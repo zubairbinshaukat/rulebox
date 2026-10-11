@@ -1,0 +1,14 @@
+{
+  "compilerOptions": {
+    "strict": true,
+    "moduleResolution": "bundler",
+    "module": "ESNext",
+    "target": "ES2022",
+    "jsx": "react-jsx",
+    "noEmit": true,
+    "skipLibCheck": true,
+    "noUncheckedIndexedAccess": true,
+    "isolatedModules": true,
+    "lib": ["ES2022", "DOM", "DOM.Iterable"]
+  }
+}

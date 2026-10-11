@@ -1,0 +1,29 @@
+{
+  "name": "@rulebox/staff-app",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "tauri": "tauri",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "lint": "eslint ."
+  },
+  "dependencies": {
+    "@rulebox/types": "workspace:*",
+    "@rulebox/ui": "workspace:*",
+    "convex": "catalog:",
+    "react": "catalog:",
+    "react-dom": "catalog:"
+  },
+  "devDependencies": {
+    "@tauri-apps/cli": "^2.12.2",
+    "@types/react": "catalog:",
+    "@types/react-dom": "catalog:",
+    "@vitejs/plugin-react": "catalog:",
+    "eslint": "catalog:",
+    "typescript": "catalog:",
+    "vite": "catalog:"
+  }
+}

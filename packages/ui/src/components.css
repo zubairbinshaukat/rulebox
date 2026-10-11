@@ -1,0 +1,312 @@
+/* Component styles. Everything is token-driven so light, dark and Lite all work. */
+
+/* Root scope: apply data-theme / data-lite on a wrapper element. */
+.rb-root {
+  position: relative;
+  background: var(--rb-bg);
+  color: var(--rb-ink);
+  font-family: var(--rb-font-sans);
+  font-size: var(--rb-font-size);
+}
+
+/* Button */
+.rb-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  height: 40px;
+  padding: 0 18px;
+  border-radius: var(--rb-r-md);
+  font-weight: 500;
+  text-align: center;
+  transition:
+    background var(--rb-duration) var(--rb-ease),
+    transform var(--rb-duration) var(--rb-ease);
+}
+.rb-btn:active:not(:disabled) {
+  transform: scale(0.98);
+}
+.rb-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+.rb-btn:focus-visible,
+.rb-tile:focus-visible,
+.rb-seg button:focus-visible {
+  outline: 2px solid var(--rb-accent);
+  outline-offset: 2px;
+}
+.rb-btn--primary {
+  background: var(--rb-ink);
+  color: var(--rb-on-ink);
+}
+.rb-btn--primary:hover:not(:disabled) {
+  background: var(--rb-ink-hover);
+}
+.rb-btn--ghost {
+  border: 1px solid var(--rb-line);
+}
+.rb-btn--ghost:hover:not(:disabled) {
+  background: var(--rb-hover);
+}
+.rb-btn--danger-ghost {
+  color: var(--rb-danger-text);
+}
+.rb-btn--danger-ghost:hover:not(:disabled) {
+  background: var(--rb-hover);
+}
+.rb-btn--icon {
+  width: 46px;
+  height: 46px;
+  padding: 0;
+  flex: none;
+}
+
+/* Input */
+.rb-input {
+  width: 100%;
+  height: 46px;
+  padding: 0 14px;
+  border-radius: var(--rb-r-md);
+  border: 1px solid var(--rb-line);
+  background: var(--rb-surface);
+  outline: none;
+  font-size: 14.5px;
+  transition:
+    border-color var(--rb-duration) var(--rb-ease),
+    box-shadow var(--rb-duration) var(--rb-ease);
+}
+.rb-input:focus {
+  border-color: var(--rb-accent);
+  box-shadow: 0 0 0 3px var(--rb-accent-soft);
+}
+.rb-input::placeholder {
+  color: var(--rb-faint);
+}
+
+/* Panel (frosted card) */
+.rb-panel {
+  background: var(--rb-surface-glass);
+  -webkit-backdrop-filter: blur(var(--rb-blur));
+  backdrop-filter: blur(var(--rb-blur));
+  border: 1px solid var(--rb-glass-border);
+  border-radius: var(--rb-r-2xl);
+  box-shadow: var(--rb-shadow-lg);
+}
+.rb-panel--md {
+  border-radius: var(--rb-r-xl);
+  box-shadow: var(--rb-shadow-md);
+}
+
+/* Avatar */
+.rb-avatar {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+  border-radius: 50%;
+  background: var(--rb-accent-soft);
+  color: var(--rb-accent-text);
+  font-weight: 500;
+  user-select: none;
+}
+
+/* Segmented control */
+.rb-seg {
+  display: inline-flex;
+  gap: 2px;
+  padding: 3px;
+  border-radius: 10px;
+  background: var(--rb-hover);
+}
+.rb-seg button {
+  height: 28px;
+  padding: 0 12px;
+  border-radius: var(--rb-r-sm);
+  font-size: 13px;
+  font-weight: 500;
+  text-align: center;
+  color: var(--rb-muted);
+}
+.rb-seg button[aria-checked="true"] {
+  background: var(--rb-surface);
+  color: var(--rb-ink);
+  box-shadow: 0 1px 2px oklch(0 0 0 / 0.1);
+}
+
+/* App tile */
+.rb-tile {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  align-items: flex-start;
+  text-align: left;
+  width: 168px;
+  height: 148px;
+  padding: 16px;
+  border-radius: var(--rb-r-xl);
+  background: var(--rb-surface-glass);
+  border: 1px solid var(--rb-glass-border);
+  box-shadow: var(--rb-shadow-sm);
+  transition:
+    transform var(--rb-duration) ease,
+    box-shadow var(--rb-duration) ease;
+}
+.rb-tile:hover {
+  transform: translateY(-3px);
+  box-shadow: var(--rb-shadow-md);
+}
+.rb-tile:active {
+  transform: scale(0.98);
+}
+.rb-tile__icon {
+  width: 48px;
+  height: 48px;
+  border-radius: var(--rb-r-lg);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 18px;
+  font-weight: 600;
+  letter-spacing: -0.02em;
+  background: var(--rb-accent-soft);
+  color: var(--rb-accent-text);
+}
+.rb-tile__text {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+  width: 100%;
+}
+.rb-tile__name {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  font-size: 15px;
+  font-weight: 500;
+  letter-spacing: -0.01em;
+}
+.rb-tile__name > span:first-child {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.rb-tile__desc {
+  font-size: 13.5px;
+  color: var(--rb-muted);
+  line-height: 1.35;
+}
+.rb-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--rb-accent);
+  flex: none;
+}
+.rb-badge {
+  position: absolute;
+  top: 16px;
+  right: 16px;
+  min-width: 22px;
+  height: 22px;
+  padding: 0 7px;
+  border-radius: 11px;
+  background: var(--rb-ink);
+  color: var(--rb-on-ink);
+  font-size: 12px;
+  font-weight: 600;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+/* Title bar */
+.rb-titlebar {
+  height: var(--rb-titlebar);
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 0 6px 0 14px;
+  border-bottom: 1px solid var(--rb-line);
+  background: var(--rb-surface);
+}
+.rb-titlebar__icon {
+  width: 22px;
+  height: 22px;
+  flex: none;
+  border-radius: 6px;
+  background: var(--rb-accent-soft);
+  color: var(--rb-accent-text);
+  font-size: 11px;
+  font-weight: 600;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.rb-titlebar__title {
+  flex: 1;
+  min-width: 0;
+  font-size: 13.5px;
+  font-weight: 500;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.rb-titlebar__controls {
+  display: flex;
+  gap: 2px;
+  flex: none;
+}
+.rb-titlebar__controls button {
+  width: 38px;
+  height: 32px;
+  border-radius: var(--rb-r-sm);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--rb-muted);
+}
+.rb-titlebar__controls button:hover {
+  background: var(--rb-hover);
+  color: var(--rb-ink);
+}
+.rb-titlebar__controls button.rb-close:hover {
+  background: var(--rb-danger);
+  color: white;
+}
+
+/* Backdrop blobs */
+.rb-backdrop {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  pointer-events: none;
+  z-index: 0;
+}
+.rb-backdrop__blob {
+  position: absolute;
+  border-radius: 50%;
+  filter: blur(120px);
+  pointer-events: none;
+}
+.rb-backdrop__blob--a {
+  width: 80vmax;
+  height: 80vmax;
+  left: -30vmax;
+  top: -42vmax;
+  background: var(--rb-blob-a);
+  opacity: 0.5;
+}
+.rb-backdrop__blob--b {
+  width: 70vmax;
+  height: 70vmax;
+  right: -25vmax;
+  bottom: -38vmax;
+  background: var(--rb-blob-b);
+  opacity: 0.7;
+}

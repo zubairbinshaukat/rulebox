@@ -1,0 +1,15 @@
+[workspace]
+resolver = "2"
+members = ["apps/agent", "apps/staff-app/src-tauri", "crates/*"]
+
+[workspace.package]
+edition = "2021"
+license = "MIT"
+
+[profile.dev]
+debug = "line-tables-only"   # keeps target/ small (see CLAUDE.md)
+
+[profile.release]
+lto = true
+codegen-units = 1
+strip = true

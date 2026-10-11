@@ -1,0 +1,145 @@
+/*
+ * Rulebox design tokens. Source: design/staff-desktop-v0 (light/dark values),
+ * renamed to semantic --rb-* names.
+ *
+ * :root                  light theme (default)
+ * [data-theme="dark"]    dark theme
+ * [data-theme="auto"]    follows prefers-color-scheme
+ * [data-lite="true"]     Lite mode (PRD 22.5): no blur/glass, no blobs, no motion
+ */
+
+:root {
+  color-scheme: light;
+
+  --rb-bg: oklch(0.935 0.009 85);
+  --rb-ink: oklch(0.24 0.012 70);
+  --rb-ink-hover: oklch(0.32 0.012 70);
+  --rb-on-ink: white;
+  --rb-muted: oklch(0.5 0.012 70);
+  --rb-faint: oklch(0.62 0.01 70);
+  --rb-line: oklch(0.9 0.006 80);
+  --rb-surface: oklch(0.995 0.002 85);
+  --rb-surface-glass: oklch(0.995 0.002 85 / 0.72);
+  --rb-glass-border: oklch(1 0 0 / 0.85);
+  --rb-hover: oklch(0.94 0.006 85);
+  --rb-accent: oklch(0.5 0.085 175);
+  --rb-accent-soft: oklch(0.94 0.03 175);
+  --rb-accent-text: oklch(0.38 0.085 175);
+  --rb-danger: oklch(0.6 0.17 25);
+  --rb-danger-text: oklch(0.5 0.15 25);
+  --rb-blob-a: oklch(0.86 0.045 170);
+  --rb-blob-b: oklch(0.9 0.045 75);
+
+  /* Shadow colour (the design uses a warm near-black at low alpha) */
+  --rb-shadow-color: oklch(0.3 0.02 70);
+
+  --rb-r-sm: 8px;
+  --rb-r-md: 12px;
+  --rb-r-lg: 14px;
+  --rb-r-xl: 20px;
+  --rb-r-2xl: 26px;
+
+  --rb-titlebar: 46px;
+  --rb-taskbar: 60px;
+  --rb-taskbar-inset: 12px;
+
+  --rb-font-sans: "Geist Variable", "Geist", ui-sans-serif, system-ui, sans-serif;
+  --rb-font-mono: "Geist Mono Variable", "Geist Mono", ui-monospace, monospace;
+  --rb-font-size: 14px;
+
+  --rb-shadow-sm:
+    0 1px 2px oklch(0.3 0.02 70 / 0.06), 0 8px 24px -12px oklch(0.3 0.02 70 / 0.18);
+  --rb-shadow-md:
+    0 1px 2px oklch(0.3 0.02 70 / 0.05), 0 12px 32px -16px oklch(0.3 0.02 70 / 0.2);
+  --rb-shadow-lg:
+    0 1px 2px oklch(0.3 0.02 70 / 0.05), 0 24px 56px -20px oklch(0.3 0.02 70 / 0.3);
+
+  --rb-ease: cubic-bezier(0.2, 0.8, 0.2, 1);
+  --rb-duration: 0.2s;
+
+  --rb-blur: 24px;
+}
+
+[data-theme="dark"] {
+  color-scheme: dark;
+
+  --rb-bg: oklch(0.16 0.006 70);
+  --rb-ink: oklch(0.97 0.006 70);
+  --rb-ink-hover: oklch(0.91 0.006 70);
+  --rb-on-ink: oklch(0.2 0.01 70);
+  --rb-muted: oklch(0.775 0.006 70);
+  --rb-faint: oklch(0.685 0.006 70);
+  --rb-line: oklch(0.338 0.006 70);
+  --rb-surface: oklch(0.215 0.006 70);
+  --rb-surface-glass: oklch(0.22 0.006 70 / 0.72);
+  --rb-glass-border: oklch(1 0 0 / 0.077);
+  --rb-hover: oklch(0.287 0.006 70);
+  --rb-accent: oklch(0.64 0.09 175);
+  --rb-accent-soft: oklch(0.34 0.05 175);
+  --rb-accent-text: oklch(0.8 0.08 175);
+  --rb-danger: oklch(0.6 0.17 25);
+  --rb-danger-text: oklch(0.78 0.15 25);
+  --rb-blob-a: oklch(0.32 0.045 170);
+  --rb-blob-b: oklch(0.32 0.045 75);
+
+  --rb-shadow-color: oklch(0 0 0);
+
+  --rb-shadow-sm: 0 1px 2px oklch(0 0 0 / 0.132), 0 8px 24px -12px oklch(0 0 0 / 0.396);
+  --rb-shadow-md: 0 1px 2px oklch(0 0 0 / 0.11), 0 12px 32px -16px oklch(0 0 0 / 0.44);
+  --rb-shadow-lg: 0 1px 2px oklch(0 0 0 / 0.11), 0 24px 56px -20px oklch(0 0 0 / 0.66);
+}
+
+@media (prefers-color-scheme: dark) {
+  [data-theme="auto"] {
+    color-scheme: dark;
+
+    --rb-bg: oklch(0.16 0.006 70);
+    --rb-ink: oklch(0.97 0.006 70);
+    --rb-ink-hover: oklch(0.91 0.006 70);
+    --rb-on-ink: oklch(0.2 0.01 70);
+    --rb-muted: oklch(0.775 0.006 70);
+    --rb-faint: oklch(0.685 0.006 70);
+    --rb-line: oklch(0.338 0.006 70);
+    --rb-surface: oklch(0.215 0.006 70);
+    --rb-surface-glass: oklch(0.22 0.006 70 / 0.72);
+    --rb-glass-border: oklch(1 0 0 / 0.077);
+    --rb-hover: oklch(0.287 0.006 70);
+    --rb-accent: oklch(0.64 0.09 175);
+    --rb-accent-soft: oklch(0.34 0.05 175);
+    --rb-accent-text: oklch(0.8 0.08 175);
+    --rb-danger: oklch(0.6 0.17 25);
+    --rb-danger-text: oklch(0.78 0.15 25);
+    --rb-blob-a: oklch(0.32 0.045 170);
+    --rb-blob-b: oklch(0.32 0.045 75);
+
+    --rb-shadow-color: oklch(0 0 0);
+
+    --rb-shadow-sm: 0 1px 2px oklch(0 0 0 / 0.132), 0 8px 24px -12px oklch(0 0 0 / 0.396);
+    --rb-shadow-md: 0 1px 2px oklch(0 0 0 / 0.11), 0 12px 32px -16px oklch(0 0 0 / 0.44);
+    --rb-shadow-lg: 0 1px 2px oklch(0 0 0 / 0.11), 0 24px 56px -20px oklch(0 0 0 / 0.66);
+  }
+}
+
+/* Lite mode (PRD 22.5): solid surfaces, no blur, no blobs, no transitions. */
+[data-lite="true"] {
+  --rb-blur: 0px;
+  --rb-duration: 0s;
+  --rb-surface-glass: var(--rb-surface);
+  --rb-glass-border: var(--rb-line);
+  --rb-shadow-sm: 0 1px 2px oklch(0 0 0 / 0.08);
+  --rb-shadow-md: 0 1px 2px oklch(0 0 0 / 0.08);
+  --rb-shadow-lg: 0 1px 3px oklch(0 0 0 / 0.1);
+}
+
+[data-lite="true"] *,
+[data-lite="true"] *::before,
+[data-lite="true"] *::after {
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+  transition: none !important;
+  animation: none !important;
+}
+
+[data-lite="true"] .rb-backdrop {
+  display: none;
+}

@@ -1,0 +1,17 @@
+node_modules/
+target/
+dist/
+.env*.local
+*.zip
+.DS_Store
+*.log
+
+# Local Convex backend data
+.convex/
+
+# Design starter (reference only; the real design lives in packages/ui)
+design/
+
+# Personal, never committed
+.personal/
+CLAUDE.local.md
