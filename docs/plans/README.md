@@ -6,7 +6,7 @@ contract).
 
 | # | Plan file | Status | One-line description |
 |---|---|---|---|
-| 1 | `phase-1-setup.md` | Implemented — awaiting user review | Monorepo skeleton: dashboard, Staff App, Convex schema and shared design system, all running empty |
+| 1 | `phase-1-setup.md` | ✅ Done (reviewed) | Monorepo skeleton: dashboard, Staff App, Convex schema and shared design system, all running empty |
 | 2 | `phase-2-agent-core.md` | Not written | Rust Windows service: enrollment code, Staff account, auto sign-in, shell replacement, watchdog and agent↔shell IPC |
 | 3 | `phase-3-staff-shell.md` | Not written | Staff App as the shell: sign-in, desktop, taskbar, Start menu, window tracking, web app windows, file explorer and viewers |
 | 4 | `phase-4-dashboard-state.md` | Not written | Dashboard and desired state: devices, employees, groups, apps, remote installs, Convex Auth, policy signing and audit log |
