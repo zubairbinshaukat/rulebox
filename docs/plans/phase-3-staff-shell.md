@@ -32,6 +32,24 @@ a primary source; the plan says how each one gets confirmed.
 
 ---
 
+## Updates since this plan was written (13 October 2026)
+
+Read this first. Where it disagrees with the text below, this section wins.
+The steps below have NOT been rewritten for these yet; do that before
+starting Phase 3.
+
+The user answered the open questions (table in `docs/plans/README.md`).
+Three answers differ from this plan's recommendation:
+
+- **P3 default exit combination: Ctrl + Shift + F12** (not Ctrl+Alt+Shift+R).
+- **P7 the Windows key opens Start: yes.** This needs the low-level
+  keyboard hook this plan chose to avoid, and it must be reconciled with
+  Phase 5, which disables Windows-key shortcuts by policy.
+- **P9 employees can switch light/dark theme: yes** (remembered per
+  employee; the organization's theme is the default).
+
+All other answers match the recommendations.
+
 ## 1. Goal
 
 At the end of Phase 3:

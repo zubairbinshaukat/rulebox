@@ -25,6 +25,28 @@ the plan says how each one gets confirmed.
 
 ---
 
+## Updates since this plan was written (13 October 2026)
+
+Read this first. Where it disagrees with the text below, this section wins.
+
+- **Open questions (Section 14):** the user answered them; see the table in
+  `docs/plans/README.md`. Every Phase 2 answer matches this plan's
+  recommendation, so no step changes.
+- **Ctrl + Alt + Del is no longer an admin route** (PRD 9.5, 12, 12.4).
+  Phase 5 will empty that screen for the Staff account, including Switch
+  user. The routes to admin are the hidden exit (Staff App, Phase 3) and
+  holding Shift during startup. In Phase 2 itself Switch user still works,
+  so the "Disconnected session" handling and VM checklist item stay, but
+  never show or document it as the way out: edge-case rows 26 and 27 should
+  list Shift at startup, `recover`, `unenroll` and Disable kiosk only. The
+  launcher fallback text in Step 12 is already corrected.
+- **Protocol 1.1 addendum (not written yet):** Phase 3 needs extra agent
+  requests (`session.*`, `apps.list`, `adminExit.submit`), PIN checking in
+  the agent, and the hidden exit offered on the launcher fallback screen.
+  They are listed in Section 15 of `phase-3-staff-shell.md` (R1 to R11).
+  They are additive: build contract 1.0 exactly as written in Steps 0 to 5.
+  The addendum must be written before Step 6 is started.
+
 ## 1. Goal
 
 At the end of Phase 2, on a **test VM**:
@@ -2035,7 +2057,7 @@ pub fn show(reason: &str) -> FallbackChoice;      // returns when "Try again" is
    Please contact your administrator.
 
    <reason, e.g. "The Staff App stopped 5 times (exit code 1).">
-   Administrators: press Ctrl+Alt+Del and choose "Switch user".
+   Administrators: restart and hold Shift to reach the Windows sign-in screen.
    ```
 
    One button: **Try again**. The window also retries by itself every
