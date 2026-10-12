@@ -7,6 +7,7 @@
 //! `/// DESTRUCTIVE: guarded.` (plan Section 7, Step 3).
 
 pub mod error;
+pub mod folders;
 pub mod guard;
 pub mod pipe;
 pub mod security;
