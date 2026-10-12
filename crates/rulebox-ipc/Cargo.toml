@@ -17,12 +17,20 @@ serde_json.workspace = true
 thiserror.workspace = true
 ts-rs.workspace = true
 bytes = { workspace = true, optional = true }
-futures-util = { workspace = true, optional = true }
+futures-util = { workspace = true, optional = true, features = ["sink"] }
 tokio = { workspace = true, optional = true, features = ["rt", "macros", "net", "time", "sync", "io-util"] }
 tokio-util = { workspace = true, optional = true, features = ["codec", "rt"] }
 
 [target.'cfg(windows)'.dependencies]
 rulebox-win32 = { workspace = true, optional = true }
+
+[[example]]
+name = "fake_staff"
+required-features = ["client"]
+
+[[test]]
+name = "pipe_roundtrip"
+required-features = ["client", "server"]
 
 [lints]
 workspace = true

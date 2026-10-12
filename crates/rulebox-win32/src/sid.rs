@@ -78,6 +78,11 @@ pub fn current_user_sid() -> Result<Sid> {
         .map_err(|e| api_err("OpenProcessToken", &e))?;
     let token = OwnedHandle::new(token)?;
 
+    user_sid_of_token(&token)
+}
+
+/// The user SID of a token opened with `TOKEN_QUERY`.
+pub(crate) fn user_sid_of_token(token: &OwnedHandle) -> Result<Sid> {
     let mut needed = 0u32;
     // SAFETY: a null buffer with size 0 only queries the required size.
     let first = unsafe { GetTokenInformation(token.raw(), TokenUser, None, 0, &mut needed) };

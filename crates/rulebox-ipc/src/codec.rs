@@ -19,6 +19,33 @@ pub enum CodecError {
     InvalidJson(String),
 }
 
+/// Errors of the pipe transport (server and client).
+#[derive(Debug, thiserror::Error)]
+pub enum TransportError {
+    #[error("i/o error: {0}")]
+    Io(#[from] std::io::Error),
+    #[error("framing error: {0}")]
+    Codec(#[from] CodecError),
+    #[error("{0}")]
+    Win32(#[from] rulebox_win32::Win32Error),
+    /// Another process already owns the pipe name (first-instance protection).
+    #[error("the pipe name is owned by another process")]
+    NameInUse,
+}
+
+/// Turns the next item of a framed pipe into a frame. A closed or broken pipe
+/// is a clean end (`None`), not an error.
+pub(crate) fn frame_or_end(
+    item: Option<Result<Frame, CodecError>>,
+) -> Result<Option<Frame>, TransportError> {
+    match item {
+        None => Ok(None),
+        Some(Ok(frame)) => Ok(Some(frame)),
+        Some(Err(CodecError::Io(e))) if e.kind() == std::io::ErrorKind::BrokenPipe => Ok(None),
+        Some(Err(e)) => Err(e.into()),
+    }
+}
+
 pub struct FrameCodec {
     inner: LengthDelimitedCodec,
 }

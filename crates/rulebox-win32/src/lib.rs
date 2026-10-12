@@ -8,6 +8,7 @@
 
 pub mod error;
 pub mod guard;
+pub mod pipe;
 pub mod security;
 pub mod sid;
 pub mod util;

@@ -44,7 +44,19 @@ impl OwnedHandle {
     pub fn raw(&self) -> HANDLE {
         self.0
     }
+
+    /// Gives up ownership without closing the handle.
+    pub fn into_raw(self) -> HANDLE {
+        let handle = self.0;
+        std::mem::forget(self);
+        handle
+    }
 }
+
+// SAFETY: a kernel handle is just an identifier; it may be used and closed from any thread.
+unsafe impl Send for OwnedHandle {}
+// SAFETY: sharing the identifier across threads is fine; the only mutation is `Drop`/`into_raw`, which take ownership.
+unsafe impl Sync for OwnedHandle {}
 
 impl Drop for OwnedHandle {
     fn drop(&mut self) {
@@ -71,6 +83,9 @@ impl LocalAllocGuard {
         self.0
     }
 }
+
+// SAFETY: the guard uniquely owns the buffer, so moving it to another thread is fine.
+unsafe impl Send for LocalAllocGuard {}
 
 impl Drop for LocalAllocGuard {
     fn drop(&mut self) {

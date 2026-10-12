@@ -7,10 +7,14 @@
 use std::time::Duration;
 
 pub mod admin;
+#[cfg(feature = "client")]
+pub mod client;
 #[cfg(any(feature = "client", feature = "server"))]
 pub mod codec;
 pub mod envelope;
 pub mod methods;
+#[cfg(feature = "server")]
+pub mod server;
 pub mod types;
 
 pub use envelope::{ErrorCode, Frame, RpcError};

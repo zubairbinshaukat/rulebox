@@ -10,6 +10,12 @@ pub enum Win32Error {
     Nt { api: &'static str, status: i32 },
     #[error("{0}")]
     Invalid(String),
+    /// Win32 error 2 or 3 (for example a pipe that does not exist yet).
+    #[error("not found")]
+    NotFound,
+    /// `ERROR_PIPE_BUSY` (231): every pipe instance is in use; retry shortly.
+    #[error("pipe busy")]
+    Busy,
 }
 
 pub type Result<T> = std::result::Result<T, Win32Error>;
