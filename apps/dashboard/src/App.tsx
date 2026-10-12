@@ -11,7 +11,7 @@ const routes = [
 ] as const;
 
 export function App() {
-  const [route, setRoute] = useState<Route>("status");
+  const [route, setRoute] = useState<Route>(window.location.hash === "#gallery" ? "gallery" : "status");
   const [theme, setThemeState] = useState<Theme>("light");
   const [lite, setLiteState] = useState(false);
 

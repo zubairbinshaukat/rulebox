@@ -1,10 +1,12 @@
-import type { ButtonHTMLAttributes } from "react";
+import type { ButtonHTMLAttributes, ReactNode } from "react";
 
 export interface AppTileProps extends Omit<ButtonHTMLAttributes<HTMLButtonElement>, "children"> {
   name: string;
   description?: string;
   /** Short text shown in the icon block (defaults to the first letter). */
   mono?: string;
+  /** Icon shown in the icon block instead of the mono text. */
+  icon?: ReactNode;
   /** Shows the small accent dot: the app is open. */
   running?: boolean;
   /** Notification count in the corner. */
@@ -15,6 +17,7 @@ export function AppTile({
   name,
   description,
   mono,
+  icon,
   running = false,
   badge,
   className,
@@ -28,7 +31,7 @@ export function AppTile({
       title={description}
       {...rest}
     >
-      <span className="rb-tile__icon">{mono ?? name.charAt(0).toUpperCase()}</span>
+      <span className="rb-tile__icon">{icon ?? mono ?? name.charAt(0).toUpperCase()}</span>
       <span className="rb-tile__text">
         <span className="rb-tile__name">
           <span>{name}</span>

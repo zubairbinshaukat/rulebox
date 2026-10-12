@@ -27,6 +27,13 @@
   --rb-accent-text: oklch(0.38 0.085 175);
   --rb-danger: oklch(0.6 0.17 25);
   --rb-danger-text: oklch(0.5 0.15 25);
+  --rb-danger-soft: oklch(0.95 0.03 25);
+  --rb-success: oklch(0.58 0.11 150);
+  --rb-success-soft: oklch(0.94 0.04 150);
+  --rb-success-text: oklch(0.42 0.1 150);
+  --rb-warning: oklch(0.74 0.13 75);
+  --rb-warning-soft: oklch(0.95 0.05 80);
+  --rb-warning-text: oklch(0.5 0.11 65);
   --rb-blob-a: oklch(0.86 0.045 170);
   --rb-blob-b: oklch(0.9 0.045 75);
 
@@ -79,6 +86,13 @@
   --rb-accent-text: oklch(0.8 0.08 175);
   --rb-danger: oklch(0.6 0.17 25);
   --rb-danger-text: oklch(0.78 0.15 25);
+  --rb-danger-soft: oklch(0.33 0.06 25);
+  --rb-success: oklch(0.7 0.12 150);
+  --rb-success-soft: oklch(0.32 0.05 150);
+  --rb-success-text: oklch(0.82 0.1 150);
+  --rb-warning: oklch(0.78 0.12 75);
+  --rb-warning-soft: oklch(0.34 0.05 75);
+  --rb-warning-text: oklch(0.86 0.1 80);
   --rb-blob-a: oklch(0.32 0.045 170);
   --rb-blob-b: oklch(0.32 0.045 75);
 
@@ -109,6 +123,13 @@
     --rb-accent-text: oklch(0.8 0.08 175);
     --rb-danger: oklch(0.6 0.17 25);
     --rb-danger-text: oklch(0.78 0.15 25);
+    --rb-danger-soft: oklch(0.33 0.06 25);
+    --rb-success: oklch(0.7 0.12 150);
+    --rb-success-soft: oklch(0.32 0.05 150);
+    --rb-success-text: oklch(0.82 0.1 150);
+    --rb-warning: oklch(0.78 0.12 75);
+    --rb-warning-soft: oklch(0.34 0.05 75);
+    --rb-warning-text: oklch(0.86 0.1 80);
     --rb-blob-a: oklch(0.32 0.045 170);
     --rb-blob-b: oklch(0.32 0.045 75);
 

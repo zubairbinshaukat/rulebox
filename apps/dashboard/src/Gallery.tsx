@@ -1,3 +1,4 @@
+import { useState, type ComponentType, type ReactNode, type SVGProps } from "react";
 import {
   AppTile,
   Avatar,
@@ -5,10 +6,123 @@ import {
   Button,
   Input,
   Panel,
+  Pill,
+  ProgressBar,
   SegmentedControl,
+  StatCard,
+  Switch,
   TitleBar,
   type Theme,
 } from "@rulebox/ui";
+
+import Home2Linear from "~icons/solar/home-2-linear";
+import Home2Duo from "~icons/solar/home-2-bold-duotone";
+import Home2Bold from "~icons/solar/home-2-bold";
+import MonitorLinear from "~icons/solar/monitor-linear";
+import MonitorDuo from "~icons/solar/monitor-bold-duotone";
+import MonitorBold from "~icons/solar/monitor-bold";
+import LaptopLinear from "~icons/solar/laptop-linear";
+import LaptopDuo from "~icons/solar/laptop-bold-duotone";
+import LaptopBold from "~icons/solar/laptop-bold";
+import UsersLinear from "~icons/solar/users-group-rounded-linear";
+import UsersDuo from "~icons/solar/users-group-rounded-bold-duotone";
+import UsersBold from "~icons/solar/users-group-rounded-bold";
+import WidgetLinear from "~icons/solar/widget-2-linear";
+import WidgetDuo from "~icons/solar/widget-2-bold-duotone";
+import WidgetBold from "~icons/solar/widget-2-bold";
+import FolderLinear from "~icons/solar/folder-linear";
+import FolderDuo from "~icons/solar/folder-bold-duotone";
+import FolderBold from "~icons/solar/folder-bold";
+import DocLinear from "~icons/solar/document-text-linear";
+import DocDuo from "~icons/solar/document-text-bold-duotone";
+import DocBold from "~icons/solar/document-text-bold";
+import MusicLinear from "~icons/solar/music-note-2-linear";
+import MusicDuo from "~icons/solar/music-note-2-bold-duotone";
+import MusicBold from "~icons/solar/music-note-2-bold";
+import VideoLinear from "~icons/solar/videocamera-record-linear";
+import VideoDuo from "~icons/solar/videocamera-record-bold-duotone";
+import VideoBold from "~icons/solar/videocamera-record-bold";
+import GalleryLinear from "~icons/solar/gallery-linear";
+import GalleryDuo from "~icons/solar/gallery-bold-duotone";
+import GalleryBold from "~icons/solar/gallery-bold";
+import ShieldLinear from "~icons/solar/shield-check-linear";
+import ShieldDuo from "~icons/solar/shield-check-bold-duotone";
+import ShieldBold from "~icons/solar/shield-check-bold";
+import LockLinear from "~icons/solar/lock-keyhole-linear";
+import LockDuo from "~icons/solar/lock-keyhole-bold-duotone";
+import LockBold from "~icons/solar/lock-keyhole-bold";
+import WifiLinear from "~icons/solar/wi-fi-router-linear";
+import WifiDuo from "~icons/solar/wi-fi-router-bold-duotone";
+import WifiBold from "~icons/solar/wi-fi-router-bold";
+import PrinterLinear from "~icons/solar/printer-linear";
+import PrinterDuo from "~icons/solar/printer-bold-duotone";
+import PrinterBold from "~icons/solar/printer-bold";
+import SettingsLinear from "~icons/solar/settings-linear";
+import SettingsDuo from "~icons/solar/settings-bold-duotone";
+import SettingsBold from "~icons/solar/settings-bold";
+import BellLinear from "~icons/solar/bell-linear";
+import BellDuo from "~icons/solar/bell-bold-duotone";
+import BellBold from "~icons/solar/bell-bold";
+import PowerLinear from "~icons/solar/power-linear";
+import PowerDuo from "~icons/solar/power-bold-duotone";
+import PowerBold from "~icons/solar/power-bold";
+import DownloadLinear from "~icons/solar/cloud-download-linear";
+import DownloadDuo from "~icons/solar/cloud-download-bold-duotone";
+import DownloadBold from "~icons/solar/cloud-download-bold";
+import RocketLinear from "~icons/solar/rocket-2-linear";
+import RocketDuo from "~icons/solar/rocket-2-bold-duotone";
+import RocketBold from "~icons/solar/rocket-2-bold";
+import HistoryLinear from "~icons/solar/history-linear";
+import HistoryDuo from "~icons/solar/history-bold-duotone";
+import HistoryBold from "~icons/solar/history-bold";
+import CalendarLinear from "~icons/solar/calendar-linear";
+import CalendarDuo from "~icons/solar/calendar-bold-duotone";
+import CalendarBold from "~icons/solar/calendar-bold";
+import ChatLinear from "~icons/solar/chat-round-dots-linear";
+import ChatDuo from "~icons/solar/chat-round-dots-bold-duotone";
+import ChatBold from "~icons/solar/chat-round-dots-bold";
+import KeyLinear from "~icons/solar/key-linear";
+import KeyDuo from "~icons/solar/key-bold-duotone";
+import KeyBold from "~icons/solar/key-bold";
+import ChartLinear from "~icons/solar/chart-2-linear";
+import ChartDuo from "~icons/solar/chart-2-bold-duotone";
+import ChartBold from "~icons/solar/chart-2-bold";
+import AddLinear from "~icons/solar/add-circle-linear";
+import RefreshLinear from "~icons/solar/refresh-linear";
+import TrashLinear from "~icons/solar/trash-bin-2-linear";
+import CheckDuo from "~icons/solar/check-circle-bold-duotone";
+import DangerDuo from "~icons/solar/danger-triangle-bold-duotone";
+import LogoutLinear from "~icons/solar/logout-2-linear";
+
+type Icon = ComponentType<SVGProps<SVGSVGElement>>;
+type IconStyle = "linear" | "duotone" | "bold";
+
+const ICONS: { name: string; linear: Icon; duotone: Icon; bold: Icon }[] = [
+  { name: "Home", linear: Home2Linear, duotone: Home2Duo, bold: Home2Bold },
+  { name: "Devices", linear: MonitorLinear, duotone: MonitorDuo, bold: MonitorBold },
+  { name: "Laptop", linear: LaptopLinear, duotone: LaptopDuo, bold: LaptopBold },
+  { name: "Employees", linear: UsersLinear, duotone: UsersDuo, bold: UsersBold },
+  { name: "Apps", linear: WidgetLinear, duotone: WidgetDuo, bold: WidgetBold },
+  { name: "Files", linear: FolderLinear, duotone: FolderDuo, bold: FolderBold },
+  { name: "Document", linear: DocLinear, duotone: DocDuo, bold: DocBold },
+  { name: "Music", linear: MusicLinear, duotone: MusicDuo, bold: MusicBold },
+  { name: "Video", linear: VideoLinear, duotone: VideoDuo, bold: VideoBold },
+  { name: "Images", linear: GalleryLinear, duotone: GalleryDuo, bold: GalleryBold },
+  { name: "Policies", linear: ShieldLinear, duotone: ShieldDuo, bold: ShieldBold },
+  { name: "Lock", linear: LockLinear, duotone: LockDuo, bold: LockBold },
+  { name: "Wi-Fi", linear: WifiLinear, duotone: WifiDuo, bold: WifiBold },
+  { name: "Printers", linear: PrinterLinear, duotone: PrinterDuo, bold: PrinterBold },
+  { name: "Settings", linear: SettingsLinear, duotone: SettingsDuo, bold: SettingsBold },
+  { name: "Alerts", linear: BellLinear, duotone: BellDuo, bold: BellBold },
+  { name: "Power", linear: PowerLinear, duotone: PowerDuo, bold: PowerBold },
+  { name: "Install", linear: DownloadLinear, duotone: DownloadDuo, bold: DownloadBold },
+  { name: "Rollout", linear: RocketLinear, duotone: RocketDuo, bold: RocketBold },
+  { name: "Audit log", linear: HistoryLinear, duotone: HistoryDuo, bold: HistoryBold },
+  { name: "Schedule", linear: CalendarLinear, duotone: CalendarDuo, bold: CalendarBold },
+  { name: "Messages", linear: ChatLinear, duotone: ChatDuo, bold: ChatBold },
+  { name: "Admin PIN", linear: KeyLinear, duotone: KeyDuo, bold: KeyBold },
+  { name: "Reports", linear: ChartLinear, duotone: ChartDuo, bold: ChartBold },
+];
 
 const themes = [
   { value: "light", label: "Light" },
@@ -21,6 +135,12 @@ const liteOptions = [
   { value: "lite", label: "Lite" },
 ] as const;
 
+const iconStyles = [
+  { value: "linear", label: "Linear" },
+  { value: "duotone", label: "Bold Duotone" },
+  { value: "bold", label: "Bold" },
+] as const;
+
 interface GalleryProps {
   theme: Theme;
   onTheme: (t: Theme) => void;
@@ -28,78 +148,268 @@ interface GalleryProps {
   onLite: (lite: boolean) => void;
 }
 
-function Section({ title, children }: { title: string; children: React.ReactNode }) {
+function Section({
+  title,
+  description,
+  action,
+  children,
+}: {
+  title: string;
+  description?: string;
+  action?: ReactNode;
+  children: ReactNode;
+}) {
   return (
-    <section style={{ marginBottom: 32 }}>
-      <h2 style={{ margin: "0 0 14px", fontSize: 13, fontWeight: 500, color: "var(--rb-muted)" }}>{title}</h2>
-      <div style={{ display: "flex", flexWrap: "wrap", gap: 16, alignItems: "flex-start" }}>{children}</div>
-    </section>
+    <Panel size="md" style={{ padding: 28 }}>
+      <div style={{ display: "flex", flexWrap: "wrap", gap: 16, alignItems: "flex-start", marginBottom: 24 }}>
+        <div style={{ marginRight: "auto" }}>
+          <h2 style={{ margin: 0, fontSize: 17, fontWeight: 500, letterSpacing: "-0.01em" }}>{title}</h2>
+          {description && (
+            <p style={{ margin: "4px 0 0", fontSize: 13.5, color: "var(--rb-muted)" }}>{description}</p>
+          )}
+        </div>
+        {action}
+      </div>
+      {children}
+    </Panel>
   );
 }
 
+const row = { display: "flex", flexWrap: "wrap", gap: 12, alignItems: "center" } as const;
+
 export function Gallery({ theme, onTheme, lite, onLite }: GalleryProps) {
+  const [iconStyle, setIconStyle] = useState<IconStyle>("duotone");
+  const [sw, setSw] = useState({ kiosk: true, usb: false, wifi: true });
+
   return (
     <div style={{ position: "relative" }}>
-      <Backdrop />
-      <div style={{ position: "relative", zIndex: 1 }}>
-        <div style={{ display: "flex", flexWrap: "wrap", gap: 12, marginBottom: 28 }}>
-          <SegmentedControl options={themes} value={theme} onChange={onTheme} aria-label="Theme" />
-          <SegmentedControl
-            options={liteOptions}
-            value={lite ? "lite" : "standard"}
-            onChange={(v) => onLite(v === "lite")}
-            aria-label="Display mode"
-          />
+      {/* Fixed so the soft blobs fill the whole viewport instead of a hard-edged box. */}
+      <div style={{ position: "fixed", inset: 0, zIndex: -1, pointerEvents: "none" }}>
+        <Backdrop />
+      </div>
+      <div style={{ position: "relative", zIndex: 1, maxWidth: 1120, margin: "0 auto" }}>
+        {/* Hero */}
+        <div style={{ display: "flex", flexWrap: "wrap", gap: 20, alignItems: "flex-end", margin: "12px 0 36px" }}>
+          <div style={{ marginRight: "auto" }}>
+            <div
+              style={{
+                fontFamily: "var(--rb-font-mono)",
+                fontSize: 11,
+                letterSpacing: "0.08em",
+                textTransform: "uppercase",
+                color: "var(--rb-accent-text)",
+                marginBottom: 8,
+              }}
+            >
+              Design system
+            </div>
+            <h1 style={{ margin: 0, fontSize: 34, fontWeight: 500, letterSpacing: "-0.025em" }}>Rulebox UI</h1>
+            <p style={{ margin: "8px 0 0", color: "var(--rb-muted)", maxWidth: 520, lineHeight: 1.55 }}>
+              Shared components for the dashboard and the Staff App. Switch theme and display mode to check every
+              state.
+            </p>
+          </div>
+          <div style={row}>
+            <SegmentedControl options={themes} value={theme} onChange={onTheme} aria-label="Theme" />
+            <SegmentedControl
+              options={liteOptions}
+              value={lite ? "lite" : "standard"}
+              onChange={(v) => onLite(v === "lite")}
+              aria-label="Display mode"
+            />
+          </div>
         </div>
 
-        <Section title="Button">
-          <Button>Primary</Button>
-          <Button variant="ghost">Ghost</Button>
-          <Button variant="danger-ghost">Danger</Button>
-          <Button disabled>Disabled</Button>
-          <Button icon aria-label="Go">
-            <svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true">
-              <path d="M3 8h10M9 4l4 4-4 4" stroke="currentColor" strokeWidth="1.7" fill="none" strokeLinecap="round" strokeLinejoin="round" />
-            </svg>
-          </Button>
-        </Section>
-
-        <Section title="Input">
-          <div style={{ width: 280 }}>
-            <Input placeholder="Username" />
+        <div style={{ display: "flex", flexDirection: "column", gap: 24 }}>
+          {/* Stats */}
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: 16 }}>
+            <StatCard label="Devices online" value="24" icon={<MonitorDuo />} hint="+3 since yesterday" />
+            <StatCard label="Employees" value="58" icon={<UsersDuo />} />
+            <StatCard label="Apps assigned" value="12" icon={<WidgetDuo />} />
+            <StatCard label="Pending changes" value="3" icon={<RocketDuo />} />
           </div>
-          <div style={{ width: 280 }}>
-            <Input type="password" placeholder="Password" />
-          </div>
-        </Section>
 
-        <Section title="Avatar">
-          <Avatar name="Maya Okafor" size={72} />
-          <Avatar name="Sam Lee" size={40} />
-        </Section>
-
-        <Section title="Panel">
-          <Panel style={{ width: 300, padding: 24 }}>Frosted panel (large)</Panel>
-          <Panel size="md" style={{ width: 300, padding: 24 }}>
-            Frosted panel (medium)
-          </Panel>
-        </Section>
-
-        <Section title="AppTile">
-          <AppTile name="Zoom" description="Video meetings" mono="Z" running />
-          <AppTile name="Tally" description="Accounts" mono="T" badge={3} />
-          <AppTile name="Orders" description="Web portal" mono="O" />
-        </Section>
-
-        <Section title="TitleBar">
-          <Panel
-            size="md"
-            style={{ width: 420, overflow: "hidden", background: "var(--rb-surface)", display: "flex", flexDirection: "column" }}
+          {/* Icons */}
+          <Section
+            title="Icons"
+            description="Solar by 480 Design · bundled offline. Dashboard uses Linear, Staff App uses Bold Duotone."
+            action={
+              <SegmentedControl options={iconStyles} value={iconStyle} onChange={setIconStyle} aria-label="Icon style" />
+            }
           >
-            <TitleBar title="Files on this laptop" mono="F" />
-            <div style={{ padding: 20, color: "var(--rb-muted)" }}>Window content</div>
-          </Panel>
-        </Section>
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(108px, 1fr))", gap: 10 }}>
+              {ICONS.map((ic) => {
+                const C = ic[iconStyle];
+                return (
+                  <div
+                    key={ic.name}
+                    style={{
+                      display: "flex",
+                      flexDirection: "column",
+                      alignItems: "center",
+                      gap: 10,
+                      padding: "18px 8px 14px",
+                      borderRadius: "var(--rb-r-lg)",
+                      background: "var(--rb-hover)",
+                    }}
+                  >
+                    <C style={{ fontSize: 28, color: "var(--rb-accent-text)" }} />
+                    <span style={{ fontSize: 12, color: "var(--rb-muted)" }}>{ic.name}</span>
+                  </div>
+                );
+              })}
+            </div>
+          </Section>
+
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(420px, 1fr))", gap: 24 }}>
+            {/* Buttons */}
+            <Section title="Buttons" description="Primary, ghost, danger and icon-only.">
+              <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+                <div style={row}>
+                  <Button>
+                    <AddLinear /> Add app
+                  </Button>
+                  <Button variant="ghost">
+                    <RefreshLinear /> Sync now
+                  </Button>
+                  <Button variant="danger-ghost">
+                    <TrashLinear /> Remove
+                  </Button>
+                </div>
+                <div style={row}>
+                  <Button disabled>Disabled</Button>
+                  <Button icon aria-label="Sign in">
+                    <svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true">
+                      <path
+                        d="M3 8h10M9 4l4 4-4 4"
+                        stroke="currentColor"
+                        strokeWidth="1.7"
+                        fill="none"
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                      />
+                    </svg>
+                  </Button>
+                  <Button variant="ghost" icon aria-label="Log out">
+                    <LogoutLinear style={{ fontSize: 18 }} />
+                  </Button>
+                </div>
+              </div>
+            </Section>
+
+            {/* Status */}
+            <Section title="Status" description="Device and change states.">
+              <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+                <div style={row}>
+                  <Pill tone="success" dot>Online</Pill>
+                  <Pill tone="neutral" dot>Offline</Pill>
+                  <Pill tone="warning" dot>Pending</Pill>
+                  <Pill tone="danger" dot>Failed</Pill>
+                  <Pill tone="accent">Pilot ring</Pill>
+                </div>
+                <div style={{ ...row, gap: 18, color: "var(--rb-muted)", fontSize: 13.5 }}>
+                  <span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+                    <CheckDuo style={{ fontSize: 18, color: "var(--rb-success)" }} /> Zoom installed
+                  </span>
+                  <span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+                    <DangerDuo style={{ fontSize: 18, color: "var(--rb-warning)" }} /> Low disk space
+                  </span>
+                </div>
+              </div>
+            </Section>
+
+            {/* Inputs */}
+            <Section title="Inputs" description="Sign-in and forms.">
+              <div style={{ display: "flex", flexDirection: "column", gap: 12, maxWidth: 360 }}>
+                <Input placeholder="Username" />
+                <Input type="password" placeholder="Password" />
+              </div>
+            </Section>
+
+            {/* Switches */}
+            <Section title="Switches" description="Policy toggles.">
+              <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+                <Switch label="Kiosk mode" checked={sw.kiosk} onChange={(v) => setSw({ ...sw, kiosk: v })} />
+                <Switch label="Block USB storage" checked={sw.usb} onChange={(v) => setSw({ ...sw, usb: v })} />
+                <Switch label="Managed Wi-Fi only" checked={sw.wifi} onChange={(v) => setSw({ ...sw, wifi: v })} />
+                <Switch label="Disabled option" checked={false} onChange={() => {}} disabled />
+              </div>
+            </Section>
+
+            {/* Progress */}
+            <Section title="Storage" description="Quota bars turn amber above 80% and red above 95%.">
+              <div style={{ display: "flex", flexDirection: "column", gap: 18 }}>
+                <ProgressBar label="Maya Okafor" detail="3.1 of 10 GB" value={31} />
+                <ProgressBar label="Sam Lee" detail="8.6 of 10 GB" value={86} />
+                <ProgressBar label="Disk C:" detail="97% used" value={97} />
+              </div>
+            </Section>
+
+            {/* Avatars */}
+            <Section title="Avatars" description="Initials on the accent tint.">
+              <div style={{ ...row, gap: 16 }}>
+                <Avatar name="Maya Okafor" size={72} />
+                <Avatar name="Sam Lee" size={48} />
+                <Avatar name="Priya Shah" size={40} />
+                <Avatar name="Tom Becker" size={32} />
+              </div>
+            </Section>
+          </div>
+
+          {/* App tiles */}
+          <Section title="App tiles" description="Staff App desktop. Dot = open, badge = notifications.">
+            <div style={{ ...row, gap: 18 }}>
+              <AppTile name="Zoom" description="Video meetings" icon={<VideoDuo style={{ fontSize: 26 }} />} running />
+              <AppTile name="Tally" description="Accounts" icon={<ChartDuo style={{ fontSize: 26 }} />} badge={3} />
+              <AppTile name="Files" description="On this laptop" icon={<FolderDuo style={{ fontSize: 26 }} />} />
+              <AppTile name="Orders" description="Web portal" mono="Or" />
+            </div>
+          </Section>
+
+          {/* Window */}
+          <Section title="Window" description="Rulebox title bar for built-in windows and web apps.">
+            <div
+              style={{
+                maxWidth: 560,
+                borderRadius: "var(--rb-r-lg)",
+                overflow: "hidden",
+                border: "1px solid var(--rb-line)",
+                background: "var(--rb-surface)",
+                boxShadow: "var(--rb-shadow-md)",
+              }}
+            >
+              <TitleBar title="Files on this laptop" mono="F" />
+              <div style={{ padding: 8 }}>
+                {[
+                  { n: "Q3 report.pdf", m: "PDF · 2.4 MB", I: DocDuo },
+                  { n: "Team photo.jpg", m: "Image · 840 KB", I: GalleryDuo },
+                  { n: "Training intro.mp4", m: "Video · 48 MB", I: VideoDuo },
+                ].map(({ n, m, I }) => (
+                  <div
+                    key={n}
+                    style={{
+                      display: "flex",
+                      alignItems: "center",
+                      gap: 12,
+                      padding: "10px 12px",
+                      borderRadius: "var(--rb-r-md)",
+                    }}
+                  >
+                    <I style={{ fontSize: 24, color: "var(--rb-accent-text)" }} />
+                    <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
+                      <span style={{ fontSize: 13.5, fontWeight: 500 }}>{n}</span>
+                      <span style={{ fontSize: 12, color: "var(--rb-muted)" }}>{m}</span>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </Section>
+
+          <p style={{ margin: "8px 0 32px", textAlign: "center", fontSize: 12, color: "var(--rb-faint)" }}>
+            Icons: Solar by 480 Design (CC BY 4.0)
+          </p>
+        </div>
       </div>
     </div>
   );

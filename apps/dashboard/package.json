@@ -18,11 +18,15 @@
     "react-dom": "catalog:"
   },
   "devDependencies": {
+    "@iconify-json/solar": "catalog:",
+    "@svgr/core": "catalog:",
+    "@svgr/plugin-jsx": "catalog:",
     "@types/react": "catalog:",
     "@types/react-dom": "catalog:",
     "@vitejs/plugin-react": "catalog:",
     "eslint": "catalog:",
     "typescript": "catalog:",
+    "unplugin-icons": "catalog:",
     "vite": "catalog:"
   }
 }
