@@ -8,3 +8,5 @@ publish = false
 [dependencies]
 rulebox-policy = { path = "../../crates/rulebox-policy" }
 serde_json = "1.0"
+[lints]
+workspace = true

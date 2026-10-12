@@ -2493,6 +2493,22 @@ dependencies = [
 ]
 
 [[package]]
+name = "rulebox-ipc"
+version = "0.0.0"
+dependencies = [
+ "bytes",
+ "futures-util",
+ "rulebox-policy",
+ "rulebox-win32",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.21",
+ "tokio",
+ "tokio-util",
+ "ts-rs",
+]
+
+[[package]]
 name = "rulebox-policy"
 version = "0.0.0"
 dependencies = [
@@ -2502,11 +2518,23 @@ dependencies = [
 ]
 
 [[package]]
+name = "rulebox-shell"
+version = "0.0.0"
+
+[[package]]
 name = "rulebox-staff"
 version = "0.0.0"
 dependencies = [
  "tauri",
  "tauri-build",
+]
+
+[[package]]
+name = "rulebox-win32"
+version = "0.0.0"
+dependencies = [
+ "thiserror 2.0.21",
+ "windows",
 ]
 
 [[package]]
@@ -3380,7 +3408,19 @@ dependencies = [
  "mio",
  "pin-project-lite",
  "socket2",
+ "tokio-macros",
  "windows-sys 0.61.2",
+]
+
+[[package]]
+name = "tokio-macros"
+version = "2.7.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "78773a2a397f451582ce068015985c33193cf6dea8b74d2a639fe457b2f07b0e"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 3.0.8",
 ]
 
 [[package]]
@@ -3392,6 +3432,8 @@ dependencies = [
  "bytes",
  "futures-core",
  "futures-sink",
+ "futures-util",
+ "libc",
  "pin-project-lite",
  "tokio",
 ]

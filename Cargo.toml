@@ -1,10 +1,44 @@
 [workspace]
 resolver = "2"
-members = ["apps/agent", "apps/staff-app/src-tauri", "crates/*"]
+members = ["apps/agent", "apps/shell-launcher", "apps/staff-app/src-tauri", "crates/*"]
 
 [workspace.package]
 edition = "2021"
 license = "MIT"
+
+[workspace.dependencies]
+# Internal crates
+rulebox-policy = { path = "crates/rulebox-policy" }
+rulebox-ipc = { path = "crates/rulebox-ipc" }
+rulebox-win32 = { path = "crates/rulebox-win32" }
+
+# Phase 2 (versions checked with `cargo search` on 2026-10-13)
+windows = "0.62"
+windows-service = "0.8.1"
+tokio = { version = "~1.53", default-features = false }
+tokio-util = { version = "0.7", default-features = false }
+convex = "0.10.4"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+ts-rs = "12.0"
+tracing = "0.1.44"
+tracing-subscriber = "0.3.23"
+tracing-appender = "0.2.5"
+thiserror = "2"
+anyhow = "1"
+clap = { version = "4.6.7", features = ["derive"] }
+futures-util = "0.3.34"
+bytes = "1.12.1"
+sha2 = "0.11.1"
+base64 = "0.23.1"
+getrandom = "0.4.3"
+
+[workspace.lints.rust]
+unsafe_op_in_unsafe_fn = "deny"
+
+[workspace.lints.clippy]
+unwrap_used = "warn"
+expect_used = "warn"
 
 [profile.dev]
 debug = "line-tables-only"   # keeps target/ small (see CLAUDE.md)

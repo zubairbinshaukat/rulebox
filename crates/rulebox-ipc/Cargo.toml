@@ -1,0 +1,28 @@
+[package]
+name = "rulebox-ipc"
+version = "0.0.0"
+edition.workspace = true
+license.workspace = true
+publish = false
+
+[features]
+default = []
+client = ["dep:tokio", "dep:tokio-util", "dep:futures-util", "dep:bytes", "dep:rulebox-win32"]
+server = ["dep:tokio", "dep:tokio-util", "dep:futures-util", "dep:bytes", "dep:rulebox-win32"]
+
+[dependencies]
+rulebox-policy.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+ts-rs.workspace = true
+bytes = { workspace = true, optional = true }
+futures-util = { workspace = true, optional = true }
+tokio = { workspace = true, optional = true, features = ["rt", "macros", "net", "time", "sync", "io-util"] }
+tokio-util = { workspace = true, optional = true, features = ["codec", "rt"] }
+
+[target.'cfg(windows)'.dependencies]
+rulebox-win32 = { workspace = true, optional = true }
+
+[lints]
+workspace = true
