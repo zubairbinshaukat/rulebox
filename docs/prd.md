@@ -798,15 +798,29 @@ associations.
 
 
 
-\- \*\*Ctrl + Alt + Del → Switch user → Admin\*\* opens a normal Windows
+\- \*\*Hidden admin exit\*\* inside the Staff App (key combination + PIN,
 
-&#x20; session.
+&#x20; Section 12.4). This is the normal way to reach the admin account from
+
+&#x20; the Staff session.
 
 \- From the dashboard: \*\*Disable kiosk\*\* / \*\*Enable kiosk\*\* at any time.
 
-\- Hidden admin exit inside the Staff App (key combination + PIN,
+\- \*\*Recovery when the Staff App is not working:\*\* Disable kiosk from the
 
-&#x20; Section 12.4).
+&#x20; dashboard, or hold \*\*Shift\*\* during startup to skip auto sign-in and
+
+&#x20; reach the Windows sign-in screen.
+
+\- Ctrl + Alt + Del is \*\*not\*\* an admin route: its screen is emptied for
+
+&#x20; the Staff account, including "Switch user" (Section 12).
+
+\- The admin account itself is normal Windows. Lockdown applies to the
+
+&#x20; Staff account; only the machine-wide settings named in this document
+
+&#x20; (for example Section 22.3) also affect the admin.
 
 
 
@@ -969,7 +983,13 @@ optional extra.
 
 &#x20;   Registry Editor
 
-&#x20; - Remove non-essential options from the Ctrl + Alt + Del screen
+&#x20; - Empty the Ctrl + Alt + Del screen: remove Task Manager, Lock, Change
+
+&#x20;   password, Sign out and Switch user. Windows reserves the key
+
+&#x20;   combination itself, so it cannot be blocked per account on Home or
+
+&#x20;   Pro; the screen is left with nothing useful instead
 
 &#x20; - Disable Windows key shortcuts (Win + E, Win + R, Win + X, etc.)
 
@@ -1035,6 +1055,16 @@ The Staff App provides a secret key combination that prompts for a PIN.
 
 
 
+\- The key combination is \*\*set per organization in the dashboard\*\*, with
+
+&#x20; a fixed default.
+
+\- A correct PIN \*\*signs the Staff session out\*\* and shows the Windows
+
+&#x20; sign-in screen, so no employee session stays open behind the admin.
+
+
+
 \- The PIN is stored only as a salted hash.
 
 \- Attempts are rate-limited, with lockout after repeated failures.
@@ -1073,7 +1103,7 @@ The Staff App provides a secret key combination that prompts for a PIN.
 
 | Accessibility tools (Sticky Keys, Narrator, On-Screen Keyboard) | Disable for the Staff account or restrict via policy |
 
-| Ctrl + Alt + Del screen | Remove non-essential options via policy |
+| Ctrl + Alt + Del screen | Empty it via policy, including Switch user; the admin uses the hidden exit (Section 12.4) |
 
 | Windows key shortcuts | Disable via policy |
 
@@ -1684,7 +1714,7 @@ and a clean custom UI, all in one open-source package.
 | 15 | Audit log and signed policies | Both in **v1** (moved from v1.x), because the backend can push installers to every device (Section 12.3) |
 | 16 | Icon set | **Solar Icons** by 480 Design (CC BY 4.0), soft and rounded. Dashboard: *Linear*, with *Bold Duotone* for active states. Staff App: *Bold Duotone*, with *Bold* for selected states. Bundled at build time from Iconify data (`@iconify-json/solar` + `unplugin-icons`) so only used icons ship and nothing loads online. Attribution "Icons: Solar by 480 Design (CC BY 4.0)" appears in `THIRD_PARTY_NOTICES.md` and the Staff App and dashboard About screens. App icons still come from app manifests (Section 6.1) |
 | 17 | Offline-first assets | The Staff App works with **no internet**: fonts, icons, GSAP and all UI assets are bundled. No CDNs, Google Fonts, icon fonts or online icon APIs at runtime |
-| 18 | Logo and brand animations | Logo: rounded box with three rounded tiles. Its **splash, loading and open-desktop animations are kept as designed** (Section 25.5); logo **colors will change** to the Rulebox palette |
+| 18 | Logo and brand animations | Logo: rounded box holding a 7×9 tile grid that forms a pixel "R" with a **green leg** (`#12b76a`). Its **splash, loading, open-desktop and lock animations are kept as designed** and run as pure CSS (Section 25.5). The UI accent stays teal |
 | 19 | Fonts | **Figtree** (variable, OFL) for all UI text; **Geist Mono** (OFL) for numbers, codes and small uppercase labels. Both bundled for offline use (Decision 17) |
 
 
@@ -2045,33 +2075,55 @@ Applies to the Staff App and the dashboard.
 
 ### 25.5 Logo and brand animations (Decision 18)
 
-Reference: `design/logo/rulebox_logo_gsap_animation.html`. The animations
-are kept as designed; only colors change.
+Design reference: `design/logo/rulebox_pixel_r_logo_v2_dense_grid.html`
+(gitignored). The animations are kept as designed.
 
-**Logo geometry** (`viewBox="0 0 120 120"`):
+**Logo geometry** (`viewBox="0 0 120 120"`). Source of truth:
+`packages/ui/src/brand/geometry.ts`.
 
-| Part | Shape | Current color → planned |
+| Part | Shape | Color |
 |---|---|---|
-| `box` | `rect x=10 y=10 w=100 h=100 rx=28`, stroke 8, no fill | Ink → Rulebox ink token |
-| `tA` | `rect x=26 y=26 w=30 h=68 rx=10` (tall tile) | Ink → Rulebox ink token |
-| `tC` | `rect x=64 y=64 w=30 h=30 rx=10` | Secondary text → muted token |
-| `tB` | `rect x=64 y=26 w=30 h=30 rx=10` | Purple `#7F77DD` → Rulebox **teal accent** |
+| Box | `rect x=9 y=9 w=102 h=102 rx=28`, stroke 6, no fill | Ink token |
+| Grid | 7 columns × 9 rows of `7×7 rx=2` tiles, pitch 8.6, first tile at `x=30.7 y=22.1` | |
+| Allowed tiles | Form the letter **R** | Ink token |
+| Leg tiles | The R's leg (rows 6–8, columns 3–6) | **Brand green `#12b76a`** (`--rb-brand`) |
+| Blocked tiles | Drawn at 40% size, 45% opacity; hidden below ~40 px | Muted token |
+| App icon | Same grid, white tiles on a `#141413` tile (`rx=30`), no box | |
 
-Wordmark: "rulebox", lowercase, weight 500, each letter animatable.
+The green is the **logo color only**. The UI accent stays teal
+(`--rb-accent`).
+
+Wordmark: "rulebox", lowercase, weight 500, followed by a small green
+square. Tagline: "Only what you allow".
+
+Static files (SVG, PNG, ICO, favicons, Tauri icons) are generated from the
+geometry by `pnpm gen:brand` into `assets/brand/` and the app folders.
 
 | Animation | Where used | Sequence |
 |---|---|---|
-| **Splash** | App start, before the login screen | Box outline draws in (0.9 s) while rotating from −90° and scaling up; tall and small tiles pop in (`back.out`); accent tile drops in with a bounce; wordmark letters rise in with a stagger |
-| **Loading** | Waiting states (agent starting, first sync, sign-in check) | Looping: the three tiles shrink and grow in a staggered wave; the accent tile rotates 90°; wordmark dimmed |
-| **Open desktop** | After successful sign-in | Letters lift out, box scales up and fades, small tiles shrink away, accent tile zooms ×5 and fades, then desktop tiles pop in with a stagger |
+| **Splash** | App start, before the login screen | Box outline draws in (0.9 s) while rotating from −45° and scaling up; all tiles pop in as dots; a green scan line passes top to bottom and turns on the R row by row; the leg tiles spin in and kick; wordmark letters rise in with a stagger |
+| **Loading** | Waiting states (agent starting, first sync, sign-in check) | Looping (1.8 s): a short segment of the outline travels around the box; the scan line passes down and each row pulses as it is crossed; wordmark dimmed |
+| **Open desktop** | After successful sign-in | Scan line passes up; blocked dots and the wordmark leave; R tiles spin away; the box scales up and fades; the last leg tile moves to the center and grows until it covers the screen, then fades to reveal the desktop |
+| **Lock** | Returning to the login screen | Outline draws in; tiles fly in from random positions; scan line, leg kick and wordmark as in Splash |
 
 Implementation rules:
 
-- GSAP is bundled, not loaded from a CDN (Decision 17).
-- The splash's outline draw animates `strokeDashoffset` on one small SVG.
-  This is the only allowed exception to the transform/opacity rule.
+- The logo animations are **pure CSS** (`<LogoMotion>` and
+  `logo-motion.css` in `packages/ui`), not GSAP. This is a deliberate
+  exception to 25.2: CSS animations need no JavaScript per frame, can play
+  before the app bundle has loaded, and hold no timeline objects in memory.
+  GSAP remains the library for everything else.
+- Tiles, scan line, wordmark and the flood are HTML elements that animate
+  only `transform`/`translate`/`scale` and `opacity`, so they run on the
+  compositor even while the main thread is busy starting the app.
+- The outline is one small SVG rect that animates `stroke-dashoffset`
+  (Splash, Lock and Loading). This is the only allowed exception to the
+  transform/opacity rule.
+- One-shot animations end on the resting style without a forwards fill, so
+  no layers stay promoted afterwards.
 - Lite mode and reduced motion: show the static logo with a short fade;
   "Loading" becomes a gentle opacity pulse; "Open desktop" becomes a
   cross-fade.
 - The splash never delays sign-in: it is skipped or cut short as soon as
   the login screen is ready.
+- Wherever the logo does not move, use the static `<LogoMark>` (one SVG).

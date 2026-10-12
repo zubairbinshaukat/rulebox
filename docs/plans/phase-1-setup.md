@@ -2,7 +2,7 @@
 
 > **For the implementing agent:** follow this plan step by step. Each step
 > has a **Done when** check — run it and see it pass before moving on.
-> Read `CLAUDE.md` first. From `prd.md`, read only Sections 3, 4.1–4.4, 16
+> Read `CLAUDE.md` first. From `docs/prd.md`, read only Sections 3, 4.1–4.4, 16
 > and 22.5. Don't build anything from later phases (no shell
 > replacement, lockdown, auth or Windows service logic).
 

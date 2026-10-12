@@ -5,7 +5,7 @@ workstation managed from a web dashboard. v1 = Windows, v2 = Android.
 
 ## Source of truth
 
-- **`prd.md`** is the spec. Read the relevant section before building a
+- **`docs/prd.md`** is the spec. Read the relevant section before building a
   feature. Locked decisions are in Section 21 — do not re-open them.
 - If code and PRD disagree, ask; don't silently pick one.
 - Section 13.6 lists researched risks with recommended fixes. If you find
@@ -26,7 +26,8 @@ workstation managed from a web dashboard. v1 = Windows, v2 = Android.
 
 Monorepo: Cargo workspace + pnpm workspace. Dev commands (repo root):
 `pnpm dev:dashboard`, `pnpm dev:staff` (Tauri), `pnpm dev:convex`,
-`pnpm gen:types` (Rust `DesiredState` -> `packages/types`).
+`pnpm gen:types` (Rust `DesiredState` -> `packages/types`), `pnpm gen:brand`
+(logo files).
 Phase plans live in `docs/plans/` (index: `docs/plans/README.md`) — follow
 the current phase's plan exactly and update its status in the index.
 
@@ -89,12 +90,16 @@ will change; the PRD wins on behavior.
 - Turn its inline styles into tokens in `packages/ui/` — never copy the
   `--t0…--t83` variable names as-is.
 
-**Logo:** `design/logo/rulebox_logo_gsap_animation.html` (only the
-`<svg id="logo">` and the final `<script>` matter; the rest is host CSS).
-Keep its splash / loading / open-desktop animations exactly; change only
-the colors to our tokens (accent tile → teal). Spec in PRD 25.5.
-`design/` is gitignored, so PRD 25.5 holds the geometry and timings.
-
+**Logo:** pixel "R" in a rounded box with a green leg (`#12b76a`,
+`--rb-brand`; the UI accent stays teal). Spec in PRD 25.5.
+- Geometry lives in `packages/ui/src/brand/geometry.ts`. Never redraw it.
+- Still logo: `<LogoMark>`. Splash / loading / open-desktop / lock:
+  `<LogoMotion>` (pure CSS in `logo-motion.css`, the one exception to the
+  GSAP rule). Keep those animations exactly as they are.
+- Static files in `assets/brand/`, favicons and Tauri icons are generated:
+  change the geometry, then run `pnpm gen:brand`. Never edit them by hand.
+- Design reference: `design/logo/rulebox_pixel_r_logo_v2_dense_grid.html`
+  (gitignored).
 ## Environment
 
 - Windows 11, PowerShell. Disk space is tight (~22 GB free on D:, ~39 GB
