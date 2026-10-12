@@ -7,7 +7,7 @@ contract).
 | # | Plan file | Status | One-line description |
 |---|---|---|---|
 | 1 | `phase-1-setup.md` | ✅ Done (reviewed) | Monorepo skeleton: dashboard, Staff App, Convex schema and shared design system, all running empty |
-| 2 | `phase-2-agent-core.md` | Plan written | Rust Windows service: enrollment code, Staff account, auto sign-in, shell replacement, watchdog and agent↔shell IPC |
+| 2 | `phase-2-agent-core.md` | In progress (Steps 0–5 done; protocol 1.1 addendum written, next is Step 5a) | Rust Windows service: enrollment code, Staff account, auto sign-in, shell replacement, watchdog and agent↔shell IPC |
 | 3 | `phase-3-staff-shell.md` | Plan written | Staff App as the shell: sign-in, desktop, taskbar, Start menu, window tracking, web app windows, file explorer and viewers |
 | 4 | `phase-4-dashboard-state.md` | Not written | Dashboard and desired state: devices, employees, groups, apps, remote installs, Convex Auth, policy signing and audit log |
 | 5 | `phase-5-lockdown.md` | Not written | Lockdown and Section 24 features: App Control, process watchdog, policies, web app permissions, Wi-Fi/printers, rollout rings, device lock; pass the escape checklist |
@@ -38,5 +38,9 @@ Not yet applied to the plan files. Apply these before starting the phase.
 | 3 | P12 employee Lock | Yes |
 | 3 | P13 second monitor | Blank |
 | 3 | P14 agent side of protocol 1.1 | Phase 2 addendum; real backend in Phase 4 |
+| 2 | 1.1: demo employees on a real agent | Allowed only when `agent-config.json` asks for it and the test-machine marker is present |
+| 2 | 1.1: broken PIN hash from the dashboard | Fail closed: the exit turns off until a valid PIN arrives |
+| 2 | 1.1: kiosk returns after an admin exit | Re-arm when an administrator signs in, after 5 minutes, or at agent restart |
+| 2 | 1.1: launcher IPC | Reuse the `rulebox-ipc` client (tokio allowed in the launcher) |
 
 All other open questions: the plan's recommendation stands.

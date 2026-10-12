@@ -29,23 +29,65 @@ the plan says how each one gets confirmed.
 
 Read this first. Where it disagrees with the text below, this section wins.
 
+- **Progress:** Steps 0 to 5 are implemented and committed (contract 1.0
+  types and codec, Win32 foundation and guard, named-pipe transport, agent
+  skeleton with `SimPlatform`). **The next step is Step 5a.** The order
+  from here is 5a, 6, 6a, 6b, 7, 8, … 15.
 - **Open questions (Section 14):** the user answered them; see the table in
   `docs/plans/README.md`. Every Phase 2 answer matches this plan's
-  recommendation, so no step changes.
-- **Ctrl + Alt + Del is no longer an admin route** (PRD 9.5, 12, 12.4).
-  Phase 5 will empty that screen for the Staff account, including Switch
-  user. The routes to admin are the hidden exit (Staff App, Phase 3) and
-  holding Shift during startup. In Phase 2 itself Switch user still works,
-  so the "Disconnected session" handling and VM checklist item stay, but
-  never show or document it as the way out: edge-case rows 26 and 27 should
-  list Shift at startup, `recover`, `unenroll` and Disable kiosk only. The
-  launcher fallback text in Step 12 is already corrected.
-- **Protocol 1.1 addendum (not written yet):** Phase 3 needs extra agent
-  requests (`session.*`, `apps.list`, `adminExit.submit`), PIN checking in
-  the agent, and the hidden exit offered on the launcher fallback screen.
-  They are listed in Section 15 of `phase-3-staff-shell.md` (R1 to R11).
-  They are additive: build contract 1.0 exactly as written in Steps 0 to 5.
-  The addendum must be written before Step 6 is started.
+  recommendation.
+- **Ctrl + Alt + Del is not an admin route** (PRD 9.5, 12, 12.4). Phase 5
+  empties that screen for the Staff account, including Switch user. The
+  routes to an administrator are the hidden exit (key combination + PIN,
+  checked by the agent), Disable kiosk from the backend, holding Shift
+  during startup, and `rulebox-agent recover` / `unenroll`. In Phase 2
+  itself Switch user still physically works, so the "Disconnected
+  session" handling and its VM checklist item stay, but nothing shows or
+  documents it as the way out.
+- **Protocol 1.1 addendum (written; second revision of this plan).** It
+  answers Section 15 of `phase-3-staff-shell.md` (R1 to R11). Contract 1.0
+  is unchanged; 1.1 is additive (minor 1, new capabilities `session`,
+  `apps`, `adminExit`). Where to find it:
+  - wire shapes: **Section 6.11**;
+  - agent behaviour: **Sections 5.9** (employee session), **5.10** (admin
+    exit and PIN), **5.11** (audit queue);
+  - steps: new **Step 5a** (contract), amended **Step 6** (servers), new
+    **Step 6a** (session and apps) and **Step 6b** (admin exit), and
+    amendments marked "(1.1)" in Steps 7 to 15.
+- **What else changed in this revision:**
+  - The admin exit and its PIN are now Phase 2 work (they were listed as a
+    Phase 5 non-goal). The real employee backend, the audit log backend
+    and the dashboard settings stay in Phase 4, behind the seams named in
+    Sections 5.9 to 5.11.
+  - Admin-pipe failures such as `already_enrolled` and `compat_blocked`
+    now have a wire form: error code `operation_failed` with
+    `data.reason` (Section 6.7).
+  - The data-directory startup check of Section 5.1 is now assigned to
+    **Step 10** (it was in no step).
+  - The Step 4 pipe test showed that a client open asking for bit `0x4`
+    was accepted against a descriptor without it (run elevated). Section
+    6.2 gains a second server check on the client side, and the VM
+    checklist gains a probe run as the real Staff user (Section 10.2,
+    "IPC security").
+  - R5 to R8 are applied: four places may use the `windows` crate
+    (Section 4.2), `gen:types` lists every exporting crate (Step 1 note),
+    `vm-deploy.ps1` prefers a real `rulebox-staff.exe` (Step 14), and
+    Ctrl + Alt + Del → Switch user is gone from the edge-case rows,
+    security notes and checklist wording.
+  - `rulebox-shell.exe` now speaks the IPC protocol for one purpose: the
+    hidden exit on its fallback screen (Step 12). It therefore depends on
+    `rulebox-ipc` and tokio.
+- **How the code already differs from older text below** (follow the
+  code): the wire enums use the hand-written `unknown_on_new_values!`
+  macro in `types.rs` instead of `#[serde(other)]` (ts-rs cannot parse
+  it); `TransportError` lives in `codec.rs`; `Deps` has no
+  `backend_factory` yet (Step 8 adds it); `agent::run` creates a
+  `watch::Sender<AgentSnapshot>` whose receiver is unused until Step 6;
+  simulate mode starts no pipe until Step 6; there is no admin-pipe
+  client helper until Step 5a.
+- **Nothing in the 1.1 addendum has been run.** It was specified from the
+  code of Steps 0 to 5 and from the two plans. Items that need a VM or a
+  crate check are marked **(unverified)**.
 
 ## 1. Goal
 
@@ -72,6 +114,10 @@ At the end of Phase 2, on a **test VM**:
    and that contract is frozen at version 1.0 for Phase 3.
 7. `rulebox-agent recover` and `rulebox-agent unenroll` restore normal
    Windows even when the service is stopped or broken.
+8. (1.1) The agent answers protocol 1.1: it checks the hidden-exit PIN
+   itself and signs the Staff session out to the Windows sign-in screen,
+   and it answers employee sign-in and the app catalogue from a fixture
+   directory (the real employee backend is Phase 4).
 
 On the **dev machine** everything except the real Win32 side effects is
 built, unit-tested and runnable in `--simulate` mode, including a working
@@ -81,10 +127,11 @@ IPC endpoint that Phase 3 can develop against.
 
 | Not in Phase 2 | Belongs to |
 |---|---|
-| Staff App UI, Tauri commands, window tracking, employee sign-in | Phase 3 |
-| Dashboard screens, Convex Auth, groups/employees/apps UI, merging group and device desired state, rollout rings, **policy signing and verification**, audit log, fleet-size-based heartbeat interval | Phase 4 |
+| Staff App UI, Tauri commands, window tracking, the sign-in screen and the PIN dialog | Phase 3 |
+| Dashboard screens, Convex Auth, groups/employees/apps UI, merging group and device desired state, rollout rings, **policy signing and verification**, fleet-size-based heartbeat interval | Phase 4 |
+| The **real** employee directory (checking employee passwords against Convex), the **real** app catalogue, the audit log table and the mutation that receives audit records, dashboard settings for the exit PIN, key combination and power options. Phase 2 builds the agent side against fixtures and the seams of Sections 5.9 to 5.11 | Phase 4 |
 | App install/update/remove, winget, file handlers, session cleanup on employee logout, storage quotas | Phase 4 |
-| Lockdown policies for the Staff account (Task Manager, Win keys, Ctrl+Alt+Del options, `NoLogoff`, USB), App Control, the **process allow-list watchdog** (PRD 13.6 #2), hidden admin exit + PIN (PRD 12.4), hiding the admin tile, account lockout policy, device lock, broadcasts, Wi-Fi and printers, per-user tuning (PRD 22.2), kiosk performance profile (PRD 22.3), restricting the service's privileges | Phase 5 |
+| Lockdown policies for the Staff account (Task Manager, Win keys, Ctrl+Alt+Del options, `NoLogoff`, USB), App Control, the **process allow-list watchdog** (PRD 13.6 #2), hiding the admin tile, account lockout policy, device lock, broadcasts, Wi-Fi and printers, per-user tuning (PRD 22.2), kiosk performance profile (PRD 22.3), restricting the service's privileges | Phase 5 |
 | MSI/WiX, installer UI, WebView2 bootstrap, code signing, how release builds satisfy the test-machine guard | Phase 6 |
 | Agent self-update, Staff App update flow and version rollback (PRD 23.4, 23.9), Windows Update policy, Windows Event Log output | v1.x / later |
 | Periodic rotation of the Staff password | later (the repair path in Step 10 is enough for v1) |
@@ -92,6 +139,9 @@ IPC endpoint that Phase 3 can develop against.
 Phase 2 builds **seams** for three of these and nothing more: a
 `signature` field carried next to the desired state (always `null` now),
 `current.json` with one version entry, and reserved IPC method namespaces.
+The 1.1 addendum adds three more seams for Phase 4: `EmployeeDirectory`
+(Section 5.9), `AuditSink` (Section 5.11) and the agent-only keys of the
+desired-state document (Section 5.10).
 
 ---
 
@@ -103,7 +153,8 @@ Phase 2 builds **seams** for three of these and nothing more: a
 - `docs/plans/phase-1-setup.md`, Steps 3, 4 and 7, to know what exists.
 - `docs/prd.md` — only these sections: 3.2, 3.3, 5.1, 9.1, 9.4, 9.5, 10,
   11, 11.1, 12.1–12.3, 13.2, 13.5, 13.6 (rows 3, 4, 5, 8), 14, 15, 21,
-  22.4, 22.5, 23.3, 23.7. Section 21 is locked: never re-open a decision.
+  22.4, 22.5, 23.3, 23.7. For the 1.1 steps (5a, 6a, 6b) also 5.2, 5.3,
+  12.4 and 13.6 row 6. Section 21 is locked: never re-open a decision.
   Lines 1–1690 of the PRD have escaped markdown (`\#`, doubled blank
   lines); that is cosmetic.
 - Sections 4 to 6 of this file before writing any code.
@@ -174,15 +225,19 @@ Session 0 (SYSTEM)                      Staff session (standard user RuleboxStaf
 | `crates/rulebox-ipc/` | `rulebox-ipc` | lib (new) | The IPC contract: message types, framing codec, error codes, ts-rs export; named-pipe client (feature `client`) and server transport (feature `server`) |
 | `crates/rulebox-win32/` | `rulebox-win32` | lib (new) | **Every** `unsafe` Win32 call in the workspace, behind safe functions; the test-machine guard |
 | `apps/agent/` | `rulebox-agent` | bin (rewrite stub) | Service host, CLI, state store, backend client, kiosk reconciler, watchdog, IPC servers |
-| `apps/shell-launcher/` | `rulebox-shell` | bin (new) | `rulebox-shell.exe`: the registered shell; starts and relaunches the Staff App; native fallback screen |
+| `apps/shell-launcher/` | `rulebox-shell` | bin (new) | `rulebox-shell.exe`: the registered shell; starts and relaunches the Staff App; native fallback screen; (1.1) the hidden exit on that screen |
 | `convex/` | — | TS | Enrollment, device auth, desired-state query, heartbeat, dev helpers |
 
 `apps/shell-launcher` is covered by neither existing workspace glob, so
 it is added to `members` explicitly.
 
-Only `rulebox-win32` and `rulebox-shell` may depend on the `windows`
-crate. Reason: `windows` 0.100 will rename every feature and module
-(Section 13), so the migration must stay in one place.
+Only **four known places** may use the `windows` crate: `rulebox-win32`
+and `rulebox-shell` (this phase), and `crates/rulebox-desktop` and
+`apps/staff-app/src-tauri/src/webapp/` (Phase 3 owns both; do not create
+or edit them here). Reason: `windows` 0.100 will rename every feature
+and module (Section 13), so the migration must stay in a short, known
+list. `rulebox-agent` and `rulebox-ipc` never import `windows::`
+directly; they call `rulebox-win32`.
 
 ```
 crates/rulebox-ipc/
@@ -192,9 +247,11 @@ crates/rulebox-ipc/
 │  ├─ envelope.rs     # Frame, RpcError, ErrorCode
 │  ├─ methods.rs      # Method trait + one unit struct per method
 │  ├─ types.rs        # Hello*, AgentSnapshot and its parts (ts-rs export)
-│  ├─ admin.rs        # admin-pipe params/results (not exported to TS)
-│  ├─ codec.rs        # length-delimited JSON codec
-│  ├─ client.rs       # feature "client": IpcClient (connect, verify, call, events, reconnect)
+│  ├─ requests.rs     # (1.1) params/results of session.*, apps.list, adminExit.submit (not exported to TS)
+│  ├─ hotkey.rs       # (1.1) the key-combination text format: parse, canonical form (pure)
+│  ├─ admin.rs        # admin-pipe params/results, OperationFailure (not exported to TS)
+│  ├─ codec.rs        # length-delimited JSON codec, TransportError
+│  ├─ client.rs       # feature "client": IpcClient (connect, verify, call, events, reconnect); (1.1) call_once
 │  └─ server.rs       # feature "server": PipeListener, Connection, PeerInfo
 └─ examples/
    └─ fake_staff.rs   # stand-in Staff App for tests (console program)
@@ -240,7 +297,16 @@ apps/agent/
    ├─ compat.rs       # CompatReport + blocking rules
    ├─ kiosk.rs        # reconciler: enable / disable / repair
    ├─ watchdog.rs     # launcher presence + hang detection
-   ├─ ipc_shell.rs    # shell-pipe server
+   ├─ agent_policy.rs # (1.1) agent-only keys of the desired-state document (admin exit, power, org name)
+   ├─ kdf.rs          # (1.1) Argon2id: hash, verify, parameter limits
+   ├─ lockout.rs      # (1.1) rate limiting and lockout for the PIN and employee passwords, persisted
+   ├─ audit.rs        # (1.1) audit queue on disk + AuditSink seam
+   ├─ directory.rs    # (1.1) EmployeeDirectory seam, UnavailableDirectory, FixtureDirectory
+   ├─ employee_cache.rs # (1.1) offline sign-in cache
+   ├─ session.rs      # (1.1) SessionManager: session.* and apps.list
+   ├─ admin_exit.rs   # (1.1) PIN gate, adminExit.submit, the sign-out flow
+   ├─ fixtures.rs     # (1.1) demo document, employees and catalogue for --sim-demo and fixture mode
+   ├─ ipc_shell.rs    # shell-pipe server, ShellExtension seam
    ├─ ipc_admin.rs    # admin-pipe server + CLI client helpers
    ├─ agent.rs        # run(): wires tasks, owns the snapshot
    ├─ service.rs      # windows-service host, install/uninstall
@@ -252,7 +318,8 @@ apps/shell-launcher/
    ├─ main.rs         # single instance, supervise loop
    ├─ current.rs      # current.json parsing + path validation (pure)
    ├─ backoff.rs      # crash-loop logic (pure)
-   └─ fallback.rs     # native "Contact your administrator" window
+   ├─ fallback.rs     # native "Contact your administrator" window
+   └─ exit.rs         # (1.1) hidden exit on the fallback screen: key combination, PIN field, adminExit.submit
 
 convex/
 ├─ schema.ts          # changed
@@ -275,6 +342,8 @@ scripts/vm-deploy.ps1 # new: copies a debug build into Program Files on the VM
 | Staff App | `<install>\versions\<version>\rulebox-staff.exe` |
 | Data directory | `%ProgramData%\Rulebox\` (resolve with `FOLDERID_ProgramData`) |
 | State | `<data>\state\agent-state.json`, `secrets.bin`, `desired-state.json`, optional `agent-config.json` |
+| State (1.1) | `<data>\state\lockouts.json`, `employee-cache.json`, `audit-queue.json` |
+| Employee files root (1.1) | `<Staff profile folder>\RuleboxFiles\<employee folder name>\`. The agent only **names** this path (Section 5.9); the Staff App creates and uses it |
 | Agent logs | `<data>\logs\agent.YYYY-MM-DD.log`, 14 files kept |
 | Launcher log | `%LOCALAPPDATA%\Rulebox\logs\shell-launcher.log` in the Staff profile, truncated at 1 MB |
 | Service | name `RuleboxAgent`, display name `Rulebox Agent`, LocalSystem, automatic (not delayed) |
@@ -337,8 +406,26 @@ the latest stable:
 | `sha2` | agent | SHA-256 of the device secret and enrollment token |
 | `base64` | agent | Decoding the enrollment code |
 | `getrandom` | agent | Device secret and Staff password from the OS random source |
+| `argon2` (RustCrypto; default features, which include the PHC string support) | agent | (1.1) Argon2id for the exit PIN (verify) and the offline sign-in cache (hash and verify). PRD 13.6 #6 names Argon2id |
 
 Notes:
+
+- (1.1) Argon2 is far too slow in an unoptimized build (a debug-build
+  check could take longer than the 10-second IPC timeout). Add to the
+  root `Cargo.toml`, next to the existing `[profile.dev]`:
+
+  ```toml
+  [profile.dev.package.argon2]
+  opt-level = 3
+  [profile.dev.package.blake2]
+  opt-level = 3
+  ```
+
+  If `cargo` warns that `blake2` is not in the dependency graph, remove
+  that block and say so in the report. **(unverified)**
+- (1.1) `rulebox-shell` additionally depends on `rulebox-ipc` with
+  feature `client` (which brings tokio). This replaces the earlier "no
+  tokio in the launcher" rule; the reason is in Step 12.
 
 - `convex` default feature is `native-tls-vendored`. On Windows native-tls
   uses SChannel and the machine certificate store, so nothing should build
@@ -407,12 +494,54 @@ pub struct Secrets { pub device_secret: Option<String>,          // 64 hex chars
   `CRYPTPROTECT_LOCAL_MACHINE` (so only SYSTEM can decrypt; with that flag
   any local process could). Never log a secret, a password, an enrollment
   code or an enrollment token. `Debug` for `Secrets` prints `<redacted>`.
-- **Startup check.** Before reading or writing, the agent verifies the
-  data directory is a real directory (not a reparse point), is owned by
-  SYSTEM or Administrators, and has the protected DACL. If not, it fixes
-  the DACL when the directory is empty and otherwise refuses to start with
-  a clear log line. Reason: standard users may create folders under
-  `%ProgramData%` and could plant one first.
+- **Startup check (built in Step 10; it was missing from every step).**
+  Before anything reads or writes the real data directory, the agent
+  verifies that it is a real directory (not a reparse point), is owned by
+  SYSTEM or Administrators, and has the protected DACL. Reason: standard
+  users may create folders under `%ProgramData%` and could plant one
+  first. The rules:
+
+  | `verify_protected_dir(<data>)` says | Directory is empty | Action |
+  |---|---|---|
+  | does not exist | — | `create_protected_dir`, then verify again |
+  | is a reparse point | any | **refuse** |
+  | `is_ok()` | any | use it |
+  | owner is SYSTEM or Administrators, DACL differs | yes | `create_protected_dir` (it replaces the DACL), then verify again |
+  | owner is anyone else | yes | `std::fs::remove_dir` (not recursive), `create_protected_dir`, then verify again |
+  | not `is_ok()` | no | **refuse** |
+
+  "Verify again" must return `is_ok()`, otherwise refuse (this also
+  covers someone re-creating the folder between the two calls). "Refuse"
+  means: print the reason to stderr, write **nothing** into the
+  directory (no log file either), and exit; in service mode stop with
+  `ServiceExitCode::ServiceSpecific(2)`. The check runs **before**
+  `logging::init`, because logs live inside the data directory.
+  - Only three commands open the real data directory: `service run`,
+    `run --console` without `--simulate`, and `recover`. The first two
+    run the check (and repair) first; `recover` only verifies and never
+    repairs (Step 11). `service install` creates the directory through
+    the same function. No other command (`enroll`, `status`, `unenroll`, `compat`,
+    `hash-pin`) initialises file logging or opens the state store; they
+    talk to the service over the admin pipe or only read.
+  - Simulate mode skips the check: its data directory is under
+    `target\`.
+
+**Files added by the 1.1 addendum** (same atomic-write and corrupt-file
+rules; all inside `<data>\state\`, so the Staff account can read none of
+them):
+
+| File | Holds | Defined in |
+|---|---|---|
+| `lockouts.json` | Failure counters and lock times for the exit PIN (one per device) and for employee passwords (one per username) | Section 5.10, `lockout.rs` |
+| `employee-cache.json` | Per employee who signed in online on this PC: profile, app catalogue, Argon2id hash of the password, time of the last online sign-in | Section 5.9, `employee_cache.rs` |
+| `audit-queue.json` | Audit records not yet accepted by the backend | Section 5.11, `audit.rs` |
+
+`AgentState` gains one field: `StaffAccount.profile_dir: Option<String>`
+(`#[serde(default)]`), the Staff profile folder returned by
+`ensure_profile`, saved in Enable step 3 (Section 5.6). The exit PIN's
+hash is **not** copied into `AgentState` or `Secrets`: it stays inside
+the cached desired-state document (`desired-state.json`), which is in the
+same protected directory.
 
 ### 5.2 Tasks inside the service
 
@@ -425,8 +554,14 @@ console mode:
 | `backend` | Convex client, subscription, heartbeat timer | enrollment state, connection state |
 | `reconciler` | all kiosk changes (the only task that calls mutating `Platform` methods) | `Trigger` channel: `Startup`, `DesiredChanged`, `Session`, `Power`, `Reassert` (every 10 minutes), `Admin` |
 | `watchdog` | launcher presence, hang detection | session events, 5-second tick while kiosk is enabled, shell heartbeats |
-| `ipc_shell` | shell pipe | Staff SID known |
+| `ipc_shell` | shell pipe; calls the `ShellExtension`s (`SessionManager`, `AdminExit`) for 1.1 methods | Staff SID known |
 | `ipc_admin` | admin pipe | always |
+| `audit` (1.1) | delivery of the audit queue through `AuditSink` | a new record, or the connection becoming `online` |
+
+The 1.1 request handlers run inside the `ipc_shell` connection tasks.
+They never call a mutating `Platform` method themselves: the one
+privileged action (signing the Staff session out after a correct PIN) is
+sent to the `reconciler` as a request (Section 5.10).
 
 Shared state is one `tokio::sync::watch::Sender<AgentSnapshot>`
 (Section 6.6). Tasks never share a mutex over Win32 state.
@@ -515,7 +650,10 @@ RBX1.<base64url, no padding, of the UTF-8 string "<convexUrl>#<token>">
 - The server stores only `sha256(token)` as lowercase hex.
 
 **Flow** (`admin.enroll` on the admin pipe; the reconciler task executes
-it so nothing else mutates the machine at the same time):
+it so nothing else mutates the machine at the same time). Every "fail
+with `<name>`" below is reported on the admin pipe as the error code
+`operation_failed` with `data.reason = "<name>"` (Section 6.7); these
+names are **not** values of `ErrorCode`:
 
 1. If `enrollment` is present and not revoked: fail with
    `already_enrolled`.
@@ -607,7 +745,9 @@ is repaired automatically.
      create.
 3. **Profile.** `ensure_profile` (creates the profile if the account has
    never signed in, so its registry hive exists). Returns the real profile
-   path; never assume `C:\Users\RuleboxStaff`.
+   path; never assume `C:\Users\RuleboxStaff`. (1.1) Save the path as
+   `state.staff.profile_dir` and tell the `SessionManager`
+   (`set_files_base(<profile>\RuleboxFiles)`, Section 5.9).
 4. **Staff hive values** (per user, journal not needed because the whole
    account is ours):
    - shell value = `"<install>\rulebox-shell.exe"` (with the quotes) using
@@ -671,8 +811,16 @@ increment `failures`, and retry on the next trigger or after
 a session whose user is Staff while kiosk is enabled: wait 10 seconds;
 if that session is still `Active` and is the console session, sign it
 out (automatic sign-in then brings the shell back). If it became
-`Disconnected` (the admin used Switch user), leave it alone. This covers
-Automatic Restart Sign-On locking the session after an update restart.
+`Disconnected`, leave it alone (until Phase 5 empties the Ctrl + Alt +
+Del screen, Switch user can still produce this state; it is handled, but
+it is not a documented admin route). This covers Automatic Restart
+Sign-On locking the session after an update restart.
+
+**Exit hold (1.1).** After a correct exit PIN the reconciler treats
+`AutoAdminLogon = "0"` as the wanted value instead of drift, so the
+Staff account is not signed straight back in. Section 5.10 defines when
+the hold starts and ends. While it is active, every other value of
+Enable is still re-asserted as usual.
 
 ### 5.7 Launcher watchdog
 
@@ -757,6 +905,375 @@ restarted agent finds it again by image path, session and owner.
   use the timeout); the client has no proxy support (document it, do not
   work around it).
 
+### 5.9 Employee session (protocol 1.1)
+
+Serves `session.signIn`, `session.signOut`, `session.get`,
+`session.verifyPassword` and `apps.list` (wire shapes in Section 6.11).
+Code: `session.rs` (`SessionManager`), `directory.rs`,
+`employee_cache.rs`, `lockout.rs`, `kdf.rs`. Built in Step 6a.
+
+**The seam Phase 4 replaces.** The agent never talks to an employee
+backend directly; it asks this trait:
+
+```rust
+// apps/agent/src/directory.rs
+pub trait EmployeeDirectory: Send + Sync + 'static {
+    /// false = this build cannot check employees at all. The agent then does not
+    /// list the `session` and `apps` capabilities in `hello`.
+    fn available(&self) -> bool;
+    /// One online check of one username and password. Never retries, never caches.
+    /// The caller applies the timeout and the rate limit.
+    fn verify<'a>(&'a self, username: &'a str, password: &'a str)
+        -> BoxFuture<'a, Result<DirectoryAnswer, DirectoryError>>;
+}
+pub enum DirectoryAnswer { Ok(DirectoryEmployee), WrongCredentials, Disabled, LockedOut { retry_after_ms: u64 } }
+pub struct DirectoryEmployee { pub employee: Employee,        // rulebox_ipc::requests::Employee
+                               pub apps: Vec<AppEntry>,        // rulebox_ipc::requests::AppEntry; the employee's whole catalogue
+                               pub offline_days: u32 }         // how long offline sign-in stays allowed; 0 = never
+pub enum DirectoryError { Unreachable, Unavailable }
+```
+
+| Implementation | Used when | Behaviour |
+|---|---|---|
+| `UnavailableDirectory` | The real agent, by default, until Phase 4 | `available()` is false; `verify` returns `Unavailable` |
+| `FixtureDirectory` | `run --console --simulate --sim-demo`; and the **real** agent only when `agent-config.json` has `"fixtureDirectory": true` **and** `rulebox_win32::guard::is_test_machine()` is true | Answers from `fixtures.rs` (Section 6.11, "Simulated agent"). The real agent logs a warning at every start: "fixture employee directory is ON (test machine only)". Without the marker the setting is ignored and logged |
+| `ConvexDirectory` | Phase 4 | One Convex call per sign-in that returns the employee **and** the catalogue (PRD 11.1 rule 1). `apps.list` never calls the backend |
+
+`Deps` gains `directory: Arc<dyn EmployeeDirectory>`. Phase 4 changes
+only the value put there; the contract and `SessionManager` stay.
+
+**Session state.** One per device, in memory only:
+`Option<ActiveSession { employee, apps, files_root, offline }>`. It is
+**not** written to disk. After an agent restart `session.get` returns no
+employee and the Staff App must ask for the password again. Reason: a
+stored session cannot be tied safely to one Windows logon, and after a
+power cut the next person would become the previous employee. The session
+is cleared by `session.signOut`, when the Staff Windows session ends
+(session event), after a correct exit PIN, and when the device becomes
+revoked.
+
+**`session.signIn`, exactly:**
+
+1. Not enrolled → error `not_enrolled`. Enrollment revoked → error
+   `denied_by_policy`.
+2. Normalize `username`: trim, then Unicode lowercase. Empty or longer
+   than 64 characters, or `password` empty or longer than 256 characters
+   → error `invalid_params`.
+3. A session exists for a **different** username → error
+   `denied_by_policy` ("another employee is signed in"). The same
+   username is allowed and replaces the session (this is how the Staff
+   App recovers after an agent restart).
+4. Take the sign-in gate (one `tokio::sync::Mutex` for `signIn` and
+   `verifyPassword` together) with `try_lock`. Already taken → error
+   `busy`. One check at a time keeps parallel requests from racing the
+   failure counter.
+5. Ask the device-wide guard and this username's counter in the lockout
+   store (both below). Either one locked → outcome `lockedOut` with
+   `retryAfterMs`. The password is not checked. Every failure that
+   stays counted is also recorded in the device-wide guard.
+6. **Count first:** record a failure for this username and save
+   `lockouts.json` **before** checking anything. A success in step 7 or 8
+   clears it. This way killing the agent in the middle of a check never
+   gives a free guess.
+7. **Online path**, only when the snapshot's `connection` is `online`:
+   `directory.verify` under a 6-second timeout.
+   - `Ok(e)` → clear the counter; hash the password with Argon2id in
+     `spawn_blocking` and store the cache entry (below); start the
+     session with `offline: false`; outcome `ok`.
+   - `WrongCredentials` → outcome `wrongCredentials` (or `lockedOut` if
+     this failure reached a lock). The offline cache is **not** tried.
+   - `Disabled` → remove this username's cache entry; undo the counted
+     failure; outcome `disabled`.
+   - `LockedOut` → undo the counted failure; outcome `lockedOut` with the
+     server's `retryAfterMs`.
+   - `Unreachable`, `Unavailable` or the timeout → go to step 8.
+8. **Offline path** (`connection` is not `online`, or step 7 fell
+   through):
+   - no cache entry for this username → undo the counted failure;
+     outcome `offlineNeverSignedIn`;
+   - entry expired (see below) → undo the counted failure; outcome
+     `offlineExpired`;
+   - Argon2id check in `spawn_blocking`: no match → outcome
+     `wrongCredentials` (or `lockedOut`); match → clear the counter,
+     start the session with `offline: true`, outcome `ok`.
+9. The whole request has an 8-second budget in the agent. Past it →
+   error `timeout` (`retryable: true`); the counted failure is undone.
+
+**`session.verifyPassword`** (the Staff App's employee lock): no session
+→ error `not_signed_in`. Otherwise steps 4 to 6 above, then one Argon2id
+check against the **current employee's cache entry** (it always exists:
+an online sign-in writes it and an offline sign-in used it). It never
+calls the directory, so it works offline and is fast.
+
+**`session.signOut`**: clears the session; no session is still a success.
+Closing the employee's apps and wiping app data folders (PRD 5.3) is
+Phase 4. **`session.get`** returns the session or nulls. **`apps.list`**:
+no session → error `not_signed_in`; otherwise the session's `apps`.
+Icons: an `iconPngBase64` longer than 43,692 characters (32 KiB decoded)
+is replaced by null; if the serialized result is still above 900,000
+bytes every icon is set to null and a warning is logged, so the reply
+always fits one frame.
+
+**Files root.** `filesRoot` is
+`<files base>\<folder name>`, where `<files base>` is
+`<Staff profile folder>\RuleboxFiles` (`state.staff.profile_dir`; in
+`--sim-demo` it is `<data dir>\sim-files`) and `<folder name>` is the
+employee id if it matches `^[A-Za-z0-9_-]{1,64}$`, otherwise the first
+32 hex characters of its SHA-256. **The agent only builds this string.
+It never creates, opens or lists the folder.** Reason: the folder is in
+a place the Staff account can write, and a SYSTEM process that creates
+folders there can be tricked with a planted link into writing somewhere
+else. The Staff App, running as Staff, creates the folder (this differs
+from Phase 3's R1 text; it is on the list for Phase 3 in Section 12). If the files base is not known yet (the Staff account was never
+set up) → error `internal`, `retryable: true`, message "the Staff
+account is not set up yet".
+
+**Offline cache** (`employee-cache.json`). Entry: `username`,
+`employee`, `apps`, `passwordHash` (Argon2id PHC string), `offlineDays`,
+`lastOnlineMs`. At most 50 entries; the one with the oldest
+`lastOnlineMs` is dropped first. An entry is **expired** when
+`offlineDays == 0` or
+`max(now, state.last_wall_clock_ms) - lastOnlineMs > offlineDays × 86,400,000`.
+Using the larger of the two clocks means setting the clock back never
+extends the period. The plain password is never stored and never logged.
+
+**Argon2id** (`kdf.rs`), one set of constants for both the cache and the
+PIN: Argon2id, version 19, memory 19,456 KiB, 2 passes, 1 lane, 16-byte
+random salt, 32-byte output, PHC string format. A hash that comes from
+outside (the PIN) is accepted only if it is `argon2id`, `v=19`, memory
+8,192 to 65,536 KiB, passes 1 to 10, lanes 1 to 4; anything else is
+"invalid" (a hostile document must not be able to make the agent
+allocate gigabytes).
+
+```rust
+// apps/agent/src/kdf.rs
+pub fn hash_secret(secret: &str) -> Result<String, KdfError>;                 // PHC string, fresh salt
+pub fn verify_secret(secret: &str, phc: &str) -> Result<bool, KdfError>;      // Err only for an invalid/out-of-limits hash
+pub fn check_hash(phc: &str) -> Result<(), KdfError>;                         // the limits above, without hashing
+pub enum KdfError { Invalid(String), Internal(String) }
+```
+
+**Lockout engine** (`lockout.rs`; shared with the PIN, Section 5.10).
+
+```rust
+pub struct LockPolicy { pub free_failures: u32, pub lock_ms: &'static [u64], pub forget_after_ms: Option<u64> }
+pub const PASSWORD_POLICY: LockPolicy = LockPolicy { free_failures: 4, lock_ms: &[30_000, 60_000, 300_000, 900_000], forget_after_ms: Some(1_800_000) };
+pub const PIN_POLICY:      LockPolicy = LockPolicy { free_failures: 4, lock_ms: &[60_000, 300_000, 900_000, 1_800_000, 3_600_000], forget_after_ms: None };
+#[derive(Serialize, Deserialize, Default, Clone)] #[serde(rename_all = "camelCase", default)]
+pub struct Counter { pub failures: u32, pub last_failure_ms: u64, pub locked_at_ms: u64, pub lock_ms: u64 }
+pub enum Gate { Open { attempts_left: u32 }, Locked { retry_after_ms: u64 } }
+impl Counter {
+    pub fn gate(&mut self, policy: &LockPolicy, now_ms: u64) -> Gate;          // also applies forget_after and the clock rule
+    pub fn record_failure(&mut self, policy: &LockPolicy, now_ms: u64) -> Gate; // returns the state AFTER this failure
+    pub fn undo_failure(&mut self);                                             // for "counted first, then it was not a guess"
+    pub fn clear(&mut self);
+}
+```
+
+- Failure number `n` (consecutive, starting at 1) locks when
+  `n > free_failures`; the lock lasts `lock_ms[min(n - free_failures - 1, len - 1)]`.
+- **Employee passwords**, per normalized username: failures 1 to 4 are
+  answered `wrongCredentials`; the 5th locks for 30 seconds, the 6th for
+  1 minute, the 7th for 5 minutes, the 8th and every later one for 15
+  minutes. A correct password clears the counter; so do 30 minutes
+  without a failed attempt.
+- **Device-wide guard for passwords** (memory only): more than 20 failed
+  password checks, over all usernames, within any 10 minutes → every
+  `signIn` and `verifyPassword` is answered `lockedOut` until the oldest
+  of those failures is 10 minutes old (`retryAfterMs` says when). This
+  bounds guessing across many usernames. A hostile Staff-session process
+  can use it to block sign-in on that PC for a while; that is accepted,
+  since such a process can already disturb the session in worse ways.
+- **Clock rule.** Times are wall-clock milliseconds (`state::unix_ms`). If
+  `now < locked_at_ms` (the clock went back), set `locked_at_ms = now`
+  and save: a clock change never shortens a lock. The Staff account
+  cannot set the system clock; someone with firmware access can shorten
+  a lock by setting it forward. Accepted.
+- Stored in `lockouts.json`:
+  `{ "schema": 1, "adminExit": Counter, "adminExitPinId": string|null, "employees": { "<username>": Counter } }`.
+  Employee entries that are not locked and older than 30 minutes are
+  removed on every save.
+- Every lock that starts (password or PIN) writes one audit record
+  (Section 5.11). PRD 5.2 asks for employee lockouts to be reported.
+
+### 5.10 Hidden admin exit (protocol 1.1)
+
+Serves `adminExit.submit` and the snapshot field `adminExit`. Code:
+`admin_exit.rs`, `agent_policy.rs`, `lockout.rs`, `kdf.rs`. Built in
+Step 6b; the reconciler part in Step 9. PRD 9.5 and 12.4.
+
+**What a correct PIN gives.** It ends the Staff session and shows the
+Windows sign-in screen. It grants **no** administrator right: the person
+still has to sign in to Windows with an administrator account. That is
+why this method is safe to expose on a pipe any Staff-session process
+can open (Section 6.2).
+
+**Where the settings come from (the Phase 4 seam).** The desired-state
+document may carry three extra top-level keys that only the agent reads.
+They are **not** fields of `rulebox_policy::DesiredState`, so they can
+never appear in `AgentSnapshot.desiredState`:
+
+```jsonc
+"adminExit": { "enabled": true,                 // optional, default true
+               "hotkey": "Ctrl+Shift+F12",      // optional, default DEFAULT_ADMIN_EXIT_HOTKEY
+               "pinHash": "$argon2id$v=19$m=19456,t=2,p=1$<salt>$<hash>" },   // optional
+"power":     { "sleep": true, "restart": true, "shutDown": true },            // optional
+"orgName":   "Company"                                                         // optional
+```
+
+```rust
+// apps/agent/src/agent_policy.rs
+pub struct AgentPolicy { pub admin_exit: AdminExitPolicy, pub power: Option<PowerOptions>, pub org_name: Option<String> }
+pub struct AdminExitPolicy { pub enabled: bool,              // true only when a valid pin_hash is present and "enabled" is not false
+                             pub hotkey: String,             // always canonical and valid
+                             pub pin_hash: Option<String>,   // Debug prints "<redacted>"
+                             pub problem: Option<String> }   // why the settings were not usable, for the log and `status`
+impl AgentPolicy { pub fn from_doc(doc: Option<&serde_json::Value>) -> AgentPolicy; }   // pure; never fails
+```
+
+- No document, or no `adminExit` key, or no `pinHash` → `enabled: false`
+  (there is no default PIN).
+- `pinHash` fails `kdf::check_hash` → `enabled: false`,
+  `problem: "admin_exit_pin_invalid"`, logged as an error. Failing
+  closed is deliberate: the two recovery routes of PRD 9.5 still work,
+  and a broken document must not keep an old PIN alive after a rotation.
+- `hotkey` fails `rulebox_ipc::hotkey::parse` → the default is used,
+  `problem: "admin_exit_hotkey_invalid"`, logged as a warning.
+- `orgName` longer than 100 characters, or `power` of the wrong shape →
+  `None`.
+- The snapshot gets `adminExit: { enabled, hotkey }`, `power`, `orgName`.
+  The hash, its salt and the counter never go into the snapshot, any IPC
+  result, the admin `status` output or a log line.
+- **Until Phase 4** the keys are written by `convex/dev.ts` →
+  `setAdminExit` (Step 7) using a hash printed by `rulebox-agent
+  hash-pin` (Step 6b). Phase 4 replaces `dev.ts` with dashboard settings
+  and must keep the hash write-only for dashboard readers. In
+  `--sim-demo` the fixture document has PIN `2468`.
+- The hash lives in the cached document (`desired-state.json`) inside the
+  protected data directory. It is a salted Argon2id hash of a 4 to
+  12 digit number, so anyone who can read that file can guess it
+  offline; only SYSTEM and Administrators can read it, and they own the
+  machine already. What protects the PIN is that the hash never leaves
+  the agent and that guesses are rate-limited.
+
+**`adminExit.submit`, exactly:**
+
+1. `pin` is not 4 to 12 ASCII digits → error `invalid_params`. Not
+   counted (it is not a guess the dialog can produce).
+2. `AdminExitPolicy.enabled` is false → outcome `disabled`.
+3. Take the PIN gate (its own `tokio::sync::Mutex`) with `try_lock`.
+   Already taken → error `busy`.
+4. If `lockouts.adminExitPinId` differs from the current PIN id (the
+   first 16 hex characters of SHA-256 of the `pinHash` string): the PIN
+   was rotated; clear the counter and store the new id.
+5. Counter says locked → outcome `lockedOut` with `retryAfterMs`. The PIN
+   is not checked and nothing is counted. An audit record is written at
+   most once per lock, when it starts (step 7), not per refused call.
+6. **Count first:** `record_failure`, save `lockouts.json`.
+7. `kdf::verify_secret(pin, pin_hash)` in `spawn_blocking`.
+   - No match → audit `adminExitWrongPin`. If the counter is now locked:
+     audit `adminExitLockedOut`, outcome `lockedOut` with `retryAfterMs`;
+     otherwise outcome `wrongPin` with `attemptsLeft`.
+   - Match → clear the counter, save, continue.
+8. Send `ExitRequest { session_id: <the caller's verified session id> }`
+   to the reconciler and wait at most 3 seconds for "prepared". The
+   reconciler (Step 9; a small stand-in task until then, Step 6b):
+   a. if `kiosk.applied == Enabled`: start the **exit hold** and write
+      `AutoAdminLogon = "0"` through `write_machine_value`. A failure
+      here ends the hold and is reported back;
+   b. replies "prepared".
+   Not prepared (error or 3 seconds) → audit `adminExitFailed`, error
+   `internal` with `retryable: true`. The PIN was right, so nothing is
+   counted.
+9. Clear the employee session. Write audit `adminExitSuccess`. Answer
+   outcome `signingOut`.
+10. The reconciler then broadcasts
+    `agent.shuttingDown { reason: "adminExit", graceMs: 2000 }`, waits
+    2 seconds (so the answer and the event reach the client), and calls
+    `logoff_session(session_id)`. If that fails it retries after 1, 2
+    and 4 seconds; if all fail it ends the hold (automatic sign-in is
+    re-armed by the next reconcile), logs an error and writes audit
+    `adminExitFailed`.
+
+The lock schedule for the PIN (`PIN_POLICY`, one counter per **device**,
+persisted, never forgotten with time): consecutive wrong PINs 1 to 4
+are answered `wrongPin` with `attemptsLeft` 4, 3, 2, 1 (`attemptsLeft`
+is the number of further PINs that will still be checked before a wait;
+`Gate::Open.attempts_left` is `free_failures + 1 - failures`, at least
+1). The 5th consecutive wrong PIN is answered `lockedOut` and locks for
+1 minute, the 6th for 5 minutes, the 7th for 15 minutes, the 8th for
+30 minutes, the 9th and every later one for 60 minutes. After a lock
+ends exactly one PIN is checked before the next lock. Only a correct
+PIN or a rotated PIN clears the counter. With a 4-digit PIN this allows
+about 30 guesses on the first day and 24 a day after that (more than a
+year to try every value); Phase 4's dashboard should still ask for at
+least 6 digits.
+
+**Exit hold: when automatic sign-in comes back.** The hold is kept in
+memory by the reconciler (not on disk). It ends, and the next reconcile
+writes `AutoAdminLogon = "1"` again, at the **first** of:
+
+- a session of a user other than Staff becomes `Active` (the
+  administrator signed in; the sign-in screen is no longer deciding);
+- 5 minutes pass (nobody signed in);
+- the agent restarts.
+
+After the administrator signs out, the kiosk returns at the next sign-in
+decision Windows makes: at the latest at the next restart. Whether
+Windows signs Staff in again right after an administrator signs out
+(without a restart) is **(unverified)**; the VM checklist records it. A
+PC restarted **during** the 5-minute hold starts at the Windows sign-in
+screen once; the restart after that is a kiosk again. Both facts go into
+the administrator notes in the final report.
+
+**Offline.** Nothing in this section calls the backend. A device whose
+enrollment was revoked keeps its last cached document, so its PIN keeps
+working (an administrator at a revoked PC still needs the way out).
+
+### 5.11 Audit queue (protocol 1.1)
+
+PRD 12.4: every use of the exit is reported to the dashboard audit log.
+The log itself is Phase 4; Phase 2 records and queues.
+
+```rust
+// apps/agent/src/audit.rs
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)] #[serde(rename_all = "camelCase")]
+pub struct AuditRecord { pub id: String,                      // 32 hex characters, random; the backend uses it to drop duplicates
+                         pub at_ms: u64,                      // device wall clock
+                         pub server_time_offset_ms: Option<i64>,   // as known when recorded, so the backend can correct at_ms
+                         pub kind: AuditKind,
+                         pub username: Option<String>,        // employee lockouts only
+                         pub detail: Option<String> }         // short, fixed texts only; never a PIN, password or hash
+pub enum AuditKind { AdminExitSuccess, AdminExitWrongPin, AdminExitLockedOut, AdminExitFailed, EmployeeLockedOut }
+pub trait AuditSink: Send + Sync + 'static {
+    /// Deliver a batch. Ok = the backend has all of them (it must accept a repeated id silently).
+    fn deliver<'a>(&'a self, batch: &'a [AuditRecord]) -> BoxFuture<'a, Result<(), AuditSinkError>>;
+}
+pub enum AuditSinkError { Unavailable, Unreachable }
+pub struct AuditQueue { /* path, records, dropped */ }
+impl AuditQueue { pub fn open(path: PathBuf) -> std::io::Result<Self>;
+                  pub fn push(&mut self, record: AuditRecord) -> std::io::Result<()>;      // appends and saves atomically
+                  pub fn peek(&self, max: usize) -> &[AuditRecord];
+                  pub fn ack(&mut self, count: usize) -> std::io::Result<()>;              // removes the first `count` and saves
+                  pub fn len(&self) -> usize; }
+```
+
+- `audit-queue.json`: `{ "schema": 1, "dropped": 0, "records": [...] }`.
+  At most 500 records; when full, the oldest is removed and `dropped` is
+  increased (the count is sent with the next batch's first record as
+  `detail: "dropped:<n>"` and then reset).
+- The `audit` task delivers in batches of at most 50, oldest first, when
+  a record is pushed and when `connection` becomes `online`. On any
+  error it stops and waits for the next trigger; it never loops on a
+  timer (CLAUDE.md data rule 6).
+- A record is written to disk **before** the IPC answer is sent, so an
+  answer is never seen without its record.
+- Implementations: `NullAuditSink` (the real agent until Phase 4; always
+  `Unavailable`, so records stay queued up to the cap) and
+  `LogAuditSink` (simulate mode: logs each record at `info` and returns
+  `Ok`). Phase 4 adds the Convex sink and the table. `Deps` gains
+  `audit_sink: Arc<dyn AuditSink>`.
+
 ---
 
 ## 6. The agent↔shell IPC contract (version 1.0)
@@ -766,6 +1283,10 @@ Rust types live in `crates/rulebox-ipc`; the TypeScript types are
 generated into `packages/types/src/generated/`. Changing anything here
 after Step 6 is done requires telling the user, because Phase 3 builds
 against it in parallel.
+
+Sections 6.1 to 6.10 describe version 1.0 as built in Steps 2 and 4.
+**Section 6.11 is the 1.1 addendum.** It only adds; where it changes a
+sentence of 6.1 to 6.10, that sentence carries a "(1.1)" note.
 
 ### 6.1 Transport
 
@@ -812,8 +1333,14 @@ before answering it:
 2. `GetNamedPipeClientSessionId` must be a session in which the Staff
    account is signed in (never session 0).
 3. `GetNamedPipeClientProcessId` → `QueryFullProcessImageNameW`: the
-   image must be inside `<install>\versions\`. This is defence in depth
-   only: any process running as Staff could inject into the Staff App.
+   image must be inside `<install>\versions\`, **or (1.1) be exactly
+   `<install>\rulebox-shell.exe`** (the launcher calls `state.get` and
+   `adminExit.submit` from its fallback screen, Step 12). Compare
+   case-insensitively after resolving both paths. This is defence in
+   depth only: any process running as Staff could inject into the Staff
+   App. Nothing else is accepted, so a `pnpm dev:staff` build can only
+   ever talk to a `--simulate` agent; that is intended (Phase 3 R10), do
+   not "fix" it.
 4. On any failure: answer the first request with `unauthorized` and
    close.
 
@@ -833,14 +1360,39 @@ permission. Later phases must keep this rule when they add methods.
 2. `GetSecurityInfo(handle, SE_KERNEL_OBJECT, OWNER_SECURITY_INFORMATION)`
    must return owner `S-1-5-18` (SYSTEM). Otherwise it closes the handle
    and reports `ServerNotTrusted`.
+3. **(1.1, added in Step 5a)** `GetNamedPipeServerSessionId(handle)` must
+   return **0**. Otherwise `ServerNotTrusted`. Reason: from 1.1 on the
+   client sends passwords and the exit PIN, so it must know the other end
+   is a service. The owner check alone cannot tell: every instance of a
+   pipe name shares the security descriptor of the first one, so an
+   instance created by another process would still show SYSTEM as owner
+   **(unverified)**. A process of the Staff account cannot run in
+   session 0. Whether this API reports 0 for our service on every
+   edition is **(unverified)**; the VM checklist's first `Linked` proves
+   it.
 
-`rulebox-ipc`'s `IpcClient` does both. Phase 3 must use `IpcClient` and
-not open the pipe itself.
+`rulebox-ipc`'s `IpcClient` does all three. Phase 3 must use `IpcClient`
+and not open the pipe itself.
+
+**What the Step 4 test showed, and what it means.** Run elevated as the
+same user, a client open that asked for `GENERIC_WRITE` (which includes
+bit `0x4`) was **accepted** against a descriptor whose only entry lacked
+that bit, while a request for `DELETE` was refused. So a client-side
+open is not where Windows enforces bit `0x4` (probably it is checked
+only when an instance is **created**, where it means
+`FILE_CREATE_PIPE_INSTANCE`; on an open the same bit is
+`FILE_APPEND_DATA`) **(unverified)**. The property the design needs is
+narrower and is tested directly on the VM (Section 10.2, "IPC
+security"): a process of the Staff account must not be able to call
+`CreateNamedPipeW` on the shell pipe's name. Check 3 above is the
+second line if that test fails. The client keeps its reduced access
+mask; it is harmless.
 
 **Simulate mode** (development only): the agent started with
 `--simulate` serves `\\.\pipe\dev.rulebox.agent.shell.sim`, grants the
 **current user** instead of the Staff SID, skips checks 2 and 3, and the
-client accepts the current user as pipe owner. `IpcClient` uses the
+client accepts the current user as pipe owner and skips the server
+session check. `IpcClient` uses the
 `.sim` name only when built with `debug_assertions` **and** the
 environment variable `RULEBOX_AGENT_SIM=1` is set. Release builds ignore
 the variable.
@@ -912,9 +1464,13 @@ pub trait Method { const NAME: &'static str; type Params: Serialize + Deserializ
   with that list, not with the version number. Phase 2 capabilities:
   `["state", "health"]`.
 - Reserved method namespaces for later phases (do not use them now):
-  `session.*` (employee logout cleanup), `apps.*`, `files.*`,
-  `adminExit.*`, `update.*`, `net.*`, `power.*`, `device.*`. Adding a
-  namespace is a minor bump plus a new capability string.
+  `files.*`, `update.*`, `net.*`, `power.*`, `device.*`. Adding a
+  namespace is a minor bump plus a new capability string. (1.1) The
+  namespaces `session.*`, `apps.*` and `adminExit.*` are in use from
+  version 1.1 (Section 6.11).
+- (1.1) The agent built in this phase answers `hello` with
+  `{ "major": 1, "minor": 1 }`. A 1.0 client keeps working: it ignores
+  the new fields, values and capabilities.
 
 ### 6.6 Methods and events (1.0)
 
@@ -983,9 +1539,53 @@ What the Staff App does with this (for the Phase 3 planner):
 | `timeout` | The agent could not finish in time | true |
 | `frame_too_large` | Frame above 1 MiB; the connection is closed | false |
 | `internal` | Unexpected agent error. `message` never contains secrets or file paths outside the install directory | true |
+| `not_signed_in` (1.1) | The method needs a signed-in employee (`session.verifyPassword`, `apps.list`) | false |
+| `operation_failed` (1.1) | The method ran and failed for a reason of its own. `data` is `{ "reason": string, "details": object \| null }`. Used on the **admin pipe** only; shell-pipe methods report expected results as an `outcome` in the result instead | per reason |
 
 `ErrorCode` serializes as the snake_case strings above and has
-`#[serde(other)] Internal`.
+`#[serde(other)] Internal`. A 1.0 client therefore reads the two new
+codes as `internal`.
+
+**Admin-pipe failures (finding from Step 2: these had no code).**
+Enrollment failures are open-ended (some names come from the server), so
+they are not `ErrorCode` values. They travel as `operation_failed`:
+
+```jsonc
+{ "t": "res", "id": 1, "ok": false,
+  "error": { "code": "operation_failed", "message": "This PC is already enrolled.", "retryable": false,
+             "data": { "reason": "already_enrolled", "details": null } } }
+```
+
+```rust
+// crates/rulebox-ipc/src/admin.rs
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq)] #[serde(rename_all = "camelCase")]
+pub struct OperationFailure { pub reason: String, #[serde(default)] pub details: Option<serde_json::Value> }
+pub mod reasons {
+    pub const NOT_AVAILABLE_YET: &str = "not_available_yet";      // a method whose step is not built yet
+    pub const ALREADY_ENROLLED: &str = "already_enrolled";
+    pub const CODE_INVALID: &str = "code_invalid";                // details: { "kind": "badPrefix" | "badEncoding" | "malformed" | "badUrl" | "badToken" }
+    pub const COMPAT_BLOCKED: &str = "compat_blocked";            // details: { "blockers": ["no_other_admin", ...] }
+    pub const BACKEND_UNREACHABLE: &str = "backend_unreachable";  // retryable: true
+    pub const TOKEN_INVALID: &str = "token_invalid";
+    pub const TOKEN_EXPIRED: &str = "token_expired";
+    pub const TOKEN_USED_UP: &str = "token_used_up";
+    pub const TOKEN_REVOKED: &str = "token_revoked";
+    pub const BACKEND_REJECTED: &str = "backend_rejected";        // any other server code; details: { "serverCode": "..." }
+}
+```
+
+| Method | `operation_failed` reasons | Other errors |
+|---|---|---|
+| `admin.enroll` | all of the above | `busy` (another enroll or unenroll is running), `invalid_params` |
+| `admin.unenroll` | `not_available_yet` (until Step 11). An unreachable backend is not an error here; Step 11 only logs it | `not_enrolled`, `busy` |
+| `admin.status` | none | — |
+
+A kiosk failure during enrollment is not an error at all: the result's
+`kiosk.errorCode` carries it (Section 5.4, step 7). The CLI prints
+`error: <reason>: <message>` (for `compat_blocked` one blocker per line
+after it), adds "Try again." when `retryable` is true, and exits with
+code **3**. Exit code 2 stays "the service is not running"; 1 is any
+other error.
 
 ### 6.8 Limits and timing
 
@@ -999,6 +1599,10 @@ What the Staff App does with this (for the Phase 3 planner):
 | Outbound event queue per connection | 64 frames; `state.changed` is coalesced; if the queue is still full the connection is closed |
 | Client reconnect backoff | 100 ms, doubling to 2 s, forever |
 | Client pipe-busy retry (`ERROR_PIPE_BUSY`, 231) | every 50 ms, up to 5 s per attempt |
+| (1.1) Agent budget for `session.signIn` | 8 s (directory call 6 s inside it) |
+| (1.1) Agent budget for `adminExit.submit` | answer within 5 s (PIN check, then at most 3 s for the reconciler) |
+| (1.1) Checks running at once | 1 password check and 1 PIN check per device; a second one gets `busy` |
+| (1.1) Grace between `signingOut` and the sign-out | 2 s |
 
 ### 6.9 Process contract between the launcher and the Staff App
 
@@ -1040,6 +1644,248 @@ What the Staff App does with this (for the Phase 3 planner):
   from `@rulebox/types`.
 - A simulated agent for development on any machine:
   `cargo run -p rulebox-agent -- run --console --simulate`.
+- (1.1) The method structs and types of Section 6.11, the key-combination
+  parser `rulebox_ipc::hotkey`, and a simulated agent that answers the
+  1.1 methods from fixtures:
+  `cargo run -p rulebox-agent -- run --console --simulate --sim-demo`.
+
+### 6.11 Protocol 1.1 addendum
+
+Version **1.1** (`PROTOCOL_MINOR = 1`). Everything in Sections 6.1 to
+6.10 still holds. Nothing of 1.0 is removed or changes meaning. Built in
+Steps 5a (types), 6a and 6b (agent).
+
+**Capabilities**
+
+| Capability | Listed by the agent when | Gives |
+|---|---|---|
+| `state`, `health` | always | the 1.0 methods |
+| `adminExit` | always | `adminExit.submit`; the snapshot field `adminExit` |
+| `session` | `EmployeeDirectory::available()` is true (Section 5.9) | `session.signIn`, `session.signOut`, `session.get`, `session.verifyPassword` |
+| `apps` | same condition as `session` | `apps.list` |
+
+A method whose capability is not listed answers `unknown_method`. The
+real agent of Phase 2 lists `session` and `apps` only in fixture mode;
+Phase 4 turns them on for good. `lib.rs` gets `CAP_SESSION`, `CAP_APPS`
+and `CAP_ADMIN_EXIT`; the existing `CAPABILITIES` constant keeps its two
+values and now means "always present".
+
+**Methods**
+
+| Method | Params | Result | Errors beyond the general ones |
+|---|---|---|---|
+| `session.signIn` | `SignInParams` | `SignInResult` | `not_enrolled`, `denied_by_policy` (revoked, or another employee is signed in), `busy`, `timeout` |
+| `session.signOut` | `{}` | `{}` | — |
+| `session.get` | `{}` | `SessionGetResult` | — |
+| `session.verifyPassword` | `VerifyPasswordParams` | `VerifyPasswordResult` | `not_signed_in`, `busy` |
+| `apps.list` | `{}` | `AppsListResult` | `not_signed_in` |
+| `adminExit.submit` | `AdminExitSubmitParams` | `AdminExitSubmitResult` | `busy`, `internal` (the PIN was right but the sign-out could not be prepared; `retryable: true`) |
+
+A wrong password, a wrong PIN, a lockout and "disabled" are **outcomes**
+inside a successful response (`ok: true`), never RPC errors.
+
+```jsonc
+// session.signIn
+{ "username": "maya", "password": "…" }
+{ "outcome": "ok", "employee": { "id": "emp_maya", "username": "maya", "name": "Maya Chen", "role": "Cashier", "quotaBytes": 10737418240 },
+  "filesRoot": "C:\\Users\\RuleboxStaff\\RuleboxFiles\\emp_maya", "offline": false, "retryAfterMs": null }
+{ "outcome": "lockedOut", "employee": null, "filesRoot": null, "offline": false, "retryAfterMs": 30000 }
+// other outcomes: "wrongCredentials" | "disabled" | "offlineNeverSignedIn" | "offlineExpired" (all other fields null / false)
+
+// session.get
+{ "employee": { … } | null, "filesRoot": "…" | null, "offline": false }
+
+// session.verifyPassword
+{ "password": "…" }
+{ "outcome": "ok" | "wrongCredentials" | "lockedOut", "retryAfterMs": null | 30000 }
+
+// apps.list
+{ "apps": [ { "id": "orders-web", "name": "Orders", "description": null, "kind": "web",
+              "builtin": null,
+              "web": { "url": "https://portal.company.com/orders", "allowedDomains": ["portal.company.com"],
+                       "permissions": { "camera": false, "microphone": false, "screenShare": false, "clipboardRead": false,
+                                        "notifications": true, "downloads": true, "printing": false, "geolocation": false } },
+              "desktop": null,
+              "pinnedTaskbar": true, "pinnedDesktop": true, "iconPngBase64": null, "hue": 175 } ] }
+
+// adminExit.submit
+{ "pin": "2468" }
+{ "outcome": "signingOut", "attemptsLeft": null, "retryAfterMs": null }
+{ "outcome": "wrongPin",   "attemptsLeft": 3,    "retryAfterMs": null }
+{ "outcome": "lockedOut",  "attemptsLeft": null, "retryAfterMs": 60000 }
+{ "outcome": "disabled",   "attemptsLeft": null, "retryAfterMs": null }
+```
+
+Result fields that do not apply are sent as `null` (or `false`), the
+same way the 1.0 snapshot sends `"device": null`. A reader must treat a
+missing field and `null` alike.
+
+```rust
+// crates/rulebox-ipc/src/requests.rs — new file. Every type: Serialize, Deserialize, Clone, PartialEq,
+// #[serde(rename_all = "camelCase")]. Option and bool fields of RESULT types carry #[serde(default)].
+// These types are NOT exported to TypeScript (no TS derive): the Staff App keeps IPC on its Rust side,
+// and its own DTOs named Employee and AppEntry are generated into the same folder.
+pub struct SignInParams { pub username: String, pub password: String }          // Debug: hand-written, prints "<redacted>" for password
+pub struct SignInResult { pub outcome: SignInOutcome, pub employee: Option<Employee>, pub files_root: Option<String>,
+                          pub offline: bool, pub retry_after_ms: Option<u64> }
+pub enum SignInOutcome { Ok, WrongCredentials, Disabled, LockedOut, OfflineNeverSignedIn, OfflineExpired, Unknown }
+pub struct Employee { pub id: String, pub username: String, pub name: String, pub role: Option<String>, pub quota_bytes: u64 }
+pub struct SessionGetResult { pub employee: Option<Employee>, pub files_root: Option<String>, pub offline: bool }
+pub struct VerifyPasswordParams { pub password: String }                         // Debug redacted
+pub struct VerifyPasswordResult { pub outcome: VerifyOutcome, pub retry_after_ms: Option<u64> }
+pub enum VerifyOutcome { Ok, WrongCredentials, LockedOut, Unknown }
+pub struct AppsListResult { pub apps: Vec<AppEntry> }
+pub struct AppEntry { pub id: String, pub name: String, pub description: Option<String>, pub kind: AppKind,
+                      pub builtin: Option<BuiltinApp>,    // set when kind = builtin
+                      pub web: Option<WebApp>,            // set when kind = web
+                      pub desktop: Option<DesktopApp>,    // set when kind = desktop
+                      pub pinned_taskbar: bool, pub pinned_desktop: bool,
+                      pub icon_png_base64: Option<String>, pub hue: Option<u16> }
+pub enum AppKind { Builtin, Web, Desktop, Unknown }                              // "builtin" | "web" | "desktop"
+pub struct BuiltinApp { pub tool: String }                                       // "files" is the only tool today
+pub struct WebApp { pub url: String, pub allowed_domains: Vec<String>, pub permissions: WebPermissions }
+pub struct WebPermissions { pub camera: bool, pub microphone: bool, pub screen_share: bool, pub clipboard_read: bool,
+                            pub notifications: bool, pub downloads: bool, pub printing: bool, pub geolocation: bool }
+                            // #[serde(default)] on the struct; Default = notifications and downloads true, the rest false (PRD 24.1)
+pub struct DesktopApp { pub exe: String, pub args: Vec<String>, pub file_arg_template: Vec<String> }
+pub struct AdminExitSubmitParams { pub pin: String }                             // Debug redacted
+pub struct AdminExitSubmitResult { pub outcome: AdminExitOutcome, pub attempts_left: Option<u32>, pub retry_after_ms: Option<u64> }
+pub enum AdminExitOutcome { SigningOut, WrongPin, LockedOut, Disabled, Unknown }
+
+// crates/rulebox-ipc/src/methods.rs — additions
+pub struct SessionSignIn;         // "session.signIn"          SignInParams          -> SignInResult
+pub struct SessionSignOut;        // "session.signOut"         Empty                 -> Empty
+pub struct SessionGet;            // "session.get"             Empty                 -> SessionGetResult
+pub struct SessionVerifyPassword; // "session.verifyPassword"  VerifyPasswordParams  -> VerifyPasswordResult
+pub struct AppsList;              // "apps.list"               Empty                 -> AppsListResult
+pub struct AdminExitSubmit;       // "adminExit.submit"        AdminExitSubmitParams -> AdminExitSubmitResult
+```
+
+The four enums serialize as the camelCase strings shown in the examples
+and use `unknown_on_new_values!` (never `#[serde(other)]`), like the 1.0
+enums. A client that reads `Unknown` for an outcome treats it as a
+failure and shows its generic error. A client that reads `AppKind::Unknown`
+skips that app.
+
+**Snapshot additions** (optional fields; a 1.0 agent does not send them
+and a 1.1 client then reads `None`):
+
+```rust
+// crates/rulebox-ipc/src/types.rs — these two ARE exported to TypeScript, like every part of AgentSnapshot
+pub struct AdminExitInfo { pub enabled: bool, pub hotkey: String }               // hotkey: canonical text, grammar below
+pub struct PowerOptions  { pub sleep: bool, pub restart: bool, pub shut_down: bool }
+// AgentSnapshot gains, each with #[serde(default)] and serialized as null when None:
+//   pub admin_exit: Option<AdminExitInfo>,   // "adminExit". The 1.1 agent always sends it
+//   pub power: Option<PowerOptions>,         // "power".     null until the document carries it (Phase 4)
+//   pub org_name: Option<String>,            // "orgName".   null until the document carries it (Phase 4)
+```
+
+```jsonc
+"adminExit": { "enabled": true, "hotkey": "Ctrl+Shift+F12" }, "power": null, "orgName": null
+```
+
+- `adminExit.enabled` is true only when the organization has not
+  disabled the exit **and** a valid PIN is set. When false,
+  `adminExit.submit` answers `disabled` and the Staff App ignores the key
+  combination.
+- `power` null means "all three allowed"; `orgName` null means "use
+  `desiredState.branding.name`" (Phase 3 R4).
+- The snapshot never contains the PIN hash, the failure counter, or
+  anything about the signed-in employee (use `session.get`).
+
+**New enum values** (old clients read them as `unknown`):
+`ClientRole` gains `launcher` (`rulebox-shell.exe`) and `admin` (the
+CLI on the admin pipe); `ShutdownReason` gains `adminExit`. The role is
+only a label for logs and for the watchdog (Step 13); it is never used
+to decide what a client may do.
+
+**Event change:** `agent.shuttingDown` is also sent with
+`{ reason: "adminExit", graceMs: 2000 }` after a correct PIN (Section
+5.10, step 10).
+
+**Key-combination text** (`rulebox_ipc::hotkey`, used by the agent to
+validate the document, by the launcher, and offered to Phase 3):
+
+```rust
+// crates/rulebox-ipc/src/hotkey.rs  (pure, no Windows types)
+pub const DEFAULT_ADMIN_EXIT_HOTKEY: &str = "Ctrl+Shift+F12";
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Hotkey { pub ctrl: bool, pub alt: bool, pub shift: bool, pub key: HotkeyKey }
+pub enum HotkeyKey { Letter(char /* 'A'..='Z' */), Digit(u8 /* 0..=9 */), Function(u8 /* 1..=12 */) }
+pub enum HotkeyError { Empty, UnknownToken(String), NoKey, TwoKeys, DuplicateModifier, NeedsCtrlOrAlt }
+pub fn parse(text: &str) -> Result<Hotkey, HotkeyError>;
+impl Hotkey { pub fn canonical(&self) -> String;      // "Ctrl+Alt+Shift+<KEY>", modifiers in that order, key upper-case
+              pub fn virtual_key(&self) -> u32; }     // 'A'..'Z' = 0x41.., '0'..'9' = 0x30.., F1..F12 = 0x70..0x7B
+```
+
+Grammar: tokens separated by `+`; spaces around a token are ignored;
+case-insensitive; modifiers `Ctrl`, `Alt`, `Shift`, each at most once;
+exactly one key: a letter `A`–`Z`, a digit `0`–`9`, or `F1`–`F12`; at
+least one of `Ctrl` or `Alt` must be present. Everything else is an
+error (so `Alt+Tab`, `Ctrl+Esc` and `Ctrl+Alt+Del` cannot be expressed).
+The snapshot always carries the canonical form of a valid combination.
+
+**Security rules for every 1.1 method** (they restate Section 6.2 for
+the new surface; later phases must keep them):
+
+1. Any process in the Staff session can call every method. Each one is
+   therefore judged by "what can a hostile Staff process gain?":
+
+   | Method | Worst case for a hostile caller | Why that is acceptable |
+   |---|---|---|
+   | `session.signIn`, `session.verifyPassword` | Guessing a password | Rate limit and lockout in the agent, per username and per device, persisted (Section 5.9) |
+   | `session.signOut` | Ends the employee's Rulebox session | Nuisance only; such a process can already close the Staff App's windows |
+   | `session.get`, `apps.list` | Reads who is signed in and their catalogue (including desktop `exe` paths) | The same Windows session already shows this |
+   | `adminExit.submit` | Guessing the PIN; with the PIN, ending the Staff session | Rate limit and lockout per device, persisted; a correct PIN grants no administrator right (Section 5.10) |
+
+2. The PIN hash, password hashes and counters never leave the agent: not
+   in a result, an event, the snapshot, `status` or a log.
+3. `password` and `pin` are never logged. The dispatcher never logs
+   request params or whole frames at any level (Step 6). The params
+   types have a redacting `Debug`.
+4. The agent uses nothing from the caller except the fields above. It
+   signs out the **caller's own verified session** and no other. It
+   never opens, creates or runs a path because of an IPC request;
+   `filesRoot` and `exe` are strings it hands **out**.
+5. Limits are counted per device or per username, never per connection
+   (a caller can open a new connection at will).
+
+**Simulated agent** (`run --console --simulate`, Phase 3 R9):
+
+| Started with | `hello` capabilities | 1.1 behaviour |
+|---|---|---|
+| `--simulate` | `state`, `health`, `adminExit` | Not enrolled (unless `enroll --simulate` was run). `adminExit.submit` → `disabled`. `session.*` and `apps.list` → `unknown_method` |
+| `--simulate --sim-demo` | all five | The demo world below |
+| `--simulate --sim-demo --sim-offline` | all five | The demo world with `connection: "offline"`; the fixture directory answers `Unreachable`, so only cached employees can sign in |
+
+The demo world (`fixtures.rs`; state persists in `target\sim-data\`
+between runs, delete that folder to reset caches and lockouts):
+
+- Snapshot: `enrollment: "enrolled"`, device
+  `{ id: "sim-device", name: "Simulated PC" }`, `connection: "online"`,
+  `kiosk: { enabled: true, phase: "applied", errorCode: null }`,
+  `desiredState` = `EXAMPLE_DESIRED_STATE_JSON`,
+  `adminExit: { enabled: true, hotkey: "Ctrl+Shift+F12" }`,
+  `power: { sleep: true, restart: true, shutDown: true }`,
+  `orgName: "Demo Company"`.
+- Employees (password `demo` for all): `maya` (Maya Chen, role
+  "Cashier", 10 GiB, `offline_days` 7), `sam` (Sam Ortiz, role
+  "Manager", 10 GiB, `offline_days` 0, so `sam` is always
+  `offlineExpired` when offline), `alex` (answers `disabled`). Any other
+  username or password → `wrongCredentials`. These names match Phase 3's
+  `DemoAgent`.
+- Catalogue (the same for both employees): `files` (builtin, tool
+  `files`), `orders-web` (web, the example above), `mail-web` (web,
+  `https://mail.example.com`, not pinned to the taskbar), `notepad`
+  (desktop, `exe` = `%SystemRoot%\System32\notepad.exe` expanded at
+  start, `args` empty, `fileArgTemplate` `["{file}"]`). No icons.
+- `filesRoot` = `<data dir>\sim-files\<employee id>`.
+- Exit PIN `2468` (hashed with `kdf::hash_secret` when the fixture is
+  built). A correct PIN answers `signingOut`, sends the
+  `agent.shuttingDown` event, and after the 2 seconds logs "simulate:
+  would sign the Staff session out to the Windows sign-in screen". No
+  real session is touched. Lockouts are real and persist.
+- Audit records go to the log (`LogAuditSink`).
 
 ---
 
@@ -1053,7 +1899,8 @@ General rules for every step:
   Step 15.
 - **Never** run `cargo build --release`, `tauri build`, a test marked
   `#[ignore]`, or any `rulebox-agent` subcommand other than `compat`,
-  `status --simulate` and `run --console --simulate` on the dev machine.
+  `hash-pin`, and the `--simulate` forms of `run --console`, `status`,
+  `enroll` and `unenroll` on the dev machine.
 - No `unwrap()` or `expect()` outside tests, except on values proven
   constant at compile time. Libraries return `thiserror` enums; the agent
   binary adds context with `anyhow`.
@@ -1134,6 +1981,13 @@ Change root `package.json`:
 ```json
 "gen:types": "cargo test -p rulebox-policy -p rulebox-ipc export_bindings"
 ```
+
+(Done, with exactly this line. Rule from Phase 3 R6: the script must
+list **every** crate that exports types. When Phase 3's `rulebox-staff`
+has `#[ts(export)]` types the line becomes
+`cargo test -p rulebox-policy -p rulebox-ipc -p rulebox-staff export_bindings`.
+Both phases edit this line and `packages/types/src/index.ts`; whoever
+lands second merges, never overwrites. Step 5a says when to check.)
 
 **Verify:** `cargo check --workspace` → finishes with no errors.
 `cargo metadata --no-deps --format-version 1 | Select-String target_directory`
@@ -1440,33 +2294,178 @@ cargo run -p rulebox-agent -- run --console --simulate    # then Ctrl+C
 
 ---
 
+### Step 5a — Contract 1.1 in `rulebox-ipc` (types and client only; no agent code)
+
+Read Section 6.11 and the "(1.1)" notes in Sections 6.2, 6.5 and 6.7
+first. This step changes files written in Steps 2 to 4 and adds two.
+Nothing here removes or renames a 1.0 item.
+
+| File | Change |
+|---|---|
+| `crates/rulebox-ipc/src/lib.rs` | `PROTOCOL_MINOR = 1`. Add `pub mod requests;`, `pub mod hotkey;`, `pub const CAP_SESSION: &str = "session";`, `CAP_APPS = "apps"`, `CAP_ADMIN_EXIT = "adminExit"`. `CAPABILITIES` stays `["state", "health"]`. Move the `unknown_on_new_values!` macro from `types.rs` to the top of `lib.rs` (before the `mod` lines, `macro_rules!` without `#[macro_export]`) so `types.rs` and `requests.rs` both see it. Update the crate doc comment to say "protocol 1.1" |
+| `envelope.rs` | `ErrorCode` gains `NotSignedIn` and `OperationFailed` (place them before `Internal`). Extend the existing test: `"not_signed_in"` and `"operation_failed"` round-trip |
+| `types.rs` | Add `AdminExitInfo`, `PowerOptions`; the three `AgentSnapshot` fields; `ClientRole::{Launcher, Admin}`; `ShutdownReason::AdminExit`; extend the three macro invocations and the tests `unknown_enum_values_map_to_unknown` / `every_enum_value_round_trips` |
+| `requests.rs` (new) | Everything in the `requests.rs` block of Section 6.11 |
+| `methods.rs` | The six method structs of Section 6.11; extend `method_names_match_the_contract` |
+| `hotkey.rs` (new) | As in Section 6.11 |
+| `admin.rs` | `OperationFailure`, `mod reasons` (Section 6.7). `AdminStatusResult` gains `#[serde(default)] pub extra: Option<AdminStatusExtra>` with `pub struct AdminStatusExtra { pub employee: Option<String>, pub admin_exit_failures: u32, pub admin_exit_locked_for_ms: Option<u64>, pub admin_exit_problem: Option<String>, pub audit_queued: u32 }` (camelCase; filled from Step 6a on) |
+| `crates/rulebox-win32/src/pipe.rs` | `pub fn server_session_id(pipe: RawHandle) -> Result<u32>` (`GetNamedPipeServerSessionId`). `pub fn probe_create_instance(name: &str) -> Result<Option<u32>>`: tries `CreateNamedPipeW` on an **existing** name with the same mode as `create_server_instance`, no security attributes and no first-instance flag; closes the handle at once; returns `None` if the call **succeeded** and `Some(win32 error)` if it failed. Neither is destructive, so neither is guarded |
+| `client.rs` | See below |
+| `packages/types/src/index.ts`, `packages/types/src/generated/` | Regenerated: `AgentSnapshot.ts`, `ClientRole.ts`, `ShutdownReason.ts` change; `AdminExitInfo.ts` and `PowerOptions.ts` are new and get one export line each |
+
+`client.rs`:
+
+```rust
+pub struct ClientConfig { pub pipe_name: String, pub trusted_owner: Sid, pub request_timeout: Duration,
+                          pub require_session_zero: bool }      // new: Section 6.2, client check 3
+impl ClientConfig {
+    pub fn production() -> Self;            // unchanged, plus require_session_zero = true (false on the .sim branch)
+    pub fn admin(simulate: bool) -> Self;   // ADMIN_PIPE (+ SIM_SUFFIX and the current user as owner when simulate); session check on unless simulate
+    pub fn with_timeout(self, timeout: Duration) -> Self;
+}
+/// One connection, `hello`, one request, close. Blocks the calling thread: it builds a
+/// current-thread tokio runtime. Never call it from inside a runtime.
+/// Pipe missing or connection lost -> NotLinked. Owner or session check failed -> ServerNotTrusted.
+pub fn call_once<M: Method>(config: ClientConfig, info: ClientInfo, params: M::Params) -> Result<M::Result, CallError>;
+```
+
+- `connect` calls `server_session_id` after the owner check when
+  `require_session_zero` is set; a value other than 0 is
+  `ConnectError::NotTrusted`.
+- `call_once` reuses `connect` and `say_hello`; it does not reconnect and
+  waits for the pipe at most `BUSY_GIVE_UP`.
+- The client accepts a `hello` result with minor 0 or 1 (it already
+  ignores minor). Fix every `ClientConfig { .. }` literal in
+  `tests/pipe_roundtrip.rs` and `examples/fake_staff.rs` (set
+  `require_session_zero: false` in tests: the test server is not in
+  session 0).
+
+Unit tests to add:
+
+1. `types.rs`: update `snapshot_golden_json` (the three new keys, with
+   `adminExit` set, `power` set, `orgName` set) and
+   `snapshot_with_nothing_set_serializes_nulls` (the three are `null`).
+   New: a snapshot JSON **without** the three keys (a 1.0 agent) parses,
+   and the three fields are `None`.
+2. `requests.rs`: one golden test per JSON example in Section 6.11 (parse
+   and re-serialize to the same value); every enum maps an unknown
+   string to `Unknown`; a `SignInResult` JSON containing only
+   `{ "outcome": "wrongCredentials" }` parses (missing fields default);
+   `format!("{:?}", SignInParams { .. })`, the same for
+   `VerifyPasswordParams` and `AdminExitSubmitParams`, does not contain
+   the secret; `WebPermissions::default()` has only `notifications` and
+   `downloads` true.
+3. `hotkey.rs`: `"Ctrl+Shift+F12"`, `" ctrl + shift + f12 "` and
+   `"shift+CTRL+F12"` parse to the same value and `canonical()` is
+   `"Ctrl+Shift+F12"`; `"Ctrl+Alt+Shift+R"` round-trips; errors for `""`,
+   `"Shift+A"` (`NeedsCtrlOrAlt`), `"Ctrl"` (`NoKey`), `"Ctrl+A+B"`
+   (`TwoKeys`), `"Ctrl+Ctrl+A"`, `"Ctrl+Del"`, `"Alt+Tab"`, `"Ctrl+F13"`;
+   `virtual_key` for `A`, `0`, `F1`, `F12` is `0x41`, `0x30`, `0x70`,
+   `0x7B`; `parse(DEFAULT_ADMIN_EXIT_HOTKEY)` is `Ok`.
+4. `admin.rs`: `OperationFailure` round-trips the JSON in Section 6.7.
+5. `tests/pipe_roundtrip.rs`: `call_once` against a test server returns
+   the result; against a missing pipe returns `NotLinked` within
+   6 seconds; with `require_session_zero: true` against the test server
+   (which runs in your session, not session 0) returns
+   `ServerNotTrusted`. `probe_create_instance` on the test pipe's name
+   returns `None` or `Some(_)`; record which in the report (the test
+   server grants the current user everything, so this proves only that
+   the function runs).
+
+Then run `pnpm gen:types`. Before you do, search
+`apps/staff-app/src-tauri/src` for `ts(export`. If Phase 3 has exported
+types there and the `gen:types` line in the root `package.json` does not
+list `-p rulebox-staff`, **stop and ask the user** (adding it compiles
+the Tauri crate in the test profile, which is several GB; Step 1 note).
+
+**Verify:**
+
+```powershell
+cargo clippy -p rulebox-ipc --all-targets --all-features -- -D warnings
+cargo test -p rulebox-ipc --all-features
+cargo clippy -p rulebox-win32 --all-targets -- -D warnings
+cargo test -p rulebox-win32
+cargo clippy -p rulebox-agent --all-targets -- -D warnings
+cargo test -p rulebox-agent
+pnpm gen:types
+pnpm --filter @rulebox/types typecheck
+```
+
+**Done when:** all pass (the agent crate must still compile:
+`initial_snapshot` sets the three new fields to `None` for now);
+`packages/types/src/generated/AgentSnapshot.ts` contains `adminExit`,
+`power` and `orgName`; no file named `Employee.ts`, `AppEntry.ts` or
+`SignInParams.ts` was generated by `rulebox-ipc`.
+
+---
+
 ### Step 6 — IPC servers in the agent (unblocks Phase 3)
 
-Files: `ipc_shell.rs`, `ipc_admin.rs`, and wiring in `agent.rs`.
+Files: `ipc_shell.rs`, `ipc_admin.rs`, wiring in `agent.rs`, and the
+`status` / `enroll` / `unenroll` arms of `dispatch` in `main.rs`.
 
-- `ipc_shell::serve(listener_factory, snapshot_rx, health_tx, shutdown)`:
-  accept loop; one task per connection; enforces the `hello` deadline,
-  peer verification (Section 6.2; in simulate mode only the SID check,
-  against the current user), `MAX_IN_FLIGHT`, and the outbound queue with
-  coalescing. Dispatch table by method name; unknown names return
-  `unknown_method`. `shell.ready` and `shell.heartbeat` send
-  `ShellSignal::{Ready, Heartbeat}(connection id, pid)` to the watchdog
-  channel. Every change of the `watch` snapshot becomes a `state.changed`
-  event.
+```rust
+// ipc_shell.rs
+pub struct PeerCtx { pub connection_id: u64, pub pid: u32, pub session_id: u32, pub role: ClientRole }
+/// How later steps add methods without touching the server (Steps 6a and 6b implement it).
+pub trait ShellExtension: Send + Sync + 'static {
+    fn capabilities(&self) -> Vec<&'static str>;
+    /// None = not my method. The future must not borrow `params`.
+    fn handle(&self, peer: &PeerCtx, method: &str, params: serde_json::Value)
+        -> Option<BoxFuture<'static, Result<serde_json::Value, RpcError>>>;
+}
+#[derive(Clone)] pub struct ShellBroadcast { /* tokio::sync::broadcast::Sender<Frame>, capacity 16 */ }
+impl ShellBroadcast { pub fn new() -> Self; pub fn shutting_down(&self, reason: ShutdownReason, grace_ms: u64); }
+pub enum ShellSignal { Connected { connection_id: u64, pid: u32, role: ClientRole }, Ready { connection_id: u64, pid: u32 },
+                       Heartbeat { connection_id: u64, pid: u32 }, Closed { connection_id: u64 } }
+pub enum PeerPolicy { Production { staff_sid: Sid, install: InstallPaths }, Simulate { current_user: Sid } }
+pub struct ShellServer { pub snapshot_rx: watch::Receiver<AgentSnapshot>, pub signals: mpsc::UnboundedSender<ShellSignal>,
+                         pub broadcast: ShellBroadcast, pub extensions: Vec<Arc<dyn ShellExtension>>, pub peers: PeerPolicy }
+pub async fn serve(listener: PipeListener, server: ShellServer, shutdown: CancellationToken);
+pub fn image_allowed(install: &InstallPaths, image: &Path) -> bool;      // Section 6.2, server check 3 (pure)
+```
+
+- `serve`: accept loop; one task per connection; enforces the `hello`
+  deadline, peer verification (Section 6.2; with `PeerPolicy::Simulate`
+  only the SID check, against the current user), `MAX_IN_FLIGHT`, and
+  the outbound queue with coalescing. `shell.ready` and
+  `shell.heartbeat` send `ShellSignal`s. Every change of the `watch`
+  snapshot becomes a `state.changed` event. Frames sent through
+  `ShellBroadcast` go to every connection.
+- **Dispatch:** `hello`, `state.get`, `shell.ready`, `shell.heartbeat`
+  are built in. Any other method is offered to each extension in order;
+  the first `Some` answers. No extension takes it → `unknown_method`.
+- **`hello`** answers protocol `{ major: 1, minor: 1 }` and
+  `capabilities` = `CAPABILITIES` followed by every extension's list. In
+  this step the extension list is empty, so the answer lists `state` and
+  `health` only.
+- **Never log secrets:** the server logs the method name, request id,
+  connection id, peer pid and whether the answer was a result or an
+  error code. It never logs `params`, a result, or a whole frame, at any
+  log level. From Step 6a on, params carry passwords and PINs.
+- `agent::run` now keeps the `watch::Receiver<AgentSnapshot>` it used to
+  drop and hands a clone to the shell server and to the admin server.
 - The shell listener is (re)created whenever the Staff SID becomes known
-  or changes, and dropped when it becomes unknown.
+  or changes, and dropped when it becomes unknown. **Simulate mode now
+  starts both pipes at once** (it started none in Step 5): names with
+  `SIM_SUFFIX`, `sim_pipe_sddl(current user)`, `PeerPolicy::Simulate`.
 - `ipc_admin::serve(...)`: same framing and envelope on the admin pipe.
-  Verification: `token_is_elevated_admin` must be true (the pipe DACL
-  already excludes everyone else; this is the second check). Methods:
-  `admin.status`, `admin.enroll`, `admin.unenroll`. `admin.enroll` and
-  `admin.unenroll` return `not_implemented`-style `internal` errors with
-  message "available after Step 8/9" until those steps land. Only one
-  `admin.enroll` or `admin.unenroll` runs at a time; a second gets `busy`.
-- CLI side: `status`, `enroll`, `unenroll` connect with a small
-  synchronous-looking client (a current-thread tokio runtime), 150-second
-  timeout for `enroll`, 10 seconds otherwise. Pipe not found → print
-  "The Rulebox Agent service is not running." and exit with code 2.
-  `status` prints the snapshot as text, or JSON with `--json`.
+  Verification: `peer_is_elevated_admin` must be true (the pipe DACL
+  already excludes everyone else; this is the second check; skipped in
+  simulate mode). Methods: `admin.status`, `admin.enroll`,
+  `admin.unenroll`. Until Steps 8 and 11 land, `admin.enroll` and
+  `admin.unenroll` answer `operation_failed` with reason
+  `not_available_yet` (Section 6.7). Only one `admin.enroll` or
+  `admin.unenroll` runs at a time; a second gets `busy`.
+- CLI side (`ipc_admin.rs`, "CLI client helpers"): `status`, `enroll`
+  and `unenroll` use `rulebox_ipc::client::call_once` with
+  `ClientConfig::admin(simulate)`, `ClientRole::Admin`, a 150-second
+  timeout for `enroll` and 10 seconds otherwise. These commands do not
+  initialise file logging and do not open the data directory
+  (Section 5.1). `CallError::NotLinked` → print "The Rulebox Agent
+  service is not running." and exit with code 2. `CallError::Rpc` with
+  code `operation_failed` → print as in Section 6.7 and exit with code
+  3. `status` prints the snapshot as text, or JSON with `--json`.
 
 Tests (run on the dev machine with `SimPlatform` and `.sim`-style unique
 pipe names):
@@ -1483,6 +2482,19 @@ pipe names):
 5. 17 concurrent in-flight requests: the 17th gets `busy`.
 6. `agent.shuttingDown` is sent to connected clients when `shutdown` is
    cancelled.
+7. A test extension that lists capability `x` and answers `x.echo`:
+   `hello` lists `state`, `health`, `x`; `x.echo` returns its params;
+   `x.other` gets `unknown_method`.
+8. With a capturing `tracing` writer at `trace` level, a request whose
+   params contain `"password": "hunter2-do-not-log"` leaves no
+   `hunter2-do-not-log` in the captured output.
+9. `admin.enroll` answers `operation_failed` with
+   `data.reason == "not_available_yet"`, and the CLI helper maps it to
+   exit code 3; a missing pipe maps to exit code 2.
+10. `image_allowed`: `<install>\versions\1.0\rulebox-staff.exe` → true;
+    `<install>\rulebox-shell.exe` → true (also in another letter case);
+    `<install>\other.exe`, `<install>\versions\..\x.exe` and
+    `C:\Temp\rulebox-shell.exe` → false.
 
 Manual check on the dev machine (two terminals):
 
@@ -1492,10 +2504,318 @@ $env:RULEBOX_AGENT_SIM = "1"; cargo run -p rulebox-ipc --example fake_staff --fe
 cargo run -p rulebox-agent -- status --simulate
 ```
 
-**Done when:** tests pass; `fake_staff` prints `Linked`, a snapshot with
-`"enrollment":"notEnrolled"` and `"displayMode"`, and the agent log shows
-heartbeats; `status --simulate` prints the same snapshot. **Tell the user
-that the IPC contract is ready for Phase 3.**
+**Done when:** tests pass; `fake_staff` prints `Linked` with protocol
+1.1, a snapshot with `"enrollment":"notEnrolled"` and `"displayMode"`,
+and the agent log shows heartbeats; `status --simulate` prints the same
+snapshot. **Tell the user that the 1.0 methods are live on the simulated
+agent; the 1.1 methods follow in Steps 6a and 6b.**
+
+---
+
+### Step 6a — Employee session and app catalogue (protocol 1.1)
+
+Read Section 5.9, Section 5.11 and the "Simulated agent" part of Section
+6.11. This step builds the agent side of `session.*` and `apps.list`
+against `FixtureDirectory`. It makes no Windows call.
+
+New files: `kdf.rs`, `lockout.rs`, `audit.rs`, `directory.rs`,
+`employee_cache.rs`, `session.rs`, `fixtures.rs`.
+
+Changed files:
+
+| File | Change |
+|---|---|
+| root `Cargo.toml` | `argon2` in `[workspace.dependencies]` (check the version with `cargo search argon2 --limit 1`); the two `[profile.dev.package.*]` blocks of Section 4.4 |
+| `apps/agent/Cargo.toml` | `argon2 = { workspace = true }` |
+| `state.rs` | `StaffAccount.profile_dir: Option<String>` with `#[serde(default)]` |
+| `paths.rs` | `DataPaths::lockouts()`, `employee_cache()`, `audit_queue()` (all in `state_dir()`), `sim_files()` (`<root>\sim-files`) |
+| `agent.rs` | `Deps` gains `directory: Arc<dyn EmployeeDirectory>`, `audit_sink: Arc<dyn AuditSink>`, `sim: SimOptions { demo: bool, offline: bool }`. `AgentConfig` gains `fixture_directory: bool` (default false; JSON key `fixtureDirectory`). `run` builds the `LockoutStore`, `AuditQueue`, `EmployeeCache` and `SessionManager`, registers the manager as a `ShellExtension`, starts the `audit` task, and in demo mode overlays the demo snapshot (Section 6.11; its `adminExit`, `power` and `orgName` values arrive in Step 6b and are `None` until then) and sets the files base to `paths.sim_files()` |
+| `cli.rs`, `main.rs` | `run` gains `--sim-demo` and `--sim-offline` (both require `--simulate`; `--sim-offline` requires `--sim-demo`). `run_simulated` passes `FixtureDirectory` when `--sim-demo` is set and `UnavailableDirectory` otherwise, and always `LogAuditSink` |
+| `ipc_admin.rs` | `admin.status` fills `extra.employee` and `extra.audit_queued` |
+| `crates/rulebox-ipc/examples/fake_staff.rs` | New keys, shown only when the capability is present: `i` sign in (then reads one line: `username password`), `o` sign out, `g` `session.get`, `a` `apps.list` (prints id, kind and name per app), `v` verify password (reads one line). Each prints the result as JSON. Never print the typed password back |
+
+```rust
+// lockout.rs — the types of Section 5.9, plus:
+pub struct LockoutStore { /* path, data */ }
+impl LockoutStore { pub fn open(path: PathBuf) -> std::io::Result<Self>;            // missing file = empty; corrupt = renamed aside (state::read_json)
+                    pub fn employee(&mut self, username: &str) -> &mut Counter;
+                    pub fn admin_exit(&mut self) -> &mut Counter;
+                    pub fn admin_exit_pin_id(&mut self) -> &mut Option<String>;
+                    pub fn save(&mut self, now_ms: u64) -> std::io::Result<()>; }   // prunes, then state::write_atomic
+pub struct DeviceGuard { /* VecDeque<u64> of failure times */ }                      // the 20-in-10-minutes rule, memory only
+impl DeviceGuard { pub fn check(&mut self, now_ms: u64) -> Option<u64 /* retry_after_ms */>; pub fn record_failure(&mut self, now_ms: u64); }
+
+// employee_cache.rs
+pub struct CacheEntry { pub username: String, pub employee: Employee, pub apps: Vec<AppEntry>, pub password_hash: String,
+                        pub offline_days: u32, pub last_online_ms: u64 }             // Debug redacts password_hash
+pub struct EmployeeCache { /* path, entries */ }
+impl EmployeeCache { pub fn open(path: PathBuf) -> std::io::Result<Self>; pub fn get(&self, username: &str) -> Option<&CacheEntry>;
+                     pub fn put(&mut self, entry: CacheEntry) -> std::io::Result<()>;   // keeps the newest 50
+                     pub fn remove(&mut self, username: &str) -> std::io::Result<()>; }
+pub fn is_expired(entry: &CacheEntry, now_ms: u64, last_wall_clock_ms: u64) -> bool;
+
+// session.rs
+pub struct SessionDeps { pub directory: Arc<dyn EmployeeDirectory>, pub cache: EmployeeCache, pub lockouts: Arc<Mutex<LockoutStore>>,
+                         pub audit: Arc<AuditHandle>, pub snapshot_rx: watch::Receiver<AgentSnapshot>,
+                         pub files_base: Option<PathBuf>, pub now_ms: Arc<dyn Fn() -> u64 + Send + Sync> }
+pub struct SessionManager { /* … */ }
+impl SessionManager { pub fn new(deps: SessionDeps) -> Arc<Self>;
+                      pub fn set_files_base(&self, base: Option<PathBuf>);
+                      pub fn clear(&self, reason: &'static str);                       // Staff session ended, admin exit, revoked
+                      pub fn current_username(&self) -> Option<String>; }
+impl ShellExtension for SessionManager { /* capabilities: ["session", "apps"] when directory.available(), else none */ }
+pub fn files_folder_name(employee_id: &str) -> String;                                // Section 5.9 "Files root"
+
+// audit.rs — the types of Section 5.11, plus:
+pub struct AuditHandle { /* Mutex<AuditQueue>, tokio::sync::Notify */ }
+impl AuditHandle { pub fn record(&self, kind: AuditKind, username: Option<String>, detail: Option<String>); }   // push + notify; logs an error if the disk write fails
+pub async fn run_audit_task(handle: Arc<AuditHandle>, sink: Arc<dyn AuditSink>, mut snapshot_rx: watch::Receiver<AgentSnapshot>, shutdown: CancellationToken);
+```
+
+Rules:
+
+- `std::sync::Mutex` guards are never held across an `.await`. Argon2
+  runs in `tokio::task::spawn_blocking`.
+- `SessionManager` reads `connection` and `enrollment` from
+  `snapshot_rx`. For the expiry rule it also needs
+  `state.last_wall_clock_ms`: add
+  `pub clock_floor_ms: Arc<dyn Fn() -> u64 + Send + Sync>` to
+  `SessionDeps` (in this step it returns the value loaded from the state
+  file; Step 8 keeps that value current). Tests pass plain closures for
+  both clocks.
+- The real agent chooses the directory when `Deps` is built (Steps 10
+  and 11): `FixtureDirectory` only if `config.fixture_directory &&
+  rulebox_win32::guard::is_test_machine()`; otherwise
+  `UnavailableDirectory`. Write that as one function
+  `directory::choose(config, is_test_machine: bool, simulate_demo: bool)`
+  now and unit-test it.
+- `fixtures.rs` holds the employees, catalogue and demo document of
+  Section 6.11. Employee ids are `emp_maya` and `emp_sam`.
+- If an API of the `argon2` crate differs from what you expect, keep the
+  three function signatures of `kdf.rs` and record the difference under
+  "Deviations". **(unverified against the pinned version)**
+
+Unit tests (paused time where waiting is involved; a fake clock through
+`now_ms`):
+
+1. `kdf`: `verify_secret("2468", &hash_secret("2468")?)` is true and is
+   false for `"2469"`; two hashes of the same secret differ; `check_hash`
+   rejects `$argon2i$…`, memory 1,048,576 KiB, 11 passes, and garbage.
+   Timing: one `hash_secret` plus one `verify_secret` take **under
+   2 seconds** in the dev profile (this proves the `opt-level` override
+   works; if it fails, stop and report).
+2. `lockout`, password policy: failures 1 to 4 → `Open`; 5th → locked
+   30 s; after 30 s one more failure → locked 60 s; then 5 min; then
+   15 min; then 15 min again. `clear` resets. 30 minutes without a
+   failure resets. Clock moved back during a lock → the full lock time
+   remains.
+3. `lockout`, PIN policy: `attempts_left` is 4, 3, 2, 1 after failures
+   1 to 4; the lock times are 1, 5, 15, 30, 60, 60 minutes; no reset
+   after 24 hours without a failure.
+4. `LockoutStore` survives a reopen (write, drop, open, same counters);
+   unlocked employee entries older than 30 minutes are pruned.
+5. `DeviceGuard`: the 21st failure within 10 minutes blocks; it opens
+   again when the oldest is 10 minutes old.
+6. Sign-in online, happy path: outcome `ok`, `offline: false`,
+   `filesRoot` ends with `\emp_maya`, a cache entry exists, and the
+   cache file does not contain the text `demo`.
+7. Wrong password online → `wrongCredentials`; the offline cache is not
+   used even when it holds the right password.
+8. Offline with a cache entry → `ok` with `offline: true`; unknown user →
+   `offlineNeverSignedIn`; `sam` (0 days) → `offlineExpired`; `maya`
+   8 days after her last online sign-in → `offlineExpired`; with the
+   local clock set back 30 days she is still `offlineExpired`.
+9. Directory `Unreachable` while `connection` is `online` → falls to the
+   offline path.
+10. `alex` → `disabled`, and a previous cache entry for `alex` is gone.
+11. Five wrong passwords → the fifth answer is `lockedOut` with
+    `retryAfterMs` near 30,000; a correct password during the lock is
+    still `lockedOut`; after the lock it is `ok` and the counter is
+    cleared.
+12. Count-first: a directory that never answers (the 8-second budget
+    fires) → error `timeout`, and the counter is back to its old value.
+13. A second `signIn` while one is in progress → error `busy`.
+14. Signed in as `maya`, `signIn` as `sam` → error `denied_by_policy`;
+    `signIn` as `maya` again → `ok`.
+15. `verifyPassword`: no session → `not_signed_in`; right → `ok`; wrong
+    five times → `lockedOut`; it makes no directory call (assert on a
+    call counter).
+16. `apps.list`: no session → `not_signed_in`; signed in → the four
+    fixture apps; an icon of 50,000 base64 characters comes back as
+    null.
+17. `session.get` before and after sign-in; `signOut` twice succeeds;
+    `clear` empties the session.
+18. Not enrolled → `not_enrolled`; revoked → `denied_by_policy`; empty
+    username, 65-character username and 257-character password →
+    `invalid_params`.
+19. `UnavailableDirectory`: the extension lists no capability, and
+    `session.signIn` through the server gets `unknown_method`.
+20. `files_folder_name`: `emp_maya` stays; `..\evil` and a 70-character
+    id become 32 hex characters.
+21. `AuditQueue`: push, reopen, the record is there; the 501st push
+    drops the oldest and sets `dropped` to 1; `ack` removes from the
+    front. `run_audit_task` with a sink that fails once delivers
+    everything after the next trigger and does not call the sink in
+    between (assert with paused time advanced by an hour).
+22. A lock that starts writes exactly one `EmployeeLockedOut` record
+    with the username.
+23. `directory::choose`: (fixture on, test machine) → fixture; (fixture
+    on, not a test machine) → unavailable; simulate demo → fixture.
+
+Manual check on the dev machine (two terminals):
+
+```powershell
+cargo run -p rulebox-agent -- run --console --simulate --sim-demo
+$env:RULEBOX_AGENT_SIM = "1"; cargo run -p rulebox-ipc --example fake_staff --features client
+# in fake_staff: i  ->  "maya demo"  ->  a  ->  g  ->  v  ->  "demo"  ->  o
+# stop the agent, start it again with: --simulate --sim-demo --sim-offline
+# in fake_staff: i -> "maya demo" (ok, offline true);  i -> "sam demo" (offlineExpired or offlineNeverSignedIn)
+```
+
+**Verify:** `cargo clippy -p rulebox-agent --all-targets -- -D warnings`,
+`cargo test -p rulebox-agent`,
+`cargo clippy -p rulebox-ipc --all-targets --all-features -- -D warnings`.
+
+**Done when:** tests pass; the manual check shows the results in the
+comments; `Select-String -Path target\sim-data\logs\*.log -Pattern "demo"`
+finds no password (the word may appear in "Demo Company" or
+`--sim-demo`; check each hit); `target\sim-data\state\` contains
+`employee-cache.json` and `lockouts.json`.
+
+---
+
+### Step 6b — Hidden admin exit: PIN check and sign-out request (protocol 1.1)
+
+Read Section 5.10. This step builds everything of the admin exit that
+does not need the reconciler; Step 9 moves the last part into it.
+
+New files: `agent_policy.rs`, `admin_exit.rs`.
+
+Changed files:
+
+| File | Change |
+|---|---|
+| `agent.rs` | `initial_snapshot` (and every later snapshot update) fills `admin_exit`, `power`, `org_name` from `AgentPolicy`. New `pub struct CachedDesired { pub version: u64, pub doc: serde_json::Value, pub signature: Option<String> }` (camelCase) and `pub fn load_cached_desired(paths: &DataPaths) -> Option<CachedDesired>` reading `desired-state.json`; this is the file format Step 8 writes. `run` builds `AgentPolicy::from_doc` from the cached document (the fixture document in demo mode), registers `AdminExit` as a `ShellExtension`, and starts the **stand-in exit task** below |
+| `cli.rs`, `main.rs` | New command `rulebox-agent hash-pin`: prints `PIN (4 to 12 digits): ` to stderr, reads one line from stdin, rejects anything that is not 4 to 12 ASCII digits (exit code 1), prints the `kdf::hash_secret` PHC string to stdout. It touches no file, pipe or registry key, so it is safe on every machine. Add `hash-pin` to the commands the general rules of Section 7 allow on the dev machine |
+| `ipc_admin.rs` | `admin.status` fills `extra.admin_exit_failures`, `extra.admin_exit_locked_for_ms`, `extra.admin_exit_problem`; the text form of `status` prints "admin exit: on / off (<problem>)", the key combination and the lock time left. Never the hash |
+| `fixtures.rs` | The demo document gains the three agent-only keys with the hash of `2468` |
+| `fake_staff.rs` | Key `x`: reads one line (the PIN), calls `adminExit.submit`, prints the result. Key `p` (used by the VM checklist): the pipe probe described in the note below |
+
+Note on `p`: `fake_staff` does not own the client's pipe handle. So `p`
+does two things that need no handle from `IpcClient`: it opens its own
+second connection with `rulebox_win32::pipe::open_client`, prints
+`pipe_owner` and `server_session_id` for it (`owner: <SID>`,
+`server session: <n>`), closes it, then prints the result of
+`probe_create_instance(<the pipe name in use>)` as
+`create-instance: DENIED (error <n>)` or `create-instance: ALLOWED`,
+and last the result of
+`open_client_with_access(<name>, GENERIC_READ | GENERIC_WRITE)` (the
+numeric value `0xC000_0000`, so `rulebox-ipc` needs no `windows`
+import) as `generic-write open: ACCEPTED` or `REFUSED (error <n>)`,
+closing that handle at once. The connections opened by `p` send no
+frame; the agent drops them at the `hello` deadline.
+
+```rust
+// admin_exit.rs
+pub struct ExitRequest { pub session_id: u32, pub prepared: oneshot::Sender<Result<(), String>> }
+pub struct AdminExitDeps { pub policy_rx: watch::Receiver<AgentPolicy>, pub lockouts: Arc<Mutex<LockoutStore>>,
+                           pub audit: Arc<AuditHandle>, pub session: Arc<SessionManager>,
+                           pub exit_tx: mpsc::Sender<ExitRequest>, pub now_ms: Arc<dyn Fn() -> u64 + Send + Sync> }
+pub struct AdminExit { /* … */ }
+impl AdminExit { pub fn new(deps: AdminExitDeps) -> Arc<Self>; }
+impl ShellExtension for AdminExit { /* capabilities: ["adminExit"]; method "adminExit.submit" as in Section 5.10 */ }
+pub fn pin_id(pin_hash: &str) -> String;       // first 16 hex characters of SHA-256
+/// Steps 8a to 10 of Section 5.10. Used by the stand-in task now and by the reconciler from Step 9.
+pub async fn run_exit(platform: Arc<dyn Platform>, kiosk_enabled: bool, simulate: bool,
+                      req: ExitRequest, broadcast: ShellBroadcast) -> Result<(), PlatformError>;
+```
+
+- `AgentPolicy` travels in its own `watch` channel (`policy_tx` in
+  `agent.rs`), separate from the snapshot, so the hash is never inside
+  `AgentSnapshot`.
+- **Stand-in exit task** (in `agent.rs`, removed in Step 9): receives
+  `ExitRequest`s and calls `run_exit` with `kiosk_enabled` from the
+  loaded state. It has no exit hold; that arrives with the reconciler.
+- `run_exit` in simulate mode: skips the registry write, replies
+  "prepared", broadcasts, waits 2 seconds, logs "simulate: would sign
+  the Staff session out to the Windows sign-in screen", and calls
+  nothing on `Platform`.
+- `run_exit` outside simulate mode writes `AutoAdminLogon = "0"` with
+  `write_machine_value` (key
+  `SOFTWARE\Microsoft\Windows NT\CurrentVersion\Winlogon`) only when
+  `kiosk_enabled`, then `logoff_session(req.session_id)` with the
+  retries of Section 5.10. Both are guarded `Platform` calls; on the dev
+  machine they can only ever run against `SimPlatform` in tests.
+
+Unit tests (`SimPlatform`, fake clock, paused time):
+
+1. `AgentPolicy::from_doc`: no document, no `adminExit` key, and no
+   `pinHash` → `enabled: false`, no problem; a valid hash →
+   `enabled: true`; `"enabled": false` with a valid hash → false; a bad
+   hash → false with problem `admin_exit_pin_invalid`; a bad `hotkey` →
+   the default with problem `admin_exit_hotkey_invalid`;
+   `"ctrl+alt+shift+r"` → `"Ctrl+Alt+Shift+R"`; `power` and `orgName`
+   are passed through; a 101-character `orgName` → `None`.
+2. **No leak:** build the snapshot from a document with a `pinHash`,
+   serialize it, and assert the JSON contains neither `pinHash` nor the
+   hash text nor `$argon2`. The same for `AdminStatusResult` and for
+   `format!("{:?}", policy)`.
+3. Correct PIN → `signingOut`; exactly one `ExitRequest` with the
+   caller's `session_id`; the employee session is cleared; one
+   `AdminExitSuccess` record; the counter is 0.
+4. Wrong PIN four times → `wrongPin` with `attemptsLeft` 4, 3, 2, 1; the
+   fifth → `lockedOut` near 60,000 ms; the correct PIN during the lock →
+   `lockedOut` and **no** `ExitRequest`; after the lock the correct PIN
+   → `signingOut`.
+5. The audit queue after test 4 holds five `AdminExitWrongPin`, one
+   `AdminExitLockedOut` and one `AdminExitSuccess`, in order, and no
+   record or log line contains a PIN.
+6. Counter and lock survive dropping and re-creating `AdminExit` and
+   `LockoutStore` (an agent restart).
+7. Rotation: after three wrong PINs, a document with a different
+   `pinHash` → the next wrong PIN answers `attemptsLeft: 4`.
+8. Disabled (no hash, or `"enabled": false`) → `disabled`; the counter
+   does not change; no audit record.
+9. `"12"`, `"12a4"`, a 13-digit PIN and `""` → `invalid_params`; the
+   counter does not change.
+10. Two submits at once → one of them gets `busy`.
+11. Count-first: make the verify step panic or be cancelled after the
+    counter was saved → the stored counter is one higher.
+12. Reconciler stand-in never replies → error `internal`,
+    `retryable: true`, one `AdminExitFailed` record, counter 0.
+13. `run_exit` against `SimPlatform` (not simulate mode, kiosk enabled):
+    `AutoAdminLogon` is `"0"` before `logoff_session` is called;
+    `agent.shuttingDown { reason: adminExit, graceMs: 2000 }` was
+    broadcast; `logoff_session` got the requested session id. With
+    `fail_next(logoff)` three times it succeeds on the fourth call; with
+    four failures it returns the error.
+14. `run_exit` with kiosk not enabled does not touch `AutoAdminLogon`.
+15. `hash-pin` logic (as a function): `"2468"` gives a string that
+    `check_hash` accepts and `verify_secret("2468", …)` confirms; `"12"`
+    is rejected.
+
+Manual check on the dev machine:
+
+```powershell
+cargo run -p rulebox-agent -- run --console --simulate --sim-demo        # terminal 1
+$env:RULEBOX_AGENT_SIM = "1"; cargo run -p rulebox-ipc --example fake_staff --features client   # terminal 2
+# in fake_staff: x -> 1111 (wrongPin, attemptsLeft 4) ; x -> 2468 (signingOut, then a ShuttingDown adminExit event)
+cargo run -p rulebox-agent -- status --simulate
+"2468" | cargo run -p rulebox-agent -- hash-pin
+```
+
+**Verify:** `cargo clippy -p rulebox-agent --all-targets -- -D warnings`,
+`cargo test -p rulebox-agent`,
+`cargo clippy -p rulebox-ipc --all-targets --all-features -- -D warnings`,
+`cargo build -p rulebox-ipc --example fake_staff --features client`.
+
+**Done when:** tests pass; the manual check shows the two outcomes and
+the agent log line "simulate: would sign the Staff session out to the
+Windows sign-in screen"; `hash-pin` prints a line starting with
+`$argon2id$v=19$m=19456,t=2,p=1$`; `status --simulate` shows the admin
+exit as on with `Ctrl+Shift+F12`. **Tell the user that protocol 1.1 is
+ready for Phase 3 on the simulated agent** (`--simulate --sim-demo`),
+and give them the list "Changes Phase 3 must pick up" from Section 12.
 
 ---
 
@@ -1587,6 +2907,24 @@ export async function requireDevice(ctx, args: { deviceId: Id<"devices">; device
   full valid document (copy the previous `doc`, or the PRD Section 10
   example with empty lists, and set `kioskEnabled`).
 - `revokeDevice({ deviceId })`, `revokeEnrollmentToken({ tokenId })`.
+- (1.1) `setAdminExit({ deviceId, pinHash?: string, enabled?: boolean,
+  hotkey?: string })` → inserts a new `desiredStates` row like
+  `setKiosk` does (copy the previous `doc`, `version + 1`) with the
+  top-level key `adminExit` replaced by the given fields (Section 5.10).
+  `pinHash` is the line printed by `rulebox-agent hash-pin`; the
+  mutation only checks that it starts with `$argon2id$`. Passing
+  `pinHash: ""` removes the PIN. `setKiosk` must **keep** an existing
+  `adminExit`, `power` and `orgName` when it copies the document. If
+  `desiredStates.doc` has a strict validator in `schema.ts` that rejects
+  these keys, add them as optional fields (`adminExit:
+  v.optional(v.object({ enabled: v.optional(v.boolean()), hotkey:
+  v.optional(v.string()), pinHash: v.optional(v.string()) }))`, `power:
+  v.optional(v.object({ sleep: v.boolean(), restart: v.boolean(),
+  shutDown: v.boolean() }))`, `orgName: v.optional(v.string())`). This is
+  a test helper; Phase 4 replaces it with dashboard settings and keeps
+  `pinHash` unreadable for dashboard users.
+- (1.1) No Convex function for employees or for audit records is added
+  in Phase 2 (Sections 5.9 and 5.11 name the seams).
 
 Every query uses `.withIndex(...)`; nothing uses `.filter()` or
 `.collect()`.
@@ -1654,6 +2992,31 @@ pub enum BackendError { Unreachable, Timeout, Rejected { code: String }, Protoco
   handling, cache file `desired-state.json`, heartbeat scheduling with
   jitter, clock offset). The enrollment flow of Section 5.4 lives in the
   reconciler task and is reached through `admin.enroll`.
+- `Deps` gains `backend_factory` in this step (it has none yet).
+- **Admin-pipe errors.** `admin.enroll` reports every failure of Section
+  5.4 as `operation_failed` with the reason from
+  `rulebox_ipc::admin::reasons` (Section 6.7): `CodeError` →
+  `code_invalid` with `details.kind`; a blocker → `compat_blocked` with
+  `details.blockers`; `BackendError::Unreachable` or `Timeout` →
+  `backend_unreachable` with `retryable: true`; `Rejected { code }` → the
+  code itself when it is one of the four `token_*` names, otherwise
+  `backend_rejected` with `details.serverCode`.
+- **(1.1) Cache file and agent-only keys.** `desired-state.json` is
+  written as `CachedDesired { version, doc, signature }` (Step 6b), with
+  `doc` being the **raw** document as received, so the agent-only keys
+  survive a restart while offline. Every time a document is accepted
+  (and once at start from the cache) the backend task: parses `doc`
+  into `DesiredState` for the snapshot as before; sends
+  `AgentPolicy::from_doc(Some(&doc))` on `policy_tx`; and sets the
+  snapshot's `admin_exit`, `power` and `org_name` from it. A document
+  whose `DesiredState` part does not parse keeps the previous state
+  **and** the previous `AgentPolicy`.
+- **(1.1) Revoked device:** besides the existing handling, call
+  `SessionManager::clear("revoked")`. The cached document, and with it
+  the exit PIN, stays.
+- **(1.1) Audit delivery** needs no code here: the `audit` task already
+  watches `connection` in the snapshot (Step 6a). With `NullAuditSink`
+  nothing is sent in Phase 2.
 - `compat.rs` as in Section 5.5.
 - `hardwareIdHash`: SHA-256 of
   `HKLM\SOFTWARE\Microsoft\Cryptography\MachineGuid`. It is a hint for
@@ -1681,6 +3044,19 @@ Unit tests (with `FakeBackend`, `SimPlatform`, paused time):
    `connection: "offline"`.
 10. Heartbeat sends `status` only when it changed; the next call is
     scheduled from `nextPingInMs` within ±10%.
+11. Each failure of Section 5.4 arrives at an admin-pipe client as
+    `operation_failed` with the reason listed above (one case per
+    reason), and `backend_unreachable` has `retryable: true`.
+12. (1.1) A received document with `adminExit.pinHash` → the snapshot
+    shows `adminExit.enabled: true`, `desired-state.json` contains the
+    hash, and the serialized snapshot does not. After a restart with a
+    backend that never connects, `adminExit.submit` with the right PIN
+    still answers `signingOut`.
+13. (1.1) A newer document without `adminExit` → `enabled: false` and
+    `adminExit.submit` answers `disabled`. A document with a different
+    `hotkey` → one `state.changed` with the new canonical text.
+14. (1.1) `Revoked` clears the employee session and keeps
+    `adminExit.enabled`.
 
 Manual check on the dev machine (network only; simulate mode changes
 nothing on the machine):
@@ -1696,8 +3072,12 @@ npx convex run dev:setKiosk '{"deviceId":"<id>","enabled":false}'
 device with a `deviceStatus` row; `status` shows `enrolled` and `online`;
 after `setKiosk` the agent log shows the new desired-state version within
 a few seconds **without any polling**; running the same `enroll` again
-prints `already_enrolled`; a second device enrolling with the same
-single-use code gets `token_used_up`.
+prints `error: already_enrolled: …` and exits with code 3; a second
+device enrolling with the same single-use code gets `token_used_up`.
+(1.1) After
+`npx convex run dev:setAdminExit '{"deviceId":"<id>","pinHash":"<line from hash-pin>"}'`
+`status --simulate` shows the admin exit as on within a few seconds, and
+`fake_staff` key `x` with that PIN answers `signingOut`.
 
 ---
 
@@ -1720,6 +3100,39 @@ pub fn generate_password() -> String;   // 32 chars, all four classes present
 `enable` and `disable` are synchronous and run inside `spawn_blocking`.
 State and secrets are saved after **each** numbered step of Section 5.6,
 not only at the end, so a crash mid-way leaves an accurate journal.
+
+**(1.1) The reconciler takes over the admin exit.** Delete the stand-in
+exit task of Step 6b. The reconciler task owns the
+`mpsc::Receiver<ExitRequest>` and handles a request inside its own loop
+(so no kiosk change runs at the same time):
+
+```rust
+// kiosk.rs
+pub struct ExitHold { pub started: Instant }                 // memory only; None after an agent restart
+pub const EXIT_HOLD_MAX: Duration = Duration::from_secs(300);
+/// Section 5.10: true when the hold must end now.
+pub fn hold_ended(hold: &ExitHold, now: Instant, sessions: &[SessionInfo], staff_sid: &str) -> bool;
+```
+
+- On an `ExitRequest`: set the hold (only when `kiosk.applied ==
+  Enabled`), then call `admin_exit::run_exit`. If `run_exit` returns an
+  error, drop the hold and reconcile.
+- While a hold is set, `reconcile` treats `AutoAdminLogon = "0"` as the
+  target for that one value and leaves it alone; everything else is
+  unchanged. `Kiosk::enable` gets the hold as a parameter
+  (`exit_hold: bool`); the journal is not touched by the hold (the
+  original value was journaled when kiosk was first enabled).
+- On every trigger and on a 30-second tick while a hold is set, call
+  `hold_ended`; when true, clear the hold and reconcile (which writes
+  `"1"` again).
+- **Employee session and the Windows session:** whenever the reconciler
+  re-reads the session list and finds no `Active` or `Connected` session
+  of the Staff account, it calls `SessionManager::clear("staff session
+  ended")`.
+- Enable step 3 saves `state.staff.profile_dir` and calls
+  `SessionManager::set_files_base(Some(<profile>\RuleboxFiles))`; at
+  agent start the base is set from the saved value. Disable does not
+  clear it.
 
 Unit tests:
 
@@ -1755,6 +3168,21 @@ Unit tests:
 13. Retry schedule after failures is 1, 5, 15, 15 minutes.
 14. `generate_password` output is 32 characters with all four classes
     (run 1,000 times).
+15. (1.1) `ExitRequest` with kiosk enabled: `AutoAdminLogon` becomes
+    `"0"`, the session is signed out, and a `Reassert` trigger one
+    minute later leaves `AutoAdminLogon` at `"0"` while fixing a
+    changed `DefaultUserName`.
+16. (1.1) `hold_ended`: false at 4 minutes with no sessions; true at
+    5 minutes; true as soon as a non-Staff session is `Active`; false
+    while only the Staff session is listed. After it ends, the next
+    reconcile writes `"1"`.
+17. (1.1) `run_exit` failing (sign-out fails four times) drops the hold
+    and the next reconcile writes `"1"`.
+18. (1.1) An `ExitRequest` while kiosk is `Disabled` sets no hold and
+    does not write `AutoAdminLogon`.
+19. (1.1) Enable saves `profile_dir`; the `SessionManager` then returns
+    a `filesRoot` under `<profile>\RuleboxFiles\`. The Staff session
+    ending clears the employee session.
 
 **Verify:** `cargo clippy -p rulebox-agent --all-targets -- -D warnings`
 and `cargo test -p rulebox-agent`.
@@ -1872,6 +3300,43 @@ pub const FORBIDDEN_WINLOGON_VALUES: &[&str] = &["Shell", "Userinit", "IgnoreShi
 `WINLOGON_KEY` through `set_winlogon_value`, and rejects any key outside
 the three HKLM keys listed in Section 5.6.
 
+**Data-directory startup check (Section 5.1; this is the step that owns
+it).** Until now only simulate mode could run, so nothing has ever
+written to the real `%ProgramData%\Rulebox`. This step makes the real
+`run --console` possible, so the check lands here, before that path
+exists:
+
+```rust
+// paths.rs (pure; unit-tested on the dev machine)
+pub enum DataDirAction { Use, Create, FixDacl, Recreate, Refuse(&'static str) }
+pub fn data_dir_action(check: &rulebox_win32::security::DirCheck, is_empty: bool) -> DataDirAction;   // the table in Section 5.1
+
+// platform/windows.rs
+/// Runs the Section 5.1 check and repair on `root`. Creating or repairing is guarded (test machine only).
+/// Err = refuse to start; the message says which rule failed.
+pub fn ensure_data_dir(root: &Path) -> anyhow::Result<()>;
+```
+
+- `ensure_data_dir`: `verify_protected_dir` → `data_dir_action` → act
+  (`create_protected_dir`, or `std::fs::remove_dir` then
+  `create_protected_dir`) → `verify_protected_dir` again → must be
+  `is_ok()`. "Empty" is decided with `std::fs::read_dir(root)?.next().is_none()`.
+- `main.rs`: the non-simulate `run --console` arm (it currently bails
+  with "arrives in Step 10") now: `DataPaths::from_known_folders()` →
+  **`ensure_data_dir`** → `logging::init` → `load_config` → build `Deps`
+  with `WindowsPlatform`, `directory::choose(&config,
+  guard::is_test_machine(), false)` and `NullAuditSink` → `agent::run`.
+  On `Err` from `ensure_data_dir`: print to stderr, exit with code 1,
+  create no file. Step 11 uses the same order for `service run` and
+  `recover`.
+- `compat` builds a `WindowsPlatform` but never calls `ensure_data_dir`,
+  `logging::init` with the real directory, or `StateStore::open`: it
+  logs to stderr only.
+- On the dev machine `ensure_data_dir` can only ever return
+  `Err(Guard)` for the create and repair branches (and you must not run
+  the real `run --console` there anyway). The decision function is what
+  gets tested.
+
 Unit tests on the dev machine (read-only):
 
 1. `os_version()` returns a build of at least 19045; `memory_mb() > 0`;
@@ -1889,6 +3354,15 @@ Unit tests on the dev machine (read-only):
 6. `dpapi` is **not** tested on the dev machine through the guard-free
    path: `protect`/`unprotect` change nothing, so they are not guarded;
    test a round trip.
+7. `data_dir_action`, one case per row of the table in Section 5.1:
+   missing → `Create`; reparse point (empty or not) → `Refuse`; ok →
+   `Use`; owner SYSTEM with a different DACL and empty → `FixDacl`;
+   owner a normal user and empty → `Recreate`; owner a normal user and
+   not empty → `Refuse`; DACL differs and not empty → `Refuse`.
+8. `verify_protected_dir` on a temp directory you create (owned by you,
+   inherited DACL) is not `is_ok()`, and `data_dir_action` for it with
+   `is_empty = true` is `Recreate` (this runs the real read-only check
+   once on the dev machine).
 
 `#[ignore]` VM tests (`crates/rulebox-win32/tests/vm_*.rs`): create user
 → find → test logon → set password → ensure profile → set and read shell
@@ -1916,8 +3390,14 @@ Files: `service.rs`, `recover.rs`.
    1063 (`ERROR_FAILED_SERVICE_CONTROLLER_CONNECT`) means it was started
    by hand: print "This command is started by Windows. Use `run
    --console` to debug." and exit with code 2.
-2. In `service_main`: create the `CancellationToken` and an unbounded
-   channel; `service_control_handler::register` with a closure that only
+2. In `service_main`, **first** call
+   `platform::windows::ensure_data_dir` (Step 10), before
+   `logging::init`. If it fails, report `Stopped` with
+   `ServiceExitCode::ServiceSpecific(2)` and return without writing any
+   file (there is no trusted place to log to; `sc.exe query
+   RuleboxAgent` then shows the service-specific exit code 2, which
+   means "data directory not trusted"). Then create the
+   `CancellationToken` and an unbounded channel; `service_control_handler::register` with a closure that only
    does `token.cancel()` for `Stop` and `Shutdown`, forwards
    `SessionChange` and `PowerEvent` into the channel, and returns
    `NoError` immediately. No locks, no I/O in the handler.
@@ -1952,8 +3432,9 @@ in Phase 6):
 - `set_failure_actions_on_non_crash_failures(true)`.
 - Do **not** set delayed auto-start: the agent must be up before
   automatic sign-in.
-- Create the data directory with the protected DACL, then start the
-  service.
+- Create the data directory through `ensure_data_dir` (Step 10; never
+  with a plain `create_dir`), and stop with its message if it refuses.
+  Then start the service.
 - If the service already exists: update its configuration with
   `change_config` instead of deleting and recreating (avoids the
   "marked for deletion" state).
@@ -1969,7 +3450,12 @@ run this again."
 with the service stopped, broken or missing):
 
 1. Check the caller is an elevated administrator. Ask for confirmation
-   unless `--yes`.
+   unless `--yes`. Before reading or writing anything in the data
+   directory, run `verify_protected_dir` on it: if it is a reparse
+   point, or exists and is not `is_ok()`, do **not** read the state file
+   from it or write the flag into it; continue with step 4 (the "state
+   file missing" path) and say so in the output. `recover` never creates
+   or repairs the directory.
 2. Stop the service if it is running (so it does not re-apply), ignoring
    errors.
 3. Load `agent-state.json` if readable. Restore every journaled machine
@@ -1996,7 +3482,11 @@ with the service stopped, broken or missing):
 (up to 30 s), then `delete_staff_user`; call `devices:unenroll` (10 s
 timeout, failure is only logged); delete `secrets.bin`,
 `desired-state.json`; clear `enrollment`, `staff` (if removed) and the
-journal.
+journal. (1.1) Also clear the employee session and delete
+`employee-cache.json`, `lockouts.json` and `audit-queue.json` (log how
+many audit records were still undelivered); they belong to the
+organization the PC is leaving. With `desired-state.json` gone the exit
+PIN is gone too, which is right: kiosk mode is off.
 
 Unit tests: the control handler mapping (pure function from
 `ServiceControl` to an action); `recover`'s decision logic as a pure
@@ -2017,8 +3507,18 @@ guard, but do not try).
 ### Step 12 — `rulebox-shell.exe` (the launcher)
 
 Crate `apps/shell-launcher`. Dependencies: `windows`, `rulebox-win32`
-(for `to_wide`, `OwnedHandle`), `serde`, `serde_json`. **No tokio, no
-WebView, no network.** Add `#![windows_subsystem = "windows"]`.
+(for `to_wide`, `OwnedHandle`), `serde`, `serde_json`, and (1.1)
+`rulebox-ipc` with feature `client`. **No WebView, no network.** Add
+`#![windows_subsystem = "windows"]`.
+
+(1.1) The earlier rule "no tokio in the launcher" is dropped for one
+purpose only: the hidden exit on the fallback screen (Phase 3 R11,
+answer P2). The launcher uses `rulebox_ipc::client::call_once`, which
+builds a current-thread runtime for the length of one call and drops it.
+Reason for reusing it instead of a second, hand-written pipe client:
+`call_once` already contains the owner check, the session check, `hello`
+and the framing, and those must not exist twice. The supervise loop
+itself stays free of async code.
 
 ```rust
 // current.rs (pure)
@@ -2065,25 +3565,90 @@ pub fn show(reason: &str) -> FallbackChoice;      // returns when "Try again" is
 5. Log every start, exit code and fallback to the launcher log
    (Section 4.3). The launcher never exits on its own.
 
-The launcher needs no IPC: the agent learns the shell's health from the
-Staff App's `shell.ready` and heartbeats.
+The launcher needs no IPC for supervising: the agent learns the shell's
+health from the Staff App's `shell.ready` and heartbeats.
+
+**(1.1) Hidden exit on the fallback screen** (`exit.rs`, used by
+`fallback.rs`). When the Staff App cannot start there is no Staff App to
+offer the exit, so the launcher offers the same one. The agent still
+checks the PIN; the launcher only carries it.
+
+```rust
+// exit.rs
+pub struct ExitSettings { pub enabled: bool, pub hotkey: rulebox_ipc::hotkey::Hotkey }
+/// state.get with a 2-second timeout. Any failure, a missing `adminExit` field, or an unparseable
+/// hotkey -> enabled: true with DEFAULT_ADMIN_EXIT_HOTKEY (the agent decides anyway when the PIN is sent).
+pub fn load_settings() -> ExitSettings;
+/// adminExit.submit with a 10-second timeout, on a worker thread. Never called on the window thread.
+pub fn submit(pin: String) -> ExitView;
+pub enum ExitView { Ready, Checking, WrongPin { attempts_left: Option<u32> }, LockedOut { retry_after_ms: u64 },
+                    SigningOut, Unavailable /* not linked, timeout, not trusted, unknown_method, any RPC error */, Disabled }
+pub fn view_for(result: Result<AdminExitSubmitResult, CallError>) -> ExitView;   // pure
+pub fn message(view: &ExitView, now_remaining_ms: u64) -> String;               // pure; the texts below
+```
+
+- Both calls use `ClientConfig::production()` (so `RULEBOX_AGENT_SIM=1`
+  works in a debug build) and `ClientInfo { role: ClientRole::Launcher,
+  name: "rulebox-shell", version: env!("CARGO_PKG_VERSION") }`.
+- When the fallback window is shown: call `load_settings` on a worker
+  thread. While the window is visible, register the combination with
+  `RegisterHotKey(hwnd, 1, modifiers | MOD_NOREPEAT, virtual_key)` and
+  also match it in the window's `WM_KEYDOWN` / `WM_SYSKEYDOWN` handling
+  (`GetKeyState` for the modifiers), so it works whether or not the
+  registration succeeded. `UnregisterHotKey` when the window closes, so
+  the Staff App can register it later. The combination is **never**
+  shown on screen.
+- The combination opens a small panel inside the fallback window: the
+  title "Administrator exit", one `EDIT` control with `ES_PASSWORD |
+  ES_NUMBER` limited to 12 characters (`EM_SETLIMITTEXT`), the buttons
+  **Sign out to Windows** (enabled from 4 digits) and **Cancel**. Enter
+  submits; Escape cancels. `enabled == false` → the combination does
+  nothing.
+- Submitting: clear the field at once, show "Checking…", run `submit` on
+  a worker thread, post the result back with `PostMessageW(hwnd,
+  WM_APP + 1, …)`. The PIN `String` is dropped after the call and never
+  logged. While the panel is open, the window's own 30-second "try
+  again" timer is paused.
+- Texts: `WrongPin` → "That PIN is not right." plus " N tries left."
+  when given; `LockedOut` → "Too many tries. Try again in M:SS."
+  (counting down once a second; the field stays disabled until zero);
+  `SigningOut` → "Signing out to Windows…" (the panel stays until the
+  session ends; if the session is still there after 30 seconds, return
+  to `Ready` with "Signing out did not work. Try again, or restart this
+  PC while holding Shift."); `Unavailable` → "Rulebox can't check the
+  PIN right now. Restart this PC while holding Shift, or turn kiosk off
+  from the dashboard."; `Disabled` → close the panel.
+- The launcher log records "admin exit: opened / wrong / locked /
+  signing out / unavailable". Never the PIN.
 
 Unit tests: `resolve` for a good file, an absolute path, `..`, a path
 outside `versions\`, bad JSON, a missing exe (use a temp directory);
 `CrashTracker` sequences: `0,0,0` → always `RestartNow`; five `1`s in
 10 s → `Fallback` on the fifth; four `1`s, 61 s pause, one `1` → not
-`Fallback`; delays are 500 ms, 1 s, 2 s, 5 s.
+`Fallback`; delays are 500 ms, 1 s, 2 s, 5 s. (1.1) `view_for`: each
+outcome of `AdminExitSubmitResult` maps to its view; an `Unknown`
+outcome, `CallError::NotLinked`, `Timeout`, `ServerNotTrusted` and an
+RPC error map to `Unavailable`. `message`: the lockout text for
+61,000 ms is "Too many tries. Try again in 1:01."; `WrongPin` with and
+without a count.
 
 **Verify:** `cargo clippy -p rulebox-shell --all-targets -- -D warnings`,
 `cargo test -p rulebox-shell`.
 
-Optional look at the fallback window on the dev machine (harmless: it is
-only a window): build, then run `target\debug\rulebox-shell.exe` from a
-folder with **no** `current.json`. The fallback window must appear; close
-it with Alt+F4 (add that for debug builds only) and take a screenshot for
-the report. Kill the process afterwards.
+Look at the fallback window on the dev machine (harmless: it is only a
+window, and with `RULEBOX_AGENT_SIM=1` it talks to the simulated agent
+only): start `cargo run -p rulebox-agent -- run --console --simulate
+--sim-demo` in one terminal; in another set `$env:RULEBOX_AGENT_SIM =
+"1"`, build, then run `target\debug\rulebox-shell.exe` from a folder
+with **no** `current.json`. The fallback window must appear. Press
+Ctrl + Shift + F12: the PIN panel appears; `1111` shows the wrong-PIN
+text; `2468` shows "Signing out to Windows…" and the agent log shows the
+simulate sign-out line. Close the window with Alt+F4 (add that for debug
+builds only), take screenshots of the fallback screen and of the panel
+for the report, and kill the process afterwards.
 
-**Done when:** tests pass and the fallback window has been seen.
+**Done when:** tests pass, and the fallback window and its PIN panel
+have been seen working against the simulated agent.
 
 ---
 
@@ -2107,6 +3672,15 @@ The task gathers `WatchdogInput` from `Platform` and the IPC server,
 calls `decide`, executes the action through `Platform`, and writes
 `shell.health` into the snapshot. Rules are in Section 5.7.
 
+(1.1) `shell_clients` contains only connections whose `hello` role was
+`shell` (from `ShellSignal::Connected`). A `launcher` connection (the
+fallback screen's short calls, Step 12) is not a Staff App and must not
+change `shell.health`. The role is self-declared, so this is only
+bookkeeping: a process that lies about it can at most keep itself out
+of hang detection, which it could also do by not connecting. While an
+exit hold is set (Step 9) there is no Staff session, so rule 1 of
+Section 5.7 already makes the watchdog idle.
+
 Unit tests (pure, with a fake clock):
 
 1. Kiosk disabled → `None`, `notRunning`.
@@ -2121,6 +3695,10 @@ Unit tests (pure, with a fake clock):
 6. `killHungShell: false` → never `TerminateShell`.
 7. Five consecutive launch failures → `failed`, next attempt 30 s later.
 8. Staff session ends → state resets to `notRunning`.
+9. (1.1) A connected client with role `launcher` and no `shell` client:
+   health follows the launcher rules only (`starting`, then `unhealthy`
+   after 30 s without `shell.ready`), and it is never a `TerminateShell`
+   target.
 
 Simulate-mode check: start the simulated agent with a simulated Staff
 session (`SimPlatform` option `--sim-staff-session`, add it to `run`),
@@ -2145,10 +3723,22 @@ folder containing the three debug binaries, and:
    for the user to run by hand. The script never creates the marker.
 2. Creates `%ProgramFiles%\Rulebox\versions\0.0.0-dev\`.
 3. Copies `rulebox-agent.exe` and `rulebox-shell.exe` to
-   `%ProgramFiles%\Rulebox\`, and `fake_staff.exe` to
-   `versions\0.0.0-dev\rulebox-staff.exe`.
+   `%ProgramFiles%\Rulebox\`. For the Staff App (Phase 3 R7): if a file
+   named `rulebox-staff.exe` is in the script's folder, copy **it** to
+   `versions\0.0.0-dev\rulebox-staff.exe`; otherwise copy
+   `fake_staff.exe` to that name. Print which one was used. Always also
+   copy `fake_staff.exe` (when present) to
+   `%ProgramFiles%\Rulebox\versions\0.0.0-dev\fake_staff.exe`, so the
+   pipe probe of the checklist can run from an allowed folder.
 4. Writes `current.json` (Section 4.3).
 5. Runs `rulebox-agent.exe service install`.
+6. (1.1) Only with the switch `-FixtureDirectory`: after the service is
+   installed and stopped, writes
+   `%ProgramData%\Rulebox\state\agent-config.json` with
+   `{ "fixtureDirectory": true }` (keeping other keys if the file
+   exists) and starts the service again. Without the switch it does not
+   touch that file. The agent honours the setting only on a machine with
+   the test marker (Section 5.9).
 
 Build the binaries on the dev machine (debug only):
 
@@ -2189,9 +3779,14 @@ Windows 11 Pro VM, and the Home items are either ticked or listed as
    ```
 
 2. Search for leftovers: no `unsafe` outside `crates/rulebox-win32` and
-   `apps/shell-launcher`; no `windows::` import outside those two; no
+   `apps/shell-launcher`; no `windows::` import outside the four places
+   of Section 4.2 (in the code this phase owns: only those two); no
    `.filter(` or `.collect()` in `convex/`; every `DESTRUCTIVE` function
-   calls the guard on its first line.
+   calls the guard on its first line. (1.1) Also: no `tracing` call or
+   `Debug` derive that can print `password`, `pin`, `pin_hash` or
+   `password_hash` (search for those four words in `apps/agent/src`,
+   `apps/shell-launcher/src` and `crates/rulebox-ipc/src` and read every
+   hit); the stand-in exit task of Step 6b is gone.
 3. Delete `target\sim-data\` and any copied binaries outside `target\`.
 4. Update `docs/plans/README.md`: Phase 2 status → `✅ Done` only after
    the user has reviewed the VM results; until then
@@ -2211,6 +3806,11 @@ Windows 11 Pro VM, and the Home items are either ticked or listed as
   (CLAUDE.md rule), say so explicitly.
 - Anything marked **(unverified)** in this plan that you confirmed or
   disproved.
+- (1.1) The result of the pipe probe as the Staff user (Section 10.2),
+  what Windows did after an administrator signed out following a hidden
+  exit, and how long one PIN check took on the VM.
+- (1.1) The list "Changes Phase 3 must pick up" from Section 12, with
+  anything you had to change in it.
 - Open questions for the user.
 
 ## Stop and ask the user if
@@ -2222,7 +3822,14 @@ Windows 11 Pro VM, and the Home items are either ticked or listed as
 - you want to add a dependency not named in Section 4.4, or a newer
   minor/major of one of the pinned crates exists;
 - the build starts compiling OpenSSL;
-- you need to change anything in Section 6 after Step 6 is done;
+- you need to change anything in Section 6 after Step 6 is done (for
+  Section 6.11: after Step 6b is done);
+- the Argon2 timing test of Step 6a fails, or a PIN check takes more
+  than 3 seconds anywhere;
+- the VM pipe probe prints `create-instance: ALLOWED`, or the
+  server-session check keeps a correct client from linking;
+- a secret (password, PIN, hash) shows up in a log, a snapshot or a
+  `status` output;
 - a Convex deploy would delete or reject existing data;
 - the code and the PRD disagree on something not listed in Section 14.
 
@@ -2250,15 +3857,15 @@ Windows 11 Pro VM, and the Home items are either ticked or listed as
 | 16 | The owner already used auto sign-in for their own account | Original values (including the password, kept in `Secrets`) are journaled and restored on Disable | 9 |
 | 17 | A sign-in legal notice is configured | Blocker `legal_notice`; kiosk not enabled; the agent never deletes the banner | 5.5, 9 |
 | 18 | Update restart signs Staff back in and **locks** the session (Automatic Restart Sign-On), or anything else locks it | `DisableAutomaticRestartSignOn = 1` and `DisableLockWorkstation = 1` prevent it; if it still happens, the agent signs the locked console session out after 10 s and automatic sign-in returns to the shell | 9 |
-| 19 | Admin uses Ctrl+Alt+Del → Switch user | Staff session becomes `Disconnected`; the agent leaves it alone; watchdog pauses for that session | 9, 13 |
+| 19 | The Staff session becomes `Disconnected` (until Phase 5 empties the Ctrl + Alt + Del screen, Switch user can still cause this; it is not an admin route and nothing documents it as one) | The agent leaves the session alone; watchdog pauses for that session | 9, 13 |
 | 20 | Service starts **after** automatic sign-in (boot race, Fast Startup resume) | Never rely on logon events; enumerate sessions at start and after each event; the launcher was started by Winlogon and needs no agent | 11, 13 |
 | 21 | Staff App crashes | Launcher relaunches after 500 ms (within the PRD's ~2 s) | 12 |
 | 22 | Staff App crash loop (5 in 60 s), or `current.json` / exe missing or invalid | Native fallback screen with "Try again"; retry every 30 s; agent reports `shell.health` `unhealthy`/`failed` in the next heartbeat | 12, 13 |
 | 23 | Staff App hangs (no heartbeat for 30 s after being ready) | Agent terminates the verified process once per 60 s; launcher relaunches it | 13 |
 | 24 | Launcher itself dies | Agent relaunches it in the Staff session after 3 s; 5 failures → `failed`, retry every 30 s | 13 |
 | 25 | Agent crashes or panics | Process ends without a clean stop; service manager restarts it after 1 s, 5 s, 30 s; the shell keeps running; the restarted agent finds it again | 5, 11 |
-| 26 | Agent permanently broken or deleted | PC still works: launcher and Staff App run without it (Staff App shows "agent unavailable"); admin signs in through Switch user or Shift at sign-in and runs `recover` | 11, 12 |
-| 27 | Admin needs normal Windows now | Any of: Ctrl+Alt+Del → Switch user; hold Shift during sign-out/boot to skip auto sign-in; `kioskEnabled: false` from the backend; `rulebox-agent unenroll`; `rulebox-agent recover` | 9, 11 |
+| 26 | Agent permanently broken or deleted | PC still works: launcher and Staff App run without it (Staff App shows "agent unavailable"; the hidden exit cannot work without the agent and says so); admin restarts while holding Shift to reach the Windows sign-in screen, signs in and runs `recover` | 11, 12 |
+| 27 | Admin needs normal Windows now | Any of: the hidden exit (key combination + PIN; in the Staff App, or on the launcher's fallback screen); `kioskEnabled: false` from the backend (Disable kiosk); hold Shift during startup to skip auto sign-in; then, signed in as an administrator, `rulebox-agent unenroll` or `rulebox-agent recover` | 6b, 9, 11, 12 |
 | 28 | No other usable local administrator exists | Blocker `no_other_admin`; kiosk never enabled | 5.5, 9 |
 | 29 | Device clock is wrong (dead CMOS battery) | Nothing is rejected on local time; `clockSuspect` set when the clock jumps back more than 24 h; TLS failures show as `offline`; cached state keeps the kiosk working | 8 |
 | 30 | Unsupported Windows (below build 19045, S mode) | Blocker; enrollment refused before any change | 5.5, 8 |
@@ -2269,7 +3876,7 @@ Windows 11 Pro VM, and the Home items are either ticked or listed as
 | 35 | A non-Staff process, a process in another session, or a low-integrity process connects to the shell pipe | DACL, mandatory label and peer verification reject it (`unauthorized`) | 4, 6 |
 | 36 | Client floods the agent or sends a huge frame | `busy` above 16 in flight; frame above 1 MiB closes the connection | 2, 6 |
 | 37 | Protocol version mismatch between agent and Staff App | `unsupported_protocol` with the supported version; the Staff App shows a "version mismatch" state | 2, 6 |
-| 38 | Data directory was pre-created by a standard user, or is a reparse point | Agent refuses to start and logs why | 5 |
+| 38 | Data directory was pre-created by a standard user, or is a reparse point | Empty and not a link: removed and created again with the protected DACL. Otherwise the agent refuses to start, writes nothing into it, prints why to stderr and (as a service) stops with service-specific exit code 2 (Section 5.1) | 10, 11 |
 | 39 | State file corrupt | Renamed aside, treated as missing; the kiosk settings already on the machine stay; `recover` handles the no-state case | 5, 11 |
 | 40 | Service removed while kiosk is on | `service uninstall` refuses unless `--force`, which runs `recover` first | 11 |
 | 41 | "Service marked for deletion" on reinstall | Reinstall updates the existing service instead of recreating; error 1072 gives a clear instruction | 11 |
@@ -2277,7 +3884,23 @@ Windows 11 Pro VM, and the Home items are either ticked or listed as
 | 43 | Convex one-shot call never returns while offline | Every call has a 30 s timeout | 8 |
 | 44 | Network requires an explicit proxy | The Convex Rust client has no proxy support: the device stays `offline`. Documented limitation | 8 |
 | 45 | First sign-in of the new account shows Windows first-run or privacy screens | `EnableFirstLogonAnimation = 0`, `DisablePrivacyExperience = 1`; verify on the VM (**unverified** on Home) | 9, 14 |
-| 46 | Employee signs out of Windows from Ctrl+Alt+Del | Automatic sign-in signs Staff back in. Removing that option is Phase 5 | 9 |
+| 46 | Employee signs out of Windows from Ctrl+Alt+Del | Automatic sign-in signs Staff back in (**unverified** whether Windows does this without a restart; the VM checklist records it). Removing that option is Phase 5 | 9 |
+| 47 | (1.1) Wrong exit PIN, repeatedly, by an employee | `wrongPin` four times, then locks of 1, 5, 15, 30 and 60 minutes; counted per device, saved to disk, kept across agent and PC restarts; every wrong PIN and every lock is an audit record. The administrator can wait, rotate the PIN, or use a recovery route | 6b |
+| 48 | (1.1) Many PIN or password requests at the same moment (a hostile process opening several connections) | One check at a time per device; the others get `busy`. The failure is counted and saved **before** the check runs | 6a, 6b |
+| 49 | (1.1) Agent killed or PC powered off in the middle of a PIN or password check | The attempt was already counted; no free guess | 6a, 6b |
+| 50 | (1.1) Correct PIN, but the sign-out cannot be prepared or fails | Before the answer: error `internal` (retryable), nothing counted. After `signingOut`: three retries, then automatic sign-in is re-armed and an `adminExitFailed` record is written; the client returns to its PIN field after 30 s | 6b, 9, 12 |
+| 51 | (1.1) Administrator used the hidden exit and never signed in | Automatic sign-in is re-armed after 5 minutes; the next restart is a kiosk again | 9 |
+| 52 | (1.1) PC restarted during the 5-minute exit hold | It starts at the Windows sign-in screen once (the value was still `"0"` at boot); the agent re-arms at start; the restart after that is a kiosk | 9 |
+| 53 | (1.1) Exit settings in the document are broken (bad hash, bad key combination) | Bad hash: exit **off**, error logged, shown in `status`. Bad combination: default combination, warning logged | 6b, 8 |
+| 54 | (1.1) PIN rotated or exit disabled from the backend while offline | Takes effect when the document arrives; until then the cached settings apply | 8 |
+| 55 | (1.1) Exit PIN entered on a PC with no PIN set, not enrolled, or exit disabled | `disabled`; nothing counted; the key combination does nothing in the clients | 6b |
+| 56 | (1.1) Employee signs in while the PC is offline | Cache entry present, not expired and the password matches → `ok` with `offline: true`. Otherwise `offlineNeverSignedIn` or `offlineExpired`. Clock set back → still expired | 6a |
+| 57 | (1.1) Employee backend unreachable although the device is "online" | 6-second timeout, then the offline path | 6a |
+| 58 | (1.1) Agent restarts while an employee is signed in | The session is gone (memory only); `session.get` returns no employee; the Staff App asks for the password again and signs in the same user | 6a |
+| 59 | (1.1) Staff session ends while an employee is signed in (restart, crash, hidden exit) | The agent clears the employee session | 6b, 9 |
+| 60 | (1.1) Audit records cannot be delivered (offline, or no audit backend before Phase 4) | Kept in `audit-queue.json`, at most 500, oldest dropped and counted; sent in batches of 50 when the connection returns | 6a |
+| 61 | (1.1) A Staff-session process creates its own instance of the shell pipe and waits for the Staff App | The DACL should refuse it (VM probe). If it does not: the client's server-session check refuses a server outside session 0 before it sends anything | 5a, 14 |
+| 62 | (1.1) A link is planted where the employee's files folder will be | The agent never touches that folder; it only names the path. The Staff App creates and confines it (Phase 3) | 6a |
 
 ---
 
@@ -2285,9 +3908,14 @@ Windows 11 Pro VM, and the Home items are either ticked or listed as
 
 - **Least privilege by placement.** The Staff App and the launcher run as
   the standard user and never elevate. Everything privileged is in the
-  service. The Phase 2 IPC surface is read-only state plus health
-  signals; it contains no method that performs a privileged action on
-  request.
+  service. The 1.0 IPC surface is read-only state plus health signals.
+  (1.1) The 1.1 surface adds exactly **one** method that makes the agent
+  act with its privileges: `adminExit.submit`. What it can cause is
+  fixed (sign the caller's own Staff session out and pause automatic
+  sign-in for at most 5 minutes), it takes no path, command or target
+  from the caller, it is gated by a PIN the agent checks itself, and a
+  correct PIN grants no administrator right. `session.*` and
+  `apps.list` change only the agent's own memory and its cache files.
 - **Never trust the Staff session.** Any process running as Staff can
   open the shell pipe, and could inject into the Staff App. Therefore:
   every method must be safe when called by a hostile Staff-session
@@ -2297,7 +3925,34 @@ Windows 11 Pro VM, and the Home items are either ticked or listed as
 - **Pipe ACLs.** Explicit security descriptor on every instance; SYSTEM
   as owner; no create-instance right for Staff; network logons denied;
   first-instance flag; remote clients rejected; client connects at
-  identification level and checks the owner.
+  identification level and checks the owner. (1.1) The client also
+  requires the server to be in session 0, because the "no
+  create-instance right for Staff" property is **not yet proven** (the
+  Step 4 result in Section 6.2) and the client now sends passwords and
+  the PIN. The VM probe decides whether the DACL holds.
+- **(1.1) PIN and passwords.**
+  - The exit PIN exists on the device only as a salted Argon2id hash
+    inside the cached desired-state document, in the directory only
+    SYSTEM and Administrators can read. It is never in the snapshot, an
+    IPC result, an event, `status` output or a log. The Staff session
+    never holds it, so nothing in the Staff session can check a PIN.
+  - Employee passwords are checked online by the directory (Phase 4) or
+    against a salted Argon2id hash in `employee-cache.json` in the same
+    directory. The plain password lives only for the length of one
+    request and is never written or logged.
+  - Guessing is limited in the agent, per device (PIN) and per username
+    plus per device (passwords), saved to disk, counted before the check
+    runs, one check at a time. Limits are never per connection.
+  - A 4-digit PIN is weak against anyone who can read the hash; the
+    design therefore depends on the hash staying inside the agent, not
+    on the hash function. Phase 4 should require at least 6 digits.
+  - Every exit attempt is an audit record written to disk before the
+    answer is sent.
+- **(1.1) Fixture employees are a test-only door.** `FixtureDirectory`
+  accepts published passwords. Outside simulate mode it is used only
+  when the config file asks for it **and** the test-machine marker is
+  present; Phase 4 removes the config key when the real directory
+  lands, and Phase 6 must confirm a release build cannot enable it.
 - **Admin commands** travel over a second pipe that only SYSTEM and
   elevated Administrators can open, and the agent re-checks the caller's
   token.
@@ -2329,7 +3984,14 @@ Windows 11 Pro VM, and the Home items are either ticked or listed as
   `set_winlogon_value` refuses `Shell`, `Userinit`, `IgnoreShiftOverride`
   and `ForceAutoLogon`; the shell value can only be written through a
   handle to the Staff user's hive; `write_machine_value` accepts exactly
-  three HKLM keys.
+  three HKLM keys. The routes back are: the hidden exit (key combination
+  + PIN), Disable kiosk from the backend, holding Shift during startup,
+  and `recover` / `unenroll` from an administrator session. **Holding
+  Shift at startup must keep working** (it is one of the two recovery
+  routes of PRD 9.5 when the Staff App is broken); no later phase may
+  set `IgnoreShiftOverride` or `ForceAutoLogon`. Ctrl + Alt + Del →
+  Switch user is **not** a route: it still works on a Phase 2 test VM,
+  Phase 5 removes it, and nothing may be designed around it.
 - **Not covered in Phase 2** (stated so nobody assumes otherwise): the
   desired state is **not** signature-checked yet (Phase 4); binaries are
   unsigned (Phase 6); the Staff account has no lockdown policies, so an
@@ -2351,6 +4013,10 @@ Windows 11 Pro VM, and the Home items are either ticked or listed as
 | Enrollment, backend handling, cache, heartbeat | unit with `FakeBackend`, paused time | `rulebox-agent` |
 | Kiosk enable/disable/rollback/idempotency | unit with `SimPlatform` | `rulebox-agent` |
 | Watchdog decisions | pure unit, fake clock | `rulebox-agent` |
+| (1.1) Wire shapes of 1.1, key-combination parser, `call_once` | unit and pipe integration | `rulebox-ipc` |
+| (1.1) Lockout schedules, offline cache, sign-in outcomes, PIN gate, audit queue, "no secret in snapshot or log" | unit with `FixtureDirectory`, fake clock | `rulebox-agent` |
+| (1.1) Data-directory decision table | pure unit | `rulebox-agent` |
+| (1.1) Launcher PIN panel | pure unit for the mapping; by eye against the simulated agent | `rulebox-shell` |
 | Launcher path validation and crash logic | pure unit | `rulebox-shell` |
 | Convex functions | typecheck, lint, manual `npx convex run` | `convex/` |
 | End to end without OS changes | `run --console --simulate` + `fake_staff` + real Convex dev deployment | manual |
@@ -2366,8 +4032,18 @@ Run once per available VM. Record Windows edition, version and build.
 **Setup**
 
 - [ ] Snapshot taken. A second local administrator account exists and its
-      password is known.
+      password is known. A second **standard** user exists too.
 - [ ] Marker created by hand (Step 3 commands).
+- [ ] (Data directory, planted and not empty.) **Before** the first
+      `vm-deploy.ps1`, signed in as the standard user, run
+      `mkdir C:\ProgramData\Rulebox` and
+      `echo x > C:\ProgramData\Rulebox\x.txt`. Then run `vm-deploy.ps1`
+      as the administrator: `service install` must **refuse** and name
+      the data directory; nothing else may be written into that folder.
+- [ ] (Data directory, planted and empty.) As the administrator delete
+      `x.txt` only, and run `vm-deploy.ps1` again: it succeeds;
+      `(Get-Acl C:\ProgramData\Rulebox).Owner` is SYSTEM or
+      Administrators, not the standard user.
 - [ ] `vm-deploy.ps1` finishes; `sc.exe qc RuleboxAgent` shows
       `AUTO_START`, `LocalSystem`, a quoted path;
       `sc.exe qfailure RuleboxAgent` shows three restart actions.
@@ -2424,6 +4100,43 @@ Run once per available VM. Record Windows edition, version and build.
       outside `Program Files\Rulebox\versions\`: `unauthorized`.
 - [ ] From an elevated admin prompt, `rulebox-agent status` works; from a
       non-elevated prompt it fails with an access error.
+- [ ] **Pipe probe as the real Staff user (not elevated).** This repeats
+      Step 4's test 4 the way it has to be done: on the dev machine it
+      ran elevated as the pipe's owner, and there a client open asking
+      for bit `0x4` was accepted. In the Staff session press `p` in
+      `fake_staff` and write down the three lines. Expected:
+      `owner: S-1-5-18`, `server session: 0`,
+      `create-instance: DENIED (error 5)`.
+  - **`create-instance: ALLOWED`, or an error other than 5** (231 means
+    all four instances were busy: close other clients and repeat once):
+    the pipe's DACL does **not** stop a Staff process from creating its
+    own instance. Stop and tell the user. The fallback design is:
+    1. The client's server-session check (Section 6.2, client check 3)
+       becomes the thing that authenticates the agent to its clients.
+       It is already built (Step 5a); confirm it with the next item.
+    2. Rewrite the sentences in Section 6.2 and Section 9 that say the
+       Staff entry "can never create its own instance", and report it.
+    3. Ask the user whether to add a second client check before
+       release: `GetNamedPipeServerProcessId` →
+       `QueryFullProcessImageNameW` must be
+       `<install>\rulebox-agent.exe`. Do not build it unasked.
+    What remains possible for a hostile Staff process in that case is
+    taking pipe instances so the Staff App cannot connect (a nuisance,
+    visible as `shell.health` never becoming `healthy`).
+  - **`server session` is not 0, or `fake_staff` never reaches
+    `Linked` and its output says the server is not trusted:** the
+    session check does not behave as specified on this edition
+    **(unverified)**. Stop and tell the user; the replacement is the
+    process-image check of point 3. Never ship with the check simply
+    switched off.
+- [ ] As the Staff user, a client open that asks for `GENERIC_READ |
+      GENERIC_WRITE` (the `p` output prints this as a fourth line,
+      `generic-write open: ACCEPTED` or `REFUSED (error n)`). Either
+      result is acceptable; record it. It tells us whether the Step 4
+      observation came from running elevated.
+- [ ] As the Staff user (Task Manager → Run new task → `cmd`),
+      `type "%ProgramData%\Rulebox\state\desired-state.json"` and
+      `dir "%ProgramData%\Rulebox"` both fail with "Access is denied".
 
 **Offline and desired state**
 
@@ -2438,12 +4151,53 @@ Run once per available VM. Record Windows edition, version and build.
       automatically.
 - [ ] `setKiosk … true`: after a restart the kiosk is back.
 
+**Hidden admin exit (1.1)**
+
+- [ ] On the dev machine: `rulebox-agent hash-pin` with a 6-digit PIN of
+      your choice, then
+      `npx convex run dev:setAdminExit '{"deviceId":"…","pinHash":"<line>"}'`.
+      On the VM, `rulebox-agent status` shows the admin exit as on with
+      `Ctrl+Shift+F12` within seconds, and shows no hash.
+- [ ] In `fake_staff` press `x` and enter a wrong PIN twice: `wrongPin`
+      with `attemptsLeft` 4, then 3. Restart the PC. `status` still shows
+      2 failures.
+- [ ] `x` with the right PIN: `signingOut`, about 2 seconds later the
+      Windows sign-in screen, and Staff is **not** signed back in.
+      Write down how long the answer took (the agent log has the
+      duration; it must be far below 10 seconds in this debug build).
+- [ ] Sign in as the administrator. Within a minute
+      `reg query "HKLM\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Winlogon" /v AutoAdminLogon`
+      shows `1` again. Sign out: **write down** whether Windows signs
+      Staff in by itself or stays at the sign-in screen
+      **(unverified)**. Restart: the kiosk is back.
+- [ ] Use the exit again, do **not** sign in, wait 6 minutes, restart:
+      the kiosk is back.
+- [ ] Five wrong PINs: the fifth answers `lockedOut` near 60 seconds; the
+      right PIN during the lock is refused; after the lock it works.
+- [ ] Network disconnected: the right PIN still works.
+- [ ] `dev:setAdminExit` with `"enabled": false`: `x` answers `disabled`.
+      Set it back.
+- [ ] Press `c` five times quickly (fallback screen), then Ctrl + Shift
+      + F12: the PIN panel appears; a wrong PIN shows its text; the right
+      PIN leads to the Windows sign-in screen.
+- [ ] `rulebox-agent status` shows a non-zero "audit queued" count after
+      these tests (nothing is delivered before Phase 4).
+- [ ] Optional, with `vm-deploy.ps1 -FixtureDirectory`: in `fake_staff`,
+      `i` → `maya demo` answers `ok` with a `filesRoot` under the Staff
+      profile's `RuleboxFiles`; that folder does **not** exist afterwards
+      (the agent must not create it); `a` lists four apps. Without the
+      switch, `i` is not offered (`session` is not in the capabilities).
+
 **Admin way back**
 
-- [ ] Ctrl+Alt+Del → Switch user → admin signs in normally and sees
-      Explorer. Sign out: the Staff session is still there.
-- [ ] Hold Shift while signing out of Staff (or at boot): the sign-in
-      screen appears instead of automatic sign-in.
+- [ ] Staff session `Disconnected` (still reachable in Phase 2 through
+      Ctrl + Alt + Del → Switch user; **this is not an admin route**,
+      Phase 5 removes it, and it is tested only because the state can
+      occur): the administrator signs in and sees Explorer; the agent log
+      shows it left the disconnected Staff session alone; after the
+      administrator signs out the Staff session is still there.
+- [ ] Hold Shift during startup (and, separately, while signing out of
+      Staff): the sign-in screen appears instead of automatic sign-in.
 - [ ] Win+L in the Staff session does nothing.
 - [ ] Stop and disable the service, then run `rulebox-agent recover
       --yes`: restart shows the normal sign-in screen; signing in as
@@ -2492,15 +4246,84 @@ Run once per available VM. Record Windows edition, version and build.
   with code 0 only for an intentional restart; be single-instance; take
   `displayMode`, `convexUrl` and `desiredState` from the snapshot; build
   the real `rulebox-staff.exe` that replaces `fake_staff`.
+- **Changes Phase 3 must pick up** (where protocol 1.1 as specified here
+  differs from Section 15 of `phase-3-staff-shell.md`; the Phase 3 plan
+  was not edited):
+  1. **The agent does not create the employee's folder.** `filesRoot`
+     is a path only. The Staff App creates it (as Staff) and must refuse
+     a reparse point there (Section 5.9, "Files root").
+  2. **Result shapes are flat.** `SignInResult`,
+     `VerifyPasswordResult` and `AdminExitSubmitResult` are structs with
+     an `outcome` string and nullable fields, not tagged unions; fields
+     that do not apply are `null`, not absent. Use the types in
+     `rulebox_ipc::requests` and map them to the Staff App's own enums.
+     An `unknown` outcome must be handled.
+  3. **`AppEntry` on the wire** has `kind` as a string plus three
+     nullable objects (`builtin`, `web`, `desktop`), and no `iconKey` or
+     `badge`. The Staff App maps it to its own `AppEntry`.
+  4. **The 1.1 request types are not generated into `@rulebox/types`**
+     (the Staff App's DTOs `Employee` and `AppEntry` would collide in
+     the same folder). Only `AdminExitInfo` and `PowerOptions` are new
+     there.
+  5. **The session lives in the agent's memory.** After every relink
+     call `session.get`; if it returns no employee while the UI is
+     signed in, show the lock screen and unlock with `session.signIn`
+     for the same username (`verifyPassword` would answer
+     `not_signed_in`). `session.signIn` for a different username while
+     someone is signed in is refused with `denied_by_policy`; call
+     `session.signOut` first.
+  6. **New error codes** `not_signed_in` and `busy` can come back from
+     the 1.1 methods; `session.signIn` can also answer `timeout`
+     (retryable). `session` and `apps` are missing from the capabilities
+     when the agent has no employee directory (every real agent until
+     Phase 4, except fixture mode on a test machine).
+  7. **Key combination:** the snapshot always carries a canonical, valid
+     text. `rulebox_ipc::hotkey::parse` implements the grammar Phase 3
+     describes (F1 to F12 only); use it instead of a second parser. The
+     default is `Ctrl+Shift+F12` (`DEFAULT_ADMIN_EXIT_HOTKEY`).
+  8. **After `signingOut`** the agent sends `agent.shuttingDown` with
+     reason `adminExit` and `graceMs: 2000`. Do not show the "save your
+     work" banner for this reason. If the session is still alive
+     30 seconds later, return the dialog to its ready state with an
+     error (the agent re-arms automatic sign-in by itself).
+  9. **`attemptsLeft`** counts the PINs that will still be checked
+     before a wait (4, 3, 2, 1). The answer to the fifth wrong PIN is
+     `lockedOut`, not `wrongPin` with 0.
+  10. **Simulated agent:** 1.1 answers need `--simulate --sim-demo`
+      (plain `--simulate` is not enrolled and lists only `adminExit`
+      beyond 1.0). Add `--sim-offline` for the offline outcomes. Demo
+      users: `maya`, `sam` (always `offlineExpired` offline), `alex`
+      (`disabled`); password `demo`; PIN `2468`.
+  11. **Server check:** `IpcClient` now also requires the pipe server to
+      be in session 0 outside simulate mode. No action unless the VM run
+      shows a problem.
+  12. **`vm-deploy.ps1`** copies `rulebox-staff.exe` when it lies next
+      to the script (R7), and `-FixtureDirectory` turns on the fixture
+      employees on a marked test VM so Phase 3's VM run can sign in.
 - **Phase 4** owns: signature verification (the `signature` field and
   the startup warning mark the seam), merging group and device desired
   state, heartbeat interval scaling, the dashboard for enrollment codes
   (replacing `convex/dev.ts`), the audit log, and a decision on moving
-  device auth to JWT (Q1).
+  device auth to JWT (Q1). From the 1.1 addendum it also owns:
+  `ConvexDirectory` behind `EmployeeDirectory` (one call that returns
+  the employee, the catalogue and `offline_days`; then remove the
+  `fixtureDirectory` config key); the Convex sink behind `AuditSink`
+  and its table (idempotent on `AuditRecord.id`); writing `adminExit`,
+  `power` and `orgName` into the desired-state document from dashboard
+  settings (hashing the PIN with Argon2id inside the limits of Section
+  5.9, never letting a dashboard reader fetch `pinHash`, asking for at
+  least 6 digits); what `session.signOut` cleans up (PRD 5.3); an
+  `apps.changed` event if the catalogue must refresh while signed in
+  (a 1.2 addition). **Never add a secret field to
+  `rulebox_policy::DesiredState`**: that type is sent to the Staff
+  session whole.
 - **Phase 5** owns: Staff lockdown policies (`NoLogoff`, Task Manager,
-  Win keys), hiding the admin tile, the admin exit and PIN, wake-password
-  and sleep behaviour, restricting service privileges, the process
-  allow-list watchdog.
+  Win keys, emptying the Ctrl + Alt + Del screen), hiding the admin
+  tile, wake-password and sleep behaviour, restricting service
+  privileges, the process allow-list watchdog. It must keep the hidden
+  exit and the Shift-at-startup bypass working, and it must re-run the
+  hidden-exit checklist items after `NoLogoff` and the other policies
+  are applied (the agent's `logoff_session` must still work).
 - **Phase 6** owns: the MSI (registering the service the same way as
   Step 11), the release answer to the test-machine guard, code signing,
   and reusing `compat.rs` for the installer check.
@@ -2511,7 +4334,10 @@ Run once per available VM. Record Windows edition, version and build.
 
 | Risk | Detail | Handling |
 |---|---|---|
-| `windows` crate 0.100 migration | `windows-core` and related crates are already 0.100 (2026-09-03); the `windows` and `windows-sys` crates are still 0.62.2 / 0.61.2. When 0.100 lands, every `Win32_*` feature and module path is renamed and signatures change | All `windows` usage is confined to two crates. Stay on 0.62. Do not add 0.100 sub-crates |
+| `windows` crate 0.100 migration | `windows-core` and related crates are already 0.100 (2026-09-03); the `windows` and `windows-sys` crates are still 0.62.2 / 0.61.2. When 0.100 lands, every `Win32_*` feature and module path is renamed and signatures change | All `windows` usage is confined to four known places (Section 4.2; two in this phase, two in Phase 3). Stay on 0.62. Do not add 0.100 sub-crates |
+| (1.1) Automatic sign-in after a sign-out | This plan assumes Windows signs Staff in again after a sign-out without a restart, and `ForceAutoLogon` (which would force it) is forbidden. Not confirmed **(unverified)** | The hidden exit does not depend on it (it sets `AutoAdminLogon = "0"` first, so it is right either way). The VM checklist records the behaviour; if Windows does not sign in again, edge cases 18 and 46 need a restart to return to the kiosk and the user must be told |
+| (1.1) Argon2 in debug builds | Unoptimized Argon2 can exceed the 10-second IPC timeout | `opt-level = 3` for `argon2` and `blake2` in the dev profile; a timing test in Step 6a; the VM checklist records the real duration |
+| (1.1) Pipe DACL and bit `0x4` | The Step 4 run (elevated) accepted a client open that asked for the bit | Probe as the real Staff user on the VM; client-side server-session check as the second line (Section 6.2) |
 | Per-user custom shell on Home | Neither `Policies\System\Shell` nor per-user `Winlogon\Shell` is documented by Microsoft for Windows 11 Home; evidence is forum-level and old **(unverified)** | Both mechanisms implemented; VM checklist decides; PRD 13.2 "Verify" gets its answer |
 | Automatic sign-in removed by management policy | Reports on Windows 11 24H2 of `AutoAdminLogon` being reset on Intune/domain devices | Joined devices are blocked by default; values are re-asserted |
 | Automatic Restart Sign-On vs automatic sign-in | Precedence is undocumented **(unverified)** | Machine policy disables it; locked-console rule as the safety net |
@@ -2567,6 +4393,9 @@ Do not edit the PRD in this phase; give this list to the user.
 | 13.6 #4 | Minimum supported build 19045; "out of support" is judged on the server from the reported build | Lifecycle dates change |
 | 16 | "App updates: Tauri updater + GitHub Releases" contradicts 23.2 | Wording only |
 | New | Add the account name `RuleboxStaff`, service name `RuleboxAgent`, pipe names and data directory to the PRD | Gap |
+| 12.4 (1.1) | State that the **agent** checks the PIN and that the Staff App never holds the hash; PIN is 4 to 12 digits (dashboard asks for at least 6); the lock schedule (5th wrong PIN: 1 minute, then 5, 15, 30, 60 minutes, per device, kept across restarts); a correct PIN grants no admin right, it only leads to the Windows sign-in screen; automatic sign-in is paused for at most 5 minutes and the kiosk returns at the next restart; the exit is also offered on the "Rulebox can't start" screen | Fills in the numbers and the owner PRD 12.4 leaves open |
+| 5.2 (1.1) | Name the offline hash (Argon2id), the lock schedule for employee passwords (5th wrong: 30 seconds, then 1, 5, 15 minutes) and that the agent, not the Staff App, checks credentials | Gap |
+| 9.5 (1.1) | Add `rulebox-agent recover` and `unenroll` as the administrator-session tools, and note that the hidden exit needs the agent to be running | Recovery routes |
 
 Also note for the Phase 1 plan (historical): it says `#[ts(export,
 export_to = …)]` and Geist fonts; the repository uses `TS_RS_EXPORT_DIR`
