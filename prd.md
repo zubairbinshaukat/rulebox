@@ -1685,6 +1685,7 @@ and a clean custom UI, all in one open-source package.
 | 16 | Icon set | **Solar Icons** by 480 Design (CC BY 4.0), soft and rounded. Dashboard: *Linear*, with *Bold Duotone* for active states. Staff App: *Bold Duotone*, with *Bold* for selected states. Bundled at build time from Iconify data (`@iconify-json/solar` + `unplugin-icons`) so only used icons ship and nothing loads online. Attribution "Icons: Solar by 480 Design (CC BY 4.0)" appears in `THIRD_PARTY_NOTICES.md` and the Staff App and dashboard About screens. App icons still come from app manifests (Section 6.1) |
 | 17 | Offline-first assets | The Staff App works with **no internet**: fonts, icons, GSAP and all UI assets are bundled. No CDNs, Google Fonts, icon fonts or online icon APIs at runtime |
 | 18 | Logo and brand animations | Logo: rounded box with three rounded tiles. Its **splash, loading and open-desktop animations are kept as designed** (Section 25.5); logo **colors will change** to the Rulebox palette |
+| 19 | Fonts | **Figtree** (variable, OFL) for all UI text; **Geist Mono** (OFL) for numbers, codes and small uppercase labels. Both bundled for offline use (Decision 17) |
 
 
 

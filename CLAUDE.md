@@ -79,7 +79,8 @@ will change; the PRD wins on behavior.
 - Read `Rulebox Staff Desktop.dc.html` (readable template + script).
   Skip `Rulebox Staff Desktop.html` (400 KB bundle) and `support.js`.
 - Vibe to keep: warm paper neutrals (oklch hue ~70–85), single teal
-  accent (oklch hue 175), Geist + Geist Mono, soft blurred color blobs
+  accent (oklch hue 175), Figtree + Geist Mono (Decision 19; the design
+  export still shows Geist — ignore that), soft blurred color blobs
   behind the desktop, generous radii (12–26 px), frosted panels, calm
   shadows, light + dark themes via CSS tokens.
 - Screens in it: sign-in (big clock + frosted card), desktop (greeting,

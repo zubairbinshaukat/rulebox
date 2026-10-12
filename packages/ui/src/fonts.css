@@ -1,3 +1,4 @@
-/* Self-hosted variable fonts (kiosk PCs may be offline). No CDN links. */
-@import "@fontsource-variable/geist/index.css";
+/* Self-hosted variable fonts (kiosk PCs may be offline). No CDN links. Decision 19:
+   Figtree for UI text, Geist Mono for numbers, codes and small uppercase labels. */
+@import "@fontsource-variable/figtree/index.css";
 @import "@fontsource-variable/geist-mono/index.css";
