@@ -535,8 +535,8 @@ effectively a remote-execution system and is protected accordingly.
 
 The Staff App provides a secret key combination that prompts for a PIN.
 
-- The key combination is **set per organization in the dashboard**, with
-  a fixed default.
+- The key combination is **set per organization in the dashboard**. The
+  default is **Ctrl + Shift + F12**.
 - A correct PIN **signs the Staff session out** and shows the Windows
   sign-in screen, so no employee session stays open behind the admin.
 
