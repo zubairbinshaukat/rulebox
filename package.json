@@ -3,17 +3,21 @@
   "private": true,
   "type": "module",
   "packageManager": "pnpm@12.8.1",
-  "engines": { "node": ">=22" },
+  "engines": {
+    "node": ">=22"
+  },
   "scripts": {
     "dev:dashboard": "pnpm --filter @rulebox/dashboard dev",
     "dev:staff": "pnpm --filter @rulebox/staff-app tauri dev",
     "dev:convex": "convex dev",
     "typecheck": "pnpm -r typecheck",
     "lint": "pnpm -r lint",
-    "gen:types": "cargo test -p rulebox-policy export_bindings"
+    "gen:types": "cargo test -p rulebox-policy export_bindings",
+    "gen:brand": "node scripts/build-brand.mjs"
   },
   "devDependencies": {
     "@eslint/js": "catalog:",
+    "@resvg/resvg-js": "^2.6.2",
     "convex": "catalog:",
     "eslint": "catalog:",
     "eslint-plugin-react-hooks": "catalog:",

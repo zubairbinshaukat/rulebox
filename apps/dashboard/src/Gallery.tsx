@@ -5,6 +5,8 @@ import {
   Backdrop,
   Button,
   Input,
+  LogoMark,
+  LogoMotion,
   Panel,
   Pill,
   ProgressBar,
@@ -12,6 +14,7 @@ import {
   StatCard,
   Switch,
   TitleBar,
+  type LogoAnimation,
   type Theme,
 } from "@rulebox/ui";
 
@@ -177,6 +180,75 @@ function Section({
 
 const row = { display: "flex", flexWrap: "wrap", gap: 12, alignItems: "center" } as const;
 
+const logoAnimations = [
+  { value: "splash", label: "Splash" },
+  { value: "loading", label: "Loading" },
+  { value: "open", label: "Open desktop" },
+  { value: "lock", label: "Lock" },
+] as const;
+
+function LogoSection() {
+  const [anim, setAnim] = useState<LogoAnimation>("splash");
+  // Bumping the key remounts the logo, which replays the same animation.
+  const [run, setRun] = useState(0);
+
+  return (
+    <Section
+      title="Logo"
+      description="LogoMark is the still logo. LogoMotion plays the brand animations in CSS only."
+      action={
+        <div style={row}>
+          <SegmentedControl
+            options={logoAnimations}
+            value={anim === "none" ? "splash" : anim}
+            onChange={(v) => {
+              setAnim(v);
+              setRun((n) => n + 1);
+            }}
+            aria-label="Logo animation"
+          />
+          <Button variant="ghost" onClick={() => setRun((n) => n + 1)}>
+            Replay
+          </Button>
+        </div>
+      }
+    >
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(280px, 1fr))", gap: 16 }}>
+        <div
+          style={{
+            position: "relative",
+            height: 380,
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            overflow: "hidden",
+            borderRadius: "var(--rb-r-xl)",
+            background: "var(--rb-hover)",
+          }}
+        >
+          <LogoMotion key={run} animation={anim} />
+        </div>
+        <div
+          style={{
+            display: "flex",
+            flexWrap: "wrap",
+            gap: 24,
+            alignItems: "center",
+            justifyContent: "center",
+            padding: 24,
+            borderRadius: "var(--rb-r-xl)",
+            background: "var(--rb-hover)",
+          }}
+        >
+          {[96, 48, 32, 20].map((s) => (
+            <LogoMark key={s} size={s} />
+          ))}
+        </div>
+      </div>
+    </Section>
+  );
+}
+
 export function Gallery({ theme, onTheme, lite, onLite }: GalleryProps) {
   const [iconStyle, setIconStyle] = useState<IconStyle>("duotone");
   const [sw, setSw] = useState({ kiosk: true, usb: false, wifi: true });
@@ -228,6 +300,8 @@ export function Gallery({ theme, onTheme, lite, onLite }: GalleryProps) {
             <StatCard label="Apps assigned" value="12" icon={<WidgetDuo />} />
             <StatCard label="Pending changes" value="3" icon={<RocketDuo />} />
           </div>
+
+          <LogoSection />
 
           {/* Icons */}
           <Section

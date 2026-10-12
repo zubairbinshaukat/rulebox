@@ -15,4 +15,6 @@ export { Pill, type PillProps, type PillTone } from "./components/Pill";
 export { Switch, type SwitchProps } from "./components/Switch";
 export { ProgressBar, type ProgressBarProps } from "./components/ProgressBar";
 export { StatCard, type StatCardProps } from "./components/StatCard";
+export { LogoMark, type LogoMarkProps } from "./components/LogoMark";
+export { LogoMotion, type LogoMotionProps, type LogoAnimation } from "./components/LogoMotion";
 export { setTheme, setLite, type Theme } from "./theme";
