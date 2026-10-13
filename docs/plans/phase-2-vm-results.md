@@ -64,7 +64,15 @@ one decision is open (restart during the exit hold).
 | 8 | When the launcher is killed, its Staff App survives and the new launcher starts a second one | **Fixed** (kill-on-close job object), unit-tested on the host; **not re-verified on the VM** (the marker was created once and the VM is reverted) |
 | 9 | After a first `unenroll` that followed a `recover` and re-enable, the Staff password was still in the LSA `DefaultPassword` | **Not reproduced** in a clean run of the same sequence; the normal path deletes it. Watch for it |
 
-## Open decisions
+## Decisions (taken after the run, recommended option each)
+
+| # | Decision | What was done |
+|---|---|---|
+| 1 | Restart within the exit hold | The hold now also ends 15 s after the Staff session has gone (the hold is checked every 5 s; the 5-minute maximum and "an administrator became active" still end it). A restart after that signs Staff in again. Unit-tested; **not yet re-verified on a VM** |
+| 2 | Visual C++ runtime | `rulebox-agent.exe` and `rulebox-shell.exe` link the vcruntime statically (a `build.rs` in each crate, no new dependency; Tauri untouched). **Verified on the clean VM**: `compat` runs and the launcher stays up with no Visual C++ runtime installed. `vm-deploy.ps1` still copies the DLLs for `fake_staff.exe`, which is a test tool |
+| 3 | PIN hash | `rulebox-agent hash-pin` now refuses fewer than 6 digits (the dashboard rule in PRD 12.4). A shorter PIN typed at the exit is still a valid shape, so an earlier hash keeps working. Binding the check to a device-held key is **not** built; the hash stays a portable string by design |
+
+Original write-up of the three points:
 
 1. **Restart within the exit hold.** After the correct exit PIN the agent holds
    `AutoAdminLogon = 0` for up to 5 minutes. If the PC is restarted inside that

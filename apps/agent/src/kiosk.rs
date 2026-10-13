@@ -76,9 +76,15 @@ pub const LOCK_GRACE: Duration = Duration::from_secs(10);
 /// Drift is re-asserted this often even when no event arrives (Section 5.2).
 pub const REASSERT_INTERVAL: Duration = Duration::from_secs(600);
 /// While an exit hold is set it is looked at this often (Section 5.10).
-pub const HOLD_TICK: Duration = Duration::from_secs(30);
+pub const HOLD_TICK: Duration = Duration::from_secs(5);
 /// The exit hold ends by itself after this long (Section 5.10).
 pub const EXIT_HOLD_MAX: Duration = Duration::from_secs(300);
+/// The exit hold also ends this long after the Staff session has gone. Windows
+/// decides about automatic sign-in once, when it shows the sign-in screen; by now
+/// that decision is made, and putting `AutoAdminLogon` back to `"1"` means a restart
+/// signs Staff in again instead of stopping at the sign-in screen (found on the VM:
+/// a restart within the 5 minutes left the PC at the sign-in screen).
+pub const STAFF_GONE_GRACE: Duration = Duration::from_secs(15);
 
 pub const PASSWORD_LEN: usize = 32;
 const UPPER: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZ";
@@ -727,12 +733,25 @@ impl Kiosk<'_> {
 #[derive(Debug, Clone, Copy)]
 pub struct ExitHold {
     pub started: Instant,
+    /// When the Staff session was first seen gone (`None` while it is alive or not
+    /// yet known to be gone).
+    pub gone_since: Option<Instant>,
 }
 
-/// Section 5.10: true when the hold must end now. A session of a user other than
-/// Staff is `Active` (the administrator signed in), or 5 minutes have passed.
+impl ExitHold {
+    pub fn new(started: Instant) -> Self {
+        Self { started, gone_since: None }
+    }
+}
+
+/// Section 5.10: true when the hold must end now. The Staff session has been gone
+/// for [`STAFF_GONE_GRACE`], a session of a user other than Staff is `Active` (the
+/// administrator signed in), or 5 minutes have passed.
 pub fn hold_ended(hold: &ExitHold, now: Instant, sessions: &[SessionInfo], staff_sid: &str) -> bool {
     if now.saturating_duration_since(hold.started) >= EXIT_HOLD_MAX {
+        return true;
+    }
+    if hold.gone_since.is_some_and(|since| now.saturating_duration_since(since) >= STAFF_GONE_GRACE) {
         return true;
     }
     sessions.iter().any(|session| {
@@ -987,6 +1006,10 @@ impl Reconciler {
             if !alive {
                 self.d.session.clear("staff session ended");
             }
+            // The hold remembers how long the Staff session has been gone.
+            if let Some(hold) = self.hold.as_mut() {
+                hold.gone_since = if alive { None } else { hold.gone_since.or(Some(Instant::now())) };
+            }
         }
         if let Some(hold) = self.hold {
             let staff_sid = staff.map(|staff| staff.sid).unwrap_or_default();
@@ -1081,7 +1104,7 @@ impl Reconciler {
                     )
                 };
                 if is_off {
-                    self.set_hold(Some(ExitHold { started: Instant::now() }));
+                    self.set_hold(Some(ExitHold::new(Instant::now())));
                     tracing::info!("exit hold set: automatic sign-in stays off for at most 5 minutes");
                 }
             }

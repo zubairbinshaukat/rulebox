@@ -150,7 +150,7 @@ fn dispatch(cli: Cli) -> anyhow::Result<u8> {
 }
 
 /// `rulebox-agent hash-pin`: prompts on stderr, reads one line from `input`, and
-/// prints the Argon2id hash of a PIN of 4 to 12 ASCII digits on `out` (exit code
+/// prints the Argon2id hash of a PIN of 6 to 12 ASCII digits on `out` (exit code
 /// 0). Anything else is refused with exit code 1. Starts no logging and touches no
 /// file, pipe or registry key, so it is safe on every machine.
 fn hash_pin(
@@ -159,7 +159,7 @@ fn hash_pin(
     err: &mut dyn Write,
 ) -> u8 {
     // A failed write to stderr is not worth a second error.
-    let _ = write!(err, "PIN (4 to 12 digits): ");
+    let _ = write!(err, "PIN (6 to 12 digits): ");
     let _ = err.flush();
     let mut line = String::new();
     if let Err(error) = input.read_line(&mut line) {
@@ -356,21 +356,21 @@ mod tests {
 
     #[test]
     fn hash_pin_prompts_on_stderr_and_prints_only_the_hash_on_stdout() {
-        let (code, out, err) = run("2468\r\n");
+        let (code, out, err) = run("246810\r\n");
         assert_eq!(code, 0);
         assert!(out.starts_with("$argon2id$v=19$m=19456,t=2,p=1$"), "{out}");
         assert_eq!(out.lines().count(), 1);
-        assert!(kdf::verify_secret("2468", out.trim()).unwrap());
-        assert_eq!(err, "PIN (4 to 12 digits): ");
+        assert!(kdf::verify_secret("246810", out.trim()).unwrap());
+        assert_eq!(err, "PIN (6 to 12 digits): ");
     }
 
     #[test]
-    fn hash_pin_rejects_anything_that_is_not_four_to_twelve_digits() {
-        for bad in ["12\n", "12a4\n", "1234567890123\n", "\n", ""] {
+    fn hash_pin_rejects_anything_that_is_not_six_to_twelve_digits() {
+        for bad in ["12\n", "2468\n", "12345\n", "12a456\n", "1234567890123\n", "\n", ""] {
             let (code, out, err) = run(bad);
             assert_eq!(code, 1, "{bad:?}");
             assert!(out.is_empty(), "nothing on stdout for {bad:?}");
-            assert!(err.contains("4 to 12 digits"), "{err}");
+            assert!(err.contains("6 to 12 digits"), "{err}");
         }
     }
 }

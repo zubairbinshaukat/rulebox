@@ -756,7 +756,7 @@ fn session(id: u32, sid: Option<&str>, state: SessionState) -> SessionInfo {
 #[tokio::test(start_paused = true)]
 async fn the_hold_ends_after_5_minutes_or_when_an_administrator_is_active() {
     let start = Instant::now();
-    let hold = ExitHold { started: start };
+    let hold = ExitHold::new(start);
     let staff = "S-1-5-21-1-1-1-2001";
     let after = |secs: u64| start + Duration::from_secs(secs);
 
@@ -775,6 +775,27 @@ async fn the_hold_ends_after_5_minutes_or_when_an_administrator_is_active() {
         &[session(2, Some(staff), SessionState::Active), session(3, Some(ADMIN_SID), SessionState::Active)],
         staff
     ));
+}
+
+/// Found on the VM: a restart within the 5 minutes left the PC at the sign-in
+/// screen, because the value was still "0" when Windows decided at boot. The hold
+/// therefore also ends shortly after the Staff session is gone.
+#[tokio::test(start_paused = true)]
+async fn the_hold_ends_shortly_after_the_staff_session_is_gone() {
+    let start = Instant::now();
+    let staff = "S-1-5-21-1-1-1-2001";
+    let after = |secs: u64| start + Duration::from_secs(secs);
+
+    // The session was seen gone at 20 s: not yet 15 s later... and then it is.
+    let mut hold = ExitHold::new(start);
+    hold.gone_since = Some(after(20));
+    assert!(!hold_ended(&hold, after(20), &[], staff));
+    assert!(!hold_ended(&hold, after(34), &[], staff));
+    assert!(hold_ended(&hold, after(35), &[], staff));
+
+    // A Staff session that is back resets the clock (the caller clears `gone_since`).
+    hold.gone_since = None;
+    assert!(!hold_ended(&hold, after(120), &[], staff));
 }
 
 // -- the reconciler (tests 11 to 19) --------------------------------------------------------------

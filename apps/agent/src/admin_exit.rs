@@ -32,9 +32,15 @@ use crate::platform::{Platform, PlatformError, RegData, RegValueRef};
 use crate::session::SessionManager;
 use crate::state::lock;
 
-/// Shortest and longest exit PIN, in ASCII digits.
+/// Shortest and longest exit PIN the agent accepts when one is typed, in ASCII
+/// digits. A PIN set earlier with fewer digits keeps working.
 pub const MIN_PIN_DIGITS: usize = 4;
 pub const MAX_PIN_DIGITS: usize = 12;
+/// Shortest PIN `rulebox-agent hash-pin` will create a hash for. The hash is a
+/// portable string that travels in the desired-state document, so a short PIN could
+/// be guessed offline by anyone who reads it; six digits is also what the dashboard
+/// asks for (PRD 12.4).
+pub const MIN_NEW_PIN_DIGITS: usize = 6;
 /// How long the client has to finish what it is doing before the sign-out
 /// (`agent.shuttingDown.graceMs`, also the pause before the sign-out call).
 pub const EXIT_GRACE_MS: u64 = 2000;
@@ -194,7 +200,7 @@ pub fn pin_id(pin_hash: &str) -> String {
 
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum HashPinError {
-    #[error("the PIN must be 4 to 12 digits")]
+    #[error("the PIN must be 6 to 12 digits")]
     NotAPin,
     #[error("hashing failed: {0}")]
     Hash(String),
@@ -204,7 +210,7 @@ pub enum HashPinError {
 /// `kdf::hash_secret` PHC string. Touches no file, pipe or registry key.
 pub fn hash_pin_line(line: &str) -> Result<String, HashPinError> {
     let pin = line.trim_end_matches(['\r', '\n']);
-    if !valid_pin(pin) {
+    if !valid_pin(pin) || pin.len() < MIN_NEW_PIN_DIGITS {
         return Err(HashPinError::NotAPin);
     }
     kdf::hash_secret(pin).map_err(|error| HashPinError::Hash(error.to_string()))
@@ -1112,16 +1118,19 @@ mod tests {
     // -- hash-pin (test 15) -------------------------------------------------------------
 
     #[test]
-    fn hash_pin_line_accepts_four_to_twelve_digits_only() {
-        let hash = hash_pin_line("2468\r\n").unwrap();
+    fn hash_pin_line_creates_hashes_for_six_to_twelve_digits_only() {
+        let hash = hash_pin_line("246810\r\n").unwrap();
         assert!(hash.starts_with("$argon2id$v=19$m=19456,t=2,p=1$"), "{hash}");
         assert!(kdf::check_hash(&hash).is_ok());
-        assert!(kdf::verify_secret("2468", &hash).unwrap());
-        assert!(!kdf::verify_secret("2469", &hash).unwrap());
+        assert!(kdf::verify_secret("246810", &hash).unwrap());
+        assert!(!kdf::verify_secret("246811", &hash).unwrap());
         assert_eq!(hash_pin_line("123456789012\n").map(|_| ()), Ok(()));
-        for bad in ["12", "12a4", "1234567890123", "", "\n", " 2468", "24 68"] {
+        // Under six digits is refused for a new hash, although such a PIN typed at
+        // the exit is still a valid shape (an earlier hash keeps working).
+        for bad in ["12", "2468", "12345", "12a456", "1234567890123", "", "\n", " 246810", "246 810"] {
             assert_eq!(hash_pin_line(bad), Err(HashPinError::NotAPin), "{bad:?}");
         }
+        assert!(valid_pin("2468"));
     }
 
     #[test]

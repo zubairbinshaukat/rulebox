@@ -73,7 +73,7 @@ pub enum Command {
         #[arg(long)]
         json: bool,
     },
-    /// (1.1) Hash an exit PIN: reads one line (4 to 12 digits) from standard input and
+    /// (1.1) Hash an exit PIN: reads one line (6 to 12 digits) from standard input and
     /// prints the Argon2id hash. Touches no file, pipe or registry key.
     HashPin,
 }
