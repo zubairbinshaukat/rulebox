@@ -101,8 +101,14 @@ pub fn run() {
             let app_state = AppState::new(agent, initial);
             app_state.bind_app(app.handle().clone());
             spawn_agent_tasks(app_state.clone());
+            // Screenshot automation: any process of this user can write the
+            // file it polls, so it runs only in dev mode and only when asked.
             #[cfg(debug_assertions)]
-            commands::spawn_dev_cmd_poller(app_state.clone());
+            if mode == rulebox_desktop::ShellMode::Dev
+                && std::env::var_os("RULEBOX_STAFF_DEV_CMD").is_some()
+            {
+                commands::spawn_dev_cmd_poller(app_state.clone());
+            }
             app.manage(app_state);
 
             let host = shellwin::init(app.handle(), mode)?;

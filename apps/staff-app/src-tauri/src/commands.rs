@@ -157,8 +157,7 @@ pub async fn sign_in_last(
 #[tauri::command]
 pub fn switch_user(window: Window, state: State<'_, AppState>) -> Result<(), CommandError> {
     require_shell_desktop(&window)?;
-    session::switch_user(&state);
-    Ok(())
+    session::switch_user(&state)
 }
 
 /// Debug overlay only. Release builds keep the ACL entry but always refuse.

@@ -295,7 +295,7 @@ export function SignIn({ shell, last, onSuccess }: SignInProps) {
               <Input
                 aria-label="Username"
                 placeholder="Username"
-                autoComplete="username"
+                autoComplete="off"
                 value={username}
                 disabled={fieldsDisabled}
                 onChange={(e) => setUsername(e.target.value)}
@@ -307,7 +307,7 @@ export function SignIn({ shell, last, onSuccess }: SignInProps) {
                 aria-label="Password"
                 placeholder="Password"
                 type="password"
-                autoComplete="current-password"
+                autoComplete="off"
                 value={password}
                 disabled={fieldsDisabled}
                 onChange={(e) => setPassword(e.target.value)}

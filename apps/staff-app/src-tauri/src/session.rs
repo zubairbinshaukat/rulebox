@@ -194,10 +194,17 @@ pub async fn sign_in_last(state: &AppState, password: String) -> Result<SignInOu
     sign_in(state, username, password).await
 }
 
-pub fn switch_user(state: &AppState) {
+/// Forget the remembered employee on the sign-in screen ("not you?").
+/// Only valid while signed out: it never ends an agent session, so calling
+/// it for a signed-in employee would leave the agent and the UI disagreeing.
+pub fn switch_user(state: &AppState) -> Result<(), CommandError> {
+    if !matches!(state.snapshot().session, SessionState::SignedOut { .. }) {
+        return Err(CommandError::Forbidden);
+    }
     state.update(|s| {
         s.session = SessionState::SignedOut { last: None };
     });
+    Ok(())
 }
 
 /// Pure mapping used by tests: which shell session follows each outcome.

@@ -12,6 +12,9 @@ dist/
 # Design starter (reference only; the real design lives in packages/ui)
 design/
 
+# Screenshots and scratch output from agent runs
+.tmp/
+
 # Personal, never committed
 .personal/
 CLAUDE.local.md
