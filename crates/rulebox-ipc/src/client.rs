@@ -54,6 +54,10 @@ pub enum LinkState {
 pub enum CallError {
     #[error("not connected to the agent")]
     NotLinked,
+    /// The pipe exists but Windows refused the open (error 5): the caller is not
+    /// allowed to talk to it, for example the admin pipe from a non-elevated prompt.
+    #[error("access to the agent pipe was denied")]
+    AccessDenied,
     #[error("the agent did not answer in time")]
     Timeout,
     #[error("the agent returned an error: {0:?}")]
@@ -197,6 +201,8 @@ type Pipe = Framed<NamedPipeClient, FrameCodec>;
 
 enum ConnectError {
     NotFound,
+    /// Windows refused the open (Win32 error 5).
+    AccessDenied,
     NotTrusted,
     Other,
 }
@@ -209,6 +215,7 @@ async fn connect(config: &ClientConfig) -> Result<Pipe, ConnectError> {
             Ok(handle) => break handle,
             Err(Win32Error::Busy) if Instant::now() < give_up => sleep(BUSY_RETRY).await,
             Err(Win32Error::NotFound) => return Err(ConnectError::NotFound),
+            Err(Win32Error::Api { code: 5, .. }) => return Err(ConnectError::AccessDenied),
             Err(_) => return Err(ConnectError::Other),
         }
     };
@@ -292,7 +299,7 @@ async fn run(
                 shared.not_trusted.store(true, Ordering::Relaxed);
                 None
             }
-            Err(ConnectError::NotFound | ConnectError::Other) => None,
+            Err(ConnectError::NotFound | ConnectError::AccessDenied | ConnectError::Other) => None,
         };
 
         if let Some((mut pipe, hello)) = linked {
@@ -401,6 +408,7 @@ pub fn call_once<M: Method>(
         let mut pipe = match connect(&config).await {
             Ok(pipe) => pipe,
             Err(ConnectError::NotTrusted) => return Err(CallError::ServerNotTrusted),
+            Err(ConnectError::AccessDenied) => return Err(CallError::AccessDenied),
             Err(ConnectError::NotFound | ConnectError::Other) => return Err(CallError::NotLinked),
         };
         say_hello(&mut pipe, &info, config.request_timeout).await.ok_or(CallError::NotLinked)?;

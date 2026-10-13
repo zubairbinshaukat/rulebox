@@ -187,6 +187,7 @@ mod tests {
         let rpc = RpcError { code: ErrorCode::Internal, message: "x".into(), retryable: true, data: None };
         for error in [
             CallError::NotLinked,
+            CallError::AccessDenied,
             CallError::Timeout,
             CallError::ServerNotTrusted,
             CallError::Protocol("bad".into()),

@@ -356,6 +356,14 @@ pub fn report_error(error: &CallError, err: &mut dyn Write) -> u8 {
             let _ = writeln!(err, "The Rulebox Agent service is not running.");
             EXIT_NOT_RUNNING
         }
+        CallError::AccessDenied => {
+            let _ = writeln!(
+                err,
+                "error: access denied. The service is running, but this command must be run from an \
+                 elevated (Run as administrator) prompt."
+            );
+            EXIT_ERROR
+        }
         CallError::ServerNotTrusted => {
             let _ = writeln!(
                 err,
@@ -843,6 +851,12 @@ mod tests {
         assert!(String::from_utf8(err).unwrap().starts_with("error: busy: "));
 
         let mut err = Vec::new();
+        // Found on the VM: a standard user running `status` was told the service is
+        // not running, although it was; the real cause is the pipe's access check.
+        let mut denied = Vec::new();
+        assert_eq!(report_error(&CallError::AccessDenied, &mut denied), EXIT_ERROR);
+        let text = String::from_utf8(denied).unwrap();
+        assert!(text.contains("elevated") && !text.contains("not running"), "{text}");
         assert_eq!(report_error(&CallError::ServerNotTrusted, &mut err), EXIT_ERROR);
         assert_eq!(report_error(&CallError::Timeout, &mut err), EXIT_ERROR);
     }

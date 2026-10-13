@@ -234,13 +234,18 @@ pub fn plan(facts: &Facts) -> Plan {
                 // The owner's password cannot come back, so putting automatic sign-in
                 // back to "1" would make Windows try the owner's account with no
                 // password at every start (and count each try as a failed sign-in).
-                if password_lost
+                // That holds when the password was a registry value kept in the
+                // service's secrets, and also when it was the LSA secret the agent
+                // replaced (`lsa_taken_over`): `recover` deletes the Staff password
+                // from the LSA and cannot read the original (only SYSTEM can).
+                if (password_lost || state.kiosk.lsa_taken_over)
                     && entry.key == winlogon(AUTO_ADMIN_LOGON)
                     && data == Some(RegData::String("1".to_string()))
                 {
                     data = Some(RegData::String("0".to_string()));
                     notes.push(
-                        "AutoAdminLogon was left at 0 because the original password could not be restored."
+                        "AutoAdminLogon was left at 0 because the original automatic sign-in password could \
+                         not be restored. Set automatic sign-in up again if you want it."
                             .to_string(),
                     );
                 }
@@ -776,6 +781,33 @@ mod tests {
         for step in &result.steps {
             assert!(!step.describe().contains(OWNER_PLAIN));
         }
+    }
+
+    #[test]
+    fn an_owner_whose_password_was_the_lsa_secret_is_not_left_trying_an_empty_password() {
+        // Found as a gap on the VM: the owner used LSA-based automatic sign-in
+        // (AutoAdminLogon "1", the password only in the LSA). The agent replaced the
+        // secret and recover deletes it, so "1" would fail at every start.
+        let journal = vec![
+            entry("AutoAdminLogon", OriginalValue::String("1".into())),
+            entry("DefaultUserName", OriginalValue::String("Owner".into())),
+        ];
+        let result = plan(&facts(readable(journal.clone(), true), Some("RuleboxStaff"), None));
+        assert!(result
+            .steps
+            .contains(&Step::RestoreValue { key: winlogon("AutoAdminLogon"), data: Some(text("0")) }));
+        assert!(result.notes.iter().any(|note| note.contains("Set automatic sign-in up again")));
+        // The owner name is still restored.
+        assert!(result
+            .steps
+            .contains(&Step::RestoreValue { key: winlogon("DefaultUserName"), data: Some(text("Owner")) }));
+
+        // When the agent never took the secret over (a rollback before that step), "1"
+        // can safely go back: the owner's own secret was left alone.
+        let result = plan(&facts(readable(journal, false), Some("RuleboxStaff"), None));
+        assert!(result
+            .steps
+            .contains(&Step::RestoreValue { key: winlogon("AutoAdminLogon"), data: Some(text("1")) }));
     }
 
     #[test]
