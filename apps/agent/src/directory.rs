@@ -16,6 +16,8 @@ pub enum DirectoryAnswer {
     Ok(DirectoryEmployee),
     WrongCredentials,
     Disabled,
+    // Answered by the Phase 4 directory; the sign-in flow already maps it.
+    #[allow(dead_code)]
     LockedOut { retry_after_ms: u64 },
 }
 

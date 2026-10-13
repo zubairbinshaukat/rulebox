@@ -323,6 +323,7 @@ impl SnapshotHandle {
         self.0.borrow().clone()
     }
 
+    #[cfg(test)]
     pub fn subscribe(&self) -> watch::Receiver<AgentSnapshot> {
         self.0.subscribe()
     }

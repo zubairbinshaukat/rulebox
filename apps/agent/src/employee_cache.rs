@@ -79,6 +79,7 @@ impl EmployeeCache {
         self.entries.iter().find(|entry| entry.username == username)
     }
 
+    #[cfg(test)]
     pub fn len(&self) -> usize {
         self.entries.len()
     }

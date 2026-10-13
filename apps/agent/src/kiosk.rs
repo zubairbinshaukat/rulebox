@@ -795,6 +795,10 @@ pub struct ReconcilerDeps {
     pub simulate: bool,
     /// The Staff SID, for the shell pipe's DACL (plan Section 5.2).
     pub staff_sid_tx: watch::Sender<Option<String>>,
+    /// (Step 11) `<data>\state\recovered.flag`, written by `recover`. While the file
+    /// exists nothing is enabled, repaired or disabled: the kiosk is held off until
+    /// the next `enroll` (which deletes it) or until an administrator does.
+    pub recovered_flag: PathBuf,
 }
 
 enum Action {
@@ -814,6 +818,8 @@ pub struct Reconciler {
     retry_at: Option<Instant>,
     hold_check_at: Option<Instant>,
     lock_checks: Vec<(u32, Instant)>,
+    /// The flag was seen present at the last reconcile (so it is logged once).
+    recovered_logged: bool,
 }
 
 impl Reconciler {
@@ -826,14 +832,44 @@ impl Reconciler {
             retry_at: None,
             hold_check_at: None,
             lock_checks: Vec::new(),
+            recovered_logged: false,
+        }
+    }
+
+    /// True while `recovered.flag` exists. Looked at on every reconcile, so deleting
+    /// the file by hand takes effect at the next trigger without a restart.
+    fn recovered(&mut self) -> bool {
+        let present = self.d.recovered_flag.exists();
+        if present && !self.recovered_logged {
+            tracing::info!(
+                flag = %self.d.recovered_flag.display(),
+                "recovered: the kiosk is held off until the next enroll or until this file is deleted"
+            );
+        }
+        self.recovered_logged = present;
+        present
+    }
+
+    /// `enroll` finished: the administrator wants the kiosk, so the flag goes.
+    fn lift_recovered_flag(&mut self) {
+        match crate::state::remove_file_if_exists(&self.d.recovered_flag) {
+            Ok(()) => {
+                if self.recovered_logged {
+                    tracing::info!("enrollment: the recovered flag was removed");
+                }
+                self.recovered_logged = false;
+            }
+            Err(error) => tracing::error!("cannot remove the recovered flag: {error}"),
         }
     }
 
     /// The exit hold, for tests.
+    #[cfg(test)]
     pub fn hold(&self) -> Option<ExitHold> {
         self.hold
     }
 
+    #[cfg(test)]
     pub fn retry_at(&self) -> Option<Instant> {
         self.retry_at
     }
@@ -864,6 +900,7 @@ impl Reconciler {
             }
             Trigger::ReconcileNow(reply) => {
                 self.held_off = false;
+                self.lift_recovered_flag();
                 self.housekeeping();
                 let status = self.reconcile().await;
                 let _ = reply.send(status);
@@ -1066,6 +1103,11 @@ impl Reconciler {
             // Not enrolled: nothing to do.
             return self.d.snapshot.current().kiosk;
         };
+        if self.recovered() {
+            // `recover` put the machine back and asked for it to stay that way.
+            self.after_reconcile();
+            return kiosk_status(&self.d.shared.read(|state| state.kiosk.clone()));
+        }
         let applied = state.kiosk.applied;
         let (desired_on, version) = self.desired();
         let action = if enrollment.revoked {

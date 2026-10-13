@@ -337,6 +337,7 @@ pub async fn run(
             install: deps.install.clone(),
             simulate: deps.simulate,
             staff_sid_tx,
+            recovered_flag: deps.paths.recovered_flag(),
         },
         exit_rx,
         shutdown.clone(),

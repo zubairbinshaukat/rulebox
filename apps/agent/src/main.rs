@@ -1,10 +1,6 @@
-//! `rulebox-agent`: service host and CLI. `run --console --simulate` (Step 5) and
-//! the admin-pipe commands `status`, `enroll` and `unenroll` (Step 6) are
-//! implemented; the other commands arrive in later steps.
-
-// The skeleton defines the full Platform seam, state and secrets types before the
-// tasks that use them exist (Steps 6 to 11). Remove this allow in Step 11.
-#![allow(dead_code)]
+//! `rulebox-agent`: service host and CLI. `run --console`, the admin-pipe commands
+//! `status`, `enroll` and `unenroll`, `compat`, `hash-pin`, and (Step 11) the
+//! service host and its commands `service run|install|uninstall` and `recover`.
 
 mod admin_exit;
 mod agent;
@@ -28,7 +24,9 @@ mod lockout;
 mod logging;
 mod paths;
 mod platform;
+mod recover;
 mod secrets;
+mod service;
 mod session;
 mod state;
 #[cfg(test)]
@@ -40,14 +38,14 @@ use std::path::PathBuf;
 use std::process::ExitCode;
 use std::sync::{Arc, OnceLock};
 
-use anyhow::{bail, Context};
+use anyhow::Context;
 use clap::Parser;
 use rulebox_ipc::admin::{AdminEnrollParams, AdminUnenrollParams};
 use rulebox_ipc::client::ClientConfig;
 use tokio_util::sync::CancellationToken;
 
 use crate::agent::{Deps, PipeNames, SimOptions};
-use crate::cli::{Cli, Command};
+use crate::cli::{Cli, Command, ServiceAction};
 use crate::paths::{DataPaths, InstallPaths};
 use crate::platform::sim::SimPlatform;
 
@@ -96,15 +94,39 @@ fn dispatch(cli: Cli) -> anyhow::Result<u8> {
             run_simulated(data_dir, sim_demo, sim_offline).map(|()| 0)
         }
         Command::Run { simulate: false, .. } => run_real(),
-        Command::Service { .. } | Command::Recover { .. } => bail!("not implemented yet (Phase 2, Step 11)"),
-        // The admin commands talk to the running service over the admin pipe. They
-        // start no logging and open no data directory (plan Section 5.1).
-        Command::Status { json, simulate } => Ok(ipc_admin::run_status(
-            ClientConfig::admin(simulate).with_timeout(ipc_admin::DEFAULT_TIMEOUT),
-            json,
+        // Step 11. The service host, its install and uninstall, and the offline
+        // recovery. The last three change the machine and start with the guard.
+        Command::Service { action: ServiceAction::Run } => Ok(service::run_dispatcher(&mut std::io::stderr().lock())),
+        Command::Service { action: ServiceAction::Install } => {
+            Ok(service::run_install(&mut std::io::stdout().lock(), &mut std::io::stderr().lock()))
+        }
+        Command::Service { action: ServiceAction::Uninstall { force } } => {
+            Ok(service::run_uninstall(force, &mut std::io::stdout().lock(), &mut std::io::stderr().lock()))
+        }
+        Command::Recover { yes } => Ok(recover::run_recover(
+            yes,
+            &mut std::io::stdin().lock(),
             &mut std::io::stdout().lock(),
             &mut std::io::stderr().lock(),
         )),
+        // The admin commands talk to the running service over the admin pipe. They
+        // start no logging and open no data directory (plan Section 5.1).
+        Command::Status { json, simulate } => {
+            let code = ipc_admin::run_status(
+                ClientConfig::admin(simulate).with_timeout(ipc_admin::DEFAULT_TIMEOUT),
+                json,
+                &mut std::io::stdout().lock(),
+                &mut std::io::stderr().lock(),
+            );
+            // `recover` left a flag: say so (a stat of one file; nothing is opened).
+            if code == 0 && !json && !simulate {
+                let line = DataPaths::from_known_folders().ok().and_then(|paths| recover::status_line(&paths));
+                if let Some(line) = line {
+                    let _ = writeln!(std::io::stdout().lock(), "{line}");
+                }
+            }
+            Ok(code)
+        }
         Command::Enroll { code, name, allow_joined, simulate } => Ok(ipc_admin::run_enroll(
             ClientConfig::admin(simulate).with_timeout(ipc_admin::ENROLL_TIMEOUT),
             AdminEnrollParams { code, device_name: name, allow_joined },
@@ -198,6 +220,8 @@ fn run_with_runtime(deps: Deps) -> anyhow::Result<()> {
         .build()
         .context("start the async runtime")?;
     let shutdown = CancellationToken::new();
+    // Console mode has no session or power events (the service host feeds those, see
+    // `service.rs`); the sender stays open so the receiver keeps waiting for shutdown.
     let (_control_tx, control_rx) = tokio::sync::mpsc::unbounded_channel();
     let result = runtime.block_on(async {
         let on_ctrl_c = shutdown.clone();
@@ -232,9 +256,18 @@ fn run_real() -> anyhow::Result<u8> {
     let _ = PANIC_LOG_DIR.set(paths.logs_dir());
     tracing::info!("console mode: data directory {}", paths.root().display());
 
+    let result = real_deps(paths, install).and_then(run_with_runtime);
+    drop(guard);
+    result.map(|()| 0)
+}
+
+/// The dependencies of the real agent on this PC, shared by console mode and the
+/// service host. The data directory has been checked by the caller, which also
+/// started logging.
+pub(crate) fn real_deps(paths: DataPaths, install: InstallPaths) -> anyhow::Result<Deps> {
     let config = agent::load_config(&paths)?;
     let choice = directory::choose(&config, rulebox_win32::guard::is_test_machine(), false);
-    let deps = Deps {
+    Ok(Deps {
         platform: Arc::new(platform::windows::WindowsPlatform::new(install.clone(), paths.clone())),
         backend_factory: backend::convex::ConvexBackend::factory(),
         install,
@@ -245,10 +278,7 @@ fn run_real() -> anyhow::Result<u8> {
         directory: directory::build(choice, false),
         audit_sink: Arc::new(audit::NullAuditSink),
         sim: SimOptions { demo: false, offline: false },
-    };
-    let result = run_with_runtime(deps);
-    drop(guard);
-    result.map(|()| 0)
+    })
 }
 
 /// `compat [--json]`: reads this PC and prints the compatibility report. It builds

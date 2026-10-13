@@ -836,6 +836,7 @@ impl RecRig {
             install: rig.install.clone(),
             simulate,
             staff_sid_tx: sid_tx,
+            recovered_flag: state_dir.join("recovered.flag"),
         });
         Self { rig, rec, snapshot, session, audit, events, sid_rx }
     }
@@ -1382,6 +1383,59 @@ async fn a_repair_that_fails_leaves_a_working_kiosk_on_but_a_blocker_switches_it
     assert_eq!(r.rig.winlogon("AutoAdminLogon"), None);
 }
 
+// -- the recovered flag (Step 11) -------------------------------------------------------------------------
+
+fn flag_path(r: &RecRig) -> std::path::PathBuf {
+    r.rig.dir.path().join("state").join("recovered.flag")
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_recovered_pc_is_held_off_by_every_trigger_until_the_flag_goes() {
+    let mut r = RecRig::new();
+    std::fs::write(flag_path(&r), b"recovered").unwrap();
+    r.want(true, 1);
+
+    for trigger in [Trigger::Startup, Trigger::DesiredChanged, Trigger::Session, Trigger::Power, Trigger::Reassert]
+    {
+        r.trigger(trigger).await;
+    }
+    // Nothing was changed, not even read-modify-write of the account.
+    assert_eq!(r.rig.mutating_since(0), Vec::<SimOp>::new());
+    assert_eq!(r.state().kiosk.applied, KioskApplied::NotApplied);
+    assert_eq!(r.status(), KioskStatus { enabled: false, phase: KioskPhase::NotApplied, error_code: None });
+
+    // An administrator deletes the file: the next trigger enables the kiosk.
+    std::fs::remove_file(flag_path(&r)).unwrap();
+    r.trigger(Trigger::Reassert).await;
+    assert_eq!(r.state().kiosk.applied, KioskApplied::Enabled);
+}
+
+#[tokio::test(start_paused = true)]
+async fn enrollment_deletes_the_recovered_flag_and_enables_the_kiosk() {
+    let mut r = RecRig::new();
+    std::fs::write(flag_path(&r), b"recovered").unwrap();
+    r.trigger(Trigger::Startup).await;
+    assert_eq!(r.state().kiosk.applied, KioskApplied::NotApplied);
+
+    let (reply, answer) = oneshot::channel();
+    r.trigger(Trigger::ReconcileNow(reply)).await;
+    let status = answer.await.unwrap();
+    assert!(status.enabled, "{status:?}");
+    assert!(!flag_path(&r).exists(), "enroll lifts the hold");
+    assert_eq!(r.state().kiosk.applied, KioskApplied::Enabled);
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_new_document_does_not_lift_the_recovered_flag() {
+    let mut r = RecRig::new();
+    std::fs::write(flag_path(&r), b"recovered").unwrap();
+    r.want(true, 5);
+    r.trigger(Trigger::DesiredChanged).await;
+    assert!(flag_path(&r).exists());
+    assert_eq!(r.state().kiosk.applied, KioskApplied::NotApplied);
+    assert_eq!(r.state().last_applied_version, 0);
+}
+
 // -- the handle (KioskControl) and the task loop ----------------------------------------------------------
 
 #[tokio::test]
@@ -1407,6 +1461,7 @@ async fn the_handle_reconciles_on_request_and_holds_the_kiosk_off_after_a_disabl
             install: rig.install.clone(),
             simulate: false,
             staff_sid_tx: sid_tx,
+            recovered_flag: rig.dir.path().join("state").join("recovered.flag"),
         },
         exit_rx,
         shutdown.clone(),

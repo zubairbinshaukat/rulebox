@@ -56,6 +56,8 @@ pub enum AuditSinkError {
     /// This build cannot deliver at all.
     Unavailable,
     /// The backend could not be reached; try again on the next trigger.
+    // Returned by the Phase 4 Convex sink; only tests construct it before that.
+    #[allow(dead_code)]
     Unreachable,
 }
 
@@ -148,6 +150,7 @@ impl AuditQueue {
     }
 
     /// Removes the first `count` records and saves.
+    #[cfg(test)]
     pub fn ack(&mut self, count: usize) -> std::io::Result<()> {
         self.ack_reported(count, 0)
     }
@@ -164,6 +167,8 @@ impl AuditQueue {
         self.records.len()
     }
 
+    // The companion of `len` (clippy `len_without_is_empty`); nothing asks yet.
+    #[allow(dead_code)]
     pub fn is_empty(&self) -> bool {
         self.records.is_empty()
     }

@@ -148,6 +148,7 @@ pub struct StatusReport {
 
 /// The object keys of `StatusReport` that `devices:heartbeat` accepts (`convex/devices.ts`,
 /// `statusValidator`). A test pins the serialized key set to this list.
+#[cfg(test)]
 pub const STATUS_KEYS: [&str; 12] = [
     "agentVersion",
     "os",

@@ -25,6 +25,7 @@ tokio-util = { workspace = true, features = ["rt"] }
 tracing.workspace = true
 tracing-appender.workspace = true
 tracing-subscriber.workspace = true
+windows-service.workspace = true
 
 [dev-dependencies]
 # Pause the clock in the hello-deadline test; raw pipe client for protocol tests.

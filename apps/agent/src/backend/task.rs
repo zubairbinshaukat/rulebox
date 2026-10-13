@@ -144,11 +144,6 @@ impl DesiredSync {
         Self { floor: last_applied_version, accepted: None, problem: None }
     }
 
-    /// The version a document must reach to not be stale.
-    pub fn floor(&self) -> u64 {
-        self.floor
-    }
-
     /// Reads `desired-state.json` once at start and applies it (without writing it
     /// back), so the snapshot and the policy show the cached state while offline.
     pub fn load_cached(&mut self, ctx: &TaskContext) {
@@ -570,6 +565,7 @@ impl BackendRunner {
     }
 
     /// True while the task is alive (false after a revocation ended it).
+    #[cfg(test)]
     pub async fn is_running(&self) -> bool {
         self.running.lock().await.as_ref().is_some_and(|task| !task.handle.is_finished())
     }
@@ -592,6 +588,8 @@ mod tests {
     const START_MS: u64 = 1_760_000_000_000;
 
     struct Rig {
+        // Held only so the directory is removed on drop.
+        #[allow(dead_code)]
         dir: TempDir,
         ctx: Arc<TaskContext>,
         control: Arc<FakeKioskControl>,

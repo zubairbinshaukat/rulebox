@@ -12,10 +12,10 @@ use windows::Win32::Security::Authorization::{
     SetNamedSecurityInfoW, SDDL_REVISION_1, SE_FILE_OBJECT,
 };
 use windows::Win32::Security::{
-    AdjustTokenPrivileges, GetSecurityDescriptorDacl, LookupPrivilegeValueW, ACL,
-    DACL_SECURITY_INFORMATION, LUID_AND_ATTRIBUTES, OWNER_SECURITY_INFORMATION,
+    AdjustTokenPrivileges, GetSecurityDescriptorDacl, GetTokenInformation, LookupPrivilegeValueW,
+    TokenElevation, ACL, DACL_SECURITY_INFORMATION, LUID_AND_ATTRIBUTES, OWNER_SECURITY_INFORMATION,
     PROTECTED_DACL_SECURITY_INFORMATION, PSECURITY_DESCRIPTOR, PSID, SECURITY_ATTRIBUTES,
-    SE_PRIVILEGE_ENABLED, TOKEN_ADJUST_PRIVILEGES, TOKEN_PRIVILEGES, TOKEN_QUERY,
+    SE_PRIVILEGE_ENABLED, TOKEN_ADJUST_PRIVILEGES, TOKEN_ELEVATION, TOKEN_PRIVILEGES, TOKEN_QUERY,
 };
 use windows::Win32::Storage::FileSystem::{CreateDirectoryW, FILE_ATTRIBUTE_REPARSE_POINT};
 use windows::Win32::System::Threading::{GetCurrentProcess, OpenProcessToken};
@@ -251,9 +251,41 @@ pub fn enable_privileges(names: &[&str]) -> Result<()> {
     Ok(())
 }
 
+/// True when this process runs with an elevated token (an administrator who
+/// accepted the UAC prompt, or SYSTEM). The same `TokenElevation` test the admin
+/// pipe applies to its clients. Read-only: it changes nothing, so it is not guarded.
+pub fn process_is_elevated() -> Result<bool> {
+    let mut token = Default::default();
+    // SAFETY: the pseudo handle from `GetCurrentProcess` is always valid; `token` is a valid out pointer.
+    unsafe { OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY, &mut token) }
+        .map_err(|e| api_err("OpenProcessToken", &e))?;
+    let token = OwnedHandle::new(token)?;
+    let mut elevation = TOKEN_ELEVATION::default();
+    let mut returned = 0u32;
+    // SAFETY: the buffer is a TOKEN_ELEVATION and the size passed is its size.
+    unsafe {
+        GetTokenInformation(
+            token.raw(),
+            TokenElevation,
+            Some(std::ptr::from_mut(&mut elevation).cast::<c_void>()),
+            std::mem::size_of::<TOKEN_ELEVATION>() as u32,
+            &mut returned,
+        )
+    }
+    .map_err(|e| api_err("GetTokenInformation", &e))?;
+    Ok(elevation.TokenIsElevated != 0)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_process_token_can_be_read() {
+        // Either answer is fine (it depends on how the tests were started); the
+        // call must not fail.
+        process_is_elevated().unwrap();
+    }
 
     #[test]
     fn sddl_builds_and_garbage_fails() {

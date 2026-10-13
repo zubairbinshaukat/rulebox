@@ -157,6 +157,7 @@ impl SessionManager {
     }
 
     /// The normalized login name of the signed-in employee.
+    #[cfg(test)]
     pub fn current_username(&self) -> Option<String> {
         lock(&self.inner.session).as_ref().map(|s| s.username.clone())
     }

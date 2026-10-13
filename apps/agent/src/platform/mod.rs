@@ -129,6 +129,9 @@ pub trait Platform: Send + Sync + 'static {
     fn find_local_user(&self, user_name: &str) -> Result<Option<LocalUser>, PlatformError>;
     fn read_machine_value(&self, key: &RegValueRef) -> Result<Option<RegData>, PlatformError>;
     fn sessions(&self) -> Result<Vec<SessionInfo>, PlatformError>;
+    // The launcher watchdog (Step 13) is the caller of `find_processes`,
+    // `launch_in_session` and `terminate_process`.
+    #[allow(dead_code)]
     fn find_processes(&self, session_id: u32, image_path: &Path) -> Result<Vec<u32>, PlatformError>;
     /// Launcher and `current.json` target exist.
     fn shell_binaries_ok(&self) -> Result<ShellBinaries, PlatformError>;
@@ -152,7 +155,9 @@ pub trait Platform: Send + Sync + 'static {
     fn set_staff_user_policy(&self, sid: &str, name: &str, value: Option<u32>) -> Result<(), PlatformError>;
     fn logoff_session(&self, session_id: u32) -> Result<(), PlatformError>;
     /// Returns the new process id.
+    #[allow(dead_code)]
     fn launch_in_session(&self, session_id: u32, expected_sid: &str, exe: &Path) -> Result<u32, PlatformError>;
+    #[allow(dead_code)]
     fn terminate_process(&self, pid: u32, expected_image: &Path, expected_sid: &str) -> Result<(), PlatformError>;
     /// Already unprotected.
     fn secrets_load(&self) -> Result<Option<Vec<u8>>, PlatformError>;

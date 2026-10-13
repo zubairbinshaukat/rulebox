@@ -7,8 +7,8 @@ use std::path::{Path, PathBuf};
 use std::sync::{Mutex, MutexGuard, PoisonError};
 
 use super::{
-    LocalUser, OsInfo, Platform, PlatformError, RegData, RegValueRef, SessionInfo, SessionState,
-    ShellBinaries, ShellMechanism, StaffUserSpec,
+    LocalUser, OsInfo, Platform, PlatformError, RegData, RegValueRef, SessionInfo, ShellBinaries,
+    ShellMechanism, StaffUserSpec,
 };
 use crate::state::write_atomic;
 
@@ -44,6 +44,7 @@ pub enum SimOp {
 impl SimOp {
     /// The calls of the `mutating` group of plan Section 5.3 (`test_logon` is in it:
     /// it is a sign-in attempt that counts towards the account lockout).
+    #[cfg(test)]
     pub fn is_mutating(self) -> bool {
         !matches!(
             self,
@@ -167,12 +168,14 @@ impl SimPlatform {
     }
 
     /// The next call of `op` returns `err` (queued: one error per call).
+    #[cfg(test)]
     pub fn fail_next(&self, op: SimOp, err: PlatformError) {
         lock(&self.failures).entry(op).or_default().push_back(Some(err));
     }
 
     /// The call of `op` that comes after `skip` more calls of it fails (`skip` 0 is
     /// the same as `fail_next`). Counted from the calls still to come.
+    #[cfg(test)]
     pub fn fail_nth(&self, op: SimOp, skip: usize, err: PlatformError) {
         let mut failures = lock(&self.failures);
         let queue = failures.entry(op).or_default();
@@ -181,6 +184,7 @@ impl SimPlatform {
     }
 
     /// Reads or edits the simulated machine.
+    #[cfg(test)]
     pub fn with_world<R>(&self, f: impl FnOnce(&mut SimWorld) -> R) -> R {
         f(&mut lock(&self.world))
     }
@@ -444,11 +448,16 @@ impl Platform for SimPlatform {
 
 impl SimPlatform {
     /// Test helper: adds a signed-in (or disconnected) session.
+    #[cfg(test)]
     pub fn add_session(&self, id: u32, user_sid: Option<&str>, active: bool) {
         self.with_world(|w| {
             w.sessions.push(SessionInfo {
                 id,
-                state: if active { SessionState::Active } else { SessionState::Disconnected },
+                state: if active {
+                    super::SessionState::Active
+                } else {
+                    super::SessionState::Disconnected
+                },
                 user_sid: user_sid.map(str::to_string),
                 is_console: true,
             });

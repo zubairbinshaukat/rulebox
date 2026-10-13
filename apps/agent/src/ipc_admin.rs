@@ -48,8 +48,9 @@ pub const EXIT_OPERATION_FAILED: u8 = 3;
 
 // -- the server ------------------------------------------------------------------
 
-/// What `admin.enroll` and `admin.unenroll` do. Step 8 and Step 11 provide the
-/// real one (it sends the work to the reconciler); until then [`NotAvailableYet`].
+/// What `admin.enroll` and `admin.unenroll` do. The real one is `Enroller`
+/// (Step 8: it sends the work to the reconciler); tests also use the
+/// `NotAvailableYet` stub.
 pub trait AdminHandler: Send + Sync + 'static {
     fn enroll(&self, params: AdminEnrollParams) -> BoxFuture<'static, Result<AdminEnrollResult, RpcError>>;
     fn unenroll(&self, params: AdminUnenrollParams) -> BoxFuture<'static, Result<(), RpcError>>;
@@ -75,9 +76,12 @@ pub fn operation_failed(
     }
 }
 
-/// Answers `operation_failed` / `not_available_yet` for both operations.
+/// Answers `operation_failed` / `not_available_yet` for both operations. Only the
+/// tests use it now that `Enroller` exists.
+#[cfg(test)]
 pub struct NotAvailableYet;
 
+#[cfg(test)]
 impl NotAvailableYet {
     fn failure(what: &str) -> RpcError {
         operation_failed(
@@ -89,6 +93,7 @@ impl NotAvailableYet {
     }
 }
 
+#[cfg(test)]
 impl AdminHandler for NotAvailableYet {
     fn enroll(&self, _params: AdminEnrollParams) -> BoxFuture<'static, Result<AdminEnrollResult, RpcError>> {
         std::future::ready(Err(Self::failure("Enrollment"))).boxed()

@@ -28,6 +28,8 @@ impl InstallPaths {
         &self.root
     }
 
+    /// The service's own program. Step 13 compares it with a pipe peer's image.
+    #[allow(dead_code)]
     pub fn agent_exe(&self) -> PathBuf {
         self.root.join("rulebox-agent.exe")
     }
@@ -40,6 +42,8 @@ impl InstallPaths {
         self.root.join("current.json")
     }
 
+    /// `<install>\versions`; the watchdog (Step 13) and the updater (Phase 6) use it.
+    #[allow(dead_code)]
     pub fn versions_dir(&self) -> PathBuf {
         self.root.join("versions")
     }
@@ -94,6 +98,12 @@ impl DataPaths {
 
     pub fn agent_config(&self) -> PathBuf {
         self.state_dir().join("agent-config.json")
+    }
+
+    /// (Step 11) Written by `recover`. A service that finds it does not enable the
+    /// kiosk until the next `enroll` or until an administrator deletes it.
+    pub fn recovered_flag(&self) -> PathBuf {
+        self.state_dir().join("recovered.flag")
     }
 
     /// (1.1) Failure counters and lock times for the exit PIN and employee passwords.
@@ -232,6 +242,7 @@ mod tests {
         assert!(data.lockouts().ends_with("state/lockouts.json"));
         assert!(data.employee_cache().ends_with("state/employee-cache.json"));
         assert!(data.audit_queue().ends_with("state/audit-queue.json"));
+        assert!(data.recovered_flag().ends_with("state/recovered.flag"));
         assert!(data.sim_files().ends_with("sim-files"));
     }
 

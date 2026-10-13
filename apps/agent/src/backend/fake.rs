@@ -72,6 +72,7 @@ impl FakeBackend {
         lock(&self.inner.enroll_script).push_back(result);
     }
 
+    #[allow(dead_code)]
     pub fn set_enroll_delay(&self, delay: Duration) {
         *lock(&self.inner.enroll_delay) = delay;
     }

@@ -421,6 +421,8 @@ enum End {
     Shutdown,
     PeerClosed,
     QueueFull,
+    // The text is for the `Debug` output in the connection log.
+    #[allow(dead_code)]
     BadFrame(&'static str),
     Protocol,
 }

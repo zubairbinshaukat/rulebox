@@ -589,6 +589,8 @@ mod tests {
     }
 
     struct Rig {
+        // Held only so the directory is removed on drop.
+        #[allow(dead_code)]
         dir: TempDir,
         platform: Arc<SimPlatform>,
         ctx: Arc<TaskContext>,

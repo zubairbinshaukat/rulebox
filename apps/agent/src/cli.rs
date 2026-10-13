@@ -76,9 +76,16 @@ pub enum Command {
 
 #[derive(Subcommand, Debug, PartialEq, Eq)]
 pub enum ServiceAction {
+    /// For the service manager only: starts the service host.
     Run,
+    /// Create (or update) the Windows service and start it. Dev and VM use only.
     Install,
-    Uninstall,
+    /// Stop and delete the service.
+    Uninstall {
+        /// Remove the service even when the kiosk is applied: runs `recover` first.
+        #[arg(long)]
+        force: bool,
+    },
 }
 
 #[cfg(test)]
@@ -95,7 +102,14 @@ mod tests {
     fn parses_every_command_line_in_the_plan() {
         assert_eq!(parse(&["service", "run"]), Command::Service { action: ServiceAction::Run });
         assert_eq!(parse(&["service", "install"]), Command::Service { action: ServiceAction::Install });
-        assert_eq!(parse(&["service", "uninstall"]), Command::Service { action: ServiceAction::Uninstall });
+        assert_eq!(
+            parse(&["service", "uninstall"]),
+            Command::Service { action: ServiceAction::Uninstall { force: false } }
+        );
+        assert_eq!(
+            parse(&["service", "uninstall", "--force"]),
+            Command::Service { action: ServiceAction::Uninstall { force: true } }
+        );
         assert_eq!(
             parse(&["run", "--console"]),
             Command::Run {
