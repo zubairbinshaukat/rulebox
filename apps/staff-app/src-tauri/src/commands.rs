@@ -1,9 +1,13 @@
 //! Thin `#[tauri::command]` wrappers. Every command checks the caller's
 //! window label prefix before doing anything.
 
-use tauri::{State, Window};
+use std::sync::Arc;
+
+use rulebox_desktop::placement::Rect;
+use tauri::{AppHandle, State, Window};
 
 use crate::model::{ShellState, ThemeDto};
+use crate::shellwin::{AnchorRect, DesktopHost, PopupKind};
 use crate::state::AppState;
 
 /// Why a command refused to run.
@@ -11,6 +15,8 @@ use crate::state::AppState;
 pub enum CommandError {
     #[error("forbidden")]
     Forbidden,
+    #[error("{0}")]
+    Failed(String),
     #[error("{0}")]
     Agent(#[from] crate::agent::AgentError),
 }
@@ -74,6 +80,47 @@ pub fn dismiss_notice(
 ) -> Result<(), CommandError> {
     require_shell_or_app(&window)?;
     state.dismiss_notice(id);
+    Ok(())
+}
+
+/// Open the shared popup. `anchor` is the control that opened it, in
+/// **physical** pixels relative to the calling window's client area.
+#[tauri::command]
+pub fn popup_open(
+    window: Window,
+    app: AppHandle,
+    host: State<'_, Arc<DesktopHost>>,
+    kind: PopupKind,
+    anchor: Option<AnchorRect>,
+) -> Result<(), CommandError> {
+    require_label(&window, "shell-")?;
+    let anchor = match anchor {
+        Some(rect) => {
+            let origin = window
+                .inner_position()
+                .map_err(|error| CommandError::Failed(error.to_string()))?;
+            let left = origin.x + rect.x.round() as i32;
+            let top = origin.y + rect.y.round() as i32;
+            Some(Rect::new(
+                left,
+                top,
+                left + rect.width.round() as i32,
+                top + rect.height.round() as i32,
+            ))
+        }
+        None => None,
+    };
+    crate::shellwin::popup_open(&app, &host, kind, anchor).map_err(CommandError::Failed)
+}
+
+#[tauri::command]
+pub fn popup_close(
+    window: Window,
+    app: AppHandle,
+    host: State<'_, Arc<DesktopHost>>,
+) -> Result<(), CommandError> {
+    require_label(&window, "shell-")?;
+    crate::shellwin::popup_close(&app, &host);
     Ok(())
 }
 

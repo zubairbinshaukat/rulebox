@@ -10,6 +10,8 @@
     "allow-ui-ready",
     "allow-ui-alive",
     "allow-dismiss-notice",
-    "allow-dev-set-display"
+    "allow-dev-set-display",
+    "allow-popup-open",
+    "allow-popup-close"
   ]
 }

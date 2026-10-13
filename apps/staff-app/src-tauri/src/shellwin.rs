@@ -1,0 +1,439 @@
+//! The three shell windows: `shell-desktop`, `shell-taskbar`, `shell-popup`
+//! (plan Section 5.1 and Step 4). Rust creates them, places them in physical
+//! pixels and keeps them in place; React only draws the content.
+//!
+//! Shell mode (no Explorer, VM): the desktop covers the monitor at the
+//! bottom of the z-order, the taskbar strip is the bottom 84 px, and the
+//! Windows work area is reduced to what is above the strip. Dev mode
+//! (Explorer running): a normal decorated window and a strip directly above
+//! the Windows taskbar; **nothing session-wide is touched**.
+
+use std::sync::{Arc, Mutex};
+use std::time::Duration;
+
+use rulebox_desktop::placement::{
+    self, popup_rect, taskbar_rect, taskbar_zone_px, usable_bounds, Rect, POPUP_GAP_LOGICAL,
+};
+use rulebox_desktop::workarea::{self, MonitorRect};
+use rulebox_desktop::{DesktopEvent, MsgLoop, ShellMode, ShellToken};
+use serde::{Deserialize, Serialize};
+use tauri::{
+    AppHandle, Emitter, Manager, PhysicalPosition, PhysicalSize, WebviewUrl, WebviewWindow,
+    WebviewWindowBuilder, WindowEvent,
+};
+use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
+
+pub const DESKTOP: &str = "shell-desktop";
+pub const TASKBAR: &str = "shell-taskbar";
+pub const POPUP: &str = "shell-popup";
+
+/// Bursts of display messages (one per monitor property) become one re-place.
+const REAPPLY_DEBOUNCE: Duration = Duration::from_millis(150);
+
+/// What the shared popup window is showing. The page picks its content from
+/// `popup://show { kind }`. Sizes are provisional; the steps that build each
+/// popup adjust them.
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub enum PopupKind {
+    Start,
+    QuickSettings,
+    Account,
+    Switcher,
+    Thumb,
+    Confirm,
+}
+
+impl PopupKind {
+    /// Size in logical pixels.
+    pub fn logical_size(self) -> (i32, i32) {
+        match self {
+            PopupKind::Start => (560, 640),
+            PopupKind::QuickSettings => (360, 440),
+            PopupKind::Account => (288, 232),
+            PopupKind::Switcher => (720, 232),
+            PopupKind::Thumb => (272, 196),
+            PopupKind::Confirm => (400, 232),
+        }
+    }
+}
+
+/// A control's rectangle in **physical** pixels, relative to the client area
+/// of the window that reports it (the taskbar page multiplies
+/// `getBoundingClientRect()` by `devicePixelRatio`).
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq)]
+pub struct AnchorRect {
+    pub x: f64,
+    pub y: f64,
+    pub width: f64,
+    pub height: f64,
+}
+
+/// Owns the message loop and the shell-mode token.
+pub struct DesktopHost {
+    mode: ShellMode,
+    token: Option<Arc<ShellToken>>,
+    msgloop: Mutex<Option<MsgLoop>>,
+    /// Lets window events (DPI change) join the Win32 event stream.
+    events: UnboundedSender<DesktopEvent>,
+    popup: Mutex<Option<PopupKind>>,
+}
+
+impl DesktopHost {
+    pub fn mode(&self) -> ShellMode {
+        self.mode
+    }
+
+    /// Stop the message loop (restores the work area in shell mode).
+    pub fn shutdown(&self) {
+        let taken = self
+            .msgloop
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .take();
+        if let Some(msgloop) = taken {
+            msgloop.stop();
+        }
+    }
+
+    fn request_reapply(&self) {
+        let _ = self.events.send(DesktopEvent::DpiChanged);
+    }
+}
+
+/// Fallback when Windows cannot tell us about the monitor: a small desktop so
+/// the shell still comes up and the problem is visible in the log.
+fn fallback_monitor() -> MonitorRect {
+    let rect = Rect::new(0, 0, 1366, 768);
+    MonitorRect {
+        rect,
+        work: rect,
+        dpi: 96,
+        scale: 1.0,
+    }
+}
+
+fn current_monitor() -> MonitorRect {
+    match workarea::primary_monitor() {
+        Ok(monitor) => monitor,
+        Err(error) => {
+            tracing::error!(%error, "cannot read the primary monitor; using 1366x768");
+            fallback_monitor()
+        }
+    }
+}
+
+fn place(window: &WebviewWindow, rect: Rect) {
+    if let Err(error) = window.set_position(PhysicalPosition::new(rect.left, rect.top)) {
+        tracing::warn!(label = window.label(), %error, "set_position failed");
+    }
+    let size = PhysicalSize::new(rect.width().max(1) as u32, rect.height().max(1) as u32);
+    if let Err(error) = window.set_size(size) {
+        tracing::warn!(label = window.label(), %error, "set_size failed");
+    }
+}
+
+fn raw_hwnd(window: &WebviewWindow) -> Option<isize> {
+    window.hwnd().ok().map(|hwnd| hwnd.0 as isize)
+}
+
+/// Create the three windows, start the message loop and (shell mode) take
+/// over the work area. Call once, from `setup`.
+pub fn init(app: &AppHandle, mode: ShellMode) -> Result<Arc<DesktopHost>, String> {
+    let (events_tx, events_rx) = tokio::sync::mpsc::unbounded_channel();
+    let msgloop = MsgLoop::start(mode, events_tx.clone())
+        .map_err(|error| format!("start the desktop message loop: {error}"))?;
+
+    let host = Arc::new(DesktopHost {
+        mode,
+        token: ShellToken::acquire(mode).map(Arc::new),
+        msgloop: Mutex::new(Some(msgloop)),
+        events: events_tx,
+        popup: Mutex::new(None),
+    });
+
+    create_windows(app, &host)?;
+    take_over_session(&host);
+    reapply(app, &host);
+    show_initial(app);
+
+    let task_app = app.clone();
+    let task_host = Arc::clone(&host);
+    tauri::async_runtime::spawn(async move {
+        consume_events(task_app, task_host, events_rx).await;
+    });
+
+    tracing::info!(mode = ?mode, "shell windows created");
+    Ok(host)
+}
+
+/// The settings of one shell window (the table in plan Step 4).
+struct Spec {
+    label: &'static str,
+    route: &'static str,
+    title: &'static str,
+    decorations: bool,
+    resizable: bool,
+    always_on_top: bool,
+    focusable: bool,
+    focused: bool,
+}
+
+fn build_window(app: &AppHandle, spec: &Spec) -> Result<WebviewWindow, String> {
+    let label = spec.label;
+    let url = WebviewUrl::App(format!("shell.html#/{}", spec.route).into());
+    WebviewWindowBuilder::new(app, label, url)
+        .title(spec.title)
+        .decorations(spec.decorations)
+        .resizable(spec.resizable)
+        .always_on_top(spec.always_on_top)
+        .focusable(spec.focusable)
+        .focused(spec.focused)
+        // Created hidden, placed in physical pixels, then shown: the builder's
+        // own position is logical and would flash at the wrong scale.
+        .visible(false)
+        .shadow(false)
+        .devtools(cfg!(debug_assertions))
+        .disable_drag_drop_handler()
+        .build()
+        .map_err(|error| format!("create {label}: {error}"))
+}
+
+fn create_windows(app: &AppHandle, host: &Arc<DesktopHost>) -> Result<(), String> {
+    let shell = host.mode == ShellMode::Shell;
+
+    let desktop = build_window(
+        app,
+        &Spec {
+            label: DESKTOP,
+            route: "desktop",
+            title: if shell { "Rulebox" } else { "Rulebox (dev)" },
+            decorations: !shell,
+            resizable: !shell,
+            always_on_top: false,
+            focusable: true,
+            focused: true,
+        },
+    )?;
+    let taskbar = build_window(
+        app,
+        &Spec {
+            label: TASKBAR,
+            route: "taskbar",
+            title: "Rulebox taskbar",
+            decorations: false,
+            resizable: false,
+            always_on_top: shell,
+            focusable: false,
+            focused: false,
+        },
+    )?;
+    let popup = build_window(
+        app,
+        &Spec {
+            label: POPUP,
+            route: "popup",
+            title: "Rulebox",
+            decorations: false,
+            resizable: false,
+            always_on_top: true,
+            focusable: true,
+            focused: false,
+        },
+    )?;
+
+    if !shell {
+        // Dev mode: an ordinary window the developer can move around.
+        let _ = desktop.set_size(tauri::LogicalSize::new(1280.0, 800.0));
+        let _ = desktop.center();
+    }
+
+    // Our own strip and popup never get a taskbar button of their own.
+    for window in [&taskbar, &popup] {
+        if let Some(hwnd) = raw_hwnd(window) {
+            if let Err(error) = rulebox_desktop::windows::set_tool_window(hwnd) {
+                tracing::warn!(label = window.label(), %error, "WS_EX_TOOLWINDOW failed");
+            }
+        }
+    }
+
+    wire_events(&desktop, host, WindowRole::Desktop);
+    wire_events(&taskbar, host, WindowRole::Taskbar);
+    wire_events(&popup, host, WindowRole::Popup);
+    Ok(())
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum WindowRole {
+    Desktop,
+    Taskbar,
+    Popup,
+}
+
+fn wire_events(window: &WebviewWindow, host: &Arc<DesktopHost>, role: WindowRole) {
+    let host = Arc::clone(host);
+    let handle = window.app_handle().clone();
+    let label = window.label().to_string();
+    window.on_window_event(move |event| match event {
+        // The desktop and the taskbar live for the whole run.
+        WindowEvent::CloseRequested { api, .. } if role != WindowRole::Popup => {
+            api.prevent_close();
+        }
+        WindowEvent::Focused(true) if role == WindowRole::Desktop => {
+            // Keep the desktop under every program window.
+            if let (Some(token), Some(window)) = (&host.token, handle.get_webview_window(&label)) {
+                if let Some(hwnd) = raw_hwnd(&window) {
+                    if let Err(error) = rulebox_desktop::windows::send_to_bottom(token, hwnd) {
+                        tracing::warn!(%error, "could not send the desktop to the bottom");
+                    }
+                }
+            }
+        }
+        WindowEvent::Focused(false) if role == WindowRole::Popup => {
+            hide_popup(&handle, &host);
+        }
+        WindowEvent::ScaleFactorChanged { .. } => host.request_reapply(),
+        _ => {}
+    });
+}
+
+/// Shell-mode start-up, in this order: taskman window, hide minimized
+/// windows, reserve the bottom strip. Runs on the message loop thread.
+fn take_over_session(host: &Arc<DesktopHost>) {
+    let Some(token) = host.token.clone() else {
+        return;
+    };
+    let guard = host.msgloop.lock().unwrap_or_else(|e| e.into_inner());
+    let Some(msgloop) = guard.as_ref() else {
+        return;
+    };
+    // Fire and forget: failures are logged on the loop thread.
+    drop(msgloop.run(move |ctx| {
+        if let Err(error) = workarea::register_taskman(&token, ctx.hwnd) {
+            tracing::warn!(%error, "SetTaskmanWindow failed");
+        }
+        if let Err(error) = workarea::hide_minimized(&token) {
+            tracing::warn!(%error, "hiding minimized windows failed");
+        }
+        // The work area itself is reserved by `reapply`, which knows the scale.
+    }));
+}
+
+/// Place the windows for the monitor as it is now. Shell mode also
+/// (re)reserves the work area.
+pub fn reapply(app: &AppHandle, host: &Arc<DesktopHost>) {
+    let monitor = current_monitor();
+    let zone = taskbar_zone_px(monitor.scale);
+    let strip = taskbar_rect(host.mode, monitor.rect, monitor.work, monitor.scale);
+
+    if let Some(taskbar) = app.get_webview_window(TASKBAR) {
+        place(&taskbar, strip);
+    }
+
+    if host.mode == ShellMode::Shell {
+        if let Some(desktop) = app.get_webview_window(DESKTOP) {
+            place(&desktop, monitor.rect);
+        }
+        if let Some(token) = host.token.clone() {
+            let guard = host.msgloop.lock().unwrap_or_else(|e| e.into_inner());
+            if let Some(msgloop) = guard.as_ref() {
+                drop(msgloop.run(move |_| {
+                    if let Err(error) = workarea::set_bottom_reserve(&token, zone) {
+                        tracing::warn!(%error, "reserving the work area failed");
+                    }
+                }));
+            }
+        }
+    }
+}
+
+fn show_initial(app: &AppHandle) {
+    for label in [DESKTOP, TASKBAR] {
+        if let Some(window) = app.get_webview_window(label) {
+            if let Err(error) = window.show() {
+                tracing::warn!(label, %error, "show failed");
+            }
+        }
+    }
+}
+
+async fn consume_events(
+    app: AppHandle,
+    host: Arc<DesktopHost>,
+    mut events: UnboundedReceiver<DesktopEvent>,
+) {
+    while let Some(first) = events.recv().await {
+        let mut replace = matches!(
+            first,
+            DesktopEvent::DisplayChanged | DesktopEvent::DpiChanged | DesktopEvent::Resumed
+        );
+        if !replace {
+            tracing::debug!(event = ?first, "desktop event");
+            continue;
+        }
+        // Let a burst of display messages settle, then place once.
+        tokio::time::sleep(REAPPLY_DEBOUNCE).await;
+        while let Ok(next) = events.try_recv() {
+            replace |= matches!(
+                next,
+                DesktopEvent::DisplayChanged | DesktopEvent::DpiChanged | DesktopEvent::Resumed
+            );
+        }
+        if replace {
+            reapply(&app, &host);
+        }
+    }
+}
+
+/// Open the shared popup for `kind`, above `anchor` (physical pixels, screen
+/// coordinates) or in the bottom-left corner without one.
+pub fn popup_open(
+    app: &AppHandle,
+    host: &Arc<DesktopHost>,
+    kind: PopupKind,
+    anchor: Option<Rect>,
+) -> Result<(), String> {
+    let popup = app
+        .get_webview_window(POPUP)
+        .ok_or_else(|| "the popup window does not exist".to_string())?;
+    let monitor = current_monitor();
+    let bounds = usable_bounds(host.mode, monitor.rect, monitor.work, monitor.scale);
+    let (width, height) = kind.logical_size();
+    let size = (
+        placement::scale_px(width, monitor.scale),
+        placement::scale_px(height, monitor.scale),
+    );
+    let gap = placement::scale_px(POPUP_GAP_LOGICAL, monitor.scale);
+    place(&popup, popup_rect(size, anchor, bounds, gap));
+
+    *host.popup.lock().unwrap_or_else(|e| e.into_inner()) = Some(kind);
+    app.emit_to(POPUP, "popup://show", serde_json::json!({ "kind": kind }))
+        .map_err(|error| format!("emit popup://show: {error}"))?;
+    popup.show().map_err(|error| format!("show popup: {error}"))?;
+    // The click that opened the popup counts as recent input, so Windows lets
+    // us take the foreground. If it ever does not, the popup stays open until
+    // the next click on the desktop (Step 9 adds a click-away fallback).
+    if let Err(error) = popup.set_focus() {
+        tracing::warn!(%error, "popup could not take focus");
+    }
+    Ok(())
+}
+
+pub fn popup_close(app: &AppHandle, host: &Arc<DesktopHost>) {
+    hide_popup(app, host);
+}
+
+fn hide_popup(app: &AppHandle, host: &Arc<DesktopHost>) {
+    let was_open = host
+        .popup
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .take()
+        .is_some();
+    if let Some(popup) = app.get_webview_window(POPUP) {
+        let _ = popup.hide();
+    }
+    if was_open {
+        let _ = app.emit_to(POPUP, "popup://hide", ());
+    }
+}

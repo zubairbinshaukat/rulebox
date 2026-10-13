@@ -12,6 +12,7 @@ pub mod mode;
 pub mod msgloop;
 pub mod net;
 pub mod notify;
+pub mod placement;
 pub mod power;
 pub mod thumbs;
 pub mod tracker;
@@ -21,3 +22,6 @@ pub mod workarea;
 
 pub use error::{DesktopError, Result};
 pub use mode::{ShellMode, ShellToken};
+pub use msgloop::{DesktopEvent, LoopCtx, MsgLoop};
+pub use placement::Rect;
+pub use workarea::MonitorRect;

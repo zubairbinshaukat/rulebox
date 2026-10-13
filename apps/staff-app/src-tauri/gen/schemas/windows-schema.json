@@ -189,6 +189,18 @@
           "markdownDescription": "Enables the dismiss_notice command without any pre-configured scope."
         },
         {
+          "description": "Enables the popup_close command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-popup-close",
+          "markdownDescription": "Enables the popup_close command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the popup_open command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-popup-open",
+          "markdownDescription": "Enables the popup_open command without any pre-configured scope."
+        },
+        {
           "description": "Enables the shell_state command without any pre-configured scope.",
           "type": "string",
           "const": "allow-shell-state",
@@ -217,6 +229,18 @@
           "type": "string",
           "const": "deny-dismiss-notice",
           "markdownDescription": "Denies the dismiss_notice command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the popup_close command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-popup-close",
+          "markdownDescription": "Denies the popup_close command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the popup_open command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-popup-open",
+          "markdownDescription": "Denies the popup_open command without any pre-configured scope."
         },
         {
           "description": "Denies the shell_state command without any pre-configured scope.",

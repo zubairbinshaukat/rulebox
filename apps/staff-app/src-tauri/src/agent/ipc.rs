@@ -146,9 +146,13 @@ fn on_linked(shared: &Shared, hello: HelloResult) {
 
 fn map_call_error(error: CallError) -> AgentError {
     match error {
-        CallError::NotLinked | CallError::AccessDenied | CallError::ServerNotTrusted => {
+        CallError::ServerNotTrusted => {
+            // The pipe's server failed the peer check. It is shown as "not
+            // linked", but it is not an ordinary disconnect: say so in the log.
+            tracing::warn!("the agent pipe's server was not trusted");
             AgentError::NotLinked
         }
+        CallError::NotLinked | CallError::AccessDenied => AgentError::NotLinked,
         CallError::Timeout => AgentError::Timeout,
         CallError::Rpc(rpc) => {
             if matches!(rpc.code, ErrorCode::UnsupportedProtocol) {

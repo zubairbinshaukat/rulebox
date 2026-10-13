@@ -300,6 +300,7 @@ crates/rulebox-desktop/                 # new; Win32 for the shell (see Section 
    ├─ net.rs            # connectivity status
    ├─ hotkeys.rs        # RegisterHotKey (ShellToken)
    ├─ winkey.rs         # the one narrow WH_KEYBOARD_LL hook: Windows key alone opens Start (P7, Step 16)
+   ├─ placement.rs      # pure placement maths: taskbar strip, work area, popup clamping (Step 4)
    └─ notify.rs         # display, DPI, power-resume, session notifications
 
 apps/staff-app/src-tauri/
