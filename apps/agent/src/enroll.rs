@@ -319,6 +319,9 @@ impl EnrollDeps {
             device_name: response.device_name.clone(),
             enrolled_at_ms: now,
             revoked: false,
+            // The kiosk enable re-checks the blockers; it must know what the
+            // administrator accepted here.
+            allow_joined: params.allow_joined,
         };
         if let Err(error) = ctx.shared.update(|state| {
             state.enrollment = Some(enrollment);
@@ -721,6 +724,7 @@ mod tests {
                 device_name: "Old".into(),
                 enrolled_at_ms: 1,
                 revoked,
+                allow_joined: false,
             }),
             last_applied_version: 11,
             ..AgentState::default()

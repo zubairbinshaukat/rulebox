@@ -48,8 +48,8 @@ const LOGOFF_RETRY_DELAYS: [Duration; 3] =
 /// `AutoAdminLogon`: the one machine-wide value the exit touches. Written only
 /// when the kiosk is applied, and only before the sign-out, so Windows shows the
 /// sign-in screen instead of signing the Staff account straight back in.
-const WINLOGON_KEY: &str = r"SOFTWARE\Microsoft\Windows NT\CurrentVersion\Winlogon";
-const AUTO_ADMIN_LOGON: &str = "AutoAdminLogon";
+pub(crate) const WINLOGON_KEY: &str = r"SOFTWARE\Microsoft\Windows NT\CurrentVersion\Winlogon";
+pub(crate) const AUTO_ADMIN_LOGON: &str = "AutoAdminLogon";
 
 /// What `adminExit.submit` sends to the reconciler after a correct PIN.
 pub struct ExitRequest {
@@ -369,8 +369,10 @@ fn undo_count(inner: &Inner) {
 
 // -- the sign-out (Section 5.10, steps 8a to 10) --------------------------------------
 
-/// Prepares and performs the sign-out for one correct PIN. Used by the stand-in task
-/// of Step 6b now and by the reconciler from Step 9.
+/// Prepares and performs the sign-out for one correct PIN. The reconciler
+/// (`kiosk::Reconciler::on_exit`) calls it from its own loop, so no kiosk change runs
+/// at the same time, and owns the exit hold that keeps `AutoAdminLogon` at `"0"`
+/// afterwards.
 ///
 /// 1. When the kiosk is applied (and this is not simulate mode) automatic sign-in
 ///    is turned off, so Windows shows the sign-in screen. A failure is reported

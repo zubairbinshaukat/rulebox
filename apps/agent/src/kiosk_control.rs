@@ -3,16 +3,13 @@
 //! "a new document arrived", "reconcile now and tell me how it went" (enrollment,
 //! plan Section 5.4 step 7) and "run Disable" (unenrollment, Section 5.6).
 //!
-//! Step 9 provides the real implementation, backed by its `Trigger` channel;
-//! until then [`NoReconciler`] stands in.
-
-use std::sync::Arc;
+//! The real implementation is `kiosk::ReconcilerHandle`, backed by the reconciler's
+//! `Trigger` channel. Tests use [`FakeKioskControl`].
 
 use futures_util::future::BoxFuture;
+#[cfg(test)]
 use futures_util::FutureExt;
 use rulebox_ipc::types::KioskStatus;
-
-use crate::state::{KioskApplied, SharedState, SnapshotHandle};
 
 pub trait KioskControl: Send + Sync + 'static {
     /// A new desired state was accepted (`Trigger::DesiredChanged`). Never blocks.
@@ -25,32 +22,6 @@ pub trait KioskControl: Send + Sync + 'static {
     /// Section 5.6 "Disable", for `unenroll`. `Err` carries a short reason; the
     /// caller then keeps the enrollment and the journal.
     fn disable(&self) -> BoxFuture<'static, Result<(), String>>;
-}
-
-/// Until Step 9: nothing reconciles, so there is nothing to wait for and nothing to
-/// undo. It refuses `disable` while the state file says the kiosk is on, because
-/// clearing the enrollment and the journal then would strand a locked PC.
-pub struct NoReconciler {
-    pub snapshot: SnapshotHandle,
-    pub shared: Arc<SharedState>,
-}
-
-impl KioskControl for NoReconciler {
-    fn desired_changed(&self) {}
-
-    fn reconcile_now(&self) -> BoxFuture<'static, KioskStatus> {
-        std::future::ready(self.snapshot.current().kiosk).boxed()
-    }
-
-    fn disable(&self) -> BoxFuture<'static, Result<(), String>> {
-        let applied = self.shared.read(|state| state.kiosk.applied);
-        let result = if applied == KioskApplied::Enabled {
-            Err("the kiosk reconciler is not available in this build".to_string())
-        } else {
-            Ok(())
-        };
-        std::future::ready(result).boxed()
-    }
 }
 
 /// A scripted reconciler for tests: counts what it is asked and answers as told.

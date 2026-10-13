@@ -41,6 +41,27 @@ pub enum SimOp {
     SecretsSave,
 }
 
+impl SimOp {
+    /// The calls of the `mutating` group of plan Section 5.3 (`test_logon` is in it:
+    /// it is a sign-in attempt that counts towards the account lockout).
+    pub fn is_mutating(self) -> bool {
+        !matches!(
+            self,
+            SimOp::OsInfo
+                | SimOp::ComputerName
+                | SimOp::OtherEnabledLocalAdmins
+                | SimOp::LegalNoticePresent
+                | SimOp::FindLocalUser
+                | SimOp::ReadMachineValue
+                | SimOp::Sessions
+                | SimOp::FindProcesses
+                | SimOp::ShellBinariesOk
+                | SimOp::LsaSecretGet
+                | SimOp::SecretsLoad
+        )
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct SimUser {
     pub sid: String,
@@ -115,7 +136,9 @@ impl SimWorld {
 
 pub struct SimPlatform {
     world: Mutex<SimWorld>,
-    failures: Mutex<HashMap<SimOp, VecDeque<PlatformError>>>,
+    /// Per operation, one entry per upcoming call: `Some` fails it, `None` lets it
+    /// through (used by `fail_nth` to skip calls).
+    failures: Mutex<HashMap<SimOp, VecDeque<Option<PlatformError>>>>,
     data_dir: PathBuf,
     /// Every operation in the order it was called (tests only).
     #[cfg(test)]
@@ -145,7 +168,16 @@ impl SimPlatform {
 
     /// The next call of `op` returns `err` (queued: one error per call).
     pub fn fail_next(&self, op: SimOp, err: PlatformError) {
-        lock(&self.failures).entry(op).or_default().push_back(err);
+        lock(&self.failures).entry(op).or_default().push_back(Some(err));
+    }
+
+    /// The call of `op` that comes after `skip` more calls of it fails (`skip` 0 is
+    /// the same as `fail_next`). Counted from the calls still to come.
+    pub fn fail_nth(&self, op: SimOp, skip: usize, err: PlatformError) {
+        let mut failures = lock(&self.failures);
+        let queue = failures.entry(op).or_default();
+        queue.extend(std::iter::repeat_with(|| None).take(skip));
+        queue.push_back(Some(err));
     }
 
     /// Reads or edits the simulated machine.
@@ -157,8 +189,8 @@ impl SimPlatform {
         #[cfg(test)]
         lock(&self.calls).push(op);
         match lock(&self.failures).get_mut(&op).and_then(VecDeque::pop_front) {
-            Some(err) => Err(err),
-            None => Ok(()),
+            Some(Some(err)) => Err(err),
+            Some(None) | None => Ok(()),
         }
     }
 
@@ -481,6 +513,22 @@ mod tests {
         sim.fail_next(SimOp::CreateStaffUser, PlatformError::AccessDenied);
         assert!(matches!(sim.create_staff_user(&spec(), "pw"), Err(PlatformError::AccessDenied)));
         assert!(sim.create_staff_user(&spec(), "pw").is_ok());
+    }
+
+    #[test]
+    fn fail_nth_skips_the_calls_before_it() {
+        let dir = TempDir::new();
+        let sim = SimPlatform::new(dir.path().to_path_buf());
+        let key = RegValueRef { path: "SOFTWARE\\X".into(), name: "Y".into() };
+        sim.fail_nth(SimOp::WriteMachineValue, 2, PlatformError::AccessDenied);
+        assert!(sim.write_machine_value(&key, Some(&RegData::Dword(1))).is_ok());
+        assert!(sim.write_machine_value(&key, Some(&RegData::Dword(2))).is_ok());
+        assert!(matches!(
+            sim.write_machine_value(&key, Some(&RegData::Dword(3))),
+            Err(PlatformError::AccessDenied)
+        ));
+        assert!(sim.write_machine_value(&key, Some(&RegData::Dword(4))).is_ok());
+        assert_eq!(sim.read_machine_value(&key).unwrap(), Some(RegData::Dword(4)));
     }
 
     #[test]

@@ -611,6 +611,7 @@ mod tests {
                     device_name: "Desk".into(),
                     enrolled_at_ms: 1,
                     revoked: false,
+                    allow_joined: false,
                 }),
                 ..AgentState::default()
             })
@@ -738,6 +739,7 @@ mod tests {
                 device_name: "Desk".into(),
                 enrolled_at_ms: 1,
                 revoked: false,
+                allow_joined: false,
             }),
             ..AgentState::default()
         });

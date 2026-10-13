@@ -61,11 +61,31 @@ pub struct ShellBinaries {
     pub staff_app_ok: bool,
 }
 
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+/// Where the Staff account's shell value is written. `agent-config.json` key
+/// `shellMechanism`: `"policyShell"` (default) or `"winlogonShell"`.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub enum ShellMechanism {
     #[default]
     PolicyShell,
     WinlogonShell,
+}
+
+impl ShellMechanism {
+    /// The other mechanism: its location is cleared when this one is written.
+    pub fn other(self) -> Self {
+        match self {
+            ShellMechanism::PolicyShell => ShellMechanism::WinlogonShell,
+            ShellMechanism::WinlogonShell => ShellMechanism::PolicyShell,
+        }
+    }
+
+    pub fn name(self) -> &'static str {
+        match self {
+            ShellMechanism::PolicyShell => "policyShell",
+            ShellMechanism::WinlogonShell => "winlogonShell",
+        }
+    }
 }
 
 /// A value under HKLM.

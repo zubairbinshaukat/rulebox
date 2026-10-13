@@ -9,8 +9,7 @@ use std::time::Duration;
 
 use anyhow::{bail, Context};
 use rulebox_ipc::types::{
-    AgentSnapshot, ConnectionStatus, DeviceInfo, DisplayMode, EnrollmentStatus, KioskPhase,
-    KioskStatus, ShellHealth, ShellStatus,
+    AgentSnapshot, ConnectionStatus, DeviceInfo, DisplayMode, EnrollmentStatus, ShellHealth, ShellStatus,
 };
 use rulebox_ipc::{ADMIN_PIPE, SHELL_PIPE, SIM_SUFFIX};
 use serde::{Deserialize, Serialize};
@@ -18,7 +17,7 @@ use tokio::sync::{mpsc, watch};
 use tokio_util::sync::CancellationToken;
 use tokio_util::task::TaskTracker;
 
-use crate::admin_exit::{run_exit, AdminExit, AdminExitDeps, ExitRequest};
+use crate::admin_exit::{AdminExit, AdminExitDeps, ExitRequest};
 use crate::agent_policy::AgentPolicy;
 use crate::audit::{run_audit_task, AuditHandle, AuditQueue, AuditSink};
 use crate::backend::task::{apply_to_snapshot, note_clock, os_jitter, BackendRunner, TaskContext};
@@ -29,21 +28,20 @@ use crate::enroll::{EnrollDeps, Enroller, Timings};
 use crate::fixtures;
 use crate::ipc_admin::{self, AdminPipe, WithStatusExtra};
 use crate::ipc_shell::{self, ShellBroadcast, ShellExtension, ShellPipe, ShellSignal};
-use crate::kiosk_control::{KioskControl, NoReconciler};
+use crate::kiosk::{kiosk_status, spawn_reconciler, ReconcilerDeps};
+use crate::kiosk_control::KioskControl;
 use crate::lockout::LockoutStore;
 use crate::paths::{DataPaths, InstallPaths};
-use crate::platform::Platform;
+use crate::platform::{Platform, ShellMechanism};
 use crate::session::{SessionDeps, SessionManager, SessionTimeouts};
-use crate::state::{
-    read_json, unix_ms, AgentState, KioskApplied, SharedState, SnapshotHandle, StateStore,
-};
+use crate::state::{read_json, unix_ms, AgentState, SharedState, SnapshotHandle, StateStore};
 
 /// RAM at or below this many MB selects Lite mode (PRD 22.5).
 const LITE_MODE_MAX_RAM_MB: u64 = 4352;
 /// How long `run` waits for the IPC tasks to wind down after shutdown.
 const TASK_WIND_DOWN: Duration = Duration::from_secs(5);
 /// The folder under the Staff profile that holds every employee's files folder.
-const FILES_BASE_DIR: &str = "RuleboxFiles";
+pub(crate) const FILES_BASE_DIR: &str = "RuleboxFiles";
 /// Pending exit requests: the PIN gate lets one through at a time, so this is only
 /// slack.
 const EXIT_QUEUE: usize = 4;
@@ -71,11 +69,14 @@ pub struct AgentConfig {
     /// (1.1) Asks for the demo employee directory. Honoured on a real agent only
     /// when the test-machine marker is present too (`directory::choose`).
     pub fixture_directory: bool,
+    /// (Step 9) Where the Staff account's shell value is written: `"policyShell"`
+    /// (default) or `"winlogonShell"` (plan Section 10.2, "Sign-in and shell").
+    pub shell_mechanism: ShellMechanism,
 }
 
 impl Default for AgentConfig {
     fn default() -> Self {
-        Self { kill_hung_shell: true, fixture_directory: false }
+        Self { kill_hung_shell: true, fixture_directory: false, shell_mechanism: ShellMechanism::default() }
     }
 }
 
@@ -94,6 +95,9 @@ pub struct SimOptions {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ControlEvent {
     SessionChanged { session_id: u32 },
+    /// A session was locked (`WTS_SESSION_LOCK`): the Staff console is signed out 10
+    /// seconds later if it is still the active console session (plan Section 5.6).
+    SessionLocked { session_id: u32 },
     PowerResumed,
 }
 
@@ -178,15 +182,8 @@ pub fn initial_snapshot(
         Some(e) if e.revoked => EnrollmentStatus::Revoked,
         Some(_) => EnrollmentStatus::Enrolled,
     };
-    let kiosk = KioskStatus {
-        enabled: state.kiosk.applied == KioskApplied::Enabled,
-        phase: match state.kiosk.applied {
-            KioskApplied::NotApplied => KioskPhase::NotApplied,
-            _ if state.kiosk.last_error.is_some() => KioskPhase::Failed,
-            _ => KioskPhase::Applied,
-        },
-        error_code: state.kiosk.last_error.clone(),
-    };
+    // The same mapping the reconciler uses after every reconcile.
+    let kiosk = kiosk_status(&state.kiosk);
     let mut snapshot = AgentSnapshot {
         agent_version: env!("CARGO_PKG_VERSION").to_string(),
         enrollment,
@@ -210,38 +207,6 @@ pub fn initial_snapshot(
     };
     policy.apply_to_snapshot(&mut snapshot);
     snapshot
-}
-
-/// The **stand-in** exit task of Step 6b (Step 9 replaces it with the reconciler,
-/// which adds the exit hold of plan Section 5.10): takes the requests of
-/// `adminExit.submit` one at a time and runs the sign-out flow for each.
-async fn stand_in_exit_task(
-    mut requests: mpsc::Receiver<ExitRequest>,
-    platform: Arc<dyn Platform>,
-    snapshot_rx: watch::Receiver<AgentSnapshot>,
-    simulate: bool,
-    broadcast: ShellBroadcast,
-    shutdown: CancellationToken,
-) {
-    loop {
-        let request = tokio::select! {
-            () = shutdown.cancelled() => return,
-            request = requests.recv() => match request {
-                Some(request) => request,
-                None => return,
-            },
-        };
-        // The same fact as "kiosk.applied == Enabled" of the loaded state.
-        let kiosk_enabled = snapshot_rx.borrow().kiosk.enabled;
-        tokio::select! {
-            () = shutdown.cancelled() => return,
-            result = run_exit(Arc::clone(&platform), kiosk_enabled, simulate, request, broadcast.clone()) => {
-                if let Err(error) = result {
-                    tracing::error!("admin exit did not complete: {error}");
-                }
-            }
-        }
-    }
 }
 
 pub async fn run(
@@ -298,9 +263,10 @@ pub async fn run(
     }
     tracing::debug!(display_mode = ?snapshot_rx.borrow().display_mode, "initial snapshot built");
 
-    // The Staff account's SID: the shell pipe exists only while it is known. Later
-    // steps (the reconciler, unenrollment) send changes through `_staff_sid_tx`.
-    let (_staff_sid_tx, staff_sid_rx) =
+    // The Staff account's SID: the shell pipe exists only while it is known. The
+    // reconciler sends changes through `staff_sid_tx` (after enable creates the
+    // account, and when the record changes).
+    let (staff_sid_tx, staff_sid_rx) =
         watch::channel(state.staff.as_ref().map(|staff| staff.sid.clone()));
     let (signals_tx, signals_rx) = mpsc::unbounded_channel::<ShellSignal>();
     let broadcast = ShellBroadcast::new();
@@ -344,8 +310,8 @@ pub async fn run(
         timeouts: SessionTimeouts::default(),
     });
 
-    // (1.1) The hidden admin exit: the PIN gate, and the stand-in task that signs
-    // the Staff session out (the reconciler of Step 9 takes that over).
+    // (1.1) The hidden admin exit: the PIN gate. The reconciler owns the receiving
+    // end of the exit requests (plan Section 5.10 and Step 9).
     let (exit_tx, exit_rx) = mpsc::channel::<ExitRequest>(EXIT_QUEUE);
     let admin_exit = AdminExit::new(AdminExitDeps {
         policy_rx,
@@ -356,10 +322,30 @@ pub async fn run(
         now_ms: Arc::clone(&now_ms),
     });
 
+    // The kiosk reconciler (Step 9): the only task that changes the machine. It is
+    // the `KioskControl` of the backend task and the enrollment flow, and the
+    // receiver of the exit requests.
+    let tasks = TaskTracker::new();
+    let reconciler = spawn_reconciler(
+        ReconcilerDeps {
+            platform: Arc::clone(&deps.platform),
+            shared: Arc::clone(&shared),
+            snapshot: snapshot_handle.clone(),
+            session: Arc::clone(&session),
+            broadcast: broadcast.clone(),
+            config: deps.config.clone(),
+            install: deps.install.clone(),
+            simulate: deps.simulate,
+            staff_sid_tx,
+        },
+        exit_rx,
+        shutdown.clone(),
+        &tasks,
+    );
+
     // The backend task, and the enrollment flow behind `admin.enroll` and
-    // `admin.unenroll`. The kiosk reconciler (Step 9) replaces `NoReconciler`.
-    let control: Arc<dyn KioskControl> =
-        Arc::new(NoReconciler { snapshot: snapshot_handle.clone(), shared: Arc::clone(&shared) });
+    // `admin.unenroll`.
+    let control: Arc<dyn KioskControl> = Arc::new(reconciler.clone());
     let task_ctx = Arc::new(TaskContext {
         shared: Arc::clone(&shared),
         paths: deps.paths.clone(),
@@ -388,7 +374,6 @@ pub async fn run(
         }
     }
 
-    let tasks = TaskTracker::new();
     tasks.spawn(ipc_admin::run_pipe(
         AdminPipe {
             name: deps.pipes.admin.clone(),
@@ -432,21 +417,15 @@ pub async fn run(
         },
         shutdown.clone(),
     ));
-    tasks.spawn(stand_in_exit_task(
-        exit_rx,
-        Arc::clone(&deps.platform),
-        snapshot_rx.clone(),
-        deps.simulate,
-        broadcast.clone(),
-        shutdown.clone(),
-    ));
     tasks.spawn(log_shell_signals(signals_rx, shutdown.clone()));
 
     loop {
         tokio::select! {
             () = shutdown.cancelled() => break,
             event = control_rx.recv() => match event {
-                Some(event) => tracing::debug!(?event, "control event (ignored until the reconciler exists)"),
+                Some(ControlEvent::SessionChanged { .. }) => reconciler.session_changed(),
+                Some(ControlEvent::SessionLocked { session_id }) => reconciler.session_locked(session_id),
+                Some(ControlEvent::PowerResumed) => reconciler.power_resumed(),
                 // The host dropped its sender: nothing more can arrive, keep waiting for shutdown.
                 None => {
                     shutdown.cancelled().await;
@@ -531,8 +510,10 @@ async fn log_shell_signals(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use rulebox_ipc::types::KioskPhase;
+
     use crate::platform::sim::SimPlatform;
-    use crate::state::{Enrollment, KioskRecord};
+    use crate::state::{Enrollment, KioskApplied, KioskRecord};
     use crate::testutil::{unique_pipe_name, TempDir};
 
     #[test]
@@ -614,6 +595,7 @@ mod tests {
                 device_name: "Desk".into(),
                 enrolled_at_ms: 1,
                 revoked: false,
+                allow_joined: false,
             }),
             kiosk: KioskRecord { applied: KioskApplied::Enabled, ..KioskRecord::default() },
             last_applied_version: 7,
@@ -1072,7 +1054,14 @@ mod backend_tests {
 
         // `status`: enrolled; online once the connection comes up; the document
         // arrives without anyone asking for it.
-        agent.wait_status(&["enrollment    : enrolled", "device        : Front desk (dev-1)"]).await;
+        // (Step 9) The reconciler enabled the kiosk right after enrollment (Q12).
+        agent
+            .wait_status(&[
+                "enrollment    : enrolled",
+                "device        : Front desk (dev-1)",
+                "enabled=true phase=applied error=-",
+            ])
+            .await;
         fake.push(BackendEvent::Connection(ConnectionStatus::Online));
         push(&fake, 3, document(3, true, Some("ctrl+alt+k")));
         let text = agent
@@ -1087,7 +1076,22 @@ mod backend_tests {
         assert_eq!(first.auth.device_id, "dev-1");
         let status = first.status.expect("the first heartbeat carries the status");
         assert_eq!(status.agent_version, env!("CARGO_PKG_VERSION"));
-        assert_eq!(status.applied_version, Some(0));
+        // Step 9: the reconciler writes `last_applied_version` after a successful
+        // reconcile, so the heartbeat reports 3. A heartbeat that fired in the
+        // milliseconds before that reconcile finished reports 0; the next one (minutes
+        // later) carries the change, so both are right here.
+        assert!(matches!(status.applied_version, Some(0 | 3)), "{:?}", status.applied_version);
+        assert_eq!(status.kiosk_phase.as_deref(), Some("applied"));
+        let state_file = dir.path().join("state").join("agent-state.json");
+        let deadline = tokio::time::Instant::now() + Duration::from_secs(5);
+        loop {
+            let saved = std::fs::read_to_string(&state_file).unwrap();
+            if saved.contains("\"lastAppliedVersion\": 3") {
+                break;
+            }
+            assert!(tokio::time::Instant::now() < deadline, "the applied version was never saved:\n{saved}");
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
 
         // `rulebox-agent unenroll`
         let (exit, out, err) = agent.unenroll(false).await;
@@ -1096,6 +1100,8 @@ mod backend_tests {
         assert_eq!(fake.unenroll_calls().len(), 1);
         let text = agent.wait_status(&["enrollment    : notEnrolled", "connection    : offline"]).await;
         assert!(text.contains("admin exit    : off"), "{text}");
+        // Unenrolling switched the kiosk off first (Section 5.6 "Disable").
+        assert!(text.contains("enabled=false phase=applied error=-"), "{text}");
         assert!(!dir.path().join("state").join("desired-state.json").exists());
 
         // And it can be enrolled again.

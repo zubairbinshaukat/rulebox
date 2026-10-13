@@ -55,6 +55,11 @@ pub struct Enrollment {
     pub device_name: String,
     pub enrolled_at_ms: u64,
     pub revoked: bool,
+    /// (Step 9) `enroll --allow-joined` was given: the kiosk enable re-checks the
+    /// compatibility blockers (plan Section 5.6, Enable step 1) and must not turn
+    /// `managed_device` into a blocker the administrator already accepted.
+    #[serde(default)]
+    pub allow_joined: bool,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
@@ -83,6 +88,26 @@ pub struct KioskRecord {
     pub applied: KioskApplied,
     pub last_error: Option<String>,
     pub failures: u32,
+    /// (Step 9) True once the reconciler captured the machine's original LSA
+    /// `DefaultPassword` (into `Secrets.original_default_password_lsa`, or "there was
+    /// none") and is allowed to overwrite it. Until then Disable leaves that secret
+    /// alone, so a rollback never deletes the owner's own auto sign-in password.
+    pub lsa_taken_over: bool,
+    /// (Step 9) The Staff hive values the reconciler wrote (shell command and
+    /// `DisableLockWorkstation`). The `Platform` seam has no read-back for them, so
+    /// the record is what makes a second Enable a no-op and what tells Disable that
+    /// there is something to delete.
+    pub staff_hive: Option<StaffHiveRecord>,
+}
+
+/// What was written into the Staff hive. `complete` is false from just before the
+/// first write until the last one succeeded, so a crash in between is visible.
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct StaffHiveRecord {
+    /// `<sid>|<mechanism>|<command>`: a change in any part means "write again".
+    pub fingerprint: String,
+    pub complete: bool,
 }
 
 #[derive(Serialize, Deserialize, Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -317,13 +342,20 @@ mod tests {
                 device_name: "Desk".into(),
                 enrolled_at_ms: 5,
                 revoked: false,
+                allow_joined: false,
             }),
             staff: Some(StaffAccount {
                 sid: "S-1-5-21-1".into(),
                 user_name: "RuleboxStaff".into(),
                 profile_dir: Some(r"C:\Users\RuleboxStaff".into()),
             }),
-            kiosk: KioskRecord { applied: KioskApplied::Enabled, last_error: Some("e".into()), failures: 2 },
+            kiosk: KioskRecord {
+                applied: KioskApplied::Enabled,
+                last_error: Some("e".into()),
+                failures: 2,
+                lsa_taken_over: true,
+                staff_hive: Some(StaffHiveRecord { fingerprint: "sid|policyShell|cmd".into(), complete: true }),
+            },
             journal: vec![
                 JournalEntry {
                     key: RegValueRef { path: "SOFTWARE\\X".into(), name: "Y".into() },
@@ -392,6 +424,20 @@ mod tests {
         let state: AgentState =
             serde_json::from_str(r#"{ "staff": { "sid": "S-1-5-21-1", "userName": "RuleboxStaff" } }"#).unwrap();
         assert_eq!(state.staff.unwrap().profile_dir, None);
+    }
+
+    #[test]
+    fn a_state_file_from_before_step_9_still_loads() {
+        let text = r#"{
+            "enrollment": { "convexUrl": "https://x.convex.cloud", "deviceId": "d", "orgId": "o",
+                            "deviceName": "n", "enrolledAtMs": 1, "revoked": false },
+            "kiosk": { "applied": "enabled", "lastError": null, "failures": 0 }
+        }"#;
+        let state: AgentState = serde_json::from_str(text).unwrap();
+        assert!(!state.enrollment.unwrap().allow_joined);
+        assert_eq!(state.kiosk.applied, KioskApplied::Enabled);
+        assert!(!state.kiosk.lsa_taken_over);
+        assert_eq!(state.kiosk.staff_hive, None);
     }
 
     #[test]

@@ -22,6 +22,7 @@ mod ipc_admin;
 mod ipc_conn;
 mod ipc_shell;
 mod kdf;
+mod kiosk;
 mod kiosk_control;
 mod lockout;
 mod logging;
