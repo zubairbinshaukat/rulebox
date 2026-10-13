@@ -6,7 +6,9 @@
 // tasks that use them exist (Steps 6 to 11). Remove this allow in Step 11.
 #![allow(dead_code)]
 
+mod admin_exit;
 mod agent;
+mod agent_policy;
 mod audit;
 mod cli;
 mod directory;
@@ -113,6 +115,40 @@ fn dispatch(cli: Cli) -> anyhow::Result<u8> {
             &mut std::io::stderr().lock(),
         )),
         Command::Compat { .. } => bail!("not implemented yet (Phase 2, a later step)"),
+        Command::HashPin => Ok(hash_pin(
+            &mut std::io::stdin().lock(),
+            &mut std::io::stdout().lock(),
+            &mut std::io::stderr().lock(),
+        )),
+    }
+}
+
+/// `rulebox-agent hash-pin`: prompts on stderr, reads one line from `input`, and
+/// prints the Argon2id hash of a PIN of 4 to 12 ASCII digits on `out` (exit code
+/// 0). Anything else is refused with exit code 1. Starts no logging and touches no
+/// file, pipe or registry key, so it is safe on every machine.
+fn hash_pin(
+    input: &mut dyn std::io::BufRead,
+    out: &mut dyn Write,
+    err: &mut dyn Write,
+) -> u8 {
+    // A failed write to stderr is not worth a second error.
+    let _ = write!(err, "PIN (4 to 12 digits): ");
+    let _ = err.flush();
+    let mut line = String::new();
+    if let Err(error) = input.read_line(&mut line) {
+        let _ = writeln!(err, "error: cannot read the PIN: {error}");
+        return ipc_admin::EXIT_ERROR;
+    }
+    match admin_exit::hash_pin_line(&line) {
+        Ok(hash) => {
+            let _ = writeln!(out, "{hash}");
+            0
+        }
+        Err(error) => {
+            let _ = writeln!(err, "error: {error}");
+            ipc_admin::EXIT_ERROR
+        }
     }
 }
 
@@ -167,4 +203,35 @@ fn run_simulated(data_dir: Option<PathBuf>, sim_demo: bool, sim_offline: bool) -
     }
     drop(guard);
     result
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn run(input: &str) -> (u8, String, String) {
+        let (mut out, mut err) = (Vec::new(), Vec::new());
+        let code = hash_pin(&mut input.as_bytes(), &mut out, &mut err);
+        (code, String::from_utf8(out).unwrap(), String::from_utf8(err).unwrap())
+    }
+
+    #[test]
+    fn hash_pin_prompts_on_stderr_and_prints_only_the_hash_on_stdout() {
+        let (code, out, err) = run("2468\r\n");
+        assert_eq!(code, 0);
+        assert!(out.starts_with("$argon2id$v=19$m=19456,t=2,p=1$"), "{out}");
+        assert_eq!(out.lines().count(), 1);
+        assert!(kdf::verify_secret("2468", out.trim()).unwrap());
+        assert_eq!(err, "PIN (4 to 12 digits): ");
+    }
+
+    #[test]
+    fn hash_pin_rejects_anything_that_is_not_four_to_twelve_digits() {
+        for bad in ["12\n", "12a4\n", "1234567890123\n", "\n", ""] {
+            let (code, out, err) = run(bad);
+            assert_eq!(code, 1, "{bad:?}");
+            assert!(out.is_empty(), "nothing on stdout for {bad:?}");
+            assert!(err.contains("4 to 12 digits"), "{err}");
+        }
+    }
 }

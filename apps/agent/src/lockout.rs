@@ -63,8 +63,9 @@ pub enum Gate {
 }
 
 impl Counter {
-    /// Milliseconds the lock still lasts at `now_ms`, if it does.
-    fn locked_for(&self, now_ms: u64) -> Option<u64> {
+    /// Milliseconds the lock still lasts at `now_ms`, if it does. Read-only (the
+    /// clock rule of [`gate`](Self::gate) is not applied), for `status`.
+    pub fn locked_for(&self, now_ms: u64) -> Option<u64> {
         if self.lock_ms == 0 {
             return None;
         }

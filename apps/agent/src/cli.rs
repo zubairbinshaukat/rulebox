@@ -69,6 +69,9 @@ pub enum Command {
         #[arg(long)]
         json: bool,
     },
+    /// (1.1) Hash an exit PIN: reads one line (4 to 12 digits) from standard input and
+    /// prints the Argon2id hash. Touches no file, pipe or registry key.
+    HashPin,
 }
 
 #[derive(Subcommand, Debug, PartialEq, Eq)]
@@ -139,6 +142,7 @@ mod tests {
         assert_eq!(parse(&["recover"]), Command::Recover { yes: false });
         assert_eq!(parse(&["recover", "--yes"]), Command::Recover { yes: true });
         assert_eq!(parse(&["compat", "--json"]), Command::Compat { json: true });
+        assert_eq!(parse(&["hash-pin"]), Command::HashPin);
     }
 
     #[test]

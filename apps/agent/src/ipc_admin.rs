@@ -25,6 +25,7 @@ use rulebox_win32::sid::{current_user_sid, Sid};
 use tokio::sync::{watch, Mutex};
 use tokio_util::sync::CancellationToken;
 
+use crate::admin_exit::AdminExit;
 use crate::audit::AuditHandle;
 use crate::ipc_conn::{
     bind_with_retry, rpc_error, serve as serve_connections, Dispatcher, Engine, PeerCtx,
@@ -99,17 +100,23 @@ impl AdminHandler for NotAvailableYet {
 }
 
 /// Wraps the enroll/unenroll handler and adds what `status` shows beyond the
-/// snapshot: the signed-in employee's name and the audit queue length (Step 6a;
-/// Step 6b adds the admin-exit counters).
+/// snapshot: the signed-in employee's name and the audit queue length (Step 6a), and
+/// the admin-exit counters and problem (Step 6b). Never the PIN hash.
 pub struct WithStatusExtra {
     inner: Arc<dyn AdminHandler>,
     session: Arc<SessionManager>,
     audit: Arc<AuditHandle>,
+    admin_exit: Arc<AdminExit>,
 }
 
 impl WithStatusExtra {
-    pub fn new(inner: Arc<dyn AdminHandler>, session: Arc<SessionManager>, audit: Arc<AuditHandle>) -> Self {
-        Self { inner, session, audit }
+    pub fn new(
+        inner: Arc<dyn AdminHandler>,
+        session: Arc<SessionManager>,
+        audit: Arc<AuditHandle>,
+        admin_exit: Arc<AdminExit>,
+    ) -> Self {
+        Self { inner, session, audit, admin_exit }
     }
 }
 
@@ -123,10 +130,13 @@ impl AdminHandler for WithStatusExtra {
     }
 
     fn status_extra(&self) -> Option<AdminStatusExtra> {
+        let exit = self.admin_exit.status();
         Some(AdminStatusExtra {
             employee: self.session.current_display_name(),
+            admin_exit_failures: exit.failures,
+            admin_exit_locked_for_ms: exit.locked_for_ms,
+            admin_exit_problem: exit.problem,
             audit_queued: u32::try_from(self.audit.queued()).unwrap_or(u32::MAX),
-            ..AdminStatusExtra::default()
         })
     }
 }
@@ -493,8 +503,26 @@ pub fn format_status(result: &AdminStatusResult) -> String {
         ("policy", policy),
         ("clock", clock),
     ];
+    // (1.1) The hidden exit: on or off, with its key combination, or off with the
+    // reason the settings were not usable. Never the PIN or its hash.
+    if let Some(exit) = &s.admin_exit {
+        let problem = result.extra.as_ref().and_then(|extra| extra.admin_exit_problem.as_deref());
+        let text = match (exit.enabled, problem) {
+            (true, None) => format!("on ({})", exit.hotkey),
+            (true, Some(problem)) => format!("on ({}; {problem})", exit.hotkey),
+            (false, None) => "off".to_string(),
+            (false, Some(problem)) => format!("off ({problem})"),
+        };
+        lines.push(("admin exit", text));
+    }
     // (1.1) Only an agent that sends `extra` shows these lines.
     if let Some(extra) = &result.extra {
+        if extra.admin_exit_failures > 0 {
+            lines.push(("exit failures", extra.admin_exit_failures.to_string()));
+        }
+        if let Some(left_ms) = extra.admin_exit_locked_for_ms {
+            lines.push(("exit locked", format!("{} s left", left_ms.div_ceil(1000))));
+        }
         lines.push(("employee", extra.employee.clone().unwrap_or_else(|| "-".to_string())));
         lines.push(("audit queued", extra.audit_queued.to_string()));
     }
@@ -732,6 +760,55 @@ mod tests {
         let again = second.request(3, "admin.unenroll", json!({ "removeStaffAccount": true })).await;
         assert!(matches!(again, Frame::Response { ok: true, .. }));
         rig.stop().await;
+    }
+
+    #[test]
+    fn status_text_shows_the_admin_exit_its_key_its_problem_and_its_lock() {
+        use rulebox_ipc::types::AdminExitInfo;
+        let result = |enabled: bool, extra: Option<AdminStatusExtra>| {
+            let mut snapshot = test_snapshot();
+            snapshot.admin_exit = Some(AdminExitInfo { enabled, hotkey: "Ctrl+Shift+F12".into() });
+            format_status(&AdminStatusResult { snapshot, extra })
+        };
+        let line = |text: &str, name: &str| {
+            text.lines().find(|l| l.starts_with(name)).map(str::to_string)
+        };
+
+        let on = result(true, Some(AdminStatusExtra::default()));
+        assert_eq!(line(&on, "admin exit").as_deref(), Some("admin exit    : on (Ctrl+Shift+F12)"));
+        assert!(line(&on, "exit locked").is_none() && line(&on, "exit failures").is_none());
+
+        let off = result(false, Some(AdminStatusExtra::default()));
+        assert_eq!(line(&off, "admin exit").as_deref(), Some("admin exit    : off"));
+
+        let broken = result(
+            false,
+            Some(AdminStatusExtra {
+                admin_exit_problem: Some("admin_exit_pin_invalid".into()),
+                ..AdminStatusExtra::default()
+            }),
+        );
+        assert_eq!(
+            line(&broken, "admin exit").as_deref(),
+            Some("admin exit    : off (admin_exit_pin_invalid)")
+        );
+
+        let locked = result(
+            true,
+            Some(AdminStatusExtra {
+                admin_exit_failures: 5,
+                admin_exit_locked_for_ms: Some(59_001),
+                ..AdminStatusExtra::default()
+            }),
+        );
+        assert_eq!(line(&locked, "exit failures").as_deref(), Some("exit failures : 5"));
+        assert_eq!(line(&locked, "exit locked").as_deref(), Some("exit locked   : 60 s left"));
+
+        // A 1.0 agent sends neither the field nor `extra`: no exit lines at all.
+        let mut old = test_snapshot();
+        old.admin_exit = None;
+        let text = format_status(&AdminStatusResult { snapshot: old, extra: None });
+        assert!(!text.contains("admin exit") && !text.contains("exit locked"));
     }
 
     #[test]

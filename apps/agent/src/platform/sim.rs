@@ -117,6 +117,9 @@ pub struct SimPlatform {
     world: Mutex<SimWorld>,
     failures: Mutex<HashMap<SimOp, VecDeque<PlatformError>>>,
     data_dir: PathBuf,
+    /// Every operation in the order it was called (tests only).
+    #[cfg(test)]
+    calls: Mutex<Vec<SimOp>>,
 }
 
 fn lock<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {
@@ -125,7 +128,19 @@ fn lock<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {
 
 impl SimPlatform {
     pub fn new(data_dir: PathBuf) -> Self {
-        Self { world: Mutex::new(SimWorld::new()), failures: Mutex::new(HashMap::new()), data_dir }
+        Self {
+            world: Mutex::new(SimWorld::new()),
+            failures: Mutex::new(HashMap::new()),
+            data_dir,
+            #[cfg(test)]
+            calls: Mutex::new(Vec::new()),
+        }
+    }
+
+    /// The operations called so far, oldest first (tests only).
+    #[cfg(test)]
+    pub fn calls(&self) -> Vec<SimOp> {
+        lock(&self.calls).clone()
     }
 
     /// The next call of `op` returns `err` (queued: one error per call).
@@ -139,6 +154,8 @@ impl SimPlatform {
     }
 
     fn check(&self, op: SimOp) -> Result<(), PlatformError> {
+        #[cfg(test)]
+        lock(&self.calls).push(op);
         match lock(&self.failures).get_mut(&op).and_then(VecDeque::pop_front) {
             Some(err) => Err(err),
             None => Ok(()),

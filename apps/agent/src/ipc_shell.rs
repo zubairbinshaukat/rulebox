@@ -64,6 +64,12 @@ impl ShellBroadcast {
     fn sender(&self) -> broadcast::Sender<Frame> {
         self.tx.clone()
     }
+
+    /// Tests read the broadcast without a pipe.
+    #[cfg(test)]
+    pub fn subscribe(&self) -> broadcast::Receiver<Frame> {
+        self.tx.subscribe()
+    }
 }
 
 impl Default for ShellBroadcast {

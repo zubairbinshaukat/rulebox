@@ -5,16 +5,18 @@
 //! Nothing here runs on a real agent unless `agent-config.json` asks for it **and**
 //! the test-machine marker is present (`directory::choose`).
 
+use rulebox_ipc::hotkey::DEFAULT_ADMIN_EXIT_HOTKEY;
 use rulebox_ipc::requests::{
     AppEntry, AppKind, BuiltinApp, DesktopApp, Employee, WebApp, WebPermissions,
 };
 use rulebox_ipc::types::{AgentSnapshot, ConnectionStatus, DeviceInfo, EnrollmentStatus, KioskPhase, KioskStatus};
 use rulebox_policy::{DesiredState, EXAMPLE_DESIRED_STATE_JSON};
 
+use crate::kdf;
+
 /// Every demo employee's password.
 pub const DEMO_PASSWORD: &str = "demo";
-/// The demo exit PIN (Step 6b hashes it with `kdf::hash_secret` when it builds the
-/// demo document).
+/// The demo exit PIN. [`demo_document`] hashes it with `kdf::hash_secret`.
 pub const DEMO_EXIT_PIN: &str = "2468";
 const GIB: u64 = 1024 * 1024 * 1024;
 
@@ -122,9 +124,34 @@ pub fn catalogue() -> Vec<AppEntry> {
     ]
 }
 
+/// The demo desired-state document: the example state plus the three agent-only
+/// keys of Section 5.10 (`adminExit` with the hash of [`DEMO_EXIT_PIN`], `power`,
+/// `orgName`). `AgentPolicy::from_doc` reads the keys; the snapshot's
+/// `desiredState` is parsed from the same text by [`apply_demo_snapshot`]. Hashing
+/// takes a few tens of milliseconds, so call it once per start.
+pub fn demo_document() -> serde_json::Value {
+    let mut doc = serde_json::from_str::<serde_json::Value>(EXAMPLE_DESIRED_STATE_JSON)
+        .unwrap_or_else(|_| serde_json::json!({}));
+    let mut admin_exit = serde_json::json!({ "enabled": true, "hotkey": DEFAULT_ADMIN_EXIT_HOTKEY });
+    match kdf::hash_secret(DEMO_EXIT_PIN) {
+        Ok(hash) => admin_exit["pinHash"] = serde_json::Value::String(hash),
+        // Without a hash the demo exit is simply off; `status` says why.
+        Err(error) => tracing::error!("cannot hash the demo exit PIN: {error}"),
+    }
+    if let Some(object) = doc.as_object_mut() {
+        object.insert("adminExit".into(), admin_exit);
+        object.insert(
+            "power".into(),
+            serde_json::json!({ "sleep": true, "restart": true, "shutDown": true }),
+        );
+        object.insert("orgName".into(), serde_json::json!("Demo Company"));
+    }
+    doc
+}
+
 /// The demo snapshot of Section 6.11: enrolled, kiosk applied, the example desired
-/// state. `offline` is `--sim-offline`. `admin_exit`, `power` and `org_name`
-/// arrive with Step 6b and stay `None` until then.
+/// state. `offline` is `--sim-offline`. The 1.1 fields `adminExit`, `power` and
+/// `orgName` come from [`demo_document`] through `AgentPolicy`, not from here.
 pub fn apply_demo_snapshot(snapshot: &mut AgentSnapshot, offline: bool) {
     snapshot.enrollment = EnrollmentStatus::Enrolled;
     snapshot.device = Some(DeviceInfo { id: "sim-device".into(), name: "Simulated PC".into() });
@@ -178,10 +205,31 @@ mod tests {
         assert_eq!(online.connection, ConnectionStatus::Online);
         assert_eq!(online.device.as_ref().map(|d| d.id.as_str()), Some("sim-device"));
         assert!(online.kiosk.enabled && online.desired_state.is_some());
-        assert!(online.admin_exit.is_none() && online.power.is_none() && online.org_name.is_none());
+        // The overlay leaves the 1.1 policy fields to `AgentPolicy`.
+        assert!(online.power.is_none() && online.org_name.is_none());
 
         let mut offline = test_snapshot();
         apply_demo_snapshot(&mut offline, true);
         assert_eq!(offline.connection, ConnectionStatus::Offline);
+    }
+
+    #[test]
+    fn the_demo_document_carries_the_agent_only_keys_with_the_hash_of_2468() {
+        use crate::agent_policy::AgentPolicy;
+        let doc = demo_document();
+        // Still a valid desired state, with the three extra keys beside it.
+        assert!(serde_json::from_value::<DesiredState>(doc.clone()).is_ok());
+        let policy = AgentPolicy::from_doc(Some(&doc));
+        assert!(policy.admin_exit.enabled, "{policy:?}");
+        assert_eq!(policy.admin_exit.hotkey, "Ctrl+Shift+F12");
+        assert_eq!(policy.admin_exit.problem, None);
+        assert_eq!(policy.org_name.as_deref(), Some("Demo Company"));
+        assert_eq!(
+            policy.power,
+            Some(rulebox_ipc::types::PowerOptions { sleep: true, restart: true, shut_down: true })
+        );
+        let hash = policy.admin_exit.pin_hash.unwrap();
+        assert!(kdf::verify_secret(DEMO_EXIT_PIN, &hash).unwrap());
+        assert!(!kdf::verify_secret("1111", &hash).unwrap());
     }
 }

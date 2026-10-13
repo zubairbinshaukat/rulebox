@@ -13,11 +13,13 @@ use rulebox_ipc::types::{
     KioskStatus, ShellHealth, ShellStatus,
 };
 use rulebox_ipc::{ADMIN_PIPE, SHELL_PIPE, SIM_SUFFIX};
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use tokio::sync::{mpsc, watch};
 use tokio_util::sync::CancellationToken;
 use tokio_util::task::TaskTracker;
 
+use crate::admin_exit::{run_exit, AdminExit, AdminExitDeps, ExitRequest};
+use crate::agent_policy::AgentPolicy;
 use crate::audit::{run_audit_task, AuditHandle, AuditQueue, AuditSink};
 use crate::directory::EmployeeDirectory;
 use crate::employee_cache::EmployeeCache;
@@ -36,6 +38,9 @@ const LITE_MODE_MAX_RAM_MB: u64 = 4352;
 const TASK_WIND_DOWN: Duration = Duration::from_secs(5);
 /// The folder under the Staff profile that holds every employee's files folder.
 const FILES_BASE_DIR: &str = "RuleboxFiles";
+/// Pending exit requests: the PIN gate lets one through at a time, so this is only
+/// slack.
+const EXIT_QUEUE: usize = 4;
 
 /// The two pipe names. Tests use unique ones so they never meet a real agent.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -109,11 +114,50 @@ pub fn load_config(paths: &DataPaths) -> anyhow::Result<AgentConfig> {
     Ok(loaded.unwrap_or_default())
 }
 
-/// The snapshot shown to the Staff App before any backend contact.
+/// `desired-state.json`: the last document the backend sent, as received. `doc`
+/// is the **raw** document, so the agent-only keys of Section 5.10 (the exit PIN
+/// hash among them) survive a restart while offline. Step 8 writes the file;
+/// Step 6b only reads it.
+#[derive(Serialize, Deserialize, Clone, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct CachedDesired {
+    pub version: u64,
+    pub doc: serde_json::Value,
+    #[serde(default)]
+    pub signature: Option<String>,
+}
+
+impl std::fmt::Debug for CachedDesired {
+    // Not derived: `doc` can hold the PIN hash.
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("CachedDesired")
+            .field("version", &self.version)
+            .field("signed", &self.signature.is_some())
+            .finish_non_exhaustive()
+    }
+}
+
+/// The cached document, or `None` when there is none (or it cannot be read; the
+/// reason is logged and, for a file that does not parse, the file is moved aside by
+/// `read_json`).
+pub fn load_cached_desired(paths: &DataPaths) -> Option<CachedDesired> {
+    match read_json::<CachedDesired>(&paths.desired_state()) {
+        Ok(cached) => cached,
+        Err(error) => {
+            tracing::error!("cannot read desired-state.json: {error}");
+            None
+        }
+    }
+}
+
+/// The snapshot shown to the Staff App before any backend contact. The protocol
+/// 1.1 fields `adminExit`, `power` and `orgName` come from `policy` (never the
+/// PIN hash).
 pub fn initial_snapshot(
     state: &AgentState,
     platform: &dyn Platform,
     _config: &AgentConfig,
+    policy: &AgentPolicy,
 ) -> AgentSnapshot {
     let ram_mb = platform.os_info().map(|os| os.ram_mb);
     let display_mode = match ram_mb {
@@ -134,7 +178,7 @@ pub fn initial_snapshot(
         },
         error_code: state.kiosk.last_error.clone(),
     };
-    AgentSnapshot {
+    let mut snapshot = AgentSnapshot {
         agent_version: env!("CARGO_PKG_VERSION").to_string(),
         enrollment,
         device: state
@@ -150,10 +194,44 @@ pub fn initial_snapshot(
         desired_state_version: state.last_applied_version,
         server_time_offset_ms: None,
         clock_suspect: false,
-        // Protocol 1.1 fields; Step 6b fills `admin_exit`, Phase 4 the other two.
+        // Protocol 1.1 fields: set from the policy just below.
         admin_exit: None,
         power: None,
         org_name: None,
+    };
+    policy.apply_to_snapshot(&mut snapshot);
+    snapshot
+}
+
+/// The **stand-in** exit task of Step 6b (Step 9 replaces it with the reconciler,
+/// which adds the exit hold of plan Section 5.10): takes the requests of
+/// `adminExit.submit` one at a time and runs the sign-out flow for each.
+async fn stand_in_exit_task(
+    mut requests: mpsc::Receiver<ExitRequest>,
+    platform: Arc<dyn Platform>,
+    snapshot_rx: watch::Receiver<AgentSnapshot>,
+    simulate: bool,
+    broadcast: ShellBroadcast,
+    shutdown: CancellationToken,
+) {
+    loop {
+        let request = tokio::select! {
+            () = shutdown.cancelled() => return,
+            request = requests.recv() => match request {
+                Some(request) => request,
+                None => return,
+            },
+        };
+        // The same fact as "kiosk.applied == Enabled" of the loaded state.
+        let kiosk_enabled = snapshot_rx.borrow().kiosk.enabled;
+        tokio::select! {
+            () = shutdown.cancelled() => return,
+            result = run_exit(Arc::clone(&platform), kiosk_enabled, simulate, request, broadcast.clone()) => {
+                if let Err(error) = result {
+                    tracing::error!("admin exit did not complete: {error}");
+                }
+            }
+        }
     }
 }
 
@@ -168,11 +246,30 @@ pub async fn run(
     }
     let store = StateStore::open(&deps.paths.state_dir()).context("open the state directory")?;
     let state = store.load().context("load the agent state")?;
-    let mut first_snapshot = initial_snapshot(&state, deps.platform.as_ref(), &deps.config);
+    // (1.1) The agent-only keys of the desired-state document: the demo document in
+    // demo mode, otherwise the cached one (Step 8 keeps it current). No document
+    // means no exit PIN, so the admin exit is off.
+    let policy_doc = if deps.sim.demo {
+        Some(fixtures::demo_document())
+    } else {
+        load_cached_desired(&deps.paths).map(|cached| cached.doc)
+    };
+    let policy = AgentPolicy::from_doc(policy_doc.as_ref());
+    drop(policy_doc);
+    tracing::info!(
+        enabled = policy.admin_exit.enabled,
+        hotkey = %policy.admin_exit.hotkey,
+        problem = ?policy.admin_exit.problem,
+        "admin exit settings"
+    );
+    let mut first_snapshot = initial_snapshot(&state, deps.platform.as_ref(), &deps.config, &policy);
     if deps.sim.demo {
         fixtures::apply_demo_snapshot(&mut first_snapshot, deps.sim.offline);
     }
     let (snapshot_tx, snapshot_rx) = watch::channel(first_snapshot);
+    // The policy travels in its own channel, so the PIN hash is never inside the
+    // snapshot. Step 8 sends the next policy whenever a document is accepted.
+    let (_policy_tx, policy_rx) = watch::channel(policy);
 
     if deps.simulate {
         tracing::info!(demo = deps.sim.demo, offline = deps.sim.offline, "agent started (simulate)");
@@ -216,10 +313,22 @@ pub async fn run(
         audit: Arc::clone(&audit),
         snapshot_rx: snapshot_rx.clone(),
         files_base,
-        now_ms,
+        now_ms: Arc::clone(&now_ms),
         // Step 8 keeps `last_wall_clock_ms` current; until then the loaded value.
         clock_floor_ms: Arc::new(move || clock_floor),
         timeouts: SessionTimeouts::default(),
+    });
+
+    // (1.1) The hidden admin exit: the PIN gate, and the stand-in task that signs
+    // the Staff session out (the reconciler of Step 9 takes that over).
+    let (exit_tx, exit_rx) = mpsc::channel::<ExitRequest>(EXIT_QUEUE);
+    let admin_exit = AdminExit::new(AdminExitDeps {
+        policy_rx,
+        lockouts: Arc::clone(&lockouts),
+        audit: Arc::clone(&audit),
+        session: Arc::clone(&session),
+        exit_tx,
+        now_ms,
     });
 
     let tasks = TaskTracker::new();
@@ -233,6 +342,7 @@ pub async fn run(
                 Arc::new(NotAvailableYet),
                 Arc::clone(&session),
                 Arc::clone(&audit),
+                Arc::clone(&admin_exit),
             )),
         },
         shutdown.clone(),
@@ -257,10 +367,21 @@ pub async fn run(
             snapshot_rx: snapshot_rx.clone(),
             signals: signals_tx,
             broadcast: broadcast.clone(),
-            // Step 6b adds the admin-exit extension here.
-            extensions: vec![Arc::clone(&session) as Arc<dyn ShellExtension>],
+            // The order is the order of the capability list in `hello`.
+            extensions: vec![
+                Arc::clone(&admin_exit) as Arc<dyn ShellExtension>,
+                Arc::clone(&session) as Arc<dyn ShellExtension>,
+            ],
             staff_sid_rx,
         },
+        shutdown.clone(),
+    ));
+    tasks.spawn(stand_in_exit_task(
+        exit_rx,
+        Arc::clone(&deps.platform),
+        snapshot_rx.clone(),
+        deps.simulate,
+        broadcast.clone(),
         shutdown.clone(),
     ));
     tasks.spawn(log_shell_signals(signals_rx, shutdown.clone()));
@@ -358,11 +479,66 @@ mod tests {
     fn fresh_snapshot_is_not_enrolled_and_standard() {
         let dir = TempDir::new();
         let sim = SimPlatform::new(dir.path().to_path_buf());
-        let snapshot = initial_snapshot(&AgentState::default(), &sim, &AgentConfig::default());
+        let snapshot =
+            initial_snapshot(&AgentState::default(), &sim, &AgentConfig::default(), &AgentPolicy::default());
         assert_eq!(snapshot.enrollment, EnrollmentStatus::NotEnrolled);
         assert_eq!(snapshot.display_mode, DisplayMode::Standard);
         assert_eq!(snapshot.kiosk.phase, KioskPhase::NotApplied);
         assert!(snapshot.device.is_none() && snapshot.desired_state.is_none());
+        // A 1.1 agent always sends `adminExit`; with no PIN it is off.
+        assert_eq!(
+            snapshot.admin_exit,
+            Some(rulebox_ipc::types::AdminExitInfo { enabled: false, hotkey: "Ctrl+Shift+F12".into() })
+        );
+        assert!(snapshot.power.is_none() && snapshot.org_name.is_none());
+    }
+
+    #[test]
+    fn the_snapshot_takes_the_policy_fields_and_never_the_hash() {
+        let dir = TempDir::new();
+        let sim = SimPlatform::new(dir.path().to_path_buf());
+        let document = serde_json::json!({
+            "adminExit": { "pinHash": crate::kdf::hash_secret("2468").unwrap(), "hotkey": "ctrl+alt+k" },
+            "power": { "sleep": false, "restart": true, "shutDown": true },
+            "orgName": "Corner Shop"
+        });
+        let policy = AgentPolicy::from_doc(Some(&document));
+        let snapshot = initial_snapshot(&AgentState::default(), &sim, &AgentConfig::default(), &policy);
+        assert_eq!(
+            snapshot.admin_exit,
+            Some(rulebox_ipc::types::AdminExitInfo { enabled: true, hotkey: "Ctrl+Alt+K".into() })
+        );
+        assert_eq!(snapshot.org_name.as_deref(), Some("Corner Shop"));
+        assert_eq!(snapshot.power.map(|p| p.sleep), Some(false));
+        let wire = serde_json::to_string(&snapshot).unwrap();
+        assert!(!wire.contains("pinHash") && !wire.contains("argon2"), "{wire}");
+    }
+
+    #[test]
+    fn the_cached_document_is_read_from_desired_state_json_and_debug_hides_it() {
+        let dir = TempDir::new();
+        let paths = DataPaths::new(dir.path().to_path_buf());
+        assert_eq!(load_cached_desired(&paths), None);
+
+        std::fs::create_dir_all(paths.state_dir()).unwrap();
+        let text = r#"{ "version": 7, "doc": { "adminExit": { "pinHash": "$argon2id$secret" }, "x": 1 },
+                        "signature": "sig" }"#;
+        std::fs::write(paths.desired_state(), text).unwrap();
+        let cached = load_cached_desired(&paths).expect("a cached document");
+        assert_eq!(cached.version, 7);
+        assert_eq!(cached.doc["x"], 1);
+        assert_eq!(cached.signature.as_deref(), Some("sig"));
+        let debug = format!("{cached:?}");
+        assert!(!debug.contains("argon2") && !debug.contains("pinHash"), "{debug}");
+
+        // No signature in the file is fine (it is written unsigned until Phase 5).
+        std::fs::write(paths.desired_state(), r#"{ "version": 1, "doc": {} }"#).unwrap();
+        assert_eq!(load_cached_desired(&paths).unwrap().signature, None);
+
+        // A file that does not parse is moved aside and treated as missing.
+        std::fs::write(paths.desired_state(), "{ not json").unwrap();
+        assert_eq!(load_cached_desired(&paths), None);
+        assert!(!paths.desired_state().exists());
     }
 
     #[test]
@@ -383,7 +559,7 @@ mod tests {
             last_applied_version: 7,
             ..AgentState::default()
         };
-        let snapshot = initial_snapshot(&state, &sim, &AgentConfig::default());
+        let snapshot = initial_snapshot(&state, &sim, &AgentConfig::default(), &AgentPolicy::default());
         assert_eq!(snapshot.display_mode, DisplayMode::Lite);
         assert_eq!(snapshot.enrollment, EnrollmentStatus::Enrolled);
         assert_eq!(snapshot.device.map(|d| d.id), Some("d1".to_string()));
@@ -429,8 +605,10 @@ mod tests {
     async fn the_demo_world_signs_an_employee_in_and_status_names_them() {
         use rulebox_ipc::admin::{AdminStatus, AdminStatusResult};
         use rulebox_ipc::client::{ClientConfig, ClientEvent, IpcClient};
-        use rulebox_ipc::methods::{AppsList, Empty, SessionSignIn, SessionSignOut};
-        use rulebox_ipc::requests::{SignInOutcome, SignInParams};
+        use rulebox_ipc::methods::{AdminExitSubmit, AppsList, Empty, SessionGet, SessionSignIn};
+        use rulebox_ipc::requests::{
+            AdminExitOutcome, AdminExitSubmitParams, SignInOutcome, SignInParams,
+        };
         use rulebox_ipc::types::{ClientInfo, ClientRole};
         use rulebox_win32::sid::current_user_sid;
 
@@ -455,7 +633,7 @@ mod tests {
         let (client, mut events) = IpcClient::spawn_with(info, config(shell_name));
         match tokio::time::timeout(Duration::from_secs(10), events.recv()).await.unwrap().unwrap() {
             ClientEvent::Linked(hello) => {
-                assert_eq!(hello.capabilities, ["state", "health", "session", "apps"]);
+                assert_eq!(hello.capabilities, ["state", "health", "adminExit", "session", "apps"]);
             }
             other => panic!("unexpected {other:?}"),
         }
@@ -463,7 +641,18 @@ mod tests {
         let snapshot = client.call::<rulebox_ipc::methods::StateGet>(Empty {}).await.unwrap();
         assert_eq!(snapshot.enrollment, EnrollmentStatus::Enrolled);
         assert_eq!(snapshot.connection, ConnectionStatus::Online);
-        assert_eq!(snapshot.device.map(|d| d.id), Some("sim-device".to_string()));
+        assert_eq!(snapshot.device.as_ref().map(|d| d.id.as_str()), Some("sim-device"));
+        // The demo document's agent-only keys reach the snapshot, the hash does not.
+        assert_eq!(
+            snapshot.admin_exit,
+            Some(rulebox_ipc::types::AdminExitInfo { enabled: true, hotkey: "Ctrl+Shift+F12".into() })
+        );
+        assert_eq!(snapshot.org_name.as_deref(), Some("Demo Company"));
+        assert_eq!(
+            snapshot.power,
+            Some(rulebox_ipc::types::PowerOptions { sleep: true, restart: true, shut_down: true })
+        );
+        assert!(!serde_json::to_string(&snapshot).unwrap().contains("argon2"));
 
         let signed_in = client
             .call::<SessionSignIn>(SignInParams { username: "maya".into(), password: "demo".into() })
@@ -485,8 +674,31 @@ mod tests {
         let extra = extra.expect("a 1.1 agent sends extra");
         assert_eq!(extra.employee.as_deref(), Some("Maya Chen"));
         assert_eq!(extra.audit_queued, 0);
+        assert_eq!((extra.admin_exit_failures, extra.admin_exit_locked_for_ms), (0, None));
 
-        client.call::<SessionSignOut>(Empty {}).await.unwrap();
+        // The hidden exit end to end: a wrong PIN, then the demo PIN.
+        let wrong = client
+            .call::<AdminExitSubmit>(AdminExitSubmitParams { pin: "1111".into() })
+            .await
+            .unwrap();
+        assert_eq!((wrong.outcome, wrong.attempts_left), (AdminExitOutcome::WrongPin, Some(4)));
+        let right = client
+            .call::<AdminExitSubmit>(AdminExitSubmitParams { pin: "2468".into() })
+            .await
+            .unwrap();
+        assert_eq!(right.outcome, AdminExitOutcome::SigningOut);
+        // The employee session went with it, and the client was told why.
+        let session = client.call::<SessionGet>(Empty {}).await.unwrap();
+        assert!(session.employee.is_none());
+        let mut told = None;
+        while let Ok(Some(event)) = tokio::time::timeout(Duration::from_secs(5), events.recv()).await {
+            if let ClientEvent::ShuttingDown { reason, grace_ms } = event {
+                told = Some((reason, grace_ms));
+                break;
+            }
+        }
+        assert_eq!(told, Some((rulebox_ipc::types::ShutdownReason::AdminExit, 2000)));
+
         shutdown.cancel();
         task.await.unwrap().unwrap();
         // The state files of Step 6a are in the state directory.
@@ -546,12 +758,22 @@ mod tests {
         match linked {
             ClientEvent::Linked(hello) => {
                 assert_eq!((hello.protocol.major, hello.protocol.minor), (1, 1));
-                assert_eq!(hello.capabilities, ["state", "health"]);
+                // No employee directory: no `session` or `apps`; the exit is always listed.
+                assert_eq!(hello.capabilities, ["state", "health", "adminExit"]);
             }
             other => panic!("unexpected {other:?}"),
         }
         let snapshot = client.call::<StateGet>(Empty {}).await.unwrap();
         assert_eq!(snapshot.enrollment, EnrollmentStatus::NotEnrolled);
+        // No document, so no PIN: the exit is off and says so.
+        assert_eq!(snapshot.admin_exit.as_ref().map(|exit| exit.enabled), Some(false));
+        let disabled = client
+            .call::<rulebox_ipc::methods::AdminExitSubmit>(rulebox_ipc::requests::AdminExitSubmitParams {
+                pin: "2468".into(),
+            })
+            .await
+            .unwrap();
+        assert_eq!(disabled.outcome, rulebox_ipc::requests::AdminExitOutcome::Disabled);
         client.call::<ShellReady>(Empty {}).await.unwrap();
         client.call::<ShellHeartbeat>(Empty {}).await.unwrap();
 

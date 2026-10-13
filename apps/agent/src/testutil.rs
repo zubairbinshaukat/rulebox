@@ -13,6 +13,7 @@ use tokio::net::windows::named_pipe::NamedPipeClient;
 use tokio_util::codec::Framed;
 
 use crate::agent::{initial_snapshot, AgentConfig};
+use crate::agent_policy::AgentPolicy;
 use crate::platform::sim::SimPlatform;
 use crate::state::AgentState;
 
@@ -52,7 +53,7 @@ pub fn unique_pipe_name() -> String {
 /// The snapshot of a fresh, not enrolled agent.
 pub fn test_snapshot() -> AgentSnapshot {
     let sim = SimPlatform::new(std::env::temp_dir());
-    initial_snapshot(&AgentState::default(), &sim, &AgentConfig::default())
+    initial_snapshot(&AgentState::default(), &sim, &AgentConfig::default(), &AgentPolicy::default())
 }
 
 /// A bare protocol client for tests that need to misbehave: it sends whatever
