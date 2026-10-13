@@ -34,21 +34,32 @@ a primary source; the plan says how each one gets confirmed.
 
 ## Updates since this plan was written (13 October 2026)
 
-Read this first. Where it disagrees with the text below, this section wins.
-The steps below have NOT been rewritten for these yet; do that before
-starting Phase 3.
+Read this first. The body below was rewritten for these answers after
+Phase 2 was finished (Sections 2, 3, 7.4 and 9, Steps 3, 10 and 16, and
+Sections 12, 15 and 17). Where anything still disagrees with this section,
+this section wins.
 
 The user answered the open questions (table in `docs/plans/README.md`).
-Three answers differ from this plan's recommendation:
+Three answers differ from this plan's original recommendation:
 
 - **P3 default exit combination: Ctrl + Shift + F12** (not Ctrl+Alt+Shift+R).
-- **P7 the Windows key opens Start: yes.** This needs the low-level
-  keyboard hook this plan chose to avoid, and it must be reconciled with
-  Phase 5, which disables Windows-key shortcuts by policy.
-- **P9 employees can switch light/dark theme: yes** (remembered per
-  employee; the organization's theme is the default).
+  This is also the Phase 2 agent's default, so the Staff App and the
+  launcher agree without the dashboard setting.
+- **P7 the Windows key opens Start: yes.** Built as **one narrow
+  low-level keyboard hook** in Step 16 (shell mode only; it acts only on a
+  Windows key pressed and released alone, never records or sends key
+  content, and is the only hook in the app). It is compatible with Phase 5,
+  which disables the *combinations* (Win+R, Win+E, ...) by policy: the hook
+  never handles a combination. Antivirus and signing are covered in
+  Section 9 and Phase 6.
+- **P9 employees can switch light/dark theme: yes** (Auto / Light / Dark in
+  quick settings, remembered per employee in their folder; the
+  organization's theme is the default) (Step 10).
 
-All other answers match the recommendations.
+All other answers match the recommendations. Phase 2 is **done**: its
+questions were answered as recommended and its agent speaks protocol 1.1
+(`session.*`, `apps.list`, `adminExit.submit`; see
+`phase-2-agent-core.md` Sections 6.11 and 12).
 
 ## 1. Goal
 
@@ -94,7 +105,7 @@ agent, with Explorer untouched.
 | Lockdown policies, App Control, the process allow-list watchdog, blocking Ctrl+Alt+Del or Task Manager, restricting common file dialogs and print dialogs, device lock screen (PRD 24.4), broadcast messages, Wi-Fi list / connect / toggle, printer setup | Phase 5 |
 | Custom title bar on **web app** windows (Tauri multiwebview is still behind the `unstable` flag; PRD 13.6 #7 says build the native title bar first) | later enhancement |
 | System tray host, Windows toast hosting, multi-monitor taskbars | v1.x (PRD 13.4, 17) |
-| Low-level keyboard hooks of any kind (so: no "Windows key opens Start") | Section 17, P7 |
+| Any low-level keyboard hook **other than** the single Windows-key hook of Step 16 (P7); a hook that reads, logs or sends key content; handling Windows-key *combinations* (Win+R, Win+E, ...) | Phase 5 disables the combinations by policy |
 | PPTX preview (Section 17, P5), HEVC/AVI/WMV playback, editing any document | later |
 | Idle auto-logout, idle auto-close of web apps (PRD 22.4), shift hours | later; the hooks are noted in Section 13 |
 | MSI, WebView2 bootstrap, code signing, release builds | Phase 6 |
@@ -103,9 +114,10 @@ agent, with Explorer untouched.
 
 ## 3. Assumptions from Phase 2 open questions
 
-The Phase 2 questions are **not answered yet**. Phase 3 is planned on the
-Phase 2 recommendations. If the user picks the other option, only the
-places in the last column change.
+The Phase 2 questions were answered (13 October 2026, table in
+`docs/plans/README.md`) and **every answer matches the recommendation
+assumed here**. The last column is kept for the record: it says what would
+change if one of them were reopened.
 
 | # | Phase 2 question | Assumed answer | If the user picks the other option |
 |---|---|---|---|
@@ -121,8 +133,8 @@ places in the last column change.
 Decisions already made by the user and used here:
 
 - **Hidden admin exit (PRD 9.5, 12.4):** the key combination is set per
-  organization from the dashboard, with a fixed default (suggested
-  Ctrl + Alt + Shift + R; the exact default is still open, P3). A correct
+  organization from the dashboard, with a fixed default of
+  **Ctrl + Shift + F12** (P3, decided). A correct
   PIN **signs the Staff session out to the Windows sign-in screen**. It
   goes through the agent (Section 6.4), because automatic sign-in would
   otherwise sign Staff straight back in and because PIN checking must not
@@ -287,6 +299,7 @@ crates/rulebox-desktop/                 # new; Win32 for the shell (see Section 
    ├─ power.rs          # battery, shutdown / restart / sleep
    ├─ net.rs            # connectivity status
    ├─ hotkeys.rs        # RegisterHotKey (ShellToken)
+   ├─ winkey.rs         # the one narrow WH_KEYBOARD_LL hook: Windows key alone opens Start (P7, Step 16)
    └─ notify.rs         # display, DPI, power-resume, session notifications
 
 apps/staff-app/src-tauri/
@@ -579,12 +592,16 @@ Click: restore if minimized; minimize if it is the active window; else
 focus. Right-click or Shift+F10: menu with Close window, and for pinned
 apps Open.
 
+The Start menu opens from the Start button, from **Ctrl+Esc** and from the
+**Windows key pressed and released alone** (P7, Step 16). The Windows key
+with another key (Win+R, Win+E, ...) is never handled by Rulebox.
+
 ### 7.5 Popups (`shell-popup`)
 
 | Popup | Content | States |
 |---|---|---|
 | Start menu | Search field, app grid, recent files, profile row, **Log out**, power (Sleep, Restart, Shut down) | No results; power item hidden when the Staff account lacks the shutdown right or the admin disabled it |
-| Quick settings | Volume slider + mute, battery line, network status line, brightness slider if supported, notices list | No audio device ("No sound device"); desktop PC (no battery line); brightness unsupported (hidden) |
+| Quick settings | Volume slider + mute, battery line, network status line, brightness slider if supported, **theme row (Auto / Light / Dark, P9)**, notices list | No audio device ("No sound device"); desktop PC (no battery line); brightness unsupported (hidden) |
 | Account menu | Avatar, name, role; "Lock"; "Log out" | — |
 | Confirm log out | "Log out? These apps will be closed: …" with the list, "Unsaved work may be lost." | Nothing open: no list |
 | App switcher | Icon + title per window (thumbnail in Standard mode) | One window only: still shown |
@@ -962,8 +979,10 @@ React never sees (the `SafeRoot`, job handles, the agent port).
 
 `agent/`: `AgentPort`, `IpcAgent`, `DemoAgent` (Section 6). A task copies
 link and snapshot changes into `AppState`. `display.lite` comes from the
-snapshot's `displayMode`; `display.theme` is `"auto"` (P9);
-`display.reducedMotion` is read in React from the media query.
+snapshot's `displayMode`; `display.theme` starts as the organization's
+setting (`"auto"` until the dashboard has one) and, once an employee is
+signed in, the employee's own choice from `prefs.json` replaces it (P9,
+Step 10); `display.reducedMotion` is read in React from the media query.
 
 Commands (all thin): `shell_state() -> ShellState`, `ui_ready()`,
 `ui_alive()`, `dismiss_notice(id)`. Debug builds only:
@@ -1382,12 +1401,30 @@ pub fn connectivity() -> Connectivity;                        // None | Local | 
   record it.
 - Clock: time `HH:mm` and short date from the OS locale, updated on the
   minute boundary (one timer, not a 500 ms poll).
+- **Theme choice (P9).** Quick settings has a three-way row: Auto
+  (follow the organization's setting / the system), Light, Dark. The
+  choice is **per employee** and is kept next to the window positions
+  (Step 8), in
+  `%LOCALAPPDATA%\dev.rulebox.staff\employees\<employeeId>\prefs.json`
+  (`{ "theme": "auto"|"light"|"dark" }`, nothing else, ignored when it
+  does not parse). It is **not** in the employee's files, so it never
+  shows in the explorer, counts against no quota and is outside the file
+  commands' confinement.
+  Commands: `set_theme(theme)` (writes the file, updates
+  `display.theme`, emits `shell://state`); the value is read after
+  sign-in and cleared on log out, so the sign-in screen always follows the
+  organization setting. A write failure keeps the choice for the session
+  and posts a notice. No agent method is involved.
 - Notices: `AppState::notify(tone, title, detail)` keeps the latest 20;
   the bell shows the unread count; the list is in quick settings. There
   are no floating toasts in Phase 3 and no Windows toasts.
 
 Tests: volume clamping and rounding; battery text ("86% · Charging",
-"On battery · 2 h 10 min left", none); connectivity mapping.
+"On battery · 2 h 10 min left", none); connectivity mapping; theme:
+`prefs.json` round trip, a broken file falls back to the organization
+setting, an `employeeId` that is not a plain identifier is refused (no
+path separators), the sign-in screen ignores the previous employee's
+choice.
 
 **Verify:** tests; demo run: the slider changes the real system volume
 and moves when the volume is changed elsewhere; unplugging power (if a
@@ -1808,15 +1845,55 @@ message thread for:
 |---|---|---|
 | `Switcher` | Alt+Tab | Open the app switcher |
 | `Start` | Ctrl+Esc | Open the Start menu |
-| `AdminExit` | Ctrl+Alt+Shift+R (default; later from the agent, Section 15 R4) | Open the admin-exit PIN popup |
+| `AdminExit` | **Ctrl+Shift+F12** (default, P3; later from the agent's `adminExit.hotkey`, Section 15 R4) | Open the admin-exit PIN popup |
 
 - **Shell mode only.** In dev mode the same three actions are reachable
   from the dev overlay, so nothing global is registered on the dev
-  machine.
+  machine, and **no hook is installed** there either.
 - If a registration fails, log it and continue; the feature is then
   reachable only by mouse (Start) or not at all (switcher). Record it.
-- **No low-level keyboard hook** is installed anywhere in Phase 3. The
-  Windows key therefore does not open Start (P7).
+
+**The Windows key opens Start (P7) — `winkey.rs`, the only hook in the
+app.** `RegisterHotKey` cannot express "the Windows key alone", so this one
+feature uses a low-level keyboard hook (`SetWindowsHookExW(WH_KEYBOARD_LL)`)
+under these rules, all of which are tests or checks below:
+
+- **Shell mode only, installed once, on the message thread** (the same
+  thread that owns the hotkeys; it has a message loop, which the hook
+  needs). `SetWindowsHookExW` failure: log, record, continue; Start stays
+  reachable by click and Ctrl+Esc.
+- **It acts on one pattern only:** `VK_LWIN` or `VK_RWIN` pressed and then
+  released with **no other key event in between** (`LLKHF_INJECTED`
+  events and key repeats are ignored). On that pattern it posts a
+  message to the main thread that toggles the Start menu, and swallows the
+  Windows key's release so nothing else reacts to it.
+- **It never handles a combination.** If any other key goes down while the
+  Windows key is held, the hook stands aside and passes every event on
+  untouched (Win+R, Win+E, Win+L, ... are Phase 5's, disabled by policy).
+- **It reads no key content.** The callback looks at the virtual-key code
+  and the flags to decide "is this the Windows key, and was another key
+  seen"; it stores one boolean and one timestamp, and it writes nothing
+  to disk, to the log or to any channel. A unit test pins that the state
+  struct contains no character or key-code buffer.
+- **It is fast.** Nothing but flag updates and one `PostMessageW` happens
+  in the callback: no allocation, no locks that another thread holds, no
+  logging, no IPC. Windows removes a hook that takes longer than the
+  `LowLevelHooksTimeout` (about 300 ms by default); if that happens the
+  hook is reinstalled once at the next message-loop tick, then left off
+  and recorded.
+- **It is removed on exit** (`UnhookWindowsHookEx`), on log out of the
+  last window and on `WM_ENDSESSION`.
+- **Antivirus.** A low-level hook is a pattern security products look at.
+  Mitigations that exist in this plan: shell mode only, the narrow pattern
+  above, no key content, and signing in Phase 6. If a product flags it
+  anyway, the feature is one constant (`WINKEY_HOOK_ENABLED`) in
+  `winkey.rs` and Start still opens by click and Ctrl+Esc. Record the
+  product in the final report if it happens on the VM.
+- **Phase 5.** Disabling Windows-key shortcuts by policy affects the
+  combinations, not this hook. Whether the system still delivers a lone
+  Windows key to a low-level hook with those policies on is
+  **(unverified)**; the VM run checks it, and Phase 5 re-checks it when it
+  applies the policy.
 
 App switcher: the popup shows the task list (most recently active
 first). Because the popup takes focus, key handling is in React: Tab /
@@ -1847,8 +1924,10 @@ inputs), `hotkeys.rs`, commands `admin_exit_open()` (any `shell-*` or
 ```rust
 pub enum AdminExitOutcome { SigningOut, WrongPin { attempts_left: Option<u32> }, LockedOut { retry_after_ms: u64 }, Disabled }
 pub struct AdminExitView { pub link: AgentLinkDto, pub supported: bool, pub enabled: bool, pub lite: bool, pub theme: ThemeDto }
-/// Parses "Ctrl+Alt+Shift+R"-style text: 1..3 modifiers from Ctrl, Alt, Shift plus one letter, digit or F-key.
+/// Parses "Ctrl+Shift+F12"-style text: 1..3 modifiers from Ctrl, Alt, Shift plus one letter, digit or F-key.
 /// Rejects combinations without Ctrl or Alt, and Alt+Tab / Ctrl+Esc / Ctrl+Alt+Del.
+/// (The agent's own parser, `rulebox_ipc::hotkey`, is the reference; the Staff App
+/// may depend on that crate's `hotkey` module instead of writing a second one.)
 pub fn parse_hotkey(text: &str) -> Result<Hotkey, HotkeyError>;
 ```
 
@@ -1877,7 +1956,13 @@ pub fn parse_hotkey(text: &str) -> Result<Hotkey, HotkeyError>;
 
 Tests: switcher ordering and key handling; thumbnail rectangle scaling
 at 125%; `parse_hotkey` (valid, missing modifier, reserved combinations,
-garbage); admin-exit state mapping for every row of Section 7.11
+garbage, and that the default `Ctrl+Shift+F12` parses); the Windows-key
+state machine as a pure function over a recorded sequence of key events
+(`Win down, Win up` → Start; `Win down, R down, R up, Win up` → nothing,
+all events passed on; injected events and key repeats ignored; two
+quick taps → two toggles; a hook-timeout sequence reinstalls once), and
+that the state struct holds no key-code or character buffer;
+admin-exit state mapping for every row of Section 7.11
 including agent-not-linked → linked; PIN input filter; `admin_exit_open`
 succeeds in each `SessionState` and with `link = Disconnected`; a test
 that `exit.html`'s entry does not import the store, GSAP or any icon.
@@ -1892,8 +1977,13 @@ agent logs it; a wrong PIN shows the error; five wrong PINs show the
 countdown; with the demo agent's "link down" switch the field is disabled
 and re-enables when the link returns; force an error in the desktop page
 (dev overlay "throw") and open the exit again; repeat once in Lite.
-Screenshots of each dialog state. Confirm that **no** global hotkey was
-registered in dev mode (Alt+Tab still shows the Windows switcher).
+Screenshots of each dialog state. Confirm that **no** global hotkey and
+**no** keyboard hook was registered in dev mode (Alt+Tab still shows the
+Windows switcher, and the Windows key opens the real Start menu: that is
+the check that shell mode did not leak). On the VM (Step 18): the Windows
+key alone opens the Rulebox Start menu, Win+R and Win+E do not trigger
+anything of Rulebox's, and typing in a web app and a desktop app is
+unaffected (no dropped or doubled keys).
 
 **Done when:** all of that holds.
 
@@ -2030,7 +2120,9 @@ each unticked item is listed with the reason.
 - the Windows work area, hotkeys or minimized-window setting changed on
   the dev machine (shell mode leaked);
 - you would need the Tauri `unstable` feature, a plugin from the "do not
-  add" list, a low-level keyboard hook, or `ShellExecute`;
+  add" list, a **second** low-level keyboard hook or any hook that reads
+  key content (the Windows-key hook of Step 16 is the only one allowed),
+  or `ShellExecute`;
 - a logo animation misses its targets (do not edit the logo files);
 - you need to change a file Phase 2 owns, or anything in the IPC
   contract;
@@ -2084,7 +2176,7 @@ each unticked item is listed with the reason.
   | Route | State after Phase 3 | Phase 3 rule |
   |---|---|---|
   | Ctrl+Alt+Del screen, Task Manager | Untouched until Phase 5 empties the screen by policy (PRD 12.2). It is **not** an admin route | No text, test or flow mentions or depends on it; the hidden exit is the route |
-  | Windows key shortcuts, Win+R, Win+E | Untouched; many do nothing without Explorer **(unverified)** | No hook is installed |
+  | Windows key shortcuts, Win+R, Win+E | Untouched; many do nothing without Explorer **(unverified)** | Not handled. Only a Windows key pressed and released **alone** opens Rulebox's Start (P7); the narrow hook of Step 16 passes every combination through |
   | File Open / Save dialogs in desktop apps and in web pages (`<input type="file">`) | Open: they show the real file system | Built-in windows never open a common dialog; the explorer has its own rename / new-folder UI |
   | Print dialog (`window.print()`, "Save as PDF") | Open | Built-in viewers have no print button |
   | Links in desktop apps opening a browser | Open | The shell never registers itself as a URL handler |
@@ -2179,7 +2271,12 @@ marked **(A)** need the Phase 2 agent with the capability named.
 - [ ] Clicking a task button focuses, minimizes, restores. Note the
       activation rung from the log.
 - [ ] Alt+Tab: what happens? (Rulebox switcher / nothing / Windows
-      switcher.) Ctrl+Esc opens Start? The Windows key: what happens?
+      switcher.) Ctrl+Esc opens Start? The Windows key **alone** opens
+      Rulebox's Start (P7), and Win+R / Win+E do nothing of Rulebox's?
+      Does typing stay intact in a web app and in Notepad with the hook
+      on (no dropped, doubled or stuck keys, including a held Shift)?
+      Did the antivirus on the VM say anything? **Ctrl+Shift+F12** opens
+      the exit dialog?
 - [ ] Change resolution and scale (100% → 125% → 150%): desktop and
       taskbar re-fit; the work area follows.
 - [ ] Plug in a second monitor: the shell stays on the primary one;
@@ -2382,7 +2479,7 @@ Phase 2 currently lists the admin exit as a Phase 5 non-goal; it needs
 an explicit owner now.
 
 **R4 — Optional snapshot fields** (additive): `adminExit: { enabled:
-boolean, hotkey: string }` (for example `"Ctrl+Alt+Shift+R"`; the
+boolean, hotkey: string }` (for example `"Ctrl+Shift+F12"`; the
 dashboard sets it per organization), `power: { sleep, restart, shutDown:
 boolean }` (PRD 4.7), `orgName: string | null`. Until present, the Staff
 App uses the default hotkey, all power options, and
@@ -2472,13 +2569,13 @@ The plan assumes the **recommended** option.
 |---|---|---|---|
 | P1 | Who verifies employee sign-in? | (a) The agent, over IPC. (b) The Staff App talks to Convex itself | **(a).** With (b): a second backend connection per device (free tier: 1,000 concurrent sessions), a credential cache readable by the Staff account, CSP and Step 3/5 changes |
 | P2 | Should the launcher's "Rulebox can't start" screen also offer the hidden exit? (Ctrl+Alt+Del is decided: not an admin route) | (a) Yes: the launcher shows a native PIN field and asks the agent (Section 15, R11). (b) No: in that state only Disable kiosk and Shift at startup remain | **(a).** Otherwise an admin standing at a PC whose Staff App is broken has no on-screen route and must restart it. No Phase 3 step changes either way |
-| P3 | Default admin-exit key combination | Ctrl+Alt+Shift+R (suggested) or another | **Ctrl+Alt+Shift+R** unless it collides with an approved app's shortcut. It is one constant (Step 16) |
+| P3 | Default admin-exit key combination | Ctrl+Alt+Shift+R (suggested) or another | **Decided: Ctrl+Shift+F12** (also the agent's default). One constant (Step 16) |
 | P4 | What does Delete do? | (a) Trash folder inside the employee folder. (b) Windows Recycle Bin. (c) Permanent | **(a).** (b) is unverified without Explorer and has no restore UI |
 | P5 | PPTX preview (PRD 7.1 lists it) | (a) "Preview not available — open with …". (b) Ship a best-effort library | **(a).** No library of known quality was found or tested |
 | P6 | Title bar of web app windows | (a) Native Windows title bar. (b) Custom, using Tauri's `unstable` multiwebview | **(a)** for v1 (PRD 13.6 #7) |
-| P7 | Should the Windows key open the Rulebox Start menu? | (a) No; Start opens by click and Ctrl+Esc. (b) Yes, with a low-level keyboard hook | **(a).** A global keyboard hook looks like a keylogger to antivirus, and Phase 5 will disable Windows-key shortcuts by policy anyway |
+| P7 | Should the Windows key open the Rulebox Start menu? | (a) No; Start opens by click and Ctrl+Esc. (b) Yes, with a low-level keyboard hook | **Decided: (b), as one narrow hook** (Step 16): shell mode only, Windows key pressed and released alone, never key content, combinations passed through untouched, one constant to switch it off. Risks recorded: antivirus heuristics (mitigated by signing in Phase 6) and Phase 5's Windows-key policy **(unverified)** |
 | P8 | Lite mode built-in windows | (a) One tabbed window. (b) In-page floating windows inside one full-screen WebView | **(a).** (b) cannot interleave with other apps' windows |
-| P9 | May employees change light / dark? | (a) No: follows the organization setting, default Auto. (b) Yes, per employee, in quick settings (the design shows it) | **(a)** until the dashboard has the setting; (b) is a small addition in Step 10 |
+| P9 | May employees change light / dark? | (a) No: follows the organization setting, default Auto. (b) Yes, per employee, in quick settings (the design shows it) | **Decided: (b).** Auto / Light / Dark in quick settings, kept per employee in `%LOCALAPPDATA%\dev.rulebox.staff\employees\<employeeId>\prefs.json` (Step 10); the organization setting is the default |
 | P10 | Sign-in screen remembers the last employee's name | (a) Yes (as designed). (b) Always ask for the username | **(a).** With (b): one branch less in Step 5 |
 | P11 | Wi-Fi in quick settings | (a) Status only. (b) List and connect now | **(a).** (b) needs agent methods and the location-consent story |
 | P12 | Employee "Lock" (apps stay open) | (a) Include as a convenience. (b) Leave out until Phase 5 | **(a).** It is in the design and PRD 4.7 mentions locking |
@@ -2501,6 +2598,9 @@ checklist).
 - What Windows does with **Alt+Tab** and the **Windows key** when Explorer
   is not the shell; whether `RegisterHotKey` for Alt+Tab and Ctrl+Esc
   succeeds there.
+- Whether a low-level keyboard hook still sees a **lone Windows key** when
+  Explorer is not the shell and, later, when Phase 5's Windows-key policy is
+  on (P7); and whether any antivirus on the VM objects to the hook.
 - Whether `SetForegroundWindow` succeeds when the click landed in the
   WebView2 child process (activation ladder, Step 8).
 - Whether `SetTaskmanWindow` is required for shell-hook messages; whether

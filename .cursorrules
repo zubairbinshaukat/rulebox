@@ -1,0 +1,36 @@
+Rulebox: rules for the Cursor agent.
+
+The full rules are in AGENTS.md and CLAUDE.md at the repo root. Read both
+before doing anything. CLAUDE.md is binding and wins on any disagreement.
+The current phase is Phase 3: follow docs/plans/phase-3-staff-shell.md step
+by step, and see each step's "Done when" check pass before the next step.
+
+The short list that must never be missed:
+
+1. Never run destructive things on this machine: creating or changing
+   Windows accounts, writing Winlogon/policy/LSA values, loading another
+   user's registry hive, signing a session out, installing the Rulebox
+   service, or running rulebox-agent enroll/recover/unenroll/service
+   install for real. Only the user runs those, on the test VM.
+2. Never create HKLM\SOFTWARE\Rulebox\TestMachine.
+3. Do not edit apps/agent, apps/shell-launcher, crates/rulebox-ipc or
+   crates/rulebox-win32 from a Phase 3 step. The IPC contract is frozen.
+   If you need a change there, stop and tell the user.
+4. The Staff App has no admin rights. Privileged work goes through the
+   agent over IPC. Never log or store a password, PIN, hash, device secret
+   or enrollment code.
+5. Offline-first: bundle fonts, icons and every asset. Icons are Solar only
+   (see CLAUDE.md). No CDN, no runtime icon API.
+6. Git: commit as the repo's own identity, never change git config, no AI
+   attribution of any kind (no Co-Authored-By, no "Generated with"), one
+   commit per plan step, and never push or open a PR without the user's
+   explicit go-ahead.
+7. Use pnpm only. One Cargo workspace and one target/ at the repo root,
+   debug builds only. Warn before a step that builds several GB.
+8. Develop against the simulated agent:
+   cargo run -p rulebox-agent -- run --console --simulate --sim-demo --sim-staff-session
+9. Verify for real: clippy and tests for the touched crate, pnpm typecheck
+   and pnpm lint, and run the UI and look at it. State plainly what you
+   could not verify.
+10. If a Done-when check fails twice, or the PRD and the plan disagree,
+    stop and ask the user.

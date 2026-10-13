@@ -15,7 +15,8 @@ contract).
 
 ## Answers to the plans' open questions (13 October 2026)
 
-Not yet applied to the plan files. Apply these before starting the phase.
+Applied to `phase-3-staff-shell.md` on 2026-10-13 (P3, P7 and P9 changed the
+text; the rest matched). Phase 2 is done and its answers matched the plan.
 
 | Plan | Question | Answer |
 |---|---|---|
