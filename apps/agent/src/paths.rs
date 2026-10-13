@@ -122,9 +122,98 @@ impl DataPaths {
     }
 }
 
+/// What to do with the data directory at startup (plan Section 5.1).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DataDirAction {
+    /// Already safe.
+    Use,
+    /// Does not exist: create it with the protected DACL.
+    Create,
+    /// Owned by SYSTEM or Administrators, empty, DACL differs: replace the DACL.
+    FixDacl,
+    /// Owned by someone else but empty: remove it and create it again.
+    Recreate,
+    /// Not safe and not empty (or a reparse point): start nothing.
+    Refuse(&'static str),
+}
+
+/// The table of plan Section 5.1, as a pure function of what `verify_protected_dir`
+/// found and whether the directory is empty.
+pub fn data_dir_action(check: &rulebox_win32::security::DirCheck, is_empty: bool) -> DataDirAction {
+    use rulebox_win32::sid::Sid;
+
+    if !check.exists {
+        return DataDirAction::Create;
+    }
+    if check.is_reparse_point {
+        return DataDirAction::Refuse("it is a reparse point (link or junction)");
+    }
+    if check.is_ok() {
+        return DataDirAction::Use;
+    }
+    let owned_by_admins = check
+        .owner
+        .as_ref()
+        .is_some_and(|owner| *owner == Sid::system() || *owner == Sid::builtin_admins());
+    match (owned_by_admins, is_empty) {
+        (true, true) => DataDirAction::FixDacl,
+        (false, true) => DataDirAction::Recreate,
+        (true, false) => DataDirAction::Refuse("its permissions are wrong and it is not empty"),
+        (false, false) => DataDirAction::Refuse("it is owned by another account and it is not empty"),
+    }
+}
+
 #[cfg(test)]
 mod tests {
+    use rulebox_win32::security::DirCheck;
+    use rulebox_win32::sid::Sid;
+
     use super::*;
+
+    fn check(exists: bool, reparse: bool, owner: Option<Sid>, dacl_matches: bool) -> DirCheck {
+        DirCheck { exists, is_reparse_point: reparse, owner, dacl_matches }
+    }
+
+    fn user() -> Option<Sid> {
+        Some(Sid::parse("S-1-5-21-1111-2222-3333-1001").unwrap())
+    }
+
+    #[test]
+    fn data_dir_action_follows_the_section_5_1_table() {
+        let system = Some(Sid::system());
+        let admins = Some(Sid::builtin_admins());
+
+        // Missing -> Create (empty or not is moot).
+        assert_eq!(data_dir_action(&check(false, false, None, false), true), DataDirAction::Create);
+        // Reparse point, empty or not -> Refuse.
+        for empty in [true, false] {
+            assert!(matches!(
+                data_dir_action(&check(true, true, system.clone(), true), empty),
+                DataDirAction::Refuse(_)
+            ));
+        }
+        // OK -> Use, empty or not, for either trusted owner.
+        for owner in [system.clone(), admins.clone()] {
+            for empty in [true, false] {
+                assert_eq!(data_dir_action(&check(true, false, owner.clone(), true), empty), DataDirAction::Use);
+            }
+        }
+        // Trusted owner, DACL differs: empty -> FixDacl, otherwise Refuse.
+        assert_eq!(data_dir_action(&check(true, false, system.clone(), false), true), DataDirAction::FixDacl);
+        assert!(matches!(
+            data_dir_action(&check(true, false, admins, false), false),
+            DataDirAction::Refuse(_)
+        ));
+        // A normal user owns it: empty -> Recreate, otherwise Refuse (even with a matching DACL).
+        assert_eq!(data_dir_action(&check(true, false, user(), false), true), DataDirAction::Recreate);
+        assert_eq!(data_dir_action(&check(true, false, user(), true), true), DataDirAction::Recreate);
+        assert!(matches!(
+            data_dir_action(&check(true, false, user(), false), false),
+            DataDirAction::Refuse(_)
+        ));
+        // An owner that cannot be read is untrusted.
+        assert_eq!(data_dir_action(&check(true, false, None, false), true), DataDirAction::Recreate);
+    }
 
     #[test]
     fn layout_under_a_root() {

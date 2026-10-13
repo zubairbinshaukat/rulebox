@@ -2,7 +2,9 @@
 
 use std::ffi::c_void;
 
+use windows::core::{PCWSTR, PWSTR};
 use windows::Win32::Foundation::{CloseHandle, LocalFree, HANDLE, HLOCAL, INVALID_HANDLE_VALUE};
+use windows::Win32::NetworkManagement::NetManagement::NetApiBufferFree;
 
 use crate::error::{Result, Win32Error};
 
@@ -97,9 +99,77 @@ impl Drop for LocalAllocGuard {
     }
 }
 
+/// A NUL-terminated UTF-16 copy of a secret (a password), overwritten with zeros
+/// on drop so it does not linger in freed memory.
+pub(crate) struct SecretWide(Vec<u16>);
+
+impl SecretWide {
+    pub(crate) fn new(secret: &str) -> Self {
+        Self(to_wide(secret))
+    }
+
+    pub(crate) fn as_pcwstr(&self) -> PCWSTR {
+        PCWSTR(self.0.as_ptr())
+    }
+
+    pub(crate) fn as_pwstr(&mut self) -> PWSTR {
+        PWSTR(self.0.as_mut_ptr())
+    }
+}
+
+impl Drop for SecretWide {
+    fn drop(&mut self) {
+        for unit in &mut self.0 {
+            // SAFETY: `unit` is a valid, aligned, exclusive reference; the volatile
+            // write keeps the compiler from removing the wipe.
+            unsafe { std::ptr::write_volatile(unit, 0) };
+        }
+    }
+}
+
+/// A buffer returned by a `Net*` API, freed with `NetApiBufferFree`.
+pub(crate) struct NetApiBuffer(*mut u8);
+
+impl NetApiBuffer {
+    /// Takes ownership of `ptr` (null is allowed and frees nothing).
+    pub(crate) fn new(ptr: *mut u8) -> Self {
+        Self(ptr)
+    }
+
+    pub(crate) fn as_ptr(&self) -> *mut u8 {
+        self.0
+    }
+}
+
+impl Drop for NetApiBuffer {
+    fn drop(&mut self) {
+        if !self.0.is_null() {
+            // SAFETY: the pointer came from a `Net*` API that documents
+            // `NetApiBufferFree` as its release function; freed only here.
+            unsafe {
+                let _ = NetApiBufferFree(Some(self.0.cast_const().cast()));
+            }
+        }
+    }
+}
+
+/// Reads a NUL-terminated UTF-16 string from a `PWSTR` field; null gives "".
+pub(crate) fn pwstr_to_string(p: PWSTR) -> String {
+    // SAFETY: every caller passes a field of a structure the system filled in,
+    // which is null or a NUL-terminated string that lives as long as that structure.
+    unsafe { from_wide_ptr(p.0) }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn secret_wide_is_nul_terminated() {
+        let secret = SecretWide::new("pw");
+        // SAFETY: `secret` holds a NUL-terminated string.
+        assert_eq!(unsafe { from_wide_ptr(secret.as_pcwstr().0) }, "pw");
+    }
 
     #[test]
     fn wide_round_trip() {

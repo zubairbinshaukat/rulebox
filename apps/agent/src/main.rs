@@ -95,10 +95,7 @@ fn dispatch(cli: Cli) -> anyhow::Result<u8> {
         Command::Run { simulate: true, data_dir, sim_demo, sim_offline, .. } => {
             run_simulated(data_dir, sim_demo, sim_offline).map(|()| 0)
         }
-        Command::Run { simulate: false, .. } => bail!(
-            "`run --console` without --simulate needs WindowsPlatform, which arrives in Step 10 \
-             (and only runs on a test machine)"
-        ),
+        Command::Run { simulate: false, .. } => run_real(),
         Command::Service { .. } | Command::Recover { .. } => bail!("not implemented yet (Phase 2, Step 11)"),
         // The admin commands talk to the running service over the admin pipe. They
         // start no logging and open no data directory (plan Section 5.1).
@@ -120,7 +117,7 @@ fn dispatch(cli: Cli) -> anyhow::Result<u8> {
             &mut std::io::stdout().lock(),
             &mut std::io::stderr().lock(),
         )),
-        Command::Compat { .. } => bail!("not implemented yet (Phase 2, a later step)"),
+        Command::Compat { json } => run_compat(json, &mut std::io::stdout().lock()),
         Command::HashPin => Ok(hash_pin(
             &mut std::io::stdin().lock(),
             &mut std::io::stdout().lock(),
@@ -188,6 +185,13 @@ fn run_simulated(data_dir: Option<PathBuf>, sim_demo: bool, sim_offline: bool) -
         sim: SimOptions { demo: sim_demo, offline: sim_offline },
     };
 
+    let result = run_with_runtime(deps);
+    drop(guard);
+    result
+}
+
+/// Runs the agent on its own tokio runtime until Ctrl+C.
+fn run_with_runtime(deps: Deps) -> anyhow::Result<()> {
     let runtime = tokio::runtime::Builder::new_multi_thread()
         .worker_threads(2)
         .enable_all()
@@ -208,8 +212,94 @@ fn run_simulated(data_dir: Option<PathBuf>, sim_demo: bool, sim_offline: bool) -
     if let Err(error) = &result {
         tracing::error!("agent failed: {error:#}");
     }
-    drop(guard);
     result
+}
+
+/// `run --console` without `--simulate`: the real platform on the real data
+/// directory. The protected-directory check (plan Section 5.1) runs first, before
+/// anything is read or written and before logging, which lives in that directory.
+/// If the check refuses, nothing is created and the exit code is 1. Creating or
+/// repairing the directory is guarded, so on a machine without the test-machine
+/// marker this ends here.
+fn run_real() -> anyhow::Result<u8> {
+    let paths = DataPaths::from_known_folders()?;
+    let install = InstallPaths::from_known_folders()?;
+    if let Err(error) = platform::windows::ensure_data_dir(paths.root()) {
+        eprintln!("error: {error:#}");
+        return Ok(1);
+    }
+    let guard = logging::init(&paths.logs_dir(), true)?;
+    let _ = PANIC_LOG_DIR.set(paths.logs_dir());
+    tracing::info!("console mode: data directory {}", paths.root().display());
+
+    let config = agent::load_config(&paths)?;
+    let choice = directory::choose(&config, rulebox_win32::guard::is_test_machine(), false);
+    let deps = Deps {
+        platform: Arc::new(platform::windows::WindowsPlatform::new(install.clone(), paths.clone())),
+        backend_factory: backend::convex::ConvexBackend::factory(),
+        install,
+        paths,
+        config,
+        simulate: false,
+        pipes: PipeNames::for_mode(false),
+        directory: directory::build(choice, false),
+        audit_sink: Arc::new(audit::NullAuditSink),
+        sim: SimOptions { demo: false, offline: false },
+    };
+    let result = run_with_runtime(deps);
+    drop(guard);
+    result.map(|()| 0)
+}
+
+/// `compat [--json]`: reads this PC and prints the compatibility report. It builds
+/// a `WindowsPlatform` but never checks or opens the data directory, never starts
+/// file logging and never opens the state store, so it is safe on every machine.
+fn run_compat(json: bool, out: &mut dyn Write) -> anyhow::Result<u8> {
+    logging::init_stderr_only();
+    let platform = platform::windows::WindowsPlatform::new(
+        InstallPaths::from_known_folders()?,
+        DataPaths::from_known_folders()?,
+    );
+    let report = compat::build(&platform, None, false).context("read this PC")?;
+    if json {
+        writeln!(out, "{}", serde_json::to_string_pretty(&report.to_json())?)?;
+    } else {
+        write_compat_text(&report, out)?;
+    }
+    Ok(0)
+}
+
+fn write_compat_text(report: &compat::CompatReport, out: &mut dyn Write) -> std::io::Result<()> {
+    let os = &report.os;
+    writeln!(out, "Windows build : {}.{} ({})", os.build, os.ubr, os.display_version)?;
+    writeln!(out, "Edition       : {} (product type {})", os.edition_id, os.product_type)?;
+    writeln!(out, "Architecture  : {}", os.arch)?;
+    writeln!(out, "Memory        : {} MB{}", os.ram_mb, if report.lite_mode { " (Lite mode)" } else { "" })?;
+    writeln!(out, "System disk   : {} GB free", os.system_disk_free_gb)?;
+    writeln!(
+        out,
+        "Joined        : domain {}, Entra {}",
+        if os.domain_joined { "yes" } else { "no" },
+        if os.entra_joined { "yes" } else { "no" }
+    )?;
+    writeln!(out, "S mode        : {}", if os.s_mode { "yes" } else { "no" })?;
+    let blockers = report.blocker_codes();
+    if blockers.is_empty() {
+        writeln!(out, "Blockers      : none")?;
+    } else {
+        writeln!(out, "Blockers      : {}", blockers.join(", "))?;
+    }
+    if report.warnings.is_empty() {
+        writeln!(out, "Warnings      : none")?;
+    } else {
+        let warnings: Vec<String> = report
+            .warnings
+            .iter()
+            .map(|w| serde_json::to_value(w).ok().and_then(|v| v.as_str().map(str::to_string)).unwrap_or_default())
+            .collect();
+        writeln!(out, "Warnings      : {}", warnings.join(", "))?;
+    }
+    Ok(())
 }
 
 #[cfg(test)]

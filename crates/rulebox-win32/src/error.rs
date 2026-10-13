@@ -16,6 +16,23 @@ pub enum Win32Error {
     /// `ERROR_PIPE_BUSY` (231): every pipe instance is in use; retry shortly.
     #[error("pipe busy")]
     Busy,
+    /// The account (or object) to create exists already (`NERR_UserExists`, 2224).
+    #[error("already exists")]
+    AlreadyExists,
+    /// The local password policy refused the password (`NERR_PasswordTooShort`,
+    /// 2245, which Windows also returns for any other policy failure).
+    #[error("password rejected by local policy")]
+    PasswordPolicy,
+}
+
+impl Win32Error {
+    /// The Win32 error code, when the error carries one.
+    pub fn code(&self) -> Option<u32> {
+        match self {
+            Win32Error::Api { code, .. } => Some(*code),
+            _ => None,
+        }
+    }
 }
 
 pub type Result<T> = std::result::Result<T, Win32Error>;

@@ -12,6 +12,18 @@ use tracing_subscriber::layer::SubscriberExt;
 use tracing_subscriber::util::SubscriberInitExt;
 use tracing_subscriber::{fmt, Layer};
 
+/// Logging to standard error only: no directory, no file. For the read-only
+/// commands (`compat`) that must not create anything on disk. Safe to call twice.
+pub fn init_stderr_only() {
+    let level = std::env::var("RULEBOX_LOG")
+        .ok()
+        .and_then(|value| LevelFilter::from_str(value.trim()).ok())
+        .unwrap_or(LevelFilter::WARN);
+    let _ = tracing_subscriber::registry()
+        .with(fmt::layer().with_writer(std::io::stderr).with_filter(level))
+        .try_init();
+}
+
 /// Keep the returned guard alive until just before exit, or buffered lines are lost.
 pub fn init(dir: &Path, also_stderr: bool) -> anyhow::Result<WorkerGuard> {
     std::fs::create_dir_all(dir).with_context(|| format!("create log directory {}", dir.display()))?;

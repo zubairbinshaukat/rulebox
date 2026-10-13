@@ -3,12 +3,11 @@
 //! variable, cargo feature or flag. The marker is created only by the user, by
 //! hand, on a VM (plan Section 7, Step 3). This module only ever reads it.
 
-use windows::core::{PCWSTR, PWSTR};
+use windows::core::PCWSTR;
 use windows::Win32::Foundation::ERROR_SUCCESS;
 use windows::Win32::System::Registry::{
     RegGetValueW, HKEY_LOCAL_MACHINE, RRF_RT_REG_SZ, RRF_SUBKEY_WOW6464KEY,
 };
-use windows::Win32::System::SystemInformation::{ComputerNameNetBIOS, GetComputerNameExW};
 
 use crate::error::{Result, Win32Error};
 use crate::util::to_wide;
@@ -43,14 +42,10 @@ fn guard_err(what: &str, code: u32) -> Win32Error {
     Win32Error::Guard(format!("{what} (Win32 error {code})"))
 }
 
-/// The NetBIOS name, the same value as `$env:COMPUTERNAME`.
+/// The NetBIOS name, the same value as `$env:COMPUTERNAME`. Any failure is a guard error.
 fn computer_name() -> Result<String> {
-    let mut buf = [0u16; 64];
-    let mut len = buf.len() as u32;
-    // SAFETY: `buf` is valid for `len` UTF-16 units and `len` is a valid out pointer.
-    unsafe { GetComputerNameExW(ComputerNameNetBIOS, Some(PWSTR(buf.as_mut_ptr())), &mut len) }
-        .map_err(|e| guard_err("could not read the computer name", e.code().0 as u32 & 0xFFFF))?;
-    Ok(String::from_utf16_lossy(&buf[..len as usize]))
+    crate::osinfo::computer_name()
+        .map_err(|e| guard_err("could not read the computer name", e.code().unwrap_or(0)))
 }
 
 /// Reads the marker value. Any failure, including "not there", is a guard error

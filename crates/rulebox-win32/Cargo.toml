@@ -11,13 +11,21 @@ tracing.workspace = true
 # `net` only for the safe named-pipe constructors in `pipe.rs` (keeps `unsafe` in this crate).
 tokio = { workspace = true, features = ["net"] }
 windows = { workspace = true, features = [
+    # RtlGetVersion (osinfo.rs); not in the plan's feature list, which missed it.
+    "Wdk_System_SystemServices",
     "Win32_Foundation",
+    "Win32_NetworkManagement_NetManagement",
     "Win32_Security",
+    "Win32_Security_Authentication_Identity",
     "Win32_Security_Authorization",
+    "Win32_Security_Cryptography",
     "Win32_Storage_FileSystem",
     "Win32_System_Com",
+    "Win32_System_Diagnostics_ToolHelp",
+    "Win32_System_Environment",
     "Win32_System_Pipes",
     "Win32_System_Registry",
+    "Win32_System_RemoteDesktop",
     "Win32_System_SystemInformation",
     "Win32_System_Threading",
     "Win32_UI_Shell",

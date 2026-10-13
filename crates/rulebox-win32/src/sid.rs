@@ -148,6 +148,14 @@ pub fn lookup_account_name(name: &str) -> Result<Option<Sid>> {
 /// The account name the system shows for a SID, for example
 /// `S-1-5-32-545` -> "Users" / "Benutzer".
 pub fn localized_group_name(sid: &Sid) -> Result<String> {
+    lookup_account_sid(sid)?
+        .map(|(_, name)| name)
+        .ok_or_else(|| Win32Error::Invalid(format!("no account has the SID {sid}")))
+}
+
+/// `(domain, name)` of a SID, for example `("DESK-1", "Owner")`. `Ok(None)` if the
+/// SID maps to no account.
+pub fn lookup_account_sid(sid: &Sid) -> Result<Option<(String, String)>> {
     let psid = string_to_psid(sid.as_str())?;
     let psid = PSID(psid.as_ptr());
     let (mut name_len, mut dom_len) = (0u32, 0u32);
@@ -157,6 +165,7 @@ pub fn localized_group_name(sid: &Sid) -> Result<String> {
         LookupAccountSidW(PCWSTR::null(), psid, None, &mut name_len, None, &mut dom_len, &mut kind)
     };
     match first {
+        Err(e) if e.code() == ERROR_NONE_MAPPED.to_hresult() => return Ok(None),
         Err(e) if e.code() == ERROR_INSUFFICIENT_BUFFER.to_hresult() => {}
         Err(e) => return Err(api_err("LookupAccountSidW", &e)),
         Ok(()) => {}
@@ -176,8 +185,10 @@ pub fn localized_group_name(sid: &Sid) -> Result<String> {
         )
     }
     .map_err(|e| api_err("LookupAccountSidW", &e))?;
-    // SAFETY: the API wrote a NUL-terminated name into `name`.
-    Ok(unsafe { from_wide_ptr(name.as_ptr()) })
+    // SAFETY: the API wrote NUL-terminated strings into both buffers (they were
+    // zero-filled and one unit longer than the sizes passed).
+    let (dom, name) = unsafe { (from_wide_ptr(dom.as_ptr()), from_wide_ptr(name.as_ptr())) };
+    Ok(Some((dom, name)))
 }
 
 #[cfg(test)]
@@ -203,6 +214,11 @@ mod tests {
     #[test]
     fn builtin_users_has_a_name() {
         assert!(!localized_group_name(&Sid::builtin_users()).unwrap().is_empty());
+        let (domain, name) = lookup_account_sid(&Sid::system()).unwrap().unwrap();
+        assert!(!domain.is_empty() && !name.is_empty());
+        // A well-formed SID that belongs to nobody.
+        let nobody = Sid::parse("S-1-5-21-1-2-3-999999").unwrap();
+        assert_eq!(lookup_account_sid(&nobody).unwrap(), None);
     }
 
     #[test]

@@ -7,6 +7,7 @@ use std::path::{Path, PathBuf};
 use serde::{Deserialize, Serialize};
 
 pub mod sim;
+pub mod windows;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct OsInfo {
