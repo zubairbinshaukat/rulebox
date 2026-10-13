@@ -8,6 +8,11 @@ publish = false
 [lib]
 name = "rulebox_staff_lib"
 crate-type = ["staticlib", "cdylib", "rlib"]
+# Lib / integration test harnesses exit with STATUS_ENTRYPOINT_NOT_FOUND
+# (0xC0000139) on this Windows + Tauri link. Step 3 tests live on the bin
+# (`src/main.rs` `#[cfg(test)]`).
+test = false
+doctest = false
 
 [build-dependencies]
 tauri-build = { workspace = true, features = [] }
@@ -25,6 +30,8 @@ thiserror.workspace = true
 tracing.workspace = true
 tracing-subscriber.workspace = true
 tracing-appender.workspace = true
+tokio = { workspace = true, features = ["rt", "macros", "sync", "time"] }
+futures-util = { workspace = true }
 cap-std.workspace = true
 walkdir.workspace = true
 notify.workspace = true
@@ -40,6 +47,9 @@ zip.workspace = true
 [target.'cfg(windows)'.dependencies]
 webview2-com.workspace = true
 windows = { workspace = true, features = ["Win32_Foundation"] }
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["rt", "macros", "time", "sync"] }
 
 [lints]
 workspace = true

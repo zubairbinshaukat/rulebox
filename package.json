@@ -12,7 +12,7 @@
     "dev:convex": "convex dev",
     "typecheck": "pnpm -r typecheck",
     "lint": "pnpm -r lint",
-    "gen:types": "cargo test -p rulebox-policy -p rulebox-ipc export_bindings",
+    "gen:types": "cargo test -p rulebox-policy -p rulebox-ipc -p rulebox-staff export_bindings",
     "gen:brand": "node scripts/build-brand.mjs"
   },
   "devDependencies": {

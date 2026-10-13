@@ -177,6 +177,66 @@
       "description": "Permission identifier",
       "oneOf": [
         {
+          "description": "Enables the dev_set_display command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-dev-set-display",
+          "markdownDescription": "Enables the dev_set_display command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the dismiss_notice command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-dismiss-notice",
+          "markdownDescription": "Enables the dismiss_notice command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the shell_state command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-shell-state",
+          "markdownDescription": "Enables the shell_state command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the ui_alive command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-ui-alive",
+          "markdownDescription": "Enables the ui_alive command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the ui_ready command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-ui-ready",
+          "markdownDescription": "Enables the ui_ready command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the dev_set_display command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-dev-set-display",
+          "markdownDescription": "Denies the dev_set_display command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the dismiss_notice command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-dismiss-notice",
+          "markdownDescription": "Denies the dismiss_notice command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the shell_state command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-shell-state",
+          "markdownDescription": "Denies the shell_state command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the ui_alive command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-ui-alive",
+          "markdownDescription": "Denies the ui_alive command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the ui_ready command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-ui-ready",
+          "markdownDescription": "Denies the ui_ready command without any pre-configured scope."
+        },
+        {
           "description": "Default core plugins set.\n#### This default permission set includes:\n\n- `core:path:default`\n- `core:event:default`\n- `core:window:default`\n- `core:webview:default`\n- `core:app:default`\n- `core:image:default`\n- `core:resources:default`\n- `core:menu:default`\n- `core:tray:default`",
           "type": "string",
           "const": "core:default",

@@ -2,11 +2,17 @@
 //! permission (`allow-<command>`).
 
 /// Commands callable from `shell-*` windows.
-const SHELL_COMMANDS: &[&str] = &[];
+const SHELL_COMMANDS: &[&str] = &[
+    "shell_state",
+    "ui_ready",
+    "ui_alive",
+    "dismiss_notice",
+    "dev_set_display",
+];
 
 /// Commands callable from `app-*` windows. A name may also appear in
 /// `SHELL_COMMANDS`.
-const APP_COMMANDS: &[&str] = &[];
+const APP_COMMANDS: &[&str] = &["shell_state", "dismiss_notice"];
 
 fn main() {
     let commands = merge(SHELL_COMMANDS, APP_COMMANDS);

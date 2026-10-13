@@ -3,5 +3,13 @@
   "identifier": "shell",
   "description": "Shell windows (desktop, taskbar, popup, exit). No remote.",
   "windows": ["shell-*"],
-  "permissions": ["core:event:default", "core:app:default"]
+  "permissions": [
+    "core:event:default",
+    "core:app:default",
+    "allow-shell-state",
+    "allow-ui-ready",
+    "allow-ui-alive",
+    "allow-dismiss-notice",
+    "allow-dev-set-display"
+  ]
 }
