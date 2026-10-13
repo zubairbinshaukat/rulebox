@@ -27,6 +27,13 @@ pub enum Command {
         simulate: bool,
         #[arg(long)]
         data_dir: Option<PathBuf>,
+        /// (1.1) The demo world: enrolled, demo employees (password `demo`) and
+        /// catalogue. Simulate mode only.
+        #[arg(long, requires = "simulate")]
+        sim_demo: bool,
+        /// (1.1) The demo world, but offline: only cached employees can sign in.
+        #[arg(long, requires = "sim_demo")]
+        sim_offline: bool,
     },
     /// Enroll this PC with an enrollment code.
     Enroll {
@@ -88,11 +95,31 @@ mod tests {
         assert_eq!(parse(&["service", "uninstall"]), Command::Service { action: ServiceAction::Uninstall });
         assert_eq!(
             parse(&["run", "--console"]),
-            Command::Run { console: true, simulate: false, data_dir: None }
+            Command::Run {
+                console: true,
+                simulate: false,
+                data_dir: None,
+                sim_demo: false,
+                sim_offline: false
+            }
         );
         assert_eq!(
             parse(&["run", "--console", "--simulate", "--data-dir", "x"]),
-            Command::Run { console: true, simulate: true, data_dir: Some(PathBuf::from("x")) }
+            Command::Run {
+                console: true,
+                simulate: true,
+                data_dir: Some(PathBuf::from("x")),
+                sim_demo: false,
+                sim_offline: false
+            }
+        );
+        assert_eq!(
+            parse(&["run", "--console", "--simulate", "--sim-demo"]),
+            Command::Run { console: true, simulate: true, data_dir: None, sim_demo: true, sim_offline: false }
+        );
+        assert_eq!(
+            parse(&["run", "--console", "--simulate", "--sim-demo", "--sim-offline"]),
+            Command::Run { console: true, simulate: true, data_dir: None, sim_demo: true, sim_offline: true }
         );
         assert_eq!(
             parse(&["enroll", "RBX1.abc#def", "--name", "Desk 1", "--allow-joined", "--simulate"]),
@@ -117,5 +144,20 @@ mod tests {
     #[test]
     fn run_needs_console() {
         assert!(Cli::try_parse_from(["rulebox-agent", "run"]).is_err());
+    }
+
+    #[test]
+    fn the_demo_flags_need_simulate_and_each_other() {
+        let parse = |args: &[&str]| {
+            let mut full = vec!["rulebox-agent", "run", "--console"];
+            full.extend_from_slice(args);
+            Cli::try_parse_from(full)
+        };
+        // --sim-demo needs --simulate, so a real agent cannot be given the demo world.
+        assert!(parse(&["--sim-demo"]).is_err());
+        // --sim-offline needs --sim-demo (and so --simulate).
+        assert!(parse(&["--simulate", "--sim-offline"]).is_err());
+        assert!(parse(&["--sim-offline"]).is_err());
+        assert!(parse(&["--simulate", "--sim-demo", "--sim-offline"]).is_ok());
     }
 }

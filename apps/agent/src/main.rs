@@ -7,14 +7,21 @@
 #![allow(dead_code)]
 
 mod agent;
+mod audit;
 mod cli;
+mod directory;
+mod employee_cache;
+mod fixtures;
 mod ipc_admin;
 mod ipc_conn;
 mod ipc_shell;
+mod kdf;
+mod lockout;
 mod logging;
 mod paths;
 mod platform;
 mod secrets;
+mod session;
 mod state;
 #[cfg(test)]
 mod testutil;
@@ -31,7 +38,7 @@ use rulebox_ipc::admin::{AdminEnrollParams, AdminUnenrollParams};
 use rulebox_ipc::client::ClientConfig;
 use tokio_util::sync::CancellationToken;
 
-use crate::agent::{Deps, PipeNames};
+use crate::agent::{Deps, PipeNames, SimOptions};
 use crate::cli::{Cli, Command};
 use crate::paths::{DataPaths, InstallPaths};
 use crate::platform::sim::SimPlatform;
@@ -77,7 +84,9 @@ fn main() -> ExitCode {
 /// `ipc_admin::EXIT_*` for the admin commands).
 fn dispatch(cli: Cli) -> anyhow::Result<u8> {
     match cli.command {
-        Command::Run { simulate: true, data_dir, .. } => run_simulated(data_dir).map(|()| 0),
+        Command::Run { simulate: true, data_dir, sim_demo, sim_offline, .. } => {
+            run_simulated(data_dir, sim_demo, sim_offline).map(|()| 0)
+        }
         Command::Run { simulate: false, .. } => bail!(
             "`run --console` without --simulate needs WindowsPlatform, which arrives in Step 10 \
              (and only runs on a test machine)"
@@ -108,8 +117,9 @@ fn dispatch(cli: Cli) -> anyhow::Result<u8> {
 }
 
 /// `run --console --simulate`: in-memory platform, throwaway data directory,
-/// stops on Ctrl+C. Touches nothing outside the data directory.
-fn run_simulated(data_dir: Option<PathBuf>) -> anyhow::Result<()> {
+/// stops on Ctrl+C. Touches nothing outside the data directory. `--sim-demo` adds
+/// the demo world (plan Section 6.11) and `--sim-offline` makes it offline.
+fn run_simulated(data_dir: Option<PathBuf>, sim_demo: bool, sim_offline: bool) -> anyhow::Result<()> {
     let paths = match data_dir {
         Some(dir) => DataPaths::new(dir),
         None => DataPaths::simulate_default()?,
@@ -119,6 +129,9 @@ fn run_simulated(data_dir: Option<PathBuf>) -> anyhow::Result<()> {
     tracing::info!("simulate mode: data directory {}", paths.root().display());
 
     let config = agent::load_config(&paths)?;
+    // The one decision about fixture employees (also used by the real agent in
+    // Steps 10 and 11): the demo world, or both the config key and the marker.
+    let choice = directory::choose(&config, rulebox_win32::guard::is_test_machine(), sim_demo);
     let deps = Deps {
         platform: Arc::new(SimPlatform::new(paths.root().to_path_buf())),
         // Simulate mode checks no binary paths; this is a placeholder.
@@ -127,6 +140,9 @@ fn run_simulated(data_dir: Option<PathBuf>) -> anyhow::Result<()> {
         config,
         simulate: true,
         pipes: PipeNames::for_mode(true),
+        directory: directory::build(choice, sim_offline),
+        audit_sink: Arc::new(audit::LogAuditSink),
+        sim: SimOptions { demo: sim_demo, offline: sim_offline },
     };
 
     let runtime = tokio::runtime::Builder::new_multi_thread()

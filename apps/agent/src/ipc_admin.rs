@@ -25,10 +25,12 @@ use rulebox_win32::sid::{current_user_sid, Sid};
 use tokio::sync::{watch, Mutex};
 use tokio_util::sync::CancellationToken;
 
+use crate::audit::AuditHandle;
 use crate::ipc_conn::{
     bind_with_retry, rpc_error, serve as serve_connections, Dispatcher, Engine, PeerCtx,
     PeerVerifier, RpcResult, VerifiedPeer,
 };
+use crate::session::SessionManager;
 
 /// `enroll` waits this long: the reconciler may take up to 120 seconds after the
 /// backend call (plan Section 5.4, step 7).
@@ -93,6 +95,39 @@ impl AdminHandler for NotAvailableYet {
 
     fn unenroll(&self, _params: AdminUnenrollParams) -> BoxFuture<'static, Result<(), RpcError>> {
         std::future::ready(Err(Self::failure("Unenrollment"))).boxed()
+    }
+}
+
+/// Wraps the enroll/unenroll handler and adds what `status` shows beyond the
+/// snapshot: the signed-in employee's name and the audit queue length (Step 6a;
+/// Step 6b adds the admin-exit counters).
+pub struct WithStatusExtra {
+    inner: Arc<dyn AdminHandler>,
+    session: Arc<SessionManager>,
+    audit: Arc<AuditHandle>,
+}
+
+impl WithStatusExtra {
+    pub fn new(inner: Arc<dyn AdminHandler>, session: Arc<SessionManager>, audit: Arc<AuditHandle>) -> Self {
+        Self { inner, session, audit }
+    }
+}
+
+impl AdminHandler for WithStatusExtra {
+    fn enroll(&self, params: AdminEnrollParams) -> BoxFuture<'static, Result<AdminEnrollResult, RpcError>> {
+        self.inner.enroll(params)
+    }
+
+    fn unenroll(&self, params: AdminUnenrollParams) -> BoxFuture<'static, Result<(), RpcError>> {
+        self.inner.unenroll(params)
+    }
+
+    fn status_extra(&self) -> Option<AdminStatusExtra> {
+        Some(AdminStatusExtra {
+            employee: self.session.current_display_name(),
+            audit_queued: u32::try_from(self.audit.queued()).unwrap_or(u32::MAX),
+            ..AdminStatusExtra::default()
+        })
     }
 }
 
@@ -438,7 +473,7 @@ pub fn format_status(result: &AdminStatusResult) -> String {
         ),
         None => (if s.clock_suspect { "suspect" } else { "ok" }).to_string(),
     };
-    let lines = [
+    let mut lines = vec![
         ("agent version", s.agent_version.clone()),
         ("enrollment", wire(&s.enrollment)),
         ("device", device),
@@ -458,6 +493,11 @@ pub fn format_status(result: &AdminStatusResult) -> String {
         ("policy", policy),
         ("clock", clock),
     ];
+    // (1.1) Only an agent that sends `extra` shows these lines.
+    if let Some(extra) = &result.extra {
+        lines.push(("employee", extra.employee.clone().unwrap_or_else(|| "-".to_string())));
+        lines.push(("audit queued", extra.audit_queued.to_string()));
+    }
     lines
         .iter()
         .map(|(name, value)| format!("{name:<14}: {value}"))

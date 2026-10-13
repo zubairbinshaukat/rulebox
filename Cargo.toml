@@ -32,6 +32,8 @@ bytes = "1.12.1"
 sha2 = "0.11.1"
 base64 = "0.23.1"
 getrandom = "0.4.3"
+# (1.1) Argon2id for the exit PIN and the offline sign-in cache (plan 4.4)
+argon2 = "0.6.0"
 
 [workspace.lints.rust]
 unsafe_op_in_unsafe_fn = "deny"
@@ -42,6 +44,13 @@ expect_used = "warn"
 
 [profile.dev]
 debug = "line-tables-only"   # keeps target/ small (see CLAUDE.md)
+
+# Argon2 is far too slow unoptimized (plan 4.4): a debug-build check could outlast the
+# 10-second IPC timeout. Dependencies only; our own code stays in the normal dev profile.
+[profile.dev.package.argon2]
+opt-level = 3
+[profile.dev.package.blake2]
+opt-level = 3
 
 [profile.release]
 lto = true

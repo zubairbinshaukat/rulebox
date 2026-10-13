@@ -96,6 +96,27 @@ impl DataPaths {
         self.state_dir().join("agent-config.json")
     }
 
+    /// (1.1) Failure counters and lock times for the exit PIN and employee passwords.
+    pub fn lockouts(&self) -> PathBuf {
+        self.state_dir().join("lockouts.json")
+    }
+
+    /// (1.1) The offline sign-in cache.
+    pub fn employee_cache(&self) -> PathBuf {
+        self.state_dir().join("employee-cache.json")
+    }
+
+    /// (1.1) Audit records the backend has not accepted yet.
+    pub fn audit_queue(&self) -> PathBuf {
+        self.state_dir().join("audit-queue.json")
+    }
+
+    /// (1.1) Simulate mode only: the files base the demo employees get (the real
+    /// base is `<Staff profile>\RuleboxFiles`). The agent only names it.
+    pub fn sim_files(&self) -> PathBuf {
+        self.root.join("sim-files")
+    }
+
     pub fn logs_dir(&self) -> PathBuf {
         self.root.join("logs")
     }
@@ -119,6 +140,10 @@ mod tests {
         assert!(data.desired_state().ends_with("state/desired-state.json"));
         assert!(data.agent_config().ends_with("state/agent-config.json"));
         assert!(data.logs_dir().ends_with("logs"));
+        assert!(data.lockouts().ends_with("state/lockouts.json"));
+        assert!(data.employee_cache().ends_with("state/employee-cache.json"));
+        assert!(data.audit_queue().ends_with("state/audit-queue.json"));
+        assert!(data.sim_files().ends_with("sim-files"));
     }
 
     #[test]

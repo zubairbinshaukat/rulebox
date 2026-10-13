@@ -66,6 +66,11 @@ pub struct PendingEnrollment {
 pub struct StaffAccount {
     pub sid: String,
     pub user_name: String,
+    /// (1.1) The Staff profile folder returned by `ensure_profile`, saved when the
+    /// kiosk is enabled (plan Section 5.6, step 3). The employee files base is
+    /// `<profile_dir>\RuleboxFiles`.
+    #[serde(default)]
+    pub profile_dir: Option<String>,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, Default, PartialEq)]
@@ -104,6 +109,13 @@ pub enum OriginalValue {
 
 pub fn unix_ms() -> u64 {
     SystemTime::now().duration_since(UNIX_EPOCH).map_or(0, |d| d.as_millis() as u64)
+}
+
+/// Locks a `std::sync::Mutex`, ignoring poisoning: the data these guard (counters,
+/// queues) is saved to disk after every change and is always in a usable state.
+/// Never hold the guard across an `.await`.
+pub fn lock<T>(mutex: &std::sync::Mutex<T>) -> std::sync::MutexGuard<'_, T> {
+    mutex.lock().unwrap_or_else(std::sync::PoisonError::into_inner)
 }
 
 /// Writes `<name>.tmp`, syncs it, then renames it over the target.
@@ -182,7 +194,11 @@ mod tests {
                 enrolled_at_ms: 5,
                 revoked: false,
             }),
-            staff: Some(StaffAccount { sid: "S-1-5-21-1".into(), user_name: "RuleboxStaff".into() }),
+            staff: Some(StaffAccount {
+                sid: "S-1-5-21-1".into(),
+                user_name: "RuleboxStaff".into(),
+                profile_dir: Some(r"C:\Users\RuleboxStaff".into()),
+            }),
             kiosk: KioskRecord { applied: KioskApplied::Enabled, last_error: Some("e".into()), failures: 2 },
             journal: vec![
                 JournalEntry {
@@ -244,6 +260,14 @@ mod tests {
             .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
             .collect();
         assert_eq!(names, ["agent-state.json"]);
+    }
+
+    #[test]
+    fn a_staff_account_without_a_profile_dir_still_loads() {
+        // A state file written before protocol 1.1.
+        let state: AgentState =
+            serde_json::from_str(r#"{ "staff": { "sid": "S-1-5-21-1", "userName": "RuleboxStaff" } }"#).unwrap();
+        assert_eq!(state.staff.unwrap().profile_dir, None);
     }
 
     #[test]
