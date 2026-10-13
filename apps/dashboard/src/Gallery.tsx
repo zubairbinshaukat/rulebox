@@ -4,15 +4,25 @@ import {
   Avatar,
   Backdrop,
   Button,
+  Dialog,
+  FileChip,
+  IconButton,
   Input,
   LogoMark,
   LogoMotion,
+  MenuItem,
+  MenuList,
+  Notice,
   Panel,
   Pill,
   ProgressBar,
   SegmentedControl,
+  Slider,
+  Spinner,
   StatCard,
+  Surface,
   Switch,
+  Tabs,
   TitleBar,
   type LogoAnimation,
   type Theme,
@@ -252,6 +262,16 @@ function LogoSection() {
 export function Gallery({ theme, onTheme, lite, onLite }: GalleryProps) {
   const [iconStyle, setIconStyle] = useState<IconStyle>("duotone");
   const [sw, setSw] = useState({ kiosk: true, usb: false, wifi: true });
+  const [volume, setVolume] = useState(62);
+  const [tab, setTab] = useState("files");
+  const [tabs, setTabs] = useState([
+    { id: "files", label: "Files", closable: true },
+    { id: "viewer", label: "Q3 report.pdf", closable: true },
+    { id: "settings", label: "Settings", closable: false },
+  ]);
+  const [dialogOpen, setDialogOpen] = useState(false);
+  const [noticeVisible, setNoticeVisible] = useState(true);
+  const [iconActive, setIconActive] = useState(false);
 
   return (
     <div style={{ position: "relative" }}>
@@ -431,54 +451,221 @@ export function Gallery({ theme, onTheme, lite, onLite }: GalleryProps) {
           </div>
 
           {/* App tiles */}
-          <Section title="App tiles" description="Staff App desktop. Dot = open, badge = notifications.">
-            <div style={{ ...row, gap: 18 }}>
-              <AppTile name="Zoom" description="Video meetings" icon={<VideoDuo style={{ fontSize: 26 }} />} running />
-              <AppTile name="Tally" description="Accounts" icon={<ChartDuo style={{ fontSize: 26 }} />} badge={3} />
-              <AppTile name="Files" description="On this laptop" icon={<FolderDuo style={{ fontSize: 26 }} />} />
+          <Section title="App tiles" description="Staff App desktop. Dot = open, badge = notifications. size + hue props.">
+            <div style={{ ...row, gap: 18, alignItems: "flex-end" }}>
+              <AppTile size="lg" name="Zoom" description="Large tile" icon={<VideoDuo style={{ fontSize: 28 }} />} running hue={255} />
+              <AppTile name="Tally" description="Default md" icon={<ChartDuo style={{ fontSize: 26 }} />} badge={3} hue={145} />
+              <AppTile size="sm" name="Files" description="Small" icon={<FolderDuo style={{ fontSize: 22 }} />} hue={70} />
               <AppTile name="Orders" description="Web portal" mono="Or" />
             </div>
           </Section>
 
           {/* Window */}
-          <Section title="Window" description="Rulebox title bar for built-in windows and web apps.">
-            <div
-              style={{
-                maxWidth: 560,
-                borderRadius: "var(--rb-r-lg)",
-                overflow: "hidden",
-                border: "1px solid var(--rb-line)",
-                background: "var(--rb-surface)",
-                boxShadow: "var(--rb-shadow-md)",
-              }}
-            >
-              <TitleBar title="Files on this laptop" mono="F" />
-              <div style={{ padding: 8 }}>
-                {[
-                  { n: "Q3 report.pdf", m: "PDF · 2.4 MB", I: DocDuo },
-                  { n: "Team photo.jpg", m: "Image · 840 KB", I: GalleryDuo },
-                  { n: "Training intro.mp4", m: "Video · 48 MB", I: VideoDuo },
-                ].map(({ n, m, I }) => (
-                  <div
-                    key={n}
-                    style={{
-                      display: "flex",
-                      alignItems: "center",
-                      gap: 12,
-                      padding: "10px 12px",
-                      borderRadius: "var(--rb-r-md)",
-                    }}
-                  >
-                    <I style={{ fontSize: 24, color: "var(--rb-accent-text)" }} />
-                    <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
-                      <span style={{ fontSize: 13.5, fontWeight: 500 }}>{n}</span>
-                      <span style={{ fontSize: 12, color: "var(--rb-muted)" }}>{m}</span>
+          <Section title="Window" description="TitleBar: icon, focused, children, dragRegion. Surface kind=window.">
+            <div style={{ display: "flex", flexDirection: "column", gap: 16, maxWidth: 560 }}>
+              <Surface kind="window">
+                <TitleBar
+                  title="Files on this laptop"
+                  icon={<FolderDuo style={{ fontSize: 14 }} />}
+                  focused
+                >
+                  <IconButton label="Pin" size={32}>
+                    <LockDuo style={{ fontSize: 16 }} />
+                  </IconButton>
+                </TitleBar>
+                <div style={{ padding: 8 }}>
+                  {[
+                    { n: "Q3 report.pdf", m: "PDF · 2.4 MB", I: DocDuo, ext: "pdf" },
+                    { n: "Team photo.jpg", m: "Image · 840 KB", I: GalleryDuo, ext: "jpg" },
+                    { n: "Training intro.mp4", m: "Video · 48 MB", I: VideoDuo, ext: "mp4" },
+                  ].map(({ n, m, I, ext }) => (
+                    <div
+                      key={n}
+                      style={{
+                        display: "flex",
+                        alignItems: "center",
+                        gap: 12,
+                        padding: "10px 12px",
+                        borderRadius: "var(--rb-r-md)",
+                      }}
+                    >
+                      <I style={{ fontSize: 24, color: "var(--rb-accent-text)" }} />
+                      <div style={{ display: "flex", flexDirection: "column", gap: 2, flex: 1, minWidth: 0 }}>
+                        <span style={{ fontSize: 13.5, fontWeight: 500 }}>{n}</span>
+                        <span style={{ fontSize: 12, color: "var(--rb-muted)" }}>{m}</span>
+                      </div>
+                      <FileChip ext={ext} />
                     </div>
-                  </div>
-                ))}
-              </div>
+                  ))}
+                </div>
+              </Surface>
+              <Surface kind="window" style={{ boxShadow: "var(--rb-shadow-window-inactive)" }}>
+                <TitleBar title="Unfocused window" mono="U" focused={false} />
+                <div style={{ padding: 16, fontSize: 13.5, color: "var(--rb-muted)" }}>Muted title when focused=false.</div>
+              </Surface>
             </div>
           </Section>
+
+          {/* Phase 3 Step 2 — new components */}
+          <div id="gallery-new" style={{ display: "flex", flexDirection: "column", gap: 24 }}>
+            <Section title="IconButton" description="label → aria-label + title. Sizes 32 / 38 / 44, active state.">
+              <div style={row}>
+                <IconButton label="Settings" size={32}>
+                  <SettingsDuo style={{ fontSize: 16 }} />
+                </IconButton>
+                <IconButton label="Alerts" size={38} active={iconActive} onClick={() => setIconActive((v) => !v)}>
+                  <BellDuo style={{ fontSize: 18 }} />
+                </IconButton>
+                <IconButton label="Power" size={44}>
+                  <PowerDuo style={{ fontSize: 20 }} />
+                </IconButton>
+              </div>
+            </Section>
+
+            <Section title="Surface" description="Frosted containers: popover, bar, window.">
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))", gap: 16 }}>
+                <Surface kind="popover" style={{ padding: 16 }}>
+                  <div style={{ fontWeight: 500, marginBottom: 6 }}>Popover</div>
+                  <div style={{ fontSize: 13, color: "var(--rb-muted)" }}>glass-strong + shadow-popover</div>
+                </Surface>
+                <Surface kind="bar" style={{ padding: 16, height: 60, display: "flex", alignItems: "center" }}>
+                  <div style={{ fontWeight: 500 }}>Bar · taskbar glass</div>
+                </Surface>
+                <Surface kind="window" style={{ padding: 16 }}>
+                  <div style={{ fontWeight: 500, marginBottom: 6 }}>Window</div>
+                  <div style={{ fontSize: 13, color: "var(--rb-muted)" }}>shadow-window</div>
+                </Surface>
+              </div>
+            </Section>
+
+            <Section title="Slider" description="Native range, styled. Label + value.">
+              <div style={{ maxWidth: 420 }}>
+                <Slider label="Volume" value={volume} onChange={setVolume} min={0} max={100} step={1} />
+              </div>
+            </Section>
+
+            <Section title="Menu" description="role=menu / menuitem with arrow-key navigation.">
+              <Surface kind="popover" style={{ width: 280, padding: 0 }}>
+                <MenuList aria-label="Quick actions">
+                  <MenuItem icon={<SettingsDuo />} hint="⌘,">
+                    Settings
+                  </MenuItem>
+                  <MenuItem icon={<BellDuo />}>Notifications</MenuItem>
+                  <MenuItem icon={<LogoutLinear />} danger>
+                    Log out
+                  </MenuItem>
+                </MenuList>
+              </Surface>
+            </Section>
+
+            <Section
+              title="Dialog"
+              description="Focus trap, Escape closes, role=dialog aria-modal."
+              action={
+                <Button variant="ghost" onClick={() => setDialogOpen(true)}>
+                  Open dialog
+                </Button>
+              }
+            >
+              <p style={{ margin: 0, fontSize: 13.5, color: "var(--rb-muted)" }}>
+                Click the button to open a modal dialog over the gallery.
+              </p>
+              <Dialog
+                open={dialogOpen}
+                title="Restart Rulebox?"
+                onClose={() => setDialogOpen(false)}
+                actions={
+                  <>
+                    <Button variant="ghost" onClick={() => setDialogOpen(false)}>
+                      Cancel
+                    </Button>
+                    <Button onClick={() => setDialogOpen(false)}>Restart</Button>
+                  </>
+                }
+              >
+                Open windows will close. Unsaved work in built-in viewers may be lost.
+              </Dialog>
+            </Section>
+
+            <Section title="Tabs" description="Closable tabs with role=tablist and arrow keys.">
+              <Tabs
+                tabs={tabs}
+                value={tab}
+                onChange={setTab}
+                onClose={(id) => {
+                  setTabs((prev) => {
+                    const next = prev.filter((t) => t.id !== id);
+                    if (id === tab && next.length) setTab(next[0]!.id);
+                    return next;
+                  });
+                }}
+              >
+                Active tab: <strong style={{ color: "var(--rb-ink)" }}>{tab}</strong>
+              </Tabs>
+            </Section>
+
+            <Section title="FileChip" description="Extension → fixed hue table.">
+              <div style={row}>
+                {["pdf", "docx", "xlsx", "png", "mp3", "mp4", "zip", "txt"].map((ext) => (
+                  <FileChip key={ext} ext={ext} />
+                ))}
+              </div>
+            </Section>
+
+            <Section title="Notice" description="Tone, title, detail, optional dismiss.">
+              <div style={{ display: "flex", flexDirection: "column", gap: 12, maxWidth: 480 }}>
+                {noticeVisible ? (
+                  <Notice
+                    tone="warning"
+                    title="Low disk space"
+                    detail="Only 1.2 GB free on this laptop."
+                    icon={<DangerDuo style={{ fontSize: 20, color: "var(--rb-warning)" }} />}
+                    onDismiss={() => setNoticeVisible(false)}
+                  />
+                ) : (
+                  <Button variant="ghost" onClick={() => setNoticeVisible(true)}>
+                    Show notice again
+                  </Button>
+                )}
+                <Notice tone="success" title="Policy applied" detail="Kiosk mode is on." />
+                <Notice tone="danger" title="Sign-in locked" detail="Try again in 5 minutes." />
+              </div>
+            </Section>
+
+            <Section title="Spinner" description="LogoMotion loading animation, no wordmark.">
+              <div style={{ ...row, gap: 24 }}>
+                <Spinner size={32} />
+                <Spinner size={48} />
+                <Spinner size={72} />
+              </div>
+            </Section>
+
+            <Section title="Backdrop offsetY" description="Shifts the blob layer so stacked windows share one backdrop.">
+              <div
+                style={{
+                  position: "relative",
+                  height: 120,
+                  borderRadius: "var(--rb-r-xl)",
+                  overflow: "hidden",
+                  background: "var(--rb-bg)",
+                  border: "1px solid var(--rb-line)",
+                }}
+              >
+                <Backdrop offsetY={-40} />
+                <div
+                  style={{
+                    position: "relative",
+                    zIndex: 1,
+                    padding: 16,
+                    fontSize: 13.5,
+                    color: "var(--rb-muted)",
+                  }}
+                >
+                  offsetY=-40 on this preview strip.
+                </div>
+              </div>
+            </Section>
+          </div>
 
           <p style={{ margin: "8px 0 32px", textAlign: "center", fontSize: 12, color: "var(--rb-faint)" }}>
             Icons: Solar by 480 Design (CC BY 4.0)

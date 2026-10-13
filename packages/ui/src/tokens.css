@@ -47,10 +47,35 @@
   --rb-r-lg: 14px;
   --rb-r-xl: 20px;
   --rb-r-2xl: 26px;
+  --rb-r-16: 16px;
+  --rb-r-18: 18px;
+  --rb-r-22: 22px;
 
   --rb-titlebar: 46px;
   --rb-taskbar: 60px;
   --rb-taskbar-inset: 12px;
+  --rb-taskbar-zone: 84px;
+  --rb-taskbar-item: 44px;
+
+  --rb-paper: oklch(0.982 0.003 85);
+  --rb-raise: oklch(0.995 0.002 85);
+
+  /* Hue channels: compose at use-site so local --rb-hue overrides work.
+     (Custom props resolve var() on the declaring element; inheriting a
+     pre-baked --rb-tint-bg from :root would always lock hue to 175.) */
+  --rb-hue: 175;
+  --rb-tint-bg-l: 0.93;
+  --rb-tint-bg-c: 0.045;
+  --rb-tint-fg-l: 0.43;
+  --rb-tint-fg-c: 0.1;
+  --rb-tint-bg: oklch(var(--rb-tint-bg-l) var(--rb-tint-bg-c) var(--rb-hue));
+  --rb-tint-fg: oklch(var(--rb-tint-fg-l) var(--rb-tint-fg-c) var(--rb-hue));
+
+  --rb-glass-strong: oklch(0.99 0.003 85 / 0.94);
+  --rb-glass-bar: oklch(0.99 0.003 85 / 0.8);
+
+  --rb-z-popover: 100;
+  --rb-z-banner: 200;
 
   --rb-font-sans: "Figtree Variable", "Figtree", ui-sans-serif, system-ui, sans-serif;
   --rb-font-mono: "Geist Mono Variable", "Geist Mono", ui-monospace, monospace;
@@ -62,6 +87,11 @@
     0 1px 2px oklch(0.3 0.02 70 / 0.05), 0 12px 32px -16px oklch(0.3 0.02 70 / 0.2);
   --rb-shadow-lg:
     0 1px 2px oklch(0.3 0.02 70 / 0.05), 0 24px 56px -20px oklch(0.3 0.02 70 / 0.3);
+  --rb-shadow-window:
+    0 1px 2px oklch(0.3 0.02 70 / 0.06), 0 28px 64px -18px oklch(0.3 0.02 70 / 0.38);
+  --rb-shadow-window-inactive:
+    0 1px 2px oklch(0.3 0.02 70 / 0.04), 0 16px 40px -20px oklch(0.3 0.02 70 / 0.18);
+  --rb-shadow-popover: 0 20px 48px -16px oklch(0.3 0.02 70 / 0.35);
 
   --rb-ease: cubic-bezier(0.2, 0.8, 0.2, 1);
   --rb-duration: 0.2s;
@@ -98,11 +128,27 @@
   --rb-blob-a: oklch(0.32 0.045 170);
   --rb-blob-b: oklch(0.32 0.045 75);
 
+  --rb-paper: oklch(0.2 0.006 70);
+  --rb-raise: oklch(0.24 0.006 70);
+
+  --rb-tint-bg-l: 0.34;
+  --rb-tint-bg-c: 0.05;
+  --rb-tint-fg-l: 0.8;
+  --rb-tint-fg-c: 0.08;
+  --rb-tint-bg: oklch(var(--rb-tint-bg-l) var(--rb-tint-bg-c) var(--rb-hue));
+  --rb-tint-fg: oklch(var(--rb-tint-fg-l) var(--rb-tint-fg-c) var(--rb-hue));
+
+  --rb-glass-strong: oklch(0.22 0.006 70 / 0.94);
+  --rb-glass-bar: oklch(0.22 0.006 70 / 0.8);
+
   --rb-shadow-color: oklch(0 0 0);
 
   --rb-shadow-sm: 0 1px 2px oklch(0 0 0 / 0.132), 0 8px 24px -12px oklch(0 0 0 / 0.396);
   --rb-shadow-md: 0 1px 2px oklch(0 0 0 / 0.11), 0 12px 32px -16px oklch(0 0 0 / 0.44);
   --rb-shadow-lg: 0 1px 2px oklch(0 0 0 / 0.11), 0 24px 56px -20px oklch(0 0 0 / 0.66);
+  --rb-shadow-window: 0 1px 2px oklch(0 0 0 / 0.14), 0 28px 64px -18px oklch(0 0 0 / 0.72);
+  --rb-shadow-window-inactive: 0 1px 2px oklch(0 0 0 / 0.1), 0 16px 40px -20px oklch(0 0 0 / 0.4);
+  --rb-shadow-popover: 0 20px 48px -16px oklch(0 0 0 / 0.55);
 }
 
 @media (prefers-color-scheme: dark) {
@@ -135,11 +181,27 @@
     --rb-blob-a: oklch(0.32 0.045 170);
     --rb-blob-b: oklch(0.32 0.045 75);
 
+    --rb-paper: oklch(0.2 0.006 70);
+    --rb-raise: oklch(0.24 0.006 70);
+
+    --rb-tint-bg-l: 0.34;
+    --rb-tint-bg-c: 0.05;
+    --rb-tint-fg-l: 0.8;
+    --rb-tint-fg-c: 0.08;
+    --rb-tint-bg: oklch(var(--rb-tint-bg-l) var(--rb-tint-bg-c) var(--rb-hue));
+    --rb-tint-fg: oklch(var(--rb-tint-fg-l) var(--rb-tint-fg-c) var(--rb-hue));
+
+    --rb-glass-strong: oklch(0.22 0.006 70 / 0.94);
+    --rb-glass-bar: oklch(0.22 0.006 70 / 0.8);
+
     --rb-shadow-color: oklch(0 0 0);
 
     --rb-shadow-sm: 0 1px 2px oklch(0 0 0 / 0.132), 0 8px 24px -12px oklch(0 0 0 / 0.396);
     --rb-shadow-md: 0 1px 2px oklch(0 0 0 / 0.11), 0 12px 32px -16px oklch(0 0 0 / 0.44);
     --rb-shadow-lg: 0 1px 2px oklch(0 0 0 / 0.11), 0 24px 56px -20px oklch(0 0 0 / 0.66);
+    --rb-shadow-window: 0 1px 2px oklch(0 0 0 / 0.14), 0 28px 64px -18px oklch(0 0 0 / 0.72);
+    --rb-shadow-window-inactive: 0 1px 2px oklch(0 0 0 / 0.1), 0 16px 40px -20px oklch(0 0 0 / 0.4);
+    --rb-shadow-popover: 0 20px 48px -16px oklch(0 0 0 / 0.55);
   }
 }
 
@@ -149,9 +211,14 @@
   --rb-duration: 0s;
   --rb-surface-glass: var(--rb-surface);
   --rb-glass-border: var(--rb-line);
+  --rb-glass-strong: var(--rb-surface);
+  --rb-glass-bar: var(--rb-surface);
   --rb-shadow-sm: 0 1px 2px oklch(0 0 0 / 0.08);
   --rb-shadow-md: 0 1px 2px oklch(0 0 0 / 0.08);
   --rb-shadow-lg: 0 1px 3px oklch(0 0 0 / 0.1);
+  --rb-shadow-window: 0 1px 2px oklch(0 0 0 / 0.08);
+  --rb-shadow-window-inactive: 0 1px 2px oklch(0 0 0 / 0.08);
+  --rb-shadow-popover: 0 1px 2px oklch(0 0 0 / 0.08);
 }
 
 [data-lite="true"] *,
