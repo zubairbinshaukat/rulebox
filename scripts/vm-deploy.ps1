@@ -32,11 +32,17 @@
 #Requires -RunAsAdministrator
 [CmdletBinding()]
 param(
-    [string]$SourceDir = $PSScriptRoot,
+    [string]$SourceDir = '',
     [switch]$FixtureDirectory
 )
 
 $ErrorActionPreference = 'Stop'
+
+# Windows PowerShell 5.1 leaves $PSScriptRoot empty inside a parameter default
+# in some hosts, so the default is resolved here instead.
+if (-not $SourceDir) {
+    $SourceDir = Split-Path -Parent $MyInvocation.MyCommand.Path
+}
 
 $markerKey = 'HKLM:\SOFTWARE\Rulebox\TestMachine'
 $version = '0.0.0-dev'
@@ -99,6 +105,19 @@ if (Test-Path -LiteralPath $staff) {
 }
 if (Test-Path -LiteralPath $fake) {
     Copy-Item -LiteralPath $fake -Destination (Join-Path $versionDir 'fake_staff.exe') -Force
+}
+
+# The debug binaries link the Visual C++ runtime dynamically, and a fresh Windows
+# does not have it (the program fails with 0xC0000135). If the runtime DLLs are in
+# the source folder, put them next to every binary (app-local deployment).
+$runtimeDlls = @(Get-ChildItem -LiteralPath $SourceDir -File -ErrorAction SilentlyContinue |
+    Where-Object { $_.Name -match '^(vcruntime140(_1)?|msvcp140(_1|_2)?|concrt140)\.dll$' })
+foreach ($dll in $runtimeDlls) {
+    Copy-Item -LiteralPath $dll.FullName -Destination $install -Force
+    Copy-Item -LiteralPath $dll.FullName -Destination $versionDir -Force
+}
+if ($runtimeDlls.Count -gt 0) {
+    Write-Host ("Copied the Visual C++ runtime next to the binaries: " + (($runtimeDlls | ForEach-Object Name) -join ', '))
 }
 
 # 5. current.json (UTF-8 without a byte-order mark).

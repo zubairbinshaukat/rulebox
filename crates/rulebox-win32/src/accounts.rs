@@ -38,6 +38,8 @@ const HRESULT_ALREADY_EXISTS: u32 = 0x8007_00B7;
 const MAX_PREFERRED_LENGTH: u32 = u32::MAX;
 const PROFILE_LIST_KEY: &str = r"SOFTWARE\Microsoft\Windows NT\CurrentVersion\ProfileList";
 const MAX_USER_NAME: usize = 20;
+/// `MAX_PATH`: the buffer size `CreateProfile` accepts.
+const PROFILE_PATH_CHARS: usize = 260;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct UserInfo {
@@ -328,7 +330,9 @@ pub fn ensure_profile(sid: &Sid, name: &str) -> Result<PathBuf> {
     check_user_name(name)?;
     let sid_w = to_wide(sid.as_str());
     let name_w = to_wide(name);
-    let mut path = vec![0u16; 520];
+    // Exactly MAX_PATH: `CreateProfile` fails with error 1783 ("the stub received
+    // bad data") for any larger `cchProfilePath` (found on the VM, Windows 11 26300).
+    let mut path = vec![0u16; PROFILE_PATH_CHARS];
     // SAFETY: both strings are NUL-terminated; `path` is a writable buffer whose
     // length in characters is passed.
     let created = unsafe {
