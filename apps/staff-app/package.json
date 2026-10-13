@@ -8,22 +8,36 @@
     "build": "vite build",
     "tauri": "tauri",
     "typecheck": "tsc --noEmit -p tsconfig.json",
-    "lint": "eslint ."
+    "lint": "eslint .",
+    "test": "vitest run"
   },
   "dependencies": {
+    "@gsap/react": "catalog:",
     "@rulebox/types": "workspace:*",
     "@rulebox/ui": "workspace:*",
-    "convex": "catalog:",
+    "@tanstack/react-virtual": "catalog:",
+    "@tauri-apps/api": "catalog:",
+    "docx-preview": "catalog:",
+    "dompurify": "catalog:",
+    "gsap": "catalog:",
+    "pdfjs-dist": "catalog:",
     "react": "catalog:",
     "react-dom": "catalog:"
   },
   "devDependencies": {
+    "@iconify-json/solar": "catalog:",
+    "@svgr/core": "catalog:",
+    "@svgr/plugin-jsx": "catalog:",
     "@tauri-apps/cli": "^2.12.2",
+    "@testing-library/react": "catalog:",
     "@types/react": "catalog:",
     "@types/react-dom": "catalog:",
     "@vitejs/plugin-react": "catalog:",
     "eslint": "catalog:",
+    "jsdom": "catalog:",
     "typescript": "catalog:",
-    "vite": "catalog:"
+    "unplugin-icons": "catalog:",
+    "vite": "catalog:",
+    "vitest": "catalog:"
   }
 }

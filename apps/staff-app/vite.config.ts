@@ -1,12 +1,23 @@
-import { fileURLToPath } from "node:url";
 import react from "@vitejs/plugin-react";
-import { defineConfig } from "vite";
+import Icons from "unplugin-icons/vite";
+import { defineConfig } from "vitest/config";
 
 export default defineConfig({
-  plugins: [react()],
-  resolve: {
-    alias: { "@convex": fileURLToPath(new URL("../../convex", import.meta.url)) },
-  },
+  // Solar icons are compiled into the bundle at build time (Decision 16/17: no runtime fetching).
+  plugins: [react(), Icons({ compiler: "jsx", jsx: "react" })],
   clearScreen: false,
   server: { port: 1420, strictPort: true },
+  build: {
+    rollupOptions: {
+      input: {
+        shell: "shell.html",
+        apps: "apps.html",
+      },
+    },
+  },
+  test: {
+    environment: "jsdom",
+    // Step 1 has no tests yet; the plan still requires `pnpm test` to pass.
+    passWithNoTests: true,
+  },
 });

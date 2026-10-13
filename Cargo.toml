@@ -11,6 +11,7 @@ license = "MIT"
 rulebox-policy = { path = "crates/rulebox-policy" }
 rulebox-ipc = { path = "crates/rulebox-ipc" }
 rulebox-win32 = { path = "crates/rulebox-win32" }
+rulebox-desktop = { path = "crates/rulebox-desktop" }
 
 # Phase 2 (versions checked with `cargo search` on 2026-10-13)
 windows = "0.62"
@@ -34,6 +35,24 @@ base64 = "0.23.1"
 getrandom = "0.4.3"
 # (1.1) Argon2id for the exit PIN and the offline sign-in cache (plan 4.4)
 argon2 = "0.6.0"
+
+# Phase 3 Staff App / rulebox-desktop (versions checked 2026-10-13)
+tauri = "2.12.3"
+# Versioning is independent of `tauri` (tauri 2.12.3 builds with 2.7.2).
+tauri-build = "2.7.2"
+tauri-plugin-single-instance = "2.5.3"
+webview2-com = "0.39.1"
+cap-std = "4.0.3"
+walkdir = "2.5.0"
+notify = "8.2.0"
+notify-debouncer-full = "0.7.0"
+infer = "0.22.0"
+chardetng = "1.0.0"
+encoding_rs = "0.8.42"
+csv = "1.4.0"
+dunce = "1.0.5"
+png = "0.18.1"
+zip = "9.0.2"
 
 [workspace.lints.rust]
 unsafe_op_in_unsafe_fn = "deny"

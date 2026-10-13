@@ -1,8 +1,7 @@
 {
   "extends": "../../tsconfig.base.json",
   "compilerOptions": {
-    "types": ["vite/client"],
-    "paths": { "@convex/*": ["../../convex/*"] }
+    "types": ["vite/client", "unplugin-icons/types/react"]
   },
   "include": ["src"]
 }
