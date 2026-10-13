@@ -34,6 +34,10 @@ pub enum Command {
         /// (1.1) The demo world, but offline: only cached employees can sign in.
         #[arg(long, requires = "sim_demo")]
         sim_offline: bool,
+        /// (Step 13) A simulated, signed-in Staff session for the launcher watchdog to
+        /// watch. Simulate mode only.
+        #[arg(long, requires = "simulate")]
+        sim_staff_session: bool,
     },
     /// Enroll this PC with an enrollment code.
     Enroll {
@@ -117,7 +121,8 @@ mod tests {
                 simulate: false,
                 data_dir: None,
                 sim_demo: false,
-                sim_offline: false
+                sim_offline: false,
+                sim_staff_session: false
             }
         );
         assert_eq!(
@@ -127,16 +132,42 @@ mod tests {
                 simulate: true,
                 data_dir: Some(PathBuf::from("x")),
                 sim_demo: false,
-                sim_offline: false
+                sim_offline: false,
+                sim_staff_session: false
             }
         );
         assert_eq!(
             parse(&["run", "--console", "--simulate", "--sim-demo"]),
-            Command::Run { console: true, simulate: true, data_dir: None, sim_demo: true, sim_offline: false }
+            Command::Run {
+                console: true,
+                simulate: true,
+                data_dir: None,
+                sim_demo: true,
+                sim_offline: false,
+                sim_staff_session: false
+            }
         );
         assert_eq!(
             parse(&["run", "--console", "--simulate", "--sim-demo", "--sim-offline"]),
-            Command::Run { console: true, simulate: true, data_dir: None, sim_demo: true, sim_offline: true }
+            Command::Run {
+                console: true,
+                simulate: true,
+                data_dir: None,
+                sim_demo: true,
+                sim_offline: true,
+                sim_staff_session: false
+            }
+        );
+        assert_eq!(
+            parse(&["run", "--console", "--simulate", "--sim-staff-session"]),
+            Command::Run {
+                console: true,
+                simulate: true,
+                data_dir: None,
+                sim_demo: false,
+                sim_offline: false,
+                sim_staff_session: true
+            }
         );
         assert_eq!(
             parse(&["enroll", "RBX1.abc#def", "--name", "Desk 1", "--allow-joined", "--simulate"]),
@@ -177,5 +208,8 @@ mod tests {
         assert!(parse(&["--simulate", "--sim-offline"]).is_err());
         assert!(parse(&["--sim-offline"]).is_err());
         assert!(parse(&["--simulate", "--sim-demo", "--sim-offline"]).is_ok());
+        // (Step 13) --sim-staff-session needs --simulate; a real agent cannot get it.
+        assert!(parse(&["--sim-staff-session"]).is_err());
+        assert!(parse(&["--simulate", "--sim-staff-session"]).is_ok());
     }
 }

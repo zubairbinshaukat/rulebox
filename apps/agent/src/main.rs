@@ -31,6 +31,7 @@ mod session;
 mod state;
 #[cfg(test)]
 mod testutil;
+mod watchdog;
 
 use std::backtrace::Backtrace;
 use std::io::Write;
@@ -90,8 +91,8 @@ fn main() -> ExitCode {
 /// `ipc_admin::EXIT_*` for the admin commands).
 fn dispatch(cli: Cli) -> anyhow::Result<u8> {
     match cli.command {
-        Command::Run { simulate: true, data_dir, sim_demo, sim_offline, .. } => {
-            run_simulated(data_dir, sim_demo, sim_offline).map(|()| 0)
+        Command::Run { simulate: true, data_dir, sim_demo, sim_offline, sim_staff_session, .. } => {
+            run_simulated(data_dir, sim_demo, sim_offline, sim_staff_session).map(|()| 0)
         }
         Command::Run { simulate: false, .. } => run_real(),
         // Step 11. The service host, its install and uninstall, and the offline
@@ -180,7 +181,14 @@ fn hash_pin(
 /// `run --console --simulate`: in-memory platform, throwaway data directory,
 /// stops on Ctrl+C. Touches nothing outside the data directory. `--sim-demo` adds
 /// the demo world (plan Section 6.11) and `--sim-offline` makes it offline.
-fn run_simulated(data_dir: Option<PathBuf>, sim_demo: bool, sim_offline: bool) -> anyhow::Result<()> {
+/// `--sim-staff-session` (Step 13) adds a simulated signed-in Staff session, so the
+/// watchdog has something to watch.
+fn run_simulated(
+    data_dir: Option<PathBuf>,
+    sim_demo: bool,
+    sim_offline: bool,
+    sim_staff_session: bool,
+) -> anyhow::Result<()> {
     let paths = match data_dir {
         Some(dir) => DataPaths::new(dir),
         None => DataPaths::simulate_default()?,
@@ -193,8 +201,12 @@ fn run_simulated(data_dir: Option<PathBuf>, sim_demo: bool, sim_offline: bool) -
     // The one decision about fixture employees (also used by the real agent in
     // Steps 10 and 11): the demo world, or both the config key and the marker.
     let choice = directory::choose(&config, rulebox_win32::guard::is_test_machine(), sim_demo);
+    let platform = SimPlatform::new(paths.root().to_path_buf());
+    if sim_staff_session {
+        platform.add_session(watchdog::SIM_STAFF_SESSION, Some(watchdog::SIM_STAFF_SID), true);
+    }
     let deps = Deps {
-        platform: Arc::new(SimPlatform::new(paths.root().to_path_buf())),
+        platform: Arc::new(platform),
         backend_factory: backend::convex::ConvexBackend::factory(),
         // Simulate mode checks no binary paths; this is a placeholder.
         install: InstallPaths::new(paths.root().join("install")),
@@ -204,7 +216,7 @@ fn run_simulated(data_dir: Option<PathBuf>, sim_demo: bool, sim_offline: bool) -
         pipes: PipeNames::for_mode(true),
         directory: directory::build(choice, sim_offline),
         audit_sink: Arc::new(audit::LogAuditSink),
-        sim: SimOptions { demo: sim_demo, offline: sim_offline },
+        sim: SimOptions { demo: sim_demo, offline: sim_offline, staff_session: sim_staff_session },
     };
 
     let result = run_with_runtime(deps);
@@ -277,7 +289,7 @@ pub(crate) fn real_deps(paths: DataPaths, install: InstallPaths) -> anyhow::Resu
         pipes: PipeNames::for_mode(false),
         directory: directory::build(choice, false),
         audit_sink: Arc::new(audit::NullAuditSink),
-        sim: SimOptions { demo: false, offline: false },
+        sim: SimOptions::default(),
     })
 }
 

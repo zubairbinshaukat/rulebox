@@ -447,20 +447,14 @@ impl Platform for SimPlatform {
 
 
 impl SimPlatform {
-    /// Test helper: adds a signed-in (or disconnected) session.
-    #[cfg(test)]
+    /// Adds a signed-in (or disconnected) session. Tests use it, and so does
+    /// `--sim-staff-session` (the simulated Staff session of Step 13).
     pub fn add_session(&self, id: u32, user_sid: Option<&str>, active: bool) {
-        self.with_world(|w| {
-            w.sessions.push(SessionInfo {
-                id,
-                state: if active {
-                    super::SessionState::Active
-                } else {
-                    super::SessionState::Disconnected
-                },
-                user_sid: user_sid.map(str::to_string),
-                is_console: true,
-            });
+        lock(&self.world).sessions.push(SessionInfo {
+            id,
+            state: if active { super::SessionState::Active } else { super::SessionState::Disconnected },
+            user_sid: user_sid.map(str::to_string),
+            is_console: true,
         });
     }
 }

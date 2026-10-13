@@ -1,8 +1,8 @@
 //! The single entry point for service mode and console mode. It loads the
-//! state, builds the first snapshot and runs the IPC servers (Step 6); the other
-//! tasks of Section 5.2 are added in later steps.
+//! state, builds the first snapshot and runs the tasks of Section 5.2: the IPC
+//! servers (Step 6), the backend and reconciler (Steps 8 and 9) and the launcher
+//! watchdog (Step 13).
 
-use std::collections::HashSet;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
@@ -35,6 +35,7 @@ use crate::paths::{DataPaths, InstallPaths};
 use crate::platform::{Platform, ShellMechanism};
 use crate::session::{SessionDeps, SessionManager, SessionTimeouts};
 use crate::state::{read_json, unix_ms, AgentState, SharedState, SnapshotHandle, StateStore};
+use crate::watchdog::{self, WatchdogDeps};
 
 /// RAM at or below this many MB selects Lite mode (PRD 22.5).
 const LITE_MODE_MAX_RAM_MB: u64 = 4352;
@@ -89,6 +90,10 @@ pub struct SimOptions {
     pub demo: bool,
     /// The demo world with `connection: "offline"`.
     pub offline: bool,
+    /// (Step 13) `--sim-staff-session`: the watchdog behaves as if the kiosk were on
+    /// and the simulated Staff session of `SIM_STAFF_SID` were signed in (the caller
+    /// adds that session to `SimPlatform`). Simulate mode only.
+    pub staff_session: bool,
 }
 
 /// Events from the service host (session changes, power) that the reconciler reacts to.
@@ -217,6 +222,9 @@ pub async fn run(
     // The demo world exists only in the simulated agent (README answers table, 1.1).
     if deps.sim.demo && !deps.simulate {
         bail!("the demo world (--sim-demo) is only available together with --simulate");
+    }
+    if deps.sim.staff_session && !deps.simulate {
+        bail!("--sim-staff-session is only available together with --simulate");
     }
     let store = StateStore::open(&deps.paths.state_dir()).context("open the state directory")?;
     let state = store.load().context("load the agent state")?;
@@ -400,6 +408,27 @@ pub async fn run(
         Arc::clone(&session),
         shutdown.clone(),
     ));
+    // (Step 13) The launcher watchdog: launcher presence and hang detection. It reads
+    // the kiosk and Staff account from the shared state, never from the snapshot.
+    let (watchdog, watchdog_events) = watchdog::channel();
+    let gate = if deps.simulate && deps.sim.staff_session {
+        watchdog::sim_gate()
+    } else {
+        watchdog::state_gate(Arc::clone(&shared))
+    };
+    tasks.spawn(watchdog::run(
+        WatchdogDeps {
+            platform: Arc::clone(&deps.platform),
+            snapshot: snapshot_handle.clone(),
+            install: deps.install.clone(),
+            kill_hung_shell: deps.config.kill_hung_shell,
+            simulate: deps.simulate,
+            gate,
+        },
+        signals_rx,
+        watchdog_events,
+        shutdown.clone(),
+    ));
     tasks.spawn(ipc_shell::run_pipe(
         ShellPipe {
             name: deps.pipes.shell.clone(),
@@ -418,15 +447,20 @@ pub async fn run(
         },
         shutdown.clone(),
     ));
-    tasks.spawn(log_shell_signals(signals_rx, shutdown.clone()));
 
     loop {
         tokio::select! {
             () = shutdown.cancelled() => break,
             event = control_rx.recv() => match event {
-                Some(ControlEvent::SessionChanged { .. }) => reconciler.session_changed(),
+                Some(ControlEvent::SessionChanged { .. }) => {
+                    reconciler.session_changed();
+                    watchdog.session_changed();
+                }
                 Some(ControlEvent::SessionLocked { session_id }) => reconciler.session_locked(session_id),
-                Some(ControlEvent::PowerResumed) => reconciler.power_resumed(),
+                Some(ControlEvent::PowerResumed) => {
+                    reconciler.power_resumed();
+                    watchdog.session_changed();
+                }
                 // The host dropped its sender: nothing more can arrive, keep waiting for shutdown.
                 None => {
                     shutdown.cancelled().await;
@@ -468,41 +502,6 @@ async fn clear_session_when_not_enrolled(
                 if changed.is_err() {
                     return;
                 }
-            }
-        }
-    }
-}
-
-/// Consumes the shell connection signals until the watchdog (Step 13) takes them
-/// over. Logs `shell.ready`, the first heartbeat of each connection at `info`
-/// and the rest at `debug`.
-async fn log_shell_signals(
-    mut signals: mpsc::UnboundedReceiver<ShellSignal>,
-    shutdown: CancellationToken,
-) {
-    let mut beating: HashSet<u64> = HashSet::new();
-    loop {
-        let signal = tokio::select! {
-            () = shutdown.cancelled() => return,
-            signal = signals.recv() => match signal {
-                Some(signal) => signal,
-                None => return,
-            },
-        };
-        match signal {
-            ShellSignal::Connected { .. } => {}
-            ShellSignal::Ready { connection_id, pid } => {
-                tracing::info!(connection_id, pid, "shell.ready");
-            }
-            ShellSignal::Heartbeat { connection_id, pid } => {
-                if beating.insert(connection_id) {
-                    tracing::info!(connection_id, pid, "shell.heartbeat (first on this connection)");
-                } else {
-                    tracing::debug!(connection_id, pid, "shell.heartbeat");
-                }
-            }
-            ShellSignal::Closed { connection_id } => {
-                beating.remove(&connection_id);
             }
         }
     }
@@ -660,7 +659,7 @@ mod tests {
         let dir = TempDir::new();
         let mut deps = test_deps(&dir);
         deps.directory = Arc::new(crate::directory::FixtureDirectory::new(false));
-        deps.sim = SimOptions { demo: true, offline: false };
+        deps.sim = SimOptions { demo: true, ..SimOptions::default() };
         let (shell_name, admin_name) = (deps.pipes.shell.clone(), deps.pipes.admin.clone());
         let sim_files = deps.paths.sim_files();
         let shutdown = CancellationToken::new();
@@ -757,7 +756,7 @@ mod tests {
         let dir = TempDir::new();
         let mut deps = test_deps(&dir);
         deps.simulate = false;
-        deps.sim = SimOptions { demo: true, offline: false };
+        deps.sim = SimOptions { demo: true, ..SimOptions::default() };
         let (_control_tx, control_rx) = mpsc::unbounded_channel();
         let error = run(deps, CancellationToken::new(), control_rx).await.unwrap_err();
         assert!(error.to_string().contains("--sim-demo"), "{error:#}");
