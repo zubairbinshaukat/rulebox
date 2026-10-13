@@ -91,20 +91,36 @@ if ($service -and $service.Status -ne 'Stopped') {
     $service.WaitForStatus('Stopped', [TimeSpan]::FromSeconds(30))
 }
 
-Copy-Item -LiteralPath $agent -Destination (Join-Path $install 'rulebox-agent.exe') -Force
-Copy-Item -LiteralPath $shell -Destination (Join-Path $install 'rulebox-shell.exe') -Force
+# Copies a file unless the target is already byte-identical (a file that a running
+# program holds open cannot be overwritten, and there is no need to).
+function Copy-IfChanged([string]$From, [string]$To) {
+    if ((Test-Path -LiteralPath $To) -and
+        ((Get-FileHash -LiteralPath $From -Algorithm SHA256).Hash -eq (Get-FileHash -LiteralPath $To -Algorithm SHA256).Hash)) {
+        return
+    }
+    try {
+        Copy-Item -LiteralPath $From -Destination $To -Force -ErrorAction Stop
+    } catch {
+        Fail ("cannot replace $To because a running program is using it. " +
+              'Sign the Staff session out (or run `rulebox-agent recover`), then run this script again. ' +
+              "($($_.Exception.Message))")
+    }
+}
+
+Copy-IfChanged $agent (Join-Path $install 'rulebox-agent.exe')
+Copy-IfChanged $shell (Join-Path $install 'rulebox-shell.exe')
 
 # 4. The Staff App: the real one if it is here, otherwise the stand-in.
 $staffTarget = Join-Path $versionDir 'rulebox-staff.exe'
 if (Test-Path -LiteralPath $staff) {
-    Copy-Item -LiteralPath $staff -Destination $staffTarget -Force
+    Copy-IfChanged $staff $staffTarget
     $staffUsed = 'rulebox-staff.exe (the real Staff App)'
 } else {
-    Copy-Item -LiteralPath $fake -Destination $staffTarget -Force
+    Copy-IfChanged $fake $staffTarget
     $staffUsed = 'fake_staff.exe (the stand-in console program)'
 }
 if (Test-Path -LiteralPath $fake) {
-    Copy-Item -LiteralPath $fake -Destination (Join-Path $versionDir 'fake_staff.exe') -Force
+    Copy-IfChanged $fake (Join-Path $versionDir 'fake_staff.exe')
 }
 
 # The debug binaries link the Visual C++ runtime dynamically, and a fresh Windows
@@ -113,8 +129,8 @@ if (Test-Path -LiteralPath $fake) {
 $runtimeDlls = @(Get-ChildItem -LiteralPath $SourceDir -File -ErrorAction SilentlyContinue |
     Where-Object { $_.Name -match '^(vcruntime140(_1)?|msvcp140(_1|_2)?|concrt140)\.dll$' })
 foreach ($dll in $runtimeDlls) {
-    Copy-Item -LiteralPath $dll.FullName -Destination $install -Force
-    Copy-Item -LiteralPath $dll.FullName -Destination $versionDir -Force
+    Copy-IfChanged $dll.FullName (Join-Path $install $dll.Name)
+    Copy-IfChanged $dll.FullName (Join-Path $versionDir $dll.Name)
 }
 if ($runtimeDlls.Count -gt 0) {
     Write-Host ("Copied the Visual C++ runtime next to the binaries: " + (($runtimeDlls | ForEach-Object Name) -join ', '))
