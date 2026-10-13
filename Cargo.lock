@@ -3075,6 +3075,13 @@ dependencies = [
 [[package]]
 name = "rulebox-shell"
 version = "0.0.0"
+dependencies = [
+ "rulebox-ipc",
+ "rulebox-win32",
+ "serde",
+ "serde_json",
+ "windows",
+]
 
 [[package]]
 name = "rulebox-staff"
