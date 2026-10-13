@@ -173,6 +173,16 @@ impl AuditQueue {
         self.dropped
     }
 
+    /// Drops everything, including the dropped counter, and deletes the file
+    /// (unenrollment). Returns how many records had not been delivered.
+    pub fn clear(&mut self) -> std::io::Result<usize> {
+        let undelivered = self.records.len();
+        self.records.clear();
+        self.dropped = 0;
+        crate::state::remove_file_if_exists(&self.path)?;
+        Ok(undelivered)
+    }
+
     fn save(&self) -> std::io::Result<()> {
         let file = QueueFile { schema: 1, dropped: self.dropped, records: self.records.clone() };
         let bytes = serde_json::to_vec_pretty(&file).map_err(std::io::Error::other)?;
@@ -240,6 +250,18 @@ impl AuditHandle {
     /// Records waiting for delivery.
     pub fn queued(&self) -> usize {
         lock(&self.queue).len()
+    }
+
+    /// Unenrollment: the queue belongs to the organization the PC is leaving.
+    /// Returns how many records had not been delivered.
+    pub fn discard_all(&self) -> usize {
+        match lock(&self.queue).clear() {
+            Ok(undelivered) => undelivered,
+            Err(error) => {
+                tracing::error!("cannot delete the audit queue: {error}");
+                0
+            }
+        }
     }
 
     /// A copy of everything queued, oldest first (tests).

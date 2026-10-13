@@ -10,14 +10,19 @@ mod admin_exit;
 mod agent;
 mod agent_policy;
 mod audit;
+mod backend;
 mod cli;
+mod compat;
 mod directory;
 mod employee_cache;
+mod enroll;
+mod enroll_code;
 mod fixtures;
 mod ipc_admin;
 mod ipc_conn;
 mod ipc_shell;
 mod kdf;
+mod kiosk_control;
 mod lockout;
 mod logging;
 mod paths;
@@ -170,6 +175,7 @@ fn run_simulated(data_dir: Option<PathBuf>, sim_demo: bool, sim_offline: bool) -
     let choice = directory::choose(&config, rulebox_win32::guard::is_test_machine(), sim_demo);
     let deps = Deps {
         platform: Arc::new(SimPlatform::new(paths.root().to_path_buf())),
+        backend_factory: backend::convex::ConvexBackend::factory(),
         // Simulate mode checks no binary paths; this is a placeholder.
         install: InstallPaths::new(paths.root().join("install")),
         paths,

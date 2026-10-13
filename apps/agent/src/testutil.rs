@@ -56,6 +56,54 @@ pub fn test_snapshot() -> AgentSnapshot {
     initial_snapshot(&AgentState::default(), &sim, &AgentConfig::default(), &AgentPolicy::default())
 }
 
+/// The employee-session pieces a backend or enrollment test needs, built over files
+/// in `<dir>\state`.
+pub struct SessionParts {
+    pub session: Arc<crate::session::SessionManager>,
+    pub lockouts: Arc<Mutex<crate::lockout::LockoutStore>>,
+    pub audit: Arc<crate::audit::AuditHandle>,
+}
+
+pub fn test_session_parts(
+    dir: &Path,
+    snapshot_rx: tokio::sync::watch::Receiver<AgentSnapshot>,
+) -> SessionParts {
+    use crate::audit::{AuditHandle, AuditQueue};
+    use crate::directory::UnavailableDirectory;
+    use crate::employee_cache::EmployeeCache;
+    use crate::lockout::LockoutStore;
+    use crate::session::{SessionDeps, SessionManager, SessionTimeouts};
+
+    let state = dir.join("state");
+    std::fs::create_dir_all(&state).unwrap();
+    let now: Arc<dyn Fn() -> u64 + Send + Sync> = Arc::new(crate::state::unix_ms);
+    let lockouts = Arc::new(Mutex::new(LockoutStore::open(state.join("lockouts.json")).unwrap()));
+    let audit = AuditHandle::new(
+        AuditQueue::open(state.join("audit-queue.json")).unwrap(),
+        snapshot_rx.clone(),
+        Arc::clone(&now),
+    );
+    let session = SessionManager::new(SessionDeps {
+        directory: Arc::new(UnavailableDirectory),
+        cache: EmployeeCache::open(state.join("employee-cache.json")).unwrap(),
+        lockouts: Arc::clone(&lockouts),
+        audit: Arc::clone(&audit),
+        snapshot_rx,
+        files_base: None,
+        now_ms: now,
+        clock_floor_ms: Arc::new(|| 0),
+        timeouts: SessionTimeouts::default(),
+    });
+    SessionParts { session, lockouts, audit }
+}
+
+pub fn test_session(
+    dir: &Path,
+    snapshot_rx: tokio::sync::watch::Receiver<AgentSnapshot>,
+) -> Arc<crate::session::SessionManager> {
+    test_session_parts(dir, snapshot_rx).session
+}
+
 /// A bare protocol client for tests that need to misbehave: it sends whatever
 /// it is told and never says `hello` by itself. Must be used inside a runtime.
 pub struct RawClient {

@@ -116,6 +116,13 @@ impl EmployeeCache {
         self.save()
     }
 
+    /// Forgets every entry and deletes the file (unenrollment: the cache belongs to
+    /// the organization the PC is leaving).
+    pub fn clear(&mut self) -> std::io::Result<()> {
+        self.entries.clear();
+        crate::state::remove_file_if_exists(&self.path)
+    }
+
     fn save(&self) -> std::io::Result<()> {
         let file = CacheFile { schema: 1, entries: self.entries.clone() };
         let bytes = serde_json::to_vec_pretty(&file).map_err(std::io::Error::other)?;

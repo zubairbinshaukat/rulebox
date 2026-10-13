@@ -48,9 +48,38 @@ pub struct DesiredState {
     pub version: u64,
 }
 
+impl DesiredState {
+    /// Used when a device is enrolled but the backend has no document yet (PRD 9.1
+    /// step 5, plan Section 5.6): kiosk on, everything else empty, version 0.
+    pub fn enrollment_default() -> Self {
+        Self {
+            kiosk_enabled: true,
+            apps: Vec::new(),
+            allowed_sites: Vec::new(),
+            file_handlers: BTreeMap::new(),
+            storage: StorageConfig { default_quota_gb: 0 },
+            branding: Branding { name: "Rulebox".to_string(), logo: None },
+            version: 0,
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn enrollment_default_is_kiosk_on_and_empty() {
+        let state = DesiredState::enrollment_default();
+        assert!(state.kiosk_enabled);
+        assert!(state.apps.is_empty() && state.allowed_sites.is_empty() && state.file_handlers.is_empty());
+        assert_eq!(state.storage.default_quota_gb, 0);
+        assert_eq!(state.branding, Branding { name: "Rulebox".into(), logo: None });
+        assert_eq!(state.version, 0);
+        // It is a valid document: it survives a round trip through JSON.
+        let again: DesiredState = serde_json::from_value(serde_json::to_value(&state).unwrap()).unwrap();
+        assert_eq!(again, state);
+    }
 
     #[test]
     fn prd_example_round_trips() {

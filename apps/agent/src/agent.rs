@@ -21,16 +21,22 @@ use tokio_util::task::TaskTracker;
 use crate::admin_exit::{run_exit, AdminExit, AdminExitDeps, ExitRequest};
 use crate::agent_policy::AgentPolicy;
 use crate::audit::{run_audit_task, AuditHandle, AuditQueue, AuditSink};
+use crate::backend::task::{apply_to_snapshot, note_clock, os_jitter, BackendRunner, TaskContext};
+use crate::backend::BackendFactory;
 use crate::directory::EmployeeDirectory;
 use crate::employee_cache::EmployeeCache;
+use crate::enroll::{EnrollDeps, Enroller, Timings};
 use crate::fixtures;
-use crate::ipc_admin::{self, AdminPipe, NotAvailableYet, WithStatusExtra};
+use crate::ipc_admin::{self, AdminPipe, WithStatusExtra};
 use crate::ipc_shell::{self, ShellBroadcast, ShellExtension, ShellPipe, ShellSignal};
+use crate::kiosk_control::{KioskControl, NoReconciler};
 use crate::lockout::LockoutStore;
 use crate::paths::{DataPaths, InstallPaths};
 use crate::platform::Platform;
 use crate::session::{SessionDeps, SessionManager, SessionTimeouts};
-use crate::state::{read_json, unix_ms, AgentState, KioskApplied, StateStore};
+use crate::state::{
+    read_json, unix_ms, AgentState, KioskApplied, SharedState, SnapshotHandle, StateStore,
+};
 
 /// RAM at or below this many MB selects Lite mode (PRD 22.5).
 const LITE_MODE_MAX_RAM_MB: u64 = 4352;
@@ -91,9 +97,12 @@ pub enum ControlEvent {
     PowerResumed,
 }
 
-/// Everything `run` needs from the outside. The backend factory is added in Step 8.
+/// Everything `run` needs from the outside.
 pub struct Deps {
     pub platform: Arc<dyn Platform>,
+    /// (Step 8) Builds the backend client for one deployment URL: `ConvexBackend` on
+    /// a real or simulated agent, a scripted fake in tests.
+    pub backend_factory: BackendFactory,
     pub paths: DataPaths,
     /// Where the Rulebox binaries live (peer verification, Section 6.2 check 3).
     /// Unused in simulate mode.
@@ -247,12 +256,13 @@ pub async fn run(
     let store = StateStore::open(&deps.paths.state_dir()).context("open the state directory")?;
     let state = store.load().context("load the agent state")?;
     // (1.1) The agent-only keys of the desired-state document: the demo document in
-    // demo mode, otherwise the cached one (Step 8 keeps it current). No document
-    // means no exit PIN, so the admin exit is off.
+    // demo mode, otherwise the cached one (the backend task keeps it current). No
+    // document means no exit PIN, so the admin exit is off.
+    let cached = if deps.sim.demo { None } else { load_cached_desired(&deps.paths) };
     let policy_doc = if deps.sim.demo {
         Some(fixtures::demo_document())
     } else {
-        load_cached_desired(&deps.paths).map(|cached| cached.doc)
+        cached.as_ref().map(|cached| cached.doc.clone())
     };
     let policy = AgentPolicy::from_doc(policy_doc.as_ref());
     drop(policy_doc);
@@ -263,31 +273,43 @@ pub async fn run(
         "admin exit settings"
     );
     let mut first_snapshot = initial_snapshot(&state, deps.platform.as_ref(), &deps.config, &policy);
+    // Offline at boot: the cached document fills the snapshot before any backend
+    // contact (plan Section 5.8), so the Staff App has the state from the start.
+    if let (Some(cached), Some(_)) = (&cached, &state.enrollment) {
+        if let Ok(desired) = serde_json::from_value::<rulebox_policy::DesiredState>(cached.doc.clone()) {
+            apply_to_snapshot(&mut first_snapshot, &desired, cached.version, &policy);
+        }
+    }
+    drop(cached);
     if deps.sim.demo {
         fixtures::apply_demo_snapshot(&mut first_snapshot, deps.sim.offline);
     }
-    let (snapshot_tx, snapshot_rx) = watch::channel(first_snapshot);
+    let (snapshot_handle, snapshot_rx) = SnapshotHandle::new(first_snapshot);
     // The policy travels in its own channel, so the PIN hash is never inside the
-    // snapshot. Step 8 sends the next policy whenever a document is accepted.
-    let (_policy_tx, policy_rx) = watch::channel(policy);
+    // snapshot. The backend task sends the next policy whenever a document is
+    // accepted.
+    let (policy_tx, policy_rx) = watch::channel(policy);
+    let policy_tx = Arc::new(policy_tx);
 
     if deps.simulate {
         tracing::info!(demo = deps.sim.demo, offline = deps.sim.offline, "agent started (simulate)");
     } else {
         tracing::info!("agent started");
     }
-    tracing::debug!(display_mode = ?snapshot_tx.borrow().display_mode, "initial snapshot built");
+    tracing::debug!(display_mode = ?snapshot_rx.borrow().display_mode, "initial snapshot built");
 
     // The Staff account's SID: the shell pipe exists only while it is known. Later
-    // steps (enrollment, unenrollment) send changes through `_staff_sid_tx`.
+    // steps (the reconciler, unenrollment) send changes through `_staff_sid_tx`.
     let (_staff_sid_tx, staff_sid_rx) =
         watch::channel(state.staff.as_ref().map(|staff| staff.sid.clone()));
     let (signals_tx, signals_rx) = mpsc::unbounded_channel::<ShellSignal>();
     let broadcast = ShellBroadcast::new();
 
+    // State and secrets, shared by the backend task and the enrollment flow.
+    let shared = SharedState::new(store, state.clone(), Arc::clone(&deps.platform));
+
     // (1.1) Employee session, lockouts, offline cache and audit queue.
     let now_ms: Arc<dyn Fn() -> u64 + Send + Sync> = Arc::new(unix_ms);
-    let clock_floor = state.last_wall_clock_ms;
     let lockouts = Arc::new(Mutex::new(
         LockoutStore::open(deps.paths.lockouts()).context("open lockouts.json")?,
     ));
@@ -314,8 +336,11 @@ pub async fn run(
         snapshot_rx: snapshot_rx.clone(),
         files_base,
         now_ms: Arc::clone(&now_ms),
-        // Step 8 keeps `last_wall_clock_ms` current; until then the loaded value.
-        clock_floor_ms: Arc::new(move || clock_floor),
+        // The highest wall clock seen; the backend task keeps it current.
+        clock_floor_ms: {
+            let shared = Arc::clone(&shared);
+            Arc::new(move || shared.last_wall_clock_ms())
+        },
         timeouts: SessionTimeouts::default(),
     });
 
@@ -328,8 +353,40 @@ pub async fn run(
         audit: Arc::clone(&audit),
         session: Arc::clone(&session),
         exit_tx,
-        now_ms,
+        now_ms: Arc::clone(&now_ms),
     });
+
+    // The backend task, and the enrollment flow behind `admin.enroll` and
+    // `admin.unenroll`. The kiosk reconciler (Step 9) replaces `NoReconciler`.
+    let control: Arc<dyn KioskControl> =
+        Arc::new(NoReconciler { snapshot: snapshot_handle.clone(), shared: Arc::clone(&shared) });
+    let task_ctx = Arc::new(TaskContext {
+        shared: Arc::clone(&shared),
+        paths: deps.paths.clone(),
+        snapshot: snapshot_handle.clone(),
+        policy_tx,
+        session: Arc::clone(&session),
+        control,
+        platform: Arc::clone(&deps.platform),
+        factory: Arc::clone(&deps.backend_factory),
+        now_ms: Arc::clone(&now_ms),
+        jitter: Arc::new(os_jitter),
+    });
+    let runner = BackendRunner::new(Arc::clone(&task_ctx), shutdown.clone());
+    let enroller = Arc::new(Enroller::new(EnrollDeps {
+        ctx: Arc::clone(&task_ctx),
+        runner: Arc::clone(&runner),
+        audit: Arc::clone(&audit),
+        lockouts: Arc::clone(&lockouts),
+        timings: Timings::default(),
+    }));
+    // The demo world is not enrolled in the state file, so it starts no backend.
+    if !deps.sim.demo {
+        note_clock(&task_ctx);
+        if runner.start_from_state().await {
+            tracing::info!("syncing with the backend");
+        }
+    }
 
     let tasks = TaskTracker::new();
     tasks.spawn(ipc_admin::run_pipe(
@@ -337,9 +394,8 @@ pub async fn run(
             name: deps.pipes.admin.clone(),
             simulate: deps.simulate,
             snapshot_rx: snapshot_rx.clone(),
-            // Steps 8 and 11 replace the inner handler with the real enroll and unenroll.
             handler: Arc::new(WithStatusExtra::new(
-                Arc::new(NotAvailableYet),
+                enroller,
                 Arc::clone(&session),
                 Arc::clone(&audit),
                 Arc::clone(&admin_exit),
@@ -400,10 +456,14 @@ pub async fn run(
         }
     }
 
-    // The pipe tasks watch the same token: they tell their clients and close.
+    // The pipe tasks watch the same token: they tell their clients and close. So
+    // does the backend task; wait for it too.
     tasks.close();
     if tokio::time::timeout(TASK_WIND_DOWN, tasks.wait()).await.is_err() {
         tracing::warn!("the IPC tasks did not stop within {} s", TASK_WIND_DOWN.as_secs());
+    }
+    if tokio::time::timeout(TASK_WIND_DOWN, runner.stop()).await.is_err() {
+        tracing::warn!("the backend task did not stop within {} s", TASK_WIND_DOWN.as_secs());
     }
     tracing::info!("agent stopped");
     Ok(())
@@ -571,6 +631,8 @@ mod tests {
     fn test_deps(dir: &TempDir) -> Deps {
         Deps {
             platform: Arc::new(SimPlatform::new(dir.path().to_path_buf())),
+            // No test reaches a backend through this: a call would be unreachable.
+            backend_factory: Arc::new(|_| Err(crate::backend::BackendError::Unreachable)),
             paths: DataPaths::new(dir.path().to_path_buf()),
             install: InstallPaths::new(dir.path().join("install")),
             config: AgentConfig::default(),
@@ -807,5 +869,405 @@ mod tests {
         }
         assert!(saw_shutting_down, "the client must be told the agent is stopping");
         task.await.unwrap().unwrap();
+    }
+}
+
+/// Step 8 end to end: the real `run`, a scripted backend, and the admin and shell
+/// pipes (the CLI helpers of `ipc_admin` are the code `rulebox-agent enroll`,
+/// `status` and `unenroll` run).
+#[cfg(test)]
+mod backend_tests {
+    use super::*;
+
+    use base64::engine::general_purpose::URL_SAFE_NO_PAD;
+    use base64::Engine as _;
+    use rulebox_ipc::client::{ClientConfig, ClientEvent, IpcClient};
+    use rulebox_ipc::methods::{AdminExitSubmit, Empty, SessionGet, SessionSignIn, StateGet};
+    use rulebox_ipc::requests::{AdminExitOutcome, AdminExitSubmitParams, SignInOutcome, SignInParams};
+    use rulebox_ipc::types::{ClientInfo, ClientRole};
+    use rulebox_win32::sid::current_user_sid;
+    use serde_json::json;
+
+    use crate::backend::fake::FakeBackend;
+    use crate::backend::{Backend, BackendError, BackendEvent, DesiredFetch};
+    use crate::platform::sim::SimPlatform;
+    use crate::state::{StaffAccount, StateStore};
+    use crate::testutil::{unique_pipe_name, TempDir};
+
+    const TOKEN: &str = "0123456789ABCDEFGHJK";
+    const PIN: &str = "2468";
+
+    fn code() -> String {
+        format!("RBX1.{}", URL_SAFE_NO_PAD.encode(format!("https://test.convex.cloud#{TOKEN}")))
+    }
+
+    fn deps_for(dir: &std::path::Path, fake: &FakeBackend) -> Deps {
+        let fake = fake.clone();
+        Deps {
+            platform: Arc::new(SimPlatform::new(dir.to_path_buf())),
+            backend_factory: Arc::new(move |_| Ok(Arc::new(fake.clone()) as Arc<dyn Backend>)),
+            paths: DataPaths::new(dir.to_path_buf()),
+            install: InstallPaths::new(dir.join("install")),
+            config: AgentConfig::default(),
+            simulate: true,
+            pipes: PipeNames { shell: unique_pipe_name(), admin: unique_pipe_name() },
+            directory: Arc::new(crate::directory::FixtureDirectory::new(false)),
+            audit_sink: Arc::new(crate::audit::LogAuditSink),
+            sim: SimOptions::default(),
+        }
+    }
+
+    struct Running {
+        shutdown: CancellationToken,
+        task: tokio::task::JoinHandle<anyhow::Result<()>>,
+        shell: String,
+        admin: String,
+    }
+
+    impl Running {
+        /// Starts the agent and waits until its admin pipe answers.
+        async fn start(deps: Deps) -> Self {
+            let (shell, admin) = (deps.pipes.shell.clone(), deps.pipes.admin.clone());
+            let shutdown = CancellationToken::new();
+            let (control_tx, control_rx) = mpsc::unbounded_channel();
+            // Keep the control sender alive for as long as the agent runs.
+            std::mem::forget(control_tx);
+            let task = tokio::spawn(run(deps, shutdown.clone(), control_rx));
+            let running = Self { shutdown, task, shell, admin };
+            let deadline = tokio::time::Instant::now() + Duration::from_secs(10);
+            loop {
+                let config = running.config(&running.admin);
+                let exit = tokio::task::spawn_blocking(move || {
+                    ipc_admin::run_status(config, false, &mut Vec::new(), &mut Vec::new())
+                })
+                .await
+                .unwrap();
+                if exit == 0 {
+                    break;
+                }
+                assert!(tokio::time::Instant::now() < deadline, "the admin pipe never came up");
+                tokio::time::sleep(Duration::from_millis(20)).await;
+            }
+            running
+        }
+
+        async fn stop(self) {
+            self.shutdown.cancel();
+            self.task.await.unwrap().unwrap();
+        }
+
+        fn config(&self, pipe: &str) -> ClientConfig {
+            ClientConfig {
+                pipe_name: pipe.to_string(),
+                trusted_owner: current_user_sid().unwrap(),
+                request_timeout: Duration::from_secs(10),
+                require_session_zero: false,
+            }
+        }
+
+        async fn enroll(&self, code: String) -> (u8, String, String) {
+            let config = self.config(&self.admin);
+            tokio::task::spawn_blocking(move || {
+                let (mut out, mut err) = (Vec::new(), Vec::new());
+                let params = rulebox_ipc::admin::AdminEnrollParams {
+                    code,
+                    device_name: Some("Front desk".into()),
+                    allow_joined: false,
+                };
+                let exit = ipc_admin::run_enroll(config, params, &mut out, &mut err);
+                (exit, String::from_utf8(out).unwrap(), String::from_utf8(err).unwrap())
+            })
+            .await
+            .unwrap()
+        }
+
+        async fn unenroll(&self, remove_staff_account: bool) -> (u8, String, String) {
+            let config = self.config(&self.admin);
+            tokio::task::spawn_blocking(move || {
+                let (mut out, mut err) = (Vec::new(), Vec::new());
+                let params = rulebox_ipc::admin::AdminUnenrollParams { remove_staff_account };
+                let exit = ipc_admin::run_unenroll(config, params, &mut out, &mut err);
+                (exit, String::from_utf8(out).unwrap(), String::from_utf8(err).unwrap())
+            })
+            .await
+            .unwrap()
+        }
+
+        async fn status(&self) -> String {
+            let config = self.config(&self.admin);
+            tokio::task::spawn_blocking(move || {
+                let (mut out, mut err) = (Vec::new(), Vec::new());
+                let exit = ipc_admin::run_status(config, false, &mut out, &mut err);
+                assert_eq!(exit, 0, "{}", String::from_utf8_lossy(&err));
+                String::from_utf8(out).unwrap()
+            })
+            .await
+            .unwrap()
+        }
+
+        /// Polls `status` until every fragment is in it.
+        async fn wait_status(&self, fragments: &[&str]) -> String {
+            let deadline = tokio::time::Instant::now() + Duration::from_secs(10);
+            loop {
+                let text = self.status().await;
+                if fragments.iter().all(|fragment| text.contains(fragment)) {
+                    return text;
+                }
+                assert!(tokio::time::Instant::now() < deadline, "status never showed {fragments:?}:\n{text}");
+                tokio::time::sleep(Duration::from_millis(50)).await;
+            }
+        }
+
+        async fn shell_client(&self) -> (IpcClient, mpsc::Receiver<ClientEvent>) {
+            let info = ClientInfo { role: ClientRole::Shell, name: "test".into(), version: "0.0.0".into() };
+            let (client, mut events) = IpcClient::spawn_with(info, self.config(&self.shell));
+            match tokio::time::timeout(Duration::from_secs(10), events.recv()).await.unwrap().unwrap() {
+                ClientEvent::Linked(_) => {}
+                other => panic!("unexpected {other:?}"),
+            }
+            (client, events)
+        }
+    }
+
+    fn document(version: u64, kiosk_enabled: bool, hotkey: Option<&str>) -> serde_json::Value {
+        let mut admin_exit = json!({ "pinHash": crate::kdf::hash_secret(PIN).unwrap() });
+        if let Some(hotkey) = hotkey {
+            admin_exit["hotkey"] = json!(hotkey);
+        }
+        json!({
+            "kioskEnabled": kiosk_enabled, "apps": [], "allowedSites": [], "fileHandlers": {},
+            "storage": { "defaultQuotaGb": 0 }, "branding": { "name": "Rulebox" }, "version": version,
+            "adminExit": admin_exit
+        })
+    }
+
+    fn push(fake: &FakeBackend, version: u64, doc: serde_json::Value) {
+        fake.push(BackendEvent::Desired(DesiredFetch::Doc { version, doc, signature: None }));
+    }
+
+    #[tokio::test]
+    async fn the_cli_path_enrolls_syncs_reports_and_unenrolls_against_a_fake_backend() {
+        let dir = TempDir::new();
+        let fake = FakeBackend::new();
+        let agent = Running::start(deps_for(dir.path(), &fake)).await;
+
+        let text = agent.status().await;
+        assert!(text.contains("enrollment    : notEnrolled"), "{text}");
+
+        // `rulebox-agent enroll <code>`
+        let (exit, out, err) = agent.enroll(code()).await;
+        assert_eq!(exit, 0, "{err}");
+        assert_eq!(out, "Enrolled as \"Front desk\" (dev-1).\n");
+        let calls = fake.enroll_calls();
+        assert_eq!(calls.len(), 1);
+        assert_eq!(calls[0].token, TOKEN);
+        assert_eq!(calls[0].device_name, "Front desk");
+
+        // The same command again: `error: already_enrolled: ...`, exit code 3, and no
+        // second call reached the backend.
+        let (exit, out, err) = agent.enroll(code()).await;
+        assert_eq!((exit, out.as_str()), (3, ""));
+        assert!(err.starts_with("error: already_enrolled: "), "{err}");
+        assert_eq!(fake.enroll_calls().len(), 1);
+
+        // `status`: enrolled; online once the connection comes up; the document
+        // arrives without anyone asking for it.
+        agent.wait_status(&["enrollment    : enrolled", "device        : Front desk (dev-1)"]).await;
+        fake.push(BackendEvent::Connection(ConnectionStatus::Online));
+        push(&fake, 3, document(3, true, Some("ctrl+alt+k")));
+        let text = agent
+            .wait_status(&["connection    : online", "policy        : version 3", "admin exit    : on (Ctrl+Alt+K)"])
+            .await;
+        assert!(!text.contains("argon2"), "{text}");
+
+        // The first heartbeat comes after the 0 to 10 s jitter; it is the only
+        // thing the agent sends on its own.
+        fake.wait_until("a heartbeat", |f| !f.heartbeat_calls().is_empty()).await;
+        let first = fake.heartbeat_calls()[0].clone();
+        assert_eq!(first.auth.device_id, "dev-1");
+        let status = first.status.expect("the first heartbeat carries the status");
+        assert_eq!(status.agent_version, env!("CARGO_PKG_VERSION"));
+        assert_eq!(status.applied_version, Some(0));
+
+        // `rulebox-agent unenroll`
+        let (exit, out, err) = agent.unenroll(false).await;
+        assert_eq!(exit, 0, "{err}");
+        assert_eq!(out, "This PC is no longer enrolled.\n");
+        assert_eq!(fake.unenroll_calls().len(), 1);
+        let text = agent.wait_status(&["enrollment    : notEnrolled", "connection    : offline"]).await;
+        assert!(text.contains("admin exit    : off"), "{text}");
+        assert!(!dir.path().join("state").join("desired-state.json").exists());
+
+        // And it can be enrolled again.
+        let (exit, _, err) = agent.enroll(code()).await;
+        assert_eq!(exit, 0, "{err}");
+        agent.stop().await;
+    }
+
+    #[tokio::test]
+    async fn every_enrollment_failure_reaches_the_cli_with_its_reason_and_exit_code_3() {
+        let cases = [
+            (BackendError::Rejected { code: "token_used_up".into() }, "token_used_up", false),
+            (BackendError::Rejected { code: "token_expired".into() }, "token_expired", false),
+            (BackendError::Rejected { code: "token_revoked".into() }, "token_revoked", false),
+            (BackendError::Rejected { code: "token_invalid".into() }, "token_invalid", false),
+            (BackendError::Rejected { code: "invalid_request".into() }, "backend_rejected", false),
+            (BackendError::Timeout, "backend_unreachable", true),
+            (BackendError::Unreachable, "backend_unreachable", true),
+        ];
+        for (backend_error, reason, retryable) in cases {
+            let dir = TempDir::new();
+            let fake = FakeBackend::new();
+            fake.script_enroll(Err(backend_error.clone()));
+            let agent = Running::start(deps_for(dir.path(), &fake)).await;
+            let (exit, _, err) = agent.enroll(code()).await;
+            assert_eq!(exit, 3, "{backend_error:?}");
+            assert!(err.starts_with(&format!("error: {reason}: ")), "{backend_error:?}: {err}");
+            assert_eq!(err.trim_end().ends_with("Try again."), retryable, "{backend_error:?}: {err}");
+            agent.stop().await;
+        }
+
+        // A code that is not a code, and a PC that is blocked: no backend call.
+        let dir = TempDir::new();
+        let fake = FakeBackend::new();
+        let deps = deps_for(dir.path(), &fake);
+        let platform = Arc::new(SimPlatform::new(dir.path().to_path_buf()));
+        platform.with_world(|w| w.legal_notice = true);
+        let deps = Deps { platform, ..deps };
+        let agent = Running::start(deps).await;
+        let (exit, _, err) = agent.enroll("not-a-code".into()).await;
+        assert_eq!(exit, 3);
+        assert!(err.starts_with("error: code_invalid: "), "{err}");
+        let (exit, _, err) = agent.enroll(code()).await;
+        assert_eq!(exit, 3);
+        assert!(err.starts_with("error: compat_blocked: ") && err.contains("  - legal_notice"), "{err}");
+        assert!(fake.enroll_calls().is_empty());
+        agent.stop().await;
+    }
+
+    /// Plan Step 8 tests 12 to 14 and Section 5.8 end to end: the exit PIN lives in
+    /// the cached document, survives a restart with no connection, rotates and
+    /// disappears with the document, and a revocation keeps it while it ends the
+    /// employee's session.
+    #[tokio::test]
+    async fn the_document_drives_the_exit_across_restarts_and_a_revocation_keeps_it() {
+        let dir = TempDir::new();
+        // The Staff profile is known, so the fixture employees can sign in.
+        {
+            let paths = DataPaths::new(dir.path().to_path_buf());
+            let store = StateStore::open(&paths.state_dir()).unwrap();
+            let state = AgentState {
+                staff: Some(StaffAccount {
+                    sid: "S-1-5-21-1-1-1-2001".into(),
+                    user_name: "RuleboxStaff".into(),
+                    profile_dir: Some(dir.path().join("profile").to_string_lossy().into_owned()),
+                }),
+                ..AgentState::default()
+            };
+            store.save(&state).unwrap();
+        }
+
+        // Run 1: enroll, go online, receive a document with a PIN.
+        let fake = FakeBackend::new();
+        let agent = Running::start(deps_for(dir.path(), &fake)).await;
+        let (exit, _, err) = agent.enroll(code()).await;
+        assert_eq!(exit, 0, "{err}");
+        fake.push(BackendEvent::Connection(ConnectionStatus::Online));
+        push(&fake, 5, document(5, true, None));
+        agent.wait_status(&["admin exit    : on (Ctrl+Shift+F12)", "policy        : version 5"]).await;
+        let cache = std::fs::read_to_string(dir.path().join("state").join("desired-state.json")).unwrap();
+        assert!(cache.contains("argon2id"), "the cache keeps the hash");
+        // The snapshot the Staff App reads does not.
+        let (client, mut events) = agent.shell_client().await;
+        let snapshot = client.call::<StateGet>(Empty {}).await.unwrap();
+        assert!(snapshot.admin_exit.as_ref().unwrap().enabled);
+        assert!(!serde_json::to_string(&snapshot).unwrap().contains("argon2"));
+
+        // A different hotkey: exactly one state.changed, with the canonical text.
+        while tokio::time::timeout(Duration::from_millis(300), events.recv()).await.is_ok() {}
+        push(&fake, 6, document(6, true, Some("shift+ctrl+f11")));
+        let mut changed = Vec::new();
+        while let Ok(Some(event)) = tokio::time::timeout(Duration::from_millis(800), events.recv()).await {
+            if let ClientEvent::StateChanged(snapshot) = event {
+                changed.push(snapshot);
+            }
+        }
+        assert_eq!(changed.len(), 1, "{changed:?}");
+        assert_eq!(changed[0].admin_exit.as_ref().unwrap().hotkey, "Ctrl+Shift+F11");
+
+        // An employee signs in online, then the device is revoked remotely.
+        let signed_in = client
+            .call::<SessionSignIn>(SignInParams { username: "maya".into(), password: "demo".into() })
+            .await
+            .unwrap();
+        assert_eq!(signed_in.outcome, SignInOutcome::Ok);
+        fake.push(BackendEvent::Desired(DesiredFetch::Revoked));
+        agent.wait_status(&["enrollment    : revoked", "connection    : offline"]).await;
+        let session = client.call::<SessionGet>(Empty {}).await.unwrap();
+        assert!(session.employee.is_none(), "a revocation ends the employee session");
+        // The exit PIN keeps working on a revoked PC, and the kiosk is untouched:
+        // no kiosk-disable was triggered (the state file still has no kiosk record
+        // change and the cached document is still there).
+        assert!(dir.path().join("state").join("desired-state.json").exists());
+        let right = client
+            .call::<AdminExitSubmit>(AdminExitSubmitParams { pin: PIN.into() })
+            .await
+            .unwrap();
+        assert_eq!(right.outcome, AdminExitOutcome::SigningOut);
+        drop(client);
+        agent.stop().await;
+
+        // Run 2: a restart with a backend that never connects. The revoked
+        // enrollment is remembered, nothing is synced, and the exit still works.
+        let silent = FakeBackend::new();
+        let agent = Running::start(deps_for(dir.path(), &silent)).await;
+        let (client, _events) = agent.shell_client().await;
+        let snapshot = client.call::<StateGet>(Empty {}).await.unwrap();
+        assert_eq!(snapshot.enrollment, EnrollmentStatus::Revoked);
+        assert_eq!(snapshot.connection, ConnectionStatus::Offline);
+        assert_eq!(snapshot.desired_state_version, 6);
+        assert!(snapshot.admin_exit.as_ref().unwrap().enabled);
+        assert!(silent.subscriptions().is_empty(), "a revoked device does not subscribe");
+        let right = client
+            .call::<AdminExitSubmit>(AdminExitSubmitParams { pin: PIN.into() })
+            .await
+            .unwrap();
+        assert_eq!(right.outcome, AdminExitOutcome::SigningOut);
+        drop(client);
+
+        // It can be unenrolled locally; the backend answering "rejected" is fine.
+        silent.script_unenroll(Err(BackendError::Rejected { code: "rejected".into() }));
+        let (exit, _, err) = agent.unenroll(false).await;
+        assert_eq!(exit, 0, "{err}");
+        agent.wait_status(&["enrollment    : notEnrolled", "admin exit    : off"]).await;
+        agent.stop().await;
+    }
+
+    #[tokio::test]
+    async fn an_enrolled_agent_that_restarts_offline_shows_the_cached_state_and_offline() {
+        let dir = TempDir::new();
+        let fake = FakeBackend::new();
+        let agent = Running::start(deps_for(dir.path(), &fake)).await;
+        agent.enroll(code()).await;
+        fake.push(BackendEvent::Connection(ConnectionStatus::Online));
+        push(&fake, 8, document(8, false, None));
+        agent.wait_status(&["policy        : version 8", "connection    : online"]).await;
+        agent.stop().await;
+
+        let silent = FakeBackend::new();
+        let agent = Running::start(deps_for(dir.path(), &silent)).await;
+        let text = agent
+            .wait_status(&["enrollment    : enrolled", "connection    : offline", "policy        : version 8"])
+            .await;
+        assert!(text.contains("admin exit    : on"), "{text}");
+        // It subscribes with the saved secret; a document older than the cached one
+        // is stale and changes nothing.
+        silent.wait_for_subscription().await;
+        assert_eq!(silent.subscriptions()[0].device_id, "dev-1");
+        push(&silent, 2, document(2, true, None));
+        tokio::time::sleep(Duration::from_millis(300)).await;
+        let text = agent.status().await;
+        assert!(text.contains("policy        : version 8"), "{text}");
+        agent.stop().await;
     }
 }

@@ -2,12 +2,16 @@
 
 use std::io::Write;
 use std::path::{Path, PathBuf};
+use std::sync::{Arc, Mutex};
 use std::time::{SystemTime, UNIX_EPOCH};
 
+use rulebox_ipc::types::AgentSnapshot;
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
+use tokio::sync::watch;
 
-use crate::platform::RegValueRef;
+use crate::platform::{Platform, PlatformError, RegValueRef};
+use crate::secrets::Secrets;
 
 pub const STATE_SCHEMA: u32 = 1;
 
@@ -136,6 +140,15 @@ pub fn write_atomic(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
     result
 }
 
+/// Deletes a file; a file that is not there is fine.
+pub fn remove_file_if_exists(path: &Path) -> std::io::Result<()> {
+    match std::fs::remove_file(path) {
+        Ok(()) => Ok(()),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(e) => Err(e),
+    }
+}
+
 /// Reads a JSON file. Missing gives `None`. A file that does not parse is renamed
 /// to `<name>.corrupt-<unix ms>`, logged as an error, and treated as missing.
 pub fn read_json<T: DeserializeOwned>(path: &Path) -> std::io::Result<Option<T>> {
@@ -176,6 +189,117 @@ impl StateStore {
     pub fn save(&self, state: &AgentState) -> std::io::Result<()> {
         let bytes = serde_json::to_vec_pretty(state).map_err(std::io::Error::other)?;
         write_atomic(&self.path, &bytes)
+    }
+}
+
+/// The agent's persisted state and secrets, shared by the tasks that change them
+/// (the backend task and the enrollment flow in Step 8; the reconciler in Step 9).
+/// Every change is saved before the call returns. The guards are `std::sync::Mutex`
+/// and are never held across an `.await`.
+pub struct SharedState {
+    store: StateStore,
+    state: Mutex<AgentState>,
+    /// `None` until first needed: a PC that was never enrolled never reads it.
+    secrets: Mutex<Option<Secrets>>,
+    platform: Arc<dyn Platform>,
+}
+
+impl SharedState {
+    pub fn new(store: StateStore, state: AgentState, platform: Arc<dyn Platform>) -> Arc<Self> {
+        Arc::new(Self { store, state: Mutex::new(state), secrets: Mutex::new(None), platform })
+    }
+
+    /// A copy of the current state.
+    pub fn get(&self) -> AgentState {
+        lock(&self.state).clone()
+    }
+
+    /// Reads without copying the whole state.
+    pub fn read<R>(&self, f: impl FnOnce(&AgentState) -> R) -> R {
+        f(&lock(&self.state))
+    }
+
+    /// Applies `f` and saves. The change stays in memory when the write fails, so
+    /// the running agent keeps working; the error says it was not persisted.
+    pub fn update(&self, f: impl FnOnce(&mut AgentState)) -> std::io::Result<()> {
+        let mut state = lock(&self.state);
+        f(&mut state);
+        self.store.save(&state)
+    }
+
+    /// `state.last_wall_clock_ms`: the highest wall clock the agent has seen.
+    pub fn last_wall_clock_ms(&self) -> u64 {
+        lock(&self.state).last_wall_clock_ms
+    }
+
+    /// Raises `last_wall_clock_ms` to `now_ms` (never lowers it) and saves, but only
+    /// when it moves by at least `min_step_ms`, so a busy agent does not rewrite the
+    /// file for nothing. In memory the value is always raised.
+    pub fn note_wall_clock(&self, now_ms: u64, min_step_ms: u64) -> std::io::Result<()> {
+        let mut state = lock(&self.state);
+        if now_ms <= state.last_wall_clock_ms {
+            return Ok(());
+        }
+        let step = now_ms - state.last_wall_clock_ms;
+        state.last_wall_clock_ms = now_ms;
+        if step >= min_step_ms || step == now_ms {
+            self.store.save(&state)?;
+        }
+        Ok(())
+    }
+
+    /// Reads the secrets (loading them on first use).
+    pub fn secrets<R>(&self, f: impl FnOnce(&Secrets) -> R) -> Result<R, PlatformError> {
+        let mut guard = lock(&self.secrets);
+        if guard.is_none() {
+            *guard = Some(Secrets::load(self.platform.as_ref())?);
+        }
+        Ok(f(guard.as_ref().unwrap_or(&Secrets::default())))
+    }
+
+    /// Applies `f` and saves. On a failed save the in-memory secrets go back to what
+    /// they were, so memory never holds a secret that was not persisted.
+    pub fn update_secrets(&self, f: impl FnOnce(&mut Secrets)) -> Result<(), PlatformError> {
+        let mut guard = lock(&self.secrets);
+        let mut current = match guard.as_ref() {
+            Some(secrets) => secrets.clone(),
+            None => Secrets::load(self.platform.as_ref())?,
+        };
+        f(&mut current);
+        current.save(self.platform.as_ref())?;
+        *guard = Some(current);
+        Ok(())
+    }
+}
+
+/// The one `watch` channel of [`AgentSnapshot`] (plan Section 6.6) with a cheap way
+/// to change it: a write that changes nothing wakes nobody, so the Staff App gets no
+/// `state.changed` for it.
+#[derive(Clone)]
+pub struct SnapshotHandle(Arc<watch::Sender<AgentSnapshot>>);
+
+impl SnapshotHandle {
+    pub fn new(snapshot: AgentSnapshot) -> (Self, watch::Receiver<AgentSnapshot>) {
+        let (tx, rx) = watch::channel(snapshot);
+        (Self(Arc::new(tx)), rx)
+    }
+
+    /// Applies `f`; receivers are notified only if the snapshot ended up different.
+    /// Returns whether it did.
+    pub fn update(&self, f: impl FnOnce(&mut AgentSnapshot)) -> bool {
+        self.0.send_if_modified(|snapshot| {
+            let before = snapshot.clone();
+            f(snapshot);
+            *snapshot != before
+        })
+    }
+
+    pub fn current(&self) -> AgentSnapshot {
+        self.0.borrow().clone()
+    }
+
+    pub fn subscribe(&self) -> watch::Receiver<AgentSnapshot> {
+        self.0.subscribe()
     }
 }
 

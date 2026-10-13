@@ -147,6 +147,15 @@ impl SessionManager {
         }
     }
 
+    /// Unenrollment: ends the session and forgets every cached employee (the offline
+    /// sign-in cache belongs to the organization the PC is leaving).
+    pub fn forget_employees(&self) {
+        self.clear("unenrolled");
+        if let Err(error) = lock(&self.inner.cache).clear() {
+            tracing::error!("cannot delete the employee cache: {error}");
+        }
+    }
+
     /// The normalized login name of the signed-in employee.
     pub fn current_username(&self) -> Option<String> {
         lock(&self.inner.session).as_ref().map(|s| s.username.clone())

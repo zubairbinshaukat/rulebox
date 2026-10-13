@@ -174,6 +174,12 @@ impl LockoutStore {
         &mut self.data.admin_exit_pin_id
     }
 
+    /// Forgets every counter and deletes the file (unenrollment).
+    pub fn reset(&mut self) -> std::io::Result<()> {
+        self.data = LockoutFile::default();
+        crate::state::remove_file_if_exists(&self.path)
+    }
+
     /// Prunes, then writes the file atomically.
     pub fn save(&mut self, now_ms: u64) -> std::io::Result<()> {
         self.data.employees.retain(|_, counter| {
