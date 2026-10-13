@@ -17,6 +17,7 @@ export default defineConfig({
   },
   test: {
     environment: "jsdom",
+    setupFiles: ["./src/test/setup.ts"],
     // Step 1 has no tests yet; the plan still requires `pnpm test` to pass.
     passWithNoTests: true,
   },

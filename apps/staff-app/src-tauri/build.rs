@@ -8,8 +8,12 @@ const SHELL_COMMANDS: &[&str] = &[
     "ui_alive",
     "dismiss_notice",
     "dev_set_display",
+    "dev_set_boot",
     "popup_open",
     "popup_close",
+    "sign_in",
+    "sign_in_last",
+    "switch_user",
 ];
 
 /// Commands callable from `app-*` windows. A name may also appear in

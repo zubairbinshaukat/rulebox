@@ -11,7 +11,11 @@
     "allow-ui-alive",
     "allow-dismiss-notice",
     "allow-dev-set-display",
+    "allow-dev-set-boot",
     "allow-popup-open",
-    "allow-popup-close"
+    "allow-popup-close",
+    "allow-sign-in",
+    "allow-sign-in-last",
+    "allow-switch-user"
   ]
 }

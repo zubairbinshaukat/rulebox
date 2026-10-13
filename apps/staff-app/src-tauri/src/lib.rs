@@ -4,6 +4,7 @@ pub mod agent;
 pub mod commands;
 mod logging;
 pub mod model;
+pub mod session;
 pub mod shellwin;
 pub mod state;
 
@@ -81,15 +82,25 @@ pub fn run() {
             commands::ui_alive,
             commands::dismiss_notice,
             commands::dev_set_display,
+            commands::dev_set_boot,
             commands::popup_open,
             commands::popup_close,
+            commands::sign_in,
+            commands::sign_in_last,
+            commands::switch_user,
         ])
         .setup(move |app| {
             // `IpcClient::spawn` calls `tokio::spawn`; run inside Tauri's runtime.
             let agent = tauri::async_runtime::block_on(async { agent::select_agent() });
-            let app_state = AppState::new(agent, ShellState::initial(shell_mode_dto(mode)));
+            let mut initial = ShellState::initial(shell_mode_dto(mode));
+            if let Some(last) = session::load_last_user() {
+                initial.session = crate::model::SessionState::SignedOut { last: Some(last) };
+            }
+            let app_state = AppState::new(agent, initial);
             app_state.bind_app(app.handle().clone());
             spawn_agent_tasks(app_state.clone());
+            #[cfg(debug_assertions)]
+            commands::spawn_dev_cmd_poller(app_state.clone());
             app.manage(app_state);
 
             let host = shellwin::init(app.handle(), mode)?;

@@ -34,6 +34,11 @@ struct Inner {
     /// How many emits were actually flushed (tests assert coalescing).
     #[allow(dead_code)]
     emit_count: AtomicU64,
+    /// Employee files root from the last successful sign-in (SafeRoot is Step 12).
+    files_root: Mutex<Option<String>>,
+    /// Debug: when set, agent link updates do not overwrite a forced boot link.
+    #[cfg(debug_assertions)]
+    pub(crate) dev_hold_link: AtomicBool,
 }
 
 impl AppState {
@@ -49,8 +54,36 @@ impl AppState {
                 coalesce_pending: AtomicBool::new(false),
                 notice_seq: AtomicU32::new(1),
                 emit_count: AtomicU64::new(0),
+                files_root: Mutex::new(None),
+                #[cfg(debug_assertions)]
+                dev_hold_link: AtomicBool::new(false),
             }),
         }
+    }
+
+    pub fn set_files_root(&self, path: Option<String>) {
+        if let Ok(mut slot) = self.inner.files_root.lock() {
+            *slot = path;
+        }
+    }
+
+    #[cfg(debug_assertions)]
+    pub fn set_dev_hold_link(&self, hold: bool) {
+        self.inner.dev_hold_link.store(hold, Ordering::SeqCst);
+    }
+
+    #[cfg(debug_assertions)]
+    pub fn dev_hold_link(&self) -> bool {
+        self.inner.dev_hold_link.load(Ordering::SeqCst)
+    }
+
+    #[allow(dead_code)] // SafeRoot (Step 12) will read this.
+    pub fn files_root(&self) -> Option<String> {
+        self.inner
+            .files_root
+            .lock()
+            .ok()
+            .and_then(|slot| slot.clone())
     }
 
     pub fn bind_app(&self, app: AppHandle) {
@@ -270,6 +303,11 @@ async fn mirror_agent(state: AppState) {
 fn apply_link(state: &AppState, link: crate::model::AgentLink) {
     use crate::model::AgentLinkDto;
 
+    #[cfg(debug_assertions)]
+    if state.dev_hold_link() {
+        return;
+    }
+
     match link {
         AgentLinkDto::Disconnected | AgentLinkDto::Connecting | AgentLinkDto::VersionMismatch => {
             state.clear_ready_sent();
@@ -290,6 +328,11 @@ fn apply_link(state: &AppState, link: crate::model::AgentLink) {
 fn apply_snapshot(state: &AppState, snap: Option<rulebox_ipc::types::AgentSnapshot>) {
     use crate::model::{agent_summary_from_snapshot, AgentLinkDto};
     use rulebox_ipc::types::DisplayMode;
+
+    #[cfg(debug_assertions)]
+    if state.dev_hold_link() {
+        return;
+    }
 
     state.update(|s| {
         match snap {

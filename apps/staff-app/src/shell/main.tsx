@@ -7,9 +7,9 @@ import "@rulebox/ui/base.css";
 
 import { startShellStore, useShell } from "../lib/store";
 import { call, isTauri } from "../lib/tauri";
+import { DesktopRoot } from "./DesktopRoot";
 import { DevOverlay } from "./DevOverlay";
 import { PopupRoot } from "./popup/PopupRoot";
-import { StatusPanel } from "./StatusPanel";
 import { Taskbar } from "./taskbar/Taskbar";
 
 /** Which of the three shell windows this page is: `#/desktop|taskbar|popup`. */
@@ -52,7 +52,7 @@ export function ShellRoot() {
   }
   return (
     <>
-      <StatusPanel />
+      <DesktopRoot />
       <DevOverlay />
     </>
   );

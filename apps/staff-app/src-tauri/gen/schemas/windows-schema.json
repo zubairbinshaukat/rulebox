@@ -177,6 +177,12 @@
       "description": "Permission identifier",
       "oneOf": [
         {
+          "description": "Enables the dev_set_boot command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-dev-set-boot",
+          "markdownDescription": "Enables the dev_set_boot command without any pre-configured scope."
+        },
+        {
           "description": "Enables the dev_set_display command without any pre-configured scope.",
           "type": "string",
           "const": "allow-dev-set-display",
@@ -207,6 +213,24 @@
           "markdownDescription": "Enables the shell_state command without any pre-configured scope."
         },
         {
+          "description": "Enables the sign_in command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-sign-in",
+          "markdownDescription": "Enables the sign_in command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the sign_in_last command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-sign-in-last",
+          "markdownDescription": "Enables the sign_in_last command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the switch_user command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-switch-user",
+          "markdownDescription": "Enables the switch_user command without any pre-configured scope."
+        },
+        {
           "description": "Enables the ui_alive command without any pre-configured scope.",
           "type": "string",
           "const": "allow-ui-alive",
@@ -217,6 +241,12 @@
           "type": "string",
           "const": "allow-ui-ready",
           "markdownDescription": "Enables the ui_ready command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the dev_set_boot command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-dev-set-boot",
+          "markdownDescription": "Denies the dev_set_boot command without any pre-configured scope."
         },
         {
           "description": "Denies the dev_set_display command without any pre-configured scope.",
@@ -247,6 +277,24 @@
           "type": "string",
           "const": "deny-shell-state",
           "markdownDescription": "Denies the shell_state command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the sign_in command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-sign-in",
+          "markdownDescription": "Denies the sign_in command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the sign_in_last command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-sign-in-last",
+          "markdownDescription": "Denies the sign_in_last command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the switch_user command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-switch-user",
+          "markdownDescription": "Denies the switch_user command without any pre-configured scope."
         },
         {
           "description": "Denies the ui_alive command without any pre-configured scope.",

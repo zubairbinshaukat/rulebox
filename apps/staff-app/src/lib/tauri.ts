@@ -1,5 +1,11 @@
 import { invoke } from "@tauri-apps/api/core";
-import type { ShellState, ThemeDto } from "@rulebox/types";
+import type {
+  AgentLinkDto,
+  EnrollmentDto,
+  KioskPhaseDto,
+  ShellState,
+  ThemeDto,
+} from "@rulebox/types";
 
 /** What the shared popup window shows (Rust `shellwin::PopupKind`). */
 export type PopupKind =
@@ -18,17 +24,57 @@ export interface AnchorRect {
   height: number;
 }
 
+/**
+ * Externally-tagged serde shape of `SignInOutcome` (not in @rulebox/types yet —
+ * do not run gen:types without asking).
+ */
+export type SignInOutcomeDto =
+  | {
+      ok: {
+        employee: {
+          id: string;
+          username: string;
+          name: string;
+          role: string | null;
+          quotaBytes: number;
+        };
+        filesRoot: string;
+        offline: boolean;
+      };
+    }
+  | "wrongCredentials"
+  | "disabled"
+  | { lockedOut: { retryAfterMs: number } }
+  | "offlineNeverSignedIn"
+  | "offlineExpired"
+  | "unknown";
+
 type Commands = {
   shell_state: { args: Record<string, never>; result: ShellState };
   ui_ready: { args: Record<string, never>; result: void };
   ui_alive: { args: Record<string, never>; result: void };
   dismiss_notice: { args: { id: number }; result: void };
   dev_set_display: { args: { lite: boolean; theme: ThemeDto }; result: void };
+  dev_set_boot: {
+    args: {
+      link: AgentLinkDto | null;
+      enrollment: EnrollmentDto | null;
+      kioskPhase: KioskPhaseDto | null;
+      clockSuspect: boolean | null;
+    };
+    result: void;
+  };
   popup_open: {
     args: { kind: PopupKind; anchor: AnchorRect | null };
     result: void;
   };
   popup_close: { args: Record<string, never>; result: void };
+  sign_in: {
+    args: { username: string; password: string };
+    result: SignInOutcomeDto;
+  };
+  sign_in_last: { args: { password: string }; result: SignInOutcomeDto };
+  switch_user: { args: Record<string, never>; result: void };
 };
 
 export function call<K extends keyof Commands>(

@@ -6,7 +6,8 @@ use std::sync::Arc;
 use rulebox_desktop::placement::Rect;
 use tauri::{AppHandle, State, Window};
 
-use crate::model::{ShellState, ThemeDto};
+use crate::model::{ShellState, SignInOutcome, ThemeDto};
+use crate::session;
 use crate::shellwin::{AnchorRect, DesktopHost, PopupKind};
 use crate::state::AppState;
 
@@ -124,6 +125,42 @@ pub fn popup_close(
     Ok(())
 }
 
+fn require_shell_desktop(window: &Window) -> Result<(), CommandError> {
+    if window.label() == "shell-desktop" {
+        Ok(())
+    } else {
+        Err(CommandError::Forbidden)
+    }
+}
+
+#[tauri::command]
+pub async fn sign_in(
+    window: Window,
+    state: State<'_, AppState>,
+    username: String,
+    password: String,
+) -> Result<SignInOutcome, CommandError> {
+    require_shell_desktop(&window)?;
+    session::sign_in(&state, username, password).await
+}
+
+#[tauri::command]
+pub async fn sign_in_last(
+    window: Window,
+    state: State<'_, AppState>,
+    password: String,
+) -> Result<SignInOutcome, CommandError> {
+    require_shell_desktop(&window)?;
+    session::sign_in_last(&state, password).await
+}
+
+#[tauri::command]
+pub fn switch_user(window: Window, state: State<'_, AppState>) -> Result<(), CommandError> {
+    require_shell_desktop(&window)?;
+    session::switch_user(&state);
+    Ok(())
+}
+
 /// Debug overlay only. Release builds keep the ACL entry but always refuse.
 #[tauri::command]
 pub fn dev_set_display(
@@ -146,4 +183,145 @@ pub fn dev_set_display(
         let _ = (state, lite, theme);
         Err(CommandError::Forbidden)
     }
+}
+
+/// Apply a debug boot/display patch (also used by the temp-file poller).
+#[cfg(debug_assertions)]
+pub fn apply_dev_boot(
+    state: &AppState,
+    link: Option<crate::model::AgentLinkDto>,
+    enrollment: Option<crate::model::EnrollmentDto>,
+    kiosk_phase: Option<crate::model::KioskPhaseDto>,
+    clock_suspect: Option<bool>,
+    lite: Option<bool>,
+    theme: Option<ThemeDto>,
+) {
+    if link.is_some() || enrollment.is_some() || kiosk_phase.is_some() {
+        state.set_dev_hold_link(true);
+    }
+    // Clearing hold when explicitly resetting to linked + enrolled + applied.
+    if matches!(link, Some(crate::model::AgentLinkDto::Linked))
+        && matches!(enrollment, Some(crate::model::EnrollmentDto::Enrolled))
+        && matches!(kiosk_phase, Some(crate::model::KioskPhaseDto::Applied))
+    {
+        state.set_dev_hold_link(false);
+    }
+
+    state.update(|s| {
+        if let Some(link) = link {
+            s.link = link;
+        }
+        if let Some(lite) = lite {
+            s.display.lite = lite;
+        }
+        if let Some(theme) = theme {
+            s.display.theme = theme;
+        }
+        if s.agent.is_none() {
+            s.agent = Some(crate::model::AgentSummary {
+                enrollment: crate::model::EnrollmentDto::Enrolled,
+                connection: crate::model::ConnectionDto::Online,
+                kiosk_phase: crate::model::KioskPhaseDto::Applied,
+                clock_suspect: false,
+                org_name: Some("Demo Org".into()),
+            });
+        }
+        if let Some(agent) = s.agent.as_mut() {
+            if let Some(enrollment) = enrollment {
+                agent.enrollment = enrollment;
+            }
+            if let Some(kiosk_phase) = kiosk_phase {
+                agent.kiosk_phase = kiosk_phase;
+            }
+            if let Some(clock_suspect) = clock_suspect {
+                agent.clock_suspect = clock_suspect;
+            }
+        }
+    });
+}
+
+/// Debug: force link / enrollment for boot-state screenshots. Release: Forbidden.
+#[tauri::command]
+pub fn dev_set_boot(
+    window: Window,
+    state: State<'_, AppState>,
+    link: Option<crate::model::AgentLinkDto>,
+    enrollment: Option<crate::model::EnrollmentDto>,
+    kiosk_phase: Option<crate::model::KioskPhaseDto>,
+    clock_suspect: Option<bool>,
+) -> Result<(), CommandError> {
+    require_label(&window, "shell-")?;
+    #[cfg(debug_assertions)]
+    {
+        apply_dev_boot(
+            &state,
+            link,
+            enrollment,
+            kiosk_phase,
+            clock_suspect,
+            None,
+            None,
+        );
+        Ok(())
+    }
+    #[cfg(not(debug_assertions))]
+    {
+        let _ = (state, link, enrollment, kiosk_phase, clock_suspect);
+        Err(CommandError::Forbidden)
+    }
+}
+
+/// Poll `%TEMP%\rulebox-staff-dev-cmd.json` for screenshot automation (debug only).
+#[cfg(debug_assertions)]
+pub fn spawn_dev_cmd_poller(state: AppState) {
+    use std::time::Duration;
+
+    use serde::Deserialize;
+
+    #[derive(Debug, Deserialize)]
+    #[serde(rename_all = "camelCase")]
+    struct DevCmd {
+        id: i64,
+        #[serde(default)]
+        link: Option<crate::model::AgentLinkDto>,
+        #[serde(default)]
+        enrollment: Option<crate::model::EnrollmentDto>,
+        #[serde(default)]
+        kiosk_phase: Option<crate::model::KioskPhaseDto>,
+        #[serde(default)]
+        clock_suspect: Option<bool>,
+        #[serde(default)]
+        lite: Option<bool>,
+        #[serde(default)]
+        theme: Option<ThemeDto>,
+    }
+
+    tauri::async_runtime::spawn(async move {
+        let path = std::env::temp_dir().join("rulebox-staff-dev-cmd.json");
+        let mut last_id = -1_i64;
+        tracing::info!(path = %path.display(), "dev cmd poller watching");
+        loop {
+            tokio::time::sleep(Duration::from_millis(300)).await;
+            let Ok(bytes) = std::fs::read(&path) else {
+                continue;
+            };
+            let Ok(cmd) = serde_json::from_slice::<DevCmd>(&bytes) else {
+                continue;
+            };
+            if cmd.id == last_id {
+                continue;
+            }
+            last_id = cmd.id;
+            tracing::info!(id = cmd.id, "dev cmd applied");
+            apply_dev_boot(
+                &state,
+                cmd.link,
+                cmd.enrollment,
+                cmd.kiosk_phase,
+                cmd.clock_suspect,
+                cmd.lite,
+                cmd.theme,
+            );
+        }
+    });
 }

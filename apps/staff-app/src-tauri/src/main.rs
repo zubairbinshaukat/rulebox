@@ -292,4 +292,48 @@ mod step3_tests {
         );
         assert!(count >= 1, "expected at least one emit");
     }
+
+    #[test]
+    fn sign_in_outcomes_map_to_session() {
+        use rulebox_staff_lib::model::Employee;
+        use rulebox_staff_lib::session::session_after_outcome;
+
+        let last = Some(EmployeeBrief {
+            username: "maya".into(),
+            name: "Maya Chen".into(),
+        });
+        let emp = Employee {
+            id: "emp_maya".into(),
+            username: "maya".into(),
+            name: "Maya Chen".into(),
+            role: None,
+            quota_bytes: 1,
+        };
+        let ok = SignInOutcome::Ok {
+            employee: emp,
+            files_root: r"C:\tmp".into(),
+            offline: true,
+        };
+        assert!(matches!(
+            session_after_outcome(last.clone(), &ok),
+            SessionState::SignedIn { offline: true, .. }
+        ));
+        for outcome in [
+            SignInOutcome::WrongCredentials,
+            SignInOutcome::Disabled,
+            SignInOutcome::LockedOut {
+                retry_after_ms: 30_000,
+            },
+            SignInOutcome::OfflineNeverSignedIn,
+            SignInOutcome::OfflineExpired,
+            SignInOutcome::Unknown,
+        ] {
+            match session_after_outcome(last.clone(), &outcome) {
+                SessionState::SignedOut {
+                    last: Some(ref brief),
+                } => assert_eq!(brief.username, "maya"),
+                other => panic!("unexpected {other:?} for {outcome:?}"),
+            }
+        }
+    }
 }
