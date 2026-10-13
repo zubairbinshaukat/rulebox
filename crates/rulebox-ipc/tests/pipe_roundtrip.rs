@@ -8,14 +8,14 @@
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::time::Duration;
 
-use rulebox_ipc::client::{CallError, ClientConfig, ClientEvent, IpcClient};
+use rulebox_ipc::client::{call_once, CallError, ClientConfig, ClientEvent, IpcClient};
 use rulebox_ipc::codec::TransportError;
 use rulebox_ipc::envelope::Frame;
 use rulebox_ipc::methods::{Empty, Hello, Method, ShellReady, StateGet};
 use rulebox_ipc::server::{Connection, PipeListener};
 use rulebox_ipc::types::*;
 use rulebox_ipc::{CAPABILITIES, PROTOCOL_MAJOR, PROTOCOL_MINOR};
-use rulebox_win32::pipe::{open_client_with_access, sim_pipe_sddl};
+use rulebox_win32::pipe::{open_client_with_access, probe_create_instance, sim_pipe_sddl};
 use rulebox_win32::sid::{current_user_sid, Sid};
 use rulebox_win32::Win32Error;
 use serde_json::json;
@@ -33,7 +33,13 @@ fn info() -> ClientInfo {
 }
 
 fn config(name: &str, owner: &Sid) -> ClientConfig {
-    ClientConfig { pipe_name: name.into(), trusted_owner: owner.clone(), request_timeout: Duration::from_secs(5) }
+    ClientConfig {
+        pipe_name: name.into(),
+        trusted_owner: owner.clone(),
+        request_timeout: Duration::from_secs(5),
+        // The test server runs in the current user's session, not session 0.
+        require_session_zero: false,
+    }
 }
 
 fn snapshot() -> AgentSnapshot {
@@ -50,6 +56,9 @@ fn snapshot() -> AgentSnapshot {
         desired_state_version: 0,
         server_time_offset_ms: None,
         clock_suspect: false,
+        admin_exit: None,
+        power: None,
+        org_name: None,
     }
 }
 
@@ -192,4 +201,123 @@ async fn dropping_the_server_fails_a_pending_call_with_not_linked() {
     let outcome = timeout(Duration::from_secs(10), pending).await.unwrap().unwrap();
     assert!(matches!(outcome, Err(CallError::NotLinked)), "{outcome:?}");
     assert!(matches!(next_event(&mut events).await, ClientEvent::Unlinked));
+}
+
+#[tokio::test]
+async fn call_once_returns_the_result() {
+    use rulebox_ipc::methods::AdminExitSubmit;
+    use rulebox_ipc::requests::{AdminExitOutcome, AdminExitSubmitParams};
+
+    let me = current_user_sid().unwrap();
+    let name = unique_name();
+    let mut listener = PipeListener::bind(&name, &sim_pipe_sddl(&me)).unwrap();
+    let cfg = config(&name, &me);
+    let call = tokio::task::spawn_blocking(move || {
+        call_once::<AdminExitSubmit>(cfg, info(), AdminExitSubmitParams { pin: "2468".into() })
+    });
+
+    let mut conn = listener.accept().await.unwrap();
+    serve_hello(&mut conn).await;
+    let Some(Frame::Request { id, method, params }) = conn.read_frame().await.unwrap() else {
+        panic!("expected a request");
+    };
+    assert_eq!(method, AdminExitSubmit::NAME);
+    assert_eq!(params, json!({ "pin": "2468" }));
+    conn.write_frame(response(id, json!({ "outcome": "wrongPin", "attemptsLeft": 3, "retryAfterMs": null })))
+        .await
+        .unwrap();
+
+    let result = call.await.unwrap().unwrap();
+    assert_eq!(result.outcome, AdminExitOutcome::WrongPin);
+    assert_eq!(result.attempts_left, Some(3));
+}
+
+#[tokio::test]
+async fn call_once_turns_an_error_response_into_rpc() {
+    let me = current_user_sid().unwrap();
+    let name = unique_name();
+    let mut listener = PipeListener::bind(&name, &sim_pipe_sddl(&me)).unwrap();
+    let cfg = config(&name, &me);
+    let call = tokio::task::spawn_blocking(move || call_once::<StateGet>(cfg, info(), Empty {}));
+
+    let mut conn = listener.accept().await.unwrap();
+    serve_hello(&mut conn).await;
+    let Some(Frame::Request { id, .. }) = conn.read_frame().await.unwrap() else {
+        panic!("expected a request");
+    };
+    let error = rulebox_ipc::RpcError {
+        code: rulebox_ipc::ErrorCode::NotEnrolled,
+        message: "not enrolled".into(),
+        retryable: false,
+        data: None,
+    };
+    conn.write_frame(Frame::Response { id, ok: false, result: None, error: Some(error) }).await.unwrap();
+
+    match call.await.unwrap() {
+        Err(CallError::Rpc(e)) => assert_eq!(e.code, rulebox_ipc::ErrorCode::NotEnrolled),
+        other => panic!("unexpected {other:?}"),
+    }
+}
+
+#[tokio::test]
+async fn call_once_on_a_missing_pipe_is_not_linked_quickly() {
+    let me = current_user_sid().unwrap();
+    let cfg = config(&unique_name(), &me);
+    let started = std::time::Instant::now();
+    let outcome = tokio::task::spawn_blocking(move || call_once::<StateGet>(cfg, info(), Empty {}))
+        .await
+        .unwrap();
+    assert!(matches!(outcome, Err(CallError::NotLinked)), "{outcome:?}");
+    assert!(started.elapsed() < Duration::from_secs(6), "took {:?}", started.elapsed());
+}
+
+#[tokio::test]
+async fn call_once_requiring_session_zero_refuses_a_server_in_another_session() {
+    let me = current_user_sid().unwrap();
+    let name = unique_name();
+    let _listener = PipeListener::bind(&name, &sim_pipe_sddl(&me)).unwrap();
+    // The server is this test process: owned by the current user, in the
+    // interactive session, so only the session check can refuse it.
+    let mut cfg = config(&name, &me);
+    cfg.require_session_zero = true;
+    let outcome = tokio::task::spawn_blocking(move || call_once::<StateGet>(cfg, info(), Empty {}))
+        .await
+        .unwrap();
+    assert!(matches!(outcome, Err(CallError::ServerNotTrusted)), "{outcome:?}");
+}
+
+#[tokio::test]
+async fn client_links_to_an_agent_that_says_minor_zero() {
+    let me = current_user_sid().unwrap();
+    let name = unique_name();
+    let mut listener = PipeListener::bind(&name, &sim_pipe_sddl(&me)).unwrap();
+    let (_client, mut events) = IpcClient::spawn_with(info(), config(&name, &me));
+
+    let mut conn = listener.accept().await.unwrap();
+    let Some(Frame::Request { id, .. }) = conn.read_frame().await.unwrap() else {
+        panic!("expected a request");
+    };
+    conn.verify_peer().unwrap();
+    let result = HelloResult {
+        protocol: ProtocolVersion { major: PROTOCOL_MAJOR, minor: 0 },
+        agent_version: "0.0.0".into(),
+        capabilities: vec!["state".into(), "health".into()],
+    };
+    conn.write_frame(response(id, serde_json::to_value(result).unwrap())).await.unwrap();
+    match next_event(&mut events).await {
+        ClientEvent::Linked(hello) => assert_eq!(hello.protocol.minor, 0),
+        other => panic!("unexpected event {other:?}"),
+    }
+}
+
+#[tokio::test]
+async fn probe_create_instance_runs_against_an_existing_pipe() {
+    let me = current_user_sid().unwrap();
+    let name = unique_name();
+    let _listener = PipeListener::bind(&name, &sim_pipe_sddl(&me)).unwrap();
+    // The test server grants the current user everything, so this only proves
+    // that the function runs; the real check is the VM's "IPC security" probe.
+    let outcome = probe_create_instance(&name).unwrap();
+    eprintln!("probe_create_instance on the test pipe: {outcome:?}");
+    assert!(matches!(outcome, None | Some(_)));
 }

@@ -3,6 +3,10 @@
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 
+use crate::requests::{
+    AdminExitSubmitParams, AdminExitSubmitResult, AppsListResult, SessionGetResult, SignInParams,
+    SignInResult, VerifyPasswordParams, VerifyPasswordResult,
+};
 use crate::types::{AgentSnapshot, HelloParams, HelloResult};
 
 pub trait Method {
@@ -53,6 +57,54 @@ impl Method for ShellHeartbeat {
     type Result = Empty;
 }
 
+/// (1.1, capability `session`) Employee sign-in.
+pub struct SessionSignIn;
+impl Method for SessionSignIn {
+    const NAME: &'static str = "session.signIn";
+    type Params = SignInParams;
+    type Result = SignInResult;
+}
+
+/// (1.1, capability `session`) Ends the employee's Rulebox session.
+pub struct SessionSignOut;
+impl Method for SessionSignOut {
+    const NAME: &'static str = "session.signOut";
+    type Params = Empty;
+    type Result = Empty;
+}
+
+/// (1.1, capability `session`) Who is signed in.
+pub struct SessionGet;
+impl Method for SessionGet {
+    const NAME: &'static str = "session.get";
+    type Params = Empty;
+    type Result = SessionGetResult;
+}
+
+/// (1.1, capability `session`) Re-checks the signed-in employee's password.
+pub struct SessionVerifyPassword;
+impl Method for SessionVerifyPassword {
+    const NAME: &'static str = "session.verifyPassword";
+    type Params = VerifyPasswordParams;
+    type Result = VerifyPasswordResult;
+}
+
+/// (1.1, capability `apps`) The signed-in employee's app catalogue.
+pub struct AppsList;
+impl Method for AppsList {
+    const NAME: &'static str = "apps.list";
+    type Params = Empty;
+    type Result = AppsListResult;
+}
+
+/// (1.1, capability `adminExit`) Submits the hidden-exit PIN.
+pub struct AdminExitSubmit;
+impl Method for AdminExitSubmit {
+    const NAME: &'static str = "adminExit.submit";
+    type Params = AdminExitSubmitParams;
+    type Result = AdminExitSubmitResult;
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -69,5 +121,11 @@ mod tests {
         assert_eq!(StateGet::NAME, "state.get");
         assert_eq!(ShellReady::NAME, "shell.ready");
         assert_eq!(ShellHeartbeat::NAME, "shell.heartbeat");
+        assert_eq!(SessionSignIn::NAME, "session.signIn");
+        assert_eq!(SessionSignOut::NAME, "session.signOut");
+        assert_eq!(SessionGet::NAME, "session.get");
+        assert_eq!(SessionVerifyPassword::NAME, "session.verifyPassword");
+        assert_eq!(AppsList::NAME, "apps.list");
+        assert_eq!(AdminExitSubmit::NAME, "adminExit.submit");
     }
 }

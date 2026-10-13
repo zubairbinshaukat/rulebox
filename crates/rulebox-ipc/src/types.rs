@@ -1,29 +1,14 @@
 //! Types that cross the shell pipe (plan Section 6.6). TypeScript is generated
 //! with ts-rs into `packages/types/src/generated/` (run `pnpm gen:types`).
 //!
-//! Every enum has an `Unknown` variant (`#[serde(other)]`) so a newer agent can
-//! add values without breaking an older client (plan Section 6.5).
+//! Every enum has an `Unknown` variant, filled by the `unknown_on_new_values!`
+//! macro (see `lib.rs`), so a newer agent can add values without breaking an
+//! older client (plan Section 6.5).
 
 use rulebox_policy::DesiredState;
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
-/// Deserializes an enum from a string; any value not listed becomes `Unknown`.
-/// Written by hand because ts-rs cannot parse `#[serde(other)]` (it warns on
-/// every build); the wire format is the same.
-macro_rules! unknown_on_new_values {
-    ($ty:ident { $($variant:ident => $text:literal),+ $(,)? }) => {
-        impl<'de> Deserialize<'de> for $ty {
-            fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
-                let text = String::deserialize(d)?;
-                Ok(match text.as_str() {
-                    $($text => Self::$variant,)+
-                    _ => Self::Unknown,
-                })
-            }
-        }
-    };
-}
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
 #[serde(rename_all = "camelCase")]
 #[ts(export)]
@@ -54,6 +39,10 @@ pub struct ClientInfo {
 #[ts(export)]
 pub enum ClientRole {
     Shell,
+    /// (1.1) `rulebox-shell.exe`, the launcher.
+    Launcher,
+    /// (1.1) The agent CLI on the admin pipe.
+    Admin,
     Unknown,
 }
 
@@ -163,6 +152,38 @@ pub struct AgentSnapshot {
     #[ts(type = "number | null")]
     pub server_time_offset_ms: Option<i64>,
     pub clock_suspect: bool,
+    /// (1.1) The hidden admin exit. A 1.1 agent always sends it; null (or
+    /// missing) from a 1.0 agent.
+    #[serde(default)]
+    pub admin_exit: Option<AdminExitInfo>,
+    /// (1.1) Power buttons the employee may use. Null means all three.
+    #[serde(default)]
+    pub power: Option<PowerOptions>,
+    /// (1.1) Organization name. Null means use `desiredState.branding.name`.
+    #[serde(default)]
+    pub org_name: Option<String>,
+}
+
+/// (1.1) Whether the hidden admin exit is available and its key combination.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub struct AdminExitInfo {
+    /// True only when the exit is not disabled by the organization and a valid
+    /// PIN is set.
+    pub enabled: bool,
+    /// Canonical key-combination text (see `hotkey`), for example `Ctrl+Shift+F12`.
+    pub hotkey: String,
+}
+
+/// (1.1) Which power actions the employee is offered.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub struct PowerOptions {
+    pub sleep: bool,
+    pub restart: bool,
+    pub shut_down: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, TS)]
@@ -171,6 +192,8 @@ pub struct AgentSnapshot {
 pub enum ShutdownReason {
     Stop,
     KioskDisabled,
+    /// (1.1) A correct admin-exit PIN; the Staff session is signed out after the grace.
+    AdminExit,
     Unknown,
 }
 
@@ -184,7 +207,11 @@ pub struct ShuttingDownData {
     pub grace_ms: u64,
 }
 
-unknown_on_new_values!(ClientRole { Shell => "shell" });
+unknown_on_new_values!(ClientRole {
+    Shell => "shell",
+    Launcher => "launcher",
+    Admin => "admin",
+});
 unknown_on_new_values!(EnrollmentStatus {
     NotEnrolled => "notEnrolled",
     Enrolled => "enrolled",
@@ -209,7 +236,12 @@ unknown_on_new_values!(ShellHealth {
     Failed => "failed",
 });
 unknown_on_new_values!(DisplayMode { Standard => "standard", Lite => "lite" });
-unknown_on_new_values!(ShutdownReason { Stop => "stop", KioskDisabled => "kioskDisabled" });
+unknown_on_new_values!(ShutdownReason {
+    Stop => "stop",
+    KioskDisabled => "kioskDisabled",
+    AdminExit => "adminExit",
+});
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -234,6 +266,9 @@ mod tests {
             desired_state_version: 42,
             server_time_offset_ms: Some(-1500),
             clock_suspect: true,
+            admin_exit: Some(AdminExitInfo { enabled: true, hotkey: "Ctrl+Shift+F12".into() }),
+            power: Some(PowerOptions { sleep: true, restart: false, shut_down: true }),
+            org_name: Some("Demo Company".into()),
         }
     }
 
@@ -260,7 +295,10 @@ mod tests {
             },
             "desiredStateVersion": 42,
             "serverTimeOffsetMs": -1500,
-            "clockSuspect": true
+            "clockSuspect": true,
+            "adminExit": { "enabled": true, "hotkey": "Ctrl+Shift+F12" },
+            "power": { "sleep": true, "restart": false, "shutDown": true },
+            "orgName": "Demo Company"
         });
         let snapshot = full_snapshot();
         assert_eq!(serde_json::to_value(&snapshot).unwrap(), expected);
@@ -282,13 +320,35 @@ mod tests {
             desired_state_version: 0,
             server_time_offset_ms: None,
             clock_suspect: false,
+            admin_exit: None,
+            power: None,
+            org_name: None,
         };
         let value = serde_json::to_value(&snapshot).unwrap();
         assert_eq!(value["device"], json!(null));
         assert_eq!(value["desiredState"], json!(null));
         assert_eq!(value["serverTimeOffsetMs"], json!(null));
         assert_eq!(value["kiosk"]["errorCode"], json!(null));
+        // The 1.1 fields are present and null, never omitted.
+        assert_eq!(value["adminExit"], json!(null));
+        assert_eq!(value["power"], json!(null));
+        assert_eq!(value["orgName"], json!(null));
         assert_eq!(serde_json::from_value::<AgentSnapshot>(value).unwrap(), snapshot);
+    }
+
+    /// A 1.0 agent does not send the three 1.1 keys; a 1.1 client reads `None`.
+    #[test]
+    fn snapshot_from_a_1_0_agent_parses() {
+        let mut value = serde_json::to_value(full_snapshot()).unwrap();
+        let object = value.as_object_mut().unwrap();
+        for key in ["adminExit", "power", "orgName"] {
+            assert!(object.remove(key).is_some());
+        }
+        let parsed = serde_json::from_value::<AgentSnapshot>(value).unwrap();
+        assert_eq!(parsed.admin_exit, None);
+        assert_eq!(parsed.power, None);
+        assert_eq!(parsed.org_name, None);
+        assert_eq!(parsed.desired_state_version, 42);
     }
 
     #[test]
@@ -311,6 +371,9 @@ mod tests {
         assert_eq!(serde_json::from_str::<ShutdownReason>(&from("crash")).unwrap(), ShutdownReason::Unknown);
         // Known values still map normally.
         assert_eq!(serde_json::from_str::<ClientRole>(&from("shell")).unwrap(), ClientRole::Shell);
+        assert_eq!(serde_json::from_str::<ClientRole>(&from("launcher")).unwrap(), ClientRole::Launcher);
+        assert_eq!(serde_json::from_str::<ClientRole>(&from("admin")).unwrap(), ClientRole::Admin);
+        assert_eq!(serde_json::from_str::<ShutdownReason>(&from("adminExit")).unwrap(), ShutdownReason::AdminExit);
         assert_eq!(serde_json::from_str::<EnrollmentStatus>(&from("notEnrolled")).unwrap(), EnrollmentStatus::NotEnrolled);
     }
 
@@ -323,13 +386,30 @@ mod tests {
             }
         }
         use {ConnectionStatus as C, DisplayMode as D, EnrollmentStatus as E, KioskPhase as K, ShellHealth as H};
-        check(&[ClientRole::Shell, ClientRole::Unknown]);
+        check(&[ClientRole::Shell, ClientRole::Launcher, ClientRole::Admin, ClientRole::Unknown]);
         check(&[E::NotEnrolled, E::Enrolled, E::Revoked, E::Unknown]);
         check(&[C::Offline, C::Connecting, C::Online, C::Unknown]);
         check(&[K::NotApplied, K::Applying, K::Applied, K::Failed, K::Unknown]);
         check(&[H::NotRunning, H::Starting, H::Healthy, H::Unhealthy, H::Failed, H::Unknown]);
         check(&[D::Standard, D::Lite, D::Unknown]);
-        check(&[ShutdownReason::Stop, ShutdownReason::KioskDisabled, ShutdownReason::Unknown]);
+        check(&[
+            ShutdownReason::Stop,
+            ShutdownReason::KioskDisabled,
+            ShutdownReason::AdminExit,
+            ShutdownReason::Unknown,
+        ]);
+    }
+
+    #[test]
+    fn new_enum_values_use_the_camel_case_strings() {
+        assert_eq!(serde_json::to_string(&ClientRole::Launcher).unwrap(), r#""launcher""#);
+        assert_eq!(serde_json::to_string(&ClientRole::Admin).unwrap(), r#""admin""#);
+        assert_eq!(serde_json::to_string(&ShutdownReason::AdminExit).unwrap(), r#""adminExit""#);
+        let event = ShuttingDownData { reason: ShutdownReason::AdminExit, grace_ms: 2000 };
+        assert_eq!(
+            serde_json::to_value(&event).unwrap(),
+            json!({ "reason": "adminExit", "graceMs": 2000 })
+        );
     }
     #[test]
     fn hello_and_shutdown_wire_format() {

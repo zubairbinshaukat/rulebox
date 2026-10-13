@@ -11,7 +11,8 @@ use tokio::net::windows::named_pipe::{
 };
 use windows::core::{PCWSTR, PWSTR};
 use windows::Win32::Foundation::{
-    ERROR_FILE_NOT_FOUND, ERROR_PATH_NOT_FOUND, ERROR_PIPE_BUSY, HANDLE,
+    GetLastError, ERROR_FILE_NOT_FOUND, ERROR_PATH_NOT_FOUND, ERROR_PIPE_BUSY, HANDLE,
+    INVALID_HANDLE_VALUE,
 };
 use windows::Win32::Security::Authorization::{GetSecurityInfo, SE_KERNEL_OBJECT};
 use windows::Win32::Security::{
@@ -22,10 +23,12 @@ use windows::Win32::Security::{
 use windows::Win32::Storage::FileSystem::{
     CreateFileW, FILE_FLAGS_AND_ATTRIBUTES, FILE_FLAG_OVERLAPPED, FILE_GENERIC_READ,
     FILE_SHARE_MODE, FILE_WRITE_ATTRIBUTES, FILE_WRITE_DATA, FILE_WRITE_EA, OPEN_EXISTING,
-    SECURITY_IDENTIFICATION, SECURITY_SQOS_PRESENT,
+    PIPE_ACCESS_DUPLEX, SECURITY_IDENTIFICATION, SECURITY_SQOS_PRESENT,
 };
 use windows::Win32::System::Pipes::{
-    GetNamedPipeClientProcessId, GetNamedPipeClientSessionId, ImpersonateNamedPipeClient,
+    CreateNamedPipeW, GetNamedPipeClientProcessId, GetNamedPipeClientSessionId,
+    GetNamedPipeServerSessionId, ImpersonateNamedPipeClient, PIPE_READMODE_BYTE,
+    PIPE_REJECT_REMOTE_CLIENTS, PIPE_TYPE_BYTE, PIPE_WAIT,
 };
 use windows::Win32::System::Threading::{
     GetCurrentThread, OpenProcess, OpenThreadToken, QueryFullProcessImageNameW,
@@ -231,6 +234,48 @@ pub fn create_server_instance(
     // SAFETY: `attrs.as_ptr()` points to a valid SECURITY_ATTRIBUTES (with a valid
     // descriptor) that outlives this call; the kernel copies the descriptor.
     unsafe { options.create_with_security_attributes_raw(name, attrs.as_ptr()) }
+}
+
+/// The session id of the process that serves the pipe behind a **client** handle
+/// (`GetNamedPipeServerSessionId`). The client uses it to insist on session 0, i.e.
+/// a service (plan Section 6.2, client check 3).
+pub fn server_session_id(pipe: RawHandle) -> Result<u32> {
+    let mut session_id = 0u32;
+    // SAFETY: the caller passes a valid pipe client handle; `session_id` is a valid out pointer.
+    unsafe { GetNamedPipeServerSessionId(HANDLE(pipe), &mut session_id) }
+        .map_err(|e| api_err("GetNamedPipeServerSessionId", &e))?;
+    Ok(session_id)
+}
+
+/// Tries to create one more instance of an **existing** pipe name, the way a
+/// process that is not the service would: same mode as `create_server_instance`,
+/// no security attributes and no first-instance flag. The handle is closed at
+/// once. Returns `None` if the call **succeeded** (the caller could take over the
+/// name) and `Some(win32 error)` if it failed (for example 5, access denied, or
+/// 231, no free instance). Not destructive, so not guarded.
+pub fn probe_create_instance(name: &str) -> Result<Option<u32>> {
+    let wide = to_wide(name);
+    // SAFETY: `wide` is NUL-terminated and outlives the call; null security
+    // attributes are allowed; the returned handle is checked and then owned.
+    let handle = unsafe {
+        CreateNamedPipeW(
+            PCWSTR(wide.as_ptr()),
+            PIPE_ACCESS_DUPLEX | FILE_FLAG_OVERLAPPED,
+            PIPE_TYPE_BYTE | PIPE_READMODE_BYTE | PIPE_WAIT | PIPE_REJECT_REMOTE_CLIENTS,
+            PIPE_MAX_INSTANCES as u32,
+            PIPE_BUFFER_SIZE,
+            PIPE_BUFFER_SIZE,
+            0,
+            None,
+        )
+    };
+    if handle.is_invalid() || handle == INVALID_HANDLE_VALUE {
+        // SAFETY: reads the calling thread's last error; nothing ran in between.
+        let code = unsafe { GetLastError() }.0;
+        return Ok(Some(code));
+    }
+    drop(OwnedHandle::new(handle)?);
+    Ok(None)
 }
 
 /// Wraps a handle from `open_client` for async use. Must run inside a tokio runtime.

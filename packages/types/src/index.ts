@@ -1,6 +1,7 @@
 export * from "./generated/DesiredState";
 export * from "./generated/StorageConfig";
 export * from "./generated/Branding";
+export * from "./generated/AdminExitInfo";
 export * from "./generated/AgentSnapshot";
 export * from "./generated/ClientInfo";
 export * from "./generated/ClientRole";
@@ -12,6 +13,7 @@ export * from "./generated/HelloParams";
 export * from "./generated/HelloResult";
 export * from "./generated/KioskPhase";
 export * from "./generated/KioskStatus";
+export * from "./generated/PowerOptions";
 export * from "./generated/ProtocolVersion";
 export * from "./generated/ShellHealth";
 export * from "./generated/ShellStatus";

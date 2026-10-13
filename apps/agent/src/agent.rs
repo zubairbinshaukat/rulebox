@@ -94,6 +94,10 @@ pub fn initial_snapshot(
         desired_state_version: state.last_applied_version,
         server_time_offset_ms: None,
         clock_suspect: false,
+        // Protocol 1.1 fields; Step 6b fills `admin_exit`, Phase 4 the other two.
+        admin_exit: None,
+        power: None,
+        org_name: None,
     }
 }
 

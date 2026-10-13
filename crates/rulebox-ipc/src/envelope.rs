@@ -55,6 +55,11 @@ pub enum ErrorCode {
     Busy,
     Timeout,
     FrameTooLarge,
+    /// (1.1) The method needs a signed-in employee.
+    NotSignedIn,
+    /// (1.1) The method ran and failed for a reason of its own; `data` is
+    /// `{ "reason": string, "details": object | null }` (see `admin::OperationFailure`).
+    OperationFailed,
     #[serde(other)]
     Internal,
 }
@@ -132,5 +137,16 @@ mod tests {
         let known: ErrorCode = serde_json::from_str(r#""frame_too_large""#).unwrap();
         assert_eq!(known, ErrorCode::FrameTooLarge);
         assert_eq!(serde_json::to_string(&ErrorCode::HelloRequired).unwrap(), r#""hello_required""#);
+    }
+
+    #[test]
+    fn protocol_1_1_error_codes_round_trip() {
+        for (code, text) in [
+            (ErrorCode::NotSignedIn, r#""not_signed_in""#),
+            (ErrorCode::OperationFailed, r#""operation_failed""#),
+        ] {
+            assert_eq!(serde_json::to_string(&code).unwrap(), text);
+            assert_eq!(serde_json::from_str::<ErrorCode>(text).unwrap(), code);
+        }
     }
 }

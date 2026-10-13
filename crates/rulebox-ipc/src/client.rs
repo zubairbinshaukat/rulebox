@@ -13,7 +13,7 @@ use tokio::sync::{mpsc, oneshot, watch};
 use tokio::time::{sleep, timeout, Instant};
 use tokio_util::codec::Framed;
 
-use rulebox_win32::pipe::{client_from_handle, open_client, pipe_owner};
+use rulebox_win32::pipe::{client_from_handle, open_client, pipe_owner, server_session_id};
 use rulebox_win32::sid::{current_user_sid, Sid};
 use rulebox_win32::Win32Error;
 
@@ -24,7 +24,7 @@ use crate::types::{
     AgentSnapshot, ClientInfo, HelloParams, HelloResult, ProtocolVersion, ShutdownReason,
     ShuttingDownData,
 };
-use crate::{PROTOCOL_MAJOR, PROTOCOL_MINOR, SHELL_PIPE, SIM_SUFFIX};
+use crate::{ADMIN_PIPE, PROTOCOL_MAJOR, PROTOCOL_MINOR, SHELL_PIPE, SIM_SUFFIX};
 
 /// Default time a `call` waits for its response.
 pub const REQUEST_TIMEOUT: Duration = Duration::from_secs(10);
@@ -71,6 +71,10 @@ pub struct ClientConfig {
     /// The account that must own the pipe.
     pub trusted_owner: Sid,
     pub request_timeout: Duration,
+    /// (1.1) The server must run in session 0, i.e. be a service (plan Section
+    /// 6.2, client check 3). Off only for the `.sim` pipe and for tests, whose
+    /// server runs in the current user's session.
+    pub require_session_zero: bool,
 }
 
 impl ClientConfig {
@@ -83,14 +87,42 @@ impl ClientConfig {
                 pipe_name: format!("{SHELL_PIPE}{SIM_SUFFIX}"),
                 trusted_owner: current_user_sid().unwrap_or_else(|_| Sid::system()),
                 request_timeout: REQUEST_TIMEOUT,
+                require_session_zero: false,
             }
         } else {
             Self {
                 pipe_name: SHELL_PIPE.to_string(),
                 trusted_owner: Sid::system(),
                 request_timeout: REQUEST_TIMEOUT,
+                require_session_zero: true,
             }
         }
+    }
+
+    /// The admin pipe, for `rulebox-agent enroll|status|unenroll`. With `simulate`
+    /// the `.sim` pipe owned by the current user, with no session check.
+    pub fn admin(simulate: bool) -> Self {
+        if simulate {
+            Self {
+                pipe_name: format!("{ADMIN_PIPE}{SIM_SUFFIX}"),
+                trusted_owner: current_user_sid().unwrap_or_else(|_| Sid::system()),
+                request_timeout: REQUEST_TIMEOUT,
+                require_session_zero: false,
+            }
+        } else {
+            Self {
+                pipe_name: ADMIN_PIPE.to_string(),
+                trusted_owner: Sid::system(),
+                request_timeout: REQUEST_TIMEOUT,
+                require_session_zero: true,
+            }
+        }
+    }
+
+    /// Replaces the request timeout (the default is `REQUEST_TIMEOUT`).
+    pub fn with_timeout(mut self, timeout: Duration) -> Self {
+        self.request_timeout = timeout;
+        self
     }
 }
 
@@ -184,6 +216,15 @@ async fn connect(config: &ClientConfig) -> Result<Pipe, ConnectError> {
         Ok(owner) if owner == config.trusted_owner => {}
         Ok(_) => return Err(ConnectError::NotTrusted),
         Err(_) => return Err(ConnectError::Other),
+    }
+    // From 1.1 the client sends passwords and the exit PIN, so the other end must
+    // be a service. A process of the Staff account cannot run in session 0.
+    if config.require_session_zero {
+        match server_session_id(handle.raw().0) {
+            Ok(0) => {}
+            Ok(_) => return Err(ConnectError::NotTrusted),
+            Err(_) => return Err(ConnectError::Other),
+        }
     }
     let pipe = client_from_handle(handle).map_err(|_| ConnectError::Other)?;
     Ok(Framed::new(pipe, FrameCodec::new()))
@@ -302,17 +343,7 @@ async fn pump(
             item = pipe.next() => match frame_or_end(item) {
                 Ok(Some(Frame::Response { id, ok, result, error })) => {
                     if let Some(reply) = pending.remove(&id) {
-                        let outcome = if ok {
-                            Ok(result.unwrap_or_else(|| serde_json::json!({})))
-                        } else {
-                            Err(CallError::Rpc(error.unwrap_or_else(|| RpcError {
-                                code: ErrorCode::Internal,
-                                message: "error response without an error".into(),
-                                retryable: false,
-                                data: None,
-                            })))
-                        };
-                        let _ = reply.send(outcome);
+                        let _ = reply.send(response_outcome(ok, result, error));
                     }
                 }
                 Ok(Some(Frame::Event { event, data })) => {
@@ -329,6 +360,73 @@ async fn pump(
         let _ = reply.send(Err(CallError::NotLinked));
     }
     keep_running
+}
+
+/// Turns the fields of a response frame into the outcome of one call.
+fn response_outcome(
+    ok: bool,
+    result: Option<serde_json::Value>,
+    error: Option<RpcError>,
+) -> Result<serde_json::Value, CallError> {
+    if ok {
+        Ok(result.unwrap_or_else(|| serde_json::json!({})))
+    } else {
+        Err(CallError::Rpc(error.unwrap_or_else(|| RpcError {
+            code: ErrorCode::Internal,
+            message: "error response without an error".into(),
+            retryable: false,
+            data: None,
+        })))
+    }
+}
+
+/// One connection, `hello`, one request, close. Blocks the calling thread: it
+/// builds a current-thread tokio runtime, so never call it from inside a runtime.
+///
+/// Pipe missing or connection lost -> `NotLinked`. Owner or session check failed
+/// -> `ServerNotTrusted`. It does not reconnect; it waits for a busy pipe at most
+/// `BUSY_GIVE_UP`. Used by the CLI (`enroll`, `status`, `unenroll`) and by the
+/// launcher's fallback screen.
+pub fn call_once<M: Method>(
+    config: ClientConfig,
+    info: ClientInfo,
+    params: M::Params,
+) -> Result<M::Result, CallError> {
+    let params = serde_json::to_value(params).map_err(|e| CallError::Protocol(e.to_string()))?;
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .map_err(|e| CallError::Protocol(format!("cannot start the runtime: {e}")))?;
+    let value = runtime.block_on(async {
+        let mut pipe = match connect(&config).await {
+            Ok(pipe) => pipe,
+            Err(ConnectError::NotTrusted) => return Err(CallError::ServerNotTrusted),
+            Err(ConnectError::NotFound | ConnectError::Other) => return Err(CallError::NotLinked),
+        };
+        say_hello(&mut pipe, &info, config.request_timeout).await.ok_or(CallError::NotLinked)?;
+
+        // 0 was the hello.
+        let id = 1;
+        let request = Frame::Request { id, method: M::NAME.to_string(), params };
+        pipe.send(request).await.map_err(|_| CallError::NotLinked)?;
+        let answer = timeout(config.request_timeout, async {
+            loop {
+                match frame_or_end(pipe.next().await) {
+                    Ok(Some(Frame::Response { id: got, ok, result, error })) if got == id => {
+                        return response_outcome(ok, result, error);
+                    }
+                    // Events and answers to other ids are not ours.
+                    Ok(Some(Frame::Event { .. } | Frame::Response { .. })) => {}
+                    Ok(Some(Frame::Request { .. })) | Ok(None) | Err(_) => {
+                        return Err(CallError::NotLinked);
+                    }
+                }
+            }
+        })
+        .await;
+        answer.unwrap_or(Err(CallError::Timeout))
+    })?;
+    serde_json::from_value(value).map_err(|e| CallError::Protocol(e.to_string()))
 }
 
 /// Unknown events and unparsable data are ignored (plan Section 6.5).
