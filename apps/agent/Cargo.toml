@@ -6,11 +6,12 @@ license.workspace = true
 publish = false
 
 [dependencies]
-rulebox-ipc.workspace = true
+rulebox-ipc = { workspace = true, features = ["client", "server"] }
 rulebox-policy.workspace = true
 rulebox-win32.workspace = true
 anyhow.workspace = true
 clap.workspace = true
+futures-util.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true
@@ -19,6 +20,12 @@ tokio-util = { workspace = true, features = ["rt"] }
 tracing.workspace = true
 tracing-appender.workspace = true
 tracing-subscriber.workspace = true
+
+[dev-dependencies]
+# Pause the clock in the hello-deadline test; raw pipe client for protocol tests.
+tokio = { workspace = true, features = ["test-util", "io-util"] }
+tokio-util = { workspace = true, features = ["codec"] }
+futures-util = { workspace = true, features = ["sink"] }
 
 [lints]
 workspace = true

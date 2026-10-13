@@ -1,24 +1,47 @@
-//! The single entry point for service mode and console mode. For now it loads
-//! the state, builds the first snapshot and waits for shutdown; the tasks of
-//! Section 5.2 are added in later steps.
+//! The single entry point for service mode and console mode. It loads the
+//! state, builds the first snapshot and runs the IPC servers (Step 6); the other
+//! tasks of Section 5.2 are added in later steps.
 
+use std::collections::HashSet;
 use std::sync::Arc;
+use std::time::Duration;
 
 use anyhow::Context;
 use rulebox_ipc::types::{
     AgentSnapshot, ConnectionStatus, DeviceInfo, DisplayMode, EnrollmentStatus, KioskPhase,
     KioskStatus, ShellHealth, ShellStatus,
 };
+use rulebox_ipc::{ADMIN_PIPE, SHELL_PIPE, SIM_SUFFIX};
 use serde::Deserialize;
 use tokio::sync::{mpsc, watch};
 use tokio_util::sync::CancellationToken;
+use tokio_util::task::TaskTracker;
 
-use crate::paths::DataPaths;
+use crate::ipc_admin::{self, AdminPipe, NotAvailableYet};
+use crate::ipc_shell::{self, ShellBroadcast, ShellPipe, ShellSignal};
+use crate::paths::{DataPaths, InstallPaths};
 use crate::platform::Platform;
 use crate::state::{read_json, AgentState, KioskApplied, StateStore};
 
 /// RAM at or below this many MB selects Lite mode (PRD 22.5).
 const LITE_MODE_MAX_RAM_MB: u64 = 4352;
+/// How long `run` waits for the IPC tasks to wind down after shutdown.
+const TASK_WIND_DOWN: Duration = Duration::from_secs(5);
+
+/// The two pipe names. Tests use unique ones so they never meet a real agent.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PipeNames {
+    pub shell: String,
+    pub admin: String,
+}
+
+impl PipeNames {
+    /// The production names, or the same with `.sim` appended in simulate mode.
+    pub fn for_mode(simulate: bool) -> Self {
+        let suffix = if simulate { SIM_SUFFIX } else { "" };
+        Self { shell: format!("{SHELL_PIPE}{suffix}"), admin: format!("{ADMIN_PIPE}{suffix}") }
+    }
+}
 
 /// Optional `agent-config.json` in the state directory.
 #[derive(Deserialize, Debug, Clone, PartialEq)]
@@ -44,8 +67,12 @@ pub enum ControlEvent {
 pub struct Deps {
     pub platform: Arc<dyn Platform>,
     pub paths: DataPaths,
+    /// Where the Rulebox binaries live (peer verification, Section 6.2 check 3).
+    /// Unused in simulate mode.
+    pub install: InstallPaths,
     pub config: AgentConfig,
     pub simulate: bool,
+    pub pipes: PipeNames,
 }
 
 pub fn load_config(paths: &DataPaths) -> anyhow::Result<AgentConfig> {
@@ -108,7 +135,7 @@ pub async fn run(
 ) -> anyhow::Result<()> {
     let store = StateStore::open(&deps.paths.state_dir()).context("open the state directory")?;
     let state = store.load().context("load the agent state")?;
-    let (snapshot_tx, _snapshot_rx) =
+    let (snapshot_tx, snapshot_rx) =
         watch::channel(initial_snapshot(&state, deps.platform.as_ref(), &deps.config));
 
     if deps.simulate {
@@ -117,6 +144,41 @@ pub async fn run(
         tracing::info!("agent started");
     }
     tracing::debug!(display_mode = ?snapshot_tx.borrow().display_mode, "initial snapshot built");
+
+    // The Staff account's SID: the shell pipe exists only while it is known. Later
+    // steps (enrollment, unenrollment) send changes through `_staff_sid_tx`.
+    let (_staff_sid_tx, staff_sid_rx) =
+        watch::channel(state.staff.as_ref().map(|staff| staff.sid.clone()));
+    let (signals_tx, signals_rx) = mpsc::unbounded_channel::<ShellSignal>();
+    let broadcast = ShellBroadcast::new();
+
+    let tasks = TaskTracker::new();
+    tasks.spawn(ipc_admin::run_pipe(
+        AdminPipe {
+            name: deps.pipes.admin.clone(),
+            simulate: deps.simulate,
+            snapshot_rx: snapshot_rx.clone(),
+            // Steps 8 and 11 replace this with the real enroll and unenroll.
+            handler: Arc::new(NotAvailableYet),
+        },
+        shutdown.clone(),
+    ));
+    tasks.spawn(ipc_shell::run_pipe(
+        ShellPipe {
+            name: deps.pipes.shell.clone(),
+            simulate: deps.simulate,
+            install: deps.install.clone(),
+            platform: Arc::clone(&deps.platform),
+            snapshot_rx: snapshot_rx.clone(),
+            signals: signals_tx,
+            broadcast: broadcast.clone(),
+            // Steps 6a and 6b add the session and admin-exit extensions here.
+            extensions: Vec::new(),
+            staff_sid_rx,
+        },
+        shutdown.clone(),
+    ));
+    tasks.spawn(log_shell_signals(signals_rx, shutdown.clone()));
 
     loop {
         tokio::select! {
@@ -131,8 +193,49 @@ pub async fn run(
             },
         }
     }
+
+    // The pipe tasks watch the same token: they tell their clients and close.
+    tasks.close();
+    if tokio::time::timeout(TASK_WIND_DOWN, tasks.wait()).await.is_err() {
+        tracing::warn!("the IPC tasks did not stop within {} s", TASK_WIND_DOWN.as_secs());
+    }
     tracing::info!("agent stopped");
     Ok(())
+}
+
+/// Consumes the shell connection signals until the watchdog (Step 13) takes them
+/// over. Logs `shell.ready`, the first heartbeat of each connection at `info`
+/// and the rest at `debug`.
+async fn log_shell_signals(
+    mut signals: mpsc::UnboundedReceiver<ShellSignal>,
+    shutdown: CancellationToken,
+) {
+    let mut beating: HashSet<u64> = HashSet::new();
+    loop {
+        let signal = tokio::select! {
+            () = shutdown.cancelled() => return,
+            signal = signals.recv() => match signal {
+                Some(signal) => signal,
+                None => return,
+            },
+        };
+        match signal {
+            ShellSignal::Connected { .. } => {}
+            ShellSignal::Ready { connection_id, pid } => {
+                tracing::info!(connection_id, pid, "shell.ready");
+            }
+            ShellSignal::Heartbeat { connection_id, pid } => {
+                if beating.insert(connection_id) {
+                    tracing::info!(connection_id, pid, "shell.heartbeat (first on this connection)");
+                } else {
+                    tracing::debug!(connection_id, pid, "shell.heartbeat");
+                }
+            }
+            ShellSignal::Closed { connection_id } => {
+                beating.remove(&connection_id);
+            }
+        }
+    }
 }
 
 #[cfg(test)]
@@ -140,7 +243,7 @@ mod tests {
     use super::*;
     use crate::platform::sim::SimPlatform;
     use crate::state::{Enrollment, KioskRecord};
-    use crate::testutil::TempDir;
+    use crate::testutil::{unique_pipe_name, TempDir};
 
     #[test]
     fn fresh_snapshot_is_not_enrolled_and_standard() {
@@ -179,21 +282,112 @@ mod tests {
         assert_eq!(snapshot.desired_state_version, 7);
     }
 
+    /// A simulated agent on pipe names of its own.
+    fn test_deps(dir: &TempDir) -> Deps {
+        Deps {
+            platform: Arc::new(SimPlatform::new(dir.path().to_path_buf())),
+            paths: DataPaths::new(dir.path().to_path_buf()),
+            install: InstallPaths::new(dir.path().join("install")),
+            config: AgentConfig::default(),
+            simulate: true,
+            pipes: PipeNames {
+                shell: unique_pipe_name(),
+                admin: unique_pipe_name(),
+            },
+        }
+    }
+
     #[tokio::test]
     async fn run_waits_for_shutdown() {
         let dir = TempDir::new();
-        let deps = Deps {
-            platform: Arc::new(SimPlatform::new(dir.path().to_path_buf())),
-            paths: DataPaths::new(dir.path().to_path_buf()),
-            config: AgentConfig::default(),
-            simulate: true,
-        };
+        let deps = test_deps(&dir);
         let shutdown = CancellationToken::new();
         let (_control_tx, control_rx) = mpsc::unbounded_channel();
         let task = tokio::spawn(run(deps, shutdown.clone(), control_rx));
         tokio::time::sleep(std::time::Duration::from_millis(50)).await;
         assert!(!task.is_finished());
         shutdown.cancel();
+        task.await.unwrap().unwrap();
+    }
+
+    #[test]
+    fn pipe_names_follow_the_mode() {
+        let production = PipeNames::for_mode(false);
+        assert_eq!(production.shell, r"\\.\pipe\dev.rulebox.agent.shell");
+        assert_eq!(production.admin, r"\\.\pipe\dev.rulebox.agent.admin");
+        let simulated = PipeNames::for_mode(true);
+        assert_eq!(simulated.shell, r"\\.\pipe\dev.rulebox.agent.shell.sim");
+        assert_eq!(simulated.admin, r"\\.\pipe\dev.rulebox.agent.admin.sim");
+    }
+
+    /// Step 6 end to end on the simulated agent: both pipes start at once, the
+    /// shell pipe says protocol 1.1 and the snapshot, the admin pipe answers
+    /// `status`, and shutdown reaches the connected client.
+    #[tokio::test]
+    async fn run_serves_both_pipes_in_simulate_mode() {
+        use rulebox_ipc::client::{CallError, ClientConfig, ClientEvent, IpcClient};
+        use rulebox_ipc::methods::{Empty, ShellHeartbeat, ShellReady, StateGet};
+        use rulebox_ipc::types::{ClientInfo, ClientRole};
+        use rulebox_win32::sid::current_user_sid;
+
+        let dir = TempDir::new();
+        let deps = test_deps(&dir);
+        let (shell_name, admin_name) = (deps.pipes.shell.clone(), deps.pipes.admin.clone());
+        let shutdown = CancellationToken::new();
+        let (_control_tx, control_rx) = mpsc::unbounded_channel();
+        let task = tokio::spawn(run(deps, shutdown.clone(), control_rx));
+
+        let me = current_user_sid().unwrap();
+        let config = |name: String| ClientConfig {
+            pipe_name: name,
+            trusted_owner: me.clone(),
+            request_timeout: Duration::from_secs(5),
+            require_session_zero: false,
+        };
+        let info = ClientInfo { role: ClientRole::Shell, name: "test".into(), version: "0.0.0".into() };
+        let (client, mut events) = IpcClient::spawn_with(info, config(shell_name));
+        let linked = tokio::time::timeout(Duration::from_secs(10), events.recv()).await.unwrap().unwrap();
+        match linked {
+            ClientEvent::Linked(hello) => {
+                assert_eq!((hello.protocol.major, hello.protocol.minor), (1, 1));
+                assert_eq!(hello.capabilities, ["state", "health"]);
+            }
+            other => panic!("unexpected {other:?}"),
+        }
+        let snapshot = client.call::<StateGet>(Empty {}).await.unwrap();
+        assert_eq!(snapshot.enrollment, EnrollmentStatus::NotEnrolled);
+        client.call::<ShellReady>(Empty {}).await.unwrap();
+        client.call::<ShellHeartbeat>(Empty {}).await.unwrap();
+
+        // The admin pipe: status works, enroll is not available yet.
+        let admin_config = config(admin_name);
+        let (status, enroll) = tokio::task::spawn_blocking(move || {
+            use rulebox_ipc::admin::{AdminEnroll, AdminEnrollParams, AdminStatus};
+            let info = ClientInfo { role: ClientRole::Admin, name: "test".into(), version: "0.0.0".into() };
+            let status = rulebox_ipc::client::call_once::<AdminStatus>(admin_config.clone(), info.clone(), Empty {});
+            let params = AdminEnrollParams { code: "RBX1.x".into(), device_name: None, allow_joined: false };
+            let enroll = rulebox_ipc::client::call_once::<AdminEnroll>(admin_config, info, params);
+            (status, enroll)
+        })
+        .await
+        .unwrap();
+        assert_eq!(status.unwrap().snapshot, snapshot);
+        match enroll {
+            Err(CallError::Rpc(error)) => {
+                assert_eq!(error.code, rulebox_ipc::ErrorCode::OperationFailed);
+            }
+            other => panic!("unexpected {other:?}"),
+        }
+
+        shutdown.cancel();
+        let mut saw_shutting_down = false;
+        while let Ok(Some(event)) = tokio::time::timeout(Duration::from_secs(5), events.recv()).await {
+            if matches!(event, ClientEvent::ShuttingDown { .. }) {
+                saw_shutting_down = true;
+                break;
+            }
+        }
+        assert!(saw_shutting_down, "the client must be told the agent is stopping");
         task.await.unwrap().unwrap();
     }
 }

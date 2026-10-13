@@ -44,7 +44,11 @@ async fn main() {
                 match event {
                     ClientEvent::Linked(_) => {
                         match client.call::<StateGet>(Empty {}).await {
-                            Ok(snapshot) => println!("state.get: {snapshot:#?}"),
+                            // JSON, the wire form (enrollment, displayMode, ...).
+                            Ok(snapshot) => match serde_json::to_string(&snapshot) {
+                                Ok(json) => println!("state.get: {json}"),
+                                Err(e) => println!("state.get: cannot print the snapshot: {e}"),
+                            },
                             Err(e) => println!("state.get failed: {e}"),
                         }
                         match client.call::<ShellReady>(Empty {}).await {
