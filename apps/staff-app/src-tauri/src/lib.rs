@@ -88,6 +88,8 @@ pub fn run() {
             commands::sign_in,
             commands::sign_in_last,
             commands::switch_user,
+            commands::launch_app,
+            commands::refresh_catalogue,
         ])
         .setup(move |app| {
             // `IpcClient::spawn` calls `tokio::spawn`; run inside Tauri's runtime.

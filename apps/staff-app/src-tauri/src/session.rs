@@ -160,7 +160,7 @@ pub async fn sign_in(
     Ok(outcome)
 }
 
-async fn load_catalogue(state: &AppState) {
+pub async fn load_catalogue(state: &AppState) {
     match state.agent().apps().await {
         Ok(items) => {
             state.update(|s| {

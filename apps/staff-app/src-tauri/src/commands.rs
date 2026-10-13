@@ -271,6 +271,33 @@ pub fn dev_set_boot(
     }
 }
 
+/// Launch an approved app. Step 8 wires the real launcher; until then a notice.
+#[tauri::command]
+pub fn launch_app(window: Window, state: State<'_, AppState>, id: String) -> Result<(), CommandError> {
+    require_label(&window, "shell-")?;
+    let _ = id;
+    state.notify(
+        crate::model::NoticeTone::Neutral,
+        "Not available yet",
+        Some("App launch arrives in a later step.".into()),
+    );
+    Ok(())
+}
+
+/// Re-fetch the employee catalogue (empty / error desktop actions).
+#[tauri::command]
+pub async fn refresh_catalogue(
+    window: Window,
+    state: State<'_, AppState>,
+) -> Result<(), CommandError> {
+    require_label(&window, "shell-")?;
+    state.update(|s| {
+        s.apps.status = crate::model::CatalogStatus::Loading;
+    });
+    session::load_catalogue(&state).await;
+    Ok(())
+}
+
 /// Poll `%TEMP%\rulebox-staff-dev-cmd.json` for screenshot automation (debug only).
 #[cfg(debug_assertions)]
 pub fn spawn_dev_cmd_poller(state: AppState) {
@@ -294,6 +321,9 @@ pub fn spawn_dev_cmd_poller(state: AppState) {
         lite: Option<bool>,
         #[serde(default)]
         theme: Option<ThemeDto>,
+        /// Override the signed-in catalogue size for Step 6 screenshots.
+        #[serde(default)]
+        demo_apps: Option<usize>,
     }
 
     tauri::async_runtime::spawn(async move {
@@ -322,6 +352,15 @@ pub fn spawn_dev_cmd_poller(state: AppState) {
                 cmd.lite,
                 cmd.theme,
             );
+            if let Some(n) = cmd.demo_apps {
+                let items = crate::agent::demo::sample_apps_for(Some(n));
+                state.update(|s| {
+                    s.apps = crate::model::CatalogState {
+                        status: crate::model::CatalogStatus::Ready,
+                        items,
+                    };
+                });
+            }
         }
     });
 }

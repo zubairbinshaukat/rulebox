@@ -16,6 +16,8 @@
     "allow-popup-close",
     "allow-sign-in",
     "allow-sign-in-last",
-    "allow-switch-user"
+    "allow-switch-user",
+    "allow-launch-app",
+    "allow-refresh-catalogue"
   ]
 }

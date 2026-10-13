@@ -7,6 +7,7 @@ import { useShell } from "../lib/store";
 import { Splash } from "./boot/Splash";
 import { StatusScreen, type StatusKind } from "./boot/StatusScreen";
 import { useLogoSequence } from "./boot/useLogoSequence";
+import { Desktop } from "./desktop/Desktop";
 import { SignIn } from "./signin/SignIn";
 
 function lastFromSession(session: SessionState): EmployeeBrief | null {
@@ -104,27 +105,11 @@ export function DesktopRoot() {
     return <StatusScreen kind={bootStatus} />;
   }
 
-  if (signedIn && (opening || openFinished)) {
+  if (signedIn && shell.session.status === "signedIn") {
+    const showDesktop = openFinished || openSeq.covered || (!opening && !openFinished);
     return (
       <div style={{ position: "absolute", inset: 0, background: "var(--rb-bg)" }}>
-        {(openFinished || openSeq.covered) && (
-          <div
-            data-testid="desktop-placeholder"
-            style={{
-              position: "absolute",
-              inset: 0,
-              padding: "32px 40px",
-              color: "var(--rb-ink)",
-            }}
-          >
-            <h1 style={{ margin: 0, fontSize: 28, fontWeight: 500 }}>
-              {shell.session.status === "signedIn"
-                ? `Welcome, ${shell.session.employee.name.split(" ")[0]}`
-                : "Desktop"}
-            </h1>
-            <p style={{ color: "var(--rb-muted)" }}>Your apps will appear here.</p>
-          </div>
-        )}
+        {showDesktop ? <Desktop shell={shell} employee={shell.session.employee} /> : null}
         {opening && !openFinished ? (
           <div
             style={{
@@ -145,29 +130,6 @@ export function DesktopRoot() {
             />
           </div>
         ) : null}
-      </div>
-    );
-  }
-
-  if (signedIn && !opening && !openFinished) {
-    // Already signed in (e.g. restored) — go straight to desktop placeholder.
-    return (
-      <div
-        data-testid="desktop-placeholder"
-        style={{
-          position: "absolute",
-          inset: 0,
-          padding: "32px 40px",
-          background: "var(--rb-bg)",
-          color: "var(--rb-ink)",
-        }}
-      >
-        <h1 style={{ margin: 0, fontSize: 28, fontWeight: 500 }}>
-          {shell.session.status === "signedIn"
-            ? `Welcome, ${shell.session.employee.name.split(" ")[0]}`
-            : "Desktop"}
-        </h1>
-        <p style={{ color: "var(--rb-muted)" }}>Your apps will appear here.</p>
       </div>
     );
   }

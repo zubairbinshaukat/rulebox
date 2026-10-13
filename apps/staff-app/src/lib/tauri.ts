@@ -75,6 +75,8 @@ type Commands = {
   };
   sign_in_last: { args: { password: string }; result: SignInOutcomeDto };
   switch_user: { args: Record<string, never>; result: void };
+  launch_app: { args: { id: string }; result: void };
+  refresh_catalogue: { args: Record<string, never>; result: void };
 };
 
 export function call<K extends keyof Commands>(

@@ -107,8 +107,10 @@ fn demo_snapshot() -> AgentSnapshot {
     }
 }
 
-fn sample_apps() -> Vec<AppEntry> {
-    vec![
+/// Catalogue for the demo agent. `RULEBOX_DEMO_APPS=<n>` (and the debug
+/// cmd poller) select the count for layout screenshots.
+pub fn sample_apps_for(n: Option<usize>) -> Vec<AppEntry> {
+    let base = vec![
         AppEntry {
             id: "files".into(),
             name: "My files".into(),
@@ -152,7 +154,45 @@ fn sample_apps() -> Vec<AppEntry> {
             pinned_desktop: true,
             badge: None,
         },
-    ]
+    ];
+
+    let Some(n) = n else {
+        return base;
+    };
+    if n == 0 {
+        return Vec::new();
+    }
+    let mut out = base;
+    if out.len() > n {
+        out.truncate(n);
+        return out;
+    }
+    let mut i = out.len();
+    while out.len() < n {
+        i += 1;
+        let hue = ((i * 37) % 360) as u16;
+        out.push(AppEntry {
+            id: format!("demo-app-{i}"),
+            name: format!("Demo app {i}"),
+            description: Some("Generated for layout screenshots".into()),
+            kind: AppKind::Web(WebApp {
+                url: format!("https://example.invalid/app/{i}"),
+                allowed_domains: vec!["example.invalid".into()],
+                permissions: WebPermissions::default(),
+            }),
+            icon_key: None,
+            hue: Some(hue),
+            pinned_taskbar: false,
+            pinned_desktop: true,
+            badge: if i % 5 == 0 { Some(i as u32 % 9 + 1) } else { None },
+        });
+    }
+    out
+}
+
+fn sample_apps() -> Vec<AppEntry> {
+    let n = std::env::var_os("RULEBOX_DEMO_APPS").and_then(|raw| raw.to_string_lossy().parse().ok());
+    sample_apps_for(n)
 }
 
 fn files_root_for(username: &str) -> String {

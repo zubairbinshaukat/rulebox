@@ -14,6 +14,8 @@ const SHELL_COMMANDS: &[&str] = &[
     "sign_in",
     "sign_in_last",
     "switch_user",
+    "launch_app",
+    "refresh_catalogue",
 ];
 
 /// Commands callable from `app-*` windows. A name may also appear in

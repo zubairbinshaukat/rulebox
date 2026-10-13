@@ -195,6 +195,12 @@
           "markdownDescription": "Enables the dismiss_notice command without any pre-configured scope."
         },
         {
+          "description": "Enables the launch_app command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-launch-app",
+          "markdownDescription": "Enables the launch_app command without any pre-configured scope."
+        },
+        {
           "description": "Enables the popup_close command without any pre-configured scope.",
           "type": "string",
           "const": "allow-popup-close",
@@ -205,6 +211,12 @@
           "type": "string",
           "const": "allow-popup-open",
           "markdownDescription": "Enables the popup_open command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the refresh_catalogue command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-refresh-catalogue",
+          "markdownDescription": "Enables the refresh_catalogue command without any pre-configured scope."
         },
         {
           "description": "Enables the shell_state command without any pre-configured scope.",
@@ -261,6 +273,12 @@
           "markdownDescription": "Denies the dismiss_notice command without any pre-configured scope."
         },
         {
+          "description": "Denies the launch_app command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-launch-app",
+          "markdownDescription": "Denies the launch_app command without any pre-configured scope."
+        },
+        {
           "description": "Denies the popup_close command without any pre-configured scope.",
           "type": "string",
           "const": "deny-popup-close",
@@ -271,6 +289,12 @@
           "type": "string",
           "const": "deny-popup-open",
           "markdownDescription": "Denies the popup_open command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the refresh_catalogue command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-refresh-catalogue",
+          "markdownDescription": "Denies the refresh_catalogue command without any pre-configured scope."
         },
         {
           "description": "Denies the shell_state command without any pre-configured scope.",
