@@ -21,15 +21,37 @@ export default defineSchema({
     orgId: v.id("organizations"),
     groupId: v.optional(v.id("groups")),
     name: v.string(),
-    status: v.string(), // e.g. "online" | "offline" | "pending"
-    lastSeen: v.optional(v.number()),
+    // Device authentication (Phase 2): SHA-256 hex of the device secret.
+    secretHash: v.string(),
+    revoked: v.boolean(),
+    enrolledAt: v.number(),
+    enrollmentTokenId: v.id("enrollmentTokens"),
+    hardwareIdHash: v.optional(v.string()),
+    // Reported by the agent. Written only when something changed (rule 5).
+    agentVersion: v.optional(v.string()),
     os: v.optional(v.string()),
+    osBuild: v.optional(v.string()),
+    osEdition: v.optional(v.string()),
     ramMb: v.optional(v.number()),
     diskFreeGb: v.optional(v.number()),
     lockdownLevel: v.optional(v.string()),
+    kioskPhase: v.optional(v.string()),
+    kioskError: v.optional(v.string()),
+    appliedVersion: v.optional(v.number()),
+    shellHealth: v.optional(v.string()),
+    compat: v.optional(v.any()), // CompatReport, shape owned by the agent
+    // `status` and `lastSeen` live in `deviceStatus` (PRD 11.1 rule 4).
   })
     .index("by_org", ["orgId"])
-    .index("by_group", ["groupId"]),
+    .index("by_group", ["groupId"])
+    .index("by_secret_hash", ["secretHash"]),
+
+  // The only fast-changing device data. Kept out of `devices` so that lists
+  // subscribed to `devices` do not re-run on every heartbeat.
+  deviceStatus: defineTable({
+    deviceId: v.id("devices"),
+    lastSeenAt: v.number(),
+  }).index("by_device", ["deviceId"]),
 
   employees: defineTable({
     orgId: v.id("organizations"),
@@ -60,7 +82,10 @@ export default defineSchema({
     // Group or device id. A plain string so one table can hold both scopes.
     scope: v.string(),
     version: v.number(),
-    doc: v.any(), // DesiredState (see packages/types)
+    // DesiredState (see packages/types) plus the agent-only top-level keys
+    // `adminExit`, `power` and `orgName` (Phase 2 plan 5.10). Kept as `any`
+    // so those keys are accepted without a strict validator.
+    doc: v.any(),
   })
     .index("by_org", ["orgId"])
     .index("by_scope_version", ["scope", "version"]),
@@ -70,6 +95,9 @@ export default defineSchema({
     tokenHash: v.string(),
     expiresAt: v.number(),
     usesLeft: v.number(),
+    revoked: v.optional(v.boolean()),
+    groupId: v.optional(v.id("groups")),
+    createdAt: v.number(),
   })
     .index("by_org", ["orgId"])
     .index("by_token_hash", ["tokenHash"]),

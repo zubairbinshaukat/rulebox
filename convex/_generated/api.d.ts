@@ -8,7 +8,12 @@
  * @module
  */
 
+import type * as dev from "../dev.js";
+import type * as devices from "../devices.js";
+import type * as enrollment from "../enrollment.js";
 import type * as health from "../health.js";
+import type * as lib_deepEqual from "../lib/deepEqual.js";
+import type * as lib_deviceAuth from "../lib/deviceAuth.js";
 
 import type {
   ApiFromModules,
@@ -17,7 +22,12 @@ import type {
 } from "convex/server";
 
 declare const fullApi: ApiFromModules<{
+  dev: typeof dev;
+  devices: typeof devices;
+  enrollment: typeof enrollment;
   health: typeof health;
+  "lib/deepEqual": typeof lib_deepEqual;
+  "lib/deviceAuth": typeof lib_deviceAuth;
 }>;
 
 /**
