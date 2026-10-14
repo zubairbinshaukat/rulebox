@@ -52,6 +52,15 @@ pub fn is_hung(hwnd: isize) -> bool {
     unsafe { IsHungAppWindow(hwnd_from(hwnd)) }.as_bool()
 }
 
+/// Does Windows still have this window? A stale handle answers `false`.
+pub fn is_open(hwnd: isize) -> bool {
+    if hwnd == 0 {
+        return false;
+    }
+    // SAFETY: a handle query only.
+    unsafe { IsWindow(Some(hwnd_from(hwnd))) }.as_bool()
+}
+
 /// Is this window (or the window it belongs to) the foreground window?
 fn is_foreground(hwnd: isize) -> bool {
     // SAFETY: handle query only.

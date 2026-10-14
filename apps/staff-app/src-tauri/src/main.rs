@@ -878,3 +878,243 @@ mod step8_tests {
         assert_eq!(adoption_target(&only_old, "x.exe"), None);
     }
 }
+
+#[cfg(all(test, debug_assertions))]
+mod step9_tests {
+    use std::collections::{HashMap, HashSet};
+
+    use rulebox_staff_lib::model::{Employee, SessionState};
+    use rulebox_staff_lib::session::{
+        closing_names, drive_sign_out, lock_transition, matches_search, sign_out_targets,
+        windows_to_minimize, CloseCandidate, LockEvent, MinimizeCandidate, NamedWindow, SignOutOps,
+        SignOutScope,
+    };
+
+    fn scope_jobs(pids: &[u32]) -> SignOutScope {
+        SignOutScope {
+            job_pids: pids.iter().copied().collect(),
+            adopted_hwnds: HashSet::new(),
+        }
+    }
+
+    fn scope_adopted(hwnds: &[isize]) -> SignOutScope {
+        SignOutScope {
+            job_pids: HashSet::new(),
+            adopted_hwnds: hwnds.iter().copied().collect(),
+        }
+    }
+
+    fn sample_employee() -> Employee {
+        Employee {
+            id: "emp_maya".into(),
+            username: "maya".into(),
+            name: "Maya Chen".into(),
+            role: Some("Cashier".into()),
+            quota_bytes: 1,
+        }
+    }
+
+    fn signed_in(locked: bool) -> SessionState {
+        SessionState::SignedIn {
+            employee: sample_employee(),
+            locked,
+            offline: false,
+        }
+    }
+
+    struct FakeSignOut {
+        calls: Vec<String>,
+        agent_fails: bool,
+    }
+
+    impl SignOutOps for FakeSignOut {
+        fn close(&mut self, hwnd: isize) {
+            self.calls.push(format!("close:{hwnd}"));
+        }
+        fn wait_for_close(&mut self) {
+            self.calls.push("wait".into());
+        }
+        fn terminate_jobs(&mut self) {
+            self.calls.push("terminate".into());
+        }
+        fn clear_memory(&mut self) {
+            self.calls.push("clear".into());
+        }
+        fn agent_sign_out(&mut self) -> Result<(), String> {
+            self.calls.push("agent".into());
+            if self.agent_fails {
+                Err("unsupported".into())
+            } else {
+                Ok(())
+            }
+        }
+        fn signed_out(&mut self) {
+            self.calls.push("signed-out".into());
+        }
+    }
+
+    #[test]
+    fn search_folds_case_and_diacritics() {
+        assert!(matches_search("Café Orders", "cafe"));
+        assert!(matches_search("Notepad", "NOTE"));
+        assert!(matches_search("Zoë", "zoe"));
+        assert!(matches_search("My files", ""));
+        assert!(matches_search("My files", "  my f"));
+        assert!(!matches_search("Notepad", "word"));
+    }
+
+    #[test]
+    fn sign_out_never_closes_a_foreign_window_and_keeps_order() {
+        let windows = vec![
+            CloseCandidate {
+                hwnd: 1,
+                pid: 10,
+                shell_app: false,
+            },
+            CloseCandidate {
+                hwnd: 99,
+                pid: 20,
+                shell_app: false,
+            },
+            CloseCandidate {
+                hwnd: 3,
+                pid: 30,
+                shell_app: true,
+            },
+        ];
+        let targets = sign_out_targets(&windows, &scope_jobs(&[10]));
+        assert_eq!(targets, vec![3, 1]);
+        assert!(!targets.contains(&99));
+
+        let mut fake = FakeSignOut {
+            calls: Vec::new(),
+            agent_fails: true,
+        };
+        drive_sign_out(&mut fake, &targets);
+        assert_eq!(
+            fake.calls,
+            vec![
+                "close:3",
+                "close:1",
+                "wait",
+                "terminate",
+                "clear",
+                "agent",
+                "signed-out",
+            ]
+        );
+    }
+
+    #[test]
+    fn closing_names_skip_foreign_windows_and_repeat_names() {
+        let windows = vec![
+            NamedWindow {
+                hwnd: 1,
+                pid: 10,
+                shell_app: false,
+                title: "Untitled - Notepad".into(),
+            },
+            NamedWindow {
+                hwnd: 2,
+                pid: 10,
+                shell_app: false,
+                title: "Notes - Notepad".into(),
+            },
+            NamedWindow {
+                hwnd: 20,
+                pid: 20,
+                shell_app: false,
+                title: "Hand opened".into(),
+            },
+            NamedWindow {
+                hwnd: 30,
+                pid: 30,
+                shell_app: true,
+                title: "Files".into(),
+            },
+        ];
+        let owned = HashMap::from([(10, "notes".into())]);
+        let names = HashMap::from([("notes".into(), "Notepad".into())]);
+        assert_eq!(
+            closing_names(&windows, &scope_jobs(&[10]), &owned, &names),
+            vec!["Notepad".to_string(), "Files".to_string()]
+        );
+    }
+
+    #[test]
+    fn sign_out_closes_only_the_adopted_window_of_a_shared_process() {
+        // Windows 11 Notepad is one process. The hand-opened window shares
+        // its pid with the window the shell's stub handed off to.
+        let windows = vec![
+            CloseCandidate {
+                hwnd: 1,
+                pid: 10,
+                shell_app: false,
+            },
+            CloseCandidate {
+                hwnd: 2,
+                pid: 10,
+                shell_app: false,
+            },
+        ];
+        let targets = sign_out_targets(&windows, &scope_adopted(&[2]));
+        assert_eq!(targets, vec![2]);
+    }
+
+    #[test]
+    fn lock_transitions_stay_on_a_signed_in_employee() {
+        let open = signed_in(false);
+        let locked = lock_transition(&open, LockEvent::Lock).expect("lock");
+        assert!(matches!(locked, SessionState::SignedIn { locked: true, .. }));
+        let still = lock_transition(&locked, LockEvent::UnlockDenied).expect("denied");
+        assert!(matches!(still, SessionState::SignedIn { locked: true, .. }));
+        let unlocked = lock_transition(&locked, LockEvent::UnlockOk).expect("ok");
+        assert!(matches!(
+            unlocked,
+            SessionState::SignedIn { locked: false, .. }
+        ));
+        assert!(lock_transition(
+            &SessionState::SignedOut { last: None },
+            LockEvent::Lock
+        )
+        .is_none());
+        assert!(lock_transition(&open, LockEvent::UnlockOk).is_none());
+        let SessionState::SignedIn { employee, .. } = &locked else {
+            panic!("locked");
+        };
+        assert_eq!(employee, &sample_employee());
+    }
+
+    #[test]
+    fn dev_mode_lock_does_not_minimize_foreign_windows() {
+        let windows = vec![
+            MinimizeCandidate {
+                hwnd: 1,
+                pid: 10,
+                shell_app: false,
+            },
+            MinimizeCandidate {
+                hwnd: 2,
+                pid: 20,
+                shell_app: false,
+            },
+            MinimizeCandidate {
+                hwnd: 3,
+                pid: 30,
+                shell_app: true,
+            },
+        ];
+        assert_eq!(
+            windows_to_minimize(true, &windows, &scope_jobs(&[10])),
+            vec![1, 3]
+        );
+        assert_eq!(
+            windows_to_minimize(false, &windows, &scope_jobs(&[10])),
+            vec![1, 2, 3]
+        );
+        assert_eq!(
+            windows_to_minimize(true, &windows, &scope_adopted(&[1])),
+            vec![1, 3]
+        );
+    }
+}

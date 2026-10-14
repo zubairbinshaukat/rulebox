@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-power-shut-down"
+description = "Enables the power_shut_down command without any pre-configured scope."
+commands.allow = ["power_shut_down"]
+
+[[permission]]
+identifier = "deny-power-shut-down"
+description = "Denies the power_shut_down command without any pre-configured scope."
+commands.deny = ["power_shut_down"]

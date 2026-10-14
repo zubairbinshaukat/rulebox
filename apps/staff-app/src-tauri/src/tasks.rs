@@ -323,6 +323,16 @@ impl TaskRegistry {
             .map(|facts| (hwnd, *facts))
     }
 
+    /// Every listed window, for log out and lock. Shell windows are not listed.
+    pub fn snapshot(&self) -> Vec<(isize, TaskFacts)> {
+        self.windows
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .iter()
+            .map(|(hwnd, facts)| (*hwnd, *facts))
+            .collect()
+    }
+
     /// `(hwnd, minimized)` of every listed window.
     pub fn listed(&self) -> Vec<(isize, bool)> {
         self.windows
@@ -585,7 +595,9 @@ impl TaskHost {
             // A program that handed off to another process still gets its
             // window counted as the launched app's.
             if let WindowEvent::Added(info) = event {
-                self.services.launcher.adopt(info.pid, info.exe.as_deref());
+                self.services
+                    .launcher
+                    .adopt(info.hwnd, info.pid, info.exe.as_deref());
             }
         }
         if changed {

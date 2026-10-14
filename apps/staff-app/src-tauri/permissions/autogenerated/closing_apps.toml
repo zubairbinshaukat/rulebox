@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-closing-apps"
+description = "Enables the closing_apps command without any pre-configured scope."
+commands.allow = ["closing_apps"]
+
+[[permission]]
+identifier = "deny-closing-apps"
+description = "Denies the closing_apps command without any pre-configured scope."
+commands.deny = ["closing_apps"]

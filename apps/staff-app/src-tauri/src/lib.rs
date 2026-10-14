@@ -99,6 +99,14 @@ pub fn run() {
             commands::sign_in,
             commands::sign_in_last,
             commands::switch_user,
+            commands::sign_out,
+            commands::closing_apps,
+            commands::lock,
+            commands::unlock,
+            commands::power_sleep,
+            commands::power_restart,
+            commands::power_shut_down,
+            commands::restart_rulebox,
             commands::launch_app,
             commands::task_click,
             commands::task_close,
@@ -116,6 +124,11 @@ pub fn run() {
             }
             let app_state = AppState::new(agent, initial);
             app_state.bind_app(app.handle().clone());
+            let can_power_off = rulebox_desktop::power::can_power_off();
+            tracing::info!(can_power_off, "shutdown privilege");
+            app_state.update(|shell| {
+                shell.system.can_power_off = can_power_off;
+            });
             spawn_agent_tasks(app_state.clone());
             // Screenshot automation: any process of this user can write the
             // file it polls, so it runs only in dev mode and only when asked.

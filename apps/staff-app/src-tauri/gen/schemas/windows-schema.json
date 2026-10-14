@@ -177,6 +177,12 @@
       "description": "Permission identifier",
       "oneOf": [
         {
+          "description": "Enables the closing_apps command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-closing-apps",
+          "markdownDescription": "Enables the closing_apps command without any pre-configured scope."
+        },
+        {
           "description": "Enables the dev_set_boot command without any pre-configured scope.",
           "type": "string",
           "const": "allow-dev-set-boot",
@@ -201,6 +207,12 @@
           "markdownDescription": "Enables the launch_app command without any pre-configured scope."
         },
         {
+          "description": "Enables the lock command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-lock",
+          "markdownDescription": "Enables the lock command without any pre-configured scope."
+        },
+        {
           "description": "Enables the popup_close command without any pre-configured scope.",
           "type": "string",
           "const": "allow-popup-close",
@@ -213,10 +225,34 @@
           "markdownDescription": "Enables the popup_open command without any pre-configured scope."
         },
         {
+          "description": "Enables the power_restart command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-power-restart",
+          "markdownDescription": "Enables the power_restart command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the power_shut_down command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-power-shut-down",
+          "markdownDescription": "Enables the power_shut_down command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the power_sleep command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-power-sleep",
+          "markdownDescription": "Enables the power_sleep command without any pre-configured scope."
+        },
+        {
           "description": "Enables the refresh_catalogue command without any pre-configured scope.",
           "type": "string",
           "const": "allow-refresh-catalogue",
           "markdownDescription": "Enables the refresh_catalogue command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the restart_rulebox command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-restart-rulebox",
+          "markdownDescription": "Enables the restart_rulebox command without any pre-configured scope."
         },
         {
           "description": "Enables the shell_state command without any pre-configured scope.",
@@ -241,6 +277,12 @@
           "type": "string",
           "const": "allow-sign-in-last",
           "markdownDescription": "Enables the sign_in_last command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the sign_out command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-sign-out",
+          "markdownDescription": "Enables the sign_out command without any pre-configured scope."
         },
         {
           "description": "Enables the switch_user command without any pre-configured scope.",
@@ -285,6 +327,18 @@
           "markdownDescription": "Enables the ui_ready command without any pre-configured scope."
         },
         {
+          "description": "Enables the unlock command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-unlock",
+          "markdownDescription": "Enables the unlock command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the closing_apps command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-closing-apps",
+          "markdownDescription": "Denies the closing_apps command without any pre-configured scope."
+        },
+        {
           "description": "Denies the dev_set_boot command without any pre-configured scope.",
           "type": "string",
           "const": "deny-dev-set-boot",
@@ -309,6 +363,12 @@
           "markdownDescription": "Denies the launch_app command without any pre-configured scope."
         },
         {
+          "description": "Denies the lock command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-lock",
+          "markdownDescription": "Denies the lock command without any pre-configured scope."
+        },
+        {
           "description": "Denies the popup_close command without any pre-configured scope.",
           "type": "string",
           "const": "deny-popup-close",
@@ -321,10 +381,34 @@
           "markdownDescription": "Denies the popup_open command without any pre-configured scope."
         },
         {
+          "description": "Denies the power_restart command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-power-restart",
+          "markdownDescription": "Denies the power_restart command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the power_shut_down command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-power-shut-down",
+          "markdownDescription": "Denies the power_shut_down command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the power_sleep command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-power-sleep",
+          "markdownDescription": "Denies the power_sleep command without any pre-configured scope."
+        },
+        {
           "description": "Denies the refresh_catalogue command without any pre-configured scope.",
           "type": "string",
           "const": "deny-refresh-catalogue",
           "markdownDescription": "Denies the refresh_catalogue command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the restart_rulebox command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-restart-rulebox",
+          "markdownDescription": "Denies the restart_rulebox command without any pre-configured scope."
         },
         {
           "description": "Denies the shell_state command without any pre-configured scope.",
@@ -349,6 +433,12 @@
           "type": "string",
           "const": "deny-sign-in-last",
           "markdownDescription": "Denies the sign_in_last command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the sign_out command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-sign-out",
+          "markdownDescription": "Denies the sign_out command without any pre-configured scope."
         },
         {
           "description": "Denies the switch_user command without any pre-configured scope.",
@@ -391,6 +481,12 @@
           "type": "string",
           "const": "deny-ui-ready",
           "markdownDescription": "Denies the ui_ready command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the unlock command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-unlock",
+          "markdownDescription": "Denies the unlock command without any pre-configured scope."
         },
         {
           "description": "Default core plugins set.\n#### This default permission set includes:\n\n- `core:path:default`\n- `core:event:default`\n- `core:window:default`\n- `core:webview:default`\n- `core:app:default`\n- `core:image:default`\n- `core:resources:default`\n- `core:menu:default`\n- `core:tray:default`",

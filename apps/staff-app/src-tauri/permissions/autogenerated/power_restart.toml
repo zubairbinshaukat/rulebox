@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-power-restart"
+description = "Enables the power_restart command without any pre-configured scope."
+commands.allow = ["power_restart"]
+
+[[permission]]
+identifier = "deny-power-restart"
+description = "Denies the power_restart command without any pre-configured scope."
+commands.deny = ["power_restart"]

@@ -2,7 +2,7 @@ import { useRef } from "react";
 import gsap from "gsap";
 import { Flip } from "gsap/Flip";
 import { useGSAP } from "@gsap/react";
-import { LogoMark, Surface } from "@rulebox/ui";
+import { Avatar, LogoMark, Surface } from "@rulebox/ui";
 import type { AppEntry, TaskItem } from "@rulebox/types";
 
 import { useMotionLevel } from "../../lib/motion";
@@ -17,7 +17,8 @@ gsap.registerPlugin(Flip, useGSAP);
 /**
  * The strip: Start, then pinned apps and every open window. A click restores,
  * minimizes or focuses; right click (or Shift+F10) opens the task menu. The
- * system area (network, volume, battery, clock, account) is Step 10.
+ * The account button opens the account menu. Network, volume and the clock
+ * arrive with quick settings.
  */
 export function Taskbar() {
   const level = useMotionLevel();
@@ -27,6 +28,9 @@ export function Taskbar() {
   const flipState = useRef<Flip.FlipState | null>(null);
 
   const signedIn = useShell((s) => s.session.status === "signedIn" && !s.session.locked);
+  const employeeName = useShell((s) =>
+    s.session.status === "signedIn" ? s.session.employee.name : null,
+  );
   const apps = useShell((s) => s.apps.items);
   const tasks = useShell((s) => s.tasks);
   const inTauri = isTauri();
@@ -76,6 +80,16 @@ export function Taskbar() {
     });
   };
 
+  const openAccount = (element: Element) => {
+    if (!inTauri) {
+      return;
+    }
+    void call("popup_open", {
+      kind: "account",
+      anchor: anchorOf(element),
+    });
+  };
+
   /** A click: the app's window when it has one, else start the app. */
   const clickPinned = (app: AppEntry, windows: TaskItem[]) => {
     if (!inTauri) {
@@ -107,6 +121,11 @@ export function Taskbar() {
     >
       <Surface
         kind="bar"
+        onPointerDown={() => {
+          if (inTauri) {
+            void call("popup_close", {});
+          }
+        }}
         style={{
           height: "var(--rb-taskbar)",
           display: "flex",
@@ -124,6 +143,7 @@ export function Taskbar() {
               className="rb-task"
               aria-label="Start"
               title="Start"
+              onPointerDown={(event) => event.stopPropagation()}
               onClick={openStart}
             >
               <span className="rb-task__icon">
@@ -180,6 +200,19 @@ export function Taskbar() {
                 ),
               )}
             </div>
+            {employeeName ? (
+              <button
+                type="button"
+                className="rb-task"
+                aria-label="Account"
+                title={employeeName}
+                style={{ width: "auto", padding: "0 8px", gap: 8 }}
+                onPointerDown={(event) => event.stopPropagation()}
+                onClick={(event) => openAccount(event.currentTarget)}
+              >
+                <Avatar name={employeeName} size={28} />
+              </button>
+            ) : null}
           </>
         ) : null}
       </Surface>

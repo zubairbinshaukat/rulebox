@@ -1,13 +1,15 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { LogoMotion } from "@rulebox/ui";
 import type { EmployeeBrief, SessionState } from "@rulebox/types";
 
 import { useMotionLevel } from "../lib/motion";
 import { useShell } from "../lib/store";
+import { call, isTauri } from "../lib/tauri";
 import { Splash } from "./boot/Splash";
 import { StatusScreen, type StatusKind } from "./boot/StatusScreen";
 import { useLogoSequence } from "./boot/useLogoSequence";
 import { Desktop } from "./desktop/Desktop";
+import { LockScreen } from "./signin/LockScreen";
 import { SignIn } from "./signin/SignIn";
 
 function lastFromSession(session: SessionState): EmployeeBrief | null {
@@ -97,17 +99,41 @@ export function DesktopRoot() {
 
   const last = lastFromSession(shell.session);
 
+  const dismissPopup = () => {
+    if (isTauri()) {
+      void call("popup_close", {});
+    }
+  };
+
+  let body: ReactNode;
   if (splashActive) {
-    return <Splash seq={splash} />;
-  }
-
-  if (bootStatus) {
-    return <StatusScreen kind={bootStatus} />;
-  }
-
-  if (signedIn && shell.session.status === "signedIn") {
+    body = <Splash seq={splash} />;
+  } else if (bootStatus) {
+    body = <StatusScreen kind={bootStatus} />;
+  } else if (shell.session.status === "signingOut") {
+    body = (
+      <div
+        data-testid="signing-out"
+        style={{
+          position: "absolute",
+          inset: 0,
+          background: "var(--rb-bg)",
+          display: "flex",
+          flexDirection: "column",
+          alignItems: "center",
+          justifyContent: "center",
+          gap: 12,
+        }}
+      >
+        <LogoMotion animation="lock" />
+        <div style={{ fontSize: 15, color: "var(--rb-muted)" }}>Signing out…</div>
+      </div>
+    );
+  } else if (shell.session.status === "signedIn" && shell.session.locked) {
+    body = <LockScreen shell={shell} employee={shell.session.employee} />;
+  } else if (signedIn && shell.session.status === "signedIn") {
     const showDesktop = openFinished || openSeq.covered || (!opening && !openFinished);
-    return (
+    body = (
       <div style={{ position: "absolute", inset: 0, background: "var(--rb-bg)" }}>
         {showDesktop ? <Desktop shell={shell} employee={shell.session.employee} /> : null}
         {opening && !openFinished ? (
@@ -132,16 +158,22 @@ export function DesktopRoot() {
         ) : null}
       </div>
     );
+  } else {
+    body = (
+      <SignIn
+        shell={shell}
+        last={last}
+        onSuccess={() => {
+          setOpenFinished(false);
+          setOpening(true);
+        }}
+      />
+    );
   }
 
   return (
-    <SignIn
-      shell={shell}
-      last={last}
-      onSuccess={() => {
-        setOpenFinished(false);
-        setOpening(true);
-      }}
-    />
+    <div style={{ position: "absolute", inset: 0 }} onPointerDown={dismissPopup}>
+      {body}
+    </div>
   );
 }

@@ -255,6 +255,16 @@ export function DevOverlay() {
           bad clock
         </button>
       </div>
+      <button
+        type="button"
+        onClick={() => {
+          if (isTauri()) {
+            void call("restart_rulebox", {});
+          }
+        }}
+      >
+        Restart Rulebox
+      </button>
       <div style={{ color: "var(--rb-muted)" }}>
         Ctrl+Shift+D · hotkeys 1–7 boot, 8/9 theme, 0 Lite
       </div>

@@ -1,12 +1,16 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import { listen } from "@tauri-apps/api/event";
 import { Surface } from "@rulebox/ui";
 
 import { call, isTauri, type PopupKind } from "../../lib/tauri";
+import { AccountMenu } from "./AccountMenu";
+import { ConfirmLogout } from "./ConfirmLogout";
+import { StartMenu } from "./StartMenu";
 
 /**
- * Placeholder (Step 4): shows which popup was asked for. The real contents
- * arrive with the Start menu (Step 9) and quick settings (Step 10).
+ * The shared popup. Escape, blur and a click on the desktop or taskbar close
+ * it. The taskbar's right-click menu is a native menu and does not come through
+ * here.
  */
 export function PopupRoot() {
   const [kind, setKind] = useState<PopupKind | null>(null);
@@ -37,23 +41,55 @@ export function PopupRoot() {
     };
   }, []);
 
+  useEffect(() => {
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        event.preventDefault();
+        void call("popup_close", {});
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
+
   return (
     <Surface
       kind="popover"
       style={{
         height: "100vh",
-        padding: 16,
         fontFamily: "var(--rb-font-sans)",
         color: "var(--rb-ink)",
-        display: "flex",
-        flexDirection: "column",
-        gap: 8,
+        overflow: "hidden",
       }}
     >
-      <div style={{ fontWeight: 600 }}>Popup: {kind ?? "—"}</div>
-      <button type="button" onClick={() => void call("popup_close", {})}>
-        Close
-      </button>
+      {renderKind(kind)}
     </Surface>
   );
+}
+
+function renderKind(kind: PopupKind | null): ReactNode {
+  switch (kind) {
+    case null:
+      return null;
+    case "start":
+      return <StartMenu />;
+    case "account":
+      return <AccountMenu />;
+    case "confirm":
+      return <ConfirmLogout />;
+    case "quickSettings":
+      return <Placeholder title="Quick settings" />;
+    case "switcher":
+      return <Placeholder title="App switcher" />;
+    case "thumb":
+      return <Placeholder title="Preview" />;
+    default: {
+      const unreachable: never = kind;
+      return unreachable;
+    }
+  }
+}
+
+function Placeholder({ title }: { title: string }) {
+  return <div style={{ padding: 20, color: "var(--rb-muted)" }}>{title}</div>;
 }

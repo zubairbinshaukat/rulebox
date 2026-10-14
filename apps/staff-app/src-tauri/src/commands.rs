@@ -6,7 +6,7 @@ use std::sync::Arc;
 use rulebox_desktop::placement::Rect;
 use tauri::{AppHandle, Manager, State, Window};
 
-use crate::model::{ShellState, SignInOutcome, ThemeDto};
+use crate::model::{SessionState, ShellState, SignInOutcome, ThemeDto, VerifyOutcome};
 use crate::session;
 use crate::shellwin::{AnchorRect, DesktopHost, PopupKind};
 use crate::state::AppState;
@@ -160,6 +160,194 @@ pub async fn sign_in_last(
 pub fn switch_user(window: Window, state: State<'_, AppState>) -> Result<(), CommandError> {
     require_shell_desktop(&window)?;
     session::switch_user(&state)
+}
+
+fn desktop_window(app: &AppHandle) -> Option<tauri::WebviewWindow> {
+    app.get_webview_window(crate::shellwin::DESKTOP)
+}
+
+/// Steps 2–7 of log out. Safe to call again while already signing out.
+async fn run_sign_out(
+    app: &AppHandle,
+    state: &AppState,
+    services: &TaskServices,
+    host: &Arc<DesktopHost>,
+) -> Result<(), CommandError> {
+    let employee = match state.snapshot().session {
+        SessionState::SignedIn { employee, .. } => employee,
+        SessionState::SigningOut => return Ok(()),
+        _ => return Err(CommandError::Failed("nobody is signed in".into())),
+    };
+    state.update(|shell| {
+        shell.session = SessionState::SigningOut;
+    });
+    crate::shellwin::popup_close(app, host);
+    if let Some(desktop) = desktop_window(app) {
+        let _ = desktop.set_always_on_top(false);
+    }
+    let (state, services, employee) = (state.clone(), services.clone(), employee);
+    blocking(move || session::perform_sign_out(&state, &services, &employee)).await
+}
+
+/// Close the shell's apps and return to sign-in. Windows the shell did not
+/// launch are left open.
+#[tauri::command]
+pub async fn sign_out(
+    window: Window,
+    app: AppHandle,
+    state: State<'_, AppState>,
+    services: State<'_, TaskServices>,
+    host: State<'_, Arc<DesktopHost>>,
+) -> Result<(), CommandError> {
+    require_label(&window, "shell-")?;
+    run_sign_out(&app, &state, &services, &host).await
+}
+
+/// Names of the apps the next log out will close. Foreign windows are omitted.
+#[tauri::command]
+pub fn closing_apps(
+    window: Window,
+    state: State<'_, AppState>,
+    services: State<'_, TaskServices>,
+) -> Result<Vec<String>, CommandError> {
+    require_label(&window, "shell-")?;
+    Ok(session::apps_closing(&state, &services))
+}
+
+/// Employee lock: apps stay open, the desktop covers them.
+#[tauri::command]
+pub async fn lock(
+    window: Window,
+    app: AppHandle,
+    state: State<'_, AppState>,
+    services: State<'_, TaskServices>,
+    host: State<'_, Arc<DesktopHost>>,
+) -> Result<(), CommandError> {
+    require_label(&window, "shell-")?;
+    let dev_mode = host.mode() == rulebox_desktop::ShellMode::Dev;
+    let Some(hwnds) = session::begin_lock(&state, &services, dev_mode) else {
+        return Err(CommandError::Failed("nobody is signed in".into()));
+    };
+    crate::shellwin::popup_close(&app, &host);
+    if let Some(desktop) = desktop_window(&app) {
+        let _ = desktop.set_always_on_top(true);
+        let _ = desktop.set_focus();
+    }
+    blocking(move || {
+        for hwnd in hwnds {
+            if let Err(error) = rulebox_desktop::control::minimize(hwnd) {
+                tracing::debug!(%error, hwnd, "lock: could not minimize");
+            }
+        }
+    })
+    .await
+}
+
+/// `shell-desktop` only, same as sign-in. The password is not logged.
+#[tauri::command]
+pub async fn unlock(
+    window: Window,
+    app: AppHandle,
+    state: State<'_, AppState>,
+    password: String,
+) -> Result<VerifyOutcome, CommandError> {
+    require_shell_desktop(&window)?;
+    let outcome = session::unlock(&state, password).await?;
+    if matches!(outcome, VerifyOutcome::Ok) {
+        if let Some(desktop) = desktop_window(&app) {
+            let _ = desktop.set_always_on_top(false);
+        }
+    }
+    Ok(outcome)
+}
+
+async fn run_power(
+    app: &AppHandle,
+    state: &AppState,
+    services: &TaskServices,
+    host: &Arc<DesktopHost>,
+    sign_out_first: bool,
+    action: fn() -> rulebox_desktop::Result<()>,
+) -> Result<(), CommandError> {
+    if !rulebox_desktop::power::can_power_off() {
+        return Err(CommandError::Failed(
+            "This account cannot shut the PC down.".into(),
+        ));
+    }
+    let signed_in = matches!(state.snapshot().session, SessionState::SignedIn { .. });
+    if sign_out_first && signed_in {
+        run_sign_out(app, state, services, host).await?;
+    }
+    blocking(action)
+        .await?
+        .map_err(|error| CommandError::Failed(error.to_string()))
+}
+
+#[tauri::command]
+pub async fn power_sleep(
+    window: Window,
+    app: AppHandle,
+    state: State<'_, AppState>,
+    services: State<'_, TaskServices>,
+    host: State<'_, Arc<DesktopHost>>,
+) -> Result<(), CommandError> {
+    require_label(&window, "shell-")?;
+    run_power(&app, &state, &services, &host, false, rulebox_desktop::power::sleep).await
+}
+
+#[tauri::command]
+pub async fn power_restart(
+    window: Window,
+    app: AppHandle,
+    state: State<'_, AppState>,
+    services: State<'_, TaskServices>,
+    host: State<'_, Arc<DesktopHost>>,
+) -> Result<(), CommandError> {
+    require_label(&window, "shell-")?;
+    run_power(
+        &app,
+        &state,
+        &services,
+        &host,
+        true,
+        rulebox_desktop::power::restart,
+    )
+    .await
+}
+
+#[tauri::command]
+pub async fn power_shut_down(
+    window: Window,
+    app: AppHandle,
+    state: State<'_, AppState>,
+    services: State<'_, TaskServices>,
+    host: State<'_, Arc<DesktopHost>>,
+) -> Result<(), CommandError> {
+    require_label(&window, "shell-")?;
+    run_power(
+        &app,
+        &state,
+        &services,
+        &host,
+        true,
+        rulebox_desktop::power::shut_down,
+    )
+    .await
+}
+
+/// Debug overlay only. Exit code 0 asks the launcher to bring Rulebox back.
+#[tauri::command]
+pub fn restart_rulebox(window: Window) -> Result<(), CommandError> {
+    require_shell_desktop(&window)?;
+    #[cfg(debug_assertions)]
+    {
+        tracing::info!("restarting Rulebox (exit 0)");
+        std::process::exit(0);
+    }
+    #[cfg(not(debug_assertions))]
+    {
+        Err(CommandError::Forbidden)
+    }
 }
 
 /// Debug overlay only. Release builds keep the ACL entry but always refuse.

@@ -49,6 +49,13 @@ export type SignInOutcomeDto =
   | "offlineExpired"
   | "unknown";
 
+/** Externally-tagged serde shape of `VerifyOutcome`. */
+export type VerifyOutcomeDto =
+  | "ok"
+  | "wrongCredentials"
+  | { lockedOut: { retryAfterMs: number } }
+  | "unknown";
+
 type Commands = {
   shell_state: { args: Record<string, never>; result: ShellState };
   ui_ready: { args: Record<string, never>; result: void };
@@ -75,6 +82,14 @@ type Commands = {
   };
   sign_in_last: { args: { password: string }; result: SignInOutcomeDto };
   switch_user: { args: Record<string, never>; result: void };
+  sign_out: { args: Record<string, never>; result: void };
+  closing_apps: { args: Record<string, never>; result: string[] };
+  lock: { args: Record<string, never>; result: void };
+  unlock: { args: { password: string }; result: VerifyOutcomeDto };
+  power_sleep: { args: Record<string, never>; result: void };
+  power_restart: { args: Record<string, never>; result: void };
+  power_shut_down: { args: Record<string, never>; result: void };
+  restart_rulebox: { args: Record<string, never>; result: void };
   launch_app: { args: { id: string }; result: void };
   task_click: { args: { id: string }; result: void };
   task_close: { args: { id: string }; result: void };

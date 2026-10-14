@@ -58,10 +58,10 @@ impl PopupKind {
         match self {
             PopupKind::Start => (560, 640),
             PopupKind::QuickSettings => (360, 440),
-            PopupKind::Account => (288, 232),
+            PopupKind::Account => (300, 220),
             PopupKind::Switcher => (720, 232),
             PopupKind::Thumb => (272, 196),
-            PopupKind::Confirm => (400, 232),
+            PopupKind::Confirm => (400, 220),
         }
     }
 }
@@ -293,6 +293,9 @@ fn wire_events(window: &WebviewWindow, host: &Arc<DesktopHost>, role: WindowRole
             api.prevent_close();
         }
         WindowEvent::Focused(true) if role == WindowRole::Desktop => {
+            // Click-away: a click on the desktop dismisses the popup even when
+            // the popup never managed to take the focus (blur never fires).
+            hide_popup(&handle, &host);
             // Keep the desktop under every program window.
             if let (Some(token), Some(window)) = (&host.token, handle.get_webview_window(&label)) {
                 if let Some(hwnd) = raw_hwnd(&window) {
@@ -480,7 +483,26 @@ pub fn popup_open(
         placement::scale_px(height, monitor.scale),
     );
     let gap = placement::scale_px(POPUP_GAP_LOGICAL, monitor.scale);
-    place(&popup, popup_rect(size, anchor, bounds, gap));
+    // Switching menus (Start → confirm) keeps the bottom edge, so the panel
+    // stays by the taskbar instead of jumping to the corner.
+    let switching = host
+        .popup
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .is_some();
+    let rect = if anchor.is_none() && switching {
+        match (popup.outer_position(), popup.outer_size()) {
+            (Ok(pos), Ok(cur)) => {
+                let bottom = pos.y + cur.height as i32;
+                let raw = Rect::new(pos.x, bottom - size.1, pos.x + size.0, bottom);
+                placement::clamp_into(raw, bounds)
+            }
+            _ => popup_rect(size, anchor, bounds, gap),
+        }
+    } else {
+        popup_rect(size, anchor, bounds, gap)
+    };
+    place(&popup, rect);
 
     *host.popup.lock().unwrap_or_else(|e| e.into_inner()) = Some(kind);
     app.emit_to(POPUP, "popup://show", serde_json::json!({ "kind": kind }))

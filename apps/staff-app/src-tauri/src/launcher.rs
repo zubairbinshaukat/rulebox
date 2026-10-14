@@ -124,8 +124,11 @@ struct Running {
 #[derive(Default)]
 pub struct Launcher {
     running: Mutex<Vec<Running>>,
-    /// Processes adopted as an app's by name: `(pid, app id)`.
-    adopted: Mutex<Vec<(u32, String)>>,
+    /// Windows adopted as an app's by name: `(hwnd, pid, app id)`.
+    /// The hwnd is what log out may close. The pid is only so the taskbar
+    /// can group the window; a process that already had other windows keeps
+    /// those.
+    adopted: Mutex<Vec<(isize, u32, String)>>,
 }
 
 impl Launcher {
@@ -149,7 +152,7 @@ impl Launcher {
     /// A new window appeared for process `pid` running `exe`. If it is not
     /// in a launched job but its program has the name of an app launched a
     /// moment ago, count it as that app's.
-    pub fn adopt(&self, pid: u32, exe: Option<&Path>) {
+    pub fn adopt(&self, hwnd: isize, pid: u32, exe: Option<&Path>) {
         let Some(window_name) = exe.and_then(Path::file_name) else {
             return;
         };
@@ -178,9 +181,9 @@ impl Launcher {
             return;
         };
         let mut adopted = self.adopted.lock().unwrap_or_else(|e| e.into_inner());
-        if !adopted.iter().any(|(known, _)| *known == pid) {
-            tracing::info!(pid, app = %app_id, "window adopted as the launched app's");
-            adopted.push((pid, app_id));
+        if !adopted.iter().any(|(known, _, _)| *known == hwnd) {
+            tracing::info!(hwnd, pid, app = %app_id, "window adopted as the launched app's");
+            adopted.push((hwnd, pid, app_id));
         }
     }
 
@@ -202,10 +205,52 @@ impl Launcher {
             });
         }
         let mut adopted = self.adopted.lock().unwrap_or_else(|e| e.into_inner());
-        adopted.retain(|(pid, _)| live_pids.contains(pid));
-        for (pid, app_id) in adopted.iter() {
+        adopted.retain(|(_, pid, _)| live_pids.contains(pid));
+        for (_, pid, app_id) in adopted.iter() {
             map.insert(*pid, app_id.clone());
         }
         map
+    }
+
+    /// What log out may close, besides the shell's own app windows.
+    ///
+    /// Job pids: every window of a process the shell started. Adopted hwnds:
+    /// the specific hand-off window, not the other windows of that process
+    /// (Windows 11 Notepad is one process for every document).
+    pub fn sign_out_scope(&self, live_pids: &HashSet<u32>) -> (HashSet<u32>, HashSet<isize>) {
+        let _ = self.pid_map(live_pids);
+        let job_pids = {
+            let running = self.running.lock().unwrap_or_else(|e| e.into_inner());
+            running
+                .iter()
+                .flat_map(|entry| launch::job_pids(&entry.job))
+                .collect()
+        };
+        let adopted = {
+            let adopted = self.adopted.lock().unwrap_or_else(|e| e.into_inner());
+            adopted.iter().map(|(hwnd, _, _)| *hwnd).collect()
+        };
+        (job_pids, adopted)
+    }
+
+    /// End every job the shell created, then forget adopted hand-off pids.
+    /// Processes that were never in one of these jobs are not touched.
+    pub fn terminate_all(&self) {
+        let jobs: Vec<JobHandle> = self
+            .running
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .drain(..)
+            .map(|entry| entry.job)
+            .collect();
+        for job in &jobs {
+            if let Err(error) = launch::terminate_job(job) {
+                tracing::warn!(%error, "log out: could not end a launched app");
+            }
+        }
+        self.adopted
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .clear();
     }
 }
