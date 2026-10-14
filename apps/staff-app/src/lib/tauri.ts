@@ -24,6 +24,15 @@ export interface AnchorRect {
   height: number;
 }
 
+/** What a built-in window is showing. Mirrors Rust `appwin::AppView`. */
+export interface AppViewDto {
+  label: string;
+  lite: boolean;
+  maximized: boolean;
+  selected: number;
+  tabs: { title: string; kind: string; path: string }[];
+}
+
 /**
  * Externally-tagged serde shape of `SignInOutcome` (not in @rulebox/types yet —
  * do not run gen:types without asking).
@@ -105,6 +114,14 @@ type Commands = {
   };
   show_desktop: { args: Record<string, never>; result: void };
   refresh_catalogue: { args: Record<string, never>; result: void };
+  open_doc: { args: { kind: string; path: string }; result: string };
+  win_minimize: { args: Record<string, never>; result: void };
+  win_toggle_maximize: { args: Record<string, never>; result: void };
+  win_close: { args: Record<string, never>; result: void };
+  win_snap: { args: { zone: string }; result: void };
+  app_snapshot: { args: Record<string, never>; result: AppViewDto };
+  app_select_tab: { args: { index: number }; result: void };
+  app_close_tab: { args: { index: number }; result: void };
 };
 
 export function call<K extends keyof Commands>(

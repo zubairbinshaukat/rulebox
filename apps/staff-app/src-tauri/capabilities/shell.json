@@ -36,6 +36,7 @@
     "allow-task-end",
     "allow-task-menu",
     "allow-show-desktop",
-    "allow-refresh-catalogue"
+    "allow-refresh-catalogue",
+    "allow-open-doc"
   ]
 }

@@ -7,6 +7,14 @@
     "core:event:default",
     "core:window:allow-start-dragging",
     "allow-shell-state",
-    "allow-dismiss-notice"
+    "allow-dismiss-notice",
+    "allow-open-doc",
+    "allow-win-minimize",
+    "allow-win-toggle-maximize",
+    "allow-win-close",
+    "allow-win-snap",
+    "allow-app-snapshot",
+    "allow-app-select-tab",
+    "allow-app-close-tab"
   ]
 }

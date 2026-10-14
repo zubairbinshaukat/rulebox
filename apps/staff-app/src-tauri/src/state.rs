@@ -113,6 +113,10 @@ impl AppState {
         }
     }
 
+    pub fn app_handle(&self) -> Option<AppHandle> {
+        self.inner.app.lock().ok().and_then(|slot| slot.clone())
+    }
+
     pub fn agent(&self) -> Arc<dyn AgentPort> {
         Arc::clone(&self.inner.agent)
     }

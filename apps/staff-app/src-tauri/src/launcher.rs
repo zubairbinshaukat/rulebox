@@ -12,7 +12,7 @@ use std::time::{Duration, Instant};
 use rulebox_desktop::launch::{self, JobHandle, Launched};
 use rulebox_desktop::DesktopError;
 
-use crate::model::{AppEntry, AppKind, TaskItem};
+use crate::model::{AppEntry, AppKind, BuiltinTool, TaskItem};
 
 /// What `launch_app(id)` should do. Pure, so every rule is tested.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -21,8 +21,10 @@ pub enum LaunchPlan {
     Focus { task_id: String },
     /// Start the program.
     Start { exe: PathBuf, args: Vec<String> },
-    /// Built-in tools and web apps arrive in later steps.
+    /// Built-in tools open a Rulebox window. Web apps arrive later.
     NotYet,
+    /// Open a built-in tool (Files, and later the viewers).
+    OpenBuiltin { tool: BuiltinTool },
     /// The id is not in the catalogue.
     Unknown,
     /// Not now (Rulebox is closing).
@@ -44,7 +46,8 @@ pub fn plan_launch(
         return LaunchPlan::Unknown;
     };
     match &app.kind {
-        AppKind::Builtin { .. } | AppKind::Web(_) => LaunchPlan::NotYet,
+        AppKind::Builtin { tool } => LaunchPlan::OpenBuiltin { tool: *tool },
+        AppKind::Web(_) => LaunchPlan::NotYet,
         AppKind::Desktop(desktop) => {
             let open: Vec<&TaskItem> = tasks
                 .iter()

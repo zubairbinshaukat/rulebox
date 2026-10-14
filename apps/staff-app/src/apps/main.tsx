@@ -6,11 +6,10 @@ import "@rulebox/ui/tokens.css";
 import "@rulebox/ui/base.css";
 
 import { startShellStore, useShell } from "../lib/store";
+import { AppHost } from "./AppHost";
 
 export function AppRoot() {
   const display = useShell((s) => s.display);
-  const link = useShell((s) => s.link);
-  const session = useShell((s) => s.session);
 
   useEffect(() => {
     void startShellStore();
@@ -21,17 +20,7 @@ export function AppRoot() {
     setLite(display.lite);
   }, [display.lite, display.theme]);
 
-  const sessionText =
-    session.status === "signedIn" ? session.employee.name : session.status;
-
-  return (
-    <div style={{ padding: 24, color: "var(--rb-fg, var(--rb-ink))" }}>
-      <div>Rulebox app</div>
-      <div style={{ marginTop: 8, fontSize: 13, color: "var(--rb-muted)" }}>
-        Link: {link} · Session: {sessionText}
-      </div>
-    </div>
-  );
+  return <AppHost />;
 }
 
 createRoot(document.getElementById("root")!).render(

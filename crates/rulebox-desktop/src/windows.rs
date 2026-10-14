@@ -25,6 +25,7 @@ use windows::Win32::UI::WindowsAndMessaging::{
 
 use crate::error::{DesktopError, Result};
 use crate::mode::ShellToken;
+use crate::placement::Rect;
 
 /// Long titles are cut here; a taskbar tooltip never needs more.
 const MAX_TITLE_CHARS: usize = 512;
@@ -324,6 +325,26 @@ pub fn set_tool_window(hwnd: isize) -> Result<()> {
             0,
             0,
             SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE | SWP_FRAMECHANGED,
+        )
+        .map_err(|e| DesktopError::win32("SetWindowPos", &e))
+    }
+}
+
+/// Move and size one of our own windows so its outer rectangle is exactly
+/// `rect` (physical pixels). Tauri's size call leaves a frame outside that
+/// rectangle, which would sit on the taskbar strip.
+pub fn place_outer(hwnd: isize, rect: Rect) -> Result<()> {
+    // SAFETY: SetWindowPos on a handle of our own window. A bad handle fails
+    // the call; it does not write through a pointer.
+    unsafe {
+        SetWindowPos(
+            hwnd_from(hwnd),
+            None,
+            rect.left,
+            rect.top,
+            rect.width().max(1),
+            rect.height().max(1),
+            SWP_NOZORDER | SWP_NOACTIVATE,
         )
         .map_err(|e| DesktopError::win32("SetWindowPos", &e))
     }

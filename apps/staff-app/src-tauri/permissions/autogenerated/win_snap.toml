@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-win-snap"
+description = "Enables the win_snap command without any pre-configured scope."
+commands.allow = ["win_snap"]
+
+[[permission]]
+identifier = "deny-win-snap"
+description = "Denies the win_snap command without any pre-configured scope."
+commands.deny = ["win_snap"]

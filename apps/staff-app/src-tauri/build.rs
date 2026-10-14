@@ -34,11 +34,23 @@ const SHELL_COMMANDS: &[&str] = &[
     "task_menu",
     "show_desktop",
     "refresh_catalogue",
+    "open_doc",
 ];
 
 /// Commands callable from `app-*` windows. A name may also appear in
 /// `SHELL_COMMANDS`.
-const APP_COMMANDS: &[&str] = &["shell_state", "dismiss_notice"];
+const APP_COMMANDS: &[&str] = &[
+    "shell_state",
+    "dismiss_notice",
+    "open_doc",
+    "win_minimize",
+    "win_toggle_maximize",
+    "win_close",
+    "win_snap",
+    "app_snapshot",
+    "app_select_tab",
+    "app_close_tab",
+];
 
 fn main() {
     let commands = merge(SHELL_COMMANDS, APP_COMMANDS);

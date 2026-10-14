@@ -177,6 +177,24 @@
       "description": "Permission identifier",
       "oneOf": [
         {
+          "description": "Enables the app_close_tab command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-app-close-tab",
+          "markdownDescription": "Enables the app_close_tab command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the app_select_tab command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-app-select-tab",
+          "markdownDescription": "Enables the app_select_tab command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the app_snapshot command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-app-snapshot",
+          "markdownDescription": "Enables the app_snapshot command without any pre-configured scope."
+        },
+        {
           "description": "Enables the closing_apps command without any pre-configured scope.",
           "type": "string",
           "const": "allow-closing-apps",
@@ -217,6 +235,12 @@
           "type": "string",
           "const": "allow-notices-seen",
           "markdownDescription": "Enables the notices_seen command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the open_doc command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-open-doc",
+          "markdownDescription": "Enables the open_doc command without any pre-configured scope."
         },
         {
           "description": "Enables the popup_close command without any pre-configured scope.",
@@ -363,6 +387,48 @@
           "markdownDescription": "Enables the unlock command without any pre-configured scope."
         },
         {
+          "description": "Enables the win_close command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-win-close",
+          "markdownDescription": "Enables the win_close command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the win_minimize command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-win-minimize",
+          "markdownDescription": "Enables the win_minimize command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the win_snap command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-win-snap",
+          "markdownDescription": "Enables the win_snap command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the win_toggle_maximize command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-win-toggle-maximize",
+          "markdownDescription": "Enables the win_toggle_maximize command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the app_close_tab command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-app-close-tab",
+          "markdownDescription": "Denies the app_close_tab command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the app_select_tab command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-app-select-tab",
+          "markdownDescription": "Denies the app_select_tab command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the app_snapshot command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-app-snapshot",
+          "markdownDescription": "Denies the app_snapshot command without any pre-configured scope."
+        },
+        {
           "description": "Denies the closing_apps command without any pre-configured scope.",
           "type": "string",
           "const": "deny-closing-apps",
@@ -403,6 +469,12 @@
           "type": "string",
           "const": "deny-notices-seen",
           "markdownDescription": "Denies the notices_seen command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the open_doc command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-open-doc",
+          "markdownDescription": "Denies the open_doc command without any pre-configured scope."
         },
         {
           "description": "Denies the popup_close command without any pre-configured scope.",
@@ -547,6 +619,30 @@
           "type": "string",
           "const": "deny-unlock",
           "markdownDescription": "Denies the unlock command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the win_close command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-win-close",
+          "markdownDescription": "Denies the win_close command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the win_minimize command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-win-minimize",
+          "markdownDescription": "Denies the win_minimize command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the win_snap command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-win-snap",
+          "markdownDescription": "Denies the win_snap command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the win_toggle_maximize command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-win-toggle-maximize",
+          "markdownDescription": "Denies the win_toggle_maximize command without any pre-configured scope."
         },
         {
           "description": "Default core plugins set.\n#### This default permission set includes:\n\n- `core:path:default`\n- `core:event:default`\n- `core:window:default`\n- `core:webview:default`\n- `core:app:default`\n- `core:image:default`\n- `core:resources:default`\n- `core:menu:default`\n- `core:tray:default`",

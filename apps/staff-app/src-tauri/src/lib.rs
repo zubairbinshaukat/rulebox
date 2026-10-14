@@ -1,6 +1,7 @@
 //! Rulebox Staff App (Tauri). Privileged work goes through the agent over IPC.
 
 pub mod agent;
+pub mod appwin;
 pub mod commands;
 pub mod launcher;
 mod logging;
@@ -120,6 +121,14 @@ pub fn run() {
             commands::task_menu,
             commands::show_desktop,
             commands::refresh_catalogue,
+            commands::open_doc,
+            commands::win_minimize,
+            commands::win_toggle_maximize,
+            commands::win_close,
+            commands::win_snap,
+            commands::app_snapshot,
+            commands::app_select_tab,
+            commands::app_close_tab,
         ])
         .setup(move |app| {
             // `IpcClient::spawn` calls `tokio::spawn`; run inside Tauri's runtime.
@@ -147,6 +156,7 @@ pub fn run() {
             app.manage(app_state);
 
             app.manage(services.clone());
+            app.manage(std::sync::Arc::new(appwin::AppWindows::default()));
             let host = shellwin::init(app.handle(), mode, services.clone())?;
             app.manage(host);
             tracing::info!(?mode, "shell windows ready");

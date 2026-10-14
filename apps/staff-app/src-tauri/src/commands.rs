@@ -6,6 +6,7 @@ use std::sync::Arc;
 use rulebox_desktop::placement::Rect;
 use tauri::{AppHandle, Manager, State, Window};
 
+use crate::appwin::{self, AppView, AppWindows, SnapZone};
 use crate::model::{SessionState, ShellState, SignInOutcome, ThemeDto, VerifyOutcome};
 use crate::session;
 use crate::shellwin::{AnchorRect, DesktopHost, PopupKind};
@@ -239,6 +240,9 @@ async fn run_sign_out(
         shell.session = SessionState::SigningOut;
     });
     crate::shellwin::popup_close(app, host);
+    if let Some(apps) = app.try_state::<Arc<crate::appwin::AppWindows>>() {
+        apps.close_all(app);
+    }
     if let Some(desktop) = desktop_window(app) {
         let _ = desktop.set_always_on_top(false);
     }
@@ -286,6 +290,9 @@ pub async fn lock(
         return Err(CommandError::Failed("nobody is signed in".into()));
     };
     crate::shellwin::popup_close(&app, &host);
+    if let Some(apps) = app.try_state::<Arc<crate::appwin::AppWindows>>() {
+        apps.minimize_all(&app);
+    }
     if let Some(desktop) = desktop_window(&app) {
         let _ = desktop.set_always_on_top(true);
         let _ = desktop.set_focus();
@@ -547,8 +554,9 @@ pub async fn launch_app(
     id: String,
 ) -> Result<(), CommandError> {
     require_label(&window, "shell-")?;
+    let app = window.app_handle().clone();
     let (state, services) = (state.inner().clone(), services.inner().clone());
-    blocking(move || taskops::launch(&services, &state, &id)).await
+    blocking(move || taskops::launch(&app, &services, &state, &id)).await
 }
 
 /// A click on a window's taskbar button (restore / minimize / focus).
@@ -604,6 +612,113 @@ pub async fn show_desktop(
     require_label(&window, "shell-")?;
     let services = services.inner().clone();
     blocking(move || taskops::show_desktop(&services)).await
+}
+
+/// Open a built-in document. The path is relative to the employee root.
+#[tauri::command]
+pub fn open_doc(
+    window: Window,
+    app: AppHandle,
+    state: State<'_, AppState>,
+    host: State<'_, Arc<AppWindows>>,
+    kind: String,
+    path: String,
+) -> Result<String, CommandError> {
+    require_shell_or_app(&window)?;
+    let doc = appwin::parse_doc(&kind, &path).map_err(CommandError::Failed)?;
+    host.open(&app, state.inner(), doc)
+        .map_err(map_open_error(state.inner()))
+}
+
+/// Minimize the calling built-in window only.
+#[tauri::command]
+pub fn win_minimize(window: Window, app: AppHandle) -> Result<(), CommandError> {
+    require_label(&window, "app-")?;
+    AppWindows::minimize(&app, window.label()).map_err(CommandError::Failed)
+}
+
+/// Maximize or restore the calling built-in window only.
+#[tauri::command]
+pub fn win_toggle_maximize(
+    window: Window,
+    app: AppHandle,
+    host: State<'_, Arc<AppWindows>>,
+) -> Result<(), CommandError> {
+    require_label(&window, "app-")?;
+    host.toggle_maximize(&app, window.label())
+        .map_err(CommandError::Failed)
+}
+
+/// Close the calling built-in window only.
+#[tauri::command]
+pub fn win_close(window: Window, app: AppHandle) -> Result<(), CommandError> {
+    require_label(&window, "app-")?;
+    AppWindows::close(&app, window.label()).map_err(CommandError::Failed)
+}
+
+/// Snap the calling built-in window to a zone of the work area.
+#[tauri::command]
+pub fn win_snap(
+    window: Window,
+    app: AppHandle,
+    host: State<'_, Arc<AppWindows>>,
+    zone: SnapZone,
+) -> Result<(), CommandError> {
+    require_label(&window, "app-")?;
+    host.snap(&app, window.label(), zone)
+        .map_err(CommandError::Failed)
+}
+
+/// What the calling built-in window is showing.
+#[tauri::command]
+pub fn app_snapshot(
+    window: Window,
+    host: State<'_, Arc<AppWindows>>,
+) -> Result<AppView, CommandError> {
+    require_label(&window, "app-")?;
+    host.snapshot(window.label())
+        .ok_or_else(|| CommandError::Failed("that window is not open".into()))
+}
+
+/// Select a tab in the calling window (Lite mode).
+#[tauri::command]
+pub fn app_select_tab(
+    window: Window,
+    app: AppHandle,
+    host: State<'_, Arc<AppWindows>>,
+    index: u32,
+) -> Result<(), CommandError> {
+    require_label(&window, "app-")?;
+    host.select_tab(&app, window.label(), index as usize)
+        .map_err(CommandError::Failed)
+}
+
+/// Close a tab in the calling window. The last tab closes the window.
+#[tauri::command]
+pub fn app_close_tab(
+    window: Window,
+    app: AppHandle,
+    host: State<'_, Arc<AppWindows>>,
+    index: u32,
+) -> Result<(), CommandError> {
+    require_label(&window, "app-")?;
+    host.close_tab(&app, window.label(), index as usize)
+        .map_err(CommandError::Failed)
+}
+
+fn map_open_error(state: &AppState) -> impl Fn(String) -> CommandError + '_ {
+    move |error| {
+        if error == "close a tab first" {
+            // `open` already posted the notice.
+            return CommandError::Failed(error);
+        }
+        state.notify(
+            crate::model::NoticeTone::Warning,
+            "That window could not be opened.",
+            Some(error.clone()),
+        );
+        CommandError::Failed(error)
+    }
 }
 
 /// Right-click menu of a taskbar button: for a window (`id`) or for a pinned
@@ -677,6 +792,7 @@ pub fn on_menu_event(app: &AppHandle, menu_id: &str) {
     };
     let (services, state) = (services.inner().clone(), state.inner().clone());
     let menu_id = menu_id.to_string();
+    let app = app.clone();
     tauri::async_runtime::spawn_blocking(move || {
         tracing::info!(menu_id, "task menu choice");
         if let Some(id) = menu_id.strip_prefix("task-close:") {
@@ -689,7 +805,7 @@ pub fn on_menu_event(app: &AppHandle, menu_id: &str) {
                 Err(error) => tracing::warn!(%error, "task menu: end failed"),
             }
         } else if let Some(app_id) = menu_id.strip_prefix("app-open:") {
-            taskops::launch(&services, &state, app_id);
+            taskops::launch(&app, &services, &state, app_id);
         }
     });
 }
@@ -737,12 +853,21 @@ pub fn spawn_dev_cmd_poller(state: AppState) {
         /// Sign in as a demo employee without typing into the screen.
         #[serde(default)]
         sign_in: Option<DevSignIn>,
+        /// Open a built-in document (`kind` is `files` or `view`).
+        #[serde(default)]
+        open_doc: Option<DevOpenDoc>,
     }
 
     #[derive(Debug, Deserialize)]
     struct DevSignIn {
         username: String,
         password: String,
+    }
+
+    #[derive(Debug, Deserialize)]
+    struct DevOpenDoc {
+        kind: String,
+        path: String,
     }
 
     tauri::async_runtime::spawn(async move {
@@ -785,6 +910,20 @@ pub fn spawn_dev_cmd_poller(state: AppState) {
                         items,
                     };
                 });
+            }
+            if let Some(doc) = cmd.open_doc {
+                let Some(handle) = state.app_handle() else {
+                    continue;
+                };
+                match appwin::parse_doc(&doc.kind, &doc.path) {
+                    Ok(parsed) => {
+                        let host = handle.state::<Arc<AppWindows>>();
+                        if let Err(error) = host.open(&handle, &state, parsed) {
+                            tracing::warn!(%error, "dev cmd open_doc failed");
+                        }
+                    }
+                    Err(error) => tracing::warn!(%error, "dev cmd open_doc refused"),
+                }
             }
         }
     });

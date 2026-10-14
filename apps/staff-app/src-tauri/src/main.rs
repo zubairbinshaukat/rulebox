@@ -716,7 +716,12 @@ mod step8_tests {
         ];
         assert_eq!(plan_launch(&catalogue, "nope", &[], false), LaunchPlan::Unknown);
         assert_eq!(plan_launch(&catalogue, "notes", &[], true), LaunchPlan::Closing);
-        assert_eq!(plan_launch(&catalogue, "files", &[], false), LaunchPlan::NotYet);
+        assert_eq!(
+            plan_launch(&catalogue, "files", &[], false),
+            LaunchPlan::OpenBuiltin {
+                tool: BuiltinTool::Files
+            }
+        );
         assert_eq!(plan_launch(&catalogue, "orders", &[], false), LaunchPlan::NotYet);
     }
 
@@ -1181,5 +1186,159 @@ mod step10_tests {
         assert_eq!(theme_for_sign_in(org, None), ThemeDto::Auto);
         assert_eq!(theme_for_sign_in(org, Some(ThemeDto::Dark)), ThemeDto::Dark);
         assert_eq!(theme_after_sign_out(org), ThemeDto::Auto);
+    }
+}
+
+#[cfg(all(test, debug_assertions))]
+mod step11_tests {
+    use rulebox_desktop::placement::Rect;
+    use rulebox_staff_lib::appwin::{
+        cascade_rect, check_relative, consider_tab, default_logical_size, doc_key, kind_name,
+        kind_of, parse_places, restore_if_fits, snap_rect, AppDoc, DocKind, OpenTab, SavedPlace,
+        SnapZone, TabAction, MAX_TABS,
+    };
+
+    fn doc_files(path: &str) -> AppDoc {
+        AppDoc::Files { path: path.into() }
+    }
+
+    fn doc_view(path: &str) -> AppDoc {
+        AppDoc::View { path: path.into() }
+    }
+
+    #[test]
+    fn snap_rectangles_for_two_work_areas() {
+        let hd = Rect::new(0, 0, 1920, 1040);
+        assert_eq!(snap_rect(SnapZone::Left, hd), Some(Rect::new(0, 0, 960, 1040)));
+        assert_eq!(snap_rect(SnapZone::Right, hd), Some(Rect::new(960, 0, 1920, 1040)));
+        assert_eq!(snap_rect(SnapZone::TopLeft, hd), Some(Rect::new(0, 0, 960, 520)));
+        assert_eq!(
+            snap_rect(SnapZone::TopRight, hd),
+            Some(Rect::new(960, 0, 1920, 520))
+        );
+        assert_eq!(
+            snap_rect(SnapZone::BottomLeft, hd),
+            Some(Rect::new(0, 520, 960, 1040))
+        );
+        assert_eq!(
+            snap_rect(SnapZone::BottomRight, hd),
+            Some(Rect::new(960, 520, 1920, 1040))
+        );
+        assert_eq!(snap_rect(SnapZone::Maximize, hd), Some(hd));
+        assert_eq!(snap_rect(SnapZone::Restore, hd), None);
+
+        let side = Rect::new(-1920, 40, -640, 760);
+        assert_eq!(
+            snap_rect(SnapZone::Left, side),
+            Some(Rect::new(-1920, 40, -1280, 760))
+        );
+        assert_eq!(
+            snap_rect(SnapZone::Right, side),
+            Some(Rect::new(-1280, 40, -640, 760))
+        );
+        assert_eq!(
+            snap_rect(SnapZone::BottomRight, side),
+            Some(Rect::new(-1280, 400, -640, 760))
+        );
+    }
+
+    #[test]
+    fn cascade_steps_and_wraps() {
+        let area = Rect::new(0, 0, 800, 600);
+        let size = (400, 300);
+        assert_eq!(cascade_rect(0, size, area, 28), Rect::new(0, 0, 400, 300));
+        assert_eq!(cascade_rect(1, size, area, 28), Rect::new(28, 28, 428, 328));
+        assert_eq!(cascade_rect(11, size, area, 28), Rect::new(0, 0, 400, 300));
+        let wide = Rect::new(10, 20, 30, 40);
+        assert_eq!(cascade_rect(3, (500, 500), wide, 28), Rect::new(10, 20, 30, 40));
+    }
+
+    #[test]
+    fn the_ninth_tab_asks_to_close_one() {
+        let mut tabs: Vec<OpenTab> = (0..MAX_TABS)
+            .map(|n| OpenTab {
+                key: format!("view:n{n}.txt"),
+                title: format!("n{n}.txt"),
+                kind: "text".into(),
+                path: format!("n{n}.txt"),
+            })
+            .collect();
+        assert_eq!(
+            consider_tab(&tabs, &doc_view("extra.txt"), MAX_TABS),
+            TabAction::AskToClose
+        );
+        assert!(matches!(
+            consider_tab(&tabs, &doc_view("n0.txt"), MAX_TABS),
+            TabAction::Select(0)
+        ));
+        tabs.clear();
+        let TabAction::Append(first) = consider_tab(&tabs, &doc_files(""), MAX_TABS) else {
+            panic!("the first document is a new tab");
+        };
+        assert_eq!(first.key, doc_key(&doc_files("")));
+        tabs.push(first);
+        assert!(matches!(
+            consider_tab(&tabs, &doc_files(""), MAX_TABS),
+            TabAction::Select(0)
+        ));
+        assert!(matches!(
+            consider_tab(&tabs, &doc_view("notes.txt"), MAX_TABS),
+            TabAction::Append(_)
+        ));
+    }
+
+    #[test]
+    fn restore_uses_a_rectangle_that_still_fits() {
+        let area = Rect::new(0, 0, 1000, 800);
+        let fits = SavedPlace {
+            kind: "files".into(),
+            x: 10,
+            y: 20,
+            w: 400,
+            h: 300,
+            maximized: false,
+        };
+        assert_eq!(
+            restore_if_fits(&fits, area),
+            Some(Rect::new(10, 20, 410, 320))
+        );
+        let outside = SavedPlace {
+            x: 900,
+            w: 200,
+            ..fits.clone()
+        };
+        assert_eq!(restore_if_fits(&outside, area), None);
+        let maximized = SavedPlace {
+            maximized: true,
+            x: -100,
+            ..fits
+        };
+        assert_eq!(restore_if_fits(&maximized, area), Some(area));
+        let empty = SavedPlace {
+            kind: "files".into(),
+            x: 0,
+            y: 0,
+            w: 0,
+            h: 10,
+            maximized: false,
+        };
+        assert_eq!(restore_if_fits(&empty, area), None);
+    }
+
+    #[test]
+    fn kinds_sizes_and_relative_paths() {
+        assert_eq!(default_logical_size(DocKind::Files), (860, 540));
+        assert_eq!(default_logical_size(DocKind::Pdf), (820, 700));
+        assert_eq!(default_logical_size(DocKind::Media), (980, 580));
+        assert_eq!(kind_name(kind_of(&doc_view("a/b.PNG"))), "image");
+        assert_eq!(kind_name(kind_of(&doc_view("song.mp3"))), "media");
+        assert_eq!(doc_key(&doc_files("a/b")), "files:a/b");
+        assert_eq!(check_relative("").as_deref(), Ok(""));
+        assert_eq!(check_relative(r"docs\note.txt").as_deref(), Ok("docs/note.txt"));
+        assert!(check_relative("..").is_err());
+        assert!(check_relative("a/../b").is_err());
+        assert!(check_relative("C:/secret").is_err());
+        assert!(check_relative("/etc/passwd").is_err());
+        assert!(parse_places("{").is_empty());
     }
 }

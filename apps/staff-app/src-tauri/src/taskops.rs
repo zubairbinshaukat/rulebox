@@ -2,8 +2,11 @@
 //! calls: run it from a worker thread (`spawn_blocking`), never from the
 //! message loop or a UI thread.
 
+use tauri::{AppHandle, Manager};
+
 use rulebox_desktop::control;
 
+use crate::appwin::{self, AppWindows};
 use crate::launcher::{failure_notice, plan_launch, LaunchPlan};
 use crate::model::NoticeTone;
 use crate::state::AppState;
@@ -105,7 +108,7 @@ pub fn show_desktop(services: &TaskServices) {
 }
 
 /// Open an app from the catalogue: focus it when it is open, else start it.
-pub fn launch(services: &TaskServices, state: &AppState, id: &str) {
+pub fn launch(app: &AppHandle, services: &TaskServices, state: &AppState, id: &str) {
     let (catalogue, tasks, closing) =
         state.read(|s| (s.apps.items.clone(), s.tasks.clone(), s.banner.is_some()));
     let name = catalogue
@@ -135,6 +138,21 @@ pub fn launch(services: &TaskServices, state: &AppState, id: &str) {
                 tracing::warn!(%error, app = id, "app launch failed");
                 let (title, detail) = failure_notice(&name, &error);
                 state.notify(NoticeTone::Warning, title, detail);
+            }
+        },
+        LaunchPlan::OpenBuiltin { tool } => match tool {
+            crate::model::BuiltinTool::Files => {
+                let host = app.state::<std::sync::Arc<AppWindows>>();
+                if let Err(error) = appwin::open_files(&host, app, state) {
+                    if error != "close a tab first" {
+                        tracing::warn!(%error, app = id, "built-in window failed");
+                        state.notify(
+                            NoticeTone::Warning,
+                            format!("{name} could not be opened."),
+                            Some(error),
+                        );
+                    }
+                }
             }
         },
         LaunchPlan::NotYet => state.notify(
