@@ -4,12 +4,14 @@
 use std::sync::Arc;
 
 use rulebox_desktop::placement::Rect;
-use tauri::{AppHandle, State, Window};
+use tauri::{AppHandle, Manager, State, Window};
 
 use crate::model::{ShellState, SignInOutcome, ThemeDto};
 use crate::session;
 use crate::shellwin::{AnchorRect, DesktopHost, PopupKind};
 use crate::state::AppState;
+use crate::taskops;
+use crate::tasks::TaskServices;
 
 /// Why a command refused to run.
 #[derive(Debug, thiserror::Error)]
@@ -270,17 +272,172 @@ pub fn dev_set_boot(
     }
 }
 
-/// Launch an approved app. Step 8 wires the real launcher; until then a notice.
+/// Run blocking Win32 work off the UI threads.
+async fn blocking<F, R>(work: F) -> Result<R, CommandError>
+where
+    F: FnOnce() -> R + Send + 'static,
+    R: Send + 'static,
+{
+    tauri::async_runtime::spawn_blocking(work)
+        .await
+        .map_err(|error| CommandError::Failed(error.to_string()))
+}
+
+/// Open an app from the catalogue: focus it when it is open, else start it.
+/// React sends an id; the program path comes only from the catalogue.
 #[tauri::command]
-pub fn launch_app(window: Window, state: State<'_, AppState>, id: String) -> Result<(), CommandError> {
+pub async fn launch_app(
+    window: Window,
+    state: State<'_, AppState>,
+    services: State<'_, TaskServices>,
+    id: String,
+) -> Result<(), CommandError> {
     require_label(&window, "shell-")?;
-    let _ = id;
-    state.notify(
-        crate::model::NoticeTone::Neutral,
-        "Not available yet",
-        Some("App launch arrives in a later step.".into()),
-    );
-    Ok(())
+    let (state, services) = (state.inner().clone(), services.inner().clone());
+    blocking(move || taskops::launch(&services, &state, &id)).await
+}
+
+/// A click on a window's taskbar button (restore / minimize / focus).
+#[tauri::command]
+pub async fn task_click(
+    window: Window,
+    state: State<'_, AppState>,
+    services: State<'_, TaskServices>,
+    id: String,
+) -> Result<(), CommandError> {
+    require_label(&window, "shell-")?;
+    let (state, services) = (state.inner().clone(), services.inner().clone());
+    blocking(move || taskops::click(&services, &state, &id))
+        .await?
+        .map_err(CommandError::Failed)
+}
+
+#[tauri::command]
+pub async fn task_close(
+    window: Window,
+    state: State<'_, AppState>,
+    services: State<'_, TaskServices>,
+    id: String,
+) -> Result<(), CommandError> {
+    require_label(&window, "shell-")?;
+    let (state, services) = (state.inner().clone(), services.inner().clone());
+    blocking(move || taskops::close(&services, &state, &id))
+        .await?
+        .map_err(CommandError::Failed)
+}
+
+/// End the program of a window that is not responding.
+#[tauri::command]
+pub async fn task_end(
+    window: Window,
+    state: State<'_, AppState>,
+    services: State<'_, TaskServices>,
+    id: String,
+) -> Result<(), CommandError> {
+    require_label(&window, "shell-")?;
+    let (state, services) = (state.inner().clone(), services.inner().clone());
+    blocking(move || taskops::end(&services, &state, &id))
+        .await?
+        .map_err(CommandError::Failed)
+}
+
+/// Minimize every open window; the next call restores them.
+#[tauri::command]
+pub async fn show_desktop(
+    window: Window,
+    services: State<'_, TaskServices>,
+) -> Result<(), CommandError> {
+    require_label(&window, "shell-")?;
+    let services = services.inner().clone();
+    blocking(move || taskops::show_desktop(&services)).await
+}
+
+/// Right-click menu of a taskbar button: for a window (`id`) or for a pinned
+/// app that is not open (`app_id`). A native menu, so it does not depend on
+/// the shared popup window.
+#[tauri::command]
+pub async fn task_menu(
+    window: Window,
+    app: AppHandle,
+    services: State<'_, TaskServices>,
+    id: Option<String>,
+    app_id: Option<String>,
+) -> Result<(), CommandError> {
+    use tauri::menu::{ContextMenu, Menu, MenuItem};
+
+    require_label(&window, "shell-")?;
+    let build = |error: tauri::Error| CommandError::Failed(error.to_string());
+
+    let mut items: Vec<MenuItem<tauri::Wry>> = Vec::new();
+    if let Some(id) = &id {
+        let (_, facts) = services
+            .registry
+            .lookup(id)
+            .ok_or_else(|| CommandError::Failed("that window is not listed".into()))?;
+        items.push(
+            MenuItem::with_id(&app, format!("task-close:{id}"), "Close window", true, None::<&str>)
+                .map_err(build)?,
+        );
+        if facts.hung && !facts.own {
+            items.push(
+                MenuItem::with_id(
+                    &app,
+                    format!("task-end:{id}"),
+                    "End app (not responding)",
+                    true,
+                    None::<&str>,
+                )
+                .map_err(build)?,
+            );
+        }
+    } else if let Some(app_id) = &app_id {
+        items.push(
+            MenuItem::with_id(&app, format!("app-open:{app_id}"), "Open", true, None::<&str>)
+                .map_err(build)?,
+        );
+    }
+    if items.is_empty() {
+        return Ok(());
+    }
+    // The borrowed trait objects are not `Send`: keep them out of the
+    // future's state by finishing with them before the await below.
+    let menu = {
+        let refs: Vec<&dyn tauri::menu::IsMenuItem<tauri::Wry>> = items
+            .iter()
+            .map(|item| item as &dyn tauri::menu::IsMenuItem<tauri::Wry>)
+            .collect();
+        Menu::with_items(&app, &refs).map_err(build)?
+    };
+    drop(items);
+    // Blocks until the menu closes; the choice arrives as a menu event.
+    blocking(move || menu.popup(window)).await?.map_err(build)
+}
+
+/// A choice in the task menu (`Builder::on_menu_event`).
+pub fn on_menu_event(app: &AppHandle, menu_id: &str) {
+    let Some(services) = app.try_state::<TaskServices>() else {
+        return;
+    };
+    let Some(state) = app.try_state::<AppState>() else {
+        return;
+    };
+    let (services, state) = (services.inner().clone(), state.inner().clone());
+    let menu_id = menu_id.to_string();
+    tauri::async_runtime::spawn_blocking(move || {
+        tracing::info!(menu_id, "task menu choice");
+        if let Some(id) = menu_id.strip_prefix("task-close:") {
+            if let Err(error) = taskops::close(&services, &state, id) {
+                tracing::warn!(%error, "task menu: close failed");
+            }
+        } else if let Some(id) = menu_id.strip_prefix("task-end:") {
+            match taskops::end(&services, &state, id) {
+                Ok(()) => tracing::info!("task menu: app ended"),
+                Err(error) => tracing::warn!(%error, "task menu: end failed"),
+            }
+        } else if let Some(app_id) = menu_id.strip_prefix("app-open:") {
+            taskops::launch(&services, &state, app_id);
+        }
+    });
 }
 
 /// Re-fetch the employee catalogue (empty / error desktop actions).

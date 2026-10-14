@@ -28,10 +28,19 @@ export interface TaskButtonProps {
   /** Stable key for the reorder animation. */
   flipId: string;
   onClick?: () => void;
+  /** Right click or Shift+F10. */
+  onContextMenu?: () => void;
 }
 
 /** One taskbar button: icon, open / active indicator, window count, warning. */
-export function TaskButton({ label, state, icon, flipId, onClick }: TaskButtonProps) {
+export function TaskButton({
+  label,
+  state,
+  icon,
+  flipId,
+  onClick,
+  onContextMenu,
+}: TaskButtonProps) {
   return (
     <button
       type="button"
@@ -44,6 +53,10 @@ export function TaskButton({ label, state, icon, flipId, onClick }: TaskButtonPr
       data-minimized={state.minimized}
       data-flashing={state.flashing}
       onClick={onClick}
+      onContextMenu={(event) => {
+        event.preventDefault();
+        onContextMenu?.();
+      }}
     >
       <span className="rb-task__icon">{icon}</span>
       {state.count > 1 ? <span className="rb-task__count">{state.count}</span> : null}

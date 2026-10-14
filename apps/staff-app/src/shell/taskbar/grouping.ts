@@ -36,6 +36,22 @@ export function groupTaskbar(apps: AppEntry[], tasks: TaskItem[]): TaskbarButton
   return buttons;
 }
 
+/**
+ * The window a click on a button goes to: the only one; with several, the
+ * one after the active window (wrapping), else the first. `null` when the
+ * app has no window, which means "launch it".
+ */
+export function clickTarget(tasks: TaskItem[]): TaskItem | null {
+  if (tasks.length === 0) {
+    return null;
+  }
+  if (tasks.length === 1) {
+    return tasks[0]!;
+  }
+  const active = tasks.findIndex((task) => task.active);
+  return tasks[(active + 1) % tasks.length]!;
+}
+
 /** The state a button shows, summed over its windows. */
 export interface ButtonState {
   open: boolean;

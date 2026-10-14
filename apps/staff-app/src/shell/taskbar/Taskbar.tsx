@@ -3,20 +3,21 @@ import gsap from "gsap";
 import { Flip } from "gsap/Flip";
 import { useGSAP } from "@gsap/react";
 import { LogoMark, Surface } from "@rulebox/ui";
+import type { AppEntry, TaskItem } from "@rulebox/types";
 
 import { useMotionLevel } from "../../lib/motion";
 import { useShell } from "../../lib/store";
 import { anchorOf, call, isTauri } from "../../lib/tauri";
 import { AppIcon } from "../appIcon";
-import { groupTaskbar, labelOf, stateOf } from "./grouping";
+import { clickTarget, groupTaskbar, labelOf, stateOf } from "./grouping";
 import { TaskButton, WindowIcon } from "./TaskButton";
 
 gsap.registerPlugin(Flip, useGSAP);
 
 /**
- * The strip: Start, then pinned apps and every open window. The system area
- * (network, volume, battery, clock, account) is Step 10. Clicking a window
- * button does nothing yet: window control is Step 8.
+ * The strip: Start, then pinned apps and every open window. A click restores,
+ * minimizes or focuses; right click (or Shift+F10) opens the task menu. The
+ * system area (network, volume, battery, clock, account) is Step 10.
  */
 export function Taskbar() {
   const level = useMotionLevel();
@@ -75,9 +76,22 @@ export function Taskbar() {
     });
   };
 
-  const launch = (id: string) => {
+  /** A click: the app's window when it has one, else start the app. */
+  const clickPinned = (app: AppEntry, windows: TaskItem[]) => {
+    if (!inTauri) {
+      return;
+    }
+    const target = clickTarget(windows);
+    if (target) {
+      void call("task_click", { id: target.id });
+    } else {
+      void call("launch_app", { id: app.id });
+    }
+  };
+
+  const menuFor = (taskId: string | null, appId: string | null) => {
     if (inTauri) {
-      void call("launch_app", { id });
+      void call("task_menu", { id: taskId, appId });
     }
   };
 
@@ -143,7 +157,11 @@ export function Taskbar() {
                     label={labelOf(button.app.name, button.tasks)}
                     state={stateOf(button.tasks)}
                     icon={<AppIcon app={button.app} />}
-                    onClick={() => launch(button.app.id)}
+                    onClick={() => clickPinned(button.app, button.tasks)}
+                    onContextMenu={() => {
+                      const target = clickTarget(button.tasks);
+                      menuFor(target?.id ?? null, target ? null : button.app.id);
+                    }}
                   />
                 ) : (
                   <TaskButton
@@ -152,6 +170,12 @@ export function Taskbar() {
                     label={labelOf(button.task.title || "Untitled window", [button.task])}
                     state={stateOf([button.task])}
                     icon={<WindowIcon iconKey={button.task.iconKey} enabled={inTauri} />}
+                    onClick={() => {
+                      if (inTauri) {
+                        void call("task_click", { id: button.task.id });
+                      }
+                    }}
+                    onContextMenu={() => menuFor(button.task.id, null)}
                   />
                 ),
               )}

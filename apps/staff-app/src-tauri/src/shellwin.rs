@@ -24,7 +24,7 @@ use tauri::{
 };
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
 
-use crate::tasks::{IconStore, TaskHost};
+use crate::tasks::{TaskHost, TaskServices};
 
 pub const DESKTOP: &str = "shell-desktop";
 pub const TASKBAR: &str = "shell-taskbar";
@@ -150,7 +150,7 @@ fn raw_hwnd(window: &WebviewWindow) -> Option<isize> {
 pub fn init(
     app: &AppHandle,
     mode: ShellMode,
-    icons: Arc<IconStore>,
+    services: TaskServices,
 ) -> Result<Arc<DesktopHost>, String> {
     let (events_tx, events_rx) = tokio::sync::mpsc::unbounded_channel();
     let msgloop = MsgLoop::start(mode, events_tx.clone())
@@ -173,7 +173,7 @@ pub fn init(
     let task_app = app.clone();
     let task_host = Arc::clone(&host);
     tauri::async_runtime::spawn(async move {
-        consume_events(task_app, task_host, events_rx, icons).await;
+        consume_events(task_app, task_host, events_rx, services).await;
     });
 
     tracing::info!(mode = ?mode, "shell windows created");
@@ -407,9 +407,9 @@ async fn consume_events(
     app: AppHandle,
     host: Arc<DesktopHost>,
     mut events: UnboundedReceiver<DesktopEvent>,
-    icons: Arc<IconStore>,
+    services: TaskServices,
 ) {
-    let mut tasks = TaskHost::new(icons);
+    let mut tasks = TaskHost::new(services);
     let mut hung_tick = tokio::time::interval(HUNG_CHECK_INTERVAL);
     hung_tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
 

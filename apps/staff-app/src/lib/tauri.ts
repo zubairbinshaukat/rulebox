@@ -76,6 +76,14 @@ type Commands = {
   sign_in_last: { args: { password: string }; result: SignInOutcomeDto };
   switch_user: { args: Record<string, never>; result: void };
   launch_app: { args: { id: string }; result: void };
+  task_click: { args: { id: string }; result: void };
+  task_close: { args: { id: string }; result: void };
+  task_end: { args: { id: string }; result: void };
+  task_menu: {
+    args: { id: string | null; appId: string | null };
+    result: void;
+  };
+  show_desktop: { args: Record<string, never>; result: void };
   refresh_catalogue: { args: Record<string, never>; result: void };
 };
 

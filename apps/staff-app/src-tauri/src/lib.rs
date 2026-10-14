@@ -2,11 +2,13 @@
 
 pub mod agent;
 pub mod commands;
+pub mod launcher;
 mod logging;
 pub mod model;
 pub mod session;
 pub mod shellwin;
 pub mod state;
+pub mod taskops;
 pub mod tasks;
 
 use std::backtrace::Backtrace;
@@ -71,9 +73,9 @@ pub fn run() {
     // Decided once. Shell mode only when no Explorer owns the shell window.
     let mode = rulebox_desktop::mode::detect();
 
-    // Icons of tracked windows, served to the taskbar by `rbicon://`.
-    let icons = Arc::new(tasks::IconStore::default());
-    let protocol_icons = Arc::clone(&icons);
+    // Icons, control state and launched apps of the task list.
+    let services = tasks::TaskServices::default();
+    let protocol_icons = Arc::clone(&services.icons);
 
     // Agent selection (especially `IpcClient::spawn`) needs a Tokio runtime.
     // Tauri installs one before `setup`, so connect there — not earlier.
@@ -84,6 +86,7 @@ pub fn run() {
         .register_asynchronous_uri_scheme_protocol("rbicon", move |_ctx, request, responder| {
             tasks::serve_icon(&protocol_icons, request, responder);
         })
+        .on_menu_event(|app, event| commands::on_menu_event(app, event.id().as_ref()))
         .invoke_handler(tauri::generate_handler![
             commands::shell_state,
             commands::ui_ready,
@@ -97,6 +100,11 @@ pub fn run() {
             commands::sign_in_last,
             commands::switch_user,
             commands::launch_app,
+            commands::task_click,
+            commands::task_close,
+            commands::task_end,
+            commands::task_menu,
+            commands::show_desktop,
             commands::refresh_catalogue,
         ])
         .setup(move |app| {
@@ -119,7 +127,8 @@ pub fn run() {
             }
             app.manage(app_state);
 
-            let host = shellwin::init(app.handle(), mode, Arc::clone(&icons))?;
+            app.manage(services.clone());
+            let host = shellwin::init(app.handle(), mode, services.clone())?;
             app.manage(host);
             tracing::info!(?mode, "shell windows ready");
             Ok(())

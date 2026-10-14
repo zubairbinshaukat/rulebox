@@ -383,6 +383,10 @@ mod step7_tests {
         }
     }
 
+    fn no_jobs() -> std::collections::HashMap<u32, String> {
+        std::collections::HashMap::new()
+    }
+
     fn labels(pairs: &[(isize, &str)]) -> Labels {
         pairs.iter().map(|(h, l)| (*h, (*l).to_string())).collect()
     }
@@ -409,7 +413,7 @@ mod step7_tests {
         table.apply(&WindowEvent::Added(info(1, "Rulebox", None)), &labels);
         table.apply(&WindowEvent::Added(info(2, "Rulebox", None)), &labels);
         table.apply(&WindowEvent::Added(info(3, "Notes", None)), &labels);
-        let items = table.items(&labels, &[]);
+        let items = table.items(&labels, &[], &no_jobs());
         assert_eq!(items.len(), 1);
         assert_eq!(items[0].id, "3");
         assert!(!items[0].own);
@@ -421,7 +425,7 @@ mod step7_tests {
         let labels = labels(&[(5, "web-orders-web-1"), (6, "app-0")]);
         table.apply(&WindowEvent::Added(info(5, "Orders", None)), &labels);
         table.apply(&WindowEvent::Added(info(6, "My files", None)), &labels);
-        let items = table.items(&labels, &[]);
+        let items = table.items(&labels, &[], &no_jobs());
         assert_eq!(items[0].app_id.as_deref(), Some("orders-web"));
         assert!(items[0].own);
         assert_eq!(items[1].app_id, None);
@@ -442,7 +446,7 @@ mod step7_tests {
             &none,
         );
         table.apply(&WindowEvent::Added(info(3, "c", None)), &none);
-        let items = table.items(&none, &catalogue);
+        let items = table.items(&none, &catalogue, &no_jobs());
         assert_eq!(items[0].app_id.as_deref(), Some("notepad"));
         assert_eq!(items[1].app_id, None);
         assert_eq!(items[2].app_id, None);
@@ -461,7 +465,7 @@ mod step7_tests {
         let mut table = TaskTable::default();
         let none = Labels::new();
         table.apply(&WindowEvent::Added(info(1, "a", Some(r"C:\x.exe"))), &none);
-        assert_eq!(table.items(&none, &[web])[0].app_id, None);
+        assert_eq!(table.items(&none, &[web], &no_jobs())[0].app_id, None);
     }
 
     #[test]
@@ -471,20 +475,29 @@ mod step7_tests {
         table.apply(&WindowEvent::Added(info(1, "a", None)), &labels);
         table.apply(&WindowEvent::Added(info(2, "b", None)), &labels);
         assert!(table.apply(&WindowEvent::Activated(Some(1)), &labels));
-        assert!(table.items(&labels, &[])[0].active);
+        assert!(table.items(&labels, &[], &no_jobs())[0].active);
         // Same window again: no change.
         assert!(!table.apply(&WindowEvent::Activated(Some(1)), &labels));
         // The popup takes focus: the program stays active.
         assert!(!table.apply(&WindowEvent::Activated(Some(9)), &labels));
-        assert!(table.items(&labels, &[])[0].active);
+        assert!(table.items(&labels, &[], &no_jobs())[0].active);
         // The desktop takes focus: nothing is active.
         assert!(table.apply(&WindowEvent::Activated(Some(8)), &labels));
-        assert!(table.items(&labels, &[]).iter().all(|t| !t.active));
+        assert!(table.items(&labels, &[], &no_jobs()).iter().all(|t| !t.active));
         // An unknown window (a tool window, a dialog): nothing is active.
         table.apply(&WindowEvent::Activated(Some(1)), &labels);
         assert!(table.apply(&WindowEvent::Activated(Some(777)), &labels));
     }
 
+    #[test]
+    fn a_window_that_takes_the_focus_before_it_is_listed_is_active_once_listed() {
+        let mut table = TaskTable::default();
+        let none = Labels::new();
+        // The foreground event arrives first, the window's Added after it.
+        table.apply(&WindowEvent::Activated(Some(9)), &none);
+        table.apply(&WindowEvent::Added(info(9, "Late", None)), &none);
+        assert!(table.items(&none, &[], &no_jobs())[0].active);
+    }
     #[test]
     fn removing_a_window_drops_its_state() {
         let mut table = TaskTable::default();
@@ -493,11 +506,11 @@ mod step7_tests {
         table.apply(&WindowEvent::Activated(Some(1)), &none);
         table.apply(&WindowEvent::Flash(1, true), &none);
         assert!(table.apply(&WindowEvent::Removed(1), &none));
-        assert!(table.items(&none, &[]).is_empty());
+        assert!(table.items(&none, &[], &no_jobs()).is_empty());
         assert!(!table.apply(&WindowEvent::Removed(1), &none));
         // A re-added window starts clean.
         table.apply(&WindowEvent::Added(info(1, "a", None)), &none);
-        let item = &table.items(&none, &[])[0];
+        let item = &table.items(&none, &[], &no_jobs())[0];
         assert!(!item.active && !item.flashing);
     }
 
@@ -509,7 +522,7 @@ mod step7_tests {
         table.apply(&WindowEvent::Flash(1, true), &none);
         assert!(table.set_hung([1].into_iter().collect()));
         assert!(!table.set_hung([1].into_iter().collect()));
-        let item = &table.items(&none, &[])[0];
+        let item = &table.items(&none, &[], &no_jobs())[0];
         assert!(item.flashing && item.hung);
     }
 
@@ -518,9 +531,9 @@ mod step7_tests {
         let mut table = TaskTable::default();
         let none = Labels::new();
         table.apply(&WindowEvent::Added(info(7, "a", None)), &none);
-        assert_eq!(table.items(&none, &[])[0].icon_key, "hwnd:7:0");
+        assert_eq!(table.items(&none, &[], &no_jobs())[0].icon_key, "hwnd:7:0");
         table.apply(&WindowEvent::IconChanged(7), &none);
-        assert_eq!(table.items(&none, &[])[0].icon_key, "hwnd:7:1");
+        assert_eq!(table.items(&none, &[], &no_jobs())[0].icon_key, "hwnd:7:1");
     }
 
     #[test]
@@ -573,3 +586,295 @@ mod step7_tests {
 }
 
 
+
+
+#[cfg(all(test, debug_assertions))]
+mod step8_tests {
+    use std::collections::HashMap;
+    use std::path::PathBuf;
+
+    use rulebox_desktop::tracker::WindowEvent;
+    use rulebox_desktop::windows::WindowInfo;
+    use rulebox_desktop::DesktopError;
+    use rulebox_staff_lib::launcher::{
+        adoption_target, failure_notice, plan_launch, LaunchPlan, Launcher, ADOPT_WINDOW,
+    };
+    use rulebox_staff_lib::model::{
+        AppEntry, AppKind, BuiltinTool, DesktopApp, TaskItem, WebApp, WebPermissions,
+    };
+    use rulebox_staff_lib::tasks::{
+        click_action, plan_show_desktop, ClickAction, Labels, ShowDesktopPlan, TaskFacts,
+        TaskRegistry, TaskTable,
+    };
+
+    fn app(id: &str, kind: AppKind) -> AppEntry {
+        AppEntry {
+            id: id.into(),
+            name: format!("{id} app"),
+            description: None,
+            kind,
+            icon_key: None,
+            hue: None,
+            pinned_taskbar: false,
+            pinned_desktop: false,
+            badge: None,
+        }
+    }
+
+    fn desktop(id: &str, exe: &str, args: &[&str]) -> AppEntry {
+        app(
+            id,
+            AppKind::Desktop(DesktopApp {
+                exe: exe.into(),
+                args: args.iter().map(|a| (*a).to_string()).collect(),
+                file_arg_template: vec![],
+            }),
+        )
+    }
+
+    fn task(id: &str, app_id: Option<&str>, active: bool) -> TaskItem {
+        TaskItem {
+            id: id.into(),
+            app_id: app_id.map(String::from),
+            title: "t".into(),
+            icon_key: format!("hwnd:{id}:0"),
+            active,
+            minimized: false,
+            flashing: false,
+            hung: false,
+            own: false,
+        }
+    }
+
+    #[test]
+    fn launching_an_unopened_desktop_app_starts_it_from_the_catalogue() {
+        let catalogue = vec![desktop("notes", r"C:\Apps\notes.exe", &["--fast"])];
+        let plan = plan_launch(&catalogue, "notes", &[], false);
+        assert_eq!(
+            plan,
+            LaunchPlan::Start {
+                exe: PathBuf::from(r"C:\Apps\notes.exe"),
+                args: vec!["--fast".into()],
+            }
+        );
+    }
+
+    #[test]
+    fn launching_an_open_app_focuses_it_instead_of_starting_another() {
+        let catalogue = vec![desktop("notes", r"C:\Apps\notes.exe", &[])];
+        let tasks = vec![task("10", Some("notes"), false), task("11", Some("notes"), false)];
+        assert_eq!(
+            plan_launch(&catalogue, "notes", &tasks, false),
+            LaunchPlan::Focus {
+                task_id: "10".into()
+            }
+        );
+    }
+
+    #[test]
+    fn the_active_window_of_an_app_is_the_one_focused() {
+        let catalogue = vec![desktop("notes", r"C:\Apps\notes.exe", &[])];
+        let tasks = vec![task("10", Some("notes"), false), task("11", Some("notes"), true)];
+        assert_eq!(
+            plan_launch(&catalogue, "notes", &tasks, false),
+            LaunchPlan::Focus {
+                task_id: "11".into()
+            }
+        );
+    }
+
+    #[test]
+    fn other_apps_windows_do_not_count() {
+        let catalogue = vec![desktop("notes", r"C:\Apps\notes.exe", &[])];
+        let tasks = vec![task("10", Some("other"), true), task("11", None, false)];
+        assert!(matches!(
+            plan_launch(&catalogue, "notes", &tasks, false),
+            LaunchPlan::Start { .. }
+        ));
+    }
+
+    #[test]
+    fn unknown_ids_and_closing_and_other_kinds_are_not_started() {
+        let catalogue = vec![
+            desktop("notes", r"C:\Apps\notes.exe", &[]),
+            app(
+                "files",
+                AppKind::Builtin {
+                    tool: BuiltinTool::Files,
+                },
+            ),
+            app(
+                "orders",
+                AppKind::Web(WebApp {
+                    url: "https://x.test".into(),
+                    allowed_domains: vec![],
+                    permissions: WebPermissions::default(),
+                }),
+            ),
+        ];
+        assert_eq!(plan_launch(&catalogue, "nope", &[], false), LaunchPlan::Unknown);
+        assert_eq!(plan_launch(&catalogue, "notes", &[], true), LaunchPlan::Closing);
+        assert_eq!(plan_launch(&catalogue, "files", &[], false), LaunchPlan::NotYet);
+        assert_eq!(plan_launch(&catalogue, "orders", &[], false), LaunchPlan::NotYet);
+    }
+
+    #[test]
+    fn failure_notices_explain_elevation_and_missing_programs() {
+        let (title, detail) = failure_notice("Zoom", &DesktopError::NeedsElevation);
+        assert_eq!(title, "Zoom could not be opened.");
+        assert_eq!(
+            detail.as_deref(),
+            Some("This app needs administrator rights and can't be opened here.")
+        );
+        let (_, missing) =
+            failure_notice("Zoom", &DesktopError::Refused("the program was not found".into()));
+        assert_eq!(missing.as_deref(), Some("The program was not found on this PC."));
+    }
+
+    #[test]
+    fn the_task_click_rule() {
+        assert_eq!(click_action(true, false), ClickAction::Restore);
+        // A minimized window is never "active" in a way that minimizes it again.
+        assert_eq!(click_action(true, true), ClickAction::Restore);
+        assert_eq!(click_action(false, true), ClickAction::Minimize);
+        assert_eq!(click_action(false, false), ClickAction::Focus);
+    }
+
+    #[test]
+    fn show_desktop_minimizes_everything_then_restores_only_those() {
+        let listed = vec![(1, false), (2, true), (3, false)];
+        // First call: minimize the two that are showing.
+        assert_eq!(
+            plan_show_desktop(&[], &listed),
+            ShowDesktopPlan::Minimize(vec![1, 3])
+        );
+        // Second call: those two are now minimized; 2 was minimized before and stays.
+        let after = vec![(1, true), (2, true), (3, true)];
+        assert_eq!(
+            plan_show_desktop(&[1, 3], &after),
+            ShowDesktopPlan::Restore(vec![1, 3])
+        );
+    }
+
+    #[test]
+    fn show_desktop_leaves_a_window_the_person_restored_and_forgets_closed_ones() {
+        // 1 was restored by hand, 3 was closed, 4 is still minimized.
+        let listed = vec![(1, false), (4, true)];
+        assert_eq!(
+            plan_show_desktop(&[1, 3, 4], &listed),
+            ShowDesktopPlan::Restore(vec![4])
+        );
+    }
+
+    #[test]
+    fn show_desktop_starts_over_when_nothing_remembered_is_left() {
+        let listed = vec![(1, false), (2, false)];
+        assert_eq!(
+            plan_show_desktop(&[9], &listed),
+            ShowDesktopPlan::Minimize(vec![1, 2])
+        );
+    }
+
+    #[test]
+    fn the_registry_only_knows_listed_windows() {
+        let registry = TaskRegistry::default();
+        registry.sync(vec![(
+            42,
+            TaskFacts {
+                pid: 7,
+                own: false,
+                minimized: false,
+                active: true,
+                hung: false,
+            },
+        )]);
+        assert!(registry.lookup("42").is_some());
+        assert!(registry.lookup("43").is_none());
+        assert!(registry.lookup("not a number").is_none());
+        assert!(registry.lookup("").is_none());
+        registry.sync(vec![]);
+        assert!(registry.lookup("42").is_none());
+    }
+
+    #[test]
+    fn a_process_in_a_started_job_maps_to_its_app_even_without_a_matching_exe() {
+        let catalogue = vec![desktop("notes", r"C:\Apps\notes.exe", &[])];
+        let mut table = TaskTable::default();
+        let none = Labels::new();
+        table.apply(
+            &WindowEvent::Added(WindowInfo {
+                hwnd: 5,
+                pid: 4321,
+                title: "x".into(),
+                exe: Some(PathBuf::from(r"C:\Somewhere\else.exe")),
+                aumid: None,
+                minimized: false,
+                cloaked: false,
+                class: "Test".into(),
+            }),
+            &none,
+        );
+        let mut jobs = HashMap::new();
+        jobs.insert(4321u32, "notes".to_string());
+        assert_eq!(
+            table.items(&none, &catalogue, &jobs)[0].app_id.as_deref(),
+            Some("notes")
+        );
+        assert_eq!(
+            table.items(&none, &catalogue, &HashMap::new())[0].app_id,
+            None
+        );
+    }
+
+    #[test]
+    fn the_launcher_tracks_a_started_program_until_it_ends() {
+        let exe = PathBuf::from(r"C:\Windows\System32\ping.exe");
+        if !exe.exists() {
+            return;
+        }
+        let launcher = Launcher::default();
+        let pid = launcher
+            .start("pinger", &exe, &["-n".into(), "2".into(), "127.0.0.1".into()])
+            .expect("start");
+        let none = std::collections::HashSet::new();
+        assert_eq!(launcher.pid_map(&none).get(&pid).map(String::as_str), Some("pinger"));
+        // Two pings take about a second; then the job empties and is dropped.
+        std::thread::sleep(std::time::Duration::from_millis(2500));
+        assert!(launcher.pid_map(&none).is_empty());
+    }
+
+    #[test]
+    fn a_hand_off_window_is_adopted_by_program_name_shortly_after_launch() {
+        let launches = vec![(
+            "notes".to_string(),
+            Some("Notepad.exe".to_string()),
+            std::time::Duration::from_secs(2),
+        )];
+        assert_eq!(
+            adoption_target(&launches, "notepad.exe").as_deref(),
+            Some("notes")
+        );
+        assert_eq!(adoption_target(&launches, "calc.exe"), None);
+    }
+
+    #[test]
+    fn adoption_expires_and_prefers_the_newest_launch() {
+        let old = std::time::Duration::from_secs(60);
+        let launches = vec![
+            ("a".to_string(), Some("x.exe".to_string()), old),
+            (
+                "b".to_string(),
+                Some("x.exe".to_string()),
+                std::time::Duration::from_secs(5),
+            ),
+            (
+                "c".to_string(),
+                Some("x.exe".to_string()),
+                std::time::Duration::from_secs(1),
+            ),
+        ];
+        assert_eq!(adoption_target(&launches, "x.exe").as_deref(), Some("c"));
+        let only_old = vec![("a".to_string(), Some("x.exe".to_string()), ADOPT_WINDOW)];
+        assert_eq!(adoption_target(&only_old, "x.exe"), None);
+    }
+}

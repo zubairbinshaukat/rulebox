@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { AppEntry, TaskItem } from "@rulebox/types";
 
-import { groupTaskbar, iconUrl, labelOf, stateOf } from "./grouping";
+import { clickTarget, groupTaskbar, iconUrl, labelOf, stateOf } from "./grouping";
 
 function app(id: string, pinnedTaskbar: boolean, name = id): AppEntry {
   return {
@@ -120,5 +120,27 @@ describe("iconUrl", () => {
   it("points at the icon protocol", () => {
     expect(iconUrl("hwnd:42:1")).toBe("http://rbicon.localhost/hwnd:42:1?s=48");
     expect(iconUrl("hwnd:42:1", 64)).toBe("http://rbicon.localhost/hwnd:42:1?s=64");
+  });
+});
+
+describe("clickTarget", () => {
+  it("is null for an app with no window (launch it)", () => {
+    expect(clickTarget([])).toBeNull();
+  });
+
+  it("is the only window", () => {
+    const only = task("1", "a");
+    expect(clickTarget([only])).toBe(only);
+  });
+
+  it("moves on to the window after the active one, wrapping", () => {
+    const windows = [task("1", "a"), task("2", "a", { active: true }), task("3", "a")];
+    expect(clickTarget(windows)?.id).toBe("3");
+    const last = [task("1", "a"), task("2", "a"), task("3", "a", { active: true })];
+    expect(clickTarget(last)?.id).toBe("1");
+  });
+
+  it("starts at the first window when none is active", () => {
+    expect(clickTarget([task("1", "a"), task("2", "a")])?.id).toBe("1");
   });
 });

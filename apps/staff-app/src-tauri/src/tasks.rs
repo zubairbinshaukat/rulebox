@@ -16,6 +16,7 @@ use rulebox_desktop::tracker::WindowEvent;
 use rulebox_desktop::windows::WindowInfo;
 use tauri::{AppHandle, Manager};
 
+use crate::launcher::Launcher;
 use crate::model::{AppEntry, AppKind, TaskItem};
 use crate::state::AppState;
 
@@ -82,9 +83,17 @@ fn normalize_path(path: &str) -> String {
     path.replace('/', "\\").to_lowercase()
 }
 
-/// Which catalogue app a program window belongs to, by program file.
-/// (Job membership joins in Step 8; the catalogue has no AUMIDs yet.)
-fn match_catalogue_app(info: &WindowInfo, catalogue: &[AppEntry]) -> Option<String> {
+/// Which catalogue app a program window belongs to: first by the job the
+/// shell started it in (`launched`: pid → app id), then by program file.
+/// (The catalogue has no AUMIDs yet.)
+fn match_catalogue_app(
+    info: &WindowInfo,
+    catalogue: &[AppEntry],
+    launched: &HashMap<u32, String>,
+) -> Option<String> {
+    if let Some(app_id) = launched.get(&info.pid) {
+        return Some(app_id.clone());
+    }
     let exe = normalize_path(&info.exe.as_ref()?.to_string_lossy());
     catalogue.iter().find_map(|app| match &app.kind {
         AppKind::Desktop(desktop) if normalize_path(&desktop.exe) == exe => Some(app.id.clone()),
@@ -145,8 +154,11 @@ impl TaskTable {
                         Some(LabelKind::Shell) if labels.get(hwnd).map(String::as_str) == Some("shell-desktop") => None,
                         // Popup / exit dialog: the program under it stays active.
                         Some(LabelKind::Shell) => self.active,
-                        _ if self.windows.contains_key(hwnd) => Some(*hwnd),
-                        _ => None,
+                        // Kept even when the window is not listed (yet): a
+                        // new window often takes the focus before its
+                        // `Added` event is handled. A handle that never gets
+                        // listed (a tool window) simply marks nothing active.
+                        _ => Some(*hwnd),
                     },
                 };
                 let changed = self.active != next;
@@ -210,8 +222,44 @@ impl TaskTable {
             .collect()
     }
 
-    /// The taskbar's list, in the order windows appeared.
-    pub fn items(&self, labels: &Labels, catalogue: &[AppEntry]) -> Vec<TaskItem> {
+    /// Process ids of every tracked window.
+    pub fn pids(&self) -> HashSet<u32> {
+        self.windows.values().map(|info| info.pid).collect()
+    }
+
+    /// What the commands may act on: every listed (non-shell) window.
+    pub fn facts(&self, labels: &Labels) -> Vec<(isize, TaskFacts)> {
+        self.order
+            .iter()
+            .filter_map(|hwnd| {
+                let info = self.windows.get(hwnd)?;
+                let own = match labels.get(hwnd).and_then(|label| parse_label(label)) {
+                    Some(LabelKind::Shell) => return None,
+                    Some(_) => true,
+                    None => false,
+                };
+                Some((
+                    *hwnd,
+                    TaskFacts {
+                        pid: info.pid,
+                        own,
+                        minimized: info.minimized,
+                        active: self.active == Some(*hwnd),
+                        hung: self.hung.contains(hwnd),
+                    },
+                ))
+            })
+            .collect()
+    }
+
+    /// The taskbar's list, in the order windows appeared. `launched` maps
+    /// the processes of apps the shell started to their catalogue app id.
+    pub fn items(
+        &self,
+        labels: &Labels,
+        catalogue: &[AppEntry],
+        launched: &HashMap<u32, String>,
+    ) -> Vec<TaskItem> {
         let mut items = Vec::with_capacity(self.order.len());
         for hwnd in &self.order {
             let Some(info) = self.windows.get(hwnd) else {
@@ -222,7 +270,7 @@ impl TaskTable {
                 Some(LabelKind::Shell) => continue,
                 Some(LabelKind::Builtin) => (true, None),
                 Some(LabelKind::Web { app_id }) => (true, Some(app_id)),
-                None => (false, match_catalogue_app(info, catalogue)),
+                None => (false, match_catalogue_app(info, catalogue, launched)),
             };
             items.push(TaskItem {
                 id: hwnd.to_string(),
@@ -238,6 +286,122 @@ impl TaskTable {
         }
         items
     }
+}
+
+/// What the control commands know about a listed window.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct TaskFacts {
+    pub pid: u32,
+    /// One of our own windows (`app-*`, `web-*`).
+    pub own: bool,
+    pub minimized: bool,
+    pub active: bool,
+    pub hung: bool,
+}
+
+/// The windows the control commands may act on. Commands take an id from
+/// React and look it up here, so a made-up handle controls nothing.
+#[derive(Default)]
+pub struct TaskRegistry {
+    windows: Mutex<HashMap<isize, TaskFacts>>,
+    /// Windows the last "show desktop" minimized, to restore on the next one.
+    desktop_minimized: Mutex<Vec<isize>>,
+}
+
+impl TaskRegistry {
+    pub fn sync(&self, facts: Vec<(isize, TaskFacts)>) {
+        *self.windows.lock().unwrap_or_else(|e| e.into_inner()) = facts.into_iter().collect();
+    }
+
+    /// Facts of a listed window; `id` is the decimal HWND string of a `TaskItem`.
+    pub fn lookup(&self, id: &str) -> Option<(isize, TaskFacts)> {
+        let hwnd = id.parse::<isize>().ok()?;
+        self.windows
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .get(&hwnd)
+            .map(|facts| (hwnd, *facts))
+    }
+
+    /// `(hwnd, minimized)` of every listed window.
+    pub fn listed(&self) -> Vec<(isize, bool)> {
+        self.windows
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .iter()
+            .map(|(hwnd, facts)| (*hwnd, facts.minimized))
+            .collect()
+    }
+
+    pub fn desktop_minimized(&self) -> Vec<isize> {
+        self.desktop_minimized
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .clone()
+    }
+
+    pub fn set_desktop_minimized(&self, windows: Vec<isize>) {
+        *self
+            .desktop_minimized
+            .lock()
+            .unwrap_or_else(|e| e.into_inner()) = windows;
+    }
+}
+
+/// What a click on a window's button does.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ClickAction {
+    Restore,
+    Minimize,
+    Focus,
+}
+
+/// Restore if minimized; minimize if it is the active window; else focus.
+pub fn click_action(minimized: bool, active: bool) -> ClickAction {
+    if minimized {
+        ClickAction::Restore
+    } else if active {
+        ClickAction::Minimize
+    } else {
+        ClickAction::Focus
+    }
+}
+
+/// What "show desktop" does next.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum ShowDesktopPlan {
+    Minimize(Vec<isize>),
+    Restore(Vec<isize>),
+}
+
+/// First call: minimize everything that is open. Second call: restore what
+/// the first one minimized and that is still minimized (a window the person
+/// restored by hand in between is left alone; if none is left, the call
+/// starts over and minimizes again).
+pub fn plan_show_desktop(remembered: &[isize], listed: &[(isize, bool)]) -> ShowDesktopPlan {
+    let to_restore: Vec<isize> = remembered
+        .iter()
+        .copied()
+        .filter(|hwnd| listed.iter().any(|(h, minimized)| h == hwnd && *minimized))
+        .collect();
+    if !to_restore.is_empty() {
+        return ShowDesktopPlan::Restore(to_restore);
+    }
+    ShowDesktopPlan::Minimize(
+        listed
+            .iter()
+            .filter(|(_, minimized)| !minimized)
+            .map(|(hwnd, _)| *hwnd)
+            .collect(),
+    )
+}
+
+/// Everything the task commands and the window event task share.
+#[derive(Clone, Default)]
+pub struct TaskServices {
+    pub icons: Arc<IconStore>,
+    pub registry: Arc<TaskRegistry>,
+    pub launcher: Arc<Launcher>,
 }
 
 /// Collapse a burst of events: of several `Changed` for one window only the
@@ -401,14 +565,14 @@ pub fn serve_icon(
 /// Owns the table; lives inside the desktop event task.
 pub struct TaskHost {
     table: TaskTable,
-    icons: Arc<IconStore>,
+    services: TaskServices,
 }
 
 impl TaskHost {
-    pub fn new(icons: Arc<IconStore>) -> Self {
+    pub fn new(services: TaskServices) -> Self {
         Self {
             table: TaskTable::default(),
-            icons,
+            services,
         }
     }
 
@@ -418,6 +582,11 @@ impl TaskHost {
         let mut changed = false;
         for event in &coalesce(events) {
             changed |= self.table.apply(event, &labels);
+            // A program that handed off to another process still gets its
+            // window counted as the launched app's.
+            if let WindowEvent::Added(info) = event {
+                self.services.launcher.adopt(info.pid, info.exe.as_deref());
+            }
         }
         if changed {
             self.publish(app, &labels);
@@ -439,11 +608,13 @@ impl TaskHost {
     }
 
     fn publish(&mut self, app: &AppHandle, labels: &Labels) {
-        self.icons.sync(self.table.tracked());
+        self.services.icons.sync(self.table.tracked());
+        self.services.registry.sync(self.table.facts(labels));
         let Some(state) = app.try_state::<AppState>() else {
             return;
         };
-        let items = state.read(|s| self.table.items(labels, &s.apps.items));
+        let launched = self.services.launcher.pid_map(&self.table.pids());
+        let items = state.read(|s| self.table.items(labels, &s.apps.items, &launched));
         let differs = state.read(|s| s.tasks != items);
         if differs {
             state.update(|s| s.tasks = items);

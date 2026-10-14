@@ -15,6 +15,11 @@ const SHELL_COMMANDS: &[&str] = &[
     "sign_in_last",
     "switch_user",
     "launch_app",
+    "task_click",
+    "task_close",
+    "task_end",
+    "task_menu",
+    "show_desktop",
     "refresh_catalogue",
 ];
 

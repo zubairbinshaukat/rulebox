@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-task-close"
+description = "Enables the task_close command without any pre-configured scope."
+commands.allow = ["task_close"]
+
+[[permission]]
+identifier = "deny-task-close"
+description = "Denies the task_close command without any pre-configured scope."
+commands.deny = ["task_close"]

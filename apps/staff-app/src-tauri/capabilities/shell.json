@@ -18,6 +18,11 @@
     "allow-sign-in-last",
     "allow-switch-user",
     "allow-launch-app",
+    "allow-task-click",
+    "allow-task-close",
+    "allow-task-end",
+    "allow-task-menu",
+    "allow-show-desktop",
     "allow-refresh-catalogue"
   ]
 }

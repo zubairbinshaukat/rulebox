@@ -225,6 +225,12 @@
           "markdownDescription": "Enables the shell_state command without any pre-configured scope."
         },
         {
+          "description": "Enables the show_desktop command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-show-desktop",
+          "markdownDescription": "Enables the show_desktop command without any pre-configured scope."
+        },
+        {
           "description": "Enables the sign_in command without any pre-configured scope.",
           "type": "string",
           "const": "allow-sign-in",
@@ -241,6 +247,30 @@
           "type": "string",
           "const": "allow-switch-user",
           "markdownDescription": "Enables the switch_user command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the task_click command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-task-click",
+          "markdownDescription": "Enables the task_click command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the task_close command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-task-close",
+          "markdownDescription": "Enables the task_close command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the task_end command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-task-end",
+          "markdownDescription": "Enables the task_end command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the task_menu command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-task-menu",
+          "markdownDescription": "Enables the task_menu command without any pre-configured scope."
         },
         {
           "description": "Enables the ui_alive command without any pre-configured scope.",
@@ -303,6 +333,12 @@
           "markdownDescription": "Denies the shell_state command without any pre-configured scope."
         },
         {
+          "description": "Denies the show_desktop command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-show-desktop",
+          "markdownDescription": "Denies the show_desktop command without any pre-configured scope."
+        },
+        {
           "description": "Denies the sign_in command without any pre-configured scope.",
           "type": "string",
           "const": "deny-sign-in",
@@ -319,6 +355,30 @@
           "type": "string",
           "const": "deny-switch-user",
           "markdownDescription": "Denies the switch_user command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the task_click command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-task-click",
+          "markdownDescription": "Denies the task_click command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the task_close command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-task-close",
+          "markdownDescription": "Denies the task_close command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the task_end command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-task-end",
+          "markdownDescription": "Denies the task_end command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the task_menu command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-task-menu",
+          "markdownDescription": "Denies the task_menu command without any pre-configured scope."
         },
         {
           "description": "Denies the ui_alive command without any pre-configured scope.",

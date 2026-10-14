@@ -14,6 +14,16 @@ pub enum DesktopError {
     /// The message loop thread has stopped, so nothing can run on it.
     #[error("the desktop message loop is not running")]
     LoopStopped,
+    /// The program asks for administrator rights (error 740). Never retried
+    /// elevated: the Staff App has no admin rights and never asks for them.
+    #[error("the program needs administrator rights")]
+    NeedsElevation,
+    /// No way of bringing the window to the front worked.
+    #[error("the window could not be brought to the front")]
+    NotForeground,
+    /// The request was refused before any Win32 call (bad path, own process, ...).
+    #[error("{0}")]
+    Refused(String),
 }
 
 impl DesktopError {
