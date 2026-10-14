@@ -61,6 +61,11 @@ type Commands = {
   ui_ready: { args: Record<string, never>; result: void };
   ui_alive: { args: Record<string, never>; result: void };
   dismiss_notice: { args: { id: number }; result: void };
+  notices_seen: { args: Record<string, never>; result: void };
+  set_volume: { args: { level: number }; result: void };
+  set_muted: { args: { muted: boolean }; result: void };
+  set_brightness: { args: { level: number }; result: void };
+  set_theme: { args: { theme: ThemeDto }; result: void };
   dev_set_display: { args: { lite: boolean; theme: ThemeDto }; result: void };
   dev_set_boot: {
     args: {

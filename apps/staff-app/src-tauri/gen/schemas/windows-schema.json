@@ -213,6 +213,12 @@
           "markdownDescription": "Enables the lock command without any pre-configured scope."
         },
         {
+          "description": "Enables the notices_seen command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-notices-seen",
+          "markdownDescription": "Enables the notices_seen command without any pre-configured scope."
+        },
+        {
           "description": "Enables the popup_close command without any pre-configured scope.",
           "type": "string",
           "const": "allow-popup-close",
@@ -253,6 +259,30 @@
           "type": "string",
           "const": "allow-restart-rulebox",
           "markdownDescription": "Enables the restart_rulebox command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the set_brightness command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-set-brightness",
+          "markdownDescription": "Enables the set_brightness command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the set_muted command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-set-muted",
+          "markdownDescription": "Enables the set_muted command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the set_theme command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-set-theme",
+          "markdownDescription": "Enables the set_theme command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the set_volume command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-set-volume",
+          "markdownDescription": "Enables the set_volume command without any pre-configured scope."
         },
         {
           "description": "Enables the shell_state command without any pre-configured scope.",
@@ -369,6 +399,12 @@
           "markdownDescription": "Denies the lock command without any pre-configured scope."
         },
         {
+          "description": "Denies the notices_seen command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-notices-seen",
+          "markdownDescription": "Denies the notices_seen command without any pre-configured scope."
+        },
+        {
           "description": "Denies the popup_close command without any pre-configured scope.",
           "type": "string",
           "const": "deny-popup-close",
@@ -409,6 +445,30 @@
           "type": "string",
           "const": "deny-restart-rulebox",
           "markdownDescription": "Denies the restart_rulebox command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the set_brightness command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-set-brightness",
+          "markdownDescription": "Denies the set_brightness command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the set_muted command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-set-muted",
+          "markdownDescription": "Denies the set_muted command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the set_theme command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-set-theme",
+          "markdownDescription": "Denies the set_theme command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the set_volume command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-set-volume",
+          "markdownDescription": "Denies the set_volume command without any pre-configured scope."
         },
         {
           "description": "Denies the shell_state command without any pre-configured scope.",

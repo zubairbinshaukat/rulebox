@@ -12,6 +12,7 @@ tokio = { workspace = true, features = ["sync"] }
 png.workspace = true
 
 [target.'cfg(windows)'.dependencies]
+windows-core = "0.62.2"
 windows = { workspace = true, features = [
     "Win32_Foundation",
     "Win32_Graphics_Dwm",
@@ -19,6 +20,10 @@ windows = { workspace = true, features = [
     "Win32_Security",
     "Win32_System_JobObjects",
     "Win32_Storage_EnhancedStorage",
+    "Win32_Devices_Display",
+    "Win32_Media_Audio",
+    "Win32_Media_Audio_Endpoints",
+    "Win32_Networking_NetworkListManager",
     "Win32_System_Com",
     "Win32_System_Com_StructuredStorage",
     "Win32_System_LibraryLoader",

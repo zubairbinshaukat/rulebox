@@ -77,12 +77,17 @@ pub fn apply_sign_in_outcome(state: &AppState, outcome: SignInOutcome) -> Result
                 tracing::warn!(%error, "could not save last-user.json");
             }
             state.set_files_root(Some(files_root));
+            let theme = crate::system::theme_for_sign_in(
+                state.org_theme(),
+                crate::system::load_theme(&employee.id),
+            );
             state.update(|s| {
                 s.session = SessionState::SignedIn {
                     employee: employee.clone(),
                     locked: false,
                     offline,
                 };
+                s.display.theme = theme;
                 s.apps = CatalogState {
                     status: CatalogStatus::Loading,
                     items: Vec::new(),
@@ -496,8 +501,10 @@ impl SignOutOps for LiveSignOut<'_> {
 
     fn signed_out(&mut self) {
         let last = self.last.clone();
+        let theme = crate::system::theme_after_sign_out(self.state.org_theme());
         self.state.update(|shell| {
             shell.session = SessionState::SignedOut { last };
+            shell.display.theme = theme;
             shell.apps = CatalogState {
                 status: CatalogStatus::Idle,
                 items: Vec::new(),

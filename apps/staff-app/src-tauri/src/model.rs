@@ -303,6 +303,8 @@ pub struct SystemState {
     pub battery: Option<BatteryDto>,
     pub network: NetworkDto,
     pub can_power_off: bool,
+    /// 0–100 when a monitor answered at startup. `None` hides the slider.
+    pub brightness: Option<u8>,
 }
 
 impl Default for SystemState {
@@ -312,6 +314,7 @@ impl Default for SystemState {
             battery: None,
             network: NetworkDto::None,
             can_power_off: false,
+            brightness: None,
         }
     }
 }
@@ -354,6 +357,8 @@ pub struct NoticeItem {
     pub detail: Option<String>,
     #[ts(type = "number")]
     pub at_ms: u64,
+    /// Cleared when quick settings is opened.
+    pub unread: bool,
 }
 
 #[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq, TS)]

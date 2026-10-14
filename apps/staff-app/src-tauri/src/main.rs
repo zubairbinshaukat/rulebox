@@ -103,6 +103,7 @@ mod step3_tests {
                 battery: None,
                 network: NetworkDto::Internet,
                 can_power_off: true,
+                brightness: None,
             },
             notices: vec![],
             banner: None,
@@ -196,7 +197,8 @@ mod step3_tests {
                 "volume": { "level": 0.5, "muted": false },
                 "battery": null,
                 "network": "internet",
-                "canPowerOff": true
+                "canPowerOff": true,
+                "brightness": null
             },
             "notices": [],
             "banner": null,
@@ -1116,5 +1118,68 @@ mod step9_tests {
             windows_to_minimize(true, &windows, &scope_adopted(&[1])),
             vec![1, 3]
         );
+    }
+}
+
+#[cfg(all(test, debug_assertions))]
+mod step10_tests {
+    use std::fs;
+
+    use rulebox_staff_lib::model::ThemeDto;
+    use rulebox_staff_lib::system::{
+        load_theme_at, plain_employee_id, theme_after_sign_out, theme_for_sign_in, write_theme_at,
+    };
+
+    fn temp_root(name: &str) -> std::path::PathBuf {
+        let root = std::env::temp_dir().join(format!("rulebox-prefs-{name}-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&root);
+        if let Err(error) = fs::create_dir_all(&root) {
+            panic!("temp dir: {error}");
+        }
+        root
+    }
+
+    #[test]
+    fn theme_prefs_round_trip_and_a_broken_file_falls_back() {
+        let root = temp_root("round");
+        if let Err(error) = write_theme_at(&root, "emp_maya", ThemeDto::Dark) {
+            panic!("write: {error}");
+        }
+        assert_eq!(load_theme_at(&root, "emp_maya"), Some(ThemeDto::Dark));
+
+        let broken = root.join("emp_sam");
+        if let Err(error) = fs::create_dir_all(&broken) {
+            panic!("dir: {error}");
+        }
+        if let Err(error) = fs::write(broken.join("prefs.json"), "{") {
+            panic!("broken: {error}");
+        }
+        assert_eq!(load_theme_at(&root, "emp_sam"), None);
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn a_bad_employee_id_is_refused() {
+        let root = temp_root("bad");
+        assert!(!plain_employee_id("../x"));
+        assert!(!plain_employee_id("a/b"));
+        assert!(!plain_employee_id(""));
+        assert!(!plain_employee_id("a.b"));
+        assert!(write_theme_at(&root, "../x", ThemeDto::Dark).is_err());
+        assert!(write_theme_at(&root, "a/b", ThemeDto::Light).is_err());
+        let entries = match fs::read_dir(&root) {
+            Ok(entries) => entries,
+            Err(error) => panic!("root: {error}"),
+        };
+        assert!(entries.count() == 0);
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn sign_in_ignores_the_previous_employees_theme() {
+        let org = ThemeDto::Auto;
+        assert_eq!(theme_for_sign_in(org, None), ThemeDto::Auto);
+        assert_eq!(theme_for_sign_in(org, Some(ThemeDto::Dark)), ThemeDto::Dark);
+        assert_eq!(theme_after_sign_out(org), ThemeDto::Auto);
     }
 }

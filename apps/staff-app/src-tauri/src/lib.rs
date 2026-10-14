@@ -7,6 +7,7 @@ mod logging;
 pub mod model;
 pub mod session;
 pub mod shellwin;
+pub mod system;
 pub mod state;
 pub mod taskops;
 pub mod tasks;
@@ -92,6 +93,11 @@ pub fn run() {
             commands::ui_ready,
             commands::ui_alive,
             commands::dismiss_notice,
+            commands::notices_seen,
+            commands::set_volume,
+            commands::set_muted,
+            commands::set_brightness,
+            commands::set_theme,
             commands::dev_set_display,
             commands::dev_set_boot,
             commands::popup_open,

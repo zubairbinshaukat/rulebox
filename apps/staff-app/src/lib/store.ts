@@ -15,7 +15,7 @@ export const EMPTY_SHELL_STATE: ShellState = {
   session: { status: "signedOut", last: null },
   apps: { status: "idle", items: [] },
   tasks: [],
-  system: { volume: null, battery: null, network: "none", canPowerOff: false },
+  system: { volume: null, battery: null, network: "none", canPowerOff: false, brightness: null },
   notices: [],
   banner: null,
   capabilities: [],

@@ -4,6 +4,7 @@ import { Flip } from "gsap/Flip";
 import { useGSAP } from "@gsap/react";
 import { Avatar, LogoMark, Surface } from "@rulebox/ui";
 import type { AppEntry, TaskItem } from "@rulebox/types";
+import IconBell from "~icons/solar/bell-bold-duotone";
 
 import { useMotionLevel } from "../../lib/motion";
 import { useShell } from "../../lib/store";
@@ -11,14 +12,16 @@ import { anchorOf, call, isTauri } from "../../lib/tauri";
 import { AppIcon } from "../appIcon";
 import { clickTarget, groupTaskbar, labelOf, stateOf } from "./grouping";
 import { TaskButton, WindowIcon } from "./TaskButton";
+import { Clock } from "./Clock";
+import { SystemArea } from "./SystemArea";
 
 gsap.registerPlugin(Flip, useGSAP);
 
 /**
  * The strip: Start, then pinned apps and every open window. A click restores,
  * minimizes or focuses; right click (or Shift+F10) opens the task menu. The
- * The account button opens the account menu. Network, volume and the clock
- * arrive with quick settings.
+ * The account button opens the account menu. The bell, network, volume,
+ * battery and clock open quick settings or show the time.
  */
 export function Taskbar() {
   const level = useMotionLevel();
@@ -28,6 +31,7 @@ export function Taskbar() {
   const flipState = useRef<Flip.FlipState | null>(null);
 
   const signedIn = useShell((s) => s.session.status === "signedIn" && !s.session.locked);
+  const unread = useShell((s) => s.notices.filter((notice) => notice.unread).length);
   const employeeName = useShell((s) =>
     s.session.status === "signedIn" ? s.session.employee.name : null,
   );
@@ -77,6 +81,16 @@ export function Taskbar() {
     void call("popup_open", {
       kind: "start",
       anchor: anchorOf(start.current),
+    });
+  };
+
+  const openQuick = (element: Element) => {
+    if (!inTauri) {
+      return;
+    }
+    void call("popup_open", {
+      kind: "quickSettings",
+      anchor: anchorOf(element),
     });
   };
 
@@ -204,16 +218,37 @@ export function Taskbar() {
               <button
                 type="button"
                 className="rb-task"
-                aria-label="Account"
-                title={employeeName}
-                style={{ width: "auto", padding: "0 8px", gap: 8 }}
+                aria-label="Notices"
+                title="Notices"
                 onPointerDown={(event) => event.stopPropagation()}
-                onClick={(event) => openAccount(event.currentTarget)}
+                onClick={(event) => openQuick(event.currentTarget)}
               >
-                <Avatar name={employeeName} size={28} />
+                <span className="rb-task__icon">
+                  <IconBell width={22} height={22} />
+                </span>
+                {unread > 0 ? (
+                  <span className="rb-task__count">{unread > 9 ? "9+" : unread}</span>
+                ) : null}
               </button>
             ) : null}
           </>
+        ) : (
+          <div style={{ flex: 1 }} />
+        )}
+        <SystemArea />
+        <Clock />
+        {signedIn && employeeName ? (
+          <button
+            type="button"
+            className="rb-task"
+            aria-label="Account"
+            title={employeeName}
+            style={{ width: "auto", padding: "0 8px", gap: 8 }}
+            onPointerDown={(event) => event.stopPropagation()}
+            onClick={(event) => openAccount(event.currentTarget)}
+          >
+            <Avatar name={employeeName} size={28} />
+          </button>
         ) : null}
       </Surface>
     </div>

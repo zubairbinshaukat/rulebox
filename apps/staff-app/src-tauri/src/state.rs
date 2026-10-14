@@ -36,6 +36,9 @@ struct Inner {
     emit_count: AtomicU64,
     /// Employee files root from the last successful sign-in (SafeRoot is Step 12).
     files_root: Mutex<Option<String>>,
+    /// Theme of the sign-in screen (organization / dev setting). An employee's
+    /// choice replaces `display.theme` only while they are signed in.
+    org_theme: Mutex<crate::model::ThemeDto>,
     /// Debug: when set, agent link updates do not overwrite a forced boot link.
     #[cfg(debug_assertions)]
     pub(crate) dev_hold_link: AtomicBool,
@@ -43,6 +46,7 @@ struct Inner {
 
 impl AppState {
     pub fn new(agent: Arc<dyn AgentPort>, initial: ShellState) -> Self {
+        let org_theme = initial.display.theme;
         Self {
             inner: Arc::new(Inner {
                 shell: Mutex::new(initial),
@@ -55,10 +59,27 @@ impl AppState {
                 notice_seq: AtomicU32::new(1),
                 emit_count: AtomicU64::new(0),
                 files_root: Mutex::new(None),
+                org_theme: Mutex::new(org_theme),
                 #[cfg(debug_assertions)]
                 dev_hold_link: AtomicBool::new(false),
             }),
         }
+    }
+
+    pub fn org_theme(&self) -> crate::model::ThemeDto {
+        *self
+            .inner
+            .org_theme
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+    }
+
+    pub fn set_org_theme(&self, theme: crate::model::ThemeDto) {
+        *self
+            .inner
+            .org_theme
+            .lock()
+            .unwrap_or_else(|e| e.into_inner()) = theme;
     }
 
     pub fn set_files_root(&self, path: Option<String>) {
@@ -146,7 +167,6 @@ impl AppState {
             .swap(true, Ordering::SeqCst)
     }
 
-    #[allow(dead_code)] // Notices UI is Step 10; API is ready now.
     pub fn notify(&self, tone: NoticeTone, title: impl Into<String>, detail: Option<String>) {
         let id = self.inner.notice_seq.fetch_add(1, Ordering::Relaxed);
         let at_ms = std::time::SystemTime::now()
@@ -159,12 +179,26 @@ impl AppState {
             title: title.into(),
             detail,
             at_ms,
+            unread: true,
         };
         self.update(|s| {
             s.notices.push(item);
             if s.notices.len() > 20 {
                 let drain = s.notices.len() - 20;
                 s.notices.drain(0..drain);
+            }
+        });
+    }
+
+    /// The bell's count drops when quick settings is opened.
+    pub fn mark_notices_read(&self) {
+        let any = self.read(|shell| shell.notices.iter().any(|notice| notice.unread));
+        if !any {
+            return;
+        }
+        self.update(|shell| {
+            for notice in &mut shell.notices {
+                notice.unread = false;
             }
         });
     }

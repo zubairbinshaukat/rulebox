@@ -241,6 +241,39 @@ impl Drop for MsgLoop {
     }
 }
 
+/// AC-line and battery-percent notifications, so a laptop unplug shows up
+/// without polling. The window procedure only forwards `PowerChanged`.
+fn register_power_settings(hwnd: HWND) -> Vec<windows::Win32::System::Power::HPOWERNOTIFY> {
+    use windows::core::GUID;
+    use windows::Win32::Foundation::HANDLE;
+    use windows::Win32::System::Power::RegisterPowerSettingNotification;
+    use windows::Win32::UI::WindowsAndMessaging::DEVICE_NOTIFY_WINDOW_HANDLE;
+
+    const GUID_ACDC_POWER_SOURCE: GUID = GUID::from_u128(0x5d3e9a59_e9d5_4b00_a6bd_ff34ff516548);
+    const GUID_BATTERY_PERCENTAGE_REMAINING: GUID =
+        GUID::from_u128(0xa7ad8041_b45a_4cae_87a3_eecbb468a9e1);
+
+    let mut handles = Vec::new();
+    for guid in [GUID_ACDC_POWER_SOURCE, GUID_BATTERY_PERCENTAGE_REMAINING] {
+        // SAFETY: `hwnd` is the message window on this thread.
+        match unsafe {
+            RegisterPowerSettingNotification(HANDLE(hwnd.0), &guid, DEVICE_NOTIFY_WINDOW_HANDLE)
+        } {
+            Ok(handle) => handles.push(handle),
+            Err(error) => tracing::warn!(%error, "a power setting was not registered"),
+        }
+    }
+    handles
+}
+
+fn unregister_power_settings(handles: &[windows::Win32::System::Power::HPOWERNOTIFY]) {
+    use windows::Win32::System::Power::UnregisterPowerSettingNotification;
+    for handle in handles {
+        // SAFETY: each handle was returned by RegisterPowerSettingNotification.
+        let _ = unsafe { UnregisterPowerSettingNotification(*handle) };
+    }
+}
+
 fn hwnd_from(raw: isize) -> HWND {
     HWND(raw as *mut c_void)
 }
@@ -259,6 +292,7 @@ fn thread_main(state: &WndState, ready: mpsc::Sender<Result<isize>>) {
             // loop ends.
             let registered =
                 unsafe { WTSRegisterSessionNotification(hwnd, NOTIFY_FOR_THIS_SESSION) }.is_ok();
+            let power_handles = register_power_settings(hwnd);
             run_loop();
             // Hooks belong to this thread: drop them before it ends.
             tracker::stop();
@@ -266,6 +300,7 @@ fn thread_main(state: &WndState, ready: mpsc::Sender<Result<isize>>) {
                 // SAFETY: matches the registration above.
                 let _ = unsafe { WTSUnRegisterSessionNotification(hwnd) };
             }
+            unregister_power_settings(&power_handles);
             // Leave the Windows work area the way we found it.
             if state.mode == ShellMode::Shell {
                 if let Err(error) = workarea::restore_saved_work_area() {

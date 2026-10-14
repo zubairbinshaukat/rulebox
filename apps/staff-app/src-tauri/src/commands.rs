@@ -86,6 +86,63 @@ pub fn dismiss_notice(
     Ok(())
 }
 
+/// Clear the bell count. The notices stay in the list.
+#[tauri::command]
+pub fn notices_seen(window: Window, state: State<'_, AppState>) -> Result<(), CommandError> {
+    require_label(&window, "shell-")?;
+    state.mark_notices_read();
+    Ok(())
+}
+
+/// Master volume, 0–1. Clamped. No sound device is an error the UI already hides.
+#[tauri::command]
+pub fn set_volume(
+    window: Window,
+    host: State<'_, Arc<DesktopHost>>,
+    level: f32,
+) -> Result<(), CommandError> {
+    require_label(&window, "shell-")?;
+    host.watch()
+        .set_volume(level)
+        .map_err(|error| CommandError::Failed(error.to_string()))
+}
+
+#[tauri::command]
+pub fn set_muted(
+    window: Window,
+    host: State<'_, Arc<DesktopHost>>,
+    muted: bool,
+) -> Result<(), CommandError> {
+    require_label(&window, "shell-")?;
+    host.watch()
+        .set_muted(muted)
+        .map_err(|error| CommandError::Failed(error.to_string()))
+}
+
+#[tauri::command]
+pub fn set_brightness(
+    window: Window,
+    host: State<'_, Arc<DesktopHost>>,
+    level: u8,
+) -> Result<(), CommandError> {
+    require_label(&window, "shell-")?;
+    host.watch()
+        .set_brightness(level)
+        .map_err(|error| CommandError::Failed(error.to_string()))
+}
+
+/// Per-employee theme. Signed out, this is the organization setting.
+#[tauri::command]
+pub fn set_theme(
+    window: Window,
+    state: State<'_, AppState>,
+    theme: ThemeDto,
+) -> Result<(), CommandError> {
+    require_label(&window, "shell-")?;
+    crate::system::set_theme(&state, theme);
+    Ok(())
+}
+
 /// Open the shared popup. `anchor` is the control that opened it, in
 /// **physical** pixels relative to the calling window's client area.
 #[tauri::command]
@@ -361,10 +418,14 @@ pub fn dev_set_display(
     require_label(&window, "shell-")?;
     #[cfg(debug_assertions)]
     {
+        let signed_in = matches!(state.snapshot().session, SessionState::SignedIn { .. });
         state.update(|s| {
             s.display.lite = lite;
             s.display.theme = theme;
         });
+        if !signed_in {
+            state.set_org_theme(theme);
+        }
         Ok(())
     }
     #[cfg(not(debug_assertions))]
@@ -427,6 +488,11 @@ pub fn apply_dev_boot(
             }
         }
     });
+    if let Some(theme) = theme {
+        if !matches!(state.snapshot().session, SessionState::SignedIn { .. }) {
+            state.set_org_theme(theme);
+        }
+    }
 }
 
 /// Debug: force link / enrollment for boot-state screenshots. Release: Forbidden.

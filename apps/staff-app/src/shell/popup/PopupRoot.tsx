@@ -5,6 +5,7 @@ import { Surface } from "@rulebox/ui";
 import { call, isTauri, type PopupKind } from "../../lib/tauri";
 import { AccountMenu } from "./AccountMenu";
 import { ConfirmLogout } from "./ConfirmLogout";
+import { QuickSettings } from "./QuickSettings";
 import { StartMenu } from "./StartMenu";
 
 /**
@@ -78,7 +79,7 @@ function renderKind(kind: PopupKind | null): ReactNode {
     case "confirm":
       return <ConfirmLogout />;
     case "quickSettings":
-      return <Placeholder title="Quick settings" />;
+      return <QuickSettings />;
     case "switcher":
       return <Placeholder title="App switcher" />;
     case "thumb":

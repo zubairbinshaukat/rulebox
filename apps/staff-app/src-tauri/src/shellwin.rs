@@ -57,7 +57,7 @@ impl PopupKind {
     pub fn logical_size(self) -> (i32, i32) {
         match self {
             PopupKind::Start => (560, 640),
-            PopupKind::QuickSettings => (360, 440),
+            PopupKind::QuickSettings => (380, 560),
             PopupKind::Account => (300, 220),
             PopupKind::Switcher => (720, 232),
             PopupKind::Thumb => (272, 196),
@@ -85,6 +85,8 @@ pub struct DesktopHost {
     /// Lets window events (DPI change) join the Win32 event stream.
     events: UnboundedSender<DesktopEvent>,
     popup: Mutex<Option<PopupKind>>,
+    /// Volume, network and brightness. Lives on its own MTA thread.
+    system: rulebox_desktop::system::Watch,
 }
 
 impl DesktopHost {
@@ -102,6 +104,10 @@ impl DesktopHost {
         if let Some(msgloop) = taken {
             msgloop.stop();
         }
+    }
+
+    pub fn watch(&self) -> &rulebox_desktop::system::Watch {
+        &self.system
     }
 
     fn request_reapply(&self) {
@@ -160,8 +166,9 @@ pub fn init(
         mode,
         token: ShellToken::acquire(mode).map(Arc::new),
         msgloop: Mutex::new(Some(msgloop)),
-        events: events_tx,
+        events: events_tx.clone(),
         popup: Mutex::new(None),
+        system: rulebox_desktop::system::Watch::start(events_tx),
     });
 
     create_windows(app, &host)?;
@@ -399,6 +406,16 @@ fn resync_tracking(host: &Arc<DesktopHost>) {
     }
 }
 
+fn is_system_event(event: &DesktopEvent) -> bool {
+    matches!(
+        event,
+        DesktopEvent::VolumeChanged
+            | DesktopEvent::NetworkChanged
+            | DesktopEvent::PowerChanged
+            | DesktopEvent::Resumed
+    )
+}
+
 fn is_display_event(event: &DesktopEvent) -> bool {
     matches!(
         event,
@@ -442,13 +459,15 @@ async fn consume_events(
         }
 
         let mut replace = false;
+        let mut refresh_system = false;
         let mut window_events = Vec::new();
         for event in batch {
             match event {
                 DesktopEvent::Window(event) => window_events.push(event),
                 other => {
                     replace |= is_display_event(&other);
-                    if !is_display_event(&other) {
+                    refresh_system |= is_system_event(&other);
+                    if !is_display_event(&other) && !is_system_event(&other) {
                         tracing::debug!(event = ?other, "desktop event");
                     }
                 }
@@ -457,6 +476,11 @@ async fn consume_events(
         if replace {
             reapply(&app, &host);
             resync_tracking(&host);
+        }
+        if refresh_system {
+            if let Some(state) = app.try_state::<crate::state::AppState>() {
+                crate::system::apply_snapshot(&state, &host.watch().snapshot());
+            }
         }
         if !window_events.is_empty() {
             tasks.on_events(&app, window_events);

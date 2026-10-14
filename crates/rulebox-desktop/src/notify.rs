@@ -18,6 +18,10 @@ pub const WM_WTSSESSION_CHANGE: u32 = 0x02B1;
 const WTS_SESSION_LOCK: u32 = 0x7;
 const WTS_SESSION_UNLOCK: u32 = 0x8;
 
+/// `PBT_POWERSETTINGCHANGE` (winuser.h). Fired for the power-setting
+/// notifications registered on the hidden window (AC line, battery percent).
+const PBT_POWERSETTINGCHANGE: u32 = 0x8013;
+
 /// Map one window message to the event it means, if any.
 pub fn map_message(msg: u32, wparam: usize) -> Option<DesktopEvent> {
     match msg {
@@ -25,7 +29,7 @@ pub fn map_message(msg: u32, wparam: usize) -> Option<DesktopEvent> {
         WM_DPICHANGED => Some(DesktopEvent::DpiChanged),
         WM_POWERBROADCAST => match wparam as u32 {
             PBT_APMRESUMEAUTOMATIC | PBT_APMRESUMESUSPEND => Some(DesktopEvent::Resumed),
-            PBT_APMPOWERSTATUSCHANGE => Some(DesktopEvent::PowerChanged),
+            PBT_APMPOWERSTATUSCHANGE | PBT_POWERSETTINGCHANGE => Some(DesktopEvent::PowerChanged),
             _ => None,
         },
         WM_WTSSESSION_CHANGE => match wparam as u32 {
@@ -68,6 +72,10 @@ mod tests {
     fn power_status_change() {
         assert!(matches!(
             map_message(WM_POWERBROADCAST, PBT_APMPOWERSTATUSCHANGE as usize),
+            Some(DesktopEvent::PowerChanged)
+        ));
+        assert!(matches!(
+            map_message(WM_POWERBROADCAST, PBT_POWERSETTINGCHANGE as usize),
             Some(DesktopEvent::PowerChanged)
         ));
     }
