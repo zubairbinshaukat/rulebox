@@ -1,4 +1,11 @@
-import { useMemo, useState, type CSSProperties, type KeyboardEvent, type ReactNode } from "react";
+import {
+  useEffect,
+  useMemo,
+  useState,
+  type CSSProperties,
+  type KeyboardEvent,
+  type ReactNode,
+} from "react";
 import { Avatar } from "@rulebox/ui";
 import type { AppEntry } from "@rulebox/types";
 import IconLogout from "~icons/solar/logout-2-bold-duotone";
@@ -22,6 +29,27 @@ export function StartMenu() {
   const canPowerOff = useShell((s) => s.system.canPowerOff);
   const [query, setQuery] = useState("");
   const [active, setActive] = useState(0);
+  // Restart and Shut down close every app, so they need a second click.
+  const [armed, setArmed] = useState<"restart" | "shutdown" | null>(null);
+
+  useEffect(() => {
+    if (armed === null) {
+      return;
+    }
+    const timer = window.setTimeout(() => setArmed(null), 4000);
+    return () => window.clearTimeout(timer);
+  }, [armed]);
+
+  function powerAction(kind: "restart" | "shutdown") {
+    if (armed !== kind) {
+      setArmed(kind);
+      return;
+    }
+    setArmed(null);
+    void call(kind === "restart" ? "power_restart" : "power_shut_down", {}).catch(() => {
+      // The shell posts a notice when Windows refuses.
+    });
+  }
 
   const employee = session.status === "signedIn" ? session.employee : null;
   const results = useMemo(
@@ -193,13 +221,28 @@ export function StartMenu() {
         </button>
         {canPowerOff ? (
           <span style={{ marginLeft: "auto", display: "flex", gap: 4 }}>
-            <IconAction label="Sleep" onClick={() => void call("power_sleep", {})}>
+            <IconAction
+              label="Sleep"
+              onClick={() =>
+                void call("power_sleep", {}).catch(() => {
+                  // The shell posts a notice when Windows refuses.
+                })
+              }
+            >
               <IconMoon width={18} height={18} />
             </IconAction>
-            <IconAction label="Restart" onClick={() => void call("power_restart", {})}>
+            <IconAction
+              label={armed === "restart" ? "Click again to restart" : "Restart"}
+              armed={armed === "restart"}
+              onClick={() => powerAction("restart")}
+            >
               <IconRestart width={18} height={18} />
             </IconAction>
-            <IconAction label="Shut down" onClick={() => void call("power_shut_down", {})}>
+            <IconAction
+              label={armed === "shutdown" ? "Click again to shut down" : "Shut down"}
+              armed={armed === "shutdown"}
+              onClick={() => powerAction("shutdown")}
+            >
               <IconPower width={18} height={18} />
             </IconAction>
           </span>
@@ -225,10 +268,13 @@ const footerButton: CSSProperties = {
 
 function IconAction({
   label,
+  armed = false,
   onClick,
   children,
 }: {
   label: string;
+  /** Waiting for the confirming second click. */
+  armed?: boolean;
   onClick: () => void;
   children: ReactNode;
 }) {
@@ -246,8 +292,8 @@ function IconAction({
         justifyContent: "center",
         borderRadius: 10,
         border: 0,
-        background: "transparent",
-        color: "var(--rb-ink)",
+        background: armed ? "var(--rb-danger-soft)" : "transparent",
+        color: armed ? "var(--rb-danger-text)" : "var(--rb-ink)",
         cursor: "pointer",
       }}
     >

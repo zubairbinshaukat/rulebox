@@ -17,7 +17,7 @@ use rulebox_desktop::windows::WindowInfo;
 use tauri::{AppHandle, Manager};
 
 use crate::launcher::Launcher;
-use crate::model::{AppEntry, AppKind, TaskItem};
+use crate::model::{AppEntry, AppKind, BuiltinTool, TaskItem};
 use crate::state::AppState;
 
 /// Browsers re-request after this; the server cache uses the same lifetime.
@@ -109,6 +109,9 @@ pub struct TaskTable {
     flashing: HashSet<isize>,
     hung: HashSet<isize>,
     icon_rev: HashMap<isize, u32>,
+    /// Built-in windows that show a catalogue app (the Files window): hwnd →
+    /// app id, so the window groups under that app's pinned button.
+    builtin_apps: HashMap<isize, String>,
 }
 
 impl TaskTable {
@@ -181,6 +184,16 @@ impl TaskTable {
                 }
             }
         }
+    }
+
+    /// Tell the table which built-in windows show a catalogue app. Returns
+    /// `true` when that changed.
+    pub fn set_builtin_apps(&mut self, apps: HashMap<isize, String>) -> bool {
+        if self.builtin_apps == apps {
+            return false;
+        }
+        self.builtin_apps = apps;
+        true
     }
 
     /// Replace the set of hung windows. Returns `true` when it changed.
@@ -268,7 +281,7 @@ impl TaskTable {
             let kind = labels.get(hwnd).and_then(|label| parse_label(label));
             let (own, app_id) = match kind {
                 Some(LabelKind::Shell) => continue,
-                Some(LabelKind::Builtin) => (true, None),
+                Some(LabelKind::Builtin) => (true, self.builtin_apps.get(hwnd).cloned()),
                 Some(LabelKind::Web { app_id }) => (true, Some(app_id)),
                 None => (false, match_catalogue_app(info, catalogue, launched)),
             };
@@ -572,6 +585,34 @@ pub fn serve_icon(
 // Glue.
 // ---------------------------------------------------------------------------
 
+/// Which built-in windows show a catalogue app: a Files window (its selected
+/// tab) belongs to the catalogue's Files app. Viewers belong to no app.
+fn builtin_apps_of(app: &AppHandle, state: &AppState, labels: &Labels) -> HashMap<isize, String> {
+    let files_app = state.read(|s| {
+        s.apps.items.iter().find_map(|entry| match &entry.kind {
+            AppKind::Builtin {
+                tool: BuiltinTool::Files,
+            } => Some(entry.id.clone()),
+            _ => None,
+        })
+    });
+    let (Some(files_app), Some(windows)) = (
+        files_app,
+        app.try_state::<Arc<crate::appwin::AppWindows>>(),
+    ) else {
+        return HashMap::new();
+    };
+    labels
+        .iter()
+        .filter(|(_, label)| matches!(parse_label(label), Some(LabelKind::Builtin)))
+        .filter_map(|(hwnd, label)| {
+            let view = windows.snapshot(label)?;
+            let tab = view.tabs.get(view.selected)?;
+            (tab.kind == "files").then(|| (*hwnd, files_app.clone()))
+        })
+        .collect()
+}
+
 /// Owns the table; lives inside the desktop event task.
 pub struct TaskHost {
     table: TaskTable,
@@ -626,6 +667,8 @@ impl TaskHost {
             return;
         };
         let launched = self.services.launcher.pid_map(&self.table.pids());
+        self.table
+            .set_builtin_apps(builtin_apps_of(app, &state, labels));
         let items = state.read(|s| self.table.items(labels, &s.apps.items, &launched));
         let differs = state.read(|s| s.tasks != items);
         if differs {

@@ -294,7 +294,11 @@ pub async fn lock(
         apps.minimize_all(&app);
     }
     if let Some(desktop) = desktop_window(&app) {
-        let _ = desktop.set_always_on_top(true);
+        // Only the real shell covers everything. In dev mode the desktop is an
+        // ordinary window and must not pin itself above the developer's apps.
+        if !dev_mode {
+            let _ = desktop.set_always_on_top(true);
+        }
         let _ = desktop.set_focus();
     }
     blocking(move || {
@@ -342,9 +346,19 @@ async fn run_power(
     if sign_out_first && signed_in {
         run_sign_out(app, state, services, host).await?;
     }
-    blocking(action)
+    let result = blocking(action)
         .await?
-        .map_err(|error| CommandError::Failed(error.to_string()))
+        .map_err(|error| CommandError::Failed(error.to_string()));
+    if let Err(error) = &result {
+        // The button has no other way to say that nothing happened.
+        tracing::warn!(%error, "power action failed");
+        state.notify(
+            crate::model::NoticeTone::Warning,
+            "That did not work.",
+            Some("Windows did not accept the request.".into()),
+        );
+    }
+    result
 }
 
 #[tauri::command]

@@ -8,7 +8,7 @@ contract).
 |---|---|---|---|
 | 1 | `phase-1-setup.md` | ✅ Done (reviewed) | Monorepo skeleton: dashboard, Staff App, Convex schema and shared design system, all running empty |
 | 2 | `phase-2-agent-core.md` | ✅ Done (VM-verified on Windows 11 Pro 26300, results in `phase-2-vm-results.md`; three late fixes are unit-tested only and need a re-check on the next VM run: exit-hold timing, kill-on-close job, `recover` for LSA auto sign-in owners) | Rust Windows service: enrollment code, Staff account, auto sign-in, shell replacement, watchdog and agent↔shell IPC |
-| 3 | `phase-3-staff-shell.md` | Plan written | Staff App as the shell: sign-in, desktop, taskbar, Start menu, window tracking, web app windows, file explorer and viewers |
+| 3 | `phase-3-staff-shell.md` | In progress: Steps 1-11 done and reviewed (dev machine, demo agent); Steps 12-19 left, VM run is Step 18 | Staff App as the shell: sign-in, desktop, taskbar, Start menu, window tracking, web app windows, file explorer and viewers |
 | 4 | `phase-4-dashboard-state.md` | Not written | Dashboard and desired state: devices, employees, groups, apps, remote installs, Convex Auth, policy signing and audit log |
 | 5 | `phase-5-lockdown.md` | Not written | Lockdown and Section 24 features: App Control, process watchdog, policies, web app permissions, Wi-Fi/printers, rollout rings, device lock; pass the escape checklist |
 | 6 | `phase-6-installer-pilot.md` | Not written | MSI installer with compatibility check, Lite mode tuning, and a pilot on a real 4 GB laptop, then a small group |

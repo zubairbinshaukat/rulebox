@@ -492,6 +492,22 @@ mod step7_tests {
     }
 
     #[test]
+    fn a_built_in_files_window_belongs_to_the_files_app() {
+        let mut table = TaskTable::default();
+        let labels = labels(&[(5, "app-0"), (6, "app-1")]);
+        table.apply(&WindowEvent::Added(info(5, "Files", None)), &labels);
+        table.apply(&WindowEvent::Added(info(6, "notes.txt", None)), &labels);
+        // Only window 5 shows the Files tool; 6 is a viewer.
+        let mut builtin = std::collections::HashMap::new();
+        builtin.insert(5isize, "files".to_string());
+        assert!(table.set_builtin_apps(builtin.clone()));
+        assert!(!table.set_builtin_apps(builtin));
+        let items = table.items(&labels, &[], &no_jobs());
+        assert_eq!(items[0].app_id.as_deref(), Some("files"));
+        assert!(items[0].own);
+        assert_eq!(items[1].app_id, None);
+    }
+    #[test]
     fn a_window_that_takes_the_focus_before_it_is_listed_is_active_once_listed() {
         let mut table = TaskTable::default();
         let none = Labels::new();
