@@ -7,11 +7,12 @@ pub mod model;
 pub mod session;
 pub mod shellwin;
 pub mod state;
+pub mod tasks;
 
 use std::backtrace::Backtrace;
 use std::fs::OpenOptions;
 use std::io::Write;
-use std::sync::OnceLock;
+use std::sync::{Arc, OnceLock};
 
 use tauri::{Manager, RunEvent};
 use tracing_appender::non_blocking::WorkerGuard;
@@ -70,12 +71,19 @@ pub fn run() {
     // Decided once. Shell mode only when no Explorer owns the shell window.
     let mode = rulebox_desktop::mode::detect();
 
+    // Icons of tracked windows, served to the taskbar by `rbicon://`.
+    let icons = Arc::new(tasks::IconStore::default());
+    let protocol_icons = Arc::clone(&icons);
+
     // Agent selection (especially `IpcClient::spawn`) needs a Tokio runtime.
     // Tauri installs one before `setup`, so connect there — not earlier.
     let builder = tauri::Builder::default()
         .plugin(tauri_plugin_single_instance::init(|_app, _argv, _cwd| {
             // Second start: nothing to focus yet (the sign-in layer is Step 5).
         }))
+        .register_asynchronous_uri_scheme_protocol("rbicon", move |_ctx, request, responder| {
+            tasks::serve_icon(&protocol_icons, request, responder);
+        })
         .invoke_handler(tauri::generate_handler![
             commands::shell_state,
             commands::ui_ready,
@@ -111,7 +119,7 @@ pub fn run() {
             }
             app.manage(app_state);
 
-            let host = shellwin::init(app.handle(), mode)?;
+            let host = shellwin::init(app.handle(), mode, Arc::clone(&icons))?;
             app.manage(host);
             tracing::info!(?mode, "shell windows ready");
             Ok(())

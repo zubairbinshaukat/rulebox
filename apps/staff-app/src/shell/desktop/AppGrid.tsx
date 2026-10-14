@@ -3,32 +3,15 @@ import gsap from "gsap";
 import { Flip } from "gsap/Flip";
 import { AppTile, Button } from "@rulebox/ui";
 import type { AppEntry } from "@rulebox/types";
-import IconFolder from "~icons/solar/folder-bold-duotone";
-import IconDocument from "~icons/solar/document-bold-duotone";
-import IconGlobal from "~icons/solar/global-bold-duotone";
-import IconWidget from "~icons/solar/widget-bold-duotone";
 
 import { useMotionLevel } from "../../lib/motion";
 import { call } from "../../lib/tauri";
+import { AppIcon } from "../appIcon";
 import { solveTiles, type TileTier } from "./tileLayout";
 
 gsap.registerPlugin(Flip);
 
 const GAP = 18;
-
-function iconFor(app: AppEntry) {
-  const key = app.iconKey ?? "";
-  if (key.includes("folder") || app.id === "files") {
-    return <IconFolder width="1em" height="1em" />;
-  }
-  if (app.kind.type === "web") {
-    return <IconGlobal width="1em" height="1em" />;
-  }
-  if (app.kind.type === "builtin") {
-    return <IconDocument width="1em" height="1em" />;
-  }
-  return <IconWidget width="1em" height="1em" />;
-}
 
 export interface AppGridProps {
   apps: AppEntry[];
@@ -195,7 +178,7 @@ export function AppGrid({ apps, status, onRetry }: AppGridProps) {
             <AppTile
               name={app.name}
               description={app.description ?? undefined}
-              icon={iconFor(app)}
+              icon={<AppIcon app={app} />}
               badge={app.badge ?? undefined}
               hue={app.hue ?? undefined}
               size={solved.tier}

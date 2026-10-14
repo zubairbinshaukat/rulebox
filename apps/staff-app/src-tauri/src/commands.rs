@@ -323,6 +323,15 @@ pub fn spawn_dev_cmd_poller(state: AppState) {
         /// Override the signed-in catalogue size for Step 6 screenshots.
         #[serde(default)]
         demo_apps: Option<usize>,
+        /// Sign in as a demo employee without typing into the screen.
+        #[serde(default)]
+        sign_in: Option<DevSignIn>,
+    }
+
+    #[derive(Debug, Deserialize)]
+    struct DevSignIn {
+        username: String,
+        password: String,
     }
 
     tauri::async_runtime::spawn(async move {
@@ -351,6 +360,12 @@ pub fn spawn_dev_cmd_poller(state: AppState) {
                 cmd.lite,
                 cmd.theme,
             );
+            if let Some(creds) = cmd.sign_in {
+                match session::sign_in(&state, creds.username, creds.password).await {
+                    Ok(outcome) => tracing::info!(?outcome, "dev cmd sign-in"),
+                    Err(error) => tracing::warn!(%error, "dev cmd sign-in failed"),
+                }
+            }
             if let Some(n) = cmd.demo_apps {
                 let items = crate::agent::demo::sample_apps_for(Some(n));
                 state.update(|s| {

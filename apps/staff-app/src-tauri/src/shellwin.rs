@@ -14,6 +14,7 @@ use std::time::Duration;
 use rulebox_desktop::placement::{
     self, popup_rect, taskbar_rect, taskbar_zone_px, usable_bounds, Rect, POPUP_GAP_LOGICAL,
 };
+use rulebox_desktop::tracker;
 use rulebox_desktop::workarea::{self, MonitorRect};
 use rulebox_desktop::{DesktopEvent, MsgLoop, ShellMode, ShellToken};
 use serde::{Deserialize, Serialize};
@@ -23,12 +24,19 @@ use tauri::{
 };
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
 
+use crate::tasks::{IconStore, TaskHost};
+
 pub const DESKTOP: &str = "shell-desktop";
 pub const TASKBAR: &str = "shell-taskbar";
 pub const POPUP: &str = "shell-popup";
 
 /// Bursts of display messages (one per monitor property) become one re-place.
 const REAPPLY_DEBOUNCE: Duration = Duration::from_millis(150);
+/// Window events are batched for this long: well inside the 300 ms budget
+/// of the taskbar, long enough to fold a flurry of title changes.
+const WINDOW_EVENT_SETTLE: Duration = Duration::from_millis(40);
+/// How often visible windows are checked for "not responding".
+const HUNG_CHECK_INTERVAL: Duration = Duration::from_secs(5);
 
 /// What the shared popup window is showing. The page picks its content from
 /// `popup://show { kind }`. Sizes are provisional; the steps that build each
@@ -139,7 +147,11 @@ fn raw_hwnd(window: &WebviewWindow) -> Option<isize> {
 
 /// Create the three windows, start the message loop and (shell mode) take
 /// over the work area. Call once, from `setup`.
-pub fn init(app: &AppHandle, mode: ShellMode) -> Result<Arc<DesktopHost>, String> {
+pub fn init(
+    app: &AppHandle,
+    mode: ShellMode,
+    icons: Arc<IconStore>,
+) -> Result<Arc<DesktopHost>, String> {
     let (events_tx, events_rx) = tokio::sync::mpsc::unbounded_channel();
     let msgloop = MsgLoop::start(mode, events_tx.clone())
         .map_err(|error| format!("start the desktop message loop: {error}"))?;
@@ -156,11 +168,12 @@ pub fn init(app: &AppHandle, mode: ShellMode) -> Result<Arc<DesktopHost>, String
     take_over_session(&host);
     reapply(app, &host);
     show_initial(app);
+    start_tracking(&host);
 
     let task_app = app.clone();
     let task_host = Arc::clone(&host);
     tauri::async_runtime::spawn(async move {
-        consume_events(task_app, task_host, events_rx).await;
+        consume_events(task_app, task_host, events_rx, icons).await;
     });
 
     tracing::info!(mode = ?mode, "shell windows created");
@@ -357,30 +370,93 @@ fn show_initial(app: &AppHandle) {
     }
 }
 
+/// Follow every top-level window (read-only; harmless in dev mode, where it
+/// acts as a second taskbar). Events arrive on the desktop event stream.
+fn start_tracking(host: &Arc<DesktopHost>) {
+    let guard = host.msgloop.lock().unwrap_or_else(|e| e.into_inner());
+    let Some(msgloop) = guard.as_ref() else {
+        return;
+    };
+    let started = msgloop.run(tracker::start);
+    tauri::async_runtime::spawn(async move {
+        match started.await {
+            Ok(Ok(())) => tracing::info!("window tracking started"),
+            Ok(Err(error)) => tracing::error!(%error, "window tracking did not start"),
+            Err(_) => tracing::error!("window tracking did not start: the loop stopped"),
+        }
+    });
+}
+
+/// Ask the loop thread to re-enumerate windows (after a display change or a
+/// resume, when events may have been missed).
+fn resync_tracking(host: &Arc<DesktopHost>) {
+    let guard = host.msgloop.lock().unwrap_or_else(|e| e.into_inner());
+    if let Some(msgloop) = guard.as_ref() {
+        drop(msgloop.run(|_| tracker::resync()));
+    }
+}
+
+fn is_display_event(event: &DesktopEvent) -> bool {
+    matches!(
+        event,
+        DesktopEvent::DisplayChanged | DesktopEvent::DpiChanged | DesktopEvent::Resumed
+    )
+}
+
 async fn consume_events(
     app: AppHandle,
     host: Arc<DesktopHost>,
     mut events: UnboundedReceiver<DesktopEvent>,
+    icons: Arc<IconStore>,
 ) {
-    while let Some(first) = events.recv().await {
-        let mut replace = matches!(
-            first,
-            DesktopEvent::DisplayChanged | DesktopEvent::DpiChanged | DesktopEvent::Resumed
-        );
-        if !replace {
-            tracing::debug!(event = ?first, "desktop event");
-            continue;
-        }
-        // Let a burst of display messages settle, then place once.
-        tokio::time::sleep(REAPPLY_DEBOUNCE).await;
+    let mut tasks = TaskHost::new(icons);
+    let mut hung_tick = tokio::time::interval(HUNG_CHECK_INTERVAL);
+    hung_tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+
+    loop {
+        let first = tokio::select! {
+            next = events.recv() => match next {
+                Some(event) => event,
+                None => break,
+            },
+            _ = hung_tick.tick() => {
+                tasks.refresh(&app);
+                continue;
+            }
+        };
+
+        // Let a burst settle, then handle it as one batch: window events a
+        // little (the taskbar must feel instant), display events longer.
+        let settle = if is_display_event(&first) {
+            REAPPLY_DEBOUNCE
+        } else {
+            WINDOW_EVENT_SETTLE
+        };
+        tokio::time::sleep(settle).await;
+        let mut batch = vec![first];
         while let Ok(next) = events.try_recv() {
-            replace |= matches!(
-                next,
-                DesktopEvent::DisplayChanged | DesktopEvent::DpiChanged | DesktopEvent::Resumed
-            );
+            batch.push(next);
+        }
+
+        let mut replace = false;
+        let mut window_events = Vec::new();
+        for event in batch {
+            match event {
+                DesktopEvent::Window(event) => window_events.push(event),
+                other => {
+                    replace |= is_display_event(&other);
+                    if !is_display_event(&other) {
+                        tracing::debug!(event = ?other, "desktop event");
+                    }
+                }
+            }
         }
         if replace {
             reapply(&app, &host);
+            resync_tracking(&host);
+        }
+        if !window_events.is_empty() {
+            tasks.on_events(&app, window_events);
         }
     }
 }

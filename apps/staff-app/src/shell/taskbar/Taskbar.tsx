@@ -1,17 +1,72 @@
 import { useRef } from "react";
-import { Surface } from "@rulebox/ui";
+import gsap from "gsap";
+import { Flip } from "gsap/Flip";
+import { useGSAP } from "@gsap/react";
+import { LogoMark, Surface } from "@rulebox/ui";
 
+import { useMotionLevel } from "../../lib/motion";
+import { useShell } from "../../lib/store";
 import { anchorOf, call, isTauri } from "../../lib/tauri";
+import { AppIcon } from "../appIcon";
+import { groupTaskbar, labelOf, stateOf } from "./grouping";
+import { TaskButton, WindowIcon } from "./TaskButton";
+
+gsap.registerPlugin(Flip, useGSAP);
 
 /**
- * Placeholder strip (Step 4). The real taskbar is Step 6. The Start button
- * exists so the popup window can be placed and checked on screen.
+ * The strip: Start, then pinned apps and every open window. The system area
+ * (network, volume, battery, clock, account) is Step 10. Clicking a window
+ * button does nothing yet: window control is Step 8.
  */
 export function Taskbar() {
+  const level = useMotionLevel();
   const start = useRef<HTMLButtonElement>(null);
+  const row = useRef<HTMLDivElement>(null);
+  // The buttons' positions after the previous change: the FLIP starting point.
+  const flipState = useRef<Flip.FlipState | null>(null);
+
+  const signedIn = useShell((s) => s.session.status === "signedIn" && !s.session.locked);
+  const apps = useShell((s) => s.apps.items);
+  const tasks = useShell((s) => s.tasks);
+  const inTauri = isTauri();
+
+  const buttons = signedIn ? groupTaskbar(apps, tasks) : [];
+  const signature = buttons.map((b) => b.key).join("|");
+
+  useGSAP(
+    () => {
+      const el = row.current;
+      if (!el) {
+        flipState.current = null;
+        return;
+      }
+      const targets = el.querySelectorAll("[data-flip-id]");
+      // Read the natural layout: stop a running reorder and drop its transforms.
+      gsap.killTweensOf(targets);
+      gsap.set(targets, { clearProps: "transform" });
+      const natural = Flip.getState(targets);
+      const previous = flipState.current;
+      flipState.current = natural;
+      if (level !== "full" || !previous) {
+        return;
+      }
+      Flip.from(previous, {
+        targets,
+        duration: 0.25,
+        ease: "power2.out",
+        onEnter: (entering) =>
+          gsap.fromTo(
+            entering,
+            { autoAlpha: 0, scale: 0.85 },
+            { autoAlpha: 1, scale: 1, duration: 0.2, ease: "power2.out" },
+          ),
+      });
+    },
+    { dependencies: [signature, level], scope: row },
+  );
 
   const openStart = () => {
-    if (!isTauri() || !start.current) {
+    if (!inTauri || !start.current) {
       return;
     }
     void call("popup_open", {
@@ -20,23 +75,90 @@ export function Taskbar() {
     });
   };
 
+  const launch = (id: string) => {
+    if (inTauri) {
+      void call("launch_app", { id });
+    }
+  };
+
   return (
-    <Surface
-      kind="bar"
+    <div
       style={{
         height: "100vh",
-        display: "flex",
-        alignItems: "center",
-        padding: "0 16px",
-        gap: 12,
+        boxSizing: "border-box",
+        padding: "var(--rb-taskbar-inset)",
         fontFamily: "var(--rb-font-sans)",
         color: "var(--rb-ink)",
       }}
     >
-      <button ref={start} type="button" onClick={openStart}>
-        Start
-      </button>
-      <span style={{ color: "var(--rb-muted)" }}>Taskbar (Step 6)</span>
-    </Surface>
+      <Surface
+        kind="bar"
+        style={{
+          height: "var(--rb-taskbar)",
+          display: "flex",
+          alignItems: "center",
+          padding: "0 8px",
+          gap: 4,
+          minWidth: 0,
+        }}
+      >
+        {signedIn ? (
+          <>
+            <button
+              ref={start}
+              type="button"
+              className="rb-task"
+              aria-label="Start"
+              title="Start"
+              onClick={openStart}
+            >
+              <span className="rb-task__icon">
+                <LogoMark size={28} compact />
+              </span>
+            </button>
+            <span className="rb-task-divider" aria-hidden />
+            <div
+              ref={row}
+              style={{
+                flex: 1,
+                minWidth: 0,
+                display: "flex",
+                alignItems: "center",
+                gap: 4,
+                overflowX: "auto",
+                overflowY: "hidden",
+                scrollbarWidth: "none",
+              }}
+            >
+              {buttons.length === 0 ? (
+                <span style={{ padding: "0 8px", color: "var(--rb-muted)", fontSize: 13.5 }}>
+                  Open an app to get started
+                </span>
+              ) : null}
+              {buttons.map((button) =>
+                button.kind === "pinned" ? (
+                  <TaskButton
+                    key={button.key}
+                    flipId={button.key}
+                    label={labelOf(button.app.name, button.tasks)}
+                    state={stateOf(button.tasks)}
+                    icon={<AppIcon app={button.app} />}
+                    onClick={() => launch(button.app.id)}
+                  />
+                ) : (
+                  <TaskButton
+                    key={button.key}
+                    flipId={button.key}
+                    label={labelOf(button.task.title || "Untitled window", [button.task])}
+                    state={stateOf([button.task])}
+                    icon={<WindowIcon iconKey={button.task.iconKey} enabled={inTauri} />}
+                  />
+                ),
+              )}
+            </div>
+          </>
+        ) : null}
+      </Surface>
+    </div>
   );
 }

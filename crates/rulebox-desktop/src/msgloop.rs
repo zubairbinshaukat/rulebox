@@ -6,6 +6,7 @@
 //! [`DesktopEvent`], pushes it into the channel and returns. Work that must
 //! run on this thread (hooks, hotkeys) is posted with [`MsgLoop::run`].
 
+use std::cell::RefCell;
 use std::collections::VecDeque;
 use std::ffi::c_void;
 use std::panic::{catch_unwind, AssertUnwindSafe};
@@ -18,6 +19,7 @@ use tokio::sync::mpsc::UnboundedSender;
 use tokio::sync::oneshot;
 use windows::core::w;
 use windows::Win32::Foundation::{ERROR_CLASS_ALREADY_EXISTS, HWND, LPARAM, LRESULT, WPARAM};
+use windows::Win32::System::Com::{CoInitializeEx, CoUninitialize, COINIT_APARTMENTTHREADED};
 use windows::Win32::System::LibraryLoader::GetModuleHandleW;
 use windows::Win32::System::RemoteDesktop::{
     WTSRegisterSessionNotification, WTSUnRegisterSessionNotification, NOTIFY_FOR_THIS_SESSION,
@@ -33,7 +35,7 @@ use crate::error::{DesktopError, Result};
 use crate::hotkeys::HotkeyId;
 use crate::mode::ShellMode;
 use crate::notify::{map_message, WM_WTSSESSION_CHANGE};
-use crate::tracker::WindowEvent;
+use crate::tracker::{self, WindowEvent};
 use crate::workarea;
 
 /// Everything the shell learns from Windows, in one stream.
@@ -60,6 +62,24 @@ pub struct LoopCtx {
 }
 
 type Job = Box<dyn FnOnce(&LoopCtx) + Send>;
+
+thread_local! {
+    /// The event channel, reachable from callbacks that have no user data
+    /// (WinEvent hooks run on this thread but receive no context pointer).
+    static SINK: RefCell<Option<UnboundedSender<DesktopEvent>>> = const { RefCell::new(None) };
+}
+
+/// Send an event from the loop thread. Dropped when the loop is not running
+/// or the receiver is gone.
+pub(crate) fn emit_from_loop_thread(event: DesktopEvent) {
+    SINK.with(|sink| {
+        if let Ok(slot) = sink.try_borrow() {
+            if let Some(sender) = slot.as_ref() {
+                let _ = sender.send(event);
+            }
+        }
+    });
+}
 
 struct Shared {
     queue: Mutex<VecDeque<Job>>,
@@ -226,6 +246,11 @@ fn hwnd_from(raw: isize) -> HWND {
 }
 
 fn thread_main(state: &WndState, ready: mpsc::Sender<Result<isize>>) {
+    SINK.with(|sink| *sink.borrow_mut() = Some(state.events.clone()));
+    // The tracker reads shell property stores (COM) on this thread.
+    // SAFETY: balanced with CoUninitialize below when it succeeded.
+    let com = unsafe { CoInitializeEx(None, COINIT_APARTMENTTHREADED) }.is_ok();
+
     match create_window(state) {
         Ok(hwnd) => {
             let _ = ready.send(Ok(hwnd.0 as isize));
@@ -235,6 +260,8 @@ fn thread_main(state: &WndState, ready: mpsc::Sender<Result<isize>>) {
             let registered =
                 unsafe { WTSRegisterSessionNotification(hwnd, NOTIFY_FOR_THIS_SESSION) }.is_ok();
             run_loop();
+            // Hooks belong to this thread: drop them before it ends.
+            tracker::stop();
             if registered {
                 // SAFETY: matches the registration above.
                 let _ = unsafe { WTSUnRegisterSessionNotification(hwnd) };
@@ -249,6 +276,12 @@ fn thread_main(state: &WndState, ready: mpsc::Sender<Result<isize>>) {
         Err(error) => {
             let _ = ready.send(Err(error));
         }
+    }
+
+    SINK.with(|sink| *sink.borrow_mut() = None);
+    if com {
+        // SAFETY: matches the successful CoInitializeEx above.
+        unsafe { CoUninitialize() };
     }
 }
 
@@ -341,6 +374,10 @@ unsafe extern "system" fn wndproc(
         if msg == WM_DESTROY {
             // SAFETY: ends this thread's message loop.
             unsafe { PostQuitMessage(0) };
+            return Some(LRESULT(0));
+        }
+        // Registered messages (0xC000..=0xFFFF) include the shell hook's.
+        if (0xC000..=0xFFFF).contains(&msg) && tracker::handle_message(msg, wparam, lparam) {
             return Some(LRESULT(0));
         }
         if let Some(event) = map_message(msg, wparam.0) {

@@ -337,3 +337,239 @@ mod step3_tests {
         }
     }
 }
+
+#[cfg(all(test, debug_assertions))]
+mod step7_tests {
+    use std::path::PathBuf;
+
+    use rulebox_desktop::tracker::WindowEvent;
+    use rulebox_desktop::windows::WindowInfo;
+    use rulebox_staff_lib::model::{
+        AppEntry, AppKind, DesktopApp, WebApp, WebPermissions,
+    };
+    use rulebox_staff_lib::tasks::{
+        coalesce, parse_icon_key, parse_icon_size, parse_label, IconStore, LabelKind, Labels,
+        TaskTable,
+    };
+
+    fn info(hwnd: isize, title: &str, exe: Option<&str>) -> WindowInfo {
+        WindowInfo {
+            hwnd,
+            pid: 10,
+            title: title.into(),
+            exe: exe.map(PathBuf::from),
+            aumid: None,
+            minimized: false,
+            cloaked: false,
+            class: "Test".into(),
+        }
+    }
+
+    fn desktop_app(id: &str, exe: &str) -> AppEntry {
+        AppEntry {
+            id: id.into(),
+            name: id.into(),
+            description: None,
+            kind: AppKind::Desktop(DesktopApp {
+                exe: exe.into(),
+                args: vec![],
+                file_arg_template: vec![],
+            }),
+            icon_key: None,
+            hue: None,
+            pinned_taskbar: false,
+            pinned_desktop: false,
+            badge: None,
+        }
+    }
+
+    fn labels(pairs: &[(isize, &str)]) -> Labels {
+        pairs.iter().map(|(h, l)| (*h, (*l).to_string())).collect()
+    }
+
+    #[test]
+    fn labels_are_classified() {
+        assert_eq!(parse_label("shell-taskbar"), Some(LabelKind::Shell));
+        assert_eq!(parse_label("app-3"), Some(LabelKind::Builtin));
+        assert_eq!(
+            parse_label("web-orders-web-2"),
+            Some(LabelKind::Web {
+                app_id: "orders-web".into()
+            })
+        );
+        assert_eq!(parse_label("web-orders"), None);
+        assert_eq!(parse_label("web--1"), None);
+        assert_eq!(parse_label("main"), None);
+    }
+
+    #[test]
+    fn shell_windows_are_never_listed() {
+        let mut table = TaskTable::default();
+        let labels = labels(&[(1, "shell-desktop"), (2, "shell-popup")]);
+        table.apply(&WindowEvent::Added(info(1, "Rulebox", None)), &labels);
+        table.apply(&WindowEvent::Added(info(2, "Rulebox", None)), &labels);
+        table.apply(&WindowEvent::Added(info(3, "Notes", None)), &labels);
+        let items = table.items(&labels, &[]);
+        assert_eq!(items.len(), 1);
+        assert_eq!(items[0].id, "3");
+        assert!(!items[0].own);
+    }
+
+    #[test]
+    fn own_windows_carry_their_app_id() {
+        let mut table = TaskTable::default();
+        let labels = labels(&[(5, "web-orders-web-1"), (6, "app-0")]);
+        table.apply(&WindowEvent::Added(info(5, "Orders", None)), &labels);
+        table.apply(&WindowEvent::Added(info(6, "My files", None)), &labels);
+        let items = table.items(&labels, &[]);
+        assert_eq!(items[0].app_id.as_deref(), Some("orders-web"));
+        assert!(items[0].own);
+        assert_eq!(items[1].app_id, None);
+        assert!(items[1].own);
+    }
+
+    #[test]
+    fn programs_group_under_their_catalogue_app_by_exe() {
+        let catalogue = vec![desktop_app("notepad", r"C:\Windows\System32\notepad.exe")];
+        let mut table = TaskTable::default();
+        let none = Labels::new();
+        table.apply(
+            &WindowEvent::Added(info(1, "a.txt", Some(r"c:/windows/system32/NOTEPAD.EXE"))),
+            &none,
+        );
+        table.apply(
+            &WindowEvent::Added(info(2, "b", Some(r"C:\Other\thing.exe"))),
+            &none,
+        );
+        table.apply(&WindowEvent::Added(info(3, "c", None)), &none);
+        let items = table.items(&none, &catalogue);
+        assert_eq!(items[0].app_id.as_deref(), Some("notepad"));
+        assert_eq!(items[1].app_id, None);
+        assert_eq!(items[2].app_id, None);
+    }
+
+    #[test]
+    fn web_catalogue_entries_never_match_by_exe() {
+        let web = AppEntry {
+            kind: AppKind::Web(WebApp {
+                url: "https://x.test".into(),
+                allowed_domains: vec![],
+                permissions: WebPermissions::default(),
+            }),
+            ..desktop_app("w", "")
+        };
+        let mut table = TaskTable::default();
+        let none = Labels::new();
+        table.apply(&WindowEvent::Added(info(1, "a", Some(r"C:\x.exe"))), &none);
+        assert_eq!(table.items(&none, &[web])[0].app_id, None);
+    }
+
+    #[test]
+    fn the_active_indicator_follows_activation() {
+        let mut table = TaskTable::default();
+        let labels = labels(&[(9, "shell-popup"), (8, "shell-desktop")]);
+        table.apply(&WindowEvent::Added(info(1, "a", None)), &labels);
+        table.apply(&WindowEvent::Added(info(2, "b", None)), &labels);
+        assert!(table.apply(&WindowEvent::Activated(Some(1)), &labels));
+        assert!(table.items(&labels, &[])[0].active);
+        // Same window again: no change.
+        assert!(!table.apply(&WindowEvent::Activated(Some(1)), &labels));
+        // The popup takes focus: the program stays active.
+        assert!(!table.apply(&WindowEvent::Activated(Some(9)), &labels));
+        assert!(table.items(&labels, &[])[0].active);
+        // The desktop takes focus: nothing is active.
+        assert!(table.apply(&WindowEvent::Activated(Some(8)), &labels));
+        assert!(table.items(&labels, &[]).iter().all(|t| !t.active));
+        // An unknown window (a tool window, a dialog): nothing is active.
+        table.apply(&WindowEvent::Activated(Some(1)), &labels);
+        assert!(table.apply(&WindowEvent::Activated(Some(777)), &labels));
+    }
+
+    #[test]
+    fn removing_a_window_drops_its_state() {
+        let mut table = TaskTable::default();
+        let none = Labels::new();
+        table.apply(&WindowEvent::Added(info(1, "a", None)), &none);
+        table.apply(&WindowEvent::Activated(Some(1)), &none);
+        table.apply(&WindowEvent::Flash(1, true), &none);
+        assert!(table.apply(&WindowEvent::Removed(1), &none));
+        assert!(table.items(&none, &[]).is_empty());
+        assert!(!table.apply(&WindowEvent::Removed(1), &none));
+        // A re-added window starts clean.
+        table.apply(&WindowEvent::Added(info(1, "a", None)), &none);
+        let item = &table.items(&none, &[])[0];
+        assert!(!item.active && !item.flashing);
+    }
+
+    #[test]
+    fn flash_and_hung_show_on_the_item() {
+        let mut table = TaskTable::default();
+        let none = Labels::new();
+        table.apply(&WindowEvent::Added(info(1, "a", None)), &none);
+        table.apply(&WindowEvent::Flash(1, true), &none);
+        assert!(table.set_hung([1].into_iter().collect()));
+        assert!(!table.set_hung([1].into_iter().collect()));
+        let item = &table.items(&none, &[])[0];
+        assert!(item.flashing && item.hung);
+    }
+
+    #[test]
+    fn icon_key_changes_when_the_icon_changes() {
+        let mut table = TaskTable::default();
+        let none = Labels::new();
+        table.apply(&WindowEvent::Added(info(7, "a", None)), &none);
+        assert_eq!(table.items(&none, &[])[0].icon_key, "hwnd:7:0");
+        table.apply(&WindowEvent::IconChanged(7), &none);
+        assert_eq!(table.items(&none, &[])[0].icon_key, "hwnd:7:1");
+    }
+
+    #[test]
+    fn a_burst_of_title_changes_collapses_to_the_last() {
+        let mut events = vec![WindowEvent::Added(info(1, "start", None))];
+        for n in 0..50 {
+            events.push(WindowEvent::Changed(info(1, &format!("t{n}"), None)));
+        }
+        events.push(WindowEvent::Changed(info(2, "other", None)));
+        let folded = coalesce(events);
+        let changes: Vec<_> = folded
+            .iter()
+            .filter_map(|e| match e {
+                WindowEvent::Changed(i) => Some((i.hwnd, i.title.clone())),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(changes, vec![(1, "t49".to_string()), (2, "other".to_string())]);
+        assert!(matches!(folded[0], WindowEvent::Added(_)));
+    }
+
+    #[test]
+    fn a_change_before_a_removal_is_dropped() {
+        let folded = coalesce(vec![
+            WindowEvent::Changed(info(1, "x", None)),
+            WindowEvent::Removed(1),
+        ]);
+        assert!(matches!(folded.as_slice(), [WindowEvent::Removed(1)]));
+    }
+
+    #[test]
+    fn icon_keys_and_sizes_parse() {
+        assert_eq!(parse_icon_key("hwnd:123:4"), Some(123));
+        assert_eq!(parse_icon_key("hwnd:123"), Some(123));
+        assert_eq!(parse_icon_key("hwnd:0:1"), None);
+        assert_eq!(parse_icon_key("hwnd:abc:1"), None);
+        assert_eq!(parse_icon_key("exe:abc"), None);
+        assert_eq!(parse_icon_size(None), 48);
+        assert_eq!(parse_icon_size(Some("s=32")), 32);
+        assert_eq!(parse_icon_size(Some("x=1&s=1000")), 256);
+        assert_eq!(parse_icon_size(Some("s=2")), 16);
+        assert_eq!(parse_icon_size(Some("s=zz")), 48);
+    }
+
+    #[test]
+    fn the_icon_store_refuses_windows_the_tracker_never_listed() {
+        let store = IconStore::default();
+        assert!(store.render("hwnd:12345:0", 32).is_none());
+    }
+}
+
+

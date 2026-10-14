@@ -104,6 +104,12 @@ impl AppState {
             .clone()
     }
 
+    /// Look at the shell state without cloning it.
+    pub fn read<R>(&self, f: impl FnOnce(&ShellState) -> R) -> R {
+        let shell = self.inner.shell.lock().unwrap_or_else(|e| e.into_inner());
+        f(&shell)
+    }
+
     /// Mutate shell state and schedule a coalesced `shell://state` emit.
     pub fn update<F>(&self, f: F)
     where
