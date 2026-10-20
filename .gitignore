@@ -11,6 +11,8 @@ dist/
 
 # Design starter (reference only; the real design lives in packages/ui)
 design/
+# Dashboard design demo (large HTML reference, never shipped)
+apps/dashboard/public/design/
 
 # Screenshots and scratch output from agent runs
 .tmp/
