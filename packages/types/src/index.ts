@@ -52,6 +52,8 @@ export * from "./generated/WebApp";
 export * from "./generated/WebPermissions";
 
 // Files backend DTOs (Phase 3 Step 12)
+export * from "./generated/Clip";
+export * from "./generated/ClipOp";
 export * from "./generated/CsvPreview";
 export * from "./generated/Entry";
 export * from "./generated/EntryKind";
@@ -59,6 +61,8 @@ export * from "./generated/FileError";
 export * from "./generated/ImageInfo";
 export * from "./generated/NameRule";
 export * from "./generated/OpenAction";
+export * from "./generated/PasteFailure";
+export * from "./generated/PasteResult";
 export * from "./generated/TextPreview";
 export * from "./generated/TrashItem";
 export * from "./generated/Usage";

@@ -1,25 +1,90 @@
-import { Button } from "@rulebox/ui";
-import { useState } from "react";
-import IconFolder from "~icons/solar/folder-bold-duotone";
+import { useEffect, useState } from "react";
+import { Button, FileChip } from "@rulebox/ui";
+import type { Entry } from "@rulebox/types";
 import IconDocument from "~icons/solar/document-bold-duotone";
+import IconFolder from "~icons/solar/folder-bold-duotone";
 import IconGallery from "~icons/solar/gallery-bold-duotone";
+
+import { useTauriEvent } from "../../lib/events";
+import { openFile } from "../../lib/files";
+import { call, isTauri } from "../../lib/tauri";
 
 type Tab = "all" | "docs" | "media";
 
-const SAMPLE = [
-  { id: "1", name: "Shift notes.txt", kind: "docs" as const, when: "Yesterday" },
-  { id: "2", name: "Order photo.jpg", kind: "media" as const, when: "Mon" },
-  { id: "3", name: "Checklist.pdf", kind: "docs" as const, when: "Mon" },
-  { id: "4", name: "Welcome clip.mp4", kind: "media" as const, when: "Last week" },
-];
+const DOCS_EXT = new Set(["doc", "docx", "pdf", "txt", "xls", "xlsx", "csv", "ppt", "pptx", "md"]);
+const MEDIA_EXT = new Set(["jpg", "jpeg", "png", "gif", "webp", "mp3", "wav", "m4a", "mp4", "webm"]);
 
-/**
- * Static recent-files list until Step 13 fills it from the SafeRoot.
- * Hidden by the parent when the desktop is narrower than 1000 px.
- */
+function getExt(name: string): string {
+  const dot = name.lastIndexOf(".");
+  return dot > 0 ? name.slice(dot + 1).toLowerCase() : "";
+}
+
+function formatWhen(ms: number): string {
+  if (!ms || ms <= 0) {
+    return "Recently";
+  }
+  const diff = Date.now() - ms;
+  const mins = Math.floor(diff / 60000);
+  if (mins < 1) return "Just now";
+  if (mins < 60) return `${mins}m ago`;
+  const hours = Math.floor(mins / 60);
+  if (hours < 24) return `${hours}h ago`;
+  const days = Math.floor(hours / 24);
+  if (days === 1) return "Yesterday";
+  if (days < 7) return `${days}d ago`;
+  return new Date(ms).toLocaleDateString(undefined, { month: "short", day: "numeric" });
+}
+
 export function MyFilesPanel({ onOpenFiles }: { onOpenFiles?: () => void }) {
   const [tab, setTab] = useState<Tab>("all");
-  const items = SAMPLE.filter((f) => tab === "all" || f.kind === tab);
+  const [recentFiles, setRecentFiles] = useState<Entry[]>([]);
+
+  const [tick, setTick] = useState(0);
+
+  useEffect(() => {
+    let current = true;
+    async function run() {
+      if (!isTauri()) {
+        return;
+      }
+      try {
+        let list = await call("fs_recent", {});
+        if (list.length === 0) {
+          // Nothing opened yet: show the files at the top so the panel is useful on a fresh sign-in.
+          const top = await call("fs_list", { path: "" });
+          list = top.filter((entry) => entry.kind === "file").slice(0, 8);
+        }
+        if (current) setRecentFiles(list);
+      } catch {
+        // The folder may not be open yet.
+      }
+    }
+    void run();
+    return () => {
+      current = false;
+    };
+  }, [tick]);
+
+  // Only the top folder feeds the fallback list.
+  useTauriEvent<{ dir: string }>("files://changed", ({ dir }) => {
+    if (dir === "") {
+      setTick((n) => n + 1);
+    }
+  });
+  const items = recentFiles.filter((f) => {
+    const ext = getExt(f.name);
+    if (tab === "docs") return DOCS_EXT.has(ext);
+    if (tab === "media") return MEDIA_EXT.has(ext);
+    return true;
+  });
+
+  async function handleOpenFile(file: Entry) {
+    try {
+      await openFile(file.path);
+    } catch {
+      // The notice for a failure comes from the backend.
+    }
+  }
 
   return (
     <aside
@@ -81,41 +146,74 @@ export function MyFilesPanel({ onOpenFiles }: { onOpenFiles?: () => void }) {
           overflow: "auto",
         }}
       >
-        {items.map((file) => (
-          <li
-            key={file.id}
-            style={{
-              display: "flex",
-              alignItems: "center",
-              gap: 10,
-              padding: "8px 10px",
-              borderRadius: 12,
-              background: "var(--rb-bg)",
-            }}
-          >
-            {file.kind === "media" ? (
-              <IconGallery width={18} height={18} />
-            ) : (
-              <IconDocument width={18} height={18} />
-            )}
-            <div style={{ minWidth: 0, flex: 1 }}>
-              <div
+        {items.length === 0 ? (
+          <li style={{ padding: "16px 8px", textAlign: "center", color: "var(--rb-muted)", fontSize: 13 }}>
+            No files in this category yet.
+          </li>
+        ) : (
+          items.map((file) => {
+            const ext = getExt(file.name);
+            const isMedia = MEDIA_EXT.has(ext);
+
+            return (
+              <li key={file.path} style={{ listStyle: "none" }}>
+              <button
+                type="button"
+                onClick={() => void handleOpenFile(file)}
                 style={{
-                  fontSize: 13.5,
-                  fontWeight: 500,
-                  overflow: "hidden",
-                  textOverflow: "ellipsis",
-                  whiteSpace: "nowrap",
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 10,
+                  width: "100%",
+                  padding: "8px 10px",
+                  border: 0,
+                  borderRadius: 12,
+                  background: "var(--rb-bg)",
+                  color: "inherit",
+                  font: "inherit",
+                  textAlign: "left",
+                  cursor: "pointer",
                 }}
               >
-                {file.name}
-              </div>
-              <div style={{ fontSize: 12, color: "var(--rb-muted)" }}>{file.when}</div>
-            </div>
-          </li>
-        ))}
+                {isMedia ? (
+                  <IconGallery width={18} height={18} style={{ color: "var(--rb-accent)", flexShrink: 0 }} />
+                ) : ext ? (
+                  <FileChip ext={ext} style={{ flexShrink: 0 }} />
+                ) : (
+                  <IconDocument width={18} height={18} style={{ color: "var(--rb-muted)", flexShrink: 0 }} />
+                )}
+                <div style={{ minWidth: 0, flex: 1 }}>
+                  <div
+                    style={{
+                      fontSize: 13.5,
+                      fontWeight: 500,
+                      overflow: "hidden",
+                      textOverflow: "ellipsis",
+                      whiteSpace: "nowrap",
+                    }}
+                  >
+                    {file.name}
+                  </div>
+                  <div style={{ fontSize: 12, color: "var(--rb-muted)" }}>
+                    {formatWhen(file.modifiedMs)}
+                  </div>
+                </div>
+              </button>
+              </li>
+            );
+          })
+        )}
       </ul>
-      <Button type="button" onClick={() => onOpenFiles?.()}>
+      <Button
+        type="button"
+        onClick={() => {
+          if (onOpenFiles) {
+            onOpenFiles();
+          } else if (isTauri()) {
+            void call("open_doc", { kind: "files", path: "" });
+          }
+        }}
+      >
         Open Files
       </Button>
     </aside>

@@ -1,10 +1,17 @@
 import { invoke } from "@tauri-apps/api/core";
 import type {
   AgentLinkDto,
+  Clip,
+  ClipOp,
   EnrollmentDto,
+  Entry,
   KioskPhaseDto,
+  OpenAction,
+  PasteResult,
   ShellState,
   ThemeDto,
+  TrashItem,
+  Usage,
 } from "@rulebox/types";
 
 /** What the shared popup window shows (Rust `shellwin::PopupKind`). */
@@ -122,6 +129,25 @@ type Commands = {
   app_snapshot: { args: Record<string, never>; result: AppViewDto };
   app_select_tab: { args: { index: number }; result: void };
   app_close_tab: { args: { index: number }; result: void };
+  fs_list: { args: { path: string }; result: Entry[] };
+  fs_stat: { args: { path: string }; result: Entry };
+  fs_mkdir: { args: { path: string }; result: void };
+  fs_rename: { args: { from: string; to: string }; result: void };
+  fs_copy: { args: { from: string; toDir: string }; result: string };
+  fs_move: { args: { from: string; toDir: string }; result: string };
+  fs_trash: { args: { path: string; permanent: boolean }; result: void };
+  fs_trash_list: { args: Record<string, never>; result: TrashItem[] };
+  fs_restore: { args: { id: string }; result: string };
+  fs_purge: { args: { id?: string | null }; result: void };
+  fs_usage: { args: Record<string, never>; result: Usage };
+  fs_search: { args: { query: string; searchId: number }; result: void };
+  fs_recent: { args: Record<string, never>; result: Entry[] };
+  fs_clip_set: { args: { op: ClipOp; paths: string[] }; result: void };
+  fs_clip_get: { args: Record<string, never>; result: Clip | null };
+  fs_paste: { args: { toDir: string }; result: PasteResult };
+  fs_handler: { args: { path: string }; result: string | null };
+  fs_open: { args: { path: string }; result: OpenAction };
+  fs_open_with: { args: { path: string }; result: OpenAction };
 };
 
 export function call<K extends keyof Commands>(

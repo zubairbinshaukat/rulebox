@@ -204,6 +204,67 @@ fn files_root_for(username: &str) -> String {
     path.to_string_lossy().into_owned()
 }
 
+/// A real 96x64 PNG (a soft gradient) so the image chip and viewer have something to show.
+fn demo_png() -> Vec<u8> {
+    let (width, height) = (96u32, 64u32);
+    let mut pixels = Vec::with_capacity((width * height * 3) as usize);
+    for y in 0..height {
+        for x in 0..width {
+            pixels.extend_from_slice(&[(40 + x * 2) as u8, (120 + y) as u8, 170]);
+        }
+    }
+    let mut out = Vec::new();
+    {
+        let mut encoder = png::Encoder::new(&mut out, width, height);
+        encoder.set_color(png::ColorType::Rgb);
+        encoder.set_depth(png::BitDepth::Eight);
+        if let Ok(mut writer) = encoder.write_header() {
+            let _ = writer.write_image_data(&pixels);
+        }
+    }
+    out
+}
+
+/// Sample files for the demo employees: about a dozen files, a few folders and
+/// one folder of 5,000 empty files (to check that the lists scroll smoothly).
+/// Written once, on a worker, and only when the folder has never been seeded.
+fn seed_demo_files(root: &str) {
+    let root = PathBuf::from(root);
+    std::thread::spawn(move || {
+        let marker = root.join(".rulebox-demo-seeded");
+        if marker.exists() {
+            return;
+        }
+        let write = |name: &str, bytes: &[u8]| {
+            let path = root.join(name);
+            if let Some(parent) = path.parent() {
+                let _ = std::fs::create_dir_all(parent);
+            }
+            let _ = std::fs::write(path, bytes);
+        };
+        write("Shopping list.txt", b"Milk\nEggs\nBread\nCoffee\n");
+        write("Notes.txt", "Remember to call the supplier.\nTotal: 4\u{20ac}\n".as_bytes());
+        write("Sales.csv", b"Day,Items,Total\nMon,12,48.50\nTue,9,36.00\nWed,15,61.25\n");
+        write("Report.pdf", b"%PDF-1.4\n% demo stub\n");
+        write("Budget.xlsx", b"PK\x03\x04 demo stub");
+        write("Letter.docx", b"PK\x03\x04 demo stub");
+        write("Song.mp3", b"ID3 demo stub");
+        write("Clip.mp4", b"\0\0\0\x18ftypmp42 demo stub");
+        let png = demo_png();
+        write("Photo.png", &png);
+        write("Documents/Contract.txt", b"Draft contract.\n");
+        write("Documents/Invoice.csv", b"No,Amount\n1,100\n");
+        write("Pictures/Logo.png", &png);
+        write("Downloads/Manual.pdf", b"%PDF-1.4\n% demo stub\n");
+        let big = root.join("Big folder");
+        let _ = std::fs::create_dir_all(&big);
+        for n in 0..5000 {
+            let _ = std::fs::write(big.join(format!("File {n:04}.txt")), b"");
+        }
+        let _ = std::fs::write(marker, b"1");
+    });
+}
+
 struct SessionSlot {
     employee: Option<Employee>,
     fails: u32,
@@ -308,9 +369,11 @@ impl AgentPort for DemoAgent {
                 Some(rec) if rec.password == req.password => {
                     slot.fails = 0;
                     slot.employee = Some(rec.employee.clone());
+                    let files_root = files_root_for(rec.username);
+                    seed_demo_files(&files_root);
                     Ok(SignInOutcome::Ok {
                         employee: rec.employee.clone(),
-                        files_root: files_root_for(rec.username),
+                        files_root,
                         offline: false,
                     })
                 }

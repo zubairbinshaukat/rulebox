@@ -6,14 +6,16 @@ import {
   type KeyboardEvent,
   type ReactNode,
 } from "react";
-import { Avatar } from "@rulebox/ui";
-import type { AppEntry } from "@rulebox/types";
+import { Avatar, FileChip } from "@rulebox/ui";
+import type { AppEntry, Entry } from "@rulebox/types";
+import IconDocument from "~icons/solar/document-bold-duotone";
 import IconLogout from "~icons/solar/logout-2-bold-duotone";
 import IconMagnifier from "~icons/solar/magnifer-bold-duotone";
 import IconMoon from "~icons/solar/moon-bold-duotone";
 import IconPower from "~icons/solar/power-bold-duotone";
 import IconRestart from "~icons/solar/restart-bold-duotone";
 
+import { openFile } from "../../lib/files";
 import { useShell } from "../../lib/store";
 import { call } from "../../lib/tauri";
 import { AppIcon } from "../appIcon";
@@ -57,10 +59,25 @@ export function StartMenu() {
     [apps, query],
   );
   const clamped = results.length === 0 ? 0 : Math.min(active, results.length - 1);
+  const [recentFiles, setRecentFiles] = useState<Entry[]>([]);
+
+  useEffect(() => {
+    void call("fs_recent", {})
+      .then((res) => setRecentFiles(res))
+      .catch(() => {});
+  }, []);
 
   async function openApp(app: AppEntry) {
     await call("launch_app", { id: app.id });
     await call("popup_close", {});
+  }
+
+  async function openRecent(file: Entry) {
+    try {
+      await openFile(file.path);
+    } finally {
+      await call("popup_close", {});
+    }
   }
 
   function onSearchKey(event: KeyboardEvent<HTMLInputElement>) {
@@ -178,7 +195,49 @@ export function StartMenu() {
         ))}
       </div>
 
-      <p style={{ margin: 0, fontSize: 12.5, color: "var(--rb-muted)" }}>No recent files yet</p>
+      <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+        <span style={{ fontSize: 12, fontWeight: 600, color: "var(--rb-muted)" }}>Recent files</span>
+        {recentFiles.length === 0 ? (
+          <p style={{ margin: 0, fontSize: 12.5, color: "var(--rb-muted)" }}>No recent files yet</p>
+        ) : (
+          <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
+            {recentFiles.slice(0, 3).map((file) => {
+              const dot = file.name.lastIndexOf(".");
+              const ext = dot > 0 ? file.name.slice(dot + 1) : "";
+              return (
+                <button
+                  key={file.path}
+                  type="button"
+                  onClick={() => void openRecent(file)}
+                  style={{
+                    display: "flex",
+                    alignItems: "center",
+                    gap: 8,
+                    padding: "4px 6px",
+                    borderRadius: 8,
+                    border: 0,
+                    background: "transparent",
+                    color: "var(--rb-ink)",
+                    cursor: "pointer",
+                    textAlign: "left",
+                    font: "inherit",
+                    fontSize: 13,
+                  }}
+                >
+                  {ext ? (
+                    <FileChip ext={ext} />
+                  ) : (
+                    <IconDocument width={16} height={16} style={{ color: "var(--rb-muted)" }} />
+                  )}
+                  <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                    {file.name}
+                  </span>
+                </button>
+              );
+            })}
+          </div>
+        )}
+      </div>
 
       {employee ? (
         <button

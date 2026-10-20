@@ -28,6 +28,20 @@ pub fn handler_app_id(name: &str, handlers: &BTreeMap<String, String>) -> Option
         .map(|(_, app_id)| app_id.clone())
 }
 
+/// The name of the app "Open with" would start for this file, if there is one
+/// in the catalogue. Drives the context-menu item.
+pub fn handler_name(state: &AppState, name: &str) -> Option<String> {
+    let app_id = handler_app_id(name, &state.files().handlers())?;
+    state.read(|shell| {
+        shell
+            .apps
+            .items
+            .iter()
+            .find(|app| app.id == app_id && matches!(app.kind, AppKind::Desktop(_)))
+            .map(|app| app.name.clone())
+    })
+}
+
 /// The command line: the app's own arguments, then its file template with
 /// `{file}` replaced. `{file}` must be a whole token, so a path can never be
 /// glued onto another argument (`--out={file}`) or split into two.

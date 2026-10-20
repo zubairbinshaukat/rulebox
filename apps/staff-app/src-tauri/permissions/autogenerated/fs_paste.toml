@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-fs-paste"
+description = "Enables the fs_paste command without any pre-configured scope."
+commands.allow = ["fs_paste"]
+
+[[permission]]
+identifier = "deny-fs-paste"
+description = "Denies the fs_paste command without any pre-configured scope."
+commands.deny = ["fs_paste"]

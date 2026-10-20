@@ -6,10 +6,10 @@ export interface ProgressBarProps {
   detail?: string;
 }
 
-/** Thin progress bar (storage quota, installs). Turns warning above 80% and danger above 95%. */
+/** Thin progress bar (storage quota, installs). Turns warning from 80% and danger from 95% (PRD 7.8). */
 export function ProgressBar({ value, label, detail }: ProgressBarProps) {
   const pct = Math.min(100, Math.max(0, value));
-  const tone = pct > 95 ? "danger" : pct > 80 ? "warning" : "accent";
+  const tone = pct >= 95 ? "danger" : pct >= 80 ? "warning" : "accent";
   return (
     <div className="rb-progress">
       {(label || detail) && (

@@ -16,6 +16,7 @@ import IconWidget from "~icons/solar/widget-4-bold-duotone";
 
 import { useMotionLevel } from "../lib/motion";
 import { call, isTauri } from "../lib/tauri";
+import { FileExplorer } from "./files/FileExplorer";
 
 gsap.registerPlugin(useGSAP);
 
@@ -277,17 +278,30 @@ export function AppHost() {
           flex: 1,
           minHeight: 0,
           display: "flex",
-          alignItems: "center",
-          justifyContent: "center",
-          padding: 32,
+          flexDirection: "column",
+          overflow: "hidden",
         }}
       >
-        <div style={{ textAlign: "center", maxWidth: 360 }}>
-          <div style={{ fontSize: 18, fontWeight: 600 }}>{heading(selected)}</div>
-          <p style={{ margin: "8px 0 0", color: "var(--rb-muted)", fontSize: 14 }}>
-            {selected?.path ? selected.path : "Nothing here yet."}
-          </p>
-        </div>
+        {!selected || selected.kind === "files" ? (
+          <FileExplorer key={selected?.path ?? ""} initialPath={selected?.path ?? ""} />
+        ) : (
+          <div
+            style={{
+              flex: 1,
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              padding: 32,
+            }}
+          >
+            <div style={{ textAlign: "center", maxWidth: 360 }}>
+              <div style={{ fontSize: 18, fontWeight: 600 }}>{heading(selected)}</div>
+              <p style={{ margin: "8px 0 0", color: "var(--rb-muted)", fontSize: 14 }}>
+                {selected?.path ? selected.path : "Nothing here yet."}
+              </p>
+            </div>
+          </div>
+        )}
       </main>
     </div>
   );

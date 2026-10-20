@@ -16,7 +16,7 @@ use std::path::Path;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, RwLock, Weak};
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use tauri::{AppHandle, Emitter, Manager};
 use ts_rs::TS;
@@ -43,6 +43,42 @@ pub struct Usage {
     pub limit: u64,
 }
 
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub enum ClipOp {
+    Copy,
+    Cut,
+}
+
+/// The file clipboard: relative paths and copy / cut, kept here and nowhere
+/// else. The Windows clipboard is never read or written for files, so
+/// nothing from outside the employee's folder can be pasted in.
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub struct Clip {
+    pub op: ClipOp,
+    pub paths: Vec<String>,
+}
+
+#[derive(Serialize, Clone, Debug, PartialEq, Eq, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub struct PasteFailure {
+    pub path: String,
+    pub error: FileError,
+}
+
+/// What a paste did, item by item: one failure does not stop the rest.
+#[derive(Serialize, Clone, Debug, PartialEq, Eq, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub struct PasteResult {
+    pub pasted: Vec<String>,
+    pub failed: Vec<PasteFailure>,
+}
+
 /// Events go to `shell-*` and `app-*` windows only, never to a web app's page.
 pub fn ui_emitter(app: AppHandle) -> Emit {
     Arc::new(move |event, payload| {
@@ -61,6 +97,7 @@ pub struct FileSession {
     quota: Quota,
     emit: Emit,
     recent: Mutex<VecDeque<String>>,
+    clipboard: Mutex<Option<Clip>>,
     search_gen: AtomicU64,
     scan_busy: AtomicBool,
     scan_dirty: AtomicBool,
@@ -79,6 +116,7 @@ impl FileSession {
             quota: Quota::new(quota_bytes),
             emit,
             recent: Mutex::new(VecDeque::new()),
+            clipboard: Mutex::new(None),
             search_gen: AtomicU64::new(0),
             scan_busy: AtomicBool::new(false),
             scan_dirty: AtomicBool::new(false),
@@ -208,6 +246,69 @@ impl FileSession {
 
     pub fn trash_list(&self) -> Vec<TrashItem> {
         self.root.trash_list()
+    }
+
+    // ---- Clipboard ----------------------------------------------------
+
+    pub fn clip(&self) -> Option<Clip> {
+        self.clipboard.lock().ok().and_then(|clip| clip.clone())
+    }
+
+    fn store_clip(&self, clip: Option<Clip>) {
+        if let Ok(mut slot) = self.clipboard.lock() {
+            *slot = clip.clone();
+        }
+        (self.emit)("files://clipboard", json!(clip));
+    }
+
+    /// Every path is checked now, so a bad one never reaches a paste.
+    pub fn set_clip(&self, op: ClipOp, paths: Vec<String>) -> Result<(), FileError> {
+        if paths.is_empty() {
+            self.store_clip(None);
+            return Ok(());
+        }
+        for path in &paths {
+            let rel = RelPath::parse(path)?;
+            if rel.is_root() {
+                return Err(FileError::OutsideRoot);
+            }
+        }
+        self.store_clip(Some(Clip { op, paths }));
+        Ok(())
+    }
+
+    /// Paste into `to_dir`. Copy keeps the clipboard; cut empties it of what moved.
+    pub fn paste(&self, to_dir: &RelPath) -> Result<PasteResult, FileError> {
+        let clip = self.clip().ok_or(FileError::NotFound)?;
+        let mut result = PasteResult {
+            pasted: Vec::new(),
+            failed: Vec::new(),
+        };
+        let mut left = Vec::new();
+        for path in &clip.paths {
+            let step = RelPath::parse(path).and_then(|from| match clip.op {
+                ClipOp::Copy => self.copy(&from, to_dir),
+                ClipOp::Cut => self.move_to(&from, to_dir),
+            });
+            match step {
+                Ok(created) => result.pasted.push(created.as_string()),
+                Err(error) => {
+                    left.push(path.clone());
+                    result.failed.push(PasteFailure {
+                        path: path.clone(),
+                        error,
+                    });
+                }
+            }
+        }
+        if clip.op == ClipOp::Cut {
+            let rest = (!left.is_empty()).then_some(Clip {
+                op: ClipOp::Cut,
+                paths: left,
+            });
+            self.store_clip(rest);
+        }
+        Ok(result)
     }
 
     // ---- Recent and search -------------------------------------------

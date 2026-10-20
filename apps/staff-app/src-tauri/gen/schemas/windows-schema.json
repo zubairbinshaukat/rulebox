@@ -219,10 +219,28 @@
           "markdownDescription": "Enables the dismiss_notice command without any pre-configured scope."
         },
         {
+          "description": "Enables the fs_clip_get command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-fs-clip-get",
+          "markdownDescription": "Enables the fs_clip_get command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the fs_clip_set command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-fs-clip-set",
+          "markdownDescription": "Enables the fs_clip_set command without any pre-configured scope."
+        },
+        {
           "description": "Enables the fs_copy command without any pre-configured scope.",
           "type": "string",
           "const": "allow-fs-copy",
           "markdownDescription": "Enables the fs_copy command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the fs_handler command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-fs-handler",
+          "markdownDescription": "Enables the fs_handler command without any pre-configured scope."
         },
         {
           "description": "Enables the fs_image_info command without any pre-configured scope.",
@@ -265,6 +283,12 @@
           "type": "string",
           "const": "allow-fs-open-with",
           "markdownDescription": "Enables the fs_open_with command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the fs_paste command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-fs-paste",
+          "markdownDescription": "Enables the fs_paste command without any pre-configured scope."
         },
         {
           "description": "Enables the fs_purge command without any pre-configured scope.",
@@ -567,10 +591,28 @@
           "markdownDescription": "Denies the dismiss_notice command without any pre-configured scope."
         },
         {
+          "description": "Denies the fs_clip_get command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-fs-clip-get",
+          "markdownDescription": "Denies the fs_clip_get command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the fs_clip_set command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-fs-clip-set",
+          "markdownDescription": "Denies the fs_clip_set command without any pre-configured scope."
+        },
+        {
           "description": "Denies the fs_copy command without any pre-configured scope.",
           "type": "string",
           "const": "deny-fs-copy",
           "markdownDescription": "Denies the fs_copy command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the fs_handler command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-fs-handler",
+          "markdownDescription": "Denies the fs_handler command without any pre-configured scope."
         },
         {
           "description": "Denies the fs_image_info command without any pre-configured scope.",
@@ -613,6 +655,12 @@
           "type": "string",
           "const": "deny-fs-open-with",
           "markdownDescription": "Denies the fs_open_with command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the fs_paste command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-fs-paste",
+          "markdownDescription": "Denies the fs_paste command without any pre-configured scope."
         },
         {
           "description": "Denies the fs_purge command without any pre-configured scope.",

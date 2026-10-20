@@ -10,7 +10,7 @@ use ts_rs::TS;
 use super::preview::{self, CsvPreview, ImageInfo, TextPreview};
 use super::saferoot::{Entry, EntryKind, FileError, RelPath, TrashItem};
 use super::types::{check_content, extension, opener_for, Opener, ViewerKind};
-use super::{openwith, Emit, FileSession, Usage};
+use super::{openwith, Clip, ClipOp, Emit, FileSession, PasteResult, Usage};
 use crate::state::AppState;
 use crate::tasks::TaskServices;
 
@@ -223,6 +223,56 @@ pub async fn fs_search(
     Ok(())
 }
 
+/// Put paths on the file clipboard (`copy` or `cut`). An empty list clears it.
+#[tauri::command]
+pub async fn fs_clip_set(
+    window: Window,
+    state: State<'_, AppState>,
+    op: ClipOp,
+    paths: Vec<String>,
+) -> Result<(), FileError> {
+    allow(&window, false)?;
+    let session = session_of(&state)?;
+    run(move || session.set_clip(op, paths)).await
+}
+
+#[tauri::command]
+pub async fn fs_clip_get(
+    window: Window,
+    state: State<'_, AppState>,
+) -> Result<Option<Clip>, FileError> {
+    allow(&window, false)?;
+    Ok(session_of(&state)?.clip())
+}
+
+/// Paste the clipboard into a folder. Reports each item; one failure does not stop the rest.
+#[tauri::command]
+pub async fn fs_paste(
+    window: Window,
+    state: State<'_, AppState>,
+    to_dir: String,
+) -> Result<PasteResult, FileError> {
+    allow(&window, false)?;
+    let session = session_of(&state)?;
+    run(move || session.paste(&RelPath::parse(&to_dir)?)).await
+}
+
+/// The app "Open with" would use for this file, or nothing.
+#[tauri::command]
+pub async fn fs_handler(
+    window: Window,
+    state: State<'_, AppState>,
+    path: String,
+) -> Result<Option<String>, FileError> {
+    allow(&window, false)?;
+    let state = state.inner().clone();
+    run(move || {
+        let rel = RelPath::parse(&path)?;
+        Ok(rel.leaf().and_then(|leaf| openwith::handler_name(&state, leaf)))
+    })
+    .await
+}
+
 /// Files opened since sign-in, newest first.
 #[tauri::command]
 pub async fn fs_recent(window: Window, state: State<'_, AppState>) -> Result<Vec<Entry>, FileError> {
@@ -241,8 +291,10 @@ pub async fn fs_open(
 ) -> Result<OpenAction, FileError> {
     allow(&window, true)?;
     let session = session_of(&state)?;
+    let from_shell = window.label().starts_with("shell-");
     let (state, services) = (state.inner().clone(), services.inner().clone());
-    run(move || {
+    let notify_state = state.clone();
+    let action = run(move || {
         let rel = RelPath::parse(&path)?;
         let entry = session.root().stat(&rel)?;
         if entry.kind != EntryKind::File {
@@ -278,7 +330,28 @@ pub async fn fs_open(
             },
         }
     })
-    .await
+    .await?;
+    // The desktop and Start menu have no dialogs: tell the person with a notice.
+    if from_shell {
+        match &action {
+            OpenAction::Blocked => notify_state.notify(
+                crate::model::NoticeTone::Warning,
+                "This type of file can't be opened on this PC.",
+                None,
+            ),
+            OpenAction::NoHandler { extension } => notify_state.notify(
+                crate::model::NoticeTone::Neutral,
+                if extension.is_empty() {
+                    "No app on this PC can open that file.".to_string()
+                } else {
+                    format!("No app on this PC can open .{extension} files.")
+                },
+                None,
+            ),
+            _ => {}
+        }
+    }
+    Ok(action)
 }
 
 /// The "Open with <app>" action: the handler app, even when a viewer exists.

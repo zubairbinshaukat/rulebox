@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-fs-clip-get"
+description = "Enables the fs_clip_get command without any pre-configured scope."
+commands.allow = ["fs_clip_get"]
+
+[[permission]]
+identifier = "deny-fs-clip-get"
+description = "Denies the fs_clip_get command without any pre-configured scope."
+commands.deny = ["fs_clip_get"]

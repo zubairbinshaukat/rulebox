@@ -625,6 +625,60 @@ fn permanent_delete_frees_the_quota() {
 }
 
 // ---------------------------------------------------------------------------
+// Clipboard (Step 13 addition).
+// ---------------------------------------------------------------------------
+
+#[test]
+fn clipboard_copy_keeps_cut_moves_and_failures_are_per_item() {
+    use rulebox_staff_lib::files::ClipOp;
+    let temp = TempRoot::new("clip");
+    std::fs::write(temp.join("a.txt"), b"a").unwrap();
+    std::fs::write(temp.join("b.txt"), b"b").unwrap();
+    std::fs::create_dir(temp.join("dest")).unwrap();
+    let s = open_session(&temp, 0);
+
+    assert!(s.clip().is_none());
+    assert!(s.set_clip(ClipOp::Copy, vec!["..".into()]).is_err(), "bad paths are refused up front");
+    assert!(s.set_clip(ClipOp::Copy, vec![r"C:\x".into()]).is_err());
+    assert!(s.clip().is_none());
+
+    s.set_clip(ClipOp::Copy, vec!["a.txt".into(), "b.txt".into()]).unwrap();
+    let pasted = s.paste(&rel("dest")).unwrap();
+    assert_eq!(pasted.pasted, vec!["dest/a.txt", "dest/b.txt"]);
+    assert!(pasted.failed.is_empty());
+    assert!(temp.join("a.txt").exists(), "copy leaves the original");
+    assert!(s.clip().is_some(), "copy keeps the clipboard");
+    let again = s.paste(&rel("dest")).unwrap();
+    assert_eq!(again.pasted, vec!["dest/a (1).txt", "dest/b (1).txt"]);
+
+    s.set_clip(ClipOp::Cut, vec!["a.txt".into(), "gone.txt".into(), "b.txt".into()]).unwrap();
+    let moved = s.paste(&rel("dest")).unwrap();
+    assert_eq!(moved.pasted.len(), 2, "{moved:?}");
+    assert_eq!(moved.failed.len(), 1);
+    assert_eq!(moved.failed[0].path, "gone.txt");
+    assert!(!temp.join("a.txt").exists() && !temp.join("b.txt").exists());
+    let left = s.clip().expect("the failed item stays on the clipboard");
+    assert_eq!(left.paths, vec!["gone.txt"]);
+    std::fs::write(temp.join("gone.txt"), b"now it exists").unwrap();
+    assert_eq!(s.paste(&rel("dest")).unwrap().pasted, vec!["dest/gone.txt"]);
+    assert!(s.clip().is_none(), "a finished cut empties the clipboard");
+    assert_eq!(s.paste(&rel("dest")), Err(FileError::NotFound), "nothing to paste");
+}
+
+#[test]
+fn a_full_folder_refuses_every_pasted_copy_with_the_shortfall() {
+    use rulebox_staff_lib::files::ClipOp;
+    let temp = TempRoot::new("clip-quota");
+    std::fs::write(temp.join("a.bin"), vec![1u8; 100]).unwrap();
+    std::fs::create_dir(temp.join("dest")).unwrap();
+    let s = open_session(&temp, 150);
+    wait_for_usage(&s, 100);
+    s.set_clip(ClipOp::Copy, vec!["a.bin".into()]).unwrap();
+    assert_eq!(s.paste(&rel("dest")).unwrap().failed[0].error, FileError::QuotaExceeded { short_by: 50 });
+    assert!(!temp.join("dest/a.bin").exists());
+}
+
+// ---------------------------------------------------------------------------
 // Search, recent, watcher.
 // ---------------------------------------------------------------------------
 
