@@ -83,6 +83,11 @@ fn viewer_for(ext: &str) -> Option<ViewerKind> {
     })
 }
 
+/// The built-in viewer for a file name, by its last extension.
+pub fn viewer_for_name(name: &str) -> Option<ViewerKind> {
+    viewer_for(&extension(name)?)
+}
+
 /// Order: (1) deny-list, (2) built-in viewer, (3) `fileHandlers`, (4) none.
 pub fn opener_for(name: &str, handlers: &BTreeMap<String, String>) -> Opener {
     let Some(ext) = extension(name) else {

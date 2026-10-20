@@ -4,7 +4,10 @@
   "private": true,
   "type": "module",
   "scripts": {
+    "prepare:pdfjs": "node scripts/prepare-pdfjs.mjs",
+    "predev": "pnpm prepare:pdfjs",
     "dev": "vite",
+    "prebuild": "pnpm prepare:pdfjs",
     "build": "vite build",
     "tauri": "tauri",
     "typecheck": "tsc --noEmit -p tsconfig.json",
@@ -22,7 +25,8 @@
     "gsap": "catalog:",
     "pdfjs-dist": "catalog:",
     "react": "catalog:",
-    "react-dom": "catalog:"
+    "react-dom": "catalog:",
+    "xlsx": "file:../../vendor/xlsx-0.20.3.tgz"
   },
   "devDependencies": {
     "@iconify-json/solar": "catalog:",

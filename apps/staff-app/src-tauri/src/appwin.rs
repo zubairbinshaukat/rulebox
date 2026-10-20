@@ -59,8 +59,12 @@ pub enum DocKind {
     Image,
     Pdf,
     Text,
+    Csv,
+    Docx,
+    Xlsx,
     Media,
-    Sheet,
+    /// Allowed to be listed but nothing here can show it: the window offers "Open with".
+    Unsupported,
 }
 
 /// One remembered rectangle. Physical pixels.
@@ -150,7 +154,10 @@ pub fn kind_name(kind: DocKind) -> &'static str {
         DocKind::Pdf => "pdf",
         DocKind::Text => "text",
         DocKind::Media => "media",
-        DocKind::Sheet => "sheet",
+        DocKind::Csv => "csv",
+        DocKind::Docx => "docx",
+        DocKind::Xlsx => "xlsx",
+        DocKind::Unsupported => "unsupported",
     }
 }
 
@@ -162,7 +169,10 @@ pub fn default_logical_size(kind: DocKind) -> (i32, i32) {
         DocKind::Pdf => (820, 700),
         DocKind::Text => (780, 700),
         DocKind::Media => (980, 580),
-        DocKind::Sheet => (860, 520),
+        DocKind::Csv => (860, 520),
+        DocKind::Docx => (820, 700),
+        DocKind::Xlsx => (860, 520),
+        DocKind::Unsupported => (560, 360),
     }
 }
 
@@ -823,17 +833,21 @@ fn session_of(state: &AppState) -> Result<(String, bool, ShellMode), String> {
     })
 }
 
+/// The same table the files backend uses to pick a viewer, so a window and
+/// `fs_open` never disagree. A name no viewer takes is `Unsupported`.
 fn kind_from_extension(path: &str) -> DocKind {
-    let ext = path.rsplit('.').next().unwrap_or("").to_ascii_lowercase();
-    match ext.as_str() {
-        "png" | "jpg" | "jpeg" | "gif" | "webp" | "bmp" => DocKind::Image,
-        "pdf" => DocKind::Pdf,
-        "mp4" | "webm" | "mp3" | "wav" | "mov" => DocKind::Media,
-        "xlsx" | "xls" | "ods" => DocKind::Sheet,
-        _ => DocKind::Text,
+    use crate::files::types::{viewer_for_name, ViewerKind};
+    match viewer_for_name(path) {
+        Some(ViewerKind::Image) => DocKind::Image,
+        Some(ViewerKind::Media) => DocKind::Media,
+        Some(ViewerKind::Pdf) => DocKind::Pdf,
+        Some(ViewerKind::Text) => DocKind::Text,
+        Some(ViewerKind::Csv) => DocKind::Csv,
+        Some(ViewerKind::Docx) => DocKind::Docx,
+        Some(ViewerKind::Xlsx) => DocKind::Xlsx,
+        None => DocKind::Unsupported,
     }
 }
-
 fn file_name(path: &str) -> String {
     path.rsplit(['/', '\\'])
         .next()
@@ -900,7 +914,10 @@ fn default_px(kind: &str, area: Rect, scale: f64) -> (i32, i32) {
         "pdf" => default_logical_size(DocKind::Pdf),
         "text" => default_logical_size(DocKind::Text),
         "media" => default_logical_size(DocKind::Media),
-        "sheet" => default_logical_size(DocKind::Sheet),
+        "csv" => default_logical_size(DocKind::Csv),
+        "docx" => default_logical_size(DocKind::Docx),
+        "xlsx" => default_logical_size(DocKind::Xlsx),
+        "unsupported" => default_logical_size(DocKind::Unsupported),
         _ => default_logical_size(DocKind::Files),
     };
     let width = scale_px(logical.0, scale).clamp(1, area.width().max(1));

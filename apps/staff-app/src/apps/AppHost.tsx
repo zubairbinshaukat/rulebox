@@ -17,6 +17,7 @@ import IconWidget from "~icons/solar/widget-4-bold-duotone";
 import { useMotionLevel } from "../lib/motion";
 import { call, isTauri } from "../lib/tauri";
 import { FileExplorer } from "./files/FileExplorer";
+import { ViewerHost } from "./viewers/ViewerHost";
 
 gsap.registerPlugin(useGSAP);
 
@@ -285,33 +286,10 @@ export function AppHost() {
         {!selected || selected.kind === "files" ? (
           <FileExplorer key={selected?.path ?? ""} initialPath={selected?.path ?? ""} />
         ) : (
-          <div
-            style={{
-              flex: 1,
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "center",
-              padding: 32,
-            }}
-          >
-            <div style={{ textAlign: "center", maxWidth: 360 }}>
-              <div style={{ fontSize: 18, fontWeight: 600 }}>{heading(selected)}</div>
-              <p style={{ margin: "8px 0 0", color: "var(--rb-muted)", fontSize: 14 }}>
-                {selected?.path ? selected.path : "Nothing here yet."}
-              </p>
-            </div>
-          </div>
-        )}
-      </main>
+          <ViewerHost path={selected.path} />
+        )}      </main>
     </div>
   );
-}
-
-function heading(tab: AppTab | undefined): string {
-  if (!tab || tab.kind === "files") {
-    return "Files on this laptop";
-  }
-  return tab.title;
 }
 
 function kindIcon(kind: string | undefined): ReactNode {
@@ -325,7 +303,9 @@ function kindIcon(kind: string | undefined): ReactNode {
       return <IconFolder width={14} height={14} />;
     case "pdf":
     case "text":
-    case "sheet":
+    case "csv":
+    case "docx":
+    case "xlsx":
       return <IconDocument width={14} height={14} />;
     default:
       return <IconDocument width={14} height={14} />;

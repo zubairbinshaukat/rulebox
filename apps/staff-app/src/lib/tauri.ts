@@ -3,12 +3,15 @@ import type {
   AgentLinkDto,
   Clip,
   ClipOp,
+  CsvPreview,
   EnrollmentDto,
   Entry,
+  ImageInfo,
   KioskPhaseDto,
   OpenAction,
   PasteResult,
   ShellState,
+  TextPreview,
   ThemeDto,
   TrashItem,
   Usage,
@@ -146,6 +149,10 @@ type Commands = {
   fs_clip_get: { args: Record<string, never>; result: Clip | null };
   fs_paste: { args: { toDir: string }; result: PasteResult };
   fs_handler: { args: { path: string }; result: string | null };
+  fs_read_text: { args: { path: string }; result: TextPreview };
+  fs_read_csv: { args: { path: string }; result: CsvPreview };
+  fs_office_check: { args: { path: string }; result: void };
+  fs_image_info: { args: { path: string }; result: ImageInfo };
   fs_open: { args: { path: string }; result: OpenAction };
   fs_open_with: { args: { path: string }; result: OpenAction };
 };

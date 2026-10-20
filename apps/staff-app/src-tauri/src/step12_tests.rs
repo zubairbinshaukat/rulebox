@@ -392,6 +392,24 @@ fn a_pdf_that_is_really_an_exe_is_refused_everywhere() {
 }
 
 #[test]
+fn a_viewer_window_gets_the_kind_the_backend_would_pick() {
+    use rulebox_staff_lib::appwin::{kind_name, kind_of, AppDoc};
+    let kind = |name: &str| kind_name(kind_of(&AppDoc::View { path: format!("Docs/{name}") }));
+    assert_eq!(kind("a.PNG"), "image");
+    assert_eq!(kind("a.mp3"), "media");
+    assert_eq!(kind("a.pdf"), "pdf");
+    assert_eq!(kind("a.txt"), "text");
+    assert_eq!(kind("a.csv"), "csv");
+    assert_eq!(kind("a.docx"), "docx");
+    assert_eq!(kind("a.xlsx"), "xlsx");
+    // No viewer: the window offers "Open with" instead of guessing text.
+    assert_eq!(kind("a.mkv"), "unsupported");
+    assert_eq!(kind("a.exe"), "unsupported");
+    assert_eq!(kind("noextension"), "unsupported");
+    assert_eq!(kind_name(kind_of(&AppDoc::Files { path: String::new() })), "files");
+}
+
+#[test]
 fn the_protocol_table_has_no_html_or_svg() {
     assert_eq!(content_type("a.SVG"), None);
     assert_eq!(content_type("a.html"), None);
