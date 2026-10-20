@@ -870,12 +870,27 @@ pub fn spawn_dev_cmd_poller(state: AppState) {
         /// Open a built-in document (`kind` is `files` or `view`).
         #[serde(default)]
         open_doc: Option<DevOpenDoc>,
+        /// Launch a catalogue app by id, as a tile click would.
+        #[serde(default)]
+        launch: Option<String>,
+        /// Run a probe script inside a web app window (see below).
+        #[serde(default)]
+        eval_web: Option<DevEvalWeb>,
     }
 
     #[derive(Debug, Deserialize)]
     struct DevSignIn {
         username: String,
         password: String,
+    }
+
+    #[derive(Debug, Deserialize)]
+    struct DevEvalWeb {
+        /// Catalogue app id of the web window.
+        app: String,
+        /// The script. It reports by setting `window.name` is not visible from here, so it
+        /// navigates to the local blocked page with its result as the host.
+        js: String,
     }
 
     #[derive(Debug, Deserialize)]
@@ -924,6 +939,26 @@ pub fn spawn_dev_cmd_poller(state: AppState) {
                         items,
                     };
                 });
+            }
+            if let Some(app_id) = cmd.launch {
+                if let Some(handle) = state.app_handle() {
+                    let services = handle.state::<TaskServices>();
+                    let (state, services) = (state.clone(), services.inner().clone());
+                    let handle = handle.clone();
+                    std::thread::spawn(move || taskops::launch(&handle, &services, &state, &app_id));
+                }
+            }
+            if let Some(probe) = cmd.eval_web {
+                if let Some(handle) = state.app_handle() {
+                    let prefix = format!("web-{}-", probe.app);
+                    for (label, window) in handle.webview_windows() {
+                        if label.starts_with(&prefix) {
+                            if let Err(error) = window.eval(&probe.js) {
+                                tracing::warn!(%error, label, "dev cmd eval_web failed");
+                            }
+                        }
+                    }
+                }
             }
             if let Some(doc) = cmd.open_doc {
                 let Some(handle) = state.app_handle() else {

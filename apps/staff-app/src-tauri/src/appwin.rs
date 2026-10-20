@@ -880,7 +880,7 @@ fn view_of(label: &str, lite: bool, slot: &Slot) -> AppView {
     }
 }
 
-fn focus_window(app: &AppHandle, label: &str) {
+pub(crate) fn focus_window(app: &AppHandle, label: &str) {
     if let Some(window) = app.get_webview_window(label) {
         let _ = window.unminimize();
         let _ = window.show();
@@ -888,7 +888,7 @@ fn focus_window(app: &AppHandle, label: &str) {
     }
 }
 
-fn area_for(mode: ShellMode) -> (Rect, f64) {
+pub(crate) fn area_for(mode: ShellMode) -> (Rect, f64) {
     let monitor = match workarea::primary_monitor() {
         Ok(monitor) => monitor,
         Err(error) => {
@@ -936,7 +936,7 @@ fn nearly_same(a: Rect, b: Rect) -> bool {
         && (a.bottom - b.bottom).abs() <= 4
 }
 
-fn place(window: &WebviewWindow, rect: Rect) {
+pub(crate) fn place(window: &WebviewWindow, rect: Rect) {
     if let Some(hwnd) = window.hwnd().ok().map(|handle| handle.0 as isize) {
         if rulebox_desktop::windows::place_outer(hwnd, rect).is_ok() {
             return;

@@ -13,6 +13,7 @@ pub mod system;
 pub mod state;
 pub mod taskops;
 pub mod tasks;
+pub mod webapp;
 
 use std::backtrace::Backtrace;
 use std::fs::OpenOptions;
@@ -86,10 +87,22 @@ pub fn run() {
         .plugin(tauri_plugin_single_instance::init(|_app, _argv, _cwd| {
             // Second start: nothing to focus yet (the sign-in layer is Step 5).
         }))
-        .register_asynchronous_uri_scheme_protocol("rbicon", move |_ctx, request, responder| {
+        .register_asynchronous_uri_scheme_protocol("rbicon", move |ctx, request, responder| {
+            // Window icons are for the shell's own windows only, never a web app's page.
+            if !ctx.webview_label().starts_with("shell-") {
+                files::protocol::refuse(responder);
+                return;
+            }
             tasks::serve_icon(&protocol_icons, request, responder);
         })
+        // The only local page a web app window may show: "this site is not allowed".
+        .register_uri_scheme_protocol("rbblocked", |_ctx, request| webapp::blocked::serve(request))
         .register_asynchronous_uri_scheme_protocol("rbfile", |ctx, request, responder| {
+            // A web app's page must never read the employee's files (not even as an image).
+            if !files::protocol::label_may_read(ctx.webview_label()) {
+                files::protocol::refuse(responder);
+                return;
+            }
             files::protocol::serve_request(ctx.app_handle(), request, responder);
         })
         .on_menu_event(|app, event| commands::on_menu_event(app, event.id().as_ref()))
@@ -184,6 +197,7 @@ pub fn run() {
 
             app.manage(services.clone());
             app.manage(std::sync::Arc::new(appwin::AppWindows::default()));
+            app.manage(std::sync::Arc::new(webapp::WebApps::default()));
             let host = shellwin::init(app.handle(), mode, services.clone())?;
             app.manage(host);
             tracing::info!(?mode, "shell windows ready");

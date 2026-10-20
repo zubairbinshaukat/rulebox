@@ -38,6 +38,8 @@ struct Inner {
     files_root: Mutex<Option<String>>,
     /// The signed-in employee's file session and the `fileHandlers` table.
     files: Arc<crate::files::FilesHub>,
+    /// How often each web app asked for something it may not have (PRD 24.1; reported in Phase 4).
+    web_denials: Mutex<std::collections::HashMap<String, u32>>,
     /// Theme of the sign-in screen (organization / dev setting). An employee's
     /// choice replaces `display.theme` only while they are signed in.
     org_theme: Mutex<crate::model::ThemeDto>,
@@ -62,6 +64,7 @@ impl AppState {
                 emit_count: AtomicU64::new(0),
                 files_root: Mutex::new(None),
                 files: Arc::new(crate::files::FilesHub::default()),
+                web_denials: Mutex::new(std::collections::HashMap::new()),
                 org_theme: Mutex::new(org_theme),
                 #[cfg(debug_assertions)]
                 dev_hold_link: AtomicBool::new(false),
@@ -99,6 +102,22 @@ impl AppState {
     #[cfg(debug_assertions)]
     pub fn dev_hold_link(&self) -> bool {
         self.inner.dev_hold_link.load(Ordering::SeqCst)
+    }
+
+    /// A web app asked for a permission or a download it may not have.
+    pub fn note_web_denial(&self, app_id: &str) {
+        if let Ok(mut counts) = self.inner.web_denials.lock() {
+            *counts.entry(app_id.to_string()).or_insert(0) += 1;
+        }
+    }
+
+    pub fn web_denials(&self, app_id: &str) -> u32 {
+        self.inner
+            .web_denials
+            .lock()
+            .ok()
+            .and_then(|counts| counts.get(app_id).copied())
+            .unwrap_or(0)
     }
 
     pub fn files(&self) -> Arc<crate::files::FilesHub> {

@@ -190,9 +190,39 @@ pub fn sample_apps_for(n: Option<usize>) -> Vec<AppEntry> {
     out
 }
 
+/// Two real web apps for trying the web app windows by hand (Step 15):
+/// "Example" may show only example.com (its own "More information" link goes
+/// to iana.org, which is not allowed), and "Camera test" asks for a camera it is
+/// not given. Added when RULEBOX_DEMO_WEB is set.
+fn demo_web_apps() -> Vec<AppEntry> {
+    let make = |id: &str, name: &str, url: &str, domains: &[&str]| AppEntry {
+        id: id.into(),
+        name: name.into(),
+        description: Some("Web app demo".into()),
+        kind: AppKind::Web(WebApp {
+            url: url.into(),
+            allowed_domains: domains.iter().map(|d| (*d).to_string()).collect(),
+            permissions: WebPermissions::default(),
+        }),
+        icon_key: None,
+        hue: Some(210),
+        pinned_taskbar: false,
+        pinned_desktop: true,
+        badge: None,
+    };
+    vec![
+        make("example-web", "Example", "https://example.com/", &["example.com"]),
+        make("camera-web", "Camera test", "https://webcamtests.com/", &["webcamtests.com"]),
+    ]
+}
+
 fn sample_apps() -> Vec<AppEntry> {
     let n = std::env::var_os("RULEBOX_DEMO_APPS").and_then(|raw| raw.to_string_lossy().parse().ok());
-    sample_apps_for(n)
+    let mut apps = sample_apps_for(n);
+    if std::env::var_os("RULEBOX_DEMO_WEB").is_some() {
+        apps.extend(demo_web_apps());
+    }
+    apps
 }
 
 fn files_root_for(username: &str) -> String {

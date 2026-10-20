@@ -53,6 +53,7 @@ csv = "1.4.0"
 dunce = "1.0.5"
 png = "0.18.1"
 zip = "9.0.2"
+url = "2.5.8"
 
 [workspace.lints.rust]
 unsafe_op_in_unsafe_fn = "deny"

@@ -3739,6 +3739,7 @@ dependencies = [
  "tracing-appender",
  "tracing-subscriber",
  "ts-rs",
+ "url",
  "walkdir",
  "webview2-com",
  "windows",

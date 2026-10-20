@@ -155,11 +155,21 @@ pub fn launch(app: &AppHandle, services: &TaskServices, state: &AppState, id: &s
                 }
             }
         },
-        LaunchPlan::NotYet => state.notify(
-            NoticeTone::Neutral,
-            "Not available yet",
-            Some("This kind of app arrives in a later step.".into()),
-        ),
+        LaunchPlan::OpenWeb => {
+            let entry = catalogue.iter().find(|app| app.id == id);
+            let opened = match (entry, app.try_state::<std::sync::Arc<crate::webapp::WebApps>>()) {
+                (Some(entry), Some(web)) => web.open(app, state, entry),
+                _ => Err("that app is not available".to_string()),
+            };
+            if let Err(error) = opened {
+                tracing::warn!(%error, app = id, "web app window failed");
+                state.notify(
+                    NoticeTone::Warning,
+                    format!("{name} could not be opened."),
+                    Some(error),
+                );
+            }
+        }
         LaunchPlan::Unknown => state.notify(
             NoticeTone::Warning,
             "That app is not available.",

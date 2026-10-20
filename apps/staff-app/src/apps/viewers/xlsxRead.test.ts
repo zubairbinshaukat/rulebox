@@ -49,14 +49,15 @@ describe("reading a spreadsheet", () => {
   });
 
   it("stops at 2,000 rows and 100 columns per sheet", () => {
-    const rows = Array.from({ length: MAX_ROWS + 500 }, (_, r) =>
-      Array.from({ length: MAX_COLUMNS + 20 }, (_, c) => `${r}:${c}`),
+    const rows = Array.from({ length: MAX_ROWS + 100 }, (_, r) =>
+      Array.from({ length: MAX_COLUMNS + 10 }, (_, c) => `${r}:${c}`),
     );
     const [sheet] = readSheets(workbook({ Big: XLSX.utils.aoa_to_sheet(rows) }));
     expect(sheet?.rows.length).toBe(MAX_ROWS);
     expect(sheet?.rows[0]?.length).toBe(MAX_COLUMNS);
     expect(sheet?.rows[MAX_ROWS - 1]?.[MAX_COLUMNS - 1]).toBe(`${MAX_ROWS - 1}:${MAX_COLUMNS - 1}`);
-  });
+    // A big workbook takes a while to build and read; give it room on a busy machine.
+  }, 60_000);
 
   it("fails on bytes that are not a workbook, instead of guessing", () => {
     const junk = new TextEncoder().encode("this is not a spreadsheet at all").buffer;

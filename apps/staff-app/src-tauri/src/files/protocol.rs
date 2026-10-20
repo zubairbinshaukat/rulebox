@@ -212,6 +212,26 @@ fn serve(session: Option<&FileSession>, request: &Request<'_>) -> Reply {
     reply
 }
 
+/// Which webviews may ask the shell's custom schemes for anything: the shell
+/// windows and the built-in app windows, never a web app's page. Every webview
+/// can request any scheme, and an image or media request carries no usable
+/// Origin, so the asking webview's own label is what decides.
+pub fn label_may_read(label: &str) -> bool {
+    label.starts_with("shell-") || label.starts_with("app-")
+}
+
+/// Answer 403 to a webview that may not ask (see label_may_read).
+pub fn refuse(responder: tauri::UriSchemeResponder) {
+    let response = tauri::http::Response::builder()
+        .status(403)
+        .header("Cache-Control", "no-store")
+        .header("X-Content-Type-Options", "nosniff")
+        .body(std::borrow::Cow::Borrowed(&[][..]));
+    if let Ok(response) = response {
+        responder.respond(response);
+    }
+}
+
 /// The glue to Tauri. Reads on a worker thread so the webview is never blocked.
 pub fn serve_request(
     app: &AppHandle,

@@ -556,6 +556,18 @@ fn protocol_refuses_signed_out_foreign_and_unsafe_requests() {
 }
 
 #[test]
+fn only_the_shell_and_built_in_windows_may_ask_for_files() {
+    use rulebox_staff_lib::files::protocol::label_may_read;
+    for yes in ["shell-desktop", "shell-taskbar", "shell-popup", "app-0", "app-12"] {
+        assert!(label_may_read(yes), "{yes}");
+    }
+    // A web app's page, and anything unexpected, never.
+    for no in ["web-orders-web-0", "web-example-web-1", "main", "", "apps", "shell", "xapp-1", "WEB-1"] {
+        assert!(!label_may_read(no), "{no}");
+    }
+}
+
+#[test]
 fn the_protocol_does_not_follow_a_junction() {
     let outside = TempRoot::new("proto-outside");
     std::fs::write(outside.join("secret.txt"), b"secret").unwrap();

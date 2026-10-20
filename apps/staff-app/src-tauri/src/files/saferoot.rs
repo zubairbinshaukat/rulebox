@@ -413,6 +413,25 @@ impl SafeRoot {
         to_dir.join(&name)
     }
 
+    /// A name that is free in `dir`: `name`, else `name (1)`, `name (2)`...
+    /// (for downloads: the browser would overwrite).
+    pub fn free_name_in(&self, dir: &RelPath, name: &str) -> Result<String> {
+        let handle = self.open_dir_at(dir)?;
+        unique_name(&handle, name, false)
+    }
+
+    /// Remove one file for good, without the trash. For files the shell itself
+    /// must not keep (a disguised executable, a download over the quota).
+    pub fn remove_file_now(&self, path: &RelPath) -> Result<()> {
+        let (parent, leaf) = self.parent_and_leaf(path)?;
+        let meta = parent.symlink_metadata(leaf)?;
+        if is_link(&meta) || !meta.is_file() {
+            return Err(FileError::IsReparsePoint);
+        }
+        parent.remove_file(leaf)?;
+        Ok(())
+    }
+
     /// Bytes used by a file or by everything inside a folder (links skipped).
     pub fn tree_size(&self, path: &RelPath) -> Result<u64> {
         let entry = self.stat(path)?;

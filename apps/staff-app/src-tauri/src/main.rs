@@ -8,6 +8,9 @@ fn main() {
 #[cfg(all(test, debug_assertions))]
 mod step12_tests;
 
+#[cfg(all(test, debug_assertions))]
+mod step15_tests;
+
 // Step 3 tests live here: the lib unit-test / integration-test harnesses exit
 // with STATUS_ENTRYPOINT_NOT_FOUND (0xC0000139) on this Windows + Tauri link,
 // but the bin harness (this file) starts cleanly.
@@ -741,7 +744,7 @@ mod step8_tests {
                 tool: BuiltinTool::Files
             }
         );
-        assert_eq!(plan_launch(&catalogue, "orders", &[], false), LaunchPlan::NotYet);
+        assert_eq!(plan_launch(&catalogue, "orders", &[], false), LaunchPlan::OpenWeb);
     }
 
     #[test]

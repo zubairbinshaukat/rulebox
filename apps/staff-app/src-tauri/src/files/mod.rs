@@ -186,6 +186,31 @@ impl FileSession {
         });
     }
 
+    /// Whether the folder is at 100% (adding bytes is refused).
+    pub fn quota_full(&self) -> bool {
+        self.quota.is_full()
+    }
+
+    /// Over the limit, not merely full. For a download that already landed.
+    pub fn over_quota(&self) -> bool {
+        let limit = self.quota.limit();
+        limit > 0 && self.quota.used() > limit
+    }
+
+    /// Count the folder again now (on this thread). A finished download calls this.
+    pub fn refresh_usage(&self) {
+        self.quota.set_used(self.root.used_bytes());
+        self.emit_usage();
+    }
+
+    /// Delete one file for good and say the folder changed.
+    pub fn delete_now(&self, path: &RelPath) -> Result<(), FileError> {
+        self.root.remove_file_now(path)?;
+        self.refresh_usage();
+        self.emit_changed(&path.parent().as_string());
+        Ok(())
+    }
+
     // ---- Operations that change the folder ---------------------------
 
     pub fn mkdir(&self, path: &RelPath) -> Result<(), FileError> {

@@ -21,8 +21,8 @@ pub enum LaunchPlan {
     Focus { task_id: String },
     /// Start the program.
     Start { exe: PathBuf, args: Vec<String> },
-    /// Built-in tools open a Rulebox window. Web apps arrive later.
-    NotYet,
+    /// Open a web app window.
+    OpenWeb,
     /// Open a built-in tool (Files, and later the viewers).
     OpenBuiltin { tool: BuiltinTool },
     /// The id is not in the catalogue.
@@ -47,25 +47,28 @@ pub fn plan_launch(
     };
     match &app.kind {
         AppKind::Builtin { tool } => LaunchPlan::OpenBuiltin { tool: *tool },
-        AppKind::Web(_) => LaunchPlan::NotYet,
-        AppKind::Desktop(desktop) => {
-            let open: Vec<&TaskItem> = tasks
-                .iter()
-                .filter(|task| task.app_id.as_deref() == Some(id))
-                .collect();
-            // The window that has the focus, else the first one.
-            let target = open.iter().find(|task| task.active).or_else(|| open.first());
-            match target {
-                Some(task) => LaunchPlan::Focus {
-                    task_id: task.id.clone(),
-                },
-                None => LaunchPlan::Start {
-                    exe: PathBuf::from(&desktop.exe),
-                    args: desktop.args.clone(),
-                },
-            }
-        }
+        AppKind::Web(_) => match first_task(tasks, id) {
+            Some(task) => LaunchPlan::Focus {
+                task_id: task.id.clone(),
+            },
+            None => LaunchPlan::OpenWeb,
+        },
+        AppKind::Desktop(desktop) => match first_task(tasks, id) {
+            Some(task) => LaunchPlan::Focus {
+                task_id: task.id.clone(),
+            },
+            None => LaunchPlan::Start {
+                exe: PathBuf::from(&desktop.exe),
+                args: desktop.args.clone(),
+            },
+        },
     }
+}
+
+/// The window of app id that has the focus, else its first window.
+fn first_task<'a>(tasks: &'a [TaskItem], id: &str) -> Option<&'a TaskItem> {
+    let open: Vec<&TaskItem> = tasks.iter().filter(|task| task.app_id.as_deref() == Some(id)).collect();
+    open.iter().find(|task| task.active).or_else(|| open.first()).copied()
 }
 
 /// The notice a failed launch turns into: `(title, detail)`.
