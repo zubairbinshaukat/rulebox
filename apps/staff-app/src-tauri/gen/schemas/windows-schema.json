@@ -219,6 +219,120 @@
           "markdownDescription": "Enables the dismiss_notice command without any pre-configured scope."
         },
         {
+          "description": "Enables the fs_copy command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-fs-copy",
+          "markdownDescription": "Enables the fs_copy command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the fs_image_info command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-fs-image-info",
+          "markdownDescription": "Enables the fs_image_info command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the fs_list command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-fs-list",
+          "markdownDescription": "Enables the fs_list command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the fs_mkdir command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-fs-mkdir",
+          "markdownDescription": "Enables the fs_mkdir command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the fs_move command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-fs-move",
+          "markdownDescription": "Enables the fs_move command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the fs_office_check command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-fs-office-check",
+          "markdownDescription": "Enables the fs_office_check command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the fs_open command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-fs-open",
+          "markdownDescription": "Enables the fs_open command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the fs_open_with command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-fs-open-with",
+          "markdownDescription": "Enables the fs_open_with command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the fs_purge command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-fs-purge",
+          "markdownDescription": "Enables the fs_purge command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the fs_read_csv command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-fs-read-csv",
+          "markdownDescription": "Enables the fs_read_csv command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the fs_read_text command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-fs-read-text",
+          "markdownDescription": "Enables the fs_read_text command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the fs_recent command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-fs-recent",
+          "markdownDescription": "Enables the fs_recent command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the fs_rename command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-fs-rename",
+          "markdownDescription": "Enables the fs_rename command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the fs_restore command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-fs-restore",
+          "markdownDescription": "Enables the fs_restore command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the fs_search command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-fs-search",
+          "markdownDescription": "Enables the fs_search command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the fs_stat command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-fs-stat",
+          "markdownDescription": "Enables the fs_stat command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the fs_trash command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-fs-trash",
+          "markdownDescription": "Enables the fs_trash command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the fs_trash_list command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-fs-trash-list",
+          "markdownDescription": "Enables the fs_trash_list command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the fs_usage command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-fs-usage",
+          "markdownDescription": "Enables the fs_usage command without any pre-configured scope."
+        },
+        {
           "description": "Enables the launch_app command without any pre-configured scope.",
           "type": "string",
           "const": "allow-launch-app",
@@ -451,6 +565,120 @@
           "type": "string",
           "const": "deny-dismiss-notice",
           "markdownDescription": "Denies the dismiss_notice command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the fs_copy command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-fs-copy",
+          "markdownDescription": "Denies the fs_copy command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the fs_image_info command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-fs-image-info",
+          "markdownDescription": "Denies the fs_image_info command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the fs_list command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-fs-list",
+          "markdownDescription": "Denies the fs_list command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the fs_mkdir command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-fs-mkdir",
+          "markdownDescription": "Denies the fs_mkdir command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the fs_move command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-fs-move",
+          "markdownDescription": "Denies the fs_move command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the fs_office_check command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-fs-office-check",
+          "markdownDescription": "Denies the fs_office_check command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the fs_open command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-fs-open",
+          "markdownDescription": "Denies the fs_open command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the fs_open_with command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-fs-open-with",
+          "markdownDescription": "Denies the fs_open_with command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the fs_purge command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-fs-purge",
+          "markdownDescription": "Denies the fs_purge command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the fs_read_csv command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-fs-read-csv",
+          "markdownDescription": "Denies the fs_read_csv command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the fs_read_text command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-fs-read-text",
+          "markdownDescription": "Denies the fs_read_text command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the fs_recent command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-fs-recent",
+          "markdownDescription": "Denies the fs_recent command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the fs_rename command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-fs-rename",
+          "markdownDescription": "Denies the fs_rename command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the fs_restore command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-fs-restore",
+          "markdownDescription": "Denies the fs_restore command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the fs_search command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-fs-search",
+          "markdownDescription": "Denies the fs_search command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the fs_stat command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-fs-stat",
+          "markdownDescription": "Denies the fs_stat command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the fs_trash command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-fs-trash",
+          "markdownDescription": "Denies the fs_trash command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the fs_trash_list command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-fs-trash-list",
+          "markdownDescription": "Denies the fs_trash_list command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the fs_usage command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-fs-usage",
+          "markdownDescription": "Denies the fs_usage command without any pre-configured scope."
         },
         {
           "description": "Denies the launch_app command without any pre-configured scope.",

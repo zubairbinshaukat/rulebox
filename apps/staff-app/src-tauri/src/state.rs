@@ -34,8 +34,10 @@ struct Inner {
     /// How many emits were actually flushed (tests assert coalescing).
     #[allow(dead_code)]
     emit_count: AtomicU64,
-    /// Employee files root from the last successful sign-in (SafeRoot is Step 12).
+    /// Employee files root from the last successful sign-in.
     files_root: Mutex<Option<String>>,
+    /// The signed-in employee's file session and the `fileHandlers` table.
+    files: Arc<crate::files::FilesHub>,
     /// Theme of the sign-in screen (organization / dev setting). An employee's
     /// choice replaces `display.theme` only while they are signed in.
     org_theme: Mutex<crate::model::ThemeDto>,
@@ -59,6 +61,7 @@ impl AppState {
                 notice_seq: AtomicU32::new(1),
                 emit_count: AtomicU64::new(0),
                 files_root: Mutex::new(None),
+                files: Arc::new(crate::files::FilesHub::default()),
                 org_theme: Mutex::new(org_theme),
                 #[cfg(debug_assertions)]
                 dev_hold_link: AtomicBool::new(false),
@@ -98,7 +101,11 @@ impl AppState {
         self.inner.dev_hold_link.load(Ordering::SeqCst)
     }
 
-    #[allow(dead_code)] // SafeRoot (Step 12) will read this.
+    pub fn files(&self) -> Arc<crate::files::FilesHub> {
+        Arc::clone(&self.inner.files)
+    }
+
+    #[allow(dead_code)]
     pub fn files_root(&self) -> Option<String> {
         self.inner
             .files_root

@@ -65,6 +65,26 @@ fn save_last_user(employee: &Employee) -> Result<(), String> {
     fs::write(&path, json).map_err(|e| format!("write last-user.json: {e}"))
 }
 
+/// Open the employee's folder behind the files backend. Sign-in goes on when
+/// it fails: the person still gets a desktop, and a notice says why Files is empty.
+fn open_files(state: &AppState, files_root: &str, quota_bytes: u64) {
+    let emit: crate::files::Emit = match state.app_handle() {
+        Some(app) => crate::files::ui_emitter(app),
+        None => std::sync::Arc::new(|_, _| {}),
+    };
+    if let Err(error) = state
+        .files()
+        .sign_in(std::path::Path::new(files_root), quota_bytes, emit)
+    {
+        tracing::error!(%error, "could not open the employee's folder");
+        state.notify(
+            crate::model::NoticeTone::Warning,
+            "Your files could not be opened.",
+            Some("Ask your administrator.".into()),
+        );
+    }
+}
+
 /// Apply a successful or failed sign-in outcome to `AppState`.
 pub fn apply_sign_in_outcome(state: &AppState, outcome: SignInOutcome) -> Result<(), CommandError> {
     match outcome {
@@ -76,6 +96,7 @@ pub fn apply_sign_in_outcome(state: &AppState, outcome: SignInOutcome) -> Result
             if let Err(error) = save_last_user(&employee) {
                 tracing::warn!(%error, "could not save last-user.json");
             }
+            open_files(state, &files_root, employee.quota_bytes);
             state.set_files_root(Some(files_root));
             let theme = crate::system::theme_for_sign_in(
                 state.org_theme(),
@@ -486,8 +507,10 @@ impl SignOutOps for LiveSignOut<'_> {
     }
 
     fn clear_memory(&mut self) {
-        // File clipboard and recent lists arrive with the files backend.
-        // Notices and the files root are what exists today.
+        // Closing the file session also drops the recent list, the folder
+        // watcher and any running search. (The file clipboard lives in the
+        // Files window, which log out closes.)
+        self.state.files().sign_out();
         self.state.set_files_root(None);
         self.state.update(|shell| {
             shell.notices.clear();

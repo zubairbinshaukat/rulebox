@@ -5,6 +5,7 @@
 pub mod audio;
 pub mod control;
 pub mod error;
+pub mod files;
 pub mod hotkeys;
 pub mod icons;
 pub mod launch;

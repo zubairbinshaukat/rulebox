@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-fs-open"
+description = "Enables the fs_open command without any pre-configured scope."
+commands.allow = ["fs_open"]
+
+[[permission]]
+identifier = "deny-fs-open"
+description = "Denies the fs_open command without any pre-configured scope."
+commands.deny = ["fs_open"]

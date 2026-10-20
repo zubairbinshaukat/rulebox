@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-fs-restore"
+description = "Enables the fs_restore command without any pre-configured scope."
+commands.allow = ["fs_restore"]
+
+[[permission]]
+identifier = "deny-fs-restore"
+description = "Denies the fs_restore command without any pre-configured scope."
+commands.deny = ["fs_restore"]

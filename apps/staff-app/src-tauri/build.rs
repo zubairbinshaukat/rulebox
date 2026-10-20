@@ -35,6 +35,11 @@ const SHELL_COMMANDS: &[&str] = &[
     "show_desktop",
     "refresh_catalogue",
     "open_doc",
+    // Files (Step 12): the desktop panel and the Start menu only read.
+    "fs_list",
+    "fs_search",
+    "fs_recent",
+    "fs_open",
 ];
 
 /// Commands callable from `app-*` windows. A name may also appear in
@@ -50,6 +55,25 @@ const APP_COMMANDS: &[&str] = &[
     "app_snapshot",
     "app_select_tab",
     "app_close_tab",
+    "fs_list",
+    "fs_stat",
+    "fs_mkdir",
+    "fs_rename",
+    "fs_copy",
+    "fs_move",
+    "fs_trash",
+    "fs_trash_list",
+    "fs_restore",
+    "fs_purge",
+    "fs_usage",
+    "fs_search",
+    "fs_recent",
+    "fs_open",
+    "fs_open_with",
+    "fs_read_text",
+    "fs_read_csv",
+    "fs_office_check",
+    "fs_image_info",
 ];
 
 fn main() {

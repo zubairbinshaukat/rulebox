@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-fs-move"
+description = "Enables the fs_move command without any pre-configured scope."
+commands.allow = ["fs_move"]
+
+[[permission]]
+identifier = "deny-fs-move"
+description = "Denies the fs_move command without any pre-configured scope."
+commands.deny = ["fs_move"]

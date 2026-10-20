@@ -37,6 +37,10 @@
     "allow-task-menu",
     "allow-show-desktop",
     "allow-refresh-catalogue",
-    "allow-open-doc"
+    "allow-open-doc",
+    "allow-fs-list",
+    "allow-fs-search",
+    "allow-fs-recent",
+    "allow-fs-open"
   ]
 }

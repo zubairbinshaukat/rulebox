@@ -3,6 +3,7 @@
 pub mod agent;
 pub mod appwin;
 pub mod commands;
+pub mod files;
 pub mod launcher;
 mod logging;
 pub mod model;
@@ -88,6 +89,9 @@ pub fn run() {
         .register_asynchronous_uri_scheme_protocol("rbicon", move |_ctx, request, responder| {
             tasks::serve_icon(&protocol_icons, request, responder);
         })
+        .register_asynchronous_uri_scheme_protocol("rbfile", |ctx, request, responder| {
+            files::protocol::serve_request(ctx.app_handle(), request, responder);
+        })
         .on_menu_event(|app, event| commands::on_menu_event(app, event.id().as_ref()))
         .invoke_handler(tauri::generate_handler![
             commands::shell_state,
@@ -129,6 +133,25 @@ pub fn run() {
             commands::app_snapshot,
             commands::app_select_tab,
             commands::app_close_tab,
+            files::commands::fs_list,
+            files::commands::fs_stat,
+            files::commands::fs_mkdir,
+            files::commands::fs_rename,
+            files::commands::fs_copy,
+            files::commands::fs_move,
+            files::commands::fs_trash,
+            files::commands::fs_trash_list,
+            files::commands::fs_restore,
+            files::commands::fs_purge,
+            files::commands::fs_usage,
+            files::commands::fs_search,
+            files::commands::fs_recent,
+            files::commands::fs_open,
+            files::commands::fs_open_with,
+            files::commands::fs_read_text,
+            files::commands::fs_read_csv,
+            files::commands::fs_office_check,
+            files::commands::fs_image_info,
         ])
         .setup(move |app| {
             // `IpcClient::spawn` calls `tokio::spawn`; run inside Tauri's runtime.

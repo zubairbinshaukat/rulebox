@@ -196,8 +196,10 @@ fn sample_apps() -> Vec<AppEntry> {
 }
 
 fn files_root_for(username: &str) -> String {
-    let mut path = PathBuf::from("target");
-    path.push("demo-files");
+    // The workspace `target\`, not a `target\` next to wherever the app was
+    // started (the files backend creates the folder).
+    let mut path = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    path.push("../../../target/demo-files");
     path.push(username);
     path.to_string_lossy().into_owned()
 }

@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-fs-usage"
+description = "Enables the fs_usage command without any pre-configured scope."
+commands.allow = ["fs_usage"]
+
+[[permission]]
+identifier = "deny-fs-usage"
+description = "Denies the fs_usage command without any pre-configured scope."
+commands.deny = ["fs_usage"]
