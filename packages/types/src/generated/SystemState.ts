@@ -5,6 +5,6 @@ import type { VolumeDto } from "./VolumeDto";
 
 export type SystemState = { volume: VolumeDto | null, battery: BatteryDto | null, network: NetworkDto, canPowerOff: boolean, 
 /**
- * 0–100 when a monitor answered at startup. `null` hides the slider.
+ * 0–100 when a monitor answered at startup. `None` hides the slider.
  */
 brightness: number | null, };
