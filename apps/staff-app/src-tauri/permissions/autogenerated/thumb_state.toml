@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-thumb-state"
+description = "Enables the thumb_state command without any pre-configured scope."
+commands.allow = ["thumb_state"]
+
+[[permission]]
+identifier = "deny-thumb-state"
+description = "Denies the thumb_state command without any pre-configured scope."
+commands.deny = ["thumb_state"]

@@ -28,6 +28,7 @@ function task(id: string, appId: string | null, extra: Partial<TaskItem> = {}): 
     flashing: false,
     hung: false,
     own: false,
+    recency: 0,
     ...extra,
   };
 }

@@ -1,4 +1,4 @@
-import { useState, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 
 import { GenericProgramIcon } from "../appIcon";
 import { iconUrl, type ButtonState } from "./grouping";
@@ -30,7 +30,14 @@ export interface TaskButtonProps {
   onClick?: () => void;
   /** Right click or Shift+F10. */
   onContextMenu?: () => void;
+  /** The pointer rested on the button (after HOVER_PREVIEW_MS). Standard mode only. */
+  onHover?: (element: HTMLElement) => void;
+  /** The pointer left (or the button was pressed). */
+  onHoverEnd?: () => void;
 }
+
+/** How long the pointer rests on a button before the preview appears. */
+export const HOVER_PREVIEW_MS = 400;
 
 /** One taskbar button: icon, open / active indicator, window count, warning. */
 export function TaskButton({
@@ -40,7 +47,12 @@ export function TaskButton({
   flipId,
   onClick,
   onContextMenu,
+  onHover,
+  onHoverEnd,
 }: TaskButtonProps) {
+  const timer = useRef<number | undefined>(undefined);
+  useEffect(() => () => window.clearTimeout(timer.current), []);
+
   return (
     <button
       type="button"
@@ -52,7 +64,20 @@ export function TaskButton({
       data-active={state.active}
       data-minimized={state.minimized}
       data-flashing={state.flashing}
-      onClick={onClick}
+      onMouseEnter={(event) => {
+        if (!onHover) return;
+        const element = event.currentTarget;
+        window.clearTimeout(timer.current);
+        timer.current = window.setTimeout(() => onHover(element), HOVER_PREVIEW_MS);
+      }}
+      onMouseLeave={() => {
+        window.clearTimeout(timer.current);
+        onHoverEnd?.();
+      }}
+      onClick={() => {
+        window.clearTimeout(timer.current);
+        onClick?.();
+      }}
       onContextMenu={(event) => {
         event.preventDefault();
         onContextMenu?.();

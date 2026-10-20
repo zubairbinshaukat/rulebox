@@ -77,6 +77,13 @@ pub struct AnchorRect {
     pub height: f64,
 }
 
+/// What the thumbnail popup shows. Dropping the Thumb removes the live picture.
+#[derive(Default)]
+struct ThumbSlot {
+    task_id: Option<String>,
+    thumb: Option<rulebox_desktop::thumbs::Thumb>,
+}
+
 /// Owns the message loop and the shell-mode token.
 pub struct DesktopHost {
     mode: ShellMode,
@@ -85,6 +92,8 @@ pub struct DesktopHost {
     /// Lets window events (DPI change) join the Win32 event stream.
     events: UnboundedSender<DesktopEvent>,
     popup: Mutex<Option<PopupKind>>,
+    /// The window the thumbnail popup is about, and the live DWM thumbnail drawn in it.
+    thumb: Mutex<ThumbSlot>,
     /// Volume, network and brightness. Lives on its own MTA thread.
     system: rulebox_desktop::system::Watch,
 }
@@ -108,6 +117,49 @@ impl DesktopHost {
 
     pub fn watch(&self) -> &rulebox_desktop::system::Watch {
         &self.system
+    }
+
+    /// True in shell mode: global hotkeys and the keyboard hook may exist.
+    pub fn token_available(&self) -> bool {
+        self.token.is_some()
+    }
+
+    /// Run  on the message-loop thread with the shell token. None in dev
+    /// mode (nothing session-wide may be touched) or when the loop has stopped.
+    pub fn run_on_loop<T, F>(&self, f: F) -> Option<tokio::sync::oneshot::Receiver<T>>
+    where
+        T: Send + 'static,
+        F: FnOnce(&rulebox_desktop::LoopCtx, &ShellToken) -> T + Send + 'static,
+    {
+        let token = self.token.clone()?;
+        let guard = self.msgloop.lock().unwrap_or_else(|e| e.into_inner());
+        let msgloop = guard.as_ref()?;
+        Some(msgloop.run(move |ctx| f(ctx, &token)))
+    }
+
+    /// What the shared popup is showing, if it is open.
+    pub fn popup_kind(&self) -> Option<PopupKind> {
+        *self.popup.lock().unwrap_or_else(|e| e.into_inner())
+    }
+
+    pub fn thumb_task(&self) -> Option<String> {
+        self.thumb.lock().unwrap_or_else(|e| e.into_inner()).task_id.clone()
+    }
+
+    pub fn set_thumb_task(&self, id: Option<String>) {
+        let mut slot = self.thumb.lock().unwrap_or_else(|e| e.into_inner());
+        slot.task_id = id;
+        slot.thumb = None;
+    }
+
+    pub fn attach_thumb(&self, thumb: rulebox_desktop::thumbs::Thumb) {
+        self.thumb.lock().unwrap_or_else(|e| e.into_inner()).thumb = Some(thumb);
+    }
+
+    fn drop_thumb(&self) {
+        let mut slot = self.thumb.lock().unwrap_or_else(|e| e.into_inner());
+        slot.thumb = None;
+        slot.task_id = None;
     }
 
     fn request_reapply(&self) {
@@ -168,6 +220,7 @@ pub fn init(
         msgloop: Mutex::new(Some(msgloop)),
         events: events_tx.clone(),
         popup: Mutex::new(None),
+        thumb: Mutex::new(ThumbSlot::default()),
         system: rulebox_desktop::system::Watch::start(events_tx),
     });
 
@@ -176,6 +229,9 @@ pub fn init(
     reapply(app, &host);
     show_initial(app);
     start_tracking(&host);
+    if let Some(state) = app.try_state::<crate::state::AppState>() {
+        crate::shortcuts::start(app, &host, state.inner().clone());
+    }
 
     let task_app = app.clone();
     let task_host = Arc::clone(&host);
@@ -461,9 +517,11 @@ async fn consume_events(
         let mut replace = false;
         let mut refresh_system = false;
         let mut window_events = Vec::new();
+        let mut hotkeys = Vec::new();
         for event in batch {
             match event {
                 DesktopEvent::Window(event) => window_events.push(event),
+                DesktopEvent::Hotkey(id) => hotkeys.push(id),
                 other => {
                     replace |= is_display_event(&other);
                     refresh_system |= is_system_event(&other);
@@ -484,6 +542,9 @@ async fn consume_events(
         }
         if !window_events.is_empty() {
             tasks.on_events(&app, window_events);
+        }
+        for id in hotkeys {
+            crate::shortcuts::on_hotkey(&app, &host, id);
         }
     }
 }
@@ -514,7 +575,9 @@ pub fn popup_open(
         .lock()
         .unwrap_or_else(|e| e.into_inner())
         .is_some();
-    let rect = if anchor.is_none() && switching {
+    let rect = if kind == PopupKind::Switcher {
+        placement::centered_rect(size, bounds)
+    } else if anchor.is_none() && switching {
         match (popup.outer_position(), popup.outer_size()) {
             (Ok(pos), Ok(cur)) => {
                 let bottom = pos.y + cur.height as i32;
@@ -531,12 +594,17 @@ pub fn popup_open(
     *host.popup.lock().unwrap_or_else(|e| e.into_inner()) = Some(kind);
     app.emit_to(POPUP, "popup://show", serde_json::json!({ "kind": kind }))
         .map_err(|error| format!("emit popup://show: {error}"))?;
+    // A preview must not take the focus from the program under the pointer.
+    let takes_focus = kind != PopupKind::Thumb;
+    let _ = popup.set_focusable(takes_focus);
     popup.show().map_err(|error| format!("show popup: {error}"))?;
     // The click that opened the popup counts as recent input, so Windows lets
     // us take the foreground. If it ever does not, the popup stays open until
     // the next click on the desktop (Step 9 adds a click-away fallback).
-    if let Err(error) = popup.set_focus() {
-        tracing::warn!(%error, "popup could not take focus");
+    if takes_focus {
+        if let Err(error) = popup.set_focus() {
+            tracing::warn!(%error, "popup could not take focus");
+        }
     }
     Ok(())
 }
@@ -546,6 +614,7 @@ pub fn popup_close(app: &AppHandle, host: &Arc<DesktopHost>) {
 }
 
 fn hide_popup(app: &AppHandle, host: &Arc<DesktopHost>) {
+    host.drop_thumb();
     let was_open = host
         .popup
         .lock()

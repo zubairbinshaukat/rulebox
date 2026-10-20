@@ -1,0 +1,10 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "popup",
+  "description": "The shared popup window only: what the thumbnail preview needs on top of the shell commands.",
+  "windows": ["shell-popup"],
+  "permissions": [
+    "allow-thumb-state",
+    "allow-thumb-attach"
+  ]
+}

@@ -185,6 +185,158 @@ pub fn popup_close(
     Ok(())
 }
 
+// ---- Thumbnails (plan Step 16, Standard mode) ----------------------------------
+
+/// What the thumbnail popup shows for the window it is about.
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ThumbInfo {
+    pub task_id: String,
+    pub title: String,
+    pub icon_key: String,
+    pub minimized: bool,
+}
+
+/// Open the preview above a task button. `false` means "no preview" (Lite mode,
+/// or the window is gone): the taskbar then shows only its tooltip.
+#[tauri::command]
+pub fn thumb_open(
+    window: Window,
+    app: AppHandle,
+    host: State<'_, Arc<DesktopHost>>,
+    state: State<'_, AppState>,
+    services: State<'_, TaskServices>,
+    task_id: String,
+    anchor: AnchorRect,
+) -> Result<bool, CommandError> {
+    require_label(&window, "shell-")?;
+    if state.read(|shell| shell.display.lite) || services.registry.lookup(&task_id).is_none() {
+        return Ok(false);
+    }
+    host.set_thumb_task(Some(task_id));
+    popup_open(window, app, host, PopupKind::Thumb, Some(anchor))?;
+    Ok(true)
+}
+
+/// The popup page asks what it is previewing.
+#[tauri::command]
+pub fn thumb_state(
+    window: Window,
+    host: State<'_, Arc<DesktopHost>>,
+    state: State<'_, AppState>,
+) -> Result<Option<ThumbInfo>, CommandError> {
+    require_label(&window, "shell-popup")?;
+    let Some(task_id) = host.thumb_task() else {
+        return Ok(None);
+    };
+    Ok(state.read(|shell| {
+        shell.tasks.iter().find(|task| task.id == task_id).map(|task| ThumbInfo {
+            task_id: task.id.clone(),
+            title: task.title.clone(),
+            icon_key: task.icon_key.clone(),
+            minimized: task.minimized,
+        })
+    }))
+}
+
+/// The popup page reports where its empty rectangle is (physical pixels, relative to
+/// the popup); DWM then draws the live picture there. `false` when there is nothing to draw.
+#[tauri::command]
+pub fn thumb_attach(
+    window: Window,
+    host: State<'_, Arc<DesktopHost>>,
+    services: State<'_, TaskServices>,
+    x: f64,
+    y: f64,
+    width: f64,
+    height: f64,
+) -> Result<bool, CommandError> {
+    require_label(&window, "shell-popup")?;
+    let Some(task_id) = host.thumb_task() else {
+        return Ok(false);
+    };
+    let Some((source, facts)) = services.registry.lookup(&task_id) else {
+        return Ok(false);
+    };
+    // A minimized window has nothing to show: the page shows its icon and title instead.
+    if facts.minimized {
+        return Ok(false);
+    }
+    let Some(dest) = window.hwnd().ok().map(|hwnd| hwnd.0 as isize) else {
+        return Ok(false);
+    };
+    let bounds = Rect::new(
+        x.round() as i32,
+        y.round() as i32,
+        (x + width).round() as i32,
+        (y + height).round() as i32,
+    );
+    match rulebox_desktop::thumbs::show(dest, source, bounds) {
+        Ok(thumb) => {
+            host.attach_thumb(thumb);
+            Ok(true)
+        }
+        Err(error) => {
+            tracing::debug!(%error, "no live thumbnail for this window");
+            Ok(false)
+        }
+    }
+}
+
+// ---- Administrator exit (plan Section 7.11) ------------------------------------
+
+fn require_exit_window(window: &Window) -> Result<(), CommandError> {
+    if window.label() == crate::exit::EXIT {
+        Ok(())
+    } else {
+        Err(CommandError::Forbidden)
+    }
+}
+
+/// Open the exit dialog. Any shell or built-in window may ask; it is done in Rust.
+#[tauri::command]
+pub fn admin_exit_open(
+    window: Window,
+    app: AppHandle,
+    host: State<'_, Arc<DesktopHost>>,
+    state: State<'_, AppState>,
+) -> Result<(), CommandError> {
+    require_shell_or_app(&window)?;
+    crate::exit::open(&app, &host, &state).map_err(CommandError::Failed)
+}
+
+/// The key combination the page listeners match; `None` when the exit is off.
+#[tauri::command]
+pub fn admin_exit_hotkey(window: Window, state: State<'_, AppState>) -> Result<Option<String>, CommandError> {
+    require_shell_or_app(&window)?;
+    Ok(crate::exit::hotkey_text(&state))
+}
+
+#[tauri::command]
+pub fn admin_exit_state(
+    window: Window,
+    state: State<'_, AppState>,
+) -> Result<crate::exit::AdminExitView, CommandError> {
+    require_exit_window(&window)?;
+    Ok(crate::exit::view(&state))
+}
+
+/// Relay a PIN to the agent. The agent checks it; nothing here does.
+#[tauri::command]
+pub async fn admin_exit_submit(
+    window: Window,
+    state: State<'_, AppState>,
+    pin: String,
+) -> Result<crate::exit::ExitAnswer, CommandError> {
+    require_exit_window(&window)?;
+    Ok(crate::exit::submit(state.inner(), pin).await)
+}
+
+#[tauri::command]
+pub fn admin_exit_close(window: Window) -> Result<(), CommandError> {
+    require_exit_window(&window)?;
+    window.destroy().map_err(|error| CommandError::Failed(error.to_string()))
+}
 fn require_shell_desktop(window: &Window) -> Result<(), CommandError> {
     if window.label() == "shell-desktop" {
         Ok(())
@@ -876,6 +1028,9 @@ pub fn spawn_dev_cmd_poller(state: AppState) {
         /// Run a probe script inside a web app window (see below).
         #[serde(default)]
         eval_web: Option<DevEvalWeb>,
+        /// Act as a shortcut: `switcher`, `start` or `exit` (no hotkeys exist in dev mode).
+        #[serde(default)]
+        shortcut: Option<String>,
     }
 
     #[derive(Debug, Deserialize)]
@@ -946,6 +1101,23 @@ pub fn spawn_dev_cmd_poller(state: AppState) {
                     let (state, services) = (state.clone(), services.inner().clone());
                     let handle = handle.clone();
                     std::thread::spawn(move || taskops::launch(&handle, &services, &state, &app_id));
+                }
+            }
+            if let Some(name) = cmd.shortcut {
+                if let Some(handle) = state.app_handle() {
+                    let id = match name.as_str() {
+                        "switcher" => Some(rulebox_desktop::hotkeys::HotkeyId::SWITCHER),
+                        "start" => Some(rulebox_desktop::hotkeys::HotkeyId::START),
+                        "exit" => Some(rulebox_desktop::hotkeys::HotkeyId::ADMIN_EXIT),
+                        _ => None,
+                    };
+                    match id {
+                        Some(id) => match handle.try_state::<Arc<DesktopHost>>() {
+                            Some(host) => crate::shortcuts::on_hotkey(&handle, host.inner(), id),
+                            None => tracing::warn!(name, "dev cmd shortcut: shell not ready yet"),
+                        },
+                        None => tracing::warn!(name, "dev cmd shortcut unknown"),
+                    }
                 }
             }
             if let Some(probe) = cmd.eval_web {

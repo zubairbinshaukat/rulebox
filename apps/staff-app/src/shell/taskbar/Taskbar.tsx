@@ -117,6 +117,27 @@ export function Taskbar() {
     }
   };
 
+  // The live preview above a button (Standard mode); Lite shows only the tooltip.
+  const lite = useShell((state) => state.display.lite);
+  const previewing = useRef(false);
+  const showPreview = (task: TaskItem | null | undefined, element: HTMLElement) => {
+    if (!inTauri || lite || !task) {
+      return;
+    }
+    void call("thumb_open", { taskId: task.id, anchor: anchorOf(element) }).then(
+      (shown) => {
+        previewing.current = shown;
+      },
+      () => undefined,
+    );
+  };
+  const hidePreview = () => {
+    if (previewing.current) {
+      previewing.current = false;
+      void call("popup_close", {});
+    }
+  };
+
   const menuFor = (taskId: string | null, appId: string | null) => {
     if (inTauri) {
       void call("task_menu", { id: taskId, appId });
@@ -192,6 +213,8 @@ export function Taskbar() {
                     state={stateOf(button.tasks)}
                     icon={<AppIcon app={button.app} />}
                     onClick={() => clickPinned(button.app, button.tasks)}
+                    onHover={(element) => showPreview(clickTarget(button.tasks), element)}
+                    onHoverEnd={hidePreview}
                     onContextMenu={() => {
                       const target = clickTarget(button.tasks);
                       menuFor(target?.id ?? null, target ? null : button.app.id);
@@ -210,6 +233,8 @@ export function Taskbar() {
                       }
                     }}
                     onContextMenu={() => menuFor(button.task.id, null)}
+                    onHover={(element) => showPreview(button.task, element)}
+                    onHoverEnd={hidePreview}
                   />
                 ),
               )}

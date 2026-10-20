@@ -1,0 +1,13 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "exit",
+  "description": "The administrator-exit dialog. It can read its own state, relay a PIN to the agent and close. Nothing else.",
+  "windows": ["shell-exit"],
+  "permissions": [
+    "core:event:default",
+    "allow-admin-exit-state",
+    "allow-admin-exit-submit",
+    "allow-admin-exit-close",
+    "allow-admin-exit-hotkey"
+  ]
+}

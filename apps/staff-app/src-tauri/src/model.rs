@@ -293,6 +293,9 @@ pub struct TaskItem {
     pub flashing: bool,
     pub hung: bool,
     pub own: bool,
+    /// Larger means used more recently (0 = never seen active). The app switcher sorts by it.
+    #[serde(default)]
+    pub recency: u32,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, TS)]

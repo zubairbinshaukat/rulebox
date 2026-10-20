@@ -255,6 +255,18 @@ export function DevOverlay() {
           bad clock
         </button>
       </div>
+      <div style={{ fontWeight: 600, marginTop: 4 }}>Shell actions (no global hotkeys in dev)</div>
+      <div style={{ display: "flex", flexWrap: "wrap", gap: 4 }}>
+        <button type="button" onClick={() => isTauri() && void call("popup_open", { kind: "switcher", anchor: null })}>
+          App switcher
+        </button>
+        <button type="button" onClick={() => isTauri() && void call("popup_open", { kind: "start", anchor: null })}>
+          Start
+        </button>
+        <button type="button" onClick={() => isTauri() && void call("admin_exit_open", {})}>
+          Admin exit
+        </button>
+      </div>
       <button
         type="button"
         onClick={() => {

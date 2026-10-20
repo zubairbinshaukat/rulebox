@@ -295,6 +295,7 @@ fn thread_main(state: &WndState, ready: mpsc::Sender<Result<isize>>) {
             let power_handles = register_power_settings(hwnd);
             run_loop();
             // Hooks belong to this thread: drop them before it ends.
+            crate::winkey::remove_on_loop();
             tracker::stop();
             if registered {
                 // SAFETY: matches the registration above.
@@ -404,6 +405,11 @@ unsafe extern "system" fn wndproc(
     let handled = catch_unwind(AssertUnwindSafe(|| {
         if msg == WM_APP {
             state.drain_jobs();
+            return Some(LRESULT(0));
+        }
+        if msg == crate::winkey::WM_WINKEY_START {
+            // The lone Windows key: the same action as Ctrl+Esc.
+            state.send(DesktopEvent::Hotkey(HotkeyId::START));
             return Some(LRESULT(0));
         }
         if msg == WM_DESTROY {

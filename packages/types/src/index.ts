@@ -21,6 +21,7 @@ export * from "./generated/ShutdownReason";
 export * from "./generated/ShuttingDownData";
 
 // Staff App shell DTOs (Phase 3 Step 3)
+export * from "./generated/AdminExitView";
 export * from "./generated/AgentLinkDto";
 export * from "./generated/AgentSummary";
 export * from "./generated/AppEntry";
@@ -37,6 +38,7 @@ export * from "./generated/DisplayPrefs";
 export * from "./generated/Employee";
 export * from "./generated/EmployeeBrief";
 export * from "./generated/EnrollmentDto";
+export * from "./generated/ExitAnswer";
 export * from "./generated/KioskPhaseDto";
 export * from "./generated/NetworkDto";
 export * from "./generated/NoticeItem";

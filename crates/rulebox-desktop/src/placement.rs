@@ -100,6 +100,14 @@ pub fn clamp_into(rect: Rect, bounds: Rect) -> Rect {
     Rect::new(left, top, left + width, top + height)
 }
 
+/// `size` (width, height) centred in `bounds`, clamped into it (the app switcher).
+pub fn centered_rect(size: (i32, i32), bounds: Rect) -> Rect {
+    let (width, height) = (size.0.max(1), size.1.max(1));
+    let left = bounds.left + (bounds.width() - width) / 2;
+    let top = bounds.top + (bounds.height() - height) / 2;
+    clamp_into(Rect::new(left, top, left + width, top + height), bounds)
+}
+
 /// Where a popup of `size` (width, height) goes.
 ///
 /// With an `anchor` it is centred on the anchor and sits above it; if there
@@ -131,6 +139,13 @@ mod tests {
 
     const M_1366: Rect = Rect::new(0, 0, 1366, 768);
     const M_1920: Rect = Rect::new(0, 0, 1920, 1080);
+
+    #[test]
+    fn switcher_is_centred_and_clamped_on_small_screens() {
+        assert_eq!(centered_rect((720, 232), M_1920), Rect::new(600, 424, 1320, 656));
+        let tight = Rect::new(0, 0, 600, 200);
+        assert_eq!(centered_rect((720, 232), tight), Rect::new(0, 0, 600, 200));
+    }
 
     #[test]
     fn zone_scales_with_dpi() {

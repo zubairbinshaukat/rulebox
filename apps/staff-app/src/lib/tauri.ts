@@ -1,11 +1,13 @@
 import { invoke } from "@tauri-apps/api/core";
 import type {
+  AdminExitView,
   AgentLinkDto,
   Clip,
   ClipOp,
   CsvPreview,
   EnrollmentDto,
   Entry,
+  ExitAnswer,
   ImageInfo,
   KioskPhaseDto,
   OpenAction,
@@ -35,6 +37,14 @@ export interface AnchorRect {
 }
 
 /** What a built-in window is showing. Mirrors Rust `appwin::AppView`. */
+/** What the thumbnail preview is about (Rust `commands::ThumbInfo`). */
+export interface ThumbInfo {
+  taskId: string;
+  title: string;
+  iconKey: string;
+  minimized: boolean;
+}
+
 export interface AppViewDto {
   label: string;
   lite: boolean;
@@ -144,6 +154,14 @@ type Commands = {
   fs_purge: { args: { id?: string | null }; result: void };
   fs_usage: { args: Record<string, never>; result: Usage };
   fs_search: { args: { query: string; searchId: number }; result: void };
+  thumb_open: { args: { taskId: string; anchor: AnchorRect }; result: boolean };
+  thumb_state: { args: Record<string, never>; result: ThumbInfo | null };
+  thumb_attach: { args: { x: number; y: number; width: number; height: number }; result: boolean };
+  admin_exit_open: { args: Record<string, never>; result: void };
+  admin_exit_hotkey: { args: Record<string, never>; result: string | null };
+  admin_exit_state: { args: Record<string, never>; result: AdminExitView };
+  admin_exit_submit: { args: { pin: string }; result: ExitAnswer };
+  admin_exit_close: { args: Record<string, never>; result: void };
   fs_recent: { args: Record<string, never>; result: Entry[] };
   fs_clip_set: { args: { op: ClipOp; paths: string[] }; result: void };
   fs_clip_get: { args: Record<string, never>; result: Clip | null };

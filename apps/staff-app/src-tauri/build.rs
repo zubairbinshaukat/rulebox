@@ -16,6 +16,9 @@ const SHELL_COMMANDS: &[&str] = &[
     "dev_set_boot",
     "popup_open",
     "popup_close",
+    "thumb_open",
+    "admin_exit_open",
+    "admin_exit_hotkey",
     "sign_in",
     "sign_in_last",
     "switch_user",
@@ -55,6 +58,8 @@ const APP_COMMANDS: &[&str] = &[
     "app_snapshot",
     "app_select_tab",
     "app_close_tab",
+    "admin_exit_open",
+    "admin_exit_hotkey",
     "fs_list",
     "fs_stat",
     "fs_mkdir",
@@ -80,8 +85,14 @@ const APP_COMMANDS: &[&str] = &[
     "fs_image_info",
 ];
 
+/// Commands only the popup page may call (the thumbnail preview).
+const POPUP_COMMANDS: &[&str] = &["thumb_state", "thumb_attach"];
+
+/// Commands only the administrator-exit dialog may call.
+const EXIT_COMMANDS: &[&str] = &["admin_exit_state", "admin_exit_submit", "admin_exit_close", "admin_exit_hotkey"];
+
 fn main() {
-    let commands = merge(SHELL_COMMANDS, APP_COMMANDS);
+    let commands = merge(&merge(SHELL_COMMANDS, APP_COMMANDS), &merge(POPUP_COMMANDS, EXIT_COMMANDS));
     // `AppManifest::commands` wants a `&'static [&'static str]`.
     let commands: &'static [&'static str] = Box::leak(commands.into_boxed_slice());
     let attributes = tauri_build::Attributes::new()

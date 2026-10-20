@@ -12,6 +12,7 @@ export default defineConfig({
       input: {
         shell: "shell.html",
         apps: "apps.html",
+        exit: "exit.html",
       },
     },
   },

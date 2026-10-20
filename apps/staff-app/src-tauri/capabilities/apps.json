@@ -38,6 +38,8 @@
     "allow-fs-read-text",
     "allow-fs-read-csv",
     "allow-fs-office-check",
-    "allow-fs-image-info"
+    "allow-fs-image-info",
+    "allow-admin-exit-open",
+    "allow-admin-exit-hotkey"
   ]
 }

@@ -7,6 +7,8 @@ import { AccountMenu } from "./AccountMenu";
 import { ConfirmLogout } from "./ConfirmLogout";
 import { QuickSettings } from "./QuickSettings";
 import { StartMenu } from "./StartMenu";
+import { Switcher } from "./Switcher";
+import { ThumbPreview } from "./ThumbPreview";
 
 /**
  * The shared popup. Escape, blur and a click on the desktop or taskbar close
@@ -81,16 +83,12 @@ function renderKind(kind: PopupKind | null): ReactNode {
     case "quickSettings":
       return <QuickSettings />;
     case "switcher":
-      return <Placeholder title="App switcher" />;
+      return <Switcher />;
     case "thumb":
-      return <Placeholder title="Preview" />;
+      return <ThumbPreview />;
     default: {
       const unreachable: never = kind;
       return unreachable;
     }
   }
-}
-
-function Placeholder({ title }: { title: string }) {
-  return <div style={{ padding: 20, color: "var(--rb-muted)" }}>{title}</div>;
 }

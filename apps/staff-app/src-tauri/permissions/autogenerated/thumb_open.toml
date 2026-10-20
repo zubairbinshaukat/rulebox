@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-thumb-open"
+description = "Enables the thumb_open command without any pre-configured scope."
+commands.allow = ["thumb_open"]
+
+[[permission]]
+identifier = "deny-thumb-open"
+description = "Denies the thumb_open command without any pre-configured scope."
+commands.deny = ["thumb_open"]

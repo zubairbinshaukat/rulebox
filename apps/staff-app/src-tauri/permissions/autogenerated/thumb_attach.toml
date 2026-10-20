@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-thumb-attach"
+description = "Enables the thumb_attach command without any pre-configured scope."
+commands.allow = ["thumb_attach"]
+
+[[permission]]
+identifier = "deny-thumb-attach"
+description = "Denies the thumb_attach command without any pre-configured scope."
+commands.deny = ["thumb_attach"]

@@ -3,11 +3,13 @@
 pub mod agent;
 pub mod appwin;
 pub mod commands;
+pub mod exit;
 pub mod files;
 pub mod launcher;
 mod logging;
 pub mod model;
 pub mod session;
+pub mod shortcuts;
 pub mod shellwin;
 pub mod system;
 pub mod state;
@@ -120,6 +122,14 @@ pub fn run() {
             commands::dev_set_boot,
             commands::popup_open,
             commands::popup_close,
+            commands::thumb_open,
+            commands::thumb_state,
+            commands::thumb_attach,
+            commands::admin_exit_open,
+            commands::admin_exit_hotkey,
+            commands::admin_exit_state,
+            commands::admin_exit_submit,
+            commands::admin_exit_close,
             commands::sign_in,
             commands::sign_in_last,
             commands::switch_user,

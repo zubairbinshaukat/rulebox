@@ -304,6 +304,8 @@ impl AppState {
                 }
             }
         }
+        // The administrator-exit dialog has its own small page and its own event.
+        crate::exit::push_if_changed(&app, self);
     }
 }
 

@@ -1,8 +1,8 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "shell",
-  "description": "Shell windows (desktop, taskbar, popup, exit). No remote.",
-  "windows": ["shell-*"],
+  "description": "Shell windows (desktop, taskbar, popup). No remote. The exit dialog has its own capability.",
+  "windows": ["shell-desktop", "shell-taskbar", "shell-popup"],
   "permissions": [
     "core:event:default",
     "core:app:default",
@@ -41,6 +41,9 @@
     "allow-fs-list",
     "allow-fs-search",
     "allow-fs-recent",
-    "allow-fs-open"
+    "allow-fs-open",
+    "allow-thumb-open",
+    "allow-admin-exit-open",
+    "allow-admin-exit-hotkey"
   ]
 }

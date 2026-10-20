@@ -4,4 +4,8 @@ export type TaskItem = {
 /**
  * HWND as a decimal string.
  */
-id: string, appId: string | null, title: string, iconKey: string, active: boolean, minimized: boolean, flashing: boolean, hung: boolean, own: boolean, };
+id: string, appId: string | null, title: string, iconKey: string, active: boolean, minimized: boolean, flashing: boolean, hung: boolean, own: boolean, 
+/**
+ * Larger means used more recently (0 = never seen active). The app switcher sorts by it.
+ */
+recency: number, };

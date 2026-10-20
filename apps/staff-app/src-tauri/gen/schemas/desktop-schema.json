@@ -177,6 +177,36 @@
       "description": "Permission identifier",
       "oneOf": [
         {
+          "description": "Enables the admin_exit_close command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-admin-exit-close",
+          "markdownDescription": "Enables the admin_exit_close command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the admin_exit_hotkey command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-admin-exit-hotkey",
+          "markdownDescription": "Enables the admin_exit_hotkey command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the admin_exit_open command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-admin-exit-open",
+          "markdownDescription": "Enables the admin_exit_open command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the admin_exit_state command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-admin-exit-state",
+          "markdownDescription": "Enables the admin_exit_state command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the admin_exit_submit command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-admin-exit-submit",
+          "markdownDescription": "Enables the admin_exit_submit command without any pre-configured scope."
+        },
+        {
           "description": "Enables the app_close_tab command without any pre-configured scope.",
           "type": "string",
           "const": "allow-app-close-tab",
@@ -507,6 +537,24 @@
           "markdownDescription": "Enables the task_menu command without any pre-configured scope."
         },
         {
+          "description": "Enables the thumb_attach command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-thumb-attach",
+          "markdownDescription": "Enables the thumb_attach command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the thumb_open command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-thumb-open",
+          "markdownDescription": "Enables the thumb_open command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the thumb_state command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-thumb-state",
+          "markdownDescription": "Enables the thumb_state command without any pre-configured scope."
+        },
+        {
           "description": "Enables the ui_alive command without any pre-configured scope.",
           "type": "string",
           "const": "allow-ui-alive",
@@ -547,6 +595,36 @@
           "type": "string",
           "const": "allow-win-toggle-maximize",
           "markdownDescription": "Enables the win_toggle_maximize command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the admin_exit_close command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-admin-exit-close",
+          "markdownDescription": "Denies the admin_exit_close command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the admin_exit_hotkey command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-admin-exit-hotkey",
+          "markdownDescription": "Denies the admin_exit_hotkey command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the admin_exit_open command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-admin-exit-open",
+          "markdownDescription": "Denies the admin_exit_open command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the admin_exit_state command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-admin-exit-state",
+          "markdownDescription": "Denies the admin_exit_state command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the admin_exit_submit command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-admin-exit-submit",
+          "markdownDescription": "Denies the admin_exit_submit command without any pre-configured scope."
         },
         {
           "description": "Denies the app_close_tab command without any pre-configured scope.",
@@ -877,6 +955,24 @@
           "type": "string",
           "const": "deny-task-menu",
           "markdownDescription": "Denies the task_menu command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the thumb_attach command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-thumb-attach",
+          "markdownDescription": "Denies the thumb_attach command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the thumb_open command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-thumb-open",
+          "markdownDescription": "Denies the thumb_open command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the thumb_state command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-thumb-state",
+          "markdownDescription": "Denies the thumb_state command without any pre-configured scope."
         },
         {
           "description": "Denies the ui_alive command without any pre-configured scope.",

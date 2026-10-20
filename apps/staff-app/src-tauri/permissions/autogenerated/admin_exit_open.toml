@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-admin-exit-open"
+description = "Enables the admin_exit_open command without any pre-configured scope."
+commands.allow = ["admin_exit_open"]
+
+[[permission]]
+identifier = "deny-admin-exit-open"
+description = "Denies the admin_exit_open command without any pre-configured scope."
+commands.deny = ["admin_exit_open"]

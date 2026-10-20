@@ -109,6 +109,9 @@ pub struct TaskTable {
     flashing: HashSet<isize>,
     hung: HashSet<isize>,
     icon_rev: HashMap<isize, u32>,
+    /// When each window was last active: a counter, larger is more recent.
+    last_active: HashMap<isize, u32>,
+    focus_seq: u32,
     /// Built-in windows that show a catalogue app (the Files window): hwnd →
     /// app id, so the window groups under that app's pinned button.
     builtin_apps: HashMap<isize, String>,
@@ -142,6 +145,7 @@ impl TaskTable {
                 self.flashing.remove(hwnd);
                 self.hung.remove(hwnd);
                 self.icon_rev.remove(hwnd);
+                self.last_active.remove(hwnd);
                 let existed = self.windows.remove(hwnd).is_some();
                 self.order.retain(|h| h != hwnd);
                 if self.active == Some(*hwnd) {
@@ -165,6 +169,12 @@ impl TaskTable {
                     },
                 };
                 let changed = self.active != next;
+                if let Some(hwnd) = next {
+                    if changed {
+                        self.focus_seq = self.focus_seq.wrapping_add(1);
+                        self.last_active.insert(hwnd, self.focus_seq);
+                    }
+                }
                 self.active = next;
                 changed
             }
@@ -295,6 +305,7 @@ impl TaskTable {
                 flashing: self.flashing.contains(hwnd),
                 hung: self.hung.contains(hwnd),
                 own,
+                recency: self.last_active.get(hwnd).copied().unwrap_or(0),
             });
         }
         items
