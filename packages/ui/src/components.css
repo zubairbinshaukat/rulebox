@@ -143,91 +143,200 @@
   box-shadow: 0 1px 2px oklch(0 0 0 / 0.1);
 }
 
-/* App tile */
+/* App tile.
+   A card with the app's art top left, an optional count top right, and the
+   name and a two-line description at the bottom. Art is one of:
+   - a Solar glyph on a gradient square in the app's hue (`--glyph`),
+   - the app's own icon on a light plate, with a large faded copy of it in
+     the bottom right corner (`--image`),
+   - a soft tinted square with a glyph or letter (the older look; `--tint`).
+   Hover lifts the card and pops the art; only transform and opacity move. */
 .rb-tile {
+  --rb-tile-pad: 18px;
+  --rb-tile-art: 56px;
+  --rb-tile-art-r: 16px;
+  --rb-tile-glyph: 30px;
   position: relative;
   isolation: isolate;
   display: flex;
   flex-direction: column;
   justify-content: space-between;
-  align-items: flex-start;
+  align-items: stretch;
+  gap: 10px;
   text-align: left;
   width: 168px;
   height: 148px;
-  padding: 16px;
-  border-radius: var(--rb-r-xl);
+  padding: var(--rb-tile-pad);
+  border-radius: var(--rb-r-22);
   background: var(--rb-surface-glass);
   border: 1px solid var(--rb-glass-border);
   box-shadow: var(--rb-shadow-sm);
-  transition: transform var(--rb-duration) ease;
+  color: var(--rb-ink);
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+  transition: transform 0.28s var(--rb-ease);
 }
+/* The stronger hover shadow fades in on its own layer (opacity only). */
 .rb-tile::after {
   content: "";
   position: absolute;
   inset: 0;
   border-radius: inherit;
-  box-shadow: var(--rb-shadow-md);
+  box-shadow: var(--rb-shadow-lg);
   opacity: 0;
   pointer-events: none;
   z-index: -1;
-  transition: opacity var(--rb-duration) ease;
+  transition: opacity 0.28s var(--rb-ease);
 }
 .rb-tile:hover {
-  transform: translateY(-3px);
+  transform: translateY(-4px);
 }
 .rb-tile:hover::after {
   opacity: 1;
 }
 .rb-tile:active {
-  transform: scale(0.98);
+  transform: translateY(-1px) scale(0.985);
+  transition-duration: 0.1s;
+}
+.rb-tile:focus-visible {
+  outline: 2px solid var(--rb-accent);
+  outline-offset: 3px;
 }
 .rb-tile--lg {
-  width: 196px;
-  height: 168px;
-  padding: 18px;
-  border-radius: var(--rb-r-22);
-}
-.rb-tile--lg .rb-tile__icon {
-  width: 56px;
-  height: 56px;
-  border-radius: var(--rb-r-16);
+  --rb-tile-pad: 20px;
+  --rb-tile-art: 64px;
+  --rb-tile-art-r: 18px;
+  --rb-tile-glyph: 34px;
 }
 .rb-tile--sm {
-  width: 132px;
-  height: 120px;
-  padding: 12px;
-  border-radius: var(--rb-r-16);
+  --rb-tile-pad: 14px;
+  --rb-tile-art: 44px;
+  --rb-tile-art-r: 13px;
+  --rb-tile-glyph: 24px;
+  border-radius: var(--rb-r-18);
 }
-.rb-tile--sm .rb-tile__icon {
-  width: 40px;
-  height: 40px;
-  border-radius: var(--rb-r-md);
-  font-size: 15px;
+
+/* Clips the faded corner copy to the card without clipping the card's shadow. */
+.rb-tile__clip {
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  overflow: hidden;
+  pointer-events: none;
+  z-index: -1;
 }
-.rb-tile--sm .rb-tile__name {
-  font-size: 13.5px;
+.rb-tile__mark {
+  position: absolute;
+  right: -14%;
+  bottom: -18%;
+  width: 60%;
+  aspect-ratio: 1;
+  object-fit: contain;
+  opacity: 0.1;
+  transform: rotate(-6deg);
+  transition:
+    transform 0.4s var(--rb-ease),
+    opacity 0.4s var(--rb-ease);
+  user-select: none;
 }
-.rb-tile--sm .rb-tile__desc {
-  font-size: 12.5px;
+.rb-tile:hover .rb-tile__mark {
+  opacity: 0.15;
+  transform: rotate(-2deg) scale(1.06);
 }
+
+.rb-tile__top {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 8px;
+  min-width: 0;
+}
+
 .rb-tile__icon {
-  width: 48px;
-  height: 48px;
-  border-radius: var(--rb-r-lg);
+  position: relative;
+  flex: none;
+  width: var(--rb-tile-art);
+  height: var(--rb-tile-art);
+  border-radius: var(--rb-tile-art-r);
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: 18px;
+  font-size: calc(var(--rb-tile-art) * 0.36);
   font-weight: 600;
   letter-spacing: -0.02em;
+  transform-origin: 30% 30%;
+  transition: transform 0.36s var(--rb-ease-pop);
   /* Compose at use-site so inline --rb-hue applies */
   background: oklch(var(--rb-tint-bg-l) var(--rb-tint-bg-c) var(--rb-hue));
   color: oklch(var(--rb-tint-fg-l) var(--rb-tint-fg-c) var(--rb-hue));
 }
+/* The art's own shadow, deeper on hover (opacity only). */
+.rb-tile__icon::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.36s var(--rb-ease);
+}
+.rb-tile:hover .rb-tile__icon {
+  transform: translate(-3px, -5px) scale(1.1);
+}
+.rb-tile:hover .rb-tile__icon::after {
+  opacity: 1;
+}
+
+.rb-tile__icon--glyph {
+  font-size: var(--rb-tile-glyph);
+  color: oklch(1 0 0);
+  background: linear-gradient(
+    150deg,
+    oklch(var(--rb-art-top-l) var(--rb-art-c) var(--rb-hue)),
+    oklch(var(--rb-art-bottom-l) var(--rb-art-c) calc(var(--rb-hue) + 12))
+  );
+  box-shadow:
+    inset 0 1px 0 oklch(1 0 0 / 0.32),
+    0 6px 14px -6px oklch(0.55 0.16 var(--rb-hue) / 0.55);
+}
+.rb-tile__icon--glyph::after {
+  box-shadow: 0 14px 26px -10px oklch(0.55 0.16 var(--rb-hue) / 0.6);
+}
+
+.rb-tile__icon--image {
+  background: var(--rb-icon-plate);
+  border: 1px solid var(--rb-icon-plate-border);
+  box-shadow: var(--rb-shadow-sm);
+}
+.rb-tile__icon--image::after {
+  box-shadow: var(--rb-shadow-md);
+}
+.rb-tile__img {
+  width: 62%;
+  height: 62%;
+  object-fit: contain;
+  user-select: none;
+}
+
+.rb-tile__count {
+  flex: none;
+  min-width: 24px;
+  height: 24px;
+  padding: 0 7px;
+  border-radius: 999px;
+  background: var(--rb-ink);
+  color: var(--rb-on-ink);
+  font-size: 12.5px;
+  font-weight: 600;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
 .rb-tile__text {
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: 3px;
   min-width: 0;
   width: 100%;
 }
@@ -236,9 +345,15 @@
   align-items: center;
   gap: 8px;
   min-width: 0;
-  font-size: 15px;
-  font-weight: 500;
-  letter-spacing: -0.01em;
+  font-size: 16px;
+  font-weight: 600;
+  letter-spacing: -0.015em;
+}
+.rb-tile--lg .rb-tile__name {
+  font-size: 17px;
+}
+.rb-tile--sm .rb-tile__name {
+  font-size: 14px;
 }
 .rb-tile__name > span:first-child {
   white-space: nowrap;
@@ -246,32 +361,147 @@
   text-overflow: ellipsis;
 }
 .rb-tile__desc {
-  font-size: 13.5px;
+  font-size: 13px;
   color: var(--rb-muted);
-  line-height: 1.35;
+  line-height: 1.38;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  overflow: hidden;
 }
+.rb-tile--sm .rb-tile__desc {
+  font-size: 12px;
+  -webkit-line-clamp: 1;
+}
+
+/* Lite and reduced motion: the card still answers hover, but nothing pops or drifts. */
+[data-lite="true"] .rb-tile:hover,
+[data-lite="true"] .rb-tile:hover .rb-tile__icon,
+[data-lite="true"] .rb-tile:hover .rb-tile__mark {
+  transform: none;
+}
+[data-lite="true"] .rb-tile__icon--glyph {
+  box-shadow: inset 0 1px 0 oklch(1 0 0 / 0.32);
+}
+@media (prefers-reduced-motion: reduce) {
+  .rb-tile,
+  .rb-tile::after,
+  .rb-tile__icon,
+  .rb-tile__icon::after,
+  .rb-tile__mark {
+    transition: none;
+  }
+  .rb-tile:hover,
+  .rb-tile:hover .rb-tile__icon,
+  .rb-tile:hover .rb-tile__mark {
+    transform: none;
+  }
+}
+/* Paging for a grid that does not fit (the desktop's app tiles): round
+   arrows at the sides, and dots in a pill with a sliding thumb under it. */
+.rb-page-arrow {
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  color: var(--rb-ink);
+  background: var(--rb-surface-glass);
+  border: 1px solid var(--rb-glass-border);
+  box-shadow: var(--rb-shadow-sm);
+  -webkit-backdrop-filter: blur(var(--rb-blur));
+  backdrop-filter: blur(var(--rb-blur));
+  cursor: pointer;
+  /* Large enough that the Solar chevron reads as a chevron, not a dot. */
+  font-size: 24px;
+  transition:
+    transform var(--rb-duration) var(--rb-ease),
+    opacity var(--rb-duration) var(--rb-ease);
+}
+.rb-page-arrow:hover:not(:disabled) {
+  transform: scale(1.07);
+}
+.rb-page-arrow:active:not(:disabled) {
+  transform: scale(0.96);
+}
+.rb-page-arrow:disabled {
+  opacity: 0.35;
+  cursor: default;
+}
+.rb-page-arrow:focus-visible,
+.rb-pager__dot:focus-visible {
+  outline: 2px solid var(--rb-accent);
+  outline-offset: 2px;
+}
+.rb-pager {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+}
+.rb-pager__dots {
+  --rb-pager-step: 16px;
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  border-radius: 999px;
+  background: var(--rb-surface-glass);
+  border: 1px solid var(--rb-glass-border);
+  box-shadow: var(--rb-shadow-sm);
+  -webkit-backdrop-filter: blur(var(--rb-blur));
+  backdrop-filter: blur(var(--rb-blur));
+}
+.rb-pager__dot {
+  position: relative;
+  width: 8px;
+  height: 8px;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: var(--rb-faint);
+  opacity: 0.5;
+  cursor: pointer;
+  transition: opacity var(--rb-duration) var(--rb-ease);
+}
+/* A bigger target than the dot itself. */
+.rb-pager__dot::before {
+  content: "";
+  position: absolute;
+  inset: -6px -4px;
+}
+.rb-pager__dot:hover {
+  opacity: 0.9;
+}
+.rb-pager__thumb {
+  position: absolute;
+  top: 50%;
+  left: 12px;
+  width: 24px;
+  height: 8px;
+  margin-top: -4px;
+  border-radius: 999px;
+  background: var(--rb-ink);
+  pointer-events: none;
+  /* Centred on dot i: i steps along, then back by half the extra width. */
+  transform: translateX(calc(var(--rb-pager-index, 0) * var(--rb-pager-step) - 8px));
+  transition: transform 0.36s var(--rb-ease);
+}
+.rb-pager__caption {
+  font-size: 12px;
+  color: var(--rb-muted);
+  font-variant-numeric: tabular-nums;
+}
+
 .rb-dot {
   width: 6px;
   height: 6px;
   border-radius: 50%;
   background: var(--rb-accent);
   flex: none;
-}
-.rb-badge {
-  position: absolute;
-  top: 16px;
-  right: 16px;
-  min-width: 22px;
-  height: 22px;
-  padding: 0 7px;
-  border-radius: 11px;
-  background: var(--rb-ink);
-  color: var(--rb-on-ink);
-  font-size: 12px;
-  font-weight: 600;
-  display: flex;
-  align-items: center;
-  justify-content: center;
 }
 
 /* Title bar */

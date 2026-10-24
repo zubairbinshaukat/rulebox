@@ -94,9 +94,19 @@
   --rb-shadow-popover: 0 20px 48px -16px oklch(0.3 0.02 70 / 0.35);
 
   --rb-ease: cubic-bezier(0.2, 0.8, 0.2, 1);
+  /* A small overshoot for things that "pop" (an app tile's icon on hover). */
+  --rb-ease-pop: cubic-bezier(0.34, 1.45, 0.64, 1);
   --rb-duration: 0.2s;
 
   --rb-blur: 24px;
+
+  /* App tile art. A Solar glyph sits on a gradient in the app's hue (top and
+     bottom lightness, one chroma); an app's own icon sits on a light plate. */
+  --rb-art-top-l: 0.73;
+  --rb-art-bottom-l: 0.56;
+  --rb-art-c: 0.17;
+  --rb-icon-plate: oklch(1 0 0);
+  --rb-icon-plate-border: oklch(0.92 0.006 80);
 }
 
 [data-theme="dark"] {
@@ -149,6 +159,11 @@
   --rb-shadow-window: 0 1px 2px oklch(0 0 0 / 0.14), 0 28px 64px -18px oklch(0 0 0 / 0.72);
   --rb-shadow-window-inactive: 0 1px 2px oklch(0 0 0 / 0.1), 0 16px 40px -20px oklch(0 0 0 / 0.4);
   --rb-shadow-popover: 0 20px 48px -16px oklch(0 0 0 / 0.55);
+
+  --rb-art-top-l: 0.7;
+  --rb-art-bottom-l: 0.54;
+  --rb-icon-plate: oklch(0.95 0.004 80);
+  --rb-icon-plate-border: oklch(1 0 0 / 0);
 }
 
 @media (prefers-color-scheme: dark) {
@@ -202,6 +217,11 @@
     --rb-shadow-window: 0 1px 2px oklch(0 0 0 / 0.14), 0 28px 64px -18px oklch(0 0 0 / 0.72);
     --rb-shadow-window-inactive: 0 1px 2px oklch(0 0 0 / 0.1), 0 16px 40px -20px oklch(0 0 0 / 0.4);
     --rb-shadow-popover: 0 20px 48px -16px oklch(0 0 0 / 0.55);
+
+    --rb-art-top-l: 0.7;
+    --rb-art-bottom-l: 0.54;
+    --rb-icon-plate: oklch(0.95 0.004 80);
+    --rb-icon-plate-border: oklch(1 0 0 / 0);
   }
 }
 

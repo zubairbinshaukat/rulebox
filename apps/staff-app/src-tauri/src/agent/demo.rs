@@ -107,6 +107,15 @@ fn demo_snapshot() -> AgentSnapshot {
     }
 }
 
+/// Stand-in web app icons for the demo (128 px PNGs, as base64 text).
+const DEMO_ICON_MAIL: &str = include_str!("demo-icons/mail.png.b64");
+const DEMO_ICON_ORDERS: &str = include_str!("demo-icons/orders.png.b64");
+const DEMO_ICON_ACCOUNTS: &str = include_str!("demo-icons/accounts.png.b64");
+
+fn demo_icon(base64: &str) -> Option<String> {
+    crate::model::icon_data_url(base64)
+}
+
 /// Catalogue for the demo agent. `RULEBOX_DEMO_APPS=<n>` (and the debug
 /// cmd poller) select the count for layout screenshots.
 pub fn sample_apps_for(n: Option<usize>) -> Vec<AppEntry> {
@@ -119,6 +128,7 @@ pub fn sample_apps_for(n: Option<usize>) -> Vec<AppEntry> {
                 tool: BuiltinTool::Files,
             },
             icon_key: Some("folder".into()),
+            icon_url: None,
             hue: None,
             pinned_taskbar: true,
             pinned_desktop: false,
@@ -127,13 +137,14 @@ pub fn sample_apps_for(n: Option<usize>) -> Vec<AppEntry> {
         AppEntry {
             id: "orders-web".into(),
             name: "Orders".into(),
-            description: Some("Company order portal".into()),
+            description: Some("Track and fulfil customer orders".into()),
             kind: AppKind::Web(WebApp {
                 url: "https://portal.company.com/orders".into(),
                 allowed_domains: vec!["portal.company.com".into()],
                 permissions: WebPermissions::default(),
             }),
             icon_key: None,
+            icon_url: demo_icon(DEMO_ICON_ORDERS),
             hue: Some(175),
             pinned_taskbar: true,
             pinned_desktop: true,
@@ -149,6 +160,7 @@ pub fn sample_apps_for(n: Option<usize>) -> Vec<AppEntry> {
                 file_arg_template: vec!["{file}".into()],
             }),
             icon_key: None,
+            icon_url: None,
             hue: Some(30),
             pinned_taskbar: false,
             pinned_desktop: true,
@@ -167,24 +179,40 @@ pub fn sample_apps_for(n: Option<usize>) -> Vec<AppEntry> {
         out.truncate(n);
         return out;
     }
-    let mut i = out.len();
+    // Realistic names, so the tiles pick their Solar glyphs and colours the
+    // way a real catalogue would; some carry their own icon like a web app.
+    let extra: [(&str, &str, Option<&str>); 9] = [
+        ("Mail", "Team inbox and dispatch alerts", Some(DEMO_ICON_MAIL)),
+        ("Meetings", "Today's schedule and rooms", None),
+        ("Accounts", "Customer accounts and balances", Some(DEMO_ICON_ACCOUNTS)),
+        ("Videos", "Training clips and briefings", None),
+        ("Music", "Background audio for the floor", None),
+        ("Visitor pass", "Front desk badge check-in", None),
+        ("Reports", "Daily sales and stock levels", None),
+        ("Team chat", "Talk to your shift", None),
+        ("Deliveries", "Inbound and outbound parcels", None),
+    ];
+    let base_len = out.len();
+    let mut i = base_len;
     while out.len() < n {
+        let (name, description, icon) = extra[(i - base_len) % extra.len()];
+        let round = (i - base_len) / extra.len();
         i += 1;
-        let hue = ((i * 37) % 360) as u16;
         out.push(AppEntry {
             id: format!("demo-app-{i}"),
-            name: format!("Demo app {i}"),
-            description: Some("Generated for layout screenshots".into()),
+            name: if round == 0 { name.to_string() } else { format!("{name} {}", round + 1) },
+            description: Some(description.into()),
             kind: AppKind::Web(WebApp {
                 url: format!("https://example.invalid/app/{i}"),
                 allowed_domains: vec!["example.invalid".into()],
                 permissions: WebPermissions::default(),
             }),
             icon_key: None,
-            hue: Some(hue),
+            icon_url: icon.and_then(demo_icon),
+            hue: None,
             pinned_taskbar: false,
             pinned_desktop: true,
-            badge: if i % 5 == 0 { Some(i as u32 % 9 + 1) } else { None },
+            badge: if name == "Mail" { Some(4) } else if i % 7 == 0 { Some(2) } else { None },
         });
     }
     out
@@ -205,6 +233,7 @@ fn demo_web_apps() -> Vec<AppEntry> {
             permissions: WebPermissions::default(),
         }),
         icon_key: None,
+        icon_url: None,
         hue: Some(210),
         pinned_taskbar: false,
         pinned_desktop: true,

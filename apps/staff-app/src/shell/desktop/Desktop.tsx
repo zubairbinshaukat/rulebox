@@ -102,6 +102,7 @@ export function Desktop({ shell, employee }: DesktopProps) {
       <div style={{ flex: 1, minHeight: 0, display: "flex", gap: 24 }}>
         <AppGrid
           apps={shell.apps.items}
+          tasks={shell.tasks}
           status={shell.apps.status}
           onRetry={() => void refreshCatalogue()}
         />

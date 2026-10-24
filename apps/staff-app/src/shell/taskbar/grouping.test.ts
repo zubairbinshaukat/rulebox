@@ -10,6 +10,7 @@ function app(id: string, pinnedTaskbar: boolean, name = id): AppEntry {
     description: null,
     kind: { type: "desktop" },
     iconKey: null,
+    iconUrl: null,
     hue: null,
     pinnedTaskbar,
     pinnedDesktop: false,

@@ -72,6 +72,7 @@ mod step3_tests {
                             tool: BuiltinTool::Files,
                         },
                         icon_key: Some("folder".into()),
+                        icon_url: None,
                         hue: None,
                         pinned_taskbar: true,
                         pinned_desktop: false,
@@ -87,6 +88,7 @@ mod step3_tests {
                             permissions: WebPermissions::default(),
                         }),
                         icon_key: None,
+                        icon_url: None,
                         hue: Some(175),
                         pinned_taskbar: true,
                         pinned_desktop: true,
@@ -102,6 +104,7 @@ mod step3_tests {
                             file_arg_template: vec!["{file}".into()],
                         }),
                         icon_key: None,
+                        icon_url: None,
                         hue: Some(30),
                         pinned_taskbar: false,
                         pinned_desktop: true,
@@ -165,6 +168,7 @@ mod step3_tests {
                         "description": "Your files",
                         "kind": { "type": "builtin", "tool": "files" },
                         "iconKey": "folder",
+                        "iconUrl": null,
                         "hue": null,
                         "pinnedTaskbar": true,
                         "pinnedDesktop": false,
@@ -190,6 +194,7 @@ mod step3_tests {
                             }
                         },
                         "iconKey": null,
+                        "iconUrl": null,
                         "hue": 175,
                         "pinnedTaskbar": true,
                         "pinnedDesktop": true,
@@ -201,6 +206,7 @@ mod step3_tests {
                         "description": null,
                         "kind": { "type": "desktop" },
                         "iconKey": null,
+                        "iconUrl": null,
                         "hue": 30,
                         "pinnedTaskbar": false,
                         "pinnedDesktop": true,
@@ -355,6 +361,30 @@ mod step3_tests {
             }
         }
     }
+
+    #[test]
+    fn only_a_small_base64_png_becomes_an_icon_url() {
+        use rulebox_staff_lib::model::icon_data_url;
+        assert_eq!(
+            icon_data_url("iVBORw0KGgoAAAANSUhEUg=="),
+            Some("data:image/png;base64,iVBORw0KGgoAAAANSUhEUg==".into())
+        );
+        assert_eq!(icon_data_url(" iVBORw0KGgo= \n"), Some("data:image/png;base64,iVBORw0KGgo=".into()));
+        assert_eq!(icon_data_url("R0lGODlhAQABAAAAACw="), None, "a GIF is refused");
+        assert_eq!(icon_data_url("iVBORw0KGgo\"><script>"), None, "not base64");
+        assert_eq!(icon_data_url(""), None);
+        let huge = format!("iVBORw0KGgo{}", "A".repeat(300 * 1024));
+        assert_eq!(icon_data_url(&huge), None, "too large");
+    }
+
+    #[test]
+    fn the_demo_catalogue_has_both_icon_styles() {
+        let apps = rulebox_staff_lib::agent::demo::sample_apps_for(Some(12));
+        assert_eq!(apps.len(), 12);
+        assert!(apps.iter().any(|app| app.icon_url.is_some()), "own icons (web apps)");
+        assert!(apps.iter().any(|app| app.icon_url.is_none()), "Solar glyphs");
+        assert!(apps.iter().any(|app| app.name == "Mail" && app.badge == Some(4)));
+    }
 }
 
 #[cfg(all(test, debug_assertions))]
@@ -395,6 +425,7 @@ mod step7_tests {
                 file_arg_template: vec![],
             }),
             icon_key: None,
+            icon_url: None,
             hue: None,
             pinned_taskbar: false,
             pinned_desktop: false,
@@ -649,6 +680,7 @@ mod step8_tests {
             description: None,
             kind,
             icon_key: None,
+            icon_url: None,
             hue: None,
             pinned_taskbar: false,
             pinned_desktop: false,

@@ -205,10 +205,31 @@ pub struct AppEntry {
     pub description: Option<String>,
     pub kind: AppKind,
     pub icon_key: Option<String>,
+    /// The app's own icon (a web app's manifest icon or favicon, stored by
+    /// the dashboard) as a `data:image/png` URL. `None`: the tile shows a Solar glyph.
+    #[serde(default)]
+    pub icon_url: Option<String>,
     pub hue: Option<u16>,
     pub pinned_taskbar: bool,
     pub pinned_desktop: bool,
     pub badge: Option<u32>,
+}
+
+/// The largest app icon accepted from the agent, in base64 characters
+/// (about 192 KB of PNG): plenty for a 256 px icon, and it keeps the
+/// catalogue the shell windows receive small.
+const MAX_ICON_BASE64: usize = 256 * 1024;
+
+/// Pure: a `data:` URL for an app icon sent as base64 PNG, or `None` when it
+/// is too large, is not base64, or is not a PNG (the PNG signature encodes
+/// to `iVBORw0KGgo`). Nothing else is ever put into an `img` source.
+pub fn icon_data_url(base64: &str) -> Option<String> {
+    let text = base64.trim();
+    let is_base64 = text
+        .bytes()
+        .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'+' | b'/' | b'='));
+    (text.len() <= MAX_ICON_BASE64 && is_base64 && text.starts_with("iVBORw0KGgo"))
+        .then(|| format!("data:image/png;base64,{text}"))
 }
 
 /// Internally tagged (`type`) for React. See module docs.
@@ -506,6 +527,7 @@ pub fn map_wire_app(wire: rulebox_ipc::requests::AppEntry) -> Option<AppEntry> {
         description: wire.description,
         kind,
         icon_key: None,
+        icon_url: wire.icon_png_base64.as_deref().and_then(icon_data_url),
         hue: wire.hue,
         pinned_taskbar: wire.pinned_taskbar,
         pinned_desktop: wire.pinned_desktop,
