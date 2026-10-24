@@ -16,6 +16,7 @@ pub mod net;
 pub mod notify;
 pub mod placement;
 pub mod power;
+pub mod procstats;
 pub mod system;
 pub mod thumbs;
 pub mod tracker;

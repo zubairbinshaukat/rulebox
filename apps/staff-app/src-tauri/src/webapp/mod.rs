@@ -107,6 +107,20 @@ impl WebApps {
         self.inner.lock().map_or(0, |inner| inner.windows.len())
     }
 
+    /// `(window label, app name)` of every open web window (the resource monitor's labels).
+    pub fn open_windows(&self) -> Vec<(String, String)> {
+        self.inner.lock().map_or_else(
+            |_| Vec::new(),
+            |inner| {
+                inner
+                    .windows
+                    .iter()
+                    .map(|(label, window)| (label.clone(), window.app_name.clone()))
+                    .collect()
+            },
+        )
+    }
+
     fn forget(&self, label: &str) {
         if let Ok(mut inner) = self.inner.lock() {
             inner.windows.remove(label);
@@ -360,6 +374,11 @@ fn announce(state: &AppState, app_name: &str, finished: download::Finished) {
         download::Finished::Failed => state.notify(NoticeTone::Warning, "The download did not finish.", app),
         download::Finished::Misplaced => tracing::warn!("a download finished outside the employee's folder"),
     }
+}
+
+/// The WebView2 browser process behind a web window (for the developer resource monitor).
+pub fn browser_pid(window: &WebviewWindow, done: impl FnOnce(u32) + Send + 'static) {
+    hooks::browser_pid(window, done);
 }
 
 pub fn focus(app: &AppHandle, label: &str) {

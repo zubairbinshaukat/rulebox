@@ -70,3 +70,6 @@ export * from "./generated/TrashItem";
 export * from "./generated/Usage";
 export * from "./generated/ViewerKind";
 export * from "./generated/FileKind";
+export * from "./generated/GroupKind";
+export * from "./generated/UsageGroup";
+export * from "./generated/MonitorSample";

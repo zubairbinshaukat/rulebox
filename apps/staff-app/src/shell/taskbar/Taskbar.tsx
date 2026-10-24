@@ -10,6 +10,7 @@ import { useMotionLevel } from "../../lib/motion";
 import { useShell } from "../../lib/store";
 import { anchorOf, call, isTauri } from "../../lib/tauri";
 import { AppArt } from "../AppArtIcon";
+import { MonitorChip } from "./MonitorChip";
 import { clickTarget, groupTaskbar, labelOf, stateOf } from "./grouping";
 import { TaskButton, WindowIcon } from "./TaskButton";
 import { Clock } from "./Clock";
@@ -90,6 +91,16 @@ export function Taskbar() {
     }
     void call("popup_open", {
       kind: "quickSettings",
+      anchor: anchorOf(element),
+    });
+  };
+
+  const openMonitor = (element: Element) => {
+    if (!inTauri) {
+      return;
+    }
+    void call("popup_open", {
+      kind: "monitor",
       anchor: anchorOf(element),
     });
   };
@@ -230,6 +241,7 @@ export function Taskbar() {
           <div />
         )}
         <div className="rb-dock rb-dock--tray">
+          <MonitorChip onOpen={openMonitor} />
           {signedIn && employeeName ? (
             <button
               type="button"

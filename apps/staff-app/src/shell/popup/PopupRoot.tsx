@@ -5,6 +5,7 @@ import { Surface } from "@rulebox/ui";
 import { call, isTauri, type PopupKind } from "../../lib/tauri";
 import { AccountMenu } from "./AccountMenu";
 import { ConfirmLogout } from "./ConfirmLogout";
+import { Monitor } from "./Monitor";
 import { QuickSettings } from "./QuickSettings";
 import { StartMenu } from "./StartMenu";
 import { Switcher } from "./Switcher";
@@ -86,6 +87,8 @@ function renderKind(kind: PopupKind | null): ReactNode {
       return <Switcher />;
     case "thumb":
       return <ThumbPreview />;
+    case "monitor":
+      return <Monitor />;
     default: {
       const unreachable: never = kind;
       return unreachable;

@@ -9,6 +9,7 @@ pub mod known_folders;
 pub mod launcher;
 mod logging;
 pub mod model;
+pub mod monitor;
 pub mod session;
 pub mod shortcuts;
 pub mod shellwin;
@@ -214,6 +215,8 @@ pub fn run() {
             app.manage(std::sync::Arc::new(webapp::WebApps::default()));
             let host = shellwin::init(app.handle(), mode, services.clone())?;
             app.manage(host);
+            // Debug builds: live CPU and memory per app in the taskbar (developer aid).
+            monitor::start(app.handle());
             // Nobody is signed in yet. If the app died while someone was,
             // their folder is still Documents, Desktop and Downloads: undo it.
             let startup = app.handle().clone();

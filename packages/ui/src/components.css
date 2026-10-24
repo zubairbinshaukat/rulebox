@@ -991,6 +991,11 @@
   padding: 0 8px 0 8px;
   gap: 8px;
 }
+/* Nothing in the tray shrinks or wraps (the clock stays on one line). */
+.rb-dock--tray > * {
+  flex: none;
+  white-space: nowrap;
+}
 /* A rounded chip inside the tray (the bell, the status group). The hover
    tint is its own layer, so only opacity changes. */
 .rb-chip {
@@ -1055,6 +1060,182 @@
 .rb-chip__muted {
   color: var(--rb-muted);
 }
+/* Debug builds: the resource chip. Dashed, so it never passes for product UI. */
+.rb-chip--dev {
+  gap: 8px;
+  padding: 0 10px 0 6px;
+  font-weight: 600;
+  border: 1px dashed var(--rb-line);
+}
+.rb-chip__devtag {
+  padding: 2px 5px;
+  border-radius: 6px;
+  background: var(--rb-warning-soft);
+  color: var(--rb-warning-text);
+  font-size: 9.5px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+}
+.rb-chip__stack {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  line-height: 1.15;
+  font-size: 11.5px;
+  font-family: var(--rb-font-mono);
+  font-weight: 500;
+  white-space: nowrap;
+}
+.rb-chip__stack > span:last-child {
+  font-size: 10.5px;
+}
+
+/* The resource monitor popup (debug builds). */
+.rb-monitor {
+  height: 100%;
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 16px;
+  color: var(--rb-ink);
+}
+.rb-monitor--waiting {
+  align-items: center;
+  justify-content: center;
+  color: var(--rb-muted);
+}
+.rb-monitor__head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+}
+.rb-monitor__eyebrow {
+  font-size: 11.5px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--rb-muted);
+}
+.rb-monitor__hint,
+.rb-monitor__foot {
+  font-size: 11.5px;
+  color: var(--rb-faint);
+}
+.rb-monitor__meters {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+}
+.rb-monitor__meter {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 10px 12px;
+  border-radius: 14px;
+  background: var(--rb-hover);
+}
+.rb-monitor__meter-label {
+  font-size: 11.5px;
+  color: var(--rb-muted);
+}
+.rb-monitor__meter-value {
+  font-size: 15px;
+  font-weight: 650;
+  font-family: var(--rb-font-mono);
+  white-space: nowrap;
+}
+.rb-monitor__total {
+  font-size: 13px;
+  color: var(--rb-muted);
+}
+.rb-monitor__total strong {
+  color: var(--rb-ink);
+  font-family: var(--rb-font-mono);
+}
+.rb-monitor__list {
+  flex: 1;
+  min-height: 0;
+  margin: 0 -6px;
+  padding: 0;
+  list-style: none;
+  overflow-y: auto;
+}
+.rb-monitor__row {
+  display: grid;
+  grid-template-columns: 10px minmax(0, 1fr) auto;
+  grid-template-rows: auto 4px;
+  column-gap: 10px;
+  row-gap: 5px;
+  align-items: center;
+  padding: 8px 6px;
+  border-radius: 10px;
+}
+.rb-monitor__row:hover {
+  background: var(--rb-hover);
+}
+.rb-monitor__dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+}
+.rb-monitor__name {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+.rb-monitor__title {
+  font-size: 13px;
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.rb-monitor__sub {
+  font-size: 11px;
+  color: var(--rb-muted);
+}
+.rb-monitor__figures {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  font-family: var(--rb-font-mono);
+  font-variant-numeric: tabular-nums;
+}
+.rb-monitor__mem {
+  font-size: 12.5px;
+  font-weight: 600;
+}
+.rb-monitor__mem--na {
+  font-family: var(--rb-font-sans);
+  font-size: 11.5px;
+  font-weight: 500;
+  color: var(--rb-faint);
+}
+.rb-monitor__cpu {
+  font-size: 11px;
+  color: var(--rb-muted);
+}
+.rb-monitor__bar {
+  grid-column: 2 / 4;
+  position: relative;
+  height: 4px;
+  border-radius: 2px;
+  background: var(--rb-line);
+  overflow: hidden;
+}
+.rb-monitor__bar--meter {
+  grid-column: auto;
+  margin-top: 2px;
+}
+/* Width by transform (scaleX from the left), so a change is a cheap transform. */
+.rb-monitor__fill {
+  position: absolute;
+  inset: 0;
+  transform-origin: left center;
+  transition: transform 0.6s var(--rb-ease);
+}
+
 /* Clock and avatar: plain buttons in the tray. */
 .rb-tray-button {
   position: relative;

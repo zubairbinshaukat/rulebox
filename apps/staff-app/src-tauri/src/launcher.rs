@@ -218,6 +218,21 @@ impl Launcher {
         map
     }
 
+    /// Process id → app id for the processes of every launched job and every
+    /// adopted window, changing nothing (the developer resource monitor reads it).
+    pub fn app_pids(&self) -> HashMap<u32, String> {
+        let mut map = HashMap::new();
+        for entry in self.running.lock().unwrap_or_else(|e| e.into_inner()).iter() {
+            for pid in launch::job_pids(&entry.job) {
+                map.insert(pid, entry.app_id.clone());
+            }
+        }
+        for (_, pid, app_id) in self.adopted.lock().unwrap_or_else(|e| e.into_inner()).iter() {
+            map.insert(*pid, app_id.clone());
+        }
+        map
+    }
+
     /// What log out may close, besides the shell's own app windows.
     ///
     /// Job pids: every window of a process the shell started. Adopted hwnds:

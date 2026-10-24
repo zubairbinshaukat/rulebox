@@ -118,6 +118,20 @@ pub fn set_suspended(window: &WebviewWindow, suspended: bool) {
     });
 }
 
+/// The WebView2 browser process behind `window` (the root of its process
+/// tree), handed to `done` from the UI thread. Read-only; for the developer
+/// resource monitor.
+pub fn browser_pid(window: &WebviewWindow, done: impl FnOnce(u32) + Send + 'static) {
+    let _ = window.with_webview(move |platform| {
+        let mut pid = 0u32;
+        // SAFETY: the controller is valid for this call; BrowserProcessId only writes the out-parameter.
+        let read = unsafe { platform.controller().CoreWebView2().and_then(|core| core.BrowserProcessId(&mut pid)) };
+        if read.is_ok() && pid != 0 {
+            done(pid);
+        }
+    });
+}
+
 /// Send the (hardened) window to its first real address.
 unsafe fn navigate(controller: &ICoreWebView2Controller, start: &Url) -> windows::core::Result<()> {
     let target = windows::core::HSTRING::from(start.as_str());

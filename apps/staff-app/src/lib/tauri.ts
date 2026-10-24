@@ -27,7 +27,8 @@ export type PopupKind =
   | "account"
   | "switcher"
   | "thumb"
-  | "confirm";
+  | "confirm"
+  | "monitor";
 
 /** A control's rectangle in **physical** pixels, relative to its window. */
 export interface AnchorRect {

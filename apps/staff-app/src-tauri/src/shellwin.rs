@@ -50,6 +50,8 @@ pub enum PopupKind {
     Switcher,
     Thumb,
     Confirm,
+    /// The developer resource monitor (debug builds).
+    Monitor,
 }
 
 impl PopupKind {
@@ -62,6 +64,7 @@ impl PopupKind {
             PopupKind::Switcher => (760, 292),
             PopupKind::Thumb => (272, 196),
             PopupKind::Confirm => (400, 220),
+            PopupKind::Monitor => (420, 540),
         }
     }
 }

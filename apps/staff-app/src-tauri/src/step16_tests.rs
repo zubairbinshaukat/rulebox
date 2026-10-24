@@ -272,3 +272,70 @@ fn the_windows_key_opens_start_only_on_an_unlocked_desktop() {
     assert!(!start_allowed(&SessionState::SigningIn));
     assert!(!start_allowed(&SessionState::SigningOut));
 }
+
+mod resource_monitor {
+    use std::collections::HashMap;
+    use std::time::Duration;
+
+    use rulebox_desktop::procstats::ProcInfo;
+    use rulebox_staff_lib::monitor::{build_groups, process_cpu, GroupKind, Roots};
+
+    fn proc(pid: u32, parent: u32, exe: &str, mb: u64) -> ProcInfo {
+        ProcInfo { pid, parent, exe: exe.into(), private_ws: Some(mb << 20), cpu_100ns: Some(0) }
+    }
+
+    #[test]
+    fn processes_are_grouped_by_the_tree_they_belong_to() {
+        let processes = vec![
+            proc(10, 1, "rulebox-staff.exe", 40),
+            proc(11, 10, "msedgewebview2.exe", 100),
+            proc(12, 11, "msedgewebview2.exe", 60),
+            proc(20, 10, "msedgewebview2.exe", 80), // a web app's browser
+            proc(21, 20, "msedgewebview2.exe", 30),
+            proc(30, 2, "notepad.exe", 25), // launched by the shell
+            proc(40, 3, "rulebox-agent.exe", 15),
+            proc(41, 3, "rulebox-shell.exe", 5),
+            proc(50, 4, "explorer.exe", 90),
+            proc(51, 4, "code.exe", 70),
+            proc(52, 4, "code.exe", 30),
+        ];
+        let mut roots: Roots = HashMap::new();
+        roots.insert(10, (GroupKind::Shell, "Shell".into()));
+        roots.insert(20, (GroupKind::WebApp, "Orders".into()));
+        roots.insert(30, (GroupKind::App, "Notepad".into()));
+        let cpu: HashMap<u32, f32> = [(11, 2.0), (12, 1.0), (21, 4.0)].into_iter().collect();
+
+        let groups = build_groups(&processes, &cpu, &roots);
+        let find = |name: &str| groups.iter().find(|g| g.name == name).unwrap_or_else(|| panic!("{name} in {groups:?}"));
+        assert_eq!(groups[0].kind, GroupKind::Shell, "Rulebox's shell comes first");
+        // The web app's browser is a child of the shell but its own root wins.
+        assert_eq!(find("Shell").bytes, 200 << 20);
+        assert_eq!(find("Shell").processes, 3);
+        assert_eq!(find("Orders").bytes, 110 << 20);
+        assert!((find("Orders").cpu_percent - 4.0).abs() < 0.01);
+        assert_eq!(find("Notepad").kind, GroupKind::App);
+        assert_eq!(find("Rulebox agent").kind, GroupKind::Agent);
+        assert_eq!(find("Rulebox shell launcher").kind, GroupKind::Launcher);
+        // Other programs are one row per program.
+        assert_eq!(find("code.exe").processes, 2);
+        assert_eq!(find("code.exe").bytes, 100 << 20);
+        assert_eq!(find("Shell").unreadable, 0);
+    }
+
+    #[test]
+    fn processes_without_figures_are_counted_as_unreadable() {
+        let mut agent = proc(40, 3, "rulebox-agent.exe", 0);
+        agent.private_ws = None;
+        let groups = build_groups(&[agent], &HashMap::new(), &HashMap::new());
+        assert_eq!(groups[0].bytes, 0);
+        assert_eq!(groups[0].unreadable, 1, "a SYSTEM process is shown as not readable, not as 0 MB");
+    }
+
+    #[test]
+    fn a_process_cpu_share_is_of_the_whole_machine() {
+        // One second of CPU in one wall second on 4 cores: 25 %.
+        assert!((process_cpu(0, 10_000_000, Duration::from_secs(1), 4) - 25.0).abs() < 0.01);
+        assert_eq!(process_cpu(5, 5, Duration::from_secs(2), 8), 0.0);
+        assert_eq!(process_cpu(0, 1, Duration::ZERO, 8), 0.0);
+    }
+}
