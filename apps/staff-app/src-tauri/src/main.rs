@@ -15,6 +15,9 @@ fn main() {
 mod step12_tests;
 
 #[cfg(all(test, debug_assertions))]
+mod known_folders_tests;
+
+#[cfg(all(test, debug_assertions))]
 mod step15_tests;
 
 #[cfg(all(test, debug_assertions))]

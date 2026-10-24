@@ -124,6 +124,12 @@ impl DesktopHost {
         self.token.is_some()
     }
 
+    /// Run `f` on the calling thread with the shell token. None in dev mode,
+    /// where nothing session-wide may be touched.
+    pub fn with_shell_token<T>(&self, f: impl FnOnce(&ShellToken) -> T) -> Option<T> {
+        self.token.as_deref().map(f)
+    }
+
     /// Run  on the message-loop thread with the shell token. None in dev
     /// mode (nothing session-wide may be touched) or when the loop has stopped.
     pub fn run_on_loop<T, F>(&self, f: F) -> Option<tokio::sync::oneshot::Receiver<T>>

@@ -8,6 +8,7 @@ pub mod error;
 pub mod files;
 pub mod hotkeys;
 pub mod icons;
+pub mod known_folders;
 pub mod launch;
 pub mod mode;
 pub mod msgloop;

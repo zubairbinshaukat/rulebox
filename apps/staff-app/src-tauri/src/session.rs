@@ -85,6 +85,17 @@ fn open_files(state: &AppState, files_root: &str, quota_bytes: u64) {
     }
 }
 
+/// Send Documents, Desktop and Downloads of the Windows account into the
+/// employee's folder (shell mode only; a no-op in dev mode). Needs the files
+/// session, so it follows `open_files`; without one nothing is redirected.
+/// Blocks briefly: callers run it on a worker thread.
+fn redirect_known_folders(state: &AppState) {
+    let Some(session) = state.files().session() else {
+        return;
+    };
+    crate::known_folders::redirect_for_employee(state.app_handle().as_ref(), session.root());
+}
+
 /// Apply a successful or failed sign-in outcome to `AppState`.
 pub fn apply_sign_in_outcome(state: &AppState, outcome: SignInOutcome) -> Result<(), CommandError> {
     match outcome {
@@ -97,6 +108,7 @@ pub fn apply_sign_in_outcome(state: &AppState, outcome: SignInOutcome) -> Result
                 tracing::warn!(%error, "could not save last-user.json");
             }
             open_files(state, &files_root, employee.quota_bytes);
+            redirect_known_folders(state);
             state.set_files_root(Some(files_root));
             let theme = crate::system::theme_for_sign_in(
                 state.org_theme(),
@@ -187,7 +199,13 @@ pub async fn sign_in(
         }
     };
 
-    apply_sign_in_outcome(state, outcome.clone())?;
+    // On a worker thread: opening the folder and redirecting the Windows
+    // known folders touch the disk and the registry.
+    let applying = state.clone();
+    let applied = outcome.clone();
+    tauri::async_runtime::spawn_blocking(move || apply_sign_in_outcome(&applying, applied))
+        .await
+        .map_err(|error| CommandError::Failed(error.to_string()))??;
 
     if matches!(outcome, SignInOutcome::Ok { .. }) {
         load_catalogue(state).await;
@@ -511,6 +529,9 @@ impl SignOutOps for LiveSignOut<'_> {
         // watcher and any running search. (The file clipboard lives in the
         // Files window, which log out closes.)
         self.state.files().sign_out();
+        // Documents, Desktop and Downloads go back to the account's own
+        // folders. A failure is logged inside and never stops log out.
+        crate::known_folders::restore(self.state.app_handle().as_ref());
         self.state.set_files_root(None);
         self.state.update(|shell| {
             shell.notices.clear();

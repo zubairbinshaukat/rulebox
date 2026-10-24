@@ -5,6 +5,7 @@ pub mod appwin;
 pub mod commands;
 pub mod exit;
 pub mod files;
+pub mod known_folders;
 pub mod launcher;
 mod logging;
 pub mod model;
@@ -212,6 +213,10 @@ pub fn run() {
             app.manage(std::sync::Arc::new(webapp::WebApps::default()));
             let host = shellwin::init(app.handle(), mode, services.clone())?;
             app.manage(host);
+            // Nobody is signed in yet. If the app died while someone was,
+            // their folder is still Documents, Desktop and Downloads: undo it.
+            let startup = app.handle().clone();
+            tauri::async_runtime::spawn_blocking(move || known_folders::restore(Some(&startup)));
             tracing::info!(?mode, "shell windows ready");
             Ok(())
         });
