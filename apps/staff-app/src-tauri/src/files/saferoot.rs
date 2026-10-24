@@ -9,6 +9,7 @@
 use std::io::{self, Read};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU32, Ordering};
+use std::sync::Mutex;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use cap_std::ambient_authority;
@@ -22,6 +23,8 @@ use super::names::{self, NameRule};
 const MAX_DEPTH: usize = 64;
 const TRASH_DIR: &str = ".rulebox-trash";
 const TRASH_INDEX: &str = "index.json";
+/// Where a new index is written before it replaces the real one.
+const TRASH_INDEX_TMP: &str = "index.json.tmp";
 
 #[derive(Serialize, Clone, Debug, PartialEq, Eq, thiserror::Error, TS)]
 #[serde(tag = "kind", rename_all = "camelCase")]
@@ -230,10 +233,33 @@ fn unique_name(dir: &Dir, name: &str, is_dir: bool) -> Result<String> {
     Err(FileError::Exists)
 }
 
+/// Create an empty file named `name` (or the first free `name (n)`) and return
+/// the name it got. Never overwrites and never follows a link.
+fn reserve_name(dir: &Dir, name: &str) -> Result<String> {
+    let mut options = OpenOptions::new();
+    options.write(true).create_new(true);
+    for n in 0..10_000 {
+        let candidate = if n == 0 {
+            name.to_string()
+        } else {
+            names::numbered(name, n, false)
+        };
+        names::check_component(&candidate).map_err(|rule| FileError::InvalidName { rule })?;
+        match dir.open_with(&candidate, &options) {
+            Ok(_claimed) => return Ok(candidate),
+            Err(error) if error.kind() == io::ErrorKind::AlreadyExists => {}
+            Err(error) => return Err(error.into()),
+        }
+    }
+    Err(FileError::Exists)
+}
+
 pub struct SafeRoot {
     dir: Dir,
     /// Canonical, without the `\\?\` prefix.
     root: PathBuf,
+    /// Serialises the trash operations (see `trash_guard`).
+    trash_lock: Mutex<()>,
 }
 
 impl SafeRoot {
@@ -245,6 +271,7 @@ impl SafeRoot {
         Ok(SafeRoot {
             dir,
             root: canonical,
+            trash_lock: Mutex::new(()),
         })
     }
 
@@ -417,11 +444,13 @@ impl SafeRoot {
         to_dir.join(&name)
     }
 
-    /// A name that is free in `dir`: `name`, else `name (1)`, `name (2)`...
-    /// (for downloads: the browser would overwrite).
-    pub fn free_name_in(&self, dir: &RelPath, name: &str) -> Result<String> {
+    /// Claim a name in `dir` by creating an empty file under it: `name`, else
+    /// `name (1)`, `name (2)`... Checking for a free name and creating the file
+    /// are one step (`create_new`), so two downloads with the same name can
+    /// never be handed the same one; the browser then fills the claimed file.
+    pub fn reserve_name_in(&self, dir: &RelPath, name: &str) -> Result<String> {
         let handle = self.open_dir_at(dir)?;
-        unique_name(&handle, name, false)
+        reserve_name(&handle, name)
     }
 
     /// Remove one file for good, without the trash. For files the shell itself
@@ -478,6 +507,12 @@ impl SafeRoot {
         Ok(Some(self.dir.open_dir(TRASH_DIR)?))
     }
 
+    /// One trash operation at a time: a half-finished `trash` (slot folder made,
+    /// index not yet written) must never be mistaken for an orphan.
+    fn trash_guard(&self) -> std::sync::MutexGuard<'_, ()> {
+        self.trash_lock.lock().unwrap_or_else(|e| e.into_inner())
+    }
+
     fn read_index(trash: &Dir) -> Vec<TrashItem> {
         trash
             .read(TRASH_INDEX)
@@ -486,18 +521,69 @@ impl SafeRoot {
             .unwrap_or_default()
     }
 
+    /// The index as it really is: entries whose payload is gone are dropped,
+    /// payload folders the index does not know (a crash between the move and
+    /// the index write, or a damaged index) are adopted so the employee can
+    /// still restore or delete them, empty ones are removed. Writes the index
+    /// back when anything changed. Call with the trash guard held.
+    fn load_index(trash: &Dir) -> Vec<TrashItem> {
+        let stored = Self::read_index(trash);
+        let stored_len = stored.len();
+        let mut items: Vec<TrashItem> = Vec::with_capacity(stored_len);
+        for item in stored {
+            let known = items.iter().any(|kept| kept.id == item.id);
+            if !known && is_slot_id(&item.id) && payload_present(trash, &item) {
+                items.push(item);
+            }
+        }
+        let mut changed = items.len() != stored_len;
+        if let Ok(entries) = trash.entries() {
+            for entry in entries.flatten() {
+                let Ok(id) = entry.file_name().into_string() else {
+                    continue;
+                };
+                if !is_slot_id(&id) || items.iter().any(|kept| kept.id == id) {
+                    continue;
+                }
+                let Ok(meta) = entry.metadata() else { continue };
+                if is_link(&meta) || !meta.is_dir() {
+                    continue;
+                }
+                if let Some(adopted) = adopt_orphan(trash, &id, &meta) {
+                    items.push(adopted);
+                    changed = true;
+                }
+            }
+        }
+        // A leftover from an interrupted index write.
+        if trash.symlink_metadata(TRASH_INDEX_TMP).is_ok() {
+            let _ = trash.remove_file(TRASH_INDEX_TMP);
+        }
+        if changed {
+            let _ = Self::write_index(trash, &items);
+        }
+        items
+    }
+
+    /// Write the index to a temporary file in the same folder, then replace the
+    /// real one: a crash leaves the old index or the new one, never half of one.
     fn write_index(trash: &Dir, items: &[TrashItem]) -> Result<()> {
         let bytes = serde_json::to_vec(items).map_err(|e| FileError::Io {
             message: e.to_string(),
         })?;
-        trash.write(TRASH_INDEX, bytes)?;
+        trash.write(TRASH_INDEX_TMP, bytes)?;
+        if let Err(error) = trash.rename(TRASH_INDEX_TMP, trash, TRASH_INDEX) {
+            let _ = trash.remove_file(TRASH_INDEX_TMP);
+            return Err(error.into());
+        }
         Ok(())
     }
 
     pub fn trash_list(&self) -> Vec<TrashItem> {
+        let _guard = self.trash_guard();
         match self.trash_dir(false) {
             Ok(Some(trash)) => {
-                let mut items = Self::read_index(&trash);
+                let mut items = Self::load_index(&trash);
                 items.sort_by_key(|item| std::cmp::Reverse(item.deleted_ms));
                 items
             }
@@ -513,12 +599,16 @@ impl SafeRoot {
         }
         let size = self.tree_size(path)?;
         let (parent, leaf) = self.parent_and_leaf(path)?;
+        let _guard = self.trash_guard();
         let trash = self.trash_dir(true)?.ok_or(FileError::NotFound)?;
+        // Before the new slot exists, so it cannot be taken for an orphan.
+        let mut items = Self::load_index(&trash);
         static SEQ: AtomicU32 = AtomicU32::new(0);
         let id = format!("{:x}{:03x}", now_ms(), SEQ.fetch_add(1, Ordering::Relaxed) & 0xfff);
         trash.create_dir(&id)?;
         let slot = trash.open_dir(&id)?;
         if let Err(error) = parent.rename(leaf, &slot, leaf) {
+            drop(slot);
             let _ = trash.remove_dir(&id);
             return Err(error.into());
         }
@@ -530,10 +620,10 @@ impl SafeRoot {
             size,
             deleted_ms: now_ms(),
         };
-        let mut items = Self::read_index(&trash);
         items.push(item.clone());
         if let Err(error) = Self::write_index(&trash, &items) {
             let _ = slot.rename(leaf, &parent, leaf);
+            drop(slot);
             let _ = trash.remove_dir(&item.id);
             return Err(error);
         }
@@ -543,8 +633,9 @@ impl SafeRoot {
     /// Back to where it was. When the folder is gone it lands in the root;
     /// when the name is taken it is numbered.
     pub fn restore(&self, id: &str) -> Result<RelPath> {
+        let _guard = self.trash_guard();
         let trash = self.trash_dir(false)?.ok_or(FileError::NotFound)?;
-        let mut items = Self::read_index(&trash);
+        let mut items = Self::load_index(&trash);
         let position = items.iter().position(|i| i.id == id).ok_or(FileError::NotFound)?;
         let item = items[position].clone();
         let original = RelPath::parse(&item.original).unwrap_or_default();
@@ -555,6 +646,8 @@ impl SafeRoot {
         let name = unique_name(&dest_dir, &item.name, item.is_folder)?;
         let slot = trash.open_dir(&item.id)?;
         slot.rename(&item.name, &dest_dir, &name)?;
+        // Windows will not remove a folder this code still holds open.
+        drop(slot);
         let _ = trash.remove_dir(&item.id);
         items.remove(position);
         Self::write_index(&trash, &items)?;
@@ -562,24 +655,45 @@ impl SafeRoot {
     }
 
     /// Delete for good: one item, or everything (`None`). Returns the bytes freed.
+    ///
+    /// An item that cannot be removed (a file open in another program, say)
+    /// stays in the trash and in the index, so it is still listed, still counted
+    /// and can be tried again; the call then returns an error after having
+    /// removed everything else it could.
     pub fn purge(&self, id: Option<&str>) -> Result<u64> {
+        let _guard = self.trash_guard();
         let Some(trash) = self.trash_dir(false)? else {
             return Ok(0);
         };
-        let mut items = Self::read_index(&trash);
-        let mut freed = 0;
-        let (gone, kept): (Vec<_>, Vec<_>) = items
-            .drain(..)
+        let items = Self::load_index(&trash);
+        let (gone, mut kept): (Vec<_>, Vec<_>) = items
+            .into_iter()
             .partition(|item| id.is_none_or(|wanted| wanted == item.id));
         if id.is_some() && gone.is_empty() {
             return Err(FileError::NotFound);
         }
-        for item in &gone {
-            if trash.remove_dir_all(&item.id).is_ok() {
-                freed += item.size;
+        let mut freed = 0;
+        let mut failed = 0usize;
+        for item in gone {
+            match trash.remove_dir_all(&item.id) {
+                Ok(()) => freed += item.size,
+                Err(error) if error.kind() == io::ErrorKind::NotFound => freed += item.size,
+                Err(_) => {
+                    failed += 1;
+                    kept.push(item);
+                }
             }
         }
         Self::write_index(&trash, &kept)?;
+        if failed > 0 {
+            return Err(FileError::Io {
+                message: if failed == 1 {
+                    "One item could not be deleted. It may be open in another program.".into()
+                } else {
+                    format!("{failed} items could not be deleted. They may be open in another program.")
+                },
+            });
+        }
         Ok(freed)
     }
 
@@ -595,7 +709,6 @@ impl SafeRoot {
             .filter_map(|id| self.purge(Some(id)).ok())
             .sum()
     }
-
     // ---- Search -------------------------------------------------------
 
     /// Case-insensitive substring on names, breadth first. Stops at `cap`
@@ -665,6 +778,61 @@ impl SafeRoot {
         }
         Ok(simple)
     }
+}
+
+/// A trash slot folder is named by its id: lower-case hex, as `trash` makes it.
+fn is_slot_id(name: &str) -> bool {
+    !name.is_empty() && name.len() <= 32 && name.chars().all(|c| c.is_ascii_hexdigit())
+}
+
+/// Is the indexed item's file or folder still in its slot?
+fn payload_present(trash: &Dir, item: &TrashItem) -> bool {
+    let Ok(slot) = trash.open_dir(&item.id) else {
+        return false;
+    };
+    slot.symlink_metadata(&item.name).is_ok_and(|meta| !is_link(&meta))
+}
+
+/// A slot the index does not list. One with exactly one valid entry becomes a
+/// trash item again (its old location is lost, so it restores to the root);
+/// an empty one is removed; anything else is left alone.
+fn adopt_orphan(trash: &Dir, id: &str, slot_meta: &Metadata) -> Option<TrashItem> {
+    let slot = trash.open_dir(id).ok()?;
+    let mut found = slot.entries().ok()?.flatten();
+    let Some(first) = found.next() else {
+        // Windows will not remove a folder this code still holds open.
+        drop(found);
+        drop(slot);
+        let _ = trash.remove_dir(id);
+        return None;
+    };
+    if found.next().is_some() {
+        return None;
+    }
+    let name = first.file_name().into_string().ok()?;
+    names::check_component(&name).ok()?;
+    let meta = first.metadata().ok()?;
+    if is_link(&meta) || !(meta.is_dir() || meta.is_file()) {
+        return None;
+    }
+    let is_folder = meta.is_dir();
+    let size = if is_folder {
+        dir_size(&slot.open_dir(&name).ok()?, 0)
+    } else {
+        meta.len()
+    };
+    Some(TrashItem {
+        id: id.to_string(),
+        original: name.clone(),
+        name,
+        is_folder,
+        size,
+        // The move into the trash is the last thing that changed the slot.
+        deleted_ms: match modified_ms(slot_meta) {
+            0 => now_ms(),
+            known => known,
+        },
+    })
 }
 
 /// Case-insensitive "is `path` inside `root`", by whole components.

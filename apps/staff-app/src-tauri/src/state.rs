@@ -406,6 +406,18 @@ fn apply_snapshot(state: &AppState, snap: Option<rulebox_ipc::types::AgentSnapsh
         return;
     }
 
+    // "Open with" and handler launches read this table; it follows every snapshot.
+    if let Some(ref snap) = snap {
+        let handlers = snap
+            .desired_state
+            .as_ref()
+            .map(crate::files::openwith::handlers_from_desired)
+            .unwrap_or_default();
+        if handlers != state.files().handlers() {
+            state.files().set_handlers(handlers);
+        }
+    }
+
     state.update(|s| {
         match snap {
             Some(ref snap) => {

@@ -364,6 +364,35 @@ fn downloads_land_in_the_downloads_folder_and_never_overwrite() {
     let _ = FileError::NotFound;
 }
 
+#[test]
+fn simultaneous_downloads_of_one_name_get_different_files() {
+    let temp = TempRoot::new("dest-race");
+    let root = Arc::new(SafeRoot::open(temp.path()).unwrap());
+    // Nobody writes anything: a name is claimed the moment it is handed out.
+    let workers: Vec<_> = (0..16)
+        .map(|_| {
+            let root = Arc::clone(&root);
+            std::thread::spawn(move || destination(&root, "report.pdf").unwrap())
+        })
+        .collect();
+    let mut paths: Vec<PathBuf> = workers.into_iter().map(|w| w.join().unwrap()).collect();
+    paths.sort();
+    paths.dedup();
+    assert_eq!(paths.len(), 16, "every download got its own file name");
+    assert!(paths.iter().all(|p| p.is_file()), "each name is already claimed on disk");
+    assert!(paths.contains(&root.root_path().join("Downloads").join("report.pdf")));
+    assert!(paths.contains(&root.root_path().join("Downloads").join("report (15).pdf")));
+}
+
+#[test]
+fn the_first_navigation_target_is_only_about_blank() {
+    let blank = tauri::Url::parse(blocked::BLANK).unwrap();
+    assert!(blocked::is_blank_page(&blank));
+    for other in ["about:blank#x", "about:blank?x", "about:srcdoc", "https://example.com/", "data:text/html,x"] {
+        assert!(!blocked::is_blank_page(&tauri::Url::parse(other).unwrap()), "{other}");
+    }
+}
+
 fn session(temp: &TempRoot, quota: u64) -> Arc<FileSession> {
     FileSession::open(temp.path(), quota, Arc::new(|_, _| {})).unwrap()
 }

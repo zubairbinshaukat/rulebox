@@ -13,6 +13,23 @@ use crate::model::{AppKind, DesktopApp};
 use crate::state::AppState;
 use crate::tasks::TaskServices;
 
+/// The `fileHandlers` table of a desired state, ready for
+/// `FilesHub::set_handlers`: extension (lower-case, with the dot) to catalogue
+/// app id. Entries without an app, or whose extension is empty, are dropped.
+/// Whether the app exists, is a desktop app or is on the deny-list is decided
+/// when a file is opened, not here.
+pub fn handlers_from_desired(desired: &rulebox_policy::DesiredState) -> BTreeMap<String, String> {
+    desired
+        .file_handlers
+        .iter()
+        .filter_map(|(extension, app_id)| {
+            let bare = extension.trim().trim_start_matches('.').to_lowercase();
+            let app_id = app_id.trim();
+            (!bare.is_empty() && !app_id.is_empty()).then(|| (format!(".{bare}"), app_id.to_string()))
+        })
+        .collect()
+}
+
 /// The app `fileHandlers` names for this file, unless the type is on the
 /// deny-list. A built-in viewer does not matter here: "Open with" is a
 /// separate action from "Open".

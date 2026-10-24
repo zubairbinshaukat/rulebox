@@ -11,7 +11,7 @@
 
 use std::sync::Arc;
 
-use tauri::WebviewWindow;
+use tauri::{Url, WebviewWindow};
 use webview2_com::Microsoft::Web::WebView2::Win32::{
     ICoreWebView2, ICoreWebView2Controller, ICoreWebView2PermissionRequestedEventArgs3, ICoreWebView2Settings3,
     ICoreWebView2Settings4, ICoreWebView2_18, ICoreWebView2_24, ICoreWebView2_27, ICoreWebView2_3, COREWEBVIEW2_PERMISSION_KIND,
@@ -55,13 +55,21 @@ fn kind_of(raw: COREWEBVIEW2_PERMISSION_KIND) -> PermissionKind {
 /// Fails closed: when the hooks cannot be installed the window is destroyed,
 /// because without them the page runs with WebView2's defaults (permission
 /// prompts, frames from any host).
-pub fn install(window: &WebviewWindow, context: Arc<HookContext>) {
+///
+/// The window is built at `about:blank`. Only after every hook is in place does
+/// this same closure send it to `start`, so the first real page is already
+/// hardened (no gap between the first navigation and the hooks).
+pub fn install(window: &WebviewWindow, context: Arc<HookContext>, start: Url) {
     let label = window.label().to_string();
     let doomed = window.clone();
     let result = window.with_webview(move |platform| {
         // SAFETY: the controller is valid for the duration of this call, and
         // every handler below only holds `Arc`s and clones of COM interfaces.
-        if let Err(error) = unsafe { setup(&platform.controller(), &context) } {
+        let controller = platform.controller();
+        let outcome = unsafe { setup(&controller, &context) }
+            // SAFETY: as above; `Navigate` is called on the UI thread, which this closure runs on.
+            .and_then(|()| unsafe { navigate(&controller, &start) });
+        if let Err(error) = outcome {
             tracing::error!(%error, "web app hooks could not be installed; closing the window");
             context.state.notify(
                 NoticeTone::Warning,
@@ -108,6 +116,12 @@ pub fn set_suspended(window: &WebviewWindow, suspended: bool) {
             }
         }
     });
+}
+
+/// Send the (hardened) window to its first real address.
+unsafe fn navigate(controller: &ICoreWebView2Controller, start: &Url) -> windows::core::Result<()> {
+    let target = windows::core::HSTRING::from(start.as_str());
+    unsafe { controller.CoreWebView2()?.Navigate(&target) }
 }
 
 unsafe fn setup(controller: &ICoreWebView2Controller, context: &Arc<HookContext>) -> windows::core::Result<()> {

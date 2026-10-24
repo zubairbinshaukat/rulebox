@@ -22,6 +22,14 @@ pub fn is_blocked_page(url: &Url) -> bool {
         && url.path() == "/"
 }
 
+/// The empty page a web window is built at, before its hooks are installed.
+pub const BLANK: &str = "about:blank";
+
+/// Exactly `about:blank` (no fragment, no query), nothing that merely starts with it.
+pub fn is_blank_page(url: &Url) -> bool {
+    url.as_str() == BLANK
+}
+
 /// The address of the page for `host`, with a link back to `back`.
 pub fn blocked_url(host: &str, back: &str) -> Option<Url> {
     let mut url = Url::parse(&format!("http://{HOST}/")).ok()?;

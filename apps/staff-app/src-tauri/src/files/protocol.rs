@@ -16,10 +16,16 @@ use super::types::{check_content, content_type};
 use super::FileSession;
 use crate::state::AppState;
 
-/// Most bytes in one `206` response.
-pub const MAX_RANGE: u64 = 2 * 1024 * 1024;
-/// Without a `Range` the whole file is sent, so big ones must ask for ranges.
-pub const MAX_WHOLE: u64 = 64 * 1024 * 1024;
+/// Most bytes in one `206` response: media and PDF readers ask again for the
+/// next piece, so a response body is never bigger than this.
+pub const MAX_RANGE: u64 = 4 * 1024 * 1024;
+/// Without a `Range` the whole file is sent when it is at most this big. It
+/// equals the size limit of the Office previews (`preview::OFFICE_MAX_BYTES`),
+/// the largest reader that fetches a file in one piece, and also covers the
+/// pictures an `<img>` loads without ranges. A bigger file asked for without
+/// `Range` gets only its first `MAX_RANGE` bytes, as a `206` that names the
+/// full size, so one request never holds more than this in memory.
+pub const MAX_WHOLE: u64 = super::preview::OFFICE_MAX_BYTES;
 
 const OWN_ORIGINS: &[&str] = &[
     "http://tauri.localhost",
@@ -104,6 +110,16 @@ fn parse_range(header: &str, size: u64) -> Option<(u64, u64)> {
         (start, end) => (start.parse().ok()?, end.parse::<u64>().ok()?.min(size.checked_sub(1)?)),
     };
     (start <= end && start < size).then_some((start, end))
+}
+
+/// The last byte to send for a request without `Range`, and whether the file
+/// was too big to send whole (so the answer is a `206`). Pure.
+pub fn whole_file_span(size: u64) -> (u64, bool) {
+    if size > MAX_WHOLE {
+        (MAX_RANGE - 1, true)
+    } else {
+        (size.saturating_sub(1), false)
+    }
 }
 
 fn with_cors(mut reply: Reply, origin: Option<&str>) -> Reply {
@@ -192,12 +208,16 @@ fn serve(session: Option<&FileSession>, request: &Request<'_>) -> Reply {
                 return reply;
             }
         },
-        None => {
-            if size > MAX_WHOLE {
-                return Reply::status(413);
+        None => match whole_file_span(size) {
+            (end, true) => {
+                reply.status = 206;
+                reply
+                    .headers
+                    .push(("Content-Range", format!("bytes 0-{end}/{size}")));
+                (0, end)
             }
-            (0, size.saturating_sub(1))
-        }
+            (end, false) => (0, end),
+        },
     };
     let length = if size == 0 { 0 } else { end - start + 1 };
     reply.headers.push(("Content-Length", length.to_string()));

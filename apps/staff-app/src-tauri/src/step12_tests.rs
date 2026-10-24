@@ -310,6 +310,124 @@ fn trash_restore_purge_and_expiry() {
     assert_eq!(root.purge_expired(rulebox_staff_lib::files::saferoot::now_ms() + 31 * day, 30 * day), 5);
 }
 
+fn trash_dir(temp: &TempRoot) -> PathBuf {
+    temp.join(".rulebox-trash")
+}
+
+#[test]
+fn the_trash_index_is_replaced_atomically() {
+    let temp = TempRoot::new("trash-atomic");
+    std::fs::write(temp.join("a.txt"), b"a").unwrap();
+    std::fs::write(temp.join("b.txt"), b"bb").unwrap();
+    let root = SafeRoot::open(temp.path()).unwrap();
+    root.trash(&rel("a.txt")).unwrap();
+    root.trash(&rel("b.txt")).unwrap();
+    let dir = trash_dir(&temp);
+    assert!(!dir.join("index.json.tmp").exists(), "the temporary file is renamed away");
+    let index: Vec<serde_json::Value> = serde_json::from_slice(&std::fs::read(dir.join("index.json")).unwrap()).unwrap();
+    assert_eq!(index.len(), 2);
+    // A temporary file left by an interrupted write never replaces the real
+    // index; it is cleaned up and the items are all still there.
+    std::fs::write(dir.join("index.json.tmp"), b"[{ half a wri").unwrap();
+    assert_eq!(root.trash_list().len(), 2);
+    assert!(!dir.join("index.json.tmp").exists());
+    // Writing over an existing index works every time (rename replaces).
+    for _ in 0..3 {
+        std::fs::write(temp.join("c.txt"), b"c").unwrap();
+        let item = root.trash(&rel("c.txt")).unwrap();
+        root.restore(&item.id).unwrap();
+    }
+    assert_eq!(root.trash_list().len(), 2);
+}
+
+#[test]
+fn orphaned_trash_items_are_adopted_and_stale_entries_dropped() {
+    let temp = TempRoot::new("trash-orphans");
+    std::fs::write(temp.join("a.txt"), b"hello").unwrap();
+    std::fs::write(temp.join("b.txt"), b"bb").unwrap();
+    std::fs::create_dir(temp.join("pics")).unwrap();
+    std::fs::write(temp.join("pics/p.png"), vec![0u8; 100]).unwrap();
+    let root = SafeRoot::open(temp.path()).unwrap();
+    let a = root.trash(&rel("a.txt")).unwrap();
+    let b = root.trash(&rel("b.txt")).unwrap();
+    root.trash(&rel("pics")).unwrap();
+    let dir = trash_dir(&temp);
+
+    // The index is lost: the payloads are found again instead of lingering, uncounted by the list.
+    std::fs::remove_file(dir.join("index.json")).unwrap();
+    let list = root.trash_list();
+    assert_eq!(list.len(), 3, "{list:?}");
+    let adopted = list.iter().find(|i| i.id == a.id).unwrap();
+    assert_eq!((adopted.name.as_str(), adopted.original.as_str(), adopted.size), ("a.txt", "a.txt", 5));
+    let pics = list.iter().find(|i| i.name == "pics").unwrap();
+    assert!(pics.is_folder && pics.size == 100);
+    assert_eq!(root.used_bytes(), 5 + 2 + 100);
+
+    // A damaged index is treated the same way.
+    std::fs::write(dir.join("index.json"), b"this is not json").unwrap();
+    assert_eq!(root.trash_list().len(), 3);
+
+    // An entry whose payload is gone is dropped, not listed forever.
+    std::fs::remove_dir_all(dir.join(&b.id)).unwrap();
+    let list = root.trash_list();
+    assert_eq!(list.len(), 2);
+    assert!(list.iter().all(|i| i.id != b.id));
+    let index: Vec<serde_json::Value> = serde_json::from_slice(&std::fs::read(dir.join("index.json")).unwrap()).unwrap();
+    assert_eq!(index.len(), 2, "the cleaned index was written back");
+
+    // An empty slot is removed; folders that are not slots are left alone.
+    std::fs::create_dir(dir.join("abc123")).unwrap();
+    std::fs::create_dir(dir.join("keepme")).unwrap();
+    assert_eq!(root.trash_list().len(), 2);
+    assert!(!dir.join("abc123").exists());
+    assert!(dir.join("keepme").exists());
+
+    // An adopted item restores to the root and can be deleted for good.
+    assert_eq!(root.restore(&a.id).unwrap(), rel("a.txt"));
+    assert_eq!(std::fs::read(temp.join("a.txt")).unwrap(), b"hello");
+    assert!(!dir.join(&a.id).exists(), "the emptied slot is removed");
+    assert_eq!(root.purge(None).unwrap(), 100);
+    assert!(root.trash_list().is_empty());
+}
+
+#[test]
+fn purge_keeps_an_item_it_could_not_remove() {
+    use std::os::windows::fs::OpenOptionsExt;
+    let temp = TempRoot::new("trash-purge-fail");
+    std::fs::create_dir(temp.join("pics")).unwrap();
+    std::fs::write(temp.join("pics/p.png"), vec![0u8; 100]).unwrap();
+    std::fs::write(temp.join("pics/q.png"), vec![0u8; 50]).unwrap();
+    std::fs::write(temp.join("plain.txt"), b"12345").unwrap();
+    let root = SafeRoot::open(temp.path()).unwrap();
+    let pics = root.trash(&rel("pics")).unwrap();
+    let plain = root.trash(&rel("plain.txt")).unwrap();
+
+    // Another program holds a file in the trash open without sharing: Windows refuses to delete it.
+    let held = std::fs::OpenOptions::new()
+        .read(true)
+        .share_mode(0)
+        .open(trash_dir(&temp).join(&pics.id).join("pics").join("q.png"))
+        .unwrap();
+
+    // Emptying the trash removes what it can, reports the failure, and keeps the stuck item.
+    let result = root.purge(None);
+    assert!(matches!(result, Err(FileError::Io { .. })), "{result:?}");
+    let left = root.trash_list();
+    assert_eq!(left.len(), 1, "{left:?}");
+    assert_eq!(left[0].id, pics.id);
+    assert!(!trash_dir(&temp).join(&plain.id).exists(), "the other item is gone");
+    // One item, asked for by id, fails the same way and stays.
+    assert!(matches!(root.purge(Some(&pics.id)), Err(FileError::Io { .. })));
+    assert_eq!(root.trash_list().len(), 1);
+
+    // Once the other program lets go, it can be deleted and nothing lingers.
+    drop(held);
+    assert!(root.purge(Some(&pics.id)).is_ok());
+    assert!(root.trash_list().is_empty());
+    assert!(!trash_dir(&temp).join(&pics.id).exists());
+    assert_eq!(root.used_bytes(), 0);
+}
+
 #[test]
 fn listing_sorts_folders_first_and_hides_internal_and_odd_names() {
     let temp = TempRoot::new("list");
@@ -451,6 +569,30 @@ fn open_with_builds_one_whole_file_argument() {
     assert_eq!(handler_app_id("a.xyz", &h), None);
 }
 
+#[test]
+fn file_handlers_come_from_the_desired_state() {
+    use rulebox_staff_lib::files::openwith::handlers_from_desired;
+    let mut desired = rulebox_policy::DesiredState::enrollment_default();
+    assert!(handlers_from_desired(&desired).is_empty());
+    desired.file_handlers = BTreeMap::from([
+        (".DOCX".to_string(), "libreoffice".to_string()),
+        ("mkv".to_string(), " vlc ".to_string()),
+        (".".to_string(), "x".to_string()),
+        (".odt".to_string(), String::new()),
+    ]);
+    let handlers = handlers_from_desired(&desired);
+    assert_eq!(
+        handlers,
+        BTreeMap::from([
+            (".docx".to_string(), "libreoffice".to_string()),
+            (".mkv".to_string(), "vlc".to_string()),
+        ])
+    );
+    // The table feeds the same lookup "Open with" uses.
+    assert_eq!(handler_app_id("memo.docx", &handlers).as_deref(), Some("libreoffice"));
+    assert_eq!(handler_app_id("clip.MKV", &handlers).as_deref(), Some("vlc"));
+}
+
 // ---------------------------------------------------------------------------
 // Test 8: the rbfile protocol.
 // ---------------------------------------------------------------------------
@@ -464,7 +606,7 @@ fn header<'a>(reply: &'a Reply, name: &str) -> Option<&'a str> {
 }
 
 fn protocol_session(temp: &TempRoot) -> Arc<FileSession> {
-    let big: Vec<u8> = (0..3 * 1024 * 1024).map(|n| (n % 251) as u8).collect();
+    let big: Vec<u8> = (0..5 * 1024 * 1024).map(|n| (n % 251) as u8).collect();
     std::fs::write(temp.join("big.mp4"), &big).unwrap();
     std::fs::write(temp.join("note.txt"), "hello").unwrap();
     std::fs::write(temp.join("page.html"), "<b>x</b>").unwrap();
@@ -516,20 +658,53 @@ fn protocol_shapes_200_206_416() {
 }
 
 #[test]
-fn a_three_mib_range_request_is_capped() {
+fn a_five_mib_range_request_is_capped() {
+    assert_eq!(MAX_RANGE, 4 * 1024 * 1024);
     let temp = TempRoot::new("proto-cap");
     let session = protocol_session(&temp);
     let s = Some(session.as_ref());
     let first = respond(s, &get("/big.mp4", Some("bytes=0-")));
     assert_eq!(first.status, 206);
     assert_eq!(first.body.len() as u64, MAX_RANGE);
-    let expected = format!("bytes 0-{}/{}", MAX_RANGE - 1, 3 * 1024 * 1024);
+    let expected = format!("bytes 0-{}/{}", MAX_RANGE - 1, 5 * 1024 * 1024);
     assert_eq!(header(&first, "Content-Range"), Some(expected.as_str()));
-    let explicit = respond(s, &get("/big.mp4", Some("bytes=0-3145727")));
+    let explicit = respond(s, &get("/big.mp4", Some("bytes=0-5242879")));
     assert_eq!(explicit.body.len() as u64, MAX_RANGE);
-    let rest = respond(s, &get("/big.mp4", Some("bytes=2097152-")));
+    let rest = respond(s, &get("/big.mp4", Some("bytes=4194304-")));
     assert_eq!(rest.body.len(), 1024 * 1024);
-    assert_eq!(rest.body[0], (2_097_152usize % 251) as u8, "the right bytes, not the first ones");
+    assert_eq!(rest.body[0], (4_194_304usize % 251) as u8, "the right bytes, not the first ones");
+    // Seeking into the middle (a media player or PDF.js) still works.
+    let middle = respond(s, &get("/big.mp4", Some("bytes=1000000-1000009")));
+    assert_eq!((middle.status, middle.body.len()), (206, 10));
+    assert_eq!(middle.body[0], (1_000_000usize % 251) as u8);
+}
+
+#[test]
+fn a_big_file_asked_for_without_a_range_gets_a_bounded_206() {
+    use rulebox_staff_lib::files::protocol::{whole_file_span, MAX_WHOLE};
+    // The pure rule: whole up to the limit, the first piece beyond it.
+    assert_eq!(whole_file_span(0), (0, false));
+    assert_eq!(whole_file_span(10), (9, false));
+    assert_eq!(whole_file_span(MAX_WHOLE), (MAX_WHOLE - 1, false));
+    assert_eq!(whole_file_span(MAX_WHOLE + 1), (MAX_RANGE - 1, true));
+    assert_eq!(MAX_WHOLE, preview::OFFICE_MAX_BYTES, "the Office previews fetch a whole file");
+
+    let temp = TempRoot::new("proto-whole");
+    let size = MAX_WHOLE + 1024;
+    let file = std::fs::File::create(temp.join("huge.mp4")).unwrap();
+    file.set_len(size).unwrap();
+    drop(file);
+    let session = open_session(&temp, 0);
+    let s = Some(session.as_ref());
+    let reply = respond(s, &get("/huge.mp4", None));
+    assert_eq!(reply.status, 206);
+    assert_eq!(reply.body.len() as u64, MAX_RANGE, "never more than one range in memory");
+    let expected = format!("bytes 0-{}/{size}", MAX_RANGE - 1);
+    assert_eq!(header(&reply, "Content-Range"), Some(expected.as_str()));
+    assert_eq!(header(&reply, "Accept-Ranges"), Some("bytes"));
+    // HEAD agrees with GET.
+    let head = respond(s, &Request { method: "HEAD", ..get("/huge.mp4", None) });
+    assert_eq!((head.status, head.body.len()), (206, 0));
 }
 
 #[test]
@@ -754,7 +929,7 @@ fn streaming_search_sends_batches_and_a_final_done() {
         assert_eq!(event, "files://search");
         let _ = tx.lock().unwrap().send(payload);
     });
-    s.start_search(7, "match".into(), send);
+    s.start_search("app-0", 7, "match".into(), send);
     let (mut total, mut batches) = (0, 0);
     loop {
         let message = rx.recv_timeout(Duration::from_secs(5)).expect("search finished");
@@ -767,6 +942,59 @@ fn streaming_search_sends_batches_and_a_final_done() {
     }
     assert_eq!(total, 95);
     assert!(batches >= 3, "40 + 40 + 15: {batches}");
+}
+
+#[test]
+fn one_windows_search_does_not_cancel_another_windows_search() {
+    let temp = TempRoot::new("search-scope");
+    for n in 0..95 {
+        std::fs::write(temp.join(&format!("match-{n:03}.txt")), "x").unwrap();
+    }
+    let s = open_session(&temp, 0);
+    let (tx, rx) = std::sync::mpsc::channel();
+    let tx = std::sync::Mutex::new(tx);
+    // Window A's first batch is held back until window B has started its own search.
+    let (release, gate) = std::sync::mpsc::channel::<()>();
+    let gate = std::sync::Mutex::new(Some(gate));
+    let send_a: rulebox_staff_lib::files::Emit = Arc::new(move |_, payload| {
+        if let Some(gate) = gate.lock().unwrap().take() {
+            let _ = gate.recv_timeout(Duration::from_secs(5));
+        }
+        let _ = tx.lock().unwrap().send(payload);
+    });
+    s.start_search("app-1", 1, "match".into(), send_a);
+    // B searches and then clears its box (an empty query): both would have cancelled A before.
+    s.start_search("shell-popup", 2, "match".into(), Arc::new(|_, _| {}));
+    s.start_search("shell-popup", 3, String::new(), Arc::new(|_, _| {}));
+    release.send(()).unwrap();
+    let mut total = 0;
+    loop {
+        let message = rx.recv_timeout(Duration::from_secs(5)).expect("window A's search finished");
+        assert_eq!(message["searchId"], 1);
+        total += message["hits"].as_array().unwrap().len();
+        if message["done"] == true {
+            break;
+        }
+    }
+    assert_eq!(total, 95);
+
+    // The same window starting a newer search does cancel its own older one.
+    let (tx, rx) = std::sync::mpsc::channel();
+    let tx = std::sync::Mutex::new(tx);
+    let (release, gate) = std::sync::mpsc::channel::<()>();
+    let gate = std::sync::Mutex::new(Some(gate));
+    let old: rulebox_staff_lib::files::Emit = Arc::new(move |_, payload| {
+        if let Some(gate) = gate.lock().unwrap().take() {
+            let _ = gate.recv_timeout(Duration::from_secs(5));
+        }
+        let _ = tx.lock().unwrap().send(payload);
+    });
+    s.start_search("app-1", 10, "match".into(), old);
+    s.start_search("app-1", 11, "match".into(), Arc::new(|_, _| {}));
+    release.send(()).unwrap();
+    while let Ok(message) = rx.recv_timeout(Duration::from_millis(800)) {
+        assert_ne!(message["done"], true, "the superseded search must not finish");
+    }
 }
 
 #[test]
@@ -871,6 +1099,50 @@ fn a_zip_bomb_is_refused_before_a_viewer_sees_it() {
     std::fs::write(temp.join("junk.docx"), b"not a zip").unwrap();
     let junk = std::fs::File::open(temp.join("junk.docx")).unwrap();
     assert_eq!(preview::office_precheck(junk), Err(FileError::Damaged));
+}
+
+/// Patch the uncompressed size in the central directory of a one-entry zip, so
+/// the archive claims to be smaller than it unpacks.
+fn lie_about_the_size(path: &Path, claimed: u32) {
+    let mut bytes = std::fs::read(path).unwrap();
+    let at = bytes.windows(4).rposition(|w| w == [0x50, 0x4b, 0x01, 0x02]).expect("central directory");
+    bytes[at + 24..at + 28].copy_from_slice(&claimed.to_le_bytes());
+    std::fs::write(path, bytes).unwrap();
+}
+
+#[test]
+fn the_zip_check_counts_real_bytes_not_the_sizes_the_archive_declares() {
+    let temp = TempRoot::new("zip-lie");
+    // 4 MB of zeros unpack from a few KB. The archive says "100 bytes".
+    zip_with(1, 4 * 1024 * 1024, &temp.join("liar.docx"));
+    lie_about_the_size(&temp.join("liar.docx"), 100);
+    let limit = 1024 * 1024;
+    let declared_only = {
+        let mut archive = zip::ZipArchive::new(std::fs::File::open(temp.join("liar.docx")).unwrap()).unwrap();
+        let size = archive.by_index_raw(0).unwrap().size();
+        size
+    };
+    assert_eq!(declared_only, 100, "the declared size is a lie");
+    let result = preview::check_archive(std::fs::File::open(temp.join("liar.docx")).unwrap(), 10, limit);
+    assert!(
+        matches!(result, Err(FileError::TooLarge | FileError::Damaged)),
+        "a lying header must not get through: {result:?}"
+    );
+    // An honest archive of the same size passes with a big enough limit and fails with a small one.
+    zip_with(1, 4 * 1024 * 1024, &temp.join("honest.docx"));
+    let open = || std::fs::File::open(temp.join("honest.docx")).unwrap();
+    assert_eq!(preview::check_archive(open(), 10, 8 * 1024 * 1024), Ok(()));
+    assert_eq!(preview::check_archive(open(), 10, limit), Err(FileError::TooLarge));
+}
+
+#[test]
+fn the_bounded_reader_stops_one_byte_past_the_limit() {
+    let endless = std::io::repeat(7);
+    assert_eq!(preview::drain_bounded(Cursor::new(vec![0u8; 10]), 10), Ok(10));
+    assert_eq!(preview::drain_bounded(Cursor::new(vec![0u8; 11]), 10), Err(FileError::TooLarge));
+    // An endless source ends at the limit instead of running forever.
+    assert_eq!(preview::drain_bounded(endless, 1000), Err(FileError::TooLarge));
+    assert_eq!(preview::drain_bounded(Cursor::new(Vec::new()), 0), Ok(0));
 }
 
 #[test]

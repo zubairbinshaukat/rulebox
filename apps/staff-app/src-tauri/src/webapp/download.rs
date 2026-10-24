@@ -71,7 +71,11 @@ fn shorten(name: &str) -> String {
 }
 
 /// `<root>\Downloads\<name>`, numbered (`name (1).ext`) when taken, because
-/// WebView2 would overwrite. Creates the folder when it is missing.
+/// WebView2 would overwrite. Creates the folder when it is missing. The name
+/// is claimed by creating the empty file right here, in one atomic step, so
+/// two downloads of the same name get two different files. The caller removes
+/// the file again if the download does not go ahead (a failed download is
+/// removed by `finish`).
 pub fn destination(root: &SafeRoot, name: &str) -> Result<PathBuf, FileError> {
     let folder = RelPath::parse(DOWNLOADS)?;
     match root.mkdir(&folder) {
@@ -79,7 +83,7 @@ pub fn destination(root: &SafeRoot, name: &str) -> Result<PathBuf, FileError> {
         Err(other) => return Err(other),
     }
     let clean = clean_download_name(name);
-    let target = root.free_name_in(&folder, &clean)?;
+    let target = root.reserve_name_in(&folder, &clean)?;
     Ok(root.root_path().join(DOWNLOADS).join(target))
 }
 

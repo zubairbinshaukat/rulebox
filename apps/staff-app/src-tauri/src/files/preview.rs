@@ -104,19 +104,46 @@ pub fn office_precheck(file: std::fs::File) -> Result<(), FileError> {
     if file.metadata()?.len() > OFFICE_MAX_BYTES {
         return Err(FileError::TooLarge);
     }
+    check_archive(file, ZIP_MAX_ENTRIES, ZIP_MAX_UNPACKED)
+}
+
+/// The zip checks with the limits as parameters. The sizes an archive declares
+/// are only a hint (a hostile file can state 1 KB and unpack to gigabytes), so
+/// the declared total is a cheap first filter and the real limit is enforced on
+/// the bytes that actually come out of the decompressor, through a bounded
+/// reader that stops one byte past what is left of the budget.
+pub fn check_archive(file: impl Read + std::io::Seek, max_entries: usize, max_unpacked: u64) -> Result<(), FileError> {
     let mut archive = zip::ZipArchive::new(file).map_err(|_| FileError::Damaged)?;
-    if archive.len() > ZIP_MAX_ENTRIES {
+    if archive.len() > max_entries {
         return Err(FileError::TooLarge);
     }
-    let mut unpacked: u64 = 0;
+    let mut declared: u64 = 0;
     for index in 0..archive.len() {
         let entry = archive.by_index_raw(index).map_err(|_| FileError::Damaged)?;
-        unpacked = unpacked.saturating_add(entry.size());
-        if unpacked > ZIP_MAX_UNPACKED {
+        declared = declared.saturating_add(entry.size());
+        if declared > max_unpacked {
             return Err(FileError::TooLarge);
         }
     }
+    let mut unpacked: u64 = 0;
+    for index in 0..archive.len() {
+        let entry = archive.by_index(index).map_err(|_| FileError::Damaged)?;
+        let left = max_unpacked - unpacked;
+        let read = drain_bounded(entry, left)?;
+        unpacked += read;
+    }
     Ok(())
+}
+
+/// Read `reader` to its end into nowhere, and fail with `TooLarge` as soon as
+/// more than `limit` bytes have come out. Returns the bytes read.
+pub fn drain_bounded(reader: impl Read, limit: u64) -> Result<u64, FileError> {
+    let read = std::io::copy(&mut reader.take(limit.saturating_add(1)), &mut std::io::sink())
+        .map_err(|_| FileError::Damaged)?;
+    if read > limit {
+        return Err(FileError::TooLarge);
+    }
+    Ok(read)
 }
 
 /// Pixel size from the header alone; over 40 megapixels is `TooLarge`.

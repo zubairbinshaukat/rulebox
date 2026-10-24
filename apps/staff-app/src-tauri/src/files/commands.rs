@@ -205,7 +205,8 @@ pub async fn fs_usage(window: Window, state: State<'_, AppState>) -> Result<Usag
 }
 
 /// Starts a search. Batches arrive as `files://search { searchId, hits, done }`
-/// on the calling window. A newer search, or an empty query, cancels this one.
+/// on the calling window. A newer search from that window, or an empty query
+/// from it, cancels this one; other windows' searches are not affected.
 #[tauri::command]
 pub async fn fs_search(
     window: Window,
@@ -220,7 +221,7 @@ pub async fn fs_search(
         // Only to the window that asked: `emit` on a window reaches all of them.
         let _ = target.emit_to(target.label(), event, payload);
     });
-    session.start_search(search_id, query, send);
+    session.start_search(window.label(), search_id, query, send);
     Ok(())
 }
 

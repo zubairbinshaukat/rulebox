@@ -12,6 +12,7 @@ pub mod permissions;
 
 use std::collections::HashMap;
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 
 use rulebox_desktop::placement::scale_px;
@@ -38,6 +39,8 @@ pub struct WebWindow {
     pub permissions: WebPermissions,
     /// The last allowed address shown: where "Go back" on the blocked page leads.
     last_allowed: Mutex<String>,
+    /// The window is built at `about:blank`; that one navigation is let through.
+    initial_blank: AtomicBool,
 }
 
 impl WebWindow {
@@ -49,6 +52,12 @@ impl WebWindow {
 
     fn last_allowed(&self) -> String {
         self.last_allowed.lock().map(|slot| slot.clone()).unwrap_or_default()
+    }
+
+    /// True once, for the `about:blank` the window is built at. A page that
+    /// sends itself to `about:blank` later is treated like any other address.
+    fn take_initial_blank(&self, url: &Url) -> bool {
+        blocked::is_blank_page(url) && self.initial_blank.swap(false, Ordering::SeqCst)
     }
 }
 
@@ -138,9 +147,14 @@ impl WebApps {
             allow,
             permissions: web.permissions,
             last_allowed: Mutex::new(start.to_string()),
+            initial_blank: AtomicBool::new(true),
         });
 
-        let window = build_window(app, state, &info, start, data_dir, web)?;
+        // The window starts on `about:blank`, never on the app's address: the
+        // hardening hooks are installed first, and only then does the same UI-thread
+        // call that installed them send the window to `start`. If the hooks cannot
+        // be installed the page is never loaded at all.
+        let window = build_window(app, state, &info, data_dir, web)?;
         if let Ok(mut inner) = self.inner.lock() {
             inner.windows.insert(label.clone(), Arc::clone(&info));
         }
@@ -151,6 +165,7 @@ impl WebApps {
                 window: Arc::clone(&info),
                 state: state.clone(),
             }),
+            start,
         );
 
         let mode = state.read(|shell| match shell.mode {
@@ -190,7 +205,6 @@ fn build_window(
     app: &AppHandle,
     state: &AppState,
     info: &Arc<WebWindow>,
-    start: Url,
     data_dir: PathBuf,
     web: &WebApp,
 ) -> Result<WebviewWindow, String> {
@@ -202,7 +216,7 @@ fn build_window(
     let download_state = state.clone();
     let _ = web;
 
-    WebviewWindowBuilder::new(app, &info.label, WebviewUrl::External(start))
+    WebviewWindowBuilder::new(app, &info.label, WebviewUrl::External(blank_page()?))
         .title(&info.app_name)
         // The page gets a normal title bar; there is no Rulebox chrome around a site.
         .decorations(true)
@@ -231,9 +245,14 @@ fn build_window(
         .map_err(|error| format!("create {}: {error}", info.label))
 }
 
+/// The page every web window is built at, before its hooks exist.
+fn blank_page() -> Result<Url, String> {
+    Url::parse(blocked::BLANK).map_err(|error| error.to_string())
+}
+
 /// `true` lets the navigation go on. A refused address shows the blocked page instead.
 fn gate_navigation(app: &AppHandle, info: &Arc<WebWindow>, url: &Url) -> bool {
-    if blocked::is_blocked_page(url) {
+    if blocked::is_blocked_page(url) || info.take_initial_blank(url) {
         return true;
     }
     if info.allow.allows_url(url) {
@@ -309,28 +328,37 @@ fn handle_download(state: &AppState, info: &Arc<WebWindow>, event: DownloadEvent
             let (Some(session), Some(path)) = (session, path) else {
                 return true;
             };
-            match download::finish(&session, &path, success) {
-                download::Finished::Saved { name } => {
-                    state.notify(NoticeTone::Success, format!("Saved {name}"), Some(info.app_name.clone()))
-                }
-                download::Finished::RemovedUnsafe { name } => state.notify(
-                    NoticeTone::Warning,
-                    format!("{name} was removed."),
-                    Some("This type of file can't be kept on this PC.".into()),
-                ),
-                download::Finished::RemovedOverQuota { name } => state.notify(
-                    NoticeTone::Warning,
-                    format!("{name} was removed."),
-                    Some("Storage is full. Delete files to save new ones.".into()),
-                ),
-                download::Finished::Failed => {
-                    state.notify(NoticeTone::Warning, "The download did not finish.", Some(info.app_name.clone()))
-                }
-                download::Finished::Misplaced => tracing::warn!("a download finished outside the employee's folder"),
-            }
+            // This handler runs on the WebView2 thread. The content check and the
+            // folder re-count read the disk, so they run on a worker instead and
+            // the window never waits for them.
+            let state = state.clone();
+            let app_name = info.app_name.clone();
+            tauri::async_runtime::spawn_blocking(move || {
+                announce(&state, &app_name, download::finish(&session, &path, success));
+            });
             true
         }
         _ => true,
+    }
+}
+
+/// Tell the employee how a finished download ended.
+fn announce(state: &AppState, app_name: &str, finished: download::Finished) {
+    let app = Some(app_name.to_string());
+    match finished {
+        download::Finished::Saved { name } => state.notify(NoticeTone::Success, format!("Saved {name}"), app),
+        download::Finished::RemovedUnsafe { name } => state.notify(
+            NoticeTone::Warning,
+            format!("{name} was removed."),
+            Some("This type of file can't be kept on this PC.".into()),
+        ),
+        download::Finished::RemovedOverQuota { name } => state.notify(
+            NoticeTone::Warning,
+            format!("{name} was removed."),
+            Some("Storage is full. Delete files to save new ones.".into()),
+        ),
+        download::Finished::Failed => state.notify(NoticeTone::Warning, "The download did not finish.", app),
+        download::Finished::Misplaced => tracing::warn!("a download finished outside the employee's folder"),
     }
 }
 

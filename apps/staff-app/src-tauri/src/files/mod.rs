@@ -11,7 +11,7 @@ pub mod quota;
 pub mod saferoot;
 pub mod types;
 
-use std::collections::{BTreeMap, VecDeque};
+use std::collections::{BTreeMap, HashMap, VecDeque};
 use std::path::Path;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, RwLock, Weak};
@@ -99,7 +99,7 @@ pub struct FileSession {
     emit: Emit,
     recent: Mutex<VecDeque<String>>,
     clipboard: Mutex<Option<Clip>>,
-    search_gen: AtomicU64,
+    searches: Searches,
     scan_busy: AtomicBool,
     scan_dirty: AtomicBool,
     watch: Mutex<Option<Watch>>,
@@ -118,7 +118,7 @@ impl FileSession {
             emit,
             recent: Mutex::new(VecDeque::new()),
             clipboard: Mutex::new(None),
-            search_gen: AtomicU64::new(0),
+            searches: Searches::default(),
             scan_busy: AtomicBool::new(false),
             scan_dirty: AtomicBool::new(false),
             watch: Mutex::new(None),
@@ -247,12 +247,17 @@ impl FileSession {
     /// To the trash, or gone for good when `permanent`.
     pub fn delete(self: &Arc<Self>, path: &RelPath, permanent: bool) -> Result<(), FileError> {
         let item = self.root.trash(path)?;
-        if permanent {
-            self.root.purge(Some(&item.id))?;
+        let purged = if permanent {
+            // Whatever happened, the folder changed and the count must be redone.
+            let result = self.root.purge(Some(&item.id));
             self.request_scan();
-        }
+            result.map(|_| ())
+        } else {
+            Ok(())
+        };
         self.emit_changed(&path.parent().as_string());
-        Ok(())
+        // A failure here leaves the item in the trash, where it can be tried again.
+        purged
     }
 
     pub fn restore(&self, id: &str) -> Result<RelPath, FileError> {
@@ -265,9 +270,10 @@ impl FileSession {
     }
 
     pub fn purge(self: &Arc<Self>, id: Option<&str>) -> Result<(), FileError> {
-        self.root.purge(id)?;
+        // Even a partly failed purge freed something: count again either way.
+        let result = self.root.purge(id);
         self.request_scan();
-        Ok(())
+        result.map(|_| ())
     }
 
     pub fn trash_list(&self) -> Vec<TrashItem> {
@@ -364,15 +370,18 @@ impl FileSession {
     }
 
     /// Starts a search on a worker and streams `files://search` batches to
-    /// `send`. A newer search, or an empty query, cancels this one.
-    pub fn start_search(self: &Arc<Self>, search_id: u64, query: String, send: Emit) {
-        let generation = self.search_gen.fetch_add(1, Ordering::SeqCst) + 1;
+    /// `send`. A newer search from the same window (`label`), or an empty
+    /// query, cancels this one; another window's searches are never touched.
+    pub fn start_search(self: &Arc<Self>, label: &str, search_id: u64, query: String, send: Emit) {
+        let (counter, generation) = self.searches.begin(label);
         if query.trim().is_empty() {
+            self.searches.finish(label, &counter, generation);
             return;
         }
         let session = Arc::clone(self);
+        let label = label.to_string();
         std::thread::spawn(move || {
-            let cancelled = || session.search_gen.load(Ordering::SeqCst) != generation;
+            let cancelled = || counter.load(Ordering::SeqCst) != generation;
             let mut batch: Vec<Entry> = Vec::new();
             let flush = |batch: &mut Vec<Entry>, done: bool| {
                 send(
@@ -392,7 +401,35 @@ impl FileSession {
             if !cancelled() {
                 flush(&mut batch, true);
             }
+            session.searches.finish(&label, &counter, generation);
         });
+    }
+}
+
+/// Which search of each window is the current one. A search checks its own
+/// window's counter, so one window starting or clearing a search never cancels
+/// another window's.
+#[derive(Default)]
+struct Searches {
+    by_window: Mutex<HashMap<String, Arc<AtomicU64>>>,
+}
+
+impl Searches {
+    /// Supersede the window's running search; returns its counter and the
+    /// generation the new search must still see to stay alive.
+    fn begin(&self, label: &str) -> (Arc<AtomicU64>, u64) {
+        let mut map = self.by_window.lock().unwrap_or_else(|e| e.into_inner());
+        let counter = Arc::clone(map.entry(label.to_string()).or_default());
+        let generation = counter.fetch_add(1, Ordering::SeqCst) + 1;
+        (counter, generation)
+    }
+
+    /// Forget the window's entry once its latest search is over.
+    fn finish(&self, label: &str, counter: &Arc<AtomicU64>, generation: u64) {
+        let mut map = self.by_window.lock().unwrap_or_else(|e| e.into_inner());
+        if counter.load(Ordering::SeqCst) == generation {
+            map.remove(label);
+        }
     }
 }
 
