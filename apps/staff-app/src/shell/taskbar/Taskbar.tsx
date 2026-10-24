@@ -1,14 +1,15 @@
-import { useRef } from "react";
+import { useRef, type CSSProperties } from "react";
 import gsap from "gsap";
 import { Flip } from "gsap/Flip";
 import { useGSAP } from "@gsap/react";
-import { Avatar, LogoMark, Surface } from "@rulebox/ui";
+import { Avatar, LogoMark } from "@rulebox/ui";
 import type { AppEntry, TaskItem } from "@rulebox/types";
 import IconBell from "~icons/solar/bell-bold-duotone";
 
 import { useMotionLevel } from "../../lib/motion";
 import { useShell } from "../../lib/store";
 import { anchorOf, call, isTauri } from "../../lib/tauri";
+import { hueFor } from "../appArt";
 import { AppIcon } from "../appIcon";
 import { clickTarget, groupTaskbar, labelOf, stateOf } from "./grouping";
 import { TaskButton, WindowIcon } from "./TaskButton";
@@ -144,6 +145,12 @@ export function Taskbar() {
     }
   };
 
+  const closePopup = () => {
+    if (inTauri) {
+      void call("popup_close", {});
+    }
+  };
+
   return (
     <div
       style={{
@@ -154,24 +161,9 @@ export function Taskbar() {
         color: "var(--rb-ink)",
       }}
     >
-      <Surface
-        kind="bar"
-        onPointerDown={() => {
-          if (inTauri) {
-            void call("popup_close", {});
-          }
-        }}
-        style={{
-          height: "var(--rb-taskbar)",
-          display: "flex",
-          alignItems: "center",
-          padding: "0 8px",
-          gap: 4,
-          minWidth: 0,
-        }}
-      >
+      <div className="rb-taskbar" onPointerDown={closePopup}>
         {signedIn ? (
-          <>
+          <div className="rb-dock rb-dock--start">
             <button
               ref={start}
               type="button"
@@ -182,25 +174,17 @@ export function Taskbar() {
               onClick={openStart}
             >
               <span className="rb-task__icon">
-                <LogoMark size={28} compact />
+                <LogoMark size={30} compact />
               </span>
             </button>
-            <span className="rb-task-divider" aria-hidden />
-            <div
-              ref={row}
-              style={{
-                flex: 1,
-                minWidth: 0,
-                display: "flex",
-                alignItems: "center",
-                gap: 4,
-                overflowX: "auto",
-                overflowY: "hidden",
-                scrollbarWidth: "none",
-              }}
-            >
+          </div>
+        ) : (
+          <div />
+        )}
+        {signedIn ? (
+          <div ref={row} className="rb-dock rb-dock--apps">
               {buttons.length === 0 ? (
-                <span style={{ padding: "0 8px", color: "var(--rb-muted)", fontSize: 13.5 }}>
+                <span style={{ padding: "0 10px", color: "var(--rb-muted)", fontSize: 13.5 }}>
                   Open an app to get started
                 </span>
               ) : null}
@@ -211,7 +195,7 @@ export function Taskbar() {
                     flipId={button.key}
                     label={labelOf(button.app.name, button.tasks)}
                     state={stateOf(button.tasks)}
-                    icon={<AppIcon app={button.app} />}
+                    icon={<AppArt app={button.app} />}
                     onClick={() => clickPinned(button.app, button.tasks)}
                     onHover={(element) => showPreview(clickTarget(button.tasks), element)}
                     onHoverEnd={hidePreview}
@@ -226,7 +210,11 @@ export function Taskbar() {
                     flipId={button.key}
                     label={labelOf(button.task.title || "Untitled window", [button.task])}
                     state={stateOf([button.task])}
-                    icon={<WindowIcon iconKey={button.task.iconKey} enabled={inTauri} />}
+                    icon={
+                      <span className="rb-task__art rb-task__art--image">
+                        <WindowIcon iconKey={button.task.iconKey} enabled={inTauri} />
+                      </span>
+                    }
                     onClick={() => {
                       if (inTauri) {
                         void call("task_click", { id: button.task.id });
@@ -238,44 +226,57 @@ export function Taskbar() {
                   />
                 ),
               )}
-            </div>
-            {employeeName ? (
-              <button
-                type="button"
-                className="rb-task"
-                aria-label="Notices"
-                title="Notices"
-                onPointerDown={(event) => event.stopPropagation()}
-                onClick={(event) => openQuick(event.currentTarget)}
-              >
-                <span className="rb-task__icon">
-                  <IconBell width={22} height={22} />
-                </span>
-                {unread > 0 ? (
-                  <span className="rb-task__count">{unread > 9 ? "9+" : unread}</span>
-                ) : null}
-              </button>
-            ) : null}
-          </>
+          </div>
         ) : (
-          <div style={{ flex: 1 }} />
+          <div />
         )}
-        <SystemArea />
-        <Clock />
-        {signedIn && employeeName ? (
-          <button
-            type="button"
-            className="rb-task"
-            aria-label="Account"
-            title={employeeName}
-            style={{ width: "auto", padding: "0 8px", gap: 8 }}
-            onPointerDown={(event) => event.stopPropagation()}
-            onClick={(event) => openAccount(event.currentTarget)}
-          >
-            <Avatar name={employeeName} size={28} />
-          </button>
-        ) : null}
-      </Surface>
+        <div className="rb-dock rb-dock--tray">
+          {signedIn && employeeName ? (
+            <button
+              type="button"
+              className="rb-chip rb-chip--icon"
+              aria-label={unread > 0 ? `Notices, ${unread} new` : "Notices"}
+              title="Notices"
+              onPointerDown={(event) => event.stopPropagation()}
+              onClick={(event) => openQuick(event.currentTarget)}
+            >
+              <IconBell width={20} height={20} />
+              {unread > 0 ? <span className="rb-chip__dot" aria-hidden /> : null}
+            </button>
+          ) : null}
+          <SystemArea />
+          <Clock />
+          {signedIn && employeeName ? (
+            <button
+              type="button"
+              className="rb-tray-button"
+              aria-label="Account"
+              title={employeeName}
+              onPointerDown={(event) => event.stopPropagation()}
+              onClick={(event) => openAccount(event.currentTarget)}
+            >
+              <Avatar name={employeeName} size={40} />
+            </button>
+          ) : null}
+        </div>
+      </div>
     </div>
+  );
+}
+
+/** A catalogue app's art on its taskbar button: its own icon, or its Solar glyph in colour. */
+function AppArt({ app }: { app: AppEntry }) {
+  const style = { ["--rb-hue" as string]: hueFor(app) } as CSSProperties;
+  if (app.iconUrl) {
+    return (
+      <span className="rb-task__art rb-task__art--image" style={style}>
+        <img src={app.iconUrl} alt="" draggable={false} />
+      </span>
+    );
+  }
+  return (
+    <span className="rb-task__art rb-task__art--glyph" style={style}>
+      <AppIcon app={app} />
+    </span>
   );
 }

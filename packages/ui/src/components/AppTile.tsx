@@ -43,20 +43,23 @@ export function AppTile({
   ...rest
 }: AppTileProps) {
   const art = imageSrc ? "image" : glyph ? "glyph" : "tint";
-  const iconStyle: CSSProperties | undefined =
-    hue !== undefined ? ({ ["--rb-hue" as string]: hue } as CSSProperties) : undefined;
+  // On the card itself, so the art, its corner copy and the glow share it.
+  const tileStyle: CSSProperties | undefined =
+    hue !== undefined ? ({ ["--rb-hue" as string]: hue, ...style } as CSSProperties) : style;
   const cls = ["rb-tile", `rb-tile--${size}`, className ?? ""].filter(Boolean).join(" ");
   const count = badge && badge > 0 ? (badge > 99 ? "99+" : String(badge)) : null;
 
   return (
-    <button type={type} className={cls} title={description} style={style} {...rest}>
-      {imageSrc ? (
-        <span className="rb-tile__clip" aria-hidden>
+    <button type={type} className={cls} title={description} style={tileStyle} {...rest}>
+      <span className="rb-tile__clip" aria-hidden>
+        {art === "image" ? (
           <img className="rb-tile__mark" src={imageSrc} alt="" draggable={false} />
-        </span>
-      ) : null}
+        ) : art === "glyph" ? (
+          <span className="rb-tile__mark rb-tile__mark--glyph">{glyph}</span>
+        ) : null}
+      </span>
       <span className="rb-tile__top">
-        <span className={`rb-tile__icon rb-tile__icon--${art}`} style={iconStyle} aria-hidden>
+        <span className={`rb-tile__icon rb-tile__icon--${art}`} aria-hidden>
           {art === "image" ? (
             <img className="rb-tile__img" src={imageSrc} alt="" draggable={false} />
           ) : art === "glyph" ? (

@@ -59,8 +59,9 @@ export function ShellRoot() {
   );
 }
 
-// The popup window is transparent: only its rounded panel may paint.
-if (routeOf(window.location.hash) === "popup") {
+// The popup and taskbar windows are transparent: only their rounded panels
+// paint, so the desktop shows around them.
+if (routeOf(window.location.hash) !== "desktop") {
   document.documentElement.classList.add("rb-page-transparent");
 }
 

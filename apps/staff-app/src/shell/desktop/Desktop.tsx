@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import type { Employee, ShellState } from "@rulebox/types";
+import { Backdrop } from "@rulebox/ui";
 
 import { call } from "../../lib/tauri";
 import { AppGrid } from "./AppGrid";
@@ -58,7 +59,8 @@ export function Desktop({ shell, employee }: DesktopProps) {
         boxSizing: "border-box",
       }}
     >
-      <header style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+      <Backdrop />
+      <header style={{ display: "flex", flexDirection: "column", gap: 6, position: "relative", zIndex: 1 }}>
         <div
           style={{
             display: "flex",
@@ -99,7 +101,7 @@ export function Desktop({ shell, employee }: DesktopProps) {
         </h1>
       </header>
 
-      <div style={{ flex: 1, minHeight: 0, display: "flex", gap: 24 }}>
+      <div style={{ flex: 1, minHeight: 0, display: "flex", gap: 24, position: "relative", zIndex: 1 }}>
         <AppGrid
           apps={shell.apps.items}
           tasks={shell.tasks}

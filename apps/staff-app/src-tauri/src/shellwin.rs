@@ -259,7 +259,8 @@ struct Spec {
     always_on_top: bool,
     focusable: bool,
     focused: bool,
-    /// Only the popup: its rounded panel must not sit on a square of page colour.
+    /// The popup and the taskbar: their rounded panels must not sit on a
+    /// strip or square of page colour.
     transparent: bool,
 }
 
@@ -312,7 +313,8 @@ fn create_windows(app: &AppHandle, host: &Arc<DesktopHost>) -> Result<(), String
             always_on_top: shell,
             focusable: false,
             focused: false,
-            transparent: false,
+            // Its three pills float over the desktop.
+            transparent: true,
         },
     )?;
     let popup = build_window(
