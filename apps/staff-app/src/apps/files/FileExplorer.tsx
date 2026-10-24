@@ -781,8 +781,8 @@ export function FileExplorer({ initialPath = "" }: FileExplorerProps) {
           </div>
 
           {section !== "trash" ? (
-            <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-              <div style={{ position: "relative", width: 200, flexShrink: 0 }}>
+            <div style={toolbarControls}>
+              <div style={{ position: "relative", flex: "0 1 200px", minWidth: 110 }}>
                 <span aria-hidden style={searchIcon}>
                   <IconMagnifier width={14} height={14} />
                 </span>
@@ -982,6 +982,18 @@ const toolbar: CSSProperties = {
   minHeight: 48,
   flexShrink: 0,
   gap: 4,
+  // A narrow window puts the controls on a second row instead of cutting them off.
+  flexWrap: "wrap",
+  rowGap: 8,
+};
+
+const toolbarControls: CSSProperties = {
+  display: "flex",
+  alignItems: "center",
+  justifyContent: "flex-end",
+  gap: 8,
+  flex: "1 1 auto",
+  minWidth: 0,
 };
 
 const centered: CSSProperties = {

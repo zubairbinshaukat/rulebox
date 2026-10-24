@@ -253,6 +253,8 @@ struct Spec {
     always_on_top: bool,
     focusable: bool,
     focused: bool,
+    /// Only the popup: its rounded panel must not sit on a square of page colour.
+    transparent: bool,
 }
 
 fn build_window(app: &AppHandle, spec: &Spec) -> Result<WebviewWindow, String> {
@@ -265,6 +267,7 @@ fn build_window(app: &AppHandle, spec: &Spec) -> Result<WebviewWindow, String> {
         .always_on_top(spec.always_on_top)
         .focusable(spec.focusable)
         .focused(spec.focused)
+        .transparent(spec.transparent)
         // Created hidden, placed in physical pixels, then shown: the builder's
         // own position is logical and would flash at the wrong scale.
         .visible(false)
@@ -289,6 +292,7 @@ fn create_windows(app: &AppHandle, host: &Arc<DesktopHost>) -> Result<(), String
             always_on_top: false,
             focusable: true,
             focused: true,
+            transparent: false,
         },
     )?;
     let taskbar = build_window(
@@ -302,6 +306,7 @@ fn create_windows(app: &AppHandle, host: &Arc<DesktopHost>) -> Result<(), String
             always_on_top: shell,
             focusable: false,
             focused: false,
+            transparent: false,
         },
     )?;
     let popup = build_window(
@@ -315,6 +320,7 @@ fn create_windows(app: &AppHandle, host: &Arc<DesktopHost>) -> Result<(), String
             always_on_top: true,
             focusable: true,
             focused: false,
+            transparent: true,
         },
     )?;
 
@@ -337,6 +343,35 @@ fn create_windows(app: &AppHandle, host: &Arc<DesktopHost>) -> Result<(), String
     wire_events(&taskbar, host, WindowRole::Taskbar);
     wire_events(&popup, host, WindowRole::Popup);
     Ok(())
+}
+
+/// When, and which, popup last closed because it lost the focus.
+static LAST_FOCUS_LOSS: std::sync::Mutex<Option<(std::time::Instant, PopupKind)>> = std::sync::Mutex::new(None);
+
+/// How long after a focus-loss close a Start key press still counts as the one
+/// that caused it. Holding the Windows key can take the focus from the popup
+/// first (seen on the VM), and the release then asks for a toggle that finds
+/// Start already closed.
+const FOCUS_LOSS_GRACE: std::time::Duration = std::time::Duration::from_millis(1500);
+
+fn note_focus_loss(kind: PopupKind) {
+    if let Ok(mut last) = LAST_FOCUS_LOSS.lock() {
+        *last = Some((std::time::Instant::now(), kind));
+    }
+}
+
+/// True when `kind` was closed by a focus loss a moment ago (consumes the note).
+pub fn just_lost_focus(kind: PopupKind) -> bool {
+    let Ok(mut last) = LAST_FOCUS_LOSS.lock() else {
+        return false;
+    };
+    match *last {
+        Some((at, was)) if was == kind && at.elapsed() < FOCUS_LOSS_GRACE => {
+            *last = None;
+            true
+        }
+        _ => false,
+    }
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -369,6 +404,11 @@ fn wire_events(window: &WebviewWindow, host: &Arc<DesktopHost>, role: WindowRole
             }
         }
         WindowEvent::Focused(false) if role == WindowRole::Popup => {
+            // Only a focus loss while the Windows key is held is that key's
+            // doing; a click elsewhere must not eat the next press.
+            if let Some(kind) = host.popup_kind().filter(|_| rulebox_desktop::winkey::win_key_down()) {
+                note_focus_loss(kind);
+            }
             hide_popup(&handle, &host);
         }
         WindowEvent::ScaleFactorChanged { .. } => host.request_reapply(),
@@ -568,13 +608,17 @@ pub fn popup_open(
         placement::scale_px(height, monitor.scale),
     );
     let gap = placement::scale_px(POPUP_GAP_LOGICAL, monitor.scale);
-    // Switching menus (Start → confirm) keeps the bottom edge, so the panel
-    // stays by the taskbar instead of jumping to the corner.
-    let switching = host
-        .popup
-        .lock()
-        .unwrap_or_else(|e| e.into_inner())
-        .is_some();
+    let side = placement::scale_px(placement::POPUP_SIDE_LOGICAL, monitor.scale);
+    // A confirm opened from a menu (Start or account → confirm) keeps that
+    // menu's place, so the panel stays where it was instead of jumping to the
+    // corner. Anything else opens in its own place: the Windows key pressed
+    // over the account menu opens Start on the left, not by the clock.
+    let switching = kind == PopupKind::Confirm
+        && host
+            .popup
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .is_some();
     let rect = if kind == PopupKind::Switcher {
         placement::centered_rect(size, bounds)
     } else if anchor.is_none() && switching {
@@ -584,10 +628,10 @@ pub fn popup_open(
                 let raw = Rect::new(pos.x, bottom - size.1, pos.x + size.0, bottom);
                 placement::clamp_into(raw, bounds)
             }
-            _ => popup_rect(size, anchor, bounds, gap),
+            _ => popup_rect(size, anchor, bounds, gap, side),
         }
     } else {
-        popup_rect(size, anchor, bounds, gap)
+        popup_rect(size, anchor, bounds, gap, side)
     };
     place(&popup, rect);
 

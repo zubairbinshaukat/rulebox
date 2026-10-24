@@ -408,7 +408,7 @@ unsafe extern "system" fn wndproc(
             return Some(LRESULT(0));
         }
         if msg == crate::winkey::WM_WINKEY_START {
-            // The lone Windows key: the same action as Ctrl+Esc.
+            // The lone Windows key, posted by the hook helper process.
             state.send(DesktopEvent::Hotkey(HotkeyId::START));
             return Some(LRESULT(0));
         }

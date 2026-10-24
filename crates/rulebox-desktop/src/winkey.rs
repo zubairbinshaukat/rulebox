@@ -16,36 +16,71 @@
 //!   reacts to a lone Windows key anyway, so every event is passed on.
 //! * The callback does flag updates and one `PostMessageW`, nothing else.
 //!
+//! **The hook runs in a helper process**, the same exe started with
+//! [`HELPER_SWITCH`]. Windows does not call a low-level keyboard hook whose
+//! process owns the foreground window (seen on the VM: with a Rulebox window
+//! in front the hook got no key at all, unless another program's hook sat
+//! ahead of it in the chain). The shell owns the foreground most of the
+//! time, so the hook lives in a windowless child that never does. The child
+//! posts [`WM_WINKEY_START`] to the shell's message window and ends when the
+//! shell process or that window is gone. The exe's `main` must call
+//! [`helper_main`] before anything else.
+//!
 //! The decision logic is [`WinKeyState::step`], a pure function over key
 //! events, tested with recorded sequences. Shell mode only (needs a `ShellToken`).
 
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
+use std::ffi::OsString;
+use std::os::windows::process::CommandExt;
+use std::process::{Child, Command, Stdio};
 use std::sync::atomic::{AtomicBool, AtomicIsize, AtomicU32, Ordering};
-use std::sync::Mutex;
-use std::time::Instant;
+use std::sync::{mpsc, Mutex};
+use std::thread::JoinHandle;
+use std::time::{Duration, Instant};
 
-use windows::Win32::Foundation::{HINSTANCE, HWND, LPARAM, LRESULT, WPARAM};
+use windows::Win32::Foundation::{CloseHandle, HINSTANCE, HWND, LPARAM, LRESULT, WAIT_OBJECT_0, WPARAM};
 use windows::Win32::System::LibraryLoader::GetModuleHandleW;
-use windows::Win32::UI::Input::KeyboardAndMouse::{VK_LWIN, VK_RWIN};
+use windows::Win32::System::Threading::{
+    GetCurrentThreadId, OpenProcess, WaitForSingleObject, CREATE_NO_WINDOW, PROCESS_SYNCHRONIZE,
+};
+use windows::Win32::UI::Input::KeyboardAndMouse::{GetAsyncKeyState, VK_LWIN, VK_RWIN};
 use windows::Win32::UI::WindowsAndMessaging::{
-    CallNextHookEx, PostMessageW, SetWindowsHookExW, UnhookWindowsHookEx, HHOOK, KBDLLHOOKSTRUCT, LLKHF_INJECTED,
-    WH_KEYBOARD_LL, WM_APP, WM_KEYDOWN, WM_KEYUP, WM_SYSKEYDOWN, WM_SYSKEYUP,
+    CallNextHookEx, GetMessageW, IsWindow, PostMessageW, PostThreadMessageW, SetWindowsHookExW,
+    UnhookWindowsHookEx, KBDLLHOOKSTRUCT, LLKHF_INJECTED, MSG, WH_KEYBOARD_LL, WM_APP, WM_KEYDOWN, WM_KEYUP,
+    WM_QUIT, WM_SYSKEYDOWN, WM_SYSKEYUP,
 };
 
 use crate::error::{DesktopError, Result};
 use crate::mode::ShellToken;
 
 /// The one switch for the whole feature. When a security product objects,
-/// turn this off: Start still opens by click and Ctrl+Esc.
+/// turn this off: Start still opens by click.
 pub const WINKEY_HOOK_ENABLED: bool = true;
 
 /// Posted to the message window when the pattern is seen; the loop turns it
 /// into the Start hotkey event.
 pub const WM_WINKEY_START: u32 = WM_APP + 1;
 
+/// The command-line switch that starts the exe as the hook helper:
+/// `<exe> --rulebox-winkey-hook <message window> <shell process id>`.
+pub const HELPER_SWITCH: &str = "--rulebox-winkey-hook";
+
 /// A hook that takes longer than this in one call is on its way to being
 /// removed by Windows (`LowLevelHooksTimeout`, about 300 ms).
 const SLOW_CALL_MS: u128 = 150;
+
+/// How often the helper looks at the shell and at its own health.
+const HELPER_CHECK: Duration = Duration::from_secs(5);
+
+/// The helper's exit codes. The shell restarts a helper that ended for any
+/// reason but [`EXIT_TOO_SLOW`], a limited number of times.
+const EXIT_DONE: i32 = 0;
+const EXIT_BAD_ARGS: i32 = 2;
+const EXIT_INSTALL_FAILED: i32 = 3;
+const EXIT_TOO_SLOW: i32 = 4;
+
+/// How many times the shell starts a helper again after it ended.
+const MAX_RESTARTS: u32 = 3;
 
 /// One key event, reduced to what the pattern needs. No key content.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -103,7 +138,7 @@ impl WinKeyState {
     }
 }
 
-// ---- The hook itself --------------------------------------------------------
+// ---- The hook itself (in the helper process) ---------------------------------
 
 /// The state the callback uses. Only the hook's own thread touches it.
 static STATE: Mutex<WinKeyState> = Mutex::new(WinKeyState {
@@ -114,25 +149,60 @@ static TARGET: AtomicIsize = AtomicIsize::new(0);
 static SLOW_CALLS: AtomicU32 = AtomicU32::new(0);
 static INSTALLED: AtomicBool = AtomicBool::new(false);
 
-/// The installed hook. Dropping it removes the hook; do that on the thread that installed it.
-pub struct Hook {
-    handle: HHOOK,
+/// The installed hook. It lives on a thread of its own that does nothing but
+/// pump messages: Windows silently removes a low-level hook whose thread is
+/// slow to answer. Dropping this stops that thread, which removes the hook.
+struct Hook {
+    thread_id: u32,
+    thread: Option<JoinHandle<()>>,
 }
 
 impl Drop for Hook {
     fn drop(&mut self) {
-        // SAFETY: the handle came from SetWindowsHookExW and is removed once.
-        let _ = unsafe { UnhookWindowsHookEx(self.handle) };
+        // SAFETY: posting WM_QUIT to a thread id is sound; a gone thread just fails.
+        let _ = unsafe { PostThreadMessageW(self.thread_id, WM_QUIT, WPARAM(0), LPARAM(0)) };
+        if let Some(thread) = self.thread.take() {
+            let _ = thread.join();
+        }
         INSTALLED.store(false, Ordering::SeqCst);
     }
 }
 
-/// Install the hook. Call on the message-loop thread (the hook needs its
-/// message loop), once. `hwnd` is the loop's window, which gets `WM_WINKEY_START`.
-pub fn install(_token: &ShellToken, hwnd: isize) -> Result<Hook> {
-    if !WINKEY_HOOK_ENABLED {
-        return Err(DesktopError::Refused("the Windows-key hook is switched off".into()));
+/// The hook thread: install, pump messages until `WM_QUIT`, remove.
+fn hook_thread(ready: mpsc::Sender<Result<u32>>) {
+    // SAFETY: the callback has the required signature and stays valid for the life of the process.
+    let installed = unsafe {
+        GetModuleHandleW(None)
+            .map_err(|e| DesktopError::win32("GetModuleHandleW", &e))
+            .and_then(|module| {
+                SetWindowsHookExW(WH_KEYBOARD_LL, Some(callback), Some(HINSTANCE(module.0)), 0)
+                    .map_err(|e| DesktopError::win32("SetWindowsHookExW", &e))
+            })
+    };
+    let handle = match installed {
+        Ok(handle) => handle,
+        Err(error) => {
+            let _ = ready.send(Err(error));
+            return;
+        }
+    };
+    // SAFETY: plain query of the calling thread's id.
+    if ready.send(Ok(unsafe { GetCurrentThreadId() })).is_err() {
+        // `install_hook` gave up waiting: nobody owns this hook, so remove it.
+        // SAFETY: the handle came from SetWindowsHookExW above and is removed once.
+        let _ = unsafe { UnhookWindowsHookEx(handle) };
+        INSTALLED.store(false, Ordering::SeqCst);
+        return;
     }
+    let mut message = MSG::default();
+    // SAFETY: `message` is a valid out-parameter; GetMessageW returns 0 on WM_QUIT and -1 on error.
+    while unsafe { GetMessageW(&mut message, None, 0, 0) }.0 > 0 {}
+    // SAFETY: the handle came from SetWindowsHookExW above and is removed once.
+    let _ = unsafe { UnhookWindowsHookEx(handle) };
+}
+
+/// Install the hook on its own thread, once. `hwnd` gets `WM_WINKEY_START`.
+fn install_hook(hwnd: isize) -> Result<Hook> {
     if INSTALLED.swap(true, Ordering::SeqCst) {
         return Err(DesktopError::Refused("the Windows-key hook is already installed".into()));
     }
@@ -141,24 +211,28 @@ pub fn install(_token: &ShellToken, hwnd: isize) -> Result<Hook> {
     if let Ok(mut state) = STATE.lock() {
         *state = WinKeyState::default();
     }
-    // SAFETY: the callback has the required signature and stays valid for the life of the process.
-    let handle = unsafe {
-        let module = GetModuleHandleW(None).map_err(|e| DesktopError::win32("GetModuleHandleW", &e))?;
-        SetWindowsHookExW(WH_KEYBOARD_LL, Some(callback), Some(HINSTANCE(module.0)), 0)
-    };
-    match handle {
-        Ok(handle) => Ok(Hook { handle }),
-        Err(error) => {
+    let (ready, answer) = mpsc::channel();
+    let thread = std::thread::Builder::new()
+        .name("winkey-hook".into())
+        .spawn(move || hook_thread(ready))
+        .map_err(|e| {
             INSTALLED.store(false, Ordering::SeqCst);
-            Err(DesktopError::win32("SetWindowsHookExW", &error))
+            DesktopError::Message(format!("could not start the Windows-key hook thread: {e}"))
+        })?;
+    match answer.recv_timeout(Duration::from_secs(5)) {
+        Ok(Ok(thread_id)) => Ok(Hook {
+            thread_id,
+            thread: Some(thread),
+        }),
+        Ok(Err(error)) => {
+            let _ = thread.join();
+            INSTALLED.store(false, Ordering::SeqCst);
+            Err(error)
         }
+        // INSTALLED stays set: the thread may still be on its way. When it finds
+        // nobody listening it removes its own hook and clears the flag.
+        Err(_) => Err(DesktopError::Message("the Windows-key hook thread did not answer".into())),
     }
-}
-
-/// How many calls were slow since the hook was installed. The loop reads this
-/// and reinstalls once, then gives up, when Windows is about to drop the hook.
-pub fn slow_calls() -> u32 {
-    SLOW_CALLS.load(Ordering::SeqCst)
 }
 
 unsafe extern "system" fn callback(code: i32, wparam: WPARAM, lparam: LPARAM) -> LRESULT {
@@ -204,16 +278,6 @@ unsafe extern "system" fn callback(code: i32, wparam: WPARAM, lparam: LPARAM) ->
     unsafe { CallNextHookEx(None, code, wparam, lparam) }
 }
 
-
-// ---- Keeping the hook on the loop thread, and its health ----------------------
-
-thread_local! {
-    /// The hook belongs to the loop thread: it is installed, checked and removed there.
-    static HOOK: RefCell<Option<Hook>> = const { RefCell::new(None) };
-}
-
-static REINSTALLS: AtomicU32 = AtomicU32::new(0);
-
 /// What to do about a hook that has been slow.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Health {
@@ -233,43 +297,162 @@ pub fn health(slow_calls: u32, reinstalls_done: u32) -> Health {
     }
 }
 
-/// Install and keep the hook on this (the loop) thread.
+/// Pure: the helper's arguments after the exe name, when they ask for the
+/// helper. `Some(None)` is the switch with unusable arguments.
+fn parse_helper_args(args: &[OsString]) -> Option<Option<(isize, u32)>> {
+    if args.first()?.to_str() != Some(HELPER_SWITCH) {
+        return None;
+    }
+    let number = |at: usize| args.get(at).and_then(|arg| arg.to_str());
+    let hwnd = number(1).and_then(|text| text.parse::<isize>().ok()).filter(|hwnd| *hwnd != 0);
+    let parent = number(2).and_then(|text| text.parse::<u32>().ok()).filter(|pid| *pid != 0);
+    Some(hwnd.zip(parent))
+}
+
+/// Run as the hook helper when the command line asks for it; returns the exit
+/// code then. `None`: this is a normal start, carry on.
+pub fn helper_main(args: impl IntoIterator<Item = OsString>) -> Option<i32> {
+    let args: Vec<OsString> = args.into_iter().skip(1).collect();
+    let Some((hwnd, parent)) = parse_helper_args(&args)? else {
+        return Some(EXIT_BAD_ARGS);
+    };
+    if !WINKEY_HOOK_ENABLED {
+        return Some(EXIT_DONE);
+    }
+    // SAFETY: plain open of a process handle that is only waited on.
+    let Ok(parent) = (unsafe { OpenProcess(PROCESS_SYNCHRONIZE, false, parent) }) else {
+        return Some(EXIT_BAD_ARGS);
+    };
+    let code = run_helper(hwnd, |timeout| {
+        // SAFETY: `parent` is a valid handle until it is closed below.
+        unsafe { WaitForSingleObject(parent, timeout.as_millis() as u32) == WAIT_OBJECT_0 }
+    });
+    // SAFETY: the handle came from OpenProcess above and is closed once.
+    let _ = unsafe { CloseHandle(parent) };
+    Some(code)
+}
+
+/// The helper's life: hook installed, then every few seconds check the shell
+/// is still there and the hook is healthy. `parent_gone` waits up to the
+/// given time and says whether the shell process ended.
+fn run_helper(hwnd: isize, parent_gone: impl Fn(Duration) -> bool) -> i32 {
+    let Ok(mut hook) = install_hook(hwnd) else {
+        return EXIT_INSTALL_FAILED;
+    };
+    let mut reinstalls = 0;
+    let code = loop {
+        if parent_gone(HELPER_CHECK) {
+            break EXIT_DONE;
+        }
+        // SAFETY: IsWindow only checks a handle value.
+        if !unsafe { IsWindow(Some(HWND(hwnd as *mut std::ffi::c_void))) }.as_bool() {
+            break EXIT_DONE;
+        }
+        match health(SLOW_CALLS.load(Ordering::SeqCst), reinstalls) {
+            Health::Fine => {}
+            Health::Reinstall => {
+                reinstalls += 1;
+                drop(hook);
+                match install_hook(hwnd) {
+                    Ok(new) => hook = new,
+                    Err(_) => return EXIT_INSTALL_FAILED,
+                }
+            }
+            Health::GiveUp => break EXIT_TOO_SLOW,
+        }
+    };
+    drop(hook);
+    code
+}
+
+// ---- The shell's side: starting and watching the helper -----------------------
+
+/// Whether a Windows key is held right now. Holding it can take the focus from
+/// an open Start menu before the release toggles it; the shell asks this to
+/// tell that focus loss from a click elsewhere. Reads those two keys only.
+pub fn win_key_down() -> bool {
+    // SAFETY: plain key-state queries.
+    let held = |vk: u16| unsafe { GetAsyncKeyState(i32::from(vk)) } < 0;
+    held(VK_LWIN.0) || held(VK_RWIN.0)
+}
+
+/// The running helper. Dropping it ends the helper (which removes the hook).
+pub struct Helper {
+    child: Child,
+}
+
+impl Drop for Helper {
+    fn drop(&mut self) {
+        let _ = self.child.kill();
+        let _ = self.child.wait();
+    }
+}
+
+/// Start the helper for the message window `hwnd`.
+pub fn install(_token: &ShellToken, hwnd: isize) -> Result<Helper> {
+    if !WINKEY_HOOK_ENABLED {
+        return Err(DesktopError::Refused("the Windows-key hook is switched off".into()));
+    }
+    let exe = std::env::current_exe()
+        .map_err(|e| DesktopError::Message(format!("could not find the app's own exe: {e}")))?;
+    let child = Command::new(exe)
+        .arg(HELPER_SWITCH)
+        .arg(hwnd.to_string())
+        .arg(std::process::id().to_string())
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .creation_flags(CREATE_NO_WINDOW.0)
+        .spawn()
+        .map_err(|e| DesktopError::Message(format!("could not start the Windows-key helper: {e}")))?;
+    Ok(Helper { child })
+}
+
+thread_local! {
+    /// The helper belongs to the loop thread: started, checked and ended there.
+    static HELPER: RefCell<Option<Helper>> = const { RefCell::new(None) };
+    static RESTARTS: Cell<u32> = const { Cell::new(0) };
+}
+
+/// Start the helper and keep it on this (the loop) thread.
 pub fn install_on_loop(token: &ShellToken, hwnd: isize) -> Result<()> {
-    let hook = install(token, hwnd)?;
-    HOOK.with(|slot| *slot.borrow_mut() = Some(hook));
+    let helper = install(token, hwnd)?;
+    HELPER.with(|slot| *slot.borrow_mut() = Some(helper));
     Ok(())
 }
 
-/// Remove the hook if it is installed. Safe to call anywhere on the loop thread.
+/// End the helper if it is running. Safe to call anywhere on the loop thread.
 pub fn remove_on_loop() {
-    HOOK.with(|slot| drop(slot.borrow_mut().take()));
+    HELPER.with(|slot| drop(slot.borrow_mut().take()));
 }
 
-/// Look at the hook's health and act on it (reinstall once, then give up).
-/// Called from the loop every few seconds. Returns what it found.
-pub fn tick(token: &ShellToken, hwnd: isize) -> Health {
-    let installed = HOOK.with(|slot| slot.borrow().is_some());
-    if !installed {
-        return Health::Fine;
+/// Pure: start a helper again after it ended with `code`?
+fn restart_after(code: Option<i32>, restarts_done: u32) -> bool {
+    code != Some(EXIT_TOO_SLOW) && restarts_done < MAX_RESTARTS
+}
+
+/// Look at the helper and start it again when it ended (a few times, then
+/// give up). Called from the loop every few seconds.
+pub fn tick(token: &ShellToken, hwnd: isize) {
+    let ended = HELPER.with(|slot| {
+        let mut slot = slot.borrow_mut();
+        let status = slot.as_mut()?.child.try_wait().ok().flatten()?;
+        slot.take();
+        Some(status.code())
+    });
+    let Some(code) = ended else {
+        return;
+    };
+    let restarts = RESTARTS.with(Cell::get);
+    if !restart_after(code, restarts) {
+        tracing::warn!(?code, "the Windows-key helper ended and stays off; Start opens by click");
+        return;
     }
-    let verdict = health(slow_calls(), REINSTALLS.load(Ordering::SeqCst));
-    match verdict {
-        Health::Fine => {}
-        Health::Reinstall => {
-            REINSTALLS.fetch_add(1, Ordering::SeqCst);
-            remove_on_loop();
-            if let Err(error) = install_on_loop(token, hwnd) {
-                tracing::warn!(%error, "the Windows-key hook could not be reinstalled");
-            } else {
-                tracing::warn!("the Windows-key hook was slow and has been reinstalled once");
-            }
-        }
-        Health::GiveUp => {
-            remove_on_loop();
-            tracing::warn!("the Windows-key hook was slow again and is now off; Start opens by click and Ctrl+Esc");
-        }
+    RESTARTS.with(|count| count.set(restarts + 1));
+    match install_on_loop(token, hwnd) {
+        Ok(()) => tracing::warn!(?code, "the Windows-key helper ended and was started again"),
+        Err(error) => tracing::warn!(%error, "the Windows-key helper could not be started again"),
     }
-    verdict
 }
 
 #[cfg(test)]
@@ -285,7 +468,27 @@ mod health_tests {
         assert_eq!(health(1, 1), Health::GiveUp);
         assert_eq!(health(3, 7), Health::GiveUp);
     }
+
+    #[test]
+    fn a_helper_is_restarted_a_few_times_but_not_after_giving_up() {
+        assert!(restart_after(Some(EXIT_INSTALL_FAILED), 0));
+        assert!(restart_after(None, 2), "killed from outside");
+        assert!(!restart_after(Some(EXIT_DONE), MAX_RESTARTS));
+        assert!(!restart_after(Some(EXIT_TOO_SLOW), 0), "a slow hook stays off");
+    }
+
+    #[test]
+    fn only_the_switch_starts_the_helper() {
+        let args = |list: &[&str]| list.iter().map(OsString::from).collect::<Vec<_>>();
+        assert_eq!(parse_helper_args(&args(&[])), None);
+        assert_eq!(parse_helper_args(&args(&["--other", "1", "2"])), None);
+        assert_eq!(parse_helper_args(&args(&[HELPER_SWITCH, "4242", "77"])), Some(Some((4242, 77))));
+        assert_eq!(parse_helper_args(&args(&[HELPER_SWITCH, "x", "77"])), Some(None));
+        assert_eq!(parse_helper_args(&args(&[HELPER_SWITCH, "0", "77"])), Some(None));
+        assert_eq!(parse_helper_args(&args(&[HELPER_SWITCH, "4242"])), Some(None));
+    }
 }
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -370,9 +573,9 @@ mod tests {
 
     #[test]
     fn the_hook_cannot_be_installed_twice() {
-        // `install` needs a ShellToken (shell mode only), so the guard is checked on the flag.
+        // The guard is checked on the flag, without touching the real hook.
         INSTALLED.store(true, Ordering::SeqCst);
-        assert!(INSTALLED.swap(true, Ordering::SeqCst));
+        assert!(install_hook(1).is_err());
         INSTALLED.store(false, Ordering::SeqCst);
     }
 }

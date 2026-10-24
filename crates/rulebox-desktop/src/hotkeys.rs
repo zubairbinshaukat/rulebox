@@ -21,7 +21,8 @@ pub struct HotkeyId(pub i32);
 impl HotkeyId {
     /// Alt+Tab: the app switcher.
     pub const SWITCHER: HotkeyId = HotkeyId(1);
-    /// Ctrl+Esc, and the lone Windows key (see `winkey`): the Start menu.
+    /// The lone Windows key (see `winkey`): the Start menu. Ctrl+Esc cannot
+    /// be registered (Windows keeps it), so this id has no combination.
     pub const START: HotkeyId = HotkeyId(2);
     /// The administrator's hidden exit (the combination comes from policy).
     pub const ADMIN_EXIT: HotkeyId = HotkeyId(3);

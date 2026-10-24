@@ -558,6 +558,10 @@
   border: 1px solid var(--rb-glass-border);
 }
 .rb-surface--popover {
+  /* The popup window is exactly the panel's size, so the shadow is clipped
+     and a white border vanishes over white content behind it (the corners
+     then read as patches). A visible hairline keeps the edge. */
+  border-color: var(--rb-line);
   border-radius: var(--rb-r-xl);
   box-shadow: var(--rb-shadow-popover);
   z-index: var(--rb-z-popover);

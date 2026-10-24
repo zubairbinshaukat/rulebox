@@ -85,7 +85,9 @@ fn wanted(state: &AppState) -> Vec<(HotkeyId, Option<Combo>)> {
     };
     vec![
         (HotkeyId::SWITCHER, Some(Combo::ALT_TAB)),
-        (HotkeyId::START, Some(Combo::CTRL_ESC)),
+        // Ctrl+Esc is not ours to take: Windows keeps it (RegisterHotKey fails
+        // with 1409 on the VM). Start opens from the lone Windows key and the button.
+        (HotkeyId::START, None),
         (HotkeyId::ADMIN_EXIT, exit),
     ]
 }
@@ -179,7 +181,7 @@ async fn install_hook(host: &Arc<DesktopHost>) -> bool {
             true
         }
         Ok(Err(error)) => {
-            tracing::warn!(%error, "the Windows-key hook could not be installed; Start opens by click and Ctrl+Esc");
+            tracing::warn!(%error, "the Windows-key hook could not be installed; Start opens by click");
             false
         }
         Err(_) => false,
@@ -200,6 +202,8 @@ pub fn on_hotkey(app: &AppHandle, host: &Arc<DesktopHost>, id: HotkeyId) {
         HotkeyId::START => {
             if host.popup_kind() == Some(PopupKind::Start) {
                 crate::shellwin::popup_close(app, host);
+            } else if crate::shellwin::just_lost_focus(PopupKind::Start) {
+                // This press is what took the focus from the open menu: it closes it.
             } else if let Err(error) = crate::shellwin::popup_open(app, host, PopupKind::Start, None) {
                 tracing::warn!(%error, "could not open the Start menu");
             }

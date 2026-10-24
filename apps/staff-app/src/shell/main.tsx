@@ -59,6 +59,11 @@ export function ShellRoot() {
   );
 }
 
+// The popup window is transparent: only its rounded panel may paint.
+if (routeOf(window.location.hash) === "popup") {
+  document.documentElement.classList.add("rb-page-transparent");
+}
+
 // The administrator exit works from every Rulebox page, even one whose UI has crashed.
 installExitKey();
 

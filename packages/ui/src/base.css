@@ -18,6 +18,13 @@ body {
   font-variant-numeric: tabular-nums;
 }
 
+/* A page in a transparent window (the shell popup): only its panel paints,
+   so the area outside the rounded corners shows what is behind the window. */
+html.rb-page-transparent,
+html.rb-page-transparent body {
+  background: transparent;
+}
+
 * {
   box-sizing: border-box;
 }

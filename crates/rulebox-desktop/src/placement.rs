@@ -42,6 +42,10 @@ pub const TASKBAR_ZONE_LOGICAL: i32 = 84;
 /// Gap between a popup and the control that opened it, in logical pixels.
 pub const POPUP_GAP_LOGICAL: i32 = 8;
 
+/// A popup's distance from the left and right screen edges, in logical
+/// pixels: the taskbar's own inset (`--rb-taskbar-inset`), so they line up.
+pub const POPUP_SIDE_LOGICAL: i32 = 12;
+
 /// `logical` device-independent pixels at `scale` (1.0 = 100 %), rounded.
 pub fn scale_px(logical: i32, scale: f64) -> i32 {
     (f64::from(logical) * scale).round() as i32
@@ -112,8 +116,11 @@ pub fn centered_rect(size: (i32, i32), bounds: Rect) -> Rect {
 ///
 /// With an `anchor` it is centred on the anchor and sits above it; if there
 /// is no room above it goes below. Without an anchor it sits in the bottom
-/// left corner of `bounds`. The result is always clamped into `bounds`.
-pub fn popup_rect(size: (i32, i32), anchor: Option<Rect>, bounds: Rect, gap: i32) -> Rect {
+/// left corner of `bounds`. The result is always clamped into `bounds`, and
+/// keeps `side` from its left and right edges when there is room for that, so
+/// it lines up with the taskbar instead of touching the screen edge (where its
+/// rounded corners are lost).
+pub fn popup_rect(size: (i32, i32), anchor: Option<Rect>, bounds: Rect, gap: i32, side: i32) -> Rect {
     let (width, height) = (size.0.max(1), size.1.max(1));
     let raw = match anchor {
         Some(anchor) => {
@@ -125,12 +132,17 @@ pub fn popup_rect(size: (i32, i32), anchor: Option<Rect>, bounds: Rect, gap: i32
             Rect::new(left, top, left + width, top + height)
         }
         None => {
-            let left = bounds.left + gap;
+            let left = bounds.left + side;
             let top = bounds.bottom - gap - height;
             Rect::new(left, top, left + width, top + height)
         }
     };
-    clamp_into(raw, bounds)
+    let inset = if bounds.width() - 2 * side >= width {
+        Rect::new(bounds.left + side, bounds.top, bounds.right - side, bounds.bottom)
+    } else {
+        bounds
+    };
+    clamp_into(raw, inset)
 }
 
 #[cfg(test)]
@@ -203,7 +215,7 @@ mod tests {
         let bounds = Rect::new(0, 0, 1366, 684);
         // An anchor in the middle of the usable area: gap above it is kept.
         let anchor = Rect::new(600, 500, 660, 550);
-        let popup = popup_rect((400, 300), Some(anchor), bounds, 8);
+        let popup = popup_rect((400, 300), Some(anchor), bounds, 8, 12);
         assert_eq!(popup.width(), 400);
         assert_eq!(popup.height(), 300);
         assert_eq!(popup.bottom, 500 - 8);
@@ -215,7 +227,7 @@ mod tests {
         // The anchor is a taskbar button inside the strip (top = 700 > 684).
         let bounds = Rect::new(0, 0, 1366, 684);
         let anchor = Rect::new(600, 700, 660, 750);
-        let popup = popup_rect((400, 300), Some(anchor), bounds, 8);
+        let popup = popup_rect((400, 300), Some(anchor), bounds, 8, 12);
         assert_eq!(popup.bottom, 684);
         assert_eq!(popup.height(), 300);
     }
@@ -224,8 +236,9 @@ mod tests {
     fn popup_is_clamped_at_the_right_edge() {
         let bounds = Rect::new(0, 0, 1366, 684);
         let anchor = Rect::new(1300, 700, 1360, 750);
-        let popup = popup_rect((400, 300), Some(anchor), bounds, 8);
-        assert_eq!(popup.right, 1366);
+        let popup = popup_rect((400, 300), Some(anchor), bounds, 8, 12);
+        // The gap stays, so the panel keeps its rounded corners.
+        assert_eq!(popup.right, 1366 - 12);
         assert_eq!(popup.width(), 400);
     }
 
@@ -233,29 +246,38 @@ mod tests {
     fn popup_is_clamped_at_the_left_edge() {
         let bounds = Rect::new(0, 0, 1366, 684);
         let anchor = Rect::new(0, 700, 40, 750);
-        let popup = popup_rect((400, 300), Some(anchor), bounds, 8);
-        assert_eq!(popup.left, 0);
+        let popup = popup_rect((400, 300), Some(anchor), bounds, 8, 12);
+        assert_eq!(popup.left, 12);
+    }
+
+    #[test]
+    fn a_popup_wider_than_the_room_inside_the_gaps_still_fits() {
+        let bounds = Rect::new(0, 0, 410, 684);
+        let anchor = Rect::new(380, 700, 400, 750);
+        let popup = popup_rect((400, 300), Some(anchor), bounds, 8, 12);
+        assert!(popup.left >= 0 && popup.right <= 410);
+        assert_eq!(popup.width(), 400);
     }
 
     #[test]
     fn popup_goes_below_when_there_is_no_room_above() {
         let bounds = Rect::new(0, 0, 1366, 684);
         let anchor = Rect::new(600, 10, 660, 60);
-        let popup = popup_rect((400, 300), Some(anchor), bounds, 8);
+        let popup = popup_rect((400, 300), Some(anchor), bounds, 8, 12);
         assert_eq!(popup.top, 60 + 8);
     }
 
     #[test]
     fn popup_without_anchor_is_bottom_left() {
         let bounds = Rect::new(0, 0, 1366, 684);
-        let popup = popup_rect((400, 300), None, bounds, 8);
-        assert_eq!(popup, Rect::new(8, 376, 408, 676));
+        let popup = popup_rect((400, 300), None, bounds, 8, 12);
+        assert_eq!(popup, Rect::new(12, 376, 412, 676));
     }
 
     #[test]
     fn popup_larger_than_the_area_is_shrunk() {
         let bounds = Rect::new(0, 0, 300, 200);
-        let popup = popup_rect((900, 900), None, bounds, 8);
+        let popup = popup_rect((900, 900), None, bounds, 8, 12);
         assert_eq!(popup, Rect::new(0, 0, 300, 200));
     }
 
@@ -263,7 +285,7 @@ mod tests {
     fn popup_on_a_second_monitor_with_negative_origin() {
         let bounds = Rect::new(-1920, 0, 0, 1000);
         let anchor = Rect::new(-1900, 1010, -1840, 1060);
-        let popup = popup_rect((400, 300), Some(anchor), bounds, 8);
+        let popup = popup_rect((400, 300), Some(anchor), bounds, 8, 12);
         assert!(popup.left >= -1920 && popup.right <= 0);
         assert!(popup.bottom <= 1000);
     }

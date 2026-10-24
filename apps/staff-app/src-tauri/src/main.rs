@@ -1,7 +1,13 @@
-// Prevents an extra console window on Windows in release.
-#![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
+// No console window, also in debug: as the shell it would be a window to close
+// (that kills the app) and noise in the taskbar. Logs go to the file in `logging.rs`.
+#![windows_subsystem = "windows"]
 
 fn main() {
+    // The Windows-key hook runs in a windowless child of this same exe (see
+    // `rulebox_desktop::winkey`); that child must not start the app.
+    if let Some(code) = rulebox_desktop::winkey::helper_main(std::env::args_os()) {
+        std::process::exit(code);
+    }
     rulebox_staff_lib::run()
 }
 
@@ -112,6 +118,7 @@ mod step3_tests {
                 battery: None,
                 network: NetworkDto::Internet,
                 can_power_off: true,
+                can_sleep: true,
                 brightness: None,
             },
             notices: vec![],
@@ -207,6 +214,7 @@ mod step3_tests {
                 "battery": null,
                 "network": "internet",
                 "canPowerOff": true,
+                "canSleep": true,
                 "brightness": null
             },
             "notices": [],
