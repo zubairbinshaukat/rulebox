@@ -5,6 +5,10 @@ import type { VolumeDto } from "./VolumeDto";
 
 export type SystemState = { volume: VolumeDto | null, battery: BatteryDto | null, network: NetworkDto, canPowerOff: boolean, 
 /**
+ * The PC has a sleep state; without one the Sleep button stays hidden.
+ */
+canSleep: boolean, 
+/**
  * 0–100 when a monitor answered at startup. `None` hides the slider.
  */
 brightness: number | null, };

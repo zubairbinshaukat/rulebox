@@ -24,6 +24,8 @@ use crate::state::AppState;
 const ICON_MAX_AGE: Duration = Duration::from_secs(60);
 const ICON_CACHE_LIMIT: usize = 256;
 const ICON_DEFAULT_SIZE: u32 = 48;
+/// The biggest icon a window usually offers (`ICON_BIG`).
+const WINDOW_ICON_MAX_SIDE: u32 = 32;
 
 // ---------------------------------------------------------------------------
 // Labels: which of the windows are ours.
@@ -540,14 +542,19 @@ impl IconStore {
             .packaged_aumid
             .as_deref()
             .and_then(|aumid| rulebox_desktop::icons::app_icon_png(aumid, size));
+        let exe_icon = || {
+            source
+                .exe
+                .as_deref()
+                .and_then(|exe| rulebox_desktop::icons::exe_icon_png(exe, size))
+        };
+        // A window only offers a 16 or 32 px icon, which turns soft when it is
+        // stretched; the program file has large ones, so ask it first above 32.
+        let large = size > WINDOW_ICON_MAX_SIDE;
         let png = packaged
+            .or_else(|| if large { exe_icon() } else { None })
             .or_else(|| rulebox_desktop::icons::icon_png(hwnd, size))
-            .or_else(|| {
-                source
-                    .exe
-                    .as_deref()
-                    .and_then(|exe| rulebox_desktop::icons::exe_icon_png(exe, size))
-            })?;
+            .or_else(exe_icon)?;
         let png = Arc::new(png);
         let mut cache = self.cache.lock().unwrap_or_else(|e| e.into_inner());
         if cache.len() >= ICON_CACHE_LIMIT {

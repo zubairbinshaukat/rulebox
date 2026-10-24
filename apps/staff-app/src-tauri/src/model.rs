@@ -306,6 +306,8 @@ pub struct SystemState {
     pub battery: Option<BatteryDto>,
     pub network: NetworkDto,
     pub can_power_off: bool,
+    /// The PC has a sleep state; without one the Sleep button stays hidden.
+    pub can_sleep: bool,
     /// 0–100 when a monitor answered at startup. `None` hides the slider.
     pub brightness: Option<u8>,
 }
@@ -317,6 +319,7 @@ impl Default for SystemState {
             battery: None,
             network: NetworkDto::None,
             can_power_off: false,
+            can_sleep: false,
             brightness: None,
         }
     }

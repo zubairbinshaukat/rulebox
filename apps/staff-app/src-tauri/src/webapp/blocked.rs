@@ -10,8 +10,16 @@ use tauri::Url;
 /// How Windows addresses the custom scheme (`http://<scheme>.localhost/`).
 const HOST: &str = "rbblocked.localhost";
 
+/// Only the exact address of the page: no port (the custom scheme is matched
+/// without one, so `rbblocked.localhost:8080` would be a real loopback server),
+/// no user info and the root path.
 pub fn is_blocked_page(url: &Url) -> bool {
-    url.scheme() == "http" && url.host_str() == Some(HOST)
+    url.scheme() == "http"
+        && url.host_str() == Some(HOST)
+        && url.port().is_none()
+        && url.username().is_empty()
+        && url.password().is_none()
+        && url.path() == "/"
 }
 
 /// The address of the page for `host`, with a link back to `back`.

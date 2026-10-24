@@ -76,6 +76,20 @@ pub fn can_power_off() -> bool {
     }
 }
 
+/// The firmware offers a sleep state (S1 to S3, or modern standby). A Hyper-V
+/// VM offers none, and `SetSuspendState` then fails with `ERROR_NOT_SUPPORTED`.
+pub fn can_sleep() -> bool {
+    use windows::Win32::System::Power::{GetPwrCapabilities, SYSTEM_POWER_CAPABILITIES};
+
+    let mut caps = SYSTEM_POWER_CAPABILITIES::default();
+    // SAFETY: `caps` is a valid out-parameter of the size the API expects.
+    if !unsafe { GetPwrCapabilities(&mut caps) } {
+        tracing::warn!("could not read the power capabilities; Sleep stays hidden");
+        return false;
+    }
+    caps.SystemS1 || caps.SystemS2 || caps.SystemS3 || caps.AoAc
+}
+
 fn token_has_shutdown_privilege() -> Result<bool> {
     let token = open_token(TOKEN_QUERY)?;
     let wanted = privilege_luid()?;

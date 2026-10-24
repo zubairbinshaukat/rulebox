@@ -231,6 +231,16 @@ fn rename_never_overwrites_and_allows_a_case_change() {
 }
 
 #[test]
+fn a_folder_cannot_go_into_itself_under_another_spelling() {
+    let temp = TempRoot::new("selfcase");
+    std::fs::create_dir_all(temp.join("Docs").join("sub")).unwrap();
+    let root = SafeRoot::open(temp.path()).unwrap();
+    assert_eq!(root.copy(&rel("Docs"), &rel("docs/sub")), Err(FileError::IntoItself));
+    assert_eq!(root.move_to(&rel("Docs"), &rel("DOCS/sub")), Err(FileError::IntoItself));
+    assert_eq!(root.rename(&rel("Docs"), &rel("docs/inner")), Err(FileError::IntoItself));
+}
+
+#[test]
 fn copy_and_move_number_taken_names() {
     let temp = TempRoot::new("copy");
     std::fs::write(temp.join("report.txt"), b"1").unwrap();

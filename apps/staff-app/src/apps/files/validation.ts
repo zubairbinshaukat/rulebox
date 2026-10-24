@@ -62,7 +62,21 @@ export function nameRuleMessage(rule: NameRule): string {
       return "A name can't contain text-direction characters.";
     case "internal":
       return "That name is reserved by Rulebox.";
+    case "shortAlias":
+      return "A name can't look like a Windows short name such as REPORT~1.";
   }
+}
+
+/** An 8.3 alias such as `BUDGET~1.XLS`; the same test as `is_short_alias` in `names.rs`. */
+function isShortAlias(name: string): boolean {
+  const dot = name.indexOf(".");
+  const stem = dot === -1 ? name : name.slice(0, dot);
+  const ext = dot === -1 ? "" : name.slice(dot + 1);
+  if (ext.includes(".") || [...ext].length > 3 || [...stem].length > 8) {
+    return false;
+  }
+  const tilde = stem.lastIndexOf("~");
+  return tilde > 0 && /^[0-9]+$/.test(stem.slice(tilde + 1));
 }
 
 export interface ValidationResult {
@@ -136,6 +150,9 @@ export function validateName(name: string): ValidationResult {
   }
   if (name.startsWith(INTERNAL_PREFIX)) {
     return { valid: false, rule: "internal", message: nameRuleMessage("internal") };
+  }
+  if (isShortAlias(name)) {
+    return { valid: false, rule: "shortAlias", message: nameRuleMessage("shortAlias") };
   }
   return { valid: true };
 }

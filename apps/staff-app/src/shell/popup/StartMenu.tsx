@@ -29,6 +29,7 @@ export function StartMenu() {
   const apps = useShell((s) => s.apps.items);
   const session = useShell((s) => s.session);
   const canPowerOff = useShell((s) => s.system.canPowerOff);
+  const canSleep = useShell((s) => s.system.canSleep);
   const [query, setQuery] = useState("");
   const [active, setActive] = useState(0);
   // Restart and Shut down close every app, so they need a second click.
@@ -280,16 +281,18 @@ export function StartMenu() {
         </button>
         {canPowerOff ? (
           <span style={{ marginLeft: "auto", display: "flex", gap: 4 }}>
-            <IconAction
-              label="Sleep"
-              onClick={() =>
-                void call("power_sleep", {}).catch(() => {
-                  // The shell posts a notice when Windows refuses.
-                })
-              }
-            >
-              <IconMoon width={18} height={18} />
-            </IconAction>
+            {canSleep ? (
+              <IconAction
+                label="Sleep"
+                onClick={() =>
+                  void call("power_sleep", {}).catch(() => {
+                    // The shell posts a notice when Windows refuses.
+                  })
+                }
+              >
+                <IconMoon width={18} height={18} />
+              </IconAction>
+            ) : null}
             <IconAction
               label={armed === "restart" ? "Click again to restart" : "Restart"}
               armed={armed === "restart"}

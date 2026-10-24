@@ -120,9 +120,12 @@ impl RelPath {
         self.0.iter().map(String::as_str)
     }
 
-    /// True when `self` is `other` or inside it.
+    /// True when `self` is `other` or inside it. Case does not matter: NTFS
+    /// treats `Docs` and `docs` as one folder, and "a folder into itself" has
+    /// to be caught under either spelling.
     pub fn starts_with(&self, other: &RelPath) -> bool {
-        self.0.len() >= other.0.len() && self.0.iter().zip(&other.0).all(|(a, b)| a == b)
+        self.0.len() >= other.0.len()
+            && self.0.iter().zip(&other.0).all(|(a, b)| a == b || a.to_lowercase() == b.to_lowercase())
     }
 
     pub fn as_string(&self) -> String {
@@ -347,7 +350,8 @@ impl SafeRoot {
         if from.is_root() || to.is_root() {
             return Err(FileError::OutsideRoot);
         }
-        if to.starts_with(from) && from != to {
+        // Strictly inside: `a.txt` -> `A.TXT` (same entry, other case) is a plain rename.
+        if to.0.len() > from.0.len() && to.starts_with(from) {
             return Err(FileError::IntoItself);
         }
         let (from_parent, from_leaf) = self.parent_and_leaf(from)?;

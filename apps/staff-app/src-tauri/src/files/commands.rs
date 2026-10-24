@@ -217,7 +217,8 @@ pub async fn fs_search(
     let session = session_of(&state)?;
     let target = window.clone();
     let send: Emit = Arc::new(move |event, payload| {
-        let _ = target.emit(event, payload);
+        // Only to the window that asked: `emit` on a window reaches all of them.
+        let _ = target.emit_to(target.label(), event, payload);
     });
     session.start_search(search_id, query, send);
     Ok(())

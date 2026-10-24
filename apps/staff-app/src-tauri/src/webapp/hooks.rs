@@ -51,23 +51,40 @@ fn kind_of(raw: COREWEBVIEW2_PERMISSION_KIND) -> PermissionKind {
 }
 
 /// Put the hooks on the window's WebView2. The closure runs on the UI thread.
+///
+/// Fails closed: when the hooks cannot be installed the window is destroyed,
+/// because without them the page runs with WebView2's defaults (permission
+/// prompts, frames from any host).
 pub fn install(window: &WebviewWindow, context: Arc<HookContext>) {
     let label = window.label().to_string();
+    let doomed = window.clone();
     let result = window.with_webview(move |platform| {
         // SAFETY: the controller is valid for the duration of this call, and
         // every handler below only holds `Arc`s and clones of COM interfaces.
         if let Err(error) = unsafe { setup(&platform.controller(), &context) } {
-            tracing::error!(%error, "web app hooks could not be installed; the window stays closed to the page");
+            tracing::error!(%error, "web app hooks could not be installed; closing the window");
             context.state.notify(
                 NoticeTone::Warning,
                 "This app could not be secured.",
                 Some("Ask your administrator.".into()),
             );
+            close_later(doomed);
         }
     });
     if let Err(error) = result {
         tracing::error!(%error, label, "could not reach the web view");
+        close_later(window.clone());
     }
+}
+
+/// Destroy a window from another thread, so this one (the UI thread, inside
+/// `with_webview`) is not waiting on itself.
+fn close_later(window: WebviewWindow) {
+    std::thread::spawn(move || {
+        if let Err(error) = window.destroy() {
+            tracing::warn!(%error, "could not close an unsecured web window");
+        }
+    });
 }
 
 /// Pause a page that is not on screen, and wake it again.

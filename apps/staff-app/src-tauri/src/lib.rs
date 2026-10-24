@@ -190,9 +190,11 @@ pub fn run() {
             let app_state = AppState::new(agent, initial);
             app_state.bind_app(app.handle().clone());
             let can_power_off = rulebox_desktop::power::can_power_off();
-            tracing::info!(can_power_off, "shutdown privilege");
+            let can_sleep = rulebox_desktop::power::can_sleep();
+            tracing::info!(can_power_off, can_sleep, "shutdown privilege and sleep support");
             app_state.update(|shell| {
                 shell.system.can_power_off = can_power_off;
+                shell.system.can_sleep = can_sleep;
             });
             spawn_agent_tasks(app_state.clone());
             // Screenshot automation: any process of this user can write the

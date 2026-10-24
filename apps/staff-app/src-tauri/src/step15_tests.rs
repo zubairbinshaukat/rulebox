@@ -204,6 +204,10 @@ fn only_the_local_blocked_address_counts_as_the_blocked_page() {
     assert!(blocked::is_blocked_page(&Url::parse("http://rbblocked.localhost/?host=a&back=b").unwrap()));
     assert!(!blocked::is_blocked_page(&Url::parse("https://rbblocked.localhost/").unwrap()));
     assert!(!blocked::is_blocked_page(&Url::parse("http://rbblocked.localhost.evil.net/").unwrap()));
+    // A port would reach a real loopback server; user info and other paths are not the page.
+    assert!(!blocked::is_blocked_page(&Url::parse("http://rbblocked.localhost:8080/").unwrap()));
+    assert!(!blocked::is_blocked_page(&Url::parse("http://user:pw@rbblocked.localhost/").unwrap()));
+    assert!(!blocked::is_blocked_page(&Url::parse("http://rbblocked.localhost/other").unwrap()));
     assert!(!blocked::is_blocked_page(&Url::parse("http://rbfile.localhost/a.txt").unwrap()));
     assert!(!blocked::is_blocked_page(&Url::parse("http://tauri.localhost/").unwrap()));
 }

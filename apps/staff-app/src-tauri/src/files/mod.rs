@@ -80,12 +80,13 @@ pub struct PasteResult {
 }
 
 /// Events go to `shell-*` and `app-*` windows only, never to a web app's page.
+/// `emit_to` addresses one window; `emit` on a window would reach every window.
 pub fn ui_emitter(app: AppHandle) -> Emit {
     Arc::new(move |event, payload| {
         for window in app.webview_windows().values() {
             let label = window.label();
             if label.starts_with("shell-") || label.starts_with("app-") {
-                let _ = window.emit(event, payload.clone());
+                let _ = window.emit_to(label, event, payload.clone());
             }
         }
     })

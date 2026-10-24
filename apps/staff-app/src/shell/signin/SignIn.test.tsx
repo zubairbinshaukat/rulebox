@@ -32,6 +32,7 @@ function baseShell(over: Partial<ShellState> = {}): ShellState {
       battery: null,
       network: "internet",
       canPowerOff: false,
+      canSleep: false,
       brightness: null,
     },
     notices: [],
