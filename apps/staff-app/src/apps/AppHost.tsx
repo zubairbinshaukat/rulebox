@@ -5,6 +5,7 @@ import gsap from "gsap";
 import { useGSAP } from "@gsap/react";
 import { TitleBar } from "@rulebox/ui";
 import IconClose from "~icons/solar/close-square-bold-duotone";
+import IconCloseTab from "~icons/solar/close-circle-bold-duotone";
 import IconCopy from "~icons/solar/copy-bold-duotone";
 import IconDocument from "~icons/solar/document-bold-duotone";
 import IconFolder from "~icons/solar/folder-bold-duotone";
@@ -243,31 +244,35 @@ export function AppHost() {
         </div>
       </TitleBar>
       {view?.lite ? (
-        <div role="tablist" aria-label="Open documents" style={tabRow}>
+        <div role="tablist" aria-label="Open documents" className="rb-tabstrip">
           {view.tabs.map((tab, index) => {
             const on = index === view.selected;
             return (
-              <div key={`${tab.kind}:${tab.path}:${index}`} style={{ display: "flex" }}>
+              <div
+                key={`${tab.kind}:${tab.path}:${index}`}
+                className="rb-tabstrip__tab"
+                data-active={on}
+                title={tab.title}
+              >
                 <button
                   type="button"
                   role="tab"
                   aria-selected={on}
+                  className="rb-tabstrip__select"
                   onClick={() => void call("app_select_tab", { index })}
-                  style={{
-                    ...tabButton,
-                    background: on ? "var(--rb-surface)" : "transparent",
-                    color: on ? "var(--rb-ink)" : "var(--rb-muted)",
-                  }}
                 >
-                  {tab.title}
+                  <span className="rb-tabstrip__icon" aria-hidden>
+                    {kindIcon(tab.kind)}
+                  </span>
+                  <span className="rb-tabstrip__title">{tab.title}</span>
                 </button>
                 <button
                   type="button"
+                  className="rb-tabstrip__close"
                   aria-label={`Close ${tab.title}`}
                   onClick={() => void call("app_close_tab", { index })}
-                  style={tabClose}
                 >
-                  <IconClose width={14} height={14} />
+                  <IconCloseTab width={14} height={14} />
                 </button>
               </div>
             );
@@ -354,30 +359,3 @@ const snapItem: CSSProperties = {
   fontSize: 13.5,
 };
 
-const tabRow: CSSProperties = {
-  display: "flex",
-  gap: 4,
-  padding: "6px 10px 0",
-  overflow: "auto",
-  flex: "none",
-};
-
-const tabButton: CSSProperties = {
-  border: 0,
-  borderRadius: "10px 0 0 10px",
-  padding: "6px 8px 6px 12px",
-  cursor: "pointer",
-  font: "inherit",
-  fontSize: 13,
-};
-
-const tabClose: CSSProperties = {
-  border: 0,
-  borderRadius: "0 10px 10px 0",
-  background: "transparent",
-  color: "var(--rb-muted)",
-  cursor: "pointer",
-  display: "inline-flex",
-  alignItems: "center",
-  padding: "0 8px 0 2px",
-};

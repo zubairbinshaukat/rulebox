@@ -3,10 +3,50 @@
 
 use std::collections::BTreeMap;
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
 use super::saferoot::FileError;
+
+/// A kind of file the Files sidebar and the desktop's My files panel group by.
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub enum FileKind {
+    All,
+    Documents,
+    Audio,
+    Video,
+    Images,
+    /// Audio, video and images together.
+    Media,
+}
+
+const DOCUMENT_EXTS: &[&str] = &[
+    "csv", "doc", "docx", "md", "odp", "ods", "odt", "pdf", "ppt", "pptx", "rtf", "txt", "xls", "xlsx",
+];
+const AUDIO_EXTS: &[&str] = &["aac", "flac", "m4a", "mp3", "ogg", "wav"];
+const VIDEO_EXTS: &[&str] = &["avi", "mkv", "mov", "mp4", "webm"];
+const IMAGE_EXTS: &[&str] = &["bmp", "gif", "jpeg", "jpg", "png", "svg", "webp"];
+
+impl FileKind {
+    /// Pure: does a file called `name` belong to this kind (by its extension)?
+    pub fn matches(self, name: &str) -> bool {
+        let ext = match name.rsplit_once('.') {
+            Some((stem, ext)) if !stem.is_empty() => ext.to_ascii_lowercase(),
+            _ => String::new(),
+        };
+        let has = |list: &[&str]| list.contains(&ext.as_str());
+        match self {
+            FileKind::All => true,
+            FileKind::Documents => has(DOCUMENT_EXTS),
+            FileKind::Audio => has(AUDIO_EXTS),
+            FileKind::Video => has(VIDEO_EXTS),
+            FileKind::Images => has(IMAGE_EXTS),
+            FileKind::Media => has(AUDIO_EXTS) || has(VIDEO_EXTS) || has(IMAGE_EXTS),
+        }
+    }
+}
 
 #[derive(Serialize, Clone, Copy, Debug, PartialEq, Eq, TS)]
 #[serde(rename_all = "camelCase")]

@@ -52,7 +52,8 @@ function Battery({ battery }: { battery: BatteryDto }) {
   const low = battery.percent != null && battery.percent < 20 && !battery.charging;
   return (
     <span style={{ display: "inline-flex", alignItems: "center", gap: 4 }}>
-      <span className={battery.charging ? "rb-chip__warn" : low ? "rb-chip__bad" : "rb-chip__muted"} style={{ display: "inline-flex" }}>
+      {/* Plugged in: green. On battery: neutral, red when low. */}
+      <span className={battery.charging ? "rb-chip__good" : low ? "rb-chip__bad" : "rb-chip__muted"} style={{ display: "inline-flex" }}>
         {batteryIcon(battery.charging, battery.percent)}
       </span>
       {battery.percent != null ? (

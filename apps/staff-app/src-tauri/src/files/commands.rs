@@ -9,7 +9,7 @@ use ts_rs::TS;
 
 use super::preview::{self, CsvPreview, ImageInfo, TextPreview};
 use super::saferoot::{Entry, EntryKind, FileError, RelPath, TrashItem};
-use super::types::{check_content, extension, opener_for, Opener, ViewerKind};
+use super::types::{check_content, extension, opener_for, FileKind, Opener, ViewerKind};
 use super::{openwith, Clip, ClipOp, Emit, FileSession, PasteResult, Usage};
 use crate::state::AppState;
 use crate::tasks::TaskServices;
@@ -281,6 +281,21 @@ pub async fn fs_recent(window: Window, state: State<'_, AppState>) -> Result<Vec
     allow(&window, true)?;
     let session = session_of(&state)?;
     run(move || Ok(session.recent())).await
+}
+
+/// The newest files of one kind anywhere in the employee's folder: the Files
+/// sidebar's Documents / Audio / Video / Images, and the desktop's My files panel.
+#[tauri::command]
+pub async fn fs_files(
+    window: Window,
+    state: State<'_, AppState>,
+    kind: FileKind,
+    limit: Option<u32>,
+) -> Result<Vec<Entry>, FileError> {
+    allow(&window, true)?;
+    let session = session_of(&state)?;
+    let limit = limit.unwrap_or(200) as usize;
+    run(move || Ok(session.files_of_kind(kind, limit))).await
 }
 
 /// Decides what opening a file means, and starts a handler app when that is it.

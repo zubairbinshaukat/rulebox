@@ -1175,3 +1175,49 @@ fn image_sizes_come_from_the_header() {
     assert_eq!(preview::image_info(&jpeg), Ok(ImageInfo { width: 640, height: 480 }));
     assert_eq!(preview::image_info(b"not an image"), Err(FileError::Damaged));
 }
+
+#[test]
+fn file_kinds_go_by_extension() {
+    use rulebox_staff_lib::files::types::FileKind;
+    assert!(FileKind::Documents.matches("Letter.DOCX"));
+    assert!(FileKind::Audio.matches("song.mp3"));
+    assert!(FileKind::Video.matches("clip.mp4"));
+    assert!(FileKind::Images.matches("photo.JPG"));
+    assert!(FileKind::Media.matches("photo.png") && FileKind::Media.matches("clip.webm"));
+    assert!(!FileKind::Documents.matches("photo.png"));
+    assert!(!FileKind::Images.matches(".png"), "a dot file has no extension");
+    assert!(!FileKind::Audio.matches("mp3"));
+    assert!(FileKind::All.matches("anything"));
+}
+
+#[test]
+fn files_of_a_kind_are_found_in_every_folder_newest_first() {
+    use rulebox_staff_lib::files::types::FileKind;
+    let temp = TempRoot::new("kinds");
+    std::fs::create_dir_all(temp.join("Documents\\Old")).unwrap();
+    std::fs::create_dir_all(temp.join("Downloads")).unwrap();
+    std::fs::write(temp.join("top.txt"), b"a").unwrap();
+    std::thread::sleep(Duration::from_millis(30));
+    std::fs::write(temp.join("Documents\\Old\\deep.pdf"), b"b").unwrap();
+    std::thread::sleep(Duration::from_millis(30));
+    std::fs::write(temp.join("Documents\\notes.txt"), b"c").unwrap();
+    std::fs::write(temp.join("Downloads\\song.mp3"), b"d").unwrap();
+
+    let session = open_session(&temp, 0);
+    let docs: Vec<String> = session
+        .files_of_kind(FileKind::Documents, 10)
+        .into_iter()
+        .map(|e| e.path)
+        .collect();
+    assert_eq!(docs.len(), 3, "{docs:?}");
+    assert_eq!(docs.last().map(String::as_str), Some("top.txt"), "oldest last: {docs:?}");
+    assert!(docs.iter().any(|p| p.ends_with("deep.pdf")), "found two folders down");
+
+    let audio = session.files_of_kind(FileKind::Audio, 10);
+    assert_eq!(audio.len(), 1);
+    assert_eq!(audio[0].kind, EntryKind::File);
+
+    let all = session.files_of_kind(FileKind::All, 2);
+    assert_eq!(all.len(), 2, "the limit holds");
+    assert!(all.iter().all(|e| e.kind == EntryKind::File), "folders are never listed");
+}

@@ -757,6 +757,39 @@ impl SafeRoot {
         found
     }
 
+    /// Files anywhere under the root that `wanted` accepts by name, newest
+    /// first, at most `limit` of them. Looks at no more than `max_scan`
+    /// entries, so a huge folder cannot stall the caller; folders themselves
+    /// are never returned.
+    pub fn newest_files(&self, wanted: &dyn Fn(&str) -> bool, limit: usize, max_scan: usize) -> Vec<Entry> {
+        let mut found: Vec<Entry> = Vec::new();
+        let mut scanned = 0usize;
+        let mut queue = std::collections::VecDeque::from([RelPath::root()]);
+        'walk: while let Some(folder) = queue.pop_front() {
+            let Ok(entries) = self.list(&folder) else {
+                continue;
+            };
+            for entry in entries {
+                scanned += 1;
+                if scanned > max_scan {
+                    break 'walk;
+                }
+                match entry.kind {
+                    EntryKind::Folder => {
+                        if let Ok(child) = RelPath::parse(&entry.path) {
+                            queue.push_back(child);
+                        }
+                    }
+                    EntryKind::File if wanted(&entry.name) => found.push(entry),
+                    EntryKind::File => {}
+                }
+            }
+        }
+        found.sort_by(|a, b| b.modified_ms.cmp(&a.modified_ms).then_with(|| a.path.cmp(&b.path)));
+        found.truncate(limit);
+        found
+    }
+
     /// The first bytes of a file, for the content check.
     pub fn read_head(&self, path: &RelPath, max: usize) -> Result<Vec<u8>> {
         let file = self.open_read(path)?;

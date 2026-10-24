@@ -19,6 +19,7 @@ use rulebox_ipc::hotkey::{self as hotkey_text, Hotkey, HotkeyKey};
 use rulebox_ipc::types::AdminExitInfo;
 use tauri::AppHandle;
 
+use crate::model::SessionState;
 use crate::shellwin::{DesktopHost, PopupKind};
 use crate::state::AppState;
 
@@ -188,6 +189,11 @@ async fn install_hook(host: &Arc<DesktopHost>) -> bool {
     }
 }
 
+/// Pure: may the Windows key open Start in this session state?
+pub fn start_allowed(session: &SessionState) -> bool {
+    matches!(session, SessionState::SignedIn { locked: false, .. })
+}
+
 /// A hotkey came back from Windows (or the lone Windows key was tapped).
 pub fn on_hotkey(app: &AppHandle, host: &Arc<DesktopHost>, id: HotkeyId) {
     match id {
@@ -200,6 +206,14 @@ pub fn on_hotkey(app: &AppHandle, host: &Arc<DesktopHost>, id: HotkeyId) {
             }
         }
         HotkeyId::START => {
+            // Start belongs to a signed-in, unlocked desktop: the sign-in and
+            // lock screens have no Start menu.
+            let unlocked = tauri::Manager::try_state::<AppState>(app).is_some_and(|state| {
+                state.read(|shell| start_allowed(&shell.session))
+            });
+            if !unlocked {
+                return;
+            }
             if host.popup_kind() == Some(PopupKind::Start) {
                 crate::shellwin::popup_close(app, host);
             } else if crate::shellwin::just_lost_focus(PopupKind::Start) {

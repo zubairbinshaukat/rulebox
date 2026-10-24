@@ -1,4 +1,4 @@
-import { useRef, type CSSProperties } from "react";
+import { useRef } from "react";
 import gsap from "gsap";
 import { Flip } from "gsap/Flip";
 import { useGSAP } from "@gsap/react";
@@ -9,8 +9,7 @@ import IconBell from "~icons/solar/bell-bold-duotone";
 import { useMotionLevel } from "../../lib/motion";
 import { useShell } from "../../lib/store";
 import { anchorOf, call, isTauri } from "../../lib/tauri";
-import { hueFor } from "../appArt";
-import { AppIcon } from "../appIcon";
+import { AppArt } from "../AppArtIcon";
 import { clickTarget, groupTaskbar, labelOf, stateOf } from "./grouping";
 import { TaskButton, WindowIcon } from "./TaskButton";
 import { Clock } from "./Clock";
@@ -264,19 +263,3 @@ export function Taskbar() {
   );
 }
 
-/** A catalogue app's art on its taskbar button: its own icon, or its Solar glyph in colour. */
-function AppArt({ app }: { app: AppEntry }) {
-  const style = { ["--rb-hue" as string]: hueFor(app) } as CSSProperties;
-  if (app.iconUrl) {
-    return (
-      <span className="rb-task__art rb-task__art--image" style={style}>
-        <img src={app.iconUrl} alt="" draggable={false} />
-      </span>
-    );
-  }
-  return (
-    <span className="rb-task__art rb-task__art--glyph" style={style}>
-      <AppIcon app={app} />
-    </span>
-  );
-}

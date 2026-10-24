@@ -1,7 +1,8 @@
-import type { Entry } from "@rulebox/types";
+import type { Entry, FileKind } from "@rulebox/types";
 import type { SidebarSection, SortConfig } from "./types";
 export { formatBytes } from "./storage";
 
+// Keep these in step with `FileKind::matches` (src-tauri/src/files/types.rs).
 export const DOC_EXTS = new Set([
   "doc",
   "docx",
@@ -9,6 +10,8 @@ export const DOC_EXTS = new Set([
   "txt",
   "rtf",
   "odt",
+  "ods",
+  "odp",
   "xls",
   "xlsx",
   "csv",
@@ -96,28 +99,48 @@ export function sortEntries(entries: Entry[], sort: SortConfig): Entry[] {
   });
 }
 
-/** Filter entries according to active sidebar media category. */
+/**
+ * The sidebar's file categories: every file of that kind anywhere in the
+ * employee's folder (loaded with `fs_files`), not the current folder filtered.
+ */
+export const CATEGORY_KINDS = {
+  documents: "documents",
+  audio: "audio",
+  video: "video",
+  images: "images",
+} as const satisfies Partial<Record<SidebarSection, FileKind>>;
+
+export const CATEGORY_TITLES: Record<keyof typeof CATEGORY_KINDS, string> = {
+  documents: "Documents",
+  audio: "Audio",
+  video: "Video",
+  images: "Images",
+};
+
+/** The `fs_files` kind for a category section, or null for a place (All files, Downloads, Trash). */
+export function categoryKind(section: SidebarSection): FileKind | null {
+  return section in CATEGORY_KINDS ? CATEGORY_KINDS[section as keyof typeof CATEGORY_KINDS] : null;
+}
+
+/**
+ * Filter entries for the active sidebar section. A category shows files of
+ * its kind only (also among search results); a place shows everything.
+ */
 export function filterEntriesBySection(
   entries: Entry[],
   section: SidebarSection,
 ): Entry[] {
+  const keep = (exts: Set<string>) =>
+    entries.filter((e) => e.kind === "file" && exts.has(getExtension(e.name)));
   switch (section) {
     case "documents":
-      return entries.filter(
-        (e) => e.kind === "folder" || DOC_EXTS.has(getExtension(e.name)),
-      );
+      return keep(DOC_EXTS);
     case "audio":
-      return entries.filter(
-        (e) => e.kind === "folder" || AUDIO_EXTS.has(getExtension(e.name)),
-      );
+      return keep(AUDIO_EXTS);
     case "video":
-      return entries.filter(
-        (e) => e.kind === "folder" || VIDEO_EXTS.has(getExtension(e.name)),
-      );
+      return keep(VIDEO_EXTS);
     case "images":
-      return entries.filter(
-        (e) => e.kind === "folder" || IMAGE_EXTS.has(getExtension(e.name)),
-      );
+      return keep(IMAGE_EXTS);
     default:
       return entries;
   }

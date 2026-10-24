@@ -1,10 +1,10 @@
-import { useEffect, useRef, type CSSProperties, type MouseEvent, type PointerEvent } from "react";
+import { useEffect, useRef, useState, type CSSProperties, type MouseEvent, type PointerEvent } from "react";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { FileChip } from "@rulebox/ui";
 import type { Entry } from "@rulebox/types";
 import IconFolder from "~icons/solar/folder-bold-duotone";
 
-import { LIST_ROW_HEIGHT } from "./layout";
+import { COLUMN_WIDTH, LIST_ROW_HEIGHT, visibleColumns } from "./layout";
 import { RenameInput } from "./RenameInput";
 import type { SortConfig, SortField } from "./types";
 import { formatBytes, formatDate, getExtension, itemId } from "./utils";
@@ -26,14 +26,25 @@ export interface FileListProps {
   onItemPointerDown: (entry: Entry, event: PointerEvent) => void;
   onCommitRename: (oldPath: string, newName: string) => void;
   onCancelRename: () => void;
+  /** Show each item's folder next to its name (a category lists files from many folders). */
+  showLocation?: boolean;
 }
+
+
 
 const COLUMNS: { field: SortField; label: string; style: CSSProperties }[] = [
   { field: "name", label: "Name", style: { flex: 1, minWidth: 0 } },
-  { field: "type", label: "Type", style: { width: 110 } },
-  { field: "size", label: "Size", style: { width: 100, textAlign: "right" } },
-  { field: "modified", label: "Date modified", style: { width: 170, textAlign: "right" } },
+  { field: "type", label: "Type", style: { width: COLUMN_WIDTH.type, flexShrink: 0 } },
+  { field: "size", label: "Size", style: { width: COLUMN_WIDTH.size, flexShrink: 0, textAlign: "right" } },
+  { field: "modified", label: "Date modified", style: { width: COLUMN_WIDTH.modified, flexShrink: 0, textAlign: "right" } },
 ];
+
+
+/** The folder part of a relative path ("" at the top). */
+function folderOf(path: string): string {
+  const cut = path.lastIndexOf("/");
+  return cut > 0 ? path.slice(0, cut) : "";
+}
 
 export function FileList({
   items,
@@ -50,8 +61,24 @@ export function FileList({
   onItemPointerDown,
   onCommitRename,
   onCancelRename,
+  showLocation = false,
 }: FileListProps) {
   const bodyRef = useRef<HTMLDivElement>(null);
+  const gridRef = useRef<HTMLDivElement>(null);
+  const [width, setWidth] = useState(800);
+
+  useEffect(() => {
+    const el = gridRef.current;
+    // Test DOMs have no ResizeObserver: the default layout stays.
+    if (!el || typeof ResizeObserver === "undefined") return;
+    const ro = new ResizeObserver((entries) => {
+      const box = entries[0]?.contentRect;
+      if (box) setWidth(box.width);
+    });
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
+  const shown = visibleColumns(width);
 
   // eslint-disable-next-line react-hooks/incompatible-library -- TanStack Virtual, used as the plan says
   const virtualizer = useVirtualizer({
@@ -81,15 +108,16 @@ export function FileList({
       role="grid"
       aria-label="Files"
       aria-rowcount={items.length + 1}
-      aria-colcount={4}
+      aria-colcount={shown.size}
       aria-multiselectable="true"
       aria-activedescendant={focusedPath ? itemId(focusedPath) : undefined}
       tabIndex={0}
       data-explorer-list
+      ref={gridRef}
       style={tableContainer}
     >
       <div role="row" aria-rowindex={1} style={headerRow}>
-        {COLUMNS.map((column) => {
+        {COLUMNS.filter((column) => shown.has(column.field)).map((column) => {
           const active = sort.field === column.field;
           return (
             <div
@@ -161,24 +189,33 @@ export function FileList({
                   ) : (
                     <span style={nameText} title={entry.path}>
                       {entry.name}
+                      {showLocation ? (
+                        <span style={locationText}>{folderOf(entry.path) || "My files"}</span>
+                      ) : null}
                     </span>
                   )}
                 </div>
-                <div role="gridcell" style={{ ...cell, width: 110, color: "var(--rb-muted)" }}>
-                  {isFolder ? "Folder" : ext.toUpperCase() || "File"}
-                </div>
-                <div
-                  role="gridcell"
-                  style={{ ...cell, width: 100, justifyContent: "flex-end", color: "var(--rb-muted)" }}
-                >
-                  {isFolder ? "" : formatBytes(entry.size)}
-                </div>
-                <div
-                  role="gridcell"
-                  style={{ ...cell, width: 170, justifyContent: "flex-end", color: "var(--rb-muted)" }}
-                >
-                  {formatDate(entry.modifiedMs)}
-                </div>
+                {shown.has("type") ? (
+                  <div role="gridcell" style={{ ...cell, ...fixed(COLUMN_WIDTH.type), color: "var(--rb-muted)" }}>
+                    {isFolder ? "Folder" : ext.toUpperCase() || "File"}
+                  </div>
+                ) : null}
+                {shown.has("size") ? (
+                  <div
+                    role="gridcell"
+                    style={{ ...cell, ...fixed(COLUMN_WIDTH.size), justifyContent: "flex-end", color: "var(--rb-muted)" }}
+                  >
+                    {isFolder ? "" : formatBytes(entry.size)}
+                  </div>
+                ) : null}
+                {shown.has("modified") ? (
+                  <div
+                    role="gridcell"
+                    style={{ ...cell, ...fixed(COLUMN_WIDTH.modified), justifyContent: "flex-end", color: "var(--rb-muted)" }}
+                  >
+                    {formatDate(entry.modifiedMs)}
+                  </div>
+                ) : null}
               </div>
             );
           })}
@@ -251,3 +288,14 @@ const nameText: CSSProperties = {
   whiteSpace: "nowrap",
   fontWeight: 500,
 };
+
+const locationText: CSSProperties = {
+  marginLeft: 8,
+  fontWeight: 400,
+  fontSize: 12,
+  color: "var(--rb-muted)",
+};
+
+function fixed(width: number): CSSProperties {
+  return { width, flexShrink: 0 };
+}

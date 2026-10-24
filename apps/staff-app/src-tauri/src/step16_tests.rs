@@ -253,3 +253,22 @@ fn recency_grows_as_windows_are_activated() {
     table.apply(&WindowEvent::Added(info(3, "three again")), &none);
     assert_eq!(recency(&table).iter().find(|(i, _)| i == "3").unwrap().1, 0);
 }
+
+#[test]
+fn the_windows_key_opens_start_only_on_an_unlocked_desktop() {
+    use rulebox_staff_lib::model::{Employee, SessionState};
+    use rulebox_staff_lib::shortcuts::start_allowed;
+    let employee = Employee {
+        id: "emp_maya".into(),
+        username: "maya".into(),
+        name: "Maya Chen".into(),
+        role: None,
+        quota_bytes: 1,
+    };
+    let signed_in = |locked| SessionState::SignedIn { employee: employee.clone(), locked, offline: false };
+    assert!(start_allowed(&signed_in(false)));
+    assert!(!start_allowed(&signed_in(true)), "the lock screen has no Start");
+    assert!(!start_allowed(&SessionState::SignedOut { last: None }), "nor the sign-in screen");
+    assert!(!start_allowed(&SessionState::SigningIn));
+    assert!(!start_allowed(&SessionState::SigningOut));
+}

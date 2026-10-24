@@ -27,6 +27,8 @@ export interface SidebarProps {
   dropTarget: string | null;
   /** The storage bar's Free up space action. */
   onFreeUp: () => void;
+  /** A narrow window: icons only, names in tooltips. */
+  compact?: boolean;
 }
 
 interface SectionItem {
@@ -83,17 +85,17 @@ const SECTIONS: SectionItem[] = [
   },
 ];
 
-export function Sidebar({ section, onSelectSection, storage, dropTarget, onFreeUp }: SidebarProps) {
+export function Sidebar({ section, onSelectSection, storage, dropTarget, onFreeUp, compact = false }: SidebarProps) {
   return (
     <aside
       aria-label="Files navigation"
       style={{
-        width: 210,
+        width: compact ? 60 : 210,
         flexShrink: 0,
         display: "flex",
         flexDirection: "column",
         justifyContent: "space-between",
-        padding: "16px 12px",
+        padding: compact ? "12px 8px" : "16px 12px",
         background: "var(--rb-surface)",
         borderRight: "1px solid var(--rb-line)",
         userSelect: "none",
@@ -110,8 +112,12 @@ export function Sidebar({ section, onSelectSection, storage, dropTarget, onFreeU
               onClick={() => onSelectSection(item.id)}
               data-drop-dir={item.targetDir}
               aria-current={active ? "page" : undefined}
+              aria-label={compact ? item.label : undefined}
+              title={compact ? item.label : undefined}
               style={{
                 ...navButton,
+                justifyContent: compact ? "center" : "flex-start",
+                padding: compact ? "10px 0" : navButton.padding,
                 background: active || (item.targetDir !== undefined && dropTarget === item.targetDir) ? "var(--rb-accent-soft)" : "transparent",
                 color: active ? "var(--rb-accent-text)" : "var(--rb-ink)",
                 fontWeight: active ? 600 : 500,
@@ -125,12 +131,17 @@ export function Sidebar({ section, onSelectSection, storage, dropTarget, onFreeU
               >
                 {item.icon(active)}
               </span>
-              <span>{item.label}</span>
+              {compact ? null : <span>{item.label}</span>}
             </button>
           );
         })}
       </nav>
 
+      {compact ? (
+        <div style={storageSection} title={`Storage: ${storage.detail}`}>
+          <ProgressBar value={storage.pct} />
+        </div>
+      ) : (
       <div style={storageSection}>
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 6 }}>
           <span style={{ fontSize: 12, fontWeight: 600, color: "var(--rb-ink)" }}>Storage</span>
@@ -178,6 +189,7 @@ export function Sidebar({ section, onSelectSection, storage, dropTarget, onFreeU
           </div>
         ) : null}
       </div>
+      )}
     </aside>
   );
 }

@@ -69,3 +69,4 @@ export * from "./generated/TextPreview";
 export * from "./generated/TrashItem";
 export * from "./generated/Usage";
 export * from "./generated/ViewerKind";
+export * from "./generated/FileKind";

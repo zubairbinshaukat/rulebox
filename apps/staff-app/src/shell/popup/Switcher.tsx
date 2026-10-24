@@ -4,6 +4,7 @@ import type { TaskItem } from "@rulebox/types";
 import { useTauriEvent } from "../../lib/events";
 import { useShell } from "../../lib/store";
 import { call, isTauri } from "../../lib/tauri";
+import { AppArt } from "../AppArtIcon";
 import { WindowIcon } from "../taskbar/TaskButton";
 import { initialIndex, moveIndex, switcherKey, switcherOrder } from "./switcherLogic";
 
@@ -15,6 +16,7 @@ import { initialIndex, moveIndex, switcherKey, switcherOrder } from "./switcherL
  */
 export function Switcher() {
   const tasks = useShell((state) => state.tasks);
+  const apps = useShell((state) => state.apps.items);
   const ordered = useMemo(() => switcherOrder(tasks), [tasks]);
   // Until a key or the pointer moves the highlight it is on the window used before this one.
   const [moved, setMoved] = useState<number | null>(null);
@@ -72,75 +74,70 @@ export function Switcher() {
 
   if (ordered.length === 0) {
     return (
-      <div style={{ padding: 24, color: "var(--rb-muted)", fontSize: 14 }}>
-        No windows are open.
+      <div className="rb-switcher rb-switcher--empty">
+        <span className="rb-switcher__eyebrow">Switch apps</span>
+        <span className="rb-switcher__title">No windows are open</span>
       </div>
     );
   }
 
   const selected = Math.min(index, ordered.length - 1);
+  const current = ordered[selected];
+  const appOf = (task: TaskItem) => (task.appId ? apps.find((app) => app.id === task.appId) : undefined);
+  const currentApp = current ? appOf(current) : undefined;
   return (
-    <div
-      role="listbox"
-      aria-label="Open windows"
-      aria-activedescendant={`switch-${ordered[selected]?.id}`}
-      style={{
-        height: "100%",
-        boxSizing: "border-box",
-        padding: 16,
-        display: "flex",
-        gap: 10,
-        alignItems: "stretch",
-        overflowX: "auto",
-        overflowY: "hidden",
-      }}
-    >
-      {ordered.map((task, position) => (
-        <button
-          key={task.id}
-          id={`switch-${task.id}`}
-          type="button"
-          role="option"
-          aria-selected={position === selected}
-          onClick={() => activate(task)}
-          onMouseEnter={() => setMoved(position)}
-          style={{
-            flex: "0 0 132px",
-            display: "flex",
-            flexDirection: "column",
-            alignItems: "center",
-            justifyContent: "center",
-            gap: 10,
-            padding: 12,
-            borderRadius: 16,
-            border: `2px solid ${position === selected ? "var(--rb-accent)" : "transparent"}`,
-            background: position === selected ? "var(--rb-accent-soft)" : "transparent",
-            color: "var(--rb-ink)",
-            font: "inherit",
-            cursor: "pointer",
-          }}
-        >
-          <span style={{ width: 48, height: 48, display: "flex", alignItems: "center", justifyContent: "center" }}>
-            <WindowIcon iconKey={task.iconKey} enabled={isTauri()} />
-          </span>
-          <span
-            style={{
-              fontSize: 12.5,
-              fontWeight: 500,
-              textAlign: "center",
-              maxWidth: "100%",
-              overflow: "hidden",
-              textOverflow: "ellipsis",
-              display: "-webkit-box",
-              WebkitLineClamp: 2,
-              WebkitBoxOrient: "vertical",
-              lineHeight: 1.3,
-            }}
-          >
-            {task.title || "Untitled window"}
-          </span>
-        </button>
-      ))}
+    <div className="rb-switcher">
+      <div className="rb-switcher__head">
+        <span className="rb-switcher__eyebrow">Switch apps · {ordered.length}</span>
+        <span className="rb-switcher__title">{currentApp?.name ?? current?.title ?? "Untitled window"}</span>
+      </div>
+      <div
+        role="listbox"
+        aria-label="Open windows"
+        aria-activedescendant={`switch-${current?.id}`}
+        className="rb-switcher__list"
+      >
+        {ordered.map((task, position) => {
+          const app = appOf(task);
+          const title = task.title || "Untitled window";
+          return (
+            <button
+              key={task.id}
+              id={`switch-${task.id}`}
+              type="button"
+              role="option"
+              aria-selected={position === selected}
+              className="rb-switcher__item"
+              title={title}
+              onClick={() => activate(task)}
+              onMouseEnter={() => setMoved(position)}
+            >
+              {app ? (
+                <AppArt app={app} large />
+              ) : (
+                <span className="rb-task__art rb-task__art--image rb-task__art--lg">
+                  <WindowIcon iconKey={task.iconKey} enabled={isTauri()} />
+                </span>
+              )}
+              <span className="rb-switcher__label">{app?.name ?? title}</span>
+              {app && title !== app.name ? <span className="rb-switcher__sub">{title}</span> : null}
+              {task.minimized ? <span className="rb-switcher__state">Minimized</span> : null}
+            </button>
+          );
+        })}
+      </div>
+      <div className="rb-switcher__hints" aria-hidden>
+        <span>
+          <kbd className="rb-kbd">Tab</kbd> next
+        </span>
+        <span>
+          <kbd className="rb-kbd">Shift</kbd>+<kbd className="rb-kbd">Tab</kbd> back
+        </span>
+        <span>release <kbd className="rb-kbd">Alt</kbd> to switch</span>
+        <span>
+          <kbd className="rb-kbd">Esc</kbd> cancel
+        </span>
+      </div>
     </div>
   );
 }

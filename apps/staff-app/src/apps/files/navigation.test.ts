@@ -138,3 +138,16 @@ describe("paths and names", () => {
     expect(uniqueName("New folder", ["new FOLDER", "New folder (2)"])).toBe("New folder (3)");
   });
 });
+
+describe("responsive layout", () => {
+  it("keeps the name readable and drops Type, then Size, then the date", async () => {
+    const { toolbarModeFor, visibleColumns } = await import("./layout");
+    expect([...visibleColumns(900)].sort()).toEqual(["modified", "name", "size", "type"]);
+    expect(visibleColumns(420).has("type")).toBe(false);
+    expect(visibleColumns(420).has("modified")).toBe(true);
+    expect([...visibleColumns(250)]).toEqual(["name"]);
+    expect(toolbarModeFor(1000)).toBe("wide");
+    expect(toolbarModeFor(600)).toBe("stacked");
+    expect(toolbarModeFor(400)).toBe("narrow");
+  });
+});

@@ -30,6 +30,9 @@ pub type Emit = Arc<dyn Fn(&str, Value) + Send + Sync>;
 const TRASH_MAX_AGE_MS: u64 = 30 * 24 * 60 * 60 * 1000;
 const RECENT_MAX: usize = 12;
 const SEARCH_CAP: usize = 500;
+/// The most files one category view lists, and the most entries it looks at.
+const KIND_LIMIT: usize = 1000;
+const KIND_SCAN: usize = 50_000;
 const SEARCH_BATCH: usize = 40;
 
 #[derive(Serialize, Clone, Copy, Debug, PartialEq, Eq, TS)]
@@ -367,6 +370,13 @@ impl FileSession {
             .filter_map(|p| self.root.stat(&p).ok())
             .filter(|entry| entry.kind == EntryKind::File)
             .collect()
+    }
+
+    /// The newest files of `kind` anywhere in the folder (the Files sidebar's
+    /// categories, the desktop's My files panel). Blocks; run on a worker.
+    pub fn files_of_kind(&self, kind: types::FileKind, limit: usize) -> Vec<Entry> {
+        self.root
+            .newest_files(&|name| kind.matches(name), limit.clamp(1, KIND_LIMIT), KIND_SCAN)
     }
 
     /// Starts a search on a worker and streams `files://search` batches to

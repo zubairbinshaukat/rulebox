@@ -41,6 +41,7 @@
     "allow-fs-list",
     "allow-fs-search",
     "allow-fs-recent",
+    "allow-fs-files",
     "allow-fs-open",
     "allow-thumb-open",
     "allow-admin-exit-open",

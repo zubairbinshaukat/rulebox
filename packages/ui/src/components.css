@@ -423,6 +423,121 @@
     transform: none;
   }
 }
+/* Document tabs under a built-in window's title bar (Lite mode keeps one
+   window with tabs). The active tab is the colour of the content below and
+   joins it; the others are quiet until hovered. */
+.rb-tabstrip {
+  display: flex;
+  align-items: flex-end;
+  gap: 2px;
+  flex: none;
+  height: 40px;
+  padding: 0 10px;
+  overflow-x: auto;
+  overflow-y: hidden;
+  scrollbar-width: none;
+  border-bottom: 1px solid var(--rb-line);
+}
+.rb-tabstrip__tab {
+  position: relative;
+  isolation: isolate;
+  display: flex;
+  align-items: center;
+  flex: 0 1 200px;
+  min-width: 96px;
+  height: 34px;
+  margin-bottom: -1px;
+  padding-right: 4px;
+  border: 1px solid transparent;
+  border-bottom: 0;
+  border-radius: 12px 12px 0 0;
+  color: var(--rb-muted);
+}
+.rb-tabstrip__tab::before {
+  content: "";
+  position: absolute;
+  inset: 3px 0 4px;
+  border-radius: 9px;
+  background: var(--rb-hover);
+  opacity: 0;
+  z-index: -1;
+  transition: opacity var(--rb-duration) var(--rb-ease);
+}
+.rb-tabstrip__tab:hover::before {
+  opacity: 1;
+}
+.rb-tabstrip__tab[data-active="true"] {
+  background: var(--rb-surface);
+  border-color: var(--rb-line);
+  color: var(--rb-ink);
+}
+.rb-tabstrip__tab[data-active="true"]::before {
+  display: none;
+}
+.rb-tabstrip__select {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: 1;
+  min-width: 0;
+  height: 100%;
+  padding: 0 4px 0 12px;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  text-align: left;
+}
+.rb-tabstrip__tab[data-active="true"] .rb-tabstrip__select {
+  font-weight: 600;
+}
+.rb-tabstrip__icon {
+  display: inline-flex;
+  flex: none;
+  color: var(--rb-muted);
+}
+.rb-tabstrip__tab[data-active="true"] .rb-tabstrip__icon {
+  color: var(--rb-accent);
+}
+.rb-tabstrip__title {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.rb-tabstrip__close {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--rb-faint);
+  cursor: pointer;
+  opacity: 0.7;
+  transition: opacity var(--rb-duration) var(--rb-ease);
+}
+.rb-tabstrip__close:hover,
+.rb-tabstrip__tab[data-active="true"] .rb-tabstrip__close {
+  opacity: 1;
+}
+.rb-tabstrip__close:hover {
+  color: var(--rb-danger-text);
+}
+.rb-tabstrip__select:focus-visible,
+.rb-tabstrip__close:focus-visible {
+  outline: 2px solid var(--rb-accent);
+  outline-offset: -2px;
+  border-radius: 8px;
+}
+
 /* Paging for a grid that does not fit (the desktop's app tiles): round
    arrows at the sides, and dots in a pill with a sliding thumb under it. */
 .rb-page-arrow {
@@ -986,8 +1101,168 @@
   height: 22px;
   object-fit: contain;
 }
+.rb-task__art--lg {
+  width: 56px;
+  height: 56px;
+  border-radius: 17px;
+  font-size: 30px;
+}
+.rb-task__art--lg.rb-task__art--image img {
+  width: 34px;
+  height: 34px;
+}
 .rb-task:hover .rb-task__art {
   transform: translateY(-2px) scale(1.06);
+}
+
+/* The app switcher (Alt+Tab): the chosen window's name on top, the windows
+   as cards, the keys at the bottom. The chosen card lifts (transform) and
+   gets an accent ring. */
+.rb-switcher {
+  height: 100%;
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 18px 18px 14px;
+}
+.rb-switcher--empty {
+  align-items: center;
+  justify-content: center;
+}
+.rb-switcher__head {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  min-width: 0;
+}
+.rb-switcher__eyebrow {
+  font-size: 11.5px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--rb-muted);
+}
+.rb-switcher__title {
+  max-width: 100%;
+  font-size: 17px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  color: var(--rb-ink);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.rb-switcher__list {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  align-items: stretch;
+  justify-content: safe center;
+  gap: 10px;
+  padding: 6px 4px;
+  overflow-x: auto;
+  overflow-y: hidden;
+  scrollbar-width: none;
+}
+.rb-switcher__item {
+  position: relative;
+  isolation: isolate;
+  flex: 0 0 128px;
+  /* Fixed: a long window title is cut with an ellipsis, never widens the card. */
+  width: 128px;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 12px 10px;
+  border: 0;
+  border-radius: 18px;
+  background: transparent;
+  color: var(--rb-ink);
+  font: inherit;
+  cursor: pointer;
+  transition: transform 0.22s var(--rb-ease);
+}
+.rb-switcher__item::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  background: var(--rb-hover);
+  opacity: 0;
+  z-index: -1;
+  transition: opacity 0.18s var(--rb-ease);
+}
+.rb-switcher__item:hover::before {
+  opacity: 0.6;
+}
+.rb-switcher__item[aria-selected="true"] {
+  transform: translateY(-3px);
+}
+.rb-switcher__item[aria-selected="true"]::before {
+  opacity: 1;
+  background: var(--rb-accent-soft);
+  box-shadow:
+    0 0 0 2px var(--rb-accent),
+    var(--rb-shadow-md);
+}
+.rb-switcher__item .rb-task__art {
+  margin-bottom: 4px;
+}
+.rb-switcher__label {
+  max-width: 100%;
+  font-size: 13px;
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.rb-switcher__sub {
+  max-width: 100%;
+  font-size: 11.5px;
+  color: var(--rb-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.rb-switcher__state {
+  font-size: 10.5px;
+  font-weight: 600;
+  color: var(--rb-faint);
+}
+.rb-switcher__hints {
+  display: flex;
+  justify-content: center;
+  flex-wrap: wrap;
+  gap: 6px 16px;
+  font-size: 11.5px;
+  color: var(--rb-muted);
+}
+.rb-kbd {
+  display: inline-block;
+  min-width: 20px;
+  padding: 1px 6px;
+  border-radius: 6px;
+  border: 1px solid var(--rb-line);
+  border-bottom-width: 2px;
+  background: var(--rb-surface);
+  color: var(--rb-ink);
+  font: inherit;
+  font-size: 11px;
+  font-weight: 600;
+  text-align: center;
+}
+@media (prefers-reduced-motion: reduce) {
+  .rb-switcher__item[aria-selected="true"] {
+    transform: none;
+  }
+}
+[data-lite="true"] .rb-switcher__item[aria-selected="true"] {
+  transform: none;
 }
 /* In the apps pill the art itself answers hover; no tinted square behind it. */
 .rb-dock--apps .rb-task:hover {
@@ -996,6 +1271,22 @@
 .rb-dock--apps .rb-task__icon {
   width: auto;
   height: auto;
+}
+/* Art on top, the open / active mark 5 px under it, the pair centred in the pill. */
+.rb-dock--apps {
+  padding: 0 10px;
+  gap: 4px;
+}
+.rb-dock--apps .rb-task {
+  width: 48px;
+  height: 50px;
+  align-items: flex-start;
+  padding-top: 4px;
+  border-radius: 14px;
+}
+.rb-dock--apps .rb-task__bar {
+  bottom: 3px;
+  height: 4px;
 }
 [data-lite="true"] .rb-task:hover .rb-task__art {
   transform: none;

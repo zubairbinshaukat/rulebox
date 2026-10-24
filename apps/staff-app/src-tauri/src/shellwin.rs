@@ -59,7 +59,7 @@ impl PopupKind {
             PopupKind::Start => (560, 640),
             PopupKind::QuickSettings => (380, 560),
             PopupKind::Account => (300, 220),
-            PopupKind::Switcher => (720, 232),
+            PopupKind::Switcher => (760, 292),
             PopupKind::Thumb => (272, 196),
             PopupKind::Confirm => (400, 220),
         }

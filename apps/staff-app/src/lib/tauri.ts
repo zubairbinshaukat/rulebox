@@ -8,6 +8,7 @@ import type {
   EnrollmentDto,
   Entry,
   ExitAnswer,
+  FileKind,
   ImageInfo,
   KioskPhaseDto,
   OpenAction,
@@ -163,6 +164,7 @@ type Commands = {
   admin_exit_submit: { args: { pin: string }; result: ExitAnswer };
   admin_exit_close: { args: Record<string, never>; result: void };
   fs_recent: { args: Record<string, never>; result: Entry[] };
+  fs_files: { args: { kind: FileKind; limit?: number }; result: Entry[] };
   fs_clip_set: { args: { op: ClipOp; paths: string[] }; result: void };
   fs_clip_get: { args: Record<string, never>; result: Clip | null };
   fs_paste: { args: { toDir: string }; result: PasteResult };

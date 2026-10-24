@@ -19,6 +19,8 @@ import IconMagnifier from "~icons/solar/magnifer-bold-duotone";
 import IconRefresh from "~icons/solar/refresh-bold-duotone";
 import IconSortDown from "~icons/solar/sort-from-top-to-bottom-bold-duotone";
 import IconSortUp from "~icons/solar/sort-from-bottom-to-top-bold-duotone";
+import IconListView from "~icons/solar/list-bold-duotone";
+import IconGridView from "~icons/solar/widget-bold-duotone";
 
 import { useTauriEvent } from "../../lib/events";
 import { openFile } from "../../lib/files";
@@ -49,8 +51,9 @@ import {
 import { Sidebar } from "./Sidebar";
 import { getStorageThreshold } from "./storage";
 import { TrashView } from "./TrashView";
+import { toolbarModeFor, type ToolbarMode } from "./layout";
 import type { DialogState, SidebarSection, SortConfig, SortField, ViewMode } from "./types";
-import { filterEntriesBySection, itemId, sortEntries } from "./utils";
+import { CATEGORY_TITLES, categoryKind, filterEntriesBySection, itemId, sortEntries } from "./utils";
 import { useDragMove } from "./useDragMove";
 import { useSelection } from "./useSelection";
 
@@ -67,6 +70,10 @@ const SORT_LABELS: Record<SortField, string> = {
   size: "Size",
   modified: "Date modified",
 };
+
+/** Below this window width the sidebar shows icons only. */
+const COMPACT_SIDEBAR_BELOW = 720;
+
 
 function locationSection(path: string): SidebarSection {
   return path === "Downloads" ? "downloads" : "all";
@@ -107,12 +114,42 @@ export function FileExplorer({ initialPath = "" }: FileExplorerProps) {
   const [announcement, setAnnouncement] = useState("");
 
   const containerRef = useRef<HTMLDivElement>(null);
+  const mainRef = useRef<HTMLDivElement>(null);
+  const [toolbarMode, setToolbarMode] = useState<ToolbarMode>("wide");
+  const category = categoryKind(section);
   const searchInputRef = useRef<HTMLInputElement>(null);
   const typeAhead = useRef(new TypeAheadBuffer(500));
   const columnsRef = useRef(4);
   const reloadTimer = useRef<number | undefined>(undefined);
   const quietReload = useRef(false);
   const [reloadTick, setReloadTick] = useState(0);
+
+  // The toolbar's layout follows the width of the area beside the sidebar.
+  useEffect(() => {
+    const el = mainRef.current;
+    // Test DOMs have no ResizeObserver: the default layout stays.
+    if (!el || typeof ResizeObserver === "undefined") return;
+    const ro = new ResizeObserver((entries) => {
+      const box = entries[0]?.contentRect;
+      if (box) setToolbarMode(toolbarModeFor(box.width));
+    });
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
+
+  // A narrow window turns the sidebar into a rail of icons.
+  const [compactSidebar, setCompactSidebar] = useState(false);
+  useEffect(() => {
+    const el = containerRef.current;
+    // Test DOMs have no ResizeObserver: the default layout stays.
+    if (!el || typeof ResizeObserver === "undefined") return;
+    const ro = new ResizeObserver((entries) => {
+      const box = entries[0]?.contentRect;
+      if (box) setCompactSidebar(box.width < COMPACT_SIDEBAR_BELOW);
+    });
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
 
   const onColumns = useCallback((columns: number) => {
     columnsRef.current = columns;
@@ -158,9 +195,17 @@ export function FileExplorer({ initialPath = "" }: FileExplorerProps) {
     let current = true;
     async function run() {
       try {
+        const kind = categoryKind(section);
         if (section === "trash") {
           const list = isTauri() ? await call("fs_trash_list", {}) : [];
           if (current) setTrashItems(list);
+        } else if (kind) {
+          // A category: every file of that kind in the whole folder, newest first.
+          const list = isTauri() ? await call("fs_files", { kind, limit: 1000 }) : [];
+          if (current) {
+            setEntries(list);
+            setFolderError(null);
+          }
         } else {
           const list = isTauri() ? await call("fs_list", { path: currentDir }) : [];
           if (current) {
@@ -202,7 +247,8 @@ export function FileExplorer({ initialPath = "" }: FileExplorerProps) {
 
   // Live refresh. A burst of changes (a paste of many files) is one reload.
   useTauriEvent<{ dir: string }>("files://changed", ({ dir }) => {
-    if (section !== "trash" && dir !== currentDir) {
+    // The trash and the categories span the whole folder: any change counts.
+    if (section !== "trash" && !categoryKind(section) && dir !== currentDir) {
       return;
     }
     window.clearTimeout(reloadTimer.current);
@@ -756,33 +802,57 @@ export function FileExplorer({ initialPath = "" }: FileExplorerProps) {
         dropTarget={dropTarget}
         onSelectSection={selectSection}
         onFreeUp={() => selectSection("trash")}
+        compact={compactSidebar}
       />
 
-      <div style={mainArea}>
+      <div ref={mainRef} style={mainArea}>
         <div style={toolbar}>
           <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
             <IconButton label="Back" size={32} disabled={!canGoBack(history)} onClick={back}>
-              <IconAltArrowLeft width={16} height={16} />
+              <IconAltArrowLeft width={18} height={18} />
             </IconButton>
             <IconButton label="Forward" size={32} disabled={!canGoForward(history)} onClick={forward}>
-              <IconAltArrowRight width={16} height={16} />
+              <IconAltArrowRight width={18} height={18} />
             </IconButton>
-            <IconButton label="Up one folder" size={32} disabled={!currentDir || section === "trash"} onClick={up}>
-              <IconAltArrowUp width={16} height={16} />
+            <IconButton
+              label="Up one folder"
+              size={32}
+              disabled={!currentDir || section === "trash" || category !== null}
+              onClick={up}
+            >
+              <IconAltArrowUp width={18} height={18} />
             </IconButton>
           </div>
 
-          <div style={{ flex: 1, minWidth: 0, margin: "0 12px" }}>
+          <div style={{ flex: "1 1 0", minWidth: 0, margin: "0 12px" }}>
             {section === "trash" ? (
-              <span style={{ fontWeight: 600, fontSize: 13.5 }}>Trash</span>
+              <span style={placeTitle}>Trash</span>
+            ) : category ? (
+              <span style={placeTitle}>
+                {CATEGORY_TITLES[section as keyof typeof CATEGORY_TITLES]}
+                <span style={placeHint}>in all your folders</span>
+              </span>
             ) : (
               <Breadcrumbs currentPath={currentDir} onNavigate={navigateTo} dropTarget={dropTarget} />
             )}
           </div>
 
           {section !== "trash" ? (
-            <div style={toolbarControls}>
-              <div style={{ position: "relative", flex: "0 1 200px", minWidth: 110 }}>
+            <div
+              style={{
+                ...toolbarControls,
+                // Below the full width the controls get a row of their own, led by the search.
+                flex: toolbarMode === "wide" ? "0 1 auto" : "1 1 100%",
+                justifyContent: toolbarMode === "wide" ? "flex-end" : "flex-start",
+              }}
+            >
+              <div
+                style={{
+                  position: "relative",
+                  flex: toolbarMode === "wide" ? "0 1 220px" : "1 1 auto",
+                  minWidth: 120,
+                }}
+              >
                 <span aria-hidden style={searchIcon}>
                   <IconMagnifier width={14} height={14} />
                 </span>
@@ -797,46 +867,60 @@ export function FileExplorer({ initialPath = "" }: FileExplorerProps) {
                 />
               </div>
 
-              <select
-                className="rb-input"
-                aria-label="Sort by"
-                value={sort.field}
-                onChange={(event) => setSort((prev) => ({ ...prev, field: event.target.value as SortField }))}
-                style={{ height: 32, fontSize: 13, width: 140, flexShrink: 0 }}
-              >
-                {(Object.keys(SORT_LABELS) as SortField[]).map((field) => (
-                  <option key={field} value={field}>
-                    {SORT_LABELS[field]}
-                  </option>
-                ))}
-              </select>
+              {toolbarMode !== "narrow" ? (
+                <select
+                  className="rb-input"
+                  aria-label="Sort by"
+                  value={sort.field}
+                  onChange={(event) => setSort((prev) => ({ ...prev, field: event.target.value as SortField }))}
+                  style={{ height: 32, fontSize: 13, width: 132, flexShrink: 0 }}
+                >
+                  {(Object.keys(SORT_LABELS) as SortField[]).map((field) => (
+                    <option key={field} value={field}>
+                      {SORT_LABELS[field]}
+                    </option>
+                  ))}
+                </select>
+              ) : null}
               <IconButton
                 label={sort.direction === "asc" ? "Sorted ascending" : "Sorted descending"}
                 size={32}
                 onClick={() => setSort((prev) => ({ ...prev, direction: prev.direction === "asc" ? "desc" : "asc" }))}
               >
                 {sort.direction === "asc" ? (
-                  <IconSortDown width={16} height={16} />
+                  <IconSortDown width={18} height={18} />
                 ) : (
-                  <IconSortUp width={16} height={16} />
+                  <IconSortUp width={18} height={18} />
                 )}
               </IconButton>
 
-              <SegmentedControl<ViewMode>
-                aria-label="View"
-                value={viewMode}
-                onChange={setViewMode}
-                options={[
-                  { value: "list", label: "List" },
-                  { value: "grid", label: "Grid" },
-                ]}
-              />
+              {toolbarMode === "narrow" ? (
+                <IconButton
+                  label={viewMode === "list" ? "Show as grid" : "Show as list"}
+                  size={32}
+                  onClick={() => setViewMode(viewMode === "list" ? "grid" : "list")}
+                >
+                  {viewMode === "list" ? <IconGridView width={18} height={18} /> : <IconListView width={18} height={18} />}
+                </IconButton>
+              ) : (
+                <SegmentedControl<ViewMode>
+                  aria-label="View"
+                  value={viewMode}
+                  onChange={setViewMode}
+                  options={[
+                    { value: "list", label: "List" },
+                    { value: "grid", label: "Grid" },
+                  ]}
+                />
+              )}
 
-              <IconButton label="New folder" size={32} onClick={askNewFolder}>
-                <IconAddFolder width={16} height={16} />
-              </IconButton>
+              {category === null ? (
+                <IconButton label="New folder" size={32} onClick={askNewFolder}>
+                  <IconAddFolder width={18} height={18} />
+                </IconButton>
+              ) : null}
               <IconButton label="Refresh" size={32} onClick={reload}>
-                <IconRefresh width={16} height={16} />
+                <IconRefresh width={18} height={18} />
               </IconButton>
             </div>
           ) : null}
@@ -881,6 +965,7 @@ export function FileExplorer({ initialPath = "" }: FileExplorerProps) {
               sort={sort}
               renamingPath={renamingPath}
               dropTarget={dropTarget}
+              showLocation={category !== null || searchResults !== null}
               onSortChange={(field) =>
                 setSort((prev) => ({
                   field,
@@ -985,6 +1070,23 @@ const toolbar: CSSProperties = {
   // A narrow window puts the controls on a second row instead of cutting them off.
   flexWrap: "wrap",
   rowGap: 8,
+};
+
+const placeTitle: CSSProperties = {
+  display: "inline-flex",
+  alignItems: "baseline",
+  gap: 8,
+  fontWeight: 600,
+  fontSize: 14,
+  whiteSpace: "nowrap",
+};
+
+const placeHint: CSSProperties = {
+  fontWeight: 400,
+  fontSize: 12.5,
+  color: "var(--rb-muted)",
+  overflow: "hidden",
+  textOverflow: "ellipsis",
 };
 
 const toolbarControls: CSSProperties = {

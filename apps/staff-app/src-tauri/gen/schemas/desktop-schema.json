@@ -267,6 +267,12 @@
           "markdownDescription": "Enables the fs_copy command without any pre-configured scope."
         },
         {
+          "description": "Enables the fs_files command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-fs-files",
+          "markdownDescription": "Enables the fs_files command without any pre-configured scope."
+        },
+        {
           "description": "Enables the fs_handler command without any pre-configured scope.",
           "type": "string",
           "const": "allow-fs-handler",
@@ -685,6 +691,12 @@
           "type": "string",
           "const": "deny-fs-copy",
           "markdownDescription": "Denies the fs_copy command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the fs_files command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-fs-files",
+          "markdownDescription": "Denies the fs_files command without any pre-configured scope."
         },
         {
           "description": "Denies the fs_handler command without any pre-configured scope.",

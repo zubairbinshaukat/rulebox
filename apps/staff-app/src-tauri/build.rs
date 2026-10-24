@@ -42,6 +42,7 @@ const SHELL_COMMANDS: &[&str] = &[
     "fs_list",
     "fs_search",
     "fs_recent",
+    "fs_files",
     "fs_open",
 ];
 
@@ -73,6 +74,7 @@ const APP_COMMANDS: &[&str] = &[
     "fs_usage",
     "fs_search",
     "fs_recent",
+    "fs_files",
     "fs_clip_set",
     "fs_clip_get",
     "fs_paste",

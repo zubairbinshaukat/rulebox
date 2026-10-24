@@ -170,6 +170,7 @@ pub fn run() {
             files::commands::fs_usage,
             files::commands::fs_search,
             files::commands::fs_recent,
+            files::commands::fs_files,
             files::commands::fs_clip_set,
             files::commands::fs_clip_get,
             files::commands::fs_paste,

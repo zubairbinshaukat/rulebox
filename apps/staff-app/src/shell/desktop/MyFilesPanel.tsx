@@ -1,6 +1,6 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Button, FileChip } from "@rulebox/ui";
-import type { Entry } from "@rulebox/types";
+import type { Entry, FileKind } from "@rulebox/types";
 import IconDocument from "~icons/solar/document-bold-duotone";
 import IconFolder from "~icons/solar/folder-bold-duotone";
 import IconGallery from "~icons/solar/gallery-bold-duotone";
@@ -11,7 +11,6 @@ import { call, isTauri } from "../../lib/tauri";
 
 type Tab = "all" | "docs" | "media";
 
-const DOCS_EXT = new Set(["doc", "docx", "pdf", "txt", "xls", "xlsx", "csv", "ppt", "pptx", "md"]);
 const MEDIA_EXT = new Set(["jpg", "jpeg", "png", "gif", "webp", "mp3", "wav", "m4a", "mp4", "webm"]);
 
 function getExt(name: string): string {
@@ -35,11 +34,17 @@ function formatWhen(ms: number): string {
   return new Date(ms).toLocaleDateString(undefined, { month: "short", day: "numeric" });
 }
 
+/** Each tab asks the backend for the newest files of its kind in every folder. */
+const TAB_KIND: Record<Tab, FileKind> = { all: "all", docs: "documents", media: "media" };
+const PANEL_LIMIT = 12;
+/** A burst of file changes (a copy of many files) is one reload. */
+const RELOAD_DELAY_MS = 400;
+
 export function MyFilesPanel({ onOpenFiles }: { onOpenFiles?: () => void }) {
   const [tab, setTab] = useState<Tab>("all");
-  const [recentFiles, setRecentFiles] = useState<Entry[]>([]);
-
+  const [items, setItems] = useState<Entry[]>([]);
   const [tick, setTick] = useState(0);
+  const reloadTimer = useRef<number | undefined>(undefined);
 
   useEffect(() => {
     let current = true;
@@ -48,13 +53,9 @@ export function MyFilesPanel({ onOpenFiles }: { onOpenFiles?: () => void }) {
         return;
       }
       try {
-        let list = await call("fs_recent", {});
-        if (list.length === 0) {
-          // Nothing opened yet: show the files at the top so the panel is useful on a fresh sign-in.
-          const top = await call("fs_list", { path: "" });
-          list = top.filter((entry) => entry.kind === "file").slice(0, 8);
-        }
-        if (current) setRecentFiles(list);
+        // Newest first, from every folder: a file Notepad saved in Documents shows up too.
+        const list = await call("fs_files", { kind: TAB_KIND[tab], limit: PANEL_LIMIT });
+        if (current) setItems(list);
       } catch {
         // The folder may not be open yet.
       }
@@ -63,19 +64,14 @@ export function MyFilesPanel({ onOpenFiles }: { onOpenFiles?: () => void }) {
     return () => {
       current = false;
     };
-  }, [tick]);
+  }, [tab, tick]);
 
-  // Only the top folder feeds the fallback list.
-  useTauriEvent<{ dir: string }>("files://changed", ({ dir }) => {
-    if (dir === "") {
-      setTick((n) => n + 1);
-    }
-  });
-  const items = recentFiles.filter((f) => {
-    const ext = getExt(f.name);
-    if (tab === "docs") return DOCS_EXT.has(ext);
-    if (tab === "media") return MEDIA_EXT.has(ext);
-    return true;
+  useEffect(() => () => window.clearTimeout(reloadTimer.current), []);
+
+  // Any change anywhere in the folder can change the newest files.
+  useTauriEvent<{ dir: string }>("files://changed", () => {
+    window.clearTimeout(reloadTimer.current);
+    reloadTimer.current = window.setTimeout(() => setTick((n) => n + 1), RELOAD_DELAY_MS);
   });
 
   async function handleOpenFile(file: Entry) {
