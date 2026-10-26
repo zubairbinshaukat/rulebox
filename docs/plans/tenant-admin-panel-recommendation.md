@@ -107,6 +107,11 @@ slot: **after the Phase 6 pilot**, as its own phase ("hosted offer"), starting w
 to prove automated provisioning and upgrades of a tenant deployment. Until then, the only work that
 helps is keeping Phase 4's multi-organization rules and tests intact.
 
+## 7a. Decision taken (2026-10-27)
+
+The owner chose **hosted service**. The silo model (A) stays the recommendation; operators and the
+first-tenant count are still open. Consequences are listed in "What hosting changes" below.
+
 ## 7. Decision needed from the owner
 
 1. Will Rulebox be offered as a **hosted service** (you run the tenants), or only self-hosted?
@@ -120,3 +125,32 @@ helps is keeping Phase 4's multi-organization rules and tests intact.
 - Convex platform APIs: https://docs.convex.dev/platform-apis
 - Convex deploy key types: https://docs.convex.dev/cli/deploy-key-types
 - Cloudflare Access (posture, mTLS): https://developers.cloudflare.com/cloudflare-one/team-and-resources/devices/cloudflare-one-client/configure/modes/device-information-only/
+
+## What hosting changes (added after the decision)
+
+Code that must stay true now (Phase 4 and 6 hooks):
+
+1. **A device must find its tenant.** The agent talks to one Convex deployment, and `VITE_CONVEX_URL` is a
+   build-time value in the dashboard. Hosted needs (a) a tenant locator inside the enrollment code (or a
+   small resolver in the control plane that maps code prefix to deployment URL) and (b) a dashboard that reads its
+   deployment URL at run time from the host name (`acme.app.example`), not from the build. Decide this
+   before Phase 4 Step 6 (enrollment codes) is written.
+2. **Owner bootstrap must be callable by the control plane.** `setup:createOwnerInvite` is internal and CLI-only
+   today; provisioning runs it with that tenant's deploy key (`npx convex run`), then emails the invite link.
+3. **Per-tenant configuration lives in the tenant deployment** (signing seed, rate limits, quotas), set by the
+   provisioning script, never by hand.
+4. **Upgrades roll out tenant by tenant** (canary tenants first). Schema migrations follow the widen-then-narrow rule
+   of Phase 4 Section 11 because a fleet of deployments will briefly run different versions.
+
+Work that is new (not in any phase yet):
+
+| Area | What it needs |
+|---|---|
+| Billing | Plans, usage metering (devices), invoices, dunning, suspend-on-non-payment that keeps devices locked. Use an existing provider; never store card data. |
+| Legal | Terms, privacy policy, data processing agreement, sub-processor list (Convex, Cloudflare, the file host), data residency statement, deletion and export on request. Needs a lawyer, not code. |
+| Operations | Status page, uptime monitoring and alerts, on-call, backup and restore drills, incident runbook, per-tenant cost dashboard. |
+| Onboarding | Self-serve or sales-assisted sign-up, tenant provisioning (spike first), welcome flow, custom domain or subdomain per tenant. |
+| Installer hosting | Customers upload installers: the Tigris plan in the project notes becomes a hosted-service component with per-tenant quotas and malware scanning. |
+| Security | Independent penetration test before the first paying tenant, a disclosure address, secrets manager, operator offboarding procedure. |
+| Cost | A paid Convex plan per tenant deployment is likely (limits and pricing **unverified**; check before pricing the product). The free-tier heartbeat scaling work of Phase 4 stays useful for small tenants. |
+| Licensing | The code is MIT; a hosted offer competes with anyone who self-hosts it. Decide what is the product (convenience, support, SLA) and whether the Rulebox name and logo need trademark protection. |
