@@ -1282,3 +1282,18 @@ Effort in focused engineering weeks for one developer with agent help;
   `apps/dashboard/src/data/{README.md,api.ts,types.ts}`, `convex/*.ts`,
   `apps/agent/src/backend/task.rs`,
   `.personal/installer-hosting-tigris.md` (gitignored).
+
+---
+
+## Owner decisions on Section 8.4 (2026-10-27, binding for the agents that follow)
+
+| Q | Decision |
+|---|---|
+| Q1 Convex plan | **Stay on the free plan** until there are real outside tenants; pay-as-you-go is a later, separate decision. Consequence: the quota guard, alerts at 50/80 % and the degrade modes of Section 2 are REQUIRED before any outside tenant signs up, because a cap on the free plan fails writes for everyone. |
+| Q2 Ping interval | **Default 30 minutes**, changeable per tenant or globally from the operator console (global default and per-tenant override stored as settings; the agent receives its interval in the desired state). Watch mode and "Check now" stay. |
+| Q3 Free-plan limits | Defaults as proposed (2 devices, 25 employees, 20 apps, 3 groups, 2 members, 30-day audit), all editable per tenant and globally from the console. |
+| Q4 File storage | **Pooling is kept**: start with ONE account; the operator adds credentials in the console only when needed. Keep the provider abstraction, per-account usage tracking and the rule that no installer exists in only one account without a way to re-upload (risk accepted by the owner: provider terms on multiple free accounts are not verified). |
+| Q6 Roster out of the signed document | Yes. |
+| Q7 JWT lifetime | 60 minutes (revocation stays instant: every call checks the session row). |
+| New: step-up authentication | Each tenant member can set an **action PIN** and register **passkeys**. A dashboard session that is idle for **10 minutes** must be re-confirmed with the PIN or a passkey; **major actions** (turn lock mode or the kiosk off, device lock/unlock, revoke or remove a device, change the exit PIN, publish a policy that changes lock/kiosk settings, change roles or MFA, delete anything, signing-key actions, plan or limit changes by an operator) always require PIN or passkey, even inside the 10 minutes. All edge cases must be designed (lost PIN, lost passkey, devices without passkey support, brute force, replay, multiple owners). |
+| New: dashboard size and speed | The dashboard must be small and fast on mobile and slow networks (that is why Vite was chosen): a hard initial-load budget enforced in CI, measured on throttled mobile; see the dashboard performance pass. |
