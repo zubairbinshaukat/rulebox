@@ -5,28 +5,43 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
+    "dev:demo": "vite --mode demo",
     "build": "vite build",
+    "build:demo": "vite build --mode demo",
     "preview": "vite preview",
+    "preview:demo": "vite preview --mode demo",
     "typecheck": "tsc --noEmit -p tsconfig.json",
-    "lint": "eslint ."
+    "lint": "eslint .",
+    "test": "vitest run",
+    "check:ui": "node e2e/check-ui.mjs"
   },
   "dependencies": {
+    "@gsap/react": "catalog:",
     "@rulebox/types": "workspace:*",
     "@rulebox/ui": "workspace:*",
     "convex": "catalog:",
+    "gsap": "catalog:",
     "react": "catalog:",
-    "react-dom": "catalog:"
+    "react-dom": "catalog:",
+    "react-router": "catalog:",
+    "uqr": "catalog:"
   },
   "devDependencies": {
+    "@axe-core/playwright": "catalog:",
     "@iconify-json/solar": "catalog:",
+    "@playwright/test": "catalog:",
     "@svgr/core": "catalog:",
     "@svgr/plugin-jsx": "catalog:",
+    "@testing-library/react": "catalog:",
+    "@testing-library/user-event": "catalog:",
     "@types/react": "catalog:",
     "@types/react-dom": "catalog:",
     "@vitejs/plugin-react": "catalog:",
     "eslint": "catalog:",
+    "jsdom": "catalog:",
     "typescript": "catalog:",
     "unplugin-icons": "catalog:",
-    "vite": "catalog:"
+    "vite": "catalog:",
+    "vitest": "catalog:"
   }
 }

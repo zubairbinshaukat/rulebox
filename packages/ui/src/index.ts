@@ -27,3 +27,7 @@ export { FileChip, type FileChipProps } from "./components/FileChip";
 export { Notice, type NoticeProps, type NoticeTone } from "./components/Notice";
 export { Spinner, type SpinnerProps } from "./components/Spinner";
 export { setTheme, setLite, type Theme } from "./theme";
+export { Select, type SelectProps } from "./components/Select";
+export { Textarea, type TextareaProps } from "./components/Textarea";
+export { Checkbox, type CheckboxProps } from "./components/Checkbox";
+
