@@ -1,12 +1,13 @@
 import { StrictMode, type ReactNode } from "react";
 import { createRoot } from "react-dom/client";
 import { BrowserRouter } from "react-router";
-import { ConvexProvider, ConvexReactClient } from "convex/react";
+import { ConvexReactClient } from "convex/react";
+import { ConvexAuthProvider } from "@convex-dev/auth/react";
 import "@rulebox/ui/fonts.css";
 import "@rulebox/ui/tokens.css";
 import "@rulebox/ui/base.css";
 import "./styles/dashboard.css";
-import { ErrorBoundary } from "@rulebox/ui";
+import { AppErrorBoundary } from "./app/AppErrorBoundary";
 import { IS_DEMO } from "./data";
 import { App } from "./App";
 
@@ -14,9 +15,9 @@ const root = createRoot(document.getElementById("root")!);
 
 const shell = (children: ReactNode) => (
   <StrictMode>
-    <ErrorBoundary title="Something went wrong">
+    <AppErrorBoundary>
       <BrowserRouter>{children}</BrowserRouter>
-    </ErrorBoundary>
+    </AppErrorBoundary>
   </StrictMode>
 );
 
@@ -37,13 +38,15 @@ if (IS_DEMO) {
       </main>,
     );
   } else {
-    // Step 4 wraps this in ConvexAuthProvider once @convex-dev/auth is installed.
     const convex = new ConvexReactClient(url);
     root.render(
       shell(
-        <ConvexProvider client={convex}>
+        // Convex Auth keeps its own tokens (localStorage); the dashboard stores
+        // nothing about the session. Passwords only: never read a `?code=` from
+        // the URL (that is for OAuth / magic links, which Rulebox does not use).
+        <ConvexAuthProvider client={convex} shouldHandleCode={false}>
           <App />
-        </ConvexProvider>,
+        </ConvexAuthProvider>,
       ),
     );
   }

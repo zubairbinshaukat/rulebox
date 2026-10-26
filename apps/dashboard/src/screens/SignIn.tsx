@@ -1,7 +1,7 @@
 import { useRef } from "react";
 import { Link, Navigate, useNavigate, useSearchParams } from "react-router";
 import { Button, Input } from "@rulebox/ui";
-import { useAuthActions, useAuthState } from "../data";
+import { useAuthActions, useAuthState, useMe } from "../data";
 import { AuthShell } from "../components/AuthShell";
 import { Field } from "../components/Field";
 import { InlineNotice } from "../components/Notice";
@@ -18,19 +18,24 @@ const s = strings.auth;
 export default function SignIn() {
   const [params] = useSearchParams();
   const next = safeNext(params.get("next"));
+  const expired = params.get("expired") === "1";
   const navigate = useNavigate();
   const { signIn } = useAuthActions();
   const { isAuthenticated } = useAuthState();
+  const me = useMe();
   const form = useRef<HTMLFormElement>(null);
   const f = useForm({ email: "", password: "" }, (x) => ({
     email: v.email(x.email) ?? undefined,
     password: x.password ? undefined : strings.validate.required,
   }));
 
-  if (isAuthenticated && !f.pending) return <Navigate to={next} replace />;
+  // Already signed in (the server knows the session): go on. A token the
+  // server no longer accepts (`me` is null) stays here so it cannot loop.
+  if (isAuthenticated && me && !f.pending) return <Navigate to={next} replace />;
 
   return (
     <AuthShell title={s.signInTitle} lead={s.signInLead} demoHint={strings.demo.credentials}>
+      {expired && !f.serverError ? <InlineNotice tone="warning" title={strings.errors.unauthenticated} /> : null}
       <form
         ref={form}
         className="dash-form"

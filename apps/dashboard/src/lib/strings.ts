@@ -36,6 +36,7 @@ export const strings = {
     reconnectingDetail: "Changes you make now are sent when the connection is back.",
     newVersion: "A new version of the dashboard is available.",
     reload: "Reload",
+    crashTitle: "Something went wrong",
     noAccessTitle: "This account has no access to Rulebox",
     noAccessBody: "Ask an Owner of your organization to invite you, then sign in again.",
     demoBadge: "Demo",

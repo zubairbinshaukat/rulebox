@@ -136,10 +136,10 @@ export interface DataApi {
   usePrepareRotation: Mutation<void>;
   useFinishRotation: Mutation<void>;
   useMembersScreen: () => QueryState<MembersScreen>;
-  useInviteMember: Mutation<{ email: string; role: Role }, { code: string }>;
+  useInviteMember: Mutation<{ email: string; role: Role }, { code: string; expiresAt: number }>;
   useRevokeInvite: Mutation<{ inviteId: Id }>;
-  useChangeRole: Mutation<{ memberId: Id; role: Role }>;
-  useSetMemberDisabled: Mutation<{ memberId: Id; disabled: boolean }>;
-  useCreateResetCode: Mutation<{ memberId: Id }, { code: string }>;
+  useChangeRole: Mutation<{ memberId: Id; role: Role; expectedRevision: number }>;
+  useSetMemberDisabled: Mutation<{ memberId: Id; disabled: boolean; expectedRevision: number }>;
+  useCreateResetCode: Mutation<{ memberId: Id }, { code: string; expiresAt: number }>;
   useResetMemberMfa: Mutation<{ memberId: Id }>;
 }

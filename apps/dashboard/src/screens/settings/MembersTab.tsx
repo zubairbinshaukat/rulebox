@@ -29,6 +29,7 @@ import { formatDateTime } from "../../lib/format";
 import { messageFor } from "../../lib/errors";
 import { strings } from "../../lib/strings";
 import { useForm } from "../../lib/useForm";
+import { useNow } from "../../lib/useNow";
 import * as v from "../../lib/validate";
 
 const s = strings.settings.members;
@@ -60,6 +61,11 @@ function Members({ m }: { m: MembersScreen }) {
   const resetCode = useCreateResetCode();
   const revokeInvite = useRevokeInvite();
   const [dialog, setDialog] = useState<Dialog | null>(null);
+  const now = useNow(30_000);
+  // `members:list` returns the latest invites in every state; only open ones are pending.
+  const pending = m.invites.filter((i) => i.usedAt === undefined && i.expiresAt > now);
+  // The row as it is now (the dialog keeps the revision it was opened with).
+  const liveRow = (row: MemberRow) => m.members.find((x) => x._id === row._id) ?? row;
 
   const cols = useMemo<Column<MemberRow>[]>(
     () => [
@@ -123,7 +129,12 @@ function Members({ m }: { m: MembersScreen }) {
                         variant="ghost"
                         className="dash-btn--sm"
                         aria-label={`${s.enable}: ${x.email}`}
-                        onClick={() => setDisabled({ memberId: x._id, disabled: false }).then(() => toast(s.saved), (e) => toast(messageFor(e), "danger"))}
+                        onClick={() =>
+                          setDisabled({ memberId: x._id, disabled: false, expectedRevision: x.revision }).then(
+                            () => toast(s.saved),
+                            (e) => toast(messageFor(e), "danger"),
+                          )
+                        }
                       >
                         {s.enable}
                       </Button>
@@ -162,10 +173,10 @@ function Members({ m }: { m: MembersScreen }) {
         </div>
       </Card>
 
-      {m.invites.length ? (
+      {pending.length ? (
         <Card title={s.pendingInvites} body="flush">
           <ul className="dash-list">
-            {m.invites.map((i) => (
+            {pending.map((i) => (
               <li key={i._id} className="dash-list__item">
                 <div className="dash-list__body">
                   <p className="dash-list__title dash-truncate" title={i.email}>
@@ -192,7 +203,7 @@ function Members({ m }: { m: MembersScreen }) {
           onCode={(email, code) => setDialog({ kind: "code", title: s.inviteCodeTitle, body: s.inviteCodeBody(email), code })}
         />
       ) : null}
-      {dialog?.kind === "role" ? <RoleDialog member={dialog.member} onClose={() => setDialog(null)} /> : null}
+      {dialog?.kind === "role" ? <RoleDialog opened={dialog.member} live={liveRow(dialog.member)} onClose={() => setDialog(null)} /> : null}
       {dialog?.kind === "code" ? (
         <Modal open title={dialog.title} onClose={() => setDialog(null)} actions={<Button onClick={() => setDialog(null)}>{strings.common.done}</Button>}>
           <div className="dash-form">
@@ -208,7 +219,11 @@ function Members({ m }: { m: MembersScreen }) {
         confirmLabel={s.disable}
         danger
         typeToConfirm={dialog?.kind === "disable" ? dialog.member.email : undefined}
-        onConfirm={() => (dialog?.kind === "disable" ? setDisabled({ memberId: dialog.member._id, disabled: true }) : Promise.resolve())}
+        onConfirm={() =>
+          dialog?.kind === "disable"
+            ? setDisabled({ memberId: dialog.member._id, disabled: true, expectedRevision: dialog.member.revision })
+            : Promise.resolve()
+        }
         onDone={() => toast(s.saved)}
         onClose={() => setDialog(null)}
       />
@@ -281,9 +296,15 @@ function InviteDialog({ onClose, onCode }: { onClose: () => void; onCode: (email
   );
 }
 
-function RoleDialog({ member, onClose }: { member: MemberRow; onClose: () => void }) {
+/**
+ * Change a member's role. Sends the revision the dialog was opened with; when
+ * someone else changed the member meanwhile the server answers `stale_edit`
+ * and Reload takes the current row (role and revision), keeping nothing.
+ */
+function RoleDialog({ opened, live, onClose }: { opened: MemberRow; live: MemberRow; onClose: () => void }) {
   const change = useChangeRole();
   const toast = useToast();
+  const [member, setMember] = useState(opened);
   const f = useForm({ role: member.role }, () => ({}));
   return (
     <Modal
@@ -292,7 +313,7 @@ function RoleDialog({ member, onClose }: { member: MemberRow; onClose: () => voi
       onClose={() => !f.pending && onClose()}
       onSubmit={() =>
         void f.submit(async (x) => {
-          await change({ memberId: member._id, role: x.role });
+          await change({ memberId: member._id, role: x.role, expectedRevision: member.revision });
           toast(s.saved);
           onClose();
         })
@@ -320,7 +341,13 @@ function RoleDialog({ member, onClose }: { member: MemberRow; onClose: () => voi
             </Select>
           )}
         </Field>
-        <FormError error={f.serverError} />
+        <FormError
+          error={f.serverError}
+          onReload={() => {
+            setMember(live);
+            f.reset({ role: live.role });
+          }}
+        />
       </div>
     </Modal>
   );

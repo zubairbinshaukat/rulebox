@@ -21,6 +21,7 @@ import { QrCode } from "../components/QrCode";
 import { RegionError } from "../components/Region";
 import { SkeletonBlock } from "../components/Skeleton";
 import { FullPageSpinner } from "../app/RequireMember";
+import { useSessionGuard } from "../app/useSessionGuard";
 import { groupChars } from "../lib/format";
 import { safeNext, withNext } from "../lib/next";
 import { strings } from "../lib/strings";
@@ -40,9 +41,14 @@ export default function Mfa() {
   // While setup is being confirmed the server already marks the session verified;
   // keep the setup screen until the one-time recovery codes arrive.
   const [confirming, setConfirming] = useState(false);
+  // `mfa:verify` is an action: its promise can settle before the queries show
+  // the verified session, so leave only once `mfa:status` says so.
+  const [verifiedHere, setVerifiedHere] = useState(false);
+  useSessionGuard(!auth.isLoading && auth.isAuthenticated && me === null, next);
 
   if (auth.isLoading || me === undefined) return <FullPageSpinner />;
-  if (!auth.isAuthenticated || me === null) return <Navigate to={withNext("/sign-in", "/mfa")} replace />;
+  if (!auth.isAuthenticated) return <Navigate to={withNext("/sign-in", "/mfa")} replace />;
+  if (me === null) return <FullPageSpinner />;
   if ("noAccess" in me) return <Navigate to="/" replace />;
 
   // The recovery codes stay on screen (shown once) until the member confirms.
@@ -63,8 +69,9 @@ export default function Mfa() {
     );
   }
   const st = status.data;
+  if (verifiedHere && st.verified) return <Navigate to={next} replace />;
   if (!confirming && st.enrolled && st.verified) return <Enabled next={next} />;
-  if (!confirming && st.enrolled) return <Verify next={next} />;
+  if (!confirming && st.enrolled) return <Verify onVerified={() => setVerifiedHere(true)} />;
   return <Setup next={next} optional={!st.required} onConfirming={setConfirming} onCodes={setRecoveryCodes} />;
 }
 
@@ -89,11 +96,12 @@ function Enabled({ next }: { next: string }) {
   );
 }
 
-function Verify({ next }: { next: string }) {
-  const navigate = useNavigate();
+function Verify({ onVerified }: { onVerified: () => void }) {
   const verify = useVerifyMfa();
   const redeem = useRedeemRecoveryCode();
   const [mode, setMode] = useState<"totp" | "recovery">("totp");
+  // After a success the button stays disabled until the page moves on.
+  const [accepted, setAccepted] = useState(false);
   const form = useRef<HTMLFormElement>(null);
   const f = useForm({ code: "" }, (x) => ({
     code: (mode === "totp" ? v.totpCode(x.code) : v.recoveryCode(x.code)) ?? undefined,
@@ -110,7 +118,8 @@ function Verify({ next }: { next: string }) {
           void f.submit(async (x) => {
             if (mode === "totp") await verify({ code: x.code.replace(/\s/g, "") });
             else await redeem({ code: v.normalizeRecoveryCode(x.code) });
-            navigate(next, { replace: true });
+            setAccepted(true);
+            onVerified();
           }, form.current);
         }}
       >
@@ -133,14 +142,15 @@ function Verify({ next }: { next: string }) {
           )}
         </Field>
         <FormError error={f.serverError} />
-        <Button type="submit" disabled={f.pending} aria-busy={f.pending} className="dash-btn--accent">
-          {f.pending ? s.confirming : s.verify}
+        <Button type="submit" disabled={f.pending || accepted} aria-busy={f.pending || accepted} className="dash-btn--accent">
+          {f.pending || accepted ? s.confirming : s.verify}
         </Button>
         <div className="dash-auth__links">
           <button
             type="button"
             className="dash-link"
             onClick={() => {
+              setAccepted(false);
               setMode((m) => (m === "totp" ? "recovery" : "totp"));
               f.reset({ code: "" });
             }}
@@ -173,15 +183,28 @@ function Setup({
   const form = useRef<HTMLFormElement>(null);
   const f = useForm({ code: "" }, (x) => ({ code: v.totpCode(x.code) ?? undefined }));
 
+  // `beginSetup` stores a new pending secret on every call, so it must run
+  // exactly once per attempt: a second call (React StrictMode runs effects
+  // twice in development) would replace the secret this screen shows.
+  const mounted = useRef(true);
+  const startedFor = useRef(-1);
   useEffect(() => {
-    let live = true;
-    begin().then(
-      (r) => live && setSetup(r),
-      (e) => live && setSetupError(e),
-    );
+    mounted.current = true;
     return () => {
-      live = false;
+      mounted.current = false;
     };
+  }, []);
+  useEffect(() => {
+    if (startedFor.current === attempt) return;
+    startedFor.current = attempt;
+    begin().then(
+      (r) => {
+        if (mounted.current) setSetup(r);
+      },
+      (e: unknown) => {
+        if (mounted.current) setSetupError(e);
+      },
+    );
   }, [begin, attempt]);
 
   return (

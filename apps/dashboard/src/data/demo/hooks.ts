@@ -1563,11 +1563,12 @@ export const demoApi: DataApi = {
         runMutation("owner", ({ db, audit, now }) => {
           if (validate.email(email)) fail("invalid_argument", { field: "email" });
           const addr = email.trim().toLowerCase();
-          if (db.members.some((m) => m.email === addr)) fail("conflict", { field: "email" });
+          if (db.members.some((m) => m.email === addr)) fail("already_member");
           const code = token(20);
-          db.invites.push({ _id: newId("inv"), email: addr, role, kind: "join", code, expiresAt: now + 7 * DAY });
+          const expiresAt = now + 7 * DAY;
+          db.invites.push({ _id: newId("inv"), email: addr, role, kind: "join", code, expiresAt });
           audit({ action: "member.invited", targetLabel: addr, summary: `Invited ${addr} as ${role}.` });
-          return { code };
+          return { code, expiresAt };
         }),
       [],
     );
@@ -1586,10 +1587,11 @@ export const demoApi: DataApi = {
 
   useChangeRole() {
     return useCallback(
-      ({ memberId, role }) =>
+      ({ memberId, role, expectedRevision }) =>
         runMutation("owner", ({ db, me, audit }) => {
           const m = find(db.members, memberId);
           if (m._id === me._id) fail("forbidden");
+          checkRevision(m, expectedRevision);
           const owners = db.members.filter((x) => x.role === "owner" && x.status === "active");
           if (m.role === "owner" && role !== "owner" && owners.length <= 1) fail("last_owner");
           m.role = role;
@@ -1602,10 +1604,11 @@ export const demoApi: DataApi = {
 
   useSetMemberDisabled() {
     return useCallback(
-      ({ memberId, disabled }) =>
+      ({ memberId, disabled, expectedRevision }) =>
         runMutation("owner", ({ db, me, audit }) => {
           const m = find(db.members, memberId);
           if (m._id === me._id) fail("forbidden");
+          checkRevision(m, expectedRevision);
           const owners = db.members.filter((x) => x.role === "owner" && x.status === "active");
           if (disabled && m.role === "owner" && owners.length <= 1) fail("last_owner");
           m.status = disabled ? "disabled" : "active";
@@ -1621,10 +1624,12 @@ export const demoApi: DataApi = {
       ({ memberId }) =>
         runMutation("owner", ({ db, audit, now }) => {
           const m = find(db.members, memberId);
+          if (m.status !== "active") fail("account_disabled");
           const code = token(20);
-          db.invites.push({ _id: newId("inv"), email: m.email, role: m.role, kind: "passwordReset", code, expiresAt: now + DAY });
+          const expiresAt = now + DAY;
+          db.invites.push({ _id: newId("inv"), email: m.email, role: m.role, kind: "passwordReset", code, expiresAt });
           audit({ action: "member.resetCodeCreated", targetLabel: m.email, summary: "Password reset code created." });
-          return { code };
+          return { code, expiresAt };
         }),
       [],
     );

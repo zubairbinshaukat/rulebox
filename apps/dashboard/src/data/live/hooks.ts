@@ -1,17 +1,17 @@
 /**
- * Live implementation (real Convex backend). The Phase 4 Convex functions do
- * not exist yet, so every hook answers `not_ready` for now. Each one is
- * swapped for `useQuery(api.x.y)` / `usePaginatedQuery` / `useMutation` /
- * `useAction` as the backend steps land — see `../README.md` for the exact
- * function per hook.
- *
- * The connection state is already real (`ConvexReactClient.connectionState()`).
+ * Live implementation (real Convex backend). Session, sign-in, MFA, account
+ * and members are wired to the Phase 4 Step 3 functions (Step 4). Every other
+ * hook answers `not_ready` until its Convex step lands — see `../README.md`
+ * for the exact function per hook.
  */
-import { useConvex } from "convex/react";
-import { useEffect, useState } from "react";
+import { useAuthActions as useConvexAuthActions } from "@convex-dev/auth/react";
+import { useAction, useConvexAuth, useConvexConnectionState, useMutation, useQuery } from "convex/react";
+import { useCallback, useMemo } from "react";
+import { api } from "@convex/_generated/api";
 import type { DataApi } from "../api";
 import { AppError } from "../../lib/errors";
-import type { PagedState, QueryState } from "../types";
+import type { MeResult, PagedState, QueryState, Role } from "../types";
+import { mapError, useMapped, useMemberQuery } from "./convex";
 
 const notReady = () => new AppError({ code: "not_ready", detail: "Phase 4 backend function not deployed yet" });
 
@@ -29,38 +29,86 @@ function useNotReadyMutation<A, R>(): (args: A) => Promise<R> {
   };
 }
 
+/** Convex Auth sign-in through the "password" credentials provider (convex/auth.ts). */
+function useLiveAuthActions() {
+  const { signIn, signOut } = useConvexAuthActions();
+  return useMemo(() => {
+    const run = async (params: Record<string, string>) => {
+      try {
+        const r = await signIn("password", params);
+        // Credentials sign-in either returns tokens or throws; anything else is a failure.
+        if (!r.signingIn) throw new Error("sign-in did not complete");
+      } catch (e) {
+        throw mapError(e);
+      }
+    };
+    return {
+      signIn: ({ email, password }: { email: string; password: string }) => run({ flow: "signIn", email, password }),
+      signUp: ({ inviteCode, email, password }: { inviteCode: string; email: string; password: string }) =>
+        run({ flow: "signUp", inviteCode, email, password }),
+      // Convex Auth removes its own tokens; errors (already signed out) are ignored there.
+      signOut: () => signOut(),
+    };
+  }, [signIn, signOut]);
+}
+
 export const liveApi: DataApi = {
-  // Step 4: useConvexAuth() from convex/react (with ConvexAuthProvider).
-  useAuthState: () => ({ isLoading: false, isAuthenticated: false }),
-  // Step 3/4: useQuery(api.account.me)
-  useMe: () => null,
-  // Step 4: useAuthActions() from @convex-dev/auth/react; signIn("password", { email, password, flow: "signIn" | "signUp", inviteCode })
-  useAuthActions: () => ({
-    signIn: async () => {
-      throw notReady();
-    },
-    signUp: async () => {
-      throw notReady();
-    },
-    signOut: async () => undefined,
-  }),
-  useRedeemReset: useNotReadyMutation,
+  // ---- session (Convex Auth + account:me)
+  useAuthState() {
+    const { isLoading, isAuthenticated } = useConvexAuth();
+    return { isLoading, isAuthenticated };
+  },
+  useMe(): MeResult | undefined {
+    return useQuery(api.account.me);
+  },
+  useAuthActions: useLiveAuthActions,
+  useRedeemReset() {
+    const redeem = useAction(api.account.redeemReset);
+    const call = useCallback(
+      async (a: { email: string; code: string; newPassword: string }) => {
+        await redeem(a);
+      },
+      [redeem],
+    );
+    return useMapped(call);
+  },
   useConnectionState() {
-    const convex = useConvex();
-    const [connected, setConnected] = useState(true);
-    useEffect(() => {
-      const tick = () => setConnected(convex.connectionState().isWebSocketConnected);
-      const t = setInterval(tick, 1000);
-      return () => clearInterval(t);
-    }, [convex]);
-    return { isWebSocketConnected: connected };
+    const { isWebSocketConnected } = useConvexConnectionState();
+    return { isWebSocketConnected };
   },
 
-  useMfaStatus: useNotReady,
-  useBeginMfaSetup: useNotReadyMutation,
-  useConfirmMfaSetup: useNotReadyMutation,
-  useVerifyMfa: useNotReadyMutation,
-  useRedeemRecoveryCode: useNotReadyMutation,
+  // ---- MFA (actions except `status`)
+  useMfaStatus() {
+    return useMemberQuery(api.mfa.status, {});
+  },
+  useBeginMfaSetup() {
+    const begin = useAction(api.mfa.beginSetup);
+    const call = useCallback(async () => await begin({}), [begin]);
+    return useMapped(call);
+  },
+  useConfirmMfaSetup() {
+    return useMapped(useAction(api.mfa.confirmSetup));
+  },
+  useVerifyMfa() {
+    const verify = useAction(api.mfa.verify);
+    const call = useCallback(
+      async (a: { code: string }) => {
+        await verify(a);
+      },
+      [verify],
+    );
+    return useMapped(call);
+  },
+  useRedeemRecoveryCode() {
+    const redeem = useAction(api.mfa.useRecoveryCode);
+    const call = useCallback(
+      async (a: { code: string }) => {
+        await redeem(a);
+      },
+      [redeem],
+    );
+    return useMapped(call);
+  },
 
   useOverview: useNotReady,
 
@@ -126,13 +174,56 @@ export const liveApi: DataApi = {
   useRegisterKey: useNotReadyMutation,
   usePrepareRotation: useNotReadyMutation,
   useFinishRotation: useNotReadyMutation,
-  useMembersScreen: useNotReady,
-  useInviteMember: useNotReadyMutation,
-  useRevokeInvite: useNotReadyMutation,
-  useChangeRole: useNotReadyMutation,
-  useSetMemberDisabled: useNotReadyMutation,
-  useCreateResetCode: useNotReadyMutation,
-  useResetMemberMfa: useNotReadyMutation,
+  // ---- members (Owner-only changes; codes are returned once and kept in component state)
+  useMembersScreen() {
+    return useMemberQuery(api.members.list, {});
+  },
+  useInviteMember() {
+    return useMapped(useAction(api.members.invite));
+  },
+  useRevokeInvite() {
+    const revoke = useMutation(api.members.revokeInvite);
+    const call = useCallback(
+      async (a: { inviteId: string }) => {
+        await revoke(a);
+      },
+      [revoke],
+    );
+    return useMapped(call);
+  },
+  useChangeRole() {
+    const change = useMutation(api.members.changeRole);
+    const call = useCallback(
+      async (a: { memberId: string; role: Role; expectedRevision: number }) => {
+        await change(a);
+      },
+      [change],
+    );
+    return useMapped(call);
+  },
+  useSetMemberDisabled() {
+    const set = useMutation(api.members.setDisabled);
+    const call = useCallback(
+      async (a: { memberId: string; disabled: boolean; expectedRevision: number }) => {
+        await set(a);
+      },
+      [set],
+    );
+    return useMapped(call);
+  },
+  useCreateResetCode() {
+    return useMapped(useAction(api.members.createResetCode));
+  },
+  useResetMemberMfa() {
+    const reset = useMutation(api.members.resetMfa);
+    const call = useCallback(
+      async (a: { memberId: string }) => {
+        await reset(a);
+      },
+      [reset],
+    );
+    return useMapped(call);
+  },
 };
 
 /** Resolved through the `@rulebox/data-impl` alias in live builds. */

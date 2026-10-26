@@ -1,4 +1,4 @@
-import type { ErrorCode, ErrorData } from "../data/types";
+import { ERROR_CODES, type ErrorCode, type ErrorData } from "../data/types";
 import { strings } from "./strings";
 
 /**
@@ -26,16 +26,26 @@ export function isAppError(e: unknown): e is AppError {
   return e instanceof AppError;
 }
 
-/** Accepts our `AppError` or anything shaped like a `ConvexError` (`{ data: { code } }`). */
+const KNOWN_CODES: ReadonlySet<string> = new Set(ERROR_CODES);
+
+/**
+ * Accepts our `AppError` or anything shaped like a `ConvexError`
+ * (`{ data: { code } }`) whose code is one of `ERROR_CODES`. Only the known
+ * fields are copied (numbers and short strings), never the server's message.
+ * Anything else is `null` and shows the generic sentence.
+ */
 export function toAppError(e: unknown): AppError | null {
   if (e instanceof AppError) return e;
-  if (e && typeof e === "object" && "data" in e) {
-    const data = (e as { data: unknown }).data;
-    if (data && typeof data === "object" && "code" in data && typeof (data as { code: unknown }).code === "string") {
-      return new AppError(data as ErrorData);
-    }
-  }
-  return null;
+  if (!e || typeof e !== "object" || !("data" in e)) return null;
+  const data: unknown = (e as { data: unknown }).data;
+  if (!data || typeof data !== "object") return null;
+  const d = data as Record<string, unknown>;
+  if (typeof d.code !== "string" || !KNOWN_CODES.has(d.code)) return null;
+  const out: ErrorData = { code: d.code as ErrorCode };
+  if (typeof d.field === "string") out.field = d.field;
+  if (typeof d.retryAfterMs === "number") out.retryAfterMs = d.retryAfterMs;
+  if (typeof d.detail === "string") out.detail = d.detail;
+  return new AppError(out);
 }
 
 export function errorCodeOf(e: unknown): ErrorCode | null {
@@ -55,6 +65,8 @@ export function messageForCode(code: ErrorCode, data?: Omit<ErrorData, "code">):
     case "not_found":
       return e.notFound;
     case "invalid_argument":
+      // The server's password rule (12-256, a letter and a digit) has its own sentence.
+      if (data?.field === "password") return strings.validate.passwordMember;
       return data?.field ? e.invalidField(data.field) : e.invalidArgument;
     case "stale_edit":
       return e.staleEdit;

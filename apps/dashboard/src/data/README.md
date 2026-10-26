@@ -7,9 +7,10 @@ satisfy the same `DataApi` type (`api.ts`):
   `VITE_DEMO=1` (`pnpm --filter @rulebox/dashboard dev:demo`, `build:demo`,
   `preview:demo`). Reactive like Convex, with simulated latency, connection
   loss (writes queue), failing queries and stale edits (top-bar demo controls).
-- `live/hooks.ts` — the real backend. Today every hook answers `not_ready`
-  (the Phase 4 Convex functions do not exist yet); `useConnectionState` is
-  already real.
+- `live/hooks.ts` — the real backend. Session, sign-in, MFA, account and
+  members are live (Step 4, against the Step 3 functions); every other hook
+  answers `not_ready` until its Convex step lands. `live/convex.ts` holds the
+  adapters (`useMemberQuery`, `useMapped`, `mapError`).
 
 All shapes live in `types.ts` and use the field names of plan Section 4.2.
 
@@ -17,30 +18,41 @@ All shapes live in `types.ts` and use the field names of plan Section 4.2.
 
 Replace the hook body in `live/hooks.ts`; screens do not change.
 
-- **Query** (`QueryState<T>`): `const r = useQuery(api.x.y, args)` →
-  `r === undefined ? { status: "loading" } : { status: "ready", data: r }`.
-  Query errors throw during render and are caught by the per-region
-  `RegionBoundary` (same "Try again" UI as `status: "error"`).
+- **Query** (`QueryState<T>`): `return useMemberQuery(api.x.y, args)`
+  (`live/convex.ts`). It is skipped until Convex Auth confirms the session,
+  uses `useQueries` so errors come back as `status: "error"` (mapped to
+  `AppError`) instead of throwing during render, and `retry` re-subscribes.
+  `unauthenticated` also fires `reportUnauthenticated()` (`lib/session.ts`):
+  `useSessionGuard` sends the person to `/sign-in?next=…&expired=1`.
+  `account:me` (public) stays a plain `useQuery`.
 - **Paginated** (`PagedState<T>`): `usePaginatedQuery(api.x.y, args, { initialNumItems: 50 })`
   → `items = results`, `canLoadMore = status === "CanLoadMore" || status === "LoadingMore"`,
   `isLoadingMore = status === "LoadingMore"`, `loadMore = () => loadMore(50)`,
   `"LoadingFirstPage"` → `{ status: "loading" }`.
-- **Mutation / action**: `useMutation(api.x.y)` / `useAction(api.x.y)`; wrap so a
-  thrown `ConvexError` becomes `toAppError(e) ?? e` (see `lib/errors.ts`).
-  Toggles add `.withOptimisticUpdate(...)` (kiosk, archive, pins).
+- **Mutation / action**: `useMapped(useMutation(api.x.y))` /
+  `useMapped(useAction(api.x.y))`: a thrown `ConvexError` with a known code
+  becomes an `AppError` (`toAppError`, `lib/errors.ts`); anything else is
+  passed on and shown only as the generic sentence. Toggles add
+  `.withOptimisticUpdate(...)` (kiosk, archive, pins).
+- **Actions resolve before the queries update.** When the screen must wait
+  for the result to show (for example `mfa:verify` → `verified`), wait for the
+  query, not the promise (see `screens/Mfa.tsx`).
 
 ## Hook → Convex function
 
-| Hook | Convex |
-|---|---|
-| `useAuthState` | `useConvexAuth()` (inside `ConvexAuthProvider`) |
-| `useMe` | `useQuery(api.account.me)` |
-| `useAuthActions` | `useAuthActions()` from `@convex-dev/auth/react`: `signIn("password", { email, password, flow: "signIn" })`, sign-up with `flow: "signUp", inviteCode`, `signOut()` |
-| `useRedeemReset` | `useAction(api.account.redeemReset)` |
-| `useConnectionState` | `useConvex().connectionState()` (done) |
-| `useMfaStatus` | `api.mfa.status` |
-| `useBeginMfaSetup` / `useConfirmMfaSetup` | `useAction(api.mfa.beginSetup)` / `useAction(api.mfa.confirmSetup)` |
-| `useVerifyMfa` / `useRedeemRecoveryCode` | `useMutation(api.mfa.verify)` / `useMutation(api.mfa.useRecoveryCode)` |
+Status: **live** = wired in `live/hooks.ts`; everything else answers
+`not_ready` in live builds until its step lands.
+
+| Hook | Convex | Status |
+|---|---|---|
+| `useAuthState` | `useConvexAuth()` from `convex/react` (inside `ConvexAuthProvider`, `shouldHandleCode={false}`) | live |
+| `useMe` | `useQuery(api.account.me)` (public; `null` signed out, `{ noAccess }` without membership; compare `serverApiVersion` with `DASHBOARD_API_VERSION`) | live |
+| `useAuthActions` | `useAuthActions()` from `@convex-dev/auth/react`: `signIn("password", { flow: "signIn", email, password })`, sign-up `signIn("password", { flow: "signUp", inviteCode, email, password })`, `signOut()`. A wrong email or password is a plain error without a code (shown as "Email or password is not right."); coded: `rate_limited`, `invite_invalid`, `invalid_argument {field:"password"}`, `account_disabled` | live |
+| `useRedeemReset` | `useAction(api.account.redeemReset)` → `null` | live |
+| `useConnectionState` | `useConvexConnectionState()` | live |
+| `useMfaStatus` | `api.mfa.status` (query) | live |
+| `useBeginMfaSetup` / `useConfirmMfaSetup` | `useAction(api.mfa.beginSetup)` → `{ secret, uri }` / `useAction(api.mfa.confirmSetup)` → `string[]` (recovery codes, once) | live |
+| `useVerifyMfa` / `useRedeemRecoveryCode` | `useAction(api.mfa.verify)` / `useAction(api.mfa.useRecoveryCode)` (**actions**, so the lockout counter commits) | live |
 | `useOverview(nowMinute)` | `api.overview.get({ nowMs })` |
 | `useDevicesScreen({ groupId, search })` | `api.fleet.list({ groupId })` (paginated); with `search`: `api.fleet.search({ text })` (`.take(50)`, set `searchCapped` when 50 came back) |
 | `useLiveStatus(ids)` | `api.fleet.liveStatus({ deviceIds })` (≤ 100 ids) |
@@ -71,12 +83,14 @@ Replace the hook body in `live/hooks.ts`; screens do not change.
 | `useSetExitPin` / `useClearExitPin` | `useAction(api.settings.setExitPin)` / `api.settings.clearExitPin` |
 | `useKeysScreen` | `api.keys.status` (+ `keys:trustProgress`) |
 | `useRegisterKey` / `usePrepareRotation` / `useFinishRotation` | `api.keys.registerActive` / `prepareRotation` / `finishRotation` |
-| `useMembersScreen` | `api.members.list` |
-| `useInviteMember` / `useCreateResetCode` | `useAction(api.members.invite)` / `useAction(api.members.createResetCode)` |
-| `useRevokeInvite` / `useChangeRole` / `useSetMemberDisabled` / `useResetMemberMfa` | `api.members.revokeInvite` / `changeRole` / `setDisabled` / `resetMfa` |
+| `useMembersScreen` | `api.members.list` → `{ members, invites }` (invites in every state, newest 100; the screen shows only unused, unexpired ones) | live |
+| `useInviteMember` / `useCreateResetCode` | `useAction(api.members.invite)` / `useAction(api.members.createResetCode)` → `{ code, expiresAt }` (code shown once, kept in component state only) | live |
+| `useRevokeInvite` / `useResetMemberMfa` | `useMutation(api.members.revokeInvite)` / `useMutation(api.members.resetMfa)` | live |
+| `useChangeRole` / `useSetMemberDisabled` | `useMutation(api.members.changeRole)` / `useMutation(api.members.setDisabled)`, both with `expectedRevision` (`stale_edit` when the member changed) | live |
 
 Shapes the plan does not pin down and the backend must match (or the types
-change): `MfaStatus.lockedUntil/recoveryCodesLeft`, `GroupDetail.appOptions`
-and `enrollmentCodeCount`, `EmployeeDetail.groupOptions/appOptions/defaultQuotaGb`,
-`AppDetail.groupOptions`, `KeysScreen`, `MembersScreen`, `DeviceRow` without
-`deviceStatus`.
+change): `GroupDetail.appOptions` and `enrollmentCodeCount`,
+`EmployeeDetail.groupOptions/appOptions/defaultQuotaGb`,
+`AppDetail.groupOptions`, `KeysScreen`, `DeviceRow` without `deviceStatus`.
+(`MfaStatus` and `MembersScreen` now match Step 3's functions; `account:me`
+also returns `memberships`, unused until v2.)

@@ -4,6 +4,7 @@ import { useAuthActions, useAuthState, useMe } from "../data";
 import { MeContext } from "../lib/member";
 import { withNext } from "../lib/next";
 import { strings } from "../lib/strings";
+import { useSessionGuard } from "./useSessionGuard";
 
 export function FullPageSpinner() {
   return (
@@ -42,11 +43,13 @@ export function RequireMember() {
   const me = useMe();
   const location = useLocation();
   const here = location.pathname + location.search;
+  // A token the server no longer accepts (`me` stays null), or any live hook
+  // answering `unauthenticated`: back to sign-in with `next` (session expiry).
+  useSessionGuard(!isLoading && isAuthenticated && me === null);
 
   if (isLoading) return <FullPageSpinner />;
   if (!isAuthenticated) return <Navigate to={withNext("/sign-in", here)} replace />;
-  if (me === undefined) return <FullPageSpinner />;
-  if (me === null) return <Navigate to={withNext("/sign-in", here)} replace />;
+  if (me === undefined || me === null) return <FullPageSpinner />;
   if ("noAccess" in me) return <NoAccess />;
   if (me.mfa.required && !me.mfa.verified) return <Navigate to={withNext("/mfa", here)} replace />;
 
