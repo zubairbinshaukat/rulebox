@@ -52,12 +52,12 @@ function loadControls(): DemoControls {
 }
 
 const state = {
-  db: seed(),
+  db: /* @__PURE__ */ seed(),
   version: 0,
-  controls: loadControls(),
-  session: loadSession(),
+  controls: /* @__PURE__ */ loadControls(),
+  session: /* @__PURE__ */ loadSession(),
   /** Role override from the demo controls ("View as"). */
-  roleOverride: (readStorage("rulebox.demo.role", "session") as Role | null) ?? null,
+  roleOverride: (/* @__PURE__ */ readStorage("rulebox.demo.role", "session") as Role | null) ?? null,
   failedSignIns: 0,
 };
 

@@ -16,7 +16,8 @@ import { AccountMenu } from "./AccountMenu";
 import { ConnectionBanner } from "./ConnectionBanner";
 import { Nav } from "./Nav";
 
-const DemoControls = IS_DEMO ? lazy(() => import("./DemoControls")) : null;
+// `__DEMO__` is a build-time literal, so live builds drop this chunk entirely.
+const DemoControls = __DEMO__ ? lazy(() => import("./DemoControls")) : null;
 
 
 function PageFallback() {

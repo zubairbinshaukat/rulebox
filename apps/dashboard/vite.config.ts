@@ -2,7 +2,7 @@ import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import react from "@vitejs/plugin-react";
 import Icons from "unplugin-icons/vite";
-import type { Plugin } from "vite";
+import { loadEnv, type Plugin } from "vite";
 import { defineConfig } from "vitest/config";
 
 const pkg = JSON.parse(readFileSync(new URL("./package.json", import.meta.url), "utf8")) as { version: string };
@@ -26,14 +26,22 @@ function cspMeta(): Plugin {
   };
 }
 
-export default defineConfig({
+export default defineConfig(({ mode }) => {
+  const demo = loadEnv(mode, process.cwd(), "VITE_").VITE_DEMO === "1";
+  return {
   // Solar icons are compiled into the bundle at build time (Decision 16/17: no runtime fetching).
   plugins: [react(), Icons({ compiler: "jsx", jsx: "react" }), cspMeta()],
   define: {
     __APP_VERSION__: JSON.stringify(pkg.version),
+    // Build-time switch so a live build drops the demo fixtures entirely.
+    __DEMO__: JSON.stringify(demo),
   },
   resolve: {
-    alias: { "@convex": fileURLToPath(new URL("../../convex", import.meta.url)) },
+    alias: {
+      "@convex": fileURLToPath(new URL("../../convex", import.meta.url)),
+      // The data implementation (src/data/README.md): fixtures only in demo builds.
+      "@rulebox/data-impl": fileURLToPath(new URL(demo ? "./src/data/demo/hooks.ts" : "./src/data/live/hooks.ts", import.meta.url)),
+    },
   },
   server: { port: 5173, strictPort: true },
   preview: { port: 4173, strictPort: true },
@@ -56,4 +64,5 @@ export default defineConfig({
     include: ["src/**/*.test.{ts,tsx}"],
     css: false,
   },
+  };
 });

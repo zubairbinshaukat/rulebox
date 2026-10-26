@@ -4,12 +4,14 @@
  * fixtures, anything else the real Convex backend.
  */
 import type { DataApi } from "./api";
-import { demoApi } from "./demo/hooks";
-import { liveApi } from "./live/hooks";
+// vite.config.ts points this alias at demo/hooks.ts (VITE_DEMO=1) or live/hooks.ts,
+// so a live build never contains the fixtures.
+import { dataApi } from "@rulebox/data-impl";
 
-export const IS_DEMO = import.meta.env.VITE_DEMO === "1";
+/** Same as `import.meta.env.VITE_DEMO === "1"`, as a build-time constant so live builds drop the fixtures. */
+export const IS_DEMO: boolean = __DEMO__;
 
-const api: DataApi = IS_DEMO ? demoApi : liveApi;
+const api: DataApi = dataApi;
 
 export const {
   useAuthState,

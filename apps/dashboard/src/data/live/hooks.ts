@@ -134,3 +134,7 @@ export const liveApi: DataApi = {
   useCreateResetCode: useNotReadyMutation,
   useResetMemberMfa: useNotReadyMutation,
 };
+
+/** Resolved through the `@rulebox/data-impl` alias in live builds. */
+export const dataApi = liveApi;
+

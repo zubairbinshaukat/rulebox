@@ -8,3 +8,6 @@ interface ImportMetaEnv {
 
 /** The dashboard's package.json version (vite.config.ts `define`). */
 declare const __APP_VERSION__: string;
+
+/** "VITE_DEMO=1" at build time (vite.config.ts `define`). */
+declare const __DEMO__: boolean;

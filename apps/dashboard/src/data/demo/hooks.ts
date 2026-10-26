@@ -1661,3 +1661,7 @@ function bumpVersion(db: DemoDb, deviceId: string, reason: string) {
 function republishGroup(db: DemoDb, groupId: string, reason: string) {
   for (const d of db.devices) if (d.groupId === groupId) bumpVersion(db, d._id, reason);
 }
+
+/** Resolved through the `@rulebox/data-impl` alias in demo builds. */
+export const dataApi = demoApi;
+
