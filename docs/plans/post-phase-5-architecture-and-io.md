@@ -45,8 +45,11 @@ has been run.
 
 ## Updates since this plan was written
 
-None yet. When the user answers Section 8.4, record the answers here and in
-`docs/plans/README.md`.
+- **2026-10-27:** the owner answered Q1-Q4, Q6, Q7 and added step-up
+  authentication (final section). Amendments A1-A22 are folded into the
+  remaining Phase 4 steps (`phase-4-dashboard-state.md`, "Updates since
+  this plan was written", 4.2.1, Steps 5-22, new Step 5a); A10 is the
+  Step 3 follow-up there.
 
 ---
 

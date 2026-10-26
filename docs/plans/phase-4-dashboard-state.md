@@ -85,6 +85,48 @@ a primary source; the plan says how each one gets confirmed.
   (8) `organizations.maxDevices` (optional; 2 for new organizations) for
   the hosted plan, enforced from Step 6; (9) `setup:createOwnerInvite`
   takes `existingOrgId` to adopt a Phase 2 organization without members.
+- **2026-10-27, Step 4 built** (`598253a`).
+- **2026-10-27, owner decisions on the post-Phase-5 plan and its I/O
+  amendments applied** (`docs/plans/post-phase-5-architecture-and-io.md`,
+  Sections 2, 3, 7 and "Owner decisions on Section 8.4"). Decisions:
+  hosted service on **one shared Convex deployment with many
+  organizations**; stay on the **free Convex plan** until real outside
+  tenants exist (database I/O is the scarce resource: every read and write
+  is budgeted); **default device ping interval 30 minutes**, editable
+  globally and per tenant (stored as settings, carried to the agent in its
+  desired-state head); free-plan limits 2 devices / 25 employees / 20 apps /
+  3 groups / 2 members / 30-day audit, editable globally and per tenant;
+  **employee roster out of the signed document** (Q6 yes); **JWT lifetime
+  60 minutes** (Q7); new feature **step-up authentication** (action PIN +
+  passkeys, Section 4.16, Step 5a). Amendments applied to the remaining
+  steps: A1 (`orgPlans`, `maxDevices` in `enroll`) → 4.2, Steps 5, 6; A2
+  (`deviceCredentials`) → 4.2, 4.6, Step 7; A3 (presence by transitions)
+  → 4.2, 4.9, Steps 7, 17; A4 (`devices:ping`, interval from settings) →
+  4.9, 5.1, Steps 7, 13; A5 (head/body split) → 4.4, 5.1, Steps 8, 9;
+  A6 (signed roster log) → 4.4, 4.12, Steps 8, 9, 11, 13; A7 (overview
+  counters) → 4.2, Steps 5, 10, 11, 17; A8 (`deviceSummary`) → Step 7;
+  A9 (limiter consumed on failure, `enrollPerOrg`, limiter cleanup) →
+  Steps 6, 12; A10 (JWT 60 min, refresh-token cleanup, indexed
+  maintenance) → Step 3 follow-up (done in code, see the next entry);
+  A11 (`loadOrgSigningKey(ctx, orgId)`) → 4.5, Step 8; A12 (batched
+  `deviceApi:report`, terminal-only install reports, jittered backoff,
+  `MAX_PING_MS` 6 h) → Steps 12, 13, 14; A13 (reserved head fields and
+  `relocate`) → Steps 8, 9, 13; A14 (audit retention per plan) → 4.11,
+  Step 17; A15 (`orgDb`, org-B/suspended callers) → 4.6, Steps 7, 18;
+  A16 (I/O probe, `ioBudgets.ts`, CI test) → rules for every step, Step
+  18; A17 (dashboard data types) → Steps 7, 17; A18 (`/config.json`) →
+  Step 20; A19-A21 (Phase 5/6) → Section 17; A22 (PRD) → Section 20.
+  **Conflicts with code that already exists** (each is resolved in the
+  step named): `organizations.maxDevices` + `DEFAULT_MAX_DEVICES` (Step 3)
+  are replaced by `orgPlans.limits.maxDevices` (Step 5 migrates, Step 6
+  enforces); `orgStats.pingIntervalMs` (written 300,000 by
+  `setup:createOwnerInvite`) is replaced by the settings of 4.9 (Step 5);
+  `deviceStatus` and the `devices.secretHash` / `previousSecretHash` /
+  `rotateCredential` / `revoked` fields used by `lib/deviceAuth.ts`,
+  `enrollment:enroll` and `devices:heartbeat` move to `deviceLiveness` /
+  `devicePresence` / `deviceCredentials` (Step 7 migrates);
+  `desiredStates` (Phase 2 rows) is replaced by `desiredHeads` /
+  `desiredBodies` / `desiredVersions` (Step 8).
 
 ---
 
@@ -301,6 +343,18 @@ improvise. Section 19 lists every decision this plan made on its own.
   stored for audit and for Phase 5 rollback.
 - **The Staff App still never talks to Convex** (Phase 3 P1).
 
+**Amended (A3, A4, A5, A6, A12; owner decisions 2026-10-27).** The
+subscription is `devices:headState` and returns a ~250-byte **head**
+(`desiredHeads`: version, content hash, key id, body id, ping interval,
+`pingNonce`, `fastUntil`, roster epoch), never the signed payload. The
+agent fetches the signed body once per version with the one-shot
+`devices:fetchDesired({ version })` and roster changes with
+`devices:fetchRoster({ sinceEpoch })`. `devices:heartbeat` becomes
+`devices:ping` (liveness only, no status); status, install results,
+audit records and apply reports go together in one batched
+`deviceApi:report` call. The device list reads presence **transitions**
+(`devicePresence`), never `lastSeen`; there is no `fleet:liveStatus`.
+
 ### 4.2 Data model
 
 Legend: **grows** = never `.collect()`; list with `.paginate()`, "latest"
@@ -363,6 +417,46 @@ separate"):
   read it (the detail page does).
 - `orgStats` is read by `heartbeat`, written only on enroll / remove.
 
+#### 4.2.1 Tables added or changed by the I/O amendments (owner decisions 2026-10-27)
+
+These rows **replace** the matching rows above where they differ. Sizes
+are from the post-Phase-5 plan, Section 1.2; every row stays small and
+fixed-size, and every hot row is read by exactly the readers named.
+
+| Table | Size | Fields | Indexes | Amendment, step |
+|---|---|---|---|---|
+| `orgPlans` | tiny (1 per org) | `orgId`, `plan: "free"\|"team"\|"custom"`, `status: "active"\|"suspended"\|"pendingDeletion"`, `limits: planLimits` (post-Phase-5 3.1: `maxDevices`, `maxEmployees`, `maxApps`, `maxGroups`, `maxMembers`, `auditRetentionDays`, `storageQuotaBytes`, `maxUploadBytes`, `watchMode`, `maxEnrollmentCodesActive`), `pingIntervalMs: v.optional(number)` (**per-tenant override**; missing = global setting), `degradeLevel: number`, `suspendedReason: v.optional(string)`, `revision: number`, `updatedBy: string`, `updatedAt` | `by_org [orgId]`, `by_status [status]` | A1, Step 5 (created), Step 6 (`maxDevices` enforced) |
+| `platformSettings` | tiny (1 row, `key: "global"`) | `key`, `pingIntervalMs: number` (**global default**, 1,800,000), `planDefaults: v.record(plan, planLimits)`, `revision` | `by_key [key]` | A4 + owner Q2/Q3, Step 5 |
+| `orgStats` | tiny (1 per org) | `orgId`, `deviceCount` (non-revoked), `employeeCount`, `activeEmployeeCount`, `appCount`, `groupCount`, `memberCount`, `noGroupDeviceCount`, `outOfSupportCount`, `failedInstallCount`, `activeEnrollmentCodes`, `publishFailedAt: v.optional(number)`, `lastActivityDay: v.optional(string)`. **`pingIntervalMs` is removed** (4.9). Each counter is changed in the same mutation that changes the counted thing | `by_org` | A7, from Step 5 on |
+| `deviceCredentials` | grows (1 per device), read by **every** device call | `deviceId`, `orgId`, `secretHash`, `previousSecretHash: v.optional`, `rotate: v.optional(boolean)`, `state: "active"\|"revoked"\|"overLimit"\|"suspended"` | `by_device [deviceId]`, `by_secret_hash`, `by_previous_secret_hash` | A2, Step 7 (moved from `devices`) |
+| `devices` | grows | identity only: `orgId`, `groupId`, `name`, `enrolledAt`, `enrollmentTokenId`, `hardwareIdHash`, `kioskEnabled`, `ring` (Phase 5), `revision`. No secret hashes, no `revoked` (in `deviceCredentials.state`), no status | `by_org`, `by_group`, `search_name` | A2, Step 7 |
+| `deviceLiveness` | grows (1 per device), fast-changing, **never subscribed** (except one row on a watched detail page) | `deviceId`, `orgId`, `seenBucket` (Unix ms ÷ 60,000), `online: boolean` | `by_device`, `by_online_seen [online, seenBucket]` | A3, Step 7 |
+| `devicePresence` | grows (1 per device), written **only on a transition** | `deviceId`, `orgId`, `online`, `since` | `by_device` | A3, Step 7 |
+| `orgPresence` | tiny (4 shards per org; 16 above 1,000 devices) | `orgId`, `shard`, `online: number` | `by_org_shard [orgId, shard]` | A3, Step 7 |
+| `deviceSummary` | grows (1 per device) | the list columns only: `deviceId`, `orgId`, `agentVersion`, `windowsBuild`, `kioskPhase`, `outOfSupport`, `appliedVersion`, `diskBand`, `updatedAt` (≈ 250 B) | `by_device` | A8, Step 7 |
+| `deviceReports` | grows (1 per device) | detail only (compat JSON, trusted key ids, restart pending, exact disk value when the band changes) | `by_device` | A8, Step 7 |
+| `deviceStatus` | **retired** | — (rows deleted by the Step 7 migration) | — | A3, Step 7 |
+| `desiredHeads` | grows (1 per device), the agent's subscription | `deviceId`, `orgId`, `version`, `contentHash`, `keyId`, `bodyId: v.id("desiredBodies")`, `pingIntervalMs`, `pingNonce: number`, `fastUntil: number`, `rosterGroupId: v.optional(id)`, `planState: "ok"\|"overLimit"\|"suspended"` | `by_device` | A5 + A13, Step 8 |
+| `desiredBodies` | grows (5 per device) | `orgId`, `deviceId`, `version`, `payload`, `signature`, `keyId`, `contentHash`, `createdAt` | `by_device_version [deviceId, version]` | A5, Step 8 (replaces `desiredStates`) |
+| `desiredVersions` | grows (5 per device) | `orgId`, `deviceId`, `version`, `reason`, `createdAt`, `bodyId` (≈ 150 B; device page history) | `by_device_version` | A5, Step 8 |
+| `groupRoster` | tiny (1 per group) | `orgId`, `groupId`, `epoch: number`, `snapshotEpoch: number`, `snapshotId: v.optional(id)` | `by_group` | A6, Step 8 (table), Step 11 (writes) |
+| `rosterEntries` | grows (pruned at each snapshot) | `orgId`, `groupId`, `epoch`, `employeeId`, `credentialRevision: v.optional(number)` (missing = removed), `signature` (org key over `rulebox.roster/1\n<orgId>\n<groupId>\n<epoch>\n<employeeId>\n<rev\|removed>`) | `by_group_epoch [groupId, epoch]` | A6, Steps 8, 11 |
+
+Rules that come with these tables:
+
+- **Write on transitions and changes only.** `devicePresence` and
+  `orgPresence` change on online/offline transitions; `deviceSummary` on a
+  list-column change; `orgStats` counters in the mutation that changes the
+  counted rows; `desiredHeads` on a new version, ping-interval change,
+  watch/check-now signal or roster epoch change.
+- **Never subscribe** to `deviceLiveness` (except the single watched row),
+  `desiredBodies`, `authRefreshTokens`, rate-limiter rows, or any table
+  scanned to count (post-Phase-5 2.5).
+- **Every new public function has a row in `convex/ioBudgets.ts`** (A16)
+  with its maximum reads, read bytes, writes and write bytes per call;
+  the probe test of Step 18 fails a function over its budget. Steps 5-17
+  add the rows for the functions they create.
+
 ### 4.3 Index list (complete) and the query that uses each
 
 A query not in this table does not exist in Phase 4. Every
@@ -413,7 +507,22 @@ A query not in this table does not exist in Phase 4. Every
 | `auditLog.by_org_at` | audit screen (`paginate`, `order("desc")`), overview (`.take(10)`) |
 | `auditLog.by_org_target` | "history" panel on a device / employee / app page (`paginate`) |
 | `auditLog.by_event_key` | `reportAudit` idempotency |
-| `auditLog.by_at` | retention cron |
+| `auditLog.by_at` | retention cron (**amended A14:** per-org retention uses `by_org_at` with each org's cutoff; `by_at` stays only for the global maximum) |
+
+**Indexes added by the I/O amendments (4.2.1):** `orgPlans.by_org`,
+`orgPlans.by_status`, `platformSettings.by_key`, `deviceCredentials.by_device`
+/ `by_secret_hash` / `by_previous_secret_hash` (every device call, enroll
+idempotency, rotation), `deviceLiveness.by_device` (ping) and
+`by_online_seen` (`presence:sweep`, `.take(500)`), `devicePresence.by_device`
+and `deviceSummary.by_device` (list joins, `.unique()`),
+`orgPresence.by_org_shard` (overview, `.take(16)`), `desiredHeads.by_device`
+(agent subscription, publisher), `desiredBodies.by_device_version`
+(`fetchDesired`, pruning by id), `desiredVersions.by_device_version` (device
+page `.take(5)`), `groupRoster.by_group`, `rosterEntries.by_group_epoch`
+(`fetchRoster`, `.take(201)`), `invites.by_expires_at` (maintenance, A10).
+**Removed:** `deviceStatus.*`, `devices.by_secret_hash`,
+`devices.by_previous_secret_hash`, `desiredStates.*` (after the Step 7 and
+Step 8 migrations).
 
 ### 4.4 The desired-state document (version 2) and the publisher
 
@@ -525,6 +634,39 @@ export const run = internalMutation({ args: { orgId: v.id("organizations") }, re
 - The queue row is the only hot row; it is written by admin edits only
   (a few per minute at most), so write conflicts are not a concern.
 
+**Amended (A5, A6, A13; owner Q6 = yes).**
+
+- **Head/body split.** The signed payload above is stored in
+  `desiredBodies`; for each new version the publisher writes the body, a
+  `desiredVersions` row and patches the device's `desiredHeads` row
+  (`version`, `contentHash`, `keyId`, `bodyId`) in the same mutation. The
+  "compare `contentHash`" of rule 5 reads the **head** (250 B), never the
+  newest payload. Pruning deletes bodies and version rows by id (`version
+  <= N - 5`). The head is **not** signed; the body is. The agent applies a
+  body only when its signature verifies and its `version`, `keyId` and
+  SHA-256 match the head, so a forged head can only cause a fetch that
+  fails verification.
+- **The `employees` key leaves the document.** Rule 3 is replaced: the
+  document carries `rosterGroupId` (the device's group id, or `null`)
+  instead of `employees`; who may sign in on the device comes from the
+  **signed per-group roster log** (`rosterEntries`, 4.2.1). The head
+  carries the group's current `rosterEpoch`; the agent calls
+  `devices:fetchRoster({ sinceEpoch })` (≤ 200 entries, else a signed
+  snapshot) when the epoch moves. An employee change therefore costs each
+  device of the group one head re-run (≈ 0.7 KB) and one delta fetch
+  instead of a 13 KB payload rewrite and re-read. `employeeIds` inside
+  `catalog` entries with audience `selected` stay in the document (they
+  change only when an app's audience changes).
+- **Reserved now** (protocol, A13): head fields `pingNonce` (agent pings
+  at once when it changes) and `fastUntil` (agent pings every 60 s until
+  then), and the agent-only document key `relocate` (`{ url, deviceId,
+  notBefore }`, signed with the body; tenant moves, post-Phase-5 4.6). The
+  Phase 4 agent parses and ignores `relocate`.
+- **Ping interval in the head.** `desiredHeads.pingIntervalMs` = the
+  org's override or the global setting (4.9). Changing either patches the
+  heads of the affected devices in batches of 100 (no re-signing).
+- Phase 5 document additions (A19) go into the body like `catalog`.
+
 ### 4.5 Signing, keys, rotation and loss
 
 - **Algorithm:** Ed25519 (RFC 8032). TypeScript: `@noble/ed25519` 3.2.0
@@ -624,6 +766,17 @@ export const run = internalMutation({ args: { orgId: v.id("organizations") }, re
   its last document (the kiosk must keep working, PRD 9.4). The freeze
   attack (an attacker who blocks updates) is accepted and listed in
   Section 13.
+- **Amended (A11): one signing entry point per organization.** Every
+  signer (publisher, roster signer, `keys:*`) gets its key from
+  `loadOrgSigningKey(ctx, orgId, which: "active" | "next")` in
+  `convex/lib/signing.ts`. In Phase 4 it reads the env seed
+  (`RULEBOX_POLICY_KEY` / `_NEXT`) and checks that the org's `policyKeys`
+  row matches it; Phase 5 Step 10 swaps the body for `keyring.ts`
+  (per-org wrapped keys under the deployment master key) without touching
+  any caller. `keys:registerActive` registers the key **per org**. No
+  other module reads the env seed (a lint rule names the allowed file).
+- **Signing-key actions are major actions** (Step 5a): `keys:registerActive`,
+  `keys:prepareRotation`, `keys:finishRotation` need a fresh step-up.
 
 ### 4.6 Function catalogue and authorization
 
@@ -694,6 +847,34 @@ credentials; it can only touch its own device's rows.
 Rules: the last Owner cannot be demoted, disabled or removed
 (`last_owner`). A member cannot change their own role. Admins cannot
 create Owners.
+
+**Amended matrix rows (A2, A3, A4, A5, A6, A9, A12, A15; Step 5a).**
+
+| Function (file:name) | Kind | Unauth | Viewer | Admin | Owner | Device |
+|---|---|---|---|---|---|---|
+| `devices:headState` (replaces `devices:desiredState`; the old name stays as an alias returning the Phase 2 shape until Phase 6) | device query, the agent's one subscription | — | — | — | — | ✓ |
+| `devices:fetchDesired({ version })`, `devices:fetchRoster({ sinceEpoch })` | device query, one-shot | — | — | — | — | ✓ |
+| `devices:ping` (replaces `devices:heartbeat`; old name kept as an alias for Phase 2 agents until Phase 6) | device mutation | — | — | — | — | ✓ |
+| `deviceApi:report({ status?, summary?, installs?, audit?, apply?, findings?, acks? })` (replaces `reportAudit` / `reportInstalls`; status leaves the ping) | device mutation | — | — | — | — | ✓ |
+| `fleet:watch({ deviceId })` (6/min per member), `fleet:liveness({ deviceId })` (the one watched row) | mutation / query | — | ✓ | ✓ | ✓ | — |
+| `fleet:checkNow({ deviceIds })` (≤ 50, 1/min per org), `fleet:checkResult({ checkId })` | mutation / query | — | — | ✓ | ✓ | — |
+| `fleet:liveStatus` | **removed** (A3) | | | | | |
+| `stepUp:*` (Section 4.16) | mixed | — | ✓ (own factors) | ✓ | ✓ | — |
+
+- **Major actions need a fresh step-up** (Section 4.16): every function in
+  `MAJOR_ACTIONS` (`convex/lib/stepUp.ts`) answers `step_up_required`
+  unless the session verified its action PIN or a passkey within the last
+  5 minutes; every other member write needs an unlocked session. The
+  matrix test of Step 18 adds the callers "owner, step-up idle" and
+  "owner, step-up older than 5 minutes".
+- **`orgDb` (A15, before Step 7):** the member and device wrappers hand
+  handlers a `ctx.db` that throws on a `withIndex` over an `orgId` table
+  whose first equality is not the caller's org (or an id already checked
+  with `getInOrg`) and returns `null` from `get` for another org's row.
+  New queries from Step 7 on are born scoped.
+- **Callers added to the matrix (A15):** owner of org B, device of org B,
+  owner of a suspended org (`orgPlans.status = "suspended"`: reads allowed,
+  writes refused except revoke / lock / exit PIN / export).
 
 #### Ready for more than one organization
 
@@ -945,7 +1126,12 @@ and never downloads anything not named by a signed document.
   the server has not acknowledged (kept in `installs.json`
   `reportedState`), when online; on reconnect the unacknowledged ones
   are sent again. The server upserts `installResults` (write only on
-  change).
+  change). **Amended (A12):** only two transitions are reported per
+  install, `accepted` (the agent took the job: `pending`) and the terminal
+  state (`installed`, `failed`, `removed`, `unsupported`); `downloading`
+  and `installing` stay local (shown in the agent log). They travel in the
+  batched `deviceApi:report({ installs })` call, coalesced with status and
+  audit at most every 60 s.
 - **Simulate mode:** `SimPlatform` fakes download and install (a
   scripted exit code per app id, default 0) and creates the exe in its
   fake file set, so the whole flow is testable on the dev machine.
@@ -983,6 +1169,48 @@ sign-in; `reportAudit` / `reportInstalls` are event-driven. The
 dashboard's `fleet:liveStatus` re-runs on each heartbeat of a visible
 device only while a device list is open. Section 15 has the full budget.
 
+**Superseded (A3, A4; owner Q1, Q2, 2026-10-27).** The fleet-size table,
+`pingIntervalFor(deviceCount)`, `orgStats.pingIntervalMs`, the
+`lastSeenAt` online rule and `fleet:liveStatus` above are replaced by:
+
+- **Interval from settings, not fleet size.** Effective interval =
+  `orgPlans.pingIntervalMs` (per-tenant override) ?? `platformSettings
+  .pingIntervalMs` (global default, **30 minutes**; owner Q2). Both are
+  edited by the operator (`plans:setGlobalPingInterval`,
+  `plans:setOrgPingInterval`, internal until the console exists; bounds
+  60,000 – 21,600,000 ms) and reach the agent through
+  `desiredHeads.pingIntervalMs` (4.4). `lib/heartbeat.ts` becomes
+  `lib/ping.ts` with `effectivePingInterval(orgPlan, settings)`.
+- **`devices:ping`** (renamed from `heartbeat`, alias kept): reads
+  `deviceCredentials` (auth) and `deviceLiveness` (1 row), writes
+  `deviceLiveness` only when the minute bucket changed (≈ 100 B), and on an
+  offline → online transition also `devicePresence` and one `orgPresence`
+  shard in the same mutation. It never reads `orgPlans`, `orgStats` or
+  `devices`. Answer: `{ nextPingInMs, planState, rotateCredential }`
+  (`nextPingInMs` = head interval, plus up to 25 % random spread for three
+  pings when the deployment is under load, post-Phase-5 2.10). Any other
+  device call refreshes liveness the same way (a sign-in counts as a
+  ping).
+- **Online → offline** by the cron `presence:sweep` (every 5 minutes):
+  `deviceLiveness.by_online_seen` with `online = true` and `seenBucket <
+  now - grace`, `.take(500)`, rescheduling while full; `grace = 2.5 ×
+  interval + 1 min` per org (map built once per run). It reads only
+  devices that just went silent.
+- **Dashboards read transitions, never timestamps:** lists show "Online"
+  or "Offline since 14:05" from `devicePresence`; the overview sums the
+  `orgPresence` shards. The device detail page may subscribe to the one
+  `deviceLiveness` row of the device it shows, while **watch mode** is on.
+- **Real time on demand:** `fleet:watch` sets `desiredHeads.fastUntil =
+  now + 5 min` (written only when it extends the value by ≥ 2 min; the page
+  renews it while visible); the agent pings every 60 s until then.
+  `fleet:checkNow` bumps `desiredHeads.pingNonce` on ≤ 50 devices; each
+  agent pings within 0–5 s; `fleet:checkResult` reads their liveness rows
+  for at most 60 s.
+- **Budget (post-Phase-5 1.4 B, estimates):** ≈ 2.2-3.7 MB of database I/O
+  per device per month at 30 minutes (≈ 445 devices per GB for small
+  tenants) instead of ≈ 14 MB at 5 minutes; 48 ping calls per device per
+  day. The agent clamps `nextPingInMs` to `[60 s, 6 h]` (A12).
+
 ### 4.10 Organization settings
 
 ```ts
@@ -1011,7 +1239,12 @@ export const orgSettings = v.object({
 ### 4.11 Audit log
 
 - Append-only. No mutation updates or deletes an audit row except the
-  retention cron (365 days, `AUDIT_RETENTION_DAYS`).
+  retention cron (365 days, `AUDIT_RETENTION_DAYS`). **Amended (A14):**
+  retention is per organization, `orgPlans.limits.auditRetentionDays`
+  (free 30 days, owner Q3; `custom` 365), pruned by
+  `maintenance:pruneAudit` one org per run through `auditLog.by_org_at`
+  with that org's cutoff, 500 rows per run. Successful employee sign-ins
+  are never audited (already true; keep it).
 - `writeAudit(ctx, entry)` in `convex/lib/audit.ts` is the only writer.
   It truncates `summary` to 300 characters and refuses (throws in tests,
   drops the field in production) any `summary` that matches
@@ -1065,7 +1298,10 @@ export const orgSettings = v.object({
   2. Per-device rate limit (`@convex-dev/rate-limiter` 0.4.2,
      `verifyPerDevice`: token bucket 30 per minute, capacity 30) via an
      internal mutation; over the limit → `{ kind: "lockedOut",
-     retryAfterMs }`.
+     retryAfterMs }`. **Amended (A9):** the limit is **checked**
+     (read-only `check`) before the Argon2 verify and **consumed only on a
+     wrong password**; a successful sign-in writes nothing (the call
+     count drops from 3 to 2).
   3. No employee, disabled, or not in the device's group: still run one
      Argon2id verify against a fixed dummy hash (equal timing), then
      answer `wrongCredentials` / `disabled` / `notAllowedHere`
@@ -1079,6 +1315,13 @@ export const orgSettings = v.object({
      quotaBytes }, offlineDays, credentialRevision }` where `quotaBytes`
      = (employee `quotaGb` ?? org `defaultQuotaGb`) × 1,073,741,824
      (0 = unlimited).
+- **Offline sign-in and revocation (amended A6):** the "allowed
+  employees" list is the signed **roster** of the device's group
+  (`rosterEntries`, 4.4), not `doc.employees`. The agent keeps the roster
+  it verified (entries signed by a trusted org key, epochs increasing
+  without gaps, or a signed snapshot) and drops a cache entry when the
+  roster removes the employee or carries a new `credentialRevision`.
+  `verifyEmployee` also refreshes `deviceLiveness` (it counts as a ping).
 - **Session cleanup (PRD 5.3):** `resetFolders` entries are templates
   `{LocalAppData}\<rel>` or `{RoamingAppData}\<rel>`, `<rel>` 1–6
   components with the path-template character rules; resolved inside the
@@ -1114,6 +1357,34 @@ inside `<RequireMember>` (Step 4).
 | `/settings` | Tabs: Organization (name, offline days, default quota, power options), Admin exit (enabled, key combination, set / clear PIN), Signing (key id, fingerprint, device trust counts, register / rotate, loss instructions), Members (Owner: invite, roles, disable, reset code, reset 2FA), About (versions, Solar credit "Icons: Solar by 480 Design (CC BY 4.0)", GSAP notice) | `settings:get` (+ `members:list` on that tab, `keys:status` on Signing) | viewer / admin / owner per tab |
 | `/gallery` | The existing design-system gallery (members only) | — | viewer |
 | `*` | Not found | — | — |
+
+**Amended screen data (A3, A7, A8, A17, 3.3 of the post-Phase-5 plan):**
+
+- `/` Overview reads **one** `overview:get` that returns `orgStats`
+  counters, the sum of the `orgPresence` shards (`onlineCount`), the
+  plan (`{ name, limits, status }`), `overLimitCount`, 10 audit rows and
+  `publishFailedAt`; no `.take(1001)`, no audit scan, no `nowMs`
+  argument. Banners: over-limit devices, suspended organization, plan
+  limit reached ("Contact us" button, `mailto:` the `ORG_UPGRADE_CONTACT`
+  setting).
+- `/devices` reads one `fleet:list` page: 50 × (`devices` + `deviceSummary`
+  + `devicePresence` + `desiredHeads`), returning `presence: { online,
+  since }`, `appliedVersion`, `latestVersion` (from the head) and a red
+  "Over plan limit — not updated" badge when `planState = "overLimit"`.
+  Never a payload, never `deviceLiveness`. A **Check now** button (admin)
+  calls `fleet:checkNow` for the visible devices and shows answered / no
+  answer from `fleet:checkResult` for 60 s.
+- `/devices/:id` reads `fleet:get` (versions from `desiredVersions`);
+  while the page is visible it calls `fleet:watch` every 4 minutes and
+  subscribes to `fleet:liveness` ("Last contact 20 s ago").
+- Dashboard data layer (`apps/dashboard/src/data`): `useLiveStatus`
+  removed; `DeviceRow.presence`; new hooks `useWatchDevice`,
+  `useCheckNow`, `useCheckResult`; `OverviewScreen` gains `onlineCount`,
+  `overLimitCount`, `plan`; `Me` gains `plan: { name, limits, status }`;
+  new error code `plan_limit` (with `detail` naming the limit); demo
+  fixtures follow.
+- Major actions (Section 4.16) show the step-up dialog (action PIN or
+  passkey) before calling the function, and again on `step_up_required`.
 
 States every data screen has (the shared components of Step 4):
 
@@ -1269,6 +1540,24 @@ refusal rather than a wrong action.
 | `deviceApi:reportInstalls` | — | `{ deviceId, deviceSecret, results: [{ appId, state, appRevision, attempts, exitCode?, detail? }] (≤ 50) }` → `{ accepted: number }`; unknown app ids are ignored (counted as accepted) |
 | `deviceApi:rotateCredential` | — | `{ deviceId, deviceSecret, newSecretHash }` → `{ kind: "ok" }`; idempotent: if `secretHash` already equals `newSecretHash` and the caller presented `previousSecretHash`, answer ok |
 
+**Amended contract (A2, A4, A5, A6, A12, A13; owner Q2, Q6).** Rows above
+that these replace keep their old names as aliases for Phase 2 agents
+until Phase 6, so an old agent still gets a clean answer.
+
+| Function | Phase 4 (amended) |
+|---|---|
+| `enrollment:enroll` | adds the plan check: `orgStats.deviceCount` (non-revoked) vs `orgPlans.limits.maxDevices` in the same transaction → `ConvexError({ code: "plan_limit", detail: "devices" })` (the agent prints "This organization has reached its device limit. Ask your administrator." and stays unenrolled, exit code 3); rate limits `enrollPerOrg` (10/min) + `enrollGlobal` (120/min); creates `deviceCredentials`, `desiredHeads`, `deviceLiveness`, `devicePresence`, increments `orgStats.deviceCount` and one `orgPresence` shard |
+| `devices:headState` | the subscription: `{ head: { version, contentHash, keyId, bodyId, pingIntervalMs, pingNonce, fastUntil, rosterEpoch, planState } \| null, keys, retiredKeyIds }` or `{ kind: "revoked" \| "unknownDevice" }`. Reads `deviceCredentials`, `desiredHeads`, `groupRoster` and `policyKeys` (≤ 20 documents, ≤ 2 KB) |
+| `devices:fetchDesired({ version })` | one-shot query: `{ version, payload, signature, keyId }` of that version (the envelope of Step 9), or `not_found` when pruned (the agent re-reads the head) |
+| `devices:fetchRoster({ sinceEpoch })` | one-shot query: `{ epoch, entries: [{ epoch, employeeId, credentialRevision \| null, signature }] }` (≤ 200) or `{ snapshot: { epoch, payload, signature, keyId } }` when `sinceEpoch < snapshotEpoch` or more than 200 entries are missing |
+| `devices:ping` | `{}` → `{ nextPingInMs, planState: "ok" \| "overLimit" \| "suspended", rotateCredential }`; liveness only |
+| `deviceApi:report` | `{ status?, summary?, installs? (≤ 50), audit? { records ≤ 50, dropped }, apply?, findings?, acks? }` → `{ accepted: { installs, audit } }`; one credentials read per call; each part keeps its own idempotency rule (audit `eventKey`, install upsert, write on change) |
+
+The agent sends at most one `report` per 60 s (security audit records at
+once), pings with full-jitter backoff after errors (5 s → 10 min), waits
+0–120 s before the first ping after an outage longer than 5 minutes, and
+clamps `nextPingInMs` to `[60 s, 6 h]` (`MAX_PING_MS` 1 h → 6 h).
+
 **Order of deployment within the phase:** server first (Steps 7, 8,
 12), agent second (Steps 9, 13, 14). Between Step 8 and Step 9 a
 Phase 2 agent receives the new envelope, fails to parse it
@@ -1305,8 +1594,9 @@ The `AgentSnapshot` does not change (the catalogue is not in it, and the
 | 2 | Schema v2, function wrappers, errors, audit helper | dev | 1 | `convex/` |
 | 3 | Member accounts: Convex Auth, invites, owner bootstrap, MFA | dev | 2 | `convex/` |
 | 4 | Dashboard foundation | dev | 3 | dashboard, `packages/ui` |
-| 5 | Organization settings, exit PIN, groups | dev | 4 | `convex/`, dashboard |
-| 6 | Enrollment codes | dev | 5 | `convex/`, dashboard |
+| 5 | Organization settings, exit PIN, groups (+ `orgPlans`, `platformSettings`, `orgStats` counters) | dev | 4, 5a | `convex/`, dashboard |
+| 5a | Step-up authentication: action PIN and passkeys (Section 4.16; backend first, dashboard UI after) | dev | 4 | `convex/`, root deps, dashboard error mirror; dashboard UI later |
+| 6 | Enrollment codes (+ `maxDevices` in `enroll`, `enrollPerOrg`) | dev | 5 | `convex/`, dashboard |
 | 7 | Devices: reports split, heartbeat scaling, fleet screens | dev | 6 | `convex/`, dashboard |
 | 8 | Signing keys and the publisher | dev | 7 | `convex/`, `scripts/`, `rulebox-policy` vectors, dashboard |
 | 9 | Agent: verify signed documents, key trust | dev (simulate) | 8 | `rulebox-policy`, agent |
@@ -1323,6 +1613,14 @@ The `AgentSnapshot` does not change (the catalogue is not in it, and the
 | 20 | Retire `dev.ts`, docs | dev | 19 | `convex/`, docs |
 | 21 | VM run (the user runs it) | **VM** | 15, 16, 20 | nothing new |
 | 22 | Wrap-up | dev | 21 | docs |
+
+**Dependency order after the 2026-10-27 amendments:** 4 → **5a** → 5 → 6
+→ 7 → 8 → (9, 10) → 11 → 12 → (13 → 14, 15, 16) → 17 → 18 → 19 → 20 →
+21 → 22. Step 5a comes before Step 5 because Step 5 creates the first
+major actions (`settings:setExitPin`, `settings:clearExitPin`,
+`groups:delete`) and wires them to `requireStepUp`. The **BEFORE** items
+of the post-Phase-5 plan land in these steps: A1 → 5/6, A2, A3, A4, A8,
+A15 → 7, A5, A6, A11 → 8, A9, A12 → 12, A13 → 13.
 
 Rules for every step:
 
@@ -1355,6 +1653,22 @@ Rules for every step:
   (`import IconDevices from '~icons/solar/laptop-linear'`).
 - If an API name here does not match the version you installed, use the
   equivalent and record it under "Deviations" in your report.
+- **Database I/O (post-Phase-5 rules, owner Q1: free Convex plan):** every
+  new or changed function gets its row in `convex/ioBudgets.ts` (reads,
+  read bytes, writes, write bytes per call; A16) and the step's report
+  states writes per device per day for any device flow it adds. Write
+  only on change; no query reads a row that changes on a timer; no
+  `.take(1001)` counts in live queries (use `orgStats` counters); lists
+  never read payloads.
+- **Major actions** (Section 4.16): a function that does one of the things
+  in `MAJOR_ACTIONS` is built with `memberMutation(role, { major:
+  "<file>:<name>" })` (or calls `requireStepUp(ctx, "fresh")` when only
+  some arguments make it major) and gets a matrix row; the step-up test
+  fails otherwise.
+- **Counters (A7):** a mutation that creates, deletes, enables or
+  disables a counted thing updates its `orgStats` counter in the same
+  transaction, and the create mutations check the matching
+  `orgPlans.limits` (`plan_limit` with `detail`).
 
 ---
 
@@ -1703,6 +2017,45 @@ an unused owner invite.
 `users`; return a secret from a query; skip the MFA rule for admins in
 any wrapper.
 
+**Follow-up (A10, owner Q7; a separate commit after Step 4):**
+
+1. `JWT_DURATION_MS` 10 → **60 minutes** (`convexAuth({ jwt: { durationMs
+   } })`). Revocation stays instant: `getSignedIn` reads the
+   `authSessions` row on every call, so a deleted session stops at once;
+   mutations and actions also refuse a session past its
+   `expirationTime`, so the longer JWT cannot outlive the session there
+   (queries skip that check: no `Date.now()` in queries; a query's tail is
+   at most one JWT lifetime and only reads).
+2. `maintenance.daily` stops paging whole tables. Each stage deletes
+   only dead rows found through an index bound: `authSessions` and
+   `mfaSessions` by `by_creation_time < now - SESSION_TOTAL_MS` (every
+   session older than its total duration has expired); `invites` by the
+   new `by_expires_at` index; refresh tokens (below); audit by `by_at` as
+   before; at most `MAINTENANCE_BATCH` rows per run, rescheduling while a
+   batch is full.
+3. **Refresh tokens** (`authRefreshTokens`, Convex Auth 0.0.96): one row
+   per refresh, chained by `parentRefreshTokenId`. Safe to delete: (a)
+   every token created more than `SESSION_INACTIVE_MS` ago (its
+   `expirationTime` = creation + that value, so it is expired); (b) a used
+   token (`firstUsedTime` set) more than 60 s after first use (the reuse
+   window is 10 s) **unless** it is the parent of an unused token (Convex
+   Auth lets the parent of the active token fetch that token again, which
+   covers a lost refresh answer). Presenting a deleted token makes Convex
+   Auth delete the session (sign-out), never grant access.
+4. `rateLimits` (component): `clearAll({ before: now - 7 days })` from the
+   daily job (100 rows per component mutation, self-rescheduling). It
+   resets buckets created more than 7 days ago: an attacker who keeps one
+   email's bucket empty gets at most one extra bucket (10 attempts) per
+   week; Convex Auth's own per-account limit and Scrypt still apply.
+   Convex Auth's `authRateLimits` rows fully refilled (last attempt more
+   than an hour ago) are deleted too.
+
+**Tests:** sign-in issues a 60-minute JWT; a disabled member's next call
+fails at once; an expired session row is refused by mutations; the daily
+job deletes exactly the dead rows of each kind and keeps the active
+token and its parent; a run reads no live row of `invites`,
+`mfaSessions` or `authSessions`.
+
 ---
 
 ### Step 4 — Dashboard foundation
@@ -1876,6 +2229,49 @@ Rust.
 **Do NOT:** hash the PIN in the browser; send the PIN to any query; let
 the hotkey grammar differ from the Rust crate.
 
+**Amendments (A1, A4, A7; Step 5a; owner Q1-Q3):**
+
+8. **Plans and settings.** Add `orgPlans` and `platformSettings` (4.2.1)
+   and `convex/lib/plans.ts`: `FREE_LIMITS` (owner Q3: 2 devices, 25
+   employees, 20 apps, 3 groups, 2 members, 30-day audit, 1 GiB storage,
+   500 MiB upload, watch mode on, 5 active enrollment codes),
+   `CUSTOM_LIMITS` (self-host: no limits, 365-day audit),
+   `loadOrgPlan(ctx, orgId)` (1 read, `by_org`), `assertWithinLimit(ctx,
+   orgId, "groups" | …)` (reads `orgPlans` + `orgStats`, throws
+   `plan_limit` with `detail`), `effectivePingInterval(plan, settings)`.
+   `setup:createOwnerInvite` creates the org's `orgPlans` row (`custom`
+   unless env `RULEBOX_HOSTED=1`, then `free`), and the global settings
+   row on first run (`pingIntervalMs: 1_800_000`, owner Q2). Internal
+   mutations `plans:setGlobalPingInterval`, `plans:setOrgPingInterval`,
+   `plans:setLimits` (operator, CLI until the console; audit
+   `org.planChanged` in the tenant's log) patch heads in batches (Step 8
+   gives the heads). **Migration of existing code:** an internal
+   `maintenance:migratePlans` copies `organizations.maxDevices` into
+   `orgPlans.limits.maxDevices`, removes `orgStats.pingIntervalMs`; then
+   narrow the validators (`organizations.maxDevices`,
+   `DEFAULT_MAX_DEVICES` and `orgStats.pingIntervalMs` deleted).
+9. **Counters.** `orgStats` gains the counters of 4.2.1 (missing = 0
+   until `stats:reconcile` runs once; written by the step that creates the
+   counted thing). This step: `groupCount` in `groups:create` / `delete`
+   with `assertWithinLimit("groups")`; `memberCount` in the join path and
+   `members:setDisabled`; `members:invite` checks `maxMembers`.
+10. **Major actions wired** (`requireStepUp`, Section 4.16):
+    `settings:setExitPin`, `settings:clearExitPin`, `groups:delete`, and
+    `settings:update` when it changes `adminExit` (conditional: the handler
+    calls `requireStepUp(ctx, "fresh")` when `adminExit` differs).
+    Every other write here needs an unlocked session (the wrapper's
+    default).
+11. **I/O:** `settings:get` and `groups:list` re-run only on settings or
+    group changes; group counts come from the `devices.by_group` /
+    `groupMembers.by_group` `.take(501)` reads of the plan (tiny for free
+    tenants) until Step 17 adds per-group counters if the probe test shows
+    them over budget. Budget rows in `ioBudgets.ts`.
+
+**Tests (added):** `plan_limit` on the 4th group of a free org; the
+migration moves `maxDevices`; the exit-PIN functions answer
+`step_up_required` without a fresh step-up and succeed with one;
+`settings:update` that changes only `offlineDays` needs no fresh step-up.
+
 ---
 
 ### Step 6 — Enrollment codes
@@ -1916,6 +2312,32 @@ a simulated agent) happens in Step 9, after signing exists.
 deployment.
 
 **Do NOT:** show a code a second time; log it.
+
+**Amendments (A1, A9, A7):**
+
+5. **`maxDevices` in `enroll`** (A1, BEFORE this step): `enrollment:enroll`
+   reads `orgPlans` and `orgStats` in the same transaction as the device
+   insert and refuses with `ConvexError({ code: "plan_limit", detail:
+   "devices" })` when `deviceCount >= limits.maxDevices` (non-revoked
+   devices; the idempotent retry of an already-enrolled secret still
+   answers the first result). It increments `orgStats.deviceCount`.
+   `status = "suspended"` → `plan_limit` with detail `suspended`. Add
+   `plan_limit` to both error lists (server + dashboard mirror) and its
+   sentence ("Your plan's limit is reached. Contact us to upgrade.").
+6. **Rate limits:** `enrollGlobal` (120/min) is consumed before the token
+   lookup (unknown tokens have no org); `enrollPerOrg` (10/min, key = the
+   token's org id) is consumed once the token resolves to an org. An
+   idempotent retry of an enrolled secret consumes only the global
+   bucket.
+7. `create` checks `limits.maxEnrollmentCodesActive` against
+   `orgStats.activeEnrollmentCodes` (incremented on create, decremented
+   on revoke and when the last use is consumed; expiry is reconciled by
+   `stats:reconcile`).
+
+**Tests (added):** the third device of a free org is refused with
+`plan_limit` and nothing is written; a retry of an enrolled secret still
+works at the limit; a revoked device frees a slot; the sixth active code
+is refused.
 
 ---
 
@@ -1992,6 +2414,57 @@ dev deployment.
 
 **Do NOT:** read `deviceStatus` in `fleet:list`; call `Date.now()` in a
 query; delete a non-revoked device.
+
+**Amendments (A2, A3, A4, A8, A15, A17; all BEFORE this step). They replace
+items 2-5 above where they differ:**
+
+6. **`orgDb` first** (A15): `convex/lib/orgDb.ts` and the wrapper change
+   of 4.6; every query of this step uses it. Tests: a handler that
+   queries `devices.by_org` with another org's id throws; `get` of a
+   foreign device returns `null`.
+7. **Credentials split** (A2): `deviceCredentials` (4.2.1). One-off
+   `maintenance:splitDeviceCredentials` (100 per run) creates a row per
+   device from `secretHash`, `previousSecretHash`, `rotateCredential`,
+   `revoked`, then the fields leave `devices`. `lib/deviceAuth.ts`
+   `checkDevice` reads **only** `deviceCredentials.by_device` (220 B);
+   `enroll` idempotency uses `deviceCredentials.by_secret_hash`. Device
+   wrappers give handlers `ctx.device = { _id, orgId, state }` and load the
+   `devices` row only when a handler needs it.
+8. **Presence** (A3): `deviceLiveness`, `devicePresence`, `orgPresence`
+   and `presence:sweep` (cron every 5 minutes) as 4.9; the migration
+   creates the rows from `deviceStatus` and deletes `deviceStatus`.
+   **Remove `fleet:liveStatus`**, `lib/online.ts`'s timestamp rule and
+   `useLiveStatus` (the dashboard keeps `useNow` only for "since" texts).
+9. **Ping** (A4): `devices:ping` replaces `heartbeat` (alias kept until
+   Phase 6) and does liveness only (4.9). The 14-key status leaves the
+   ping: it is sent in `deviceApi:report({ status })` (Step 12); until
+   Step 12 lands, the `heartbeat` alias accepts the status and writes it
+   through the same `report` helper.
+10. **Summary split** (A8): `deviceSummary` (list columns) and
+    `deviceReports` (detail) each written only when their own fields
+    change; disk space quantized to the bands of post-Phase-5 2.6 for the
+    summary. `fleet:list` = one query, 50 × (`devices` + `deviceSummary` +
+    `devicePresence` + `desiredHeads` after Step 8); `latestVersion` from
+    the head; never `desiredStates` / bodies.
+11. **Watch and check now:** `fleet:watch`, `fleet:liveness`,
+    `fleet:checkNow`, `fleet:checkResult` (4.6, 4.9); limits `watch`
+    (6/min per member) and `checkNow` (1/min per org) consumed only when
+    they write.
+12. **Major actions** (Section 4.16): `fleet:setKiosk` when it turns the
+    kiosk **off**, `fleet:revoke`, `fleet:remove` need a fresh step-up;
+    rename, move and `requestCredentialRotation` need an unlocked session.
+13. **Counters:** `deviceCount` and `noGroupDeviceCount` in `enroll`,
+    `move`, `revoke`, `remove`; `outOfSupportCount` when a summary's
+    `outOfSupport` flips. The `pingIntervalFor` table tests are removed;
+    instead `effectivePingInterval` (override, global default, bounds).
+
+**Tests (added):** `ping` writes nothing when the minute bucket did not
+change and writes three rows on an offline → online transition;
+`presence:sweep` marks a silent device offline once and reads only
+silent devices; `fleet:list` reads ≤ 250 documents and ≤ 64 KB for a
+page of 50 (probe); `headState` re-runs neither on ping nor on a report;
+`checkDevice` reads only `deviceCredentials`; `orgDb` refuses a foreign
+org index range.
 
 ---
 
@@ -2083,6 +2556,48 @@ deployment publishes signed documents.
 **Do NOT:** sign in an action and pass the signature to a mutation (the
 payload and its row must be written in the same transaction); put the
 seed anywhere but the env var; add an "unsigned" mode.
+
+**Amendments (A5, A6, A11, A13; owner Q6; BEFORE this step). They replace
+items 1, 3, 4, 5 above where they differ:**
+
+9. **`loadOrgSigningKey(ctx, orgId, which)`** (A11) is the only signing
+   entry point (4.5); `loadSigningKey(which)` is private to
+   `lib/signing.ts`. A lint rule allows reading `RULEBOX_POLICY_KEY` only
+   there.
+10. **Head/body split** (A5, 4.4): the publisher writes
+    `desiredBodies` + `desiredVersions` and patches `desiredHeads` in one
+    transaction; the unchanged-content check reads the head only; pruning
+    deletes bodies and versions by id. `devices:headState` (subscription)
+    and `devices:fetchDesired({ version })` replace `desiredState`; the
+    old name stays as an alias that returns the Phase 2 shape built from
+    the newest body (one release, Phase 2 agents only). Migration:
+    `desiredStates` rows are not copied (Phase 2 rows have no signature);
+    the first publish creates heads for every device, then
+    `desiredStates` is dropped.
+11. **Roster log** (A6): `groupRoster`, `rosterEntries`,
+    `devices:fetchRoster`, `lib/roster.ts` (`signRosterEntry`,
+    `buildRosterSnapshot`, snapshot every 200 entries, entries older than
+    the snapshot pruned). The document's `employees` key is replaced by
+    `rosterGroupId` (4.4). Vectors: `crates/rulebox-policy/tests/vectors/roster-v1.json`
+    (two entries, one removal, one snapshot) signed with the RFC 8032
+    test-1 seed, verified byte for byte in Step 9. Until Step 11 the
+    roster of every group is empty (epoch 0).
+12. **Reserved fields** (A13): heads carry `pingNonce: 0`, `fastUntil: 0`,
+    `pingIntervalMs` (4.9); the document builder accepts an optional
+    `relocate` (never set in Phase 4).
+13. **Major actions:** `keys:registerActive`, `keys:prepareRotation`,
+    `keys:finishRotation` (Section 4.16).
+14. **I/O:** a publish of an unchanged document reads one head (250 B)
+    and writes nothing; a changed one writes body + version + head
+    (≈ 13 KB once) and the agent reads the body once
+    (post-Phase-5 1.3 "Publish fan-out" ≈ 21 KB per device per version).
+    `publishBytesToday` is added to `orgStats` once per publish run.
+
+**Tests (added):** `headState` returns ≤ 2 KB and never a payload;
+`fetchDesired` of a pruned version → `not_found`; changing only the
+roster bumps the epoch and does not write a body; roster entries verify
+against the vector; `loadOrgSigningKey` refuses an org whose active
+`policyKeys` row does not match the env seed.
 
 ---
 
@@ -2216,6 +2731,32 @@ changes with verified signatures.
 from an unsigned source after enrollment; run `enroll` without
 `--simulate`.
 
+**Amendments (A5, A6, A13; protocol, very expensive to change after
+devices ship):**
+
+9. The subscription is `devices:headState`; `DesiredFetch::Ok` carries
+   the **head** (`version`, `content_hash`, `key_id`, `ping_interval_ms`,
+   `ping_nonce`, `fast_until`, `roster_epoch`, `plan_state`) plus keys.
+   When `head.version` is above the last applied version the task calls
+   `fetch_desired(version)` once (retry with backoff on error; `not_found`
+   → wait for the next head), then `verify_envelope` **and** checks
+   `version`, `key_id` and SHA-256 of the payload against the head
+   (`VerifyError::HeadMismatch`, new). Nothing is applied from the head
+   alone.
+10. **Roster:** `rulebox-policy/src/roster.rs` (`RosterEntry`,
+    `RosterSnapshot`, `verify_roster_entry`, `verify_snapshot`; message
+    format of 4.2.1). The agent stores the verified roster in
+    `<data>\state\roster.json` (schema 1, atomic writes) and fetches
+    deltas when `roster_epoch` moves; a gap or a bad signature → fetch a
+    snapshot; never accept an unsigned entry. Tests:
+    `roster_vector_verifies`, `roster_gap_triggers_snapshot`,
+    `forged_roster_entry_refused`, `roster_of_other_group_refused`.
+11. **Reserved fields** (A13): parse `ping_nonce` / `fast_until`
+    (behaviour in Step 13) and the body key `relocate` (parsed, logged
+    "relocation not supported yet", ignored).
+12. `STATUS_KEYS` stays 14 keys, but the status now travels in
+    `report`, not the ping (Step 13 switches the call).
+
 ---
 
 ### Step 10 — Apps, winget, web metadata, assignments, file types
@@ -2319,6 +2860,15 @@ increases and the simulated agent logs the new version. Screenshots.
 **Do NOT:** call GitHub from the browser; run winget anywhere; accept an
 `http://` installer URL; store an icon larger than 32 KiB.
 
+**Amendments (A7; Step 5a):** `apps:createWeb` / `createDesktop` check
+`limits.maxApps` against `orgStats.appCount` and increment it;
+`setArchived` / `remove` keep it right. `apps:remove` (delete) and
+`fileHandlers:remove` are major actions; the rest need an unlocked
+session. `apps:list` never reads `installResults` (install summaries come
+in Step 17 from per-app counters or the capped reads of that step).
+Publishing on an app change costs one head re-run per affected device
+plus one body fetch (A5).
+
 ---
 
 ### Step 11 — Employees
@@ -2363,6 +2913,27 @@ by printing the document); screenshots.
 
 **Do NOT:** return `passwordHash`; let the dashboard set a password for
 an employee of another organization; hash in the browser.
+
+**Amendments (A6, A7; owner Q6, Q3):**
+
+5. **Roster instead of documents** (replaces item 3 and the "republishes
+   the employee's groups" of item 2 and 4.12): every change to who may
+   sign in on a group's devices (create with groups, `setGroups`,
+   `setDisabled`, `setPassword`, username change, `remove`) appends one
+   signed `rosterEntries` row per affected group and bumps
+   `groupRoster.epoch` in the same mutation; **no document is
+   republished** for an employee change. Direct app grants
+   (`setDirectApps`) still republish (they change `catalog`).
+6. **Limits and counters:** `create` checks `limits.maxEmployees` against
+   `orgStats.employeeCount`; `employeeCount` / `activeEmployeeCount` kept
+   in `create`, `setDisabled`, `remove`. `employees:setPassword` is
+   limited by `employeeWrites` (300/hour per org).
+7. **Major actions:** `employees:remove`; `setPassword`, `unlock`,
+   `setDisabled` need an unlocked session.
+
+**Tests (added):** disabling an employee writes one roster entry per
+group and no `desiredBodies` row; the entry verifies with the org key;
+the 26th employee of a free org is refused with `plan_limit`.
 
 ---
 
@@ -2419,6 +2990,36 @@ once the new one was used, wrong secret refused.
 
 **Do NOT:** log arguments in these functions (they carry passwords and
 secrets); answer `disabled` or `notAllowedHere` for a wrong password.
+
+**Amendments (A9, A12, A6; BEFORE this step):**
+
+6. **`deviceApi:report`** (batched, 5.1 amended) replaces
+   `reportAudit` and `reportInstalls` (both kept as thin aliases until
+   Phase 6) and receives the status from the ping. One credentials read
+   per call; each part keeps its rule (audit idempotent on `eventKey`;
+   installs upserted, write on change, only `accepted` and terminal
+   states; status into `deviceSummary` / `deviceReports` on change).
+   Phase 5 adds `apply`, `findings`, daily summaries to the same call
+   (A19). Writes per device per day: report budget of post-Phase-5 1.4 B
+   (≈ 0.4 calls, ≈ 6 KB).
+7. **`verifyEmployee`** (A9): limiter `check` before the Argon2 verify,
+   `limit` only on a wrong password; the membership check stays
+   `groupMembers.by_group_employee` (server truth; the roster is the
+   device's signed copy), so no new reads. Successful sign-in: 2
+   function calls, 0 writes except
+   `deviceLiveness` when its minute bucket changed.
+8. **Limiter rows:** `rateLimits` cleanup is the daily `clearAll` of
+   Step 3's follow-up (A10). New per-tenant buckets (post-Phase-5 4.4:
+   `memberWrites` 120/min per member, `orgWrites` 600/min per org,
+   `employeeWrites`, `checkNow`, `watch`) are consumed only by writes that
+   already write.
+9. `deviceApi:rotateCredential` patches `deviceCredentials` (A2), not
+   `devices`.
+
+**Tests (added):** a successful `verifyEmployee` writes no limiter row; a
+failed one writes exactly one; `report` with status + 3 installs + 5
+audit records reads the credentials row once and writes only changed
+rows; replays of the same batch write nothing.
 
 ---
 
@@ -2540,6 +3141,31 @@ apps; disable the employee in the dashboard → `fake_staff` prints a
 **Do NOT:** put the catalogue or `employees` into `AgentSnapshot` or
 `DesiredState`; call the backend from `apps.list`; log a password.
 
+**Amendments (A6, A12, A13, A4):**
+
+9. **Roster, not `employees`:** item 6's cache rules use the verified
+   roster of Step 9 (an employee missing from it, or with a different
+   `credentialRevision`, is dropped / ends the session); offline sign-in
+   refuses an employee not in the roster.
+10. **Batched reporting** (A12): `Backend::report(auth, ReportBatch)`
+    replaces `report_audit` / `report_installs`; the status leaves
+    `heartbeat`/`ping`. The audit sink and install engine enqueue into one
+    `ReportQueue` flushed at most every 60 s (security records:
+    admin-exit success/lockout, employee lockout → flush at once).
+11. **Ping and backoff** (A4, A12, A13): `Backend::ping` (server
+    `devices:ping`); full-jitter exponential backoff 5 s → 10 min on any
+    backend error; after an outage longer than 5 minutes the first ping
+    waits a random 0–120 s; `MAX_PING_MS` 1 h → 6 h (clamp `[60 s, 6 h]`);
+    a changed `ping_nonce` triggers one ping within 0–5 s; while
+    `now < fast_until` ping every 60 s. Tests:
+    `ping_interval_comes_from_head`, `nonce_change_pings_once`,
+    `fast_until_pings_every_minute_then_stops`,
+    `backoff_is_jittered_and_capped`, `first_ping_after_outage_is_delayed`,
+    `report_queue_flushes_security_at_once`.
+12. `plan_state = "overLimit" | "suspended"`: the agent logs it and
+    changes nothing (the device keeps its last signed document and stays
+    locked; never unlock to save resources).
+
 ---
 
 ### Step 14 — Agent: install engine
@@ -2629,6 +3255,11 @@ dashboard device page shows `installed` after Step 17 (until then check
 **Do NOT:** run any real installer on the dev machine (the guard
 refuses it; do not work around it); use `winget`, PowerShell or
 `ShellExecute`; download from a URL not in a verified document.
+
+**Amendment (A12):** `report.rs` enqueues only `accepted` and terminal
+transitions (4.8 amended) into the `ReportQueue` of Step 13; the test
+`reports_only_unacknowledged_transitions` becomes
+`reports_only_accepted_and_terminal_unacknowledged_transitions`.
 
 ---
 
@@ -2752,6 +3383,30 @@ and with data), device installs, app install summary, audit log.
 **Do NOT:** compute "online" on the server; scan `devices` for the
 overview.
 
+**Amendments (A7, A14, A3, A17). They replace item 3:**
+
+6. `overview:get` (no arguments): `orgStats` (device, employee, app,
+   group counts; `noGroupDeviceCount`, `outOfSupportCount`,
+   `failedInstallCount`, `publishFailedAt`), the sum of the
+   `orgPresence` shards (`onlineCount`), `orgPlans` (`plan`, `limits`,
+   `status`, `overLimitCount`), signing key state, 10 audit rows. Budget:
+   ≤ 60 documents, ≤ 32 KB per run (probe test). It re-runs on
+   transitions, counter changes and new audit rows only. The failed
+   installs list (latest 20) is a separate panel query only when
+   `failedInstallCount > 0`.
+7. `failedInstallCount` is kept by `deviceApi:report` (install part) in
+   the same mutation as the `installResults` change.
+8. **Audit retention per plan** (A14): `maintenance:pruneAudit`, one org
+   per run (`orgPlans.by_status` pages active orgs), `auditLog.by_org_at`
+   below that org's cutoff, 500 rows per run.
+9. **`stats:reconcile`** (nightly, one org per run, paginated): recounts
+   each counter and writes only when it differs.
+
+**Tests (added):** overview reads no `deviceLiveness`, `desiredBodies`,
+`installResults` beyond the panel; a ping storm of 50 devices does not
+change any row the overview reads; a free org's audit rows older than 30
+days are pruned, a custom org's are kept.
+
 ---
 
 ### Step 18 — Security and load hardening
@@ -2792,6 +3447,33 @@ it).
 the user's consent and numbers reported; checklist done.
 
 **Do NOT:** run the load check against anything but the dev deployment.
+
+**Amendments (A15, A16; Step 5a):**
+
+7. **Authorization table** (A15): callers gain owner of org B, device of
+   org B, owner of a suspended org, "owner, step-up idle" and "owner,
+   step-up older than 5 minutes"; the expected answer per function ×
+   caller is exact.
+8. **Cross-tenant property test** (A15): two orgs with identical names,
+   usernames, app and group names; for every query, every `_id`-shaped
+   string in the result belongs to the caller's org.
+9. **I/O probe and budgets** (A16): the wrappers wrap `ctx.db` in a
+   counting proxy when `RULEBOX_IO_PROBE` is set (always in tests);
+   `convex/ioBudgets.ts` has a row per public and internal function;
+   `convex/ioBudgets.test.ts` seeds the large-org fixture (200 devices,
+   300 employees, 30 apps, 10 groups, 500 audit rows) plus a second org,
+   calls every function and fails a function without a row or over its
+   budget; live queries are checked against the "never subscribe" list
+   (post-Phase-5 2.5).
+10. **Load check** (item 5) drives `devices:ping` and `headState`
+    instead of `heartbeat`/`desiredState`, and reports the per-flow
+    function calls; `fleet-sim.mjs` gains `--flow <name> --count <n>` for
+    the measurement procedure of post-Phase-5 1.6 (run only on the
+    owner's separate lab project, never the dev deployment, and only when
+    the owner says so).
+11. **Step-up review:** every function in `MAJOR_ACTIONS` exists and
+    refuses without a fresh step-up; no member write is missing a
+    step-up level (the step-up test of Step 5a walks the api).
 
 ---
 
@@ -2855,6 +3537,15 @@ twice in a row.
 **Done when:** `git grep -n "dev:"` finds no reference to the deleted
 functions; README section reviewed by you once as a new user would read
 it.
+
+**Amendments (A18, A4, Step 5a):** the dashboard reads its Convex URL
+from `/config.json` at start (`{ "convexUrl": "https://…" }`, fallback
+`VITE_CONVEX_URL`) so one hosted build serves several deployments and a
+tenant can move (post-Phase-5 4.6). The README adds: the global ping
+interval and per-tenant overrides (`npx convex run
+plans:setGlobalPingInterval '{"ms":1800000}'`), the passkey settings
+(`RULEBOX_WEBAUTHN_RP_ID`, `RULEBOX_WEBAUTHN_ORIGINS`) and the
+action-PIN reset paths of Section 4.16.
 
 ---
 
@@ -3130,7 +3821,7 @@ agent `enroll`/`recover`/`unenroll` without `--simulate`,
 | Convex Auth tokens in `localStorage` | Any XSS can steal the refresh token | CSP, no HTML injection, short idle timeout, documented mitigation (clear `authSessions`, rotate keys) |
 | Ed25519 signing in mutations | Convex's own WebCrypto signing is documented as actions-only | Pure-JS `@noble/ed25519` in the mutation; a deployed check in Step 8 (Stop-and-ask item) |
 | `crypto.getRandomValues` in queries/mutations | Seeded per execution, not a secure source | Rule: random only in actions |
-| Free tier | 1M calls, 1 GB DB I/O per month | Heartbeat scaling, write-on-change, `deviceReports` split, document only on content change, 5-version history |
+| Free tier | 1M calls, 1 GB DB I/O per month | Heartbeat scaling, write-on-change, `deviceReports` split, document only on content change, 5-version history. **Amended 2026-10-27:** one shared free deployment for many orgs; hard caps fail writes for every tenant, so the I/O rules of 4.2.1/4.9, the budgets test and the post-Phase-5 degrade ladder are required before any outside tenant |
 | Freeze attack | An attacker who blocks updates keeps a device on an old document | Accepted (no expiry; kiosk must work offline); listed for the user |
 | GitHub rate limit for winget | 60 requests/hour unauthenticated | Server-side cache 24 h, optional `GITHUB_TOKEN` |
 | winget manifests without a silent switch / user-scope only | Cannot be installed as SYSTEM silently | Refused with a reason at resolve time |
@@ -3164,6 +3855,19 @@ agent `enroll`/`recover`/`unenroll` without `--simulate`,
 | `verifyEmployee` | < 1.5 s server time (Argon2 ≈ 0.1–0.3 s) | Step 18 / VM |
 | Lite mode | the dashboard is not a Lite-mode surface; it honours reduced motion | — |
 
+**Amended budget (owner Q1: free Convex plan, one shared deployment;
+post-Phase-5 1.4 B, estimates until measured):**
+
+| Item | Budget | How measured |
+|---|---|---|
+| Ping | 48 calls per device per day at 30 min; ≤ 1 write (≈ 100 B) per call, none when the minute bucket is unchanged | probe test (Step 18) |
+| Device total | ≈ 2.2-3.7 MB database I/O per device per month; ≈ 67 calls per device per day | arithmetic + lab measurement (post-Phase-5 1.6) |
+| Agent subscription | ≤ 20 documents, ≤ 2 KB per run (head, not payload) | probe test |
+| Overview | ≤ 60 documents, ≤ 32 KB per run; no re-run on pings | probe test |
+| Lists | ≤ 250 documents, ≤ 64 KB per run (page of 50) | probe test |
+| Member session | JWT 60 min: 1 refresh (2 reads, 2 writes) per open hour; used refresh tokens deleted daily | Step 3 follow-up tests |
+| Step-up | 0 extra writes per normal call; ≤ 1 write per 2 minutes of activity (`lastActiveAt`); 3-4 writes per verification | Step 5a tests |
+
 ## 16. Accessibility
 
 - Keyboard: every action reachable; visible focus ring; skip link to
@@ -3189,6 +3893,14 @@ agent `enroll`/`recover`/`unenroll` without `--simulate`,
   carried in the catalogue.
 - `installResults` and the install engine are the model for Wi-Fi /
   printer apply results.
+- **Amendments for Phase 5 and 6 (post-Phase-5 A19-A21):** Phase 5 apply
+  reports, findings and daily summaries go through `deviceApi:report`
+  (A12); its document additions go into `desiredBodies` (A5); the daily
+  CPU/memory summary joins `deviceSecurityDaily` (never a per-ping
+  value); `keys:createOrgKeys` runs at sign-up and `loadOrgSigningKey`
+  switches to `keyring.ts` before the first outside tenant (A11, A20).
+  Phase 6 includes the I/O measurement of post-Phase-5 1.6 during the
+  pilot and installer hosting through the storage pool (A21).
 
 ## 18. Definition of done for Phase 4
 
@@ -3226,7 +3938,7 @@ PRD 21.1 decisions are untouched. These are this plan's own:
 | D11 | Catalogue and allowed employees travel in the signed document; the agent computes each employee's apps | Live updates (`apps.changed`) and offline correctness without extra calls |
 | D12 | Group-based install; per-employee grants for web apps everywhere, desktop apps only where installed | A desktop app needs an install the group asked for |
 | D13 | Installer by `https://` URL + SHA-256 only; winget resolved on the server; EXE uninstall not supported | CLAUDE.md winget rule; no upload storage in the free tier |
-| D14 | Heartbeat interval table of 4.9; online computed in the browser | Free tier; no `Date.now()` in queries |
+| D14 | Heartbeat interval table of 4.9; online computed in the browser. **Superseded 2026-10-27 (A3, A4):** interval from settings (30 min default), online from presence transitions | Free tier; no `Date.now()` in queries |
 | D15 | react-router 8 declarative mode, no form/state/UI libraries | Smallest surface for ~15 screens |
 | D16 | Optimistic updates only for toggles | Server truth elsewhere |
 | D17 | `expectedRevision` on every edit | Two-admin safety |
@@ -3255,6 +3967,11 @@ Do not edit the PRD in this phase; give this list to the user.
 | 15 ("Multi-organization with roles") | Roles now; one org per deployment in the UI | PRD 17 v2 |
 | 22.6 ("memory and CPU with the regular heartbeat") | Not reported in Phase 4 (write-only-on-change would make every heartbeat a write) | Contradiction noted in Phase 2 |
 | 3.1 ("branding: logo, colors, wallpaper") | Name only in Phase 4 (Q3) | Needs Staff App work and asset delivery |
+| 11 ("interval 2 → 5 → 10 minutes"; amended 2026-10-27, A22) | The interval is a setting: global default 30 minutes, per-tenant override; real time on demand (watch mode, Check now); replaces the fleet-size row above | Owner Q2; pings dominate database I/O on the free plan |
+| 11.1 rule 4 (A22) | Add: "dashboards read transitions and counters, never timestamps that change on a timer" | Read amplification of every open list |
+| 12.3 / 15 (new: step-up) | Owners and Admins confirm major actions with an action PIN or a passkey (fresh within 5 minutes); an idle dashboard session (10 minutes) is re-confirmed | Owner decision 2026-10-27; PRD has no step-up yet |
+| 16 (A22) | Installer storage via the provider pool of the post-Phase-5 plan, not R2 only | Owner Q4 |
+| 22.6 (A22) | CPU/memory pressure as a daily summary, never per ping | Write budget |
 
 ## 21. Open questions for the user
 
