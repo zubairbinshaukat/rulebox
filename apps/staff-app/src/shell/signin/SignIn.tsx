@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, type FormEvent } from "react";
+import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import {
   Avatar,
   Backdrop,
@@ -9,6 +9,7 @@ import {
 } from "@rulebox/ui";
 import type { EmployeeBrief, ShellState } from "@rulebox/types";
 
+import { useDocumentTitle } from "../../lib/a11y";
 import { call } from "../../lib/tauri";
 import type { SignInOutcomeDto } from "../../lib/tauri";
 
@@ -25,12 +26,34 @@ function pad(n: number): string {
   return n.toString().padStart(2, "0");
 }
 
-function useClock() {
+/**
+ * The current time for the sign-in screen. It moves once a minute, on the
+ * minute (the screen shows no seconds), and once a second only while a lockout
+ * countdown is on screen.
+ */
+function useClock(everySecond: boolean) {
   const [now, setNow] = useState(() => new Date());
   useEffect(() => {
-    const id = window.setInterval(() => setNow(new Date()), 1_000);
-    return () => window.clearInterval(id);
-  }, []);
+    if (everySecond) {
+      // One reading right away, so a countdown that just started is not up to a minute stale.
+      const kick = window.setTimeout(() => setNow(new Date()), 0);
+      const id = window.setInterval(() => setNow(new Date()), 1_000);
+      return () => {
+        window.clearTimeout(kick);
+        window.clearInterval(id);
+      };
+    }
+    let timer = 0;
+    const schedule = () => {
+      const untilNextMinute = 60_000 - (Date.now() % 60_000) + 50;
+      timer = window.setTimeout(() => {
+        setNow(new Date());
+        schedule();
+      }, untilNextMinute);
+    };
+    schedule();
+    return () => window.clearTimeout(timer);
+  }, [everySecond]);
   return now;
 }
 
@@ -52,6 +75,20 @@ function outcomeToError(outcome: SignInOutcomeDto): InlineError | null {
     return { kind: "locked", until: Date.now() + outcome.lockedOut.retryAfterMs };
   }
   return null;
+}
+
+/**
+ * The lockout message. The countdown is drawn second by second but hidden from
+ * screen readers (the alert would repeat every second); they get whole minutes.
+ */
+function LockedText({ until, now }: { until: number; now: number }) {
+  const minutes = Math.max(1, Math.ceil((until - now) / 60_000));
+  return (
+    <>
+      Too many tries. Try again in <span aria-hidden="true">{formatCountdown(until, now)}</span>
+      <span className="rb-sr-only">{minutes === 1 ? "about a minute" : `about ${minutes} minutes`}</span>.
+    </>
+  );
 }
 
 function errorText(error: InlineError, now: number): string {
@@ -80,7 +117,6 @@ export interface SignInProps {
 }
 
 export function SignIn({ shell, last, onSuccess }: SignInProps) {
-  const now = useClock();
   /** When true, show the username field even if a last employee exists. */
   const [switching, setSwitching] = useState(false);
   const returning = Boolean(last) && !switching;
@@ -90,6 +126,7 @@ export function SignIn({ shell, last, onSuccess }: SignInProps) {
   const [checking, setChecking] = useState(false);
   const [formError, setFormError] = useState<InlineError | null>(null);
   const [offlineNote, setOfflineNote] = useState(false);
+  const now = useClock(formError?.kind === "locked");
 
   const canSession = shell.capabilities.includes("session");
   const reconnecting = shell.link !== "linked";
@@ -98,6 +135,17 @@ export function SignIn({ shell, last, onSuccess }: SignInProps) {
     : formError;
   const locked = error?.kind === "locked" && error.until > now.getTime();
   const fieldsDisabled = checking || locked || reconnecting || !canSession;
+
+  useDocumentTitle("Sign in - Rulebox");
+
+  // The fields are disabled while the password is checked, which drops the keyboard focus.
+  // After a wrong answer (or when a lockout ends) it goes back to the password field.
+  const passwordRef = useRef<HTMLInputElement>(null);
+  useEffect(() => {
+    if (formError && !fieldsDisabled) {
+      passwordRef.current?.focus();
+    }
+  }, [formError, fieldsDisabled]);
 
   // Keep username in sync when `last` identity changes (adjust during render).
   const lastKey = last ? `${last.username}:${last.name}` : "";
@@ -175,7 +223,7 @@ export function SignIn({ shell, last, onSuccess }: SignInProps) {
         : "Offline";
 
   return (
-    <div
+    <main
       data-testid="sign-in"
       style={{
         position: "absolute",
@@ -262,9 +310,9 @@ export function SignIn({ shell, last, onSuccess }: SignInProps) {
         >
           {displayName ? (
             <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-              <Avatar name={displayName} size={44} />
+              <Avatar name={displayName} size={44} decorative />
               <div style={{ minWidth: 0 }}>
-                <div style={{ fontWeight: 500, fontSize: 16 }}>{displayName}</div>
+                <h1 style={{ margin: 0, fontWeight: 500, fontSize: 16 }}>{displayName}</h1>
                 <button
                   type="button"
                   onClick={() => void onSwitchUser()}
@@ -284,7 +332,7 @@ export function SignIn({ shell, last, onSuccess }: SignInProps) {
               </div>
             </div>
           ) : (
-            <div style={{ fontWeight: 500, fontSize: 16 }}>Sign in</div>
+            <h1 style={{ margin: 0, fontWeight: 500, fontSize: 16 }}>Sign in</h1>
           )}
 
           <form
@@ -304,6 +352,7 @@ export function SignIn({ shell, last, onSuccess }: SignInProps) {
             ) : null}
             <div style={{ display: "flex", gap: 8 }}>
               <Input
+                ref={passwordRef}
                 aria-label="Password"
                 placeholder="Password"
                 type="password"
@@ -337,7 +386,11 @@ export function SignIn({ shell, last, onSuccess }: SignInProps) {
               role="alert"
               style={{ margin: 0, fontSize: 13.5, color: "var(--rb-danger-text)" }}
             >
-              {errorText(error, now.getTime())}
+              {error.kind === "locked" ? (
+                <LockedText until={error.until} now={now.getTime()} />
+              ) : (
+                errorText(error, now.getTime())
+              )}
             </p>
           ) : null}
 
@@ -381,6 +434,6 @@ export function SignIn({ shell, last, onSuccess }: SignInProps) {
           </span>
         ) : null}
       </div>
-    </div>
+    </main>
   );
 }

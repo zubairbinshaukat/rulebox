@@ -32,7 +32,7 @@ export function ConfirmLogout() {
         gap: 12,
       }}
     >
-      <div style={{ fontWeight: 600, fontSize: 16 }}>Log out?</div>
+      <h2 style={{ margin: 0, fontWeight: 600, fontSize: 16 }}>Log out?</h2>
       {apps && apps.length > 0 ? (
         <div style={{ minHeight: 0, overflow: "auto" }}>
           <div style={{ fontSize: 13.5, color: "var(--rb-muted)", marginBottom: 6 }}>
@@ -49,7 +49,8 @@ export function ConfirmLogout() {
         Unsaved work may be lost.
       </p>
       <div style={{ marginTop: "auto", display: "flex", justifyContent: "flex-end", gap: 8 }}>
-        <Button variant="ghost" disabled={busy} onClick={() => void call("popup_close", {})}>
+        {/* Cancel takes the focus first: Enter right after opening must not log anyone out. */}
+        <Button variant="ghost" disabled={busy} data-autofocus onClick={() => void call("popup_close", {})}>
           Cancel
         </Button>
         <Button

@@ -35,7 +35,7 @@ export function TrashView({
 
   if (loading) {
     return (
-      <div style={emptyContainer}>
+      <div style={emptyContainer} role="status">
         <p style={{ color: "var(--rb-muted)", fontSize: 14 }}>Loading trash…</p>
       </div>
     );
@@ -43,8 +43,8 @@ export function TrashView({
 
   if (items.length === 0) {
     return (
-      <div style={emptyContainer}>
-        <IconTrash width={40} height={40} style={{ color: "var(--rb-muted)", opacity: 0.5 }} />
+      <div style={emptyContainer} role="status">
+        <IconTrash aria-hidden width={40} height={40} style={{ color: "var(--rb-muted)", opacity: 0.5 }} />
         <p style={{ margin: "12px 0 0", color: "var(--rb-muted)", fontSize: 14 }}>Trash is empty.</p>
       </div>
     );
@@ -65,6 +65,14 @@ export function TrashView({
       </div>
 
       <div
+        role="table"
+        aria-label="Deleted files"
+        aria-rowcount={items.length + 1}
+        style={{ display: "flex", flexDirection: "column", flex: 1, minHeight: 0 }}
+      >
+      <div
+        role="row"
+        aria-rowindex={1}
         style={{
           display: "grid",
           gridTemplateColumns: "minmax(200px, 2fr) minmax(140px, 1.5fr) 90px 150px 140px",
@@ -76,11 +84,11 @@ export function TrashView({
           userSelect: "none",
         }}
       >
-        <div>Name</div>
-        <div>Original location</div>
-        <div style={{ textAlign: "right" }}>Size</div>
-        <div style={{ textAlign: "right" }}>Date deleted</div>
-        <div style={{ textAlign: "right" }}>Actions</div>
+        <div role="columnheader">Name</div>
+        <div role="columnheader">Original location</div>
+        <div role="columnheader" style={{ textAlign: "right" }}>Size</div>
+        <div role="columnheader" style={{ textAlign: "right" }}>Date deleted</div>
+        <div role="columnheader" style={{ textAlign: "right" }}>Actions</div>
       </div>
 
       <div
@@ -109,6 +117,8 @@ export function TrashView({
             return (
               <div
                 key={item.id}
+                role="row"
+                aria-rowindex={virtualRow.index + 2}
                 style={{
                   position: "absolute",
                   top: 0,
@@ -124,11 +134,11 @@ export function TrashView({
                   fontSize: 13,
                 }}
               >
-                <div style={{ display: "flex", alignItems: "center", gap: 8, minWidth: 0 }}>
+                <div role="cell" style={{ display: "flex", alignItems: "center", gap: 8, minWidth: 0 }}>
                   {item.isFolder ? (
-                    <IconFolder width={18} height={18} style={{ color: "var(--rb-accent)", flexShrink: 0 }} />
+                    <IconFolder aria-hidden width={18} height={18} style={{ color: "var(--rb-accent)", flexShrink: 0 }} />
                   ) : (
-                    <FileChip ext={ext} style={{ flexShrink: 0 }} />
+                    <FileChip ext={ext} style={{ flexShrink: 0 }} aria-hidden />
                   )}
                   <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                     {item.name}
@@ -136,6 +146,7 @@ export function TrashView({
                 </div>
 
                 <div
+                  role="cell"
                   style={{
                     color: "var(--rb-muted)",
                     overflow: "hidden",
@@ -146,15 +157,15 @@ export function TrashView({
                   {item.original || "All files"}
                 </div>
 
-                <div style={{ textAlign: "right", color: "var(--rb-muted)" }}>
+                <div role="cell" style={{ textAlign: "right", color: "var(--rb-muted)" }}>
                   {item.isFolder ? "--" : formatBytes(item.size)}
                 </div>
 
-                <div style={{ textAlign: "right", color: "var(--rb-muted)" }}>
+                <div role="cell" style={{ textAlign: "right", color: "var(--rb-muted)" }}>
                   {formatDate(item.deletedMs)}
                 </div>
 
-                <div style={{ display: "flex", justifyContent: "flex-end", gap: 6 }}>
+                <div role="cell" style={{ display: "flex", justifyContent: "flex-end", gap: 6 }}>
                   <button
                     type="button"
                     title="Restore"
@@ -179,6 +190,7 @@ export function TrashView({
             );
           })}
         </div>
+      </div>
       </div>
     </div>
   );

@@ -2,10 +2,11 @@ import { useRef } from "react";
 import gsap from "gsap";
 import { Flip } from "gsap/Flip";
 import { useGSAP } from "@gsap/react";
-import { Avatar, LogoMark } from "@rulebox/ui";
+import { Avatar, LogoMark, rovingKeyDown } from "@rulebox/ui";
 import type { AppEntry, TaskItem } from "@rulebox/types";
 import IconBell from "~icons/solar/bell-bold-duotone";
 
+import { useDocumentTitle } from "../../lib/a11y";
 import { useMotionLevel } from "../../lib/motion";
 import { useShell } from "../../lib/store";
 import { anchorOf, call, isTauri } from "../../lib/tauri";
@@ -25,6 +26,7 @@ gsap.registerPlugin(Flip, useGSAP);
  * battery and clock open quick settings or show the time.
  */
 export function Taskbar() {
+  useDocumentTitle("Rulebox taskbar");
   const level = useMotionLevel();
   const start = useRef<HTMLButtonElement>(null);
   const row = useRef<HTMLDivElement>(null);
@@ -171,7 +173,15 @@ export function Taskbar() {
         color: "var(--rb-ink)",
       }}
     >
-      <div className="rb-taskbar" onPointerDown={closePopup}>
+      <div
+        className="rb-taskbar"
+        role="toolbar"
+        aria-label="Taskbar"
+        aria-orientation="horizontal"
+        // Left and Right (and Home and End) walk the buttons; Tab still reaches each one.
+        onKeyDown={(event) => rovingKeyDown(event, "button", "horizontal")}
+        onPointerDown={closePopup}
+      >
         {signedIn ? (
           <div className="rb-dock rb-dock--start">
             <button
@@ -179,6 +189,7 @@ export function Taskbar() {
               type="button"
               className="rb-task"
               aria-label="Start"
+              aria-haspopup="dialog"
               title="Start"
               onPointerDown={(event) => event.stopPropagation()}
               onClick={openStart}
@@ -247,6 +258,7 @@ export function Taskbar() {
               type="button"
               className="rb-chip rb-chip--icon"
               aria-label={unread > 0 ? `Notices, ${unread} new` : "Notices"}
+              aria-haspopup="dialog"
               title="Notices"
               onPointerDown={(event) => event.stopPropagation()}
               onClick={(event) => openQuick(event.currentTarget)}
@@ -261,12 +273,13 @@ export function Taskbar() {
             <button
               type="button"
               className="rb-tray-button"
-              aria-label="Account"
+              aria-label={`Account, ${employeeName}`}
+              aria-haspopup="dialog"
               title={employeeName}
               onPointerDown={(event) => event.stopPropagation()}
               onClick={(event) => openAccount(event.currentTarget)}
             >
-              <Avatar name={employeeName} size={40} />
+              <Avatar name={employeeName} size={40} decorative />
             </button>
           ) : null}
         </div>

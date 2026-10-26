@@ -16,13 +16,18 @@
   --rb-ink-hover: oklch(0.32 0.012 70);
   --rb-on-ink: white;
   --rb-muted: oklch(0.5 0.012 70);
-  --rb-faint: oklch(0.62 0.01 70);
+  /* Quietest text: placeholders, hints. 4.5:1 on every surface (it was 0.62, which was 3.0:1). */
+  --rb-faint: oklch(0.52 0.01 70);
   --rb-line: oklch(0.9 0.006 80);
+  /* Edge of a control (input, select, switch track): 3:1 against the page and surface (WCAG 1.4.11). */
+  --rb-line-strong: oklch(0.6 0.01 70);
   --rb-surface: oklch(0.995 0.002 85);
   --rb-surface-glass: oklch(0.995 0.002 85 / 0.72);
   --rb-glass-border: oklch(1 0 0 / 0.85);
   --rb-hover: oklch(0.94 0.006 85);
   --rb-accent: oklch(0.5 0.085 175);
+  /* The keyboard focus ring: 3:1 or more against the page, surfaces, glass and selected rows. */
+  --rb-focus: oklch(0.5 0.085 175);
   --rb-accent-soft: oklch(0.94 0.03 175);
   --rb-accent-text: oklch(0.38 0.085 175);
   /* Logo green; same in both themes. Mirrors LOGO_BRAND in brand/geometry.ts. */
@@ -102,8 +107,9 @@
 
   /* App tile art. A Solar glyph sits on a gradient in the app's hue (top and
      bottom lightness, one chroma); an app's own icon sits on a light plate. */
-  --rb-art-top-l: 0.73;
-  --rb-art-bottom-l: 0.56;
+  /* Dark enough that a white glyph keeps 3:1 across the gradient at every hue. */
+  --rb-art-top-l: 0.69;
+  --rb-art-bottom-l: 0.55;
   --rb-art-c: 0.17;
   --rb-icon-plate: oklch(1 0 0);
   --rb-icon-plate-border: oklch(0.92 0.006 80);
@@ -123,11 +129,13 @@
   --rb-muted: oklch(0.77 0.018 255);
   --rb-faint: oklch(0.66 0.02 255);
   --rb-line: oklch(0.33 0.025 258);
+  --rb-line-strong: oklch(0.56 0.025 258);
   --rb-surface: oklch(0.215 0.024 258);
   --rb-surface-glass: oklch(0.24 0.026 258 / 0.62);
   --rb-glass-border: oklch(1 0 0 / 0.1);
   --rb-hover: oklch(0.29 0.028 258);
   --rb-accent: oklch(0.64 0.09 175);
+  --rb-focus: oklch(0.64 0.09 175);
   --rb-accent-soft: oklch(0.34 0.05 175);
   --rb-accent-text: oklch(0.8 0.08 175);
   --rb-danger: oklch(0.6 0.17 25);
@@ -183,11 +191,13 @@
     --rb-muted: oklch(0.77 0.018 255);
     --rb-faint: oklch(0.66 0.02 255);
     --rb-line: oklch(0.33 0.025 258);
+    --rb-line-strong: oklch(0.56 0.025 258);
     --rb-surface: oklch(0.215 0.024 258);
     --rb-surface-glass: oklch(0.24 0.026 258 / 0.62);
     --rb-glass-border: oklch(1 0 0 / 0.1);
     --rb-hover: oklch(0.29 0.028 258);
     --rb-accent: oklch(0.64 0.09 175);
+    --rb-focus: oklch(0.64 0.09 175);
     --rb-accent-soft: oklch(0.34 0.05 175);
     --rb-accent-text: oklch(0.8 0.08 175);
     --rb-danger: oklch(0.6 0.17 25);

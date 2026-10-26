@@ -1,7 +1,8 @@
-import { useEffect, useState, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { listen } from "@tauri-apps/api/event";
 import { Surface } from "@rulebox/ui";
 
+import { focusInside, trapTab, useDocumentTitle } from "../../lib/a11y";
 import { call, isTauri, type PopupKind } from "../../lib/tauri";
 import { AccountMenu } from "./AccountMenu";
 import { ConfirmLogout } from "./ConfirmLogout";
@@ -56,6 +57,20 @@ export function PopupRoot() {
     return () => window.removeEventListener("keydown", onKey);
   }, []);
 
+  const root = useRef<HTMLDivElement>(null);
+  const semantics = kind ? POPUP_SEMANTICS[kind] : null;
+  useDocumentTitle(semantics?.label ? `${semantics.label} - Rulebox` : "Rulebox");
+
+  // A popup that opens takes the keyboard focus (the switcher and the preview manage it themselves).
+  useEffect(() => {
+    const element = root.current;
+    if (!kind || !element || !POPUP_SEMANTICS[kind].takesFocus) {
+      return;
+    }
+    const frame = window.requestAnimationFrame(() => focusInside(element));
+    return () => window.cancelAnimationFrame(frame);
+  }, [kind]);
+
   return (
     <Surface
       kind="popover"
@@ -66,10 +81,43 @@ export function PopupRoot() {
         overflow: "hidden",
       }}
     >
-      {renderKind(kind)}
+      {kind ? (
+        <div
+          ref={root}
+          role={semantics?.role}
+          aria-modal={semantics?.takesFocus ? true : undefined}
+          aria-label={semantics?.label}
+          tabIndex={-1}
+          onKeyDown={(event) => {
+            if (semantics?.takesFocus && root.current) {
+              trapTab(event, root.current);
+            }
+          }}
+          style={{ height: "100%", outline: "none" }}
+        >
+          {renderKind(kind)}
+        </div>
+      ) : null}
     </Surface>
   );
 }
+
+/**
+ * How each popup is announced. Popups that hold the focus are dialogs (Tab stays
+ * inside, Escape closes); the preview is only a picture of a window.
+ */
+const POPUP_SEMANTICS: Record<
+  PopupKind,
+  { role: "dialog" | "alertdialog" | undefined; label: string | undefined; takesFocus: boolean }
+> = {
+  start: { role: "dialog", label: "Start", takesFocus: true },
+  account: { role: "dialog", label: "Account", takesFocus: true },
+  confirm: { role: "alertdialog", label: "Log out", takesFocus: true },
+  quickSettings: { role: "dialog", label: "Quick settings", takesFocus: true },
+  switcher: { role: "dialog", label: "Switch apps", takesFocus: false },
+  thumb: { role: undefined, label: undefined, takesFocus: false },
+  monitor: { role: "dialog", label: "Resources", takesFocus: true },
+};
 
 function renderKind(kind: PopupKind | null): ReactNode {
   switch (kind) {

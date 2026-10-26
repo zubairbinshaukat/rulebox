@@ -72,9 +72,16 @@ export function Switcher() {
     };
   }, []);
 
+  // The listbox holds the keyboard focus, so a screen reader follows the highlight (aria-activedescendant).
+  const listRef = useRef<HTMLDivElement>(null);
+  const hasWindows = ordered.length > 0;
+  useEffect(() => {
+    listRef.current?.focus();
+  }, [hasWindows]);
+
   if (ordered.length === 0) {
     return (
-      <div className="rb-switcher rb-switcher--empty">
+      <div className="rb-switcher rb-switcher--empty" role="status">
         <span className="rb-switcher__eyebrow">Switch apps</span>
         <span className="rb-switcher__title">No windows are open</span>
       </div>
@@ -92,10 +99,12 @@ export function Switcher() {
         <span className="rb-switcher__title">{currentApp?.name ?? current?.title ?? "Untitled window"}</span>
       </div>
       <div
+        ref={listRef}
         role="listbox"
         aria-label="Open windows"
         aria-activedescendant={`switch-${current?.id}`}
-        className="rb-switcher__list"
+        tabIndex={-1}
+        className="rb-switcher__list rb-focus-inset"
       >
         {ordered.map((task, position) => {
           const app = appOf(task);
@@ -106,6 +115,7 @@ export function Switcher() {
               id={`switch-${task.id}`}
               type="button"
               role="option"
+              tabIndex={-1}
               aria-selected={position === selected}
               className="rb-switcher__item"
               title={title}

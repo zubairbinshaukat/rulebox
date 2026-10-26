@@ -145,7 +145,8 @@ export function AdminExit() {
           onChange={(event) => setPin(filterPin(event.target.value))}
         />
 
-        <div style={{ minHeight: 44 }} aria-live="polite">
+        {/* The message is its own live region (alert or status), so this wrapper is not one too. */}
+        <div style={{ minHeight: 44 }}>
           {shown?.message ? (
             <p
               role={shown.tone === "error" ? "alert" : "status"}
@@ -156,7 +157,7 @@ export function AdminExit() {
                 color: shown.tone === "error" ? "var(--rb-danger-text)" : "var(--rb-ink)",
               }}
             >
-              {shown.message}
+              <MessageText message={shown.message} />
             </p>
           ) : null}
           {shown?.recovery ? (
@@ -174,6 +175,27 @@ export function AdminExit() {
         </div>
       </form>
     </main>
+  );
+}
+
+/**
+ * The lockout line counts down every second. The count is drawn but hidden from
+ * screen readers (the alert would repeat every second); they hear whole minutes.
+ */
+function MessageText({ message }: { message: string }) {
+  const locked = /^(Too many tries\. Try again in )(\d+):(\d{2})\.$/.exec(message);
+  if (!locked) {
+    return <>{message}</>;
+  }
+  const minutes = Math.max(1, Number(locked[2]) + (Number(locked[3]) > 0 ? 1 : 0));
+  return (
+    <>
+      {locked[1]}
+      <span aria-hidden="true">
+        {locked[2]}:{locked[3]}
+      </span>
+      <span className="rb-sr-only">{minutes === 1 ? "about a minute" : `about ${minutes} minutes`}</span>.
+    </>
   );
 }
 

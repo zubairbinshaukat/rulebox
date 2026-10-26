@@ -1,5 +1,7 @@
 import { LogoMark, LogoMotion } from "@rulebox/ui";
 
+import { useDocumentTitle } from "../../lib/a11y";
+
 export type StatusKind =
   | "waiting"
   | "unavailable"
@@ -28,9 +30,11 @@ const COPY: Record<StatusKind, { title: string; detail?: string; loading: boolea
 
 export function StatusScreen({ kind }: { kind: StatusKind }) {
   const copy = COPY[kind];
+  useDocumentTitle("Rulebox");
   return (
-    <div
+    <main
       data-testid={`status-${kind}`}
+      aria-busy={copy.loading}
       style={{
         position: "absolute",
         inset: 0,
@@ -50,7 +54,8 @@ export function StatusScreen({ kind }: { kind: StatusKind }) {
       ) : (
         <LogoMark size={72} />
       )}
-      <p style={{ margin: 0, maxWidth: 420, fontSize: 16, fontWeight: 500, lineHeight: 1.45 }}>
+      {/* A status, not an alert: it says where the PC is and changes by itself. */}
+      <p role="status" style={{ margin: 0, maxWidth: 420, fontSize: 16, fontWeight: 500, lineHeight: 1.45 }}>
         {copy.title}
       </p>
       {copy.detail ? (
@@ -58,6 +63,6 @@ export function StatusScreen({ kind }: { kind: StatusKind }) {
           {copy.detail}
         </p>
       ) : null}
-    </div>
+    </main>
   );
 }

@@ -25,6 +25,15 @@ html.rb-page-transparent body {
   background: transparent;
 }
 
+/* Nothing sits behind a transparent window's own page (the desktop is another
+   window), so a backdrop blur would blur nothing and still cost compositing. */
+html.rb-page-transparent *,
+html.rb-page-transparent *::before,
+html.rb-page-transparent *::after {
+  -webkit-backdrop-filter: none !important;
+  backdrop-filter: none !important;
+}
+
 * {
   box-sizing: border-box;
 }
@@ -48,6 +57,13 @@ textarea {
 
 a {
   color: var(--rb-accent-text);
+}
+
+/* Keyboard focus ring for anything a component class does not style itself (zero
+   specificity, so every component's own ring wins). Mouse clicks do not show it. */
+:where(button, a[href], input, select, textarea, summary, [tabindex]):focus-visible {
+  outline: 2px solid var(--rb-focus);
+  outline-offset: 2px;
 }
 
 ::-webkit-scrollbar {

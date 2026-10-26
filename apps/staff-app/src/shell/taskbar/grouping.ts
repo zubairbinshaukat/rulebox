@@ -91,6 +91,18 @@ export function labelOf(name: string, tasks: TaskItem[]): string {
   return label;
 }
 
+/**
+ * The accessible name of a task button: the label, plus what the open / minimized
+ * / attention marks say (the bar under the icon shows them, but not to a screen
+ * reader). "Active" is the pressed state (`aria-pressed`), so it is not repeated.
+ */
+export function stateLabel(label: string, state: ButtonState): string {
+  const words: string[] = [];
+  if (state.open) words.push(state.minimized ? "minimized" : "open");
+  if (state.flashing) words.push("needs attention");
+  return words.length > 0 ? `${label}, ${words.join(", ")}` : label;
+}
+
 /** `http://rbicon.localhost/<key>?s=<px>`: served by the Rust icon protocol. */
 export function iconUrl(iconKey: string, px = 48): string {
   return `http://rbicon.localhost/${iconKey}?s=${px}`;

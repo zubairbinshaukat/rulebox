@@ -85,6 +85,7 @@ export function MyFilesPanel({ onOpenFiles }: { onOpenFiles?: () => void }) {
   return (
     <aside
       data-testid="my-files-panel"
+      aria-labelledby="my-files-title"
       style={{
         width: 300,
         flexShrink: 0,
@@ -100,10 +101,12 @@ export function MyFilesPanel({ onOpenFiles }: { onOpenFiles?: () => void }) {
       }}
     >
       <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-        <IconFolder width={20} height={20} />
-        <span style={{ fontWeight: 500, fontSize: 15 }}>My files</span>
+        <IconFolder width={20} height={20} aria-hidden />
+        <h2 id="my-files-title" style={{ margin: 0, fontWeight: 500, fontSize: 15 }}>
+          My files
+        </h2>
       </div>
-      <div style={{ display: "flex", gap: 6 }}>
+      <div role="group" aria-label="Show" style={{ display: "flex", gap: 6 }}>
         {(
           [
             ["all", "All"],
@@ -114,6 +117,7 @@ export function MyFilesPanel({ onOpenFiles }: { onOpenFiles?: () => void }) {
           <button
             key={id}
             type="button"
+            aria-pressed={tab === id}
             onClick={() => setTab(id)}
             style={{
               flex: 1,
@@ -122,6 +126,8 @@ export function MyFilesPanel({ onOpenFiles }: { onOpenFiles?: () => void }) {
               border: 0,
               cursor: "pointer",
               fontSize: 13,
+              // Bold as well as tinted, so the chosen filter is not told by colour alone.
+              fontWeight: tab === id ? 600 : 400,
               background: tab === id ? "var(--rb-accent-soft)" : "transparent",
               color: tab === id ? "var(--rb-accent-text)" : "var(--rb-muted)",
             }}
@@ -174,7 +180,7 @@ export function MyFilesPanel({ onOpenFiles }: { onOpenFiles?: () => void }) {
                 {isMedia ? (
                   <IconGallery width={18} height={18} style={{ color: "var(--rb-accent)", flexShrink: 0 }} />
                 ) : ext ? (
-                  <FileChip ext={ext} style={{ flexShrink: 0 }} />
+                  <FileChip ext={ext} style={{ flexShrink: 0 }} aria-hidden />
                 ) : (
                   <IconDocument width={18} height={18} style={{ color: "var(--rb-muted)", flexShrink: 0 }} />
                 )}

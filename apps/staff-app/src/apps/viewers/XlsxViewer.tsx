@@ -1,4 +1,5 @@
 import { useEffect, useState, type CSSProperties } from "react";
+import { rovingKeyDown } from "@rulebox/ui";
 
 import { fileErrorText, isFileError } from "../files/errors";
 import { call } from "../../lib/tauri";
@@ -82,13 +83,24 @@ export default function XlsxViewer({ path }: { path: string }) {
     <>
       {sheet.rows.length >= MAX_ROWS ? <ViewerBanner>Showing the first part of this sheet.</ViewerBanner> : null}
       <CsvTable rows={sheet.rows} letters />
-      <div role="tablist" aria-label="Sheets" style={tabs}>
+      <div
+        role="tablist"
+        aria-label="Sheets"
+        style={tabs}
+        // Left/Right/Home/End move to a sheet and open it.
+        onKeyDown={(event) => {
+          const next = rovingKeyDown(event, '[role="tab"]', "horizontal");
+          if (next?.dataset.index !== undefined) setActive(Number(next.dataset.index));
+        }}
+      >
         {state.sheets.map((s, index) => (
           <button
             key={`${index}-${s.name}`}
             type="button"
             role="tab"
+            data-index={index}
             aria-selected={index === active}
+            tabIndex={index === active ? 0 : -1}
             onClick={() => setActive(index)}
             style={{ ...tab, ...(index === active ? tabActive : null) }}
           >

@@ -6,6 +6,10 @@ export interface IconButtonProps extends Omit<ButtonHTMLAttributes<HTMLButtonEle
   /** Required: used as aria-label and title (tooltip). */
   label: string;
   size?: IconButtonSize;
+  /**
+   * Makes this a toggle button: `true` is pressed, `false` is not. Leave it out
+   * for a plain action button, so a screen reader does not call it a toggle.
+   */
   active?: boolean;
   children?: ReactNode;
 }
@@ -13,7 +17,7 @@ export interface IconButtonProps extends Omit<ButtonHTMLAttributes<HTMLButtonEle
 export function IconButton({
   label,
   size = 38,
-  active = false,
+  active,
   className,
   type = "button",
   children,

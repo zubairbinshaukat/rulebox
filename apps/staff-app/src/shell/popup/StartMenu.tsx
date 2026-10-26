@@ -1,6 +1,8 @@
 import {
   useEffect,
+  useId,
   useMemo,
+  useRef,
   useState,
   type CSSProperties,
   type KeyboardEvent,
@@ -34,12 +36,21 @@ export function StartMenu() {
   const [active, setActive] = useState(0);
   // Restart and Shut down close every app, so they need a second click.
   const [armed, setArmed] = useState<"restart" | "shutdown" | null>(null);
+  const listId = useId();
+  const optionId = (appId: string) => `${listId}-${appId}`;
+  // While the armed button has the keyboard focus the question stays open (no 4 s timer to race);
+  // moving the focus away, or Escape, cancels it.
+  const armedFocused = useRef(false);
 
   useEffect(() => {
     if (armed === null) {
       return;
     }
-    const timer = window.setTimeout(() => setArmed(null), 4000);
+    const timer = window.setTimeout(() => {
+      if (!armedFocused.current) {
+        setArmed(null);
+      }
+    }, 6000);
     return () => window.clearTimeout(timer);
   }, [armed]);
 
@@ -81,15 +92,38 @@ export function StartMenu() {
     }
   }
 
+  // The active result stays in view when the arrows move it down a long list.
+  const activeId = results[clamped] ? optionId(results[clamped].id) : undefined;
+  useEffect(() => {
+    if (activeId) {
+      document.getElementById(activeId)?.scrollIntoView?.({ block: "nearest" });
+    }
+  }, [activeId]);
+
   function onSearchKey(event: KeyboardEvent<HTMLInputElement>) {
-    if (event.key === "ArrowDown" || event.key === "ArrowRight") {
+    // The results are two columns: Up and Down move a row, Left and Right a cell. Left and
+    // Right only do that while the search is empty; otherwise they move the text cursor.
+    const sideways = query === "";
+    if (event.key === "ArrowDown" || (sideways && event.key === "ArrowRight")) {
       event.preventDefault();
-      setActive((index) => Math.min(results.length - 1, index + 1));
+      const step = event.key === "ArrowDown" ? 2 : 1;
+      setActive((index) => Math.min(results.length - 1, index + step));
       return;
     }
-    if (event.key === "ArrowUp" || event.key === "ArrowLeft") {
+    if (event.key === "ArrowUp" || (sideways && event.key === "ArrowLeft")) {
       event.preventDefault();
-      setActive((index) => Math.max(0, index - 1));
+      const step = event.key === "ArrowUp" ? 2 : 1;
+      setActive((index) => Math.max(0, index - step));
+      return;
+    }
+    if (event.key === "Home" && sideways) {
+      event.preventDefault();
+      setActive(0);
+      return;
+    }
+    if (event.key === "End" && sideways) {
+      event.preventDefault();
+      setActive(Math.max(0, results.length - 1));
       return;
     }
     if (event.key === "Enter" && results[clamped]) {
@@ -132,7 +166,12 @@ export function StartMenu() {
         </span>
         <input
           className="rb-input"
+          role="combobox"
           aria-label="Search apps"
+          aria-autocomplete="list"
+          aria-expanded="true"
+          aria-controls={listId}
+          aria-activedescendant={activeId}
           placeholder="Search apps"
           value={query}
           autoFocus
@@ -145,7 +184,13 @@ export function StartMenu() {
         />
       </label>
 
+      {/* The number of results, said once the search settles (not drawn). */}
+      <div role="status" className="rb-sr-only">
+        {query ? `${results.length} ${results.length === 1 ? "app" : "apps"} found` : ""}
+      </div>
+
       <div
+        id={listId}
         role="listbox"
         aria-label="Apps"
         style={{
@@ -166,8 +211,11 @@ export function StartMenu() {
         {results.map((app, index) => (
           <button
             key={app.id}
+            id={optionId(app.id)}
             type="button"
             role="option"
+            // The focus stays in the search box; the arrows move the highlight (aria-activedescendant).
+            tabIndex={-1}
             aria-selected={index === clamped}
             onMouseEnter={() => setActive(index)}
             onClick={() => void openApp(app)}
@@ -180,13 +228,16 @@ export function StartMenu() {
               borderRadius: 12,
               border: 0,
               background: index === clamped ? "var(--rb-accent-soft)" : "transparent",
+              // A line as well as the tint, so the highlighted result is not told by colour alone.
+              outline: index === clamped ? "2px solid var(--rb-focus)" : "none",
+              outlineOffset: -2,
               color: "var(--rb-ink)",
               cursor: "pointer",
               font: "inherit",
               fontSize: 14.5,
             }}
           >
-            <span style={{ fontSize: 22, display: "flex", color: "var(--rb-accent)" }}>
+            <span aria-hidden style={{ fontSize: 22, display: "flex", color: "var(--rb-accent)" }}>
               <AppIcon app={app} />
             </span>
             <span style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis" }}>
@@ -197,7 +248,7 @@ export function StartMenu() {
       </div>
 
       <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-        <span style={{ fontSize: 12, fontWeight: 600, color: "var(--rb-muted)" }}>Recent files</span>
+        <h2 style={{ margin: 0, fontSize: 12, fontWeight: 600, color: "var(--rb-muted)" }}>Recent files</h2>
         {recentFiles.length === 0 ? (
           <p style={{ margin: 0, fontSize: 12.5, color: "var(--rb-muted)" }}>No recent files yet</p>
         ) : (
@@ -226,7 +277,7 @@ export function StartMenu() {
                   }}
                 >
                   {ext ? (
-                    <FileChip ext={ext} />
+                    <FileChip ext={ext} aria-hidden />
                   ) : (
                     <IconDocument width={16} height={16} style={{ color: "var(--rb-muted)" }} />
                   )}
@@ -258,7 +309,7 @@ export function StartMenu() {
             font: "inherit",
           }}
         >
-          <Avatar name={employee.name} size={36} />
+          <Avatar name={employee.name} size={36} decorative />
           <span style={{ minWidth: 0 }}>
             <span style={{ display: "block", fontWeight: 500 }}>{employee.name}</span>
             {employee.role ? (
@@ -280,7 +331,14 @@ export function StartMenu() {
           Log out
         </button>
         {canPowerOff ? (
-          <span style={{ marginLeft: "auto", display: "flex", gap: 4 }}>
+          <span style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: 4 }}>
+            {/* Said and drawn: the second click is asked for in words, not only by a red tint. */}
+            <span
+              role="status"
+              style={{ marginRight: 4, fontSize: 12.5, fontWeight: 500, color: "var(--rb-danger-text)" }}
+            >
+              {armed === "restart" ? "Click again to restart" : armed === "shutdown" ? "Click again to shut down" : ""}
+            </span>
             {canSleep ? (
               <IconAction
                 label="Sleep"
@@ -297,6 +355,10 @@ export function StartMenu() {
               label={armed === "restart" ? "Click again to restart" : "Restart"}
               armed={armed === "restart"}
               onClick={() => powerAction("restart")}
+              onFocusChange={(focused) => {
+                armedFocused.current = focused;
+                if (!focused) setArmed((now) => (now === "restart" ? null : now));
+              }}
             >
               <IconRestart width={18} height={18} />
             </IconAction>
@@ -304,6 +366,10 @@ export function StartMenu() {
               label={armed === "shutdown" ? "Click again to shut down" : "Shut down"}
               armed={armed === "shutdown"}
               onClick={() => powerAction("shutdown")}
+              onFocusChange={(focused) => {
+                armedFocused.current = focused;
+                if (!focused) setArmed((now) => (now === "shutdown" ? null : now));
+              }}
             >
               <IconPower width={18} height={18} />
             </IconAction>
@@ -332,12 +398,15 @@ function IconAction({
   label,
   armed = false,
   onClick,
+  onFocusChange,
   children,
 }: {
   label: string;
   /** Waiting for the confirming second click. */
   armed?: boolean;
   onClick: () => void;
+  /** The button gained or lost the keyboard focus. */
+  onFocusChange?: (focused: boolean) => void;
   children: ReactNode;
 }) {
   return (
@@ -346,6 +415,8 @@ function IconAction({
       aria-label={label}
       title={label}
       onClick={onClick}
+      onFocus={() => onFocusChange?.(true)}
+      onBlur={() => onFocusChange?.(false)}
       style={{
         width: 36,
         height: 36,

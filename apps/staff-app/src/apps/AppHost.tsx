@@ -3,7 +3,7 @@ import { listen } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import gsap from "gsap";
 import { useGSAP } from "@gsap/react";
-import { TitleBar } from "@rulebox/ui";
+import { MenuItem, MenuList, rovingKeyDown, TitleBar } from "@rulebox/ui";
 import IconClose from "~icons/solar/close-square-bold-duotone";
 import IconCloseTab from "~icons/solar/close-circle-bold-duotone";
 import IconCopy from "~icons/solar/copy-bold-duotone";
@@ -15,6 +15,7 @@ import IconMinimize from "~icons/solar/minimize-square-bold-duotone";
 import IconVideo from "~icons/solar/videocamera-bold-duotone";
 import IconWidget from "~icons/solar/widget-4-bold-duotone";
 
+import { useDocumentTitle } from "../lib/a11y";
 import { useMotionLevel } from "../lib/motion";
 import { call, isTauri } from "../lib/tauri";
 import { FileExplorer } from "./files/FileExplorer";
@@ -160,6 +161,25 @@ export function AppHost() {
 
   const selected = view?.tabs[view.selected];
   const title = selected?.title ?? "Files";
+  useDocumentTitle(`${title} - Rulebox`);
+
+  // The snap menu: the first item takes the focus when it opens; Escape or a click elsewhere
+  // closes it, and Escape puts the focus back on the button that opened it.
+  const snapRoot = useRef<HTMLDivElement>(null);
+  const snapButtonRef = useRef<HTMLButtonElement>(null);
+  useEffect(() => {
+    if (!snapOpen) {
+      return;
+    }
+    snapRoot.current?.querySelector<HTMLElement>('[role="menuitem"]')?.focus();
+    const onPointerDown = (event: PointerEvent) => {
+      if (snapRoot.current && !snapRoot.current.contains(event.target as Node)) {
+        setSnapOpen(false);
+      }
+    };
+    window.addEventListener("pointerdown", onPointerDown);
+    return () => window.removeEventListener("pointerdown", onPointerDown);
+  }, [snapOpen]);
 
   async function closeWindow() {
     if (closing.current) {
@@ -212,10 +232,23 @@ export function AppHost() {
         restoreIcon={<IconCopy width={16} height={16} />}
         closeIcon={<IconClose width={16} height={16} />}
       >
-        <div style={{ position: "relative" }}>
+        <div
+          ref={snapRoot}
+          style={{ position: "relative" }}
+          onKeyDown={(event) => {
+            if (event.key === "Escape" && snapOpen) {
+              event.preventDefault();
+              event.stopPropagation();
+              setSnapOpen(false);
+              snapButtonRef.current?.focus();
+            }
+          }}
+        >
           <button
+            ref={snapButtonRef}
             type="button"
             aria-label="Snap layouts"
+            aria-haspopup="menu"
             aria-expanded={snapOpen}
             title="Snap"
             onClick={() => setSnapOpen((open) => !open)}
@@ -224,32 +257,50 @@ export function AppHost() {
             <IconWidget width={16} height={16} />
           </button>
           {snapOpen ? (
-            <div role="menu" aria-label="Snap layouts" style={snapMenu}>
+            <MenuList aria-label="Snap layouts" style={snapMenu}>
               {ZONES.map((zone) => (
-                <button
+                <MenuItem
                   key={zone.id}
-                  type="button"
-                  role="menuitem"
-                  onClick={() => {
+                  onSelect={() => {
                     setSnapOpen(false);
+                    snapButtonRef.current?.focus();
                     void call("win_snap", { zone: zone.id });
                   }}
-                  style={snapItem}
                 >
                   {zone.label}
-                </button>
+                </MenuItem>
               ))}
-            </div>
+            </MenuList>
           ) : null}
         </div>
       </TitleBar>
       {view?.lite ? (
-        <div role="tablist" aria-label="Open documents" className="rb-tabstrip">
+        <div
+          role="tablist"
+          aria-label="Open documents"
+          className="rb-tabstrip"
+          // Left/Right/Home/End move to a tab and open it; Delete closes the one in focus.
+          onKeyDown={(event) => {
+            if (event.key === "Delete") {
+              const at = (event.target as HTMLElement).closest<HTMLElement>('[role="tab"]')?.dataset.index;
+              if (at !== undefined) {
+                event.preventDefault();
+                void call("app_close_tab", { index: Number(at) });
+              }
+              return;
+            }
+            const next = rovingKeyDown(event, '[role="tab"]', "horizontal");
+            if (next?.dataset.index !== undefined) {
+              void call("app_select_tab", { index: Number(next.dataset.index) });
+            }
+          }}
+        >
           {view.tabs.map((tab, index) => {
             const on = index === view.selected;
             return (
               <div
                 key={`${tab.kind}:${tab.path}:${index}`}
+                role="presentation"
                 className="rb-tabstrip__tab"
                 data-active={on}
                 title={tab.title}
@@ -257,7 +308,10 @@ export function AppHost() {
                 <button
                   type="button"
                   role="tab"
+                  data-index={index}
                   aria-selected={on}
+                  aria-keyshortcuts="Delete"
+                  tabIndex={on ? 0 : -1}
                   className="rb-tabstrip__select"
                   onClick={() => void call("app_select_tab", { index })}
                 >
@@ -266,10 +320,13 @@ export function AppHost() {
                   </span>
                   <span className="rb-tabstrip__title">{tab.title}</span>
                 </button>
+                {/* A tab list may only hold tabs: for the keyboard this is the Delete key on the tab. */}
                 <button
                   type="button"
                   className="rb-tabstrip__close"
-                  aria-label={`Close ${tab.title}`}
+                  aria-hidden="true"
+                  tabIndex={-1}
+                  title={`Close ${tab.title}`}
                   onClick={() => void call("app_close_tab", { index })}
                 >
                   <IconCloseTab width={14} height={14} />
@@ -347,15 +404,4 @@ const snapMenu: CSSProperties = {
   gap: 2,
 };
 
-const snapItem: CSSProperties = {
-  textAlign: "left",
-  border: 0,
-  background: "transparent",
-  color: "var(--rb-ink)",
-  borderRadius: 8,
-  padding: "8px 10px",
-  cursor: "pointer",
-  font: "inherit",
-  fontSize: 13.5,
-};
 

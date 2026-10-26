@@ -30,7 +30,7 @@ export function Dialogs({ dialog, onClose, onConfirmDelete, onCreateFolder }: Di
         : `Move ${dialog.items.length} items to the trash?`;
 
     return (
-      <Dialog open title={title} onClose={onClose}>
+      <Dialog open title={title} onClose={onClose} role="alertdialog">
         <div style={{ display: "flex", gap: 14, alignItems: "flex-start", marginBottom: 20 }}>
           <span style={{ color: "var(--rb-danger)", display: "flex", marginTop: 2 }}>
             <IconDanger width={24} height={24} />

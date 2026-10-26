@@ -48,7 +48,10 @@ export function AppGrid({ apps, tasks = [], status, onRetry }: AppGridProps) {
 
   if (status === "loading" || status === "idle") {
     return (
-      <div ref={areaRef} style={areaStyle}>
+      <div ref={areaRef} style={areaStyle} aria-busy="true">
+        <div role="status" className="rb-sr-only">
+          Loading your apps
+        </div>
         <Skeleton layout={layout} />
       </div>
     );
@@ -56,7 +59,7 @@ export function AppGrid({ apps, tasks = [], status, onRetry }: AppGridProps) {
 
   if (status === "error") {
     return (
-      <div ref={areaRef} style={{ ...areaStyle, ...messageStyle }}>
+      <div ref={areaRef} role="alert" style={{ ...areaStyle, ...messageStyle }}>
         <div style={{ fontSize: 18, fontWeight: 500 }}>Can&apos;t load your apps right now.</div>
         <Button type="button" onClick={() => onRetry?.()}>
           Try again
@@ -91,6 +94,8 @@ function PagedTiles({ apps, tasks, layout }: { apps: AppEntry[]; tasks: TaskItem
   const level = useMotionLevel();
   const gridRef = useRef<HTMLDivElement>(null);
   const [page, setPage] = useState(0);
+  // The tile that Tab lands on (one tab stop for the whole grid; the arrow keys do the rest).
+  const [tabStop, setTabStop] = useState(0);
   const lastPage = layout.pages - 1;
   const shown = Math.min(page, lastPage);
   // The direction of the last turn, for the slide-in (1 = forward).
@@ -227,6 +232,10 @@ function PagedTiles({ apps, tasks, layout }: { apps: AppEntry[]; tasks: TaskItem
 
   const running = new Set(tasks.map((task) => task.appId).filter((id): id is string => Boolean(id)));
   const onPage = pageSlice(apps, shown, layout.perPage);
+  const firstOnPage = shown * layout.perPage;
+  // A remembered tile on another page does not count: the page's first tile takes the tab stop.
+  const reachable =
+    tabStop >= firstOnPage && tabStop < firstOnPage + onPage.length ? tabStop : firstOnPage;
   const gridHeight = layout.rows * layout.tile.h + (layout.rows - 1) * TILE_GAP;
   const gutter = layout.paged ? PAGE_GUTTER : 0;
 
@@ -250,7 +259,7 @@ function PagedTiles({ apps, tasks, layout }: { apps: AppEntry[]; tasks: TaskItem
               type="button"
               className="rb-page-arrow"
               aria-label="Previous page"
-              disabled={shown === 0}
+              aria-disabled={shown === 0}
               onClick={() => goTo(shown - 1)}
             >
               <IconLeft width="1em" height="1em" />
@@ -259,6 +268,8 @@ function PagedTiles({ apps, tasks, layout }: { apps: AppEntry[]; tasks: TaskItem
         ) : null}
         <div
           ref={gridRef}
+          role="list"
+          aria-label="Apps"
           style={{
             display: "grid",
             gridTemplateColumns: `repeat(${layout.cols}, ${layout.tile.w}px)`,
@@ -269,8 +280,10 @@ function PagedTiles({ apps, tasks, layout }: { apps: AppEntry[]; tasks: TaskItem
           }}
         >
           {onPage.map((app, i) => (
-            <div key={app.id} data-tile data-index={shown * layout.perPage + i}>
+            <div key={app.id} role="listitem" data-tile data-index={firstOnPage + i}>
               <AppTile
+                tabIndex={firstOnPage + i === reachable ? 0 : -1}
+                onFocus={() => setTabStop(firstOnPage + i)}
                 name={app.name}
                 description={app.description ?? undefined}
                 imageSrc={app.iconUrl ?? undefined}
@@ -291,7 +304,7 @@ function PagedTiles({ apps, tasks, layout }: { apps: AppEntry[]; tasks: TaskItem
               type="button"
               className="rb-page-arrow"
               aria-label="Next page"
-              disabled={shown === lastPage}
+              aria-disabled={shown === lastPage}
               onClick={() => goTo(shown + 1)}
             >
               <IconRight width="1em" height="1em" />

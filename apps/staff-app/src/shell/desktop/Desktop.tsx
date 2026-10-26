@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import type { Employee, ShellState } from "@rulebox/types";
 import { Backdrop } from "@rulebox/ui";
 
+import { useDocumentTitle } from "../../lib/a11y";
 import { call } from "../../lib/tauri";
 import { AppGrid } from "./AppGrid";
 import { formatDesktopDate, greetingFor } from "./greeting";
@@ -15,6 +16,7 @@ export interface DesktopProps {
 }
 
 export function Desktop({ shell, employee }: DesktopProps) {
+  useDocumentTitle("Rulebox desktop");
   const [now, setNow] = useState(() => new Date());
   const [wide, setWide] = useState(
     () => (typeof window !== "undefined" ? window.innerWidth >= 1000 : true),
@@ -45,8 +47,9 @@ export function Desktop({ shell, employee }: DesktopProps) {
   }
 
   return (
-    <div
+    <main
       data-testid="desktop"
+      aria-label="Desktop"
       style={{
         position: "absolute",
         inset: 0,
@@ -75,6 +78,7 @@ export function Desktop({ shell, employee }: DesktopProps) {
           <span>{org}</span>
           {offline ? (
             <span
+              role="status"
               style={{
                 marginLeft: 4,
                 padding: "2px 8px",
@@ -112,6 +116,6 @@ export function Desktop({ shell, employee }: DesktopProps) {
           <MyFilesPanel onOpenFiles={() => void call("launch_app", { id: "files" })} />
         ) : null}
       </div>
-    </div>
+    </main>
   );
 }

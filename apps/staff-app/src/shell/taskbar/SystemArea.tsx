@@ -33,7 +33,8 @@ export function SystemArea() {
     <button
       type="button"
       className="rb-chip"
-      aria-label={`Quick settings: ${networkLabel(network)}${battery?.percent != null ? `, battery ${battery.percent}%` : ""}`}
+      aria-label={systemLabel(network, volume, battery)}
+      aria-haspopup="dialog"
       title="Quick settings"
       style={{ padding: "0 14px" }}
       onPointerDown={(event) => event.stopPropagation()}
@@ -61,6 +62,23 @@ function Battery({ battery }: { battery: BatteryDto }) {
       ) : null}
     </span>
   );
+}
+
+/** What the chip's icons say, in words: network, sound, battery (the icons are colour and shape only). */
+function systemLabel(
+  network: NetworkDto,
+  volume: { level: number; muted: boolean } | null,
+  battery: BatteryDto | null,
+): string {
+  const parts = [`Quick settings: ${networkLabel(network)}`];
+  if (volume) {
+    parts.push(volume.muted ? "sound muted" : `volume ${Math.round(volume.level * 100)}%`);
+  }
+  if (battery) {
+    const level = battery.percent != null ? `battery ${battery.percent}%` : "battery";
+    parts.push(battery.charging ? `${level}, charging` : level);
+  }
+  return parts.join(", ");
 }
 
 function networkLabel(network: NetworkDto): string {

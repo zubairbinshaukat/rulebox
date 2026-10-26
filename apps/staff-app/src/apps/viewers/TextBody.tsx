@@ -13,7 +13,7 @@ export function TextBody({ text }: { text: string }) {
     return <WindowedLines lines={lines} />;
   }
   return (
-    <pre tabIndex={0} aria-label="File contents" style={block}>
+    <pre tabIndex={0} aria-label="File contents" className="rb-focus-inset" style={block}>
       {text}
     </pre>
   );
@@ -29,7 +29,14 @@ function WindowedLines({ lines }: { lines: string[] }) {
     overscan: 20,
   });
   return (
-    <div ref={scrollRef} tabIndex={0} role="document" aria-label="File contents" style={windowStyle}>
+    <div
+      ref={scrollRef}
+      tabIndex={0}
+      role="document"
+      aria-label="File contents"
+      className="rb-focus-inset"
+      style={windowStyle}
+    >
       <div style={{ height: virtualizer.getTotalSize(), position: "relative", minWidth: "max-content" }}>
         {virtualizer.getVirtualItems().map((row) => (
           <div key={row.index} style={{ ...lineStyle, transform: `translateY(${row.start}px)` }}>
@@ -53,7 +60,6 @@ const block: CSSProperties = {
   fontSize: 13,
   lineHeight: `${TEXT_LINE_HEIGHT}px`,
   whiteSpace: "pre",
-  outline: "none",
   background: "var(--rb-surface)",
   color: "var(--rb-ink)",
 };

@@ -26,4 +26,5 @@ export { Tabs, type TabsProps, type TabItem } from "./components/Tabs";
 export { FileChip, type FileChipProps } from "./components/FileChip";
 export { Notice, type NoticeProps, type NoticeTone } from "./components/Notice";
 export { Spinner, type SpinnerProps } from "./components/Spinner";
+export { rovingKeyDown, type RovingOrientation } from "./roving";
 export { setTheme, setLite, type Theme } from "./theme";

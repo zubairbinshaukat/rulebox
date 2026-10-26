@@ -31,9 +31,9 @@ export function AccountMenu() {
       }}
     >
       <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-        <Avatar name={employee.name} size={48} />
+        <Avatar name={employee.name} size={48} decorative />
         <div style={{ minWidth: 0 }}>
-          <div style={{ fontWeight: 600, fontSize: 16 }}>{employee.name}</div>
+          <h2 style={{ margin: 0, fontWeight: 600, fontSize: 16 }}>{employee.name}</h2>
           {employee.role ? (
             <div style={{ marginTop: 2, fontSize: 13, color: "var(--rb-muted)" }}>{employee.role}</div>
           ) : null}

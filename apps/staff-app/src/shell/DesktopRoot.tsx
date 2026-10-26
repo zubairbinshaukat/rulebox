@@ -112,7 +112,7 @@ export function DesktopRoot() {
     body = <StatusScreen kind={bootStatus} />;
   } else if (shell.session.status === "signingOut") {
     body = (
-      <div
+      <main
         data-testid="signing-out"
         style={{
           position: "absolute",
@@ -126,8 +126,10 @@ export function DesktopRoot() {
         }}
       >
         <LogoMotion animation="lock" />
-        <div style={{ fontSize: 15, color: "var(--rb-muted)" }}>Signing out…</div>
-      </div>
+        <div role="status" style={{ fontSize: 15, color: "var(--rb-muted)" }}>
+          Signing out…
+        </div>
+      </main>
     );
   } else if (shell.session.status === "signedIn" && shell.session.locked) {
     body = <LockScreen shell={shell} employee={shell.session.employee} />;

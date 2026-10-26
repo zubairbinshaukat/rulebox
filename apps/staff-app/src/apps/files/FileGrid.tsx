@@ -98,6 +98,7 @@ export function FileGrid({
       aria-activedescendant={focusedPath ? itemId(focusedPath) : undefined}
       tabIndex={0}
       data-explorer-list
+      className="rb-focus-inset"
       style={gridContainer}
     >
       <div style={{ height: virtualizer.getTotalSize(), width: "100%", position: "relative" }}>
@@ -140,11 +141,14 @@ export function FileGrid({
                   style={{
                     ...gridCard,
                     background: dropActive || isSelected ? "var(--rb-accent-soft)" : "var(--rb-surface)",
-                    border: `1px solid ${dropActive || isFocused ? "var(--rb-accent)" : "var(--rb-line)"}`,
+                    // Selected and focused cards get a 2 px line, not only a tint.
+                    border: `${isSelected || dropActive || isFocused ? 2 : 1}px solid ${
+                      dropActive || isFocused ? "var(--rb-focus)" : isSelected ? "var(--rb-accent)" : "var(--rb-line)"
+                    }`,
                     opacity: cut.has(entry.path) ? 0.5 : 1,
                   }}
                 >
-                  <div style={iconContainer}>
+                  <div style={iconContainer} aria-hidden="true">
                     {isFolder ? (
                       <IconFolder width={42} height={42} style={{ color: "var(--rb-accent)" }} />
                     ) : (
@@ -161,6 +165,7 @@ export function FileGrid({
                   ) : (
                     <span title={entry.path} style={nameLabel}>
                       {entry.name}
+                      {isFolder ? <span className="rb-sr-only">, folder</span> : null}
                     </span>
                   )}
                 </div>
@@ -178,7 +183,6 @@ const gridContainer: CSSProperties = {
   minHeight: 0,
   overflow: "auto",
   paddingTop: 16,
-  outline: "none",
   userSelect: "none",
 };
 

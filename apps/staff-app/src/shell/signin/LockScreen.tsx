@@ -1,7 +1,8 @@
-import { useState, type FormEvent } from "react";
+import { useEffect, useRef, useState, type FormEvent } from "react";
 import { Avatar, Backdrop, Button, Input, LogoMotion, Panel } from "@rulebox/ui";
 import type { Employee, ShellState } from "@rulebox/types";
 
+import { useDocumentTitle } from "../../lib/a11y";
 import { call, type VerifyOutcomeDto } from "../../lib/tauri";
 
 export interface LockScreenProps {
@@ -31,6 +32,15 @@ export function LockScreen({ shell, employee }: LockScreenProps) {
   const [message, setMessage] = useState<string | null>(null);
   const [logo, setLogo] = useState(true);
   const first = employee.name.split(" ")[0] ?? employee.name;
+  useDocumentTitle("Locked - Rulebox");
+
+  // The field is disabled while the password is checked, which drops the focus: put it back.
+  const passwordRef = useRef<HTMLInputElement>(null);
+  useEffect(() => {
+    if (!checking && message) {
+      passwordRef.current?.focus();
+    }
+  }, [checking, message]);
 
   async function submit(event: FormEvent) {
     event.preventDefault();
@@ -51,7 +61,7 @@ export function LockScreen({ shell, employee }: LockScreenProps) {
   }
 
   return (
-    <div
+    <main
       data-testid="lock-screen"
       style={{
         position: "absolute",
@@ -87,9 +97,9 @@ export function LockScreen({ shell, employee }: LockScreenProps) {
           }}
         >
           <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-            <Avatar name={employee.name} size={48} />
+            <Avatar name={employee.name} size={48} decorative />
             <div>
-              <div style={{ fontWeight: 600, fontSize: 16 }}>{employee.name}</div>
+              <h1 style={{ margin: 0, fontWeight: 600, fontSize: 16 }}>{employee.name}</h1>
               <div style={{ marginTop: 2, fontSize: 13, color: "var(--rb-muted)" }}>
                 Locked · your apps are still open
               </div>
@@ -97,6 +107,7 @@ export function LockScreen({ shell, employee }: LockScreenProps) {
           </div>
           <form onSubmit={(event) => void submit(event)} style={{ display: "flex", gap: 8 }}>
             <Input
+              ref={passwordRef}
               aria-label="Password"
               placeholder="Password"
               type="password"
@@ -154,6 +165,6 @@ export function LockScreen({ shell, employee }: LockScreenProps) {
           <LogoMotion animation="lock" onDone={() => setLogo(false)} />
         </div>
       ) : null}
-    </div>
+    </main>
   );
 }

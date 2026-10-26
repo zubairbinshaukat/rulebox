@@ -31,11 +31,14 @@ export function CsvTable({ rows, letters = false }: { rows: string[][]; letters?
   return (
     <div
       ref={scrollRef}
-      role="grid"
+      // A read-only table (no cell editing, no cell-by-cell arrow keys), so not a grid.
+      // It takes focus so the arrow keys, Page Up/Down and Home/End scroll it.
+      role="table"
       aria-label="Table"
       aria-rowcount={rows.length}
       aria-colcount={columns}
       tabIndex={0}
+      className="rb-focus-inset"
       style={scroller}
     >
       {letters ? (
@@ -67,7 +70,7 @@ export function CsvTable({ rows, letters = false }: { rows: string[][]; letters?
                 {item.index + 1}
               </div>
               {Array.from({ length: columns }, (_, column) => (
-                <div role="gridcell" key={column} style={cell} title={row[column] ?? ""}>
+                <div role="cell" key={column} style={cell} title={row[column] ?? ""}>
                   {row[column] ?? ""}
                 </div>
               ))}
@@ -93,7 +96,6 @@ const scroller: CSSProperties = {
   flex: 1,
   minHeight: 0,
   overflow: "auto",
-  outline: "none",
   background: "var(--rb-surface)",
   color: "var(--rb-ink)",
   fontSize: 13,

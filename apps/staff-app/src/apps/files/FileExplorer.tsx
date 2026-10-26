@@ -936,7 +936,7 @@ export function FileExplorer({ initialPath = "" }: FileExplorerProps) {
               onEmptyTrash={() => void purgeItem(null, "")}
             />
           ) : folderError ? (
-            <div style={centered}>
+            <div style={centered} role="alert">
               <p style={{ margin: 0, fontSize: 15, fontWeight: 500 }}>{folderError}</p>
               <Button type="button" onClick={() => selectSection("all")}>
                 Go to All files
@@ -944,16 +944,19 @@ export function FileExplorer({ initialPath = "" }: FileExplorerProps) {
             </div>
           ) : loading ? (
             <div style={{ padding: 16, display: "flex", flexDirection: "column", gap: 12 }} aria-busy="true">
+              <span role="status" className="rb-sr-only">
+                Loading files
+              </span>
               {[0, 1, 2, 3, 4].map((n) => (
-                <div key={n} style={skeletonRow} />
+                <div key={n} aria-hidden="true" style={skeletonRow} />
               ))}
             </div>
           ) : searchQuery.trim() && searchResults !== null && searchResults.length === 0 ? (
-            <div style={centered}>
+            <div style={centered} role="status">
               <p style={muted}>Nothing matches “{searchQuery.trim()}”</p>
             </div>
           ) : displayedEntries.length === 0 ? (
-            <div style={centered}>
+            <div style={centered} role="status">
               <p style={muted}>This folder is empty.</p>
             </div>
           ) : viewMode === "list" ? (

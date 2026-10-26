@@ -63,7 +63,8 @@ export function QuickSettings() {
           </div>
           <button
             type="button"
-            aria-label={volume.muted ? "Unmute" : "Mute"}
+            // One name and a pressed state: "Mute, pressed", not a name that flips with it.
+            aria-label="Mute"
             aria-pressed={volume.muted}
             title={volume.muted ? "Unmute" : "Mute"}
             onClick={() => void call("set_muted", { muted: !volume.muted })}
@@ -105,6 +106,9 @@ export function QuickSettings() {
                 ...themeButton,
                 background: selected ? "var(--rb-accent-soft)" : "transparent",
                 color: selected ? "var(--rb-accent-text)" : "var(--rb-ink)",
+                // Bold and a heavier edge as well as the tint: the choice is not told by colour alone.
+                fontWeight: selected ? 600 : 400,
+                borderColor: selected ? "var(--rb-focus)" : "var(--rb-line-strong)",
               }}
             >
               {choice.id === "auto" ? <IconMonitor width={16} height={16} /> : null}
@@ -116,7 +120,7 @@ export function QuickSettings() {
         })}
       </div>
 
-      <div style={{ fontSize: 13, fontWeight: 600 }}>Notices</div>
+      <h2 style={{ margin: 0, fontSize: 13, fontWeight: 600 }}>Notices</h2>
       <div
         aria-live="polite"
         style={{ flex: 1, minHeight: 0, overflow: "auto", display: "flex", flexDirection: "column", gap: 8 }}
@@ -146,7 +150,11 @@ export function QuickSettings() {
                 }}
               />
               <div style={{ flex: 1, minWidth: 0 }}>
-                <div style={{ fontWeight: 600 }}>{notice.title}</div>
+                <div style={{ fontWeight: 600 }}>
+                  {/* The dot's colour in words, so a problem is not told by colour alone. */}
+                  {TONE_WORD[notice.tone] ? <span className="rb-sr-only">{TONE_WORD[notice.tone]}: </span> : null}
+                  {notice.title}
+                </div>
                 {notice.detail ? (
                   <div style={{ color: "var(--rb-muted)" }}>{notice.detail}</div>
                 ) : null}
@@ -176,7 +184,8 @@ function toneColor(tone: NoticeTone): string {
     case "success":
       return "var(--rb-success)";
     case "warning":
-      return "var(--rb-warning)";
+      // The darker shade: --rb-warning is 2.3:1 on the popup.
+      return "var(--rb-warning-text)";
     case "danger":
       return "var(--rb-danger)";
     default: {
@@ -185,6 +194,12 @@ function toneColor(tone: NoticeTone): string {
     }
   }
 }
+
+const TONE_WORD: Partial<Record<NoticeTone, string>> = {
+  success: "Success",
+  warning: "Warning",
+  danger: "Error",
+};
 
 const iconButton: CSSProperties = {
   width: 36,

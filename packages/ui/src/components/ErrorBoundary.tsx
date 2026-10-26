@@ -29,7 +29,7 @@ export class ErrorBoundary extends Component<ErrorBoundaryProps, State> {
     if (!error) return this.props.children;
     return (
       <div style={{ minHeight: "100vh", display: "grid", placeItems: "center", padding: 24 }}>
-        <Panel style={{ maxWidth: 420, padding: 28, display: "flex", flexDirection: "column", gap: 12 }}>
+        <Panel role="alert" style={{ maxWidth: 420, padding: 28, display: "flex", flexDirection: "column", gap: 12 }}>
           <h1 style={{ margin: 0, fontSize: 19, fontWeight: 500 }}>
             {this.props.title ?? "Something went wrong"}
           </h1>

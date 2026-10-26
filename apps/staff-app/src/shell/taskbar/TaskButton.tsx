@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
 
 import { GenericProgramIcon } from "../appIcon";
-import { iconUrl, type ButtonState } from "./grouping";
+import { iconUrl, stateLabel, type ButtonState } from "./grouping";
 
 /** A program window's own icon, served by the `rbicon` protocol. */
 export function WindowIcon({ iconKey, enabled }: { iconKey: string; enabled: boolean }) {
@@ -58,7 +58,9 @@ export function TaskButton({
       type="button"
       className="rb-task"
       title={label}
-      aria-label={label}
+      // The window's state in words (the bar under the icon shows it, but not to a screen reader).
+      aria-label={stateLabel(label, state)}
+      aria-pressed={state.active}
       data-flip-id={flipId}
       data-open={state.open}
       data-active={state.active}
@@ -84,7 +86,11 @@ export function TaskButton({
       }}
     >
       <span className="rb-task__icon">{icon}</span>
-      {state.count > 1 ? <span className="rb-task__count">{state.count}</span> : null}
+      {state.count > 1 ? (
+        <span className="rb-task__count" aria-hidden>
+          {state.count}
+        </span>
+      ) : null}
       {state.hung ? <span className="rb-task__warn" aria-hidden /> : null}
       <span className="rb-task__bar" aria-hidden />
     </button>

@@ -154,7 +154,9 @@ function Pages({ doc, path }: { doc: PDFDocumentProxy; path: string }) {
         <IconButton label="Zoom out (-)" size={32} onClick={() => step(-1)} disabled={zoomValue <= 0.5}>
           <IconZoomOut width={16} height={16} />
         </IconButton>
-        <span style={{ minWidth: 44, textAlign: "center", fontSize: 12.5 }}>{Math.round(zoomValue * 100)}%</span>
+        <span aria-live="polite" style={{ minWidth: 44, textAlign: "center", fontSize: 12.5 }}>
+          {Math.round(zoomValue * 100)}%
+        </span>
         <IconButton label="Zoom in (+)" size={32} onClick={() => step(1)} disabled={zoomValue >= 2}>
           <IconZoomIn width={16} height={16} />
         </IconButton>
@@ -167,6 +169,7 @@ function Pages({ doc, path }: { doc: PDFDocumentProxy; path: string }) {
         tabIndex={0}
         role="document"
         aria-label={fileNameOf(path)}
+        className="rb-focus-inset"
         onKeyDown={onKeyDown}
         onScroll={onScroll}
         style={scrollArea}
@@ -261,7 +264,6 @@ function PageSlot({
   return (
     <div
       ref={slot}
-      aria-label={`Page ${number}`}
       style={{
         position: "absolute",
         left: "50%",
@@ -273,7 +275,13 @@ function PageSlot({
         boxShadow: "var(--rb-shadow-sm)",
       }}
     >
-      <canvas ref={canvas} style={{ width: "100%", height: "100%", display: "block" }} />
+      {/* A drawn page has no text a screen reader can reach; it is named by its number. */}
+      <canvas
+        ref={canvas}
+        role="img"
+        aria-label={`Page ${number}`}
+        style={{ width: "100%", height: "100%", display: "block" }}
+      />
     </div>
   );
 }
@@ -291,7 +299,6 @@ const scrollArea: CSSProperties = {
   flex: 1,
   minHeight: 0,
   overflow: "auto",
-  outline: "none",
   background: "var(--rb-bg)",
 };
 

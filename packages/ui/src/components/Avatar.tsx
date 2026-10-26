@@ -5,6 +5,12 @@ export interface AvatarProps {
   name: string;
   size?: number;
   className?: string;
+  /**
+   * The name is already written next to the avatar (or the avatar sits in a
+   * button that has its own label): hide the initials from screen readers
+   * instead of reading the name twice.
+   */
+  decorative?: boolean;
 }
 
 function initials(name: string): string {
@@ -14,10 +20,16 @@ function initials(name: string): string {
   return (first + last).toUpperCase();
 }
 
-export function Avatar({ name, size = 72, className }: AvatarProps) {
+export function Avatar({ name, size = 72, className, decorative = false }: AvatarProps) {
   const style: CSSProperties = { width: size, height: size, fontSize: Math.round(size / 3) };
   return (
-    <span className={["rb-avatar", className ?? ""].filter(Boolean).join(" ")} style={style} aria-label={name}>
+    <span
+      className={["rb-avatar", className ?? ""].filter(Boolean).join(" ")}
+      style={style}
+      role={decorative ? undefined : "img"}
+      aria-label={decorative ? undefined : name}
+      aria-hidden={decorative ? true : undefined}
+    >
       {initials(name)}
     </span>
   );

@@ -129,7 +129,7 @@ export function ContextMenu({
               }}
             />
           ) : null}
-          <div style={divider} />
+          <div role="separator" style={divider} />
           <ContextMenuItem
             icon={<IconPen width={16} height={16} />}
             label="Rename"
@@ -171,7 +171,7 @@ export function ContextMenu({
         }}
       />
 
-      <div style={divider} />
+      <div role="separator" style={divider} />
 
       {hasTarget ? (
         <ContextMenuItem
@@ -215,6 +215,7 @@ function ContextMenuItem({
     <button
       type="button"
       role="menuitem"
+      className="rb-ctx-item"
       disabled={disabled}
       onClick={onClick}
       style={{
@@ -223,7 +224,9 @@ function ContextMenuItem({
         cursor: disabled ? "default" : "pointer",
       }}
     >
-      <span style={{ display: "flex", color: "var(--rb-muted)" }}>{icon}</span>
+      <span aria-hidden="true" style={{ display: "flex", color: "var(--rb-muted)" }}>
+        {icon}
+      </span>
       <span style={{ flex: 1, minWidth: 0 }}>{label}</span>
       {shortcut ? (
         <span style={{ fontSize: 11, color: "var(--rb-muted)", marginLeft: 16 }}>{shortcut}</span>
@@ -254,7 +257,6 @@ const menuItem: CSSProperties = {
   padding: "6px 8px",
   borderRadius: 8,
   border: 0,
-  background: "transparent",
   color: "var(--rb-ink)",
   font: "inherit",
   fontSize: 13,

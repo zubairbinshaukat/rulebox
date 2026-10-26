@@ -1,5 +1,7 @@
 import type { KeyboardEvent } from "react";
 
+import { rovingKeyDown } from "../roving";
+
 export interface SegmentedOption<T extends string> {
   value: T;
   label: string;
@@ -18,31 +20,11 @@ export function SegmentedControl<T extends string>({
   onChange,
   "aria-label": ariaLabel,
 }: SegmentedControlProps<T>) {
+  // Arrow keys move the focus and select, as native radio buttons do.
   function onKeyDown(e: KeyboardEvent<HTMLDivElement>) {
-    const i = options.findIndex((o) => o.value === value);
-    if (i < 0 || options.length === 0) return;
-
-    let next = i;
-    switch (e.key) {
-      case "ArrowRight":
-      case "ArrowDown":
-        next = (i + 1) % options.length;
-        break;
-      case "ArrowLeft":
-      case "ArrowUp":
-        next = (i - 1 + options.length) % options.length;
-        break;
-      case "Home":
-        next = 0;
-        break;
-      case "End":
-        next = options.length - 1;
-        break;
-      default:
-        return;
-    }
-    e.preventDefault();
-    onChange(options[next]!.value);
+    const target = rovingKeyDown(e, '[role="radio"]', "both");
+    const picked = target?.dataset.value as T | undefined;
+    if (picked !== undefined) onChange(picked);
   }
 
   return (
@@ -52,6 +34,7 @@ export function SegmentedControl<T extends string>({
           key={o.value}
           type="button"
           role="radio"
+          data-value={o.value}
           aria-checked={o.value === value}
           tabIndex={o.value === value ? 0 : -1}
           onClick={() => onChange(o.value)}

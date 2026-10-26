@@ -69,15 +69,23 @@ export function AppTile({
           )}
         </span>
         {count ? (
-          <span className="rb-tile__count" aria-label={`${count} new`}>
-            {count}
-          </span>
+          <>
+            <span className="rb-tile__count" aria-hidden="true">
+              {count}
+            </span>
+            <span className="rb-sr-only">, {count} new</span>
+          </>
         ) : null}
       </span>
       <span className="rb-tile__text">
         <span className="rb-tile__name">
           <span>{name}</span>
-          {running ? <span className="rb-dot" title="Open" /> : null}
+          {running ? (
+            <>
+              <span className="rb-dot" aria-hidden="true" />
+              <span className="rb-sr-only">, open</span>
+            </>
+          ) : null}
         </span>
         {description ? <span className="rb-tile__desc">{description}</span> : null}
       </span>

@@ -1,5 +1,24 @@
 /* Component styles. Everything is token-driven so light, dark and Lite all work. */
 
+/* Text for screen readers only: still read, never drawn. */
+.rb-sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+/* A scrolling region or list that takes the keyboard focus: the ring sits inside, so a clipping parent cannot hide it. */
+.rb-focus-inset:focus-visible {
+  outline: 2px solid var(--rb-focus);
+  outline-offset: -2px;
+}
+
 /* Root scope: apply data-theme / data-lite on a wrapper element. */
 .rb-root {
   position: relative;
@@ -42,7 +61,7 @@
 .rb-titlebar__controls button:focus-visible,
 .rb-slider__input:focus-visible,
 .rb-dialog:focus-visible {
-  outline: 2px solid var(--rb-accent);
+  outline: 2px solid var(--rb-focus);
   outline-offset: 2px;
 }
 .rb-btn--primary {
@@ -77,7 +96,7 @@
   height: 46px;
   padding: 0 14px;
   border-radius: var(--rb-r-md);
-  border: 1px solid var(--rb-line);
+  border: 1px solid var(--rb-line-strong);
   background: var(--rb-surface);
   outline: none;
   font-size: 14.5px;
@@ -86,8 +105,17 @@
     box-shadow var(--rb-duration) var(--rb-ease);
 }
 .rb-input:focus {
-  border-color: var(--rb-accent);
+  border-color: var(--rb-focus);
   box-shadow: 0 0 0 3px var(--rb-accent-soft);
+}
+/* The ring for keyboard focus; the border and halo above stay for the mouse. */
+.rb-input:focus-visible {
+  outline: 2px solid var(--rb-focus);
+  outline-offset: 1px;
+}
+.rb-input:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
 }
 .rb-input::placeholder {
   color: var(--rb-faint);
@@ -199,7 +227,7 @@
   transition-duration: 0.1s;
 }
 .rb-tile:focus-visible {
-  outline: 2px solid var(--rb-accent);
+  outline: 2px solid var(--rb-focus);
   outline-offset: 3px;
 }
 .rb-tile--lg {
@@ -519,9 +547,9 @@
   border: 0;
   border-radius: 8px;
   background: transparent;
-  color: var(--rb-faint);
+  color: var(--rb-muted);
   cursor: pointer;
-  opacity: 0.7;
+  opacity: 0.85;
   transition: opacity var(--rb-duration) var(--rb-ease);
 }
 .rb-tabstrip__close:hover,
@@ -533,7 +561,7 @@
 }
 .rb-tabstrip__select:focus-visible,
 .rb-tabstrip__close:focus-visible {
-  outline: 2px solid var(--rb-accent);
+  outline: 2px solid var(--rb-focus);
   outline-offset: -2px;
   border-radius: 8px;
 }
@@ -561,19 +589,21 @@
     transform var(--rb-duration) var(--rb-ease),
     opacity var(--rb-duration) var(--rb-ease);
 }
-.rb-page-arrow:hover:not(:disabled) {
+.rb-page-arrow:hover:not(:disabled, [aria-disabled="true"]) {
   transform: scale(1.07);
 }
-.rb-page-arrow:active:not(:disabled) {
+.rb-page-arrow:active:not(:disabled, [aria-disabled="true"]) {
   transform: scale(0.96);
 }
-.rb-page-arrow:disabled {
+/* aria-disabled keeps the keyboard focus on the arrow when the last page is reached. */
+.rb-page-arrow:disabled,
+.rb-page-arrow[aria-disabled="true"] {
   opacity: 0.35;
   cursor: default;
 }
 .rb-page-arrow:focus-visible,
 .rb-pager__dot:focus-visible {
-  outline: 2px solid var(--rb-accent);
+  outline: 2px solid var(--rb-focus);
   outline-offset: 2px;
 }
 .rb-pager {
@@ -603,8 +633,8 @@
   padding: 0;
   border: 0;
   border-radius: 50%;
-  background: var(--rb-faint);
-  opacity: 0.5;
+  background: var(--rb-muted);
+  opacity: 0.8;
   cursor: pointer;
   transition: opacity var(--rb-duration) var(--rb-ease);
 }
@@ -615,7 +645,7 @@
   inset: -6px -4px;
 }
 .rb-pager__dot:hover {
-  opacity: 0.9;
+  opacity: 1;
 }
 .rb-pager__thumb {
   position: absolute;
@@ -752,14 +782,14 @@
   height: 24px;
   flex: none;
   border-radius: 12px;
-  background: var(--rb-line);
+  background: var(--rb-line-strong);
   transition: background var(--rb-duration) var(--rb-ease);
 }
 .rb-switch__track[aria-checked="true"] {
   background: var(--rb-accent);
 }
 .rb-switch__track:focus-visible {
-  outline: 2px solid var(--rb-accent);
+  outline: 2px solid var(--rb-focus);
   outline-offset: 2px;
 }
 .rb-switch__thumb {
@@ -808,7 +838,8 @@
   transition: transform 0.4s var(--rb-ease);
 }
 .rb-progress__fill--accent { background: var(--rb-accent); }
-.rb-progress__fill--warning { background: var(--rb-warning); }
+/* --rb-warning is 2:1 on the track; the darker shade keeps the fill readable (3:1). */
+.rb-progress__fill--warning { background: var(--rb-warning-text); }
 .rb-progress__fill--danger { background: var(--rb-danger); }
 
 /* Stat card */
@@ -861,26 +892,28 @@
   pointer-events: none;
   z-index: 0;
 }
+/* A soft edge made by the gradient itself: a 120 px `filter: blur` on an
+   80vmax disc costs a large offscreen texture and a re-blur on every resize
+   for the same picture. */
 .rb-backdrop__blob {
   position: absolute;
   border-radius: 50%;
-  filter: blur(120px);
   pointer-events: none;
 }
 .rb-backdrop__blob--a {
-  width: 80vmax;
-  height: 80vmax;
-  left: -30vmax;
-  top: -42vmax;
-  background: var(--rb-blob-a);
+  width: 110vmax;
+  height: 110vmax;
+  left: -45vmax;
+  top: -57vmax;
+  background: radial-gradient(closest-side, var(--rb-blob-a) 45%, transparent 100%);
   opacity: 0.5;
 }
 .rb-backdrop__blob--b {
-  width: 70vmax;
-  height: 70vmax;
-  right: -25vmax;
-  bottom: -38vmax;
-  background: var(--rb-blob-b);
+  width: 100vmax;
+  height: 100vmax;
+  right: -40vmax;
+  bottom: -53vmax;
+  background: radial-gradient(closest-side, var(--rb-blob-b) 45%, transparent 100%);
   opacity: 0.7;
 }
 
@@ -1030,7 +1063,7 @@
 }
 .rb-chip:focus-visible,
 .rb-tray-button:focus-visible {
-  outline: 2px solid var(--rb-accent);
+  outline: 2px solid var(--rb-focus);
   outline-offset: 2px;
 }
 .rb-chip--icon {
@@ -1413,7 +1446,7 @@
 .rb-switcher__state {
   font-size: 10.5px;
   font-weight: 600;
-  color: var(--rb-faint);
+  color: var(--rb-muted);
 }
 .rb-switcher__hints {
   display: flex;
@@ -1497,7 +1530,7 @@
   background: var(--rb-hover);
 }
 .rb-task:focus-visible {
-  outline: 2px solid var(--rb-accent);
+  outline: 2px solid var(--rb-focus);
   outline-offset: 2px;
 }
 .rb-task__icon {
@@ -1553,7 +1586,8 @@
   width: 9px;
   height: 9px;
   border-radius: 50%;
-  background: var(--rb-warning);
+  /* The darker warning shade: --rb-warning is only 2.3:1 on the surface ring. */
+  background: var(--rb-warning-text);
   box-shadow: 0 0 0 2px var(--rb-surface);
 }
 .rb-task__count {
@@ -1585,6 +1619,26 @@
   .rb-task[data-flashing="true"] .rb-task__bar {
     animation: none;
   }
+  .rb-pager__thumb,
+  .rb-progress__fill,
+  .rb-monitor__fill,
+  .rb-task__bar,
+  .rb-switch__thumb,
+  .rb-switcher__item {
+    transition: none;
+  }
+}
+/* With no pulse (reduced motion, Lite) "needs attention" still differs from "active":
+   a taller bar in the warning shade, so it is not told by animation alone. */
+@media (prefers-reduced-motion: reduce) {
+  .rb-task[data-flashing="true"] .rb-task__bar {
+    height: 6px;
+    background: var(--rb-warning-text);
+  }
+}
+[data-lite="true"] .rb-task[data-flashing="true"] .rb-task__bar {
+  height: 6px;
+  background: var(--rb-warning-text);
 }
 .rb-task-divider {
   flex: none;
@@ -1714,6 +1768,15 @@
   font-family: var(--rb-font-mono);
 }
 
+/* The Files window's right-click menu items (their layout is inline): hover and keyboard focus tint. */
+.rb-ctx-item:hover:not(:disabled),
+.rb-ctx-item:focus-visible:not(:disabled) {
+  background: var(--rb-hover);
+}
+.rb-ctx-item:focus-visible {
+  outline-offset: -2px;
+}
+
 /* Dialog */
 .rb-dialog-backdrop {
   position: fixed;
@@ -1727,6 +1790,9 @@
 }
 .rb-dialog {
   width: min(420px, 100%);
+  /* A small window or a 200% zoom: the dialog scrolls instead of running off the screen. */
+  max-height: 100%;
+  overflow-y: auto;
   padding: 24px;
   border-radius: var(--rb-r-xl);
   background: var(--rb-glass-strong);

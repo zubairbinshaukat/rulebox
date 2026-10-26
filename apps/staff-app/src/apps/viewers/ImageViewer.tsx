@@ -75,11 +75,21 @@ function Picture({ path, image }: { path: string; image: Size }) {
     const target = stepZoom(shown.scale, direction);
     setPlacement(clampPan(zoomAt(shown, target / shown.scale, { x: view.w / 2, y: view.h / 2 }), view, image));
   }
+  /** The arrow keys pan a zoomed picture (a drag is not the only way to move it). */
+  function panBy(dx: number, dy: number) {
+    if (!shown) return;
+    setPlacement(clampPan({ ...shown, x: shown.x + dx, y: shown.y + dy }, view, image));
+  }
   function onKeyDown(event: KeyboardEvent) {
+    const step = event.shiftKey ? 200 : 50;
     if (event.key === "+" || event.key === "=") zoomStep(1);
     else if (event.key === "-" || event.key === "_") zoomStep(-1);
     else if (event.key === "0") fit();
     else if (event.key === "1") actual();
+    else if (event.key === "ArrowLeft") panBy(step, 0);
+    else if (event.key === "ArrowRight") panBy(-step, 0);
+    else if (event.key === "ArrowUp") panBy(0, step);
+    else if (event.key === "ArrowDown") panBy(0, -step);
     else return;
     event.preventDefault();
   }
@@ -143,8 +153,9 @@ function Picture({ path, image }: { path: string; image: Size }) {
       <div
         ref={stage}
         tabIndex={0}
-        aria-label={fileNameOf(path)}
+        aria-label={`${fileNameOf(path)}. Plus and minus zoom, arrow keys move, 0 fits, 1 shows actual size.`}
         role="img"
+        className="rb-focus-inset"
         onKeyDown={onKeyDown}
         onPointerDown={onPointerDown}
         onPointerMove={onPointerMove}
@@ -194,7 +205,6 @@ const stageStyle: CSSProperties = {
   flex: 1,
   minHeight: 0,
   overflow: "hidden",
-  outline: "none",
   cursor: "grab",
   touchAction: "none",
   background: "var(--rb-bg)",

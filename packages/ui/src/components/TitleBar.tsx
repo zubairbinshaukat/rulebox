@@ -70,7 +70,9 @@ export function TitleBar({
 
   return (
     <div className={cls} onDoubleClick={onDoubleClick} {...dragProps}>
-      <span className="rb-titlebar__icon">{icon ?? mono ?? title.charAt(0).toUpperCase()}</span>
+      <span className="rb-titlebar__icon" aria-hidden="true">
+        {icon ?? mono ?? title.charAt(0).toUpperCase()}
+      </span>
       <span className="rb-titlebar__title" {...dragProps}>
         {title}
       </span>

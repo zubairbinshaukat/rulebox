@@ -28,7 +28,7 @@ describe("CSV and spreadsheet cells are text", () => {
 
   it("shows a formula-looking value as the characters it is, with no markup", () => {
     render(<CsvTable rows={[["Name", "Total"], [evil, "=1+1"], ['<img src=x onerror="alert(1)">', "@SUM(A1)"]]} />);
-    const cells = screen.getAllByRole("gridcell").map((cell) => cell.textContent);
+    const cells = screen.getAllByRole("cell").map((cell) => cell.textContent);
     expect(cells).toContain(evil);
     expect(cells).toContain("=1+1");
     expect(cells).toContain('<img src=x onerror="alert(1)">');
@@ -40,7 +40,7 @@ describe("CSV and spreadsheet cells are text", () => {
   it("lets the widest row decide the columns and pads short rows", () => {
     render(<CsvTable rows={[["a", "b", "c"], ["1"]]} />);
     expect(screen.getAllByRole("row")).toHaveLength(2);
-    expect(screen.getAllByRole("gridcell")).toHaveLength(6);
+    expect(screen.getAllByRole("cell")).toHaveLength(6);
     expect(columnCount([["a"], ["a", "b", "c"], []])).toBe(3);
     expect(columnCount([])).toBe(0);
   });

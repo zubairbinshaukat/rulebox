@@ -113,6 +113,7 @@ export function FileList({
       aria-activedescendant={focusedPath ? itemId(focusedPath) : undefined}
       tabIndex={0}
       data-explorer-list
+      className="rb-focus-inset"
       ref={gridRef}
       style={tableContainer}
     >
@@ -127,7 +128,8 @@ export function FileList({
               onClick={() => onSortChange(column.field)}
               style={{ ...column.style, cursor: "pointer" }}
             >
-              {column.label} {active ? (sort.direction === "asc" ? "▲" : "▼") : null}
+              {column.label}{" "}
+              {active ? <span aria-hidden="true">{sort.direction === "asc" ? "▲" : "▼"}</span> : null}
             </div>
           );
         })}
@@ -163,17 +165,15 @@ export function FileList({
                   height: LIST_ROW_HEIGHT,
                   transform: `translateY(${start}px)`,
                   background: dropActive || isSelected ? "var(--rb-accent-soft)" : "transparent",
-                  outline: dropActive
-                    ? "2px solid var(--rb-accent)"
-                    : isFocused
-                      ? "1px solid var(--rb-accent)"
-                      : "none",
-                  outlineOffset: -1,
+                  // The row the keyboard is on (and a folder a drag would land in) has a 2 px line,
+                  // not only a tint: the selection and the cursor are two different things.
+                  outline: dropActive || isFocused ? "2px solid var(--rb-focus)" : "none",
+                  outlineOffset: -2,
                   opacity: cut.has(entry.path) ? 0.5 : 1,
                 }}
               >
                 <div role="gridcell" style={{ ...cell, flex: 1, minWidth: 0 }}>
-                  <span style={iconWrapper}>
+                  <span style={iconWrapper} aria-hidden="true">
                     {isFolder ? (
                       <IconFolder width={18} height={18} style={{ color: "var(--rb-accent)" }} />
                     ) : (
@@ -230,7 +230,6 @@ const tableContainer: CSSProperties = {
   flexDirection: "column",
   flex: 1,
   minHeight: 0,
-  outline: "none",
   userSelect: "none",
 };
 

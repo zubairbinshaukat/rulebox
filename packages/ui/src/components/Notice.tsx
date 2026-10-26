@@ -11,6 +11,13 @@ export interface NoticeProps {
   icon?: ReactNode;
 }
 
+/** The tone in words, so it is never told by colour alone. */
+const TONE_WORD: Partial<Record<NoticeTone, string>> = {
+  success: "Success",
+  warning: "Warning",
+  danger: "Error",
+};
+
 export function Notice({
   tone = "neutral",
   title,
@@ -20,12 +27,21 @@ export function Notice({
   icon,
 }: NoticeProps) {
   const cls = ["rb-notice", `rb-notice--${tone}`, className ?? ""].filter(Boolean).join(" ");
+  const word = TONE_WORD[tone];
 
   return (
-    <div className={cls} role="status">
-      {icon ? <span className="rb-notice__icon">{icon}</span> : null}
+    // A problem interrupts (alert); everything else waits its turn (status).
+    <div className={cls} role={tone === "danger" || tone === "warning" ? "alert" : "status"}>
+      {icon ? (
+        <span className="rb-notice__icon" aria-hidden="true">
+          {icon}
+        </span>
+      ) : null}
       <div className="rb-notice__text">
-        <div className="rb-notice__title">{title}</div>
+        <div className="rb-notice__title">
+          {word ? <span className="rb-sr-only">{word}: </span> : null}
+          {title}
+        </div>
         {detail ? <div className="rb-notice__detail">{detail}</div> : null}
       </div>
       {onDismiss ? (
@@ -36,7 +52,7 @@ export function Notice({
           title="Dismiss"
           onClick={onDismiss}
         >
-          ×
+          <span aria-hidden="true">×</span>
         </button>
       ) : null}
     </div>

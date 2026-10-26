@@ -139,7 +139,7 @@ export function Sidebar({ section, onSelectSection, storage, dropTarget, onFreeU
 
       {compact ? (
         <div style={storageSection} title={`Storage: ${storage.detail}`}>
-          <ProgressBar value={storage.pct} />
+          <ProgressBar value={storage.pct} name={`Storage: ${storage.detail}`} />
         </div>
       ) : (
       <div style={storageSection}>
@@ -169,7 +169,7 @@ export function Sidebar({ section, onSelectSection, storage, dropTarget, onFreeU
           ) : null}
         </div>
 
-        <ProgressBar value={storage.pct} detail={storage.detail} />
+        <ProgressBar value={storage.pct} name="Storage" detail={storage.detail} />
 
         {storage.banner ? (
           <div
