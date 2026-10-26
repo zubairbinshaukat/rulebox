@@ -987,7 +987,10 @@
    network/volume/battery, clock, account) on the right. */
 .rb-taskbar {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(0, auto) minmax(0, 1fr);
+  /* The side pills never shrink below their content; on a narrow screen the
+     apps pill in the middle gives way (it scrolls) instead of sliding under
+     the tray. */
+  grid-template-columns: minmax(max-content, 1fr) minmax(96px, auto) minmax(max-content, 1fr);
   align-items: center;
   gap: 12px;
   height: var(--rb-taskbar);

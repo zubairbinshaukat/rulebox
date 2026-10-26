@@ -89,3 +89,25 @@ environment variable changed nothing: Tauri's own arguments win.)
 - Desktop covered by a maximized window: the Low memory request fires
   (logged `desktop page covered by a program window`); its saving is too
   small to separate from noise on this machine.
+
+## VM run (2026-10-27, headless; Windows 11 Pro build 26300, 4 GB RAM, 2 vCPU, 1024×768, software rendering)
+
+The debug build as the real shell with the real agent (`IpcAgent`), driven with synthetic mouse and keys from the host,
+read through the log, `metrics.jsonl` and VM screenshots (only the VM screen, no host screen).
+
+| What | Result |
+|---|---|
+| Staff App tree at the sign-in screen | **103–105 MB**, 10 processes, CPU 0–0.4 % (Lite budget ≤ 220 MB) |
+| Signed in, desktop idle | **≈ 120 MB** |
+| + Files window | ≈ 152–158 MB; back to ≈ 120 MB when closed |
+| Files maximized | log: `desktop page covered by a program window covered=true` (the call works in shell mode) |
+| Windows key alone | opens Start (the popup that was hidden while closed shows again, correctly placed) |
+| Boot after a deploy | sign-in screen with the Windows-key hook installed, known folders restored |
+| Keyboard focus ring (new `--rb-focus`) | visible on the password field and on the Start search |
+
+Found and fixed during the run: at 1024 px the tray pill slid over the middle (apps) pill, hiding the task buttons.
+The taskbar grid now keeps the side pills at their content width and lets the middle pill give way.
+
+Not done in this run (still open for checklist 12.2): Alt+Tab and Ctrl+Esc, sign-out restore of the known folders,
+Notepad Save-As, DPI 125/150 %, second monitor, sleep, touch keyboard, toast notices, web apps and a PDF in the VM,
+Narrator, 200 % zoom. The three Phase 2 fixes that are unit-tested only are also still open.
