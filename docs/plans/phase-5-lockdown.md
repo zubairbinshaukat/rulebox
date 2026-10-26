@@ -2114,7 +2114,7 @@ top of this file).
 
 ---
 
-## 6. Escape checklist (written separately by the main session)
+## 6. Escape checklist
 
 Each row names a route in a few words, the control that closes it, an
 observation that proves it closed (pass = nothing opens, or the stated
