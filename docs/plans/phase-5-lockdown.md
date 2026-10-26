@@ -2116,8 +2116,99 @@ top of this file).
 
 ## 6. Escape checklist (written separately by the main session)
 
+Each row names a route in a few words, the control that closes it, an
+observation that proves it closed (pass = nothing opens, or the stated
+screen appears), and what stays open. Controls are configured and audited
+by Rulebox (Sections 4 and 5); the checks are run by the tester in the VM
+(Steps 21 and 22). Rows E-70..E-74 are the way back and must all pass.
+
 | # | Route | Closing control | VM check (pass/fail) | Residual risk |
 |---|---|---|---|---|
+| E-01 | Security screen of Ctrl+Alt+Del | Policy values remove Task Manager, Lock, Change password and Sign out items for the Staff account (L1) | Pass: the screen shows no Task Manager item for Staff | The screen itself cannot be removed; it only offers Switch user and Sign out |
+| E-02 | Switch user | Tile list shows only allowed accounts; admin tiles hidden only after E-71 passes (Q5) | Pass: the sign-in screen lists no tile that leads to an admin shell without the "Other user" way | Hiding tiles never replaces a strong admin password |
+| E-03 | Sign out from the Windows menu | Rulebox log out is the supported path; Windows sign-out returns to the same kiosk shell | Pass: after sign-out and auto sign-in the shell is back | None beyond a brief sign-in screen |
+| E-04 | Windows lock screen | Lock handled by the Staff App lock; Windows lock hotkey policy set | Pass: the lock shortcut shows the Rulebox lock screen or nothing | A Windows lock needs the Staff password |
+| E-05 | Disconnected or second sessions | Remote sessions and fast user switching policies set for the Staff account | Pass: no second Staff session can be created | Remote access by an administrator is by design |
+| E-06 | Accounts with no password | Staff account has a generated password; local policy forbids blank-password network logons | Pass: no sign-in path accepts an empty password | Physical access to the machine, see E-60..E-69 |
+| E-10 | Windows key alone | Staff App hook opens Rulebox Start (decision P7) | Pass: Start opens, Windows Start does not exist | None |
+| E-11 | Windows key combinations (Run, Explorer, Settings, Search, Task view) | Staff App hook swallows them (Q7); policy values disabled where they exist | Pass: none of the listed combinations opens a window | A key combination handled by firmware or drivers |
+| E-12 | Task Manager shortcut | Policy removes Task Manager; process watchdog logs an attempt | Pass: the shortcut shows nothing | An administrator account can still run it |
+| E-13 | Alt+Tab and task view | Rulebox switcher lists only allowed windows | Pass: the switcher shows only Rulebox-listed windows | None |
+| E-14 | Alt+F4 on the shell | Shell windows refuse close; the agent restarts a dead shell within seconds | Pass: the shell stays or returns within the restart time | A crash loop is reported as a finding |
+| E-15 | Function keys and media keys that launch programs | Registry association for hot keys removed; watchdog blocks unlisted launches | Pass: pressing the keys starts nothing | OEM utilities installed by the vendor are listed as findings |
+| E-16 | Touch gestures and edge swipes | Edge-swipe policy off for the Staff account | Pass: swipes from screen edges open nothing | Hardware without the policy shows a finding |
+| E-17 | Sticky, Filter and Toggle keys prompts | Hot-key prompts disabled for the Staff account | Pass: five Shift presses show no dialog | None |
+| E-18 | Voice access and dictation shortcuts | Features off for the Staff account | Pass: the shortcuts start nothing | Tied to Windows build; listed per build |
+| E-19 | Screenshot and recording shortcuts | Policy and App Control block the capture tools | Pass: the shortcuts start no capture tool | Camera or phone pointed at the screen |
+
+| E-20 | Open and Save dialogs inside an allowed app | Places pane limited by policy; the dialog is confined to the employee folder where the app supports it; App Control blocks what the dialog could start | Pass: choosing a program or script file in the dialog cannot start it | A dialog may still show folder names the Staff account can read; file permissions limit it |
+| E-21 | "Open file location" and "Open with" | Rulebox never uses file associations; Open with lists only the `fileHandlers` table | Pass: no entry starts a program that is not in the catalogue | None |
+| E-22 | Print dialog | Printers limited to assigned ones; file printers (PDF, XPS) removed while the kiosk is on (D-decision) | Pass: the printer list shows only assigned printers | A web page can still call the system print dialog |
+| E-23 | Help and "Learn more" links in allowed apps | Link handlers go through the web app allow list; external protocols denied | Pass: a Help link opens a blocked page or nothing | App-specific help viewers are listed per app in findings |
+| E-24 | Drag and drop of files onto the shell | Shell windows ignore drops; apps drop only into the employee folder | Pass: dropping a file on the desktop does nothing | None |
+| E-25 | Clipboard content that is a program path | Clipboard is data only; Rulebox never runs clipboard text | Pass: pasting a path starts nothing | None |
+| E-30 | Program not in the catalogue | Allow-list rules for the Staff account (AppLocker; App Control block rules as base) | Pass: a program outside the allow list shows the Windows "blocked" message and a finding appears | In audit mode nothing is blocked, only reported |
+| E-31 | Scripts and script hosts | Script rule collection of the allow-list; script hosts not in the allow list | Pass: a script file in the employee folder does not run | Allowed apps with their own macro or plug-in engines |
+| E-32 | Installers and installer packages | Installer rule collection; Staff has no right to install | Pass: an installer file in the employee folder does not run | An administrator can install; the catalogue installs run as SYSTEM only after hash checks |
+| E-33 | User-writable folders (profile, temp, downloads) | Default rules allow only signed or listed locations; user-writable paths are not allowed paths | Pass: a copy of an allowed program placed in a writable folder does not run | Programs that are allowed and also load code from writable folders: listed as findings |
+| E-34 | Elevation prompts (UAC) | Staff account is a standard user; elevation prompts for administrators are denied by policy | Pass: no UAC prompt appears in the Staff session; a program that needs elevation shows the Rulebox notice | A prompt that appears for another reason is a bug to file |
+| E-35 | Hand-off launchers (a stub that starts a packaged app) | Launcher adopts the new window within the allowed time; packaged apps are listed by identity | Pass: the stub starts only the listed packaged app | New builds may change the identity: the watchdog reports it |
+| E-36 | Windows built-in tools (command line, shells, registry editor, system settings) | Block rules for the tools; policies hide Settings and Control Panel | Pass: none of them can be started from any Rulebox path | An administrator keeps access by design |
+| E-37 | Legacy components that run code (help viewers, script engines) | Block rules from Microsoft's recommended list for the tools that are not needed | Pass: the listed components are blocked | New components in later builds; the list is reviewed each Windows feature update |
+| E-38 | Task Scheduler and services entries added by a user | Staff has no rights to create them | Pass: a Staff process cannot create a task or service | An administrator process can |
+| E-39 | Portable apps copied from a USB stick | USB storage read-only by default (Q4); allow list ignores unknown programs | Pass: a program on a USB stick does not run | If a group allows USB writes, the allow list is the only barrier |
+
+| E-40 | Link to an address outside the allow list | Web window navigation gate shows the blocked page | Pass: the blocked page appears | None |
+| E-41 | Pop-up or new window from a site | New-window handler denies or reuses the same window when allowed | Pass: no extra window opens for an unlisted address | None |
+| E-42 | External protocol links (mail, file, other app schemes) | WebView2 external-launch handler denies by default | Pass: clicking such a link starts no program | A scheme on the allow list for a catalogue app is by design |
+| E-43 | Downloads from a site | Downloads land in the employee's Downloads folder; names checked; executables refused | Pass: a downloaded program is blocked by name and by the allow list | A document with active content is the document app's concern |
+| E-44 | Camera, microphone, location, notifications, clipboard read, file access requests | Permission handler denies every kind not in the app's rule; unknown kinds denied | Pass: a request shows no prompt and is denied; the denial count increases | A permitted kind is by design |
+| E-45 | Site-provided file pickers and print calls | Pickers confined to the employee folder; print uses the assigned printers | Pass: the picker shows only the employee folder | System print dialog cannot be intercepted (E-22) |
+| E-46 | Developer tools and view-source in web windows | Developer tools disabled in release builds; no remote debugging port | Pass: the shortcuts do nothing | Debug builds are for test machines only |
+| E-47 | Another employee's saved sign-ins in a web app | Each employee has a separate web profile folder, removed on reset | Pass: signing in as a second employee shows no first-employee session | A shared kiosk account is not a supported setup |
+| E-48 | Credential and autofill prompts | Autofill and password-save prompts disabled | Pass: no prompt appears | None |
+| E-50 | Narrator, Magnifier, on-screen keyboard from the sign-in screen | Narrator off by default, the on-screen keyboard on (Q13); tools blocked per group switch | Pass: the Ease of Access button on the sign-in screen starts only the allowed tools | Accessibility tools are an accessibility duty: leave one allowed route |
+| E-51 | Ease of Access button apps launching other programs | Allow list applies to the programs these tools start | Pass: a tool that offers "open" cannot start an unlisted program | Behaviour depends on Windows build; checked per build |
+| E-52 | Sign-in screen network and power menus | Power menu limited by policy; network menu left for administrators | Pass: Staff cannot change network settings from the sign-in screen | A person with the Windows password for an admin account |
+| E-53 | Windows Hello and sign-in options | Options not needed are off for the Staff account | Pass: no extra sign-in option appears for Staff | None |
+| E-54 | Notification toasts from other apps | Toasts allowed only for Rulebox and catalogue apps | Pass: a toast from an unlisted source does not appear | Toasts from allowed apps may show content |
+| E-55 | Windows feature pop-ups (welcome, tips, Copilot, widgets) | Policies disable the features for the Staff account | Pass: none of them appear after sign-in | New features in later builds are checked each feature update |
+| E-60 | Safe Mode boot | Agent registered to start in Safe Mode and holds auto sign-in off there (unverified until the VM run) | Pass: in Safe Mode the Staff account is not signed in automatically | Safe Mode needs physical access or boot menu access; BIOS password and BitLocker are the real barrier |
+| E-61 | Recovery environment and boot menu | Boot recovery options left unchanged when BitLocker is on; documented as a physical risk | Pass: the documented residual risk is shown in the dashboard | Cannot be closed by software |
+| E-62 | Boot from USB or network | Not controllable by software; documented in the install guide as a firmware setting | Pass: the install checklist asks the installer to set a firmware password | Firmware settings differ by vendor |
+| E-63 | Network shares and remote tools | Remote tools blocked for Staff; file sharing off for the Staff folder | Pass: the Staff account has no share access to other machines | A managed-network policy can limit it further (Q8) |
+| E-64 | Second user account created by someone | Staff cannot create accounts; the agent reports new local accounts as findings | Pass: a new account shows as a finding within the report interval | An administrator can create one |
+| E-65 | Windows Update and restart prompts | Update policy set; restarts at configured hours | Pass: no restart prompt interrupts the Staff session | Feature updates can reset settings: the agent re-applies and reports drift |
+| E-66 | USB devices that act as keyboards or network cards | Device installation limited to the classes the group allows | Pass: an unlisted class is not installed for Staff | A trusted-looking keyboard device cannot be told apart |
+
+| E-70 | Hidden administrator exit (the owner's way back) | Hotkey and PIN checked by the agent; works with every policy in force; never blocked by App Control or the watchdog | **Must pass:** the exit dialog opens with the key combination and accepts the right PIN | If the PIN is lost, `recover` (E-73) |
+| E-71 | "Other user" sign-in tile | Hiding admin tiles is allowed only while this check passes on the build in use | **Must pass:** after all policies the sign-in screen still offers a way to sign in as another account | A Windows update could change the screen: re-checked each feature update |
+| E-72 | Shift at startup (skip the kiosk shell) | The agent's fallback path stays available; no policy removes it | **Must pass:** holding the key at sign-in starts the fallback instead of the Staff shell | Documented in the install guide |
+| E-73 | `recover` command on the machine | Command restores the original settings; never blocked by App Control for administrators | **Must pass:** after `recover` the Staff account is a normal account again | Needs an administrator |
+| E-74 | "Disable kiosk" from the dashboard | Agent restores originals on the next sync, keeps the account and files | **Must pass:** after the command the machine has no kiosk policies and no allow-list rules | Offline machine waits until it syncs |
+| E-75 | Stopping or changing the agent service | Service rights limited to SYSTEM and administrators; recovery actions restart it | Pass: a Staff process cannot stop it; an administrator stop is reported as a finding when it returns | An administrator can stop it |
+| E-76 | Editing the agent's files or config | Folders writable by SYSTEM and administrators only | Pass: a Staff process cannot write there | An administrator can |
+| E-77 | Editing the policy registry keys | Keys owned and writable by SYSTEM and administrators only; drift is detected and re-applied | Pass: a Staff process cannot write; a change by an administrator is re-applied and reported | An administrator can change it between checks |
+| E-78 | Changing the clock to extend offline sign-in | Offline window uses a monotonic check and records clock changes as a finding | Pass: a changed clock does not extend the allowed offline period | Large jumps by an administrator are only reported |
+| E-79 | Replacing the agent with an older version | Versions only move forward; the policy version must not go backwards | Pass: an older signed document is refused | Replacing the program file needs administrator rights |
+| E-80 | Device lock | Lock screen with a message; sign-in refused; survives a restart and an admin exit until unlocked | Pass: while locked no employee can sign in, after restart it is still locked | An administrator at the machine can use E-73 (documented) |
+| E-81 | Revoked device | Stays locked and stops syncing; never unlocks by itself | Pass: after revoke the device remains locked | Re-enrollment needs a new code |
+| E-82 | Broadcast message | Shown on the lock screen and desktop; cannot be dismissed into a bypass | Pass: the message appears and does not unlock anything | None |
+| E-83 | Offline device during a ring rollout | Offline devices keep the last applied version and take new ones when they return | Pass: an offline device applies the new version once and not older ones | A device offline for weeks follows the offline sign-in limits |
+| E-84 | Replay of an older signed policy | Version must be higher than the last applied; signature checked | Pass: the older document is refused and logged | None |
+| E-85 | Policy that would remove the way back | Safety invariants refuse it before applying (refusal codes I1–I9) | Pass: the policy is refused with the matching code and the device keeps the old one | A rule outside the invariants: reported by the audit step |
+| E-86 | Policy applied half way (power loss) | Journal v2 finishes or rolls back at the next start | Pass: after a power cut during apply the device ends in the old or the new state, never between | Disk write failures are reported |
+| E-87 | App Control or AppLocker blocking Rulebox itself | Rulebox files are allowed by publisher and path; audit mode first | Pass: in enforce mode the agent, the launcher and the Staff App all start | A new build with a changed signature needs the allow rule updated first |
+| E-88 | Antivirus quarantining a Rulebox file | Install guide lists the exclusion request; the agent reports missing files | Pass: a removed file is reported and repaired from the version store | Third-party products differ |
+| E-89 | Windows feature update resets settings | The agent compares settings with the desired state after each start and re-applies | Pass: after an update the policies are back and a finding is recorded | A short gap between the update and the next check |
+
+
+### Checklist notes
+
+- Counts: 74 rows are written; numbers inside a range that are unused are free for new routes. Add a row inside a range when a VM run finds a new route.
+- A failed row is a bug in the control, not a note: fix, then re-run the row.
+- Rows depending on a Windows build record the build in the VM results file (Step 22).
+
 
 ---
 
@@ -2565,4 +2656,3 @@ Cryptography
 Convex
 - https://docs.convex.dev/production/state/limits · https://docs.convex.dev/scheduling/cron-jobs · https://docs.convex.dev/production/environment-variables
 
-<!-- APPEND -->
