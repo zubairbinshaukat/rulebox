@@ -34,6 +34,9 @@ export default defineSchema({
     settings: v.optional(orgSettings), // missing = DEFAULT_ORG_SETTINGS
     revision: v.optional(v.number()), // missing = 0
     createdAt: v.optional(v.number()),
+    // Enrolled-device cap, set by the platform operator (hosted plan); missing =
+    // DEFAULT_MAX_DEVICES. Enforced by enrollment from Step 6.
+    maxDevices: v.optional(v.number()),
   }),
 
   // tiny (1 per org). Read only by the publisher (plan 4.7).

@@ -64,6 +64,27 @@ a primary source; the plan says how each one gets confirmed.
   `organizations`, 3+ `devices` / `deviceStatus` / `enrollmentTokens`
   rows, 3+ `desiredStates` rows (Phase 2 shape), empty `groups`,
   `employees`, `apps`, `auditLog`.
+- **2026-10-27, Steps 1-3 built** (deviations, kept for the plan/PRD
+  update): (1) `mfa:verify` / `mfa:useRecoveryCode` are actions over
+  internal mutations: a throwing mutation rolls back its own failure
+  counter, so the lockout would never fire; (2) the Password provider is
+  replaced by a `ConvexCredentials` provider "password" (same Scrypt
+  hashing): `Password`'s `profile()` is synchronous (cannot read the DB) and
+  its errors and timing reveal which emails have accounts; the invite is
+  checked before any account lookup and bound by its hash, not "newest
+  invite for the email"; (3) invite / reset codes are 26 Crockford
+  characters (130 bits, was 20 = 100 bits); (4) `members:setDisabled`
+  deletes sessions inside the mutation (`invalidateSessions` is
+  action-only), and `requireMember` also requires the `authSessions` row,
+  so a disabled member is out at once; (5) rate limits per email
+  (`signInPerEmail` 10/h, `redeemCode` 10/15 min) instead of global
+  buckets; TOTP attempts are limited by the persisted lockout only;
+  (6) `desiredStates` is widened, not cleared (Phase 2 rows stay readable
+  until Step 8); (7) new error codes `org_required`, `already_member`; new
+  audit actions `member.inviteRevoked`, `member.recoveryCodeUsed`;
+  (8) `organizations.maxDevices` (optional; 2 for new organizations) for
+  the hosted plan, enforced from Step 6; (9) `setup:createOwnerInvite`
+  takes `existingOrgId` to adopt a Phase 2 organization without members.
 
 ---
 

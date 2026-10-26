@@ -44,3 +44,7 @@ export const MAINTENANCE_BATCH = 500;
 /** Name lengths (plan edge case 27). */
 export const MAX_DEVICE_NAME = 100;
 export const MAX_EMAIL = 254;
+
+/** Enrolled devices per organization when `organizations.maxDevices` is missing (hosted plan). */
+export const DEFAULT_MAX_DEVICES = 2;
+

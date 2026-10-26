@@ -26,7 +26,8 @@
     "@noble/hashes": "catalog:",
     "convex": "catalog:",
     "convex-helpers": "catalog:",
-    "hash-wasm": "catalog:"
+    "hash-wasm": "catalog:",
+    "lucia": "catalog:"
   },
   "devDependencies": {
     "@edge-runtime/vm": "catalog:",

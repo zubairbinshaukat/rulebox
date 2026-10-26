@@ -9,11 +9,15 @@
  */
 
 import type * as account from "../account.js";
+import type * as auth from "../auth.js";
+import type * as crons from "../crons.js";
 import type * as dev from "../dev.js";
 import type * as devices from "../devices.js";
 import type * as enrollment from "../enrollment.js";
 import type * as health from "../health.js";
+import type * as http from "../http.js";
 import type * as lib_audit from "../lib/audit.js";
+import type * as lib_authCallbacks from "../lib/authCallbacks.js";
 import type * as lib_authz from "../lib/authz.js";
 import type * as lib_crypto from "../lib/crypto.js";
 import type * as lib_deepEqual from "../lib/deepEqual.js";
@@ -22,7 +26,14 @@ import type * as lib_errors from "../lib/errors.js";
 import type * as lib_functions from "../lib/functions.js";
 import type * as lib_limits from "../lib/limits.js";
 import type * as lib_members from "../lib/members.js";
+import type * as lib_rateLimits from "../lib/rateLimits.js";
+import type * as lib_sessions from "../lib/sessions.js";
+import type * as lib_totp from "../lib/totp.js";
 import type * as lib_validators from "../lib/validators.js";
+import type * as maintenance from "../maintenance.js";
+import type * as members from "../members.js";
+import type * as mfa from "../mfa.js";
+import type * as setup from "../setup.js";
 
 import type {
   ApiFromModules,
@@ -32,11 +43,15 @@ import type {
 
 declare const fullApi: ApiFromModules<{
   account: typeof account;
+  auth: typeof auth;
+  crons: typeof crons;
   dev: typeof dev;
   devices: typeof devices;
   enrollment: typeof enrollment;
   health: typeof health;
+  http: typeof http;
   "lib/audit": typeof lib_audit;
+  "lib/authCallbacks": typeof lib_authCallbacks;
   "lib/authz": typeof lib_authz;
   "lib/crypto": typeof lib_crypto;
   "lib/deepEqual": typeof lib_deepEqual;
@@ -45,7 +60,14 @@ declare const fullApi: ApiFromModules<{
   "lib/functions": typeof lib_functions;
   "lib/limits": typeof lib_limits;
   "lib/members": typeof lib_members;
+  "lib/rateLimits": typeof lib_rateLimits;
+  "lib/sessions": typeof lib_sessions;
+  "lib/totp": typeof lib_totp;
   "lib/validators": typeof lib_validators;
+  maintenance: typeof maintenance;
+  members: typeof members;
+  mfa: typeof mfa;
+  setup: typeof setup;
 }>;
 
 /**

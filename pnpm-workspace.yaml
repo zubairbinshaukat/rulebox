@@ -49,6 +49,8 @@ catalog:
   hash-wasm: 4.12.0
   convex-test: 0.0.62
   "@edge-runtime/vm": 5.0.0
+  # Scrypt for member passwords: the version @convex-dev/auth 0.0.96 resolves
+  lucia: 3.2.2
 
 allowBuilds:
   esbuild: true
