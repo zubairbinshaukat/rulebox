@@ -13,7 +13,7 @@
     "typecheck": "pnpm -r typecheck && pnpm typecheck:convex",
     "typecheck:convex": "tsc --noEmit -p convex/tsconfig.json",
     "lint": "pnpm -r lint && pnpm lint:convex",
-    "lint:convex": "eslint convex vitest.config.ts",
+    "lint:convex": "eslint convex tests/convex vitest.config.ts",
     "test:convex": "vitest run --project convex",
     "gen:types": "cargo test -p rulebox-policy -p rulebox-ipc -p rulebox-staff export_bindings",
     "gen:brand": "node scripts/build-brand.mjs"

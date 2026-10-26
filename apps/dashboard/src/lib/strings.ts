@@ -162,6 +162,8 @@ export const strings = {
     deviceRejected: "The PC was not accepted.",
     tooLarge: "This is too large. Remove some items and try again.",
     hasDependents: "This is still in use. Move or remove what uses it first.",
+    orgRequired: "Choose an organization first.",
+    alreadyMember: "This person is already a member.",
   },
 
   validate: {

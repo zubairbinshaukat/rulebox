@@ -35,6 +35,9 @@ export const ERROR_CODES = [
   "device_rejected",
   "too_large",
   "has_dependents",
+  // Plan 4.6 (more than one organization); thrown by the member wrappers / joins.
+  "org_required",
+  "already_member",
 ] as const;
 
 export type ErrorCode = (typeof ERROR_CODES)[number];

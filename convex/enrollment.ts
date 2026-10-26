@@ -1,6 +1,7 @@
-import { ConvexError, v } from "convex/values";
-import { mutation } from "./_generated/server";
+import { v } from "convex/values";
 import { sha256Hex } from "./lib/deviceAuth";
+import { failWire } from "./lib/errors";
+import { publicMutation } from "./lib/functions";
 
 const SECRET_HASH_RE = /^[0-9a-f]{64}$/;
 const MAX_NAME_LENGTH = 100;
@@ -16,7 +17,7 @@ const MAX_NAME_LENGTH = 100;
  * Errors are `ConvexError({ code })` with one of: `token_invalid`,
  * `token_revoked`, `token_expired`, `token_used_up`, `invalid_request`.
  */
-export const enroll = mutation({
+export const enroll = publicMutation({
   args: {
     token: v.string(),
     deviceSecretHash: v.string(),
@@ -34,10 +35,7 @@ export const enroll = mutation({
   handler: async (ctx, args) => {
     const secretHash = args.deviceSecretHash.toLowerCase();
     if (!SECRET_HASH_RE.test(secretHash)) {
-      throw new ConvexError({
-        code: "invalid_request",
-        message: "deviceSecretHash must be 64 hex characters",
-      });
+      failWire("invalid_request", "deviceSecretHash must be 64 hex characters");
     }
 
     const tokenHash = await sha256Hex(args.token);
@@ -46,7 +44,7 @@ export const enroll = mutation({
       .withIndex("by_token_hash", (q) => q.eq("tokenHash", tokenHash))
       .first();
     if (token === null) {
-      throw new ConvexError({ code: "token_invalid" });
+      failWire("token_invalid");
     }
 
     const existing = await ctx.db
@@ -64,21 +62,18 @@ export const enroll = mutation({
         };
       }
       // A device secret must never be shared between two devices.
-      throw new ConvexError({
-        code: "invalid_request",
-        message: "device secret already in use",
-      });
+      failWire("invalid_request", "device secret already in use");
     }
 
     const now = Date.now();
     if (token.revoked === true) {
-      throw new ConvexError({ code: "token_revoked" });
+      failWire("token_revoked");
     }
     if (token.expiresAt <= now) {
-      throw new ConvexError({ code: "token_expired" });
+      failWire("token_expired");
     }
     if (token.usesLeft <= 0) {
-      throw new ConvexError({ code: "token_used_up" });
+      failWire("token_used_up");
     }
 
     const deviceName =
@@ -97,7 +92,7 @@ export const enroll = mutation({
       agentVersion: args.agentVersion,
       compat: args.compat,
     });
-    await ctx.db.insert("deviceStatus", { deviceId, lastSeenAt: now });
+    await ctx.db.insert("deviceStatus", { deviceId, orgId: token.orgId, lastSeenAt: now });
 
     return {
       deviceId,

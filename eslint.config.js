@@ -36,11 +36,6 @@ export default tseslint.config(
       "convex/auth.ts",
       "convex/http.ts",
       "convex/**/*.test.ts",
-      // Phase 2 files; Step 2 moves them onto the wrappers.
-      "convex/health.ts",
-      "convex/devices.ts",
-      "convex/enrollment.ts",
-      "convex/dev.ts",
     ],
     rules: {
       "no-restricted-imports": [

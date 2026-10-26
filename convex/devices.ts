@@ -1,9 +1,10 @@
 import { v } from "convex/values";
-import { mutation, query } from "./_generated/server";
+import { internalQuery } from "./_generated/server";
 import { checkDevice } from "./lib/deviceAuth";
 import { deepEqual } from "./lib/deepEqual";
+import { phase2DeviceMutation, phase2DeviceQuery } from "./lib/functions";
 
-/** Fixed in Phase 2 (about 5 minutes); Phase 4 scales it with fleet size. */
+/** Fixed in Phase 2 (about 5 minutes); Step 7 scales it with fleet size. */
 const NEXT_PING_IN_MS = 300_000;
 
 /**
@@ -13,11 +14,11 @@ const NEXT_PING_IN_MS = 300_000;
  * must not read `deviceStatus`: either would re-run the subscription on every
  * heartbeat.
  *
- * The device-scope document wins over the group-scope one. `signature` is
- * always null in Phase 2 (signing arrives in Phase 4).
+ * Phase 2 wire shape until Step 8: the device-scope document wins over the
+ * group-scope one, and `signature` is always null.
  */
-export const desiredState = query({
-  args: { deviceId: v.string(), deviceSecret: v.string() },
+export const desiredState = phase2DeviceQuery({
+  args: {},
   returns: v.union(
     v.object({ kind: v.literal("unknownDevice") }),
     v.object({ kind: v.literal("revoked") }),
@@ -33,8 +34,8 @@ export const desiredState = query({
       ),
     }),
   ),
-  handler: async (ctx, args) => {
-    const check = await checkDevice(ctx, args);
+  handler: async (ctx) => {
+    const check = ctx.deviceCheck;
     if (check.kind === "unknown") return { kind: "unknownDevice" as const };
     if (check.kind === "revoked") return { kind: "revoked" as const };
     const device = check.device;
@@ -58,7 +59,7 @@ export const desiredState = query({
       desired:
         row === null
           ? null
-          : { version: row.version, doc: row.doc, signature: null },
+          : { version: row.version, doc: row.doc ?? null, signature: null },
     };
   },
 });
@@ -90,12 +91,8 @@ const statusValidator = v.object({
  * Heartbeat: refresh `deviceStatus.lastSeenAt`, and write `devices` only when
  * the reported status differs from the stored one (PRD 11.1 rule 5).
  */
-export const heartbeat = mutation({
-  args: {
-    deviceId: v.string(),
-    deviceSecret: v.string(),
-    status: v.optional(statusValidator),
-  },
+export const heartbeat = phase2DeviceMutation({
+  args: { status: v.optional(statusValidator) },
   returns: v.union(
     v.object({ kind: v.literal("rejected") }),
     v.object({
@@ -105,7 +102,7 @@ export const heartbeat = mutation({
     }),
   ),
   handler: async (ctx, args) => {
-    const check = await checkDevice(ctx, args);
+    const check = ctx.deviceCheck;
     if (check.kind !== "ok") return { kind: "rejected" as const };
     const device = check.device;
     const now = Date.now();
@@ -117,10 +114,12 @@ export const heartbeat = mutation({
     if (statusRow === null) {
       await ctx.db.insert("deviceStatus", {
         deviceId: device._id,
+        orgId: device.orgId,
         lastSeenAt: now,
       });
     } else {
-      await ctx.db.patch(statusRow._id, { lastSeenAt: now });
+      // Backfills `orgId` on Phase 2 rows (plan 4.2).
+      await ctx.db.patch(statusRow._id, { lastSeenAt: now, orgId: device.orgId });
     }
 
     const s = args.status;
@@ -161,16 +160,39 @@ export const heartbeat = mutation({
  * Marks the device revoked; its subscription then answers `revoked`.
  * `rejected` means unknown id, wrong secret or already revoked.
  */
-export const unenroll = mutation({
-  args: { deviceId: v.string(), deviceSecret: v.string() },
+export const unenroll = phase2DeviceMutation({
+  args: {},
   returns: v.union(
     v.object({ kind: v.literal("rejected") }),
     v.object({ kind: v.literal("ok") }),
   ),
-  handler: async (ctx, args) => {
-    const check = await checkDevice(ctx, args);
+  handler: async (ctx) => {
+    const check = ctx.deviceCheck;
     if (check.kind !== "ok") return { kind: "rejected" as const };
     await ctx.db.patch(check.device._id, { revoked: true });
     return { kind: "ok" as const };
+  },
+});
+
+/**
+ * The device check for `deviceAction` (actions have no `db`). Null for an
+ * unknown device, a wrong secret or a revoked device. Never returns a hash.
+ */
+export const authorizeDevice = internalQuery({
+  args: { deviceId: v.string(), deviceSecret: v.string() },
+  returns: v.union(
+    v.null(),
+    v.object({
+      _id: v.id("devices"),
+      orgId: v.id("organizations"),
+      groupId: v.optional(v.id("groups")),
+      name: v.string(),
+    }),
+  ),
+  handler: async (ctx, args) => {
+    const check = await checkDevice(ctx, args);
+    if (check.kind !== "ok") return null;
+    const d = check.device;
+    return { _id: d._id, orgId: d.orgId, groupId: d.groupId, name: d.name };
   },
 });

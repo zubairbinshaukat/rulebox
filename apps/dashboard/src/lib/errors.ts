@@ -88,6 +88,10 @@ export function messageForCode(code: ErrorCode, data?: Omit<ErrorData, "code">):
       return e.tooLarge;
     case "has_dependents":
       return e.hasDependents;
+    case "org_required":
+      return e.orgRequired;
+    case "already_member":
+      return e.alreadyMember;
   }
 }
 
