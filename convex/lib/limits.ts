@@ -25,7 +25,23 @@ export const RESET_CODE_TTL_MS = DAY_MS;
 /** Convex Auth sessions (plan Step 3; Section 9: 12 h idle, 7 days total). */
 export const SESSION_TOTAL_MS = 7 * DAY_MS;
 export const SESSION_INACTIVE_MS = 12 * HOUR_MS;
-export const JWT_DURATION_MS = 10 * MINUTE_MS;
+/**
+ * Member JWT lifetime (A10, owner Q7: 60 minutes, was 10). Revocation stays
+ * instant: `getSignedIn` reads the `authSessions` row on every call, and
+ * mutations/actions also refuse a session past its `expirationTime`.
+ */
+export const JWT_DURATION_MS = 60 * MINUTE_MS;
+
+/**
+ * Maintenance of Convex Auth's tables (A10). A used refresh token is kept this
+ * long after its first use (Convex Auth's reuse window is 10 s), then deleted
+ * unless it is the parent of an unused token.
+ */
+export const REFRESH_TOKEN_USED_GRACE_MS = MINUTE_MS;
+/** Convex Auth's `authRateLimits` row is fully refilled after an hour without attempts. */
+export const AUTH_RATE_LIMIT_REFILL_MS = HOUR_MS;
+/** Rate-limiter component rows created longer ago than this are cleared daily. */
+export const RATE_LIMIT_ROW_MAX_AGE_MS = 7 * DAY_MS;
 
 /** TOTP (plan Step 3.4). */
 export const TOTP_MAX_FAILURES = 5;

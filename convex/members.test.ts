@@ -195,12 +195,15 @@ describe("members", () => {
     expect(await t.run((ctx) => ctx.db.query("mfaSessions").withIndex("by_user", (q) => q.eq("userId", owner.userId)).first())).toBeNull();
   });
 
-  test("maintenance:daily deletes dead MFA sessions, old invites and old audit rows only", async () => {
+  test("maintenance:daily deletes old invites and old audit rows only (indexed, A10)", async () => {
     const t = await setupAuth();
     const { owner, orgId } = await team(t);
     const old = Date.now() - 400 * 86_400_000;
     await t.run(async (ctx) => {
-      await ctx.db.delete(owner.sessionId); // its mfaSessions row is now dead
+      // A signed-out session's MFA row is no longer looked up by a full-table
+      // scan: it is harmless (requireMember checks the session row first) and
+      // deleted by age once its session would have expired (maintenance.test.ts).
+      await ctx.db.delete(owner.sessionId);
       await ctx.db.insert("invites", { orgId, email: "a@x.test", role: "viewer", kind: "join", tokenHash: "h1", expiresAt: old });
       await ctx.db.insert("invites", { orgId, email: "b@x.test", role: "viewer", kind: "join", tokenHash: "h2", expiresAt: Date.now() + 1000 });
       await ctx.db.insert("auditLog", { orgId, at: old, actorType: "system", actorLabel: "x", action: "group.created", summary: "old" });
@@ -213,7 +216,7 @@ describe("members", () => {
       invites: (await ctx.db.query("invites").withIndex("by_org", (q) => q.eq("orgId", orgId)).take(10)).map((i) => i.email),
       audit: (await ctx.db.query("auditLog").withIndex("by_org_at", (q) => q.eq("orgId", orgId)).take(10)).map((a) => a.summary),
     }));
-    expect(left.mfa).toBeNull();
+    expect(left.mfa).not.toBeNull();
     expect(left.invites).toEqual(["b@x.test"]);
     expect(left.audit).toEqual(["new"]);
   });

@@ -80,7 +80,9 @@ export default defineSchema({
   })
     .index("by_token_hash", ["tokenHash"])
     .index("by_email", ["email"])
-    .index("by_org", ["orgId"]),
+    .index("by_org", ["orgId"])
+    // maintenance: invites expired more than INVITE_RETENTION_MS ago (A10)
+    .index("by_expires_at", ["expiresAt"]),
 
   // tiny (1 per user: the authenticator belongs to the person).
   // Written only by mfa:confirmSetup / mfa:verify / mfa:useRecoveryCode and

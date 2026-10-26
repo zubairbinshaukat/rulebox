@@ -31,7 +31,7 @@ export type SignedIn = {
  * a session deleted by `invalidateSessions` (member disabled, password reset)
  * stops working at once, not when its JWT expires.
  */
-export async function getSignedIn(ctx: AuthedCtx): Promise<SignedIn | null> {
+export async function getSignedIn(ctx: AuthedCtx, now?: number): Promise<SignedIn | null> {
   const userIdRaw = await getAuthUserId(ctx);
   const sessionIdRaw = await getAuthSessionId(ctx);
   if (userIdRaw === null || sessionIdRaw === null) return null;
@@ -40,8 +40,11 @@ export async function getSignedIn(ctx: AuthedCtx): Promise<SignedIn | null> {
   if (userId === null || sessionId === null) return null;
   const session = await ctx.db.get(sessionId);
   if (session === null || session.userId !== userId) return null;
-  // No expiry check here (no Date.now() in queries): an expired session cannot
-  // refresh its 10-minute JWT, and the maintenance job deletes the rows.
+  // Mutations and actions pass `now`: a session past its total lifetime is
+  // refused even while its last JWT (60 minutes, A10) is still valid. Queries
+  // pass nothing (no Date.now() in queries); their tail is at most one JWT
+  // lifetime of reads, and the maintenance job deletes expired rows.
+  if (now !== undefined && session.expirationTime < now) return null;
   return { userId, sessionId };
 }
 
@@ -68,7 +71,8 @@ export async function sessionHasMfa(
   return row !== null && row.userId === signedIn.userId;
 }
 
-export type MemberOpts = { skipMfa?: true; orgId?: Id<"organizations"> };
+/** `now`: server time, passed by mutations and actions only (session expiry). */
+export type MemberOpts = { skipMfa?: true; orgId?: Id<"organizations">; now?: number };
 
 export type MemberContext = {
   member: Doc<"members">;
@@ -86,7 +90,7 @@ export async function requireMember(
   minRole: Role,
   opts: MemberOpts = {},
 ): Promise<MemberContext> {
-  const signedIn = await getSignedIn(ctx);
+  const signedIn = await getSignedIn(ctx, opts.now);
   if (signedIn === null) fail("unauthenticated");
 
   const rows = await membershipsOf(ctx, signedIn.userId);

@@ -27,6 +27,8 @@ export const authorize = internalQuery({
     minRole: role,
     skipMfa: v.boolean(),
     orgId: v.optional(v.id("organizations")),
+    /** The calling action's clock: refuses a session past its expiry (A10). */
+    now: v.number(),
   },
   returns: v.object({
     member: doc(schema, "members"),
@@ -38,6 +40,7 @@ export const authorize = internalQuery({
     return await requireMember(ctx, args.minRole, {
       skipMfa: args.skipMfa ? true : undefined,
       orgId: args.orgId,
+      now: args.now,
     });
   },
 });

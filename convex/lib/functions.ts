@@ -56,7 +56,11 @@ export function memberMutation(minRole: Role, opts: MemberOpts = {}) {
   return customMutation(mutation, {
     args: orgIdArg,
     input: async (ctx, args): Promise<{ ctx: MemberCtx; args: NoArgs }> => {
-      const m = await requireMember(ctx, minRole, { skipMfa: opts.skipMfa, orgId: args.orgId });
+      const m = await requireMember(ctx, minRole, {
+        skipMfa: opts.skipMfa,
+        orgId: args.orgId,
+        now: Date.now(),
+      });
       return { ctx: { ...m, actor: actorOf(m.member) }, args: {} };
     },
   });
@@ -71,6 +75,7 @@ export function memberAction(minRole: Role, opts: MemberOpts = {}) {
         minRole,
         skipMfa: opts.skipMfa === true,
         orgId: args.orgId,
+        now: Date.now(),
       });
       return { ctx: { ...m, actor: actorOf(m.member) }, args: {} };
     },

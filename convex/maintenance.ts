@@ -1,79 +1,169 @@
 import { v } from "convex/values";
-import { internal } from "./_generated/api";
-import { internalMutation } from "./_generated/server";
+import { components, internal } from "./_generated/api";
+import { internalMutation, type MutationCtx } from "./_generated/server";
 import { SYSTEM_ACTOR, writeAudit } from "./lib/audit";
 import { normalizeEmail } from "./lib/crypto";
 import { fail } from "./lib/errors";
-import { AUDIT_RETENTION_DAYS, DAY_MS, INVITE_RETENTION_MS, MAINTENANCE_BATCH, MAX_MEMBERSHIPS } from "./lib/limits";
+import {
+  AUDIT_RETENTION_DAYS,
+  AUTH_RATE_LIMIT_REFILL_MS,
+  DAY_MS,
+  INVITE_RETENTION_MS,
+  MAINTENANCE_BATCH,
+  MAX_MEMBERSHIPS,
+  RATE_LIMIT_ROW_MAX_AGE_MS,
+  REFRESH_TOKEN_USED_GRACE_MS,
+  SESSION_INACTIVE_MS,
+  SESSION_TOTAL_MS,
+} from "./lib/limits";
 import { clearMfa } from "./lib/sessions";
 
-const stage = v.union(v.literal("mfaSessions"), v.literal("authSessions"), v.literal("invites"), v.literal("auditLog"));
-type Stage = "mfaSessions" | "authSessions" | "invites" | "auditLog";
-const NEXT: Record<Stage, Stage | null> = {
-  mfaSessions: "authSessions",
-  authSessions: "invites",
-  invites: "auditLog",
-  auditLog: null,
-};
+// Daily cleanup (crons.ts; plan Step 3.6 and its A10 follow-up).
+//
+// Every stage reads ONLY rows that are dead, found through an index bound,
+// never a whole table (pooled deployment: tables grow with tenants):
+//
+// - sessions        `authSessions` created more than SESSION_TOTAL_MS ago
+//                   (Convex Auth sets expirationTime = creation + that value).
+// - mfaSessions     `mfaSessions` created more than SESSION_TOTAL_MS ago (a row
+//                   is created after its session, so that session has
+//                   expired). Younger orphans (after a sign-out) are harmless:
+//                   `requireMember` checks the session row first and session
+//                   ids are never reused.
+// - refreshExpired  `authRefreshTokens` created more than SESSION_INACTIVE_MS
+//                   ago (expirationTime = creation + that value).
+// - refreshUsed     younger tokens, paged by creation time: deleted when used
+//                   more than REFRESH_TOKEN_USED_GRACE_MS ago and not the
+//                   parent of an unused token (Convex Auth lets the parent of
+//                   the active token fetch it again after a lost answer).
+//                   Kept rows: the active token and its parent, about two per
+//                   live session.
+// - authRateLimits  Convex Auth's per-account failure rows fully refilled
+//                   (last attempt more than an hour ago), paged.
+// - invites         `invites.by_expires_at` below now - INVITE_RETENTION_MS.
+// - auditLog        `auditLog.by_at` below the retention cutoff.
+// - rateLimiter     the component's `clearAll` for rows created more than
+//                   RATE_LIMIT_ROW_MAX_AGE_MS ago (100 per component call, it
+//                   reschedules itself).
+//
+// At most MAINTENANCE_BATCH rows per run; a stage reschedules itself while a
+// batch is full, then the next stage starts. `now` is fixed for the whole
+// daily run so paginated ranges stay identical between pages.
 
-/**
- * Daily cleanup (crons.ts, plan Step 3.6). One page of MAINTENANCE_BATCH rows
- * per run, rescheduling itself page by page and table by table, so no run
- * reads more than one batch. Writes only deletions of dead rows:
- * mfaSessions whose session is gone, expired Convex Auth sessions (with
- * their refresh tokens), invites expired more than 30 days ago, and audit
- * rows older than AUDIT_RETENTION_DAYS (auditLog.by_at).
- */
-export const daily = internalMutation({
-  args: { stage: v.optional(stage), cursor: v.optional(v.union(v.string(), v.null())) },
-  returns: v.null(),
-  handler: async (ctx, args) => {
-    const now = Date.now();
-    const current: Stage = args.stage ?? "mfaSessions";
-    const page = { numItems: MAINTENANCE_BATCH, cursor: args.cursor ?? null };
-    let done: boolean;
-    let cursor: string | null = null;
+const STAGES = [
+  "sessions",
+  "mfaSessions",
+  "refreshExpired",
+  "refreshUsed",
+  "authRateLimits",
+  "invites",
+  "auditLog",
+  "rateLimiter",
+] as const;
+type Stage = (typeof STAGES)[number];
+const stage = v.union(...STAGES.map((s) => v.literal(s)));
 
-    if (current === "mfaSessions") {
-      const r = await ctx.db.query("mfaSessions").paginate(page);
-      for (const row of r.page) {
-        if ((await ctx.db.get(row.sessionId)) === null) await ctx.db.delete(row._id);
-      }
-      done = r.isDone;
-      cursor = r.continueCursor;
-    } else if (current === "authSessions") {
-      const r = await ctx.db.query("authSessions").paginate(page);
-      for (const s of r.page) {
-        if (s.expirationTime >= now) continue;
-        const tokens = await ctx.db
-          .query("authRefreshTokens")
-          .withIndex("sessionId", (q) => q.eq("sessionId", s._id))
-          .take(MAINTENANCE_BATCH);
-        for (const t of tokens) await ctx.db.delete(t._id);
-        await ctx.db.delete(s._id);
-      }
-      done = r.isDone;
-      cursor = r.continueCursor;
-    } else if (current === "invites") {
-      const r = await ctx.db.query("invites").paginate(page);
-      for (const inv of r.page) {
-        if (inv.expiresAt < now - INVITE_RETENTION_MS) await ctx.db.delete(inv._id);
-      }
-      done = r.isDone;
-      cursor = r.continueCursor;
-    } else {
-      const old = await ctx.db
+type StageResult = { done: boolean; cursor: string | null };
+
+/** Delete rows of `table` created before `before`, oldest first, one batch. */
+async function deleteCreatedBefore(
+  ctx: MutationCtx,
+  table: "authSessions" | "mfaSessions" | "authRefreshTokens",
+  before: number,
+): Promise<StageResult> {
+  const rows = await ctx.db
+    .query(table)
+    .withIndex("by_creation_time", (q) => q.lt("_creationTime", before))
+    .take(MAINTENANCE_BATCH);
+  for (const row of rows) await ctx.db.delete(row._id);
+  return { done: rows.length < MAINTENANCE_BATCH, cursor: null };
+}
+
+async function refreshUsed(ctx: MutationCtx, now: number, cursor: string | null): Promise<StageResult> {
+  const r = await ctx.db
+    .query("authRefreshTokens")
+    .withIndex("by_creation_time", (q) =>
+      q.gte("_creationTime", now - SESSION_INACTIVE_MS).lt("_creationTime", now - REFRESH_TOKEN_USED_GRACE_MS),
+    )
+    .paginate({ numItems: MAINTENANCE_BATCH, cursor });
+  for (const token of r.page) {
+    if (token.firstUsedTime === undefined || token.firstUsedTime >= now - REFRESH_TOKEN_USED_GRACE_MS) continue;
+    // Keep the parent of an unused token (normally exactly one child).
+    const children = await ctx.db
+      .query("authRefreshTokens")
+      .withIndex("sessionIdAndParentRefreshTokenId", (q) =>
+        q.eq("sessionId", token.sessionId).eq("parentRefreshTokenId", token._id),
+      )
+      .take(4);
+    if (children.some((c) => c.firstUsedTime === undefined)) continue;
+    await ctx.db.delete(token._id);
+  }
+  return { done: r.isDone, cursor: r.continueCursor };
+}
+
+async function authRateLimits(ctx: MutationCtx, now: number, cursor: string | null): Promise<StageResult> {
+  const r = await ctx.db
+    .query("authRateLimits")
+    .withIndex("by_creation_time", (q) => q.lt("_creationTime", now - AUTH_RATE_LIMIT_REFILL_MS))
+    .paginate({ numItems: MAINTENANCE_BATCH, cursor });
+  for (const row of r.page) {
+    if (row.lastAttemptTime < now - AUTH_RATE_LIMIT_REFILL_MS) await ctx.db.delete(row._id);
+  }
+  return { done: r.isDone, cursor: r.continueCursor };
+}
+
+async function runStage(ctx: MutationCtx, current: Stage, now: number, cursor: string | null): Promise<StageResult> {
+  switch (current) {
+    case "sessions":
+      return await deleteCreatedBefore(ctx, "authSessions", now - SESSION_TOTAL_MS);
+    case "mfaSessions":
+      return await deleteCreatedBefore(ctx, "mfaSessions", now - SESSION_TOTAL_MS);
+    case "refreshExpired":
+      return await deleteCreatedBefore(ctx, "authRefreshTokens", now - SESSION_INACTIVE_MS);
+    case "refreshUsed":
+      return await refreshUsed(ctx, now, cursor);
+    case "authRateLimits":
+      return await authRateLimits(ctx, now, cursor);
+    case "invites": {
+      const rows = await ctx.db
+        .query("invites")
+        .withIndex("by_expires_at", (q) => q.lt("expiresAt", now - INVITE_RETENTION_MS))
+        .take(MAINTENANCE_BATCH);
+      for (const row of rows) await ctx.db.delete(row._id);
+      return { done: rows.length < MAINTENANCE_BATCH, cursor: null };
+    }
+    case "auditLog": {
+      const rows = await ctx.db
         .query("auditLog")
         .withIndex("by_at", (q) => q.lt("at", now - AUDIT_RETENTION_DAYS * DAY_MS))
         .take(MAINTENANCE_BATCH);
-      for (const row of old) await ctx.db.delete(row._id);
-      done = old.length < MAINTENANCE_BATCH;
+      for (const row of rows) await ctx.db.delete(row._id);
+      return { done: rows.length < MAINTENANCE_BATCH, cursor: null };
     }
+    case "rateLimiter":
+      // Resets buckets created more than 7 days ago (they refill anyway; at
+      // most one extra bucket per key per week). The component pages itself.
+      await ctx.runMutation(components.rateLimiter.lib.clearAll, { before: now - RATE_LIMIT_ROW_MAX_AGE_MS });
+      return { done: true, cursor: null };
+  }
+}
 
-    if (!done) {
-      await ctx.scheduler.runAfter(0, internal.maintenance.daily, { stage: current, cursor });
-    } else if (NEXT[current] !== null) {
-      await ctx.scheduler.runAfter(0, internal.maintenance.daily, { stage: NEXT[current] });
+export const daily = internalMutation({
+  args: {
+    stage: v.optional(stage),
+    cursor: v.optional(v.union(v.string(), v.null())),
+    now: v.optional(v.number()),
+  },
+  returns: v.null(),
+  handler: async (ctx, args) => {
+    const now = args.now ?? Date.now();
+    const current: Stage = args.stage ?? STAGES[0];
+    const result = await runStage(ctx, current, now, args.cursor ?? null);
+    if (!result.done) {
+      await ctx.scheduler.runAfter(0, internal.maintenance.daily, { stage: current, cursor: result.cursor, now });
+    } else {
+      const next = STAGES[STAGES.indexOf(current) + 1];
+      if (next !== undefined) await ctx.scheduler.runAfter(0, internal.maintenance.daily, { stage: next, now });
     }
     return null;
   },

@@ -127,6 +127,14 @@ a primary source; the plan says how each one gets confirmed.
   `devicePresence` / `deviceCredentials` (Step 7 migrates);
   `desiredStates` (Phase 2 rows) is replaced by `desiredHeads` /
   `desiredBodies` / `desiredVersions` (Step 8).
+- **2026-10-27, A10 done** (Step 3 follow-up): JWT 60 minutes; session
+  expiry enforced in mutations and actions; `maintenance.daily` deletes
+  only dead rows through index bounds (sessions, MFA rows, expired and
+  used refresh tokens, Convex Auth `authRateLimits`, invites via the new
+  `invites.by_expires_at`, audit, rate-limiter `clearAll`). Deviation:
+  orphan `mfaSessions` rows of signed-out sessions are no longer found by
+  a join over the whole table; they are deleted by age (≤ 7 days) and are
+  harmless meanwhile (`requireMember` checks the session row first).
 
 ---
 
