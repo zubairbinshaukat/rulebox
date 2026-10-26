@@ -967,9 +967,12 @@ export const orgSettings = v.object({
 ```
 
 - The hotkey text is validated on the server with the same grammar as
-  `rulebox_ipc::hotkey::parse` (modifiers Ctrl/Alt/Shift, at least two
-  of them or one plus F1–F12, key A–Z, 0–9 or F1–F12; refused:
-  Alt+Tab, Alt+F4, Ctrl+Alt+Del, Ctrl+Esc, Win combinations). Port the
+  `rulebox_ipc::hotkey::parse` (modifiers Ctrl/Alt/Shift, each at most
+  once, at least one of Ctrl or Alt, one key A–Z, 0–9 or F1–F12; Win
+  combinations, Alt+Tab, Ctrl+Esc and Ctrl+Alt+Del cannot be written in
+  this grammar. The crate is the source of truth: it also accepts
+  `Alt+F4` and single-modifier combinations such as `Ctrl+0`; decided
+  2026-10-27, the plan followed the crate, not the other way round). Port the
   rules to `convex/lib/hotkey.ts` and run the Rust crate's accepted and
   refused examples as a table test in both languages (vectors in
   `crates/rulebox-ipc/tests/vectors/hotkeys.json`, new).
