@@ -1,4 +1,4 @@
-import { useState, type ComponentType, type ReactNode, type SVGProps } from "react";
+import { useEffect, useState, type ComponentType, type ReactNode, type SVGProps } from "react";
 import {
   AppTile,
   Avatar,
@@ -24,9 +24,14 @@ import {
   Switch,
   Tabs,
   TitleBar,
+  Select,
+  Textarea,
+  Checkbox,
+  setLite,
   type LogoAnimation,
   type Theme,
 } from "@rulebox/ui";
+import { useTheme } from "./app/theme";
 
 import Home2Linear from "~icons/solar/home-2-linear";
 import Home2Duo from "~icons/solar/home-2-bold-duotone";
@@ -259,6 +264,17 @@ function LogoSection() {
   );
 }
 
+/** `/gallery` (members only): the design system with its own theme and Lite switches. */
+export default function GalleryScreen() {
+  const [theme, setTheme] = useTheme();
+  const [lite, setLiteState] = useState(false);
+  useEffect(() => {
+    setLite(lite);
+    return () => setLite(false);
+  }, [lite]);
+  return <Gallery theme={theme} onTheme={setTheme} lite={lite} onLite={setLiteState} />;
+}
+
 export function Gallery({ theme, onTheme, lite, onLite }: GalleryProps) {
   const [iconStyle, setIconStyle] = useState<IconStyle>("duotone");
   const [sw, setSw] = useState({ kiosk: true, usb: false, wifi: true });
@@ -274,7 +290,7 @@ export function Gallery({ theme, onTheme, lite, onLite }: GalleryProps) {
   const [iconActive, setIconActive] = useState(false);
 
   return (
-    <div style={{ position: "relative" }}>
+    <div style={{ position: "relative", overflowX: "clip" }}>
       {/* Fixed so the soft blobs fill the whole viewport instead of a hard-edged box. */}
       <div style={{ position: "fixed", inset: 0, zIndex: -1, pointerEvents: "none" }}>
         <Backdrop />
@@ -295,7 +311,7 @@ export function Gallery({ theme, onTheme, lite, onLite }: GalleryProps) {
             >
               Design system
             </div>
-            <h1 style={{ margin: 0, fontSize: 34, fontWeight: 500, letterSpacing: "-0.025em" }}>Rulebox UI</h1>
+            <h1 data-page-title tabIndex={-1} style={{ margin: 0, fontSize: 34, fontWeight: 500, letterSpacing: "-0.025em" }}>Rulebox UI</h1>
             <p style={{ margin: "8px 0 0", color: "var(--rb-muted)", maxWidth: 520, lineHeight: 1.55 }}>
               Shared components for the dashboard and the Staff App. Switch theme and display mode to check every
               state.
@@ -314,7 +330,7 @@ export function Gallery({ theme, onTheme, lite, onLite }: GalleryProps) {
 
         <div style={{ display: "flex", flexDirection: "column", gap: 24 }}>
           {/* Stats */}
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: 16 }}>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(min(100%, 220px), 1fr))", gap: 16 }}>
             <StatCard label="Devices online" value="24" icon={<MonitorDuo />} hint="+3 since yesterday" />
             <StatCard label="Employees" value="58" icon={<UsersDuo />} />
             <StatCard label="Apps assigned" value="12" icon={<WidgetDuo />} />
@@ -355,7 +371,7 @@ export function Gallery({ theme, onTheme, lite, onLite }: GalleryProps) {
             </div>
           </Section>
 
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(420px, 1fr))", gap: 24 }}>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(min(100%, 420px), 1fr))", gap: 24 }}>
             {/* Buttons */}
             <Section title="Buttons" description="Primary, ghost, danger and icon-only.">
               <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
@@ -415,8 +431,25 @@ export function Gallery({ theme, onTheme, lite, onLite }: GalleryProps) {
             {/* Inputs */}
             <Section title="Inputs" description="Sign-in and forms.">
               <div style={{ display: "flex", flexDirection: "column", gap: 12, maxWidth: 360 }}>
-                <Input placeholder="Username" />
-                <Input type="password" placeholder="Password" />
+                <Input placeholder="Username" aria-label="Username" />
+                <Input type="password" placeholder="Password" aria-label="Password" />
+              </div>
+            </Section>
+
+            {/* Form controls (Phase 4) */}
+            <Section title="Form controls" description="Select (native), Textarea, Checkbox.">
+              <div style={{ display: "flex", flexDirection: "column", gap: 12, maxWidth: 360 }}>
+                <Select aria-label="Group" defaultValue="front">
+                  <option value="front">Front desk</option>
+                  <option value="office">Back office</option>
+                </Select>
+                <Select aria-label="Compact select" compact defaultValue="all">
+                  <option value="all">All groups</option>
+                </Select>
+                <Textarea aria-label="Notes" placeholder="Allowed domains, one per line" rows={3} />
+                <Checkbox label="Pin to taskbar" defaultChecked />
+                <Checkbox label="Show on desktop" hint="The tile appears on the Staff App desktop." />
+                <Checkbox label="Disabled option" disabled />
               </div>
             </Section>
 
