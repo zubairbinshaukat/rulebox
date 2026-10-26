@@ -2,7 +2,10 @@
   "extends": "../tsconfig.base.json",
   "compilerOptions": {
     "allowJs": false,
-    "forceConsistentCasingInFileNames": true
+    "forceConsistentCasingInFileNames": true,
+    "moduleResolution": "Bundler",
+    "skipLibCheck": true,
+    "types": ["vite/client"]
   },
   "include": ["./**/*.ts"],
   "exclude": ["./_generated"]

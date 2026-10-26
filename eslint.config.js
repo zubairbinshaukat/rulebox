@@ -27,4 +27,38 @@ export default tseslint.config(
       "react-refresh/only-export-components": ["warn", { allowConstantExport: true }],
     },
   },
+  // Convex: every public function goes through convex/lib/functions.ts
+  // (plan Phase 4, rule 3). Internal builders stay allowed.
+  {
+    files: ["convex/**/*.ts"],
+    ignores: [
+      "convex/lib/functions.ts",
+      "convex/auth.ts",
+      "convex/http.ts",
+      "convex/**/*.test.ts",
+      // Phase 2 files; Step 2 moves them onto the wrappers.
+      "convex/health.ts",
+      "convex/devices.ts",
+      "convex/enrollment.ts",
+      "convex/dev.ts",
+    ],
+    rules: {
+      "no-restricted-imports": [
+        "error",
+        {
+          paths: ["./_generated/server", "../_generated/server"].map((name) => ({
+            name,
+            importNames: ["query", "mutation", "action"],
+            message: "Use the wrappers in convex/lib/functions.ts",
+          })),
+        },
+      ],
+    },
+  },
+  // Convex logs: never arguments or values (plan Section 8).
+  {
+    files: ["convex/**/*.ts"],
+    ignores: ["convex/**/*.test.ts"],
+    rules: { "no-console": ["error", { allow: ["error", "warn"] }] },
+  },
 );

@@ -10,20 +10,37 @@
     "dev:dashboard": "pnpm --filter @rulebox/dashboard dev",
     "dev:staff": "pnpm --filter @rulebox/staff-app tauri dev",
     "dev:convex": "convex dev",
-    "typecheck": "pnpm -r typecheck",
-    "lint": "pnpm -r lint",
+    "typecheck": "pnpm -r typecheck && pnpm typecheck:convex",
+    "typecheck:convex": "tsc --noEmit -p convex/tsconfig.json",
+    "lint": "pnpm -r lint && pnpm lint:convex",
+    "lint:convex": "eslint convex vitest.config.ts",
+    "test:convex": "vitest run --project convex",
     "gen:types": "cargo test -p rulebox-policy -p rulebox-ipc -p rulebox-staff export_bindings",
     "gen:brand": "node scripts/build-brand.mjs"
   },
+  "dependencies": {
+    "@auth/core": "catalog:",
+    "@convex-dev/auth": "catalog:",
+    "@convex-dev/rate-limiter": "catalog:",
+    "@noble/ed25519": "catalog:",
+    "@noble/hashes": "catalog:",
+    "convex": "catalog:",
+    "convex-helpers": "catalog:",
+    "hash-wasm": "catalog:"
+  },
   "devDependencies": {
+    "@edge-runtime/vm": "catalog:",
     "@eslint/js": "catalog:",
     "@resvg/resvg-js": "^2.6.2",
-    "convex": "catalog:",
+    "@rulebox/types": "workspace:*",
+    "convex-test": "catalog:",
     "eslint": "catalog:",
     "eslint-plugin-react-hooks": "catalog:",
     "eslint-plugin-react-refresh": "catalog:",
     "globals": "catalog:",
     "typescript": "catalog:",
-    "typescript-eslint": "catalog:"
+    "typescript-eslint": "catalog:",
+    "vite": "catalog:",
+    "vitest": "catalog:"
   }
 }

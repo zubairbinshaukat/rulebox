@@ -55,8 +55,15 @@ a primary source; the plan says how each one gets confirmed.
 
 ## Updates since this plan was written
 
-None yet. When the user answers Section 21, record the answers here and in
-`docs/plans/README.md`, and change the affected steps before starting.
+- **2026-10-20, Section 21 answered:** recommended options for Q1 (a),
+  Q2 (a) and Q5 (a); Q3 and Q4 stay deferred. No step changes.
+- **2026-10-27, Step 0 preflight:** node 24.15.0, pnpm 12.8.1, rustc
+  1.99.0; free D: 47.6 GB, C: 29.4 GB; `target\` 7.1 GB; tree clean at
+  `0f49ea5`. Phase 3 Step 19 is not committed, so Step 15 stays blocked.
+  `npx convex dev --once` works on the dev deployment. Data: 2
+  `organizations`, 3+ `devices` / `deviceStatus` / `enrollmentTokens`
+  rows, 3+ `desiredStates` rows (Phase 2 shape), empty `groups`,
+  `employees`, `apps`, `auditLog`.
 
 ---
 

@@ -13,9 +13,11 @@
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "lint": "eslint .",
     "test": "vitest run",
+    "e2e": "playwright test",
     "check:ui": "node e2e/check-ui.mjs"
   },
   "dependencies": {
+    "@convex-dev/auth": "catalog:",
     "@gsap/react": "catalog:",
     "@rulebox/types": "workspace:*",
     "@rulebox/ui": "workspace:*",
