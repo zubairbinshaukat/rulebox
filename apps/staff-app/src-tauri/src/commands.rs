@@ -56,7 +56,7 @@ fn require_shell_or_app(window: &Window) -> Result<(), CommandError> {
 #[tauri::command]
 pub fn shell_state(window: Window, state: State<'_, AppState>) -> Result<ShellState, CommandError> {
     require_shell_or_app(&window)?;
-    Ok(state.snapshot())
+    Ok(state.wire_snapshot())
 }
 
 #[tauri::command]
@@ -73,6 +73,18 @@ pub async fn ui_ready(window: Window, state: State<'_, AppState>) -> Result<(), 
 pub fn ui_alive(window: Window, state: State<'_, AppState>) -> Result<(), CommandError> {
     require_label(&window, "shell-")?;
     state.mark_ui_alive();
+    Ok(())
+}
+
+/// A line from the UI for the log (frame-meter results, which logo callback
+/// fired). Debug builds only; a release build ignores it.
+#[tauri::command]
+pub fn dev_note(window: Window, text: String) -> Result<(), CommandError> {
+    require_label(&window, "shell-")?;
+    if cfg!(debug_assertions) {
+        let line: String = text.chars().take(400).collect();
+        tracing::info!(note = %line, "ui note");
+    }
     Ok(())
 }
 
@@ -1031,6 +1043,9 @@ pub fn spawn_dev_cmd_poller(state: AppState) {
         /// Act as a shortcut: `switcher`, `start` or `exit` (no hotkeys exist in dev mode).
         #[serde(default)]
         shortcut: Option<String>,
+        /// Show the lock screen (what the Lock button does to the session).
+        #[serde(default)]
+        lock: Option<bool>,
     }
 
     #[derive(Debug, Deserialize)]
@@ -1085,6 +1100,13 @@ pub fn spawn_dev_cmd_poller(state: AppState) {
                     Ok(outcome) => tracing::info!(?outcome, "dev cmd sign-in"),
                     Err(error) => tracing::warn!(%error, "dev cmd sign-in failed"),
                 }
+            }
+            if cmd.lock == Some(true) {
+                state.update(|s| {
+                    if let Some(next) = session::lock_transition(&s.session, session::LockEvent::Lock) {
+                        s.session = next;
+                    }
+                });
             }
             if let Some(n) = cmd.demo_apps {
                 let items = crate::agent::demo::sample_apps_for(Some(n));

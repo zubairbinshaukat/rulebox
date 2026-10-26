@@ -32,8 +32,33 @@ function emit() {
   }
 }
 
+/** JSON of each top-level slice of `current`, to tell a changed slice from an untouched one. */
+let sliceJson: Partial<Record<keyof ShellState, string>> = {};
+
+/**
+ * Keep the object of every slice that did not change, so selectors that return
+ * a slice compare by identity (no serialising on every render), and tell the
+ * listeners nothing when a whole snapshot is the same as the last one.
+ */
 function setState(next: ShellState) {
-  current = next;
+  const keys = Object.keys(next) as (keyof ShellState)[];
+  const shared = { ...next } as Record<keyof ShellState, unknown>;
+  const json: Partial<Record<keyof ShellState, string>> = {};
+  let changed = keys.length !== Object.keys(current).length;
+  for (const key of keys) {
+    const text = JSON.stringify(next[key]);
+    json[key] = text;
+    if (sliceJson[key] === text && key in current) {
+      shared[key] = current[key];
+    } else {
+      changed = true;
+    }
+  }
+  sliceJson = json;
+  if (!changed) {
+    return;
+  }
+  current = shared as unknown as ShellState;
   emit();
 }
 
@@ -81,7 +106,13 @@ export function stopShellStore(): void {
 /** Test helper: push a full shell state without Tauri. */
 export function __setShellStateForTests(state: ShellState): void {
   current = state;
+  sliceJson = {};
   emit();
+}
+
+/** Test helper: deliver a snapshot the way a `shell://state` event does. */
+export function __applySnapshotForTests(state: ShellState): void {
+  setState(state);
 }
 
 /**
@@ -94,16 +125,22 @@ export function useShell<T>(select: (s: ShellState) => T): T {
     selectRef.current = select;
   });
 
-  const cacheRef = useRef<{ json: string; value: T } | null>(null);
+  const cacheRef = useRef<{ raw: T; json: string; value: T } | null>(null);
 
   const getSnapshot = useCallback((): T => {
-    const value = selectRef.current(current);
-    const json = JSON.stringify(value);
-    if (cacheRef.current && cacheRef.current.json === json) {
-      return cacheRef.current.value;
+    const raw = selectRef.current(current);
+    const cache = cacheRef.current;
+    // The same object as last time (an untouched slice): nothing to compare.
+    if (cache && Object.is(cache.raw, raw)) {
+      return cache.value;
+    }
+    const json = JSON.stringify(raw);
+    if (cache && cache.json === json) {
+      cacheRef.current = { raw, json, value: cache.value };
+      return cache.value;
     }
     const stable = JSON.parse(json) as T;
-    cacheRef.current = { json, value: stable };
+    cacheRef.current = { raw, json, value: stable };
     return stable;
   }, []);
 

@@ -91,6 +91,7 @@ type Commands = {
   shell_state: { args: Record<string, never>; result: ShellState };
   ui_ready: { args: Record<string, never>; result: void };
   ui_alive: { args: Record<string, never>; result: void };
+  dev_note: { args: { text: string }; result: void };
   dismiss_notice: { args: { id: number }; result: void };
   notices_seen: { args: Record<string, never>; result: void };
   set_volume: { args: { level: number }; result: void };

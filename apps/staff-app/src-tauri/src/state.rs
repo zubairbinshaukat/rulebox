@@ -155,6 +155,25 @@ impl AppState {
             .clone()
     }
 
+    /// The state as the windows get it: app icons are kept in the icon store and
+    /// the catalogue carries a short address for each, so a change to anything
+    /// does not send every icon to every window again.
+    pub fn wire_snapshot(&self) -> ShellState {
+        let mut state = self.snapshot();
+        let icons = self.app_handle().and_then(|app| {
+            app.try_state::<crate::tasks::TaskServices>()
+                .map(|services| Arc::clone(&services.icons))
+        });
+        if let Some(icons) = icons {
+            for app in &mut state.apps.items {
+                if let Some(short) = app.icon_url.as_deref().and_then(|url| icons.intern_app_icon(url)) {
+                    app.icon_url = Some(short);
+                }
+            }
+        }
+        state
+    }
+
     /// Look at the shell state without cloning it.
     pub fn read<R>(&self, f: impl FnOnce(&ShellState) -> R) -> R {
         let shell = self.inner.shell.lock().unwrap_or_else(|e| e.into_inner());
@@ -283,7 +302,6 @@ impl AppState {
             *last = Some(Instant::now());
         }
 
-        let payload = self.snapshot();
         self.inner.emit_count.fetch_add(1, Ordering::SeqCst);
 
         let app = {
@@ -296,6 +314,14 @@ impl AppState {
             return;
         };
 
+        // Serialized once, not once per window.
+        let payload = match serde_json::value::to_raw_value(&self.wire_snapshot()) {
+            Ok(raw) => raw,
+            Err(error) => {
+                tracing::warn!(%error, "could not serialize the shell state");
+                return;
+            }
+        };
         for window in app.webview_windows().values() {
             let label = window.label();
             if label.starts_with("shell-") || label.starts_with("app-") {

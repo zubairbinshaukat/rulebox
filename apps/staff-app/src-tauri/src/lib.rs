@@ -114,6 +114,7 @@ pub fn run() {
             commands::shell_state,
             commands::ui_ready,
             commands::ui_alive,
+            commands::dev_note,
             commands::dismiss_notice,
             commands::notices_seen,
             commands::set_volume,

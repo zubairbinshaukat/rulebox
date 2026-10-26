@@ -350,6 +350,24 @@ pub fn place_outer(hwnd: isize, rect: Rect) -> Result<()> {
     }
 }
 
+/// The outer rectangle of a window, in physical pixels (read-only).
+pub fn outer_rect(hwnd: isize) -> Option<Rect> {
+    let mut rect = windows::Win32::Foundation::RECT::default();
+    // SAFETY: GetWindowRect only writes the RECT we pass; a stale handle makes it fail.
+    unsafe { windows::Win32::UI::WindowsAndMessaging::GetWindowRect(hwnd_from(hwnd), &mut rect).ok()? };
+    Some(Rect::new(rect.left, rect.top, rect.right, rect.bottom))
+}
+
+/// Pure: does `window` hide everything inside `area`? A window that reaches
+/// the edges within `slack` pixels counts (a maximized window's outer
+/// rectangle overshoots the work area by its invisible frame).
+pub fn covers(window: Rect, area: Rect, slack: i32) -> bool {
+    window.left <= area.left + slack
+        && window.top <= area.top + slack
+        && window.right >= area.right - slack
+        && window.bottom >= area.bottom - slack
+}
+
 /// Put one of our own windows at the bottom of the z-order without moving,
 /// resizing or activating it. Shell mode only: the desktop window lives
 /// there so every program window is above it.
@@ -372,6 +390,20 @@ pub fn send_to_bottom(_token: &ShellToken, hwnd: isize) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn covers_counts_a_maximized_frame_but_not_a_smaller_window() {
+        let area = Rect::new(0, 0, 1366, 728);
+        // A maximized window's outer rectangle overshoots by its invisible frame.
+        assert!(covers(Rect::new(-8, -8, 1374, 736), area, 2));
+        assert!(covers(area, area, 0));
+        // One pixel short on any side is not covering (with no slack).
+        assert!(!covers(Rect::new(1, 0, 1366, 728), area, 0));
+        assert!(!covers(Rect::new(0, 0, 1366, 700), area, 2));
+        // A window in the middle of the screen, or parked off-screen when minimized.
+        assert!(!covers(Rect::new(200, 100, 900, 600), area, 2));
+        assert!(!covers(Rect::new(-32000, -32000, -31840, -31972), area, 2));
+    }
 
     /// A plain, visible, unowned window: passes.
     fn plain() -> TaskFlags {

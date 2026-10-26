@@ -9,6 +9,7 @@
     "allow-shell-state",
     "allow-ui-ready",
     "allow-ui-alive",
+    "allow-dev-note",
     "allow-dismiss-notice",
     "allow-notices-seen",
     "allow-set-volume",

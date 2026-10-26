@@ -1,4 +1,4 @@
-import { StrictMode, useEffect } from "react";
+import { StrictMode, Suspense, lazy, useEffect } from "react";
 import { createRoot } from "react-dom/client";
 import { setLite, setTheme, ErrorBoundary } from "@rulebox/ui";
 import "@rulebox/ui/fonts.css";
@@ -8,10 +8,15 @@ import "@rulebox/ui/base.css";
 import { installExitKey } from "../lib/exitKey";
 import { startShellStore, useShell } from "../lib/store";
 import { call, isTauri } from "../lib/tauri";
-import { DesktopRoot } from "./DesktopRoot";
-import { DevOverlay } from "./DevOverlay";
-import { PopupRoot } from "./popup/PopupRoot";
-import { Taskbar } from "./taskbar/Taskbar";
+
+// Each of the three shell windows loads only its own screens: the taskbar
+// window never parses the desktop, the popup never parses the sign-in.
+const DesktopRoot = lazy(() => import("./DesktopRoot").then((m) => ({ default: m.DesktopRoot })));
+const DevOverlay = lazy(() => import("./DevOverlay").then((m) => ({ default: m.DevOverlay })));
+const PopupRoot = lazy(() => import("./popup/PopupRoot").then((m) => ({ default: m.PopupRoot })));
+const Taskbar = lazy(() => import("./taskbar/Taskbar").then((m) => ({ default: m.Taskbar })));
+// The logo bench exists only in a build made with VITE_RB_BENCH=1 (Step 17 measurements).
+const LogoBench = import.meta.env.VITE_RB_BENCH ? lazy(() => import("./bench/LogoBench")) : null;
 
 /** Which of the three shell windows this page is: `#/desktop|taskbar|popup`. */
 function routeOf(hash: string): "desktop" | "taskbar" | "popup" {
@@ -46,16 +51,31 @@ export function ShellRoot() {
   }, [route]);
 
   if (route === "taskbar") {
-    return <Taskbar />;
+    return (
+      <Suspense fallback={null}>
+        <Taskbar />
+      </Suspense>
+    );
   }
   if (route === "popup") {
-    return <PopupRoot />;
+    return (
+      <Suspense fallback={null}>
+        <PopupRoot />
+      </Suspense>
+    );
+  }
+  if (LogoBench && window.location.hash === "#/bench-logo") {
+    return (
+      <Suspense fallback={null}>
+        <LogoBench />
+      </Suspense>
+    );
   }
   return (
-    <>
+    <Suspense fallback={null}>
       <DesktopRoot />
-      <DevOverlay />
-    </>
+      {import.meta.env.DEV ? <DevOverlay /> : null}
+    </Suspense>
   );
 }
 

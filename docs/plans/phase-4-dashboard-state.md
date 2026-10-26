@@ -115,7 +115,7 @@ user (Step 21).
 | Installer **uploads** (MSI/EXE stored by Rulebox). Phase 4 accepts an `https://` URL plus SHA-256 only. Convex file storage is too small for installers (PRD 16 names Cloudflare R2) | Phase 6 or later (Section 21, Q4) |
 | Branding beyond the organization name: logo, colours, wallpaper on devices (PRD 3.1). Phase 4 stores the name; the `branding.logo` field stays `null` | Section 21, Q3 |
 | Agent self-update, Staff App update channels and deadlines (PRD 23) | v1.x / later |
-| Multi-organization in one deployment, plugin system for app types, `npx create-rulebox` (PRD 17 v2). The schema keeps `orgId` on every row so v2 needs no data migration | v2 |
+| Multi-organization in one deployment, plugin system for app types, `npx create-rulebox` (PRD 17 v2). The schema keeps `orgId` on every row (including `policyKeys`), the membership lookup already returns a list, and MFA hangs off the user, so v2 needs no data migration. What v2 still builds is listed in Section 4.6 "Ready for more than one organization" | v2 |
 | MSI installer, release builds, code signing, hosting the dashboard on Cloudflare Pages / Vercel (Phase 4 writes the header files but does not deploy) | Phase 6 |
 | Idle auto-logout, shift hours (PRD 4.7, 24.5) | later |
 | Uninstalling EXE-type apps (only MSI and portable apps are removed when unassigned; Section 4.8) | later |
@@ -278,8 +278,8 @@ improvise. Section 19 lists every decision this plan made on its own.
 Legend: **grows** = never `.collect()`; list with `.paginate()`, "latest"
 with `.take(n)`. **tiny** = at most a few rows per organization; reading
 all rows of one organization through an index with `.take(LIMIT)` is
-allowed where LIMIT is named. Every table has `orgId` (except the
-deployment-wide `policyKeys`), and every query filters on it through an
+allowed where LIMIT is named. Every table has `orgId` or hangs off a row that does (except the
+per-user MFA tables, `wingetCache` and the Convex Auth tables), and every query filters on it through an
 index.
 
 All fields below are exact. `v.optional` marks fields that existing
@@ -291,10 +291,10 @@ Phase 2 rows lack or that are truly optional. Timestamps are Unix ms
 | `organizations` | tiny | `name: string`, `settings: v.optional(orgSettings)` (missing = defaults, Section 4.10), `revision: v.optional(number)` (missing = 0), `createdAt: v.optional(number)` | — (read by id) |
 | `orgSecrets` | tiny (1 per org) | `orgId`, `exitPinHash: v.optional(string)` (Argon2id PHC) | `by_org [orgId]` |
 | `orgStats` | tiny (1 per org) | `orgId`, `deviceCount: number`, `pingIntervalMs: number` | `by_org [orgId]` |
-| `members` | tiny | `orgId`, `userId: v.id("users")`, `email: string` (lower-case), `role: "owner"\|"admin"\|"viewer"`, `status: "active"\|"disabled"`, `createdAt: number`, `revision: number` | `by_user [userId]`, `by_org_email [orgId, email]`, `by_org_role [orgId, role]` |
+| `members` | tiny | `orgId`, `userId: v.id("users")`, `email: string` (lower-case), `role: "owner"\|"admin"\|"viewer"`, `status: "active"\|"disabled"`, `createdAt: number`, `revision: number` | `by_user [userId]` (one row per membership, read with `.take(MAX_MEMBERSHIPS)`), `by_org_user [orgId, userId]` (uniqueness), `by_org_email [orgId, email]`, `by_org_role [orgId, role]` |
 | `invites` | tiny | `orgId`, `email: string` (lower-case), `role`, `kind: "join"\|"passwordReset"`, `tokenHash: string` (SHA-256 hex), `expiresAt: number`, `createdBy: v.optional(v.id("members"))`, `usedAt: v.optional(number)` | `by_token_hash [tokenHash]`, `by_email [email]`, `by_org [orgId]` |
-| `memberSecrets` | tiny | `memberId: v.id("members")`, `totpSecret: v.optional(string)` (base32), `totpPending: v.optional(string)`, `totpEnabledAt: v.optional(number)`, `recoveryHashes: v.array(string)` (SHA-256 hex), `lastTotpStep: number`, `totpFailures: number`, `totpLockedUntil: number` | `by_member [memberId]` |
-| `mfaSessions` | small (1 per signed-in session) | `sessionId: v.id("authSessions")`, `memberId`, `verifiedAt: number` | `by_session [sessionId]`, `by_member [memberId]` |
+| `memberSecrets` | tiny (1 per **user**, not per membership: the authenticator belongs to the person) | `userId: v.id("users")`, `totpSecret: v.optional(string)` (base32), `totpPending: v.optional(string)`, `totpEnabledAt: v.optional(number)`, `recoveryHashes: v.array(string)` (SHA-256 hex), `lastTotpStep: number`, `totpFailures: number`, `totpLockedUntil: number` | `by_user [userId]` |
+| `mfaSessions` | small (1 per signed-in session) | `sessionId: v.id("authSessions")`, `userId: v.id("users")`, `verifiedAt: number` (one verification covers every organization of that session) | `by_session [sessionId]`, `by_user [userId]` |
 | `groups` | tiny | `orgId`, `name: string`, `description: v.optional(string)`, `revision: v.optional(number)`, `createdAt: v.optional(number)` | `by_org [orgId]` (exists), `by_org_name [orgId, name]` |
 | `devices` | **grows** | Phase 2 identity fields (`orgId`, `groupId`, `name`, `secretHash`, `revoked`, `enrolledAt`, `enrollmentTokenId`, `hardwareIdHash`) plus `previousSecretHash: v.optional(string)`, `rotateCredential: v.optional(boolean)`, `kioskEnabled: v.optional(boolean)` (missing = true), `revision: v.optional(number)`. **The 12 reported status fields are removed** (moved to `deviceReports`) | `by_org [orgId]`, `by_group [groupId]` (exist), `by_secret_hash` (exists), `by_previous_secret_hash [previousSecretHash]`; search index `search_name { searchField: "name", filterFields: ["orgId"] }` |
 | `deviceReports` | grows (1 per device) | `deviceId`, `orgId`, the 12 status fields of Phase 2 (`agentVersion` … `compat`) plus `trustedKeyIds: v.optional(v.array(string))`, `outOfSupport: boolean`, `updatedAt: number` | `by_device [deviceId]` |
@@ -310,7 +310,7 @@ Phase 2 rows lack or that are truly optional. Timestamps are Unix ms
 | `enrollmentTokens` | grows | Phase 2 fields plus `label: v.optional(string)`, `createdBy: v.optional(v.id("members"))` | `by_org` (exists), `by_token_hash` (exists), `by_org_created [orgId, createdAt]` |
 | `desiredStates` | grows (pruned to 5 per device) | `orgId`, `deviceId: v.id("devices")`, `version: number`, `payload: string`, `signature: string` (base64), `keyId: string`, `contentHash: string`, `createdAt: number`, `reason: string` | `by_device_version [deviceId, version]` |
 | `publishQueue` | tiny (1 per org) | `orgId`, `allDevices: boolean`, `groupIds: v.array(id)`, `deviceIds: v.array(id)`, `scheduled: v.optional(v.id("_scheduled_functions"))`, `requestedAt: number` | `by_org [orgId]` |
-| `policyKeys` | tiny (deployment-wide) | `keyId: string` (16 hex), `publicKey: string` (base64, 32 bytes), `status: "active"\|"next"\|"retired"`, `endorsement: v.optional({ byKeyId: string, signature: string })`, `createdAt: number` | `by_key_id [keyId]`, `by_status [status]` |
+| `policyKeys` | tiny (per org) | `orgId`, `keyId: string` (16 hex), `publicKey: string` (base64, 32 bytes), `status: "active"\|"next"\|"retired"`, `endorsement: v.optional({ byKeyId: string, signature: string })`, `createdAt: number`. Trust is per organization: the same public key may be registered by two organizations as two rows | `by_org_key_id [orgId, keyId]` (uniqueness), `by_org_status [orgId, status]` |
 | `installResults` | **grows** (devices × apps) | `orgId`, `deviceId`, `appId`, `state: "pending"\|"downloading"\|"installing"\|"installed"\|"failed"\|"removing"\|"removed"\|"unsupported"`, `appRevision: number`, `attempts: number`, `exitCode: v.optional(number)`, `detail: v.optional(string)` (≤ 200 chars, fixed texts), `updatedAt: number` | `by_device [deviceId]`, `by_device_app [deviceId, appId]`, `by_app_state [appId, state]`, `by_org_state [orgId, state]` |
 | `wingetCache` | tiny | `packageId: string`, `version: string`, `resolved: wingetResolved` (Section 4.8), `fetchedAt: number` | `by_package_version [packageId, version]` |
 | `auditLog` | **grows** | `orgId`, `at: number`, `actorType: "member"\|"device"\|"system"`, `actorId: v.optional(string)`, `actorLabel: string`, `action: string` (Section 4.11 list), `targetType: v.optional(string)`, `targetId: v.optional(string)`, `targetLabel: v.optional(string)`, `summary: string` (≤ 300 chars), `eventKey: v.optional(string)` | `by_org_at [orgId, at]` (exists), `by_event_key [eventKey]`, `by_org_target [orgId, targetId, at]`, `by_at [at]` |
@@ -342,13 +342,14 @@ A query not in this table does not exist in Phase 4. Every
 
 | Index | Used by |
 |---|---|
-| `members.by_user` | every member wrapper (`requireMember`) |
+| `members.by_user` | every member wrapper (`requireMember`, `.take(MAX_MEMBERSHIPS)`), `account:me` |
+| `members.by_org_user` | uniqueness check on join / invite acceptance |
 | `members.by_org_email` | invite creation (duplicate check), `auth.ts` callbacks |
 | `members.by_org_role` | "last owner" check, members screen (`.take(200)`) |
 | `invites.by_token_hash` | join, password reset |
 | `invites.by_email` | `profile()` / `createOrUpdateUser` |
 | `invites.by_org` | members screen (`.take(100)`, newest first) |
-| `memberSecrets.by_member`, `mfaSessions.by_session`, `mfaSessions.by_member` | MFA |
+| `memberSecrets.by_user`, `mfaSessions.by_session`, `mfaSessions.by_user` | MFA |
 | `groups.by_org` | group list (`.take(500)`, tiny), group pickers |
 | `groups.by_org_name` | duplicate name check |
 | `devices.by_org` | device list (`paginate`), publisher "all devices" (`paginate` in batches) |
@@ -375,7 +376,7 @@ A query not in this table does not exist in Phase 4. Every
 | `enrollmentTokens.by_token_hash` | `enroll` |
 | `enrollmentTokens.by_org_created` | enrollment screen (`paginate`, newest first) |
 | `desiredStates.by_device_version` | agent subscription (`order("desc").first()`), publisher (latest + pruning), device detail (`.take(5)`) |
-| `policyKeys.by_status`, `policyKeys.by_key_id` | publisher, subscription key list, signing settings |
+| `policyKeys.by_org_status`, `policyKeys.by_org_key_id` | publisher, subscription key list, signing settings |
 | `installResults.by_device` | device detail (`paginate`) |
 | `installResults.by_device_app` | `reportInstalls` upsert |
 | `installResults.by_app_state` | app detail counts per state (`.take(1001)` per state) |
@@ -538,8 +539,15 @@ export const run = internalMutation({ args: { orgId: v.id("organizations") }, re
      first and records which form worked.
   3. Dashboard → Settings → Signing → **Register key**
      (`keys:registerActive`, Owner): an action derives the public key
-     from the env seed, inserts the `policyKeys` row `status: "active"`
+     from the env seed, inserts the `policyKeys` row `status: "active"` for the caller's `orgId` (`key_exists` when the organization already has that key id)
      and requests a publish of every device.
+- **Trust is per organization.** Every `policyKeys` row carries the
+  `orgId` of the organization whose devices trust it. A device is only
+  ever told the keys of its own organization. In Phase 4 the private
+  seed is still one deployment env var (`RULEBOX_POLICY_KEY`), which is
+  right for one organization per deployment; where per-organization seeds
+  would live in v2 is an open question (Section 4.6, "Ready for more than
+  one organization").
 - **Trust on the device:** `enrollment:enroll` returns
   `policyKeys: [{ keyId, publicKey }]` (the active key, and the next key
   when one exists). The agent stores them in `AgentState.trusted_keys`
@@ -608,7 +616,19 @@ export const deviceQuery, deviceMutation, deviceAction;
 `requireMember(ctx, minRole)`:
 
 1. `getAuthUserId(ctx)` → null → `ConvexError({ code: "unauthenticated" })`.
-2. `members.by_user` → none, or `status: "disabled"` → `forbidden`.
+2. Pick the membership. Load the user's rows with `members.by_user`
+   `.take(MAX_MEMBERSHIPS)` (20, `lib/limits.ts`). The wrapper also
+   consumes an optional argument `orgId` (it never reaches the handler;
+   the Phase 4 dashboard never sends it):
+   - `orgId` given: no membership in that organization → `not_found`
+     (does not confirm the organization exists); that membership is
+     `disabled` → `forbidden`.
+   - `orgId` absent: no membership, or every membership `disabled` →
+     `forbidden`; exactly one active → that one; more than one active →
+     `org_required`.
+
+   The client's `orgId` only selects among memberships the server just
+   loaded; the organization is never taken from the client alone.
 3. Role rank (`viewer < admin < owner`) below `minRole` → `forbidden`.
 4. For role `owner` or `admin`: `getAuthSessionId(ctx)` must have an
    `mfaSessions` row → otherwise `mfa_required`. (Viewers may enable
@@ -646,6 +666,54 @@ credentials; it can only touch its own device's rows.
 Rules: the last Owner cannot be demoted, disabled or removed
 (`last_owner`). A member cannot change their own role. Admins cannot
 create Owners.
+
+#### Ready for more than one organization
+
+Phase 4 ships one organization per deployment (D1). These rules are
+built and tested now so that adding a second organization later needs
+no data migration. Every table with an `orgId` is new in Phase 4 or
+already has it, so `orgId` is required from the start on `members`,
+`policyKeys` and the others; only `deviceStatus.orgId` stays optional
+(Phase 2 rows).
+
+| Edge case | Rule |
+|---|---|
+| Same person, two organizations | Two `members` rows, one `users` row. MFA (`memberSecrets`, `mfaSessions`) belongs to the user, so they enrol an authenticator once and one verification covers the session |
+| Duplicate membership | Convex indexes do not enforce uniqueness. Every insert into `members` first reads `by_org_user` in the same mutation (mutations are serializable, so two racing joins cannot both pass) and returns the existing row or `already_member` |
+| Disabling in one organization | `members:setDisabled` calls `invalidateSessions` and deletes the user's `mfaSessions` **only when the user has no other active membership**. Otherwise the disabled row alone blocks them, because `requireMember` checks it on every call |
+| Last Owner | Counted per organization (`members.by_org_role`), never per user |
+| Same email invited by two organizations | Invites are per organization (`invites.by_org`); acceptance checks `by_org_user`. In Phase 4 an email that already has a member row in a different organization gets `already_member` (only tests create a second organization) |
+| Another organization's id | `not_found` from `assertInOrg`, as today |
+| Same public signing key in two organizations | Two `policyKeys` rows, one per organization (`by_org_key_id`); rotating in one never touches the other |
+| Device keys | `desiredState` and `enroll` return only the device's organization's keys |
+| Audit rows | `orgId` of the organization the action ran in, never the user's "home" |
+| More than `MAX_MEMBERSHIPS` memberships | Rows beyond 20 are ignored by `requireMember`; the Phase 4 UI cannot produce them |
+
+`account:me` also returns `memberships: [{ orgId, orgName, role }]`
+(active ones only). The dashboard shows an organization switcher only
+when the list has more than one entry.
+
+**Proof, not a promise:** `authz.test.ts` builds two organizations and a
+user who is a member of both (Section 4.6 tests) so the claim "no data
+change in v2" is checked on every run.
+
+**What v2 still has to build** (not data changes):
+
+- The organization switcher and the client sending `orgId`.
+- The invite path for an existing user (attach a membership instead of
+  creating a user). How Convex Auth's `createOrUpdateUser` behaves for an
+  existing account is **(unverified)**; check it first.
+- A home for per-organization signing seeds. Convex env vars are
+  deployment-wide, so options are a master key in env that encrypts each
+  organization's seed in the database, or an external key service.
+  **Open; decide in v2.** Until then every organization in a deployment
+  signs with the one env seed, and trust stays per organization. This
+  also means whoever operates the deployment can sign for every
+  organization, which is acceptable for self-hosting and must be stated
+  for any hosted offer.
+- Per-organization rate limits (`enrollGlobal` is per deployment) and
+  `orgStats` counters per organization (already one row each).
+- Narrowing `deviceStatus.orgId` to required once every row has it.
 
 ### 4.7 Secrets: one writer, one reader
 
@@ -1426,6 +1494,18 @@ deleted in Step 20).
   `mfa_required` for an admin without an `mfaSessions` row and success
   with one; viewer without MFA passes; `assertInOrg` answers `not_found`
   for a document of another organization; `checkRevision`.
+- `authz.test.ts`, **two organizations**: a user who is an active member
+  of both → `org_required` without `orgId`, the right member with it;
+  `orgId` of an organization they do not belong to → `not_found`; one of
+  the two memberships disabled → the other still works without `orgId`,
+  the disabled one answers `forbidden` with it; a user whose every
+  membership is disabled → `forbidden`; a second insert for the same
+  `(orgId, userId)` returns `already_member`; `setDisabled` in one
+  organization keeps the user's sessions and `mfaSessions` while another
+  active membership exists and removes them when none does; the last
+  Owner rule is per organization; the same public key registers in both
+  organizations as two rows, and `desiredState` / `enroll` for a device
+  of organization A never list organization B's keys.
 - `audit.test.ts`: summary truncated to 300; a summary containing
   `$argon2…` throws in tests; `eventKey` stored.
 - The identity helper `tests/convex/identity.ts` (test-only, **outside**
@@ -1506,7 +1586,7 @@ argument; add a `.filter()`.
    Usage, printed in the README later:
    `npx convex run setup:createOwnerInvite '{"orgName":"Acme","email":"owner@acme.test"}'`.
 3. **Account** (`account.ts`): `me` (`publicQuery`): `null` when
-   signed out; else `{ email, role, status, orgId, orgName, mfa: {
+   signed out; else `{ email, role, status, orgId, orgName, memberships: [{ orgId, orgName, role }], mfa: {
    enrolled, required, verified }, serverApiVersion }` or
    `{ noAccess: true, serverApiVersion }` when the user has no member
    row. `serverApiVersion` is the constant `SERVER_API_VERSION = 1` in
@@ -1548,7 +1628,8 @@ argument; add a `.filter()`.
    `invite` (action: `{ email, role }`, role ≠ owner unless caller is
    owner, 7-day code, returns the code once, audit `member.invited`);
    `revokeInvite`; `changeRole` (`last_owner`, no self-change);
-   `setDisabled` (calls `invalidateSessions`, deletes the member's
+   `setDisabled` (only when the user has no other active membership:
+   calls `invalidateSessions` and deletes the user's
    `mfaSessions`, `last_owner`); `createResetCode` (action, 24-hour
    `passwordReset` code shown once); `resetMfa` (clears TOTP fields and
    `mfaSessions`, audit `member.mfaReset`). CLI fallback when the only
@@ -1916,13 +1997,13 @@ query; delete a non-revoked device.
 3. **`publish.ts` `run`** as Section 4.4 (batch of 25, per-group cache,
    skip unchanged, prune to 5, missing-key handling).
 4. **`desiredState`** returns the envelope of Section 5.1, `keys` = every
-   `policyKeys` row oldest first (`by_status` for each of the three
+   `policyKeys` row of the device's organization, oldest first (`by_org_status` for each of the three
    statuses, `.take(20)` each, merged and sorted by `createdAt`) and
    `retiredKeyIds`. An old
    row without `payload` is never returned (there are none after Step 2's
    clear).
 5. **`enroll`**: refuses with `not_ready` when no `active` key exists;
-   returns `policyKeys`; requests a publish for the new device;
+   returns the organization's `policyKeys`; requests a publish for the new device;
    increments `orgStats` (Step 7). Rate limit `enrollGlobal`.
 6. **`keys.ts`** (Owner unless noted): `status` (viewer: active / next
    / retired rows with key id and fingerprint = key id in groups of 4);
@@ -2870,7 +2951,7 @@ tested" with the reason) in `phase-4-vm-results.md`.
 | 9 | Forged, replayed or rolled-back document | Refused (`policy_rejected`), previous state kept, `kioskError: desired_state_untrusted` visible on the device page | 9 |
 | 10 | Large fleet vs free tier | Heartbeat interval scales (4.9); the overview shows a warning above 300 devices: "Your fleet may exceed the Convex free plan; see Usage in the Convex dashboard" | 7, 17 |
 | 11 | Convex outage or overload (HTTP errors, 16 concurrent limit) | Agent: one-shot calls time out and retry later; sign-in falls back to the offline cache (Phase 2); reconnect jitter. Dashboard: connection banner, mutations queue in the client | 4, 13 |
-| 12 | Signing key rotated (once or several times) while a device was offline | `keys` lists **every** `policyKeys` row, oldest first, each with its endorsement. The agent processes them in that order before verifying the document, so it walks the chain A → B → C from the key it trusts, then drops retired keys per 4.5 step 5. Only a device that trusts no key in the chain needs re-enrollment | 8, 9 |
+| 12 | Signing key rotated (once or several times) while a device was offline | `keys` lists **every** `policyKeys` row of the device's organization, oldest first, each with its endorsement. The agent processes them in that order before verifying the document, so it walks the chain A → B → C from the key it trusts, then drops retired keys per 4.5 step 5. Only a device that trusts no key in the chain needs re-enrollment | 8, 9 |
 | 13 | Signing key lost / stolen | Section 4.5 | 8 |
 | 14 | Stale dashboard tab (old JS after a deploy) | Convex keeps old function signatures working only if args are compatible; the dashboard checks `api` version: `account:me` returns `serverVersion` (a constant bumped with breaking changes); a mismatch shows "A new version of the dashboard is available — Reload" | 4 |
 | 15 | Employee deleted, files still on laptops | Files stay (PRD 8: local, v1). The agent drops the cache entry; nobody can sign in as that employee; the folder stays under `RuleboxFiles\<id>`. Deleting those folders is a later feature; the delete dialog says so | 11, 13 |
@@ -3101,7 +3182,7 @@ PRD 21.1 decisions are untouched. These are this plan's own:
 
 | # | Decision | Reason |
 |---|---|---|
-| D1 | One organization per deployment in the UI; `orgId` on every row; `setup:createOwnerInvite` refuses a second org unless asked (tests and e2e use extra orgs) | PRD 17 puts multi-org in v2; the schema stays ready and cross-org isolation is still tested |
+| D1 | One organization per deployment in the UI; `orgId` on every row; `setup:createOwnerInvite` refuses a second org unless asked (tests and e2e use extra orgs) | PRD 17 puts multi-org in v2; the schema, the membership lookup, MFA and the signing-key table are ready for it (Section 4.6) and cross-org isolation is still tested |
 | D2 | Roles Owner / Admin / Viewer with the matrix of 4.6 | PRD 15 |
 | D3 | Convex Auth Password provider + our own TOTP gate per session (`mfaSessions`) | Convex Auth has no 2FA; PRD 12.3 requires it for Owner/Admin; keeps the PRD's named auth library |
 | D4 | Devices keep the 256-bit secret as credential, plus dashboard-triggered rotation | Convex documents shared-secret checks for service authentication; JWT needs signing infrastructure and token expiry on an open Rust socket is undocumented (Q1 asks the user) |

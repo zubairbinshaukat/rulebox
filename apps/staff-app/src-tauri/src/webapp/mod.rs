@@ -239,7 +239,7 @@ fn build_window(
         .focused(true)
         .data_directory(data_dir)
         // Replaces the defaults on purpose: SmartScreen stays on for remote content.
-        .additional_browser_args("--disable-features=msWebOOUI,msPdfOOUI")
+        .additional_browser_args(&browser_args())
         .devtools(false)
         .zoom_hotkeys_enabled(false)
         .general_autofill_enabled(false)
@@ -257,6 +257,19 @@ fn build_window(
         .on_download(move |_, event| handle_download(&download_state, &download_info, event))
         .build()
         .map_err(|error| format!("create {}: {error}", info.label))
+}
+
+/// What every web window's browser is started with. Debug builds append
+/// `RULEBOX_WEB_BROWSER_ARGS`, so a flag can be measured without a rebuild.
+fn browser_args() -> String {
+    let mut args = String::from("--disable-features=msWebOOUI,msPdfOOUI");
+    if cfg!(debug_assertions) {
+        if let Ok(extra) = std::env::var("RULEBOX_WEB_BROWSER_ARGS") {
+            args.push(' ');
+            args.push_str(extra.trim());
+        }
+    }
+    args
 }
 
 /// The page every web window is built at, before its hooks exist.
@@ -379,6 +392,18 @@ fn announce(state: &AppState, app_name: &str, finished: download::Finished) {
 /// The WebView2 browser process behind a web window (for the developer resource monitor).
 pub fn browser_pid(window: &WebviewWindow, done: impl FnOnce(u32) + Send + 'static) {
     hooks::browser_pid(window, done);
+}
+
+/// Stop a page nobody can see from painting and hold less memory for it (the
+/// closed popup, a minimized built-in window). Its scripts keep running.
+pub fn set_hidden(window: &WebviewWindow, hidden: bool) {
+    hooks::set_hidden(window, hidden);
+}
+
+/// Ask for less memory for a page that is on screen but covered (the desktop
+/// behind a maximized window).
+pub fn set_low_memory(window: &WebviewWindow, low: bool) {
+    hooks::set_low_memory(window, low);
 }
 
 pub fn focus(app: &AppHandle, label: &str) {

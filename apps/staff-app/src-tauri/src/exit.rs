@@ -140,7 +140,12 @@ pub fn open(app: &AppHandle, host: &Arc<DesktopHost>, state: &AppState) -> Resul
         window.set_focus().map_err(|error| format!("focus the exit dialog: {error}"))?;
         return Ok(());
     }
-    let window = WebviewWindowBuilder::new(app, EXIT, WebviewUrl::App("exit.html".into()))
+    let builder = WebviewWindowBuilder::new(app, EXIT, WebviewUrl::App("exit.html".into()));
+    let builder = match crate::shellwin::local_browser_args() {
+        Some(args) => builder.additional_browser_args(&args),
+        None => builder,
+    };
+    let window = builder
         .title("Rulebox administrator exit")
         .decorations(false)
         .resizable(false)

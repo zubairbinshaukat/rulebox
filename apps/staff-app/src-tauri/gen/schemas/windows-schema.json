@@ -231,6 +231,12 @@
           "markdownDescription": "Enables the closing_apps command without any pre-configured scope."
         },
         {
+          "description": "Enables the dev_note command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-dev-note",
+          "markdownDescription": "Enables the dev_note command without any pre-configured scope."
+        },
+        {
           "description": "Enables the dev_set_boot command without any pre-configured scope.",
           "type": "string",
           "const": "allow-dev-set-boot",
@@ -655,6 +661,12 @@
           "type": "string",
           "const": "deny-closing-apps",
           "markdownDescription": "Denies the closing_apps command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the dev_note command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-dev-note",
+          "markdownDescription": "Denies the dev_note command without any pre-configured scope."
         },
         {
           "description": "Denies the dev_set_boot command without any pre-configured scope.",

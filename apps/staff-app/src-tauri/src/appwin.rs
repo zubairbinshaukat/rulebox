@@ -599,22 +599,27 @@ impl AppWindows {
             .get(&kind)
             .is_some_and(|place| place.maximized && restore_if_fits(place, area).is_some());
 
-        let window = WebviewWindowBuilder::new(
+        let builder = WebviewWindowBuilder::new(
             app,
             &label,
             WebviewUrl::App("apps.html#/host".into()),
-        )
-        .title(&title)
-        .decorations(false)
-        .resizable(true)
-        .shadow(true)
-        .min_inner_size(MIN_W as f64, MIN_H as f64)
-        .visible(false)
-        .focused(true)
-        .devtools(cfg!(debug_assertions))
-        .disable_drag_drop_handler()
-        .build()
-        .map_err(|error| format!("create {label}: {error}"))?;
+        );
+        let builder = match crate::shellwin::local_browser_args() {
+            Some(args) => builder.additional_browser_args(&args),
+            None => builder,
+        };
+        let window = builder
+            .title(&title)
+            .decorations(false)
+            .resizable(true)
+            .shadow(true)
+            .min_inner_size(MIN_W as f64, MIN_H as f64)
+            .visible(false)
+            .focused(true)
+            .devtools(cfg!(debug_assertions))
+            .disable_drag_drop_handler()
+            .build()
+            .map_err(|error| format!("create {label}: {error}"))?;
 
         {
             let mut inner = self.inner.lock().unwrap_or_else(|e| e.into_inner());
@@ -671,11 +676,21 @@ impl AppWindows {
         let host = Arc::clone(self);
         let handle = app.clone();
         let label = label.to_string();
+        let hidden = std::sync::atomic::AtomicBool::new(false);
         window.on_window_event(move |event| match event {
             WindowEvent::Moved(_) | WindowEvent::Resized(_) => {
                 let Some(window) = handle.get_webview_window(&label) else {
                     return;
                 };
+                // A minimized window stops painting and gives memory back until it returns.
+                let minimized = window.is_minimized().unwrap_or(false);
+                if hidden.swap(minimized, std::sync::atomic::Ordering::SeqCst) != minimized {
+                    crate::webapp::set_hidden(&window, minimized);
+                }
+                // A minimized window reports a parked rectangle; it is not a place to remember.
+                if minimized {
+                    return;
+                }
                 let applying = host
                     .inner
                     .lock()

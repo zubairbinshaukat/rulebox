@@ -14,7 +14,9 @@ use std::sync::Arc;
 use tauri::{Url, WebviewWindow};
 use webview2_com::Microsoft::Web::WebView2::Win32::{
     ICoreWebView2, ICoreWebView2Controller, ICoreWebView2PermissionRequestedEventArgs3, ICoreWebView2Settings3,
-    ICoreWebView2Settings4, ICoreWebView2_18, ICoreWebView2_24, ICoreWebView2_27, ICoreWebView2_3, COREWEBVIEW2_PERMISSION_KIND,
+    ICoreWebView2Settings4, ICoreWebView2_18, ICoreWebView2_19, ICoreWebView2_24, ICoreWebView2_27, ICoreWebView2_3,
+    COREWEBVIEW2_MEMORY_USAGE_TARGET_LEVEL_LOW, COREWEBVIEW2_MEMORY_USAGE_TARGET_LEVEL_NORMAL,
+    COREWEBVIEW2_PERMISSION_KIND,
     COREWEBVIEW2_PERMISSION_KIND_AUTOPLAY, COREWEBVIEW2_PERMISSION_KIND_CAMERA,
     COREWEBVIEW2_PERMISSION_KIND_CLIPBOARD_READ, COREWEBVIEW2_PERMISSION_KIND_GEOLOCATION,
     COREWEBVIEW2_PERMISSION_KIND_MICROPHONE, COREWEBVIEW2_PERMISSION_KIND_NOTIFICATIONS,
@@ -116,6 +118,49 @@ pub fn set_suspended(window: &WebviewWindow, suspended: bool) {
             }
         }
     });
+}
+
+/// Ask the engine to hold less memory (`low`) or go back to normal. It trims
+/// caches and discards what it can rebuild; the page keeps running, so events
+/// sent to it are not lost. For a page that is on screen but not being looked
+/// at (the desktop behind a maximized window). Not used together with
+/// [`set_suspended`] on the same window.
+pub fn set_low_memory(window: &WebviewWindow, low: bool) {
+    let _ = window.with_webview(move |platform| {
+        // SAFETY: as in `install`.
+        unsafe { apply_memory_level(&platform.controller(), low) };
+    });
+}
+
+/// A page nobody can see (a minimized built-in window, the closed popup):
+/// stop it painting and trim its memory. Unlike [`set_suspended`] its scripts
+/// and events keep working, so the state it shows is current when it returns.
+pub fn set_hidden(window: &WebviewWindow, hidden: bool) {
+    let _ = window.with_webview(move |platform| {
+        // SAFETY: as in `install`.
+        unsafe {
+            let controller = platform.controller();
+            let _ = controller.SetIsVisible(!hidden);
+            apply_memory_level(&controller, hidden);
+        }
+    });
+}
+
+unsafe fn apply_memory_level(controller: &ICoreWebView2Controller, low: bool) {
+    let Ok(core) = (unsafe { controller.CoreWebView2() }) else {
+        return;
+    };
+    // Runtimes older than the interface simply keep their own memory policy.
+    let Ok(core19) = core.cast::<ICoreWebView2_19>() else {
+        return;
+    };
+    let level = if low {
+        COREWEBVIEW2_MEMORY_USAGE_TARGET_LEVEL_LOW
+    } else {
+        COREWEBVIEW2_MEMORY_USAGE_TARGET_LEVEL_NORMAL
+    };
+    // SAFETY: `core19` is a live interface; the call only reads `level`.
+    let _ = unsafe { core19.SetMemoryUsageTargetLevel(level) };
 }
 
 /// The WebView2 browser process behind `window` (the root of its process

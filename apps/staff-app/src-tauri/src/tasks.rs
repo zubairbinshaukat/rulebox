@@ -502,14 +502,51 @@ pub struct IconSource {
     pub packaged_aumid: Option<String>,
 }
 
+/// Distinct catalogue icons kept for the pages (a catalogue has tens of apps).
+const APP_ICON_LIMIT: usize = 512;
+const DATA_URL_PNG: &str = "data:image/png;base64,";
+
 /// Which windows the icon protocol may answer for, and what it has rendered.
 #[derive(Default)]
 pub struct IconStore {
     tracked: Mutex<HashMap<isize, IconSource>>,
     cache: Mutex<HashMap<(isize, u32, u32), CachedIcon>>,
+    /// The PNG of each catalogue app icon, under `app:<hash of its content>`.
+    app_icons: Mutex<HashMap<String, Arc<Vec<u8>>>>,
+}
+
+/// 64-bit FNV-1a: a content address for an icon, not a security measure.
+fn content_hash(bytes: &[u8]) -> u64 {
+    bytes
+        .iter()
+        .fold(0xcbf2_9ce4_8422_2325_u64, |hash, byte| (hash ^ u64::from(*byte)).wrapping_mul(0x0000_0100_0000_01b3))
 }
 
 impl IconStore {
+    /// Keep an app icon sent as a `data:image/png;base64,...` URL and return the
+    /// short address the pages load it from. The catalogue then carries a
+    /// 40-character URL instead of the icon, so a state change no longer
+    /// sends every icon to every window again. `None` when `data_url` is not
+    /// such a URL or does not decode.
+    pub fn intern_app_icon(&self, data_url: &str) -> Option<String> {
+        use base64::Engine;
+        let encoded = data_url.strip_prefix(DATA_URL_PNG)?;
+        let key = format!("app:{:016x}", content_hash(encoded.as_bytes()));
+        let mut icons = self.app_icons.lock().unwrap_or_else(|e| e.into_inner());
+        if !icons.contains_key(&key) {
+            let png = base64::engine::general_purpose::STANDARD.decode(encoded).ok()?;
+            if icons.len() >= APP_ICON_LIMIT {
+                icons.clear();
+            }
+            icons.insert(key.clone(), Arc::new(png));
+        }
+        Some(format!("http://rbicon.localhost/{key}"))
+    }
+
+    fn app_icon(&self, key: &str) -> Option<Arc<Vec<u8>>> {
+        self.app_icons.lock().unwrap_or_else(|e| e.into_inner()).get(key).cloned()
+    }
+
     pub fn sync(&self, windows: Vec<(isize, IconSource)>) {
         let mut tracked = self.tracked.lock().unwrap_or_else(|e| e.into_inner());
         *tracked = windows.into_iter().collect();
@@ -519,6 +556,9 @@ impl IconStore {
 
     /// Render (or fetch) the icon for a key. Blocking: call from a worker.
     pub fn render(&self, key: &str, size: u32) -> Option<Arc<Vec<u8>>> {
+        if key.starts_with("app:") {
+            return self.app_icon(key);
+        }
         let hwnd = parse_icon_key(key)?;
         let rev = key.rsplit(':').next().and_then(|r| r.parse().ok()).unwrap_or(0);
         let source = {
@@ -635,14 +675,36 @@ fn builtin_apps_of(app: &AppHandle, state: &AppState, labels: &Labels) -> HashMa
 pub struct TaskHost {
     table: TaskTable,
     services: TaskServices,
+    /// A program window hides the whole desktop page (it holds less memory then).
+    desktop_covered: bool,
 }
+
+/// How far a window may fall short of the work area and still count as covering it.
+const COVER_SLACK: i32 = 2;
 
 impl TaskHost {
     pub fn new(services: TaskServices) -> Self {
         Self {
             table: TaskTable::default(),
             services,
+            desktop_covered: false,
         }
+    }
+
+    /// Does a program window (not one of the shell's own) hide the desktop?
+    fn desktop_is_covered(&self, labels: &Labels) -> bool {
+        let handles = self.table.visible_handles();
+        if handles.is_empty() {
+            return false;
+        }
+        let Ok(monitor) = rulebox_desktop::workarea::primary_monitor() else {
+            return false;
+        };
+        handles
+            .into_iter()
+            .filter(|hwnd| !matches!(labels.get(hwnd).and_then(|label| parse_label(label)), Some(LabelKind::Shell)))
+            .filter_map(rulebox_desktop::windows::outer_rect)
+            .any(|rect| rulebox_desktop::windows::covers(rect, monitor.work, COVER_SLACK))
     }
 
     /// Apply a batch of tracker events and publish once.
@@ -679,6 +741,11 @@ impl TaskHost {
     }
 
     fn publish(&mut self, app: &AppHandle, labels: &Labels) {
+        let covered = self.desktop_is_covered(labels);
+        if covered != self.desktop_covered {
+            self.desktop_covered = covered;
+            crate::shellwin::set_desktop_covered(app, covered);
+        }
         self.services.icons.sync(self.table.tracked());
         self.services.registry.sync(self.table.facts(labels));
         let Some(state) = app.try_state::<AppState>() else {

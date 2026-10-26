@@ -6,6 +6,7 @@ const SHELL_COMMANDS: &[&str] = &[
     "shell_state",
     "ui_ready",
     "ui_alive",
+    "dev_note",
     "dismiss_notice",
     "notices_seen",
     "set_volume",

@@ -202,8 +202,33 @@ pub fn start(app: &AppHandle) {
         .unwrap_or_else(|error| tracing::warn!(%error, "could not start the resource monitor"));
 }
 
+/// One line per sample in `metrics.jsonl` next to the log, so a run can be
+/// measured without looking at the screen (a fresh file every start).
+fn open_metrics() -> Option<std::fs::File> {
+    let dir = crate::logging::log_dir()?;
+    std::fs::create_dir_all(&dir).ok()?;
+    std::fs::File::create(dir.join("metrics.jsonl")).ok()
+}
+
+fn write_metrics(file: &mut std::fs::File, started: Instant, sample: &MonitorSample) {
+    use std::io::Write;
+    let line = serde_json::json!({
+        "t": started.elapsed().as_secs(),
+        "cpu": sample.cpu_percent,
+        "memUsed": sample.mem_used,
+        "rulebox": sample.rulebox_bytes,
+        "ruleboxCpu": sample.rulebox_cpu,
+        "groups": sample.groups.iter().map(|g| serde_json::json!({
+            "name": g.name, "kind": g.kind, "n": g.processes, "bytes": g.bytes, "cpu": g.cpu_percent,
+        })).collect::<Vec<_>>(),
+    });
+    let _ = writeln!(file, "{line}");
+}
+
 fn run(app: &AppHandle, browsers: &Arc<Mutex<HashMap<u32, (GroupKind, String)>>>) {
     let cpus = std::thread::available_parallelism().map_or(1, usize::from);
+    let started = Instant::now();
+    let mut metrics = open_metrics();
     let mut last_times: Option<(Instant, SystemTimes, HashMap<u32, u64>)> = None;
     let mut last_browser_refresh: Option<Instant> = None;
     loop {
@@ -237,6 +262,9 @@ fn run(app: &AppHandle, browsers: &Arc<Mutex<HashMap<u32, (GroupKind, String)>>>
                 rulebox_cpu: groups.iter().filter(ours).map(|g| g.cpu_percent).sum(),
                 groups,
             };
+            if let Some(file) = metrics.as_mut() {
+                write_metrics(file, started, &sample);
+            }
             for label in [crate::shellwin::TASKBAR, crate::shellwin::POPUP] {
                 let _ = app.emit_to(label, "monitor://sample", &sample);
             }

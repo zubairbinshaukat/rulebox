@@ -267,10 +267,32 @@ struct Spec {
     transparent: bool,
 }
 
+/// Browser arguments for every window that shares the Staff App's WebView2
+/// environment (they must all agree, or the second window fails to start).
+/// `None` keeps Tauri's defaults. Debug builds read `RULEBOX_BROWSER_ARGS` so
+/// a flag can be measured without rebuilding.
+pub fn local_browser_args() -> Option<String> {
+    if cfg!(debug_assertions) {
+        return std::env::var("RULEBOX_BROWSER_ARGS").ok().filter(|args| !args.trim().is_empty());
+    }
+    None
+}
+
 fn build_window(app: &AppHandle, spec: &Spec) -> Result<WebviewWindow, String> {
     let label = spec.label;
     let url = WebviewUrl::App(format!("shell.html#/{}", spec.route).into());
-    WebviewWindowBuilder::new(app, label, url)
+    let builder = WebviewWindowBuilder::new(app, label, url);
+    // Debug builds tell the page so it can run the frame meter (`lib/frameMeter.ts`).
+    let builder = if cfg!(debug_assertions) {
+        builder.initialization_script("window.__RB_DEBUG__ = true;")
+    } else {
+        builder
+    };
+    let builder = match local_browser_args() {
+        Some(args) => builder.additional_browser_args(&args),
+        None => builder,
+    };
+    builder
         .title(spec.title)
         .decorations(spec.decorations)
         .resizable(spec.resizable)
@@ -295,7 +317,12 @@ fn create_windows(app: &AppHandle, host: &Arc<DesktopHost>) -> Result<(), String
         app,
         &Spec {
             label: DESKTOP,
-            route: "desktop",
+            // A debug build can open the logo bench instead (Step 17 measurements).
+            route: if cfg!(debug_assertions) && std::env::var_os("RULEBOX_BENCH_LOGO").is_some() {
+                "bench-logo"
+            } else {
+                "desktop"
+            },
             title: if shell { "Rulebox" } else { "Rulebox (dev)" },
             decorations: !shell,
             resizable: !shell,
@@ -353,7 +380,19 @@ fn create_windows(app: &AppHandle, host: &Arc<DesktopHost>) -> Result<(), String
     wire_events(&desktop, host, WindowRole::Desktop);
     wire_events(&taskbar, host, WindowRole::Taskbar);
     wire_events(&popup, host, WindowRole::Popup);
+    // The popup starts closed: nothing to paint until the first menu opens.
+    crate::webapp::set_hidden(&popup, true);
     Ok(())
+}
+
+/// The desktop page is covered by a maximized window (or not any more): hold
+/// less memory for it while nobody can see it. The page keeps running, so the
+/// desktop is current the moment it shows again.
+pub fn set_desktop_covered(app: &AppHandle, covered: bool) {
+    tracing::info!(covered, "desktop page covered by a program window");
+    if let Some(desktop) = app.get_webview_window(DESKTOP) {
+        crate::webapp::set_low_memory(&desktop, covered);
+    }
 }
 
 /// When, and which, popup last closed because it lost the focus.
@@ -652,6 +691,8 @@ pub fn popup_open(
     // A preview must not take the focus from the program under the pointer.
     let takes_focus = kind != PopupKind::Thumb;
     let _ = popup.set_focusable(takes_focus);
+    // The page was parked while closed; it paints again before the window shows.
+    crate::webapp::set_hidden(&popup, false);
     popup.show().map_err(|error| format!("show popup: {error}"))?;
     // The click that opened the popup counts as recent input, so Windows lets
     // us take the foreground. If it ever does not, the popup stays open until
@@ -678,6 +719,8 @@ fn hide_popup(app: &AppHandle, host: &Arc<DesktopHost>) {
         .is_some();
     if let Some(popup) = app.get_webview_window(POPUP) {
         let _ = popup.hide();
+        // A closed popup is nothing to look at: stop painting and trim its memory.
+        crate::webapp::set_hidden(&popup, true);
     }
     if was_open {
         let _ = app.emit_to(POPUP, "popup://hide", ());

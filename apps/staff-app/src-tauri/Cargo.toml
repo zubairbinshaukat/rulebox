@@ -24,7 +24,8 @@ rulebox-desktop.workspace = true
 rulebox-ipc = { workspace = true, features = ["client"] }
 rulebox-policy.workspace = true
 serde.workspace = true
-serde_json.workspace = true
+serde_json = { workspace = true, features = ["raw_value"] }
+base64.workspace = true
 ts-rs.workspace = true
 thiserror.workspace = true
 tracing.workspace = true

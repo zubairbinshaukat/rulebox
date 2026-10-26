@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import type { LogoAnimation } from "@rulebox/ui";
 
+import { note, startFrameMeter } from "../../lib/frameMeter";
 import type { MotionLevel } from "../../lib/motion";
 
 export type LogoKind = "splash" | "open" | "lock";
@@ -61,14 +62,33 @@ export function useLogoSequence(
     markDone();
   }, [markDone]);
 
+  // Debug builds log which of the two paths (the animation's own callback or
+  // the fallback timer) ended each step; the first one wins either way.
+  const onCovered = useCallback(() => {
+    note(`logo ${kind} covered via callback`);
+    markCovered();
+  }, [kind, markCovered]);
+  const onDone = useCallback(() => {
+    note(`logo ${kind} done via callback`);
+    markDone();
+  }, [kind, markDone]);
+
   useEffect(() => {
     if (!enabled) return;
     const times = level === "fade" ? { covered: FADE_MS, done: FADE_MS } : FULL_MS[kind];
-    const tCover = window.setTimeout(markCovered, times.covered);
-    const tDone = window.setTimeout(markDone, times.done);
+    const stopMeter = startFrameMeter(`${kind}:${level}`);
+    const tCover = window.setTimeout(() => {
+      note(`logo ${kind} covered via timer`);
+      markCovered();
+    }, times.covered);
+    const tDone = window.setTimeout(() => {
+      note(`logo ${kind} done via timer`);
+      markDone();
+    }, times.done);
     return () => {
       window.clearTimeout(tCover);
       window.clearTimeout(tDone);
+      stopMeter();
     };
   }, [kind, key, level, enabled, markCovered, markDone]);
 
@@ -84,8 +104,8 @@ export function useLogoSequence(
   return {
     animation: kind,
     key,
-    onCovered: markCovered,
-    onDone: markDone,
+    onCovered,
+    onDone,
     covered,
     done,
     skip,
