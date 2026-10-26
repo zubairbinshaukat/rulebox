@@ -1,0 +1,122 @@
+# Operator console for tenants: recommendation (2026-10-27)
+
+Status: **recommendation, not a plan.** Nothing here is built. It needs one decision from the
+owner (Section 7) before it becomes a phase. It does not change Phase 4: the schema already
+carries `orgId` everywhere and Section 4.6 of the Phase 4 plan lists what a second organization
+still needs.
+
+No web application is "not penetratable", and a document that says so is wrong. The goal is
+narrower and testable: **no single compromise (one stolen password, one XSS bug, one operator
+laptop, one leaked key) gives anyone a tenant's data or the ability to push a policy to a
+tenant's devices.** Everything below serves that sentence.
+
+## 1. The decision under it: how tenants are separated
+
+| Model | Isolation | Cost and effort | Verdict |
+|---|---|---|---|
+| **A. One Convex deployment per tenant ("silo")** | A bug in authorization can only ever expose the one tenant it ran in. No query path crosses tenants. The same code and schema as self-hosting (MIT). | A deployment per tenant to provision, upgrade and monitor; Convex plan limits per deployment apply (check pricing). | **Recommended for any paid or hosted offer.** |
+| B. One deployment, many organizations (`orgId` rows) | Isolation is only as good as every `assertInOrg` call and index. One missed check leaks across tenants. | Cheapest to run; the Phase 4 schema is already ready for it. | Acceptable for a free tier, only with the authorization test table of Phase 4 Section 4.6 enforced in CI. |
+
+Provisioning in model A: Convex documents a Management API that creates **deploy keys** for an
+existing deployment (`POST /deployments/:name/create_deploy_key`) and scripting through the CLI
+with `CONVEX_DEPLOY_KEY`. A call that creates a project and its deployment is mentioned by users
+and appears to be in beta; **this is not verified end to end and must be tested in a spike before
+the plan relies on it** (sources at the end).
+
+## 2. Shape: a control plane that cannot touch tenant data
+
+```
+Operator browser ──► Cloudflare Access / Tailscale ──► Operator Console (own origin)
+                          (SSO + hardware key + device posture)        │
+                                                                       ▼
+                                                   Control-plane Convex deployment
+                                                   (tenants, plans, usage, operator audit)
+                                                                       │ least-privilege deploy keys
+                                       ┌───────────────────────────────┼───────────────────────┐
+                                       ▼                               ▼                       ▼
+                               Tenant A deployment             Tenant B deployment      Tenant C ...
+                               (own members, devices,          (own signing seed)
+                                own signing seed)
+```
+
+Rules that make this safe:
+
+1. **Separate app, separate origin, separate deployment, separate auth.** The tenant dashboard
+   contains no operator code, no operator routes and no shared cookies or sessions. The console
+   never imports tenant dashboard code.
+2. **The console cannot sign or publish policies.** Each tenant's Ed25519 policy seed lives only
+   in that tenant's deployment environment (Phase 4 Section 4.5). The console holds no signing key
+   and has no function that publishes desired state. A fully compromised console can suspend or
+   delete tenants (noisy, reversible within the soft-delete window) but cannot run code on any
+   tenant's devices. This is the most important rule of the whole design.
+3. **The console sees metadata only:** tenant name, plan, status, device and employee counts,
+   usage, agent versions, health, last activity. Never employee records, files, passwords, audit
+   contents or document names.
+4. **Support access is consented, time-boxed and read-only.** A tenant owner switches on "allow
+   Rulebox support" for 1 hour; that creates a viewer-role member in their deployment that expires
+   by itself. Every use is written to the tenant's own audit log and to the operator audit log. No
+   standing access, no "impersonate" that acts as a tenant user.
+5. **Deploy keys are per deployment, least privilege, stored encrypted** (envelope encryption
+   with a key held outside the database), never shown in the UI, never logged, rotated on a schedule
+   and on every operator offboarding.
+6. **A revoked or suspended tenant's devices stay locked** (the existing rule: never unlock
+   remotely). Suspension is a state change, not a deletion.
+
+## 3. Who can sign in, and how
+
+| Layer | Control |
+|---|---|
+| Network | Console is unreachable without Cloudflare Access (or Tailscale): SSO, **hardware security key required**, device posture or client certificate (mTLS), country and IP allowlist. Cloudflare documents posture checks and mTLS for Access; requiring FIDO2 keys specifically must be confirmed in their Access authentication docs (not found in one official guide). |
+| Application | Second, independent login: **passkeys only (WebAuthn), no passwords.** Sessions at most 8 hours, 15 minutes idle. A stolen Access session alone is not enough. |
+| Step-up | Re-authenticate with the passkey for: suspend, delete, restore, rotate a key, grant or end support access, change an operator. |
+| Two-person rule | Delete tenant, rotate the control-plane encryption key, add or remove an operator, break-glass use: a second operator approves in the console. |
+| Roles | `viewer` (metadata), `support` (can request consented access), `admin` (lifecycle), `owner` (operators and keys). Two or three humans in total; no shared accounts. |
+| Break-glass | One sealed offline credential, stored apart, alarmed on use, rotated after any use. |
+
+## 4. Hardening checklist for the build
+
+- Strict CSP (no inline scripts, no third-party scripts, no CDN), `frame-ancestors 'none'`,
+  `X-Content-Type-Options`, Referrer-Policy, Permissions-Policy; no `dangerouslySetInnerHTML`; every
+  input validated on the server with typed validators; output encoded; no user-supplied URLs fetched
+  by the server without an allowlist (SSRF).
+- Every function behind a wrapper that checks the operator role, the step-up freshness and writes an
+  audit row; a lint rule forbids raw `query/mutation/action` (same pattern as Phase 4).
+- Operator audit log: append-only, hash-chained, **copied off the box** to storage the console
+  cannot rewrite; alerts on every sign-in, step-up, failed login, role change and support session.
+- Rate limits and lockouts on every endpoint; generic errors; no enumeration.
+- Supply chain: pinned versions, `minimumReleaseAge`, lockfile review, dependency and secret
+  scanning in CI, protected branches, signed commits, deploys only from the protected branch by CI.
+- Data lifecycle: 30-day soft delete, tested restore, tenant data export, backups of the control
+  plane, a written incident runbook and a tested kill switch (suspend all tenants' syncing).
+- `security.txt`, a disclosure address, and **an independent penetration test before the first
+  paying tenant**, repeated after every major change. Automated tests cannot replace it.
+
+## 5. What this does not protect against (say it out loud)
+
+- Physical access to a kiosk PC (BIOS, safe mode, boot media): Phase 5 documents residual risk.
+- A malicious or coerced operator with the two-person approvals: limited by the metadata-only view,
+  the missing signing key and the off-box audit log, not eliminated.
+- A zero-day in Convex, Cloudflare or the browser. Mitigated by silo isolation and the layers above,
+  not removed.
+- A tenant owner losing their own credentials: recovery is a deliberate, audited, consented process.
+
+## 6. When to build it
+
+Not in v1 (self-hosted, one organization per deployment, Decision D1 of Phase 4). Suggested
+slot: **after the Phase 6 pilot**, as its own phase ("hosted offer"), starting with a one-week spike
+to prove automated provisioning and upgrades of a tenant deployment. Until then, the only work that
+helps is keeping Phase 4's multi-organization rules and tests intact.
+
+## 7. Decision needed from the owner
+
+1. Will Rulebox be offered as a **hosted service** (you run the tenants), or only self-hosted?
+   If only self-hosted, this console is not needed and each customer is simply their own deployment.
+2. If hosted: model A (silo per tenant, recommended) or model B (shared deployment, free tier only)?
+3. Who are the first operators (people count decides the two-person rule and break-glass design)?
+
+## Sources
+
+- Convex Management API, create deploy key: https://docs.convex.dev/management-api/create-deploy-key
+- Convex platform APIs: https://docs.convex.dev/platform-apis
+- Convex deploy key types: https://docs.convex.dev/cli/deploy-key-types
+- Cloudflare Access (posture, mTLS): https://developers.cloudflare.com/cloudflare-one/team-and-resources/devices/cloudflare-one-client/configure/modes/device-information-only/
