@@ -154,3 +154,30 @@ Work that is new (not in any phase yet):
 | Security | Independent penetration test before the first paying tenant, a disclosure address, secrets manager, operator offboarding procedure. |
 | Cost | A paid Convex plan per tenant deployment is likely (limits and pricing **unverified**; check before pricing the product). The free-tier heartbeat scaling work of Phase 4 stays useful for small tenants. |
 | Licensing | The code is MIT; a hosted offer competes with anyone who self-hosts it. Decide what is the product (convenience, support, SLA) and whether the Rulebox name and logo need trademark protection. |
+## Decision update (2026-10-27, later): pooled first, separate control plane
+
+Replaces the "silo per tenant is recommended" parts above for the first launch.
+
+1. **Tenants are organizations inside ONE shared Convex deployment ("data plane").** Free sign-up gets
+   `maxDevices = 2` by default; enrollment refuses a new PC at the limit and the dashboard shows "contact us to upgrade".
+   The operator changes the default or one tenant's limit from the console. A device finds its tenant with no locator:
+   there is one URL. (The "device finds its tenant" question of the previous section is closed.)
+   Large paying customers can move to their own deployment later; the code is the same.
+2. **The operator console is a separate app AND a separate Convex deployment ("control plane").** It holds operator
+   accounts (passkey only), plans, the default limits, the file-storage pool settings and the operator audit log.
+   It reaches the data plane only through a small authenticated platform API in the data plane that can: list tenant
+   metadata and counts, set `plan` / `maxDevices`, suspend or restore a tenant. It has no function that reads employee
+   data, files or audit contents, and it holds no policy signing key.
+3. **Per-organization signing keys.** In a shared deployment one environment seed would sign for every tenant. Phase 4
+   leaves this open; it must be solved (master key in the environment encrypting each organization's seed, or an external
+   key service) before the first outside tenant.
+4. **Free sign-up abuse controls:** email verification, rate limits, captcha, one free organization per verified email,
+   cleanup of inactive free tenants after a warning.
+5. **File-storage cloud pool** (customers' installers and uploads, free tiers pooled across accounts, per-tenant quota,
+   automatic switch when an account is full) is configured from the console and planned together with it. The note
+   in the project memory (Tigris) is the starting point; the plan must also cover credentials handling, malware scanning
+   and deletion.
+6. **Database I/O is the scarce resource** (the free plan gives about 1 GB, about 3 GB with referrals; figures to be
+   verified). A dedicated post-Phase-5 planning pass owns it: per-device and per-day I/O budget, cost of live
+   subscriptions (every change re-reads what each open dashboard watches), heartbeat and status write policy,
+   rate-limiter and audit writes, pagination and what each screen subscribes to.
