@@ -193,6 +193,57 @@ a primary source; the plan says how each one gets confirmed.
   (9) `base64UrlEncode` / `assertAgentAcceptableUrl` moved to
   `lib/crypto.ts` (+ `formatEnrollmentCode`). Credentials stay on `devices`
   until Step 7 (A2).
+- **2026-10-27, owner decision: the Default group is free.** `maxGroups` does
+  not count the group `setup` creates with the organization (`groups.isDefault`,
+  excluded from `orgStats.groupCount`): a free tenant gets 3 usable groups
+  besides it. `migratePlans` marks the oldest "Default" group of older
+  organizations; deleting it frees no slot.
+- **2026-10-27, Step 7 backend built** (`fleet.ts`, `presence.ts`,
+  `lib/{orgDb,presence,deviceReport,fleet,lifecycle}.ts`; the dashboard screens
+  follow). Deviations and notes: (1) **Widen-then-narrow split into two
+  migrations:** `maintenance:migrateDevices` only CREATES the new rows
+  (credentials, liveness, presence + shard, summary, report) and never changes a
+  `devices` row or overwrites an existing new row, then runs `migratePlans`
+  (exact recount); `maintenance:narrowDevices` (removes the deprecated
+  `devices` fields and `deviceStatus` rows, skips devices without credentials)
+  runs only after the enrolled agents were seen working. Until then
+  `checkDevice` falls back to the `devices` row for a device without a
+  credentials row. `migrateDevices` ran on the dev deployment (6 devices, the
+  VM device's credentials match); `narrowDevices` has NOT run. (2) **Per-row
+  offline deadline** instead of the per-org grace map: `deviceLiveness`
+  stores `offlineAfter` (minute bucket = last contact + ceil((2.5 x the interval
+  this device was told + 1 min) / 1 min)) and the index is
+  `by_online_deadline [online, offlineAfter]` (replaces `by_online_seen`): the
+  sweep reads only devices that really expired, even when one tenant has a
+  1-minute interval. (3) **Interval carried today in the heartbeat answer**:
+  the effective interval (override ?? global, 30 min) is stored on each
+  device's `deviceLiveness.pingIntervalMs` (index `by_org`, new) and answered as
+  `nextPingInMs`, which the installed Phase 2 agent already obeys (it clamps to
+  5 s .. 1 h, so intervals above 1 h ping hourly until Step 13 raises
+  `MAX_PING_MS`). `plans:setGlobalPingInterval` / `setOrgPingInterval` schedule
+  `presence:applyPingInterval` (batched, writes only differing rows). Step 8 adds
+  the same value to `desiredHeads`. (4) **Watch and Check now without heads:**
+  `fastUntil`, `pendingCheck` and `answeredCheck` live on `deviceLiveness`
+  (the ping reads that row anyway); a watched device is answered 60 s. A Phase 2
+  agent sees watch / check-now only at its next regular ping; Step 8's head
+  fields (`fastUntil`, `pingNonce`) make them immediate. New table
+  `fleetChecks` (pruned daily after a day). (5) `fleet:list` takes `search`
+  (search index, `filterFields` now `orgId` + `groupId`) instead of a separate
+  `fleet:search`; `fleet:get` returns `versions: []` until Step 8
+  (`desiredVersions`); `latestVersion` is null until Step 8; `fleet:installs`
+  is not built (the install section stays empty until Step 17). (6) Revoked
+  devices are shown through `devicePresence.revoked` (lists never read
+  credentials). Counters `deviceCount`, `noGroupDeviceCount`,
+  `outOfSupportCount` count NON-revoked devices: revoke lowers them, remove does
+  not. (7) `fleet:watch` has no step-up check (a view aid; the locked page does
+  not call it). (8) `devices:ping` exists (deviceMutation, `device_rejected`);
+  `heartbeat` stays the Phase 2 alias and also writes the status; its answer
+  gains `rotateCredential` and `planState`. `plans:applyLimits`
+  (`overLimit` / `suspended` credential states) is not built; the states exist
+  and are answered as `planState`. (9) `outOfSupport` dates in
+  `lib/lifecycle.ts` were recorded from memory (unverified). (10) Public
+  wrappers now also pass the I/O probe; the probe is in `lib/orgDb.ts`
+  (`ioProbe`).
 
 ---
 
@@ -586,6 +637,11 @@ and `deviceSummary.by_device` (list joins, `.unique()`),
 (`fetchDesired`, pruning by id), `desiredVersions.by_device_version` (device
 page `.take(5)`), `groupRoster.by_group`, `rosterEntries.by_group_epoch`
 (`fetchRoster`, `.take(201)`), `invites.by_expires_at` (maintenance, A10).
+**Step 7 as built:** `deviceLiveness.by_online_deadline [online,
+offlineAfter]` replaces `by_online_seen` (sweep), `deviceLiveness.by_org`
+(ping-interval propagation), `devices.search_name` filter fields `orgId` +
+`groupId` (search within a group); `fleetChecks` has no index (by id; pruned
+through `by_creation_time`).
 **Removed:** `deviceStatus.*`, `devices.by_secret_hash`,
 `devices.by_previous_secret_hash`, `desiredStates.*` (after the Step 7 and
 Step 8 migrations).
@@ -2567,7 +2623,9 @@ the hotkey grammar differ from the Rust crate.
 9. **Counters.** `orgStats` gains the counters of 4.2.1 (missing = 0
    until `stats:reconcile` runs once; written by the step that creates the
    counted thing). This step: `groupCount` in `groups:create` / `delete`
-   with `assertWithinLimit("groups")`; `memberCount` in the join path and
+   with `assertWithinLimit("groups")` (the setup-created Default group,
+   `groups.isDefault`, is NOT counted: free tenants get 3 usable groups besides
+   it; owner decision 2026-10-27); `memberCount` in the join path and
    `members:setDisabled`; `members:invite` checks `maxMembers`.
 10. **Major actions wired** (`requireStepUp`, Section 4.16):
     `settings:setExitPin`, `settings:clearExitPin`, `groups:delete`, and
