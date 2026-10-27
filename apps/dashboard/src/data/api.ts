@@ -33,8 +33,10 @@ import type {
   OrgSettings,
   OverviewScreen,
   PagedState,
+  PlanScreen,
   QueryState,
   Role,
+  SettingsSaved,
   SettingsScreen,
   WebAppInput,
   WebMeta,
@@ -42,6 +44,12 @@ import type {
 } from "./types";
 
 type Mutation<A, R = void> = () => (args: A) => Promise<R>;
+
+/**
+ * The `not_ready` detail of a live hook whose Convex step has not landed yet;
+ * a region shows "Coming in a later step" for it instead of an error.
+ */
+export const NOT_DEPLOYED = "Phase 4 backend function not deployed yet";
 
 export interface DataApi {
   // ---- session (Convex Auth + account:me)
@@ -81,7 +89,8 @@ export interface DataApi {
   useGroupsScreen: () => QueryState<GroupRow[]>;
   useGroupDetail: (groupId: Id) => QueryState<GroupDetail>;
   useCreateGroup: Mutation<{ name: string; description?: string }, Id>;
-  useUpdateGroup: Mutation<{ groupId: Id; expectedRevision: number; name: string; description?: string }>;
+  /** `description`: undefined = unchanged, "" = cleared (the server's rule). */
+  useUpdateGroup: Mutation<{ groupId: Id; expectedRevision: number; name: string; description?: string }, { revision: number }>;
   useDeleteGroup: Mutation<{ groupId: Id }>;
   useAssignApp: Mutation<{ groupId: Id; appId: Id; audience: Audience; pinnedTaskbar: boolean; pinnedDesktop: boolean }>;
   useUpdateAssignment: Mutation<{ assignmentId: Id; audience: Audience; pinnedTaskbar: boolean; pinnedDesktop: boolean }>;
@@ -128,7 +137,8 @@ export interface DataApi {
 
   // ---- settings, signing keys, members
   useSettingsScreen: () => QueryState<SettingsScreen>;
-  useUpdateSettings: Mutation<{ expectedRevision: number; name: string; settings: OrgSettings }>;
+  useUpdateSettings: Mutation<{ expectedRevision: number; name: string; settings: OrgSettings }, SettingsSaved>;
+  usePlan: () => QueryState<PlanScreen>;
   useSetExitPin: Mutation<{ pin: string }>;
   useClearExitPin: Mutation<void>;
   useKeysScreen: () => QueryState<KeysScreen>;

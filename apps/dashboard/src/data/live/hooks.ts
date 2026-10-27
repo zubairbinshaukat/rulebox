@@ -1,6 +1,7 @@
 /**
  * Live implementation (real Convex backend). Session, sign-in, MFA, account
- * and members are wired to the Phase 4 Step 3 functions (Step 4). Every other
+ * and members are wired to the Phase 4 Step 3 functions (Step 4); settings,
+ * the plan and groups to Step 5's. Every other
  * hook answers `not_ready` until its Convex step lands — see `../README.md`
  * for the exact function per hook.
  */
@@ -8,12 +9,12 @@ import { useAuthActions as useConvexAuthActions } from "@convex-dev/auth/react";
 import { useAction, useConvexAuth, useConvexConnectionState, useMutation, useQuery } from "convex/react";
 import { useCallback, useMemo } from "react";
 import { api } from "@convex/_generated/api";
-import type { DataApi } from "../api";
+import { NOT_DEPLOYED, type DataApi } from "../api";
 import { AppError } from "../../lib/errors";
-import type { MeResult, PagedState, QueryState, Role } from "../types";
-import { mapError, useMapped, useMemberQuery } from "./convex";
+import { cappedNumber, type MeResult, type PagedState, type QueryState, type Role } from "../types";
+import { mapError, useMapped, useMappedState, useMemberQuery } from "./convex";
 
-const notReady = () => new AppError({ code: "not_ready", detail: "Phase 4 backend function not deployed yet" });
+const notReady = () => new AppError({ code: "not_ready", detail: NOT_DEPLOYED });
 
 function useNotReady<T>(): QueryState<T> {
   return { status: "error", error: notReady(), retry: () => undefined };
@@ -123,11 +124,43 @@ export const liveApi: DataApi = {
   useRemoveDevice: useNotReadyMutation,
   useRequestRotation: useNotReadyMutation,
 
-  useGroupsScreen: useNotReady,
-  useGroupDetail: useNotReady,
-  useCreateGroup: useNotReadyMutation,
-  useUpdateGroup: useNotReadyMutation,
-  useDeleteGroup: useNotReadyMutation,
+  // ---- groups (Step 5). Counts arrive as `{ count, more }` and become one capped number.
+  useGroupsScreen() {
+    const q = useMemberQuery(api.groups.list, {});
+    return useMappedState(q, (rows) =>
+      rows.map(({ devices, employees, ...g }) => ({ ...g, deviceCount: cappedNumber(devices), employeeCount: cappedNumber(employees) })),
+    );
+  },
+  useGroupDetail(groupId) {
+    const q = useMemberQuery(api.groups.get, { groupId });
+    return useMappedState(q, ({ group: g, apps }) => ({
+      _id: g._id,
+      name: g.name,
+      description: g.description,
+      revision: g.revision,
+      deviceCount: cappedNumber(g.devices),
+      employeeCount: cappedNumber(g.employees),
+      assignments: apps.map((a) => ({ _id: a.appId, appId: a.appId, appName: a.name, appKind: a.kind, audience: a.audience, pinnedTaskbar: a.pinnedTaskbar, pinnedDesktop: a.pinnedDesktop })),
+    }));
+  },
+  useCreateGroup() {
+    const create = useMutation(api.groups.create);
+    const call = useCallback(async (a: { name: string; description?: string }) => (await create(a)).groupId as string, [create]);
+    return useMapped(call);
+  },
+  useUpdateGroup() {
+    return useMapped(useMutation(api.groups.rename));
+  },
+  useDeleteGroup() {
+    const remove = useMutation(api.groups.remove);
+    const call = useCallback(
+      async (a: { groupId: string }) => {
+        await remove(a);
+      },
+      [remove],
+    );
+    return useMapped(call);
+  },
   useAssignApp: useNotReadyMutation,
   useUpdateAssignment: useNotReadyMutation,
   useUnassignApp: useNotReadyMutation,
@@ -166,10 +199,35 @@ export const liveApi: DataApi = {
   useAuditScreen: useNotReadyPaged,
   useHistory: useNotReadyPaged,
 
-  useSettingsScreen: useNotReady,
-  useUpdateSettings: useNotReadyMutation,
-  useSetExitPin: useNotReadyMutation,
-  useClearExitPin: useNotReadyMutation,
+  // ---- organization settings (Step 5). Changing the admin exit, the exit PIN and
+  // deleting a group are major actions: `useMapped` opens the step-up dialog and retries.
+  useSettingsScreen() {
+    return useMemberQuery(api.settings.get, {});
+  },
+  useUpdateSettings() {
+    return useMapped(useMutation(api.settings.update));
+  },
+  usePlan() {
+    return useMemberQuery(api.settings.plan, {});
+  },
+  useSetExitPin() {
+    // An action: the PIN is hashed on the server and never sent to a query.
+    const set = useAction(api.settings.setExitPin);
+    const call = useCallback(
+      async (a: { pin: string }) => {
+        await set(a);
+      },
+      [set],
+    );
+    return useMapped(call);
+  },
+  useClearExitPin() {
+    const clear = useMutation(api.settings.clearExitPin);
+    const call = useCallback(async () => {
+      await clear({});
+    }, [clear]);
+    return useMapped(call);
+  },
   useKeysScreen: useNotReady,
   useRegisterKey: useNotReadyMutation,
   usePrepareRotation: useNotReadyMutation,

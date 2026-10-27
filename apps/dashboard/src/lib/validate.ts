@@ -24,26 +24,33 @@ export function hasErrors(errors: Record<string, string | undefined>): boolean {
   return Object.values(errors).some(Boolean);
 }
 
+// The server's rule (`normalizeOrgName`, groups `normalizeName`): C0 controls and DEL.
 // eslint-disable-next-line no-control-regex
-const CONTROL = /[\u0000-\u001f\u007f-\u009f]/;
+const CONTROL = /[\u0000-\u001f\u007f]/;
 
-/** Names (plan edge case 27): trimmed, 1..max characters, no control characters. */
+/** Names (plan edge case 27): trimmed, 1..max UTF-16 units like the server's `length`, no control characters. */
 export function name(value: string, max: number): Check {
   const t = value.trim();
   if (!t) return v.required;
   if (CONTROL.test(t)) return v.controlChars;
-  if ([...t].length > max) return v.tooLong(max);
+  if (t.length > max) return v.tooLong(max);
   return null;
 }
 
-export const NAME_MAX = { device: 100, employee: 100, app: 60, group: 60, org: 100, label: 60, description: 300 } as const;
+/** Server maxima (convex/lib/limits.ts where they exist: MAX_ORG_NAME, MAX_GROUP_NAME, MAX_GROUP_DESCRIPTION). */
+export const NAME_MAX = { device: 100, employee: 100, app: 60, group: 64, org: 100, label: 60, description: 300 } as const;
 
 export function optionalText(value: string, max: number): Check {
   const t = value.trim();
   if (!t) return null;
   if (CONTROL.test(t)) return v.controlChars;
-  if ([...t].length > max) return v.tooLong(max);
+  if (t.length > max) return v.tooLong(max);
   return null;
+}
+
+/** A multi-line description: the server checks only the trimmed length (groups `normalizeDescription`). */
+export function description(value: string, max: number): Check {
+  return value.trim().length > max ? v.tooLong(max) : null;
 }
 
 export function email(value: string): Check {
@@ -302,70 +309,73 @@ export function extension(value: string): Check {
 // ---------------------------------------------------------------- admin exit
 
 export const DEFAULT_HOTKEY = "Ctrl+Shift+F12";
+/** `MAX_HOTKEY_TEXT` of convex/lib/limits.ts. */
+export const HOTKEY_MAX = 64;
 
-export type HotkeyResult = { ok: true; canonical: string } | { ok: false; reason: string };
+/** The Rust `HotkeyError` variant names (also the server's `detail`). */
+export type HotkeyProblem = "Empty" | "UnknownToken" | "NoKey" | "TwoKeys" | "DuplicateModifier" | "NeedsCtrlOrAlt";
+
+/** `token`: the text that was not a key (UnknownToken only, for the message). */
+export type HotkeyResult = { ok: true; canonical: string } | { ok: false; reason: HotkeyProblem; token?: string };
+
+/** Rust `char::is_whitespace` (differs from JS `trim` on U+0085 and U+FEFF). */
+const RUST_WS = /^[\t-\r \x85\xa0\u{1680}\u{2000}-\u{200a}\u{2028}\u{2029}\u{202f}\u{205f}\u{3000}]$/u;
+
+function rustTrim(text: string): string {
+  const cps = [...text];
+  let a = 0;
+  let b = cps.length;
+  while (a < b && RUST_WS.test(cps[a]!)) a++;
+  while (b > a && RUST_WS.test(cps[b - 1]!)) b--;
+  return cps.slice(a, b).join("");
+}
 
 /**
- * Port of `rulebox_ipc::hotkey::parse` (crates/rulebox-ipc/src/hotkey.rs):
- * `+`-separated tokens, case-insensitive; Ctrl/Alt/Shift at most once each;
- * exactly one key A–Z, 0–9 or F1–F12; Ctrl or Alt required.
+ * Port of `convex/lib/hotkey.ts` = `rulebox_ipc::hotkey::parse` (the source
+ * of truth; the shared vectors in crates/rulebox-ipc/tests/vectors/hotkeys.json
+ * run against all three). `+`-separated tokens, ASCII case-insensitive;
+ * Ctrl/Alt/Shift at most once each; exactly one key A–Z, 0–9 or F1–F12;
+ * Ctrl or Alt required. Canonical form: `Ctrl+Alt+Shift+<KEY>`.
  */
 export function parseHotkey(text: string): HotkeyResult {
-  const h = strings.hotkey;
-  if (!text.trim()) return { ok: false, reason: h.empty };
-  let ctrl = false;
-  let alt = false;
-  let shift = false;
+  if (rustTrim(text) === "") return { ok: false, reason: "Empty" };
+  const mods = { ctrl: false, alt: false, shift: false };
   let key: string | null = null;
   for (const raw of text.split("+")) {
-    const token = raw.trim();
-    const lower = token.toLowerCase();
+    const token = rustTrim(raw);
+    const lower = token.replace(/[A-Z]/g, (c) => c.toLowerCase());
     if (lower === "ctrl" || lower === "alt" || lower === "shift") {
-      const already = lower === "ctrl" ? ctrl : lower === "alt" ? alt : shift;
-      if (already) return { ok: false, reason: h.duplicate };
-      if (lower === "ctrl") ctrl = true;
-      else if (lower === "alt") alt = true;
-      else shift = true;
+      if (mods[lower]) return { ok: false, reason: "DuplicateModifier" };
+      mods[lower] = true;
       continue;
     }
-    if (lower === "win" || lower === "windows" || lower === "meta") return { ok: false, reason: h.win };
-    const parsed = parseHotkeyKey(token);
-    if (!parsed) return { ok: false, reason: h.unknownKey(token) };
-    if (key !== null) return { ok: false, reason: h.oneKey };
+    const upper = token.replace(/[a-z]/g, (c) => c.toUpperCase());
+    // One ASCII letter or digit, or F1-F12 written plainly (no sign, no leading zero).
+    const parsed = /^[A-Z0-9]$/.test(upper) ? upper : /^F(?:[1-9]|1[0-2])$/.test(upper) ? upper : null;
+    if (parsed === null) return { ok: false, reason: "UnknownToken", token };
+    if (key !== null) return { ok: false, reason: "TwoKeys" };
     key = parsed;
   }
-  if (key === null) return { ok: false, reason: h.needsKey };
-  if (!ctrl && !alt) return { ok: false, reason: h.needsModifiers };
-  const parts = [ctrl && "Ctrl", alt && "Alt", shift && "Shift", key].filter(Boolean) as string[];
-  return { ok: true, canonical: parts.join("+") };
+  if (key === null) return { ok: false, reason: "NoKey" };
+  if (!mods.ctrl && !mods.alt) return { ok: false, reason: "NeedsCtrlOrAlt" };
+  return { ok: true, canonical: [mods.ctrl && "Ctrl", mods.alt && "Alt", mods.shift && "Shift", key].filter(Boolean).join("+") };
 }
 
-function parseHotkeyKey(token: string): string | null {
-  const upper = token.toUpperCase();
-  if (/^[A-Z]$/.test(upper) || /^[0-9]$/.test(upper)) return upper;
-  const m = /^F([1-9]\d?)$/.exec(upper);
-  if (m) {
-    const num = Number(m[1]);
-    if (num >= 1 && num <= 12 && String(num) === m[1]) return `F${num}`;
-  }
+/** `exitPinProblem` of convex/lib/orgSettings.ts: the server's `detail`, or null when acceptable. */
+export type ExitPinProblem = "6 to 12 digits" | "all digits the same" | "sequence";
+
+/** Exit PIN (Section 4.10): 6–12 ASCII digits; not all the same; not a run up or down by one (no wrap). */
+export function exitPinProblem(pin: string): ExitPinProblem | null {
+  if (!/^[0-9]{6,12}$/.test(pin)) return "6 to 12 digits";
+  if (/^(\d)\1+$/.test(pin)) return "all digits the same";
+  if ("0123456789".includes(pin) || "9876543210".includes(pin)) return "sequence";
   return null;
 }
 
-export function hotkey(text: string): Check {
-  const r = parseHotkey(text);
-  return r.ok ? null : v.hotkey(r.reason);
-}
-
-/** Exit PIN (Section 4.10): 6–12 ASCII digits; not all the same; not an ascending/descending run. */
 export function exitPin(value: string): Check {
   if (!value) return v.required;
-  if (!/^[0-9]{6,12}$/.test(value)) return v.pin;
-  if (/^(\d)\1+$/.test(value)) return v.pinWeak;
-  const digits = [...value].map(Number);
-  const asc = digits.every((d, i) => i === 0 || d === ((digits[i - 1]! + 1) % 10));
-  const desc = digits.every((d, i) => i === 0 || d === ((digits[i - 1]! + 9) % 10));
-  if (asc || desc) return v.pinWeak;
-  return null;
+  const p = exitPinProblem(value);
+  return p === null ? null : p === "6 to 12 digits" ? v.pin : v.pinWeak;
 }
 
 // ---------------------------------------------------------------- MFA

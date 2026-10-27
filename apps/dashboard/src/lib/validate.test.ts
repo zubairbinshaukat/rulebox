@@ -1,35 +1,50 @@
 import { describe, expect, it } from "vitest";
+import raw from "../../../../crates/rulebox-ipc/tests/vectors/hotkeys.json?raw";
 import * as v from "./validate";
 
-describe("hotkey (port of rulebox_ipc::hotkey::parse, same examples as the Rust tests)", () => {
-  it.each([
-    ["Ctrl+Shift+F12", "Ctrl+Shift+F12"],
-    [" ctrl + shift + f12 ", "Ctrl+Shift+F12"],
-    ["shift+CTRL+F12", "Ctrl+Shift+F12"],
-    ["Ctrl+Alt+Shift+R", "Ctrl+Alt+Shift+R"],
-    ["Ctrl+0", "Ctrl+0"],
-    ["Alt+9", "Alt+9"],
-    ["Alt+F1", "Alt+F1"],
-    ["Ctrl+Alt+Z", "Ctrl+Alt+Z"],
-    ["shift+alt+ctrl+r", "Ctrl+Alt+Shift+R"],
-  ])("accepts %s", (text, canonical) => {
-    expect(v.parseHotkey(text)).toEqual({ ok: true, canonical });
+// The shared vectors: `rulebox_ipc::hotkey::parse` (Rust, the source of truth),
+// convex/lib/hotkey.ts and this port must agree on every one.
+const vectors = JSON.parse(raw) as { accept: [string, string][]; reject: [string, v.HotkeyProblem][] };
+
+describe("hotkey = rulebox_ipc::hotkey::parse (crates/rulebox-ipc/tests/vectors/hotkeys.json)", () => {
+  it("the vector file is not empty", () => {
+    expect(vectors.accept.length).toBeGreaterThanOrEqual(10);
+    expect(vectors.reject.length).toBeGreaterThanOrEqual(10);
   });
-  it.each(["", "   ", "Shift+A", "Ctrl", "Ctrl+Shift", "Ctrl+A+B", "Ctrl+Ctrl+A", "Ctrl+Del", "Alt+Tab", "Ctrl+F13", "Ctrl+F0", "Ctrl+F01", "Ctrl+Esc", "Ctrl+", "Ctrl+Alt+Del", "Ctrl+10", "Ctrl+\u00e9", "Win+L"])(
-    "refuses %j",
-    (text) => {
-      expect(v.parseHotkey(text).ok).toBe(false);
-      expect(v.hotkey(text)).toBeTruthy();
-    },
-  );
+  it.each(vectors.accept)("accepts %j as %s", (text, canonical) => {
+    expect(v.parseHotkey(text)).toEqual({ ok: true, canonical });
+    expect(v.parseHotkey(canonical)).toEqual({ ok: true, canonical });
+  });
+  it.each(vectors.reject)("refuses %j (%s)", (text, reason) => {
+    const r = v.parseHotkey(text);
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.reason).toBe(reason);
+  });
+  it("the default is canonical", () => {
+    expect(v.parseHotkey(v.DEFAULT_HOTKEY)).toEqual({ ok: true, canonical: v.DEFAULT_HOTKEY });
+  });
+  it("names the token that is not a key", () => {
+    expect(v.parseHotkey("Ctrl+Esc")).toEqual({ ok: false, reason: "UnknownToken", token: "Esc" });
+  });
 });
 
-describe("exit PIN (Section 4.10)", () => {
-  it.each(["12345", "1234567890123", "111111", "123456", "987654", "12a456", ""])("refuses %j", (pin) => {
+describe("exit PIN = exitPinProblem of convex/lib/orgSettings.ts (Section 4.10)", () => {
+  it.each([
+    ["12345", "6 to 12 digits"],
+    ["1234567890123", "6 to 12 digits"],
+    ["12a456", "6 to 12 digits"],
+    ["", "6 to 12 digits"],
+    ["111111", "all digits the same"],
+    ["123456", "sequence"],
+    ["987654", "sequence"],
+    ["0123456789", "sequence"],
+  ])("refuses %j (%s)", (pin, problem) => {
+    expect(v.exitPinProblem(pin)).toBe(problem);
     expect(v.exitPin(pin)).toBeTruthy();
   });
-  it("accepts 246813", () => {
-    expect(v.exitPin("246813")).toBeNull();
+  it.each(["246813", "890123", "121212", "135790"])("accepts %j (the server has no wrap-around or pattern rule)", (pin) => {
+    expect(v.exitPinProblem(pin)).toBeNull();
+    expect(v.exitPin(pin)).toBeNull();
   });
 });
 
@@ -39,6 +54,11 @@ describe("names, usernames, passwords", () => {
     expect(v.name("a".repeat(61), 60)).toBeTruthy();
     expect(v.name("ok\nname", 60)).toBeTruthy();
     expect(v.name("  Front desk  ", 60)).toBeNull();
+    // Group names: 64 like MAX_GROUP_NAME; descriptions may span lines (length only).
+    expect(v.name("g".repeat(64), v.NAME_MAX.group)).toBeNull();
+    expect(v.name("g".repeat(65), v.NAME_MAX.group)).toBeTruthy();
+    expect(v.description("line one\nline two", 300)).toBeNull();
+    expect(v.description("d".repeat(301), 300)).toBeTruthy();
   });
   it("usernames: 1–64 of letters, digits, . _ -", () => {
     expect(v.username("Maya")).toBeNull();

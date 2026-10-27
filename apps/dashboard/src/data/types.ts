@@ -188,12 +188,51 @@ export interface OrgSettings {
   adminExit: { enabled: boolean; hotkey: string };
 }
 
-/** `settings:get` — never the PIN hash. */
+/** `settings:get` — never the PIN hash. `setAt`: when the current exit PIN was set (server time). */
 export interface SettingsScreen {
   name: string;
   revision: number;
   settings: OrgSettings;
-  exitPin: { set: boolean };
+  exitPin: { set: boolean; setAt?: number };
+}
+
+/** `settings:update` */
+export interface SettingsSaved {
+  revision: number;
+  /** Top-level names that changed ("name", "offlineDays", "power", "adminExit", …); empty = nothing written. */
+  changed: string[];
+}
+
+// ---------------------------------------------------------------- plans (plan 4.2.1)
+
+export type PlanName = "free" | "team" | "custom";
+export type PlanStatus = "active" | "suspended" | "pendingDeletion";
+
+/** `planLimits` of convex/lib/validators.ts. "No limit" is a very large number (`UNLIMITED`). */
+export interface PlanLimits {
+  maxDevices: number;
+  maxEmployees: number;
+  maxApps: number;
+  maxGroups: number;
+  maxMembers: number;
+  auditRetentionDays: number;
+  storageQuotaBytes: number;
+  maxUploadBytes: number;
+  watchMode: boolean;
+  maxEnrollmentCodesActive: number;
+}
+
+/** The `plan_limit` detail names (`LimitKind` of convex/lib/plans.ts). */
+export type LimitKind = "devices" | "employees" | "apps" | "groups" | "members" | "enrollmentCodes";
+
+/** `settings:plan` */
+export interface PlanScreen {
+  plan: PlanName;
+  status: PlanStatus;
+  suspendedReason?: string;
+  limits: PlanLimits;
+  usage: Record<LimitKind, number>;
+  pingIntervalMs: number;
 }
 
 export type PolicyKeyStatus = "active" | "next" | "retired";
@@ -215,14 +254,33 @@ export interface KeysScreen {
 
 // ---------------------------------------------------------------- groups
 
-/** `groups:list` row. Counts are capped at 501 by the server ("500+"). */
+/**
+ * `groups:list` row. The server sends `{ count, more }` per count
+ * (`.take(501)`); the seam turns it into one number capped at 501, shown as
+ * "500+" (`formatCount(n, 500)`).
+ */
 export interface GroupRow {
   _id: Id;
   name: string;
   description?: string;
+  revision: number;
   deviceCount: number;
   employeeCount: number;
   createdAt?: number;
+}
+
+/** A count read with `.take(cap + 1)` (`groups:list` / `groups:get`). */
+export interface CappedCount {
+  count: number;
+  more: boolean;
+}
+
+/** `GROUP_COUNT_CAP` of convex/lib/limits.ts. */
+export const GROUP_COUNT_CAP = 500;
+
+/** `{ count, more }` → one number; above the cap it is cap + 1 ("500+"). */
+export function cappedNumber(c: CappedCount): number {
+  return c.more ? GROUP_COUNT_CAP + 1 : c.count;
 }
 
 export type Audience = "everyone" | "selected";
@@ -238,7 +296,12 @@ export interface AssignmentRow {
   pinnedDesktop: boolean;
 }
 
-/** `groups:get` */
+/**
+ * `groups:get`: the group, its counts (capped like `GroupRow`) and its
+ * assigned apps (`.take(150)`). Assignment rows carry the app id as `_id`
+ * until Step 10 adds assignment ids and the editing functions. Enrollment
+ * codes are not counted here: `groups:remove` names them in `has_dependents`.
+ */
 export interface GroupDetail {
   _id: Id;
   name: string;
@@ -247,9 +310,6 @@ export interface GroupDetail {
   assignments: AssignmentRow[];
   deviceCount: number;
   employeeCount: number;
-  enrollmentCodeCount: number;
-  /** App picker for "Assign app" (`apps.by_org_archived` `.take(500)`). */
-  appOptions: AppOption[];
 }
 
 export interface GroupOption {

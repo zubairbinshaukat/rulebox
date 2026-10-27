@@ -199,6 +199,13 @@ function nameOrFail(value: string, max: number, field = "name") {
   return value.trim();
 }
 
+/** Groups `normalizeDescription`: trimmed, at most 300; "" = none. */
+function descriptionOrFail(value: string | undefined): string | undefined {
+  if (value === undefined) return undefined;
+  if (validate.description(value, validate.NAME_MAX.description)) fail("invalid_argument", { field: "description" });
+  return value.trim() || undefined;
+}
+
 // ---------------------------------------------------------------- session
 
 let booted = false;
@@ -652,6 +659,7 @@ export const demoApi: DataApi = {
           _id: g._id,
           name: g.name,
           description: g.description,
+          revision: g.revision,
           createdAt: g.createdAt,
           deviceCount: Math.min(db.devices.filter((d) => d.groupId === g._id).length, 501),
           employeeCount: Math.min(db.groupMembers.filter((m) => m.groupId === g._id).length, 501),
@@ -675,27 +683,30 @@ export const demoApi: DataApi = {
           .slice(0, 150),
         deviceCount: Math.min(db.devices.filter((d) => d.groupId === g._id).length, 501),
         employeeCount: Math.min(db.groupMembers.filter((m) => m.groupId === g._id).length, 501),
-        enrollmentCodeCount: db.tokens.filter((t) => t.groupId === g._id && codeState(t, Date.now()) === "active").length,
-        appOptions: appOptions(db),
       };
     });
   },
 
+  // `groups:create`: exact-name uniqueness (`by_org_name`), then the plan's `maxGroups`.
   useCreateGroup() {
     return useCallback(
       ({ name, description }) =>
         runMutation("admin", ({ db, audit, now }) => {
           const clean = nameOrFail(name, validate.NAME_MAX.group);
-          if (db.groups.some((g) => g.name.toLowerCase() === clean.toLowerCase())) fail("conflict", { field: "name" });
+          const desc = descriptionOrFail(description);
+          if (db.groups.some((g) => g.name === clean)) fail("conflict", { field: "name" });
+          if (db.org.plan.status !== "active") fail("plan_limit", { detail: "suspended" });
+          if (db.groups.length + 1 > db.org.plan.limits.maxGroups) fail("plan_limit", { detail: "groups" });
           const id = newId("grp");
-          db.groups.push({ _id: id, name: clean, description: description?.trim() || undefined, revision: 0, createdAt: now });
-          audit({ action: "group.created", targetType: "group", targetId: id, targetLabel: clean, summary: `Group “${clean}” created.` });
+          db.groups.push({ _id: id, name: clean, description: desc, revision: 0, createdAt: now });
+          audit({ action: "group.created", targetType: "group", targetId: id, targetLabel: clean, summary: `Created the group ${clean}` });
           return id;
         }),
       [],
     );
   },
 
+  // `groups:rename`: description undefined = unchanged, "" = cleared; nothing changed = no write.
   useUpdateGroup() {
     return useCallback(
       ({ groupId, expectedRevision, name, description }) =>
@@ -703,31 +714,47 @@ export const demoApi: DataApi = {
           const g = find(db.groups, groupId);
           checkRevision(g, expectedRevision);
           const clean = nameOrFail(name, validate.NAME_MAX.group);
-          if (db.groups.some((x) => x._id !== g._id && x.name.toLowerCase() === clean.toLowerCase())) fail("conflict", { field: "name" });
+          const desc = description === undefined ? g.description : descriptionOrFail(description);
           const renamed = g.name !== clean;
+          if (!renamed && desc === g.description) return { revision: g.revision };
+          if (renamed && db.groups.some((x) => x._id !== g._id && x.name === clean)) fail("conflict", { field: "name" });
+          const before = g.name;
           g.name = clean;
-          g.description = description?.trim() || undefined;
+          g.description = desc;
           g.revision++;
-          audit({ action: renamed ? "group.renamed" : "group.renamed", targetType: "group", targetId: g._id, targetLabel: clean, summary: renamed ? `Renamed to “${clean}”.` : "Description changed." });
+          audit({
+            action: renamed ? "group.renamed" : "group.updated",
+            targetType: "group",
+            targetId: g._id,
+            targetLabel: clean,
+            summary: renamed ? `Renamed the group ${before} to ${clean}` : `Changed the description of the group ${clean}`,
+          });
+          return { revision: g.revision };
         }),
       [],
     );
   },
 
+  // `groups:remove` (major): `has_dependents` names what still uses the group.
   useDeleteGroup() {
     return useCallback(
       ({ groupId }) =>
-        runMutation("admin", ({ db, audit }) => {
-          const g = find(db.groups, groupId);
-          const busy =
-            db.devices.some((d) => d.groupId === groupId) ||
-            db.groupMembers.some((m) => m.groupId === groupId) ||
-            db.assignments.some((a) => a.groupId === groupId) ||
-            db.tokens.some((t) => t.groupId === groupId && !t.revoked && t.expiresAt > Date.now() && t.usesLeft > 0);
-          if (busy) fail("has_dependents");
-          db.groups = db.groups.filter((x) => x._id !== groupId);
-          audit({ action: "group.deleted", targetType: "group", targetId: g._id, targetLabel: g.name, summary: `Group “${g.name}” deleted.` });
-        }),
+        runMutation(
+          "admin",
+          ({ db, audit, now }) => {
+            const g = find(db.groups, groupId);
+            const dependents = [
+              db.devices.some((d) => d.groupId === groupId) ? "devices" : null,
+              db.groupMembers.some((m) => m.groupId === groupId) ? "employees" : null,
+              db.assignments.some((a) => a.groupId === groupId) ? "apps" : null,
+              db.tokens.some((t) => t.groupId === groupId && !t.revoked && t.expiresAt > now && t.usesLeft > 0) ? "enrollment codes" : null,
+            ].filter((x) => x !== null);
+            if (dependents.length > 0) fail("has_dependents", { detail: dependents.join(", ") });
+            db.groups = db.groups.filter((x) => x._id !== groupId);
+            audit({ action: "group.deleted", targetType: "group", targetId: g._id, targetLabel: g.name, summary: `Deleted the group ${g.name}` });
+          },
+          "fresh",
+        ),
       [],
     );
   },
@@ -1407,45 +1434,93 @@ export const demoApi: DataApi = {
         name: db.org.name,
         revision: db.org.revision,
         settings: structuredClone(db.org.settings),
-        exitPin: { set: db.org.exitPinSet },
+        exitPin: { set: db.org.exitPinSetAt !== undefined, setAt: db.org.exitPinSetAt },
       };
     });
   },
 
+  // `settings:update`: every rule of convex/lib/orgSettings.ts; nothing changed =
+  // no write; a changed admin exit is a major action (fresh step-up).
   useUpdateSettings() {
-    return useCallback(
-      ({ expectedRevision, name, settings }) =>
-        runMutation("admin", ({ db, audit }) => {
-          checkRevision(db.org, expectedRevision);
-          const clean = nameOrFail(name, validate.NAME_MAX.org);
-          if (settings.offlineDays < 0 || settings.offlineDays > 30) fail("invalid_argument", { field: "offlineDays" });
-          if (settings.defaultQuotaGb < 0 || settings.defaultQuotaGb > 2000) fail("invalid_argument", { field: "defaultQuotaGb" });
-          const hk = validate.parseHotkey(settings.adminExit.hotkey);
-          if (!hk.ok) fail("invalid_argument", { field: "hotkey" });
-          const before = db.org.settings;
-          const changed: string[] = [];
-          if (db.org.name !== clean) changed.push("name");
-          if (before.offlineDays !== settings.offlineDays) changed.push("offlineDays");
-          if (before.defaultQuotaGb !== settings.defaultQuotaGb) changed.push("defaultQuotaGb");
-          if (JSON.stringify(before.power) !== JSON.stringify(settings.power)) changed.push("power");
-          if (JSON.stringify(before.adminExit) !== JSON.stringify({ ...settings.adminExit, hotkey: hk.canonical })) changed.push("adminExit");
+    return useCallback(async ({ expectedRevision, name, settings }) => {
+      const check = (db: DemoDb) => {
+        checkRevision(db.org, expectedRevision);
+        const clean = nameOrFail(name, validate.NAME_MAX.org);
+        const whole = (n: number, max: number) => Number.isInteger(n) && n >= 0 && n <= max;
+        if (!whole(settings.offlineDays, 30)) fail("invalid_argument", { field: "offlineDays" });
+        if (!whole(settings.defaultQuotaGb, 2000)) fail("invalid_argument", { field: "defaultQuotaGb" });
+        if (settings.adminExit.hotkey.length > validate.HOTKEY_MAX) fail("invalid_argument", { field: "adminExit.hotkey" });
+        const hk = validate.parseHotkey(settings.adminExit.hotkey);
+        if (!hk.ok) fail("invalid_argument", { field: "adminExit.hotkey", detail: hk.reason });
+        const next = { ...settings, power: { ...settings.power }, adminExit: { enabled: settings.adminExit.enabled, hotkey: hk.canonical } };
+        const before = db.org.settings;
+        const changed: string[] = [];
+        if (db.org.name !== clean) changed.push("name");
+        if (before.offlineDays !== next.offlineDays) changed.push("offlineDays");
+        if (before.defaultQuotaGb !== next.defaultQuotaGb) changed.push("defaultQuotaGb");
+        if (JSON.stringify(before.power) !== JSON.stringify(next.power)) changed.push("power");
+        if (JSON.stringify(before.adminExit) !== JSON.stringify(next.adminExit)) changed.push("adminExit");
+        return { clean, next, changed };
+      };
+      // The step-up level depends on what changes, as in the server's handler.
+      let level: "unlocked" | "fresh" = "unlocked";
+      try {
+        if (check(getDb()).changed.includes("adminExit")) level = "fresh";
+      } catch {
+        // Invalid input: the mutation below throws the same error.
+      }
+      return runMutation(
+        "admin",
+        ({ db, audit }) => {
+          const { clean, next, changed } = check(db);
+          if (changed.length === 0) return { revision: db.org.revision, changed };
           db.org.name = clean;
-          db.org.settings = { ...settings, adminExit: { ...settings.adminExit, hotkey: hk.canonical } };
+          db.org.settings = next;
           db.org.revision++;
-          audit({ action: "org.settingsChanged", summary: changed.length ? `Changed: ${changed.join(", ")}.` : "Saved without changes." });
-        }),
-      [],
-    );
+          audit({ action: "org.settingsChanged", targetType: "organization", targetId: db.org._id, targetLabel: clean, summary: `Changed organization settings: ${changed.join(", ")}` });
+          return { revision: db.org.revision, changed };
+        },
+        level,
+      );
+    }, []);
   },
 
+  usePlan() {
+    return useDemoQuery("settings:plan", (db) => {
+      requireReader();
+      const now = Date.now();
+      return {
+        plan: db.org.plan.plan,
+        status: db.org.plan.status,
+        limits: { ...db.org.plan.limits },
+        usage: {
+          devices: db.devices.filter((d) => !d.revoked).length,
+          employees: db.employees.length,
+          apps: db.apps.length,
+          groups: db.groups.length,
+          members: db.members.filter((m) => m.status === "active").length,
+          enrollmentCodes: db.tokens.filter((t) => codeState(t, now) === "active").length,
+        },
+        pingIntervalMs: db.pingIntervalMs,
+      };
+    });
+  },
+
+  // `settings:setExitPin` (admin action, major): the server's rule, only a "set at" is kept.
   useSetExitPin() {
     return useCallback(
       ({ pin }) =>
-        runMutation("admin", ({ db, audit }) => {
-          if (validate.exitPin(pin)) fail("invalid_argument", { field: "pin" });
-          db.org.exitPinSet = true;
-          audit({ action: "org.exitPinSet", summary: "Exit PIN set." });
-        }),
+        runMutation(
+          "admin",
+          ({ db, audit, now }) => {
+            const problem = validate.exitPinProblem(pin);
+            if (problem !== null) fail("invalid_argument", { field: "pin", detail: problem });
+            const replaced = db.org.exitPinSetAt !== undefined;
+            db.org.exitPinSetAt = now;
+            audit({ action: "org.exitPinSet", targetType: "organization", targetId: db.org._id, summary: replaced ? "Changed the device exit PIN" : "Set the device exit PIN" });
+          },
+          "fresh",
+        ),
       [],
     );
   },
@@ -1453,10 +1528,15 @@ export const demoApi: DataApi = {
   useClearExitPin() {
     return useCallback(
       () =>
-        runMutation("admin", ({ db, audit }) => {
-          db.org.exitPinSet = false;
-          audit({ action: "org.exitPinCleared", summary: "Exit PIN cleared." });
-        }),
+        runMutation(
+          "admin",
+          ({ db, audit }) => {
+            if (db.org.exitPinSetAt === undefined) return;
+            db.org.exitPinSetAt = undefined;
+            audit({ action: "org.exitPinCleared", targetType: "organization", targetId: db.org._id, summary: "Removed the device exit PIN" });
+          },
+          "fresh",
+        ),
       [],
     );
   },

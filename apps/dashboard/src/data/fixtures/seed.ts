@@ -16,12 +16,35 @@ import type {
   InstallState,
   KioskPhase,
   OrgSettings,
+  PlanLimits,
+  PlanName,
+  PlanStatus,
   PolicyKeyStatus,
   Role,
   ShellHealth,
   WebSpec,
 } from "../types";
 import { DEFAULT_WEB_PERMISSIONS } from "../types";
+
+const GIB = 1024 * 1024 * 1024;
+
+/**
+ * `TEAM_LIMITS` of convex/lib/plans.ts (placeholder values there too), with
+ * devices and employees raised by the operator (`plans:setLimits`) so the
+ * demo's 500+ PCs fit. Groups keep 50: "New group" can reach the limit.
+ */
+export const DEMO_TEAM_LIMITS: PlanLimits = {
+  maxDevices: 1000,
+  maxEmployees: 1000,
+  maxApps: 200,
+  maxGroups: 50,
+  maxMembers: 10,
+  auditRetentionDays: 365,
+  storageQuotaBytes: 10 * GIB,
+  maxUploadBytes: 2 * GIB,
+  watchMode: true,
+  maxEnrollmentCodesActive: 20,
+};
 
 export const DEMO_PASSWORD = "rulebox-demo-1";
 export const DEMO_TOTP = "123456";
@@ -162,7 +185,16 @@ export interface DbKey {
 }
 
 export interface DemoDb {
-  org: { _id: string; name: string; revision: number; settings: OrgSettings; exitPinSet: boolean };
+  org: {
+    _id: string;
+    name: string;
+    revision: number;
+    settings: OrgSettings;
+    /** When the exit PIN was set (`organizations.exitPinSetAt`); undefined = none. */
+    exitPinSetAt?: number;
+    /** `orgPlans`: the demo org is on the (placeholder) Team plan. */
+    plan: { plan: PlanName; status: PlanStatus; limits: PlanLimits };
+  };
   pingIntervalMs: number;
   members: DbMember[];
   invites: DbInvite[];
@@ -803,7 +835,8 @@ export function seed(now: number = Date.now()): DemoDb {
         power: { sleep: true, restart: true, shutDown: false },
         adminExit: { enabled: true, hotkey: "Ctrl+Shift+F12" },
       },
-      exitPinSet: true,
+      exitPinSetAt: now - 41 * DAY,
+      plan: { plan: "team", status: "active", limits: { ...DEMO_TEAM_LIMITS } },
     },
     pingIntervalMs: pingIntervalFor(devices.filter((d) => !d.revoked).length),
     members,

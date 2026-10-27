@@ -7,6 +7,7 @@ import { Card } from "../../components/Card";
 import { ConfirmDialog } from "../../components/ConfirmDialog";
 import { Field } from "../../components/Field";
 import { FormError } from "../../components/FormError";
+import { serverFieldError } from "../../components/serverField";
 import { Modal } from "../../components/Modal";
 import { InlineNotice } from "../../components/Notice";
 import { QueryRegion } from "../../components/Region";
@@ -17,9 +18,18 @@ import { useToast } from "../../lib/toast";
 import { strings } from "../../lib/strings";
 import { useForm } from "../../lib/useForm";
 import * as v from "../../lib/validate";
+import { exit as s, exitPinMessage, hotkeyMessage } from "./strings";
 
-const s = strings.settings.exit;
+const HOTKEY_FIELD = "adminExit.hotkey";
 
+/** The sentence for a key combination, or null when it is valid (the same grammar as the server and the PCs). */
+function hotkeyError(text: string): string | null {
+  if (text.length > v.HOTKEY_MAX) return strings.validate.tooLong(v.HOTKEY_MAX);
+  const r = v.parseHotkey(text);
+  return r.ok ? null : hotkeyMessage(r);
+}
+
+/** Settings → Admin exit: `settings:get`; saving a changed admin exit and the exit PIN need a fresh step-up. */
 export function AdminExitTab() {
   const settings = useSettingsScreen();
   const [formKey, setFormKey] = useState(0);
@@ -28,7 +38,7 @@ export function AdminExitTab() {
       {(data) => (
         <>
           <ExitForm key={formKey} data={data} onReload={() => setFormKey((k) => k + 1)} />
-          <PinCard set={data.exitPin.set} />
+          <PinCard pin={data.exitPin} />
         </>
       )}
     </QueryRegion>
@@ -41,11 +51,17 @@ function ExitForm({ data, onReload }: { data: SettingsScreen; onReload: () => vo
   const toast = useToast();
   const form = useRef<HTMLFormElement>(null);
   const [revision, setRevision] = useState(data.revision);
+  const [typed, setTyped] = useState(false);
   const f = useForm({ enabled: data.settings.adminExit.enabled, hotkey: data.settings.adminExit.hotkey }, (x) => ({
-    hotkey: x.enabled ? (v.hotkey(x.hotkey) ?? undefined) : undefined,
+    hotkey: hotkeyError(x.hotkey) ?? undefined,
   }));
-  // Live feedback as the admin types (Step 5 #7), before the first submit too.
-  const live = f.values.hotkey ? v.parseHotkey(f.values.hotkey) : null;
+  // Live feedback while the admin types (Step 5 #7), before the first submit too.
+  const live = typed ? hotkeyError(f.values.hotkey) : null;
+  const parsed = v.parseHotkey(f.values.hotkey);
+  const canonicalHint = parsed.ok && parsed.canonical !== f.values.hotkey ? s.hotkeyCanonical(parsed.canonical) : null;
+  const serverHotkey = serverFieldError(f.serverError, HOTKEY_FIELD, (e) =>
+    e.detail ? hotkeyMessage({ ok: false, reason: e.detail as v.HotkeyProblem }) : strings.errors.invalidArgument,
+  );
 
   return (
     <Card title={strings.settings.tabs.adminExit} sub={s.lead}>
@@ -57,50 +73,55 @@ function ExitForm({ data, onReload }: { data: SettingsScreen; onReload: () => vo
           e.preventDefault();
           void f.submit(async (x) => {
             const hk = v.parseHotkey(x.hotkey);
-            await update({
+            const r = await update({
               expectedRevision: revision,
               name: data.name,
               settings: { ...data.settings, adminExit: { enabled: x.enabled, hotkey: hk.ok ? hk.canonical : x.hotkey } },
             });
-            setRevision((r) => r + 1);
-            toast(s.saved);
+            setRevision(r.revision);
+            if (hk.ok) f.reset({ enabled: x.enabled, hotkey: hk.canonical });
+            setTyped(false);
+            toast(r.changed.length ? s.saved : strings.common.saved);
           }, form.current);
         }}
       >
         {!canAct ? <InlineNotice tone="neutral" title={strings.app.readOnly} /> : null}
-        <Switch checked={f.values.enabled} onChange={(val) => f.set("enabled", val)} label={s.enabled} disabled={!canAct} />
-        <Field
-          label={s.hotkey}
-          hint={live && live.ok && live.canonical !== f.values.hotkey ? `${s.hotkeyHint} → ${live.canonical}` : s.hotkeyHint}
-          error={f.errors.hotkey ?? (live && !live.ok && f.values.hotkey.length > 2 ? strings.validate.hotkey(live.reason) : null)}
-          required
-        >
+        <div className="dash-stack" style={{ gap: 6 }}>
+          <Switch checked={f.values.enabled} onChange={(val) => f.set("enabled", val)} label={s.enabled} disabled={!canAct} />
+          {canAct ? <p className="dash-field__hint">{s.enabledHint}</p> : null}
+        </div>
+        <Field label={s.hotkey} hint={canonicalHint ?? s.hotkeyHint} error={f.errors.hotkey ?? live ?? serverHotkey} required>
           {(p) => (
-            <div className="dash-row" style={{ flexWrap: "nowrap" }}>
+            <div className="dash-row" style={{ flexWrap: "wrap" }}>
               <Input
                 {...p}
                 className="dash-mono"
                 value={f.values.hotkey}
-                disabled={!canAct || !f.values.enabled}
+                disabled={!canAct}
                 autoComplete="off"
                 spellCheck={false}
-                onChange={(e) => f.set("hotkey", e.target.value)}
-                style={{ maxWidth: 280 }}
+                autoCapitalize="off"
+                onChange={(e) => {
+                  setTyped(true);
+                  f.set("hotkey", e.target.value);
+                }}
+                style={{ maxWidth: 280, flex: "1 1 180px" }}
               />
               {canAct ? (
-                <Button variant="ghost" onClick={() => f.set("hotkey", v.DEFAULT_HOTKEY)} disabled={!f.values.enabled || f.values.hotkey === v.DEFAULT_HOTKEY}>
+                <Button variant="ghost" onClick={() => f.set("hotkey", v.DEFAULT_HOTKEY)} disabled={f.values.hotkey === v.DEFAULT_HOTKEY}>
                   {s.useDefault}
                 </Button>
               ) : null}
             </div>
           )}
         </Field>
-        <FormError error={f.serverError} onReload={onReload} />
+        <FormError error={f.serverError} onReload={onReload} fields={[HOTKEY_FIELD]} />
         {canAct ? (
           <div className="dash-form__actions">
             <Button type="submit" disabled={f.pending} aria-busy={f.pending}>
               {f.pending ? strings.common.saving : strings.common.saveChanges}
             </Button>
+            {f.dirty ? <span className="dash-form__status">{strings.common.unsavedHint}</span> : null}
           </div>
         ) : null}
       </form>
@@ -108,7 +129,8 @@ function ExitForm({ data, onReload }: { data: SettingsScreen; onReload: () => vo
   );
 }
 
-function PinCard({ set }: { set: boolean }) {
+/** The exit PIN is never shown: only whether one is set, and since when. Admins and Owners change it. */
+function PinCard({ pin }: { pin: SettingsScreen["exitPin"] }) {
   const [dialog, setDialog] = useState<"set" | "clear" | null>(null);
   const clear = useClearExitPin();
   const toast = useToast();
@@ -119,9 +141,9 @@ function PinCard({ set }: { set: boolean }) {
         <RoleGate minRole="admin">
           <Button variant="ghost" className="dash-btn--sm" onClick={() => setDialog("set")}>
             <IconLock aria-hidden="true" />
-            {set ? s.changePin : s.setPin}
+            {pin.set ? s.changePin : s.setPin}
           </Button>
-          {set ? (
+          {pin.set ? (
             <Button variant="danger-ghost" className="dash-btn--sm" onClick={() => setDialog("clear")}>
               {s.clearPin}
             </Button>
@@ -129,12 +151,12 @@ function PinCard({ set }: { set: boolean }) {
         </RoleGate>
       }
     >
-      {set ? (
+      {pin.set ? (
         <p className="dash-row">
           <Pill tone="success" dot>
             {strings.common.yes}
           </Pill>
-          <span>{s.pinSet}</span>
+          <span>{pin.setAt !== undefined ? s.pinSetOn(pin.setAt) : s.pinSet}</span>
         </p>
       ) : (
         <InlineNotice tone="warning" title={s.pinNotSet} />
@@ -154,7 +176,10 @@ function PinCard({ set }: { set: boolean }) {
   );
 }
 
-/** The PIN goes to the `settings:setExitPin` action only; it is hashed on the server and never shown again. */
+/**
+ * The PIN goes to the `settings:setExitPin` action only: it is checked and
+ * hashed on the server, never stored in the browser and never shown again.
+ */
 function PinDialog({ onClose }: { onClose: () => void }) {
   const setPin = useSetExitPin();
   const toast = useToast();
@@ -162,6 +187,7 @@ function PinDialog({ onClose }: { onClose: () => void }) {
     pin: v.exitPin(x.pin) ?? undefined,
     repeat: v.same(x.pin, x.repeat, strings.validate.pinsDiffer) ?? undefined,
   }));
+  const serverPin = serverFieldError(f.serverError, "pin", (e) => exitPinMessage(e.detail));
   const digitsOnly = (value: string) => value.replace(/\D/g, "").slice(0, 12);
   return (
     <Modal
@@ -188,7 +214,7 @@ function PinDialog({ onClose }: { onClose: () => void }) {
     >
       <div className="dash-form">
         <p className="dash-dialog__lead">{s.pinBody}</p>
-        <Field label={s.newPin} error={f.errors.pin} required>
+        <Field label={s.newPin} error={f.errors.pin ?? serverPin} required>
           {(p) => (
             <Input
               {...p}
@@ -218,7 +244,7 @@ function PinDialog({ onClose }: { onClose: () => void }) {
             />
           )}
         </Field>
-        <FormError error={f.serverError} />
+        <FormError error={f.serverError} fields={["pin"]} />
       </div>
     </Modal>
   );

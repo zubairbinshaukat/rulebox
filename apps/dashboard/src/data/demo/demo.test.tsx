@@ -42,8 +42,39 @@ describe("demo data layer", () => {
     simulateConcurrentEdit();
     const error = await result.current({ expectedRevision: revision, name: "X", settings: db().org.settings }).catch((e) => e);
     expect(errorCodeOf(error)).toBe("stale_edit");
-    await expect(result.current({ expectedRevision: db().org.revision, name: "X", settings: db().org.settings })).resolves.toBeUndefined();
+    const before = db().org.revision;
+    await expect(result.current({ expectedRevision: before, name: "X", settings: db().org.settings })).resolves.toEqual({ revision: before + 1, changed: ["name"] });
     expect(db().org.name).toBe("X");
+    // Nothing changed: no write, same revision (settings:update).
+    await expect(result.current({ expectedRevision: before + 1, name: "X", settings: db().org.settings })).resolves.toEqual({ revision: before + 1, changed: [] });
+  });
+
+  it("follows the server's settings, exit PIN and group rules", async () => {
+    resetDemo();
+    signInAs("owner@demo.rulebox.test");
+    const update = renderHook(() => demoApi.useUpdateSettings()).result.current;
+    const s = db().org.settings;
+    const bad = await update({ expectedRevision: db().org.revision, name: db().org.name, settings: { ...s, adminExit: { enabled: true, hotkey: "Alt+Tab" } } }).catch((e) => e);
+    expect(bad).toMatchObject({ code: "invalid_argument", field: "adminExit.hotkey", detail: "UnknownToken" });
+    const ok = await update({ expectedRevision: db().org.revision, name: db().org.name, settings: { ...s, adminExit: { enabled: true, hotkey: "alt+f4" } } });
+    expect(ok.changed).toEqual(["adminExit"]);
+    expect(db().org.settings.adminExit.hotkey).toBe("Alt+F4");
+
+    const setPin = renderHook(() => demoApi.useSetExitPin()).result.current;
+    expect(await setPin({ pin: "111111" }).catch((e) => e)).toMatchObject({ code: "invalid_argument", field: "pin", detail: "all digits the same" });
+    await setPin({ pin: "246813" });
+    expect(db().org.exitPinSetAt).toBeGreaterThan(0);
+
+    const create = renderHook(() => demoApi.useCreateGroup()).result.current;
+    expect(await create({ name: "Front desk" }).catch((e) => e)).toMatchObject({ code: "conflict", field: "name" });
+    db().org.plan.limits.maxGroups = db().groups.length;
+    expect(await create({ name: "One too many" }).catch((e) => e)).toMatchObject({ code: "plan_limit", detail: "groups" });
+
+    const del = renderHook(() => demoApi.useDeleteGroup()).result.current;
+    const front = db().groups.find((g) => g.name === "Front desk")!;
+    const refused: unknown = await del({ groupId: front._id }).catch((e) => e);
+    expect(refused).toMatchObject({ code: "has_dependents" });
+    expect((refused as { detail?: string }).detail).toContain("devices");
   });
 
   it("refuses writes from viewers (forbidden)", async () => {

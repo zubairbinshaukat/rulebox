@@ -74,6 +74,7 @@ export const {
   useHistory,
   useSettingsScreen,
   useUpdateSettings,
+  usePlan,
   useSetExitPin,
   useClearExitPin,
   useKeysScreen,

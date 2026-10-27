@@ -95,3 +95,17 @@ export function useMemberQuery<Q extends FunctionReference<"query">>(
   if (failed) return { status: "error", error: toAppError(result) ?? result, retry };
   return { status: "ready", data: result as FunctionReturnType<Q> };
 }
+
+/**
+ * A query result reshaped for the screen (for example capped counts). The
+ * mapped data is kept while the server's result is the same object, so
+ * screens see a stable value between renders, like `useQuery`'s.
+ */
+export function useMappedState<T, U>(state: QueryState<T>, map: (data: T) => U): QueryState<U> {
+  const data = state.status === "ready" ? state.data : undefined;
+  // `map` is a fresh closure each render; the result depends only on `data`.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  const mapped = useMemo(() => (data === undefined ? undefined : map(data)), [data]);
+  if (state.status !== "ready") return state;
+  return { status: "ready", data: mapped as U };
+}

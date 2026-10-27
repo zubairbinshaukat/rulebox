@@ -1,13 +1,19 @@
 import { Component, type ErrorInfo, type ReactNode } from "react";
 import { Button } from "@rulebox/ui";
 import IconDanger from "~icons/solar/danger-circle-linear";
-import { messageFor, errorCodeOf } from "../lib/errors";
+import { messageFor, errorCodeOf, toAppError } from "../lib/errors";
 import { strings } from "../lib/strings";
+import { NOT_DEPLOYED } from "../data/api";
 import type { PagedState, QueryState } from "../data/types";
+import { EmptyState } from "./EmptyState";
 
 /** The "this part didn't load" panel with Try again. */
 export function RegionError({ error, onRetry }: { error: unknown; onRetry?: () => void }) {
   const code = errorCodeOf(error);
+  // A live hook whose backend step has not landed: not an error, just not here yet.
+  if (code === "not_ready" && toAppError(error)?.detail === NOT_DEPLOYED) {
+    return <EmptyState compact title={strings.app.comingLater} />;
+  }
   const detail = code ? messageFor(error) : strings.common.regionFailedDetail;
   return (
     <div className="dash-region-error" role="alert">

@@ -18,6 +18,8 @@ export interface ConfirmDialogProps {
   onClose: () => void;
   /** Called after a successful confirm, before closing (navigate away, toast). */
   onDone?: () => void;
+  /** A screen's own sentence for a refusal (null = the usual one), e.g. `has_dependents`. */
+  describeError?: (error: unknown) => string | null;
 }
 
 /**
@@ -31,7 +33,7 @@ export function ConfirmDialog(props: ConfirmDialogProps) {
   return <ConfirmInner {...props} />;
 }
 
-function ConfirmInner({ title, body, confirmLabel, danger, typeToConfirm, onConfirm, onClose, onDone }: ConfirmDialogProps) {
+function ConfirmInner({ title, body, confirmLabel, danger, typeToConfirm, onConfirm, onClose, onDone, describeError }: ConfirmDialogProps) {
   const [typed, setTyped] = useState("");
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<unknown>(null);
@@ -94,7 +96,7 @@ function ConfirmInner({ title, body, confirmLabel, danger, typeToConfirm, onConf
             )}
           </Field>
         ) : null}
-        <FormError error={error} />
+        <FormError error={error} describe={describeError} />
       </div>
     </Modal>
   );

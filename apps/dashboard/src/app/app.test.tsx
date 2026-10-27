@@ -24,6 +24,7 @@ vi.mock("../data", () => ({
   useConnectionState: () => ({ isWebSocketConnected: mock.connected }),
   useSettingsScreen: () => mock.settings,
   useUpdateSettings: () => mock.updateSettings,
+  usePlan: () => ({ status: "loading" }),
 }));
 
 vi.mock("../data/stepup", () => ({
@@ -242,7 +243,7 @@ describe("stale edit", () => {
     expect((screen.getByLabelText(/Organization name/) as HTMLInputElement).value).toBe("Acme Ltd");
     expect(screen.queryByText(strings.common.staleTitle)).toBeNull();
 
-    mock.updateSettings.mockResolvedValueOnce(undefined);
+    mock.updateSettings.mockResolvedValueOnce({ revision: 6, changed: ["offlineDays"] });
     fireEvent.click(screen.getByRole("button", { name: strings.common.saveChanges }));
     await waitFor(() => expect(mock.updateSettings).toHaveBeenCalledTimes(2));
     expect(mock.updateSettings.mock.calls[1]![0]).toMatchObject({ expectedRevision: 5, name: "Acme Ltd" });

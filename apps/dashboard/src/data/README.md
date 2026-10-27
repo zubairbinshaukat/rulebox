@@ -8,8 +8,10 @@ satisfy the same `DataApi` type (`api.ts`):
   `preview:demo`). Reactive like Convex, with simulated latency, connection
   loss (writes queue), failing queries and stale edits (top-bar demo controls).
 - `live/hooks.ts` — the real backend. Session, sign-in, MFA, account and
-  members are live (Step 4, against the Step 3 functions); every other hook
-  answers `not_ready` until its Convex step lands. `live/convex.ts` holds the
+  members are live (Step 4, against the Step 3 functions); settings, the plan
+  and groups since Step 5; every other hook answers `not_ready` with the
+  detail `NOT_DEPLOYED` (`api.ts`), which a region shows as "Coming in a
+  later step", until its Convex step lands. `live/convex.ts` holds the
   adapters (`useMemberQuery`, `useMapped`, `mapError`).
 
 All shapes live in `types.ts` and use the field names of plan Section 4.2.
@@ -59,9 +61,9 @@ Status: **live** = wired in `live/hooks.ts`; everything else answers
 | `useDeviceDetail` | `api.fleet.get` |
 | `useDeviceInstalls` | `api.fleet.installs` (paginated) |
 | `useRenameDevice` / `useMoveDevice` / `useSetKiosk` / `useRevokeDevice` / `useRemoveDevice` / `useRequestRotation` | `api.fleet.rename` / `move` / `setKiosk` (optimistic) / `revoke` / `remove` / `requestCredentialRotation` |
-| `useGroupsScreen` | `api.groups.list` |
-| `useGroupDetail` | `api.groups.get` (also returns the app picker, `.take(500)`) |
-| `useCreateGroup` / `useUpdateGroup` / `useDeleteGroup` | `api.groups.create` / `rename` (+ description) / `delete` |
+| `useGroupsScreen` | `api.groups.list` (`{ count, more }` per count → one number capped at 501, "500+") | live |
+| `useGroupDetail` | `api.groups.get` → `{ group, apps }` mapped to `GroupDetail` (assignment `_id` = app id until Step 10) | live |
+| `useCreateGroup` / `useUpdateGroup` / `useDeleteGroup` | `api.groups.create` → id (`plan_limit` detail "groups", `conflict` field "name") / `rename` (`expectedRevision`; description undefined = unchanged, "" = cleared) → `{ revision }` / `remove` (major; `has_dependents` detail lists what to move first) | live |
 | `useAssignApp` / `useUpdateAssignment` / `useUnassignApp` | `api.groups.assignApp` / `updateAssignment` (optimistic) / `unassignApp` |
 | `useAddGroupEmployee` / `useRemoveGroupEmployee` | `api.groups` members section (Step 11) |
 | `useEmployeesScreen({ groupId, search })` | `api.employees.list` (paginated) / `api.employees.search` |
@@ -79,8 +81,9 @@ Status: **live** = wired in `live/hooks.ts`; everything else answers
 | `useEnrollmentScreen(nowMinute)` | `api.enrollmentCodes.list({ nowMs })` (paginated) |
 | `useCreateEnrollmentCode` / `useRevokeEnrollmentCode` | `useAction(api.enrollmentCodes.create)` / `revoke` |
 | `useAuditScreen` / `useHistory(targetId)` | `api.audit.list` / `api.audit.forTarget` (paginated) |
-| `useSettingsScreen` / `useUpdateSettings` | `api.settings.get` / `api.settings.update` |
-| `useSetExitPin` / `useClearExitPin` | `useAction(api.settings.setExitPin)` / `api.settings.clearExitPin` |
+| `useSettingsScreen` / `useUpdateSettings` | `api.settings.get` (`exitPin: { set, setAt }`) / `api.settings.update` → `{ revision, changed }` (fresh step-up when `adminExit` changes; `invalid_argument` field `adminExit.hotkey` with the grammar rule in `detail`) | live |
+| `usePlan` | `api.settings.plan` (plan, status, limits, usage); Settings → Organization and the "New group" dialog | live |
+| `useSetExitPin` / `useClearExitPin` | `useAction(api.settings.setExitPin)` (major; `invalid_argument` field `pin`, `detail` the rule) / `api.settings.clearExitPin` (major) | live |
 | `useKeysScreen` | `api.keys.status` (+ `keys:trustProgress`) |
 | `useRegisterKey` / `usePrepareRotation` / `useFinishRotation` | `api.keys.registerActive` / `prepareRotation` / `finishRotation` |
 | `useMembersScreen` | `api.members.list` → `{ members, invites }` (invites in every state, newest 100; the screen shows only unused, unexpired ones) | live |
@@ -117,7 +120,7 @@ The demo store applies the same rule (`runMutation(role, fn, "unlocked" |
 | `useResetStepUpWithRecoveryCode` | `useAction(api.stepUp.resetWithRecoveryCode)` | live |
 
 Shapes the plan does not pin down and the backend must match (or the types
-change): `GroupDetail.appOptions` and `enrollmentCodeCount`,
+change):
 `EmployeeDetail.groupOptions/appOptions/defaultQuotaGb`,
 `AppDetail.groupOptions`, `KeysScreen`, `DeviceRow` without `deviceStatus`.
 (`MfaStatus` and `MembersScreen` now match Step 3's functions; `account:me`
