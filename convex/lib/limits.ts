@@ -146,4 +146,35 @@ export const MAX_PUBLISH_TARGETS = 500;
 /** `maintenance:migratePlans`: organizations per run, and the most rows it recounts per table. */
 export const MIGRATION_ORG_BATCH = 20;
 export const MAX_RECOUNT_ROWS = 5_000;
+/** Devices recounted per organization (each costs up to 4 reads: device, credentials, summary, presence). */
+export const MAX_RECOUNT_DEVICES = 2_000;
+
+/** Devices (plan Step 7). */
+/** Device pages (`fleet:list`): at most this many rows per page (post-Phase-5 2.5). */
+export const MAX_FLEET_PAGE = 50;
+/** `fleet:list` search text. */
+export const MAX_SEARCH_TEXT = 100;
+/** Group names joined into a device page (`groups.by_org`, tiny). */
+export const MAX_GROUPS_JOINED = 500;
+/** `maintenance:migrateDevices` and the purge of a removed device: rows per run. */
+export const MIGRATION_DEVICE_BATCH = 100;
+export const PURGE_BATCH = 100;
+/** `presence:sweep`: devices marked offline per run (it reschedules while full). */
+export const SWEEP_BATCH = 500;
+/** Ping-interval propagation: liveness rows per run. */
+export const PING_PROPAGATION_BATCH = 200;
+/** Organizations per run of the global ping-interval propagation. */
+export const PING_PROPAGATION_ORG_BATCH = 50;
+/** Online counters per organization (`orgPresence`): a reconnect storm spreads over shards. */
+export const PRESENCE_SHARDS = 4;
+/** Watch mode (plan 4.9): pings every FAST_PING_MS until `fastUntil`. */
+export const FAST_PING_MS = MINUTE_MS;
+export const WATCH_MS = 5 * MINUTE_MS;
+/** `fleet:watch` writes only when it extends `fastUntil` by at least this much. */
+export const WATCH_MIN_EXTEND_MS = 2 * MINUTE_MS;
+/** "Check now": devices per click; checks are deleted this long after the click. */
+export const MAX_CHECK_DEVICES = 50;
+export const FLEET_CHECK_RETENTION_MS = DAY_MS;
+/** Offline grace = 2.5 x the device's interval + this (plan 4.9). */
+export const OFFLINE_GRACE_EXTRA_MS = MINUTE_MS;
 

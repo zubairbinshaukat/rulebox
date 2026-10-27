@@ -37,12 +37,14 @@ describe("setup:createOwnerInvite", () => {
     expect(rows.org?.settings?.offlineDays).toBe(3);
     // Step 5: limits live in orgPlans (self-host = "custom"), counters are exact.
     expect(rows.org?.maxDevices).toBeUndefined();
-    expect(rows.stats).toMatchObject({ deviceCount: 0, groupCount: 1, memberCount: 0 });
+    // The Default group is not counted toward maxGroups (owner decision 2026-10-27).
+    expect(rows.stats).toMatchObject({ deviceCount: 0, groupCount: 0, memberCount: 0 });
     expect(rows.stats?.pingIntervalMs).toBeUndefined();
     const plan = await t.run((ctx) => ctx.db.query("orgPlans").withIndex("by_org", (q) => q.eq("orgId", first.orgId)).unique());
     expect(plan).toMatchObject({ plan: "custom", status: "active", degradeLevel: 0 });
     expect(rows.secrets?.exitPinHash).toBeUndefined();
     expect(rows.group?.name).toBe("Default");
+    expect(rows.group?.isDefault).toBe(true);
     expect(rows.invite).toMatchObject({ role: "owner", kind: "join", email: "owner@acme.test" });
     // Only the hash is stored, never the code; the audit row has no code either.
     expect(rows.invite?.tokenHash).toBe(codeHash(first.inviteCode));

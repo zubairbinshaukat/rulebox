@@ -1,5 +1,6 @@
 import { describe, expect, test } from "vitest";
 import { setupAuth } from "../tests/convex/auth";
+import { enrollDevice } from "../tests/convex/devices";
 import { asMember, codeOf, expectNoSecrets, giveStepUp, makeOrg, type T } from "../tests/convex/identity";
 import { MAJOR_ACTIONS } from "./lib/stepUp";
 import { MINUTE_MS } from "./lib/limits";
@@ -30,6 +31,10 @@ type Fixture = {
   inviteId: Id<"invites">;
   groupId: Id<"groups">;
   tokenId: Id<"enrollmentTokens">;
+  deviceId: Id<"devices">;
+  checkId: Id<"fleetChecks">;
+  /** The device's stored secret hashes (current and previous). */
+  storedHashes: string[];
   accessor: Record<Caller, ReturnType<T["withIdentity"]> | T>;
 };
 
@@ -61,6 +66,17 @@ async function fixture(): Promise<Fixture> {
     });
     return { groupId: g, tokenId: tok };
   });
+  const { deviceId } = await enrollDevice(t, orgId, { groupId });
+  // A credential mid-rotation: both hashes are stored, neither may ever be returned.
+  const storedHashes = await t.run(async (ctx) => {
+    const c = (await ctx.db.query("deviceCredentials").withIndex("by_device", (q) => q.eq("deviceId", deviceId)).unique())!;
+    const previousSecretHash = "9".repeat(64);
+    await ctx.db.patch(c._id, { previousSecretHash });
+    return [c.secretHash, previousSecretHash];
+  });
+  const checkId = await t.run((ctx) =>
+    ctx.db.insert("fleetChecks", { orgId, deviceIds: [deviceId], requestedAt: Date.now(), requestedBy: target.memberId }),
+  );
   const foreignOrg = await makeOrg(t, "Other");
   type StepUp = "fresh" | "stale" | "idle" | "factorOnly" | "none";
   const m = async (role: "owner" | "admin" | "viewer", mfa: boolean, status: "active" | "disabled" = "active", o = orgId, s: StepUp = "none") => {
@@ -78,6 +94,9 @@ async function fixture(): Promise<Fixture> {
     inviteId,
     groupId,
     tokenId,
+    deviceId,
+    checkId,
+    storedHashes,
     accessor: {
       unauth: t,
       viewer: await m("viewer", false),
@@ -175,6 +194,8 @@ const ROWS: Row[] = [
   { name: "devices:desiredState", call: (a) => a.query(api.devices.desiredState, deviceArgs), expect: { default: "kind:unknownDevice" } },
   { name: "devices:heartbeat", call: (a) => a.mutation(api.devices.heartbeat, deviceArgs), expect: { default: "kind:rejected" } },
   { name: "devices:unenroll", call: (a) => a.mutation(api.devices.unenroll, deviceArgs), expect: { default: "kind:rejected" } },
+  // Step 7: the liveness ping of Phase 4 agents. Device credentials only; no member identity helps.
+  { name: "devices:ping", call: (a) => a.mutation(api.devices.ping, deviceArgs), expect: { default: "device_rejected" } },
   { name: "mfa:status", call: (a) => a.query(api.mfa.status, {}), expect: { ...VIEWER_ANY_MFA, foreign: "ok" } },
   { name: "mfa:beginSetup", call: (a) => a.action(api.mfa.beginSetup, {}), expect: { ...VIEWER_ANY_MFA, foreign: "ok" }, returnsSecretOnce: true },
   {
@@ -308,6 +329,68 @@ const ROWS: Row[] = [
     call: (a, f) => a.mutation(api.enrollmentCodes.revoke, { tokenId: f.tokenId }),
     expect: { ...ADMIN_MAJOR, foreign: "not_found" },
   },
+  // ---- Step 7: devices (fleet)
+  {
+    name: "fleet:list",
+    call: (a) => a.query(api.fleet.list, { paginationOpts: { numItems: 50, cursor: null } }),
+    expect: { ...VIEWER, foreign: "ok" }, // the foreign owner lists THEIR devices
+  },
+  { name: "fleet:get", call: (a, f) => a.query(api.fleet.get, { deviceId: f.deviceId }), expect: { ...VIEWER, foreign: "not_found" } },
+  {
+    name: "fleet:rename",
+    // Unchanged name: no write, every allowed caller gets the same answer.
+    call: (a, f) => a.mutation(api.fleet.rename, { deviceId: f.deviceId, expectedRevision: 0, name: "PC" }),
+    expect: { ...ADMIN_UNLOCKED, foreign: "not_found" },
+  },
+  {
+    name: "fleet:move",
+    call: (a, f) => a.mutation(api.fleet.move, { deviceId: f.deviceId, expectedRevision: 0, groupId: f.groupId }),
+    expect: { ...ADMIN_UNLOCKED, foreign: "not_found" },
+  },
+  {
+    name: "fleet:setKiosk",
+    // Turning it ON (unchanged here) needs an unlocked session; OFF is major (fleet.test.ts).
+    call: (a, f) => a.mutation(api.fleet.setKiosk, { deviceId: f.deviceId, expectedRevision: 0, enabled: true }),
+    expect: { ...ADMIN_UNLOCKED, foreign: "not_found" },
+  },
+  { name: "fleet:revoke", call: (a, f) => a.mutation(api.fleet.revoke, { deviceId: f.deviceId }), expect: { ...ADMIN_MAJOR, foreign: "not_found" } },
+  {
+    name: "fleet:remove",
+    call: (a, f) => a.mutation(api.fleet.remove, { deviceId: f.deviceId }),
+    expect: { ...ADMIN_MAJOR, default: "conflict", foreign: "not_found" }, // not revoked
+  },
+  {
+    name: "fleet:requestCredentialRotation",
+    call: (a, f) => a.mutation(api.fleet.requestCredentialRotation, { deviceId: f.deviceId }),
+    expect: { ...ADMIN_UNLOCKED, foreign: "not_found" },
+  },
+  {
+    name: "fleet:watch",
+    // A view aid (stepUp "none"): any member who can see the device; rate limited.
+    call: (a, f) => a.mutation(api.fleet.watch, { deviceId: f.deviceId }),
+    expect: { ...VIEWER, foreign: "not_found" },
+  },
+  { name: "fleet:liveness", call: (a, f) => a.query(api.fleet.liveness, { deviceId: f.deviceId }), expect: { ...VIEWER, foreign: "not_found" } },
+  {
+    name: "fleet:checkNow",
+    // 1 per minute per organization: the first allowed caller (admin) uses the token.
+    call: (a, f) => a.mutation(api.fleet.checkNow, { deviceIds: [f.deviceId] }),
+    expect: { ...ADMIN_UNLOCKED, owner: "rate_limited", ownerStale: "rate_limited", foreign: "not_found" },
+  },
+  {
+    name: "fleet:checkResult",
+    call: (a, f) => a.query(api.fleet.checkResult, { checkId: f.checkId }),
+    expect: {
+      default: "ok",
+      unauth: "unauthenticated",
+      device: "unauthenticated",
+      viewer: "forbidden",
+      adminNoMfa: "mfa_required",
+      ownerNoMfa: "mfa_required",
+      disabled: "forbidden",
+      foreign: "not_found",
+    },
+  },
 ];
 
 /** Member writes that are entry points of MFA or step-up themselves (no step-up level). */
@@ -315,8 +398,10 @@ const STEP_UP_EXEMPT = new Set([
   "mfa:beginSetup", "mfa:confirmSetup", "mfa:verify", "mfa:useRecoveryCode",
   "stepUp:lock", "stepUp:setActionPin", "stepUp:verifyActionPin", "stepUp:resetWithRecoveryCode",
   "passkeys:beginRegistration", "passkeys:finishRegistration", "passkeys:beginVerification", "passkeys:finishVerification",
+  // A view aid of the device page (renews watch mode while the page is visible; the page is hidden when locked).
+  "fleet:watch",
   // not member functions
-  "account:redeemReset", "enrollment:enroll", "devices:heartbeat", "devices:unenroll",
+  "account:redeemReset", "enrollment:enroll", "devices:heartbeat", "devices:unenroll", "devices:ping",
 ]);
 
 async function outcome(p: Promise<unknown>): Promise<{ result: string; value: unknown }> {
@@ -342,7 +427,7 @@ describe("authorization matrix (plan 4.6)", () => {
         got[caller] = r.result;
         want[caller] = row.expect[caller] ?? row.expect.default;
         // Whatever comes back, it never carries a secret (plan 4.7).
-        if (row.returnsSecretOnce !== true) expectNoSecrets(r.value);
+        if (row.returnsSecretOnce !== true) expectNoSecrets(r.value, f.storedHashes);
       }
       expect(got).toEqual(want);
     });

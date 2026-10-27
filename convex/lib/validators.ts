@@ -147,6 +147,17 @@ export const wingetResolved = v.object({
   name: v.optional(v.string()),
 });
 
+/** Free disk space, quantized (post-Phase-5 plan 2.6): `deviceSummary` stores the band. */
+export const diskBand = v.union(
+  v.literal("lt5"),
+  v.literal("5to10"),
+  v.literal("10to20"),
+  v.literal("20to50"),
+  v.literal("50to100"),
+  v.literal("gt100"),
+);
+export type DiskBand = Infer<typeof diskBand>;
+
 /** The 12 status fields the agent reports (Phase 2), as stored. */
 export const reportedStatusFields = {
   agentVersion: v.optional(v.string()),

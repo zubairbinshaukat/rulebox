@@ -4,8 +4,9 @@ import { internal } from "../_generated/api";
 import type { Doc, Id } from "../_generated/dataModel";
 import { action, mutation, query } from "../_generated/server";
 import { requireMember, type Role } from "./authz";
-import { checkDevice, settleRotation, type DeviceCheck } from "./deviceAuth";
+import { checkDevice, settleRotation, type CredentialState, type DeviceCheck, type DeviceCred } from "./deviceAuth";
 import { fail } from "./errors";
+import { scopedDb, type OrgScope } from "./orgDb";
 import { checkStepUpOrFail, touchActivity, type MajorAction, type StepUpLevel } from "./stepUp";
 
 // The only place that turns Convex's raw builders into public functions
@@ -59,12 +60,20 @@ function actorOf(member: Doc<"members">): AuditActorCtx {
   return { type: "member", id: member._id, label: member.email };
 }
 
+// Every member and device handler gets a `ctx.db` scoped to its organization
+// (`lib/orgDb.ts`, A15): another org's row reads as null and an index range
+// over another org throws. The wrapper's own checks (session, membership,
+// device credentials) run on the unscoped database, counted by the I/O probe
+// when it is on.
+
 export function memberQuery(minRole: Role, opts: MemberOpts = {}) {
   return customQuery(query, {
     args: orgIdArg,
-    input: async (ctx, args): Promise<{ ctx: MemberCtx; args: NoArgs }> => {
-      const m = await requireMember(ctx, minRole, { skipMfa: opts.skipMfa, orgId: args.orgId });
-      return { ctx: { ...m, actor: actorOf(m.member) }, args: {} };
+    input: async (ctx, args) => {
+      const db = scopedDb(ctx.db, null);
+      const m = await requireMember({ db, auth: ctx.auth }, minRole, { skipMfa: opts.skipMfa, orgId: args.orgId });
+      const member: MemberCtx = { ...m, actor: actorOf(m.member) };
+      return { ctx: { ...member, db: scopedDb(db, { orgId: m.orgId, checked: new Set() }) }, args: {} as NoArgs };
     },
   });
 }
@@ -72,16 +81,18 @@ export function memberQuery(minRole: Role, opts: MemberOpts = {}) {
 export function memberMutation(minRole: Role, opts: MemberOpts = {}) {
   return customMutation(mutation, {
     args: orgIdArg,
-    input: async (ctx, args): Promise<{ ctx: MemberCtx; args: NoArgs }> => {
+    input: async (ctx, args) => {
       const now = Date.now();
-      const m = await requireMember(ctx, minRole, { skipMfa: opts.skipMfa, orgId: args.orgId, now });
+      const db = scopedDb(ctx.db, null);
+      const m = await requireMember({ db, auth: ctx.auth }, minRole, { skipMfa: opts.skipMfa, orgId: args.orgId, now });
       const level = stepUpLevelOf(opts);
       if (level !== null) {
-        const row = await checkStepUpOrFail(ctx, m, level, now);
+        const row = await checkStepUpOrFail({ db }, m, level, now);
         // A member write is activity: at most one patch per quantum.
-        await touchActivity(ctx, row, now);
+        await touchActivity({ db }, row, now);
       }
-      return { ctx: { ...m, actor: actorOf(m.member) }, args: {} };
+      const member: MemberCtx = { ...m, actor: actorOf(m.member) };
+      return { ctx: { ...member, db: scopedDb(db, { orgId: m.orgId, checked: new Set() }) }, args: {} as NoArgs };
     },
   });
 }
@@ -107,25 +118,50 @@ export function memberAction(minRole: Role, opts: MemberOpts = {}) {
 
 const deviceArgs = { deviceId: v.string(), deviceSecret: v.string() };
 
-export type DeviceCtx = { device: Doc<"devices"> };
+/**
+ * What device handlers know about their caller (plan 4.6 amended, A2): the
+ * credentials row only. Handlers load the `devices` row themselves when they
+ * need it.
+ */
+export type DeviceIdentity = {
+  _id: Id<"devices">;
+  orgId: Id<"organizations">;
+  state: CredentialState;
+  rotate: boolean;
+};
+
+export type DeviceCtx = { device: DeviceIdentity };
+
+function identityOf(cred: DeviceCred): DeviceIdentity {
+  return { _id: cred.deviceId, orgId: cred.orgId, state: cred.state, rotate: cred.rotate };
+}
+
+function deviceScope(check: DeviceCheck): OrgScope | null {
+  if (check.kind === "unknown") return null;
+  return { orgId: check.cred.orgId, checked: new Set<string>([check.cred.deviceId]) };
+}
 
 /** New device functions: unknown, wrong secret and revoked all answer `device_rejected`. */
 export const deviceQuery = customQuery(query, {
   args: deviceArgs,
-  input: async (ctx, args): Promise<{ ctx: DeviceCtx; args: NoArgs }> => {
-    const check = await checkDevice(ctx, args);
+  input: async (ctx, args) => {
+    const db = scopedDb(ctx.db, null);
+    const check = await checkDevice({ db }, args);
     if (check.kind !== "ok") fail("device_rejected");
-    return { ctx: { device: check.device }, args: {} };
+    const device: DeviceIdentity = identityOf(check.cred);
+    return { ctx: { device, db: scopedDb(db, deviceScope(check)) }, args: {} as NoArgs };
   },
 });
 
 export const deviceMutation = customMutation(mutation, {
   args: deviceArgs,
-  input: async (ctx, args): Promise<{ ctx: DeviceCtx; args: NoArgs }> => {
-    const check = await checkDevice(ctx, args);
+  input: async (ctx, args) => {
+    const db = scopedDb(ctx.db, null);
+    const check = await checkDevice({ db }, args);
     if (check.kind !== "ok") fail("device_rejected");
-    await settleRotation(ctx, check);
-    return { ctx: { device: check.device }, args: {} };
+    await settleRotation({ db }, check);
+    const device: DeviceIdentity = identityOf(check.cred);
+    return { ctx: { device, db: scopedDb(db, deviceScope(check)) }, args: {} as NoArgs };
   },
 });
 
@@ -153,25 +189,34 @@ export const deviceAction = customAction(action, {
  */
 export const phase2DeviceQuery = customQuery(query, {
   args: deviceArgs,
-  input: async (ctx, args): Promise<{ ctx: { deviceCheck: DeviceCheck }; args: NoArgs }> => {
-    return { ctx: { deviceCheck: await checkDevice(ctx, args) }, args: {} };
+  input: async (ctx, args) => {
+    const db = scopedDb(ctx.db, null);
+    const deviceCheck: DeviceCheck = await checkDevice({ db }, args);
+    return { ctx: { deviceCheck, db: scopedDb(db, deviceScope(deviceCheck)) }, args: {} as NoArgs };
   },
 });
 
 export const phase2DeviceMutation = customMutation(mutation, {
   args: deviceArgs,
-  input: async (ctx, args): Promise<{ ctx: { deviceCheck: DeviceCheck }; args: NoArgs }> => {
-    const check = await checkDevice(ctx, args);
-    await settleRotation(ctx, check);
-    return { ctx: { deviceCheck: check }, args: {} };
+  input: async (ctx, args) => {
+    const db = scopedDb(ctx.db, null);
+    const deviceCheck: DeviceCheck = await checkDevice({ db }, args);
+    await settleRotation({ db }, deviceCheck);
+    return { ctx: { deviceCheck, db: scopedDb(db, deviceScope(deviceCheck)) }, args: {} as NoArgs };
   },
 });
 
 // ---------------------------------------------------------------- public
 
-/** ONLY health:ping, account:me (plan 4.6). */
-export const publicQuery = customQuery(query, NoOp);
-/** ONLY enrollment:enroll. */
-export const publicMutation = customMutation(mutation, NoOp);
+/** ONLY health:ping, account:me (plan 4.6). Unscoped; counted by the I/O probe when it is on. */
+export const publicQuery = customQuery(query, {
+  args: {},
+  input: async (ctx) => ({ ctx: { db: scopedDb(ctx.db, null) }, args: {} as NoArgs }),
+});
+/** ONLY enrollment:enroll. Unscoped; counted by the I/O probe when it is on. */
+export const publicMutation = customMutation(mutation, {
+  args: {},
+  input: async (ctx) => ({ ctx: { db: scopedDb(ctx.db, null) }, args: {} as NoArgs }),
+});
 /** ONLY account:redeemReset. */
 export const publicAction = customAction(action, NoOp);

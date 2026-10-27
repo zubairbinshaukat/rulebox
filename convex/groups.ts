@@ -46,6 +46,8 @@ const groupRow = v.object({
   description: v.optional(v.string()),
   revision: v.number(),
   createdAt: v.number(),
+  /** The group made with the organization; not counted toward the plan's `maxGroups`. */
+  isDefault: v.boolean(),
   devices: cappedCount,
   employees: cappedCount,
 });
@@ -57,6 +59,7 @@ function rowOf(g: Doc<"groups">, counts: Awaited<ReturnType<typeof countsOf>>) {
     description: g.description,
     revision: g.revision ?? 0,
     createdAt: g.createdAt ?? g._creationTime,
+    isDefault: g.isDefault === true,
     ...counts,
   };
 }
@@ -249,7 +252,8 @@ export const remove = memberMutation("admin", { major: "groups:remove" })({
     if (dependents.length > 0) fail("has_dependents", { detail: dependents.join(", ") });
 
     await ctx.db.delete(group._id);
-    await bumpOrgStats(ctx, ctx.orgId, { groupCount: -1 });
+    // The default group was never counted (it is not one of the plan's groups).
+    if (group.isDefault !== true) await bumpOrgStats(ctx, ctx.orgId, { groupCount: -1 });
     await writeAudit(ctx, {
       orgId: ctx.orgId,
       actor: ctx.actor,

@@ -45,8 +45,9 @@ export const createOwnerInvite = internalAction({
 
 /**
  * Make sure an organization has a "Default" group and its one-per-org rows
- * (plan, counters, secrets; Step 5). The counters are recounted after the
- * group exists, so the Default group counts toward `maxGroups`.
+ * (plan, counters, secrets; Step 5). The Default group is marked `isDefault`
+ * and does NOT count toward `maxGroups` (owner decision 2026-10-27: a free
+ * tenant gets 3 usable groups besides it); the recount skips it.
  */
 async function prepareOrg(ctx: Pick<MutationCtx, "db">, orgId: Id<"organizations">): Promise<void> {
   const now = Date.now();
@@ -55,7 +56,7 @@ async function prepareOrg(ctx: Pick<MutationCtx, "db">, orgId: Id<"organizations
     .withIndex("by_org_name", (q) => q.eq("orgId", orgId).eq("name", "Default"))
     .first();
   if (existing === null) {
-    await ctx.db.insert("groups", { orgId, name: "Default", revision: 0, createdAt: now });
+    await ctx.db.insert("groups", { orgId, name: "Default", revision: 0, createdAt: now, isDefault: true });
   }
   const org = await ctx.db.get(orgId);
   if (org === null) fail("not_found");

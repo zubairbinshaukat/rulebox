@@ -1,6 +1,8 @@
 import { v } from "convex/values";
 import { writeAudit } from "./lib/audit";
 import { constantTimeEqual, isEnrollmentTokenShape, sha256HexSync } from "./lib/crypto";
+import { writeStatus } from "./lib/deviceReport";
+import { createPresence, orgPingInterval } from "./lib/presence";
 import { normalizeDeviceName } from "./lib/enrollmentCodes";
 import { fail, failWire } from "./lib/errors";
 import { publicMutation } from "./lib/functions";
@@ -93,11 +95,20 @@ export const enroll = publicMutation({
     }
 
     // 4. Idempotent retry after a lost answer: the first result, nothing written
-    //    but the global bucket.
-    const existing = await ctx.db
-      .query("devices")
+    //    but the global bucket. Credentials live in `deviceCredentials` (A2);
+    //    devices enrolled before the split still carry theirs on `devices`
+    //    until the narrow step.
+    const cred = await ctx.db
+      .query("deviceCredentials")
       .withIndex("by_secret_hash", (q) => q.eq("secretHash", secretHash))
       .first();
+    const existing =
+      cred !== null
+        ? await ctx.db.get(cred.deviceId)
+        : await ctx.db
+            .query("devices")
+            .withIndex("by_secret_hash", (q) => q.eq("secretHash", secretHash))
+            .first();
     if (existing !== null) {
       if (existing.enrollmentTokenId === token._id) {
         return {
@@ -123,7 +134,8 @@ export const enroll = publicMutation({
     if (!perOrg.ok) fail("rate_limited", { retryAfterMs: perOrg.retryAfter });
     const stats = await assertWithinLimit(ctx, token.orgId, "devices");
 
-    // 7. Writes: token, device, its status row, counters, audit.
+    // 7. Writes: token, device (identity only), credentials, presence rows
+    //    (online now), summary + report, counters, audit.
     const usesLeft = token.usesLeft - 1;
     const deviceName = normalizeDeviceName(args.deviceName);
     await ctx.db.patch(token._id, { usesLeft });
@@ -131,17 +143,17 @@ export const enroll = publicMutation({
       orgId: token.orgId,
       groupId: token.groupId,
       name: deviceName,
-      secretHash,
-      revoked: false,
       enrolledAt: now,
       enrollmentTokenId: token._id,
       hardwareIdHash,
-      agentVersion: args.agentVersion,
-      compat: args.compat,
     });
-    await ctx.db.insert("deviceStatus", { deviceId, orgId: token.orgId, lastSeenAt: now });
+    const ids = { deviceId, orgId: token.orgId };
+    await ctx.db.insert("deviceCredentials", { ...ids, secretHash, state: "active" });
+    await createPresence(ctx, ids, now, await orgPingInterval(ctx, token.orgId));
+    await writeStatus(ctx, ids, { agentVersion: args.agentVersion, compat: args.compat }, now);
     await bumpStats(ctx, stats, {
       deviceCount: 1,
+      noGroupDeviceCount: token.groupId === undefined ? 1 : 0,
       // The last use leaves the active-code count (only codes it counts).
       activeEnrollmentCodes: usesLeft === 0 && token.usesTotal !== undefined ? -1 : 0,
     });

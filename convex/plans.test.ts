@@ -31,7 +31,8 @@ describe("setup creates the plan rows", () => {
     expect(await planRow(t, orgId)).toMatchObject({ plan: "custom", status: "active", limits: CUSTOM_LIMITS, revision: 0 });
     const shown = await t.query(internal.plans.show, { orgId });
     expect(shown).toMatchObject({ plan: "custom", migrated: true, pingIntervalMs: { override: null, effective: 1_800_000 } });
-    expect(shown.usage).toMatchObject({ groups: 1, members: 0, devices: 0 });
+    // The setup-created Default group is not one of the plan's groups (owner decision 2026-10-27).
+    expect(shown.usage).toMatchObject({ groups: 0, members: 0, devices: 0 });
   });
 
   test("hosted (RULEBOX_HOSTED=1): free plan with the owner-decided limits", async () => {
@@ -74,8 +75,11 @@ describe("maintenance:migratePlans", () => {
     expect(org?.maxDevices).toBeUndefined();
     expect((await planRow(t, orgId))?.limits.maxDevices).toBe(5);
     const s = await stats(t, orgId);
-    expect(s).toMatchObject({ deviceCount: 2, groupCount: 2, memberCount: 1 });
+    // "Default" (the setup group of an older org) gets `isDefault` and leaves the group count.
+    expect(s).toMatchObject({ deviceCount: 2, groupCount: 1, memberCount: 1, noGroupDeviceCount: 0, outOfSupportCount: 0 });
     expect(s?.pingIntervalMs).toBeUndefined();
+    const groups = await t.run((ctx) => ctx.db.query("groups").withIndex("by_org", (q) => q.eq("orgId", orgId)).take(5));
+    expect(groups.map((g) => [g.name, g.isDefault === true])).toEqual([["Default", true], ["Other", false]]);
     expect(await stats(t, bare)).toMatchObject({ deviceCount: 0, groupCount: 0, memberCount: 0 });
     expect(await t.run((ctx) => ctx.db.query("orgSecrets").withIndex("by_org", (q) => q.eq("orgId", bare)).unique())).not.toBeNull();
     const global = await t.run((ctx) => ctx.db.query("platformSettings").withIndex("by_key", (q) => q.eq("key", "global")).unique());

@@ -1,16 +1,21 @@
 import { v } from "convex/values";
 import { components, internal } from "./_generated/api";
+import type { Doc } from "./_generated/dataModel";
 import { internalMutation, type MutationCtx } from "./_generated/server";
 import { SYSTEM_ACTOR, writeAudit } from "./lib/audit";
 import { normalizeEmail } from "./lib/crypto";
+import { writeStatus, type StatusInput } from "./lib/deviceReport";
 import { fail } from "./lib/errors";
+import { bumpOnline, minuteBucket, offlineAfterBucket, orgPingInterval } from "./lib/presence";
 import {
   AUDIT_RETENTION_DAYS,
   AUTH_RATE_LIMIT_REFILL_MS,
   DAY_MS,
+  FLEET_CHECK_RETENTION_MS,
   INVITE_RETENTION_MS,
   MAINTENANCE_BATCH,
   MAX_MEMBERSHIPS,
+  MIGRATION_DEVICE_BATCH,
   MIGRATION_ORG_BATCH,
   RATE_LIMIT_ROW_MAX_AGE_MS,
   REFRESH_TOKEN_USED_GRACE_MS,
@@ -49,6 +54,7 @@ import { clearMfa } from "./lib/sessions";
 //                   reschedules itself).
 // - stepUpSessions  step-up rows created more than SESSION_TOTAL_MS ago.
 // - stepUpChallenges expired WebAuthn challenges (`by_expires_at`).
+// - fleetChecks     "Check now" rows created more than a day ago.
 //
 // At most MAINTENANCE_BATCH rows per run; a stage reschedules itself while a
 // batch is full, then the next stage starts. `now` is fixed for the whole
@@ -65,6 +71,7 @@ const STAGES = [
   "rateLimiter",
   "stepUpSessions",
   "stepUpChallenges",
+  "fleetChecks",
 ] as const;
 type Stage = (typeof STAGES)[number];
 const stage = v.union(...STAGES.map((s) => v.literal(s)));
@@ -74,7 +81,7 @@ type StageResult = { done: boolean; cursor: string | null };
 /** Delete rows of `table` created before `before`, oldest first, one batch. */
 async function deleteCreatedBefore(
   ctx: MutationCtx,
-  table: "authSessions" | "mfaSessions" | "authRefreshTokens" | "stepUpSessions",
+  table: "authSessions" | "mfaSessions" | "authRefreshTokens" | "stepUpSessions" | "fleetChecks",
   before: number,
 ): Promise<StageResult> {
   const rows = await ctx.db
@@ -163,6 +170,9 @@ async function runStage(ctx: MutationCtx, current: Stage, now: number, cursor: s
       for (const row of rows) await ctx.db.delete(row._id);
       return { done: rows.length < MAINTENANCE_BATCH, cursor: null };
     }
+    case "fleetChecks":
+      // "Check now" rows are read for 60 s after the click; keep them a day.
+      return await deleteCreatedBefore(ctx, "fleetChecks", now - FLEET_CHECK_RETENTION_MS);
   }
 }
 
@@ -217,6 +227,199 @@ export const migratePlans = internalMutation({
     return { organizations: page.page.length, changed, done: page.isDone };
   },
 });
+
+/** What a Phase 2 device was told by its last heartbeat (`nextPingInMs`). */
+const PHASE2_PING_MS = 300_000;
+
+/** The 12 Phase 2 status fields still on a `devices` row, as a status snapshot (null = none). */
+function legacyStatus(d: Doc<"devices">): StatusInput | null {
+  const s: StatusInput = {
+    agentVersion: d.agentVersion,
+    os: d.os,
+    osBuild: d.osBuild,
+    osEdition: d.osEdition,
+    ramMb: d.ramMb,
+    diskFreeGb: d.diskFreeGb,
+    lockdownLevel: d.lockdownLevel,
+    kioskPhase: d.kioskPhase,
+    kioskError: d.kioskError,
+    appliedVersion: d.appliedVersion,
+    shellHealth: d.shellHealth,
+    compat: d.compat,
+  };
+  return Object.values(s).some((x) => x !== undefined) ? s : null;
+}
+
+/**
+ * Step 7 migration, WIDEN half (plan Step 7 items 1, 7, 8; A2, A3, A8; Section
+ * 11). For every device, creates what is missing, never overwriting a row
+ * that exists (a row written by the new code is newer than the deprecated
+ * fields it would be copied from):
+ * - `deviceCredentials` from `devices.secretHash` / `previousSecretHash` /
+ *   `rotateCredential` / `revoked`;
+ * - `deviceLiveness` + `devicePresence` (+ its `orgPresence` shard) from
+ *   `deviceStatus.lastSeenAt`: online when the device's last heartbeat is
+ *   within 2.5 x the 5 minutes it was told + 1 minute;
+ * - `deviceSummary` + `deviceReports` from the 12 status fields (only when
+ *   both are missing).
+ * The `devices` row is NOT changed (the narrow half removes the deprecated
+ * fields later), so an agent keeps authenticating whichever code it meets.
+ * Idempotent; MIGRATION_DEVICE_BATCH devices per run, then it schedules
+ * itself, and finally `migratePlans` (exact recount of every counter and
+ * online shard). Run once per deployment:
+ *   npx convex run maintenance:migrateDevices '{}'
+ */
+export const migrateDevices = internalMutation({
+  args: { cursor: v.optional(v.union(v.string(), v.null())), now: v.optional(v.number()) },
+  returns: v.object({
+    devices: v.number(),
+    credentials: v.number(),
+    liveness: v.number(),
+    summaries: v.number(),
+    done: v.boolean(),
+  }),
+  handler: async (ctx, args) => {
+    const now = args.now ?? Date.now();
+    const page = await ctx.db.query("devices").paginate({ numItems: MIGRATION_DEVICE_BATCH, cursor: args.cursor ?? null });
+    const intervals = new Map<string, number>();
+    const created = { credentials: 0, liveness: 0, summaries: 0 };
+    for (const d of page.page) {
+      const ids = { deviceId: d._id, orgId: d.orgId };
+      const revoked = d.revoked === true;
+
+      const cred = await ctx.db
+        .query("deviceCredentials")
+        .withIndex("by_device", (q) => q.eq("deviceId", d._id))
+        .unique();
+      if (cred === null && d.secretHash !== undefined) {
+        await ctx.db.insert("deviceCredentials", {
+          ...ids,
+          secretHash: d.secretHash,
+          previousSecretHash: d.previousSecretHash,
+          rotate: d.rotateCredential === true ? true : undefined,
+          state: revoked ? "revoked" : "active",
+        });
+        created.credentials++;
+      }
+
+      const liveness = await ctx.db
+        .query("deviceLiveness")
+        .withIndex("by_device", (q) => q.eq("deviceId", d._id))
+        .unique();
+      if (liveness === null) {
+        let interval = intervals.get(d.orgId);
+        if (interval === undefined) {
+          interval = await orgPingInterval(ctx, d.orgId);
+          intervals.set(d.orgId, interval);
+        }
+        const status = await ctx.db
+          .query("deviceStatus")
+          .withIndex("by_device", (q) => q.eq("deviceId", d._id))
+          .first();
+        const lastSeen = status?.lastSeenAt ?? d.enrolledAt;
+        const seenBucket = minuteBucket(lastSeen);
+        const offlineAfter = offlineAfterBucket(seenBucket, PHASE2_PING_MS);
+        const online = !revoked && offlineAfter >= minuteBucket(now);
+        await ctx.db.insert("deviceLiveness", { ...ids, seenBucket, online, offlineAfter, pingIntervalMs: interval });
+        const presence = await ctx.db
+          .query("devicePresence")
+          .withIndex("by_device", (q) => q.eq("deviceId", d._id))
+          .unique();
+        if (presence === null) {
+          await ctx.db.insert("devicePresence", { ...ids, online, since: lastSeen, revoked: revoked ? true : undefined });
+          if (online) await bumpOnline(ctx, ids, 1);
+        }
+        created.liveness++;
+      }
+
+      const legacy = legacyStatus(d);
+      if (legacy !== null) {
+        const summary = await ctx.db
+          .query("deviceSummary")
+          .withIndex("by_device", (q) => q.eq("deviceId", d._id))
+          .unique();
+        const report = await ctx.db
+          .query("deviceReports")
+          .withIndex("by_device", (q) => q.eq("deviceId", d._id))
+          .unique();
+        if (summary === null && report === null) {
+          // `outOfSupportCount` is set exactly by the recount at the end.
+          await writeStatus(ctx, ids, legacy, now, { counters: false });
+          created.summaries++;
+        }
+      }
+    }
+    if (!page.isDone) {
+      await ctx.scheduler.runAfter(0, internal.maintenance.migrateDevices, { cursor: page.continueCursor, now });
+    } else {
+      await ctx.scheduler.runAfter(0, internal.maintenance.migratePlans, {});
+    }
+    return { devices: page.page.length, ...created, done: page.isDone };
+  },
+});
+
+/**
+ * Step 7 migration, NARROW half. Run ONLY after `migrateDevices` finished on
+ * this deployment and its enrolled agents were seen working on the new rows
+ * (a heartbeat after the deploy). For every device that HAS its credentials
+ * row: removes the deprecated credential and status fields from `devices`,
+ * and deletes its retired `deviceStatus` row. A device without a credentials
+ * row is skipped and counted (run `migrateDevices` first). Idempotent; writes
+ * only rows that still carry something. Afterwards the deprecated schema
+ * fields, `devices.by_secret_hash`, the `checkDevice` fallback and the
+ * `deviceStatus` table can be removed (one more deploy).
+ *   npx convex run maintenance:narrowDevices '{}'
+ */
+export const narrowDevices = internalMutation({
+  args: { cursor: v.optional(v.union(v.string(), v.null())) },
+  returns: v.object({ devices: v.number(), narrowed: v.number(), skipped: v.number(), done: v.boolean() }),
+  handler: async (ctx, args) => {
+    const page = await ctx.db.query("devices").paginate({ numItems: MIGRATION_DEVICE_BATCH, cursor: args.cursor ?? null });
+    let narrowed = 0;
+    let skipped = 0;
+    for (const d of page.page) {
+      const cred = await ctx.db
+        .query("deviceCredentials")
+        .withIndex("by_device", (q) => q.eq("deviceId", d._id))
+        .unique();
+      if (cred === null) {
+        skipped++;
+        continue;
+      }
+      const legacyKeys = [...DEPRECATED_DEVICE_FIELDS].filter((k) => (d as Record<string, unknown>)[k] !== undefined);
+      if (legacyKeys.length > 0) {
+        await ctx.db.patch(d._id, Object.fromEntries(legacyKeys.map((k) => [k, undefined])));
+        narrowed++;
+      }
+      const status = await ctx.db
+        .query("deviceStatus")
+        .withIndex("by_device", (q) => q.eq("deviceId", d._id))
+        .first();
+      if (status !== null) await ctx.db.delete(status._id);
+    }
+    if (!page.isDone) await ctx.scheduler.runAfter(0, internal.maintenance.narrowDevices, { cursor: page.continueCursor });
+    return { devices: page.page.length, narrowed, skipped, done: page.isDone };
+  },
+});
+
+const DEPRECATED_DEVICE_FIELDS = [
+  "secretHash",
+  "previousSecretHash",
+  "rotateCredential",
+  "revoked",
+  "agentVersion",
+  "os",
+  "osBuild",
+  "osEdition",
+  "ramMb",
+  "diskFreeGb",
+  "lockdownLevel",
+  "kioskPhase",
+  "kioskError",
+  "appliedVersion",
+  "shellHealth",
+  "compat",
+] as const;
 
 /**
  * CLI fallback when the only Owner lost their authenticator and recovery

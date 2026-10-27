@@ -1,4 +1,5 @@
 import { v } from "convex/values";
+import { internal } from "./_generated/api";
 import type { Doc } from "./_generated/dataModel";
 import { internalMutation, internalQuery } from "./_generated/server";
 import { writeAudit, type AuditActor } from "./lib/audit";
@@ -36,8 +37,9 @@ import { planLimits, planLimitsPatch, planName, type PlanLimits } from "./lib/va
 // `org.planChanged` row into THAT tenant's audit log (actor "Rulebox
 // support"). Changing defaults never changes existing tenants: their limits
 // are a copy made at creation (post-Phase-5 3.1). Nothing is written when the
-// value does not change. From Step 8 a ping-interval change also patches the
-// affected `desiredHeads` in batches (the heads do not exist yet).
+// value does not change. A ping-interval change is handed to the devices by
+// `presence:applyPingInterval` (their `deviceLiveness` rows, in batches; the
+// next ping answer carries it); Step 8 also patches the `desiredHeads`.
 
 const OPERATOR: AuditActor = { type: "system", label: "Rulebox support" };
 
@@ -103,6 +105,8 @@ export const setGlobalPingInterval = internalMutation({
     const settings = await ensurePlatformSettings(ctx);
     if (settings.pingIntervalMs === args.pingIntervalMs) return { changed: false };
     await ctx.db.patch(settings._id, { pingIntervalMs: args.pingIntervalMs, revision: settings.revision + 1 });
+    // Devices of every organization without an override get it in their next ping answer.
+    await ctx.scheduler.runAfter(0, internal.presence.applyPingInterval, {});
     return { changed: true };
   },
 });
@@ -133,6 +137,7 @@ export const setOrgPingInterval = internalMutation({
     if (row.pingIntervalMs === next) return { changed: false };
     const now = Date.now();
     await ctx.db.patch(row._id, { pingIntervalMs: next, revision: row.revision + 1, updatedBy: by, updatedAt: now });
+    await ctx.scheduler.runAfter(0, internal.presence.applyPingInterval, { orgId: args.orgId });
     await writeAudit(ctx, {
       orgId: args.orgId,
       actor: OPERATOR,

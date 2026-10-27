@@ -331,7 +331,12 @@ describe("enrollment:enroll (Step 6: plan limits, rate limits, validation)", () 
     expect(result).toMatchObject({ orgId, deviceName: "Front desk PC" });
     const rows = await devices(t, orgId);
     expect(rows).toHaveLength(1);
-    expect(rows[0]).toMatchObject({ groupId, name: "Front desk PC", revoked: false, hardwareIdHash: sha256HexSync("machine-guid") });
+    expect(rows[0]).toMatchObject({ groupId, name: "Front desk PC", hardwareIdHash: sha256HexSync("machine-guid") });
+    // Identity only on `devices` (Step 7, A2): the credentials have their own row.
+    expect(rows[0]!.secretHash).toBeUndefined();
+    expect(rows[0]!.revoked).toBeUndefined();
+    const cred = await t.run((ctx) => ctx.db.query("deviceCredentials").withIndex("by_device", (q) => q.eq("deviceId", result.deviceId)).unique());
+    expect(cred).toMatchObject({ orgId, secretHash: args.deviceSecretHash, state: "active" });
     expect((await stats(t, orgId))?.deviceCount).toBe(1);
     const log = await audit(t, orgId);
     expect(log.map((r) => r.action)).toEqual(["enrollment.codeCreated", "device.enrolled"]);
@@ -360,12 +365,12 @@ describe("enrollment:enroll (Step 6: plan limits, rate limits, validation)", () 
 
     // A revoked device frees a slot.
     const secret = "freed-slot-secret";
-    await t.run(async (ctx) => {
+    const deviceId = await t.run(async (ctx) => {
       // Give the first device a known secret so it can unenroll itself.
-      const d = (await ctx.db.query("devices").withIndex("by_secret_hash", (q) => q.eq("secretHash", first.deviceSecretHash)).unique())!;
-      await ctx.db.patch(d._id, { secretHash: sha256HexSync(secret) });
+      const c = (await ctx.db.query("deviceCredentials").withIndex("by_secret_hash", (q) => q.eq("secretHash", first.deviceSecretHash)).unique())!;
+      await ctx.db.patch(c._id, { secretHash: sha256HexSync(secret) });
+      return c.deviceId;
     });
-    const deviceId = (await devices(t, orgId)).find((d) => d.secretHash === sha256HexSync(secret))!._id;
     expect(await t.mutation(api.devices.unenroll, { deviceId, deviceSecret: secret })).toEqual({ kind: "ok" });
     expect((await stats(t, orgId))?.deviceCount).toBe(1);
     await t.mutation(api.enrollment.enroll, enrollArgs(token));

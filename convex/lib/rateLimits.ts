@@ -38,6 +38,11 @@ export const rateLimiter = new RateLimiter(components.rateLimiter, {
   // nothing at all and are bounded by the 100-bit token.
   enrollGlobal: { kind: "token bucket", rate: 120, period: MINUTE_MS, capacity: 120 },
   enrollPerOrg: { kind: "token bucket", rate: 10, period: MINUTE_MS, capacity: 10 },
+  // Fleet (plan 4.6 amended, Step 7). Consumed only when the call writes:
+  // `fleet:watch` per member (the page renews every 4 minutes), `fleet:checkNow`
+  // per organization (each click wakes up to 50 PCs).
+  watch: { kind: "token bucket", rate: 6, period: MINUTE_MS, capacity: 6 },
+  checkNow: { kind: "token bucket", rate: 1, period: MINUTE_MS, capacity: 1 },
 });
 
 export type LimitName =
@@ -46,7 +51,9 @@ export type LimitName =
   | "stepUpChallenge"
   | "stepUpFailuresGlobal"
   | "enrollGlobal"
-  | "enrollPerOrg";
+  | "enrollPerOrg"
+  | "watch"
+  | "checkNow";
 
 /** Read-only: throw `rate_limited` when the bucket is empty, without consuming. */
 export async function checkOrFail(

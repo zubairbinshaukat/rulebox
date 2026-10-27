@@ -6,6 +6,7 @@ import {
   audience,
   auditActorType,
   desktopSpec,
+  diskBand,
   installState,
   inviteKind,
   memberStatus,
@@ -226,49 +227,139 @@ export default defineSchema({
     description: v.optional(v.string()),
     revision: v.optional(v.number()),
     createdAt: v.optional(v.number()),
+    // The group `setup` creates with the organization. It does NOT count toward
+    // `orgStats.groupCount` / `maxGroups` (owner decision 2026-10-27: a free
+    // tenant has 3 usable groups besides it).
+    isDefault: v.optional(v.boolean()),
   })
     .index("by_org", ["orgId"])
     .index("by_org_name", ["orgId", "name"]),
 
-  // grows
+  // grows. Identity only (plan 4.2.1, A2). The credential and status fields
+  // below are DEPRECATED (Step 7, widen-then-narrow): `maintenance:migrateDevices`
+  // copies them into `deviceCredentials` / `deviceSummary` / `deviceReports`
+  // without touching this row; `maintenance:narrowDevices` removes them once
+  // every deployment ran the copy and its devices were checked. New devices
+  // never get them. Only the pre-migration fallback of `lib/deviceAuth.ts`
+  // and the migrations read them.
   devices: defineTable({
     orgId: v.id("organizations"),
     groupId: v.optional(v.id("groups")),
     name: v.string(),
-    // Device authentication: SHA-256 hex of the device secret (plan 4.7).
-    secretHash: v.string(),
-    previousSecretHash: v.optional(v.string()),
-    rotateCredential: v.optional(v.boolean()),
-    revoked: v.boolean(),
     enrolledAt: v.number(),
     enrollmentTokenId: v.id("enrollmentTokens"),
     hardwareIdHash: v.optional(v.string()),
     kioskEnabled: v.optional(v.boolean()), // missing = true
     revision: v.optional(v.number()),
-    // removed in Step 7 (moved to deviceReports)
+    // DEPRECATED (moved to deviceCredentials)
+    secretHash: v.optional(v.string()),
+    previousSecretHash: v.optional(v.string()),
+    rotateCredential: v.optional(v.boolean()),
+    revoked: v.optional(v.boolean()),
+    // DEPRECATED (moved to deviceSummary / deviceReports)
     ...reportedStatusFields,
   })
     .index("by_org", ["orgId"])
     .index("by_group", ["groupId"])
+    // DEPRECATED: enrollment idempotency for devices enrolled before the
+    // credentials split; removed with the narrow step.
     .index("by_secret_hash", ["secretHash"])
-    .index("by_previous_secret_hash", ["previousSecretHash"])
-    .searchIndex("search_name", { searchField: "name", filterFields: ["orgId"] }),
+    .searchIndex("search_name", { searchField: "name", filterFields: ["orgId", "groupId"] }),
 
-  // grows (1 per device). Written by the heartbeat from Step 7.
+  // grows (1 per device). Read by EVERY device call, nothing else but the
+  // fleet mutations that change it (plan 4.2.1, A2). Never returned.
+  deviceCredentials: defineTable({
+    deviceId: v.id("devices"),
+    orgId: v.id("organizations"),
+    secretHash: v.string(), // SHA-256 hex of the device secret
+    previousSecretHash: v.optional(v.string()),
+    rotate: v.optional(v.boolean()),
+    state: v.union(v.literal("active"), v.literal("revoked"), v.literal("overLimit"), v.literal("suspended")),
+  })
+    .index("by_device", ["deviceId"])
+    .index("by_secret_hash", ["secretHash"])
+    .index("by_previous_secret_hash", ["previousSecretHash"]),
+
+  // grows (1 per device), fast-changing, NEVER subscribed except the one row
+  // of a watched device page (plan 4.2.1, A3). Written by a device call only
+  // when the minute bucket changed or a transition happens.
+  // `offlineAfter`: the minute bucket after which the sweep marks the device
+  // offline = seenBucket + ceil((2.5 x the interval this device was told + 1
+  // min) / 1 min). A per-row deadline instead of the plan's per-org grace map
+  // (`by_online_seen`): the sweep reads only devices that really expired, even
+  // when tenants have different intervals.
+  deviceLiveness: defineTable({
+    deviceId: v.id("devices"),
+    orgId: v.id("organizations"),
+    seenBucket: v.number(), // Unix ms / 60,000
+    online: v.boolean(),
+    offlineAfter: v.number(), // minute bucket
+    pingIntervalMs: v.number(), // the effective interval of this device (settings)
+    fastUntil: v.optional(v.number()), // watch mode: answer 60 s until then
+    pendingCheck: v.optional(v.id("fleetChecks")), // "Check now" not answered yet
+    answeredCheck: v.optional(v.id("fleetChecks")),
+  })
+    .index("by_device", ["deviceId"])
+    .index("by_online_deadline", ["online", "offlineAfter"])
+    // ping-interval propagation (plans:setOrgPingInterval / setGlobalPingInterval)
+    .index("by_org", ["orgId"]),
+
+  // grows (1 per device), written ONLY on an online/offline transition or
+  // revoke (plan 4.2.1, A3). What lists show: "Online" / "Offline since 14:05".
+  devicePresence: defineTable({
+    deviceId: v.id("devices"),
+    orgId: v.id("organizations"),
+    online: v.boolean(),
+    since: v.number(),
+    revoked: v.optional(v.boolean()), // terminal: revoked devices are never online
+  }).index("by_device", ["deviceId"]),
+
+  // tiny (PRESENCE_SHARDS per org): online device counts, changed on transitions.
+  orgPresence: defineTable({
+    orgId: v.id("organizations"),
+    shard: v.number(),
+    online: v.number(),
+  }).index("by_org_shard", ["orgId", "shard"]),
+
+  // grows (1 per device): the list columns only (plan 4.2.1, A8), written only
+  // when one of them changes. Disk space as a band.
+  deviceSummary: defineTable({
+    deviceId: v.id("devices"),
+    orgId: v.id("organizations"),
+    agentVersion: v.optional(v.string()),
+    windowsBuild: v.optional(v.string()),
+    kioskPhase: v.optional(v.string()),
+    outOfSupport: v.boolean(),
+    appliedVersion: v.optional(v.number()),
+    diskBand: v.optional(diskBand),
+    updatedAt: v.number(),
+  }).index("by_device", ["deviceId"]),
+
+  // grows (1 per device): the detail page's report (plan 4.2.1, A8). Written
+  // only when a field changes; `diskFreeGb` only when its band changes.
   deviceReports: defineTable({
     deviceId: v.id("devices"),
     orgId: v.id("organizations"),
     ...reportedStatusFields,
     trustedKeyIds: v.optional(v.array(v.string())),
     restartPending: v.optional(v.boolean()),
-    outOfSupport: v.boolean(),
     updatedAt: v.number(),
   }).index("by_device", ["deviceId"]),
 
-  // grows (1 per device), fast-changing (PRD 11.1 rule 4)
+  // grows (pruned daily after a day). One "Check now" click (plan 4.9).
+  fleetChecks: defineTable({
+    orgId: v.id("organizations"),
+    deviceIds: v.array(v.id("devices")), // <= MAX_CHECK_DEVICES
+    requestedAt: v.number(),
+    requestedBy: v.id("members"),
+  }),
+
+  // RETIRED (Step 7, A3): no longer written. Rows are deleted by
+  // `maintenance:narrowDevices` after `migrateDevices` copied them into
+  // `deviceLiveness` / `devicePresence`.
   deviceStatus: defineTable({
     deviceId: v.id("devices"),
-    orgId: v.optional(v.id("organizations")), // backfilled by the next heartbeat
+    orgId: v.optional(v.id("organizations")),
     lastSeenAt: v.number(),
   })
     .index("by_device", ["deviceId"])

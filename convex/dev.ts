@@ -17,6 +17,7 @@ import {
   formatEnrollmentCode,
 } from "./lib/crypto";
 import { countsAsActive } from "./lib/enrollmentCodes";
+import { credOf, revokeDevice as revokeDeviceRows } from "./lib/fleet";
 import { bumpOrgStatsIfPresent } from "./lib/plans";
 
 /**
@@ -225,10 +226,8 @@ export const revokeDevice = internalMutation({
   handler: async (ctx, args) => {
     const device = await ctx.db.get(args.deviceId);
     if (device === null) throw new Error(`No such device: ${args.deviceId}`);
-    if (device.revoked) return null;
-    await ctx.db.patch(args.deviceId, { revoked: true });
-    // `deviceCount` counts non-revoked devices (plan 4.2.1, A7).
-    await bumpOrgStatsIfPresent(ctx, device.orgId, { deviceCount: -1 });
+    // Credentials, counters (non-revoked devices only) and presence (Step 7).
+    await revokeDeviceRows(ctx, await credOf(ctx, device), Date.now());
     return null;
   },
 });

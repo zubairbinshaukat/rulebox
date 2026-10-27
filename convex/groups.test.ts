@@ -1,7 +1,7 @@
 import { describe, expect, test } from "vitest";
 import { setupAuth } from "../tests/convex/auth";
 import { asMember, expectCode, giveStepUp, makeOrg, type T } from "../tests/convex/identity";
-import { api } from "./_generated/api";
+import { api, internal } from "./_generated/api";
 import type { Id } from "./_generated/dataModel";
 import { MINUTE_MS } from "./lib/limits";
 
@@ -224,4 +224,32 @@ describe("groups", () => {
     await a.as.mutation(api.groups.create, { name: "Four" });
     expect(await groupCount(t, orgId)).toBe(3);
   });
+
+  test("free plan: the setup-created Default group is not one of the 3 (owner decision 2026-10-27)", async () => {
+    process.env.RULEBOX_HOSTED = "1";
+    try {
+      const t = await setupAuth();
+      const { orgId } = await t.action(internal.setup.createOwnerInvite, { orgName: "Acme", email: "o@acme.test" });
+      expect(await groupCount(t, orgId)).toBe(0);
+      const a = await admin(t, orgId);
+      for (const name of ["One", "Two", "Three"]) await a.as.mutation(api.groups.create, { name });
+      await expectCode(a.as.mutation(api.groups.create, { name: "Four" }), "plan_limit");
+      const listed = await a.as.query(api.groups.list, {});
+      expect(listed.map((g) => [g.name, g.isDefault])).toEqual([
+        ["Default", true],
+        ["One", false],
+        ["Three", false],
+        ["Two", false],
+      ]);
+      expect((await a.as.query(api.settings.plan, {})).usage).toMatchObject({ groups: 3 });
+      // Deleting the Default group frees no slot (it never used one).
+      await a.as.mutation(api.groups.remove, { groupId: listed[0]!._id });
+      expect(await groupCount(t, orgId)).toBe(3);
+      await expectCode(a.as.mutation(api.groups.create, { name: "Four" }), "plan_limit");
+    } finally {
+      delete process.env.RULEBOX_HOSTED;
+    }
+  });
 });
+
+declare const process: { env: Record<string, string | undefined> };

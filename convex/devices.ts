@@ -1,22 +1,40 @@
 import { v } from "convex/values";
 import { internalQuery } from "./_generated/server";
-import { checkDevice } from "./lib/deviceAuth";
-import { deepEqual } from "./lib/deepEqual";
-import { phase2DeviceMutation, phase2DeviceQuery } from "./lib/functions";
-import { bumpOrgStatsIfPresent } from "./lib/plans";
+import { writeAudit } from "./lib/audit";
+import { checkDevice, type CredentialState } from "./lib/deviceAuth";
+import { statusValidator, writeStatus } from "./lib/deviceReport";
+import { revokeDevice } from "./lib/fleet";
+import { deviceMutation, phase2DeviceMutation, phase2DeviceQuery } from "./lib/functions";
+import { recordContact } from "./lib/presence";
 
-/** Fixed in Phase 2 (about 5 minutes); Step 7 scales it with fleet size. */
-const NEXT_PING_IN_MS = 300_000;
+// The agent's functions (plan 5.1 as amended by A2, A3, A4).
+//
+// Wire contract of the installed Phase 2 agent (apps/agent/src/backend/convex.rs,
+// read-only): `devices:desiredState` (its one subscription), `devices:heartbeat`
+// (`{ kind: "rejected" } | { kind: "ok", nextPingInMs, serverTimeMs }`, extra
+// keys ignored; the agent clamps `nextPingInMs` to 5 s .. 1 h) and
+// `devices:unenroll`. Names, arguments and answers stay; answers only gain keys.
+//
+// The ping interval is carried in `nextPingInMs`: the effective interval from
+// the settings (per-tenant override, else the global default; plan 4.9), stored
+// on the device's `deviceLiveness` row, or 60 s while a dashboard watches the
+// device. Step 8 adds the same value to the signed head the agent subscribes
+// to (`desiredHeads.pingIntervalMs`, with `pingNonce` / `fastUntil` so watch
+// and "Check now" reach the agent at once); Step 13 teaches the agent to read
+// it there and raises its `MAX_PING_MS` to 6 h.
+
+const planStateOf = (state: CredentialState): "ok" | "overLimit" | "suspended" =>
+  state === "active" || state === "revoked" ? "ok" : state;
+const planState = v.union(v.literal("ok"), v.literal("overLimit"), v.literal("suspended"));
 
 /**
- * The agent's one subscription (PRD 11.1 rule 6).
+ * The agent's one subscription (PRD 11.1 rule 6), Phase 2 shape until Step 8.
  *
- * Reads only `devices` and `desiredStates`. It must not call `Date.now()` and
- * must not read `deviceStatus`: either would re-run the subscription on every
- * heartbeat.
- *
- * Phase 2 wire shape until Step 8: the device-scope document wins over the
- * group-scope one, and `signature` is always null.
+ * Reads `deviceCredentials` (the wrapper), the newest device-scope
+ * `desiredStates` row and, only when there is none, the `devices` row for the
+ * group scope. It must not call `Date.now()` and never reads presence,
+ * liveness, summary or report rows, so status changes and pings do not re-run
+ * it.
  */
 export const desiredState = phase2DeviceQuery({
   args: {},
@@ -39,58 +57,41 @@ export const desiredState = phase2DeviceQuery({
     const check = ctx.deviceCheck;
     if (check.kind === "unknown") return { kind: "unknownDevice" as const };
     if (check.kind === "revoked") return { kind: "revoked" as const };
-    const device = check.device;
+    const deviceId = check.cred.deviceId;
 
     let row = await ctx.db
       .query("desiredStates")
-      .withIndex("by_scope_version", (q) => q.eq("scope", device._id))
+      .withIndex("by_scope_version", (q) => q.eq("scope", deviceId))
       .order("desc")
       .first();
-    if (row === null && device.groupId !== undefined) {
-      const groupScope: string = device.groupId;
-      row = await ctx.db
-        .query("desiredStates")
-        .withIndex("by_scope_version", (q) => q.eq("scope", groupScope))
-        .order("desc")
-        .first();
+    if (row === null) {
+      const device = await ctx.db.get(deviceId);
+      if (device?.groupId !== undefined) {
+        const groupScope: string = device.groupId;
+        row = await ctx.db
+          .query("desiredStates")
+          .withIndex("by_scope_version", (q) => q.eq("scope", groupScope))
+          .order("desc")
+          .first();
+      }
     }
 
     return {
       kind: "ok" as const,
-      desired:
-        row === null
-          ? null
-          : { version: row.version, doc: row.doc ?? null, signature: null },
+      desired: row === null ? null : { version: row.version, doc: row.doc ?? null, signature: null },
     };
   },
 });
 
-/** Nullable on the wire so a Rust `None` serializes to a clear. */
-const optionalString = v.optional(v.union(v.string(), v.null()));
-const optionalNumber = v.optional(v.union(v.number(), v.null()));
-
 /**
- * The agent's complete status snapshot. Absent (or null) means "not set":
- * when this differs from what is stored, the stored fields are replaced.
- */
-const statusValidator = v.object({
-  agentVersion: optionalString,
-  os: optionalString,
-  osBuild: optionalString,
-  osEdition: optionalString,
-  ramMb: optionalNumber,
-  diskFreeGb: optionalNumber,
-  lockdownLevel: optionalString,
-  kioskPhase: optionalString,
-  kioskError: optionalString,
-  appliedVersion: optionalNumber,
-  shellHealth: optionalString,
-  compat: v.optional(v.any()),
-});
-
-/**
- * Heartbeat: refresh `deviceStatus.lastSeenAt`, and write `devices` only when
- * the reported status differs from the stored one (PRD 11.1 rule 5).
+ * Heartbeat (Phase 2 name; alias of `ping` until Phase 6, plan 4.6 amended).
+ *
+ * Liveness: writes `deviceLiveness` only when the minute bucket changed (plus
+ * `devicePresence` and one `orgPresence` shard on an offline -> online
+ * transition); a second heartbeat within the same minute writes nothing.
+ * Status: until `deviceApi:report` exists (Step 12) the alias accepts the
+ * snapshot and writes `deviceSummary` / `deviceReports` only when they change.
+ * Never writes `devices`.
  */
 export const heartbeat = phase2DeviceMutation({
   args: { status: v.optional(statusValidator) },
@@ -100,80 +101,70 @@ export const heartbeat = phase2DeviceMutation({
       kind: v.literal("ok"),
       nextPingInMs: v.number(),
       serverTimeMs: v.number(),
+      // Additive (Phase 2 agents ignore unknown keys).
+      rotateCredential: v.boolean(),
+      planState,
     }),
   ),
   handler: async (ctx, args) => {
     const check = ctx.deviceCheck;
     if (check.kind !== "ok") return { kind: "rejected" as const };
-    const device = check.device;
+    const ids = { deviceId: check.cred.deviceId, orgId: check.cred.orgId };
     const now = Date.now();
-
-    const statusRow = await ctx.db
-      .query("deviceStatus")
-      .withIndex("by_device", (q) => q.eq("deviceId", device._id))
-      .first();
-    if (statusRow === null) {
-      await ctx.db.insert("deviceStatus", {
-        deviceId: device._id,
-        orgId: device.orgId,
-        lastSeenAt: now,
-      });
-    } else {
-      // Backfills `orgId` on Phase 2 rows (plan 4.2).
-      await ctx.db.patch(statusRow._id, { lastSeenAt: now, orgId: device.orgId });
-    }
-
-    const s = args.status;
-    if (s !== undefined) {
-      const next = {
-        agentVersion: s.agentVersion ?? undefined,
-        os: s.os ?? undefined,
-        osBuild: s.osBuild ?? undefined,
-        osEdition: s.osEdition ?? undefined,
-        ramMb: s.ramMb ?? undefined,
-        diskFreeGb: s.diskFreeGb ?? undefined,
-        lockdownLevel: s.lockdownLevel ?? undefined,
-        kioskPhase: s.kioskPhase ?? undefined,
-        kioskError: s.kioskError ?? undefined,
-        appliedVersion: s.appliedVersion ?? undefined,
-        shellHealth: s.shellHealth ?? undefined,
-        compat: s.compat === null ? undefined : s.compat,
-      };
-      const changed = (Object.keys(next) as (keyof typeof next)[]).some(
-        (key) => !deepEqual(next[key], device[key]),
-      );
-      if (changed) {
-        // `undefined` removes the field, so a cleared error is really cleared.
-        await ctx.db.patch(device._id, next);
-      }
-    }
-
+    const contact = await recordContact(ctx, ids, now);
+    if (args.status !== undefined) await writeStatus(ctx, ids, args.status, now);
     return {
       kind: "ok" as const,
-      nextPingInMs: NEXT_PING_IN_MS,
+      nextPingInMs: contact.nextPingInMs,
       serverTimeMs: now,
+      rotateCredential: check.cred.rotate,
+      planState: planStateOf(check.cred.state),
+    };
+  },
+});
+
+/**
+ * The liveness ping of Phase 4 agents (plan 4.9, 5.1 amended, A4). Reads the
+ * credentials (wrapper) and the liveness row; writes as `heartbeat` does.
+ * Unknown, wrong secret and revoked answer `device_rejected`.
+ */
+export const ping = deviceMutation({
+  args: {},
+  returns: v.object({ nextPingInMs: v.number(), planState, rotateCredential: v.boolean() }),
+  handler: async (ctx) => {
+    const contact = await recordContact(ctx, { deviceId: ctx.device._id, orgId: ctx.device.orgId }, Date.now());
+    return {
+      nextPingInMs: contact.nextPingInMs,
+      planState: planStateOf(ctx.device.state),
+      rotateCredential: ctx.device.rotate,
     };
   },
 });
 
 /**
  * The device's own request to leave the fleet (`rulebox-agent unenroll`).
- * Marks the device revoked; its subscription then answers `revoked`.
- * `rejected` means unknown id, wrong secret or already revoked.
+ * Revokes it (credentials, counters, presence) and audits `device.revoked`
+ * with the device as actor. `rejected` means unknown id, wrong secret or
+ * already revoked.
  */
 export const unenroll = phase2DeviceMutation({
   args: {},
-  returns: v.union(
-    v.object({ kind: v.literal("rejected") }),
-    v.object({ kind: v.literal("ok") }),
-  ),
+  returns: v.union(v.object({ kind: v.literal("rejected") }), v.object({ kind: v.literal("ok") })),
   handler: async (ctx) => {
     const check = ctx.deviceCheck;
     if (check.kind !== "ok") return { kind: "rejected" as const };
-    await ctx.db.patch(check.device._id, { revoked: true });
-    // `deviceCount` counts non-revoked devices (plan 4.2.1, A7): a revoked
-    // device frees a slot of the plan's `maxDevices` (Step 6).
-    await bumpOrgStatsIfPresent(ctx, check.device.orgId, { deviceCount: -1 });
+    const device = await revokeDevice(ctx, check.cred, Date.now());
+    if (device !== null) {
+      await writeAudit(ctx, {
+        orgId: device.orgId,
+        actor: { type: "device", id: device._id, label: device.name },
+        action: "device.revoked",
+        targetType: "device",
+        targetId: device._id,
+        targetLabel: device.name,
+        summary: `The PC ${device.name} unenrolled itself`,
+      });
+    }
     return { kind: "ok" as const };
   },
 });
@@ -196,7 +187,8 @@ export const authorizeDevice = internalQuery({
   handler: async (ctx, args) => {
     const check = await checkDevice(ctx, args);
     if (check.kind !== "ok") return null;
-    const d = check.device;
+    const d = await ctx.db.get(check.cred.deviceId);
+    if (d === null) return null;
     return { _id: d._id, orgId: d.orgId, groupId: d.groupId, name: d.name };
   },
 });
