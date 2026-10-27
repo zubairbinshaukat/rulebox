@@ -1,10 +1,9 @@
-import { useEffect, useRef, type ReactNode } from "react";
-import { useGSAP } from "@gsap/react";
+import { useEffect, type ReactNode } from "react";
 import { Backdrop, LogoMark, SegmentedControl, type Theme } from "@rulebox/ui";
 import IconCheck from "~icons/solar/check-circle-linear";
 import { IS_DEMO } from "../data";
 import { useTheme } from "../app/theme";
-import { enter, useMotionLevel } from "../lib/motion";
+import { prefetchWhenIdle } from "../app/screens";
 import { strings } from "../lib/strings";
 import { InlineNotice } from "./Notice";
 
@@ -28,12 +27,9 @@ export function AuthShell({
   wide?: boolean;
   demoHint?: ReactNode;
 }) {
-  const card = useRef<HTMLDivElement>(null);
-  const level = useMotionLevel();
   const [theme, setTheme] = useTheme();
-  useGSAP(() => {
-    if (card.current) enter(card.current, level);
-  }, { scope: card });
+  // This screen is on screen now: fetch what comes after sign-in while the user types.
+  useEffect(() => prefetchWhenIdle(["Mfa", "Layout", "Overview"]), []);
   useEffect(() => {
     document.title = `${title} · ${strings.app.name}`;
   }, [title]);
@@ -60,7 +56,8 @@ export function AuthShell({
         <p className="dash-auth__foot">{strings.app.tagline}</p>
       </aside>
       <main className="dash-auth__main" id="main">
-        <div ref={card} className={["dash-auth__card", wide ? "dash-auth__card--wide" : ""].filter(Boolean).join(" ")}>
+        {/* `dash-enter`: CSS entrance (dashboard.css), fade only with reduced motion or Lite. */}
+        <div className={["dash-auth__card", "dash-enter", wide ? "dash-auth__card--wide" : ""].filter(Boolean).join(" ")}>
           <div>
             <h1 className="dash-auth__title">{title}</h1>
             {lead ? <p className="dash-auth__lead">{lead}</p> : null}

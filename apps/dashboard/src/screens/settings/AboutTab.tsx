@@ -34,7 +34,6 @@ export function AboutTab() {
           <h3 style={{ fontSize: 14, marginBottom: 8 }}>{s.credits}</h3>
           <ul style={{ margin: 0, paddingInlineStart: 18, display: "flex", flexDirection: "column", gap: 6 }}>
             <li>{s.solar}</li>
-            <li>{s.gsap}</li>
             <li>{s.fonts}</li>
           </ul>
           <p className="dash-muted" style={{ marginTop: 10, fontSize: 13 }}>

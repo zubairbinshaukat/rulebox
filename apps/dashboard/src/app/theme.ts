@@ -4,7 +4,7 @@ import { readStorage, writeStorage } from "../lib/storage";
 
 /**
  * Light / dark / match-system, remembered in this browser only.
- * `public/theme-init.js` applies the saved choice before the first paint.
+ * `src/boot/boot.js` applies the saved choice before the first paint.
  */
 const KEY = "rulebox.theme";
 

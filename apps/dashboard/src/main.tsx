@@ -3,7 +3,8 @@ import { createRoot } from "react-dom/client";
 import { BrowserRouter } from "react-router";
 import { ConvexReactClient } from "convex/react";
 import { ConvexAuthProvider } from "@convex-dev/auth/react";
-import "@rulebox/ui/fonts.css";
+// Latin subsets only (size budget: scripts/size.mjs); the Figtree file is preloaded by the build.
+import "@rulebox/ui/fonts-latin.css";
 import "@rulebox/ui/tokens.css";
 import "@rulebox/ui/base.css";
 import "./styles/dashboard.css";

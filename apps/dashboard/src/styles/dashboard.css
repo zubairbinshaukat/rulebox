@@ -2147,6 +2147,45 @@ a.dash-stat:hover {
   gap: 12px;
 }
 
+/* ------------------------------------------------------------ entrances (PRD 25) */
+
+/* Each entrance plays once when its element mounts (pages remount on every
+   route change, dialogs and toasts on open), so plain CSS does what the GSAP
+   tweens did without a 30 KB library on the first load. Only transform and
+   opacity; "power2.out"; nothing stays on the element afterwards (no lasting
+   transform that would trap position: fixed children). Reduced motion and
+   Lite: opacity only, 150 ms. */
+@keyframes dash-enter {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+}
+@keyframes dash-fade-in {
+  from {
+    opacity: 0;
+  }
+}
+.dash-enter,
+.dash-dialog {
+  animation: dash-enter 200ms cubic-bezier(0.33, 1, 0.68, 1) backwards;
+}
+.rb-dialog-backdrop:has(> .dash-dialog) {
+  animation: dash-fade-in 150ms cubic-bezier(0.33, 1, 0.68, 1) backwards;
+}
+@media (prefers-reduced-motion: reduce) {
+  .dash-enter,
+  .dash-dialog {
+    animation-name: dash-fade-in;
+    animation-duration: 150ms;
+  }
+}
+[data-lite="true"] .dash-enter,
+[data-lite="true"] .dash-dialog {
+  animation-name: dash-fade-in;
+  animation-duration: 150ms;
+}
+
 /* Reduced motion and Lite: static skeletons, no spinning, no lifts. */
 @media (prefers-reduced-motion: reduce) {
   .dash-sk::after {

@@ -4,3 +4,11 @@
   Referrer-Policy: strict-origin-when-cross-origin
   X-Frame-Options: DENY
   Permissions-Policy: camera=(), microphone=(), geolocation=(), payment=()
+
+# index.html and the other unhashed files keep the Pages default
+# ("public, max-age=0, must-revalidate"): a new deploy is seen on the next load.
+# Content-hashed build files (scripts, styles, fonts, the boot script) never
+# change under the same name: cache them for a year without revalidating.
+# (Not set on /* as well: Pages joins two values of one header with a comma.)
+/assets/*
+  Cache-Control: public, max-age=31536000, immutable

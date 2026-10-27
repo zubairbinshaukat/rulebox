@@ -19,6 +19,7 @@ import HistoryDuo from "~icons/solar/history-bold-duotone";
 import SettingsLinear from "~icons/solar/settings-linear";
 import SettingsDuo from "~icons/solar/settings-bold-duotone";
 import { strings } from "../lib/strings";
+import { prefetchPath } from "./screens";
 
 type Icon = ComponentType<SVGProps<SVGSVGElement>>;
 interface NavItem {
@@ -71,7 +72,17 @@ export function Nav({ onNavigate }: { onNavigate?: () => void }) {
           <ul className="dash-nav__list">
             {section.items.map((item) => (
               <li key={item.to}>
-                <NavLink to={item.to} end={item.end} className="dash-nav__link" title={item.label} onClick={onNavigate}>
+                <NavLink
+                  to={item.to}
+                  end={item.end}
+                  className="dash-nav__link"
+                  title={item.label}
+                  onClick={onNavigate}
+                  // Start downloading the screen's chunk as soon as the user aims at it.
+                  onPointerEnter={() => prefetchPath(item.to)}
+                  onFocus={() => prefetchPath(item.to)}
+                  onTouchStart={() => prefetchPath(item.to)}
+                >
                   {({ isActive }) => {
                     const I = isActive ? item.activeIcon : item.icon;
                     return (

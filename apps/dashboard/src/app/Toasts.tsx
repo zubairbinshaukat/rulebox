@@ -1,10 +1,8 @@
 import { useCallback, useMemo, useRef, useState, type ReactNode } from "react";
-import { useGSAP } from "@gsap/react";
 import IconCheck from "~icons/solar/check-circle-linear";
 import IconDanger from "~icons/solar/danger-circle-linear";
 import IconInfo from "~icons/solar/info-circle-linear";
 import IconClose from "~icons/solar/close-circle-linear";
-import { enter, useMotionLevel } from "../lib/motion";
 import { strings } from "../lib/strings";
 import { ToastContext, type ToastTone } from "../lib/toast";
 
@@ -48,14 +46,10 @@ export function ToastProvider({ children }: { children: ReactNode }) {
 }
 
 function ToastItem({ toast, onDismiss }: { toast: Toast; onDismiss: () => void }) {
-  const ref = useRef<HTMLDivElement>(null);
-  const level = useMotionLevel();
-  useGSAP(() => {
-    if (ref.current) enter(ref.current, level);
-  }, { scope: ref });
+  // `dash-enter`: the CSS entrance (dashboard.css), fade only with reduced motion or Lite.
   const Icon = ICON[toast.tone];
   return (
-    <div ref={ref} className={`dash-toast dash-toast--${toast.tone}`}>
+    <div className={`dash-toast dash-toast--${toast.tone} dash-enter`}>
       <span className="dash-toast__icon" aria-hidden="true">
         <Icon />
       </span>

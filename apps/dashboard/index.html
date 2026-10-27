@@ -9,11 +9,14 @@
     <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
     <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
     <title>Rulebox Dashboard</title>
-    <script src="/theme-init.js"></script>
+    <!-- Theme before the first paint + route preloads; the build swaps in the hashed file (vite.config.ts). -->
+    <script src="/src/boot/boot.js"></script>
   </head>
   <body>
     <noscript>Rulebox needs JavaScript to run.</noscript>
-    <div id="root"></div>
+    <!-- Static placeholder painted as soon as the CSS is in, while the scripts download; React replaces it.
+         The logo is the generated public/favicon.svg, inlined by vite.config.ts (no extra request). -->
+    <div id="root"><div class="dash-fullpage" aria-busy="true"><!--rb-logo--></div></div>
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>

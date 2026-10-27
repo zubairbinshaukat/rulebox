@@ -1,6 +1,5 @@
 import { lazy, Suspense, useEffect, useRef, useState } from "react";
 import { Link, Outlet, useLocation } from "react-router";
-import { useGSAP } from "@gsap/react";
 import { Button, LogoMark, Pill } from "@rulebox/ui";
 import IconMenu from "~icons/solar/hamburger-menu-linear";
 import IconRefresh from "~icons/solar/refresh-linear";
@@ -9,10 +8,10 @@ import { useMember } from "../lib/member";
 import { RegionBoundary } from "../components/Region";
 import { Modal } from "../components/Modal";
 import { SkeletonBlock } from "../components/Skeleton";
-import { enter, useMotionLevel } from "../lib/motion";
 import { requestTitleFocus, takeTitleFocus } from "../lib/focus";
 import { strings } from "../lib/strings";
 import { AccountMenu } from "./AccountMenu";
+import { ChunkErrorBoundary } from "./ChunkErrorBoundary";
 import { ConnectionBanner } from "./ConnectionBanner";
 import { Nav } from "./Nav";
 
@@ -40,16 +39,7 @@ export function Layout() {
   const me = useMember();
   const location = useLocation();
   const [navOpen, setNavOpen] = useState(false);
-  const page = useRef<HTMLDivElement>(null);
-  const level = useMotionLevel();
   const first = useRef(true);
-
-  useGSAP(
-    () => {
-      if (page.current) enter(page.current, level);
-    },
-    { dependencies: [location.pathname], scope: page },
-  );
 
   useEffect(() => {
     if (first.current) {
@@ -144,11 +134,14 @@ export function Layout() {
           ) : null}
 
           <main id="main" className="dash-main" tabIndex={-1}>
-            <div ref={page} key={location.pathname}>
+            {/* Remounts on every route change, so the CSS entrance (`dash-enter`) plays each time. */}
+            <div key={location.pathname} className="dash-enter">
               <RegionBoundary resetKey={location.pathname}>
-                <Suspense fallback={<PageFallback />}>
-                  <Outlet />
-                </Suspense>
+                <ChunkErrorBoundary resetKey={location.pathname}>
+                  <Suspense fallback={<PageFallback />}>
+                    <Outlet />
+                  </Suspense>
+                </ChunkErrorBoundary>
               </RegionBoundary>
             </div>
           </main>
