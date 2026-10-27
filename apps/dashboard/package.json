@@ -14,7 +14,9 @@
     "lint": "eslint .",
     "test": "vitest run",
     "e2e": "playwright test",
-    "check:ui": "node e2e/check-ui.mjs"
+    "check:ui": "node e2e/check-ui.mjs",
+    "size": "node scripts/size.mjs",
+    "perf": "node e2e/perf.mjs"
   },
   "dependencies": {
     "@convex-dev/auth": "catalog:",
