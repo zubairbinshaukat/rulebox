@@ -44,6 +44,9 @@ the current phase's plan exactly and update its status in the index.
   `Microsoft.WinGet.Client` or install from the manifest's URL + hash.
 - Animation follows PRD Section 25: GSAP (+ Flip), only `transform` and
   `opacity`, clean up on unmount, honor reduced motion and Lite mode.
+  The web dashboard is the exception (owner decision 2026-10-27): its few entrance
+  animations are plain CSS (dash-enter, opacity and transform only, reduced motion
+  and Lite honoured) so GSAP stays out of its small bundle.
 - **Icons: Solar only** (Decision 16), bundled at build time via
   `@iconify-json/solar` + `unplugin-icons` (e.g.
   `import IconHome from '~icons/solar/home-2-bold-duotone'`). Dashboard:

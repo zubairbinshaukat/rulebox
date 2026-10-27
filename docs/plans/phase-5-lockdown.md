@@ -67,8 +67,7 @@ of Steps 21 and 22).
 
 ## Updates since this plan was written
 
-None yet. When the user answers Section 20, record the answers here and in
-`docs/plans/README.md`, and change the affected steps before starting.
+2026-10-27: the owner answered Section 20 with **all recommended options** (Q1-Q13). The plan's assumptions stand unchanged; no step changes. Section 19 (PRD deviations) is approved with them. Also decided that day (see post-phase-5-architecture-and-io.md): hosted service on ONE shared Convex deployment (free plan for now), per-organization keys under a deployment master key, device report interval 30 minutes by default and changeable per tenant or globally, step-up authentication (action PIN and passkeys) in the dashboard.
 
 ---
 
