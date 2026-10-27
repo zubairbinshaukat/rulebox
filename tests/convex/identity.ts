@@ -143,7 +143,49 @@ export const FORBIDDEN_KEYS = [
   "recoveryHashes",
   "secret",
   "hardwareIdHash",
+  // Step-up (plan 4.16)
+  "actionPinHash",
+  "credentialPublicKey",
+  "credentialId",
+  "challengeHash",
+  "webauthnUserId",
 ];
+
+/**
+ * Give a member's session a step-up state (plan 4.16): a factor (an action
+ * PIN hash, not a real one unless `pinHash` is given) and a step-up row
+ * verified `verifiedAgoMs` ago, last active `activeAgoMs` ago. `none` adds
+ * only the factor.
+ */
+export async function giveStepUp(
+  t: T,
+  m: { userId: Id<"users">; sessionId: Id<"authSessions"> },
+  opts: { verifiedAgoMs?: number; activeAgoMs?: number; none?: true; pinHash?: string } = {},
+): Promise<void> {
+  await t.run(async (ctx) => {
+    const now = Date.now();
+    const existing = await ctx.db.query("stepUpFactors").withIndex("by_user", (q) => q.eq("userId", m.userId)).first();
+    if (existing === null) {
+      await ctx.db.insert("stepUpFactors", {
+        userId: m.userId,
+        actionPinHash: opts.pinHash ?? "not-a-real-hash",
+        actionPinSetAt: now,
+        pinFailures: 0,
+        pinFailuresTotal: 0,
+        pinLockedUntil: 0,
+      });
+    }
+    if (opts.none === true) return;
+    const verifiedAt = now - (opts.verifiedAgoMs ?? 0);
+    await ctx.db.insert("stepUpSessions", {
+      sessionId: m.sessionId,
+      userId: m.userId,
+      verifiedAt,
+      lastActiveAt: now - (opts.activeAgoMs ?? opts.verifiedAgoMs ?? 0),
+      method: "actionPin",
+    });
+  });
+}
 
 /** Recursively collects every object key in `value`. */
 export function allKeys(value: unknown, out: Set<string> = new Set()): Set<string> {

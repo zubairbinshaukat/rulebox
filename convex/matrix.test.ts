@@ -1,6 +1,8 @@
 import { describe, expect, test } from "vitest";
 import { setupAuth } from "../tests/convex/auth";
-import { asMember, codeOf, expectNoSecrets, makeOrg, type T } from "../tests/convex/identity";
+import { asMember, codeOf, expectNoSecrets, giveStepUp, makeOrg, type T } from "../tests/convex/identity";
+import { MAJOR_ACTIONS } from "./lib/stepUp";
+import { MINUTE_MS } from "./lib/limits";
 import { api } from "./_generated/api";
 import type { Id } from "./_generated/dataModel";
 import { modules } from "./test.setup";
@@ -9,8 +11,16 @@ import { modules } from "./test.setup";
 // that exists after Step 3. A new public function without a row fails the
 // completeness test at the bottom.
 
-type Caller = "unauth" | "viewer" | "adminNoMfa" | "admin" | "ownerNoMfa" | "owner" | "disabled" | "foreign" | "device";
-const CALLERS: Caller[] = ["unauth", "viewer", "adminNoMfa", "admin", "ownerNoMfa", "owner", "disabled", "foreign", "device"];
+// admin, owner, foreign: MFA and a FRESH step-up. ownerStale: verified 6
+// minutes ago, active (unlocked, not fresh). ownerIdle: verified and last
+// active 20 minutes ago (locked). ownerNoFactor: MFA, no action PIN or passkey.
+type Caller =
+  | "unauth" | "viewer" | "adminNoMfa" | "admin" | "ownerNoMfa" | "owner" | "disabled" | "foreign" | "device"
+  | "ownerStale" | "ownerIdle" | "ownerNoFactor";
+const CALLERS: Caller[] = [
+  "unauth", "viewer", "adminNoMfa", "admin", "ownerNoMfa", "owner", "disabled", "foreign", "device",
+  "ownerStale", "ownerIdle", "ownerNoFactor",
+];
 
 type Fixture = {
   t: T;
@@ -35,8 +45,15 @@ async function fixture(): Promise<Fixture> {
     }),
   );
   const foreignOrg = await makeOrg(t, "Other");
-  const m = async (role: "owner" | "admin" | "viewer", mfa: boolean, status: "active" | "disabled" = "active", o = orgId) =>
-    (await asMember(t, { role, mfa, status, orgId: o })).as;
+  type StepUp = "fresh" | "stale" | "idle" | "factorOnly" | "none";
+  const m = async (role: "owner" | "admin" | "viewer", mfa: boolean, status: "active" | "disabled" = "active", o = orgId, s: StepUp = "none") => {
+    const x = await asMember(t, { role, mfa, status, orgId: o });
+    if (s === "fresh") await giveStepUp(t, x);
+    if (s === "stale") await giveStepUp(t, x, { verifiedAgoMs: 6 * MINUTE_MS, activeAgoMs: 0 });
+    if (s === "idle") await giveStepUp(t, x, { verifiedAgoMs: 20 * MINUTE_MS });
+    if (s === "factorOnly") await giveStepUp(t, x, { none: true });
+    return x.as;
+  };
   return {
     t,
     orgId,
@@ -46,11 +63,14 @@ async function fixture(): Promise<Fixture> {
       unauth: t,
       viewer: await m("viewer", false),
       adminNoMfa: await m("admin", false),
-      admin: await m("admin", true),
+      admin: await m("admin", true, "active", orgId, "fresh"),
       ownerNoMfa: await m("owner", false),
-      owner: await m("owner", true),
+      owner: await m("owner", true, "active", orgId, "fresh"),
       disabled: await m("owner", true, "disabled"),
-      foreign: await m("owner", true, "active", foreignOrg),
+      foreign: await m("owner", true, "active", foreignOrg, "fresh"),
+      ownerStale: await m("owner", true, "active", orgId, "stale"),
+      ownerIdle: await m("owner", true, "active", orgId, "idle"),
+      ownerNoFactor: await m("owner", true),
       device: t, // a device has no member identity; it can only present device credentials
     },
   };
@@ -83,14 +103,28 @@ const OWNER: Row["expect"] = {
   owner: "ok",
   // Owner of another organization: the id is not in their org.
   foreign: "not_found",
+  // Every OWNER function today is a major action (plan 4.16).
+  ownerStale: "step_up_required",
+  ownerIdle: "step_up_required",
+  ownerNoFactor: "step_up_setup_required",
 };
+// A member write at the "unlocked" level: viewer has no factor yet.
+const UNLOCKED: Row["expect"] = {
+  ...VIEWER,
+  viewer: "step_up_setup_required",
+  ownerIdle: "step_up_required",
+  ownerNoFactor: "step_up_setup_required",
+};
+// A self-service major action (viewer level, fresh step-up).
+const SELF_MAJOR: Row["expect"] = { ...UNLOCKED, ownerStale: "step_up_required" };
+const fakePasskeyId = "jh7bp5vtxgdvg1vq4dzkrymc8s8gvwzm";
 
 const ROWS: Row[] = [
   { name: "health:ping", call: (a) => a.query(api.health.ping, {}), expect: { default: "ok" } },
   { name: "account:me", call: (a) => a.query(api.account.me, {}), expect: { default: "ok" } },
   {
     name: "account:redeemReset",
-    call: (a) => a.action(api.account.redeemReset, { email: "target@acme.test", code: "WRONG", newPassword: "valid pass 1234" }),
+    call: (a) => a.action(api.account.redeemReset, { email: `t${Math.random().toString(36).slice(2)}@acme.test`, code: "WRONG", newPassword: "valid pass 1234" }),
     expect: { default: "invite_invalid" }, // public; needs a valid code whoever calls
   },
   {
@@ -144,7 +178,72 @@ const ROWS: Row[] = [
   },
   { name: "members:createResetCode", call: (a, f) => a.action(api.members.createResetCode, { memberId: f.targetMemberId }), expect: OWNER },
   { name: "members:resetMfa", call: (a, f) => a.mutation(api.members.resetMfa, { memberId: f.targetMemberId }), expect: OWNER },
+  // ---- Step-up (plan 4.16)
+  { name: "stepUp:status", call: (a) => a.query(api.stepUp.status, {}), expect: { ...VIEWER, foreign: "ok" } },
+  { name: "stepUp:keepAlive", call: (a) => a.mutation(api.stepUp.keepAlive, {}), expect: UNLOCKED },
+  { name: "stepUp:lock", call: (a) => a.mutation(api.stepUp.lock, {}), expect: { ...VIEWER, foreign: "ok" } },
+  {
+    name: "stepUp:setActionPin",
+    call: (a) => a.action(api.stepUp.setActionPin, { pin: "246813" }),
+    // no factor + fresh sign-in = bootstrap; a factor needs a fresh step-up
+    expect: { ...VIEWER, ownerStale: "step_up_required", ownerIdle: "step_up_required" },
+  },
+  {
+    name: "stepUp:verifyActionPin",
+    call: (a) => a.action(api.stepUp.verifyActionPin, { pin: "246813" }),
+    expect: { ...VIEWER, default: "step_up_invalid", viewer: "not_ready", ownerNoFactor: "not_ready" },
+  },
+  {
+    name: "stepUp:clearActionPin",
+    call: (a) => a.mutation(api.stepUp.clearActionPin, {}),
+    expect: { ...SELF_MAJOR, default: "step_up_last_factor" },
+  },
+  {
+    name: "stepUp:renamePasskey",
+    call: (a) => a.mutation(api.stepUp.renamePasskey, { passkeyId: fakePasskeyId, name: "Laptop" }),
+    expect: { ...UNLOCKED, default: "not_found" },
+  },
+  {
+    name: "stepUp:removePasskey",
+    call: (a) => a.mutation(api.stepUp.removePasskey, { passkeyId: fakePasskeyId }),
+    expect: { ...SELF_MAJOR, default: "not_found" },
+  },
+  { name: "stepUp:resetMember", call: (a, f) => a.mutation(api.stepUp.resetMember, { memberId: f.targetMemberId }), expect: OWNER },
+  {
+    name: "stepUp:resetWithRecoveryCode",
+    call: (a) => a.action(api.stepUp.resetWithRecoveryCode, { code: "AAAA-AAAA" }),
+    expect: { ...VIEWER, default: "not_ready" },
+  },
+  {
+    name: "passkeys:beginRegistration",
+    call: (a) => a.action(api.passkeys.beginRegistration, {}),
+    expect: { ...VIEWER, ownerStale: "step_up_required", ownerIdle: "step_up_required" },
+  },
+  {
+    name: "passkeys:finishRegistration",
+    call: (a) => a.action(api.passkeys.finishRegistration, { responseJson: "{}" }),
+    expect: { ...VIEWER, default: "step_up_invalid" },
+  },
+  {
+    name: "passkeys:beginVerification",
+    call: (a) => a.action(api.passkeys.beginVerification, {}),
+    expect: { ...VIEWER, default: "not_ready" },
+  },
+  {
+    name: "passkeys:finishVerification",
+    call: (a) => a.action(api.passkeys.finishVerification, { responseJson: "{}" }),
+    expect: { ...VIEWER, default: "step_up_invalid" },
+  },
 ];
+
+/** Member writes that are entry points of MFA or step-up themselves (no step-up level). */
+const STEP_UP_EXEMPT = new Set([
+  "mfa:beginSetup", "mfa:confirmSetup", "mfa:verify", "mfa:useRecoveryCode",
+  "stepUp:lock", "stepUp:setActionPin", "stepUp:verifyActionPin", "stepUp:resetWithRecoveryCode",
+  "passkeys:beginRegistration", "passkeys:finishRegistration", "passkeys:beginVerification", "passkeys:finishVerification",
+  // not member functions
+  "account:redeemReset", "enrollment:enroll", "devices:heartbeat", "devices:unenroll",
+]);
 
 async function outcome(p: Promise<unknown>): Promise<{ result: string; value: unknown }> {
   try {
@@ -193,4 +292,63 @@ describe("authorization matrix (plan 4.6)", () => {
     expect(publicNames.filter((n) => !covered.has(n))).toEqual([]);
     expect(publicNames.length).toBeGreaterThan(15);
   });
+
+  // ---- Step-up wiring (plan 4.16): a new function cannot forget it.
+
+  test("every MAJOR_ACTIONS function that exists refuses a step-up older than 5 minutes", async () => {
+    const fns = await publicFunctions();
+    const existing = Object.entries(MAJOR_ACTIONS)
+      .filter(([name, spec]) => spec.when === "always" && fns.has(name))
+      .map(([name]) => name);
+    expect(existing.length).toBeGreaterThanOrEqual(9);
+    for (const name of existing) {
+      const row = ROWS.find((r) => r.name === name);
+      expect(row, `${name} needs a matrix row`).toBeDefined();
+      // The matrix test above runs these expectations against the real functions.
+      expect(row!.expect.ownerStale ?? row!.expect.default, name).toBe("step_up_required");
+    }
+  });
+
+  test("every other member write needs an unlocked session", async () => {
+    const fns = await publicFunctions();
+    for (const [name, fn] of fns) {
+      if (fn.isQuery === true || STEP_UP_EXEMPT.has(name) || name.startsWith("auth:")) continue;
+      const row = ROWS.find((r) => r.name === name);
+      expect(row, `${name} needs a matrix row`).toBeDefined();
+      expect(row!.expect.ownerIdle ?? row!.expect.default, name).toBe("step_up_required");
+    }
+  });
+
+  test("a `major:` name is the function's own file:name and is in MAJOR_ACTIONS", async () => {
+    const sources = import.meta.glob("./*.ts", { query: "?raw", import: "default" });
+    let seen = 0;
+    for (const [path, load] of Object.entries(sources)) {
+      if (path.includes(".test.")) continue;
+      const file = path.replace(/^\.\//, "").replace(/\.ts$/, "");
+      const text = (await load()) as string;
+      for (const m of text.matchAll(/export const (\w+) = member(?:Mutation|Action|Query)\([^)]*major:\s*"([^"]+)"/g)) {
+        seen++;
+        expect(m[2], `${file}:${m[1]}`).toBe(`${file}:${m[1]}`);
+        expect(Object.keys(MAJOR_ACTIONS)).toContain(m[2]);
+      }
+    }
+    expect(seen).toBeGreaterThanOrEqual(9);
+  });
 });
+
+type Registered = { isPublic?: boolean; isQuery?: boolean; isMutation?: boolean; isAction?: boolean };
+
+async function publicFunctions(): Promise<Map<string, Registered>> {
+  const out = new Map<string, Registered>();
+  for (const [path, load] of Object.entries(modules)) {
+    if (path.includes(".test.") || path.includes("test.setup") || path.includes("/_generated/") || path.includes("/lib/")) continue;
+    if (/\/(convex\.config|auth\.config|schema|crons|http)\.ts$/.test(path)) continue;
+    const mod = (await load()) as Record<string, unknown>;
+    const file = path.replace(/^\.\//, "").replace(/\.[jt]s$/, "");
+    for (const [name, fn] of Object.entries(mod)) {
+      const f = fn as Registered;
+      if (typeof fn === "function" && f.isPublic === true) out.set(`${file}:${name}`, f);
+    }
+  }
+  return out;
+}

@@ -104,6 +104,16 @@ export function messageForCode(code: ErrorCode, data?: Omit<ErrorData, "code">):
       return e.orgRequired;
     case "already_member":
       return e.alreadyMember;
+    case "step_up_required":
+      return e.stepUpRequired;
+    case "step_up_setup_required":
+      return data?.detail === "reauthenticate" ? e.stepUpReauthenticate : e.stepUpSetupRequired;
+    case "step_up_invalid":
+      return data?.retryAfterMs ? e.stepUpInvalidWait(data.retryAfterMs) : e.stepUpInvalid;
+    case "step_up_locked":
+      return data?.detail === "disabled" || !data?.retryAfterMs ? e.stepUpDisabled : e.stepUpLocked(data.retryAfterMs);
+    case "step_up_last_factor":
+      return e.stepUpLastFactor;
   }
 }
 

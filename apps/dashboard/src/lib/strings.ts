@@ -165,6 +165,15 @@ export const strings = {
     hasDependents: "This is still in use. Move or remove what uses it first.",
     orgRequired: "Choose an organization first.",
     alreadyMember: "This person is already a member.",
+    // Step-up (plan 4.16): the action PIN, not the device exit PIN.
+    stepUpRequired: "Confirm with your action PIN or a passkey to continue.",
+    stepUpSetupRequired: "Set up an action PIN or a passkey first.",
+    stepUpReauthenticate: "Sign in again to set up your action PIN or passkey.",
+    stepUpInvalid: "That did not match. Try again.",
+    stepUpInvalidWait: (ms: number) => `That did not match. Try again in ${formatDuration(ms)}.`,
+    stepUpLocked: (ms: number) => `Too many wrong action PINs. Try again in ${formatDuration(ms)}.`,
+    stepUpDisabled: "Your action PIN is turned off after too many wrong attempts. Use a passkey or ask another Owner to reset it.",
+    stepUpLastFactor: "Keep at least one action PIN or passkey.",
   },
 
   validate: {

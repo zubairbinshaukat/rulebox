@@ -11,6 +11,10 @@ const app = defineApp({
     RULEBOX_POLICY_KEY_NEXT: v.optional(v.string()),
     GITHUB_TOKEN: v.optional(v.string()),
     RULEBOX_ALLOW_TEST_SEED: v.optional(v.literal("1")),
+    // Step-up passkeys (plan 4.16): relying party per environment.
+    RULEBOX_WEBAUTHN_RP_ID: v.optional(v.string()),
+    RULEBOX_WEBAUTHN_ORIGINS: v.optional(v.string()),
+    RULEBOX_WEBAUTHN_RP_NAME: v.optional(v.string()),
   },
 });
 app.use(rateLimiter);

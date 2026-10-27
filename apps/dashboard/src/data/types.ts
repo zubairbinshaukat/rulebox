@@ -38,6 +38,12 @@ export const ERROR_CODES = [
   // Plan 4.6 (more than one organization); thrown by the member wrappers / joins.
   "org_required",
   "already_member",
+  // Step-up authentication (plan 4.16); mirrors convex/lib/errors.ts.
+  "step_up_required",
+  "step_up_setup_required",
+  "step_up_invalid",
+  "step_up_locked",
+  "step_up_last_factor",
 ] as const;
 
 export type ErrorCode = (typeof ERROR_CODES)[number];

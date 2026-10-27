@@ -21,9 +21,36 @@ export const rateLimiter = new RateLimiter(components.rateLimiter, {
   // account:redeemReset, per email (a global bucket would let anyone block
   // every reset; the code itself has 130 bits).
   redeemCode: { kind: "token bucket", rate: 10, period: 15 * MINUTE_MS, capacity: 10 },
+  // Step-up (plan 4.16). Convex functions see no client IP, so the buckets
+  // are per user and one global ("IP-less") bucket.
+  // WebAuthn challenges per user (each one is a row write anyway).
+  stepUpChallenge: { kind: "token bucket", rate: 20, period: 10 * MINUTE_MS, capacity: 20 },
+  // Failed PIN or passkey verifications across the deployment, consumed only
+  // on a failure (checked first): many stolen sessions guessing at once.
+  // The per-user bound is the persisted PIN lockout in `stepUpFactors`.
+  stepUpFailuresGlobal: { kind: "token bucket", rate: 300, period: MINUTE_MS, capacity: 300, shards: 4 },
 });
 
-export type LimitName = "signInPerEmail" | "redeemCode";
+export type LimitName = "signInPerEmail" | "redeemCode" | "stepUpChallenge" | "stepUpFailuresGlobal";
+
+/** Read-only: throw `rate_limited` when the bucket is empty, without consuming. */
+export async function checkOrFail(
+  ctx: Parameters<typeof rateLimiter.check>[0],
+  name: LimitName,
+  key?: string,
+): Promise<void> {
+  const status = await rateLimiter.check(ctx, name, key === undefined ? {} : { key });
+  if (!status.ok) fail("rate_limited", { retryAfterMs: status.retryAfter });
+}
+
+/** Consume one token without throwing (a failure was already decided). */
+export async function consumeQuietly(
+  ctx: Parameters<typeof rateLimiter.limit>[0],
+  name: LimitName,
+  key?: string,
+): Promise<void> {
+  await rateLimiter.limit(ctx, name, key === undefined ? {} : { key });
+}
 
 /** Consume one token or throw `rate_limited` with `retryAfterMs`. Actions and mutations. */
 export async function consumeOrFail(

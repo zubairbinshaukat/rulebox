@@ -87,7 +87,7 @@ export const list = memberQuery("viewer")({
 const codeResult = v.object({ code: v.string(), expiresAt: v.number() });
 
 /** Invite a new member (Owner). Returns the join code once. */
-export const invite = memberAction("owner")({
+export const invite = memberAction("owner", { major: "members:invite" })({
   args: { email: v.string(), role },
   returns: codeResult,
   handler: async (ctx, args): Promise<{ code: string; expiresAt: number }> => {
@@ -151,7 +151,7 @@ export const storeInvite = internalMutation({
 });
 
 /** Revoke an unused invite or reset code (Owner): it expires now. */
-export const revokeInvite = memberMutation("owner")({
+export const revokeInvite = memberMutation("owner", { major: "members:revokeInvite" })({
   args: { inviteId: v.string() },
   returns: v.null(),
   handler: async (ctx, args) => {
@@ -182,7 +182,7 @@ async function targetMember(
 }
 
 /** Change a member's role (Owner). Not your own; never the last Owner's. */
-export const changeRole = memberMutation("owner")({
+export const changeRole = memberMutation("owner", { major: "members:changeRole" })({
   args: { memberId: v.string(), role, expectedRevision: v.number() },
   returns: v.null(),
   handler: async (ctx, args) => {
@@ -209,7 +209,7 @@ export const changeRole = memberMutation("owner")({
  * session only when they have no other active membership; otherwise the
  * disabled row alone blocks them here (plan 4.6).
  */
-export const setDisabled = memberMutation("owner")({
+export const setDisabled = memberMutation("owner", { major: "members:setDisabled" })({
   args: { memberId: v.string(), disabled: v.boolean(), expectedRevision: v.number() },
   returns: v.null(),
   handler: async (ctx, args) => {
@@ -241,7 +241,7 @@ export const setDisabled = memberMutation("owner")({
 });
 
 /** A one-time password-reset code for a member (Owner), 24 hours, shown once. */
-export const createResetCode = memberAction("owner")({
+export const createResetCode = memberAction("owner", { major: "members:createResetCode" })({
   args: { memberId: v.string() },
   returns: codeResult,
   handler: async (ctx, args): Promise<{ code: string; expiresAt: number }> => {
@@ -286,7 +286,7 @@ export const storeResetCode = internalMutation({
 });
 
 /** Clear a member's authenticator and recovery codes (Owner). They enrol again. */
-export const resetMfa = memberMutation("owner")({
+export const resetMfa = memberMutation("owner", { major: "members:resetMfa" })({
   args: { memberId: v.string() },
   returns: v.null(),
   handler: async (ctx, args) => {

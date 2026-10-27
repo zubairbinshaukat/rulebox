@@ -16,6 +16,7 @@ import type * as devices from "../devices.js";
 import type * as enrollment from "../enrollment.js";
 import type * as health from "../health.js";
 import type * as http from "../http.js";
+import type * as lib_argon from "../lib/argon.js";
 import type * as lib_audit from "../lib/audit.js";
 import type * as lib_authCallbacks from "../lib/authCallbacks.js";
 import type * as lib_authz from "../lib/authz.js";
@@ -28,12 +29,16 @@ import type * as lib_limits from "../lib/limits.js";
 import type * as lib_members from "../lib/members.js";
 import type * as lib_rateLimits from "../lib/rateLimits.js";
 import type * as lib_sessions from "../lib/sessions.js";
+import type * as lib_stepUp from "../lib/stepUp.js";
 import type * as lib_totp from "../lib/totp.js";
 import type * as lib_validators from "../lib/validators.js";
+import type * as lib_webauthnConfig from "../lib/webauthnConfig.js";
 import type * as maintenance from "../maintenance.js";
 import type * as members from "../members.js";
 import type * as mfa from "../mfa.js";
+import type * as passkeys from "../passkeys.js";
 import type * as setup from "../setup.js";
+import type * as stepUp from "../stepUp.js";
 
 import type {
   ApiFromModules,
@@ -50,6 +55,7 @@ declare const fullApi: ApiFromModules<{
   enrollment: typeof enrollment;
   health: typeof health;
   http: typeof http;
+  "lib/argon": typeof lib_argon;
   "lib/audit": typeof lib_audit;
   "lib/authCallbacks": typeof lib_authCallbacks;
   "lib/authz": typeof lib_authz;
@@ -62,12 +68,16 @@ declare const fullApi: ApiFromModules<{
   "lib/members": typeof lib_members;
   "lib/rateLimits": typeof lib_rateLimits;
   "lib/sessions": typeof lib_sessions;
+  "lib/stepUp": typeof lib_stepUp;
   "lib/totp": typeof lib_totp;
   "lib/validators": typeof lib_validators;
+  "lib/webauthnConfig": typeof lib_webauthnConfig;
   maintenance: typeof maintenance;
   members: typeof members;
   mfa: typeof mfa;
+  passkeys: typeof passkeys;
   setup: typeof setup;
+  stepUp: typeof stepUp;
 }>;
 
 /**

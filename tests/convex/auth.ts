@@ -32,6 +32,9 @@ export async function ensureAuthEnv(): Promise<void> {
     process.env.JWT_PRIVATE_KEY = pem(pkcs8);
     process.env.JWKS = JSON.stringify({ keys: [{ use: "sig", ...jwk }] });
     process.env.CONVEX_SITE_URL = "https://test.convex.site";
+    // Step-up passkeys (plan 4.16): the dashboard's dev origin.
+    process.env.RULEBOX_WEBAUTHN_RP_ID = "localhost";
+    process.env.RULEBOX_WEBAUTHN_ORIGINS = "http://localhost:5173";
   })();
   await ready;
 }

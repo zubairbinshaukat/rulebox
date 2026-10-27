@@ -14,6 +14,7 @@ import { publicAction, publicQuery } from "./lib/functions";
 import { SERVER_API_VERSION } from "./lib/limits";
 import { consumeOrFail } from "./lib/rateLimits";
 import { deleteMfaSessions } from "./lib/sessions";
+import { checkStepUpOrFail, deleteStepUpSessions } from "./lib/stepUp";
 import { memberStatus, role } from "./lib/validators";
 import schema from "./schema";
 
@@ -29,6 +30,8 @@ export const authorize = internalQuery({
     orgId: v.optional(v.id("organizations")),
     /** The calling action's clock: refuses a session past its expiry (A10). */
     now: v.number(),
+    /** Step-up level the action needs (plan 4.16); checked, never written here. */
+    stepUp: v.optional(v.union(v.literal("unlocked"), v.literal("fresh"))),
   },
   returns: v.object({
     member: doc(schema, "members"),
@@ -37,11 +40,13 @@ export const authorize = internalQuery({
     sessionId: v.id("authSessions"),
   }),
   handler: async (ctx, args) => {
-    return await requireMember(ctx, args.minRole, {
+    const m = await requireMember(ctx, args.minRole, {
       skipMfa: args.skipMfa ? true : undefined,
       orgId: args.orgId,
       now: args.now,
     });
+    if (args.stepUp !== undefined) await checkStepUpOrFail(ctx, m, args.stepUp, args.now);
+    return m;
   },
 });
 
@@ -183,6 +188,7 @@ export const signOutMfa = internalMutation({
   returns: v.null(),
   handler: async (ctx, args) => {
     await deleteMfaSessions(ctx, args.userId);
+    await deleteStepUpSessions(ctx, args.userId);
     return null;
   },
 });

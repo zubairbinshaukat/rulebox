@@ -6,6 +6,7 @@ import { action, mutation, query } from "../_generated/server";
 import { requireMember, type Role } from "./authz";
 import { checkDevice, settleRotation, type DeviceCheck } from "./deviceAuth";
 import { fail } from "./errors";
+import { checkStepUpOrFail, touchActivity, type MajorAction, type StepUpLevel } from "./stepUp";
 
 // The only place that turns Convex's raw builders into public functions
 // (plan Phase 4, rule 3; a lint rule forbids `query` / `mutation` / `action`
@@ -20,7 +21,23 @@ import { fail } from "./errors";
 
 export type { Role };
 
-export type MemberOpts = { skipMfa?: true };
+/**
+ * - `skipMfa`: the mfa:* entry points (how a session passes MFA); also skips
+ *   step-up.
+ * - `major`: a major action (plan 4.16): needs a fresh step-up. The name must
+ *   be this function's own `file:name` and be listed in `MAJOR_ACTIONS`
+ *   (`stepUp.test.ts` checks both).
+ * - `stepUp: "none"`: the step-up entry points themselves (verify, set up,
+ *   lock). Every other member mutation or action needs an UNLOCKED session.
+ *   Queries never check step-up (the dashboard's idle lock hides screens).
+ */
+export type MemberOpts = { skipMfa?: true; stepUp?: "none"; major?: MajorAction };
+
+export function stepUpLevelOf(opts: MemberOpts): StepUpLevel | null {
+  if (opts.major !== undefined) return "fresh";
+  if (opts.skipMfa === true || opts.stepUp === "none") return null;
+  return "unlocked";
+}
 
 /** The wrappers add no arguments to the handler's own. */
 type NoArgs = Record<never, never>;
@@ -56,11 +73,14 @@ export function memberMutation(minRole: Role, opts: MemberOpts = {}) {
   return customMutation(mutation, {
     args: orgIdArg,
     input: async (ctx, args): Promise<{ ctx: MemberCtx; args: NoArgs }> => {
-      const m = await requireMember(ctx, minRole, {
-        skipMfa: opts.skipMfa,
-        orgId: args.orgId,
-        now: Date.now(),
-      });
+      const now = Date.now();
+      const m = await requireMember(ctx, minRole, { skipMfa: opts.skipMfa, orgId: args.orgId, now });
+      const level = stepUpLevelOf(opts);
+      if (level !== null) {
+        const row = await checkStepUpOrFail(ctx, m, level, now);
+        // A member write is activity: at most one patch per quantum.
+        await touchActivity(ctx, row, now);
+      }
       return { ctx: { ...m, actor: actorOf(m.member) }, args: {} };
     },
   });
@@ -76,6 +96,7 @@ export function memberAction(minRole: Role, opts: MemberOpts = {}) {
         skipMfa: opts.skipMfa === true,
         orgId: args.orgId,
         now: Date.now(),
+        stepUp: stepUpLevelOf(opts) ?? undefined,
       });
       return { ctx: { ...m, actor: actorOf(m.member) }, args: {} };
     },

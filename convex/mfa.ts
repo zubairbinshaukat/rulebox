@@ -43,7 +43,7 @@ function throwFor(result: Attempt): void {
   fail("mfa_invalid_code");
 }
 
-async function secretsOf(ctx: { db: DatabaseReader }, userId: Id<"users">) {
+export async function secretsOf(ctx: { db: DatabaseReader }, userId: Id<"users">) {
   return await ctx.db
     .query("memberSecrets")
     .withIndex("by_user", (q) => q.eq("userId", userId))
@@ -51,12 +51,25 @@ async function secretsOf(ctx: { db: DatabaseReader }, userId: Id<"users">) {
 }
 
 /** Locked -> the remaining time, else null. */
-function lockedFor(s: Doc<"memberSecrets">, now: number): number | null {
+export function lockedFor(s: Doc<"memberSecrets">, now: number): number | null {
   return s.totpLockedUntil > now ? s.totpLockedUntil - now : null;
 }
 
+/**
+ * Find and remove one recovery code (compared against every stored hash, no
+ * early exit). Shared with the step-up reset (plan 4.16). Null when none matched.
+ */
+export function matchRecoveryCode(s: Doc<"memberSecrets">, code: string): number | null {
+  const presented = isRecoveryShape(code) ? recoveryHash(code) : "";
+  let index = -1;
+  s.recoveryHashes.forEach((h, i) => {
+    if (constantTimeEqual(h, presented) && presented !== "" && index === -1) index = i;
+  });
+  return index === -1 ? null : index;
+}
+
 /** Count a failure; the 5th consecutive one locks for 15 minutes. */
-async function recordFailure(ctx: Pick<MutationCtx, "db">, s: Doc<"memberSecrets">, now: number): Promise<Attempt> {
+export async function recordFailure(ctx: Pick<MutationCtx, "db">, s: Doc<"memberSecrets">, now: number): Promise<Attempt> {
   const failures = s.totpFailures + 1;
   if (failures >= TOTP_MAX_FAILURES) {
     await ctx.db.patch(s._id, { totpFailures: 0, totpLockedUntil: now + TOTP_LOCK_MS });
@@ -270,13 +283,8 @@ export const attemptRecovery = internalMutation({
     if (s === null || s.totpSecret === undefined) return { kind: "notEnrolled" };
     const locked = lockedFor(s, now);
     if (locked !== null) return { kind: "locked", retryAfterMs: locked };
-    const presented = isRecoveryShape(args.code) ? recoveryHash(args.code) : "";
-    // Compare against every stored hash (no early exit).
-    let index = -1;
-    s.recoveryHashes.forEach((h, i) => {
-      if (constantTimeEqual(h, presented) && presented !== "" && index === -1) index = i;
-    });
-    if (index === -1) return await recordFailure(ctx, s, now);
+    const index = matchRecoveryCode(s, args.code);
+    if (index === null) return await recordFailure(ctx, s, now);
     await ctx.db.patch(s._id, {
       recoveryHashes: s.recoveryHashes.filter((_, i) => i !== index),
       totpFailures: 0,

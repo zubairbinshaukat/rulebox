@@ -24,6 +24,7 @@
     "@convex-dev/rate-limiter": "catalog:",
     "@noble/ed25519": "catalog:",
     "@noble/hashes": "catalog:",
+    "@simplewebauthn/server": "catalog:",
     "convex": "catalog:",
     "convex-helpers": "catalog:",
     "hash-wasm": "catalog:",

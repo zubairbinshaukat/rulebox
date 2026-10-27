@@ -135,6 +135,14 @@ a primary source; the plan says how each one gets confirmed.
   orphan `mfaSessions` rows of signed-out sessions are no longer found by
   a join over the whole table; they are deleted by age (≤ 7 days) and are
   harmless meanwhile (`requireMember` checks the session row first).
+- **2026-10-27, Step 5a backend built** (Section 4.16): action PIN,
+  passkeys (`@simplewebauthn/server` 14.0.3 in a Node action), step-up
+  rows per session, `MAJOR_ACTIONS` + wrappers, resets; existing
+  `members:*` Owner functions now need a fresh step-up. Passkeys were
+  tested only with simulated authenticator responses (software ES256
+  authenticator in `tests/convex/webauthn.ts`); a real browser and
+  authenticator check waits for the dashboard UI. The dashboard UI of
+  4.16 is not built yet.
 
 ---
 
@@ -1526,6 +1534,199 @@ add `ring`, `rustls`, `openssl`, `async-trait` or any winget crate.
 `target\debug` (estimate); Playwright's Chromium about 200 MB under
 `%LOCALAPPDATA%\ms-playwright`. Step 0 checks free space.
 
+### 4.16 Step-up authentication: action PIN and passkeys (owner decision 2026-10-27)
+
+**Goal.** A signed-in dashboard session (password + TOTP) is not enough
+for dangerous changes. Each member confirms with an **action PIN** or a
+**passkey**: an idle session (10 minutes) is re-confirmed, and **major
+actions** always need a confirmation from the last 5 minutes. Nothing here
+ever unlocks a device or loosens a lock: step-up only gates dashboard
+functions (the device keeps its last signed document whatever happens).
+
+**Names.** The **action PIN** (member, dashboard, `stepUpFactors
+.actionPinHash`, `stepUp:*`) and the **exit PIN** (device, Staff App admin
+exit, `orgSecrets.exitPinHash`, `settings:setExitPin`) are different
+secrets; code, strings, audit actions and tables never use one name for
+the other, and neither is accepted for the other.
+
+**Ownership.** Step-up belongs to the **person** (`users` row), like MFA:
+one action PIN and one passkey list per person; a verification unlocks
+the **session** (`authSessions` row) in every organization of that person.
+Audit rows go to the organization the person acted in.
+
+**What Convex Auth supports (checked 2026-10-27, `@convex-dev/auth`
+0.0.96):** password, OAuth, magic links and OTP providers; **no WebAuthn**
+and no step-up. WebAuthn is verified by our own Node action with
+`@simplewebauthn/server` **14.0.3** (published 2026-09-25, older than the
+pnpm release-age policy; pinned exactly in the catalog).
+
+**Data (4.2 additions; all per user, tiny, never listed by any query except
+the fields of `stepUp:status`):**
+
+| Table | Fields | Indexes |
+|---|---|---|
+| `stepUpFactors` (1 per user) | `userId`, `actionPinHash?` (Argon2id PHC, `lib/argon.ts`, agent parameters), `actionPinSetAt?`, `pinFailures` (consecutive), `pinFailuresTotal` (since last success), `pinLockedUntil`, `pinDisabledAt?`, `webauthnUserId?` (16 random bytes, base64url; the WebAuthn `user.id`, never the Convex id) | `by_user` |
+| `passkeys` (≤ 10 per user) | `userId`, `credentialId` (base64url, unique across the deployment), `credentialPublicKey` (COSE, base64url), `counter`, `transports`, `name` (≤ 64), `aaguid`, `deviceType`, `backedUp`, `createdAt`, `lastUsedAt?`, `disabledAt?` (clone suspected) | `by_user`, `by_credential_id` |
+| `stepUpSessions` (≤ 1 per session) | `sessionId`, `userId`, `verifiedAt`, `lastActiveAt`, `method: "actionPin" \| "passkey"`, `passkeyId?` | `by_session`, `by_user` |
+| `stepUpChallenges` (≤ 1 per session and purpose) | `userId`, `sessionId`, `purpose: "register" \| "verify"`, `challengeHash` (SHA-256), `expiresAt` (2 min) | `by_challenge_hash`, `by_session_purpose`, `by_user`, `by_expires_at` |
+
+**Session model and the write budget (the choice).** The server keeps one
+row per session, written **on verification**, never per call:
+
+- **Unlocked** = `now − verifiedAt ≤ 8 h` (`STEP_UP_MAX_AGE_MS`) **and**
+  `now − lastActiveAt ≤ 10 + 5 min`. **Fresh** = unlocked and `now −
+  verifiedAt ≤ 5 min` (`STEP_UP_FRESH_MS`, the one constant to change).
+- **Idle time is measured in the dashboard** (real keyboard / pointer
+  input): after 10 minutes without input the dashboard locks itself (calls
+  `stepUp:lock`, hides screens, stops subscriptions) and asks for the PIN
+  or a passkey. While there is input and the session is unlocked, it calls
+  `stepUp:keepAlive` **at most every 5 minutes**; the server rewrites
+  `lastActiveAt` only when it is ≥ 4 minutes old, and any member write
+  does the same piggy-backed in the wrapper. So the server's idle bound is
+  15 minutes (10 + the keep-alive cadence).
+- **Cost:** a normal member write reads one extra row (≈ 200 B), writes
+  nothing extra except ≤ 1 patch per 4 minutes of activity; keep-alive is
+  ≤ 12 calls and ≤ 12 small writes per **active** dashboard hour (≈ 6 KB),
+  0 when idle or closed. A write per call would have been ≈ 10× that and
+  would have rewritten a row on every keystroke-driven mutation.
+- **Trade-off (documented):** an attacker with a stolen session token
+  (XSS) can call `keepAlive` forever, so the idle rule protects only the
+  "walked away from an unlocked laptop" case; against a stolen token the
+  bounds are: nothing without a factor if the victim's session was locked;
+  if it was unlocked, non-major writes for at most 8 hours from the
+  victim's last verification, and **major actions only within 5 minutes**
+  of it. A stolen password + TOTP gives a **new** session that has no
+  step-up at all. Reads are not step-up gated (they are protected by the
+  session; the idle lock is a privacy screen).
+
+**Major actions** (`MAJOR_ACTIONS` in `convex/lib/stepUp.ts`, one typed
+table read by the wrappers and the tests): `members:invite`,
+`revokeInvite`, `changeRole`, `setDisabled`, `createResetCode`,
+`resetMfa`; `stepUp:clearActionPin`, `removePasskey`, `resetMember`;
+planned: `settings:setExitPin`, `clearExitPin`, `settings:update` (only
+when it changes the admin exit), `groups:delete`, `enrollmentCodes:revoke`,
+`fleet:setKiosk` (only when it turns kiosk mode off), `fleet:revoke`,
+`fleet:remove`, `keys:registerActive`, `prepareRotation`,
+`finishRotation`, `apps:remove`, `fileHandlers:remove`,
+`employees:remove`, Phase 5 `fleet:lock`, `fleet:unlock`,
+`lockdown:update` (only when lock or kiosk settings change). Plan and
+limit changes are operator actions through the platform API and use the
+console's own step-up (post-Phase-5 5.3). A function is marked with
+`memberMutation(role, { major: "<file>:<name>" })`; a conditional one
+calls `requireStepUp(ctx, "fresh")`. Every other member mutation or action
+needs an **unlocked** session (the wrapper's default); exempt are only the
+MFA and step-up entry points (`stepUp: "none"` / `skipMfa`). Queries never
+check step-up.
+
+**Action PIN.** 6–12 ASCII digits (same length rule as the exit PIN):
+6 digits give 10⁶ values against at most 10 online guesses before the PIN
+turns off; offline cracking of a leaked Argon2 hash is not the threat the
+PIN answers (the thief also needs a session). Refused: one digit repeated,
+a repeated pattern (`121212`, `123123`), an up/down run with wrap
+(`123456`, `890123`, `987654`), a short common-PIN list. "PIN equals the
+password" cannot happen: passwords need a letter. Hashed with Argon2id
+(`hash-wasm`, m=19456 KiB, t=2, p=1) in a default-runtime action.
+**Lockout:** 2 free failures, then 30 s doubling to 15 min between tries;
+**10 failures since the last success disable the PIN** (audit
+`member.actionPinLocked`) until a passkey step-up sets a new one, an
+Owner resets it, or a recovery code is used. Each attempt is **reserved
+before** the Argon2 check by an internal mutation (counts as a failure
+until the success mutation clears it), so parallel guesses each count and
+a crash fails closed; the public action throws only after the counter
+committed (Step 3's MFA lesson). A disabled PIN still counts as a factor,
+so guessing it into the hard lock never opens the bootstrap path.
+Global failure bucket `stepUpFailuresGlobal` (300/min, 4 shards; Convex
+functions see no client IP, so there is no per-IP bucket) is checked
+before and consumed only on a failure.
+
+**Passkeys.** Relying party from env (`RULEBOX_WEBAUTHN_RP_ID`,
+`RULEBOX_WEBAUTHN_ORIGINS` comma list of exact origins: `https`, or
+`http://localhost` for dev; each origin's host is the RP ID or below it;
+`RULEBOX_WEBAUTHN_RP_NAME`, default "Rulebox"). Missing or invalid →
+passkeys off (`not_ready`), the PIN keeps working. Challenges: 32 bytes
+from the CSPRNG **in the action**, stored as SHA-256, bound to session and
+purpose, 2 minutes, **single use** (deleted when a finish call presents
+them, whether verification then passes or not), one outstanding per
+session and purpose (a second begin replaces the first). Options:
+`userVerification: "required"`, attestation `"none"`, algorithms EdDSA,
+ES256, RS256, `excludeCredentials` = the person's passkeys. Verification
+requires UP and UV, exact origin and RP ID, and checks the signature
+counter **after** the signature verified (a forged response cannot
+suspend a passkey): when either counter is non-zero and the new one is not
+higher, the passkey is suspended (`disabledAt`, audit
+`member.passkeyCloneDetected`) and the sessions it unlocked lose that
+unlock. Credential ids are unique across the deployment. Library error
+messages (they contain the challenge and origins) never reach the client:
+every failure is `step_up_invalid`.
+
+**Setup, change, loss (the safest options, never by e-mail alone):**
+
+| Situation | Rule |
+|---|---|
+| No factor yet (first major action) | `step_up_setup_required`; the dashboard opens setup. **Bootstrap:** a session younger than 15 min (fresh password sign-in) that passed TOTP when TOTP is enrolled may set the first PIN or passkey, which also unlocks it. An Owner who never set one is never locked out: sign out and in again (`detail: "reauthenticate"`) |
+| Add a second passkey, change the PIN | fresh step-up (PIN or passkey) |
+| Forgot the PIN, has a passkey | passkey step-up, then `setActionPin` |
+| Lost the passkey, knows the PIN | PIN step-up, then remove the lost passkey (major) |
+| Lost every factor | (a) another Owner: `stepUp:resetMember` (major; not for yourself; refused when the person is also active in another organization, because step-up belongs to the person); (b) yourself: `stepUp:resetWithRecoveryCode` = fresh sign-in (≤ 15 min) + TOTP + one MFA recovery code (shares the TOTP lockout); then bootstrap; (c) the only Owner without recovery codes: the operator's CLI (`maintenance:resetMfaByEmail` pattern; to add with Step 20) |
+| Remove the last factor | refused (`step_up_last_factor`) |
+| Device without WebAuthn | action PIN |
+| Passkey on another device | action PIN (or the phone via hybrid transport) |
+
+**Edge cases (each has a test in Step 5a):** cancelled prompt → the
+challenge expires or the next begin replaces it; expired or replayed
+challenge → `step_up_invalid`; wrong origin / RP ID / ceremony type / no
+UV → `step_up_invalid`; cloned authenticator → suspended; synced passkeys
+with counter 0 keep working; another person's credential id → answered
+like an unknown one; revoking the passkey this session used → this
+session (and every other it unlocked) locks; two tabs share the session
+(one unlock unlocks both; the second tab's begin replaces the first tab's
+challenge); session expiry beats step-up (`requireMember` first, and
+mutations/actions refuse an expired session row); a disabled member's
+step-up rows are deleted with their sessions; brute force → lockout,
+hard disable, global bucket; timing → challenge hashes compared in
+constant time, an absent PIN still costs one Argon2 verify; clock skew →
+server time only, a verification more than 1 minute in the future is
+ignored, the client shows windows relative to `serverNow`.
+
+**Functions (dashboard-facing; types from `convex/_generated/api`):**
+
+| Function | Kind | Use |
+|---|---|---|
+| `stepUp:status` | query (any role) | `actionPin { set, lockedUntil, disabled, attemptsBeforeDisable }`, `passkeys [{ _id, name, createdAt, lastUsedAt, synced, suspended }]`, `passkeysAvailable`, `session { verifiedAt, lastActiveAt, method }`, `bootstrapUntil`, `policy { idleMs, keepAliveMs, freshMs, maxAgeMs }` |
+| `stepUp:setActionPin({ pin })` | action | bootstrap or after a fresh step-up |
+| `stepUp:verifyActionPin({ pin })` | action | → `{ verifiedAt, freshUntil, serverNow }` |
+| `passkeys:beginVerification()` / `finishVerification({ responseJson })` | Node actions | options JSON for `navigator.credentials.get` (`@simplewebauthn/browser` `startAuthentication({ optionsJSON })`); the credential's `toJSON()` string back |
+| `passkeys:beginRegistration()` / `finishRegistration({ responseJson, name? })` | Node actions | same for `create` |
+| `stepUp:keepAlive()` | mutation | at most every `policy.keepAliveMs` while there is input |
+| `stepUp:lock()` | mutation | idle timer, "Lock now" |
+| `stepUp:renamePasskey`, `stepUp:removePasskey` (major), `stepUp:clearActionPin` (major) | mutations | Security page |
+| `stepUp:resetMember({ memberId })` (Owner, major), `stepUp:resetWithRecoveryCode({ code })` | mutation / action | resets |
+
+Error codes: `step_up_required` (`detail`: `unlocked` / `fresh`),
+`step_up_setup_required` (`detail: "reauthenticate"` when the session is
+too old to bootstrap), `step_up_invalid` (`retryAfterMs` when the next try
+waits), `step_up_locked` (`retryAfterMs`, or `detail: "disabled"`),
+`step_up_last_factor`; `not_ready` with `detail` `"no action PIN"`,
+`"no passkey"`, `"passkeys not configured"`, `"no recovery codes"`.
+
+**Dashboard flows (for the UI step; not built in Step 5a):**
+
+1. After sign-in + TOTP, an Owner or Admin without a factor sees "Protect
+   important actions" (set PIN and/or add a passkey) before the overview;
+   a Viewer sees it on the Security page only.
+2. Any call answering `step_up_required` / `step_up_setup_required` opens
+   the confirm dialog (passkey button first when `passkeysAvailable` and a
+   passkey exists and `PublicKeyCredential` is present; PIN field always
+   offered), then retries the call once. Major-action buttons open the
+   dialog first when the last verification is older than `freshMs`.
+3. Idle timer: 10 minutes without input → lock overlay + `stepUp:lock`;
+   input while unlocked → `keepAlive` at most every 5 minutes.
+4. Settings → Security: action PIN (set / change / remove), passkeys
+   (add, rename, remove, "suspended" badge), recovery path text; Members
+   tab: Owner "Reset action PIN and passkeys".
+5. The PIN field: `inputMode="numeric"`, `autocomplete="off"`, 6–12 digits,
+   the server's rules mirrored in `lib/validate.ts`; never stored or shown.
+
 ---
 
 ## 5. Contracts that change
@@ -2164,6 +2365,61 @@ deployment, tests pass, screenshots taken.
 **Do NOT:** store anything about the session yourself (Convex Auth
 owns `localStorage`); add a UI library, a form library or a state
 library; load fonts or icons from the network.
+
+---
+
+### Step 5a — Step-up authentication (backend; the dashboard UI follows)
+
+**Owner decision 2026-10-27; design in Section 4.16.** **Files:**
+`convex/schema.ts` (4 tables), `convex/lib/{stepUp,argon,webauthnConfig,limits,errors,audit,rateLimits,functions,sessions}.ts`,
+`convex/stepUp.ts`, `convex/passkeys.ts` (`"use node"`), `convex/account.ts`
+(`authorize` checks the level), `convex/members.ts` (majors wired),
+`convex/mfa.ts` (recovery-code helper shared), `convex/maintenance.ts`
+(two stages), `convex/convex.config.ts` (three optional env values), the
+error mirror `apps/dashboard/src/data/types.ts` + `lib/errors.ts` +
+`lib/strings.ts`, root `package.json` + catalog (`@simplewebauthn/server`
+14.0.3), tests `convex/{stepUp,passkeys}.test.ts`,
+`tests/convex/webauthn.ts` (software authenticator), `matrix.test.ts`.
+
+1. Tables, wrappers (`major`, `stepUp: "none"`, default unlocked for member
+   writes, `authorize` with the level), `MAJOR_ACTIONS`, `requireStepUp`.
+2. Action PIN functions with the reserve-then-verify lockout; Argon2 helper
+   `lib/argon.ts` (Step 5 reuses it for the exit PIN).
+3. Passkey ceremonies in the Node action; challenges hashed, single use.
+4. Resets (Owner, recovery code) and the last-factor rule.
+5. Maintenance: step-up rows by age, challenges by expiry.
+
+**Tests:** PIN rules; backoff table; bootstrap and the "never locked out"
+Owner; TOTP required for bootstrap when enrolled; fresh / unlocked / idle /
+8-hour windows; keep-alive writes at most once per quantum; lock; another
+session of the same person stays locked; multi-organization; expired
+session; disabled member; change needs fresh; lockout counters persist,
+hard disable + audit, disabled PIN blocks bootstrap; recovery reset; Owner
+reset rules; last factor; passkeys: registration options, bootstrap,
+no-UV / wrong origin / wrong RP ID / wrong type / replay, duplicate and
+foreign credential, limit, verification + counter, replay, expiry, second
+begin, bad signature, foreign passkey, clone suspension vs forged low
+counter, counter-less authenticators, removal of the session's passkey,
+rename, PIN change after a passkey step-up, not configured, config rules;
+matrix rows for every new function with callers "owner, stale step-up",
+"owner, idle", "owner, no factor"; wiring tests (every existing
+`MAJOR_ACTIONS` function refuses a stale step-up, every other member write
+needs unlocked, every `major:` name equals its export).
+
+**Verify:** `pnpm install`, `npx convex dev --once`, `pnpm typecheck`,
+`pnpm lint`, `pnpm test:convex`, dashboard `test|typecheck|lint`.
+**Manual (not automatable here):** one real registration and assertion
+with a platform authenticator (Windows Hello) and a phone (hybrid) against
+the dev deployment once the UI exists; set the dev env values first
+(`npx convex env set RULEBOX_WEBAUTHN_RP_ID localhost`,
+`RULEBOX_WEBAUTHN_ORIGINS http://localhost:5173`).
+
+**Done when:** all pass; the dev deployment accepts the push.
+
+**Do NOT:** accept the exit PIN as an action PIN or the reverse; return a
+hash, a public key, a credential id or a challenge hash from a query; make
+random values outside actions; write the step-up row on every call; let
+anything here change a device.
 
 ---
 

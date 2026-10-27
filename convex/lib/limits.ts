@@ -61,6 +61,44 @@ export const MAINTENANCE_BATCH = 500;
 export const MAX_DEVICE_NAME = 100;
 export const MAX_EMAIL = 254;
 
+/**
+ * Step-up authentication (plan 4.16, Step 5a). Server time only.
+ *
+ * - A session is "unlocked" while it verified an action PIN or passkey less
+ *   than STEP_UP_MAX_AGE_MS ago AND it was active (keepAlive or a member
+ *   write) less than STEP_UP_IDLE_MS + STEP_UP_KEEPALIVE_MS ago. The
+ *   dashboard locks itself after STEP_UP_IDLE_MS of real idle time and
+ *   sends keepAlive at most every STEP_UP_KEEPALIVE_MS while the person
+ *   types or clicks; the server tolerance covers that cadence.
+ * - A major action needs a "fresh" step-up: verified less than
+ *   STEP_UP_FRESH_MS ago (the one constant to change).
+ */
+export const STEP_UP_IDLE_MS = 10 * MINUTE_MS;
+export const STEP_UP_KEEPALIVE_MS = 5 * MINUTE_MS;
+export const STEP_UP_FRESH_MS = 5 * MINUTE_MS;
+export const STEP_UP_MAX_AGE_MS = 8 * HOUR_MS;
+/** `lastActiveAt` is rewritten only when it is at least this old (write budget). */
+export const STEP_UP_ACTIVITY_QUANTUM_MS = 4 * MINUTE_MS;
+/** A verification more than this far in the future (clock step between servers) is ignored. */
+export const STEP_UP_CLOCK_SLACK_MS = MINUTE_MS;
+/** First factor without a step-up: only this soon after a password (+ TOTP) sign-in. */
+export const STEP_UP_BOOTSTRAP_MS = 15 * MINUTE_MS;
+/** WebAuthn challenges: single use, this long. */
+export const STEP_UP_CHALLENGE_TTL_MS = 2 * MINUTE_MS;
+/** Passkeys per person. */
+export const MAX_PASSKEYS = 10;
+/** Step-up rows of one user read when a passkey is removed or a person is reset. */
+export const MAX_STEP_UP_SESSIONS = 100;
+/** Action PIN lockout: free failures, then a delay doubling from the base up to the cap. */
+export const PIN_FREE_FAILURES = 2;
+export const PIN_BACKOFF_BASE_MS = 30_000;
+export const PIN_BACKOFF_MAX_MS = 15 * MINUTE_MS;
+/** Failures since the last success after which the action PIN is disabled until reset. */
+export const PIN_HARD_LIMIT = 10;
+export const MAX_PASSKEY_NAME = 64;
+/** A WebAuthn response JSON larger than this is refused before parsing. */
+export const MAX_WEBAUTHN_RESPONSE_BYTES = 32 * 1024;
+
 /** Enrolled devices per organization when `organizations.maxDevices` is missing (hosted plan). */
 export const DEFAULT_MAX_DEVICES = 2;
 

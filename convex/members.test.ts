@@ -1,15 +1,22 @@
 import { describe, expect, test } from "vitest";
 import { asToken, setupAuth, signIn } from "../tests/convex/auth";
-import { asMember, expectCode, expectNoSecrets, makeOrg, type T } from "../tests/convex/identity";
+import { asMember, expectCode, expectNoSecrets, giveStepUp, makeOrg, type T } from "../tests/convex/identity";
 import { api, internal } from "./_generated/api";
 import { codeHash } from "./lib/crypto";
 
 const PASSWORD = "correct horse 42 battery";
 
+/** An Owner/Admin with MFA and a fresh step-up (members:* are major actions, plan 4.16). */
+async function fresh(t: T, opts: Parameters<typeof asMember>[1]) {
+  const m = await asMember(t, opts);
+  await giveStepUp(t, m);
+  return m;
+}
+
 async function team(t: T) {
   const orgId = await makeOrg(t);
-  const owner = await asMember(t, { role: "owner", mfa: true, orgId, email: "owner@acme.test" });
-  const admin = await asMember(t, { role: "admin", mfa: true, orgId, email: "admin@acme.test" });
+  const owner = await fresh(t, { role: "owner", mfa: true, orgId, email: "owner@acme.test" });
+  const admin = await fresh(t, { role: "admin", mfa: true, orgId, email: "admin@acme.test" });
   const viewer = await asMember(t, { role: "viewer", orgId, email: "viewer@acme.test" });
   return { orgId, owner, admin, viewer };
 }
@@ -104,10 +111,10 @@ describe("members", () => {
   test("last owner cannot be disabled; last owner rule is per organization", async () => {
     const t = await setupAuth();
     const { owner, orgId } = await team(t);
-    const second = await asMember(t, { role: "owner", mfa: true, orgId });
+    const second = await fresh(t, { role: "owner", mfa: true, orgId });
     // Another org whose only owner is a different user: unaffected.
     const orgB = await makeOrg(t, "B");
-    await asMember(t, { role: "owner", mfa: true, orgId: orgB });
+    await fresh(t, { role: "owner", mfa: true, orgId: orgB });
     await second.as.mutation(api.members.setDisabled, { memberId: owner.memberId, disabled: true, expectedRevision: 0 });
     await expectCode(
       t.run(async (ctx) => {
@@ -136,7 +143,7 @@ describe("members", () => {
     const t = await setupAuth();
     const { owner, orgId } = await team(t);
     const orgB = await makeOrg(t, "B");
-    const inB = await asMember(t, { role: "owner", mfa: true, orgId: orgB });
+    const inB = await fresh(t, { role: "owner", mfa: true, orgId: orgB });
     // The same person is also a viewer in A.
     const alsoA = await asMember(t, { role: "viewer", orgId, userId: inB.userId, email: inB.email });
     await owner.as.mutation(api.members.setDisabled, { memberId: alsoA.memberId, disabled: true, expectedRevision: 0 });
@@ -151,7 +158,7 @@ describe("members", () => {
     const t = await setupAuth();
     const { owner } = await team(t);
     const orgB = await makeOrg(t, "B");
-    const other = await asMember(t, { role: "admin", mfa: true, orgId: orgB });
+    const other = await fresh(t, { role: "admin", mfa: true, orgId: orgB });
     await expectCode(
       owner.as.mutation(api.members.changeRole, { memberId: other.memberId, role: "viewer", expectedRevision: 0 }),
       "not_found",

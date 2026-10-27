@@ -43,7 +43,7 @@ export function randomCrockford(_ctx: ActionOnly, length: number): string {
 }
 
 /** `n` random bytes from a secure source. Actions only. */
-export function randomBytes(_ctx: ActionOnly, n: number): Uint8Array {
+export function randomBytes(_ctx: ActionOnly, n: number): Uint8Array<ArrayBuffer> {
   const bytes = new Uint8Array(n);
   crypto.getRandomValues(bytes);
   return bytes;

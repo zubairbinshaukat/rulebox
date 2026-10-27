@@ -38,6 +38,13 @@ export async function deleteUserSessions(
     if (sessions.length <= BATCH) break;
   }
   await deleteMfaSessions(ctx, userId, except);
+  // Step-up rows of the deleted sessions (plan 4.16): harmless once the
+  // session is gone, removed here so they do not wait for maintenance.
+  const stepUps = await ctx.db
+    .query("stepUpSessions")
+    .withIndex("by_user", (q) => q.eq("userId", userId))
+    .take(BATCH);
+  for (const row of stepUps) if (row.sessionId !== except) await ctx.db.delete(row._id);
   return deleted;
 }
 

@@ -45,6 +45,8 @@ import { clearMfa } from "./lib/sessions";
 // - rateLimiter     the component's `clearAll` for rows created more than
 //                   RATE_LIMIT_ROW_MAX_AGE_MS ago (100 per component call, it
 //                   reschedules itself).
+// - stepUpSessions  step-up rows created more than SESSION_TOTAL_MS ago.
+// - stepUpChallenges expired WebAuthn challenges (`by_expires_at`).
 //
 // At most MAINTENANCE_BATCH rows per run; a stage reschedules itself while a
 // batch is full, then the next stage starts. `now` is fixed for the whole
@@ -59,6 +61,8 @@ const STAGES = [
   "invites",
   "auditLog",
   "rateLimiter",
+  "stepUpSessions",
+  "stepUpChallenges",
 ] as const;
 type Stage = (typeof STAGES)[number];
 const stage = v.union(...STAGES.map((s) => v.literal(s)));
@@ -68,7 +72,7 @@ type StageResult = { done: boolean; cursor: string | null };
 /** Delete rows of `table` created before `before`, oldest first, one batch. */
 async function deleteCreatedBefore(
   ctx: MutationCtx,
-  table: "authSessions" | "mfaSessions" | "authRefreshTokens",
+  table: "authSessions" | "mfaSessions" | "authRefreshTokens" | "stepUpSessions",
   before: number,
 ): Promise<StageResult> {
   const rows = await ctx.db
@@ -145,6 +149,18 @@ async function runStage(ctx: MutationCtx, current: Stage, now: number, cursor: s
       // most one extra bucket per key per week). The component pages itself.
       await ctx.runMutation(components.rateLimiter.lib.clearAll, { before: now - RATE_LIMIT_ROW_MAX_AGE_MS });
       return { done: true, cursor: null };
+    case "stepUpSessions":
+      // Same rule as mfaSessions: created after its session, so older than
+      // SESSION_TOTAL_MS means the session has expired.
+      return await deleteCreatedBefore(ctx, "stepUpSessions", now - SESSION_TOTAL_MS);
+    case "stepUpChallenges": {
+      const rows = await ctx.db
+        .query("stepUpChallenges")
+        .withIndex("by_expires_at", (q) => q.lt("expiresAt", now))
+        .take(MAINTENANCE_BATCH);
+      for (const row of rows) await ctx.db.delete(row._id);
+      return { done: rows.length < MAINTENANCE_BATCH, cursor: null };
+    }
   }
 }
 

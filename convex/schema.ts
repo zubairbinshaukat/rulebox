@@ -107,6 +107,68 @@ export default defineSchema({
     .index("by_session", ["sessionId"])
     .index("by_user", ["userId"]),
 
+  // ---- Step-up authentication (plan 4.16, Step 5a). Belongs to the USER
+  // (like MFA), never to an organization. Never returned by a query except
+  // the fields `stepUp:status` names.
+
+  // tiny (1 per user). The ACTION PIN: confirms major dashboard actions. Not
+  // the device exit PIN (`orgSecrets.exitPinHash`).
+  stepUpFactors: defineTable({
+    userId: v.id("users"),
+    actionPinHash: v.optional(v.string()), // Argon2id PHC
+    actionPinSetAt: v.optional(v.number()),
+    pinFailures: v.number(), // consecutive, drives the backoff
+    pinFailuresTotal: v.number(), // since the last success; PIN_HARD_LIMIT disables
+    pinLockedUntil: v.number(),
+    pinDisabledAt: v.optional(v.number()),
+    webauthnUserId: v.optional(v.string()), // base64url, 16 random bytes; WebAuthn user.id
+  }).index("by_user", ["userId"]),
+
+  // tiny (<= MAX_PASSKEYS per user). Public keys only; nothing here is secret,
+  // but only `id`, `name`, dates and flags ever leave the server.
+  passkeys: defineTable({
+    userId: v.id("users"),
+    credentialId: v.string(), // base64url
+    credentialPublicKey: v.string(), // base64url of the COSE key
+    counter: v.number(),
+    transports: v.array(v.string()),
+    name: v.string(),
+    aaguid: v.string(),
+    deviceType: v.union(v.literal("singleDevice"), v.literal("multiDevice")),
+    backedUp: v.boolean(),
+    createdAt: v.number(),
+    lastUsedAt: v.optional(v.number()),
+    disabledAt: v.optional(v.number()), // cloned authenticator suspected
+  })
+    .index("by_user", ["userId"])
+    .index("by_credential_id", ["credentialId"]),
+
+  // small (1 per signed-in session that verified). Written on verification and
+  // at most once per STEP_UP_ACTIVITY_QUANTUM_MS of activity.
+  stepUpSessions: defineTable({
+    sessionId: v.id("authSessions"),
+    userId: v.id("users"),
+    verifiedAt: v.number(),
+    lastActiveAt: v.number(),
+    method: v.union(v.literal("actionPin"), v.literal("passkey")),
+    passkeyId: v.optional(v.id("passkeys")),
+  })
+    .index("by_session", ["sessionId"])
+    .index("by_user", ["userId"]),
+
+  // small (<= 2 per session: one per purpose). SHA-256 of the challenge only.
+  stepUpChallenges: defineTable({
+    userId: v.id("users"),
+    sessionId: v.id("authSessions"),
+    purpose: v.union(v.literal("register"), v.literal("verify")),
+    challengeHash: v.string(),
+    expiresAt: v.number(),
+  })
+    .index("by_challenge_hash", ["challengeHash"])
+    .index("by_session_purpose", ["sessionId", "purpose"])
+    .index("by_user", ["userId"])
+    .index("by_expires_at", ["expiresAt"]),
+
   // tiny
   groups: defineTable({
     orgId: v.id("organizations"),
