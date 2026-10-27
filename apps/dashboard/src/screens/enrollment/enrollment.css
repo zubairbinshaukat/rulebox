@@ -1,0 +1,61 @@
+/* Enrollment screen (loaded with its chunk). Tokens only; light and dark come from them. */
+
+.dash-onetime {
+  border-color: color-mix(in oklch, var(--rb-accent) 45%, var(--rb-line));
+}
+.dash-onetime__title:focus {
+  outline: none;
+}
+.dash-onetime__title:focus-visible {
+  outline: 2px solid var(--rb-accent);
+  outline-offset: 3px;
+  border-radius: 4px;
+}
+/* The code in blocks for reading aloud. Display only: the blocks have no
+   spaces between them, so selecting and copying gives the exact code. */
+.dash-onetime__code {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 10px;
+  margin: 0;
+  padding: 16px;
+  border-radius: var(--rb-r-md);
+  background: var(--rb-paper);
+  border: 1px solid var(--rb-line);
+  font-family: var(--rb-font-mono);
+  font-size: clamp(17px, 2.4vw, 22px);
+  font-weight: 600;
+  line-height: 1.35;
+  letter-spacing: 0.04em;
+  min-width: 0;
+}
+.dash-onetime__code > span {
+  white-space: nowrap;
+}
+.dash-onetime__meta {
+  margin: 0;
+  color: var(--rb-muted);
+}
+.dash-onetime__howto {
+  margin: 0;
+}
+.dash-onetime__howto + .dash-onetime__howto {
+  margin-top: -6px;
+  color: var(--rb-muted);
+  font-size: 13.5px;
+}
+.dash-onetime__howto code {
+  font-family: var(--rb-font-mono);
+  font-size: 0.95em;
+  overflow-wrap: anywhere;
+}
+
+.dash-ttl-custom {
+  display: flex;
+  gap: 8px;
+  min-width: 0;
+}
+.dash-ttl-custom > * {
+  flex: 1;
+  min-width: 0;
+}

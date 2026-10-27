@@ -1006,8 +1006,8 @@ a.dash-stat:hover {
   text-overflow: ellipsis;
 }
 
-/* Phones: each row becomes a small card; cells show their column name. */
-@media (max-width: 719px) {
+/* Phones (< 768, the breakpoint above): each row becomes a small card; cells show their column name. */
+@media (max-width: 767px) {
   .dash-table--stack thead {
     position: absolute;
     width: 1px;

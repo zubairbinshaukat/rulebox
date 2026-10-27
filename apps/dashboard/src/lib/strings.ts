@@ -6,7 +6,7 @@
  * Keep sentences short and plain: the people using this run a shop, not a
  * data centre.
  */
-import type { AuditActorType, EnrollmentCodeState, InstallState, KioskPhase, Role, ShellHealth } from "../data/types";
+import type { AuditActorType, InstallState, KioskPhase, Role, ShellHealth } from "../data/types";
 import { formatCount, formatDuration, formatNumber, plural } from "./format";
 
 const n = (count: number, one: string, other: string, cap?: number) =>
@@ -728,53 +728,9 @@ export const strings = {
     removed: (ext: string) => `${ext} removed.`,
   },
 
+  // The Enrollment screen's sentences load with it (screens/enrollment/strings.ts).
   enrollment: {
-    title: "Enrollment",
-    lead: "One-time codes that add a PC to your organization.",
-    create: "Create code",
-    createTitle: "New enrollment code",
     group: "Group",
-    groupHint: "New PCs join this group.",
-    uses: "Number of PCs",
-    usesHint: "1 to 100.",
-    expiry: "Valid for",
-    label: "Label",
-    labelHint: "Helps you recognise the code later.",
-    expiryOptions: [
-      { minutes: 15, label: "15 minutes" },
-      { minutes: 60, label: "1 hour" },
-      { minutes: 480, label: "8 hours" },
-      { minutes: 1440, label: "1 day" },
-      { minutes: 4320, label: "3 days" },
-      { minutes: 10080, label: "7 days" },
-    ],
-    codeTitle: "Your enrollment code",
-    codeOnce: "This code is shown only now.",
-    codeHowTo: "Run this on the PC, as an administrator:",
-    codeExpires: (when: string) => `Expires ${when}.`,
-    codeDone: "I copied it",
-    codeLabel: "Enrollment command",
-    colLabel: "Code",
-    colGroup: "Group",
-    colUses: "Uses left",
-    colExpires: "Expires",
-    colState: "State",
-    colCreatedBy: "Created by",
-    states: {
-      active: "Active",
-      usedUp: "Used up",
-      expired: "Expired",
-      revoked: "Revoked",
-    } satisfies Record<EnrollmentCodeState, string>,
-    unlabeled: "Unlabeled code",
-    revokeTitle: "Revoke this code?",
-    revokeBody: "PCs can no longer enroll with it. PCs already enrolled are not affected.",
-    revoked: "Code revoked.",
-    emptyTitle: "No enrollment codes yet",
-    emptyBody: "Create a code, then run the enroll command on the new PC.",
-    noGroups: "Create a group first: every code adds PCs to a group.",
-    usesLeft: (left: number, total: number) => `${formatNumber(left)} of ${formatNumber(total)}`,
-    noSigningKey: "Enrollment is refused until an Owner registers a signing key.",
   },
 
   audit: {
