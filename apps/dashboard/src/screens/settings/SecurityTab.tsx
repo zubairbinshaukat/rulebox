@@ -132,12 +132,14 @@ function Security({ st }: { st: StepUpStatus }) {
           ) : null
         }
       >
-        <div className="dash-form" style={{ padding: "12px 22px" }}>
-          {!st.passkeysAvailable ? <InlineNotice tone="neutral" title={sec.passkeysOff} /> : null}
-          {st.passkeysAvailable && !browserPasskeys ? <InlineNotice tone="neutral" title={sec.passkeyUnsupported} /> : null}
-          {st.passkeys.length >= MAX_PASSKEYS ? <InlineNotice tone="neutral" title={sec.passkeyLimit(MAX_PASSKEYS)} /> : null}
-          {st.passkeys.length === 0 ? <p className="dash-muted">{sec.passkeysEmpty}</p> : null}
-        </div>
+        {!st.passkeysAvailable || !browserPasskeys || st.passkeys.length === 0 || st.passkeys.length >= MAX_PASSKEYS ? (
+          <div className="dash-form" style={{ padding: "12px 22px" }}>
+            {!st.passkeysAvailable ? <InlineNotice tone="neutral" title={sec.passkeysOff} /> : null}
+            {st.passkeysAvailable && !browserPasskeys ? <InlineNotice tone="neutral" title={sec.passkeyUnsupported} /> : null}
+            {st.passkeys.length >= MAX_PASSKEYS ? <InlineNotice tone="neutral" title={sec.passkeyLimit(MAX_PASSKEYS)} /> : null}
+            {st.passkeys.length === 0 ? <p className="dash-muted">{sec.passkeysEmpty}</p> : null}
+          </div>
+        ) : null}
         {st.passkeys.length ? (
           <ul className="dash-list" aria-label={sec.passkeysCard}>
             {st.passkeys.map((k) => {
