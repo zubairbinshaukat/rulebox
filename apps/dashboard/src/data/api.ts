@@ -17,8 +17,6 @@ import type {
   EmployeeDetail,
   EmployeeInput,
   EmployeeRow,
-  EnrollmentCodeRow,
-  EnrollmentInput,
   FileTypesScreen,
   GroupDetail,
   GroupRow,
@@ -126,10 +124,7 @@ export interface DataApi {
   useSetFileHandler: Mutation<{ extension: string; appId: Id }>;
   useRemoveFileHandler: Mutation<{ handlerId: Id }>;
 
-  // ---- enrollment codes
-  useEnrollmentScreen: (nowMinute: number) => PagedState<EnrollmentCodeRow>;
-  useCreateEnrollmentCode: Mutation<EnrollmentInput, { code: string; expiresAt: number }>;
-  useRevokeEnrollmentCode: Mutation<{ tokenId: Id }>;
+  // ---- enrollment codes: their own seam (`enrollment/api.ts`), kept out of the first load.
 
   // ---- audit
   useAuditScreen: () => PagedState<AuditEntry>;

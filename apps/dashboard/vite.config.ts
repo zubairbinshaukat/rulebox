@@ -141,6 +141,7 @@ export default defineConfig(({ mode, command }) => {
       // The data implementation (src/data/README.md): fixtures only in demo builds.
       "@rulebox/data-impl": fileURLToPath(new URL(demo ? "./src/data/demo/hooks.ts" : "./src/data/live/hooks.ts", import.meta.url)),
       "@rulebox/stepup-impl": fileURLToPath(new URL(demo ? "./src/data/stepup/demo.ts" : "./src/data/stepup/live.ts", import.meta.url)),
+      "@rulebox/enrollment-impl": fileURLToPath(new URL(demo ? "./src/data/enrollment/demo.ts" : "./src/data/enrollment/live.ts", import.meta.url)),
     },
   },
   server: { port: 5173, strictPort: true },
@@ -154,13 +155,20 @@ export default defineConfig(({ mode, command }) => {
         codeSplitting: {
           groups: [
             { name: "vendor-react", test: /node_modules[\\/](react|react-dom|scheduler|react-router)[\\/]/, priority: 2 },
-            { name: "vendor-convex", test: /node_modules[\\/](convex|@convex-dev[\\/]auth|is-network-error)[\\/]/, priority: 1 },
+            // `usePaginatedQuery` stays out: only paginated screens (lazy) use it, so it
+            // goes with them instead of into every first load.
+            {
+              name: "vendor-convex",
+              test: /node_modules[\\/](convex|@convex-dev[\\/]auth|is-network-error)[\\/](?!dist[\\/]esm[\\/]react[\\/]use_paginated_query)/,
+              priority: 1,
+            },
             // The small shared helpers (lib, data seam, @rulebox/ui) as one chunk instead of
             // a dozen tiny ones: fewer requests on the first load, nearly all needed anyway.
             // (Scripts only: the stylesheets stay one file, in their import order.)
             // `lib/stepup/` and `data/stepup/` stay out: step-up code is loaded only
-            // by the signed-in shell and the Security tab, never by sign-in.
-            { name: "core", test: /([\\/]apps[\\/]dashboard[\\/]src[\\/](lib|data)|[\\/]packages[\\/]ui[\\/]src)[\\/](?!stepup[\\/]).*\.tsx?$/ },
+            // by the signed-in shell and the Security tab, never by sign-in. So does
+            // `data/enrollment/` (only the Enrollment screen).
+            { name: "core", test: /([\\/]apps[\\/]dashboard[\\/]src[\\/](lib|data)|[\\/]packages[\\/]ui[\\/]src)[\\/](?!(stepup|enrollment)[\\/]).*\.tsx?$/ },
           ],
         },
       },

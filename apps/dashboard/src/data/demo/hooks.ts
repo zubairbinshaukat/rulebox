@@ -6,6 +6,7 @@
  */
 import { useCallback, useEffect, useState } from "react";
 import type { DataApi } from "../api";
+import type { EnrollmentApi } from "../enrollment/api";
 import {
   DEMO_TOTP,
   type DbApp,
@@ -1359,58 +1360,6 @@ export const demoApi: DataApi = {
     );
   },
 
-  // ---- enrollment
-  useEnrollmentScreen(nowMinute) {
-    return useDemoPaged(`enrollmentCodes:list:${nowMinute}`, (db) => {
-      requireReader();
-      return [...db.tokens]
-        .sort((a, b) => b.createdAt - a.createdAt)
-        .map((t) => ({
-          _id: t._id,
-          label: t.label,
-          groupId: t.groupId,
-          groupName: groupName(db, t.groupId),
-          usesLeft: t.usesLeft,
-          usesTotal: t.usesTotal,
-          expiresAt: t.expiresAt,
-          createdAt: t.createdAt,
-          state: codeState(t, nowMinute),
-          createdByEmail: db.members.find((m) => m._id === t.createdBy)?.email,
-        }));
-    });
-  },
-
-  useCreateEnrollmentCode() {
-    return useCallback(
-      ({ groupId, uses, ttlMinutes, label }) =>
-        runMutation("admin", ({ db, me, audit, now }) => {
-          const g = find(db.groups, groupId);
-          if (!Number.isInteger(uses) || uses < 1 || uses > 100) fail("invalid_argument", { field: "uses" });
-          if (ttlMinutes < 15 || ttlMinutes > 10080) fail("invalid_argument", { field: "ttlMinutes" });
-          if (!db.keys.some((k) => k.status === "active")) fail("not_ready");
-          const id = newId("tok");
-          const expiresAt = now + ttlMinutes * MIN;
-          db.tokens.push({ _id: id, label: label?.trim() || undefined, groupId, usesLeft: uses, usesTotal: uses, expiresAt, revoked: false, createdAt: now, createdBy: me._id });
-          audit({ action: "enrollment.codeCreated", targetType: "enrollmentCode", targetId: id, targetLabel: label?.trim() || undefined, summary: `Code for “${g.name}”, ${uses} uses.` });
-          const code = `RBX1.${base64Url(`https://demo-deployment-123.convex.cloud#${token(20)}`)}`;
-          return { code, expiresAt };
-        }),
-      [],
-    );
-  },
-
-  useRevokeEnrollmentCode() {
-    return useCallback(
-      ({ tokenId }) =>
-        runMutation("admin", ({ db, audit }) => {
-          const t = find(db.tokens, tokenId);
-          t.revoked = true;
-          audit({ action: "enrollment.codeRevoked", targetType: "enrollmentCode", targetId: t._id, targetLabel: t.label, summary: "Code revoked." });
-        }),
-      [],
-    );
-  },
-
   // ---- audit
   useAuditScreen() {
     return useDemoPaged("audit:list", (db) => {
@@ -1747,6 +1696,73 @@ function republishGroup(db: DemoDb, groupId: string, reason: string) {
   for (const d of db.devices) if (d.groupId === groupId) bumpVersion(db, d._id, reason);
 }
 
+/** Enrollment codes: their own seam (`data/enrollment`), re-exported by `data/enrollment/demo.ts`. */
+export const demoEnrollmentApi: EnrollmentApi = {
+  useEnrollmentScreen(nowMinute) {
+    return useDemoPaged(`enrollmentCodes:list:${nowMinute}`, (db) => {
+      requireReader();
+      return [...db.tokens]
+        .sort((a, b) => b.createdAt - a.createdAt)
+        .map((t) => ({
+          _id: t._id,
+          label: t.label,
+          groupId: t.groupId,
+          groupName: groupName(db, t.groupId),
+          usesLeft: t.usesLeft,
+          usesTotal: t.usesTotal,
+          expiresAt: t.expiresAt,
+          createdAt: t.createdAt,
+          state: codeState(t, nowMinute),
+          createdByEmail: db.members.find((m) => m._id === t.createdBy)?.email,
+        }));
+    });
+  },
+
+  useCreateEnrollmentCode() {
+    return useCallback(
+      ({ groupId, uses, ttlMinutes, label }) =>
+        runMutation("admin", ({ db, me, audit, now }) => {
+          const g = find(db.groups, groupId);
+          if (!Number.isInteger(uses) || uses < 1 || uses > 100) fail("invalid_argument", { field: "uses" });
+          if (!Number.isInteger(ttlMinutes) || ttlMinutes < 15 || ttlMinutes > 10080) fail("invalid_argument", { field: "ttlMinutes" });
+          const clean = label?.trim();
+          if (clean && (Array.from(clean).length > 64 || [...clean].some((c) => c.charCodeAt(0) < 0x20 || c.charCodeAt(0) === 0x7f))) {
+            fail("invalid_argument", { field: "label" });
+          }
+          // As `enrollmentCodes:storeCode`: suspended, then the active-code limit (expired codes do not count).
+          if (db.org.plan.status !== "active") fail("plan_limit", { detail: "suspended" });
+          if (db.tokens.filter((t) => codeState(t, now) === "active").length + 1 > db.org.plan.limits.maxEnrollmentCodesActive) {
+            fail("plan_limit", { detail: "enrollmentCodes" });
+          }
+          const id = newId("tok");
+          const expiresAt = now + ttlMinutes * MIN;
+          db.tokens.push({ _id: id, label: label?.trim() || undefined, groupId, usesLeft: uses, usesTotal: uses, expiresAt, revoked: false, createdAt: now, createdBy: me._id });
+          audit({ action: "enrollment.codeCreated", targetType: "enrollmentCode", targetId: id, targetLabel: label?.trim() || undefined, summary: `Code for “${g.name}”, ${uses} uses.` });
+          const code = `RBX1.${base64Url(`https://demo-deployment-123.convex.cloud#${token(20)}`)}`;
+          return { code, expiresAt };
+        }),
+      [],
+    );
+  },
+
+  useRevokeEnrollmentCode() {
+    return useCallback(
+      ({ tokenId }) =>
+        runMutation(
+          "admin",
+          ({ db, audit }) => {
+            const t = find(db.tokens, tokenId);
+            if (t.revoked) return;
+            t.revoked = true;
+            audit({ action: "enrollment.codeRevoked", targetType: "enrollmentCode", targetId: t._id, targetLabel: t.label, summary: "Code revoked." });
+          },
+          // A major action on the server (plan 4.16): fresh step-up.
+          "fresh",
+        ),
+      [],
+    );
+  },
+};
+
 /** Resolved through the `@rulebox/data-impl` alias in demo builds. */
 export const dataApi = demoApi;
-

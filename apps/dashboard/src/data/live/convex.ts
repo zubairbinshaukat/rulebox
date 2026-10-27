@@ -3,7 +3,7 @@
  * (`QueryState`, plain async functions throwing `AppError`). Used only by
  * `live/hooks.ts`.
  */
-import { useConvexAuth, useQueries, type RequestForQueries } from "convex/react";
+import { useConvexAuth, useQueries, type RequestForQueries, type UsePaginatedQueryResult } from "convex/react";
 import {
   getFunctionName,
   makeFunctionReference,
@@ -16,7 +16,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { toAppError } from "../../lib/errors";
 import { reportUnauthenticated } from "../../lib/session";
 import { withStepUp } from "../../lib/stepUpRetry";
-import type { QueryState } from "../types";
+import type { PagedState, QueryState } from "../types";
 
 /**
  * Maps a thrown Convex error to the dashboard's `AppError` (codes kept in sync
@@ -95,6 +95,35 @@ export function useMemberQuery<Q extends FunctionReference<"query">>(
   if (failed) return { status: "error", error: toAppError(result) ?? result, retry };
   return { status: "ready", data: result as FunctionReturnType<Q> };
 }
+
+/**
+ * `usePaginatedQuery`'s result as a `PagedState` (README "Paginated"). When
+ * the arguments change (for example `nowMs` at the next minute) Convex starts
+ * again from the first page; the rows already on screen stay until it
+ * arrives, so the list does not flash a skeleton. `usePaginatedQuery` THROWS
+ * query errors during render: a screen renders the list inside a
+ * `RegionBoundary`, whose "Try again" subscribes again.
+ */
+export function usePagedState<T>(r: UsePaginatedQueryResult<T>, pageSize: number): PagedState<T> {
+  const [kept, setKept] = useState<T[] | null>(null);
+  const firstPage = r.status === "LoadingFirstPage";
+  if (!firstPage && kept !== r.results) setKept(r.results);
+  const { loadMore: more } = r;
+  const loadMore = useCallback(() => more(pageSize), [more, pageSize]);
+  if (firstPage) {
+    if (kept === null) return { status: "loading" };
+    return { status: "ready", items: kept, canLoadMore: false, isLoadingMore: false, loadMore: noop };
+  }
+  return {
+    status: "ready",
+    items: r.results,
+    canLoadMore: r.status === "CanLoadMore" || r.status === "LoadingMore",
+    isLoadingMore: r.status === "LoadingMore",
+    loadMore,
+  };
+}
+
+const noop = () => undefined;
 
 /**
  * A query result reshaped for the screen (for example capped counts). The

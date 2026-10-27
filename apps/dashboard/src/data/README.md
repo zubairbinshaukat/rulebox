@@ -9,7 +9,8 @@ satisfy the same `DataApi` type (`api.ts`):
   loss (writes queue), failing queries and stale edits (top-bar demo controls).
 - `live/hooks.ts` — the real backend. Session, sign-in, MFA, account and
   members are live (Step 4, against the Step 3 functions); settings, the plan
-  and groups since Step 5; every other hook answers `not_ready` with the
+  and groups since Step 5; enrollment codes since Step 6 (their own seam,
+  see below); every other hook answers `not_ready` with the
   detail `NOT_DEPLOYED` (`api.ts`), which a region shows as "Coming in a
   later step", until its Convex step lands. `live/convex.ts` holds the
   adapters (`useMemberQuery`, `useMapped`, `mapError`).
@@ -27,10 +28,18 @@ Replace the hook body in `live/hooks.ts`; screens do not change.
   `unauthenticated` also fires `reportUnauthenticated()` (`lib/session.ts`):
   `useSessionGuard` sends the person to `/sign-in?next=…&expired=1`.
   `account:me` (public) stays a plain `useQuery`.
-- **Paginated** (`PagedState<T>`): `usePaginatedQuery(api.x.y, args, { initialNumItems: 50 })`
-  → `items = results`, `canLoadMore = status === "CanLoadMore" || status === "LoadingMore"`,
+- **Paginated** (`PagedState<T>`): `usePagedState(usePaginatedQuery(api.x.y, isAuthenticated ? args : "skip", { initialNumItems: 50 }), 50)`
+  (`live/convex.ts`) → `items = results`, `canLoadMore = status === "CanLoadMore" || status === "LoadingMore"`,
   `isLoadingMore = status === "LoadingMore"`, `loadMore = () => loadMore(50)`,
-  `"LoadingFirstPage"` → `{ status: "loading" }`.
+  `"LoadingFirstPage"` → `{ status: "loading" }` (or the previous rows while new
+  arguments load). Two rules: `usePaginatedQuery` **throws** query errors during
+  render, so the screen renders the list inside a `RegionBoundary`; and it is
+  ~1 KB gzip that must stay out of the first load: put the hooks in a seam of
+  their own that only the lazy screen imports (as `enrollment/`), never in
+  `live/hooks.ts` (`vite.config.ts` keeps `use_paginated_query` out of
+  `vendor-convex`). A changed argument restarts at page 1, so a screen whose
+  argument moves (Enrollment's `nowMs` minute) stops moving it once more
+  pages are loaded.
 - **Mutation / action**: `useMapped(useMutation(api.x.y))` /
   `useMapped(useAction(api.x.y))`: a thrown `ConvexError` with a known code
   becomes an `AppError` (`toAppError`, `lib/errors.ts`); anything else is
@@ -78,8 +87,6 @@ Status: **live** = wired in `live/hooks.ts`; everything else answers
 | `useSetAppArchived` / `useDeleteApp` / `useRetryApp` | `api.apps.setArchived` (optimistic) / `remove` / `retry` |
 | `useResolveWinget` / `useFetchWebMeta` | `useAction(api.apps.resolveWinget)` / `useAction(api.apps.fetchWebMeta)` |
 | `useFileTypesScreen` / `useSetFileHandler` / `useRemoveFileHandler` | `api.fileHandlers.list` / `set` / `remove` |
-| `useEnrollmentScreen(nowMinute)` | `api.enrollmentCodes.list({ nowMs })` (paginated) |
-| `useCreateEnrollmentCode` / `useRevokeEnrollmentCode` | `useAction(api.enrollmentCodes.create)` / `revoke` |
 | `useAuditScreen` / `useHistory(targetId)` | `api.audit.list` / `api.audit.forTarget` (paginated) |
 | `useSettingsScreen` / `useUpdateSettings` | `api.settings.get` (`exitPin: { set, setAt }`) / `api.settings.update` → `{ revision, changed }` (fresh step-up when `adminExit` changes; `invalid_argument` field `adminExit.hotkey` with the grammar rule in `detail`) | live |
 | `usePlan` | `api.settings.plan` (plan, status, limits, usage); Settings → Organization and the "New group" dialog | live |
@@ -90,6 +97,20 @@ Status: **live** = wired in `live/hooks.ts`; everything else answers
 | `useInviteMember` / `useCreateResetCode` | `useAction(api.members.invite)` / `useAction(api.members.createResetCode)` → `{ code, expiresAt }` (code shown once, kept in component state only) | live |
 | `useRevokeInvite` / `useResetMemberMfa` | `useMutation(api.members.revokeInvite)` / `useMutation(api.members.resetMfa)` | live |
 | `useChangeRole` / `useSetMemberDisabled` | `useMutation(api.members.changeRole)` / `useMutation(api.members.setDisabled)`, both with `expectedRevision` (`stale_edit` when the member changed) | live |
+
+## Enrollment-code hooks (`data/enrollment/`, plan Step 6)
+
+Same pattern as the step-up seam below (`EnrollmentApi` in `enrollment/api.ts`,
+`enrollment/live.ts`, demo hooks in `demo/hooks.ts` re-exported by
+`enrollment/demo.ts`, picked by the `@rulebox/enrollment-impl` alias). Only
+`screens/Enrollment.tsx` imports it, so `usePaginatedQuery` never reaches
+sign-in.
+
+| Hook | Convex | Status |
+|---|---|---|
+| `useEnrollmentScreen(nowMinute)` | `usePaginatedQuery(api.enrollmentCodes.list, { nowMs })` (50 per page; `nowMs` = the minute) | live |
+| `useCreateEnrollmentCode` | `useAction(api.enrollmentCodes.create)` → `{ code, expiresAt }` (code shown once, kept in component state only; `plan_limit` detail `enrollmentCodes` / `suspended`, `invalid_argument` field `uses` / `ttlMinutes` / `label`, `not_found` group, `not_ready` URL) | live |
+| `useRevokeEnrollmentCode` | `useMutation(api.enrollmentCodes.revoke)` (major: fresh step-up) | live |
 
 ## Step-up hooks (`data/stepup/`, plan 4.16)
 

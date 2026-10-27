@@ -34,7 +34,14 @@ function makeClock(intervalMs: number): Clock {
         }
       };
     },
-    read: () => now,
+    // React reads the snapshot before it subscribes: a clock that sat idle
+    // (no reader for a while) refreshes first, so the first render is not stale.
+    // Only when a whole interval passed (or the system clock jumped back), so
+    // repeated reads stay equal.
+    read: () => {
+      if (!timer && Math.abs(Date.now() - now) >= intervalMs) now = Date.now();
+      return now;
+    },
   };
 }
 
@@ -55,4 +62,15 @@ export function useNow(intervalMs = 30_000): number {
 /** `now` rounded down to the minute (queries take `nowMs` this way so results cache). */
 export function minuteOf(ms: number): number {
   return Math.floor(ms / 60_000) * 60_000;
+}
+
+/**
+ * The current minute (`minuteOf(now)`), read from the shared 30 s clock. The
+ * component re-renders only when the minute changes, not on every tick, so a
+ * query argument built from it changes at most once a minute.
+ */
+export function useMinute(): number {
+  const clock = clockFor(30_000);
+  const read = () => minuteOf(clock.read());
+  return useSyncExternalStore(clock.subscribe, read, read);
 }

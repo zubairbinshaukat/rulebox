@@ -1,7 +1,7 @@
 /**
  * Live implementation (real Convex backend). Session, sign-in, MFA, account
  * and members are wired to the Phase 4 Step 3 functions (Step 4); settings,
- * the plan and groups to Step 5's. Every other
+ * the plan and groups to Step 5's (enrollment codes, Step 6: `../enrollment/`). Every other
  * hook answers `not_ready` until its Convex step lands — see `../README.md`
  * for the exact function per hook.
  */
@@ -192,9 +192,7 @@ export const liveApi: DataApi = {
   useSetFileHandler: useNotReadyMutation,
   useRemoveFileHandler: useNotReadyMutation,
 
-  useEnrollmentScreen: useNotReadyPaged,
-  useCreateEnrollmentCode: useNotReadyMutation,
-  useRevokeEnrollmentCode: useNotReadyMutation,
+  // Enrollment codes (Step 6) have their own seam: `../enrollment/live.ts`.
 
   useAuditScreen: useNotReadyPaged,
   useHistory: useNotReadyPaged,

@@ -2,6 +2,7 @@ import { Component, type ErrorInfo, type ReactNode } from "react";
 import { Button } from "@rulebox/ui";
 import IconDanger from "~icons/solar/danger-circle-linear";
 import { messageFor, errorCodeOf, toAppError } from "../lib/errors";
+import { reportUnauthenticated } from "../lib/session";
 import { strings } from "../lib/strings";
 import { NOT_DEPLOYED } from "../data/api";
 import type { PagedState, QueryState } from "../data/types";
@@ -61,6 +62,8 @@ export class RegionBoundary extends Component<BoundaryProps, BoundaryState> {
   }
 
   componentDidCatch(error: unknown, info: ErrorInfo) {
+    // A paginated query throws its errors here (usePaginatedQuery): a lost session still signs out.
+    if (toAppError(error)?.code === "unauthenticated") reportUnauthenticated();
     console.error("Rulebox dashboard region error:", error, info.componentStack);
   }
 
