@@ -10,60 +10,26 @@ import {
 } from "./_generated/server";
 import type { Id } from "./_generated/dataModel";
 import { sha256Hex } from "./lib/deviceAuth";
+import {
+  assertAgentAcceptableUrl,
+  CROCKFORD,
+  ENROLLMENT_TOKEN_LENGTH,
+  formatEnrollmentCode,
+} from "./lib/crypto";
+import { countsAsActive } from "./lib/enrollmentCodes";
+import { bumpOrgStatsIfPresent } from "./lib/plans";
 
-const CROCKFORD = "0123456789ABCDEFGHJKMNPQRSTVWXYZ";
-const TOKEN_LENGTH = 20; // 20 x 5 bits = 100 bits of entropy
-
-/** 20 Crockford base32 characters. 256 is a multiple of 32, so no bias. */
+/**
+ * 20 Crockford base32 characters. 256 is a multiple of 32, so no bias.
+ * DEV ONLY: a mutation's random source is seeded (plan Section 6); the
+ * dashboard's `enrollmentCodes:create` makes its token in an action.
+ */
 function generateToken(): string {
-  const bytes = new Uint8Array(TOKEN_LENGTH);
+  const bytes = new Uint8Array(ENROLLMENT_TOKEN_LENGTH);
   crypto.getRandomValues(bytes);
   let out = "";
   for (const byte of bytes) out += CROCKFORD.charAt(byte & 31);
   return out;
-}
-
-/** base64url without padding (no Buffer or btoa in the Convex runtime). */
-function base64UrlEncode(text: string): string {
-  const alphabet =
-    "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
-  const bytes = new TextEncoder().encode(text);
-  let out = "";
-  for (let i = 0; i < bytes.length; i += 3) {
-    const b0 = bytes[i] ?? 0;
-    const b1 = bytes[i + 1];
-    const b2 = bytes[i + 2];
-    const n = (b0 << 16) | ((b1 ?? 0) << 8) | (b2 ?? 0);
-    out += alphabet.charAt((n >> 18) & 63) + alphabet.charAt((n >> 12) & 63);
-    if (b1 !== undefined) out += alphabet.charAt((n >> 6) & 63);
-    if (b2 !== undefined) out += alphabet.charAt(n & 63);
-  }
-  return out;
-}
-
-/** The agent accepts only `https://host[:port]` with no path, query or user-info. */
-function assertAgentAcceptableUrl(url: string): void {
-  let parsed: URL;
-  try {
-    parsed = new URL(url);
-  } catch {
-    throw new Error(`Not a valid URL: ${url}`);
-  }
-  const bare =
-    parsed.protocol === "https:" &&
-    parsed.hostname !== "" &&
-    parsed.username === "" &&
-    parsed.password === "" &&
-    parsed.pathname === "/" &&
-    parsed.search === "" &&
-    parsed.hash === "" &&
-    !url.endsWith("/");
-  if (!bare) {
-    throw new Error(
-      `The agent only accepts an https:// URL with a host and no path ` +
-        `(got ${url}). A local deployment cannot be used for enrollment.`,
-    );
-  }
 }
 
 /** Seed org (dev only). Returns the new organization id. */
@@ -130,7 +96,8 @@ export const createEnrollmentCode = internalMutation({
       createdAt: now,
     });
 
-    const code = "RBX1." + base64UrlEncode(`${convexUrl}#${token}`);
+    // No `usesTotal`: a dev code is not counted in `activeEnrollmentCodes`.
+    const code = formatEnrollmentCode(convexUrl, token);
     return { code, expiresAt, tokenId };
   },
 });
@@ -258,7 +225,10 @@ export const revokeDevice = internalMutation({
   handler: async (ctx, args) => {
     const device = await ctx.db.get(args.deviceId);
     if (device === null) throw new Error(`No such device: ${args.deviceId}`);
+    if (device.revoked) return null;
     await ctx.db.patch(args.deviceId, { revoked: true });
+    // `deviceCount` counts non-revoked devices (plan 4.2.1, A7).
+    await bumpOrgStatsIfPresent(ctx, device.orgId, { deviceCount: -1 });
     return null;
   },
 });
@@ -270,7 +240,11 @@ export const revokeEnrollmentToken = internalMutation({
   handler: async (ctx, args) => {
     const token = await ctx.db.get(args.tokenId);
     if (token === null) throw new Error(`No such token: ${args.tokenId}`);
+    if (token.revoked === true) return null;
     await ctx.db.patch(args.tokenId, { revoked: true });
+    if (countsAsActive(token, Date.now())) {
+      await bumpOrgStatsIfPresent(ctx, token.orgId, { activeEnrollmentCodes: -1 });
+    }
     return null;
   },
 });

@@ -378,6 +378,10 @@ export default defineSchema({
     createdAt: v.number(),
     label: v.optional(v.string()),
     createdBy: v.optional(v.id("members")),
+    // Uses the code was created with (Step 6; the dashboard shows "used of
+    // total"). Set only by `enrollmentCodes:create`: a row WITH it is counted
+    // in `orgStats.activeEnrollmentCodes`; Phase 2 / dev rows without it are not.
+    usesTotal: v.optional(v.number()),
   })
     .index("by_org", ["orgId"])
     .index("by_token_hash", ["tokenHash"])

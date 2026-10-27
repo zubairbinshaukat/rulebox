@@ -162,6 +162,9 @@ export const FORBIDDEN_KEYS = [
   "credentialId",
   "challengeHash",
   "webauthnUserId",
+  // Enrollment (Step 6): a list or device row never carries the raw token or the device secret hash.
+  "token",
+  "deviceSecretHash",
 ];
 
 /**

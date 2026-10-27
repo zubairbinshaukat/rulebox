@@ -3,6 +3,7 @@ import { internalQuery } from "./_generated/server";
 import { checkDevice } from "./lib/deviceAuth";
 import { deepEqual } from "./lib/deepEqual";
 import { phase2DeviceMutation, phase2DeviceQuery } from "./lib/functions";
+import { bumpOrgStatsIfPresent } from "./lib/plans";
 
 /** Fixed in Phase 2 (about 5 minutes); Step 7 scales it with fleet size. */
 const NEXT_PING_IN_MS = 300_000;
@@ -170,6 +171,9 @@ export const unenroll = phase2DeviceMutation({
     const check = ctx.deviceCheck;
     if (check.kind !== "ok") return { kind: "rejected" as const };
     await ctx.db.patch(check.device._id, { revoked: true });
+    // `deviceCount` counts non-revoked devices (plan 4.2.1, A7): a revoked
+    // device frees a slot of the plan's `maxDevices` (Step 6).
+    await bumpOrgStatsIfPresent(ctx, check.device.orgId, { deviceCount: -1 });
     return { kind: "ok" as const };
   },
 });

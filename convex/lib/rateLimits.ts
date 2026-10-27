@@ -29,9 +29,24 @@ export const rateLimiter = new RateLimiter(components.rateLimiter, {
   // on a failure (checked first): many stolen sessions guessing at once.
   // The per-user bound is the persisted PIN lockout in `stepUpFactors`.
   stepUpFailuresGlobal: { kind: "token bucket", rate: 300, period: MINUTE_MS, capacity: 300, shards: 4 },
+  // enrollment:enroll (plan Step 6 item 6, A9; post-Phase-5 4.4). Convex sees
+  // no client IP: one deployment-wide bucket, consumed before the token
+  // lookup, and one per organization (key = org id), consumed once the token
+  // resolved. `enroll` is a MUTATION (Phase 2 wire contract), so a refused
+  // attempt rolls its consumption back: these buckets bound successful
+  // enrollments (and idempotent retries, global only); failed attempts write
+  // nothing at all and are bounded by the 100-bit token.
+  enrollGlobal: { kind: "token bucket", rate: 120, period: MINUTE_MS, capacity: 120 },
+  enrollPerOrg: { kind: "token bucket", rate: 10, period: MINUTE_MS, capacity: 10 },
 });
 
-export type LimitName = "signInPerEmail" | "redeemCode" | "stepUpChallenge" | "stepUpFailuresGlobal";
+export type LimitName =
+  | "signInPerEmail"
+  | "redeemCode"
+  | "stepUpChallenge"
+  | "stepUpFailuresGlobal"
+  | "enrollGlobal"
+  | "enrollPerOrg";
 
 /** Read-only: throw `rate_limited` when the bucket is empty, without consuming. */
 export async function checkOrFail(

@@ -72,6 +72,87 @@ export function codeHash(code: string): string {
   return sha256HexSync(normalizeCrockford(code));
 }
 
+// ---------------------------------------------------------------- enrollment codes (PRD 15)
+
+/**
+ * The enrollment token inside a code: 20 Crockford characters = 100 bits.
+ * Fixed by the agent's parser (`apps/agent/src/enroll_code.rs`, TOKEN_LENGTH
+ * = 20): a longer token would be refused as `BadToken` by every agent in the
+ * field. A 100-bit, single-org, short-lived (<= 7 days), use-limited token
+ * looked up by its SHA-256 is far beyond online guessing.
+ */
+export const ENROLLMENT_TOKEN_LENGTH = 20;
+/**
+ * Tokens `enrollment:enroll` looks up: 20 to 32 Crockford characters, so a
+ * future agent that accepts longer (e.g. 26-character, 130-bit) tokens works
+ * without a server change. Anything else is refused before any read.
+ */
+const ENROLL_TOKEN_RE = /^[0-9A-HJKMNP-TV-Z]{20,32}$/;
+
+export function isEnrollmentTokenShape(token: string): boolean {
+  return ENROLL_TOKEN_RE.test(token);
+}
+
+/**
+ * Version prefix of the code. The agent refuses any other prefix cleanly
+ * (`BadPrefix`), so a future format (for example one that carries a tenant
+ * locator next to the URL) gets a new prefix such as `RBX2.` and the server
+ * keeps looking tokens up by hash only: the token is the whole lookup key.
+ */
+export const ENROLLMENT_CODE_PREFIX = "RBX1.";
+
+/** `RBX1.` + base64url(`<convexUrl>#<token>`), exactly the format the agent parses. */
+export function formatEnrollmentCode(convexUrl: string, token: string): string {
+  return ENROLLMENT_CODE_PREFIX + base64UrlEncode(`${convexUrl}#${token}`);
+}
+
+/** base64url without padding (no Buffer or btoa in the Convex runtime). */
+export function base64UrlEncode(text: string): string {
+  const alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
+  const bytes = new TextEncoder().encode(text);
+  let out = "";
+  for (let i = 0; i < bytes.length; i += 3) {
+    const b0 = bytes[i] ?? 0;
+    const b1 = bytes[i + 1];
+    const b2 = bytes[i + 2];
+    const n = (b0 << 16) | ((b1 ?? 0) << 8) | (b2 ?? 0);
+    out += alphabet.charAt((n >> 18) & 63) + alphabet.charAt((n >> 12) & 63);
+    if (b1 !== undefined) out += alphabet.charAt((n >> 6) & 63);
+    if (b2 !== undefined) out += alphabet.charAt(n & 63);
+  }
+  return out;
+}
+
+/** True when the agent accepts `url`: `https://host[:port]` with no path, query or user-info. */
+export function isAgentAcceptableUrl(url: string): boolean {
+  let parsed: URL;
+  try {
+    parsed = new URL(url);
+  } catch {
+    return false;
+  }
+  return (
+    parsed.protocol === "https:" &&
+    parsed.hostname !== "" &&
+    parsed.username === "" &&
+    parsed.password === "" &&
+    parsed.pathname === "/" &&
+    parsed.search === "" &&
+    parsed.hash === "" &&
+    !url.endsWith("/")
+  );
+}
+
+/** Throwing form for the CLI helpers (`dev.ts`). */
+export function assertAgentAcceptableUrl(url: string): void {
+  if (!isAgentAcceptableUrl(url)) {
+    throw new Error(
+      `The agent only accepts an https:// URL with a host and no path ` +
+        `(got ${url}). A local deployment cannot be used for enrollment.`,
+    );
+  }
+}
+
 /** True when `text` contains a C0 control character or DEL. */
 export function hasControlChar(text: string): boolean {
   for (let i = 0; i < text.length; i++) {

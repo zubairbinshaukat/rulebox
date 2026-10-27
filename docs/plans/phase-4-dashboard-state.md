@@ -160,6 +160,39 @@ a primary source; the plan says how each one gets confirmed.
   stay `v.optional` until `npx convex run maintenance:migratePlans '{}'`
   ran on every deployment (narrow afterwards); (8) item 4 (Argon2 vectors
   in `rulebox-policy` / agent `kdf.rs`) not done in this step.
+- **2026-10-27, Step 6 backend built** (`enrollmentCodes.ts`,
+  `lib/enrollmentCodes.ts`, `enrollment.ts` reworked; the dashboard screen
+  follows). Deviations and notes: (1) the token stays **20 Crockford
+  characters (100 bits)**: the agent's parser (`enroll_code.rs`
+  `TOKEN_LENGTH = 20`) refuses any other length, so 130 bits needs an agent
+  change first; `enroll` already looks up 20-32 characters so a longer token
+  needs no server change. (2) **No tenant locator** (one hosted URL). A future
+  locator goes into a new prefix (`RBX2.`, which today's agent refuses cleanly
+  as `BadPrefix`), never into `RBX1.`; the server keeps finding the
+  organization from the token hash alone. (3) `enroll` is a **mutation** (wire
+  contract), so a refused attempt rolls back its rate-limiter consumption:
+  `enrollGlobal` (120/min) and `enrollPerOrg` (10/min) bound successful
+  enrollments (idempotent retries consume only the global bucket); refused
+  attempts write nothing (A9's "consumed on failure" is not possible here;
+  100-bit tokens bound guessing). (4) New optional field
+  `enrollmentTokens.usesTotal` (the dashboard's "used of total"); only rows
+  with it are counted in `orgStats.activeEnrollmentCodes`, so Phase 2 / dev
+  codes never skew the limit. (5) Expired codes leave the counter by a
+  **recount inside `create`** when the counter is at the limit
+  (`by_org_created` from now − 7 days, ≤ 200 rows, else refused), not only by
+  `stats:reconcile` (Step 17): otherwise a free tenant with 5 expired codes
+  could not create a code for up to a day. (6) `devices:unenroll` (and
+  `dev:revokeDevice`) decrement `deviceCount`, so a revoked device frees a
+  plan slot. (7) `enroll` validates input before any read (token shape,
+  `hardwareIdHash` 64 hex, name ≤ 1,000 input characters → cleaned to ≤ 100,
+  `agentVersion` ≤ 64, `compat` ≤ 32 KB) and writes one `device.enrolled`
+  audit row (actor = the device). (8) `plan_limit`, `rate_limited` and
+  `not_ready` reach the Phase 2 agent as "The backend refused the request."
+  with the code (exit 3, pending enrollment kept); the friendly
+  "device limit" sentence of post-Phase-5 3.2 needs an agent change (Step 13).
+  (9) `base64UrlEncode` / `assertAgentAcceptableUrl` moved to
+  `lib/crypto.ts` (+ `formatEnrollmentCode`). Credentials stay on `devices`
+  until Step 7 (A2).
 
 ---
 

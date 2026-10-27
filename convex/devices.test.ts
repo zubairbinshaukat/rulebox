@@ -1,12 +1,10 @@
-import { convexTest } from "convex-test";
 import { describe, expect, test } from "vitest";
+import { setupAuth } from "../tests/convex/auth";
 import { makeOrg, type T } from "../tests/convex/identity";
 import { api } from "./_generated/api";
 import type { Id } from "./_generated/dataModel";
 import { sha256HexSync } from "./lib/crypto";
 import { checkDevice, settleRotation } from "./lib/deviceAuth";
-import schema from "./schema";
-import { modules } from "./test.setup";
 
 // The Phase 2 wire contract (plan 5.1): names, arguments and answers of
 // enrollment:enroll, devices:desiredState, devices:heartbeat and
@@ -39,7 +37,7 @@ const enrollArgs = {
 
 describe("enrollment:enroll", () => {
   test("enrolls once, retries idempotently, then refuses a used-up token", async () => {
-    const t = convexTest(schema, modules);
+    const t = await setupAuth();
     const { orgId, tokenId } = await seed(t);
     const first = await t.mutation(api.enrollment.enroll, enrollArgs);
     expect(Object.keys(first).sort()).toEqual(["deviceId", "deviceName", "orgId", "serverTimeMs"]);
@@ -59,7 +57,7 @@ describe("enrollment:enroll", () => {
   });
 
   test("wire error codes stay as in Phase 2", async () => {
-    const t = convexTest(schema, modules);
+    const t = await setupAuth();
     await seed(t);
     await expect(t.mutation(api.enrollment.enroll, { ...enrollArgs, token: "nope" })).rejects.toMatchObject({
       data: { code: "token_invalid" },
@@ -77,7 +75,7 @@ async function enrolled(t: T): Promise<Id<"devices">> {
 
 describe("devices (Phase 2 agent functions)", () => {
   test("desiredState answers unknownDevice for a wrong secret or garbage id, ok otherwise", async () => {
-    const t = convexTest(schema, modules);
+    const t = await setupAuth();
     const deviceId = await enrolled(t);
     expect(await t.query(api.devices.desiredState, { deviceId, deviceSecret: "wrong" })).toEqual({
       kind: "unknownDevice",
@@ -92,7 +90,7 @@ describe("devices (Phase 2 agent functions)", () => {
   });
 
   test("desiredState returns the newest Phase 2 document, device scope first", async () => {
-    const t = convexTest(schema, modules);
+    const t = await setupAuth();
     const deviceId = await enrolled(t);
     const device = await t.run((ctx) => ctx.db.get(deviceId));
     await t.run(async (ctx) => {
@@ -106,7 +104,7 @@ describe("devices (Phase 2 agent functions)", () => {
   });
 
   test("heartbeat writes the device row only on change; rejected for a wrong secret", async () => {
-    const t = convexTest(schema, modules);
+    const t = await setupAuth();
     const deviceId = await enrolled(t);
     expect(await t.mutation(api.devices.heartbeat, { deviceId, deviceSecret: "wrong" })).toEqual({ kind: "rejected" });
     const status = { agentVersion: "0.4.0", kioskPhase: "applied", diskFreeGb: 30, compat: null };
@@ -122,7 +120,7 @@ describe("devices (Phase 2 agent functions)", () => {
   });
 
   test("unenroll revokes; afterwards desiredState answers revoked and unenroll rejected", async () => {
-    const t = convexTest(schema, modules);
+    const t = await setupAuth();
     const deviceId = await enrolled(t);
     expect(await t.mutation(api.devices.unenroll, { deviceId, deviceSecret: SECRET })).toEqual({ kind: "ok" });
     expect(await t.query(api.devices.desiredState, { deviceId, deviceSecret: SECRET })).toEqual({ kind: "revoked" });
@@ -133,7 +131,7 @@ describe("devices (Phase 2 agent functions)", () => {
 
 describe("checkDevice with credential rotation (plan 4.6)", () => {
   test("old and new secret both work until the new one is used in a mutation", async () => {
-    const t = convexTest(schema, modules);
+    const t = await setupAuth();
     const deviceId = await enrolled(t);
     const NEW = "new-device-secret-9876543210";
     await t.run((ctx) =>

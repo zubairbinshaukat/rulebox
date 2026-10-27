@@ -40,4 +40,19 @@ export const IO_BUDGETS: Record<string, IoBudget> = {
   // group, 3 x `.first()` dependents, unexpired codes of the group (<= 100), orgStats;
   // writes: delete, orgStats, audit. Refused: 0 writes.
   "groups:remove": { maxReads: 4 + 1 + 3 + 100 + 1, maxReadBytes: 40_960, maxWrites: 3, maxWriteBytes: 1_024 },
+
+  // ---- Step 6: enrollment codes.
+  // authorize (4) + storeCode: group, orgPlans (+ platformSettings before migration), orgStats,
+  // token-hash clash check; at the limit + the recount of codes created in the last 7 days
+  // (<= 201). Writes: token, orgStats, audit. Refused: 0 writes.
+  "enrollmentCodes:create": { maxReads: 4 + 5 + 201, maxReadBytes: 90_000, maxWrites: 3, maxWriteBytes: 1_536 },
+  // wrapper (3) + a page of <= 50 codes + their groups and creators (cached per call).
+  "enrollmentCodes:list": { maxReads: 3 + 50 + 50 + 50, maxReadBytes: 60_000, maxWrites: 0, maxWriteBytes: 0, live: true },
+  // wrapper + step-up (4), token, orgStats; writes: token, orgStats, audit. Already revoked: 0 writes.
+  "enrollmentCodes:revoke": { maxReads: 6, maxReadBytes: 2_048, maxWrites: 3, maxWriteBytes: 1_024 },
+  // Public. Limiter global + per org (2 reads, 2 writes), token, device by secret, orgPlans
+  // (+ platformSettings before migration), orgStats; writes: limiter x2, token, device
+  // (~1 KB with compat), deviceStatus, orgStats, audit = 7. Refused (any reason): <= 3-6 reads,
+  // 0 writes (the transaction rolls back). Idempotent retry: 3 reads, 1 write (global bucket).
+  "enrollment:enroll": { maxReads: 7, maxReadBytes: 6_144, maxWrites: 7, maxWriteBytes: 6_144 },
 };

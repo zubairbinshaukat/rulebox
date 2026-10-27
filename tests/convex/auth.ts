@@ -35,6 +35,8 @@ export async function ensureAuthEnv(): Promise<void> {
     // Step-up passkeys (plan 4.16): the dashboard's dev origin.
     process.env.RULEBOX_WEBAUTHN_RP_ID = "localhost";
     process.env.RULEBOX_WEBAUTHN_ORIGINS = "http://localhost:5173";
+    // Set by Convex in every cloud deployment; enrollment codes embed it (Step 6).
+    process.env.CONVEX_CLOUD_URL ??= "https://happy-animal-123.convex.cloud";
   })();
   await ready;
 }

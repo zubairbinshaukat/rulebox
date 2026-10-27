@@ -68,6 +68,13 @@ export function fail(code: ErrorCode, extra?: Omit<ErrorData, "code">): never {
  * Phase 2 wire codes of `enrollment:enroll`, read by the agent
  * (`apps/agent/src/enroll.rs`). Kept byte-for-byte so a Phase 2 agent sees
  * no change (plan 5.1). Dashboard functions never throw these.
+ *
+ * Since Step 6 `enroll` can also throw three dashboard codes through `fail`:
+ * `rate_limited`, `plan_limit` (detail "devices" / "suspended") and
+ * `not_ready`. The agent reads only `data.code`; a code it does not know is
+ * reported as "backend refused the request" with the code and the pending
+ * enrollment is kept (`apps/agent/src/enroll.rs` `backend_failure`; checked
+ * read-only 2026-10-27), so no new wire-only code is needed.
  */
 export type WireErrorCode =
   | "token_invalid"

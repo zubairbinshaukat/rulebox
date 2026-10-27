@@ -29,6 +29,7 @@ type Fixture = {
   targetMemberId: Id<"members">;
   inviteId: Id<"invites">;
   groupId: Id<"groups">;
+  tokenId: Id<"enrollmentTokens">;
   accessor: Record<Caller, ReturnType<T["withIdentity"]> | T>;
 };
 
@@ -48,9 +49,9 @@ async function fixture(): Promise<Fixture> {
   );
   // A group that cannot be deleted (a usable enrollment code points at it), so
   // every authorized groups:remove answers the same `has_dependents`.
-  const groupId = await t.run(async (ctx) => {
+  const { groupId, tokenId } = await t.run(async (ctx) => {
     const g = await ctx.db.insert("groups", { orgId, name: "Sales", revision: 0, createdAt: Date.now() });
-    await ctx.db.insert("enrollmentTokens", {
+    const tok = await ctx.db.insert("enrollmentTokens", {
       orgId,
       tokenHash: "1".repeat(64),
       expiresAt: Date.now() + 3_600_000,
@@ -58,7 +59,7 @@ async function fixture(): Promise<Fixture> {
       groupId: g,
       createdAt: Date.now(),
     });
-    return g;
+    return { groupId: g, tokenId: tok };
   });
   const foreignOrg = await makeOrg(t, "Other");
   type StepUp = "fresh" | "stale" | "idle" | "factorOnly" | "none";
@@ -76,6 +77,7 @@ async function fixture(): Promise<Fixture> {
     targetMemberId: target.memberId,
     inviteId,
     groupId,
+    tokenId,
     accessor: {
       unauth: t,
       viewer: await m("viewer", false),
@@ -288,6 +290,23 @@ const ROWS: Row[] = [
     name: "groups:remove",
     call: (a, f) => a.mutation(api.groups.remove, { groupId: f.groupId }),
     expect: { ...ADMIN_MAJOR, default: "has_dependents", foreign: "not_found" },
+  },
+  // ---- Step 6: enrollment codes
+  {
+    name: "enrollmentCodes:list",
+    call: (a) => a.query(api.enrollmentCodes.list, { paginationOpts: { numItems: 10, cursor: null }, nowMs: Date.now() }),
+    expect: { ...VIEWER, foreign: "ok" }, // the foreign owner lists THEIR codes
+  },
+  {
+    name: "enrollmentCodes:create",
+    call: (a, f) => a.action(api.enrollmentCodes.create, { groupId: f.groupId, uses: 1, ttlMinutes: 60 }),
+    expect: { ...ADMIN_UNLOCKED, foreign: "not_found" },
+    returnsSecretOnce: true, // the code, once, by design (plan 4.7)
+  },
+  {
+    name: "enrollmentCodes:revoke",
+    call: (a, f) => a.mutation(api.enrollmentCodes.revoke, { tokenId: f.tokenId }),
+    expect: { ...ADMIN_MAJOR, foreign: "not_found" },
   },
 ];
 

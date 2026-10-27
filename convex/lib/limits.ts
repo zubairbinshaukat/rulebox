@@ -120,6 +120,25 @@ export const MAX_GROUP_APPS = 150;
 /** Unexpired enrollment codes of a group checked by `groups:delete` (`by_group_expires`). */
 export const MAX_GROUP_CODES_CHECKED = 100;
 
+/** Enrollment codes (plan Step 6; PRD 12.3 short-lived, limited-use). */
+export const MIN_CODE_USES = 1;
+export const MAX_CODE_USES = 100;
+export const MIN_CODE_TTL_MINUTES = 15;
+export const MAX_CODE_TTL_MINUTES = 7 * 24 * 60; // 10,080
+export const MAX_CODE_LABEL = 64;
+/** `enrollmentCodes:list` page size (`paginationOpts.numItems`). */
+export const MAX_CODE_PAGE = 50;
+/**
+ * Codes created in the last MAX_CODE_TTL read when `create` finds the
+ * `activeEnrollmentCodes` counter at the limit (expired codes leave the counter
+ * only by this recount or `stats:reconcile`). Above it the create is refused.
+ */
+export const MAX_CODE_RECOUNT = 200;
+/** `enrollment:enroll` argument bounds (refused with `invalid_request` above them). */
+export const MAX_DEVICE_NAME_INPUT = 1_000;
+export const MAX_AGENT_VERSION = 64;
+export const MAX_COMPAT_JSON_BYTES = 32 * 1024;
+
 /** Publish queue (plan 4.4, Step 5 skeleton): debounce and the list cap before "all devices". */
 export const PUBLISH_DEBOUNCE_MS = 1_500;
 export const MAX_PUBLISH_TARGETS = 500;

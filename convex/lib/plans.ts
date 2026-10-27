@@ -237,6 +237,23 @@ export async function bumpOrgStats(
   await bumpStats(ctx, await loadOrgStats(ctx, orgId), deltas);
 }
 
+/**
+ * `bumpOrgStats` for the Phase 2 device paths (`devices:unenroll`, dev
+ * helpers) whose wire answers must not change: an organization without a
+ * counter row (not migrated) is skipped instead of failing.
+ */
+export async function bumpOrgStatsIfPresent(
+  ctx: { db: DatabaseWriter },
+  orgId: Id<"organizations">,
+  deltas: Partial<Record<CounterField, number>>,
+): Promise<void> {
+  const stats = await ctx.db
+    .query("orgStats")
+    .withIndex("by_org", (q) => q.eq("orgId", orgId))
+    .unique();
+  if (stats !== null) await bumpStats(ctx, stats, deltas);
+}
+
 // ---------------------------------------------------------------- validation (operator input)
 
 /** Null when acceptable, else the offending field name. */
