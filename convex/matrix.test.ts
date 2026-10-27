@@ -3,6 +3,7 @@ import { setupAuth } from "../tests/convex/auth";
 import { asMember, codeOf, expectNoSecrets, giveStepUp, makeOrg, type T } from "../tests/convex/identity";
 import { MAJOR_ACTIONS } from "./lib/stepUp";
 import { MINUTE_MS } from "./lib/limits";
+import { DEFAULT_ORG_SETTINGS } from "./lib/validators";
 import { api } from "./_generated/api";
 import type { Id } from "./_generated/dataModel";
 import { modules } from "./test.setup";
@@ -27,6 +28,7 @@ type Fixture = {
   orgId: Id<"organizations">;
   targetMemberId: Id<"members">;
   inviteId: Id<"invites">;
+  groupId: Id<"groups">;
   accessor: Record<Caller, ReturnType<T["withIdentity"]> | T>;
 };
 
@@ -44,6 +46,20 @@ async function fixture(): Promise<Fixture> {
       expiresAt: Date.now() + 60_000,
     }),
   );
+  // A group that cannot be deleted (a usable enrollment code points at it), so
+  // every authorized groups:remove answers the same `has_dependents`.
+  const groupId = await t.run(async (ctx) => {
+    const g = await ctx.db.insert("groups", { orgId, name: "Sales", revision: 0, createdAt: Date.now() });
+    await ctx.db.insert("enrollmentTokens", {
+      orgId,
+      tokenHash: "1".repeat(64),
+      expiresAt: Date.now() + 3_600_000,
+      usesLeft: 1,
+      groupId: g,
+      createdAt: Date.now(),
+    });
+    return g;
+  });
   const foreignOrg = await makeOrg(t, "Other");
   type StepUp = "fresh" | "stale" | "idle" | "factorOnly" | "none";
   const m = async (role: "owner" | "admin" | "viewer", mfa: boolean, status: "active" | "disabled" = "active", o = orgId, s: StepUp = "none") => {
@@ -59,6 +75,7 @@ async function fixture(): Promise<Fixture> {
     orgId,
     targetMemberId: target.memberId,
     inviteId,
+    groupId,
     accessor: {
       unauth: t,
       viewer: await m("viewer", false),
@@ -117,6 +134,20 @@ const UNLOCKED: Row["expect"] = {
 };
 // A self-service major action (viewer level, fresh step-up).
 const SELF_MAJOR: Row["expect"] = { ...UNLOCKED, ownerStale: "step_up_required" };
+// An Admin write (Step 5 on): viewers are refused by role before any step-up check.
+const ADMIN_UNLOCKED: Row["expect"] = {
+  default: "ok",
+  unauth: "unauthenticated",
+  device: "unauthenticated",
+  viewer: "forbidden",
+  adminNoMfa: "mfa_required",
+  ownerNoMfa: "mfa_required",
+  disabled: "forbidden",
+  ownerIdle: "step_up_required",
+  ownerNoFactor: "step_up_setup_required",
+};
+const ADMIN_MAJOR: Row["expect"] = { ...ADMIN_UNLOCKED, ownerStale: "step_up_required" };
+const unique = () => `G ${Math.random().toString(36).slice(2, 10)}`;
 const fakePasskeyId = "jh7bp5vtxgdvg1vq4dzkrymc8s8gvwzm";
 
 const ROWS: Row[] = [
@@ -233,6 +264,30 @@ const ROWS: Row[] = [
     name: "passkeys:finishVerification",
     call: (a) => a.action(api.passkeys.finishVerification, { responseJson: "{}" }),
     expect: { ...VIEWER, default: "step_up_invalid" },
+  },
+  // ---- Step 5: organization settings, exit PIN, plan, groups
+  { name: "settings:get", call: (a) => a.query(api.settings.get, {}), expect: { ...VIEWER, foreign: "ok" } },
+  { name: "settings:plan", call: (a) => a.query(api.settings.plan, {}), expect: { ...VIEWER, foreign: "ok" } },
+  {
+    name: "settings:update",
+    // Unchanged values (no write) for this org; the foreign owner renames THEIR org.
+    call: (a) => a.mutation(api.settings.update, { expectedRevision: 0, name: "Acme", settings: DEFAULT_ORG_SETTINGS }),
+    expect: ADMIN_UNLOCKED,
+  },
+  { name: "settings:setExitPin", call: (a) => a.action(api.settings.setExitPin, { pin: "246813" }), expect: ADMIN_MAJOR },
+  { name: "settings:clearExitPin", call: (a) => a.mutation(api.settings.clearExitPin, {}), expect: ADMIN_MAJOR },
+  { name: "groups:list", call: (a) => a.query(api.groups.list, {}), expect: { ...VIEWER, foreign: "ok" } },
+  { name: "groups:get", call: (a, f) => a.query(api.groups.get, { groupId: f.groupId }), expect: { ...VIEWER, foreign: "not_found" } },
+  { name: "groups:create", call: (a) => a.mutation(api.groups.create, { name: unique() }), expect: ADMIN_UNLOCKED },
+  {
+    name: "groups:rename",
+    call: (a, f) => a.mutation(api.groups.rename, { groupId: f.groupId, expectedRevision: 0, name: "Sales" }),
+    expect: { ...ADMIN_UNLOCKED, foreign: "not_found" },
+  },
+  {
+    name: "groups:remove",
+    call: (a, f) => a.mutation(api.groups.remove, { groupId: f.groupId }),
+    expect: { ...ADMIN_MAJOR, default: "has_dependents", foreign: "not_found" },
   },
 ];
 

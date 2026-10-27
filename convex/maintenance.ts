@@ -11,11 +11,13 @@ import {
   INVITE_RETENTION_MS,
   MAINTENANCE_BATCH,
   MAX_MEMBERSHIPS,
+  MIGRATION_ORG_BATCH,
   RATE_LIMIT_ROW_MAX_AGE_MS,
   REFRESH_TOKEN_USED_GRACE_MS,
   SESSION_INACTIVE_MS,
   SESSION_TOTAL_MS,
 } from "./lib/limits";
+import { ensureOrgRows } from "./lib/orgRows";
 import { clearMfa } from "./lib/sessions";
 
 // Daily cleanup (crons.ts; plan Step 3.6 and its A10 follow-up).
@@ -182,6 +184,37 @@ export const daily = internalMutation({
       if (next !== undefined) await ctx.scheduler.runAfter(0, internal.maintenance.daily, { stage: next, now });
     }
     return null;
+  },
+});
+
+/**
+ * Step 5 migration (plan Step 5 item 8, A1/A4/A7). For every organization:
+ * creates the `orgPlans` row (copying a Step 3 `organizations.maxDevices` into
+ * `limits.maxDevices`), the global `platformSettings` row, a missing
+ * `orgStats` / `orgSecrets` row; recounts `groupCount`, `memberCount`
+ * (active) and `deviceCount` (non-revoked) exactly; removes
+ * `organizations.maxDevices` and `orgStats.pingIntervalMs`. Idempotent; writes
+ * only what differs; MIGRATION_ORG_BATCH organizations per run, then it
+ * schedules itself. Run once per deployment:
+ *   npx convex run maintenance:migratePlans '{}'
+ * After it ran everywhere, the two deprecated schema fields can be removed.
+ */
+export const migratePlans = internalMutation({
+  args: { cursor: v.optional(v.union(v.string(), v.null())) },
+  returns: v.object({ organizations: v.number(), changed: v.number(), done: v.boolean() }),
+  handler: async (ctx, args) => {
+    const page = await ctx.db
+      .query("organizations")
+      .paginate({ numItems: MIGRATION_ORG_BATCH, cursor: args.cursor ?? null });
+    const now = Date.now();
+    let changed = 0;
+    for (const org of page.page) {
+      if (await ensureOrgRows(ctx, org, { updatedBy: "system", now })) changed++;
+    }
+    if (!page.isDone) {
+      await ctx.scheduler.runAfter(0, internal.maintenance.migratePlans, { cursor: page.continueCursor });
+    }
+    return { organizations: page.page.length, changed, done: page.isDone };
   },
 });
 

@@ -143,6 +143,23 @@ a primary source; the plan says how each one gets confirmed.
   authenticator in `tests/convex/webauthn.ts`); a real browser and
   authenticator check waits for the dashboard UI. The dashboard UI of
   4.16 is not built yet.
+- **2026-10-27, Step 5 backend built** (`settings.ts`, `groups.ts`,
+  `plans.ts`, `publish.ts` stub, `lib/{plans,orgRows,orgSettings,hotkey,publish}.ts`,
+  `ioBudgets.ts`; shared hotkey vectors run in Rust and TS). Deviations:
+  (1) `groups:delete` is `groups:remove` (`delete` is a reserved word; same
+  as `apps:remove` …), `MAJOR_ACTIONS` renamed; (2) new index
+  `enrollmentTokens.by_group_expires` (delete check without scanning the
+  org's codes; only unexpired, unrevoked codes with uses left block);
+  (3) `organizations.exitPinSetAt` added so `settings:get` never reads
+  `orgSecrets` (one reader: the publisher); (4) `platformSettings
+  .planDefaults` is an object `{ free, team, custom }`; `team` values are
+  placeholders; (5) `maxMembers` is enforced at the join and on re-enable,
+  not only at invite; (6) new `settings:plan` query (plan, limits, usage) and
+  audit actions `org.planChanged`, `group.updated` (description only);
+  (7) the deprecated `organizations.maxDevices` / `orgStats.pingIntervalMs`
+  stay `v.optional` until `npx convex run maintenance:migratePlans '{}'`
+  ran on every deployment (narrow afterwards); (8) item 4 (Argon2 vectors
+  in `rulebox-policy` / agent `kdf.rs`) not done in this step.
 
 ---
 

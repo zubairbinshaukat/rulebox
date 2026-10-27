@@ -5,7 +5,8 @@ import { internalAction, internalMutation, type MutationCtx } from "./_generated
 import { SYSTEM_ACTOR, writeAudit } from "./lib/audit";
 import { codeHash, INVITE_CODE_LENGTH, normalizeEmail, randomCrockford } from "./lib/crypto";
 import { fail } from "./lib/errors";
-import { DEFAULT_MAX_DEVICES, OWNER_INVITE_TTL_MS } from "./lib/limits";
+import { OWNER_INVITE_TTL_MS } from "./lib/limits";
+import { ensureOrgRows } from "./lib/orgRows";
 import { DEFAULT_ORG_SETTINGS } from "./lib/validators";
 
 // Owner bootstrap (plan Step 3.2). Command line only:
@@ -42,15 +43,13 @@ export const createOwnerInvite = internalAction({
   },
 });
 
-/** Make sure an organization has its one-per-org rows and a "Default" group. */
-async function ensureOrgRows(ctx: Pick<MutationCtx, "db">, orgId: Id<"organizations">): Promise<void> {
+/**
+ * Make sure an organization has a "Default" group and its one-per-org rows
+ * (plan, counters, secrets; Step 5). The counters are recounted after the
+ * group exists, so the Default group counts toward `maxGroups`.
+ */
+async function prepareOrg(ctx: Pick<MutationCtx, "db">, orgId: Id<"organizations">): Promise<void> {
   const now = Date.now();
-  if ((await ctx.db.query("orgStats").withIndex("by_org", (q) => q.eq("orgId", orgId)).first()) === null) {
-    await ctx.db.insert("orgStats", { orgId, deviceCount: 0, pingIntervalMs: 300_000 });
-  }
-  if ((await ctx.db.query("orgSecrets").withIndex("by_org", (q) => q.eq("orgId", orgId)).first()) === null) {
-    await ctx.db.insert("orgSecrets", { orgId });
-  }
   const existing = await ctx.db
     .query("groups")
     .withIndex("by_org_name", (q) => q.eq("orgId", orgId).eq("name", "Default"))
@@ -58,6 +57,9 @@ async function ensureOrgRows(ctx: Pick<MutationCtx, "db">, orgId: Id<"organizati
   if (existing === null) {
     await ctx.db.insert("groups", { orgId, name: "Default", revision: 0, createdAt: now });
   }
+  const org = await ctx.db.get(orgId);
+  if (org === null) fail("not_found");
+  await ensureOrgRows(ctx, org, { updatedBy: "system", now });
 }
 
 export const storeOwnerInvite = internalMutation({
@@ -98,10 +100,9 @@ export const storeOwnerInvite = internalMutation({
         settings: DEFAULT_ORG_SETTINGS,
         revision: 0,
         createdAt: now,
-        maxDevices: DEFAULT_MAX_DEVICES,
       });
     }
-    await ensureOrgRows(ctx, orgId);
+    await prepareOrg(ctx, orgId);
     const expiresAt = now + OWNER_INVITE_TTL_MS;
     const inviteId = await ctx.db.insert("invites", {
       orgId,

@@ -10,12 +10,22 @@ import type { TestConvex } from "convex-test";
 import { expect } from "vitest";
 import type { Id } from "../../convex/_generated/dataModel";
 import type schema from "../../convex/schema";
+import { newOrgPlanFields } from "../../convex/lib/plans";
 import { DEFAULT_ORG_SETTINGS } from "../../convex/lib/validators";
 
 export type T = TestConvex<typeof schema>;
 export type Role = "owner" | "admin" | "viewer";
 
-export async function makeOrg(t: T, name = "Acme"): Promise<Id<"organizations">> {
+/**
+ * An organization with its counter and secret rows. `plan` adds an `orgPlans`
+ * row with that plan's default limits; without it the organization has none
+ * and gets the deployment default (`custom`, no limits, in tests).
+ */
+export async function makeOrg(
+  t: T,
+  name = "Acme",
+  opts: { plan?: "free" | "team" | "custom" } = {},
+): Promise<Id<"organizations">> {
   return await t.run(async (ctx) => {
     const orgId = await ctx.db.insert("organizations", {
       name,
@@ -23,8 +33,11 @@ export async function makeOrg(t: T, name = "Acme"): Promise<Id<"organizations">>
       revision: 0,
       createdAt: Date.now(),
     });
-    await ctx.db.insert("orgStats", { orgId, deviceCount: 0, pingIntervalMs: 300_000 });
+    await ctx.db.insert("orgStats", { orgId, deviceCount: 0, groupCount: 0, memberCount: 0 });
     await ctx.db.insert("orgSecrets", { orgId });
+    if (opts.plan !== undefined) {
+      await ctx.db.insert("orgPlans", { orgId, ...newOrgPlanFields(null, opts.plan, Date.now(), "test") });
+    }
     return orgId;
   });
 }

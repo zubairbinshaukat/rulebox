@@ -7,6 +7,8 @@ export const AUDIT_ACTIONS = [
   "org.settingsChanged",
   "org.exitPinSet",
   "org.exitPinCleared",
+  // Plan, limits or ping interval changed by the operator (Step 5, A1).
+  "org.planChanged",
   "member.invited",
   "member.inviteRevoked",
   "member.joined",
@@ -29,6 +31,7 @@ export const AUDIT_ACTIONS = [
   "member.stepUpReset",
   "group.created",
   "group.renamed",
+  "group.updated", // description only (Step 5)
   "group.deleted",
   "device.enrolled",
   "device.renamed",

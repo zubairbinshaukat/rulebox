@@ -2,6 +2,7 @@ import type { Doc, Id } from "../_generated/dataModel";
 import type { MutationCtx } from "../_generated/server";
 import { fail } from "./errors";
 import { MAX_MEMBERS } from "./limits";
+import { assertWithinLimit, bumpStats } from "./plans";
 import type { Role } from "./validators";
 
 /**
@@ -19,6 +20,11 @@ export async function insertMembership(
     .withIndex("by_org_user", (q) => q.eq("orgId", m.orgId).eq("userId", m.userId))
     .first();
   if (existing !== null) fail("already_member");
+  // `maxMembers` (Step 5): enforced at the join itself, not only at invite
+  // time, so several outstanding invites cannot exceed the plan. Same
+  // transaction as the insert and the counter.
+  const stats = await assertWithinLimit(ctx, m.orgId, "members");
+  await bumpStats(ctx, stats, { memberCount: 1 });
   return await ctx.db.insert("members", {
     orgId: m.orgId,
     userId: m.userId,

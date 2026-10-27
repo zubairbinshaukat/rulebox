@@ -25,6 +25,43 @@ export const DEFAULT_ORG_SETTINGS: OrgSettings = {
   adminExit: { enabled: true, hotkey: "Ctrl+Shift+F12" },
 };
 
+// ---- Plans and limits (plan 4.2.1, A1; post-Phase-5 plan 3.1). Edited only by
+// the operator (internal functions in plans.ts until the console exists).
+
+export const planName = v.union(v.literal("free"), v.literal("team"), v.literal("custom"));
+export type PlanName = Infer<typeof planName>;
+
+export const planStatus = v.union(v.literal("active"), v.literal("suspended"), v.literal("pendingDeletion"));
+export type PlanStatus = Infer<typeof planStatus>;
+
+export const planLimits = v.object({
+  maxDevices: v.number(),
+  maxEmployees: v.number(),
+  maxApps: v.number(),
+  maxGroups: v.number(),
+  maxMembers: v.number(),
+  auditRetentionDays: v.number(),
+  storageQuotaBytes: v.number(),
+  maxUploadBytes: v.number(),
+  watchMode: v.boolean(),
+  maxEnrollmentCodesActive: v.number(),
+});
+export type PlanLimits = Infer<typeof planLimits>;
+
+/** A partial `planLimits` for operator edits (only the given fields change). */
+export const planLimitsPatch = v.object({
+  maxDevices: v.optional(v.number()),
+  maxEmployees: v.optional(v.number()),
+  maxApps: v.optional(v.number()),
+  maxGroups: v.optional(v.number()),
+  maxMembers: v.optional(v.number()),
+  auditRetentionDays: v.optional(v.number()),
+  storageQuotaBytes: v.optional(v.number()),
+  maxUploadBytes: v.optional(v.number()),
+  watchMode: v.optional(v.boolean()),
+  maxEnrollmentCodesActive: v.optional(v.number()),
+});
+
 export const webPermissions = v.object({
   camera: v.boolean(),
   microphone: v.boolean(),

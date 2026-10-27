@@ -9,6 +9,7 @@ import { fail } from "./lib/errors";
 import { memberAction, memberMutation, memberQuery } from "./lib/functions";
 import { INVITE_TTL_MS, MAX_INVITES_LISTED, MAX_MEMBERS, MAX_MEMBERSHIPS, RESET_CODE_TTL_MS } from "./lib/limits";
 import { assertNotLastOwner } from "./lib/members";
+import { assertWithinLimit, bumpOrgStats, bumpStats } from "./lib/plans";
 import { clearMfa, deleteUserSessions } from "./lib/sessions";
 import { inviteKind, memberStatus, role } from "./lib/validators";
 
@@ -126,6 +127,8 @@ export const storeInvite = internalMutation({
       .withIndex("by_org_email", (q) => q.eq("orgId", args.orgId).eq("email", args.email))
       .first();
     if (existing !== null) fail("already_member");
+    // `maxMembers` (Step 5): early, clear refusal; the join enforces it exactly.
+    await assertWithinLimit(ctx, args.orgId, "members");
     const expiresAt = Date.now() + INVITE_TTL_MS;
     const memberId = ctx.db.normalizeId("members", args.actor.id) ?? undefined;
     const inviteId = await ctx.db.insert("invites", {
@@ -218,6 +221,9 @@ export const setDisabled = memberMutation("owner", { major: "members:setDisabled
     const status = args.disabled ? "disabled" : "active";
     if (target.status === status) return null;
     if (args.disabled) await assertNotLastOwner(ctx, target);
+    // Active members count toward `maxMembers` (Step 5).
+    if (args.disabled) await bumpOrgStats(ctx, ctx.orgId, { memberCount: -1 });
+    else await bumpStats(ctx, await assertWithinLimit(ctx, ctx.orgId, "members"), { memberCount: 1 });
     await ctx.db.patch(target._id, { status, revision: nextRevision(target) });
     if (args.disabled) {
       const others = await ctx.db

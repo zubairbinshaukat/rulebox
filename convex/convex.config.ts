@@ -15,6 +15,9 @@ const app = defineApp({
     RULEBOX_WEBAUTHN_RP_ID: v.optional(v.string()),
     RULEBOX_WEBAUTHN_ORIGINS: v.optional(v.string()),
     RULEBOX_WEBAUTHN_RP_NAME: v.optional(v.string()),
+    // Hosted (pooled) deployment (plan Step 5, A1): new organizations get the
+    // "free" plan instead of the self-host "custom" plan.
+    RULEBOX_HOSTED: v.optional(v.literal("1")),
   },
 });
 app.use(rateLimiter);

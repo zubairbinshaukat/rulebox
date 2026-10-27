@@ -58,7 +58,9 @@ export const MAJOR_ACTIONS = {
   "settings:setExitPin": { when: "always", why: "changes the device exit PIN" },
   "settings:clearExitPin": { when: "always", why: "removes the device exit PIN" },
   "settings:update": { when: "conditional", why: "changes the admin exit (lock) settings" },
-  "groups:delete": { when: "always", why: "deletes a group" },
+  // Plan 4.16 says `groups:delete`; `delete` is a reserved word in JS, so the
+  // function is `groups:remove` like apps:/employees:/fleet:remove.
+  "groups:remove": { when: "always", why: "deletes a group" },
   // Step 6-8: enrollment, devices, signing keys.
   "enrollmentCodes:revoke": { when: "always", why: "deletes an enrollment code" },
   "fleet:setKiosk": { when: "conditional", why: "turns kiosk mode off" },

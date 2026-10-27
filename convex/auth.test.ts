@@ -35,8 +35,12 @@ describe("setup:createOwnerInvite", () => {
       audit: await ctx.db.query("auditLog").withIndex("by_org_at", (q) => q.eq("orgId", first.orgId)).first(),
     }));
     expect(rows.org?.settings?.offlineDays).toBe(3);
-    expect(rows.org?.maxDevices).toBe(2);
-    expect(rows.stats).toMatchObject({ deviceCount: 0, pingIntervalMs: 300_000 });
+    // Step 5: limits live in orgPlans (self-host = "custom"), counters are exact.
+    expect(rows.org?.maxDevices).toBeUndefined();
+    expect(rows.stats).toMatchObject({ deviceCount: 0, groupCount: 1, memberCount: 0 });
+    expect(rows.stats?.pingIntervalMs).toBeUndefined();
+    const plan = await t.run((ctx) => ctx.db.query("orgPlans").withIndex("by_org", (q) => q.eq("orgId", first.orgId)).unique());
+    expect(plan).toMatchObject({ plan: "custom", status: "active", degradeLevel: 0 });
     expect(rows.secrets?.exitPinHash).toBeUndefined();
     expect(rows.group?.name).toBe("Default");
     expect(rows.invite).toMatchObject({ role: "owner", kind: "join", email: "owner@acme.test" });

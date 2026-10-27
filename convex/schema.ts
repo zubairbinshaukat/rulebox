@@ -10,6 +10,9 @@ import {
   inviteKind,
   memberStatus,
   orgSettings,
+  planLimits,
+  planName,
+  planStatus,
   policyKeyStatus,
   reportedStatusFields,
   role,
@@ -34,23 +37,70 @@ export default defineSchema({
     settings: v.optional(orgSettings), // missing = DEFAULT_ORG_SETTINGS
     revision: v.optional(v.number()), // missing = 0
     createdAt: v.optional(v.number()),
-    // Enrolled-device cap, set by the platform operator (hosted plan); missing =
-    // DEFAULT_MAX_DEVICES. Enforced by enrollment from Step 6.
+    // When the device exit PIN was set (missing = no PIN). Lets `settings:get`
+    // answer "PIN set" without reading `orgSecrets` (plan 4.7: one reader).
+    exitPinSetAt: v.optional(v.number()),
+    // DEPRECATED (Step 3): moved to `orgPlans.limits.maxDevices` by
+    // `maintenance:migratePlans` (Step 5), which also removes it. Narrowed away
+    // once the migration ran on every deployment. Nothing reads it.
     maxDevices: v.optional(v.number()),
   }),
 
-  // tiny (1 per org). Read only by the publisher (plan 4.7).
+  // tiny (1 per org). Written by settings:setExitPin / clearExitPin; read only
+  // by the publisher (Step 8, plan 4.7). No query reads it.
   orgSecrets: defineTable({
     orgId: v.id("organizations"),
     exitPinHash: v.optional(v.string()), // Argon2id PHC
   }).index("by_org", ["orgId"]),
 
-  // tiny (1 per org)
+  // tiny (1 per org). Counters changed in the SAME mutation as the counted rows
+  // (plan 4.2.1, A7); missing = 0 until `maintenance:migratePlans` recounts.
+  // Mutations are serializable: a check-then-increment here cannot race.
   orgStats: defineTable({
     orgId: v.id("organizations"),
-    deviceCount: v.number(),
-    pingIntervalMs: v.number(),
+    deviceCount: v.number(), // non-revoked devices
+    employeeCount: v.optional(v.number()),
+    activeEmployeeCount: v.optional(v.number()),
+    appCount: v.optional(v.number()),
+    groupCount: v.optional(v.number()),
+    memberCount: v.optional(v.number()), // active members
+    noGroupDeviceCount: v.optional(v.number()),
+    outOfSupportCount: v.optional(v.number()),
+    failedInstallCount: v.optional(v.number()),
+    activeEnrollmentCodes: v.optional(v.number()),
+    publishFailedAt: v.optional(v.number()),
+    lastActivityDay: v.optional(v.string()),
+    // DEPRECATED (Phase 2 heartbeat interval): replaced by platformSettings /
+    // orgPlans.pingIntervalMs; removed by `maintenance:migratePlans`.
+    pingIntervalMs: v.optional(v.number()),
   }).index("by_org", ["orgId"]),
+
+  // tiny (1 per org). The tenant's plan, limits and per-tenant ping interval
+  // (plan 4.2.1, A1). Written only by the operator (plans.ts internal
+  // functions; later the platform API) and by org creation.
+  orgPlans: defineTable({
+    orgId: v.id("organizations"),
+    plan: planName,
+    status: planStatus,
+    limits: planLimits,
+    pingIntervalMs: v.optional(v.number()), // per-tenant override; missing = global
+    degradeLevel: v.number(),
+    suspendedReason: v.optional(v.string()),
+    revision: v.number(),
+    updatedBy: v.string(), // "system" | "operator:<id>" | "cli"
+    updatedAt: v.number(),
+  })
+    .index("by_org", ["orgId"])
+    .index("by_status", ["status"]),
+
+  // tiny (1 row, key "global"). Global ping interval and the limits copied
+  // into a new organization's `orgPlans` row (plan 4.2.1, owner Q2/Q3).
+  platformSettings: defineTable({
+    key: v.literal("global"),
+    pingIntervalMs: v.number(),
+    planDefaults: v.object({ free: planLimits, team: planLimits, custom: planLimits }),
+    revision: v.number(),
+  }).index("by_key", ["key"]),
 
   // tiny
   members: defineTable({
@@ -331,7 +381,10 @@ export default defineSchema({
   })
     .index("by_org", ["orgId"])
     .index("by_token_hash", ["tokenHash"])
-    .index("by_org_created", ["orgId", "createdAt"]),
+    .index("by_org_created", ["orgId", "createdAt"])
+    // groups:delete: unexpired codes that still enroll into a group (Step 5;
+    // added to plan 4.3, `has_dependents` without a scan of the org's codes).
+    .index("by_group_expires", ["groupId", "expiresAt"]),
 
   // grows (pruned to 5 per device from Step 8).
   // Widened for the Phase 2 rows still in the dev deployment: `scope` + `doc`

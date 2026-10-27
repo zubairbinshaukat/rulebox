@@ -99,6 +99,32 @@ export const MAX_PASSKEY_NAME = 64;
 /** A WebAuthn response JSON larger than this is refused before parsing. */
 export const MAX_WEBAUTHN_RESPONSE_BYTES = 32 * 1024;
 
-/** Enrolled devices per organization when `organizations.maxDevices` is missing (hosted plan). */
-export const DEFAULT_MAX_DEVICES = 2;
+// Plan limits per organization live in lib/plans.ts (`orgPlans`, Step 5);
+// `DEFAULT_MAX_DEVICES` (Step 3) was replaced by `orgPlans.limits.maxDevices`.
+
+/** Organization settings (plan 4.10, Step 5). */
+export const MAX_ORG_NAME = 100;
+export const MAX_OFFLINE_DAYS = 30;
+export const MAX_DEFAULT_QUOTA_GB = 2000;
+export const MAX_HOTKEY_TEXT = 64;
+
+/** Groups (plan Step 5.6). */
+export const MAX_GROUP_NAME = 64;
+export const MAX_GROUP_DESCRIPTION = 300;
+/** `groups:list` reads at most this many groups (`groups.by_org`, tiny). */
+export const MAX_GROUPS_LISTED = 500;
+/** Device / employee counts per group are read with `.take(GROUP_COUNT_CAP + 1)` and shown as "500+". */
+export const GROUP_COUNT_CAP = 500;
+/** `groups:get` assigned apps (`appAssignments.by_group`). */
+export const MAX_GROUP_APPS = 150;
+/** Unexpired enrollment codes of a group checked by `groups:delete` (`by_group_expires`). */
+export const MAX_GROUP_CODES_CHECKED = 100;
+
+/** Publish queue (plan 4.4, Step 5 skeleton): debounce and the list cap before "all devices". */
+export const PUBLISH_DEBOUNCE_MS = 1_500;
+export const MAX_PUBLISH_TARGETS = 500;
+
+/** `maintenance:migratePlans`: organizations per run, and the most rows it recounts per table. */
+export const MIGRATION_ORG_BATCH = 20;
+export const MAX_RECOUNT_ROWS = 5_000;
 

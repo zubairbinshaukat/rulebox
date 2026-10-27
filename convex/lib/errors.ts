@@ -37,6 +37,10 @@ export const ERROR_CODES = [
   "step_up_invalid",
   "step_up_locked",
   "step_up_last_factor",
+  // Plans and limits (plan Step 5/6, A1): `detail` names the limit
+  // ("devices" | "employees" | "apps" | "groups" | "members" |
+  // "enrollmentCodes") or "suspended".
+  "plan_limit",
 ] as const;
 
 export type ErrorCode = (typeof ERROR_CODES)[number];
