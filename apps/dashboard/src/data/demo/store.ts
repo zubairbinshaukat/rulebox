@@ -9,8 +9,17 @@
 import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { AppError } from "../../lib/errors";
 import { readStorage, writeStorage } from "../../lib/storage";
+import { withStepUp } from "../../lib/stepUpRetry";
 import { PAGE_SIZE, type ErrorCode, type PagedState, type QueryState, type Role } from "../types";
-import { pingIntervalFor, seed, type DbAudit, type DbMember, type DemoDb } from "../fixtures/seed";
+import {
+  DEMO_ACTION_PIN,
+  DEMO_OWNER_EMAIL,
+  pingIntervalFor,
+  seed,
+  type DbAudit,
+  type DbMember,
+  type DemoDb,
+} from "../fixtures/seed";
 
 // ---------------------------------------------------------------- state
 
@@ -20,9 +29,61 @@ export interface DemoControls {
   failQueries: boolean;
 }
 
+/** The demo twin of a `stepUpSessions` row (plan 4.16). Timestamps only, never a secret. */
+export interface DemoStepUpRow {
+  verifiedAt: number;
+  lastActiveAt: number;
+  method: "actionPin" | "passkey";
+  passkeyId?: string;
+}
+
 interface Session {
   memberId: string;
   mfaVerified: boolean;
+  /** When the password sign-in happened (the bootstrap window of plan 4.16). */
+  createdAt?: number;
+  stepUp?: DemoStepUpRow;
+}
+
+/** The demo twin of `stepUpFactors` + `passkeys` for one person. */
+export interface DemoPasskey {
+  _id: string;
+  credentialId: string;
+  name: string;
+  createdAt: number;
+  lastUsedAt?: number;
+  synced: boolean;
+  suspended: boolean;
+}
+export interface DemoFactors {
+  pin?: string;
+  pinFailures: number;
+  pinFailuresTotal: number;
+  pinLockedUntil: number;
+  passkeys: DemoPasskey[];
+}
+
+/** Server constants of `convex/lib/limits.ts` (step-up). */
+export const STEP_UP = {
+  idleMs: 10 * 60_000,
+  keepAliveMs: 5 * 60_000,
+  freshMs: 5 * 60_000,
+  maxAgeMs: 8 * 60 * 60_000,
+  quantumMs: 4 * 60_000,
+  bootstrapMs: 15 * 60_000,
+  slackMs: 60_000,
+  pinFreeFailures: 2,
+  pinBackoffBaseMs: 30_000,
+  pinBackoffMaxMs: 15 * 60_000,
+  pinHardLimit: 10,
+  maxPasskeys: 10,
+} as const;
+
+function seedFactors(db: DemoDb): Map<string, DemoFactors> {
+  const map = new Map<string, DemoFactors>();
+  const owner = db.members.find((m) => m.email === DEMO_OWNER_EMAIL);
+  if (owner) map.set(owner._id, { pin: DEMO_ACTION_PIN, pinFailures: 0, pinFailuresTotal: 0, pinLockedUntil: 0, passkeys: [] });
+  return map;
 }
 
 const SESSION_KEY = "rulebox.demo.session";
@@ -51,8 +112,12 @@ function loadControls(): DemoControls {
   }
 }
 
+const initialDb = /* @__PURE__ */ seed();
+
 const state = {
-  db: /* @__PURE__ */ seed(),
+  db: initialDb,
+  /** Step-up factors per member id (in memory only: a reload starts from the seed). */
+  factors: /* @__PURE__ */ seedFactors(initialDb),
   version: 0,
   controls: /* @__PURE__ */ loadControls(),
   session: /* @__PURE__ */ loadSession(),
@@ -98,6 +163,7 @@ export function setControls(patch: Partial<DemoControls>) {
 
 export function resetDemo() {
   state.db = seed();
+  state.factors = seedFactors(state.db);
   state.failedSignIns = 0;
   const owner = state.db.members.find((m) => m.role === "owner");
   if (state.session && !state.db.members.some((m) => m._id === state.session!.memberId) && owner) {
@@ -113,6 +179,84 @@ export function session(): Session | null {
 export function setSession(s: Session | null) {
   state.session = s;
   writeStorage(SESSION_KEY, s ? JSON.stringify(s) : null, "session");
+  notify();
+}
+
+// ---------------------------------------------------------------- step-up (plan 4.16)
+
+export function factorsOf(memberId: string): DemoFactors | null {
+  return state.factors.get(memberId) ?? null;
+}
+
+export function factorsFor(memberId: string): DemoFactors {
+  let f = state.factors.get(memberId);
+  if (!f) {
+    f = { pinFailures: 0, pinFailuresTotal: 0, pinLockedUntil: 0, passkeys: [] };
+    state.factors.set(memberId, f);
+  }
+  return f;
+}
+
+/** A disabled PIN and a suspended passkey still count (the backend's `hasFactor`). */
+export function hasFactor(memberId: string): boolean {
+  const f = factorsOf(memberId);
+  return f !== null && (f.pin !== undefined || f.passkeys.length > 0);
+}
+
+/** `stepUpState` of `convex/lib/stepUp.ts`. */
+export function stepUpState(row: DemoStepUpRow | undefined, now: number): { unlocked: boolean; fresh: boolean } {
+  if (!row) return { unlocked: false, fresh: false };
+  const age = now - row.verifiedAt;
+  if (age < -STEP_UP.slackMs || age > STEP_UP.maxAgeMs) return { unlocked: false, fresh: false };
+  const unlocked = now - row.lastActiveAt <= STEP_UP.idleMs + STEP_UP.keepAliveMs;
+  return { unlocked, fresh: unlocked && age <= STEP_UP.freshMs };
+}
+
+/** Marks this session verified (one row per session). */
+export function markVerified(method: DemoStepUpRow["method"], now: number, passkeyId?: string) {
+  const s = state.session;
+  if (!s) return;
+  setSession({ ...s, stepUp: { verifiedAt: now, lastActiveAt: now, method, passkeyId } });
+}
+
+/** Deletes this session's step-up row (`stepUp:lock`). */
+export function clearSessionStepUp() {
+  const s = state.session;
+  if (s?.stepUp) setSession({ ...s, stepUp: undefined });
+}
+
+/**
+ * The wrappers' check (`checkStepUpOrFail` + `touchActivity`): throws
+ * `step_up_setup_required` without a factor, else `step_up_required`.
+ */
+export function requireStepUp(me: DbMember, level: "unlocked" | "fresh", now: number) {
+  const s = state.session;
+  const st = stepUpState(s?.stepUp, now);
+  if (s?.stepUp && (level === "fresh" ? st.fresh : st.unlocked)) {
+    if (now - s.stepUp.lastActiveAt >= STEP_UP.quantumMs) {
+      state.session = { ...s, stepUp: { ...s.stepUp, lastActiveAt: now } };
+      writeStorage(SESSION_KEY, JSON.stringify(state.session), "session");
+    }
+    return;
+  }
+  if (!hasFactor(me._id)) fail("step_up_setup_required", { detail: level });
+  fail("step_up_required", { detail: level });
+}
+
+/** `authorizeFactorChange`: "bootstrap" (no factor, fresh sign-in) or a fresh step-up. */
+export function authorizeFactorChange(me: DbMember, now: number): "bootstrap" | "fresh" {
+  if (!hasFactor(me._id)) {
+    const created = state.session?.createdAt ?? 0;
+    if (now - created > STEP_UP.bootstrapMs) fail("step_up_setup_required", { detail: "reauthenticate" });
+    if (me.mfa.enrolled && !state.session?.mfaVerified) fail("mfa_required");
+    return "bootstrap";
+  }
+  requireStepUp(me, "fresh", now);
+  return "fresh";
+}
+
+/** Notifies subscribed screens after a step-up write (the demo is reactive like Convex). */
+export function touch() {
   notify();
 }
 
@@ -179,12 +323,22 @@ export interface MutationCtx {
   audit: (e: Omit<DbAudit, "_id" | "at" | "actorType" | "actorId" | "actorLabel">) => void;
 }
 
+/** Step-up a write needs (plan 4.16): every member write "unlocked", major actions "fresh". */
+export type StepUpNeed = "unlocked" | "fresh" | "none";
+
 /**
  * A member mutation: waits for the connection (queued like Convex), waits a
- * moment, checks the role, runs `fn` against the database and notifies every
- * subscribed screen.
+ * moment, checks the role and the step-up level (like the backend's
+ * wrappers), runs `fn` against the database and notifies every subscribed
+ * screen.
  */
-export async function runMutation<R>(minRole: Role, fn: (ctx: MutationCtx) => R): Promise<R> {
+export function runMutation<R>(minRole: Role, fn: (ctx: MutationCtx) => R, stepUp: StepUpNeed = "unlocked", retry = true): Promise<R> {
+  // Like `useMapped` in the live seam: a missing confirmation opens the dialog, then one retry.
+  const once = () => runMutationOnce(minRole, fn, stepUp);
+  return retry ? withStepUp(once) : once();
+}
+
+async function runMutationOnce<R>(minRole: Role, fn: (ctx: MutationCtx) => R, stepUp: StepUpNeed): Promise<R> {
   await whenConnected();
   await sleep(latency());
   const me = currentMember();
@@ -192,6 +346,7 @@ export async function runMutation<R>(minRole: Role, fn: (ctx: MutationCtx) => R)
   if (me.status === "disabled") fail("forbidden");
   if (RANK[me.role] < RANK[minRole]) fail("forbidden");
   const now = Date.now();
+  if (stepUp !== "none") requireStepUp(me, stepUp, now);
   const ctx: MutationCtx = {
     db: state.db,
     me,

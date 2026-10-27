@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 import { Button, Input, Pill, Select } from "@rulebox/ui";
 import IconUserPlus from "~icons/solar/user-plus-rounded-linear";
 import {
@@ -26,7 +26,10 @@ import { SkeletonRows } from "../../components/Skeleton";
 import { StatusDot } from "../../components/StatusDot";
 import { useToast } from "../../lib/toast";
 import { formatDateTime } from "../../lib/format";
-import { messageFor } from "../../lib/errors";
+import { messageFor, toAppError } from "../../lib/errors";
+import { secShell as sec } from "../../lib/stepup/strings-shell";
+import { useResetMemberStepUp } from "../../data/stepup";
+import { needsStepUp } from "../../stepup/context";
 import { strings } from "../../lib/strings";
 import { useForm } from "../../lib/useForm";
 import { useNow } from "../../lib/useNow";
@@ -50,16 +53,27 @@ type Dialog =
   | { kind: "role"; member: MemberRow }
   | { kind: "disable"; member: MemberRow }
   | { kind: "resetMfa"; member: MemberRow }
+  | { kind: "resetStepUp"; member: MemberRow }
   | { kind: "code"; title: string; body: string; code: string }
   | { kind: "revokeInvite"; invite: InviteRow };
 
 function Members({ m }: { m: MembersScreen }) {
   const isOwner = useCan("owner");
   const toast = useToast();
+  // Every change here is a major action (plan 4.16): the data seam opens the
+  // confirm dialog when the last confirmation is stale, then retries once.
   const setDisabled = useSetMemberDisabled();
   const resetMfa = useResetMemberMfa();
   const resetCode = useCreateResetCode();
   const revokeInvite = useRevokeInvite();
+  const resetStepUp = useResetMemberStepUp();
+  const fail = useCallback(
+    (e: unknown) => {
+      // Cancelled in the confirm dialog: nothing to report.
+      if (!needsStepUp(e)) toast(messageFor(e), "danger");
+    },
+    [toast],
+  );
   const [dialog, setDialog] = useState<Dialog | null>(null);
   const now = useNow(30_000);
   // `members:list` returns the latest invites in every state; only open ones are pending.
@@ -109,7 +123,7 @@ function Members({ m }: { m: MembersScreen }) {
                       onClick={() =>
                         resetCode({ memberId: x._id }).then(
                           (r) => setDialog({ kind: "code", title: s.resetCodeTitle, body: s.resetCodeBody(x.email), code: r.code }),
-                          (e) => toast(messageFor(e), "danger"),
+                          fail,
                         )
                       }
                     >
@@ -120,6 +134,14 @@ function Members({ m }: { m: MembersScreen }) {
                         {s.resetMfa}
                       </Button>
                     ) : null}
+                    <Button
+                      variant="ghost"
+                      className="dash-btn--sm"
+                      onClick={() => setDialog({ kind: "resetStepUp", member: x })}
+                      aria-label={`${sec.resetMember}: ${x.email}`}
+                    >
+                      {sec.resetMember}
+                    </Button>
                     {x.status === "active" ? (
                       <Button variant="danger-ghost" className="dash-btn--sm" onClick={() => setDialog({ kind: "disable", member: x })} aria-label={`${s.disable}: ${x.email}`}>
                         {s.disable}
@@ -132,7 +154,7 @@ function Members({ m }: { m: MembersScreen }) {
                         onClick={() =>
                           setDisabled({ memberId: x._id, disabled: false, expectedRevision: x.revision }).then(
                             () => toast(s.saved),
-                            (e) => toast(messageFor(e), "danger"),
+                            fail,
                           )
                         }
                       >
@@ -145,7 +167,7 @@ function Members({ m }: { m: MembersScreen }) {
           ]
         : []),
     ],
-    [isOwner, resetCode, setDisabled, toast],
+    [isOwner, resetCode, setDisabled, fail, toast],
   );
 
   return (
@@ -235,6 +257,26 @@ function Members({ m }: { m: MembersScreen }) {
         danger
         onConfirm={() => (dialog?.kind === "resetMfa" ? resetMfa({ memberId: dialog.member._id }) : Promise.resolve())}
         onDone={() => toast(s.saved)}
+        onClose={() => setDialog(null)}
+      />
+      <ConfirmDialog
+        open={dialog?.kind === "resetStepUp"}
+        title={dialog?.kind === "resetStepUp" ? sec.resetMemberTitle(dialog.member.email) : ""}
+        body={sec.resetMemberBody}
+        confirmLabel={sec.resetMember}
+        danger
+        typeToConfirm={dialog?.kind === "resetStepUp" ? dialog.member.email : undefined}
+        onConfirm={async () => {
+          if (dialog?.kind !== "resetStepUp") return;
+          try {
+            await resetStepUp({ memberId: dialog.member._id });
+          } catch (e) {
+            // The generic "no permission" sentence in the dialog; the reason as a toast.
+            if (toAppError(e)?.detail === "member of another organization") toast(sec.resetMemberOtherOrg, "danger");
+            throw e;
+          }
+        }}
+        onDone={() => toast(sec.resetMemberDone)}
         onClose={() => setDialog(null)}
       />
       <ConfirmDialog

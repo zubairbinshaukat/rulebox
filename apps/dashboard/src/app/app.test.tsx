@@ -26,6 +26,12 @@ vi.mock("../data", () => ({
   useUpdateSettings: () => mock.updateSettings,
 }));
 
+vi.mock("../data/stepup", () => ({
+  useStepUpStatus: () => ({ status: "loading" }),
+  useKeepAlive: () => async () => ({ serverNow: Date.now() }),
+  useLockSession: () => async () => undefined,
+}));
+
 import { RequireMember } from "./RequireMember";
 import { Layout } from "./Layout";
 import { ConnectionBanner } from "./ConnectionBanner";

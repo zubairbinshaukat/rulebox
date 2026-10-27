@@ -278,7 +278,7 @@ export const demoApi: DataApi = {
         if (!m || m.password !== password) throw new Error("InvalidSecret");
         if (m.status === "disabled") fail("account_disabled");
         clearFailedSignIns();
-        setSession({ memberId: m._id, mfaVerified: false });
+        setSession({ memberId: m._id, mfaVerified: false, createdAt: Date.now() });
       },
       signUp: async ({ inviteCode, email, password }) => {
         await sleep(latency());
@@ -311,7 +311,7 @@ export const demoApi: DataApi = {
           action: "member.joined",
           summary: `Joined as ${inv.role}.`,
         });
-        setSession({ memberId: id, mfaVerified: false });
+        setSession({ memberId: id, mfaVerified: false, createdAt: Date.now() });
       },
       signOut: async () => {
         setSession(null);
@@ -383,7 +383,7 @@ export const demoApi: DataApi = {
       m.mfa = { enrolled: true, recoveryCodes: codes };
       pendingSecret = null;
       mfaFailures = 0;
-      setSession({ memberId: m._id, mfaVerified: true });
+      setSession({ ...session(), memberId: m._id, mfaVerified: true });
       return codes;
     };
   },
@@ -1569,7 +1569,7 @@ export const demoApi: DataApi = {
           db.invites.push({ _id: newId("inv"), email: addr, role, kind: "join", code, expiresAt });
           audit({ action: "member.invited", targetLabel: addr, summary: `Invited ${addr} as ${role}.` });
           return { code, expiresAt };
-        }),
+        }, "fresh"),
       [],
     );
   },
@@ -1580,7 +1580,7 @@ export const demoApi: DataApi = {
         runMutation("owner", ({ db }) => {
           find(db.invites, inviteId);
           db.invites = db.invites.filter((i) => i._id !== inviteId);
-        }),
+        }, "fresh"),
       [],
     );
   },
@@ -1597,7 +1597,7 @@ export const demoApi: DataApi = {
           m.role = role;
           m.revision++;
           audit({ action: "member.roleChanged", targetLabel: m.email, summary: `Role changed to ${role}.` });
-        }),
+        }, "fresh"),
       [],
     );
   },
@@ -1614,7 +1614,7 @@ export const demoApi: DataApi = {
           m.status = disabled ? "disabled" : "active";
           m.revision++;
           audit({ action: disabled ? "member.disabled" : "member.enabled", targetLabel: m.email, summary: disabled ? "Disabled." : "Enabled." });
-        }),
+        }, "fresh"),
       [],
     );
   },
@@ -1630,7 +1630,7 @@ export const demoApi: DataApi = {
           db.invites.push({ _id: newId("inv"), email: m.email, role: m.role, kind: "passwordReset", code, expiresAt });
           audit({ action: "member.resetCodeCreated", targetLabel: m.email, summary: "Password reset code created." });
           return { code, expiresAt };
-        }),
+        }, "fresh"),
       [],
     );
   },
@@ -1642,7 +1642,7 @@ export const demoApi: DataApi = {
           const m = find(db.members, memberId);
           m.mfa = { enrolled: false, recoveryCodes: [] };
           audit({ action: "member.mfaReset", targetLabel: m.email, summary: "Two-step sign-in reset." });
-        }),
+        }, "fresh"),
       [],
     );
   },

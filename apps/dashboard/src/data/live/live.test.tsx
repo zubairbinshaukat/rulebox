@@ -53,6 +53,7 @@ function fnFor(name: string) {
 }
 
 import { liveApi as live } from "./hooks";
+import { liveStepUpApi } from "../stepup/live";
 
 const SERVER_TEXT = "[CONVEX A(x)] Server Error Uncaught Error: Invalid credentials at handler (auth.ts:34)";
 
@@ -291,6 +292,38 @@ describe("members", () => {
     const e = await rejection(result.current({ inviteId: "i1" }));
     expect(errorCodeOf(e)).toBeNull();
     expect(messageFor(e)).toBe(strings.errors.unknown);
+  });
+});
+
+describe("step-up (data/stepup/live.ts)", () => {
+  it("status subscribes to stepUp:status; verify / keepAlive / lock map their errors", async () => {
+    const { result } = renderHook(() => liveStepUpApi.useStepUpStatus());
+    expect(result.current.status).toBe("loading");
+    expect(getFunctionName((cx.requests.at(-1)!.q as { query: FunctionReference<"query"> }).query)).toBe("stepUp:status");
+
+    cx.fns["stepUp:verifyActionPin"] = vi
+      .fn()
+      .mockRejectedValueOnce(new ConvexError({ code: "step_up_locked", retryAfterMs: 60_000 }))
+      .mockResolvedValueOnce({ verifiedAt: 1, freshUntil: 2, serverNow: 3 });
+    const verify = renderHook(() => liveStepUpApi.useVerifyActionPin()).result;
+    const e = await rejection(verify.current({ pin: "000000" }));
+    expect(messageFor(e)).toBe(strings.errors.stepUpLocked(60_000));
+    await expect(verify.current({ pin: "482915" })).resolves.toEqual({ verifiedAt: 1, freshUntil: 2, serverNow: 3 });
+
+    cx.fns["stepUp:keepAlive"] = vi.fn(async () => ({ serverNow: 9 }));
+    cx.fns["stepUp:lock"] = vi.fn(async () => null);
+    await expect(renderHook(() => liveStepUpApi.useKeepAlive()).result.current()).resolves.toEqual({ serverNow: 9 });
+    await expect(renderHook(() => liveStepUpApi.useLockSession()).result.current()).resolves.toBeUndefined();
+    expect(cx.fns["stepUp:lock"]).toHaveBeenCalledWith({});
+  });
+
+  it("passkey begin calls take no arguments; finish passes the credential JSON", async () => {
+    cx.fns["passkeys:beginVerification"] = vi.fn(async () => ({ optionsJson: "{}", expiresAt: 1 }));
+    cx.fns["passkeys:finishRegistration"] = vi.fn(async () => ({ passkeyId: "pk" }));
+    await renderHook(() => liveStepUpApi.useBeginPasskeyVerification()).result.current();
+    expect(cx.fns["passkeys:beginVerification"]).toHaveBeenCalledWith({});
+    await renderHook(() => liveStepUpApi.useFinishPasskeyRegistration()).result.current({ responseJson: "{}", name: "PC" });
+    expect(cx.fns["passkeys:finishRegistration"]).toHaveBeenCalledWith({ responseJson: "{}", name: "PC" });
   });
 });
 

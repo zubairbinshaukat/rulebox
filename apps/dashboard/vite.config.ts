@@ -119,8 +119,13 @@ function bootScript(): Plugin {
   };
 }
 
-export default defineConfig(({ mode }) => {
+export default defineConfig(({ mode, command }) => {
   const demo = loadEnv(mode, process.cwd(), "VITE_").VITE_DEMO === "1";
+  // Test hook for the end-to-end run (plan 4.16): a shorter idle lock, only on
+  // the dev server (`vite`, never `vite build`), from RULEBOX_TEST_IDLE_MS in
+  // the shell. Production builds get the literal 0, and the minifier drops the
+  // branch that reads it.
+  const testIdle = command === "serve" ? Number(loadEnv(mode, process.cwd(), "RULEBOX_TEST_").RULEBOX_TEST_IDLE_MS ?? 0) : 0;
   return {
   // Solar icons are compiled into the bundle at build time (Decision 16/17: no runtime fetching).
   plugins: [react(), Icons({ compiler: "jsx", jsx: "react" }), cspMeta(), placeholderLogo(), bootScript()],
@@ -128,12 +133,14 @@ export default defineConfig(({ mode }) => {
     __APP_VERSION__: JSON.stringify(pkg.version),
     // Build-time switch so a live build drops the demo fixtures entirely.
     __DEMO__: JSON.stringify(demo),
+    __STEPUP_TEST_IDLE_MS__: JSON.stringify(Number.isFinite(testIdle) && testIdle > 0 ? Math.floor(testIdle) : 0),
   },
   resolve: {
     alias: {
       "@convex": fileURLToPath(new URL("../../convex", import.meta.url)),
       // The data implementation (src/data/README.md): fixtures only in demo builds.
       "@rulebox/data-impl": fileURLToPath(new URL(demo ? "./src/data/demo/hooks.ts" : "./src/data/live/hooks.ts", import.meta.url)),
+      "@rulebox/stepup-impl": fileURLToPath(new URL(demo ? "./src/data/stepup/demo.ts" : "./src/data/stepup/live.ts", import.meta.url)),
     },
   },
   server: { port: 5173, strictPort: true },
@@ -151,7 +158,9 @@ export default defineConfig(({ mode }) => {
             // The small shared helpers (lib, data seam, @rulebox/ui) as one chunk instead of
             // a dozen tiny ones: fewer requests on the first load, nearly all needed anyway.
             // (Scripts only: the stylesheets stay one file, in their import order.)
-            { name: "core", test: /([\\/]apps[\\/]dashboard[\\/]src[\\/](lib|data)|[\\/]packages[\\/]ui[\\/]src)[\\/].*\.tsx?$/ },
+            // `lib/stepup/` and `data/stepup/` stay out: step-up code is loaded only
+            // by the signed-in shell and the Security tab, never by sign-in.
+            { name: "core", test: /([\\/]apps[\\/]dashboard[\\/]src[\\/](lib|data)|[\\/]packages[\\/]ui[\\/]src)[\\/](?!stepup[\\/]).*\.tsx?$/ },
           ],
         },
       },

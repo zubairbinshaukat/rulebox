@@ -62,7 +62,7 @@ export function AuthShell({
             <h1 className="dash-auth__title">{title}</h1>
             {lead ? <p className="dash-auth__lead">{lead}</p> : null}
           </div>
-          {IS_DEMO && demoHint ? <InlineNotice tone="accent" title={strings.app.demoBadge} detail={demoHint} /> : null}
+          {IS_DEMO && demoHint ? <InlineNotice tone="accent" title={strings.demo.badge} detail={demoHint} /> : null}
           {children}
           <div>
             <SegmentedControl<Theme> options={THEMES} value={theme} onChange={setTheme} aria-label={strings.app.theme} />

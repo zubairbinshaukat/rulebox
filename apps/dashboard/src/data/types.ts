@@ -44,6 +44,8 @@ export const ERROR_CODES = [
   "step_up_invalid",
   "step_up_locked",
   "step_up_last_factor",
+  // Plans and limits (plan Step 5/6); `detail` names the limit or "suspended".
+  "plan_limit",
 ] as const;
 
 export type ErrorCode = (typeof ERROR_CODES)[number];
@@ -136,6 +138,45 @@ export interface InviteRow {
 export interface MembersScreen {
   members: MemberRow[];
   invites: InviteRow[];
+}
+
+// ---------------------------------------------------------------- step-up (plan 4.16)
+
+/** `stepUp:status` passkey row: never a credential id, public key or hash. */
+export interface PasskeyRow {
+  _id: Id;
+  name: string;
+  createdAt: number;
+  lastUsedAt: number | null;
+  /** Backed up / synced across devices (counter-less passkeys). */
+  synced: boolean;
+  /** Suspended after a signature counter went backwards (possible copy). */
+  suspended: boolean;
+}
+
+/** `stepUp:status`. Every timestamp is server time. */
+export interface StepUpStatus {
+  actionPin: { set: boolean; lockedUntil: number | null; disabled: boolean; attemptsBeforeDisable: number };
+  passkeys: PasskeyRow[];
+  /** False when the deployment has no WebAuthn configuration (the PIN keeps working). */
+  passkeysAvailable: boolean;
+  session: { verifiedAt: number | null; lastActiveAt: number | null; method: "actionPin" | "passkey" | null };
+  /** With no factor yet: until when this session may set the first one (fresh sign-in). */
+  bootstrapUntil: number | null;
+  policy: { idleMs: number; keepAliveMs: number; freshMs: number; maxAgeMs: number };
+}
+
+/** `stepUp:verifyActionPin` / `passkeys:finishVerification` */
+export interface StepUpVerified {
+  verifiedAt: number;
+  freshUntil: number;
+  serverNow: number;
+}
+
+/** `passkeys:begin*`: the WebAuthn options as JSON (for @simplewebauthn/browser). */
+export interface PasskeyOptions {
+  optionsJson: string;
+  expiresAt: number;
 }
 
 // ---------------------------------------------------------------- organization

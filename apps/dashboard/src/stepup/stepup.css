@@ -1,0 +1,61 @@
+/* Step-up screens (plan 4.16). Loaded with their lazy chunks only, so the
+   sign-in page's stylesheet does not grow. Tokens from packages/ui; light and
+   dark come from them. */
+
+.su-factor__passkey {
+  width: 100%;
+  justify-content: center;
+  min-height: 44px;
+}
+.su-factor__or {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  color: var(--rb-muted);
+  font-size: 13px;
+  text-align: center;
+}
+.su-factor__or::before,
+.su-factor__or::after {
+  content: "";
+  flex: 1 1 0;
+  height: 1px;
+  background: var(--rb-line);
+}
+.su-factor__pin {
+  letter-spacing: 0.3em;
+  font-size: 18px;
+  max-width: 100%;
+}
+.su-factor__tries {
+  font-size: 13px;
+}
+.su-factor__msg:empty {
+  display: none;
+}
+.su-step-title {
+  font-weight: 650;
+}
+.su-passkey {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 12px;
+  min-width: 0;
+}
+.su-passkey__name {
+  font-weight: 600;
+  overflow-wrap: anywhere;
+  min-width: 0;
+}
+.su-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  justify-content: flex-end;
+}
+@media (max-width: 479px) {
+  .su-actions {
+    justify-content: flex-start;
+  }
+}

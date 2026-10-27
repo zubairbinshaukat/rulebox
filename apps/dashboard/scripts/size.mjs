@@ -28,7 +28,9 @@ const BUDGET = {
     { name: "join", chunks: ["Join"], maxJsKb: 145, maxCssKb: 19, maxIncrementalKb: 5, incrementalFrom: "sign-in" },
     { name: "mfa", chunks: ["Mfa"], maxJsKb: 150, maxCssKb: 19, maxIncrementalKb: 10, incrementalFrom: "sign-in" },
     // The signed-in shell (navigation, account menu) plus the first screen.
-    { name: "overview", chunks: ["Layout", "Overview"], maxJsKb: 160, maxCssKb: 19, maxIncrementalKb: 25, incrementalFrom: "sign-in" },
+    // 2026-10-27, Step 5a: +3.5 KB for the step-up controller (idle lock, keep-alive,
+    // tabs) that every signed-in page must run; its dialogs and screens stay lazy.
+    { name: "overview", chunks: ["Layout", "Overview"], maxJsKb: 164, maxCssKb: 19, maxIncrementalKb: 25, incrementalFrom: "sign-in" },
     // Every other screen, on top of an already loaded overview.
     ...[
       "Devices",

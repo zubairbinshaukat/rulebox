@@ -4,9 +4,11 @@ import { demoApi } from "./hooks";
 import { db, resetDemo, setControls, setSession, simulateConcurrentEdit } from "./store";
 import { errorCodeOf } from "../../lib/errors";
 
+/** Signed in, MFA passed and step-up verified just now (writes need an unlocked session). */
 function signInAs(email: string) {
   const m = db().members.find((x) => x.email === email)!;
-  setSession({ memberId: m._id, mfaVerified: true });
+  const now = Date.now();
+  setSession({ memberId: m._id, mfaVerified: true, createdAt: now, stepUp: { verifiedAt: now, lastActiveAt: now, method: "actionPin" } });
 }
 
 describe("demo data layer", () => {

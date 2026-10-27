@@ -1,17 +1,24 @@
-import { useRef, type KeyboardEvent } from "react";
+import { lazy, Suspense, useRef, type KeyboardEvent } from "react";
 import { useSearchParams } from "react-router";
 import { PageHeader } from "../components/PageHeader";
+import { SkeletonBlock } from "../components/Skeleton";
 import { strings } from "../lib/strings";
+import { sec } from "../lib/stepup/strings";
 import { AboutTab } from "./settings/AboutTab";
 import { AdminExitTab } from "./settings/AdminExitTab";
 import { MembersTab } from "./settings/MembersTab";
 import { OrganizationTab } from "./settings/OrganizationTab";
 import { SigningTab } from "./settings/SigningTab";
 
-const TABS = ["organization", "adminExit", "signing", "members", "about"] as const;
+// The Security tab (step-up, plan 4.16) is its own chunk: most visits never open it.
+const SecurityTab = lazy(() => import("./settings/SecurityTab"));
+
+const TABS = ["organization", "adminExit", "signing", "members", "security", "about"] as const;
 type Tab = (typeof TABS)[number];
 
-/** Settings with tabs (`?tab=`): each tab is one query (`settings:get`, `keys:status`, `members:list`). */
+const tabLabel = (t: Tab) => (t === "security" ? sec.tab : strings.settings.tabs[t]);
+
+/** Settings with tabs (`?tab=`): each tab is one query (`settings:get`, `keys:status`, `members:list`, `stepUp:status`). */
 export default function Settings() {
   const [params, setParams] = useSearchParams();
   const raw = params.get("tab");
@@ -54,7 +61,7 @@ export default function Settings() {
             className="dash-tabs__tab"
             onClick={() => select(t)}
           >
-            {strings.settings.tabs[t]}
+            {tabLabel(t)}
           </button>
         ))}
       </div>
@@ -63,6 +70,11 @@ export default function Settings() {
         {tab === "adminExit" ? <AdminExitTab /> : null}
         {tab === "signing" ? <SigningTab /> : null}
         {tab === "members" ? <MembersTab /> : null}
+        {tab === "security" ? (
+          <Suspense fallback={<div className="dash-card dash-card--pad"><SkeletonBlock lines={6} /></div>}>
+            <SecurityTab />
+          </Suspense>
+        ) : null}
         {tab === "about" ? <AboutTab /> : null}
       </div>
     </div>

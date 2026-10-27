@@ -70,6 +70,16 @@ async function signIn(page) {
   await settle(page);
 }
 
+/** Demo writes need an unlocked session (step-up, plan 4.16): confirm with the demo action PIN. */
+async function confirmStepUp(page) {
+  const d = page.getByRole("dialog", { name: "Confirm it's you" });
+  if (!(await d.waitFor({ timeout: 4000 }).then(() => true, () => false))) return false;
+  await d.getByLabel("Action PIN").fill("482915");
+  await d.getByRole("button", { name: "Confirm" }).click();
+  await d.waitFor({ state: "detached" });
+  return true;
+}
+
 /** Ids are deterministic (seeded fixtures): read them once from the lists. */
 async function discover(page) {
   const href = async (path, text) => {
@@ -113,6 +123,7 @@ function routes(ids) {
     ["settings-exit", "/settings?tab=adminExit"],
     ["settings-signing", "/settings?tab=signing"],
     ["settings-members", "/settings?tab=members"],
+    ["settings-security", "/settings?tab=security"],
     ["settings-about", "/settings?tab=about"],
     ["gallery", "/gallery"],
     ["not-found", "/this-does-not-exist"],
@@ -156,6 +167,12 @@ if (run("shots")) {
       await page.getByText("Save your recovery codes").waitFor();
       await settle(page);
       await page.screenshot({ path: join(OUT, `mfa-recovery-${w}-${theme}.png`), fullPage: true });
+      // Step-up: an Admin without an action PIN sets one first.
+      await page.getByLabel("I stored these codes somewhere safe").check();
+      await page.getByRole("button", { name: "I saved them" }).click();
+      await page.getByRole("heading", { name: "Protect important actions" }).waitFor();
+      await settle(page);
+      await page.screenshot({ path: join(OUT, `stepup-setup-${w}-${theme}.png`), fullPage: true });
       // Sign out, then sign in as the owner (MFA verify screen).
       await page.evaluate(() => sessionStorage.clear());
       await page.goto(`${BASE}/sign-in`);
@@ -190,6 +207,10 @@ if (run("shots")) {
       await page.waitForTimeout(300);
       await page.screenshot({ path: join(OUT, `enrollment-dialog-${w}-${theme}.png`) });
       await page.getByRole("dialog").getByRole("button", { name: "Create code" }).click();
+      if (await page.getByRole("dialog", { name: "Confirm it's you" }).waitFor({ timeout: 4000 }).then(() => true, () => false)) {
+        await page.screenshot({ path: join(OUT, `stepup-dialog-${w}-${theme}.png`) });
+        await confirmStepUp(page);
+      }
       await page.getByText("This code is shown only now.").waitFor();
       await settle(page);
       await page.screenshot({ path: join(OUT, `enrollment-code-${w}-${theme}.png`), fullPage: true });

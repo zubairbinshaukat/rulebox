@@ -28,6 +28,8 @@ const m = vi.hoisted(() => ({
   noop: vi.fn(async () => undefined),
 }));
 
+vi.mock("../data/stepup", () => ({ useResetMemberStepUp: () => vi.fn() }));
+
 vi.mock("../data", () => {
   const actions = { signIn: m.signIn, signUp: m.signUp, signOut: m.signOut };
   return {

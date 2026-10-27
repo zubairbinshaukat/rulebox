@@ -15,6 +15,7 @@ import { convexToJson, jsonToConvex, type JSONValue, type Value } from "convex/v
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { toAppError } from "../../lib/errors";
 import { reportUnauthenticated } from "../../lib/session";
+import { withStepUp } from "../../lib/stepUpRetry";
 import type { QueryState } from "../types";
 
 /**
@@ -30,16 +31,21 @@ export function mapError(e: unknown): unknown {
   return app ?? e;
 }
 
-/** Wraps a mutation / action so its errors go through `mapError`. Stable while `fn` is. */
+/**
+ * Wraps a mutation / action so its errors go through `mapError`, and a
+ * `step_up_required` opens the confirm dialog and retries once
+ * (`lib/stepUpRetry.ts`). Stable while `fn` is.
+ */
 export function useMapped<A, R>(fn: (args: A) => Promise<R>): (args: A) => Promise<R> {
   return useCallback(
-    async (args: A) => {
-      try {
-        return await fn(args);
-      } catch (e) {
-        throw mapError(e);
-      }
-    },
+    (args: A) =>
+      withStepUp(async () => {
+        try {
+          return await fn(args);
+        } catch (e) {
+          throw mapError(e);
+        }
+      }),
     [fn],
   );
 }

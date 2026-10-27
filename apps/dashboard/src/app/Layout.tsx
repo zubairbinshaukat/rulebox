@@ -14,6 +14,7 @@ import { AccountMenu } from "./AccountMenu";
 import { ChunkErrorBoundary } from "./ChunkErrorBoundary";
 import { ConnectionBanner } from "./ConnectionBanner";
 import { Nav } from "./Nav";
+import { StepUpProvider } from "../stepup/StepUpProvider";
 
 // `__DEMO__` is a build-time literal, so live builds drop this chunk entirely.
 const DemoControls = __DEMO__ ? lazy(() => import("./DemoControls")) : null;
@@ -31,11 +32,24 @@ function PageFallback() {
 }
 
 /**
- * The signed-in shell (Step 4 #4): left navigation (a menu button and sheet
- * below 768 px), top bar with the organization, banners, account menu, and
- * the page with a short GSAP entrance on every route change.
+ * The signed-in shell with step-up (plan 4.16): the first-factor setup or the
+ * idle lock replace it when needed, and calls that need a confirmation open
+ * the confirm dialog (`stepup/StepUpProvider.tsx`).
  */
 export function Layout() {
+  return (
+    <StepUpProvider>
+      <Shell />
+    </StepUpProvider>
+  );
+}
+
+/**
+ * The signed-in shell (Step 4 #4): left navigation (a menu button and sheet
+ * below 768 px), top bar with the organization, banners, account menu, and
+ * the page with a short CSS entrance on every route change.
+ */
+function Shell() {
   const me = useMember();
   const location = useLocation();
   const [navOpen, setNavOpen] = useState(false);
@@ -78,7 +92,7 @@ export function Layout() {
           <div className="dash-side__foot">
             {IS_DEMO ? (
               <Pill tone="warning" className="dash-keep">
-                {strings.app.demoBadge}
+                {strings.demo.badge}
               </Pill>
             ) : null}
             <span>v{__APP_VERSION__}</span>
@@ -106,7 +120,7 @@ export function Layout() {
               </span>
               {IS_DEMO ? (
                 <Pill tone="warning" className="dash-top__orglabel">
-                  {strings.app.demoBadge}
+                  {strings.demo.badge}
                 </Pill>
               ) : null}
             </div>

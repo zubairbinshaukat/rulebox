@@ -36,7 +36,7 @@ export default function DemoControls() {
       </button>
       <Modal open={open} title={d.title} onClose={() => setOpen(false)} actions={<Button onClick={() => setOpen(false)}>{strings.common.done}</Button>}>
         <div className="dash-demo-panel">
-          <p className="dash-muted">{strings.app.demoBanner}</p>
+          <p className="dash-muted">{strings.demo.banner}</p>
           <div className="dash-field">
             <span className="dash-field__label" id="demo-role">
               {d.role}

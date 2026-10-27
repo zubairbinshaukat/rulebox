@@ -25,6 +25,8 @@ import { DEFAULT_WEB_PERMISSIONS } from "../types";
 
 export const DEMO_PASSWORD = "rulebox-demo-1";
 export const DEMO_TOTP = "123456";
+/** The demo Owner's action PIN (step-up, plan 4.16); other demo members start without one. */
+export const DEMO_ACTION_PIN = "482915";
 export const DEMO_INVITE_CODE = "JOIN-DEMO-2026";
 export const DEMO_RESET_CODE = "RESET-DEMO-2026";
 export const DEMO_OWNER_EMAIL = "owner@demo.rulebox.test";

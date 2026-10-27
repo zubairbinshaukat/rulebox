@@ -114,6 +114,8 @@ export function messageForCode(code: ErrorCode, data?: Omit<ErrorData, "code">):
       return data?.detail === "disabled" || !data?.retryAfterMs ? e.stepUpDisabled : e.stepUpLocked(data.retryAfterMs);
     case "step_up_last_factor":
       return e.stepUpLastFactor;
+    case "plan_limit":
+      return e.planLimit;
   }
 }
 

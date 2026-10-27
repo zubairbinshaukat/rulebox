@@ -22,7 +22,7 @@ export function AboutTab() {
             <dt>{s.dashboardVersion}</dt>
             <dd className="dash-mono">
               {__APP_VERSION__}
-              {IS_DEMO ? ` (${strings.app.demoBadge})` : ""}
+              {IS_DEMO ? ` (${strings.demo.badge})` : ""}
             </dd>
           </div>
           <div className="dash-kv__item">

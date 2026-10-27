@@ -12,6 +12,27 @@ import { formatCount, formatDuration, formatNumber, plural } from "./format";
 const n = (count: number, one: string, other: string, cap?: number) =>
   `${formatCount(count, cap)} ${plural(count, { one, other })}`;
 
+/** The demo controls and sign-in hints (`strings.demo`, demo builds only). */
+const DEMO_STRINGS = {
+  badge: "Demo",
+  banner: "Demo mode: sample data stored only in this tab. Nothing is sent anywhere.",
+  title: "Demo controls",
+  open: "Demo controls",
+  role: "View as",
+  slow: "Slow network",
+  offline: "Lose connection",
+  failQueries: "Make screens fail to load",
+  staleEdit: "Simulate another admin's edit",
+  staleEditDone: "Another admin just changed every record. Save a form to see the warning.",
+  reset: "Reset demo data",
+  resetDone: "Demo data reset.",
+  credentials: "Demo: owner@demo.rulebox.test with password rulebox-demo-1. Codes: 123456. Action PIN: 482915.",
+  totpHint: "Demo only: the code 123456 always works.",
+  inviteHint:
+    "Invite code JOIN-DEMO-2026 works for new.admin@demo.rulebox.test; reset code RESET-DEMO-2026 for sam.okafor@demo.rulebox.test.",
+  actionPin: "Demo: the Owner's action PIN is 482915.",
+} as const;
+
 export const strings = {
   app: {
     name: "Rulebox",
@@ -39,8 +60,6 @@ export const strings = {
     crashTitle: "Something went wrong",
     noAccessTitle: "This account has no access to Rulebox",
     noAccessBody: "Ask an Owner of your organization to invite you, then sign in again.",
-    demoBadge: "Demo",
-    demoBanner: "Demo mode: sample data stored only in this tab. Nothing is sent anywhere.",
     nav: {
       overview: "Overview",
       devices: "Devices",
@@ -64,21 +83,9 @@ export const strings = {
     ownerOnly: "Only an Owner can change this.",
   },
 
-  demo: {
-    title: "Demo controls",
-    open: "Demo controls",
-    role: "View as",
-    slow: "Slow network",
-    offline: "Lose connection",
-    failQueries: "Make screens fail to load",
-    staleEdit: "Simulate another admin's edit",
-    staleEditDone: "Another admin just changed every record. Save a form to see the warning.",
-    reset: "Reset demo data",
-    resetDone: "Demo data reset.",
-    credentials: "Demo: owner@demo.rulebox.test with password rulebox-demo-1. Codes: 123456.",
-    totpHint: "Demo only: the code 123456 always works.",
-    inviteHint: "Invite code JOIN-DEMO-2026 works for new.admin@demo.rulebox.test; reset code RESET-DEMO-2026 for sam.okafor@demo.rulebox.test.",
-  },
+  // Demo builds only: `__DEMO__` is a build-time literal, so a live build keeps
+  // an empty object and none of these sentences reach its first load.
+  demo: (__DEMO__ ? DEMO_STRINGS : {}) as typeof DEMO_STRINGS,
 
   common: {
     save: "Save",
@@ -174,6 +181,7 @@ export const strings = {
     stepUpLocked: (ms: number) => `Too many wrong action PINs. Try again in ${formatDuration(ms)}.`,
     stepUpDisabled: "Your action PIN is turned off after too many wrong attempts. Use a passkey or ask another Owner to reset it.",
     stepUpLastFactor: "Keep at least one action PIN or passkey.",
+    planLimit: "Your plan's limit is reached. Contact us to upgrade.",
   },
 
   validate: {

@@ -8,6 +8,9 @@ import { useAuthActions } from "../data";
 import { useMember } from "../lib/member";
 import { strings } from "../lib/strings";
 import { useTheme } from "./theme";
+import IconLock from "~icons/solar/lock-keyhole-minimalistic-linear";
+import { secShell } from "../lib/stepup/strings-shell";
+import { useStepUpController } from "../stepup/context";
 
 const THEMES = [
   { value: "light", label: strings.app.themeLight },
@@ -22,6 +25,7 @@ export function AccountMenu() {
   const navigate = useNavigate();
   const [open, setOpen] = useState(false);
   const [theme, setTheme] = useTheme();
+  const stepUp = useStepUpController();
   const root = useRef<HTMLDivElement>(null);
   const button = useRef<HTMLButtonElement>(null);
   const panelId = useId();
@@ -92,6 +96,17 @@ export function AccountMenu() {
             >
               {strings.app.security}
             </MenuItem>
+            {stepUp ? (
+              <MenuItem
+                icon={<IconLock />}
+                onSelect={() => {
+                  setOpen(false);
+                  stepUp.lockNow("manual");
+                }}
+              >
+                {secShell.lockNow}
+              </MenuItem>
+            ) : null}
             <MenuItem
               danger
               icon={<IconLogout />}

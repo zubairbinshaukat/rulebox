@@ -88,6 +88,34 @@ Status: **live** = wired in `live/hooks.ts`; everything else answers
 | `useRevokeInvite` / `useResetMemberMfa` | `useMutation(api.members.revokeInvite)` / `useMutation(api.members.resetMfa)` | live |
 | `useChangeRole` / `useSetMemberDisabled` | `useMutation(api.members.changeRole)` / `useMutation(api.members.setDisabled)`, both with `expectedRevision` (`stale_edit` when the member changed) | live |
 
+## Step-up hooks (`data/stepup/`, plan 4.16)
+
+A second, smaller seam with the same rules (`StepUpApi` in `stepup/api.ts`,
+`stepup/live.ts` and `stepup/demo.ts`, picked by the `@rulebox/stepup-impl`
+alias). It is kept out of `DataApi` and out of the `core` chunk so the sign-in
+page never downloads it: only the signed-in shell (`stepup/StepUpProvider.tsx`)
+and Settings → Security import `data/stepup`.
+
+Writes that may need a confirmation go through `useStepUpAction(hook())`
+(`src/stepup/context.ts`): on `step_up_required` / `step_up_setup_required`
+the confirm dialog opens and the call is retried once; cancelled, the original
+error is thrown. Every member write needs an unlocked session on the server,
+so wrap each new mutation hook a screen uses this way (Members tab: all six).
+The demo store applies the same rule (`runMutation(role, fn, "unlocked" |
+"fresh" | "none")`); the demo Owner's action PIN is `482915`.
+
+| Hook | Convex | Status |
+|---|---|---|
+| `useStepUpStatus` | `api.stepUp.status` (any role; server timestamps, never a hash or credential id) | live |
+| `useVerifyActionPin` | `useAction(api.stepUp.verifyActionPin)` → `{ verifiedAt, freshUntil, serverNow }` | live |
+| `useSetActionPin` / `useClearActionPin` | `useAction(api.stepUp.setActionPin)` (bootstrap or fresh) / `useMutation(api.stepUp.clearActionPin)` (major) | live |
+| `useBeginPasskeyVerification` / `useFinishPasskeyVerification` | `useAction(api.passkeys.beginVerification)` → `{ optionsJson, expiresAt }` / `finishVerification({ responseJson })`; the ceremony runs in `lib/stepup/passkey.ts` (`@simplewebauthn/browser`, loaded on first use) | live |
+| `useBeginPasskeyRegistration` / `useFinishPasskeyRegistration` | `useAction(api.passkeys.beginRegistration)` / `finishRegistration({ responseJson, name })` | live |
+| `useRenamePasskey` / `useRemovePasskey` | `useMutation(api.stepUp.renamePasskey)` / `removePasskey` (major) | live |
+| `useKeepAlive` / `useLockSession` | `useMutation(api.stepUp.keepAlive)` (at most every `policy.keepAliveMs`, only on input) / `api.stepUp.lock` | live |
+| `useResetMemberStepUp` | `useMutation(api.stepUp.resetMember)` (Owner, major) | live |
+| `useResetStepUpWithRecoveryCode` | `useAction(api.stepUp.resetWithRecoveryCode)` | live |
+
 Shapes the plan does not pin down and the backend must match (or the types
 change): `GroupDetail.appOptions` and `enrollmentCodeCount`,
 `EmployeeDetail.groupOptions/appOptions/defaultQuotaGb`,
