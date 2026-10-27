@@ -197,6 +197,9 @@ catalogs:
     '@playwright/test':
       specifier: 1.64.1
       version: 1.64.1
+    '@simplewebauthn/browser':
+      specifier: 14.0.0
+      version: 14.0.0
     '@simplewebauthn/server':
       specifier: 14.0.3
       version: 14.0.3
@@ -306,7 +309,7 @@ importers:
     dependencies:
       '@auth/core':
         specifier: 'catalog:'
-        version: 0.41.1(@simplewebauthn/server@14.0.3)
+        version: 0.41.1(@simplewebauthn/browser@14.0.0)(@simplewebauthn/server@14.0.3)
       '@convex-dev/auth':
         specifier: 'catalog:'
         version: 0.0.96(@auth/core@0.41.1(@simplewebauthn/server@14.0.3))(convex@1.47.0(react@19.3.0))(react@19.3.0)
@@ -389,6 +392,9 @@ importers:
       '@rulebox/ui':
         specifier: workspace:*
         version: link:../../packages/ui
+      '@simplewebauthn/browser':
+        specifier: 'catalog:'
+        version: 14.0.0
       convex:
         specifier: 'catalog:'
         version: 1.47.0(react@19.3.0)
@@ -1386,6 +1392,9 @@ packages:
 
   '@rolldown/pluginutils@1.0.1':
     resolution: {integrity: sha512-2j9bGt5Jh8hj+vPtgzPtl72j0yRxHAyumoo6TNfAjsLB04UtpSvPbPcDcBMxz7n+9CYB0c1GxQFxYRg2jimqGw==}
+
+  '@simplewebauthn/browser@14.0.0':
+    resolution: {integrity: sha512-1odWVqeEBTl7lJ9zMKLEsmTlnyrDO5iRcTvfMKKk1WThUnp/i8JJdffdj2icP+tty159s4PgwE3BiMoEW9NFow==}
 
   '@simplewebauthn/server@14.0.3':
     resolution: {integrity: sha512-D39/0fiDiYmGV+nraY9s63D1Ho2AX/waMLy22/9gUadTUuvbAnstfb4bpbHYbwZuV5ZLDYN1SmzDKuiHzKAA4Q==}
@@ -2854,7 +2863,7 @@ snapshots:
       is-potential-custom-element-name: 1.0.1
       lru-cache: 11.5.3
 
-  '@auth/core@0.41.1(@simplewebauthn/server@14.0.3)':
+  '@auth/core@0.41.1(@simplewebauthn/browser@14.0.0)(@simplewebauthn/server@14.0.3)':
     dependencies:
       '@panva/hkdf': 1.2.1
       jose: 6.2.13
@@ -2862,6 +2871,7 @@ snapshots:
       preact: 10.24.3
       preact-render-to-string: 6.5.11(preact@10.24.3)
     optionalDependencies:
+      '@simplewebauthn/browser': 14.0.0
       '@simplewebauthn/server': 14.0.3
 
   '@axe-core/playwright@4.14.0(playwright-core@1.64.1)':
@@ -2989,7 +2999,7 @@ snapshots:
 
   '@convex-dev/auth@0.0.96(@auth/core@0.41.1(@simplewebauthn/server@14.0.3))(convex@1.47.0(react@19.3.0))(react@19.3.0)':
     dependencies:
-      '@auth/core': 0.41.1(@simplewebauthn/server@14.0.3)
+      '@auth/core': 0.41.1(@simplewebauthn/browser@14.0.0)(@simplewebauthn/server@14.0.3)
       '@oslojs/crypto': 1.0.1
       '@oslojs/encoding': 1.1.0
       convex: 1.47.0(react@19.3.0)
@@ -3529,6 +3539,8 @@ snapshots:
     optional: true
 
   '@rolldown/pluginutils@1.0.1': {}
+
+  '@simplewebauthn/browser@14.0.0': {}
 
   '@simplewebauthn/server@14.0.3':
     dependencies:

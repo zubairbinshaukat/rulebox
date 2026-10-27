@@ -23,6 +23,7 @@
     "@gsap/react": "catalog:",
     "@rulebox/types": "workspace:*",
     "@rulebox/ui": "workspace:*",
+    "@simplewebauthn/browser": "catalog:",
     "convex": "catalog:",
     "gsap": "catalog:",
     "react": "catalog:",
