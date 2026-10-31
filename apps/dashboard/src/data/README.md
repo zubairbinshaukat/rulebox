@@ -9,8 +9,8 @@ satisfy the same `DataApi` type (`api.ts`):
   loss (writes queue), failing queries and stale edits (top-bar demo controls).
 - `live/hooks.ts` — the real backend. Session, sign-in, MFA, account and
   members are live (Step 4, against the Step 3 functions); settings, the plan
-  and groups since Step 5; enrollment codes since Step 6 (their own seam,
-  see below); every other hook answers `not_ready` with the
+  and groups since Step 5; enrollment codes since Step 6 and the device
+  lists since Step 7 (each in its own seam, see below); every other hook answers `not_ready` with the
   detail `NOT_DEPLOYED` (`api.ts`), which a region shows as "Coming in a
   later step", until its Convex step lands. `live/convex.ts` holds the
   adapters (`useMemberQuery`, `useMapped`, `mapError`).
@@ -44,7 +44,7 @@ Replace the hook body in `live/hooks.ts`; screens do not change.
   `useMapped(useAction(api.x.y))`: a thrown `ConvexError` with a known code
   becomes an `AppError` (`toAppError`, `lib/errors.ts`); anything else is
   passed on and shown only as the generic sentence. Toggles add
-  `.withOptimisticUpdate(...)` (kiosk, archive, pins).
+  `.withOptimisticUpdate(...)` (archive, pins; not the device kiosk switch).
 - **Actions resolve before the queries update.** When the screen must wait
   for the result to show (for example `mfa:verify` → `verified`), wait for the
   query, not the promise (see `screens/Mfa.tsx`).
@@ -65,11 +65,13 @@ Status: **live** = wired in `live/hooks.ts`; everything else answers
 | `useBeginMfaSetup` / `useConfirmMfaSetup` | `useAction(api.mfa.beginSetup)` → `{ secret, uri }` / `useAction(api.mfa.confirmSetup)` → `string[]` (recovery codes, once) | live |
 | `useVerifyMfa` / `useRedeemRecoveryCode` | `useAction(api.mfa.verify)` / `useAction(api.mfa.useRecoveryCode)` (**actions**, so the lockout counter commits) | live |
 | `useOverview(nowMinute)` | `api.overview.get({ nowMs })` |
-| `useDevicesScreen({ groupId, search })` | `api.fleet.list({ groupId })` (paginated); with `search`: `api.fleet.search({ text })` (`.take(50)`, set `searchCapped` when 50 came back) |
-| `useLiveStatus(ids)` | `api.fleet.liveStatus({ deviceIds })` (≤ 100 ids) |
-| `useDeviceDetail` | `api.fleet.get` |
-| `useDeviceInstalls` | `api.fleet.installs` (paginated) |
-| `useRenameDevice` / `useMoveDevice` / `useSetKiosk` / `useRevokeDevice` / `useRemoveDevice` / `useRequestRotation` | `api.fleet.rename` / `move` / `setKiosk` (optimistic) / `revoke` / `remove` / `requestCredentialRotation` |
+| `useDevicesScreen({ groupId, search })` | `usePaginatedQuery(api.fleet.list, { groupId?, search? })` (50 per page; search is an argument of the same query, at most 100 characters; `groupId` must be a real group id, there is no "no group" filter). `presence` (`{ online, since, revoked }`) is on every `DeviceRow`, so there is no separate live-status query. In `data/devices/` | live |
+| `useDeviceDetail` | `api.fleet.get` (`DeviceDetail` has `presence` too) | live |
+| `useDeviceLiveness(id)` | `api.fleet.liveness({ deviceId })` → `{ lastContactAt, online, fastUntil }`; the detail screen calls it next to `useDeviceDetail`, not inside the loaded page | live |
+| `useWatchDevice` | `useMapped(useMutation(api.fleet.watch))` → `{ fastUntil }` (on open, then every 4 minutes while visible) | live |
+| `useCheckNow` / `useCheckResult(checkId)` | `api.fleet.checkNow({ deviceIds })` (admin, first 50 shown, 1 per minute) → `{ checkId }` / `api.fleet.checkResult({ checkId })` (subscribed for 60 s) | live |
+| `useDeviceInstalls` | `usePaginatedQuery(api.fleet.installs, { deviceId })` (in `data/devices/`) | live |
+| `useRenameDevice` / `useMoveDevice` / `useSetKiosk` / `useRevokeDevice` / `useRemoveDevice` / `useRequestRotation` | `api.fleet.rename` / `move` / `setKiosk` / `revoke` / `remove` / `requestCredentialRotation`. `rename`, `move` and `setKiosk` take `expectedRevision` (`stale_edit` when the PC changed); `setKiosk` is not optimistic (turning it off is a major action with a fresh step-up) | live |
 | `useGroupsScreen` | `api.groups.list` (`{ count, more }` per count → one number capped at 501, "500+") | live |
 | `useGroupDetail` | `api.groups.get` → `{ group, apps }` mapped to `GroupDetail` (assignment `_id` = app id until Step 10) | live |
 | `useCreateGroup` / `useUpdateGroup` / `useDeleteGroup` | `api.groups.create` → id (`plan_limit` detail "groups", `conflict` field "name") / `rename` (`expectedRevision`; description undefined = unchanged, "" = cleared) → `{ revision }` / `remove` (major; `has_dependents` detail lists what to move first) | live |
@@ -111,6 +113,17 @@ sign-in.
 | `useEnrollmentScreen(nowMinute)` | `usePaginatedQuery(api.enrollmentCodes.list, { nowMs })` (50 per page; `nowMs` = the minute) | live |
 | `useCreateEnrollmentCode` | `useAction(api.enrollmentCodes.create)` → `{ code, expiresAt }` (code shown once, kept in component state only; `plan_limit` detail `enrollmentCodes` / `suspended`, `invalid_argument` field `uses` / `ttlMinutes` / `label`, `not_found` group, `not_ready` URL) | live |
 | `useRevokeEnrollmentCode` | `useMutation(api.enrollmentCodes.revoke)` (major: fresh step-up) | live |
+
+## Device-list hooks (`data/devices/`, plan Step 7)
+
+The same pattern a third time: `DevicesApi` in `devices/api.ts`, `devices/live.ts`,
+demo hooks in `demo/hooks.ts` re-exported by `devices/demo.ts`, picked by the
+`@rulebox/devices-impl` alias (`vite.config.ts` and the `paths` entry in
+`tsconfig.json`). It holds the two `usePaginatedQuery` hooks, `useDevicesScreen`
+and `useDeviceInstalls`, so it is imported only by the lazy Devices, Device
+detail and Group detail screens and stays out of the `core` chunk. Every other device hook
+(`useDeviceDetail`, `useDeviceLiveness`, `useWatchDevice`, `useCheckNow`,
+`useCheckResult`, the writes) is in `DataApi` / `live/hooks.ts`.
 
 ## Step-up hooks (`data/stepup/`, plan 4.16)
 

@@ -353,6 +353,7 @@ export const strings = {
     noMatchBody: "Try another name or clear the filter.",
     searchCap: "Showing the first 50 matches. Type more of the name to narrow it down.",
     checkNow: "Check now",
+    checkNowFirst: (max: number) => `Check first ${max}`,
     checking: "Asking the PCs to call in…",
     checkResult: (answered: number, total: number) =>
       answered === total ? `All ${total} PCs answered.` : `${answered} of ${total} PCs answered so far. The others did not answer yet.`,

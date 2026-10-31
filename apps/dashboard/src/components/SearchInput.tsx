@@ -9,11 +9,14 @@ export function SearchInput({
   onChange,
   label,
   placeholder,
+  maxLength,
 }: {
   value: string;
   onChange: (value: string) => void;
   label: string;
   placeholder?: string;
+  /** Longest text the backend accepts; typing and pasting stop there. */
+  maxLength?: number;
 }) {
   const id = useId();
   return (
@@ -27,6 +30,7 @@ export function SearchInput({
         type="search"
         value={value}
         placeholder={placeholder}
+        maxLength={maxLength}
         autoComplete="off"
         spellCheck={false}
         onChange={(e) => onChange(e.target.value)}

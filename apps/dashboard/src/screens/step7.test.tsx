@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { MemoryRouter, Route, Routes } from "react-router";
 import { getFunctionName, type FunctionReference } from "convex/server";
 import { ConvexError } from "convex/values";
@@ -17,13 +17,19 @@ const cx = vi.hoisted(() => ({
   results: {} as Record<string, unknown>,
   pages: {} as Record<string, unknown[]>,
   paged: [] as { name: string; args: unknown }[],
+  queried: [] as string[],
   fns: {} as Record<string, (args?: unknown) => Promise<unknown>>,
 }));
 
 vi.mock("convex/react", () => ({
   useConvexAuth: () => ({ isLoading: false, isAuthenticated: true }),
   useQueries: (req: Record<string, { query: FunctionReference<"query">; args: unknown }>) =>
-    Object.fromEntries(Object.entries(req).map(([k, r]) => [k, cx.results[getFunctionName(r.query)]])),
+    Object.fromEntries(
+      Object.entries(req).map(([k, r]) => {
+        cx.queried.push(getFunctionName(r.query));
+        return [k, cx.results[getFunctionName(r.query)]];
+      }),
+    ),
   useQuery: () => undefined,
   usePaginatedQuery: (ref: FunctionReference<"query">, args: unknown) => {
     cx.paged.push({ name: getFunctionName(ref), args });
@@ -116,6 +122,7 @@ beforeEach(() => {
   cx.results = {};
   cx.pages = {};
   cx.paged = [];
+  cx.queried = [];
   cx.fns = {};
 });
 
@@ -149,6 +156,44 @@ describe("Devices (fleet:list)", () => {
     cx.results["groups:list"] = [{ _id: "g1", name: "Sales", createdAt: 1, revision: 0, devices: { count: 1, more: false }, employees: { count: 0, more: false } }];
     ui(<Devices />, "viewer", "/devices?group=g1");
     expect(cx.paged.at(-1)).toEqual({ name: "fleet:list", args: { groupId: "g1" } });
+  });
+
+  it("ignores a group filter that is not a group of this organization and clears it from the URL", async () => {
+    cx.results["groups:list"] = [{ _id: "g1", name: "Sales", createdAt: 1, revision: 0, devices: { count: 1, more: false }, employees: { count: 0, more: false } }];
+    ui(<Devices />, "viewer", "/devices?group=none");
+    await waitFor(() => expect(cx.paged.at(-1)).toEqual({ name: "fleet:list", args: {} }));
+    // The unknown id never reaches fleet:list (it would throw not_found into the region boundary).
+    expect(cx.paged.some((p) => JSON.stringify(p.args).includes("none"))).toBe(false);
+    expect(screen.queryByRole("alert")).toBeNull();
+    expect((screen.getByLabelText(strings.devices.groupFilter) as HTMLSelectElement).value).toBe("");
+  });
+
+  it("waits for the groups before running a list that has a group filter", () => {
+    ui(<Devices />, "viewer", "/devices?group=g1");
+    expect(cx.paged).toEqual([]);
+  });
+
+  it("caps the search text at 100 characters, typed, pasted or both", async () => {
+    cx.results["groups:list"] = [];
+    ui(<Devices />, "viewer", "/devices");
+    const box = screen.getByRole("searchbox") as HTMLInputElement;
+    expect(box.maxLength).toBe(100);
+    fireEvent.change(box, { target: { value: "x".repeat(150) } });
+    expect(box.value).toHaveLength(100);
+    await waitFor(() => expect(cx.paged.at(-1)).toEqual({ name: "fleet:list", args: { search: "x".repeat(100) } }));
+  });
+
+  it("with more than 50 PCs loaded, Check now says it checks the first 50", async () => {
+    cx.results["groups:list"] = [];
+    cx.pages["fleet:list"] = Array.from({ length: 60 }, (_, i) => row(`d${i}`, `PC ${i}`));
+    const checkNow = vi.fn(async () => ({ checkId: "c1" }));
+    cx.fns["fleet:checkNow"] = checkNow;
+    ui(<Devices />, "admin", "/devices");
+    expect(screen.queryByRole("button", { name: strings.devices.checkNow })).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: strings.devices.checkNowFirst(50) }));
+    await waitFor(() => expect(checkNow).toHaveBeenCalledOnce());
+    const calls = checkNow.mock.calls as unknown as [{ deviceIds: string[] }][];
+    expect(calls[0]![0].deviceIds).toHaveLength(50);
   });
 
   it("an empty fleet points an admin at the enrollment screen", () => {
@@ -194,6 +239,34 @@ describe("DeviceDetail (fleet:get)", () => {
     expect(screen.getByRole("heading", { level: 1, name: "Front desk" })).toBeTruthy();
     expect(screen.getByText(strings.device.lastContact)).toBeTruthy();
     await waitFor(() => expect(watch).toHaveBeenCalledWith({ deviceId: "d1" }));
+  });
+
+  it("subscribes to liveness next to fleet:get, and a PC that pinged but never reported still shows its last contact", () => {
+    // fleet:get has not answered yet: liveness is already requested (no waterfall).
+    cx.results["fleet:liveness"] = { lastContactAt: Date.now() - 20_000, online: true, fastUntil: null };
+    open();
+    expect(cx.queried).toContain("fleet:liveness");
+
+    cx.results["fleet:get"] = detail({ report: null });
+    cx.fns["fleet:watch"] = vi.fn(async () => ({ fastUntil: null }));
+    cleanup();
+    open();
+    expect(screen.getByText(strings.device.lastContact)).toBeTruthy();
+    expect(screen.queryByText(strings.common.neverSeen)).toBeNull();
+    // The report-less Status card and the Compatibility card both say there is no report yet.
+    expect(screen.getAllByText(strings.device.compatNone)).toHaveLength(2);
+  });
+
+  it("shows a dash, not 'Not seen yet', when the liveness query fails; 'Not seen yet' when it says never", () => {
+    cx.results["fleet:get"] = detail();
+    cx.fns["fleet:watch"] = vi.fn(async () => ({ fastUntil: null }));
+    cx.results["fleet:liveness"] = new ConvexError({ code: "internal" });
+    open();
+    expect(screen.queryByText(strings.common.neverSeen)).toBeNull();
+    cleanup();
+    cx.results["fleet:liveness"] = { lastContactAt: null, online: false, fastUntil: null };
+    open();
+    expect(screen.getByText(strings.common.neverSeen)).toBeTruthy();
   });
 
   it("renews watch mode every 4 minutes and stops when the page closes", async () => {

@@ -53,7 +53,7 @@ function attentionOf(o: OverviewScreen): Attention[] {
     out.push({ key: "pub", icon: IconDanger, tone: "danger", title: s.publishFailedTitle, detail: s.publishFailedDetail, action: { to: "/audit", label: strings.app.nav.audit } });
   }
   if (o.devicesWithoutGroup > 0) {
-    out.push({ key: "grp", icon: IconLayers, tone: "warning", title: s.noGroupTitle(o.devicesWithoutGroup), detail: s.noGroupDetail, action: { to: "/devices?group=none", label: s.noGroupAction } });
+    out.push({ key: "grp", icon: IconLayers, tone: "warning", title: s.noGroupTitle(o.devicesWithoutGroup), detail: s.noGroupDetail, action: { to: "/devices", label: s.noGroupAction } });
   }
   if (o.deviceCount > 300) {
     out.push({ key: "big", icon: IconWarn, tone: "warning", title: s.largeFleetTitle, detail: s.largeFleetDetail });

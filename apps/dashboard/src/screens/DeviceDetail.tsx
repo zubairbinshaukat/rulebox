@@ -15,7 +15,7 @@ import {
   useWatchDevice,
 } from "../data";
 import { useDeviceInstalls } from "../data/devices";
-import type { DeviceDetail as Detail, DeviceInstallRow } from "../data/types";
+import type { DeviceDetail as Detail, DeviceInstallRow, DeviceLiveness, QueryState } from "../data/types";
 import { Card } from "../components/Card";
 import { ConfirmDialog } from "../components/ConfirmDialog";
 import { DataTable, type Column } from "../components/DataTable";
@@ -66,15 +66,18 @@ function useWatch(deviceId: string, enabled: boolean) {
 }
 
 /** "Last contact 20 s ago" from the one `fleet:liveness` row; the minute bucket is shown as it is. */
-function LastContact({ deviceId }: { deviceId: string }) {
-  const liveness = useDeviceLiveness(deviceId);
+function LastContact({ liveness }: { liveness: QueryState<DeviceLiveness> }) {
   const at = liveness.status === "ready" ? liveness.data.lastContactAt : null;
-  return <KV label={s.lastContact} value={at === null ? <span className="dash-muted">{strings.common.neverSeen}</span> : <RelativeTime ms={at} />} />;
+  // Loading and a failed query show a dash; "Not seen yet" is only for a PC the server says never pinged.
+  const none = liveness.status === "ready" ? strings.common.neverSeen : "—";
+  return <KV label={s.lastContact} value={at === null ? <span className="dash-muted">{none}</span> : <RelativeTime ms={at} />} />;
 }
 
 export default function DeviceDetail() {
   const { id = "" } = useParams();
   const detail = useDeviceDetail(id);
+  // Depends only on the route id, so it subscribes next to `fleet:get` instead of after it.
+  const liveness = useDeviceLiveness(id);
   return (
     <div className="dash-page">
       {detail.status === "loading" ? <PageHeader title={strings.app.loading} back={{ to: "/devices", label: s.back }} /> : null}
@@ -87,13 +90,13 @@ export default function DeviceDetail() {
           </div>
         }
       >
-        {(d) => <Device d={d} />}
+        {(d) => <Device d={d} liveness={liveness} />}
       </QueryRegion>
     </div>
   );
 }
 
-function Device({ d }: { d: Detail }) {
+function Device({ d, liveness }: { d: Detail; liveness: QueryState<DeviceLiveness> }) {
   const now = useNow(30_000);
   useWatch(d._id, !d.revoked);
   const r = d.report;
@@ -134,22 +137,24 @@ function Device({ d }: { d: Detail }) {
       <div className="dash-grid dash-grid--main">
         <div className="dash-stack">
           <Card title={s.status}>
-            {r ? (
-              <dl className="dash-kv">
-                <LastContact deviceId={d._id} />
-                <KV label={s.lastReport} value={<RelativeTime ms={r.updatedAt} />} />
-                <KV label={s.agentVersion} value={<span className="dash-mono">{r.agentVersion ?? "—"}</span>} />
-                <KV label={s.windows} value={r.os ? `${r.os} ${r.osBuild ?? ""}` : "—"} />
-                <KV label={s.edition} value={r.osEdition ?? "—"} />
-                <KV label={s.ram} value={r.ramMb ? formatGb(Math.round(r.ramMb / 1024)) : "—"} />
-                <KV label={s.diskFree} value={r.diskFreeGb !== undefined ? formatGb(r.diskFreeGb) : "—"} />
-                <KV label={s.kioskPhase} value={strings.kioskPhase[r.kioskPhase ?? "unknown"]} />
-                <KV label={s.shellHealth} value={strings.shellHealth[r.shellHealth ?? "unknown"]} />
-                <KV label={s.lockdown} value={r.lockdownLevel ?? "—"} />
-              </dl>
-            ) : (
-              <EmptyState compact title={s.compatNone} />
-            )}
+            {/* A PC that has pinged but not reported yet still shows its last contact. */}
+            <dl className="dash-kv">
+              <LastContact liveness={liveness} />
+              {r ? (
+                <>
+                  <KV label={s.lastReport} value={<RelativeTime ms={r.updatedAt} />} />
+                  <KV label={s.agentVersion} value={<span className="dash-mono">{r.agentVersion ?? "—"}</span>} />
+                  <KV label={s.windows} value={r.os ? `${r.os} ${r.osBuild ?? ""}` : "—"} />
+                  <KV label={s.edition} value={r.osEdition ?? "—"} />
+                  <KV label={s.ram} value={r.ramMb ? formatGb(Math.round(r.ramMb / 1024)) : "—"} />
+                  <KV label={s.diskFree} value={r.diskFreeGb !== undefined ? formatGb(r.diskFreeGb) : "—"} />
+                  <KV label={s.kioskPhase} value={strings.kioskPhase[r.kioskPhase ?? "unknown"]} />
+                  <KV label={s.shellHealth} value={strings.shellHealth[r.shellHealth ?? "unknown"]} />
+                  <KV label={s.lockdown} value={r.lockdownLevel ?? "—"} />
+                </>
+              ) : null}
+            </dl>
+            {r ? null : <EmptyState compact title={s.compatNone} />}
           </Card>
 
           <RegionBoundary>

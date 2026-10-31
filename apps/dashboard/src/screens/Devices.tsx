@@ -30,6 +30,8 @@ const s = strings.devices;
 /** `MAX_CHECK_DEVICES` of convex/lib/limits.ts, and how long the result stays subscribed. */
 const MAX_CHECK_DEVICES = 50;
 const CHECK_WATCH_MS = 60_000;
+/** `MAX_SEARCH_TEXT` of convex/fleet.ts: `fleet:list` throws `invalid_argument` above it. */
+const MAX_SEARCH_TEXT = 100;
 
 function columns(now: number): Column<DeviceRow>[] {
   return [
@@ -86,7 +88,7 @@ function columns(now: number): Column<DeviceRow>[] {
     },
   ];
 }
-/** Asks the visible PCs (at most 50) to call in; `fleet:checkNow` allows one request a minute per organization. */
+/** Asks the visible PCs (the first 50, and the label says so) to call in; `fleet:checkNow` allows one request a minute per organization. */
 function CheckNowButton({ ids, onStarted }: { ids: string[]; onStarted: (checkId: string) => void }) {
   const checkNow = useCheckNow();
   const toast = useToast();
@@ -111,7 +113,7 @@ function CheckNowButton({ ids, onStarted }: { ids: string[]; onStarted: (checkId
       }}
     >
       <IconRefresh aria-hidden="true" />
-      {s.checkNow}
+      {ids.length > MAX_CHECK_DEVICES ? s.checkNowFirst(MAX_CHECK_DEVICES) : s.checkNow}
     </Button>
   );
 }
@@ -133,10 +135,21 @@ function CheckResultNotice({ checkId, onEnd }: { checkId: string; onEnd: () => v
 /** `fleet:list` (search and group filter are its arguments); admins can "Check now" the visible PCs. */
 export default function Devices() {
   const [params, setParams] = useSearchParams();
-  const groupId = params.get("group") ?? "";
+  const requested = params.get("group") ?? "";
   const [search, setSearch] = useState("");
-  const debounced = useDebounced(search.trim(), 250);
+  const debounced = useDebounced(search.trim().slice(0, MAX_SEARCH_TEXT), 250);
   const groups = useGroupsScreen();
+  // `fleet:list` throws not_found for an id that is not a group of this organization (an old link, a deleted group):
+  // such a value is dropped from the query and from the URL. Until the groups are known, a requested filter waits.
+  const known = groups.status === "ready" ? groups.data.some((g) => g._id === requested) : groups.status === "error";
+  const stale = requested !== "" && groups.status === "ready" && !known;
+  const groupId = known ? requested : "";
+  useEffect(() => {
+    if (!stale) return;
+    const next = new URLSearchParams(params);
+    next.delete("group");
+    setParams(next, { replace: true });
+  }, [stale, params, setParams]);
 
   return (
     <div className="dash-page">
@@ -153,7 +166,13 @@ export default function Devices() {
         }
       />
       <div className="dash-filters">
-        <SearchInput value={search} onChange={setSearch} label={s.searchLabel} placeholder={s.searchPlaceholder} />
+        <SearchInput
+          value={search}
+          onChange={(text) => setSearch(text.slice(0, MAX_SEARCH_TEXT))}
+          label={s.searchLabel}
+          placeholder={s.searchPlaceholder}
+          maxLength={MAX_SEARCH_TEXT}
+        />
         <label className="dash-sr" htmlFor="device-group-filter">
           {s.groupFilter}
         </label>
@@ -174,7 +193,13 @@ export default function Devices() {
       </div>
       {/* The paginated query throws its errors while rendering: the list gets its own boundary. */}
       <RegionBoundary>
-        <DeviceList groupId={groupId || undefined} search={debounced || undefined} />
+        {requested && groups.status === "loading" ? (
+          <Card body="none">
+            <SkeletonRows rows={8} columns={5} />
+          </Card>
+        ) : (
+          <DeviceList groupId={groupId || undefined} search={debounced || undefined} />
+        )}
       </RegionBoundary>
     </div>
   );
