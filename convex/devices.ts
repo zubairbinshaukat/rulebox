@@ -46,8 +46,12 @@ const headValue = v.object({
  * The agent's ONE subscription from Step 9 on (PRD 11.1 rule 6; plan 5.1
  * amended, A5). The head is small and unsigned: when `head.version` is above
  * what the agent applied, it calls `fetchDesired` once and applies the body
- * only when its signature verifies and its version, key id and SHA-256 match
- * the head. `keys` = every `policyKeys` row of the device's organization,
+ * only when its signature verifies (it covers every byte of the payload with
+ * its version, key id, org and device) and its version and key id match the
+ * head. There is no SHA-256 check of the payload against the head (owner
+ * decision 2026-11-01, option A): `contentHash` is the hash of the document
+ * with version 0, not of the signed bytes, and nothing is applied from the
+ * head alone. `keys` = every `policyKeys` row of the device's organization,
  * oldest first (with endorsements, so an agent that was offline through
  * rotations can walk the chain); `retiredKeyIds` = the retired ones.
  *

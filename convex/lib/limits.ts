@@ -209,9 +209,8 @@ export const MAX_EXE_PATH = 260;
 /** Largest installer the agent downloads (4.8: 4 GiB). */
 export const MAX_INSTALLER_BYTES = 4 * 1024 * 1024 * 1024;
 export const MAX_SUCCESS_EXIT_CODES = 16;
-/** `apps:list` page size cap and the per-row group count cap (shown as "100+"). */
+/** `apps:list` page size cap. */
 export const MAX_APP_PAGE = 50;
-export const APP_GROUP_COUNT_CAP = 100;
 /** `apps:get`: assignments (`appAssignments.by_app`), file types and direct employees read per app. */
 export const MAX_APP_ASSIGNMENTS = 500;
 export const MAX_APP_FILE_TYPES = 201;

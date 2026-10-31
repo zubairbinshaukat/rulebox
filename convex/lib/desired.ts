@@ -1,4 +1,6 @@
+import type { CatalogApp, CatalogWebPermissions } from "@rulebox/types";
 import { sha256HexSync } from "./crypto";
+import { programDenied } from "./denyList";
 import type { OrgSettings } from "./validators";
 
 // The signed desired-state document, version 2 (plan 4.4 as amended by A5,
@@ -25,55 +27,11 @@ export const FILES_APP_ID = "files";
 
 // ---------------------------------------------------------------- catalogue entry (plan 4.8)
 
-/**
- * `CatalogApp` as the agent reads it (plan 4.8; Rust `rulebox_policy::catalog`
- * from Step 10, when this local type is replaced by the ts-rs export). Field
- * order here IS the serialized order.
- */
-export type CatalogInstall = {
-  kind: "msi" | "exe" | "portable";
-  url: string;
-  sha256: string;
-  sizeBytes: number;
-  silentArgs: string[];
-  productCode: string | null;
-  successExitCodes: number[];
-  removeWhenUnassigned: boolean;
-};
-
-export type CatalogApp = {
-  id: string;
-  name: string;
-  description: string | null;
-  kind: "builtin" | "web" | "desktop";
-  builtin: { tool: "files" } | null;
-  web: { url: string; allowedDomains: string[]; permissions: WebPermissions } | null;
-  desktop: {
-    exe: string;
-    args: string[];
-    fileArgTemplate: string[];
-    install: CatalogInstall | null;
-    resetFolders: string[];
-  } | null;
-  pinnedTaskbar: boolean;
-  pinnedDesktop: boolean;
-  hue: number | null;
-  icon: { url: string; sha256: string } | null;
-  audience: "everyone" | "selected";
-  employeeIds: string[];
-  revision: number;
-};
-
-export type WebPermissions = {
-  camera: boolean;
-  microphone: boolean;
-  screenShare: boolean;
-  clipboardRead: boolean;
-  notifications: boolean;
-  downloads: boolean;
-  printing: boolean;
-  geolocation: boolean;
-};
+// `CatalogApp` as the agent reads it: the ts-rs export of Rust
+// `rulebox_policy::catalog` (Step 10). The type checks the fields; the
+// serialized key order is the order of the object literals below, which
+// follows the Rust struct (the committed vector pins the bytes).
+type WebPermissions = CatalogWebPermissions;
 
 // ---------------------------------------------------------------- builder input
 
@@ -225,10 +183,18 @@ function catalogEntry(
  * the group that the group does not assign (audience "selected", no pins).
  * Desktop apps granted only directly are left out (they would need an install
  * the group did not ask for). Disabled employees count for nothing.
+ *
+ * A desktop app whose program is on the program deny list
+ * (`lib/denyList.ts`, PRD 7.3) is left out too, and with it every file-type
+ * rule that names it: `apps` refuses such programs since Step 10, but a row
+ * saved before the list existed (or before a name was added to it) must not
+ * reach a device.
  */
 export function buildCatalog(input: BuildInput): CatalogApp[] {
   if (input.group === null) return [filesEntry()];
-  const apps = new Map(input.apps.filter((a) => !a.archived).map((a) => [a._id, a]));
+  const usable = (a: BuildApp): boolean =>
+    !a.archived && !(a.kind === "desktop" && a.desktop !== undefined && programDenied(a.desktop.exe));
+  const apps = new Map(input.apps.filter(usable).map((a) => [a._id, a]));
   const active = new Set(input.employees.filter((e) => !e.disabled).map((e) => e._id));
   const grants = new Map<string, string[]>();
   for (const g of input.employeeApps) {

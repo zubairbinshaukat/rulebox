@@ -288,6 +288,24 @@ describe("buildDeviceDoc rules (plan 4.4)", () => {
     expect(catalog[1]).toMatchObject({ audience: "selected", pinnedTaskbar: false, pinnedDesktop: false, employeeIds: ["emp_a", "emp_b"] });
   });
 
+  test("a desktop app whose program is on the deny list (an older row) is left out, and so are its file-type rules", () => {
+    const denied = (exe: string): BuildInput => ({
+      ...VECTOR_INPUT,
+      apps: VECTOR_INPUT.apps.map((a) =>
+        a._id === VECTOR_IDS.desktopAppId && a.desktop !== undefined ? { ...a, desktop: { ...a.desktop, exe } } : a,
+      ),
+    });
+    for (const exe of ["{System}\\wscript.exe", "{System}\\WindowsPowerShell\\v1.0\\PowerShell.EXE", "{ProgramFiles}\\Tools\\cmd"]) {
+      const doc = buildDeviceDoc(denied(exe), 1);
+      expect(doc.apps).toEqual(["files", VECTOR_IDS.webAppId]);
+      expect((doc.catalog as { id: string }[]).map((c) => c.id)).toEqual(["files", VECTOR_IDS.webAppId]);
+      expect(doc.fileHandlers).toEqual({});
+    }
+    // An allowed program keeps the app and its rule (the vector input).
+    const ok = buildDeviceDoc(VECTOR_INPUT, 1);
+    expect(ok.fileHandlers).toEqual({ ".docx": VECTOR_IDS.desktopAppId });
+  });
+
   test("contentHash ignores the version; any content change changes it", () => {
     const a = buildDeviceDoc(VECTOR_INPUT, 1);
     const b = buildDeviceDoc(VECTOR_INPUT, 2);
