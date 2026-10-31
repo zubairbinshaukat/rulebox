@@ -591,6 +591,12 @@ const ROWS: Row[] = [
   },
   { name: "employees:unlock", call: (a, f) => a.mutation(api.employees.unlock, { employeeId: f.employeeId }), expect: { ...ADMIN_UNLOCKED, foreign: "not_found" } },
   {
+    name: "employees:save",
+    call: (a, f) =>
+      a.mutation(api.employees.save, { employeeId: f.employeeId, expectedRevision: 0, name: "Maya", username: "maya", groupIds: [], appIds: [] }),
+    expect: { ...ADMIN_UNLOCKED, foreign: "not_found" },
+  },
+  {
     name: "employees:remove",
     call: (a, f) => a.mutation(api.employees.remove, { employeeId: f.employeeId }),
     expect: { ...ADMIN_MAJOR, default: "invalid_argument", foreign: "not_found" }, // still active

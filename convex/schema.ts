@@ -406,10 +406,17 @@ export default defineSchema({
     orgId: v.id("organizations"),
     groupId: v.id("groups"),
     employeeId: v.id("employees"),
+    // true = the employee is ENABLED and has at least one direct app grant
+    // (kept by `lib/employeeSync.syncGrantFlags`). The publisher reads only these
+    // rows (`by_group_grants`), so a group with no such members costs one read.
+    // Only ever stale-TRUE (an app purge deletes grants without touching it),
+    // which costs a wasted read; never stale-false.
+    grantsActive: v.optional(v.boolean()),
   })
     .index("by_group", ["groupId"])
     .index("by_employee", ["employeeId"])
-    .index("by_group_employee", ["groupId", "employeeId"]),
+    .index("by_group_employee", ["groupId", "employeeId"])
+    .index("by_group_grants", ["groupId", "grantsActive"]),
 
   // grows (slowly)
   apps: defineTable({
@@ -537,6 +544,21 @@ export default defineSchema({
     snapshotEpoch: v.number(),
     snapshotId: v.optional(v.id("rosterSnapshots")),
   }).index("by_group", ["groupId"]),
+
+  // grows only while an organization has no usable signing key. A removal
+  // ("employee E leaves group G's roster") that could not be signed when the
+  // employee was disabled (revocation is never blocked, Step 11 review); the
+  // resync appends the signed entry once a key is available and deletes the
+  // row in the same transaction (`employees:resyncRoster`). `employeeId` is a
+  // string: the employee may have been deleted since.
+  rosterPending: defineTable({
+    orgId: v.id("organizations"),
+    groupId: v.id("groups"),
+    employeeId: v.string(),
+  })
+    .index("by_org", ["orgId"])
+    .index("by_group_employee", ["groupId", "employeeId"])
+    .index("by_employee", ["employeeId"]),
 
   // grows (pruned at each snapshot). One signed roster change (lib/roster.ts).
   rosterEntries: defineTable({

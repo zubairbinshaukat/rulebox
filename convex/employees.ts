@@ -2,9 +2,9 @@ import { paginationOptsValidator, paginationResultValidator } from "convex/serve
 import { v } from "convex/values";
 import { internal } from "./_generated/api";
 import type { Doc, Id } from "./_generated/dataModel";
-import { internalMutation, internalQuery, type DatabaseReader } from "./_generated/server";
-import { hashSecret } from "./lib/argon";
-import { writeAudit } from "./lib/audit";
+import { internalMutation, internalQuery, type DatabaseReader, type MutationCtx } from "./_generated/server";
+import { ARGON2_PARAMS, hashSecret } from "./lib/argon";
+import { writeAudit, type AuditActor } from "./lib/audit";
 import { checkRevision, getInOrg, nextRevision } from "./lib/authz";
 import {
   assertEmployeePassword,
@@ -14,7 +14,18 @@ import {
   searchQuery,
   searchTextOf,
 } from "./lib/employeeRules";
-import { appendRoster, assertGroupRoom, changeMemberships, membershipsOf, planRoster, publishForGrants, type RosterPlan } from "./lib/employeeSync";
+import {
+  appendRoster,
+  appendRosterOrQueue,
+  assertGroupRoom,
+  hasDirectApps,
+  membershipsOf,
+  planRoster,
+  publishForGrants,
+  resyncPendingRoster,
+  syncGrantFlags,
+  type RosterPlan,
+} from "./lib/employeeSync";
 import { fail } from "./lib/errors";
 import { memberAction, memberMutation, memberQuery } from "./lib/functions";
 import {
@@ -24,6 +35,7 @@ import {
   MAX_EMPLOYEE_GROUPS,
   MAX_EMPLOYEE_PAGE,
   MAX_EMPLOYEE_SEARCH,
+  MAX_EMPLOYEE_SEARCH_SCAN,
   MAX_GROUPS_JOINED,
   MAX_SEARCH_TEXT,
 } from "./lib/limits";
@@ -130,8 +142,11 @@ export const list = memberQuery("viewer")({
 
 /**
  * Employees whose name or username starts with the words of `text` (viewer,
- * `search_text`, at most MAX_EMPLOYEE_SEARCH rows; `capped` = there were more).
- * `groupId` keeps only members of that group (checked after the search).
+ * `search_text`, at most MAX_EMPLOYEE_SEARCH rows; `capped` = there may be more).
+ * `groupId` keeps only members of that group: the search index has no group
+ * field, so up to MAX_EMPLOYEE_SEARCH_SCAN hits are examined (one index range
+ * each) until MAX_EMPLOYEE_SEARCH members are found; `capped` is also set when
+ * that scan ran out, because the answer may then be incomplete.
  */
 export const search = memberQuery("viewer")({
   args: { text: v.string(), groupId: v.optional(v.string()) },
@@ -140,19 +155,24 @@ export const search = memberQuery("viewer")({
     const group = args.groupId === undefined ? null : await getInOrg(ctx, "groups", args.groupId, ctx.orgId);
     const text = searchQuery(args.text, MAX_SEARCH_TEXT);
     if (text === "") return { rows: [], capped: false };
+    const scan = group === null ? MAX_EMPLOYEE_SEARCH : MAX_EMPLOYEE_SEARCH_SCAN;
     const hits = await ctx.db
       .query("employees")
       .withSearchIndex("search_text", (q) => q.search("searchText", text).eq("orgId", ctx.orgId))
-      .take(MAX_EMPLOYEE_SEARCH + 1);
-    const capped = hits.length > MAX_EMPLOYEE_SEARCH;
+      .take(scan + 1);
+    let capped = hits.length > scan;
     const kept: Doc<"employees">[] = [];
-    for (const e of hits.slice(0, MAX_EMPLOYEE_SEARCH)) {
+    for (const e of hits.slice(0, scan)) {
       if (group !== null) {
         const member = await ctx.db
           .query("groupMembers")
           .withIndex("by_group_employee", (q) => q.eq("groupId", group._id).eq("employeeId", e._id))
           .first();
         if (member === null) continue;
+      }
+      if (kept.length === MAX_EMPLOYEE_SEARCH) {
+        capped = true;
+        break;
       }
       kept.push(e);
     }
@@ -283,14 +303,23 @@ export const create = memberAction("admin")({
   },
   returns: v.id("employees"),
   handler: async (ctx, args): Promise<Id<"employees">> => {
-    // A bad password never costs a hash; the mutation checks everything again.
+    // Everything cheap first, so a bad request costs no hash: the rules, then one
+    // read-only precheck (username free, groups and apps in the organization,
+    // plan limit, group room), then the rate limit (every create, with or
+    // without a password), then the hash. The mutation checks it all again.
+    normalizeEmployeeName(args.name);
     const username = checkedUsername(args.username);
-    let phc: string | undefined;
-    if (args.password !== undefined && args.password !== "") {
-      assertEmployeePassword(args.password, username);
-      await consumeOrFail(ctx, "employeeWrites", ctx.orgId);
-      phc = await hashSecret(ctx, args.password);
-    }
+    checkedQuota(args.quotaGb);
+    const password = args.password !== undefined && args.password !== "" ? args.password : undefined;
+    if (password !== undefined) assertEmployeePassword(password, username);
+    await ctx.runQuery(internal.employees.createPrecheck, {
+      orgId: ctx.orgId,
+      username,
+      groupIds: args.groupIds,
+      appIds: args.appIds ?? [],
+    });
+    await consumeOrFail(ctx, "employeeWrites", ctx.orgId);
+    const phc = password === undefined ? undefined : await hashSecret(ctx, password);
     return await ctx.runMutation(internal.employees.storeNew, {
       orgId: ctx.orgId,
       actor: ctx.actor,
@@ -303,6 +332,37 @@ export const create = memberAction("admin")({
     });
   },
 });
+
+/**
+ * What `create` can know before it spends a rate-limit token and a hash:
+ * a free username (`conflict`), groups and apps of the organization
+ * (`not_found`, `too_large`, `invalid_argument` for an archived app), room in the plan
+ * (`plan_limit`) and in the groups (`too_large`). Reads only; `storeNew` checks
+ * everything again in the transaction that inserts.
+ */
+export const createPrecheck = internalQuery({
+  args: { orgId: v.id("organizations"), username: v.string(), groupIds: v.array(v.string()), appIds: v.array(v.string()) },
+  returns: v.null(),
+  handler: async (ctx, args) => {
+    const taken = await ctx.db
+      .query("employees")
+      .withIndex("by_org_username", (q) => q.eq("orgId", args.orgId).eq("username", args.username))
+      .first();
+    if (taken !== null) fail("conflict", { field: "username" });
+    const groups = await resolveIds(ctx, "groups", args.groupIds, args.orgId, MAX_EMPLOYEE_GROUPS, "employee groups");
+    const apps = await resolveIds(ctx, "apps", args.appIds, args.orgId, MAX_EMPLOYEE_APPS, "employee apps");
+    if (apps.some((a) => a.archived)) fail("invalid_argument", { field: "appIds" });
+    await assertWithinLimit(ctx, args.orgId, "employees");
+    await assertGroupRoom(ctx, args.orgId, groups.map((g) => g._id));
+    return null;
+  },
+});
+
+/** An Argon2id PHC string made with the app's parameters (`lib/argon.ts`): what only `hashSecret` produces. */
+function isAppPhc(phc: string): boolean {
+  const p = ARGON2_PARAMS;
+  return phc.startsWith(`$argon2id$v=19$m=${p.memorySize},t=${p.iterations},p=${p.parallelism}$`);
+}
 
 /** The writer of a new employee row (and of its first `employeeSecrets` row). */
 export const storeNew = internalMutation({
@@ -322,7 +382,7 @@ export const storeNew = internalMutation({
     const name = normalizeEmployeeName(args.name);
     const username = checkedUsername(args.username);
     const quotaGb = checkedQuota(args.quotaGb);
-    if (args.phc !== undefined && !args.phc.startsWith("$argon2id$")) fail("invalid_argument", { field: "password" });
+    if (args.phc !== undefined && !isAppPhc(args.phc)) fail("invalid_argument", { field: "password" });
     const taken = await ctx.db
       .query("employees")
       .withIndex("by_org_username", (q) => q.eq("orgId", orgId).eq("username", username))
@@ -352,7 +412,7 @@ export const storeNew = internalMutation({
     if (args.phc !== undefined) await ctx.db.insert("employeeSecrets", { employeeId, passwordHash: args.phc });
     const plan: RosterPlan = new Map();
     for (const g of groups) {
-      await ctx.db.insert("groupMembers", { orgId, groupId: g._id, employeeId });
+      await ctx.db.insert("groupMembers", { orgId, groupId: g._id, employeeId, grantsActive: apps.length > 0 });
       planRoster(plan, g._id, { employeeId, credentialRevision });
     }
     for (const a of apps) await ctx.db.insert("employeeApps", { orgId, employeeId, appId: a._id });
@@ -395,39 +455,197 @@ export const update = memberMutation("admin")({
   handler: async (ctx, args) => {
     const e = await getInOrg(ctx, "employees", args.employeeId, ctx.orgId);
     checkRevision(e, args.expectedRevision);
-    const name = normalizeEmployeeName(args.name);
-    const username = checkedUsername(args.username);
-    const quotaGb = checkedQuota(args.quotaGb);
+    return { revision: await applyChanges(ctx, e, { profile: { name: args.name, username: args.username, quotaGb: args.quotaGb } }) };
+  },
+});
+
+type ChangeCtx = Pick<MutationCtx, "db" | "scheduler"> & { orgId: Id<"organizations">; actor: AuditActor };
+
+/**
+ * The one writer of an employee's profile, groups and direct apps, shared by
+ * `update`, `setGroups`, `setDirectApps` and `save`. Each part is optional; the
+ * parts given are validated first, then applied together in ONE transaction with
+ * ONE revision bump and, per group, at most one signed roster entry. Returns the
+ * employee's revision (unchanged when nothing differed: no write at all). The
+ * caller has checked the revision.
+ */
+async function applyChanges(
+  ctx: ChangeCtx,
+  e: Doc<"employees">,
+  parts: { profile?: { name: string; username: string; quotaGb: number | undefined }; groupIds?: string[]; appIds?: string[] },
+): Promise<number> {
+  const orgId = ctx.orgId;
+  // ---- validate and diff
+  let profile: { name: string; username: string; quotaGb: number | undefined; changed: string[] } | undefined;
+  if (parts.profile !== undefined) {
+    const name = normalizeEmployeeName(parts.profile.name);
+    const username = checkedUsername(parts.profile.username);
+    const quotaGb = checkedQuota(parts.profile.quotaGb);
     const changed: string[] = [];
     if (name !== e.name) changed.push("name");
     if (username !== e.username) changed.push("username");
     if (quotaGb !== e.quotaGb) changed.push("quota");
-    if (changed.length === 0) return { revision: e.revision };
+    if (changed.length > 0) profile = { name, username, quotaGb, changed };
+  }
+  const renamed = profile !== undefined && profile.username !== e.username;
+  const wantedGroups = parts.groupIds === undefined ? undefined : await resolveIds(ctx, "groups", parts.groupIds, orgId, MAX_EMPLOYEE_GROUPS, "employee groups");
+  const wantedApps = parts.appIds === undefined ? undefined : await resolveIds(ctx, "apps", parts.appIds, orgId, MAX_EMPLOYEE_APPS, "employee apps");
 
-    const renamed = username !== e.username;
+  const current = wantedGroups !== undefined || (renamed && !e.disabled) ? await membershipsOf(ctx, e._id) : [];
+  let addGroups: Doc<"groups">[] = [];
+  let removeGroups: Doc<"groupMembers">[] = [];
+  if (wantedGroups !== undefined) {
+    const wantedIds = new Set<string>(wantedGroups.map((g) => g._id));
+    const haveIds = new Set<string>(current.map((m) => m.groupId));
+    addGroups = wantedGroups.filter((g) => !haveIds.has(g._id));
+    removeGroups = current.filter((m) => !wantedIds.has(m.groupId));
+  }
+  let currentGrants: Doc<"employeeApps">[] = [];
+  let addApps: Doc<"apps">[] = [];
+  let removeApps: Doc<"employeeApps">[] = [];
+  if (wantedApps !== undefined) {
+    currentGrants = await ctx.db
+      .query("employeeApps")
+      .withIndex("by_employee", (q) => q.eq("employeeId", e._id))
+      .take(MAX_EMPLOYEE_APPS + 1);
+    const haveIds = new Set<string>(currentGrants.map((g) => g.appId));
+    const wantedIds = new Set<string>(wantedApps.map((a) => a._id));
+    addApps = wantedApps.filter((a) => !haveIds.has(a._id));
+    removeApps = currentGrants.filter((g) => !wantedIds.has(g.appId));
+  }
+  const groupsChanged = addGroups.length > 0 || removeGroups.length > 0;
+  const appsChanged = addApps.length > 0 || removeApps.length > 0;
+  if (profile === undefined && !groupsChanged && !appsChanged) return e.revision;
+  if (addApps.some((a) => a.archived)) fail("invalid_argument", { field: "appIds" });
+  if (profile !== undefined && renamed) {
+    const taken = await ctx.db
+      .query("employees")
+      .withIndex("by_org_username", (q) => q.eq("orgId", orgId).eq("username", profile.username))
+      .first();
+    if (taken !== null && taken._id !== e._id) fail("conflict", { field: "username" });
+  }
+  if (addGroups.length > 0) await assertGroupRoom(ctx, orgId, addGroups.map((g) => g._id));
+
+  // ---- roster: one entry per affected group (an enabled employee only)
+  const name = profile?.name ?? e.name;
+  const credentialRevision = renamed ? e.credentialRevision + 1 : e.credentialRevision;
+  if (!e.disabled) {
+    const plan: RosterPlan = new Map();
+    const removed = new Set<string>(removeGroups.map((m) => m.groupId));
+    for (const g of addGroups) planRoster(plan, g._id, { employeeId: e._id, credentialRevision });
+    for (const m of removeGroups) planRoster(plan, m.groupId, { employeeId: e._id, credentialRevision: null });
     if (renamed) {
-      const taken = await ctx.db
-        .query("employees")
-        .withIndex("by_org_username", (q) => q.eq("orgId", ctx.orgId).eq("username", username))
-        .first();
-      if (taken !== null && taken._id !== e._id) fail("conflict", { field: "username" });
+      for (const m of current) if (!removed.has(m.groupId)) planRoster(plan, m.groupId, { employeeId: e._id, credentialRevision });
     }
-    const revision = nextRevision(e);
-    const credentialRevision = renamed ? e.credentialRevision + 1 : e.credentialRevision;
-    await ctx.db.patch(e._id, { name, username, searchText: searchTextOf(name, username), quotaGb, credentialRevision, revision });
-    if (renamed && !e.disabled) {
-      const plan: RosterPlan = new Map();
-      for (const m of await membershipsOf(ctx, e._id)) planRoster(plan, m.groupId, { employeeId: e._id, credentialRevision });
-      await appendRoster(ctx, ctx.orgId, plan);
-    }
+    await appendRoster(ctx, orgId, plan);
+  }
+
+  // ---- writes
+  const hadGrants = wantedApps === undefined ? await hasDirectApps(ctx, e._id) : currentGrants.length > 0;
+  const hasGrants = wantedApps === undefined ? hadGrants : wantedApps.length > 0;
+  const revision = nextRevision(e);
+  if (profile !== undefined) {
+    await ctx.db.patch(e._id, {
+      name: profile.name,
+      username: profile.username,
+      searchText: searchTextOf(profile.name, profile.username),
+      quotaGb: profile.quotaGb,
+      credentialRevision,
+      revision,
+    });
+  } else {
+    await ctx.db.patch(e._id, { revision });
+  }
+  const removeNames: string[] = [];
+  for (const m of removeGroups) removeNames.push((await ctx.db.get(m.groupId))?.name ?? "a group");
+  for (const g of addGroups) {
+    await ctx.db.insert("groupMembers", { orgId, groupId: g._id, employeeId: e._id, grantsActive: !e.disabled && hasGrants });
+  }
+  for (const m of removeGroups) await ctx.db.delete(m._id);
+  for (const a of addApps) await ctx.db.insert("employeeApps", { orgId, employeeId: e._id, appId: a._id });
+  for (const g of removeApps) await ctx.db.delete(g._id);
+  if (appsChanged) await syncGrantFlags(ctx, e);
+
+  // ---- audit, in the order profile, groups, apps
+  if (profile !== undefined) {
     await writeAudit(ctx, {
-      orgId: ctx.orgId,
+      orgId,
       actor: ctx.actor,
       action: "employee.updated",
       targetType: "employee",
       targetId: e._id,
       targetLabel: name,
-      summary: `Changed the ${changed.join(", ")} of ${name}`,
+      summary: `Changed the ${profile.changed.join(", ")} of ${name}`,
+    });
+  }
+  if (groupsChanged) {
+    const bits: string[] = [];
+    if (addGroups.length > 0) bits.push(`added to ${addGroups.map((g) => g.name).join(", ")}`);
+    if (removeNames.length > 0) bits.push(`removed from ${removeNames.join(", ")}`);
+    await writeAudit(ctx, {
+      orgId,
+      actor: ctx.actor,
+      action: "employee.groupsChanged",
+      targetType: "employee",
+      targetId: e._id,
+      targetLabel: name,
+      summary: `Changed the groups of ${name} (${bits.join("; ")})`,
+    });
+  }
+  if (appsChanged) {
+    await writeAudit(ctx, {
+      orgId,
+      actor: ctx.actor,
+      action: "employee.appsChanged",
+      targetType: "employee",
+      targetId: e._id,
+      targetLabel: name,
+      summary: `Changed the apps of ${name} (${addApps.length} added, ${removeApps.length} removed)`,
+    });
+  }
+
+  // ---- publish: direct grants show in the catalogue of the employee's groups
+  // (a disabled employee is in no document). Every grant change republishes the
+  // current groups; a group change does when the employee has grants before or after.
+  if (!e.disabled) {
+    const groupIds = new Set<Id<"groups">>();
+    if (groupsChanged && (hadGrants || hasGrants)) {
+      for (const g of addGroups) groupIds.add(g._id);
+      for (const m of removeGroups) groupIds.add(m.groupId);
+    }
+    if (appsChanged) for (const m of await membershipsOf(ctx, e._id)) groupIds.add(m.groupId);
+    if (groupIds.size > 0) await requestPublish(ctx, orgId, { groupIds: [...groupIds] });
+  }
+  return revision;
+}
+
+/**
+ * Save the whole employee form at once (admin; unlocked session): profile,
+ * groups and direct apps in ONE transaction with ONE revision check. Either
+ * everything is stored and the new revision returned, or nothing is stored (a
+ * `stale_edit`, `not_ready`, `too_large`, `conflict`, `not_found`... leaves the
+ * employee, and so the form's revision, exactly as it was). Same rules as
+ * `update`, `setGroups` and `setDirectApps`; a part that changes nothing writes
+ * nothing, and nothing changed at all returns the same revision.
+ */
+export const save = memberMutation("admin")({
+  args: {
+    employeeId: v.string(),
+    expectedRevision: v.number(),
+    name: v.string(),
+    username: v.string(),
+    quotaGb: v.optional(v.number()),
+    groupIds: v.array(v.string()),
+    appIds: v.array(v.string()),
+  },
+  returns: v.object({ revision: v.number() }),
+  handler: async (ctx, args) => {
+    const e = await getInOrg(ctx, "employees", args.employeeId, ctx.orgId);
+    checkRevision(e, args.expectedRevision);
+    const revision = await applyChanges(ctx, e, {
+      profile: { name: args.name, username: args.username, quotaGb: args.quotaGb },
+      groupIds: args.groupIds,
+      appIds: args.appIds,
     });
     return { revision };
   },
@@ -447,17 +665,7 @@ export const setGroups = memberMutation("admin")({
   handler: async (ctx, args) => {
     const e = await getInOrg(ctx, "employees", args.employeeId, ctx.orgId);
     checkRevision(e, args.expectedRevision);
-    const wanted = await resolveIds(ctx, "groups", args.groupIds, ctx.orgId, MAX_EMPLOYEE_GROUPS, "employee groups");
-    const current = await membershipsOf(ctx, e._id);
-    const wantedIds = new Set<string>(wanted.map((g) => g._id));
-    const haveIds = new Set<string>(current.map((m) => m.groupId));
-    const add = wanted.filter((g) => !haveIds.has(g._id));
-    const remove = current.filter((m) => !wantedIds.has(m.groupId));
-    if (add.length === 0 && remove.length === 0) return { revision: e.revision };
-    const removeNames: string[] = [];
-    for (const m of remove) removeNames.push((await ctx.db.get(m.groupId))?.name ?? "a group");
-    const revision = await changeMemberships(ctx, { orgId: ctx.orgId, actor: ctx.actor, employee: e, add, remove, removeNames });
-    return { revision };
+    return { revision: await applyChanges(ctx, e, { groupIds: args.groupIds }) };
   },
 });
 
@@ -474,35 +682,7 @@ export const setDirectApps = memberMutation("admin")({
   handler: async (ctx, args) => {
     const e = await getInOrg(ctx, "employees", args.employeeId, ctx.orgId);
     checkRevision(e, args.expectedRevision);
-    const wanted = await resolveIds(ctx, "apps", args.appIds, ctx.orgId, MAX_EMPLOYEE_APPS, "employee apps");
-    const current = await ctx.db
-      .query("employeeApps")
-      .withIndex("by_employee", (q) => q.eq("employeeId", e._id))
-      .take(MAX_EMPLOYEE_APPS + 1);
-    const haveIds = new Set<string>(current.map((g) => g.appId));
-    const wantedIds = new Set<string>(wanted.map((a) => a._id));
-    const add = wanted.filter((a) => !haveIds.has(a._id));
-    const remove = current.filter((g) => !wantedIds.has(g.appId));
-    if (add.length === 0 && remove.length === 0) return { revision: e.revision };
-    if (add.some((a) => a.archived)) fail("invalid_argument", { field: "appIds" });
-    for (const a of add) await ctx.db.insert("employeeApps", { orgId: ctx.orgId, employeeId: e._id, appId: a._id });
-    for (const g of remove) await ctx.db.delete(g._id);
-    const revision = nextRevision(e);
-    await ctx.db.patch(e._id, { revision });
-    await writeAudit(ctx, {
-      orgId: ctx.orgId,
-      actor: ctx.actor,
-      action: "employee.appsChanged",
-      targetType: "employee",
-      targetId: e._id,
-      targetLabel: e.name,
-      summary: `Changed the apps of ${e.name} (${add.length} added, ${remove.length} removed)`,
-    });
-    if (!e.disabled) {
-      const groupIds = (await membershipsOf(ctx, e._id)).map((m) => m.groupId);
-      if (groupIds.length > 0) await requestPublish(ctx, ctx.orgId, { groupIds });
-    }
-    return { revision };
+    return { revision: await applyChanges(ctx, e, { appIds: args.appIds }) };
   },
 });
 
@@ -556,7 +736,7 @@ export const storePassword = internalMutation({
   args: { orgId: v.id("organizations"), actor: actorArg, employeeId: v.string(), username: v.string(), phc: v.string() },
   returns: v.null(),
   handler: async (ctx, args) => {
-    if (!args.phc.startsWith("$argon2id$")) fail("invalid_argument", { field: "password" });
+    if (!isAppPhc(args.phc)) fail("invalid_argument", { field: "password" });
     const e = await getInOrg(ctx, "employees", args.employeeId, args.orgId);
     // Renamed while the password was being hashed: it was not checked against the new name.
     if (e.username !== args.username) fail("stale_edit");
@@ -568,6 +748,13 @@ export const storePassword = internalMutation({
     else await ctx.db.patch(secret._id, { passwordHash: args.phc });
     const credentialRevision = e.credentialRevision + 1;
     await ctx.db.patch(e._id, { credentialRevision, passwordSetAt: Date.now() });
+    // A new password ends a lockout: an admin who resets the password of a locked-out employee
+    // expects it to work at once (the failures belonged to the old password).
+    const lock = await ctx.db
+      .query("employeeLockouts")
+      .withIndex("by_employee", (q) => q.eq("employeeId", e._id))
+      .unique();
+    if (lock !== null) await ctx.db.delete(lock._id);
     if (!e.disabled) {
       const plan: RosterPlan = new Map();
       for (const m of await membershipsOf(ctx, e._id)) planRoster(plan, m.groupId, { employeeId: e._id, credentialRevision });
@@ -594,6 +781,13 @@ export const storePassword = internalMutation({
  * sign-in; `deviceApi:verifyEmployee` refuses them at once); enabling puts
  * them back. Keeps `activeEmployeeCount`. Same state again = no write. The
  * `revision` is not bumped: it guards the profile form, which this does not touch.
+ *
+ * DISABLING IS NEVER REFUSED, with or without a signing key (owner decision,
+ * Step 11 review). Without a valid key the removals cannot be signed: they are
+ * queued (`rosterPending`, one row per group) and `employees:resyncRoster`
+ * signs them once a key is available (key registered, rotation finished, or
+ * the next publish run that can sign). Enabling still needs the key
+ * (`not_ready`, detail "signing key") because it must sign an "added" entry.
  */
 export const setDisabled = memberMutation("admin")({
   args: { employeeId: v.string(), disabled: v.boolean() },
@@ -606,8 +800,21 @@ export const setDisabled = memberMutation("admin")({
     for (const m of memberships) {
       planRoster(plan, m.groupId, { employeeId: e._id, credentialRevision: args.disabled ? null : e.credentialRevision });
     }
-    await appendRoster(ctx, ctx.orgId, plan);
+    let pending = false;
+    if (args.disabled) {
+      pending = (await appendRosterOrQueue(ctx, ctx.orgId, plan)) === "pending";
+    } else {
+      await appendRoster(ctx, ctx.orgId, plan);
+      // The new "added" entries supersede removals that were still waiting for a key.
+      const waiting = await ctx.db
+        .query("rosterPending")
+        .withIndex("by_employee", (q) => q.eq("employeeId", e._id))
+        .take(MAX_EMPLOYEE_GROUPS + 1);
+      const rejoined = new Set<string>(memberships.map((m) => m.groupId));
+      for (const row of waiting) if (rejoined.has(row.groupId)) await ctx.db.delete(row._id);
+    }
     await ctx.db.patch(e._id, { disabled: args.disabled });
+    await syncGrantFlags(ctx, { _id: e._id, disabled: args.disabled });
     await bumpOrgStats(ctx, ctx.orgId, { activeEmployeeCount: args.disabled ? -1 : 1 });
     await writeAudit(ctx, {
       orgId: ctx.orgId,
@@ -616,10 +823,30 @@ export const setDisabled = memberMutation("admin")({
       targetType: "employee",
       targetId: e._id,
       targetLabel: e.name,
-      summary: args.disabled ? `Disabled the employee ${e.name}` : `Enabled the employee ${e.name}`,
+      summary: args.disabled
+        ? `Disabled the employee ${e.name}${pending ? " (offline sign-in ends when the signing key is available)" : ""}`
+        : `Enabled the employee ${e.name}`,
     });
     // The catalogue lists only enabled employees under an app (`employeeIds`).
     await publishForGrants(ctx, ctx.orgId, { _id: e._id, disabled: false }, memberships.map((m) => m.groupId));
+    return null;
+  },
+});
+
+/**
+ * Sign the removals that `setDisabled` could not sign for lack of a key
+ * (`rosterPending`): a batch of ROSTER_RESYNC_BATCH per run, each row deleted in
+ * the transaction that appends its entry (so never signed twice), rescheduling
+ * itself while batches are full. A no-op without pending rows, or while there is
+ * still no valid key (the rows stay). Scheduled by `keys:registerActive`,
+ * `keys:finishRotation` and `publish:run` (after it loaded a valid key).
+ */
+export const resyncRoster = internalMutation({
+  args: { orgId: v.id("organizations") },
+  returns: v.null(),
+  handler: async (ctx, args) => {
+    const state = await resyncPendingRoster(ctx, args.orgId);
+    if (state === "more") await ctx.scheduler.runAfter(0, internal.employees.resyncRoster, { orgId: args.orgId });
     return null;
   },
 });

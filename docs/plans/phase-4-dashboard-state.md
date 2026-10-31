@@ -3633,7 +3633,8 @@ accepts what the builder emits, checked with `tsc`), and have the agent parse `a
    (`MAX_EMPLOYEE_APPS`), `setDisabled`, `setPassword` (action; Section
    4.12; bumps `credentialRevision`), `unlock` (clears
    `employeeLockouts`), `remove` (only when disabled; deletes secrets,
-   lockout, memberships, direct apps; audit keeps the name).
+   lockout, memberships, direct apps; audit keeps the name; appends NO roster
+   entry: a disabled employee is already out of every roster).
 2. Every write audits and calls `requestPublish({ kind: "employee" })`
    (and the previous groups when groups change).
 3. Builder: `employees` map and `employeeIds` per Section 4.4 / 4.8.
@@ -3662,7 +3663,9 @@ an employee of another organization; hash in the browser.
 5. **Roster instead of documents** (replaces item 3 and the "republishes
    the employee's groups" of item 2 and 4.12): every change to who may
    sign in on a group's devices (create with groups, `setGroups`,
-   `setDisabled`, `setPassword`, username change, `remove`) appends one
+   `setDisabled`, `setPassword`, username change; NOT `remove`: only a
+   disabled employee can be removed and a disabled employee is already out of
+   every roster, so `remove` appends no entry) appends one
    signed `rosterEntries` row per affected group and bumps
    `groupRoster.epoch` in the same mutation; **no document is
    republished** for an employee change. Direct app grants
@@ -3720,7 +3723,8 @@ decide: with the key lost or not registered, an employee in a group cannot be
 disabled from the dashboard (the server-side `verifyEmployee` of Step 12 will
 refuse a disabled employee regardless, but the offline revocation needs a
 signature). The alternative (accept the change and sign later) needs a pending
-queue the plan does not have.
+queue the plan does not have. **SUPERSEDED by the review fixes below: disabling
+is never blocked; the other changes keep `not_ready`.**
 (5) **What still republishes (direct grants).** `setDirectApps` (every change,
 unless the employee is disabled), and, for an enabled employee who has grants,
 joining or leaving a group and being disabled / enabled (the catalogue lists
@@ -3730,12 +3734,13 @@ reads the group's members (`.take(2000)`), one empty `employeeApps.by_employee`
 read each, the employee and the apps only for members who have grants, and loads
 directly granted apps. RISK: a 2,000-member group costs ~2,000 index reads per
 publish run for that group; a counter of grants per organization would let it
-skip them (needs a schema field).
+skip them (needs a schema field). **SUPERSEDED by the review fixes below
+(`grantsActive` flag + caps + run budget).**
 (6) **Revision.** `revision` guards the profile form: `update`, `setGroups`,
 `setDirectApps`, `addEmployee` and `removeEmployee` bump it when something
 changed; `setDisabled`, `setPassword` and `unlock` do not (they do not touch the
-form). The dashboard's `useUpdateEmployee` chains `update`, `setGroups`,
-`setDirectApps` with the revision each returned and resolves to the last one.
+form). The dashboard's `useUpdateEmployee` calls `employees:save` (one atomic call,
+see the review fixes; it first chained `update`, `setGroups`, `setDirectApps`).
 (7) **Limits.** `create` checks `maxEmployees` (`plan_limit`, detail
 "employees"; suspended organizations too); `employeeCount` / `activeEmployeeCount`
 are kept in `create`, `setDisabled`, `remove`. New `MAX_EMPLOYEE_GROUPS` (100),
@@ -3754,6 +3759,63 @@ shrinks).
 (9) Verified: `pnpm test:convex`, `typecheck:convex`, `lint:convex`, `test:scripts`;
 dashboard `typecheck`, `lint`, `test`, `build`, `size`. Not verified: any call to
 a real Convex deployment, the signed roster on a real device (Step 13).
+
+**Review fixes (2026-11-01, independent security review; local commits "Phase 4
+step 11: review fixes"; NOT deployed).** Owner decisions: (a) revocation must
+never be blocked by a missing signing key; (b) group members with direct apps
+are bounded by a flag + caps, not by a scan.
+(10) **Publisher reads are bounded** (`publish.ts` `loadGroupInputs`; Convex
+limits per query/mutation, read 2026-11-01: 4,096 index ranges = `db.get` +
+`db.query` calls, 32,000 documents scanned, 16 MiB read, 16,000 documents / 16
+MiB written, 1 s of user code; written in `lib/limits.ts`). New
+`groupMembers.grantsActive` (true = enabled AND has a direct grant; kept by
+`syncGrantFlags` in create, join/leave, `setDirectApps`, `setDisabled`, `save`;
+only ever stale-TRUE, e.g. after an app purge, never stale-false) with index
+`by_group_grants`. A group's load is: group, assignments, ONE flagged-members
+range, then at most `MAX_GROUP_GRANT_EMPLOYEES` (100) members x one grant range
+and `MAX_GROUP_GRANT_APPS` (150) granted apps. Beyond that the group degrades:
+the first ones are kept and one `policy.publishFailed` entry names the group
+(no loop, no throw). A run adds up the ranges and documents the group loads
+really read and loads another group only if that group's worst case still fits
+`RUN_RANGE_BUDGET` (3,000) / `RUN_DOC_BUDGET` (18,000); the devices it did not
+reach go back to the queue's `deviceIds` for the next hop (the first group of a
+run always loads, so every hop progresses). Tests: `publishGrants.test.ts`
+(400 members, none/40/130 with grants, counted reads), `publishBudget.test.ts`.
+**Existing data:** rows written before this change have no flag, so a deployment
+that already holds direct grants needs the flag set once (none exists: Step 11
+was never deployed); a reconcile job is not built.
+(11) **`employees:save`** (new): profile + groups + direct apps in ONE
+transaction with ONE revision check and bump, one roster entry per group; the
+dashboard's `useUpdateEmployee` calls only it, so a failure (`not_ready`,
+`too_large`, foreign group) leaves the revision untouched and the retry works.
+`update` / `setGroups` / `setDirectApps` stay (same shared writer) for other callers.
+(12) **A new password clears `employeeLockouts`** of that employee.
+(13) **`create` order:** name / username / quota / password rules, a read-only
+precheck (`createPrecheck`: free username, groups and apps of the organization,
+plan limit, group room), the `employeeWrites` limit (now for EVERY create, with
+or without a password), then the Argon2id hash; the mutation checks all again.
+`storeNew` / `storePassword` also require the app's Argon2id parameters in the
+hash (`m=19456,t=2,p=1`), not just the `$argon2id$` prefix.
+(14) **Revocation is never blocked (owner decision).** `setDisabled(true)`
+always succeeds. With a valid key the removals are signed as before. Without one
+(env seed missing or not the registered key) a `rosterPending` row per
+(group, employee) is written, the audit entry says the offline sign-in ends when
+the key is available, and nothing is signed. `employees:resyncRoster` (internal;
+scheduled by `keys:registerActive` retry/registration, `keys:finishRotation` and
+`publish:run` after it loaded a valid key) signs the removals in batches of 50
+(`ROSTER_RESYNC_BATCH`), deleting each row in the same transaction as its entry
+(never signed twice) and rescheduling while full; with no key it leaves the
+rows. Enabling an employee signs "added" entries and drops the waiting rows of
+the groups they are in; rows of groups they left while disabled stay and are
+still signed. Enabling, password change, rename and join/leave still return
+`not_ready` without a key. Until the key is back the server refuses a disabled
+employee online (`verifyEmployee`, Step 12) but devices keep an offline sign-in;
+a dashboard hint for that state is not built.
+(15) `search({ text, groupId })` with a group examines up to
+`MAX_EMPLOYEE_SEARCH_SCAN` (400) hits for members (was: 51 hits, then filtered)
+and sets `capped` when that scan or the 50 rows ran out. `unlock` stays audited
+as `employee.updated`. A change of an employee's quota reaches a device only at
+its next ONLINE sign-in (the quota is not in the roster or the document).
 
 ---
 

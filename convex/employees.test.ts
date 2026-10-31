@@ -5,7 +5,7 @@ import { asMember, codeOf, expectCode, expectNoSecrets, giveStepUp, makeOrg, typ
 import { setSeeds, TEST_KEY, TEST_SEED_B64 } from "../tests/convex/keys";
 import { api, internal } from "./_generated/api";
 import type { Doc, Id } from "./_generated/dataModel";
-import { verifySecret } from "./lib/argon";
+import { hashSecret, verifySecret } from "./lib/argon";
 import { auditPolicy } from "./lib/audit";
 import { assertEmployeePassword, checkedUsername, normalizeEmployeeName } from "./lib/employeeRules";
 import { MAX_EMPLOYEE_GROUPS, MAX_GROUP_EMPLOYEES, MINUTE_MS } from "./lib/limits";
@@ -17,6 +17,12 @@ import { DEFAULT_WEB_PERMISSIONS } from "./lib/validators";
 // Employees (plan Step 11; 4.12; A6/A7). The password is hashed in an action
 // and never leaves the server; who may sign in on a group's PCs is the signed
 // roster, not the device documents.
+
+// The real hash, observed: a bad request must never reach it.
+vi.mock("./lib/argon", async (importOriginal) => {
+  const real = await importOriginal<typeof import("./lib/argon")>();
+  return { ...real, hashSecret: vi.fn(real.hashSecret) };
+});
 
 beforeEach(() => {
   auditPolicy.strict = true;
@@ -363,18 +369,18 @@ describe("employees: update, credential revision", () => {
     );
   });
 
-  test("setPassword is limited to 300 per hour per organization, consumed only when a hash is made", async () => {
+  test("employeeWrites (300 per hour per organization) limits setPassword and EVERY create, consumed after the cheap checks", async () => {
     const t = await setupAuth();
     const orgId = await makeOrg(t);
     const a = await admin(t, orgId);
     const id = await newEmployee(a, { username: "maya" });
-    await t.run((ctx) => rateLimiter.limit(ctx, "employeeWrites", { key: orgId, count: 300 }));
+    await t.run((ctx) => rateLimiter.limit(ctx, "employeeWrites", { key: orgId, count: 299 })); // the create above took one
     // refused by the rule before it costs a token or a hash
     await expectCode(a.as.action(api.employees.setPassword, { employeeId: id, password: "short" }), "invalid_argument");
     await expectCode(a.as.action(api.employees.setPassword, { employeeId: id, password: PASSWORD }), "rate_limited");
     await expectCode(newEmployee(a, { password: PASSWORD }), "rate_limited");
-    // creating without a password hashes nothing
-    await newEmployee(a);
+    // a create without a password hashes nothing but is limited too
+    await expectCode(newEmployee(a), "rate_limited");
     expect(await secretOf(t, id)).toBeNull();
     // another organization has its own bucket
     const b = await admin(t, await makeOrg(t, "B"));
@@ -881,6 +887,356 @@ describe("employees: authorization", () => {
     await stale.as.mutation(api.employees.setDisabled, { employeeId: id, disabled: true });
     await expectCode(stale.as.mutation(api.employees.remove, { employeeId: id }), "step_up_required");
     await fresh.as.mutation(api.employees.remove, { employeeId: id });
+  });
+});
+
+describe("employees: save (atomic form save)", () => {
+  test("profile, groups and apps in one call: ONE revision bump, one roster entry per group, one audit entry per part", async () => {
+    const t = await setupAuth();
+    const orgId = await makeOrg(t);
+    const a = await admin(t, orgId);
+    const g1 = await group(t, orgId, "Sales");
+    const g2 = await group(t, orgId, "Ops");
+    const g3 = await group(t, orgId, "Team");
+    const docs = await webApp(t, orgId, "Docs");
+    const id = await newEmployee(a, { name: "Maya", username: "maya", groupIds: [g1, g2], password: PASSWORD }); // credentialRevision 1
+    const saved = await a.as.mutation(api.employees.save, {
+      employeeId: id,
+      expectedRevision: 0,
+      name: "Maya Lee",
+      username: "maya.lee",
+      quotaGb: 5,
+      groupIds: [g1, g3],
+      appIds: [docs],
+    });
+    expect(saved).toEqual({ revision: 1 });
+    expect(await row(t, id)).toMatchObject({ name: "Maya Lee", username: "maya.lee", quotaGb: 5, credentialRevision: 2, revision: 1 });
+    expect((await memberships(t, id)).map((m) => m.groupId).sort()).toEqual([g1, g3].sort());
+    expect((await grants(t, id)).map((x) => x.appId)).toEqual([docs]);
+    // g1 stays (renamed: ONE entry), g3 joins (ONE entry), g2 is left (ONE removal)
+    expect((await rosterOf(t, g1)).entries.map((e) => [e.epoch, e.credentialRevision])).toEqual([[1, 1], [2, 2]]);
+    expect((await rosterOf(t, g3)).entries.map((e) => [e.epoch, e.credentialRevision])).toEqual([[1, 2]]);
+    expect((await rosterOf(t, g2)).entries.map((e) => [e.epoch, e.credentialRevision])).toEqual([[1, 1], [2, undefined]]);
+    for (const g of [g1, g2, g3]) expect((await rosterOf(t, g)).entries.every((e) => entryVerifies(orgId, e))).toBe(true);
+    expect((await actions(t, orgId)).slice(1)).toEqual(["employee.updated", "employee.groupsChanged", "employee.appsChanged"]);
+    expect((await queueOf(t, orgId))?.groupIds.slice().sort()).toEqual([g1, g2, g3].sort());
+    // the same form again: nothing changes, nothing is written
+    const again = await probe(() =>
+      a.as.mutation(api.employees.save, { employeeId: id, expectedRevision: 1, name: "Maya Lee", username: "maya.lee", quotaGb: 5, groupIds: [g3, g1], appIds: [docs] }),
+    );
+    expect(again.result).toEqual({ revision: 1 });
+    expect(again.io.writes).toBe(0);
+  });
+
+  test("all or nothing: a failing part leaves the profile and the revision as they were, so the retry with the same revision works", async () => {
+    const t = await setupAuth();
+    const orgId = await makeOrg(t);
+    const a = await admin(t, orgId);
+    const other = await makeOrg(t, "Other");
+    const g = await group(t, orgId);
+    const foreignGroup = await group(t, other);
+    const archived = await webApp(t, orgId, "Old", true);
+    const id = await newEmployee(a, { name: "Maya", username: "maya" });
+    await newEmployee(a, { name: "Noor", username: "noor" });
+    const form = { employeeId: id, expectedRevision: 0, name: "Maya Lee", username: "maya.lee", quotaGb: 7, groupIds: [g], appIds: [] as string[] };
+    const unchanged = async () => {
+      expect(await row(t, id)).toMatchObject({ name: "Maya", username: "maya", revision: 0, credentialRevision: 0 });
+      expect(await row(t, id)).not.toHaveProperty("quotaGb", 7);
+      expect(await memberships(t, id)).toEqual([]);
+      expect((await rosterOf(t, g)).head ?? null).toBeNull();
+    };
+
+    setSeeds(undefined); // no key: the group's roster cannot be signed
+    await expectCode(a.as.mutation(api.employees.save, form), "not_ready");
+    await unchanged();
+    setSeeds(TEST_SEED_B64);
+    await expectCode(a.as.mutation(api.employees.save, { ...form, groupIds: [foreignGroup] }), "not_found");
+    await unchanged();
+    await expectCode(a.as.mutation(api.employees.save, { ...form, appIds: [archived] }), "invalid_argument");
+    await unchanged();
+    await expectCode(a.as.mutation(api.employees.save, { ...form, username: "NOOR" }), "conflict");
+    await unchanged();
+    await expectCode(a.as.mutation(api.employees.save, { ...form, expectedRevision: 3 }), "stale_edit");
+    await unchanged();
+    // the same form, same revision, now works
+    expect(await a.as.mutation(api.employees.save, form)).toEqual({ revision: 1 });
+    expect(await row(t, id)).toMatchObject({ name: "Maya Lee", username: "maya.lee", quotaGb: 7, revision: 1 });
+  });
+});
+
+describe("employees: review fixes", () => {
+  test("groupMembers.grantsActive is true exactly while the employee is enabled and has a direct app", async () => {
+    const t = await setupAuth();
+    const orgId = await makeOrg(t);
+    const a = await admin(t, orgId);
+    const g1 = await group(t, orgId, "Sales");
+    const g2 = await group(t, orgId, "Ops");
+    const app = await webApp(t, orgId);
+    const flags = async (id: Id<"employees">) => (await memberships(t, id)).map((m) => m.grantsActive === true).sort();
+    const id = await newEmployee(a, { groupIds: [g1], appIds: [app] });
+    expect(await flags(id)).toEqual([true]);
+    await a.as.mutation(api.groups.addEmployee, { groupId: g2, employeeId: id }); // joins with the flag
+    expect(await flags(id)).toEqual([true, true]);
+    await a.as.mutation(api.employees.setDisabled, { employeeId: id, disabled: true });
+    expect(await flags(id)).toEqual([false, false]);
+    await a.as.mutation(api.employees.setDisabled, { employeeId: id, disabled: false });
+    expect(await flags(id)).toEqual([true, true]);
+    await a.as.mutation(api.employees.setDirectApps, { employeeId: id, expectedRevision: 1, appIds: [] });
+    expect(await flags(id)).toEqual([false, false]);
+    await a.as.mutation(api.employees.setDirectApps, { employeeId: id, expectedRevision: 2, appIds: [app] });
+    expect(await flags(id)).toEqual([true, true]);
+    // saved through the form: a new group gets the flag too, and a disabled employee never has it
+    await a.as.mutation(api.employees.save, { employeeId: id, expectedRevision: 3, name: "P", username: "p", groupIds: [g1], appIds: [app] });
+    expect(await flags(id)).toEqual([true]);
+    await a.as.mutation(api.employees.setDisabled, { employeeId: id, disabled: true });
+    await a.as.mutation(api.employees.save, { employeeId: id, expectedRevision: 4, name: "P", username: "p", groupIds: [g1, g2], appIds: [app] });
+    expect(await flags(id)).toEqual([false, false]);
+    // a new employee without apps is never flagged
+    expect(await flags(await newEmployee(a, { groupIds: [g1] }))).toEqual([false]);
+  });
+
+  test("a new password clears the lockout of that employee, and only theirs", async () => {
+    const t = await setupAuth();
+    const orgId = await makeOrg(t);
+    const a = await admin(t, orgId);
+    const id = await newEmployee(a, { username: "maya", password: PASSWORD });
+    const other = await newEmployee(a, { username: "noor", password: PASSWORD });
+    await setLockout(t, orgId, id, Date.now() + 15 * MINUTE_MS);
+    await setLockout(t, orgId, other, Date.now() + 15 * MINUTE_MS);
+    expect((await a.as.query(api.employees.get, { employeeId: id })).lockout).not.toBeNull();
+    await a.as.action(api.employees.setPassword, { employeeId: id, password: "a brand new password" });
+    expect((await a.as.query(api.employees.get, { employeeId: id })).lockout).toBeNull();
+    expect((await a.as.query(api.employees.get, { employeeId: other })).lockout).not.toBeNull();
+    // no lockout row: setting a password still works
+    await a.as.action(api.employees.setPassword, { employeeId: id, password: "yet another password" });
+  });
+
+  test("create: bad requests cost neither a rate-limit token nor a hash; every create is limited", async () => {
+    const t = await setupAuth();
+    const orgId = await makeOrg(t);
+    const other = await makeOrg(t, "Other");
+    const a = await admin(t, orgId);
+    const foreignGroup = await group(t, other);
+    const archived = await webApp(t, orgId, "Old", true);
+    await newEmployee(a, { username: "maya" }); // token 1 of 300
+    await t.run((ctx) => rateLimiter.limit(ctx, "employeeWrites", { key: orgId, count: 298 })); // one token left
+    vi.mocked(hashSecret).mockClear();
+
+    const bad: [() => Promise<unknown>, string][] = [
+      [() => newEmployee(a, { name: "  ", password: PASSWORD }), "invalid_argument"],
+      [() => newEmployee(a, { username: "bad name", password: PASSWORD }), "invalid_argument"],
+      [() => newEmployee(a, { quotaGb: 5000, password: PASSWORD }), "invalid_argument"],
+      [() => newEmployee(a, { password: "short" }), "invalid_argument"],
+      [() => newEmployee(a, { username: "MAYA", password: PASSWORD }), "conflict"],
+      [() => newEmployee(a, { groupIds: [foreignGroup], password: PASSWORD }), "not_found"],
+      [() => newEmployee(a, { appIds: [archived], password: PASSWORD }), "invalid_argument"],
+    ];
+    for (const [call, code] of bad) await expectCode(call(), code);
+    expect(vi.mocked(hashSecret)).not.toHaveBeenCalled();
+
+    // the one token was still there: a good request takes it and hashes once; the next is limited before any hash
+    await newEmployee(a, { username: "noor", password: PASSWORD });
+    expect(vi.mocked(hashSecret)).toHaveBeenCalledTimes(1);
+    await expectCode(newEmployee(a, { username: "third", password: PASSWORD }), "rate_limited");
+    await expectCode(newEmployee(a, { username: "fourth" }), "rate_limited"); // no password: limited too
+    expect(vi.mocked(hashSecret)).toHaveBeenCalledTimes(1);
+  });
+
+  test("create: the plan limit is checked before the hash", async () => {
+    const t = await setupAuth();
+    const orgId = await makeOrg(t, "Free", { plan: "free" });
+    const a = await admin(t, orgId);
+    await t.run(async (ctx) => {
+      const s = (await ctx.db.query("orgStats").withIndex("by_org", (q) => q.eq("orgId", orgId)).unique())!;
+      await ctx.db.patch(s._id, { employeeCount: 25, activeEmployeeCount: 25 });
+    });
+    vi.mocked(hashSecret).mockClear();
+    await expectCode(newEmployee(a, { password: PASSWORD }), "plan_limit");
+    expect(vi.mocked(hashSecret)).not.toHaveBeenCalled();
+  });
+
+  test("a stored hash must come from the app's Argon2id parameters", async () => {
+    const t = await setupAuth();
+    const orgId = await makeOrg(t);
+    const a = await admin(t, orgId);
+    const id = await newEmployee(a, { username: "maya" });
+    const actor = { type: "member" as const, id: "m", label: "m@acme.test" };
+    const weak = "$argon2id$v=19$m=8,t=1,p=1$AAAAAAAAAAAAAAAAAAAAAA$AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA";
+    await expectCode(t.mutation(internal.employees.storePassword, { orgId, actor, employeeId: id, username: "maya", phc: weak }), "invalid_argument");
+    await expectCode(t.mutation(internal.employees.storeNew, { orgId, actor, name: "X", username: "x", groupIds: [], appIds: [], phc: weak }), "invalid_argument");
+  });
+
+  test("search with a group filter looks beyond the first 51 hits; capped only when the scan or the 50 rows ran out", async () => {
+    const t = await setupAuth();
+    const orgId = await makeOrg(t);
+    const a = await admin(t, orgId);
+    const g = await group(t, orgId);
+    await t.run(async (ctx) => {
+      for (let i = 0; i < 70; i++) {
+        const employeeId = await ctx.db.insert("employees", {
+          orgId,
+          name: `Seasonal ${i}`,
+          username: `seasonal${i}`,
+          searchText: `seasonal ${i} seasonal${i}`,
+          disabled: false,
+          credentialRevision: 0,
+          revision: 0,
+          createdAt: i,
+        });
+        if (i % 14 === 0) await ctx.db.insert("groupMembers", { orgId, groupId: g, employeeId }); // 5 members among 70 hits
+      }
+    });
+    const inGroup = await a.as.query(api.employees.search, { text: "seasonal", groupId: g });
+    expect(inGroup.rows).toHaveLength(5);
+    expect(inGroup.capped).toBe(false);
+    const all = await a.as.query(api.employees.search, { text: "seasonal" });
+    expect(all.rows).toHaveLength(50);
+    expect(all.capped).toBe(true);
+  });
+});
+
+describe("employees: revocation is never blocked by a missing signing key", () => {
+  async function ownerOf(t: T, orgId: Id<"organizations">) {
+    const m = await asMember(t, { role: "owner", mfa: true, orgId });
+    await giveStepUp(t, m);
+    return m;
+  }
+  async function pendingOf(t: T, orgId: Id<"organizations">) {
+    return await t.run((ctx) => ctx.db.query("rosterPending").withIndex("by_org", (q) => q.eq("orgId", orgId)).take(500));
+  }
+  async function world() {
+    vi.useFakeTimers();
+    const t = await setupAuth();
+    const orgId = await makeOrg(t);
+    const a = await admin(t, orgId);
+    const g1 = await group(t, orgId, "Sales");
+    const g2 = await group(t, orgId, "Ops");
+    const id = await newEmployee(a, { name: "Fired Person", username: "fired", groupIds: [g1, g2], password: PASSWORD }); // credentialRevision 1
+    return { t, orgId, a, g1, g2, id, drain: () => t.finishAllScheduledFunctions(vi.runAllTimers) };
+  }
+  const shape = async (t: T, g: Id<"groups">) => (await rosterOf(t, g)).entries.map((e) => [e.epoch, e.credentialRevision]);
+
+  test("disabling without a key succeeds, queues one removal per group and signs nothing; enabling still needs the key", async () => {
+    const { t, orgId, a, g1, g2, id } = await world();
+    setSeeds(undefined);
+    expect(await a.as.mutation(api.employees.setDisabled, { employeeId: id, disabled: true })).toBeNull();
+    expect(await row(t, id)).toMatchObject({ disabled: true });
+    expect(await stats(t, orgId)).toMatchObject({ employeeCount: 1, activeEmployeeCount: 0 });
+    expect((await pendingOf(t, orgId)).map((p) => [p.groupId, p.employeeId]).sort()).toEqual([[g1, id], [g2, id]].sort());
+    for (const g of [g1, g2]) expect(await shape(t, g)).toEqual([[1, 1]]); // nothing new was signed
+    const disabledAudit = (await auditRows(t, orgId)).find((r) => r.action === "employee.disabled")!;
+    expect(disabledAudit.summary).toContain("signing key");
+    // the same state again: no write; enabling is refused and changes nothing
+    const { io } = await probe(() => a.as.mutation(api.employees.setDisabled, { employeeId: id, disabled: true }));
+    expect(io.writes).toBe(0);
+    await expectCode(a.as.mutation(api.employees.setDisabled, { employeeId: id, disabled: false }), "not_ready");
+    expect(await row(t, id)).toMatchObject({ disabled: true });
+    expect(await pendingOf(t, orgId)).toHaveLength(2);
+    expect(await stats(t, orgId)).toMatchObject({ activeEmployeeCount: 0 });
+  });
+
+  test("a mismatched key (not the organization's registered one) is the same as none: disabling still works", async () => {
+    const { t, orgId, a, id } = await world();
+    setSeeds("AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=");
+    await a.as.mutation(api.employees.setDisabled, { employeeId: id, disabled: true });
+    expect(await pendingOf(t, orgId)).toHaveLength(2);
+  });
+
+  test("when the key is back (keys:registerActive), the pending removals are signed exactly once", async () => {
+    const { t, orgId, a, g1, g2, id, drain } = await world();
+    setSeeds(undefined);
+    await a.as.mutation(api.employees.setDisabled, { employeeId: id, disabled: true });
+    setSeeds(TEST_SEED_B64);
+    await (await ownerOf(t, orgId)).as.mutation(api.keys.registerActive, {}); // the retry path: the env key is the active key
+    await drain();
+    for (const g of [g1, g2]) {
+      expect(await shape(t, g)).toEqual([[1, 1], [2, undefined]]);
+      const r = await rosterOf(t, g);
+      expect(r.entries.every((e) => entryVerifies(orgId, e))).toBe(true);
+      expect(r.head?.epoch).toBe(2);
+    }
+    expect(await pendingOf(t, orgId)).toEqual([]);
+    // running it again, or from another trigger, signs nothing more
+    await t.mutation(internal.employees.resyncRoster, { orgId });
+    await drain();
+    for (const g of [g1, g2]) expect((await rosterOf(t, g)).head?.epoch).toBe(2);
+  });
+
+  test("a publish run that can sign also resyncs; while there is still no key the rows stay", async () => {
+    const { t, orgId, a, g1, id, drain } = await world();
+    setSeeds(undefined);
+    await a.as.mutation(api.employees.setDisabled, { employeeId: id, disabled: true });
+    await t.mutation(internal.employees.resyncRoster, { orgId }); // still no key
+    expect(await pendingOf(t, orgId)).toHaveLength(2);
+    expect((await rosterOf(t, g1)).head?.epoch).toBe(1);
+    setSeeds(TEST_SEED_B64);
+    await t.run((ctx) => ctx.db.insert("publishQueue", { orgId, allDevices: true, groupIds: [], deviceIds: [], requestedAt: Date.now() }));
+    await t.mutation(internal.publish.run, { orgId });
+    await drain();
+    expect(await pendingOf(t, orgId)).toEqual([]);
+    expect(await shape(t, g1)).toEqual([[1, 1], [2, undefined]]);
+  });
+
+  test("toggling: enabling with a key supersedes a waiting removal; the roster stays gap-free and ends consistent", async () => {
+    const { t, orgId, a, g1, id, drain } = await world();
+    setSeeds(undefined);
+    await a.as.mutation(api.employees.setDisabled, { employeeId: id, disabled: true }); // pending
+    setSeeds(TEST_SEED_B64);
+    await a.as.mutation(api.employees.setDisabled, { employeeId: id, disabled: false }); // signed "added", pending dropped
+    expect(await pendingOf(t, orgId)).toEqual([]);
+    expect(await shape(t, g1)).toEqual([[1, 1], [2, 1]]);
+    await t.mutation(internal.employees.resyncRoster, { orgId }); // nothing left to sign
+    expect(await shape(t, g1)).toEqual([[1, 1], [2, 1]]);
+    await a.as.mutation(api.employees.setDisabled, { employeeId: id, disabled: true }); // key present: signed at once
+    expect(await pendingOf(t, orgId)).toEqual([]);
+    expect(await shape(t, g1)).toEqual([[1, 1], [2, 1], [3, undefined]]);
+    await a.as.mutation(api.employees.setDisabled, { employeeId: id, disabled: false });
+    setSeeds(undefined);
+    await a.as.mutation(api.employees.setDisabled, { employeeId: id, disabled: true }); // pending again
+    expect(await pendingOf(t, orgId)).toHaveLength(2);
+    setSeeds(TEST_SEED_B64);
+    await t.mutation(internal.employees.resyncRoster, { orgId });
+    await drain();
+    const r = await rosterOf(t, g1);
+    expect(r.entries.map((e) => e.epoch)).toEqual([1, 2, 3, 4, 5]); // gap-free
+    expect(r.entries.at(-1)!.credentialRevision).toBeUndefined(); // last word: removed
+    expect(r.entries.every((e) => entryVerifies(orgId, e))).toBe(true);
+    expect(r.head?.epoch).toBe(5);
+    expect(await pendingOf(t, orgId)).toEqual([]);
+    expect(await stats(t, orgId)).toMatchObject({ employeeCount: 1, activeEmployeeCount: 0 });
+  });
+
+  test("a group left while disabled and waiting still gets its removal; remove keeps the waiting rows", async () => {
+    const { t, orgId, a, g1, g2, id, drain } = await world();
+    setSeeds(undefined);
+    await a.as.mutation(api.employees.setDisabled, { employeeId: id, disabled: true });
+    await a.as.mutation(api.groups.removeEmployee, { groupId: g1, employeeId: id }); // a disabled employee: no roster change, no key needed
+    await a.as.mutation(api.employees.remove, { employeeId: id });
+    expect(await pendingOf(t, orgId)).toHaveLength(2);
+    setSeeds(TEST_SEED_B64);
+    await t.mutation(internal.employees.resyncRoster, { orgId });
+    await drain();
+    for (const g of [g1, g2]) expect(await shape(t, g)).toEqual([[1, 1], [2, undefined]]);
+    expect(await pendingOf(t, orgId)).toEqual([]);
+  });
+
+  test("a large backlog is signed in batches of 50, rescheduling itself, each removal once", async () => {
+    vi.useFakeTimers();
+    const t = await setupAuth();
+    const orgId = await makeOrg(t);
+    const g = await group(t, orgId);
+    await t.run(async (ctx) => {
+      for (let i = 0; i < 120; i++) await ctx.db.insert("rosterPending", { orgId, groupId: g, employeeId: `gone${i}` });
+    });
+    await t.mutation(internal.employees.resyncRoster, { orgId });
+    expect((await rosterOf(t, g)).head?.epoch).toBe(50);
+    expect(await pendingOf(t, orgId)).toHaveLength(70);
+    await t.finishAllScheduledFunctions(vi.runAllTimers);
+    const r = await rosterOf(t, g);
+    expect(r.head?.epoch).toBe(120);
+    expect(await pendingOf(t, orgId)).toEqual([]);
+    expect(new Set(r.entries.map((e) => e.employeeId)).size).toBe(r.entries.length); // each exactly once
+    expect(r.entries.every((e) => e.credentialRevision === undefined && entryVerifies(orgId, e))).toBe(true);
   });
 });
 

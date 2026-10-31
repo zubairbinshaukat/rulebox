@@ -248,6 +248,8 @@ export const MAX_EMPLOYEE_PASSWORD = 256;
 /** `employees:list` page size cap, and `employees:search` rows (`search_text`, `.take(50)`). */
 export const MAX_EMPLOYEE_PAGE = 50;
 export const MAX_EMPLOYEE_SEARCH = 50;
+/** `employees:search` with a group filter: search hits examined (one `by_group_employee` range each) while looking for MAX_EMPLOYEE_SEARCH members. */
+export const MAX_EMPLOYEE_SEARCH_SCAN = 400;
 /** Groups an employee can be in (`employees:get` reads `.take(100)`), and direct app grants (4.4 rule 6). */
 export const MAX_EMPLOYEE_GROUPS = 100;
 export const MAX_EMPLOYEE_APPS = 50;
@@ -255,3 +257,33 @@ export const MAX_EMPLOYEE_APPS = 50;
 export const MAX_GROUP_EMPLOYEES = 2_000;
 /** Groups named on one row of the employee list; more are flagged "and more". */
 export const EMPLOYEE_ROW_GROUPS = 5;
+/**
+ * The publisher's transaction budget (Step 11 review). Convex limits for ONE
+ * query or mutation (docs.convex.dev/production/state/limits, read 2026-11-01):
+ *   index ranges read (calls to db.get + db.query) 4,096 | documents scanned
+ *   32,000 | data read 16 MiB | documents written 16,000 | data written 16 MiB |
+ *   user-code execution time 1 s (database time not counted) | 1,000 scheduled
+ *   functions.
+ * One `publish:run` builds up to PUBLISH_BATCH (25) devices, which can belong
+ * to 25 different groups, so the work of a group must be small and the run as a
+ * whole must stop loading groups well before the limits.
+ * - A group's direct-grant reads are capped at MAX_GROUP_GRANT_EMPLOYEES
+ *   members (one `groupMembers.by_group_grants` range + one `employeeApps`
+ *   range each, at most MAX_EMPLOYEE_APPS rows) and MAX_GROUP_GRANT_APPS
+ *   distinct granted apps; beyond that the group degrades with an audit entry.
+ * - A run keeps a running total of ranges and documents read by group loads and
+ *   loads one more group only if its worst case still fits the run budget
+ *   (the rest of the batch goes back to the queue and the next hop). The
+ *   budgets leave room for the ~15 ranges / ~10 documents each of the 25
+ *   devices needs, and for old-version pruning.
+ */
+export const MAX_GROUP_GRANT_EMPLOYEES = 100;
+export const MAX_GROUP_GRANT_APPS = 150;
+export const RUN_RANGE_BUDGET = 3_000;
+export const RUN_DOC_BUDGET = 18_000;
+/** Worst case of ONE group's load: group + assignments + their apps + grant members + their apps. */
+export const GROUP_LOAD_WORST_RANGES = 2 + MAX_GROUP_APPS + 1 + MAX_GROUP_GRANT_EMPLOYEES + MAX_GROUP_GRANT_APPS;
+export const GROUP_LOAD_WORST_DOCS =
+  1 + MAX_GROUP_APPS + MAX_GROUP_APPS + MAX_GROUP_GRANT_EMPLOYEES * (MAX_EMPLOYEE_APPS + 1) + MAX_GROUP_GRANT_APPS;
+/** Pending roster removals signed per `employees:resyncRoster` run (it reschedules while full). */
+export const ROSTER_RESYNC_BATCH = 50;

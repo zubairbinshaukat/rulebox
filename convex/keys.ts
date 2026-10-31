@@ -3,6 +3,7 @@ import { v } from "convex/values";
 import type { Doc, Id } from "./_generated/dataModel";
 import type { DatabaseWriter } from "./_generated/server";
 import { writeAudit } from "./lib/audit";
+import { scheduleRosterResync } from "./lib/employeeSync";
 import { fail } from "./lib/errors";
 import { memberMutation, memberQuery, type AuditActorCtx } from "./lib/functions";
 import { MAX_TRUST_PAGE } from "./lib/limits";
@@ -171,6 +172,7 @@ export const registerActive = memberMutation("owner", { major: "keys:registerAct
       // publish every device again. `force` and any other status stay a conflict.
       if (args.force !== true && known.status === "active" && known.publicKey === env.publicKey) {
         await requestPublish(ctx, ctx.orgId, { allDevices: true });
+        await scheduleRosterResync(ctx, ctx.orgId); // removals queued while the key was missing
         return { keyId: env.keyId, fingerprint: fingerprintOf(env.keyId) };
       }
       fail("conflict", { detail: "key_exists" });
@@ -199,6 +201,7 @@ export const registerActive = memberMutation("owner", { major: "keys:registerAct
         : `Registered the signing key ${fingerprintOf(env.keyId)}`,
     );
     await requestPublish(ctx, ctx.orgId, { allDevices: true });
+    await scheduleRosterResync(ctx, ctx.orgId);
     return { keyId: env.keyId, fingerprint: fingerprintOf(env.keyId) };
   },
 });
@@ -262,6 +265,7 @@ export const finishRotation = memberMutation("owner", { major: "keys:finishRotat
     await ctx.db.patch(next._id, { status: "active" });
     await audit(ctx, ctx.orgId, ctx.actor, "policy.rotationFinished", `Finished the rotation to the signing key ${fingerprintOf(next.keyId)}`);
     await requestPublish(ctx, ctx.orgId, { allDevices: true });
+    await scheduleRosterResync(ctx, ctx.orgId);
     return { keyId: next.keyId, fingerprint: fingerprintOf(next.keyId) };
   },
 });

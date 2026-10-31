@@ -15,13 +15,19 @@ import {
 } from "./lib/desired";
 import {
   KEEP_VERSIONS,
+  GROUP_LOAD_WORST_DOCS,
+  GROUP_LOAD_WORST_RANGES,
   MAX_EMPLOYEE_APPS,
   MAX_FILE_HANDLERS,
   MAX_GROUP_APPS,
-  MAX_GROUP_EMPLOYEES,
+  MAX_GROUP_GRANT_APPS,
+  MAX_GROUP_GRANT_EMPLOYEES,
   MAX_PRUNE_PER_DEVICE,
   PUBLISH_BATCH,
+  RUN_DOC_BUDGET,
+  RUN_RANGE_BUDGET,
 } from "./lib/limits";
+import { scheduleRosterResync } from "./lib/employeeSync";
 import { orgPingInterval } from "./lib/presence";
 import { loadOrgSigningKey, signWith, type SigningKey } from "./lib/signing";
 import { DEFAULT_ORG_SETTINGS, type OrgSettings } from "./lib/validators";
@@ -78,52 +84,96 @@ async function loadOrgInputs(ctx: { db: DatabaseReader }, org: Doc<"organization
   };
 }
 
+/** A group's inputs and what loading them cost: index ranges (db.get + db.query calls) and documents read. */
+export type GroupLoad = { inputs: GroupInputs; ranges: number; docs: number };
+
 /**
  * The group's catalogue inputs: the group, its app assignments, the direct
  * grants of its enabled members (Step 11) and the apps they name (with the
  * icon's stable address from file storage). The members' sign-in rights are NOT
  * here: they are the signed roster (A6). Archived apps are loaded and left out
  * by the builder, so archiving removes an app from every document.
+ *
+ * BOUNDED WORK (Step 11 review; the Convex limits are in `lib/limits.ts`): the
+ * members with direct grants come from ONE range of
+ * `groupMembers.by_group_grants` (the flag `grantsActive` = enabled and has a
+ * grant, kept by `lib/employeeSync`), so a group with none costs one read
+ * however many members it has, and one with some costs at most
+ * MAX_GROUP_GRANT_EMPLOYEES members x (1 grant range + MAX_EMPLOYEE_APPS rows)
+ * and MAX_GROUP_GRANT_APPS granted apps. Beyond those caps the group degrades:
+ * the first ones (oldest first) are kept and ONE `policy.publishFailed` audit
+ * entry says some employees' direct apps were left out of this group's
+ * documents (nothing loops, nothing throws). The returned cost lets the
+ * publisher stop loading groups before its transaction limits.
  */
-async function loadGroupInputs(
+export async function loadGroupInputs(
   ctx: Pick<MutationCtx, "db" | "storage">,
   orgId: Id<"organizations">,
   groupId: Id<"groups"> | undefined,
-): Promise<GroupInputs> {
-  const group = groupId === undefined ? null : await ctx.db.get(groupId);
-  if (group === null || group.orgId !== orgId) {
-    return { group: null, assignments: [], apps: [], employees: [], employeeApps: [] };
-  }
+): Promise<GroupLoad> {
+  const none: GroupInputs = { group: null, assignments: [], apps: [], employees: [], employeeApps: [] };
+  if (groupId === undefined) return { inputs: none, ranges: 0, docs: 0 };
+  const group = await ctx.db.get(groupId);
+  let ranges = 1;
+  let docs = group === null ? 0 : 1;
+  if (group === null || group.orgId !== orgId) return { inputs: none, ranges, docs };
   const rows = await ctx.db
     .query("appAssignments")
     .withIndex("by_group", (q) => q.eq("groupId", group._id))
     .take(MAX_GROUP_APPS);
+  ranges++;
+  docs += rows.length;
 
-  // Direct grants (Step 11): the group's members that have any, and are enabled.
-  // Most members have none, so each costs one empty index read; only those with a
-  // grant are read as documents. A disabled employee's grants are in no document
-  // (the builder ignores them), so they are not loaded.
+  // Direct grants: only the enabled members that have any (the flag is never stale-false).
   const members = await ctx.db
     .query("groupMembers")
-    .withIndex("by_group", (q) => q.eq("groupId", group._id))
-    .take(MAX_GROUP_EMPLOYEES);
+    .withIndex("by_group_grants", (q) => q.eq("groupId", group._id).eq("grantsActive", true))
+    .take(MAX_GROUP_GRANT_EMPLOYEES + 1);
+  ranges++;
+  docs += members.length;
+  let truncated = members.length > MAX_GROUP_GRANT_EMPLOYEES;
   const employees: GroupInputs["employees"] = [];
   const employeeApps: GroupInputs["employeeApps"] = [];
-  for (const m of members) {
+  const grantedApps = new Set<string>();
+  for (const m of members.slice(0, MAX_GROUP_GRANT_EMPLOYEES)) {
+    if (m.orgId !== orgId) continue;
     const grants = await ctx.db
       .query("employeeApps")
       .withIndex("by_employee", (q) => q.eq("employeeId", m.employeeId))
       .take(MAX_EMPLOYEE_APPS);
-    if (grants.length === 0) continue;
-    const employee = await ctx.db.get(m.employeeId);
-    if (employee === null || employee.orgId !== orgId || employee.disabled) continue;
-    employees.push({ _id: employee._id, disabled: false });
-    for (const g of grants) employeeApps.push({ employeeId: employee._id, appId: g.appId });
+    ranges++;
+    docs += grants.length;
+    const kept = [];
+    for (const g of grants) {
+      if (g.orgId !== orgId) continue;
+      if (!grantedApps.has(g.appId) && grantedApps.size >= MAX_GROUP_GRANT_APPS) {
+        truncated = true;
+        continue;
+      }
+      grantedApps.add(g.appId);
+      kept.push(g);
+    }
+    if (kept.length === 0) continue;
+    employees.push({ _id: m.employeeId, disabled: false });
+    for (const g of kept) employeeApps.push({ employeeId: m.employeeId, appId: g.appId });
+  }
+  if (truncated) {
+    await writeAudit(ctx, {
+      orgId,
+      actor: SYSTEM_ACTOR,
+      action: "policy.publishFailed",
+      targetType: "group",
+      targetId: group._id,
+      targetLabel: group.name,
+      summary: `The group ${group.name} has too many employees or apps given directly: some were left out of its documents (limit ${MAX_GROUP_GRANT_EMPLOYEES} employees, ${MAX_GROUP_GRANT_APPS} apps)`,
+    });
   }
 
   // Every app an assignment or a grant names (assigned ones first), once.
   const appIds = new Set<Id<"apps">>(rows.map((a) => a.appId));
   for (const g of employeeApps) appIds.add(g.appId as Id<"apps">);
+  ranges += appIds.size;
+  docs += appIds.size;
   const apps: BuildApp[] = [];
   for (const appId of appIds) {
     const app = await ctx.db.get(appId);
@@ -143,11 +193,15 @@ async function loadGroupInputs(
     });
   }
   return {
-    group: { _id: group._id },
-    assignments: rows.map((a) => ({ appId: a.appId, audience: a.audience, pinnedTaskbar: a.pinnedTaskbar, pinnedDesktop: a.pinnedDesktop })),
-    apps,
-    employees,
-    employeeApps,
+    inputs: {
+      group: { _id: group._id },
+      assignments: rows.map((a) => ({ appId: a.appId, audience: a.audience, pinnedTaskbar: a.pinnedTaskbar, pinnedDesktop: a.pinnedDesktop })),
+      apps,
+      employees,
+      employeeApps,
+    },
+    ranges,
+    docs,
   };
 }
 type PlanState = Doc<"desiredHeads">["planState"];
@@ -187,11 +241,31 @@ type RunState = {
   seen: Set<string>;
   now: number;
   bytes: number;
+  /** Groups loaded so far in this run, and the ranges / documents their loads read (the run budget). */
+  groupLoads: number;
+  ranges: number;
+  docs: number;
 };
 
-/** Build, compare, sign and write one device (skips revoked devices and repeats within the run). */
-async function publishDevice(ctx: MutationCtx, run: RunState, device: Doc<"devices">): Promise<void> {
-  if (run.seen.has(device._id) || device.orgId !== run.org.org._id) return;
+/**
+ * Build, compare, sign and write one device (skips revoked devices and repeats
+ * within the run). "deferred" = this device would need a group whose worst-case
+ * load no longer fits the run's read budget: nothing was done for it and the
+ * caller puts it (and the rest of its batch) back in the queue for the next hop.
+ * The first group of a run is always loaded, so every hop makes progress.
+ */
+async function publishDevice(ctx: MutationCtx, run: RunState, device: Doc<"devices">): Promise<"done" | "deferred"> {
+  if (run.seen.has(device._id) || device.orgId !== run.org.org._id) return "done";
+  const groupKey = device.groupId ?? "";
+  let group = run.groups.get(groupKey);
+  if (
+    group === undefined &&
+    device.groupId !== undefined &&
+    run.groupLoads > 0 &&
+    (run.ranges + GROUP_LOAD_WORST_RANGES > RUN_RANGE_BUDGET || run.docs + GROUP_LOAD_WORST_DOCS > RUN_DOC_BUDGET)
+  ) {
+    return "deferred";
+  }
   run.seen.add(device._id);
 
   const cred = await ctx.db
@@ -199,14 +273,16 @@ async function publishDevice(ctx: MutationCtx, run: RunState, device: Doc<"devic
     .withIndex("by_device", (q) => q.eq("deviceId", device._id))
     .unique();
   const state = cred?.state ?? (device.revoked === true ? "revoked" : "active");
-  if (state === "revoked") return;
+  if (state === "revoked") return "done";
   const planState: PlanState = state === "overLimit" || state === "suspended" ? state : "ok";
 
-  const groupKey = device.groupId ?? "";
-  let group = run.groups.get(groupKey);
   if (group === undefined) {
-    group = await loadGroupInputs(ctx, device.orgId, device.groupId);
+    const load = await loadGroupInputs(ctx, device.orgId, device.groupId);
+    group = load.inputs;
     run.groups.set(groupKey, group);
+    if (device.groupId !== undefined) run.groupLoads++;
+    run.ranges += load.ranges;
+    run.docs += load.docs;
   }
 
   const input: BuildInput = {
@@ -233,7 +309,7 @@ async function publishDevice(ctx: MutationCtx, run: RunState, device: Doc<"devic
     ) {
       await ctx.db.patch(head._id, { pingIntervalMs: run.org.pingIntervalMs, planState, rosterGroupId });
     }
-    return;
+    return "done";
   }
 
   const version = (head !== null ? head.version : await legacyVersionFloor(ctx, device)) + 1;
@@ -257,7 +333,7 @@ async function publishDevice(ctx: MutationCtx, run: RunState, device: Doc<"devic
       targetLabel: device.name,
       summary: `Could not publish to the PC ${device.name}: document too large`,
     });
-    return;
+    return "done";
   }
 
   const signature = signWith(run.key, payload);
@@ -310,6 +386,7 @@ async function publishDevice(ctx: MutationCtx, run: RunState, device: Doc<"devic
     if ((await ctx.db.get(row.bodyId)) !== null) await ctx.db.delete(row.bodyId);
     await ctx.db.delete(row._id);
   }
+  return "done";
 }
 
 /**
@@ -320,9 +397,9 @@ async function publishDevice(ctx: MutationCtx, run: RunState, device: Doc<"devic
  * first write of `publishDevice`, so a skipped device leaves no partial rows.
  * No value or error text goes into the entry.
  */
-async function publishOne(ctx: MutationCtx, run: RunState, device: Doc<"devices">): Promise<void> {
+async function publishOne(ctx: MutationCtx, run: RunState, device: Doc<"devices">): Promise<"done" | "deferred"> {
   try {
-    await publishDevice(ctx, run, device);
+    return await publishDevice(ctx, run, device);
   } catch {
     await writeAudit(ctx, {
       orgId: device.orgId,
@@ -333,6 +410,7 @@ async function publishOne(ctx: MutationCtx, run: RunState, device: Doc<"devices"
       targetLabel: device.name,
       summary: `Could not publish to the PC ${device.name}: unexpected error`,
     });
+    return "done";
   }
 }
 
@@ -389,7 +467,12 @@ export const run = internalMutation({
       seen: new Set(),
       now,
       bytes: 0,
+      groupLoads: 0,
+      ranges: 0,
+      docs: 0,
     };
+    // A valid key: sign the employee removals that waited for one (1 read when none).
+    await scheduleRosterResync(ctx, args.orgId);
 
     // What is left after this run (one paginated query per run at most).
     let deviceIds = queue.deviceIds;
@@ -400,9 +483,13 @@ export const run = internalMutation({
     if (deviceIds.length > 0) {
       const batch = deviceIds.slice(0, PUBLISH_BATCH);
       deviceIds = deviceIds.slice(PUBLISH_BATCH);
-      for (const id of batch) {
+      for (const [i, id] of batch.entries()) {
         const device = await ctx.db.get(id);
-        if (device !== null) await publishOne(ctx, runState, device);
+        if (device !== null && (await publishOne(ctx, runState, device)) === "deferred") {
+          // The run's read budget is spent: this device and the rest wait for the next hop.
+          deviceIds = [...batch.slice(i), ...deviceIds];
+          break;
+        }
       }
     } else if (groupIds.length > 0 || allDevices) {
       const opts = { numItems: PUBLISH_BATCH, cursor: cursor ?? null };
@@ -417,7 +504,13 @@ export const run = internalMutation({
               .query("devices")
               .withIndex("by_org", (q) => q.eq("orgId", args.orgId))
               .paginate(opts);
-      for (const device of page.page) await publishOne(ctx, runState, device);
+      for (const [i, device] of page.page.entries()) {
+        if ((await publishOne(ctx, runState, device)) === "deferred") {
+          // Read budget spent: the rest of this page becomes an explicit device list, handled first next hop.
+          deviceIds = page.page.slice(i).map((d) => d._id);
+          break;
+        }
+      }
       if (page.isDone) {
         cursor = undefined;
         if (allDevices) allDevices = false;
