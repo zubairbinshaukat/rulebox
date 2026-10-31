@@ -38,6 +38,20 @@ pub struct AgentState {
     /// (Phase 4 Step 9) The key id of the last accepted document; a retired key
     /// is dropped only when this is another key.
     pub last_doc_key_id: Option<String>,
+    /// (Phase 4 Step 9 review) The highest version of a VERIFIED document ever
+    /// accepted: the anti-rollback floor. Written at accept time, before the
+    /// reconciler has applied anything, so a lost or unverifiable
+    /// `desired-state.json` cannot lower it. Never lowered, except by unenroll and
+    /// by enrolling (a new organization has its own versions).
+    pub accepted_version: u64,
+}
+
+impl AgentState {
+    /// The version below which a signed document is a rollback: the highest of
+    /// everything this PC accepted or applied.
+    pub fn version_floor(&self) -> u64 {
+        self.accepted_version.max(self.last_applied_version)
+    }
 }
 
 impl Default for AgentState {
@@ -53,6 +67,7 @@ impl Default for AgentState {
             last_wall_clock_ms: 0,
             trusted_keys: Vec::new(),
             last_doc_key_id: None,
+            accepted_version: 0,
         }
     }
 }
@@ -263,6 +278,17 @@ impl SharedState {
         self.store.save(&state)
     }
 
+    /// Applies `f`, which also says whether it changed anything, and saves only
+    /// then. The read-modify-write happens under the state lock, so a concurrent
+    /// change (a key added by an administrator, say) cannot be lost between the
+    /// read and the write. The change stays in memory when the write fails.
+    pub fn update_if<R>(&self, f: impl FnOnce(&mut AgentState) -> (R, bool)) -> (R, std::io::Result<()>) {
+        let mut state = lock(&self.state);
+        let (result, changed) = f(&mut state);
+        let saved = if changed { self.store.save(&state) } else { Ok(()) };
+        (result, saved)
+    }
+
     /// `state.last_wall_clock_ms`: the highest wall clock the agent has seen.
     pub fn last_wall_clock_ms(&self) -> u64 {
         lock(&self.state).last_wall_clock_ms
@@ -455,6 +481,33 @@ mod tests {
         // (Phase 4 Step 9) No trust store: such a device trusts nothing.
         assert!(state.trusted_keys.is_empty());
         assert_eq!(state.last_doc_key_id, None);
+    }
+
+    #[test]
+    fn the_version_floor_is_the_highest_of_accepted_and_applied() {
+        // A file from before the review fix has no `acceptedVersion`.
+        let old: AgentState = serde_json::from_str(r#"{ "lastAppliedVersion": 7 }"#).unwrap();
+        assert_eq!((old.accepted_version, old.version_floor()), (0, 7));
+        let state = AgentState { accepted_version: 9, last_applied_version: 7, ..AgentState::default() };
+        assert_eq!(state.version_floor(), 9);
+    }
+
+    #[test]
+    fn update_if_saves_only_a_change() {
+        let dir = TempDir::new();
+        let platform: Arc<dyn Platform> = Arc::new(crate::platform::sim::SimPlatform::new(dir.path().to_path_buf()));
+        let shared = SharedState::new(StateStore::open(dir.path()).unwrap(), AgentState::default(), platform);
+        let file = dir.path().join("agent-state.json");
+        let (value, saved) = shared.update_if(|state| (state.accepted_version, false));
+        assert_eq!(value, 0);
+        saved.unwrap();
+        assert!(!file.exists(), "nothing changed, nothing written");
+        let (_, saved) = shared.update_if(|state| {
+            state.accepted_version = 4;
+            ((), true)
+        });
+        saved.unwrap();
+        assert_eq!(StateStore::open(dir.path()).unwrap().load().unwrap().accepted_version, 4);
     }
 
     #[test]

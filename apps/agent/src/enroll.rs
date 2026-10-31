@@ -33,6 +33,7 @@ use crate::ipc_conn::rpc_error;
 use crate::lockout::LockoutStore;
 use crate::platform::{Platform, RegData, RegValueRef};
 use crate::state::{lock, remove_file_if_exists, Enrollment, KioskRecord, PendingEnrollment, StaffAccount};
+use crate::trust::{self, TrustError};
 
 /// `operation_failed` reasons that are not in `rulebox_ipc::admin::reasons`.
 pub mod extra_reasons {
@@ -348,6 +349,7 @@ impl EnrollDeps {
             state.enrollment = Some(enrollment);
             state.pending_enrollment = None;
             state.last_applied_version = 0;
+            state.accepted_version = 0;
             state.trusted_keys = policy_keys;
             state.last_doc_key_id = None;
         }) {
@@ -480,6 +482,7 @@ impl EnrollDeps {
             }
             state.journal.clear();
             state.last_applied_version = 0;
+            state.accepted_version = 0;
             state.trusted_keys.clear();
             state.last_doc_key_id = None;
             if removed_staff {
@@ -512,13 +515,16 @@ impl EnrollDeps {
                 None,
             )
         })?;
-        let added = ctx.shared.read(|state| !state.trusted_keys.iter().any(|known| known.key_id == key.key_id));
+        // Read, check and write under the state lock: a merge of the backend task
+        // that lands at the same time cannot overwrite the key (or be overwritten).
+        let added = match trust::add_key(&ctx.shared, key.clone()) {
+            Ok(added) => added,
+            Err(TrustError::NotEnrolled) => {
+                return Err(rpc_error(ErrorCode::NotEnrolled, "This PC is not enrolled.", false));
+            }
+            Err(TrustError::NotSaved) => return Err(internal("Cannot save the agent's state.")),
+        };
         if added {
-            let new_key = key.clone();
-            ctx.shared.update(|state| state.trusted_keys.push(new_key)).map_err(|error| {
-                tracing::error!("cannot save the trusted keys: {error}");
-                internal("Cannot save the agent's state.")
-            })?;
             tracing::warn!(key_id = %key.key_id, "an administrator added a trusted policy key on this PC");
             self.runner.start_from_state().await;
         }
@@ -1001,6 +1007,7 @@ mod tests {
             // Left over from an earlier enrollment: replaced, never merged.
             trusted_keys: vec![trusted_of(&test_key_2())],
             last_doc_key_id: Some("old".into()),
+            accepted_version: 9,
             ..AgentState::default()
         });
         rig.fake().script_enroll(Ok(response("dev-77")));
@@ -1008,6 +1015,8 @@ mod tests {
         let state = rig.state();
         assert_eq!(state.trusted_keys, [trusted_of(&test_key())]);
         assert_eq!(state.last_doc_key_id, None);
+        // A new enrollment is a new organization: its versions start from scratch.
+        assert_eq!(state.accepted_version, 0);
         let saved = std::fs::read_to_string(rig.ctx.paths.agent_state()).unwrap();
         assert!(saved.contains("\"trustedKeys\"") && saved.contains("21fe31dfa154a261"), "{saved}");
         rig.runner.stop().await;
@@ -1015,8 +1024,28 @@ mod tests {
         // Unenrolling forgets them.
         let (rig, _) = enrolled_rig().await;
         assert_eq!(rig.state().trusted_keys.len(), 1);
+        rig.ctx.shared.update(|state| state.accepted_version = 5).unwrap();
         rig.unenroll(false).await.unwrap();
         assert!(rig.state().trusted_keys.is_empty());
+        assert_eq!(rig.state().accepted_version, 0);
+    }
+
+    #[tokio::test]
+    async fn only_an_https_deployment_url_can_enroll() {
+        // The URL comes from the enrollment code (`enroll_code::parse`): a plain
+        // `http://` one (loopback included) is `code_invalid` before any state is
+        // written or backend is built. There is no dev mode that lets it through.
+        for url in ["http://localhost:3210", "http://127.0.0.1:3210", "http://happy-animal-123.convex.cloud"] {
+            let rig = Rig::new();
+            let code = format!("RBX1.{}", base64::Engine::encode(&base64::engine::general_purpose::URL_SAFE_NO_PAD, format!("{url}#{TOKEN}")));
+            let params = AdminEnrollParams { code, device_name: None, allow_joined: true };
+            let error = rig.enroll(params).await.unwrap_err();
+            let failed = failure(&error);
+            assert_eq!(failed.reason, reasons::CODE_INVALID, "{url}");
+            assert_eq!(failed.details.unwrap()["kind"], "badUrl", "{url}");
+            assert!(lock(&rig.urls).is_empty(), "no backend was built for {url}");
+            assert!(rig.state().pending_enrollment.is_none() && rig.state().enrollment.is_none());
+        }
     }
 
     #[tokio::test]

@@ -3258,9 +3258,12 @@ devices ship):**
    When `head.version` is above the last applied version the task calls
    `fetch_desired(version)` once (retry with backoff on error; `not_found`
    → wait for the next head), then `verify_envelope` **and** checks
-   `version`, `key_id` and SHA-256 of the payload against the head
-   (`VerifyError::HeadMismatch`, new). Nothing is applied from the head
-   alone.
+   `version` and `key_id` against the head (`VerifyError::VersionMismatch` /
+   `HeadMismatch`, new). There is **no SHA-256 check of the payload against
+   the head** (owner decision 2026-11-01, option A): the signature covers every
+   byte of the body together with its version, key id, org and device, and the
+   head's `contentHash` is not a hash of the signed bytes. Nothing is applied
+   from the head alone.
 10. **Roster:** `rulebox-policy/src/roster.rs` (`RosterEntry`,
     `RosterSnapshot`, `verify_roster_entry`, `verify_snapshot`; message
     format of 4.2.1). The agent stores the verified roster in
@@ -3290,7 +3293,8 @@ binds every byte of the body, so `verify_for_head` checks `payload.version ==
 head.version` (`VersionMismatch`, as the negative vector
 `version_older_than_expected` requires) and `payload.keyId == head.keyId`
 (`HeadMismatch`). If the SHA-256 check is wanted, the head needs a
-`payloadSha256` field (server change). **Owner decision.**
+`payloadSha256` field (server change). **Owner decision (2026-11-01): option A,
+no SHA-256 check** (see (10)).
 (2) `rulebox-policy`: `envelope.rs` as item 1 plus `verify_for_head(env,
 trusted, org, device, HeadRef)`, `verify_message`, `TrustedKey::{from_public_key,
 checked}` (a listed key id must be the id of its key), `endorsement_message(org,
@@ -3334,6 +3338,55 @@ agent no longer calls `devices:desiredState`.
 (+ derive), fiat-crypto, signature, subtle. `rulebox-policy` now depends on
 ed25519-dalek, base64, sha2, thiserror, so the Staff App compiles them too (not
 checked: no Tauri build in this pass).
+(10) **Review fixes (2026-11-01, independent security review of the Step 9
+commits `ad525a4` / `eeb6288`).** Owner decisions recorded: amendment 9 is
+resolved as option A (no payload SHA-256 against the head; plan text amended
+above and in (1)); **a retired key never endorses another key**; **a version
+that failed verification is retried after the trust store changes**; **the
+roster epoch never decreases**. Changes (agent only, no vectors, no `convex/`):
+(a) *Roster rollback (blocker for Step 13).* `RosterState.floors` (group id ->
+highest verified epoch, persisted in `roster.json`, `serde(default)`, schema
+stays 1). `sync` never aims below the floor, a head epoch below the stored one
+fetches nothing and changes nothing (before: the stored roster was reset to
+empty and re-fetched from epoch 0), a start-over keeps the floor, and a result
+below it is `RosterError::Rollback { floor, got }` (log reason
+`roster_rollback`, stored roster kept, not retried until the head epoch moves).
+`save_roster` re-checks monotonicity at save (an older snapshot or a signed
+prefix of the log can no longer be persisted); the floor also survives a
+switch to another group and back. `epoch + 1` is `checked_add`.
+(b) *Trust store lost update.* `SharedState::update_if` (read-modify-write
+under the state lock, saves only on a change); `trust::update` and the new
+`trust::add_key` (used by `admin.trustKey`) merge inside it.
+(c) *Retired keys do not endorse.* `trust::merge` first drops retired keys (as
+before: only after a document of another key, never the last), then walks
+`keys` with the retired ids removed from the endorser set; a retired key is not
+added. Consequence to know: a device that was offline until its only trusted key
+was retired cannot walk the chain through it (the server lists retired keys
+with their endorsements, which the agent now ignores) and needs
+`rulebox-agent trust-key` or re-enrollment.
+(d) *Failed version recovery.* A change of the trust store (head result or
+right after a document is accepted) clears `failed_version` and `roster_failed`
+whatever the head says, so a transient `UnknownKey` followed by a new endorsed
+key with the same head recovers.
+(e) *Anti-rollback floor.* `AgentState.accepted_version` (`serde(default)`) is
+written at accept time, before the cache and the reconciler; the floor is
+`max(accepted_version, last_applied_version)` plus the cache's version; reset
+only by unenroll and by enrolling.
+(f) *Fail closed without an organization.* `trust::TrustError::NotEnrolled`
+replaces the `unwrap_or_default()` org-id fallbacks (trust merge, document
+verification, roster sync); nothing is verified, trusted or applied then.
+(g) *Enrollment URL.* No change needed: `enroll_code::parse` already requires
+`https://host[:port]` (no path, query or user-info); `http://` including
+loopback is `code_invalid` / `badUrl` and there is no dev mode that allows it
+(test `only_an_https_deployment_url_can_enroll`). Host allow-listing is not
+done (self-hosted Convex deployments use any host).
+Not done, left for the owner: size caps for the envelope payload and signature
+in `verify_envelope`; the `kioskError` precedence (a kiosk error code still
+hides `desired_state_untrusted`); the unsigned `retired` list can churn
+(a hostile backend can stop a retired key being dropped, or block endorsements
+by listing a good key as retired, which only delays a rotation);
+`deny_unknown_fields` on `Payload`; the `headState` doc comment in
+`convex/devices.ts` still says the SHA-256 is checked (a `convex/` edit).
 
 ---
 

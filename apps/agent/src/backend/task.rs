@@ -50,7 +50,7 @@ use crate::platform::Platform;
 use crate::roster::{self, RosterError, RosterState};
 use crate::session::SessionManager;
 use crate::state::{write_atomic, SharedState, SnapshotHandle};
-use crate::trust;
+use crate::trust::{self, TrustError};
 
 /// First heartbeat after a transition to online: a random wait up to this long.
 const FIRST_HEARTBEAT_JITTER_MS: u64 = 10_000;
@@ -204,6 +204,13 @@ impl DesiredSync {
         self.problem = Some(PROBLEM_DESIRED_STATE_UNTRUSTED);
     }
 
+    /// A document that could not even be checked because the PC has no
+    /// organization (fail closed): same effect as a failed verification.
+    pub fn reject_untrusted_store(&mut self, version: u64, error: TrustError) {
+        tracing::error!(version, %error, "policy_rejected: the desired state was not applied (no organization id)");
+        self.problem = Some(PROBLEM_DESIRED_STATE_UNTRUSTED);
+    }
+
     /// Handles a VERIFIED document (`payload` is what `verify_for_head` returned
     /// for `envelope`).
     pub fn accept(&mut self, ctx: &TaskContext, envelope: &SignedEnvelope, payload: Payload) -> DocOutcome {
@@ -239,6 +246,21 @@ impl DesiredSync {
         };
         self.problem = None;
         self.floor = self.floor.max(version);
+        // The anti-rollback floor is persisted NOW, at accept time (not when the
+        // reconciler has applied it, not only in the cache file): a lost or
+        // unverifiable `desired-state.json` must not let an older signed document
+        // back in.
+        let (_, saved) = ctx.shared.update_if(|state| {
+            if state.accepted_version < version {
+                state.accepted_version = version;
+                ((), true)
+            } else {
+                ((), false)
+            }
+        });
+        if let Err(error) = saved {
+            tracing::error!("cannot save the accepted version: {error}");
+        }
 
         if write_cache {
             // Cache first, so a restart that follows sees what the kiosk was told.
@@ -460,9 +482,24 @@ impl Fetcher {
         self.backoff = (self.backoff * 2).min(FETCH_RETRY_MAX);
     }
 
+    /// Forgets the failures that depended on the trust store.
+    fn retry_after_trust_change(&mut self) {
+        let had_failure = self.failed_version.take().is_some();
+        let had_roster_failure = self.roster_failed.take().is_some();
+        if had_failure || had_roster_failure {
+            tracing::info!("the trusted keys changed; retrying what failed verification");
+        }
+    }
+
     /// A new head-state result: trust first (a new key may sign the new body).
     fn on_head(&mut self, ctx: &TaskContext, head: Option<Head>, keys: Vec<PublishedKey>, retired: Vec<String>, sync: &DesiredSync) {
-        trust::update(&ctx.shared, &keys, &retired);
+        match trust::update(&ctx.shared, &keys, &retired) {
+            // The trust store changed: whatever failed before (an unknown key, say)
+            // may verify now, and a legitimate higher version must always recover.
+            Ok(change) if !change.is_empty() => self.retry_after_trust_change(),
+            Ok(_) => {}
+            Err(error) => tracing::error!(%error, "the trust store was not updated"),
+        }
         self.keys = keys;
         self.retired = retired;
         self.wait_for_head = false;
@@ -509,35 +546,51 @@ impl Fetcher {
         }
         let Some(group_id) = sync.roster_group().map(str::to_string) else {
             if self.roster.group_id.is_some() {
-                self.save_roster(ctx, RosterState::for_group(None));
+                // The floors are kept: a later document may name the group again.
+                let cleared = self.roster.restarted(None);
+                if let Err(error) = self.save_roster(ctx, cleared) {
+                    tracing::error!("roster_rejected: {error}; the stored roster stays");
+                }
             }
             return;
         };
         let target = head.roster_epoch;
-        let current = self.roster.group_id.as_deref() == Some(group_id.as_str()) && self.roster.epoch == target;
+        // A head epoch BELOW the stored one is never followed (the head is unsigned
+        // and the roster epoch never decreases).
+        let current = self.roster.group_id.as_deref() == Some(group_id.as_str()) && self.roster.epoch >= target;
         if current || self.roster_failed.as_ref() == Some(&(group_id.clone(), target)) {
             return;
         }
+        let (trusted, org_id) = match trust::verification_inputs(&ctx.shared) {
+            Ok(inputs) => inputs,
+            Err(error) => {
+                tracing::error!(%error, "roster_rejected: the roster was not checked (no organization id)");
+                return;
+            }
+        };
         let (backend, auth, done_tx) = (Arc::clone(backend), auth.clone(), done_tx.clone());
         let roster = self.roster.clone();
-        let (trusted, org_id) = ctx.shared.read(|state| {
-            (state.trusted_keys.clone(), state.enrollment.as_ref().map(|e| e.org_id.clone()).unwrap_or_default())
-        });
         self.task = Some(tokio::spawn(async move {
             let result = roster::sync(backend.as_ref(), &auth, roster, target, &trusted, &org_id, &group_id).await;
             let _ = done_tx.send(FetchDone::Roster { group_id, target, result }).await;
         }));
     }
 
-    fn save_roster(&mut self, ctx: &TaskContext, roster: RosterState) {
+    /// Replaces the stored roster. The epoch of a group never decreases: a roster
+    /// below the highest verified epoch is refused (nothing saved), and the floors
+    /// of both are merged.
+    fn save_roster(&mut self, ctx: &TaskContext, roster: RosterState) -> Result<(), RosterError> {
+        self.roster.check_monotonic(&roster)?;
+        let roster = self.roster.succeeded_by(roster);
         if roster == self.roster {
-            return;
+            return Ok(());
         }
         if let Err(error) = roster.save(&ctx.paths.roster()) {
             tracing::error!("cannot save roster.json: {error}");
         }
         tracing::info!(epoch = roster.epoch, members = roster.members.len(), "roster updated");
         self.roster = roster;
+        Ok(())
     }
 
     /// A fetch finished. Returns whether a document was applied.
@@ -545,16 +598,26 @@ impl Fetcher {
         match done {
             FetchDone::Desired { head, result: Ok(envelope) } => {
                 self.backoff = FETCH_RETRY_BASE;
-                let (trusted, org_id) = ctx.shared.read(|state| {
-                    (state.trusted_keys.clone(), state.enrollment.as_ref().map(|e| e.org_id.clone()).unwrap_or_default())
-                });
+                let (trusted, org_id) = match trust::verification_inputs(&ctx.shared) {
+                    Ok(inputs) => inputs,
+                    Err(error) => {
+                        // Fail closed: no organization id, nothing is verified or applied.
+                        sync.reject_untrusted_store(head.version, error);
+                        self.failed_version = Some(head.version);
+                        return false;
+                    }
+                };
                 let head_ref = HeadRef { version: head.version, key_id: &head.key_id };
                 match verify_for_head(&envelope, &trusted, &org_id, &auth.device_id, &head_ref) {
                     Ok(payload) => {
                         let outcome = sync.accept(ctx, &envelope, payload);
                         if outcome == DocOutcome::Applied {
                             // A document of the new key may let a retired key go.
-                            trust::update(&ctx.shared, &self.keys, &self.retired);
+                            match trust::update(&ctx.shared, &self.keys, &self.retired) {
+                                Ok(change) if !change.is_empty() => self.retry_after_trust_change(),
+                                Ok(_) => {}
+                                Err(error) => tracing::error!(%error, "the trust store was not updated"),
+                            }
                             return true;
                         }
                         if outcome != DocOutcome::Unchanged {
@@ -575,15 +638,18 @@ impl Fetcher {
             FetchDone::Roster { group_id, target, result } => match result {
                 Ok(roster) => {
                     self.backoff = FETCH_RETRY_BASE;
-                    if roster.epoch != target {
+                    if roster.epoch < target {
                         tracing::warn!(epoch = roster.epoch, target, "the roster did not reach the head's epoch");
+                        self.roster_failed = Some((group_id.clone(), target));
+                    }
+                    if let Err(error) = self.save_roster(ctx, roster) {
+                        tracing::error!(reason = error.reason(), "roster_rejected: {error}; the stored roster stays");
                         self.roster_failed = Some((group_id, target));
                     }
-                    self.save_roster(ctx, roster);
                 }
                 Err(RosterError::Backend(error)) => self.retry_later("roster", &error),
                 Err(error) => {
-                    tracing::error!("roster_rejected: {error}; the stored roster stays");
+                    tracing::error!(reason = error.reason(), "roster_rejected: {error}; the stored roster stays");
                     self.roster_failed = Some((group_id, target));
                 }
             },
@@ -607,7 +673,9 @@ pub async fn run_backend_task(
     auth: DeviceAuth,
     shutdown: CancellationToken,
 ) {
-    let mut sync = DesiredSync::new(ctx.shared.read(|state| state.last_applied_version));
+    // The anti-rollback floor: the highest of every version accepted or applied
+    // (`agent-state.json`), then the cache's (`load_cached`).
+    let mut sync = DesiredSync::new(ctx.shared.read(|state| state.version_floor()));
     sync.load_cached(&ctx);
     if ctx.shared.read(|state| state.trusted_keys.is_empty()) {
         tracing::error!("this PC trusts no policy key (enrolled before Phase 4?): no document can be applied; re-enroll it");
@@ -1395,6 +1463,157 @@ mod tests {
         assert_eq!(fake.desired_calls().len(), 3);
         assert_eq!(rig.snapshot().desired_state_version, 2);
         stop(cancel, handle).await;
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn the_accepted_version_floor_survives_a_lost_cache() {
+        let rig = Rig::new();
+        let fake = FakeBackend::new();
+        let (cancel, handle) = rig.start(&fake);
+        push_doc(&fake, 5, doc(5, true));
+        settle().await;
+        // Accepted, but the reconciler never ran (the fake control): only the
+        // accept-time floor can know about version 5.
+        let state = rig.ctx.shared.get();
+        assert_eq!((state.accepted_version, state.last_applied_version), (5, 0));
+        let on_disk = std::fs::read_to_string(rig.ctx.paths.agent_state()).unwrap();
+        assert!(on_disk.contains("\"acceptedVersion\": 5"), "{on_disk}");
+        stop(cancel, handle).await;
+
+        // The cache is lost; the agent restarts. A validly signed older document is
+        // still a rollback: never even fetched.
+        std::fs::remove_file(rig.cache_path()).unwrap();
+        let fake = FakeBackend::new();
+        let (cancel, handle) = rig.start(&fake);
+        push_doc(&fake, 3, doc(3, false));
+        settle().await;
+        assert!(fake.desired_calls().is_empty());
+        assert!(!rig.cache_path().exists());
+        // The body of 3 behind a head for 7 is refused too, and 6 is accepted.
+        let old = envelope(&test_key(), "org-1", "dev-1", 3, &doc(3, false));
+        fake.store_body(7, Ok(old.clone()));
+        fake.push(FakeBackend::head_event(&SignedEnvelope { version: 7, ..old }, 0, FakeBackend::test_keys()));
+        settle().await;
+        assert!(!rig.cache_path().exists());
+        push_doc(&fake, 6, doc(6, true));
+        settle().await;
+        assert_eq!(rig.snapshot().desired_state_version, 6);
+        assert_eq!(rig.ctx.shared.get().accepted_version, 6);
+        stop(cancel, handle).await;
+
+        // An unparseable cache does not lower it either, and re-enrolling resets it
+        // (enroll.rs tests).
+        std::fs::write(rig.cache_path(), b"{ not json").unwrap();
+        let fake = FakeBackend::new();
+        let (cancel, handle) = rig.start(&fake);
+        push_doc(&fake, 4, doc(4, false));
+        settle().await;
+        assert!(fake.desired_calls().is_empty());
+        stop(cancel, handle).await;
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_failed_version_is_retried_after_the_trust_store_changes() {
+        let rig = Rig::new();
+        let fake = FakeBackend::new();
+        let (cancel, handle) = rig.start(&fake);
+        let (k1, k2) = (test_key(), test_key_2());
+        // Version 2 is signed by k2, which this PC does not trust yet and the first
+        // answer does not list: UnknownKey, kept as failed.
+        let env = envelope(&k2, "org-1", "dev-1", 2, &doc(2, true));
+        fake.store_body(2, Ok(env.clone()));
+        fake.push(head_state(&env, vec![published(&k1, None)], vec![]));
+        settle().await;
+        assert_eq!(fake.desired_calls(), [2]);
+        assert!(rig.snapshot().desired_state.is_none());
+        // The same head with nothing new: not fetched again.
+        fake.push(head_state(&env, vec![published(&k1, None)], vec![]));
+        settle().await;
+        assert_eq!(fake.desired_calls(), [2]);
+        // The SAME head, now with k2 endorsed by k1: the trust store changes, the
+        // failure is forgotten and version 2 is fetched and applied.
+        fake.push(head_state(&env, vec![published(&k1, None), published(&k2, Some(&k1))], vec![]));
+        settle().await;
+        assert_eq!(fake.desired_calls(), [2, 2]);
+        assert_eq!(rig.snapshot().desired_state_version, 2);
+        assert_eq!(rig.trusted_ids().len(), 2);
+        stop(cancel, handle).await;
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn without_an_organization_nothing_is_verified_or_applied() {
+        let rig = Rig::with_state(AgentState { trusted_keys: vec![trusted_of(&test_key())], ..AgentState::default() });
+        let fake = FakeBackend::new();
+        let (cancel, handle) = rig.start(&fake);
+        push_doc(&fake, 1, doc(1, true));
+        settle().await;
+        assert!(rig.snapshot().desired_state.is_none());
+        assert!(!rig.cache_path().exists());
+        assert_eq!(rig.ctx.shared.get().accepted_version, 0);
+        assert_eq!(rig.changed(), 0);
+        stop(cancel, handle).await;
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn the_roster_epoch_never_decreases() {
+        let rig = Rig::new();
+        let key = test_key();
+        std::fs::create_dir_all(rig.ctx.paths.state_dir()).unwrap();
+        let stored = RosterState {
+            group_id: Some("grp-1".into()),
+            epoch: 5,
+            members: std::collections::BTreeMap::from([("emp-1".to_string(), 1), ("emp-2".to_string(), 1)]),
+            ..RosterState::default()
+        };
+        stored.save(&rig.ctx.paths.roster()).unwrap();
+        let fake = FakeBackend::new();
+        // The head says 6. The first answer has a gap (start over from 0), the
+        // second is a signed PREFIX of the log (epochs 1 to 3, the removal of emp-2
+        // comes later): refused, the stored roster stays.
+        fake.script_roster(Ok(RosterFetch::Entries {
+            epoch: 9,
+            entries: vec![roster_entry(&key, "org-1", "grp-1", 9, "emp-9", Some(1))],
+        }));
+        fake.script_roster(Ok(RosterFetch::Entries {
+            epoch: 3,
+            entries: vec![
+                roster_entry(&key, "org-1", "grp-1", 1, "emp-1", Some(1)),
+                roster_entry(&key, "org-1", "grp-1", 2, "emp-2", Some(1)),
+                roster_entry(&key, "org-1", "grp-1", 3, "emp-3", Some(1)),
+            ],
+        }));
+        let (cancel, handle) = rig.start(&fake);
+        let env = envelope(&key, "org-1", "dev-1", 1, &grouped_doc(1, "grp-1"));
+        fake.store_body(1, Ok(env.clone()));
+        fake.push(FakeBackend::head_event(&env, 6, FakeBackend::test_keys()));
+        settle().await;
+        assert_eq!(fake.roster_calls(), [5, 0, 3]);
+        assert_eq!(RosterState::load(&rig.ctx.paths.roster()), stored);
+
+        // An unsigned head that names a LOWER epoch changes nothing and fetches nothing.
+        fake.push(FakeBackend::head_event(&env, 2, FakeBackend::test_keys()));
+        settle().await;
+        assert_eq!(fake.roster_calls().len(), 3);
+        assert_eq!(RosterState::load(&rig.ctx.paths.roster()), stored);
+        stop(cancel, handle).await;
+    }
+
+    #[tokio::test]
+    async fn save_roster_refuses_a_lower_epoch() {
+        let rig = Rig::new();
+        std::fs::create_dir_all(rig.ctx.paths.state_dir()).unwrap();
+        let at = |epoch: u64| RosterState { group_id: Some("grp-1".into()), epoch, ..RosterState::default() };
+        let mut fetcher = Fetcher::new(at(5));
+        assert_eq!(fetcher.save_roster(&rig.ctx, at(3)), Err(RosterError::Rollback { floor: 5, got: 3 }));
+        assert_eq!(fetcher.roster.epoch, 5);
+        assert!(!rig.ctx.paths.roster().exists(), "nothing was written");
+        assert_eq!(fetcher.save_roster(&rig.ctx, at(6)), Ok(()));
+        assert_eq!(RosterState::load(&rig.ctx.paths.roster()).epoch, 6);
+        // Clearing the group (a document without one) keeps the floor.
+        let cleared = fetcher.roster.restarted(None);
+        assert_eq!(fetcher.save_roster(&rig.ctx, cleared), Ok(()));
+        assert_eq!(fetcher.roster.group_id, None);
+        assert_eq!(fetcher.save_roster(&rig.ctx, at(2)), Err(RosterError::Rollback { floor: 6, got: 2 }));
     }
 
     fn grouped_doc(version: u64, group: &str) -> serde_json::Value {
