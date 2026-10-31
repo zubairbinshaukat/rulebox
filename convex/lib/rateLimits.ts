@@ -57,6 +57,16 @@ export const rateLimiter = new RateLimiter(components.rateLimiter, {
   // consumed only on a wrong password, so a successful sign-in writes no row.
   // Over the limit the device is answered `lockedOut` with `retryAfterMs`.
   verifyPerDevice: { kind: "token bucket", rate: 30, period: MINUTE_MS, capacity: 30 },
+  // Device writes (review of Step 12), per device (key = device id): one token per
+  // ROW that `deviceApi:report` / `reportAudit` / `reportInstalls` /
+  // `rotateCredential` really wrote (status summary and report, install results,
+  // audit rows), consumed at the END of the mutation, so a replay or an unchanged
+  // report writes nothing and costs nothing (A10), and a refused call rolls its
+  // writes back. The capacity holds a full agent audit queue (500 records) plus a
+  // first install report and status (600); the refill (60 rows/min) is far above
+  // a healthy agent (a report per minute, a few audit records). A compromised
+  // device can add at most 3,600 rows per hour.
+  deviceWrites: { kind: "token bucket", rate: 60, period: MINUTE_MS, capacity: 600 },
   // `members:invite`, per organization; consumed in the mutation that stores
   // the invite (a refused invite rolls it back: only real invites count).
   inviteCreate: { kind: "token bucket", rate: 30, period: HOUR_MS, capacity: 30 },
@@ -75,6 +85,7 @@ export type LimitName =
   | "wingetResolve"
   | "employeeWrites"
   | "verifyPerDevice"
+  | "deviceWrites"
   | "inviteCreate";
 
 /** Read-only: throw `rate_limited` when the bucket is empty, without consuming. */
@@ -96,12 +107,13 @@ export async function consumeQuietly(
   await rateLimiter.limit(ctx, name, key === undefined ? {} : { key });
 }
 
-/** Consume one token or throw `rate_limited` with `retryAfterMs`. Actions and mutations. */
+/** Consume `count` tokens (default one) or throw `rate_limited` with `retryAfterMs`. Actions and mutations. */
 export async function consumeOrFail(
   ctx: Parameters<typeof rateLimiter.limit>[0],
   name: LimitName,
   key: string,
+  count = 1,
 ): Promise<void> {
-  const status = await rateLimiter.limit(ctx, name, { key });
+  const status = await rateLimiter.limit(ctx, name, count === 1 ? { key } : { key, count });
   if (!status.ok) fail("rate_limited", { retryAfterMs: status.retryAfter });
 }

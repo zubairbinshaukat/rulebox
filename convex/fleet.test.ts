@@ -221,8 +221,29 @@ describe("fleet writes", () => {
 
     await expectCode(stale.as.mutation(api.fleet.remove, { deviceId: d.deviceId }), "step_up_required");
     await t.run((ctx) => ctx.db.insert("desiredStates", { orgId, scope: d.deviceId, version: 1, doc: {} }));
+    // Two failed install results and one installed: the purge lowers `failedInstallCount` by the failed ones.
+    await t.run(async (ctx) => {
+      const mk = (name: string) =>
+        ctx.db.insert("apps", {
+          orgId,
+          name,
+          kind: "desktop",
+          desktop: { source: "preinstalled", exe: "{ProgramFiles}\\X\\x.exe", args: [], fileArgTemplate: [], resetFolders: [] },
+          archived: false,
+          revision: 1,
+          createdAt: 0,
+        });
+      const row = (appId: Awaited<ReturnType<typeof mk>>, state: "failed" | "installed") =>
+        ctx.db.insert("installResults", { orgId, deviceId: d.deviceId, appId, state, appRevision: 1, attempts: 1, updatedAt: 0 });
+      await row(await mk("A"), "failed");
+      await row(await mk("B"), "failed");
+      await row(await mk("C"), "installed");
+      const st = (await ctx.db.query("orgStats").withIndex("by_org", (q) => q.eq("orgId", orgId)).unique())!;
+      await ctx.db.patch(st._id, { failedInstallCount: 3 }); // 2 of this device + 1 elsewhere
+    });
     await a.as.mutation(api.fleet.remove, { deviceId: d.deviceId });
     await t.finishAllScheduledFunctions(() => {});
+    expect((await orgStatsOf(t, orgId))?.failedInstallCount).toBe(1);
     const rows = await deviceRows(t, d.deviceId);
     expect(rows).toEqual({ device: null, cred: null, liveness: null, presence: null, summary: null, report: null });
     expect(await t.run((ctx) => ctx.db.query("desiredStates").withIndex("by_scope_version", (q) => q.eq("scope", d.deviceId)).first())).toBeNull();

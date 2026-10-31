@@ -466,10 +466,15 @@ describe("apps: plan limit, archive, delete, retry", () => {
       const e = await ctx.db.insert("employees", { orgId, name: "E", username: "e", searchText: "e", disabled: false, credentialRevision: 0, revision: 0, createdAt: 0 });
       await ctx.db.insert("employeeApps", { orgId, employeeId: e, appId: id });
       expect(await ctx.storage.get(storageId)).not.toBeNull();
+      // 115 of the rows are failed; 5 more failed rows (other apps) are counted too.
+      const st = (await ctx.db.query("orgStats").withIndex("by_org", (q) => q.eq("orgId", orgId)).unique())!;
+      await ctx.db.patch(st._id, { failedInstallCount: 120 });
     });
     await a.as.mutation(api.apps.setArchived, { appId: id, archived: true });
     await a.as.mutation(api.apps.remove, { appId: id });
     await t.finishAllScheduledFunctions(vi.runAllTimers);
+    // Review of Step 12: the failed rows deleted by the purge come off `failedInstallCount`.
+    expect((await stats(t, orgId))?.failedInstallCount).toBe(5);
     await t.run(async (ctx) => {
       expect(await ctx.db.query("installResults").withIndex("by_app_state", (q) => q.eq("appId", id)).first()).toBeNull();
       expect(await ctx.db.query("employeeApps").withIndex("by_app", (q) => q.eq("appId", id)).first()).toBeNull();

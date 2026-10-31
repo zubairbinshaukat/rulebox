@@ -228,6 +228,56 @@ describe("deviceApi:verifyEmployee (plan 4.12)", () => {
     expect((await verify(s.t, s.device, "maya", PASSWORD)).kind).toBe("ok");
   });
 
+  test("nearly empty bucket: the token is taken BEFORE the Argon2id verify, once (not again for the wrong password)", async () => {
+    const s = await seed();
+    at(Date.UTC(2026, 10, 1, 12, 0, 0));
+    const drain = (count: number) => s.t.run((ctx) => rateLimiter.limit(ctx, "verifyPerDevice", { key: s.device.deviceId, count }));
+    await drain(25); // 5 tokens left: below the reserve threshold
+    const original = verifier.verify.bind(verifier);
+    let seenInVerify = NaN;
+    vi.spyOn(verifier, "verify").mockImplementation(async (password, phc) => {
+      seenInVerify = await bucketValue(s.t, s.device.deviceId);
+      return original(password, phc);
+    });
+    expect(await verify(s.t, s.device, "maya", "wrong password")).toEqual({ kind: "wrongCredentials" });
+    expect(seenInVerify).toBe(4); // already taken when the verify ran
+    expect(await bucketValue(s.t, s.device.deviceId)).toBe(4); // and not taken twice
+    expect(await lockRow(s.t, s.employeeId)).toMatchObject({ failures: 1 });
+    // A correct password in this state also takes its token (the price of the guard) and signs in.
+    expect((await verify(s.t, s.device, "maya", PASSWORD)).kind).toBe("ok");
+    expect(await bucketValue(s.t, s.device.deviceId)).toBe(3);
+    // Empty: refused with no verify at all.
+    await drain(3);
+    seenInVerify = NaN;
+    expect((await verify(s.t, s.device, "maya", PASSWORD)).kind).toBe("lockedOut");
+    expect(seenInVerify).toBeNaN();
+  });
+
+  test("a correct password re-checks the lock when the device had recent failures: locked meanwhile -> lockedOut; with a full bucket a sign-in stays at 0 writes", async () => {
+    const s = await seed();
+    const t0 = Date.UTC(2026, 10, 1, 13, 0, 0);
+    at(t0);
+    await s.t.run((ctx) => rateLimiter.limit(ctx, "verifyPerDevice", { key: s.device.deviceId, count: 2 }));
+    const original = verifier.verify.bind(verifier);
+    // A parallel burst locks the employee while this call is inside the Argon2id verify.
+    vi.spyOn(verifier, "verify").mockImplementation(async (password, phc) => {
+      await s.t.run((ctx) => ctx.db.insert("employeeLockouts", { employeeId: s.employeeId, orgId: s.orgId, failures: 10, lastFailureAt: t0, lockedUntil: t0 + EMPLOYEE_LOCK_MS }));
+      return original(password, phc);
+    });
+    expect(await verify(s.t, s.device, "maya", PASSWORD)).toEqual({ kind: "lockedOut", retryAfterMs: EMPLOYEE_LOCK_MS });
+    vi.restoreAllMocks();
+
+    // Full bucket (no recent failure): the guard is not paid for; the accepted A9 trade-off.
+    const other = await seed();
+    at(t0);
+    const originalB = verifier.verify.bind(verifier);
+    vi.spyOn(verifier, "verify").mockImplementation(async (password, phc) => {
+      await other.t.run((ctx) => ctx.db.insert("employeeLockouts", { employeeId: other.employeeId, orgId: other.orgId, failures: 10, lastFailureAt: t0, lockedUntil: t0 + EMPLOYEE_LOCK_MS }));
+      return originalB(password, phc);
+    });
+    expect((await verify(other.t, other.device, "maya", PASSWORD)).kind).toBe("ok");
+  });
+
   test("revoked device, wrong secret or unknown id: device_rejected before any verify", async () => {
     const s = await seed();
     const spy = vi.spyOn(verifier, "verify");
@@ -255,7 +305,7 @@ const record = (id: string, extra: Record<string, unknown> = {}) => ({
 });
 
 describe("deviceApi:report audit part (plan 4.11)", () => {
-  test("records become audit rows; duplicates ignored; bad kind skipped; bad detail and username dropped; no secrets", async () => {
+  test("records become audit rows; duplicates ignored; bad kind skipped but counted and reported; bad detail and username dropped; no secrets", async () => {
     const s = await seed();
     const records = [
       record("a".repeat(32)),
@@ -265,14 +315,19 @@ describe("deviceApi:report audit part (plan 4.11)", () => {
       record("e".repeat(32), { kind: "employeeLockedOut", username: "$argon2id$v=19$m=1" }),
     ];
     const first = await s.t.mutation(api.deviceApi.report, { ...creds(s.device), audit: { records, dropped: 0 } });
-    expect(first).toEqual({ accepted: { installs: 0, audit: 4 } });
+    // The unknown kind is not stored but counted, so the agent can ack the whole batch.
+    expect(first).toEqual({ accepted: { installs: 0, audit: 5 } });
     const rows = (await auditRows(s.t, s.orgId)).filter((r) => r.actorType === "device" && r.action !== "device.enrolled");
     expect(rows.map((r) => r.action).sort()).toEqual([
       "device.adminExitFailed",
       "device.adminExitWrongPin",
+      "device.auditDropped",
       "device.employeeLockedOut",
       "device.employeeLockedOut",
     ]);
+    expect(rows.find((r) => r.action === "device.auditDropped")?.summary).toBe(
+      "1 audit records were lost on the PC Desk 1 (0 while its queue was full, 1 not understood by this server)",
+    );
     const byKey = new Map(rows.map((r) => [r.eventKey, r]));
     expect(byKey.get(`dev:${s.device.deviceId}:${"b".repeat(32)}`)?.summary).toBe(
       "maya was locked out after too many wrong passwords on the PC Desk 1 (after_10)",
@@ -282,7 +337,7 @@ describe("deviceApi:report audit part (plan 4.11)", () => {
     expectNoSecrets(rows, [s.device.secret]);
     // The same batch again: all known, nothing new.
     const again = await probe(() => s.t.mutation(api.deviceApi.report, { ...creds(s.device), audit: { records, dropped: 0 } }));
-    expect(again.result).toEqual({ accepted: { installs: 0, audit: 4 } });
+    expect(again.result).toEqual({ accepted: { installs: 0, audit: 5 } });
     expect(again.io.writes).toBe(0);
   });
 
@@ -321,6 +376,30 @@ describe("deviceApi:report audit part (plan 4.11)", () => {
     const many = Array.from({ length: 51 }, (_, i) => record(i.toString(16).padStart(32, "0")));
     await expectCode(s.t.mutation(api.deviceApi.reportAudit, { ...creds(s.device), records: many, dropped: 0 }), "invalid_argument");
     await expectCode(s.t.mutation(api.deviceApi.reportAudit, { ...creds(s.device), records: [], dropped: -1 }), "invalid_argument");
+  });
+
+  test("no valid record at all (unknown kinds, bad ids): all counted as accepted so the agent can ack; one auditDropped row, none on a replay or a re-batch", async () => {
+    const s = await seed();
+    const bad = [record("k".repeat(32), { kind: "fromTheFuture" }), record("not valid!", { kind: "adminExitFailed" })];
+    const args = { ...creds(s.device), records: bad, dropped: 2 };
+    expect(await s.t.mutation(api.deviceApi.reportAudit, args)).toEqual({ accepted: 2 });
+    const dropped = async () => (await auditRows(s.t, s.orgId)).filter((r) => r.action === "device.auditDropped");
+    expect(await dropped()).toHaveLength(1);
+    expect((await dropped())[0]?.summary).toBe(
+      "4 audit records were lost on the PC Desk 1 (2 while its queue was full, 2 not understood by this server)",
+    );
+    const replay = await probe(() => s.t.mutation(api.deviceApi.reportAudit, args));
+    expect(replay.result).toEqual({ accepted: 2 });
+    expect(replay.io.writes).toBe(0);
+    // Re-batched (the queue grew, the first record is the same): still one row.
+    await s.t.mutation(api.deviceApi.reportAudit, { ...args, records: [...bad, record("m".repeat(32), { kind: "fromTheFuture" })], dropped: 2 });
+    expect(await dropped()).toHaveLength(1);
+    // Only malformed ids: the key is a hash of the batch, so a replay is still free.
+    const worse = { ...creds(s.device), records: [record("???", { kind: "adminExitFailed" })], dropped: 0 };
+    expect(await s.t.mutation(api.deviceApi.reportAudit, worse)).toEqual({ accepted: 1 });
+    const again = await probe(() => s.t.mutation(api.deviceApi.reportAudit, worse));
+    expect(again.io.writes).toBe(0);
+    expect(await dropped()).toHaveLength(2);
   });
 
   test("record ids are per device: another device's identical id is its own row", async () => {
@@ -391,12 +470,36 @@ describe("deviceApi:report installs part (plan 4.8 amended, A12)", () => {
     expect(await stats()).toBe(0);
   });
 
-  test("a detail outside the fixed list, a bad count or more than 50 results is refused and nothing is written", async () => {
+  test("a detail outside the fixed list is dropped, the result is stored and the status and audit parts still go through", async () => {
+    const s = await seed();
+    const ids = await apps(s);
+    const out = await s.t.mutation(api.deviceApi.report, {
+      ...creds(s.device),
+      status: { agentVersion: "9.9.9" },
+      installs: [
+        result(ids.a, "installed"),
+        result(ids.b, "failed", { detail: "C:\\Users\\x\\secret.txt", exitCode: 7 }),
+        result(ids.c, "failed", { detail: "x".repeat(201) }),
+        result(ids.a, "failed", { detail: "hash_mismatch" }),
+      ],
+      audit: { records: [record("5".repeat(32))], dropped: 0 },
+    });
+    expect(out).toEqual({ accepted: { installs: 4, audit: 1 } });
+    const rows = await installRows(s);
+    expect(rows.find((r) => r.appId === ids.b)).toMatchObject({ state: "failed", exitCode: 7 });
+    expect(rows.find((r) => r.appId === ids.b)?.detail).toBeUndefined();
+    expect(rows.find((r) => r.appId === ids.c)?.detail).toBeUndefined();
+    expect(rows.find((r) => r.appId === ids.a)).toMatchObject({ state: "failed", detail: "hash_mismatch" });
+    expectNoSecrets(rows, ["secret.txt"]);
+    const summary = await s.t.run((ctx) => ctx.db.query("deviceSummary").withIndex("by_device", (q) => q.eq("deviceId", s.device.deviceId)).unique());
+    expect(summary?.agentVersion).toBe("9.9.9");
+    expect((await auditRows(s.t, s.orgId)).filter((r) => r.action === "device.adminExitWrongPin")).toHaveLength(1);
+  });
+
+  test("a bad count or more than 50 results is refused and nothing is written", async () => {
     const s = await seed();
     const ids = await apps(s);
     const bad = [
-      [result(ids.a, "installed"), result(ids.b, "failed", { detail: "C:\\Users\\x\\secret.txt" })],
-      [result(ids.a, "failed", { detail: "x".repeat(201) })],
       [result(ids.a, "installed", { attempts: -1 })],
       [result(ids.a, "installed", { appRevision: 1.5 })],
       Array.from({ length: 51 }, () => result(ids.a, "installed")),
@@ -448,6 +551,38 @@ describe("deviceApi:report batched (A12)", () => {
     expect(replay.io.tables.has("deviceCredentials")).toBe(true);
   });
 
+  test("write limit: one token per row written; replays and unchanged reports are free; over the limit -> rate_limited and everything rolled back", async () => {
+    const s = await seed();
+    at(Date.UTC(2026, 10, 1, 14, 0, 0));
+    const left = async () => (await s.t.run((ctx) => rateLimiter.getValue(ctx, "deviceWrites", { key: s.device.deviceId }))).value;
+    const take = (count: number) => s.t.run((ctx) => rateLimiter.limit(ctx, "deviceWrites", { key: s.device.deviceId, count }));
+    const batch = (prefix: string, n: number) => ({ records: Array.from({ length: n }, (_, i) => record(`${prefix}${i}`.padEnd(32, "0"))), dropped: 0 });
+
+    const first = { ...creds(s.device), status: { agentVersion: "0.5.0" }, audit: batch("a", 5) };
+    await s.t.mutation(api.deviceApi.report, first);
+    // summary + report + 5 audit rows (the status is new for the device: both status rows change).
+    const afterFirst = await left();
+    expect(afterFirst).toBe(600 - 7);
+    // Replay: nothing written, nothing charged.
+    await s.t.mutation(api.deviceApi.report, first);
+    expect(await left()).toBe(afterFirst);
+    // An idempotent rotation retry and a read-only call charge nothing either (see the rotation test).
+
+    await take(Math.floor(await left()) - 3); // 3 tokens left
+    // A replay is still free at 3 tokens.
+    await s.t.mutation(api.deviceApi.report, first);
+    // 5 new rows do not fit: refused, and the rows are not there.
+    await expectCode(s.t.mutation(api.deviceApi.report, { ...creds(s.device), audit: batch("b", 5) }), "rate_limited");
+    await expectCode(s.t.mutation(api.deviceApi.reportAudit, { ...creds(s.device), ...batch("b", 5) }), "rate_limited");
+    const known = async (prefix: string) =>
+      (await auditRows(s.t, s.orgId)).filter((r) => r.eventKey?.startsWith(`dev:${s.device.deviceId}:${prefix}`) === true).length;
+    expect(await known("b")).toBe(0);
+    expect(await left()).toBeCloseTo(3, 0);
+    // 2 rows fit.
+    await s.t.mutation(api.deviceApi.reportAudit, { ...creds(s.device), ...batch("c", 2) });
+    expect(await known("c")).toBe(2);
+  });
+
   test("revoked device: device_rejected, nothing written", async () => {
     const s = await seed();
     await s.t.mutation(api.devices.unenroll, creds(s.device));
@@ -494,6 +629,25 @@ describe("deviceApi:rotateCredential (Step 12 item 4, A2)", () => {
     const rotated = (await auditRows(s.t, s.orgId)).filter((r) => r.action === "device.credentialRotated");
     expect(rotated).toHaveLength(1);
     expectNoSecrets(rotated, [oldHash, newHash, s.device.secret, NEW_SECRET]);
+  });
+
+  test("the dashboard's rotate request is not required; a rotation costs 2 write tokens, its idempotent retry none; over the limit it is refused and not applied", async () => {
+    const s = await seed();
+    at(Date.UTC(2026, 10, 1, 15, 0, 0));
+    const left = async () => (await s.t.run((ctx) => rateLimiter.getValue(ctx, "deviceWrites", { key: s.device.deviceId }))).value;
+    const newHash = sha256HexSync(NEW_SECRET);
+    expect((await credRow(s))?.rotate).toBeUndefined();
+    await s.t.mutation(api.deviceApi.rotateCredential, { ...creds(s.device), newSecretHash: newHash });
+    expect(await left()).toBe(598);
+    await s.t.mutation(api.deviceApi.rotateCredential, { ...creds(s.device), newSecretHash: newHash });
+    expect(await left()).toBe(598);
+
+    const other = await enrollDevice(s.t, s.orgId, { groupId: s.groupId, name: "Desk 2" });
+    await s.t.run((ctx) => rateLimiter.limit(ctx, "deviceWrites", { key: other.deviceId, count: 599 }));
+    await expectCode(s.t.mutation(api.deviceApi.rotateCredential, { ...creds(other), newSecretHash: sha256HexSync("another") }), "rate_limited");
+    const row = await s.t.run((ctx) => ctx.db.query("deviceCredentials").withIndex("by_device", (q) => q.eq("deviceId", other.deviceId)).unique());
+    expect(row?.secretHash).toBe(sha256HexSync(other.secret));
+    expect(row?.previousSecretHash).toBeUndefined();
   });
 
   test("wrong secret, revoked device, malformed hash", async () => {

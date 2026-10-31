@@ -591,6 +591,12 @@ const ROWS: Row[] = [
     expect: { ...ADMIN_UNLOCKED, foreign: "not_found" },
   },
   {
+    name: "employees:save",
+    call: (a, f) =>
+      a.mutation(api.employees.save, { employeeId: f.employeeId, expectedRevision: 0, name: "Maya", username: "maya", groupIds: [], appIds: [] }),
+    expect: { ...ADMIN_UNLOCKED, foreign: "not_found" },
+  },
+  {
     name: "employees:setGroups",
     call: (a, f) => a.mutation(api.employees.setGroups, { employeeId: f.employeeId, expectedRevision: 0, groupIds: [] }),
     expect: { ...ADMIN_UNLOCKED, foreign: "not_found" },
@@ -612,12 +618,6 @@ const ROWS: Row[] = [
     expect: { ...ADMIN_UNLOCKED, foreign: "not_found" },
   },
   { name: "employees:unlock", call: (a, f) => a.mutation(api.employees.unlock, { employeeId: f.employeeId }), expect: { ...ADMIN_UNLOCKED, foreign: "not_found" } },
-  {
-    name: "employees:save",
-    call: (a, f) =>
-      a.mutation(api.employees.save, { employeeId: f.employeeId, expectedRevision: 0, name: "Maya", username: "maya", groupIds: [], appIds: [] }),
-    expect: { ...ADMIN_UNLOCKED, foreign: "not_found" },
-  },
   {
     name: "employees:remove",
     call: (a, f) => a.mutation(api.employees.remove, { employeeId: f.employeeId }),

@@ -23,7 +23,7 @@ import {
   MAX_GROUPS_JOINED,
   WINGET_CACHE_MS,
 } from "./lib/limits";
-import { assertWithinLimit, bumpOrgStats, bumpStats } from "./lib/plans";
+import { assertWithinLimit, bumpOrgStats, bumpOrgStatsIfPresent, bumpStats } from "./lib/plans";
 import { consumeOrFail } from "./lib/rateLimits";
 import { audience, appKind, desktopSpec, webSpec, wingetResolved } from "./lib/validators";
 import { iconDataUrl, fetchWebMeta as scanWebMeta, pngSize } from "./lib/webmeta";
@@ -462,7 +462,13 @@ export const purgeApp = internalMutation({
       .query("employeeApps")
       .withIndex("by_app", (q) => q.eq("appId", args.appId))
       .take(APP_PURGE_BATCH);
-    for (const row of installs) await ctx.db.delete(row._id);
+    // `orgStats.failedInstallCount` counts failed rows: lower it by the failed ones deleted.
+    let failed = 0;
+    for (const row of installs) {
+      if (row.state === "failed") failed++;
+      await ctx.db.delete(row._id);
+    }
+    if (failed > 0 && installs[0] !== undefined) await bumpOrgStatsIfPresent(ctx, installs[0].orgId, { failedInstallCount: -failed });
     for (const row of grants) await ctx.db.delete(row._id);
     if (installs.length === APP_PURGE_BATCH || grants.length === APP_PURGE_BATCH) {
       await ctx.scheduler.runAfter(0, internal.apps.purgeApp, { appId: args.appId });

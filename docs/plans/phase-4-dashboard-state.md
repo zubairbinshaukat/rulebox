@@ -3968,6 +3968,56 @@ The new hash is not checked against other devices' hashes (256-bit random).
 (8) Verified: `pnpm test:convex`, `test:scripts`, `typecheck:convex`, `lint:convex`,
 `node scripts/gen-policy-vectors.mjs --check`. Not verified: any call against a
 Convex deployment, the real agent (Step 13).
+(9) **Review fixes (2026-11-01, independent security review; supersede the
+"NOT counted" of (5) and the "refuses the whole call" of (6) for `detail`).**
+- *Audit skipped = accepted.* A record with an unknown kind or an invalid id is
+  still not stored, but it IS counted in `accepted` (so the agent's "ack only when
+  `accepted == records.len()`" can never stall on version skew or a corrupt local
+  record) and is added to the `device.auditDropped` row ("N audit records were lost
+  ... (D while its queue was full, S not understood by this server)"). That row's
+  `eventKey` is `dev:<device>:<first record id with a valid id>:dropped` (stable when
+  the agent re-batches), or a hash of the batch when no id is valid, so a replay
+  never repeats it.
+- *Install `detail`.* One `detail` outside the fixed list no longer refuses the
+  report: it is dropped and the result is stored without it. `invalid_argument` stays
+  only for structurally invalid reports (more than 50 audit records or installs, a
+  `dropped` / `attempts` / `appRevision` that is not a whole number >= 0, an
+  `exitCode` that is not an integer).
+- *Sign-in concurrency (A9 trade-off accepted).* `loadForVerify` reads the bucket
+  with `getValue` + `calculateRateLimit` (same one component read as `check`).
+  (i) Below `VERIFY_RESERVE_BELOW` (10) tokens the new `reserveAttempt` mutation
+  takes the token BEFORE the Argon2id verify (a wrong password then does not take a
+  second one; `finishVerify` got `spent`). (ii) After a correct password, when the
+  device's bucket is below capacity (a recent failure), `finishVerify` re-reads the
+  lock and the answer becomes `lockedOut` if the employee was locked meanwhile. A
+  normal sign-in (full bucket, no lock row) is unchanged: 2 calls, 0 writes. Remaining
+  bound, documented in the code: one first wave of parallel guesses that all load
+  while the bucket holds >= 10 tokens runs Argon2id in full, limited only by Convex's
+  concurrent action limit, and can exceed the 10-failure lockout; a right guess in
+  that wave is answered as if it came just before the lock. Every later wave is
+  bounded by the bucket (30 failures a minute) and the 15-minute lock. Revisit at
+  Step 18 together with the per-organization sign-in bucket.
+- *`failedInstallCount`.* `apps:purgeApp` and `fleet:purgeDevice` lower it by the
+  number of `failed` rows they delete (one `orgStats` patch per batch).
+- *Write limit.* New bucket `deviceWrites` (`lib/rateLimits.ts`): per device, 60
+  rows/min refill, capacity 600 (a full agent queue of 500 records plus a first
+  install report). `report`, `reportAudit`, `reportInstalls` and `rotateCredential`
+  consume ONE TOKEN PER ROW ACTUALLY WRITTEN (status summary / report, install
+  rows and their `orgStats` patch, audit rows including `auditDropped`; a rotation =
+  2), at the end of the mutation: a replay or unchanged report writes nothing and
+  costs nothing (A10); over the limit the call throws `rate_limited` (with
+  `retryAfterMs`) and everything it wrote is rolled back. The agent must treat
+  `rate_limited` as "retry later", not as a poison answer. A compromised device can
+  still add up to 3,600 rows an hour.
+- *Rotation does not require the dashboard's `rotate` flag.* The plan only says the
+  agent rotates when a heartbeat answers `rotateCredential: true`; it never says the
+  server refuses a rotation without it, so the agent may rotate on its own schedule
+  (owner decision to confirm).
+- *Accepted, not fixed:* (a) username enumeration through lockout: `lockedOut`
+  after 10 wrong passwords shows that the account exists (inherent to 4.12);
+  (b) a deny-list change made in a deploy reaches devices only at their next
+  publish. Not done (reported): installs for apps that are not assigned to the
+  device's group / an `appRevision` comparison; a per-organization sign-in bucket.
 
 ---
 

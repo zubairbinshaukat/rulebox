@@ -439,7 +439,11 @@ export const purgeDevice = internalMutation({
       .query("desiredVersions")
       .withIndex("by_device_version", (q) => q.eq("deviceId", args.deviceId))
       .take(PURGE_BATCH);
+    // `orgStats.failedInstallCount` counts failed rows: lower it by the failed ones deleted
+    // (revoke does not touch it; the other counters did move at revoke).
+    const failed = installs.filter((row) => row.state === "failed").length;
     for (const row of [...installs, ...docs, ...scoped, ...bodies, ...versions]) await ctx.db.delete(row._id);
+    if (failed > 0 && installs[0] !== undefined) await bumpOrgStatsIfPresent(ctx, installs[0].orgId, { failedInstallCount: -failed });
     if ([installs, docs, scoped, bodies, versions].some((rows) => rows.length === PURGE_BATCH)) {
       await ctx.scheduler.runAfter(0, internal.fleet.purgeDevice, args);
     }

@@ -1,3 +1,4 @@
+import { calculateRateLimit } from "@convex-dev/rate-limiter";
 import { v, type Infer } from "convex/values";
 import { internal } from "./_generated/api";
 import type { Doc } from "./_generated/dataModel";
@@ -21,6 +22,7 @@ import {
   recordTime,
   STORED_INSTALL_STATES,
   validRecordId,
+  VERIFY_RESERVE_BELOW,
 } from "./lib/deviceApiRules";
 import { statusValidator, writeStatus } from "./lib/deviceReport";
 import { normalizeUsername } from "./lib/employeeRules";
@@ -30,7 +32,8 @@ import { MAX_EMPLOYEE_PASSWORD, MAX_USERNAME } from "./lib/limits";
 import { scopedDb } from "./lib/orgDb";
 import { bumpOrgStatsIfPresent } from "./lib/plans";
 import { contactDue, recordContact } from "./lib/presence";
-import { consumeQuietly, rateLimiter } from "./lib/rateLimits";
+import { consumeOrFail, consumeQuietly, rateLimiter } from "./lib/rateLimits";
+import { sha256HexSync } from "./lib/crypto";
 import { DEFAULT_ORG_SETTINGS, installState } from "./lib/validators";
 
 // The agent's device API (plan Step 12; 4.11, 4.12, 5.1 as amended by A2, A9,
@@ -95,6 +98,10 @@ const loaded = v.union(
     offlineDays: v.number(),
     /** The sign-in must refresh `deviceLiveness` (it counts as a ping). */
     contactDue: v.boolean(),
+    /** The device's bucket is nearly empty: take the token before the Argon2id verify. */
+    reserve: v.boolean(),
+    /** The device had a recent failure (bucket below capacity): re-check the lock after a correct password. */
+    watch: v.boolean(),
   }),
 );
 type Loaded = Infer<typeof loaded>;
@@ -115,8 +122,14 @@ export const loadForVerify = internalQuery({
     if (check.kind !== "ok") return { kind: "rejected" };
     const deviceId = check.cred.deviceId;
     const orgId = check.cred.orgId;
-    const limit = await rateLimiter.check(ctx, "verifyPerDevice", { key: deviceId });
-    if (!limit.ok) return { kind: "lockedOut", retryAfterMs: Math.max(0, Math.ceil(limit.retryAfter)) };
+    // Read-only limiter check (one component read, like `check`), done by hand so
+    // the token count is known: `getValue` is the stored value, `calculateRateLimit`
+    // refills it to `now`.
+    const bucket = await rateLimiter.getValue(ctx, "verifyPerDevice", { key: deviceId });
+    const after = calculateRateLimit(bucket, bucket.config, args.now, 1);
+    if (after.value < 0) return { kind: "lockedOut", retryAfterMs: Math.max(0, Math.ceil(after.retryAfter ?? 0)) };
+    const tokens = after.value + 1;
+    const capacity = bucket.config.capacity ?? bucket.config.rate;
 
     const device = await db.get(deviceId);
     if (device === null) return { kind: "rejected" };
@@ -126,7 +139,15 @@ export const loadForVerify = internalQuery({
       .query("deviceLiveness")
       .withIndex("by_device", (q) => q.eq("deviceId", deviceId))
       .unique();
-    const base = { kind: "check" as const, deviceId, orgId, offlineDays: settings.offlineDays, contactDue: contactDue(liveness, args.now) };
+    const base = {
+      kind: "check" as const,
+      deviceId,
+      orgId,
+      offlineDays: settings.offlineDays,
+      contactDue: contactDue(liveness, args.now),
+      reserve: tokens < VERIFY_RESERVE_BELOW,
+      watch: tokens < capacity,
+    };
 
     const username = args.username.length <= 4 * MAX_USERNAME ? normalizeUsername(args.username) : "";
     if (username.length < 1 || username.length > MAX_USERNAME) return { ...base, employee: null };
@@ -184,6 +205,8 @@ export const finishVerify = internalMutation({
     employeeId: v.optional(v.id("employees")),
     failed: v.boolean(),
     contact: v.boolean(),
+    /** The attempt's limiter token was already taken before the verify (`reserveAttempt`). */
+    spent: v.optional(v.boolean()),
   },
   returns: v.union(
     v.object({ kind: v.literal("done") }),
@@ -203,7 +226,7 @@ export const finishVerify = internalMutation({
     if (revoked) return { kind: "rejected" as const };
     const ids = { deviceId: args.deviceId, orgId: args.orgId };
     if (args.contact) await recordContact({ db }, ids, now);
-    if (args.failed) await consumeQuietly(ctx, "verifyPerDevice", args.deviceId);
+    if (args.failed && args.spent !== true) await consumeQuietly(ctx, "verifyPerDevice", args.deviceId);
     if (args.employeeId === undefined) return { kind: "done" as const };
 
     const employeeId = args.employeeId;
@@ -239,6 +262,21 @@ export const finishVerify = internalMutation({
 });
 
 /**
+ * Take one `verifyPerDevice` token BEFORE the Argon2id verify. Only called when
+ * the bucket is nearly empty (`loadForVerify`), so a burst against a drained
+ * bucket is serialized here and refused once it is empty.
+ */
+export const reserveAttempt = internalMutation({
+  args: { deviceId: v.id("devices") },
+  returns: v.union(v.object({ kind: v.literal("ok") }), v.object({ kind: v.literal("limited"), retryAfterMs: v.number() })),
+  handler: async (ctx, args) => {
+    const status = await rateLimiter.limit(ctx, "verifyPerDevice", { key: args.deviceId });
+    if (!status.ok) return { kind: "limited" as const, retryAfterMs: Math.max(0, Math.ceil(status.retryAfter)) };
+    return { kind: "ok" as const };
+  },
+});
+
+/**
  * Check an employee's username and password for the calling device (plan
  * 4.12; device action). One Argon2id verify runs on every path that reaches
  * the check, against a fixed dummy hash when there is no employee or no
@@ -247,6 +285,22 @@ export const finishVerify = internalMutation({
  * always `wrongCredentials`. `lockedOut` = the employee is locked (10 wrong
  * passwords: 15 minutes) or the device's `verifyPerDevice` bucket is empty.
  * Successful sign-ins are not audited and write nothing except liveness.
+ *
+ * Concurrency (A9 trade-off, accepted by the owner): the limiter and the
+ * lockout are read BEFORE the verify and written AFTER it, so parallel calls
+ * that all load while the device's bucket still holds >= VERIFY_RESERVE_BELOW
+ * tokens and the employee is unlocked all run Argon2id, and each wrong one is
+ * counted when it finishes. Two cheap guards narrow it: (1) with fewer than
+ * VERIFY_RESERVE_BELOW tokens left, the token is taken before the verify
+ * (`reserveAttempt`), so later waves are serialized and refused when the bucket
+ * is empty; (2) after a CORRECT password, when the device had any recent failure
+ * (bucket below capacity), `finishVerify` re-reads the lock and the answer
+ * becomes `lockedOut` if the employee was locked meanwhile. A normal sign-in
+ * (full bucket) keeps its 2 calls and 0 writes. REMAINING BOUND: one first wave
+ * of parallel guesses, limited only by Convex's concurrent action limit (not by
+ * this code), can exceed the 10-failure lockout; a right guess inside that wave
+ * is answered as if it came just before the lock. The per-device bucket (30
+ * failures a minute) and the 15-minute lock bound every later wave.
  */
 export const verifyEmployee = deviceSelfCheckedAction({
   args: { username: v.string(), password: v.string() },
@@ -260,6 +314,14 @@ export const verifyEmployee = deviceSelfCheckedAction({
     });
     if (load.kind === "rejected") fail("device_rejected");
     if (load.kind === "lockedOut") return load;
+
+    // Nearly empty bucket: the token is taken before the verify (see above).
+    let spent = false;
+    if (load.reserve) {
+      const taken = await ctx.runMutation(internal.deviceApi.reserveAttempt, { deviceId: load.deviceId });
+      if (taken.kind === "limited") return { kind: "lockedOut", retryAfterMs: taken.retryAfterMs };
+      spent = true;
+    }
 
     const e = load.employee;
     const fits = args.password.length >= 1 && args.password.length <= MAX_EMPLOYEE_PASSWORD;
@@ -284,13 +346,16 @@ export const verifyEmployee = deviceSelfCheckedAction({
 
     const failed = answer.kind === "wrongCredentials";
     const clearFailures = !failed && e !== null && e.lockRow;
-    if (failed || clearFailures || load.contactDue) {
+    // A correct password after recent failures on this device: re-read the lock.
+    const recheck = !failed && load.watch;
+    if (failed || clearFailures || recheck || load.contactDue) {
       const done = await ctx.runMutation(internal.deviceApi.finishVerify, {
         deviceId: load.deviceId,
         orgId: load.orgId,
         employeeId: e?.id,
         failed,
         contact: load.contactDue,
+        spent,
       });
       if (done.kind === "rejected") fail("device_rejected");
       if (done.kind === "locked") return { kind: "lockedOut", retryAfterMs: done.retryAfterMs };
@@ -336,9 +401,26 @@ function checkInstalls(results: InstallResult[]): void {
     if (!isCount(r.appRevision)) fail("invalid_argument", { field: "appRevision" });
     if (!isCount(r.attempts)) fail("invalid_argument", { field: "attempts" });
     if (r.exitCode !== undefined && r.exitCode !== null && !Number.isSafeInteger(r.exitCode)) fail("invalid_argument", { field: "exitCode" });
-    const detail = r.detail ?? null;
-    if (detail !== null && (detail.length > MAX_INSTALL_DETAIL || !INSTALL_DETAILS.has(detail))) fail("invalid_argument", { field: "detail" });
+    // A `detail` outside the fixed list is NOT a reason to refuse the report (it
+    // would stall the agent's queue for good on version skew): `ingestInstalls`
+    // stores the result without it.
   }
+}
+
+/** The install `detail` when it is on the fixed list, else undefined (dropped). */
+function cleanInstallDetail(detail: string | null | undefined): string | undefined {
+  if (detail === null || detail === undefined) return undefined;
+  return detail.length <= MAX_INSTALL_DETAIL && INSTALL_DETAILS.has(detail) ? detail : undefined;
+}
+
+/**
+ * Per-device write limit (`deviceWrites`): one token per row this call really
+ * wrote, taken at the END so a call that wrote nothing (a replay, an unchanged
+ * status) is free and a refused one (`rate_limited`) rolls back everything it
+ * wrote. Called by `report`, `reportAudit`, `reportInstalls`, `rotateCredential`.
+ */
+async function chargeWrites(ctx: Parameters<typeof consumeOrFail>[0], deviceId: string, rows: number): Promise<void> {
+  if (rows > 0) await consumeOrFail(ctx, "deviceWrites", deviceId, rows);
 }
 
 async function deviceRow(ctx: Ctx): Promise<Doc<"devices">> {
@@ -356,24 +438,35 @@ async function knownEvent(ctx: Ctx, eventKey: string): Promise<boolean> {
 }
 
 /**
- * The device's audit records (4.11): idempotent on `eventKey`; an unknown
- * kind or a malformed id is skipped (not counted); a bad `detail` or
- * `username` is dropped from the record. `dropped > 0` adds one
- * `device.auditDropped` row (once per batch: keyed on its first record).
- * Returns how many records the server now knows (new + duplicates).
+ * The device's audit records (4.11): idempotent on `eventKey`; a bad `detail`
+ * or `username` is dropped from the record. An unknown kind or a malformed id
+ * is not stored but IS counted as accepted (the agent acks only when
+ * `accepted == records.len()`, so version skew or one corrupt local record can
+ * never stall its queue) and is reported in the `device.auditDropped` row with
+ * the agent's own `dropped` count. That row is written once per batch, keyed on
+ * the batch's first record id (stable when the agent re-batches), or on a hash
+ * of the ids when none is valid. Returns `accepted` (= the records the server
+ * has dealt with: new, duplicate or skipped) and the rows written.
  */
-async function ingestAudit(ctx: Ctx, part: { records: AuditRecord[]; dropped: number }, now: number): Promise<number> {
-  if (part.records.length === 0 && part.dropped === 0) return 0;
+async function ingestAudit(
+  ctx: Ctx,
+  part: { records: AuditRecord[]; dropped: number },
+  now: number,
+): Promise<{ accepted: number; written: number }> {
+  if (part.records.length === 0 && part.dropped === 0) return { accepted: 0, written: 0 };
   const device = await deviceRow(ctx);
   const actor: AuditActor = { type: "device", id: device._id, label: device.name };
   const target = { targetType: "device", targetId: device._id, targetLabel: device.name };
-  let accepted = 0;
+  let written = 0;
+  let skipped = 0;
   let firstId: string | null = null;
   for (const r of part.records) {
+    if (validRecordId(r.id)) firstId ??= r.id;
     const action = actionOfKind(r.kind);
-    if (action === null || !validRecordId(r.id)) continue;
-    firstId ??= r.id;
-    accepted++;
+    if (action === null || !validRecordId(r.id)) {
+      skipped++;
+      continue;
+    }
     const eventKey = `dev:${device._id}:${r.id}`;
     if (await knownEvent(ctx, eventKey)) continue;
     const time = recordTime(r, device.enrolledAt, now);
@@ -383,21 +476,23 @@ async function ingestAudit(ctx: Ctx, part: { records: AuditRecord[]; dropped: nu
       clockWrong: time.clockWrong,
     });
     await writeAudit(ctx, { orgId: device.orgId, actor, action, ...target, summary, eventKey, at: time.at });
+    written++;
   }
-  if (part.dropped > 0) {
-    const eventKey = firstId === null ? undefined : `dev:${device._id}:${firstId}:dropped`;
-    if (eventKey === undefined || !(await knownEvent(ctx, eventKey))) {
-      await writeAudit(ctx, {
-        orgId: device.orgId,
-        actor,
-        action: "device.auditDropped",
-        ...target,
-        summary: `${part.dropped} audit records were lost on the PC ${device.name} (its queue was full)`,
-        eventKey,
-      });
+  const lost = part.dropped + skipped;
+  if (lost > 0) {
+    const batchKey =
+      firstId ?? sha256HexSync(JSON.stringify([part.dropped, part.records.map((r) => r.id.slice(0, 64))]));
+    const eventKey = `dev:${device._id}:${batchKey}:dropped`;
+    if (!(await knownEvent(ctx, eventKey))) {
+      const summary =
+        skipped === 0
+          ? `${lost} audit records were lost on the PC ${device.name} (its queue was full)`
+          : `${lost} audit records were lost on the PC ${device.name} (${part.dropped} while its queue was full, ${skipped} not understood by this server)`;
+      await writeAudit(ctx, { orgId: device.orgId, actor, action: "device.auditDropped", ...target, summary, eventKey });
+      written++;
     }
   }
-  return accepted;
+  return { accepted: part.records.length, written };
 }
 
 /**
@@ -405,10 +500,13 @@ async function ingestAudit(ctx: Ctx, part: { records: AuditRecord[]; dropped: nu
  * upserted per (device, app) and written only when a field differs; the
  * passing states (`downloading`, `installing`, `removing`) and apps that are
  * not in the device's organization are ignored but counted as accepted.
- * `orgStats.failedInstallCount` moves in the same mutation.
+ * `orgStats.failedInstallCount` moves in the same mutation. A `detail` outside
+ * the fixed list is dropped (the result is stored without it). Returns
+ * `accepted` (= every result) and the rows written.
  */
-async function ingestInstalls(ctx: Ctx, results: InstallResult[], now: number): Promise<number> {
+async function ingestInstalls(ctx: Ctx, results: InstallResult[], now: number): Promise<{ accepted: number; written: number }> {
   let failedDelta = 0;
+  let written = 0;
   for (const r of results) {
     if (!STORED_INSTALL_STATES.has(r.state)) continue;
     const appId = ctx.db.normalizeId("apps", r.appId);
@@ -420,7 +518,7 @@ async function ingestInstalls(ctx: Ctx, results: InstallResult[], now: number): 
       appRevision: r.appRevision,
       attempts: r.attempts,
       exitCode: r.exitCode ?? undefined,
-      detail: r.detail ?? undefined,
+      detail: cleanInstallDetail(r.detail),
     };
     const row = await ctx.db
       .query("installResults")
@@ -428,6 +526,7 @@ async function ingestInstalls(ctx: Ctx, results: InstallResult[], now: number): 
       .first();
     if (row === null) {
       await ctx.db.insert("installResults", { orgId: ctx.device.orgId, deviceId: ctx.device._id, appId: app._id, ...next, updatedAt: now });
+      written++;
       if (next.state === "failed") failedDelta++;
       continue;
     }
@@ -440,11 +539,15 @@ async function ingestInstalls(ctx: Ctx, results: InstallResult[], now: number): 
     if (same) continue;
     // `undefined` removes a stale exit code or detail.
     await ctx.db.patch(row._id, { ...next, updatedAt: now });
+    written++;
     if (row.state === "failed" && next.state !== "failed") failedDelta--;
     if (row.state !== "failed" && next.state === "failed") failedDelta++;
   }
-  if (failedDelta !== 0) await bumpOrgStatsIfPresent(ctx, ctx.device.orgId, { failedInstallCount: failedDelta });
-  return results.length;
+  if (failedDelta !== 0) {
+    await bumpOrgStatsIfPresent(ctx, ctx.device.orgId, { failedInstallCount: failedDelta });
+    written++;
+  }
+  return { accepted: results.length, written };
 }
 
 /**
@@ -453,7 +556,12 @@ async function ingestInstalls(ctx: Ctx, results: InstallResult[], now: number): 
  * change), install results and audit records. One credentials read per call
  * (the wrapper). Every part is checked before anything is written, so a
  * refused report writes nothing. Phase 5 adds `apply`, `findings` and daily
- * summaries (A19). A replay of the same report writes nothing.
+ * summaries (A19). A replay of the same report writes nothing and consumes no
+ * `deviceWrites` tokens; a report that writes more than the device's bucket
+ * holds is refused with `rate_limited` (and rolled back). Answer: `accepted` =
+ * installs and audit records the server has dealt with (stored, duplicate,
+ * ignored or skipped), so the agent may ack its queues when each equals what it
+ * sent.
  */
 export const report = deviceMutation({
   args: {
@@ -466,10 +574,15 @@ export const report = deviceMutation({
     if (args.installs !== undefined) checkInstalls(args.installs);
     if (args.audit !== undefined) checkAuditPart(args.audit);
     const now = Date.now();
-    if (args.status !== undefined) await writeStatus(ctx, { deviceId: ctx.device._id, orgId: ctx.device.orgId }, args.status, now);
-    const installs = args.installs === undefined ? 0 : await ingestInstalls(ctx, args.installs, now);
-    const audit = args.audit === undefined ? 0 : await ingestAudit(ctx, args.audit, now);
-    return { accepted: { installs, audit } };
+    let written = 0;
+    if (args.status !== undefined) {
+      const wrote = await writeStatus(ctx, { deviceId: ctx.device._id, orgId: ctx.device.orgId }, args.status, now);
+      written += (wrote.summary ? 1 : 0) + (wrote.report ? 1 : 0);
+    }
+    const installs = args.installs === undefined ? { accepted: 0, written: 0 } : await ingestInstalls(ctx, args.installs, now);
+    const audit = args.audit === undefined ? { accepted: 0, written: 0 } : await ingestAudit(ctx, args.audit, now);
+    await chargeWrites(ctx, ctx.device._id, written + installs.written + audit.written);
+    return { accepted: { installs: installs.accepted, audit: audit.accepted } };
   },
 });
 
@@ -479,7 +592,9 @@ export const reportAudit = deviceMutation({
   returns: v.object({ accepted: v.number() }),
   handler: async (ctx, args) => {
     checkAuditPart(args);
-    return { accepted: await ingestAudit(ctx, args, Date.now()) };
+    const audit = await ingestAudit(ctx, args, Date.now());
+    await chargeWrites(ctx, ctx.device._id, audit.written);
+    return { accepted: audit.accepted };
   },
 });
 
@@ -489,7 +604,9 @@ export const reportInstalls = deviceMutation({
   returns: v.object({ accepted: v.number() }),
   handler: async (ctx, args) => {
     checkInstalls(args.results);
-    return { accepted: await ingestInstalls(ctx, args.results, Date.now()) };
+    const installs = await ingestInstalls(ctx, args.results, Date.now());
+    await chargeWrites(ctx, ctx.device._id, installs.written);
+    return { accepted: installs.accepted };
   },
 });
 
@@ -532,6 +649,8 @@ export const rotateCredential = deviceMutation({
       targetLabel: name,
       summary: `The PC ${name} replaced its credential`,
     });
+    // Two rows written (credentials, audit); the idempotent retry above writes none and costs nothing.
+    await chargeWrites(ctx, ctx.device._id, 2);
     return { kind: "ok" as const };
   },
 });

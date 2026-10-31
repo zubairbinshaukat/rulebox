@@ -10,6 +10,14 @@ import { normalizeUsername } from "./employeeRules";
 export const EMPLOYEE_MAX_FAILURES = 10;
 export const EMPLOYEE_LOCK_MS = 15 * MINUTE_MS;
 
+/**
+ * Sign-in guard (review of Step 12): once the device's `verifyPerDevice` bucket
+ * holds fewer tokens than this, the sign-in takes its token BEFORE the Argon2id
+ * verify (one extra write, only in this state), so a burst cannot run unbounded
+ * verifies against a nearly empty bucket.
+ */
+export const VERIFY_RESERVE_BELOW = 10;
+
 /** `quotaBytes` = GB x this (4.12). */
 export const BYTES_PER_GB = 1_073_741_824;
 
