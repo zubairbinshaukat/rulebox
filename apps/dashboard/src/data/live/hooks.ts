@@ -387,19 +387,14 @@ export const liveApi: DataApi = {
     return useMapped(useAction(api.employees.create));
   },
   useUpdateEmployee() {
-    const update = useMutation(api.employees.update);
-    const setGroups = useMutation(api.employees.setGroups);
-    const setApps = useMutation(api.employees.setDirectApps);
-    // Three server calls, each guarded by the revision the one before returned; one that
-    // changes nothing writes nothing and returns the revision it was given.
+    // ONE server call (`employees:save`): profile, groups and direct apps are stored together
+    // under one revision check, or none is, so a failure never leaves the form with a stale
+    // revision.
+    const save = useMutation(api.employees.save);
     const call = useCallback(
-      async (a: { employeeId: string; expectedRevision: number; name: string; username: string; quotaGb?: number; groupIds: string[]; appIds: string[] }) => {
-        const { employeeId } = a;
-        const profile = await update({ employeeId, expectedRevision: a.expectedRevision, name: a.name, username: a.username, quotaGb: a.quotaGb });
-        const groups = await setGroups({ employeeId, expectedRevision: profile.revision, groupIds: a.groupIds });
-        return await setApps({ employeeId, expectedRevision: groups.revision, appIds: a.appIds });
-      },
-      [update, setGroups, setApps],
+      async (a: { employeeId: string; expectedRevision: number; name: string; username: string; quotaGb?: number; groupIds: string[]; appIds: string[] }) =>
+        await save(a),
+      [save],
     );
     return useMapped(call);
   },

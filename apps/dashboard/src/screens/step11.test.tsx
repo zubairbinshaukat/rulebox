@@ -170,32 +170,57 @@ describe("Employees list (employees:list / employees:search)", () => {
 });
 
 describe("EmployeeDetail (employees:get)", () => {
-  it("saving chains update, setGroups and setDirectApps with the revision each one returned", async () => {
+  it("saving is ONE call, employees:save, with the whole form and the revision; the next save uses the revision it returned", async () => {
     cx.results["employees:get"] = detail();
-    const update = vi.fn(async () => ({ revision: 4 }));
-    const setGroups = vi.fn(async () => ({ revision: 5 }));
-    const setApps = vi.fn(async () => ({ revision: 6 }));
+    const save = vi.fn(async () => ({ revision: 4 }));
+    const update = vi.fn(async () => ({ revision: 99 }));
+    cx.fns["employees:save"] = save;
     cx.fns["employees:update"] = update;
-    cx.fns["employees:setGroups"] = setGroups;
-    cx.fns["employees:setDirectApps"] = setApps;
+    cx.fns["employees:setGroups"] = update;
+    cx.fns["employees:setDirectApps"] = update;
     ui(<EmployeeDetail />, "admin", "/employees/e1");
     fireEvent.click(screen.getByLabelText("Ops"));
     fireEvent.click(screen.getByLabelText(/Docs/));
     fireEvent.click(screen.getByRole("button", { name: strings.common.saveChanges }));
-    await waitFor(() => expect(setApps).toHaveBeenCalled());
-    expect(update).toHaveBeenCalledWith({ employeeId: "e1", expectedRevision: 3, name: "Maya Lee", username: "maya", quotaGb: undefined });
-    expect(setGroups).toHaveBeenCalledWith({ employeeId: "e1", expectedRevision: 4, groupIds: ["g1", "g2"] });
-    expect(setApps).toHaveBeenCalledWith({ employeeId: "e1", expectedRevision: 5, appIds: ["a1"] });
-    // the next save starts from the last revision the server returned
+    await waitFor(() => expect(save).toHaveBeenCalled());
+    expect(save).toHaveBeenCalledWith({
+      employeeId: "e1",
+      expectedRevision: 3,
+      name: "Maya Lee",
+      username: "maya",
+      quotaGb: undefined,
+      groupIds: ["g1", "g2"],
+      appIds: ["a1"],
+    });
+    // the next save starts from the revision the server returned
     fireEvent.click(screen.getByLabelText("Ops"));
     fireEvent.click(screen.getByRole("button", { name: strings.common.saveChanges }));
-    await waitFor(() => expect(update).toHaveBeenCalledTimes(2));
-    expect(update).toHaveBeenLastCalledWith(expect.objectContaining({ expectedRevision: 6 }));
+    await waitFor(() => expect(save).toHaveBeenCalledTimes(2));
+    expect(save).toHaveBeenLastCalledWith(expect.objectContaining({ expectedRevision: 4 }));
+    expect(update).not.toHaveBeenCalled(); // none of the part-by-part functions
+  });
+
+  it("a failed save (not_ready) keeps the form's revision, so the retry is not a stale edit", async () => {
+    cx.results["employees:get"] = detail();
+    let calls = 0;
+    const save = vi.fn(async () => {
+      calls++;
+      if (calls === 1) throw new ConvexError({ code: "not_ready", detail: "signing key" });
+      return { revision: 4 };
+    });
+    cx.fns["employees:save"] = save;
+    ui(<EmployeeDetail />, "admin", "/employees/e1");
+    fireEvent.click(screen.getByLabelText("Ops"));
+    fireEvent.click(screen.getByRole("button", { name: strings.common.saveChanges }));
+    await waitFor(() => expect(save).toHaveBeenCalledTimes(1));
+    fireEvent.click(screen.getByRole("button", { name: strings.common.saveChanges }));
+    await waitFor(() => expect(save).toHaveBeenCalledTimes(2));
+    expect(save.mock.calls.map((c) => (c as unknown as [{ expectedRevision: number }])[0].expectedRevision)).toEqual([3, 3]);
   });
 
   it("a stale edit shows the reload notice", async () => {
     cx.results["employees:get"] = detail();
-    cx.fns["employees:update"] = async () => {
+    cx.fns["employees:save"] = async () => {
       throw new ConvexError({ code: "stale_edit" });
     };
     ui(<EmployeeDetail />, "admin", "/employees/e1");

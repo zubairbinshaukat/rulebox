@@ -966,10 +966,6 @@ export const demoApi: DataApi = {
           if (e.name !== name) changed.push("name");
           if (e.username !== username) changed.push("username");
           if (e.quotaGb !== input.quotaGb) changed.push("quota");
-          e.name = name;
-          e.username = username;
-          e.quotaGb = input.quotaGb;
-          e.revision++;
           const oldGroups = db.groupMembers.filter((m) => m.employeeId === e._id).map((m) => m.groupId).sort();
           if (oldGroups.join() !== [...input.groupIds].sort().join()) changed.push("groups");
           db.groupMembers = db.groupMembers.filter((m) => m.employeeId !== e._id);
@@ -978,6 +974,11 @@ export const demoApi: DataApi = {
           if (oldApps.join() !== [...input.appIds].sort().join()) changed.push("apps");
           db.employeeApps = db.employeeApps.filter((m) => m.employeeId !== e._id);
           for (const a of input.appIds) db.employeeApps.push({ employeeId: e._id, appId: a });
+          // Like `employees:save`: one revision bump for the whole form, none when nothing changed.
+          e.name = name;
+          e.username = username;
+          e.quotaGb = input.quotaGb;
+          if (changed.length > 0) e.revision++;
           audit({
             action: "employee.updated",
             targetType: "employee",

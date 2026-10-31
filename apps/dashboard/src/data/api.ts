@@ -104,9 +104,9 @@ export interface DataApi {
   /** `password` (optional) is hashed on the server; nothing returns it. */
   useCreateEmployee: Mutation<EmployeeInput, Id>;
   /**
-   * Profile, groups and direct apps in one call (the live hook chains
-   * `employees:update`, `setGroups`, `setDirectApps`, each with the revision
-   * the one before returned). Resolves to the revision to send next.
+   * Profile, groups and direct apps in ONE atomic call (`employees:save`: one
+   * revision check, all stored or none). Resolves to the revision to send next;
+   * a failure leaves the employee, and so the form's revision, untouched.
    */
   useUpdateEmployee: Mutation<Omit<EmployeeInput, "password"> & { employeeId: Id; expectedRevision: number }, { revision: number }>;
   useSetEmployeePassword: Mutation<{ employeeId: Id; password: string }>;
