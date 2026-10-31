@@ -91,6 +91,11 @@ export type AuditEntry = {
   targetLabel?: string;
   summary: string;
   eventKey?: string;
+  /**
+   * When it happened, if not now: a device record's corrected time (plan 4.11;
+   * `deviceApi:report` checks it first). Missing = server time.
+   */
+  at?: number;
 };
 
 /**
@@ -146,7 +151,7 @@ export async function writeAudit(ctx: Pick<MutationCtx, "db">, e: AuditEntry): P
     e.targetLabel !== undefined && looksSecret(e.targetLabel) ? undefined : clean(e.targetLabel, 120);
   return await ctx.db.insert("auditLog", {
     orgId: e.orgId,
-    at: Date.now(),
+    at: e.at ?? Date.now(),
     actorType: e.actor.type,
     actorId: e.actor.id,
     actorLabel: clean(e.actor.label, 120) ?? "",

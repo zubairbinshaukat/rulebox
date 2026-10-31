@@ -261,6 +261,28 @@ const ROWS: Row[] = [
     call: (a) => a.query(api.devices.fetchRoster, { ...deviceArgs, sinceEpoch: 0 }),
     expect: { default: "device_rejected" },
   },
+  // Step 12: the device API. Device credentials only; no member identity helps.
+  {
+    name: "deviceApi:verifyEmployee",
+    call: (a) => a.action(api.deviceApi.verifyEmployee, { ...deviceArgs, username: "maya", password: "not the password" }),
+    expect: { default: "device_rejected" },
+  },
+  { name: "deviceApi:report", call: (a) => a.mutation(api.deviceApi.report, { ...deviceArgs }), expect: { default: "device_rejected" } },
+  {
+    name: "deviceApi:reportAudit",
+    call: (a) => a.mutation(api.deviceApi.reportAudit, { ...deviceArgs, records: [], dropped: 0 }),
+    expect: { default: "device_rejected" },
+  },
+  {
+    name: "deviceApi:reportInstalls",
+    call: (a) => a.mutation(api.deviceApi.reportInstalls, { ...deviceArgs, results: [] }),
+    expect: { default: "device_rejected" },
+  },
+  {
+    name: "deviceApi:rotateCredential",
+    call: (a) => a.mutation(api.deviceApi.rotateCredential, { ...deviceArgs, newSecretHash: "a".repeat(64) }),
+    expect: { default: "device_rejected" },
+  },
   { name: "mfa:status", call: (a) => a.query(api.mfa.status, {}), expect: { ...VIEWER_ANY_MFA, foreign: "ok" } },
   { name: "mfa:beginSetup", call: (a) => a.action(api.mfa.beginSetup, {}), expect: { ...VIEWER_ANY_MFA, foreign: "ok" }, returnsSecretOnce: true },
   {
@@ -637,6 +659,7 @@ const STEP_UP_EXEMPT = new Set([
   "fleet:watch",
   // not member functions
   "account:redeemReset", "enrollment:enroll", "devices:heartbeat", "devices:unenroll", "devices:ping",
+  "deviceApi:verifyEmployee", "deviceApi:report", "deviceApi:reportAudit", "deviceApi:reportInstalls", "deviceApi:rotateCredential",
 ]);
 
 async function outcome(p: Promise<unknown>): Promise<{ result: string; value: unknown }> {

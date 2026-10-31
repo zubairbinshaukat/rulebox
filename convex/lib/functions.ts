@@ -128,12 +128,14 @@ export type DeviceIdentity = {
   orgId: Id<"organizations">;
   state: CredentialState;
   rotate: boolean;
+  /** Which stored secret the caller presented (`previous` only during a credential rotation). */
+  matched: "current" | "previous";
 };
 
 export type DeviceCtx = { device: DeviceIdentity };
 
-function identityOf(cred: DeviceCred): DeviceIdentity {
-  return { _id: cred.deviceId, orgId: cred.orgId, state: cred.state, rotate: cred.rotate };
+function identityOf(cred: DeviceCred, matched: "current" | "previous"): DeviceIdentity {
+  return { _id: cred.deviceId, orgId: cred.orgId, state: cred.state, rotate: cred.rotate, matched };
 }
 
 function deviceScope(check: DeviceCheck): OrgScope | null {
@@ -148,7 +150,7 @@ export const deviceQuery = customQuery(query, {
     const db = scopedDb(ctx.db, null);
     const check = await checkDevice({ db }, args);
     if (check.kind !== "ok") fail("device_rejected");
-    const device: DeviceIdentity = identityOf(check.cred);
+    const device: DeviceIdentity = identityOf(check.cred, check.matched);
     return { ctx: { device, db: scopedDb(db, deviceScope(check)) }, args: {} as NoArgs };
   },
 });
@@ -160,7 +162,7 @@ export const deviceMutation = customMutation(mutation, {
     const check = await checkDevice({ db }, args);
     if (check.kind !== "ok") fail("device_rejected");
     await settleRotation({ db }, check);
-    const device: DeviceIdentity = identityOf(check.cred);
+    const device: DeviceIdentity = identityOf(check.cred, check.matched);
     return { ctx: { device, db: scopedDb(db, deviceScope(check)) }, args: {} as NoArgs };
   },
 });
@@ -180,6 +182,25 @@ export const deviceAction = customAction(action, {
     if (device === null) fail("device_rejected");
     return { ctx: { device }, args: {} };
   },
+});
+
+/** The credentials a device presented, not yet checked. Never returned, logged or stored. */
+export type PresentedDevice = { deviceId: string; deviceSecret: string };
+
+/**
+ * A device action whose OWN internal query authenticates the device, so a
+ * call costs the action and one query instead of a separate check first (A9:
+ * an employee sign-in is 2 function calls). The handler MUST pass
+ * `ctx.presented` to an internal query that calls `checkDevice` before it
+ * reads anything else, and answer `device_rejected` when that check fails.
+ * Only `deviceApi:verifyEmployee`.
+ */
+export const deviceSelfCheckedAction = customAction(action, {
+  args: deviceArgs,
+  input: async (_ctx, args): Promise<{ ctx: { presented: PresentedDevice }; args: NoArgs }> => ({
+    ctx: { presented: { deviceId: args.deviceId, deviceSecret: args.deviceSecret } },
+    args: {},
+  }),
 });
 
 /**

@@ -97,8 +97,35 @@ export type Contact = {
   wrote: boolean;
 };
 
+/** What a contact at `now` changes on the liveness row (an empty patch = nothing to write). */
+function contactPlan(row: Doc<"deviceLiveness">, now: number) {
+  const fast = row.fastUntil !== undefined && row.fastUntil > now;
+  const interval = fast ? Math.min(FAST_PING_MS, row.pingIntervalMs) : row.pingIntervalMs;
+  const bucket = minuteBucket(now);
+  const deadline = offlineAfterBucket(bucket, interval);
+
+  const patch: Partial<Doc<"deviceLiveness">> = {};
+  if (row.seenBucket !== bucket) patch.seenBucket = bucket;
+  if (row.offlineAfter !== deadline) patch.offlineAfter = deadline;
+  if (row.pendingCheck !== undefined) {
+    patch.answeredCheck = row.pendingCheck;
+    patch.pendingCheck = undefined;
+  }
+  if (!row.online) patch.online = true;
+  return { fast, interval, patch };
+}
+
 /**
- * A device call reached the server (ping, heartbeat): refresh liveness.
+ * True when `recordContact` at `now` would write (read-only; for a caller that
+ * decides in a query whether it needs a mutation at all, A9).
+ */
+export function contactDue(row: Doc<"deviceLiveness"> | null, now: number): boolean {
+  return row === null || Object.keys(contactPlan(row, now).patch).length > 0;
+}
+
+/**
+ * A device call reached the server (ping, heartbeat, employee sign-in):
+ * refresh liveness.
  *
  * Writes nothing when the minute bucket and the deadline are unchanged and no
  * check is pending (repeated calls within a minute). An offline -> online
@@ -116,19 +143,7 @@ export async function recordContact(ctx: { db: DatabaseWriter }, ids: Ids, now: 
     await createPresence(ctx, ids, now, interval);
     return { nextPingInMs: interval, wrote: true };
   }
-  const fast = row.fastUntil !== undefined && row.fastUntil > now;
-  const interval = fast ? Math.min(FAST_PING_MS, row.pingIntervalMs) : row.pingIntervalMs;
-  const bucket = minuteBucket(now);
-  const deadline = offlineAfterBucket(bucket, interval);
-
-  const patch: Partial<Doc<"deviceLiveness">> = {};
-  if (row.seenBucket !== bucket) patch.seenBucket = bucket;
-  if (row.offlineAfter !== deadline) patch.offlineAfter = deadline;
-  if (row.pendingCheck !== undefined) {
-    patch.answeredCheck = row.pendingCheck;
-    patch.pendingCheck = undefined;
-  }
-  if (!row.online) patch.online = true;
+  const { fast, interval, patch } = contactPlan(row, now);
   if (Object.keys(patch).length === 0) return { nextPingInMs: interval, wrote: false };
   // An expired watch is dropped with a write that happens anyway.
   if (row.fastUntil !== undefined && !fast) patch.fastUntil = undefined;

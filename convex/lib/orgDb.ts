@@ -38,8 +38,12 @@ const ID_ARRAY_FIELDS = new Set(["deviceIds", "groupIds"]);
  * - `members.by_user`: a person's memberships (`requireMember`, "has another
  *   active membership" in `members:setDisabled`, step-up resets). The rows
  *   are never returned to the client.
+ * - `auditLog.by_event_key`: the duplicate check of device audit records
+ *   (`deviceApi:report`, plan 4.11). The key is "dev:" + the CALLER's device id
+ *   + ":" + record id, so the range can only hold that device's rows; only
+ *   "is there one" is used.
  */
-const ALLOWED_CROSS_ORG = new Set(["members.by_user"]);
+const ALLOWED_CROSS_ORG = new Set(["members.by_user", "auditLog.by_event_key"]);
 
 export class OrgScopeError extends Error {
   constructor(what: string) {

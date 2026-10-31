@@ -24,6 +24,12 @@ export async function verifySecret(secret: string, phc: string): Promise<boolean
 }
 
 /**
+ * The verify `deviceApi:verifyEmployee` calls, through an object so a test can
+ * watch it (plan Step 12: the dummy verify of an unknown username runs).
+ */
+export const verifier = { verify: verifySecret };
+
+/**
  * A hash of a random throwaway value with the same parameters: verifying
  * against it spends the same work as a real check when nothing is stored.
  */

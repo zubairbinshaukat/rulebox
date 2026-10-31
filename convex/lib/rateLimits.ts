@@ -52,6 +52,14 @@ export const rateLimiter = new RateLimiter(components.rateLimiter, {
   // costs one Argon2id hash (~100-300 ms of CPU) in an action: 300 per hour per
   // organization, consumed before hashing.
   employeeWrites: { kind: "token bucket", rate: 300, period: HOUR_MS, capacity: 300 },
+  // Device API (plan Step 12 item 5, A9; 4.12). `deviceApi:verifyEmployee`, per
+  // device (key = device id): CHECKED (read-only) before the Argon2id verify and
+  // consumed only on a wrong password, so a successful sign-in writes no row.
+  // Over the limit the device is answered `lockedOut` with `retryAfterMs`.
+  verifyPerDevice: { kind: "token bucket", rate: 30, period: MINUTE_MS, capacity: 30 },
+  // `members:invite`, per organization; consumed in the mutation that stores
+  // the invite (a refused invite rolls it back: only real invites count).
+  inviteCreate: { kind: "token bucket", rate: 30, period: HOUR_MS, capacity: 30 },
 });
 
 export type LimitName =
@@ -65,7 +73,9 @@ export type LimitName =
   | "checkNow"
   | "webMeta"
   | "wingetResolve"
-  | "employeeWrites";
+  | "employeeWrites"
+  | "verifyPerDevice"
+  | "inviteCreate";
 
 /** Read-only: throw `rate_limited` when the bucket is empty, without consuming. */
 export async function checkOrFail(

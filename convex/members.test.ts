@@ -37,6 +37,14 @@ describe("members", () => {
     expectNoSecrets(list, [code, codeHash(code)]);
   });
 
+  test("invite: 30 per hour per organization (inviteCreate); a refused invite does not count", async () => {
+    const t = await setupAuth();
+    const { owner } = await team(t);
+    await expectCode(owner.as.action(api.members.invite, { email: "admin@acme.test", role: "viewer" }), "already_member");
+    for (let i = 0; i < 30; i++) await owner.as.action(api.members.invite, { email: `bulk${i}@acme.test`, role: "viewer" });
+    await expectCode(owner.as.action(api.members.invite, { email: "bulk30@acme.test", role: "viewer" }), "rate_limited");
+  });
+
   test("invite: owner only; admins and viewers are refused; duplicate member refused", async () => {
     const t = await setupAuth();
     const { owner, admin, viewer } = await team(t);

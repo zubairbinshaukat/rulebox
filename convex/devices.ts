@@ -260,8 +260,9 @@ export const desiredState = phase2DeviceQuery({
  * Liveness: writes `deviceLiveness` only when the minute bucket changed (plus
  * `devicePresence` and one `orgPresence` shard on an offline -> online
  * transition); a second heartbeat within the same minute writes nothing.
- * Status: until `deviceApi:report` exists (Step 12) the alias accepts the
- * snapshot and writes `deviceSummary` / `deviceReports` only when they change.
+ * Status: Phase 2 agents send the snapshot here (Phase 4 agents send it in
+ * `deviceApi:report`); written to `deviceSummary` / `deviceReports` only when
+ * they change.
  * Never writes `devices`.
  */
 export const heartbeat = phase2DeviceMutation({

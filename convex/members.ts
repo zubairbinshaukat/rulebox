@@ -10,6 +10,7 @@ import { memberAction, memberMutation, memberQuery } from "./lib/functions";
 import { INVITE_TTL_MS, MAX_INVITES_LISTED, MAX_MEMBERS, MAX_MEMBERSHIPS, RESET_CODE_TTL_MS } from "./lib/limits";
 import { assertNotLastOwner } from "./lib/members";
 import { assertWithinLimit, bumpOrgStats, bumpStats } from "./lib/plans";
+import { consumeOrFail } from "./lib/rateLimits";
 import { clearMfa, deleteUserSessions } from "./lib/sessions";
 import { inviteKind, memberStatus, role } from "./lib/validators";
 
@@ -129,6 +130,9 @@ export const storeInvite = internalMutation({
     if (existing !== null) fail("already_member");
     // `maxMembers` (Step 5): early, clear refusal; the join enforces it exactly.
     await assertWithinLimit(ctx, args.orgId, "members");
+    // 30 invites per hour per organization (plan Step 12 item 5); consumed here,
+    // so a refused invite (rolled back) does not count.
+    await consumeOrFail(ctx, "inviteCreate", args.orgId);
     const expiresAt = Date.now() + INVITE_TTL_MS;
     const memberId = ctx.db.normalizeId("members", args.actor.id) ?? undefined;
     const inviteId = await ctx.db.insert("invites", {

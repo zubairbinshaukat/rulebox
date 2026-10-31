@@ -88,6 +88,23 @@ export const IO_BUDGETS: Record<string, IoBudget> = {
   // orgStats, liveness, shard, presence, audit. Measured 7 / 1.6 KB, 6 writes.
   "devices:unenroll": { maxReads: 8, maxReadBytes: 4_096, maxWrites: 6, maxWriteBytes: 2_048 },
 
+  // ---- Step 12: the device API (A9, A12). Counts include the wrapper's credentials read.
+  // Sign-in: the action + ONE query (credentials, limiter check, device, org, liveness,
+  // employee, lockout, secret, membership = 9). Success writes nothing unless liveness is due
+  // (+ the finish mutation: credentials, liveness, 1 write; a lockout row to clear: +1 read,
+  // 1 delete). Wrong password: + limiter row, lockout row (insert / patch); the locking one
+  // also reads employee + device and writes the audit row.
+  "deviceApi:verifyEmployee": { maxReads: 9 + 6, maxReadBytes: 8_192, maxWrites: 5, maxWriteBytes: 2_048 },
+  // credentials; status: summary + report (2 reads, <= 2 writes, compat <= 32 KB) + orgStats on
+  // an outOfSupport flip; installs (<= 50): app + result each (<= 100 reads, <= 50 writes) +
+  // orgStats; audit (<= 50): device + one event-key lookup each (+ the dropped row). A replay
+  // writes nothing (`deviceApi.test.ts` measures it).
+  "deviceApi:report": { maxReads: 1 + 3 + 101 + 52, maxReadBytes: 120_000, maxWrites: 2 + 1 + 51 + 51, maxWriteBytes: 90_000 },
+  "deviceApi:reportAudit": { maxReads: 1 + 52, maxReadBytes: 40_000, maxWrites: 51, maxWriteBytes: 40_000 },
+  "deviceApi:reportInstalls": { maxReads: 1 + 101, maxReadBytes: 60_000, maxWrites: 51, maxWriteBytes: 20_000 },
+  // credentials (wrapper; + its settle patch), credentials again, device; writes: credentials, audit.
+  "deviceApi:rotateCredential": { maxReads: 3, maxReadBytes: 2_048, maxWrites: 3, maxWriteBytes: 1_024 },
+
   // ---- Step 7: fleet (dashboard). Member wrapper = 3 reads; writes + step-up row = 4.
   // One page: 50 x (devices + summary + presence) + groups map (tiny) + wrapper. Measured for 50
   // new-shape devices: 153 reads / 34 KB. (Devices enrolled before Step 7 carry ~1.5 KB of

@@ -3903,6 +3903,72 @@ failed one writes exactly one; `report` with status + 3 installs + 5
 audit records reads the credentials row once and writes only changed
 rows; replays of the same batch write nothing.
 
+**Status (2026-11-01): built and tested on the dev machine, NOT deployed**
+(the "deployed" of Done when is open: no `convex dev` / deploy in this pass).
+`convex/_generated/api.d.ts` was edited by hand (codegen needs a deployment).
+Files: `convex/deviceApi.ts`, `convex/lib/deviceApiRules.ts` (the bounds and
+pure rules; none is a `.take(n)`, so they are not in `limits.ts`), tests
+`convex/deviceApi.test.ts`. As built / deviations:
+(1) **Sign-in = 2 calls** (A9): new wrapper `deviceSelfCheckedAction`
+(`lib/functions.ts`) hands the presented credentials to the handler, whose ONE
+internal query `loadForVerify` runs `checkDevice`, the read-only `verifyPerDevice`
+check, employee, lockout, secret, membership, org settings and the liveness row
+(`lib/presence.ts` `contactDue`). The internal mutation `finishVerify` runs only
+when something must be written: a wrong password (limiter token + failure count),
+a lockout row to clear after a correct password, or liveness due (the sign-in
+counts as a ping). It re-reads the credentials state (revoked meanwhile =
+`device_rejected`, nothing written).
+(2) **Answers.** Exactly one Argon2id verify on every path past the checks
+(`lib/argon.ts` `verifier`, so the test can watch it), against `DUMMY_PHC` for an
+unknown or malformed username, an employee without a password, or a password
+outside 1-256 characters; all of these are `wrongCredentials` and count as a
+failure (limiter; plus the employee's lockout row when the employee exists).
+`disabled` / `notAllowedHere` only for a correct password; a device without a
+group answers `notAllowedHere`. The 10th consecutive failure locks for 15 minutes,
+answers `lockedOut` itself and audits `employee.lockedOut` once (actor = the
+device). While locked: `lockedOut` with the remaining time, no verify and no
+limiter token. An empty `verifyPerDevice` bucket also answers `lockedOut`.
+(3) **Rate limits.** `verifyPerDevice` (30/min per device) and `inviteCreate` (30/hour
+per organization, consumed in `members:storeInvite`, so a refused invite does not
+count) added. `enrollGlobal` stays 120/min + `enrollPerOrg` (Step 6, A9) and
+`redeemCode` stays per email (Step 3 deviation); the plan's 60/min and "global"
+are superseded. Tests run with the real component (`rateLimiterTest.register`),
+so the `RULEBOX_TEST_DISABLE_LIMITS` fallback and the manual `npx convex run`
+check were not needed. There is **no per-organization sign-in bucket** (the plan
+names none); the per-employee lockout bounds guessing per account.
+(4) **`report`** takes `status`, `installs` and `audit` only (the Phase 5 parts
+are not accepted yet). Every part is checked before anything is written, so a
+refused report writes nothing; it does not refresh liveness (the ping does).
+`reportAudit` / `reportInstalls` are thin aliases. Measured: status + 3 installs +
+5 records = 10 writes; the replay 0 writes, 15 reads, one of them the
+credentials row.
+(5) **Audit records.** Unknown kind or an id that is not 1-64 of `[A-Za-z0-9_-]`
+is skipped and NOT counted in `accepted` (the five kinds are a closed Rust enum,
+so a real agent never sends one); `detail` not matching the rule is dropped from
+the record; `username` is normalized and kept only when it passes the username
+rule (4.12). `at` < the device's `enrolledAt` or > 7 days ahead = server time and
+"(device clock wrong)" (`writeAudit` gained an optional `at`). The
+`device.auditDropped` row is keyed on the batch's first record id, so a replay
+does not repeat it. `lib/orgDb.ts` allows `auditLog.by_event_key` (the key holds
+the caller's device id). Summaries name the PC and the username only.
+(6) **Installs.** `pending` and the terminal states are upserted
+(`by_device_app`), written only when a field differs (a cleared exit code / detail
+is removed); `downloading` / `installing` / `removing`, unknown ids and other
+organizations' apps are ignored but counted as accepted. A detail outside the
+fixed list, a count that is not a whole number >= 0, or more than 50 results
+refuses the whole call (`invalid_argument`). `orgStats.failedInstallCount` is kept
+here (Step 17 item 7).
+(7) **Rotation.** Acceptance in `checkDevice` already existed (`settleRotation`
+in the device mutation wrappers since Step 7). `rotateCredential`: current secret
+= rotate (clears `rotate`, audits `device.credentialRotated`); `secretHash`
+already equal to the new hash = ok without a write (also when the caller already
+uses the new secret); previous secret with a different hash = `conflict` (detail
+"rotation"); a device without a `deviceCredentials` row (pre-split) = `not_ready`.
+The new hash is not checked against other devices' hashes (256-bit random).
+(8) Verified: `pnpm test:convex`, `test:scripts`, `typecheck:convex`, `lint:convex`,
+`node scripts/gen-policy-vectors.mjs --check`. Not verified: any call against a
+Convex deployment, the real agent (Step 13).
+
 ---
 
 ### Step 13 — Agent: Convex directory, audit sink, catalogue, credential rotation, protocol 1.2
