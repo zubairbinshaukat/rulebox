@@ -15,8 +15,10 @@ use std::time::Duration;
 use futures_util::future::BoxFuture;
 use futures_util::FutureExt;
 use rulebox_ipc::admin::{
-    reasons, AdminEnrollParams, AdminEnrollResult, AdminUnenrollParams,
+    reasons, AdminEnrollParams, AdminEnrollResult, AdminTrustKeyParams, AdminTrustKeyResult,
+    AdminUnenrollParams,
 };
+use rulebox_policy::envelope::TrustedKey;
 use rulebox_ipc::types::{AgentSnapshot, ConnectionStatus, DeviceInfo, EnrollmentStatus};
 use rulebox_ipc::{ErrorCode, RpcError};
 
@@ -93,6 +95,11 @@ impl AdminHandler for Enroller {
         let inner = Arc::clone(&self.inner);
         async move { inner.unenroll(params).await }.boxed()
     }
+
+    fn trust_key(&self, params: AdminTrustKeyParams) -> BoxFuture<'static, Result<AdminTrustKeyResult, RpcError>> {
+        let inner = Arc::clone(&self.inner);
+        async move { inner.trust_key(params).await }.boxed()
+    }
 }
 
 // -- errors -----------------------------------------------------------------------
@@ -100,6 +107,9 @@ impl AdminHandler for Enroller {
 fn internal(message: &str) -> RpcError {
     rpc_error(ErrorCode::Internal, message, true)
 }
+
+/// The server code of `enrollment:enroll` when the organization has no active key.
+const SERVER_NOT_READY: &str = "not_ready";
 
 fn is_token_code(code: &str) -> bool {
     matches!(
@@ -127,6 +137,14 @@ pub fn backend_failure(error: &BackendError) -> RpcError {
             };
             operation_failed(code, message, false, None)
         }
+        // (Phase 4 Step 9) No signing key: a device is never enrolled without a root
+        // of trust.
+        BackendError::Rejected { code } if code == SERVER_NOT_READY => operation_failed(
+            reasons::BACKEND_NOT_READY,
+            "The organization has no signing key yet. Register one in the dashboard (Settings → Signing).",
+            false,
+            None,
+        ),
         BackendError::Rejected { code } => operation_failed(
             reasons::BACKEND_REJECTED,
             "The backend refused the request.",
@@ -323,10 +341,15 @@ impl EnrollDeps {
             // administrator accepted here.
             allow_joined: params.allow_joined,
         };
+        // (Phase 4 Step 9) The root of trust: the keys of the enrollment answer
+        // (checked against their ids when the answer was parsed), nothing else.
+        let policy_keys = response.policy_keys.clone();
         if let Err(error) = ctx.shared.update(|state| {
             state.enrollment = Some(enrollment);
             state.pending_enrollment = None;
             state.last_applied_version = 0;
+            state.trusted_keys = policy_keys;
+            state.last_doc_key_id = None;
         }) {
             // The server has the device; a retry with the same code is idempotent.
             tracing::error!("cannot save the enrollment: {error}");
@@ -380,6 +403,9 @@ impl EnrollDeps {
         let ctx = &self.ctx;
         if let Err(error) = remove_file_if_exists(&ctx.paths.desired_state()) {
             tracing::error!("cannot delete desired-state.json: {error}");
+        }
+        if let Err(error) = remove_file_if_exists(&ctx.paths.roster()) {
+            tracing::error!("cannot delete roster.json: {error}");
         }
         ctx.session.forget_employees();
         if let Err(error) = lock(&self.lockouts).reset() {
@@ -454,6 +480,8 @@ impl EnrollDeps {
             }
             state.journal.clear();
             state.last_applied_version = 0;
+            state.trusted_keys.clear();
+            state.last_doc_key_id = None;
             if removed_staff {
                 state.kiosk = KioskRecord::default();
             }
@@ -463,6 +491,38 @@ impl EnrollDeps {
         ctx.snapshot.update(not_enrolled_snapshot);
         tracing::info!("this PC is no longer enrolled");
         Ok(())
+    }
+
+    // -- trust-key ----------------------------------------------------------------
+
+    /// `admin.trustKey` (plan 4.5, "Key lost"): an administrator on the PC adds a
+    /// key. Only for an enrolled PC (the trust store belongs to the enrollment).
+    /// The backend task is restarted so a document refused for an unknown key is
+    /// fetched again.
+    async fn trust_key(&self, params: AdminTrustKeyParams) -> Result<AdminTrustKeyResult, RpcError> {
+        let ctx = &self.ctx;
+        if ctx.shared.read(|state| state.enrollment.is_none()) {
+            return Err(rpc_error(ErrorCode::NotEnrolled, "This PC is not enrolled.", false));
+        }
+        let key = TrustedKey::from_public_key(&params.public_key).map_err(|_| {
+            operation_failed(
+                reasons::KEY_INVALID,
+                "That is not a signing key. Copy the whole public key (standard base64 of 32 bytes).",
+                false,
+                None,
+            )
+        })?;
+        let added = ctx.shared.read(|state| !state.trusted_keys.iter().any(|known| known.key_id == key.key_id));
+        if added {
+            let new_key = key.clone();
+            ctx.shared.update(|state| state.trusted_keys.push(new_key)).map_err(|error| {
+                tracing::error!("cannot save the trusted keys: {error}");
+                internal("Cannot save the agent's state.")
+            })?;
+            tracing::warn!(key_id = %key.key_id, "an administrator added a trusted policy key on this PC");
+            self.runner.start_from_state().await;
+        }
+        Ok(AdminTrustKeyResult { key_id: key.key_id, added })
     }
 
     /// `devices:unenroll` under a 10-second timeout; every outcome is only logged.
@@ -574,6 +634,7 @@ mod tests {
     use crate::platform::PlatformError;
     use crate::session::SessionManager;
     use crate::state::{AgentState, KioskApplied, SharedState, SnapshotHandle, StateStore};
+    use crate::testutil::signing::{test_key, test_key_2, trusted_of};
     use crate::testutil::{test_session_parts, test_snapshot, TempDir};
 
     const TOKEN: &str = "0123456789ABCDEFGHJK";
@@ -714,6 +775,7 @@ mod tests {
             org_id: "org-1".into(),
             device_name: "Front desk".into(),
             server_time_ms: 1_760_000_000_250,
+            policy_keys: vec![trusted_of(&test_key())],
         }
     }
 
@@ -934,6 +996,75 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn enroll_saves_policy_keys() {
+        let rig = Rig::with_state(AgentState {
+            // Left over from an earlier enrollment: replaced, never merged.
+            trusted_keys: vec![trusted_of(&test_key_2())],
+            last_doc_key_id: Some("old".into()),
+            ..AgentState::default()
+        });
+        rig.fake().script_enroll(Ok(response("dev-77")));
+        rig.enroll(enroll_params(TOKEN)).await.unwrap();
+        let state = rig.state();
+        assert_eq!(state.trusted_keys, [trusted_of(&test_key())]);
+        assert_eq!(state.last_doc_key_id, None);
+        let saved = std::fs::read_to_string(rig.ctx.paths.agent_state()).unwrap();
+        assert!(saved.contains("\"trustedKeys\"") && saved.contains("21fe31dfa154a261"), "{saved}");
+        rig.runner.stop().await;
+
+        // Unenrolling forgets them.
+        let (rig, _) = enrolled_rig().await;
+        assert_eq!(rig.state().trusted_keys.len(), 1);
+        rig.unenroll(false).await.unwrap();
+        assert!(rig.state().trusted_keys.is_empty());
+    }
+
+    #[tokio::test]
+    async fn enroll_not_ready_maps_to_backend_not_ready() {
+        let rig = Rig::new();
+        rig.fake().script_enroll(Err(BackendError::Rejected { code: "not_ready".into() }));
+        let error = rig.enroll(enroll_params(TOKEN)).await.unwrap_err();
+        let failed = failure(&error);
+        assert_eq!(failed.reason, reasons::BACKEND_NOT_READY);
+        assert_eq!(
+            error.message,
+            "The organization has no signing key yet. Register one in the dashboard (Settings → Signing)."
+        );
+        assert!(!error.retryable);
+        assert!(rig.state().enrollment.is_none());
+        // An answer without keys is a protocol error, which the user sees as backend_rejected.
+        let rig = Rig::new();
+        rig.fake().script_enroll(Err(BackendError::Protocol("the enrollment answer has no policy key".into())));
+        let failed = failure(&rig.enroll(enroll_params(TOKEN)).await.unwrap_err());
+        assert_eq!(failed.reason, reasons::BACKEND_REJECTED);
+    }
+
+    #[tokio::test]
+    async fn trust_key_adds_a_valid_key_once_and_refuses_anything_else() {
+        let rig = Rig::new();
+        let key2 = trusted_of(&test_key_2());
+        // Not enrolled: there is no trust store to add to.
+        let error = rig.enroller.trust_key(AdminTrustKeyParams { public_key: key2.public_key.clone() }).await;
+        assert_eq!(error.unwrap_err().code, ErrorCode::NotEnrolled);
+
+        let (rig, _) = enrolled_rig().await;
+        let params = AdminTrustKeyParams { public_key: key2.public_key.clone() };
+        let result = rig.enroller.trust_key(params.clone()).await.unwrap();
+        assert_eq!(result, AdminTrustKeyResult { key_id: key2.key_id.clone(), added: true });
+        assert_eq!(rig.state().trusted_keys, [trusted_of(&test_key()), key2.clone()]);
+        let again = rig.enroller.trust_key(params).await.unwrap();
+        assert!(!again.added);
+        assert_eq!(rig.state().trusted_keys.len(), 2);
+        // Not a key: refused, nothing saved.
+        for bad in ["", "AAAA", "not base64!", &"A".repeat(44)] {
+            let error = rig.enroller.trust_key(AdminTrustKeyParams { public_key: bad.into() }).await.unwrap_err();
+            assert_eq!(failure(&error).reason, reasons::KEY_INVALID, "{bad}");
+        }
+        assert_eq!(rig.state().trusted_keys.len(), 2);
+        rig.runner.stop().await;
+    }
+
+    #[tokio::test]
     async fn a_failure_of_the_error_text_never_contains_the_code_or_the_token() {
         let rig = Rig::new();
         rig.fake().script_enroll(Err(BackendError::Rejected { code: "token_expired".into() }));
@@ -1102,6 +1233,20 @@ mod tests {
                 shutdown: tokio_util::sync::CancellationToken,
             ) -> BoxFuture<'_, ()> {
                 self.0.subscribe(auth, tx, shutdown)
+            }
+            fn fetch_desired(
+                &self,
+                auth: &DeviceAuth,
+                version: u64,
+            ) -> BoxFuture<'_, Result<rulebox_policy::envelope::SignedEnvelope, BackendError>> {
+                self.0.fetch_desired(auth, version)
+            }
+            fn fetch_roster(
+                &self,
+                auth: &DeviceAuth,
+                since_epoch: u64,
+            ) -> BoxFuture<'_, Result<crate::backend::RosterFetch, BackendError>> {
+                self.0.fetch_roster(auth, since_epoch)
             }
         }
         let rig = Rig::new();

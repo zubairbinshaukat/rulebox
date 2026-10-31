@@ -32,6 +32,8 @@ windows-service.workspace = true
 tokio = { workspace = true, features = ["test-util", "io-util"] }
 tokio-util = { workspace = true, features = ["codec"] }
 futures-util = { workspace = true, features = ["sink"] }
+# (Phase 4 Step 9) Signs test documents like the server does.
+ed25519-dalek.workspace = true
 
 [lints]
 workspace = true

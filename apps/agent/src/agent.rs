@@ -12,6 +12,7 @@ use rulebox_ipc::types::{
     AgentSnapshot, ConnectionStatus, DeviceInfo, DisplayMode, EnrollmentStatus, ShellHealth, ShellStatus,
 };
 use rulebox_ipc::{ADMIN_PIPE, SHELL_PIPE, SIM_SUFFIX};
+use rulebox_policy::envelope::{verify_envelope, Payload, SignedEnvelope};
 use serde::{Deserialize, Serialize};
 use tokio::sync::{mpsc, watch};
 use tokio_util::sync::CancellationToken;
@@ -132,26 +133,72 @@ pub fn load_config(paths: &DataPaths) -> anyhow::Result<AgentConfig> {
     Ok(loaded.unwrap_or_default())
 }
 
-/// `desired-state.json`: the last document the backend sent, as received. `doc`
-/// is the **raw** document, so the agent-only keys of Section 5.10 (the exit PIN
-/// hash among them) survive a restart while offline. Step 8 writes the file;
-/// Step 6b only reads it.
+/// `desired-state.json`: the last accepted document, as the signed envelope it
+/// was received in (Phase 4 Step 9), so the agent-only keys of Section 5.10 (the
+/// exit PIN hash among them) survive a restart while offline. It is verified
+/// again at every start ([`load_verified_cache`]). A Phase 2 file (an unsigned
+/// `doc`, no `payload`) parses but is ignored.
 #[derive(Serialize, Deserialize, Clone, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct CachedDesired {
     pub version: u64,
-    pub doc: serde_json::Value,
+    /// The signed payload exactly as received.
+    #[serde(default)]
+    pub payload: Option<String>,
     #[serde(default)]
     pub signature: Option<String>,
+    #[serde(default)]
+    pub key_id: Option<String>,
+}
+
+impl CachedDesired {
+    pub fn from_envelope(envelope: &SignedEnvelope) -> Self {
+        Self {
+            version: envelope.version,
+            payload: Some(envelope.payload.clone()),
+            signature: Some(envelope.signature.clone()),
+            key_id: Some(envelope.key_id.clone()),
+        }
+    }
+
+    /// The envelope, or `None` for a Phase 2 file.
+    pub fn envelope(&self) -> Option<SignedEnvelope> {
+        Some(SignedEnvelope {
+            version: self.version,
+            payload: self.payload.clone()?,
+            signature: self.signature.clone()?,
+            key_id: self.key_id.clone()?,
+        })
+    }
 }
 
 impl std::fmt::Debug for CachedDesired {
-    // Not derived: `doc` can hold the PIN hash.
+    // Not derived: `payload` holds the PIN hash.
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("CachedDesired")
             .field("version", &self.version)
             .field("signed", &self.signature.is_some())
             .finish_non_exhaustive()
+    }
+}
+
+/// The cached document when it is signed and still verifies for this device
+/// with the keys it trusts now. A Phase 2 (unsigned) file, a file that fails
+/// verification, or a PC that is not enrolled gives `None` (logged): the
+/// effective state then falls back to the enrollment default.
+pub fn load_verified_cache(paths: &DataPaths, state: &AgentState) -> Option<(SignedEnvelope, Payload)> {
+    let cached = load_cached_desired(paths)?;
+    let enrollment = state.enrollment.as_ref()?;
+    let Some(envelope) = cached.envelope() else {
+        tracing::error!(version = cached.version, "desired-state.json is unsigned (Phase 2 format); ignored");
+        return None;
+    };
+    match verify_envelope(&envelope, &state.trusted_keys, &enrollment.org_id, &enrollment.device_id) {
+        Ok(payload) => Some((envelope, payload)),
+        Err(error) => {
+            tracing::error!(version = cached.version, "desired-state.json does not verify ({error}); ignored");
+            None
+        }
     }
 }
 
@@ -229,13 +276,14 @@ pub async fn run(
     let store = StateStore::open(&deps.paths.state_dir()).context("open the state directory")?;
     let state = store.load().context("load the agent state")?;
     // (1.1) The agent-only keys of the desired-state document: the demo document in
-    // demo mode, otherwise the cached one (the backend task keeps it current). No
-    // document means no exit PIN, so the admin exit is off.
-    let cached = if deps.sim.demo { None } else { load_cached_desired(&deps.paths) };
+    // demo mode, otherwise the cached one (the backend task keeps it current), only
+    // when it still verifies (Phase 4 Step 9). No document means no exit PIN, so
+    // the admin exit is off.
+    let cached = if deps.sim.demo { None } else { load_verified_cache(&deps.paths, &state) };
     let policy_doc = if deps.sim.demo {
         Some(fixtures::demo_document())
     } else {
-        cached.as_ref().map(|cached| cached.doc.clone())
+        cached.as_ref().map(|(_, payload)| payload.doc.clone())
     };
     let policy = AgentPolicy::from_doc(policy_doc.as_ref());
     drop(policy_doc);
@@ -248,9 +296,9 @@ pub async fn run(
     let mut first_snapshot = initial_snapshot(&state, deps.platform.as_ref(), &deps.config, &policy);
     // Offline at boot: the cached document fills the snapshot before any backend
     // contact (plan Section 5.8), so the Staff App has the state from the start.
-    if let (Some(cached), Some(_)) = (&cached, &state.enrollment) {
-        if let Ok(desired) = serde_json::from_value::<rulebox_policy::DesiredState>(cached.doc.clone()) {
-            apply_to_snapshot(&mut first_snapshot, &desired, cached.version, &policy);
+    if let Some((_, payload)) = &cached {
+        if let Ok(desired) = serde_json::from_value::<rulebox_policy::DesiredState>(payload.doc.clone()) {
+            apply_to_snapshot(&mut first_snapshot, &desired, payload.version, &policy);
         }
     }
     drop(cached);
@@ -514,7 +562,7 @@ mod tests {
 
     use crate::platform::sim::SimPlatform;
     use crate::state::{Enrollment, KioskApplied, KioskRecord};
-    use crate::testutil::{unique_pipe_name, TempDir};
+    use crate::testutil::{signing, unique_pipe_name, TempDir};
 
     #[test]
     fn fresh_snapshot_is_not_enrolled_and_standard() {
@@ -562,19 +610,47 @@ mod tests {
         assert_eq!(load_cached_desired(&paths), None);
 
         std::fs::create_dir_all(paths.state_dir()).unwrap();
-        let text = r#"{ "version": 7, "doc": { "adminExit": { "pinHash": "$argon2id$secret" }, "x": 1 },
-                        "signature": "sig" }"#;
+        let envelope = signing::envelope(
+            &signing::test_key(),
+            "o1",
+            "d1",
+            7,
+            &serde_json::json!({ "adminExit": { "pinHash": "$argon2id$secret" }, "x": 1, "version": 7 }),
+        );
+        let text = serde_json::to_vec(&CachedDesired::from_envelope(&envelope)).unwrap();
         std::fs::write(paths.desired_state(), text).unwrap();
         let cached = load_cached_desired(&paths).expect("a cached document");
         assert_eq!(cached.version, 7);
-        assert_eq!(cached.doc["x"], 1);
-        assert_eq!(cached.signature.as_deref(), Some("sig"));
+        assert_eq!(cached.envelope(), Some(envelope));
         let debug = format!("{cached:?}");
         assert!(!debug.contains("argon2") && !debug.contains("pinHash"), "{debug}");
 
-        // No signature in the file is fine (it is written unsigned until Phase 5).
-        std::fs::write(paths.desired_state(), r#"{ "version": 1, "doc": {} }"#).unwrap();
-        assert_eq!(load_cached_desired(&paths).unwrap().signature, None);
+        // It verifies only for its own device, with a trusted key.
+        let mut state = AgentState {
+            enrollment: Some(Enrollment {
+                convex_url: "https://x.convex.cloud".into(),
+                device_id: "d1".into(),
+                org_id: "o1".into(),
+                device_name: "Desk".into(),
+                enrolled_at_ms: 1,
+                revoked: false,
+                allow_joined: false,
+            }),
+            ..AgentState::default()
+        };
+        assert!(load_verified_cache(&paths, &state).is_none(), "no trusted key");
+        state.trusted_keys = vec![signing::trusted_of(&signing::test_key())];
+        let (_, payload) = load_verified_cache(&paths, &state).expect("verifies");
+        assert_eq!(payload.doc["x"], 1);
+        state.enrollment.as_mut().unwrap().device_id = "d2".into();
+        assert!(load_verified_cache(&paths, &state).is_none(), "another device");
+
+        // phase2_cache_is_ignored: the Phase 2 file (an unsigned `doc`) parses but is
+        // never used.
+        state.enrollment.as_mut().unwrap().device_id = "d1".into();
+        std::fs::write(paths.desired_state(), r#"{ "version": 1, "doc": { "kioskEnabled": false } }"#).unwrap();
+        assert_eq!(load_cached_desired(&paths).unwrap().envelope(), None);
+        assert!(load_verified_cache(&paths, &state).is_none());
 
         // A file that does not parse is moved aside and treated as missing.
         std::fs::write(paths.desired_state(), "{ not json").unwrap();
@@ -1024,7 +1100,7 @@ mod backend_tests {
     }
 
     fn push(fake: &FakeBackend, version: u64, doc: serde_json::Value) {
-        fake.push(BackendEvent::Desired(DesiredFetch::Doc { version, doc, signature: None }));
+        fake.publish_doc(version, doc);
     }
 
     #[tokio::test]

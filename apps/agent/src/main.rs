@@ -25,12 +25,14 @@ mod logging;
 mod paths;
 mod platform;
 mod recover;
+mod roster;
 mod secrets;
 mod service;
 mod session;
 mod state;
 #[cfg(test)]
 mod testutil;
+mod trust;
 mod watchdog;
 
 use std::backtrace::Backtrace;
@@ -41,7 +43,7 @@ use std::sync::{Arc, OnceLock};
 
 use anyhow::Context;
 use clap::Parser;
-use rulebox_ipc::admin::{AdminEnrollParams, AdminUnenrollParams};
+use rulebox_ipc::admin::{AdminEnrollParams, AdminTrustKeyParams, AdminUnenrollParams};
 use rulebox_ipc::client::ClientConfig;
 use tokio_util::sync::CancellationToken;
 
@@ -137,6 +139,12 @@ fn dispatch(cli: Cli) -> anyhow::Result<u8> {
         Command::Unenroll { remove_staff_account, simulate } => Ok(ipc_admin::run_unenroll(
             ClientConfig::admin(simulate).with_timeout(ipc_admin::DEFAULT_TIMEOUT),
             AdminUnenrollParams { remove_staff_account },
+            &mut std::io::stdout().lock(),
+            &mut std::io::stderr().lock(),
+        )),
+        Command::TrustKey { public_key, simulate } => Ok(ipc_admin::run_trust_key(
+            ClientConfig::admin(simulate).with_timeout(ipc_admin::DEFAULT_TIMEOUT),
+            AdminTrustKeyParams { public_key },
             &mut std::io::stdout().lock(),
             &mut std::io::stderr().lock(),
         )),

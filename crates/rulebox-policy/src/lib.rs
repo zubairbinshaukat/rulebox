@@ -7,6 +7,9 @@ use std::collections::BTreeMap;
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
+pub mod envelope;
+pub mod roster;
+
 /// The example desired state from PRD Section 10.
 pub const EXAMPLE_DESIRED_STATE_JSON: &str = r#"{
   "kioskEnabled": true,

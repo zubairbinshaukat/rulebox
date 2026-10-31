@@ -22,15 +22,21 @@ use tokio::sync::{mpsc, watch, OnceCell};
 use tokio::task::JoinHandle;
 use tokio_util::sync::CancellationToken;
 
+use rulebox_policy::envelope::{Endorsement, PublishedKey, SignedEnvelope, TrustedKey};
+use rulebox_policy::roster::{RosterEntry, RosterSnapshot};
+
 use super::value::{from_json, to_json};
 use super::{
     Backend, BackendError, BackendEvent, BackendFactory, DesiredFetch, DeviceAuth, EnrollRequest,
-    EnrollResponse, HeartbeatResponse, StatusReport, CALL_TIMEOUT,
+    EnrollResponse, Head, HeartbeatResponse, RosterFetch, StatusReport, CALL_TIMEOUT,
 };
 
 /// Convex function names.
 pub const FN_ENROLL: &str = "enrollment:enroll";
-pub const FN_DESIRED_STATE: &str = "devices:desiredState";
+/// (Phase 4 Step 9) The one subscription; it replaced `devices:desiredState`.
+pub const FN_HEAD_STATE: &str = "devices:headState";
+pub const FN_FETCH_DESIRED: &str = "devices:fetchDesired";
+pub const FN_FETCH_ROSTER: &str = "devices:fetchRoster";
 pub const FN_HEARTBEAT: &str = "devices:heartbeat";
 pub const FN_UNENROLL: &str = "devices:unenroll";
 
@@ -84,6 +90,13 @@ pub fn heartbeat_args(auth: &DeviceAuth, status: Option<&StatusReport>) -> BTree
     args
 }
 
+/// The credentials and one whole-number argument (`v.number()`: a float on the wire).
+pub fn number_args(auth: &DeviceAuth, name: &str, value: u64) -> BTreeMap<String, Value> {
+    let mut args = auth_args(auth);
+    args.insert(name.to_string(), Value::Float64(value as f64));
+    args
+}
+
 // -- answers ----------------------------------------------------------------------
 
 fn protocol(what: &str) -> BackendError {
@@ -118,13 +131,34 @@ fn time_ms(json: &Json, name: &str) -> Result<i64, BackendError> {
     i64::try_from(value).map_err(|_| protocol("a time is out of range"))
 }
 
-/// `{ deviceId, orgId, deviceName, serverTimeMs }`.
+fn array_field<'a>(json: &'a Json, name: &str) -> Result<&'a Vec<Json>, BackendError> {
+    field(json, name)?
+        .as_array()
+        .ok_or_else(|| BackendError::Protocol(format!("\"{name}\" is not a list")))
+}
+
+/// `{ deviceId, orgId, deviceName, serverTimeMs, policyKeys: [{ keyId, publicKey }] }`.
+/// An answer without `policyKeys`, with none, or with a key whose id is not the id
+/// of its key, is a `Protocol` error: a device is never enrolled without a root
+/// of trust.
 pub fn parse_enroll_response(json: &Json) -> Result<EnrollResponse, BackendError> {
+    let mut policy_keys = Vec::new();
+    for key in array_field(json, "policyKeys")? {
+        let key = TrustedKey::checked(&string_field(key, "keyId")?, &string_field(key, "publicKey")?)
+            .map_err(|error| BackendError::Protocol(format!("a policy key is not valid ({error})")))?;
+        if !policy_keys.contains(&key) {
+            policy_keys.push(key);
+        }
+    }
+    if policy_keys.is_empty() {
+        return Err(protocol("the enrollment answer has no policy key"));
+    }
     Ok(EnrollResponse {
         device_id: string_field(json, "deviceId")?,
         org_id: string_field(json, "orgId")?,
         device_name: string_field(json, "deviceName")?,
         server_time_ms: time_ms(json, "serverTimeMs")?,
+        policy_keys,
     })
 }
 
@@ -150,30 +184,91 @@ pub fn parse_unenroll_response(json: &Json) -> Result<(), BackendError> {
     }
 }
 
-/// `{ kind: "unknownDevice" } | { kind: "revoked" } | { kind: "ok", desired: null |
-/// { version, doc, signature: null } }`.
-pub fn parse_desired(json: &Json) -> Result<DesiredFetch, BackendError> {
+fn parse_head(head: &Json) -> Result<Head, BackendError> {
+    Ok(Head {
+        version: whole_number(head, "version")?,
+        content_hash: string_field(head, "contentHash")?,
+        key_id: string_field(head, "keyId")?,
+        ping_interval_ms: whole_number(head, "pingIntervalMs")?,
+        ping_nonce: whole_number(head, "pingNonce")?,
+        fast_until: whole_number(head, "fastUntil")?,
+        roster_epoch: whole_number(head, "rosterEpoch")?,
+        plan_state: string_field(head, "planState")?,
+    })
+}
+
+fn parse_published_key(key: &Json) -> Result<PublishedKey, BackendError> {
+    let endorsement = match field(key, "endorsement")? {
+        Json::Null => None,
+        e => Some(Endorsement { by_key_id: string_field(e, "byKeyId")?, signature: string_field(e, "signature")? }),
+    };
+    Ok(PublishedKey { key_id: string_field(key, "keyId")?, public_key: string_field(key, "publicKey")?, endorsement })
+}
+
+/// `{ kind: "unknownDevice" } | { kind: "revoked" } | { kind: "ok", head: null |
+/// { version, contentHash, keyId, bodyId, pingIntervalMs, pingNonce, fastUntil,
+/// rosterEpoch, planState }, keys: [{ keyId, publicKey, endorsement }],
+/// retiredKeyIds: [string] }`. The keys are only parsed here; whether they are
+/// trusted is `trust::update`'s decision.
+pub fn parse_head_state(json: &Json) -> Result<DesiredFetch, BackendError> {
     match string_field(json, "kind")?.as_str() {
         "unknownDevice" => Ok(DesiredFetch::UnknownDevice),
         "revoked" => Ok(DesiredFetch::Revoked),
         "ok" => {
-            let desired = field(json, "desired")?;
-            if desired.is_null() {
-                return Ok(DesiredFetch::None);
-            }
-            let signature = match desired.get("signature") {
-                None | Some(Json::Null) => None,
-                Some(Json::String(signature)) => Some(signature.clone()),
-                Some(_) => return Err(protocol("\"signature\" is not text or null")),
+            let head = match field(json, "head")? {
+                Json::Null => None,
+                head => Some(parse_head(head)?),
             };
-            Ok(DesiredFetch::Doc {
-                version: whole_number(desired, "version")?,
-                doc: field(desired, "doc")?.clone(),
-                signature,
-            })
+            let keys = array_field(json, "keys")?.iter().map(parse_published_key).collect::<Result<_, _>>()?;
+            let retired_key_ids = array_field(json, "retiredKeyIds")?
+                .iter()
+                .map(|id| id.as_str().map(str::to_string).ok_or_else(|| protocol("a retired key id is not text")))
+                .collect::<Result<_, _>>()?;
+            Ok(DesiredFetch::Ok { head, keys, retired_key_ids })
         }
-        _ => Err(protocol("unknown desired-state answer")),
+        _ => Err(protocol("unknown head-state answer")),
     }
+}
+
+/// `{ version, payload, signature, keyId }`, kept exactly as received (the
+/// signature is over these payload bytes).
+pub fn parse_envelope(json: &Json) -> Result<SignedEnvelope, BackendError> {
+    Ok(SignedEnvelope {
+        version: whole_number(json, "version")?,
+        payload: string_field(json, "payload")?,
+        signature: string_field(json, "signature")?,
+        key_id: string_field(json, "keyId")?,
+    })
+}
+
+/// `{ epoch, entries: [{ epoch, employeeId, credentialRevision | null, signature,
+/// keyId }] } | { snapshot: { epoch, payload, signature, keyId } }`.
+pub fn parse_roster_fetch(json: &Json) -> Result<RosterFetch, BackendError> {
+    if let Some(snapshot) = json.get("snapshot") {
+        return Ok(RosterFetch::Snapshot(RosterSnapshot {
+            epoch: whole_number(snapshot, "epoch")?,
+            payload: string_field(snapshot, "payload")?,
+            signature: string_field(snapshot, "signature")?,
+            key_id: string_field(snapshot, "keyId")?,
+        }));
+    }
+    let entries = array_field(json, "entries")?
+        .iter()
+        .map(|entry| {
+            let credential_revision = match field(entry, "credentialRevision")? {
+                Json::Null => None,
+                _ => Some(whole_number(entry, "credentialRevision")?),
+            };
+            Ok(RosterEntry {
+                epoch: whole_number(entry, "epoch")?,
+                employee_id: string_field(entry, "employeeId")?,
+                credential_revision,
+                signature: string_field(entry, "signature")?,
+                key_id: string_field(entry, "keyId")?,
+            })
+        })
+        .collect::<Result<_, BackendError>>()?;
+    Ok(RosterFetch::Entries { epoch: whole_number(json, "epoch")?, entries })
 }
 
 /// The `code` of a `ConvexError`'s data, or `server_error` when it has none (the
@@ -281,6 +376,22 @@ impl ConvexBackend {
         }
     }
 
+    /// One one-shot query under the 30-second timeout.
+    async fn query(&self, name: &str, args: BTreeMap<String, Value>) -> Result<Json, BackendError> {
+        let connected = self.connected().await?;
+        let mut client = connected.client.clone();
+        let outcome = tokio::time::timeout(CALL_TIMEOUT, client.query(name, args))
+            .await
+            .map_err(|_| BackendError::Timeout)?;
+        match outcome {
+            Ok(result) => function_result(result),
+            Err(error) => {
+                tracing::debug!("backend call {name} failed: {error}");
+                Err(BackendError::Unreachable)
+            }
+        }
+    }
+
     async fn run_subscription(&self, auth: DeviceAuth, tx: mpsc::Sender<BackendEvent>, shutdown: CancellationToken) {
         let mut wait = RESUBSCRIBE_BASE;
         // Set up the subscription, retrying while the client cannot.
@@ -290,7 +401,7 @@ impl ConvexBackend {
                 let mut client = connected.client.clone();
                 let subscription = tokio::time::timeout(
                     CALL_TIMEOUT,
-                    client.subscribe(FN_DESIRED_STATE, auth_args(&auth)),
+                    client.subscribe(FN_HEAD_STATE, auth_args(&auth)),
                 )
                 .await
                 .map_err(|_| BackendError::Timeout)?
@@ -336,14 +447,14 @@ impl ConvexBackend {
                         stream_open = false;
                     }
                     Some(result) => {
-                        let fetch = function_result(result).and_then(|json| parse_desired(&json));
+                        let fetch = function_result(result).and_then(|json| parse_head_state(&json));
                         match fetch {
                             Ok(fetch) => {
                                 if tx.send(BackendEvent::Desired(fetch)).await.is_err() {
                                     return;
                                 }
                             }
-                            Err(error) => tracing::warn!("ignoring a desired-state answer: {error}"),
+                            Err(error) => tracing::warn!("ignoring a head-state answer: {error}"),
                         }
                     }
                 },
@@ -396,6 +507,24 @@ impl Backend for ConvexBackend {
     ) -> BoxFuture<'_, ()> {
         self.run_subscription(auth, tx, shutdown).boxed()
     }
+
+    fn fetch_desired(&self, auth: &DeviceAuth, version: u64) -> BoxFuture<'_, Result<SignedEnvelope, BackendError>> {
+        let args = number_args(auth, "version", version);
+        async move {
+            let json = self.query(FN_FETCH_DESIRED, args).await?;
+            parse_envelope(&json)
+        }
+        .boxed()
+    }
+
+    fn fetch_roster(&self, auth: &DeviceAuth, since_epoch: u64) -> BoxFuture<'_, Result<RosterFetch, BackendError>> {
+        let args = number_args(auth, "sinceEpoch", since_epoch);
+        async move {
+            let json = self.query(FN_FETCH_ROSTER, args).await?;
+            parse_roster_fetch(&json)
+        }
+        .boxed()
+    }
 }
 
 #[cfg(test)]
@@ -422,7 +551,9 @@ mod tests {
     #[test]
     fn function_names_match_the_server() {
         assert_eq!(FN_ENROLL, "enrollment:enroll");
-        assert_eq!(FN_DESIRED_STATE, "devices:desiredState");
+        assert_eq!(FN_HEAD_STATE, "devices:headState");
+        assert_eq!(FN_FETCH_DESIRED, "devices:fetchDesired");
+        assert_eq!(FN_FETCH_ROSTER, "devices:fetchRoster");
         assert_eq!(FN_HEARTBEAT, "devices:heartbeat");
         assert_eq!(FN_UNENROLL, "devices:unenroll");
     }
@@ -485,6 +616,8 @@ mod tests {
             applied_version: Some(7),
             shell_health: None,
             compat: json!({}),
+            trusted_key_ids: None,
+            restart_pending: None,
         };
         let args = heartbeat_args(&auth(), Some(&status));
         assert_eq!(keys(&args), ["deviceId", "deviceSecret", "status"]);
@@ -498,14 +631,30 @@ mod tests {
         assert!(matches!(sent["ramMb"], Value::Float64(n) if n == 8192.0));
     }
 
+    /// The RFC 8032 test-1 public key of the committed vectors.
+    const KEY_ID: &str = "21fe31dfa154a261";
+    const PUBLIC_KEY: &str = "11qYAYKxCrfVS/7TyWQHOg7hcvPapiMlrwIaaPcHURo=";
+
     #[test]
     fn enroll_answers_parse_and_bad_ones_are_protocol_errors() {
-        let ok = json!({ "deviceId": "d1", "orgId": "o1", "deviceName": "Desk", "serverTimeMs": 1_760_000_000_000_u64 });
+        let ok = json!({ "deviceId": "d1", "orgId": "o1", "deviceName": "Desk", "serverTimeMs": 1_760_000_000_000_u64,
+                         "policyKeys": [{ "keyId": KEY_ID, "publicKey": PUBLIC_KEY }] });
         let parsed = parse_enroll_response(&ok).unwrap();
         assert_eq!(parsed.device_id, "d1");
         assert_eq!(parsed.org_id, "o1");
         assert_eq!(parsed.device_name, "Desk");
         assert_eq!(parsed.server_time_ms, 1_760_000_000_000);
+        assert_eq!(parsed.policy_keys, [TrustedKey { key_id: KEY_ID.into(), public_key: PUBLIC_KEY.into() }]);
+        // No root of trust: an answer without keys, with none, or with a key whose id
+        // is not its own, is refused.
+        for keys in [json!(null), json!([]), json!([{ "keyId": "0000000000000000", "publicKey": PUBLIC_KEY }])] {
+            let mut answer = ok.clone();
+            answer["policyKeys"] = keys;
+            assert!(matches!(parse_enroll_response(&answer), Err(BackendError::Protocol(_))), "{answer}");
+        }
+        let mut without = ok.clone();
+        without.as_object_mut().unwrap().remove("policyKeys");
+        assert!(matches!(parse_enroll_response(&without), Err(BackendError::Protocol(_))));
         // A float that the number rule already turned into an integer parses; a
         // fraction or a missing field does not.
         let via_values = to_json(from_json(&ok));
@@ -540,31 +689,79 @@ mod tests {
         assert!(parse_unenroll_response(&json!(null)).is_err());
     }
 
+    fn head_json(version: i64) -> Json {
+        json!({ "version": version, "contentHash": "c", "keyId": KEY_ID, "bodyId": "b1", "pingIntervalMs": 1_800_000,
+                "pingNonce": 2, "fastUntil": 0, "rosterEpoch": 4, "planState": "ok" })
+    }
+
     #[test]
-    fn desired_state_answers() {
-        assert_eq!(parse_desired(&json!({ "kind": "unknownDevice" })), Ok(DesiredFetch::UnknownDevice));
-        assert_eq!(parse_desired(&json!({ "kind": "revoked" })), Ok(DesiredFetch::Revoked));
-        assert_eq!(parse_desired(&json!({ "kind": "ok", "desired": null })), Ok(DesiredFetch::None));
-        let doc = json!({ "kioskEnabled": true, "version": 3 });
-        // The version arrives as a float from the server; the number rule already ran.
-        let from_server = to_json(from_json(&json!({
-            "kind": "ok",
-            "desired": { "version": 3, "doc": doc, "signature": null }
-        })));
+    fn head_state_answers() {
+        assert_eq!(parse_head_state(&json!({ "kind": "unknownDevice" })), Ok(DesiredFetch::UnknownDevice));
+        assert_eq!(parse_head_state(&json!({ "kind": "revoked" })), Ok(DesiredFetch::Revoked));
+        // Just enrolled: no head yet (about 1.5 s), the keys already there.
+        let keys = json!([
+            { "keyId": KEY_ID, "publicKey": PUBLIC_KEY, "endorsement": null },
+            { "keyId": "39f713d0a644253f", "publicKey": "x", "endorsement": { "byKeyId": KEY_ID, "signature": "s" } }
+        ]);
+        let empty = json!({ "kind": "ok", "head": null, "keys": keys, "retiredKeyIds": [KEY_ID] });
+        let DesiredFetch::Ok { head: None, keys: parsed, retired_key_ids } = parse_head_state(&empty).unwrap() else {
+            panic!("expected ok without a head");
+        };
+        assert_eq!(parsed.len(), 2);
+        assert_eq!(parsed[0].endorsement, None);
+        assert_eq!(parsed[1].endorsement, Some(Endorsement { by_key_id: KEY_ID.into(), signature: "s".into() }));
+        assert_eq!(retired_key_ids, [KEY_ID]);
+        // Numbers arrive as floats; the number rule already ran.
+        let from_server =
+            to_json(from_json(&json!({ "kind": "ok", "head": head_json(3), "keys": [], "retiredKeyIds": [] })));
+        let DesiredFetch::Ok { head: Some(head), .. } = parse_head_state(&from_server).unwrap() else {
+            panic!("expected a head");
+        };
         assert_eq!(
-            parse_desired(&from_server),
-            Ok(DesiredFetch::Doc { version: 3, doc: doc.clone(), signature: None })
+            head,
+            Head {
+                version: 3,
+                content_hash: "c".into(),
+                key_id: KEY_ID.into(),
+                ping_interval_ms: 1_800_000,
+                ping_nonce: 2,
+                fast_until: 0,
+                roster_epoch: 4,
+                plan_state: "ok".into(),
+            }
         );
-        let signed = json!({ "kind": "ok", "desired": { "version": 4, "doc": {}, "signature": "sig" } });
-        assert_eq!(
-            parse_desired(&signed),
-            Ok(DesiredFetch::Doc { version: 4, doc: json!({}), signature: Some("sig".into()) })
-        );
-        assert!(matches!(parse_desired(&json!({ "kind": "ok" })), Err(BackendError::Protocol(_))));
-        assert!(matches!(
-            parse_desired(&json!({ "kind": "ok", "desired": { "version": -1, "doc": {}, "signature": null } })),
-            Err(BackendError::Protocol(_))
-        ));
+        // The Phase 2 shape is not a head state.
+        let phase2 = json!({ "kind": "ok", "desired": { "version": 3, "doc": {}, "signature": null } });
+        assert!(matches!(parse_head_state(&phase2), Err(BackendError::Protocol(_))));
+        let negative = json!({ "kind": "ok", "head": head_json(-1), "keys": [], "retiredKeyIds": [] });
+        assert!(matches!(parse_head_state(&negative), Err(BackendError::Protocol(_))));
+    }
+
+    #[test]
+    fn fetch_answers_keep_the_payload_bytes_and_parse_rosters() {
+        let payload = "{\"a\":\"Zo\u{eb} \\\"q\\\"\"}";
+        let envelope = parse_envelope(&json!({ "version": 7, "payload": payload, "signature": "sig", "keyId": KEY_ID }))
+            .unwrap();
+        assert_eq!(envelope.payload, payload);
+        assert_eq!((envelope.version, envelope.key_id.as_str()), (7, KEY_ID));
+        assert!(parse_envelope(&json!({ "version": 7, "payload": {}, "signature": "s", "keyId": "k" })).is_err());
+
+        let entries = json!({ "epoch": 2, "entries": [
+            { "epoch": 1, "employeeId": "e1", "credentialRevision": 3, "signature": "s1", "keyId": KEY_ID },
+            { "epoch": 2, "employeeId": "e1", "credentialRevision": null, "signature": "s2", "keyId": KEY_ID }
+        ] });
+        let RosterFetch::Entries { epoch: 2, entries } = parse_roster_fetch(&to_json(from_json(&entries))).unwrap() else {
+            panic!("expected entries");
+        };
+        assert_eq!(entries[0].credential_revision, Some(3));
+        assert_eq!(entries[1].credential_revision, None);
+        let snapshot = json!({ "snapshot": { "epoch": 5, "payload": "{}", "signature": "s", "keyId": KEY_ID } });
+        assert!(matches!(parse_roster_fetch(&snapshot), Ok(RosterFetch::Snapshot(s)) if s.epoch == 5));
+        assert!(parse_roster_fetch(&json!({ "epoch": 1 })).is_err());
+
+        let args = number_args(&auth(), "version", 7);
+        assert_eq!(keys(&args), ["deviceId", "deviceSecret", "version"]);
+        assert!(matches!(args["version"], Value::Float64(n) if n == 7.0));
     }
 
     #[test]

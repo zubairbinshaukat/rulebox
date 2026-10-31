@@ -1,23 +1,27 @@
 //! `FakeBackend`: scripted answers and a handle to push [`BackendEvent`]s (tests
-//! only). Unscripted calls succeed: `enroll` answers `dev-1`, `heartbeat` answers
-//! `nextPingInMs: 300000`, `unenroll` succeeds.
+//! only). Unscripted calls succeed: `enroll` answers `dev-1` of `org-1` with the
+//! RFC 8032 test-1 key as its policy key, `heartbeat` answers `nextPingInMs:
+//! 300000`, `unenroll` succeeds, `fetchDesired` answers what [`FakeBackend::publish`]
+//! stored (else `not_found`) and `fetchRoster` an empty roster.
 
-use std::collections::VecDeque;
+use std::collections::{BTreeMap, VecDeque};
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use futures_util::future::BoxFuture;
 use futures_util::FutureExt;
+use rulebox_policy::envelope::{PublishedKey, SignedEnvelope};
 use tokio::sync::{mpsc, Notify};
 use tokio::time::Instant;
 use tokio_util::sync::CancellationToken;
 
 use super::{
-    Backend, BackendError, BackendEvent, DeviceAuth, EnrollRequest, EnrollResponse, HeartbeatResponse,
-    StatusReport,
+    Backend, BackendError, BackendEvent, DesiredFetch, DeviceAuth, EnrollRequest, EnrollResponse, Head,
+    HeartbeatResponse, RosterFetch, StatusReport, CODE_NOT_FOUND,
 };
 use crate::state::lock;
+use crate::testutil::signing::{envelope, test_key, trusted_of};
 
 #[derive(Debug, Clone)]
 pub struct HeartbeatCall {
@@ -40,6 +44,11 @@ struct Inner {
     subscriptions: Mutex<Vec<DeviceAuth>>,
     changed: Notify,
     subscribe_count: AtomicUsize,
+    /// What `fetchDesired` answers per version; a version not here is `not_found`.
+    bodies: Mutex<BTreeMap<u64, Result<SignedEnvelope, BackendError>>>,
+    desired_calls: Mutex<Vec<u64>>,
+    roster_script: Mutex<VecDeque<Result<RosterFetch, BackendError>>>,
+    roster_calls: Mutex<Vec<u64>>,
 }
 
 #[derive(Clone)]
@@ -64,8 +73,66 @@ impl FakeBackend {
                 subscriptions: Mutex::new(Vec::new()),
                 changed: Notify::new(),
                 subscribe_count: AtomicUsize::new(0),
+                bodies: Mutex::new(BTreeMap::new()),
+                desired_calls: Mutex::new(Vec::new()),
+                roster_script: Mutex::new(VecDeque::new()),
+                roster_calls: Mutex::new(Vec::new()),
             }),
         }
+    }
+
+    /// What `fetchDesired(version)` answers from now on.
+    pub fn store_body(&self, version: u64, answer: Result<SignedEnvelope, BackendError>) {
+        lock(&self.inner.bodies).insert(version, answer);
+    }
+
+    /// The head-state event for `envelope` (keys = `keys`, nothing retired).
+    pub fn head_event(envelope: &SignedEnvelope, roster_epoch: u64, keys: Vec<PublishedKey>) -> BackendEvent {
+        BackendEvent::Desired(DesiredFetch::Ok {
+            head: Some(Head {
+                version: envelope.version,
+                content_hash: "c".to_string(),
+                key_id: envelope.key_id.clone(),
+                ping_interval_ms: 1_800_000,
+                ping_nonce: 0,
+                fast_until: 0,
+                roster_epoch,
+                plan_state: "ok".to_string(),
+            }),
+            keys,
+            retired_key_ids: Vec::new(),
+        })
+    }
+
+    /// The published key list of the test-1 key alone.
+    pub fn test_keys() -> Vec<PublishedKey> {
+        let key = trusted_of(&test_key());
+        vec![PublishedKey { key_id: key.key_id, public_key: key.public_key, endorsement: None }]
+    }
+
+    /// Publishes like the server: stores `envelope` as the body of its version and
+    /// pushes the head that announces it.
+    pub fn publish(&self, envelope: SignedEnvelope) {
+        let event = Self::head_event(&envelope, 0, Self::test_keys());
+        self.store_body(envelope.version, Ok(envelope));
+        self.push(event);
+    }
+
+    /// [`Self::publish`] of `doc` signed by the test-1 key for `org-1` / `dev-1`.
+    pub fn publish_doc(&self, version: u64, doc: serde_json::Value) {
+        self.publish(envelope(&test_key(), "org-1", "dev-1", version, &doc));
+    }
+
+    pub fn desired_calls(&self) -> Vec<u64> {
+        lock(&self.inner.desired_calls).clone()
+    }
+
+    pub fn script_roster(&self, result: Result<RosterFetch, BackendError>) {
+        lock(&self.inner.roster_script).push_back(result);
+    }
+
+    pub fn roster_calls(&self) -> Vec<u64> {
+        lock(&self.inner.roster_calls).clone()
     }
 
     pub fn script_enroll(&self, result: Result<EnrollResponse, BackendError>) {
@@ -149,6 +216,7 @@ impl Backend for FakeBackend {
                     org_id: "org-1".to_string(),
                     device_name: req.device_name,
                     server_time_ms: 1_760_000_000_000,
+                    policy_keys: vec![trusted_of(&test_key())],
                 }),
             }
         }
@@ -216,6 +284,29 @@ impl Backend for FakeBackend {
             // Hand the queue back: a later subscription (the task restarted) still
             // receives what is pushed.
             *lock(&self.inner.events_rx) = Some(rx);
+        }
+        .boxed()
+    }
+
+    fn fetch_desired(&self, _auth: &DeviceAuth, version: u64) -> BoxFuture<'_, Result<SignedEnvelope, BackendError>> {
+        async move {
+            lock(&self.inner.desired_calls).push(version);
+            self.inner.changed.notify_waiters();
+            lock(&self.inner.bodies)
+                .get(&version)
+                .cloned()
+                .unwrap_or_else(|| Err(BackendError::Rejected { code: CODE_NOT_FOUND.to_string() }))
+        }
+        .boxed()
+    }
+
+    fn fetch_roster(&self, _auth: &DeviceAuth, since_epoch: u64) -> BoxFuture<'_, Result<RosterFetch, BackendError>> {
+        async move {
+            lock(&self.inner.roster_calls).push(since_epoch);
+            self.inner.changed.notify_waiters();
+            lock(&self.inner.roster_script)
+                .pop_front()
+                .unwrap_or(Ok(RosterFetch::Entries { epoch: 0, entries: Vec::new() }))
         }
         .boxed()
     }

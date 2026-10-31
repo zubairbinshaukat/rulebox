@@ -6,6 +6,7 @@ use std::sync::{Arc, Mutex};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use rulebox_ipc::types::AgentSnapshot;
+use rulebox_policy::envelope::TrustedKey;
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 use tokio::sync::watch;
@@ -29,6 +30,14 @@ pub struct AgentState {
     pub last_applied_version: u64,
     /// For clock-went-backwards detection.
     pub last_wall_clock_ms: u64,
+    /// (Phase 4 Step 9) The policy keys this device trusts: the enrollment
+    /// answer's, plus keys endorsed by them (`trust.rs`) or added with
+    /// `rulebox-agent trust-key`. Empty on a device enrolled before Phase 4: it
+    /// then accepts no document until it is re-enrolled.
+    pub trusted_keys: Vec<TrustedKey>,
+    /// (Phase 4 Step 9) The key id of the last accepted document; a retired key
+    /// is dropped only when this is another key.
+    pub last_doc_key_id: Option<String>,
 }
 
 impl Default for AgentState {
@@ -42,6 +51,8 @@ impl Default for AgentState {
             journal: Vec::new(),
             last_applied_version: 0,
             last_wall_clock_ms: 0,
+            trusted_keys: Vec::new(),
+            last_doc_key_id: None,
         }
     }
 }
@@ -369,6 +380,8 @@ mod tests {
             ],
             last_applied_version: 42,
             last_wall_clock_ms: 99,
+            trusted_keys: vec![TrustedKey { key_id: "21fe31dfa154a261".into(), public_key: "k".into() }],
+            last_doc_key_id: Some("21fe31dfa154a261".into()),
             ..AgentState::default()
         }
     }
@@ -439,6 +452,9 @@ mod tests {
         assert_eq!(state.kiosk.applied, KioskApplied::Enabled);
         assert!(!state.kiosk.lsa_taken_over);
         assert_eq!(state.kiosk.staff_hive, None);
+        // (Phase 4 Step 9) No trust store: such a device trusts nothing.
+        assert!(state.trusted_keys.is_empty());
+        assert_eq!(state.last_doc_key_id, None);
     }
 
     #[test]

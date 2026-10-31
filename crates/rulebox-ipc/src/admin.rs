@@ -59,6 +59,11 @@ pub mod reasons {
     pub const TOKEN_REVOKED: &str = "token_revoked";
     /// Any other server code; details: `{ "serverCode": "..." }`.
     pub const BACKEND_REJECTED: &str = "backend_rejected";
+    /// (Phase 4 Step 9) The server answered `not_ready`: the organization has no
+    /// signing key yet.
+    pub const BACKEND_NOT_READY: &str = "backend_not_ready";
+    /// (Phase 4 Step 9) `trust-key`: not standard base64 of a valid Ed25519 public key.
+    pub const KEY_INVALID: &str = "key_invalid";
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
@@ -85,6 +90,23 @@ pub struct AdminUnenrollParams {
     pub remove_staff_account: bool,
 }
 
+/// (Phase 4 Step 9) `rulebox-agent trust-key <base64>`: the "key lost" recovery
+/// (plan 4.5). Adds a policy key to the device's trust store.
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct AdminTrustKeyParams {
+    /// Standard base64 of the 32-byte Ed25519 public key.
+    pub public_key: String,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct AdminTrustKeyResult {
+    pub key_id: String,
+    /// False when the key was already trusted.
+    pub added: bool,
+}
+
 pub struct AdminStatus;
 impl Method for AdminStatus {
     const NAME: &'static str = "admin.status";
@@ -106,6 +128,13 @@ impl Method for AdminUnenroll {
     type Result = Empty;
 }
 
+pub struct AdminTrustKey;
+impl Method for AdminTrustKey {
+    const NAME: &'static str = "admin.trustKey";
+    type Params = AdminTrustKeyParams;
+    type Result = AdminTrustKeyResult;
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -115,6 +144,18 @@ mod tests {
         let params = AdminEnrollParams { code: "RBX1.x#y".into(), device_name: None, allow_joined: true };
         let value = serde_json::to_value(&params).unwrap();
         assert_eq!(value, serde_json::json!({ "code": "RBX1.x#y", "deviceName": null, "allowJoined": true }));
+    }
+
+    #[test]
+    fn trust_key_uses_camel_case() {
+        let params = AdminTrustKeyParams { public_key: "AAAA".into() };
+        assert_eq!(serde_json::to_value(&params).unwrap(), serde_json::json!({ "publicKey": "AAAA" }));
+        let result = AdminTrustKeyResult { key_id: "21fe31dfa154a261".into(), added: true };
+        assert_eq!(
+            serde_json::to_value(&result).unwrap(),
+            serde_json::json!({ "keyId": "21fe31dfa154a261", "added": true })
+        );
+        assert_eq!(AdminTrustKey::NAME, "admin.trustKey");
     }
 
     #[test]

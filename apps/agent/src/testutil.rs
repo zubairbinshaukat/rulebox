@@ -229,3 +229,86 @@ impl<'a> tracing_subscriber::fmt::MakeWriter<'a> for CaptureWriter {
         self.clone()
     }
 }
+
+/// (Phase 4 Step 9) Signing like the server does, with the published RFC 8032
+/// section 7.1 test keys (never trusted outside tests).
+pub mod signing {
+    use base64::engine::general_purpose::STANDARD;
+    use base64::Engine as _;
+    use ed25519_dalek::{Signer, SigningKey};
+    use rulebox_policy::envelope::{endorsement_message, Endorsement, SignedEnvelope, TrustedKey, PAYLOAD_FORMAT};
+    use rulebox_policy::roster::{roster_entry_message, RosterEntry};
+
+    fn key_of(seed_hex: &str) -> SigningKey {
+        let bytes: Vec<u8> =
+            (0..64).step_by(2).map(|i| u8::from_str_radix(&seed_hex[i..i + 2], 16).unwrap()).collect();
+        SigningKey::from_bytes(&bytes.try_into().unwrap())
+    }
+
+    /// TEST 1 (key id `21fe31dfa154a261`, the key of the committed vectors).
+    pub fn test_key() -> SigningKey {
+        key_of("9d61b19deffd5a60ba844af492ec2cc44449c5697b326919703bac031cae7f60")
+    }
+
+    /// TEST 2 (key id `39f713d0a644253f`).
+    pub fn test_key_2() -> SigningKey {
+        key_of("4ccd089b28ff96da9db6c346ec114e0f5b8a319f35aba624da8cf6ed4fb8a6fb")
+    }
+
+    /// TEST 3.
+    pub fn test_key_3() -> SigningKey {
+        key_of("c5aa8df43f9f837bedb7442f31dcb7b166d38535076f094b85ce3a2e0b4458f7")
+    }
+
+    pub fn trusted_of(key: &SigningKey) -> TrustedKey {
+        TrustedKey::from_public_key(&STANDARD.encode(key.verifying_key().as_bytes())).unwrap()
+    }
+
+    pub fn sign_text(key: &SigningKey, text: &str) -> String {
+        STANDARD.encode(key.sign(text.as_bytes()).to_bytes())
+    }
+
+    /// The payload `buildPayload` would write for `doc` (key order as the server's).
+    pub fn payload_of(key_id: &str, org: &str, device: &str, version: u64, doc: &serde_json::Value) -> String {
+        format!(
+            "{{\"format\":\"{PAYLOAD_FORMAT}\",\"keyId\":\"{key_id}\",\"orgId\":\"{org}\",\"deviceId\":\"{device}\",\
+             \"version\":{version},\"issuedAtMs\":1760950000000,\"doc\":{doc}}}"
+        )
+    }
+
+    /// A document envelope signed by `key` (`doc.version` should equal `version`).
+    pub fn envelope(key: &SigningKey, org: &str, device: &str, version: u64, doc: &serde_json::Value) -> SignedEnvelope {
+        let key_id = trusted_of(key).key_id;
+        let payload = payload_of(&key_id, org, device, version, doc);
+        SignedEnvelope { version, signature: sign_text(key, &payload), payload, key_id }
+    }
+
+    /// `by`'s endorsement of `key` for `org`.
+    pub fn endorse(by: &SigningKey, org: &str, key: &SigningKey) -> Endorsement {
+        let t = trusted_of(key);
+        Endorsement {
+            by_key_id: trusted_of(by).key_id,
+            signature: sign_text(by, &endorsement_message(org, &t.key_id, &t.public_key)),
+        }
+    }
+
+    /// A roster entry signed by `key` for `org` / `group`.
+    pub fn roster_entry(
+        key: &SigningKey,
+        org: &str,
+        group: &str,
+        epoch: u64,
+        employee_id: &str,
+        credential_revision: Option<u64>,
+    ) -> RosterEntry {
+        let mut entry = RosterEntry {
+            epoch,
+            employee_id: employee_id.to_string(),
+            credential_revision,
+            signature: String::new(),
+            key_id: trusted_of(key).key_id,
+        };
+        entry.signature = sign_text(key, &roster_entry_message(&entry.key_id, org, group, &entry));
+        entry
+    }
+}

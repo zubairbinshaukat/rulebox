@@ -15,6 +15,8 @@ use std::time::Duration;
 
 use futures_util::future::BoxFuture;
 use rulebox_ipc::types::ConnectionStatus;
+use rulebox_policy::envelope::{PublishedKey, SignedEnvelope, TrustedKey};
+use rulebox_policy::roster::{RosterEntry, RosterSnapshot};
 use serde::Serialize;
 use sha2::{Digest, Sha256};
 use tokio::sync::mpsc;
@@ -54,7 +56,7 @@ pub trait Backend: Send + Sync {
     /// revoked) is success: the caller wants the device gone either way.
     fn unenroll(&self, auth: &DeviceAuth) -> BoxFuture<'_, Result<(), BackendError>>;
 
-    /// Long-lived. Subscribes to `devices:desiredState` (the only subscription,
+    /// Long-lived. Subscribes to `devices:headState` (the only subscription,
     /// PRD 11.1 rule 6) and sends every result and every connection-state change
     /// until `shutdown` is cancelled.
     fn subscribe(
@@ -63,7 +65,17 @@ pub trait Backend: Send + Sync {
         tx: mpsc::Sender<BackendEvent>,
         shutdown: CancellationToken,
     ) -> BoxFuture<'_, ()>;
+
+    /// (Phase 4 Step 9) `devices:fetchDesired({ version })`: the signed envelope of
+    /// one version, as received. A pruned version is `Rejected { code: "not_found" }`.
+    fn fetch_desired(&self, auth: &DeviceAuth, version: u64) -> BoxFuture<'_, Result<SignedEnvelope, BackendError>>;
+
+    /// (Phase 4 Step 9) `devices:fetchRoster({ sinceEpoch })`.
+    fn fetch_roster(&self, auth: &DeviceAuth, since_epoch: u64) -> BoxFuture<'_, Result<RosterFetch, BackendError>>;
 }
+
+/// The server code of a version that was pruned (`fetchDesired`).
+pub const CODE_NOT_FOUND: &str = "not_found";
 
 #[derive(Clone, PartialEq, Eq)]
 pub struct DeviceAuth {
@@ -111,14 +123,18 @@ pub struct EnrollResponse {
     pub org_id: String,
     pub device_name: String,
     pub server_time_ms: i64,
+    /// (Phase 4 Step 9) The organization's active key (and the next one while a
+    /// rotation is prepared): the device's root of trust. Each key id was checked
+    /// against its key when the answer was parsed.
+    pub policy_keys: Vec<TrustedKey>,
 }
 
 /// The `status` argument of `devices:heartbeat`. The server validates it with a
-/// **strict** `v.object`, so these twelve keys (camelCase) are the only ones that
-/// may ever be sent; an unknown key makes the whole call fail. Optional fields are
-/// omitted when the agent does not know them. `agent_version` and `compat` are
-/// always present because the status is a full snapshot: an absent field clears
-/// the stored value.
+/// **strict** `v.object`, so these fourteen keys (camelCase) are the only ones
+/// that may ever be sent; an unknown key makes the whole call fail. Optional
+/// fields are omitted when the agent does not know them. `agent_version` and
+/// `compat` are always present because the status is a full snapshot: an absent
+/// field clears the stored value.
 #[derive(Debug, Clone, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct StatusReport {
@@ -144,12 +160,19 @@ pub struct StatusReport {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub shell_health: Option<String>,
     pub compat: serde_json::Value,
+    /// (Phase 4 Step 9) The ids of the keys this device trusts, sorted: the
+    /// dashboard's "N of M devices trust the new key" (`keys:trustProgress`).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub trusted_key_ids: Option<Vec<String>>,
+    /// (Phase 4) Always `None` until Step 14.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub restart_pending: Option<bool>,
 }
 
-/// The object keys of `StatusReport` that `devices:heartbeat` accepts (`convex/devices.ts`,
+/// The object keys of `StatusReport` that `devices:heartbeat` accepts (`convex/lib/deviceReport.ts`,
 /// `statusValidator`). A test pins the serialized key set to this list.
 #[cfg(test)]
-pub const STATUS_KEYS: [&str; 12] = [
+pub const STATUS_KEYS: [&str; 14] = [
     "agentVersion",
     "os",
     "osBuild",
@@ -162,6 +185,8 @@ pub const STATUS_KEYS: [&str; 12] = [
     "appliedVersion",
     "shellHealth",
     "compat",
+    "trustedKeyIds",
+    "restartPending",
 ];
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -176,34 +201,45 @@ pub enum BackendEvent {
     Desired(DesiredFetch),
 }
 
-/// One result of the `devices:desiredState` subscription.
-#[derive(Clone, PartialEq)]
+/// The head of `devices:headState` (plan 5.1 amended, A5 + A13). NOT signed: it
+/// only says that a version exists. Nothing is applied from it; the body is
+/// fetched and verified (`rulebox_policy::envelope::verify_for_head`).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Head {
+    pub version: u64,
+    /// SHA-256 of the document with version 0 (server-side de-duplication only).
+    pub content_hash: String,
+    pub key_id: String,
+    pub ping_interval_ms: u64,
+    /// (A13, behaviour in Step 13) A change asks for a ping at once.
+    pub ping_nonce: u64,
+    /// (A13, behaviour in Step 13) Ping every 60 s until this Unix ms time.
+    pub fast_until: u64,
+    pub roster_epoch: u64,
+    /// `"ok" | "overLimit" | "suspended"`.
+    pub plan_state: String,
+}
+
+/// One result of the `devices:headState` subscription.
+#[derive(Debug, Clone, PartialEq)]
 pub enum DesiredFetch {
-    /// `{ kind: "ok", desired: null }`: no document yet.
-    None,
-    /// `{ kind: "ok", desired: { version, doc, signature } }`. `doc` is the raw
-    /// document, agent-only keys included.
-    Doc { version: u64, doc: serde_json::Value, signature: Option<String> },
+    /// `{ kind: "ok", head, keys, retiredKeyIds }`. `head` is `None` until the
+    /// publisher reached the device (about 1.5 s after enrollment). `keys` is
+    /// every key of the organization, oldest first, with endorsements.
+    Ok { head: Option<Head>, keys: Vec<PublishedKey>, retired_key_ids: Vec<String> },
     /// `{ kind: "revoked" }`.
     Revoked,
     /// `{ kind: "unknownDevice" }`: the id does not exist or the secret is wrong.
     UnknownDevice,
 }
 
-impl std::fmt::Debug for DesiredFetch {
-    // Not derived: `doc` can hold the exit PIN hash.
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            DesiredFetch::None => f.write_str("None"),
-            DesiredFetch::Doc { version, signature, .. } => f
-                .debug_struct("Doc")
-                .field("version", version)
-                .field("signed", &signature.is_some())
-                .finish_non_exhaustive(),
-            DesiredFetch::Revoked => f.write_str("Revoked"),
-            DesiredFetch::UnknownDevice => f.write_str("UnknownDevice"),
-        }
-    }
+/// One answer of `devices:fetchRoster`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum RosterFetch {
+    /// `{ epoch, entries }`: the entries after `sinceEpoch`, ascending.
+    Entries { epoch: u64, entries: Vec<RosterEntry> },
+    /// `{ snapshot }`: the device is behind the newest snapshot.
+    Snapshot(RosterSnapshot),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
@@ -286,12 +322,13 @@ mod tests {
             compat: serde_json::json!({}),
         };
         assert!(!format!("{request:?}").contains("TOKEN-TEXT"));
-        let doc = DesiredFetch::Doc {
+        let envelope = SignedEnvelope {
             version: 1,
-            doc: serde_json::json!({ "adminExit": { "pinHash": "$argon2id$hide-me" } }),
-            signature: None,
+            payload: r#"{"doc":{"adminExit":{"pinHash":"$argon2id$hide-me"}}}"#.into(),
+            signature: "sig".into(),
+            key_id: "k".into(),
         };
-        assert!(!format!("{doc:?}").contains("argon2"));
+        assert!(!format!("{envelope:?}").contains("argon2"));
     }
 
     fn full_status() -> StatusReport {
@@ -308,6 +345,8 @@ mod tests {
             applied_version: Some(3),
             shell_health: Some("healthy".into()),
             compat: serde_json::json!({ "blockers": [] }),
+            trusted_key_ids: Some(vec!["21fe31dfa154a261".into()]),
+            restart_pending: Some(false),
         }
     }
 
@@ -325,7 +364,7 @@ mod tests {
     /// the whole heartbeat. This pins the wire key set to the list in
     /// `convex/devices.ts` (`statusValidator`).
     #[test]
-    fn the_status_key_set_is_exactly_the_servers_list() {
+    fn status_keys_match_server() {
         let expected: std::collections::BTreeSet<String> =
             STATUS_KEYS.iter().map(|k| (*k).to_string()).collect();
         assert_eq!(keys_of(&full_status()), expected);
@@ -346,6 +385,8 @@ mod tests {
             applied_version: None,
             shell_health: None,
             compat: serde_json::json!({}),
+            trusted_key_ids: None,
+            restart_pending: None,
         };
         let keys = keys_of(&sparse);
         assert_eq!(keys.into_iter().collect::<Vec<_>>(), ["agentVersion", "compat"]);

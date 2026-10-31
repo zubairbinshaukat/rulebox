@@ -13,7 +13,8 @@ use futures_util::future::BoxFuture;
 use futures_util::FutureExt;
 use rulebox_ipc::admin::{
     reasons, AdminEnroll, AdminEnrollParams, AdminEnrollResult, AdminStatus, AdminStatusExtra,
-    AdminStatusResult, AdminUnenroll, AdminUnenrollParams, OperationFailure,
+    AdminStatusResult, AdminTrustKey, AdminTrustKeyParams, AdminTrustKeyResult, AdminUnenroll,
+    AdminUnenrollParams, OperationFailure,
 };
 use rulebox_ipc::client::{call_once, CallError, ClientConfig};
 use rulebox_ipc::methods::{Empty, Method};
@@ -54,6 +55,11 @@ pub const EXIT_OPERATION_FAILED: u8 = 3;
 pub trait AdminHandler: Send + Sync + 'static {
     fn enroll(&self, params: AdminEnrollParams) -> BoxFuture<'static, Result<AdminEnrollResult, RpcError>>;
     fn unenroll(&self, params: AdminUnenrollParams) -> BoxFuture<'static, Result<(), RpcError>>;
+    /// (Phase 4 Step 9) `admin.trustKey`: adds a policy key to the trust store.
+    fn trust_key(&self, _params: AdminTrustKeyParams) -> BoxFuture<'static, Result<AdminTrustKeyResult, RpcError>> {
+        let failure = operation_failed(reasons::NOT_AVAILABLE_YET, "trust-key is not available here.", false, None);
+        std::future::ready(Err(failure)).boxed()
+    }
     /// Counters and states for `status` beyond the snapshot (Steps 6a and 6b).
     fn status_extra(&self) -> Option<AdminStatusExtra> {
         None
@@ -132,6 +138,10 @@ impl AdminHandler for WithStatusExtra {
 
     fn unenroll(&self, params: AdminUnenrollParams) -> BoxFuture<'static, Result<(), RpcError>> {
         self.inner.unenroll(params)
+    }
+
+    fn trust_key(&self, params: AdminTrustKeyParams) -> BoxFuture<'static, Result<AdminTrustKeyResult, RpcError>> {
+        self.inner.trust_key(params)
     }
 
     fn status_extra(&self) -> Option<AdminStatusExtra> {
@@ -278,6 +288,26 @@ impl Dispatcher for AdminDispatcher {
                         let _guard = guard;
                         work.await?;
                         serde_json::to_value(Empty {}).map_err(|_| internal())
+                    }
+                    .boxed(),
+                )
+            }
+            // (Phase 4 Step 9) The same elevated-administrator check as enroll (the
+            // verifier runs for every connection) and the same one-at-a-time lock.
+            AdminTrustKey::NAME => {
+                let params = match parse_params::<AdminTrustKeyParams>(params) {
+                    Ok(params) => params,
+                    Err(error) => return Some(std::future::ready(Err(error)).boxed()),
+                };
+                let Some(guard) = self.try_begin() else {
+                    return Some(std::future::ready(Err(busy())).boxed());
+                };
+                let work = self.handler.trust_key(params);
+                Some(
+                    async move {
+                        let _guard = guard;
+                        let result = work.await?;
+                        serde_json::to_value(result).map_err(|_| internal())
                     }
                     .boxed(),
                 )
@@ -472,6 +502,23 @@ pub fn run_unenroll(
     match call::<AdminUnenroll>(config, params, err) {
         Ok(Empty {}) => {
             let _ = writeln!(out, "This PC is no longer enrolled.");
+            0
+        }
+        Err(code) => code,
+    }
+}
+
+/// `rulebox-agent trust-key <base64>`. Returns the exit code.
+pub fn run_trust_key(
+    config: ClientConfig,
+    params: AdminTrustKeyParams,
+    out: &mut dyn Write,
+    err: &mut dyn Write,
+) -> u8 {
+    match call::<AdminTrustKey>(config, params, err) {
+        Ok(result) => {
+            let what = if result.added { "Now trusting" } else { "Already trusted:" };
+            let _ = writeln!(out, "{what} the policy key {}.", result.key_id);
             0
         }
         Err(code) => code,

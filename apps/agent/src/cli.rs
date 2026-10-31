@@ -63,6 +63,13 @@ pub enum Command {
         #[arg(long)]
         simulate: bool,
     },
+    /// (Phase 4) Trust another policy signing key (the "key lost" recovery):
+    /// standard base64 of the 32-byte Ed25519 public key. Prints its key id.
+    TrustKey {
+        public_key: String,
+        #[arg(long)]
+        simulate: bool,
+    },
     /// Offline recovery: undo the kiosk changes without the service.
     Recover {
         #[arg(long)]
@@ -183,6 +190,10 @@ mod tests {
         assert_eq!(
             parse(&["unenroll", "--remove-staff-account", "--simulate"]),
             Command::Unenroll { remove_staff_account: true, simulate: true }
+        );
+        assert_eq!(
+            parse(&["trust-key", "11qYAYKxCrfVS/7TyWQHOg7hcvPapiMlrwIaaPcHURo=", "--simulate"]),
+            Command::TrustKey { public_key: "11qYAYKxCrfVS/7TyWQHOg7hcvPapiMlrwIaaPcHURo=".into(), simulate: true }
         );
         assert_eq!(parse(&["recover"]), Command::Recover { yes: false });
         assert_eq!(parse(&["recover", "--yes"]), Command::Recover { yes: true });

@@ -96,6 +96,11 @@ impl DataPaths {
         self.state_dir().join("desired-state.json")
     }
 
+    /// (Phase 4 Step 9) The verified roster of the device's group (`roster.rs`).
+    pub fn roster(&self) -> PathBuf {
+        self.state_dir().join("roster.json")
+    }
+
     pub fn agent_config(&self) -> PathBuf {
         self.state_dir().join("agent-config.json")
     }

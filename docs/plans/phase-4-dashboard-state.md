@@ -3275,6 +3275,66 @@ devices ship):**
 12. `STATUS_KEYS` stays 14 keys, but the status now travels in
     `report`, not the ping (Step 13 switches the call).
 
+**Status (2026-11-01): built and tested on the dev machine (unit and
+`FakeBackend` tests only).** The simulate-mode "Verify" run against the dev
+deployment was NOT done (no key registered there, and agent runs were out of
+scope for this pass): the Owner runs it after Step 8's "Verify". Formats first:
+the endorsement message now carries `orgId` and the roster entry message
+`keyId` (Step 8 note 15; vectors regenerated before any Rust was written).
+As built / deviations:
+(1) **Head check: version and key id only, not the SHA-256.** The head has no
+payload hash: `desiredHeads.contentHash` is SHA-256 of `JSON.stringify(doc)`
+with version 0 (the publisher's de-duplication), which the agent could only
+check by re-serializing parsed JSON byte for byte like V8. The signature already
+binds every byte of the body, so `verify_for_head` checks `payload.version ==
+head.version` (`VersionMismatch`, as the negative vector
+`version_older_than_expected` requires) and `payload.keyId == head.keyId`
+(`HeadMismatch`). If the SHA-256 check is wanted, the head needs a
+`payloadSha256` field (server change). **Owner decision.**
+(2) `rulebox-policy`: `envelope.rs` as item 1 plus `verify_for_head(env,
+trusted, org, device, HeadRef)`, `verify_message`, `TrustedKey::{from_public_key,
+checked}` (a listed key id must be the id of its key), `endorsement_message(org,
+id, pub)`; `verify_endorsement` takes the org id. `VerifyError` also has
+`WrongGroup` (roster snapshot) and `HeadMismatch`; `reason()` gives the vector
+spelling. `roster.rs` as amendment 10. ed25519-dalek 3.0.0 (`verify_strict`,
+`is_weak`); every vector, positive and negative, is checked in Rust tests in the
+documented order.
+(3) Agent: `trust.rs` (`merge`/`update`, chain walk, retired dropped only after a
+document of another key, never the last key, re-run right after a document is
+accepted); `DesiredFetch::Ok { head, keys, retired_key_ids }`;
+`Backend::{fetch_desired, fetch_roster}` (one-shot queries, 30 s timeout).
+Fetch rules: only when `head.version` is above the applied/cached version (or
+equal with no document held); a lower head is a rollback and is never fetched;
+network error → retry 5 s doubling to 5 min; `not_found` → wait for the next
+head; a body that fails verification → `policy_rejected <reason>` log,
+`kioskError: desired_state_untrusted`, previous state kept, that version not
+fetched again until the head names another one.
+(4) Cache = `{ version, payload, signature, keyId }` (the envelope as received);
+re-verified at start in BOTH places that read it (`agent::run` for the first
+snapshot and policy, and the backend task). A Phase 2 file (`doc`, no
+`payload`) is ignored with an error log.
+(5) Status still goes through `devices:heartbeat` (amendment 12: Step 13
+switches to `report`); it now sends `trustedKeyIds` (sorted) and never
+`restartPending`. A kiosk error code still takes precedence over
+`desired_state_untrusted` in `kioskError` (existing rule).
+(6) `trust-key` / `admin.trustKey { publicKey }` → `{ keyId, added }`: enrolled
+PCs only (`not_enrolled` otherwise), new reason `key_invalid`, same one-at-a-time
+lock as enroll, restarts the backend task when a key was added. New reason
+`backend_not_ready` for the server code `not_ready`.
+(7) Roster: `<data>\state\roster.json` (schema 1); synced when the accepted
+document's `rosterGroupId` or the head's `rosterEpoch` differs from it; a gap or
+bad signature starts over from epoch 0 once (= the snapshot, or the whole log
+while there is none); a sync that cannot reach the epoch is not retried until
+the epoch changes. Nothing reads the roster until Step 13. Deleted on
+unenroll / re-enroll with the other organization data, like `trustedKeys`.
+(8) `relocate` → warning "relocation not supported yet"; `pingNonce` /
+`fastUntil` / `pingIntervalMs` / `planState` parsed, unused until Step 13. The
+agent no longer calls `devices:desiredState`.
+(9) New crates (lockfile): ed25519-dalek 3.0.0, ed25519, curve25519-dalek 5.0.0
+(+ derive), fiat-crypto, signature, subtle. `rulebox-policy` now depends on
+ed25519-dalek, base64, sha2, thiserror, so the Staff App compiles them too (not
+checked: no Tauri build in this pass).
+
 ---
 
 ### Step 10 — Apps, winget, web metadata, assignments, file types
