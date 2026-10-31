@@ -405,8 +405,8 @@ recounts and fixes drift, writing only when a counter differs.
   rewrite and re-read the whole document on every device of the group. It
   becomes a **signed per-group roster log**: `rosterEntries { orgId,
   groupId, epoch, employeeId, credentialRevision | removed, signature }`
-  (signed `rulebox.roster/1\n<orgId>\n<groupId>\n<epoch>\n<employeeId>\n<rev|removed>`
-  with the org signing key) and `groupRoster { groupId, epoch, snapshotEpoch }`.
+  (signed `rulebox.roster/1\n<keyId>\n<orgId>\n<groupId>\n<epoch>\n<employeeId>\n<rev|removed>`
+  with the org signing key; `keyId` added 2026-11-01, Phase 4 Step 9) and `groupRoster { groupId, epoch, snapshotEpoch }`.
   The head query reads `groupRoster.epoch`; the agent calls
   `devices:fetchRoster({ sinceEpoch })` (≤ 200 entries; above that, or when
   `sinceEpoch < snapshotEpoch`, it gets a signed full snapshot). Offline

@@ -583,7 +583,7 @@ fixed-size, and every hot row is read by exactly the readers named.
 | `desiredBodies` | grows (5 per device) | `orgId`, `deviceId`, `version`, `payload`, `signature`, `keyId`, `contentHash`, `createdAt` | `by_device_version [deviceId, version]` | A5, Step 8 (replaces `desiredStates`) |
 | `desiredVersions` | grows (5 per device) | `orgId`, `deviceId`, `version`, `reason`, `createdAt`, `bodyId` (≈ 150 B; device page history) | `by_device_version` | A5, Step 8 |
 | `groupRoster` | tiny (1 per group) | `orgId`, `groupId`, `epoch: number`, `snapshotEpoch: number`, `snapshotId: v.optional(id)` | `by_group` | A6, Step 8 (table), Step 11 (writes) |
-| `rosterEntries` | grows (pruned at each snapshot) | `orgId`, `groupId`, `epoch`, `employeeId`, `credentialRevision: v.optional(number)` (missing = removed), `signature` (org key over `rulebox.roster/1\n<orgId>\n<groupId>\n<epoch>\n<employeeId>\n<rev\|removed>`) | `by_group_epoch [groupId, epoch]` | A6, Steps 8, 11 |
+| `rosterEntries` | grows (pruned at each snapshot) | `orgId`, `groupId`, `epoch`, `employeeId`, `credentialRevision: v.optional(number)` (missing = removed), `keyId`, `signature` (org key over `rulebox.roster/1\n<keyId>\n<orgId>\n<groupId>\n<epoch>\n<employeeId>\n<rev\|removed>`; `keyId` added 2026-11-01, Step 9 part A) | `by_group_epoch [groupId, epoch]` | A6, Steps 8, 11 |
 
 Rules that come with these tables:
 
@@ -876,8 +876,9 @@ export const run = internalMutation({ args: { orgId: v.id("organizations") }, re
   1. Generate a second key as above and set it as `RULEBOX_POLICY_KEY_NEXT`.
   2. Settings → Signing → **Prepare rotation** (`keys:prepareRotation`):
      derives the next public key, signs the endorsement message
-     `rulebox.key-endorsement/1\n<nextKeyId>\n<nextPublicKeyBase64>`
-     with the active key, inserts `policyKeys { status: "next",
+     `rulebox.key-endorsement/1\n<orgId>\n<nextKeyId>\n<nextPublicKeyBase64>`
+     (`orgId` added 2026-11-01: an endorsement is valid for one
+     organization only) with the active key, inserts `policyKeys { status: "next",
      endorsement }`.
   3. The subscription result carries `keys: [{ keyId, publicKey,
      endorsement }]` for **every** `policyKeys` row, oldest first
@@ -2883,7 +2884,7 @@ org index range.
    export function loadSigningKey(which: "active" | "next"): { seed: Uint8Array; publicKey: Uint8Array; keyId: string } | null;
    export function signPayload(payload: string, seed: Uint8Array): string;    // base64 of ed.sign(utf8(payload), seed)
    export function verifyPayload(payload: string, signatureB64: string, publicKey: Uint8Array): boolean;
-   export function endorsementMessage(keyId: string, publicKeyB64: string): string; // "rulebox.key-endorsement/1\n<keyId>\n<pub>"
+   export function endorsementMessage(orgId: string, keyId: string, publicKeyB64: string): string; // "rulebox.key-endorsement/1\n<orgId>\n<keyId>\n<pub>" (orgId added 2026-11-01)
    ```
 
    Uses `@noble/ed25519` with `ed.hashes.sha512 = sha512` set once at
@@ -3102,6 +3103,19 @@ cross-checks every vector with Node's OpenSSL Ed25519 (`crypto.verify`), and
 generator. Not changed (needs an owner decision): the endorsement message has
 no orgId and the roster entry message no keyId, because both formats are
 documented in 4.2.1 / 4.5 / post-Phase-5 and in the vectors the agent reads.
+(15) **Formats hardened (2026-11-01, decided before Step 9's Rust code, nothing
+deployed yet).** The key endorsement message is now
+`rulebox.key-endorsement/1\n<orgId>\n<nextKeyId>\n<nextPublicKeyBase64>`: the
+organization id binds an endorsement to one organization, so an endorsement
+signed for one tenant cannot make another tenant's devices trust a key. The
+roster entry message is now
+`rulebox.roster/1\n<keyId>\n<orgId>\n<groupId>\n<epoch>\n<employeeId>\n<rev|removed>`:
+it names the key that signed it, like a document payload, so the agent can
+check the entry's stored `keyId` against the signed bytes. The format strings
+stay `/1` (no device or row ever used the old forms). `endorsementMessage`
+takes `orgId`; `signRosterEntry` puts `key.keyId` in the message. 4.2.1, 4.5,
+item 1 above and post-Phase-5 2.4 updated; vectors regenerated (only the
+endorsement and the roster entries changed).
 
 ---
 

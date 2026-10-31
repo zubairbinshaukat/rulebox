@@ -14,7 +14,9 @@ import { signWith, type SigningKey } from "./signing";
 // Until Step 11 nothing appends (every group's roster is empty, epoch 0).
 //
 // Signed messages (UTF-8, verified byte for byte by the agent, Step 9):
-//   entry:    "rulebox.roster/1\n<orgId>\n<groupId>\n<epoch>\n<employeeId>\n<rev|removed>"
+//   entry:    "rulebox.roster/1\n<keyId>\n<orgId>\n<groupId>\n<epoch>\n<employeeId>\n<rev|removed>"
+//             (keyId = the signing key's id, so an entry names the key it
+//             was signed with, like a document's payload; 2026-11-01)
 //   snapshot: the JSON payload of `buildSnapshotPayload` (format
 //             "rulebox.roster-snapshot/1"), signed like a desired document.
 
@@ -23,8 +25,9 @@ export const ROSTER_SNAPSHOT_FORMAT = "rulebox.roster-snapshot/1";
 
 export type RosterChange = { employeeId: string; credentialRevision: number | null };
 
-/** The exact message of one entry. `credentialRevision` null = removed. */
+/** The exact message of one entry. `credentialRevision` null = removed. `keyId` = the signing key's id. */
 export function rosterEntryMessage(e: {
+  keyId: string;
   orgId: string;
   groupId: string;
   epoch: number;
@@ -32,15 +35,15 @@ export function rosterEntryMessage(e: {
   credentialRevision: number | null;
 }): string {
   const rev = e.credentialRevision === null ? "removed" : String(e.credentialRevision);
-  return `${ROSTER_ENTRY_FORMAT}\n${e.orgId}\n${e.groupId}\n${e.epoch}\n${e.employeeId}\n${rev}`;
+  return `${ROSTER_ENTRY_FORMAT}\n${e.keyId}\n${e.orgId}\n${e.groupId}\n${e.epoch}\n${e.employeeId}\n${rev}`;
 }
 
-/** Signature (standard base64) of one entry with the organization's key. */
+/** Signature (standard base64) of one entry with the organization's key; the message names `key.keyId`. */
 export function signRosterEntry(
   e: { orgId: string; groupId: string; epoch: number; employeeId: string; credentialRevision: number | null },
   key: SigningKey,
 ): string {
-  return signWith(key, rosterEntryMessage(e));
+  return signWith(key, rosterEntryMessage({ ...e, keyId: key.keyId }));
 }
 
 /**

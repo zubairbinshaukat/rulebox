@@ -26,6 +26,8 @@ describe("policy vectors under OpenSSL Ed25519", () => {
     expect(valid(v.publicKey, v.payload, v.signature)).toBe(true);
     expect(valid(v.publicKey, v.unicode.payload, v.unicode.signature)).toBe(true);
     expect(valid(v.publicKey, v.endorsement.message, v.endorsement.signature)).toBe(true);
+    // The endorsement names the organization it is valid for.
+    expect(v.endorsement.message.split("\n")).toEqual(["rulebox.key-endorsement/1", v.orgId, v.endorsement.keyId, v.endorsement.publicKey]);
     // The unicode payload really is multi-byte UTF-8 with JSON escapes.
     expect(Buffer.byteLength(v.unicode.payload, "utf8")).toBeGreaterThan(v.unicode.payload.length);
     expect(v.unicode.payload).toContain("\\u0001");
@@ -35,7 +37,12 @@ describe("policy vectors under OpenSSL Ed25519", () => {
 
   test("roster-v1.json: entries and snapshot verify", () => {
     const v = read("roster-v1.json");
-    for (const e of v.entries) expect(valid(v.publicKey, e.message, e.signature), `epoch ${e.epoch}`).toBe(true);
+    for (const e of v.entries) {
+      expect(valid(v.publicKey, e.message, e.signature), `epoch ${e.epoch}`).toBe(true);
+      // The entry names the key that signed it.
+      const rev = e.credentialRevision === null ? "removed" : String(e.credentialRevision);
+      expect(e.message).toBe(["rulebox.roster/1", e.keyId, v.orgId, v.groupId, String(e.epoch), e.employeeId, rev].join("\n"));
+    }
     expect(valid(v.publicKey, v.snapshot.payload, v.snapshot.signature)).toBe(true);
   });
 

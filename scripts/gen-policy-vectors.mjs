@@ -115,7 +115,7 @@ const unicodePayload = desired.buildPayload({
 });
 const unicodeSignature = signing.signPayload(unicodePayload, key.seed);
 crossCheck("signed-v2 unicode document", key.publicKeyB64, unicodePayload, unicodeSignature, true);
-const endorsementMessage = signing.endorsementMessage(next.keyId, next.publicKeyB64);
+const endorsementMessage = signing.endorsementMessage(ids.orgId, next.keyId, next.publicKeyB64);
 const signedV2 = {
   note: NOTE,
   publicKey: key.publicKeyB64,
@@ -160,7 +160,7 @@ const entries = vectors.ROSTER_VECTOR_CHANGES.map((c) => {
     epoch,
     employeeId: c.employeeId,
     credentialRevision: c.credentialRevision,
-    message: roster.rosterEntryMessage(e),
+    message: roster.rosterEntryMessage({ ...e, keyId: key.keyId }),
     signature: roster.signRosterEntry(e, key),
     keyId: key.keyId,
   };

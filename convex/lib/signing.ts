@@ -145,7 +145,12 @@ export function verifyPayload(payload: string, signatureB64: string, publicKey: 
   }
 }
 
-/** What an active key signs to endorse the next key (plan 4.5 rotation step 2). */
-export function endorsementMessage(keyId: string, publicKeyB64: string): string {
-  return `${ENDORSEMENT_FORMAT}\n${keyId}\n${publicKeyB64}`;
+/**
+ * What an active key signs to endorse the next key (plan 4.5 rotation step 2):
+ * "rulebox.key-endorsement/1\n<orgId>\n<nextKeyId>\n<nextPublicKeyBase64>".
+ * The organization id binds the endorsement to one organization, so it cannot
+ * be replayed to the devices of another one (2026-11-01, Step 9 part A).
+ */
+export function endorsementMessage(orgId: string, keyId: string, publicKeyB64: string): string {
+  return `${ENDORSEMENT_FORMAT}\n${orgId}\n${keyId}\n${publicKeyB64}`;
 }

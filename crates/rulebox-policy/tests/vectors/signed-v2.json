@@ -13,8 +13,8 @@
     "keyId": "39f713d0a644253f",
     "publicKey": "PUAXw+hDiVqStwqnTRt+vJyYLM8uxJaMwM1V8Sr0Zgw=",
     "byKeyId": "21fe31dfa154a261",
-    "message": "rulebox.key-endorsement/1\n39f713d0a644253f\nPUAXw+hDiVqStwqnTRt+vJyYLM8uxJaMwM1V8Sr0Zgw=",
-    "signature": "gVG2u6zE0b25/J/KmPPy/FGgQQ2+z7TVdHGX1v600HZ3YLMuNQtEtqi21FrAU14HnITYJW0yFn4s9vPpDCAlDA=="
+    "message": "rulebox.key-endorsement/1\norg_test_vector_1\n39f713d0a644253f\nPUAXw+hDiVqStwqnTRt+vJyYLM8uxJaMwM1V8Sr0Zgw=",
+    "signature": "d7BI5UcLrWdgM6aUYLYmFxr+GqN/evJE5j6dgAlrxD3FHHpNfF7Ev1w+G4Qw7LvK2VL4NtMSWFs7YHsAuqGXCQ=="
   },
   "unicode": {
     "note": "Same key, organization and device as above. Strings in `payload` contain non-ASCII text and JSON escapes.",

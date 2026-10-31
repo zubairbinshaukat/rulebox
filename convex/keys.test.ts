@@ -161,8 +161,10 @@ describe("rotation (plan 4.5)", () => {
     expect(state.keys.map((k) => k.keyId)).toEqual([TEST_KEY.keyId, TEST_KEY_2.keyId]);
     const next = state.keys[1]!;
     expect(next.endorsement?.byKeyId).toBe(TEST_KEY.keyId);
-    expect(verifyPayload(endorsementMessage(next.keyId, next.publicKey), next.endorsement!.signature, TEST_KEY.publicKey)).toBe(true);
-    expect(verifyPayload(endorsementMessage(next.keyId, next.publicKey), next.endorsement!.signature, decodeKey32(next.publicKey)!)).toBe(false);
+    expect(verifyPayload(endorsementMessage(orgId, next.keyId, next.publicKey), next.endorsement!.signature, TEST_KEY.publicKey)).toBe(true);
+    expect(verifyPayload(endorsementMessage(orgId, next.keyId, next.publicKey), next.endorsement!.signature, decodeKey32(next.publicKey)!)).toBe(false);
+    // Bound to the organization: the same endorsement does not verify for another org id.
+    expect(verifyPayload(endorsementMessage(`${orgId}x`, next.keyId, next.publicKey), next.endorsement!.signature, TEST_KEY.publicKey)).toBe(false);
     expect((await enrollWithToken(t, orgId)).policyKeys.map((k) => k.keyId)).toEqual([TEST_KEY.keyId, TEST_KEY_2.keyId]);
 
     // Finish before the env swap: refused.

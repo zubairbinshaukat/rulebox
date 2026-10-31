@@ -206,7 +206,7 @@ export const registerActive = memberMutation("owner", { major: "keys:registerAct
 /**
  * Rotation step 2 (Owner, major): register `RULEBOX_POLICY_KEY_NEXT` as the
  * `next` key, endorsed by the active key (it signs
- * "rulebox.key-endorsement/1\n<nextKeyId>\n<nextPublicKey>"). Devices that
+ * "rulebox.key-endorsement/1\n<orgId>\n<nextKeyId>\n<nextPublicKey>"). Devices that
  * trust the active key learn the next one from their subscription. No
  * republish: documents stay signed by the active key until `finishRotation`.
  */
@@ -232,7 +232,7 @@ export const prepareRotation = memberMutation("owner", { major: "keys:prepareRot
       status: "next",
       endorsement: {
         byKeyId: signer.key.keyId,
-        signature: signWith(signer.key, endorsementMessage(next.keyId, next.publicKey)),
+        signature: signWith(signer.key, endorsementMessage(ctx.orgId, next.keyId, next.publicKey)),
       },
       createdAt: Date.now(),
     });

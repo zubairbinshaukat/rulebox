@@ -120,7 +120,8 @@ describe("signed-v2.json (shared with the agent, Step 9)", () => {
   test("the endorsement in the vector verifies with the active key", () => {
     const e = signed.endorsement;
     expect(e).toMatchObject({ keyId: TEST_KEY_2.keyId, publicKey: TEST_KEY_2.publicKeyB64, byKeyId: TEST_KEY.keyId });
-    expect(e.message).toBe(endorsementMessage(e.keyId, e.publicKey));
+    expect(e.message).toBe(endorsementMessage(signed.orgId, e.keyId, e.publicKey));
+    expect(e.message.split("\n")).toEqual(["rulebox.key-endorsement/1", signed.orgId, e.keyId, e.publicKey]);
     expect(verifyPayload(e.message, e.signature, TEST_KEY.publicKey)).toBe(true);
   });
 });
@@ -191,7 +192,8 @@ describe("roster-v1.json (A6)", () => {
     expect(rosterVector.entries.map((e) => e.credentialRevision)).toEqual([3, 1, null]);
     rosterVector.entries.forEach((e, i) => {
       const entry = { orgId: rosterVector.orgId, groupId: rosterVector.groupId, epoch: i + 1, employeeId: e.employeeId, credentialRevision: e.credentialRevision };
-      expect(e.message).toBe(rosterEntryMessage(entry));
+      expect(e.message).toBe(rosterEntryMessage({ ...entry, keyId: TEST_KEY.keyId }));
+      expect(e.message.startsWith(`rulebox.roster/1\n${TEST_KEY.keyId}\n${rosterVector.orgId}\n`)).toBe(true);
       expect(e.signature).toBe(signRosterEntry(entry, TEST_KEY));
       expect(verifyPayload(e.message, e.signature, TEST_KEY.publicKey)).toBe(true);
     });

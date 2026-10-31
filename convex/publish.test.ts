@@ -534,7 +534,7 @@ describe("devices:headState / fetchDesired / fetchRoster", () => {
     expect(delta.epoch).toBe(1);
     const e = delta.entries[0]!;
     expect(e).toMatchObject({ epoch: 1, employeeId: emp, credentialRevision: 1, keyId: TEST_KEY.keyId });
-    const message = rosterEntryMessage({ orgId, groupId, epoch: 1, employeeId: emp, credentialRevision: 1 });
+    const message = rosterEntryMessage({ keyId: TEST_KEY.keyId, orgId, groupId, epoch: 1, employeeId: emp, credentialRevision: 1 });
     expect(verifyPayload(message, e.signature, TEST_KEY.publicKey)).toBe(true);
     expect(verifyPayload(message.replace(/\n1$/, "\n2"), e.signature, TEST_KEY.publicKey)).toBe(false);
 

@@ -89,11 +89,13 @@ describe("primitives", () => {
   });
 
   test("endorsement message format; it verifies with the endorsing key only", () => {
-    const msg = endorsementMessage(TEST_KEY_2.keyId, TEST_KEY_2.publicKeyB64);
-    expect(msg).toBe(`rulebox.key-endorsement/1\n${TEST_KEY_2.keyId}\n${TEST_KEY_2.publicKeyB64}`);
+    const msg = endorsementMessage("org_1", TEST_KEY_2.keyId, TEST_KEY_2.publicKeyB64);
+    expect(msg).toBe(`rulebox.key-endorsement/1\norg_1\n${TEST_KEY_2.keyId}\n${TEST_KEY_2.publicKeyB64}`);
     const sig = signPayload(msg, TEST_KEY.seed);
     expect(verifyPayload(msg, sig, TEST_KEY.publicKey)).toBe(true);
     expect(verifyPayload(msg, sig, TEST_KEY_2.publicKey)).toBe(false);
+    // Bound to one organization: the same signature is no endorsement for another.
+    expect(verifyPayload(endorsementMessage("org_2", TEST_KEY_2.keyId, TEST_KEY_2.publicKeyB64), sig, TEST_KEY.publicKey)).toBe(false);
   });
 });
 
