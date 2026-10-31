@@ -142,6 +142,7 @@ export default defineConfig(({ mode, command }) => {
       "@rulebox/data-impl": fileURLToPath(new URL(demo ? "./src/data/demo/hooks.ts" : "./src/data/live/hooks.ts", import.meta.url)),
       "@rulebox/stepup-impl": fileURLToPath(new URL(demo ? "./src/data/stepup/demo.ts" : "./src/data/stepup/live.ts", import.meta.url)),
       "@rulebox/enrollment-impl": fileURLToPath(new URL(demo ? "./src/data/enrollment/demo.ts" : "./src/data/enrollment/live.ts", import.meta.url)),
+      "@rulebox/devices-impl": fileURLToPath(new URL(demo ? "./src/data/devices/demo.ts" : "./src/data/devices/live.ts", import.meta.url)),
     },
   },
   server: { port: 5173, strictPort: true },
@@ -166,9 +167,9 @@ export default defineConfig(({ mode, command }) => {
             // a dozen tiny ones: fewer requests on the first load, nearly all needed anyway.
             // (Scripts only: the stylesheets stay one file, in their import order.)
             // `lib/stepup/` and `data/stepup/` stay out: step-up code is loaded only
-            // by the signed-in shell and the Security tab, never by sign-in. So does
-            // `data/enrollment/` (only the Enrollment screen).
-            { name: "core", test: /([\\/]apps[\\/]dashboard[\\/]src[\\/](lib|data)|[\\/]packages[\\/]ui[\\/]src)[\\/](?!(stepup|enrollment)[\\/]).*\.tsx?$/ },
+            // by the signed-in shell and the Security tab, never by sign-in. So do
+            // `data/enrollment/` (only the Enrollment screen) and `data/devices/`
+            { name: "core", test: /([\\/]apps[\\/]dashboard[\\/]src[\\/](lib|data)|[\\/]packages[\\/]ui[\\/]src)[\\/](?!(stepup|enrollment|devices)[\\/]).*\.tsx?$/ },
           ],
         },
       },

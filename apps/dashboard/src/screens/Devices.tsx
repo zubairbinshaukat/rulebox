@@ -1,28 +1,37 @@
-import { useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { Link, useSearchParams } from "react-router";
-import { Pill, Select } from "@rulebox/ui";
+import { Button, Pill, Select } from "@rulebox/ui";
 import IconMonitor from "~icons/solar/monitor-linear";
 import IconAdd from "~icons/solar/add-square-linear";
-import { useDevicesScreen, useGroupsScreen, useLiveStatus } from "../data";
-import type { DeviceRow, LiveStatus } from "../data/types";
+import IconRefresh from "~icons/solar/refresh-linear";
+import { useCheckNow, useCheckResult, useGroupsScreen } from "../data";
+import { useDevicesScreen } from "../data/devices";
+import type { DeviceRow } from "../data/types";
 import { Card } from "../components/Card";
 import { DataTable, type Column } from "../components/DataTable";
 import { EmptyState } from "../components/EmptyState";
 import { LoadMore } from "../components/LoadMore";
 import { InlineNotice } from "../components/Notice";
 import { PageHeader } from "../components/PageHeader";
-import { PagedRegion } from "../components/Region";
+import { PagedRegion, RegionBoundary } from "../components/Region";
 import { RoleGate } from "../components/RoleGate";
 import { SearchInput } from "../components/SearchInput";
 import { SkeletonRows } from "../components/Skeleton";
 import { DeviceOnline, KioskCell, PolicyCell } from "../components/DeviceCells";
+import { messageFor } from "../lib/errors";
+import { useCan } from "../lib/member";
 import { strings } from "../lib/strings";
+import { useToast } from "../lib/toast";
 import { useDebounced } from "../lib/useDebounced";
 import { useNow } from "../lib/useNow";
 
 const s = strings.devices;
 
-function columns(live: Map<string, number>, pingIntervalMs: number | undefined, now: number): Column<DeviceRow>[] {
+/** `MAX_CHECK_DEVICES` of convex/lib/limits.ts, and how long the result stays subscribed. */
+const MAX_CHECK_DEVICES = 50;
+const CHECK_WATCH_MS = 60_000;
+
+function columns(now: number): Column<DeviceRow>[] {
   return [
     {
       key: "name",
@@ -48,7 +57,7 @@ function columns(live: Map<string, number>, pingIntervalMs: number | undefined, 
     {
       key: "status",
       header: s.colStatus,
-      cell: (d) => <DeviceOnline lastSeenAt={live.get(d._id)} pingIntervalMs={pingIntervalMs} now={now} />,
+      cell: (d) => <DeviceOnline presence={d.presence} now={now} />,
     },
     {
       key: "windows",
@@ -77,20 +86,57 @@ function columns(live: Map<string, number>, pingIntervalMs: number | undefined, 
     },
   ];
 }
-/** `fleet:list` (+ `fleet:liveStatus` for the loaded ids, `fleet:search` while searching). */
+/** Asks the visible PCs (at most 50) to call in; `fleet:checkNow` allows one request a minute per organization. */
+function CheckNowButton({ ids, onStarted }: { ids: string[]; onStarted: (checkId: string) => void }) {
+  const checkNow = useCheckNow();
+  const toast = useToast();
+  const [pending, setPending] = useState(false);
+  return (
+    <Button
+      variant="ghost"
+      disabled={pending || ids.length === 0}
+      aria-busy={pending}
+      onClick={() => {
+        setPending(true);
+        checkNow({ deviceIds: ids.slice(0, MAX_CHECK_DEVICES) }).then(
+          ({ checkId }) => {
+            setPending(false);
+            onStarted(checkId);
+          },
+          (e) => {
+            setPending(false);
+            toast(messageFor(e), "danger");
+          },
+        );
+      }}
+    >
+      <IconRefresh aria-hidden="true" />
+      {s.checkNow}
+    </Button>
+  );
+}
+
+/** Subscribes to `fleet:checkResult` for 60 s, then lets go (plan 4.9). */
+function CheckResultNotice({ checkId, onEnd }: { checkId: string; onEnd: () => void }) {
+  const result = useCheckResult(checkId);
+  useEffect(() => {
+    const t = setTimeout(onEnd, CHECK_WATCH_MS);
+    return () => clearTimeout(t);
+  }, [onEnd]);
+  if (result.status === "error") return <InlineNotice tone="danger" title={messageFor(result.error)} />;
+  if (result.status === "loading") return <InlineNotice tone="neutral" title={s.checking} />;
+  const answered = result.data.items.filter((i) => i.answered).length;
+  const total = result.data.items.length;
+  return <InlineNotice tone={answered === total ? "success" : "neutral"} title={s.checkResult(answered, total)} />;
+}
+
+/** `fleet:list` (search and group filter are its arguments); admins can "Check now" the visible PCs. */
 export default function Devices() {
   const [params, setParams] = useSearchParams();
   const groupId = params.get("group") ?? "";
   const [search, setSearch] = useState("");
   const debounced = useDebounced(search.trim(), 250);
   const groups = useGroupsScreen();
-  const devices = useDevicesScreen({ groupId: groupId || undefined, search: debounced || undefined });
-  const ids = useMemo(() => (devices.status === "ready" ? devices.items.map((d) => d._id).slice(0, 100) : []), [devices]);
-  const liveStatus: LiveStatus | undefined = useLiveStatus(ids);
-  const now = useNow(30_000);
-  const live = useMemo(() => new Map(liveStatus?.items.map((i) => [i.deviceId, i.lastSeenAt]) ?? []), [liveStatus]);
-  const cols = useMemo(() => columns(live, liveStatus?.pingIntervalMs, now), [live, liveStatus?.pingIntervalMs, now]);
-  const filtered = Boolean(groupId || debounced);
 
   return (
     <div className="dash-page">
@@ -123,10 +169,34 @@ export default function Devices() {
           }}
         >
           <option value="">{s.allGroups}</option>
-          <option value="none">{s.noGroup}</option>
           {groups.status === "ready" ? groups.data.map((g) => <option key={g._id} value={g._id}>{g.name}</option>) : null}
         </Select>
       </div>
+      {/* The paginated query throws its errors while rendering: the list gets its own boundary. */}
+      <RegionBoundary>
+        <DeviceList groupId={groupId || undefined} search={debounced || undefined} />
+      </RegionBoundary>
+    </div>
+  );
+}
+
+function DeviceList({ groupId, search }: { groupId?: string; search?: string }) {
+  const devices = useDevicesScreen({ groupId, search });
+  const now = useNow(30_000);
+  const cols = useMemo(() => columns(now), [now]);
+  const filtered = Boolean(groupId || search);
+  const [checkId, setCheckId] = useState<string | null>(null);
+  const endCheck = useCallback(() => setCheckId(null), []);
+  const canCheck = useCan("admin");
+
+  return (
+    <>
+      {canCheck && devices.status === "ready" && devices.items.length > 0 ? (
+        <div className="dash-row" style={{ justifyContent: "flex-end" }}>
+          <CheckNowButton ids={devices.items.filter((d) => !d.revoked).map((d) => d._id)} onStarted={setCheckId} />
+        </div>
+      ) : null}
+      {checkId ? <CheckResultNotice key={checkId} checkId={checkId} onEnd={endCheck} /> : null}
       <Card body="none">
         <PagedRegion state={devices} skeleton={<SkeletonRows rows={8} columns={5} />}>
           {(d) =>
@@ -149,11 +219,6 @@ export default function Devices() {
               )
             ) : (
               <>
-                {"searchCapped" in devices && devices.searchCapped ? (
-                  <div style={{ padding: 12 }}>
-                    <InlineNotice tone="neutral" title={s.searchCap} />
-                  </div>
-                ) : null}
                 <DataTable caption={s.title} columns={cols} rows={d.items} getKey={(r) => r._id} isDim={(r) => r.revoked} />
                 <LoadMore shown={d.items.length} canLoadMore={d.canLoadMore} isLoadingMore={d.isLoadingMore} loadMore={d.loadMore} />
               </>
@@ -161,6 +226,6 @@ export default function Devices() {
           }
         </PagedRegion>
       </Card>
-    </div>
+    </>
   );
 }

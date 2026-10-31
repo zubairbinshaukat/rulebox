@@ -1,28 +1,31 @@
 import { Pill } from "@rulebox/ui";
-import type { DeviceRow } from "../data/types";
+import type { DevicePresence, DeviceRow } from "../data/types";
 import { formatDateTimeLong, formatRelative } from "../lib/format";
-import { isOnline } from "../lib/online";
 import { strings } from "../lib/strings";
 import { StatusDot } from "./StatusDot";
 
 const s = strings.devices;
 
-/** Online / offline from `fleet:liveStatus` (Section 4.9), with "last seen" that ticks. */
-export function DeviceOnline({ lastSeenAt, pingIntervalMs, now }: { lastSeenAt?: number; pingIntervalMs?: number; now: number }) {
-  if (lastSeenAt === undefined || pingIntervalMs === undefined) {
-    return <StatusDot tone="neutral" label={strings.common.offline} sub={strings.common.neverSeen} />;
+/**
+ * Online / offline from `devicePresence` (Section 4.9: a transition, never a
+ * timestamp the list has to keep fresh). Offline says since when; a PC never
+ * seen since Step 7 (`since` null) says so.
+ */
+export function DeviceOnline({ presence, now }: { presence: DevicePresence; now: number }) {
+  const { online, since } = presence;
+  if (online) {
+    return <StatusDot tone="success" label={strings.common.online} title={since === null ? undefined : formatDateTimeLong(since)} />;
   }
-  const online = isOnline(lastSeenAt, pingIntervalMs, now);
+  if (since === null) return <StatusDot tone="neutral" label={strings.common.offline} sub={strings.common.neverSeen} />;
   return (
     <StatusDot
-      tone={online ? "success" : "neutral"}
-      label={online ? strings.common.online : strings.common.offline}
-      sub={formatRelative(lastSeenAt, now)}
-      title={`${strings.common.lastSeen(formatRelative(lastSeenAt, now))} · ${formatDateTimeLong(lastSeenAt)}`}
+      tone="neutral"
+      label={strings.common.offline}
+      sub={strings.common.since(formatRelative(since, now))}
+      title={formatDateTimeLong(since)}
     />
   );
 }
-
 export function KioskCell({ row }: { row: Pick<DeviceRow, "kioskEnabled" | "revoked" | "report"> }) {
   if (row.revoked) return <Pill tone="danger">{s.revoked}</Pill>;
   if (!row.kioskEnabled) return <Pill tone="warning">{s.kioskOff}</Pill>;

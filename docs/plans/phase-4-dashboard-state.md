@@ -244,6 +244,32 @@ a primary source; the plan says how each one gets confirmed.
   `lib/lifecycle.ts` were recorded from memory (unverified). (10) Public
   wrappers now also pass the I/O probe; the probe is in `lib/orgDb.ts`
   (`ioProbe`).
+- **2026-11-01, Step 7 dashboard built** (Devices, DeviceDetail, the live hooks;
+  not yet run against a Convex deployment: checked by tests and the demo build).
+  Deviations and notes: (1) The data layer follows A3/A8, not the pre-amendment
+  types: `useLiveStatus` and `LiveStatus` are gone, `DeviceRow` / `DeviceDetail`
+  carry `presence { online, since }` (the list says "Online" or "Offline since
+  ..."), new hooks `useDeviceLiveness`, `useWatchDevice`, `useCheckNow`,
+  `useCheckResult`; `fleet:get` is mapped in `data/live/devices.ts` (summary ->
+  list columns, `outOfSupport` from the summary, free-text phases and `compat`
+  checked before use). (2) The two paginated hooks (`useDevicesScreen`,
+  `useDeviceInstalls`) moved out of `DataApi` into their own seam
+  `data/devices/` (alias `@rulebox/devices-impl`), like enrollment, so
+  `usePaginatedQuery` stays out of the first load; `GroupDetail` imports it from
+  there. (3) Search is `fleet:list`'s own argument (plan item 5 said
+  `fleet:search`), so the list has no "first 50 matches" cap. (4) **No "No group"
+  filter option:** `fleet:list` cannot list devices without a group
+  (`by_group` has no `orgId` in front; "none" is not an id). Needs an index
+  `by_org_group [orgId, groupId]` and a `groupId: "none"` branch; left out. (5)
+  `useSetKiosk` now takes `expectedRevision` (the server requires it) and is no
+  longer optimistic (turning it off opens the fresh step-up dialog); the detail
+  screen sends the live `revision` for move and kiosk (a rename also bumps it).
+  (6) "Check now" (admin, visible non-revoked PCs, at most 50) and the 60 s
+  result notice are on the list; watch mode (`fleet:watch` on open and every 4
+  minutes while visible) and "Last contact" (`fleet:liveness`) on the detail.
+  (7) Not done: the "Over plan limit" badge (`fleet:list` does not return
+  `planState`), `useDeviceInstalls` (stays `not_ready` until Step 17), versions
+  and the policy column (null until Step 8). (8) `narrowDevices` has NOT run.
 
 ---
 

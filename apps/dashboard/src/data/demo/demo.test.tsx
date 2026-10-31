@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { act, renderHook, waitFor } from "@testing-library/react";
-import { demoApi } from "./hooks";
+import { demoApi, demoDevicesApi } from "./hooks";
 import { db, resetDemo, setControls, setSession, simulateConcurrentEdit } from "./store";
 import { errorCodeOf } from "../../lib/errors";
 
@@ -107,5 +107,85 @@ describe("demo data layer", () => {
     const r = result.current;
     if (r.status !== "ready") throw new Error();
     expect(r.data.find((g) => g.name === "Front desk")!.deviceCount).toBe(501);
+  });
+});
+
+describe("demo devices (plan Step 7)", () => {
+  it("rows and the detail carry the presence transition: online PCs, offline since, revoked", async () => {
+    resetDemo();
+    signInAs("owner@demo.rulebox.test");
+    const list = renderHook(() => demoDevicesApi.useDevicesScreen({}));
+    await waitFor(() => expect(list.result.current.status).toBe("ready"), { timeout: 3000 });
+    const r = list.result.current;
+    if (r.status !== "ready") throw new Error();
+    const online = r.items.find((d) => d.presence.online)!;
+    expect(online.revoked).toBe(false);
+    const revoked = r.items.find((d) => d.revoked)!;
+    expect(revoked.presence.online).toBe(false);
+    const detail = renderHook(() => demoApi.useDeviceDetail(online._id));
+    await waitFor(() => expect(detail.result.current.status).toBe("ready"), { timeout: 3000 });
+    const d = detail.result.current;
+    expect(d.status === "ready" && d.data.presence.online).toBe(true);
+  });
+
+  it("search is the list's own argument", async () => {
+    resetDemo();
+    signInAs("owner@demo.rulebox.test");
+    const name = db().devices[0]!.name;
+    const list = renderHook(() => demoDevicesApi.useDevicesScreen({ search: name.slice(0, 5) }));
+    await waitFor(() => expect(list.result.current.status).toBe("ready"), { timeout: 3000 });
+    const r = list.result.current;
+    expect(r.status === "ready" && r.items.some((d) => d.name === name)).toBe(true);
+    expect(r.status === "ready" && r.items.every((d) => d.name.toLowerCase().includes(name.slice(0, 5).toLowerCase()))).toBe(true);
+  });
+
+  it("kiosk, move and rename check the revision; remove needs a revoked PC (conflict)", async () => {
+    resetDemo();
+    signInAs("owner@demo.rulebox.test");
+    const d = db().devices.find((x) => !x.revoked && x.groupId)!;
+    const kiosk = renderHook(() => demoApi.useSetKiosk()).result.current;
+    expect(await kiosk({ deviceId: d._id, expectedRevision: d.revision + 1, enabled: false }).catch((e) => e)).toMatchObject({ code: "stale_edit" });
+    const before = d.revision;
+    await kiosk({ deviceId: d._id, expectedRevision: before, enabled: false });
+    expect(d.kioskEnabled).toBe(false);
+    expect(d.revision).toBe(before + 1);
+    const remove = renderHook(() => demoApi.useRemoveDevice()).result.current;
+    expect(await remove({ deviceId: d._id }).catch((e) => e)).toMatchObject({ code: "conflict" });
+    await renderHook(() => demoApi.useRevokeDevice()).result.current({ deviceId: d._id });
+    await remove({ deviceId: d._id });
+    expect(db().devices.some((x) => x._id === d._id)).toBe(false);
+  });
+
+  it("check now: admins only, up to 50 PCs, one a minute; online PCs answer", async () => {
+    resetDemo();
+    signInAs("auditor.with.a.really.long.mailbox.name@regional-compliance-office.demo.rulebox.test");
+    const viewerCheck = renderHook(() => demoApi.useCheckNow()).result.current;
+    expect(await viewerCheck({ deviceIds: [db().devices[0]!._id] }).catch((e) => e)).toMatchObject({ code: "forbidden" });
+
+    signInAs("owner@demo.rulebox.test");
+    const check = renderHook(() => demoApi.useCheckNow()).result.current;
+    expect(await check({ deviceIds: [] }).catch((e) => e)).toMatchObject({ code: "invalid_argument", field: "deviceIds" });
+    expect(await check({ deviceIds: db().devices.slice(0, 51).map((x) => x._id) }).catch((e) => e)).toMatchObject({ code: "invalid_argument" });
+    const online = [...db().onlineIds][0]!;
+    const off = db().devices.find((x) => !db().onlineIds.has(x._id))!;
+    const { checkId } = await check({ deviceIds: [online, off._id] });
+    expect(await check({ deviceIds: [online] }).catch((e) => e)).toMatchObject({ code: "rate_limited" });
+    const result = renderHook(() => demoApi.useCheckResult(checkId));
+    await waitFor(() => expect(result.result.current.status).toBe("ready"), { timeout: 3000 });
+    const r = result.result.current;
+    expect(r.status === "ready" && r.data.items).toEqual([
+      { deviceId: online, answered: true },
+      { deviceId: off._id, answered: false },
+    ]);
+  });
+
+  it("watch mode extends only by two minutes or more", async () => {
+    resetDemo();
+    signInAs("owner@demo.rulebox.test");
+    const id = [...db().onlineIds][0]!;
+    const watch = renderHook(() => demoApi.useWatchDevice()).result.current;
+    const first = await watch({ deviceId: id });
+    expect(first.fastUntil).toBeGreaterThan(Date.now());
+    await expect(watch({ deviceId: id })).resolves.toEqual(first);
   });
 });

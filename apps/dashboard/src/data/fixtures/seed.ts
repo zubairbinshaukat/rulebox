@@ -204,6 +204,11 @@ export interface DemoDb {
   lastSeen: Map<string, number>;
   /** Devices the heartbeat simulation keeps fresh. */
   onlineIds: Set<string>;
+  /** `deviceLiveness.fastUntil` of the PCs a detail page watches. */
+  watching: Map<string, number>;
+  /** `fleetChecks` ("Check now"), and when the last one ran (1 per minute). */
+  checks: Map<string, { requestedAt: number; deviceIds: string[] }>;
+  lastCheckAt?: number;
   versions: Map<string, { version: number; createdAt: number; reason: string }[]>;
   employees: DbEmployee[];
   lockouts: Map<string, { failures: number; lockedUntil: number }>;
@@ -846,6 +851,8 @@ export function seed(now: number = Date.now()): DemoDb {
     reports,
     lastSeen,
     onlineIds,
+    watching: new Map(),
+    checks: new Map(),
     versions,
     employees,
     lockouts,

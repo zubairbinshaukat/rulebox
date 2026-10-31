@@ -1,11 +1,10 @@
-import { useState, type ReactNode } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import { Link, useNavigate, useParams } from "react-router";
 import { Button, Input, Pill, Select, Switch } from "@rulebox/ui";
 import IconPen from "~icons/solar/pen-linear";
 import {
   useDeviceDetail,
-  useDeviceInstalls,
-  useLiveStatus,
+  useDeviceLiveness,
   useMoveDevice,
   useRemoveDevice,
   useRenameDevice,
@@ -13,7 +12,9 @@ import {
   useRetryApp,
   useRevokeDevice,
   useSetKiosk,
+  useWatchDevice,
 } from "../data";
+import { useDeviceInstalls } from "../data/devices";
 import type { DeviceDetail as Detail, DeviceInstallRow } from "../data/types";
 import { Card } from "../components/Card";
 import { ConfirmDialog } from "../components/ConfirmDialog";
@@ -29,7 +30,7 @@ import { LoadMore } from "../components/LoadMore";
 import { Modal } from "../components/Modal";
 import { InlineNotice } from "../components/Notice";
 import { PageHeader } from "../components/PageHeader";
-import { PagedRegion, QueryRegion } from "../components/Region";
+import { PagedRegion, QueryRegion, RegionBoundary } from "../components/Region";
 import { RelativeTime } from "../components/RelativeTime";
 import { RoleGate } from "../components/RoleGate";
 import { useCan } from "../lib/member";
@@ -42,6 +43,34 @@ import { useNow } from "../lib/useNow";
 import * as v from "../lib/validate";
 
 const s = strings.device;
+
+/** The page renews watch mode (`fleet:watch`, 5 minutes) a little before it runs out. */
+const WATCH_RENEW_MS = 4 * 60_000;
+
+/** Asks for fast pings while this page is visible (plan 4.9). Errors (rate limit, plan) just leave the normal interval. */
+function useWatch(deviceId: string, enabled: boolean) {
+  const watch = useWatchDevice();
+  useEffect(() => {
+    if (!enabled) return;
+    const tick = () => {
+      if (document.visibilityState === "visible") watch({ deviceId }).catch(() => undefined);
+    };
+    tick();
+    const timer = setInterval(tick, WATCH_RENEW_MS);
+    document.addEventListener("visibilitychange", tick);
+    return () => {
+      clearInterval(timer);
+      document.removeEventListener("visibilitychange", tick);
+    };
+  }, [watch, deviceId, enabled]);
+}
+
+/** "Last contact 20 s ago" from the one `fleet:liveness` row; the minute bucket is shown as it is. */
+function LastContact({ deviceId }: { deviceId: string }) {
+  const liveness = useDeviceLiveness(deviceId);
+  const at = liveness.status === "ready" ? liveness.data.lastContactAt : null;
+  return <KV label={s.lastContact} value={at === null ? <span className="dash-muted">{strings.common.neverSeen}</span> : <RelativeTime ms={at} />} />;
+}
 
 export default function DeviceDetail() {
   const { id = "" } = useParams();
@@ -65,9 +94,8 @@ export default function DeviceDetail() {
 }
 
 function Device({ d }: { d: Detail }) {
-  const live = useLiveStatus([d._id]);
   const now = useNow(30_000);
-  const lastSeen = live?.items[0]?.lastSeenAt;
+  useWatch(d._id, !d.revoked);
   const r = d.report;
   const latest = d.versions[0]?.version;
   const waiting = latest !== undefined && r?.appliedVersion !== latest;
@@ -80,7 +108,7 @@ function Device({ d }: { d: Detail }) {
         title={<span className="dash-wrap">{d.name}</span>}
         meta={
           <>
-            <DeviceOnline lastSeenAt={lastSeen} pingIntervalMs={live?.pingIntervalMs} now={now} />
+            <DeviceOnline presence={d.presence} now={now} />
             <KioskCell row={d} />
             {r?.outOfSupport ? <Pill tone="danger">{strings.devices.outOfSupport}</Pill> : null}
           </>
@@ -108,6 +136,7 @@ function Device({ d }: { d: Detail }) {
           <Card title={s.status}>
             {r ? (
               <dl className="dash-kv">
+                <LastContact deviceId={d._id} />
                 <KV label={s.lastReport} value={<RelativeTime ms={r.updatedAt} />} />
                 <KV label={s.agentVersion} value={<span className="dash-mono">{r.agentVersion ?? "—"}</span>} />
                 <KV label={s.windows} value={r.os ? `${r.os} ${r.osBuild ?? ""}` : "—"} />
@@ -123,7 +152,9 @@ function Device({ d }: { d: Detail }) {
             )}
           </Card>
 
-          <Installs deviceId={d._id} />
+          <RegionBoundary>
+            <Installs deviceId={d._id} />
+          </RegionBoundary>
 
           <Card title={s.policy}>
             <div className="dash-form">
@@ -272,7 +303,7 @@ function Settings({ d }: { d: Detail }) {
   const move = useMoveDevice();
   const toast = useToast();
   const [groupId, setGroupId] = useState(d.group?._id ?? "");
-  const [base, setBase] = useState({ groupId: d.group?._id ?? "", revision: d.revision });
+  const [base, setBase] = useState({ groupId: d.group?._id ?? "" });
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<unknown>(null);
   const changed = groupId !== base.groupId && groupId !== "";
@@ -292,7 +323,7 @@ function Settings({ d }: { d: Detail }) {
               checked={d.kioskEnabled}
               label={d.kioskEnabled ? s.kioskOn : s.kioskOffLabel}
               onChange={(enabled) =>
-                setKiosk({ deviceId: d._id, enabled }).catch((e) => toast(messageFor(e), "danger"))
+                setKiosk({ deviceId: d._id, expectedRevision: d.revision, enabled }).catch((e) => toast(messageFor(e), "danger"))
               }
             />
           ) : (
@@ -309,10 +340,10 @@ function Settings({ d }: { d: Detail }) {
               if (!changed || pending) return;
               setPending(true);
               setError(null);
-              move({ deviceId: d._id, expectedRevision: base.revision, groupId }).then(
+              move({ deviceId: d._id, expectedRevision: d.revision, groupId }).then(
                 () => {
                   setPending(false);
-                  setBase({ groupId, revision: base.revision + 1 });
+                  setBase({ groupId });
                   toast(strings.common.saved);
                 },
                 (err) => {
@@ -339,7 +370,7 @@ function Settings({ d }: { d: Detail }) {
               onReload={() => {
                 setError(null);
                 setGroupId(d.group?._id ?? "");
-                setBase({ groupId: d.group?._id ?? "", revision: d.revision });
+                setBase({ groupId: d.group?._id ?? "" });
               }}
             />
             {changed ? (

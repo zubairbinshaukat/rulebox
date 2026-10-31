@@ -362,7 +362,17 @@ export interface DeviceReport {
   updatedAt: number;
 }
 
-/** `fleet:list` / `fleet:search` row. Not `deviceStatus` (rule 4). */
+/**
+ * Online or offline as `devicePresence` stores it (plan 4.9, written only on a
+ * transition). `since` = start of the current state; null for a PC not seen
+ * since Step 7.
+ */
+export interface DevicePresence {
+  online: boolean;
+  since: number | null;
+}
+
+/** `fleet:list` row: `devices` + `deviceSummary` + `devicePresence`. Never `deviceLiveness` (rule 4). */
 export interface DeviceRow {
   _id: Id;
   name: string;
@@ -371,6 +381,8 @@ export interface DeviceRow {
   revoked: boolean;
   kioskEnabled: boolean;
   enrolledAt: number;
+  presence: DevicePresence;
+  /** The summary (list columns only); null until the PC's first report. */
   report: Pick<
     DeviceReport,
     "agentVersion" | "osBuild" | "osEdition" | "kioskPhase" | "kioskError" | "appliedVersion" | "outOfSupport"
@@ -378,10 +390,18 @@ export interface DeviceRow {
   latestVersion?: number;
 }
 
-/** `fleet:liveStatus` */
-export interface LiveStatus {
-  pingIntervalMs: number;
-  items: { deviceId: Id; lastSeenAt: number }[];
+/** `fleet:liveness`: the one liveness row of the watched device (plan 4.9). */
+export interface DeviceLiveness {
+  /** Minute bucket of the last contact; null for a PC never seen. */
+  lastContactAt: number | null;
+  online: boolean;
+  fastUntil: number | null;
+}
+
+/** `fleet:checkResult` (admin): which of the asked PCs called in since. */
+export interface CheckResult {
+  requestedAt: number;
+  items: { deviceId: Id; answered: boolean }[];
 }
 
 export interface DocVersion {
@@ -399,6 +419,7 @@ export interface DeviceDetail {
   kioskEnabled: boolean;
   enrolledAt: number;
   group: GroupOption | null;
+  presence: DevicePresence;
   report: DeviceReport | null;
   versions: DocVersion[];
   flags: { noGroup: boolean; revoked: boolean; rotateCredential: boolean };

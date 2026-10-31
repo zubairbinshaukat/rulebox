@@ -1,7 +1,8 @@
 /**
  * Live implementation (real Convex backend). Session, sign-in, MFA, account
  * and members are wired to the Phase 4 Step 3 functions (Step 4); settings,
- * the plan and groups to Step 5's (enrollment codes, Step 6: `../enrollment/`). Every other
+ * the plan and groups to Step 5's (enrollment codes, Step 6: `../enrollment/`;
+ * devices, Step 7: here and `../devices/`). Every other
  * hook answers `not_ready` until its Convex step lands — see `../README.md`
  * for the exact function per hook.
  */
@@ -12,6 +13,7 @@ import { api } from "@convex/_generated/api";
 import { NOT_DEPLOYED, type DataApi } from "../api";
 import { AppError } from "../../lib/errors";
 import { cappedNumber, type MeResult, type PagedState, type QueryState, type Role } from "../types";
+import { deviceDetailOf } from "./devices";
 import { mapError, useMapped, useMappedState, useMemberQuery } from "./convex";
 
 const notReady = () => new AppError({ code: "not_ready", detail: NOT_DEPLOYED });
@@ -113,16 +115,84 @@ export const liveApi: DataApi = {
 
   useOverview: useNotReady,
 
-  useDevicesScreen: useNotReadyPaged,
-  useLiveStatus: () => undefined,
-  useDeviceDetail: useNotReady,
-  useDeviceInstalls: useNotReadyPaged,
-  useRenameDevice: useNotReadyMutation,
-  useMoveDevice: useNotReadyMutation,
-  useSetKiosk: useNotReadyMutation,
-  useRevokeDevice: useNotReadyMutation,
-  useRemoveDevice: useNotReadyMutation,
-  useRequestRotation: useNotReadyMutation,
+  // ---- devices (Step 7). The paginated lists are in `../devices/live.ts`. Admin writes
+  // go through `useMapped`: turning the kiosk off, revoke and remove need a fresh step-up
+  // (the dialog opens and the call is retried once), the others an unlocked session.
+  useDeviceDetail(deviceId) {
+    return useMappedState(useMemberQuery(api.fleet.get, { deviceId }), deviceDetailOf);
+  },
+  useDeviceLiveness(deviceId) {
+    return useMemberQuery(api.fleet.liveness, { deviceId });
+  },
+  useWatchDevice() {
+    return useMapped(useMutation(api.fleet.watch));
+  },
+  useCheckNow() {
+    return useMapped(useMutation(api.fleet.checkNow));
+  },
+  useCheckResult(checkId) {
+    return useMemberQuery(api.fleet.checkResult, { checkId });
+  },
+  useRenameDevice() {
+    const rename = useMutation(api.fleet.rename);
+    const call = useCallback(
+      async (a: { deviceId: string; expectedRevision: number; name: string }) => {
+        await rename(a);
+      },
+      [rename],
+    );
+    return useMapped(call);
+  },
+  useMoveDevice() {
+    const move = useMutation(api.fleet.move);
+    const call = useCallback(
+      async (a: { deviceId: string; expectedRevision: number; groupId: string }) => {
+        await move(a);
+      },
+      [move],
+    );
+    return useMapped(call);
+  },
+  useSetKiosk() {
+    const set = useMutation(api.fleet.setKiosk);
+    const call = useCallback(
+      async (a: { deviceId: string; expectedRevision: number; enabled: boolean }) => {
+        await set(a);
+      },
+      [set],
+    );
+    return useMapped(call);
+  },
+  useRevokeDevice() {
+    const revoke = useMutation(api.fleet.revoke);
+    const call = useCallback(
+      async (a: { deviceId: string }) => {
+        await revoke(a);
+      },
+      [revoke],
+    );
+    return useMapped(call);
+  },
+  useRemoveDevice() {
+    const remove = useMutation(api.fleet.remove);
+    const call = useCallback(
+      async (a: { deviceId: string }) => {
+        await remove(a);
+      },
+      [remove],
+    );
+    return useMapped(call);
+  },
+  useRequestRotation() {
+    const request = useMutation(api.fleet.requestCredentialRotation);
+    const call = useCallback(
+      async (a: { deviceId: string }) => {
+        await request(a);
+      },
+      [request],
+    );
+    return useMapped(call);
+  },
 
   // ---- groups (Step 5). Counts arrive as `{ count, more }` and become one capped number.
   useGroupsScreen() {

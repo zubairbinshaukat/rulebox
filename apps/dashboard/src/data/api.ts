@@ -9,11 +9,10 @@ import type {
   AppRow,
   Audience,
   AuditEntry,
+  CheckResult,
   DesktopAppInput,
   DeviceDetail,
-  DeviceFilter,
-  DeviceInstallRow,
-  DeviceRow,
+  DeviceLiveness,
   EmployeeDetail,
   EmployeeInput,
   EmployeeRow,
@@ -23,7 +22,6 @@ import type {
   Id,
   InstallState,
   KeysScreen,
-  LiveStatus,
   MeResult,
   MembersScreen,
   MfaSetup,
@@ -71,14 +69,21 @@ export interface DataApi {
   // ---- overview
   useOverview: (nowMinute: number) => QueryState<OverviewScreen>;
 
-  // ---- devices (fleet:*)
-  useDevicesScreen: (filter: DeviceFilter) => PagedState<DeviceRow> & { searchCapped?: boolean };
-  useLiveStatus: (deviceIds: Id[]) => LiveStatus | undefined;
+  // ---- devices (fleet:*). The two paginated lists (`useDevicesScreen`,
+  // `useDeviceInstalls`) are in their own seam, `./devices`.
   useDeviceDetail: (deviceId: Id) => QueryState<DeviceDetail>;
-  useDeviceInstalls: (deviceId: Id) => PagedState<DeviceInstallRow>;
+  /** `fleet:liveness`: subscribe only while the detail page is open (plan 4.9). */
+  useDeviceLiveness: (deviceId: Id) => QueryState<DeviceLiveness>;
+  /** `fleet:watch` (viewer): the page calls it on open and every 4 minutes while visible. */
+  useWatchDevice: Mutation<{ deviceId: Id }, { fastUntil: number | null }>;
+  /** `fleet:checkNow` (admin, at most 50 PCs, 1 per minute per organization). */
+  useCheckNow: Mutation<{ deviceIds: Id[] }, { checkId: Id }>;
+  /** `fleet:checkResult` (admin): subscribe for at most 60 s after the request. */
+  useCheckResult: (checkId: Id) => QueryState<CheckResult>;
   useRenameDevice: Mutation<{ deviceId: Id; expectedRevision: number; name: string }>;
   useMoveDevice: Mutation<{ deviceId: Id; expectedRevision: number; groupId: Id }>;
-  useSetKiosk: Mutation<{ deviceId: Id; enabled: boolean }>;
+  /** Turning the kiosk off is a major action (fresh step-up, retried by the hook). */
+  useSetKiosk: Mutation<{ deviceId: Id; expectedRevision: number; enabled: boolean }>;
   useRevokeDevice: Mutation<{ deviceId: Id }>;
   useRemoveDevice: Mutation<{ deviceId: Id }>;
   useRequestRotation: Mutation<{ deviceId: Id }>;

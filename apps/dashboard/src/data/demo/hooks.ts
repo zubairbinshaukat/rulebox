@@ -6,6 +6,7 @@
  */
 import { useCallback, useEffect, useState } from "react";
 import type { DataApi } from "../api";
+import type { DevicesApi } from "../devices/api";
 import type { EnrollmentApi } from "../enrollment/api";
 import {
   DEMO_TOTP,
@@ -21,6 +22,7 @@ import {
   type AppRow,
   type AssignmentRow,
   type AuditEntry,
+  type DevicePresence,
   type DeviceRow,
   type EmployeeDetail,
   type EmployeeRow,
@@ -88,6 +90,12 @@ function latestVersion(db: DemoDb, deviceId: string) {
   return db.versions.get(deviceId)?.[0]?.version;
 }
 
+/** `devicePresence`: a transition, not a timestamp (an online PC's `since` is not shown). */
+function devicePresence(db: DemoDb, d: DbDevice): DevicePresence {
+  if (!d.revoked && db.onlineIds.has(d._id)) return { online: true, since: d.enrolledAt };
+  return { online: false, since: db.lastSeen.get(d._id) ?? null };
+}
+
 function deviceRow(db: DemoDb, d: DbDevice): DeviceRow {
   const r = db.reports.get(d._id);
   return {
@@ -98,6 +106,7 @@ function deviceRow(db: DemoDb, d: DbDevice): DeviceRow {
     revoked: d.revoked,
     kioskEnabled: d.kioskEnabled,
     enrolledAt: d.enrolledAt,
+    presence: devicePresence(db, d),
     report: r
       ? {
           agentVersion: r.agentVersion,
@@ -173,6 +182,12 @@ function requireReader() {
   const me = currentMember();
   if (!me) fail("unauthenticated");
   if (me.status === "disabled") fail("forbidden");
+  return me;
+}
+
+function requireAdmin() {
+  const me = requireReader();
+  if (me.role !== "admin" && me.role !== "owner") fail("forbidden");
   return me;
 }
 
@@ -464,44 +479,7 @@ export const demoApi: DataApi = {
     });
   },
 
-  // ---- devices
-  useDevicesScreen({ groupId, search }) {
-    const text = search?.trim().toLowerCase() ?? "";
-    const paged = useDemoPaged(`fleet:list:${groupId ?? ""}:${text}`, (db) => {
-      requireReader();
-      let list = db.devices;
-      if (groupId === "none") list = list.filter((d) => !d.groupId);
-      else if (groupId) list = list.filter((d) => d.groupId === groupId);
-      if (text) {
-        // fleet:search: search index on name, `.take(50)`, no pagination.
-        return list.filter((d) => d.name.toLowerCase().includes(text)).slice(0, 51).map((d) => deviceRow(db, d));
-      }
-      return [...list].sort((a, b) => b.enrolledAt - a.enrolledAt).map((d) => deviceRow(db, d));
-    });
-    if (text && paged.status === "ready") {
-      return { ...paged, canLoadMore: false, searchCapped: paged.canLoadMore };
-    }
-    return paged;
-  },
-
-  useLiveStatus(deviceIds) {
-    useStoreVersion();
-    const db = getDb();
-    const [ready, setReady] = useState(false);
-    useEffect(() => {
-      const t = setTimeout(() => setReady(true), 120);
-      return () => clearTimeout(t);
-    }, []);
-    if (!ready) return undefined;
-    return {
-      pingIntervalMs: db.pingIntervalMs,
-      items: deviceIds.slice(0, 100).flatMap((id) => {
-        const t = db.lastSeen.get(id);
-        return t === undefined ? [] : [{ deviceId: id, lastSeenAt: t }];
-      }),
-    };
-  },
-
+  // ---- devices (the paginated lists: `demoDevicesApi` below)
   useDeviceDetail(deviceId) {
     return useDemoQuery(`fleet:get:${deviceId}`, (db) => {
       requireReader();
@@ -515,6 +493,7 @@ export const demoApi: DataApi = {
         kioskEnabled: d.kioskEnabled,
         enrolledAt: d.enrolledAt,
         group: g ? { _id: g._id, name: g.name } : null,
+        presence: devicePresence(db, d),
         report: db.reports.get(d._id) ?? null,
         versions: (db.versions.get(d._id) ?? []).slice(0, 5),
         flags: { noGroup: !d.groupId, revoked: d.revoked, rotateCredential: d.rotateCredential },
@@ -523,22 +502,67 @@ export const demoApi: DataApi = {
     });
   },
 
-  useDeviceInstalls(deviceId) {
-    return useDemoPaged(`fleet:installs:${deviceId}`, (db) => {
+  // `fleet:liveness`: the one liveness row (minute buckets in the real backend).
+  useDeviceLiveness(deviceId) {
+    return useDemoQuery(`fleet:liveness:${deviceId}`, (db) => {
       requireReader();
-      return db.installs
-        .filter((i) => i.deviceId === deviceId)
-        .sort((a, b) => b.updatedAt - a.updatedAt)
-        .map((i) => ({
-          _id: i._id,
-          appId: i.appId,
-          appName: db.apps.find((a) => a._id === i.appId)?.name ?? "",
-          state: i.state,
-          attempts: i.attempts,
-          exitCode: i.exitCode,
-          detail: i.detail,
-          updatedAt: i.updatedAt,
-        }));
+      const d = find(db.devices, deviceId);
+      const seen = db.lastSeen.get(d._id);
+      return {
+        lastContactAt: seen === undefined ? null : Math.floor(seen / MIN) * MIN,
+        online: devicePresence(db, d).online,
+        fastUntil: db.watching.get(d._id) ?? null,
+      };
+    });
+  },
+
+  // `fleet:watch`: ping every 60 s for 5 minutes (written only when it extends by 2 minutes).
+  useWatchDevice() {
+    return useCallback(
+      ({ deviceId }) =>
+        runMutation("viewer", ({ db, now }) => {
+          const d = find(db.devices, deviceId);
+          if (d.revoked || !db.lastSeen.has(d._id)) return { fastUntil: null };
+          const fastUntil = Math.ceil((now + 5 * MIN) / MIN) * MIN;
+          const have = db.watching.get(d._id);
+          if (have !== undefined && fastUntil < have + 2 * MIN) return { fastUntil: have };
+          db.watching.set(d._id, fastUntil);
+          return { fastUntil };
+        }),
+      [],
+    );
+  },
+
+  // `fleet:checkNow`: at most 50 PCs; online ones answer, the others do not.
+  useCheckNow() {
+    return useCallback(
+      ({ deviceIds }) =>
+        runMutation("admin", ({ db, now }) => {
+          const ids = [...new Set(deviceIds)];
+          if (ids.length < 1 || ids.length > 50) fail("invalid_argument", { field: "deviceIds" });
+          for (const id of ids) find(db.devices, id);
+          if (db.lastCheckAt !== undefined && now - db.lastCheckAt < MIN) fail("rate_limited");
+          db.lastCheckAt = now;
+          const id = newId("chk");
+          db.checks.set(id, { requestedAt: now, deviceIds: ids });
+          return { checkId: id };
+        }),
+      [],
+    );
+  },
+
+  useCheckResult(checkId) {
+    return useDemoQuery(`fleet:checkResult:${checkId}`, (db) => {
+      requireAdmin();
+      const c = db.checks.get(checkId);
+      if (!c) fail("not_found");
+      return {
+        requestedAt: c.requestedAt,
+        items: c.deviceIds.map((deviceId) => {
+          const d = db.devices.find((x) => x._id === deviceId);
+          return { deviceId, answered: d !== undefined && devicePresence(db, d).online };
+        }),
+      };
     });
   },
 
@@ -574,49 +598,49 @@ export const demoApi: DataApi = {
     );
   },
 
+  // Turning the kiosk off is a major action on the server (plan 4.16): fresh step-up.
   useSetKiosk() {
-    return useCallback(({ deviceId, enabled }) => {
-      let before = true;
-      return runOptimistic(
-        "admin",
-        (db) => {
-          const d = db.devices.find((x) => x._id === deviceId);
-          if (d) {
-            before = d.kioskEnabled;
+    return useCallback(
+      ({ deviceId, expectedRevision, enabled }) =>
+        runMutation(
+          "admin",
+          ({ db, audit }) => {
+            const d = find(db.devices, deviceId);
+            if (d.revoked) fail("conflict", { detail: "device revoked" });
+            checkRevision(d, expectedRevision);
+            if (d.kioskEnabled === enabled) return;
             d.kioskEnabled = enabled;
-          }
-        },
-        (db) => {
-          const d = db.devices.find((x) => x._id === deviceId);
-          if (d) d.kioskEnabled = before;
-        },
-        ({ db, audit }) => {
-          const d = find(db.devices, deviceId);
-          d.kioskEnabled = enabled;
-          d.revision++;
-          bumpVersion(db, d._id, enabled ? "kiosk on" : "kiosk off");
-          audit({
-            action: enabled ? "device.kioskEnabled" : "device.kioskDisabled",
-            targetType: "device",
-            targetId: d._id,
-            targetLabel: d.name,
-            summary: enabled ? "Kiosk turned on." : "Kiosk turned off.",
-          });
-        },
-      );
-    }, []);
+            d.revision++;
+            bumpVersion(db, d._id, enabled ? "kiosk on" : "kiosk off");
+            audit({
+              action: enabled ? "device.kioskEnabled" : "device.kioskDisabled",
+              targetType: "device",
+              targetId: d._id,
+              targetLabel: d.name,
+              summary: enabled ? "Kiosk turned on." : "Kiosk turned off.",
+            });
+          },
+          enabled ? "unlocked" : "fresh",
+        ),
+      [],
+    );
   },
-
   useRevokeDevice() {
     return useCallback(
       ({ deviceId }) =>
-        runMutation("admin", ({ db, audit }) => {
-          const d = find(db.devices, deviceId);
-          d.revoked = true;
-          d.revision++;
-          db.onlineIds.delete(d._id);
-          audit({ action: "device.revoked", targetType: "device", targetId: d._id, targetLabel: d.name, summary: "Revoked." });
-        }),
+        // Major action (plan 4.16): fresh step-up.
+        runMutation(
+          "admin",
+          ({ db, audit }) => {
+            const d = find(db.devices, deviceId);
+            if (d.revoked) return;
+            d.revoked = true;
+            d.revision++;
+            db.onlineIds.delete(d._id);
+            audit({ action: "device.revoked", targetType: "device", targetId: d._id, targetLabel: d.name, summary: "Revoked." });
+          },
+          "fresh",
+        ),
       [],
     );
   },
@@ -624,16 +648,21 @@ export const demoApi: DataApi = {
   useRemoveDevice() {
     return useCallback(
       ({ deviceId }) =>
-        runMutation("admin", ({ db, audit }) => {
-          const d = find(db.devices, deviceId);
-          if (!d.revoked) fail("invalid_argument", { field: "revoked" });
-          db.devices = db.devices.filter((x) => x._id !== deviceId);
-          db.installs = db.installs.filter((x) => x.deviceId !== deviceId);
-          db.reports.delete(deviceId);
-          db.lastSeen.delete(deviceId);
-          db.versions.delete(deviceId);
-          audit({ action: "device.removed", targetType: "device", targetId: d._id, targetLabel: d.name, summary: "Removed from Rulebox." });
-        }),
+        // Major action (plan 4.16): fresh step-up.
+        runMutation(
+          "admin",
+          ({ db, audit }) => {
+            const d = find(db.devices, deviceId);
+            if (!d.revoked) fail("conflict", { detail: "revoke the device first" });
+            db.devices = db.devices.filter((x) => x._id !== deviceId);
+            db.installs = db.installs.filter((x) => x.deviceId !== deviceId);
+            db.reports.delete(deviceId);
+            db.lastSeen.delete(deviceId);
+            db.versions.delete(deviceId);
+            audit({ action: "device.removed", targetType: "device", targetId: d._id, targetLabel: d.name, summary: "Removed from Rulebox." });
+          },
+          "fresh",
+        ),
       [],
     );
   },
@@ -1695,6 +1724,40 @@ function bumpVersion(db: DemoDb, deviceId: string, reason: string) {
 function republishGroup(db: DemoDb, groupId: string, reason: string) {
   for (const d of db.devices) if (d.groupId === groupId) bumpVersion(db, d._id, reason);
 }
+
+/** Device lists: their own seam (`data/devices`), re-exported by `data/devices/demo.ts`. */
+export const demoDevicesApi: DevicesApi = {
+  useDevicesScreen({ groupId, search }) {
+    const text = search?.trim().toLowerCase() ?? "";
+    return useDemoPaged(`fleet:list:${groupId ?? ""}:${text}`, (db) => {
+      requireReader();
+      let list = db.devices;
+      if (groupId) list = list.filter((d) => d.groupId === groupId);
+      // `search_name` returns its best matches first; the demo keeps newest first.
+      if (text) list = list.filter((d) => d.name.toLowerCase().includes(text));
+      return [...list].sort((a, b) => b.enrolledAt - a.enrolledAt).map((d) => deviceRow(db, d));
+    });
+  },
+
+  useDeviceInstalls(deviceId) {
+    return useDemoPaged(`fleet:installs:${deviceId}`, (db) => {
+      requireReader();
+      return db.installs
+        .filter((i) => i.deviceId === deviceId)
+        .sort((a, b) => b.updatedAt - a.updatedAt)
+        .map((i) => ({
+          _id: i._id,
+          appId: i.appId,
+          appName: db.apps.find((a) => a._id === i.appId)?.name ?? "",
+          state: i.state,
+          attempts: i.attempts,
+          exitCode: i.exitCode,
+          detail: i.detail,
+          updatedAt: i.updatedAt,
+        }));
+    });
+  },
+};
 
 /** Enrollment codes: their own seam (`data/enrollment`), re-exported by `data/enrollment/demo.ts`. */
 export const demoEnrollmentApi: EnrollmentApi = {

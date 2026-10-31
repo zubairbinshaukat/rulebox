@@ -16,6 +16,8 @@ import { strings } from "../lib/strings";
 // grammar, weak PIN, step-up retry), not the backend (convex/*.test.ts).
 const cx = vi.hoisted(() => ({
   results: {} as Record<string, unknown>,
+  /** `usePaginatedQuery` answers by function name: rows of one loaded, exhausted page. */
+  pages: {} as Record<string, unknown[]>,
   fns: {} as Record<string, (args?: unknown) => Promise<unknown>>,
 }));
 
@@ -24,6 +26,12 @@ vi.mock("convex/react", () => ({
   useQueries: (req: Record<string, { query: FunctionReference<"query">; args: unknown }>) =>
     Object.fromEntries(Object.entries(req).map(([k, r]) => [k, cx.results[getFunctionName(r.query)]])),
   useQuery: () => undefined,
+  usePaginatedQuery: (ref: FunctionReference<"query">) => ({
+    results: cx.pages[getFunctionName(ref)] ?? [],
+    status: "Exhausted",
+    isLoading: false,
+    loadMore: () => undefined,
+  }),
   useAction: (ref: FunctionReference<"action">) => fnFor(getFunctionName(ref)),
   useMutation: (ref: FunctionReference<"mutation">) => fnFor(getFunctionName(ref)),
   useConvexConnectionState: () => ({ isWebSocketConnected: true }),
@@ -114,6 +122,7 @@ const groupRow = (id: string, name: string, devices = 0, more = false) => ({
 
 beforeEach(() => {
   cx.results = {};
+  cx.pages = {};
   cx.fns = {};
 });
 
@@ -205,14 +214,29 @@ describe("Group detail (groups:get)", () => {
     apps: [{ appId: "a1", name: "Notepad", kind: "desktop", audience: "everyone", pinnedTaskbar: true, pinnedDesktop: false }],
   });
 
-  it("apps are read-only; devices and employees say 'Coming in a later step'", () => {
+  it("apps are read-only; the devices are live (Step 7), employees say 'Coming in a later step'", () => {
     cx.results["groups:get"] = detail(0);
+    cx.pages["fleet:list"] = [
+      {
+        _id: "d1",
+        name: "Front desk",
+        groupId: "g1",
+        groupName: "Office",
+        kioskEnabled: true,
+        enrolledAt: 1,
+        revision: 0,
+        presence: { online: true, since: 1, revoked: false },
+        summary: { outOfSupport: false, kioskPhase: "applied", updatedAt: 1 },
+        latestVersion: null,
+      },
+    ];
     ui(<GroupDetail />, "admin", "/groups/g1");
     expect(screen.getByRole("heading", { level: 1, name: "Office" })).toBeTruthy();
     expect(screen.getByText("Notepad")).toBeTruthy();
     expect(screen.queryByRole("button", { name: strings.group.assign })).toBeNull();
     expect(screen.queryByRole("combobox")).toBeNull();
-    expect(screen.getAllByText(strings.app.comingLater).length).toBeGreaterThanOrEqual(2);
+    expect(screen.getByRole("link", { name: "Front desk" }).getAttribute("href")).toBe("/devices/d1");
+    expect(screen.getAllByText(strings.app.comingLater).length).toBeGreaterThanOrEqual(1);
   });
 
   it("delete is blocked up front by what the screen knows (devices, apps)", () => {

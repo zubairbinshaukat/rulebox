@@ -7,12 +7,12 @@ import IconAdd from "~icons/solar/add-circle-linear";
 import {
   useAddGroupEmployee,
   useDeleteGroup,
-  useDevicesScreen,
   useEmployeesScreen,
   useGroupDetail,
   useRemoveGroupEmployee,
   useUpdateGroup,
 } from "../data";
+import { useDevicesScreen } from "../data/devices";
 import type { AssignmentRow, DeviceRow, EmployeeRow, GroupDetail as Detail } from "../data/types";
 import { AppGlyph } from "../components/AppGlyph";
 import { Card } from "../components/Card";
@@ -27,7 +27,7 @@ import { LoadMore } from "../components/LoadMore";
 import { Modal } from "../components/Modal";
 import { InlineNotice } from "../components/Notice";
 import { PageHeader } from "../components/PageHeader";
-import { PagedRegion, QueryRegion } from "../components/Region";
+import { PagedRegion, QueryRegion, RegionBoundary } from "../components/Region";
 import { RoleGate } from "../components/RoleGate";
 import { useCan } from "../lib/member";
 import { SearchInput } from "../components/SearchInput";
@@ -94,7 +94,9 @@ function Group({ g }: { g: Detail }) {
 
       <Assignments g={g} />
       <div className="dash-grid dash-grid--2">
-        <GroupDevices groupId={g._id} />
+        <RegionBoundary>
+          <GroupDevices groupId={g._id} />
+        </RegionBoundary>
         <GroupEmployees groupId={g._id} />
       </div>
       <HistoryPanel targetId={g._id} />
