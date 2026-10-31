@@ -198,6 +198,11 @@ impl AppState {
         }
     }
 
+    /// How long ago the desktop page last said it was alive; `None` before the first time.
+    pub fn ui_alive_age(&self) -> Option<Duration> {
+        self.inner.last_ui_alive.lock().ok().and_then(|slot| slot.map(|at| at.elapsed()))
+    }
+
     pub fn ui_alive_recent(&self) -> bool {
         let Ok(slot) = self.inner.last_ui_alive.lock() else {
             return false;

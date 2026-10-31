@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import gsap from "gsap";
 
+import { useForcedFullMotion } from "./devMotion";
 import { useShell } from "./store";
 
 export type MotionLevel = "full" | "fade";
@@ -39,6 +40,8 @@ function systemPrefersReducedMotion(): boolean {
  */
 export function useMotionLevel(): MotionLevel {
   const lite = useShell((s) => s.display.lite);
+  // Debug builds only: "Force full motion" in the resource monitor ignores Lite and reduced motion.
+  const forcedFull = useForcedFullMotion();
   const [reduced, setReduced] = useState(
     () => forceReducedMotion || systemPrefersReducedMotion(),
   );
@@ -56,6 +59,9 @@ export function useMotionLevel(): MotionLevel {
     };
   }, []);
 
+  if (forcedFull) {
+    return "full";
+  }
   return lite || reduced ? "fade" : "full";
 }
 

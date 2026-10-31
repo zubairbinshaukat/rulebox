@@ -117,6 +117,7 @@ export function MyFilesPanel({ onOpenFiles }: { onOpenFiles?: () => void }) {
           <button
             key={id}
             type="button"
+            className="rb-filter-btn"
             aria-pressed={tab === id}
             onClick={() => setTab(id)}
             style={{
@@ -128,7 +129,7 @@ export function MyFilesPanel({ onOpenFiles }: { onOpenFiles?: () => void }) {
               fontSize: 13,
               // Bold as well as tinted, so the chosen filter is not told by colour alone.
               fontWeight: tab === id ? 600 : 400,
-              background: tab === id ? "var(--rb-accent-soft)" : "transparent",
+              background: tab === id ? "var(--rb-accent-soft)" : undefined,
               color: tab === id ? "var(--rb-accent-text)" : "var(--rb-muted)",
             }}
           >
@@ -161,6 +162,7 @@ export function MyFilesPanel({ onOpenFiles }: { onOpenFiles?: () => void }) {
               <li key={file.path} style={{ listStyle: "none" }}>
               <button
                 type="button"
+                className="rb-panel-row"
                 onClick={() => void handleOpenFile(file)}
                 style={{
                   display: "flex",
@@ -170,7 +172,7 @@ export function MyFilesPanel({ onOpenFiles }: { onOpenFiles?: () => void }) {
                   padding: "8px 10px",
                   border: 0,
                   borderRadius: 12,
-                  background: "var(--rb-bg)",
+                  // The resting colour and the hover tint come from `rb-panel-row`.
                   color: "inherit",
                   font: "inherit",
                   textAlign: "left",

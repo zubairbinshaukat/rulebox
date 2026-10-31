@@ -1,7 +1,10 @@
 import type { CSSProperties } from "react";
+import { Switch } from "@rulebox/ui";
 import type { GroupKind } from "@rulebox/types";
 
+import { DEV_TOOLS_BUILD, setFullMotionForced, useForcedFullMotion } from "../../lib/devMotion";
 import { formatMemory, formatPercent, useMonitorSample } from "../../lib/monitor";
+import { DevToastButtons } from "../toast/DevToastButtons";
 
 /** Each group's dot colour (an oklch hue; "Other" has none). */
 const KIND_HUE: Record<GroupKind, number | null> = {
@@ -34,6 +37,7 @@ export function Monitor() {
       <div className="rb-monitor rb-monitor--waiting">
         <span className="rb-monitor__eyebrow">Resources · dev</span>
         <span>Measuring…</span>
+        <ForceFullMotion />
       </div>
     );
   }
@@ -60,6 +64,8 @@ export function Monitor() {
         Rulebox uses <strong>{formatMemory(sample.ruleboxBytes)}</strong> and{" "}
         <strong>{formatPercent(sample.ruleboxCpu)}</strong> CPU
       </div>
+
+      <DevToastButtons />
 
       <ul className="rb-monitor__list" aria-label="Memory and CPU by app">
         {sample.groups.map((group) => {
@@ -102,7 +108,26 @@ export function Monitor() {
         })}
       </ul>
 
+      <ForceFullMotion />
+
       <div className="rb-monitor__foot">Memory is the private working set: Task Manager's Memory column.</div>
+    </div>
+  );
+}
+
+/**
+ * Debug builds only: play every animation, ignoring Lite and reduced motion, in
+ * every Rulebox window (splash, logo, open and lock, Flip moves). Off by default.
+ */
+function ForceFullMotion() {
+  const forced = useForcedFullMotion();
+  if (!DEV_TOOLS_BUILD) {
+    return null;
+  }
+  return (
+    <div className="rb-monitor__toggle">
+      <Switch checked={forced} onChange={setFullMotionForced} label="Force full motion" />
+      <span className="rb-monitor__hint">Ignores Lite and reduced motion in every window, to see all animations.</span>
     </div>
   );
 }

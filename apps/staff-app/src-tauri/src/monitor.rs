@@ -194,12 +194,78 @@ pub fn start(app: &AppHandle) {
         return;
     }
     let browsers: Arc<Mutex<HashMap<u32, (GroupKind, String)>>> = Arc::default();
+    start_stall_probe(app);
     let app = app.clone();
     std::thread::Builder::new()
         .name("dev-monitor".into())
         .spawn(move || run(&app, &browsers))
         .map(|_| tracing::info!("developer resource monitor running (debug build)"))
         .unwrap_or_else(|error| tracing::warn!(%error, "could not start the resource monitor"));
+}
+
+/// Debug builds: once a second, ask the UI (main) thread to run a closure and
+/// log when it answers late. A blocked main thread freezes every click (the
+/// page's `invoke` calls run there) while CSS hover keeps working.
+fn start_stall_probe(app: &AppHandle) {
+    // Same idea for Tauri's async runtime (async commands, the agent heartbeat, the
+    // state mirror run there): a task that sleeps 1 s and logs when it wakes late.
+    tauri::async_runtime::spawn(async {
+        loop {
+            let slept = Instant::now();
+            tokio::time::sleep(Duration::from_secs(1)).await;
+            let late = slept.elapsed().saturating_sub(Duration::from_secs(1));
+            if late >= Duration::from_secs(2) {
+                tracing::warn!(late_ms = late.as_millis() as u64, "async runtime woke a task late");
+            }
+        }
+    });
+    // The page calls `ui_alive` every 5 s. When it has been silent for 12 s, say so
+    // in the log (the agent ends a Staff App that is silent for 30 s).
+    let alive_app = app.clone();
+    let _ = std::thread::Builder::new().name("dev-alive-probe".into()).spawn(move || {
+        let mut reported = false;
+        loop {
+            std::thread::sleep(Duration::from_secs(2));
+            let Some(state) = alive_app.try_state::<AppState>() else { continue };
+            let Some(age) = state.ui_alive_age() else { continue };
+            if age < Duration::from_secs(12) {
+                reported = false;
+                continue;
+            }
+            if reported {
+                continue;
+            }
+            reported = true;
+            tracing::warn!(silent_s = age.as_secs(), "the page has not called ui_alive");
+        }
+    });
+    let app = app.clone();
+    let _ = std::thread::Builder::new().name("dev-stall-probe".into()).spawn(move || loop {
+        let sent = Instant::now();
+        let (tx, rx) = std::sync::mpsc::channel::<()>();
+        if app.run_on_main_thread(move || {
+            let _ = tx.send(());
+        }).is_err() {
+            return;
+        }
+        let mut warned = false;
+        loop {
+            match rx.recv_timeout(Duration::from_millis(500)) {
+                Ok(()) => break,
+                Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {
+                    if sent.elapsed() >= Duration::from_secs(2) && !warned {
+                        warned = true;
+                        tracing::warn!("UI thread has not answered for 2 s");
+                    }
+                }
+                Err(_) => return,
+            }
+        }
+        if warned {
+            tracing::warn!(ms = sent.elapsed().as_millis() as u64, "UI thread answered again");
+        }
+        std::thread::sleep(Duration::from_secs(1));
+    });
 }
 
 /// One line per sample in `metrics.jsonl` next to the log, so a run can be

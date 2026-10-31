@@ -113,6 +113,11 @@
   --rb-art-c: 0.17;
   --rb-icon-plate: oklch(1 0 0);
   --rb-icon-plate-border: oklch(0.92 0.006 80);
+  /* A small icon's logo has no box of its own. A logo that would vanish on the surface is
+     recoloured instead: a dark logo (black Z) is inverted on the dark theme, a light logo on the
+     light theme (hue-rotate keeps a tinted logo's hue). Never a box behind it. */
+  --rb-logo-filter-dark: none;
+  --rb-logo-filter-light: invert(1) hue-rotate(180deg);
   /* How strongly a tile glows in its app's colour behind the art (dark only). */
   --rb-tile-glow: 0;
   /* The faded copy of the art in a tile's corner. */
@@ -176,6 +181,8 @@
   --rb-art-bottom-l: 0.54;
   --rb-icon-plate: oklch(0.95 0.004 80);
   --rb-icon-plate-border: oklch(1 0 0 / 0);
+  --rb-logo-filter-dark: invert(1) hue-rotate(180deg);
+  --rb-logo-filter-light: none;
   --rb-tile-glow: 0.34;
   --rb-tile-mark: 0.14;
 }
@@ -238,6 +245,8 @@
     --rb-art-bottom-l: 0.54;
     --rb-icon-plate: oklch(0.95 0.004 80);
     --rb-icon-plate-border: oklch(1 0 0 / 0);
+    --rb-logo-filter-dark: invert(1) hue-rotate(180deg);
+    --rb-logo-filter-light: none;
     --rb-tile-glow: 0.34;
     --rb-tile-mark: 0.14;
   }

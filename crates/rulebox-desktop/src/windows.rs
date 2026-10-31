@@ -5,8 +5,12 @@ use std::ffi::c_void;
 use std::path::PathBuf;
 
 use windows::core::{w, PWSTR};
-use windows::Win32::Foundation::{CloseHandle, HWND, LPARAM};
+use windows::Win32::Foundation::{CloseHandle, HWND, LPARAM, LRESULT, POINT, RECT, WPARAM};
 use windows::Win32::Graphics::Dwm::{DwmGetWindowAttribute, DWMWA_CLOAKED};
+use windows::Win32::Graphics::Gdi::{
+    ClientToScreen, CombineRgn, CreateRectRgn, CreateRoundRectRgn, DeleteObject, SetWindowRgn,
+    RGN_OR,
+};
 use windows::Win32::Storage::EnhancedStorage::PKEY_AppUserModel_ID;
 use windows::Win32::System::Com::CoTaskMemFree;
 use windows::Win32::System::Com::StructuredStorage::{PropVariantClear, PropVariantToStringAlloc};
@@ -14,13 +18,17 @@ use windows::Win32::System::Threading::{
     OpenProcess, QueryFullProcessImageNameW, PROCESS_NAME_WIN32, PROCESS_QUERY_LIMITED_INFORMATION,
 };
 use windows::Win32::UI::Shell::PropertiesSystem::{IPropertyStore, SHGetPropertyStoreForWindow};
+use windows::Win32::UI::Shell::{DefSubclassProc, RemoveWindowSubclass, SetWindowSubclass};
 use windows::Win32::UI::WindowsAndMessaging::{
     EnumWindows, FindWindowExW, GetAncestor, GetClassNameW, GetDesktopWindow, GetPropW,
-    GetWindow, GetWindowLongPtrW, GetWindowTextLengthW, GetWindowTextW,
+    GetWindow, GetWindowLongPtrW, GetWindowRect, GetWindowTextLengthW, GetWindowTextW,
     GetWindowThreadProcessId, IsIconic, IsWindow, IsWindowVisible, SetWindowLongPtrW,
-    SetWindowPos, GA_PARENT, GA_ROOTOWNER, GWL_EXSTYLE, GW_OWNER, HWND_BOTTOM, SWP_FRAMECHANGED,
-    SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE, SWP_NOZORDER, WS_EX_APPWINDOW, WS_EX_NOACTIVATE,
-    WS_EX_TOOLWINDOW, WS_EX_WINDOWEDGE,
+    SetWindowPos, GA_PARENT, GA_ROOTOWNER, GWL_EXSTYLE, GWL_STYLE, GW_OWNER, HWND_BOTTOM,
+    MA_NOACTIVATE, STYLESTRUCT, SWP_FRAMECHANGED, SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE,
+    SWP_NOZORDER, WM_MOUSEACTIVATE, WM_NCACTIVATE, WM_NCDESTROY, WM_NCPAINT, WM_STYLECHANGING,
+    WS_CAPTION, WS_EX_APPWINDOW, WS_EX_CLIENTEDGE, WS_EX_DLGMODALFRAME, WS_EX_NOACTIVATE,
+    WS_EX_STATICEDGE, WS_EX_TOOLWINDOW, WS_EX_WINDOWEDGE, WS_MAXIMIZEBOX, WS_MINIMIZEBOX,
+    WS_SYSMENU, WS_THICKFRAME,
 };
 
 use crate::error::{DesktopError, Result};
@@ -307,16 +315,137 @@ pub fn enumerate() -> Vec<WindowInfo> {
     handles.into_iter().filter_map(window_info).collect()
 }
 
+/// The window-style bits that make Windows draw a title bar, buttons or a sizing
+/// frame (`WS_CAPTION` already includes `WS_BORDER` and `WS_DLGFRAME`).
+const FRAME_STYLE_BITS: u32 =
+    WS_CAPTION.0 | WS_SYSMENU.0 | WS_MINIMIZEBOX.0 | WS_MAXIMIZEBOX.0 | WS_THICKFRAME.0;
+
+/// The extended-style bits that add an edge or a taskbar button to a window.
+const FRAME_EX_STYLE_BITS: u32 = WS_EX_APPWINDOW.0
+    | WS_EX_WINDOWEDGE.0
+    | WS_EX_CLIENTEDGE.0
+    | WS_EX_STATICEDGE.0
+    | WS_EX_DLGMODALFRAME.0;
+
+/// Pure: a style word with every frame bit removed.
+pub fn without_frame_style(style: u32) -> u32 {
+    style & !FRAME_STYLE_BITS
+}
+
+/// Pure: an extended style word for an overlay (the taskbar strip, the popup):
+/// a tool window (no taskbar button, no Alt+Tab entry), no edges.
+pub fn overlay_ex_style(ex_style: u32) -> u32 {
+    (ex_style | WS_EX_TOOLWINDOW.0) & !FRAME_EX_STYLE_BITS
+}
+
+/// Drop the caption styles of one of our own windows; `true` when any were set.
+/// The taskbar and popup pages have no frame, but Tauri's undecorated windows keep
+/// `WS_CAPTION` (the toolkit hides the frame by answering `WM_NCCALCSIZE`), and it
+/// puts the bits back whenever it re-applies its window flags (showing the window
+/// does). The window guard (`guard_overlay_frame`) stops that for good; this is the
+/// belt to its braces and runs again with every shape update.
+fn strip_caption(hwnd: HWND) -> bool {
+    // SAFETY: plain window-long read and write on a handle of our own window.
+    unsafe {
+        let style = GetWindowLongPtrW(hwnd, GWL_STYLE);
+        let wanted = without_frame_style(style as u32) as isize;
+        // Keep the high bits of a pointer-sized value (`WS_POPUP` is the top bit).
+        let wanted = (style & !(u32::MAX as isize)) | wanted;
+        if wanted == style {
+            return false;
+        }
+        SetWindowLongPtrW(hwnd, GWL_STYLE, wanted);
+        true
+    }
+}
+
+/// Subclass id of the frame guard (a constant of ours, one per window).
+const GUARD_ID: usize = 0x5242_4752;
+
+/// `dwRefData` flag: a click on this window must never activate it.
+const GUARD_NEVER_ACTIVATE: usize = 1;
+
+/// Window procedure of the frame guard. It runs before the toolkit's own and
+/// keeps a frame-less overlay frame-less:
+///
+/// - `WM_STYLECHANGING`: whoever sets the styles (the toolkit does, on show,
+///   focus and always-on-top changes) gets the frame bits removed from the new
+///   value before it is applied. DWM then never sees a caption, not even for an
+///   instant.
+/// - `WM_NCACTIVATE`: activation changes (every click on the strip activates
+///   and deactivates it) must not repaint the non-client area; DWM paints the
+///   caption of the window that is being activated, through the translucent
+///   pills, until the window is next re-framed.
+/// - `WM_NCPAINT`: nothing to paint, the page covers the whole window.
+/// - `WM_MOUSEACTIVATE`: the taskbar strip is never made the active window by
+///   a click, so the program the user was working in keeps the focus.
+unsafe extern "system" fn guard_proc(
+    hwnd: HWND,
+    message: u32,
+    wparam: WPARAM,
+    lparam: LPARAM,
+    _id: usize,
+    data: usize,
+) -> LRESULT {
+    match message {
+        WM_STYLECHANGING if lparam.0 != 0 => {
+            // SAFETY: for this message `lparam` points at a STYLESTRUCT that
+            // Windows owns for the duration of the call.
+            let change = unsafe { &mut *(lparam.0 as *mut STYLESTRUCT) };
+            if wparam.0 as i32 == GWL_STYLE.0 {
+                change.styleNew = without_frame_style(change.styleNew);
+            } else if wparam.0 as i32 == GWL_EXSTYLE.0 {
+                change.styleNew = overlay_ex_style(change.styleNew);
+            }
+            // SAFETY: forwards the same message to the next procedure.
+            unsafe { DefSubclassProc(hwnd, message, wparam, lparam) }
+        }
+        // lParam -1: "do not repaint the non-client area".
+        // SAFETY: as above.
+        WM_NCACTIVATE => unsafe { DefSubclassProc(hwnd, message, wparam, LPARAM(-1)) },
+        WM_NCPAINT => LRESULT(0),
+        WM_MOUSEACTIVATE if data & GUARD_NEVER_ACTIVATE != 0 => LRESULT(MA_NOACTIVATE as isize),
+        WM_NCDESTROY => {
+            // SAFETY: the window is going away; drop our hook first.
+            let _ = unsafe { RemoveWindowSubclass(hwnd, Some(guard_proc), GUARD_ID) };
+            // SAFETY: as above.
+            unsafe { DefSubclassProc(hwnd, message, wparam, lparam) }
+        }
+        // SAFETY: as above.
+        _ => unsafe { DefSubclassProc(hwnd, message, wparam, lparam) },
+    }
+}
+
+/// Keep one of our own overlay windows (the taskbar strip, the popup) free of
+/// frame styles for its whole life, and stop its activation changes from
+/// painting a frame. Call once per window, from the thread that owns it.
+/// `never_activate`: a click on the window does not activate it (the strip).
+pub fn guard_overlay_frame(hwnd: isize, never_activate: bool) -> Result<()> {
+    let hwnd = hwnd_from(hwnd);
+    let data = if never_activate { GUARD_NEVER_ACTIVATE } else { 0 };
+    // SAFETY: SetWindowSubclass only works from the thread that created the
+    // window and fails (returns false) otherwise; `guard_proc` is a plain
+    // function that lives for the whole program.
+    let installed = unsafe { SetWindowSubclass(hwnd, Some(guard_proc), GUARD_ID, data) };
+    if !installed.as_bool() {
+        return Err(DesktopError::Message("SetWindowSubclass failed".into()));
+    }
+    Ok(())
+}
+
 /// Give one of our own windows `WS_EX_TOOLWINDOW` (Tauri has no option for
-/// it). Such a window has no taskbar button of its own and never shows in
-/// Alt+Tab, which is what the taskbar strip and the popup need.
-pub fn set_tool_window(hwnd: isize) -> Result<()> {
+/// it) and remove its frame styles. Such a window has no taskbar button of its
+/// own and never shows in Alt+Tab, which is what the taskbar strip and the popup
+/// need. Also installs the frame guard so the toolkit cannot undo it.
+pub fn set_tool_window(hwnd: isize, never_activate: bool) -> Result<()> {
+    guard_overlay_frame(hwnd, never_activate)?;
     let hwnd = hwnd_from(hwnd);
     // SAFETY: plain window-long read and write on a handle of our own window;
     // an invalid handle makes the call fail, it does not corrupt memory.
     unsafe {
-        let style = GetWindowLongPtrW(hwnd, GWL_EXSTYLE);
-        SetWindowLongPtrW(hwnd, GWL_EXSTYLE, style | WS_EX_TOOLWINDOW.0 as isize);
+        let ex = GetWindowLongPtrW(hwnd, GWL_EXSTYLE);
+        SetWindowLongPtrW(hwnd, GWL_EXSTYLE, overlay_ex_style(ex as u32) as isize | (ex & !(u32::MAX as isize)));
+        strip_caption(hwnd);
         SetWindowPos(
             hwnd,
             None,
@@ -347,6 +476,76 @@ pub fn place_outer(hwnd: isize, rect: Rect) -> Result<()> {
             SWP_NOZORDER | SWP_NOACTIVATE,
         )
         .map_err(|e| DesktopError::win32("SetWindowPos", &e))
+    }
+}
+
+/// Limit one of our own windows to the union of rounded rectangles `rects`
+/// (physical pixels, relative to the **client** area; `radius` is the corner
+/// radius). Everything outside is neither drawn nor hit: mouse input goes to
+/// the window behind. This is how the taskbar's transparent strip between its
+/// pills lets clicks through, which `WS_EX_TRANSPARENT` cannot do per area and
+/// `HTTRANSPARENT` cannot do across the WebView2 process boundary.
+///
+/// An empty `rects` removes the shape (the whole window takes input again).
+pub fn set_shape(hwnd: isize, rects: &[Rect], radius: i32) -> Result<()> {
+    let hwnd = hwnd_from(hwnd);
+    if strip_caption(hwnd) {
+        // SAFETY: our own window; only asks it to recompute its frame.
+        let _ = unsafe {
+            SetWindowPos(
+                hwnd,
+                None,
+                0,
+                0,
+                0,
+                0,
+                SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE | SWP_FRAMECHANGED,
+            )
+        };
+    }
+    if rects.is_empty() {
+        // SAFETY: a null region removes the window's region; no pointer is read.
+        let cleared = unsafe { SetWindowRgn(hwnd, None, true) };
+        return if cleared == 0 {
+            Err(DesktopError::Message("SetWindowRgn(clear) failed".into()))
+        } else {
+            Ok(())
+        };
+    }
+    // SAFETY: every GDI region created here is either deleted in this
+    // function or handed to `SetWindowRgn`, which then owns it. The RECT and
+    // POINT are locals the calls write into.
+    unsafe {
+        let mut window = RECT::default();
+        GetWindowRect(hwnd, &mut window).map_err(|e| DesktopError::win32("GetWindowRect", &e))?;
+        // A region is in window coordinates; the page reports client ones.
+        let mut origin = POINT { x: 0, y: 0 };
+        if !ClientToScreen(hwnd, &mut origin).as_bool() {
+            return Err(DesktopError::Message("ClientToScreen failed".into()));
+        }
+        let dx = origin.x - window.left;
+        let dy = origin.y - window.top;
+        let diameter = radius.max(0) * 2;
+
+        let combined = CreateRectRgn(0, 0, 0, 0);
+        for rect in rects {
+            // Right and bottom of a round-rect region are exclusive and one short.
+            let piece = CreateRoundRectRgn(
+                rect.left + dx,
+                rect.top + dy,
+                rect.right + dx + 1,
+                rect.bottom + dy + 1,
+                diameter,
+                diameter,
+            );
+            CombineRgn(Some(combined), Some(combined), Some(piece), RGN_OR);
+            let _ = DeleteObject(piece.into());
+        }
+        if SetWindowRgn(hwnd, Some(combined), true) == 0 {
+            let _ = DeleteObject(combined.into());
+            return Err(DesktopError::Message("SetWindowRgn failed".into()));
+        }
+        Ok(())
     }
 }
 
@@ -403,6 +602,34 @@ mod tests {
         // A window in the middle of the screen, or parked off-screen when minimized.
         assert!(!covers(Rect::new(200, 100, 900, 600), area, 2));
         assert!(!covers(Rect::new(-32000, -32000, -31840, -31972), area, 2));
+    }
+
+    #[test]
+    fn frame_bits_are_removed_and_the_rest_is_kept() {
+        // What the toolkit sets on an undecorated window: caption, system menu,
+        // both boxes, visible and clip-siblings.
+        let toolkit = WS_CAPTION.0 | WS_SYSMENU.0 | WS_MINIMIZEBOX.0 | WS_MAXIMIZEBOX.0 | 0x1400_0000;
+        assert_eq!(without_frame_style(toolkit), 0x1400_0000);
+        // The border and dialog-frame halves of WS_CAPTION go too.
+        assert_eq!(without_frame_style(0x0080_0000 | 0x0040_0000), 0);
+        assert_eq!(without_frame_style(WS_THICKFRAME.0 | 0x1000_0000), 0x1000_0000);
+        // Nothing to remove: unchanged.
+        assert_eq!(without_frame_style(0x1400_0000), 0x1400_0000);
+        // The popup bit (the top bit) survives.
+        assert_eq!(without_frame_style(0x8000_0000 | WS_CAPTION.0), 0x8000_0000);
+    }
+
+    #[test]
+    fn an_overlay_is_a_tool_window_without_edges_or_a_button() {
+        let toolkit = WS_EX_WINDOWEDGE.0 | WS_EX_APPWINDOW.0 | 0x10 | WS_EX_NOACTIVATE.0 | 0x8;
+        let overlay = overlay_ex_style(toolkit);
+        assert_eq!(overlay & WS_EX_TOOLWINDOW.0, WS_EX_TOOLWINDOW.0);
+        assert_eq!(overlay & WS_EX_APPWINDOW.0, 0);
+        assert_eq!(overlay & WS_EX_WINDOWEDGE.0, 0);
+        // Always-on-top, accept-files and no-activate are left alone.
+        assert_eq!(overlay & (0x10 | WS_EX_NOACTIVATE.0 | 0x8), 0x10 | WS_EX_NOACTIVATE.0 | 0x8);
+        // Idempotent.
+        assert_eq!(overlay_ex_style(overlay), overlay);
     }
 
     /// A plain, visible, unowned window: passes.

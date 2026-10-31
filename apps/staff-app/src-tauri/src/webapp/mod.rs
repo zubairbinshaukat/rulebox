@@ -5,9 +5,13 @@
 //! allow-list, no prompts, and a browser profile of its own per employee.
 
 pub mod allow;
+pub mod bar;
+mod barhost;
 pub mod blocked;
 pub mod download;
 mod hooks;
+pub mod icon;
+pub mod nav;
 pub mod permissions;
 
 use std::collections::HashMap;
@@ -22,7 +26,7 @@ use tauri::webview::{DownloadEvent, NewWindowResponse};
 use self::allow::AllowList;
 use self::download::DownloadDecision;
 use crate::appwin::{area_for, cascade_rect, focus_window, place};
-use crate::model::{AppEntry, AppKind, NoticeTone, SessionState, WebApp, WebPermissions};
+use crate::model::{AppEntry, AppKind, NoticeTone, SessionState, WebPermissions};
 use crate::state::AppState;
 
 /// 1100 x 720 logical pixels, before clamping to the work area.
@@ -41,6 +45,8 @@ pub struct WebWindow {
     last_allowed: Mutex<String>,
     /// The window is built at `about:blank`; that one navigation is let through.
     initial_blank: AtomicBool,
+    /// What the bar above the site shows (see `nav.rs`, `bar.rs`).
+    pub nav: Mutex<nav::NavState>,
 }
 
 impl WebWindow {
@@ -162,13 +168,14 @@ impl WebApps {
             permissions: web.permissions,
             last_allowed: Mutex::new(start.to_string()),
             initial_blank: AtomicBool::new(true),
+            nav: Mutex::new(nav::NavState::default()),
         });
 
         // The window starts on `about:blank`, never on the app's address: the
         // hardening hooks are installed first, and only then does the same UI-thread
         // call that installed them send the window to `start`. If the hooks cannot
         // be installed the page is never loaded at all.
-        let window = build_window(app, state, &info, data_dir, web)?;
+        let window = build_window(app, state, &info, data_dir, entry.icon_url.as_deref())?;
         if let Ok(mut inner) = self.inner.lock() {
             inner.windows.insert(label.clone(), Arc::clone(&info));
         }
@@ -220,7 +227,7 @@ fn build_window(
     state: &AppState,
     info: &Arc<WebWindow>,
     data_dir: PathBuf,
-    web: &WebApp,
+    icon_url: Option<&str>,
 ) -> Result<WebviewWindow, String> {
     let nav_app = app.clone();
     let nav_info = Arc::clone(info);
@@ -228,9 +235,8 @@ fn build_window(
     let new_info = Arc::clone(info);
     let download_info = Arc::clone(info);
     let download_state = state.clone();
-    let _ = web;
 
-    WebviewWindowBuilder::new(app, &info.label, WebviewUrl::External(blank_page()?))
+    let mut builder = WebviewWindowBuilder::new(app, &info.label, WebviewUrl::External(blank_page()?))
         .title(&info.app_name)
         // The page gets a normal title bar; there is no Rulebox chrome around a site.
         .decorations(true)
@@ -243,6 +249,9 @@ fn build_window(
         .devtools(false)
         .zoom_hotkeys_enabled(false)
         .general_autofill_enabled(false)
+        // The colour behind the bar's strip and the site before either has painted: the bar's
+        // background, in the employee's theme. (The bar itself is added in `hooks::install`.)
+        .background_color(bar_background(state))
         .on_navigation(move |url| gate_navigation(&nav_app, &nav_info, url))
         .on_new_window(move |url, _| {
             // A site never gets a window of its own: an allowed address opens here.
@@ -254,9 +263,25 @@ fn build_window(
             }
             NewWindowResponse::Deny
         })
-        .on_download(move |_, event| handle_download(&download_state, &download_info, event))
-        .build()
-        .map_err(|error| format!("create {}: {error}", info.label))
+        .on_download(move |_, event| handle_download(&download_state, &download_info, event));
+
+    // The app's own icon in the title bar and on the Rulebox taskbar button, like an
+    // installed PWA. No icon, or one that does not decode: the default icon, never an error.
+    if let Some(icon) = icon_url.and_then(icon::window_icon) {
+        let image = tauri::image::Image::new_owned(icon.pixels, icon.width, icon.height);
+        builder = builder
+            .icon(image)
+            .map_err(|error| format!("icon of {}: {error}", info.label))?;
+    }
+
+    builder.build().map_err(|error| format!("create {}: {error}", info.label))
+}
+
+/// The bar's background for the person signed in (`auto` counts as light until the bar paints).
+fn bar_background(state: &AppState) -> tauri::window::Color {
+    let dark = state.read(|shell| shell.display.theme == crate::model::ThemeDto::Dark);
+    let (r, g, b) = bar::surface_rgb(dark);
+    tauri::window::Color(r, g, b, 255)
 }
 
 /// What every web window's browser is started with. Debug builds append
@@ -281,6 +306,14 @@ fn blank_page() -> Result<Url, String> {
 fn gate_navigation(app: &AppHandle, info: &Arc<WebWindow>, url: &Url) -> bool {
     if blocked::is_blocked_page(url) || info.take_initial_blank(url) {
         return true;
+    }
+    if blocked::is_blank_page(url) {
+        // Back stepped onto the window's own start page (or a page sent itself there). It is not
+        // a site and shows nothing: stay where we are, and tell the bar Back is used up.
+        if let Ok(mut nav) = info.nav.lock() {
+            nav.blank_below();
+        }
+        return false;
     }
     if info.allow.allows_url(url) {
         info.remember(url);

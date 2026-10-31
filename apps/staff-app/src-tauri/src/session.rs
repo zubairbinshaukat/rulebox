@@ -107,8 +107,15 @@ pub fn apply_sign_in_outcome(state: &AppState, outcome: SignInOutcome) -> Result
             if let Err(error) = save_last_user(&employee) {
                 tracing::warn!(%error, "could not save last-user.json");
             }
+            let started = std::time::Instant::now();
             open_files(state, &files_root, employee.quota_bytes);
+            let opened = started.elapsed();
             redirect_known_folders(state);
+            tracing::info!(
+                open_files_ms = opened.as_millis() as u64,
+                redirect_ms = (started.elapsed() - opened).as_millis() as u64,
+                "sign-in disk work done"
+            );
             state.set_files_root(Some(files_root));
             let theme = crate::system::theme_for_sign_in(
                 state.org_theme(),

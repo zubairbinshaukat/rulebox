@@ -16,6 +16,7 @@
     "allow-app-snapshot",
     "allow-app-select-tab",
     "allow-app-close-tab",
+    "allow-viewer-fullscreen",
     "allow-fs-list",
     "allow-fs-stat",
     "allow-fs-mkdir",

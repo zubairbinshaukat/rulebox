@@ -3,7 +3,7 @@
 
 use std::sync::Arc;
 
-use rulebox_desktop::placement::Rect;
+use rulebox_desktop::placement::{self, Rect};
 use tauri::{AppHandle, Manager, State, Window};
 
 use crate::appwin::{self, AppView, AppWindows, SnapZone};
@@ -84,6 +84,25 @@ pub fn dev_note(window: Window, text: String) -> Result<(), CommandError> {
     if cfg!(debug_assertions) {
         let line: String = text.chars().take(400).collect();
         tracing::info!(note = %line, "ui note");
+    }
+    Ok(())
+}
+
+/// Debug builds: post a notice (and so a toast) to see how it looks and behaves.
+/// `tone` is a `NoticeTone` name. A release build ignores it.
+#[tauri::command]
+pub fn dev_toast(
+    window: Window,
+    state: State<'_, AppState>,
+    tone: crate::model::NoticeTone,
+    title: String,
+    detail: Option<String>,
+) -> Result<(), CommandError> {
+    require_label(&window, "shell-")?;
+    if cfg!(debug_assertions) {
+        let title: String = title.chars().take(120).collect();
+        let detail = detail.map(|text| text.chars().take(300).collect::<String>());
+        state.notify(tone, title, detail);
     }
     Ok(())
 }
@@ -197,6 +216,60 @@ pub fn popup_close(
     Ok(())
 }
 
+/// The taskbar page reports where its pills are (physical pixels, relative to the
+/// taskbar window). Only those areas take mouse input; the transparent strip
+/// between and around them lets clicks reach the window behind. An empty list
+/// gives the whole strip back.
+#[tauri::command]
+pub fn taskbar_shape(window: Window, rects: Vec<AnchorRect>) -> Result<(), CommandError> {
+    require_label(&window, crate::shellwin::TASKBAR)?;
+    // More pills than the bar can have is a broken page; keep the strip whole.
+    if rects.len() > 8 {
+        return Err(CommandError::Failed("too many taskbar areas".into()));
+    }
+    let hwnd = window
+        .hwnd()
+        .map_err(|error| CommandError::Failed(error.to_string()))?
+        .0 as isize;
+    let scale = window.scale_factor().unwrap_or(1.0);
+    let size = window
+        .inner_size()
+        .map_err(|error| CommandError::Failed(error.to_string()))?;
+    let margin = placement::scale_px(placement::TASKBAR_SHAPE_MARGIN_LOGICAL, scale);
+    let radius = placement::scale_px(
+        placement::TASKBAR_PILL_RADIUS_LOGICAL + placement::TASKBAR_SHAPE_MARGIN_LOGICAL,
+        scale,
+    );
+    let shape: Vec<Rect> = rects
+        .iter()
+        .filter(|rect| {
+            rect.x.is_finite() && rect.y.is_finite() && rect.width.is_finite() && rect.height.is_finite()
+        })
+        .filter_map(|rect| {
+            let pill = Rect::new(
+                rect.x.round() as i32,
+                rect.y.round() as i32,
+                (rect.x + rect.width).round() as i32,
+                (rect.y + rect.height).round() as i32,
+            );
+            placement::taskbar_shape_rect(pill, margin, size.width as i32, size.height as i32)
+        })
+        .collect();
+    // Nothing usable reported: the strip stays clickable (the window is taller
+    // than the strip, so "no region" would block the area above it).
+    let (shape, radius) = if shape.is_empty() {
+        let zone = placement::taskbar_strip_in_window(size.width as i32, size.height as i32, scale);
+        (vec![zone], 0)
+    } else {
+        (shape, radius)
+    };
+    let began = std::time::Instant::now();
+    let result = rulebox_desktop::windows::set_shape(hwnd, &shape, radius)
+        .map_err(|error| CommandError::Failed(error.to_string()));
+    tracing::debug!(pills = shape.len(), ms = began.elapsed().as_millis() as u64, "taskbar_shape applied");
+    result
+}
+
 // ---- Thumbnails (plan Step 16, Standard mode) ----------------------------------
 
 /// What the thumbnail popup shows for the window it is about.
@@ -307,14 +380,18 @@ fn require_exit_window(window: &Window) -> Result<(), CommandError> {
 
 /// Open the exit dialog. Any shell or built-in window may ask; it is done in Rust.
 #[tauri::command]
-pub fn admin_exit_open(
+pub async fn admin_exit_open(
     window: Window,
     app: AppHandle,
     host: State<'_, Arc<DesktopHost>>,
     state: State<'_, AppState>,
 ) -> Result<(), CommandError> {
     require_shell_or_app(&window)?;
-    crate::exit::open(&app, &host, &state).map_err(CommandError::Failed)
+    // Builds a window: never on the UI thread (see `open_doc`).
+    let (host, state) = (host.inner().clone(), state.inner().clone());
+    blocking(move || crate::exit::open(&app, &host, &state))
+        .await?
+        .map_err(CommandError::Failed)
 }
 
 /// The key combination the page listeners match; `None` when the exit is off.
@@ -734,7 +811,11 @@ pub async fn launch_app(
     require_label(&window, "shell-")?;
     let app = window.app_handle().clone();
     let (state, services) = (state.inner().clone(), services.inner().clone());
-    blocking(move || taskops::launch(&app, &services, &state, &id)).await
+    tracing::debug!(app = %id, "launch_app: begin");
+    let began = std::time::Instant::now();
+    let result = blocking(move || taskops::launch(&app, &services, &state, &id)).await;
+    tracing::debug!(ms = began.elapsed().as_millis() as u64, "launch_app: end");
+    result
 }
 
 /// A click on a window's taskbar button (restore / minimize / focus).
@@ -793,8 +874,14 @@ pub async fn show_desktop(
 }
 
 /// Open a built-in document. The path is relative to the employee root.
+///
+/// `async` on purpose: a plain `fn` command runs on the UI (main) thread, inside the
+/// WebView2 request callback of the page that called it, and creating a window there
+/// waits for the new WebView2 with a nested message loop that can never finish
+/// (found on the VM, 2026-10-31: the whole Staff App froze on a double-click). Any
+/// command that builds a window must run on the blocking pool, like `launch_app`.
 #[tauri::command]
-pub fn open_doc(
+pub async fn open_doc(
     window: Window,
     app: AppHandle,
     state: State<'_, AppState>,
@@ -804,8 +891,13 @@ pub fn open_doc(
 ) -> Result<String, CommandError> {
     require_shell_or_app(&window)?;
     let doc = appwin::parse_doc(&kind, &path).map_err(CommandError::Failed)?;
-    host.open(&app, state.inner(), doc)
-        .map_err(map_open_error(state.inner()))
+    let (state, host) = (state.inner().clone(), host.inner().clone());
+    let opened = blocking(move || {
+        host.open(&app, &state, doc)
+            .map_err(|error| map_open_error(&state)(error))
+    })
+    .await?;
+    opened
 }
 
 /// Minimize the calling built-in window only.
@@ -1170,4 +1262,30 @@ pub fn spawn_dev_cmd_poller(state: AppState) {
             }
         }
     });
+}
+
+#[cfg(test)]
+mod window_thread_tests {
+    /// A plain `fn` command runs on the UI thread, inside the WebView2 request
+    /// callback of the calling page. Building a window there waits for a new
+    /// WebView2 with a nested message loop and freezes the whole app (VM, 2026-10-31).
+    /// So no sync command may open or build a window; those must be `async` and
+    /// use `blocking(..)`.
+    #[test]
+    fn no_sync_command_builds_a_window() {
+        let source = include_str!("commands.rs");
+        let production = source.split("#[cfg(test)]\nmod window_thread_tests").next().unwrap_or(source);
+        let forbidden = ["host.open(", "exit::open(", "WebviewWindowBuilder", "web.open(", "open_files(", ".build()"];
+        for chunk in production.split("#[tauri::command").skip(1) {
+            let head: String = chunk.lines().skip_while(|l| !l.contains("fn ")).take(1).collect();
+            if !head.contains("pub fn ") {
+                continue; // async commands run on the runtime, not the UI thread
+            }
+            let end = chunk.find("\n}\n").unwrap_or(chunk.len());
+            let body = &chunk[..end];
+            for word in forbidden {
+                assert!(!body.contains(word), "sync command `{}` uses `{word}`", head.trim());
+            }
+        }
+    }
 }

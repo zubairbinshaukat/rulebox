@@ -31,6 +31,11 @@ class Fallback extends Component<{ children: ReactNode }, { failed: boolean }> {
   }
 }
 
+// The exit window is transparent: only the rounded card paints, nothing square behind it.
+if (isTauri()) {
+  document.documentElement.classList.add("rb-page-transparent");
+}
+
 installExitKey();
 
 createRoot(document.getElementById("root")!).render(

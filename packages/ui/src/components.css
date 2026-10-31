@@ -285,6 +285,13 @@
   opacity: calc(var(--rb-tile-mark) + 0.05);
   transform: rotate(-2deg) scale(1.06);
 }
+/* An app icon's corner copy: the logo's silhouette (never its own opaque background) in the
+   app's colour, cut out with a mask made once from the icon (`shell/iconArt.ts`). */
+.rb-tile__mark--mask {
+  background: oklch(0.6 0.15 var(--rb-hue, 175));
+  -webkit-mask: var(--rb-mark-url) center / contain no-repeat;
+  mask: var(--rb-mark-url) center / contain no-repeat;
+}
 /* A glyph's corner copy: the glyph itself, in the app's colour. */
 .rb-tile__mark--glyph {
   display: flex;
@@ -357,19 +364,82 @@
   box-shadow: 0 14px 26px -10px oklch(0.55 0.16 var(--rb-hue) / 0.6);
 }
 
+/* An app's own icon: its logo, cut out of the icon's background and scaled up until it spans about
+   93% of the rounded box (`data-icon-fit="logo"`, below). The logo has no box: it sits straight on
+   the surface, and the icon's old background colour is never drawn. Only a logo that would vanish
+   on the theme's surface is recoloured (`data-icon-recolor`, tokens `--rb-logo-filter-*`). A
+   picture that cannot be cut out (a photo) fills the box with `cover` on its flat colour
+   (`--rb-icon-edge`). `data-icon-kind="pending"` waits for the analysis (a frame or two) so the
+   wrong look does not flash first. */
 .rb-tile__icon--image {
-  background: var(--rb-icon-plate);
-  border: 1px solid var(--rb-icon-plate-border);
+  background: var(
+    --rb-icon-edge,
+    linear-gradient(
+      150deg,
+      oklch(var(--rb-art-top-l) var(--rb-art-c) var(--rb-hue)),
+      oklch(var(--rb-art-bottom-l) var(--rb-art-c) calc(var(--rb-hue) + 12))
+    )
+  );
   box-shadow: var(--rb-shadow-sm);
 }
 .rb-tile__icon--image::after {
   box-shadow: var(--rb-shadow-md);
 }
 .rb-tile__img {
-  width: 62%;
-  height: 62%;
-  object-fit: contain;
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  display: block;
+  object-fit: cover;
+  border-radius: inherit;
   user-select: none;
+}
+.rb-tile__icon--image[data-icon-kind="pending"] .rb-tile__img {
+  visibility: hidden;
+}
+/* `inset`: a transparent logo whose cut-out failed, the original with a margin on a plate in the app's
+   colour, dark under a light logo and light under a dark one. */
+.rb-tile__icon--image[data-icon-fit="inset"][data-icon-tone="light"],
+.rb-task__art--photo[data-icon-fit="inset"][data-icon-tone="light"] {
+  background: linear-gradient(150deg, oklch(0.36 0.08 var(--rb-hue)), oklch(0.25 0.06 calc(var(--rb-hue) + 12)));
+}
+.rb-tile__icon--image[data-icon-fit="inset"][data-icon-tone="dark"],
+.rb-task__art--photo[data-icon-fit="inset"][data-icon-tone="dark"] {
+  background: linear-gradient(150deg, oklch(0.98 0.02 var(--rb-hue)), oklch(0.92 0.045 calc(var(--rb-hue) + 12)));
+}
+.rb-tile__icon--image[data-icon-fit="inset"] .rb-tile__img,
+.rb-task__art--photo[data-icon-fit="inset"] img {
+  inset: 12%;
+  width: 76%;
+  height: 76%;
+  object-fit: contain;
+  border-radius: 0;
+}
+/* `logo`: the cut-out (iconCutout.ts) is already cropped to the logo plus a 3.5% margin, so `contain`
+   on the square box fills it. No box, no shadow, no ring: the box is transparent. */
+.rb-tile__icon--image[data-icon-fit="logo"],
+.rb-task__art--photo[data-icon-fit="logo"] {
+  background: none;
+  box-shadow: none;
+}
+.rb-tile__icon--image[data-icon-fit="logo"]::after {
+  box-shadow: none;
+}
+.rb-tile__icon--image[data-icon-fit="logo"] .rb-tile__img,
+.rb-task__art--photo[data-icon-fit="logo"] img {
+  object-fit: contain;
+  border-radius: 0;
+}
+/* A logo that would vanish on the theme's surface is recoloured, never boxed: the filter changes the
+   cut-out's colours only (its alpha stays), so no square and no halo. `none` where the logo reads. */
+.rb-tile__icon--image[data-icon-fit="logo"][data-icon-recolor="dark-logo"] .rb-tile__img,
+.rb-task__art--photo[data-icon-fit="logo"][data-icon-recolor="dark-logo"] img {
+  filter: var(--rb-logo-filter-dark);
+}
+.rb-tile__icon--image[data-icon-fit="logo"][data-icon-recolor="light-logo"] .rb-tile__img,
+.rb-task__art--photo[data-icon-fit="logo"][data-icon-recolor="light-logo"] img {
+  filter: var(--rb-logo-filter-light);
 }
 
 .rb-tile__count {
@@ -437,17 +507,19 @@
 [data-lite="true"] .rb-tile__icon--glyph {
   box-shadow: inset 0 1px 0 oklch(1 0 0 / 0.32);
 }
+/* Reduced motion. `:where(:root:not([data-force-motion]))` adds no specificity; the
+   attribute is set only by the debug builds' "Force full motion" switch (lib/devMotion.ts). */
 @media (prefers-reduced-motion: reduce) {
-  .rb-tile,
-  .rb-tile::after,
-  .rb-tile__icon,
-  .rb-tile__icon::after,
-  .rb-tile__mark {
+  :where(:root:not([data-force-motion="true"])) .rb-tile,
+  :where(:root:not([data-force-motion="true"])) .rb-tile::after,
+  :where(:root:not([data-force-motion="true"])) .rb-tile__icon,
+  :where(:root:not([data-force-motion="true"])) .rb-tile__icon::after,
+  :where(:root:not([data-force-motion="true"])) .rb-tile__mark {
     transition: none;
   }
-  .rb-tile:hover,
-  .rb-tile:hover .rb-tile__icon,
-  .rb-tile:hover .rb-tile__mark {
+  :where(:root:not([data-force-motion="true"])) .rb-tile:hover,
+  :where(:root:not([data-force-motion="true"])) .rb-tile:hover .rb-tile__icon,
+  :where(:root:not([data-force-motion="true"])) .rb-tile:hover .rb-tile__mark {
     transform: none;
   }
 }
@@ -962,6 +1034,14 @@
   border: 1px solid var(--rb-glass-border);
 }
 .rb-surface--popover {
+  /* SOLID. A popup is its own transparent window: nothing in its page sits
+     behind the panel to blur, and the OS composites any alpha straight over
+     the windows beneath, so the Start menu, account menu and quick settings
+     were hard to read. Opaque token, no backdrop-filter (also cheaper). Only
+     the taskbar pills and the desktop stay glass. */
+  background: var(--rb-surface);
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
   /* The popup window is exactly the panel's size, so the shadow is clipped
      and a white border vanishes over white content behind it (the corners
      then read as patches). A visible hairline keeps the edge. */
@@ -1005,7 +1085,8 @@
   border-radius: var(--rb-r-22);
   background: var(--rb-glass-bar);
   border: 1px solid var(--rb-glass-border);
-  box-shadow: var(--rb-shadow-md);
+  /* No outer shadow: the taskbar window is clipped to the pills, so a shadow
+     could only show as a pale or dark fringe in the strip around them. */
   -webkit-backdrop-filter: blur(var(--rb-blur));
   backdrop-filter: blur(var(--rb-blur));
 }
@@ -1158,6 +1239,15 @@
   font-size: 11.5px;
   color: var(--rb-faint);
 }
+/* Developer switch under the list: "Force full motion". */
+.rb-monitor__toggle {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 10px 12px;
+  border-radius: 14px;
+  background: var(--rb-hover);
+}
 .rb-monitor__meters {
   display: grid;
   grid-template-columns: 1fr 1fr;
@@ -1308,6 +1398,7 @@
     inset 0 1px 0 oklch(1 0 0 / 0.3),
     0 4px 10px -5px oklch(0.55 0.16 var(--rb-hue) / 0.6);
 }
+/* A program window's own icon (Windows gives it a small bitmap): on a light plate. */
 .rb-task__art--image {
   background: var(--rb-icon-plate);
   border: 1px solid var(--rb-icon-plate-border);
@@ -1318,6 +1409,31 @@
   height: 22px;
   object-fit: contain;
 }
+/* A catalogue app's own icon: full-bleed in the rounded box, like the tile's (see `.rb-tile__icon--image`). */
+.rb-task__art--photo {
+  position: relative;
+  background: var(
+    --rb-icon-edge,
+    linear-gradient(
+      150deg,
+      oklch(var(--rb-art-top-l) var(--rb-art-c) var(--rb-hue)),
+      oklch(var(--rb-art-bottom-l) var(--rb-art-c) calc(var(--rb-hue) + 12))
+    )
+  );
+  box-shadow: var(--rb-shadow-sm);
+}
+.rb-task__art--photo img {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  display: block;
+  object-fit: cover;
+  border-radius: inherit;
+}
+.rb-task__art--photo[data-icon-kind="pending"] img {
+  visibility: hidden;
+}
 .rb-task__art--lg {
   width: 56px;
   height: 56px;
@@ -1327,6 +1443,12 @@
 .rb-task__art--lg.rb-task__art--image img {
   width: 34px;
   height: 34px;
+}
+.rb-task__art--sm {
+  width: 26px;
+  height: 26px;
+  border-radius: 8px;
+  font-size: 16px;
 }
 .rb-task:hover .rb-task__art {
   transform: translateY(-2px) scale(1.06);
@@ -1474,7 +1596,7 @@
   text-align: center;
 }
 @media (prefers-reduced-motion: reduce) {
-  .rb-switcher__item[aria-selected="true"] {
+  :where(:root:not([data-force-motion="true"])) .rb-switcher__item[aria-selected="true"] {
     transform: none;
   }
 }
@@ -1509,8 +1631,8 @@
   transform: none;
 }
 @media (prefers-reduced-motion: reduce) {
-  .rb-task:hover .rb-task__art,
-  .rb-tray-button:hover {
+  :where(:root:not([data-force-motion="true"])) .rb-task:hover .rb-task__art,
+  :where(:root:not([data-force-motion="true"])) .rb-tray-button:hover {
     transform: none;
   }
 }
@@ -1619,22 +1741,22 @@
 }
 /* Reduced motion: a steady accent bar instead of a pulse. */
 @media (prefers-reduced-motion: reduce) {
-  .rb-task[data-flashing="true"] .rb-task__bar {
+  :where(:root:not([data-force-motion="true"])) .rb-task[data-flashing="true"] .rb-task__bar {
     animation: none;
   }
-  .rb-pager__thumb,
-  .rb-progress__fill,
-  .rb-monitor__fill,
-  .rb-task__bar,
-  .rb-switch__thumb,
-  .rb-switcher__item {
+  :where(:root:not([data-force-motion="true"])) .rb-pager__thumb,
+  :where(:root:not([data-force-motion="true"])) .rb-progress__fill,
+  :where(:root:not([data-force-motion="true"])) .rb-monitor__fill,
+  :where(:root:not([data-force-motion="true"])) .rb-task__bar,
+  :where(:root:not([data-force-motion="true"])) .rb-switch__thumb,
+  :where(:root:not([data-force-motion="true"])) .rb-switcher__item {
     transition: none;
   }
 }
 /* With no pulse (reduced motion, Lite) "needs attention" still differs from "active":
    a taller bar in the warning shade, so it is not told by animation alone. */
 @media (prefers-reduced-motion: reduce) {
-  .rb-task[data-flashing="true"] .rb-task__bar {
+  :where(:root:not([data-force-motion="true"])) .rb-task[data-flashing="true"] .rb-task__bar {
     height: 6px;
     background: var(--rb-warning-text);
   }
@@ -1714,6 +1836,20 @@
   cursor: pointer;
 }
 
+/* A slider whose icon in front already says what it is (quick settings): the
+   name stays for screen readers and is not drawn. */
+.rb-slider--bare .rb-slider__label {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
 /* Menu */
 .rb-menu {
   display: flex;
@@ -1777,6 +1913,57 @@
   background: var(--rb-hover);
 }
 .rb-ctx-item:focus-visible {
+  outline-offset: -2px;
+}
+
+/*
+ * Files: rows, cards, navigation and the desktop's My files panel.
+ * Hover is a static tint (a colour change, nothing animates), so it is the same in
+ * Lite and with reduced motion. The tint is a few percent of the ink colour, so it
+ * shows on the page, on a surface and in the dark theme alike. A selected item keeps
+ * its own tint and gains a thin accent line on hover; keyboard focus stays the
+ * global 2 px ring (or the inline outline on a list row).
+ */
+.rb-file-row:hover,
+.rb-nav-btn:hover,
+.rb-crumb:hover,
+.rb-filter-btn:hover:not([aria-pressed="true"]) {
+  background: color-mix(in oklch, var(--rb-ink) 5.5%, transparent);
+}
+.rb-file-row[aria-selected="true"],
+.rb-nav-btn[aria-current="page"],
+.rb-file-card[aria-selected="true"] {
+  background: var(--rb-accent-soft);
+}
+.rb-file-row[aria-selected="true"]:hover,
+.rb-nav-btn[aria-current="page"]:hover,
+.rb-file-card[aria-selected="true"]:hover {
+  background: var(--rb-accent-soft);
+  box-shadow: inset 0 0 0 1px color-mix(in oklch, var(--rb-accent) 40%, transparent);
+}
+.rb-file-card {
+  border: 1px solid var(--rb-line);
+  background: var(--rb-surface);
+}
+.rb-file-card:hover:not([aria-selected="true"]) {
+  background: color-mix(in oklch, var(--rb-ink) 5.5%, var(--rb-surface));
+  border-color: color-mix(in oklch, var(--rb-accent) 45%, var(--rb-line));
+}
+.rb-panel-row {
+  background: var(--rb-bg);
+}
+.rb-panel-row:hover {
+  background: var(--rb-accent-soft);
+  box-shadow: inset 0 0 0 1px color-mix(in oklch, var(--rb-accent) 35%, transparent);
+}
+.rb-panel-row:focus-visible {
+  outline: 2px solid var(--rb-focus);
+  outline-offset: 1px;
+}
+.rb-nav-btn:focus-visible,
+.rb-crumb:focus-visible,
+.rb-filter-btn:focus-visible {
+  outline: 2px solid var(--rb-focus);
   outline-offset: -2px;
 }
 

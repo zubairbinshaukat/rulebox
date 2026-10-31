@@ -204,7 +204,10 @@ fn apply(plan: &[Redirect], create_missing: bool) -> Report {
             report.unchanged.push(folder);
             continue;
         }
-        match set(folder, &item.target) {
+        let began = std::time::Instant::now();
+        let result = set(folder, &item.target);
+        tracing::debug!(?folder, ms = began.elapsed().as_millis() as u64, "SHSetKnownFolderPath");
+        match result {
             Ok(()) => report.changed.push(folder),
             Err(error) => report.failed.push((folder, error.to_string())),
         }

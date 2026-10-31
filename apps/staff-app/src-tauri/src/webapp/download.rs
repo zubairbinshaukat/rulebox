@@ -6,7 +6,8 @@ use std::path::PathBuf;
 
 use crate::files::names::{self, INTERNAL_PREFIX};
 use crate::files::saferoot::{FileError, RelPath, SafeRoot};
-use crate::files::types::{check_content, opener_for, Opener};
+use crate::files::types::check_content;
+pub use crate::files::types::is_blocked_name;
 use crate::files::FileSession;
 
 /// Longest download name kept, in characters (the extension survives a cut).
@@ -109,11 +110,6 @@ pub fn decide_download(downloads_allowed: bool, blocked_type: bool, quota_full: 
     } else {
         DownloadDecision::Allow
     }
-}
-
-/// Is this file name on the deny-list (a type that may never be opened)?
-pub fn is_blocked_name(name: &str) -> bool {
-    matches!(opener_for(name, &Default::default()), Opener::Blocked)
 }
 
 /// What happened to a finished download.

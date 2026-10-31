@@ -1,0 +1,112 @@
+:root {
+  color-scheme: light;
+  --rb-bg: oklch(0.935 0.009 85);
+  --rb-ink: oklch(0.24 0.012 70);
+  --rb-muted: oklch(0.5 0.012 70);
+  --rb-line: oklch(0.9 0.006 80);
+  --rb-line-strong: oklch(0.6 0.01 70);
+  --rb-surface: oklch(0.995 0.002 85);
+  --rb-hover: oklch(0.94 0.006 85);
+  --rb-focus: oklch(0.5 0.085 175);
+  --rb-success-text: oklch(0.42 0.1 150);
+  --rb-danger-text: oklch(0.5 0.15 25);
+  --rb-shadow-popover: 0 20px 48px -16px oklch(0.3 0.02 70 / 0.35);
+}
+[data-theme="dark"] {
+  color-scheme: dark;
+  --rb-bg: oklch(0.165 0.022 258);
+  --rb-ink: oklch(0.97 0.008 250);
+  --rb-muted: oklch(0.77 0.018 255);
+  --rb-line: oklch(0.33 0.025 258);
+  --rb-line-strong: oklch(0.56 0.025 258);
+  --rb-surface: oklch(0.215 0.024 258);
+  --rb-hover: oklch(0.29 0.028 258);
+  --rb-focus: oklch(0.64 0.09 175);
+  --rb-success-text: oklch(0.82 0.1 150);
+  --rb-danger-text: oklch(0.78 0.15 25);
+  --rb-shadow-popover: 0 20px 48px -16px oklch(0 0 0 / 0.55);
+}
+* { box-sizing: border-box; }
+html, body {
+  margin: 0;
+  height: 100%;
+  overflow: hidden;
+  background: transparent;
+  color: var(--rb-ink);
+  font: 13px/1 "Segoe UI Variable Text", "Segoe UI", system-ui, sans-serif;
+  user-select: none;
+  -webkit-user-select: none;
+  cursor: default;
+}
+.bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 44px;
+  padding: 0 10px;
+  background: var(--rb-surface);
+  border-bottom: 1px solid var(--rb-line);
+}
+.nav, .actions { display: flex; align-items: center; gap: 2px; flex: none; }
+.actions[hidden] { display: none; }
+button {
+  all: unset;
+  box-sizing: border-box;
+  width: 32px;
+  height: 32px;
+  border-radius: 8px;
+  display: grid;
+  place-items: center;
+  cursor: pointer;
+  color: var(--rb-ink);
+  transition: transform 0.08s ease, opacity 0.12s ease;
+}
+button:hover { background: var(--rb-hover); }
+button:active { transform: scale(0.92); }
+button:focus-visible { outline: 2px solid var(--rb-focus); outline-offset: 1px; }
+button:disabled { opacity: 0.38; cursor: default; background: none; transform: none; }
+svg { width: 18px; height: 18px; display: block; pointer-events: none; }
+.i-stop { display: none; }
+.loading .i-stop { display: block; }
+.loading .i-reload { display: none; }
+.address {
+  flex: 1 1 auto;
+  min-width: 0;
+  height: 30px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 12px 0 10px;
+  border-radius: 15px;
+  background: var(--rb-bg);
+  color: var(--rb-ink);
+  cursor: default;
+}
+.sec { flex: none; display: grid; place-items: center; color: var(--rb-muted); }
+.sec svg { width: 16px; height: 16px; }
+.sec .g { display: none; }
+.address[data-kind="site"][data-secure="true"] .g-lock { display: block; color: var(--rb-success-text); }
+.address[data-kind="site"][data-secure="false"] .g-warn { display: block; color: var(--rb-danger-text); }
+.address[data-kind="app"] .g-app { display: block; }
+.address[data-kind="blocked"] .g-blocked { display: block; color: var(--rb-danger-text); }
+.host { flex: 0 1 auto; min-width: 0; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.rest { flex: 0 100 auto; min-width: 0; color: var(--rb-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.scrim { position: fixed; inset: 0; background: transparent; }
+.scrim[hidden], .menu[hidden] { display: none; }
+.menu {
+  position: fixed;
+  top: 46px;
+  right: 10px;
+  min-width: 200px;
+  max-width: calc(100vw - 20px);
+  padding: 6px;
+  border-radius: 12px;
+  background: var(--rb-surface);
+  border: 1px solid var(--rb-line-strong);
+  box-shadow: var(--rb-shadow-popover);
+}
+.menu button { all: unset; box-sizing: border-box; width: 100%; height: 34px; display: flex; align-items: center; gap: 10px; padding: 0 10px; border-radius: 8px; cursor: pointer; }
+.menu button:hover { background: var(--rb-hover); }
+.menu button:focus-visible { outline: 2px solid var(--rb-focus); outline-offset: -2px; }
+.calm * { transition: none !important; }
+@media (prefers-reduced-motion: reduce) { * { transition: none !important; } }

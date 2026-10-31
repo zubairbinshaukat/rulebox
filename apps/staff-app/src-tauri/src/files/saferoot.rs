@@ -48,6 +48,10 @@ pub enum FileError {
     },
     #[error("this type of file can't be opened")]
     BlockedType,
+    /// A file may not be given (or kept under) a name the deny-list refuses:
+    /// `Notes.txt` -> `Notes.exe` is not allowed (PRD 7.3). `extension` has no dot.
+    #[error("this type of file can't be created here")]
+    BlockedName { extension: String },
     #[error("too large")]
     TooLarge,
     #[error("the file is damaged")]
@@ -74,6 +78,18 @@ impl From<io::Error> for FileError {
 }
 
 type Result<T> = std::result::Result<T, FileError>;
+
+/// The one place a file name is tested against the deny-list for the file
+/// operations that create or re-name a file (rename, copy, move). Uses the same
+/// rule as opening and downloads: `types::is_blocked_name`.
+fn refuse_blocked_name(name: &str) -> Result<()> {
+    if super::types::is_blocked_name(name) {
+        return Err(FileError::BlockedName {
+            extension: super::types::extension(name).unwrap_or_default(),
+        });
+    }
+    Ok(())
+}
 
 /// A path inside the employee's folder: validated components, no `..`, no
 /// drive, no stream. Only constructible through `parse` / `join`.
@@ -387,6 +403,11 @@ impl SafeRoot {
             return Err(FileError::IsReparsePoint);
         }
         let (to_parent, to_leaf) = self.parent_and_leaf(to)?;
+        // Security rule (PRD 7.3): a file can never be renamed to a program or script name.
+        // Folders are not files: a folder called `tools.js` is only a name.
+        if !meta.is_dir() {
+            refuse_blocked_name(to_leaf)?;
+        }
         let case_only = from.parent() == to.parent()
             && from_leaf != to_leaf
             && from_leaf.to_lowercase() == to_leaf.to_lowercase();
@@ -404,6 +425,9 @@ impl SafeRoot {
             return Err(FileError::IntoItself);
         }
         let (from_parent, from_leaf) = self.parent_and_leaf(from)?;
+        if source.kind == EntryKind::File {
+            refuse_blocked_name(from_leaf)?;
+        }
         let target = self.open_dir_at(to_dir)?;
         let is_dir = source.kind == EntryKind::Folder;
         let name = unique_name(&target, from_leaf, is_dir)?;
@@ -438,6 +462,9 @@ impl SafeRoot {
             return Ok(from.clone());
         }
         let (from_parent, from_leaf) = self.parent_and_leaf(from)?;
+        if source.kind == EntryKind::File {
+            refuse_blocked_name(from_leaf)?;
+        }
         let target = self.open_dir_at(to_dir)?;
         let name = unique_name(&target, from_leaf, source.kind == EntryKind::Folder)?;
         from_parent.rename(from_leaf, &target, &name)?;

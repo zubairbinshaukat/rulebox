@@ -71,7 +71,7 @@ impl Reply {
     }
 }
 
-fn from_own_origin(value: &str) -> bool {
+pub(crate) fn from_own_origin(value: &str) -> bool {
     OWN_ORIGINS
         .iter()
         .any(|own| value == *own || value.starts_with(&format!("{own}/")))

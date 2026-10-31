@@ -51,11 +51,12 @@ export function Breadcrumbs({ currentPath, onNavigate, dropTarget }: Breadcrumbs
               ) : (
                 <button
                   type="button"
+                  className="rb-crumb"
                   onClick={() => onNavigate(crumb.path)}
                   data-drop-dir={crumb.path}
                   style={{
                     ...crumbButton,
-                    background: isDropActive ? "var(--rb-accent-soft)" : "transparent",
+                    background: isDropActive ? "var(--rb-accent-soft)" : undefined,
                   }}
                 >
                   {idx === 0 ? <IconFolder width={16} height={16} style={{ display: "inline-flex" }} /> : null}
@@ -109,7 +110,6 @@ const crumbButton: CSSProperties = {
   display: "inline-flex",
   alignItems: "center",
   gap: 6,
-  transition: "color 0.15s ease, background 0.15s ease",
 };
 
 const crumbText: CSSProperties = {

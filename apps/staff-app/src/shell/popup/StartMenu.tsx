@@ -21,6 +21,7 @@ import { openFile } from "../../lib/files";
 import { useShell } from "../../lib/store";
 import { call } from "../../lib/tauri";
 import { AppIcon } from "../appIcon";
+import { AppArt } from "../AppArtIcon";
 import { matchesSearch } from "./search";
 
 /**
@@ -238,7 +239,11 @@ export function StartMenu() {
             }}
           >
             <span aria-hidden style={{ fontSize: 22, display: "flex", color: "var(--rb-accent)" }}>
-              <AppIcon app={app} />
+              {app.iconUrl ? (
+                <AppArt app={app} small />
+              ) : (
+                <AppIcon app={app} />
+              )}
             </span>
             <span style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis" }}>
               {app.name}

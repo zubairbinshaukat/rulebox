@@ -78,6 +78,33 @@ pub fn taskbar_rect(mode: ShellMode, monitor: Rect, work: Rect, scale: f64) -> R
     }
 }
 
+/// Room above the strip for toast notifications (three cards of up to about
+/// 100 px, their gaps and the gap to the strip), in logical pixels. The taskbar window is this much
+/// taller than the strip, and only its pills and cards (a window region) take
+/// clicks, so the extra height is invisible and click-through.
+pub const TOAST_AREA_LOGICAL: i32 = 360;
+
+/// The taskbar **window**: the strip plus the toast area above it, kept inside
+/// the usable monitor (shell) or work area (dev). Its bottom edge is the
+/// strip's, so the page lays the pills out from the bottom.
+pub fn taskbar_window_rect(mode: ShellMode, monitor: Rect, work: Rect, scale: f64) -> Rect {
+    let strip = taskbar_rect(mode, monitor, work, scale);
+    let top_limit = match mode {
+        ShellMode::Shell => monitor.top,
+        ShellMode::Dev => work.top,
+    };
+    let top = (strip.top - scale_px(TOAST_AREA_LOGICAL, scale)).max(top_limit).min(strip.top);
+    Rect::new(strip.left, top, strip.right, strip.bottom)
+}
+
+/// The strip inside the taskbar window, in the window's own (client) pixels:
+/// its bottom `TASKBAR_ZONE_LOGICAL` rows. The region used until the page says
+/// where its pills are.
+pub fn taskbar_strip_in_window(width: i32, height: i32, scale: f64) -> Rect {
+    let zone = taskbar_zone_px(scale).min(height.max(1));
+    Rect::new(0, (height - zone).max(0), width.max(1), height.max(1))
+}
+
 /// The work area to set in shell mode: the monitor minus the strip.
 pub fn work_area_after_reserve(monitor: Rect, reserve_px: i32) -> Rect {
     let reserve = reserve_px.clamp(0, monitor.height().saturating_sub(1).max(0));
@@ -145,9 +172,49 @@ pub fn popup_rect(size: (i32, i32), anchor: Option<Rect>, bounds: Rect, gap: i32
     clamp_into(raw, inset)
 }
 
+/// Corner radius of the taskbar's pills, in logical pixels (`--rb-r-22`).
+pub const TASKBAR_PILL_RADIUS_LOGICAL: i32 = 22;
+
+/// How far the clickable shape of a taskbar pill reaches past the pill, in
+/// logical pixels. Zero: anything past the pill's own border would be a strip
+/// that shows the window behind as a pale rim (a window region has no
+/// anti-aliasing, so a margin cannot fade out). The page draws nothing outside
+/// the pills (no outer shadow), so nothing is cut off.
+pub const TASKBAR_SHAPE_MARGIN_LOGICAL: i32 = 0;
+
+/// The part of a taskbar window that takes mouse input and is drawn for one
+/// pill: `pill` grown by `margin` and kept inside the `width` x `height`
+/// client area. `None` when nothing of it is left (empty, or off the window).
+pub fn taskbar_shape_rect(pill: Rect, margin: i32, width: i32, height: i32) -> Option<Rect> {
+    let grown = Rect::new(
+        (pill.left - margin).max(0),
+        (pill.top - margin).max(0),
+        (pill.right + margin).min(width),
+        (pill.bottom + margin).min(height),
+    );
+    (grown.width() > 0 && grown.height() > 0).then_some(grown)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn taskbar_shape_grows_a_pill_and_stays_in_the_window() {
+        let pill = Rect::new(12, 12, 72, 72);
+        assert_eq!(
+            taskbar_shape_rect(pill, 2, 1366, 84),
+            Some(Rect::new(10, 10, 74, 74))
+        );
+        // Clamped at the window edges, not pushed outside them.
+        assert_eq!(
+            taskbar_shape_rect(Rect::new(0, 0, 60, 84), 2, 1366, 84),
+            Some(Rect::new(0, 0, 62, 84))
+        );
+        // Entirely off the window, or empty after clamping: nothing.
+        assert_eq!(taskbar_shape_rect(Rect::new(2000, 0, 2100, 60), 2, 1366, 84), None);
+        assert_eq!(taskbar_shape_rect(Rect::new(10, 10, 10, 10), 0, 1366, 84), None);
+    }
 
     const M_1366: Rect = Rect::new(0, 0, 1366, 768);
     const M_1920: Rect = Rect::new(0, 0, 1920, 1080);
@@ -183,6 +250,28 @@ mod tests {
         // 1920x1080 @125 %: Windows taskbar of 60 px physical at the bottom.
         let work = Rect::new(0, 0, 1920, 1020);
         assert_eq!(dev_taskbar_rect(work, 1.25), Rect::new(0, 915, 1920, 1020));
+    }
+
+    #[test]
+    fn taskbar_window_is_the_strip_plus_the_toast_area_above_it() {
+        let window = taskbar_window_rect(ShellMode::Shell, M_1366, M_1366, 1.0);
+        assert_eq!(window, Rect::new(0, 324, 1366, 768));
+        // Same bottom edge as the strip, so the pills do not move.
+        assert_eq!(window.bottom, shell_taskbar_rect(M_1366, 1.0).bottom);
+        // Scaled like everything else.
+        let scaled = taskbar_window_rect(ShellMode::Shell, M_1920, M_1920, 1.5);
+        assert_eq!(scaled, Rect::new(0, 1080 - 126 - 540, 1920, 1080));
+        // Dev mode stays inside the work area.
+        let work = Rect::new(0, 0, 1366, 400);
+        assert_eq!(taskbar_window_rect(ShellMode::Dev, M_1366, work, 1.0), Rect::new(0, 0, 1366, 400));
+    }
+
+    #[test]
+    fn the_strip_is_the_bottom_of_the_taller_window() {
+        assert_eq!(taskbar_strip_in_window(1366, 444, 1.0), Rect::new(0, 360, 1366, 444));
+        assert_eq!(taskbar_strip_in_window(1920, 666, 1.5), Rect::new(0, 540, 1920, 666));
+        // A window shorter than the strip is all strip.
+        assert_eq!(taskbar_strip_in_window(800, 40, 1.0), Rect::new(0, 0, 800, 40));
     }
 
     #[test]

@@ -25,12 +25,13 @@ function errorText(outcome: VerifyOutcomeDto): string | null {
 
 /**
  * Convenience lock. Apps stay open. Unlock checks the password with the agent.
+ * The card shows at once: the logo's lock animation used to play over it for
+ * three seconds, which read as the splash screen coming back.
  */
 export function LockScreen({ shell, employee }: LockScreenProps) {
   const [password, setPassword] = useState("");
   const [checking, setChecking] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
-  const [logo, setLogo] = useState(true);
   const first = employee.name.split(" ")[0] ?? employee.name;
   useDocumentTitle("Locked - Rulebox");
 
@@ -150,21 +151,6 @@ export function LockScreen({ shell, employee }: LockScreenProps) {
         </Panel>
         <div style={{ fontSize: 13, color: "var(--rb-muted)" }}>{shell.agent?.orgName ?? "Rulebox"}</div>
       </div>
-      {logo ? (
-        <div
-          style={{
-            position: "absolute",
-            inset: 0,
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "center",
-            zIndex: 40,
-            pointerEvents: "none",
-          }}
-        >
-          <LogoMotion animation="lock" onDone={() => setLogo(false)} />
-        </div>
-      ) : null}
     </main>
   );
 }

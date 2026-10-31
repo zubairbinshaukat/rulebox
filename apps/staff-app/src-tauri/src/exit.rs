@@ -148,12 +148,16 @@ pub fn open(app: &AppHandle, host: &Arc<DesktopHost>, state: &AppState) -> Resul
     let window = builder
         .title("Rulebox administrator exit")
         .decorations(false)
+        // Transparent and without the native shadow: the OS shadow and any page
+        // background are rectangles, which showed as a square frame around the
+        // rounded card. The page draws the card and its own soft shadow.
+        .transparent(true)
+        .shadow(false)
         .resizable(false)
         .always_on_top(true)
         .inner_size(WIDTH, HEIGHT)
         .center()
         .focused(true)
-        .shadow(true)
         .devtools(cfg!(debug_assertions))
         .disable_drag_drop_handler()
         .build()

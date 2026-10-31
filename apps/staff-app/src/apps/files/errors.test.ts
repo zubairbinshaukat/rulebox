@@ -13,6 +13,14 @@ describe("file error messages", () => {
     [{ kind: "quotaExceeded", shortBy: 1 }, "Storage is full. Delete files to save new ones."],
     [{ kind: "quotaExceeded", shortBy: 2_097_152 }, "Storage is full. 2 MB more space is needed."],
     [{ kind: "blockedType" }, "This type of file can't be opened on this PC."],
+    [
+      { kind: "blockedName", extension: "exe" },
+      "Files ending in .exe aren't allowed on this PC. Choose a different ending for the name.",
+    ],
+    [
+      { kind: "blockedName", extension: "" },
+      "This type of file isn't allowed on this PC. Choose a different ending for the name.",
+    ],
     [{ kind: "tooLarge" }, "That is too large to handle here."],
     [{ kind: "damaged" }, "That file looks damaged."],
     [{ kind: "intoItself" }, "A folder can't be moved inside itself."],

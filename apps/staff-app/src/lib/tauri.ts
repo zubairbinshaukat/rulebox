@@ -11,6 +11,7 @@ import type {
   FileKind,
   ImageInfo,
   KioskPhaseDto,
+  NoticeTone,
   OpenAction,
   PasteResult,
   ShellState,
@@ -92,6 +93,7 @@ type Commands = {
   ui_ready: { args: Record<string, never>; result: void };
   ui_alive: { args: Record<string, never>; result: void };
   dev_note: { args: { text: string }; result: void };
+  dev_toast: { args: { tone: NoticeTone; title: string; detail: string | null }; result: void };
   dismiss_notice: { args: { id: number }; result: void };
   notices_seen: { args: Record<string, never>; result: void };
   set_volume: { args: { level: number }; result: void };
@@ -113,6 +115,7 @@ type Commands = {
     result: void;
   };
   popup_close: { args: Record<string, never>; result: void };
+  taskbar_shape: { args: { rects: AnchorRect[] }; result: void };
   sign_in: {
     args: { username: string; password: string };
     result: SignInOutcomeDto;
@@ -177,6 +180,7 @@ type Commands = {
   fs_image_info: { args: { path: string }; result: ImageInfo };
   fs_open: { args: { path: string }; result: OpenAction };
   fs_open_with: { args: { path: string }; result: OpenAction };
+  viewer_fullscreen: { args: { on: boolean }; result: void };
 };
 
 export function call<K extends keyof Commands>(

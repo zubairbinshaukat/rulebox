@@ -110,8 +110,11 @@ function install() {
         disk.clip = { op: a.op as "copy" | "cut", paths: a.paths as string[] };
         act(() => handlers.get("files://clipboard")?.(disk.clip));
         return undefined;
-      case "fs_handler":
-        return null;
+      case "fs_handler": {
+        // The demo policy: Notepad opens text and CSV files.
+        const ext = (a.path as string).split(".").pop()?.toLowerCase();
+        return ext === "txt" || ext === "csv" ? "Notepad" : null;
+      }
       case "fs_mkdir": {
         const path = a.path as string;
         if (disk.folders.has(path) || disk.files.has(path)) reject({ kind: "exists" });
@@ -123,6 +126,10 @@ function install() {
         const from = a.from as string;
         const to = a.to as string;
         if (disk.files.has(to) || disk.folders.has(to)) reject({ kind: "exists" });
+        // The backend refuses a file name the deny-list blocks (the single `is_blocked_name` rule).
+        if (!disk.folders.has(from) && /\.(exe|bat|cmd|ps1|js|vbs|msi)$/i.test(to)) {
+          reject({ kind: "blockedName", extension: (to.split(".").pop() ?? "").toLowerCase() });
+        }
         if (disk.folders.has(from)) {
           disk.folders.delete(from);
           disk.folders.add(to);
@@ -315,10 +322,38 @@ describe("the file explorer, driven by the keyboard", () => {
     key("ContextMenu");
     const menu = await screen.findByRole("menu");
     expect(within(menu).getByRole("menuitem", { name: /Rename/ })).toBeTruthy();
-    // No "Open with" entry: no handler is configured.
+    // A folder has no "Open with" entry.
     expect(within(menu).queryByRole("menuitem", { name: /Open with/ })).toBeNull();
     fireEvent.keyDown(menu, { key: "Escape" });
     await waitFor(() => expect(screen.queryByRole("menu")).toBeNull());
+  });
+
+  it("offers Open with <app> for text and CSV files that have a handler", async () => {
+    await ready();
+    key("ArrowDown"); // Docs
+    key("ArrowDown"); // a.txt
+    key("ContextMenu");
+    let menu = await screen.findByRole("menu");
+    expect(await within(menu).findByRole("menuitem", { name: /Open with Notepad/ })).toBeTruthy();
+    fireEvent.keyDown(menu, { key: "Escape" });
+    await waitFor(() => expect(screen.queryByRole("menu")).toBeNull());
+
+    key("ArrowDown"); // b.csv
+    key("ContextMenu");
+    menu = await screen.findByRole("menu");
+    fireEvent.click(await within(menu).findByRole("menuitem", { name: /Open with Notepad/ }));
+    await waitFor(() => expect(calls.find((c) => c.cmd === "fs_open_with")?.args).toEqual({ path: "b.csv" }));
+  });
+
+  it("does not offer Open with for a file nothing is configured for", async () => {
+    disk.files.set("pic.png", 9);
+    await ready();
+    fireEvent.contextMenu(screen.getByText("pic.png"));
+    const menu = await screen.findByRole("menu");
+    await waitFor(() =>
+      expect(calls.some((c) => c.cmd === "fs_handler" && (c.args as { path: string }).path === "pic.png")).toBe(true),
+    );
+    expect(within(menu).queryByRole("menuitem", { name: /Open with/ })).toBeNull();
   });
 
   it("does not let the search box steal list keys, and Escape clears the search", async () => {
@@ -356,6 +391,21 @@ describe("the file explorer, driven by the keyboard", () => {
     expect(calls.some((c) => c.cmd === "fs_rename")).toBe(false);
     fireEvent.keyDown(rename, { key: "Escape" });
     await waitFor(() => expect(screen.queryByLabelText("New name")).toBeNull());
+  });
+
+  it("refuses to rename a file to a program name and says why", async () => {
+    await ready();
+    key("ArrowDown");
+    key("ArrowDown"); // a.txt
+    key("F2");
+    const rename = await screen.findByLabelText("New name");
+    fireEvent.change(rename, { target: { value: "a.exe" } });
+    fireEvent.submit(rename.closest("form") as HTMLFormElement);
+    expect(
+      await screen.findByText("Files ending in .exe aren't allowed on this PC. Choose a different ending for the name."),
+    ).toBeTruthy();
+    expect(disk.files.has("a.txt")).toBe(true);
+    expect(disk.files.has("a.exe")).toBe(false);
   });
 
   it("shows the reason when the backend refuses", async () => {

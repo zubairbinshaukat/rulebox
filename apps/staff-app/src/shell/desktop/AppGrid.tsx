@@ -1,6 +1,6 @@
 import { useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent, type PointerEvent, type WheelEvent } from "react";
 import gsap from "gsap";
-import { AppTile, Button } from "@rulebox/ui";
+import { AppTile, Button, type AppTileProps } from "@rulebox/ui";
 import type { AppEntry, TaskItem } from "@rulebox/types";
 import IconLeft from "~icons/solar/alt-arrow-left-bold-duotone";
 import IconRight from "~icons/solar/alt-arrow-right-bold-duotone";
@@ -9,6 +9,7 @@ import { useMotionLevel } from "../../lib/motion";
 import { call } from "../../lib/tauri";
 import { AppIcon } from "../appIcon";
 import { hueFor } from "../appArt";
+import { useIconArt } from "../iconArt";
 import { moveFocus, pageSlice, PAGE_GUTTER, solvePages, TILE_GAP, type PageLayout } from "./tileLayout";
 
 /** A horizontal drag longer than this turns the page. */
@@ -281,19 +282,13 @@ function PagedTiles({ apps, tasks, layout }: { apps: AppEntry[]; tasks: TaskItem
         >
           {onPage.map((app, i) => (
             <div key={app.id} role="listitem" data-tile data-index={firstOnPage + i}>
-              <AppTile
+              <AppCard
+                app={app}
                 tabIndex={firstOnPage + i === reachable ? 0 : -1}
                 onFocus={() => setTabStop(firstOnPage + i)}
-                name={app.name}
-                description={app.description ?? undefined}
-                imageSrc={app.iconUrl ?? undefined}
-                glyph={<AppIcon app={app} />}
-                hue={hueFor(app)}
-                badge={app.badge ?? undefined}
                 running={running.has(app.id)}
                 size={layout.tier}
                 onClick={() => void launch(app.id)}
-                style={{ width: "100%", height: "100%" }}
               />
             </div>
           ))}
@@ -340,6 +335,27 @@ function PagedTiles({ apps, tasks, layout }: { apps: AppEntry[]; tasks: TaskItem
         </div>
       ) : null}
     </div>
+  );
+}
+
+/** One app tile. The icon is read once per icon (`useIconArt`) so its own opaque background never shows as a block. */
+function AppCard({
+  app,
+  ...rest
+}: { app: AppEntry } & Pick<AppTileProps, "tabIndex" | "onFocus" | "running" | "size" | "onClick">) {
+  const art = useIconArt(app.iconUrl);
+  return (
+    <AppTile
+      {...rest}
+      name={app.name}
+      description={app.description ?? undefined}
+      imageSrc={app.iconUrl ?? undefined}
+      imageArt={art}
+      glyph={<AppIcon app={app} />}
+      hue={hueFor(app)}
+      badge={app.badge ?? undefined}
+      style={{ width: "100%", height: "100%" }}
+    />
   );
 }
 

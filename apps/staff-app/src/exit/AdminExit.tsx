@@ -125,25 +125,33 @@ export function AdminExit() {
               Administrator exit
             </h1>
             <p style={{ margin: "2px 0 0", fontSize: 13, color: "var(--rb-muted)" }}>
-              Enter the administrator PIN.
+              Sign out of this kiosk and return to Windows.
             </p>
           </div>
         </div>
 
-        <Input
-          id="exit-pin"
-          type="password"
-          inputMode="numeric"
-          autoComplete="off"
-          autoCorrect="off"
-          spellCheck={false}
-          maxLength={12}
-          aria-label="Administrator PIN"
-          placeholder="PIN (4 to 12 digits)"
-          disabled={disabled}
-          value={pin}
-          onChange={(event) => setPin(filterPin(event.target.value))}
-        />
+        <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+          <label htmlFor="exit-pin" style={{ fontSize: 13, fontWeight: 600 }}>
+            Administrator PIN
+          </label>
+          <Input
+            id="exit-pin"
+            type="password"
+            inputMode="numeric"
+            autoComplete="off"
+            autoCorrect="off"
+            spellCheck={false}
+            maxLength={12}
+            aria-describedby="exit-pin-hint"
+            placeholder="4 to 12 digits"
+            disabled={disabled}
+            value={pin}
+            onChange={(event) => setPin(filterPin(event.target.value))}
+          />
+          <p id="exit-pin-hint" style={{ margin: 0, fontSize: 12.5, lineHeight: 1.4, color: "var(--rb-muted)" }}>
+            {MESSAGES.pinHint}
+          </p>
+        </div>
 
         {/* The message is its own live region (alert or status), so this wrapper is not one too. */}
         <div style={{ minHeight: 44 }}>
@@ -199,13 +207,15 @@ function MessageText({ message }: { message: string }) {
   );
 }
 
+// The window is transparent (see exit.rs), so this wrapper paints nothing: only
+// the rounded card is visible. Its padding is just room for the card's shadow.
 const page: CSSProperties = {
   minHeight: "100vh",
   display: "grid",
   placeItems: "center",
   padding: 16,
   boxSizing: "border-box",
-  background: "var(--rb-bg)",
+  background: "transparent",
   color: "var(--rb-ink)",
   fontFamily: "var(--rb-font-sans)",
 };
@@ -220,5 +230,6 @@ const card: CSSProperties = {
   borderRadius: 22,
   background: "var(--rb-surface)",
   border: "1px solid var(--rb-line)",
-  boxShadow: "var(--rb-shadow-lg)",
+  // Smaller than shadow-lg so it fits in the 16 px of transparent room around the card.
+  boxShadow: "var(--rb-shadow-md)",
 };

@@ -5,6 +5,7 @@ pub mod appwin;
 pub mod commands;
 pub mod exit;
 pub mod files;
+pub mod fullscreen;
 pub mod known_folders;
 pub mod launcher;
 mod logging;
@@ -115,6 +116,7 @@ pub fn run() {
             commands::ui_ready,
             commands::ui_alive,
             commands::dev_note,
+            commands::dev_toast,
             commands::dismiss_notice,
             commands::notices_seen,
             commands::set_volume,
@@ -125,6 +127,7 @@ pub fn run() {
             commands::dev_set_boot,
             commands::popup_open,
             commands::popup_close,
+            commands::taskbar_shape,
             commands::thumb_open,
             commands::thumb_state,
             commands::thumb_attach,
@@ -159,6 +162,7 @@ pub fn run() {
             commands::app_snapshot,
             commands::app_select_tab,
             commands::app_close_tab,
+            fullscreen::viewer_fullscreen,
             files::commands::fs_list,
             files::commands::fs_stat,
             files::commands::fs_mkdir,

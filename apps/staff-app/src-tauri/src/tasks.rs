@@ -611,6 +611,11 @@ impl IconStore {
     }
 }
 
+/// The request origin to echo in `Access-Control-Allow-Origin`: only the Staff App's own pages.
+fn icon_cors_origin(origin: &str) -> Option<String> {
+    crate::files::protocol::from_own_origin(origin).then(|| origin.to_string())
+}
+
 /// The `rbicon` protocol: `http://rbicon.localhost/hwnd:<n>:<rev>?s=<px>`.
 pub fn serve_icon(
     store: &Arc<IconStore>,
@@ -619,14 +624,28 @@ pub fn serve_icon(
 ) {
     let key = request.uri().path().trim_start_matches('/').to_string();
     let size = parse_icon_size(request.uri().query());
+    let origin = request
+        .headers()
+        .get("origin")
+        .and_then(|value| value.to_str().ok())
+        .and_then(icon_cors_origin);
     let store = Arc::clone(store);
     tauri::async_runtime::spawn_blocking(move || {
         let response = match store.render(&key, size) {
-            Some(png) => tauri::http::Response::builder()
-                .status(200)
-                .header("Content-Type", "image/png")
-                .header("Cache-Control", "max-age=60")
-                .body(Cow::Owned(png.as_ref().clone())),
+            Some(png) => {
+                let mut builder = tauri::http::Response::builder()
+                    .status(200)
+                    .header("Content-Type", "image/png")
+                    .header("Cache-Control", "max-age=60");
+                // The shell reads an app icon's pixels once (a canvas, `shell/iconArt`) to
+                // tell a transparent logo from one on its own opaque background; a canvas
+                // read of a cross-origin image needs this header. Only the app's own
+                // pages get it (the protocol already refuses every other webview).
+                if let Some(origin) = origin {
+                    builder = builder.header("Access-Control-Allow-Origin", origin).header("Vary", "Origin");
+                }
+                builder.body(Cow::Owned(png.as_ref().clone()))
+            }
             None => tauri::http::Response::builder()
                 .status(404)
                 .header("Cache-Control", "no-store")
@@ -759,5 +778,19 @@ impl TaskHost {
         if differs {
             state.update(|s| s.tasks = items);
         }
+    }
+}
+
+#[cfg(test)]
+mod icon_cors_tests {
+    use super::icon_cors_origin;
+
+    #[test]
+    fn only_the_apps_own_pages_get_the_cors_header() {
+        assert_eq!(icon_cors_origin("http://tauri.localhost").as_deref(), Some("http://tauri.localhost"));
+        assert_eq!(icon_cors_origin("tauri://localhost").as_deref(), Some("tauri://localhost"));
+        assert_eq!(icon_cors_origin("https://evil.example"), None);
+        assert_eq!(icon_cors_origin("http://tauri.localhost.evil.example"), None);
+        assert_eq!(icon_cors_origin("null"), None);
     }
 }

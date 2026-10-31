@@ -1,7 +1,20 @@
 //! Step 17 tests: app icons leave the broadcast state for the icon store.
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 
+use rulebox_staff_lib::model::{AdminExitOutcome, SignInOutcome, VerifyOutcome};
 use rulebox_staff_lib::tasks::IconStore;
+
+/// The page reads `lockedOut.retryAfterMs`; a snake_case field made the lockout
+/// message show "NaN:NaN".
+#[test]
+fn outcome_fields_reach_the_page_in_camel_case() {
+    let locked = serde_json::to_value(SignInOutcome::LockedOut { retry_after_ms: 90_000 }).unwrap();
+    assert_eq!(locked, serde_json::json!({ "lockedOut": { "retryAfterMs": 90_000 } }));
+    let verify = serde_json::to_value(VerifyOutcome::LockedOut { retry_after_ms: 5_000 }).unwrap();
+    assert_eq!(verify, serde_json::json!({ "lockedOut": { "retryAfterMs": 5_000 } }));
+    let pin = serde_json::to_value(AdminExitOutcome::WrongPin { attempts_left: Some(2) }).unwrap();
+    assert_eq!(pin, serde_json::json!({ "wrongPin": { "attemptsLeft": 2 } }));
+}
 
 /// A real (1x1) PNG as base64.
 const PNG_B64: &str = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==";

@@ -13,10 +13,10 @@ use std::sync::Arc;
 
 use tauri::{Url, WebviewWindow};
 use webview2_com::Microsoft::Web::WebView2::Win32::{
-    ICoreWebView2, ICoreWebView2Controller, ICoreWebView2PermissionRequestedEventArgs3, ICoreWebView2Settings3,
-    ICoreWebView2Settings4, ICoreWebView2_18, ICoreWebView2_19, ICoreWebView2_24, ICoreWebView2_27, ICoreWebView2_3,
-    COREWEBVIEW2_MEMORY_USAGE_TARGET_LEVEL_LOW, COREWEBVIEW2_MEMORY_USAGE_TARGET_LEVEL_NORMAL,
-    COREWEBVIEW2_PERMISSION_KIND,
+    ICoreWebView2, ICoreWebView2Controller, ICoreWebView2Environment, ICoreWebView2PermissionRequestedEventArgs3,
+    ICoreWebView2Settings3, ICoreWebView2Settings4, ICoreWebView2_18, ICoreWebView2_19, ICoreWebView2_24,
+    ICoreWebView2_27, ICoreWebView2_3, COREWEBVIEW2_MEMORY_USAGE_TARGET_LEVEL_LOW,
+    COREWEBVIEW2_MEMORY_USAGE_TARGET_LEVEL_NORMAL, COREWEBVIEW2_PERMISSION_KIND,
     COREWEBVIEW2_PERMISSION_KIND_AUTOPLAY, COREWEBVIEW2_PERMISSION_KIND_CAMERA,
     COREWEBVIEW2_PERMISSION_KIND_CLIPBOARD_READ, COREWEBVIEW2_PERMISSION_KIND_GEOLOCATION,
     COREWEBVIEW2_PERMISSION_KIND_MICROPHONE, COREWEBVIEW2_PERMISSION_KIND_NOTIFICATIONS,
@@ -29,6 +29,8 @@ use webview2_com::{
 };
 use windows::core::{Interface, PWSTR};
 
+use super::barhost;
+use super::nav::Look;
 use super::permissions::{decide, denial_notice, Decision, PermissionKind};
 use super::WebWindow;
 use crate::model::NoticeTone;
@@ -68,7 +70,8 @@ pub fn install(window: &WebviewWindow, context: Arc<HookContext>, start: Url) {
         // SAFETY: the controller is valid for the duration of this call, and
         // every handler below only holds `Arc`s and clones of COM interfaces.
         let controller = platform.controller();
-        let outcome = unsafe { setup(&controller, &context) }
+        let environment = platform.environment();
+        let outcome = unsafe { setup(&controller, &environment, &context) }
             // SAFETY: as above; `Navigate` is called on the UI thread, which this closure runs on.
             .and_then(|()| unsafe { navigate(&controller, &start) });
         if let Err(error) = outcome {
@@ -183,7 +186,11 @@ unsafe fn navigate(controller: &ICoreWebView2Controller, start: &Url) -> windows
     unsafe { controller.CoreWebView2()?.Navigate(&target) }
 }
 
-unsafe fn setup(controller: &ICoreWebView2Controller, context: &Arc<HookContext>) -> windows::core::Result<()> {
+unsafe fn setup(
+    controller: &ICoreWebView2Controller,
+    environment: &ICoreWebView2Environment,
+    context: &Arc<HookContext>,
+) -> windows::core::Result<()> {
     let core: ICoreWebView2 = unsafe { controller.CoreWebView2()? };
     unsafe {
         settings(&core)?;
@@ -201,12 +208,23 @@ unsafe fn setup(controller: &ICoreWebView2Controller, context: &Arc<HookContext>
         if let Err(error) = notifications(&core, context) {
             tracing::warn!(%error, "notifications could not be routed on this WebView2 runtime");
         }
+        // Convenience, not security: without the bar the site simply has the whole window and no
+        // Back / Forward / Reload buttons (the keys come with the bar's events and are lost too).
+        if let Err(error) = barhost::attach(controller, environment, context) {
+            tracing::warn!(%error, "the web app bar could not be added");
+        }
     }
     Ok(())
 }
 
+/// How the bar should look for the person signed in (their theme; no motion in Lite mode).
+pub(super) fn look(context: &HookContext) -> Look {
+    context
+        .state
+        .read(|shell| Look::new(shell.display.theme, shell.display.lite || shell.display.reduced_motion))
+}
 /// No developer tools, no browser menus or shortcuts, no autofill, no zoom UI.
-unsafe fn settings(core: &ICoreWebView2) -> windows::core::Result<()> {
+pub(super) unsafe fn settings(core: &ICoreWebView2) -> windows::core::Result<()> {
     unsafe {
         let settings = core.Settings()?;
         settings.SetAreDevToolsEnabled(false)?;

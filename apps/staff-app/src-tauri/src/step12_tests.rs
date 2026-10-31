@@ -231,6 +231,45 @@ fn rename_never_overwrites_and_allows_a_case_change() {
 }
 
 #[test]
+fn a_file_cannot_be_renamed_copied_or_moved_to_a_program_name() {
+    let temp = TempRoot::new("blockedname");
+    std::fs::write(temp.join("Notes.txt"), b"hello").unwrap();
+    std::fs::write(temp.join("old.exe"), b"MZ").unwrap();
+    std::fs::create_dir(temp.join("dir")).unwrap();
+    let session = open_session(&temp, 1_000_000);
+    fn blocked<T>(extension: &str) -> Result<T, FileError> {
+        Err(FileError::BlockedName { extension: extension.into() })
+    }
+
+    // The security rule is in the backend: the session (what the commands call) refuses.
+    for target in ["Notes.exe", "Notes.EXE", "Notes.bat", "Notes.ps1", "Notes.js", "Notes.vbs", "Notes.msi"] {
+        let extension = target.rsplit_once('.').unwrap().1.to_lowercase();
+        assert_eq!(session.rename(&rel("Notes.txt"), &rel(target)), blocked(&extension), "{target}");
+        assert!(temp.join("Notes.txt").exists(), "the file keeps its name: {target}");
+        assert!(!temp.join(target).exists(), "{target}");
+    }
+    // A harmless name still works, a case change too, and a folder's name is only a name.
+    assert_eq!(session.rename(&rel("Notes.txt"), &rel("Notes.md")), Ok(()));
+    assert_eq!(session.rename(&rel("Notes.md"), &rel("Notes.MD")), Ok(()));
+    assert_eq!(session.rename(&rel("dir"), &rel("dir.exe")), Ok(()));
+    assert_eq!(session.rename(&rel("dir.exe"), &rel("dir")), Ok(()));
+    // Not even the name `old.exe` can be kept by renaming it to another program name.
+    assert_eq!(session.rename(&rel("old.exe"), &rel("new.cmd")), blocked("cmd"));
+    assert_eq!(session.rename(&rel("old.exe"), &rel("old.txt")), Ok(()));
+    std::fs::write(temp.join("setup.exe"), b"MZ").unwrap();
+    // Copy and move keep the name, so a program-named file cannot be duplicated or moved either.
+    assert_eq!(session.copy(&rel("setup.exe"), &rel("dir")), blocked("exe"));
+    assert_eq!(session.move_to(&rel("setup.exe"), &rel("dir")), blocked("exe"));
+    assert!(temp.join("setup.exe").exists() && !temp.join("dir/setup.exe").exists());
+    // The pasted result of a cut / copy reports it per item instead of aborting the rest.
+    session.set_clip(rulebox_staff_lib::files::ClipOp::Copy, vec!["setup.exe".into(), "Notes.MD".into()]).unwrap();
+    let pasted = session.paste(&rel("dir")).unwrap();
+    assert_eq!(pasted.pasted.len(), 1);
+    assert_eq!(pasted.failed.len(), 1);
+    assert_eq!(pasted.failed[0].error, FileError::BlockedName { extension: "exe".into() });
+}
+
+#[test]
 fn a_folder_cannot_go_into_itself_under_another_spelling() {
     let temp = TempRoot::new("selfcase");
     std::fs::create_dir_all(temp.join("Docs").join("sub")).unwrap();
@@ -1188,6 +1227,66 @@ fn file_kinds_go_by_extension() {
     assert!(!FileKind::Images.matches(".png"), "a dot file has no extension");
     assert!(!FileKind::Audio.matches("mp3"));
     assert!(FileKind::All.matches("anything"));
+}
+
+#[test]
+fn no_file_kind_lists_a_name_the_deny_list_refuses_to_open() {
+    use rulebox_staff_lib::files::types::{is_blocked_name, FileKind};
+    let kinds = [
+        FileKind::All,
+        FileKind::Documents,
+        FileKind::Audio,
+        FileKind::Video,
+        FileKind::Images,
+        FileKind::Media,
+    ];
+    // A renamed file (notes.txt -> notes.exe) leaves every list, even "all".
+    for name in ["notes.exe", "NOTES.EXE", "setup.msi", "run.ps1", "x.bat", "pic.svg", "macro.docm"] {
+        assert!(is_blocked_name(name), "{name}");
+        for kind in kinds {
+            assert!(!kind.matches(name), "{kind:?} must not list {name}");
+        }
+    }
+    // The extension is the last one: a blocked name inside is fine.
+    assert!(FileKind::Documents.matches("exe.txt"));
+    assert!(FileKind::All.matches("report.pdf") && FileKind::All.matches("README"));
+    // Whatever a kind lists, opener_for does not refuse (one rule, no drift).
+    let handlers = std::collections::BTreeMap::new();
+    for name in ["a.docx", "a.mp3", "a.mp4", "a.png", "a.txt", "a.csv", "a.flac", "a.bmp", "a.mkv"] {
+        for kind in kinds {
+            if kind.matches(name) {
+                assert_ne!(opener_for(name, &handlers), Opener::Blocked, "{kind:?} lists {name}");
+            }
+        }
+    }
+}
+
+#[test]
+fn my_files_all_tab_hides_a_renamed_executable_but_the_folder_listing_keeps_it() {
+    use rulebox_staff_lib::files::types::FileKind;
+    let temp = TempRoot::new("renamed-exe");
+    std::fs::write(temp.join("notes.txt"), b"a").unwrap();
+    std::fs::write(temp.join("was-notes.exe"), b"a").unwrap();
+    std::fs::write(temp.join("logo.svg"), b"<svg/>").unwrap();
+
+    let session = open_session(&temp, 0);
+    let all: Vec<String> = session
+        .files_of_kind(FileKind::All, 10)
+        .into_iter()
+        .map(|e| e.path)
+        .collect();
+    assert_eq!(all, ["notes.txt"], "the My files panel and the categories skip it");
+    assert!(session.files_of_kind(FileKind::Images, 10).is_empty(), "svg never opens");
+
+    // The folder (a place) still shows it, so it can be renamed or deleted.
+    let listed: Vec<String> = session
+        .root()
+        .list(&RelPath::root())
+        .unwrap()
+        .into_iter()
+        .map(|e| e.name)
+        .collect();
+    assert!(listed.contains(&"was-notes.exe".to_string()), "{listed:?}");
 }
 
 #[test]

@@ -5,6 +5,7 @@ import "@rulebox/ui/fonts.css";
 import "@rulebox/ui/tokens.css";
 import "@rulebox/ui/base.css";
 
+import { startDevMotion, useForcedFullMotion } from "../lib/devMotion";
 import { installExitKey } from "../lib/exitKey";
 import { startShellStore, useShell } from "../lib/store";
 import { call, isTauri } from "../lib/tauri";
@@ -27,6 +28,8 @@ function routeOf(hash: string): "desktop" | "taskbar" | "popup" {
 export function ShellRoot() {
   const route = routeOf(window.location.hash);
   const display = useShell((s) => s.display);
+  // Debug builds only (resource monitor): show every animation even in Lite.
+  const forcedFullMotion = useForcedFullMotion();
 
   useEffect(() => {
     void startShellStore();
@@ -34,8 +37,8 @@ export function ShellRoot() {
 
   useEffect(() => {
     setTheme(display.theme);
-    setLite(display.lite);
-  }, [display.lite, display.theme]);
+    setLite(display.lite && !forcedFullMotion);
+  }, [display.lite, display.theme, forcedFullMotion]);
 
   // Only the desktop page reports "ready" and "alive": the agent's watchdog
   // must watch the page that carries the sign-in and the desktop.
@@ -87,6 +90,8 @@ if (routeOf(window.location.hash) !== "desktop") {
 
 // The administrator exit works from every Rulebox page, even one whose UI has crashed.
 installExitKey();
+// Debug builds only: restores "Force full motion" and follows the other windows.
+startDevMotion();
 
 createRoot(document.getElementById("root")!).render(
   <StrictMode>

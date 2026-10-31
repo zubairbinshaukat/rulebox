@@ -7,7 +7,7 @@ export {
   type SegmentedControlProps,
   type SegmentedOption,
 } from "./components/SegmentedControl";
-export { AppTile, type AppTileProps, type AppTileSize } from "./components/AppTile";
+export { AppTile, type AppTileImageArt, type AppTileProps, type AppTileSize } from "./components/AppTile";
 export { TitleBar, type TitleBarProps } from "./components/TitleBar";
 export { Backdrop, type BackdropProps } from "./components/Backdrop";
 export { ErrorBoundary, type ErrorBoundaryProps } from "./components/ErrorBoundary";

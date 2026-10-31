@@ -27,11 +27,21 @@ const DOCUMENT_EXTS: &[&str] = &[
 ];
 const AUDIO_EXTS: &[&str] = &["aac", "flac", "m4a", "mp3", "ogg", "wav"];
 const VIDEO_EXTS: &[&str] = &["avi", "mkv", "mov", "mp4", "webm"];
-const IMAGE_EXTS: &[&str] = &["bmp", "gif", "jpeg", "jpg", "png", "svg", "webp"];
+const IMAGE_EXTS: &[&str] = &["bmp", "gif", "jpeg", "jpg", "png", "webp"];
 
 impl FileKind {
     /// Pure: does a file called `name` belong to this kind (by its extension)?
+    ///
+    /// These are the *openable-file lists* (the Files sidebar's categories and
+    /// the desktop's My files panel). A name the deny-list refuses to open
+    /// (`opener_for` is `Blocked`) is in no kind, not even `All`, so both
+    /// places agree. The folder listing (`fs_list`) is a place, not a list of
+    /// openable files: it still shows such a file so it can be renamed or
+    /// deleted, and opening it is refused (PRD 7.3).
     pub fn matches(self, name: &str) -> bool {
+        if is_blocked_name(name) {
+            return false;
+        }
         let ext = match name.rsplit_once('.') {
             Some((stem, ext)) if !stem.is_empty() => ext.to_ascii_lowercase(),
             _ => String::new(),
@@ -128,12 +138,18 @@ pub fn viewer_for_name(name: &str) -> Option<ViewerKind> {
     viewer_for(&extension(name)?)
 }
 
+/// Is this file name on the deny-list (a type that may never be opened)? The
+/// one test every place uses: opening, downloads, and the openable-file lists.
+pub fn is_blocked_name(name: &str) -> bool {
+    extension(name).is_some_and(|ext| DENY.binary_search(&ext.as_str()).is_ok())
+}
+
 /// Order: (1) deny-list, (2) built-in viewer, (3) `fileHandlers`, (4) none.
 pub fn opener_for(name: &str, handlers: &BTreeMap<String, String>) -> Opener {
     let Some(ext) = extension(name) else {
         return Opener::None;
     };
-    if DENY.binary_search(&ext.as_str()).is_ok() {
+    if is_blocked_name(name) {
         return Opener::Blocked;
     }
     if let Some(kind) = viewer_for(&ext) {

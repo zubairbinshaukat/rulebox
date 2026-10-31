@@ -118,6 +118,7 @@ export function TrashView({
               <div
                 key={item.id}
                 role="row"
+                className="rb-file-row"
                 aria-rowindex={virtualRow.index + 2}
                 style={{
                   position: "absolute",
@@ -168,6 +169,7 @@ export function TrashView({
                 <div role="cell" style={{ display: "flex", justifyContent: "flex-end", gap: 6 }}>
                   <button
                     type="button"
+                    className="rb-crumb"
                     title="Restore"
                     aria-label={`Restore ${item.name}`}
                     onClick={() => onRestore(item.id, item.name)}
@@ -178,6 +180,7 @@ export function TrashView({
                   </button>
                   <button
                     type="button"
+                    className="rb-crumb"
                     title="Delete permanently"
                     aria-label={`Permanently delete ${item.name}`}
                     onClick={() => onPurge(item.id, item.name)}
@@ -220,7 +223,6 @@ const actionButton: CSSProperties = {
   padding: "4px 8px",
   borderRadius: 6,
   border: "1px solid var(--rb-line)",
-  background: "transparent",
   color: "var(--rb-ink)",
   fontSize: 12,
   cursor: "pointer",

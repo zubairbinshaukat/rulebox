@@ -48,7 +48,13 @@ url.workspace = true
 
 [target.'cfg(windows)'.dependencies]
 webview2-com.workspace = true
-windows = { workspace = true, features = ["Win32_Foundation"] }
+windows = { workspace = true, features = [
+    "Win32_Foundation",
+    "Win32_UI_HiDpi",
+    "Win32_UI_Input_KeyboardAndMouse",
+    "Win32_UI_Shell",
+    "Win32_UI_WindowsAndMessaging",
+] }
 
 [dev-dependencies]
 tokio = { workspace = true, features = ["rt", "macros", "time", "sync"] }

@@ -109,6 +109,7 @@ export function Sidebar({ section, onSelectSection, storage, dropTarget, onFreeU
             <button
               key={item.id}
               type="button"
+              className="rb-nav-btn"
               onClick={() => onSelectSection(item.id)}
               data-drop-dir={item.targetDir}
               aria-current={active ? "page" : undefined}
@@ -118,7 +119,9 @@ export function Sidebar({ section, onSelectSection, storage, dropTarget, onFreeU
                 ...navButton,
                 justifyContent: compact ? "center" : "flex-start",
                 padding: compact ? "10px 0" : navButton.padding,
-                background: active || (item.targetDir !== undefined && dropTarget === item.targetDir) ? "var(--rb-accent-soft)" : "transparent",
+                // Hover and the current section's tint come from `rb-nav-btn`; only a drop target is inline.
+                background:
+                  item.targetDir !== undefined && dropTarget === item.targetDir ? "var(--rb-accent-soft)" : undefined,
                 color: active ? "var(--rb-accent-text)" : "var(--rb-ink)",
                 fontWeight: active ? 600 : 500,
               }}
@@ -206,7 +209,6 @@ const navButton: CSSProperties = {
   fontFamily: "inherit",
   cursor: "pointer",
   textAlign: "left",
-  transition: "background 0.15s ease, color 0.15s ease",
 };
 
 const storageSection: CSSProperties = {

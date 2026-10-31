@@ -249,6 +249,12 @@
           "markdownDescription": "Enables the dev_set_display command without any pre-configured scope."
         },
         {
+          "description": "Enables the dev_toast command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-dev-toast",
+          "markdownDescription": "Enables the dev_toast command without any pre-configured scope."
+        },
+        {
           "description": "Enables the dismiss_notice command without any pre-configured scope.",
           "type": "string",
           "const": "allow-dismiss-notice",
@@ -549,6 +555,12 @@
           "markdownDescription": "Enables the task_menu command without any pre-configured scope."
         },
         {
+          "description": "Enables the taskbar_shape command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-taskbar-shape",
+          "markdownDescription": "Enables the taskbar_shape command without any pre-configured scope."
+        },
+        {
           "description": "Enables the thumb_attach command without any pre-configured scope.",
           "type": "string",
           "const": "allow-thumb-attach",
@@ -583,6 +595,12 @@
           "type": "string",
           "const": "allow-unlock",
           "markdownDescription": "Enables the unlock command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the viewer_fullscreen command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-viewer-fullscreen",
+          "markdownDescription": "Enables the viewer_fullscreen command without any pre-configured scope."
         },
         {
           "description": "Enables the win_close command without any pre-configured scope.",
@@ -679,6 +697,12 @@
           "type": "string",
           "const": "deny-dev-set-display",
           "markdownDescription": "Denies the dev_set_display command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the dev_toast command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-dev-toast",
+          "markdownDescription": "Denies the dev_toast command without any pre-configured scope."
         },
         {
           "description": "Denies the dismiss_notice command without any pre-configured scope.",
@@ -981,6 +1005,12 @@
           "markdownDescription": "Denies the task_menu command without any pre-configured scope."
         },
         {
+          "description": "Denies the taskbar_shape command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-taskbar-shape",
+          "markdownDescription": "Denies the taskbar_shape command without any pre-configured scope."
+        },
+        {
           "description": "Denies the thumb_attach command without any pre-configured scope.",
           "type": "string",
           "const": "deny-thumb-attach",
@@ -1015,6 +1045,12 @@
           "type": "string",
           "const": "deny-unlock",
           "markdownDescription": "Denies the unlock command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the viewer_fullscreen command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-viewer-fullscreen",
+          "markdownDescription": "Denies the viewer_fullscreen command without any pre-configured scope."
         },
         {
           "description": "Denies the win_close command without any pre-configured scope.",

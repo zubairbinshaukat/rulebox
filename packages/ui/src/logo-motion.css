@@ -536,24 +536,26 @@
   }
 }
 
+/* `:where(:root:not([data-force-motion]))` adds no specificity; the attribute is set only by
+   the debug builds' "Force full motion" switch (lib/devMotion.ts), never in a release build. */
 @media (prefers-reduced-motion: reduce) {
-  .rb-lm[data-anim] * {
+  :where(:root:not([data-force-motion="true"])) .rb-lm[data-anim] * {
     animation: none !important;
   }
 
-  .rb-lm[data-anim="loading"] .rb-lm-box rect {
+  :where(:root:not([data-force-motion="true"])) .rb-lm[data-anim="loading"] .rb-lm-box rect {
     stroke-dasharray: none;
   }
 
-  .rb-lm:is([data-anim="splash"], [data-anim="lock"]) {
+  :where(:root:not([data-force-motion="true"])) .rb-lm:is([data-anim="splash"], [data-anim="lock"]) {
     animation: rb-lm-fade-in 0.3s ease backwards !important;
   }
 
-  .rb-lm[data-anim="loading"] .rb-lm-mark {
+  :where(:root:not([data-force-motion="true"])) .rb-lm[data-anim="loading"] .rb-lm-mark {
     animation: rb-lm-breathe 1.2s ease-in-out infinite alternate !important;
   }
 
-  .rb-lm[data-anim="open"] {
+  :where(:root:not([data-force-motion="true"])) .rb-lm[data-anim="open"] {
     animation: rb-lm-fade-out 0.3s ease forwards !important;
   }
 }

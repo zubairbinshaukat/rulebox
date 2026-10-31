@@ -6,6 +6,9 @@ export default defineConfig({
   // Solar icons are compiled into the bundle at build time (Decision 16/17: no runtime fetching).
   plugins: [react(), Icons({ compiler: "jsx", jsx: "react" })],
   clearScreen: false,
+  // `TAURI_ENV_DEBUG` is true while `tauri build --debug` builds the pages; the developer
+  // tools (lib/devMotion.ts) switch on it, so a release build has none of them.
+  envPrefix: ["VITE_", "TAURI_ENV_"],
   server: { port: 1420, strictPort: true },
   build: {
     rollupOptions: {

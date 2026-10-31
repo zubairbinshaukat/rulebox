@@ -41,9 +41,12 @@ export function SystemArea() {
       onClick={(event) => open(event.currentTarget)}
     >
       {networkIcon(network)}
-      <span className="rb-chip__muted" style={{ display: "inline-flex" }}>
-        {volumeIcon(volume?.muted ?? false, volume?.level ?? 0)}
-      </span>
+      {/* No sound device: no sound icon, instead of one that looks muted. */}
+      {volume ? (
+        <span className="rb-chip__muted" style={{ display: "inline-flex" }}>
+          {volumeIcon(volume.muted, volume.level)}
+        </span>
+      ) : null}
       {battery ? <Battery battery={battery} /> : null}
     </button>
   );

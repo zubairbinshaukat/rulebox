@@ -133,6 +133,7 @@ export function FileGrid({
                   id={itemId(entry.path)}
                   role="option"
                   aria-selected={isSelected}
+                  className="rb-file-card"
                   data-drop-dir={isFolder ? entry.path : undefined}
                   onPointerDown={(event) => onItemPointerDown(entry, event)}
                   onClick={(event) => onItemClick(entry.path, event)}
@@ -140,11 +141,17 @@ export function FileGrid({
                   onContextMenu={(event) => onItemContextMenu(entry.path, event)}
                   style={{
                     ...gridCard,
-                    background: dropActive || isSelected ? "var(--rb-accent-soft)" : "var(--rb-surface)",
+                    // The resting look, the hover tint and the selected tint come from `rb-file-card`;
+                    // only a drop target is inline.
+                    background: dropActive ? "var(--rb-accent-soft)" : undefined,
                     // Selected and focused cards get a 2 px line, not only a tint.
-                    border: `${isSelected || dropActive || isFocused ? 2 : 1}px solid ${
-                      dropActive || isFocused ? "var(--rb-focus)" : isSelected ? "var(--rb-accent)" : "var(--rb-line)"
-                    }`,
+                    ...(isSelected || dropActive || isFocused
+                      ? {
+                          border: `2px solid ${
+                            dropActive || isFocused ? "var(--rb-focus)" : "var(--rb-accent)"
+                          }`,
+                        }
+                      : {}),
                     opacity: cut.has(entry.path) ? 0.5 : 1,
                   }}
                 >

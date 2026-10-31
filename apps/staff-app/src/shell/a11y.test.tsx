@@ -211,6 +211,20 @@ describe("lock screen", () => {
     expect((await screen.findByRole("alert")).textContent).toBe("That password is not right.");
     await waitFor(() => expect(document.activeElement).toBe(password));
   });
+
+  it("shows the card at once, with no logo animation over it", () => {
+    mockedCall.mockImplementation(async () => "wrongCredentials");
+    const { container } = render(<LockScreen shell={shellState()} employee={maya} />);
+    expect(container.querySelector(".rb-lm")).toBeNull();
+  });
+
+  it("reads a lockout from the agent's camelCase payload as minutes and seconds", async () => {
+    const user = userEvent.setup();
+    mockedCall.mockImplementation(async () => ({ lockedOut: { retryAfterMs: 125_000 } }));
+    render(<LockScreen shell={shellState()} employee={maya} />);
+    await user.type(screen.getByLabelText("Password"), "nope{Enter}");
+    expect((await screen.findByRole("alert")).textContent).toBe("Too many tries. Try again in 2:05.");
+  });
 });
 
 describe("boot status screen", () => {

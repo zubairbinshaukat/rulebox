@@ -1,4 +1,4 @@
-import { useRef } from "react";
+import { useLayoutEffect, useRef } from "react";
 import gsap from "gsap";
 import { Flip } from "gsap/Flip";
 import { useGSAP } from "@gsap/react";
@@ -15,7 +15,9 @@ import { MonitorChip } from "./MonitorChip";
 import { clickTarget, groupTaskbar, labelOf, stateOf } from "./grouping";
 import { TaskButton, WindowIcon } from "./TaskButton";
 import { Clock } from "./Clock";
+import { ToastHost } from "../toast/ToastHost";
 import { SystemArea } from "./SystemArea";
+import { useTaskbarShape } from "./useTaskbarShape";
 
 gsap.registerPlugin(Flip, useGSAP);
 
@@ -30,10 +32,14 @@ export function Taskbar() {
   const level = useMotionLevel();
   const start = useRef<HTMLButtonElement>(null);
   const row = useRef<HTMLDivElement>(null);
+  const bar = useRef<HTMLDivElement>(null);
   // The buttons' positions after the previous change: the FLIP starting point.
   const flipState = useRef<Flip.FlipState | null>(null);
 
   const signedIn = useShell((s) => s.session.status === "signedIn" && !s.session.locked);
+  // Clicks in the transparent strip around the pills reach the window behind.
+  // Signing in or out swaps pills for placeholders, so it re-arms the observers.
+  const refreshShape = useTaskbarShape(bar, signedIn ? "in" : "out");
   const unread = useShell((s) => s.notices.filter((notice) => notice.unread).length);
   const employeeName = useShell((s) =>
     s.session.status === "signedIn" ? s.session.employee.name : null,
@@ -44,6 +50,13 @@ export function Taskbar() {
 
   const buttons = signedIn ? groupTaskbar(apps, tasks) : [];
   const signature = buttons.map((b) => b.key).join("|");
+
+  // The apps pill has just grown or shrunk (an app opened or closed): the clip
+  // goes to Rust now, before this frame is painted, not when an observer or the
+  // next frame gets round to it.
+  useLayoutEffect(() => {
+    refreshShape();
+  }, [signature, refreshShape]);
 
   useGSAP(
     () => {
@@ -169,11 +182,17 @@ export function Taskbar() {
         height: "100vh",
         boxSizing: "border-box",
         padding: "var(--rb-taskbar-inset)",
+        // The window is taller than the strip (room for toasts above it): the bar sits at the bottom.
+        position: "relative",
+        display: "flex",
+        flexDirection: "column",
+        justifyContent: "flex-end",
         fontFamily: "var(--rb-font-sans)",
         color: "var(--rb-ink)",
       }}
     >
       <div
+        ref={bar}
         className="rb-taskbar"
         role="toolbar"
         aria-label="Taskbar"
@@ -284,6 +303,7 @@ export function Taskbar() {
           ) : null}
         </div>
       </div>
+      <ToastHost onLayout={refreshShape} />
     </div>
   );
 }

@@ -28,6 +28,10 @@ export function fileErrorText(error: unknown, name?: string): string {
         : `Storage is full. ${formatBytes(error.shortBy)} more space is needed.`;
     case "blockedType":
       return "This type of file can't be opened on this PC.";
+    case "blockedName":
+      return error.extension
+        ? `Files ending in .${error.extension} aren't allowed on this PC. Choose a different ending for the name.`
+        : "This type of file isn't allowed on this PC. Choose a different ending for the name.";
     case "tooLarge":
       return "That is too large to handle here.";
     case "damaged":

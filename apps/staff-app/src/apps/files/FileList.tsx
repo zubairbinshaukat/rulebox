@@ -155,6 +155,7 @@ export function FileList({
                 role="row"
                 aria-rowindex={index + 2}
                 aria-selected={isSelected}
+                className="rb-file-row"
                 data-drop-dir={isFolder ? entry.path : undefined}
                 onPointerDown={(event) => onItemPointerDown(entry, event)}
                 onClick={(event) => onItemClick(entry.path, event)}
@@ -164,7 +165,8 @@ export function FileList({
                   ...itemRow,
                   height: LIST_ROW_HEIGHT,
                   transform: `translateY(${start}px)`,
-                  background: dropActive || isSelected ? "var(--rb-accent-soft)" : "transparent",
+                  // Hover and selection tints come from the stylesheet (`rb-file-row`); only a drop target is inline.
+                  background: dropActive ? "var(--rb-accent-soft)" : undefined,
                   // The row the keyboard is on (and a folder a drag would land in) has a 2 px line,
                   // not only a tint: the selection and the cursor are two different things.
                   outline: dropActive || isFocused ? "2px solid var(--rb-focus)" : "none",

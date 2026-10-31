@@ -151,6 +151,11 @@ describe("SignIn states", () => {
     await waitFor(() => {
       expect(screen.getByText(/Too many tries\. Try again in/)).toBeTruthy();
     });
+    // The agent's real payload: externally tagged, camelCase fields (a snake_case
+    // `retry_after_ms` once made this read "NaN:NaN").
+    const text = screen.getByTestId("sign-in-error").textContent ?? "";
+    expect(text).not.toContain("NaN");
+    expect(text).toMatch(/Try again in 1:[23]\d/);
   });
 
   it("shows offline-never and offline-expired errors", async () => {

@@ -81,7 +81,11 @@ fn demo_snapshot() -> AgentSnapshot {
             kiosk_enabled: true,
             apps: vec!["files".into(), "orders-web".into(), "notepad".into()],
             allowed_sites: vec!["portal.company.com".into()],
-            file_handlers: Default::default(),
+            // Notepad (a desktop app in the demo catalogue) opens text and CSV files: "Open with".
+            file_handlers: [(".txt", "notepad"), (".csv", "notepad")]
+                .into_iter()
+                .map(|(extension, app)| (extension.to_string(), app.to_string()))
+                .collect(),
             storage: rulebox_policy::StorageConfig {
                 default_quota_gb: 10,
             },

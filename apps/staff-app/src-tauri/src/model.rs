@@ -439,7 +439,7 @@ impl fmt::Debug for SignInRequest {
 /// Staff-side sign-in outcome (tagged). Mapped from flat `rulebox_ipc` results.
 #[allow(dead_code)] // AgentPort surface; sign-in command is Step 5.
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "camelCase", rename_all_fields = "camelCase")]
 pub enum SignInOutcome {
     Ok {
         employee: Employee,
@@ -459,7 +459,7 @@ pub enum SignInOutcome {
 
 #[allow(dead_code)] // AgentPort surface; unlock is a later step.
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "camelCase", rename_all_fields = "camelCase")]
 pub enum VerifyOutcome {
     Ok,
     WrongCredentials,
@@ -469,7 +469,7 @@ pub enum VerifyOutcome {
 
 #[allow(dead_code)] // AgentPort surface; admin exit is a later step.
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "camelCase", rename_all_fields = "camelCase")]
 pub enum AdminExitOutcome {
     SigningOut,
     WrongPin { attempts_left: Option<u32> },

@@ -3,6 +3,8 @@ import type { SidebarSection, SortConfig } from "./types";
 export { formatBytes } from "./storage";
 
 // Keep these in step with `FileKind::matches` (src-tauri/src/files/types.rs).
+// The backend also drops every name on its deny-list (PRD 7.3) from all kinds;
+// none of these lists may contain such an extension (SVG is on the deny-list).
 export const DOC_EXTS = new Set([
   "doc",
   "docx",
@@ -28,7 +30,6 @@ export const IMAGE_EXTS = new Set([
   "png",
   "gif",
   "webp",
-  "svg",
   "bmp",
 ]);
 

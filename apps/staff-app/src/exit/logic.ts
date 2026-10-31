@@ -10,6 +10,7 @@ export const RECOVERY_AFTER_MS = 30_000;
 export const RETRY_AFTER_UNAVAILABLE_MS = 5_000;
 
 export const MESSAGES = {
+  pinHint: "The administrator exit PIN, set in the dashboard under Settings, Admin exit.",
   wrong: "That PIN is not right.",
   checking: "Checking…",
   signingOut: "Signing out to Windows…",

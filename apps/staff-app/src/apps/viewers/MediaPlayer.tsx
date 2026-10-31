@@ -1,7 +1,8 @@
-import { useMemo, useState, type CSSProperties } from "react";
+import { useMemo, useRef, useState, type CSSProperties } from "react";
 
 import { fileNameOf, isVideo, mediaMime, rbfileUrl } from "./kind";
 import { OpenWith } from "./OpenWith";
+import { useFullscreenCover } from "./useFullscreenCover";
 import { ViewerMessage } from "./ViewerMessage";
 
 /**
@@ -13,6 +14,9 @@ export default function MediaPlayer({ path }: { path: string }) {
   const name = fileNameOf(path);
   const video = isVideo(name);
   const [failed, setFailed] = useState(false);
+  const videoRef = useRef<HTMLVideoElement>(null);
+  // Fullscreen video covers the taskbar too (a separate window); undone on every way out.
+  useFullscreenCover(videoRef);
 
   // An empty answer means this engine has no decoder for the format.
   const playable = useMemo(() => {
@@ -42,7 +46,7 @@ export default function MediaPlayer({ path }: { path: string }) {
   return (
     <div style={stage}>
       {video ? (
-        <video {...shared} disablePictureInPicture disableRemotePlayback style={videoStyle} />
+        <video ref={videoRef} {...shared} disablePictureInPicture disableRemotePlayback style={videoStyle} />
       ) : (
         <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 16, width: "min(560px, 90%)" }}>
           <p style={{ margin: 0, fontSize: 15, fontWeight: 500 }}>{name}</p>

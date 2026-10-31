@@ -12,7 +12,7 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use rulebox_desktop::placement::{
-    self, popup_rect, taskbar_rect, taskbar_zone_px, usable_bounds, Rect, POPUP_GAP_LOGICAL,
+    self, popup_rect, taskbar_window_rect, taskbar_zone_px, usable_bounds, Rect, POPUP_GAP_LOGICAL,
 };
 use rulebox_desktop::tracker;
 use rulebox_desktop::workarea::{self, MonitorRect};
@@ -236,6 +236,7 @@ pub fn init(
     create_windows(app, &host)?;
     take_over_session(&host);
     reapply(app, &host);
+    clip_taskbar_to_strip(app, mode);
     show_initial(app);
     start_tracking(&host);
     if let Some(state) = app.try_state::<crate::state::AppState>() {
@@ -369,9 +370,11 @@ fn create_windows(app: &AppHandle, host: &Arc<DesktopHost>) -> Result<(), String
     }
 
     // Our own strip and popup never get a taskbar button of their own.
-    for window in [&taskbar, &popup] {
+    // The strip is also never activated by a click (the program in use keeps the
+    // focus); the popup must take it.
+    for (window, never_activate) in [(&taskbar, true), (&popup, false)] {
         if let Some(hwnd) = raw_hwnd(window) {
-            if let Err(error) = rulebox_desktop::windows::set_tool_window(hwnd) {
+            if let Err(error) = rulebox_desktop::windows::set_tool_window(hwnd, never_activate) {
                 tracing::warn!(label = window.label(), %error, "WS_EX_TOOLWINDOW failed");
             }
         }
@@ -488,15 +491,35 @@ fn take_over_session(host: &Arc<DesktopHost>) {
     }));
 }
 
+/// The taskbar window is taller than its strip (room for toasts), and a window
+/// that has no region takes every click. Until its page reports where its pills
+/// are (a moment after start-up), only the bottom strip takes clicks, so the
+/// transparent area above it is never in the way.
+fn clip_taskbar_to_strip(app: &AppHandle, mode: ShellMode) {
+    let Some(taskbar) = app.get_webview_window(TASKBAR) else {
+        return;
+    };
+    let Some(hwnd) = raw_hwnd(&taskbar) else {
+        return;
+    };
+    let monitor = current_monitor();
+    let window = taskbar_window_rect(mode, monitor.rect, monitor.work, monitor.scale);
+    let strip = placement::taskbar_strip_in_window(window.width(), window.height(), monitor.scale);
+    if let Err(error) = rulebox_desktop::windows::set_shape(hwnd, &[strip], 0) {
+        tracing::warn!(%error, "could not clip the taskbar window to its strip");
+    }
+}
+
 /// Place the windows for the monitor as it is now. Shell mode also
 /// (re)reserves the work area.
 pub fn reapply(app: &AppHandle, host: &Arc<DesktopHost>) {
     let monitor = current_monitor();
     let zone = taskbar_zone_px(monitor.scale);
-    let strip = taskbar_rect(host.mode, monitor.rect, monitor.work, monitor.scale);
+    // The taskbar window is the strip plus the room for toasts above it.
+    let window = taskbar_window_rect(host.mode, monitor.rect, monitor.work, monitor.scale);
 
     if let Some(taskbar) = app.get_webview_window(TASKBAR) {
-        place(&taskbar, strip);
+        place(&taskbar, window);
     }
 
     if host.mode == ShellMode::Shell {
@@ -669,7 +692,9 @@ pub fn popup_open(
             .lock()
             .unwrap_or_else(|e| e.into_inner())
             .is_some();
-    let rect = if kind == PopupKind::Switcher {
+    // A confirm with no menu behind it (the lock screen's "Log out instead")
+    // belongs in the middle of the screen, not in the taskbar's corner.
+    let rect = if kind == PopupKind::Switcher || (kind == PopupKind::Confirm && anchor.is_none() && !switching) {
         placement::centered_rect(size, bounds)
     } else if anchor.is_none() && switching {
         match (popup.outer_position(), popup.outer_size()) {
