@@ -14,8 +14,9 @@ import {
 } from "./lib/desired";
 import { KEEP_VERSIONS, MAX_PRUNE_PER_DEVICE, PUBLISH_BATCH } from "./lib/limits";
 import { orgPingInterval } from "./lib/presence";
-import { loadOrgSigningKey, signPayload, type SigningKey } from "./lib/signing";
+import { loadOrgSigningKey, signWith, type SigningKey } from "./lib/signing";
 import { DEFAULT_ORG_SETTINGS, type OrgSettings } from "./lib/validators";
+import { sanitizeVersion } from "./lib/versions";
 
 // The publisher (plan 4.4 as amended by A5, A6, A13; Step 8 item 3). Internal:
 // scheduled by `lib/publish.ts` `requestPublish` (1.5 s after the first of a
@@ -90,7 +91,9 @@ async function legacyVersionFloor(ctx: { db: DatabaseReader }, device: Doc<"devi
     .query("deviceSummary")
     .withIndex("by_device", (q) => q.eq("deviceId", device._id))
     .unique();
-  floor = Math.max(floor, summary?.appliedVersion ?? 0);
+  // The device reported this: untrusted. A value that is not a sane integer
+  // (rows written before the report path sanitized it) counts as 0.
+  floor = Math.max(floor, sanitizeVersion(summary?.appliedVersion) ?? 0);
   const scopes: string[] = [device._id];
   if (device.groupId !== undefined) scopes.push(device.groupId);
   for (const scope of scopes) {
@@ -99,7 +102,7 @@ async function legacyVersionFloor(ctx: { db: DatabaseReader }, device: Doc<"devi
       .withIndex("by_scope_version", (q) => q.eq("scope", scope))
       .order("desc")
       .first();
-    floor = Math.max(floor, row?.version ?? 0);
+    floor = Math.max(floor, sanitizeVersion(row?.version) ?? 0);
   }
   return floor;
 }
@@ -184,7 +187,7 @@ async function publishDevice(ctx: MutationCtx, run: RunState, device: Doc<"devic
     return;
   }
 
-  const signature = signPayload(payload, run.key.seed);
+  const signature = signWith(run.key, payload);
   const bodyId = await ctx.db.insert("desiredBodies", {
     orgId: device.orgId,
     deviceId: device._id,
@@ -233,6 +236,30 @@ async function publishDevice(ctx: MutationCtx, run: RunState, device: Doc<"devic
   for (const row of old) {
     if ((await ctx.db.get(row.bodyId)) !== null) await ctx.db.delete(row.bodyId);
     await ctx.db.delete(row._id);
+  }
+}
+
+/**
+ * One device of a batch. A device whose document cannot be built or written
+ * (bad data of its own) is skipped with an audit entry and does not abort the
+ * run for the other 24. Everything that can throw for data reasons (the
+ * version floor, the document, the payload, the signature) happens BEFORE the
+ * first write of `publishDevice`, so a skipped device leaves no partial rows.
+ * No value or error text goes into the entry.
+ */
+async function publishOne(ctx: MutationCtx, run: RunState, device: Doc<"devices">): Promise<void> {
+  try {
+    await publishDevice(ctx, run, device);
+  } catch {
+    await writeAudit(ctx, {
+      orgId: device.orgId,
+      actor: SYSTEM_ACTOR,
+      action: "policy.publishFailed",
+      targetType: "device",
+      targetId: device._id,
+      targetLabel: device.name,
+      summary: `Could not publish to the PC ${device.name}: unexpected error`,
+    });
   }
 }
 
@@ -302,7 +329,7 @@ export const run = internalMutation({
       deviceIds = deviceIds.slice(PUBLISH_BATCH);
       for (const id of batch) {
         const device = await ctx.db.get(id);
-        if (device !== null) await publishDevice(ctx, runState, device);
+        if (device !== null) await publishOne(ctx, runState, device);
       }
     } else if (groupIds.length > 0 || allDevices) {
       const opts = { numItems: PUBLISH_BATCH, cursor: cursor ?? null };
@@ -317,7 +344,7 @@ export const run = internalMutation({
               .query("devices")
               .withIndex("by_org", (q) => q.eq("orgId", args.orgId))
               .paginate(opts);
-      for (const device of page.page) await publishDevice(ctx, runState, device);
+      for (const device of page.page) await publishOne(ctx, runState, device);
       if (page.isDone) {
         cursor = undefined;
         if (allDevices) allDevices = false;
@@ -347,7 +374,9 @@ export const run = internalMutation({
       return null;
     }
     const scheduled = await ctx.scheduler.runAfter(0, internal.publish.run, { orgId: args.orgId });
-    await ctx.db.patch(queue._id, { deviceIds, groupIds, allDevices, cursor, scheduled });
+    // `requestedAt` renews the lease (a run that throws never gets here, so
+    // `requestPublish` reschedules once the lease ran out).
+    await ctx.db.patch(queue._id, { deviceIds, groupIds, allDevices, cursor, scheduled, requestedAt: now });
     return null;
   },
 });

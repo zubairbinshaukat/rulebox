@@ -429,16 +429,49 @@ const DEPRECATED_DEVICE_FIELDS = [
  * falls back to these rows and the first publish reads them for the version
  * floor. Afterwards the table is removed from the schema.
  *   npx convex run maintenance:dropDesiredStates '{}'
+ *
+ * Refuses (deletes nothing) while any non-revoked device has no head: a first
+ * pass walks `devices` page by page (read-only, reschedules itself), and only
+ * when every one has a head does a second pass delete. A refusal returns
+ * `blocked` > 0 when the first page already shows it; on a later page it is
+ * logged (`console.error`, a count, no values) and the walk stops.
  */
 export const dropDesiredStates = internalMutation({
-  args: {},
-  returns: v.object({ deleted: v.number(), done: v.boolean() }),
-  handler: async (ctx) => {
+  args: { verifyCursor: v.optional(v.union(v.string(), v.null())), verified: v.optional(v.boolean()) },
+  returns: v.object({ deleted: v.number(), done: v.boolean(), blocked: v.number() }),
+  handler: async (ctx, args) => {
+    if (args.verified !== true) {
+      const page = await ctx.db.query("devices").paginate({ numItems: MIGRATION_DEVICE_BATCH, cursor: args.verifyCursor ?? null });
+      let blocked = 0;
+      for (const d of page.page) {
+        const cred = await ctx.db
+          .query("deviceCredentials")
+          .withIndex("by_device", (q) => q.eq("deviceId", d._id))
+          .unique();
+        // Same rule as the publisher: a revoked device gets no head.
+        if ((cred?.state ?? (d.revoked === true ? "revoked" : "active")) === "revoked") continue;
+        const head = await ctx.db
+          .query("desiredHeads")
+          .withIndex("by_device", (q) => q.eq("deviceId", d._id))
+          .unique();
+        if (head === null) blocked++;
+      }
+      if (blocked > 0) {
+        console.error(`dropDesiredStates refused: ${blocked} device(s) on one page have no signed head yet; publish first`);
+        return { deleted: 0, done: true, blocked };
+      }
+      await ctx.scheduler.runAfter(
+        0,
+        internal.maintenance.dropDesiredStates,
+        page.isDone ? { verified: true } : { verifyCursor: page.continueCursor },
+      );
+      return { deleted: 0, done: false, blocked: 0 };
+    }
     const rows = await ctx.db.query("desiredStates").withIndex("by_creation_time").take(MIGRATION_DEVICE_BATCH);
     for (const row of rows) await ctx.db.delete(row._id);
     const done = rows.length < MIGRATION_DEVICE_BATCH;
-    if (!done) await ctx.scheduler.runAfter(0, internal.maintenance.dropDesiredStates, {});
-    return { deleted: rows.length, done };
+    if (!done) await ctx.scheduler.runAfter(0, internal.maintenance.dropDesiredStates, { verified: true });
+    return { deleted: rows.length, done, blocked: 0 };
   },
 });
 

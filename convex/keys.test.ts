@@ -95,6 +95,41 @@ describe("keys:registerActive and enrollment's root of trust", () => {
     await expect(o.as.mutation(api.keys.registerActive, { force: true })).rejects.toMatchObject({ data: { code: "conflict", detail: "key_exists" } });
   });
 
+  test("retry after a failed publish: with the seed restored, Register key again publishes (no second row, no conflict)", async () => {
+    const t = await setupAuth();
+    const orgId = await makeOrg(t);
+    const o = await owner(t, orgId);
+    const { deviceId } = await enrollDevice(t, orgId);
+    const head = () => t.run((ctx) => ctx.db.query("desiredHeads").withIndex("by_device", (q) => q.eq("deviceId", deviceId)).unique());
+
+    // The seed is gone: the run fails, audits and leaves the queue unscheduled.
+    setSeeds(undefined);
+    await drain(t);
+    expect(await head()).toBeNull();
+    const failed = await t.run((ctx) => ctx.db.query("orgStats").withIndex("by_org", (q) => q.eq("orgId", orgId)).unique());
+    expect(failed?.publishFailedAt).toBeDefined();
+
+    // The Owner restores the same seed: nothing else would ever publish. The retry registers nothing.
+    setSeeds(TEST_SEED_B64);
+    const before = await keyRows(t, orgId);
+    expect(await o.as.mutation(api.keys.registerActive, {})).toEqual({ keyId: TEST_KEY.keyId, fingerprint: "21fe 31df a154 a261" });
+    expect(await keyRows(t, orgId)).toEqual(before);
+    expect((await auditRows(t, orgId)).filter((r) => r.action === "policy.keyRegistered")).toHaveLength(0);
+    await drain(t);
+    expect((await head())?.version).toBe(1);
+    const fixed = await t.run((ctx) => ctx.db.query("orgStats").withIndex("by_org", (q) => q.eq("orgId", orgId)).unique());
+    expect(fixed?.publishFailedAt).toBeUndefined();
+  });
+
+  test("the env key known as `next` or `retired` stays a conflict (only the active key is a retry)", async () => {
+    const t = await setupAuth();
+    const orgId = await makeOrg(t, "Acme", { noKey: true });
+    await insertKeyRow(t, orgId, TEST_KEY_2, "active");
+    await insertKeyRow(t, orgId, TEST_KEY, "retired");
+    const o = await owner(t, orgId);
+    await expect(o.as.mutation(api.keys.registerActive, {})).rejects.toMatchObject({ data: { code: "conflict", detail: "key_exists" } });
+  });
+
   test("only the Owner, with a fresh step-up", async () => {
     const t = await setupAuth();
     const orgId = await makeOrg(t, "Acme", { noKey: true });
@@ -171,6 +206,37 @@ describe("rotation (plan 4.5)", () => {
     expect(res).toMatchObject({ page: { total: 2, trustNext: 1 }, isDone: true });
     expect(b.deviceId).toBeDefined();
     await expectCode(viewer.as.query(api.keys.trustProgress, { paginationOpts: { numItems: 201, cursor: null } }), "invalid_argument");
+  });
+});
+
+describe("many retired keys", () => {
+  test("a device is told the NEWEST 20 retired keys plus the active one, oldest first (never the oldest 20)", async () => {
+    const t = await setupAuth();
+    const orgId = await makeOrg(t);
+    const viewer = await asMember(t, { role: "viewer", orgId });
+    await t.run(async (ctx) => {
+      for (let i = 0; i < 25; i++) {
+        await ctx.db.insert("policyKeys", {
+          orgId,
+          keyId: `retired${String(i).padStart(2, "0")}`,
+          publicKey: TEST_KEY_2.publicKeyB64,
+          status: "retired",
+          createdAt: i + 1, // older than the active key, which was created "now"
+        });
+      }
+    });
+    const ids = (await viewer.as.query(api.keys.status, {})).keys.map((k) => k.keyId);
+    const retired = ids.filter((id) => id.startsWith("retired"));
+    expect(retired).toEqual(Array.from({ length: 20 }, (_, i) => `retired${String(i + 5).padStart(2, "0")}`));
+    expect(ids.at(-1)).toBe(TEST_KEY.keyId);
+    expect(ids).toHaveLength(21);
+
+    const { deviceId, secret } = await enrollDevice(t, orgId);
+    await drain(t);
+    const state = await t.query(api.devices.headState, { deviceId, deviceSecret: secret });
+    if (state.kind !== "ok") throw new Error("expected ok");
+    expect(state.keys.map((k) => k.keyId)).toEqual(ids);
+    expect(state.retiredKeyIds).toEqual(retired);
   });
 });
 

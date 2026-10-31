@@ -1,5 +1,6 @@
 import { describe, expect, test } from "vitest";
 import rosterRaw from "../crates/rulebox-policy/tests/vectors/roster-v1.json?raw";
+import negativeRaw from "../crates/rulebox-policy/tests/vectors/signed-v2-negative.json?raw";
 import signedRaw from "../crates/rulebox-policy/tests/vectors/signed-v2.json?raw";
 import { TEST_KEY, TEST_KEY_2 } from "../tests/convex/keys";
 import {
@@ -9,6 +10,8 @@ import {
   VECTOR_ISSUED_AT_MS,
   VECTOR_PIN,
   VECTOR_PIN_HASH,
+  VECTOR_UNICODE_INPUT,
+  VECTOR_UNICODE_VERSION,
   VECTOR_VERSION,
 } from "../tests/convex/vectors";
 import { verifySecret } from "./lib/argon";
@@ -39,6 +42,15 @@ type SignedVector = {
   payloadSha256: string;
   contentHash: string;
   endorsement: { keyId: string; publicKey: string; byKeyId: string; message: string; signature: string };
+  unicode: { version: number; payload: string; signature: string; payloadSha256: string; contentHash: string; orgName: string };
+};
+type Envelope = { keyId: string; version: number; payload: string; signature: string };
+type NegativeVector = {
+  procedure: string[];
+  reasons: string[];
+  trustedKeys: { keyId: string; publicKey: string }[];
+  expected: { orgId: string; deviceId: string; version: number };
+  cases: { name: string; reason: string; detail: string; envelope: Envelope }[];
 };
 type RosterVector = {
   publicKey: string;
@@ -49,7 +61,25 @@ type RosterVector = {
   snapshot: { epoch: number; payload: string; signature: string; keyId: string };
 };
 const signed = JSON.parse(signedRaw) as SignedVector;
+const negative = JSON.parse(negativeRaw) as NegativeVector;
 const rosterVector = JSON.parse(rosterRaw) as RosterVector;
+
+/**
+ * The reference verifier of `signed-v2-negative.json`: the checks of its
+ * `procedure`, in that order. The Rust agent (Step 9) must give the same
+ * reason for every case. `null` = accepted.
+ */
+function rejectionReason(e: Envelope, v: NegativeVector): string | null {
+  const trusted = v.trustedKeys.find((k) => k.keyId === e.keyId);
+  if (trusted === undefined) return "unknown_key";
+  if (!verifyPayload(e.payload, e.signature, decodeKey32(trusted.publicKey)!)) return "bad_signature";
+  const p = JSON.parse(e.payload) as { keyId: string; orgId: string; deviceId: string; version: number; doc: { version: number } };
+  if (p.keyId !== e.keyId) return "key_id_mismatch";
+  if (p.orgId !== v.expected.orgId) return "wrong_org";
+  if (p.deviceId !== v.expected.deviceId) return "wrong_device";
+  if (p.version !== e.version || p.version !== v.expected.version || p.doc.version !== p.version) return "version_mismatch";
+  return null;
+}
 
 const payloadOf = (input: BuildInput, version = VECTOR_VERSION) =>
   buildPayload({
@@ -92,6 +122,66 @@ describe("signed-v2.json (shared with the agent, Step 9)", () => {
     expect(e).toMatchObject({ keyId: TEST_KEY_2.keyId, publicKey: TEST_KEY_2.publicKeyB64, byKeyId: TEST_KEY.keyId });
     expect(e.message).toBe(endorsementMessage(e.keyId, e.publicKey));
     expect(verifyPayload(e.message, e.signature, TEST_KEY.publicKey)).toBe(true);
+  });
+});
+
+describe("signed-v2.json `unicode` document (UTF-8 and JSON escaping)", () => {
+  test("the builder reproduces it byte for byte; the signature is over the UTF-8 bytes; the strings round-trip", () => {
+    const u = signed.unicode;
+    const payload = payloadOf(VECTOR_UNICODE_INPUT, VECTOR_UNICODE_VERSION);
+    expect(payload).toBe(u.payload);
+    expect(signPayload(payload, TEST_KEY.seed)).toBe(u.signature);
+    expect(u.version).toBe(VECTOR_UNICODE_VERSION);
+    expect(verifyPayload(u.payload, u.signature, TEST_KEY.publicKey)).toBe(true);
+    // The hash and the signature cover UTF-8 bytes, not UTF-16 code units.
+    expect(new TextEncoder().encode(u.payload).length).toBeGreaterThan(u.payload.length);
+    expect(u.payloadSha256).toBe(sha256HexSync(u.payload));
+    expect(u.contentHash).toBe(contentHashOf(buildDeviceDoc(VECTOR_UNICODE_INPUT, VECTOR_UNICODE_VERSION)));
+    // The escapes JSON requires are in the bytes; DEL and the non-ASCII text are raw.
+    for (const raw of ["\\\"", "\\\\", "\\n", "\\t", "\\u0001", "Zoë", "日本語", "🦀", "\u007f", "“quoted”"]) {
+      expect(u.payload, raw).toContain(raw);
+    }
+    expect(u.payload).not.toContain("\n"); // no raw newline or control character
+    // A parser gets the original strings back.
+    const parsed = JSON.parse(u.payload) as { doc: { orgName: string; branding: { name: string }; catalog: { name: string; description: string | null }[] } };
+    expect(parsed.doc.orgName).toBe(u.orgName);
+    expect(parsed.doc.branding.name).toBe(u.orgName);
+    expect(u.orgName).toContain("\u0001");
+    const web = parsed.doc.catalog.find((c) => c.name.startsWith("Ørders"));
+    expect(web).toMatchObject({ name: 'Ørders "Küche" \\ 注文', description: "Zeile 1\nZeile 2 – “quoted” \u007f 😀" });
+  });
+});
+
+describe("signed-v2-negative.json (documents the agent must reject)", () => {
+  test("every case is rejected for exactly the stated reason by the reference verifier", () => {
+    expect(negative.trustedKeys).toEqual([{ keyId: TEST_KEY.keyId, publicKey: TEST_KEY.publicKeyB64 }]);
+    expect(negative.expected).toEqual({ orgId: VECTOR_IDS.orgId, deviceId: VECTOR_IDS.deviceId, version: VECTOR_VERSION });
+    expect(negative.cases.map((c) => c.name)).toEqual([
+      "flipped_payload_byte",
+      "flipped_signature_byte",
+      "non_canonical_s",
+      "wrong_key_id",
+      "key_id_mismatch",
+      "wrong_org_id",
+      "wrong_device_id",
+      "version_older_than_expected",
+      "version_envelope_vs_payload",
+      "version_doc_vs_payload",
+    ]);
+    for (const c of negative.cases) expect(rejectionReason(c.envelope, negative), c.name).toBe(c.reason);
+    expect(new Set(negative.cases.map((c) => c.reason))).toEqual(new Set(negative.reasons));
+  });
+
+  test("the valid envelope is accepted by the same verifier (the cases differ from it in one thing)", () => {
+    const ok: Envelope = { keyId: signed.keyId, version: signed.version, payload: signed.payload, signature: signed.signature };
+    expect(rejectionReason(ok, negative)).toBeNull();
+  });
+
+  test("a case that fails the signature does so even though the rest is right (and the others have a valid signature)", () => {
+    for (const c of negative.cases) {
+      const valid = verifyPayload(c.envelope.payload, c.envelope.signature, TEST_KEY.publicKey);
+      expect(valid, c.name).toBe(c.reason !== "bad_signature");
+    }
   });
 });
 

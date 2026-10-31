@@ -1,6 +1,6 @@
 // The fixed input of the committed signing vectors (plan Step 8 item 7):
 // `scripts/gen-policy-vectors.mjs` builds, signs and writes
-// `crates/rulebox-policy/tests/vectors/{signed-v2,roster-v1}.json` from it;
+// `crates/rulebox-policy/tests/vectors/{signed-v2,signed-v2-negative,roster-v1}.json` from it;
 // `convex/desired.test.ts` checks that the builder still produces those exact
 // bytes; the Rust agent verifies the same files (Step 9). Every id is a fixed,
 // obviously fake string. Changing anything here changes the vectors: run
@@ -90,6 +90,26 @@ export const VECTOR_INPUT: BuildInput = {
   employeeApps: [{ employeeId: VECTOR_IDS.employeeId, appId: VECTOR_IDS.desktopAppId }],
   fileHandlers: [{ extension: ".docx", appId: VECTOR_IDS.desktopAppId }],
   device: { _id: VECTOR_IDS.deviceId, kioskEnabled: true },
+};
+
+/**
+ * The "unicode" document (review fix): the same input with strings that
+ * exercise UTF-8 and JSON escaping in the bytes the agent verifies. Accents,
+ * CJK, an emoji (a surrogate pair), a double quote, a backslash, a newline, a
+ * tab, a control character (U+0001) and DEL (U+007F, which JSON does not
+ * escape). Real names never reach the builder with control characters (the
+ * validators refuse them); this is a test of the signer and verifier, not of
+ * what the dashboard accepts.
+ */
+export const VECTOR_UNICODE_VERSION = 8;
+export const VECTOR_UNICODE_INPUT: BuildInput = {
+  ...VECTOR_INPUT,
+  org: { _id: VECTOR_IDS.orgId, name: 'Zoë "Café" Müller\\Ünï 日本語 🦀\nline 2\t(tab)\u0001end' },
+  apps: VECTOR_INPUT.apps.map((a) =>
+    a._id === VECTOR_IDS.webAppId
+      ? { ...a, name: 'Ørders "Küche" \\ 注文', description: "Zeile 1\nZeile 2 – “quoted” \u007f 😀" }
+      : a,
+  ),
 };
 
 /** The roster vector (A6): two members added, one removed, then a snapshot of what is left. */

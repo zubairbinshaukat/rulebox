@@ -1,13 +1,22 @@
 import type { Id } from "../_generated/dataModel";
 import { internal } from "../_generated/api";
 import type { MutationCtx } from "../_generated/server";
-import { MAX_PUBLISH_TARGETS, PUBLISH_DEBOUNCE_MS } from "./limits";
+import { MAX_PUBLISH_TARGETS, MINUTE_MS, PUBLISH_DEBOUNCE_MS } from "./limits";
 
 // The publish queue (plan 4.4). Every mutation that changes what a device
 // should look like calls `requestPublish`; the consumer `publish:run` builds,
 // signs and writes the documents (Step 8). One `publishQueue` row per
 // organization collects every change made within PUBLISH_DEBOUNCE_MS, so ten
 // quick edits cost one run.
+
+/**
+ * A scheduled run that neither finished nor rescheduled itself after this long
+ * is taken for dead (it threw, which leaves `scheduled` set): the next request
+ * schedules a new one. `requestedAt` is the lease clock: it is set when the
+ * row is created and whenever a run is (re)scheduled, so every hop of a long
+ * walk renews it.
+ */
+export const PUBLISH_LEASE_MS = 5 * MINUTE_MS;
 
 export type PublishTarget =
   | { allDevices: true }
@@ -78,9 +87,13 @@ export async function requestPublish(
     sameSet(row.groupIds, groupIds) &&
     sameSet(row.deviceIds, deviceIds) &&
     row.cursor === cursor;
-  if (unchanged && row.scheduled !== undefined) return; // nothing new: no write
-  const scheduled =
-    row.scheduled ?? (await ctx.scheduler.runAfter(PUBLISH_DEBOUNCE_MS, internal.publish.run, { orgId }));
+  const now = Date.now();
+  // A run that was scheduled long ago and left the row behind died (threw).
+  const live = row.scheduled !== undefined && now - row.requestedAt <= PUBLISH_LEASE_MS;
+  if (unchanged && live) return; // nothing new: no write
+  const scheduled = live
+    ? row.scheduled
+    : await ctx.scheduler.runAfter(PUBLISH_DEBOUNCE_MS, internal.publish.run, { orgId });
   // `union` keeps the walked group first, so the cursor stays valid for it.
-  await ctx.db.patch(row._id, { allDevices, groupIds, deviceIds, scheduled, cursor });
+  await ctx.db.patch(row._id, { allDevices, groupIds, deviceIds, scheduled, cursor, requestedAt: live ? row.requestedAt : now });
 }

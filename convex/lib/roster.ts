@@ -1,7 +1,7 @@
 import type { Doc, Id } from "../_generated/dataModel";
 import type { DatabaseWriter } from "../_generated/server";
 import { ROSTER_SNAPSHOT_EVERY } from "./limits";
-import { signPayload, type SigningKey } from "./signing";
+import { signWith, type SigningKey } from "./signing";
 
 // The signed per-group roster log (plan 4.2.1 / 4.4 amended, A6; Step 8 item
 // 11). Who may sign in on a device is NOT in the device document any more:
@@ -40,7 +40,7 @@ export function signRosterEntry(
   e: { orgId: string; groupId: string; epoch: number; employeeId: string; credentialRevision: number | null },
   key: SigningKey,
 ): string {
-  return signPayload(rosterEntryMessage(e), key.seed);
+  return signWith(key, rosterEntryMessage(e));
 }
 
 /**
@@ -147,7 +147,7 @@ export async function appendRosterEntries(
       groupId,
       epoch,
       payload,
-      signature: signPayload(payload, key.seed),
+      signature: signWith(key, payload),
       keyId: key.keyId,
       createdAt: now,
     });

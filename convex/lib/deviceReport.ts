@@ -6,6 +6,7 @@ import { deepEqual } from "./deepEqual";
 import { isOutOfSupport } from "./lifecycle";
 import { bumpOrgStatsIfPresent } from "./plans";
 import type { DiskBand } from "./validators";
+import { sanitizeVersion } from "./versions";
 
 // The agent's status report, split by change rate (plan 4.2.1, A8; post-Phase-5
 // plan 2.6): `deviceSummary` holds the list columns, `deviceReports` the
@@ -80,13 +81,15 @@ export async function writeStatus(
   const osBuild = nn(s.osBuild);
   const osEdition = nn(s.osEdition);
   const diskFreeGb = nn(s.diskFreeGb);
+  // Untrusted: the publisher builds a device's first signed version on this.
+  const appliedVersion = sanitizeVersion(s.appliedVersion);
 
   const summaryNext: SummaryFields = {
     agentVersion: nn(s.agentVersion),
     windowsBuild: osBuild,
     kioskPhase: nn(s.kioskPhase),
     outOfSupport: isOutOfSupport(osBuild, osEdition, now),
-    appliedVersion: nn(s.appliedVersion),
+    appliedVersion,
     diskBand: diskBandOf(diskFreeGb),
   };
   const summary = await ctx.db
@@ -122,7 +125,7 @@ export async function writeStatus(
     lockdownLevel: nn(s.lockdownLevel),
     kioskPhase: nn(s.kioskPhase),
     kioskError: nn(s.kioskError),
-    appliedVersion: nn(s.appliedVersion),
+    appliedVersion,
     shellHealth: nn(s.shellHealth),
     compat: nn(s.compat),
     trustedKeyIds: nn(s.trustedKeyIds),

@@ -10,7 +10,8 @@ import { auditPolicy, looksSecret } from "./lib/audit";
 import { sha256HexSync } from "./lib/crypto";
 import { PAYLOAD_FORMAT } from "./lib/desired";
 import { KEEP_VERSIONS, MINUTE_MS, PUBLISH_BATCH, ROSTER_SNAPSHOT_EVERY } from "./lib/limits";
-import { requestPublish } from "./lib/publish";
+import { PUBLISH_LEASE_MS, requestPublish } from "./lib/publish";
+import { MAX_APPLIED_VERSION } from "./lib/versions";
 import { appendRosterEntries, rosterEntryMessage } from "./lib/roster";
 import { decodeKey32, verifyPayload } from "./lib/signing";
 
@@ -289,6 +290,158 @@ describe("publish:run", () => {
     const r = await rows(t, deviceId);
     expect(r.head).toMatchObject({ version: 1, pingIntervalMs: 10 * MINUTE_MS });
     expect(r.bodies).toHaveLength(1);
+  });
+});
+
+describe("review fixes: hostile reported versions, a dead run, one bad device", () => {
+  const BAD_VERSIONS: [string, number][] = [
+    ["NaN", Number.NaN],
+    ["Infinity", Number.POSITIVE_INFINITY],
+    ["-Infinity", Number.NEGATIVE_INFINITY],
+    ["negative", -3],
+    ["fraction", 2.5],
+    ["1e300", 1e300],
+    ["above the bound", MAX_APPLIED_VERSION + 1],
+  ];
+
+  test.each(BAD_VERSIONS)("the publisher ignores a stored appliedVersion that is %s: version 1, nothing aborted", async (_name, bad) => {
+    const t = await setupAuth();
+    const orgId = await makeOrg(t);
+    const a = (await enrollDevice(t, orgId, { name: "A" })).deviceId;
+    const b = (await enrollDevice(t, orgId, { name: "B" })).deviceId;
+    await t.run(async (ctx) => {
+      const s = (await ctx.db.query("deviceSummary").withIndex("by_device", (q) => q.eq("deviceId", a)).unique())!;
+      await ctx.db.patch(s._id, { appliedVersion: bad });
+    });
+    await drain(t);
+    expect((await rows(t, a)).head?.version).toBe(1);
+    expect((await rows(t, b)).head?.version).toBe(1);
+    expect(await auditOf(t, orgId, "policy.publishFailed")).toEqual([]);
+    expect(await queueOf(t, orgId)).toBeNull();
+  });
+
+  test("the largest accepted appliedVersion still gives a valid version above it", async () => {
+    const t = await setupAuth();
+    const { deviceId } = await enrolled(t);
+    await t.run(async (ctx) => {
+      const s = (await ctx.db.query("deviceSummary").withIndex("by_device", (q) => q.eq("deviceId", deviceId)).unique())!;
+      await ctx.db.patch(s._id, { appliedVersion: MAX_APPLIED_VERSION });
+    });
+    await drain(t);
+    expect((await rows(t, deviceId)).head?.version).toBe(MAX_APPLIED_VERSION + 1);
+  });
+
+  test.each(BAD_VERSIONS)("a report with appliedVersion %s is stored without it (summary and report); a sane one is kept", async (_name, bad) => {
+    const t = await setupAuth();
+    const { deviceId, dev } = await enrolled(t);
+    await t.mutation(api.devices.heartbeat, { ...dev, status: { agentVersion: "0.4.0", appliedVersion: 5 } });
+    const stored = async () =>
+      await t.run(async (ctx) => ({
+        summary: (await ctx.db.query("deviceSummary").withIndex("by_device", (q) => q.eq("deviceId", deviceId)).unique())?.appliedVersion,
+        report: (await ctx.db.query("deviceReports").withIndex("by_device", (q) => q.eq("deviceId", deviceId)).unique())?.appliedVersion,
+      }));
+    expect(await stored()).toEqual({ summary: 5, report: 5 });
+    await t.mutation(api.devices.heartbeat, { ...dev, status: { agentVersion: "0.4.0", appliedVersion: bad } });
+    expect(await stored()).toEqual({ summary: undefined, report: undefined });
+  });
+
+  test("a device whose own data breaks its publish is skipped with an audit entry; the rest of the batch publishes", async () => {
+    const t = await setupAuth();
+    const orgId = await makeOrg(t);
+    const bad = (await enrollDevice(t, orgId, { name: "Broken PC" })).deviceId;
+    const good = (await enrollDevice(t, orgId, { name: "Good PC" })).deviceId;
+    // Two credential rows for one device: `.unique()` throws inside that device's publish.
+    await t.run(async (ctx) => {
+      const c = (await ctx.db.query("deviceCredentials").withIndex("by_device", (q) => q.eq("deviceId", bad)).unique())!;
+      const { _id, _creationTime, ...copy } = c;
+      void _id;
+      void _creationTime;
+      await ctx.db.insert("deviceCredentials", copy);
+    });
+    await drain(t);
+    expect((await rows(t, bad)).head).toBeNull();
+    expect((await rows(t, good)).head?.version).toBe(1);
+    const failed = await auditOf(t, orgId, "policy.publishFailed");
+    expect(failed.map((r) => r.summary)).toEqual(["Could not publish to the PC Broken PC: unexpected error"]);
+    expect(await queueOf(t, orgId)).toBeNull();
+  });
+
+  test("a run that threw leaves the queue scheduled; once the lease ran out the next request reschedules and publishes", async () => {
+    const t = await setupAuth();
+    const { orgId, deviceId } = await enrolled(t);
+    // A second `orgSecrets` row makes the run throw before it touches a device.
+    const dup = await t.run(async (ctx) => {
+      const s = (await ctx.db.query("orgSecrets").withIndex("by_org", (q) => q.eq("orgId", orgId)).unique())!;
+      const { _id, _creationTime, ...copy } = s;
+      void _id;
+      void _creationTime;
+      return await ctx.db.insert("orgSecrets", copy);
+    });
+    await drain(t).catch(() => undefined); // the failed run may surface here
+    const dead = await queueOf(t, orgId);
+    expect(dead).toMatchObject({ deviceIds: [deviceId] });
+    expect(dead?.scheduled).toBeDefined(); // the dead run's id: nothing will ever clear it
+    expect((await rows(t, deviceId)).head).toBeNull();
+
+    // Within the lease a request changes nothing (no write, no second run).
+    await t.run((ctx) => requestPublish(ctx, orgId, { deviceIds: [deviceId] }));
+    expect(await queueOf(t, orgId)).toEqual(dead);
+
+    // The poisoned row is gone and the lease ran out: the same request now schedules a run.
+    await t.run((ctx) => ctx.db.delete(dup));
+    vi.setSystemTime(Date.now() + PUBLISH_LEASE_MS + 1);
+    await t.run((ctx) => requestPublish(ctx, orgId, { deviceIds: [deviceId] }));
+    const healed = await queueOf(t, orgId);
+    expect(healed?.scheduled).toBeDefined();
+    expect(healed?.scheduled).not.toBe(dead?.scheduled);
+    expect(healed!.requestedAt).toBeGreaterThan(dead!.requestedAt);
+    await drain(t);
+    expect((await rows(t, deviceId)).head?.version).toBe(1);
+    expect(await queueOf(t, orgId)).toBeNull();
+  });
+
+  test("a hop of a long walk renews the lease (requestedAt), so a healthy chain is never rescheduled", async () => {
+    const t = await setupAuth();
+    const orgId = await makeOrg(t);
+    for (let i = 0; i < PUBLISH_BATCH + 2; i++) {
+      if (i % 9 === 8) vi.setSystemTime(Date.now() + MINUTE_MS);
+      await enrollDevice(t, orgId, { name: `PC ${i}` });
+    }
+    await t.run(async (ctx) => {
+      const q = (await ctx.db.query("publishQueue").withIndex("by_org", (x) => x.eq("orgId", orgId)).unique())!;
+      await ctx.db.patch(q._id, { deviceIds: [], allDevices: true, requestedAt: 0 });
+    });
+    await t.mutation(internal.publish.run, { orgId });
+    const q = await queueOf(t, orgId);
+    expect(q?.scheduled).toBeDefined();
+    expect(q!.requestedAt).toBeGreaterThan(0);
+    const before = q!.scheduled;
+    await t.run((ctx) => requestPublish(ctx, orgId, { allDevices: true }));
+    // The walk restarted (cursor reset) but the live run is kept.
+    expect((await queueOf(t, orgId))?.scheduled).toBe(before);
+  });
+});
+
+describe("maintenance:dropDesiredStates (A5 migration guard)", () => {
+  test("refuses while a non-revoked device has no signed head; deletes once every one has", async () => {
+    const t = await setupAuth();
+    const { orgId, deviceId } = await enrolled(t);
+    const gone = await enrollDevice(t, orgId, { name: "Gone" });
+    await t.mutation(api.devices.unenroll, { deviceId: gone.deviceId, deviceSecret: gone.secret });
+    await t.run((ctx) => ctx.db.insert("desiredStates", { orgId, scope: deviceId, version: 4, doc: { kioskEnabled: true } }));
+
+    // Nothing is published yet: refused, rows kept, nothing scheduled to delete.
+    const refused = await t.mutation(internal.maintenance.dropDesiredStates, {});
+    expect(refused).toEqual({ deleted: 0, done: true, blocked: 1 });
+    expect((await t.run((ctx) => ctx.db.query("desiredStates").withIndex("by_creation_time").take(10))).length).toBe(1);
+
+    // Everything published (the revoked device never gets a head): the guard passes, the delete follows.
+    await drain(t);
+    expect((await rows(t, deviceId)).head).not.toBeNull();
+    const verifying = await t.mutation(internal.maintenance.dropDesiredStates, {});
+    expect(verifying).toEqual({ deleted: 0, done: false, blocked: 0 });
+    await drain(t);
+    expect(await t.run((ctx) => ctx.db.query("desiredStates").withIndex("by_creation_time").take(10))).toEqual([]);
   });
 });
 

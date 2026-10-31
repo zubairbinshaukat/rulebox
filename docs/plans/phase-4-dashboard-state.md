@@ -3064,6 +3064,44 @@ the CLI lines was not screenshotted: the demo has a key). The global red
 banner "on every page" is not built (only on the Signing tab).
 (13) `keys:trustProgress` reads `deviceReports` (compat up to 32 KB): a full
 200-device page can read ~6 MB. Consider `trustedKeyIds` on `deviceSummary`.
+(14) **Review fixes (2026-11-01, independent security review of the Step 8
+commit).** (a) `deviceSummary.appliedVersion` is sanitized at ingestion
+(`lib/versions.ts` `sanitizeVersion`: safe integer in 0..1,000,000,000, else
+stored as absent) and again in the publisher's version floor (an invalid value
+counts as 0), so NaN / Infinity / negatives / fractions / 1e300 can no longer
+break `buildPayload`. (b) The publisher is per device: a device whose publish
+throws is skipped with a `policy.publishFailed` audit entry ("unexpected
+error"), the rest of the batch goes on. (c) The queue heals itself:
+`publishQueue.requestedAt` is now the lease clock (set when a run is scheduled,
+renewed by every hop of a run chain); `requestPublish` schedules a new run when
+`scheduled` is set but older than `PUBLISH_LEASE_MS` (5 min) because the run
+threw. A queue with no new request stays stuck until the next edit or enroll
+(no sweeper; it would need a time index). (d) `keys:registerActive` without
+`force`, when the env key is already the ACTIVE row, registers nothing and
+publishes every device again (the retry after a failed publish with the seed
+restored); `force`, or the key as `next` / `retired`, is still `conflict`
+`key_exists`. **No dashboard button for it yet** (Signing tab, only when
+`publishFailedAt` is set and `signing` is "ok"; the demo hook must treat an
+existing active key as a retry). (e) `orgPolicyKeys` reads the NEWEST 20 rows
+per status (descending), not the oldest. (f) `maintenance:dropDesiredStates`
+first walks the devices (read-only) and deletes nothing while a non-revoked
+device has no head. (g) `signWith(key, message)` in `lib/signing.ts` is how
+the publisher, `lib/roster.ts` and `keys.ts` sign; lint also forbids `.seed`,
+destructuring/templates/dynamic indexing/copying of the environment outside
+`lib/signing.ts`. `keyFromSeed` stays exported (test keys, vector generator).
+(h) **Vectors Step 9 must use:** `signed-v2.json` gains `unicode` (same key,
+org, device, version 8: accents, CJK, an emoji, `"`, `\`, newline, tab, U+0001,
+U+007F; verify the UTF-8 bytes of `payload` as given), and the new
+`signed-v2-negative.json` lists envelopes to REJECT with the expected reason
+(`unknown_key`, `bad_signature`, `key_id_mismatch`, `wrong_org`, `wrong_device`,
+`version_mismatch`; checks in the order of its `procedure`; `bad_signature`
+covers a flipped payload byte, a flipped signature byte and a non-canonical S =
+S + L, so use `verify_strict`). `scripts/gen-policy-vectors.mjs` now also
+cross-checks every vector with Node's OpenSSL Ed25519 (`crypto.verify`), and
+`scripts/policy-vectors.test.mjs` does the same independently of the
+generator. Not changed (needs an owner decision): the endorsement message has
+no orgId and the roster entry message no keyId, because both formats are
+documented in 4.2.1 / 4.5 / post-Phase-5 and in the vectors the agent reads.
 
 ---
 

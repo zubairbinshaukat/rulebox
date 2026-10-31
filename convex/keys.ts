@@ -8,7 +8,7 @@ import { memberMutation, memberQuery, type AuditActorCtx } from "./lib/functions
 import { MAX_TRUST_PAGE } from "./lib/limits";
 import { orgPolicyKeys } from "./lib/policyKeys";
 import { requestPublish } from "./lib/publish";
-import { endorsementMessage, envPublicKey, fingerprintOf, loadOrgSigningKey, signPayload } from "./lib/signing";
+import { endorsementMessage, envPublicKey, fingerprintOf, loadOrgSigningKey, signWith } from "./lib/signing";
 import { policyKeyStatus } from "./lib/validators";
 
 // Settings -> Signing (plan 4.5, Step 8 item 6). The private seeds live ONLY
@@ -145,7 +145,10 @@ async function audit(
  * organization's active key (Owner, major) and republish every device.
  *
  * - No (valid) seed: `not_ready`.
- * - The organization already has that key id: `conflict` (detail "key_exists").
+ * - The organization already has that key id: `conflict` (detail "key_exists"),
+ *   except when it is the active key and no `force`: then this is the retry
+ *   after a failed publish (restored seed) and just publishes every device
+ *   again, registering nothing.
  * - An active key exists: `conflict` unless `force` ("key lost", plan 4.5):
  *   the old active key is retired and the new one becomes active. Devices do
  *   NOT trust it (nothing endorses it): they need re-enrollment or
@@ -161,7 +164,17 @@ export const registerActive = memberMutation("owner", { major: "keys:registerAct
   handler: async (ctx, args) => {
     const env = envPublicKey("active");
     if (env === null) fail("not_ready", { detail: "RULEBOX_POLICY_KEY is not set or not 32 bytes of base64" });
-    if ((await keyRowById(ctx, ctx.orgId, env.keyId)) !== null) fail("conflict", { detail: "key_exists" });
+    const known = await keyRowById(ctx, ctx.orgId, env.keyId);
+    if (known !== null) {
+      // Retry path: the env key IS the active key (the Owner restored the seed
+      // after a failed publish, which kept no schedule). Nothing to register;
+      // publish every device again. `force` and any other status stay a conflict.
+      if (args.force !== true && known.status === "active" && known.publicKey === env.publicKey) {
+        await requestPublish(ctx, ctx.orgId, { allDevices: true });
+        return { keyId: env.keyId, fingerprint: fingerprintOf(env.keyId) };
+      }
+      fail("conflict", { detail: "key_exists" });
+    }
     const rows = await orgPolicyKeys(ctx, ctx.orgId);
     const active = rows.filter((r) => r.status === "active");
     if (active.length > 0 && args.force !== true) fail("conflict", { detail: "an active key exists" });
@@ -219,7 +232,7 @@ export const prepareRotation = memberMutation("owner", { major: "keys:prepareRot
       status: "next",
       endorsement: {
         byKeyId: signer.key.keyId,
-        signature: signPayload(endorsementMessage(next.keyId, next.publicKey), signer.key.seed),
+        signature: signWith(signer.key, endorsementMessage(next.keyId, next.publicKey)),
       },
       createdAt: Date.now(),
     });

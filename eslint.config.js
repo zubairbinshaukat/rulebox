@@ -51,6 +51,11 @@ export default tseslint.config(
     },
   },
   // The policy signing seed is read ONLY by convex/lib/signing.ts (plan 4.5, A11).
+  // Caught: `env.X` / `process.env.X`, `env["X"]`, env[`X`], destructuring
+  // (`const { X } = env`, `{ X: k }`), and taking the whole environment
+  // (`{ ...env }`, `const e = env`, `env[key]`, `fn(env)`), which would let the
+  // seed be read under another name. `.seed` of a SigningKey is signing.ts's too
+  // (everyone else signs with `signWith`). Tests are exempt.
   {
     files: ["convex/**/*.ts"],
     ignores: ["convex/lib/signing.ts", "convex/convex.config.ts", "convex/**/*.test.ts"],
@@ -62,8 +67,40 @@ export default tseslint.config(
           message: "Only convex/lib/signing.ts reads the signing seed (use loadOrgSigningKey).",
         },
         {
+          selector: "Property[key.name=/^RULEBOX_POLICY_KEY/]",
+          message: "Only convex/lib/signing.ts reads the signing seed (use loadOrgSigningKey).",
+        },
+        {
           selector: "Literal[value=/^RULEBOX_POLICY_KEY(_NEXT)?$/]",
           message: "Only convex/lib/signing.ts reads the signing seed (use loadOrgSigningKey).",
+        },
+        {
+          selector: "TemplateElement[value.cooked=/^RULEBOX_POLICY_KEY(_NEXT)?$/]",
+          message: "Only convex/lib/signing.ts reads the signing seed (use loadOrgSigningKey).",
+        },
+        {
+          selector: "MemberExpression[computed=true][object.name='env']",
+          message: "Do not index the environment dynamically; name the variable (only convex/lib/signing.ts may read the signing seed).",
+        },
+        {
+          selector: "MemberExpression[computed=true][property.name='env']",
+          message: "Do not index the environment dynamically; name the variable (only convex/lib/signing.ts may read the signing seed).",
+        },
+        {
+          selector: "SpreadElement > :matches(Identifier[name='env'], MemberExpression[property.name='env'])",
+          message: "Do not pass, copy or spread the whole environment; read named variables (only convex/lib/signing.ts may read the signing seed).",
+        },
+        {
+          selector: "VariableDeclarator > :matches(Identifier[name='env'], MemberExpression[property.name='env']).init",
+          message: "Do not pass, copy or spread the whole environment; read named variables (only convex/lib/signing.ts may read the signing seed).",
+        },
+        {
+          selector: "CallExpression > :matches(Identifier[name='env'], MemberExpression[property.name='env']).arguments",
+          message: "Do not pass, copy or spread the whole environment; read named variables (only convex/lib/signing.ts may read the signing seed).",
+        },
+        {
+          selector: "MemberExpression[property.name='seed']",
+          message: "Only convex/lib/signing.ts touches a key's seed (sign with signWith).",
         },
       ],
     },

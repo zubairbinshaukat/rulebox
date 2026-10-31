@@ -398,7 +398,8 @@ const ROWS: Row[] = [
     call: (a) => a.query(api.keys.trustProgress, { paginationOpts: { numItems: 50, cursor: null } }),
     expect: { ...VIEWER, foreign: "ok" },
   },
-  { name: "keys:registerActive", call: (a) => a.mutation(api.keys.registerActive, {}), expect: { ...OWNER, owner: "conflict", foreign: "conflict" } },
+  // The env key is already each organization's active key: the retry path (publishes again, registers nothing).
+  { name: "keys:registerActive", call: (a) => a.mutation(api.keys.registerActive, {}), expect: { ...OWNER, owner: "ok", foreign: "ok" } },
   { name: "keys:prepareRotation", call: (a) => a.mutation(api.keys.prepareRotation, {}), expect: { ...OWNER, owner: "not_ready", foreign: "not_ready" } },
   { name: "keys:finishRotation", call: (a) => a.mutation(api.keys.finishRotation, {}), expect: { ...OWNER, owner: "conflict", foreign: "conflict" } },
   {

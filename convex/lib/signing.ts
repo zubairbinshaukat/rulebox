@@ -26,7 +26,7 @@ export const ENDORSEMENT_FORMAT = "rulebox.key-endorsement/1";
 
 export type Which = "active" | "next";
 
-/** A loaded key. `seed` is secret: use it only to call `signPayload` in this call. */
+/** A loaded key. `seed` is secret: sign with `signWith(key, ...)`, never read the seed outside this module. */
 export type SigningKey = {
   readonly seed: Uint8Array;
   readonly publicKey: Uint8Array;
@@ -111,7 +111,21 @@ export async function loadOrgSigningKey(
   return { ok: true, key, row };
 }
 
-/** Standard base64 (with padding) of the 64-byte Ed25519 signature of the UTF-8 bytes of `payload`. */
+/**
+ * Sign with a loaded key: standard base64 (with padding) of the 64-byte
+ * Ed25519 signature of the UTF-8 bytes of `message`. THE function the
+ * publisher, the roster log and the rotation endorsement use, so no caller
+ * touches `key.seed`.
+ */
+export function signWith(key: SigningKey, message: string): string {
+  return signPayload(message, key.seed);
+}
+
+/**
+ * Same as `signWith` for a bare seed. For tests and the vector generator
+ * (which hold the published RFC 8032 test seeds); production code uses
+ * `signWith` (a lint rule keeps `.seed` out of the other modules).
+ */
 export function signPayload(payload: string, seed: Uint8Array): string {
   return base64Encode(ed.sign(utf8ToBytes(payload), seed));
 }

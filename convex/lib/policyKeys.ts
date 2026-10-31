@@ -9,7 +9,12 @@ import { MAX_POLICY_KEYS_PER_STATUS } from "./limits";
 
 const STATUSES = ["active", "next", "retired"] as const;
 
-/** Every key row of the organization, oldest first (3 index reads, <= 20 rows each). */
+/**
+ * Every key row of the organization, oldest first (3 index reads, <= 20 rows
+ * each). Per status the NEWEST rows are read (descending): when more than 20
+ * keys were retired, it is the oldest that drop out, never the recent ones a
+ * device may still need to verify old documents against.
+ */
 export async function orgPolicyKeys(ctx: { db: DatabaseReader }, orgId: Id<"organizations">): Promise<Doc<"policyKeys">[]> {
   const rows: Doc<"policyKeys">[] = [];
   for (const status of STATUSES) {
@@ -17,6 +22,7 @@ export async function orgPolicyKeys(ctx: { db: DatabaseReader }, orgId: Id<"orga
       ...(await ctx.db
         .query("policyKeys")
         .withIndex("by_org_status", (q) => q.eq("orgId", orgId).eq("status", status))
+        .order("desc")
         .take(MAX_POLICY_KEYS_PER_STATUS)),
     );
   }
