@@ -8,7 +8,6 @@ import IconArchive from "~icons/solar/archive-linear";
 import IconTrash from "~icons/solar/trash-bin-trash-linear";
 import {
   useAppDetail,
-  useAppInstalls,
   useAssignApp,
   useCreateDesktopApp,
   useCreateWebApp,
@@ -16,9 +15,11 @@ import {
   useFetchWebMeta,
   useResolveWinget,
   useRetryApp,
+  useSaveAppIcon,
   useSetAppArchived,
   useUpdateApp,
 } from "../data";
+import { useAppInstalls } from "../data/apps";
 import {
   DEFAULT_WEB_PERMISSIONS,
   INSTALL_STATES,
@@ -56,6 +57,7 @@ import { formatBytes, formatCount, shortHex } from "../lib/format";
 import { messageFor } from "../lib/errors";
 import { strings } from "../lib/strings";
 import { useForm } from "../lib/useForm";
+import { assignmentErrorMessage } from "./groups/errors";
 import * as v from "../lib/validate";
 
 const s = strings.appEdit;
@@ -304,6 +306,9 @@ function AppForm({
   const update = useUpdateApp();
   const fetchMeta = useFetchWebMeta();
   const resolve = useResolveWinget();
+  const saveIcon = useSaveAppIcon();
+  // The icon "Fetch details" previewed (a `data:` URL): stored with the app when the form is saved.
+  const [icon, setIcon] = useState<string | null>(null);
   const form = useRef<HTMLFormElement>(null);
   const f = useForm<FormValues>(initialValues(d, kind), (x) => validateValues(kind, x));
   const [helper, setHelper] = useState<{ pending: boolean; error: unknown; note: string | null }>({ pending: false, error: null, note: null });
@@ -318,17 +323,30 @@ function AppForm({
     }
   }
 
+  /** The app is saved by now; a failing icon upload must not undo that, so it only warns. */
+  async function storeIcon(appId: string) {
+    if (icon === null) return;
+    try {
+      await saveIcon({ appId, png: icon });
+      setIcon(null);
+    } catch (e) {
+      toast(`${s.iconNotSaved} ${messageFor(e)}`, "danger");
+    }
+  }
+
   async function save(values: FormValues) {
     const common = { name: values.name.trim(), description: values.description.trim() || undefined, hue: values.hue };
     if (kind === "web") {
       const web = { ...common, url: values.url.trim(), allowedDomains: v.lines(values.domains).map((s2) => s2.toLowerCase()) };
       if (isNew) {
         const id = await createWeb(web);
+        await storeIcon(id);
         toast(s.created(common.name));
         navigate(`/apps/${id}`, { replace: true });
       } else {
         await update({ appId: d._id, expectedRevision: revision, web });
         onSaved();
+        await storeIcon(d._id);
         toast(s.saved);
       }
     } else {
@@ -397,7 +415,8 @@ function AppForm({
                           const meta = await fetchMeta({ url: x.url.trim() });
                           if (meta.name && !x.name.trim()) f.set("name", meta.name);
                           if (meta.hue !== undefined) f.set("hue", nearestHue(meta.hue));
-                          return s.fetched;
+                          setIcon(meta.iconPreviewUrl ?? null);
+                          return meta.iconPreviewUrl ? s.fetchedWithIcon : s.fetched;
                         })
                       }
                     >
@@ -408,6 +427,12 @@ function AppForm({
                 )}
               </Field>
               <HelperResult helper={helper} />
+              {icon !== null ? (
+                <div className="dash-row" style={{ flexWrap: "nowrap", alignItems: "center", gap: 12 }}>
+                  <AppGlyph name={x.name || "?"} hue={x.hue} iconUrl={icon} size="lg" />
+                  <span className="dash-muted">{s.iconPreview}</span>
+                </div>
+              ) : null}
               <Field label={s.allowedDomains} hint={s.allowedDomainsHint} error={f.errors.domains} optional>
                 {(p) => (
                   <Textarea {...p} rows={3} spellCheck={false} autoCapitalize="off" className="dash-mono" value={x.domains} onChange={(e) => f.set("domains", e.target.value)} />
@@ -790,7 +815,7 @@ function AssignToGroup({ d, onClose }: { d: AppDetail; onClose: () => void }) {
             <Checkbox label={strings.group.pinDesktop} checked={f.values.pinnedDesktop} onChange={(e) => f.set("pinnedDesktop", e.target.checked)} />
           </div>
         </FieldSet>
-        <FormError error={f.serverError} />
+        <FormError error={f.serverError} describe={assignmentErrorMessage} />
       </div>
     </Modal>
   );

@@ -1,0 +1,2 @@
+/** Demo app list hooks (`VITE_DEMO=1`): they live with the demo store. */
+export { demoAppsApi as appsApi } from "../demo/hooks";

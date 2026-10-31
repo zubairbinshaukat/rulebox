@@ -96,6 +96,11 @@ describe("apps", () => {
     expect(v.webUrl("https://10.0.0.1")).toBeTruthy();
     expect(v.webUrl("https://192.168.1.10/app")).toBeTruthy();
     expect(v.webUrl("https://localhost")).toBeTruthy();
+    // the server's other refusals (convex/lib/hostRules.ts): credentials, local names, reserved ranges
+    for (const url of ["https://user:pw@pos.example.com", "https://intranet", "https://wiki.internal", "https://printer.local", "https://169.254.169.254/", "https://127.1", "https://224.0.0.1", "https://100.64.0.1"]) {
+      expect(v.webUrl(url), url).toBeTruthy();
+    }
+    expect(v.webUrl("https://172.32.0.1")).toBeNull();
   });
   it("allowed domains", () => {
     expect(v.domains(["example.com", "*.cdn.example.com"])).toBeNull();
@@ -107,6 +112,7 @@ describe("apps", () => {
     expect(v.exePath("{ProgramFiles}\\VideoLAN\\VLC\\vlc.exe", false)).toBeNull();
     expect(v.exePath("C:\\x.exe", false)).toBeTruthy();
     expect(v.exePath("{ProgramFiles}\\..\\x.exe", false)).toBeTruthy();
+    expect(v.exePath("{ProgramFiles}\\...\\x.exe", false)).toBeTruthy();
     expect(v.exePath("{ProgramFiles}\\a\\b.bat", false)).toBeTruthy();
     expect(v.exePath("{ProgramFiles}\\1\\2\\3\\4\\5\\6\\7\\8\\x.exe", false)).toBeTruthy();
     expect(v.exePath("{RuleboxApps}\\{AppId}\\labels.exe", true)).toBeNull();

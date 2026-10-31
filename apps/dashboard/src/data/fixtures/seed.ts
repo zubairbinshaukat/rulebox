@@ -132,6 +132,8 @@ export interface DbApp {
   hue?: number;
   web?: WebSpec;
   desktop?: DesktopSpec;
+  /** The icon a site offered (demo: a `data:` URL; live: the storage URL). */
+  iconUrl?: string;
   archived: boolean;
   revision: number;
   createdAt: number;

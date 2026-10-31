@@ -38,15 +38,18 @@ vi.mock("@convex-dev/auth/react", () => ({
 }));
 
 /** One stable function per Convex function name (like the real hooks). */
-const stable = new Map<string, (args?: unknown) => Promise<unknown>>();
-function fnFor(name: string) {
+type Mock = ((args?: unknown) => Promise<unknown>) & { withOptimisticUpdate: () => Mock };
+const stable = new Map<string, Mock>();
+function fnFor(name: string): Mock {
   let f = stable.get(name);
   if (!f) {
-    f = (args?: unknown) => {
+    const call = ((args?: unknown) => {
       const impl = cx.fns[name];
       if (!impl) throw new Error(`no mock for ${name}`);
       return impl(args);
-    };
+    }) as Mock;
+    call.withOptimisticUpdate = () => call; // the optimistic part is the real client's job
+    f = call;
     stable.set(name, f);
   }
   return f;
@@ -324,6 +327,61 @@ describe("step-up (data/stepup/live.ts)", () => {
     expect(cx.fns["passkeys:beginVerification"]).toHaveBeenCalledWith({});
     await renderHook(() => liveStepUpApi.useFinishPasskeyRegistration()).result.current({ responseJson: "{}", name: "PC" });
     expect(cx.fns["passkeys:finishRegistration"]).toHaveBeenCalledWith({ responseJson: "{}", name: "PC" });
+  });
+});
+
+describe("apps, assignments and file types (Step 10)", () => {
+  it("a new app asks the server for nothing; an existing one is apps:get with no install counts yet", () => {
+    const fresh = renderHook(() => live.useAppDetail("new"));
+    expect(fresh.result.current).toMatchObject({ status: "ready", data: { _id: "new", kind: "web", assignments: [] } });
+    expect(cx.requests.flatMap((r) => Object.values(r))).toEqual([]);
+
+    cx.queryResult = { _id: "a1", name: "Docs", kind: "web", archived: false, revision: 2, createdAt: 1, assignments: [], fileTypes: [], directEmployeeCount: 0, groupOptions: [] };
+    const { result } = renderHook(() => live.useAppDetail("a1"));
+    const req = Object.values(cx.requests.at(-1)!)[0] as { args: unknown };
+    expect(req.args).toEqual({ appId: "a1" });
+    expect(result.current).toMatchObject({ status: "ready", data: { _id: "a1", revision: 2, installCounts: {} } });
+  });
+
+  it("writes go to their functions with the dashboard's arguments and errors keep their code", async () => {
+    cx.fns["apps:createWeb"] = vi.fn(async () => "a9");
+    const create = renderHook(() => live.useCreateWebApp()).result.current;
+    const input = { name: "Docs", url: "https://docs.example.com", allowedDomains: [] };
+    expect(await create(input)).toBe("a9");
+    expect(cx.fns["apps:createWeb"]).toHaveBeenCalledWith(input);
+
+    cx.fns["apps:update"] = vi.fn(async () => ({ revision: 3 }));
+    await renderHook(() => live.useUpdateApp()).result.current({ appId: "a1", expectedRevision: 2, web: input });
+    expect(cx.fns["apps:update"]).toHaveBeenCalledWith({ appId: "a1", expectedRevision: 2, web: input });
+
+    cx.fns["groups:assignApp"] = vi.fn(async () => ({ assignmentId: "as" }));
+    await renderHook(() => live.useAssignApp()).result.current({ groupId: "g1", appId: "a1", audience: "selected", pinnedTaskbar: true, pinnedDesktop: false });
+    expect(cx.fns["groups:assignApp"]).toHaveBeenCalledWith({ groupId: "g1", appId: "a1", audience: "selected", pinnedTaskbar: true, pinnedDesktop: false });
+
+    cx.fns["fileHandlers:set"] = vi.fn(async () => {
+      throw new ConvexError({ code: "invalid_argument", field: "extension", detail: "denied" });
+    });
+    const err = await renderHook(() => live.useSetFileHandler()).result.current({ extension: ".exe", appId: "a1" }).catch((e: unknown) => e);
+    expect(errorCodeOf(err)).toBe("invalid_argument");
+    expect((err as AppError).field).toBe("extension");
+
+    cx.fns["apps:resolveWinget"] = vi.fn(async () => {
+      throw new ConvexError({ code: "winget_unsupported", detail: "no silent install" });
+    });
+    const winget = await renderHook(() => live.useResolveWinget()).result.current({ packageId: "A.B" }).catch((e: unknown) => e);
+    expect(messageFor(winget)).toBe(strings.errors.wingetUnsupportedBecause("no silent install"));
+  });
+
+  it("groups:get assignments carry the assignment id the edit and unassign calls need", () => {
+    cx.queryResult = {
+      group: { _id: "g1", name: "Office", revision: 0, createdAt: 1, isDefault: false, devices: { count: 0, more: false }, employees: { count: 0, more: false } },
+      apps: [{ assignmentId: "as1", appId: "a1", name: "Notepad", kind: "desktop", hue: 40, archived: false, audience: "everyone", pinnedTaskbar: true, pinnedDesktop: false }],
+    };
+    const { result } = renderHook(() => live.useGroupDetail("g1"));
+    expect(result.current).toMatchObject({
+      status: "ready",
+      data: { assignments: [{ _id: "as1", appId: "a1", appName: "Notepad", hue: 40, audience: "everyone", pinnedTaskbar: true, pinnedDesktop: false }] },
+    });
   });
 });
 

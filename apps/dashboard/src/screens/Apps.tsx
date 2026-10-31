@@ -4,7 +4,7 @@ import { Pill, SegmentedControl } from "@rulebox/ui";
 import IconWidget from "~icons/solar/widget-2-linear";
 import IconGlobal from "~icons/solar/global-linear";
 import IconMonitor from "~icons/solar/monitor-linear";
-import { useAppsScreen } from "../data";
+import { useAppsScreen } from "../data/apps";
 import type { AppRow, InstallSummary } from "../data/types";
 import { AppGlyph } from "../components/AppGlyph";
 import { Card } from "../components/Card";
@@ -53,7 +53,7 @@ export default function Apps() {
         primary: true,
         cell: (a) => (
           <span className="dash-row" style={{ flexWrap: "nowrap", minWidth: 0 }}>
-            <AppGlyph name={a.name} hue={a.hue} />
+            <AppGlyph name={a.name} hue={a.hue} iconUrl={a.iconUrl} />
             <span className="dash-cell-stack">
               <Link className="dash-link dash-link--plain dash-truncate" to={`/apps/${a._id}`} title={a.name}>
                 {a.name}

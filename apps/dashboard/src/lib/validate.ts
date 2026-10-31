@@ -113,6 +113,7 @@ export function quota(value: string): Check {
 
 // ---------------------------------------------------------------- web apps
 
+// Mirrors `isForbiddenHost` of convex/lib/hostRules.ts (the server is authoritative).
 const PRIVATE_V4 = [
   /^10\./,
   /^127\./,
@@ -121,6 +122,11 @@ const PRIVATE_V4 = [
   /^172\.(1[6-9]|2\d|3[01])\./,
   /^0\./,
   /^100\.(6[4-9]|[7-9]\d|1[01]\d|12[0-7])\./,
+  /^192\.0\.[02]\./,
+  /^198\.(18|19)\./,
+  /^198\.51\.100\./,
+  /^203\.0\.113\./,
+  /^(22[4-9]|2[3-5]\d)\./,
 ];
 
 function isIpLiteral(host: string): boolean {
@@ -137,13 +143,16 @@ export function webUrl(value: string): Check {
   } catch {
     return v.httpsUrl;
   }
-  if (url.protocol !== "https:") return v.httpsUrl;
-  const host = url.hostname.toLowerCase();
+  if (url.protocol !== "https:" || url.username || url.password) return v.httpsUrl;
+  const host = url.hostname.toLowerCase().replace(/\.$/, "");
   if (!host) return v.httpsUrl;
-  if (host === "localhost" || host.endsWith(".localhost") || host.endsWith(".local")) return v.privateHost;
+  if (t.length > 2048) return v.httpsUrl;
+  if (/^(localhost|.+\.(localhost|local|internal|localdomain|home\.arpa))$/.test(host)) return v.privateHost;
   if (isIpLiteral(host)) {
     if (host.startsWith("[")) return v.privateHost; // IPv6 literals: refused outright in the client
     if (PRIVATE_V4.some((re) => re.test(host))) return v.privateHost;
+  } else if (!host.includes(".")) {
+    return v.privateHost; // a name without a dot is on the local network
   }
   return null;
 }
@@ -209,7 +218,7 @@ export function exePath(value: string, portable: boolean): Check {
   if (!portable && prefix === "{RuleboxApps}\\{AppId}\\") return v.exePath;
   const rest = t.slice(prefix.length).split("\\");
   if (rest.length < 1 || rest.length > 8) return v.exePath;
-  if (rest.some((c) => !COMPONENT.test(c) || c === "." || c === "..")) return v.exePath;
+  if (rest.some((c) => !COMPONENT.test(c) || c.replace(/[. ]/g, "") === "")) return v.exePath;
   if (!/\.exe$/i.test(rest[rest.length - 1] ?? "")) return v.exePath;
   if (t.length > 260) return v.exePath;
   return null;
@@ -266,7 +275,7 @@ export function resetFolders(list: string[]): Check {
     const prefix = ["{LocalAppData}\\", "{RoamingAppData}\\"].find((p) => item.startsWith(p));
     if (!prefix) return v.resetFolder(item);
     const rest = item.slice(prefix.length).split("\\");
-    if (rest.length < 1 || rest.length > 6 || rest.some((c) => !COMPONENT.test(c) || c === "." || c === "..")) {
+    if (rest.length < 1 || rest.length > 6 || rest.some((c) => !COMPONENT.test(c) || c.replace(/[. ]/g, "") === "")) {
       return v.resetFolder(item);
     }
   }

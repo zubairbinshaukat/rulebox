@@ -306,8 +306,8 @@ export interface AssignmentRow {
 
 /**
  * `groups:get`: the group, its counts (capped like `GroupRow`) and its
- * assigned apps (`.take(150)`). Assignment rows carry the app id as `_id`
- * until Step 10 adds assignment ids and the editing functions. Enrollment
+ * assigned apps (`.take(150)`); an assignment row's `_id` is its
+ * `appAssignments` id (what edit and unassign take). Enrollment
  * codes are not counted here: `groups:remove` names them in `has_dependents`.
  */
 export interface GroupDetail {

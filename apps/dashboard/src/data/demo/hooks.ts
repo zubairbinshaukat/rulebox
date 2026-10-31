@@ -6,6 +6,7 @@
  */
 import { useCallback, useEffect, useState } from "react";
 import type { DataApi } from "../api";
+import type { AppsApi } from "../apps/api";
 import type { DevicesApi } from "../devices/api";
 import type { EnrollmentApi } from "../enrollment/api";
 import {
@@ -1064,25 +1065,10 @@ export const demoApi: DataApi = {
   },
 
   // ---- apps
-  useAppsScreen({ archived }) {
-    return useDemoPaged(`apps:list:${archived}`, (db) => {
+  useAppOptions() {
+    return useDemoQuery("apps:options", (db) => {
       requireReader();
-      return db.apps
-        .filter((a) => a.archived === archived)
-        .sort((a, b) => b.createdAt - a.createdAt)
-        .map(
-          (a): AppRow => ({
-            _id: a._id,
-            name: a.name,
-            description: a.description,
-            kind: a.kind,
-            source: a.desktop?.source,
-            hue: a.hue,
-            archived: a.archived,
-            groupCount: db.assignments.filter((x) => x.appId === a._id).length,
-            summary: a.kind === "desktop" ? installSummary(db, a._id) : null,
-          }),
-        );
+      return appOptions(db);
     });
   },
 
@@ -1116,6 +1102,7 @@ export const demoApi: DataApi = {
         description: a.description,
         kind: a.kind,
         hue: a.hue,
+        iconUrl: a.iconUrl,
         web: a.web,
         desktop: a.desktop,
         archived: a.archived,
@@ -1127,25 +1114,6 @@ export const demoApi: DataApi = {
         installCounts: counts,
         groupOptions: groupOptions(db),
       };
-    });
-  },
-
-  useAppInstalls(appId, state) {
-    return useDemoPaged(`apps:installs:${appId}:${state}`, (db) => {
-      requireReader();
-      return db.installs
-        .filter((i) => i.appId === appId && i.state === state)
-        .sort((a, b) => b.updatedAt - a.updatedAt)
-        .map((i) => ({
-          _id: i._id,
-          deviceId: i.deviceId,
-          deviceName: db.devices.find((d) => d._id === i.deviceId)?.name ?? "",
-          state: i.state,
-          attempts: i.attempts,
-          exitCode: i.exitCode,
-          detail: i.detail,
-          updatedAt: i.updatedAt,
-        }));
     });
   },
 
@@ -1343,8 +1311,22 @@ export const demoApi: DataApi = {
       const base = host.replace(/^www\./, "").split(".")[0] ?? host;
       let hash = 0;
       for (const ch of host) hash = (hash * 31 + ch.charCodeAt(0)) % 360;
-      return { name: base.charAt(0).toUpperCase() + base.slice(1), hue: hash };
+      // A drawn tile stands in for the PNG a real site would offer (the demo stores nothing).
+      const icon = `data:image/svg+xml,${encodeURIComponent(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64"><rect width="64" height="64" rx="14" fill="hsl(${hash} 55% 48%)"/><text x="32" y="43" font-size="32" text-anchor="middle" fill="white" font-family="sans-serif">${(base[0] ?? "?").toUpperCase()}</text></svg>`)}`;
+      return { name: base.charAt(0).toUpperCase() + base.slice(1), hue: hash, ...(host.includes("noicon") ? {} : { iconPreviewUrl: icon }) };
     }, []);
+  },
+
+  useSaveAppIcon() {
+    return useCallback(
+      ({ appId, png }) =>
+        runMutation("admin", ({ db, audit }) => {
+          const a = find(db.apps, appId);
+          a.iconUrl = png;
+          audit({ action: "app.updated", targetType: "app", targetId: a._id, targetLabel: a.name, summary: "Icon changed." });
+        }),
+      [],
+    );
   },
 
   // ---- file types
@@ -1832,3 +1814,48 @@ export const demoEnrollmentApi: EnrollmentApi = {
 
 /** Resolved through the `@rulebox/data-impl` alias in demo builds. */
 export const dataApi = demoApi;
+
+/** App lists: their own seam (data/apps), re-exported by data/apps/demo.ts. */
+export const demoAppsApi: AppsApi = {
+  useAppsScreen({ archived }) {
+    return useDemoPaged(`apps:list:${archived}`, (db) => {
+      requireReader();
+      return db.apps
+        .filter((a) => a.archived === archived)
+        .sort((a, b) => b.createdAt - a.createdAt)
+        .map(
+          (a): AppRow => ({
+            _id: a._id,
+            name: a.name,
+            description: a.description,
+            kind: a.kind,
+            source: a.desktop?.source,
+            hue: a.hue,
+            iconUrl: a.iconUrl,
+            archived: a.archived,
+            groupCount: db.assignments.filter((x) => x.appId === a._id).length,
+            summary: a.kind === "desktop" ? installSummary(db, a._id) : null,
+          }),
+        );
+    });
+  },
+
+  useAppInstalls(appId, state) {
+    return useDemoPaged(`apps:installs:${appId}:${state}`, (db) => {
+      requireReader();
+      return db.installs
+        .filter((i) => i.appId === appId && i.state === state)
+        .sort((a, b) => b.updatedAt - a.updatedAt)
+        .map((i) => ({
+          _id: i._id,
+          deviceId: i.deviceId,
+          deviceName: db.devices.find((d) => d._id === i.deviceId)?.name ?? "",
+          state: i.state,
+          attempts: i.attempts,
+          exitCode: i.exitCode,
+          detail: i.detail,
+          updatedAt: i.updatedAt,
+        }));
+    });
+  },
+};

@@ -5,8 +5,7 @@
  */
 import type {
   AppDetail,
-  AppInstallRow,
-  AppRow,
+  AppOption,
   Audience,
   AuditEntry,
   CheckResult,
@@ -20,7 +19,6 @@ import type {
   GroupDetail,
   GroupRow,
   Id,
-  InstallState,
   KeysScreen,
   MeResult,
   MembersScreen,
@@ -111,10 +109,11 @@ export interface DataApi {
   useUnlockEmployee: Mutation<{ employeeId: Id }>;
   useDeleteEmployee: Mutation<{ employeeId: Id }>;
 
-  // ---- apps
-  useAppsScreen: (filter: { archived: boolean }) => PagedState<AppRow>;
+  // ---- apps. The two paginated lists (`useAppsScreen`, `useAppInstalls`) are in
+  // their own seam, `./apps`, like the device lists.
   useAppDetail: (appId: Id | "new") => QueryState<AppDetail>;
-  useAppInstalls: (appId: Id, state: InstallState) => PagedState<AppInstallRow>;
+  /** `apps:options`: the apps a group may be given. Subscribed only while the assign dialog is open. */
+  useAppOptions: () => QueryState<AppOption[]>;
   useCreateWebApp: Mutation<WebAppInput, Id>;
   useCreateDesktopApp: Mutation<DesktopAppInput, Id>;
   useUpdateApp: Mutation<{ appId: Id; expectedRevision: number; web?: WebAppInput; desktop?: DesktopAppInput }>;
@@ -123,6 +122,8 @@ export interface DataApi {
   useRetryApp: Mutation<{ appId: Id }>;
   useResolveWinget: Mutation<{ packageId: string; version?: string }, WingetResolved>;
   useFetchWebMeta: Mutation<{ url: string }, WebMeta>;
+  /** `apps:saveIcon`: stores the PNG `useFetchWebMeta` previewed (its `data:` URL), after the app is saved. */
+  useSaveAppIcon: Mutation<{ appId: Id; png: string }>;
 
   // ---- file types
   useFileTypesScreen: () => QueryState<FileTypesScreen>;

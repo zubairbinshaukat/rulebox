@@ -10,6 +10,7 @@ import {
   useEmployeesScreen,
   useGroupDetail,
   useRemoveGroupEmployee,
+  useUnassignApp,
   useUpdateGroup,
 } from "../data";
 import { useDevicesScreen } from "../data/devices";
@@ -38,6 +39,7 @@ import { strings } from "../lib/strings";
 import { useDebounced } from "../lib/useDebounced";
 import { useForm } from "../lib/useForm";
 import * as v from "../lib/validate";
+import { AssignAppDialog, EditAssignmentDialog } from "./groups/AssignmentDialogs";
 import { groupErrorMessage, groupFieldError } from "./groups/errors";
 import { groupText } from "./groups/strings";
 
@@ -45,8 +47,8 @@ const s = strings.group;
 
 /**
  * `groups:get` (+ the paginated devices `fleet:list({ groupId })` and
- * employees `employees:list({ groupId })`, which show "Coming in a later
- * step" until Steps 7 and 11). Apps are read-only until Step 10.
+ * employees `employees:list({ groupId })`; the employees show "Coming in a
+ * later step" until Step 11). Apps: assign, edit audience and pins, unassign.
  */
 export default function GroupDetail() {
   const { id = "" } = useParams();
@@ -193,9 +195,14 @@ function DeleteGroup({ g, open, onClose }: { g: Detail; open: boolean; onClose: 
   );
 }
 
-/** Assigned apps, read-only until Step 10 brings assigning, audiences and pins. */
+/** Assigned apps (`groups:get`): assign, change audience and pins, unassign. Every change rebuilds the group's PCs' documents. */
 function Assignments({ g }: { g: Detail }) {
   const canAct = useCan("admin");
+  const unassign = useUnassignApp();
+  const toast = useToast();
+  const [assigning, setAssigning] = useState(false);
+  const [editing, setEditing] = useState<AssignmentRow | null>(null);
+  const [removing, setRemoving] = useState<AssignmentRow | null>(null);
   const cols = useMemo<Column<AssignmentRow>[]>(
     () => [
       {
@@ -223,11 +230,38 @@ function Assignments({ g }: { g: Detail }) {
           </span>
         ),
       },
+      ...(canAct
+        ? [
+            {
+              key: "act",
+              header: strings.common.actions,
+              actions: true,
+              cell: (a: AssignmentRow) => (
+                <span className="dash-row" style={{ flexWrap: "nowrap", gap: 4 }}>
+                  <Button variant="ghost" className="dash-btn--sm" aria-label={`${strings.common.edit} ${a.appName}`} onClick={() => setEditing(a)}>
+                    {strings.common.edit}
+                  </Button>
+                  <Button variant="danger-ghost" className="dash-btn--sm" aria-label={`${s.unassign} ${a.appName}`} onClick={() => setRemoving(a)}>
+                    {s.unassign}
+                  </Button>
+                </span>
+              ),
+            },
+          ]
+        : []),
     ],
-    [],
+    [canAct],
+  );
+  const assign = (
+    <RoleGate minRole="admin">
+      <Button variant="ghost" className="dash-btn--sm" onClick={() => setAssigning(true)}>
+        <IconAdd aria-hidden="true" />
+        {s.assign}
+      </Button>
+    </RoleGate>
   );
   return (
-    <Card title={s.apps} sub={canAct ? `${s.appsLead} ${groupText.appsReadOnly}` : s.appsLead} body="none">
+    <Card title={s.apps} sub={s.appsLead} body="none" actions={assign}>
       <div style={{ paddingTop: 12 }}>
         {g.assignments.length === 0 ? (
           <EmptyState compact title={s.appsNone} />
@@ -235,10 +269,21 @@ function Assignments({ g }: { g: Detail }) {
           <DataTable caption={s.apps} columns={cols} rows={g.assignments} getKey={(a) => a._id} />
         )}
       </div>
+      {assigning ? <AssignAppDialog groupId={g._id} assignedAppIds={g.assignments.map((a) => a.appId)} onClose={() => setAssigning(false)} /> : null}
+      {editing ? <EditAssignmentDialog key={editing._id} assignment={editing} onClose={() => setEditing(null)} /> : null}
+      <ConfirmDialog
+        open={removing !== null}
+        title={s.unassignTitle(removing?.appName ?? "")}
+        body={s.unassignBody}
+        confirmLabel={s.unassign}
+        danger
+        onConfirm={() => unassign({ assignmentId: removing!._id })}
+        onDone={() => toast(groupText.unassigned(removing?.appName ?? ""))}
+        onClose={() => setRemoving(null)}
+      />
     </Card>
   );
 }
-
 function GroupDevices({ groupId }: { groupId: string }) {
   const devices = useDevicesScreen({ groupId });
   const cols = useMemo<Column<DeviceRow>[]>(

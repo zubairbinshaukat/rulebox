@@ -2,7 +2,8 @@
  * Live implementation (real Convex backend). Session, sign-in, MFA, account
  * and members are wired to the Phase 4 Step 3 functions (Step 4); settings,
  * the plan and groups to Step 5's (enrollment codes, Step 6: `../enrollment/`;
- * devices, Step 7: here and `../devices/`; signing keys, Step 8). Every other
+ * devices, Step 7: here and `../devices/`; signing keys, Step 8; apps,
+ * assignments and file types, Step 10: here and `../apps/`). Every other
  * hook answers `not_ready` until its Convex step lands — see `../README.md`
  * for the exact function per hook.
  */
@@ -21,7 +22,8 @@ import { useCallback, useMemo, useState } from "react";
 import { api } from "@convex/_generated/api";
 import { NOT_DEPLOYED, type DataApi } from "../api";
 import { AppError } from "../../lib/errors";
-import { cappedNumber, type KeysScreen, type MeResult, type PagedState, type QueryState, type Role } from "../types";
+import { cappedNumber, type Audience, type KeysScreen, type MeResult, type PagedState, type QueryState, type Role } from "../types";
+import { appDetailOf, NEW_APP } from "./apps";
 import { deviceDetailOf } from "./devices";
 import { mapError, useMapped, useMappedState, useMemberQuery } from "./convex";
 
@@ -279,7 +281,16 @@ export const liveApi: DataApi = {
       revision: g.revision,
       deviceCount: cappedNumber(g.devices),
       employeeCount: cappedNumber(g.employees),
-      assignments: apps.map((a) => ({ _id: a.appId, appId: a.appId, appName: a.name, appKind: a.kind, audience: a.audience, pinnedTaskbar: a.pinnedTaskbar, pinnedDesktop: a.pinnedDesktop })),
+      assignments: apps.map((a) => ({
+        _id: a.assignmentId,
+        appId: a.appId,
+        appName: a.name,
+        appKind: a.kind,
+        hue: a.hue,
+        audience: a.audience,
+        pinnedTaskbar: a.pinnedTaskbar,
+        pinnedDesktop: a.pinnedDesktop,
+      })),
     }));
   },
   useCreateGroup() {
@@ -300,10 +311,53 @@ export const liveApi: DataApi = {
     );
     return useMapped(call);
   },
-  useAssignApp: useNotReadyMutation,
-  useUpdateAssignment: useNotReadyMutation,
-  useUnassignApp: useNotReadyMutation,
-  useAddGroupEmployee: useNotReadyMutation,
+  // Assigning apps to a group: a group's document is rebuilt on the server for every change.
+  useAssignApp() {
+    const assign = useMutation(api.groups.assignApp);
+    const call = useCallback(
+      async (a: { groupId: string; appId: string; audience: Audience; pinnedTaskbar: boolean; pinnedDesktop: boolean }) => {
+        await assign(a);
+      },
+      [assign],
+    );
+    return useMapped(call);
+  },
+  useUpdateAssignment() {
+    const base = useMutation(api.groups.updateAssignment);
+    // Pins and audience are toggles: the group page shows the change at once, the server's answer replaces it.
+    const update = useMemo(
+      () =>
+        base.withOptimisticUpdate((store, a) => {
+          for (const { args, value } of store.getAllQueries(api.groups.get)) {
+            if (value === undefined || !value.apps.some((x) => x.assignmentId === a.assignmentId)) continue;
+            store.setQuery(api.groups.get, args, {
+              ...value,
+              apps: value.apps.map((x) =>
+                x.assignmentId === a.assignmentId ? { ...x, audience: a.audience, pinnedTaskbar: a.pinnedTaskbar, pinnedDesktop: a.pinnedDesktop } : x,
+              ),
+            });
+          }
+        }),
+      [base],
+    );
+    const call = useCallback(
+      async (a: { assignmentId: string; audience: Audience; pinnedTaskbar: boolean; pinnedDesktop: boolean }) => {
+        await update(a);
+      },
+      [update],
+    );
+    return useMapped(call);
+  },
+  useUnassignApp() {
+    const unassign = useMutation(api.groups.unassignApp);
+    const call = useCallback(
+      async (a: { assignmentId: string }) => {
+        await unassign(a);
+      },
+      [unassign],
+    );
+    return useMapped(call);
+  },  useAddGroupEmployee: useNotReadyMutation,
   useRemoveGroupEmployee: useNotReadyMutation,
 
   useEmployeesScreen: useNotReadyPaged,
@@ -315,22 +369,111 @@ export const liveApi: DataApi = {
   useUnlockEmployee: useNotReadyMutation,
   useDeleteEmployee: useNotReadyMutation,
 
-  useAppsScreen: useNotReadyPaged,
-  useAppDetail: useNotReady,
-  useAppInstalls: useNotReadyPaged,
-  useCreateWebApp: useNotReadyMutation,
-  useCreateDesktopApp: useNotReadyMutation,
-  useUpdateApp: useNotReadyMutation,
-  useSetAppArchived: useNotReadyMutation,
-  useDeleteApp: useNotReadyMutation,
-  useRetryApp: useNotReadyMutation,
-  useResolveWinget: useNotReadyMutation,
-  useFetchWebMeta: useNotReadyMutation,
+  // ---- apps (Step 10). The paginated lists are in `../apps/live.ts`. `remove` is a major action
+  // (fresh step-up); `useMapped` opens the dialog and retries.
+  useAppDetail(appId) {
+    const q = useMemberQuery(api.apps.get, appId === "new" ? "skip" : { appId });
+    const mapped = useMappedState(q, appDetailOf);
+    return appId === "new" ? { status: "ready", data: NEW_APP } : mapped;
+  },
+  useAppOptions() {
+    return useMemberQuery(api.apps.options, {});
+  },
+  useCreateWebApp() {
+    return useMapped(useMutation(api.apps.createWeb));
+  },
+  useCreateDesktopApp() {
+    return useMapped(useMutation(api.apps.createDesktop));
+  },
+  useUpdateApp() {
+    const update = useMutation(api.apps.update);
+    const call = useCallback(
+      async (a: Parameters<typeof update>[0]) => {
+        await update(a);
+      },
+      [update],
+    );
+    return useMapped(call);
+  },
+  useSetAppArchived() {
+    const base = useMutation(api.apps.setArchived);
+    const set = useMemo(
+      () =>
+        base.withOptimisticUpdate((store, a) => {
+          const detail = store.getQuery(api.apps.get, { appId: a.appId });
+          if (detail !== undefined) store.setQuery(api.apps.get, { appId: a.appId }, { ...detail, archived: a.archived });
+        }),
+      [base],
+    );
+    const call = useCallback(
+      async (a: { appId: string; archived: boolean }) => {
+        await set(a);
+      },
+      [set],
+    );
+    return useMapped(call);
+  },
+  useDeleteApp() {
+    const remove = useMutation(api.apps.remove);
+    const call = useCallback(
+      async (a: { appId: string }) => {
+        await remove(a);
+      },
+      [remove],
+    );
+    return useMapped(call);
+  },
+  useRetryApp() {
+    const retry = useMutation(api.apps.retry);
+    const call = useCallback(
+      async (a: { appId: string }) => {
+        await retry(a);
+      },
+      [retry],
+    );
+    return useMapped(call);
+  },
+  useResolveWinget() {
+    return useMapped(useAction(api.apps.resolveWinget));
+  },
+  useFetchWebMeta() {
+    return useMapped(useAction(api.apps.fetchWebMeta));
+  },
+  useSaveAppIcon() {
+    const save = useAction(api.apps.saveIcon);
+    const call = useCallback(
+      async (a: { appId: string; png: string }) => {
+        await save(a);
+      },
+      [save],
+    );
+    return useMapped(call);
+  },
 
-  useFileTypesScreen: useNotReady,
-  useSetFileHandler: useNotReadyMutation,
-  useRemoveFileHandler: useNotReadyMutation,
-
+  // ---- file types (Step 10). Removing a rule is a major action.
+  useFileTypesScreen() {
+    return useMemberQuery(api.fileHandlers.list, {});
+  },
+  useSetFileHandler() {
+    const set = useMutation(api.fileHandlers.set);
+    const call = useCallback(
+      async (a: { extension: string; appId: string }) => {
+        await set(a);
+      },
+      [set],
+    );
+    return useMapped(call);
+  },
+  useRemoveFileHandler() {
+    const remove = useMutation(api.fileHandlers.remove);
+    const call = useCallback(
+      async (a: { handlerId: string }) => {
+        await remove(a);
+      },
+      [remove],
+    );
+    return useMapped(call);
+  },
   // Enrollment codes (Step 6) have their own seam: `../enrollment/live.ts`.
 
   useAuditScreen: useNotReadyPaged,

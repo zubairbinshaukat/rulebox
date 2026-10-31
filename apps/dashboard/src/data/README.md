@@ -9,8 +9,9 @@ satisfy the same `DataApi` type (`api.ts`):
   loss (writes queue), failing queries and stale edits (top-bar demo controls).
 - `live/hooks.ts` — the real backend. Session, sign-in, MFA, account and
   members are live (Step 4, against the Step 3 functions); settings, the plan
-  and groups since Step 5; enrollment codes since Step 6 and the device
-  lists since Step 7 (each in its own seam, see below); every other hook answers `not_ready` with the
+  and groups since Step 5; enrollment codes since Step 6, the device
+  lists since Step 7 and the app lists since Step 10 (each in its own seam, see below); apps,
+  assignments and file types since Step 10; every other hook answers `not_ready` with the
   detail `NOT_DEPLOYED` (`api.ts`), which a region shows as "Coming in a
   later step", until its Convex step lands. `live/convex.ts` holds the
   adapters (`useMemberQuery`, `useMapped`, `mapError`).
@@ -73,23 +74,24 @@ Status: **live** = wired in `live/hooks.ts`; everything else answers
 | `useDeviceInstalls` | `usePaginatedQuery(api.fleet.installs, { deviceId })` (in `data/devices/`) | live |
 | `useRenameDevice` / `useMoveDevice` / `useSetKiosk` / `useRevokeDevice` / `useRemoveDevice` / `useRequestRotation` | `api.fleet.rename` / `move` / `setKiosk` / `revoke` / `remove` / `requestCredentialRotation`. `rename`, `move` and `setKiosk` take `expectedRevision` (`stale_edit` when the PC changed); `setKiosk` is not optimistic (turning it off is a major action with a fresh step-up) | live |
 | `useGroupsScreen` | `api.groups.list` (`{ count, more }` per count → one number capped at 501, "500+") | live |
-| `useGroupDetail` | `api.groups.get` → `{ group, apps }` mapped to `GroupDetail` (assignment `_id` = app id until Step 10) | live |
+| `useGroupDetail` | `api.groups.get` → `{ group, apps }` mapped to `GroupDetail` (assignment `_id` = the `appAssignments` id) | live |
 | `useCreateGroup` / `useUpdateGroup` / `useDeleteGroup` | `api.groups.create` → id (`plan_limit` detail "groups", `conflict` field "name") / `rename` (`expectedRevision`; description undefined = unchanged, "" = cleared) → `{ revision }` / `remove` (major; `has_dependents` detail lists what to move first) | live |
-| `useAssignApp` / `useUpdateAssignment` / `useUnassignApp` | `api.groups.assignApp` / `updateAssignment` (optimistic) / `unassignApp` |
+| `useAssignApp` / `useUpdateAssignment` / `useUnassignApp` | `api.groups.assignApp` (`conflict` field `app`, `too_large` detail `group apps`, `invalid_argument` field `app` for an archived app) / `updateAssignment` (optimistic on `groups:get`; nothing changed = no write) / `unassignApp`; each republishes the group | live |
 | `useAddGroupEmployee` / `useRemoveGroupEmployee` | `api.groups` members section (Step 11) |
 | `useEmployeesScreen({ groupId, search })` | `api.employees.list` (paginated) / `api.employees.search` |
 | `useEmployeeDetail(id \| "new")` | `api.employees.get` ("new": only the pickers + `defaultQuotaGb`) |
 | `useCreateEmployee` | `api.employees.create` |
 | `useUpdateEmployee` | `api.employees.update`, then `setGroups`, then `setDirectApps` (each with `expectedRevision`) |
 | `useSetEmployeePassword` / `useSetEmployeeDisabled` / `useUnlockEmployee` / `useDeleteEmployee` | `useAction(api.employees.setPassword)` / `setDisabled` / `unlock` / `remove` |
-| `useAppsScreen({ archived })` | `api.apps.list` (paginated) |
-| `useAppDetail(id \| "new")` | `api.apps.get` + `api.apps.installSummary` |
-| `useAppInstalls(appId, state)` | `api.apps.installs` (paginated) |
-| `useCreateWebApp` / `useCreateDesktopApp` / `useUpdateApp` | `api.apps.createWeb` / `createDesktop` / `update` |
-| `useSetAppArchived` / `useDeleteApp` / `useRetryApp` | `api.apps.setArchived` (optimistic) / `remove` / `retry` |
-| `useResolveWinget` / `useFetchWebMeta` | `useAction(api.apps.resolveWinget)` / `useAction(api.apps.fetchWebMeta)` |
-| `useFileTypesScreen` / `useSetFileHandler` / `useRemoveFileHandler` | `api.fileHandlers.list` / `set` / `remove` |
-| `useAuditScreen` / `useHistory(targetId)` | `api.audit.list` / `api.audit.forTarget` (paginated) |
+| `useAppsScreen({ archived })` | `usePaginatedQuery(api.apps.list, { archived })` (50 per page, newest first; per row a group count capped at 101 and the icon address, never install results). In `data/apps/` | live |
+| `useAppDetail(id \| "new")` | `api.apps.get` (`"new"` subscribes to nothing and answers a constant form). `installCounts` is `{}` until Step 17 (`apps:installSummary`) | live |
+| `useAppOptions` | `api.apps.options` (non-archived apps, at most 500): the group page's assign dialog, subscribed only while it is open | live |
+| `useAppInstalls(appId, state)` | `api.apps.installs` (paginated, Step 17). In `data/apps/` | `not_ready` |
+| `useCreateWebApp` / `useCreateDesktopApp` / `useUpdateApp` | `api.apps.createWeb` / `createDesktop` / `update` (`expectedRevision`; `invalid_argument` names the field, e.g. `url`, `exe`, `install.sha256`; `plan_limit` detail `apps`) | live |
+| `useSetAppArchived` / `useDeleteApp` / `useRetryApp` | `api.apps.setArchived` (optimistic on `apps:get`) / `remove` (major: fresh step-up; `has_dependents` detail `groups, file types`) / `retry` | live |
+| `useResolveWinget` / `useFetchWebMeta` | `useAction(api.apps.resolveWinget)` (`winget_unsupported` detail = the reason, `winget_unreachable`) / `useAction(api.apps.fetchWebMeta)` → `{ name?, hue?, iconPreviewUrl? }` (`webmeta_failed`) | live |
+| `useSaveAppIcon` | `useAction(api.apps.saveIcon)`: the `data:` URL `useFetchWebMeta` previewed, sent after the app is saved | live |
+| `useFileTypesScreen` / `useSetFileHandler` / `useRemoveFileHandler` | `api.fileHandlers.list` / `set` (`invalid_argument` field `extension` detail `format` or `denied`; field `app`) / `remove` (major) | live || `useAuditScreen` / `useHistory(targetId)` | `api.audit.list` / `api.audit.forTarget` (paginated) |
 | `useSettingsScreen` / `useUpdateSettings` | `api.settings.get` (`exitPin: { set, setAt }`) / `api.settings.update` → `{ revision, changed }` (fresh step-up when `adminExit` changes; `invalid_argument` field `adminExit.hotkey` with the grammar rule in `detail`) | live |
 | `usePlan` | `api.settings.plan` (plan, status, limits, usage); Settings → Organization and the "New group" dialog | live |
 | `useSetExitPin` / `useClearExitPin` | `useAction(api.settings.setExitPin)` (major; `invalid_argument` field `pin`, `detail` the rule) / `api.settings.clearExitPin` (major) | live |
@@ -124,6 +126,14 @@ and `useDeviceInstalls`, so it is imported only by the lazy Devices, Device
 detail and Group detail screens and stays out of the `core` chunk. Every other device hook
 (`useDeviceDetail`, `useDeviceLiveness`, `useWatchDevice`, `useCheckNow`,
 `useCheckResult`, the writes) is in `DataApi` / `live/hooks.ts`.
+
+## App-list hooks (`data/apps/`, plan Step 10)
+
+The same pattern a fourth time: `AppsApi` in `apps/api.ts`, `apps/live.ts`, demo hooks in
+`demo/hooks.ts` re-exported by `apps/demo.ts`, picked by the `@rulebox/apps-impl` alias
+(`vite.config.ts` and the `paths` entry in `tsconfig.json`; `vite.config.ts` keeps the folder out of
+the `core` chunk). It holds `useAppsScreen` and `useAppInstalls`, imported only by the lazy Apps and
+App screens.
 
 ## Step-up hooks (`data/stepup/`, plan 4.16)
 

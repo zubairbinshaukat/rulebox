@@ -3387,6 +3387,72 @@ in Step 17 from per-app counters or the capped reads of that step).
 Publishing on an app change costs one head re-run per affected device
 plus one body fetch (A5).
 
+**Status (2026-11-01): built and tested on the dev machine (backend and
+dashboard), NOT deployed; items 1 (Rust types) and the `cargo test` part of
+"Verify" are NOT done.** The Rust `catalog.rs`, its ts-rs export, `packages/types`
+and `tests/vectors/catalog-v2.json` were left out on instruction (no Rust edits in
+this run): `lib/desired.ts` still has its local `CatalogApp`. The dev-deployment
+"Verify" (web app with Fetch details, `7zip.7zip` with Resolve, assign to a group
+with a simulated device) is the Owner's to run; `convex/_generated/api.d.ts` was
+edited by hand (codegen needs a deployment). Screens checked in demo mode only
+(screenshots: Apps, AppEdit web with Fetch details, AppEdit program with Resolve,
+the group page's assign dialog, File types).
+As built / deviations:
+(1) New: `apps:options` (viewer; non-archived apps, `.take(500)`) feeds the group
+page's assign dialog, subscribed only while it is open (`groups:get` stays small);
+`apps:saveIcon` takes the base64 PNG (or the `data:` URL) that `fetchWebMeta`
+previewed (`iconPreviewUrl`), re-checks it (signature, IHDR, <= 512 px, <= 32 KiB),
+hashes it and stores it; the app form sends it after Save and only warns when the
+upload fails. `saveIcon` does not bump `revision` (the published version moves
+anyway). `groups:get` rows gain `assignmentId`, `hue`, `archived`.
+(2) **`appCount` counts NON-archived apps.** Archiving frees a plan slot, restoring
+needs one (`plan_limit`), `remove` (archived only) changes nothing. The plan says
+only "keep it right"; `maintenance:migratePlans` now recounts it.
+(3) **SSRF (`lib/safeFetch.ts`, `lib/hostRules.ts`):** instead of `redirect:
+"follow"` the fetch follows up to 4 redirects itself and re-checks every hop (https,
+no credentials, no private / loopback / link-local / CGNAT / reserved IPv4, no IPv6
+literal, no `localhost` / `.local` / `.internal` / `.localdomain` / `.home.arpa` /
+dot-less name); body caps are enforced while reading; one 10 s deadline. A host NAME
+that resolves to a private address cannot be seen from Convex (no DNS API): the
+defence there is that Convex's cloud has no route to a private network, plus the
+redirect checks. **(unverified)** that Convex's runtime `fetch` honours
+`redirect: "manual"` and returns the 3xx response; if it does not, a redirect shows
+as `webmeta_failed` (the page is never read), not as an SSRF.
+(4) Winget: `arm` is dropped with `arm64`; the display name and publisher come from a
+best-effort extra fetch of `<id>.locale.en-US.yaml`; the version list keeps only
+folders that start with a digit (sub-packages such as `Insiders` are skipped) and the
+newest three are tried; package ids are case-sensitive in the repository (the error
+says so); the cache key is the REQUESTED version ("" = newest) so a "newest" lookup
+does not touch the rate-limited listing for 24 hours; `DefaultInstallLocation`
+(`%ProgramFiles%\Git`) is turned into `{ProgramFiles}\Git` for the hint. Rate limits
+`webMeta` and `wingetResolve`: 20 per minute per organization. `GITHUB_TOKEN` goes only
+to `api.github.com`.
+(5) Validation extras the plan does not list: `allowedDomains` is 20 entries of the
+admin's own plus the URL's host; credentials in a URL, dot-less hosts and the extra
+reserved ranges are refused (the client mirrors them); path components made only of
+dots and spaces are refused; `args` have no control characters; at most 20 reset
+folders; a program that clears its file argument while a file-type rule points at it
+is refused (`has_dependents`, detail "file types").
+(6) The publisher loads the group's assignments, their apps (with the icon address
+from `ctx.storage.getUrl`) and the organization's file-type rules (once per run). The
+plan's `PublishTarget` kinds `app` / `employee` do not exist in the Step 5 queue
+(`{ groupIds, deviceIds, allDevices}`): `lib/appPublish.ts` resolves an app to its
+groups (assignments, and groups of employees with a direct grant, capped: more than 500
+assignments, 50 grants or an employee in more than 20 groups = every device). Direct
+grants and group members stay empty in the document until Step 11, so `selected` apps
+list no employees yet.
+(7) Dashboard: the two paginated app hooks moved to their own seam `data/apps/`
+(`@rulebox/apps-impl`, kept out of the `core` chunk); `useAppDetail("new")`
+subscribes to nothing; `installCounts` is `{}` and `useAppInstalls` stays `not_ready`
+until Step 17; `apps:list` shows no install summary (`summary: null`) and its group
+count is capped at 101; `useMemberQuery` accepts `"skip"`. GroupDetail's apps card
+can assign, change audience and pins, and unassign. Client validators now match the
+server's host and path rules.
+(8) Verified: `pnpm test:convex` (536), `typecheck:convex`, `lint:convex`, `test:scripts`;
+dashboard `typecheck`, `lint`, `test` (358). Not verified: any call to a real Convex
+deployment, real GitHub or real websites. Risk: `apps:list` reads up to ~5,000
+assignment rows for a page of 50 apps that are each in 100 groups (a free tenant ~80).
+
 ---
 
 ### Step 11 — Employees

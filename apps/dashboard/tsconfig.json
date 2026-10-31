@@ -2,7 +2,7 @@
   "extends": "../../tsconfig.base.json",
   "compilerOptions": {
     "types": ["vite/client", "unplugin-icons/types/react"],
-    "paths": { "@convex/*": ["../../convex/*"], "@rulebox/data-impl": ["./src/data/live/hooks.ts"], "@rulebox/stepup-impl": ["./src/data/stepup/live.ts"], "@rulebox/enrollment-impl": ["./src/data/enrollment/live.ts"], "@rulebox/devices-impl": ["./src/data/devices/live.ts"] }
+    "paths": { "@convex/*": ["../../convex/*"], "@rulebox/data-impl": ["./src/data/live/hooks.ts"], "@rulebox/stepup-impl": ["./src/data/stepup/live.ts"], "@rulebox/enrollment-impl": ["./src/data/enrollment/live.ts"], "@rulebox/devices-impl": ["./src/data/devices/live.ts"], "@rulebox/apps-impl": ["./src/data/apps/live.ts"] }
   },
   "include": ["src", "scripts"]
 }

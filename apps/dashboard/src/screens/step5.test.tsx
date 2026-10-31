@@ -37,15 +37,19 @@ vi.mock("convex/react", () => ({
   useConvexConnectionState: () => ({ isWebSocketConnected: true }),
 }));
 
-const stable = new Map<string, (args?: unknown) => Promise<unknown>>();
-function fnFor(name: string) {
+type Mock = ((args?: unknown) => Promise<unknown>) & { withOptimisticUpdate: () => Mock };
+const stable = new Map<string, Mock>();
+function fnFor(name: string): Mock {
   let f = stable.get(name);
   if (!f) {
-    f = (args?: unknown) => {
+    const call = ((args?: unknown) => {
       const impl = cx.fns[name];
       if (!impl) throw new Error(`no mock for ${name}`);
       return impl(args);
-    };
+    }) as Mock;
+    // `useMutation(...).withOptimisticUpdate(...)`: the optimistic part is the real client's job.
+    call.withOptimisticUpdate = () => call;
+    f = call;
     stable.set(name, f);
   }
   return f;
@@ -211,10 +215,10 @@ describe("Groups list (groups:list)", () => {
 describe("Group detail (groups:get)", () => {
   const detail = (revision: number, name = "Office", devices = 0) => ({
     group: { ...groupRow("g1", name, devices), revision, description: "Back office" },
-    apps: [{ appId: "a1", name: "Notepad", kind: "desktop", audience: "everyone", pinnedTaskbar: true, pinnedDesktop: false }],
+    apps: [{ assignmentId: "as1", appId: "a1", name: "Notepad", kind: "desktop", archived: false, audience: "everyone", pinnedTaskbar: true, pinnedDesktop: false }],
   });
 
-  it("apps are read-only; the devices are live (Step 7), employees say 'Coming in a later step'", () => {
+  it("admins can assign apps; the devices are live (Step 7), employees say 'Coming in a later step'", () => {
     cx.results["groups:get"] = detail(0);
     cx.pages["fleet:list"] = [
       {
@@ -233,10 +237,74 @@ describe("Group detail (groups:get)", () => {
     ui(<GroupDetail />, "admin", "/groups/g1");
     expect(screen.getByRole("heading", { level: 1, name: "Office" })).toBeTruthy();
     expect(screen.getByText("Notepad")).toBeTruthy();
-    expect(screen.queryByRole("button", { name: strings.group.assign })).toBeNull();
-    expect(screen.queryByRole("combobox")).toBeNull();
+    expect(screen.getByRole("button", { name: strings.group.assign })).toBeTruthy();
     expect(screen.getByRole("link", { name: "Front desk" }).getAttribute("href")).toBe("/devices/d1");
     expect(screen.getAllByText(strings.app.comingLater).length).toBeGreaterThanOrEqual(1);
+  });
+
+  it("viewers see the assigned apps without the buttons", () => {
+    cx.results["groups:get"] = detail(0);
+    ui(<GroupDetail />, "viewer", "/groups/g1");
+    expect(screen.getByText("Notepad")).toBeTruthy();
+    expect(screen.queryByRole("button", { name: strings.group.assign })).toBeNull();
+    expect(screen.queryByRole("button", { name: `${strings.common.edit} Notepad` })).toBeNull();
+    expect(screen.queryByRole("button", { name: `${strings.group.unassign} Notepad` })).toBeNull();
+  });
+
+  it("assign: picks an app (those already in the group are left out), sends the audience and pins", async () => {
+    cx.results["groups:get"] = detail(0);
+    cx.results["apps:options"] = [
+      { _id: "a1", name: "Notepad", kind: "desktop", canOpenFiles: true },
+      { _id: "a2", name: "Wiki", kind: "web", canOpenFiles: false },
+    ];
+    const assign = vi.fn(async () => ({ assignmentId: "as2" }));
+    cx.fns["groups:assignApp"] = assign;
+    ui(<GroupDetail />, "admin", "/groups/g1");
+    fireEvent.click(screen.getByRole("button", { name: strings.group.assign }));
+    const dialog = await screen.findByRole("dialog");
+    const picker = within(dialog).getByLabelText(new RegExp(`^${strings.group.app}`)) as HTMLSelectElement;
+    expect([...picker.options].map((o) => o.textContent)).toEqual(["Wiki"]);
+    fireEvent.change(within(dialog).getByLabelText(strings.group.audience), { target: { value: "selected" } });
+    fireEvent.click(within(dialog).getByLabelText(strings.group.pinTaskbar));
+    fireEvent.click(within(dialog).getByRole("button", { name: strings.group.assign }));
+    await waitFor(() => expect(assign).toHaveBeenCalledWith({ groupId: "g1", appId: "a2", audience: "selected", pinnedTaskbar: true, pinnedDesktop: true }));
+  });
+
+  it("assign: the server's conflict and too_large refusals get their own sentences", async () => {
+    cx.results["groups:get"] = { ...detail(0), apps: [] };
+    cx.results["apps:options"] = [{ _id: "a2", name: "Wiki", kind: "web", canOpenFiles: false }];
+    cx.fns["groups:assignApp"] = vi
+      .fn()
+      .mockRejectedValueOnce(new ConvexError({ code: "conflict", field: "app" }))
+      .mockRejectedValueOnce(new ConvexError({ code: "too_large", detail: "group apps" }));
+    ui(<GroupDetail />, "admin", "/groups/g1");
+    fireEvent.click(screen.getByRole("button", { name: strings.group.assign }));
+    const dialog = await screen.findByRole("dialog");
+    fireEvent.click(within(dialog).getByRole("button", { name: strings.group.assign }));
+    expect(await within(dialog).findByText(groupText.alreadyAssigned)).toBeTruthy();
+    fireEvent.click(within(dialog).getByRole("button", { name: strings.group.assign }));
+    expect(await within(dialog).findByText(groupText.tooManyApps)).toBeTruthy();
+  });
+
+  it("edit sends the assignment id with the new audience and pins; unassign asks first", async () => {
+    cx.results["groups:get"] = detail(0);
+    const update = vi.fn(async () => null);
+    const unassign = vi.fn(async () => null);
+    cx.fns["groups:updateAssignment"] = update;
+    cx.fns["groups:unassignApp"] = unassign;
+    ui(<GroupDetail />, "admin", "/groups/g1");
+    fireEvent.click(screen.getByRole("button", { name: `${strings.common.edit} Notepad` }));
+    let dialog = await screen.findByRole("dialog");
+    fireEvent.click(within(dialog).getByLabelText(strings.group.pinDesktop));
+    fireEvent.click(within(dialog).getByRole("button", { name: strings.common.save }));
+    await waitFor(() => expect(update).toHaveBeenCalledWith({ assignmentId: "as1", audience: "everyone", pinnedTaskbar: true, pinnedDesktop: true }));
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+
+    fireEvent.click(screen.getByRole("button", { name: `${strings.group.unassign} Notepad` }));
+    dialog = await screen.findByRole("dialog");
+    expect(unassign).not.toHaveBeenCalled();
+    fireEvent.click(within(dialog).getByRole("button", { name: strings.group.unassign }));
+    await waitFor(() => expect(unassign).toHaveBeenCalledWith({ assignmentId: "as1" }));
   });
 
   it("delete is blocked up front by what the screen knows (devices, apps)", () => {

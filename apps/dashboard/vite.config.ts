@@ -143,6 +143,7 @@ export default defineConfig(({ mode, command }) => {
       "@rulebox/stepup-impl": fileURLToPath(new URL(demo ? "./src/data/stepup/demo.ts" : "./src/data/stepup/live.ts", import.meta.url)),
       "@rulebox/enrollment-impl": fileURLToPath(new URL(demo ? "./src/data/enrollment/demo.ts" : "./src/data/enrollment/live.ts", import.meta.url)),
       "@rulebox/devices-impl": fileURLToPath(new URL(demo ? "./src/data/devices/demo.ts" : "./src/data/devices/live.ts", import.meta.url)),
+      "@rulebox/apps-impl": fileURLToPath(new URL(demo ? "./src/data/apps/demo.ts" : "./src/data/apps/live.ts", import.meta.url)),
     },
   },
   server: { port: 5173, strictPort: true },
@@ -169,7 +170,7 @@ export default defineConfig(({ mode, command }) => {
             // `lib/stepup/` and `data/stepup/` stay out: step-up code is loaded only
             // by the signed-in shell and the Security tab, never by sign-in. So do
             // `data/enrollment/` (only the Enrollment screen) and `data/devices/`
-            { name: "core", test: /([\\/]apps[\\/]dashboard[\\/]src[\\/](lib|data)|[\\/]packages[\\/]ui[\\/]src)[\\/](?!(stepup|enrollment|devices)[\\/]).*\.tsx?$/ },
+            { name: "core", test: /([\\/]apps[\\/]dashboard[\\/]src[\\/](lib|data)|[\\/]packages[\\/]ui[\\/]src)[\\/](?!(stepup|enrollment|devices|apps)[\\/]).*\.tsx?$/ },
           ],
         },
       },

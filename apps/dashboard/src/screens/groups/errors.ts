@@ -18,3 +18,12 @@ export function groupErrorMessage(error: unknown, plan?: PlanScreen | null): str
   if (e?.code === "has_dependents") return groupText.hasDependents(e.detail);
   return null;
 }
+
+/** Screen sentences for the refusals of assigning an app; null = the usual sentence. */
+export function assignmentErrorMessage(error: unknown): string | null {
+  const e = toAppError(error);
+  if (e?.code === "conflict" && e.field === "app") return groupText.alreadyAssigned;
+  if (e?.code === "too_large") return groupText.tooManyApps;
+  if (e?.code === "invalid_argument" && e.field === "app") return groupText.appArchived;
+  return null;
+}

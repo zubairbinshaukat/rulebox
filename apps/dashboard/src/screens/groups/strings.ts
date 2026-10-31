@@ -18,7 +18,15 @@ export const groupText = {
   descriptionInvalid: "Use at most 300 characters.",
   usage: (used: number, limit: number, plan: string) =>
     `${formatNumber(used)} of ${formatNumber(limit)} ${plural(limit, { one: "group", other: "groups" })} used on the ${plan} plan.`,
-  appsReadOnly: "Assigning apps to groups comes with the apps step.",
+  alreadyAssigned: "This group already has this app.",
+  tooManyApps: "A group can have at most 150 apps.",
+  appArchived: "An archived app can't be assigned. Restore it first.",
+  noAppsToAssign: "Every app is already assigned to this group, or there are no apps yet.",
+  assigned: (app: string) => `${app} assigned.`,
+  unassigned: (app: string) => `${app} unassigned.`,
+  editAssignment: "Change how it appears",
+  editAssignmentTitle: (app: string) => `How ${app} appears`,
+  audienceHint: "Who in the group sees the app. \"Only selected employees\" lists the employees who were given the app one by one.",
   /** `has_dependents` detail ("devices, employees, apps, enrollment codes") as a sentence. */
   hasDependents: (detail: string | undefined) => {
     const parts = (detail ?? "")

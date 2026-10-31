@@ -55,27 +55,29 @@ export function useMapped<A, R>(fn: (args: A) => Promise<R>): (args: A) => Promi
  * confirmed session (no `unauthenticated` noise while signed out). Errors do
  * not throw during render (`useQueries` returns them), so a screen can show
  * its own "Try again"; `retry` drops the subscription for one tick and
- * subscribes again.
+ * subscribes again. `"skip"` as the arguments subscribes to nothing (state `loading`;
+ * the caller answers instead, for example a form for a new item).
  */
 export function useMemberQuery<Q extends FunctionReference<"query">>(
   query: Q,
-  args: FunctionArgs<Q>,
+  args: FunctionArgs<Q> | "skip",
 ): QueryState<FunctionReturnType<Q>> {
   const { isAuthenticated } = useConvexAuth();
   const [paused, setPaused] = useState(false);
-  const argsKey = JSON.stringify(convexToJson(args));
+  const skip = args === "skip";
+  const argsKey = JSON.stringify(skip ? null : convexToJson(args));
   // `api.x.y` is a new Proxy on every access: key on the function's name (as
   // Convex's own `useQuery` does), or every render would re-subscribe.
   const name = getFunctionName(query);
   const requests = useMemo((): RequestForQueries => {
-    if (!isAuthenticated || paused) return {};
+    if (!isAuthenticated || paused || skip) return {};
     return {
       q: {
         query: makeFunctionReference<"query">(name),
         args: jsonToConvex(JSON.parse(argsKey) as JSONValue) as Record<string, Value>,
       },
     };
-  }, [isAuthenticated, paused, name, argsKey]);
+  }, [isAuthenticated, paused, skip, name, argsKey]);
   const result: unknown = useQueries(requests).q;
 
   useEffect(() => {
