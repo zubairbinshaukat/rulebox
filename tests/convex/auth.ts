@@ -7,6 +7,7 @@ import { api } from "../../convex/_generated/api";
 import schema from "../../convex/schema";
 import { modules } from "../../convex/test.setup";
 import type { T } from "./identity";
+import { setSeeds, TEST_SEED_B64 } from "./keys";
 
 // Convex Auth reads its keys from process.env (also in convex-test).
 declare const process: { env: Record<string, string | undefined> };
@@ -37,6 +38,9 @@ export async function ensureAuthEnv(): Promise<void> {
     process.env.RULEBOX_WEBAUTHN_ORIGINS = "http://localhost:5173";
     // Set by Convex in every cloud deployment; enrollment codes embed it (Step 6).
     process.env.CONVEX_CLOUD_URL ??= "https://happy-animal-123.convex.cloud";
+    // Step 8: the TEST signing seed (RFC 8032 test 1; `makeOrg` registers its
+    // public key). Tests that need another env state set it themselves.
+    setSeeds(TEST_SEED_B64);
   })();
   await ready;
 }

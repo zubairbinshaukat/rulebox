@@ -196,6 +196,18 @@ const ROWS: Row[] = [
   { name: "devices:unenroll", call: (a) => a.mutation(api.devices.unenroll, deviceArgs), expect: { default: "kind:rejected" } },
   // Step 7: the liveness ping of Phase 4 agents. Device credentials only; no member identity helps.
   { name: "devices:ping", call: (a) => a.mutation(api.devices.ping, deviceArgs), expect: { default: "device_rejected" } },
+  // Step 8: the signed-document head (subscription) and the one-shot fetches.
+  { name: "devices:headState", call: (a) => a.query(api.devices.headState, deviceArgs), expect: { default: "kind:unknownDevice" } },
+  {
+    name: "devices:fetchDesired",
+    call: (a) => a.query(api.devices.fetchDesired, { ...deviceArgs, version: 1 }),
+    expect: { default: "device_rejected" },
+  },
+  {
+    name: "devices:fetchRoster",
+    call: (a) => a.query(api.devices.fetchRoster, { ...deviceArgs, sinceEpoch: 0 }),
+    expect: { default: "device_rejected" },
+  },
   { name: "mfa:status", call: (a) => a.query(api.mfa.status, {}), expect: { ...VIEWER_ANY_MFA, foreign: "ok" } },
   { name: "mfa:beginSetup", call: (a) => a.action(api.mfa.beginSetup, {}), expect: { ...VIEWER_ANY_MFA, foreign: "ok" }, returnsSecretOnce: true },
   {
@@ -377,6 +389,18 @@ const ROWS: Row[] = [
     call: (a, f) => a.mutation(api.fleet.checkNow, { deviceIds: [f.deviceId] }),
     expect: { ...ADMIN_UNLOCKED, owner: "rate_limited", ownerStale: "rate_limited", foreign: "not_found" },
   },
+  // ---- Step 8: signing keys. Every organization of the fixture already has the
+  // TEST key active and the env holds no next seed, so an Owner with a fresh
+  // step-up reaches the handler and gets its refusal (never a secret).
+  { name: "keys:status", call: (a) => a.query(api.keys.status, {}), expect: { ...VIEWER, foreign: "ok" } },
+  {
+    name: "keys:trustProgress",
+    call: (a) => a.query(api.keys.trustProgress, { paginationOpts: { numItems: 50, cursor: null } }),
+    expect: { ...VIEWER, foreign: "ok" },
+  },
+  { name: "keys:registerActive", call: (a) => a.mutation(api.keys.registerActive, {}), expect: { ...OWNER, owner: "conflict", foreign: "conflict" } },
+  { name: "keys:prepareRotation", call: (a) => a.mutation(api.keys.prepareRotation, {}), expect: { ...OWNER, owner: "not_ready", foreign: "not_ready" } },
+  { name: "keys:finishRotation", call: (a) => a.mutation(api.keys.finishRotation, {}), expect: { ...OWNER, owner: "conflict", foreign: "conflict" } },
   {
     name: "fleet:checkResult",
     call: (a, f) => a.query(api.fleet.checkResult, { checkId: f.checkId }),

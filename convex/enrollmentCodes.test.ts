@@ -327,7 +327,7 @@ describe("enrollment:enroll (Step 6: plan limits, rate limits, validation)", () 
     const { orgId, groupId, token } = await freeOrgWithCode(t);
     const args = enrollArgs(token, { deviceName: "  Front\u0000 desk​\n PC  " });
     const result = await t.mutation(api.enrollment.enroll, args);
-    expect(Object.keys(result).sort()).toEqual(["deviceId", "deviceName", "orgId", "serverTimeMs"]);
+    expect(Object.keys(result).sort()).toEqual(["deviceId", "deviceName", "orgId", "policyKeys", "serverTimeMs"]);
     expect(result).toMatchObject({ orgId, deviceName: "Front desk PC" });
     const rows = await devices(t, orgId);
     expect(rows).toHaveLength(1);

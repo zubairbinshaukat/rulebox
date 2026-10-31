@@ -123,6 +123,54 @@ export function base64UrlEncode(text: string): string {
   return out;
 }
 
+// ---------------------------------------------------------------- base64 (RFC 4648, standard alphabet)
+
+const B64 = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+
+/** Standard base64 WITH padding (the form of keys and signatures, plan 4.5). */
+export function base64Encode(bytes: Uint8Array): string {
+  let out = "";
+  for (let i = 0; i < bytes.length; i += 3) {
+    const b0 = bytes[i] ?? 0;
+    const b1 = bytes[i + 1];
+    const b2 = bytes[i + 2];
+    const n = (b0 << 16) | ((b1 ?? 0) << 8) | (b2 ?? 0);
+    out += B64.charAt((n >> 18) & 63) + B64.charAt((n >> 12) & 63);
+    out += b1 !== undefined ? B64.charAt((n >> 6) & 63) : "=";
+    out += b2 !== undefined ? B64.charAt(n & 63) : "=";
+  }
+  return out;
+}
+
+/**
+ * Decode standard base64 with padding. Strict: only the canonical encoding of
+ * some byte string is accepted (length a multiple of 4, padding only at the
+ * end, zero bits after the last character), so one value has one spelling.
+ * Null otherwise.
+ */
+export function base64Decode(text: string): Uint8Array | null {
+  if (text.length % 4 !== 0) return null;
+  const pad = text.endsWith("==") ? 2 : text.endsWith("=") ? 1 : 0;
+  const body = text.slice(0, text.length - pad);
+  const out: number[] = [];
+  let buffer = 0;
+  let bits = 0;
+  for (const ch of body) {
+    const value = B64.indexOf(ch);
+    if (value < 0) return null;
+    buffer = (buffer << 6) | value;
+    bits += 6;
+    if (bits >= 8) {
+      out.push((buffer >>> (bits - 8)) & 0xff);
+      bits -= 8;
+    }
+    buffer &= (1 << bits) - 1;
+  }
+  if (buffer !== 0) return null; // non-zero leftover bits: not canonical
+  const bytes = new Uint8Array(out);
+  return base64Encode(bytes) === text ? bytes : null;
+}
+
 /** True when the agent accepts `url`: `https://host[:port]` with no path, query or user-info. */
 export function isAgentAcceptableUrl(url: string): boolean {
   let parsed: URL;

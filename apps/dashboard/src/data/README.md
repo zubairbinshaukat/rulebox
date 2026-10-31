@@ -93,8 +93,8 @@ Status: **live** = wired in `live/hooks.ts`; everything else answers
 | `useSettingsScreen` / `useUpdateSettings` | `api.settings.get` (`exitPin: { set, setAt }`) / `api.settings.update` → `{ revision, changed }` (fresh step-up when `adminExit` changes; `invalid_argument` field `adminExit.hotkey` with the grammar rule in `detail`) | live |
 | `usePlan` | `api.settings.plan` (plan, status, limits, usage); Settings → Organization and the "New group" dialog | live |
 | `useSetExitPin` / `useClearExitPin` | `useAction(api.settings.setExitPin)` (major; `invalid_argument` field `pin`, `detail` the rule) / `api.settings.clearExitPin` (major) | live |
-| `useKeysScreen` | `api.keys.status` (+ `keys:trustProgress`) |
-| `useRegisterKey` / `usePrepareRotation` / `useFinishRotation` | `api.keys.registerActive` / `prepareRotation` / `finishRotation` |
+| `useKeysScreen` | `api.keys.status` (`signing` "ok" / "missing" / "mismatch", env key ids, `publishFailedAt`) + `keys:trustProgress` page after page (200 devices each, summed, only while a `next` key exists) | live |
+| `useRegisterKey` / `usePrepareRotation` / `useFinishRotation` | `api.keys.registerActive` / `prepareRotation` / `finishRotation` (Owner, major: fresh step-up; `not_ready` when the env key is missing or not the prepared one, `conflict` detail `key_exists` / "an active key exists") | live |
 | `useMembersScreen` | `api.members.list` → `{ members, invites }` (invites in every state, newest 100; the screen shows only unused, unexpired ones) | live |
 | `useInviteMember` / `useCreateResetCode` | `useAction(api.members.invite)` / `useAction(api.members.createResetCode)` → `{ code, expiresAt }` (code shown once, kept in component state only) | live |
 | `useRevokeInvite` / `useResetMemberMfa` | `useMutation(api.members.revokeInvite)` / `useMutation(api.members.resetMfa)` | live |
@@ -156,6 +156,6 @@ The demo store applies the same rule (`runMutation(role, fn, "unlocked" |
 Shapes the plan does not pin down and the backend must match (or the types
 change):
 `EmployeeDetail.groupOptions/appOptions/defaultQuotaGb`,
-`AppDetail.groupOptions`, `KeysScreen`, `DeviceRow` without `deviceStatus`.
+`AppDetail.groupOptions`, `DeviceRow` without `deviceStatus`.
 (`MfaStatus` and `MembersScreen` now match Step 3's functions; `account:me`
 also returns `memberships`, unused until v2.)

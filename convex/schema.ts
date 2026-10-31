@@ -71,6 +71,10 @@ export default defineSchema({
     activeEnrollmentCodes: v.optional(v.number()),
     publishFailedAt: v.optional(v.number()),
     lastActivityDay: v.optional(v.string()),
+    // Payload bytes the publisher wrote on `publishBytesDay` (UTC "YYYY-MM-DD";
+    // Step 8 item 14), added once per publish run.
+    publishBytesToday: v.optional(v.number()),
+    publishBytesDay: v.optional(v.string()),
     // DEPRECATED (Phase 2 heartbeat interval): replaced by platformSettings /
     // orgPlans.pingIntervalMs; removed by `maintenance:migratePlans`.
     pingIntervalMs: v.optional(v.number()),
@@ -481,10 +485,89 @@ export default defineSchema({
     // added to plan 4.3, `has_dependents` without a scan of the org's codes).
     .index("by_group_expires", ["groupId", "expiresAt"]),
 
-  // grows (pruned to 5 per device from Step 8).
-  // Widened for the Phase 2 rows still in the dev deployment: `scope` + `doc`
-  // are the Phase 2 shape (read by devices:desiredState until Step 8); the
-  // Phase 4 fields become required once the publisher writes every row.
+  // ---- Signed desired state, head/body split (plan 4.2.1 / 4.4, A5 + A13; Step 8).
+
+  // grows (1 per device): the agent's ONE subscription (`devices:headState`).
+  // Small and unsigned: it only tells the agent which signed body to fetch.
+  // Written on a new version, a ping-interval / plan-state change and the
+  // watch / check-now signals (`fastUntil`, `pingNonce`).
+  desiredHeads: defineTable({
+    deviceId: v.id("devices"),
+    orgId: v.id("organizations"),
+    version: v.number(),
+    contentHash: v.string(), // SHA-256 hex of the document with version 0
+    keyId: v.string(),
+    bodyId: v.id("desiredBodies"),
+    pingIntervalMs: v.number(),
+    pingNonce: v.number(), // reserved (A13): the agent pings at once when it changes
+    fastUntil: v.number(), // reserved (A13): the agent pings every 60 s until then (0 = off)
+    rosterGroupId: v.optional(v.id("groups")),
+    planState: v.union(v.literal("ok"), v.literal("overLimit"), v.literal("suspended")),
+  }).index("by_device", ["deviceId"]),
+
+  // grows (KEEP_VERSIONS per device). The signed payload; read only by
+  // `devices:fetchDesired` (one-shot, never subscribed except by the Phase 2
+  // alias) and the pruning. Rows never change.
+  desiredBodies: defineTable({
+    orgId: v.id("organizations"),
+    deviceId: v.id("devices"),
+    version: v.number(),
+    payload: v.string(), // the exact signed UTF-8 string
+    signature: v.string(), // standard base64 of 64 bytes
+    keyId: v.string(),
+    contentHash: v.string(),
+    createdAt: v.number(),
+  }).index("by_device_version", ["deviceId", "version"]),
+
+  // grows (KEEP_VERSIONS per device, ~150 B): the device page's history.
+  desiredVersions: defineTable({
+    orgId: v.id("organizations"),
+    deviceId: v.id("devices"),
+    version: v.number(),
+    reason: v.string(),
+    createdAt: v.number(),
+    bodyId: v.id("desiredBodies"),
+  }).index("by_device_version", ["deviceId", "version"]),
+
+  // tiny (1 per group): the roster log's position (A6). Step 11 writes it.
+  groupRoster: defineTable({
+    orgId: v.id("organizations"),
+    groupId: v.id("groups"),
+    epoch: v.number(),
+    snapshotEpoch: v.number(),
+    snapshotId: v.optional(v.id("rosterSnapshots")),
+  }).index("by_group", ["groupId"]),
+
+  // grows (pruned at each snapshot). One signed roster change (lib/roster.ts).
+  rosterEntries: defineTable({
+    orgId: v.id("organizations"),
+    groupId: v.id("groups"),
+    epoch: v.number(),
+    employeeId: v.string(), // an `employees` id (a string: removed employees stay referenced)
+    credentialRevision: v.optional(v.number()), // missing = removed
+    keyId: v.string(), // added to plan 4.2.1: which org key signed it (rotation)
+    signature: v.string(),
+  }).index("by_group_epoch", ["groupId", "epoch"]),
+
+  // tiny (1 per group): the newest signed roster snapshot (added to plan
+  // 4.2.1, which names `groupRoster.snapshotId` but no table for it).
+  rosterSnapshots: defineTable({
+    orgId: v.id("organizations"),
+    groupId: v.id("groups"),
+    epoch: v.number(),
+    payload: v.string(),
+    signature: v.string(),
+    keyId: v.string(),
+    createdAt: v.number(),
+  }),
+
+  // RETIRED (Step 8, A5): replaced by desiredHeads / desiredBodies /
+  // desiredVersions. Phase 2 rows (unsigned) are NOT copied; they are read
+  // only by the `devices:desiredState` fallback for a device the publisher
+  // has not reached yet, by the first publish (so a new version is above the
+  // one the device applied) and by `dev.ts` (retired in Step 20).
+  // `maintenance:dropDesiredStates` deletes the rows; the table is removed
+  // from the schema once it is empty on every deployment.
   desiredStates: defineTable({
     orgId: v.id("organizations"),
     // Phase 4 (required from Step 8)
@@ -512,6 +595,11 @@ export default defineSchema({
     deviceIds: v.array(v.id("devices")),
     scheduled: v.optional(v.id("_scheduled_functions")),
     requestedAt: v.number(),
+    // The publisher's position (Step 8): pagination cursor over the first
+    // group in `groupIds`, or over all devices when `allDevices`. Reset by a
+    // new request for the same target (its change may concern devices
+    // already passed).
+    cursor: v.optional(v.string()),
   }).index("by_org", ["orgId"]),
 
   // tiny (per org)

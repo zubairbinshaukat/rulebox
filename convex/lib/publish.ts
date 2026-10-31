@@ -3,10 +3,11 @@ import { internal } from "../_generated/api";
 import type { MutationCtx } from "../_generated/server";
 import { MAX_PUBLISH_TARGETS, PUBLISH_DEBOUNCE_MS } from "./limits";
 
-// The publish queue (plan 4.4). Step 5 ships only this entry point and a
-// consumer (`publish:run`) that clears the queue; Step 8 makes `run` sign and
-// write the documents. One `publishQueue` row per organization collects every
-// change made within PUBLISH_DEBOUNCE_MS, so ten quick edits cost one run.
+// The publish queue (plan 4.4). Every mutation that changes what a device
+// should look like calls `requestPublish`; the consumer `publish:run` builds,
+// signs and writes the documents (Step 8). One `publishQueue` row per
+// organization collects every change made within PUBLISH_DEBOUNCE_MS, so ten
+// quick edits cost one run.
 
 export type PublishTarget =
   | { allDevices: true }
@@ -59,10 +60,27 @@ export async function requestPublish(
     await ctx.db.insert("publishQueue", { orgId, allDevices, groupIds, deviceIds, scheduled, requestedAt: Date.now() });
     return;
   }
+  // The publisher walks "all devices" or the first group with a cursor. A new
+  // request for the target being walked restarts it: the change may concern
+  // devices the walk already passed.
+  let cursor = row.cursor;
+  if (cursor !== undefined) {
+    const walkingAll = row.allDevices;
+    const walkedGroup = row.groupIds[0];
+    if (walkingAll !== allDevices) cursor = undefined;
+    else if (walkingAll && target.allDevices === true) cursor = undefined;
+    else if (!walkingAll && target.allDevices !== true && walkedGroup !== undefined && target.groupIds?.includes(walkedGroup)) {
+      cursor = undefined;
+    }
+  }
   const unchanged =
-    row.allDevices === allDevices && sameSet(row.groupIds, groupIds) && sameSet(row.deviceIds, deviceIds);
+    row.allDevices === allDevices &&
+    sameSet(row.groupIds, groupIds) &&
+    sameSet(row.deviceIds, deviceIds) &&
+    row.cursor === cursor;
   if (unchanged && row.scheduled !== undefined) return; // nothing new: no write
   const scheduled =
     row.scheduled ?? (await ctx.scheduler.runAfter(PUBLISH_DEBOUNCE_MS, internal.publish.run, { orgId }));
-  await ctx.db.patch(row._id, { allDevices, groupIds, deviceIds, scheduled });
+  // `union` keeps the walked group first, so the cursor stays valid for it.
+  await ctx.db.patch(row._id, { allDevices, groupIds, deviceIds, scheduled, cursor });
 }

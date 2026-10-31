@@ -1,0 +1,19 @@
+{
+  "note": "TEST VECTOR. Signed with the RFC 8032 section 7.1 TEST 1 seed (published, not secret). Never trust this key outside tests.",
+  "publicKey": "11qYAYKxCrfVS/7TyWQHOg7hcvPapiMlrwIaaPcHURo=",
+  "keyId": "21fe31dfa154a261",
+  "version": 7,
+  "payload": "{\"format\":\"rulebox.desired/2\",\"keyId\":\"21fe31dfa154a261\",\"orgId\":\"org_test_vector_1\",\"deviceId\":\"dev_test_vector_1\",\"version\":7,\"issuedAtMs\":1760950000000,\"doc\":{\"kioskEnabled\":true,\"apps\":[\"files\",\"app_test_desktop_1\",\"app_test_web_1\"],\"allowedSites\":[],\"fileHandlers\":{\".docx\":\"app_test_desktop_1\"},\"storage\":{\"defaultQuotaGb\":10},\"branding\":{\"name\":\"Acme Test\",\"logo\":null},\"version\":7,\"adminExit\":{\"enabled\":true,\"hotkey\":\"Ctrl+Shift+F12\",\"pinHash\":\"$argon2id$v=19$m=19456,t=2,p=1$cnVsZWJveC12ZWN0b3ItMQ$bsRu3JR6kqceQgUhW6gLhsNaDytRywphbIf52wZ6/zg\"},\"power\":{\"sleep\":true,\"restart\":true,\"shutDown\":false},\"orgName\":\"Acme Test\",\"catalog\":[{\"id\":\"files\",\"name\":\"Files\",\"description\":null,\"kind\":\"builtin\",\"builtin\":{\"tool\":\"files\"},\"web\":null,\"desktop\":null,\"pinnedTaskbar\":true,\"pinnedDesktop\":false,\"hue\":null,\"icon\":null,\"audience\":\"everyone\",\"employeeIds\":[],\"revision\":0},{\"id\":\"app_test_desktop_1\",\"name\":\"Writer\",\"description\":null,\"kind\":\"desktop\",\"builtin\":null,\"web\":null,\"desktop\":{\"exe\":\"{ProgramFiles}\\\\Writer\\\\writer.exe\",\"args\":[],\"fileArgTemplate\":[\"{file}\"],\"install\":{\"kind\":\"msi\",\"url\":\"https://downloads.example.test/writer-1.0.msi\",\"sha256\":\"0000000000000000000000000000000000000000000000000000000000000001\",\"sizeBytes\":1048576,\"silentArgs\":[],\"productCode\":\"{00000000-0000-0000-0000-000000000001}\",\"successExitCodes\":[0],\"removeWhenUnassigned\":true},\"resetFolders\":[\"{RoamingAppData}\\\\Writer\"]},\"pinnedTaskbar\":false,\"pinnedDesktop\":true,\"hue\":null,\"icon\":null,\"audience\":\"selected\",\"employeeIds\":[\"emp_test_vector_1\"],\"revision\":1},{\"id\":\"app_test_web_1\",\"name\":\"Orders\",\"description\":\"Order desk\",\"kind\":\"web\",\"builtin\":null,\"web\":{\"url\":\"https://orders.example.test/\",\"allowedDomains\":[\"orders.example.test\"],\"permissions\":{\"camera\":false,\"microphone\":false,\"screenShare\":false,\"clipboardRead\":false,\"notifications\":true,\"downloads\":true,\"printing\":true,\"geolocation\":false}},\"desktop\":null,\"pinnedTaskbar\":true,\"pinnedDesktop\":true,\"hue\":175,\"icon\":null,\"audience\":\"everyone\",\"employeeIds\":[],\"revision\":2}],\"rosterGroupId\":\"grp_test_vector_1\",\"offlineDays\":3}}",
+  "signature": "JEF8oS89hjkql00DpgK2J7Rk0QES7ZQ3hTwMR9MQGeuB1RzHUC65LibqAQljq/udAW8xgbz83lIJpWZhUnD9Aw==",
+  "orgId": "org_test_vector_1",
+  "deviceId": "dev_test_vector_1",
+  "payloadSha256": "a3e402569a6bd3146f00b95655510a744602cd88bd71433b2a24de4e30dbfc8e",
+  "contentHash": "b1d19cd26a5a662c3f9fc03969dbc09ea3a9d22eb0e3bffc5ca5aef4da3a7530",
+  "endorsement": {
+    "keyId": "39f713d0a644253f",
+    "publicKey": "PUAXw+hDiVqStwqnTRt+vJyYLM8uxJaMwM1V8Sr0Zgw=",
+    "byKeyId": "21fe31dfa154a261",
+    "message": "rulebox.key-endorsement/1\n39f713d0a644253f\nPUAXw+hDiVqStwqnTRt+vJyYLM8uxJaMwM1V8Sr0Zgw=",
+    "signature": "gVG2u6zE0b25/J/KmPPy/FGgQQ2+z7TVdHGX1v600HZ3YLMuNQtEtqi21FrAU14HnITYJW0yFn4s9vPpDCAlDA=="
+  }
+}

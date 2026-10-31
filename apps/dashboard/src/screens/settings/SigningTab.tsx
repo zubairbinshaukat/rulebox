@@ -3,6 +3,7 @@ import { Button, Pill, type PillTone } from "@rulebox/ui";
 import { useFinishRotation, useKeysScreen, usePrepareRotation, useRegisterKey } from "../../data";
 import type { KeysScreen, PolicyKeyStatus } from "../../data/types";
 import { Card } from "../../components/Card";
+import { CopyField } from "../../components/CopyField";
 import { ConfirmDialog } from "../../components/ConfirmDialog";
 import { FormError } from "../../components/FormError";
 import { InlineNotice } from "../../components/Notice";
@@ -56,7 +57,22 @@ function Signing({ k }: { k: KeysScreen }) {
     <>
       <Card title={strings.settings.tabs.signing} sub={s.lead}>
         <div className="dash-form">
+          {k.publishFailedAt !== null ? <InlineNotice tone="danger" title={s.publishFailed(formatDate(k.publishFailedAt))} /> : null}
           {!k.envKeyPresent ? <InlineNotice tone="warning" title={s.envMissing} /> : null}
+          {active && k.envKeyPresent && k.signing === "mismatch" ? (
+            <InlineNotice tone="danger" title={s.mismatchTitle} detail={s.mismatchBody} />
+          ) : null}
+          {!active ? (
+            <RoleGate minRole="owner">
+              <div className="dash-form">
+                <p className="dash-list__title">{s.cliTitle}</p>
+                {s.cliSteps.map((step) => (
+                  <CopyField key={step.command} label={step.label} value={step.command} showLabel />
+                ))}
+                <p className="dash-muted">{s.cliNote}</p>
+              </div>
+            </RoleGate>
+          ) : null}
           {!active ? (
             <InlineNotice
               tone="danger"

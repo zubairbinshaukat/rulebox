@@ -12,6 +12,7 @@ import type { Id } from "../../convex/_generated/dataModel";
 import type schema from "../../convex/schema";
 import { newOrgPlanFields } from "../../convex/lib/plans";
 import { DEFAULT_ORG_SETTINGS } from "../../convex/lib/validators";
+import { TEST_KEY } from "./keys";
 
 export type T = TestConvex<typeof schema>;
 export type Role = "owner" | "admin" | "viewer";
@@ -19,12 +20,15 @@ export type Role = "owner" | "admin" | "viewer";
 /**
  * An organization with its counter and secret rows. `plan` adds an `orgPlans`
  * row with that plan's default limits; without it the organization has none
- * and gets the deployment default (`custom`, no limits, in tests).
+ * and gets the deployment default (`custom`, no limits, in tests). It has the
+ * TEST signing key (RFC 8032 test 1, `tests/convex/keys.ts`) registered as its
+ * active key, as every organization that enrolls devices does since Step 8;
+ * `noKey` leaves it without one.
  */
 export async function makeOrg(
   t: T,
   name = "Acme",
-  opts: { plan?: "free" | "team" | "custom" } = {},
+  opts: { plan?: "free" | "team" | "custom"; noKey?: true } = {},
 ): Promise<Id<"organizations">> {
   return await t.run(async (ctx) => {
     const orgId = await ctx.db.insert("organizations", {
@@ -37,6 +41,15 @@ export async function makeOrg(
     await ctx.db.insert("orgSecrets", { orgId });
     if (opts.plan !== undefined) {
       await ctx.db.insert("orgPlans", { orgId, ...newOrgPlanFields(null, opts.plan, Date.now(), "test") });
+    }
+    if (opts.noKey !== true) {
+      await ctx.db.insert("policyKeys", {
+        orgId,
+        keyId: TEST_KEY.keyId,
+        publicKey: TEST_KEY.publicKeyB64,
+        status: "active",
+        createdAt: Date.now(),
+      });
     }
     return orgId;
   });

@@ -4,7 +4,10 @@ import { writeAudit } from "./lib/audit";
 import { checkDevice, type CredentialState } from "./lib/deviceAuth";
 import { statusValidator, writeStatus } from "./lib/deviceReport";
 import { revokeDevice } from "./lib/fleet";
-import { deviceMutation, phase2DeviceMutation, phase2DeviceQuery } from "./lib/functions";
+import { fail } from "./lib/errors";
+import { deviceMutation, deviceQuery, phase2DeviceMutation, phase2DeviceQuery } from "./lib/functions";
+import { MAX_ROSTER_FETCH } from "./lib/limits";
+import { orgPolicyKeys, publishedKey, publishedKeysOf } from "./lib/policyKeys";
 import { recordContact } from "./lib/presence";
 
 // The agent's functions (plan 5.1 as amended by A2, A3, A4).
@@ -27,14 +30,166 @@ const planStateOf = (state: CredentialState): "ok" | "overLimit" | "suspended" =
   state === "active" || state === "revoked" ? "ok" : state;
 const planState = v.union(v.literal("ok"), v.literal("overLimit"), v.literal("suspended"));
 
+const headValue = v.object({
+  version: v.number(),
+  contentHash: v.string(),
+  keyId: v.string(),
+  bodyId: v.id("desiredBodies"),
+  pingIntervalMs: v.number(),
+  pingNonce: v.number(),
+  fastUntil: v.number(),
+  rosterEpoch: v.number(),
+  planState,
+});
+
 /**
- * The agent's one subscription (PRD 11.1 rule 6), Phase 2 shape until Step 8.
+ * The agent's ONE subscription from Step 9 on (PRD 11.1 rule 6; plan 5.1
+ * amended, A5). The head is small and unsigned: when `head.version` is above
+ * what the agent applied, it calls `fetchDesired` once and applies the body
+ * only when its signature verifies and its version, key id and SHA-256 match
+ * the head. `keys` = every `policyKeys` row of the device's organization,
+ * oldest first (with endorsements, so an agent that was offline through
+ * rotations can walk the chain); `retiredKeyIds` = the retired ones.
  *
- * Reads `deviceCredentials` (the wrapper), the newest device-scope
- * `desiredStates` row and, only when there is none, the `devices` row for the
- * group scope. It must not call `Date.now()` and never reads presence,
- * liveness, summary or report rows, so status changes and pings do not re-run
- * it.
+ * Reads `deviceCredentials` (wrapper), `desiredHeads`, `groupRoster` and
+ * `policyKeys` only (<= 20 documents, <= 2 KB), never a payload, never
+ * presence / liveness / summary / report rows, and no `Date.now()`, so pings
+ * and status reports do not re-run it. `head` is null until the publisher
+ * reached the device (a just-enrolled device: ~1.5 s).
+ */
+export const headState = phase2DeviceQuery({
+  args: {},
+  returns: v.union(
+    v.object({ kind: v.literal("unknownDevice") }),
+    v.object({ kind: v.literal("revoked") }),
+    v.object({
+      kind: v.literal("ok"),
+      head: v.union(headValue, v.null()),
+      keys: v.array(publishedKey),
+      retiredKeyIds: v.array(v.string()),
+    }),
+  ),
+  handler: async (ctx) => {
+    const check = ctx.deviceCheck;
+    if (check.kind === "unknown") return { kind: "unknownDevice" as const };
+    if (check.kind === "revoked") return { kind: "revoked" as const };
+    const head = await ctx.db
+      .query("desiredHeads")
+      .withIndex("by_device", (q) => q.eq("deviceId", check.cred.deviceId))
+      .unique();
+    let rosterEpoch = 0;
+    const rosterGroupId = head?.rosterGroupId;
+    if (rosterGroupId !== undefined) {
+      const roster = await ctx.db
+        .query("groupRoster")
+        .withIndex("by_group", (q) => q.eq("groupId", rosterGroupId))
+        .unique();
+      rosterEpoch = roster?.epoch ?? 0;
+    }
+    const rows = await orgPolicyKeys(ctx, check.cred.orgId);
+    return {
+      kind: "ok" as const,
+      head:
+        head === null
+          ? null
+          : {
+              version: head.version,
+              contentHash: head.contentHash,
+              keyId: head.keyId,
+              bodyId: head.bodyId,
+              pingIntervalMs: head.pingIntervalMs,
+              pingNonce: head.pingNonce,
+              fastUntil: head.fastUntil,
+              rosterEpoch,
+              planState: head.planState,
+            },
+      keys: publishedKeysOf(rows),
+      retiredKeyIds: rows.filter((r) => r.status === "retired").map((r) => r.keyId),
+    };
+  },
+});
+
+/**
+ * One signed version (one-shot query; plan 5.1 amended): the envelope
+ * `{ version, payload, signature, keyId }` the agent verifies (Step 9).
+ * `not_found` when that version was pruned: the agent re-reads the head.
+ */
+export const fetchDesired = deviceQuery({
+  args: { version: v.number() },
+  returns: v.object({ version: v.number(), payload: v.string(), signature: v.string(), keyId: v.string() }),
+  handler: async (ctx, args) => {
+    const body = await ctx.db
+      .query("desiredBodies")
+      .withIndex("by_device_version", (q) => q.eq("deviceId", ctx.device._id).eq("version", args.version))
+      .unique();
+    if (body === null) fail("not_found");
+    return { version: body.version, payload: body.payload, signature: body.signature, keyId: body.keyId };
+  },
+});
+
+const rosterEntryValue = v.object({
+  epoch: v.number(),
+  employeeId: v.string(),
+  credentialRevision: v.union(v.number(), v.null()),
+  signature: v.string(),
+  keyId: v.string(),
+});
+
+/**
+ * The roster of the device's group since `sinceEpoch` (one-shot; plan 5.1
+ * amended, A6): up to MAX_ROSTER_FETCH signed entries, or the signed snapshot
+ * when the device is behind the snapshot or more entries are missing. A
+ * device without a group has an empty roster (epoch 0).
+ */
+export const fetchRoster = deviceQuery({
+  args: { sinceEpoch: v.number() },
+  returns: v.union(
+    v.object({ epoch: v.number(), entries: v.array(rosterEntryValue) }),
+    v.object({ snapshot: v.object({ epoch: v.number(), payload: v.string(), signature: v.string(), keyId: v.string() }) }),
+  ),
+  handler: async (ctx, args) => {
+    if (!Number.isSafeInteger(args.sinceEpoch) || args.sinceEpoch < 0) fail("invalid_argument", { field: "sinceEpoch" });
+    const device = await ctx.db.get(ctx.device._id);
+    const groupId = device?.groupId;
+    if (groupId === undefined) return { epoch: 0, entries: [] };
+    const roster = await ctx.db
+      .query("groupRoster")
+      .withIndex("by_group", (q) => q.eq("groupId", groupId))
+      .unique();
+    if (roster === null) return { epoch: 0, entries: [] };
+    const snapshot = async () => {
+      const s = roster.snapshotId !== undefined ? await ctx.db.get(roster.snapshotId) : null;
+      if (s === null) fail("not_found");
+      return { snapshot: { epoch: s.epoch, payload: s.payload, signature: s.signature, keyId: s.keyId } };
+    };
+    if (args.sinceEpoch < roster.snapshotEpoch) return await snapshot();
+    const rows = await ctx.db
+      .query("rosterEntries")
+      .withIndex("by_group_epoch", (q) => q.eq("groupId", groupId).gt("epoch", args.sinceEpoch))
+      .take(MAX_ROSTER_FETCH + 1);
+    if (rows.length > MAX_ROSTER_FETCH) return await snapshot();
+    return {
+      epoch: roster.epoch,
+      entries: rows.map((e) => ({
+        epoch: e.epoch,
+        employeeId: e.employeeId,
+        credentialRevision: e.credentialRevision ?? null,
+        signature: e.signature,
+        keyId: e.keyId,
+      })),
+    };
+  },
+});
+
+/**
+ * The Phase 2 subscription, kept as an ALIAS for Phase 2 agents for one
+ * release (plan Step 8 item 10): the Phase 2 shape `{ version, doc,
+ * signature: null }` built from the device's newest signed body (head ->
+ * body by id; bodies never change, so it re-runs only on a new head). A
+ * device the publisher has not reached yet still gets its Phase 2
+ * `desiredStates` document (device scope, then group scope).
+ *
+ * Never reads presence, liveness, summary or report rows, and no `Date.now()`.
  */
 export const desiredState = phase2DeviceQuery({
   args: {},
@@ -58,6 +213,18 @@ export const desiredState = phase2DeviceQuery({
     if (check.kind === "unknown") return { kind: "unknownDevice" as const };
     if (check.kind === "revoked") return { kind: "revoked" as const };
     const deviceId = check.cred.deviceId;
+
+    const head = await ctx.db
+      .query("desiredHeads")
+      .withIndex("by_device", (q) => q.eq("deviceId", deviceId))
+      .unique();
+    if (head !== null) {
+      const body = await ctx.db.get(head.bodyId);
+      if (body !== null) {
+        const parsed = JSON.parse(body.payload) as { doc?: unknown };
+        return { kind: "ok" as const, desired: { version: body.version, doc: parsed.doc ?? null, signature: null } };
+      }
+    }
 
     let row = await ctx.db
       .query("desiredStates")

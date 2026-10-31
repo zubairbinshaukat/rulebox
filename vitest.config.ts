@@ -14,6 +14,14 @@ export default defineConfig({
           server: { deps: { inline: ["convex-test"] } },
         },
       },
+      // Node scripts (Step 8: scripts/policy-key.mjs).
+      {
+        test: {
+          name: "scripts",
+          include: ["scripts/**/*.test.mjs"],
+          environment: "node",
+        },
+      },
     ],
   },
 });

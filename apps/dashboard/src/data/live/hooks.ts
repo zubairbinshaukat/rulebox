@@ -2,17 +2,26 @@
  * Live implementation (real Convex backend). Session, sign-in, MFA, account
  * and members are wired to the Phase 4 Step 3 functions (Step 4); settings,
  * the plan and groups to Step 5's (enrollment codes, Step 6: `../enrollment/`;
- * devices, Step 7: here and `../devices/`). Every other
+ * devices, Step 7: here and `../devices/`; signing keys, Step 8). Every other
  * hook answers `not_ready` until its Convex step lands — see `../README.md`
  * for the exact function per hook.
  */
 import { useAuthActions as useConvexAuthActions } from "@convex-dev/auth/react";
-import { useAction, useConvexAuth, useConvexConnectionState, useMutation, useQuery } from "convex/react";
-import { useCallback, useMemo } from "react";
+import {
+  useAction,
+  useConvexAuth,
+  useConvexConnectionState,
+  useMutation,
+  useQueries,
+  useQuery,
+  type RequestForQueries,
+} from "convex/react";
+import { makeFunctionReference } from "convex/server";
+import { useCallback, useMemo, useState } from "react";
 import { api } from "@convex/_generated/api";
 import { NOT_DEPLOYED, type DataApi } from "../api";
 import { AppError } from "../../lib/errors";
-import { cappedNumber, type MeResult, type PagedState, type QueryState, type Role } from "../types";
+import { cappedNumber, type KeysScreen, type MeResult, type PagedState, type QueryState, type Role } from "../types";
 import { deviceDetailOf } from "./devices";
 import { mapError, useMapped, useMappedState, useMemberQuery } from "./convex";
 
@@ -53,6 +62,66 @@ function useLiveAuthActions() {
       signOut: () => signOut(),
     };
   }, [signIn, signOut]);
+}
+
+const TRUST_PAGE = 200;
+const trustProgressRef = makeFunctionReference<"query">("keys:trustProgress");
+
+type TrustPage = { page: { total: number; trustNext: number }; isDone: boolean; continueCursor: string };
+
+/**
+ * "N of M devices trust the new key": `keys:trustProgress` page after page
+ * (200 devices each), summed; subscribed only while a `next` key exists.
+ * Undefined while a page is loading.
+ */
+function useTrustTotals(enabled: boolean): { trusting: number; total: number } | undefined {
+  const { isAuthenticated } = useConvexAuth();
+  const [cursors, setCursors] = useState<(string | null)[]>([null]);
+  const requests = useMemo((): RequestForQueries => {
+    if (!enabled || !isAuthenticated) return {};
+    return Object.fromEntries(
+      cursors.map((cursor, i) => [`p${i}`, { query: trustProgressRef, args: { paginationOpts: { numItems: TRUST_PAGE, cursor } } }]),
+    );
+  }, [enabled, isAuthenticated, cursors]);
+  const results: Record<string, unknown> = useQueries(requests);
+  const pages = cursors.map((_, i) => results[`p${i}`]);
+  const last = pages[pages.length - 1];
+  const lastPage = last !== undefined && !(last instanceof Error) ? (last as TrustPage) : null;
+  const more = lastPage !== null && !lastPage.isDone ? lastPage.continueCursor : null;
+  // The next page's subscription is added during render (React's "adjust state
+  // while rendering" pattern, as `usePagedState` does).
+  if (more !== null && !cursors.includes(more)) setCursors([...cursors, more]);
+  if (!enabled || pages.some((p) => p === undefined || p instanceof Error) || more !== null) return undefined;
+  let trusting = 0;
+  let total = 0;
+  for (const p of pages as TrustPage[]) {
+    trusting += p.page.trustNext;
+    total += p.page.total;
+  }
+  return { trusting, total };
+}
+
+/** `keys:status` (+ the trust totals while a rotation is prepared), as `KeysScreen`. */
+function useLiveKeysScreen(): QueryState<KeysScreen> {
+  const status = useMemberQuery(api.keys.status, {});
+  const hasNext = status.status === "ready" && status.data.keys.some((k) => k.status === "next");
+  const trust = useTrustTotals(hasNext);
+  const trusting = trust?.trusting;
+  const total = trust?.total;
+  const data = status.status === "ready" ? status.data : undefined;
+  const screen = useMemo((): KeysScreen | undefined => {
+    if (data === undefined) return undefined;
+    return {
+      envKeyPresent: data.env.active !== null,
+      envNextKeyPresent: data.env.next !== null,
+      signing: data.signing,
+      publishFailedAt: data.publishFailedAt,
+      keys: data.keys.map((k) => ({ keyId: k.keyId, fingerprint: k.fingerprint, status: k.status, createdAt: k.createdAt })),
+      trust: hasNext && trusting !== undefined && total !== undefined ? { trusting, total } : null,
+    };
+  }, [data, hasNext, trusting, total]);
+  if (status.status !== "ready" || screen === undefined) return status.status === "ready" ? { status: "loading" } : status;
+  return { status: "ready", data: screen };
 }
 
 export const liveApi: DataApi = {
@@ -296,10 +365,29 @@ export const liveApi: DataApi = {
     }, [clear]);
     return useMapped(call);
   },
-  useKeysScreen: useNotReady,
-  useRegisterKey: useNotReadyMutation,
-  usePrepareRotation: useNotReadyMutation,
-  useFinishRotation: useNotReadyMutation,
+  // ---- signing keys (Step 8). The three writes are Owner major actions (fresh step-up).
+  useKeysScreen: useLiveKeysScreen,
+  useRegisterKey() {
+    const register = useMutation(api.keys.registerActive);
+    const call = useCallback(async () => {
+      await register({});
+    }, [register]);
+    return useMapped(call);
+  },
+  usePrepareRotation() {
+    const prepare = useMutation(api.keys.prepareRotation);
+    const call = useCallback(async () => {
+      await prepare({});
+    }, [prepare]);
+    return useMapped(call);
+  },
+  useFinishRotation() {
+    const finish = useMutation(api.keys.finishRotation);
+    const call = useCallback(async () => {
+      await finish({});
+    }, [finish]);
+    return useMapped(call);
+  },
   // ---- members (Owner-only changes; codes are returned once and kept in component state)
   useMembersScreen() {
     return useMemberQuery(api.members.list, {});

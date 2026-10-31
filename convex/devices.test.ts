@@ -73,7 +73,7 @@ describe("enrollment:enroll (Step 7 rows)", () => {
     const t = await setupAuth();
     const { orgId, tokenId } = await seed(t);
     const first = await t.mutation(api.enrollment.enroll, enrollArgs);
-    expect(Object.keys(first).sort()).toEqual(["deviceId", "deviceName", "orgId", "serverTimeMs"]);
+    expect(Object.keys(first).sort()).toEqual(["deviceId", "deviceName", "orgId", "policyKeys", "serverTimeMs"]);
     expect(first).toMatchObject({ orgId, deviceName: "Front desk PC" });
     const rows = await deviceRows(t, first.deviceId);
     expect(rows.device?.secretHash).toBeUndefined();
@@ -243,7 +243,8 @@ describe("checkDevice with credential rotation (plan 4.6)", () => {
     for (const table of ["deviceReports", "deviceSummary", "deviceLiveness", "devicePresence", "deviceStatus", "orgStats", "orgPlans"]) {
       expect(io.tables.has(table), table).toBe(false);
     }
-    expect([...io.tables].sort()).toEqual(["desiredStates", "deviceCredentials", "devices"]);
+    // (Before the first publish: no head yet, so the Phase 2 fallback reads its rows.)
+    expect([...io.tables].sort()).toEqual(["desiredHeads", "desiredStates", "deviceCredentials", "devices"]);
   });
 });
 

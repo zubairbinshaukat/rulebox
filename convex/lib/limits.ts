@@ -178,3 +178,18 @@ export const FLEET_CHECK_RETENTION_MS = DAY_MS;
 /** Offline grace = 2.5 x the device's interval + this (plan 4.9). */
 export const OFFLINE_GRACE_EXTRA_MS = MINUTE_MS;
 
+/** Signing and the publisher (plan 4.4, 4.5, Step 8). */
+/** Devices built, signed and written per `publish:run` (it reschedules itself for the rest). */
+export const PUBLISH_BATCH = 25;
+/** Versions kept per device: after inserting N, versions <= N - KEEP_VERSIONS are pruned. */
+export const KEEP_VERSIONS = 5;
+/** Old versions deleted per device per publish (index range). */
+export const MAX_PRUNE_PER_DEVICE = 10;
+/** `policyKeys` rows read per status (tiny: a few per organization). */
+export const MAX_POLICY_KEYS_PER_STATUS = 20;
+/** `keys:trustProgress` page size (devices of the organization). */
+export const MAX_TRUST_PAGE = 200;
+/** Roster log (A6): a signed snapshot every this many entries; `fetchRoster` answers at most this many entries. */
+export const ROSTER_SNAPSHOT_EVERY = 200;
+export const MAX_ROSTER_FETCH = 200;
+

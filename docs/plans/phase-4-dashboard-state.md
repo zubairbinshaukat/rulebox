@@ -2997,6 +2997,74 @@ roster bumps the epoch and does not write a body; roster entries verify
 against the vector; `loadOrgSigningKey` refuses an org whose active
 `policyKeys` row does not match the env seed.
 
+**Status (2026-11-01): built and tested on the dev machine, NOT deployed.**
+No real key was generated and no env var was set; the "Verify" part (dev key,
+`env set`, Register key, signed rows on the dev deployment) is the Owner's to
+run. Only the RFC 8032 test-1/test-2 seeds are used in tests and vectors.
+As built / deviations:
+(1) `keys:registerActive` is a **mutation**, not an action (it signs nothing;
+one transaction cannot register a key that changed in between); `key_exists`
+is `conflict` with `detail: "key_exists"` (no new error code). `force` also
+retires a pending `next` key.
+(2) **Unchanged check = content hash AND key id**: after `finishRotation` every
+device is re-signed with the new key (reason "Signed with a new key"), else
+agents would keep the retired key forever. Unchanged content with a changed
+interval / plan state / group patches only the head.
+(3) **First version is above anything applied**: a device's first head starts at
+max(Phase 2 `desiredStates` version of device or group scope,
+`deviceSummary.appliedVersion`) + 1, so a Step 9 agent does not take it for a
+rollback.
+(4) `enroll` does **not** create the head (the body needs signing): it requests
+a publish of the new device; `headState` answers `head: null` for ~1.5 s.
+`enroll` refuses `not_ready` without an active key and returns `policyKeys`.
+(5) `headState` answers `{ kind: "ok", head, keys, retiredKeyIds }` (plus
+`revoked` / `unknownDevice` like Phase 2); `fetchDesired` / `fetchRoster` answer
+`device_rejected`. Measured: <= 2 KB, never a payload or status row.
+(6) Roster (A6): `rosterEntries` gain `keyId`; new table `rosterSnapshots`
+(plan names `snapshotId` without a table); snapshot payload format
+`rulebox.roster-snapshot/1` = `{ format, keyId, orgId, groupId, epoch, members:
+[[employeeId, rev], ...] }` (an array: JS reorders integer-like object keys).
+`lib/roster.ts` `appendRosterEntries` exists (snapshot every 200, prune) with no
+caller until Step 11; the head reads `groupRoster.epoch`, so a roster change
+writes no head and no body.
+(7) The catalogue builder is complete per 4.8 (assignments, direct web grants,
+disabled employees) with a local `CatalogApp` type (Step 10 replaces it with
+the ts-rs export); the publisher passes empty assignments / apps / members /
+file rules until Steps 10-11. Absent optionals are `null`, never missing.
+(8) Vectors: `scripts/gen-policy-vectors.mjs` (`--check` mode) imports the REAL
+TS builder via Node 24 type stripping and a resolve hook; fixed input in
+`tests/convex/vectors.ts`; PIN hash = Argon2id of "246813" with the fixed salt
+"rulebox-vector-1" (Step 5 had no PIN vector). `signed-v2.json` adds
+`note`, `orgId`, `deviceId`, `payloadSha256`, `contentHash` and an
+`endorsement` (test-2 key endorsed by test-1); `roster-v1.json` = 3 entries
+(two adds, one removal) + snapshot. Both cross-checked with Node's OpenSSL
+Ed25519.
+(9) Publisher: one paginated query per run (listed devices first, then the
+first listed group, then all devices) with a new `publishQueue.cursor`; a new
+request for the target being walked restarts the walk. Missing / mismatched
+key: one `policy.publishFailed` audit per run, `orgStats.publishFailedAt`, the
+queue kept with `scheduled` cleared (the next request schedules again).
+`orgStats.publishBytesToday` / `publishBytesDay` added. Version reasons are
+generic ("First signed document", "Policy changed", "Signed with a new key"):
+the queue does not carry the cause.
+(10) `fleet:watch` / `checkNow` also write the head's `fastUntil` / `pingNonce`;
+`presence:applyPingInterval` patches heads; `fleet:list` `latestVersion` and
+`fleet:get` `versions` are live; `fleet:remove` / `purgeDevice` delete heads,
+bodies, versions. `devices:desiredState` (alias) answers the Phase 2 shape from
+the newest body, else the Phase 2 rows. `desiredStates` stays in the schema;
+`maintenance:dropDesiredStates` deletes its rows (run only after every device
+has a head, then remove the table).
+(11) `SigningKey.seed` is a non-enumerable property (a key logged by mistake
+shows no seed). Lint rule: `RULEBOX_POLICY_KEY*` only in `lib/signing.ts`.
+(12) Dashboard: Signing tab live (`keys:status` + `keys:trustProgress` summed
+page by page); new: `signing` mismatch notice, publish-failed banner, the CLI
+lines to copy when no key exists. `KeysScreen` gains `signing` and
+`publishFailedAt`. Screens checked in demo mode only (the "no key" view with
+the CLI lines was not screenshotted: the demo has a key). The global red
+banner "on every page" is not built (only on the Signing tab).
+(13) `keys:trustProgress` reads `deviceReports` (compat up to 32 KB): a full
+200-device page can read ~6 MB. Consider `trustedKeyIds` on `deviceSummary`.
+
 ---
 
 ### Step 9 — Agent: verify signed documents, key trust

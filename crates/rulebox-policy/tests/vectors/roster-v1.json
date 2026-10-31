@@ -1,0 +1,39 @@
+{
+  "note": "TEST VECTOR. Signed with the RFC 8032 section 7.1 TEST 1 seed (published, not secret). Never trust this key outside tests.",
+  "publicKey": "11qYAYKxCrfVS/7TyWQHOg7hcvPapiMlrwIaaPcHURo=",
+  "keyId": "21fe31dfa154a261",
+  "orgId": "org_test_vector_1",
+  "groupId": "grp_test_vector_1",
+  "entries": [
+    {
+      "epoch": 1,
+      "employeeId": "emp_test_vector_1",
+      "credentialRevision": 3,
+      "message": "rulebox.roster/1\norg_test_vector_1\ngrp_test_vector_1\n1\nemp_test_vector_1\n3",
+      "signature": "MSictgaez56cmQQYwkWu/He27iITBMmrX2RYi+CAzUCkDuwxOueFbcNlex4WZ8Qp7/foAsg6RGUOcky6BYl5Aw==",
+      "keyId": "21fe31dfa154a261"
+    },
+    {
+      "epoch": 2,
+      "employeeId": "emp_test_vector_2",
+      "credentialRevision": 1,
+      "message": "rulebox.roster/1\norg_test_vector_1\ngrp_test_vector_1\n2\nemp_test_vector_2\n1",
+      "signature": "Q+uRltiN39iy4q5N/nwkoEa2P22BC/r+zj1CErI5OX8ZE0Ac1R5XEJRXukDoT9OVeagOuOe4UT4mMUbouNqvAw==",
+      "keyId": "21fe31dfa154a261"
+    },
+    {
+      "epoch": 3,
+      "employeeId": "emp_test_vector_2",
+      "credentialRevision": null,
+      "message": "rulebox.roster/1\norg_test_vector_1\ngrp_test_vector_1\n3\nemp_test_vector_2\nremoved",
+      "signature": "PaRqbeb/y9b71F5xfM7ftb7UT5+OU563/+Atqq5sO/MZWyYnkCPyqVjH9oqcyKLcEJ75csQLcuxVtCka/DyPAQ==",
+      "keyId": "21fe31dfa154a261"
+    }
+  ],
+  "snapshot": {
+    "epoch": 3,
+    "payload": "{\"format\":\"rulebox.roster-snapshot/1\",\"keyId\":\"21fe31dfa154a261\",\"orgId\":\"org_test_vector_1\",\"groupId\":\"grp_test_vector_1\",\"epoch\":3,\"members\":[[\"emp_test_vector_1\",3]]}",
+    "signature": "PeQh88e1D22mKCItGQ5DyfQA9u1KQiJd143W63pQMilpY71G9VDSkj6qW4l76Wo32hguPH2Qx9FtXprFX5FLBQ==",
+    "keyId": "21fe31dfa154a261"
+  }
+}

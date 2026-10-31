@@ -247,6 +247,14 @@ export interface PolicyKeyRow {
 export interface KeysScreen {
   envKeyPresent: boolean;
   envNextKeyPresent: boolean;
+  /**
+   * Whether the publisher can sign: "ok" when the deployment's key is this
+   * organization's active key, "missing" without a key, "mismatch" when the
+   * deployment holds another key.
+   */
+  signing: "ok" | "missing" | "mismatch";
+  /** When a publish last failed for want of a key (null when it works). */
+  publishFailedAt: number | null;
   keys: PolicyKeyRow[];
   /** Devices that trust the `next` key, of all devices (null without a next key). */
   trust: { trusting: number; total: number } | null;

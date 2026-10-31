@@ -2,7 +2,7 @@ import { afterEach, describe, expect, test, vi } from "vitest";
 import { setupAuth } from "../tests/convex/auth";
 import { deviceRows, enrollDevice, onlineCount, orgStatsOf, probe } from "../tests/convex/devices";
 import { asMember, expectCode, expectNoSecrets, giveStepUp, makeOrg, type T } from "../tests/convex/identity";
-import { api } from "./_generated/api";
+import { api, internal } from "./_generated/api";
 import type { Id } from "./_generated/dataModel";
 import { sha256HexSync } from "./lib/crypto";
 import { MINUTE_MS } from "./lib/limits";
@@ -254,9 +254,13 @@ describe("watch mode and check now (plan 4.9)", () => {
     vi.setSystemTime(start);
     const orgId = await makeOrg(t, "Free", { plan: "free" });
     const d = await enrollDevice(t, orgId);
+    await t.mutation(internal.publish.run, { orgId }); // the device's head (Step 8)
     const viewer = await asMember(t, { role: "viewer", orgId });
     const w1 = await viewer.as.mutation(api.fleet.watch, { deviceId: d.deviceId });
     expect(w1.fastUntil).toBe(Math.ceil((start + 5 * MINUTE_MS) / MINUTE_MS) * MINUTE_MS);
+    // Step 8: the head carries it to the agent's subscription at once.
+    const head = await t.run((ctx) => ctx.db.query("desiredHeads").withIndex("by_device", (q) => q.eq("deviceId", d.deviceId)).unique());
+    expect(head).toMatchObject({ fastUntil: w1.fastUntil, version: 1 });
     const again = await probe(() => viewer.as.mutation(api.fleet.watch, { deviceId: d.deviceId }));
     expect(again.result.fastUntil).toBe(w1.fastUntil);
     expect(again.io.writes).toBe(0);
@@ -313,8 +317,14 @@ describe("watch mode and check now (plan 4.9)", () => {
     await expectCode(viewer.as.mutation(api.fleet.checkNow, { deviceIds: [d1.deviceId] }), "forbidden");
     await expectCode(a.as.mutation(api.fleet.checkNow, { deviceIds: [] }), "invalid_argument");
     await expectCode(a.as.mutation(api.fleet.checkNow, { deviceIds: Array.from({ length: 51 }, (_, i) => `x${i}`) }), "invalid_argument");
+    await t.mutation(internal.publish.run, { orgId }); // the devices' heads (Step 8)
     const { checkId } = await a.as.mutation(api.fleet.checkNow, { deviceIds: [d1.deviceId, d2.deviceId, d1.deviceId] });
     await expectCode(a.as.mutation(api.fleet.checkNow, { deviceIds: [d1.deviceId] }), "rate_limited");
+    // Step 8: each head's `pingNonce` moved once (the agent pings within seconds).
+    for (const d of [d1, d2]) {
+      const head = await t.run((ctx) => ctx.db.query("desiredHeads").withIndex("by_device", (q) => q.eq("deviceId", d.deviceId)).unique());
+      expect(head).toMatchObject({ pingNonce: 1, version: 1 });
+    }
     const before = await a.as.query(api.fleet.checkResult, { checkId });
     expect(before.items).toEqual([
       { deviceId: d1.deviceId, answered: false },

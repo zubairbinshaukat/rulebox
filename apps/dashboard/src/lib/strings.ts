@@ -832,6 +832,17 @@ export const strings = {
       noKeyBody: "Create a key with the CLI, set it as RULEBOX_POLICY_KEY on the Convex deployment, then register it here.",
       envMissing: "RULEBOX_POLICY_KEY is not set on the deployment.",
       envNextMissing: "RULEBOX_POLICY_KEY_NEXT is not set on the deployment.",
+      mismatchTitle: "The deployment's key is not this organization's key",
+      mismatchBody:
+        "Nothing new can be sent to the PCs. Set RULEBOX_POLICY_KEY back to the registered key, or, if that key is lost, follow the steps under “If the key is lost”.",
+      publishFailed: (when: string) => `Publishing has failed since ${when}. PCs keep their last policy.`,
+      cliTitle: "Create the key (once, on your own computer)",
+      cliSteps: [
+        { label: "1. Create a key (prints its key id, never the secret)", command: "node scripts/policy-key.mjs generate --out .tmp/policy-key.seed" },
+        { label: "2. Set the file's only line on the Convex deployment", command: 'npx convex env set RULEBOX_POLICY_KEY "<the line in .tmp/policy-key.seed>"' },
+        { label: "3. Delete the file, then press Register key", command: "Remove-Item .tmp/policy-key.seed" },
+      ],
+      cliNote: "Never paste the secret anywhere else. Your shell history may keep the line from step 2: clear it if others use this computer.",
       register: "Register key",
       registered: "Key registered. Every PC gets a newly signed policy.",
       keyId: "Key id",

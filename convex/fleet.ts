@@ -10,6 +10,7 @@ import { fail } from "./lib/errors";
 import { credOf, revokeDevice } from "./lib/fleet";
 import { memberMutation, memberQuery } from "./lib/functions";
 import {
+  KEEP_VERSIONS,
   MAX_CHECK_DEVICES,
   MAX_FLEET_PAGE,
   MAX_GROUPS_JOINED,
@@ -104,8 +105,16 @@ async function rowOf(ctx: { db: DatabaseReader }, d: Doc<"devices">, groupNames:
     revision: d.revision ?? 0,
     presence: await presenceOf(ctx, d),
     summary: await summaryOf(ctx, d._id),
-    latestVersion: null,
+    latestVersion: (await headOf(ctx, d._id))?.version ?? null,
   };
+}
+
+/** The device's head (~250 B; never the payload). */
+async function headOf(ctx: { db: DatabaseReader }, deviceId: Id<"devices">) {
+  return await ctx.db
+    .query("desiredHeads")
+    .withIndex("by_device", (q) => q.eq("deviceId", deviceId))
+    .unique();
 }
 
 async function groupNamesOf(ctx: { db: DatabaseReader }, orgId: Id<"organizations">): Promise<Map<string, string>> {
@@ -182,8 +191,8 @@ const reportValue = v.object({
 });
 
 /**
- * One device for its detail page (viewer). `versions` (the last 5 documents)
- * comes from `desiredVersions` with Step 8; empty until then. Never a hash.
+ * One device for its detail page (viewer). `versions`: the last KEEP_VERSIONS
+ * signed versions (`desiredVersions`, ~150 B each; never a payload). Never a hash.
  */
 export const get = memberQuery("viewer")({
   args: { deviceId: v.string() },
@@ -215,6 +224,11 @@ export const get = memberQuery("viewer")({
       .withIndex("by_org", (q) => q.eq("orgId", ctx.orgId))
       .take(MAX_GROUPS_JOINED);
     const group = groups.find((g) => g._id === d.groupId);
+    const versions = await ctx.db
+      .query("desiredVersions")
+      .withIndex("by_device_version", (q) => q.eq("deviceId", d._id))
+      .order("desc")
+      .take(KEEP_VERSIONS);
     const rotateCredential = cred.row?.rotate === true || (cred.row === null && d.rotateCredential === true);
     return {
       _id: d._id,
@@ -246,7 +260,7 @@ export const get = memberQuery("viewer")({
               restartPending: report.restartPending,
               updatedAt: report.updatedAt,
             },
-      versions: [],
+      versions: versions.map((r) => ({ version: r.version, createdAt: r.createdAt, reason: r.reason })),
       flags: { noGroup: d.groupId === undefined, revoked: cred.state === "revoked", rotateCredential },
       groups: groups.map((g) => ({ _id: g._id, name: g.name })).sort((a, b) => a.name.localeCompare(b.name)),
     };
@@ -378,7 +392,7 @@ export const remove = memberMutation("admin", { major: "fleet:remove" })({
     const device = await getInOrg(ctx, "devices", args.deviceId, ctx.orgId);
     const cred = await credOf(ctx, device);
     if (cred.state !== "revoked") fail("conflict", { detail: "revoke the device first" });
-    for (const table of ["deviceCredentials", "deviceLiveness", "devicePresence", "deviceSummary", "deviceReports", "deviceStatus"] as const) {
+    for (const table of ["deviceCredentials", "deviceLiveness", "devicePresence", "deviceSummary", "deviceReports", "deviceStatus", "desiredHeads"] as const) {
       const row = await ctx.db
         .query(table)
         .withIndex("by_device", (q) => q.eq("deviceId", device._id))
@@ -417,8 +431,16 @@ export const purgeDevice = internalMutation({
       .query("desiredStates")
       .withIndex("by_scope_version", (q) => q.eq("scope", args.deviceId))
       .take(PURGE_BATCH);
-    for (const row of [...installs, ...docs, ...scoped]) await ctx.db.delete(row._id);
-    if (installs.length === PURGE_BATCH || docs.length === PURGE_BATCH || scoped.length === PURGE_BATCH) {
+    const bodies = await ctx.db
+      .query("desiredBodies")
+      .withIndex("by_device_version", (q) => q.eq("deviceId", args.deviceId))
+      .take(PURGE_BATCH);
+    const versions = await ctx.db
+      .query("desiredVersions")
+      .withIndex("by_device_version", (q) => q.eq("deviceId", args.deviceId))
+      .take(PURGE_BATCH);
+    for (const row of [...installs, ...docs, ...scoped, ...bodies, ...versions]) await ctx.db.delete(row._id);
+    if ([installs, docs, scoped, bodies, versions].some((rows) => rows.length === PURGE_BATCH)) {
       await ctx.scheduler.runAfter(0, internal.fleet.purgeDevice, args);
     }
     return null;
@@ -485,6 +507,9 @@ export const watch = memberMutation("viewer", { stepUp: "none" })({
     }
     await consumeOrFail(ctx, "watch", ctx.member._id);
     await ctx.db.patch(row._id, { fastUntil });
+    // The head carries it to a Step 9+ agent at once (its subscription).
+    const head = await headOf(ctx, device._id);
+    if (head !== null) await ctx.db.patch(head._id, { fastUntil });
     return { fastUntil };
   },
 });
@@ -535,6 +560,9 @@ export const checkNow = memberMutation("admin")({
     });
     for (const r of rows) {
       if (r.liveness !== null) await ctx.db.patch(r.liveness._id, { pendingCheck: checkId });
+      // A new `pingNonce` makes a Step 9+ agent ping within seconds (its subscription).
+      const head = await headOf(ctx, r.deviceId);
+      if (head !== null) await ctx.db.patch(head._id, { pingNonce: head.pingNonce + 1 });
     }
     return { checkId };
   },

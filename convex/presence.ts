@@ -56,9 +56,16 @@ export const applyPingInterval = internalMutation({
       .paginate({ numItems: PING_PROPAGATION_BATCH, cursor: args.cursor ?? null });
     let changed = 0;
     for (const row of page.page) {
-      if (row.pingIntervalMs === interval) continue;
-      await ctx.db.patch(row._id, { pingIntervalMs: interval });
-      changed++;
+      if (row.pingIntervalMs !== interval) {
+        await ctx.db.patch(row._id, { pingIntervalMs: interval });
+        changed++;
+      }
+      // The signed-document head carries the interval too (Step 8, plan 4.4 amended); no re-signing.
+      const head = await ctx.db
+        .query("desiredHeads")
+        .withIndex("by_device", (q) => q.eq("deviceId", row.deviceId))
+        .unique();
+      if (head !== null && head.pingIntervalMs !== interval) await ctx.db.patch(head._id, { pingIntervalMs: interval });
     }
     if (!page.isDone) {
       await ctx.scheduler.runAfter(0, internal.presence.applyPingInterval, { orgId, cursor: page.continueCursor });

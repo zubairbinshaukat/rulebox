@@ -50,6 +50,24 @@ export default tseslint.config(
       ],
     },
   },
+  // The policy signing seed is read ONLY by convex/lib/signing.ts (plan 4.5, A11).
+  {
+    files: ["convex/**/*.ts"],
+    ignores: ["convex/lib/signing.ts", "convex/convex.config.ts", "convex/**/*.test.ts"],
+    rules: {
+      "no-restricted-syntax": [
+        "error",
+        {
+          selector: "MemberExpression[property.name=/^RULEBOX_POLICY_KEY/]",
+          message: "Only convex/lib/signing.ts reads the signing seed (use loadOrgSigningKey).",
+        },
+        {
+          selector: "Literal[value=/^RULEBOX_POLICY_KEY(_NEXT)?$/]",
+          message: "Only convex/lib/signing.ts reads the signing seed (use loadOrgSigningKey).",
+        },
+      ],
+    },
+  },
   // Convex logs: never arguments or values (plan Section 8).
   {
     files: ["convex/**/*.ts"],

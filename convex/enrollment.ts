@@ -8,6 +8,8 @@ import { fail, failWire } from "./lib/errors";
 import { publicMutation } from "./lib/functions";
 import { MAX_AGENT_VERSION, MAX_COMPAT_JSON_BYTES, MAX_DEVICE_NAME_INPUT } from "./lib/limits";
 import { assertWithinLimit, bumpStats } from "./lib/plans";
+import { enrollmentKeysOf, orgPolicyKeys } from "./lib/policyKeys";
+import { requestPublish } from "./lib/publish";
 import { rateLimiter } from "./lib/rateLimits";
 
 const HEX64_RE = /^[0-9a-f]{64}$/;
@@ -17,7 +19,8 @@ const HEX64_RE = /^[0-9a-f]{64}$/;
  * Step 6 with amendments A1, A9).
  *
  * The wire contract of Phase 2 is unchanged: same arguments, same answer
- * `{ deviceId, orgId, deviceName, serverTimeMs }`, same error codes. The
+ * `{ deviceId, orgId, deviceName, serverTimeMs }` (+ `policyKeys` since Step
+ * 8, which a Phase 2 agent ignores), same error codes. The
  * caller proves it holds a token; `deviceSecretHash` is the SHA-256 of the
  * device secret, which never leaves the machine. Retrying with the same token
  * and the same secret hash returns the first result without using up the
@@ -36,7 +39,7 @@ const HEX64_RE = /^[0-9a-f]{64}$/;
  *   `token_expired`, `token_used_up`, `invalid_request`.
  * - New in Phase 4: `rate_limited` (+ `retryAfterMs`), `plan_limit` with
  *   `detail` "devices" (plan full) or "suspended", `not_ready` (counter row
- *   missing). A Phase 2 agent shows any code it does not know as "The backend
+ *   missing, or no active signing key: Step 8). A Phase 2 agent shows any code it does not know as "The backend
  *   refused the request." with the code, keeps its pending enrollment and
  *   exits 3 (apps/agent/src/enroll.rs `backend_failure`).
  *
@@ -58,6 +61,8 @@ export const enroll = publicMutation({
     orgId: v.id("organizations"),
     deviceName: v.string(),
     serverTimeMs: v.number(),
+    // Step 8 (plan 4.5, 5.1): the keys the new device trusts (active, + next).
+    policyKeys: v.array(v.object({ keyId: v.string(), publicKey: v.string() })),
   }),
   handler: async (ctx, args) => {
     // 1. Shape checks: no reads, no writes.
@@ -116,6 +121,7 @@ export const enroll = publicMutation({
           orgId: existing.orgId,
           deviceName: existing.name,
           serverTimeMs: Date.now(),
+          policyKeys: enrollmentKeysOf(await orgPolicyKeys(ctx, existing.orgId)),
         };
       }
       // A device secret must never be shared between two devices.
@@ -127,6 +133,12 @@ export const enroll = publicMutation({
     if (token.revoked === true) failWire("token_revoked");
     if (token.expiresAt <= now) failWire("token_expired");
     if (token.usesLeft <= 0) failWire("token_used_up");
+
+    // 5b. A root of trust (plan 4.5, Step 8): no device is enrolled while the
+    //     organization has no active signing key, so every device starts out
+    //     trusting a key and nothing unsigned is ever accepted.
+    const keys = await orgPolicyKeys(ctx, token.orgId);
+    if (!keys.some((k) => k.status === "active")) fail("not_ready", { detail: "no signing key registered" });
 
     // 6. Per-organization bucket, then the plan (A1): suspended organization or
     //    `deviceCount >= maxDevices` -> plan_limit. Same transaction as the insert.
@@ -169,12 +181,16 @@ export const enroll = publicMutation({
           ? `Enrolled the PC ${deviceName} with the enrollment code ${token.label}`
           : `Enrolled the PC ${deviceName} with an enrollment code`,
     });
+    // Its first signed document (the head appears ~1.5 s later; until then
+    // `headState` answers `head: null` and the agent keeps its enrollment default).
+    await requestPublish(ctx, token.orgId, { deviceIds: [deviceId] });
 
     return {
       deviceId,
       orgId: token.orgId,
       deviceName,
       serverTimeMs: now,
+      policyKeys: enrollmentKeysOf(keys),
     };
   },
 });

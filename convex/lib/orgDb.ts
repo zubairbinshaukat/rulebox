@@ -29,7 +29,7 @@ export const ORG_TABLES: ReadonlySet<string> = new Set(
 );
 
 /** Fields holding the id of a row of the same organization. */
-const ID_FIELDS = new Set(["deviceId", "groupId", "employeeId", "appId", "scope"]);
+const ID_FIELDS = new Set(["deviceId", "groupId", "employeeId", "appId", "scope", "rosterGroupId"]);
 /** Arrays of such ids (validated when the row was written, e.g. `fleetChecks.deviceIds`). */
 const ID_ARRAY_FIELDS = new Set(["deviceIds", "groupIds"]);
 

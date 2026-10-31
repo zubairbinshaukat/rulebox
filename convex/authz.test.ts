@@ -228,8 +228,10 @@ describe("two organizations, one user", () => {
       b: await ctx.db
         .query("policyKeys")
         .withIndex("by_org_status", (q) => q.eq("orgId", orgB).eq("status", "active"))
-        .take(2),
+        .take(5),
     }));
+    // (orgB also has the test key that `makeOrg` registers.)
+    rows.b = rows.b.filter((r) => r.keyId === keyId);
     expect(rows.a).toHaveLength(1);
     expect(rows.b).toHaveLength(1);
     expect(rows.a[0]!._id).not.toBe(rows.b[0]!._id);

@@ -1524,9 +1524,12 @@ export const demoApi: DataApi = {
       requireReader();
       const next = db.keys.find((k) => k.status === "next");
       const live = db.devices.filter((d) => !d.revoked);
+      const hasActive = db.keys.some((k) => k.status === "active");
       return {
         envKeyPresent: db.env.key,
         envNextKeyPresent: db.env.next,
+        signing: !db.env.key ? ("missing" as const) : hasActive ? ("ok" as const) : ("mismatch" as const),
+        publishFailedAt: null,
         keys: [...db.keys].sort((a, b) => a.createdAt - b.createdAt),
         trust: next
           ? {

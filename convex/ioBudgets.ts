@@ -55,14 +55,25 @@ export const IO_BUDGETS: Record<string, IoBudget> = {
   // for the ping interval; writes: limiter x2, token, device (identity), credentials, liveness,
   // presence, online shard, summary, report (compat <= 32 KB), orgStats, audit = 12.
   // Measured (probe, limiter excluded): 5 reads / 1.5 KB, 10 writes / 1.3 KB. Refused: 0 writes.
-  "enrollment:enroll": { maxReads: 10, maxReadBytes: 8_192, maxWrites: 12, maxWriteBytes: 40_960 },
+  // Step 8: + the org's key rows (3 index reads, a few rows) and the publish queue (read; insert
+  // or patch + one scheduled run) for the device's first signed document.
+  "enrollment:enroll": { maxReads: 16, maxReadBytes: 12_288, maxWrites: 13, maxWriteBytes: 41_984 },
 
   // ---- Step 7: the agent's calls (plan 4.9, 5.1 amended). Measured with the probe
   // (convex-test, `JSON.stringify` bytes; patches counted as the patch value, so the
   // Convex-side write size is the full row + its index entries).
   // The Phase 2 subscription: credentials, newest device-scope document (Phase 2 docs are
   // small), the device row only when there is none (+ the group-scope document). Measured 2 / 0.5 KB.
-  "devices:desiredState": { maxReads: 4, maxReadBytes: 8_192, maxWrites: 0, maxWriteBytes: 0, live: true },
+  // Step 8: the Phase 2 ALIAS reads the head and the newest body by id (~13 KB once; bodies
+  // never change, so it re-runs only on a new head); without a head, the Phase 2 rows as before.
+  "devices:desiredState": { maxReads: 5, maxReadBytes: 540_000, maxWrites: 0, maxWriteBytes: 0, live: true },
+  // ---- Step 8: the signed document (A5, A6). The subscription: credentials, head, group roster,
+  // <= 3 x key rows (a few). Plan 5.1: <= 20 documents, <= 2 KB (`devices.test.ts` measures it).
+  "devices:headState": { maxReads: 20, maxReadBytes: 2_048, maxWrites: 0, maxWriteBytes: 0, live: true },
+  // One-shot: credentials + one body (<= MAX_PAYLOAD_BYTES; ~13 KB typical), once per version.
+  "devices:fetchDesired": { maxReads: 2, maxReadBytes: 530_000, maxWrites: 0, maxWriteBytes: 0 },
+  // One-shot: credentials, device, roster row, <= 201 entries (~300 B) or the snapshot.
+  "devices:fetchRoster": { maxReads: 4 + 201, maxReadBytes: 80_000, maxWrites: 0, maxWriteBytes: 0 },
   // Alias of ping + the status snapshot until deviceApi:report (Step 12). Typical (same minute):
   // 2 reads / 0.5 KB, 0 writes; new minute: 1 write (liveness, ~250 B row); with a changed status:
   // + summary and report (2 reads, <= 2 writes); outOfSupport flip: + orgStats; offline -> online:
@@ -82,9 +93,11 @@ export const IO_BUDGETS: Record<string, IoBudget> = {
   // new-shape devices: 153 reads / 34 KB. (Devices enrolled before Step 7 carry ~1.5 KB of
   // deprecated fields until `maintenance:narrowDevices` ran.) Re-runs on device, summary or
   // presence changes only, never on pings.
-  "fleet:list": { maxReads: 250, maxReadBytes: 65_536, maxWrites: 0, maxWriteBytes: 0, live: true },
+  // Step 8: + one head per row (~250 B) for `latestVersion`.
+  "fleet:list": { maxReads: 300, maxReadBytes: 81_920, maxWrites: 0, maxWriteBytes: 0, live: true },
   // device, credentials, report (compat <= 32 KB), summary, presence, groups (tiny). Measured 8 / 2.1 KB.
-  "fleet:get": { maxReads: 3 + 5 + 50, maxReadBytes: 49_152, maxWrites: 0, maxWriteBytes: 0, live: true },
+  // Step 8: + the last 5 version rows (~150 B each).
+  "fleet:get": { maxReads: 3 + 5 + 50 + 5, maxReadBytes: 50_176, maxWrites: 0, maxWriteBytes: 0, live: true },
   // device; writes: device, audit. Unchanged: 0 writes. Measured 5 / 1.1 KB, 2 writes.
   "fleet:rename": { maxReads: 5, maxReadBytes: 4_096, maxWrites: 2, maxWriteBytes: 1_024 },
   // device, credentials, group, orgStats, publishQueue; writes: device, orgStats, queue, audit
@@ -102,12 +115,28 @@ export const IO_BUDGETS: Record<string, IoBudget> = {
   "fleet:requestCredentialRotation": { maxReads: 6, maxReadBytes: 4_096, maxWrites: 2, maxWriteBytes: 1_024 },
   // device, orgPlans (+ platformSettings), liveness, credentials; writes: liveness only when it
   // extends `fastUntil` by >= 2 min (+ limiter row). Measured 6 / 1.6 KB, 0-1 write.
-  "fleet:watch": { maxReads: 8, maxReadBytes: 4_096, maxWrites: 2, maxWriteBytes: 512 },
+  // Step 8: + the head (fastUntil) when it writes.
+  "fleet:watch": { maxReads: 9, maxReadBytes: 4_608, maxWrites: 3, maxWriteBytes: 768 },
   // The one watched liveness row (+ device). Re-runs at most once a minute while watched.
   "fleet:liveness": { maxReads: 4, maxReadBytes: 2_048, maxWrites: 0, maxWriteBytes: 0, live: true },
   // <= 50 x (device + liveness) + limiter; writes: check row + <= 50 liveness patches + limiter.
   // Measured for 50: 104 reads / 25 KB, 51 writes / 4.4 KB. 1 per minute per organization.
-  "fleet:checkNow": { maxReads: 3 + 1 + 100 + 1, maxReadBytes: 32_768, maxWrites: 53, maxWriteBytes: 16_384 },
+  // Step 8: + <= 50 heads read and patched (`pingNonce`).
+  "fleet:checkNow": { maxReads: 3 + 1 + 150 + 1, maxReadBytes: 45_056, maxWrites: 103, maxWriteBytes: 20_480 },
   // check row + <= 50 liveness rows; subscribed for <= 60 s. Measured 54 / 17.6 KB.
   "fleet:checkResult": { maxReads: 3 + 1 + 50, maxReadBytes: 24_576, maxWrites: 0, maxWriteBytes: 0, live: true },
+
+  // ---- Step 8: Settings -> Signing (keys.ts). Wrapper 3 reads (+1 step-up for writes).
+  // key rows (3 index reads, a few rows), the env key's row, orgStats.
+  "keys:status": { maxReads: 3 + 10, maxReadBytes: 6_144, maxWrites: 0, maxWriteBytes: 0, live: true },
+  // next key + one page of <= 200 devices x (device, presence, report: compat <= 32 KB).
+  // RISK: a page of 200 devices with large compat reports reads up to ~6 MB; the tab loads
+  // pages only while a rotation is prepared (rare).
+  "keys:trustProgress": { maxReads: 3 + 1 + 600, maxReadBytes: 6_500_000, maxWrites: 0, maxWriteBytes: 0, live: true },
+  // key by id, key rows; writes: retire old rows (force), insert, audit, queue + scheduled run.
+  "keys:registerActive": { maxReads: 4 + 12, maxReadBytes: 8_192, maxWrites: 8, maxWriteBytes: 4_096 },
+  // active key row, key by id, next row; writes: insert (with endorsement), audit.
+  "keys:prepareRotation": { maxReads: 4 + 3, maxReadBytes: 4_096, maxWrites: 2, maxWriteBytes: 2_048 },
+  // key rows; writes: retire old, activate next, audit, queue + scheduled run.
+  "keys:finishRotation": { maxReads: 4 + 11, maxReadBytes: 8_192, maxWrites: 5, maxWriteBytes: 3_072 },
 };

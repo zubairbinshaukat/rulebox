@@ -422,6 +422,27 @@ const DEPRECATED_DEVICE_FIELDS = [
 ] as const;
 
 /**
+ * Step 8 migration (A5): delete the retired, unsigned Phase 2 `desiredStates`
+ * rows (batches of MIGRATION_DEVICE_BATCH, reschedules itself). Run it only
+ * after the first publish wrote a head for every device (Settings -> Signing
+ * -> Register key publishes all of them): until then `devices:desiredState`
+ * falls back to these rows and the first publish reads them for the version
+ * floor. Afterwards the table is removed from the schema.
+ *   npx convex run maintenance:dropDesiredStates '{}'
+ */
+export const dropDesiredStates = internalMutation({
+  args: {},
+  returns: v.object({ deleted: v.number(), done: v.boolean() }),
+  handler: async (ctx) => {
+    const rows = await ctx.db.query("desiredStates").withIndex("by_creation_time").take(MIGRATION_DEVICE_BATCH);
+    for (const row of rows) await ctx.db.delete(row._id);
+    const done = rows.length < MIGRATION_DEVICE_BATCH;
+    if (!done) await ctx.scheduler.runAfter(0, internal.maintenance.dropDesiredStates, {});
+    return { deleted: rows.length, done };
+  },
+});
+
+/**
  * CLI fallback when the only Owner lost their authenticator and recovery
  * codes (plan edge case 24):
  *   npx convex run maintenance:resetMfaByEmail '{"email":"owner@acme.test"}'
