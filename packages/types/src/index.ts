@@ -73,3 +73,16 @@ export * from "./generated/FileKind";
 export * from "./generated/GroupKind";
 export * from "./generated/UsageGroup";
 export * from "./generated/MonitorSample";
+
+// App catalogue of the signed document (Phase 4 Step 10; crates/rulebox-policy/src/catalog.rs)
+export * from "./generated/Audience";
+export * from "./generated/BuiltinSpec";
+export * from "./generated/CatalogApp";
+export * from "./generated/CatalogKind";
+export * from "./generated/CatalogTool";
+export * from "./generated/CatalogWebPermissions";
+export * from "./generated/DesktopSpec";
+export * from "./generated/IconRef";
+export * from "./generated/InstallKind";
+export * from "./generated/InstallSpec";
+export * from "./generated/WebSpec";

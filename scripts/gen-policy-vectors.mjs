@@ -11,6 +11,7 @@
 //
 //   crates/rulebox-policy/tests/vectors/signed-v2.json  one signed document + an endorsement
 //   crates/rulebox-policy/tests/vectors/roster-v1.json  three roster entries + a snapshot
+//   crates/rulebox-policy/tests/vectors/catalog-v2.json an unsigned device document with a catalogue of every app kind (Step 10)
 //
 //   crates/rulebox-policy/tests/vectors/signed-v2-negative.json  documents the agent must REJECT, each with the reason
 //
@@ -180,6 +181,126 @@ const rosterV1 = {
 for (const e of rosterV1.entries) crossCheck(`roster entry ${e.epoch}`, key.publicKeyB64, e.message, e.signature, true);
 crossCheck("roster snapshot", key.publicKeyB64, rosterV1.snapshot.payload, rosterV1.snapshot.signature, true);
 
+// ---- catalog-v2.json
+// The device catalogue (plan 4.8, Step 10 item 1): an UNSIGNED document built by
+// the real builder from an input that covers every app kind, every install
+// kind, a preinstalled app, optional values absent and present, an icon,
+// unicode names, a selected audience, a direct web grant, an archived app, a
+// disabled employee and file-type rules (one lower-cased, one dropped because
+// its app is not in the catalogue). `catalogJson` is the exact JSON.stringify
+// of `doc.catalog`: the Rust types must serialize back to those bytes.
+const { DEFAULT_WEB_PERMISSIONS } = await load("convex/lib/validators.ts");
+const hex = (n) => n.toString(16).padStart(64, "0");
+const emp = { one: "emp_vec_1", two: "emp_vec_2", off: "emp_vec_off" };
+const catalogInput = {
+  ...vectors.VECTOR_INPUT,
+  assignments: [
+    { appId: "app_vec_web_min", audience: "everyone", pinnedTaskbar: false, pinnedDesktop: false },
+    { appId: "app_vec_web_full", audience: "selected", pinnedTaskbar: true, pinnedDesktop: false },
+    { appId: "app_vec_msi", audience: "everyone", pinnedTaskbar: false, pinnedDesktop: true },
+    { appId: "app_vec_exe", audience: "selected", pinnedTaskbar: true, pinnedDesktop: true },
+    { appId: "app_vec_portable", audience: "everyone", pinnedTaskbar: false, pinnedDesktop: false },
+    { appId: "app_vec_pre", audience: "everyone", pinnedTaskbar: true, pinnedDesktop: false },
+    { appId: "app_vec_archived", audience: "everyone", pinnedTaskbar: true, pinnedDesktop: true },
+  ],
+  apps: [
+    { _id: "app_vec_web_min", name: "Intranet", kind: "web", archived: false, revision: 1, web: { url: "https://intranet.example.test/", allowedDomains: ["intranet.example.test"], permissions: { ...DEFAULT_WEB_PERMISSIONS } } },
+    {
+      _id: "app_vec_web_full",
+      name: 'Ørders "Küche" \\ 注文 🦀',
+      description: "Zeile 1\nZeile 2 – “quoted”",
+      kind: "web",
+      hue: 175,
+      archived: false,
+      revision: 9,
+      web: {
+        url: "https://orders.example.test/start?lang=de",
+        allowedDomains: ["orders.example.test", "*.cdn.example.test"],
+        permissions: { ...DEFAULT_WEB_PERMISSIONS, camera: true, printing: true },
+      },
+      icon: { url: "https://storage.example.test/icons/orders.png", sha256: hex(0xabc) },
+    },
+    { _id: "app_vec_web_direct", name: "Wiki", description: "Granted to employees directly", kind: "web", hue: 0, archived: false, revision: 3, web: { url: "https://wiki.example.test/", allowedDomains: ["wiki.example.test"], permissions: { ...DEFAULT_WEB_PERMISSIONS, downloads: false } } },
+    {
+      _id: "app_vec_msi",
+      name: "Writer",
+      description: "Word processor",
+      kind: "desktop",
+      hue: 359,
+      archived: false,
+      revision: 4,
+      desktop: {
+        exe: "{ProgramFiles}\\Writer\\writer.exe",
+        args: ["--no-splash"],
+        fileArgTemplate: ["{file}"],
+        install: { kind: "msi", url: "https://downloads.example.test/writer-1.0.msi", sha256: hex(1), sizeBytes: 1048576, silentArgs: [], productCode: "{00000000-0000-0000-0000-000000000001}", successExitCodes: [0], removeWhenUnassigned: true },
+        resetFolders: ["{RoamingAppData}\\Writer", "{LocalAppData}\\Writer"],
+      },
+      icon: { url: "https://storage.example.test/icons/writer.png", sha256: hex(2) },
+    },
+    {
+      _id: "app_vec_exe",
+      name: "Ünïcode Editör 日本語",
+      kind: "desktop",
+      archived: false,
+      revision: 1,
+      desktop: {
+        exe: "{ProgramFilesX86}\\Edit Pad\\editpad.exe",
+        args: [],
+        fileArgTemplate: ["--open", "{file}"],
+        install: { kind: "exe", url: "https://downloads.example.test/editpad-setup.exe", sha256: hex(3), sizeBytes: 0, silentArgs: ["/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART", "/SP-"], successExitCodes: [0, 3010], removeWhenUnassigned: false },
+        resetFolders: [],
+      },
+    },
+    {
+      _id: "app_vec_portable",
+      name: "Calc Lite",
+      kind: "desktop",
+      archived: false,
+      revision: 2,
+      desktop: {
+        exe: "{RuleboxApps}\\app_vec_portable\\calclite.exe",
+        args: [],
+        fileArgTemplate: [],
+        install: { kind: "portable", url: "https://downloads.example.test/calclite.exe", sha256: hex(4), sizeBytes: 524288, silentArgs: [], successExitCodes: [0], removeWhenUnassigned: true },
+        resetFolders: [],
+      },
+    },
+    { _id: "app_vec_pre", name: "Notepad", kind: "desktop", archived: false, revision: 1, desktop: { exe: "{SystemRoot}\\System32\\notepad.exe", args: [], fileArgTemplate: ["{file}"], resetFolders: [] } },
+    { _id: "app_vec_archived", name: "Old tool", kind: "web", archived: true, revision: 5, web: { url: "https://old.example.test/", allowedDomains: ["old.example.test"], permissions: { ...DEFAULT_WEB_PERMISSIONS } } },
+    // Granted to an employee but not assigned to the group: a desktop app is left out.
+    { _id: "app_vec_unassigned", name: "Unassigned", kind: "desktop", archived: false, revision: 1, desktop: { exe: "{ProgramFiles}\\U\\u.exe", args: [], fileArgTemplate: [], resetFolders: [] } },
+  ],
+  employees: [
+    { _id: emp.one, disabled: false },
+    { _id: emp.two, disabled: false },
+    { _id: emp.off, disabled: true },
+  ],
+  employeeApps: [
+    { employeeId: emp.two, appId: "app_vec_web_full" },
+    { employeeId: emp.one, appId: "app_vec_web_full" },
+    { employeeId: emp.off, appId: "app_vec_web_full" },
+    { employeeId: emp.one, appId: "app_vec_web_direct" },
+    { employeeId: emp.two, appId: "app_vec_exe" },
+    { employeeId: emp.one, appId: "app_vec_unassigned" },
+  ],
+  fileHandlers: [
+    { extension: ".txt", appId: "app_vec_pre" },
+    { extension: ".ODT", appId: "app_vec_msi" },
+    { extension: ".docx", appId: "app_vec_msi" },
+    { extension: ".md", appId: "app_vec_exe" },
+    { extension: ".dropped", appId: "app_vec_archived" },
+  ],
+};
+const catalogVersion = 11;
+const catalogDoc = desired.buildDeviceDoc(catalogInput, catalogVersion);
+const catalogV2 = {
+  note: "UNSIGNED device document built by convex/lib/desired.ts (buildDeviceDoc). `doc.catalog` is the app catalogue of plan 4.8; `catalogJson` is its exact JSON.stringify. Test data only.",
+  version: catalogVersion,
+  doc: catalogDoc,
+  catalogJson: JSON.stringify(catalogDoc.catalog),
+};
+
 // ---- signed-v2-negative.json
 // Documents the agent must reject. Every case names the FIRST check of the
 // procedure below that fails; the checks run in this order, so a case never
@@ -325,7 +446,12 @@ const signedV2Negative = {
 };
 
 const outDir = join(root, "crates", "rulebox-policy", "tests", "vectors");
-const files = { "signed-v2.json": signedV2, "signed-v2-negative.json": signedV2Negative, "roster-v1.json": rosterV1 };
+const files = {
+  "signed-v2.json": signedV2,
+  "signed-v2-negative.json": signedV2Negative,
+  "roster-v1.json": rosterV1,
+  "catalog-v2.json": catalogV2,
+};
 const check = process.argv.includes("--check");
 let differ = 0;
 mkdirSync(outDir, { recursive: true });

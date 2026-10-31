@@ -1,0 +1,312 @@
+{
+  "note": "UNSIGNED device document built by convex/lib/desired.ts (buildDeviceDoc). `doc.catalog` is the app catalogue of plan 4.8; `catalogJson` is its exact JSON.stringify. Test data only.",
+  "version": 11,
+  "doc": {
+    "kioskEnabled": true,
+    "apps": [
+      "files",
+      "app_vec_exe",
+      "app_vec_msi",
+      "app_vec_portable",
+      "app_vec_pre",
+      "app_vec_web_direct",
+      "app_vec_web_full",
+      "app_vec_web_min"
+    ],
+    "allowedSites": [],
+    "fileHandlers": {
+      ".docx": "app_vec_msi",
+      ".md": "app_vec_exe",
+      ".odt": "app_vec_msi",
+      ".txt": "app_vec_pre"
+    },
+    "storage": {
+      "defaultQuotaGb": 10
+    },
+    "branding": {
+      "name": "Acme Test",
+      "logo": null
+    },
+    "version": 11,
+    "adminExit": {
+      "enabled": true,
+      "hotkey": "Ctrl+Shift+F12",
+      "pinHash": "$argon2id$v=19$m=19456,t=2,p=1$cnVsZWJveC12ZWN0b3ItMQ$bsRu3JR6kqceQgUhW6gLhsNaDytRywphbIf52wZ6/zg"
+    },
+    "power": {
+      "sleep": true,
+      "restart": true,
+      "shutDown": false
+    },
+    "orgName": "Acme Test",
+    "catalog": [
+      {
+        "id": "files",
+        "name": "Files",
+        "description": null,
+        "kind": "builtin",
+        "builtin": {
+          "tool": "files"
+        },
+        "web": null,
+        "desktop": null,
+        "pinnedTaskbar": true,
+        "pinnedDesktop": false,
+        "hue": null,
+        "icon": null,
+        "audience": "everyone",
+        "employeeIds": [],
+        "revision": 0
+      },
+      {
+        "id": "app_vec_exe",
+        "name": "Ünïcode Editör 日本語",
+        "description": null,
+        "kind": "desktop",
+        "builtin": null,
+        "web": null,
+        "desktop": {
+          "exe": "{ProgramFilesX86}\\Edit Pad\\editpad.exe",
+          "args": [],
+          "fileArgTemplate": [
+            "--open",
+            "{file}"
+          ],
+          "install": {
+            "kind": "exe",
+            "url": "https://downloads.example.test/editpad-setup.exe",
+            "sha256": "0000000000000000000000000000000000000000000000000000000000000003",
+            "sizeBytes": 0,
+            "silentArgs": [
+              "/VERYSILENT",
+              "/SUPPRESSMSGBOXES",
+              "/NORESTART",
+              "/SP-"
+            ],
+            "productCode": null,
+            "successExitCodes": [
+              0,
+              3010
+            ],
+            "removeWhenUnassigned": false
+          },
+          "resetFolders": []
+        },
+        "pinnedTaskbar": true,
+        "pinnedDesktop": true,
+        "hue": null,
+        "icon": null,
+        "audience": "selected",
+        "employeeIds": [
+          "emp_vec_2"
+        ],
+        "revision": 1
+      },
+      {
+        "id": "app_vec_msi",
+        "name": "Writer",
+        "description": "Word processor",
+        "kind": "desktop",
+        "builtin": null,
+        "web": null,
+        "desktop": {
+          "exe": "{ProgramFiles}\\Writer\\writer.exe",
+          "args": [
+            "--no-splash"
+          ],
+          "fileArgTemplate": [
+            "{file}"
+          ],
+          "install": {
+            "kind": "msi",
+            "url": "https://downloads.example.test/writer-1.0.msi",
+            "sha256": "0000000000000000000000000000000000000000000000000000000000000001",
+            "sizeBytes": 1048576,
+            "silentArgs": [],
+            "productCode": "{00000000-0000-0000-0000-000000000001}",
+            "successExitCodes": [
+              0
+            ],
+            "removeWhenUnassigned": true
+          },
+          "resetFolders": [
+            "{RoamingAppData}\\Writer",
+            "{LocalAppData}\\Writer"
+          ]
+        },
+        "pinnedTaskbar": false,
+        "pinnedDesktop": true,
+        "hue": 359,
+        "icon": {
+          "url": "https://storage.example.test/icons/writer.png",
+          "sha256": "0000000000000000000000000000000000000000000000000000000000000002"
+        },
+        "audience": "everyone",
+        "employeeIds": [],
+        "revision": 4
+      },
+      {
+        "id": "app_vec_portable",
+        "name": "Calc Lite",
+        "description": null,
+        "kind": "desktop",
+        "builtin": null,
+        "web": null,
+        "desktop": {
+          "exe": "{RuleboxApps}\\app_vec_portable\\calclite.exe",
+          "args": [],
+          "fileArgTemplate": [],
+          "install": {
+            "kind": "portable",
+            "url": "https://downloads.example.test/calclite.exe",
+            "sha256": "0000000000000000000000000000000000000000000000000000000000000004",
+            "sizeBytes": 524288,
+            "silentArgs": [],
+            "productCode": null,
+            "successExitCodes": [
+              0
+            ],
+            "removeWhenUnassigned": true
+          },
+          "resetFolders": []
+        },
+        "pinnedTaskbar": false,
+        "pinnedDesktop": false,
+        "hue": null,
+        "icon": null,
+        "audience": "everyone",
+        "employeeIds": [],
+        "revision": 2
+      },
+      {
+        "id": "app_vec_pre",
+        "name": "Notepad",
+        "description": null,
+        "kind": "desktop",
+        "builtin": null,
+        "web": null,
+        "desktop": {
+          "exe": "{SystemRoot}\\System32\\notepad.exe",
+          "args": [],
+          "fileArgTemplate": [
+            "{file}"
+          ],
+          "install": null,
+          "resetFolders": []
+        },
+        "pinnedTaskbar": true,
+        "pinnedDesktop": false,
+        "hue": null,
+        "icon": null,
+        "audience": "everyone",
+        "employeeIds": [],
+        "revision": 1
+      },
+      {
+        "id": "app_vec_web_direct",
+        "name": "Wiki",
+        "description": "Granted to employees directly",
+        "kind": "web",
+        "builtin": null,
+        "web": {
+          "url": "https://wiki.example.test/",
+          "allowedDomains": [
+            "wiki.example.test"
+          ],
+          "permissions": {
+            "camera": false,
+            "microphone": false,
+            "screenShare": false,
+            "clipboardRead": false,
+            "notifications": true,
+            "downloads": false,
+            "printing": false,
+            "geolocation": false
+          }
+        },
+        "desktop": null,
+        "pinnedTaskbar": false,
+        "pinnedDesktop": false,
+        "hue": 0,
+        "icon": null,
+        "audience": "selected",
+        "employeeIds": [
+          "emp_vec_1"
+        ],
+        "revision": 3
+      },
+      {
+        "id": "app_vec_web_full",
+        "name": "Ørders \"Küche\" \\ 注文 🦀",
+        "description": "Zeile 1\nZeile 2 – “quoted”",
+        "kind": "web",
+        "builtin": null,
+        "web": {
+          "url": "https://orders.example.test/start?lang=de",
+          "allowedDomains": [
+            "orders.example.test",
+            "*.cdn.example.test"
+          ],
+          "permissions": {
+            "camera": true,
+            "microphone": false,
+            "screenShare": false,
+            "clipboardRead": false,
+            "notifications": true,
+            "downloads": true,
+            "printing": true,
+            "geolocation": false
+          }
+        },
+        "desktop": null,
+        "pinnedTaskbar": true,
+        "pinnedDesktop": false,
+        "hue": 175,
+        "icon": {
+          "url": "https://storage.example.test/icons/orders.png",
+          "sha256": "0000000000000000000000000000000000000000000000000000000000000abc"
+        },
+        "audience": "selected",
+        "employeeIds": [
+          "emp_vec_1",
+          "emp_vec_2"
+        ],
+        "revision": 9
+      },
+      {
+        "id": "app_vec_web_min",
+        "name": "Intranet",
+        "description": null,
+        "kind": "web",
+        "builtin": null,
+        "web": {
+          "url": "https://intranet.example.test/",
+          "allowedDomains": [
+            "intranet.example.test"
+          ],
+          "permissions": {
+            "camera": false,
+            "microphone": false,
+            "screenShare": false,
+            "clipboardRead": false,
+            "notifications": true,
+            "downloads": true,
+            "printing": false,
+            "geolocation": false
+          }
+        },
+        "desktop": null,
+        "pinnedTaskbar": false,
+        "pinnedDesktop": false,
+        "hue": null,
+        "icon": null,
+        "audience": "everyone",
+        "employeeIds": [],
+        "revision": 1
+      }
+    ],
+    "rosterGroupId": "grp_test_vector_1",
+    "offlineDays": 3
+  },
+  "catalogJson": "[{\"id\":\"files\",\"name\":\"Files\",\"description\":null,\"kind\":\"builtin\",\"builtin\":{\"tool\":\"files\"},\"web\":null,\"desktop\":null,\"pinnedTaskbar\":true,\"pinnedDesktop\":false,\"hue\":null,\"icon\":null,\"audience\":\"everyone\",\"employeeIds\":[],\"revision\":0},{\"id\":\"app_vec_exe\",\"name\":\"Ünïcode Editör 日本語\",\"description\":null,\"kind\":\"desktop\",\"builtin\":null,\"web\":null,\"desktop\":{\"exe\":\"{ProgramFilesX86}\\\\Edit Pad\\\\editpad.exe\",\"args\":[],\"fileArgTemplate\":[\"--open\",\"{file}\"],\"install\":{\"kind\":\"exe\",\"url\":\"https://downloads.example.test/editpad-setup.exe\",\"sha256\":\"0000000000000000000000000000000000000000000000000000000000000003\",\"sizeBytes\":0,\"silentArgs\":[\"/VERYSILENT\",\"/SUPPRESSMSGBOXES\",\"/NORESTART\",\"/SP-\"],\"productCode\":null,\"successExitCodes\":[0,3010],\"removeWhenUnassigned\":false},\"resetFolders\":[]},\"pinnedTaskbar\":true,\"pinnedDesktop\":true,\"hue\":null,\"icon\":null,\"audience\":\"selected\",\"employeeIds\":[\"emp_vec_2\"],\"revision\":1},{\"id\":\"app_vec_msi\",\"name\":\"Writer\",\"description\":\"Word processor\",\"kind\":\"desktop\",\"builtin\":null,\"web\":null,\"desktop\":{\"exe\":\"{ProgramFiles}\\\\Writer\\\\writer.exe\",\"args\":[\"--no-splash\"],\"fileArgTemplate\":[\"{file}\"],\"install\":{\"kind\":\"msi\",\"url\":\"https://downloads.example.test/writer-1.0.msi\",\"sha256\":\"0000000000000000000000000000000000000000000000000000000000000001\",\"sizeBytes\":1048576,\"silentArgs\":[],\"productCode\":\"{00000000-0000-0000-0000-000000000001}\",\"successExitCodes\":[0],\"removeWhenUnassigned\":true},\"resetFolders\":[\"{RoamingAppData}\\\\Writer\",\"{LocalAppData}\\\\Writer\"]},\"pinnedTaskbar\":false,\"pinnedDesktop\":true,\"hue\":359,\"icon\":{\"url\":\"https://storage.example.test/icons/writer.png\",\"sha256\":\"0000000000000000000000000000000000000000000000000000000000000002\"},\"audience\":\"everyone\",\"employeeIds\":[],\"revision\":4},{\"id\":\"app_vec_portable\",\"name\":\"Calc Lite\",\"description\":null,\"kind\":\"desktop\",\"builtin\":null,\"web\":null,\"desktop\":{\"exe\":\"{RuleboxApps}\\\\app_vec_portable\\\\calclite.exe\",\"args\":[],\"fileArgTemplate\":[],\"install\":{\"kind\":\"portable\",\"url\":\"https://downloads.example.test/calclite.exe\",\"sha256\":\"0000000000000000000000000000000000000000000000000000000000000004\",\"sizeBytes\":524288,\"silentArgs\":[],\"productCode\":null,\"successExitCodes\":[0],\"removeWhenUnassigned\":true},\"resetFolders\":[]},\"pinnedTaskbar\":false,\"pinnedDesktop\":false,\"hue\":null,\"icon\":null,\"audience\":\"everyone\",\"employeeIds\":[],\"revision\":2},{\"id\":\"app_vec_pre\",\"name\":\"Notepad\",\"description\":null,\"kind\":\"desktop\",\"builtin\":null,\"web\":null,\"desktop\":{\"exe\":\"{SystemRoot}\\\\System32\\\\notepad.exe\",\"args\":[],\"fileArgTemplate\":[\"{file}\"],\"install\":null,\"resetFolders\":[]},\"pinnedTaskbar\":true,\"pinnedDesktop\":false,\"hue\":null,\"icon\":null,\"audience\":\"everyone\",\"employeeIds\":[],\"revision\":1},{\"id\":\"app_vec_web_direct\",\"name\":\"Wiki\",\"description\":\"Granted to employees directly\",\"kind\":\"web\",\"builtin\":null,\"web\":{\"url\":\"https://wiki.example.test/\",\"allowedDomains\":[\"wiki.example.test\"],\"permissions\":{\"camera\":false,\"microphone\":false,\"screenShare\":false,\"clipboardRead\":false,\"notifications\":true,\"downloads\":false,\"printing\":false,\"geolocation\":false}},\"desktop\":null,\"pinnedTaskbar\":false,\"pinnedDesktop\":false,\"hue\":0,\"icon\":null,\"audience\":\"selected\",\"employeeIds\":[\"emp_vec_1\"],\"revision\":3},{\"id\":\"app_vec_web_full\",\"name\":\"Ørders \\\"Küche\\\" \\\\ 注文 🦀\",\"description\":\"Zeile 1\\nZeile 2 – “quoted”\",\"kind\":\"web\",\"builtin\":null,\"web\":{\"url\":\"https://orders.example.test/start?lang=de\",\"allowedDomains\":[\"orders.example.test\",\"*.cdn.example.test\"],\"permissions\":{\"camera\":true,\"microphone\":false,\"screenShare\":false,\"clipboardRead\":false,\"notifications\":true,\"downloads\":true,\"printing\":true,\"geolocation\":false}},\"desktop\":null,\"pinnedTaskbar\":true,\"pinnedDesktop\":false,\"hue\":175,\"icon\":{\"url\":\"https://storage.example.test/icons/orders.png\",\"sha256\":\"0000000000000000000000000000000000000000000000000000000000000abc\"},\"audience\":\"selected\",\"employeeIds\":[\"emp_vec_1\",\"emp_vec_2\"],\"revision\":9},{\"id\":\"app_vec_web_min\",\"name\":\"Intranet\",\"description\":null,\"kind\":\"web\",\"builtin\":null,\"web\":{\"url\":\"https://intranet.example.test/\",\"allowedDomains\":[\"intranet.example.test\"],\"permissions\":{\"camera\":false,\"microphone\":false,\"screenShare\":false,\"clipboardRead\":false,\"notifications\":true,\"downloads\":true,\"printing\":false,\"geolocation\":false}},\"desktop\":null,\"pinnedTaskbar\":false,\"pinnedDesktop\":false,\"hue\":null,\"icon\":null,\"audience\":\"everyone\",\"employeeIds\":[],\"revision\":1}]"
+}

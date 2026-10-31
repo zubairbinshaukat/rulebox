@@ -7,6 +7,25 @@ use std::collections::BTreeMap;
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
+/// Deserializes an enum from a string; any value not listed becomes `Unknown`.
+/// Written by hand because ts-rs cannot parse `#[serde(other)]`; the wire format
+/// is the same. A copy of the macro in `rulebox-ipc` (plan Phase 4, 4.8). Must
+/// stay above the `mod` lines so the modules can see it.
+macro_rules! unknown_on_new_values {
+    ($ty:ident { $($variant:ident => $text:literal),+ $(,)? }) => {
+        impl<'de> serde::Deserialize<'de> for $ty {
+            fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+                let text = <String as serde::Deserialize>::deserialize(d)?;
+                Ok(match text.as_str() {
+                    $($text => Self::$variant,)+
+                    _ => Self::Unknown,
+                })
+            }
+        }
+    };
+}
+
+pub mod catalog;
 pub mod envelope;
 pub mod roster;
 

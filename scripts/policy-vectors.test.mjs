@@ -68,6 +68,7 @@ describe("gen-policy-vectors.mjs --check", () => {
     expect(r.stdout).toContain("signed-v2.json: up to date");
     expect(r.stdout).toContain("signed-v2-negative.json: up to date");
     expect(r.stdout).toContain("roster-v1.json: up to date");
+    expect(r.stdout).toContain("catalog-v2.json: up to date");
     expect(r.status).toBe(0);
   }, 60_000);
 });

@@ -3512,6 +3512,24 @@ server's host and path rules.
 dashboard `typecheck`, `lint`, `test` (358). Not verified: any call to a real Convex
 deployment, real GitHub or real websites. Risk: `apps:list` reads up to ~5,000
 assignment rows for a page of 50 apps that are each in 100 groups (a free tenant ~80).
+(9) **2026-11-01, Rust half done (supersedes the "item 1 NOT done" above):**
+`crates/rulebox-policy/src/catalog.rs` has `CatalogApp`, `CatalogKind`, `BuiltinSpec`
+(+ `CatalogTool`), `WebSpec` (+ `CatalogWebPermissions`), `DesktopSpec`, `InstallSpec`,
+`InstallKind`, `IconRef`, `Audience`, with ts-rs export (committed in
+`packages/types/src/generated/`, re-exported from `index.ts`), the
+`unknown_on_new_values!` macro copied into `lib.rs`, `CatalogApp::validate()` (https
+URLs, 64 lower-case hex hashes, spec fits the kind) and `parse_catalog()` (per-entry
+results, so one bad app is skipped, not the catalogue). Golden vector
+`tests/vectors/catalog-v2.json` is written by `gen-policy-vectors.mjs` from its own
+broader input (every kind and install kind, optional values absent and present, icon,
+unicode, selected audience, direct web grant, archived app, file-type rules), not the
+Step 8 input, which has too few cases; Rust parses it, validates it and serializes back
+to the same bytes as `JSON.stringify`. The permissions type is
+`CatalogWebPermissions` (the Staff App already exports a different `WebPermissions`).
+**Still to do:** switch `convex/lib/desired.ts` to `import type { CatalogApp } from
+"@rulebox/types"` (after Step 11 finishes in that file; the generated type already
+accepts what the builder emits, checked with `tsc`), and have the agent parse `apps` /
+`catalog` with `parse_catalog` (Step 14).
 
 ---
 
