@@ -3678,6 +3678,83 @@ an employee of another organization; hash in the browser.
 group and no `desiredBodies` row; the entry verifies with the org key;
 the 26th employee of a free org is refused with `plan_limit`.
 
+**Status (2026-11-01): built and tested on the dev machine (backend and
+dashboard), NOT deployed.** `convex/_generated/api.d.ts` was edited by hand
+(codegen needs a deployment). The dashboard was checked in demo mode only
+(screenshots: Employees, EmployeeDetail with the lockout banner, the Set
+password dialog). Nothing was run against a Convex deployment; the "Verify"
+line about `status --simulate` is replaced by the roster (the agent reads it
+from Step 13 on). The plan lists no bulk create, so none was built.
+As built / deviations:
+(1) **`employees:create` and `employees:setPassword` are actions** over internal
+mutations (`storeNew`, `storePassword`; `passwordTarget` is the internal query
+that gives `setPassword` the username for the "not the username" rule). Argon2id
+needs a random salt, which only an action has (`lib/argon.ts`, as the exit PIN).
+`create` also takes `appIds` (direct grants: the new-employee form has the
+picker) and an optional `password`; a password is checked, rate limited and
+hashed before the mutation, and the mutation checks everything again. A username
+renamed between hashing and storing is `stale_edit`. `employeeWrites` (300 per
+hour per organization) is consumed by `setPassword` and by a `create` that
+carries a password, after the rule check and before the hash.
+(2) **Names and shapes.** Group members are `groups:addEmployee` /
+`removeEmployee` (idempotent: already a member / not a member = no write); the
+group's employee list is `employees:list({ groupId })`. New: `employees:options`
+(the pickers of the "new" form). `list` returns each row with its first 5 groups
+(`moreGroups` above); `search({ text, groupId? })` returns `{ rows, capped }`
+(`.take(51)`, the group filter is checked per hit afterwards). `get` never reads
+`employeeSecrets` (`passwordSet` = `passwordSetAt`), and returns the lockout row
+(the client compares `lockedUntil` with its clock).
+(3) **The roster of a group = its enabled members with their `credentialRevision`**
+(`lib/employeeSync.ts`). One signed entry per group is appended (and `epoch`
+bumped) when: an employee is created into groups, joins or leaves a group
+(`setGroups`, `addEmployee`, `removeEmployee`: only when enabled), is disabled
+(removed from every group) or enabled again (re-added), gets a new password or a
+new username (new revision). `remove` appends nothing: a disabled employee was
+already taken out when disabled (so no second "removed"). No document is
+republished for any of this.
+(4) **No signing key = `not_ready` (detail "signing key")** for every change that
+needs a roster entry (an employee with groups, join / leave, disable, password,
+rename of an enabled employee in groups), the same answer `enroll` gives; the
+whole mutation rolls back. Employees with no group need no key. Consequence to
+decide: with the key lost or not registered, an employee in a group cannot be
+disabled from the dashboard (the server-side `verifyEmployee` of Step 12 will
+refuse a disabled employee regardless, but the offline revocation needs a
+signature). The alternative (accept the change and sign later) needs a pending
+queue the plan does not have.
+(5) **What still republishes (direct grants).** `setDirectApps` (every change,
+unless the employee is disabled), and, for an enabled employee who has grants,
+joining or leaving a group and being disabled / enabled (the catalogue lists
+enabled employees under an app in `employeeIds` and adds web apps granted
+directly). `lib/publish.ts` is unchanged; `publish.ts` `loadGroupInputs` now
+reads the group's members (`.take(2000)`), one empty `employeeApps.by_employee`
+read each, the employee and the apps only for members who have grants, and loads
+directly granted apps. RISK: a 2,000-member group costs ~2,000 index reads per
+publish run for that group; a counter of grants per organization would let it
+skip them (needs a schema field).
+(6) **Revision.** `revision` guards the profile form: `update`, `setGroups`,
+`setDirectApps`, `addEmployee` and `removeEmployee` bump it when something
+changed; `setDisabled`, `setPassword` and `unlock` do not (they do not touch the
+form). The dashboard's `useUpdateEmployee` chains `update`, `setGroups`,
+`setDirectApps` with the revision each returned and resolves to the last one.
+(7) **Limits.** `create` checks `maxEmployees` (`plan_limit`, detail
+"employees"; suspended organizations too); `employeeCount` / `activeEmployeeCount`
+are kept in `create`, `setDisabled`, `remove`. New `MAX_EMPLOYEE_GROUPS` (100),
+`MAX_EMPLOYEE_APPS` (50), `MAX_GROUP_EMPLOYEES` (2,000: `too_large` detail "group
+employees", checked by a scan only when the organization has >= 2,000 employees).
+`unlock` audits as `employee.updated` (the closed list of 4.11 has no
+`employee.unlocked`). Audit summaries carry names and counts only.
+(8) **Dashboard.** The paginated list moved to its own seam `data/employees/`
+(`@rulebox/employees-impl`, like apps and devices; kept out of the `core` chunk);
+the `useEmployeesScreen` of the group page's add dialog subscribes to nothing
+while its text is blank. Error sentences for the employee password rule
+(`invalid_argument` field `password` with detail `length` / `username`), a taken
+username and `not_ready` "signing key". Fixed a CSS bug the Extra apps list
+showed (rows squeezed and hints overlapped: `.dash-checks > *` no longer
+shrinks).
+(9) Verified: `pnpm test:convex`, `typecheck:convex`, `lint:convex`, `test:scripts`;
+dashboard `typecheck`, `lint`, `test`, `build`, `size`. Not verified: any call to
+a real Convex deployment, the signed roster on a real device (Step 13).
+
 ---
 
 ### Step 12 — Device API (server)

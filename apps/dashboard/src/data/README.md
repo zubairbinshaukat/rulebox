@@ -10,8 +10,9 @@ satisfy the same `DataApi` type (`api.ts`):
 - `live/hooks.ts` — the real backend. Session, sign-in, MFA, account and
   members are live (Step 4, against the Step 3 functions); settings, the plan
   and groups since Step 5; enrollment codes since Step 6, the device
-  lists since Step 7 and the app lists since Step 10 (each in its own seam, see below); apps,
-  assignments and file types since Step 10; every other hook answers `not_ready` with the
+  lists since Step 7, the app lists since Step 10 and the employee list since Step 11 (each in its own
+  seam, see below); apps, assignments and file types since Step 10; employees and group members since
+  Step 11; every other hook answers `not_ready` with the
   detail `NOT_DEPLOYED` (`api.ts`), which a region shows as "Coming in a
   later step", until its Convex step lands. `live/convex.ts` holds the
   adapters (`useMemberQuery`, `useMapped`, `mapError`).
@@ -77,12 +78,12 @@ Status: **live** = wired in `live/hooks.ts`; everything else answers
 | `useGroupDetail` | `api.groups.get` → `{ group, apps }` mapped to `GroupDetail` (assignment `_id` = the `appAssignments` id) | live |
 | `useCreateGroup` / `useUpdateGroup` / `useDeleteGroup` | `api.groups.create` → id (`plan_limit` detail "groups", `conflict` field "name") / `rename` (`expectedRevision`; description undefined = unchanged, "" = cleared) → `{ revision }` / `remove` (major; `has_dependents` detail lists what to move first) | live |
 | `useAssignApp` / `useUpdateAssignment` / `useUnassignApp` | `api.groups.assignApp` (`conflict` field `app`, `too_large` detail `group apps`, `invalid_argument` field `app` for an archived app) / `updateAssignment` (optimistic on `groups:get`; nothing changed = no write) / `unassignApp`; each republishes the group | live |
-| `useAddGroupEmployee` / `useRemoveGroupEmployee` | `api.groups` members section (Step 11) |
-| `useEmployeesScreen({ groupId, search })` | `api.employees.list` (paginated) / `api.employees.search` |
-| `useEmployeeDetail(id \| "new")` | `api.employees.get` ("new": only the pickers + `defaultQuotaGb`) |
-| `useCreateEmployee` | `api.employees.create` |
-| `useUpdateEmployee` | `api.employees.update`, then `setGroups`, then `setDirectApps` (each with `expectedRevision`) |
-| `useSetEmployeePassword` / `useSetEmployeeDisabled` / `useUnlockEmployee` / `useDeleteEmployee` | `useAction(api.employees.setPassword)` / `setDisabled` / `unlock` / `remove` |
+| `useAddGroupEmployee` / `useRemoveGroupEmployee` | `api.groups.addEmployee` / `removeEmployee` (already a member / not a member = no write; each appends one signed roster entry for the group, and republishes it only when the employee has direct apps; `too_large` detail `employee groups` / `group employees`) | live |
+| `useEmployeesScreen({ groupId, search })` | `usePaginatedQuery(api.employees.list, { groupId? })` (50 per page, newest first, each row with its first 5 groups) while the search box is empty, `api.employees.search({ text, groupId? })` (best 50, `searchCapped`) while it has text; text that is blank after trimming subscribes to nothing. In `data/employees/` | live |
+| `useEmployeeDetail(id \| "new")` | `api.employees.get` (never a hash: `passwordSet` comes from `passwordSetAt`; the lockout row is shown only while `lockedUntil` is in the future) / `api.employees.options` for "new" (the pickers + `defaultQuotaGb`) | live |
+| `useCreateEmployee` | `useAction(api.employees.create)` → id (an action: the optional first password is hashed on the server; `conflict` field `username`, `invalid_argument` field `name` / `username` / `quotaGb` / `password` with detail `length` or `username`, `plan_limit` detail `employees`, `not_ready` detail `signing key`, `rate_limited`) | live |
+| `useUpdateEmployee` | `api.employees.update`, then `setGroups`, then `setDirectApps` (each with the revision the one before returned; a part that changes nothing writes nothing). Resolves to `{ revision }`, which the form sends next | live |
+| `useSetEmployeePassword` / `useSetEmployeeDisabled` / `useUnlockEmployee` / `useDeleteEmployee` | `useAction(api.employees.setPassword)` (300 per hour per organization) / `setDisabled` / `unlock` / `remove` (major: fresh step-up; `invalid_argument` field `disabled` while the employee is active) | live |
 | `useAppsScreen({ archived })` | `usePaginatedQuery(api.apps.list, { archived })` (50 per page, newest first; per row a group count capped at 101 and the icon address, never install results). In `data/apps/` | live |
 | `useAppDetail(id \| "new")` | `api.apps.get` (`"new"` subscribes to nothing and answers a constant form). `installCounts` is `{}` until Step 17 (`apps:installSummary`) | live |
 | `useAppOptions` | `api.apps.options` (non-archived apps, at most 500): the group page's assign dialog, subscribed only while it is open | live |
@@ -135,6 +136,15 @@ The same pattern a fourth time: `AppsApi` in `apps/api.ts`, `apps/live.ts`, demo
 the `core` chunk). It holds `useAppsScreen` and `useAppInstalls`, imported only by the lazy Apps and
 App screens.
 
+## Employee-list hook (`data/employees/`, plan Step 11)
+
+The same pattern a fifth time: `EmployeesApi` in `employees/api.ts`, `employees/live.ts`, the demo hook in
+`demo/hooks.ts` re-exported by `employees/demo.ts`, picked by the `@rulebox/employees-impl` alias
+(`vite.config.ts` and the `paths` entry in `tsconfig.json`; `vite.config.ts` keeps the folder out of the
+`core` chunk). It holds `useEmployeesScreen` only, imported by the lazy Employees and Group detail screens.
+Two server queries sit behind it (`employees:list`, `employees:search`); only one is subscribed at a time.
+Everything else about employees is in `DataApi` / `live/hooks.ts` (`live/employees.ts` maps `employees:get`).
+
 ## Step-up hooks (`data/stepup/`, plan 4.16)
 
 A second, smaller seam with the same rules (`StepUpApi` in `stepup/api.ts`,
@@ -165,7 +175,7 @@ The demo store applies the same rule (`runMutation(role, fn, "unlocked" |
 
 Shapes the plan does not pin down and the backend must match (or the types
 change):
-`EmployeeDetail.groupOptions/appOptions/defaultQuotaGb`,
 `AppDetail.groupOptions`, `DeviceRow` without `deviceStatus`.
+(`EmployeeDetail.groupOptions/appOptions/defaultQuotaGb` now match `employees:get`.)
 (`MfaStatus` and `MembersScreen` now match Step 3's functions; `account:me`
 also returns `memberships`, unused until v2.)

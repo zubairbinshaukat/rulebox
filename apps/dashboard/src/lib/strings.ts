@@ -158,6 +158,7 @@ export const strings = {
     lastOwner: "The organization needs at least one Owner. Make someone else an Owner first.",
     rateLimited: "Too many attempts. Try again in an hour or ask an Owner for a reset code.",
     notReady: "This isn't ready yet. Try again in a moment.",
+    notReadySigningKey: "The signing key isn't set up yet, so this change can't be signed for the PCs. An Owner can register it in Settings, Signing.",
     inviteInvalid: "That code is not valid, was already used, or has expired.",
     accountDisabled: "This account is disabled. Ask an Owner to turn it back on.",
     mfaInvalidCode: "That code didn't work. Codes change every 30 seconds — try the newest one.",
@@ -196,6 +197,7 @@ export const strings = {
     passwordEqualsUsername: "The password can't be the same as the username.",
     passwordsDiffer: "The two passwords are not the same.",
     username: "Use 1 to 64 letters, digits, dots, dashes or underscores.",
+    usernameTaken: "Another employee already has this username.",
     quota: "Enter a whole number from 0 to 2000, or leave it empty for the default.",
     integerRange: (min: number, max: number) =>
       `Enter a whole number from ${formatNumber(min)} to ${formatNumber(max)}.`,

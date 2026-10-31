@@ -861,6 +861,10 @@ a.dash-stat:hover {
   border-radius: var(--rb-r-md);
   background: var(--rb-surface);
 }
+/* In a scrolling list the rows keep their height (they would squeeze and a hint would overlap the next row). */
+.dash-checks > * {
+  flex-shrink: 0;
+}
 .dash-checks--inline {
   flex-direction: row;
   flex-wrap: wrap;

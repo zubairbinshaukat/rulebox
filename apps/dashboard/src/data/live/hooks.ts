@@ -25,6 +25,7 @@ import { AppError } from "../../lib/errors";
 import { cappedNumber, type Audience, type KeysScreen, type MeResult, type PagedState, type QueryState, type Role } from "../types";
 import { appDetailOf, NEW_APP } from "./apps";
 import { deviceDetailOf } from "./devices";
+import { employeeDetailOf, newEmployeeOf } from "./employees";
 import { mapError, useMapped, useMappedState, useMemberQuery } from "./convex";
 
 const notReady = () => new AppError({ code: "not_ready", detail: NOT_DEPLOYED });
@@ -35,12 +36,6 @@ function useNotReady<T>(): QueryState<T> {
 
 function useNotReadyPaged<T>(): PagedState<T> {
   return { status: "error", error: notReady(), retry: () => undefined };
-}
-
-function useNotReadyMutation<A, R>(): (args: A) => Promise<R> {
-  return async () => {
-    throw notReady();
-  };
 }
 
 /** Convex Auth sign-in through the "password" credentials provider (convex/auth.ts). */
@@ -357,17 +352,97 @@ export const liveApi: DataApi = {
       [unassign],
     );
     return useMapped(call);
-  },  useAddGroupEmployee: useNotReadyMutation,
-  useRemoveGroupEmployee: useNotReadyMutation,
+  },
+  // Group members (Step 11): each adds or removes one signed roster entry for the group.
+  useAddGroupEmployee() {
+    const add = useMutation(api.groups.addEmployee);
+    const call = useCallback(
+      async (a: { groupId: string; employeeId: string }) => {
+        await add(a);
+      },
+      [add],
+    );
+    return useMapped(call);
+  },
+  useRemoveGroupEmployee() {
+    const remove = useMutation(api.groups.removeEmployee);
+    const call = useCallback(
+      async (a: { groupId: string; employeeId: string }) => {
+        await remove(a);
+      },
+      [remove],
+    );
+    return useMapped(call);
+  },
 
-  useEmployeesScreen: useNotReadyPaged,
-  useEmployeeDetail: useNotReady,
-  useCreateEmployee: useNotReadyMutation,
-  useUpdateEmployee: useNotReadyMutation,
-  useSetEmployeePassword: useNotReadyMutation,
-  useSetEmployeeDisabled: useNotReadyMutation,
-  useUnlockEmployee: useNotReadyMutation,
-  useDeleteEmployee: useNotReadyMutation,
+  // ---- employees (Step 11). The paginated list is in `../employees/live.ts`. Passwords go
+  // to an action (hashed on the server) and are never read back; `remove` is a major action.
+  useEmployeeDetail(employeeId) {
+    const isNew = employeeId === "new";
+    const existing = useMappedState(useMemberQuery(api.employees.get, isNew ? "skip" : { employeeId }), employeeDetailOf);
+    const blank = useMappedState(useMemberQuery(api.employees.options, isNew ? {} : "skip"), newEmployeeOf);
+    return isNew ? blank : existing;
+  },
+  useCreateEmployee() {
+    return useMapped(useAction(api.employees.create));
+  },
+  useUpdateEmployee() {
+    const update = useMutation(api.employees.update);
+    const setGroups = useMutation(api.employees.setGroups);
+    const setApps = useMutation(api.employees.setDirectApps);
+    // Three server calls, each guarded by the revision the one before returned; one that
+    // changes nothing writes nothing and returns the revision it was given.
+    const call = useCallback(
+      async (a: { employeeId: string; expectedRevision: number; name: string; username: string; quotaGb?: number; groupIds: string[]; appIds: string[] }) => {
+        const { employeeId } = a;
+        const profile = await update({ employeeId, expectedRevision: a.expectedRevision, name: a.name, username: a.username, quotaGb: a.quotaGb });
+        const groups = await setGroups({ employeeId, expectedRevision: profile.revision, groupIds: a.groupIds });
+        return await setApps({ employeeId, expectedRevision: groups.revision, appIds: a.appIds });
+      },
+      [update, setGroups, setApps],
+    );
+    return useMapped(call);
+  },
+  useSetEmployeePassword() {
+    const set = useAction(api.employees.setPassword);
+    const call = useCallback(
+      async (a: { employeeId: string; password: string }) => {
+        await set(a);
+      },
+      [set],
+    );
+    return useMapped(call);
+  },
+  useSetEmployeeDisabled() {
+    const set = useMutation(api.employees.setDisabled);
+    const call = useCallback(
+      async (a: { employeeId: string; disabled: boolean }) => {
+        await set(a);
+      },
+      [set],
+    );
+    return useMapped(call);
+  },
+  useUnlockEmployee() {
+    const unlock = useMutation(api.employees.unlock);
+    const call = useCallback(
+      async (a: { employeeId: string }) => {
+        await unlock(a);
+      },
+      [unlock],
+    );
+    return useMapped(call);
+  },
+  useDeleteEmployee() {
+    const remove = useMutation(api.employees.remove);
+    const call = useCallback(
+      async (a: { employeeId: string }) => {
+        await remove(a);
+      },
+      [remove],
+    );
+    return useMapped(call);
+  },
 
   // ---- apps (Step 10). The paginated lists are in `../apps/live.ts`. `remove` is a major action
   // (fresh step-up); `useMapped` opens the dialog and retries.

@@ -14,7 +14,6 @@ import type {
   DeviceLiveness,
   EmployeeDetail,
   EmployeeInput,
-  EmployeeRow,
   FileTypesScreen,
   GroupDetail,
   GroupRow,
@@ -99,11 +98,17 @@ export interface DataApi {
   useAddGroupEmployee: Mutation<{ groupId: Id; employeeId: Id }>;
   useRemoveGroupEmployee: Mutation<{ groupId: Id; employeeId: Id }>;
 
-  // ---- employees
-  useEmployeesScreen: (filter: { groupId?: Id; search?: string }) => PagedState<EmployeeRow> & { searchCapped?: boolean };
+  // ---- employees. The paginated list (`useEmployeesScreen`) is in its own seam,
+  // `./employees`, like the device and app lists.
   useEmployeeDetail: (employeeId: Id | "new") => QueryState<EmployeeDetail>;
+  /** `password` (optional) is hashed on the server; nothing returns it. */
   useCreateEmployee: Mutation<EmployeeInput, Id>;
-  useUpdateEmployee: Mutation<EmployeeInput & { employeeId: Id; expectedRevision: number }>;
+  /**
+   * Profile, groups and direct apps in one call (the live hook chains
+   * `employees:update`, `setGroups`, `setDirectApps`, each with the revision
+   * the one before returned). Resolves to the revision to send next.
+   */
+  useUpdateEmployee: Mutation<Omit<EmployeeInput, "password"> & { employeeId: Id; expectedRevision: number }, { revision: number }>;
   useSetEmployeePassword: Mutation<{ employeeId: Id; password: string }>;
   useSetEmployeeDisabled: Mutation<{ employeeId: Id; disabled: boolean }>;
   useUnlockEmployee: Mutation<{ employeeId: Id }>;

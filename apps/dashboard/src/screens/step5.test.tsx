@@ -15,6 +15,8 @@ import { strings } from "../lib/strings";
 // screens must handle (limit reached, has_dependents, stale edit, hotkey
 // grammar, weak PIN, step-up retry), not the backend (convex/*.test.ts).
 const cx = vi.hoisted(() => ({
+  /** One empty array for every unset page: the real hook keeps `results` stable between renders. */
+  none: [] as unknown[],
   results: {} as Record<string, unknown>,
   /** `usePaginatedQuery` answers by function name: rows of one loaded, exhausted page. */
   pages: {} as Record<string, unknown[]>,
@@ -27,7 +29,7 @@ vi.mock("convex/react", () => ({
     Object.fromEntries(Object.entries(req).map(([k, r]) => [k, cx.results[getFunctionName(r.query)]])),
   useQuery: () => undefined,
   usePaginatedQuery: (ref: FunctionReference<"query">) => ({
-    results: cx.pages[getFunctionName(ref)] ?? [],
+    results: cx.pages[getFunctionName(ref)] ?? cx.none,
     status: "Exhausted",
     isLoading: false,
     loadMore: () => undefined,

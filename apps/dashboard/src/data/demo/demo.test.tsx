@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { act, renderHook, waitFor } from "@testing-library/react";
-import { demoApi, demoDevicesApi } from "./hooks";
+import { demoApi, demoDevicesApi, demoEmployeesApi } from "./hooks";
 import { db, resetDemo, setControls, setSession, simulateConcurrentEdit } from "./store";
 import { errorCodeOf } from "../../lib/errors";
 
@@ -15,7 +15,7 @@ describe("demo data layer", () => {
   it("paginates 50 at a time and reports exhaustion", async () => {
     resetDemo();
     signInAs("owner@demo.rulebox.test");
-    const { result } = renderHook(() => demoApi.useEmployeesScreen({}));
+    const { result } = renderHook(() => demoEmployeesApi.useEmployeesScreen({}));
     await waitFor(() => expect(result.current.status).toBe("ready"), { timeout: 3000 });
     const total = db().employees.length; // 140
     let loaded = 50;

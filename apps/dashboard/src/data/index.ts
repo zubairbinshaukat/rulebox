@@ -46,7 +46,6 @@ export const {
   useUnassignApp,
   useAddGroupEmployee,
   useRemoveGroupEmployee,
-  useEmployeesScreen,
   useEmployeeDetail,
   useCreateEmployee,
   useUpdateEmployee,

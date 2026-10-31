@@ -149,7 +149,7 @@ function ExistingEmployee({ d }: { d: Detail }) {
               key={formKey}
               d={d}
               onSave={async (x) => {
-                await update({
+                const saved = await update({
                   employeeId: d._id,
                   expectedRevision: revision,
                   name: x.name.trim(),
@@ -158,7 +158,8 @@ function ExistingEmployee({ d }: { d: Detail }) {
                   groupIds: x.groupIds,
                   appIds: x.appIds,
                 });
-                setRevision((r) => r + 1);
+                // The revision to send next: the server bumps it once per part that changed.
+                setRevision(saved.revision);
                 toast(s.saved);
               }}
               onReload={() => {

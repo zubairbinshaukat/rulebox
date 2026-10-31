@@ -65,19 +65,24 @@ export function messageForCode(code: ErrorCode, data?: Omit<ErrorData, "code">):
     case "not_found":
       return e.notFound;
     case "invalid_argument":
-      // The server's password rule (12-256, a letter and a digit) has its own sentence.
-      if (data?.field === "password") return strings.validate.passwordMember;
+      // The member password rule (12-256, a letter and a digit) has its own sentence; so
+      // does the employee rule (8-256, not the username), which the server marks with a detail.
+      if (data?.field === "password") {
+        if (data.detail === "length") return strings.validate.passwordEmployee;
+        if (data.detail === "username") return strings.validate.passwordEqualsUsername;
+        return strings.validate.passwordMember;
+      }
       return data?.field ? e.invalidField(data.field) : e.invalidArgument;
     case "stale_edit":
       return e.staleEdit;
     case "conflict":
-      return e.conflict;
+      return data?.field === "username" ? strings.validate.usernameTaken : e.conflict;
     case "last_owner":
       return e.lastOwner;
     case "rate_limited":
       return e.rateLimited;
     case "not_ready":
-      return e.notReady;
+      return data?.detail === "signing key" ? e.notReadySigningKey : e.notReady;
     case "invite_invalid":
       return e.inviteInvalid;
     case "account_disabled":

@@ -8,6 +8,7 @@ import { useCallback, useEffect, useState } from "react";
 import type { DataApi } from "../api";
 import type { AppsApi } from "../apps/api";
 import type { DevicesApi } from "../devices/api";
+import type { EmployeesApi } from "../employees/api";
 import type { EnrollmentApi } from "../enrollment/api";
 import {
   DEMO_TOTP,
@@ -134,8 +135,8 @@ function employeeRow(db: DemoDb, e: DemoDb["employees"][number]): EmployeeRow {
     username: e.username,
     quotaGb: e.quotaGb,
     disabled: e.disabled,
-    groups: groups.slice(0, 3),
-    moreGroups: groups.length > 3,
+    groups: groups.slice(0, 5),
+    moreGroups: groups.length > 5,
   };
 }
 
@@ -854,7 +855,7 @@ export const demoApi: DataApi = {
         runMutation("admin", ({ db, audit }) => {
           find(db.groups, groupId);
           const e = find(db.employees, employeeId);
-          if (db.groupMembers.some((m) => m.groupId === groupId && m.employeeId === employeeId)) fail("conflict");
+          if (db.groupMembers.some((m) => m.groupId === groupId && m.employeeId === employeeId)) return; // already a member: no change
           db.groupMembers.push({ groupId, employeeId });
           e.revision++;
           audit({ action: "employee.groupsChanged", targetType: "employee", targetId: e._id, targetLabel: e.name, summary: `Added to “${groupName(db, groupId)}”.` });
@@ -876,30 +877,7 @@ export const demoApi: DataApi = {
     );
   },
 
-  // ---- employees
-  useEmployeesScreen({ groupId, search }) {
-    const text = search?.trim().toLowerCase() ?? "";
-    const paged = useDemoPaged(`employees:list:${groupId ?? ""}:${text}`, (db) => {
-      requireReader();
-      let list = db.employees;
-      if (groupId) {
-        const ids = new Set(db.groupMembers.filter((m) => m.groupId === groupId).map((m) => m.employeeId));
-        list = list.filter((e) => ids.has(e._id));
-      }
-      if (text) {
-        return list
-          .filter((e) => `${e.name} ${e.username}`.toLowerCase().includes(text))
-          .slice(0, 51)
-          .map((e) => employeeRow(db, e));
-      }
-      return [...list].sort((a, b) => b.createdAt - a.createdAt).map((e) => employeeRow(db, e));
-    });
-    if (text && paged.status === "ready") {
-      return { ...paged, canLoadMore: false, searchCapped: paged.canLoadMore };
-    }
-    return paged;
-  },
-
+  // ---- employees (the list is in `demoEmployeesApi`, its own seam)
   useEmployeeDetail(employeeId) {
     return useDemoQuery(`employees:get:${employeeId}`, (db): EmployeeDetail => {
       requireReader();
@@ -951,6 +929,9 @@ export const demoApi: DataApi = {
           const username = validate.normalizeUsername(input.username);
           if (db.employees.some((e) => e.username === username)) fail("conflict", { field: "username" });
           if (input.password && validate.employeePassword(input.password, username)) fail("invalid_argument", { field: "password" });
+          // As `employees:create`: suspended, then the plan's `maxEmployees`.
+          if (db.org.plan.status !== "active") fail("plan_limit", { detail: "suspended" });
+          if (db.employees.length + 1 > db.org.plan.limits.maxEmployees) fail("plan_limit", { detail: "employees" });
           const id = newId("emp");
           db.employees.push({
             _id: id,
@@ -1004,6 +985,7 @@ export const demoApi: DataApi = {
             targetLabel: name,
             summary: changed.length ? `Changed: ${changed.join(", ")}.` : "Saved without changes.",
           });
+          return { revision: e.revision };
         }),
       [],
     );
@@ -1027,8 +1009,9 @@ export const demoApi: DataApi = {
       ({ employeeId, disabled }) =>
         runMutation("admin", ({ db, audit }) => {
           const e = find(db.employees, employeeId);
+          if (e.disabled === disabled) return;
+          // As the server: the revision guards the profile form, which this does not touch.
           e.disabled = disabled;
-          e.revision++;
           audit({
             action: disabled ? "employee.disabled" : "employee.enabled",
             targetType: "employee",
@@ -1846,8 +1829,7 @@ export const demoAppsApi: AppsApi = {
   },
 
   useAppInstalls(appId, state) {
-    return useDemoPaged(`apps:installs:${appId}:${state}`, (db) => {
-      requireReader();
+    return useDemoPaged(`apps:installs:${appId}:${state}`, (db) => {      requireReader();
       return db.installs
         .filter((i) => i.appId === appId && i.state === state)
         .sort((a, b) => b.updatedAt - a.updatedAt)
@@ -1862,5 +1844,34 @@ export const demoAppsApi: AppsApi = {
           updatedAt: i.updatedAt,
         }));
     });
+  },
+};
+
+/** Employee list: its own seam (data/employees), re-exported by data/employees/demo.ts. */
+export const demoEmployeesApi: EmployeesApi = {
+  useEmployeesScreen({ groupId, search }) {
+    const text = search?.trim().toLowerCase() ?? "";
+    // Asked to search for nothing (the group page's add dialog before typing): no rows.
+    const idle = search !== undefined && text === "";
+    const paged = useDemoPaged(`employees:list:${groupId ?? ""}:${text}:${idle}`, (db) => {
+      requireReader();
+      if (idle) return [];
+      let list = db.employees;
+      if (groupId) {
+        const ids = new Set(db.groupMembers.filter((m) => m.groupId === groupId).map((m) => m.employeeId));
+        list = list.filter((e) => ids.has(e._id));
+      }
+      if (text) {
+        return list
+          .filter((e) => `${e.name} ${e.username}`.toLowerCase().includes(text))
+          .slice(0, 51)
+          .map((e) => employeeRow(db, e));
+      }
+      return [...list].sort((a, b) => b.createdAt - a.createdAt).map((e) => employeeRow(db, e));
+    });
+    if (text && paged.status === "ready") {
+      return { ...paged, canLoadMore: false, searchCapped: paged.canLoadMore };
+    }
+    return paged;
   },
 };

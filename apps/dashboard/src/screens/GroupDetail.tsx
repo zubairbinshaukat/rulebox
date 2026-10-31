@@ -7,13 +7,13 @@ import IconAdd from "~icons/solar/add-circle-linear";
 import {
   useAddGroupEmployee,
   useDeleteGroup,
-  useEmployeesScreen,
   useGroupDetail,
   useRemoveGroupEmployee,
   useUnassignApp,
   useUpdateGroup,
 } from "../data";
 import { useDevicesScreen } from "../data/devices";
+import { useEmployeesScreen } from "../data/employees";
 import type { AssignmentRow, DeviceRow, EmployeeRow, GroupDetail as Detail } from "../data/types";
 import { AppGlyph } from "../components/AppGlyph";
 import { Card } from "../components/Card";
@@ -47,8 +47,9 @@ const s = strings.group;
 
 /**
  * `groups:get` (+ the paginated devices `fleet:list({ groupId })` and
- * employees `employees:list({ groupId })`; the employees show "Coming in a
- * later step" until Step 11). Apps: assign, edit audience and pins, unassign.
+ * employees `employees:list({ groupId })`). Employees: add and remove (each is a
+ * signed roster change for the group). Apps: assign, edit audience and pins,
+ * unassign.
  */
 export default function GroupDetail() {
   const { id = "" } = useParams();
