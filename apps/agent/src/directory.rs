@@ -197,7 +197,7 @@ mod tests {
             Ok(DirectoryAnswer::Ok(found)) => {
                 assert_eq!(found.employee.id, "emp_maya");
                 assert_eq!(found.offline_days, 7);
-                assert_eq!(found.apps.len(), 4);
+                assert_eq!(found.apps.len(), 7);
             }
             other => panic!("unexpected {other:?}"),
         }

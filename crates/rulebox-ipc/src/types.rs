@@ -288,7 +288,7 @@ mod tests {
                 "kioskEnabled": true,
                 "apps": ["orders-web", "zoom", "tally", "libreoffice"],
                 "allowedSites": ["portal.company.com"],
-                "fileHandlers": { ".docx": "libreoffice" },
+                "fileHandlers": { ".docx": "libreoffice", ".txt": "notepad", ".csv": "notepad" },
                 "storage": { "defaultQuotaGb": 10 },
                 "branding": { "name": "Company OS", "logo": "..." },
                 "version": 42

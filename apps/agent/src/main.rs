@@ -279,6 +279,11 @@ fn run_real() -> anyhow::Result<u8> {
 pub(crate) fn real_deps(paths: DataPaths, install: InstallPaths) -> anyhow::Result<Deps> {
     let config = agent::load_config(&paths)?;
     let choice = directory::choose(&config, rulebox_win32::guard::is_test_machine(), false);
+    if choice == directory::DirectoryChoice::Fixture {
+        // Test machines only. Into the agent's own (protected) folder, never into
+        // the Staff profile: the agent must not create the employee's files folder.
+        fixtures::export_sample_files(&paths.fixture_samples());
+    }
     Ok(Deps {
         platform: Arc::new(platform::windows::WindowsPlatform::new(install.clone(), paths.clone())),
         backend_factory: backend::convex::ConvexBackend::factory(),

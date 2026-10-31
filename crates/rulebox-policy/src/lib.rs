@@ -12,7 +12,7 @@ pub const EXAMPLE_DESIRED_STATE_JSON: &str = r#"{
   "kioskEnabled": true,
   "apps": ["orders-web", "zoom", "tally", "libreoffice"],
   "allowedSites": ["portal.company.com"],
-  "fileHandlers": { ".docx": "libreoffice" },
+  "fileHandlers": { ".docx": "libreoffice", ".txt": "notepad", ".csv": "notepad" },
   "storage": { "defaultQuotaGb": 10 },
   "branding": { "name": "Company OS", "logo": "..." },
   "version": 42
@@ -88,6 +88,9 @@ mod tests {
         assert_eq!(state.version, 42);
         assert_eq!(state.storage.default_quota_gb, 10);
         assert_eq!(state.file_handlers.get(".docx").map(String::as_str), Some("libreoffice"));
+        // The demo catalogue's Notepad opens text and CSV files ("Open with" in the Files window).
+        assert_eq!(state.file_handlers.get(".txt").map(String::as_str), Some("notepad"));
+        assert_eq!(state.file_handlers.get(".csv").map(String::as_str), Some("notepad"));
 
         let original: serde_json::Value = serde_json::from_str(EXAMPLE_DESIRED_STATE_JSON).unwrap();
         let again = serde_json::to_value(&state).unwrap();

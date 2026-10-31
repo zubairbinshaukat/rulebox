@@ -1338,7 +1338,7 @@ mod tests {
         h.sign_in("maya", "demo").await.unwrap();
         let apps = h.apps().await.unwrap().apps;
         let ids: Vec<_> = apps.iter().map(|a| a.id.as_str()).collect();
-        assert_eq!(ids, ["files", "orders-web", "mail-web", "notepad"]);
+        assert_eq!(ids, ["files", "zubyr-web", "batwa-web", "zahras-pos-web", "example-web", "notepad", "needs-admin"]);
     }
 
     fn app_with_icon(id: &str, icon_chars: usize) -> AppEntry {
@@ -1645,7 +1645,7 @@ mod wire_tests {
         let apps = client.request(4, "apps.list", json!({})).await;
         match apps {
             Frame::Response { ok: true, result: Some(result), .. } => {
-                assert_eq!(result["apps"].as_array().map(Vec::len), Some(4));
+                assert_eq!(result["apps"].as_array().map(Vec::len), Some(7));
             }
             other => panic!("unexpected {other:?}"),
         }

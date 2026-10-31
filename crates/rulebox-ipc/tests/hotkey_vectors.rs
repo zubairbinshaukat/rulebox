@@ -3,6 +3,8 @@
 //! (`convex/hotkey.test.ts`), so the dashboard can never accept a combination
 //! the agent refuses, or the reverse (plan Phase 4, Section 4.10).
 
+#![allow(clippy::expect_used)]
+
 use rulebox_ipc::hotkey::parse;
 use serde_json::Value;
 

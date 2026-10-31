@@ -705,7 +705,7 @@ mod tests {
         assert_eq!(signed_in.outcome, SignInOutcome::Ok);
         assert!(signed_in.files_root.is_some_and(|root| root.starts_with(sim_files.to_str().unwrap())));
         assert!(!sim_files.exists(), "the agent must not create the files folder");
-        assert_eq!(client.call::<AppsList>(Empty {}).await.unwrap().apps.len(), 4);
+        assert_eq!(client.call::<AppsList>(Empty {}).await.unwrap().apps.len(), 7);
 
         let admin_config = config(admin_name);
         let status = tokio::task::spawn_blocking(move || {
