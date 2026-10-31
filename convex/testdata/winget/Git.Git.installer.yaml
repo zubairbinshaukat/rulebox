@@ -1,0 +1,26 @@
+# Test fixture (plan Step 10): the SHAPE of winget-pkgs/manifests/g/Git/Git/2.47.0/Git.Git.installer.yaml.
+# An Inno Setup exe with NO Silent switch in the manifest: the default /VERYSILENT set applies. x64 has
+# the machine scope, x86 declares none, the ARM build must be dropped. Hashes are made up.
+PackageIdentifier: Git.Git
+PackageVersion: 2.47.0
+InstallerType: inno
+Scope: machine
+InstallerSuccessCodes:
+  - 3010
+  - 1641
+UpgradeBehavior: install
+Installers:
+  - Architecture: x86
+    Scope: ""
+    InstallerUrl: https://github.com/git-for-windows/git/releases/download/v2.47.0.windows.1/Git-2.47.0-32-bit.exe
+    InstallerSha256: CCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCC1
+  - Architecture: x64
+    InstallerUrl: https://github.com/git-for-windows/git/releases/download/v2.47.0.windows.1/Git-2.47.0-64-bit.exe
+    InstallerSha256: CCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCC2
+    InstallationMetadata:
+      DefaultInstallLocation: '%ProgramFiles%\Git'
+  - Architecture: arm64
+    InstallerUrl: https://github.com/git-for-windows/git/releases/download/v2.47.0.windows.1/Git-2.47.0-arm64.exe
+    InstallerSha256: CCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCC3
+ManifestType: installer
+ManifestVersion: 1.6.0

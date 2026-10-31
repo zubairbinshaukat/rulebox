@@ -1,0 +1,634 @@
+import { paginationOptsValidator, paginationResultValidator } from "convex/server";
+import { v, type Infer } from "convex/values";
+import { internal } from "./_generated/api";
+import type { Doc, Id } from "./_generated/dataModel";
+import { env, internalMutation, internalQuery } from "./_generated/server";
+import { publishApp } from "./lib/appPublish";
+import { writeAudit } from "./lib/audit";
+import { checkRevision, getInOrg, nextRevision } from "./lib/authz";
+import { normalizeAppDescription, normalizeAppName, normalizeDesktop, normalizeHue, normalizeWeb, withAppId, wingetIdProblem, wingetVersionProblem } from "./lib/appRules";
+import { base64Decode, sha256HexOfBytes } from "./lib/crypto";
+import { deepEqual } from "./lib/deepEqual";
+import { fail } from "./lib/errors";
+import { memberAction, memberMutation, memberQuery } from "./lib/functions";
+import { webUrlProblem } from "./lib/hostRules";
+import {
+  APP_EMPLOYEE_COUNT_CAP,
+  APP_GROUP_COUNT_CAP,
+  APP_PURGE_BATCH,
+  MAX_APP_ASSIGNMENTS,
+  MAX_APP_OPTIONS,
+  MAX_APP_FILE_TYPES,
+  MAX_APP_PAGE,
+  MAX_GROUPS_JOINED,
+  WINGET_CACHE_MS,
+} from "./lib/limits";
+import { assertWithinLimit, bumpOrgStats, bumpStats } from "./lib/plans";
+import { consumeOrFail } from "./lib/rateLimits";
+import { audience, appKind, desktopSpec, webSpec, wingetResolved } from "./lib/validators";
+import { iconDataUrl, fetchWebMeta as scanWebMeta, pngSize } from "./lib/webmeta";
+import { resolveWinget as resolveFromGithub } from "./lib/winget";
+
+// Apps (plan Step 10; 4.8). An app is a website or a Windows program an admin
+// adds once and assigns to groups. Everything that decides what a device may
+// run is validated HERE (`lib/appRules.ts`, `lib/pathRules.ts`); the dashboard
+// mirrors the rules for inline messages. A change that alters what a device's
+// document says calls `requestPublish` for the groups that carry the app, and
+// only when something really changed (write only on change).
+//
+// `appCount` in `orgStats` counts NON-archived apps: archiving frees a plan
+// slot, restoring takes one (and is refused at the limit).
+
+const actorArg = v.object({ type: v.literal("member"), id: v.string(), label: v.string() });
+
+/** The icon's address (stable while the file exists), or undefined. */
+async function iconUrlOf(ctx: { storage: { getUrl(id: Id<"_storage">): Promise<string | null> } }, app: Doc<"apps">): Promise<string | undefined> {
+  if (app.icon === undefined) return undefined;
+  return (await ctx.storage.getUrl(app.icon.storageId)) ?? undefined;
+}
+
+// ---------------------------------------------------------------- reads
+
+const appRow = v.object({
+  _id: v.id("apps"),
+  name: v.string(),
+  description: v.optional(v.string()),
+  kind: appKind,
+  source: v.optional(desktopSpec.fields.source),
+  hue: v.optional(v.number()),
+  iconUrl: v.optional(v.string()),
+  archived: v.boolean(),
+  /** Groups that assign the app, capped (`APP_GROUP_COUNT_CAP` + 1 = "100+"). */
+  groupCount: v.number(),
+  /** Install counts come with Step 17 (`apps:list` never reads `installResults`). */
+  summary: v.null(),
+});
+
+/**
+ * The organization's apps, newest first (viewer, paginated by
+ * `apps.by_org_archived`). Per row: its group count (one capped index read)
+ * and icon address. Never `installResults`.
+ */
+export const list = memberQuery("viewer")({
+  args: { paginationOpts: paginationOptsValidator, archived: v.boolean() },
+  returns: paginationResultValidator(appRow),
+  handler: async (ctx, args) => {
+    const numItems = args.paginationOpts.numItems;
+    if (!Number.isInteger(numItems) || numItems < 1 || numItems > MAX_APP_PAGE) fail("invalid_argument", { field: "paginationOpts" });
+    const result = await ctx.db
+      .query("apps")
+      .withIndex("by_org_archived", (q) => q.eq("orgId", ctx.orgId).eq("archived", args.archived))
+      .order("desc")
+      .paginate(args.paginationOpts);
+    const page = [];
+    for (const a of result.page) {
+      const groups = await ctx.db
+        .query("appAssignments")
+        .withIndex("by_app", (q) => q.eq("appId", a._id))
+        .take(APP_GROUP_COUNT_CAP + 1);
+      page.push({
+        _id: a._id,
+        name: a.name,
+        description: a.description,
+        kind: a.kind,
+        source: a.desktop?.source,
+        hue: a.hue,
+        iconUrl: await iconUrlOf(ctx, a),
+        archived: a.archived,
+        groupCount: groups.length,
+        summary: null,
+      });
+    }
+    return { ...result, page };
+  },
+});
+
+const assignmentRow = v.object({
+  /** The `appAssignments` id (what `groups:updateAssignment` / `unassignApp` take). */
+  _id: v.id("appAssignments"),
+  appId: v.id("apps"),
+  appName: v.string(),
+  appKind: appKind,
+  hue: v.optional(v.number()),
+  audience,
+  pinnedTaskbar: v.boolean(),
+  pinnedDesktop: v.boolean(),
+  groupId: v.id("groups"),
+  groupName: v.string(),
+});
+
+/**
+ * One app for its edit screen (viewer): the spec, its assignments with group
+ * names, the file types it opens, the number of employees who have it directly
+ * (`.take(1001)`: shown "1000+"), and the group picker. The install counts
+ * (`apps:installSummary`) come with Step 17.
+ */
+export const get = memberQuery("viewer")({
+  args: { appId: v.string() },
+  returns: v.object({
+    _id: v.id("apps"),
+    name: v.string(),
+    description: v.optional(v.string()),
+    kind: appKind,
+    hue: v.optional(v.number()),
+    iconUrl: v.optional(v.string()),
+    web: v.optional(webSpec),
+    desktop: v.optional(desktopSpec),
+    archived: v.boolean(),
+    revision: v.number(),
+    createdAt: v.number(),
+    assignments: v.array(assignmentRow),
+    fileTypes: v.array(v.string()),
+    directEmployeeCount: v.number(),
+    groupOptions: v.array(v.object({ _id: v.id("groups"), name: v.string() })),
+  }),
+  handler: async (ctx, args) => {
+    const app = await getInOrg(ctx, "apps", args.appId, ctx.orgId);
+    const assignments = await ctx.db
+      .query("appAssignments")
+      .withIndex("by_app", (q) => q.eq("appId", app._id))
+      .take(MAX_APP_ASSIGNMENTS);
+    const groups = await ctx.db
+      .query("groups")
+      .withIndex("by_org", (q) => q.eq("orgId", ctx.orgId))
+      .take(MAX_GROUPS_JOINED);
+    const names = new Map(groups.map((g) => [g._id, g.name]));
+    const rows = [];
+    for (const a of assignments) {
+      const groupName = names.get(a.groupId);
+      if (groupName === undefined) continue; // a group of another organization never matches
+      rows.push({
+        _id: a._id,
+        appId: app._id,
+        appName: app.name,
+        appKind: app.kind,
+        hue: app.hue,
+        audience: a.audience,
+        pinnedTaskbar: a.pinnedTaskbar,
+        pinnedDesktop: a.pinnedDesktop,
+        groupId: a.groupId,
+        groupName,
+      });
+    }
+    rows.sort((a, b) => a.groupName.localeCompare(b.groupName));
+    const handlers = await ctx.db
+      .query("fileHandlers")
+      .withIndex("by_app", (q) => q.eq("appId", app._id))
+      .take(MAX_APP_FILE_TYPES);
+    const direct = await ctx.db
+      .query("employeeApps")
+      .withIndex("by_app", (q) => q.eq("appId", app._id))
+      .take(APP_EMPLOYEE_COUNT_CAP + 1);
+    return {
+      _id: app._id,
+      name: app.name,
+      description: app.description,
+      kind: app.kind,
+      hue: app.hue,
+      iconUrl: await iconUrlOf(ctx, app),
+      web: app.web,
+      desktop: app.desktop,
+      archived: app.archived,
+      revision: app.revision,
+      createdAt: app.createdAt,
+      assignments: rows,
+      fileTypes: handlers.map((h) => h.extension).sort(),
+      directEmployeeCount: direct.length,
+      groupOptions: groups.map((g) => ({ _id: g._id, name: g.name })).sort((a, b) => a.name.localeCompare(b.name)),
+    };
+  },
+});
+
+/**
+ * The apps a group may be given (viewer): non-archived, by name, up to 500
+ * (the picker of the group page; subscribed only while its dialog is open).
+ */
+export const options = memberQuery("viewer")({
+  args: {},
+  returns: v.array(v.object({ _id: v.id("apps"), name: v.string(), kind: appKind, canOpenFiles: v.boolean() })),
+  handler: async (ctx) => {
+    const apps = await ctx.db
+      .query("apps")
+      .withIndex("by_org_archived", (q) => q.eq("orgId", ctx.orgId).eq("archived", false))
+      .take(MAX_APP_OPTIONS);
+    return apps
+      .map((a) => ({ _id: a._id, name: a.name, kind: a.kind, canOpenFiles: a.kind === "desktop" && (a.desktop?.fileArgTemplate.length ?? 0) > 0 }))
+      .sort((a, b) => a.name.localeCompare(b.name));
+  },
+});
+
+// ---------------------------------------------------------------- create / update
+
+const webInput = {
+  name: v.string(),
+  description: v.optional(v.string()),
+  hue: v.optional(v.number()),
+  url: v.string(),
+  allowedDomains: v.array(v.string()),
+};
+
+/**
+ * Add a website (admin). `invalid_argument` names the field (`url`,
+ * `allowedDomains`, `name`...); `plan_limit` (detail "apps") at the plan's
+ * `maxApps`. Permissions are the defaults (PRD 24.1): not editable yet.
+ */
+export const createWeb = memberMutation("admin")({
+  args: webInput,
+  returns: v.id("apps"),
+  handler: async (ctx, args) => {
+    const name = normalizeAppName(args.name);
+    const description = normalizeAppDescription(args.description);
+    const hue = normalizeHue(args.hue);
+    const web = normalizeWeb(args.url, args.allowedDomains);
+    const stats = await assertWithinLimit(ctx, ctx.orgId, "apps");
+    const appId = await ctx.db.insert("apps", {
+      orgId: ctx.orgId,
+      name,
+      description,
+      kind: "web",
+      hue,
+      web,
+      archived: false,
+      revision: 0,
+      createdAt: Date.now(),
+    });
+    await bumpStats(ctx, stats, { appCount: 1 });
+    await writeAudit(ctx, {
+      orgId: ctx.orgId,
+      actor: ctx.actor,
+      action: "app.created",
+      targetType: "app",
+      targetId: appId,
+      targetLabel: name,
+      summary: `Added the website ${name}`,
+    });
+    return appId;
+  },
+});
+
+/**
+ * Add a Windows program (admin). The program's path, arguments, install
+ * source (SHA-256 and https URL), file argument and cleanup folders are
+ * checked by `lib/appRules.ts`. A portable app's `{AppId}` in its path is
+ * replaced by the new id inside this transaction.
+ */
+export const createDesktop = memberMutation("admin")({
+  args: { name: v.string(), description: v.optional(v.string()), hue: v.optional(v.number()), desktop: desktopSpec },
+  returns: v.id("apps"),
+  handler: async (ctx, args) => {
+    const name = normalizeAppName(args.name);
+    const description = normalizeAppDescription(args.description);
+    const hue = normalizeHue(args.hue);
+    const desktop = normalizeDesktop(args.desktop);
+    const stats = await assertWithinLimit(ctx, ctx.orgId, "apps");
+    const appId = await ctx.db.insert("apps", {
+      orgId: ctx.orgId,
+      name,
+      description,
+      kind: "desktop",
+      hue,
+      desktop,
+      archived: false,
+      revision: 0,
+      createdAt: Date.now(),
+    });
+    // The id is known now: a portable app's folder is `{RuleboxApps}\<id>\` (re-checked with the real id).
+    if (desktop.exe.includes("{AppId}")) {
+      await ctx.db.patch(appId, { desktop: normalizeDesktop(withAppId(desktop, appId), appId) });
+    }
+    await bumpStats(ctx, stats, { appCount: 1 });
+    await writeAudit(ctx, {
+      orgId: ctx.orgId,
+      actor: ctx.actor,
+      action: "app.created",
+      targetType: "app",
+      targetId: appId,
+      targetLabel: name,
+      summary: `Added the Windows program ${name}`,
+    });
+    return appId;
+  },
+});
+
+/**
+ * Change an app (admin): pass `web` for a website, `desktop` for a program
+ * (the kind never changes). `stale_edit` when someone saved in between.
+ * Nothing changed = no write, no new revision, no publish. A change bumps the
+ * revision (the agent retries a failed install on a new revision) and
+ * republishes the groups that carry the app.
+ */
+export const update = memberMutation("admin")({
+  args: {
+    appId: v.string(),
+    expectedRevision: v.number(),
+    web: v.optional(v.object(webInput)),
+    desktop: v.optional(v.object({ name: v.string(), description: v.optional(v.string()), hue: v.optional(v.number()), desktop: desktopSpec })),
+  },
+  returns: v.object({ revision: v.number() }),
+  handler: async (ctx, args) => {
+    const app = await getInOrg(ctx, "apps", args.appId, ctx.orgId);
+    checkRevision(app, args.expectedRevision);
+    if ((args.web === undefined) === (args.desktop === undefined)) fail("invalid_argument", { field: "kind" });
+    if (args.web !== undefined && app.kind !== "web") fail("invalid_argument", { field: "kind" });
+    if (args.desktop !== undefined && app.kind !== "desktop") fail("invalid_argument", { field: "kind" });
+
+    const input = args.web ?? args.desktop!;
+    const fields: Pick<Doc<"apps">, "name" | "description" | "hue" | "web" | "desktop"> = {
+      name: normalizeAppName(input.name),
+      description: normalizeAppDescription(input.description),
+      hue: normalizeHue(input.hue),
+      web: args.web !== undefined ? normalizeWeb(args.web.url, args.web.allowedDomains, app.web?.permissions) : undefined,
+      desktop: args.desktop !== undefined ? normalizeDesktop(args.desktop.desktop, app._id) : undefined,
+    };
+    if (deepEqual(fields, { name: app.name, description: app.description, hue: app.hue, web: app.web, desktop: app.desktop })) {
+      return { revision: app.revision };
+    }
+    // A program that can no longer open files cannot be the target of a file-type rule.
+    if (app.kind === "desktop" && fields.desktop!.fileArgTemplate.length === 0 && (app.desktop?.fileArgTemplate.length ?? 0) > 0) {
+      const rule = await ctx.db
+        .query("fileHandlers")
+        .withIndex("by_app", (q) => q.eq("appId", app._id))
+        .first();
+      if (rule !== null) fail("has_dependents", { detail: "file types" });
+    }
+    const revision = nextRevision(app);
+    await ctx.db.patch(app._id, { ...fields, revision });
+    await writeAudit(ctx, {
+      orgId: ctx.orgId,
+      actor: ctx.actor,
+      action: "app.updated",
+      targetType: "app",
+      targetId: app._id,
+      targetLabel: fields.name,
+      summary: `Changed the app ${fields.name}`,
+    });
+    await publishApp(ctx, ctx.orgId, app._id);
+    return { revision };
+  },
+});
+
+/**
+ * Archive or restore an app (admin). An archived app disappears from every
+ * device's document at once (and frees a plan slot); restoring needs a free
+ * slot (`plan_limit`). Already in that state = no write.
+ */
+export const setArchived = memberMutation("admin")({
+  args: { appId: v.string(), archived: v.boolean() },
+  returns: v.null(),
+  handler: async (ctx, args) => {
+    const app = await getInOrg(ctx, "apps", args.appId, ctx.orgId);
+    if (app.archived === args.archived) return null;
+    const stats = args.archived ? null : await assertWithinLimit(ctx, ctx.orgId, "apps");
+    await ctx.db.patch(app._id, { archived: args.archived, revision: nextRevision(app) });
+    if (stats !== null) await bumpStats(ctx, stats, { appCount: 1 });
+    else await bumpOrgStats(ctx, ctx.orgId, { appCount: -1 });
+    await writeAudit(ctx, {
+      orgId: ctx.orgId,
+      actor: ctx.actor,
+      action: args.archived ? "app.archived" : "app.updated",
+      targetType: "app",
+      targetId: app._id,
+      targetLabel: app.name,
+      summary: args.archived ? `Archived the app ${app.name}` : `Restored the app ${app.name} from the archive`,
+    });
+    await publishApp(ctx, ctx.orgId, app._id);
+    return null;
+  },
+});
+
+/**
+ * Delete an archived app (admin, major: fresh step-up). `has_dependents`
+ * while a group still assigns it or a file type points at it; `invalid_argument`
+ * (field "archived") when it is not archived. The install results and direct
+ * employee grants are deleted in batches by `purgeApp`; the icon file goes now.
+ */
+export const remove = memberMutation("admin", { major: "apps:remove" })({
+  args: { appId: v.string() },
+  returns: v.null(),
+  handler: async (ctx, args) => {
+    const app = await getInOrg(ctx, "apps", args.appId, ctx.orgId);
+    if (!app.archived) fail("invalid_argument", { field: "archived" });
+    const dependents: string[] = [];
+    const assigned = await ctx.db
+      .query("appAssignments")
+      .withIndex("by_app", (q) => q.eq("appId", app._id))
+      .first();
+    if (assigned !== null) dependents.push("groups");
+    const rule = await ctx.db
+      .query("fileHandlers")
+      .withIndex("by_app", (q) => q.eq("appId", app._id))
+      .first();
+    if (rule !== null) dependents.push("file types");
+    if (dependents.length > 0) fail("has_dependents", { detail: dependents.join(", ") });
+
+    if (app.icon !== undefined) await ctx.storage.delete(app.icon.storageId);
+    await ctx.db.delete(app._id);
+    // Archived apps are not counted (archiving freed the slot): no counter change here.
+    await ctx.scheduler.runAfter(0, internal.apps.purgeApp, { appId: app._id });
+    await writeAudit(ctx, {
+      orgId: ctx.orgId,
+      actor: ctx.actor,
+      action: "app.deleted",
+      targetType: "app",
+      targetId: app._id,
+      targetLabel: app.name,
+      summary: `Deleted the app ${app.name}`,
+    });
+    return null;
+  },
+});
+
+/** Batches of a deleted app's install results and direct employee grants (reschedules while full). */
+export const purgeApp = internalMutation({
+  args: { appId: v.id("apps") },
+  returns: v.null(),
+  handler: async (ctx, args) => {
+    const installs = await ctx.db
+      .query("installResults")
+      .withIndex("by_app_state", (q) => q.eq("appId", args.appId))
+      .take(APP_PURGE_BATCH);
+    const grants = await ctx.db
+      .query("employeeApps")
+      .withIndex("by_app", (q) => q.eq("appId", args.appId))
+      .take(APP_PURGE_BATCH);
+    for (const row of installs) await ctx.db.delete(row._id);
+    for (const row of grants) await ctx.db.delete(row._id);
+    if (installs.length === APP_PURGE_BATCH || grants.length === APP_PURGE_BATCH) {
+      await ctx.scheduler.runAfter(0, internal.apps.purgeApp, { appId: args.appId });
+    }
+    return null;
+  },
+});
+
+/**
+ * Ask the agents to try a failed install again (admin): bumps the app's
+ * revision (the agent's attempt counter resets on a new revision) and
+ * republishes. Desktop apps with an install source only.
+ */
+export const retry = memberMutation("admin")({
+  args: { appId: v.string() },
+  returns: v.object({ revision: v.number() }),
+  handler: async (ctx, args) => {
+    const app = await getInOrg(ctx, "apps", args.appId, ctx.orgId);
+    if (app.kind !== "desktop" || app.desktop?.install === undefined || app.archived) fail("invalid_argument", { field: "appId" });
+    const revision = nextRevision(app);
+    await ctx.db.patch(app._id, { revision });
+    await writeAudit(ctx, {
+      orgId: ctx.orgId,
+      actor: ctx.actor,
+      action: "app.retryRequested",
+      targetType: "app",
+      targetId: app._id,
+      targetLabel: app.name,
+      summary: `Asked the PCs to retry installing ${app.name}`,
+    });
+    await publishApp(ctx, ctx.orgId, app._id);
+    return { revision };
+  },
+});
+
+// ---------------------------------------------------------------- icon
+
+/**
+ * Store the icon `fetchWebMeta` previewed (admin). `png` is the base64 of a
+ * PNG of at most 32 KiB and 512 x 512 pixels: anything else is
+ * `invalid_argument`. The bytes are re-checked here (the client is not
+ * trusted), hashed, put in file storage and recorded on the app with their
+ * SHA-256, which the document carries so the Staff App can verify the file.
+ * Replaces and deletes an earlier icon.
+ */
+export const saveIcon = memberAction("admin")({
+  args: { appId: v.string(), png: v.string() },
+  returns: v.null(),
+  handler: async (ctx, args): Promise<null> => {
+    // The preview is a `data:` URL; accept it whole or just its base64 part.
+    const bytes = base64Decode(args.png.replace(/^data:image\/png;base64,/, ""));
+    if (bytes === null || pngSize(bytes) === null) fail("invalid_argument", { field: "png" });
+    const storageId = await ctx.storage.store(new Blob([bytes as Uint8Array<ArrayBuffer>], { type: "image/png" }));
+    try {
+      await ctx.runMutation(internal.apps.attachIcon, {
+        orgId: ctx.orgId,
+        actor: ctx.actor,
+        appId: args.appId,
+        storageId,
+        sha256: sha256HexOfBytes(bytes),
+        sizeBytes: bytes.length,
+      });
+    } catch (e) {
+      await ctx.storage.delete(storageId); // no orphan file when the app is not this organization's
+      throw e;
+    }
+    return null;
+  },
+});
+
+/** The single writer of `apps.icon`. */
+export const attachIcon = internalMutation({
+  args: {
+    orgId: v.id("organizations"),
+    actor: actorArg,
+    appId: v.string(),
+    storageId: v.id("_storage"),
+    sha256: v.string(),
+    sizeBytes: v.number(),
+  },
+  returns: v.null(),
+  handler: async (ctx, args) => {
+    const app = await getInOrg(ctx, "apps", args.appId, args.orgId);
+    if (!/^[0-9a-f]{64}$/.test(args.sha256)) fail("invalid_argument", { field: "png" });
+    if (app.icon?.sha256 === args.sha256) {
+      await ctx.storage.delete(args.storageId); // the same icon again: keep the stored one, write nothing
+      return null;
+    }
+    if (app.icon !== undefined) await ctx.storage.delete(app.icon.storageId);
+    await ctx.db.patch(app._id, { icon: { storageId: args.storageId, sha256: args.sha256, sizeBytes: args.sizeBytes } });
+    await writeAudit(ctx, {
+      orgId: args.orgId,
+      actor: args.actor,
+      action: "app.updated",
+      targetType: "app",
+      targetId: app._id,
+      targetLabel: app.name,
+      summary: `Changed the icon of ${app.name}`,
+    });
+    await publishApp(ctx, args.orgId, app._id);
+    return null;
+  },
+});
+
+// ---------------------------------------------------------------- web metadata
+
+/**
+ * "Fetch details" (admin): reads the web app manifest of `url` and answers its
+ * name, a hue from `theme_color` and an icon preview (`data:` URL of a PNG up
+ * to 32 KiB). Stores nothing. `webmeta_failed` when the page cannot be read;
+ * `invalid_argument` (field "url") for an address no web app may have.
+ */
+export const fetchWebMeta = memberAction("admin")({
+  args: { url: v.string() },
+  returns: v.object({ name: v.optional(v.string()), hue: v.optional(v.number()), iconPreviewUrl: v.optional(v.string()) }),
+  handler: async (ctx, args): Promise<{ name?: string; hue?: number; iconPreviewUrl?: string }> => {
+    if (webUrlProblem(args.url) !== null) fail("invalid_argument", { field: "url" });
+    await consumeOrFail(ctx, "webMeta", ctx.orgId);
+    const meta = await scanWebMeta(args.url.trim());
+    return {
+      ...(meta.name !== undefined ? { name: meta.name } : {}),
+      ...(meta.hue !== undefined ? { hue: meta.hue } : {}),
+      ...(meta.iconPng !== undefined ? { iconPreviewUrl: iconDataUrl(meta.iconPng) } : {}),
+    };
+  },
+});
+
+// ---------------------------------------------------------------- winget
+
+/** A cached resolution younger than 24 hours (4.8), or null. `version` "" = "latest". */
+export const cachedWinget = internalQuery({
+  args: { packageId: v.string(), version: v.string(), now: v.number() },
+  returns: v.union(wingetResolved, v.null()),
+  handler: async (ctx, args) => {
+    const row = await ctx.db
+      .query("wingetCache")
+      .withIndex("by_package_version", (q) => q.eq("packageId", args.packageId).eq("version", args.version))
+      .first();
+    return row !== null && args.now - row.fetchedAt < WINGET_CACHE_MS ? row.resolved : null;
+  },
+});
+
+export const storeWinget = internalMutation({
+  args: { packageId: v.string(), version: v.string(), resolved: wingetResolved, now: v.number() },
+  returns: v.null(),
+  handler: async (ctx, args) => {
+    const existing = await ctx.db
+      .query("wingetCache")
+      .withIndex("by_package_version", (q) => q.eq("packageId", args.packageId).eq("version", args.version))
+      .first();
+    const fields = { packageId: args.packageId, version: args.version, resolved: args.resolved, fetchedAt: args.now };
+    if (existing === null) await ctx.db.insert("wingetCache", fields);
+    else await ctx.db.patch(existing._id, fields);
+    return null;
+  },
+});
+
+/**
+ * "Resolve" a winget package (admin): reads the public manifest from the
+ * winget-pkgs repository (never runs winget) and answers the install spec the
+ * form fills in. `version` empty = the newest. Cached 24 hours.
+ * `winget_unreachable` (GitHub unreachable or rate limited; set `GITHUB_TOKEN`
+ * to raise the limit), `winget_unsupported` with the reason.
+ */
+export const resolveWinget = memberAction("admin")({
+  args: { packageId: v.string(), version: v.optional(v.string()) },
+  returns: wingetResolved,
+  handler: async (ctx, args): Promise<Infer<typeof wingetResolved>> => {
+    const packageId = args.packageId.trim();
+    const version = args.version?.trim() === "" ? undefined : args.version?.trim();
+    if (wingetIdProblem(packageId)) fail("invalid_argument", { field: "packageId" });
+    if (version !== undefined && wingetVersionProblem(version)) fail("invalid_argument", { field: "version" });
+    const cached = await ctx.runQuery(internal.apps.cachedWinget, { packageId, version: version ?? "", now: Date.now() });
+    if (cached !== null) return cached;
+    await consumeOrFail(ctx, "wingetResolve", ctx.orgId);
+    const resolved = await resolveFromGithub(packageId, version, { githubToken: env.GITHUB_TOKEN });
+    await ctx.runMutation(internal.apps.storeWinget, { packageId, version: version ?? "", resolved, now: Date.now() });
+    return resolved;
+  },
+});

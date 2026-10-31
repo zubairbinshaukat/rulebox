@@ -54,6 +54,11 @@ async function recount(ctx: Db, orgId: Id<"organizations">): Promise<Recount> {
     // Never write a wrong (capped) count into a limit counter.
     fail("conflict", { detail: "too many rows to recount in one transaction" });
   }
+  const apps = await ctx.db
+    .query("apps")
+    .withIndex("by_org_archived", (q) => q.eq("orgId", orgId).eq("archived", false))
+    .take(MAX_RECOUNT_ROWS);
+  if (apps.length >= MAX_RECOUNT_ROWS) fail("conflict", { detail: "too many rows to recount in one transaction" });
   const wrote = await markDefaultGroup(ctx, groups);
   let deviceCount = 0;
   let noGroup = 0;
@@ -79,6 +84,8 @@ async function recount(ctx: Db, orgId: Id<"organizations">): Promise<Recount> {
     counters: {
       // The default group is not one of the plan's `maxGroups`.
       groupCount: groups.filter((g) => g.isDefault !== true).length,
+      // Archived apps are not counted (Step 10): archiving frees a plan slot.
+      appCount: apps.length,
       memberCount: members.filter((m) => m.status === "active").length,
       deviceCount,
       noGroupDeviceCount: noGroup,

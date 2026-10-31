@@ -139,4 +139,46 @@ export const IO_BUDGETS: Record<string, IoBudget> = {
   "keys:prepareRotation": { maxReads: 4 + 3, maxReadBytes: 4_096, maxWrites: 2, maxWriteBytes: 2_048 },
   // key rows; writes: retire old, activate next, audit, queue + scheduled run.
   "keys:finishRotation": { maxReads: 4 + 11, maxReadBytes: 8_192, maxWrites: 5, maxWriteBytes: 3_072 },
+
+  // ---- Step 10: apps, assignments, file types. Wrapper 3 reads (+1 step-up for writes). A change
+  // that alters a document ends in `publishApp`: assignments by app (<= 501), grants (<= 51) with
+  // their groups (<= 21 each, only when grants exist), the publish queue (1 read; insert or patch
+  // + one scheduled run) = typically 3 reads, 2 writes.
+  // One page of <= 50 apps, each with its group count (`.take(101)`) and icon address. Never
+  // `installResults`. RISK: 50 apps each in 100 groups read ~5,000 assignments; a free tenant
+  // (20 apps, 3 groups) reads ~80.
+  "apps:list": { maxReads: 3 + 50 + 50 * 101, maxReadBytes: 900_000, maxWrites: 0, maxWriteBytes: 0, live: true },
+  // app, assignments (<= 500), groups (<= 500), file types (<= 201), direct grants (<= 1,001).
+  "apps:get": { maxReads: 3 + 1 + 500 + 500 + 201 + 1001, maxReadBytes: 700_000, maxWrites: 0, maxWriteBytes: 0, live: true },
+  // <= 500 non-archived apps (the group page's picker; subscribed only while its dialog is open).
+  "apps:options": { maxReads: 3 + 500, maxReadBytes: 500_000, maxWrites: 0, maxWriteBytes: 0, live: true },
+  // orgPlans, orgStats (+ platformSettings before migration); writes: app, orgStats, audit.
+  "apps:createWeb": { maxReads: 4 + 3, maxReadBytes: 4_096, maxWrites: 3, maxWriteBytes: 4_096 },
+  // as createWeb, + the portable app's path patched once its id is known.
+  "apps:createDesktop": { maxReads: 4 + 3, maxReadBytes: 4_096, maxWrites: 4, maxWriteBytes: 8_192 },
+  // app, file types (only when the file argument is cleared), publishApp; unchanged: 1 read, 0 writes.
+  "apps:update": { maxReads: 4 + 1 + 1 + 501 + 51 + 51 * 21 + 1, maxReadBytes: 250_000, maxWrites: 4, maxWriteBytes: 8_192 },
+  // app, orgPlans/orgStats when restoring, publishApp; writes: app, orgStats, audit, queue (+ scheduled run).
+  "apps:setArchived": { maxReads: 4 + 1 + 3 + 501 + 51 + 51 * 21 + 1, maxReadBytes: 250_000, maxWrites: 5, maxWriteBytes: 4_096 },
+  // app, assignments `.first()`, file types `.first()`; writes: app, audit, one scheduled purge (+ icon file).
+  "apps:remove": { maxReads: 4 + 3, maxReadBytes: 6_144, maxWrites: 3, maxWriteBytes: 2_048 },
+  // app, publishApp; writes: app, audit, queue (`purgeApp`, internal: <= 100 install results + <= 100 grants per run).
+  "apps:retry": { maxReads: 4 + 1 + 501 + 51 + 51 * 21 + 1, maxReadBytes: 250_000, maxWrites: 4, maxWriteBytes: 4_096 },
+  // authorize (4) + attachIcon: app, publishApp; writes: app, audit, queue. The upload is an action.
+  "apps:saveIcon": { maxReads: 4 + 1 + 501 + 51 + 51 * 21 + 1, maxReadBytes: 250_000, maxWrites: 4, maxWriteBytes: 4_096 },
+  // authorize (4) + 2 rate-limiter rows; the fetch is outside the database.
+  "apps:fetchWebMeta": { maxReads: 6, maxReadBytes: 4_096, maxWrites: 1, maxWriteBytes: 512 },
+  // authorize (4) + cache lookup + cache write + 2 rate-limiter rows (a cached answer reads 5).
+  "apps:resolveWinget": { maxReads: 8, maxReadBytes: 8_192, maxWrites: 2, maxWriteBytes: 4_096 },
+  // <= 201 rules, <= 500 apps (the picker).
+  "fileHandlers:list": { maxReads: 3 + 201 + 500 + 10, maxReadBytes: 500_000, maxWrites: 0, maxWriteBytes: 0, live: true },
+  // app, rule by extension, rules (<= 200, only for a new one), publishApp x2; writes: rule, audit, queue.
+  "fileHandlers:set": { maxReads: 4 + 1 + 1 + 200 + 2 * (501 + 51 + 51 * 21) + 1, maxReadBytes: 500_000, maxWrites: 4, maxWriteBytes: 2_048 },
+  // rule, app, publishApp; writes: delete, audit, queue.
+  "fileHandlers:remove": { maxReads: 4 + 2 + 501 + 51 + 51 * 21 + 1, maxReadBytes: 250_000, maxWrites: 4, maxWriteBytes: 2_048 },
+  // group, app, assignment `.first()`, assignments (<= 150), publish queue; writes: assignment, audit, queue.
+  "groups:assignApp": { maxReads: 4 + 2 + 1 + 150 + 1, maxReadBytes: 60_000, maxWrites: 4, maxWriteBytes: 2_048 },
+  // assignment, group, app, queue; unchanged: 1 read, 0 writes.
+  "groups:updateAssignment": { maxReads: 4 + 4, maxReadBytes: 6_144, maxWrites: 3, maxWriteBytes: 2_048 },
+  "groups:unassignApp": { maxReads: 4 + 4, maxReadBytes: 6_144, maxWrites: 4, maxWriteBytes: 2_048 },
 };

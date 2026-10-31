@@ -1,0 +1,18 @@
+# Test fixture (plan Step 10): the SHAPE of winget-pkgs/manifests/s/Spotify/Spotify/1.2.52/Spotify.Spotify.installer.yaml.
+# Every entry is Scope: user (per-user install): Rulebox must refuse it, because the installer runs as SYSTEM
+# and a per-user install would land in SYSTEM's profile. Hashes are made up.
+PackageIdentifier: Spotify.Spotify
+PackageVersion: 1.2.52.442
+InstallerType: nullsoft
+Scope: user
+InstallerSwitches:
+  Silent: /silent
+Installers:
+  - Architecture: x86
+    InstallerUrl: https://download.scdn.co/SpotifySetup.exe
+    InstallerSha256: DDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDD1
+  - Architecture: x64
+    InstallerUrl: https://download.scdn.co/SpotifyFullSetupX64.exe
+    InstallerSha256: DDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDD2
+ManifestType: installer
+ManifestVersion: 1.6.0

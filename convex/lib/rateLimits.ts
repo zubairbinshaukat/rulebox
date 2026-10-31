@@ -43,6 +43,11 @@ export const rateLimiter = new RateLimiter(components.rateLimiter, {
   // per organization (each click wakes up to 50 PCs).
   watch: { kind: "token bucket", rate: 6, period: MINUTE_MS, capacity: 6 },
   checkNow: { kind: "token bucket", rate: 1, period: MINUTE_MS, capacity: 1 },
+  // Apps (plan Step 10). Both actions make the server fetch from the internet
+  // for an admin (web metadata, a GitHub manifest): per organization, so one
+  // tenant cannot use the deployment as a proxy or burn the GitHub quota.
+  webMeta: { kind: "token bucket", rate: 20, period: MINUTE_MS, capacity: 20 },
+  wingetResolve: { kind: "token bucket", rate: 20, period: MINUTE_MS, capacity: 20 },
 });
 
 export type LimitName =
@@ -53,7 +58,9 @@ export type LimitName =
   | "enrollGlobal"
   | "enrollPerOrg"
   | "watch"
-  | "checkNow";
+  | "checkNow"
+  | "webMeta"
+  | "wingetResolve";
 
 /** Read-only: throw `rate_limited` when the bucket is empty, without consuming. */
 export async function checkOrFail(

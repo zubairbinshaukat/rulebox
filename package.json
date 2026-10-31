@@ -30,7 +30,8 @@
     "convex": "catalog:",
     "convex-helpers": "catalog:",
     "hash-wasm": "catalog:",
-    "lucia": "catalog:"
+    "lucia": "catalog:",
+    "yaml": "catalog:"
   },
   "devDependencies": {
     "@edge-runtime/vm": "catalog:",

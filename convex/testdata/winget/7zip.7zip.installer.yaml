@@ -1,0 +1,36 @@
+# Test fixture (plan Step 10): the SHAPE of winget-pkgs/manifests/7/7zip/7zip/24.08/7zip.7zip.installer.yaml
+# (singleton schema 1.6). URLs are real-looking, hashes are made up. A package with an MSI that has a
+# ProductCode next to plain exe installers and an ARM build: the machine-wide x64 MSI must win.
+PackageIdentifier: 7zip.7zip
+PackageVersion: "24.08"
+InstallerLocale: en-US
+InstallerType: nullsoft
+Installers:
+  - Architecture: x86
+    InstallerUrl: https://www.7-zip.org/a/7z2408.exe
+    InstallerSha256: AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA1
+    ProductCode: 7-Zip
+  - Architecture: x64
+    InstallerUrl: https://www.7-zip.org/a/7z2408-x64.exe
+    InstallerSha256: AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA2
+    ProductCode: 7-Zip
+  - Architecture: arm64
+    InstallerUrl: https://www.7-zip.org/a/7z2408-arm64.exe
+    InstallerSha256: AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA3
+  - Architecture: x64
+    InstallerType: wix
+    Scope: machine
+    InstallerUrl: https://www.7-zip.org/a/7z2408-x64.msi
+    InstallerSha256: BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB4
+    ProductCode: '{23170F69-40C1-2702-2408-000001000000}'
+    AppsAndFeaturesEntries:
+      - DisplayName: 7-Zip 24.08 (x64 edition)
+        ProductCode: '{23170F69-40C1-2702-2408-000001000000}'
+  - Architecture: arm64
+    InstallerType: wix
+    Scope: machine
+    InstallerUrl: https://www.7-zip.org/a/7z2408-arm64.msi
+    InstallerSha256: BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB5
+    ProductCode: '{23170F69-40C1-2702-2408-000001000001}'
+ManifestType: installer
+ManifestVersion: 1.6.0

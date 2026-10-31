@@ -193,3 +193,50 @@ export const MAX_TRUST_PAGE = 200;
 export const ROSTER_SNAPSHOT_EVERY = 200;
 export const MAX_ROSTER_FETCH = 200;
 
+
+/** Apps, winget, web metadata, file types (plan Step 10; 4.8). */
+export const MAX_APP_NAME = 60;
+export const MAX_APP_DESCRIPTION = 300;
+/** Allowed domains an admin lists for a web app; the URL's own host is added on top (plan Step 10 item 3). */
+export const MAX_ALLOWED_DOMAINS = 20;
+export const MAX_APP_URL = 2_048;
+/** `args`, `fileArgTemplate` and silent switches: entries and characters per entry (plan 4.8 "Path templates"). */
+export const MAX_APP_ARGS = 16;
+export const MAX_APP_ARG_LENGTH = 200;
+/** Session cleanup folders per app (4.12; the count is not in the plan, it bounds the document). */
+export const MAX_RESET_FOLDERS = 20;
+export const MAX_EXE_PATH = 260;
+/** Largest installer the agent downloads (4.8: 4 GiB). */
+export const MAX_INSTALLER_BYTES = 4 * 1024 * 1024 * 1024;
+export const MAX_SUCCESS_EXIT_CODES = 16;
+/** `apps:list` page size cap and the per-row group count cap (shown as "100+"). */
+export const MAX_APP_PAGE = 50;
+export const APP_GROUP_COUNT_CAP = 100;
+/** `apps:get`: assignments (`appAssignments.by_app`), file types and direct employees read per app. */
+export const MAX_APP_ASSIGNMENTS = 500;
+export const MAX_APP_FILE_TYPES = 201;
+export const APP_EMPLOYEE_COUNT_CAP = 1_000;
+/** File-type rules per organization (`fileHandlers`, tiny). */
+export const MAX_FILE_HANDLERS = 200;
+/** Rows of a removed app deleted per run of `apps:purgeApp` (it reschedules while full). */
+export const APP_PURGE_BATCH = 100;
+/** Icons: a PNG of at most 32 KiB and 512 x 512 pixels (plan Step 10 "Do NOT"). */
+export const MAX_ICON_BYTES = 32 * 1024;
+export const MAX_ICON_PIXELS = 512;
+/** Web metadata fetch (plan Step 10 item 5): page, manifest, redirects, time. */
+export const WEBMETA_MAX_PAGE_BYTES = 1024 * 1024;
+export const WEBMETA_MAX_MANIFEST_BYTES = 256 * 1024;
+export const WEBMETA_TIMEOUT_MS = 10_000;
+export const WEBMETA_MAX_REDIRECTS = 4;
+/** Winget: manifest and listing size caps, cache lifetime (4.8: 24 hours). */
+export const WINGET_MAX_MANIFEST_BYTES = 512 * 1024;
+export const WINGET_MAX_LISTING_BYTES = 512 * 1024;
+export const WINGET_TIMEOUT_MS = 10_000;
+export const WINGET_CACHE_MS = DAY_MS;
+/** Version folders tried (newest first) when the latest has no installer manifest. */
+export const WINGET_MAX_VERSION_TRIES = 3;
+/** App pickers (`apps.by_org_archived`, plan 4.3 `.take(500)`). */
+export const MAX_APP_OPTIONS = 500;
+/** `publishApp`: direct employee grants followed to their groups; above these it republishes every device instead. */
+export const MAX_GRANT_LOOKUPS = 50;
+export const MAX_GRANT_GROUPS = 20;

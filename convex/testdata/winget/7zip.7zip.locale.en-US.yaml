@@ -1,0 +1,9 @@
+PackageIdentifier: 7zip.7zip
+PackageVersion: "24.08"
+PackageLocale: en-US
+Publisher: Igor Pavlov
+PackageName: 7-Zip
+License: LGPL-2.1
+ShortDescription: File archiver
+ManifestType: defaultLocale
+ManifestVersion: 1.6.0

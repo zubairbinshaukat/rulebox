@@ -14,6 +14,7 @@ import {
   MAX_GROUPS_LISTED,
 } from "./lib/limits";
 import { assertWithinLimit, bumpOrgStats, bumpStats } from "./lib/plans";
+import { requestPublish } from "./lib/publish";
 import { appKind, audience } from "./lib/validators";
 
 // Groups (plan Step 5.6; PRD 3.1). Tiny table: every read goes through
@@ -79,16 +80,20 @@ export const list = memberQuery("viewer")({
   },
 });
 
-/** One group with its counts and assigned apps (viewer). Devices/employees lists come with Steps 7/11. */
+/** One group with its counts and assigned apps (viewer). The devices list is `fleet:list({ groupId })`. */
 export const get = memberQuery("viewer")({
   args: { groupId: v.string() },
   returns: v.object({
     group: groupRow,
     apps: v.array(
       v.object({
+        /** The `appAssignments` id: what `updateAssignment` / `unassignApp` take. */
+        assignmentId: v.id("appAssignments"),
         appId: v.id("apps"),
         name: v.string(),
         kind: appKind,
+        hue: v.optional(v.number()),
+        archived: v.boolean(),
         audience,
         pinnedTaskbar: v.boolean(),
         pinnedDesktop: v.boolean(),
@@ -106,9 +111,12 @@ export const get = memberQuery("viewer")({
       const app = await ctx.db.get(a.appId);
       if (app === null || app.orgId !== ctx.orgId) continue;
       apps.push({
+        assignmentId: a._id,
         appId: app._id,
         name: app.name,
         kind: app.kind,
+        hue: app.hue,
+        archived: app.archived,
         audience: a.audience,
         pinnedTaskbar: a.pinnedTaskbar,
         pinnedDesktop: a.pinnedDesktop,
@@ -263,6 +271,110 @@ export const remove = memberMutation("admin", { major: "groups:remove" })({
       targetLabel: group.name,
       summary: `Deleted the group ${group.name}`,
     });
+    return null;
+  },
+});
+
+// ---------------------------------------------------------------- app assignments (plan Step 10 item 6)
+
+/** The pins and audience of one assignment (the same arguments `assignApp` and `updateAssignment` take). */
+const assignmentFields = {
+  audience,
+  pinnedTaskbar: v.boolean(),
+  pinnedDesktop: v.boolean(),
+};
+
+/**
+ * Give a group an app (admin; unlocked session): its devices then install and
+ * show it. One assignment per group and app (`conflict`, field "app");
+ * `invalid_argument` (field "app") for an archived app; `too_large` (detail
+ * "group apps") at MAX_GROUP_APPS, the most one document carries. Republishes
+ * the group.
+ */
+export const assignApp = memberMutation("admin")({
+  args: { groupId: v.string(), appId: v.string(), ...assignmentFields },
+  returns: v.object({ assignmentId: v.id("appAssignments") }),
+  handler: async (ctx, args) => {
+    const group = await getInOrg(ctx, "groups", args.groupId, ctx.orgId);
+    const app = await getInOrg(ctx, "apps", args.appId, ctx.orgId);
+    if (app.archived) fail("invalid_argument", { field: "app" });
+    const same = await ctx.db
+      .query("appAssignments")
+      .withIndex("by_group_app", (q) => q.eq("groupId", group._id).eq("appId", app._id))
+      .first();
+    if (same !== null) fail("conflict", { field: "app" });
+    const all = await ctx.db
+      .query("appAssignments")
+      .withIndex("by_group", (q) => q.eq("groupId", group._id))
+      .take(MAX_GROUP_APPS);
+    if (all.length >= MAX_GROUP_APPS) fail("too_large", { detail: "group apps" });
+    const assignmentId = await ctx.db.insert("appAssignments", {
+      orgId: ctx.orgId,
+      groupId: group._id,
+      appId: app._id,
+      audience: args.audience,
+      pinnedTaskbar: args.pinnedTaskbar,
+      pinnedDesktop: args.pinnedDesktop,
+    });
+    await writeAudit(ctx, {
+      orgId: ctx.orgId,
+      actor: ctx.actor,
+      action: "app.assigned",
+      targetType: "app",
+      targetId: app._id,
+      targetLabel: app.name,
+      summary: `Assigned the app ${app.name} to the group ${group.name}`,
+    });
+    await requestPublish(ctx, ctx.orgId, { groupIds: [group._id] });
+    return { assignmentId };
+  },
+});
+
+/** Change an assignment's audience and pins (admin). Nothing changed = no write, no publish. */
+export const updateAssignment = memberMutation("admin")({
+  args: { assignmentId: v.string(), ...assignmentFields },
+  returns: v.null(),
+  handler: async (ctx, args) => {
+    const a = await getInOrg(ctx, "appAssignments", args.assignmentId, ctx.orgId);
+    if (a.audience === args.audience && a.pinnedTaskbar === args.pinnedTaskbar && a.pinnedDesktop === args.pinnedDesktop) {
+      return null;
+    }
+    const group = await ctx.db.get(a.groupId);
+    const app = await ctx.db.get(a.appId);
+    await ctx.db.patch(a._id, { audience: args.audience, pinnedTaskbar: args.pinnedTaskbar, pinnedDesktop: args.pinnedDesktop });
+    await writeAudit(ctx, {
+      orgId: ctx.orgId,
+      actor: ctx.actor,
+      action: "app.updated",
+      targetType: "app",
+      targetId: a.appId,
+      targetLabel: app?.name,
+      summary: `Changed how ${app?.name ?? "an app"} is offered to the group ${group?.name ?? ""}`.trim(),
+    });
+    await requestPublish(ctx, ctx.orgId, { groupIds: [a.groupId] });
+    return null;
+  },
+});
+
+/** Take an app away from a group (admin; unlocked session). Its devices stop offering it; an installed msi may be removed (the app's `removeWhenUnassigned`). */
+export const unassignApp = memberMutation("admin")({
+  args: { assignmentId: v.string() },
+  returns: v.null(),
+  handler: async (ctx, args) => {
+    const a = await getInOrg(ctx, "appAssignments", args.assignmentId, ctx.orgId);
+    const group = await ctx.db.get(a.groupId);
+    const app = await ctx.db.get(a.appId);
+    await ctx.db.delete(a._id);
+    await writeAudit(ctx, {
+      orgId: ctx.orgId,
+      actor: ctx.actor,
+      action: "app.unassigned",
+      targetType: "app",
+      targetId: a.appId,
+      targetLabel: app?.name,
+      summary: `Took the app ${app?.name ?? ""} away from the group ${group?.name ?? ""}`.replace(/\s+/g, " "),
+    });
+    await requestPublish(ctx, ctx.orgId, { groupIds: [a.groupId] });
     return null;
   },
 });

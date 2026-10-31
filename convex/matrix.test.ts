@@ -4,7 +4,7 @@ import { enrollDevice } from "../tests/convex/devices";
 import { asMember, codeOf, expectNoSecrets, giveStepUp, makeOrg, type T } from "../tests/convex/identity";
 import { MAJOR_ACTIONS } from "./lib/stepUp";
 import { MINUTE_MS } from "./lib/limits";
-import { DEFAULT_ORG_SETTINGS } from "./lib/validators";
+import { DEFAULT_ORG_SETTINGS, DEFAULT_WEB_PERMISSIONS } from "./lib/validators";
 import { api } from "./_generated/api";
 import type { Id } from "./_generated/dataModel";
 import { modules } from "./test.setup";
@@ -33,6 +33,11 @@ type Fixture = {
   tokenId: Id<"enrollmentTokens">;
   deviceId: Id<"devices">;
   checkId: Id<"fleetChecks">;
+  /** A website no group assigns, a program that can open files, a website assigned to `groupId`, and a rule for the program. */
+  appId: Id<"apps">;
+  desktopAppId: Id<"apps">;
+  assignmentId: Id<"appAssignments">;
+  handlerId: Id<"fileHandlers">;
   /** The device's stored secret hashes (current and previous). */
   storedHashes: string[];
   accessor: Record<Caller, ReturnType<T["withIdentity"]> | T>;
@@ -77,6 +82,31 @@ async function fixture(): Promise<Fixture> {
   const checkId = await t.run((ctx) =>
     ctx.db.insert("fleetChecks", { orgId, deviceIds: [deviceId], requestedAt: Date.now(), requestedBy: target.memberId }),
   );
+  const { appId, desktopAppId, assignmentId, handlerId } = await t.run(async (ctx) => {
+    const web = (name: string) => ({
+      orgId,
+      name,
+      kind: "web" as const,
+      web: { url: "https://example.com", allowedDomains: ["example.com"], permissions: DEFAULT_WEB_PERMISSIONS },
+      archived: false,
+      revision: 0,
+      createdAt: Date.now(),
+    });
+    const appId = await ctx.db.insert("apps", web("Docs"));
+    const wiki = await ctx.db.insert("apps", web("Wiki"));
+    const desktopAppId = await ctx.db.insert("apps", {
+      orgId,
+      name: "Reader",
+      kind: "desktop",
+      desktop: { source: "preinstalled", exe: "{ProgramFiles}\\Reader\\reader.exe", args: [], fileArgTemplate: ["{file}"], resetFolders: [] },
+      archived: false,
+      revision: 0,
+      createdAt: Date.now(),
+    });
+    const assignmentId = await ctx.db.insert("appAssignments", { orgId, groupId, appId: wiki, audience: "everyone", pinnedTaskbar: false, pinnedDesktop: true });
+    const handlerId = await ctx.db.insert("fileHandlers", { orgId, extension: ".txt", appId: desktopAppId });
+    return { appId, desktopAppId, assignmentId, handlerId };
+  });
   const foreignOrg = await makeOrg(t, "Other");
   type StepUp = "fresh" | "stale" | "idle" | "factorOnly" | "none";
   const m = async (role: "owner" | "admin" | "viewer", mfa: boolean, status: "active" | "disabled" = "active", o = orgId, s: StepUp = "none") => {
@@ -96,6 +126,10 @@ async function fixture(): Promise<Fixture> {
     tokenId,
     deviceId,
     checkId,
+    appId,
+    desktopAppId,
+    assignmentId,
+    handlerId,
     storedHashes,
     accessor: {
       unauth: t,
@@ -168,6 +202,10 @@ const ADMIN_UNLOCKED: Row["expect"] = {
   ownerNoFactor: "step_up_setup_required",
 };
 const ADMIN_MAJOR: Row["expect"] = { ...ADMIN_UNLOCKED, ownerStale: "step_up_required" };
+/** The smallest PNG the icon check accepts: signature + a 1 x 1 IHDR chunk (the pixel data is not decoded). */
+const TINY_PNG_B64 = btoa(
+  String.fromCharCode(0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 13, 0x49, 0x48, 0x44, 0x52, 0, 0, 0, 1, 0, 0, 0, 1, 8, 6, 0, 0, 0, 0x1f, 0x15, 0xc4, 0x89),
+);
 const unique = () => `G ${Math.random().toString(36).slice(2, 10)}`;
 const fakePasskeyId = "jh7bp5vtxgdvg1vq4dzkrymc8s8gvwzm";
 
@@ -402,7 +440,98 @@ const ROWS: Row[] = [
   { name: "keys:registerActive", call: (a) => a.mutation(api.keys.registerActive, {}), expect: { ...OWNER, owner: "ok", foreign: "ok" } },
   { name: "keys:prepareRotation", call: (a) => a.mutation(api.keys.prepareRotation, {}), expect: { ...OWNER, owner: "not_ready", foreign: "not_ready" } },
   { name: "keys:finishRotation", call: (a) => a.mutation(api.keys.finishRotation, {}), expect: { ...OWNER, owner: "conflict", foreign: "conflict" } },
+  // ---- Step 10: apps, assignments, file types. Writes that need nothing but the caller's rights
+  // are chosen so that every allowed caller gets the same answer (no-op updates, or a refusal
+  // that comes after the authorization); the foreign owner acts on THEIR organization.
   {
+    name: "apps:list",
+    call: (a) => a.query(api.apps.list, { paginationOpts: { numItems: 10, cursor: null }, archived: false }),
+    expect: { ...VIEWER, foreign: "ok" },
+  },
+  { name: "apps:get", call: (a, f) => a.query(api.apps.get, { appId: f.appId }), expect: { ...VIEWER, foreign: "not_found" } },
+  { name: "apps:options", call: (a) => a.query(api.apps.options, {}), expect: { ...VIEWER, foreign: "ok" } },
+  {
+    name: "apps:createWeb",
+    call: (a) => a.mutation(api.apps.createWeb, { name: unique(), url: "https://example.com", allowedDomains: [] }),
+    expect: { ...ADMIN_UNLOCKED, foreign: "ok" },
+  },
+  {
+    name: "apps:createDesktop",
+    call: (a) =>
+      a.mutation(api.apps.createDesktop, {
+        name: unique(),
+        desktop: { source: "preinstalled", exe: "{ProgramFiles}\\Acme\\a.exe", args: [], fileArgTemplate: [], resetFolders: [] },
+      }),
+    expect: { ...ADMIN_UNLOCKED, foreign: "ok" },
+  },
+  {
+    name: "apps:update",
+    // The same values again: no write, every allowed caller gets the same answer.
+    call: (a, f) =>
+      a.mutation(api.apps.update, { appId: f.appId, expectedRevision: 0, web: { name: "Docs", url: "https://example.com", allowedDomains: [] } }),
+    expect: { ...ADMIN_UNLOCKED, foreign: "not_found" },
+  },
+  {
+    name: "apps:setArchived",
+    call: (a, f) => a.mutation(api.apps.setArchived, { appId: f.appId, archived: false }),
+    expect: { ...ADMIN_UNLOCKED, foreign: "not_found" },
+  },
+  {
+    name: "apps:remove",
+    call: (a, f) => a.mutation(api.apps.remove, { appId: f.appId }),
+    expect: { ...ADMIN_MAJOR, default: "invalid_argument", foreign: "not_found" }, // not archived
+  },
+  {
+    name: "apps:retry",
+    call: (a, f) => a.mutation(api.apps.retry, { appId: f.appId }),
+    expect: { ...ADMIN_UNLOCKED, default: "invalid_argument", foreign: "not_found" }, // a website has nothing to install
+  },
+  {
+    name: "apps:saveIcon",
+    call: (a, f) => a.action(api.apps.saveIcon, { appId: f.appId, png: TINY_PNG_B64 }),
+    expect: { ...ADMIN_UNLOCKED, foreign: "not_found" },
+  },
+  {
+    name: "apps:fetchWebMeta",
+    // An address no web app may have is refused before anything is fetched.
+    call: (a) => a.action(api.apps.fetchWebMeta, { url: "http://example.com" }),
+    expect: { ...ADMIN_UNLOCKED, default: "invalid_argument" },
+  },
+  {
+    name: "apps:resolveWinget",
+    call: (a) => a.action(api.apps.resolveWinget, { packageId: "not a package" }),
+    expect: { ...ADMIN_UNLOCKED, default: "invalid_argument" },
+  },
+  { name: "fileHandlers:list", call: (a) => a.query(api.fileHandlers.list, {}), expect: { ...VIEWER, foreign: "ok" } },
+  {
+    name: "fileHandlers:set",
+    call: (a, f) => a.mutation(api.fileHandlers.set, { extension: ".pdf", appId: f.desktopAppId }),
+    expect: { ...ADMIN_UNLOCKED, foreign: "not_found" },
+  },
+  {
+    name: "fileHandlers:remove",
+    // The first allowed caller deletes the rule; the next ones find nothing.
+    call: (a, f) => a.mutation(api.fileHandlers.remove, { handlerId: f.handlerId }),
+    expect: { ...ADMIN_MAJOR, owner: "not_found", foreign: "not_found" },
+  },
+  {
+    name: "groups:assignApp",
+    call: (a, f) =>
+      a.mutation(api.groups.assignApp, { groupId: f.groupId, appId: f.appId, audience: "everyone", pinnedTaskbar: false, pinnedDesktop: true }),
+    // The first allowed caller assigns; the next ones find the pair taken.
+    expect: { ...ADMIN_UNLOCKED, owner: "conflict", ownerStale: "conflict", foreign: "not_found" },
+  },
+  {
+    name: "groups:updateAssignment",
+    call: (a, f) =>
+      a.mutation(api.groups.updateAssignment, { assignmentId: f.assignmentId, audience: "everyone", pinnedTaskbar: false, pinnedDesktop: true }),
+    expect: { ...ADMIN_UNLOCKED, foreign: "not_found" },
+  },
+  {
+    name: "groups:unassignApp",
+    call: (a, f) => a.mutation(api.groups.unassignApp, { assignmentId: f.assignmentId }),
+    expect: { ...ADMIN_UNLOCKED, owner: "not_found", ownerStale: "not_found", foreign: "not_found" },
+  },  {
     name: "fleet:checkResult",
     call: (a, f) => a.query(api.fleet.checkResult, { checkId: f.checkId }),
     expect: {
@@ -432,7 +561,8 @@ const STEP_UP_EXEMPT = new Set([
 async function outcome(p: Promise<unknown>): Promise<{ result: string; value: unknown }> {
   try {
     const value = await p;
-    if (value !== null && typeof value === "object" && "kind" in value && (value as { kind: string }).kind !== "ok") {
+    // `kind` is the Phase 2 wire answer of the device functions; `apps:get` has a `kind` field of its own.
+    if (value !== null && typeof value === "object" && "kind" in value && !["ok", "web", "desktop"].includes((value as { kind: string }).kind)) {
       return { result: `kind:${(value as { kind: string }).kind}`, value };
     }
     return { result: "ok", value };

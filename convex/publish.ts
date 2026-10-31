@@ -10,9 +10,10 @@ import {
   contentHashOf,
   MAX_PAYLOAD_BYTES,
   utf8Length,
+  type BuildApp,
   type BuildInput,
 } from "./lib/desired";
-import { KEEP_VERSIONS, MAX_PRUNE_PER_DEVICE, PUBLISH_BATCH } from "./lib/limits";
+import { KEEP_VERSIONS, MAX_FILE_HANDLERS, MAX_GROUP_APPS, MAX_PRUNE_PER_DEVICE, PUBLISH_BATCH } from "./lib/limits";
 import { orgPingInterval } from "./lib/presence";
 import { loadOrgSigningKey, signWith, type SigningKey } from "./lib/signing";
 import { DEFAULT_ORG_SETTINGS, type OrgSettings } from "./lib/validators";
@@ -41,6 +42,7 @@ import { sanitizeVersion } from "./lib/versions";
 type OrgInputs = {
   org: Doc<"organizations">;
   settings: OrgSettings;
+  fileHandlers: BuildInput["fileHandlers"];
   pinHash: string | null;
   pingIntervalMs: number;
 };
@@ -53,30 +55,67 @@ async function loadOrgInputs(ctx: { db: DatabaseReader }, org: Doc<"organization
     .query("orgSecrets")
     .withIndex("by_org", (q) => q.eq("orgId", org._id))
     .unique();
+  // The organization's file-type rules, once per run (tiny: at most MAX_FILE_HANDLERS). Each
+  // device keeps only those whose app is in its catalogue (`lib/desired.ts`).
+  const handlers = await ctx.db
+    .query("fileHandlers")
+    .withIndex("by_org_ext", (q) => q.eq("orgId", org._id))
+    .take(MAX_FILE_HANDLERS);
   return {
     org,
     settings: org.settings ?? DEFAULT_ORG_SETTINGS,
+    fileHandlers: handlers.map((h) => ({ extension: h.extension, appId: h.appId })),
     pinHash: secrets?.exitPinHash ?? null,
     pingIntervalMs: await orgPingInterval(ctx, org._id),
   };
 }
 
 /**
- * The group's catalogue inputs. Step 8: the group itself only; assignments,
- * apps and grants are loaded here from Step 10, group members from Step 11
- * (until then the catalogue holds only "files" and the roster is empty).
+ * The group's catalogue inputs: the group, its app assignments and the apps
+ * they name (with the icon's stable address from file storage). Group members
+ * and direct grants come with Step 11 (until then the roster is empty and a
+ * "selected" app lists no employees). Archived apps are loaded and left out by
+ * the builder, so archiving removes an app from every document.
  */
-async function loadGroupInputs(ctx: { db: DatabaseReader }, orgId: Id<"organizations">, groupId: Id<"groups"> | undefined): Promise<GroupInputs> {
+async function loadGroupInputs(
+  ctx: Pick<MutationCtx, "db" | "storage">,
+  orgId: Id<"organizations">,
+  groupId: Id<"groups"> | undefined,
+): Promise<GroupInputs> {
   const group = groupId === undefined ? null : await ctx.db.get(groupId);
+  if (group === null || group.orgId !== orgId) {
+    return { group: null, assignments: [], apps: [], employees: [], employeeApps: [] };
+  }
+  const rows = await ctx.db
+    .query("appAssignments")
+    .withIndex("by_group", (q) => q.eq("groupId", group._id))
+    .take(MAX_GROUP_APPS);
+  const apps: BuildApp[] = [];
+  for (const a of rows) {
+    const app = await ctx.db.get(a.appId);
+    if (app === null || app.orgId !== orgId) continue;
+    const icon = app.icon !== undefined ? await ctx.storage.getUrl(app.icon.storageId) : null;
+    apps.push({
+      _id: app._id,
+      name: app.name,
+      description: app.description,
+      kind: app.kind,
+      hue: app.hue,
+      archived: app.archived,
+      revision: app.revision,
+      web: app.web,
+      desktop: app.desktop,
+      icon: app.icon !== undefined && icon !== null ? { url: icon, sha256: app.icon.sha256 } : undefined,
+    });
+  }
   return {
-    group: group !== null && group.orgId === orgId ? { _id: group._id } : null,
-    assignments: [],
-    apps: [],
+    group: { _id: group._id },
+    assignments: rows.map((a) => ({ appId: a.appId, audience: a.audience, pinnedTaskbar: a.pinnedTaskbar, pinnedDesktop: a.pinnedDesktop })),
+    apps,
     employees: [],
     employeeApps: [],
   };
 }
-
 type PlanState = Doc<"desiredHeads">["planState"];
 
 /**
@@ -141,7 +180,7 @@ async function publishDevice(ctx: MutationCtx, run: RunState, device: Doc<"devic
     settings: run.org.settings,
     pinHash: run.org.pinHash,
     ...group,
-    fileHandlers: [], // Step 10 (`fileHandlers.by_org_ext`, once per run)
+    fileHandlers: run.org.fileHandlers,
     device: { _id: device._id, kioskEnabled: device.kioskEnabled !== false },
   };
   const rosterGroupId = group.group !== null ? (group.group._id as Id<"groups">) : undefined;

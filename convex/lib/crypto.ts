@@ -14,6 +14,11 @@ export function sha256HexSync(text: string): string {
   return bytesToHex(sha256(utf8ToBytes(text)));
 }
 
+/** SHA-256 of raw bytes, as 64 lower-case hex characters (icons, Step 10). */
+export function sha256HexOfBytes(bytes: Uint8Array): string {
+  return bytesToHex(sha256(bytes));
+}
+
 /**
  * Compare two strings in time that depends only on their lengths. Use it for
  * every comparison of a presented secret (or its hash) with a stored one.
