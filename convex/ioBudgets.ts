@@ -181,4 +181,36 @@ export const IO_BUDGETS: Record<string, IoBudget> = {
   // assignment, group, app, queue; unchanged: 1 read, 0 writes.
   "groups:updateAssignment": { maxReads: 4 + 4, maxReadBytes: 6_144, maxWrites: 3, maxWriteBytes: 2_048 },
   "groups:unassignApp": { maxReads: 4 + 4, maxReadBytes: 6_144, maxWrites: 4, maxWriteBytes: 2_048 },
+
+  // ---- Step 11: employees. Worst cases are the caps (100 groups, 50 grants per employee);
+  // a typical call (1-3 groups, no grants) reads under 20 documents.
+  // wrapper (3) + a page of <= 50 + the groups (<= 500, tiny) + <= 6 memberships per row (+ 50 gets for a group's page).
+  "employees:list": { maxReads: 3 + 1 + 50 + 50 + 500 + 50 * 6, maxReadBytes: 400_000, maxWrites: 0, maxWriteBytes: 0, live: true },
+  // wrapper + group + <= 51 hits + a membership check each + groups + rows' memberships.
+  "employees:search": { maxReads: 3 + 1 + 51 + 51 + 500 + 50 * 6, maxReadBytes: 400_000, maxWrites: 0, maxWriteBytes: 0, live: true },
+  // wrapper + groups (<= 500) + apps (<= 500) + the organization.
+  "employees:options": { maxReads: 3 + 500 + 500 + 1, maxReadBytes: 500_000, maxWrites: 0, maxWriteBytes: 0, live: true },
+  // wrapper + employee + <= 101 memberships + <= 50 grants + lockout + the pickers. Never `employeeSecrets`.
+  "employees:get": { maxReads: 3 + 1 + 101 + 50 + 1 + 1001, maxReadBytes: 520_000, maxWrites: 0, maxWriteBytes: 0, live: true },
+  // authorize (4) + storeNew: username check, <= 100 groups, <= 50 apps, orgPlans + orgStats (+ platformSettings),
+  // orgStats for the group room, key row, <= 100 groupRoster rows (+ a snapshot per 200 entries), queue; writes:
+  // employee, secret, <= 100 members, <= 50 grants, <= 100 roster entries + <= 100 roster rows, stats, audit, queue (+ run).
+  "employees:create": { maxReads: 4 + 1 + 100 + 50 + 3 + 1 + 1 + 100 * 2 + 2, maxReadBytes: 120_000, maxWrites: 1 + 1 + 100 + 50 + 200 + 1 + 1 + 3, maxWriteBytes: 90_000 },
+  // employee, username check, <= 101 memberships, <= 100 roster rows + key; writes: employee, <= 100 x (entry + roster row), audit.
+  "employees:update": { maxReads: 4 + 1 + 1 + 101 + 1 + 100 * 2, maxReadBytes: 80_000, maxWrites: 1 + 200 + 1, maxWriteBytes: 60_000 },
+  // employee, <= 100 groups, <= 101 memberships, group names, stats (when 2,000 employees), key, roster rows; writes: members, entries, roster rows, employee, audit, queue.
+  "employees:setGroups": { maxReads: 4 + 1 + 100 + 101 + 100 + 2 + 1 + 100 * 2 + 3, maxReadBytes: 120_000, maxWrites: 100 + 200 + 1 + 1 + 3, maxWriteBytes: 90_000 },
+  // employee, <= 50 apps, <= 51 grants, memberships (<= 101), queue; writes: grants, employee, audit, queue (+ run).
+  "employees:setDirectApps": { maxReads: 4 + 1 + 50 + 51 + 101 + 1, maxReadBytes: 60_000, maxWrites: 50 + 1 + 1 + 3, maxWriteBytes: 20_000 },
+  // authorize (4) + target query (1) + storePassword: employee, secret, memberships (<= 101), key, roster rows; the limiter row.
+  "employees:setPassword": { maxReads: 4 + 1 + 1 + 1 + 101 + 1 + 100 + 2, maxReadBytes: 60_000, maxWrites: 1 + 1 + 200 + 1 + 1, maxWriteBytes: 60_000 },
+  // employee, memberships, key, roster rows, grants `.first()`, queue; writes: entries, roster rows, employee, stats, audit, queue.
+  "employees:setDisabled": { maxReads: 4 + 1 + 101 + 1 + 100 + 3 + 1 + 1, maxReadBytes: 60_000, maxWrites: 200 + 1 + 1 + 1 + 3, maxWriteBytes: 60_000 },
+  // employee, lockout; none: 0 writes.
+  "employees:unlock": { maxReads: 4 + 2, maxReadBytes: 2_048, maxWrites: 2, maxWriteBytes: 1_024 },
+  // employee, secret, lockout, <= 101 memberships, <= 51 grants, stats; writes: deletes of all of those, stats, audit.
+  "employees:remove": { maxReads: 4 + 1 + 1 + 1 + 101 + 51 + 1, maxReadBytes: 40_000, maxWrites: 1 + 1 + 1 + 100 + 50 + 1 + 1, maxWriteBytes: 4_096 },
+  // group, employee, membership `.first()`, memberships (<= 101), stats, key, roster row, grants `.first()`, queue.
+  "groups:addEmployee": { maxReads: 4 + 2 + 1 + 101 + 1 + 1 + 1 + 1 + 1, maxReadBytes: 40_000, maxWrites: 7, maxWriteBytes: 4_096 },
+  "groups:removeEmployee": { maxReads: 4 + 2 + 1 + 1 + 1 + 1 + 1 + 1, maxReadBytes: 40_000, maxWrites: 7, maxWriteBytes: 4_096 },
 };

@@ -3,10 +3,12 @@ import type { Doc, Id } from "./_generated/dataModel";
 import type { DatabaseReader } from "./_generated/server";
 import { writeAudit } from "./lib/audit";
 import { checkRevision, getInOrg, nextRevision } from "./lib/authz";
+import { changeMemberships, membershipsOf } from "./lib/employeeSync";
 import { fail } from "./lib/errors";
 import { memberMutation, memberQuery } from "./lib/functions";
 import {
   GROUP_COUNT_CAP,
+  MAX_EMPLOYEE_GROUPS,
   MAX_GROUP_APPS,
   MAX_GROUP_CODES_CHECKED,
   MAX_GROUP_DESCRIPTION,
@@ -271,6 +273,51 @@ export const remove = memberMutation("admin", { major: "groups:remove" })({
       targetLabel: group.name,
       summary: `Deleted the group ${group.name}`,
     });
+    return null;
+  },
+});
+
+// ---------------------------------------------------------------- members (plan Step 11)
+
+/**
+ * Put an employee into a group (admin; unlocked session): they may then sign
+ * in on the group's PCs. Already a member = no write. One signed roster entry
+ * for the group (when the employee is enabled); the group's documents are
+ * republished only when the employee has direct app grants. `too_large`
+ * (detail "employee groups" / "group employees") at the limits one document
+ * and one employee form can carry. The group's employee LIST is
+ * `employees:list({ groupId })`.
+ */
+export const addEmployee = memberMutation("admin")({
+  args: { groupId: v.string(), employeeId: v.string() },
+  returns: v.null(),
+  handler: async (ctx, args) => {
+    const group = await getInOrg(ctx, "groups", args.groupId, ctx.orgId);
+    const employee = await getInOrg(ctx, "employees", args.employeeId, ctx.orgId);
+    const member = await ctx.db
+      .query("groupMembers")
+      .withIndex("by_group_employee", (q) => q.eq("groupId", group._id).eq("employeeId", employee._id))
+      .first();
+    if (member !== null) return null;
+    if ((await membershipsOf(ctx, employee._id)).length >= MAX_EMPLOYEE_GROUPS) fail("too_large", { detail: "employee groups" });
+    await changeMemberships(ctx, { orgId: ctx.orgId, actor: ctx.actor, employee, add: [group], remove: [], removeNames: [] });
+    return null;
+  },
+});
+
+/** Take an employee out of a group (admin; unlocked session). Not a member = no write. Their sign-in on the group's PCs ends (a signed "removed" roster entry). */
+export const removeEmployee = memberMutation("admin")({
+  args: { groupId: v.string(), employeeId: v.string() },
+  returns: v.null(),
+  handler: async (ctx, args) => {
+    const group = await getInOrg(ctx, "groups", args.groupId, ctx.orgId);
+    const employee = await getInOrg(ctx, "employees", args.employeeId, ctx.orgId);
+    const member = await ctx.db
+      .query("groupMembers")
+      .withIndex("by_group_employee", (q) => q.eq("groupId", group._id).eq("employeeId", employee._id))
+      .first();
+    if (member === null) return null;
+    await changeMemberships(ctx, { orgId: ctx.orgId, actor: ctx.actor, employee, add: [], remove: [member], removeNames: [group.name] });
     return null;
   },
 });

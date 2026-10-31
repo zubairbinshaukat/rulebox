@@ -38,6 +38,8 @@ type Fixture = {
   desktopAppId: Id<"apps">;
   assignmentId: Id<"appAssignments">;
   handlerId: Id<"fileHandlers">;
+  /** An enabled employee in no group. */
+  employeeId: Id<"employees">;
   /** The device's stored secret hashes (current and previous). */
   storedHashes: string[];
   accessor: Record<Caller, ReturnType<T["withIdentity"]> | T>;
@@ -107,6 +109,18 @@ async function fixture(): Promise<Fixture> {
     const handlerId = await ctx.db.insert("fileHandlers", { orgId, extension: ".txt", appId: desktopAppId });
     return { appId, desktopAppId, assignmentId, handlerId };
   });
+  const employeeId = await t.run((ctx) =>
+    ctx.db.insert("employees", {
+      orgId,
+      name: "Maya",
+      username: "maya",
+      searchText: "maya maya",
+      disabled: false,
+      credentialRevision: 0,
+      revision: 0,
+      createdAt: Date.now(),
+    }),
+  );
   const foreignOrg = await makeOrg(t, "Other");
   type StepUp = "fresh" | "stale" | "idle" | "factorOnly" | "none";
   const m = async (role: "owner" | "admin" | "viewer", mfa: boolean, status: "active" | "disabled" = "active", o = orgId, s: StepUp = "none") => {
@@ -130,6 +144,7 @@ async function fixture(): Promise<Fixture> {
     desktopAppId,
     assignmentId,
     handlerId,
+    employeeId,
     storedHashes,
     accessor: {
       unauth: t,
@@ -531,7 +546,67 @@ const ROWS: Row[] = [
     name: "groups:unassignApp",
     call: (a, f) => a.mutation(api.groups.unassignApp, { assignmentId: f.assignmentId }),
     expect: { ...ADMIN_UNLOCKED, owner: "not_found", ownerStale: "not_found", foreign: "not_found" },
-  },  {
+  },
+  // ---- Step 11: employees. Writes are chosen so that every allowed caller gets the same answer
+  // (no-op values, or a refusal that comes after the authorization); a password is never returned.
+  {
+    name: "employees:list",
+    call: (a) => a.query(api.employees.list, { paginationOpts: { numItems: 10, cursor: null } }),
+    expect: { ...VIEWER, foreign: "ok" },
+  },
+  { name: "employees:search", call: (a) => a.query(api.employees.search, { text: "maya" }), expect: { ...VIEWER, foreign: "ok" } },
+  { name: "employees:options", call: (a) => a.query(api.employees.options, {}), expect: { ...VIEWER, foreign: "ok" } },
+  { name: "employees:get", call: (a, f) => a.query(api.employees.get, { employeeId: f.employeeId }), expect: { ...VIEWER, foreign: "not_found" } },
+  {
+    name: "employees:create",
+    call: (a) =>
+      a.action(api.employees.create, { name: "New", username: `new.${Math.random().toString(36).slice(2, 10)}`, groupIds: [] }),
+    expect: { ...ADMIN_UNLOCKED, foreign: "ok" },
+  },
+  {
+    name: "employees:update",
+    call: (a, f) => a.mutation(api.employees.update, { employeeId: f.employeeId, expectedRevision: 0, name: "Maya", username: "maya" }),
+    expect: { ...ADMIN_UNLOCKED, foreign: "not_found" },
+  },
+  {
+    name: "employees:setGroups",
+    call: (a, f) => a.mutation(api.employees.setGroups, { employeeId: f.employeeId, expectedRevision: 0, groupIds: [] }),
+    expect: { ...ADMIN_UNLOCKED, foreign: "not_found" },
+  },
+  {
+    name: "employees:setDirectApps",
+    call: (a, f) => a.mutation(api.employees.setDirectApps, { employeeId: f.employeeId, expectedRevision: 0, appIds: [] }),
+    expect: { ...ADMIN_UNLOCKED, foreign: "not_found" },
+  },
+  {
+    name: "employees:setPassword",
+    // Too short: every allowed caller is refused after the authorization and the foreign owner finds no such employee.
+    call: (a, f) => a.action(api.employees.setPassword, { employeeId: f.employeeId, password: "short" }),
+    expect: { ...ADMIN_UNLOCKED, default: "invalid_argument", foreign: "not_found" },
+  },
+  {
+    name: "employees:setDisabled",
+    call: (a, f) => a.mutation(api.employees.setDisabled, { employeeId: f.employeeId, disabled: false }),
+    expect: { ...ADMIN_UNLOCKED, foreign: "not_found" },
+  },
+  { name: "employees:unlock", call: (a, f) => a.mutation(api.employees.unlock, { employeeId: f.employeeId }), expect: { ...ADMIN_UNLOCKED, foreign: "not_found" } },
+  {
+    name: "employees:remove",
+    call: (a, f) => a.mutation(api.employees.remove, { employeeId: f.employeeId }),
+    expect: { ...ADMIN_MAJOR, default: "invalid_argument", foreign: "not_found" }, // still active
+  },
+  {
+    name: "groups:addEmployee",
+    // The first allowed caller adds; the next ones find the employee already in the group (no write).
+    call: (a, f) => a.mutation(api.groups.addEmployee, { groupId: f.groupId, employeeId: f.employeeId }),
+    expect: { ...ADMIN_UNLOCKED, foreign: "not_found" },
+  },
+  {
+    name: "groups:removeEmployee",
+    call: (a, f) => a.mutation(api.groups.removeEmployee, { groupId: f.groupId, employeeId: f.employeeId }),
+    expect: { ...ADMIN_UNLOCKED, foreign: "not_found" },
+  },
+  {
     name: "fleet:checkResult",
     call: (a, f) => a.query(api.fleet.checkResult, { checkId: f.checkId }),
     expect: {

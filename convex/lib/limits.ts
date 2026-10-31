@@ -240,3 +240,19 @@ export const MAX_APP_OPTIONS = 500;
 /** `publishApp`: direct employee grants followed to their groups; above these it republishes every device instead. */
 export const MAX_GRANT_LOOKUPS = 50;
 export const MAX_GRANT_GROUPS = 20;
+
+/** Employees (plan Step 11; 4.12). */
+export const MAX_EMPLOYEE_NAME = 100;
+export const MAX_USERNAME = 64;
+export const MIN_EMPLOYEE_PASSWORD = 8;
+export const MAX_EMPLOYEE_PASSWORD = 256;
+/** `employees:list` page size cap, and `employees:search` rows (`search_text`, `.take(50)`). */
+export const MAX_EMPLOYEE_PAGE = 50;
+export const MAX_EMPLOYEE_SEARCH = 50;
+/** Groups an employee can be in (`employees:get` reads `.take(100)`), and direct app grants (4.4 rule 6). */
+export const MAX_EMPLOYEE_GROUPS = 100;
+export const MAX_EMPLOYEE_APPS = 50;
+/** Members of one group: what one signed document may carry (4.4 rule 6). */
+export const MAX_GROUP_EMPLOYEES = 2_000;
+/** Groups named on one row of the employee list; more are flagged "and more". */
+export const EMPLOYEE_ROW_GROUPS = 5;

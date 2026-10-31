@@ -13,7 +13,15 @@ import {
   type BuildApp,
   type BuildInput,
 } from "./lib/desired";
-import { KEEP_VERSIONS, MAX_FILE_HANDLERS, MAX_GROUP_APPS, MAX_PRUNE_PER_DEVICE, PUBLISH_BATCH } from "./lib/limits";
+import {
+  KEEP_VERSIONS,
+  MAX_EMPLOYEE_APPS,
+  MAX_FILE_HANDLERS,
+  MAX_GROUP_APPS,
+  MAX_GROUP_EMPLOYEES,
+  MAX_PRUNE_PER_DEVICE,
+  PUBLISH_BATCH,
+} from "./lib/limits";
 import { orgPingInterval } from "./lib/presence";
 import { loadOrgSigningKey, signWith, type SigningKey } from "./lib/signing";
 import { DEFAULT_ORG_SETTINGS, type OrgSettings } from "./lib/validators";
@@ -71,11 +79,11 @@ async function loadOrgInputs(ctx: { db: DatabaseReader }, org: Doc<"organization
 }
 
 /**
- * The group's catalogue inputs: the group, its app assignments and the apps
- * they name (with the icon's stable address from file storage). Group members
- * and direct grants come with Step 11 (until then the roster is empty and a
- * "selected" app lists no employees). Archived apps are loaded and left out by
- * the builder, so archiving removes an app from every document.
+ * The group's catalogue inputs: the group, its app assignments, the direct
+ * grants of its enabled members (Step 11) and the apps they name (with the
+ * icon's stable address from file storage). The members' sign-in rights are NOT
+ * here: they are the signed roster (A6). Archived apps are loaded and left out
+ * by the builder, so archiving removes an app from every document.
  */
 async function loadGroupInputs(
   ctx: Pick<MutationCtx, "db" | "storage">,
@@ -90,9 +98,35 @@ async function loadGroupInputs(
     .query("appAssignments")
     .withIndex("by_group", (q) => q.eq("groupId", group._id))
     .take(MAX_GROUP_APPS);
+
+  // Direct grants (Step 11): the group's members that have any, and are enabled.
+  // Most members have none, so each costs one empty index read; only those with a
+  // grant are read as documents. A disabled employee's grants are in no document
+  // (the builder ignores them), so they are not loaded.
+  const members = await ctx.db
+    .query("groupMembers")
+    .withIndex("by_group", (q) => q.eq("groupId", group._id))
+    .take(MAX_GROUP_EMPLOYEES);
+  const employees: GroupInputs["employees"] = [];
+  const employeeApps: GroupInputs["employeeApps"] = [];
+  for (const m of members) {
+    const grants = await ctx.db
+      .query("employeeApps")
+      .withIndex("by_employee", (q) => q.eq("employeeId", m.employeeId))
+      .take(MAX_EMPLOYEE_APPS);
+    if (grants.length === 0) continue;
+    const employee = await ctx.db.get(m.employeeId);
+    if (employee === null || employee.orgId !== orgId || employee.disabled) continue;
+    employees.push({ _id: employee._id, disabled: false });
+    for (const g of grants) employeeApps.push({ employeeId: employee._id, appId: g.appId });
+  }
+
+  // Every app an assignment or a grant names (assigned ones first), once.
+  const appIds = new Set<Id<"apps">>(rows.map((a) => a.appId));
+  for (const g of employeeApps) appIds.add(g.appId as Id<"apps">);
   const apps: BuildApp[] = [];
-  for (const a of rows) {
-    const app = await ctx.db.get(a.appId);
+  for (const appId of appIds) {
+    const app = await ctx.db.get(appId);
     if (app === null || app.orgId !== orgId) continue;
     const icon = app.icon !== undefined ? await ctx.storage.getUrl(app.icon.storageId) : null;
     apps.push({
@@ -112,8 +146,8 @@ async function loadGroupInputs(
     group: { _id: group._id },
     assignments: rows.map((a) => ({ appId: a.appId, audience: a.audience, pinnedTaskbar: a.pinnedTaskbar, pinnedDesktop: a.pinnedDesktop })),
     apps,
-    employees: [],
-    employeeApps: [],
+    employees,
+    employeeApps,
   };
 }
 type PlanState = Doc<"desiredHeads">["planState"];

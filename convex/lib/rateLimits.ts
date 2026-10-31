@@ -48,6 +48,10 @@ export const rateLimiter = new RateLimiter(components.rateLimiter, {
   // tenant cannot use the deployment as a proxy or burn the GitHub quota.
   webMeta: { kind: "token bucket", rate: 20, period: MINUTE_MS, capacity: 20 },
   wingetResolve: { kind: "token bucket", rate: 20, period: MINUTE_MS, capacity: 20 },
+  // Employees (plan Step 11 item 6). Each password set or create-with-password
+  // costs one Argon2id hash (~100-300 ms of CPU) in an action: 300 per hour per
+  // organization, consumed before hashing.
+  employeeWrites: { kind: "token bucket", rate: 300, period: HOUR_MS, capacity: 300 },
 });
 
 export type LimitName =
@@ -60,7 +64,8 @@ export type LimitName =
   | "watch"
   | "checkNow"
   | "webMeta"
-  | "wingetResolve";
+  | "wingetResolve"
+  | "employeeWrites";
 
 /** Read-only: throw `rate_limited` when the bucket is empty, without consuming. */
 export async function checkOrFail(
