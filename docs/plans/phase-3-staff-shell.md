@@ -673,6 +673,7 @@ Native title bar showing the page title and the app's icon.
 | Download | Saved to `<employee folder>\Downloads` with a cleaned name; a notice "Saved report.pdf"; blocked types and a full quota cancel it with a notice |
 | Permission request | Answered from the app's rules without any browser prompt (PRD 24.1). A denial adds a notice "Microphone is not allowed for this app." |
 | External protocol link (`mailto:`, `ms-settings:`, …) | Always cancelled |
+| Top bar (every web window) | A 44 px bar above the site that **takes its own space**, so the page is never covered (round 4; it replaced a floating pill that hid content). Left: Back, Forward, Reload (Stop while a page loads). Then a **read-only address**: lock (https), the host in bold, the rest of the address dimmer, an ellipsis when long, the full address as tooltip; no typing, selecting or navigating from it. For the window's start page, the blocked page and the browser's own pages it shows the **app's name** instead. Right: an action slot (icon buttons with tooltips, "More" menu on overflow; **no actions ship yet**, registry `ACTIONS` in `webapp/bar.rs`). Keys: Alt+Left, Alt+Right, F5, Ctrl+R (also with the bar focused); arrow keys, Home, End inside the bar; Escape returns to the page. State comes from the site's WebView2 (`CanGoBack`, `CanGoForward`, `Source`, navigation events). Back from the blocked page returns to the page that linked to it; a window never steps back onto its own `about:blank`. HTML full screen (a video) hides the bar and gives the site the whole window; leaving it brings the bar back. Resize and DPI changes keep both laid out (the bar stays 44 logical px). The bar is a **second WebView2 from the same environment** (one extra small renderer, shared browser process and profile), created after the site starts loading |
 | Page crash or load failure | WebView2's own error page; closing and reopening from the taskbar works |
 | Offline | The site's own behaviour; the shell adds nothing |
 
@@ -1418,7 +1419,11 @@ pub fn connectivity() -> Connectivity;                        // None | Local | 
   and posts a notice. No agent method is involved.
 - Notices: `AppState::notify(tone, title, detail)` keeps the latest 20;
   the bell shows the unread count; the list is in quick settings. There
-  are no floating toasts in Phase 3 and no Windows toasts.
+  are no Windows toasts. (Changed in Step 18, owner request: every new
+  notice also shows as a Rulebox toast card at the bottom right, above the
+  taskbar, for about 6 s, at most 3 at once. It is drawn by the taskbar
+  window, which is 360 logical px taller than the strip and clipped to its
+  pills and the cards; see `phase-3-step18-progress.md`, Round 4.)
 
 Tests: volume clamping and rounding; battery text ("86% · Charging",
 "On battery · 2 h 10 min left", none); connectivity mapping; theme:
@@ -1758,9 +1763,44 @@ impl AllowList {
   remote content. (Different arguments require a different data folder
   than the shell UI, which this already is.)
 - `devtools(false)`, `zoom_hotkeys_enabled(false)`,
-  `general_autofill_enabled(false)`, no initialization script, no
-  `withGlobalTauri`, drag-drop handler left on (it blocks file drops from
-  navigating).
+  `general_autofill_enabled(false)`, **no initialization script** (round 4:
+  the injected Back / Forward / Reload pill was removed, nothing runs inside
+  the site), `background_color` = the bar's surface token for the employee's
+  theme (no white flash behind the bar), no `withGlobalTauri`, drag-drop
+  handler left on (it blocks file drops from navigating).
+- **Top bar (round 4, `webapp/bar.rs`, `bar.html/css/js`, `barhost.rs`).**
+  The first Back / Forward / Reload pill was injected into the page and hid
+  site content, so it was replaced by a bar that owns a strip of the window.
+  Chosen design: a **second WebView2 controller created from the site's own
+  `ICoreWebView2Environment`** (`PlatformWebview::environment()`), parented to
+  the same container HWND, so it shares the browser, GPU and network processes
+  and the profile folder and adds one small renderer. It is created after the
+  site has started to load (never delays it) and loads one self-contained page
+  (`bar::page()`, `NavigateToString`, CSP `default-src 'none'`). The site's
+  controller is moved to start below the bar (`bar::place`, 44 logical px,
+  DPI-scaled); a window subclass re-applies the layout after wry's own
+  `WM_SIZE` handling and on `WM_DPICHANGED`, so resize and scale changes keep
+  both laid out. Rejected: (b) a Win32 owner-drawn bar with pre-rasterized icons
+  (saves roughly 15-30 MB per window but means hand-written, untestable-here
+  unsafe UI code with no accessibility tree, no token reuse and a worse path
+  for the action slot), (c) injecting into the page (fixed/sticky page elements
+  make it fragile), and Tauri `Window::add_child` (needs the `unstable`
+  feature, a full tauri rebuild, and `get_webview_window` stops working for a
+  window with two webviews). State is fed from the real WebView2 of the site
+  (`CanGoBack`, `CanGoForward`, `Source`, `HistoryChanged`,
+  `NavigationStarting/Completed`, `SourceChanged`, `ContainsFullScreenElementChanged`)
+  through `NavState` (unchanged logic) to the bar with `PostWebMessageAsJson`;
+  the bar answers with strictly parsed messages (`nav::parse_command`): Back,
+  Forward, Reload, Stop, an action id, menu open/close, "focus the page". It
+  can only step through the site's own history, so the allow-list gate
+  (`on_navigation` + `FrameNavigationStarting`) still decides every address.
+  The bar's own WebView is locked: one navigation (ours), no frames, no new
+  windows, no downloads, every permission denied, no devtools or context menu,
+  no Tauri IPC. Full screen hides the bar and gives the site the whole window.
+  No new Tauri command, capability or `build.rs` entry; no new dependency; the
+  `windows` crate gained the `Win32_UI_HiDpi`, `Win32_UI_Shell` and
+  `Win32_UI_WindowsAndMessaging` features. If the bar cannot be created the
+  site simply takes the whole window.
 - `on_navigation(|url| allow.allows(url) || is_blocked_page(url))`; when
   it returns false, navigate the window to the blocked page.
 - `on_new_window(|url, _| …)`: allowed → navigate **this** window to the
@@ -2573,7 +2613,7 @@ The plan assumes the **recommended** option.
 | P3 | Default admin-exit key combination | Ctrl+Alt+Shift+R (suggested) or another | **Decided: Ctrl+Shift+F12** (also the agent's default). One constant (Step 16) |
 | P4 | What does Delete do? | (a) Trash folder inside the employee folder. (b) Windows Recycle Bin. (c) Permanent | **(a).** (b) is unverified without Explorer and has no restore UI |
 | P5 | PPTX preview (PRD 7.1 lists it) | (a) "Preview not available — open with …". (b) Ship a best-effort library | **(a).** No library of known quality was found or tested |
-| P6 | Title bar of web app windows | (a) Native Windows title bar. (b) Custom, using Tauri's `unstable` multiwebview | **(a)** for v1 (PRD 13.6 #7) |
+| P6 | Title bar of web app windows | (a) Native Windows title bar. (b) Custom, using Tauri's `unstable` multiwebview | **(a)** for v1 (PRD 13.6 #7). The top bar below the title bar (7.10) is **not** (b): it is a second WebView2 added with the raw `webview2-com` API on the same environment, so `WebviewWindow`, its label and `unstable` are untouched |
 | P7 | Should the Windows key open the Rulebox Start menu? | (a) No; Start opens by click and Ctrl+Esc. (b) Yes, with a low-level keyboard hook | **Decided: (b), as one narrow hook** (Step 16): shell mode only, Windows key pressed and released alone, never key content, combinations passed through untouched, one constant to switch it off. Risks recorded: antivirus heuristics (mitigated by signing in Phase 6) and Phase 5's Windows-key policy **(unverified)** |
 | P8 | Lite mode built-in windows | (a) One tabbed window. (b) In-page floating windows inside one full-screen WebView | **(a).** (b) cannot interleave with other apps' windows |
 | P9 | May employees change light / dark? | (a) No: follows the organization setting, default Auto. (b) Yes, per employee, in quick settings (the design shows it) | **Decided: (b).** Auto / Light / Dark in quick settings, kept per employee in `%LOCALAPPDATA%\dev.rulebox.staff\employees\<employeeId>\prefs.json` (Step 10); the organization setting is the default |
