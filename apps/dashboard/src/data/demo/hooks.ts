@@ -141,6 +141,11 @@ function employeeRow(db: DemoDb, e: DemoDb["employees"][number]): EmployeeRow {
 
 const IN_PROGRESS: InstallState[] = ["pending", "downloading", "installing", "removing"];
 
+/** Like `apps:list`: reads at most 10 assignments per app and says when there are more ("10+"). */
+function appGroupCount(total: number): { groupCount: number; groupCountMore: boolean } {
+  return { groupCount: Math.min(total, 10), groupCountMore: total > 10 };
+}
+
 function installSummary(db: DemoDb, appId: string): InstallSummary | null {
   const rows = db.installs.filter((i) => i.appId === appId);
   if (rows.length === 0) return null;
@@ -1833,7 +1838,7 @@ export const demoAppsApi: AppsApi = {
             hue: a.hue,
             iconUrl: a.iconUrl,
             archived: a.archived,
-            groupCount: db.assignments.filter((x) => x.appId === a._id).length,
+            ...appGroupCount(db.assignments.filter((x) => x.appId === a._id).length),
             summary: a.kind === "desktop" ? installSummary(db, a._id) : null,
           }),
         );

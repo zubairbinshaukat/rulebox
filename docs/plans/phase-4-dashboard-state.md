@@ -3512,6 +3512,34 @@ server's host and path rules.
 dashboard `typecheck`, `lint`, `test` (358). Not verified: any call to a real Convex
 deployment, real GitHub or real websites. Risk: `apps:list` reads up to ~5,000
 assignment rows for a page of 50 apps that are each in 100 groups (a free tenant ~80).
+(9) **Review fixes (2026-11-01, independent security review of the two Step 10
+commits).** `lib/safeFetch.ts`: an answer is refused (`redirect_followed`, shown as
+`webmeta_failed`) when `res.redirected`, an opaque redirect, or a response URL that
+differs from the requested one, so a runtime that follows redirects itself cannot reach
+an unchecked host (this closes the "unverified `redirect: manual`" risk in (3)); only
+port 443 (or none) is fetched. `lib/hostRules.ts`: wildcard-DNS suffixes (nip.io, sslip.io,
+xip.io, traefik.me, localtest.me, lvh.me, vcap.me, lacolhost.com), `localhost.<anything>`
+and 192.88.99.0/24 are refused (the client mirrors them). **A host name that an attacker's
+DNS points at a private address, or a rebinding answer, still cannot be detected inside
+Convex; that is harmless in Convex's cloud, but a SELF-HOSTED backend needs an egress
+proxy/firewall that blocks private ranges (noted in the file).** `lib/denyList.ts`: new
+`DENY_PROGRAMS` (shells, script hosts, runtimes, LOLBins such as `cmd`, `wscript`,
+`powershell`, `pwsh`, `mshta`, `rundll32`, `regsvr32`, `msiexec`, `certutil`, `explorer`,
+`taskmgr`, `python`, `node`, `java`...) refused as an app's `exe` (any root) and as a
+file-type target (`fileHandlers:set`, `options`, `list`); notepad, mspaint and calc stay
+allowed. The dashboard mirrors it (`validate.ts`, compared by `fileHandlers.test.ts`); there
+is no Rust copy yet (the agent must re-check at Step 13/14). `DENY` extensions gained
+`msu`, `ppkg`, `wsb`, `website`, `searchconnector-ms` in the Rust file, `denyList.ts` and
+`validate.ts`. `apps:list` reads at most 11 assignments per app (`APP_LIST_GROUP_CAP` = 10 in
+`apps.ts`) and returns `groupCountMore` ("10+ groups"); `apps:get` names each assignment's
+group with `ctx.db.get` (the picker keeps its 500). Path components may not end in a dot or
+space or be a DOS device name; winget silent switches go through `argsProblem` at Resolve
+time; `cleanName` strips control and bidi characters and `normalizeAppName` refuses bidi
+marks; `saveIcon` checks the app's organization before storing the file and shares the
+`webMeta` limiter; AppEdit keeps the previewed icon only for the address it came from.
+`APP_GROUP_COUNT_CAP` in `limits.ts` is now unused. Not done (reported): per-fetch deadline
+sum, 500-app picker cap, `wingetCache` sharing/expiry, the `exe` 260-character client/server
+length mismatch.
 (9) **2026-11-01, Rust half done (supersedes the "item 1 NOT done" above):**
 `crates/rulebox-policy/src/catalog.rs` has `CatalogApp`, `CatalogKind`, `BuiltinSpec`
 (+ `CatalogTool`), `WebSpec` (+ `CatalogWebPermissions`), `DesktopSpec`, `InstallSpec`,

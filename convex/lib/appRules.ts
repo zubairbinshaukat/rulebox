@@ -21,8 +21,9 @@ import { DEFAULT_WEB_PERMISSIONS, type desktopSpec, type installSpec } from "./v
 type DesktopSpec = Infer<typeof desktopSpec>;
 type InstallSpec = Infer<typeof installSpec>;
 
+// C0 controls, DEL and the bidi direction marks / overrides / isolates (they reorder or hide text).
 // eslint-disable-next-line no-control-regex
-const CONTROL = /[\u0000-\u001f\u007f]/;
+const CONTROL = /[\u0000-\u001f\u007f\u200e\u200f\u202a-\u202e\u2066-\u2069]/;
 
 export function normalizeAppName(name: string): string {
   const t = name.trim();

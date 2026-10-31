@@ -13,7 +13,7 @@ import { WEBMETA_MAX_REDIRECTS, WEBMETA_TIMEOUT_MS } from "./limits";
 
 type FetchLike = typeof fetch;
 
-export type FetchFailure = "blocked" | "redirects" | "status" | "too_large" | "network";
+export type FetchFailure = "blocked" | "redirects" | "redirect_followed" | "status" | "too_large" | "network";
 export type Fetched =
   | { ok: true; url: URL; bytes: Uint8Array; contentType: string }
   | { ok: false; reason: FetchFailure; status?: number };
@@ -67,9 +67,29 @@ export type PublicFetchOptions = {
   headers?: (url: URL) => Record<string, string>;
 };
 
-/** True for a URL the server may fetch: https, no credentials, a public host. */
+/**
+ * True for a URL the server may fetch: https, no credentials, port 443 (the
+ * URL parser drops an explicit `:443`, so "no port" is the only form left; any
+ * other port could reach an internal admin service on a public host), a public host.
+ */
 export function fetchableUrl(url: URL): boolean {
-  return url.protocol === "https:" && url.username === "" && url.password === "" && !isForbiddenHost(url.hostname);
+  return url.protocol === "https:" && url.username === "" && url.password === "" && url.port === "" && !isForbiddenHost(url.hostname);
+}
+
+/** `href` without its fragment (a response URL never carries one). */
+function withoutFragment(href: string): string {
+  const at = href.indexOf("#");
+  return at === -1 ? href : href.slice(0, at);
+}
+
+/**
+ * True when the runtime followed a redirect on its own although we asked for
+ * `redirect: "manual"` (or answered an opaque redirect): the body then came
+ * from an address we never checked, so it must not be read.
+ */
+function followedRedirect(res: Response, requested: URL): boolean {
+  if (res.redirected || res.type === "opaqueredirect") return true;
+  return res.url !== "" && res.url !== withoutFragment(requested.href);
 }
 
 /** GET `start` over https, following up to `maxRedirects` redirects that each pass `fetchableUrl`. */
@@ -87,6 +107,11 @@ export async function fetchPublic(start: string, opts: PublicFetchOptions): Prom
     for (let hop = 0; hop <= (opts.maxRedirects ?? WEBMETA_MAX_REDIRECTS); hop++) {
       if (!fetchableUrl(url)) return { ok: false, reason: "blocked" };
       const res = await f(url.href, { method: "GET", redirect: "manual", signal: ctl.signal, headers: { accept: opts.accept ?? "*/*", ...opts.headers?.(url) } });
+      // Whether the runtime honours `redirect: "manual"` is not something we can rely on: refuse any answer that did not come from the address we checked.
+      if (followedRedirect(res, url)) {
+        await res.body?.cancel().catch(() => undefined);
+        return { ok: false, reason: "redirect_followed" };
+      }
       if (res.status >= 300 && res.status < 400) {
         const location = res.headers.get("location");
         await res.body?.cancel().catch(() => undefined);

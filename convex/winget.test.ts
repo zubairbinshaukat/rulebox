@@ -119,6 +119,19 @@ describe("pickInstaller rules", () => {
     expect(inherited.ok && inherited.install.silentArgs).toEqual(["-s"]);
   });
 
+  test("silent switches that apps:createDesktop would refuse (more than 16, over 200 characters) are not offered at Resolve time", () => {
+    const many = Array.from({ length: 17 }, (_, i) => `/a${i}`).join(" ");
+    const tooMany = pick(base(entry({ InstallerType: "inno", InstallerSwitches: `\n      Silent: ${many}` })));
+    expect(tooMany).toEqual({ ok: false, reason: expect.stringMatching(/silent install switches are not usable/) });
+    const tooLong = pick(base(entry({ InstallerType: "inno", InstallerSwitches: `\n      Silent: /D=${"x".repeat(201)}` })));
+    expect(tooLong.ok).toBe(false);
+    const sixteen = pick(base(entry({ InstallerType: "inno", InstallerSwitches: `\n      Silent: ${many.replace(" /a16", "")}` })));
+    expect(sixteen.ok && sixteen.install.silentArgs).toHaveLength(16);
+    // another entry with usable switches still wins
+    const other = pick(base(entry({ InstallerType: "inno", InstallerSwitches: `\n      Silent: ${many}` }) + entry({ InstallerType: "nullsoft", InstallerUrl: "https://example.com/nsis.exe", Architecture: "x86" })));
+    expect(other.ok && other.install.url).toBe("https://example.com/nsis.exe");
+  });
+
   test("a plain exe without a silent switch is skipped when another entry works", () => {
     const r = pick(base(entry({ InstallerType: "exe", InstallerUrl: "https://example.com/plain.exe" }) + entry({ InstallerType: "nullsoft", InstallerUrl: "https://example.com/nsis.exe", Architecture: "x86" })));
     expect(r.ok && r.install.url).toBe("https://example.com/nsis.exe");

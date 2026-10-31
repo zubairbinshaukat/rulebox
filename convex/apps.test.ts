@@ -180,6 +180,67 @@ describe("apps: create, read, update", () => {
     await expectCode(a.as.query(api.apps.list, { paginationOpts: { numItems: 0, cursor: null }, archived: false }), "invalid_argument");
   });
 
+  test("list reads at most 11 assignments per app and says 10+ through groupCountMore", async () => {
+    const t = await setupAuth();
+    const orgId = await makeOrg(t);
+    const a = await admin(t, orgId);
+    const busy = await a.as.mutation(api.apps.createWeb, web("Busy"));
+    const edge = await a.as.mutation(api.apps.createWeb, web("Edge"));
+    await t.run(async (ctx) => {
+      // 25 groups carry "Busy" (more than the cap), 10 carry "Edge" (exactly the cap)
+      for (let i = 0; i < 25; i++) {
+        const g = await ctx.db.insert("groups", { orgId, name: `G${i}`, revision: 0, createdAt: i });
+        await ctx.db.insert("appAssignments", { orgId, groupId: g, appId: busy, audience: "everyone", pinnedTaskbar: false, pinnedDesktop: false });
+        if (i < 10) await ctx.db.insert("appAssignments", { orgId, groupId: g, appId: edge, audience: "everyone", pinnedTaskbar: false, pinnedDesktop: false });
+      }
+    });
+    const page = await a.as.query(api.apps.list, { paginationOpts: { numItems: 10, cursor: null }, archived: false });
+    expect(page.page.map((r) => [r.name, r.groupCount, r.groupCountMore])).toEqual([
+      ["Edge", 10, false],
+      ["Busy", 10, true],
+    ]);
+    // the detail screen still lists every assignment (bounded by the assignment cap, not by the list cap)
+    expect((await a.as.query(api.apps.get, { appId: busy })).assignments).toHaveLength(25);
+  });
+
+  test("get names every assignment even when the organization has more groups than the picker holds", async () => {
+    const t = await setupAuth();
+    const orgId = await makeOrg(t);
+    const a = await admin(t, orgId);
+    const id = await a.as.mutation(api.apps.createWeb, web("Wiki"));
+    const foreignOrg = await makeOrg(t, "Other");
+    const lateGroup = await t.run(async (ctx) => {
+      for (let i = 0; i < 510; i++) await ctx.db.insert("groups", { orgId, name: `Filler ${String(i).padStart(3, "0")}`, revision: 0, createdAt: i });
+      const late = await ctx.db.insert("groups", { orgId, name: "Late group", revision: 0, createdAt: 9_999 }); // beyond the first 500
+      const foreign = await ctx.db.insert("groups", { orgId: foreignOrg, name: "Not ours", revision: 0, createdAt: 0 });
+      await ctx.db.insert("appAssignments", { orgId, groupId: late, appId: id, audience: "everyone", pinnedTaskbar: true, pinnedDesktop: false });
+      await ctx.db.insert("appAssignments", { orgId, groupId: foreign, appId: id, audience: "everyone", pinnedTaskbar: false, pinnedDesktop: false });
+      return late;
+    });
+    const d = await a.as.query(api.apps.get, { appId: id });
+    expect(d.assignments.map((x) => [x.groupId, x.groupName])).toEqual([[lateGroup, "Late group"]]); // the other organization's group never shows
+    expect(d.groupOptions).toHaveLength(500); // the picker stays bounded
+  });
+
+  test("options: a shell or script host is never offered as a file opener, even when an older app has one", async () => {
+    const t = await setupAuth();
+    const orgId = await makeOrg(t);
+    const a = await admin(t, orgId);
+    const old = await t.run((ctx) =>
+      ctx.db.insert("apps", {
+        orgId,
+        name: "Old script host",
+        kind: "desktop",
+        desktop: { source: "preinstalled", exe: "{SystemRoot}\\System32\\wscript.exe", args: [], fileArgTemplate: ["{file}"], resetFolders: [] },
+        archived: false,
+        revision: 0,
+        createdAt: 0,
+      }),
+    );
+    expect(await a.as.query(api.apps.options, {})).toEqual([{ _id: old, name: "Old script host", kind: "desktop", canOpenFiles: false }]);
+    await expectCode(a.as.mutation(api.apps.createDesktop, desktop("Shell", { exe: "{SystemRoot}\\System32\\cmd.exe" })), "invalid_argument");
+  });
+
   test("options: non-archived apps by name with whether they can open files; other organizations excluded", async () => {
     const t = await setupAuth();
     const orgId = await makeOrg(t);
@@ -493,6 +554,20 @@ describe("apps: icon", () => {
     const appB = await b.as.mutation(api.apps.createWeb, web("B"));
     await expectCode(a.as.action(api.apps.saveIcon, { appId: appB, png: TINY_PNG }), "not_found");
     expect(await t.run((ctx) => ctx.db.system.query("_storage").take(5))).toEqual([]);
+    // an id that is not an app at all fails the same way, before anything is stored
+    await expectCode(a.as.action(api.apps.saveIcon, { appId: "nonsense", png: TINY_PNG }), "not_found");
+    expect(await t.run((ctx) => ctx.db.system.query("_storage").take(5))).toEqual([]);
+  });
+
+  test("saveIcon shares the 20 per minute metadata limit of the organization", async () => {
+    const t = await setupAuth();
+    const orgId = await makeOrg(t);
+    const a = await admin(t, orgId);
+    const id = await a.as.mutation(api.apps.createWeb, web("Docs"));
+    for (let i = 0; i < 20; i++) await a.as.action(api.apps.saveIcon, { appId: id, png: TINY_PNG });
+    await expectCode(a.as.action(api.apps.saveIcon, { appId: id, png: TINY_PNG }), "rate_limited");
+    stubFetch({ [PAGE]: { body: "<html></html>" } });
+    await expectCode(a.as.action(api.apps.fetchWebMeta, { url: PAGE }), "rate_limited"); // the same bucket
   });
 });
 

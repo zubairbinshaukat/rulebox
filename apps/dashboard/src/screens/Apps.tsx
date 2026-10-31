@@ -78,7 +78,7 @@ export default function Apps() {
           </span>
         ),
       },
-      { key: "groups", header: s.colGroups, cell: (a) => (a.groupCount ? s.groups(a.groupCount) : <span className="dash-muted">—</span>) },
+      { key: "groups", header: s.colGroups, cell: (a) => (a.groupCount ? s.groups(a.groupCount, a.groupCountMore) : <span className="dash-muted">—</span>) },
       { key: "installs", header: s.colInstalls, isEmpty: (a) => a.kind === "web", cell: (a) => (a.kind === "web" ? <span className="dash-muted">—</span> : <Summary summary={a.summary} />) },
     ],
     [],

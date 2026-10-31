@@ -104,12 +104,13 @@ pub const DENY: &[&str] = &[
     "jse", "ksh", "library-ms", "lnk", "mad", "maf", "mag", "mam", "maq", "mar", "mas", "mat",
     "mau", "mav", "maw", "mcf", "mda", "mdb", "mde", "mdt", "mdw", "mdz", "mht", "mhtml", "msc",
     "msh", "msh1", "msh1xml", "msh2", "msh2xml", "mshxml", "msi", "msix", "msixbundle", "msp",
-    "mst", "ocx", "ops", "osd", "pcd", "pif", "pl", "plg", "potm", "ppam", "pptm", "prf", "prg",
-    "printerexport", "ps1", "ps1xml", "ps2", "ps2xml", "psc1", "psc2", "psd1", "psm1", "pst",
-    "py", "pyc", "pyw", "pyz", "pyzw", "rb", "rdp", "reg", "scf", "scr", "sct", "search-ms",
-    "settingcontent-ms", "sh", "shb", "shs", "sldm", "svg", "sys", "theme", "tmp", "url", "vb",
-    "vbe", "vbp", "vbs", "vbscript", "vhd", "vhdx", "vsmacros", "vss", "vst", "vsw", "wll",
-    "ws", "wsc", "wsf", "wsh", "xbap", "xlam", "xll", "xlsm", "xltm", "xml", "xnk",
+    "mst", "msu", "ocx", "ops", "osd", "pcd", "pif", "pl", "plg", "potm", "ppam", "ppkg",
+    "pptm", "prf", "prg", "printerexport", "ps1", "ps1xml", "ps2", "ps2xml", "psc1", "psc2",
+    "psd1", "psm1", "pst", "py", "pyc", "pyw", "pyz", "pyzw", "rb", "rdp", "reg", "scf", "scr",
+    "sct", "search-ms", "searchconnector-ms", "settingcontent-ms", "sh", "shb", "shs", "sldm",
+    "svg", "sys", "theme", "tmp", "url", "vb", "vbe", "vbp", "vbs", "vbscript", "vhd", "vhdx",
+    "vsmacros", "vss", "vst", "vsw", "website", "wll", "ws", "wsb", "wsc", "wsf", "wsh", "xbap",
+    "xlam", "xll", "xlsm", "xltm", "xml", "xnk",
 ];
 
 /// The last extension, lower-cased, after trimming dots and spaces.

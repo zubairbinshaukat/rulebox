@@ -194,9 +194,11 @@ function parseManifest(bytes: Uint8Array): Manifest | null {
 
 function cleanName(text: unknown): string | undefined {
   if (typeof text !== "string") return undefined;
-  const t = text.trim();
+  // A site-supplied name is shown in the dashboard and on the PCs: drop control characters (C0, DEL, C1) and
+  // the invisible bidi / zero-width marks that can make text read in another order or hide characters.
   // eslint-disable-next-line no-control-regex
-  return t.length >= 1 && t.length <= 60 && !/[\u0000-\u001f\u007f]/.test(t) ? t : undefined;
+  const t = text.replace(/[\u0000-\u001f\u007f-\u009f\u061c\u200b-\u200f\u202a-\u202e\u2060-\u2069\ufeff]/g, "").trim();
+  return t.length >= 1 && t.length <= 60 ? t : undefined;
 }
 
 /**

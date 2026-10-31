@@ -307,12 +307,14 @@ function AppForm({
   const fetchMeta = useFetchWebMeta();
   const resolve = useResolveWinget();
   const saveIcon = useSaveAppIcon();
-  // The icon "Fetch details" previewed (a `data:` URL): stored with the app when the form is saved.
-  const [icon, setIcon] = useState<string | null>(null);
+  // The icon "Fetch details" previewed (a `data:` URL) and the address it came from: stored with the app
+  // when the form is saved, and only while the address still is that one (a previous site's icon is never saved).
+  const [fetchedIcon, setIcon] = useState<{ forUrl: string; data: string } | null>(null);
   const form = useRef<HTMLFormElement>(null);
   const f = useForm<FormValues>(initialValues(d, kind), (x) => validateValues(kind, x));
   const [helper, setHelper] = useState<{ pending: boolean; error: unknown; note: string | null }>({ pending: false, error: null, note: null });
   const x = f.values;
+  const icon = fetchedIcon !== null && fetchedIcon.forUrl === x.url.trim() ? fetchedIcon.data : null;
 
   async function runHelper(fn: () => Promise<string>) {
     setHelper({ pending: true, error: null, note: null });
@@ -324,10 +326,10 @@ function AppForm({
   }
 
   /** The app is saved by now; a failing icon upload must not undo that, so it only warns. */
-  async function storeIcon(appId: string) {
-    if (icon === null) return;
+  async function storeIcon(appId: string, forUrl: string) {
+    if (fetchedIcon === null || fetchedIcon.forUrl !== forUrl) return;
     try {
-      await saveIcon({ appId, png: icon });
+      await saveIcon({ appId, png: fetchedIcon.data });
       setIcon(null);
     } catch (e) {
       toast(`${s.iconNotSaved} ${messageFor(e)}`, "danger");
@@ -340,13 +342,13 @@ function AppForm({
       const web = { ...common, url: values.url.trim(), allowedDomains: v.lines(values.domains).map((s2) => s2.toLowerCase()) };
       if (isNew) {
         const id = await createWeb(web);
-        await storeIcon(id);
+        await storeIcon(id, web.url);
         toast(s.created(common.name));
         navigate(`/apps/${id}`, { replace: true });
       } else {
         await update({ appId: d._id, expectedRevision: revision, web });
         onSaved();
-        await storeIcon(d._id);
+        await storeIcon(d._id, web.url);
         toast(s.saved);
       }
     } else {
@@ -412,10 +414,11 @@ function AppForm({
                       aria-busy={helper.pending}
                       onClick={() =>
                         void runHelper(async () => {
-                          const meta = await fetchMeta({ url: x.url.trim() });
+                          const requested = x.url.trim();
+                          const meta = await fetchMeta({ url: requested });
                           if (meta.name && !x.name.trim()) f.set("name", meta.name);
                           if (meta.hue !== undefined) f.set("hue", nearestHue(meta.hue));
-                          setIcon(meta.iconPreviewUrl ?? null);
+                          setIcon(meta.iconPreviewUrl ? { forUrl: requested, data: meta.iconPreviewUrl } : null);
                           return meta.iconPreviewUrl ? s.fetchedWithIcon : s.fetched;
                         })
                       }

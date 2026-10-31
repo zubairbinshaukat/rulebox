@@ -122,8 +122,8 @@ const webApp = {
 describe("Apps list (apps:list)", () => {
   it("asks for the active or the archived page, shows rows with the icon, source and group count; no install numbers yet", () => {
     cx.pages["apps:list"] = [
-      { _id: "a1", name: "Docs", kind: "web", archived: false, groupCount: 2, summary: null, iconUrl: "https://x.convex.cloud/api/storage/1" },
-      { _id: "a2", name: "Reader", kind: "desktop", source: "msi", archived: false, groupCount: 0, summary: null },
+      { _id: "a1", name: "Docs", kind: "web", archived: false, groupCount: 2, groupCountMore: false, summary: null, iconUrl: "https://x.convex.cloud/api/storage/1" },
+      { _id: "a2", name: "Reader", kind: "desktop", source: "msi", archived: false, groupCount: 0, groupCountMore: false, summary: null },
     ];
     ui(<Apps />, "viewer", "/apps");
     expect(cx.paged.at(-1)).toEqual({ name: "apps:list", args: { archived: false } });
@@ -134,6 +134,12 @@ describe("Apps list (apps:list)", () => {
     expect(document.querySelector("img[src='https://x.convex.cloud/api/storage/1']")).not.toBeNull();
     // a viewer cannot add
     expect(screen.queryByRole("link", { name: strings.apps.addWeb })).toBeNull();
+  });
+
+  it("a long group list is shown as 10+ (the query reads only the first assignments)", () => {
+    cx.pages["apps:list"] = [{ _id: "a1", name: "Busy", kind: "web", archived: false, groupCount: 10, groupCountMore: true, summary: null }];
+    ui(<Apps />, "viewer", "/apps");
+    expect(screen.getByText("10+ groups")).toBeTruthy();
   });
 
   it("archived apps are a separate page of the same query", () => {
@@ -167,6 +173,23 @@ describe("AppEdit: a website", () => {
       allowedDomains: ["*.cdn.example.com"],
     });
     await waitFor(() => expect(screen.getByTestId("where").textContent).toBe("/apps/a9"));
+  });
+
+  it("changing the address drops the previewed icon: a previous site's icon is neither shown nor saved", async () => {
+    const saveIcon = vi.fn(async () => null);
+    cx.fns["apps:createWeb"] = vi.fn(async () => "a9");
+    cx.fns["apps:saveIcon"] = saveIcon;
+    cx.fns["apps:fetchWebMeta"] = vi.fn(async () => ({ name: "Docs", iconPreviewUrl: "data:image/png;base64,AAAA" }));
+    ui(<AppEdit />, "admin", "/apps/new?kind=web");
+    const url = screen.getByRole("textbox", { name: new RegExp(`^${strings.appEdit.url}`) });
+    fireEvent.change(url, { target: { value: "https://docs.example.com" } });
+    fireEvent.click(screen.getByRole("button", { name: strings.appEdit.fetch }));
+    await screen.findByText(strings.appEdit.iconPreview);
+    fireEvent.change(url, { target: { value: "https://other.example.org" } });
+    expect(screen.queryByText(strings.appEdit.iconPreview)).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: strings.common.create }));
+    await waitFor(() => expect(screen.getByTestId("where").textContent).toBe("/apps/a9"));
+    expect(saveIcon).not.toHaveBeenCalled();
   });
 
   it("a failed icon upload does not undo the saved app", async () => {

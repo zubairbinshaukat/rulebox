@@ -1,3 +1,4 @@
+import { programDenied } from "./denyList";
 import { MAX_APP_ARG_LENGTH, MAX_APP_ARGS, MAX_EXE_PATH, MAX_RESET_FOLDERS } from "./limits";
 
 // Path templates, arguments and session-cleanup folders of a desktop app
@@ -15,9 +16,17 @@ export const APP_ID_PLACEHOLDER = "{AppId}";
 /** Letters, digits, space and `._-()+&`, 1-100 characters (plan 4.8). */
 const COMPONENT = /^[A-Za-z0-9 ._\-()+&]{1,100}$/;
 
-/** A component made only of dots and spaces ("..", "...", " ") means nothing or the parent to Windows. */
+/** DOS device names: Windows treats `CON`, `NUL.txt`, `com1.exe`... as the device, never as a file or folder. */
+const RESERVED_DEVICE = /^(con|prn|aux|nul|com[1-9]|lpt[1-9])(\..*)?$/i;
+
+/**
+ * One path component: allowed characters, not made only of dots and spaces
+ * ("..", "...", " " mean nothing or the parent to Windows), not ending in a dot
+ * or a space (Windows drops them, so `x.exe.` is `x.exe`) and not a reserved
+ * device name.
+ */
 function validComponent(c: string): boolean {
-  return COMPONENT.test(c) && c.replace(/[. ]/g, "") !== "";
+  return COMPONENT.test(c) && c.replace(/[. ]/g, "") !== "" && !/[. ]$/.test(c) && !RESERVED_DEVICE.test(c);
 }
 
 const FIXED_PREFIXES = ["{ProgramFiles}\\", "{ProgramFilesX86}\\", "{SystemRoot}\\System32\\"] as const;
@@ -47,7 +56,10 @@ export type ExePathContext = {
  *   `{SystemRoot}\System32\`), or for a portable app exactly
  *   `{RuleboxApps}\<this app's id>\` (not another app's folder);
  * - 1 to 8 components below the root, each 1-100 allowed characters, never
- *   `.` / `..` (or dots only), the last one ending in `.exe`;
+ *   `.` / `..` (or dots only), never ending in a dot or space, never a DOS
+ *   device name (`CON`, `NUL.x`, `COM1`...), the last one ending in `.exe`;
+ * - not a shell, script host, runtime or similar program (`DENY_PROGRAMS`:
+ *   `cmd.exe`, `wscript.exe`, `powershell.exe`... PRD 7.3);
  * - at most 260 characters once expanded.
  */
 export function exePathProblem(exe: string, ctx: ExePathContext): string | null {
@@ -62,6 +74,7 @@ export function exePathProblem(exe: string, ctx: ExePathContext): string | null 
   if (rest.length < 1 || rest.length > 8) return "1 to 8 path components";
   if (!rest.every(validComponent)) return "path component not allowed";
   if (!/\.exe$/i.test(rest[rest.length - 1]!)) return "path must end in .exe";
+  if (programDenied(exe)) return "program not allowed";
   const expanded = EXPANDED_PREFIX_LENGTH[ctx.portable ? "{RuleboxApps}\\" : prefix]! + (ctx.portable ? 32 + 1 : 0) + rest.join("\\").length;
   if (expanded > MAX_EXE_PATH) return "path too long";
   return null;

@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import raw from "../../../../crates/rulebox-ipc/tests/vectors/hotkeys.json?raw";
+import { strings } from "./strings";
 import * as v from "./validate";
 
 // The shared vectors: `rulebox_ipc::hotkey::parse` (Rust, the source of truth),
@@ -101,6 +102,11 @@ describe("apps", () => {
       expect(v.webUrl(url), url).toBeTruthy();
     }
     expect(v.webUrl("https://172.32.0.1")).toBeNull();
+    // wildcard-DNS names and 192.88.99.0/24 (server: WILDCARD_DNS_SUFFIXES, privateV4)
+    for (const url of ["https://10.0.0.1.nip.io", "https://a.b.sslip.io/", "https://x.traefik.me", "https://app.localtest.me", "https://localhost.example.com", "https://192.88.99.1"]) {
+      expect(v.webUrl(url), url).toBeTruthy();
+    }
+    expect(v.webUrl("https://mynip.io")).toBeNull();
   });
   it("allowed domains", () => {
     expect(v.domains(["example.com", "*.cdn.example.com"])).toBeNull();
@@ -115,6 +121,14 @@ describe("apps", () => {
     expect(v.exePath("{ProgramFiles}\\...\\x.exe", false)).toBeTruthy();
     expect(v.exePath("{ProgramFiles}\\a\\b.bat", false)).toBeTruthy();
     expect(v.exePath("{ProgramFiles}\\1\\2\\3\\4\\5\\6\\7\\8\\x.exe", false)).toBeTruthy();
+    expect(v.exePath("{SystemRoot}\\System32\\notepad.exe", false)).toBeNull();
+    // shells, script hosts and the like (convex/lib/denyList.ts DENY_PROGRAMS), DOS device names, trailing dot / space
+    for (const exe of ["{SystemRoot}\\System32\\cmd.exe", "{SystemRoot}\\System32\\WScript.exe", "{ProgramFiles}\\PowerShell\\7\\pwsh.exe", "{ProgramFiles}\\x\\CON.exe", "{ProgramFiles}\\nul.d\\x.exe", "{ProgramFiles}\\a.\\x.exe", "{ProgramFiles}\\a \\x.exe"]) {
+      expect(v.exePath(exe, false), exe).toBeTruthy();
+    }
+    expect(v.exePath("{SystemRoot}\\System32\\cmd.exe", false)).toBe(strings.validate.programDenied);
+    expect(v.resetFolders(["{LocalAppData}\\CON"])).toBeTruthy();
+    expect(v.resetFolders(["{LocalAppData}\\Vendor."])).toBeTruthy();
     expect(v.exePath("{RuleboxApps}\\{AppId}\\labels.exe", true)).toBeNull();
     expect(v.exePath("{ProgramFiles}\\labels.exe", true)).toBeTruthy();
   });
@@ -134,6 +148,8 @@ describe("apps", () => {
     expect(v.normalizeExtension("PDF")).toBe(".pdf");
     expect(v.extension(".exe")).toBeTruthy();
     expect(v.extension(".ps1")).toBeTruthy();
+    for (const ext of [".msu", ".ppkg", ".wsb", ".website"]) expect(v.extension(ext), ext).toBe(strings.validate.extensionDenied);
+    expect(v.DENY_EXTENSIONS.has("searchconnector-ms")).toBe(true);
     expect(v.extension(".toolongextension")).toBeTruthy();
   });
 });

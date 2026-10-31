@@ -4,7 +4,7 @@ import { probe } from "../tests/convex/devices";
 import { asMember, expectCode, giveStepUp, makeOrg, type T } from "../tests/convex/identity";
 import { api } from "./_generated/api";
 import type { Id } from "./_generated/dataModel";
-import { DENY_EXTENSIONS, extensionProblem, normalizeExtension } from "./lib/denyList";
+import { DENY_EXTENSIONS, DENY_PROGRAMS, extensionProblem, normalizeExtension, programDenied } from "./lib/denyList";
 import { MAX_FILE_HANDLERS, MINUTE_MS } from "./lib/limits";
 import rustTypes from "../apps/staff-app/src-tauri/src/files/types.rs?raw";
 import dashboardValidate from "../apps/dashboard/src/lib/validate.ts?raw";
@@ -26,6 +26,28 @@ describe("deny-list", () => {
     expect([...DENY_EXTENSIONS].sort()).toEqual([...rust].sort());
     const client = listIn(dashboardValidate, /DENY_EXTENSIONS: ReadonlySet<string> = new Set\(\[/, "]);");
     expect([...DENY_EXTENSIONS].sort()).toEqual([...client].sort());
+  });
+
+  test("the program deny-list equals the dashboard's mirror, is sorted and holds the interpreters that matter", () => {
+    const client = listIn(dashboardValidate, /DENY_PROGRAMS: ReadonlySet<string> = new Set\(\[/, "]);");
+    expect([...DENY_PROGRAMS].sort()).toEqual([...client].sort());
+    expect([...DENY_PROGRAMS]).toEqual([...DENY_PROGRAMS].sort()); // kept sorted, lower-case, no duplicates
+    expect(client).toHaveLength(DENY_PROGRAMS.size);
+    for (const p of ["cmd", "powershell", "pwsh", "wscript", "cscript", "mshta", "rundll32", "regsvr32", "msiexec", "wmic", "bitsadmin", "certutil", "schtasks", "reg", "mmc"]) {
+      expect(DENY_PROGRAMS.has(p), p).toBe(true);
+    }
+    for (const ok of ["notepad", "mspaint", "calc", "wordpad", "vlc", "7zfm"]) expect(DENY_PROGRAMS.has(ok), ok).toBe(false);
+    expect(programDenied("{SystemRoot}\\System32\\MSHTA.EXE")).toBe(true);
+    expect(programDenied("{SystemRoot}\\System32\\notepad.exe")).toBe(false);
+  });
+
+  test("Windows packages, provisioning and sandbox files, Internet shortcuts and search connectors are refused (msu, ppkg, wsb, website, searchconnector-ms)", () => {
+    for (const ext of ["msu", "ppkg", "wsb", "website", "MSU"]) {
+      expect(extensionProblem(normalizeExtension(ext)), ext).toBe("denied");
+    }
+    // a hyphen never passes the shape check; the list still holds it for the Staff App's own check
+    expect(extensionProblem(".searchconnector-ms")).toBe("format");
+    for (const ext of ["msu", "ppkg", "wsb", "website", "searchconnector-ms"]) expect(DENY_EXTENSIONS.has(ext), ext).toBe(true);
   });
 
   test("executables, scripts, installers, shortcuts and macros are refused; documents are not", () => {
@@ -127,6 +149,34 @@ describe("fileHandlers", () => {
     expect(list.appOptions).toEqual([]); // none of the three can open files
     const ok = await a.as.mutation(api.apps.createDesktop, program("Reader"));
     expect((await a.as.query(api.fileHandlers.list, {})).appOptions).toEqual([{ _id: ok, name: "Reader", kind: "desktop", canOpenFiles: true }]);
+  });
+
+  test("a shell, script host or runtime can never be the target of a rule: .txt does not open with wscript.exe", async () => {
+    const t = await setupAuth();
+    const orgId = await makeOrg(t);
+    const a = await admin(t, orgId);
+    for (const exe of ["wscript", "cscript", "cmd", "powershell", "mshta", "rundll32", "regsvr32", "msiexec", "wmic", "certutil"]) {
+      await expectCode(a.as.mutation(api.apps.createDesktop, program(exe, { exe: `{SystemRoot}\\System32\\${exe}.exe` })), "invalid_argument");
+    }
+    // an app that predates the list (written straight into the table) is still refused as a target and not offered
+    const legacy = await t.run((ctx) =>
+      ctx.db.insert("apps", {
+        orgId,
+        name: "Legacy host",
+        kind: "desktop",
+        desktop: { source: "preinstalled", exe: "{SystemRoot}\\System32\\wscript.exe", args: [], fileArgTemplate: ["{file}"], resetFolders: [] },
+        archived: false,
+        revision: 0,
+        createdAt: 0,
+      }),
+    );
+    await expectCode(a.as.mutation(api.fileHandlers.set, { extension: ".txt", appId: legacy }), "invalid_argument");
+    expect((await a.as.query(api.fileHandlers.list, {})).appOptions).toEqual([]);
+    expect(await rules(t, orgId)).toEqual([]);
+    // a normal program is still fine, including a System32 one such as notepad
+    const notepad = await a.as.mutation(api.apps.createDesktop, program("Notepad", { exe: "{SystemRoot}\\System32\\notepad.exe" }));
+    await a.as.mutation(api.fileHandlers.set, { extension: ".txt", appId: notepad });
+    expect(await rules(t, orgId)).toEqual([[".txt", notepad]]);
   });
 
   test("list is ordered by extension and names the program, also an archived one (its rule waits)", async () => {

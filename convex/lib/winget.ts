@@ -3,6 +3,7 @@ import type { Infer } from "convex/values";
 import { httpsUrlProblem, wingetIdProblem, wingetVersionProblem } from "./appRules";
 import { fail } from "./errors";
 import { WINGET_MAX_LISTING_BYTES, WINGET_MAX_MANIFEST_BYTES, WINGET_MAX_VERSION_TRIES, WINGET_TIMEOUT_MS } from "./limits";
+import { argsProblem } from "./pathRules";
 import { fetchPublic } from "./safeFetch";
 import type { installSpec, wingetResolved } from "./validators";
 
@@ -172,6 +173,10 @@ export function pickInstaller(manifest: unknown): PickResult {
     const switches = inherited(entry, manifest, (o) => (isObject(o.InstallerSwitches) ? str(o.InstallerSwitches.Silent) : undefined));
     const silentArgs = switches !== undefined ? splitSwitches(switches) : (DEFAULT_SILENT[type] ?? []);
     if (silentArgs.length === 0) continue; // plain exe without a silent switch
+    if (argsProblem(silentArgs) !== null) {
+      refused = "its silent install switches are not usable (too many, too long or with control characters)";
+      continue;
+    }
     return {
       ok: true,
       install: { kind: "exe", ...base, silentArgs, removeWhenUnassigned: false },

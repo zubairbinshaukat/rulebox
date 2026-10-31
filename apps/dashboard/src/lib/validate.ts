@@ -123,11 +123,15 @@ const PRIVATE_V4 = [
   /^0\./,
   /^100\.(6[4-9]|[7-9]\d|1[01]\d|12[0-7])\./,
   /^192\.0\.[02]\./,
+  /^192\.88\.99\./,
   /^198\.(18|19)\./,
   /^198\.51\.100\./,
   /^203\.0\.113\./,
   /^(22[4-9]|2[3-5]\d)\./,
 ];
+
+/** Wildcard-DNS services (`10.0.0.1.nip.io` resolves to 10.0.0.1); mirrors WILDCARD_DNS_SUFFIXES of the server. */
+const WILDCARD_DNS = ["nip.io", "sslip.io", "xip.io", "traefik.me", "localtest.me", "lvh.me", "vcap.me", "lacolhost.com"];
 
 function isIpLiteral(host: string): boolean {
   return /^\d{1,3}(\.\d{1,3}){3}$/.test(host) || host.startsWith("[");
@@ -148,6 +152,7 @@ export function webUrl(value: string): Check {
   if (!host) return v.httpsUrl;
   if (t.length > 2048) return v.httpsUrl;
   if (/^(localhost|.+\.(localhost|local|internal|localdomain|home\.arpa))$/.test(host)) return v.privateHost;
+  if (/(^|\.)localhost\./.test(host) || WILDCARD_DNS.some((s) => host === s || host.endsWith(`.${s}`))) return v.privateHost;
   if (isIpLiteral(host)) {
     if (host.startsWith("[")) return v.privateHost; // IPv6 literals: refused outright in the client
     if (PRIVATE_V4.some((re) => re.test(host))) return v.privateHost;
@@ -206,6 +211,11 @@ export function installerUrl(value: string): Check {
 }
 
 const COMPONENT = /^[A-Za-z0-9 ._\-()+&]{1,100}$/;
+/** Mirrors `validComponent` of convex/lib/pathRules.ts: not dots/spaces only, not ending in a dot or space, not a DOS device name. */
+const RESERVED_DEVICE = /^(con|prn|aux|nul|com[1-9]|lpt[1-9])(\..*)?$/i;
+function pathComponent(c: string): boolean {
+  return COMPONENT.test(c) && c.replace(/[. ]/g, "") !== "" && !/[. ]$/.test(c) && !RESERVED_DEVICE.test(c);
+}
 const EXE_PREFIXES = ["{ProgramFiles}\\", "{ProgramFilesX86}\\", "{SystemRoot}\\System32\\", "{RuleboxApps}\\{AppId}\\"];
 
 /** Path templates (Section 4.8). `portable` must start with `{RuleboxApps}\{AppId}\`. */
@@ -218,8 +228,9 @@ export function exePath(value: string, portable: boolean): Check {
   if (!portable && prefix === "{RuleboxApps}\\{AppId}\\") return v.exePath;
   const rest = t.slice(prefix.length).split("\\");
   if (rest.length < 1 || rest.length > 8) return v.exePath;
-  if (rest.some((c) => !COMPONENT.test(c) || c.replace(/[. ]/g, "") === "")) return v.exePath;
+  if (!rest.every(pathComponent)) return v.exePath;
   if (!/\.exe$/i.test(rest[rest.length - 1] ?? "")) return v.exePath;
+  if (programDenied(t)) return v.programDenied;
   if (t.length > 260) return v.exePath;
   return null;
 }
@@ -275,7 +286,7 @@ export function resetFolders(list: string[]): Check {
     const prefix = ["{LocalAppData}\\", "{RoamingAppData}\\"].find((p) => item.startsWith(p));
     if (!prefix) return v.resetFolder(item);
     const rest = item.slice(prefix.length).split("\\");
-    if (rest.length < 1 || rest.length > 6 || rest.some((c) => !COMPONENT.test(c) || c.replace(/[. ]/g, "") === "")) {
+    if (rest.length < 1 || rest.length > 6 || !rest.every(pathComponent)) {
       return v.resetFolder(item);
     }
   }
@@ -286,21 +297,43 @@ export function resetFolders(list: string[]): Check {
 
 /** Copied from apps/staff-app/src-tauri/src/files/types.rs `DENY` (PRD 7.3). */
 export const DENY_EXTENSIONS: ReadonlySet<string> = new Set([
-  "ade", "adp", "app", "appinstaller", "application", "appref-ms", "appx", "appxbundle",
-  "asp", "bas", "bat", "cab", "cer", "chm", "cmd", "cnt", "com", "cpl", "crt", "csh", "der",
-  "diagcab", "dll", "dmg", "docm", "dotm", "drv", "exe", "fxp", "gadget", "grp", "hlp", "hpj",
-  "hta", "htm", "html", "img", "inf", "ins", "iso", "isp", "its", "jar", "jnlp", "job", "js",
-  "jse", "ksh", "library-ms", "lnk", "mad", "maf", "mag", "mam", "maq", "mar", "mas", "mat",
-  "mau", "mav", "maw", "mcf", "mda", "mdb", "mde", "mdt", "mdw", "mdz", "mht", "mhtml", "msc",
-  "msh", "msh1", "msh1xml", "msh2", "msh2xml", "mshxml", "msi", "msix", "msixbundle", "msp",
-  "mst", "ocx", "ops", "osd", "pcd", "pif", "pl", "plg", "potm", "ppam", "pptm", "prf", "prg",
-  "printerexport", "ps1", "ps1xml", "ps2", "ps2xml", "psc1", "psc2", "psd1", "psm1", "pst",
-  "py", "pyc", "pyw", "pyz", "pyzw", "rb", "rdp", "reg", "scf", "scr", "sct", "search-ms",
-  "settingcontent-ms", "sh", "shb", "shs", "sldm", "svg", "sys", "theme", "tmp", "url", "vb",
-  "vbe", "vbp", "vbs", "vbscript", "vhd", "vhdx", "vsmacros", "vss", "vst", "vsw", "wll",
-  "ws", "wsc", "wsf", "wsh", "xbap", "xlam", "xll", "xlsm", "xltm", "xml", "xnk",
+  "ade", "adp", "app", "appinstaller", "application", "appref-ms", "appx", "appxbundle", "asp",
+  "bas", "bat", "cab", "cer", "chm", "cmd", "cnt", "com", "cpl", "crt", "csh", "der", "diagcab",
+  "dll", "dmg", "docm", "dotm", "drv", "exe", "fxp", "gadget", "grp", "hlp", "hpj", "hta",
+  "htm", "html", "img", "inf", "ins", "iso", "isp", "its", "jar", "jnlp", "job", "js", "jse",
+  "ksh", "library-ms", "lnk", "mad", "maf", "mag", "mam", "maq", "mar", "mas", "mat", "mau",
+  "mav", "maw", "mcf", "mda", "mdb", "mde", "mdt", "mdw", "mdz", "mht", "mhtml", "msc", "msh",
+  "msh1", "msh1xml", "msh2", "msh2xml", "mshxml", "msi", "msix", "msixbundle", "msp", "mst",
+  "msu", "ocx", "ops", "osd", "pcd", "pif", "pl", "plg", "potm", "ppam", "ppkg", "pptm", "prf",
+  "prg", "printerexport", "ps1", "ps1xml", "ps2", "ps2xml", "psc1", "psc2", "psd1", "psm1",
+  "pst", "py", "pyc", "pyw", "pyz", "pyzw", "rb", "rdp", "reg", "scf", "scr", "sct",
+  "search-ms", "searchconnector-ms", "settingcontent-ms", "sh", "shb", "shs", "sldm", "svg",
+  "sys", "theme", "tmp", "url", "vb", "vbe", "vbp", "vbs", "vbscript", "vhd", "vhdx",
+  "vsmacros", "vss", "vst", "vsw", "website", "wll", "ws", "wsb", "wsc", "wsf", "wsh", "xbap",
+  "xlam", "xll", "xlsm", "xltm", "xml", "xnk",
 ]);
 
+/** Mirrors `DENY_PROGRAMS` of convex/lib/denyList.ts (shells, script hosts, runtimes, LOLBins, consoles: never an app or a file-type target). */
+export const DENY_PROGRAMS: ReadonlySet<string> = new Set([
+  "at", "bash", "bcdedit", "bitsadmin", "bun", "cacls", "certreq", "certutil", "cmd", "cmstp",
+  "compmgmt", "conhost", "control", "csc", "cscript", "curl", "deno", "dfsvc", "diskpart",
+  "dism", "dnscmd", "esentutl", "eventvwr", "expand", "explorer", "extrac32", "forfiles", "ftp",
+  "hh", "icacls", "ieexec", "infdefaultinstall", "installutil", "java", "javaw", "javaws",
+  "jjs", "jsc", "lua", "makecab", "mavinject", "mmc", "msbuild", "msconfig", "msdt", "mshta",
+  "msiexec", "msxsl", "net", "net1", "netsh", "node", "odbcconf", "openconsole", "pcalua",
+  "pcwrun", "perl", "php", "pnputil", "powershell", "powershell_ise", "presentationhost",
+  "print", "psexec", "pwsh", "py", "python", "python3", "pythonw", "pyw", "reg", "regasm",
+  "regedit", "regini", "regsvcs", "regsvr32", "replace", "rpcping", "ruby", "runas", "rundll32",
+  "runonce", "sc", "schtasks", "scp", "sdclt", "services", "sftp", "sh", "ssh",
+  "syncappvpublishingserver", "takeown", "taskmgr", "telnet", "tftp", "tracker", "ttdinject",
+  "vbc", "wevtutil", "winrs", "wmic", "wscript", "wsl", "wt", "wusa", "xwizard",
+]);
+
+/** True when the program's file name (path template) is on `DENY_PROGRAMS`. */
+export function programDenied(exe: string): boolean {
+  const name = exe.slice(exe.lastIndexOf("\\") + 1).toLowerCase();
+  return DENY_PROGRAMS.has(name.endsWith(".exe") ? name.slice(0, -4) : name);
+}
 /** Normalizes "PDF" / "pdf" / ".pdf" to ".pdf". */
 export function normalizeExtension(value: string): string {
   const t = value.trim().toLowerCase();

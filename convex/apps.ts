@@ -9,12 +9,12 @@ import { checkRevision, getInOrg, nextRevision } from "./lib/authz";
 import { normalizeAppDescription, normalizeAppName, normalizeDesktop, normalizeHue, normalizeWeb, withAppId, wingetIdProblem, wingetVersionProblem } from "./lib/appRules";
 import { base64Decode, sha256HexOfBytes } from "./lib/crypto";
 import { deepEqual } from "./lib/deepEqual";
+import { programDenied } from "./lib/denyList";
 import { fail } from "./lib/errors";
 import { memberAction, memberMutation, memberQuery } from "./lib/functions";
 import { webUrlProblem } from "./lib/hostRules";
 import {
   APP_EMPLOYEE_COUNT_CAP,
-  APP_GROUP_COUNT_CAP,
   APP_PURGE_BATCH,
   MAX_APP_ASSIGNMENTS,
   MAX_APP_OPTIONS,
@@ -39,6 +39,13 @@ import { resolveWinget as resolveFromGithub } from "./lib/winget";
 // `appCount` in `orgStats` counts NON-archived apps: archiving frees a plan
 // slot, restoring takes one (and is refused at the limit).
 
+/**
+ * `apps:list` reads at most this many assignment rows per app (one more is read
+ * to know there are more): a page of `MAX_APP_PAGE` apps reads at most
+ * 50 x 11 = 550 rows. The screen shows "10+ groups" when `groupCountMore`.
+ */
+export const APP_LIST_GROUP_CAP = 10;
+
 const actorArg = v.object({ type: v.literal("member"), id: v.string(), label: v.string() });
 
 /** The icon's address (stable while the file exists), or undefined. */
@@ -58,8 +65,9 @@ const appRow = v.object({
   hue: v.optional(v.number()),
   iconUrl: v.optional(v.string()),
   archived: v.boolean(),
-  /** Groups that assign the app, capped (`APP_GROUP_COUNT_CAP` + 1 = "100+"). */
+  /** Groups that assign the app, at most `APP_LIST_GROUP_CAP`; `groupCountMore` = there are more ("10+"). */
   groupCount: v.number(),
+  groupCountMore: v.boolean(),
   /** Install counts come with Step 17 (`apps:list` never reads `installResults`). */
   summary: v.null(),
 });
@@ -85,7 +93,7 @@ export const list = memberQuery("viewer")({
       const groups = await ctx.db
         .query("appAssignments")
         .withIndex("by_app", (q) => q.eq("appId", a._id))
-        .take(APP_GROUP_COUNT_CAP + 1);
+        .take(APP_LIST_GROUP_CAP + 1);
       page.push({
         _id: a._id,
         name: a.name,
@@ -95,7 +103,8 @@ export const list = memberQuery("viewer")({
         hue: a.hue,
         iconUrl: await iconUrlOf(ctx, a),
         archived: a.archived,
-        groupCount: groups.length,
+        groupCount: Math.min(groups.length, APP_LIST_GROUP_CAP),
+        groupCountMore: groups.length > APP_LIST_GROUP_CAP,
         summary: null,
       });
     }
@@ -152,11 +161,13 @@ export const get = memberQuery("viewer")({
       .query("groups")
       .withIndex("by_org", (q) => q.eq("orgId", ctx.orgId))
       .take(MAX_GROUPS_JOINED);
-    const names = new Map(groups.map((g) => [g._id, g.name]));
+    // Each assignment's group is read by id (bounded by the assignment cap), not looked up in the picker's
+    // list: an organization with more groups than the picker holds still names every assignment.
     const rows = [];
     for (const a of assignments) {
-      const groupName = names.get(a.groupId);
-      if (groupName === undefined) continue; // a group of another organization never matches
+      const group = await ctx.db.get(a.groupId);
+      if (group === null || group.orgId !== ctx.orgId) continue; // a group of another organization never matches
+      const groupName = group.name;
       rows.push({
         _id: a._id,
         appId: app._id,
@@ -212,7 +223,7 @@ export const options = memberQuery("viewer")({
       .withIndex("by_org_archived", (q) => q.eq("orgId", ctx.orgId).eq("archived", false))
       .take(MAX_APP_OPTIONS);
     return apps
-      .map((a) => ({ _id: a._id, name: a.name, kind: a.kind, canOpenFiles: a.kind === "desktop" && (a.desktop?.fileArgTemplate.length ?? 0) > 0 }))
+      .map((a) => ({ _id: a._id, name: a.name, kind: a.kind, canOpenFiles: a.kind === "desktop" && (a.desktop?.fileArgTemplate.length ?? 0) > 0 && !programDenied(a.desktop?.exe ?? "") }))
       .sort((a, b) => a.name.localeCompare(b.name));
   },
 });
@@ -495,12 +506,17 @@ export const retry = memberMutation("admin")({
  * `invalid_argument`. The bytes are re-checked here (the client is not
  * trusted), hashed, put in file storage and recorded on the app with their
  * SHA-256, which the document carries so the Staff App can verify the file.
- * Replaces and deletes an earlier icon.
+ * Replaces and deletes an earlier icon. `not_found` for another organization's app
+ * (checked before the file is stored); shares the `webMeta` rate limit.
  */
 export const saveIcon = memberAction("admin")({
   args: { appId: v.string(), png: v.string() },
   returns: v.null(),
   handler: async (ctx, args): Promise<null> => {
+    // Cheapest checks first: the app must be this organization's (before any file is stored), and the
+    // call shares the metadata rate limit (it is the second half of "Fetch details").
+    await ctx.runQuery(internal.apps.iconTarget, { orgId: ctx.orgId, appId: args.appId });
+    await consumeOrFail(ctx, "webMeta", ctx.orgId);
     // The preview is a `data:` URL; accept it whole or just its base64 part.
     const bytes = base64Decode(args.png.replace(/^data:image\/png;base64,/, ""));
     if (bytes === null || pngSize(bytes) === null) fail("invalid_argument", { field: "png" });
@@ -518,6 +534,16 @@ export const saveIcon = memberAction("admin")({
       await ctx.storage.delete(storageId); // no orphan file when the app is not this organization's
       throw e;
     }
+    return null;
+  },
+});
+
+/** `not_found` unless `appId` is an app of `orgId` (so `saveIcon` stores nothing for a foreign id). */
+export const iconTarget = internalQuery({
+  args: { orgId: v.id("organizations"), appId: v.string() },
+  returns: v.null(),
+  handler: async (ctx, args) => {
+    await getInOrg(ctx, "apps", args.appId, args.orgId);
     return null;
   },
 });

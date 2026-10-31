@@ -2,6 +2,7 @@ import { describe, expect, test } from "vitest";
 import { httpsUrlProblem, normalizeDesktop, normalizeInstall, normalizeWeb } from "./lib/appRules";
 import { codeOf } from "../tests/convex/identity";
 import { domainProblem, isForbiddenHost, webUrlProblem } from "./lib/hostRules";
+import { programDenied } from "./lib/denyList";
 import { argsProblem, exePathProblem, fileArgProblem, resetFoldersProblem } from "./lib/pathRules";
 import { DEFAULT_WEB_PERMISSIONS } from "./lib/validators";
 
@@ -16,6 +17,10 @@ describe("exe path templates", () => {
       "{ProgramFiles}\\VideoLAN\\VLC\\vlc.exe",
       "{ProgramFilesX86}\\Notepad++\\notepad++.exe",
       "{SystemRoot}\\System32\\calc.exe",
+      "{SystemRoot}\\System32\\notepad.exe",
+      "{SystemRoot}\\System32\\mspaint.exe",
+      "{ProgramFiles}\\Connect\\relay.exe", // "con" inside a longer name is fine
+      "{ProgramFiles}\\Acme\\v1.2\\a.exe",
       "{ProgramFiles}\\7-Zip\\7zFM.EXE",
       "{ProgramFiles}\\A (b) & c+d_e-f.g\\x.exe",
     ]) {
@@ -49,6 +54,40 @@ describe("exe path templates", () => {
       ["{programfiles}\\x.exe", "token is case-sensitive"],
     ];
     for (const [exe, why] of bad) expect(exePathProblem(exe, fixed), `${exe} (${why})`).not.toBeNull();
+  });
+
+  test("a component may not end in a dot or space, nor be a DOS device name (with or without an extension)", () => {
+    for (const exe of [
+      "{ProgramFiles}\\a.\\x.exe",
+      "{ProgramFiles}\\a \\x.exe",
+      "{ProgramFiles}\\a\\x.exe.",
+      "{ProgramFiles}\\CON\\x.exe",
+      "{ProgramFiles}\\nul.txt\\x.exe",
+      "{ProgramFiles}\\Aux.old\\x.exe",
+      "{ProgramFiles}\\a\\PRN.exe",
+      "{ProgramFiles}\\a\\com1.exe",
+      "{ProgramFiles}\\a\\LPT9\\x.exe",
+      "{ProgramFiles}\\a\\lpt1.x.exe",
+    ]) {
+      expect(exePathProblem(exe, fixed), exe).not.toBeNull();
+    }
+    for (const exe of ["{ProgramFiles}\\com10\\x.exe", "{ProgramFiles}\\com0\\x.exe", "{ProgramFiles}\\console\\x.exe", "{ProgramFiles}\\lpt\\x.exe"]) {
+      expect(exePathProblem(exe, fixed), exe).toBeNull();
+    }
+    expect(resetFoldersProblem(["{LocalAppData}\\CON"])).not.toBeNull();
+    expect(resetFoldersProblem(["{LocalAppData}\\Acme."])).not.toBeNull();
+    expect(resetFoldersProblem(["{LocalAppData}\\Acme\\nul.dat"])).not.toBeNull();
+  });
+
+  test("shells, script hosts, runtimes and living-off-the-land programs are refused wherever they are (PRD 7.3)", () => {
+    for (const name of ["cmd", "powershell", "pwsh", "wscript", "cscript", "mshta", "rundll32", "regsvr32", "msiexec", "wmic", "bitsadmin", "certutil", "schtasks", "reg", "mmc", "explorer", "taskmgr", "python", "node", "java"]) {
+      expect(exePathProblem(`{SystemRoot}\\System32\\${name}.exe`, fixed), name).toBe("program not allowed");
+      expect(exePathProblem(`{ProgramFiles}\\Some App\\${name.toUpperCase()}.EXE`, fixed), `${name} in Program Files`).toBe("program not allowed");
+      expect(exePathProblem(`{RuleboxApps}\\k17abc\\${name}.exe`, { portable: true, appId: "k17abc" }), `${name} portable`).toBe("program not allowed");
+    }
+    expect(programDenied("{SystemRoot}\\System32\\WScript.exe")).toBe(true);
+    expect(programDenied("{SystemRoot}\\System32\\notepad.exe")).toBe(false);
+    expect(programDenied("{ProgramFiles}\\cmd-tools\\viewer.exe")).toBe(false); // only the file name counts
   });
 
   test("a path longer than 260 characters after expansion is refused", () => {
@@ -153,6 +192,16 @@ describe("web addresses", () => {
     expect(isForbiddenHost("localhost.")).toBe(true);
   });
 
+  test("wildcard-DNS names, localhost.<anything> and 192.88.99.0/24 are refused; ordinary look-alikes are not", () => {
+    for (const host of ["10.0.0.1.nip.io", "nip.io", "a.b.sslip.io", "127.0.0.1.xip.io", "x.traefik.me", "app.localtest.me", "foo.lvh.me", "localhost.example.com", "api.localhost.evil.net", "192.88.99.1", "192.88.99.255"]) {
+      expect(isForbiddenHost(host), host).toBe(true);
+      expect(webUrlProblem(`https://${host}/`), host).toBe("host");
+    }
+    for (const host of ["example.com", "mynip.io", "notlocalhost.example.com", "localhosting.example.com", "192.88.98.1", "192.88.100.1"]) {
+      expect(isForbiddenHost(host), host).toBe(false);
+    }
+  });
+
   test("allowed domains: host or *.host, lower-case, no scheme or path", () => {
     for (const d of ["example.com", "*.example.com", "a-b.example.co.uk"]) expect(domainProblem(d), d).toBe(false);
     for (const d of ["Example.com", "https://example.com", "example.com/path", "*.*.example.com", "example", "*example.com", "-a.example.com", "a..com"]) {
@@ -251,6 +300,8 @@ describe("desktop app normalization", () => {
     expect(fieldOf(() => normalizeDesktop({ ...portable, exe: "{ProgramFiles}\\tool.exe" }))).toBe("exe");
     expect(fieldOf(() => normalizeDesktop(desktop({ exe: "{RuleboxApps}\\k17abc\\tool.exe" }), "k17abc"))).toBe("exe");
     expect(fieldOf(() => normalizeDesktop(desktop({ exe: "C:\\x.exe" })))).toBe("exe");
+    expect(fieldOf(() => normalizeDesktop(desktop({ exe: "{SystemRoot}\\System32\\cmd.exe" })))).toBe("exe");
+    expect(fieldOf(() => normalizeDesktop(desktop({ exe: "{SystemRoot}\\System32\\wscript.exe", fileArgTemplate: ["{file}"] })))).toBe("exe");
   });
 
   test("arguments, file argument and cleanup folders are checked with the same rules", () => {

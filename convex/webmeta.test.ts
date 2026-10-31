@@ -213,6 +213,23 @@ describe("fetchWebMeta (stub fetch)", () => {
   });
 });
 
+test("a site-supplied name loses control and bidi characters; what is left must still be 1-60 characters", async () => {
+  const name = async (value: string) => {
+    const { f } = stub({
+      [PAGE]: { body: manifestPage },
+      "https://example.com/assets/site.webmanifest?v=3&x=1": { body: JSON.stringify({ name: value }) },
+    });
+    return (await fetchWebMeta(PAGE, { fetch: f })).name;
+  };
+  expect(await name("Docs")).toBe("Docs");
+  expect(await name("  Docs\u202e")).toBe("Docs");
+  expect(await name("Doc\u202es\u2066x\u2069\u200e\u200f")).toBe("Docsx");
+  expect(await name("Do\u0000c\u0007s\u007f\u0085")).toBe("Docs");
+  expect(await name("\u202e\u202c")).toBeUndefined();
+  expect(await name("x".repeat(61))).toBeUndefined();
+  expect(await name("x".repeat(60))).toBe("x".repeat(60));
+});
+
 describe("SSRF and size guards", () => {
   const redirectTo = (location: string) => ({ status: 302, headers: { location } });
   const failure = async (routes: Record<string, Reply>, start = PAGE) => {
@@ -238,6 +255,55 @@ describe("SSRF and size guards", () => {
       const { r, calls } = await failure({ [PAGE]: redirectTo(target) });
       expect(r, target).toEqual({ ok: false, reason: "blocked" });
       expect(calls.map((c) => c.url), target).toEqual([PAGE]);
+    }
+  });
+
+  test("a runtime that follows redirects by itself cannot reach an unchecked host: redirected / foreign response URL / opaque redirect are refused", async () => {
+    const answer = (props: Record<string, unknown>) =>
+      (async () => {
+        const res = new Response("secret internal page", { status: 200 });
+        for (const [k, val] of Object.entries(props)) Object.defineProperty(res, k, { value: val });
+        return res;
+      }) as typeof fetch;
+    const cases: Record<string, unknown>[] = [
+      { redirected: true, url: PAGE },
+      { redirected: true, url: "https://169.254.169.254/latest/meta-data/" },
+      { url: "https://169.254.169.254/latest/meta-data/" },
+      { url: "https://other.example.org/" },
+      { type: "opaqueredirect", status: 0 },
+    ];
+    for (const props of cases) {
+      const r = await fetchPublic(PAGE, { fetch: answer(props), maxBytes: 1024 });
+      expect(r, JSON.stringify(props)).toEqual({ ok: false, reason: "redirect_followed" });
+    }
+    // an honest answer: empty URL (mocks) or exactly the requested one (a fragment is not part of a response URL)
+    for (const props of [{}, { url: PAGE }, { url: PAGE, redirected: false }]) {
+      expect(await fetchPublic(PAGE, { fetch: answer(props), maxBytes: 1024 }), JSON.stringify(props)).toMatchObject({ ok: true });
+    }
+    expect(await fetchPublic(`${PAGE}#frag`, { fetch: answer({ url: PAGE }), maxBytes: 1024 })).toMatchObject({ ok: true });
+    // and the page of fetchWebMeta is never read from such an answer
+    await expect(fetchWebMeta(PAGE, { fetch: answer({ redirected: true }) })).rejects.toSatisfy((e) => codeOf(e) === "webmeta_failed");
+  });
+
+  test("only port 443 (or none) is fetched, at the start and after a redirect", async () => {
+    for (const start of ["https://example.com:8443/", "https://example.com:80/", "https://example.com:22/", "https://example.com:6379/"]) {
+      const { r, calls } = await failure({}, start);
+      expect(r, start).toEqual({ ok: false, reason: "blocked" });
+      expect(calls, start).toHaveLength(0);
+    }
+    const viaRedirect = await failure({ [PAGE]: redirectTo("https://example.org:8443/admin") });
+    expect(viaRedirect.r).toEqual({ ok: false, reason: "blocked" });
+    expect(viaRedirect.calls.map((c) => c.url)).toEqual([PAGE]);
+    // an explicit :443 is the default port and is fine
+    const ok = await failure({ "https://example.com/": { body: "ok" } }, "https://example.com:443/");
+    expect(ok.r).toMatchObject({ ok: true });
+  });
+
+  test("hosts that resolve to private addresses through wildcard DNS are not fetched", async () => {
+    for (const start of ["https://10.0.0.1.nip.io/", "https://169.254.169.254.sslip.io/", "https://localhost.example.com/"]) {
+      const { r, calls } = await failure({}, start);
+      expect(r, start).toEqual({ ok: false, reason: "blocked" });
+      expect(calls, start).toHaveLength(0);
     }
   });
 

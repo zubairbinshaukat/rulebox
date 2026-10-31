@@ -3,7 +3,7 @@ import type { Doc } from "./_generated/dataModel";
 import { publishApp } from "./lib/appPublish";
 import { writeAudit } from "./lib/audit";
 import { getInOrg } from "./lib/authz";
-import { extensionProblem, normalizeExtension } from "./lib/denyList";
+import { extensionProblem, normalizeExtension, programDenied } from "./lib/denyList";
 import { fail } from "./lib/errors";
 import { memberMutation, memberQuery } from "./lib/functions";
 import { MAX_FILE_HANDLERS, MAX_APP_OPTIONS } from "./lib/limits";
@@ -16,9 +16,14 @@ import { appKind } from "./lib/validators";
 // them again). Each device's document keeps a rule only when its app is in
 // that device's catalogue (`lib/desired.ts`).
 
-/** Can this app be the target of a rule? A non-archived program with a file argument. */
+/**
+ * Can this app be the target of a rule? A non-archived program with a file
+ * argument that is not a shell, script host or runtime (`DENY_PROGRAMS`: a
+ * `.txt` rule must never run the file as a script; checked here again for apps
+ * saved before the list grew).
+ */
 function canOpenFiles(app: Doc<"apps">): boolean {
-  return app.kind === "desktop" && !app.archived && (app.desktop?.fileArgTemplate.length ?? 0) > 0;
+  return app.kind === "desktop" && !app.archived && (app.desktop?.fileArgTemplate.length ?? 0) > 0 && !programDenied(app.desktop?.exe ?? "");
 }
 
 /**

@@ -605,7 +605,9 @@ export interface AppRow {
   hue?: number;
   iconUrl?: string;
   archived: boolean;
+  /** `apps:list` reads at most 10 assignments per app: `groupCountMore` = more than `groupCount` ("10+"). */
   groupCount: number;
+  groupCountMore: boolean;
   summary: InstallSummary | null;
 }
 

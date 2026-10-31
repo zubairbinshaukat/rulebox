@@ -207,6 +207,7 @@ export const strings = {
     exePath:
       "Start with {ProgramFiles}\\, {ProgramFilesX86}\\, {SystemRoot}\\System32\\ or {RuleboxApps}\\{AppId}\\ and end with .exe.",
     portableExe: "A portable app must live in {RuleboxApps}\\{AppId}\\.",
+    programDenied: "Command shells, script hosts and similar system tools cannot be added as an app.",
     silentArgs: "An EXE installer needs its silent install arguments (for example /S).",
     fileArg: "Use {file} exactly once, or leave it empty if the app can't open files.",
     args: "At most 16 arguments, each at most 200 characters.",
@@ -616,7 +617,8 @@ export const strings = {
     emptyBody: "Add a website or a Windows program, then assign it to a group.",
     emptyArchivedTitle: "No archived apps",
     emptyArchivedBody: "Archived apps show up here.",
-    groups: (count: number) => n(count, "group", "groups"),
+    /** `more`: the list read only the first `count` assignments ("10+ groups"). */
+    groups: (count: number, more = false) => (more ? `${formatNumber(count)}+ groups` : n(count, "group", "groups")),
     installSummary: (installed: number, failed: number, inProgress: number) =>
       `${formatNumber(installed)} installed · ${formatNumber(failed)} failed · ${formatNumber(inProgress)} pending`,
     noInstalls: "Nothing to install",
