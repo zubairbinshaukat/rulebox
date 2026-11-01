@@ -27,6 +27,7 @@ macro_rules! unknown_on_new_values {
 
 pub mod catalog;
 pub mod envelope;
+pub mod paths;
 pub mod roster;
 
 /// The example desired state from PRD Section 10.

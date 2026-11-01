@@ -209,6 +209,25 @@ impl CatalogApp {
         self.kind != CatalogKind::Unknown
     }
 
+    /// (Phase 4 Step 13, plan 4.8 "Which apps an employee sees") The audience part
+    /// of the rule: everyone, or the employee is listed. Whether a desktop app is
+    /// installed is the caller's part. An unknown audience is never visible.
+    pub fn visible_to(&self, employee_id: &str) -> bool {
+        match self.audience {
+            Audience::Everyone => true,
+            Audience::Selected => self.employee_ids.iter().any(|id| id == employee_id),
+            Audience::Unknown => false,
+        }
+    }
+
+    /// True for a desktop app the agent copies into `{RuleboxApps}\<id>\`.
+    pub fn is_portable(&self) -> bool {
+        self.desktop
+            .as_ref()
+            .and_then(|desktop| desktop.install.as_ref())
+            .is_some_and(|install| install.kind == InstallKind::Portable)
+    }
+
     /// The entry is usable: known values, the spec of its kind (and only that
     /// one), `https://` URLs, well-formed hashes. Path templates are checked
     /// where they are expanded, not here.
@@ -407,6 +426,22 @@ mod tests {
         assert_eq!(parsed[1], Err(CatalogError::UnknownValue("kind")));
         assert_eq!(parsed.iter().filter(|r| r.is_ok()).count(), total - 1);
         assert_eq!(parse_catalog(&json!({ "not": "an array" })), Err(CatalogError::NotAnArray));
+    }
+
+    #[test]
+    fn visibility_follows_the_audience() {
+        let list = apps(&vector());
+        let selected = list.iter().find(|a| a.audience == Audience::Selected && !a.employee_ids.is_empty()).unwrap();
+        let listed = selected.employee_ids[0].clone();
+        assert!(selected.visible_to(&listed));
+        assert!(!selected.visible_to("emp_somebody_else"));
+        let everyone = list.iter().find(|a| a.audience == Audience::Everyone).unwrap();
+        assert!(everyone.visible_to("emp_somebody_else"));
+        let mut unknown = everyone.clone();
+        unknown.audience = Audience::Unknown;
+        assert!(!unknown.visible_to(&listed));
+        assert!(list.iter().any(CatalogApp::is_portable));
+        assert!(!find(&list, "app_vec_msi").is_portable());
     }
 
     #[test]
