@@ -5,6 +5,7 @@ use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
+use futures_util::future::{abortable, AbortHandle};
 use tauri::{AppHandle, Emitter, Manager};
 
 use crate::agent::AgentPort;
@@ -185,11 +186,21 @@ impl AppState {
     where
         F: FnOnce(&mut ShellState),
     {
-        {
+        self.modify(f);
+    }
+
+    /// Like `update`, and hands back what `f` decided. The decision and the
+    /// change happen under one lock, so nothing can slip in between.
+    pub fn modify<F, R>(&self, f: F) -> R
+    where
+        F: FnOnce(&mut ShellState) -> R,
+    {
+        let result = {
             let mut shell = self.inner.shell.lock().unwrap_or_else(|e| e.into_inner());
-            f(&mut shell);
-        }
+            f(&mut shell)
+        };
         self.schedule_emit();
+        result
     }
 
     pub fn mark_ui_alive(&self) {
@@ -383,25 +394,66 @@ pub fn spawn_agent_tasks(state: AppState) {
     });
 }
 
-/// Protocol 1.2 pushes, one at a time and in order: a catalogue refresh must
-/// not overtake the sign-out that follows it, nor the other way round.
-async fn pump_agent_events(
+/// Run `fut` in the background and return a handle that cancels it.
+fn spawn_abortable<F>(fut: F) -> AbortHandle
+where
+    F: std::future::Future<Output = ()> + Send + 'static,
+{
+    let (fut, handle) = abortable(fut);
+    spawn_bg(async move {
+        let _ = fut.await;
+    });
+    handle
+}
+
+/// Protocol 1.2 pushes, read in order. `session.ended` is handled right here
+/// and never waits for a catalogue call: a refresh (`apps.list` can hang for
+/// its whole 10 s timeout) runs as its own task, and the end of the session
+/// cancels it first.
+pub async fn pump_agent_events(
     state: AppState,
     mut events: tokio::sync::broadcast::Receiver<crate::model::AgentEvent>,
 ) {
+    use crate::model::{AgentEvent, SessionEndedReason};
     use tokio::sync::broadcast::error::RecvError;
+
+    let mut refresh: Option<AbortHandle> = None;
+    let start_refresh = |refresh: &mut Option<AbortHandle>| {
+        // A newer refresh supersedes one that is still running.
+        if let Some(running) = refresh.take() {
+            running.abort();
+        }
+        let state = state.clone();
+        *refresh = Some(spawn_abortable(async move {
+            crate::session::refresh_catalogue_quietly(&state).await;
+        }));
+    };
 
     loop {
         match events.recv().await {
-            Ok(event) => crate::commands::on_agent_event(&state, event).await,
+            Ok(AgentEvent::AppsChanged) => start_refresh(&mut refresh),
+            Ok(AgentEvent::SessionEnded(reason)) => {
+                if let Some(running) = refresh.take() {
+                    running.abort();
+                }
+                crate::commands::end_session_from_agent(&state, reason).await;
+            }
             Err(RecvError::Lagged(missed)) => {
-                // Rare. A lost `apps.changed` is cured by asking again; a lost
-                // `session.ended` shows up as the next call failing.
-                tracing::warn!(missed, "agent events were dropped; refreshing the catalogue");
-                crate::session::refresh_catalogue_quietly(&state).await;
+                // Rare. A lost `apps.changed` is cured by asking again. A lost
+                // `session.ended` is found by asking the agent whether it still
+                // has this session (its own task: the question can take a while).
+                tracing::warn!(missed, "agent events were dropped; checking the session");
+                start_refresh(&mut refresh);
+                let state = state.clone();
+                spawn_bg(async move {
+                    crate::session::verify_session(&state, SessionEndedReason::Unknown).await;
+                });
             }
             Err(RecvError::Closed) => break,
         }
+    }
+    if let Some(running) = refresh.take() {
+        running.abort();
     }
 }
 
@@ -455,6 +507,17 @@ fn apply_link(state: &AppState, link: crate::model::AgentLink) {
             s.agent = None;
         }
     });
+
+    // Pushes sent while the pipe was down are gone for good. An employee who is
+    // shown as signed in when the link comes back is checked against the agent.
+    if matches!(link, AgentLinkDto::Linked)
+        && state.read(|s| matches!(s.session, crate::model::SessionState::SignedIn { .. }))
+    {
+        let state = state.clone();
+        spawn_bg(async move {
+            crate::session::verify_session(&state, crate::model::SessionEndedReason::Unknown).await;
+        });
+    }
 }
 
 fn apply_snapshot(state: &AppState, snap: Option<rulebox_ipc::types::AgentSnapshot>) {

@@ -10,7 +10,8 @@ use thiserror::Error;
 use tokio::sync::{broadcast, watch};
 
 use crate::model::{
-    AdminExitOutcome, AgentEvent, AgentLink, AppEntry, SignInOutcome, SignInRequest, VerifyOutcome,
+    AdminExitOutcome, AgentEvent, AgentLink, AppEntry, Employee, SignInOutcome, SignInRequest,
+    VerifyOutcome,
 };
 
 #[cfg(debug_assertions)]
@@ -25,7 +26,12 @@ pub trait AgentPort: Send + Sync + 'static {
     /// enough; a receiver that lags behind loses the oldest events.
     fn events(&self) -> broadcast::Receiver<AgentEvent>;
     /// Debug only (the dev command file): send `event` as if the agent had.
+    #[cfg(debug_assertions)]
     fn dev_emit(&self, _event: AgentEvent) {}
+    /// `session.get`: the employee the agent holds a session for, `None` when it
+    /// has none. The shell asks after a lost push or a re-link, to be sure that
+    /// it is not showing a session the agent no longer has.
+    fn session_get(&self) -> BoxFuture<'_, Result<Option<Employee>, AgentError>>;
     fn ready(&self) -> BoxFuture<'_, Result<(), AgentError>>;
     fn heartbeat(&self) -> BoxFuture<'_, Result<(), AgentError>>;
     fn sign_in(&self, req: SignInRequest) -> BoxFuture<'_, Result<SignInOutcome, AgentError>>;
@@ -52,6 +58,13 @@ pub enum AgentError {
     Rejected { code: String, message: String },
     #[error("internal: {0}")]
     Internal(String),
+}
+
+impl AgentError {
+    /// The agent answered "no employee is signed in" (`not_signed_in`).
+    pub fn is_not_signed_in(&self) -> bool {
+        matches!(self, AgentError::Rejected { code, .. } if code == "not_signed_in")
+    }
 }
 
 /// Pick demo (debug + `RULEBOX_STAFF_DEMO=1`) or IPC.

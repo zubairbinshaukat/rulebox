@@ -472,14 +472,30 @@ async fn run_sign_out(
     services: &TaskServices,
     host: &Arc<DesktopHost>,
 ) -> Result<(), CommandError> {
-    let employee = match state.snapshot().session {
-        SessionState::SignedIn { employee, .. } => employee,
-        SessionState::SigningOut => return Ok(()),
-        _ => return Err(CommandError::Failed("nobody is signed in".into())),
+    // Decided and changed under one lock: two callers cannot both start it.
+    let employee = state.modify(|shell| match &shell.session {
+        SessionState::SignedIn { employee, .. } => {
+            let employee = employee.clone();
+            shell.session = SessionState::SigningOut;
+            Ok(Some(employee))
+        }
+        SessionState::SigningOut => Ok(None),
+        _ => Err(CommandError::Failed("nobody is signed in".into())),
+    })?;
+    let Some(employee) = employee else {
+        return Ok(());
     };
-    state.update(|shell| {
-        shell.session = SessionState::SigningOut;
-    });
+    sign_out_steps(app, state, services, host, employee).await
+}
+
+/// Steps 3–7 of log out, for a session that is already `SigningOut`.
+async fn sign_out_steps(
+    app: &AppHandle,
+    state: &AppState,
+    services: &TaskServices,
+    host: &Arc<DesktopHost>,
+    employee: crate::model::Employee,
+) -> Result<(), CommandError> {
     crate::shellwin::popup_close(app, host);
     if let Some(apps) = app.try_state::<Arc<crate::appwin::AppWindows>>() {
         apps.close_all(app);
@@ -491,45 +507,44 @@ async fn run_sign_out(
     blocking(move || session::perform_sign_out(&state, &services, &employee)).await
 }
 
-/// A protocol 1.2 push from the agent (`state::spawn_agent_tasks` reads them
-/// one at a time, in order).
-pub async fn on_agent_event(state: &AppState, event: crate::model::AgentEvent) {
-    use crate::model::AgentEvent;
-
-    match event {
-        AgentEvent::AppsChanged => session::refresh_catalogue_quietly(state).await,
-        AgentEvent::SessionEnded(reason) => end_session_from_agent(state, reason).await,
-    }
+/// `session.ended`: the agent has already cleared its session, so this is the
+/// log-out sequence without asking (apps closed, memory cleared) and the reason
+/// on the sign-in screen. Works in every state (see `session::apply_session_ended`).
+pub async fn end_session_from_agent(state: &AppState, reason: crate::model::SessionEndedReason) {
+    end_session(state, reason, None).await;
 }
 
-/// `session.ended`: the agent has already cleared its session, so this is the
-/// log-out sequence without asking (apps closed, memory cleared) followed by
-/// the reason on the sign-in screen.
-async fn end_session_from_agent(state: &AppState, reason: crate::model::SessionEndedReason) {
+/// `end_session_from_agent`, optionally only for the session of one employee.
+pub async fn end_session(
+    state: &AppState,
+    reason: crate::model::SessionEndedReason,
+    only_for: Option<&str>,
+) {
     use session::EndedPlan;
 
-    match session::plan_session_ended(&state.snapshot().session, reason) {
-        EndedPlan::Ignore => return,
-        EndedPlan::NoteOnly => {}
-        EndedPlan::SignOutThenNote => {
-            let Some(app) = state.app_handle() else {
-                tracing::warn!("session.ended before the shell was ready");
-                return;
-            };
-            let (Some(services), Some(host)) = (
-                app.try_state::<TaskServices>(),
-                app.try_state::<Arc<DesktopHost>>(),
-            ) else {
-                tracing::warn!("session.ended before the shell was ready");
-                return;
-            };
-            tracing::info!(?reason, "the agent ended the session");
-            if let Err(error) = run_sign_out(&app, state, &services, &host).await {
-                tracing::warn!(%error, "could not close the session the agent ended");
-            }
-        }
+    let plan = state.modify(|shell| session::apply_session_ended(shell, reason, only_for));
+    let EndedPlan::SignOut(employee) = plan else {
+        return;
+    };
+    tracing::info!(?reason, "the agent ended the session");
+
+    // Too early for the windows (the shell is still starting): the employee must
+    // still be signed out, just without anything to close.
+    let parts = state.app_handle().and_then(|app| {
+        let services = app.try_state::<TaskServices>()?.inner().clone();
+        let host = app.try_state::<Arc<DesktopHost>>()?.inner().clone();
+        Some((app, services, host))
+    });
+    let Some((app, services, host)) = parts else {
+        tracing::warn!("session.ended before the shell was ready; signing out without windows");
+        session::sign_out_without_windows(state, &employee).await;
+        return;
+    };
+    if let Err(error) = sign_out_steps(&app, state, &services, &host, employee.clone()).await {
+        // The worker did not finish: do not leave the session half closed.
+        tracing::warn!(%error, "could not close the session the agent ended");
+        session::sign_out_without_windows(state, &employee).await;
     }
-    session::note_session_ended(state, reason);
 }
 
 /// Close the shell's apps and return to sign-in. Windows the shell did not

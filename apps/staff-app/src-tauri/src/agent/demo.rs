@@ -349,6 +349,10 @@ pub struct DemoAgent {
     session: Mutex<SessionSlot>,
     ready_count: AtomicU32,
     events_tx: broadcast::Sender<AgentEvent>,
+    /// How long `apps.list` takes to answer (tests make it slow or hung).
+    apps_delay: Mutex<Duration>,
+    /// How long the answer to `session.signIn` takes to arrive (the session is set at once).
+    sign_in_delay: Mutex<Duration>,
 }
 
 impl DemoAgent {
@@ -369,12 +373,43 @@ impl DemoAgent {
             }),
             ready_count: AtomicU32::new(0),
             events_tx: broadcast::channel(16).0,
+            apps_delay: Mutex::new(Duration::ZERO),
+            sign_in_delay: Mutex::new(Duration::ZERO),
         }
     }
 
-    #[cfg(test)]
+    /// Make the answer to `session.signIn` arrive after `delay`.
+    pub fn set_sign_in_delay(&self, delay: Duration) {
+        if let Ok(mut slot) = self.sign_in_delay.lock() {
+            *slot = delay;
+        }
+    }
+
     pub fn set_link(&self, link: AgentLink) {
         let _ = self.link_tx.send(link);
+    }
+
+    /// Make `apps.list` answer after `delay` (a hung agent call).
+    pub fn set_apps_delay(&self, delay: Duration) {
+        if let Ok(mut slot) = self.apps_delay.lock() {
+            *slot = delay;
+        }
+    }
+
+    /// The agent ended the session but its push never reached the shell
+    /// (lagged channel, or the pipe was down): the session is gone, no event.
+    pub fn end_session_silently(&self) {
+        if let Ok(mut slot) = self.session.lock() {
+            slot.employee = None;
+        }
+    }
+
+    /// Send `count` harmless events at once, more than the channel holds, so a
+    /// reader that was not listening lags (the broadcast channel drops the oldest).
+    pub fn flood_events(&self, count: usize) {
+        for _ in 0..count {
+            let _ = self.events_tx.send(AgentEvent::AppsChanged);
+        }
     }
 }
 
@@ -417,6 +452,11 @@ impl AgentPort for DemoAgent {
         let _ = self.events_tx.send(event);
     }
 
+    fn session_get(&self) -> BoxFuture<'_, Result<Option<Employee>, AgentError>> {
+        let employee = self.session.lock().ok().and_then(|slot| slot.employee.clone());
+        Box::pin(ready(Ok(employee)))
+    }
+
     fn ready(&self) -> BoxFuture<'_, Result<(), AgentError>> {
         self.ready_count.fetch_add(1, Ordering::Relaxed);
         let _ = self.snap_tx.send(Some(demo_snapshot()));
@@ -429,56 +469,13 @@ impl AgentPort for DemoAgent {
 
     fn sign_in(&self, req: SignInRequest) -> BoxFuture<'_, Result<SignInOutcome, AgentError>> {
         Box::pin(async move {
-            let mut slot = self
-                .session
-                .lock()
-                .map_err(|e| AgentError::Internal(e.to_string()))?;
-
-            if let Some(until) = slot.locked_until {
-                if Instant::now() < until {
-                    let retry = until.saturating_duration_since(Instant::now());
-                    return Ok(SignInOutcome::LockedOut {
-                        retry_after_ms: retry.as_millis() as u64,
-                    });
-                }
-                slot.locked_until = None;
-                slot.fails = 0;
+            // The session is set at once; then the answer travels (tests make it slow).
+            let outcome = self.sign_in_now(req)?;
+            let delay = self.sign_in_delay.lock().map(|d| *d).unwrap_or_default();
+            if !delay.is_zero() {
+                tokio::time::sleep(delay).await;
             }
-
-            let username = req.username.trim().to_ascii_lowercase();
-            // A real employee of the organization who is not in this PC's group (protocol 1.2).
-            if username == NOT_HERE_USER && req.password == "demo" {
-                return Ok(SignInOutcome::NotAllowedHere);
-            }
-            let found = directory()
-                .into_iter()
-                .find(|e| e.username == username.as_str());
-
-            match found {
-                Some(rec) if rec.password == req.password => {
-                    slot.fails = 0;
-                    slot.employee = Some(rec.employee.clone());
-                    let files_root = files_root_for(rec.username);
-                    seed_demo_files(&files_root);
-                    Ok(SignInOutcome::Ok {
-                        employee: rec.employee.clone(),
-                        files_root,
-                        offline: false,
-                    })
-                }
-                Some(_) | None => {
-                    slot.fails = slot.fails.saturating_add(1);
-                    if slot.fails >= LOCKOUT_AFTER {
-                        slot.locked_until = Some(Instant::now() + Duration::from_millis(LOCKOUT_MS));
-                        slot.fails = 0;
-                        Ok(SignInOutcome::LockedOut {
-                            retry_after_ms: LOCKOUT_MS,
-                        })
-                    } else {
-                        Ok(SignInOutcome::WrongCredentials)
-                    }
-                }
-            }
+            Ok(outcome)
         })
     }
 
@@ -545,7 +542,13 @@ impl AgentPort for DemoAgent {
     }
 
     fn apps(&self) -> BoxFuture<'_, Result<Vec<AppEntry>, AgentError>> {
-        Box::pin(ready(Ok(sample_apps())))
+        let delay = self.apps_delay.lock().map(|d| *d).unwrap_or_default();
+        Box::pin(async move {
+            if !delay.is_zero() {
+                tokio::time::sleep(delay).await;
+            }
+            Ok(sample_apps())
+        })
     }
 
     fn admin_exit(&self, pin: String) -> BoxFuture<'_, Result<AdminExitOutcome, AgentError>> {
@@ -587,5 +590,60 @@ impl AgentPort for DemoAgent {
                 }
             }
         })
+    }
+}
+
+impl DemoAgent {
+    fn sign_in_now(&self, req: SignInRequest) -> Result<SignInOutcome, AgentError> {
+        let mut slot = self
+            .session
+            .lock()
+            .map_err(|e| AgentError::Internal(e.to_string()))?;
+
+        if let Some(until) = slot.locked_until {
+            if Instant::now() < until {
+                let retry = until.saturating_duration_since(Instant::now());
+                return Ok(SignInOutcome::LockedOut {
+                    retry_after_ms: retry.as_millis() as u64,
+                });
+            }
+            slot.locked_until = None;
+            slot.fails = 0;
+        }
+
+        let username = req.username.trim().to_ascii_lowercase();
+        // A real employee of the organization who is not in this PC's group (protocol 1.2).
+        if username == NOT_HERE_USER && req.password == "demo" {
+            return Ok(SignInOutcome::NotAllowedHere);
+        }
+        let found = directory()
+            .into_iter()
+            .find(|e| e.username == username.as_str());
+
+        match found {
+            Some(rec) if rec.password == req.password => {
+                slot.fails = 0;
+                slot.employee = Some(rec.employee.clone());
+                let files_root = files_root_for(rec.username);
+                seed_demo_files(&files_root);
+                Ok(SignInOutcome::Ok {
+                    employee: rec.employee.clone(),
+                    files_root,
+                    offline: false,
+                })
+            }
+            Some(_) | None => {
+                slot.fails = slot.fails.saturating_add(1);
+                if slot.fails >= LOCKOUT_AFTER {
+                    slot.locked_until = Some(Instant::now() + Duration::from_millis(LOCKOUT_MS));
+                    slot.fails = 0;
+                    Ok(SignInOutcome::LockedOut {
+                        retry_after_ms: LOCKOUT_MS,
+                    })
+                } else {
+                    Ok(SignInOutcome::WrongCredentials)
+                }
+            }
+        }
     }
 }

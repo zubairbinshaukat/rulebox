@@ -146,6 +146,7 @@ mod step3_tests {
                 "adminExit".into(),
             ],
             session_ended: None,
+            pending_end: None,
         }
     }
 

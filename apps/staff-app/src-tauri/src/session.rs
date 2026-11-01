@@ -18,7 +18,7 @@ use crate::agent::AgentError;
 use crate::commands::CommandError;
 use crate::model::{
     CatalogState, CatalogStatus, Employee, EmployeeBrief, SessionEndedReason, SessionState,
-    SignInOutcome, SignInRequest, VerifyOutcome,
+    ShellState, SignInOutcome, SignInRequest, VerifyOutcome,
 };
 use crate::state::AppState;
 use crate::tasks::TaskServices;
@@ -187,11 +187,21 @@ pub async fn sign_in(
         return Err(CommandError::Agent(AgentError::Unsupported));
     }
 
-    state.update(|s| {
+    // Decided under one lock. A log out that is still running must finish first:
+    // it would overwrite the new sign-in when it ends.
+    let started = state.modify(|s| {
+        if matches!(s.session, SessionState::SigningOut) {
+            return false;
+        }
         s.session = SessionState::SigningIn;
         // The "you were signed out" note is for the screen the person just left.
         s.session_ended = None;
+        s.pending_end = None;
+        true
     });
+    if !started {
+        return Err(CommandError::Forbidden);
+    }
 
     let req = SignInRequest {
         username,
@@ -205,6 +215,7 @@ pub async fn sign_in(
             state.update(|s| {
                 s.session = SessionState::SignedOut { last };
             });
+            settle_pending_end(state).await;
             return Err(CommandError::Agent(error));
         }
     };
@@ -217,6 +228,18 @@ pub async fn sign_in(
         .await
         .map_err(|error| CommandError::Failed(error.to_string()))??;
 
+    // `session.ended` may have arrived while the agent was answering (or between
+    // its answer and the line above). Act on it now, before anything else.
+    let ended_meanwhile = settle_pending_end(state).await;
+    if ended_meanwhile {
+        if matches!(outcome, SignInOutcome::Ok { .. }) {
+            // The employee was signed in and out again inside this call: the page
+            // must not start the "open desktop" sequence for a session that is gone.
+            return Ok(SignInOutcome::Unknown);
+        }
+        return Ok(outcome);
+    }
+
     if matches!(outcome, SignInOutcome::Ok { .. }) {
         load_catalogue(state).await;
     }
@@ -224,24 +247,48 @@ pub async fn sign_in(
     Ok(outcome)
 }
 
-pub async fn load_catalogue(state: &AppState) {
-    match state.agent().apps().await {
-        Ok(items) => {
-            state.update(|s| {
-                s.apps = CatalogState {
-                    status: CatalogStatus::Ready,
-                    items,
-                };
-            });
+/// The employee id of the signed-in session (locked or not).
+fn signed_in_employee_id(state: &AppState) -> Option<String> {
+    state.read(|s| match &s.session {
+        SessionState::SignedIn { employee, .. } => Some(employee.id.clone()),
+        _ => None,
+    })
+}
+
+/// Put `catalogue` on screen, but only for the session that asked for it: if
+/// that employee signed out meanwhile (and maybe somebody else signed in), the
+/// late answer is dropped.
+fn land_catalogue(state: &AppState, employee_id: &str, catalogue: CatalogState) {
+    state.update(|s| {
+        if matches!(&s.session, SessionState::SignedIn { employee, .. } if employee.id == employee_id) {
+            s.apps = catalogue;
         }
+    });
+}
+
+pub async fn load_catalogue(state: &AppState) {
+    let Some(employee_id) = signed_in_employee_id(state) else {
+        return;
+    };
+    match state.agent().apps().await {
+        Ok(items) => land_catalogue(
+            state,
+            &employee_id,
+            CatalogState {
+                status: CatalogStatus::Ready,
+                items,
+            },
+        ),
         Err(error) => {
             tracing::warn!(?error, "apps.list failed after sign-in");
-            state.update(|s| {
-                s.apps = CatalogState {
+            land_catalogue(
+                state,
+                &employee_id,
+                CatalogState {
                     status: CatalogStatus::Error,
                     items: Vec::new(),
-                };
-            });
+                },
+            );
         }
     }
 }
@@ -249,61 +296,133 @@ pub async fn load_catalogue(state: &AppState) {
 /// `apps.changed`: fetch the catalogue again with one `apps.list`. The tiles
 /// stay as they are while it runs, and a failed call keeps them (the next
 /// event or a manual refresh tries again). Nothing happens when nobody is
-/// signed in, or when the person signed out while the call was running.
+/// signed in. The answer lands only in the session that asked: when that
+/// employee signed out while the call was running, it is dropped, also when
+/// somebody else has signed in since.
 pub async fn refresh_catalogue_quietly(state: &AppState) {
-    if !matches!(state.snapshot().session, SessionState::SignedIn { .. }) {
+    let Some(employee_id) = signed_in_employee_id(state) else {
         return;
-    }
+    };
     match state.agent().apps().await {
-        Ok(items) => {
-            state.update(|s| {
-                if matches!(s.session, SessionState::SignedIn { .. }) {
-                    s.apps = CatalogState {
-                        status: CatalogStatus::Ready,
-                        items,
-                    };
-                }
-            });
-        }
+        Ok(items) => land_catalogue(
+            state,
+            &employee_id,
+            CatalogState {
+                status: CatalogStatus::Ready,
+                items,
+            },
+        ),
         Err(error) => tracing::warn!(?error, "apps.list failed after apps.changed"),
     }
 }
 
-/// Whether `session.ended` for `reason` needs the sign-out sequence: the
-/// employee is signed in, or (for a revocation) the sign-in screen should say so.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+/// What the shell has to do about a `session.ended`.
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub enum EndedPlan {
-    /// Close the employee's apps like a log out, then show the note.
-    SignOutThenNote,
-    /// Only show the note on the sign-in screen.
-    NoteOnly,
+    /// The session is now `SigningOut`, with the reason recorded: the caller runs
+    /// the log-out steps for this employee (apps closed, memory cleared).
+    SignOut(Employee),
+    /// Recorded: the note is already on the sign-in screen, or it is applied in
+    /// the same step that finishes the sign-in / log out that is running.
+    Recorded,
     /// Nobody to tell.
     Ignore,
 }
 
-pub fn plan_session_ended(session: &SessionState, reason: SessionEndedReason) -> EndedPlan {
-    match session {
-        SessionState::SignedIn { .. } => EndedPlan::SignOutThenNote,
-        SessionState::SignedOut { .. } if reason == SessionEndedReason::Revoked => EndedPlan::NoteOnly,
-        _ => EndedPlan::Ignore,
+/// Whether the reason makes the "returning employee" form wrong: that person
+/// has no account (or no PC) to come back to.
+fn forgets_returning_employee(reason: SessionEndedReason) -> bool {
+    matches!(
+        reason,
+        SessionEndedReason::EmployeeRemoved | SessionEndedReason::Revoked
+    )
+}
+
+/// Keep the more telling of two reasons (`Unknown` says the least).
+fn stronger_reason(
+    current: Option<SessionEndedReason>,
+    new: SessionEndedReason,
+) -> SessionEndedReason {
+    match current {
+        Some(reason) if reason != SessionEndedReason::Unknown => reason,
+        _ => new,
     }
 }
 
-/// Remember `reason` for the sign-in screen. An employee who was removed (or
-/// whose PC was) is no longer offered as "returning".
-pub fn note_session_ended(state: &AppState, reason: SessionEndedReason) {
-    let forget = matches!(
-        reason,
-        SessionEndedReason::EmployeeRemoved | SessionEndedReason::Revoked
-    );
-    state.update(|s| {
-        s.session_ended = Some(reason);
-        if forget {
-            if let SessionState::SignedOut { last } = &mut s.session {
-                *last = None;
+/// React to `session.ended` in every state, atomically (call it inside
+/// `AppState::modify`):
+///
+/// - signed in: becomes `SigningOut` and the reason is recorded;
+/// - signing in or out: the reason is recorded and applied when that finishes
+///   (`finish_signed_out`, `settle_pending_end`), so it is never dropped;
+/// - signed out: the note is shown now; a person the note is about is no longer
+///   offered on the sign-in form. `Unknown` has nobody to tell.
+///
+/// `only_for` limits it to one employee's session (the check after a lost push
+/// must not end somebody who signed in since).
+pub fn apply_session_ended(
+    shell: &mut ShellState,
+    reason: SessionEndedReason,
+    only_for: Option<&str>,
+) -> EndedPlan {
+    match shell.session.clone() {
+        SessionState::SignedIn { employee, .. } => {
+            if only_for.is_some_and(|id| id != employee.id) {
+                return EndedPlan::Ignore;
             }
+            shell.session = SessionState::SigningOut;
+            shell.pending_end = Some(reason);
+            EndedPlan::SignOut(employee)
         }
-    });
+        _ if only_for.is_some() => EndedPlan::Ignore,
+        SessionState::SigningIn | SessionState::SigningOut => {
+            shell.pending_end = Some(stronger_reason(shell.pending_end, reason));
+            EndedPlan::Recorded
+        }
+        SessionState::SignedOut { .. } => {
+            if reason == SessionEndedReason::Unknown {
+                return EndedPlan::Ignore;
+            }
+            shell.session_ended = Some(reason);
+            // The agent says this person's session ended; the form must not offer them.
+            shell.session = SessionState::SignedOut { last: None };
+            EndedPlan::Recorded
+        }
+    }
+}
+
+/// Take the `session.ended` that arrived during a sign-in and act on it now.
+/// `true` when there was one.
+pub async fn settle_pending_end(state: &AppState) -> bool {
+    let Some(reason) = state.modify(|s| s.pending_end.take()) else {
+        return false;
+    };
+    crate::commands::end_session_from_agent(state, reason).await;
+    true
+}
+
+/// Ask the agent whether it still holds the session the shell shows, after a
+/// push may have been lost (the event channel lagged, or the pipe was down and
+/// came back). If it does not, the employee is signed out with `reason`.
+/// A call that fails for another reason proves nothing and ends nothing; the
+/// next re-link or lag asks again.
+pub async fn verify_session(state: &AppState, reason: SessionEndedReason) {
+    let Some(employee_id) = signed_in_employee_id(state) else {
+        return;
+    };
+    let gone = match state.agent().session_get().await {
+        Ok(Some(held)) => held.id != employee_id,
+        Ok(None) => true,
+        Err(error) if error.is_not_signed_in() => true,
+        Err(error) => {
+            tracing::warn!(?error, "could not check the session with the agent");
+            false
+        }
+    };
+    if gone {
+        tracing::warn!("the agent no longer has this employee's session; signing out");
+        crate::commands::end_session(state, reason, Some(&employee_id)).await;
+    }
 }
 
 pub async fn sign_in_last(state: &AppState, password: String) -> Result<SignInOutcome, CommandError> {
@@ -595,17 +714,7 @@ impl SignOutOps for LiveSignOut<'_> {
     }
 
     fn clear_memory(&mut self) {
-        // Closing the file session also drops the recent list, the folder
-        // watcher and any running search. (The file clipboard lives in the
-        // Files window, which log out closes.)
-        self.state.files().sign_out();
-        // Documents, Desktop and Downloads go back to the account's own
-        // folders. A failure is logged inside and never stops log out.
-        crate::known_folders::restore(self.state.app_handle().as_ref());
-        self.state.set_files_root(None);
-        self.state.update(|shell| {
-            shell.notices.clear();
-        });
+        clear_session_memory(self.state);
     }
 
     fn agent_sign_out(&mut self) -> Result<(), String> {
@@ -614,17 +723,69 @@ impl SignOutOps for LiveSignOut<'_> {
     }
 
     fn signed_out(&mut self) {
-        let last = self.last.clone();
-        let theme = crate::system::theme_after_sign_out(self.state.org_theme());
-        self.state.update(|shell| {
-            shell.session = SessionState::SignedOut { last };
-            shell.display.theme = theme;
-            shell.apps = CatalogState {
-                status: CatalogStatus::Idle,
-                items: Vec::new(),
-            };
-            shell.tasks.clear();
-        });
+        finish_signed_out(self.state, self.last.clone());
+    }
+}
+
+/// Everything of the employee that lives in the shell's memory: the file
+/// session (recent list, folder watcher, running search; the file clipboard
+/// lives in the Files window, which log out closes), the redirected Windows
+/// folders (a failure is logged inside and never stops log out), the files
+/// root and the notices.
+fn clear_session_memory(state: &AppState) {
+    state.files().sign_out();
+    crate::known_folders::restore(state.app_handle().as_ref());
+    state.set_files_root(None);
+    state.update(|shell| {
+        shell.notices.clear();
+    });
+}
+
+/// The last step of every log out: the sign-in screen, with nothing of the
+/// employee left in the state. A `session.ended` that arrived while the log
+/// out ran is applied here, in the same step, so the screen never shows the
+/// returning-employee form first and the note is never lost (nor kept for the
+/// next person: it is cleared when the next sign-in starts).
+pub fn finish_signed_out(state: &AppState, last: Option<EmployeeBrief>) {
+    let theme = crate::system::theme_after_sign_out(state.org_theme());
+    state.update(|shell| {
+        let mut last = last;
+        if let Some(reason) = shell.pending_end.take() {
+            shell.session_ended = Some(reason);
+            if forgets_returning_employee(reason) {
+                last = None;
+            }
+        }
+        shell.session = SessionState::SignedOut { last };
+        shell.display.theme = theme;
+        shell.apps = CatalogState {
+            status: CatalogStatus::Idle,
+            items: Vec::new(),
+        };
+        shell.tasks.clear();
+    });
+}
+
+/// The log out for a session the agent already ended, when the shell's windows
+/// cannot be reached (it is not fully started): there are no apps of the
+/// employee to close, but the memory is cleared and the screen returns to sign-in.
+pub async fn sign_out_without_windows(state: &AppState, employee: &Employee) {
+    let clearing = state.clone();
+    if let Err(error) =
+        tauri::async_runtime::spawn_blocking(move || clear_session_memory(&clearing)).await
+    {
+        tracing::warn!(%error, "could not clear the employee's session memory");
+    }
+    if let Err(error) = state.agent().sign_out().await {
+        tracing::warn!(%error, "agent sign-out failed; log out continues");
+    }
+    finish_signed_out(state, Some(brief_of(employee)));
+}
+
+fn brief_of(employee: &Employee) -> EmployeeBrief {
+    EmployeeBrief {
+        username: employee.username.clone(),
+        name: employee.name.clone(),
     }
 }
 

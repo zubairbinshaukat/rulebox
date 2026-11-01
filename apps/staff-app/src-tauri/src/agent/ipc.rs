@@ -5,8 +5,8 @@ use std::sync::{Arc, Mutex};
 use futures_util::future::BoxFuture;
 use rulebox_ipc::client::{CallError, ClientConfig, ClientEvent, IpcClient, LinkState};
 use rulebox_ipc::methods::{
-    AdminExitSubmit, AppsList, Empty, SessionSignIn, SessionSignOut, SessionVerifyPassword,
-    ShellHeartbeat, ShellReady,
+    AdminExitSubmit, AppsList, Empty, SessionGet, SessionSignIn, SessionSignOut,
+    SessionVerifyPassword, ShellHeartbeat, ShellReady,
 };
 use rulebox_ipc::requests::{AdminExitSubmitParams, SignInParams, VerifyPasswordParams};
 use rulebox_ipc::envelope::ErrorCode;
@@ -17,7 +17,8 @@ use tokio::sync::{broadcast, mpsc, watch};
 use super::{AgentError, AgentPort};
 use crate::model::{
     map_admin_exit_result, map_client_event, map_sign_in_result, map_verify_result, map_wire_app,
-    AdminExitOutcome, AgentEvent, AgentLink, AppEntry, SignInOutcome, SignInRequest, VerifyOutcome,
+    map_wire_employee, AdminExitOutcome, AgentEvent, AgentLink, AppEntry, Employee, SignInOutcome,
+    SignInRequest, VerifyOutcome,
 };
 
 /// Room for pushes nobody has read yet; they are rare (a burst is debounced by the agent).
@@ -201,6 +202,19 @@ impl AgentPort for IpcAgent {
 
     fn events(&self) -> broadcast::Receiver<AgentEvent> {
         self.shared.events_tx.subscribe()
+    }
+
+    fn session_get(&self) -> BoxFuture<'_, Result<Option<Employee>, AgentError>> {
+        Box::pin(async move {
+            self.require_cap(CAP_SESSION)?;
+            let result = self
+                .shared
+                .client
+                .call::<SessionGet>(Empty {})
+                .await
+                .map_err(map_call_error)?;
+            Ok(result.employee.map(map_wire_employee))
+        })
     }
 
     fn ready(&self) -> BoxFuture<'_, Result<(), AgentError>> {

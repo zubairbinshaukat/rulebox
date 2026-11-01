@@ -34,6 +34,12 @@ pub struct ShellState {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub session_ended: Option<SessionEndedReason>,
+    /// A `session.ended` that arrived while a sign-in or a log out was running.
+    /// It is applied in the same step that finishes that transition (see
+    /// `session::apply_session_ended`), so it is never lost and never reaches the page.
+    #[serde(skip)]
+    #[ts(skip)]
+    pub pending_end: Option<SessionEndedReason>,
 }
 
 impl ShellState {
@@ -54,6 +60,7 @@ impl ShellState {
             banner: None,
             capabilities: Vec::new(),
             session_ended: None,
+            pending_end: None,
         }
     }
 }

@@ -4424,6 +4424,28 @@ Screenshots of the four session-ended messages taken with the demo agent
 (`.tmp/phase4/step15/`, not committed). Not verified: the `notAllowedHere` message on screen (unit-tested
 only), `apps.changed` with a real catalogue change, anything against the real agent or in the VM.
 
+- **Review fixes (2026-11-01):** the event handling is now fail-safe in every state and under races.
+  (1) `session::apply_session_ended` (replaces `plan_session_ended` / `note_session_ended`) runs under
+  one `AppState::modify` lock: signed in -> `SigningOut`; **signing in / out -> the reason is kept in
+  `ShellState.pending_end`** (`serde(skip)`, never sent to the page) and applied in the step that ends
+  that transition (`finish_signed_out` sets the note and drops the returning form in the same update as
+  `SignedOut`; `session::sign_in` calls `settle_pending_end` right after the agent's answer, before the
+  catalogue load, and returns `unknown` if an `ok` sign-in was ended meanwhile so the page does not open a
+  desktop). The note is cleared when a sign-in starts; a sign-in is refused (`Forbidden`) while a log out
+  runs. (2) A lost `session.ended` (event channel `Lagged`, or a re-link while signed in) is found with
+  `session.get`, now on `AgentPort` as `session_get()` (needs no change to `rulebox-ipc`): if the agent
+  has no session, or another employee's, the shell signs out with reason `unknown` ("You were signed
+  out."); other errors prove nothing and end nothing (the next lag or re-link asks again). (3) Catalogue
+  answers (`apps.changed` refresh and the first load) land only if the same employee id is still signed
+  in. (4) `state::pump_agent_events` runs a refresh as its own cancellable task and `session.ended` aborts
+  it first, so a hung `apps.list` no longer delays the sign-out. (5) With no app handle or services
+  (shell not ready) `session.ended` still signs out (`sign_out_without_windows`: memory cleared, agent
+  asked, state reset). (7) A `session.ended` while already signed out now shows the note for
+  `employeeRemoved`, `credentialChanged` and `revoked` and drops the returning form (`unknown` is ignored).
+  `dev_emit` is `cfg(debug_assertions)`. Tests: `phase4_step15_tests.rs` now has 26 (state matrix, the
+  in-flight sign-in race, lag, re-link, stale catalogue, hung `apps.list`). Verified on the dev machine
+  with the demo agent only.
+
 ---
 
 ### Step 16 — Agent: session cleanup (reset folders)
