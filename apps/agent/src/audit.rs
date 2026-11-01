@@ -21,7 +21,8 @@ use tokio::sync::{watch, Notify};
 use crate::backend::{BackendLink, ReportAccepted, ReportBatch};
 use crate::state::{lock, read_json, write_atomic};
 
-/// Records kept on disk; when full the oldest is dropped and counted.
+/// Records kept on disk; when full the oldest non-urgent record is dropped and
+/// counted (a security record only when nothing else is left to drop).
 pub const MAX_RECORDS: usize = 500;
 /// Records per delivery.
 pub const BATCH_SIZE: usize = 50;
@@ -172,14 +173,11 @@ impl AuditQueue {
     /// (`state::read_json`).
     pub fn open(path: PathBuf) -> std::io::Result<Self> {
         let file = read_json::<QueueFile>(&path)?.unwrap_or_default();
-        let mut records = file.records;
-        let mut dropped = file.dropped;
-        if records.len() > MAX_RECORDS {
-            let extra = records.len() - MAX_RECORDS;
-            records.drain(..extra);
-            dropped = dropped.saturating_add(extra as u64);
+        let mut queue = Self { path, records: file.records, dropped: file.dropped };
+        while queue.records.len() > MAX_RECORDS {
+            queue.evict_one();
         }
-        Ok(Self { path, records, dropped })
+        Ok(queue)
     }
 
     /// Appends and saves atomically. The record stays queued in memory even when
@@ -187,10 +185,17 @@ impl AuditQueue {
     pub fn push(&mut self, record: AuditRecord) -> std::io::Result<()> {
         self.records.push(record);
         if self.records.len() > MAX_RECORDS {
-            self.records.remove(0);
-            self.dropped = self.dropped.saturating_add(1);
+            self.evict_one();
         }
         self.save()
+    }
+
+    /// Drops one record to make room and counts it: the oldest record that is not
+    /// urgent (a security record is the last to go), else the oldest of all.
+    fn evict_one(&mut self) {
+        let victim = self.records.iter().position(|record| !record.kind.is_urgent()).unwrap_or(0);
+        self.records.remove(victim);
+        self.dropped = self.dropped.saturating_add(1);
     }
 
     /// Up to `max` records, oldest first.
@@ -198,16 +203,18 @@ impl AuditQueue {
         &self.records[..max.min(self.records.len())]
     }
 
-    /// Removes the first `count` records and saves.
+    /// Removes the records with these ids and saves. By id, not by count: while a
+    /// report was in flight the queue may have changed at the front (a full queue
+    /// drops its oldest), and a record that was never sent must not be acked.
     #[cfg(test)]
-    pub fn ack(&mut self, count: usize) -> std::io::Result<()> {
-        self.ack_reported(count, 0)
+    pub fn ack(&mut self, ids: &[String]) -> std::io::Result<()> {
+        self.ack_reported(ids, 0)
     }
 
     /// Like [`ack`](Self::ack), and also takes `reported_dropped` off the dropped
     /// counter: that many were reported in the batch that was just accepted.
-    pub fn ack_reported(&mut self, count: usize, reported_dropped: u64) -> std::io::Result<()> {
-        self.records.drain(..count.min(self.records.len()));
+    pub fn ack_reported(&mut self, ids: &[String], reported_dropped: u64) -> std::io::Result<()> {
+        self.records.retain(|record| !ids.contains(&record.id));
         self.dropped = self.dropped.saturating_sub(reported_dropped);
         self.save()
     }
@@ -301,11 +308,11 @@ impl AuditHandle {
         (queue.peek(BATCH_SIZE).to_vec(), queue.dropped())
     }
 
-    /// The backend has the first `count` records and the `dropped` count that
-    /// went with them.
-    pub(crate) fn ack(&self, count: usize, dropped: u64) {
+    /// The backend has the records with these `ids` (the ones that were sent) and
+    /// the `dropped` count that went with them.
+    pub(crate) fn ack(&self, ids: &[String], dropped: u64) {
         let mut queue = lock(&self.queue);
-        if let Err(error) = queue.ack_reported(count, dropped) {
+        if let Err(error) = queue.ack_reported(ids, dropped) {
             tracing::error!("cannot save the audit queue: {error}");
         }
         let still = queue.records.iter().any(|record| record.kind.is_urgent());
@@ -388,7 +395,7 @@ mod tests {
         let mut reopened = AuditQueue::open(path).unwrap();
         assert_eq!(reopened.len(), 3);
         assert_eq!(reopened.peek(2), &[record(1), record(2)]);
-        reopened.ack(2).unwrap();
+        reopened.ack(&[record(1).id, record(2).id]).unwrap();
         assert_eq!(reopened.peek(10), &[record(3)]);
         assert_eq!(reopened.dropped(), 0);
     }
@@ -407,6 +414,68 @@ mod tests {
         // The counter is on disk too.
         let reopened = AuditQueue::open(path).unwrap();
         assert_eq!((reopened.len(), reopened.dropped()), (MAX_RECORDS, 1));
+    }
+
+    fn urgent(n: u64) -> AuditRecord {
+        AuditRecord { kind: AuditKind::AdminExitSuccess, ..record(n) }
+    }
+
+    #[test]
+    fn a_full_queue_drops_non_urgent_records_first() {
+        let dir = TempDir::new();
+        let mut queue = AuditQueue::open(dir.path().join("audit-queue.json")).unwrap();
+        // The oldest record is a security record; the rest are not.
+        queue.push(urgent(0)).unwrap();
+        for n in 1..MAX_RECORDS as u64 {
+            queue.push(record(n)).unwrap();
+        }
+        assert_eq!((queue.len(), queue.dropped()), (MAX_RECORDS, 0));
+        queue.push(record(900)).unwrap();
+        // The oldest NON-urgent record (1) went, the urgent one stays at the front.
+        assert_eq!((queue.len(), queue.dropped()), (MAX_RECORDS, 1));
+        assert_eq!(queue.peek(2), &[urgent(0), record(2)]);
+        // A queue of nothing but security records still takes a new one: the oldest goes.
+        let mut all = AuditQueue::open(dir.path().join("all.json")).unwrap();
+        for n in 0..=MAX_RECORDS as u64 {
+            all.push(urgent(n)).unwrap();
+        }
+        assert_eq!((all.len(), all.dropped()), (MAX_RECORDS, 1));
+        assert_eq!(all.peek(1), &[urgent(1)]);
+        // A new ordinary record never pushes out security records: it is the one dropped.
+        all.push(record(7_000)).unwrap();
+        assert_eq!((all.len(), all.dropped()), (MAX_RECORDS, 2));
+        assert!(all.peek(MAX_RECORDS).iter().all(|r| r.kind == AuditKind::AdminExitSuccess));
+        // The cap also applies to an oversized file on disk.
+        let mut big = AuditQueue::open(dir.path().join("big.json")).unwrap();
+        big.records = (0..MAX_RECORDS as u64 + 3).map(|n| if n < 2 { urgent(n) } else { record(n) }).collect();
+        big.save().unwrap();
+        let reopened = AuditQueue::open(dir.path().join("big.json")).unwrap();
+        assert_eq!((reopened.len(), reopened.dropped()), (MAX_RECORDS, 3));
+        assert_eq!(reopened.peek(2), &[urgent(0), urgent(1)]);
+    }
+
+    #[test]
+    fn the_ack_removes_the_records_that_were_sent_not_the_first_n() {
+        let dir = TempDir::new();
+        let mut queue = AuditQueue::open(dir.path().join("audit-queue.json")).unwrap();
+        for n in 0..MAX_RECORDS as u64 {
+            queue.push(record(n)).unwrap();
+        }
+        // A batch goes out ...
+        let sent: Vec<AuditRecord> = queue.peek(BATCH_SIZE).to_vec();
+        let reported = queue.dropped();
+        // ... and while it is in flight the full queue takes a new record, which
+        // drops the oldest (it was in the batch).
+        queue.push(record(1_000)).unwrap();
+        assert_eq!(queue.dropped(), reported + 1);
+        let ids: Vec<String> = sent.iter().map(|r| r.id.clone()).collect();
+        queue.ack_reported(&ids, reported).unwrap();
+        // Exactly the 49 sent records that were still queued are gone; record 50 (never
+        // sent) and the new one stay; the dropped record stays counted for the next report.
+        assert_eq!(queue.len(), MAX_RECORDS - (BATCH_SIZE - 1));
+        assert_eq!(queue.peek(1), &[record(BATCH_SIZE as u64)]);
+        assert!(queue.peek(MAX_RECORDS).contains(&record(1_000)));
+        assert_eq!(queue.dropped(), 1);
     }
 
     #[test]

@@ -210,8 +210,8 @@ impl SimPlatform {
 pub fn sim_path_roots() -> rulebox_policy::paths::PathRoots {
     rulebox_policy::paths::PathRoots {
         program_files: r"C:\Program Files".into(),
-        program_files_x86: r"C:\Program Files (x86)".into(),
-        system_root: r"C:\Windows".into(),
+        program_files_x86: Some(r"C:\Program Files (x86)".into()),
+        system_root: Some(r"C:\Windows".into()),
         rulebox_apps: r"C:\Program Files\Rulebox\apps".into(),
     }
 }

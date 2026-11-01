@@ -13,10 +13,12 @@
 pub struct PathRoots {
     /// `FOLDERID_ProgramFiles`.
     pub program_files: String,
-    /// `FOLDERID_ProgramFilesX86`.
-    pub program_files_x86: String,
-    /// `FOLDERID_Windows`.
-    pub system_root: String,
+    /// `FOLDERID_ProgramFilesX86`; `None` when this PC does not tell (only templates
+    /// that start with `{ProgramFilesX86}` are then refused).
+    pub program_files_x86: Option<String>,
+    /// `FOLDERID_Windows`; `None` when this PC does not tell (only `{SystemRoot}`
+    /// templates are then refused).
+    pub system_root: Option<String>,
     /// `<install root>\apps` (`C:\Program Files\Rulebox\apps`).
     pub rulebox_apps: String,
 }
@@ -58,6 +60,8 @@ pub enum PathProblem {
     ComponentCount,
     #[error("path component not allowed")]
     BadComponent,
+    #[error("the program folder of this path is not known on this PC")]
+    RootUnknown,
     #[error("path must end in .exe")]
     NotExe,
     #[error("program not allowed")]
@@ -131,9 +135,11 @@ pub fn expand_exe(exe: &str, app_id: &str, portable: bool, roots: &PathRoots) ->
     } else if exe.starts_with(PROGRAM_FILES) {
         (PROGRAM_FILES, roots.program_files.trim_end_matches('\\').to_string())
     } else if exe.starts_with(PROGRAM_FILES_X86) {
-        (PROGRAM_FILES_X86, roots.program_files_x86.trim_end_matches('\\').to_string())
+        let root = roots.program_files_x86.as_deref().ok_or(PathProblem::RootUnknown)?;
+        (PROGRAM_FILES_X86, root.trim_end_matches('\\').to_string())
     } else if exe.starts_with(SYSTEM32) {
-        (SYSTEM32, format!("{}\\System32", roots.system_root.trim_end_matches('\\')))
+        let root = roots.system_root.as_deref().ok_or(PathProblem::RootUnknown)?;
+        (SYSTEM32, format!("{}\\System32", root.trim_end_matches('\\')))
     } else {
         // `{RuleboxApps}\` is a root only for portable apps.
         return Err(PathProblem::UnknownRoot);
@@ -196,8 +202,8 @@ mod tests {
     fn roots() -> PathRoots {
         PathRoots {
             program_files: r"C:\Program Files".into(),
-            program_files_x86: r"C:\Program Files (x86)".into(),
-            system_root: r"C:\Windows".into(),
+            program_files_x86: Some(r"C:\Program Files (x86)".into()),
+            system_root: Some(r"C:\Windows".into()),
             rulebox_apps: r"C:\Program Files\Rulebox\apps\".into(),
         }
     }
@@ -251,6 +257,29 @@ mod tests {
         assert_eq!(expand_exe(&long, "app1", false, &r), Err(PathProblem::TooLong));
         // The messages never quote the value.
         assert!(!PathProblem::Denied.to_string().contains("cmd"));
+    }
+
+    #[test]
+    fn a_missing_root_refuses_only_the_templates_that_need_it() {
+        let r = PathRoots { program_files_x86: None, system_root: None, ..roots() };
+        assert_eq!(expand_exe(r"{ProgramFilesX86}\a\x.exe", "app1", false, &r), Err(PathProblem::RootUnknown));
+        assert_eq!(expand_exe(r"{SystemRoot}\System32\notepad.exe", "app1", false, &r), Err(PathProblem::RootUnknown));
+        assert_eq!(
+            expand_exe(r"{ProgramFiles}\VideoLAN\VLC\vlc.exe", "app1", false, &r).as_deref(),
+            Ok(r"C:\Program Files\VideoLAN\VLC\vlc.exe")
+        );
+        assert_eq!(
+            expand_exe(r"{RuleboxApps}\app1\tool.exe", "app1", true, &r).as_deref(),
+            Ok(r"C:\Program Files\Rulebox\apps\app1\tool.exe")
+        );
+        // The other roots still work when only one is missing.
+        let only_x86 = PathRoots { program_files_x86: None, ..roots() };
+        assert_eq!(
+            expand_exe(r"{SystemRoot}\System32\notepad.exe", "app1", false, &only_x86).as_deref(),
+            Ok(r"C:\Windows\System32\notepad.exe")
+        );
+        // The message names no value.
+        assert!(!PathProblem::RootUnknown.to_string().contains('\\'));
     }
 
     #[test]

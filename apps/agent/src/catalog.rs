@@ -280,6 +280,22 @@ mod tests {
     }
 
     #[test]
+    fn a_root_that_is_not_known_hides_only_the_apps_that_need_it() {
+        let apps = [
+            desktop("pf", r"{ProgramFiles}\Good\good.exe"),
+            desktop("x86", r"{ProgramFilesX86}\Old\old.exe"),
+            desktop("sys", r"{SystemRoot}\System32\notepad.exe"),
+        ];
+        let ids = |roots: &PathRoots| -> Vec<String> {
+            visible_apps(&apps, "e", Some(roots), &all_installed).into_iter().map(|a| a.id).collect()
+        };
+        assert_eq!(ids(&sim_path_roots()), ["pf", "x86", "sys"]);
+        // No `ProgramFiles(x86)` variable: the x86 app goes, System32 and Program Files stay.
+        assert_eq!(ids(&PathRoots { program_files_x86: None, ..sim_path_roots() }), ["pf", "sys"]);
+        assert_eq!(ids(&PathRoots { system_root: None, ..sim_path_roots() }), ["pf", "x86"]);
+    }
+
+    #[test]
     fn the_resolver_shows_a_desktop_app_only_when_its_exe_exists() {
         let dir = crate::testutil::TempDir::new();
         let platform = Arc::new(SimPlatform::new(dir.path().to_path_buf()));

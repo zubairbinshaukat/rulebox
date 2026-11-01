@@ -4232,6 +4232,27 @@ rulebox-policy -p rulebox-ipc --all-targets --features rulebox-ipc/client,rulebo
 (10) **2026-11-01:** `devices:ping` now returns `serverTimeMs` (the server's `Date.now()`, same
 field as `heartbeat`; no new writes), so the agent's server-time offset and the server-side
 `clockSuspect` refresh again. Not deployed yet.
+(11) **2026-11-01, review fixes** (independent security review of this step): (a) **Rotation is
+single flight** (`backend/task.rs`): the check of the pending secret travels with its reason
+(`PingDone.probe: Option<ProbeWhy>`), so an answer is never read for another question; no
+rotation starts and no second check runs while a rotation call or a check is in flight or
+waiting for a retry; "no result" is never a revocation (only the explicit answer of the
+`unknownDevice` check, or a subscription answer with nothing pending, revokes). A rejected
+`conflict` / `OldRejected` check restarts the subscription so it answers again. A cloned VM
+image that gets `conflict` stays enrolled on its old secret. (b) At least 1 h between rotation
+attempts of one run (the startup retry of a pending secret is exempt); not persisted. (c) The
+audit queue is acked **by record id**, and a full queue drops the oldest **non-urgent** record
+first (`audit.rs`). (d) After an outage over 5 min the first ordinary report waits a random
+0-120 s like the ping; security records go at once (`report.rs`). (e) The watch window
+(`fastUntil`) is bounded by a local monotonic timer from the head's arrival, using the
+server's clock when its offset is known, and at most 15 min; a repeated head does not extend
+it. (f) `PathRoots.program_files_x86` / `system_root` are `Option`: a missing
+`ProgramFiles(x86)` / `SystemRoot` variable refuses only the templates that need it
+(`PathProblem::RootUnknown`). (g) The clock offset is cleared when a ping answer carries no
+`serverTimeMs`. Not changed (reported): the offline unknown-username path of Phase 3,
+password zeroization (no `zeroize` dependency of ours), a `status_changed` that arrives
+during a delivery is swallowed by the post-delivery wake-up drain (that status goes out only
+at the next trigger).
 
 ---
 

@@ -211,7 +211,9 @@ impl Platform for WindowsPlatform {
     /// `{ProgramFiles}` is the parent of the install root (`FOLDERID_ProgramFiles`
     /// plus `Rulebox`); the x86 folder and the Windows folder come from the
     /// `ProgramFiles(x86)` and `SystemRoot` variables of the service's own
-    /// environment (set by Windows for every process, SYSTEM included).
+    /// environment (set by Windows for every process, SYSTEM included). A variable
+    /// that is missing or not an absolute path leaves that root out (`None`): only
+    /// the templates that start with it are refused, never the others.
     fn path_roots(&self) -> Result<rulebox_policy::paths::PathRoots, PlatformError> {
         let program_files = self
             .install
@@ -219,15 +221,16 @@ impl Platform for WindowsPlatform {
             .parent()
             .ok_or_else(|| PlatformError::Other("the install root has no parent".into()))?;
         let var = |name: &str| {
-            std::env::var(name)
-                .ok()
-                .filter(|value| Path::new(value).is_absolute())
-                .ok_or_else(|| PlatformError::Other(format!("the {name} folder is not known")))
+            let value = std::env::var(name).ok().filter(|value| Path::new(value).is_absolute());
+            if value.is_none() {
+                tracing::debug!("the {name} folder is not known; templates that need it are refused");
+            }
+            value
         };
         Ok(rulebox_policy::paths::PathRoots {
             program_files: program_files.to_string_lossy().into_owned(),
-            program_files_x86: var("ProgramFiles(x86)")?,
-            system_root: var("SystemRoot")?,
+            program_files_x86: var("ProgramFiles(x86)"),
+            system_root: var("SystemRoot"),
             rulebox_apps: self.install.root().join("apps").to_string_lossy().into_owned(),
         })
     }

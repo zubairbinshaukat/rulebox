@@ -65,6 +65,15 @@ const LONG_OUTAGE: Duration = Duration::from_secs(300);
 const NONCE_PING_JITTER_MS: u64 = 5_000;
 /// (A13) While `now < fastUntil` (watch mode): a ping every minute.
 const FAST_PING_MS: u64 = 60_000;
+/// The watch window is also bounded by a local monotonic timer from the moment
+/// its head arrived, and never lasts longer than this: `fastUntil` is server time,
+/// and a PC whose clock is days behind would otherwise ping every minute for days.
+const FAST_WINDOW_MAX: Duration = Duration::from_secs(15 * 60);
+/// Two credential rotation attempts on this PC are at least this far apart (the
+/// startup retry of a pending secret excepted): a server that answers
+/// `rotateCredential: true` on every ping cannot make the agent rewrite its
+/// secrets file and resubscribe every minute.
+const ROTATION_MIN_GAP: Duration = Duration::from_secs(3600);
 /// Used until the head says otherwise (the server default is 30 minutes).
 const DEFAULT_PING_MS: u64 = 1_800_000;
 /// (A12) The interval is clamped to this range, so a buggy value neither makes a
@@ -361,6 +370,11 @@ pub fn note_server_time(ctx: &TaskContext, server_time_ms: i64) {
     });
 }
 
+/// The server stopped sending its time: the stored offset is no longer current.
+pub fn clear_server_time(ctx: &TaskContext) {
+    ctx.snapshot.update(|snapshot| snapshot.server_time_offset_ms = None);
+}
+
 // -- status -----------------------------------------------------------------------
 
 /// The wire text of a serializable enum value.
@@ -418,8 +432,10 @@ pub fn build_status(ctx: &TaskContext, desired_problem: Option<&str>) -> Option<
 
 /// What a spawned ping reports back.
 struct PingDone {
-    /// The secret the ping used was the pending (rotating) one: a probe.
-    probe: bool,
+    /// Set when the ping used the pending (rotating) secret: a check, and why it
+    /// was made. The reason travels with the request, so the answer is always read
+    /// for the question that was asked.
+    probe: Option<ProbeWhy>,
     result: Result<PingResponse, BackendError>,
 }
 
@@ -455,7 +471,11 @@ struct Pinger {
     interval_ms: u64,
     head_interval: bool,
     nonce: Option<u64>,
-    fast_until_ms: u64,
+    /// The `fastUntil` (server time) of the last head, to tell a repeated head from
+    /// a new watch window.
+    fast_seen_ms: u64,
+    /// The end of the watch window on the local monotonic clock.
+    fast_deadline: Option<Instant>,
     failures: u32,
     task: Option<JoinHandle<()>>,
     offline_since: Option<Instant>,
@@ -469,7 +489,8 @@ impl Pinger {
             interval_ms: DEFAULT_PING_MS,
             head_interval: false,
             nonce: None,
-            fast_until_ms: 0,
+            fast_seen_ms: 0,
+            fast_deadline: None,
             failures: 0,
             task: None,
             offline_since: None,
@@ -481,8 +502,22 @@ impl Pinger {
         self.next_at = Some(self.next_at.map_or(at, |next| next.min(at)));
     }
 
-    fn fast(&self, ctx: &TaskContext) -> bool {
-        (ctx.now_ms)() < self.fast_until_ms
+    fn fast(&self) -> bool {
+        self.fast_deadline.is_some_and(|deadline| Instant::now() < deadline)
+    }
+
+    /// The local end of a watch window that the server ends at `fast_until_ms`
+    /// (server time): the smaller of the time left by the server's clock (this PC's
+    /// clock plus the last known offset) and [`FAST_WINDOW_MAX`], counted from now.
+    fn fast_window(ctx: &TaskContext, fast_until_ms: u64) -> Option<Instant> {
+        let offset = ctx.snapshot.current().server_time_offset_ms.unwrap_or(0);
+        let server_now = i128::from((ctx.now_ms)()) + i128::from(offset);
+        let left_ms = i128::from(fast_until_ms) - server_now;
+        if left_ms <= 0 {
+            return None;
+        }
+        let left = Duration::from_millis(u64::try_from(left_ms).unwrap_or(u64::MAX));
+        Some(Instant::now() + left.min(FAST_WINDOW_MAX))
     }
 
     /// The connection changed.
@@ -507,7 +542,11 @@ impl Pinger {
         self.head_interval = true;
         let nonce_changed = self.nonce.is_some_and(|nonce| nonce != head.ping_nonce);
         self.nonce = Some(head.ping_nonce);
-        self.fast_until_ms = head.fast_until;
+        // A repeated head (the same `fastUntil`) does not start the window again.
+        if head.fast_until != self.fast_seen_ms {
+            self.fast_seen_ms = head.fast_until;
+            self.fast_deadline = Self::fast_window(ctx, head.fast_until);
+        }
         if !online {
             return;
         }
@@ -515,7 +554,7 @@ impl Pinger {
             tracing::info!("the dashboard asked for a check; pinging");
             self.sooner(Instant::now() + Duration::from_millis((ctx.jitter)(NONCE_PING_JITTER_MS)));
         }
-        if self.fast(ctx) {
+        if self.fast() {
             self.sooner(Instant::now() + Duration::from_millis(FAST_PING_MS));
         } else if let Some(next) = self.next_at {
             // A shorter interval takes effect now, not after the old long wait.
@@ -528,7 +567,7 @@ impl Pinger {
 
     /// When the next regular ping is due, from now.
     fn schedule(&mut self, ctx: &TaskContext) {
-        let delay = if self.fast(ctx) { Duration::from_millis(FAST_PING_MS) } else { ping_delay(ctx, self.interval_ms) };
+        let delay = if self.fast() { Duration::from_millis(FAST_PING_MS) } else { ping_delay(ctx, self.interval_ms) };
         self.next_at = Some(Instant::now() + delay);
     }
 
@@ -565,11 +604,51 @@ struct Rotation {
     /// The subscription said `unknownDevice` while a rotation was pending: the
     /// pending secret is being tried before that counts as a revocation.
     unknown_device: bool,
+    /// When the last `rotateCredential` call of this run started.
+    last_attempt: Option<Instant>,
 }
 
 impl Rotation {
+    /// A call is in flight (cleared when its result is taken from the channel, so
+    /// a call that has finished but not been read yet still counts).
     fn busy(&self) -> bool {
-        self.task.as_ref().is_some_and(|task| !task.is_finished())
+        self.task.is_some()
+    }
+
+    /// Whether [`ROTATION_MIN_GAP`] has passed since the last attempt.
+    fn gap_over(&self) -> bool {
+        self.last_attempt.is_none_or(|at| at.elapsed() >= rotation_min_gap())
+    }
+}
+
+#[cfg(test)]
+thread_local! {
+    /// Tests that exercise the single-flight rules alone switch the gap off.
+    static TEST_GAP: std::cell::Cell<Option<Duration>> = const { std::cell::Cell::new(None) };
+}
+
+fn rotation_min_gap() -> Duration {
+    #[cfg(test)]
+    if let Some(gap) = TEST_GAP.with(std::cell::Cell::get) {
+        return gap;
+    }
+    ROTATION_MIN_GAP
+}
+
+/// The check of the pending secret with a ping (`ProbeWhy` says which question it
+/// answers). Single flight: at most one is running, and while one runs (or waits
+/// to be retried) no rotation starts and no second check is made, so an answer is
+/// never read for another question than the one it was asked for.
+#[derive(Default)]
+struct Probe {
+    task: Option<JoinHandle<()>>,
+    /// The last check got no answer: ask the same question again at the next ping time.
+    retry: Option<ProbeWhy>,
+}
+
+impl Probe {
+    fn active(&self) -> bool {
+        self.task.is_some() || self.retry.is_some()
     }
 }
 
@@ -929,27 +1008,35 @@ pub async fn run_backend_task(
             None
         }
     };
-    let mut rotation = Rotation { pending, task: None, blocked: false, unknown_device: false };
-    let mut probe: Option<ProbeWhy> = None;
-    // The last probe got no answer: try it again at the next ping time.
-    let mut probe_retry = false;
-    let mut probe_task: Option<JoinHandle<()>> = None;
+    let mut rotation = Rotation { pending, task: None, blocked: false, unknown_device: false, last_attempt: None };
+    let mut probe = Probe::default();
     let mut online = false;
     let mut revoked = false;
 
     let spawn_rotate = |rotation: &mut Rotation, auth: &DeviceAuth, new_secret: String| {
         let (backend, auth, tx) = (Arc::clone(&backend), auth.clone(), rotate_tx.clone());
+        rotation.last_attempt = Some(Instant::now());
         rotation.task = Some(tokio::spawn(async move {
             let result = backend.rotate_credential(&auth, &sha256_hex(&new_secret)).await;
             let _ = tx.send(RotateDone { new_secret, result }).await;
         }));
     };
-    let spawn_ping = |auth: DeviceAuth, probe: bool| {
+    let spawn_ping = |auth: DeviceAuth, probe: Option<ProbeWhy>| {
         let (backend, tx) = (Arc::clone(&backend), ping_tx.clone());
         tokio::spawn(async move {
             let result = backend.ping(&auth).await;
             let _ = tx.send(PingDone { probe, result }).await;
         })
+    };
+    // Starts the one check of the pending secret. Single flight: when a check is
+    // already running, that one decides and this call does nothing.
+    let start_probe = |probe: &mut Probe, auth: &DeviceAuth, secret: String, why: ProbeWhy| {
+        if probe.task.is_some() {
+            return;
+        }
+        probe.retry = None;
+        let probe_auth = DeviceAuth { device_id: auth.device_id.clone(), device_secret: secret };
+        probe.task = Some(spawn_ping(probe_auth, Some(why)));
     };
 
     // (Step 13 item 8) A rotation that was under way when the agent stopped: ask
@@ -1012,8 +1099,11 @@ pub async fn run_backend_task(
                         Some(new_secret) if !rotation.unknown_device => {
                             tracing::warn!("the backend does not know the current secret; trying the pending one");
                             rotation.unknown_device = true;
-                            probe = Some(ProbeWhy::UnknownDevice);
-                            probe_task = Some(spawn_ping(DeviceAuth { device_id: auth.device_id.clone(), device_secret: new_secret }, true));
+                            // Single flight: a rotation call or a check that is under way
+                            // answers first; the flag makes its end ask the question again.
+                            if !rotation.busy() && !probe.active() {
+                                start_probe(&mut probe, &auth, new_secret, ProbeWhy::UnknownDevice);
+                            }
                         }
                         Some(_) => {}
                         None => {
@@ -1048,21 +1138,25 @@ pub async fn run_backend_task(
             }
             () = timer => {
                 pinger.next_at = None;
-                let probe_running = probe_task.as_ref().is_some_and(|task| !task.is_finished());
-                if let (true, Some(new_secret), false) = (probe_retry, rotation.pending.clone(), probe_running) {
-                    probe_retry = false;
-                    probe_task = Some(spawn_ping(DeviceAuth { device_id: auth.device_id.clone(), device_secret: new_secret }, true));
-                } else if online && !pinger.in_flight() {
-                    pinger.task = Some(spawn_ping(auth.clone(), false));
+                // A check of the pending secret that got no answer is asked again (the
+                // same question); `start_probe` keeps it from running next to another.
+                if let Some(why) = probe.retry {
+                    match rotation.pending.clone() {
+                        Some(new_secret) => start_probe(&mut probe, &auth, new_secret, why),
+                        None => probe.retry = None,
+                    }
+                }
+                if online && !pinger.in_flight() {
+                    pinger.task = Some(spawn_ping(auth.clone(), None));
                 }
             }
             Some(done) = ping_rx.recv() => {
-                if done.probe {
-                    probe_task = None;
-                    let why = probe.take().unwrap_or(ProbeWhy::UnknownDevice);
+                if let Some(why) = done.probe {
+                    probe.task = None;
                     match done.result {
                         Ok(answer) => {
                             // The backend knows the pending secret: it is the one.
+                            probe.retry = None;
                             if let Some(new_secret) = rotation.pending.take() {
                                 if adopt_secret(&ctx, &new_secret) {
                                     auth = DeviceAuth { device_id: auth.device_id.clone(), device_secret: new_secret };
@@ -1076,32 +1170,47 @@ pub async fn run_backend_task(
                             pinger.note_plan_state(&answer.plan_state);
                             pinger.schedule(&ctx);
                         }
-                        Err(error) if is_code(&error, CODE_DEVICE_REJECTED) => match why {
-                            ProbeWhy::UnknownDevice => {
-                                tracing::warn!("neither the current nor the pending secret is known to the backend");
-                                handle_revoked(&ctx, true);
-                                revoked = true;
-                                break;
+                        // The server answered this very check: the pending secret is
+                        // not known to it. What that means depends on the question.
+                        Err(error) if is_code(&error, CODE_DEVICE_REJECTED) => {
+                            probe.retry = None;
+                            match why {
+                                ProbeWhy::UnknownDevice => {
+                                    tracing::warn!("neither the current nor the pending secret is known to the backend");
+                                    handle_revoked(&ctx, true);
+                                    revoked = true;
+                                    break;
+                                }
+                                ProbeWhy::Conflict => {
+                                    // The old secret works (the server answered `conflict` to
+                                    // it); the pending one is not the server's. Keep the old
+                                    // one and stop rotating until asked again.
+                                    tracing::error!("credential rotation conflict; staying on the current secret");
+                                    rotation.pending = None;
+                                    drop_pending_secret(&ctx);
+                                    rotation.blocked = true;
+                                    if rotation.unknown_device {
+                                        // The subscription said `unknownDevice` meanwhile: it
+                                        // is asked again and answers for the secret now in use.
+                                        rotation.unknown_device = false;
+                                        resubscribe = true;
+                                    }
+                                }
+                                ProbeWhy::OldRejected => {
+                                    // Both refused. Revocation is the subscription's call, not
+                                    // ours: it is asked again, and an `unknownDevice` from it
+                                    // checks the pending secret once more.
+                                    tracing::warn!("the backend refused both device secrets; the subscription decides");
+                                    rotation.unknown_device = false;
+                                    resubscribe = true;
+                                }
                             }
-                            ProbeWhy::Conflict => {
-                                // The old secret works (the server answered `conflict` to
-                                // it); the pending one is not the server's. Keep the old
-                                // one and stop rotating until asked again.
-                                tracing::error!("credential rotation conflict; staying on the current secret");
-                                rotation.pending = None;
-                                drop_pending_secret(&ctx);
-                                rotation.blocked = true;
-                            }
-                            _ => {
-                                // Both refused, but the subscription has not said so:
-                                // keep both and let it decide.
-                                tracing::warn!("the backend refused both device secrets; keeping both");
-                            }
-                        },
+                        }
                         Err(error) => {
+                            // No answer (offline, timeout): never a conclusion. The same
+                            // question is asked again at the next ping time.
                             tracing::debug!("cannot try the pending secret ({error}); trying again later");
-                            probe = Some(why);
-                            probe_retry = true;
+                            probe.retry = Some(why);
                             pinger.failed(&ctx);
                         }
                     }
@@ -1113,13 +1222,18 @@ pub async fn run_backend_task(
                             if !pinger.head_interval {
                                 pinger.interval_ms = answer.next_ping_in_ms.clamp(MIN_PING_MS, MAX_PING_MS);
                             }
-                            if let Some(server_time_ms) = answer.server_time_ms {
-                                note_server_time(&ctx, server_time_ms);
+                            match answer.server_time_ms {
+                                Some(server_time_ms) => note_server_time(&ctx, server_time_ms),
+                                // A server that stops sending its time leaves no stale offset.
+                                None => clear_server_time(&ctx),
                             }
                             note_clock(&ctx);
                             pinger.note_plan_state(&answer.plan_state);
                             pinger.schedule(&ctx);
-                            if !rotation.blocked && !rotation.busy() {
+                            // Single flight: no rotation starts while a rotation call or a
+                            // check of the pending secret is under way (or waits for a retry),
+                            // and never within ROTATION_MIN_GAP of the last attempt.
+                            if !rotation.blocked && !rotation.busy() && !probe.active() && rotation.gap_over() {
                                 if let Some(new_secret) = rotation.pending.clone() {
                                     // An earlier try got no answer: the same secret again.
                                     spawn_rotate(&mut rotation, &auth, new_secret);
@@ -1150,6 +1264,7 @@ pub async fn run_backend_task(
                     Ok(()) => {
                         if adopt_secret(&ctx, &done.new_secret) {
                             rotation.pending = None;
+                            rotation.unknown_device = false;
                             auth = DeviceAuth { device_id: auth.device_id.clone(), device_secret: done.new_secret };
                             ctx.link.set_auth(auth.clone());
                             resubscribe = true;
@@ -1157,8 +1272,7 @@ pub async fn run_backend_task(
                     }
                     Err(error) if is_code(&error, CODE_CONFLICT) => {
                         tracing::warn!("the backend holds another new credential; trying the pending secret");
-                        probe = Some(ProbeWhy::Conflict);
-                        probe_task = Some(spawn_ping(DeviceAuth { device_id: auth.device_id.clone(), device_secret: done.new_secret }, true));
+                        start_probe(&mut probe, &auth, done.new_secret, ProbeWhy::Conflict);
                     }
                     Err(error) if is_code(&error, CODE_NOT_READY) => {
                         // Nothing changed on the server (no credentials row yet).
@@ -1166,15 +1280,22 @@ pub async fn run_backend_task(
                         rotation.pending = None;
                         drop_pending_secret(&ctx);
                         rotation.blocked = true;
+                        if rotation.unknown_device {
+                            rotation.unknown_device = false;
+                            resubscribe = true;
+                        }
                     }
                     Err(error) if is_code(&error, CODE_DEVICE_REJECTED) => {
                         tracing::warn!("the backend refused the current secret during rotation; trying the pending one");
-                        probe = Some(ProbeWhy::OldRejected);
-                        probe_task = Some(spawn_ping(DeviceAuth { device_id: auth.device_id.clone(), device_secret: done.new_secret }, true));
+                        start_probe(&mut probe, &auth, done.new_secret, ProbeWhy::OldRejected);
                     }
                     Err(error) => {
                         // Lost answer or offline: both secrets stay; the next ping asks again.
                         tracing::warn!("credential rotation got no answer ({error}); trying again at the next ping");
+                        if rotation.unknown_device {
+                            // The subscription's question is still open: ask it now.
+                            start_probe(&mut probe, &auth, done.new_secret, ProbeWhy::UnknownDevice);
+                        }
                     }
                 }
             }
@@ -1191,7 +1312,7 @@ pub async fn run_backend_task(
         }
     }
 
-    for task in [pinger.task.take(), rotation.task.take(), probe_task.take()].into_iter().flatten() {
+    for task in [pinger.task.take(), rotation.task.take(), probe.task.take()].into_iter().flatten() {
         task.abort();
     }
     fetcher.stop();
@@ -2363,6 +2484,298 @@ mod tests {
         assert!(rig.ctx.shared.get().enrollment.unwrap().revoked);
         // The old secret is never thrown away by a revocation.
         assert_eq!(secrets(&rig).0.as_deref(), Some(OLD));
+    }
+
+    fn asks_to_rotate(next_ping_in_ms: u64) -> Result<PingResponse, BackendError> {
+        Ok(PingResponse { rotate_credential: true, ..crate::backend::fake::ping_ok(next_ping_in_ms) })
+    }
+
+    fn conflict() -> Result<(), BackendError> {
+        Err(BackendError::Rejected { code: "conflict".into() })
+    }
+
+    /// Pings made with the OLD secret (the ordinary ones), as opposed to checks of
+    /// the pending secret.
+    fn ordinary_pings(fake: &FakeBackend) -> usize {
+        fake.ping_calls().iter().filter(|call| call.auth.device_secret == OLD).count()
+    }
+
+    fn pending_pings(fake: &FakeBackend) -> usize {
+        fake.ping_calls().iter().filter(|call| call.auth.device_secret != OLD).count()
+    }
+
+    /// The cloned-image case: another copy of this PC rotated first, so the server
+    /// answers `conflict`, and it never heard of OUR pending secret.
+    fn cloned_image(fake: &FakeBackend) {
+        for _ in 0..400 {
+            fake.script_ping(asks_to_rotate(60_000));
+        }
+        for _ in 0..4 {
+            fake.script_rotate(conflict());
+        }
+        fake.accept_only(&[OLD]);
+    }
+
+    /// The hour between rotation attempts would hide a missing single-flight rule
+    /// in these tests: switch it off (this test thread only).
+    fn no_rotation_gap() {
+        TEST_GAP.with(|gap| gap.set(Some(Duration::ZERO)));
+    }
+
+    fn assert_enrolled_on_old_secret(rig: &Rig) {
+        assert!(!rig.ctx.shared.get().enrollment.unwrap().revoked, "a conflict is not a revocation");
+        assert_eq!(rig.snapshot().enrollment, EnrollmentStatus::Enrolled);
+        assert_eq!(secrets(rig), (Some(OLD.to_string()), None));
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_ping_that_succeeds_while_the_conflict_check_runs_starts_no_second_rotation() {
+        no_rotation_gap();
+        let rig = Rig::new();
+        with_old_secret(&rig);
+        let fake = FakeBackend::new();
+        cloned_image(&fake);
+        // The check of the pending secret is slow (ten minutes).
+        fake.delay_pings_except(OLD, Duration::from_secs(600));
+        let (cancel, handle) = rig.start(&fake);
+        fake.push(BackendEvent::Connection(ConnectionStatus::Online));
+        fake.wait_until("the conflict", |f| !f.rotate_calls().is_empty()).await;
+        fake.wait_until("a check of the pending secret", |f| pending_pings(f) == 1).await;
+        // Ordinary pings keep succeeding (each asks to rotate) while the check runs.
+        let before = ordinary_pings(&fake);
+        tokio::time::sleep(Duration::from_secs(300)).await;
+        settle().await;
+        assert!(ordinary_pings(&fake) >= before + 4, "ordinary pings went on");
+        assert_eq!(fake.rotate_calls().len(), 1, "no second rotation while the check is out");
+        assert_eq!(pending_pings(&fake), 1, "and no second check");
+
+        // The check ends: the server does not know the pending secret.
+        tokio::time::sleep(Duration::from_secs(700)).await;
+        settle().await;
+        assert_enrolled_on_old_secret(&rig);
+        assert_eq!(fake.rotate_calls().len(), 1);
+        assert_eq!(fake.subscriptions().len(), 1);
+        assert!(!handle.is_finished(), "the task keeps running");
+        // The device keeps working on the old secret.
+        let now = ordinary_pings(&fake);
+        tokio::time::sleep(Duration::from_secs(600)).await;
+        settle().await;
+        assert!(ordinary_pings(&fake) > now);
+        assert_eq!(fake.rotate_calls().len(), 1, "blocked after the conflict");
+        stop(cancel, handle).await;
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn two_conflicts_back_to_back_never_revoke_the_device() {
+        no_rotation_gap();
+        let rig = Rig::new();
+        with_old_secret(&rig);
+        let fake = FakeBackend::new();
+        cloned_image(&fake);
+        // The checks get no answer at first.
+        fake.fail_pings_except(OLD, Some(BackendError::Timeout));
+        let (cancel, handle) = rig.start(&fake);
+        fake.push(BackendEvent::Connection(ConnectionStatus::Online));
+        fake.wait_until("an unanswered check", |f| pending_pings(f) >= 1).await;
+        tokio::time::sleep(Duration::from_secs(30)).await;
+        settle().await;
+        // The check was asked again, and ordinary pings succeeded meanwhile and asked to
+        // rotate; the waiting check keeps them from starting a second rotation (which
+        // would answer `conflict` again and overwrite the first check).
+        assert!(pending_pings(&fake) >= 2);
+        assert!(ordinary_pings(&fake) >= 2);
+        assert_eq!(fake.rotate_calls().len(), 1);
+        // The server answers now: the pending secret is not known to it.
+        fake.fail_pings_except(OLD, None);
+        tokio::time::sleep(Duration::from_secs(900)).await;
+        settle().await;
+        assert_enrolled_on_old_secret(&rig);
+        assert_eq!(fake.rotate_calls().len(), 1);
+        assert!(!handle.is_finished());
+        stop(cancel, handle).await;
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_cloned_image_ends_enrolled_and_working_on_the_old_secret() {
+        no_rotation_gap();
+        let rig = Rig::new();
+        with_old_secret(&rig);
+        let fake = FakeBackend::new();
+        cloned_image(&fake);
+        fake.delay_pings_except(OLD, Duration::from_secs(200));
+        let (cancel, handle) = rig.start(&fake);
+        fake.push(BackendEvent::Connection(ConnectionStatus::Online));
+        tokio::time::sleep(Duration::from_secs(3 * 3600)).await;
+        settle().await;
+        assert_enrolled_on_old_secret(&rig);
+        assert!(ordinary_pings(&fake) > 100, "still pinging");
+        assert_eq!(fake.rotate_calls().len(), 1, "one attempt, then blocked");
+        assert_eq!(pending_pings(&fake), 1);
+        assert!(!handle.is_finished());
+        stop(cancel, handle).await;
+
+        // After a restart it is still the same enrolled device, and the one attempt
+        // of the new run ends the same way.
+        let fake = FakeBackend::new();
+        cloned_image(&fake);
+        let (cancel, handle) = rig.start(&fake);
+        fake.push(BackendEvent::Connection(ConnectionStatus::Online));
+        tokio::time::sleep(Duration::from_secs(3600)).await;
+        settle().await;
+        assert_enrolled_on_old_secret(&rig);
+        assert_eq!(fake.rotate_calls().len(), 1);
+        assert!(!handle.is_finished());
+        stop(cancel, handle).await;
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn the_subscription_reporting_unknown_during_a_conflict_check_asks_again_and_may_then_revoke() {
+        // `unknownDevice` arrives while the check of the pending secret is out: the
+        // check answers first; its refusal makes the subscription answer again, and
+        // only that answer (for the secret in use, nothing pending) revokes.
+        let rig = Rig::new();
+        with_old_secret(&rig);
+        let fake = FakeBackend::new();
+        fake.script_ping(asks_to_rotate(60_000));
+        fake.script_rotate(conflict());
+        fake.accept_only(&[OLD]);
+        fake.delay_pings_except(OLD, Duration::from_secs(300));
+        let (cancel, handle) = rig.start(&fake);
+        fake.push(BackendEvent::Connection(ConnectionStatus::Online));
+        fake.wait_until("a check of the pending secret", |f| pending_pings(f) == 1).await;
+        fake.push(BackendEvent::Desired(DesiredFetch::UnknownDevice));
+        settle().await;
+        assert_eq!(pending_pings(&fake), 1, "the running check is not joined by a second one");
+        assert!(!rig.ctx.shared.get().enrollment.unwrap().revoked, "no verdict yet");
+        // The check ends (refused): the subscription is started again.
+        tokio::time::sleep(Duration::from_secs(310)).await;
+        settle().await;
+        assert_eq!(fake.subscriptions().len(), 2);
+        assert!(!rig.ctx.shared.get().enrollment.unwrap().revoked);
+        // It still says the device is unknown, and nothing is pending any more.
+        fake.push(BackendEvent::Desired(DesiredFetch::UnknownDevice));
+        tokio::time::timeout(Duration::from_secs(5), handle).await.unwrap().unwrap();
+        assert!(rig.ctx.shared.get().enrollment.unwrap().revoked);
+        drop(cancel);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_server_that_always_asks_for_a_rotation_gets_one_per_hour() {
+        let rig = Rig::new();
+        with_old_secret(&rig);
+        let fake = FakeBackend::new();
+        for _ in 0..400 {
+            fake.script_ping(asks_to_rotate(60_000));
+        }
+        let (cancel, handle) = rig.start(&fake);
+        fake.push(BackendEvent::Connection(ConnectionStatus::Online));
+        fake.wait_until("the first rotation", |f| !f.rotate_calls().is_empty()).await;
+        // Pings every minute all asking to rotate: nothing for almost an hour ...
+        tokio::time::sleep(Duration::from_secs(58 * 60)).await;
+        settle().await;
+        assert_eq!(fake.rotate_calls().len(), 1);
+        // ... then one more, and again nothing for the next hour.
+        tokio::time::sleep(Duration::from_secs(5 * 60)).await;
+        settle().await;
+        assert_eq!(fake.rotate_calls().len(), 2);
+        // Each was a real rotation with the secret then in use.
+        let calls = fake.rotate_calls();
+        assert_eq!(calls[0].0.device_secret, OLD);
+        assert_ne!(calls[1].0.device_secret, OLD);
+        stop(cancel, handle).await;
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_pending_secret_is_retried_at_start_whatever_the_gap() {
+        // The gap counts attempts of one run: a restart retries at once.
+        let rig = Rig::new();
+        with_old_secret(&rig);
+        let pending = "cd".repeat(32);
+        rig.ctx.shared.update_secrets(|s| s.rotating_device_secret = Some(pending.clone())).unwrap();
+        for _ in 0..2 {
+            let fake = FakeBackend::new();
+            fake.script_rotate(Err(BackendError::Timeout));
+            let (cancel, handle) = rig.start(&fake);
+            fake.wait_until("the rotation at start", |f| f.rotate_calls().len() == 1).await;
+            settle().await;
+            // Not asked again by the pings of the same run within the hour.
+            fake.push(BackendEvent::Connection(ConnectionStatus::Online));
+            tokio::time::sleep(Duration::from_secs(1800)).await;
+            settle().await;
+            assert_eq!(fake.rotate_calls().len(), 1);
+            stop(cancel, handle).await;
+        }
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn the_watch_window_is_bounded_when_the_local_clock_is_far_behind() {
+        let rig = Rig::new();
+        let fake = FakeBackend::new();
+        let (cancel, handle) = rig.start(&fake);
+        // `fastUntil` is ten days ahead of this PC's clock (or the clock is behind).
+        let until = START_MS + 10 * 24 * 3_600_000;
+        fake.push(head(1, 1_800_000, 0, until));
+        fake.push(BackendEvent::Connection(ConnectionStatus::Online));
+        fake.wait_for_pings(1).await;
+        let t0 = Instant::now();
+        // A repeat of the same head does not start the window again.
+        tokio::time::sleep(Duration::from_secs(10 * 60)).await;
+        fake.push(head(1, 1_800_000, 0, until));
+        tokio::time::sleep(Duration::from_secs(6 * 60)).await;
+        settle().await;
+        let in_window = fake.ping_calls().len();
+        assert!((14..=18).contains(&in_window), "about a ping a minute for 15 minutes, got {in_window}");
+        // Past the 15 minutes: back to the regular interval, no more minute pings.
+        assert!(Instant::now() - t0 > FAST_WINDOW_MAX);
+        tokio::time::sleep(Duration::from_secs(20 * 60)).await;
+        settle().await;
+        assert_eq!(fake.ping_calls().len(), in_window);
+        stop(cancel, handle).await;
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn the_watch_window_uses_the_server_clock_when_it_is_known() {
+        let rig = Rig::new();
+        let fake = FakeBackend::new();
+        // This PC is three days behind the server, which says so in its ping answer.
+        let server_now = START_MS as i64 + 3 * 24 * 3_600_000;
+        fake.script_ping(Ok(PingResponse { server_time_ms: Some(server_now), ..crate::backend::fake::ping_ok(1_800_000) }));
+        let (cancel, handle) = rig.start(&fake);
+        fake.push(BackendEvent::Connection(ConnectionStatus::Online));
+        fake.wait_for_pings(1).await;
+        settle().await;
+        assert_eq!(rig.snapshot().server_time_offset_ms, Some(3 * 24 * 3_600_000));
+        // Watched for three more minutes by the SERVER's clock.
+        fake.push(head(1, 1_800_000, 0, server_now as u64 + 180_000));
+        settle().await;
+        tokio::time::sleep(Duration::from_secs(5 * 60)).await;
+        settle().await;
+        let in_window = fake.ping_calls().len();
+        assert!((3..=5).contains(&in_window), "got {in_window}");
+        tokio::time::sleep(Duration::from_secs(20 * 60)).await;
+        settle().await;
+        assert_eq!(fake.ping_calls().len(), in_window);
+        stop(cancel, handle).await;
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn the_offset_is_cleared_when_the_server_stops_sending_its_time() {
+        let rig = Rig::new();
+        let fake = FakeBackend::new();
+        fake.script_ping(Ok(PingResponse {
+            server_time_ms: Some(START_MS as i64 + 60_000),
+            ..crate::backend::fake::ping_ok(60_000)
+        }));
+        let (cancel, handle) = rig.start(&fake);
+        fake.push(BackendEvent::Connection(ConnectionStatus::Online));
+        fake.wait_for_pings(1).await;
+        settle().await;
+        assert_eq!(rig.snapshot().server_time_offset_ms, Some(60_000));
+        // The next answer carries no time (an older server): no stale offset stays.
+        fake.wait_for_pings(2).await;
+        settle().await;
+        assert_eq!(rig.snapshot().server_time_offset_ms, None);
+        stop(cancel, handle).await;
     }
 
     #[tokio::test(start_paused = true)]

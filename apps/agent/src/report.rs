@@ -16,7 +16,8 @@
 //!
 //! Errors: any failure keeps everything and retries with full-jitter exponential
 //! backoff (5 s doubling to 10 minutes) while online; while offline it waits for
-//! the connection (CLAUDE.md data rule 6: no polling).
+//! the connection (CLAUDE.md data rule 6: no polling). After an outage of more than 5
+//! minutes the first ordinary report waits a random 0 to 120 s (security records do not).
 
 use std::collections::BTreeMap;
 use std::sync::{Arc, Mutex};
@@ -37,6 +38,11 @@ pub const MIN_REPORT_INTERVAL: Duration = Duration::from_secs(60);
 /// Full-jitter backoff after a failed report: base, doubling up to the cap.
 pub const BACKOFF_BASE: Duration = Duration::from_secs(5);
 pub const BACKOFF_MAX: Duration = Duration::from_secs(600);
+/// (A13, as the ping) After an outage longer than [`LONG_OUTAGE`] the first report
+/// waits a random time up to this long, so a whole fleet coming back does not
+/// report at once. Security records are not held back.
+pub const OUTAGE_REPORT_JITTER_MS: u64 = 120_000;
+pub const LONG_OUTAGE: Duration = Duration::from_secs(300);
 
 /// Builds the current status snapshot, or `None` when the machine cannot be read.
 pub type StatusSource = Arc<dyn Fn() -> Option<StatusReport> + Send + Sync>;
@@ -151,7 +157,9 @@ impl ReportQueue {
         }
         if audit == batch.audit.len() {
             if !batch.audit.is_empty() || batch.dropped > 0 {
-                self.audit.ack(batch.audit.len(), batch.dropped);
+                // By id: the queue may have changed at the front while the batch was out.
+                let ids: Vec<String> = batch.audit.iter().map(|record| record.id.clone()).collect();
+                self.audit.ack(&ids, batch.dropped);
             }
         } else {
             tracing::warn!(sent = batch.audit.len(), accepted = audit, "the backend did not take every audit record; kept");
@@ -184,6 +192,10 @@ pub async fn run_report_task(
     let mut failures: u32 = 0;
     let mut retry_at: Option<Instant> = None;
     let mut was_online = is_online(&snapshot_rx);
+    // Since when the connection is down, and the earliest time an ordinary report
+    // may go out after a long outage.
+    let mut offline_since: Option<Instant> = (!was_online).then(Instant::now);
+    let mut settle_until: Option<Instant> = None;
     // True when something was asked for and may not have been sent yet.
     let mut wanted = true;
     let mut sink_unavailable = false;
@@ -192,11 +204,15 @@ pub async fn run_report_task(
         let online = is_online(&snapshot_rx);
         let pending = wanted && !sink_unavailable;
         let at = if pending {
-            let slot = if queue.audit.has_urgent() {
+            let urgent = queue.audit.has_urgent();
+            let mut slot = if urgent {
                 Instant::now()
             } else {
                 last_sent.map_or_else(Instant::now, |sent| sent + MIN_REPORT_INTERVAL)
             };
+            if let (false, Some(settle)) = (urgent, settle_until) {
+                slot = slot.max(settle);
+            }
             match retry_at {
                 // A backoff timer runs only while online; offline waits for the connection.
                 Some(retry) if online => Some(slot.max(retry)),
@@ -223,9 +239,17 @@ pub async fn run_report_task(
                     return;
                 }
                 let now_online = is_online(&snapshot_rx);
+                if !now_online && was_online {
+                    offline_since = Some(Instant::now());
+                }
                 if now_online && !was_online {
-                    // Back online: whatever failed is tried now (no backoff wait).
+                    // Back online: whatever failed is tried now (no backoff wait) ...
                     retry_at = None;
+                    // ... but after a long outage every PC would do so at the same time.
+                    if offline_since.take().is_some_and(|since| since.elapsed() > LONG_OUTAGE) {
+                        let wait = Duration::from_millis(jitter(OUTAGE_REPORT_JITTER_MS));
+                        settle_until = Some(Instant::now() + wait);
+                    }
                 }
                 was_online = now_online;
                 wanted = true;
@@ -236,6 +260,7 @@ pub async fn run_report_task(
         }
 
         // Send: one batch, then more right away while a backlog remains.
+        settle_until = None;
         loop {
             let (batch, status_text) = queue.next_batch(status_due);
             if batch.is_empty() {
@@ -503,6 +528,52 @@ mod tests {
         }
         settle().await;
         assert_eq!(rig.audit.queued(), 0);
+        rig.stop().await;
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn the_first_report_after_a_long_outage_waits_but_security_records_do_not() {
+        let mut rig = rig(0);
+        rig.with_status(None);
+        let _ = rig.next().await;
+        let set = |rig: &Rig, status| rig.snapshot_tx.send_modify(|s| s.connection = status);
+
+        // A short outage: the record goes out at once.
+        set(&rig, ConnectionStatus::Offline);
+        settle().await;
+        tokio::time::sleep(Duration::from_secs(120)).await;
+        set(&rig, ConnectionStatus::Online);
+        settle().await;
+        rig.audit.record(AuditKind::AdminExitWrongPin, None, None);
+        let back = Instant::now();
+        let _ = rig.next().await;
+        assert!(Instant::now() - back < Duration::from_secs(1), "no wait after a short outage");
+
+        // A long outage: an ordinary record waits for the random delay (the test's
+        // jitter answers the maximum, 120 s) ...
+        set(&rig, ConnectionStatus::Offline);
+        settle().await;
+        tokio::time::sleep(Duration::from_secs(600)).await;
+        set(&rig, ConnectionStatus::Online);
+        settle().await;
+        rig.audit.record(AuditKind::AdminExitWrongPin, None, None);
+        let back = Instant::now();
+        rig.nothing_for(119).await;
+        let _ = rig.next().await;
+        let waited = Instant::now() - back;
+        assert!(waited >= Duration::from_secs(119) && waited <= Duration::from_secs(121), "{waited:?}");
+
+        // ... a security record does not.
+        set(&rig, ConnectionStatus::Offline);
+        settle().await;
+        tokio::time::sleep(Duration::from_secs(600)).await;
+        set(&rig, ConnectionStatus::Online);
+        settle().await;
+        rig.audit.record(AuditKind::EmployeeLockedOut, Some("maya".into()), None);
+        let back = Instant::now();
+        let (batch, _) = rig.next().await;
+        assert!(Instant::now() - back < Duration::from_secs(1), "a lockout is reported at once");
+        assert_eq!(batch.audit[0].kind, AuditKind::EmployeeLockedOut);
         rig.stop().await;
     }
 

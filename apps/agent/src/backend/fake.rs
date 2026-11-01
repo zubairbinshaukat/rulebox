@@ -65,6 +65,12 @@ struct Inner {
     /// `(auth, new secret hash)`.
     rotate_calls: Mutex<Vec<(DeviceAuth, String)>>,
     rejected_secrets: Mutex<BTreeSet<String>>,
+    /// When set, a device call with any other secret is `device_rejected`.
+    accept_only: Mutex<Option<BTreeSet<String>>>,
+    /// Pings with a secret other than this one wait this long before they answer.
+    ping_delay_except: Mutex<Option<(String, Duration)>>,
+    /// Pings with a secret other than this one fail with this error.
+    ping_fail_except: Mutex<Option<(String, BackendError)>>,
     unenroll_script: Mutex<VecDeque<Result<(), BackendError>>>,
     unenroll_calls: Mutex<Vec<DeviceAuth>>,
     events_tx: mpsc::UnboundedSender<BackendEvent>,
@@ -101,6 +107,9 @@ impl FakeBackend {
                 rotate_script: Mutex::new(VecDeque::new()),
                 rotate_calls: Mutex::new(Vec::new()),
                 rejected_secrets: Mutex::new(BTreeSet::new()),
+                accept_only: Mutex::new(None),
+                ping_delay_except: Mutex::new(None),
+                ping_fail_except: Mutex::new(None),
                 unenroll_script: Mutex::new(VecDeque::new()),
                 unenroll_calls: Mutex::new(Vec::new()),
                 events_tx,
@@ -200,8 +209,27 @@ impl FakeBackend {
         lock(&self.inner.rejected_secrets).insert(secret.to_string());
     }
 
+    /// From now on only these secrets are known to the server; every device call
+    /// with another one is `device_rejected` (a cloned image, say).
+    pub fn accept_only(&self, secrets: &[&str]) {
+        *lock(&self.inner.accept_only) = Some(secrets.iter().map(|s| (*s).to_string()).collect());
+    }
+
+    /// Pings made with any secret but `secret` wait `delay` before they answer.
+    pub fn delay_pings_except(&self, secret: &str, delay: Duration) {
+        *lock(&self.inner.ping_delay_except) = Some((secret.to_string(), delay));
+    }
+
+    /// Pings made with any secret but `secret` fail with `error` (`None`: stop).
+    pub fn fail_pings_except(&self, secret: &str, error: Option<BackendError>) {
+        *lock(&self.inner.ping_fail_except) = error.map(|error| (secret.to_string(), error));
+    }
+
     fn is_rejected(&self, auth: &DeviceAuth) -> bool {
         lock(&self.inner.rejected_secrets).contains(&auth.device_secret)
+            || lock(&self.inner.accept_only)
+                .as_ref()
+                .is_some_and(|known| !known.contains(&auth.device_secret))
     }
 
     pub fn ping_calls(&self) -> Vec<PingCall> {
@@ -299,10 +327,22 @@ impl Backend for FakeBackend {
     fn ping(&self, auth: &DeviceAuth) -> BoxFuture<'_, Result<PingResponse, BackendError>> {
         let call = PingCall { at: Instant::now(), auth: auth.clone() };
         async move {
-            let rejected_secret = self.is_rejected(&call.auth);
-            lock(&self.inner.ping_calls).push(call);
+            let secret = call.auth.device_secret.clone();
+            lock(&self.inner.ping_calls).push(call.clone());
             self.inner.changed.notify_waiters();
-            if rejected_secret {
+            let delay = lock(&self.inner.ping_delay_except).clone();
+            if let Some((except, delay)) = delay {
+                if except != secret {
+                    tokio::time::sleep(delay).await;
+                }
+            }
+            let failure = lock(&self.inner.ping_fail_except).clone();
+            if let Some((except, error)) = failure {
+                if except != secret {
+                    return Err(error);
+                }
+            }
+            if self.is_rejected(&call.auth) {
                 return Err(rejected());
             }
             lock(&self.inner.ping_script).pop_front().unwrap_or_else(|| Ok(ping_ok(1_800_000)))
