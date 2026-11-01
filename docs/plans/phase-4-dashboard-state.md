@@ -4349,6 +4349,40 @@ transitions (4.8 amended) into the `ReportQueue` of Step 13; the test
 `reports_only_unacknowledged_transitions` becomes
 `reports_only_accepted_and_terminal_unacknowledged_transitions`.
 
+**Status (2026-11-01): built and tested on the dev machine (unit tests with
+`SimPlatform` + `FakeDownloader` only; stopped at a safe point on the owner's request).**
+Nothing was installed, downloaded or executed for real. **Done:** items 1-7 and every
+test of the list (plus TOCTOU, crash recovery, one-at-a-time, offline, quoting, deny list).
+Files: `apps/agent/src/installs/{mod,download,engine,engine_tests,report,icons}.rs`, the
+platform seam, `catalog.rs`, `report.rs`, `agent.rs`, `main.rs`, `paths.rs`,
+`backend/{mod,task}.rs`, `rulebox-win32/src/osinfo.rs` (`disk_free_bytes`, `boot_time_ms`).
+As built / deviations: (1) **6 tries, not 5:** waits 1, 5, 15, 60, 360 min after failures
+1-5, the 6th failure is final (follows the test name `..._1_5_15_60_360_then_stops`; item
+"after the 5th failure" of 4.8 would leave 360 unused). (2) Downloads wait for the
+connection (an offline PC does not use up its attempts); removals do not. (3) **TOCTOU:**
+the installer is opened with read-only sharing, not through a link, hashed again through
+that handle and held open while msiexec / the exe runs (no other handle can write, rename
+or delete it). (4) The program rule (`installer_program_allowed`: `%SystemRoot%\System32\msiexec.exe`
+or `<data>\downloads\<sha256>.exe|msi`) is checked **before** the guard, like the machine-value
+list. (5) `known_folders` not added: `path_roots` (Step 13) already gives the roots. A free-disk
+read (`Platform::disk_free_bytes`) was added for the `sizeBytes x 3` check. (6) On timeout only
+the installer process is killed (`Child::kill`, item 1), not the process tree (4.8 says tree; a
+job object in `rulebox-win32` is needed). (7) An unassigned exe, or an MSI without
+`removeWhenUnassigned` / product code, is only hidden: its record is dropped and nothing is
+reported (the dashboard row stays `installed` until Step 17 filters by assignment). (8) An
+install interrupted by an agent crash counts one failure (no detail) and is retried; an
+interrupted download restarts uncounted (no HTTP range resume). (9) A program already at its
+path with no record is taken as `installed` (4.8 "not installed and its exe is missing").
+(10) `1618` is neither counted nor reported (detail `busy` is unused). (11) A failed portable
+copy / an installer that could not start is `failed` with no detail (no fixed text fits).
+(12) `restartPending` is sent only as `true` (absent = false). (13) New dependency
+`reqwest` 0.13.5 (`native-tls`, `stream`, `http2`, `system-proxy`; already in Cargo.lock via
+Tauri; pulls in `hyper-tls`, `h2`) and the workspace `bytes` for the agent.
+**Half-done / not verified:** `WindowsPlatform::run_installer`, `place_portable`,
+`remove_portable` and `HttpDownloader` are compiled but never exercised (guard / no network
+in tests); the simulate-mode Verify run (real 7-Zip MSI download) and the `installResults`
+check were NOT done. **Not started:** nothing else in this step.
+
 ---
 
 ### Step 15 — Staff App: protocol 1.2 and file handlers
