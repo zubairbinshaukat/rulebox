@@ -491,6 +491,47 @@ async fn run_sign_out(
     blocking(move || session::perform_sign_out(&state, &services, &employee)).await
 }
 
+/// A protocol 1.2 push from the agent (`state::spawn_agent_tasks` reads them
+/// one at a time, in order).
+pub async fn on_agent_event(state: &AppState, event: crate::model::AgentEvent) {
+    use crate::model::AgentEvent;
+
+    match event {
+        AgentEvent::AppsChanged => session::refresh_catalogue_quietly(state).await,
+        AgentEvent::SessionEnded(reason) => end_session_from_agent(state, reason).await,
+    }
+}
+
+/// `session.ended`: the agent has already cleared its session, so this is the
+/// log-out sequence without asking (apps closed, memory cleared) followed by
+/// the reason on the sign-in screen.
+async fn end_session_from_agent(state: &AppState, reason: crate::model::SessionEndedReason) {
+    use session::EndedPlan;
+
+    match session::plan_session_ended(&state.snapshot().session, reason) {
+        EndedPlan::Ignore => return,
+        EndedPlan::NoteOnly => {}
+        EndedPlan::SignOutThenNote => {
+            let Some(app) = state.app_handle() else {
+                tracing::warn!("session.ended before the shell was ready");
+                return;
+            };
+            let (Some(services), Some(host)) = (
+                app.try_state::<TaskServices>(),
+                app.try_state::<Arc<DesktopHost>>(),
+            ) else {
+                tracing::warn!("session.ended before the shell was ready");
+                return;
+            };
+            tracing::info!(?reason, "the agent ended the session");
+            if let Err(error) = run_sign_out(&app, state, &services, &host).await {
+                tracing::warn!(%error, "could not close the session the agent ended");
+            }
+        }
+    }
+    session::note_session_ended(state, reason);
+}
+
 /// Close the shell's apps and return to sign-in. Windows the shell did not
 /// launch are left open.
 #[tauri::command]
@@ -1138,6 +1179,12 @@ pub fn spawn_dev_cmd_poller(state: AppState) {
         /// Show the lock screen (what the Lock button does to the session).
         #[serde(default)]
         lock: Option<bool>,
+        /// Make the demo agent send `apps.changed` (protocol 1.2).
+        #[serde(default)]
+        apps_changed: Option<bool>,
+        /// Make the demo agent send `session.ended` with this reason (protocol 1.2).
+        #[serde(default)]
+        session_ended: Option<crate::model::SessionEndedReason>,
     }
 
     #[derive(Debug, Deserialize)]
@@ -1199,6 +1246,12 @@ pub fn spawn_dev_cmd_poller(state: AppState) {
                         s.session = next;
                     }
                 });
+            }
+            if cmd.apps_changed == Some(true) {
+                state.agent().dev_emit(crate::model::AgentEvent::AppsChanged);
+            }
+            if let Some(reason) = cmd.session_ended {
+                state.agent().dev_emit(crate::model::AgentEvent::SessionEnded(reason));
             }
             if let Some(n) = cmd.demo_apps {
                 let items = crate::agent::demo::sample_apps_for(Some(n));

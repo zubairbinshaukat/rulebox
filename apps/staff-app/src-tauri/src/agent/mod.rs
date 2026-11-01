@@ -7,10 +7,10 @@
 
 use futures_util::future::BoxFuture;
 use thiserror::Error;
-use tokio::sync::watch;
+use tokio::sync::{broadcast, watch};
 
 use crate::model::{
-    AdminExitOutcome, AgentLink, AppEntry, SignInOutcome, SignInRequest, VerifyOutcome,
+    AdminExitOutcome, AgentEvent, AgentLink, AppEntry, SignInOutcome, SignInRequest, VerifyOutcome,
 };
 
 #[cfg(debug_assertions)]
@@ -21,6 +21,11 @@ pub trait AgentPort: Send + Sync + 'static {
     fn link(&self) -> watch::Receiver<AgentLink>;
     fn snapshot(&self) -> watch::Receiver<Option<rulebox_ipc::types::AgentSnapshot>>;
     fn capabilities(&self) -> Vec<String>;
+    /// Protocol 1.2 pushes (`apps.changed`, `session.ended`). One consumer is
+    /// enough; a receiver that lags behind loses the oldest events.
+    fn events(&self) -> broadcast::Receiver<AgentEvent>;
+    /// Debug only (the dev command file): send `event` as if the agent had.
+    fn dev_emit(&self, _event: AgentEvent) {}
     fn ready(&self) -> BoxFuture<'_, Result<(), AgentError>>;
     fn heartbeat(&self) -> BoxFuture<'_, Result<(), AgentError>>;
     fn sign_in(&self, req: SignInRequest) -> BoxFuture<'_, Result<SignInOutcome, AgentError>>;

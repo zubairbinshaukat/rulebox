@@ -12,18 +12,22 @@ use rulebox_ipc::types::{
     AgentSnapshot, ConnectionStatus, DisplayMode, EnrollmentStatus, KioskPhase, KioskStatus,
     ShellHealth, ShellStatus,
 };
-use rulebox_ipc::{CAPABILITIES, CAP_ADMIN_EXIT, CAP_APPS, CAP_SESSION};
-use tokio::sync::watch;
+use rulebox_ipc::{
+    CAPABILITIES, CAP_ADMIN_EXIT, CAP_APPS, CAP_APPS_CHANGED, CAP_SESSION, CAP_SESSION_ENDED,
+};
+use tokio::sync::{broadcast, watch};
 
 use super::{AgentError, AgentPort};
 use crate::model::{
-    AdminExitOutcome, AgentLink, AppEntry, AppKind, BuiltinTool, DesktopApp, Employee,
+    AdminExitOutcome, AgentEvent, AgentLink, AppEntry, AppKind, BuiltinTool, DesktopApp, Employee,
     SignInOutcome, SignInRequest, VerifyOutcome, WebApp, WebPermissions,
 };
 
 const LOCKOUT_AFTER: u32 = 5;
 const LOCKOUT_MS: u64 = 30_000;
 const ADMIN_PIN: &str = "2468";
+/// Signing in as this user (password `demo`) answers `notAllowedHere`.
+const NOT_HERE_USER: &str = "visitor";
 
 struct EmployeeRec {
     username: &'static str,
@@ -344,6 +348,7 @@ pub struct DemoAgent {
     snap_rx: watch::Receiver<Option<AgentSnapshot>>,
     session: Mutex<SessionSlot>,
     ready_count: AtomicU32,
+    events_tx: broadcast::Sender<AgentEvent>,
 }
 
 impl DemoAgent {
@@ -363,6 +368,7 @@ impl DemoAgent {
                 pin_locked_until: None,
             }),
             ready_count: AtomicU32::new(0),
+            events_tx: broadcast::channel(16).0,
         }
     }
 
@@ -392,7 +398,23 @@ impl AgentPort for DemoAgent {
         caps.push(CAP_SESSION.to_string());
         caps.push(CAP_APPS.to_string());
         caps.push(CAP_ADMIN_EXIT.to_string());
+        caps.push(CAP_APPS_CHANGED.to_string());
+        caps.push(CAP_SESSION_ENDED.to_string());
         caps
+    }
+
+    fn events(&self) -> broadcast::Receiver<AgentEvent> {
+        self.events_tx.subscribe()
+    }
+
+    fn dev_emit(&self, event: AgentEvent) {
+        // The agent clears its own session before it says so; the demo does the same.
+        if matches!(event, AgentEvent::SessionEnded(_)) {
+            if let Ok(mut slot) = self.session.lock() {
+                slot.employee = None;
+            }
+        }
+        let _ = self.events_tx.send(event);
     }
 
     fn ready(&self) -> BoxFuture<'_, Result<(), AgentError>> {
@@ -424,6 +446,10 @@ impl AgentPort for DemoAgent {
             }
 
             let username = req.username.trim().to_ascii_lowercase();
+            // A real employee of the organization who is not in this PC's group (protocol 1.2).
+            if username == NOT_HERE_USER && req.password == "demo" {
+                return Ok(SignInOutcome::NotAllowedHere);
+            }
             let found = directory()
                 .into_iter()
                 .find(|e| e.username == username.as_str());

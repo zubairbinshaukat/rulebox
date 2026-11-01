@@ -27,6 +27,9 @@ mod step16_tests;
 mod step17_tests;
 
 #[cfg(all(test, debug_assertions))]
+mod phase4_step15_tests;
+
+#[cfg(all(test, debug_assertions))]
 mod webnav_tests;
 
 // Step 3 tests live here: the lib unit-test / integration-test harnesses exit
@@ -142,6 +145,7 @@ mod step3_tests {
                 "apps".into(),
                 "adminExit".into(),
             ],
+            session_ended: None,
         }
     }
 

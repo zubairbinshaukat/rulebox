@@ -17,8 +17,8 @@ use serde::{Deserialize, Serialize};
 use crate::agent::AgentError;
 use crate::commands::CommandError;
 use crate::model::{
-    CatalogState, CatalogStatus, Employee, EmployeeBrief, SessionState, SignInOutcome,
-    SignInRequest, VerifyOutcome,
+    CatalogState, CatalogStatus, Employee, EmployeeBrief, SessionEndedReason, SessionState,
+    SignInOutcome, SignInRequest, VerifyOutcome,
 };
 use crate::state::AppState;
 use crate::tasks::TaskServices;
@@ -141,6 +141,7 @@ pub fn apply_sign_in_outcome(state: &AppState, outcome: SignInOutcome) -> Result
         | SignInOutcome::LockedOut { .. }
         | SignInOutcome::OfflineNeverSignedIn
         | SignInOutcome::OfflineExpired
+        | SignInOutcome::NotAllowedHere
         | SignInOutcome::Unknown => {
             // Return to SignedOut with the previous "last" (if any) so the
             // returning-employee form stays available. Form errors live in React.
@@ -188,6 +189,8 @@ pub async fn sign_in(
 
     state.update(|s| {
         s.session = SessionState::SigningIn;
+        // The "you were signed out" note is for the screen the person just left.
+        s.session_ended = None;
     });
 
     let req = SignInRequest {
@@ -241,6 +244,66 @@ pub async fn load_catalogue(state: &AppState) {
             });
         }
     }
+}
+
+/// `apps.changed`: fetch the catalogue again with one `apps.list`. The tiles
+/// stay as they are while it runs, and a failed call keeps them (the next
+/// event or a manual refresh tries again). Nothing happens when nobody is
+/// signed in, or when the person signed out while the call was running.
+pub async fn refresh_catalogue_quietly(state: &AppState) {
+    if !matches!(state.snapshot().session, SessionState::SignedIn { .. }) {
+        return;
+    }
+    match state.agent().apps().await {
+        Ok(items) => {
+            state.update(|s| {
+                if matches!(s.session, SessionState::SignedIn { .. }) {
+                    s.apps = CatalogState {
+                        status: CatalogStatus::Ready,
+                        items,
+                    };
+                }
+            });
+        }
+        Err(error) => tracing::warn!(?error, "apps.list failed after apps.changed"),
+    }
+}
+
+/// Whether `session.ended` for `reason` needs the sign-out sequence: the
+/// employee is signed in, or (for a revocation) the sign-in screen should say so.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum EndedPlan {
+    /// Close the employee's apps like a log out, then show the note.
+    SignOutThenNote,
+    /// Only show the note on the sign-in screen.
+    NoteOnly,
+    /// Nobody to tell.
+    Ignore,
+}
+
+pub fn plan_session_ended(session: &SessionState, reason: SessionEndedReason) -> EndedPlan {
+    match session {
+        SessionState::SignedIn { .. } => EndedPlan::SignOutThenNote,
+        SessionState::SignedOut { .. } if reason == SessionEndedReason::Revoked => EndedPlan::NoteOnly,
+        _ => EndedPlan::Ignore,
+    }
+}
+
+/// Remember `reason` for the sign-in screen. An employee who was removed (or
+/// whose PC was) is no longer offered as "returning".
+pub fn note_session_ended(state: &AppState, reason: SessionEndedReason) {
+    let forget = matches!(
+        reason,
+        SessionEndedReason::EmployeeRemoved | SessionEndedReason::Revoked
+    );
+    state.update(|s| {
+        s.session_ended = Some(reason);
+        if forget {
+            if let SessionState::SignedOut { last } = &mut s.session {
+                *last = None;
+            }
+        }
+    });
 }
 
 pub async fn sign_in_last(state: &AppState, password: String) -> Result<SignInOutcome, CommandError> {

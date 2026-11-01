@@ -5,9 +5,15 @@ import type { BannerDto } from "./BannerDto";
 import type { CatalogState } from "./CatalogState";
 import type { DisplayPrefs } from "./DisplayPrefs";
 import type { NoticeItem } from "./NoticeItem";
+import type { SessionEndedReason } from "./SessionEndedReason";
 import type { SessionState } from "./SessionState";
 import type { ShellModeDto } from "./ShellModeDto";
 import type { SystemState } from "./SystemState";
 import type { TaskItem } from "./TaskItem";
 
-export type ShellState = { mode: ShellModeDto, link: AgentLinkDto, agent: AgentSummary | null, display: DisplayPrefs, session: SessionState, apps: CatalogState, tasks: Array<TaskItem>, system: SystemState, notices: Array<NoticeItem>, banner: BannerDto | null, capabilities: Array<string>, };
+export type ShellState = { mode: ShellModeDto, link: AgentLinkDto, agent: AgentSummary | null, display: DisplayPrefs, session: SessionState, apps: CatalogState, tasks: Array<TaskItem>, system: SystemState, notices: Array<NoticeItem>, banner: BannerDto | null, capabilities: Array<string>, 
+/**
+ * Why the agent ended the last employee session (protocol 1.2). The
+ * sign-in screen shows it until the next sign-in attempt.
+ */
+sessionEnded?: SessionEndedReason, };

@@ -29,6 +29,11 @@ pub struct ShellState {
     pub notices: Vec<NoticeItem>,
     pub banner: Option<BannerDto>,
     pub capabilities: Vec<String>,
+    /// Why the agent ended the last employee session (protocol 1.2). The
+    /// sign-in screen shows it until the next sign-in attempt.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub session_ended: Option<SessionEndedReason>,
 }
 
 impl ShellState {
@@ -48,7 +53,49 @@ impl ShellState {
             notices: Vec::new(),
             banner: None,
             capabilities: Vec::new(),
+            session_ended: None,
         }
+    }
+}
+
+/// Why the agent ended the employee session itself (`session.ended`, protocol 1.2).
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub enum SessionEndedReason {
+    EmployeeRemoved,
+    CredentialChanged,
+    Revoked,
+    Unknown,
+}
+
+/// What the agent pushes besides state snapshots (protocol 1.2 events).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum AgentEvent {
+    /// `apps.changed`: ask `apps.list` again.
+    AppsChanged,
+    /// `session.ended`: the agent has already cleared the employee session.
+    SessionEnded(SessionEndedReason),
+}
+
+/// Pure: the wire event as a Staff event. Link and state events are handled by
+/// the link and snapshot channels, so they map to `None`.
+pub fn map_client_event(event: &rulebox_ipc::client::ClientEvent) -> Option<AgentEvent> {
+    use rulebox_ipc::client::ClientEvent;
+    use rulebox_ipc::requests::SessionEndReason as Wire;
+
+    match event {
+        ClientEvent::AppsChanged => Some(AgentEvent::AppsChanged),
+        ClientEvent::SessionEnded(reason) => Some(AgentEvent::SessionEnded(match reason {
+            Wire::EmployeeRemoved => SessionEndedReason::EmployeeRemoved,
+            Wire::CredentialChanged => SessionEndedReason::CredentialChanged,
+            Wire::Revoked => SessionEndedReason::Revoked,
+            Wire::Unknown => SessionEndedReason::Unknown,
+        })),
+        ClientEvent::Linked(_)
+        | ClientEvent::Unlinked
+        | ClientEvent::StateChanged(_)
+        | ClientEvent::ShuttingDown { .. } => None,
     }
 }
 
@@ -453,6 +500,8 @@ pub enum SignInOutcome {
     },
     OfflineNeverSignedIn,
     OfflineExpired,
+    /// (1.2) The password is right, but this employee may not sign in on this PC.
+    NotAllowedHere,
     /// Flat wire sent an unknown outcome string.
     Unknown,
 }
@@ -566,6 +615,7 @@ pub fn map_sign_in_result(wire: rulebox_ipc::requests::SignInResult) -> SignInOu
         },
         Wire::OfflineNeverSignedIn => SignInOutcome::OfflineNeverSignedIn,
         Wire::OfflineExpired => SignInOutcome::OfflineExpired,
+        Wire::NotAllowedHere => SignInOutcome::NotAllowedHere,
         Wire::Unknown => SignInOutcome::Unknown,
     }
 }

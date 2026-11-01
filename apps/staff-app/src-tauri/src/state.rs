@@ -359,6 +359,13 @@ pub fn spawn_agent_tasks(state: AppState) {
         mirror_agent(link_state).await;
     });
 
+    // Subscribe now, not inside the task, so no push is missed while it starts.
+    let event_state = state.clone();
+    let events = state.agent().events();
+    spawn_bg(async move {
+        pump_agent_events(event_state, events).await;
+    });
+
     let beat_state = state;
     spawn_bg(async move {
         let mut ticker = tokio::time::interval(HEARTBEAT_INTERVAL);
@@ -374,6 +381,28 @@ pub fn spawn_agent_tasks(state: AppState) {
             }
         }
     });
+}
+
+/// Protocol 1.2 pushes, one at a time and in order: a catalogue refresh must
+/// not overtake the sign-out that follows it, nor the other way round.
+async fn pump_agent_events(
+    state: AppState,
+    mut events: tokio::sync::broadcast::Receiver<crate::model::AgentEvent>,
+) {
+    use tokio::sync::broadcast::error::RecvError;
+
+    loop {
+        match events.recv().await {
+            Ok(event) => crate::commands::on_agent_event(&state, event).await,
+            Err(RecvError::Lagged(missed)) => {
+                // Rare. A lost `apps.changed` is cured by asking again; a lost
+                // `session.ended` shows up as the next call failing.
+                tracing::warn!(missed, "agent events were dropped; refreshing the catalogue");
+                crate::session::refresh_catalogue_quietly(&state).await;
+            }
+            Err(RecvError::Closed) => break,
+        }
+    }
 }
 
 async fn mirror_agent(state: AppState) {

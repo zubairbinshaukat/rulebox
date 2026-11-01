@@ -12,16 +12,20 @@ use rulebox_ipc::requests::{AdminExitSubmitParams, SignInParams, VerifyPasswordP
 use rulebox_ipc::envelope::ErrorCode;
 use rulebox_ipc::types::{AgentSnapshot, ClientInfo, ClientRole, HelloResult};
 use rulebox_ipc::{CAP_ADMIN_EXIT, CAP_APPS, CAP_SESSION};
-use tokio::sync::{mpsc, watch};
+use tokio::sync::{broadcast, mpsc, watch};
 
 use super::{AgentError, AgentPort};
 use crate::model::{
-    map_admin_exit_result, map_sign_in_result, map_verify_result, map_wire_app, AdminExitOutcome,
-    AgentLink, AppEntry, SignInOutcome, SignInRequest, VerifyOutcome,
+    map_admin_exit_result, map_client_event, map_sign_in_result, map_verify_result, map_wire_app,
+    AdminExitOutcome, AgentEvent, AgentLink, AppEntry, SignInOutcome, SignInRequest, VerifyOutcome,
 };
+
+/// Room for pushes nobody has read yet; they are rare (a burst is debounced by the agent).
+const EVENT_BACKLOG: usize = 16;
 
 struct Shared {
     client: IpcClient,
+    events_tx: broadcast::Sender<AgentEvent>,
     link_tx: watch::Sender<AgentLink>,
     link_rx: watch::Receiver<AgentLink>,
     snap_tx: watch::Sender<Option<AgentSnapshot>>,
@@ -53,6 +57,7 @@ impl IpcAgent {
         let (snap_tx, snap_rx) = watch::channel(None);
         let shared = Arc::new(Shared {
             client,
+            events_tx: broadcast::channel(EVENT_BACKLOG).0,
             link_tx,
             link_rx,
             snap_tx,
@@ -79,6 +84,12 @@ impl IpcAgent {
                     }
                     ClientEvent::ShuttingDown { .. } => {
                         // Banner wiring lands with session / boot steps.
+                    }
+                    ClientEvent::AppsChanged | ClientEvent::SessionEnded(_) => {
+                        if let Some(event) = map_client_event(&event) {
+                            // No receiver (before the shell starts listening) is fine.
+                            let _ = pump.events_tx.send(event);
+                        }
                     }
                 }
             }
@@ -186,6 +197,10 @@ impl AgentPort for IpcAgent {
             .lock()
             .map(|c| c.clone())
             .unwrap_or_default()
+    }
+
+    fn events(&self) -> broadcast::Receiver<AgentEvent> {
+        self.shared.events_tx.subscribe()
     }
 
     fn ready(&self) -> BoxFuture<'_, Result<(), AgentError>> {

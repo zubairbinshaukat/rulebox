@@ -43,6 +43,7 @@ export * from "./generated/KioskPhaseDto";
 export * from "./generated/NetworkDto";
 export * from "./generated/NoticeItem";
 export * from "./generated/NoticeTone";
+export * from "./generated/SessionEndedReason";
 export * from "./generated/SessionState";
 export * from "./generated/ShellModeDto";
 export * from "./generated/ShellState";
