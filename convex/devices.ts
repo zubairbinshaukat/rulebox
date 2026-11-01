@@ -302,13 +302,22 @@ export const heartbeat = phase2DeviceMutation({
  */
 export const ping = deviceMutation({
   args: {},
-  returns: v.object({ nextPingInMs: v.number(), planState, rotateCredential: v.boolean() }),
+  returns: v.object({
+    nextPingInMs: v.number(),
+    planState,
+    rotateCredential: v.boolean(),
+    // The server's clock (same field as `heartbeat`): the agent corrects its
+    // offset for audit timestamps and the server flags a wrong PC clock.
+    serverTimeMs: v.number(),
+  }),
   handler: async (ctx) => {
-    const contact = await recordContact(ctx, { deviceId: ctx.device._id, orgId: ctx.device.orgId }, Date.now());
+    const now = Date.now();
+    const contact = await recordContact(ctx, { deviceId: ctx.device._id, orgId: ctx.device.orgId }, now);
     return {
       nextPingInMs: contact.nextPingInMs,
       planState: planStateOf(ctx.device.state),
       rotateCredential: ctx.device.rotate,
+      serverTimeMs: now,
     };
   },
 });

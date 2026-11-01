@@ -4229,6 +4229,9 @@ before the new one is confirmed and saved.
 rulebox-ipc --features client,server` (69 + 12 + 1); `cargo clippy -p rulebox-agent -p
 rulebox-policy -p rulebox-ipc --all-targets --features rulebox-ipc/client,rulebox-ipc/server
 -- -D warnings` clean. Not verified: anything against a deployment, the Staff App, the VM.
+(10) **2026-11-01:** `devices:ping` now returns `serverTimeMs` (the server's `Date.now()`, same
+field as `heartbeat`; no new writes), so the agent's server-time offset and the server-side
+`clockSuspect` refresh again. Not deployed yet.
 
 ---
 

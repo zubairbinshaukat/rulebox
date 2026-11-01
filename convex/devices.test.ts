@@ -258,7 +258,8 @@ describe("liveness, presence by transitions, sweep (A3)", () => {
     const args = { deviceId, deviceSecret: SECRET };
 
     const same = await probe(() => t.mutation(api.devices.ping, args));
-    expect(same.result).toEqual({ nextPingInMs: DEFAULT_INTERVAL, planState: "ok", rotateCredential: false });
+    expect(same.result).toEqual({ nextPingInMs: DEFAULT_INTERVAL, planState: "ok", rotateCredential: false, serverTimeMs: start });
+    expect(typeof same.result.serverTimeMs).toBe("number");
     expect(same.io.writes).toBe(0);
     expect(same.io.reads).toBe(2); // credentials + liveness
     expect(same.io.readBytes).toBeLessThan(1_024);
