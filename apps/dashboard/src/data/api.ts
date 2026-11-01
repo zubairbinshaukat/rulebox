@@ -7,17 +7,18 @@ import type {
   AppDetail,
   AppOption,
   Audience,
-  AuditEntry,
   CheckResult,
   DesktopAppInput,
   DeviceDetail,
   DeviceLiveness,
   EmployeeDetail,
   EmployeeInput,
+  FailedInstallRow,
   FileTypesScreen,
   GroupDetail,
   GroupRow,
   Id,
+  InstallCounts,
   KeysScreen,
   MeResult,
   MembersScreen,
@@ -25,7 +26,6 @@ import type {
   MfaStatus,
   OrgSettings,
   OverviewScreen,
-  PagedState,
   PlanScreen,
   QueryState,
   Role,
@@ -63,8 +63,11 @@ export interface DataApi {
   useVerifyMfa: Mutation<{ code: string }>;
   useRedeemRecoveryCode: Mutation<{ code: string }>;
 
-  // ---- overview
-  useOverview: (nowMinute: number) => QueryState<OverviewScreen>;
+  // ---- overview. `overview:get` has no arguments: it re-runs on counter, presence and audit
+  // changes only, never on a ping.
+  useOverview: () => QueryState<OverviewScreen>;
+  /** `overview:failedInstalls` (the newest 20). Subscribed only while `enabled`, that is while the counter says there are some. */
+  useFailedInstalls: (enabled: boolean) => QueryState<FailedInstallRow[]>;
 
   // ---- devices (fleet:*). The two paginated lists (`useDevicesScreen`,
   // `useDeviceInstalls`) are in their own seam, `./devices`.
@@ -117,6 +120,8 @@ export interface DataApi {
   // ---- apps. The two paginated lists (`useAppsScreen`, `useAppInstalls`) are in
   // their own seam, `./apps`, like the device lists.
   useAppDetail: (appId: Id | "new") => QueryState<AppDetail>;
+  /** `apps:installSummary`: a query of its own (the counts change with every PC's report); only the install card subscribes. */
+  useAppInstallSummary: (appId: Id) => QueryState<InstallCounts>;
   /** `apps:options`: the apps a group may be given. Subscribed only while the assign dialog is open. */
   useAppOptions: () => QueryState<AppOption[]>;
   useCreateWebApp: Mutation<WebAppInput, Id>;
@@ -137,9 +142,7 @@ export interface DataApi {
 
   // ---- enrollment codes: their own seam (`enrollment/api.ts`), kept out of the first load.
 
-  // ---- audit
-  useAuditScreen: () => PagedState<AuditEntry>;
-  useHistory: (targetId: Id) => PagedState<AuditEntry>;
+  // ---- audit: the paginated screen and history lists are in their own seam, `./audit`.
 
   // ---- settings, signing keys, members
   useSettingsScreen: () => QueryState<SettingsScreen>;

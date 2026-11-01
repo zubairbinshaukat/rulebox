@@ -212,9 +212,15 @@ describe("device list (paginated)", () => {
     expect(result.current.status).toBe("loading");
   });
 
-  it("install results wait for Step 17: not_ready", () => {
+  it("install results are fleet:installs of that PC, paginated; skipped until the session is confirmed", () => {
+    cx.pageResults = [{ _id: "i1", appId: "a1", appName: "Docs", state: "failed", attempts: 3, updatedAt: 5 }];
+    cx.pageStatus = "Exhausted";
     const { result } = renderHook(() => liveDevicesApi.useDeviceInstalls("d1"));
-    expect(result.current.status === "error" && errorCodeOf(result.current.error)).toBe("not_ready");
+    expect(cx.paged.at(-1)).toEqual({ name: "fleet:installs", args: { deviceId: "d1" } });
+    expect(result.current).toMatchObject({ status: "ready", items: [{ _id: "i1", appName: "Docs", state: "failed" }], canLoadMore: false });
+    cx.auth = { isLoading: true, isAuthenticated: false };
+    renderHook(() => liveDevicesApi.useDeviceInstalls("d1"));
+    expect(cx.paged.at(-1)).toEqual({ name: "fleet:installs", args: "skip" });
   });
 });
 

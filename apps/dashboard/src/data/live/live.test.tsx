@@ -331,7 +331,7 @@ describe("step-up (data/stepup/live.ts)", () => {
 });
 
 describe("apps, assignments and file types (Step 10)", () => {
-  it("a new app asks the server for nothing; an existing one is apps:get with no install counts yet", () => {
+  it("a new app asks the server for nothing; an existing one is apps:get (the install counts are a query of their own)", () => {
     const fresh = renderHook(() => live.useAppDetail("new"));
     expect(fresh.result.current).toMatchObject({ status: "ready", data: { _id: "new", kind: "web", assignments: [] } });
     expect(cx.requests.flatMap((r) => Object.values(r))).toEqual([]);
@@ -340,7 +340,7 @@ describe("apps, assignments and file types (Step 10)", () => {
     const { result } = renderHook(() => live.useAppDetail("a1"));
     const req = Object.values(cx.requests.at(-1)!)[0] as { args: unknown };
     expect(req.args).toEqual({ appId: "a1" });
-    expect(result.current).toMatchObject({ status: "ready", data: { _id: "a1", revision: 2, installCounts: {} } });
+    expect(result.current).toMatchObject({ status: "ready", data: { _id: "a1", revision: 2 } });
   });
 
   it("writes go to their functions with the dashboard's arguments and errors keep their code", async () => {
@@ -385,10 +385,48 @@ describe("apps, assignments and file types (Step 10)", () => {
   });
 });
 
-describe("hooks without a backend step yet", () => {
-  it("still answer not_ready in live builds", () => {
-    const { result } = renderHook(() => live.useOverview(0));
-    expect(result.current.status).toBe("error");
-    if (result.current.status === "error") expect(errorCodeOf(result.current.error)).toBe("not_ready");
+describe("install status, overview, audit and history (Step 17)", () => {
+  const lastRequest = () => Object.values(cx.requests.at(-1)!)[0] as { query: FunctionReference<"query">; args: unknown };
+
+  it("the overview is overview:get with no arguments, passed through as it is", () => {
+    cx.queryResult = {
+      counts: { deviceCount: 3, employeeCount: 1, appCount: 2, groupCount: 1, noGroupDeviceCount: 1, outOfSupportCount: 0, failedInstallCount: 4 },
+      onlineCount: 2,
+      plan: { name: "free", status: "active", limits: {} },
+      signing: "active",
+      publishFailedAt: null,
+      recentAudit: [],
+    };
+    const { result } = renderHook(() => live.useOverview());
+    expect(getFunctionName(lastRequest().query)).toBe("overview:get");
+    expect(lastRequest().args).toEqual({});
+    expect(result.current).toEqual({ status: "ready", data: cx.queryResult });
+  });
+
+  it("the failed-installs list subscribes only while it is enabled; disabled it answers an empty list", () => {
+    cx.requests = [];
+    const off = renderHook(() => live.useFailedInstalls(false));
+    expect(off.result.current).toEqual({ status: "ready", data: [] });
+    expect(cx.requests.flatMap((r) => Object.values(r))).toEqual([]);
+    cx.queryResult = [{ _id: "i1", deviceId: "d1", deviceName: "PC", appId: "a1", appName: "Docs", updatedAt: 1 }];
+    const on = renderHook(() => live.useFailedInstalls(true));
+    expect(getFunctionName(lastRequest().query)).toBe("overview:failedInstalls");
+    expect(on.result.current).toEqual({ status: "ready", data: cx.queryResult });
+  });
+
+  it("the install summary is apps:installSummary; only the states that have PCs come back", () => {
+    cx.queryResult = { pending: 0, downloading: 0, installing: 0, installed: 12, failed: 1001, removing: 0, removed: 0, unsupported: 2 };
+    const { result } = renderHook(() => live.useAppInstallSummary("a1"));
+    expect(getFunctionName(lastRequest().query)).toBe("apps:installSummary");
+    expect(lastRequest().args).toEqual({ appId: "a1" });
+    expect(result.current).toEqual({ status: "ready", data: { installed: 12, failed: 1001, unsupported: 2 } });
+  });
+});
+
+describe("hooks that fail for want of a backend", () => {
+  it("a refused overview reads as an error with its code", () => {
+    cx.queryResult = new ConvexError({ code: "forbidden" });
+    const { result } = renderHook(() => live.useOverview());
+    expect(result.current.status === "error" && errorCodeOf(result.current.error)).toBe("forbidden");
   });
 });

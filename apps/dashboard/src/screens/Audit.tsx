@@ -2,7 +2,7 @@ import { useMemo } from "react";
 import { Button } from "@rulebox/ui";
 import IconHistory from "~icons/solar/history-linear";
 import IconPrinter from "~icons/solar/printer-minimalistic-linear";
-import { useAuditScreen } from "../data";
+import { useAuditScreen } from "../data/audit";
 import type { AuditEntry } from "../data/types";
 import { ActorLabel, TargetLink } from "../components/AuditItem";
 import { actionLabel } from "../lib/audit";

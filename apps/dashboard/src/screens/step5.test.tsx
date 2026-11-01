@@ -220,7 +220,7 @@ describe("Group detail (groups:get)", () => {
     apps: [{ assignmentId: "as1", appId: "a1", name: "Notepad", kind: "desktop", archived: false, audience: "everyone", pinnedTaskbar: true, pinnedDesktop: false }],
   });
 
-  it("admins can assign apps; the devices are live (Step 7), employees say 'Coming in a later step'", () => {
+  it("admins can assign apps; the devices (Step 7) and the history (Step 17) are live", () => {
     cx.results["groups:get"] = detail(0);
     cx.pages["fleet:list"] = [
       {
@@ -241,7 +241,7 @@ describe("Group detail (groups:get)", () => {
     expect(screen.getByText("Notepad")).toBeTruthy();
     expect(screen.getByRole("button", { name: strings.group.assign })).toBeTruthy();
     expect(screen.getByRole("link", { name: "Front desk" }).getAttribute("href")).toBe("/devices/d1");
-    expect(screen.getAllByText(strings.app.comingLater).length).toBeGreaterThanOrEqual(1);
+    expect(screen.getAllByText(strings.audit.historyNone).length).toBeGreaterThanOrEqual(1);
   });
 
   it("viewers see the assigned apps without the buttons", () => {

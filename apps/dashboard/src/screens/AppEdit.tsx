@@ -8,6 +8,7 @@ import IconArchive from "~icons/solar/archive-linear";
 import IconTrash from "~icons/solar/trash-bin-trash-linear";
 import {
   useAppDetail,
+  useAppInstallSummary,
   useAssignApp,
   useCreateDesktopApp,
   useCreateWebApp,
@@ -29,6 +30,7 @@ import {
   type Audience,
   type DesktopSource,
   type DesktopSpec,
+  type InstallCounts,
   type InstallState,
   type WebPermissions,
   type WingetResolved,
@@ -824,9 +826,21 @@ function AssignToGroup({ d, onClose }: { d: AppDetail; onClose: () => void }) {
   );
 }
 
+/** The install card: counts per state (`apps:installSummary`, a query of its own) and the PCs in the chosen state. */
 function InstallStatus({ d }: { d: AppDetail }) {
-  const present = INSTALL_STATES.filter((st) => (d.installCounts[st] ?? 0) > 0);
-  const [state, setState] = useState<InstallState>(present[0] ?? "installed");
+  const summary = useAppInstallSummary(d._id);
+  return (
+    <QueryRegion state={summary} skeleton={<Card title={s.installStatus} body="none"><SkeletonRows rows={3} columns={3} /></Card>}>
+      {(counts) => <InstallCard d={d} counts={counts} />}
+    </QueryRegion>
+  );
+}
+
+function InstallCard({ d, counts }: { d: AppDetail; counts: InstallCounts }) {
+  const present = INSTALL_STATES.filter((st) => (counts[st] ?? 0) > 0);
+  const [chosen, setState] = useState<InstallState>(present[0] ?? "installed");
+  // The chosen state may have emptied since (its last PC moved on): show the first that has PCs.
+  const state = present.includes(chosen) ? chosen : (present[0] ?? chosen);
   const retry = useRetryApp();
   const toast = useToast();
   const [retrying, setRetrying] = useState(false);
@@ -835,7 +849,7 @@ function InstallStatus({ d }: { d: AppDetail }) {
       title={s.installStatus}
       body="none"
       actions={
-        (d.installCounts.failed ?? 0) > 0 ? (
+        (counts.failed ?? 0) > 0 ? (
           <RoleGate minRole="admin">
             <Button
               variant="ghost"
@@ -870,7 +884,7 @@ function InstallStatus({ d }: { d: AppDetail }) {
             {present.map((st) => (
               <button key={st} type="button" className="dash-state-btn" aria-pressed={state === st} onClick={() => setState(st)}>
                 {strings.installState[st]}
-                <span className="dash-state-btn__count">{formatCount(d.installCounts[st] ?? 0, 1000)}</span>
+                <span className="dash-state-btn__count">{formatCount(counts[st] ?? 0, 1000)}</span>
               </button>
             ))}
           </div>

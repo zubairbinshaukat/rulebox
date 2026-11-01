@@ -7,10 +7,8 @@ import { useMemo } from "react";
 import { api } from "@convex/_generated/api";
 import { deviceRowOf } from "../live/devices";
 import { usePagedState } from "../live/convex";
-import { PAGE_SIZE, type DeviceRow } from "../types";
+import { PAGE_SIZE, type DeviceInstallRow, type DeviceRow } from "../types";
 import type { DevicesApi } from "./api";
-import { AppError } from "../../lib/errors";
-import { NOT_DEPLOYED } from "../api";
 
 export const liveDevicesApi: DevicesApi = {
   useDevicesScreen({ groupId, search }) {
@@ -21,9 +19,10 @@ export const liveDevicesApi: DevicesApi = {
     const results = useMemo(() => r.results.map(deviceRowOf), [r.results]);
     return usePagedState({ ...r, results } as UsePaginatedQueryResult<DeviceRow>, PAGE_SIZE);
   },
-  // Install results arrive with Step 17 (`fleet:installs`); until then the card says so.
-  useDeviceInstalls() {
-    return { status: "error", error: new AppError({ code: "not_ready", detail: NOT_DEPLOYED }), retry: () => undefined };
+  useDeviceInstalls(deviceId) {
+    const { isAuthenticated } = useConvexAuth();
+    const r = usePaginatedQuery(api.fleet.installs, isAuthenticated ? { deviceId } : "skip", { initialNumItems: PAGE_SIZE });
+    return usePagedState(r as UsePaginatedQueryResult<DeviceInstallRow>, PAGE_SIZE);
   },
 };
 

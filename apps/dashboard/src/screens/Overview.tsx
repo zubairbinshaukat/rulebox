@@ -14,7 +14,7 @@ import IconAdd from "~icons/solar/add-square-linear";
 import IconUserPlus from "~icons/solar/user-plus-rounded-linear";
 import IconWidgetAdd from "~icons/solar/widget-add-linear";
 import IconRight from "~icons/solar/alt-arrow-right-linear";
-import { useOverview } from "../data";
+import { useFailedInstalls, useOverview } from "../data";
 import type { OverviewScreen } from "../data/types";
 import { AuditTimelineItem } from "../components/AuditItem";
 import { Card } from "../components/Card";
@@ -26,9 +26,8 @@ import { RelativeTime } from "../components/RelativeTime";
 import { RoleGate } from "../components/RoleGate";
 import { SkeletonRows, SkeletonStats } from "../components/Skeleton";
 import { formatCount } from "../lib/format";
-import { onlineWindowMs } from "../lib/online";
 import { strings } from "../lib/strings";
-import { minuteOf, useNow } from "../lib/useNow";
+import { useNow } from "../lib/useNow";
 
 const s = strings.overview;
 type Icon = ComponentType<SVGProps<SVGSVGElement>>;
@@ -42,24 +41,44 @@ interface Attention {
   action?: { to: string; label: string };
 }
 
+/** A limit this large means "no limit" (`UNLIMITED` of convex/lib/plans.ts): never a banner. */
+const NO_LIMIT = 1_000_000;
+
+const LIMITED = [
+  { kind: "devices", count: (c: OverviewScreen["counts"]) => c.deviceCount, max: (l: OverviewScreen["plan"]["limits"]) => l.maxDevices },
+  { kind: "employees", count: (c: OverviewScreen["counts"]) => c.employeeCount, max: (l: OverviewScreen["plan"]["limits"]) => l.maxEmployees },
+  { kind: "apps", count: (c: OverviewScreen["counts"]) => c.appCount, max: (l: OverviewScreen["plan"]["limits"]) => l.maxApps },
+  { kind: "groups", count: (c: OverviewScreen["counts"]) => c.groupCount, max: (l: OverviewScreen["plan"]["limits"]) => l.maxGroups },
+] as const;
+
 function attentionOf(o: OverviewScreen): Attention[] {
   const out: Attention[] = [];
-  if (o.signing.state === "none") {
+  const c = o.counts;
+  if (o.signing === "none") {
     out.push({ key: "key", icon: IconKey, tone: "danger", title: s.noKeyTitle, detail: s.noKeyDetail, action: { to: "/settings?tab=signing", label: s.noKeyAction } });
-  } else if (o.signing.state === "rotating") {
+  } else if (o.signing === "rotating") {
     out.push({ key: "rot", icon: IconKey, tone: "accent", title: s.rotatingTitle, detail: s.rotatingDetail, action: { to: "/settings?tab=signing", label: strings.common.open } });
   }
-  if (o.publishFailedAt) {
-    out.push({ key: "pub", icon: IconDanger, tone: "danger", title: s.publishFailedTitle, detail: s.publishFailedDetail, action: { to: "/audit", label: strings.app.nav.audit } });
+  if (o.publishFailedAt !== null) {
+    out.push({ key: "pub", icon: IconDanger, tone: "danger", title: s.publishFailedTitle, detail: s.publishFailedDetail, action: { to: "/settings?tab=signing", label: strings.common.open } });
   }
-  if (o.devicesWithoutGroup > 0) {
-    out.push({ key: "grp", icon: IconLayers, tone: "warning", title: s.noGroupTitle(o.devicesWithoutGroup), detail: s.noGroupDetail, action: { to: "/devices", label: s.noGroupAction } });
+  if (o.plan.status !== "active") {
+    out.push({ key: "susp", icon: IconDanger, tone: "danger", title: s.suspendedTitle, detail: s.suspendedDetail });
   }
-  if (o.deviceCount > 300) {
+  for (const l of LIMITED) {
+    const max = l.max(o.plan.limits);
+    if (max < NO_LIMIT && l.count(c) >= max) {
+      out.push({ key: `limit-${l.kind}`, icon: IconWarn, tone: "warning", title: s.limitTitle(s.limitKinds[l.kind]), detail: s.limitDetail });
+    }
+  }
+  if (c.noGroupDeviceCount > 0) {
+    out.push({ key: "grp", icon: IconLayers, tone: "warning", title: s.noGroupTitle(c.noGroupDeviceCount), detail: s.noGroupDetail, action: { to: "/devices", label: s.noGroupAction } });
+  }
+  if (c.deviceCount > 300) {
     out.push({ key: "big", icon: IconWarn, tone: "warning", title: s.largeFleetTitle, detail: s.largeFleetDetail });
   }
-  if (o.deviceCount > 0) {
-    out.push({ key: "oos", icon: IconShield, tone: "accent", title: s.outOfSupportTitle, detail: s.outOfSupportDetail, action: { to: "/devices", label: s.noGroupAction } });
+  if (c.outOfSupportCount > 0) {
+    out.push({ key: "oos", icon: IconShield, tone: "accent", title: s.outOfSupportTitle(c.outOfSupportCount), detail: s.outOfSupportDetail, action: { to: "/devices", label: s.outOfSupportAction } });
   }
   return out;
 }
@@ -82,15 +101,66 @@ function Stat({ to, icon: I, value, label, hint }: { to: string; icon: Icon; val
   );
 }
 
-/** `overview:get`: totals, attention list, failed installs, recent activity. */
+/**
+ * The failed-installs card. Its list (`overview:failedInstalls`) is subscribed
+ * only while the counter of `overview:get` says something failed, so an
+ * organization with nothing failed never reads an install result.
+ */
+function FailedInstalls({ count }: { count: number }) {
+  const failed = useFailedInstalls(count > 0);
+  return (
+    <Card title={s.failedInstalls} body="flush" actions={count > 0 ? <span className="dash-chip">{formatCount(count, 999)}</span> : null}>
+      {count === 0 ? (
+        <EmptyState compact icon={<IconCheck />} title={s.failedInstallsNone} />
+      ) : (
+        <QueryRegion state={failed} skeleton={<SkeletonRows rows={3} columns={2} />}>
+          {(rows) =>
+            rows.length === 0 ? (
+              <EmptyState compact icon={<IconCheck />} title={s.failedInstallsNone} />
+            ) : (
+              <>
+                <ul className="dash-list">
+                  {rows.map((f) => (
+                    <li key={f._id} className="dash-list__item">
+                      <span className="dash-list__icon dash-list__icon--danger" aria-hidden="true">
+                        <IconDanger />
+                      </span>
+                      <div className="dash-list__body">
+                        <p className="dash-list__title dash-truncate">
+                          <Link className="dash-link dash-link--plain" to={`/apps/${f.appId}`}>
+                            {f.appName}
+                          </Link>{" "}
+                          <span className="dash-muted">·</span>{" "}
+                          <Link className="dash-link" to={`/devices/${f.deviceId}`}>
+                            {f.deviceName}
+                          </Link>
+                        </p>
+                        <p className="dash-list__meta">
+                          {installDetail(f.detail)} · <RelativeTime ms={f.updatedAt} />
+                        </p>
+                      </div>
+                    </li>
+                  ))}
+                </ul>
+                {count > rows.length ? <p className="dash-list__meta" style={{ padding: "10px clamp(16px, 2vw, 22px)" }}>{s.failedInstallsShown(rows.length, count)}</p> : null}
+              </>
+            )
+          }
+        </QueryRegion>
+      )}
+    </Card>
+  );
+}
+
+/** `overview:get`: totals, attention list, recent activity; the failed installs are their own card. */
 export default function Overview() {
-  const now = useNow(30_000);
-  const overview = useOverview(minuteOf(now));
+  const now = useNow(60_000);
+  const overview = useOverview();
 
   const lead = (() => {
     if (overview.status !== "ready") return undefined;
     const o = overview.data;
-    const urgent = attentionOf(o).filter((a) => a.tone !== "accent").length + (o.failedInstalls.length > 0 ? 1 : 0);
+    const urgent = attentionOf(o).filter((a) => a.tone !== "accent").length + (o.counts.failedInstallCount > 0 ? 1 : 0);
     return urgent ? s.leadAttention(urgent) : s.leadCalm;
   })();
 
@@ -125,16 +195,10 @@ export default function Overview() {
           return (
             <>
               <div className="dash-stats">
-                <Stat to="/devices" icon={IconMonitor} value={formatCount(o.deviceCount)} label={s.devices} />
-                <Stat
-                  to="/devices"
-                  icon={IconPulse}
-                  value={formatCount(o.seenRecently, 1000)}
-                  label={s.seenRecently}
-                  hint={s.seenRecentlyHint(onlineWindowMs(o.pingIntervalMs))}
-                />
-                <Stat to="/employees" icon={IconUsers} value={formatCount(o.employeeCount)} label={s.employees} />
-                <Stat to="/apps" icon={IconWidget} value={formatCount(o.appCount)} label={s.apps} hint={strings.counts.groups(o.groupCount)} />
+                <Stat to="/devices" icon={IconMonitor} value={formatCount(o.counts.deviceCount)} label={s.devices} />
+                <Stat to="/devices" icon={IconPulse} value={formatCount(o.onlineCount)} label={s.online} hint={s.onlineOf(o.counts.deviceCount)} />
+                <Stat to="/employees" icon={IconUsers} value={formatCount(o.counts.employeeCount)} label={s.employees} />
+                <Stat to="/apps" icon={IconWidget} value={formatCount(o.counts.appCount)} label={s.apps} hint={strings.counts.groups(o.counts.groupCount)} />
               </div>
 
               <div className="dash-grid dash-grid--main">
@@ -164,35 +228,7 @@ export default function Overview() {
                     )}
                   </Card>
 
-                  <Card title={s.failedInstalls} body="flush" actions={o.failedInstalls.length ? <span className="dash-chip">{formatCount(o.failedInstalls.length, 19)}</span> : null}>
-                    {o.failedInstalls.length === 0 ? (
-                      <EmptyState compact icon={<IconCheck />} title={s.failedInstallsNone} />
-                    ) : (
-                      <ul className="dash-list">
-                        {o.failedInstalls.map((f) => (
-                          <li key={f._id} className="dash-list__item">
-                            <span className="dash-list__icon dash-list__icon--danger" aria-hidden="true">
-                              <IconDanger />
-                            </span>
-                            <div className="dash-list__body">
-                              <p className="dash-list__title dash-truncate">
-                                <Link className="dash-link dash-link--plain" to={`/apps/${f.appId}`}>
-                                  {f.appName}
-                                </Link>{" "}
-                                <span className="dash-muted">·</span>{" "}
-                                <Link className="dash-link" to={`/devices/${f.deviceId}`}>
-                                  {f.deviceName}
-                                </Link>
-                              </p>
-                              <p className="dash-list__meta">
-                                {installDetail(f.detail)} · <RelativeTime ms={f.updatedAt} />
-                              </p>
-                            </div>
-                          </li>
-                        ))}
-                      </ul>
-                    )}
-                  </Card>
+                  <FailedInstalls count={o.counts.failedInstallCount} />
                 </div>
 
                 <Card

@@ -4,10 +4,8 @@
  */
 import { useConvexAuth, usePaginatedQuery, type UsePaginatedQueryResult } from "convex/react";
 import { api } from "@convex/_generated/api";
-import { AppError } from "../../lib/errors";
-import { NOT_DEPLOYED } from "../api";
 import { usePagedState } from "../live/convex";
-import { PAGE_SIZE, type AppRow } from "../types";
+import { PAGE_SIZE, type AppInstallRow, type AppRow } from "../types";
 import type { AppsApi } from "./api";
 
 export const liveAppsApi: AppsApi = {
@@ -16,9 +14,10 @@ export const liveAppsApi: AppsApi = {
     const r = usePaginatedQuery(api.apps.list, isAuthenticated ? { archived } : "skip", { initialNumItems: PAGE_SIZE });
     return usePagedState(r as UsePaginatedQueryResult<AppRow>, PAGE_SIZE);
   },
-  // Install results arrive with Step 17 (`apps:installs`); until then the card says so.
-  useAppInstalls() {
-    return { status: "error", error: new AppError({ code: "not_ready", detail: NOT_DEPLOYED }), retry: () => undefined };
+  useAppInstalls(appId, state) {
+    const { isAuthenticated } = useConvexAuth();
+    const r = usePaginatedQuery(api.apps.installs, isAuthenticated ? { appId, state } : "skip", { initialNumItems: PAGE_SIZE });
+    return usePagedState(r as UsePaginatedQueryResult<AppInstallRow>, PAGE_SIZE);
   },
 };
 

@@ -1,4 +1,4 @@
-import { useHistory } from "../data";
+import { useHistory } from "../data/audit";
 import type { Id } from "../data/types";
 import { strings } from "../lib/strings";
 import { AuditTimelineItem } from "./AuditItem";

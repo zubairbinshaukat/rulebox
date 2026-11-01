@@ -7,6 +7,7 @@
 import { useCallback, useEffect, useState } from "react";
 import type { DataApi } from "../api";
 import type { AppsApi } from "../apps/api";
+import type { AuditApi } from "../audit/api";
 import type { DevicesApi } from "../devices/api";
 import type { EmployeesApi } from "../employees/api";
 import type { EnrollmentApi } from "../enrollment/api";
@@ -30,6 +31,7 @@ import {
   type EmployeeRow,
   type EnrollmentCodeRow,
   type GroupOption,
+  type InstallCounts,
   type InstallState,
   type InstallSummary,
   type Me,
@@ -447,13 +449,36 @@ export const demoApi: DataApi = {
   },
 
   // ---- overview
-  useOverview(nowMinute) {
-    return useDemoQuery(`overview:get:${nowMinute}`, (db): OverviewScreen => {
+  useOverview() {
+    return useDemoQuery("overview:get", (db): OverviewScreen => {
       requireReader();
-      const window = 2.5 * db.pingIntervalMs + MIN;
-      let seen = 0;
-      for (const t of db.lastSeen.values()) if (nowMinute - t <= window) seen++;
-      const failed = db.installs
+      const live = db.devices.filter((d) => !d.revoked);
+      const active = db.keys.some((k) => k.status === "active");
+      const next = db.keys.some((k) => k.status === "next");
+      return {
+        counts: {
+          deviceCount: live.length,
+          employeeCount: db.employees.length,
+          appCount: db.apps.filter((a) => !a.archived).length,
+          groupCount: db.groups.length,
+          noGroupDeviceCount: live.filter((d) => !d.groupId).length,
+          outOfSupportCount: live.filter((d) => db.reports.get(d._id)?.outOfSupport === true).length,
+          failedInstallCount: db.installs.filter((i) => i.state === "failed").length,
+        },
+        onlineCount: live.filter((d) => db.onlineIds.has(d._id)).length,
+        plan: { name: db.org.plan.plan, status: db.org.plan.status, limits: db.org.plan.limits },
+        signing: !active ? "none" : next ? "rotating" : "active",
+        publishFailedAt: db.publishFailedAt ?? null,
+        recentAudit: [...db.audit].sort(byNewest).slice(0, 10).map(auditEntry),
+      };
+    });
+  },
+
+  useFailedInstalls(enabled) {
+    return useDemoQuery(`overview:failedInstalls:${enabled}`, (db) => {
+      requireReader();
+      if (!enabled) return [];
+      return db.installs
         .filter((i) => i.state === "failed")
         .sort((a, b) => b.updatedAt - a.updatedAt)
         .slice(0, 20)
@@ -466,23 +491,6 @@ export const demoApi: DataApi = {
           detail: i.detail,
           updatedAt: i.updatedAt,
         }));
-      const recent = [...db.audit].sort(byNewest);
-      const publishFailed = recent.slice(0, 50).find((e) => e.action === "policy.publishFailed" && nowMinute - e.at < DAY);
-      const active = db.keys.find((k) => k.status === "active");
-      const next = db.keys.find((k) => k.status === "next");
-      return {
-        deviceCount: db.devices.length,
-        pingIntervalMs: db.pingIntervalMs,
-        seenRecently: Math.min(seen, 1001),
-        devicesWithoutGroup: Math.min(db.devices.filter((d) => !d.groupId && !d.revoked).length, 101),
-        groupCount: db.groups.length,
-        employeeCount: db.employees.length,
-        appCount: db.apps.filter((a) => !a.archived).length,
-        failedInstalls: failed,
-        recentAudit: recent.slice(0, 10).map(auditEntry),
-        signing: active ? { state: next ? "rotating" : "active", keyId: active.keyId } : { state: "none" },
-        publishFailedAt: publishFailed?.at,
-      };
     });
   },
 
@@ -1075,16 +1083,10 @@ export const demoApi: DataApi = {
           assignments: [],
           fileTypes: [],
           directEmployeeCount: 0,
-          installCounts: {},
           groupOptions: groupOptions(db),
         };
       }
       const a = find(db.apps, appId);
-      const counts: Partial<Record<InstallState, number>> = {};
-      for (const s of INSTALL_STATES) {
-        const c = db.installs.filter((i) => i.appId === a._id && i.state === s).length;
-        if (c) counts[s] = Math.min(c, 1001);
-      }
       return {
         _id: a._id,
         name: a.name,
@@ -1100,9 +1102,21 @@ export const demoApi: DataApi = {
         assignments: db.assignments.filter((x) => x.appId === a._id).map((x) => assignmentRow(db, x)),
         fileTypes: db.fileHandlers.filter((f) => f.appId === a._id).map((f) => f.extension).sort(),
         directEmployeeCount: Math.min(db.employeeApps.filter((m) => m.appId === a._id).length, 1001),
-        installCounts: counts,
         groupOptions: groupOptions(db),
       };
+    });
+  },
+
+  useAppInstallSummary(appId) {
+    return useDemoQuery(`apps:installSummary:${appId}`, (db): InstallCounts => {
+      requireReader();
+      const a = find(db.apps, appId);
+      const counts: InstallCounts = {};
+      for (const s of INSTALL_STATES) {
+        const c = db.installs.filter((i) => i.appId === a._id && i.state === s).length;
+        if (c) counts[s] = Math.min(c, 1001);
+      }
+      return counts;
     });
   },
 
@@ -1358,21 +1372,6 @@ export const demoApi: DataApi = {
         }),
       [],
     );
-  },
-
-  // ---- audit
-  useAuditScreen() {
-    return useDemoPaged("audit:list", (db) => {
-      requireReader();
-      return [...db.audit].sort(byNewest).map(auditEntry);
-    });
-  },
-
-  useHistory(targetId) {
-    return useDemoPaged(`audit:forTarget:${targetId}`, (db) => {
-      requireReader();
-      return db.audit.filter((e) => e.targetId === targetId).sort(byNewest).map(auditEntry);
-    });
   },
 
   // ---- settings
@@ -1803,6 +1802,23 @@ export const demoEnrollmentApi: EnrollmentApi = {
 
 /** Resolved through the `@rulebox/data-impl` alias in demo builds. */
 export const dataApi = demoApi;
+
+/** Audit lists: their own seam (data/audit), re-exported by data/audit/demo.ts. */
+export const demoAuditApi: AuditApi = {
+  useAuditScreen() {
+    return useDemoPaged("audit:list", (db) => {
+      requireReader();
+      return [...db.audit].sort(byNewest).map(auditEntry);
+    });
+  },
+
+  useHistory(targetId) {
+    return useDemoPaged(`audit:forTarget:${targetId}`, (db) => {
+      requireReader();
+      return db.audit.filter((e) => e.targetId === targetId).sort(byNewest).map(auditEntry);
+    });
+  },
+};
 
 /** App lists: their own seam (data/apps), re-exported by data/apps/demo.ts. */
 export const demoAppsApi: AppsApi = {

@@ -588,6 +588,9 @@ export interface DesktopSpec {
   resetFolders: string[];
 }
 
+/** `apps:installSummary`: PCs per install state, each capped at 1001 ("1000+"); a state without PCs is absent. */
+export type InstallCounts = Partial<Record<InstallState, number>>;
+
 export interface InstallSummary {
   installed: number;
   failed: number;
@@ -634,8 +637,6 @@ export interface AppDetail {
   assignments: (AssignmentRow & { groupId: Id; groupName: string })[];
   fileTypes: string[];
   directEmployeeCount: number;
-  /** `apps:installSummary`: counts per state, each capped at 1001 ("1000+"). */
-  installCounts: Partial<Record<InstallState, number>>;
   groupOptions: GroupOption[];
 }
 
@@ -734,19 +735,27 @@ export interface FailedInstallRow {
   updatedAt: number;
 }
 
-/** `overview:get({ nowMs })` */
-export interface OverviewScreen {
+/** `overview:get`: the counters row (`orgStats`), never a list. */
+export interface OverviewCounts {
   deviceCount: number;
-  pingIntervalMs: number;
-  /** `.take(1001)` → show "1000+" above 1000. */
-  seenRecently: number;
-  /** `.take(101)` → "100+". */
-  devicesWithoutGroup: number;
-  groupCount: number;
   employeeCount: number;
   appCount: number;
-  failedInstalls: FailedInstallRow[];
+  groupCount: number;
+  noGroupDeviceCount: number;
+  outOfSupportCount: number;
+  failedInstallCount: number;
+}
+
+/** The state of the organization's signing keys ("none" = no active key, "rotating" = a next key is prepared). */
+export type OverviewSigning = "none" | "active" | "rotating";
+
+/** `overview:get` (no arguments): one small query that never re-runs on a ping. */
+export interface OverviewScreen {
+  counts: OverviewCounts;
+  /** The sum of the `orgPresence` shards: PCs online now. */
+  onlineCount: number;
+  plan: { name: PlanName; status: PlanStatus; limits: PlanLimits };
+  signing: OverviewSigning;
+  publishFailedAt: number | null;
   recentAudit: AuditEntry[];
-  signing: { state: "none" | "active" | "rotating"; keyId?: string };
-  publishFailedAt?: number;
 }

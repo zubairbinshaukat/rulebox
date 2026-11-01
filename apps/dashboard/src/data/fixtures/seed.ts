@@ -223,6 +223,8 @@ export interface DemoDb {
   installs: DbInstall[];
   audit: DbAudit[];
   keys: DbKey[];
+  /** `orgStats.publishFailedAt`: set while the last publish failed for want of a key; undefined = it works. */
+  publishFailedAt?: number;
   env: { key: boolean; next: boolean };
   nextId: number;
 }

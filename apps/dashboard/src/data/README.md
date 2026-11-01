@@ -12,10 +12,12 @@ satisfy the same `DataApi` type (`api.ts`):
   and groups since Step 5; enrollment codes since Step 6, the device
   lists since Step 7, the app lists since Step 10 and the employee list since Step 11 (each in its own
   seam, see below); apps, assignments and file types since Step 10; employees and group members since
-  Step 11; every other hook answers `not_ready` with the
-  detail `NOT_DEPLOYED` (`api.ts`), which a region shows as "Coming in a
-  later step", until its Convex step lands. `live/convex.ts` holds the
-  adapters (`useMemberQuery`, `useMapped`, `mapError`).
+  Step 11; install status, the overview, the audit log and history since
+  Step 17 (the audit lists in their own seam, `audit/`). Every hook is live; a
+  hook whose Convex step has not landed answers `not_ready` with the detail
+  `NOT_DEPLOYED` (`api.ts`), which a region shows as "Coming in a later step"
+  (no hook uses that now). `live/convex.ts` holds the adapters
+  (`useMemberQuery`, `useMapped`, `mapError`).
 
 All shapes live in `types.ts` and use the field names of plan Section 4.2.
 
@@ -53,8 +55,7 @@ Replace the hook body in `live/hooks.ts`; screens do not change.
 
 ## Hook → Convex function
 
-Status: **live** = wired in `live/hooks.ts`; everything else answers
-`not_ready` in live builds until its step lands.
+Status: **live** = wired in `live/hooks.ts` (or in the hook's own seam).
 
 | Hook | Convex | Status |
 |---|---|---|
@@ -66,7 +67,8 @@ Status: **live** = wired in `live/hooks.ts`; everything else answers
 | `useMfaStatus` | `api.mfa.status` (query) | live |
 | `useBeginMfaSetup` / `useConfirmMfaSetup` | `useAction(api.mfa.beginSetup)` → `{ secret, uri }` / `useAction(api.mfa.confirmSetup)` → `string[]` (recovery codes, once) | live |
 | `useVerifyMfa` / `useRedeemRecoveryCode` | `useAction(api.mfa.verify)` / `useAction(api.mfa.useRecoveryCode)` (**actions**, so the lockout counter commits) | live |
-| `useOverview(nowMinute)` | `api.overview.get({ nowMs })` |
+| `useOverview` | `api.overview.get` (no arguments: the `orgStats` counters, the sum of the `orgPresence` shards as `onlineCount`, the plan, the key state, `publishFailedAt` and the newest 10 audit rows; about 25 documents; re-runs on counter, presence and audit changes, never on a ping) | live |
+| `useFailedInstalls(enabled)` | `api.overview.failedInstalls` (the newest 20 failed results with PC and app names). Subscribed only while `enabled`, that is while `failedInstallCount` is above zero; disabled it answers an empty list without a subscription | live |
 | `useDevicesScreen({ groupId, search })` | `usePaginatedQuery(api.fleet.list, { groupId?, search? })` (50 per page; search is an argument of the same query, at most 100 characters; `groupId` must be a real group id, there is no "no group" filter). `presence` (`{ online, since, revoked }`) is on every `DeviceRow`, so there is no separate live-status query. In `data/devices/` | live |
 | `useDeviceDetail` | `api.fleet.get` (`DeviceDetail` has `presence` too) | live |
 | `useDeviceLiveness(id)` | `api.fleet.liveness({ deviceId })` → `{ lastContactAt, online, fastUntil }`; the detail screen calls it next to `useDeviceDetail`, not inside the loaded page | live |
@@ -85,14 +87,16 @@ Status: **live** = wired in `live/hooks.ts`; everything else answers
 | `useUpdateEmployee` | `api.employees.save`: profile, groups and direct apps in one transaction with one revision check (all stored or none; a part that changes nothing writes nothing). Resolves to `{ revision }`, which the form sends next | live |
 | `useSetEmployeePassword` / `useSetEmployeeDisabled` / `useUnlockEmployee` / `useDeleteEmployee` | `useAction(api.employees.setPassword)` (300 per hour per organization) / `setDisabled` / `unlock` / `remove` (major: fresh step-up; `invalid_argument` field `disabled` while the employee is active) | live |
 | `useAppsScreen({ archived })` | `usePaginatedQuery(api.apps.list, { archived })` (50 per page, newest first; per row a group count capped at 101 and the icon address, never install results). In `data/apps/` | live |
-| `useAppDetail(id \| "new")` | `api.apps.get` (`"new"` subscribes to nothing and answers a constant form). `installCounts` is `{}` until Step 17 (`apps:installSummary`) | live |
+| `useAppDetail(id \| "new")` | `api.apps.get` (`"new"` subscribes to nothing and answers a constant form). The install counts are not in it (`useAppInstallSummary`) | live |
+| `useAppInstallSummary(appId)` | `api.apps.installSummary`: PCs per install state, each counted up to 1,001 ("1000+"), mapped to the states that have PCs. A query of its own: the counts change with every PC's report, so `apps:get` must not carry them; only the install card subscribes | live |
 | `useAppOptions` | `api.apps.options` (non-archived apps, at most 500): the group page's assign dialog, subscribed only while it is open | live |
-| `useAppInstalls(appId, state)` | `api.apps.installs` (paginated, Step 17). In `data/apps/` | `not_ready` |
+| `useAppInstalls(appId, state)` | `usePaginatedQuery(api.apps.installs, { appId, state })` (50 per page, newest first, with the device names). In `data/apps/` | live |
 | `useCreateWebApp` / `useCreateDesktopApp` / `useUpdateApp` | `api.apps.createWeb` / `createDesktop` / `update` (`expectedRevision`; `invalid_argument` names the field, e.g. `url`, `exe`, `install.sha256`; `plan_limit` detail `apps`) | live |
 | `useSetAppArchived` / `useDeleteApp` / `useRetryApp` | `api.apps.setArchived` (optimistic on `apps:get`) / `remove` (major: fresh step-up; `has_dependents` detail `groups, file types`) / `retry` | live |
 | `useResolveWinget` / `useFetchWebMeta` | `useAction(api.apps.resolveWinget)` (`winget_unsupported` detail = the reason, `winget_unreachable`) / `useAction(api.apps.fetchWebMeta)` → `{ name?, hue?, iconPreviewUrl? }` (`webmeta_failed`) | live |
 | `useSaveAppIcon` | `useAction(api.apps.saveIcon)`: the `data:` URL `useFetchWebMeta` previewed, sent after the app is saved | live |
-| `useFileTypesScreen` / `useSetFileHandler` / `useRemoveFileHandler` | `api.fileHandlers.list` / `set` (`invalid_argument` field `extension` detail `format` or `denied`; field `app`) / `remove` (major) | live || `useAuditScreen` / `useHistory(targetId)` | `api.audit.list` / `api.audit.forTarget` (paginated) |
+| `useFileTypesScreen` / `useSetFileHandler` / `useRemoveFileHandler` | `api.fileHandlers.list` / `set` (`invalid_argument` field `extension` detail `format` or `denied`; field `app`) / `remove` (major) | live |
+| `useAuditScreen` / `useHistory(targetId)` | `usePaginatedQuery(api.audit.list, {})` (50 per page) / `usePaginatedQuery(api.audit.forTarget, { targetId })` (10, then 10 per click), newest first. In `data/audit/` | live |
 | `useSettingsScreen` / `useUpdateSettings` | `api.settings.get` (`exitPin: { set, setAt }`) / `api.settings.update` → `{ revision, changed }` (fresh step-up when `adminExit` changes; `invalid_argument` field `adminExit.hotkey` with the grammar rule in `detail`) | live |
 | `usePlan` | `api.settings.plan` (plan, status, limits, usage); Settings → Organization and the "New group" dialog | live |
 | `useSetExitPin` / `useClearExitPin` | `useAction(api.settings.setExitPin)` (major; `invalid_argument` field `pin`, `detail` the rule) / `api.settings.clearExitPin` (major) | live |
@@ -135,6 +139,13 @@ The same pattern a fourth time: `AppsApi` in `apps/api.ts`, `apps/live.ts`, demo
 (`vite.config.ts` and the `paths` entry in `tsconfig.json`; `vite.config.ts` keeps the folder out of
 the `core` chunk). It holds `useAppsScreen` and `useAppInstalls`, imported only by the lazy Apps and
 App screens.
+
+## Audit-list hooks (`data/audit/`, plan Step 17)
+
+The same pattern a sixth time: `AuditApi` in `audit/api.ts`, `audit/live.ts`, the demo hooks in `demo/hooks.ts`
+re-exported by `audit/demo.ts`, picked by the `@rulebox/audit-impl` alias (`vite.config.ts` and the `paths` entry in
+`tsconfig.json`; `vite.config.ts` keeps the folder out of the `core` chunk). It holds `useAuditScreen` and
+`useHistory`, imported only by the lazy Audit screen and by `HistoryPanel` (the device, employee, app and group pages).
 
 ## Employee-list hook (`data/employees/`, plan Step 11)
 

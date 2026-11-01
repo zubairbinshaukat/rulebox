@@ -3,9 +3,10 @@
  * and members are wired to the Phase 4 Step 3 functions (Step 4); settings,
  * the plan and groups to Step 5's (enrollment codes, Step 6: `../enrollment/`;
  * devices, Step 7: here and `../devices/`; signing keys, Step 8; apps,
- * assignments and file types, Step 10: here and `../apps/`). Every other
- * hook answers `not_ready` until its Convex step lands — see `../README.md`
- * for the exact function per hook.
+ * assignments and file types, Step 10: here and `../apps/`; employees,
+ * Step 11: here and `../employees/`; install status, overview, audit and
+ * history, Step 17: here and `../audit/`). See `../README.md` for the exact
+ * function per hook.
  */
 import { useAuthActions as useConvexAuthActions } from "@convex-dev/auth/react";
 import {
@@ -20,23 +21,15 @@ import {
 import { makeFunctionReference } from "convex/server";
 import { useCallback, useMemo, useState } from "react";
 import { api } from "@convex/_generated/api";
-import { NOT_DEPLOYED, type DataApi } from "../api";
-import { AppError } from "../../lib/errors";
-import { cappedNumber, type Audience, type KeysScreen, type MeResult, type PagedState, type QueryState, type Role } from "../types";
-import { appDetailOf, NEW_APP } from "./apps";
+import type { DataApi } from "../api";
+import { cappedNumber, type Audience, type FailedInstallRow, type KeysScreen, type MeResult, type QueryState, type Role } from "../types";
+import { appDetailOf, installCountsOf, NEW_APP } from "./apps";
 import { deviceDetailOf } from "./devices";
 import { employeeDetailOf, newEmployeeOf } from "./employees";
 import { mapError, useMapped, useMappedState, useMemberQuery } from "./convex";
 
-const notReady = () => new AppError({ code: "not_ready", detail: NOT_DEPLOYED });
-
-function useNotReady<T>(): QueryState<T> {
-  return { status: "error", error: notReady(), retry: () => undefined };
-}
-
-function useNotReadyPaged<T>(): PagedState<T> {
-  return { status: "error", error: notReady(), retry: () => undefined };
-}
+/** What the overview shows while it does not subscribe to the failed-installs list (nothing failed). */
+const EMPTY_FAILED: QueryState<FailedInstallRow[]> = { status: "ready", data: [] };
 
 /** Convex Auth sign-in through the "password" credentials provider (convex/auth.ts). */
 function useLiveAuthActions() {
@@ -179,7 +172,14 @@ export const liveApi: DataApi = {
     return useMapped(call);
   },
 
-  useOverview: useNotReady,
+  // ---- overview (Step 17). The failed-installs list is a second query, subscribed only while the counter is above zero.
+  useOverview() {
+    return useMemberQuery(api.overview.get, {});
+  },
+  useFailedInstalls(enabled) {
+    const q = useMemberQuery(api.overview.failedInstalls, enabled ? {} : "skip");
+    return enabled ? q : EMPTY_FAILED;
+  },
 
   // ---- devices (Step 7). The paginated lists are in `../devices/live.ts`. Admin writes
   // go through `useMapped`: turning the kiosk off, revoke and remove need a fresh step-up
@@ -446,6 +446,9 @@ export const liveApi: DataApi = {
     const mapped = useMappedState(q, appDetailOf);
     return appId === "new" ? { status: "ready", data: NEW_APP } : mapped;
   },
+  useAppInstallSummary(appId) {
+    return useMappedState(useMemberQuery(api.apps.installSummary, { appId }), installCountsOf);
+  },
   useAppOptions() {
     return useMemberQuery(api.apps.options, {});
   },
@@ -545,9 +548,6 @@ export const liveApi: DataApi = {
     return useMapped(call);
   },
   // Enrollment codes (Step 6) have their own seam: `../enrollment/live.ts`.
-
-  useAuditScreen: useNotReadyPaged,
-  useHistory: useNotReadyPaged,
 
   // ---- organization settings (Step 5). Changing the admin exit, the exit PIN and
   // deleting a group are major actions: `useMapped` opens the step-up dialog and retries.

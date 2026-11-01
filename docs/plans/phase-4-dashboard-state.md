@@ -4549,6 +4549,37 @@ overview.
 change any row the overview reads; a free org's audit rows older than 30
 days are pruned, a custom org's are kept.
 
+**Status (2026-11-01): items 1-7 built and tested on the dev machine (backend
+and dashboard), NOT deployed; the work was stopped at the owner's request
+before the follow-ups and items 8-9.** `convex/_generated/api.d.ts` was edited
+by hand (two lines: `audit`, `overview`; codegen needs a deployment). Screens
+were NOT run in demo mode or screenshotted (stopped first).
+Done: `apps:installSummary` (per state `.take(1001)`; a query of its own, not
+part of `apps:get`), `apps:installs`, `fleet:installs`, `overview:get` (no
+arguments, A7 shape: counters, `onlineCount` = sum of the shards, plan, key
+state, `publishFailedAt`, newest 10 audit rows; probe test <= 60 documents, <= 32
+KB, no device / liveness / payload / install table; a 50-PC ping storm changes
+no row it reads), `overview:failedInstalls` (newest 20, subscribed only while
+`failedInstallCount` > 0), `audit:list`, `audit:forTarget`; matrix rows and
+`ioBudgets.ts` rows for all of them; dashboard hooks live (`useOverview`,
+`useFailedInstalls`, `useAppInstallSummary`, `useAppInstalls`,
+`useDeviceInstalls`, and the audit lists in the new seam `data/audit/`,
+`@rulebox/audit-impl`); Overview, Audit, history panel, install cards wired.
+Deviations: (1) `AppDetail.installCounts` is gone (the card uses
+`useAppInstallSummary`); (2) `lib/online.ts` deleted ("seen recently" is now
+"Online now" from `orgPresence`); (3) the overview's attention list now uses
+the counters (out-of-support count, devices without a group, suspended
+organization, a reached plan limit); (4) `audit:list` has no filters (the plan
+names none); (5) `overLimitCount` is NOT returned: `orgPlans` has no such field
+and `plans:applyLimits` is not built; (6) `apps:installSummary` reads up to ~5,000
+results and re-runs on every result change of that app while its page is open
+(budget row says so; a per-(app, state) counter would replace it).
+NOT done: item 8 (`maintenance:pruneAudit`, retention per plan; the daily job
+still prunes at a fixed 365 days), item 9 (`stats:reconcile`), the "Over plan
+limit" badge, and the follow-ups (Signing tab "Publish again" and the global
+publish-failed banner, the `rosterPending` notice, `trustedKeyIds` on
+`deviceSummary`, the "No group" filter with `devices.by_org_group`).
+
 ---
 
 ### Step 18 — Security and load hardening

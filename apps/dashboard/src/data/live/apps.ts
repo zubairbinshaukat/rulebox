@@ -4,17 +4,21 @@
  */
 import type { FunctionReturnType } from "convex/server";
 import type { api } from "@convex/_generated/api";
-import type { AppDetail } from "../types";
+import { INSTALL_STATES, type AppDetail, type InstallCounts } from "../types";
 
 type GetResult = FunctionReturnType<typeof api.apps.get>;
+type SummaryResult = FunctionReturnType<typeof api.apps.installSummary>;
 
-/**
- * `apps:get` as the edit screen's `AppDetail`. The install counts
- * (`apps:installSummary`) come with Step 17: until then the card says no PC has
- * reported an install.
- */
+/** `apps:get` as the edit screen's `AppDetail` (the install counts are `apps:installSummary`, a query of its own). */
 export function appDetailOf(r: GetResult): AppDetail {
-  return { ...r, installCounts: {} };
+  return r;
+}
+
+/** `apps:installSummary` (a count per state, 0 included) as the card's counts: only the states that have PCs. */
+export function installCountsOf(r: SummaryResult): InstallCounts {
+  const out: InstallCounts = {};
+  for (const state of INSTALL_STATES) if (r[state] > 0) out[state] = r[state];
+  return out;
 }
 
 /** The form for a new app needs nothing from the server (the kind comes from the address). One object, so screens see a stable value. */
@@ -28,6 +32,5 @@ export const NEW_APP: AppDetail = {
   assignments: [],
   fileTypes: [],
   directEmployeeCount: 0,
-  installCounts: {},
   groupOptions: [],
 };
