@@ -37,6 +37,9 @@ getrandom = "0.4.3"
 argon2 = "0.6.0"
 # Phase 4 Step 9: policy signatures (plan 4.5; `verify_strict`). Checked 2026-11-01.
 ed25519-dalek = "3.0.0"
+# Phase 4 Step 14: installer and icon downloads (plan 4.15). SChannel through
+# native-tls like the Convex client; no rustls / aws-lc. Already in Cargo.lock (Tauri).
+reqwest = { version = "0.13.5", default-features = false, features = ["native-tls", "stream", "http2", "system-proxy"] }
 
 # Phase 3 Staff App / rulebox-desktop (versions checked 2026-10-13)
 tauri = "2.12.3"

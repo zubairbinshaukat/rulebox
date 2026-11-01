@@ -3,6 +3,7 @@
 //! in memory; `WindowsPlatform` (Step 10) forwards to `rulebox-win32`.
 
 use std::path::{Path, PathBuf};
+use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
 
@@ -102,6 +103,33 @@ pub enum RegData {
     String(String),
 }
 
+/// (Phase 4 Step 14) One installer run. `program` must be
+/// `%SystemRoot%\System32\msiexec.exe` or a file inside `<data>\downloads\`
+/// (`installs::installer_program_allowed`); anything else is refused before it
+/// starts. `args` are passed one by one with the Windows quoting rules of
+/// `std::process::Command` (no shell is involved, so a quote or `&` in an argument
+/// is never a second command).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct InstallerCommand {
+    pub program: PathBuf,
+    pub args: Vec<String>,
+    pub working_dir: PathBuf,
+    /// The program an install creates or a removal deletes. `WindowsPlatform`
+    /// ignores it (the engine checks the disk afterwards); `SimPlatform` uses it to
+    /// play the effect on its fake file set.
+    pub expected_exe: Option<PathBuf>,
+    /// True for a removal (`msiexec /x`).
+    pub removal: bool,
+}
+
+/// How an installer ended.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum InstallerExit {
+    Code(i32),
+    /// Still running at the timeout: it was killed.
+    TimedOut,
+}
+
 #[derive(thiserror::Error, Debug)]
 pub enum PlatformError {
     #[error("blocked by the test-machine guard: {0}")]
@@ -138,6 +166,10 @@ pub trait Platform: Send + Sync + 'static {
     fn file_exists(&self, path: &Path) -> bool;
     /// (Phase 4 Step 13) The roots a catalogue path template expands to.
     fn path_roots(&self) -> Result<rulebox_policy::paths::PathRoots, PlatformError>;
+    /// (Phase 4 Step 14) Free bytes on the system drive (the install disk check).
+    fn disk_free_bytes(&self) -> Result<u64, PlatformError>;
+    /// (Step 14) When the PC last started, in Unix ms (clears `restartPending`).
+    fn boot_time_ms(&self) -> Result<u64, PlatformError>;
 
     // mutating: every `WindowsPlatform` implementation calls `guard::require_test_machine()` first
     fn create_staff_user(&self, spec: &StaffUserSpec, password: &str) -> Result<String, PlatformError>;
@@ -164,4 +196,14 @@ pub trait Platform: Send + Sync + 'static {
     /// Already unprotected.
     fn secrets_load(&self) -> Result<Option<Vec<u8>>, PlatformError>;
     fn secrets_save(&self, plaintext: &[u8]) -> Result<(), PlatformError>;
+    /// (Phase 4 Step 14) Runs one installer as SYSTEM, without a window, and waits at
+    /// most `timeout` (then kills it: `TimedOut`). Blocking: call it from
+    /// `spawn_blocking`. The program rule is checked before the guard.
+    fn run_installer(&self, cmd: &InstallerCommand, timeout: Duration) -> Result<InstallerExit, PlatformError>;
+    /// (Step 14) Copies a verified portable exe to `to`, which must be below
+    /// `<install>\apps\`; creates the parent folders; refuses reparse points.
+    fn place_portable(&self, from: &Path, to: &Path) -> Result<(), PlatformError>;
+    /// (Step 14) Deletes a portable app's folder, only below `<install>\apps\`;
+    /// refuses reparse points. A folder that is not there is fine.
+    fn remove_portable(&self, app_dir: &Path) -> Result<(), PlatformError>;
 }

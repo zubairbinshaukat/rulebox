@@ -5,14 +5,16 @@
 //!
 //! Rules of "which apps an employee sees" (4.8): audience `everyone`, or the
 //! employee is listed; a desktop app only when it is installed (PRD 13.5: never a
-//! half-installed app). Until Step 14 keeps install records, "installed" means
-//! "the exe exists" ([`Platform::file_exists`]). Every desktop path template is
+//! half-installed app). With an `install`, "installed" is the install engine's
+//! record (Step 14) plus the exe on disk; without one ("preinstalled"), the exe
+//! on disk ([`Platform::file_exists`]). Every desktop path template is
 //! expanded and checked again with the server's rules (`rulebox_policy::paths`);
 //! an entry that fails is skipped and logged with its id and the fixed reason,
 //! never the value.
 //!
 //! Nothing here calls the backend: `apps.list` answers from memory.
 
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use rulebox_ipc::requests::{AppEntry, AppKind, BuiltinApp, DesktopApp, WebApp, WebPermissions};
@@ -20,6 +22,8 @@ use rulebox_policy::catalog::{parse_catalog, CatalogApp, CatalogKind, CatalogToo
 use rulebox_policy::paths::{check_args, check_file_args, expand_exe, PathRoots};
 use serde_json::Value;
 
+use crate::installs::engine::{install_of, InstallBook};
+use crate::installs::icons;
 use crate::platform::Platform;
 
 /// `doc.catalog` is there but is not a list: logged, the catalogue is empty.
@@ -85,7 +89,8 @@ fn entry_for(
     app: &CatalogApp,
     employee_id: &str,
     roots: Option<&PathRoots>,
-    installed: &dyn Fn(&str, &str) -> InstallView,
+    installed: &dyn Fn(&CatalogApp, &str) -> InstallView,
+    icon: &dyn Fn(&CatalogApp) -> Option<String>,
 ) -> Option<AppEntry> {
     if !app.is_supported() || !app.visible_to(employee_id) {
         return None;
@@ -100,9 +105,8 @@ fn entry_for(
         desktop: None,
         pinned_taskbar: app.pinned_taskbar,
         pinned_desktop: app.pinned_desktop,
-        // Icons come from the icon cache (Step 14); until then the Staff App draws a
-        // letter tile.
-        icon_png_base64: None,
+        // (Step 14) From the icon cache; without one the Staff App draws a letter tile.
+        icon_png_base64: icon(app),
         hue: app.hue,
     };
     match app.kind {
@@ -139,7 +143,7 @@ fn entry_for(
                     return None;
                 }
             };
-            if installed(&app.id, &exe) != InstallView::Installed {
+            if installed(app, &exe) != InstallView::Installed {
                 return None;
             }
             entry.kind = AppKind::Desktop;
@@ -155,26 +159,49 @@ fn entry_for(
 }
 
 /// The apps `employee_id` sees, in catalogue order (plan 4.8). Pure apart from
-/// the log lines; `installed(app_id, exe)` decides about desktop apps.
+/// the log lines; `installed(app, exe)` decides about desktop apps. No icons.
+#[cfg(test)]
 pub fn visible_apps(
     catalog: &[CatalogApp],
     employee_id: &str,
     roots: Option<&PathRoots>,
-    installed: &dyn Fn(&str, &str) -> InstallView,
+    installed: &dyn Fn(&CatalogApp, &str) -> InstallView,
 ) -> Vec<AppEntry> {
-    catalog.iter().filter_map(|app| entry_for(app, employee_id, roots, installed)).collect()
+    visible_apps_with_icons(catalog, employee_id, roots, installed, &|_| None)
 }
 
-/// [`visible_apps`] on this PC: the platform's roots, and "installed when the exe
-/// exists" until Step 14.
+/// [`visible_apps`] with `icon(app)` filling `iconPngBase64`.
+pub fn visible_apps_with_icons(
+    catalog: &[CatalogApp],
+    employee_id: &str,
+    roots: Option<&PathRoots>,
+    installed: &dyn Fn(&CatalogApp, &str) -> InstallView,
+    icon: &dyn Fn(&CatalogApp) -> Option<String>,
+) -> Vec<AppEntry> {
+    catalog.iter().filter_map(|app| entry_for(app, employee_id, roots, installed, icon)).collect()
+}
+
+/// [`visible_apps`] on this PC: the platform's roots; with the install records
+/// (Step 14), a desktop app with an `install` is shown only when the engine has
+/// it `installed` in the catalogue's version AND its program exists; a
+/// preinstalled app (no `install`) when its program exists. Icons from the cache.
 #[derive(Clone)]
 pub struct AppResolver {
     platform: Arc<dyn Platform>,
+    installs: Option<Arc<InstallBook>>,
+    icons_dir: Option<PathBuf>,
 }
 
 impl AppResolver {
+    /// "Installed when the exe exists", no icons (tests).
+    #[cfg(test)]
     pub fn new(platform: Arc<dyn Platform>) -> Self {
-        Self { platform }
+        Self { platform, installs: None, icons_dir: None }
+    }
+
+    /// (Step 14) The real rule: the install records and the icon cache.
+    pub fn with_installs(platform: Arc<dyn Platform>, installs: Arc<InstallBook>, icons_dir: PathBuf) -> Self {
+        Self { platform, installs: Some(installs), icons_dir: Some(icons_dir) }
     }
 
     pub fn visible(&self, catalog: &[CatalogApp], employee_id: &str) -> Vec<AppEntry> {
@@ -186,14 +213,24 @@ impl AppResolver {
             }
         };
         let platform = Arc::clone(&self.platform);
-        let installed = move |_app_id: &str, exe: &str| {
-            if platform.file_exists(std::path::Path::new(exe)) {
+        let installs = self.installs.clone();
+        let installed = move |app: &CatalogApp, exe: &str| {
+            let recorded = match (&installs, install_of(app)) {
+                // Never a half-installed app (PRD 13.5): the engine's word first.
+                (Some(book), Some(install)) => book.is_installed(&app.id, &install.sha256),
+                _ => true,
+            };
+            if recorded && platform.file_exists(Path::new(exe)) {
                 InstallView::Installed
             } else {
                 InstallView::NotInstalled
             }
         };
-        visible_apps(catalog, employee_id, roots.as_ref(), &installed)
+        let icon = |app: &CatalogApp| {
+            let dir = self.icons_dir.as_deref()?;
+            icons::icon_base64(dir, app.icon.as_ref()?)
+        };
+        visible_apps_with_icons(catalog, employee_id, roots.as_ref(), &installed, &icon)
     }
 }
 
@@ -210,7 +247,7 @@ mod tests {
         v["doc"]["catalog"].clone()
     }
 
-    fn all_installed(_: &str, _: &str) -> InstallView {
+    fn all_installed(_: &CatalogApp, _: &str) -> InstallView {
         InstallView::Installed
     }
 
@@ -304,5 +341,30 @@ mod tests {
         assert!(resolver.visible(&catalog, "e").is_empty());
         platform.add_file(r"C:\Program Files\Good\good.exe");
         assert_eq!(resolver.visible(&catalog, "e").len(), 1);
+    }
+
+    #[test]
+    fn with_install_records_a_desktop_app_with_an_install_needs_both() {
+        let dir = crate::testutil::TempDir::new();
+        let platform = Arc::new(SimPlatform::new(dir.path().to_path_buf()));
+        let book = InstallBook::open(dir.path().join("installs.json"));
+        let resolver = AppResolver::with_installs(Arc::clone(&platform) as Arc<dyn Platform>, Arc::clone(&book), dir.path().join("icons"));
+        let mut app = desktop("a3", r"{ProgramFiles}\Good\good.exe");
+        let preinstalled = app.clone();
+        app.desktop.as_mut().unwrap().install = Some(rulebox_policy::catalog::InstallSpec {
+            kind: rulebox_policy::catalog::InstallKind::Msi,
+            url: "https://example.com/a.msi".into(),
+            sha256: "a".repeat(64),
+            size_bytes: 0,
+            silent_args: Vec::new(),
+            product_code: None,
+            success_exit_codes: vec![0],
+            remove_when_unassigned: false,
+        });
+        // The program is there (an older copy, a half-finished install): not enough.
+        platform.add_file(r"C:\Program Files\Good\good.exe");
+        assert!(resolver.visible(std::slice::from_ref(&app), "e").is_empty());
+        // A preinstalled app (no install) is shown when its program exists.
+        assert_eq!(resolver.visible(&[preinstalled], "e").len(), 1);
     }
 }

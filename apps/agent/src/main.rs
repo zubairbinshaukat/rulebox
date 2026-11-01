@@ -15,6 +15,7 @@ mod employee_cache;
 mod enroll;
 mod enroll_code;
 mod fixtures;
+mod installs;
 mod ipc_admin;
 mod ipc_conn;
 mod ipc_shell;
@@ -230,6 +231,9 @@ fn run_simulated(
         },
         audit_sink: if sim_demo { SinkSetup::Use(Arc::new(audit::LogAuditSink)) } else { SinkSetup::Convex },
         sim: SimOptions { demo: sim_demo, offline: sim_offline, staff_session: sim_staff_session },
+        // (Phase 4 Step 14) Real downloads into the simulate data directory; the
+        // installs themselves are faked by `SimPlatform`.
+        downloader: Arc::new(installs::download::HttpDownloader::new()?),
     };
 
     let result = run_with_runtime(deps);
@@ -303,6 +307,7 @@ pub(crate) fn real_deps(paths: DataPaths, install: InstallPaths) -> anyhow::Resu
         directory: DirectorySetup::Convex,
         audit_sink: SinkSetup::Convex,
         sim: SimOptions::default(),
+        downloader: Arc::new(installs::download::HttpDownloader::new()?),
     })
 }
 

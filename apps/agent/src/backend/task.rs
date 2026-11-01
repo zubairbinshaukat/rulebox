@@ -424,7 +424,8 @@ pub fn build_status(ctx: &TaskContext, desired_problem: Option<&str>) -> Option<
         shell_health: wire(&snapshot.shell.health),
         compat: report.to_json(),
         trusted_key_ids: Some(trust::trusted_key_ids(&state.trusted_keys)),
-        restart_pending: None,
+        // (Step 14) Set by the install engine after an MSI returned 3010 / 1641.
+        restart_pending: ctx.report.restart_pending(),
     })
 }
 

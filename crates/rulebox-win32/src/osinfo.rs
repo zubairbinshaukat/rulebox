@@ -11,7 +11,7 @@ use windows::Win32::NetworkManagement::NetManagement::{
 };
 use windows::Win32::Storage::FileSystem::GetDiskFreeSpaceExW;
 use windows::Win32::System::SystemInformation::{
-    ComputerNameNetBIOS, GetComputerNameExW, GetNativeSystemInfo, GetProductInfo, GetSystemWindowsDirectoryW,
+    ComputerNameNetBIOS, GetComputerNameExW, GetNativeSystemInfo, GetProductInfo, GetSystemWindowsDirectoryW, GetTickCount64,
     GlobalMemoryStatusEx, MEMORYSTATUSEX, OSVERSIONINFOW, OS_PRODUCT_TYPE, PROCESSOR_ARCHITECTURE_AMD64,
     PROCESSOR_ARCHITECTURE_ARM64, PROCESSOR_ARCHITECTURE_INTEL, SYSTEM_INFO,
 };
@@ -161,6 +161,29 @@ pub fn disk_free_gb(path: &Path) -> Result<u64> {
     Ok(available / GIB)
 }
 
+/// (Phase 4 Step 14) Free space (available to this process) on the volume holding
+/// `path`, in bytes: the install engine's "size x 3" disk check.
+pub fn disk_free_bytes(path: &Path) -> Result<u64> {
+    let wide = to_wide(&path.to_string_lossy());
+    let mut available = 0u64;
+    // SAFETY: `wide` is NUL-terminated; `available` is a valid out pointer.
+    unsafe { GetDiskFreeSpaceExW(PCWSTR(wide.as_ptr()), Some(&mut available), None, None) }
+        .map_err(|e| api_err("GetDiskFreeSpaceExW", &e))?;
+    Ok(available)
+}
+
+/// (Phase 4 Step 14) When this PC last started, in Unix milliseconds: now minus
+/// `GetTickCount64` (milliseconds since boot). Only compared with the time an
+/// installer asked for a restart, so a few milliseconds of jitter do not matter.
+pub fn boot_time_ms() -> u64 {
+    // SAFETY: `GetTickCount64` takes no arguments and cannot fail.
+    let since_boot = unsafe { GetTickCount64() };
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |d| u64::try_from(d.as_millis()).unwrap_or(u64::MAX));
+    now.saturating_sub(since_boot)
+}
+
 /// The root of the drive Windows is installed on, for example `C:\`.
 pub fn system_drive() -> Result<PathBuf> {
     let mut buf = [0u16; 512];
@@ -233,5 +256,13 @@ mod tests {
         let _ = disk_free_gb(&drive).unwrap();
         let _ = join_state().unwrap();
         let _ = s_mode().unwrap();
+        assert!(disk_free_bytes(&drive).unwrap() / GIB >= disk_free_gb(&drive).unwrap().saturating_sub(1));
+    }
+
+    #[test]
+    fn boot_time_is_in_the_past() {
+        let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_millis() as u64;
+        let boot = boot_time_ms();
+        assert!(boot > 1_600_000_000_000 && boot <= now, "{boot}");
     }
 }

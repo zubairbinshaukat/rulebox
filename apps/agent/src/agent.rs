@@ -31,6 +31,9 @@ use crate::session::run_session_events;
 use crate::employee_cache::EmployeeCache;
 use crate::enroll::{EnrollDeps, Enroller, Timings};
 use crate::fixtures;
+use crate::installs::download::Downloader;
+use crate::installs::engine::{run_install_task, EngineDeps, InstallBook};
+use crate::installs::{EXE_WAIT, INSTALL_TIMEOUT};
 use crate::ipc_admin::{self, AdminPipe, WithStatusExtra};
 use crate::ipc_shell::{self, ShellBroadcast, ShellExtension, ShellPipe, ShellSignal};
 use crate::kiosk::{kiosk_status, spawn_reconciler, ReconcilerDeps};
@@ -126,6 +129,9 @@ pub struct Deps {
     /// (1.1) Where the reports (audit queue, status, installs) are delivered.
     pub audit_sink: SinkSetup,
     pub sim: SimOptions,
+    /// (Phase 4 Step 14) Installer and icon downloads: `HttpDownloader` on a real
+    /// or simulated agent, a fake in tests (tests never download).
+    pub downloader: Arc<dyn Downloader>,
 }
 
 /// (Step 13) The directory: a ready one, or the Convex one, which `run` builds
@@ -368,6 +374,14 @@ pub async fn run(
     // link at each call.
     let link = BackendLink::new();
     let report = ReportQueue::new(Arc::clone(&audit));
+    // (Step 14) The install records: the engine writes them, the report queue
+    // confirms what the server took, and app visibility reads them.
+    let installs = InstallBook::open(deps.paths.installs());
+    {
+        let book = Arc::clone(&installs);
+        report.set_install_ack(Arc::new(move |accepted| book.ack(accepted)));
+    }
+    let install_policy_rx = policy_rx.clone();
     let (roster_tx, roster_rx) = watch::channel(RosterState::load(&deps.paths.roster()));
     let roster_tx = Arc::new(roster_tx);
     let directory: Arc<dyn EmployeeDirectory> = match deps.directory {
@@ -375,7 +389,7 @@ pub async fn run(
         DirectorySetup::Convex => Arc::new(ConvexDirectory::new(
             Arc::clone(&link),
             policy_rx.clone(),
-            AppResolver::new(Arc::clone(&deps.platform)),
+            AppResolver::with_installs(Arc::clone(&deps.platform), Arc::clone(&installs), deps.paths.icons_dir()),
         )),
     };
     let audit_sink: Arc<dyn AuditSink> = match deps.audit_sink {
@@ -492,6 +506,29 @@ pub async fn run(
         Arc::new(os_jitter),
         shutdown.clone(),
     ));
+    // (Step 14) The install engine: one operation at a time, only while enrolled.
+    // The demo world has no enrollment and no real catalogue: no engine.
+    if !deps.sim.demo {
+        let session_for_installs = Arc::clone(&session);
+        tasks.spawn(run_install_task(
+            EngineDeps {
+                platform: Arc::clone(&deps.platform),
+                downloader: Arc::clone(&deps.downloader),
+                paths: deps.paths.clone(),
+                book: Arc::clone(&installs),
+                report: Arc::clone(&report),
+                now_ms: Arc::clone(&now_ms),
+                // A tile appeared or went: recompute the employee's apps
+                // (`apps.changed` when they differ).
+                on_visible_change: Arc::new(move || session_for_installs.resync()),
+                install_timeout: INSTALL_TIMEOUT,
+                exe_wait: EXE_WAIT,
+            },
+            install_policy_rx,
+            snapshot_rx.clone(),
+            shutdown.clone(),
+        ));
+    }
     tasks.spawn(run_session_events(session_events_rx, broadcast.clone(), shutdown.clone()));
     tasks.spawn(sync_session(session_sync.0, session_sync.1, Arc::clone(&session), shutdown.clone()));
     tasks.spawn(clear_session_when_not_enrolled(
@@ -779,6 +816,7 @@ mod tests {
             directory: DirectorySetup::Use(Arc::new(crate::directory::UnavailableDirectory)),
             audit_sink: SinkSetup::Use(Arc::new(crate::audit::LogAuditSink)),
             sim: SimOptions::default(),
+            downloader: Arc::new(crate::installs::download::fake::NoDownloads),
         }
     }
 
@@ -1050,6 +1088,7 @@ mod backend_tests {
             // (Step 13) The reports go to the fake backend.
             audit_sink: SinkSetup::Convex,
             sim: SimOptions::default(),
+            downloader: Arc::new(crate::installs::download::fake::NoDownloads),
         }
     }
 

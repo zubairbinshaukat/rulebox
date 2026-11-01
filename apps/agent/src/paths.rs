@@ -132,6 +132,27 @@ impl DataPaths {
         self.root.join("sim-files")
     }
 
+    /// (Phase 4 Step 14) The install engine's records (`installs/engine.rs`).
+    pub fn installs(&self) -> PathBuf {
+        self.state_dir().join("installs.json")
+    }
+
+    /// (Step 14) Installers while they are downloaded, verified and run:
+    /// `<sha256>.<msi|exe>` (and `.part` while downloading). Inside the protected
+    /// data directory, so the Staff account cannot write there (plan 4.8).
+    pub fn downloads_dir(&self) -> PathBuf {
+        self.root.join("downloads")
+    }
+
+    /// (Step 14) The icon cache: `<sha256>.png`.
+    pub fn icons_dir(&self) -> PathBuf {
+        self.root.join("icons")
+    }
+
+    /// (Step 14) The MSI log of one app's last install or removal.
+    pub fn install_log(&self, app_id: &str) -> PathBuf {
+        self.logs_dir().join(format!("install-{app_id}.log"))
+    }
 
     pub fn logs_dir(&self) -> PathBuf {
         self.root.join("logs")
@@ -250,6 +271,10 @@ mod tests {
         assert!(data.audit_queue().ends_with("state/audit-queue.json"));
         assert!(data.recovered_flag().ends_with("state/recovered.flag"));
         assert!(data.sim_files().ends_with("sim-files"));
+        assert!(data.installs().ends_with("state/installs.json"));
+        assert!(data.downloads_dir().ends_with("downloads"));
+        assert!(data.icons_dir().ends_with("icons"));
+        assert!(data.install_log("app1").ends_with("logs/install-app1.log"));
     }
 
     #[test]

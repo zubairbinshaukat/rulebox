@@ -17,7 +17,7 @@ use futures_util::future::BoxFuture;
 use rulebox_ipc::types::ConnectionStatus;
 use rulebox_policy::envelope::{PublishedKey, SignedEnvelope, TrustedKey};
 use rulebox_policy::roster::{RosterEntry, RosterSnapshot};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
@@ -171,8 +171,9 @@ pub struct ReportAccepted {
 }
 
 /// (Step 13, A12) One install result. Only `pending` (the agent took the job) and
-/// the terminal states are reported; Step 14's engine produces them.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+/// the terminal states are reported; Step 14's engine produces them (and keeps the
+/// last one in `installs.json` until the server took it, hence `Deserialize`).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct InstallReport {
     pub app_id: String,
@@ -186,10 +187,8 @@ pub struct InstallReport {
     pub detail: Option<String>,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-// Produced by the install engine (Step 14); tests only until then.
-#[allow(dead_code)]
 pub enum InstallState {
     Pending,
     Installed,
@@ -297,7 +296,8 @@ pub struct StatusReport {
     /// dashboard's "N of M devices trust the new key" (`keys:trustProgress`).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub trusted_key_ids: Option<Vec<String>>,
-    /// (Phase 4) Always `None` until Step 14.
+    /// (Phase 4 Step 14) `Some(true)` while an installer asked for a restart since
+    /// the last boot; left out otherwise.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub restart_pending: Option<bool>,
 }

@@ -8,6 +8,7 @@
 //! - the secrets file is protected with DPAPI under the service's own key.
 
 use std::path::{Path, PathBuf};
+use std::time::Duration;
 
 use anyhow::{bail, Context};
 use rulebox_win32::accounts;
@@ -20,9 +21,10 @@ use rulebox_win32::{dpapi, lsa, osinfo, process, security, session, Win32Error};
 use serde::Deserialize;
 
 use super::{
-    LocalUser, OsInfo, Platform, PlatformError, RegData, RegValueRef, SessionInfo, SessionState, ShellBinaries,
-    ShellMechanism, StaffUserSpec,
+    InstallerCommand, InstallerExit, LocalUser, OsInfo, Platform, PlatformError, RegData, RegValueRef, SessionInfo,
+    SessionState, ShellBinaries, ShellMechanism, StaffUserSpec,
 };
+use crate::installs::{installer_program_allowed, is_reparse_point, portable_dir_ok, portable_target_ok};
 use crate::paths::{data_dir_action, DataDirAction, DataPaths, InstallPaths};
 use crate::state::write_atomic;
 
@@ -331,6 +333,112 @@ impl Platform for WindowsPlatform {
         std::fs::create_dir_all(self.data.state_dir()).map_err(io_err)?;
         write_atomic(&self.data.secrets(), &blob).map_err(io_err)
     }
+
+    fn disk_free_bytes(&self) -> Result<u64, PlatformError> {
+        let drive = osinfo::system_drive().map_err(map_err)?;
+        osinfo::disk_free_bytes(&drive).map_err(map_err)
+    }
+
+    fn boot_time_ms(&self) -> Result<u64, PlatformError> {
+        Ok(osinfo::boot_time_ms())
+    }
+
+    /// `CreateProcessW` through `std::process::Command` (no shell: each argument is
+    /// quoted by the MSVC rules), `CREATE_NO_WINDOW`, the standard handles to NUL,
+    /// as SYSTEM (the service's own token). Waits with `try_wait` every 500 ms; at
+    /// the timeout the process is killed (`TimedOut`). The program rule is checked
+    /// first, then the guard: nothing ever starts on a machine without the marker.
+    fn run_installer(&self, cmd: &InstallerCommand, timeout: Duration) -> Result<InstallerExit, PlatformError> {
+        use std::os::windows::process::CommandExt;
+        let system_root = system_root();
+        if !installer_program_allowed(&cmd.program, system_root.as_deref(), &self.data.downloads_dir()) {
+            return Err(PlatformError::Other("program not allowed".into()));
+        }
+        guard()?;
+        // The downloads folder itself must not be a link (the file is opened and
+        // locked by the engine; this keeps the folder from being redirected).
+        if is_reparse_point(&self.data.downloads_dir()).map_err(io_err)? {
+            return Err(PlatformError::Other("the downloads folder is a link".into()));
+        }
+        let mut child = std::process::Command::new(&cmd.program)
+            .args(&cmd.args)
+            .current_dir(&cmd.working_dir)
+            .stdin(std::process::Stdio::null())
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .creation_flags(CREATE_NO_WINDOW)
+            .spawn()
+            .map_err(io_err)?;
+        let deadline = std::time::Instant::now() + timeout;
+        loop {
+            match child.try_wait().map_err(io_err)? {
+                Some(status) => return Ok(InstallerExit::Code(status.code().unwrap_or(-1))),
+                None if std::time::Instant::now() >= deadline => {
+                    // Only the process itself: a tree kill needs a job object (not in
+                    // `rulebox-win32` yet; msiexec does its work in its service anyway).
+                    let _ = child.kill();
+                    let _ = child.wait();
+                    return Ok(InstallerExit::TimedOut);
+                }
+                None => std::thread::sleep(INSTALLER_POLL),
+            }
+        }
+    }
+
+    fn place_portable(&self, from: &Path, to: &Path) -> Result<(), PlatformError> {
+        let apps = self.install.root().join("apps");
+        if !portable_target_ok(&apps, to) {
+            return Err(PlatformError::Other("not inside the apps folder".into()));
+        }
+        guard()?;
+        let folder = to.parent().ok_or_else(|| PlatformError::Other("no app folder".into()))?;
+        refuse_links(&[self.install.root(), &apps, folder])?;
+        std::fs::create_dir_all(folder).map_err(io_err)?;
+        // Again after creating: nothing may have been swapped in meanwhile.
+        refuse_links(&[&apps, folder, to])?;
+        let mut tmp_name = to.file_name().map(|n| n.to_os_string()).unwrap_or_default();
+        tmp_name.push(".tmp");
+        let tmp = to.with_file_name(tmp_name);
+        std::fs::copy(from, &tmp).map_err(io_err)?;
+        std::fs::rename(&tmp, to).map_err(|error| {
+            let _ = std::fs::remove_file(&tmp);
+            io_err(error)
+        })
+    }
+
+    fn remove_portable(&self, app_dir: &Path) -> Result<(), PlatformError> {
+        let apps = self.install.root().join("apps");
+        if !portable_dir_ok(&apps, app_dir) {
+            return Err(PlatformError::Other("not inside the apps folder".into()));
+        }
+        guard()?;
+        refuse_links(&[self.install.root(), &apps, app_dir])?;
+        match std::fs::remove_dir_all(app_dir) {
+            Ok(()) => Ok(()),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
+            Err(error) => Err(io_err(error)),
+        }
+    }
+}
+
+/// `CREATE_NO_WINDOW`.
+const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+/// How often a running installer is checked.
+const INSTALLER_POLL: Duration = Duration::from_millis(500);
+
+/// `%SystemRoot%` of the service's environment, when it is an absolute path.
+fn system_root() -> Option<PathBuf> {
+    std::env::var_os("SystemRoot").map(PathBuf::from).filter(|path| path.is_absolute())
+}
+
+/// Fails when one of `paths` is a reparse point (a link or junction).
+fn refuse_links(paths: &[&Path]) -> Result<(), PlatformError> {
+    for path in paths {
+        if is_reparse_point(path).map_err(io_err)? {
+            return Err(PlatformError::Other("a folder of the app is a link; refused".into()));
+        }
+    }
+    Ok(())
 }
 
 /// Runs the Section 5.1 check and repair on the data directory `root`. Creating
@@ -445,6 +553,54 @@ mod tests {
         blocked("launch_in_session", p.launch_in_session(1, sid, exe));
         blocked("terminate_process", p.terminate_process(1, exe, sid));
         blocked("secrets_save", p.secrets_save(b"x"));
+
+        // (Step 14) An installer the rule allows still meets the guard first.
+        let downloads = DataPaths::new(PathBuf::from(r"C:\rulebox-test-no-such-data")).downloads_dir();
+        let cmd = InstallerCommand {
+            program: downloads.join(format!("{}.exe", "a".repeat(64))),
+            args: vec!["/S".into()],
+            working_dir: downloads.clone(),
+            expected_exe: None,
+            removal: false,
+        };
+        blocked("run_installer", p.run_installer(&cmd, Duration::from_secs(1)));
+        let apps = Path::new(r"C:\rulebox-test-no-such-install\apps");
+        blocked("place_portable", p.place_portable(exe, &apps.join(r"app1\tool.exe")));
+        blocked("remove_portable", p.remove_portable(&apps.join("app1")));
+    }
+
+    #[test]
+    fn program_outside_downloads_refused_before_the_guard() {
+        // Refused on every machine, before anything else is looked at.
+        let p = platform();
+        let downloads = DataPaths::new(PathBuf::from(r"C:\rulebox-test-no-such-data")).downloads_dir();
+        for program in [
+            PathBuf::from(r"C:\Windows\System32\cmd.exe"),
+            PathBuf::from(r"C:\Users\Public\setup.exe"),
+            downloads.join("setup.exe"),
+            downloads.join(r"..\x.exe"),
+        ] {
+            let cmd = InstallerCommand {
+                program,
+                args: Vec::new(),
+                working_dir: downloads.clone(),
+                expected_exe: None,
+                removal: false,
+            };
+            match p.run_installer(&cmd, Duration::from_secs(1)) {
+                Err(PlatformError::Other(message)) => assert_eq!(message, "program not allowed"),
+                other => panic!("expected a refusal, got {other:?}"),
+            }
+        }
+        let outside = Path::new(r"C:\rulebox-test-no-such-install\rulebox-agent.exe");
+        assert!(matches!(p.place_portable(outside, outside), Err(PlatformError::Other(_))));
+        assert!(matches!(p.remove_portable(Path::new(r"C:\rulebox-test-no-such-install")), Err(PlatformError::Other(_))));
+    }
+
+    #[test]
+    fn disk_and_boot_time_are_readable() {
+        assert!(platform().disk_free_bytes().unwrap() > 0);
+        assert!(platform().boot_time_ms().unwrap() > 1_600_000_000_000);
     }
 
     #[test]

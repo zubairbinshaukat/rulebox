@@ -12,15 +12,19 @@ rulebox-win32.workspace = true
 anyhow.workspace = true
 argon2.workspace = true
 base64.workspace = true
+# (Phase 4 Step 14) The chunk type of reqwest's byte stream.
+bytes.workspace = true
 clap.workspace = true
 convex.workspace = true
 getrandom.workspace = true
+# (Phase 4 Step 14) Installer and icon downloads, `https://` only.
+reqwest.workspace = true
 sha2.workspace = true
 futures-util.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true
-tokio = { workspace = true, features = ["rt-multi-thread", "macros", "net", "time", "sync", "signal"] }
+tokio = { workspace = true, features = ["rt-multi-thread", "macros", "net", "time", "sync", "signal", "fs", "io-util"] }
 tokio-util = { workspace = true, features = ["rt"] }
 tracing.workspace = true
 tracing-appender.workspace = true

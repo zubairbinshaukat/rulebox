@@ -47,6 +47,10 @@ pub const LONG_OUTAGE: Duration = Duration::from_secs(300);
 /// Builds the current status snapshot, or `None` when the machine cannot be read.
 pub type StatusSource = Arc<dyn Fn() -> Option<StatusReport> + Send + Sync>;
 
+/// (Step 14) Told about every install result the server accepted (the engine
+/// marks it acknowledged in `installs.json`).
+pub type InstallAck = Arc<dyn Fn(&InstallReport) + Send + Sync>;
+
 /// The full-jitter delay of the `failures`-th consecutive failure (1-based):
 /// a random time in `0..=min(cap, base * 2^(failures-1))`.
 pub fn backoff_delay(failures: u32, jitter: &dyn Fn(u64) -> u64) -> Duration {
@@ -62,6 +66,9 @@ pub struct ReportQueue {
     status_source: Mutex<Option<StatusSource>>,
     /// The serialized status the server last accepted.
     last_status: Mutex<Option<String>>,
+    /// (Step 14) An installer asked for a restart since the last boot.
+    restart_pending: Mutex<bool>,
+    install_ack: Mutex<Option<InstallAck>>,
     wake: Notify,
 }
 
@@ -72,8 +79,29 @@ impl ReportQueue {
             installs: Mutex::new(BTreeMap::new()),
             status_source: Mutex::new(None),
             last_status: Mutex::new(None),
+            restart_pending: Mutex::new(false),
+            install_ack: Mutex::new(None),
             wake: Notify::new(),
         })
+    }
+
+    /// (Step 14) Sets `restartPending` for the next status (a change wakes the task).
+    pub fn set_restart_pending(&self, pending: bool) {
+        let changed = std::mem::replace(&mut *lock(&self.restart_pending), pending) != pending;
+        if changed {
+            self.wake.notify_one();
+        }
+    }
+
+    /// (Step 14) The status field: `Some(true)` while a restart is pending, else
+    /// left out (an absent field clears the stored value).
+    pub fn restart_pending(&self) -> Option<bool> {
+        (*lock(&self.restart_pending)).then_some(true)
+    }
+
+    /// (Step 14) Where accepted install results are confirmed.
+    pub fn set_install_ack(&self, ack: InstallAck) {
+        *lock(&self.install_ack) = Some(ack);
     }
 
     /// The backend task starts (`Some`) or stops (`None`).
@@ -91,7 +119,6 @@ impl ReportQueue {
     }
 
     /// (Step 14) An install result; replaces an older one of the same app.
-    #[allow(dead_code)]
     pub fn push_install(&self, report: InstallReport) {
         lock(&self.installs).insert(report.app_id.clone(), report);
         self.wake.notify_one();
@@ -114,6 +141,21 @@ impl ReportQueue {
     #[cfg(test)]
     pub fn installs_queued(&self) -> usize {
         lock(&self.installs).len()
+    }
+
+    /// The install results waiting, by app id (tests).
+    #[cfg(test)]
+    pub fn queued_installs(&self) -> Vec<InstallReport> {
+        lock(&self.installs).values().cloned().collect()
+    }
+
+    /// (Tests) As if the server accepted every waiting install result.
+    #[cfg(test)]
+    pub fn accept_installs(&self) -> Vec<InstallReport> {
+        let batch = ReportBatch { installs: self.queued_installs(), ..ReportBatch::default() };
+        let count = batch.installs.len();
+        self.accepted(&batch, None, count, 0);
+        batch.installs
     }
 
     /// Builds the next batch. `status_due`: build the status as well.
@@ -144,11 +186,20 @@ impl ReportQueue {
             *lock(&self.last_status) = Some(text);
         }
         if installs == batch.installs.len() {
-            let mut queued = lock(&self.installs);
-            for sent in &batch.installs {
-                // A newer result of the same app that arrived meanwhile stays.
-                if queued.get(&sent.app_id) == Some(sent) {
-                    queued.remove(&sent.app_id);
+            {
+                let mut queued = lock(&self.installs);
+                for sent in &batch.installs {
+                    // A newer result of the same app that arrived meanwhile stays.
+                    if queued.get(&sent.app_id) == Some(sent) {
+                        queued.remove(&sent.app_id);
+                    }
+                }
+            }
+            // Outside the queue lock: the engine writes `installs.json` here.
+            let ack = lock(&self.install_ack).clone();
+            if let Some(ack) = ack {
+                for sent in &batch.installs {
+                    ack(sent);
                 }
             }
         } else {

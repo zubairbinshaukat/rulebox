@@ -6,9 +6,15 @@ use std::collections::{HashMap, VecDeque};
 use std::path::{Path, PathBuf};
 use std::sync::{Mutex, MutexGuard, PoisonError};
 
+use std::time::Duration;
+
 use super::{
-    LocalUser, OsInfo, Platform, PlatformError, RegData, RegValueRef, SessionInfo, ShellBinaries,
-    ShellMechanism, StaffUserSpec,
+    InstallerCommand, InstallerExit, LocalUser, OsInfo, Platform, PlatformError, RegData, RegValueRef, SessionInfo,
+    ShellBinaries, ShellMechanism, StaffUserSpec,
+};
+use crate::installs::{
+    installer_program_allowed, portable_dir_ok, portable_target_ok, MSI_REBOOT_INITIATED, MSI_REBOOT_REQUIRED,
+    MSI_SUCCESS, MSI_UNKNOWN_PRODUCT,
 };
 use crate::state::write_atomic;
 
@@ -39,6 +45,11 @@ pub enum SimOp {
     TerminateProcess,
     SecretsLoad,
     SecretsSave,
+    DiskFreeBytes,
+    BootTimeMs,
+    RunInstaller,
+    PlacePortable,
+    RemovePortable,
 }
 
 impl SimOp {
@@ -59,6 +70,8 @@ impl SimOp {
                 | SimOp::ShellBinariesOk
                 | SimOp::LsaSecretGet
                 | SimOp::SecretsLoad
+                | SimOp::DiskFreeBytes
+                | SimOp::BootTimeMs
         )
     }
 }
@@ -100,6 +113,21 @@ pub struct SimWorld {
     pub staff_policies: HashMap<(String, String), u32>,
     /// (Step 13) Files that exist on the simulated machine (`file_exists`).
     pub files: std::collections::HashSet<PathBuf>,
+    /// (Step 14) Free bytes on the system drive.
+    pub disk_free_bytes: u64,
+    /// (Step 14) When the simulated PC started (Unix ms).
+    pub boot_time_ms: u64,
+    /// (Step 14) The exits of the next installer runs (default `Code(0)`).
+    pub installer_exits: VecDeque<InstallerExit>,
+    /// (Step 14) Whether a successful install creates its program (false: the
+    /// installer "succeeds" without putting the exe where the catalogue says).
+    pub installer_creates_exe: bool,
+    /// (Step 14) Every installer run, in order (nothing is ever executed).
+    pub installer_runs: Vec<InstallerCommand>,
+    /// (Step 14, tests) At each run, try to open the installer file for writing
+    /// and record whether that was refused (the engine must hold it locked).
+    pub probe_lock: bool,
+    pub lock_probes: Vec<bool>,
     next_rid: u32,
     next_pid: u32,
 }
@@ -132,6 +160,13 @@ impl SimWorld {
             staff_shell: HashMap::new(),
             staff_policies: HashMap::new(),
             files: std::collections::HashSet::new(),
+            disk_free_bytes: 100 * 1024 * 1024 * 1024,
+            boot_time_ms: 1_700_000_000_000,
+            installer_exits: VecDeque::new(),
+            installer_creates_exe: true,
+            installer_runs: Vec::new(),
+            probe_lock: false,
+            lock_probes: Vec::new(),
             next_rid: 2000,
             next_pid: 4000,
         }
@@ -472,6 +507,71 @@ impl Platform for SimPlatform {
         self.check(SimOp::SecretsSave)?;
         std::fs::create_dir_all(&self.data_dir).map_err(io_err)?;
         write_atomic(&self.secrets_path(), plaintext).map_err(io_err)
+    }
+
+    fn disk_free_bytes(&self) -> Result<u64, PlatformError> {
+        self.check(SimOp::DiskFreeBytes)?;
+        Ok(lock(&self.world).disk_free_bytes)
+    }
+
+    fn boot_time_ms(&self) -> Result<u64, PlatformError> {
+        self.check(SimOp::BootTimeMs)?;
+        Ok(lock(&self.world).boot_time_ms)
+    }
+
+    /// Never executes anything. Same program rule as `WindowsPlatform` (the fake
+    /// Windows folder, the real downloads folder of the simulate data directory);
+    /// answers the next scripted exit and, on success, plays the effect on the fake
+    /// file set (the program appears, or goes for a removal).
+    fn run_installer(&self, cmd: &InstallerCommand, _timeout: Duration) -> Result<InstallerExit, PlatformError> {
+        self.check(SimOp::RunInstaller)?;
+        let system_root = sim_path_roots().system_root.map(PathBuf::from);
+        let downloads = self.data_dir.join("downloads");
+        if !installer_program_allowed(&cmd.program, system_root.as_deref(), &downloads) {
+            return Err(PlatformError::Other("program not allowed".into()));
+        }
+        let mut world = lock(&self.world);
+        if world.probe_lock && !cmd.removal {
+            let is_msiexec = cmd.program.file_name().is_some_and(|n| n.eq_ignore_ascii_case("msiexec.exe"));
+            let file = if is_msiexec { cmd.args.get(1).map(PathBuf::from) } else { Some(cmd.program.clone()) };
+            let refused = file.is_some_and(|f| std::fs::OpenOptions::new().write(true).open(f).is_err());
+            world.lock_probes.push(refused);
+        }
+        world.installer_runs.push(cmd.clone());
+        let exit = world.installer_exits.pop_front().unwrap_or(InstallerExit::Code(0));
+        if let (InstallerExit::Code(code), Some(exe)) = (exit, &cmd.expected_exe) {
+            let success = matches!(code, MSI_SUCCESS | MSI_REBOOT_REQUIRED | MSI_REBOOT_INITIATED)
+                || (cmd.removal && code == MSI_UNKNOWN_PRODUCT);
+            if success && cmd.removal {
+                world.files.remove(exe);
+            } else if success && world.installer_creates_exe {
+                world.files.insert(exe.clone());
+            }
+        }
+        Ok(exit)
+    }
+
+    fn place_portable(&self, from: &Path, to: &Path) -> Result<(), PlatformError> {
+        self.check(SimOp::PlacePortable)?;
+        let apps = PathBuf::from(sim_path_roots().rulebox_apps);
+        if !portable_target_ok(&apps, to) {
+            return Err(PlatformError::Other("not inside the apps folder".into()));
+        }
+        if !from.is_file() {
+            return Err(PlatformError::NotFound);
+        }
+        lock(&self.world).files.insert(to.to_path_buf());
+        Ok(())
+    }
+
+    fn remove_portable(&self, app_dir: &Path) -> Result<(), PlatformError> {
+        self.check(SimOp::RemovePortable)?;
+        let apps = PathBuf::from(sim_path_roots().rulebox_apps);
+        if !portable_dir_ok(&apps, app_dir) {
+            return Err(PlatformError::Other("not inside the apps folder".into()));
+        }
+        lock(&self.world).files.retain(|file| !file.starts_with(app_dir));
+        Ok(())
     }
 }
 
