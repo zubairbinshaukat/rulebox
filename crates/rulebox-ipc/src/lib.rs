@@ -44,7 +44,10 @@ pub use envelope::{ErrorCode, Frame, RpcError};
 pub use methods::Method;
 
 pub const PROTOCOL_MAJOR: u16 = 1;
-pub const PROTOCOL_MINOR: u16 = 1;
+/// (Phase 4 Step 13) 1.2 adds the `apps.changed` and `session.ended` events and
+/// the sign-in outcome `notAllowedHere` (plan Phase 4, Section 5.2). Additive: a
+/// 1.1 client ignores the events and reads the outcome as `Unknown`.
+pub const PROTOCOL_MINOR: u16 = 2;
 
 /// Pipe the Staff App connects to.
 pub const SHELL_PIPE: &str = r"\\.\pipe\dev.rulebox.agent.shell";
@@ -73,3 +76,7 @@ pub const CAP_SESSION: &str = "session";
 pub const CAP_APPS: &str = "apps";
 /// (1.1) `adminExit.submit` and the snapshot field `adminExit`.
 pub const CAP_ADMIN_EXIT: &str = "adminExit";
+/// (1.2) The agent sends `apps.changed`; listed with `apps`.
+pub const CAP_APPS_CHANGED: &str = "appsChanged";
+/// (1.2) The agent sends `session.ended`; listed with `session`.
+pub const CAP_SESSION_ENDED: &str = "sessionEnded";

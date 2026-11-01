@@ -58,6 +58,30 @@ pub enum SignInOutcome {
     LockedOut,
     OfflineNeverSignedIn,
     OfflineExpired,
+    /// (1.2) The password is right, but the employee may not sign in on this PC
+    /// (not in its group; offline: not in its signed roster).
+    NotAllowedHere,
+    Unknown,
+}
+
+/// (1.2) Data of the `session.ended` event.
+#[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct SessionEndedData {
+    pub reason: SessionEndReason,
+}
+
+/// (1.2) Why the agent ended the employee session.
+#[derive(Serialize, Debug, Clone, Copy, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub enum SessionEndReason {
+    /// The employee is no longer in this PC's roster (removed from the group, or
+    /// disabled).
+    EmployeeRemoved,
+    /// The password or username changed (`credentialRevision`).
+    CredentialChanged,
+    /// The PC's enrollment was revoked.
+    Revoked,
     Unknown,
 }
 
@@ -251,6 +275,12 @@ unknown_on_new_values!(SignInOutcome {
     LockedOut => "lockedOut",
     OfflineNeverSignedIn => "offlineNeverSignedIn",
     OfflineExpired => "offlineExpired",
+    NotAllowedHere => "notAllowedHere",
+});
+unknown_on_new_values!(SessionEndReason {
+    EmployeeRemoved => "employeeRemoved",
+    CredentialChanged => "credentialChanged",
+    Revoked => "revoked",
 });
 unknown_on_new_values!(VerifyOutcome {
     Ok => "ok",
@@ -311,7 +341,7 @@ mod tests {
         assert_eq!(locked.outcome, SignInOutcome::LockedOut);
         assert_eq!(locked.retry_after_ms, Some(30_000));
 
-        for name in ["wrongCredentials", "disabled", "offlineNeverSignedIn", "offlineExpired"] {
+        for name in ["wrongCredentials", "disabled", "offlineNeverSignedIn", "offlineExpired", "notAllowedHere"] {
             let other: SignInResult = golden(json!({
                 "outcome": name, "employee": null, "filesRoot": null,
                 "offline": false, "retryAfterMs": null
@@ -421,7 +451,18 @@ mod tests {
             }
         }
         use SignInOutcome as S;
-        check(&[S::Ok, S::WrongCredentials, S::Disabled, S::LockedOut, S::OfflineNeverSignedIn, S::OfflineExpired, S::Unknown]);
+        check(&[
+            S::Ok,
+            S::WrongCredentials,
+            S::Disabled,
+            S::LockedOut,
+            S::OfflineNeverSignedIn,
+            S::OfflineExpired,
+            S::NotAllowedHere,
+            S::Unknown,
+        ]);
+        use SessionEndReason as R;
+        check(&[R::EmployeeRemoved, R::CredentialChanged, R::Revoked, R::Unknown]);
         check(&[VerifyOutcome::Ok, VerifyOutcome::WrongCredentials, VerifyOutcome::LockedOut, VerifyOutcome::Unknown]);
         check(&[AppKind::Builtin, AppKind::Web, AppKind::Desktop, AppKind::Unknown]);
         check(&[
@@ -431,6 +472,28 @@ mod tests {
             AdminExitOutcome::Disabled,
             AdminExitOutcome::Unknown,
         ]);
+    }
+
+    /// (1.2) The new outcome and the `session.ended` data, as the plan writes them.
+    #[test]
+    fn protocol_1_2_golden_json() {
+        let not_here: SignInResult = golden(json!({
+            "outcome": "notAllowedHere", "employee": null, "filesRoot": null,
+            "offline": false, "retryAfterMs": null
+        }));
+        assert_eq!(not_here.outcome, SignInOutcome::NotAllowedHere);
+        for (text, reason) in [
+            ("employeeRemoved", SessionEndReason::EmployeeRemoved),
+            ("credentialChanged", SessionEndReason::CredentialChanged),
+            ("revoked", SessionEndReason::Revoked),
+        ] {
+            let data: SessionEndedData = golden(json!({ "reason": text }));
+            assert_eq!(data.reason, reason);
+        }
+        // A reason a newer agent adds is Unknown, not an error.
+        let later: SessionEndedData = serde_json::from_value(json!({ "reason": "deviceMoved" })).unwrap();
+        assert_eq!(later.reason, SessionEndReason::Unknown);
+        assert_eq!(serde_json::from_str::<SignInOutcome>("\"notAllowedHere\"").unwrap(), SignInOutcome::NotAllowedHere);
     }
 
     #[test]

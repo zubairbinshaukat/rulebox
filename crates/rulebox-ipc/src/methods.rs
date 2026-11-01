@@ -23,6 +23,11 @@ pub struct Empty {}
 pub mod events {
     pub const STATE_CHANGED: &str = "state.changed";
     pub const AGENT_SHUTTING_DOWN: &str = "agent.shuttingDown";
+    /// (1.2) `{}`: the signed-in employee's app list changed; call `apps.list`
+    /// again. At most one per 2 seconds.
+    pub const APPS_CHANGED: &str = "apps.changed";
+    /// (1.2) `SessionEndedData`: the agent ended the employee session itself.
+    pub const SESSION_ENDED: &str = "session.ended";
 }
 
 /// First request on every connection; triggers peer verification.
@@ -127,5 +132,9 @@ mod tests {
         assert_eq!(SessionVerifyPassword::NAME, "session.verifyPassword");
         assert_eq!(AppsList::NAME, "apps.list");
         assert_eq!(AdminExitSubmit::NAME, "adminExit.submit");
+        assert_eq!(events::APPS_CHANGED, "apps.changed");
+        assert_eq!(events::SESSION_ENDED, "session.ended");
+        assert_eq!(crate::CAP_APPS_CHANGED, "appsChanged");
+        assert_eq!(crate::CAP_SESSION_ENDED, "sessionEnded");
     }
 }

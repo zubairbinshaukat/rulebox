@@ -20,6 +20,7 @@ use rulebox_win32::Win32Error;
 use crate::codec::{frame_or_end, FrameCodec};
 use crate::envelope::{ErrorCode, Frame, RpcError};
 use crate::methods::{events, Hello, Method};
+use crate::requests::{SessionEndReason, SessionEndedData};
 use crate::types::{
     AgentSnapshot, ClientInfo, HelloParams, HelloResult, ProtocolVersion, ShutdownReason,
     ShuttingDownData,
@@ -41,6 +42,10 @@ pub enum ClientEvent {
     Unlinked,
     StateChanged(AgentSnapshot),
     ShuttingDown { reason: ShutdownReason, grace_ms: u64 },
+    /// (1.2) `apps.changed`: call `apps.list` again.
+    AppsChanged,
+    /// (1.2) `session.ended`: the agent ended the employee session.
+    SessionEnded(SessionEndReason),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -445,6 +450,45 @@ fn parse_event(event: &str, data: serde_json::Value) -> Option<ClientEvent> {
             let data: ShuttingDownData = serde_json::from_value(data).ok()?;
             Some(ClientEvent::ShuttingDown { reason: data.reason, grace_ms: data.grace_ms })
         }
+        // The data is `{}`; whatever it holds, the event means the same.
+        events::APPS_CHANGED => Some(ClientEvent::AppsChanged),
+        events::SESSION_ENDED => {
+            let data: SessionEndedData = serde_json::from_value(data).ok()?;
+            Some(ClientEvent::SessionEnded(data.reason))
+        }
         _ => None,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn protocol_1_2_events_parse() {
+        assert!(matches!(parse_event("apps.changed", json!({})), Some(ClientEvent::AppsChanged)));
+        assert!(matches!(
+            parse_event("session.ended", json!({ "reason": "employeeRemoved" })),
+            Some(ClientEvent::SessionEnded(SessionEndReason::EmployeeRemoved))
+        ));
+        assert!(matches!(
+            parse_event("session.ended", json!({ "reason": "somethingNew" })),
+            Some(ClientEvent::SessionEnded(SessionEndReason::Unknown))
+        ));
+        // Data of the wrong shape is ignored, like any other unparsable event.
+        assert!(parse_event("session.ended", json!({})).is_none());
+    }
+
+    /// A client of an older minor (or this one, for a newer agent's event) skips an
+    /// event name it does not know instead of failing the connection.
+    #[test]
+    fn unknown_events_are_ignored() {
+        assert!(parse_event("apps.somethingLater", json!({ "x": 1 })).is_none());
+        assert!(parse_event("", json!(null)).is_none());
+        assert!(matches!(
+            parse_event("agent.shuttingDown", json!({ "reason": "stop", "graceMs": 10 })),
+            Some(ClientEvent::ShuttingDown { grace_ms: 10, .. })
+        ));
     }
 }
