@@ -7,7 +7,7 @@ import {
   LogoMotion,
   Panel,
 } from "@rulebox/ui";
-import type { EmployeeBrief, ShellState } from "@rulebox/types";
+import type { EmployeeBrief, SessionEndedReason, ShellState } from "@rulebox/types";
 
 import { useDocumentTitle } from "../../lib/a11y";
 import { call } from "../../lib/tauri";
@@ -19,6 +19,7 @@ type InlineError =
   | { kind: "locked"; until: number }
   | { kind: "offlineNever" }
   | { kind: "offlineExpired" }
+  | { kind: "notAllowed" }
   | { kind: "unsupported" }
   | { kind: "unknown" };
 
@@ -70,6 +71,7 @@ function outcomeToError(outcome: SignInOutcomeDto): InlineError | null {
   if (outcome === "disabled") return { kind: "disabled" };
   if (outcome === "offlineNeverSignedIn") return { kind: "offlineNever" };
   if (outcome === "offlineExpired") return { kind: "offlineExpired" };
+  if (outcome === "notAllowedHere") return { kind: "notAllowed" };
   if (outcome === "unknown") return { kind: "unknown" };
   if (typeof outcome === "object" && outcome && "lockedOut" in outcome) {
     return { kind: "locked", until: Date.now() + outcome.lockedOut.retryAfterMs };
@@ -103,10 +105,26 @@ function errorText(error: InlineError, now: number): string {
       return "You need an internet connection the first time you sign in on this PC.";
     case "offlineExpired":
       return "Connect to the internet to sign in again.";
+    case "notAllowed":
+      return "You can't sign in on this PC. Ask your administrator.";
     case "unsupported":
       return "This PC's Rulebox agent cannot sign employees in yet.";
     case "unknown":
       return "Something went wrong. Try again.";
+  }
+}
+
+/** Why the agent ended the last session (protocol 1.2), shown above the sign-in form. */
+function sessionEndedText(reason: SessionEndedReason): string {
+  switch (reason) {
+    case "employeeRemoved":
+      return "Your account can't be used on this PC any more.";
+    case "credentialChanged":
+      return "Your password was changed. Sign in again.";
+    case "revoked":
+      return "This PC was removed from your organization.";
+    case "unknown":
+      return "You were signed out.";
   }
 }
 
@@ -277,6 +295,24 @@ export function SignIn({ shell, last, onSuccess }: SignInProps) {
             }}
           >
             This PC&apos;s date and time look wrong. Tell your administrator.
+          </div>
+        ) : null}
+
+        {shell.sessionEnded ? (
+          <div
+            data-testid="session-ended-note"
+            role="status"
+            style={{
+              maxWidth: 360,
+              width: "100%",
+              padding: "10px 14px",
+              borderRadius: 12,
+              background: "var(--rb-warning-soft)",
+              color: "var(--rb-warning-text)",
+              fontSize: 13.5,
+            }}
+          >
+            {sessionEndedText(shell.sessionEnded)}
           </div>
         ) : null}
 

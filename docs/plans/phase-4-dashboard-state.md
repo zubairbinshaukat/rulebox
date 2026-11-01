@@ -4371,6 +4371,38 @@ windows only, with `.tmp/winshot.ps1`).
 **Do NOT:** add a Convex connection to the Staff App; change the
 `AgentSnapshot`.
 
+**Status (2026-11-01): built; verified on the dev machine with the demo agent (no real agent, no VM).**
+As built / deviations:
+(1) **Events:** `AgentPort` gained `events() -> broadcast::Receiver<AgentEvent>` (`AppsChanged`,
+`SessionEnded(SessionEndedReason)` in `model.rs`; `map_client_event` maps the wire event) and a
+debug-only `dev_emit`. `IpcAgent` forwards `ClientEvent::AppsChanged | SessionEnded`; `state.rs`
+reads them in one task, in order (`commands::on_agent_event`). **`apps.changed`** runs
+`session::refresh_catalogue_quietly`: one `apps.list`, tiles stay while it runs (the existing
+`refresh_catalogue` command sets `Loading` first and would blank them), a failed call keeps the
+tiles, nothing happens when signed out. **`session.ended`** (signed in, locked or not) runs the log-out
+sequence without the confirm dialog (`run_sign_out`: apps closed, memory cleared, one `session.signOut`
+that the agent may refuse, it only logs) and then sets the new `ShellState.sessionEnded` (generated
+type `SessionEndedReason`, `packages/types`, written by hand in ts-rs format: the Staff DTOs are not
+exported by `gen:types` because the lib test harness cannot start). The note is cleared at the start of the
+next sign-in; for `employeeRemoved` and `revoked` the "returning employee" form is dropped
+(`last: None`); a `revoked` event while signed out only shows the note.
+(2) **Messages** exactly as in items 1 and 2 (`SignIn.tsx`: `sessionEndedText`, `notAllowed` inline
+error); `SignInOutcome::NotAllowedHere` serializes as `"notAllowedHere"`.
+(3) **File handlers (item 3) were already wired in Phase 3:** `state.rs apply_snapshot` calls
+`FilesHub::set_handlers(handlers_from_desired(..))` on every snapshot, and "Open with" re-checks the
+deny list (`handler_app_id`, `check_content`) and the catalogue (`handler_name`, `open_with`) when a file
+is opened. Step 15 only added a test (`the_file_handler_table_follows_the_agent_snapshot`). The plan text
+("the method Step 12 left without a caller") is out of date.
+(4) **Demo agent:** snapshot handlers `.txt` and `.csv` -> `notepad` (already there); dev commands
+`{ "appsChanged": true }` and `{ "sessionEnded": "<reason>" }` (need `RULEBOX_STAFF_DEV_CMD=1` as
+before); demo user `visitor` / `demo` answers `notAllowedHere`.
+(5) Tests: `src-tauri/src/phase4_step15_tests.rs` (10, bin harness); `SignIn.test.tsx` (+6).
+Verified: `cargo clippy -p rulebox-staff --all-targets -- -D warnings` clean; `cargo test -p rulebox-staff
+--bin rulebox-staff` 184 pass; in `apps/staff-app` `pnpm typecheck`, `pnpm lint`, `pnpm test` (530) pass.
+Screenshots of the four session-ended messages taken with the demo agent
+(`.tmp/phase4/step15/`, not committed). Not verified: the `notAllowedHere` message on screen (unit-tested
+only), `apps.changed` with a real catalogue change, anything against the real agent or in the VM.
+
 ---
 
 ### Step 16 — Agent: session cleanup (reset folders)

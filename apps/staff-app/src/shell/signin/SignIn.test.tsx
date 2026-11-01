@@ -145,6 +145,37 @@ describe("SignIn states", () => {
     });
   });
 
+  it("shows the not-allowed-here error (protocol 1.2)", async () => {
+    mockedCall.mockResolvedValueOnce("notAllowedHere");
+    await submitReturning();
+    await waitFor(() => {
+      expect(screen.getByTestId("sign-in-error").textContent).toBe(
+        "You can't sign in on this PC. Ask your administrator.",
+      );
+    });
+  });
+
+  it("shows no note when the agent did not end a session", () => {
+    render(<SignIn shell={baseShell()} last={null} onSuccess={() => undefined} />);
+    expect(screen.queryByTestId("session-ended-note")).toBeNull();
+  });
+
+  it.each([
+    ["employeeRemoved", "Your account can't be used on this PC any more."],
+    ["credentialChanged", "Your password was changed. Sign in again."],
+    ["revoked", "This PC was removed from your organization."],
+    ["unknown", "You were signed out."],
+  ] as const)("explains why the session ended: %s", (reason, text) => {
+    render(
+      <SignIn shell={baseShell({ sessionEnded: reason })} last={null} onSuccess={() => undefined} />,
+    );
+    const note = screen.getByTestId("session-ended-note");
+    expect(note.textContent).toBe(text);
+    expect(note.getAttribute("role")).toBe("status");
+    // The form is still usable: the note is not an error state.
+    expect(screen.getByLabelText("Password").hasAttribute("disabled")).toBe(false);
+  });
+
   it("shows lockout countdown", async () => {
     mockedCall.mockResolvedValueOnce({ lockedOut: { retryAfterMs: 90_000 } });
     await submitReturning();

@@ -79,6 +79,7 @@ export type SignInOutcomeDto =
   | { lockedOut: { retryAfterMs: number } }
   | "offlineNeverSignedIn"
   | "offlineExpired"
+  | "notAllowedHere"
   | "unknown";
 
 /** Externally-tagged serde shape of `VerifyOutcome`. */
