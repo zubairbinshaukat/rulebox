@@ -226,7 +226,7 @@ describe("deviceApi:verifyEmployee (plan 4.12)", () => {
     expect((await verify(s.t, second, "maya", PASSWORD)).kind).toBe("ok");
     at(t0 + 2 * MINUTE_MS);
     expect((await verify(s.t, s.device, "maya", PASSWORD)).kind).toBe("ok");
-  });
+  }, 60_000); // 30 Argon2id hashes: slow under CPU contention
 
   test("nearly empty bucket: the token is taken BEFORE the Argon2id verify, once (not again for the wrong password)", async () => {
     const s = await seed();
