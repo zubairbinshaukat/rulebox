@@ -56,6 +56,26 @@ pub fn test_snapshot() -> AgentSnapshot {
     initial_snapshot(&AgentState::default(), &sim, &AgentConfig::default(), &AgentPolicy::default())
 }
 
+/// A small, complete status snapshot (report tests).
+pub fn sample_status() -> crate::backend::StatusReport {
+    crate::backend::StatusReport {
+        agent_version: "0.0.0".into(),
+        os: Some("Windows 11".into()),
+        os_build: None,
+        os_edition: None,
+        ram_mb: Some(8192),
+        disk_free_gb: None,
+        lockdown_level: None,
+        kiosk_phase: None,
+        kiosk_error: None,
+        applied_version: Some(1),
+        shell_health: None,
+        compat: serde_json::json!({}),
+        trusted_key_ids: None,
+        restart_pending: None,
+    }
+}
+
 /// The employee-session pieces a backend or enrollment test needs, built over files
 /// in `<dir>\state`.
 pub struct SessionParts {
@@ -97,12 +117,6 @@ pub fn test_session_parts(
     SessionParts { session, lockouts, audit }
 }
 
-pub fn test_session(
-    dir: &Path,
-    snapshot_rx: tokio::sync::watch::Receiver<AgentSnapshot>,
-) -> Arc<crate::session::SessionManager> {
-    test_session_parts(dir, snapshot_rx).session
-}
 
 /// A bare protocol client for tests that need to misbehave: it sends whatever
 /// it is told and never says `hello` by itself. Must be used inside a runtime.

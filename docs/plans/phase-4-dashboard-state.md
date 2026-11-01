@@ -4164,6 +4164,72 @@ apps; disable the employee in the dashboard → `fake_staff` prints a
     changes nothing (the device keeps its last signed document and stays
     locked; never unlock to save resources).
 
+**Status (2026-11-01): built and tested on the dev machine (unit and `FakeBackend`
+tests only).** The simulate-mode "Verify" run against the dev deployment was NOT
+done (no agent runs in this pass; Step 12 is not deployed). As built / deviations:
+(1) **Protocol 1.2** in `rulebox-ipc` as item 1; `SessionEndedData` /
+`SessionEndReason` live in `requests.rs` (not exported to TypeScript, like the other
+request types). The Staff App (`model.rs` `map_sign_in_result`, `agent/ipc.rs`) matches
+`SignInOutcome` and `ClientEvent` exhaustively, so it **does not compile until Step 15
+adds the two new arms** (not built or checked here: no Tauri build).
+(2) **Backend:** `heartbeat` is gone from the trait; `ping` (`devices:ping`),
+`report(auth, ReportBatch)` (`deviceApi:report`, amendment 10 replaces
+`report_audit`/`report_installs`), `verify_employee` (action, 30 s) and
+`rotate_credential`. `PingResponse` = `{ nextPingInMs, planState, rotateCredential,
+serverTimeMs? }`, missing `rotateCredential` = false. **`devices:ping` returns no
+`serverTimeMs`**, so the server-time offset (audit `serverTimeOffsetMs`, `clockSuspect`
+from the server) is no longer refreshed; the agent reads it when present (owner
+decision below). `BackendLink` as item 3 (also cleared on revocation and task end).
+(3) **Report queue** (`apps/agent/src/report.rs`, new): status (sent only when it
+changed; the backend task installs the status source), the newest install result per
+app (`push_install`, for Step 14) and the audit queue, one `report` per 60 s; security
+records (admin-exit success / lockout, employee lockout) at once; acked only when
+`accepted` equals what was sent; full-jitter backoff 5 s -> 10 min while online, no
+timer while offline. A backlog drains in consecutive batches of 50 inside one flush.
+The old `dropped:N;` detail marker is gone: the count travels in `audit.dropped`.
+`ConvexAuditSink` sends through the link; `--sim-demo` keeps `LogAuditSink`;
+`NullAuditSink` is test-only.
+(4) **Directory:** `ConvexDirectory` as item 4 (`rate_limited`, server errors and bad
+answers map to `Unreachable`, so the offline path runs). Phase 3 is done, so the
+`fixtureDirectory` config key, its `choose` branch, the sample-file export of the real
+agent and `vm-deploy.ps1 -FixtureDirectory` are gone (the sample files are now
+compiled for tests only; deleting them and `assets/fixture-samples` is left to the
+owner). `choose(sim_demo)`: fixtures only with `--sim-demo`.
+(5) **Catalogue** (`apps/agent/src/catalog.rs`, `rulebox-policy/src/paths.rs`):
+`AgentPolicy` gains `has_document`, `catalog`, `catalog_problem` (`catalog_invalid`) and
+`roster_group_id` (amendment 9: no `employees` map). `paths.rs` mirrors
+`pathRules.ts` (`exePathProblem`, `argsProblem`, `fileArgProblem`) and the 106 names of
+`DENY_PROGRAMS`; `CatalogApp::visible_to` / `is_portable`. Desktop apps need a valid
+template and an existing exe (`Platform::file_exists`); icons stay null until Step 14.
+`Platform::path_roots`: `{ProgramFiles}` = parent of the install root,
+`{ProgramFilesX86}` / `{SystemRoot}` from the `ProgramFiles(x86)` / `SystemRoot`
+environment variables (not `FOLDERID_*`: no `rulebox-win32` change in this pass).
+(6) **Roster rules** (`session.rs`): the cache entry gains `credentialRevision`,
+`rosterGroup`, `rosterEpoch` (`serde(default)`). Verdict: listed with a higher revision
+= `credentialChanged`; not listed = `employeeRemoved`, except a roster of the same group
+at or below the epoch held at the online sign-in (the roster lags the server, which had
+just said yes). A roster that is not the current document's group changes nothing but
+refuses every offline sign-in (fail closed, also with no document or no group).
+Offline: the password is verified FIRST, then the roster (so `notAllowedHere` reveals
+nothing without the password); a changed revision drops the entry and answers
+`offlineNeverSignedIn`. The roster reaches the session only after `save_roster`'s
+monotonic check (Step 9 floor). `apps.changed`: one at once, one more at the end of a 2 s
+burst. Revocation sends `session.ended { revoked }`.
+(7) **Rotation** as item 8 with the Step 12 contract: pending secret saved first, the
+SAME secret retried after a lost answer (at start and at each ping), `conflict` -> one
+ping with the pending secret (adopted if the server knows it, else dropped and no new
+rotation from this run; the old secret keeps working), `not_ready` -> pending dropped,
+not retried this run, `device_rejected` for the old secret -> pending tried; an
+`unknownDevice` subscription answer while a rotation is pending is a revocation only
+after a ping with the pending secret was refused too. The old secret is never deleted
+before the new one is confirmed and saved.
+(8) **Ping** as amendment 11; the interval comes from the head (the ping answer's
+`nextPingInMs` only while no head is known); a failed ping waits at least 1 s.
+(9) Verified: `cargo test -p rulebox-agent` (435), `-p rulebox-policy` (47), `-p
+rulebox-ipc --features client,server` (69 + 12 + 1); `cargo clippy -p rulebox-agent -p
+rulebox-policy -p rulebox-ipc --all-targets --features rulebox-ipc/client,rulebox-ipc/server
+-- -D warnings` clean. Not verified: anything against a deployment, the Staff App, the VM.
+
 ---
 
 ### Step 14 — Agent: install engine

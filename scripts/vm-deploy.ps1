@@ -17,23 +17,17 @@
        (for the pipe probe).
     5. Writes current.json.
     6. Runs `rulebox-agent.exe service install`.
-    7. With -FixtureDirectory: stops the service, writes
-       %ProgramData%\Rulebox\state\agent-config.json with
-       { "fixtureDirectory": true } (other keys kept), starts the service again.
 
   It changes this machine. Take a VM snapshot first.
 
 .PARAMETER SourceDir
   Folder with the binaries. Defaults to the folder this script is in.
 
-.PARAMETER FixtureDirectory
-  Turn on the demo employee directory (honoured only on a marked machine).
 #>
 #Requires -RunAsAdministrator
 [CmdletBinding()]
 param(
-    [string]$SourceDir = '',
-    [switch]$FixtureDirectory
+    [string]$SourceDir = ''
 )
 
 $ErrorActionPreference = 'Stop'
@@ -145,27 +139,6 @@ Write-Host "Installing the service from $install ..."
 & (Join-Path $install 'rulebox-agent.exe') service install
 if ($LASTEXITCODE -ne 0) {
     Fail "service install failed with exit code $LASTEXITCODE (see the message above)."
-}
-
-# 7. Optional: the demo employee directory.
-if ($FixtureDirectory) {
-    $svc = Get-Service -Name RuleboxAgent
-    if ($svc.Status -ne 'Stopped') {
-        Stop-Service -Name RuleboxAgent -Force
-        $svc.WaitForStatus('Stopped', [TimeSpan]::FromSeconds(30))
-    }
-    $stateDir = Join-Path $env:ProgramData 'Rulebox\state'
-    New-Item -ItemType Directory -Path $stateDir -Force | Out-Null
-    $configPath = Join-Path $stateDir 'agent-config.json'
-    if (Test-Path -LiteralPath $configPath) {
-        $config = Get-Content -LiteralPath $configPath -Raw | ConvertFrom-Json
-    } else {
-        $config = New-Object psobject
-    }
-    $config | Add-Member -NotePropertyName fixtureDirectory -NotePropertyValue $true -Force
-    [System.IO.File]::WriteAllText($configPath, ($config | ConvertTo-Json -Depth 5), (New-Object System.Text.UTF8Encoding($false)))
-    Start-Service -Name RuleboxAgent
-    Write-Host 'fixtureDirectory is on (demo employees).'
 }
 
 Write-Host ''

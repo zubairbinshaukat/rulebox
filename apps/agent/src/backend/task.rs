@@ -27,6 +27,7 @@
 use std::sync::Arc;
 use std::time::Duration;
 
+use futures_util::future::FusedFuture;
 use futures_util::FutureExt;
 use rulebox_ipc::types::{AgentSnapshot, ConnectionStatus, EnrollmentStatus};
 use rulebox_policy::envelope::{verify_for_head, HeadRef, Payload, PublishedKey, SignedEnvelope, VerifyError};
@@ -38,9 +39,11 @@ use tokio::time::Instant;
 use tokio_util::sync::CancellationToken;
 
 use super::{
-    Backend, BackendError, BackendEvent, BackendFactory, DesiredFetch, DeviceAuth, Head, HeartbeatResponse,
-    StatusReport, CODE_NOT_FOUND,
+    sha256_hex, Backend, BackendError, BackendEvent, BackendFactory, BackendLink, DesiredFetch, DeviceAuth, Head,
+    PingResponse, StatusReport, CODE_CONFLICT, CODE_DEVICE_REJECTED, CODE_NOT_FOUND, CODE_NOT_READY,
 };
+use crate::report::{backoff_delay, ReportQueue};
+use rulebox_ipc::requests::SessionEndReason;
 use crate::agent::{load_verified_cache, CachedDesired};
 use crate::agent_policy::AgentPolicy;
 use crate::compat;
@@ -52,14 +55,25 @@ use crate::session::SessionManager;
 use crate::state::{write_atomic, SharedState, SnapshotHandle};
 use crate::trust::{self, TrustError};
 
-/// First heartbeat after a transition to online: a random wait up to this long.
-const FIRST_HEARTBEAT_JITTER_MS: u64 = 10_000;
-/// Used until the server says otherwise (it says 300,000 in Phase 2).
-const DEFAULT_PING_MS: u64 = 300_000;
-/// The server's `nextPingInMs` is clamped to this range, so a buggy value neither
-/// makes a tight loop nor silences the device for a day.
-const MIN_PING_MS: u64 = 5_000;
-const MAX_PING_MS: u64 = 3_600_000;
+/// First ping after a transition to online: a random wait up to this long.
+const FIRST_PING_JITTER_MS: u64 = 10_000;
+/// (A13) After an outage longer than [`LONG_OUTAGE`], the first ping waits a
+/// random time up to this long instead, so a fleet coming back does not ping at once.
+const OUTAGE_PING_JITTER_MS: u64 = 120_000;
+const LONG_OUTAGE: Duration = Duration::from_secs(300);
+/// (A13) A changed `pingNonce` ("Check now"): one ping within this long.
+const NONCE_PING_JITTER_MS: u64 = 5_000;
+/// (A13) While `now < fastUntil` (watch mode): a ping every minute.
+const FAST_PING_MS: u64 = 60_000;
+/// Used until the head says otherwise (the server default is 30 minutes).
+const DEFAULT_PING_MS: u64 = 1_800_000;
+/// (A12) The interval is clamped to this range, so a buggy value neither makes a
+/// tight loop nor silences the device for a day.
+const MIN_PING_MS: u64 = 60_000;
+const MAX_PING_MS: u64 = 21_600_000;
+/// A failed ping is retried with full-jitter backoff (`report::backoff_delay`),
+/// never sooner than this.
+const MIN_RETRY: Duration = Duration::from_secs(1);
 /// More than this behind the highest clock seen: `clockSuspect` (Section 5.8).
 const CLOCK_SUSPECT_MS: u64 = 24 * 3_600_000;
 /// `last_wall_clock_ms` is rewritten to disk when it moved by at least this much.
@@ -94,6 +108,12 @@ pub struct TaskContext {
     pub now_ms: Arc<dyn Fn() -> u64 + Send + Sync>,
     /// A random number in `0..=max`.
     pub jitter: Arc<dyn Fn(u64) -> u64 + Send + Sync>,
+    /// (Step 13) Set while the task runs: the directory and the report sink use it.
+    pub link: Arc<BackendLink>,
+    /// (Step 13) The status goes out with the report, not the ping.
+    pub report: Arc<ReportQueue>,
+    /// (Step 13) Every verified roster that was saved (the session layer reads it).
+    pub roster_tx: Arc<watch::Sender<RosterState>>,
 }
 
 /// A random number in `0..=max` from the OS random source.
@@ -396,11 +416,17 @@ pub fn build_status(ctx: &TaskContext, desired_problem: Option<&str>) -> Option<
 
 // -- the task ---------------------------------------------------------------------
 
-/// What a spawned heartbeat call reports back.
-struct HeartbeatDone {
-    result: Result<HeartbeatResponse, BackendError>,
-    /// The serialized status that was sent, when one was.
-    sent_status: Option<String>,
+/// What a spawned ping reports back.
+struct PingDone {
+    /// The secret the ping used was the pending (rotating) one: a probe.
+    probe: bool,
+    result: Result<PingResponse, BackendError>,
+}
+
+/// What a spawned `rotateCredential` reports back.
+struct RotateDone {
+    new_secret: String,
+    result: Result<(), BackendError>,
 }
 
 /// What a spawned fetch reports back.
@@ -409,11 +435,187 @@ enum FetchDone {
     Roster { group_id: String, target: u64, result: Result<RosterState, RosterError> },
 }
 
-/// `base_ms` with +-10 % jitter.
+/// `base_ms` (clamped to `[60 s, 6 h]`) with +-10 % jitter.
 fn ping_delay(ctx: &TaskContext, base_ms: u64) -> Duration {
     let base = base_ms.clamp(MIN_PING_MS, MAX_PING_MS);
     let spread = base / 10;
     Duration::from_millis(base - spread + (ctx.jitter)(2 * spread))
+}
+
+fn is_code(error: &BackendError, code: &str) -> bool {
+    matches!(error, BackendError::Rejected { code: got } if got == code)
+}
+
+/// The ping schedule (A4, A12, A13): the interval from the head, a ping 0-5 s
+/// after a changed nonce, every minute while `fastUntil` is ahead, full-jitter
+/// backoff after an error, and a longer first wait after a long outage.
+struct Pinger {
+    next_at: Option<Instant>,
+    /// From the head; the ping answer's value only while no head is known.
+    interval_ms: u64,
+    head_interval: bool,
+    nonce: Option<u64>,
+    fast_until_ms: u64,
+    failures: u32,
+    task: Option<JoinHandle<()>>,
+    offline_since: Option<Instant>,
+    plan_state: String,
+}
+
+impl Pinger {
+    fn new() -> Self {
+        Self {
+            next_at: None,
+            interval_ms: DEFAULT_PING_MS,
+            head_interval: false,
+            nonce: None,
+            fast_until_ms: 0,
+            failures: 0,
+            task: None,
+            offline_since: None,
+            plan_state: "ok".into(),
+        }
+    }
+
+    fn sooner(&mut self, at: Instant) {
+        self.next_at = Some(self.next_at.map_or(at, |next| next.min(at)));
+    }
+
+    fn fast(&self, ctx: &TaskContext) -> bool {
+        (ctx.now_ms)() < self.fast_until_ms
+    }
+
+    /// The connection changed.
+    fn on_connection(&mut self, ctx: &TaskContext, was_online: bool, online: bool) {
+        if online && !was_online {
+            let long = self.offline_since.is_some_and(|since| since.elapsed() > LONG_OUTAGE);
+            let max = if long { OUTAGE_PING_JITTER_MS } else { FIRST_PING_JITTER_MS };
+            self.next_at = Some(Instant::now() + Duration::from_millis((ctx.jitter)(max)));
+            self.offline_since = None;
+        }
+        if !online {
+            self.next_at = None;
+            if self.offline_since.is_none() {
+                self.offline_since = Some(Instant::now());
+            }
+        }
+    }
+
+    /// A head arrived: interval, nonce, watch mode.
+    fn on_head(&mut self, ctx: &TaskContext, head: &Head, online: bool) {
+        self.interval_ms = head.ping_interval_ms.clamp(MIN_PING_MS, MAX_PING_MS);
+        self.head_interval = true;
+        let nonce_changed = self.nonce.is_some_and(|nonce| nonce != head.ping_nonce);
+        self.nonce = Some(head.ping_nonce);
+        self.fast_until_ms = head.fast_until;
+        if !online {
+            return;
+        }
+        if nonce_changed {
+            tracing::info!("the dashboard asked for a check; pinging");
+            self.sooner(Instant::now() + Duration::from_millis((ctx.jitter)(NONCE_PING_JITTER_MS)));
+        }
+        if self.fast(ctx) {
+            self.sooner(Instant::now() + Duration::from_millis(FAST_PING_MS));
+        } else if let Some(next) = self.next_at {
+            // A shorter interval takes effect now, not after the old long wait.
+            let latest = Instant::now() + ping_delay(ctx, self.interval_ms);
+            if next > latest {
+                self.next_at = Some(latest);
+            }
+        }
+    }
+
+    /// When the next regular ping is due, from now.
+    fn schedule(&mut self, ctx: &TaskContext) {
+        let delay = if self.fast(ctx) { Duration::from_millis(FAST_PING_MS) } else { ping_delay(ctx, self.interval_ms) };
+        self.next_at = Some(Instant::now() + delay);
+    }
+
+    fn failed(&mut self, ctx: &TaskContext) {
+        self.failures = self.failures.saturating_add(1);
+        let delay = backoff_delay(self.failures, ctx.jitter.as_ref()).max(MIN_RETRY);
+        self.next_at = Some(Instant::now() + delay);
+    }
+
+    fn in_flight(&self) -> bool {
+        self.task.as_ref().is_some_and(|task| !task.is_finished())
+    }
+
+    fn note_plan_state(&mut self, plan_state: &str) {
+        if plan_state != self.plan_state {
+            // (Step 13 item 12) Logged only: the PC keeps its last signed document
+            // and stays locked; nothing is unlocked to save resources.
+            tracing::warn!(plan_state, "the organization's plan state changed; nothing changes on this PC");
+            self.plan_state = plan_state.to_string();
+        }
+    }
+}
+
+/// A credential rotation (Step 13 item 8; Step 12 contract). The new secret is
+/// saved as `rotating_device_secret` before its hash is sent; the old secret
+/// stays `device_secret` (and in use) until the server confirmed the new one, so
+/// the PC never holds neither. A lost answer is retried with the SAME pending
+/// secret (the server answers ok again).
+struct Rotation {
+    pending: Option<String>,
+    task: Option<JoinHandle<()>>,
+    /// `not_ready` (no credentials row on the server): not tried again by this task.
+    blocked: bool,
+    /// The subscription said `unknownDevice` while a rotation was pending: the
+    /// pending secret is being tried before that counts as a revocation.
+    unknown_device: bool,
+}
+
+impl Rotation {
+    fn busy(&self) -> bool {
+        self.task.as_ref().is_some_and(|task| !task.is_finished())
+    }
+}
+
+/// Saves a new pending secret (first) and returns it.
+fn new_pending_secret(ctx: &TaskContext) -> Option<String> {
+    let secret = match crate::enroll::new_device_secret() {
+        Ok(secret) => secret,
+        Err(_) => {
+            tracing::error!("cannot make a new device secret (no random numbers); rotation not started");
+            return None;
+        }
+    };
+    match ctx.shared.update_secrets(|secrets| secrets.rotating_device_secret = Some(secret.clone())) {
+        Ok(()) => Some(secret),
+        Err(error) => {
+            // Nothing was sent: the server still has only the old secret.
+            tracing::error!("cannot save the new device secret ({error}); rotation not started");
+            None
+        }
+    }
+}
+
+/// Makes the confirmed new secret the device secret. False when it could not be
+/// saved: the old one stays in use (still valid until the new one is used) and
+/// the rotation is retried.
+fn adopt_secret(ctx: &TaskContext, new_secret: &str) -> bool {
+    let saved = ctx.shared.update_secrets(|secrets| {
+        secrets.device_secret = Some(new_secret.to_string());
+        secrets.rotating_device_secret = None;
+    });
+    match saved {
+        Ok(()) => {
+            tracing::info!("the device credential was rotated");
+            true
+        }
+        Err(error) => {
+            tracing::error!("cannot save the rotated device secret ({error}); keeping the old one for now");
+            false
+        }
+    }
+}
+
+fn drop_pending_secret(ctx: &TaskContext) {
+    if let Err(error) = ctx.shared.update_secrets(|secrets| secrets.rotating_device_secret = None) {
+        tracing::error!("cannot clear the pending device secret: {error}");
+    }
 }
 
 fn handle_revoked(ctx: &TaskContext, unknown: bool) {
@@ -433,6 +635,9 @@ fn handle_revoked(ctx: &TaskContext, unknown: bool) {
         snapshot.enrollment = EnrollmentStatus::Revoked;
         snapshot.connection = ConnectionStatus::Offline;
     });
+    ctx.link.clear();
+    // (Step 13) The Staff App hears why.
+    ctx.session.end(SessionEndReason::Revoked);
     ctx.session.clear("revoked");
 }
 
@@ -589,6 +794,9 @@ impl Fetcher {
             tracing::error!("cannot save roster.json: {error}");
         }
         tracing::info!(epoch = roster.epoch, members = roster.members.len(), "roster updated");
+        // (Step 13) Only a roster that passed the monotonic check reaches the
+        // session layer.
+        ctx.roster_tx.send_replace(roster.clone());
         self.roster = roster;
         Ok(())
     }
@@ -664,15 +872,27 @@ impl Fetcher {
     }
 }
 
+/// Why the pending secret is being tried with a ping.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ProbeWhy {
+    /// `rotateCredential` answered `conflict`: the old secret still works.
+    Conflict,
+    /// `rotateCredential` refused the old secret (`device_rejected`).
+    OldRejected,
+    /// The subscription answered `unknownDevice` for the old secret.
+    UnknownDevice,
+}
+
 /// Runs until `shutdown`, or until the backend says the device is revoked (or
-/// unknown). Never calls the reconciler's `disable`: a remote revocation must not
-/// unlock a PC (README answer Q11).
+/// unknown, with every secret it might know tried). Never calls the reconciler's
+/// `disable`: a remote revocation must not unlock a PC (README answer Q11).
 pub async fn run_backend_task(
     ctx: Arc<TaskContext>,
     backend: Arc<dyn Backend>,
     auth: DeviceAuth,
     shutdown: CancellationToken,
 ) {
+    let mut auth = auth;
     // The anti-rollback floor: the highest of every version accepted or applied
     // (`agent-state.json`), then the cache's (`load_cached`).
     let mut sync = DesiredSync::new(ctx.shared.read(|state| state.version_floor()));
@@ -681,22 +901,67 @@ pub async fn run_backend_task(
         tracing::error!("this PC trusts no policy key (enrolled before Phase 4?): no document can be applied; re-enroll it");
     }
     note_clock(&ctx);
+    ctx.link.set(Arc::clone(&backend), auth.clone());
+
+    // The status leaves with the report (A12); the report task builds it from here.
+    let problem: Arc<std::sync::Mutex<Option<&'static str>>> = Arc::new(std::sync::Mutex::new(sync.problem));
+    {
+        let (status_ctx, status_problem) = (Arc::clone(&ctx), Arc::clone(&problem));
+        ctx.report.set_status_source(Some(Arc::new(move || {
+            let current = *crate::state::lock(&status_problem);
+            build_status(&status_ctx, current)
+        })));
+    }
 
     let (event_tx, mut events) = mpsc::channel::<BackendEvent>(EVENT_QUEUE);
-    let mut subscription = backend.subscribe(auth.clone(), event_tx, shutdown.clone()).fuse();
-    let (done_tx, mut done_rx) = mpsc::channel::<HeartbeatDone>(1);
+    let mut sub_cancel = shutdown.child_token();
+    let mut subscription = backend.subscribe(auth.clone(), event_tx.clone(), sub_cancel.clone()).fuse();
+    let (ping_tx, mut ping_rx) = mpsc::channel::<PingDone>(2);
+    let (rotate_tx, mut rotate_rx) = mpsc::channel::<RotateDone>(1);
     let (fetch_tx, mut fetch_rx) = mpsc::channel::<FetchDone>(1);
     let mut fetcher = Fetcher::new(RosterState::load(&ctx.paths.roster()));
-    let mut heartbeat: Option<JoinHandle<()>> = None;
-    let mut heartbeat_at: Option<Instant> = None;
+    ctx.roster_tx.send_replace(fetcher.roster.clone());
+    let mut pinger = Pinger::new();
+    let pending = match ctx.shared.secrets(|secrets| secrets.rotating_device_secret.clone()) {
+        Ok(pending) => pending,
+        Err(error) => {
+            tracing::error!("cannot read the secrets: {error}");
+            None
+        }
+    };
+    let mut rotation = Rotation { pending, task: None, blocked: false, unknown_device: false };
+    let mut probe: Option<ProbeWhy> = None;
+    // The last probe got no answer: try it again at the next ping time.
+    let mut probe_retry = false;
+    let mut probe_task: Option<JoinHandle<()>> = None;
     let mut online = false;
-    let mut last_sent: Option<String> = None;
-    let mut next_ping_ms = DEFAULT_PING_MS;
     let mut revoked = false;
+
+    let spawn_rotate = |rotation: &mut Rotation, auth: &DeviceAuth, new_secret: String| {
+        let (backend, auth, tx) = (Arc::clone(&backend), auth.clone(), rotate_tx.clone());
+        rotation.task = Some(tokio::spawn(async move {
+            let result = backend.rotate_credential(&auth, &sha256_hex(&new_secret)).await;
+            let _ = tx.send(RotateDone { new_secret, result }).await;
+        }));
+    };
+    let spawn_ping = |auth: DeviceAuth, probe: bool| {
+        let (backend, tx) = (Arc::clone(&backend), ping_tx.clone());
+        tokio::spawn(async move {
+            let result = backend.ping(&auth).await;
+            let _ = tx.send(PingDone { probe, result }).await;
+        })
+    };
+
+    // (Step 13 item 8) A rotation that was under way when the agent stopped: ask
+    // again with the old secret and the same new hash (idempotent on the server).
+    if let Some(new_secret) = rotation.pending.clone() {
+        tracing::info!("a credential rotation was not finished; asking the backend again");
+        spawn_rotate(&mut rotation, &auth, new_secret);
+    }
 
     loop {
         let timer = async {
-            match heartbeat_at {
+            match pinger.next_at {
                 Some(at) => tokio::time::sleep_until(at).await,
                 None => std::future::pending::<()>().await,
             }
@@ -707,6 +972,7 @@ pub async fn run_backend_task(
                 None => std::future::pending::<()>().await,
             }
         };
+        let mut resubscribe = false;
         tokio::select! {
             () = shutdown.cancelled() => break,
             () = &mut subscription => {
@@ -718,16 +984,20 @@ pub async fn run_backend_task(
                 BackendEvent::Connection(status) => {
                     ctx.snapshot.update(|snapshot| snapshot.connection = status);
                     let now_online = status == ConnectionStatus::Online;
+                    pinger.on_connection(&ctx, online, now_online);
                     if now_online && !online {
-                        let wait = Duration::from_millis((ctx.jitter)(FIRST_HEARTBEAT_JITTER_MS));
-                        heartbeat_at = Some(Instant::now() + wait);
-                    }
-                    if !now_online {
-                        heartbeat_at = None;
+                        ctx.report.status_changed();
                     }
                     online = now_online;
                 }
                 BackendEvent::Desired(DesiredFetch::Ok { head, keys, retired_key_ids }) => {
+                    if rotation.unknown_device {
+                        // The (new) secret is known after all.
+                        rotation.unknown_device = false;
+                    }
+                    if let Some(head) = &head {
+                        pinger.on_head(&ctx, head, online);
+                    }
                     fetcher.on_head(&ctx, head, keys, retired_key_ids, &sync);
                     fetcher.kick(&ctx, &backend, &auth, &sync, &fetch_tx);
                 }
@@ -737,9 +1007,21 @@ pub async fn run_backend_task(
                     break;
                 }
                 BackendEvent::Desired(DesiredFetch::UnknownDevice) => {
-                    handle_revoked(&ctx, true);
-                    revoked = true;
-                    break;
+                    match rotation.pending.clone() {
+                        // (Step 13 item 8) Not a revocation until both secrets were tried.
+                        Some(new_secret) if !rotation.unknown_device => {
+                            tracing::warn!("the backend does not know the current secret; trying the pending one");
+                            rotation.unknown_device = true;
+                            probe = Some(ProbeWhy::UnknownDevice);
+                            probe_task = Some(spawn_ping(DeviceAuth { device_id: auth.device_id.clone(), device_secret: new_secret }, true));
+                        }
+                        Some(_) => {}
+                        None => {
+                            handle_revoked(&ctx, true);
+                            revoked = true;
+                            break;
+                        }
+                    }
                 }
             },
             Some(done) = fetch_rx.recv() => {
@@ -749,6 +1031,15 @@ pub async fn run_backend_task(
                 if fetcher.on_done(&ctx, &auth, &mut sync, done) {
                     ctx.control.desired_changed();
                 }
+                let changed = {
+                    let mut current = crate::state::lock(&problem);
+                    let changed = *current != sync.problem;
+                    *current = sync.problem;
+                    changed
+                };
+                if changed || sync.accepted_version().is_some() {
+                    ctx.report.status_changed();
+                }
                 fetcher.kick(&ctx, &backend, &auth, &sync, &fetch_tx);
             }
             () = retry => {
@@ -756,61 +1047,156 @@ pub async fn run_backend_task(
                 fetcher.kick(&ctx, &backend, &auth, &sync, &fetch_tx);
             }
             () = timer => {
-                heartbeat_at = None;
-                let in_flight = heartbeat.as_ref().is_some_and(|task| !task.is_finished());
-                if online && !in_flight {
-                    let status = build_status(&ctx, sync.problem);
-                    let text = status.as_ref().and_then(|status| serde_json::to_string(status).ok());
-                    // Only a status that differs from the last accepted one is sent.
-                    let send = match (&status, &text) {
-                        (Some(status), Some(text)) if last_sent.as_deref() != Some(text.as_str()) => {
-                            Some((status.clone(), text.clone()))
-                        }
-                        _ => None,
-                    };
-                    let backend = Arc::clone(&backend);
-                    let auth = auth.clone();
-                    let done_tx = done_tx.clone();
-                    heartbeat = Some(tokio::spawn(async move {
-                        let (status, sent_status) = match send {
-                            Some((status, text)) => (Some(status), Some(text)),
-                            None => (None, None),
-                        };
-                        let result = backend.heartbeat(&auth, status).await;
-                        let _ = done_tx.send(HeartbeatDone { result, sent_status }).await;
-                    }));
+                pinger.next_at = None;
+                let probe_running = probe_task.as_ref().is_some_and(|task| !task.is_finished());
+                if let (true, Some(new_secret), false) = (probe_retry, rotation.pending.clone(), probe_running) {
+                    probe_retry = false;
+                    probe_task = Some(spawn_ping(DeviceAuth { device_id: auth.device_id.clone(), device_secret: new_secret }, true));
+                } else if online && !pinger.in_flight() {
+                    pinger.task = Some(spawn_ping(auth.clone(), false));
                 }
             }
-            Some(done) = done_rx.recv() => {
-                match done.result {
-                    Ok(answer) => {
-                        if let Some(text) = done.sent_status {
-                            last_sent = Some(text);
+            Some(done) = ping_rx.recv() => {
+                if done.probe {
+                    probe_task = None;
+                    let why = probe.take().unwrap_or(ProbeWhy::UnknownDevice);
+                    match done.result {
+                        Ok(answer) => {
+                            // The backend knows the pending secret: it is the one.
+                            if let Some(new_secret) = rotation.pending.take() {
+                                if adopt_secret(&ctx, &new_secret) {
+                                    auth = DeviceAuth { device_id: auth.device_id.clone(), device_secret: new_secret };
+                                    ctx.link.set_auth(auth.clone());
+                                    resubscribe = true;
+                                } else {
+                                    rotation.pending = Some(new_secret);
+                                }
+                            }
+                            rotation.unknown_device = false;
+                            pinger.note_plan_state(&answer.plan_state);
+                            pinger.schedule(&ctx);
                         }
-                        next_ping_ms = answer.next_ping_in_ms;
-                        note_server_time(&ctx, answer.server_time_ms);
-                        note_clock(&ctx);
+                        Err(error) if is_code(&error, CODE_DEVICE_REJECTED) => match why {
+                            ProbeWhy::UnknownDevice => {
+                                tracing::warn!("neither the current nor the pending secret is known to the backend");
+                                handle_revoked(&ctx, true);
+                                revoked = true;
+                                break;
+                            }
+                            ProbeWhy::Conflict => {
+                                // The old secret works (the server answered `conflict` to
+                                // it); the pending one is not the server's. Keep the old
+                                // one and stop rotating until asked again.
+                                tracing::error!("credential rotation conflict; staying on the current secret");
+                                rotation.pending = None;
+                                drop_pending_secret(&ctx);
+                                rotation.blocked = true;
+                            }
+                            _ => {
+                                // Both refused, but the subscription has not said so:
+                                // keep both and let it decide.
+                                tracing::warn!("the backend refused both device secrets; keeping both");
+                            }
+                        },
+                        Err(error) => {
+                            tracing::debug!("cannot try the pending secret ({error}); trying again later");
+                            probe = Some(why);
+                            probe_retry = true;
+                            pinger.failed(&ctx);
+                        }
                     }
-                    Err(BackendError::Rejected { .. }) => {
-                        // The subscription decides what a rejection means.
-                        tracing::warn!("the backend rejected the heartbeat");
-                        last_sent = None;
-                    }
-                    Err(error) => {
-                        tracing::debug!("heartbeat failed ({error}); waiting for the next one");
+                } else {
+                    pinger.task = None;
+                    match done.result {
+                        Ok(answer) => {
+                            pinger.failures = 0;
+                            if !pinger.head_interval {
+                                pinger.interval_ms = answer.next_ping_in_ms.clamp(MIN_PING_MS, MAX_PING_MS);
+                            }
+                            if let Some(server_time_ms) = answer.server_time_ms {
+                                note_server_time(&ctx, server_time_ms);
+                            }
+                            note_clock(&ctx);
+                            pinger.note_plan_state(&answer.plan_state);
+                            pinger.schedule(&ctx);
+                            if !rotation.blocked && !rotation.busy() {
+                                if let Some(new_secret) = rotation.pending.clone() {
+                                    // An earlier try got no answer: the same secret again.
+                                    spawn_rotate(&mut rotation, &auth, new_secret);
+                                } else if answer.rotate_credential {
+                                    if let Some(new_secret) = new_pending_secret(&ctx) {
+                                        tracing::info!("the backend asked for a new device credential; rotating");
+                                        rotation.pending = Some(new_secret.clone());
+                                        spawn_rotate(&mut rotation, &auth, new_secret);
+                                    }
+                                }
+                            }
+                        }
+                        Err(error) => {
+                            if is_code(&error, CODE_DEVICE_REJECTED) {
+                                // The subscription decides what a rejection means.
+                                tracing::warn!("the backend rejected the ping");
+                            } else {
+                                tracing::debug!("ping failed ({error}); backing off");
+                            }
+                            pinger.failed(&ctx);
+                        }
                     }
                 }
-                if online {
-                    heartbeat_at = Some(Instant::now() + ping_delay(&ctx, next_ping_ms));
+            }
+            Some(done) = rotate_rx.recv() => {
+                rotation.task = None;
+                match done.result {
+                    Ok(()) => {
+                        if adopt_secret(&ctx, &done.new_secret) {
+                            rotation.pending = None;
+                            auth = DeviceAuth { device_id: auth.device_id.clone(), device_secret: done.new_secret };
+                            ctx.link.set_auth(auth.clone());
+                            resubscribe = true;
+                        }
+                    }
+                    Err(error) if is_code(&error, CODE_CONFLICT) => {
+                        tracing::warn!("the backend holds another new credential; trying the pending secret");
+                        probe = Some(ProbeWhy::Conflict);
+                        probe_task = Some(spawn_ping(DeviceAuth { device_id: auth.device_id.clone(), device_secret: done.new_secret }, true));
+                    }
+                    Err(error) if is_code(&error, CODE_NOT_READY) => {
+                        // Nothing changed on the server (no credentials row yet).
+                        tracing::warn!("the backend cannot rotate this device's credential yet (not_ready)");
+                        rotation.pending = None;
+                        drop_pending_secret(&ctx);
+                        rotation.blocked = true;
+                    }
+                    Err(error) if is_code(&error, CODE_DEVICE_REJECTED) => {
+                        tracing::warn!("the backend refused the current secret during rotation; trying the pending one");
+                        probe = Some(ProbeWhy::OldRejected);
+                        probe_task = Some(spawn_ping(DeviceAuth { device_id: auth.device_id.clone(), device_secret: done.new_secret }, true));
+                    }
+                    Err(error) => {
+                        // Lost answer or offline: both secrets stay; the next ping asks again.
+                        tracing::warn!("credential rotation got no answer ({error}); trying again at the next ping");
+                    }
                 }
             }
         }
+        if resubscribe {
+            // The subscription carries the credentials: start it again with the new
+            // secret (the first call with it lets the server drop the old one).
+            sub_cancel.cancel();
+            if !subscription.is_terminated() {
+                (&mut subscription).await;
+            }
+            sub_cancel = shutdown.child_token();
+            subscription = backend.subscribe(auth.clone(), event_tx.clone(), sub_cancel.clone()).fuse();
+        }
     }
 
-    if let Some(task) = heartbeat.take() {
+    for task in [pinger.task.take(), rotation.task.take(), probe_task.take()].into_iter().flatten() {
         task.abort();
     }
     fetcher.stop();
+    ctx.report.set_status_source(None);
+    ctx.link.clear();
     if !revoked {
         // Not syncing any more: do not leave "online" behind.
         ctx.snapshot.update(|snapshot| snapshot.connection = ConnectionStatus::Offline);
@@ -978,7 +1364,8 @@ mod tests {
                 let jitter_ms = Arc::clone(&jitter_ms);
                 Arc::new(move |max| jitter_ms.load(Ordering::SeqCst).min(max))
             };
-            let session = crate::testutil::test_session(dir.path(), snapshot_rx.clone());
+            let parts = crate::testutil::test_session_parts(dir.path(), snapshot_rx.clone());
+            let (session, audit) = (parts.session, parts.audit);
             let control = Arc::new(FakeKioskControl::new());
             let ctx = Arc::new(TaskContext {
                 shared,
@@ -991,6 +1378,9 @@ mod tests {
                 factory: Arc::new(|_| Err(BackendError::Unreachable)),
                 now_ms,
                 jitter,
+                link: BackendLink::new(),
+                report: crate::report::ReportQueue::new(audit),
+                roster_tx: Arc::new(watch::channel(RosterState::default()).0),
             });
             Self { dir, ctx, control, policy_rx, snapshot_rx, clock, jitter_ms }
         }
@@ -1145,9 +1535,8 @@ mod tests {
         let (cancel, handle) = rig.start(&fake);
         fake.publish(forged);
         settle().await;
-        fake.push(BackendEvent::Connection(ConnectionStatus::Online));
-        fake.wait_for_heartbeats(1).await;
-        let status = fake.heartbeat_calls()[0].status.clone().unwrap();
+        // (Step 13) The status goes out with the report; the task feeds its source.
+        let status = rig.ctx.report.build_status_now().unwrap();
         assert_eq!(status.kiosk_error.as_deref(), Some("desired_state_untrusted"));
         assert_eq!(status.trusted_key_ids, Some(vec!["21fe31dfa154a261".to_string()]));
         stop(cancel, handle).await;
@@ -1693,83 +2082,315 @@ mod tests {
         assert!(rig.ctx.shared.get().enrollment.unwrap().revoked);
     }
 
+    fn head(version: u64, interval_ms: u64, nonce: u64, fast_until: u64) -> BackendEvent {
+        let env = envelope(&test_key(), "org-1", "dev-1", version, &doc(version, true));
+        let BackendEvent::Desired(DesiredFetch::Ok { head: Some(mut head), keys, retired_key_ids }) =
+            FakeBackend::head_event(&env, 0, FakeBackend::test_keys())
+        else {
+            unreachable!()
+        };
+        head.ping_interval_ms = interval_ms;
+        head.ping_nonce = nonce;
+        head.fast_until = fast_until;
+        BackendEvent::Desired(DesiredFetch::Ok { head: Some(head), keys, retired_key_ids })
+    }
+
+    const OLD: &str = "abababababababababababababababababababababababababababababababab";
+
+    fn with_old_secret(rig: &Rig) {
+        rig.ctx.shared.update_secrets(|s| s.device_secret = Some(OLD.to_string())).unwrap();
+    }
+
+    fn secrets(rig: &Rig) -> (Option<String>, Option<String>) {
+        rig.ctx.shared.secrets(|s| (s.device_secret.clone(), s.rotating_device_secret.clone())).unwrap()
+    }
+
     #[tokio::test(start_paused = true)]
-    async fn heartbeat_waits_for_jitter_sends_status_once_and_schedules_from_next_ping() {
+    async fn ping_interval_comes_from_head() {
         let rig = Rig::new();
-        rig.jitter_ms.store(4_000, Ordering::SeqCst);
         let fake = FakeBackend::new();
-        // Ask for 100 s; the client schedules the next one within +-10 %.
-        for _ in 0..4 {
-            fake.script_heartbeat(Ok(HeartbeatResponse { next_ping_in_ms: 100_000, server_time_ms: 1_760_000_000_500 }));
-        }
         let (cancel, handle) = rig.start(&fake);
-        let t0 = Instant::now();
+        // Two hours from the head; the ping answers say 30 minutes, which loses.
+        fake.push(head(1, 7_200_000, 0, 0));
         fake.push(BackendEvent::Connection(ConnectionStatus::Online));
+        fake.wait_for_pings(1).await;
+        let first = fake.ping_calls()[0].at;
+        tokio::time::sleep(Duration::from_secs(6_000)).await;
         settle().await;
-        // Nothing before the jitter has passed.
-        tokio::time::sleep(Duration::from_millis(3_900)).await;
-        settle().await;
-        assert!(fake.heartbeat_calls().is_empty());
-        tokio::time::sleep(Duration::from_millis(200)).await;
-        fake.wait_for_heartbeats(1).await;
-        let first = fake.heartbeat_calls()[0].clone();
-        assert!(first.at - t0 >= Duration::from_millis(4_000) && first.at - t0 < Duration::from_millis(4_500));
-        let status = first.status.expect("the first heartbeat carries the status");
-        assert_eq!(status.os_edition.as_deref(), Some("Professional"));
-        assert_eq!(status.ram_mb, Some(8192));
-        assert_eq!(status.os.as_deref(), Some("Windows 11"));
-        assert!(status.compat["blockers"].is_array());
-
-        // The second one: not before 0.9 x 100 s, and without a status (unchanged).
-        tokio::time::sleep(Duration::from_secs(89)).await;
-        settle().await;
-        assert_eq!(fake.heartbeat_calls().len(), 1, "too early");
-        tokio::time::sleep(Duration::from_secs(22)).await;
-        fake.wait_for_heartbeats(2).await;
-        let second = fake.heartbeat_calls()[1].clone();
-        let gap = second.at - first.at;
-        assert!(gap >= Duration::from_secs(90) && gap <= Duration::from_secs(110), "{gap:?}");
-        assert!(second.status.is_none(), "an unchanged status is not sent again");
-
-        // The status changes (kiosk failed): the next heartbeat carries it again.
-        rig.ctx.snapshot.update(|s| s.kiosk.error_code = Some("compat_blocked".into()));
-        tokio::time::sleep(Duration::from_secs(111)).await;
-        fake.wait_for_heartbeats(3).await;
-        let third = fake.heartbeat_calls()[2].clone();
-        assert_eq!(third.status.unwrap().kiosk_error.as_deref(), Some("compat_blocked"));
-        // The server's clock is recorded as an offset.
-        assert_eq!(rig.snapshot().server_time_offset_ms, Some(500));
+        assert_eq!(fake.ping_calls().len(), 1, "not after 30 minutes");
+        tokio::time::sleep(Duration::from_secs(1_300)).await;
+        fake.wait_for_pings(2).await;
+        let gap = fake.ping_calls()[1].at - first;
+        assert!(gap >= Duration::from_secs(6_480) && gap <= Duration::from_secs(7_920), "{gap:?}");
+        // The pings carry no status: that is the report's job.
+        assert!(fake.report_calls().iter().all(|r| r.batch.audit.is_empty()));
         stop(cancel, handle).await;
     }
 
     #[tokio::test(start_paused = true)]
-    async fn no_heartbeat_while_offline_and_a_failed_one_waits_for_the_next_slot() {
+    async fn nonce_change_pings_once() {
         let rig = Rig::new();
         let fake = FakeBackend::new();
-        fake.script_heartbeat(Err(BackendError::Timeout));
         let (cancel, handle) = rig.start(&fake);
-        settle().await;
+        fake.push(head(1, 1_800_000, 4, 0));
+        fake.push(BackendEvent::Connection(ConnectionStatus::Online));
+        fake.wait_for_pings(1).await;
         tokio::time::sleep(Duration::from_secs(600)).await;
         settle().await;
-        assert!(fake.heartbeat_calls().is_empty(), "offline: nothing is sent");
-
-        fake.push(BackendEvent::Connection(ConnectionStatus::Online));
-        fake.wait_for_heartbeats(1).await;
-        // The failed call is not retried in a tight loop: the next one comes about
-        // 5 minutes (the default) later, and it carries the status again.
-        tokio::time::sleep(Duration::from_secs(30)).await;
+        assert_eq!(fake.ping_calls().len(), 1);
+        // "Check now": the nonce moves; one ping within 0-5 s.
+        let asked = Instant::now();
+        fake.push(head(1, 1_800_000, 5, 0));
+        fake.wait_for_pings(2).await;
+        assert!(fake.ping_calls()[1].at - asked <= Duration::from_secs(5));
+        // The same nonce again (another head change): no extra ping.
+        fake.push(head(1, 1_800_000, 5, 0));
+        tokio::time::sleep(Duration::from_secs(600)).await;
         settle().await;
-        assert_eq!(fake.heartbeat_calls().len(), 1);
-        tokio::time::sleep(Duration::from_secs(300)).await;
-        fake.wait_for_heartbeats(2).await;
-        assert!(fake.heartbeat_calls()[1].status.is_some());
+        assert_eq!(fake.ping_calls().len(), 2);
+        stop(cancel, handle).await;
+    }
 
-        // Going offline cancels the schedule.
+    #[tokio::test(start_paused = true)]
+    async fn fast_until_pings_every_minute_then_stops() {
+        let rig = Rig::new();
+        let fake = FakeBackend::new();
+        let (cancel, handle) = rig.start(&fake);
+        // Watched for five minutes from now (server clock = this clock here).
+        fake.push(head(1, 1_800_000, 0, START_MS + 300_000));
+        fake.push(BackendEvent::Connection(ConnectionStatus::Online));
+        fake.wait_for_pings(1).await;
+        for minute in 1..=4u64 {
+            rig.clock.store(START_MS + minute * 60_000, Ordering::SeqCst);
+            tokio::time::sleep(Duration::from_secs(60)).await;
+            fake.wait_for_pings(1 + minute as usize).await;
+        }
+        // Past `fastUntil`: back to the 30-minute interval.
+        rig.clock.store(START_MS + 360_000, Ordering::SeqCst);
+        tokio::time::sleep(Duration::from_secs(61)).await;
+        settle().await;
+        let after = fake.ping_calls().len();
+        tokio::time::sleep(Duration::from_secs(20 * 60)).await;
+        settle().await;
+        assert_eq!(fake.ping_calls().len(), after, "no more minute pings");
+        stop(cancel, handle).await;
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn first_ping_after_outage_is_delayed() {
+        let rig = Rig::new();
+        // The jitter answers 200 s, capped by each wait's own maximum.
+        rig.jitter_ms.store(200_000, Ordering::SeqCst);
+        let fake = FakeBackend::new();
+        let (cancel, handle) = rig.start(&fake);
+        let t0 = Instant::now();
+        fake.push(BackendEvent::Connection(ConnectionStatus::Online));
+        fake.wait_for_pings(1).await;
+        assert!(fake.ping_calls()[0].at - t0 <= Duration::from_secs(10), "a short first wait");
         fake.push(BackendEvent::Connection(ConnectionStatus::Offline));
         settle().await;
-        tokio::time::sleep(Duration::from_secs(900)).await;
+        tokio::time::sleep(Duration::from_secs(600)).await;
+        let back = Instant::now();
+        fake.push(BackendEvent::Connection(ConnectionStatus::Online));
+        tokio::time::sleep(Duration::from_secs(119)).await;
         settle().await;
-        assert_eq!(fake.heartbeat_calls().len(), 2);
+        assert_eq!(fake.ping_calls().len(), 1, "not before 120 s after a 10-minute outage");
+        fake.wait_for_pings(2).await;
+        assert!(fake.ping_calls()[1].at - back <= Duration::from_secs(121));
+        stop(cancel, handle).await;
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_failed_ping_backs_off_and_never_spins() {
+        let rig = Rig::new();
+        rig.jitter_ms.store(u64::MAX, Ordering::SeqCst);
+        let fake = FakeBackend::new();
+        for _ in 0..3 {
+            fake.script_ping(Err(BackendError::Timeout));
+        }
+        let (cancel, handle) = rig.start(&fake);
+        fake.push(BackendEvent::Connection(ConnectionStatus::Online));
+        fake.wait_for_pings(4).await;
+        let at: Vec<Instant> = fake.ping_calls().iter().map(|c| c.at).collect();
+        // Full jitter at its maximum: 5, 10, 20 s.
+        assert_eq!(at[1] - at[0], Duration::from_secs(5));
+        assert_eq!(at[2] - at[1], Duration::from_secs(10));
+        assert_eq!(at[3] - at[2], Duration::from_secs(20));
+        stop(cancel, handle).await;
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn plan_state_over_limit_changes_nothing() {
+        let rig = Rig::new();
+        let fake = FakeBackend::new();
+        fake.script_ping(Ok(PingResponse { plan_state: "suspended".into(), ..crate::backend::fake::ping_ok(1_800_000) }));
+        let (cancel, handle) = rig.start(&fake);
+        push_doc(&fake, 1, doc(1, true));
+        fake.push(BackendEvent::Connection(ConnectionStatus::Online));
+        fake.wait_for_pings(1).await;
+        settle().await;
+        // The document stays and nothing is disabled.
+        assert_eq!(rig.snapshot().desired_state_version, 1);
+        assert_eq!(rig.control.disables.load(Ordering::SeqCst), 0);
+        stop(cancel, handle).await;
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn rotation_happy_path() {
+        let rig = Rig::new();
+        with_old_secret(&rig);
+        let fake = FakeBackend::new();
+        fake.script_ping(Ok(PingResponse { rotate_credential: true, ..crate::backend::fake::ping_ok(1_800_000) }));
+        let (cancel, handle) = rig.start(&fake);
+        fake.push(BackendEvent::Connection(ConnectionStatus::Online));
+        fake.wait_until("the second subscription", |f| f.subscriptions().len() >= 2).await;
+        let (auth, hash) = fake.rotate_calls()[0].clone();
+        // Asked with the OLD secret; only the hash of the new one travelled.
+        assert_eq!(auth.device_secret, OLD);
+        let (current, pending) = secrets(&rig);
+        let new = current.unwrap();
+        assert_ne!(new, OLD);
+        assert_eq!((new.len(), pending), (64, None));
+        assert_eq!(hash, sha256_hex(&new));
+        // The subscription and the link use the new secret now.
+        assert_eq!(fake.subscriptions()[1].device_secret, new);
+        assert_eq!(rig.ctx.link.get().unwrap().1.device_secret, new);
+        stop(cancel, handle).await;
+        assert!(rig.ctx.link.get().is_none(), "the link is cleared when the task stops");
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn rotation_lost_answer_recovers_at_start() {
+        let rig = Rig::new();
+        with_old_secret(&rig);
+        let fake = FakeBackend::new();
+        fake.script_ping(Ok(PingResponse { rotate_credential: true, ..crate::backend::fake::ping_ok(1_800_000) }));
+        fake.script_rotate(Err(BackendError::Timeout));
+        let (cancel, handle) = rig.start(&fake);
+        fake.push(BackendEvent::Connection(ConnectionStatus::Online));
+        fake.wait_until("a rotation", |f| !f.rotate_calls().is_empty()).await;
+        settle().await;
+        // The answer was lost: both secrets are kept, the old one still in use.
+        let (current, pending) = secrets(&rig);
+        assert_eq!(current.as_deref(), Some(OLD));
+        let pending = pending.expect("the new secret is kept");
+        stop(cancel, handle).await;
+
+        // The agent restarts: the same hash is sent again with the old secret
+        // (the server answers ok), and the new secret is adopted.
+        let fake = FakeBackend::new();
+        let (cancel, handle) = rig.start(&fake);
+        fake.wait_until("the rotation at start", |f| f.subscriptions().len() >= 2).await;
+        let (auth, hash) = fake.rotate_calls()[0].clone();
+        assert_eq!((auth.device_secret.as_str(), hash), (OLD, sha256_hex(&pending)));
+        assert_eq!(secrets(&rig), (Some(pending), None));
+        stop(cancel, handle).await;
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn rotation_conflict_keeps_the_old_secret_and_stops_rotating() {
+        let rig = Rig::new();
+        with_old_secret(&rig);
+        let fake = FakeBackend::new();
+        let rotate = || Ok(PingResponse { rotate_credential: true, ..crate::backend::fake::ping_ok(60_000) });
+        fake.script_ping(rotate());
+        fake.script_rotate(Err(BackendError::Rejected { code: "conflict".into() }));
+        // The probe with the pending secret: the server does not know it.
+        fake.script_ping(Err(BackendError::Rejected { code: "device_rejected".into() }));
+        fake.script_ping(rotate());
+        let (cancel, handle) = rig.start(&fake);
+        fake.push(BackendEvent::Connection(ConnectionStatus::Online));
+        fake.wait_for_pings(3).await;
+        settle().await;
+        assert_eq!(secrets(&rig), (Some(OLD.to_string()), None));
+        assert!(fake.ping_calls()[1].auth.device_secret != OLD, "the probe used the pending secret");
+        // Asked again: no new rotation from this task (no `conflict` loop).
+        assert_eq!(fake.rotate_calls().len(), 1);
+        assert!(rig.ctx.shared.get().enrollment.unwrap().revoked.eq(&false));
+        stop(cancel, handle).await;
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn rotation_not_ready_drops_the_new_secret_and_keeps_working() {
+        let rig = Rig::new();
+        with_old_secret(&rig);
+        let fake = FakeBackend::new();
+        let rotate = || Ok(PingResponse { rotate_credential: true, ..crate::backend::fake::ping_ok(60_000) });
+        fake.script_ping(rotate());
+        fake.script_ping(rotate());
+        fake.script_rotate(Err(BackendError::Rejected { code: "not_ready".into() }));
+        let (cancel, handle) = rig.start(&fake);
+        fake.push(BackendEvent::Connection(ConnectionStatus::Online));
+        fake.wait_for_pings(2).await;
+        settle().await;
+        assert_eq!(secrets(&rig), (Some(OLD.to_string()), None));
+        assert_eq!(fake.rotate_calls().len(), 1);
+        assert_eq!(fake.subscriptions().len(), 1);
+        stop(cancel, handle).await;
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn unknown_device_during_rotation_is_not_revocation() {
+        let rig = Rig::new();
+        with_old_secret(&rig);
+        let pending = "cd".repeat(32);
+        rig.ctx.shared.update_secrets(|s| s.rotating_device_secret = Some(pending.clone())).unwrap();
+        let fake = FakeBackend::new();
+        // The rotation at start gets no answer.
+        fake.script_rotate(Err(BackendError::Timeout));
+        let (cancel, handle) = rig.start(&fake);
+        fake.wait_until("the rotation at start", |f| !f.rotate_calls().is_empty()).await;
+        // The server already uses the new secret: the old one is unknown to it.
+        fake.push(BackendEvent::Desired(DesiredFetch::UnknownDevice));
+        fake.wait_until("the second subscription", |f| f.subscriptions().len() >= 2).await;
+        assert!(!rig.ctx.shared.get().enrollment.unwrap().revoked);
+        assert_eq!(rig.snapshot().enrollment, EnrollmentStatus::Enrolled);
+        assert_eq!(secrets(&rig), (Some(pending.clone()), None));
+        assert_eq!(fake.subscriptions()[1].device_secret, pending);
+        stop(cancel, handle).await;
+
+        // Both secrets unknown: that is a revocation.
+        let rig = Rig::new();
+        with_old_secret(&rig);
+        rig.ctx.shared.update_secrets(|s| s.rotating_device_secret = Some(pending.clone())).unwrap();
+        let fake = FakeBackend::new();
+        fake.script_rotate(Err(BackendError::Timeout));
+        fake.reject_secret(&pending);
+        let (_cancel, handle) = rig.start(&fake);
+        fake.wait_until("the rotation at start", |f| !f.rotate_calls().is_empty()).await;
+        fake.push(BackendEvent::Desired(DesiredFetch::UnknownDevice));
+        tokio::time::timeout(Duration::from_secs(5), handle).await.unwrap().unwrap();
+        assert!(rig.ctx.shared.get().enrollment.unwrap().revoked);
+        // The old secret is never thrown away by a revocation.
+        assert_eq!(secrets(&rig).0.as_deref(), Some(OLD));
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn the_roster_reaches_the_session_layer_only_after_its_checks() {
+        let rig = Rig::new();
+        let key = test_key();
+        let mut roster_rx = rig.ctx.roster_tx.subscribe();
+        let fake = FakeBackend::new();
+        fake.script_roster(Ok(RosterFetch::Entries {
+            epoch: 1,
+            entries: vec![roster_entry(&key, "org-1", "grp-1", 1, "emp-1", Some(1))],
+        }));
+        let (cancel, handle) = rig.start(&fake);
+        let env = envelope(&key, "org-1", "dev-1", 1, &grouped_doc(1, "grp-1"));
+        fake.store_body(1, Ok(env.clone()));
+        fake.push(FakeBackend::head_event(&env, 1, FakeBackend::test_keys()));
+        settle().await;
+        let published = roster_rx.borrow_and_update().clone();
+        assert_eq!((published.epoch, published.members.len()), (1, 1));
+        // A forged entry is refused: nothing new is published.
+        let mut forged = roster_entry(&key, "org-1", "grp-1", 2, "emp-1", None);
+        forged.employee_id = "emp-2".into();
+        fake.script_roster(Ok(RosterFetch::Entries { epoch: 2, entries: vec![forged.clone()] }));
+        fake.script_roster(Ok(RosterFetch::Entries { epoch: 2, entries: vec![forged] }));
+        fake.push(FakeBackend::head_event(&env, 2, FakeBackend::test_keys()));
+        settle().await;
+        assert!(!roster_rx.has_changed().unwrap());
+        assert_eq!(roster_rx.borrow().epoch, 1);
         stop(cancel, handle).await;
     }
 
@@ -1807,13 +2428,13 @@ mod tests {
         let rig = Rig::new();
         let fake = FakeBackend::new();
         // The server's time is 3 days behind this PC's clock.
-        fake.script_heartbeat(Ok(HeartbeatResponse {
-            next_ping_in_ms: 300_000,
-            server_time_ms: (START_MS - 3 * 86_400_000) as i64,
+        fake.script_ping(Ok(PingResponse {
+            server_time_ms: Some((START_MS - 3 * 86_400_000) as i64),
+            ..crate::backend::fake::ping_ok(300_000)
         }));
         let (cancel, handle) = rig.start(&fake);
         fake.push(BackendEvent::Connection(ConnectionStatus::Online));
-        fake.wait_for_heartbeats(1).await;
+        fake.wait_for_pings(1).await;
         settle().await;
         assert!(rig.snapshot().clock_suspect);
         stop(cancel, handle).await;
@@ -1874,8 +2495,9 @@ mod tests {
         }
         // A silly value is clamped before the jitter is applied.
         rig.jitter_ms.store(0, Ordering::SeqCst);
-        assert_eq!(ping_delay(&rig.ctx, 1), Duration::from_millis(4_500));
-        assert_eq!(ping_delay(&rig.ctx, u64::MAX), Duration::from_millis(3_240_000));
+        // (A12) `[60 s, 6 h]`.
+        assert_eq!(ping_delay(&rig.ctx, 1), Duration::from_millis(54_000));
+        assert_eq!(ping_delay(&rig.ctx, u64::MAX), Duration::from_millis(19_440_000));
     }
 
     #[test]

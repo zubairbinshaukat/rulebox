@@ -12,6 +12,11 @@ pub struct Secrets {
     /// 64 hex characters.
     pub device_secret: Option<String>,
     pub pending_device_secret: Option<String>,
+    /// (Phase 4 Step 13) A credential rotation in progress: the new secret, saved
+    /// **before** its hash is sent. It becomes `device_secret` only once the server
+    /// confirmed it; until then `device_secret` stays the one in use, so the two
+    /// are never both lost.
+    pub rotating_device_secret: Option<String>,
     pub original_default_password_registry: Option<String>,
     pub original_default_password_lsa: Option<String>,
 }
@@ -49,6 +54,7 @@ mod tests {
         Secrets {
             device_secret: Some("ab".repeat(32)),
             pending_device_secret: Some("cd".repeat(32)),
+            rotating_device_secret: Some("ef".repeat(32)),
             original_default_password_registry: Some("hunter2-reg".into()),
             original_default_password_lsa: Some("hunter2-lsa".into()),
         }
@@ -58,7 +64,7 @@ mod tests {
     fn debug_output_has_no_secret() {
         let text = format!("{:?} {:#?}", filled(), filled());
         assert!(text.contains("<redacted>"));
-        for secret in ["abab", "cdcd", "hunter2"] {
+        for secret in ["abab", "cdcd", "efef", "hunter2"] {
             assert!(!text.contains(secret), "{text}");
         }
     }

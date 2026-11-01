@@ -43,14 +43,29 @@ pub trait Backend: Send + Sync {
     /// `enrollment:enroll`. Safe to repeat with the same token and secret hash.
     fn enroll(&self, req: EnrollRequest) -> BoxFuture<'_, Result<EnrollResponse, BackendError>>;
 
-    /// `devices:heartbeat`. `status` is a full snapshot (an absent field clears the
-    /// stored value), so pass `None` only when it has not changed since the last
-    /// accepted one. A `rejected` answer is `Err(Rejected { code: "rejected" })`.
-    fn heartbeat(
-        &self,
+    /// (Phase 4 Step 13, A4) `devices:ping`: liveness only (the status travels in
+    /// [`Backend::report`]). Unknown, wrong secret and revoked are
+    /// `Rejected { code: "device_rejected" }`.
+    fn ping(&self, auth: &DeviceAuth) -> BoxFuture<'_, Result<PingResponse, BackendError>>;
+
+    /// (Phase 4 Step 13, A12) `deviceApi:report`: the status snapshot (only when it
+    /// changed), install results and audit records in one call. Each part keeps
+    /// the server's own idempotency rule, so a repeated batch is harmless.
+    fn report<'a>(&'a self, auth: &DeviceAuth, batch: &ReportBatch) -> BoxFuture<'a, Result<ReportAccepted, BackendError>>;
+
+    /// (Phase 4 Step 13) The action `deviceApi:verifyEmployee`: one online check of
+    /// a username and password. The password is an argument of this one call and
+    /// is never logged, stored or put in an error.
+    fn verify_employee<'a>(
+        &'a self,
         auth: &DeviceAuth,
-        status: Option<StatusReport>,
-    ) -> BoxFuture<'_, Result<HeartbeatResponse, BackendError>>;
+        username: &str,
+        password: &str,
+    ) -> BoxFuture<'a, Result<VerifyAnswer, BackendError>>;
+
+    /// (Phase 4 Step 13) `deviceApi:rotateCredential`. Idempotent: the same new
+    /// hash again with the old secret answers ok once the server took it.
+    fn rotate_credential<'a>(&'a self, auth: &DeviceAuth, new_secret_hash: &str) -> BoxFuture<'a, Result<(), BackendError>>;
 
     /// `devices:unenroll`. A `rejected` answer (unknown id, wrong secret or already
     /// revoked) is success: the caller wants the device gone either way.
@@ -76,6 +91,123 @@ pub trait Backend: Send + Sync {
 
 /// The server code of a version that was pruned (`fetchDesired`).
 pub const CODE_NOT_FOUND: &str = "not_found";
+/// (Step 13) Every device function: unknown device, wrong secret or revoked.
+pub const CODE_DEVICE_REJECTED: &str = "device_rejected";
+/// (Step 13) `rotateCredential` with the previous secret while the server holds
+/// another new hash.
+pub const CODE_CONFLICT: &str = "conflict";
+/// (Step 13) `rotateCredential` for a device without a credentials row.
+pub const CODE_NOT_READY: &str = "not_ready";
+
+/// (Phase 4 Step 13) The live backend and the credentials of this device, while
+/// the backend task runs. The employee directory and the report sink are built
+/// before enrollment; they read the link at each call, so they always use the
+/// current deployment and the current (possibly just rotated) secret. Empty =
+/// not enrolled, revoked or stopped: callers answer `Unreachable`.
+#[derive(Default)]
+pub struct BackendLink {
+    inner: std::sync::RwLock<Option<(Arc<dyn Backend>, DeviceAuth)>>,
+}
+
+impl BackendLink {
+    pub fn new() -> Arc<Self> {
+        Arc::new(Self::default())
+    }
+
+    pub fn set(&self, backend: Arc<dyn Backend>, auth: DeviceAuth) {
+        *self.inner.write().unwrap_or_else(std::sync::PoisonError::into_inner) = Some((backend, auth));
+    }
+
+    /// Replaces only the credentials (a finished rotation).
+    pub fn set_auth(&self, auth: DeviceAuth) {
+        if let Some((_, current)) = self.inner.write().unwrap_or_else(std::sync::PoisonError::into_inner).as_mut() {
+            *current = auth;
+        }
+    }
+
+    pub fn clear(&self) {
+        *self.inner.write().unwrap_or_else(std::sync::PoisonError::into_inner) = None;
+    }
+
+    pub fn get(&self) -> Option<(Arc<dyn Backend>, DeviceAuth)> {
+        self.inner.read().unwrap_or_else(std::sync::PoisonError::into_inner).clone()
+    }
+}
+
+/// (Step 13) The answer of `devices:ping` (`devices:heartbeat` answers the same
+/// keys). `rotateCredential` and `planState` missing mean `false` and `"ok"`;
+/// `serverTimeMs` is read when the server sends it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PingResponse {
+    pub next_ping_in_ms: u64,
+    pub server_time_ms: Option<i64>,
+    pub rotate_credential: bool,
+    /// `"ok" | "overLimit" | "suspended"`; the agent only logs it (A13 item 12).
+    pub plan_state: String,
+}
+
+/// (Step 13) One `deviceApi:report` call. An empty part is left out.
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct ReportBatch {
+    pub status: Option<StatusReport>,
+    pub installs: Vec<InstallReport>,
+    pub audit: Vec<crate::audit::AuditRecord>,
+    /// Records lost on the device since the last accepted report.
+    pub dropped: u64,
+}
+
+impl ReportBatch {
+    pub fn is_empty(&self) -> bool {
+        self.status.is_none() && self.installs.is_empty() && self.audit.is_empty() && self.dropped == 0
+    }
+}
+
+/// (Step 13) `{ accepted: { installs, audit } }`: how many of each the server now
+/// knows (new and repeated).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct ReportAccepted {
+    pub installs: usize,
+    pub audit: usize,
+}
+
+/// (Step 13, A12) One install result. Only `pending` (the agent took the job) and
+/// the terminal states are reported; Step 14's engine produces them.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct InstallReport {
+    pub app_id: String,
+    pub state: InstallState,
+    pub app_revision: u64,
+    pub attempts: u32,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub exit_code: Option<i64>,
+    /// One of the server's fixed texts (`download_failed`, `hash_mismatch`, ...).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub detail: Option<String>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+// Produced by the install engine (Step 14); tests only until then.
+#[allow(dead_code)]
+pub enum InstallState {
+    Pending,
+    Installed,
+    Failed,
+    Removed,
+    Unsupported,
+}
+
+/// (Step 13) The answer of `deviceApi:verifyEmployee`. `Disabled` and
+/// `NotAllowedHere` come only for a correct password.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum VerifyAnswer {
+    Ok { employee: rulebox_ipc::requests::Employee, offline_days: u32, credential_revision: u64 },
+    WrongCredentials,
+    Disabled,
+    NotAllowedHere,
+    LockedOut { retry_after_ms: u64 },
+}
 
 #[derive(Clone, PartialEq, Eq)]
 pub struct DeviceAuth {
@@ -129,7 +261,8 @@ pub struct EnrollResponse {
     pub policy_keys: Vec<TrustedKey>,
 }
 
-/// The `status` argument of `devices:heartbeat`. The server validates it with a
+/// The `status` part of `deviceApi:report` (it was the argument of
+/// `devices:heartbeat` until Step 13). The server validates it with a
 /// **strict** `v.object`, so these fourteen keys (camelCase) are the only ones
 /// that may ever be sent; an unknown key makes the whole call fail. Optional
 /// fields are omitted when the agent does not know them. `agent_version` and
@@ -188,12 +321,6 @@ pub const STATUS_KEYS: [&str; 14] = [
     "trustedKeyIds",
     "restartPending",
 ];
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct HeartbeatResponse {
-    pub next_ping_in_ms: u64,
-    pub server_time_ms: i64,
-}
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum BackendEvent {

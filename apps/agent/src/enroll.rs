@@ -164,7 +164,7 @@ pub fn backend_failure(error: &BackendError) -> RpcError {
 // -- helpers ----------------------------------------------------------------------
 
 /// 32 random bytes as 64 lowercase hex characters.
-fn new_device_secret() -> Result<String, RpcError> {
+pub(crate) fn new_device_secret() -> Result<String, RpcError> {
     let mut bytes = [0u8; 32];
     getrandom::fill(&mut bytes).map_err(|_| internal("The operating system gave no random numbers."))?;
     let mut secret = String::with_capacity(64);
@@ -319,7 +319,11 @@ impl EnrollDeps {
         //    The device secret is saved while the pending one is still there: a
         //    crash between the two files leaves a state a retry completes.
         ctx.shared
-            .update_secrets(|secrets| secrets.device_secret = Some(secret.clone()))
+            .update_secrets(|secrets| {
+                secrets.device_secret = Some(secret.clone());
+                // A rotation of the old enrollment never finished; it belongs to it.
+                secrets.rotating_device_secret = None;
+            })
             .map_err(|error| {
                 tracing::error!("cannot save the device secret: {error}");
                 internal("Cannot save the agent's secrets. Run the enrollment again with the same code.")
@@ -410,6 +414,7 @@ impl EnrollDeps {
             tracing::error!("cannot delete roster.json: {error}");
         }
         ctx.session.forget_employees();
+        ctx.report.forget_status();
         if let Err(error) = lock(&self.lockouts).reset() {
             tracing::error!("cannot delete lockouts.json: {error}");
         }
@@ -469,6 +474,7 @@ impl EnrollDeps {
         if let Err(error) = ctx.shared.update_secrets(|secrets| {
             secrets.device_secret = None;
             secrets.pending_device_secret = None;
+            secrets.rotating_device_secret = None;
         }) {
             tracing::error!("cannot clear the saved secrets: {error}");
         }
@@ -716,6 +722,9 @@ mod tests {
                 factory,
                 now_ms: Arc::new(|| 1_760_000_000_000),
                 jitter: Arc::new(|_| 0),
+                link: crate::backend::BackendLink::new(),
+                report: crate::report::ReportQueue::new(Arc::clone(&parts.audit)),
+                roster_tx: Arc::new(tokio::sync::watch::channel(crate::roster::RosterState::default()).0),
             });
             let runner = BackendRunner::new(Arc::clone(&ctx), tokio_util::sync::CancellationToken::new());
             let enroller = Enroller::new(EnrollDeps {
@@ -1245,12 +1254,26 @@ mod tests {
             ) -> BoxFuture<'_, Result<EnrollResponse, BackendError>> {
                 self.0.enroll(req)
             }
-            fn heartbeat(
-                &self,
+            fn ping(&self, auth: &DeviceAuth) -> BoxFuture<'_, Result<crate::backend::PingResponse, BackendError>> {
+                self.0.ping(auth)
+            }
+            fn report<'a>(
+                &'a self,
                 auth: &DeviceAuth,
-                status: Option<crate::backend::StatusReport>,
-            ) -> BoxFuture<'_, Result<crate::backend::HeartbeatResponse, BackendError>> {
-                self.0.heartbeat(auth, status)
+                batch: &crate::backend::ReportBatch,
+            ) -> BoxFuture<'a, Result<crate::backend::ReportAccepted, BackendError>> {
+                self.0.report(auth, batch)
+            }
+            fn verify_employee<'a>(
+                &'a self,
+                auth: &DeviceAuth,
+                username: &str,
+                password: &str,
+            ) -> BoxFuture<'a, Result<crate::backend::VerifyAnswer, BackendError>> {
+                self.0.verify_employee(auth, username, password)
+            }
+            fn rotate_credential<'a>(&'a self, auth: &DeviceAuth, hash: &str) -> BoxFuture<'a, Result<(), BackendError>> {
+                self.0.rotate_credential(auth, hash)
             }
             fn unenroll(&self, _auth: &DeviceAuth) -> BoxFuture<'_, Result<(), BackendError>> {
                 std::future::pending().boxed()
@@ -1293,6 +1316,9 @@ mod tests {
             factory: Arc::new(move |_| Ok(Arc::clone(&factory_backend))),
             now_ms: Arc::clone(&rig.ctx.now_ms),
             jitter: Arc::clone(&rig.ctx.jitter),
+            link: crate::backend::BackendLink::new(),
+            report: Arc::clone(&rig.ctx.report),
+            roster_tx: Arc::clone(&rig.ctx.roster_tx),
         });
         let runner = BackendRunner::new(Arc::clone(&ctx), tokio_util::sync::CancellationToken::new());
         let enroller = Enroller::new(EnrollDeps {

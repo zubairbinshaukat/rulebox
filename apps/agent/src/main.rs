@@ -7,6 +7,7 @@ mod agent;
 mod agent_policy;
 mod audit;
 mod backend;
+mod catalog;
 mod cli;
 mod compat;
 mod directory;
@@ -25,6 +26,7 @@ mod logging;
 mod paths;
 mod platform;
 mod recover;
+mod report;
 mod roster;
 mod secrets;
 mod service;
@@ -47,7 +49,7 @@ use rulebox_ipc::admin::{AdminEnrollParams, AdminTrustKeyParams, AdminUnenrollPa
 use rulebox_ipc::client::ClientConfig;
 use tokio_util::sync::CancellationToken;
 
-use crate::agent::{Deps, PipeNames, SimOptions};
+use crate::agent::{Deps, DirectorySetup, PipeNames, SimOptions, SinkSetup};
 use crate::cli::{Cli, Command, ServiceAction};
 use crate::paths::{DataPaths, InstallPaths};
 use crate::platform::sim::SimPlatform;
@@ -206,9 +208,9 @@ fn run_simulated(
     tracing::info!("simulate mode: data directory {}", paths.root().display());
 
     let config = agent::load_config(&paths)?;
-    // The one decision about fixture employees (also used by the real agent in
-    // Steps 10 and 11): the demo world, or both the config key and the marker.
-    let choice = directory::choose(&config, rulebox_win32::guard::is_test_machine(), sim_demo);
+    // (Step 13) Fixture employees only in the demo world; otherwise the Convex
+    // directory and report sink, like the real agent.
+    let choice = directory::choose(sim_demo);
     let platform = SimPlatform::new(paths.root().to_path_buf());
     if sim_staff_session {
         platform.add_session(watchdog::SIM_STAFF_SESSION, Some(watchdog::SIM_STAFF_SID), true);
@@ -222,8 +224,11 @@ fn run_simulated(
         config,
         simulate: true,
         pipes: PipeNames::for_mode(true),
-        directory: directory::build(choice, sim_offline),
-        audit_sink: Arc::new(audit::LogAuditSink),
+        directory: match choice {
+            directory::DirectoryChoice::Fixture => DirectorySetup::Use(Arc::new(directory::FixtureDirectory::new(sim_offline))),
+            directory::DirectoryChoice::Convex => DirectorySetup::Convex,
+        },
+        audit_sink: if sim_demo { SinkSetup::Use(Arc::new(audit::LogAuditSink)) } else { SinkSetup::Convex },
         sim: SimOptions { demo: sim_demo, offline: sim_offline, staff_session: sim_staff_session },
     };
 
@@ -286,12 +291,6 @@ fn run_real() -> anyhow::Result<u8> {
 /// started logging.
 pub(crate) fn real_deps(paths: DataPaths, install: InstallPaths) -> anyhow::Result<Deps> {
     let config = agent::load_config(&paths)?;
-    let choice = directory::choose(&config, rulebox_win32::guard::is_test_machine(), false);
-    if choice == directory::DirectoryChoice::Fixture {
-        // Test machines only. Into the agent's own (protected) folder, never into
-        // the Staff profile: the agent must not create the employee's files folder.
-        fixtures::export_sample_files(&paths.fixture_samples());
-    }
     Ok(Deps {
         platform: Arc::new(platform::windows::WindowsPlatform::new(install.clone(), paths.clone())),
         backend_factory: backend::convex::ConvexBackend::factory(),
@@ -300,8 +299,9 @@ pub(crate) fn real_deps(paths: DataPaths, install: InstallPaths) -> anyhow::Resu
         config,
         simulate: false,
         pipes: PipeNames::for_mode(false),
-        directory: directory::build(choice, false),
-        audit_sink: Arc::new(audit::NullAuditSink),
+        // (Step 13) The real directory and report sink.
+        directory: DirectorySetup::Convex,
+        audit_sink: SinkSetup::Convex,
         sim: SimOptions::default(),
     })
 }

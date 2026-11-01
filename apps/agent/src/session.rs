@@ -20,16 +20,20 @@ use rulebox_ipc::methods::{
     AppsList, Empty, Method, SessionGet, SessionSignIn, SessionSignOut, SessionVerifyPassword,
 };
 use rulebox_ipc::requests::{
-    AppEntry, AppsListResult, Employee, SessionGetResult, SignInOutcome, SignInParams, SignInResult,
-    VerifyOutcome, VerifyPasswordParams, VerifyPasswordResult,
+    AppEntry, AppsListResult, Employee, SessionEndReason, SessionGetResult, SignInOutcome, SignInParams,
+    SignInResult, VerifyOutcome, VerifyPasswordParams, VerifyPasswordResult,
 };
 use rulebox_ipc::types::{AgentSnapshot, ConnectionStatus, EnrollmentStatus};
-use rulebox_ipc::{ErrorCode, RpcError, CAP_APPS, CAP_SESSION};
+use rulebox_ipc::{ErrorCode, RpcError, CAP_APPS, CAP_APPS_CHANGED, CAP_SESSION, CAP_SESSION_ENDED};
 use sha2::{Digest, Sha256};
-use tokio::sync::watch;
+use tokio::sync::{mpsc, watch};
+use tokio_util::sync::CancellationToken;
 
+use crate::agent_policy::AgentPolicy;
 use crate::audit::{AuditHandle, AuditKind};
 use crate::directory::{DirectoryAnswer, EmployeeDirectory};
+use crate::ipc_shell::ShellBroadcast;
+use crate::roster::RosterState;
 use crate::employee_cache::{is_expired, CacheEntry, EmployeeCache};
 use crate::ipc_conn::{rpc_error, PeerCtx, RpcResult};
 use crate::ipc_shell::ShellExtension;
@@ -90,6 +94,63 @@ struct ActiveSession {
     offline: bool,
     /// Argon2id PHC string of the password, for `session.verifyPassword`.
     password_hash: String,
+    /// (Step 13) What the roster rules compare (see [`roster_verdict`]).
+    credential_revision: u64,
+    roster_group: Option<String>,
+    roster_epoch: u64,
+}
+
+/// (Step 13) What the session layer sends to the Staff App (`run_session_events`
+/// turns them into `apps.changed` / `session.ended`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SessionEvent {
+    AppsChanged,
+    Ended(SessionEndReason),
+}
+
+/// (Step 13) The verified roster and the document it must belong to.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+struct RosterView {
+    /// The accepted document's `rosterGroupId`, and whether there is a document.
+    doc_group: Option<String>,
+    has_document: bool,
+    roster: RosterState,
+}
+
+impl RosterView {
+    /// The roster speaks for the current document: same group.
+    fn current(&self) -> bool {
+        self.has_document && self.roster.group_id == self.doc_group
+    }
+}
+
+/// What the signed roster says about one employee who signed in online at
+/// `entry_group` / `entry_epoch` with `revision`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RosterVerdict {
+    Keep,
+    Removed,
+    CredentialChanged,
+}
+
+/// (Step 13 items 6 and 9) Listed with a higher `credentialRevision`: the password
+/// or username changed. Not listed: removed, unless the roster is of the same
+/// group and not newer than the one held at the online sign-in (the roster lags
+/// behind the server, which had just said yes). Revisions only grow, so a lower
+/// one in the roster is the same lag.
+pub fn roster_verdict(
+    roster: &RosterState,
+    employee_id: &str,
+    revision: u64,
+    entry_group: Option<&str>,
+    entry_epoch: u64,
+) -> RosterVerdict {
+    match roster.members.get(employee_id) {
+        Some(listed) if *listed > revision => RosterVerdict::CredentialChanged,
+        Some(_) => RosterVerdict::Keep,
+        None if roster.group_id.as_deref() == entry_group && roster.epoch <= entry_epoch => RosterVerdict::Keep,
+        None => RosterVerdict::Removed,
+    }
 }
 
 struct Inner {
@@ -107,6 +168,37 @@ struct Inner {
     /// One `signIn` or `verifyPassword` check at a time keeps parallel requests
     /// from racing the failure counter.
     gate: Arc<tokio::sync::Mutex<()>>,
+    roster: Mutex<RosterView>,
+    events: Mutex<Option<mpsc::UnboundedSender<SessionEvent>>>,
+}
+
+impl Inner {
+    fn emit(&self, event: SessionEvent) {
+        if let Some(tx) = lock(&self.events).as_ref() {
+            let _ = tx.send(event);
+        }
+    }
+
+    /// The roster check of an offline sign-in or a cached employee; `None` when the
+    /// directory has no roster (the fixtures).
+    fn verdict(&self, employee_id: &str, revision: u64, group: Option<&str>, epoch: u64) -> Option<RosterVerdict> {
+        if !self.directory.uses_roster() {
+            return None;
+        }
+        let view = lock(&self.roster);
+        if !view.current() || view.roster.group_id.is_none() {
+            // No signed roster for this document's group (yet): nobody is allowed
+            // offline. Fail closed.
+            return Some(RosterVerdict::Removed);
+        }
+        Some(roster_verdict(&view.roster, employee_id, revision, group, epoch))
+    }
+
+    /// The roster group and epoch this PC holds now (stored with an online sign-in).
+    fn roster_mark(&self) -> (Option<String>, u64) {
+        let view = lock(&self.roster);
+        (view.roster.group_id.clone(), view.roster.epoch)
+    }
 }
 
 pub struct SessionManager {
@@ -129,8 +221,118 @@ impl SessionManager {
                 session: Mutex::new(None),
                 device_guard: Mutex::new(DeviceGuard::default()),
                 gate: Arc::new(tokio::sync::Mutex::new(())),
+                roster: Mutex::new(RosterView::default()),
+                events: Mutex::new(None),
             }),
         })
+    }
+
+    /// (Step 13) Where `apps.changed` and `session.ended` go.
+    pub fn set_events(&self, tx: mpsc::UnboundedSender<SessionEvent>) {
+        *lock(&self.inner.events) = Some(tx);
+    }
+
+    /// (Step 13) A new agent policy (a verified document was accepted).
+    pub fn on_policy(&self, policy: &AgentPolicy) {
+        {
+            let mut view = lock(&self.inner.roster);
+            view.doc_group = policy.roster_group_id.clone();
+            view.has_document = policy.has_document;
+        }
+        self.resync();
+    }
+
+    /// (Step 13) A new verified roster (`roster.json` was saved).
+    pub fn on_roster(&self, roster: &RosterState) {
+        lock(&self.inner.roster).roster = roster.clone();
+        self.resync();
+    }
+
+    /// (Step 13 item 6) Applies the roster to the cache and the session, and the
+    /// catalogue to the session's apps:
+    /// - cached employees the roster removed, or whose revision moved on, go;
+    /// - the signed-in employee in the same case is signed out with
+    ///   `session.ended { employeeRemoved | credentialChanged }`;
+    /// - the signed-in employee's apps are recomputed; a change is stored and
+    ///   announced with `apps.changed`.
+    ///
+    /// A roster that does not belong to the current document (the group changed,
+    /// the new roster is not synced yet) changes nothing here; offline sign-in is
+    /// refused meanwhile.
+    pub fn resync(&self) {
+        let inner = &self.inner;
+        if inner.directory.uses_roster() && lock(&inner.roster).current() {
+            let view = lock(&inner.roster).clone();
+            let (gone, saved) = lock(&inner.cache).retain(|entry| {
+                roster_verdict(
+                    &view.roster,
+                    &entry.employee.id,
+                    entry.credential_revision,
+                    entry.roster_group.as_deref(),
+                    entry.roster_epoch,
+                ) == RosterVerdict::Keep
+            });
+            if let Err(error) = saved {
+                tracing::error!("cannot save employee-cache.json: {error}");
+            }
+            if !gone.is_empty() {
+                tracing::info!(count = gone.len(), "offline sign-in removed for employees the roster no longer allows");
+            }
+            let ended = {
+                let mut session = lock(&inner.session);
+                let verdict = session.as_ref().map(|active| {
+                    roster_verdict(
+                        &view.roster,
+                        &active.employee.id,
+                        active.credential_revision,
+                        active.roster_group.as_deref(),
+                        active.roster_epoch,
+                    )
+                });
+                let reason = match verdict {
+                    Some(RosterVerdict::Removed) => Some(SessionEndReason::EmployeeRemoved),
+                    Some(RosterVerdict::CredentialChanged) => Some(SessionEndReason::CredentialChanged),
+                    Some(RosterVerdict::Keep) | None => None,
+                };
+                if reason.is_some() {
+                    *session = None;
+                }
+                reason
+            };
+            if let Some(reason) = ended {
+                tracing::info!(?reason, "employee session ended by the roster");
+                inner.emit(SessionEvent::Ended(reason));
+                return;
+            }
+        }
+        let employee_id = lock(&inner.session).as_ref().map(|active| active.employee.id.clone());
+        let Some(employee_id) = employee_id else {
+            return;
+        };
+        let Some(apps) = inner.directory.apps_for(&employee_id) else {
+            return;
+        };
+        let changed = {
+            let mut session = lock(&inner.session);
+            match session.as_mut() {
+                Some(active) if active.employee.id == employee_id && active.apps != apps => {
+                    active.apps = apps;
+                    true
+                }
+                _ => false,
+            }
+        };
+        if changed {
+            inner.emit(SessionEvent::AppsChanged);
+        }
+    }
+
+    /// (Step 13) Ends the session for `reason` and tells the Staff App.
+    pub fn end(&self, reason: SessionEndReason) {
+        if lock(&self.inner.session).take().is_some() {
+            tracing::info!(?reason, "employee session ended");
+            self.inner.emit(SessionEvent::Ended(reason));
+        }
     }
 
     /// The Staff profile became known (or changed).
@@ -171,7 +373,7 @@ impl SessionManager {
 impl ShellExtension for SessionManager {
     fn capabilities(&self) -> Vec<&'static str> {
         if self.inner.directory.available() {
-            vec![CAP_SESSION, CAP_APPS]
+            vec![CAP_SESSION, CAP_APPS, CAP_APPS_CHANGED, CAP_SESSION_ENDED]
         } else {
             Vec::new()
         }
@@ -578,6 +780,7 @@ async fn sign_in_checked(
                 };
                 inner.clear_counter(username);
                 attempt.counted = false;
+                let (roster_group, roster_epoch) = inner.roster_mark();
                 let entry = CacheEntry {
                     username: username.to_string(),
                     employee: found.employee.clone(),
@@ -585,12 +788,26 @@ async fn sign_in_checked(
                     password_hash: hash.clone(),
                     offline_days: found.offline_days,
                     last_online_ms: (inner.now_ms)(),
+                    credential_revision: found.credential_revision,
+                    roster_group: roster_group.clone(),
+                    roster_epoch,
                 };
                 if let Err(error) = lock(&inner.cache).put(entry) {
                     // The sign-in itself succeeded; only offline sign-in suffers.
                     tracing::error!("cannot save employee-cache.json: {error}");
                 }
-                return Ok(start_session(inner, username, found.employee, found.apps, hash, false, files_base));
+                let marks = SessionMarks { credential_revision: found.credential_revision, roster_group, roster_epoch };
+                return Ok(start_session(inner, username, found.employee, found.apps, hash, false, files_base, marks));
+            }
+            Ok(Ok(DirectoryAnswer::NotAllowedHere)) => {
+                // The password was right: not a guess. The employee may not sign in
+                // here, offline either.
+                if let Err(error) = lock(&inner.cache).remove(username) {
+                    tracing::error!("cannot save employee-cache.json: {error}");
+                }
+                inner.undo(username);
+                attempt.counted = false;
+                return Ok(outcome_only(SignInOutcome::NotAllowedHere));
             }
             Ok(Ok(DirectoryAnswer::WrongCredentials)) => {
                 // The offline cache is not tried: the password may have changed.
@@ -629,17 +846,39 @@ async fn sign_in_checked(
     }
     match argon2_verify(password, entry.password_hash.clone()).await? {
         Verified::Match => {
+            // (Step 13) Only after the password matched (so the answer tells nothing
+            // to someone who does not know it): the signed roster must still list
+            // the employee with this credential revision.
+            let verdict = inner.verdict(
+                &entry.employee.id,
+                entry.credential_revision,
+                entry.roster_group.as_deref(),
+                entry.roster_epoch,
+            );
+            if let Some(verdict @ (RosterVerdict::Removed | RosterVerdict::CredentialChanged)) = verdict {
+                inner.undo(username);
+                attempt.counted = false;
+                if verdict == RosterVerdict::CredentialChanged {
+                    // The old password: it must not work offline any more.
+                    if let Err(error) = lock(&inner.cache).remove(username) {
+                        tracing::error!("cannot save employee-cache.json: {error}");
+                    }
+                    return Ok(outcome_only(SignInOutcome::OfflineNeverSignedIn));
+                }
+                tracing::info!(username, "offline sign-in refused: not in this PC's signed roster");
+                return Ok(outcome_only(SignInOutcome::NotAllowedHere));
+            }
             inner.clear_counter(username);
             attempt.counted = false;
-            Ok(start_session(
-                inner,
-                username,
-                entry.employee,
-                entry.apps,
-                entry.password_hash,
-                true,
-                files_base,
-            ))
+            // The current catalogue when there is one, else the apps of the last
+            // online sign-in.
+            let apps = inner.directory.apps_for(&entry.employee.id).unwrap_or(entry.apps);
+            let marks = SessionMarks {
+                credential_revision: entry.credential_revision,
+                roster_group: entry.roster_group,
+                roster_epoch: entry.roster_epoch,
+            };
+            Ok(start_session(inner, username, entry.employee, apps, entry.password_hash, true, files_base, marks))
         }
         Verified::NoMatch => {
             attempt.counted = false;
@@ -666,6 +905,14 @@ fn wrong_credentials(inner: &Inner, username: &str, after_count: Gate, now_ms: u
     }
 }
 
+/// What [`roster_verdict`] needs about a session.
+struct SessionMarks {
+    credential_revision: u64,
+    roster_group: Option<String>,
+    roster_epoch: u64,
+}
+
+#[allow(clippy::too_many_arguments)]
 fn start_session(
     inner: &Inner,
     username: &str,
@@ -674,6 +921,7 @@ fn start_session(
     password_hash: String,
     offline: bool,
     files_base: &std::path::Path,
+    marks: SessionMarks,
 ) -> SignInResult {
     let files_root = files_base.join(files_folder_name(&employee.id)).to_string_lossy().into_owned();
     tracing::info!(username, offline, "employee signed in");
@@ -691,8 +939,57 @@ fn start_session(
         files_root,
         offline,
         password_hash,
+        credential_revision: marks.credential_revision,
+        roster_group: marks.roster_group,
+        roster_epoch: marks.roster_epoch,
     });
     result
+}
+
+// -- events to the Staff App (Step 13) ----------------------------------------------
+
+/// At most one `apps.changed` per this long (plan 5.2).
+pub const APPS_CHANGED_DEBOUNCE: Duration = Duration::from_secs(2);
+
+/// Turns session events into broadcast frames: `session.ended` at once,
+/// `apps.changed` at most once per 2 seconds (a burst gives one event now and,
+/// when more came during the 2 seconds, one more at their end).
+pub async fn run_session_events(
+    mut rx: mpsc::UnboundedReceiver<SessionEvent>,
+    broadcast: ShellBroadcast,
+    shutdown: CancellationToken,
+) {
+    let mut quiet_until: Option<tokio::time::Instant> = None;
+    let mut owed = false;
+    loop {
+        let timer = async {
+            match quiet_until {
+                Some(at) if owed => tokio::time::sleep_until(at).await,
+                _ => std::future::pending::<()>().await,
+            }
+        };
+        tokio::select! {
+            () = shutdown.cancelled() => return,
+            event = rx.recv() => match event {
+                None => return,
+                Some(SessionEvent::Ended(reason)) => broadcast.session_ended(reason),
+                Some(SessionEvent::AppsChanged) => {
+                    let now = tokio::time::Instant::now();
+                    if quiet_until.is_some_and(|until| now < until) {
+                        owed = true;
+                    } else {
+                        broadcast.apps_changed();
+                        quiet_until = Some(now + APPS_CHANGED_DEBOUNCE);
+                    }
+                }
+            },
+            () = timer => {
+                owed = false;
+                broadcast.apps_changed();
+                quiet_until = Some(tokio::time::Instant::now() + APPS_CHANGED_DEBOUNCE);
+            }
+        }
+    }
 }
 
 // -- session.verifyPassword -------------------------------------------------------
@@ -806,6 +1103,9 @@ mod tests {
         mode: Mutex<Mode>,
         calls: AtomicUsize,
         fixture: FixtureDirectory,
+        /// (Step 13) Behave like the Convex directory: a roster and a catalogue.
+        roster: std::sync::atomic::AtomicBool,
+        catalogue: Mutex<Option<Vec<AppEntry>>>,
     }
 
     impl TestDirectory {
@@ -814,6 +1114,8 @@ mod tests {
                 mode: Mutex::new(Mode::Fixture),
                 calls: AtomicUsize::new(0),
                 fixture: FixtureDirectory::new(false),
+                roster: std::sync::atomic::AtomicBool::new(false),
+                catalogue: Mutex::new(None),
             })
         }
 
@@ -851,6 +1153,14 @@ mod tests {
                 }
             }
             .boxed()
+        }
+
+        fn apps_for(&self, _employee_id: &str) -> Option<Vec<AppEntry>> {
+            lock(&self.catalogue).clone()
+        }
+
+        fn uses_roster(&self) -> bool {
+            self.roster.load(Ordering::SeqCst)
         }
     }
 
@@ -1017,6 +1327,9 @@ mod tests {
             password_hash: kdf::hash_secret(password).unwrap(),
             offline_days,
             last_online_ms,
+            credential_revision: 0,
+            roster_group: None,
+            roster_epoch: 0,
         }
     }
 
@@ -1355,6 +1668,7 @@ mod tests {
             employee: fixtures::employees().remove(0).employee,
             apps: vec![app_with_icon("big", 50_000), app_with_icon("small", 1_000)],
             offline_days: 7,
+            credential_revision: 0,
         })));
         h.sign_in("maya", "demo").await.unwrap();
         let apps = h.apps().await.unwrap().apps;
@@ -1500,10 +1814,238 @@ mod tests {
         }
     }
 
+    // -- Step 13: roster, catalogue and events -------------------------------------
+
+    const GROUP: &str = "grp-1";
+
+    fn roster(group: &str, epoch: u64, members: &[(&str, u64)]) -> RosterState {
+        RosterState {
+            group_id: Some(group.into()),
+            epoch,
+            members: members.iter().map(|(id, rev)| ((*id).to_string(), *rev)).collect(),
+            ..RosterState::default()
+        }
+    }
+
+    fn policy(group: &str) -> AgentPolicy {
+        AgentPolicy { has_document: true, roster_group_id: Some(group.into()), ..AgentPolicy::default() }
+    }
+
+    /// A harness whose directory follows the roster, with maya (`emp_maya`, revision
+    /// 0) in the roster of `grp-1` at epoch 1, and an event channel.
+    fn roster_harness(cached: Vec<CacheEntry>) -> (Harness, mpsc::UnboundedReceiver<SessionEvent>) {
+        let h = harness_with(Options { cached, ..Options::default() });
+        h.directory.roster.store(true, Ordering::SeqCst);
+        let (tx, rx) = mpsc::unbounded_channel();
+        h.manager.set_events(tx);
+        h.manager.on_policy(&policy(GROUP));
+        h.manager.on_roster(&roster(GROUP, 1, &[("emp_maya", 0)]));
+        (h, rx)
+    }
+
+    fn rostered(username: &str, epoch: u64, revision: u64) -> CacheEntry {
+        CacheEntry {
+            credential_revision: revision,
+            roster_group: Some(GROUP.into()),
+            roster_epoch: epoch,
+            ..cached_entry(username, 7, START_MS, "demo")
+        }
+    }
+
+    #[test]
+    fn the_roster_verdict_rules() {
+        let r = roster(GROUP, 5, &[("e1", 3)]);
+        assert_eq!(roster_verdict(&r, "e1", 3, Some(GROUP), 1), RosterVerdict::Keep);
+        // The roster lags behind an online sign-in that saw a newer revision.
+        assert_eq!(roster_verdict(&r, "e1", 4, Some(GROUP), 1), RosterVerdict::Keep);
+        assert_eq!(roster_verdict(&r, "e1", 2, Some(GROUP), 1), RosterVerdict::CredentialChanged);
+        // Not listed: removed, unless the roster is not newer than the one held then.
+        assert_eq!(roster_verdict(&r, "e2", 0, Some(GROUP), 4), RosterVerdict::Removed);
+        assert_eq!(roster_verdict(&r, "e2", 0, Some(GROUP), 5), RosterVerdict::Keep);
+        assert_eq!(roster_verdict(&r, "e2", 0, Some("grp-other"), 9), RosterVerdict::Removed);
+        assert_eq!(roster_verdict(&r, "e2", 0, None, 0), RosterVerdict::Removed);
+    }
+
+    #[tokio::test]
+    async fn not_allowed_here_does_not_count_a_failure() {
+        let (h, _events) = roster_harness(vec![rostered("maya", 1, 0)]);
+        h.directory.set(Mode::Answer(DirectoryAnswer::NotAllowedHere));
+        let result = h.sign_in("maya", "demo").await.unwrap();
+        assert_eq!(result.outcome, SignInOutcome::NotAllowedHere);
+        assert!(result.employee.is_none());
+        assert_eq!(h.failures("maya"), 0, "a right password is not a guess");
+        // Not allowed here online: not offline either.
+        assert!(h.cache_on_disk().get("maya").is_none());
+        assert!(h.audit_records().is_empty());
+    }
+
+    #[tokio::test]
+    async fn online_sign_in_stores_the_revision_and_the_roster_held() {
+        let (h, _events) = roster_harness(Vec::new());
+        h.directory.set(Mode::Answer(DirectoryAnswer::Ok(DirectoryEmployee {
+            employee: fixtures::employees().remove(0).employee,
+            apps: Vec::new(),
+            offline_days: 7,
+            credential_revision: 4,
+        })));
+        h.sign_in("maya", "demo").await.unwrap();
+        let entry = h.cache_on_disk().get("maya").cloned().unwrap();
+        assert_eq!((entry.credential_revision, entry.roster_group.as_deref(), entry.roster_epoch), (4, Some(GROUP), 1));
+    }
+
+    #[tokio::test]
+    async fn cache_entry_dropped_when_employee_leaves_the_doc() {
+        // "The doc" = the signed roster of the document's group (amendment 9).
+        let (h, _events) = roster_harness(vec![rostered("maya", 1, 0), rostered("sam", 1, 0)]);
+        h.manager.on_roster(&roster(GROUP, 2, &[("emp_maya", 0), ("emp_sam", 0)]));
+        assert!(h.cache_on_disk().get("maya").is_some());
+        // Epoch 3 removes sam.
+        h.manager.on_roster(&roster(GROUP, 3, &[("emp_maya", 0)]));
+        let cache = h.cache_on_disk();
+        assert!(cache.get("maya").is_some() && cache.get("sam").is_none());
+    }
+
+    #[tokio::test]
+    async fn cache_entry_dropped_when_revision_changes() {
+        let (h, _events) = roster_harness(vec![rostered("maya", 1, 0)]);
+        h.manager.on_roster(&roster(GROUP, 2, &[("emp_maya", 1)]));
+        assert!(h.cache_on_disk().get("maya").is_none(), "a new password: the old one is useless offline");
+        // Offline now: the employee must sign in online once.
+        h.set_online(false);
+        assert_eq!(h.sign_in("maya", "demo").await.unwrap().outcome, SignInOutcome::OfflineNeverSignedIn);
+    }
+
+    #[tokio::test]
+    async fn a_roster_of_another_document_changes_nothing_but_offline_fails_closed() {
+        let (h, _events) = roster_harness(vec![rostered("maya", 1, 0)]);
+        // The document moved the PC to another group; its roster is not synced yet.
+        h.manager.on_policy(&policy("grp-2"));
+        assert!(h.cache_on_disk().get("maya").is_some(), "nothing is dropped on an old roster");
+        h.set_online(false);
+        let result = h.sign_in("maya", "demo").await.unwrap();
+        assert_eq!(result.outcome, SignInOutcome::NotAllowedHere);
+        assert_eq!(h.failures("maya"), 0);
+    }
+
+    #[tokio::test]
+    async fn offline_sign_in_with_the_cached_verifier_follows_the_roster() {
+        let (h, _events) = roster_harness(vec![rostered("maya", 1, 0)]);
+        h.set_online(false);
+        let calls = h.directory.calls();
+        // Listed: offline sign-in works against the cached Argon2id hash.
+        let ok = h.sign_in("maya", "demo").await.unwrap();
+        assert_eq!((ok.outcome, ok.offline), (SignInOutcome::Ok, true));
+        h.sign_out().await;
+        // A wrong password is a counted failure before any roster answer.
+        assert_eq!(h.sign_in("maya", "nope").await.unwrap().outcome, SignInOutcome::WrongCredentials);
+        assert_eq!(h.failures("maya"), 1);
+        assert_eq!(h.directory.calls(), calls, "offline: the directory is never asked");
+    }
+
+    #[tokio::test]
+    async fn offline_sign_in_refused_when_not_in_doc() {
+        // The cache entry predates the roster rules: no group, epoch 0.
+        let (h, _events) = roster_harness(vec![]);
+        h.manager.on_roster(&roster(GROUP, 2, &[]));
+        // Written after the resync (as if the cache had been restored meanwhile).
+        lock(&h.manager.inner.cache).put(cached_entry("maya", 7, START_MS, "demo")).unwrap();
+        h.set_online(false);
+        let result = h.sign_in("maya", "demo").await.unwrap();
+        assert_eq!(result.outcome, SignInOutcome::NotAllowedHere);
+        assert_eq!(h.failures("maya"), 0, "the right password: not a guess");
+        // Without a document at all: fail closed too.
+        h.manager.on_policy(&AgentPolicy::default());
+        assert_eq!(h.sign_in("maya", "demo").await.unwrap().outcome, SignInOutcome::NotAllowedHere);
+    }
+
+    #[tokio::test]
+    async fn signed_in_employee_removed_ends_session_with_event() {
+        let (h, mut events) = roster_harness(Vec::new());
+        h.sign_in("maya", "demo").await.unwrap();
+        // A roster at the same epoch cannot say anything new.
+        h.manager.on_roster(&roster(GROUP, 1, &[]));
+        assert!(h.session_get().await.employee.is_some());
+        h.manager.on_roster(&roster(GROUP, 2, &[]));
+        assert_eq!(h.session_get().await.employee, None);
+        assert_eq!(events.try_recv(), Ok(SessionEvent::Ended(SessionEndReason::EmployeeRemoved)));
+
+        // A new credential revision: `credentialChanged`.
+        h.manager.on_roster(&roster(GROUP, 3, &[("emp_maya", 0)]));
+        h.sign_in("maya", "demo").await.unwrap();
+        h.manager.on_roster(&roster(GROUP, 4, &[("emp_maya", 2)]));
+        assert_eq!(events.try_recv(), Ok(SessionEvent::Ended(SessionEndReason::CredentialChanged)));
+        // Revocation.
+        h.manager.on_roster(&roster(GROUP, 5, &[("emp_maya", 2)]));
+        h.directory.set(Mode::Answer(DirectoryAnswer::Ok(DirectoryEmployee {
+            employee: fixtures::employees().remove(0).employee,
+            apps: Vec::new(),
+            offline_days: 7,
+            credential_revision: 2,
+        })));
+        h.sign_in("maya", "demo").await.unwrap();
+        h.manager.end(SessionEndReason::Revoked);
+        assert_eq!(events.try_recv(), Ok(SessionEvent::Ended(SessionEndReason::Revoked)));
+        assert!(events.try_recv().is_err());
+    }
+
+    #[tokio::test]
+    async fn the_apps_follow_the_catalogue_and_a_change_is_announced() {
+        let (h, mut events) = roster_harness(Vec::new());
+        let first = vec![fixtures::catalogue().remove(0)];
+        *lock(&h.directory.catalogue) = Some(first.clone());
+        h.sign_in("maya", "demo").await.unwrap();
+        // The fixture answered its own seven apps; the catalogue says one.
+        h.manager.resync();
+        assert_eq!(events.try_recv(), Ok(SessionEvent::AppsChanged));
+        assert_eq!(h.apps().await.unwrap().apps, first);
+        // Unchanged: no event.
+        h.manager.resync();
+        assert!(events.try_recv().is_err());
+        let second = fixtures::catalogue();
+        *lock(&h.directory.catalogue) = Some(second.clone());
+        h.manager.on_policy(&policy(GROUP));
+        assert_eq!(events.try_recv(), Ok(SessionEvent::AppsChanged));
+        assert_eq!(h.apps().await.unwrap().apps.len(), second.len());
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn apps_changed_sent_once_per_burst() {
+        let broadcast = ShellBroadcast::new();
+        let mut frames = broadcast.subscribe();
+        let (tx, rx) = mpsc::unbounded_channel();
+        let shutdown = CancellationToken::new();
+        let task = tokio::spawn(run_session_events(rx, broadcast.clone(), shutdown.clone()));
+        let name = |frame: rulebox_ipc::Frame| match frame {
+            rulebox_ipc::Frame::Event { event, data } => (event, data),
+            other => panic!("{other:?}"),
+        };
+        // A burst of five: one event now...
+        for _ in 0..5 {
+            tx.send(SessionEvent::AppsChanged).unwrap();
+        }
+        let (event, data) = name(frames.recv().await.unwrap());
+        assert_eq!((event.as_str(), data), ("apps.changed", json!({})));
+        tokio::time::sleep(Duration::from_millis(1_900)).await;
+        assert!(frames.try_recv().is_err(), "nothing inside the 2 seconds");
+        // ...and one at the end of the 2 seconds for the rest of the burst.
+        tokio::time::sleep(Duration::from_millis(200)).await;
+        assert_eq!(name(frames.recv().await.unwrap()).0, "apps.changed");
+        tokio::time::sleep(Duration::from_secs(10)).await;
+        assert!(frames.try_recv().is_err(), "the burst gave two at most");
+        // `session.ended` is never held back.
+        tx.send(SessionEvent::AppsChanged).unwrap();
+        tx.send(SessionEvent::Ended(SessionEndReason::EmployeeRemoved)).unwrap();
+        assert_eq!(name(frames.recv().await.unwrap()).0, "apps.changed");
+        let (event, data) = name(frames.recv().await.unwrap());
+        assert_eq!((event.as_str(), data), ("session.ended", json!({ "reason": "employeeRemoved" })));
+        shutdown.cancel();
+        task.await.unwrap();
+    }
+
     #[test]
     fn with_a_directory_the_capabilities_are_session_and_apps() {
         let h = harness();
-        assert_eq!(h.manager.capabilities(), ["session", "apps"]);
+        assert_eq!(h.manager.capabilities(), ["session", "apps", "appsChanged", "sessionEnded"]);
         assert!(h.manager.handle(&Harness::peer(), "x.other", json!({})).is_none());
     }
 }
@@ -1612,7 +2154,7 @@ mod wire_tests {
         let capture = capture_logs();
         let served = start(Arc::new(FixtureDirectory::new(false)));
         let mut client = RawClient::connect(&served.name).await;
-        assert_eq!(hello(&mut client).await.capabilities, ["state", "health", "session", "apps"]);
+        assert_eq!(hello(&mut client).await.capabilities, ["state", "health", "session", "apps", "appsChanged", "sessionEnded"]);
 
         // A password no other test writes, so the shared log capture can be searched.
         let secret = "pw-do-not-log-4f1c";

@@ -1,10 +1,13 @@
 //! `FakeBackend`: scripted answers and a handle to push [`BackendEvent`]s (tests
 //! only). Unscripted calls succeed: `enroll` answers `dev-1` of `org-1` with the
-//! RFC 8032 test-1 key as its policy key, `heartbeat` answers `nextPingInMs:
-//! 300000`, `unenroll` succeeds, `fetchDesired` answers what [`FakeBackend::publish`]
-//! stored (else `not_found`) and `fetchRoster` an empty roster.
+//! RFC 8032 test-1 key as its policy key, `ping` answers `nextPingInMs: 1800000`,
+//! `report` accepts everything, `verifyEmployee` answers `wrongCredentials`,
+//! `rotateCredential` and `unenroll` succeed, `fetchDesired` answers what
+//! [`FakeBackend::publish`] stored (else `not_found`) and `fetchRoster` an empty
+//! roster. A secret given to [`FakeBackend::reject_secret`] gets `device_rejected`
+//! from every device call (the server dropped it).
 
-use std::collections::{BTreeMap, VecDeque};
+use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
@@ -17,17 +20,33 @@ use tokio::time::Instant;
 use tokio_util::sync::CancellationToken;
 
 use super::{
-    Backend, BackendError, BackendEvent, DesiredFetch, DeviceAuth, EnrollRequest, EnrollResponse, Head,
-    HeartbeatResponse, RosterFetch, StatusReport, CODE_NOT_FOUND,
+    Backend, BackendError, BackendEvent, DesiredFetch, DeviceAuth, EnrollRequest, EnrollResponse, Head, PingResponse,
+    ReportAccepted, ReportBatch, RosterFetch, VerifyAnswer, CODE_DEVICE_REJECTED, CODE_NOT_FOUND,
 };
 use crate::state::lock;
 use crate::testutil::signing::{envelope, test_key, trusted_of};
 
 #[derive(Debug, Clone)]
-pub struct HeartbeatCall {
+pub struct PingCall {
     pub at: Instant,
     pub auth: DeviceAuth,
-    pub status: Option<StatusReport>,
+}
+
+#[derive(Debug, Clone)]
+pub struct ReportCall {
+    #[allow(dead_code)]
+    pub at: Instant,
+    pub auth: DeviceAuth,
+    pub batch: ReportBatch,
+}
+
+/// The default ping answer: 30 minutes, nothing to rotate.
+pub fn ping_ok(next_ping_in_ms: u64) -> PingResponse {
+    PingResponse { next_ping_in_ms, server_time_ms: None, rotate_credential: false, plan_state: "ok".into() }
+}
+
+fn rejected() -> BackendError {
+    BackendError::Rejected { code: CODE_DEVICE_REJECTED.to_string() }
 }
 
 struct Inner {
@@ -35,8 +54,17 @@ struct Inner {
     enroll_calls: Mutex<Vec<EnrollRequest>>,
     /// How long `enroll` takes before it answers.
     enroll_delay: Mutex<Duration>,
-    heartbeat_script: Mutex<VecDeque<Result<HeartbeatResponse, BackendError>>>,
-    heartbeat_calls: Mutex<Vec<HeartbeatCall>>,
+    ping_script: Mutex<VecDeque<Result<PingResponse, BackendError>>>,
+    ping_calls: Mutex<Vec<PingCall>>,
+    report_script: Mutex<VecDeque<Result<ReportAccepted, BackendError>>>,
+    report_calls: Mutex<Vec<ReportCall>>,
+    verify_script: Mutex<VecDeque<Result<VerifyAnswer, BackendError>>>,
+    /// `(auth, username)`; the password is not kept.
+    verify_calls: Mutex<Vec<(DeviceAuth, String)>>,
+    rotate_script: Mutex<VecDeque<Result<(), BackendError>>>,
+    /// `(auth, new secret hash)`.
+    rotate_calls: Mutex<Vec<(DeviceAuth, String)>>,
+    rejected_secrets: Mutex<BTreeSet<String>>,
     unenroll_script: Mutex<VecDeque<Result<(), BackendError>>>,
     unenroll_calls: Mutex<Vec<DeviceAuth>>,
     events_tx: mpsc::UnboundedSender<BackendEvent>,
@@ -64,8 +92,15 @@ impl FakeBackend {
                 enroll_script: Mutex::new(VecDeque::new()),
                 enroll_calls: Mutex::new(Vec::new()),
                 enroll_delay: Mutex::new(Duration::ZERO),
-                heartbeat_script: Mutex::new(VecDeque::new()),
-                heartbeat_calls: Mutex::new(Vec::new()),
+                ping_script: Mutex::new(VecDeque::new()),
+                ping_calls: Mutex::new(Vec::new()),
+                report_script: Mutex::new(VecDeque::new()),
+                report_calls: Mutex::new(Vec::new()),
+                verify_script: Mutex::new(VecDeque::new()),
+                verify_calls: Mutex::new(Vec::new()),
+                rotate_script: Mutex::new(VecDeque::new()),
+                rotate_calls: Mutex::new(Vec::new()),
+                rejected_secrets: Mutex::new(BTreeSet::new()),
                 unenroll_script: Mutex::new(VecDeque::new()),
                 unenroll_calls: Mutex::new(Vec::new()),
                 events_tx,
@@ -144,8 +179,54 @@ impl FakeBackend {
         *lock(&self.inner.enroll_delay) = delay;
     }
 
-    pub fn script_heartbeat(&self, result: Result<HeartbeatResponse, BackendError>) {
-        lock(&self.inner.heartbeat_script).push_back(result);
+    pub fn script_ping(&self, result: Result<PingResponse, BackendError>) {
+        lock(&self.inner.ping_script).push_back(result);
+    }
+
+    pub fn script_report(&self, result: Result<ReportAccepted, BackendError>) {
+        lock(&self.inner.report_script).push_back(result);
+    }
+
+    pub fn script_verify(&self, result: Result<VerifyAnswer, BackendError>) {
+        lock(&self.inner.verify_script).push_back(result);
+    }
+
+    pub fn script_rotate(&self, result: Result<(), BackendError>) {
+        lock(&self.inner.rotate_script).push_back(result);
+    }
+
+    /// From now on every device call made with `secret` is `device_rejected`.
+    pub fn reject_secret(&self, secret: &str) {
+        lock(&self.inner.rejected_secrets).insert(secret.to_string());
+    }
+
+    fn is_rejected(&self, auth: &DeviceAuth) -> bool {
+        lock(&self.inner.rejected_secrets).contains(&auth.device_secret)
+    }
+
+    pub fn ping_calls(&self) -> Vec<PingCall> {
+        lock(&self.inner.ping_calls).clone()
+    }
+
+    pub fn report_calls(&self) -> Vec<ReportCall> {
+        lock(&self.inner.report_calls).clone()
+    }
+
+    pub fn verify_calls(&self) -> Vec<(DeviceAuth, String)> {
+        lock(&self.inner.verify_calls).clone()
+    }
+
+    pub fn rotate_calls(&self) -> Vec<(DeviceAuth, String)> {
+        lock(&self.inner.rotate_calls).clone()
+    }
+
+    pub async fn wait_for_pings(&self, count: usize) {
+        self.wait_until("pings", |fake| fake.ping_calls().len() >= count).await;
+    }
+
+    #[allow(dead_code)]
+    pub async fn wait_for_reports(&self, count: usize) {
+        self.wait_until("reports", |fake| fake.report_calls().len() >= count).await;
     }
 
     pub fn script_unenroll(&self, result: Result<(), BackendError>) {
@@ -159,10 +240,6 @@ impl FakeBackend {
 
     pub fn enroll_calls(&self) -> Vec<EnrollRequest> {
         lock(&self.inner.enroll_calls).clone()
-    }
-
-    pub fn heartbeat_calls(&self) -> Vec<HeartbeatCall> {
-        lock(&self.inner.heartbeat_calls).clone()
     }
 
     pub fn unenroll_calls(&self) -> Vec<DeviceAuth> {
@@ -186,10 +263,6 @@ impl FakeBackend {
                 () = tokio::time::sleep_until(deadline) => panic!("timed out waiting for {what}"),
             }
         }
-    }
-
-    pub async fn wait_for_heartbeats(&self, count: usize) {
-        self.wait_until("heartbeats", |fake| fake.heartbeat_calls().len() >= count).await;
     }
 
     pub async fn wait_for_subscription(&self) {
@@ -223,19 +296,64 @@ impl Backend for FakeBackend {
         .boxed()
     }
 
-    fn heartbeat(
-        &self,
-        auth: &DeviceAuth,
-        status: Option<StatusReport>,
-    ) -> BoxFuture<'_, Result<HeartbeatResponse, BackendError>> {
-        let call = HeartbeatCall { at: Instant::now(), auth: auth.clone(), status };
+    fn ping(&self, auth: &DeviceAuth) -> BoxFuture<'_, Result<PingResponse, BackendError>> {
+        let call = PingCall { at: Instant::now(), auth: auth.clone() };
         async move {
-            lock(&self.inner.heartbeat_calls).push(call);
+            let rejected_secret = self.is_rejected(&call.auth);
+            lock(&self.inner.ping_calls).push(call);
             self.inner.changed.notify_waiters();
-            match lock(&self.inner.heartbeat_script).pop_front() {
-                Some(result) => result,
-                None => Ok(HeartbeatResponse { next_ping_in_ms: 300_000, server_time_ms: 1_760_000_000_000 }),
+            if rejected_secret {
+                return Err(rejected());
             }
+            lock(&self.inner.ping_script).pop_front().unwrap_or_else(|| Ok(ping_ok(1_800_000)))
+        }
+        .boxed()
+    }
+
+    fn report<'a>(&'a self, auth: &DeviceAuth, batch: &ReportBatch) -> BoxFuture<'a, Result<ReportAccepted, BackendError>> {
+        let call = ReportCall { at: Instant::now(), auth: auth.clone(), batch: batch.clone() };
+        async move {
+            let rejected_secret = self.is_rejected(&call.auth);
+            let all = ReportAccepted { installs: call.batch.installs.len(), audit: call.batch.audit.len() };
+            lock(&self.inner.report_calls).push(call);
+            self.inner.changed.notify_waiters();
+            if rejected_secret {
+                return Err(rejected());
+            }
+            lock(&self.inner.report_script).pop_front().unwrap_or(Ok(all))
+        }
+        .boxed()
+    }
+
+    fn verify_employee<'a>(
+        &'a self,
+        auth: &DeviceAuth,
+        username: &str,
+        _password: &str,
+    ) -> BoxFuture<'a, Result<VerifyAnswer, BackendError>> {
+        let call = (auth.clone(), username.to_string());
+        async move {
+            let rejected_secret = self.is_rejected(&call.0);
+            lock(&self.inner.verify_calls).push(call);
+            self.inner.changed.notify_waiters();
+            if rejected_secret {
+                return Err(rejected());
+            }
+            lock(&self.inner.verify_script).pop_front().unwrap_or(Ok(VerifyAnswer::WrongCredentials))
+        }
+        .boxed()
+    }
+
+    fn rotate_credential<'a>(&'a self, auth: &DeviceAuth, new_secret_hash: &str) -> BoxFuture<'a, Result<(), BackendError>> {
+        let call = (auth.clone(), new_secret_hash.to_string());
+        async move {
+            let rejected_secret = self.is_rejected(&call.0);
+            lock(&self.inner.rotate_calls).push(call);
+            self.inner.changed.notify_waiters();
+            if rejected_secret {
+                return Err(rejected());
+            }
+            lock(&self.inner.rotate_script).pop_front().unwrap_or(Ok(()))
         }
         .boxed()
     }

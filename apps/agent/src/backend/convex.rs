@@ -28,7 +28,7 @@ use rulebox_policy::roster::{RosterEntry, RosterSnapshot};
 use super::value::{from_json, to_json};
 use super::{
     Backend, BackendError, BackendEvent, BackendFactory, DesiredFetch, DeviceAuth, EnrollRequest,
-    EnrollResponse, Head, HeartbeatResponse, RosterFetch, StatusReport, CALL_TIMEOUT,
+    EnrollResponse, Head, PingResponse, ReportAccepted, ReportBatch, RosterFetch, VerifyAnswer, CALL_TIMEOUT,
 };
 
 /// Convex function names.
@@ -37,8 +37,15 @@ pub const FN_ENROLL: &str = "enrollment:enroll";
 pub const FN_HEAD_STATE: &str = "devices:headState";
 pub const FN_FETCH_DESIRED: &str = "devices:fetchDesired";
 pub const FN_FETCH_ROSTER: &str = "devices:fetchRoster";
-pub const FN_HEARTBEAT: &str = "devices:heartbeat";
+/// (Step 13) Liveness; it replaced `devices:heartbeat` (an alias the server keeps
+/// for Phase 2 agents).
+pub const FN_PING: &str = "devices:ping";
 pub const FN_UNENROLL: &str = "devices:unenroll";
+/// (Step 13) The batched status, installs and audit records.
+pub const FN_REPORT: &str = "deviceApi:report";
+/// (Step 13) An action.
+pub const FN_VERIFY_EMPLOYEE: &str = "deviceApi:verifyEmployee";
+pub const FN_ROTATE_CREDENTIAL: &str = "deviceApi:rotateCredential";
 
 /// Capacity of the client's state-change channel (plan Section 5.8).
 const STATE_CHANNEL: usize = 16;
@@ -78,15 +85,42 @@ pub fn enroll_args(request: &EnrollRequest) -> BTreeMap<String, Value> {
     args
 }
 
-/// The arguments of `devices:heartbeat`: the credentials, and `status` only when
-/// there is one to send.
-pub fn heartbeat_args(auth: &DeviceAuth, status: Option<&StatusReport>) -> BTreeMap<String, Value> {
+/// The arguments of `deviceApi:report`: the credentials and only the parts that
+/// carry something (`status` is a full snapshot, so it is left out when it did not
+/// change; an absent part is `v.optional`).
+pub fn report_args(auth: &DeviceAuth, batch: &ReportBatch) -> BTreeMap<String, Value> {
     let mut args = auth_args(auth);
-    if let Some(status) = status {
-        // A `StatusReport` always serializes; the empty object cannot happen.
+    if let Some(status) = &batch.status {
+        // A `StatusReport` always serializes; the null cannot happen.
         let json = serde_json::to_value(status).unwrap_or(Json::Null);
         args.insert("status".to_string(), from_json(&json));
     }
+    if !batch.installs.is_empty() {
+        let json = serde_json::to_value(&batch.installs).unwrap_or(Json::Null);
+        args.insert("installs".to_string(), from_json(&json));
+    }
+    if !batch.audit.is_empty() || batch.dropped > 0 {
+        let records = serde_json::to_value(&batch.audit).unwrap_or(Json::Null);
+        let part = serde_json::json!({ "records": records, "dropped": batch.dropped });
+        args.insert("audit".to_string(), from_json(&part));
+    }
+    args
+}
+
+/// The arguments of `deviceApi:verifyEmployee`. They hold the password: never log
+/// them (nothing in this file logs arguments).
+pub fn verify_args(auth: &DeviceAuth, username: &str, password: &str) -> BTreeMap<String, Value> {
+    let mut args = auth_args(auth);
+    args.insert("username".to_string(), text(username));
+    args.insert("password".to_string(), text(password));
+    args
+}
+
+/// The arguments of `deviceApi:rotateCredential`: only the hash of the new secret
+/// travels.
+pub fn rotate_args(auth: &DeviceAuth, new_secret_hash: &str) -> BTreeMap<String, Value> {
+    let mut args = auth_args(auth);
+    args.insert("newSecretHash".to_string(), text(new_secret_hash));
     args
 }
 
@@ -162,15 +196,75 @@ pub fn parse_enroll_response(json: &Json) -> Result<EnrollResponse, BackendError
     })
 }
 
-/// `{ kind: "rejected" } | { kind: "ok", nextPingInMs, serverTimeMs }`.
-pub fn parse_heartbeat_response(json: &Json) -> Result<HeartbeatResponse, BackendError> {
+/// `{ nextPingInMs, planState, rotateCredential }` (`devices:ping`). A missing
+/// `rotateCredential` is false and a missing `planState` is `"ok"`, so a server
+/// that does not send them never starts a rotation; `serverTimeMs` is read when
+/// present (the `heartbeat` alias sends it; `ping` does not yet).
+pub fn parse_ping_response(json: &Json) -> Result<PingResponse, BackendError> {
+    if json.get("kind").and_then(Json::as_str) == Some("rejected") {
+        return Err(BackendError::Rejected { code: super::CODE_DEVICE_REJECTED.to_string() });
+    }
+    let rotate_credential = match json.get("rotateCredential") {
+        None | Some(Json::Null) => false,
+        Some(Json::Bool(rotate)) => *rotate,
+        Some(_) => return Err(protocol("\"rotateCredential\" is not a boolean")),
+    };
+    let plan_state = match json.get("planState") {
+        None | Some(Json::Null) => "ok".to_string(),
+        Some(_) => string_field(json, "planState")?,
+    };
+    let server_time_ms = match json.get("serverTimeMs") {
+        None | Some(Json::Null) => None,
+        Some(_) => Some(time_ms(json, "serverTimeMs")?),
+    };
+    Ok(PingResponse { next_ping_in_ms: whole_number(json, "nextPingInMs")?, server_time_ms, rotate_credential, plan_state })
+}
+
+/// `{ accepted: { installs, audit } }`.
+pub fn parse_report_response(json: &Json) -> Result<ReportAccepted, BackendError> {
+    let accepted = field(json, "accepted")?;
+    let count = |name| whole_number(accepted, name).map(|n| usize::try_from(n).unwrap_or(usize::MAX));
+    Ok(ReportAccepted { installs: count("installs")?, audit: count("audit")? })
+}
+
+/// `{ kind: "ok", employee: { id, username, name, role, quotaBytes }, offlineDays,
+/// credentialRevision } | { kind: "wrongCredentials" | "disabled" |
+/// "notAllowedHere" } | { kind: "lockedOut", retryAfterMs }`.
+pub fn parse_verify_response(json: &Json) -> Result<VerifyAnswer, BackendError> {
     match string_field(json, "kind")?.as_str() {
-        "rejected" => Err(BackendError::Rejected { code: "rejected".to_string() }),
-        "ok" => Ok(HeartbeatResponse {
-            next_ping_in_ms: whole_number(json, "nextPingInMs")?,
-            server_time_ms: time_ms(json, "serverTimeMs")?,
-        }),
-        _ => Err(protocol("unknown heartbeat answer")),
+        "ok" => {
+            let employee = field(json, "employee")?;
+            let role = match employee.get("role") {
+                None | Some(Json::Null) => None,
+                Some(_) => Some(string_field(employee, "role")?),
+            };
+            let offline_days = whole_number(json, "offlineDays")?;
+            Ok(VerifyAnswer::Ok {
+                employee: rulebox_ipc::requests::Employee {
+                    id: string_field(employee, "id")?,
+                    username: string_field(employee, "username")?,
+                    name: string_field(employee, "name")?,
+                    role,
+                    quota_bytes: whole_number(employee, "quotaBytes")?,
+                },
+                // The server bounds it to 0..30; anything larger is clamped, never wrapped.
+                offline_days: u32::try_from(offline_days).unwrap_or(u32::MAX),
+                credential_revision: whole_number(json, "credentialRevision")?,
+            })
+        }
+        "wrongCredentials" => Ok(VerifyAnswer::WrongCredentials),
+        "disabled" => Ok(VerifyAnswer::Disabled),
+        "notAllowedHere" => Ok(VerifyAnswer::NotAllowedHere),
+        "lockedOut" => Ok(VerifyAnswer::LockedOut { retry_after_ms: whole_number(json, "retryAfterMs")? }),
+        _ => Err(protocol("unknown verify answer")),
+    }
+}
+
+/// `{ kind: "ok" }`.
+pub fn parse_rotate_response(json: &Json) -> Result<(), BackendError> {
+    match string_field(json, "kind")?.as_str() {
+        "ok" => Ok(()),
+        _ => Err(protocol("unknown rotation answer")),
     }
 }
 
@@ -376,6 +470,22 @@ impl ConvexBackend {
         }
     }
 
+    /// One action under the 30-second timeout (the caller may wait less).
+    async fn action(&self, name: &str, args: BTreeMap<String, Value>) -> Result<Json, BackendError> {
+        let connected = self.connected().await?;
+        let mut client = connected.client.clone();
+        let outcome = tokio::time::timeout(CALL_TIMEOUT, client.action(name, args))
+            .await
+            .map_err(|_| BackendError::Timeout)?;
+        match outcome {
+            Ok(result) => function_result(result),
+            Err(error) => {
+                tracing::debug!("backend call {name} failed: {error}");
+                Err(BackendError::Unreachable)
+            }
+        }
+    }
+
     /// One one-shot query under the 30-second timeout.
     async fn query(&self, name: &str, args: BTreeMap<String, Value>) -> Result<Json, BackendError> {
         let connected = self.connected().await?;
@@ -477,15 +587,43 @@ impl Backend for ConvexBackend {
         .boxed()
     }
 
-    fn heartbeat(
-        &self,
-        auth: &DeviceAuth,
-        status: Option<StatusReport>,
-    ) -> BoxFuture<'_, Result<HeartbeatResponse, BackendError>> {
-        let args = heartbeat_args(auth, status.as_ref());
+    fn ping(&self, auth: &DeviceAuth) -> BoxFuture<'_, Result<PingResponse, BackendError>> {
+        let args = auth_args(auth);
         async move {
-            let json = self.mutation(FN_HEARTBEAT, args).await?;
-            parse_heartbeat_response(&json)
+            let json = self.mutation(FN_PING, args).await?;
+            parse_ping_response(&json)
+        }
+        .boxed()
+    }
+
+    fn report<'a>(&'a self, auth: &DeviceAuth, batch: &ReportBatch) -> BoxFuture<'a, Result<ReportAccepted, BackendError>> {
+        let args = report_args(auth, batch);
+        async move {
+            let json = self.mutation(FN_REPORT, args).await?;
+            parse_report_response(&json)
+        }
+        .boxed()
+    }
+
+    fn verify_employee<'a>(
+        &'a self,
+        auth: &DeviceAuth,
+        username: &str,
+        password: &str,
+    ) -> BoxFuture<'a, Result<VerifyAnswer, BackendError>> {
+        let args = verify_args(auth, username, password);
+        async move {
+            let json = self.action(FN_VERIFY_EMPLOYEE, args).await?;
+            parse_verify_response(&json)
+        }
+        .boxed()
+    }
+
+    fn rotate_credential<'a>(&'a self, auth: &DeviceAuth, new_secret_hash: &str) -> BoxFuture<'a, Result<(), BackendError>> {
+        let args = rotate_args(auth, new_secret_hash);
+        async move {
+            let json = self.mutation(FN_ROTATE_CREDENTIAL, args).await?;
+            parse_rotate_response(&json)
         }
         .boxed()
     }
@@ -530,7 +668,7 @@ impl Backend for ConvexBackend {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::backend::sha256_hex;
+    use crate::backend::{sha256_hex, StatusReport};
     use serde_json::json;
 
     fn auth() -> DeviceAuth {
@@ -554,8 +692,11 @@ mod tests {
         assert_eq!(FN_HEAD_STATE, "devices:headState");
         assert_eq!(FN_FETCH_DESIRED, "devices:fetchDesired");
         assert_eq!(FN_FETCH_ROSTER, "devices:fetchRoster");
-        assert_eq!(FN_HEARTBEAT, "devices:heartbeat");
+        assert_eq!(FN_PING, "devices:ping");
         assert_eq!(FN_UNENROLL, "devices:unenroll");
+        assert_eq!(FN_REPORT, "deviceApi:report");
+        assert_eq!(FN_VERIFY_EMPLOYEE, "deviceApi:verifyEmployee");
+        assert_eq!(FN_ROTATE_CREDENTIAL, "deviceApi:rotateCredential");
     }
 
     #[test]
@@ -586,23 +727,130 @@ mod tests {
     }
 
     /// The hash sent at enrollment is the hash of the secret that every later
-    /// `desiredState` and `heartbeat` call sends, hashed as text.
+    /// `headState`, `ping` and `report` call sends, hashed as text.
     #[test]
     fn the_enrolled_hash_matches_the_secret_later_sent() {
         let auth = auth();
         let enrolled_hash = sha256_hex(&auth.device_secret);
         let desired = auth_args(&auth);
-        let heartbeat = heartbeat_args(&auth, None);
-        for args in [&desired, &heartbeat] {
+        let report = report_args(&auth, &ReportBatch::default());
+        for args in [&desired, &report] {
             assert_eq!(sha256_hex(string_arg(args, "deviceSecret")), enrolled_hash);
             assert_eq!(string_arg(args, "deviceId"), "kd7abc");
         }
         assert_eq!(keys(&desired), ["deviceId", "deviceSecret"]);
-        assert_eq!(keys(&heartbeat), ["deviceId", "deviceSecret"]);
+        assert_eq!(keys(&report), ["deviceId", "deviceSecret"]);
     }
 
     #[test]
-    fn heartbeat_status_is_sent_only_when_given_and_numbers_are_floats() {
+    fn report_arguments_carry_only_the_parts_that_are_there() {
+        use crate::audit::{AuditKind, AuditRecord};
+        use crate::backend::{InstallReport, InstallState};
+        let record = AuditRecord {
+            id: "ab".repeat(16),
+            at_ms: 1_760_000_000_000,
+            server_time_offset_ms: Some(-5),
+            kind: AuditKind::EmployeeLockedOut,
+            username: Some("maya".into()),
+            detail: Some("password_lockout".into()),
+        };
+        let install = InstallReport {
+            app_id: "app1".into(),
+            state: InstallState::Failed,
+            app_revision: 3,
+            attempts: 2,
+            exit_code: Some(1603),
+            detail: Some("exit_code".into()),
+        };
+        let batch = ReportBatch { status: None, installs: vec![install], audit: vec![record], dropped: 4 };
+        let args = report_args(&auth(), &batch);
+        assert_eq!(keys(&args), ["audit", "deviceId", "deviceSecret", "installs"]);
+        assert_eq!(
+            to_json(args["audit"].clone()),
+            json!({ "records": [{ "id": "ab".repeat(16), "atMs": 1_760_000_000_000_u64, "serverTimeOffsetMs": -5,
+                                  "kind": "employeeLockedOut", "username": "maya", "detail": "password_lockout" }],
+                    "dropped": 4 })
+        );
+        assert_eq!(
+            to_json(args["installs"].clone()),
+            json!([{ "appId": "app1", "state": "failed", "appRevision": 3, "attempts": 2, "exitCode": 1603, "detail": "exit_code" }])
+        );
+        // Numbers are floats on the wire (`v.number()`).
+        let Value::Object(audit) = &args["audit"] else { panic!("audit is not an object") };
+        assert!(matches!(audit["dropped"], Value::Float64(n) if n == 4.0));
+        // Only a dropped count still sends the audit part (the server writes one row).
+        let only_dropped = report_args(&auth(), &ReportBatch { dropped: 2, ..ReportBatch::default() });
+        assert_eq!(to_json(only_dropped["audit"].clone()), json!({ "records": [], "dropped": 2 }));
+    }
+
+    #[test]
+    fn verify_and_rotate_arguments() {
+        let args = verify_args(&auth(), "maya", "pw-value");
+        assert_eq!(keys(&args), ["deviceId", "deviceSecret", "password", "username"]);
+        assert_eq!(string_arg(&args, "password"), "pw-value");
+        let args = rotate_args(&auth(), &"0".repeat(64));
+        assert_eq!(keys(&args), ["deviceId", "deviceSecret", "newSecretHash"]);
+    }
+
+    #[test]
+    fn heartbeat_without_rotate_field_means_false() {
+        let bare = parse_ping_response(&json!({ "nextPingInMs": 1_800_000 })).unwrap();
+        assert_eq!(
+            bare,
+            PingResponse { next_ping_in_ms: 1_800_000, server_time_ms: None, rotate_credential: false, plan_state: "ok".into() }
+        );
+        let full = parse_ping_response(&json!({ "nextPingInMs": 60_000, "planState": "overLimit", "rotateCredential": true }))
+            .unwrap();
+        assert!(full.rotate_credential);
+        assert_eq!(full.plan_state, "overLimit");
+        // The `heartbeat` alias' shape parses too, server time included.
+        let alias = parse_ping_response(&json!({ "kind": "ok", "nextPingInMs": 5, "serverTimeMs": 7, "rotateCredential": false }))
+            .unwrap();
+        assert_eq!(alias.server_time_ms, Some(7));
+        assert_eq!(
+            parse_ping_response(&json!({ "kind": "rejected" })),
+            Err(BackendError::Rejected { code: "device_rejected".into() })
+        );
+        assert!(matches!(parse_ping_response(&json!({})), Err(BackendError::Protocol(_))));
+        assert!(matches!(
+            parse_ping_response(&json!({ "nextPingInMs": 5, "rotateCredential": "yes" })),
+            Err(BackendError::Protocol(_))
+        ));
+    }
+
+    #[test]
+    fn report_verify_and_rotate_answers() {
+        let accepted = parse_report_response(&to_json(from_json(&json!({ "accepted": { "installs": 3, "audit": 5 } }))));
+        assert_eq!(accepted, Ok(ReportAccepted { installs: 3, audit: 5 }));
+        assert!(parse_report_response(&json!({ "accepted": 5 })).is_err());
+
+        let ok = json!({ "kind": "ok", "employee": { "id": "e1", "username": "maya", "name": "Maya", "role": null,
+                         "quotaBytes": 10_737_418_240_u64 }, "offlineDays": 3, "credentialRevision": 7 });
+        let VerifyAnswer::Ok { employee, offline_days, credential_revision } =
+            parse_verify_response(&to_json(from_json(&ok))).unwrap()
+        else {
+            panic!("expected ok");
+        };
+        assert_eq!((employee.id.as_str(), employee.role, employee.quota_bytes), ("e1", None, 10_737_418_240));
+        assert_eq!((offline_days, credential_revision), (3, 7));
+        for (kind, answer) in [
+            ("wrongCredentials", VerifyAnswer::WrongCredentials),
+            ("disabled", VerifyAnswer::Disabled),
+            ("notAllowedHere", VerifyAnswer::NotAllowedHere),
+        ] {
+            assert_eq!(parse_verify_response(&json!({ "kind": kind })), Ok(answer));
+        }
+        assert_eq!(
+            parse_verify_response(&json!({ "kind": "lockedOut", "retryAfterMs": 900_000 })),
+            Ok(VerifyAnswer::LockedOut { retry_after_ms: 900_000 })
+        );
+        assert!(matches!(parse_verify_response(&json!({ "kind": "maybe" })), Err(BackendError::Protocol(_))));
+        assert_eq!(parse_rotate_response(&json!({ "kind": "ok" })), Ok(()));
+        assert!(parse_rotate_response(&json!({ "kind": "nope" })).is_err());
+    }
+
+    #[test]
+    fn report_status_is_sent_only_when_given_and_numbers_are_floats() {
         let status = StatusReport {
             agent_version: "0.0.0".into(),
             os: Some("Windows 11".into()),
@@ -619,7 +867,7 @@ mod tests {
             trusted_key_ids: None,
             restart_pending: None,
         };
-        let args = heartbeat_args(&auth(), Some(&status));
+        let args = report_args(&auth(), &ReportBatch { status: Some(status), ..ReportBatch::default() });
         assert_eq!(keys(&args), ["deviceId", "deviceSecret", "status"]);
         let Value::Object(sent) = &args["status"] else { panic!("status is not an object") };
         assert_eq!(
@@ -667,18 +915,6 @@ mod tests {
             parse_enroll_response(&json!({ "deviceId": "d", "orgId": "o", "deviceName": "n", "serverTimeMs": 1.5 })),
             Err(BackendError::Protocol(_))
         ));
-    }
-
-    #[test]
-    fn heartbeat_answers() {
-        let ok = parse_heartbeat_response(&json!({ "kind": "ok", "nextPingInMs": 300_000, "serverTimeMs": 5 })).unwrap();
-        assert_eq!(ok, HeartbeatResponse { next_ping_in_ms: 300_000, server_time_ms: 5 });
-        assert_eq!(
-            parse_heartbeat_response(&json!({ "kind": "rejected" })),
-            Err(BackendError::Rejected { code: "rejected".into() })
-        );
-        assert!(matches!(parse_heartbeat_response(&json!({ "kind": "?" })), Err(BackendError::Protocol(_))));
-        assert!(matches!(parse_heartbeat_response(&json!({ "kind": "ok" })), Err(BackendError::Protocol(_))));
     }
 
     #[test]

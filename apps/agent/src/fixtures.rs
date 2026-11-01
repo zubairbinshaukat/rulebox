@@ -214,6 +214,10 @@ pub fn catalogue() -> Vec<AppEntry> {
 /// (about 110 KB, no network). Generated once by a throwaway script; real files, not
 /// stubs: a PNG, a one-page PDF, a DOCX, an XLSX, a 4 s H.264 + AAC MP4 (faststart,
 /// so seeking works) and a 4 s MP3.
+///
+/// (Phase 4 Step 13) Only the Phase 3 test-machine fixture mode exported them; that
+/// mode is gone (Phase 3 is done), so they are compiled for the tests only.
+#[cfg(test)]
 mod samples {
     pub const PHOTO_PNG: &[u8] = include_bytes!("../assets/fixture-samples/Photo.png");
     pub const REPORT_PDF: &[u8] = include_bytes!("../assets/fixture-samples/Report.pdf");
@@ -224,6 +228,7 @@ mod samples {
 }
 
 /// Everything exported for the employee's folder: (relative path, bytes).
+#[cfg(test)]
 fn sample_files() -> Vec<(&'static str, &'static [u8])> {
     vec![
         ("Shopping list.txt", b"Milk\nEggs\nBread\nCoffee\n"),
@@ -250,6 +255,7 @@ fn sample_files() -> Vec<(&'static str, &'static [u8])> {
 /// 5.9: SYSTEM writing into a Staff-writable path invites junction tricks, and the
 /// Staff App creates that folder as Staff). So an administrator copies these in:
 /// `robocopy "%ProgramData%\Rulebox\fixture-samples" "<Staff profile>\RuleboxFiles\emp_maya" /E`.
+#[cfg(test)]
 pub fn export_sample_files(folder: &std::path::Path) {
     for (relative, bytes) in sample_files() {
         let path = folder.join(relative);

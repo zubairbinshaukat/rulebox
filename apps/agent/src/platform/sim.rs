@@ -98,6 +98,8 @@ pub struct SimWorld {
     pub staff_shell: HashMap<String, (ShellMechanism, Option<String>)>,
     /// Staff hive: policy DWORDs per (SID, name).
     pub staff_policies: HashMap<(String, String), u32>,
+    /// (Step 13) Files that exist on the simulated machine (`file_exists`).
+    pub files: std::collections::HashSet<PathBuf>,
     next_rid: u32,
     next_pid: u32,
 }
@@ -129,6 +131,7 @@ impl SimWorld {
             processes: Vec::new(),
             staff_shell: HashMap::new(),
             staff_policies: HashMap::new(),
+            files: std::collections::HashSet::new(),
             next_rid: 2000,
             next_pid: 4000,
         }
@@ -203,6 +206,24 @@ impl SimPlatform {
     }
 }
 
+/// The roots `SimPlatform` expands templates to (a pretend Windows layout).
+pub fn sim_path_roots() -> rulebox_policy::paths::PathRoots {
+    rulebox_policy::paths::PathRoots {
+        program_files: r"C:\Program Files".into(),
+        program_files_x86: r"C:\Program Files (x86)".into(),
+        system_root: r"C:\Windows".into(),
+        rulebox_apps: r"C:\Program Files\Rulebox\apps".into(),
+    }
+}
+
+impl SimPlatform {
+    /// (Step 13) Makes `path` exist on the simulated machine.
+    #[cfg(test)]
+    pub fn add_file(&self, path: &str) {
+        lock(&self.world).files.insert(PathBuf::from(path));
+    }
+}
+
 fn io_err(e: std::io::Error) -> PlatformError {
     PlatformError::Other(e.to_string())
 }
@@ -261,6 +282,15 @@ impl Platform for SimPlatform {
     fn shell_binaries_ok(&self) -> Result<ShellBinaries, PlatformError> {
         self.check(SimOp::ShellBinariesOk)?;
         Ok(lock(&self.world).shell_binaries)
+    }
+
+    fn file_exists(&self, path: &Path) -> bool {
+        lock(&self.world).files.contains(path)
+    }
+
+    /// Fixed fake roots: nothing on the real disk is ever looked at.
+    fn path_roots(&self) -> Result<rulebox_policy::paths::PathRoots, PlatformError> {
+        Ok(sim_path_roots())
     }
 
     fn create_staff_user(&self, spec: &StaffUserSpec, password: &str) -> Result<String, PlatformError> {

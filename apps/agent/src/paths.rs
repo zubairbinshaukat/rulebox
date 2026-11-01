@@ -132,12 +132,6 @@ impl DataPaths {
         self.root.join("sim-files")
     }
 
-    /// Fixture mode on a test machine only: the sample files the agent writes for
-    /// the viewer checklist. An administrator copies them into the employee's
-    /// folder; the agent never writes inside the Staff profile.
-    pub fn fixture_samples(&self) -> PathBuf {
-        self.root.join("fixture-samples")
-    }
 
     pub fn logs_dir(&self) -> PathBuf {
         self.root.join("logs")

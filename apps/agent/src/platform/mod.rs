@@ -133,6 +133,11 @@ pub trait Platform: Send + Sync + 'static {
     fn find_processes(&self, session_id: u32, image_path: &Path) -> Result<Vec<u32>, PlatformError>;
     /// Launcher and `current.json` target exist.
     fn shell_binaries_ok(&self) -> Result<ShellBinaries, PlatformError>;
+    /// (Phase 4 Step 13) Whether `path` is an existing file. Read-only: a desktop
+    /// app is "installed" when its exe exists until Step 14's install records.
+    fn file_exists(&self, path: &Path) -> bool;
+    /// (Phase 4 Step 13) The roots a catalogue path template expands to.
+    fn path_roots(&self) -> Result<rulebox_policy::paths::PathRoots, PlatformError>;
 
     // mutating: every `WindowsPlatform` implementation calls `guard::require_test_machine()` first
     fn create_staff_user(&self, spec: &StaffUserSpec, password: &str) -> Result<String, PlatformError>;

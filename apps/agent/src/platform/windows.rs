@@ -204,6 +204,34 @@ impl Platform for WindowsPlatform {
         Ok(ShellBinaries { launcher_ok, staff_app_ok })
     }
 
+    fn file_exists(&self, path: &Path) -> bool {
+        path.is_file()
+    }
+
+    /// `{ProgramFiles}` is the parent of the install root (`FOLDERID_ProgramFiles`
+    /// plus `Rulebox`); the x86 folder and the Windows folder come from the
+    /// `ProgramFiles(x86)` and `SystemRoot` variables of the service's own
+    /// environment (set by Windows for every process, SYSTEM included).
+    fn path_roots(&self) -> Result<rulebox_policy::paths::PathRoots, PlatformError> {
+        let program_files = self
+            .install
+            .root()
+            .parent()
+            .ok_or_else(|| PlatformError::Other("the install root has no parent".into()))?;
+        let var = |name: &str| {
+            std::env::var(name)
+                .ok()
+                .filter(|value| Path::new(value).is_absolute())
+                .ok_or_else(|| PlatformError::Other(format!("the {name} folder is not known")))
+        };
+        Ok(rulebox_policy::paths::PathRoots {
+            program_files: program_files.to_string_lossy().into_owned(),
+            program_files_x86: var("ProgramFiles(x86)")?,
+            system_root: var("SystemRoot")?,
+            rulebox_apps: self.install.root().join("apps").to_string_lossy().into_owned(),
+        })
+    }
+
     fn create_staff_user(&self, spec: &StaffUserSpec, password: &str) -> Result<String, PlatformError> {
         guard()?;
         let sid = accounts::create_standard_user(&spec.user_name, &spec.full_name, &spec.comment, password)

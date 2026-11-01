@@ -8,7 +8,8 @@ use std::sync::Arc;
 
 use futures_util::future::BoxFuture;
 use futures_util::FutureExt;
-use rulebox_ipc::methods::{Method, ShellHeartbeat, ShellReady, StateGet};
+use rulebox_ipc::methods::{events, Method, ShellHeartbeat, ShellReady, StateGet};
+use rulebox_ipc::requests::{SessionEndReason, SessionEndedData};
 use rulebox_ipc::server::{Connection, PeerInfo, PipeListener};
 use rulebox_ipc::types::{AgentSnapshot, ClientRole, ShutdownReason};
 use rulebox_ipc::{ErrorCode, Frame, RpcError, CAPABILITIES, HELLO_DEADLINE};
@@ -59,6 +60,18 @@ impl ShellBroadcast {
     pub fn shutting_down(&self, reason: ShutdownReason, grace_ms: u64) {
         // No receivers just means nobody is connected.
         let _ = self.tx.send(shutting_down_frame(reason, grace_ms));
+    }
+
+    /// (1.2) `apps.changed` with `{}`.
+    pub fn apps_changed(&self) {
+        let frame = Frame::Event { event: events::APPS_CHANGED.to_string(), data: serde_json::json!({}) };
+        let _ = self.tx.send(frame);
+    }
+
+    /// (1.2) `session.ended` with `{ reason }`.
+    pub fn session_ended(&self, reason: SessionEndReason) {
+        let data = serde_json::to_value(SessionEndedData { reason }).unwrap_or(serde_json::Value::Null);
+        let _ = self.tx.send(Frame::Event { event: events::SESSION_ENDED.to_string(), data });
     }
 
     fn sender(&self) -> broadcast::Sender<Frame> {
@@ -592,11 +605,11 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn hello_answers_protocol_1_1_with_the_always_present_capabilities() {
+    async fn hello_answers_protocol_1_2_with_the_always_present_capabilities() {
         let rig = Rig::start(Vec::new());
         let mut client = RawClient::connect(&rig.name).await;
         let hello = hello(&mut client).await;
-        assert_eq!(hello.protocol, ProtocolVersion { major: 1, minor: 1 });
+        assert_eq!(hello.protocol, ProtocolVersion { major: 1, minor: 2 });
         assert_eq!(hello.capabilities, ["state", "health"]);
         assert_eq!(hello.agent_version, env!("CARGO_PKG_VERSION"));
         rig.stop().await;

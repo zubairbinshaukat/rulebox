@@ -13,6 +13,9 @@ use rulebox_ipc::hotkey::{self, DEFAULT_ADMIN_EXIT_HOTKEY};
 use rulebox_ipc::types::{AdminExitInfo, AgentSnapshot, PowerOptions};
 use serde_json::Value;
 
+use rulebox_policy::catalog::CatalogApp;
+
+use crate::catalog::catalog_from_doc;
 use crate::kdf;
 
 /// `pinHash` is not a valid Argon2id hash (or is outside the limits of `kdf`).
@@ -65,6 +68,15 @@ pub struct AgentPolicy {
     /// `None` means "all three allowed" (also for a value of the wrong shape).
     pub power: Option<PowerOptions>,
     pub org_name: Option<String>,
+    /// (Phase 4 Step 13) True when this policy comes from a verified document.
+    pub has_document: bool,
+    /// (Step 13) `doc.catalog`, usable entries only (`catalog.rs`). Never part of
+    /// the snapshot or of `DesiredState`.
+    pub catalog: Vec<CatalogApp>,
+    /// (Step 13) `catalog_invalid` when `doc.catalog` was not a list.
+    pub catalog_problem: Option<String>,
+    /// (Step 13) `doc.rosterGroupId`: whose signed roster decides offline sign-in.
+    pub roster_group_id: Option<String>,
 }
 
 impl AgentPolicy {
@@ -76,7 +88,12 @@ impl AgentPolicy {
         let Some(doc) = doc else {
             return Self::default();
         };
+        let (catalog, catalog_problem) = catalog_from_doc(doc);
         Self {
+            has_document: true,
+            catalog,
+            catalog_problem,
+            roster_group_id: doc.get("rosterGroupId").and_then(Value::as_str).map(str::to_string),
             admin_exit: AdminExitPolicy::from_value(doc.get("adminExit")),
             power: doc.get("power").and_then(|value| serde_json::from_value(value.clone()).ok()),
             org_name: doc

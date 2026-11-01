@@ -27,6 +27,18 @@ pub struct CacheEntry {
     /// How long offline sign-in stays allowed after `last_online_ms`; 0 = never.
     pub offline_days: u32,
     pub last_online_ms: u64,
+    /// (Phase 4 Step 13) The server's `credentialRevision` at the last online
+    /// sign-in. A signed roster with a higher one drops the entry (new password or
+    /// username), so the old password stops working offline.
+    #[serde(default)]
+    pub credential_revision: u64,
+    /// (Step 13) The verified roster this PC held at that sign-in: its group and
+    /// epoch. A roster of the same group at that epoch or below may not list the
+    /// employee yet (it lags behind the server); a later one decides.
+    #[serde(default)]
+    pub roster_group: Option<String>,
+    #[serde(default)]
+    pub roster_epoch: u64,
 }
 
 impl fmt::Debug for CacheEntry {
@@ -38,6 +50,8 @@ impl fmt::Debug for CacheEntry {
             .field("password_hash", &"<redacted>")
             .field("offline_days", &self.offline_days)
             .field("last_online_ms", &self.last_online_ms)
+            .field("credential_revision", &self.credential_revision)
+            .field("roster_epoch", &self.roster_epoch)
             .finish()
     }
 }
@@ -117,6 +131,21 @@ impl EmployeeCache {
         self.save()
     }
 
+    /// (Step 13) Keeps the entries `keep` says yes to, saves when one went, and
+    /// returns the usernames that went.
+    pub fn retain(&mut self, mut keep: impl FnMut(&CacheEntry) -> bool) -> (Vec<String>, std::io::Result<()>) {
+        let mut gone = Vec::new();
+        self.entries.retain(|entry| {
+            let kept = keep(entry);
+            if !kept {
+                gone.push(entry.username.clone());
+            }
+            kept
+        });
+        let saved = if gone.is_empty() { Ok(()) } else { self.save() };
+        (gone, saved)
+    }
+
     /// Forgets every entry and deletes the file (unenrollment: the cache belongs to
     /// the organization the PC is leaving).
     pub fn clear(&mut self) -> std::io::Result<()> {
@@ -162,7 +191,30 @@ mod tests {
             password_hash: "$argon2id$placeholder".into(),
             offline_days,
             last_online_ms,
+            credential_revision: 0,
+            roster_group: None,
+            roster_epoch: 0,
         }
+    }
+
+    #[test]
+    fn a_phase_3_entry_reads_with_revision_zero_and_retain_saves() {
+        let dir = TempDir::new();
+        let path = dir.path().join("employee-cache.json");
+        std::fs::write(
+            &path,
+            r#"{ "schema": 1, "entries": [{ "username": "maya", "employee": { "id": "e1", "username": "maya",
+               "name": "Maya", "role": null, "quotaBytes": 0 }, "apps": [], "passwordHash": "$argon2id$x",
+               "offlineDays": 7, "lastOnlineMs": 5 }] }"#,
+        )
+        .unwrap();
+        let mut cache = EmployeeCache::open(path.clone()).unwrap();
+        let entry = cache.get("maya").unwrap();
+        assert_eq!((entry.credential_revision, entry.roster_group.as_deref(), entry.roster_epoch), (0, None, 0));
+        let (gone, saved) = cache.retain(|e| e.username != "maya");
+        assert_eq!(gone, ["maya"]);
+        saved.unwrap();
+        assert!(EmployeeCache::open(path).unwrap().get("maya").is_none());
     }
 
     #[test]

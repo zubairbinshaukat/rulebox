@@ -1,20 +1,24 @@
 //! The audit queue (plan Section 5.11): every use of the hidden admin exit and
 //! every employee lockout is written to disk first, then delivered to the backend
-//! through the [`AuditSink`] seam. The audit log itself is Phase 4; until then the
-//! real agent queues (up to the cap) and the simulated agent logs.
+//! through the [`AuditSink`] seam.
+//!
+//! (Phase 4 Step 13, A12) The sink delivers one [`ReportBatch`]: the audit
+//! records together with the status snapshot and install results
+//! (`report.rs` builds it). [`ConvexAuditSink`] sends it as `deviceApi:report`
+//! through the [`BackendLink`]; `--sim-demo` keeps [`LogAuditSink`].
 
 use std::fmt::Write as _;
 use std::path::PathBuf;
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 
 use futures_util::future::BoxFuture;
 use futures_util::FutureExt;
-use rulebox_ipc::types::{AgentSnapshot, ConnectionStatus};
+use rulebox_ipc::types::AgentSnapshot;
 use serde::{Deserialize, Serialize};
 use tokio::sync::{watch, Notify};
-use tokio_util::sync::CancellationToken;
 
+use crate::backend::{BackendLink, ReportAccepted, ReportBatch};
 use crate::state::{lock, read_json, write_atomic};
 
 /// Records kept on disk; when full the oldest is dropped and counted.
@@ -51,39 +55,48 @@ pub enum AuditKind {
     EmployeeLockedOut,
 }
 
+impl AuditKind {
+    /// (A12) Security records are reported at once, not with the next 60-second
+    /// batch: a successful admin exit and every lockout.
+    pub fn is_urgent(self) -> bool {
+        matches!(self, AuditKind::AdminExitSuccess | AuditKind::AdminExitLockedOut | AuditKind::EmployeeLockedOut)
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AuditSinkError {
-    /// This build cannot deliver at all.
-    Unavailable,
-    /// The backend could not be reached; try again on the next trigger.
-    // Returned by the Phase 4 Convex sink; only tests construct it before that.
+    /// This build cannot deliver at all (the test sink; kept for a build without a backend).
     #[allow(dead_code)]
+    Unavailable,
+    /// The backend could not be reached or refused the call (`rate_limited`,
+    /// `device_rejected`, ...): nothing is acked, try again later.
     Unreachable,
 }
 
-/// Where the queue is delivered. Phase 4 adds the Convex sink.
+/// Where the reports go.
 pub trait AuditSink: Send + Sync + 'static {
-    /// Deliver a batch. `Ok` = the backend has all of them (it must accept a
-    /// repeated id silently).
-    fn deliver<'a>(&'a self, batch: &'a [AuditRecord]) -> BoxFuture<'a, Result<(), AuditSinkError>>;
+    /// Deliver one batch. The answer says how many audit records and install
+    /// results the backend now has (a repeated id counts as accepted).
+    fn deliver<'a>(&'a self, batch: &'a ReportBatch) -> BoxFuture<'a, Result<ReportAccepted, AuditSinkError>>;
 }
 
-/// The real agent until Phase 4: nothing is delivered, records stay queued up to
-/// the cap.
+/// Nothing is delivered; records stay queued up to the cap (tests).
+#[cfg(test)]
 pub struct NullAuditSink;
 
+#[cfg(test)]
 impl AuditSink for NullAuditSink {
-    fn deliver<'a>(&'a self, _batch: &'a [AuditRecord]) -> BoxFuture<'a, Result<(), AuditSinkError>> {
+    fn deliver<'a>(&'a self, _batch: &'a ReportBatch) -> BoxFuture<'a, Result<ReportAccepted, AuditSinkError>> {
         std::future::ready(Err(AuditSinkError::Unavailable)).boxed()
     }
 }
 
-/// Simulate mode: logs each record at `info` and accepts it.
+/// `--sim-demo`: logs each record at `info` and accepts everything.
 pub struct LogAuditSink;
 
 impl AuditSink for LogAuditSink {
-    fn deliver<'a>(&'a self, batch: &'a [AuditRecord]) -> BoxFuture<'a, Result<(), AuditSinkError>> {
-        for record in batch {
+    fn deliver<'a>(&'a self, batch: &'a ReportBatch) -> BoxFuture<'a, Result<ReportAccepted, AuditSinkError>> {
+        for record in &batch.audit {
             tracing::info!(
                 id = %record.id,
                 at_ms = record.at_ms,
@@ -93,7 +106,43 @@ impl AuditSink for LogAuditSink {
                 "audit record"
             );
         }
-        std::future::ready(Ok(())).boxed()
+        if batch.dropped > 0 {
+            tracing::info!(dropped = batch.dropped, "audit records were dropped on this PC");
+        }
+        let accepted = ReportAccepted { installs: batch.installs.len(), audit: batch.audit.len() };
+        std::future::ready(Ok(accepted)).boxed()
+    }
+}
+
+/// (Step 13) The real agent and `--simulate` without `--sim-demo`:
+/// `deviceApi:report` through the backend link. No link (not enrolled, revoked,
+/// stopped) is `Unreachable`; so is every backend error, so nothing is acked.
+pub struct ConvexAuditSink {
+    link: Arc<BackendLink>,
+}
+
+impl ConvexAuditSink {
+    pub fn new(link: Arc<BackendLink>) -> Self {
+        Self { link }
+    }
+}
+
+impl AuditSink for ConvexAuditSink {
+    fn deliver<'a>(&'a self, batch: &'a ReportBatch) -> BoxFuture<'a, Result<ReportAccepted, AuditSinkError>> {
+        let link = self.link.get();
+        async move {
+            let Some((backend, auth)) = link else {
+                return Err(AuditSinkError::Unreachable);
+            };
+            match backend.report(&auth, batch).await {
+                Ok(accepted) => Ok(accepted),
+                Err(error) => {
+                    tracing::debug!("report failed ({error}); kept for the next try");
+                    Err(AuditSinkError::Unreachable)
+                }
+            }
+        }
+        .boxed()
     }
 }
 
@@ -220,7 +269,10 @@ fn random_id() -> String {
 /// task.
 pub struct AuditHandle {
     queue: Mutex<AuditQueue>,
-    notify: Notify,
+    /// Wakes the report task (`report.rs`).
+    pub(crate) notify: Notify,
+    /// A security record is queued (A12: report at once).
+    urgent: AtomicBool,
     snapshot_rx: watch::Receiver<AgentSnapshot>,
     now_ms: Arc<dyn Fn() -> u64 + Send + Sync>,
 }
@@ -231,7 +283,33 @@ impl AuditHandle {
         snapshot_rx: watch::Receiver<AgentSnapshot>,
         now_ms: Arc<dyn Fn() -> u64 + Send + Sync>,
     ) -> Arc<Self> {
-        Arc::new(Self { queue: Mutex::new(queue), notify: Notify::new(), snapshot_rx, now_ms })
+        // Records left from before a restart may hold a lockout: send them soon.
+        let urgent = queue.records.iter().any(|record| record.kind.is_urgent());
+        Arc::new(Self { queue: Mutex::new(queue), notify: Notify::new(), urgent: AtomicBool::new(urgent), snapshot_rx, now_ms })
+    }
+
+    /// Whether a security record waits (cleared when its batch is acked).
+    pub(crate) fn has_urgent(&self) -> bool {
+        self.urgent.load(Ordering::SeqCst)
+    }
+
+    /// The next batch, oldest first, and the dropped count it reports. The
+    /// dropped count travels in the report's own `dropped` field; no record is
+    /// changed.
+    pub(crate) fn next_batch(&self) -> (Vec<AuditRecord>, u64) {
+        let queue = lock(&self.queue);
+        (queue.peek(BATCH_SIZE).to_vec(), queue.dropped())
+    }
+
+    /// The backend has the first `count` records and the `dropped` count that
+    /// went with them.
+    pub(crate) fn ack(&self, count: usize, dropped: u64) {
+        let mut queue = lock(&self.queue);
+        if let Err(error) = queue.ack_reported(count, dropped) {
+            tracing::error!("cannot save the audit queue: {error}");
+        }
+        let still = queue.records.iter().any(|record| record.kind.is_urgent());
+        self.urgent.store(still, Ordering::SeqCst);
     }
 
     /// Writes the record to disk, then wakes the delivery task. Never blocks on
@@ -245,6 +323,9 @@ impl AuditHandle {
             username,
             detail,
         };
+        if kind.is_urgent() {
+            self.urgent.store(true, Ordering::SeqCst);
+        }
         let pushed = lock(&self.queue).push(record);
         if let Err(error) = pushed {
             tracing::error!("cannot save the audit queue: {error}");
@@ -277,96 +358,13 @@ impl AuditHandle {
     }
 }
 
-/// The next batch and how many dropped records it reports.
-fn next_batch(handle: &AuditHandle) -> (Vec<AuditRecord>, u64) {
-    let queue = lock(&handle.queue);
-    let mut batch = queue.peek(BATCH_SIZE).to_vec();
-    let dropped = queue.dropped();
-    if dropped > 0 {
-        if let Some(first) = batch.first_mut() {
-            first.detail = Some(match first.detail.take() {
-                Some(detail) => format!("dropped:{dropped};{detail}"),
-                None => format!("dropped:{dropped}"),
-            });
-            return (batch, dropped);
-        }
-    }
-    (batch, 0)
-}
-
-/// Delivers batches, oldest first, until the queue is empty or the sink fails.
-async fn deliver_all(handle: &AuditHandle, sink: &dyn AuditSink) {
-    loop {
-        let (batch, reported_dropped) = next_batch(handle);
-        if batch.is_empty() {
-            return;
-        }
-        match sink.deliver(&batch).await {
-            Ok(()) => {
-                let acked = lock(&handle.queue).ack_reported(batch.len(), reported_dropped);
-                if let Err(error) = acked {
-                    tracing::error!("cannot save the audit queue: {error}");
-                }
-            }
-            Err(error) => {
-                tracing::debug!(?error, queued = batch.len(), "audit delivery failed; waiting for the next trigger");
-                return;
-            }
-        }
-    }
-}
-
-/// The `audit` task of plan Section 5.2. It delivers once at start, then when a
-/// record is pushed and when `connection` becomes `online`. On any error it stops
-/// and waits for the next trigger; it never loops on a timer (CLAUDE.md data
-/// rule 6).
-pub async fn run_audit_task(
-    handle: Arc<AuditHandle>,
-    sink: Arc<dyn AuditSink>,
-    mut snapshot_rx: watch::Receiver<AgentSnapshot>,
-    shutdown: CancellationToken,
-) {
-    let mut was_online = snapshot_rx.borrow_and_update().connection == ConnectionStatus::Online;
-    loop {
-        // Use up a wake-up that is already stored: whatever caused it was pushed
-        // before this point, so the delivery below sees it. Without this a record
-        // that arrived during the previous delivery would give one extra attempt
-        // right after a failure.
-        let _ = handle.notify.notified().now_or_never();
-        deliver_all(&handle, sink.as_ref()).await;
-        loop {
-            tokio::select! {
-                () = shutdown.cancelled() => return,
-                () = handle.notify.notified() => break,
-                changed = snapshot_rx.changed() => {
-                    if changed.is_err() {
-                        // The snapshot sender is gone; only new records and shutdown matter now.
-                        tokio::select! {
-                            () = shutdown.cancelled() => return,
-                            () = handle.notify.notified() => break,
-                        }
-                    }
-                    let online = snapshot_rx.borrow_and_update().connection == ConnectionStatus::Online;
-                    let became_online = online && !was_online;
-                    was_online = online;
-                    if became_online {
-                        break;
-                    }
-                }
-            }
-        }
-    }
-}
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::sync::atomic::AtomicUsize;
-    use std::time::Duration;
 
-    use tokio::sync::mpsc;
 
-    use crate::testutil::{test_snapshot, TempDir};
+    use crate::testutil::TempDir;
 
     fn record(n: u64) -> AuditRecord {
         AuditRecord {
@@ -434,143 +432,40 @@ mod tests {
         assert_ne!(a, b);
     }
 
-    /// A sink that reports every batch on a channel and fails the first
-    /// `failures` calls.
-    struct ScriptedSink {
-        failures: AtomicUsize,
-        calls: AtomicUsize,
-        seen: mpsc::UnboundedSender<(usize, Vec<AuditRecord>, bool)>,
-    }
-
-    impl AuditSink for ScriptedSink {
-        fn deliver<'a>(&'a self, batch: &'a [AuditRecord]) -> BoxFuture<'a, Result<(), AuditSinkError>> {
-            let call = self.calls.fetch_add(1, Ordering::SeqCst) + 1;
-            let fail = self.failures.load(Ordering::SeqCst) > 0;
-            if fail {
-                self.failures.fetch_sub(1, Ordering::SeqCst);
-            }
-            let _ = self.seen.send((call, batch.to_vec(), !fail));
-            std::future::ready(if fail { Err(AuditSinkError::Unreachable) } else { Ok(()) }).boxed()
-        }
-    }
-
-    struct Rig {
-        handle: Arc<AuditHandle>,
-        snapshot_tx: watch::Sender<AgentSnapshot>,
-        seen: mpsc::UnboundedReceiver<(usize, Vec<AuditRecord>, bool)>,
-        shutdown: CancellationToken,
-        task: tokio::task::JoinHandle<()>,
-        _dir: TempDir,
-    }
-
-    fn rig(failures: usize) -> Rig {
-        let dir = TempDir::new();
-        let (snapshot_tx, snapshot_rx) = watch::channel(test_snapshot());
-        let queue = AuditQueue::open(dir.path().join("audit-queue.json")).unwrap();
-        let handle = AuditHandle::new(queue, snapshot_rx.clone(), Arc::new(|| 1_000));
-        let (seen_tx, seen) = mpsc::unbounded_channel();
-        let sink = Arc::new(ScriptedSink {
-            failures: AtomicUsize::new(failures),
-            calls: AtomicUsize::new(0),
-            seen: seen_tx,
-        });
-        let shutdown = CancellationToken::new();
-        let task = tokio::spawn(run_audit_task(Arc::clone(&handle), sink, snapshot_rx, shutdown.clone()));
-        Rig { handle, snapshot_tx, seen, shutdown, task, _dir: dir }
-    }
-
-    async fn next_call(rig: &mut Rig) -> (usize, Vec<AuditRecord>, bool) {
-        tokio::time::timeout(Duration::from_secs(5), rig.seen.recv())
-            .await
-            .expect("a delivery within 5 s")
-            .expect("the sink is alive")
-    }
-
-    #[tokio::test(start_paused = true)]
-    async fn a_failed_delivery_waits_for_the_next_trigger_and_never_polls() {
-        let mut rig = rig(1);
-        rig.handle.record(AuditKind::AdminExitWrongPin, None, None);
-        let (call, batch, accepted) = next_call(&mut rig).await;
-        assert_eq!((call, batch.len(), accepted), (1, 1, false));
-        assert_eq!(rig.handle.queued(), 1);
-
-        // An hour passes: nothing calls the sink.
-        tokio::time::advance(Duration::from_secs(3600)).await;
-        for _ in 0..10 {
-            tokio::task::yield_now().await;
-        }
-        assert!(rig.seen.try_recv().is_err(), "the sink was called without a trigger");
-
-        // The next record triggers; both are delivered, oldest first.
-        rig.handle.record(AuditKind::AdminExitLockedOut, None, None);
-        let (call, batch, accepted) = next_call(&mut rig).await;
-        assert_eq!((call, accepted), (2, true));
-        assert_eq!(
-            batch.iter().map(|r| r.kind).collect::<Vec<_>>(),
-            [AuditKind::AdminExitWrongPin, AuditKind::AdminExitLockedOut]
-        );
-        for _ in 0..10 {
-            tokio::task::yield_now().await;
-        }
-        assert_eq!(rig.handle.queued(), 0);
-        rig.shutdown.cancel();
-        rig.task.await.unwrap();
-    }
-
-    #[tokio::test(start_paused = true)]
-    async fn the_connection_becoming_online_triggers_delivery() {
-        let mut rig = rig(1);
-        rig.handle.record(AuditKind::AdminExitSuccess, None, None);
-        let (_, _, accepted) = next_call(&mut rig).await;
-        assert!(!accepted);
-
-        // Another snapshot change that is not "became online" does nothing.
-        rig.snapshot_tx.send_modify(|s| s.desired_state_version += 1);
-        for _ in 0..10 {
-            tokio::task::yield_now().await;
-        }
-        assert!(rig.seen.try_recv().is_err());
-
-        rig.snapshot_tx.send_modify(|s| s.connection = ConnectionStatus::Online);
-        let (call, batch, accepted) = next_call(&mut rig).await;
-        assert_eq!((call, batch.len(), accepted), (2, 1, true));
-        rig.shutdown.cancel();
-        rig.task.await.unwrap();
-    }
-
-    #[tokio::test(start_paused = true)]
-    async fn dropped_records_are_reported_once_in_the_first_record_of_a_batch() {
-        let mut rig = rig(0);
-        // Fill the queue past the cap while the task is busy elsewhere: push directly.
-        {
-            let mut queue = lock(&rig.handle.queue);
-            for n in 0..(MAX_RECORDS as u64 + 3) {
-                queue.push(record(n)).unwrap();
-            }
-        }
-        rig.handle.notify.notify_one();
-        let (_, batch, accepted) = next_call(&mut rig).await;
-        assert!(accepted);
-        assert_eq!(batch.len(), BATCH_SIZE);
-        assert_eq!(batch[0].detail.as_deref(), Some("dropped:3"));
-        assert_eq!(batch[1].detail, None);
-        // The remaining batches carry no marker.
-        let mut seen = batch.len();
-        while seen < MAX_RECORDS {
-            let (_, batch, _) = next_call(&mut rig).await;
-            assert!(batch.iter().all(|r| r.detail.is_none()));
-            seen += batch.len();
-        }
-        assert_eq!(rig.handle.queued(), 0);
-        assert_eq!(lock(&rig.handle.queue).dropped(), 0);
-        rig.shutdown.cancel();
-        rig.task.await.unwrap();
+    #[tokio::test]
+    async fn the_null_sink_is_unavailable_and_the_log_sink_accepts() {
+        let batch = ReportBatch { audit: vec![record(1)], ..ReportBatch::default() };
+        assert_eq!(NullAuditSink.deliver(&batch).await, Err(AuditSinkError::Unavailable));
+        assert_eq!(LogAuditSink.deliver(&batch).await, Ok(ReportAccepted { installs: 0, audit: 1 }));
     }
 
     #[tokio::test]
-    async fn the_null_sink_is_unavailable_and_the_log_sink_accepts() {
-        let batch = [record(1)];
-        assert_eq!(NullAuditSink.deliver(&batch).await, Err(AuditSinkError::Unavailable));
-        assert_eq!(LogAuditSink.deliver(&batch).await, Ok(()));
+    async fn the_convex_sink_needs_a_link_and_reports_through_it() {
+        use crate::backend::fake::FakeBackend;
+        use crate::backend::{BackendError, DeviceAuth};
+        let link = BackendLink::new();
+        let sink = ConvexAuditSink::new(Arc::clone(&link));
+        let batch = ReportBatch { audit: vec![record(1), record(2)], dropped: 1, ..ReportBatch::default() };
+        // Not enrolled (or revoked): nothing can be sent.
+        assert_eq!(sink.deliver(&batch).await, Err(AuditSinkError::Unreachable));
+        let fake = FakeBackend::new();
+        link.set(Arc::new(fake.clone()), DeviceAuth { device_id: "dev-1".into(), device_secret: "s".into() });
+        assert_eq!(sink.deliver(&batch).await, Ok(ReportAccepted { installs: 0, audit: 2 }));
+        let sent = &fake.report_calls()[0].batch;
+        assert_eq!((sent.audit.len(), sent.dropped), (2, 1));
+        // A rejection (rate limited, say) acks nothing.
+        fake.script_report(Err(BackendError::Rejected { code: "rate_limited".into() }));
+        assert_eq!(sink.deliver(&batch).await, Err(AuditSinkError::Unreachable));
+        link.clear();
+        assert_eq!(sink.deliver(&batch).await, Err(AuditSinkError::Unreachable));
+    }
+
+    #[test]
+    fn security_records_are_urgent() {
+        assert!(AuditKind::AdminExitSuccess.is_urgent());
+        assert!(AuditKind::AdminExitLockedOut.is_urgent());
+        assert!(AuditKind::EmployeeLockedOut.is_urgent());
+        assert!(!AuditKind::AdminExitWrongPin.is_urgent());
+        assert!(!AuditKind::AdminExitFailed.is_urgent());
     }
 }

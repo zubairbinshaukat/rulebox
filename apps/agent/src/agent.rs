@@ -20,10 +20,14 @@ use tokio_util::task::TaskTracker;
 
 use crate::admin_exit::{AdminExit, AdminExitDeps, ExitRequest};
 use crate::agent_policy::AgentPolicy;
-use crate::audit::{run_audit_task, AuditHandle, AuditQueue, AuditSink};
+use crate::audit::{AuditHandle, AuditQueue, AuditSink, ConvexAuditSink};
 use crate::backend::task::{apply_to_snapshot, note_clock, os_jitter, BackendRunner, TaskContext};
-use crate::backend::BackendFactory;
-use crate::directory::EmployeeDirectory;
+use crate::backend::{BackendFactory, BackendLink};
+use crate::catalog::AppResolver;
+use crate::directory::{ConvexDirectory, EmployeeDirectory};
+use crate::report::{run_report_task, ReportQueue};
+use crate::roster::RosterState;
+use crate::session::run_session_events;
 use crate::employee_cache::EmployeeCache;
 use crate::enroll::{EnrollDeps, Enroller, Timings};
 use crate::fixtures;
@@ -68,9 +72,6 @@ impl PipeNames {
 #[serde(rename_all = "camelCase", default)]
 pub struct AgentConfig {
     pub kill_hung_shell: bool,
-    /// (1.1) Asks for the demo employee directory. Honoured on a real agent only
-    /// when the test-machine marker is present too (`directory::choose`).
-    pub fixture_directory: bool,
     /// (Step 9) Where the Staff account's shell value is written: `"policyShell"`
     /// (default) or `"winlogonShell"` (plan Section 10.2, "Sign-in and shell").
     pub shell_mechanism: ShellMechanism,
@@ -78,7 +79,7 @@ pub struct AgentConfig {
 
 impl Default for AgentConfig {
     fn default() -> Self {
-        Self { kill_hung_shell: true, fixture_directory: false, shell_mechanism: ShellMechanism::default() }
+        Self { kill_hung_shell: true, shell_mechanism: ShellMechanism::default() }
     }
 }
 
@@ -120,12 +121,24 @@ pub struct Deps {
     pub config: AgentConfig,
     pub simulate: bool,
     pub pipes: PipeNames,
-    /// (1.1) The employee directory seam. The caller applies `directory::choose`;
-    /// Phase 4 replaces only this value.
-    pub directory: Arc<dyn EmployeeDirectory>,
-    /// (1.1) Where the audit queue is delivered.
-    pub audit_sink: Arc<dyn AuditSink>,
+    /// (1.1) The employee directory seam. The caller applies `directory::choose`.
+    pub directory: DirectorySetup,
+    /// (1.1) Where the reports (audit queue, status, installs) are delivered.
+    pub audit_sink: SinkSetup,
     pub sim: SimOptions,
+}
+
+/// (Step 13) The directory: a ready one, or the Convex one, which `run` builds
+/// because it needs the backend link and the policy channel made there.
+pub enum DirectorySetup {
+    Use(Arc<dyn EmployeeDirectory>),
+    Convex,
+}
+
+/// (Step 13) The report sink, likewise.
+pub enum SinkSetup {
+    Use(Arc<dyn AuditSink>),
+    Convex,
 }
 
 pub fn load_config(paths: &DataPaths) -> anyhow::Result<AgentConfig> {
@@ -350,8 +363,27 @@ pub async fn run(
             .and_then(|staff| staff.profile_dir.as_deref())
             .map(|profile| PathBuf::from(profile).join(FILES_BASE_DIR))
     };
+    // (Step 13) The backend link, the reports and the verified roster. The
+    // directory and the report sink are built before any enrollment and read the
+    // link at each call.
+    let link = BackendLink::new();
+    let report = ReportQueue::new(Arc::clone(&audit));
+    let (roster_tx, roster_rx) = watch::channel(RosterState::load(&deps.paths.roster()));
+    let roster_tx = Arc::new(roster_tx);
+    let directory: Arc<dyn EmployeeDirectory> = match deps.directory {
+        DirectorySetup::Use(directory) => directory,
+        DirectorySetup::Convex => Arc::new(ConvexDirectory::new(
+            Arc::clone(&link),
+            policy_rx.clone(),
+            AppResolver::new(Arc::clone(&deps.platform)),
+        )),
+    };
+    let audit_sink: Arc<dyn AuditSink> = match deps.audit_sink {
+        SinkSetup::Use(sink) => sink,
+        SinkSetup::Convex => Arc::new(ConvexAuditSink::new(Arc::clone(&link))),
+    };
     let session = SessionManager::new(SessionDeps {
-        directory: Arc::clone(&deps.directory),
+        directory,
         cache,
         lockouts: Arc::clone(&lockouts),
         audit: Arc::clone(&audit),
@@ -369,6 +401,11 @@ pub async fn run(
     // (1.1) The hidden admin exit: the PIN gate. The reconciler owns the receiving
     // end of the exit requests (plan Section 5.10 and Step 9).
     let (exit_tx, exit_rx) = mpsc::channel::<ExitRequest>(EXIT_QUEUE);
+    // (Step 13) `apps.changed` / `session.ended`, and the roster and catalogue rules
+    // applied whenever a document or a roster arrives.
+    let (session_events_tx, session_events_rx) = mpsc::unbounded_channel();
+    session.set_events(session_events_tx);
+    let session_sync = (policy_rx.clone(), roster_rx);
     let admin_exit = AdminExit::new(AdminExitDeps {
         policy_rx,
         lockouts: Arc::clone(&lockouts),
@@ -414,6 +451,9 @@ pub async fn run(
         factory: Arc::clone(&deps.backend_factory),
         now_ms: Arc::clone(&now_ms),
         jitter: Arc::new(os_jitter),
+        link,
+        report: Arc::clone(&report),
+        roster_tx,
     });
     let runner = BackendRunner::new(Arc::clone(&task_ctx), shutdown.clone());
     let enroller = Arc::new(Enroller::new(EnrollDeps {
@@ -445,12 +485,15 @@ pub async fn run(
         },
         shutdown.clone(),
     ));
-    tasks.spawn(run_audit_task(
-        Arc::clone(&audit),
-        Arc::clone(&deps.audit_sink),
+    tasks.spawn(run_report_task(
+        Arc::clone(&report),
+        audit_sink,
         snapshot_rx.clone(),
+        Arc::new(os_jitter),
         shutdown.clone(),
     ));
+    tasks.spawn(run_session_events(session_events_rx, broadcast.clone(), shutdown.clone()));
+    tasks.spawn(sync_session(session_sync.0, session_sync.1, Arc::clone(&session), shutdown.clone()));
     tasks.spawn(clear_session_when_not_enrolled(
         snapshot_rx.clone(),
         Arc::clone(&session),
@@ -529,6 +572,40 @@ pub async fn run(
     }
     tracing::info!("agent stopped");
     Ok(())
+}
+
+/// (Step 13) Applies every new policy and verified roster to the session layer
+/// (`SessionManager::resync`): dropped cache entries, an ended session,
+/// recomputed apps.
+async fn sync_session(
+    mut policy_rx: watch::Receiver<AgentPolicy>,
+    mut roster_rx: watch::Receiver<RosterState>,
+    session: Arc<SessionManager>,
+    shutdown: CancellationToken,
+) {
+    let policy = policy_rx.borrow_and_update().clone();
+    session.on_policy(&policy);
+    let roster = roster_rx.borrow_and_update().clone();
+    session.on_roster(&roster);
+    loop {
+        tokio::select! {
+            () = shutdown.cancelled() => return,
+            changed = policy_rx.changed() => {
+                if changed.is_err() {
+                    return;
+                }
+                let policy = policy_rx.borrow_and_update().clone();
+                session.on_policy(&policy);
+            }
+            changed = roster_rx.changed() => {
+                if changed.is_err() {
+                    return;
+                }
+                let roster = roster_rx.borrow_and_update().clone();
+                session.on_roster(&roster);
+            }
+        }
+    }
 }
 
 /// Ends the employee session when the device stops being enrolled or is revoked
@@ -699,8 +776,8 @@ mod tests {
                 shell: unique_pipe_name(),
                 admin: unique_pipe_name(),
             },
-            directory: Arc::new(crate::directory::UnavailableDirectory),
-            audit_sink: Arc::new(crate::audit::LogAuditSink),
+            directory: DirectorySetup::Use(Arc::new(crate::directory::UnavailableDirectory)),
+            audit_sink: SinkSetup::Use(Arc::new(crate::audit::LogAuditSink)),
             sim: SimOptions::default(),
         }
     }
@@ -734,7 +811,7 @@ mod tests {
 
         let dir = TempDir::new();
         let mut deps = test_deps(&dir);
-        deps.directory = Arc::new(crate::directory::FixtureDirectory::new(false));
+        deps.directory = DirectorySetup::Use(Arc::new(crate::directory::FixtureDirectory::new(false)));
         deps.sim = SimOptions { demo: true, ..SimOptions::default() };
         let (shell_name, admin_name) = (deps.pipes.shell.clone(), deps.pipes.admin.clone());
         let sim_files = deps.paths.sim_files();
@@ -753,7 +830,7 @@ mod tests {
         let (client, mut events) = IpcClient::spawn_with(info, config(shell_name));
         match tokio::time::timeout(Duration::from_secs(10), events.recv()).await.unwrap().unwrap() {
             ClientEvent::Linked(hello) => {
-                assert_eq!(hello.capabilities, ["state", "health", "adminExit", "session", "apps"]);
+                assert_eq!(hello.capabilities, ["state", "health", "adminExit", "session", "apps", "appsChanged", "sessionEnded"]);
             }
             other => panic!("unexpected {other:?}"),
         }
@@ -877,7 +954,7 @@ mod tests {
         let linked = tokio::time::timeout(Duration::from_secs(10), events.recv()).await.unwrap().unwrap();
         match linked {
             ClientEvent::Linked(hello) => {
-                assert_eq!((hello.protocol.major, hello.protocol.minor), (1, 1));
+                assert_eq!((hello.protocol.major, hello.protocol.minor), (1, 2));
                 // No employee directory: no `session` or `apps`; the exit is always listed.
                 assert_eq!(hello.capabilities, ["state", "health", "adminExit"]);
             }
@@ -969,8 +1046,9 @@ mod backend_tests {
             config: AgentConfig::default(),
             simulate: true,
             pipes: PipeNames { shell: unique_pipe_name(), admin: unique_pipe_name() },
-            directory: Arc::new(crate::directory::FixtureDirectory::new(false)),
-            audit_sink: Arc::new(crate::audit::LogAuditSink),
+            directory: DirectorySetup::Use(Arc::new(crate::directory::FixtureDirectory::new(false))),
+            // (Step 13) The reports go to the fake backend.
+            audit_sink: SinkSetup::Convex,
             sim: SimOptions::default(),
         }
     }
@@ -1145,19 +1223,21 @@ mod backend_tests {
             .await;
         assert!(!text.contains("argon2"), "{text}");
 
-        // The first heartbeat comes after the 0 to 10 s jitter; it is the only
-        // thing the agent sends on its own.
-        fake.wait_until("a heartbeat", |f| !f.heartbeat_calls().is_empty()).await;
-        let first = fake.heartbeat_calls()[0].clone();
+        // (Step 13) The status leaves with the first report (the ping carries
+        // none); it is sent soon after the connection came up.
+        fake.wait_until("a report with the status", |f| f.report_calls().iter().any(|r| r.batch.status.is_some())).await;
+        let first = fake.report_calls().into_iter().find(|r| r.batch.status.is_some()).unwrap();
         assert_eq!(first.auth.device_id, "dev-1");
-        let status = first.status.expect("the first heartbeat carries the status");
+        let status = first.batch.status.expect("the report carries the status");
         assert_eq!(status.agent_version, env!("CARGO_PKG_VERSION"));
         // Step 9: the reconciler writes `last_applied_version` after a successful
-        // reconcile, so the heartbeat reports 3. A heartbeat that fired in the
+        // reconcile, so the report says 3. A report that went in the
         // milliseconds before that reconcile finished reports 0; the next one (minutes
         // later) carries the change, so both are right here.
         assert!(matches!(status.applied_version, Some(0 | 3)), "{:?}", status.applied_version);
-        assert_eq!(status.kiosk_phase.as_deref(), Some("applied"));
+        // The first report goes out as soon as the connection is up, possibly while the
+        // first reconcile still runs (the next one, a minute later, has the change).
+        assert!(matches!(status.kiosk_phase.as_deref(), Some("applied" | "applying" | "notApplied")), "{:?}", status.kiosk_phase);
         let state_file = dir.path().join("state").join("agent-state.json");
         let deadline = tokio::time::Instant::now() + Duration::from_secs(5);
         loop {
