@@ -862,3 +862,109 @@ describe("no unbounded reads", () => {
     expect(io.reads).toBeLessThanOrEqual(3 + 50 + 50 * 2 + 5);
   });
 });
+
+// ---------------------------------------------------------------- install status (plan Step 17 items 1-2)
+
+/** A bare device row (no credentials): enough for the install lists, which join only its name. */
+async function bareDevice(t: T, orgId: Id<"organizations">, name: string) {
+  return await t.run(async (ctx) => {
+    const enrollmentTokenId = await ctx.db.insert("enrollmentTokens", { orgId, tokenHash: `${name}`.padEnd(64, "x"), expiresAt: 0, usesLeft: 0, createdAt: 0 });
+    return await ctx.db.insert("devices", { orgId, name, enrolledAt: 0, enrollmentTokenId });
+  });
+}
+
+type SeedState = "pending" | "installed" | "failed" | "removed" | "unsupported";
+async function seedInstall(t: T, orgId: Id<"organizations">, deviceId: Id<"devices">, appId: Id<"apps">, state: SeedState, extra: { detail?: string; exitCode?: number; updatedAt?: number } = {}) {
+  return await t.run((ctx) =>
+    ctx.db.insert("installResults", { orgId, deviceId, appId, state, appRevision: 0, attempts: state === "failed" ? 3 : 1, updatedAt: extra.updatedAt ?? 1_000, ...extra }),
+  );
+}
+
+describe("apps:installSummary", () => {
+  test("counts per state: none, a few, and the cap (1,001 means 1000+); other apps and organizations do not count", async () => {
+    const t = await setupAuth();
+    const orgId = await makeOrg(t);
+    const a = await admin(t, orgId);
+    const app = await a.as.mutation(api.apps.createDesktop, desktop("Acme"));
+    const other = await a.as.mutation(api.apps.createDesktop, desktop("Other"));
+    const zero = { pending: 0, downloading: 0, installing: 0, installed: 0, failed: 0, removing: 0, removed: 0, unsupported: 0 };
+    const viewer = await asMember(t, { role: "viewer", orgId });
+    expect(await viewer.as.query(api.apps.installSummary, { appId: app })).toEqual(zero);
+
+    const d1 = await bareDevice(t, orgId, "PC 1");
+    const d2 = await bareDevice(t, orgId, "PC 2");
+    const d3 = await bareDevice(t, orgId, "PC 3");
+    await seedInstall(t, orgId, d1, app, "installed");
+    await seedInstall(t, orgId, d2, app, "installed");
+    await seedInstall(t, orgId, d3, app, "failed");
+    await seedInstall(t, orgId, d1, other, "pending");
+    expect(await viewer.as.query(api.apps.installSummary, { appId: app })).toEqual({ ...zero, installed: 2, failed: 1 });
+
+    // Over the cap: the count stops at 1,001, which the screen shows as "1000+".
+    await t.run(async (ctx) => {
+      for (let i = 0; i < 1_002; i++) {
+        await ctx.db.insert("installResults", { orgId, deviceId: d1, appId: other, state: "installed", appRevision: 0, attempts: 1, updatedAt: i });
+      }
+    });
+    expect(await viewer.as.query(api.apps.installSummary, { appId: other })).toEqual({ ...zero, pending: 1, installed: 1_001 });
+  });
+
+  test("another organization's app is not_found; every role may read it", async () => {
+    const t = await setupAuth();
+    const orgId = await makeOrg(t);
+    const a = await admin(t, orgId);
+    const app = await a.as.mutation(api.apps.createWeb, web("Docs"));
+    const foreign = await asMember(t, { role: "viewer", orgId: await makeOrg(t, "Other") });
+    await expectCode(foreign.as.query(api.apps.installSummary, { appId: app }), "not_found");
+    await expectCode(foreign.as.query(api.apps.installs, { appId: app, state: "failed", paginationOpts: { numItems: 10, cursor: null } }), "not_found");
+    expect(await a.as.query(api.apps.installSummary, { appId: app })).toMatchObject({ installed: 0 });
+  });
+
+  test("with 3 results it reads 3 results plus one empty range per state, never the devices", async () => {
+    const t = await setupAuth();
+    const orgId = await makeOrg(t);
+    const a = await admin(t, orgId);
+    const app = await a.as.mutation(api.apps.createDesktop, desktop("Acme"));
+    const d = await bareDevice(t, orgId, "PC");
+    for (const s of ["installed", "failed", "pending"] as const) await seedInstall(t, orgId, d, app, s);
+    const { io } = await probe(() => a.as.query(api.apps.installSummary, { appId: app }));
+    expect(io.tables.has("devices")).toBe(false);
+    expect(io.reads).toBeLessThanOrEqual(3 + 1 + 3);
+  });
+});
+
+describe("apps:installs", () => {
+  test("the PCs in one state, newest first, paginated, with their names; a removed PC is left out", async () => {
+    const t = await setupAuth();
+    const orgId = await makeOrg(t);
+    const a = await admin(t, orgId);
+    const app = await a.as.mutation(api.apps.createDesktop, desktop("Acme"));
+    const ids: Id<"devices">[] = [];
+    for (const n of ["Front", "Back", "Lab", "Gone"]) ids.push(await bareDevice(t, orgId, n));
+    await seedInstall(t, orgId, ids[0]!, app, "failed", { detail: "The installer exited with an error.", exitCode: 1603 });
+    await seedInstall(t, orgId, ids[1]!, app, "failed");
+    await seedInstall(t, orgId, ids[2]!, app, "installed");
+    await seedInstall(t, orgId, ids[3]!, app, "failed");
+    await t.run((ctx) => ctx.db.delete(ids[3]!));
+
+    const failed = await a.as.query(api.apps.installs, { appId: app, state: "failed", paginationOpts: { numItems: 10, cursor: null } });
+    expect(failed.page.map((r) => r.deviceName)).toEqual(["Back", "Front"]);
+    expect(failed.page[1]).toMatchObject({ deviceId: ids[0], state: "failed", attempts: 3, exitCode: 1603, detail: "The installer exited with an error." });
+  });
+
+  test("pages follow each other newest first; the page size is bounded; a foreign state value is refused by the validator", async () => {
+    const t = await setupAuth();
+    const orgId = await makeOrg(t);
+    const a = await admin(t, orgId);
+    const app = await a.as.mutation(api.apps.createDesktop, desktop("Acme"));
+    for (let i = 0; i < 5; i++) await seedInstall(t, orgId, await bareDevice(t, orgId, `PC ${i}`), app, "failed");
+    const q = (cursor: string | null, numItems = 2) => a.as.query(api.apps.installs, { appId: app, state: "failed", paginationOpts: { numItems, cursor } });
+    const p1 = await q(null);
+    const p2 = await q(p1.continueCursor);
+    const p3 = await q(p2.continueCursor);
+    expect([p1, p2, p3].map((p) => p.page.map((r) => r.deviceName))).toEqual([["PC 4", "PC 3"], ["PC 2", "PC 1"], ["PC 0"]]);
+    expect(p3.isDone).toBe(true);
+    await expectCode(q(null, 51), "invalid_argument");
+    await expect(a.as.query(api.apps.installs, { appId: app, state: "nonsense" as never, paginationOpts: { numItems: 2, cursor: null } })).rejects.toThrow();
+  });
+});

@@ -10,6 +10,7 @@
 
 import type * as account from "../account.js";
 import type * as apps from "../apps.js";
+import type * as audit from "../audit.js";
 import type * as auth from "../auth.js";
 import type * as crons from "../crons.js";
 import type * as dev from "../dev.js";
@@ -71,6 +72,7 @@ import type * as lib_winget from "../lib/winget.js";
 import type * as maintenance from "../maintenance.js";
 import type * as members from "../members.js";
 import type * as mfa from "../mfa.js";
+import type * as overview from "../overview.js";
 import type * as passkeys from "../passkeys.js";
 import type * as plans from "../plans.js";
 import type * as presence from "../presence.js";
@@ -88,6 +90,7 @@ import type {
 declare const fullApi: ApiFromModules<{
   account: typeof account;
   apps: typeof apps;
+  audit: typeof audit;
   auth: typeof auth;
   crons: typeof crons;
   dev: typeof dev;
@@ -149,6 +152,7 @@ declare const fullApi: ApiFromModules<{
   maintenance: typeof maintenance;
   members: typeof members;
   mfa: typeof mfa;
+  overview: typeof overview;
   passkeys: typeof passkeys;
   plans: typeof plans;
   presence: typeof presence;

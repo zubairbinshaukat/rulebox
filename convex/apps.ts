@@ -16,16 +16,18 @@ import { webUrlProblem } from "./lib/hostRules";
 import {
   APP_EMPLOYEE_COUNT_CAP,
   APP_PURGE_BATCH,
+  INSTALL_COUNT_CAP,
   MAX_APP_ASSIGNMENTS,
   MAX_APP_OPTIONS,
   MAX_APP_FILE_TYPES,
   MAX_APP_PAGE,
   MAX_GROUPS_JOINED,
+  MAX_INSTALL_PAGE,
   WINGET_CACHE_MS,
 } from "./lib/limits";
 import { assertWithinLimit, bumpOrgStats, bumpOrgStatsIfPresent, bumpStats } from "./lib/plans";
 import { consumeOrFail } from "./lib/rateLimits";
-import { audience, appKind, desktopSpec, webSpec, wingetResolved } from "./lib/validators";
+import { audience, appKind, desktopSpec, installState, webSpec, wingetResolved } from "./lib/validators";
 import { iconDataUrl, fetchWebMeta as scanWebMeta, pngSize } from "./lib/webmeta";
 import { resolveWinget as resolveFromGithub } from "./lib/winget";
 
@@ -207,6 +209,98 @@ export const get = memberQuery("viewer")({
       directEmployeeCount: direct.length,
       groupOptions: groups.map((g) => ({ _id: g._id, name: g.name })).sort((a, b) => a.name.localeCompare(b.name)),
     };
+  },
+});
+
+// ---------------------------------------------------------------- install status (plan Step 17 items 1-2)
+
+const INSTALL_STATES = installState.members.map((m) => m.value);
+
+/**
+ * How many PCs are in each install state for one app (viewer): per state
+ * `installResults.by_app_state` `.take(INSTALL_COUNT_CAP + 1)`, so a count is at
+ * most 1,001 and the screen shows "1000+" above 1,000. A query of its own: the
+ * results change with every PC's report, so `apps:get` must not carry them.
+ */
+export const installSummary = memberQuery("viewer")({
+  args: { appId: v.string() },
+  returns: v.object({
+    pending: v.number(),
+    downloading: v.number(),
+    installing: v.number(),
+    installed: v.number(),
+    failed: v.number(),
+    removing: v.number(),
+    removed: v.number(),
+    unsupported: v.number(),
+  }),
+  handler: async (ctx, args) => {
+    const app = await getInOrg(ctx, "apps", args.appId, ctx.orgId);
+    const counts: Record<(typeof INSTALL_STATES)[number], number> = {
+      pending: 0,
+      downloading: 0,
+      installing: 0,
+      installed: 0,
+      failed: 0,
+      removing: 0,
+      removed: 0,
+      unsupported: 0,
+    };
+    for (const state of INSTALL_STATES) {
+      const rows = await ctx.db
+        .query("installResults")
+        .withIndex("by_app_state", (q) => q.eq("appId", app._id).eq("state", state))
+        .take(INSTALL_COUNT_CAP + 1);
+      counts[state] = rows.length;
+    }
+    return counts;
+  },
+});
+
+/**
+ * The PCs that are in one install `state` for an app (viewer, paginated by
+ * `installResults.by_app_state`, newest first), each with its name. A PC that
+ * was removed since (its results are purged in batches) is left out.
+ */
+export const installs = memberQuery("viewer")({
+  args: { appId: v.string(), state: installState, paginationOpts: paginationOptsValidator },
+  returns: paginationResultValidator(
+    v.object({
+      _id: v.id("installResults"),
+      deviceId: v.id("devices"),
+      deviceName: v.string(),
+      state: installState,
+      attempts: v.number(),
+      exitCode: v.optional(v.number()),
+      detail: v.optional(v.string()),
+      updatedAt: v.number(),
+    }),
+  ),
+  handler: async (ctx, args) => {
+    const numItems = args.paginationOpts.numItems;
+    if (!Number.isInteger(numItems) || numItems < 1 || numItems > MAX_INSTALL_PAGE) fail("invalid_argument", { field: "paginationOpts" });
+    const app = await getInOrg(ctx, "apps", args.appId, ctx.orgId);
+    const result = await ctx.db
+      .query("installResults")
+      .withIndex("by_app_state", (q) => q.eq("appId", app._id).eq("state", args.state))
+      .order("desc")
+      .paginate(args.paginationOpts);
+    const page = [];
+    for (const r of result.page) {
+      const device = await ctx.db.get(r.deviceId);
+      if (device === null) continue;
+      page.push({
+        _id: r._id,
+        deviceId: r.deviceId,
+        deviceName: device.name,
+        state: r.state,
+        attempts: r.attempts,
+        exitCode: r.exitCode,
+        detail: r.detail,
+        updatedAt: r.updatedAt,
+      });
+    }
+    return { ...result, page };
   },
 });
 

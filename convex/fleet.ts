@@ -14,6 +14,7 @@ import {
   MAX_CHECK_DEVICES,
   MAX_FLEET_PAGE,
   MAX_GROUPS_JOINED,
+  MAX_INSTALL_PAGE,
   MAX_SEARCH_TEXT,
   MINUTE_MS,
   PURGE_BATCH,
@@ -24,7 +25,7 @@ import { bumpOrgStatsIfPresent, loadOrgPlan } from "./lib/plans";
 import { requestPublish } from "./lib/publish";
 import { consumeOrFail } from "./lib/rateLimits";
 import { requireStepUp } from "./lib/stepUp";
-import { diskBand, reportedStatusFields } from "./lib/validators";
+import { diskBand, installState, reportedStatusFields } from "./lib/validators";
 
 // Devices in the dashboard (plan Step 7 items 4, 10-13; 4.13 amended).
 //
@@ -264,6 +265,53 @@ export const get = memberQuery("viewer")({
       flags: { noGroup: d.groupId === undefined, revoked: cred.state === "revoked", rotateCredential },
       groups: groups.map((g) => ({ _id: g._id, name: g.name })).sort((a, b) => a.name.localeCompare(b.name)),
     };
+  },
+});
+
+/**
+ * One PC's install results for its detail page (viewer, paginated by
+ * `installResults.by_device`, newest first), each with its app's name. An app
+ * that was deleted since (its results are purged in batches) is left out.
+ */
+export const installs = memberQuery("viewer")({
+  args: { deviceId: v.string(), paginationOpts: paginationOptsValidator },
+  returns: paginationResultValidator(
+    v.object({
+      _id: v.id("installResults"),
+      appId: v.id("apps"),
+      appName: v.string(),
+      state: installState,
+      attempts: v.number(),
+      exitCode: v.optional(v.number()),
+      detail: v.optional(v.string()),
+      updatedAt: v.number(),
+    }),
+  ),
+  handler: async (ctx, args) => {
+    const numItems = args.paginationOpts.numItems;
+    if (!Number.isInteger(numItems) || numItems < 1 || numItems > MAX_INSTALL_PAGE) fail("invalid_argument", { field: "paginationOpts" });
+    const device = await getInOrg(ctx, "devices", args.deviceId, ctx.orgId);
+    const result = await ctx.db
+      .query("installResults")
+      .withIndex("by_device", (q) => q.eq("deviceId", device._id))
+      .order("desc")
+      .paginate(args.paginationOpts);
+    const page = [];
+    for (const r of result.page) {
+      const app = await ctx.db.get(r.appId);
+      if (app === null) continue;
+      page.push({
+        _id: r._id,
+        appId: r.appId,
+        appName: app.name,
+        state: r.state,
+        attempts: r.attempts,
+        exitCode: r.exitCode,
+        detail: r.detail,
+        updatedAt: r.updatedAt,
+      });
+    }
+    return { ...result, page };
   },
 });
 

@@ -54,6 +54,13 @@ export const AUDIT_RETENTION_DAYS = 365;
 /** Invites are deleted this long after they expired (plan Step 3.6). */
 export const INVITE_RETENTION_MS = 30 * DAY_MS;
 
+/** `audit:list` / `audit:forTarget` page size cap (a page is one index range of audit rows). */
+export const MAX_AUDIT_PAGE = 50;
+/** `audit:forTarget` target id length (an id is 32 characters; anything longer cannot match). */
+export const MAX_AUDIT_TARGET_ID = 64;
+/** Audit rows the overview shows (plan Step 17 item 6). */
+export const OVERVIEW_AUDIT_ROWS = 10;
+
 /** Batch size of the daily maintenance job (plan Step 3.6). */
 export const MAINTENANCE_BATCH = 500;
 
@@ -217,6 +224,13 @@ export const MAX_APP_FILE_TYPES = 201;
 export const APP_EMPLOYEE_COUNT_CAP = 1_000;
 /** File-type rules per organization (`fileHandlers`, tiny). */
 export const MAX_FILE_HANDLERS = 200;
+/**
+ * `apps:installSummary` counts each state up to this many rows ("1000+" above it, plan Step 17 item 1);
+ * `apps:installs` / `fleet:installs` page size cap; failed installs the overview lists.
+ */
+export const INSTALL_COUNT_CAP = 1_000;
+export const MAX_INSTALL_PAGE = 50;
+export const OVERVIEW_FAILED_INSTALLS = 20;
 /** Rows of a removed app deleted per run of `apps:purgeApp` (it reschedules while full). */
 export const APP_PURGE_BATCH = 100;
 /** Icons: a PNG of at most 32 KiB and 512 x 512 pixels (plan Step 10 "Do NOT"). */

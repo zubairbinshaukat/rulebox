@@ -648,6 +648,26 @@ const ROWS: Row[] = [
       foreign: "not_found",
     },
   },
+  // ---- Step 17: install status, overview, audit, history (all viewer queries; the foreign owner reads THEIR data).
+  { name: "apps:installSummary", call: (a, f) => a.query(api.apps.installSummary, { appId: f.appId }), expect: { ...VIEWER, foreign: "not_found" } },
+  {
+    name: "apps:installs",
+    call: (a, f) => a.query(api.apps.installs, { appId: f.appId, state: "failed", paginationOpts: { numItems: 10, cursor: null } }),
+    expect: { ...VIEWER, foreign: "not_found" },
+  },
+  {
+    name: "fleet:installs",
+    call: (a, f) => a.query(api.fleet.installs, { deviceId: f.deviceId, paginationOpts: { numItems: 10, cursor: null } }),
+    expect: { ...VIEWER, foreign: "not_found" },
+  },
+  { name: "overview:get", call: (a) => a.query(api.overview.get, {}), expect: { ...VIEWER, foreign: "ok" } },
+  { name: "overview:failedInstalls", call: (a) => a.query(api.overview.failedInstalls, {}), expect: { ...VIEWER, foreign: "ok" } },
+  { name: "audit:list", call: (a) => a.query(api.audit.list, { paginationOpts: { numItems: 10, cursor: null } }), expect: { ...VIEWER, foreign: "ok" } },
+  {
+    name: "audit:forTarget",
+    call: (a, f) => a.query(api.audit.forTarget, { targetId: f.deviceId, paginationOpts: { numItems: 10, cursor: null } }),
+    expect: { ...VIEWER, foreign: "ok" }, // the foreign owner asks for THEIR history of that id: empty
+  },
 ];
 
 /** Member writes that are entry points of MFA or step-up themselves (no step-up level). */

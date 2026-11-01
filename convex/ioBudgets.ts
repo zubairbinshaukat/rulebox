@@ -230,4 +230,25 @@ export const IO_BUDGETS: Record<string, IoBudget> = {
   // group, employee, membership `.first()`, memberships (<= 101), stats, key, roster row, grants `.first()`, queue.
   "groups:addEmployee": { maxReads: 4 + 2 + 1 + 101 + 1 + 1 + 1 + 1 + 1, maxReadBytes: 40_000, maxWrites: 7, maxWriteBytes: 4_096 },
   "groups:removeEmployee": { maxReads: 4 + 2 + 1 + 1 + 1 + 1 + 1 + 1, maxReadBytes: 40_000, maxWrites: 7, maxWriteBytes: 4_096 },
+
+  // ---- Step 17: install status, overview, audit, history. Wrapper 3 reads.
+  // The app, then per state `.take(1,001)` of its results (only 5 states are ever stored). RISK: this is
+  // the one dashboard query whose cost grows with the fleet: an app on 5,000 PCs reads ~5,000 results
+  // (~1 MB) and re-runs on every result change of that app while its page is open. It is a query of its
+  // own (not part of `apps:get`) and subscribed only by the open App page's install panel; a counter per
+  // (app, state) would replace it if a rollout to thousands of PCs is ever watched live.
+  "apps:installSummary": { maxReads: 3 + 1 + 5 * 1_001, maxReadBytes: 1_100_000, maxWrites: 0, maxWriteBytes: 0, live: true },
+  // app + a page of <= 50 results + their devices (one get each).
+  "apps:installs": { maxReads: 3 + 1 + 50 + 50, maxReadBytes: 60_000, maxWrites: 0, maxWriteBytes: 0, live: true },
+  // device + a page of <= 50 results + their apps (one get each; an app spec is ~1-2 KB).
+  "fleet:installs": { maxReads: 3 + 1 + 50 + 50, maxReadBytes: 160_000, maxWrites: 0, maxWriteBytes: 0, live: true },
+  // Plan row (A7): <= 60 documents, <= 32 KB. counters, <= 4 online shards, plan (+ platformSettings
+  // before migration), 2 key rows, 10 audit rows = ~24; never a device, liveness, payload or result row.
+  // Re-runs on a counter change, a PC going online / offline and a new audit row; never on a ping.
+  "overview:get": { maxReads: 60, maxReadBytes: 32_768, maxWrites: 0, maxWriteBytes: 0, live: true },
+  // <= 20 failed results + their PCs and apps (cached per call); subscribed only while `failedInstallCount` > 0.
+  "overview:failedInstalls": { maxReads: 3 + 20 + 20 + 20, maxReadBytes: 80_000, maxWrites: 0, maxWriteBytes: 0, live: true },
+  // A page of <= 50 audit rows (~300 B each). Re-runs when a row is written inside the loaded range.
+  "audit:list": { maxReads: 3 + 50, maxReadBytes: 40_000, maxWrites: 0, maxWriteBytes: 0, live: true },
+  "audit:forTarget": { maxReads: 3 + 50, maxReadBytes: 40_000, maxWrites: 0, maxWriteBytes: 0, live: true },
 };

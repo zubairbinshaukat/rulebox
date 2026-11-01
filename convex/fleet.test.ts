@@ -359,3 +359,57 @@ describe("watch mode and check now (plan 4.9)", () => {
     await expectCode(foreign.as.query(api.fleet.checkResult, { checkId }), "not_found");
   });
 });
+
+describe("fleet:installs", () => {
+  async function seedApp(t: T, orgId: Id<"organizations">, name: string) {
+    return await t.run((ctx) =>
+      ctx.db.insert("apps", { orgId, name, kind: "web", archived: false, revision: 0, createdAt: Date.now() }),
+    );
+  }
+
+  test("one PC's results newest first with the app names, paginated; nothing of another PC or organization", async () => {
+    const t = await setupAuth();
+    const orgId = await makeOrg(t);
+    const mine = await enrollDevice(t, orgId, { name: "Front desk" });
+    const second = await enrollDevice(t, orgId, { name: "Back office" });
+    const apps = [await seedApp(t, orgId, "Docs"), await seedApp(t, orgId, "Reader"), await seedApp(t, orgId, "Notes")];
+    const gone = await seedApp(t, orgId, "Deleted");
+    await t.run(async (ctx) => {
+      const row = (deviceId: Id<"devices">, appId: Id<"apps">, state: "installed" | "failed" | "pending", updatedAt: number) =>
+        ctx.db.insert("installResults", { orgId, deviceId, appId, state, appRevision: 1, attempts: 1, updatedAt, ...(state === "failed" ? { detail: "The download did not match its checksum.", exitCode: 7 } : {}) });
+      await row(mine.deviceId, apps[0]!, "installed", 1);
+      await row(mine.deviceId, apps[1]!, "failed", 2);
+      await row(mine.deviceId, gone, "installed", 3);
+      await row(mine.deviceId, apps[2]!, "pending", 4);
+      await row(second.deviceId, apps[0]!, "installed", 5);
+      await ctx.db.delete(gone);
+    });
+    const other = await makeOrg(t, "Other");
+    const otherDevice = await enrollDevice(t, other, { name: "Theirs" });
+    await t.run(async (ctx) => {
+      const foreignApp = await ctx.db.insert("apps", { orgId: other, name: "Foreign", kind: "web", archived: false, revision: 0, createdAt: 1 });
+      await ctx.db.insert("installResults", { orgId: other, deviceId: otherDevice.deviceId, appId: foreignApp, state: "installed", appRevision: 0, attempts: 1, updatedAt: 9 });
+    });
+    const viewer = await asMember(t, { role: "viewer", orgId });
+
+    const all = await viewer.as.query(api.fleet.installs, { deviceId: mine.deviceId, ...page() });
+    expect(all.page.map((r) => [r.appName, r.state])).toEqual([["Notes", "pending"], ["Reader", "failed"], ["Docs", "installed"]]);
+    expect(all.page[1]).toMatchObject({ detail: "The download did not match its checksum.", exitCode: 7, attempts: 1 });
+    expectNoSecrets(all, [sha256HexSync(mine.secret)]);
+
+    const first = await viewer.as.query(api.fleet.installs, { deviceId: mine.deviceId, ...page(2) });
+    const next = await viewer.as.query(api.fleet.installs, { deviceId: mine.deviceId, paginationOpts: { numItems: 2, cursor: first.continueCursor } });
+    expect([...first.page, ...next.page].map((r) => r.appName)).toEqual(["Notes", "Reader", "Docs"]);
+
+    await expectCode(viewer.as.query(api.fleet.installs, { deviceId: otherDevice.deviceId, ...page() }), "not_found");
+    await expectCode(viewer.as.query(api.fleet.installs, { deviceId: mine.deviceId, ...page(51) }), "invalid_argument");
+  });
+
+  test("a PC with no results answers an empty page", async () => {
+    const t = await setupAuth();
+    const orgId = await makeOrg(t);
+    const d = await enrollDevice(t, orgId);
+    const viewer = await asMember(t, { role: "viewer", orgId });
+    expect(await viewer.as.query(api.fleet.installs, { deviceId: d.deviceId, ...page() })).toMatchObject({ page: [], isDone: true });
+  });
+});

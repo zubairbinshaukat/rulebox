@@ -1,6 +1,8 @@
-import type { Id } from "../_generated/dataModel";
+import { v } from "convex/values";
+import type { Doc, Id } from "../_generated/dataModel";
 import type { MutationCtx } from "../_generated/server";
 import { AUDIT_SUMMARY_MAX } from "./limits";
+import { auditActorType } from "./validators";
 
 /** Every audit action (plan 4.11), exact strings: a typo is a type error. */
 export const AUDIT_ACTIONS = [
@@ -165,3 +167,36 @@ export async function writeAudit(ctx: Pick<MutationCtx, "db">, e: AuditEntry): P
 }
 
 export const SYSTEM_ACTOR: AuditActor = { type: "system", label: "Rulebox" };
+
+/**
+ * What the dashboard receives of an audit row (`audit:list`, `audit:forTarget`,
+ * `overview:get`): the fields the screens show, never `orgId` or `eventKey`
+ * (which carries the device record id).
+ */
+export const auditEntryValue = v.object({
+  _id: v.id("auditLog"),
+  at: v.number(),
+  actorType: auditActorType,
+  actorId: v.optional(v.string()),
+  actorLabel: v.string(),
+  action: v.string(),
+  targetType: v.optional(v.string()),
+  targetId: v.optional(v.string()),
+  targetLabel: v.optional(v.string()),
+  summary: v.string(),
+});
+
+export function auditEntryOf(r: Doc<"auditLog">) {
+  return {
+    _id: r._id,
+    at: r.at,
+    actorType: r.actorType,
+    actorId: r.actorId,
+    actorLabel: r.actorLabel,
+    action: r.action,
+    targetType: r.targetType,
+    targetId: r.targetId,
+    targetLabel: r.targetLabel,
+    summary: r.summary,
+  };
+}
