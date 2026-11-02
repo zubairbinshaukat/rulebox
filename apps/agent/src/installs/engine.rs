@@ -6,7 +6,8 @@
 //! empty: the Phase 2 rule of `read_json`).
 //!
 //! **Needs work:** an assigned app that is not installed and whose program is
-//! missing (a program already at its path counts as installed); an installed app
+//! missing (a program already at its path counts as installed, but is marked
+//! `preexisting` and is never uninstalled or deleted: review fix); an installed app
 //! whose SHA-256 changed (a new version) or whose program vanished; an app that
 //! left the catalogue with `removeWhenUnassigned`, if it is an MSI with a product
 //! code or a portable app (an exe is only hidden: it cannot be uninstalled).
@@ -27,7 +28,9 @@
 //!
 //! **Retries:** a failure waits 1, 5, 15, 60, 360 minutes; the 6th failure is
 //! final until the app's `revision` changes (the dashboard's Retry). `1618`
-//! (another install running) waits 2 minutes and is not counted.
+//! (another install running) or a running portable program waits 2 minutes and is
+//! not counted, for at most 2 hours (then one counted failure). A stop of the
+//! agent ends the running installer and its children; that run is not counted.
 //!
 //! **Crash recovery** (at start): `downloading` goes back to `pending` (the
 //! `.part` file is deleted, nothing is counted); `installing` means the agent died
@@ -47,17 +50,18 @@ use serde::{Deserialize, Serialize};
 use tokio::sync::watch;
 use tokio_util::sync::CancellationToken;
 
-use super::download::{check_https, Downloader};
+use super::download::{check_https, part_path, Downloader};
 use super::report::report_of;
 use super::{
-    exe_install_command, icons, is_reparse_point, is_safe_id, is_sha256, judge_install, judge_removal,
-    msi_install_command, msi_removal_command, open_verified, product_code, Detail, ExitVerdict, FileCheckError,
-    BACKOFF_MINUTES, BUSY_RETRY, EXE_POLL, KEEP_MSI_LOGS, MAX_DOWNLOAD_BYTES, MAX_FAILURES,
+    download_deadline, exe_install_command, icons, is_reparse_point, is_safe_id, is_sha256, judge_install,
+    judge_removal, msi_install_command, msi_removal_command, open_verified, product_code, Detail, ExitVerdict,
+    FileCheckError, BACKOFF_MINUTES, BUSY_RETRY, BUSY_WINDOW, EXE_POLL, KEEP_MSI_LOGS, MAX_DOWNLOAD_BYTES,
+    MAX_FAILURES,
 };
 use crate::agent_policy::AgentPolicy;
 use crate::backend::InstallReport;
 use crate::paths::DataPaths;
-use crate::platform::{InstallerCommand, InstallerExit, Platform, PlatformError};
+use crate::platform::{BootIdentity, InstallerCommand, InstallerExit, Platform, PlatformError};
 use crate::report::ReportQueue;
 use crate::state::{lock, read_json, remove_file_if_exists, write_atomic};
 
@@ -145,6 +149,40 @@ pub struct InstallRecord {
     /// ... and whether the server accepted exactly that result.
     #[serde(default)]
     pub acked: bool,
+    /// (Review fix) The program was already on the PC when Rulebox first saw the
+    /// app (it was taken as installed without running an installer), or the record
+    /// is older than this field (unknown origin). Never cleared: such an app is
+    /// never uninstalled or deleted by Rulebox, only hidden when unassigned.
+    #[serde(default = "unknown_origin")]
+    pub preexisting: bool,
+    /// (Review fix, `unsupported` records) Rulebox may have put a version of the app
+    /// on the PC before its catalogue entry became unusable (a later unassignment
+    /// still removes it).
+    #[serde(default)]
+    pub on_pc: bool,
+    /// (Review fix) Unix ms of the first busy answer (`1618`, or a portable program
+    /// in use) since the last other outcome; after `BUSY_WINDOW` a busy answer counts.
+    #[serde(default)]
+    pub busy_since_ms: Option<u64>,
+}
+
+/// A record written before `preexisting` existed: nobody knows whether Rulebox
+/// installed that app or found it, so it is treated as found (never removed).
+fn unknown_origin() -> bool {
+    true
+}
+
+/// Whether Rulebox may have put (a version of) this app on the PC: it is
+/// installed (by an installer run or found, see `preexisting`), an installer ran
+/// for it, or a removal is queued for it; an `unsupported` record keeps what its
+/// predecessor said (`on_pc`). A finished removal is not on the PC any more.
+fn rulebox_may_have_installed(record: &InstallRecord) -> bool {
+    match record.state {
+        LocalState::Removed => false,
+        LocalState::Installed => true,
+        LocalState::Unsupported => record.on_pc,
+        _ => record.removal || record.attempts > 0,
+    }
 }
 
 impl InstallRecord {
@@ -165,6 +203,9 @@ impl InstallRecord {
             removal: false,
             reported: None,
             acked: false,
+            preexisting: false,
+            on_pc: false,
+            busy_since_ms: None,
         }
     }
 
@@ -190,12 +231,42 @@ pub struct InstallsFile {
     /// Unix ms when an installer last answered 3010 / 1641; cleared once the PC
     /// booted after it.
     pub restart_pending_since_ms: Option<u64>,
+    /// (Review fix) The boot an installer asked for the restart in; compared
+    /// without the wall clock (`rebooted_since`).
+    pub restart_boot: Option<BootMark>,
     pub apps: BTreeMap<String, InstallRecord>,
 }
 
 impl Default for InstallsFile {
     fn default() -> Self {
-        Self { schema: INSTALLS_SCHEMA, restart_pending_since_ms: None, apps: BTreeMap::new() }
+        Self { schema: INSTALLS_SCHEMA, restart_pending_since_ms: None, restart_boot: None, apps: BTreeMap::new() }
+    }
+}
+
+/// Which boot a restart was asked for in (`BootIdentity` without the wall clock).
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct BootMark {
+    #[serde(default)]
+    pub boot_id: Option<u32>,
+    pub uptime_ms: u64,
+}
+
+/// Whether the PC booted since the restart was asked for:
+/// - both boot counters known: they differ;
+/// - otherwise: the uptime is smaller now than it was then (the tick count only
+///   grows within one boot). A reboot after which the PC already ran longer than
+///   it had then is missed (the flag stays: the safe side);
+/// - a record from before the boot mark: the old wall-clock rule.
+///
+/// A clock correction changes none of the first two.
+pub fn rebooted_since(mark: Option<&BootMark>, since_ms: u64, now: &BootIdentity) -> bool {
+    match mark {
+        Some(mark) => match (mark.boot_id, now.boot_id) {
+            (Some(then), Some(current)) => then != current,
+            _ => now.uptime_ms < mark.uptime_ms,
+        },
+        None => now.boot_time_ms > since_ms,
     }
 }
 
@@ -423,11 +494,22 @@ struct Engine {
 enum Outcome {
     Installed { exit_code: i32 },
     Removed,
-    Busy,
+    /// `1618`, or a portable program in use: retried in 2 minutes, not counted,
+    /// for at most `BUSY_WINDOW` (then a counted failure with this exit code).
+    Busy { exit_code: Option<i64> },
+    /// Something kept the job from starting (the program folders, the entry):
+    /// retried in 2 minutes, never counted.
+    Wait,
     Failed { detail: Option<Detail>, exit_code: Option<i64> },
     /// The agent is stopping in the middle of a download: nothing is recorded
     /// (the start-up recovery handles the `downloading` state).
     Abandoned,
+    /// The agent is stopping while an installer ran: it and everything it started
+    /// were ended; the job waits again, not counted.
+    Interrupted,
+    /// (Defence in depth) A removal of an app Rulebox did not install: the record
+    /// is dropped, nothing is removed or reported.
+    Dropped,
 }
 
 impl Engine {
@@ -489,20 +571,26 @@ impl Engine {
         });
         self.push(reports);
 
-        if let Some(since) = self.deps.book.snapshot().restart_pending_since_ms {
-            match self.deps.platform.boot_time_ms() {
-                Ok(boot) if boot > since => {
-                    self.deps.book.update(|file| file.restart_pending_since_ms = None);
+        let file = self.deps.book.snapshot();
+        if let Some(since) = file.restart_pending_since_ms {
+            match self.deps.platform.boot_identity() {
+                Ok(now) if rebooted_since(file.restart_boot.as_ref(), since, &now) => {
+                    self.deps.book.update(|file| {
+                        file.restart_pending_since_ms = None;
+                        file.restart_boot = None;
+                    });
                     self.deps.report.set_restart_pending(false);
                 }
                 Ok(_) => self.deps.report.set_restart_pending(true),
                 Err(error) => {
-                    tracing::warn!("cannot read the boot time ({error}); the restart stays pending");
+                    tracing::warn!("cannot read the boot identity ({error}); the restart stays pending");
                     self.deps.report.set_restart_pending(true);
                 }
             }
         }
         self.clean_downloads();
+        // TEMP folders of installer runs a crash left behind.
+        super::sweep_run_temps(&self.deps.paths.installer_temp_dir());
     }
 
     /// Deletes `.part` files and every download no waiting install needs.
@@ -571,11 +659,15 @@ impl Engine {
                         let mut record = InstallRecord::new(&app.id, kind, &install.sha256, app.revision, LocalState::Unsupported);
                         record.detail = Some(Detail::Unsupported.as_str().to_string());
                         if let Some(old) = file.apps.get(&app.id) {
-                            // What a later removal needs about the version on the PC.
+                            // What a later removal needs about the version on the PC:
+                            // how to remove it, whether Rulebox may have put it there,
+                            // and whether it was found there (never removed).
                             record.kind = old.kind;
                             record.product_code = old.product_code.clone();
                             record.exe = old.exe.clone();
                             record.remove_when_unassigned = old.remove_when_unassigned;
+                            record.on_pc = rulebox_may_have_installed(old);
+                            record.preexisting = old.preexisting;
                         }
                         out.extend(mark(&mut record));
                         file.apps.insert(app.id.clone(), record);
@@ -585,9 +677,12 @@ impl Engine {
                 let exe_exists = platform.file_exists(Path::new(&spec.exe));
                 match file.apps.get_mut(&app.id) {
                     None => {
-                        // A program already at its path is taken as installed.
+                        // A program already at its path is taken as installed (its
+                        // tile shows), but Rulebox did not install it: it is marked
+                        // and will never be uninstalled or deleted by Rulebox.
                         let state = if exe_exists { LocalState::Installed } else { LocalState::Pending };
                         let mut record = fresh_record(app, &spec, state);
+                        record.preexisting = exe_exists;
                         out.extend(mark(&mut record));
                         file.apps.insert(app.id.clone(), record);
                     }
@@ -604,7 +699,12 @@ impl Engine {
                             if record.sha256 != spec.sha256 {
                                 doomed.push(record.file_name());
                             }
+                            // Found again at its path without Rulebox having put it
+                            // there (for example after Rulebox removed it): preexisting.
+                            let preexisting = record.preexisting
+                                || (state == LocalState::Installed && !rulebox_may_have_installed(record));
                             *record = fresh_record(app, &spec, state);
+                            record.preexisting = preexisting;
                             out.extend(mark(record));
                             continue;
                         }
@@ -636,6 +736,12 @@ impl Engine {
             for id in gone {
                 let Some(record) = file.apps.get_mut(&id) else { continue };
                 if record.removal {
+                    // A queued removal of an app Rulebox did not install (a record
+                    // from before `preexisting`): dropped, never run.
+                    if record.preexisting && record.state != LocalState::Removed {
+                        tracing::info!(app_id = %id, "not installed by Rulebox; its removal is dropped (hidden only)");
+                        file.apps.remove(&id);
+                    }
                     continue;
                 }
                 let can_remove = match record.kind {
@@ -643,9 +749,10 @@ impl Engine {
                     RecordKind::Portable => record.exe.is_some(),
                     RecordKind::Exe => false,
                 };
-                // Something may be on the PC: installed, or an install that ran.
-                let on_pc = record.state == LocalState::Installed || record.attempts > 0;
-                if record.remove_when_unassigned && can_remove && on_pc {
+                // Something Rulebox put there may be on the PC: installed, an
+                // install that ran, or the version before an `unsupported` entry.
+                let on_pc = rulebox_may_have_installed(record);
+                if record.remove_when_unassigned && can_remove && on_pc && !record.preexisting {
                     tracing::info!(app_id = %id, "unassigned; it will be removed");
                     record.removal = true;
                     record.state = LocalState::Removing;
@@ -689,32 +796,58 @@ impl Engine {
             .min()
     }
 
-    async fn fetch_icons(&mut self, policy: &AgentPolicy, deployment_url: Option<&str>) {
+    /// The missing icons; stops as soon as the agent stops.
+    async fn fetch_icons(&mut self, policy: &AgentPolicy, deployment_url: Option<&str>, shutdown: &CancellationToken) {
         let dir = self.deps.paths.icons_dir();
-        if icons::fetch_missing(&policy.catalog, deployment_url, self.deps.downloader.as_ref(), &dir, &mut self.icons_tried).await {
+        let fetched = tokio::select! {
+            () = shutdown.cancelled() => false,
+            any = icons::fetch_missing(&policy.catalog, deployment_url, self.deps.downloader.as_ref(), &dir, &mut self.icons_tried) => any,
+        };
+        if fetched {
             (self.deps.on_visible_change)();
         }
     }
 
-    /// Runs one installer in a blocking thread.
-    async fn run_installer(&self, cmd: InstallerCommand) -> Result<InstallerExit, PlatformError> {
+    /// Runs one installer in a blocking thread; `shutdown` ends it (and everything
+    /// it started) at the platform's next poll.
+    async fn run_installer(&self, cmd: InstallerCommand, shutdown: &CancellationToken) -> Result<InstallerExit, PlatformError> {
         let platform = Arc::clone(&self.deps.platform);
         let timeout = self.deps.install_timeout;
-        tokio::task::spawn_blocking(move || platform.run_installer(&cmd, timeout))
+        let cancel = shutdown.clone();
+        tokio::task::spawn_blocking(move || platform.run_installer(&cmd, timeout, &cancel))
             .await
             .unwrap_or_else(|error| Err(PlatformError::Other(format!("the installer thread failed: {error}"))))
     }
 
-    async fn wait_for_exe(&self, exe: &Path) -> bool {
+    /// `Some(found)`, or `None` when the agent stopped before the program appeared.
+    async fn wait_for_exe(&self, exe: &Path, shutdown: &CancellationToken) -> Option<bool> {
         let deadline = tokio::time::Instant::now() + self.deps.exe_wait;
         loop {
             if self.deps.platform.file_exists(exe) {
-                return true;
+                return Some(true);
             }
             if tokio::time::Instant::now() >= deadline {
-                return false;
+                return Some(false);
             }
-            tokio::time::sleep(EXE_POLL).await;
+            tokio::select! {
+                () = shutdown.cancelled() => return None,
+                () = tokio::time::sleep(EXE_POLL) => {}
+            }
+        }
+    }
+
+    /// Free disk for `need` bytes; `Err(LowDisk)` when there is less.
+    fn check_disk(&self, app_id: &str, need: u64) -> Result<(), Option<Detail>> {
+        match self.deps.platform.disk_free_bytes() {
+            Ok(free) if free < need => {
+                tracing::warn!(app_id, free, need, "not enough free disk space for this install");
+                Err(Some(Detail::LowDisk))
+            }
+            Ok(_) => Ok(()),
+            Err(error) => {
+                tracing::warn!(app_id, "cannot read the free disk space ({error}); trying anyway");
+                Ok(())
+            }
         }
     }
 
@@ -746,39 +879,52 @@ impl Engine {
             tracing::error!("the downloads folder is a link (or cannot be read); nothing is downloaded");
             return Err(Some(Detail::DownloadFailed));
         }
-        let need = spec.size_bytes.saturating_mul(3);
-        match self.deps.platform.disk_free_bytes() {
-            Ok(free) if free < need => {
-                tracing::warn!(app_id, free, need, "not enough free disk space for this install");
-                return Err(Some(Detail::LowDisk));
-            }
-            Ok(_) => {}
-            Err(error) => tracing::warn!(app_id, "cannot read the free disk space ({error}); trying anyway"),
-        }
+        // The download, then the installed files (twice its size). An unknown size
+        // (0): the most a download may write (4 GiB) now, and twice the real size
+        // once it is known.
+        let need = if spec.size_bytes > 0 { spec.size_bytes.saturating_mul(3) } else { MAX_DOWNLOAD_BYTES };
+        self.check_disk(app_id, need)?;
         let dest = dir.join(format!("{}.{}", spec.sha256, spec.kind.ext()));
+        let mut reused = false;
         if dest.exists() {
             match open_verified(&dest, &spec.sha256) {
                 Ok(_) => {
                     tracing::info!(app_id, "reusing the installer downloaded earlier");
-                    return Ok(dest);
+                    reused = true;
                 }
                 Err(_) => {
                     let _ = remove_file_if_exists(&dest);
                 }
             }
         }
-        let max = if spec.size_bytes > 0 { spec.size_bytes.min(MAX_DOWNLOAD_BYTES) } else { MAX_DOWNLOAD_BYTES };
-        tracing::info!(app_id, "downloading the installer");
-        tokio::select! {
-            () = shutdown.cancelled() => Err(None),
-            result = self.deps.downloader.fetch(&spec.url, &dest, &spec.sha256, max) => match result {
-                Ok(()) => Ok(dest),
-                Err(error) => {
-                    tracing::warn!(app_id, "download failed: {error}");
-                    Err(Some(error.detail()))
-                }
-            },
+        if !reused {
+            let max = if spec.size_bytes > 0 { spec.size_bytes.min(MAX_DOWNLOAD_BYTES) } else { MAX_DOWNLOAD_BYTES };
+            let deadline = download_deadline(spec.size_bytes);
+            tracing::info!(app_id, "downloading the installer");
+            tokio::select! {
+                () = shutdown.cancelled() => return Err(None),
+                result = tokio::time::timeout(deadline, self.deps.downloader.fetch(&spec.url, &dest, &spec.sha256, max)) => match result {
+                    Ok(Ok(())) => {}
+                    Ok(Err(error)) => {
+                        tracing::warn!(app_id, "download failed: {error}");
+                        return Err(Some(error.detail()));
+                    }
+                    Err(_) => {
+                        tracing::warn!(app_id, minutes = deadline.as_secs() / 60, "the download did not finish in time");
+                        let _ = remove_file_if_exists(&part_path(&dest));
+                        return Err(Some(Detail::DownloadFailed));
+                    }
+                },
+            }
         }
+        if spec.size_bytes == 0 {
+            let size = std::fs::metadata(&dest).map(|m| m.len()).unwrap_or(0);
+            if let Err(low) = self.check_disk(app_id, size.saturating_mul(2)) {
+                let _ = remove_file_if_exists(&dest);
+                return Err(low);
+            }
+        }
+        Ok(dest)
     }
 
     async fn install(&self, app_id: &str, spec: &Spec, roots: &PathRoots, shutdown: &CancellationToken) -> Outcome {
@@ -815,11 +961,11 @@ impl Engine {
                 let _ = std::fs::create_dir_all(self.deps.paths.logs_dir());
                 let log = self.deps.paths.install_log(app_id);
                 let cmd = msi_install_command(Path::new(system_root), verified.path(), &log, &downloads, &exe);
-                self.run_installer(cmd).await
+                self.run_installer(cmd, shutdown).await
             }
             RecordKind::Exe => {
                 let cmd = exe_install_command(verified.path(), &spec.silent_args, &downloads, &exe);
-                self.run_installer(cmd).await
+                self.run_installer(cmd, shutdown).await
             }
             RecordKind::Portable => {
                 let platform = Arc::clone(&self.deps.platform);
@@ -830,18 +976,25 @@ impl Engine {
                     .map(|()| InstallerExit::Code(0))
             }
         };
+        // Held until the installer and everything it started are gone (the
+        // platform returns only then).
         drop(verified);
         match ran {
+            Err(PlatformError::InUse) => {
+                tracing::info!(app_id, "the old program is running; the upgrade waits");
+                Outcome::Busy { exit_code: None }
+            }
             Err(error) => {
                 tracing::error!(app_id, "the installer did not run: {error}");
                 Outcome::Failed { detail: None, exit_code: None }
             }
+            Ok(InstallerExit::Cancelled) => Outcome::Interrupted,
             Ok(InstallerExit::TimedOut) => {
                 tracing::warn!(app_id, "the installer did not finish in time and was stopped");
                 Outcome::Failed { detail: Some(Detail::Timeout), exit_code: None }
             }
             Ok(InstallerExit::Code(code)) => match judge_install(spec.kind == RecordKind::Msi, &spec.success_exit_codes, code) {
-                ExitVerdict::Busy => Outcome::Busy,
+                ExitVerdict::Busy => Outcome::Busy { exit_code: Some(i64::from(code)) },
                 ExitVerdict::Failure => {
                     tracing::warn!(app_id, code, "the installer failed");
                     Outcome::Failed { detail: Some(Detail::ExitCode), exit_code: Some(i64::from(code)) }
@@ -850,20 +1003,32 @@ impl Engine {
                     if restart {
                         self.note_restart();
                     }
-                    if self.wait_for_exe(&exe).await {
-                        let _ = remove_file_if_exists(&dest);
-                        Outcome::Installed { exit_code: code }
-                    } else {
-                        tracing::warn!(app_id, "the installer succeeded but the program is not at its path");
-                        Outcome::Failed { detail: Some(Detail::ExeMissingAfterInstall), exit_code: Some(i64::from(code)) }
+                    match self.wait_for_exe(&exe, shutdown).await {
+                        Some(true) => {
+                            let _ = remove_file_if_exists(&dest);
+                            Outcome::Installed { exit_code: code }
+                        }
+                        Some(false) => {
+                            tracing::warn!(app_id, "the installer succeeded but the program is not at its path");
+                            Outcome::Failed { detail: Some(Detail::ExeMissingAfterInstall), exit_code: Some(i64::from(code)) }
+                        }
+                        // Stopping: the next start runs it again (installers are
+                        // re-runnable), not counted.
+                        None => Outcome::Interrupted,
                     }
                 }
             },
         }
     }
 
-    async fn remove(&self, record: &InstallRecord, roots: &PathRoots) -> Outcome {
+    async fn remove(&self, record: &InstallRecord, roots: &PathRoots, shutdown: &CancellationToken) -> Outcome {
         let app_id = record.app_id.as_str();
+        if record.preexisting {
+            // Never reached through `reconcile` (it never queues one); a hand-edited
+            // file must not make Rulebox uninstall what it did not install.
+            tracing::warn!(app_id, "not installed by Rulebox; nothing is removed");
+            return Outcome::Dropped;
+        }
         tracing::info!(app_id, "removing an unassigned app");
         match record.kind {
             RecordKind::Msi => {
@@ -877,7 +1042,8 @@ impl Engine {
                 let log = self.deps.paths.install_log(app_id);
                 let exe = record.exe.as_deref().map(Path::new);
                 let cmd = msi_removal_command(Path::new(system_root), &code, &log, &self.deps.paths.downloads_dir(), exe);
-                match self.run_installer(cmd).await {
+                match self.run_installer(cmd, shutdown).await {
+                    Ok(InstallerExit::Cancelled) => Outcome::Interrupted,
                     Ok(InstallerExit::Code(code)) => match judge_removal(code) {
                         ExitVerdict::Success { restart } => {
                             if restart {
@@ -885,7 +1051,7 @@ impl Engine {
                             }
                             Outcome::Removed
                         }
-                        ExitVerdict::Busy => Outcome::Busy,
+                        ExitVerdict::Busy => Outcome::Busy { exit_code: Some(i64::from(code)) },
                         ExitVerdict::Failure => Outcome::Failed { detail: Some(Detail::RemoveFailed), exit_code: Some(i64::from(code)) },
                     },
                     Ok(InstallerExit::TimedOut) => Outcome::Failed { detail: Some(Detail::Timeout), exit_code: None },
@@ -903,6 +1069,10 @@ impl Engine {
                     .unwrap_or_else(|error| Err(PlatformError::Other(error.to_string())));
                 match removed {
                     Ok(()) => Outcome::Removed,
+                    Err(PlatformError::InUse) => {
+                        tracing::info!(app_id, "the portable program is running; its removal waits");
+                        Outcome::Busy { exit_code: None }
+                    }
                     Err(error) => {
                         tracing::error!(app_id, "cannot delete the portable app: {error}");
                         Outcome::Failed { detail: Some(Detail::RemoveFailed), exit_code: None }
@@ -916,7 +1086,17 @@ impl Engine {
 
     fn note_restart(&self) {
         let now = self.now();
-        self.deps.book.update(|file| file.restart_pending_since_ms = Some(now));
+        let boot = match self.deps.platform.boot_identity() {
+            Ok(boot) => Some(BootMark { boot_id: boot.boot_id, uptime_ms: boot.uptime_ms }),
+            Err(error) => {
+                tracing::warn!("cannot read the boot identity ({error}); the wall clock decides");
+                None
+            }
+        };
+        self.deps.book.update(|file| {
+            file.restart_pending_since_ms = Some(now);
+            file.restart_boot = boot;
+        });
         self.deps.report.set_restart_pending(true);
     }
 
@@ -924,7 +1104,17 @@ impl Engine {
     fn finish(&self, app_id: &str, outcome: Outcome) {
         let now = self.now();
         let report = self.deps.book.update(|file| {
+            if matches!(outcome, Outcome::Dropped) {
+                file.apps.remove(app_id);
+                return None;
+            }
             let record = file.apps.get_mut(app_id)?;
+            // Back to waiting (not counted) after an uncounted interruption.
+            let wait_again = |record: &mut InstallRecord| {
+                if matches!(record.state, LocalState::Downloading | LocalState::Installing) {
+                    record.state = if record.removal { LocalState::Removing } else { LocalState::Pending };
+                }
+            };
             match outcome {
                 Outcome::Installed { exit_code } => {
                     tracing::info!(app_id, "installed");
@@ -932,6 +1122,7 @@ impl Engine {
                     record.detail = None;
                     record.last_exit_code = (exit_code != 0).then_some(i64::from(exit_code));
                     record.next_try_ms = 0;
+                    record.busy_since_ms = None;
                     mark(record)
                 }
                 Outcome::Removed => {
@@ -939,24 +1130,47 @@ impl Engine {
                     record.state = LocalState::Removed;
                     record.detail = None;
                     record.last_exit_code = None;
+                    record.busy_since_ms = None;
                     mark(record)
                 }
-                Outcome::Busy => {
-                    tracing::info!(app_id, "another installation is running; trying again in 2 minutes");
-                    if matches!(record.state, LocalState::Downloading | LocalState::Installing) {
-                        record.state = if record.removal { LocalState::Removing } else { LocalState::Pending };
+                Outcome::Busy { exit_code } => {
+                    let first = *record.busy_since_ms.get_or_insert(now);
+                    if now.saturating_sub(first) >= ms(BUSY_WINDOW) {
+                        tracing::warn!(app_id, "still busy after 2 hours; counted as a failed attempt");
+                        record.busy_since_ms = None;
+                        // Never `busy` on the wire: the exit code says what happened.
+                        let detail = if record.removal {
+                            Some(Detail::RemoveFailed)
+                        } else {
+                            exit_code.map(|_| Detail::ExitCode)
+                        };
+                        fail_record(record, detail, exit_code, now);
+                        return mark(record);
                     }
+                    tracing::info!(app_id, "busy (another installation, or the program is in use); trying again in 2 minutes");
+                    wait_again(record);
+                    record.next_try_ms = now.saturating_add(ms(BUSY_RETRY));
+                    None
+                }
+                Outcome::Wait => {
+                    wait_again(record);
                     record.next_try_ms = now.saturating_add(ms(BUSY_RETRY));
                     None
                 }
                 Outcome::Failed { detail, exit_code } => {
+                    record.busy_since_ms = None;
                     fail_record(record, detail, exit_code, now);
                     if record.attempts >= MAX_FAILURES {
                         tracing::warn!(app_id, attempts = record.attempts, "giving up until the app changes (Retry)");
                     }
                     mark(record)
                 }
-                Outcome::Abandoned => None,
+                Outcome::Interrupted => {
+                    tracing::info!(app_id, "the agent is stopping; the installer was ended and runs again at the next start");
+                    wait_again(record);
+                    None
+                }
+                Outcome::Abandoned | Outcome::Dropped => None,
             }
         });
         self.push(report.into_iter().collect());
@@ -976,17 +1190,17 @@ impl Engine {
             Ok(roots) => roots,
             Err(error) => {
                 tracing::warn!("cannot read the program folders ({error})");
-                return self.finish(app_id, Outcome::Busy);
+                return self.finish(app_id, Outcome::Wait);
             }
         };
         let before = self.deps.book.installed_ids();
         let outcome = if removal {
             let Some(record) = self.deps.book.snapshot().apps.get(app_id).cloned() else { return };
-            self.remove(&record, &roots).await
+            self.remove(&record, &roots, shutdown).await
         } else {
             let spec = policy.catalog.iter().find(|a| a.id == app_id).map(|app| check_spec(app, &roots));
             let Some(Ok(spec)) = spec else {
-                return self.finish(app_id, Outcome::Busy);
+                return self.finish(app_id, Outcome::Wait);
             };
             self.install(app_id, &spec, &roots, shutdown).await
         };
@@ -1027,7 +1241,10 @@ pub async fn run_install_task(
                     engine.icons_tried.clear();
                     catalog_seen = Some(policy.catalog.clone());
                 }
-                engine.fetch_icons(&policy, deployment.as_deref()).await;
+                engine.fetch_icons(&policy, deployment.as_deref(), &shutdown).await;
+                if shutdown.is_cancelled() {
+                    return;
+                }
             }
             if let Some((app_id, removal)) = engine.next_job(online) {
                 engine.run_job(&app_id, removal, &policy, &shutdown).await;

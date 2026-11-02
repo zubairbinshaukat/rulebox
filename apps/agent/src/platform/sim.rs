@@ -8,8 +8,10 @@ use std::sync::{Mutex, MutexGuard, PoisonError};
 
 use std::time::Duration;
 
+use tokio_util::sync::CancellationToken;
+
 use super::{
-    InstallerCommand, InstallerExit, LocalUser, OsInfo, Platform, PlatformError, RegData, RegValueRef, SessionInfo,
+    BootIdentity, InstallerCommand, InstallerExit, LocalUser, OsInfo, Platform, PlatformError, RegData, RegValueRef, SessionInfo,
     ShellBinaries, ShellMechanism, StaffUserSpec,
 };
 use crate::installs::{
@@ -115,8 +117,14 @@ pub struct SimWorld {
     pub files: std::collections::HashSet<PathBuf>,
     /// (Step 14) Free bytes on the system drive.
     pub disk_free_bytes: u64,
-    /// (Step 14) When the simulated PC started (Unix ms).
+    /// (Step 14) When the simulated PC started (Unix ms; only for old records).
     pub boot_time_ms: u64,
+    /// (Step 14 review) The simulated boot counter (`None`: not readable) and
+    /// milliseconds since the boot.
+    pub boot_id: Option<u32>,
+    pub uptime_ms: u64,
+    /// (Step 14 review) The next installer runs until the agent stops (`Cancelled`).
+    pub installer_hangs: bool,
     /// (Step 14) The exits of the next installer runs (default `Code(0)`).
     pub installer_exits: VecDeque<InstallerExit>,
     /// (Step 14) Whether a successful install creates its program (false: the
@@ -162,6 +170,9 @@ impl SimWorld {
             files: std::collections::HashSet::new(),
             disk_free_bytes: 100 * 1024 * 1024 * 1024,
             boot_time_ms: 1_700_000_000_000,
+            boot_id: Some(100),
+            uptime_ms: 3_600_000,
+            installer_hangs: false,
             installer_exits: VecDeque::new(),
             installer_creates_exe: true,
             installer_runs: Vec::new(),
@@ -514,21 +525,39 @@ impl Platform for SimPlatform {
         Ok(lock(&self.world).disk_free_bytes)
     }
 
-    fn boot_time_ms(&self) -> Result<u64, PlatformError> {
+    fn boot_identity(&self) -> Result<BootIdentity, PlatformError> {
         self.check(SimOp::BootTimeMs)?;
-        Ok(lock(&self.world).boot_time_ms)
+        let world = lock(&self.world);
+        Ok(BootIdentity { boot_id: world.boot_id, uptime_ms: world.uptime_ms, boot_time_ms: world.boot_time_ms })
     }
 
     /// Never executes anything. Same program rule as `WindowsPlatform` (the fake
     /// Windows folder, the real downloads folder of the simulate data directory);
     /// answers the next scripted exit and, on success, plays the effect on the fake
-    /// file set (the program appears, or goes for a removal).
-    fn run_installer(&self, cmd: &InstallerCommand, _timeout: Duration) -> Result<InstallerExit, PlatformError> {
+    /// file set (the program appears, or goes for a removal). With
+    /// `installer_hangs` it waits for `cancel` and answers `Cancelled`.
+    fn run_installer(
+        &self,
+        cmd: &InstallerCommand,
+        _timeout: Duration,
+        cancel: &CancellationToken,
+    ) -> Result<InstallerExit, PlatformError> {
         self.check(SimOp::RunInstaller)?;
         let system_root = sim_path_roots().system_root.map(PathBuf::from);
         let downloads = self.data_dir.join("downloads");
         if !installer_program_allowed(&cmd.program, system_root.as_deref(), &downloads) {
             return Err(PlatformError::Other("program not allowed".into()));
+        }
+        let hangs = {
+            let mut world = lock(&self.world);
+            world.installer_runs.push(cmd.clone());
+            world.installer_hangs
+        };
+        if hangs {
+            while !cancel.is_cancelled() {
+                std::thread::sleep(Duration::from_millis(1));
+            }
+            return Ok(InstallerExit::Cancelled);
         }
         let mut world = lock(&self.world);
         if world.probe_lock && !cmd.removal {
@@ -537,7 +566,6 @@ impl Platform for SimPlatform {
             let refused = file.is_some_and(|f| std::fs::OpenOptions::new().write(true).open(f).is_err());
             world.lock_probes.push(refused);
         }
-        world.installer_runs.push(cmd.clone());
         let exit = world.installer_exits.pop_front().unwrap_or(InstallerExit::Code(0));
         if let (InstallerExit::Code(code), Some(exe)) = (exit, &cmd.expected_exe) {
             let success = matches!(code, MSI_SUCCESS | MSI_REBOOT_REQUIRED | MSI_REBOOT_INITIATED)

@@ -12,6 +12,7 @@ pub mod dpapi;
 pub mod error;
 pub mod folders;
 pub mod guard;
+pub mod job;
 pub mod lsa;
 pub mod osinfo;
 pub mod pipe;

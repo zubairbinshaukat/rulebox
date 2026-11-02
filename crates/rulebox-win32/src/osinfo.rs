@@ -184,6 +184,14 @@ pub fn boot_time_ms() -> u64 {
     now.saturating_sub(since_boot)
 }
 
+/// (Phase 4 Step 14 review) Milliseconds since this PC started (`GetTickCount64`):
+/// monotonic within one boot and independent of the wall clock, so a clock
+/// correction cannot make it look like a reboot happened (or did not).
+pub fn uptime_ms() -> u64 {
+    // SAFETY: `GetTickCount64` takes no arguments and cannot fail.
+    unsafe { GetTickCount64() }
+}
+
 /// The root of the drive Windows is installed on, for example `C:\`.
 pub fn system_drive() -> Result<PathBuf> {
     let mut buf = [0u16; 512];
@@ -264,5 +272,12 @@ mod tests {
         let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_millis() as u64;
         let boot = boot_time_ms();
         assert!(boot > 1_600_000_000_000 && boot <= now, "{boot}");
+    }
+
+    #[test]
+    fn uptime_only_grows() {
+        let first = uptime_ms();
+        std::thread::sleep(std::time::Duration::from_millis(20));
+        assert!(first > 0 && uptime_ms() >= first);
     }
 }

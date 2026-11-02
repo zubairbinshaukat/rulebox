@@ -23,6 +23,8 @@ windows = { workspace = true, features = [
     "Win32_System_Com",
     "Win32_System_Diagnostics_ToolHelp",
     "Win32_System_Environment",
+    # (Phase 4 Step 14 review) The installer's kill-on-close job (job.rs).
+    "Win32_System_JobObjects",
     "Win32_System_Pipes",
     "Win32_System_Registry",
     "Win32_System_RemoteDesktop",

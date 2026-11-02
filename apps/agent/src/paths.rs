@@ -144,6 +144,13 @@ impl DataPaths {
         self.root.join("downloads")
     }
 
+    /// (Step 14 review) The TEMP / TMP folders of installer runs, one fresh
+    /// `run-<random>` per run (`installs::RunTemp`). Inside the protected data
+    /// directory like `downloads`, so the Staff account cannot write there.
+    pub fn installer_temp_dir(&self) -> PathBuf {
+        self.root.join("installer-temp")
+    }
+
     /// (Step 14) The icon cache: `<sha256>.png`.
     pub fn icons_dir(&self) -> PathBuf {
         self.root.join("icons")
@@ -274,6 +281,7 @@ mod tests {
         assert!(data.installs().ends_with("state/installs.json"));
         assert!(data.downloads_dir().ends_with("downloads"));
         assert!(data.icons_dir().ends_with("icons"));
+        assert!(data.installer_temp_dir().ends_with("installer-temp"));
         assert!(data.install_log("app1").ends_with("logs/install-app1.log"));
     }
 

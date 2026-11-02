@@ -255,21 +255,49 @@ async fn exit_3010_sets_restart_pending_until_the_next_boot() {
     rig.until("installed", |r| r.state("a1") == Some(LocalState::Installed)).await;
     assert_eq!(rig.report.restart_pending(), Some(true));
     let since = rig.book.snapshot().restart_pending_since_ms.unwrap();
+    assert_eq!(rig.book.snapshot().restart_boot, Some(BootMark { boot_id: Some(100), uptime_ms: 3_600_000 }));
     assert_eq!(rig.record("a1").unwrap().last_exit_code, Some(3010));
     rig.stop().await;
-    // Restarted before a reboot: still pending.
+    // Restarted before a reboot, after the clock was corrected forward (the old
+    // "wall clock minus uptime" rule would have seen a boot after the 3010): still
+    // pending, the boot counter did not change.
+    rig.sim.with_world(|w| {
+        w.boot_time_ms = since + 3_600_000;
+        w.uptime_ms += 60_000;
+    });
     let book = InstallBook::open(rig.paths.installs());
     rig.book = book;
     rig.start();
     rig.settle().await;
     assert_eq!(rig.report.restart_pending(), Some(true));
     rig.stop().await;
-    // The PC booted after it: cleared.
-    rig.sim.with_world(|w| w.boot_time_ms = since + 1);
+    // The PC booted after it (even with the clock set back): cleared.
+    rig.sim.with_world(|w| {
+        w.boot_id = Some(101);
+        w.boot_time_ms = since - 3_600_000;
+    });
     rig.start();
     rig.until("cleared", |r| r.report.restart_pending().is_none()).await;
     assert_eq!(rig.book.snapshot().restart_pending_since_ms, None);
+    assert_eq!(rig.book.snapshot().restart_boot, None);
     rig.stop().await;
+}
+
+#[test]
+fn a_reboot_is_seen_without_the_wall_clock() {
+    let now = |boot_id, uptime_ms, boot_time_ms| BootIdentity { boot_id, uptime_ms, boot_time_ms };
+    let mark = BootMark { boot_id: Some(7), uptime_ms: 600_000 };
+    // The boot counter decides when both are known, whatever the clocks say.
+    assert!(!rebooted_since(Some(&mark), 5_000, &now(Some(7), 10, 9_999_999)));
+    assert!(rebooted_since(Some(&mark), 5_000, &now(Some(8), 9_999_999, 0)));
+    // No counter: a smaller uptime can only be a new boot.
+    let no_id = BootMark { boot_id: None, uptime_ms: 600_000 };
+    assert!(rebooted_since(Some(&no_id), 5_000, &now(None, 30_000, 0)));
+    assert!(rebooted_since(Some(&mark), 5_000, &now(None, 30_000, 0)));
+    assert!(!rebooted_since(Some(&no_id), 5_000, &now(None, 700_000, 9_999_999)), "a clock jump is not a boot");
+    // A record from before the mark: the old rule.
+    assert!(rebooted_since(None, 5_000, &now(None, 1, 5_001)));
+    assert!(!rebooted_since(None, 5_000, &now(Some(1), 1, 4_999)));
 }
 
 #[tokio::test(start_paused = true)]
@@ -744,8 +772,291 @@ fn program_outside_downloads_refused_by_the_simulated_platform() {
         expected_exe: None,
         removal: false,
     };
-    assert!(matches!(sim.run_installer(&cmd, Duration::from_secs(1)), Err(PlatformError::Other(_))));
+    assert!(matches!(sim.run_installer(&cmd, Duration::from_secs(1), &CancellationToken::new()), Err(PlatformError::Other(_))));
     assert!(sim.with_world(|w| w.installer_runs.is_empty()));
+}
+
+// --- Review fixes (security review of Step 14) ---
+
+#[tokio::test(start_paused = true)]
+async fn a_program_found_on_the_pc_is_never_uninstalled() {
+    // Finding 1: an MSI with a product code and removeWhenUnassigned, already at its
+    // path: shown as installed, but Rulebox never runs `msiexec /x` on it.
+    let mut rig = rig();
+    let msi = app("a1", "msi", b"m", 1, true);
+    let portable = app("a2", "portable", b"p", 1, true);
+    rig.sim.add_file(exe_of(&msi).to_str().unwrap());
+    rig.sim.add_file(exe_of(&portable).to_str().unwrap());
+    rig.set_catalog(vec![msi.clone(), portable.clone()]);
+    rig.start();
+    rig.until("found", |r| r.state("a1") == Some(LocalState::Installed) && r.state("a2") == Some(LocalState::Installed)).await;
+    assert!(rig.record("a1").unwrap().preexisting && rig.record("a2").unwrap().preexisting);
+    assert_eq!(rig.visible(&[msi.clone(), portable.clone()]), ["a1", "a2"], "the tiles show as before");
+    rig.report.accept_installs();
+    rig.set_catalog(Vec::new());
+    rig.until("dropped", |r| r.record("a1").is_none() && r.record("a2").is_none()).await;
+    rig.settle().await;
+    assert!(rig.runs().is_empty(), "no msiexec /x");
+    assert!(!rig.sim.calls().contains(&SimOp::RemovePortable), "no portable delete");
+    assert!(rig.sim.file_exists(&exe_of(&msi)) && rig.sim.file_exists(&exe_of(&portable)));
+    assert!(rig.report.queued_installs().is_empty(), "nothing reported");
+    rig.stop().await;
+}
+
+#[tokio::test(start_paused = true)]
+async fn the_preexisting_mark_survives_a_new_version_and_a_removal_round_trip() {
+    let mut rig = rig();
+    let v1 = app("a1", "msi", b"v1", 1, true);
+    rig.sim.add_file(exe_of(&v1).to_str().unwrap());
+    rig.set_catalog(vec![v1]);
+    rig.start();
+    rig.until("found", |r| r.state("a1") == Some(LocalState::Installed)).await;
+    // A new version is installed over it by Rulebox: still never removed.
+    let v2 = app("a1", "msi", b"v2", 2, true);
+    rig.serve(&v2, b"v2");
+    rig.set_catalog(vec![v2.clone()]);
+    rig.until("v2", |r| r.record("a1").is_some_and(|x| x.sha256 == sha(b"v2") && x.state == LocalState::Installed)).await;
+    assert!(rig.record("a1").unwrap().preexisting, "never cleared");
+    rig.set_catalog(Vec::new());
+    rig.until("dropped", |r| r.record("a1").is_none()).await;
+    assert_eq!(rig.runs().len(), 1, "only the install ran, no removal");
+
+    // Rulebox installs a3 itself, removes it when unassigned, and someone puts it
+    // back before it is assigned again: found, so preexisting from then on.
+    let a3 = app("a3", "msi", b"m3", 1, true);
+    rig.serve(&a3, b"m3");
+    rig.set_catalog(vec![a3.clone()]);
+    rig.until("a3 installed", |r| r.state("a3") == Some(LocalState::Installed)).await;
+    assert!(!rig.record("a3").unwrap().preexisting);
+    rig.set_catalog(Vec::new());
+    rig.until("a3 removed", |r| r.state("a3") == Some(LocalState::Removed)).await;
+    rig.sim.add_file(exe_of(&a3).to_str().unwrap());
+    rig.set_catalog(vec![a3]);
+    rig.until("a3 found", |r| r.state("a3") == Some(LocalState::Installed)).await;
+    assert!(rig.record("a3").unwrap().preexisting);
+    rig.stop().await;
+}
+
+/// A record as an agent before the review wrote it (no `preexisting`, `onPc`,
+/// `busySinceMs`).
+fn legacy_json(record: &InstallRecord) -> serde_json::Value {
+    let mut value = serde_json::to_value(record).unwrap();
+    let object = value.as_object_mut().unwrap();
+    for key in ["preexisting", "onPc", "busySinceMs"] {
+        assert!(object.remove(key).is_some(), "{key} is written");
+    }
+    value
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_record_from_before_the_mark_is_never_removed() {
+    // Back-compatibility: an old `installed` record with no attempts may be a
+    // program Rulebox found (the old code did not say), so a record without the
+    // field is treated as found. Rulebox-installed apps of that age are then only
+    // hidden when unassigned (the safe side; nothing was shipped with the old file).
+    let dir = TempDir::new();
+    let paths = DataPaths::new(dir.path().to_path_buf());
+    std::fs::create_dir_all(paths.state_dir()).unwrap();
+    let a = app("a1", "msi", b"a", 1, true);
+    let b = app("a2", "msi", b"b", 1, true);
+    let mut ra = InstallRecord::new("a1", RecordKind::Msi, &sha(b"a"), 1, LocalState::Installed);
+    ra.exe = Some(exe_of(&a).to_string_lossy().into_owned());
+    ra.product_code = Some(CODE.into());
+    ra.remove_when_unassigned = true;
+    // An old removal already queued (the old code queued found programs too).
+    let mut rb = InstallRecord::new("a2", RecordKind::Msi, &sha(b"b"), 1, LocalState::Removing);
+    rb.exe = Some(exe_of(&b).to_string_lossy().into_owned());
+    rb.product_code = Some(CODE.into());
+    rb.remove_when_unassigned = true;
+    rb.removal = true;
+    let file = json!({ "schema": 1, "restartPendingSinceMs": null, "apps": { "a1": legacy_json(&ra), "a2": legacy_json(&rb) } });
+    std::fs::write(paths.installs(), serde_json::to_vec(&file).unwrap()).unwrap();
+    let book = InstallBook::open(paths.installs());
+    let loaded = book.snapshot();
+    assert!(loaded.apps.values().all(|r| r.preexisting && !r.on_pc && r.busy_since_ms.is_none()));
+    assert_eq!(loaded.restart_boot, None);
+    drop(book);
+
+    let mut rig = rig_in(dir);
+    rig.sim.add_file(exe_of(&a).to_str().unwrap());
+    rig.sim.add_file(exe_of(&b).to_str().unwrap());
+    rig.start();
+    rig.until("both dropped", |r| r.record("a1").is_none() && r.record("a2").is_none()).await;
+    rig.settle().await;
+    assert!(rig.runs().is_empty(), "no msiexec /x for a program of unknown origin");
+    // A record written now says what it is.
+    let fresh = InstallRecord::new("a3", RecordKind::Msi, &sha(b"c"), 1, LocalState::Pending);
+    let back: InstallRecord = serde_json::from_value(serde_json::to_value(&fresh).unwrap()).unwrap();
+    assert_eq!(back, fresh);
+    assert!(!back.preexisting);
+    rig.stop().await;
+}
+
+#[tokio::test(start_paused = true)]
+async fn an_installed_app_that_turns_unsupported_is_still_removed_when_unassigned() {
+    // Finding 7: the version on the PC is carried into the `unsupported` record.
+    let mut rig = rig();
+    let msi = app("a1", "msi", b"m", 1, true);
+    rig.serve(&msi, b"m");
+    rig.set_catalog(vec![msi.clone()]);
+    rig.start();
+    rig.until("installed", |r| r.state("a1") == Some(LocalState::Installed)).await;
+    let mut broken = app("a1", "msi", b"m", 2, true);
+    broken.desktop.as_mut().unwrap().install.as_mut().unwrap().url = "http://downloads.example.com/a.msi".into();
+    rig.set_catalog(vec![broken]);
+    rig.until("unsupported", |r| r.state("a1") == Some(LocalState::Unsupported)).await;
+    let record = rig.record("a1").unwrap();
+    assert!(record.on_pc && !record.preexisting);
+    rig.set_catalog(Vec::new());
+    rig.until("removed", |r| r.state("a1") == Some(LocalState::Removed)).await;
+    assert_eq!(rig.runs()[1].args[..2], ["/x", CODE]);
+    rig.stop().await;
+
+    // A found program that turns unsupported is still never removed.
+    let mut rig = self::rig();
+    let found = app("a2", "msi", b"f", 1, true);
+    rig.sim.add_file(exe_of(&found).to_str().unwrap());
+    rig.set_catalog(vec![found]);
+    rig.start();
+    rig.until("found", |r| r.state("a2") == Some(LocalState::Installed)).await;
+    let mut broken = app("a2", "msi", b"f", 2, true);
+    broken.desktop.as_mut().unwrap().install.as_mut().unwrap().url = "http://downloads.example.com/f.msi".into();
+    rig.set_catalog(vec![broken]);
+    rig.until("unsupported", |r| r.state("a2") == Some(LocalState::Unsupported)).await;
+    assert!(rig.record("a2").unwrap().preexisting);
+    rig.set_catalog(Vec::new());
+    rig.until("dropped", |r| r.record("a2").is_none()).await;
+    assert!(rig.runs().is_empty());
+    rig.stop().await;
+}
+
+#[tokio::test(start_paused = true)]
+async fn busy_is_retried_for_two_hours_then_counted_as_exit_code() {
+    // Finding 9: 1618 forever no longer retries forever, and `busy` never goes out.
+    let mut rig = rig();
+    let msi = app("a1", "msi", b"m", 1, true);
+    rig.serve(&msi, b"m");
+    rig.set_catalog(vec![msi]);
+    rig.sim.with_world(|w| w.installer_exits.extend(std::iter::repeat_n(InstallerExit::Code(1618), 100)));
+    rig.start();
+    let mut last_try = 0;
+    for _ in 0..70 {
+        // The run was written down (a new retry time, or the counted failure).
+        rig.until("busy recorded", |r| {
+            r.record("a1").is_some_and(|x| x.next_try_ms > last_try || x.state == LocalState::Failed)
+        })
+        .await;
+        let record = rig.record("a1").unwrap();
+        if record.state == LocalState::Failed {
+            break;
+        }
+        assert_eq!(record.attempts, 0, "not counted while busy");
+        assert!(record.busy_since_ms.is_some());
+        last_try = record.next_try_ms;
+        advance(BUSY_RETRY + Duration::from_secs(1)).await;
+    }
+    let record = rig.record("a1").unwrap();
+    assert_eq!((record.attempts, record.last_exit_code, record.detail.as_deref()), (1, Some(1618), Some("exit_code")));
+    assert_eq!(record.busy_since_ms, None);
+    assert!((60..=62).contains(&rig.runs().len()), "{} runs", rig.runs().len());
+    assert!(rig.report.queued_installs().iter().all(|r| r.detail.as_deref() != Some("busy")));
+    rig.stop().await;
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_running_portable_program_makes_the_upgrade_wait_not_fail() {
+    // Finding 10: the old exe is running (sharing violation at the rename).
+    let mut rig = rig();
+    let portable = app("a1", "portable", b"tool", 1, true);
+    rig.serve(&portable, b"tool");
+    rig.sim.fail_next(SimOp::PlacePortable, PlatformError::InUse);
+    rig.set_catalog(vec![portable]);
+    rig.start();
+    rig.until("busy", |r| r.record("a1").is_some_and(|x| x.busy_since_ms.is_some())).await;
+    let record = rig.record("a1").unwrap();
+    assert_eq!((record.state, record.attempts), (LocalState::Pending, 0));
+    advance(BUSY_RETRY + Duration::from_secs(1)).await;
+    rig.until("installed", |r| r.state("a1") == Some(LocalState::Installed)).await;
+    assert_eq!(rig.record("a1").unwrap().busy_since_ms, None);
+    // Its removal while it runs waits the same way.
+    rig.sim.fail_next(SimOp::RemovePortable, PlatformError::InUse);
+    rig.set_catalog(Vec::new());
+    rig.until("removal busy", |r| r.record("a1").is_some_and(|x| x.busy_since_ms.is_some() && x.state == LocalState::Removing)).await;
+    advance(BUSY_RETRY + Duration::from_secs(1)).await;
+    rig.until("removed", |r| r.state("a1") == Some(LocalState::Removed)).await;
+    rig.stop().await;
+}
+
+#[tokio::test(start_paused = true)]
+async fn stopping_the_agent_ends_the_installer_and_does_not_count_it() {
+    // Finding 5: the install step follows `shutdown`; the run is not a failure.
+    let mut rig = rig();
+    let msi = app("a1", "msi", b"m", 1, true);
+    rig.serve(&msi, b"m");
+    rig.set_catalog(vec![msi]);
+    rig.sim.with_world(|w| w.installer_hangs = true);
+    rig.start();
+    rig.until("running", |r| r.runs().len() == 1 && r.state("a1") == Some(LocalState::Installing)).await;
+    rig.stop().await;
+    let record = rig.record("a1").unwrap();
+    assert_eq!((record.state, record.attempts), (LocalState::Pending, 0), "back to waiting, not counted");
+    assert!(rig.report.queued_installs().iter().all(|r| r.state != InstallState::Failed));
+    // The next start installs it.
+    rig.sim.with_world(|w| w.installer_hangs = false);
+    rig.start();
+    rig.until("installed", |r| r.state("a1") == Some(LocalState::Installed)).await;
+    assert_eq!(rig.record("a1").unwrap().attempts, 0);
+    rig.stop().await;
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_download_that_drips_forever_ends_at_its_deadline() {
+    // Finding 4: a total deadline, not only a gap between reads.
+    let mut rig = rig();
+    let bytes = vec![3u8; 4096];
+    let msi = app("a1", "msi", &bytes, 1, true);
+    rig.serve(&msi, &bytes);
+    let _gate = rig.downloader.hold();
+    rig.set_catalog(vec![msi]);
+    rig.start();
+    rig.until("downloading", |r| r.downloader.calls().len() == 1).await;
+    let deadline = download_deadline(4096);
+    advance(deadline - Duration::from_secs(1)).await;
+    rig.settle().await;
+    assert_eq!(rig.state("a1"), Some(LocalState::Downloading), "still within its time");
+    advance(Duration::from_secs(2)).await;
+    rig.until("failed", |r| r.state("a1") == Some(LocalState::Failed)).await;
+    assert_eq!(rig.record("a1").unwrap().detail.as_deref(), Some("download_failed"));
+    assert!(rig.downloads().is_empty(), "no partial file");
+    rig.stop().await;
+}
+
+#[tokio::test(start_paused = true)]
+async fn an_unknown_size_still_checks_the_disk() {
+    // Finding 6: `sizeBytes` 0 checks for the 4 GiB a download may write.
+    let mut rig = rig();
+    let mut msi = app("a1", "msi", b"m", 1, true);
+    msi.desktop.as_mut().unwrap().install.as_mut().unwrap().size_bytes = 0;
+    rig.serve(&msi, b"m");
+    rig.sim.with_world(|w| w.disk_free_bytes = 3 * 1024 * 1024 * 1024);
+    rig.set_catalog(vec![msi]);
+    rig.start();
+    rig.until("failed", |r| r.state("a1") == Some(LocalState::Failed)).await;
+    assert_eq!(rig.record("a1").unwrap().detail.as_deref(), Some("low_disk"));
+    assert!(rig.downloader.calls().is_empty(), "nothing downloaded");
+    rig.stop().await;
+}
+
+#[tokio::test(start_paused = true)]
+async fn installer_temp_folders_left_by_a_crash_are_deleted_at_start() {
+    // Finding 2: the per-run TEMP folders do not pile up.
+    let mut rig = rig();
+    let left = rig.paths.installer_temp_dir().join("run-0123456789abcdef");
+    std::fs::create_dir_all(&left).unwrap();
+    std::fs::write(left.join("is-ABC.tmp"), b"x").unwrap();
+    rig.start();
+    rig.until("swept", |_| !left.exists()).await;
+    rig.stop().await;
 }
 
 #[test]

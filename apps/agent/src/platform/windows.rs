@@ -17,14 +17,19 @@ use rulebox_win32::guard::require_test_machine;
 use rulebox_win32::registry::{get_hklm, RegValue};
 use rulebox_win32::shellreg::{self, Mechanism};
 use rulebox_win32::sid::Sid;
+use rulebox_win32::job::{self, KillOnCloseJob};
 use rulebox_win32::{dpapi, lsa, osinfo, process, security, session, Win32Error};
 use serde::Deserialize;
+use tokio_util::sync::CancellationToken;
 
 use super::{
-    InstallerCommand, InstallerExit, LocalUser, OsInfo, Platform, PlatformError, RegData, RegValueRef, SessionInfo,
-    SessionState, ShellBinaries, ShellMechanism, StaffUserSpec,
+    BootIdentity, InstallerCommand, InstallerExit, LocalUser, OsInfo, Platform, PlatformError, RegData, RegValueRef,
+    SessionInfo, SessionState, ShellBinaries, ShellMechanism, StaffUserSpec,
 };
-use crate::installs::{installer_program_allowed, is_reparse_point, portable_dir_ok, portable_target_ok};
+use crate::installs::{
+    installer_program_allowed, is_in_use, is_reparse_point, portable_dir_ok, portable_target_ok, wait_for_installer,
+    InstallerWait, RunTemp, RunningInstaller, INSTALLER_TAIL_GRACE,
+};
 use crate::paths::{data_dir_action, DataDirAction, DataPaths, InstallPaths};
 use crate::state::write_atomic;
 
@@ -339,16 +344,39 @@ impl Platform for WindowsPlatform {
         osinfo::disk_free_bytes(&drive).map_err(map_err)
     }
 
-    fn boot_time_ms(&self) -> Result<u64, PlatformError> {
-        Ok(osinfo::boot_time_ms())
+    /// Windows' boot counter (`BootId` under the prefetch parameters: a value Windows
+    /// raises at every boot; not a documented API, so missing or unreadable is
+    /// `None` and the engine falls back to the uptime) and the tick count.
+    fn boot_identity(&self) -> Result<BootIdentity, PlatformError> {
+        let boot_id = match get_hklm(BOOT_ID_KEY, "BootId") {
+            Ok(Some(RegValue::Dword(id))) => Some(id),
+            Ok(_) => None,
+            Err(error) => {
+                tracing::debug!("cannot read BootId ({error}); the uptime decides");
+                None
+            }
+        };
+        Ok(BootIdentity { boot_id, uptime_ms: osinfo::uptime_ms(), boot_time_ms: osinfo::boot_time_ms() })
     }
 
     /// `CreateProcessW` through `std::process::Command` (no shell: each argument is
-    /// quoted by the MSVC rules), `CREATE_NO_WINDOW`, the standard handles to NUL,
-    /// as SYSTEM (the service's own token). Waits with `try_wait` every 500 ms; at
-    /// the timeout the process is killed (`TimedOut`). The program rule is checked
-    /// first, then the guard: nothing ever starts on a machine without the marker.
-    fn run_installer(&self, cmd: &InstallerCommand, timeout: Duration) -> Result<InstallerExit, PlatformError> {
+    /// quoted by the MSVC rules), `CREATE_NO_WINDOW | CREATE_SUSPENDED`, the standard
+    /// handles to NUL, as SYSTEM (the service's own token), with TEMP / TMP / TMPDIR
+    /// set to a fresh folder of this run inside the protected data directory (never
+    /// `C:\Windows\Temp`, which standard users can write to). The suspended process
+    /// is put in a kill-on-close job before it runs, so everything it starts is in
+    /// the job too: a timeout or a stop ends the whole tree, and so does a crash of
+    /// the agent (the job handle closes). Returns once nothing of the run is left;
+    /// the temp folder is deleted afterwards on every path. The program rule is
+    /// checked first, then the guard: nothing ever starts on a machine without the
+    /// marker.
+    fn run_installer(
+        &self,
+        cmd: &InstallerCommand,
+        timeout: Duration,
+        cancel: &CancellationToken,
+    ) -> Result<InstallerExit, PlatformError> {
+        use std::os::windows::io::AsHandle;
         use std::os::windows::process::CommandExt;
         let system_root = system_root();
         if !installer_program_allowed(&cmd.program, system_root.as_deref(), &self.data.downloads_dir()) {
@@ -360,29 +388,42 @@ impl Platform for WindowsPlatform {
         if is_reparse_point(&self.data.downloads_dir()).map_err(io_err)? {
             return Err(PlatformError::Other("the downloads folder is a link".into()));
         }
-        let mut child = std::process::Command::new(&cmd.program)
+        let temp = RunTemp::create(&self.data.installer_temp_dir()).map_err(io_err)?;
+        let job = KillOnCloseJob::new().map_err(map_err)?;
+        let child = std::process::Command::new(&cmd.program)
             .args(&cmd.args)
             .current_dir(&cmd.working_dir)
+            .env("TEMP", temp.path())
+            .env("TMP", temp.path())
+            .env("TMPDIR", temp.path())
             .stdin(std::process::Stdio::null())
             .stdout(std::process::Stdio::null())
             .stderr(std::process::Stdio::null())
-            .creation_flags(CREATE_NO_WINDOW)
+            .creation_flags(CREATE_NO_WINDOW | CREATE_SUSPENDED)
             .spawn()
             .map_err(io_err)?;
-        let deadline = std::time::Instant::now() + timeout;
-        loop {
-            match child.try_wait().map_err(io_err)? {
-                Some(status) => return Ok(InstallerExit::Code(status.code().unwrap_or(-1))),
-                None if std::time::Instant::now() >= deadline => {
-                    // Only the process itself: a tree kill needs a job object (not in
-                    // `rulebox-win32` yet; msiexec does its work in its service anyway).
-                    let _ = child.kill();
-                    let _ = child.wait();
-                    return Ok(InstallerExit::TimedOut);
-                }
-                None => std::thread::sleep(INSTALLER_POLL),
-            }
+        let mut run = JobRun { child, job };
+        // In the job before its first instruction: it cannot start a child outside.
+        let started = run.job.assign(run.child.as_handle()).and_then(|()| job::resume_process(run.child.id()));
+        if let Err(error) = started {
+            // Not in the job, or never resumed: end it (still suspended, nothing ran).
+            let _ = run.child.kill();
+            let _ = run.child.wait();
+            return Err(map_err(error));
         }
+        let start = std::time::Instant::now();
+        let wait = InstallerWait { timeout, tail_grace: INSTALLER_TAIL_GRACE, poll: INSTALLER_POLL };
+        let ended = wait_for_installer(
+            &mut run,
+            wait,
+            &|| cancel.is_cancelled(),
+            &|| start.elapsed(),
+            &|pause| std::thread::sleep(pause),
+        );
+        // The job first (nothing of the run is left), then the temp folder.
+        drop(run);
+        drop(temp);
+        ended.map_err(io_err)
     }
 
     fn place_portable(&self, from: &Path, to: &Path) -> Result<(), PlatformError> {
@@ -402,7 +443,13 @@ impl Platform for WindowsPlatform {
         std::fs::copy(from, &tmp).map_err(io_err)?;
         std::fs::rename(&tmp, to).map_err(|error| {
             let _ = std::fs::remove_file(&tmp);
-            io_err(error)
+            // The copy beside it worked, so the folder is writable: the old
+            // program is running (an upgrade waits like a busy installer).
+            if is_in_use(&error) {
+                PlatformError::InUse
+            } else {
+                io_err(error)
+            }
         })
     }
 
@@ -416,6 +463,8 @@ impl Platform for WindowsPlatform {
         match std::fs::remove_dir_all(app_dir) {
             Ok(()) => Ok(()),
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
+            // The program is running: retried like a busy installer.
+            Err(error) if is_in_use(&error) => Err(PlatformError::InUse),
             Err(error) => Err(io_err(error)),
         }
     }
@@ -423,8 +472,43 @@ impl Platform for WindowsPlatform {
 
 /// `CREATE_NO_WINDOW`.
 const CREATE_NO_WINDOW: u32 = 0x0800_0000;
-/// How often a running installer is checked.
+/// `CREATE_SUSPENDED`: the installer is put in its job before it runs.
+const CREATE_SUSPENDED: u32 = 0x0000_0004;
+/// How often a running installer (and the agent's stop) is checked.
 const INSTALLER_POLL: Duration = Duration::from_millis(500);
+/// After ending the job, how long to wait for its processes to be gone.
+const KILL_DRAIN: Duration = Duration::from_secs(10);
+/// Where Windows keeps its boot counter (`BootId`, DWORD).
+const BOOT_ID_KEY: &str = r"SYSTEM\CurrentControlSet\Control\Session Manager\Memory Management\PrefetchParameters";
+
+/// A started installer in its job (see `run_installer`). Dropping it closes the
+/// job, which ends anything still in it.
+struct JobRun {
+    child: std::process::Child,
+    job: KillOnCloseJob,
+}
+
+impl RunningInstaller for JobRun {
+    fn try_exit(&mut self) -> std::io::Result<Option<i32>> {
+        Ok(self.child.try_wait()?.map(|status| status.code().unwrap_or(-1)))
+    }
+
+    fn active(&mut self) -> std::io::Result<u32> {
+        self.job.active_processes().map_err(std::io::Error::other)
+    }
+
+    fn kill_all(&mut self) {
+        if let Err(error) = self.job.terminate(1) {
+            tracing::warn!("cannot end the installer's job ({error}); ending its process");
+            let _ = self.child.kill();
+        }
+        let deadline = std::time::Instant::now() + KILL_DRAIN;
+        while self.job.active_processes().is_ok_and(|n| n > 0) && std::time::Instant::now() < deadline {
+            std::thread::sleep(Duration::from_millis(100));
+        }
+        let _ = self.child.try_wait();
+    }
+}
 
 /// `%SystemRoot%` of the service's environment, when it is an absolute path.
 fn system_root() -> Option<PathBuf> {
@@ -563,7 +647,7 @@ mod tests {
             expected_exe: None,
             removal: false,
         };
-        blocked("run_installer", p.run_installer(&cmd, Duration::from_secs(1)));
+        blocked("run_installer", p.run_installer(&cmd, Duration::from_secs(1), &CancellationToken::new()));
         let apps = Path::new(r"C:\rulebox-test-no-such-install\apps");
         blocked("place_portable", p.place_portable(exe, &apps.join(r"app1\tool.exe")));
         blocked("remove_portable", p.remove_portable(&apps.join("app1")));
@@ -587,7 +671,7 @@ mod tests {
                 expected_exe: None,
                 removal: false,
             };
-            match p.run_installer(&cmd, Duration::from_secs(1)) {
+            match p.run_installer(&cmd, Duration::from_secs(1), &CancellationToken::new()) {
                 Err(PlatformError::Other(message)) => assert_eq!(message, "program not allowed"),
                 other => panic!("expected a refusal, got {other:?}"),
             }
@@ -600,7 +684,11 @@ mod tests {
     #[test]
     fn disk_and_boot_time_are_readable() {
         assert!(platform().disk_free_bytes().unwrap() > 0);
-        assert!(platform().boot_time_ms().unwrap() > 1_600_000_000_000);
+        let boot = platform().boot_identity().unwrap();
+        assert!(boot.boot_time_ms > 1_600_000_000_000 && boot.uptime_ms > 0, "{boot:?}");
+        // Windows keeps a boot counter on every supported build (read, not written).
+        assert!(boot.boot_id.is_some(), "{boot:?}");
+        assert_eq!(platform().boot_identity().unwrap().boot_id, boot.boot_id, "the same boot");
     }
 
     #[test]

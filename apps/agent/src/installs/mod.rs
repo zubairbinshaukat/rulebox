@@ -24,7 +24,7 @@ use std::time::Duration;
 
 use sha2::{Digest, Sha256};
 
-use crate::platform::InstallerCommand;
+use crate::platform::{InstallerCommand, InstallerExit};
 
 pub mod download;
 pub mod engine;
@@ -38,6 +38,21 @@ pub const MAX_DOWNLOAD_BYTES: u64 = 4 * 1024 * 1024 * 1024;
 /// `1618` (another installation is running): try again after this long, without
 /// counting an attempt.
 pub const BUSY_RETRY: Duration = Duration::from_secs(120);
+/// (Review fix) Busy answers (`1618`, or a portable program in use) are retried
+/// without counting for at most this long from the first one; the next busy answer
+/// after it is a counted failure (`exit_code`, or `remove_failed` for a removal).
+pub const BUSY_WINDOW: Duration = Duration::from_secs(2 * 3600);
+/// (Review fix) After the installer's own process ended, the processes it started
+/// get this long to end too; then the whole job is ended (a program it launched
+/// would otherwise keep running as SYSTEM, or overlap the next run).
+pub const INSTALLER_TAIL_GRACE: Duration = Duration::from_secs(120);
+/// (Review fix) Every download ends within this long, whatever its size (a server
+/// that sends one byte a minute can no longer hold the one engine task for days).
+pub const DOWNLOAD_DEADLINE_MAX: Duration = Duration::from_secs(2 * 3600);
+/// The least a download gets: the connection, a redirect and a small file.
+pub const DOWNLOAD_DEADLINE_MIN: Duration = Duration::from_secs(10 * 60);
+/// The slowest rate the deadline is scaled for (128 KiB/s), on top of the minimum.
+pub const DOWNLOAD_MIN_RATE: u64 = 128 * 1024;
 /// After a successful install the program must exist within this long.
 pub const EXE_WAIT: Duration = Duration::from_secs(10);
 /// How often the program is looked for meanwhile.
@@ -380,6 +395,196 @@ pub fn open_verified(path: &Path, sha256: &str) -> Result<VerifiedFile, FileChec
     Ok(VerifiedFile { _file: file, path: path.to_path_buf() })
 }
 
+/// (Review fix) The time one installer download may take: the minimum plus the
+/// declared size at the slowest rate, never more than two hours. An unknown size
+/// (0) gets the two hours.
+pub fn download_deadline(size_bytes: u64) -> Duration {
+    if size_bytes == 0 {
+        return DOWNLOAD_DEADLINE_MAX;
+    }
+    let scaled = DOWNLOAD_DEADLINE_MIN.saturating_add(Duration::from_secs(size_bytes / DOWNLOAD_MIN_RATE));
+    scaled.min(DOWNLOAD_DEADLINE_MAX)
+}
+
+/// `ERROR_ACCESS_DENIED`, `ERROR_SHARING_VIOLATION`, `ERROR_LOCK_VIOLATION`.
+const IN_USE_CODES: [i32; 3] = [5, 32, 33];
+
+/// (Review fix) A file error that means "the file is in use" (a running program
+/// cannot be replaced or deleted). Only asked after a step that already proved the
+/// folder is writable (the copy beside it succeeded), so access denied there is
+/// the running program, not a permission problem.
+pub fn is_in_use(error: &std::io::Error) -> bool {
+    error.raw_os_error().is_some_and(|code| IN_USE_CODES.contains(&code))
+}
+
+/// (Review fix) A started installer and the job that holds it and everything it
+/// starts. `WindowsPlatform` implements it on a kill-on-close job object; the
+/// tests on a scripted fake.
+pub trait RunningInstaller {
+    /// The started process's exit code, once it ended.
+    fn try_exit(&mut self) -> std::io::Result<Option<i32>>;
+    /// How many processes of the job still run (the started one included).
+    fn active(&mut self) -> std::io::Result<u32>;
+    /// Ends every process of the job and waits (bounded) until they are gone.
+    fn kill_all(&mut self);
+}
+
+/// How long [`wait_for_installer`] waits.
+#[derive(Debug, Clone, Copy)]
+pub struct InstallerWait {
+    pub timeout: Duration,
+    pub tail_grace: Duration,
+    pub poll: Duration,
+}
+
+/// Waits for an installer **and everything it started**:
+/// - the job became empty after the process ended: `Code` (its exit code);
+/// - the process ended but others still run after `tail_grace`: they are ended,
+///   `Code`;
+/// - the agent is stopping (`cancelled`): everything is ended, `Cancelled`;
+/// - `timeout` passed: everything is ended, `TimedOut` (or `Code` when the
+///   process itself had ended).
+///
+/// Returns only once the job was found empty or was ended, so the caller can keep
+/// the verified file and the run's TEMP folder until nothing of the run is left.
+/// `elapsed` and `sleep` are the clock (real in `WindowsPlatform`, scripted in the
+/// tests). A failing query ends everything and returns the error.
+pub fn wait_for_installer(
+    run: &mut dyn RunningInstaller,
+    wait: InstallerWait,
+    cancelled: &dyn Fn() -> bool,
+    elapsed: &dyn Fn() -> Duration,
+    sleep: &dyn Fn(Duration),
+) -> std::io::Result<InstallerExit> {
+    let mut exited: Option<(i32, Duration)> = None;
+    loop {
+        if cancelled() {
+            run.kill_all();
+            return Ok(InstallerExit::Cancelled);
+        }
+        if exited.is_none() {
+            match run.try_exit() {
+                Ok(Some(code)) => exited = Some((code, elapsed())),
+                Ok(None) => {}
+                Err(error) => {
+                    run.kill_all();
+                    return Err(error);
+                }
+            }
+        }
+        if let Some((code, at)) = exited {
+            match run.active() {
+                Ok(0) => return Ok(InstallerExit::Code(code)),
+                Ok(_) if elapsed().saturating_sub(at) >= wait.tail_grace => {
+                    tracing::warn!("the installer ended but processes it started still run; they are stopped");
+                    run.kill_all();
+                    return Ok(InstallerExit::Code(code));
+                }
+                Ok(_) => {}
+                Err(error) => {
+                    run.kill_all();
+                    return Err(error);
+                }
+            }
+        }
+        if elapsed() >= wait.timeout {
+            run.kill_all();
+            return Ok(exited.map_or(InstallerExit::TimedOut, |(code, _)| InstallerExit::Code(code)));
+        }
+        sleep(wait.poll);
+    }
+}
+
+/// (Review fix) The TEMP / TMP folder of one installer run:
+/// `<data>\installer-temp\run-<random>`, created fresh (never reused) inside the
+/// protected data directory, so it has the data directory's inherited DACL (SYSTEM
+/// and Administrators; the same as `downloads`) and a standard user cannot plant
+/// a DLL in it. Deleted when dropped (after the whole job ended); folders left by
+/// a crash are deleted at the next start ([`sweep_run_temps`]).
+#[derive(Debug)]
+pub struct RunTemp {
+    path: PathBuf,
+}
+
+impl RunTemp {
+    pub fn create(root: &Path) -> std::io::Result<Self> {
+        std::fs::create_dir_all(root)?;
+        if is_reparse_point(root)? {
+            return Err(std::io::Error::other("the installer temp folder is a link"));
+        }
+        for _ in 0..8 {
+            let path = root.join(format!("run-{}", random_hex()));
+            match std::fs::create_dir(&path) {
+                Ok(()) => {
+                    if is_reparse_point(&path)? {
+                        let _ = std::fs::remove_dir(&path);
+                        return Err(std::io::Error::other("the run's temp folder is a link"));
+                    }
+                    return Ok(Self { path });
+                }
+                Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => continue,
+                Err(error) => return Err(error),
+            }
+        }
+        Err(std::io::Error::other("no fresh temp folder name"))
+    }
+
+    pub fn path(&self) -> &Path {
+        &self.path
+    }
+}
+
+impl Drop for RunTemp {
+    fn drop(&mut self) {
+        // `remove_dir_all` deletes a link inside it, never what the link points to.
+        if let Err(error) = std::fs::remove_dir_all(&self.path) {
+            tracing::warn!("cannot delete the installer's temp folder: {error}");
+        }
+    }
+}
+
+/// 16 hex characters from the OS random source (the time when it gives none: the
+/// name only has to be new, `create_dir` refuses an existing one).
+fn random_hex() -> String {
+    let mut bytes = [0u8; 8];
+    if getrandom::fill(&mut bytes).is_err() {
+        let nanos = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map_or(0, |d| d.as_nanos());
+        bytes = (nanos as u64).to_le_bytes();
+    }
+    hex_lower(&bytes)
+}
+
+/// Deletes every run folder left in `root` (by a crash). Nothing when `root` is
+/// missing; refuses (only logs) when `root` itself is a link.
+pub fn sweep_run_temps(root: &Path) {
+    match is_reparse_point(root) {
+        Ok(false) => {}
+        Ok(true) => {
+            tracing::error!("the installer temp folder is a link; left alone");
+            return;
+        }
+        Err(error) => {
+            tracing::warn!("cannot check the installer temp folder: {error}");
+            return;
+        }
+    }
+    let Ok(entries) = std::fs::read_dir(root) else { return };
+    for entry in entries.flatten() {
+        let path = entry.path();
+        let removed = match entry.file_type() {
+            Ok(kind) if kind.is_dir() && !kind.is_symlink() => std::fs::remove_dir_all(&path),
+            // A file, or a link (removed itself, never followed).
+            Ok(kind) if kind.is_symlink() => std::fs::remove_dir(&path).or_else(|_| std::fs::remove_file(&path)),
+            _ => std::fs::remove_file(&path),
+        };
+        if let Err(error) = removed {
+            tracing::warn!("cannot delete an old installer temp folder: {error}");
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -573,6 +778,149 @@ mod tests {
         assert!(matches!(open_verified(&path, &sha_of(b"the real installer")), Err(FileCheckError::Mismatch)));
         assert!(matches!(open_verified(&dir.path().join("missing.exe"), &sha_of(b"")), Err(FileCheckError::Io(_))));
         assert!(matches!(open_verified(dir.path(), &sha_of(b"")), Err(FileCheckError::Io(_) | FileCheckError::NotPlain)));
+    }
+
+    #[test]
+    fn download_deadline_scales_with_the_size_and_is_capped() {
+        assert_eq!(download_deadline(0), DOWNLOAD_DEADLINE_MAX, "unknown size: the ceiling");
+        assert_eq!(download_deadline(1), DOWNLOAD_DEADLINE_MIN);
+        let hundred_mb = download_deadline(100 * 1024 * 1024);
+        assert_eq!(hundred_mb, DOWNLOAD_DEADLINE_MIN + Duration::from_secs(800));
+        assert_eq!(download_deadline(MAX_DOWNLOAD_BYTES), DOWNLOAD_DEADLINE_MAX);
+        assert_eq!(download_deadline(u64::MAX), DOWNLOAD_DEADLINE_MAX);
+    }
+
+    #[test]
+    fn in_use_errors_are_recognised() {
+        for code in [5, 32, 33] {
+            assert!(is_in_use(&std::io::Error::from_raw_os_error(code)), "{code}");
+        }
+        for code in [2, 3, 112] {
+            assert!(!is_in_use(&std::io::Error::from_raw_os_error(code)), "{code}");
+        }
+        assert!(!is_in_use(&std::io::Error::other("x")));
+    }
+
+    /// A scripted installer on a scripted clock: the process ends at `exit_at`, its
+    /// children at `children_until` (`None`: never by themselves).
+    struct FakeRun<'a> {
+        clock: &'a std::cell::Cell<Duration>,
+        exit_at: Option<Duration>,
+        children_until: Option<Duration>,
+        killed: bool,
+        fail_query: bool,
+    }
+
+    impl RunningInstaller for FakeRun<'_> {
+        fn try_exit(&mut self) -> std::io::Result<Option<i32>> {
+            if self.fail_query {
+                return Err(std::io::Error::other("query failed"));
+            }
+            Ok(self.exit_at.filter(|at| self.killed || self.clock.get() >= *at).map(|_| 7))
+        }
+        fn active(&mut self) -> std::io::Result<u32> {
+            let now = self.clock.get();
+            let main = u32::from(!self.killed && self.exit_at.is_none_or(|at| now < at));
+            let children = u32::from(!self.killed && self.children_until.is_none_or(|until| now < until));
+            Ok(main + children)
+        }
+        fn kill_all(&mut self) {
+            self.killed = true;
+        }
+    }
+
+    fn run_fake(run: &mut FakeRun<'_>, cancel_at: Option<Duration>) -> std::io::Result<InstallerExit> {
+        let clock = run.clock;
+        let wait = InstallerWait {
+            timeout: Duration::from_secs(1800),
+            tail_grace: Duration::from_secs(120),
+            poll: Duration::from_millis(500),
+        };
+        wait_for_installer(
+            run,
+            wait,
+            &|| cancel_at.is_some_and(|at| clock.get() >= at),
+            &|| clock.get(),
+            &|d| clock.set(clock.get() + d),
+        )
+    }
+
+    fn fake(clock: &std::cell::Cell<Duration>, exit_at: Option<u64>, children_until: Option<u64>) -> FakeRun<'_> {
+        FakeRun {
+            clock,
+            exit_at: exit_at.map(Duration::from_secs),
+            children_until: children_until.map(Duration::from_secs),
+            killed: false,
+            fail_query: false,
+        }
+    }
+
+    #[test]
+    fn the_wait_covers_the_children_not_only_the_process() {
+        let clock = std::cell::Cell::new(Duration::ZERO);
+        // setup.exe ends at 10 s, its setup.tmp at 40 s: the wait lasts until 40 s.
+        let mut run = fake(&clock, Some(10), Some(40));
+        assert_eq!(run_fake(&mut run, None).unwrap(), InstallerExit::Code(7));
+        assert!(!run.killed && clock.get() >= Duration::from_secs(40), "{:?}", clock.get());
+    }
+
+    #[test]
+    fn a_child_left_running_is_ended_after_the_grace() {
+        let clock = std::cell::Cell::new(Duration::ZERO);
+        let mut run = fake(&clock, Some(10), None);
+        assert_eq!(run_fake(&mut run, None).unwrap(), InstallerExit::Code(7));
+        assert!(run.killed);
+        let at = clock.get();
+        assert!(at >= Duration::from_secs(130) && at < Duration::from_secs(132), "{at:?}");
+    }
+
+    #[test]
+    fn a_timeout_ends_the_whole_tree() {
+        let clock = std::cell::Cell::new(Duration::ZERO);
+        let mut run = fake(&clock, None, None);
+        assert_eq!(run_fake(&mut run, None).unwrap(), InstallerExit::TimedOut);
+        assert!(run.killed, "the job (every process) is ended");
+        assert_eq!(clock.get(), Duration::from_secs(1800));
+    }
+
+    #[test]
+    fn a_stopping_agent_ends_the_tree_at_the_next_poll() {
+        let clock = std::cell::Cell::new(Duration::ZERO);
+        let mut run = fake(&clock, None, None);
+        assert_eq!(run_fake(&mut run, Some(Duration::from_secs(5))).unwrap(), InstallerExit::Cancelled);
+        assert!(run.killed);
+        assert!(clock.get() <= Duration::from_millis(5500), "{:?}", clock.get());
+    }
+
+    #[test]
+    fn a_failing_query_ends_the_tree() {
+        let clock = std::cell::Cell::new(Duration::ZERO);
+        let mut run = fake(&clock, None, None);
+        run.fail_query = true;
+        assert!(run_fake(&mut run, None).is_err());
+        assert!(run.killed);
+    }
+
+    #[test]
+    fn a_run_temp_folder_is_fresh_and_deleted() {
+        let dir = TempDir::new();
+        let root = dir.path().join("installer-temp");
+        let first = RunTemp::create(&root).unwrap();
+        let second = RunTemp::create(&root).unwrap();
+        assert_ne!(first.path(), second.path(), "never reused");
+        assert!(first.path().starts_with(&root) && first.path().is_dir());
+        std::fs::write(first.path().join("setup.tmp"), b"x").unwrap();
+        std::fs::create_dir(first.path().join("sub")).unwrap();
+        let path = first.path().to_path_buf();
+        drop(first);
+        assert!(!path.exists(), "deleted with everything in it");
+        // A crash leaves one behind: swept at the next start (files too).
+        let left = second.path().to_path_buf();
+        std::mem::forget(second);
+        std::fs::write(root.join("stray.txt"), b"x").unwrap();
+        sweep_run_temps(&root);
+        assert!(!left.exists() && std::fs::read_dir(&root).unwrap().next().is_none());
+        sweep_run_temps(&dir.path().join("missing"));
     }
 
     #[test]

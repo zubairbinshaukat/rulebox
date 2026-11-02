@@ -4383,6 +4383,65 @@ Tauri; pulls in `hyper-tls`, `h2`) and the workspace `bytes` for the agent.
 in tests); the simulate-mode Verify run (real 7-Zip MSI download) and the `installResults`
 check were NOT done. **Not started:** nothing else in this step.
 
+**Status (2026-11-03): security-review fixes (agent), built and unit-tested on the dev machine;
+not committed.** All ten findings fixed. Nothing was installed, downloaded or executed for
+real except `ping.exe` in the new `rulebox-win32` job tests. Tests: `rulebox-agent` 516 pass
+(was 496), `rulebox-win32` 60 pass; clippy clean on both.
+1. **Found programs are never removed (deviation from 4.8, for safety).** A program already at
+   its path still shows as `installed` (tile and report as before), but its record gets
+   `preexisting: true`, never cleared (also kept across new versions, re-assignments and
+   `unsupported`). Rulebox never runs `msiexec /x` or deletes a portable folder for such an
+   app: unassigned, it is only hidden (record dropped, nothing reported); `remove()` refuses it
+   too. A program found again after Rulebox removed it becomes preexisting. **Back-compat:**
+   a record without the field (written before this fix) loads as `preexisting: true` (unknown
+   origin: an old `installed` record with 0 attempts cannot say whether it was found or
+   installed on the first try); an old queued removal of such a record is dropped. Cost: apps
+   installed by the pre-fix agent are only hidden when unassigned (nothing shipped with it).
+2. **Per-run TEMP:** `TEMP`, `TMP` and `TMPDIR` of the installer (child only) point to a fresh
+   `<data>\installer-temp\run-<random>` (inherits the protected data directory's DACL, like
+   `downloads`; root and run folder link-checked), deleted after the whole job ended on every
+   path; leftovers swept at engine start. msiexec's server-side custom actions still use the
+   Windows Installer service's own TEMP (not ours to change).
+3. **Job object:** the installer starts suspended, goes into a `JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE`
+   job, then resumes (new `rulebox_win32::job`: `KillOnCloseJob` + `resume_process`; the shell
+   launcher's job stays in its binary, unchanged). The wait covers the whole job: done when the
+   job is empty; if the installer's own process ended but children run on, they get 2 min
+   (`INSTALLER_TAIL_GRACE`) and are then ended (the exit code still counts); timeout or agent
+   stop ends the whole job; a crash closes the job handle (kill-on-close). The verified file
+   handle stays held until the platform returns (job empty or ended). The wait loop is
+   `installs::wait_for_installer`, tested with a scripted fake.
+4. **Download deadline:** 10 min + declared size at 128 KiB/s, at most 2 h (unknown size: 2 h);
+   the `.part` is deleted on expiry, the try counts as `download_failed`. Icons: 60 s each.
+5. **Stop:** the installer poll, the 10 s program wait and the icon downloads follow `shutdown`.
+   An installer ended by a stop is not a failed attempt (the record goes back to `pending` /
+   `removing` before the task returns). Only a real crash still counts one failure at restart.
+6. **Unknown size (0):** the free-disk check asks for 4 GiB (the download cap) before, and twice
+   the real size after the download.
+7. **Unsupported:** an `unsupported` record keeps `onPc` (Rulebox may have installed the previous
+   version) and `preexisting`, so a later unassignment still removes a Rulebox-installed app.
+8. **Restart pending:** at 3010/1641 the agent stores the boot (`restartBoot`: Windows' `BootId`
+   counter under `...\Memory Management\PrefetchParameters` and the tick-count uptime). Cleared
+   when the counter changed; without a counter, when the uptime is smaller than then (misses a
+   reboot after which the PC already ran longer: stays pending, the safe side). Old files keep
+   the old wall-clock rule. `BootId` is not a documented API.
+9. **Busy cap:** `1618` (any kind) and a running portable program are retried every 2 min
+   uncounted for at most 2 h from the first busy answer; then one counted failure with detail
+   `exit_code` + exit code 1618 (`remove_failed` for a removal; no detail for a portable app,
+   no exit code exists). `busy` is never sent. Start-up waits (program folders unreadable)
+   are a separate, uncapped wait.
+10. **Portable in use:** a sharing violation / access denied at the rename (after the copy
+   beside it worked) or at the folder delete is `PlatformError::InUse` → busy (cap of 9).
+
+`rulebox-win32` edits: `job.rs` (new), `lib.rs` (`pub mod job`), `Cargo.toml`
+(`Win32_System_JobObjects`), `osinfo.rs` (`uptime_ms`). The `Platform` seam changed
+(`run_installer` takes the stop token; `boot_time_ms` → `boot_identity`; `InstallerExit::Cancelled`;
+`PlatformError::InUse`); no IPC, protocol or report-schema change.
+**Still unverified (needs the VM):** a real msiexec run with the held file; the timeout and a
+service stop ending a real Inno / NSIS / Burn tree; the per-run TEMP with a real Inno/NSIS exe
+(and that the folder is deleted afterwards); `BootId` changing on restart (and what fast
+startup does); a running portable exe giving error 5/32 at the rename; `HttpDownloader`
+against a real server.
+
 ---
 
 ### Step 15 — Staff App: protocol 1.2 and file handlers
@@ -4613,6 +4672,86 @@ still prunes at a fixed 365 days), item 9 (`stats:reconcile`), the "Over plan
 limit" badge, and the follow-ups (Signing tab "Publish again" and the global
 publish-failed banner, the `rosterPending` notice, `trustedKeyIds` on
 `deviceSummary`, the "No group" filter with `devices.by_org_group`).
+
+**Status (2026-11-03): security-review fixes + items 8-9 + backend follow-ups
+(Convex only; NOT deployed; dashboard screens are a separate change).**
+`pnpm typecheck:convex`, `pnpm lint:convex` clean; `vitest --project convex`
+698/698. `api.d.ts` edited by hand (`stats`, `lib/installs`).
+1. **Install status filtered by assignment (review HIGH, owner decision).**
+   `installResults` gains `groupId` (the PC's group): written by every report,
+   re-tagged by `fleet:move`, cleared by every revoke (`lib/fleet.revokeDevice`,
+   so `devices:unenroll` too); 200 rows per transaction, `stats:retagDevice`
+   (internal) continues with the PC's group at that time. A result COUNTS when
+   its group still assigns the app and the app is not archived
+   (`lib/installs.ts`). `apps:installSummary`, `apps:installs`, `fleet:installs`,
+   `overview:failedInstalls` and `failedInstallCount` all use that rule (stale
+   rows are kept, not deleted: re-assigning brings them back).
+   `failedInstallCount` moves in the same mutation as: a report (before/after
+   liveness of the row), `fleet:move`/revoke (retag), `groups:assignApp` /
+   `unassignApp` (that group's failed rows of the app), `apps:setArchived`
+   (the app's failed rows in its assigned groups). Above 500 rows
+   (`FAILED_DELTA_CAP`) it applies what it read and schedules
+   `stats:reconcile`. `apps:purgeApp` / `fleet:purgeDevice` no longer lower it
+   (only archived apps / revoked PCs are purged; their rows no longer count).
+   `apps:retry` still refuses archived apps (consistent: they are not listed).
+   Lists filter AFTER pagination, so a page may hold fewer rows than asked for.
+   Rows written before the field have no tag and count nowhere until the PC
+   reports again (no deployment has such rows: Step 12+ was never deployed).
+2. **`stats:reconcile` (item 9)** — new module `convex/stats.ts`:
+   `reconcile({ orgId })` (internal) recounts deviceCount, noGroupDeviceCount,
+   outOfSupportCount (devices, 200 per run), employeeCount /
+   activeEmployeeCount (1,000 per run), failedInstallCount (live failed rows,
+   200 per run), the online shards, then groupCount, appCount (non-archived),
+   memberCount, activeEnrollmentCodes in the last run; writes only what
+   differs. A paged counter that moved during the run is skipped (left for the
+   next night) instead of overwritten. `reconcileAll` (cron "reconcile
+   counters", daily 04:00 UTC) walks organizations one at a time.
+   `lib/orgRows.recount` (migrations) is unchanged; the nightly job is what
+   heals `failedInstallCount` drift (incl. the clamp-at-0 / missing-row cases).
+3. **Newest first = `updatedAt` (review MEDIUM).** `installResults` indexes are
+   now `by_device_updated [deviceId, updatedAt]`, `by_device_app`,
+   `by_app_state_updated [appId, state, updatedAt]`, `by_org_state_updated
+   [orgId, state, updatedAt]` (replacing `by_device`, `by_app_state`,
+   `by_org_state`; same index count).
+4. **`installSummary` cost (review MEDIUM): decision = keep the bounded read**,
+   no per-(app, state) counter (every move / revoke / assign / archive would
+   have to keep it exact; not worth the risk now). It reads only the 5 stored
+   states (`.take(1001)` each) plus the app's assignments and filters by the
+   row's tag (no join). New optional `capped: true` when a state hit the cap
+   (its count may then be low if many of those rows are stale). Still re-runs on
+   every result change of the app while its page is open (budget row says so).
+5. **Unknown install state (review MEDIUM).** `deviceApi:report` /
+   `reportInstalls` take `state: v.string()`; a state outside the stored set is
+   ignored and still counted in `accepted` (the agent acks). Test added.
+6. **Device audit time (review LOW).** Clamped to the server's `now`
+   (`recordTime`); > 7 days ahead still becomes `now` + "(device clock wrong)".
+7. **`maintenance:pruneAudit` (item 8).** One organization per run (walks
+   `organizations`, so suspended and plan-less orgs are covered too, not only
+   `orgPlans.by_status` active ones), cutoff from `loadOrgPlan(...).limits.
+   auditRetentionDays`, `auditLog.by_org_at`, 500 per run, same org again while
+   full. Started by the daily job's `auditLog` stage, which now deletes only
+   rows older than `MAX_AUDIT_RETENTION_DAYS` (3,650, the most a plan may set;
+   a backstop for orphaned rows). `AUDIT_RETENTION_DAYS` (365) is gone.
+   **PRD 4.11 says "365 days, AUDIT_RETENTION_DAYS"; A14 already replaced it.**
+8. **Follow-ups (backend data only):** (b) `rosterPending: boolean` on
+   `overview:get` and `keys:status` (one `rosterPending.by_org` read).
+   (c) `deviceSummary.trustedKeyIds` (written by `writeStatus` on change);
+   `keys:trustProgress` reads the summary, the report only for a summary
+   written before the field existed. (d) `fleet:list({ groupId: "none" })`
+   (index `devices.by_org_group [orgId, groupId]`; also with `search`) and
+   `planState: "ok" | "overLimit" | "suspended" | null` per row (from the head
+   already read). (a) "Publish again": no new backend needed —
+   `keys:registerActive` without `force` is already the retry (republishes all
+   devices when the env key is the active key); the banner data is
+   `publishFailedAt` on `overview:get` / `keys:status`.
+9. **Coordinator request:** `fleet:installs` rows gain optional `retryable`
+   (false when the app is archived or has no install source, the cases
+   `apps:retry` refuses).
+NOT done: `overLimitCount` (needs `plans:applyLimits`); the dashboard side of
+the follow-ups; screenshots. Also fixed: two `deviceApi.test.ts` tests froze
+the clock at 2026-11-01 AFTER seeding at the real date, so the limiter saw time
+go backwards once the real date passed (they now freeze the clock first).
+`ioBudgets.ts` rows updated for every changed function.
 
 ---
 

@@ -6,6 +6,7 @@ use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
+use tokio_util::sync::CancellationToken;
 
 pub mod sim;
 pub mod windows;
@@ -126,8 +127,22 @@ pub struct InstallerCommand {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum InstallerExit {
     Code(i32),
-    /// Still running at the timeout: it was killed.
+    /// Still running at the timeout: it was killed (with everything it started).
     TimedOut,
+    /// (Review fix) The agent is stopping: the installer and everything it started
+    /// were ended. Not a failed attempt.
+    Cancelled,
+}
+
+/// (Phase 4 Step 14 review) Which boot this is, read without trusting the wall
+/// clock: `boot_id` is Windows' boot counter when it can be read, `uptime_ms` the
+/// tick count since the boot. `boot_time_ms` (wall clock minus uptime) is only for
+/// records written before this existed.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct BootIdentity {
+    pub boot_id: Option<u32>,
+    pub uptime_ms: u64,
+    pub boot_time_ms: u64,
 }
 
 #[derive(thiserror::Error, Debug)]
@@ -144,6 +159,10 @@ pub enum PlatformError {
     PasswordPolicy,
     #[error("win32 error {code} in {api}")]
     Win32 { api: &'static str, code: u32 },
+    /// (Phase 4 Step 14 review) A file to replace or delete is in use (a portable
+    /// app's program is running): retried like a busy installer.
+    #[error("the file is in use")]
+    InUse,
     #[error("{0}")]
     Other(String),
 }
@@ -168,8 +187,8 @@ pub trait Platform: Send + Sync + 'static {
     fn path_roots(&self) -> Result<rulebox_policy::paths::PathRoots, PlatformError>;
     /// (Phase 4 Step 14) Free bytes on the system drive (the install disk check).
     fn disk_free_bytes(&self) -> Result<u64, PlatformError>;
-    /// (Step 14) When the PC last started, in Unix ms (clears `restartPending`).
-    fn boot_time_ms(&self) -> Result<u64, PlatformError>;
+    /// (Step 14) Which boot this is (clears `restartPending` once it changed).
+    fn boot_identity(&self) -> Result<BootIdentity, PlatformError>;
 
     // mutating: every `WindowsPlatform` implementation calls `guard::require_test_machine()` first
     fn create_staff_user(&self, spec: &StaffUserSpec, password: &str) -> Result<String, PlatformError>;
@@ -196,14 +215,24 @@ pub trait Platform: Send + Sync + 'static {
     /// Already unprotected.
     fn secrets_load(&self) -> Result<Option<Vec<u8>>, PlatformError>;
     fn secrets_save(&self, plaintext: &[u8]) -> Result<(), PlatformError>;
-    /// (Phase 4 Step 14) Runs one installer as SYSTEM, without a window, and waits at
-    /// most `timeout` (then kills it: `TimedOut`). Blocking: call it from
-    /// `spawn_blocking`. The program rule is checked before the guard.
-    fn run_installer(&self, cmd: &InstallerCommand, timeout: Duration) -> Result<InstallerExit, PlatformError>;
+    /// (Phase 4 Step 14) Runs one installer as SYSTEM, without a window, in a
+    /// kill-on-close job with its own fresh TEMP folder, and waits for it and
+    /// everything it starts at most `timeout` (then ends them all: `TimedOut`).
+    /// `cancel` (the agent is stopping) ends them all too (`Cancelled`). Returns only
+    /// once nothing of the run is left. Blocking: call it from `spawn_blocking`.
+    /// The program rule is checked before the guard.
+    fn run_installer(
+        &self,
+        cmd: &InstallerCommand,
+        timeout: Duration,
+        cancel: &CancellationToken,
+    ) -> Result<InstallerExit, PlatformError>;
     /// (Step 14) Copies a verified portable exe to `to`, which must be below
     /// `<install>\apps\`; creates the parent folders; refuses reparse points.
+    /// `InUse` when the old program is running.
     fn place_portable(&self, from: &Path, to: &Path) -> Result<(), PlatformError>;
     /// (Step 14) Deletes a portable app's folder, only below `<install>\apps\`;
-    /// refuses reparse points. A folder that is not there is fine.
+    /// refuses reparse points. A folder that is not there is fine. `InUse` when the
+    /// program is running.
     fn remove_portable(&self, app_dir: &Path) -> Result<(), PlatformError>;
 }

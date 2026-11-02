@@ -13,10 +13,13 @@ use base64::Engine as _;
 use rulebox_policy::catalog::{CatalogApp, IconRef};
 use sha2::{Digest, Sha256};
 
-use super::download::{check_https, Downloader};
+use super::download::{check_https, part_path, Downloader};
 use super::{hex_lower, is_sha256};
+use crate::state::remove_file_if_exists;
 
 pub const MAX_ICON_BYTES: u64 = 32 * 1024;
+/// (Review fix) One icon (at most 32 KiB) gets this long, however slowly it drips.
+pub const ICON_DEADLINE: std::time::Duration = std::time::Duration::from_secs(60);
 
 /// `<dir>\<sha256>.png`, or `None` for a hash that is not one (never a path).
 pub fn icon_file(dir: &Path, sha256: &str) -> Option<PathBuf> {
@@ -63,9 +66,13 @@ pub async fn fetch_missing(
             tracing::warn!("cannot create the icon folder: {error}");
             return any;
         }
-        match downloader.fetch(&icon.url, &path, &icon.sha256, MAX_ICON_BYTES).await {
-            Ok(()) => any = true,
-            Err(error) => tracing::warn!(app_id = %app.id, "icon not downloaded: {error}"),
+        match tokio::time::timeout(ICON_DEADLINE, downloader.fetch(&icon.url, &path, &icon.sha256, MAX_ICON_BYTES)).await {
+            Ok(Ok(())) => any = true,
+            Ok(Err(error)) => tracing::warn!(app_id = %app.id, "icon not downloaded: {error}"),
+            Err(_) => {
+                tracing::warn!(app_id = %app.id, "icon not downloaded in time");
+                let _ = remove_file_if_exists(&part_path(&path));
+            }
         }
     }
     any
@@ -153,5 +160,22 @@ mod tests {
         assert_eq!(icon_base64(&icons, &icon), None);
         // Not enrolled anywhere: nothing.
         assert!(!fetch_missing(&catalog, None, &downloader, &icons, &mut HashSet::new()).await);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_stalled_icon_gives_up_after_its_deadline() {
+        let dir = TempDir::new();
+        let icons = dir.path().join("icons");
+        let url = "https://happy-otter-123.convex.cloud/api/storage/1";
+        let downloader = FakeDownloader::new();
+        downloader.serve(url, b"png");
+        // Held forever: the server never answers.
+        let _gate = downloader.hold();
+        let catalog = [app_with_icon("a", url, b"png")];
+        let mut tried = HashSet::new();
+        let started = tokio::time::Instant::now();
+        assert!(!fetch_missing(&catalog, Some(DEPLOYMENT), &downloader, &icons, &mut tried).await);
+        assert!(started.elapsed() >= ICON_DEADLINE && started.elapsed() < ICON_DEADLINE * 2);
+        assert!(std::fs::read_dir(&icons).unwrap().next().is_none(), "nothing left behind");
     }
 }
