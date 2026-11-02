@@ -59,6 +59,18 @@ the current phase's plan exactly and update its status in the index.
 - Target hardware is **4 GB RAM** laptops: keep WebView count low, lazy
   load, respect Lite mode (PRD 22).
 
+## Database I/O budget (owner reminder, 2026-11-03)
+
+We run on the Convex free tier, so **database reads and writes are a very
+tight budget**. Treat every query, mutation, index and subscription as
+something that costs money later. Before adding one, ask: how many documents
+does it read per run, how often does it re-run (every change to anything it
+read re-runs it for every open screen), and can a counter, a smaller table or
+a bounded `.take(n)` do the job? Lists are always server-side: **sorting,
+searching and pagination happen in the Convex query** (index + cursor), never
+by loading rows and sorting or filtering in the browser. Budgets and the
+estimates behind them live in `convex/ioBudgets.ts`; add any new query there.
+
 ## Data access rules (Convex) — PRD 11.1
 
 1. **One query per screen**: join on the server; return exactly what the
