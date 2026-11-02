@@ -14,10 +14,11 @@ use anyhow::{bail, Context};
 use rulebox_win32::accounts;
 use rulebox_win32::autologon::set_machine_value;
 use rulebox_win32::guard::require_test_machine;
-use rulebox_win32::registry::{get_hklm, RegValue};
+use rulebox_win32::registry::{self, get_hklm, RegValue};
 use rulebox_win32::shellreg::{self, Mechanism};
 use rulebox_win32::sid::Sid;
 use rulebox_win32::job::{self, KillOnCloseJob};
+use rulebox_win32::tree::{self, Refusal, TreeOutcome};
 use rulebox_win32::{dpapi, lsa, osinfo, process, security, session, Win32Error};
 use serde::Deserialize;
 use tokio_util::sync::CancellationToken;
@@ -26,7 +27,7 @@ use super::{
     BootIdentity, InstallerCommand, InstallerExit, LocalUser, OsInfo, Platform, PlatformError, RegData, RegValueRef,
     ResetOutcome, SessionInfo, SessionState, ShellBinaries, ShellMechanism, StaffUserSpec,
 };
-use crate::cleanup::resolve_reset;
+use crate::cleanup::{resolve_reset, shell_folder_is_default};
 use crate::installs::{
     installer_program_allowed, is_in_use, is_reparse_point, portable_dir_ok, portable_target_ok, wait_for_installer,
     InstallerWait, RunTemp, RunningInstaller, INSTALLER_TAIL_GRACE,
@@ -470,88 +471,72 @@ impl Platform for WindowsPlatform {
         }
     }
 
-    /// (Step 16) The template rule first, then the guard. Every folder from the
-    /// profile down to the target is opened without following links
-    /// (`FILE_FLAG_OPEN_REPARSE_POINT`) and checked on that handle: a reparse point
-    /// anywhere refuses the whole entry. The handles of the folders above the target
-    /// are kept open without `FILE_SHARE_DELETE` until the deletion is over, so none
-    /// of them can be renamed, deleted or swapped for a junction meanwhile (they are
-    /// not empty, so no junction can be set on them either). The target itself is
-    /// deleted by `remove_dir_all`, which never follows a link: a link swapped in at
-    /// the last moment is removed itself.
-    fn reset_folder(&self, profile_dir: &Path, template: &str) -> Result<ResetOutcome, PlatformError> {
-        use std::os::windows::fs::MetadataExt;
+    /// (Step 16 review) The template rule first (incl. the deny list), then the
+    /// guard, then `rulebox_win32::tree::reset_below`: no path string is resolved
+    /// below the profile folder; every folder is opened relative to its parent's
+    /// held handle without crossing a reparse point, a link or a case-sensitive
+    /// folder on the way refuses the entry, and everything is deleted through its
+    /// own handle (a link inside is deleted itself). See that module for the
+    /// threat. `Stopped` (cancelled) is reported as `InUse`: not finished.
+    fn reset_folder(
+        &self,
+        profile_dir: &Path,
+        template: &str,
+        cancel: &CancellationToken,
+    ) -> Result<ResetOutcome, PlatformError> {
         let target = resolve_reset(profile_dir, template)?;
         guard()?;
-        let last = target.chain.len().saturating_sub(1);
-        let mut held = Vec::with_capacity(last);
-        let mut target_is_dir = false;
-        for (index, path) in target.chain.iter().enumerate() {
-            let handle = match open_no_follow(path) {
-                Ok(handle) => handle,
-                Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(ResetOutcome::Absent),
-                Err(error) if is_sharing_violation(&error) => return Ok(ResetOutcome::InUse),
-                Err(error) => return Err(io_err(error)),
-            };
-            let meta = handle.metadata().map_err(io_err)?;
-            if meta.file_attributes() & FILE_ATTRIBUTE_REPARSE_POINT != 0 {
-                return Err(PlatformError::Refused("a folder on the way is a link"));
+        let (shared, own) = target.components.split_at(SHARED_COMPONENTS.min(target.components.len()));
+        let shared: Vec<&str> = shared.iter().map(String::as_str).collect();
+        let own: Vec<&str> = own.iter().map(String::as_str).collect();
+        let outcome =
+            tree::reset_below(profile_dir, &shared, &own, &|| cancel.is_cancelled()).map_err(map_err)?;
+        match outcome {
+            TreeOutcome::Removed => Ok(ResetOutcome::Removed),
+            TreeOutcome::Absent => Ok(ResetOutcome::Absent),
+            TreeOutcome::InUse | TreeOutcome::Stopped => Ok(ResetOutcome::InUse),
+            TreeOutcome::Refused(Refusal::Link) => Err(PlatformError::Refused("a folder on the way is a link")),
+            TreeOutcome::Refused(Refusal::CaseSensitive) => {
+                Err(PlatformError::Refused("a folder on the way is case-sensitive"))
             }
-            if index < last {
-                if !meta.is_dir() {
-                    // A file where a folder should be: nothing below it to reset.
-                    return Ok(ResetOutcome::Absent);
+        }
+    }
+
+    fn staff_profile_dir(&self, sid: &str) -> Result<Option<PathBuf>, PlatformError> {
+        match accounts::profile_path(&parse_sid(sid)?) {
+            Ok(path) => Ok(Some(path)),
+            Err(Win32Error::NotFound) => Ok(None),
+            Err(error) => Err(map_err(error)),
+        }
+    }
+
+    /// Reads `User Shell Folders` from the Staff hive only when it is loaded (the
+    /// Staff account is signed in); `RegGetValueW` expands `%USERPROFILE%` with the
+    /// service's own profile, which [`shell_folder_is_default`] accepts too.
+    fn staff_app_data_redirected(&self, sid: &str, profile: &Path) -> Result<Option<bool>, PlatformError> {
+        let sid = parse_sid(sid)?;
+        let service_profile = std::env::var_os("USERPROFILE").map(PathBuf::from);
+        let mut redirected = false;
+        for (name, sub) in [("AppData", "Roaming"), ("Local AppData", "Local")] {
+            match registry::get_loaded_user_value(&sid, USER_SHELL_FOLDERS_KEY, name).map_err(map_err)? {
+                None => return Ok(None),
+                Some(None) => {}
+                Some(Some(RegValue::String(value))) => {
+                    redirected |= !shell_folder_is_default(&value, profile, service_profile.as_deref(), sub);
                 }
-                held.push(handle);
-            } else {
-                // Not held: the folder itself is about to be deleted.
-                target_is_dir = meta.is_dir();
+                Some(Some(RegValue::Dword(_))) => redirected = true,
             }
         }
-        let removed = if target_is_dir {
-            std::fs::remove_dir_all(target.target())
-        } else {
-            std::fs::remove_file(target.target())
-        };
-        drop(held);
-        match removed {
-            Ok(()) => Ok(ResetOutcome::Removed),
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(ResetOutcome::Absent),
-            // A file in it is open; what was deleted stays deleted.
-            Err(error) if is_in_use(&error) => Ok(ResetOutcome::InUse),
-            Err(error) => Err(io_err(error)),
-        }
+        Ok(Some(redirected))
     }
 }
 
-/// `FILE_ATTRIBUTE_REPARSE_POINT`.
-const FILE_ATTRIBUTE_REPARSE_POINT: u32 = 0x400;
-/// `FILE_LIST_DIRECTORY` (= `FILE_READ_DATA`) | `FILE_READ_ATTRIBUTES`. A data
-/// access, so the share mode below is enforced against later opens (a handle with
-/// attribute access only would not block a rename).
-const HOLD_ACCESS: u32 = 0x0001 | 0x0080;
-/// `FILE_SHARE_READ | FILE_SHARE_WRITE`: no `FILE_SHARE_DELETE`, so nobody can
-/// rename or delete the folder while the handle is open.
-const HOLD_SHARE: u32 = 0x1 | 0x2;
-/// `FILE_FLAG_BACKUP_SEMANTICS` (needed to open a folder) |
-/// `FILE_FLAG_OPEN_REPARSE_POINT` (open a link itself, never what it points to).
-const HOLD_FLAGS: u32 = 0x0200_0000 | 0x0020_0000;
-/// `ERROR_SHARING_VIOLATION`, `ERROR_LOCK_VIOLATION`.
-const SHARING_CODES: [i32; 2] = [32, 33];
-
-/// (Step 16) Opens `path` (file or folder) without following a reparse point.
-fn open_no_follow(path: &Path) -> std::io::Result<std::fs::File> {
-    use std::os::windows::fs::OpenOptionsExt;
-    std::fs::OpenOptions::new()
-        .access_mode(HOLD_ACCESS)
-        .share_mode(HOLD_SHARE)
-        .custom_flags(HOLD_FLAGS)
-        .open(path)
-}
-
-fn is_sharing_violation(error: &std::io::Error) -> bool {
-    error.raw_os_error().is_some_and(|code| SHARING_CODES.contains(&code))
-}
+/// `<profile>`'s `AppData` and `Local`/`Roaming`: shared with the Staff session
+/// (held with read and write sharing); the rest of a template's components are
+/// the app's own folders.
+const SHARED_COMPONENTS: usize = 2;
+/// Below a user's hive.
+const USER_SHELL_FOLDERS_KEY: &str = r"Software\Microsoft\Windows\CurrentVersion\Explorer\User Shell Folders";
 
 /// `CREATE_NO_WINDOW`.
 const CREATE_NO_WINDOW: u32 = 0x0800_0000;
@@ -735,21 +720,47 @@ mod tests {
         blocked("place_portable", p.place_portable(exe, &apps.join(r"app1\tool.exe")));
         blocked("remove_portable", p.remove_portable(&apps.join("app1")));
         // (Step 16) A template the rules allow, below a profile that does not exist.
-        blocked("reset_folder", p.reset_folder(Path::new(r"C:\rulebox-test-no-such-profile"), r"{LocalAppData}\Acme"));
+        let never = CancellationToken::new();
+        blocked(
+            "reset_folder",
+            p.reset_folder(Path::new(r"C:\rulebox-test-no-such-profile"), r"{LocalAppData}\Acme", &never),
+        );
     }
 
     #[test]
     fn reset_folder_refuses_bad_templates_before_the_guard() {
         // Refused on every machine, before the guard and before any file is opened.
         let p = platform();
+        let never = CancellationToken::new();
         let profile = Path::new(r"C:\rulebox-test-no-such-profile");
-        for template in [r"{LocalAppData}\..\..", r"C:\Windows", r"{SystemRoot}\System32", r"{LocalAppData}\"] {
-            assert!(matches!(p.reset_folder(profile, template), Err(PlatformError::Refused(_))), "{template}");
+        for template in [
+            r"{LocalAppData}\..\..",
+            r"C:\Windows",
+            r"{SystemRoot}\System32",
+            r"{LocalAppData}\",
+            // (Review) The deny list.
+            r"{RoamingAppData}\Microsoft\Protect",
+            r"{LocalAppData}\dev.rulebox.staff",
+        ] {
+            assert!(matches!(p.reset_folder(profile, template, &never), Err(PlatformError::Refused(_))), "{template}");
         }
         assert!(matches!(
-            p.reset_folder(Path::new(r"rulebox-test\relative"), r"{LocalAppData}\Acme"),
+            p.reset_folder(Path::new(r"rulebox-test\relative"), r"{LocalAppData}\Acme", &never),
             Err(PlatformError::Refused(_))
         ));
+    }
+
+    #[test]
+    fn staff_profile_reads_are_read_only_and_answer_on_the_dev_machine() {
+        // An account that does not exist has no profile; its hive is not loaded.
+        let p = platform();
+        let sid = "S-1-5-21-1-2-3-999999";
+        assert_eq!(p.staff_profile_dir(sid).unwrap(), None);
+        assert_eq!(p.staff_app_data_redirected(sid, Path::new(r"C:\Users\x")).unwrap(), None);
+        // The current user's own hive is loaded: it answers (redirected or not).
+        let me = rulebox_win32::sid::current_user_sid().unwrap();
+        let profile = p.staff_profile_dir(me.as_str()).unwrap().unwrap();
+        assert!(p.staff_app_data_redirected(me.as_str(), &profile).unwrap().is_some());
     }
 
     #[test]

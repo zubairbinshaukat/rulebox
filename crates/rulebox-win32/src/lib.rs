@@ -22,6 +22,7 @@ pub mod security;
 pub mod session;
 pub mod shellreg;
 pub mod sid;
+pub mod tree;
 pub mod util;
 
 pub use error::{Result, Win32Error};

@@ -4627,6 +4627,126 @@ PRD note: PRD 5.3 says "On logout, the agent closes all apps the employee
 launched"; this plan (item 2) says the Staff App closes them before it calls
 `signOut`. Step 16 relies on the plan's version; the PRD line should say which.
 
+**Status (2026-11-03): security-review fixes (agent, `rulebox-win32`,
+`rulebox-policy`, `convex/lib/pathRules.ts`). NOT committed; the real deletion is
+still NOT run (VM only).** `cargo clippy -p rulebox-agent -p rulebox-policy -p
+rulebox-win32 --all-targets` clean; `cargo test`: rulebox-agent 546/546 (+10 net),
+rulebox-policy 50/50 (+1), rulebox-win32 65/65 (+5); `pnpm typecheck:convex`,
+`pnpm lint:convex` clean, `vitest --project convex` 737/737.
+1. CRITICAL (swap race / mount point / object-manager symlink): **fixed in code,
+   VM-unverified.** New `rulebox_win32::tree::reset_below` (guarded): the profile
+   folder is opened by path without following a link; every other folder is opened
+   **relative to its parent's held handle** (`NtCreateFile` + `RootDirectory`,
+   `OBJ_DONT_REPARSE`, `FILE_OPEN_REPARSE_POINT`, backup intent); no path string is
+   resolved again. A link or a case-sensitive folder anywhere from the profile down
+   refuses the entry. Inside the target, entries are listed through the handle and
+   deleted **through their own handles** (`FileDispositionInfoEx`, POSIX + ignore
+   read-only; fallback delete-on-close); a link inside is deleted itself; an entry
+   that changed kind since the listing is left (in use). Held folders: profile /
+   `AppData` / `Local|Roaming` with `FILE_SHARE_READ|WRITE` (shared with the Staff
+   session: holding them read-only could block the cleanup for good), the app's own
+   folders and every folder being emptied with `FILE_SHARE_READ` only. The quarantine
+   rename was not needed (deletion never re-resolves a path). Impersonating the Staff
+   token was NOT built: `WTSQueryUserToken` needs an active Staff session (not there
+   after log-off, at service start, or after a crash); the handle-relative design
+   covers all cases. Verified on the dev machine (read-only, temp folders): a
+   junction as the target or above it is refused; `OBJ_DONT_REPARSE +
+   FILE_OPEN_REPARSE_POINT` opens a junction itself; a held folder cannot be renamed
+   or opened for writing; a name with `\` is never opened; `reset_below` is blocked
+   by the guard. The deletion itself was not run. The sim checks and deletes under one
+   lock, so it cannot model the race: **the race is VM-only** (checklist below).
+2. HIGH (no cleanup after reboot / crash / restart): **fixed (sim-tested).**
+   `CleanupGate` + `<data>\state\cleanup-owed.json` (atomic write at every successful
+   sign-in, before the session is set; deleted only after a clean second-or-later
+   round; any read error = owed). A service that starts with it runs both rounds.
+   Sign-in behaviour (no "preparing" state exists in protocol 1.2): it waits up to
+   1.5 s (`SIGN_IN_CLEANUP_WAIT`; the sign-in budget is 8 s and the Staff App's
+   request timeout 10 s), then fails closed with `busy`, retryable, "This PC is
+   getting ready for the next person. Try again in a moment." The signed-in
+   employee signing in again is not held up. Folders still in use (or too slow)
+   keep the marker; a full round runs every 30 s while owed, and at once when a
+   sign-in is waiting (after the two rounds of a session end).
+3. MEDIUM (sign-in vs cleanup race, unbounded deletion): **fixed (sim-tested).**
+   The gate: a sign-in starts only when no cleanup is owed, no deletion runs and no
+   other sign-in is in progress, and holds its permit until the session is set; a
+   round takes a deletion permit per folder, refused while a sign-in is in progress
+   or a session is active (checked under the gate's lock). Time limit: item 5.
+4. MEDIUM (rounds start before agent-ended sessions' apps are closed): **fixed by
+   the fallback.** Protocol 1.2 has no "apps closed" confirmation from the Staff App
+   (`session.ended` is an event, nothing answers it), so the protocol is unchanged:
+   every session end gets a full round at 3 s **and a second full round 10 s after
+   the first** (the Staff App kills app jobs 5 s after `session.ended`); the marker
+   clears only after the second (the old 10 s "in-use retry" is folded into it). The
+   PRD 5.3 ("the agent closes all apps") vs plan item 2 ("the Staff App closes them
+   before `signOut`") conflict is still open: not decided here.
+5. MEDIUM (one stalled `spawn_blocking` stalls the loop): **fixed (sim-tested).**
+   A round is a future polled next to the request channel (requests keep being
+   handled). Each folder has a 60 s watchdog: on timeout its cancel token is set
+   (`reset_below` stops between entries) and the round moves on; a call stuck
+   inside one kernel call finishes in the background, keeping its handles and its
+   deletion permit (so no sign-in starts while it still deletes) and its template
+   is skipped (counted in use, marker kept) until it ends.
+6. LOW (dodges): **partly fixed.** DACL denying SYSTEM: `SeBackupPrivilege` /
+   `SeRestorePrivilege` are enabled (process-wide, the same call `with_user_hive`
+   already makes) and every open asks for backup intent, so no ownership / DACL
+   rewrite is needed (VM-only). Case-sensitive folder on the way: refused with a
+   warning ("a folder on the way is case-sensitive"; detected with
+   `FileCaseSensitiveInfo`). Redirected `AppData` / `Local AppData` (HKCU `User Shell
+   Folders`): a warning without paths at each round, only when the Staff hive is
+   already loaded (never loaded for this; new read-only
+   `registry::get_loaded_user_value`). Following a redirect was NOT built (riskier:
+   the redirect target is Staff-controlled).
+7. LOW (deny list): **fixed.** The same `RESET_DENY` in
+   `rulebox_policy::paths` and `convex/lib/pathRules.ts`: `Microsoft\{Credentials,
+   Crypto, Protect, SystemCertificates, Vault, Windows}`, `dev.rulebox.staff` (Staff
+   App data and WebView2 profiles), `Rulebox`; case-insensitive, refused when the
+   template and an entry agree on their common length (so `{RoamingAppData}\Microsoft`
+   is refused too). Shared golden vectors
+   `crates/rulebox-policy/tests/vectors/reset-folders.json` (list, 12 accepted, 26
+   refused with kind) run by both. New `PathProblem::ResetDenied`; the server says
+   "folder holds Windows or Rulebox data". The dashboard mirror (`lib/validate.ts`)
+   was NOT changed (out of scope): the server refuses on save.
+8. LOW (`profile_dir` never re-checked): **fixed (sim-tested).** Every round reads
+   `ProfileList\<SID>\ProfileImagePath` (`Platform::staff_profile_dir`, read-only)
+   and uses it; a difference from the saved path is a warning; unreadable = round
+   not clean (marker kept); no profile = nothing to reset.
+Choices for the owner (please confirm): a refusal (a link, a case-sensitive folder,
+a denied template) or a non-"in use" error does **not** keep the marker (it would
+block every sign-in until someone fixes the folder by hand); a stuck deletion or a
+folder in use **does** (sign-in stays blocked, fail closed); a sign-in right after a
+sign-out waits ~13 s in all (two rounds) and gets `busy` meanwhile.
+`win32` edits: `Cargo.toml` (+`Wdk_Foundation`, `Wdk_Storage_FileSystem`,
+`Win32_System_IO`), `lib.rs` (`pub mod tree`), `tree.rs` (new),
+`registry.rs` (`get_loaded_user_value`, read-only). No known-folder lookups added.
+VM checklist additions (Windows, test VM only):
+- Sign out with VLC-like data in a reset folder: gone after ~3 s, a second round
+  ~13 s, `cleanup-owed.json` gone afterwards; sign-in during those ~13 s gets the
+  "getting ready" message and works after.
+- Swap race against a held parent: during a round (slow it with many files), the
+  Staff account tries to rename `Roaming\vlc` and to replace it with a junction:
+  refused (sharing violation), the junction target untouched.
+- Mount point on an emptied parent: Staff moves `cache` out of `vlc`, makes `vlc` a
+  mount point to `\RPC Control`, plants an object-manager symlink `cache` ->
+  `C:\Config.Msi` (James Forshaw's `CreateMountPoint` / `CreateSymlink` tools);
+  sign out: the entry is refused (log "a folder on the way is a link"),
+  `C:\Config.Msi` (or a canary folder) untouched. Repeat with the symlink planted
+  mid-round.
+- Junction / symlink inside a reset folder (to a canary folder): the link is
+  deleted, the canary untouched; a hard link to a canary file: only the link name
+  goes.
+- `icacls` deny SYSTEM full control on `Roaming\vlc` and a file in it: still
+  deleted (backup privileges); read-only files and folders deleted.
+- `fsutil file setCaseSensitiveInfo` on `Roaming`: refused with the warning.
+- Redirect `HKCU\...\User Shell Folders\Local AppData`: the warning appears while
+  the Staff account is signed in.
+- Power off (or kill the service) with an employee signed in: on the next start
+  the rounds run before anyone can sign in.
+- A file held open by a process left running (e.g. `notepad` on a file in the
+  folder): marker stays, sign-in says "getting ready", retried every 30 s; closing
+  it lets the next round clear the marker.
+- `OBJ_DONT_REPARSE` / POSIX delete on the VM's Windows build (26300): no
+  `STATUS_INVALID_PARAMETER` in the log.
+
 ---
 
 ### Step 17 — Dashboard: install status, overview, audit, history

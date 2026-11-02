@@ -83,6 +83,35 @@ pub enum PathProblem {
     /// (Step 16) A reset folder with no component, or more than 6, below its root.
     #[error("1 to 6 folder components")]
     ResetComponentCount,
+    /// (Step 16 review) A reset folder that is, holds or sits inside one of
+    /// [`RESET_DENY`] (Windows secrets and shell data, the Staff App's own data).
+    #[error("folder holds Windows or Rulebox data")]
+    ResetDenied,
+}
+
+/// (Phase 4 Step 16 review) Folders below `{LocalAppData}` / `{RoamingAppData}`
+/// that a reset may never touch: DPAPI keys, saved credentials, certificates and
+/// the Windows shell's own data, the Staff App's data and WebView2 profiles
+/// (`dev.rulebox.staff`), and anything named `Rulebox`. A template is refused when
+/// its first components and an entry agree, ignoring case, on their common length:
+/// the entry itself, anything inside it, and any folder that contains it
+/// (`{RoamingAppData}\Microsoft` would delete `Microsoft\Protect`). Same list and
+/// rule as `RESET_DENY` in `convex/lib/pathRules.ts`; the shared vectors
+/// (`tests/vectors/reset-folders.json`) pin both.
+pub const RESET_DENY: &[&[&str]] = &[
+    &["Microsoft", "Credentials"],
+    &["Microsoft", "Crypto"],
+    &["Microsoft", "Protect"],
+    &["Microsoft", "SystemCertificates"],
+    &["Microsoft", "Vault"],
+    &["Microsoft", "Windows"],
+    &["dev.rulebox.staff"],
+    &["Rulebox"],
+];
+
+/// Whether the components below the root meet an entry of [`RESET_DENY`].
+fn reset_denied(parts: &[&str]) -> bool {
+    RESET_DENY.iter().any(|entry| entry.iter().zip(parts).all(|(denied, part)| denied.eq_ignore_ascii_case(part)))
 }
 
 /// (Phase 4 Step 16) Where a reset folder lives inside the Staff profile.
@@ -116,8 +145,9 @@ const ROAMING_APP_DATA: &str = "{RoamingAppData}\\";
 /// (Phase 4 Step 16, plan 4.12) The agent's copy of `resetFoldersProblem` for one
 /// entry: `{LocalAppData}\<rel>` or `{RoamingAppData}\<rel>`, `<rel>` 1-6
 /// components with the path-template character rules (no `..`, no `.`, no
-/// separator other than `\`, no drive, stream or device name). Returns the root
-/// and the components; the caller joins them below the Staff profile.
+/// separator other than `\`, no drive, stream or device name), and not meeting
+/// [`RESET_DENY`]. Returns the root and the components; the caller joins them
+/// below the Staff profile.
 pub fn reset_folder_parts(template: &str) -> Result<(ResetBase, Vec<&str>), PathProblem> {
     let (base, rest) = if let Some(rest) = template.strip_prefix(LOCAL_APP_DATA) {
         (ResetBase::LocalAppData, rest)
@@ -132,6 +162,9 @@ pub fn reset_folder_parts(template: &str) -> Result<(ResetBase, Vec<&str>), Path
     }
     if !parts.iter().all(|c| valid_component(c)) {
         return Err(PathProblem::BadComponent);
+    }
+    if reset_denied(&parts) {
+        return Err(PathProblem::ResetDenied);
     }
     Ok((base, parts))
 }
@@ -390,6 +423,37 @@ mod tests {
         }
         assert_eq!(ResetBase::LocalAppData.app_data_folder(), "Local");
         assert_eq!(ResetBase::RoamingAppData.app_data_folder(), "Roaming");
+    }
+
+    /// (Step 16 review) The shared vectors, also run by `convex/pathRules.test.ts`.
+    #[test]
+    fn reset_folders_match_the_shared_vectors() {
+        #[derive(serde::Deserialize)]
+        struct Vectors {
+            deny: Vec<Vec<String>>,
+            accept: Vec<String>,
+            reject: Vec<(String, String)>,
+        }
+        let vectors: Vectors = serde_json::from_str(include_str!("../tests/vectors/reset-folders.json")).unwrap();
+        let ours: Vec<Vec<String>> =
+            RESET_DENY.iter().map(|entry| entry.iter().map(|c| c.to_string()).collect()).collect();
+        assert_eq!(ours, vectors.deny, "RESET_DENY = the shared list");
+        assert!(vectors.accept.len() >= 10 && vectors.reject.len() >= 20);
+        for template in &vectors.accept {
+            assert!(reset_folder_parts(template).is_ok(), "{template}");
+        }
+        for (template, kind) in &vectors.reject {
+            let got = match reset_folder_parts(template) {
+                Ok(_) => "accepted",
+                Err(PathProblem::ResetRoot) => "root",
+                Err(PathProblem::ResetComponentCount | PathProblem::BadComponent) => "path",
+                Err(PathProblem::ResetDenied) => "denied",
+                Err(other) => panic!("{template}: unexpected {other:?}"),
+            };
+            assert_eq!(got, kind, "{template}");
+        }
+        // The message names no value.
+        assert!(!PathProblem::ResetDenied.to_string().contains("Microsoft"));
     }
 
     #[test]

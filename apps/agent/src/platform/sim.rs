@@ -54,6 +54,8 @@ pub enum SimOp {
     PlacePortable,
     RemovePortable,
     ResetFolder,
+    StaffProfileDir,
+    AppDataRedirected,
 }
 
 impl SimOp {
@@ -76,6 +78,8 @@ impl SimOp {
                 | SimOp::SecretsLoad
                 | SimOp::DiskFreeBytes
                 | SimOp::BootTimeMs
+                | SimOp::StaffProfileDir
+                | SimOp::AppDataRedirected
         )
     }
 }
@@ -146,6 +150,14 @@ pub struct SimWorld {
     pub reparse_points: std::collections::HashSet<PathBuf>,
     /// (Step 16) Files another process holds open: a reset cannot delete them.
     pub open_files: std::collections::HashSet<PathBuf>,
+    /// (Step 16 review) `ProfileList` per SID (`staff_profile_dir`); `ensure_profile`
+    /// fills it.
+    pub profile_dirs: HashMap<String, PathBuf>,
+    /// (Step 16 review) What `staff_app_data_redirected` answers.
+    pub app_data_redirected: Option<bool>,
+    /// (Step 16 review) A reset of this template blocks (an oplock, a huge tree)
+    /// until released (or cancelled, when it honours cancellation).
+    pub reset_hang: Option<SimHang>,
     next_rid: u32,
     next_pid: u32,
 }
@@ -191,10 +203,23 @@ impl SimWorld {
             dirs: std::collections::HashSet::new(),
             reparse_points: std::collections::HashSet::new(),
             open_files: std::collections::HashSet::new(),
+            profile_dirs: HashMap::new(),
+            app_data_redirected: Some(false),
+            reset_hang: None,
             next_rid: 2000,
             next_pid: 4000,
         }
     }
+}
+
+/// (Step 16 review) A reset that blocks: see [`SimWorld::reset_hang`].
+#[derive(Debug, Clone)]
+pub struct SimHang {
+    pub template: String,
+    /// True: a cancel stops it (`InUse`). False: only `release` does (a call stuck
+    /// in the kernel).
+    pub honours_cancel: bool,
+    pub release: std::sync::Arc<std::sync::atomic::AtomicBool>,
 }
 
 pub struct SimPlatform {
@@ -387,10 +412,13 @@ impl Platform for SimPlatform {
 
     fn ensure_profile(&self, sid: &str, user_name: &str) -> Result<PathBuf, PlatformError> {
         self.check(SimOp::EnsureProfile)?;
-        if !lock(&self.world).users.get(user_name).is_some_and(|u| u.sid == sid) {
+        let mut world = lock(&self.world);
+        if !world.users.get(user_name).is_some_and(|u| u.sid == sid) {
             return Err(PlatformError::NotFound);
         }
-        Ok(self.data_dir.join("sim-profiles").join(user_name))
+        let dir = self.data_dir.join("sim-profiles").join(user_name);
+        world.profile_dirs.insert(sid.to_string(), dir.clone());
+        Ok(dir)
     }
 
     fn delete_staff_user(&self, sid: &str, user_name: &str) -> Result<(), PlatformError> {
@@ -401,6 +429,7 @@ impl Platform for SimPlatform {
             _ => return Err(PlatformError::NotFound),
         }
         world.users.remove(user_name);
+        world.profile_dirs.remove(sid);
         world.staff_shell.remove(sid);
         world.staff_policies.retain(|(s, _), _| s != sid);
         Ok(())
@@ -620,9 +649,27 @@ impl Platform for SimPlatform {
     /// `Refused` (nothing deleted), a missing one is `Absent`. Below the target,
     /// open files stay (`InUse`), everything else goes; a link inside is removed
     /// itself (what it points to is untouched).
-    fn reset_folder(&self, profile_dir: &Path, template: &str) -> Result<ResetOutcome, PlatformError> {
+    ///
+    /// The check and the deletion happen under one lock, so the sim cannot model
+    /// the swap race against a held folder: that is `WindowsPlatform`'s job
+    /// (`rulebox_win32::tree`) and a VM checklist item.
+    fn reset_folder(
+        &self,
+        profile_dir: &Path,
+        template: &str,
+        cancel: &CancellationToken,
+    ) -> Result<ResetOutcome, PlatformError> {
         self.check(SimOp::ResetFolder)?;
         let target = resolve_reset(profile_dir, template)?;
+        let hang = lock(&self.world).reset_hang.clone().filter(|hang| hang.template == template);
+        if let Some(hang) = hang {
+            while !hang.release.load(std::sync::atomic::Ordering::SeqCst) {
+                if hang.honours_cancel && cancel.is_cancelled() {
+                    return Ok(ResetOutcome::InUse);
+                }
+                std::thread::sleep(Duration::from_millis(1));
+            }
+        }
         let mut world = lock(&self.world);
         for path in &target.chain {
             if world.reparse_points.contains(path) {
@@ -638,6 +685,16 @@ impl Platform for SimPlatform {
         world.dirs.retain(|dir| !dir.starts_with(&root) || busy.iter().any(|file| file.starts_with(dir)));
         world.reparse_points.retain(|link| !link.starts_with(&root));
         Ok(if busy.is_empty() { ResetOutcome::Removed } else { ResetOutcome::InUse })
+    }
+
+    fn staff_profile_dir(&self, sid: &str) -> Result<Option<PathBuf>, PlatformError> {
+        self.check(SimOp::StaffProfileDir)?;
+        Ok(lock(&self.world).profile_dirs.get(sid).cloned())
+    }
+
+    fn staff_app_data_redirected(&self, _sid: &str, _profile: &Path) -> Result<Option<bool>, PlatformError> {
+        self.check(SimOp::AppDataRedirected)?;
+        Ok(lock(&self.world).app_data_redirected)
     }
 }
 

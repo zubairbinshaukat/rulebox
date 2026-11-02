@@ -215,6 +215,20 @@ pub fn set_hklm(path: &str, name: &str, value: Option<&RegValue>) -> Result<()> 
     }
 }
 
+/// (Phase 4 Step 16 review) Reads `HKEY_USERS\<SID>\<subkey>\<name>` only when
+/// that user's hive is already loaded (the user is signed in). `Ok(None)`: the
+/// hive is not loaded; `Ok(Some(None))`: the value does not exist. Read-only: it
+/// never loads a hive, so it is not guarded.
+pub fn get_loaded_user_value(sid: &Sid, subkey: &str, name: &str) -> Result<Option<Option<RegValue>>> {
+    let Some(root) = open_key(HKEY_USERS, sid.as_str(), KEY_QUERY_VALUE)? else {
+        return Ok(None);
+    };
+    match open_key(root.0, subkey, KEY_QUERY_VALUE)? {
+        Some(key) => read_value(&key, name).map(Some),
+        None => Ok(Some(None)),
+    }
+}
+
 /// The root of one user's hive (`HKEY_USERS\<SID>` or the temporary mount). It
 /// exists only inside `with_user_hive`, so a function that takes a `HiveKey` can
 /// reach that user's hive and nothing else (in particular never `HKLM`).

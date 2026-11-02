@@ -13,6 +13,10 @@ tokio = { workspace = true, features = ["net"] }
 windows = { workspace = true, features = [
     # RtlGetVersion (osinfo.rs); not in the plan's feature list, which missed it.
     "Wdk_System_SystemServices",
+    # (Phase 4 Step 16 review) NtCreateFile relative to a held folder handle (tree.rs).
+    "Wdk_Foundation",
+    "Wdk_Storage_FileSystem",
+    "Win32_System_IO",
     "Win32_Foundation",
     "Win32_NetworkManagement_NetManagement",
     "Win32_Security",

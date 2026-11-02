@@ -126,6 +126,13 @@ impl DataPaths {
         self.state_dir().join("audit-queue.json")
     }
 
+    /// (Phase 4 Step 16 review) Present while a session cleanup is owed: written
+    /// when an employee signs in, deleted only after a complete clean round. A
+    /// service that starts and finds it runs a round before the next sign-in.
+    pub fn cleanup_owed(&self) -> PathBuf {
+        self.state_dir().join("cleanup-owed.json")
+    }
+
     /// (1.1) Simulate mode only: the files base the demo employees get (the real
     /// base is `<Staff profile>\RuleboxFiles`). The agent only names it.
     pub fn sim_files(&self) -> PathBuf {
@@ -277,6 +284,7 @@ mod tests {
         assert!(data.employee_cache().ends_with("state/employee-cache.json"));
         assert!(data.audit_queue().ends_with("state/audit-queue.json"));
         assert!(data.recovered_flag().ends_with("state/recovered.flag"));
+        assert!(data.cleanup_owed().ends_with("state/cleanup-owed.json"));
         assert!(data.sim_files().ends_with("sim-files"));
         assert!(data.installs().ends_with("state/installs.json"));
         assert!(data.downloads_dir().ends_with("downloads"));

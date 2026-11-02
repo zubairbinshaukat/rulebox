@@ -109,9 +109,43 @@ export function fileArgProblem(list: string[]): string | null {
 }
 
 /**
+ * (Step 16 review) Folders below `{LocalAppData}` / `{RoamingAppData}` a reset
+ * may never touch: DPAPI keys, saved credentials, certificates and the Windows
+ * shell's own data, the Staff App's data and WebView2 profiles
+ * (`dev.rulebox.staff`), and anything named `Rulebox`. Same list and rule as
+ * `RESET_DENY` in `crates/rulebox-policy/src/paths.rs`; the shared vectors
+ * (`crates/rulebox-policy/tests/vectors/reset-folders.json`) pin both.
+ */
+export const RESET_DENY: readonly (readonly string[])[] = [
+  ["Microsoft", "Credentials"],
+  ["Microsoft", "Crypto"],
+  ["Microsoft", "Protect"],
+  ["Microsoft", "SystemCertificates"],
+  ["Microsoft", "Vault"],
+  ["Microsoft", "Windows"],
+  ["dev.rulebox.staff"],
+  ["Rulebox"],
+];
+
+/**
+ * True when the components below the root and a `RESET_DENY` entry agree,
+ * ignoring case, on their common length: the entry itself, anything inside it,
+ * and any folder that contains it (`{RoamingAppData}\Microsoft` would delete
+ * `Microsoft\Protect`). Components are ASCII (the character rules).
+ */
+function resetDenied(rest: string[]): boolean {
+  return RESET_DENY.some((entry) => {
+    const n = Math.min(entry.length, rest.length);
+    for (let i = 0; i < n; i++) if (entry[i]!.toLowerCase() !== rest[i]!.toLowerCase()) return false;
+    return true;
+  });
+}
+
+/**
  * Session cleanup folders (4.12): `{LocalAppData}\<rel>` or
  * `{RoamingAppData}\<rel>`, `<rel>` 1-6 components with the path-template
- * character rules; resolved inside the Staff profile by the agent.
+ * character rules, not meeting `RESET_DENY`; resolved inside the Staff profile
+ * by the agent.
  */
 export function resetFoldersProblem(list: string[]): string | null {
   if (list.length > MAX_RESET_FOLDERS) return "too many folders";
@@ -120,6 +154,7 @@ export function resetFoldersProblem(list: string[]): string | null {
     if (prefix === undefined) return "folder must start with {LocalAppData} or {RoamingAppData}";
     const rest = item.slice(prefix.length).split("\\");
     if (rest.length < 1 || rest.length > 6 || !rest.every(validComponent)) return "folder path not allowed";
+    if (resetDenied(rest)) return "folder holds Windows or Rulebox data";
   }
   return null;
 }

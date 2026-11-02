@@ -205,6 +205,16 @@ pub trait Platform: Send + Sync + 'static {
     fn disk_free_bytes(&self) -> Result<u64, PlatformError>;
     /// (Step 14) Which boot this is (clears `restartPending` once it changed).
     fn boot_identity(&self) -> Result<BootIdentity, PlatformError>;
+    /// (Phase 4 Step 16 review) The profile folder Windows has for `sid` now
+    /// (`ProfileList\<SID>\ProfileImagePath`); `None` when it has none. Read again
+    /// before every cleanup round instead of trusting the path saved at setup.
+    fn staff_profile_dir(&self, sid: &str) -> Result<Option<PathBuf>, PlatformError>;
+    /// (Step 16 review) Whether the Staff account's `AppData` / `Local AppData`
+    /// shell folders (`HKCU\...\User Shell Folders`) point away from
+    /// `<profile>\AppData\Roaming` / `\Local` (then apps keep their data where the
+    /// cleanup does not look). `None` when it cannot tell: the hive is not loaded.
+    /// Read-only: it never loads the hive.
+    fn staff_app_data_redirected(&self, sid: &str, profile: &Path) -> Result<Option<bool>, PlatformError>;
 
     // mutating: every `WindowsPlatform` implementation calls `guard::require_test_machine()` first
     fn create_staff_user(&self, spec: &StaffUserSpec, password: &str) -> Result<String, PlatformError>;
@@ -258,6 +268,14 @@ pub trait Platform: Send + Sync + 'static {
     /// existing folder from the profile down to the target is checked: a reparse
     /// point (link, junction) anywhere on the way is `Refused` and nothing is
     /// deleted. Links inside the folder are removed themselves, never followed.
+    /// (Review) `WindowsPlatform` opens every folder relative to its parent's held
+    /// handle and deletes through handles (`rulebox_win32::tree`). `cancel` stops
+    /// the work between entries (what was deleted stays deleted: `InUse`).
     /// Blocking: call it from `spawn_blocking`.
-    fn reset_folder(&self, profile_dir: &Path, template: &str) -> Result<ResetOutcome, PlatformError>;
+    fn reset_folder(
+        &self,
+        profile_dir: &Path,
+        template: &str,
+        cancel: &CancellationToken,
+    ) -> Result<ResetOutcome, PlatformError>;
 }

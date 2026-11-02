@@ -31,6 +31,7 @@ use tokio_util::sync::CancellationToken;
 
 use crate::agent_policy::AgentPolicy;
 use crate::audit::{AuditHandle, AuditKind};
+use crate::cleanup::{CleanupGate, SIGN_IN_CLEANUP_WAIT};
 use crate::directory::{DirectoryAnswer, EmployeeDirectory};
 use crate::ipc_shell::ShellBroadcast;
 use crate::roster::RosterState;
@@ -170,8 +171,10 @@ struct Inner {
     gate: Arc<tokio::sync::Mutex<()>>,
     roster: Mutex<RosterView>,
     events: Mutex<Option<mpsc::UnboundedSender<SessionEvent>>>,
-    /// (Phase 4 Step 16) Told every time an employee session ends (`cleanup.rs`).
-    cleanup: Mutex<Option<mpsc::UnboundedSender<()>>>,
+    /// (Phase 4 Step 16) Told every time an employee session ends; (review) owns the
+    /// "cleanup owed" marker and keeps sign-in and cleanup apart (`cleanup.rs`).
+    /// `None` in `--sim-demo` (no cleanup there).
+    cleanup: Mutex<Option<Arc<CleanupGate>>>,
 }
 
 impl Inner {
@@ -184,9 +187,13 @@ impl Inner {
     /// (Step 16) An employee session ended: the session cleanup resets the
     /// catalogue apps' folders a few seconds later.
     fn ended(&self) {
-        if let Some(tx) = lock(&self.cleanup).as_ref() {
-            let _ = tx.send(());
+        if let Some(gate) = self.cleanup_gate() {
+            gate.session_ended();
         }
+    }
+
+    fn cleanup_gate(&self) -> Option<Arc<CleanupGate>> {
+        lock(&self.cleanup).clone()
     }
 
     /// The roster check of an offline sign-in or a cached employee; `None` when the
@@ -238,9 +245,10 @@ impl SessionManager {
         })
     }
 
-    /// (Phase 4 Step 16) Where "an employee session ended" goes (the cleanup task).
-    pub fn set_cleanup(&self, tx: mpsc::UnboundedSender<()>) {
-        *lock(&self.inner.cleanup) = Some(tx);
+    /// (Phase 4 Step 16) Where "an employee session ended" goes (the cleanup task);
+    /// (review) a sign-in also waits on it while a cleanup is owed or running.
+    pub fn set_cleanup(&self, gate: Arc<CleanupGate>) {
+        *lock(&self.inner.cleanup) = Some(gate);
     }
 
     /// (Step 16) Whether an employee is signed in (the cleanup never runs then).
@@ -493,6 +501,11 @@ fn not_signed_in() -> RpcError {
 
 fn busy() -> RpcError {
     rpc_error(ErrorCode::Busy, "Another sign-in check is running.", true)
+}
+
+/// (Step 16 review) The last session's cleanup is not finished: retry shortly.
+fn cleanup_pending() -> RpcError {
+    rpc_error(ErrorCode::Busy, "This PC is getting ready for the next person. Try again in a moment.", true)
 }
 
 fn timeout_error() -> RpcError {
@@ -750,6 +763,22 @@ async fn sign_in(inner: &Arc<Inner>, params: SignInParams) -> Result<SignInResul
     if inner.other_employee_signed_in(&username) {
         return Err(denied("Another employee is signed in."));
     }
+    // (Step 16 review) Not while the last session's cleanup is owed or a deletion
+    // runs: wait a little, then a retryable `busy`. Held until the session is set,
+    // so no cleanup round starts in between.
+    let _cleanup_permit = match inner.cleanup_gate() {
+        Some(gate) => {
+            let active = lock(&inner.session).is_some();
+            match gate.enter_sign_in(active, SIGN_IN_CLEANUP_WAIT).await {
+                Some(permit) => Some(permit),
+                None => {
+                    tracing::info!("sign-in refused for now: the last session's cleanup is not finished");
+                    return Err(cleanup_pending());
+                }
+            }
+        }
+        None => None,
+    };
 
     // 5 to 8, inside the request's time budget (step 9).
     let mut attempt = Attempt::default();
@@ -952,6 +981,10 @@ fn start_session(
 ) -> SignInResult {
     let files_root = files_base.join(files_folder_name(&employee.id)).to_string_lossy().into_owned();
     tracing::info!(username, offline, "employee signed in");
+    // (Step 16 review) From now until a complete clean round, also across a restart.
+    if let Some(gate) = inner.cleanup_gate() {
+        gate.mark_owed();
+    }
     let result = SignInResult {
         outcome: SignInOutcome::Ok,
         employee: Some(employee.clone()),
@@ -2078,43 +2111,60 @@ mod tests {
 
     // -- Phase 4 Step 16: session cleanup ------------------------------------------------
 
-    fn cleanup_requests(h: &Harness) -> mpsc::UnboundedReceiver<()> {
+    use crate::cleanup::{CleanupGate, CleanupRequest};
+
+    fn cleanup_requests(h: &Harness) -> (Arc<CleanupGate>, mpsc::UnboundedReceiver<CleanupRequest>) {
+        let gate = CleanupGate::in_memory(false);
         let (tx, rx) = mpsc::unbounded_channel();
-        h.manager.set_cleanup(tx);
-        rx
+        gate.set_requests(tx);
+        h.manager.set_cleanup(Arc::clone(&gate));
+        (gate, rx)
     }
 
-    fn drained(rx: &mut mpsc::UnboundedReceiver<()>) -> usize {
+    /// Session ends asked for; (review) a test plays the cleanup by clearing the
+    /// marker in between.
+    fn drained(rx: &mut mpsc::UnboundedReceiver<CleanupRequest>) -> usize {
         let mut count = 0;
-        while rx.try_recv().is_ok() {
-            count += 1;
+        while let Ok(request) = rx.try_recv() {
+            if request == CleanupRequest::SessionEnded {
+                count += 1;
+            }
         }
         count
+    }
+
+    /// What the cleanup task does after a clean second round (test stand-in).
+    fn cleaned(gate: &CleanupGate) {
+        gate.clear_owed_for_test();
     }
 
     #[tokio::test]
     async fn every_end_of_an_employee_session_asks_for_the_cleanup() {
         let h = harness();
-        let mut rx = cleanup_requests(&h);
+        let (gate, mut rx) = cleanup_requests(&h);
         // No session: signing out, clearing or ending asks for nothing.
         h.sign_out().await;
         h.manager.clear("staff session ended");
         h.manager.end(SessionEndReason::Revoked);
         assert_eq!(drained(&mut rx), 0);
         assert!(!h.manager.is_active());
+        assert!(!gate.is_owed());
 
         // session.signOut.
         h.sign_in("maya", "demo").await.unwrap();
         assert!(h.manager.is_active());
+        assert!(gate.is_owed(), "(review) owed from the sign-in on");
         assert_eq!(drained(&mut rx), 0, "a sign-in is not an end");
         h.sign_out().await;
         assert!(!h.manager.is_active());
         assert_eq!(drained(&mut rx), 1);
+        cleaned(&gate);
 
         // The Staff Windows session ended with an employee signed in.
         h.sign_in("maya", "demo").await.unwrap();
         h.manager.clear("staff session ended");
         assert_eq!(drained(&mut rx), 1);
+        cleaned(&gate);
 
         // Ended by the agent (revocation, roster).
         h.sign_in("maya", "demo").await.unwrap();
@@ -2123,20 +2173,50 @@ mod tests {
     }
 
     #[tokio::test(start_paused = true)]
+    async fn a_sign_in_waits_for_the_last_sessions_cleanup() {
+        let h = harness();
+        let (gate, mut rx) = cleanup_requests(&h);
+        h.sign_in("maya", "demo").await.unwrap();
+        // Signing in again as the same employee is not held up.
+        assert_eq!(h.sign_in("maya", "demo").await.unwrap().outcome, SignInOutcome::Ok);
+        h.sign_out().await;
+        // The cleanup is owed: the next sign-in waits, then gets a retryable busy.
+        let error = h.sign_in("sam", "demo").await.unwrap_err();
+        assert_eq!((error.code, error.retryable), (ErrorCode::Busy, true));
+        assert!(!error.message.contains("sam"));
+        assert!(!h.manager.is_active());
+        assert!(std::iter::from_fn(|| rx.try_recv().ok()).any(|r| r == CleanupRequest::Nudge));
+        // Nothing was counted against the account.
+        cleaned(&gate);
+        assert_eq!(h.sign_in("sam", "demo").await.unwrap().outcome, SignInOutcome::Ok);
+        // A deletion running also holds a sign-in up.
+        h.sign_out().await;
+        cleaned(&gate);
+        let deleting = gate.begin_delete(&|| false).unwrap();
+        assert_eq!(code_of(&h.sign_in("maya", "demo").await), ErrorCode::Busy);
+        drop(deleting);
+        assert_eq!(h.sign_in("maya", "demo").await.unwrap().outcome, SignInOutcome::Ok);
+    }
+
+    #[tokio::test(start_paused = true)]
     async fn sign_out_resets_every_catalogue_apps_folders_and_never_during_a_session() {
         use crate::agent_policy::AgentPolicy;
-        use crate::cleanup::{run_cleanup, CleanupDeps, CLEANUP_DELAY, IN_USE_RETRY};
+        use crate::cleanup::{run_cleanup, CleanupDeps, CleanupTimings, StaffRef};
         use crate::platform::sim::{SimOp, SimPlatform};
         use crate::platform::Platform;
 
         let h = harness();
         let profile = PathBuf::from(r"C:\Users\RuleboxStaff");
+        let sid = "S-1-5-21-1000-2000-3000-2001";
         let sim = Arc::new(SimPlatform::new(h.dir.path().to_path_buf()));
         let files = [
             r"C:\Users\RuleboxStaff\AppData\Local\Acme\login.json",
             r"C:\Users\RuleboxStaff\AppData\Roaming\Writer\profile.db",
         ];
-        sim.with_world(|w| w.files.extend(files.iter().map(PathBuf::from)));
+        sim.with_world(|w| {
+            w.files.extend(files.iter().map(PathBuf::from));
+            w.profile_dirs.insert(sid.into(), profile.clone());
+        });
         let desktop = |id: &str, folder: &str| -> rulebox_policy::catalog::CatalogApp {
             serde_json::from_value(json!({
                 "id": id, "name": id, "description": null, "kind": "desktop", "builtin": null, "web": null,
@@ -2154,46 +2234,49 @@ mod tests {
             ..AgentPolicy::default()
         };
         let (_policy_tx, policy_rx) = watch::channel(policy);
-        let rx = cleanup_requests(&h);
+        let (gate, rx) = cleanup_requests(&h);
         let manager = Arc::clone(&h.manager);
         let shutdown = CancellationToken::new();
         tokio::spawn(run_cleanup(
             CleanupDeps {
                 platform: Arc::clone(&sim) as Arc<dyn Platform>,
                 policy_rx,
-                profile_dir: Arc::new(move || Some(profile.clone())),
+                staff: Arc::new(move || Some(StaffRef { sid: sid.into(), saved_profile: Some(profile.clone()) })),
                 session_active: Arc::new(move || manager.is_active()),
-                delay: CLEANUP_DELAY,
-                retry_after: IN_USE_RETRY,
+                gate: Arc::clone(&gate),
+                timings: CleanupTimings::default(),
             },
             rx,
             shutdown.clone(),
         ));
         let resets = || sim.calls().iter().filter(|op| **op == SimOp::ResetFolder).count();
         let exists = |f: &str| sim.with_world(|w| w.files.contains(&PathBuf::from(f)));
+        let settle = || async {
+            for _ in 0..50 {
+                tokio::task::yield_now().await;
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+        };
 
-        // Signed in, then out; another employee signs in within the 3 seconds:
-        // nothing is deleted under them.
+        // Maya stays signed in: nothing is deleted under her.
         h.sign_in("maya", "demo").await.unwrap();
-        h.sign_out().await;
-        h.sign_in("sam", "demo").await.unwrap();
         tokio::time::sleep(Duration::from_secs(20)).await;
         assert_eq!(resets(), 0);
-        assert!(files.iter().all(|f| exists(f)));
-
-        // Sam signs out: 3 seconds later every catalogue app's folders are gone.
+        // She signs out; Sam tries at once: refused (retryable) until the cleanup
+        // is done, and nothing of Maya's is left for him.
         h.sign_out().await;
-        tokio::time::sleep(Duration::from_millis(2_900)).await;
-        assert_eq!(resets(), 0);
-        tokio::time::sleep(Duration::from_millis(500)).await;
-        for _ in 0..50 {
-            if resets() == 2 {
-                break;
-            }
-            tokio::time::sleep(Duration::from_millis(10)).await;
-        }
-        assert_eq!(resets(), 2);
+        assert_eq!(code_of(&h.sign_in("sam", "demo").await), ErrorCode::Busy);
+        assert_eq!(resets(), 0, "not before 3 seconds");
+        tokio::time::sleep(Duration::from_millis(2_000)).await;
+        settle().await;
+        assert_eq!(resets(), 2, "every catalogue app's folders, 3 s after the sign-out");
         assert!(files.iter().all(|f| !exists(f)));
+        assert_eq!(code_of(&h.sign_in("sam", "demo").await), ErrorCode::Busy, "the second round is still owed");
+        tokio::time::sleep(Duration::from_millis(10_000)).await;
+        settle().await;
+        assert_eq!(resets(), 4, "the second full round");
+        assert!(!gate.is_owed());
+        assert_eq!(h.sign_in("sam", "demo").await.unwrap().outcome, SignInOutcome::Ok);
         shutdown.cancel();
     }
 }

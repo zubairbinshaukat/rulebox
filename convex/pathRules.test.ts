@@ -3,7 +3,8 @@ import { httpsUrlProblem, normalizeDesktop, normalizeInstall, normalizeWeb } fro
 import { codeOf } from "../tests/convex/identity";
 import { domainProblem, isForbiddenHost, webUrlProblem } from "./lib/hostRules";
 import { programDenied } from "./lib/denyList";
-import { argsProblem, exePathProblem, fileArgProblem, resetFoldersProblem } from "./lib/pathRules";
+import { argsProblem, exePathProblem, fileArgProblem, RESET_DENY, resetFoldersProblem } from "./lib/pathRules";
+import resetVectorsRaw from "../crates/rulebox-policy/tests/vectors/reset-folders.json?raw";
 import { DEFAULT_WEB_PERMISSIONS } from "./lib/validators";
 
 // Path templates (plan 4.8), web address rules (Step 10 item 3), and the
@@ -138,6 +139,31 @@ describe("arguments and cleanup folders", () => {
     expect(resetFoldersProblem(["C:\\Users\\x"])).not.toBeNull();
     expect(resetFoldersProblem(["{ProgramFiles}\\x"])).not.toBeNull();
     expect(resetFoldersProblem(Array.from({ length: 21 }, (_, i) => `{LocalAppData}\\f${i}`))).not.toBeNull();
+  });
+
+  // (Step 16 review) The shared vectors also run against
+  // `rulebox_policy::paths::reset_folder_parts`: both must agree on every one.
+  const resetVectors = JSON.parse(resetVectorsRaw) as { deny: string[][]; accept: string[]; reject: [string, string][] };
+  const kindOf: Record<string, string> = {
+    "folder must start with {LocalAppData} or {RoamingAppData}": "root",
+    "folder path not allowed": "path",
+    "folder holds Windows or Rulebox data": "denied",
+  };
+
+  test("reset folders: the deny list is the shared one (Windows secrets and shell data, the Staff App's data)", () => {
+    expect(RESET_DENY).toEqual(resetVectors.deny);
+    expect(resetVectors.accept.length).toBeGreaterThanOrEqual(10);
+    expect(resetVectors.reject.length).toBeGreaterThanOrEqual(20);
+  });
+
+  test.each(resetVectors.accept)("reset folders: accepts %s", (template) => {
+    expect(resetFoldersProblem([template])).toBeNull();
+  });
+
+  test.each(resetVectors.reject)("reset folders: refuses %s (%s)", (template, kind) => {
+    const problem = resetFoldersProblem([template]);
+    expect(problem).not.toBeNull();
+    expect(kindOf[problem!]).toBe(kind);
   });
 });
 
