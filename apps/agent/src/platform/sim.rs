@@ -11,9 +11,10 @@ use std::time::Duration;
 use tokio_util::sync::CancellationToken;
 
 use super::{
-    BootIdentity, InstallerCommand, InstallerExit, LocalUser, OsInfo, Platform, PlatformError, RegData, RegValueRef, SessionInfo,
-    ShellBinaries, ShellMechanism, StaffUserSpec,
+    BootIdentity, InstallerCommand, InstallerExit, LocalUser, OsInfo, Platform, PlatformError, RegData, RegValueRef,
+    ResetOutcome, SessionInfo, ShellBinaries, ShellMechanism, StaffUserSpec,
 };
+use crate::cleanup::resolve_reset;
 use crate::installs::{
     installer_program_allowed, portable_dir_ok, portable_target_ok, MSI_REBOOT_INITIATED, MSI_REBOOT_REQUIRED,
     MSI_SUCCESS, MSI_UNKNOWN_PRODUCT,
@@ -52,6 +53,7 @@ pub enum SimOp {
     RunInstaller,
     PlacePortable,
     RemovePortable,
+    ResetFolder,
 }
 
 impl SimOp {
@@ -136,6 +138,14 @@ pub struct SimWorld {
     /// and record whether that was refused (the engine must hold it locked).
     pub probe_lock: bool,
     pub lock_probes: Vec<bool>,
+    /// (Step 16) Folders that exist (a folder also exists when a file or folder
+    /// below it does).
+    pub dirs: std::collections::HashSet<PathBuf>,
+    /// (Step 16) Paths that are reparse points (junctions, links). Their targets are
+    /// not modelled: deleting one removes only the link.
+    pub reparse_points: std::collections::HashSet<PathBuf>,
+    /// (Step 16) Files another process holds open: a reset cannot delete them.
+    pub open_files: std::collections::HashSet<PathBuf>,
     next_rid: u32,
     next_pid: u32,
 }
@@ -178,6 +188,9 @@ impl SimWorld {
             installer_runs: Vec::new(),
             probe_lock: false,
             lock_probes: Vec::new(),
+            dirs: std::collections::HashSet::new(),
+            reparse_points: std::collections::HashSet::new(),
+            open_files: std::collections::HashSet::new(),
             next_rid: 2000,
             next_pid: 4000,
         }
@@ -600,6 +613,38 @@ impl Platform for SimPlatform {
         }
         lock(&self.world).files.retain(|file| !file.starts_with(app_dir));
         Ok(())
+    }
+
+    /// (Step 16) Same rules as `WindowsPlatform` on the fake file set: the template
+    /// check, then every folder from the profile down; a reparse point on the way is
+    /// `Refused` (nothing deleted), a missing one is `Absent`. Below the target,
+    /// open files stay (`InUse`), everything else goes; a link inside is removed
+    /// itself (what it points to is untouched).
+    fn reset_folder(&self, profile_dir: &Path, template: &str) -> Result<ResetOutcome, PlatformError> {
+        self.check(SimOp::ResetFolder)?;
+        let target = resolve_reset(profile_dir, template)?;
+        let mut world = lock(&self.world);
+        for path in &target.chain {
+            if world.reparse_points.contains(path) {
+                return Err(PlatformError::Refused("a folder on the way is a link"));
+            }
+            if !world.exists(path) {
+                return Ok(ResetOutcome::Absent);
+            }
+        }
+        let root = target.target().to_path_buf();
+        let busy: Vec<PathBuf> = world.open_files.iter().filter(|file| file.starts_with(&root)).cloned().collect();
+        world.files.retain(|file| !file.starts_with(&root) || busy.contains(file));
+        world.dirs.retain(|dir| !dir.starts_with(&root) || busy.iter().any(|file| file.starts_with(dir)));
+        world.reparse_points.retain(|link| !link.starts_with(&root));
+        Ok(if busy.is_empty() { ResetOutcome::Removed } else { ResetOutcome::InUse })
+    }
+}
+
+impl SimWorld {
+    /// (Step 16) A file or folder at `path`, or anything below it.
+    fn exists(&self, path: &Path) -> bool {
+        self.files.iter().chain(self.dirs.iter()).chain(self.reparse_points.iter()).any(|p| p.starts_with(path))
     }
 }
 

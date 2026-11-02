@@ -170,12 +170,22 @@ struct Inner {
     gate: Arc<tokio::sync::Mutex<()>>,
     roster: Mutex<RosterView>,
     events: Mutex<Option<mpsc::UnboundedSender<SessionEvent>>>,
+    /// (Phase 4 Step 16) Told every time an employee session ends (`cleanup.rs`).
+    cleanup: Mutex<Option<mpsc::UnboundedSender<()>>>,
 }
 
 impl Inner {
     fn emit(&self, event: SessionEvent) {
         if let Some(tx) = lock(&self.events).as_ref() {
             let _ = tx.send(event);
+        }
+    }
+
+    /// (Step 16) An employee session ended: the session cleanup resets the
+    /// catalogue apps' folders a few seconds later.
+    fn ended(&self) {
+        if let Some(tx) = lock(&self.cleanup).as_ref() {
+            let _ = tx.send(());
         }
     }
 
@@ -223,8 +233,19 @@ impl SessionManager {
                 gate: Arc::new(tokio::sync::Mutex::new(())),
                 roster: Mutex::new(RosterView::default()),
                 events: Mutex::new(None),
+                cleanup: Mutex::new(None),
             }),
         })
+    }
+
+    /// (Phase 4 Step 16) Where "an employee session ended" goes (the cleanup task).
+    pub fn set_cleanup(&self, tx: mpsc::UnboundedSender<()>) {
+        *lock(&self.inner.cleanup) = Some(tx);
+    }
+
+    /// (Step 16) Whether an employee is signed in (the cleanup never runs then).
+    pub fn is_active(&self) -> bool {
+        lock(&self.inner.session).is_some()
     }
 
     /// (Step 13) Where `apps.changed` and `session.ended` go.
@@ -302,6 +323,7 @@ impl SessionManager {
             if let Some(reason) = ended {
                 tracing::info!(?reason, "employee session ended by the roster");
                 inner.emit(SessionEvent::Ended(reason));
+                inner.ended();
                 return;
             }
         }
@@ -332,6 +354,7 @@ impl SessionManager {
         if lock(&self.inner.session).take().is_some() {
             tracing::info!(?reason, "employee session ended");
             self.inner.emit(SessionEvent::Ended(reason));
+            self.inner.ended();
         }
     }
 
@@ -346,6 +369,8 @@ impl SessionManager {
         let had = lock(&self.inner.session).take().is_some();
         if had {
             tracing::info!(reason, "employee session cleared");
+            // (Step 16) e.g. the Staff Windows session ended with an employee signed in.
+            self.inner.ended();
         }
     }
 
@@ -410,6 +435,8 @@ impl ShellExtension for SessionManager {
                     // No session is still a success.
                     if lock(&inner.session).take().is_some() {
                         tracing::info!("employee signed out");
+                        // (Step 16) The Staff App closed the apps before this call.
+                        inner.ended();
                     }
                     to_value(Empty {})
                 }
@@ -2047,6 +2074,127 @@ mod tests {
         let h = harness();
         assert_eq!(h.manager.capabilities(), ["session", "apps", "appsChanged", "sessionEnded"]);
         assert!(h.manager.handle(&Harness::peer(), "x.other", json!({})).is_none());
+    }
+
+    // -- Phase 4 Step 16: session cleanup ------------------------------------------------
+
+    fn cleanup_requests(h: &Harness) -> mpsc::UnboundedReceiver<()> {
+        let (tx, rx) = mpsc::unbounded_channel();
+        h.manager.set_cleanup(tx);
+        rx
+    }
+
+    fn drained(rx: &mut mpsc::UnboundedReceiver<()>) -> usize {
+        let mut count = 0;
+        while rx.try_recv().is_ok() {
+            count += 1;
+        }
+        count
+    }
+
+    #[tokio::test]
+    async fn every_end_of_an_employee_session_asks_for_the_cleanup() {
+        let h = harness();
+        let mut rx = cleanup_requests(&h);
+        // No session: signing out, clearing or ending asks for nothing.
+        h.sign_out().await;
+        h.manager.clear("staff session ended");
+        h.manager.end(SessionEndReason::Revoked);
+        assert_eq!(drained(&mut rx), 0);
+        assert!(!h.manager.is_active());
+
+        // session.signOut.
+        h.sign_in("maya", "demo").await.unwrap();
+        assert!(h.manager.is_active());
+        assert_eq!(drained(&mut rx), 0, "a sign-in is not an end");
+        h.sign_out().await;
+        assert!(!h.manager.is_active());
+        assert_eq!(drained(&mut rx), 1);
+
+        // The Staff Windows session ended with an employee signed in.
+        h.sign_in("maya", "demo").await.unwrap();
+        h.manager.clear("staff session ended");
+        assert_eq!(drained(&mut rx), 1);
+
+        // Ended by the agent (revocation, roster).
+        h.sign_in("maya", "demo").await.unwrap();
+        h.manager.end(SessionEndReason::Revoked);
+        assert_eq!(drained(&mut rx), 1);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn sign_out_resets_every_catalogue_apps_folders_and_never_during_a_session() {
+        use crate::agent_policy::AgentPolicy;
+        use crate::cleanup::{run_cleanup, CleanupDeps, CLEANUP_DELAY, IN_USE_RETRY};
+        use crate::platform::sim::{SimOp, SimPlatform};
+        use crate::platform::Platform;
+
+        let h = harness();
+        let profile = PathBuf::from(r"C:\Users\RuleboxStaff");
+        let sim = Arc::new(SimPlatform::new(h.dir.path().to_path_buf()));
+        let files = [
+            r"C:\Users\RuleboxStaff\AppData\Local\Acme\login.json",
+            r"C:\Users\RuleboxStaff\AppData\Roaming\Writer\profile.db",
+        ];
+        sim.with_world(|w| w.files.extend(files.iter().map(PathBuf::from)));
+        let desktop = |id: &str, folder: &str| -> rulebox_policy::catalog::CatalogApp {
+            serde_json::from_value(json!({
+                "id": id, "name": id, "description": null, "kind": "desktop", "builtin": null, "web": null,
+                "desktop": { "exe": r"{ProgramFiles}\X\x.exe", "args": [], "fileArgTemplate": [], "install": null,
+                             "resetFolders": [folder] },
+                "pinnedTaskbar": false, "pinnedDesktop": false, "hue": null, "icon": null,
+                // Maya never sees "b": it is reset all the same.
+                "audience": "selected", "employeeIds": ["emp_nobody"], "revision": 1
+            }))
+            .unwrap()
+        };
+        let policy = AgentPolicy {
+            has_document: true,
+            catalog: vec![desktop("a", r"{LocalAppData}\Acme"), desktop("b", r"{RoamingAppData}\Writer")],
+            ..AgentPolicy::default()
+        };
+        let (_policy_tx, policy_rx) = watch::channel(policy);
+        let rx = cleanup_requests(&h);
+        let manager = Arc::clone(&h.manager);
+        let shutdown = CancellationToken::new();
+        tokio::spawn(run_cleanup(
+            CleanupDeps {
+                platform: Arc::clone(&sim) as Arc<dyn Platform>,
+                policy_rx,
+                profile_dir: Arc::new(move || Some(profile.clone())),
+                session_active: Arc::new(move || manager.is_active()),
+                delay: CLEANUP_DELAY,
+                retry_after: IN_USE_RETRY,
+            },
+            rx,
+            shutdown.clone(),
+        ));
+        let resets = || sim.calls().iter().filter(|op| **op == SimOp::ResetFolder).count();
+        let exists = |f: &str| sim.with_world(|w| w.files.contains(&PathBuf::from(f)));
+
+        // Signed in, then out; another employee signs in within the 3 seconds:
+        // nothing is deleted under them.
+        h.sign_in("maya", "demo").await.unwrap();
+        h.sign_out().await;
+        h.sign_in("sam", "demo").await.unwrap();
+        tokio::time::sleep(Duration::from_secs(20)).await;
+        assert_eq!(resets(), 0);
+        assert!(files.iter().all(|f| exists(f)));
+
+        // Sam signs out: 3 seconds later every catalogue app's folders are gone.
+        h.sign_out().await;
+        tokio::time::sleep(Duration::from_millis(2_900)).await;
+        assert_eq!(resets(), 0);
+        tokio::time::sleep(Duration::from_millis(500)).await;
+        for _ in 0..50 {
+            if resets() == 2 {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+        assert_eq!(resets(), 2);
+        assert!(files.iter().all(|f| !exists(f)));
+        shutdown.cancel();
     }
 }
 

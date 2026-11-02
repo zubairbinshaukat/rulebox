@@ -24,6 +24,7 @@ use crate::audit::{AuditHandle, AuditQueue, AuditSink, ConvexAuditSink};
 use crate::backend::task::{apply_to_snapshot, note_clock, os_jitter, BackendRunner, TaskContext};
 use crate::backend::{BackendFactory, BackendLink};
 use crate::catalog::AppResolver;
+use crate::cleanup::{self, CleanupDeps};
 use crate::directory::{ConvexDirectory, EmployeeDirectory};
 use crate::report::{run_report_task, ReportQueue};
 use crate::roster::RosterState;
@@ -382,6 +383,8 @@ pub async fn run(
         report.set_install_ack(Arc::new(move |accepted| book.ack(accepted)));
     }
     let install_policy_rx = policy_rx.clone();
+    // (Step 16) The session cleanup reads the catalogue when a round starts.
+    let cleanup_policy_rx = policy_rx.clone();
     let (roster_tx, roster_rx) = watch::channel(RosterState::load(&deps.paths.roster()));
     let roster_tx = Arc::new(roster_tx);
     let directory: Arc<dyn EmployeeDirectory> = match deps.directory {
@@ -526,6 +529,35 @@ pub async fn run(
             },
             install_policy_rx,
             snapshot_rx.clone(),
+            shutdown.clone(),
+        ));
+    }
+    // (Step 16) Session cleanup: every end of an employee session resets the
+    // catalogue apps' folders in the Staff profile (PRD 5.3). The demo world has no
+    // Staff profile and no real catalogue: no cleanup.
+    if !deps.sim.demo {
+        let (cleanup_tx, cleanup_rx) = mpsc::unbounded_channel();
+        session.set_cleanup(cleanup_tx);
+        let profile_shared = Arc::clone(&shared);
+        let active_session = Arc::clone(&session);
+        tasks.spawn(cleanup::run_cleanup(
+            CleanupDeps {
+                platform: Arc::clone(&deps.platform),
+                policy_rx: cleanup_policy_rx,
+                profile_dir: Arc::new(move || {
+                    profile_shared.read(|state| state.staff.as_ref().and_then(|staff| staff.profile_dir.clone()))
+                        .map(PathBuf::from)
+                }),
+                // Weak: the session manager owns the sender of this task's channel.
+                // Gone (the agent is stopping) counts as active: nothing is deleted.
+                session_active: {
+                    let weak = Arc::downgrade(&active_session);
+                    Arc::new(move || weak.upgrade().is_none_or(|session| session.is_active()))
+                },
+                delay: cleanup::CLEANUP_DELAY,
+                retry_after: cleanup::IN_USE_RETRY,
+            },
+            cleanup_rx,
             shutdown.clone(),
         ));
     }

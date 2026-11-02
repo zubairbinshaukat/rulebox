@@ -163,8 +163,24 @@ pub enum PlatformError {
     /// app's program is running): retried like a busy installer.
     #[error("the file is in use")]
     InUse,
+    /// (Phase 4 Step 16) A safety rule refused the call before anything changed (a
+    /// template that breaks the rules, a link on the way). A fixed text: never a path.
+    #[error("refused: {0}")]
+    Refused(&'static str),
     #[error("{0}")]
     Other(String),
+}
+
+/// (Phase 4 Step 16) What [`Platform::reset_folder`] did.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ResetOutcome {
+    /// The folder (and everything in it) is gone.
+    Removed,
+    /// There was nothing to remove (the folder, or a folder above it, is missing).
+    Absent,
+    /// A file in it is open (sharing violation): what could be deleted is deleted,
+    /// the rest stays for the retry.
+    InUse,
 }
 
 pub trait Platform: Send + Sync + 'static {
@@ -235,4 +251,13 @@ pub trait Platform: Send + Sync + 'static {
     /// refuses reparse points. A folder that is not there is fine. `InUse` when the
     /// program is running.
     fn remove_portable(&self, app_dir: &Path) -> Result<(), PlatformError>;
+    /// (Phase 4 Step 16, PRD 5.3) Deletes one session-cleanup folder of the Staff
+    /// profile. `template` is `{LocalAppData}\<rel>` or `{RoamingAppData}\<rel>`; it
+    /// is checked again here (`cleanup::resolve_reset`) and resolved below
+    /// `<profile_dir>\AppData\Local` or `\Roaming`, never anywhere else. Every
+    /// existing folder from the profile down to the target is checked: a reparse
+    /// point (link, junction) anywhere on the way is `Refused` and nothing is
+    /// deleted. Links inside the folder are removed themselves, never followed.
+    /// Blocking: call it from `spawn_blocking`.
+    fn reset_folder(&self, profile_dir: &Path, template: &str) -> Result<ResetOutcome, PlatformError>;
 }

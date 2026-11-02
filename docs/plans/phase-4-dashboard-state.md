@@ -4574,6 +4574,59 @@ VM checklist item.
 **Do NOT:** delete anything outside the Staff profile's `AppData`;
 follow a junction; reset while an employee is signed in.
 
+**Status (2026-11-03): built and tested on the dev machine through `SimPlatform`;
+the real deletion is NOT run (VM only).** `cargo clippy -p rulebox-agent -p
+rulebox-policy --all-targets` clean; `cargo test`: rulebox-agent 536/536 (+20),
+rulebox-policy 49/49 (+1).
+Built:
+1. `Platform::reset_folder(profile_dir, template) -> ResetOutcome::{Removed,
+   Absent, InUse}` (`platform/mod.rs`). The template rule is the agent's copy of
+   `resetFoldersProblem` in `rulebox_policy::paths::reset_folder_parts` (+
+   `ResetBase`, `MAX_RESET_FOLDERS` = 20); `cleanup::resolve_reset` builds the
+   chain `<profile>`, `AppData`, `Local`/`Roaming`, then one folder per component
+   (the profile path must be plain and absolute). Refusals are the new
+   `PlatformError::Refused(&'static str)` (fixed text, never a path).
+   `WindowsPlatform`: template check, then the guard, then every folder of the
+   chain opened with `FILE_FLAG_OPEN_REPARSE_POINT` and checked on the handle (a
+   reparse point anywhere = refused, nothing deleted; missing = `Absent`); the
+   folders above the target stay open without `FILE_SHARE_DELETE` (and with a data
+   access, so the share mode counts) until the deletion is over, so none can be
+   renamed or swapped for a junction meanwhile; the target goes with
+   `std::fs::remove_dir_all` (does not follow links; a link inside is removed
+   itself), or `remove_file` when it is a file. Sharing / lock violation (and,
+   during the deletion, access denied) = `InUse`. `SimPlatform` models folders,
+   reparse points and open files (`dirs`, `reparse_points`, `open_files`).
+2. `cleanup.rs` `run_cleanup`: a round 3 s after the latest end of a session, for
+   the `resetFolders` of every `desktop` app of the current catalogue (read when
+   the round starts; deduplicated ignoring case; 20 per app, 500 per round). In
+   use → one retry of those folders 10 s later, then a `warn` and left for the
+   next sign-out. Checked before every folder: an employee signed in stops the
+   round and drops the retry. One folder failing never stops the others; refusals
+   are not retried. No profile known → skipped. Not started in `--sim-demo`.
+3. Logged at `info` with the template only (`warn` with the fixed error text).
+Deviations / choices (please confirm):
+- **Every** end of an employee session asks for the cleanup, not only
+  `session.signOut` and the Staff Windows session ending: also the roster ending
+  a session, revocation, the admin exit and unenrollment (`SessionManager::
+  {end, clear, resync}`). Reason: PRD 5.3 / 13.3 isolation; the plan's two
+  triggers would leave a removed employee's saved logins for the next one.
+- The rule copy lives in `crates/rulebox-policy` (next to `expand_exe`), not in
+  `cleanup.rs` (one copy of `valid_component`); two new `PathProblem` variants.
+- A sign-in during the 3 s (or before the retry) cancels that round; the next
+  sign-out does it. A deletion already in progress when someone signs in finishes
+  (`remove_dir_all` cannot be interrupted); the next folder is not started.
+- No time limit on one folder's deletion (std cannot be interrupted); the work is
+  bounded by the folder count instead.
+VM checklist (unverified on Windows): a folder is gone after sign-out; a junction
+planted by the Staff account at any level is refused (log) and its target
+untouched; a junction inside a reset folder is removed, not followed; an open file
+gives "folder in use" and one retry; read-only files are deleted; nothing is
+deleted while an employee is signed in; the Staff session ending (log off) with an
+employee signed in triggers it.
+PRD note: PRD 5.3 says "On logout, the agent closes all apps the employee
+launched"; this plan (item 2) says the Staff App closes them before it calls
+`signOut`. Step 16 relies on the plan's version; the PRD line should say which.
+
 ---
 
 ### Step 17 — Dashboard: install status, overview, audit, history

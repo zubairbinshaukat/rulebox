@@ -24,8 +24,9 @@ use tokio_util::sync::CancellationToken;
 
 use super::{
     BootIdentity, InstallerCommand, InstallerExit, LocalUser, OsInfo, Platform, PlatformError, RegData, RegValueRef,
-    SessionInfo, SessionState, ShellBinaries, ShellMechanism, StaffUserSpec,
+    ResetOutcome, SessionInfo, SessionState, ShellBinaries, ShellMechanism, StaffUserSpec,
 };
+use crate::cleanup::resolve_reset;
 use crate::installs::{
     installer_program_allowed, is_in_use, is_reparse_point, portable_dir_ok, portable_target_ok, wait_for_installer,
     InstallerWait, RunTemp, RunningInstaller, INSTALLER_TAIL_GRACE,
@@ -468,6 +469,88 @@ impl Platform for WindowsPlatform {
             Err(error) => Err(io_err(error)),
         }
     }
+
+    /// (Step 16) The template rule first, then the guard. Every folder from the
+    /// profile down to the target is opened without following links
+    /// (`FILE_FLAG_OPEN_REPARSE_POINT`) and checked on that handle: a reparse point
+    /// anywhere refuses the whole entry. The handles of the folders above the target
+    /// are kept open without `FILE_SHARE_DELETE` until the deletion is over, so none
+    /// of them can be renamed, deleted or swapped for a junction meanwhile (they are
+    /// not empty, so no junction can be set on them either). The target itself is
+    /// deleted by `remove_dir_all`, which never follows a link: a link swapped in at
+    /// the last moment is removed itself.
+    fn reset_folder(&self, profile_dir: &Path, template: &str) -> Result<ResetOutcome, PlatformError> {
+        use std::os::windows::fs::MetadataExt;
+        let target = resolve_reset(profile_dir, template)?;
+        guard()?;
+        let last = target.chain.len().saturating_sub(1);
+        let mut held = Vec::with_capacity(last);
+        let mut target_is_dir = false;
+        for (index, path) in target.chain.iter().enumerate() {
+            let handle = match open_no_follow(path) {
+                Ok(handle) => handle,
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(ResetOutcome::Absent),
+                Err(error) if is_sharing_violation(&error) => return Ok(ResetOutcome::InUse),
+                Err(error) => return Err(io_err(error)),
+            };
+            let meta = handle.metadata().map_err(io_err)?;
+            if meta.file_attributes() & FILE_ATTRIBUTE_REPARSE_POINT != 0 {
+                return Err(PlatformError::Refused("a folder on the way is a link"));
+            }
+            if index < last {
+                if !meta.is_dir() {
+                    // A file where a folder should be: nothing below it to reset.
+                    return Ok(ResetOutcome::Absent);
+                }
+                held.push(handle);
+            } else {
+                // Not held: the folder itself is about to be deleted.
+                target_is_dir = meta.is_dir();
+            }
+        }
+        let removed = if target_is_dir {
+            std::fs::remove_dir_all(target.target())
+        } else {
+            std::fs::remove_file(target.target())
+        };
+        drop(held);
+        match removed {
+            Ok(()) => Ok(ResetOutcome::Removed),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(ResetOutcome::Absent),
+            // A file in it is open; what was deleted stays deleted.
+            Err(error) if is_in_use(&error) => Ok(ResetOutcome::InUse),
+            Err(error) => Err(io_err(error)),
+        }
+    }
+}
+
+/// `FILE_ATTRIBUTE_REPARSE_POINT`.
+const FILE_ATTRIBUTE_REPARSE_POINT: u32 = 0x400;
+/// `FILE_LIST_DIRECTORY` (= `FILE_READ_DATA`) | `FILE_READ_ATTRIBUTES`. A data
+/// access, so the share mode below is enforced against later opens (a handle with
+/// attribute access only would not block a rename).
+const HOLD_ACCESS: u32 = 0x0001 | 0x0080;
+/// `FILE_SHARE_READ | FILE_SHARE_WRITE`: no `FILE_SHARE_DELETE`, so nobody can
+/// rename or delete the folder while the handle is open.
+const HOLD_SHARE: u32 = 0x1 | 0x2;
+/// `FILE_FLAG_BACKUP_SEMANTICS` (needed to open a folder) |
+/// `FILE_FLAG_OPEN_REPARSE_POINT` (open a link itself, never what it points to).
+const HOLD_FLAGS: u32 = 0x0200_0000 | 0x0020_0000;
+/// `ERROR_SHARING_VIOLATION`, `ERROR_LOCK_VIOLATION`.
+const SHARING_CODES: [i32; 2] = [32, 33];
+
+/// (Step 16) Opens `path` (file or folder) without following a reparse point.
+fn open_no_follow(path: &Path) -> std::io::Result<std::fs::File> {
+    use std::os::windows::fs::OpenOptionsExt;
+    std::fs::OpenOptions::new()
+        .access_mode(HOLD_ACCESS)
+        .share_mode(HOLD_SHARE)
+        .custom_flags(HOLD_FLAGS)
+        .open(path)
+}
+
+fn is_sharing_violation(error: &std::io::Error) -> bool {
+    error.raw_os_error().is_some_and(|code| SHARING_CODES.contains(&code))
 }
 
 /// `CREATE_NO_WINDOW`.
@@ -651,6 +734,22 @@ mod tests {
         let apps = Path::new(r"C:\rulebox-test-no-such-install\apps");
         blocked("place_portable", p.place_portable(exe, &apps.join(r"app1\tool.exe")));
         blocked("remove_portable", p.remove_portable(&apps.join("app1")));
+        // (Step 16) A template the rules allow, below a profile that does not exist.
+        blocked("reset_folder", p.reset_folder(Path::new(r"C:\rulebox-test-no-such-profile"), r"{LocalAppData}\Acme"));
+    }
+
+    #[test]
+    fn reset_folder_refuses_bad_templates_before_the_guard() {
+        // Refused on every machine, before the guard and before any file is opened.
+        let p = platform();
+        let profile = Path::new(r"C:\rulebox-test-no-such-profile");
+        for template in [r"{LocalAppData}\..\..", r"C:\Windows", r"{SystemRoot}\System32", r"{LocalAppData}\"] {
+            assert!(matches!(p.reset_folder(profile, template), Err(PlatformError::Refused(_))), "{template}");
+        }
+        assert!(matches!(
+            p.reset_folder(Path::new(r"rulebox-test\relative"), r"{LocalAppData}\Acme"),
+            Err(PlatformError::Refused(_))
+        ));
     }
 
     #[test]

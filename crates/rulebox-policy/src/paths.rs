@@ -76,6 +76,64 @@ pub enum PathProblem {
     ControlCharacter,
     #[error("{{file}} must appear exactly once")]
     FileArg,
+    /// (Phase 4 Step 16) A reset folder that does not start with `{LocalAppData}\`
+    /// or `{RoamingAppData}\`.
+    #[error("folder must start with {{LocalAppData}} or {{RoamingAppData}}")]
+    ResetRoot,
+    /// (Step 16) A reset folder with no component, or more than 6, below its root.
+    #[error("1 to 6 folder components")]
+    ResetComponentCount,
+}
+
+/// (Phase 4 Step 16) Where a reset folder lives inside the Staff profile.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ResetBase {
+    /// `{LocalAppData}` = `<profile>\AppData\Local`.
+    LocalAppData,
+    /// `{RoamingAppData}` = `<profile>\AppData\Roaming`.
+    RoamingAppData,
+}
+
+impl ResetBase {
+    /// The folder below the profile's `AppData`.
+    pub fn app_data_folder(self) -> &'static str {
+        match self {
+            ResetBase::LocalAppData => "Local",
+            ResetBase::RoamingAppData => "Roaming",
+        }
+    }
+}
+
+/// At most this many reset folders per app (`MAX_RESET_FOLDERS` in
+/// `convex/lib/limits.ts`).
+pub const MAX_RESET_FOLDERS: usize = 20;
+/// A reset folder has 1 to this many components below its root.
+pub const MAX_RESET_COMPONENTS: usize = 6;
+
+const LOCAL_APP_DATA: &str = "{LocalAppData}\\";
+const ROAMING_APP_DATA: &str = "{RoamingAppData}\\";
+
+/// (Phase 4 Step 16, plan 4.12) The agent's copy of `resetFoldersProblem` for one
+/// entry: `{LocalAppData}\<rel>` or `{RoamingAppData}\<rel>`, `<rel>` 1-6
+/// components with the path-template character rules (no `..`, no `.`, no
+/// separator other than `\`, no drive, stream or device name). Returns the root
+/// and the components; the caller joins them below the Staff profile.
+pub fn reset_folder_parts(template: &str) -> Result<(ResetBase, Vec<&str>), PathProblem> {
+    let (base, rest) = if let Some(rest) = template.strip_prefix(LOCAL_APP_DATA) {
+        (ResetBase::LocalAppData, rest)
+    } else if let Some(rest) = template.strip_prefix(ROAMING_APP_DATA) {
+        (ResetBase::RoamingAppData, rest)
+    } else {
+        return Err(PathProblem::ResetRoot);
+    };
+    let parts: Vec<&str> = rest.split('\\').collect();
+    if parts.is_empty() || parts.len() > MAX_RESET_COMPONENTS {
+        return Err(PathProblem::ResetComponentCount);
+    }
+    if !parts.iter().all(|c| valid_component(c)) {
+        return Err(PathProblem::BadComponent);
+    }
+    Ok((base, parts))
 }
 
 const PROGRAM_FILES: &str = "{ProgramFiles}\\";
@@ -293,6 +351,45 @@ mod tests {
         assert_eq!(check_file_args(&s(&["--open", "{file}"])), Ok(()));
         assert_eq!(check_file_args(&s(&["{file}", "{file}"])), Err(PathProblem::FileArg));
         assert_eq!(check_file_args(&s(&["--open"])), Err(PathProblem::FileArg));
+    }
+
+    #[test]
+    fn reset_folders_follow_the_server_rules() {
+        // Accepted (convex/pathRules.test.ts "reset folders").
+        assert_eq!(reset_folder_parts(r"{LocalAppData}\VideoLAN"), Ok((ResetBase::LocalAppData, vec!["VideoLAN"])));
+        assert_eq!(
+            reset_folder_parts(r"{RoamingAppData}\vlc\cache"),
+            Ok((ResetBase::RoamingAppData, vec!["vlc", "cache"]))
+        );
+        assert!(reset_folder_parts(r"{LocalAppData}\a\b\c\d\e\f").is_ok());
+        // Refused.
+        let refused = [
+            (r"{LocalAppData}\a\b\c\d\e\f\g", PathProblem::ResetComponentCount),
+            (r"{LocalAppData}\..\x", PathProblem::BadComponent),
+            (r"{LocalAppData}\a\..", PathProblem::BadComponent),
+            (r"{LocalAppData}\.", PathProblem::BadComponent),
+            (r"{LocalAppData}\", PathProblem::BadComponent),
+            (r"{LocalAppData}\\x", PathProblem::BadComponent),
+            (r"{LocalAppData}\a/..\x", PathProblem::BadComponent),
+            (r"{LocalAppData}\C:\x", PathProblem::BadComponent),
+            (r"{LocalAppData}\a:stream", PathProblem::BadComponent),
+            (r"{LocalAppData}\CON", PathProblem::BadComponent),
+            (r"{LocalAppData}\Acme.", PathProblem::BadComponent),
+            (r"{LocalAppData}\Acme\nul.dat", PathProblem::BadComponent),
+            (r"{LocalAppData}\*", PathProblem::BadComponent),
+            (r"{LocalAppData}", PathProblem::ResetRoot),
+            (r"C:\Users\x", PathProblem::ResetRoot),
+            (r"\\server\share\x", PathProblem::ResetRoot),
+            (r"{ProgramFiles}\x", PathProblem::ResetRoot),
+            (r"{localappdata}\x", PathProblem::ResetRoot),
+            (r"{AppData}\x", PathProblem::ResetRoot),
+            (r"x{LocalAppData}\x", PathProblem::ResetRoot),
+        ];
+        for (template, problem) in refused {
+            assert_eq!(reset_folder_parts(template), Err(problem), "{template}");
+        }
+        assert_eq!(ResetBase::LocalAppData.app_data_folder(), "Local");
+        assert_eq!(ResetBase::RoamingAppData.app_data_folder(), "Roaming");
     }
 
     #[test]

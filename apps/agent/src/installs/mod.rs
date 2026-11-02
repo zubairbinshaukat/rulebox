@@ -173,7 +173,8 @@ fn lower(path: &Path) -> String {
 }
 
 /// Absolute, with only plain components: no `..`, `.`, `\\?\` or stream syntax.
-fn plain_absolute(path: &Path) -> bool {
+/// (Step 16) Also the check of the Staff profile path before a session cleanup.
+pub(crate) fn plain_absolute(path: &Path) -> bool {
     let text = path.to_string_lossy();
     if !path.is_absolute() || text.starts_with(r"\\") || text.contains('/') {
         return false;
