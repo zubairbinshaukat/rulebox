@@ -38,6 +38,32 @@ export function KioskCell({ row }: { row: Pick<DeviceRow, "kioskEnabled" | "revo
   );
 }
 
+/**
+ * What the PC's head says about the plan: only "over the limit" and "suspended" are worth a badge
+ * (the PC keeps its last policy); "ok" and null show nothing.
+ */
+export function PlanStateBadge({ planState }: { planState: DeviceRow["planState"] }) {
+  if (planState === "overLimit") {
+    return (
+      <span>
+        <Pill tone="warning" title={s.planOverLimitHint}>
+          {s.planOverLimit}
+        </Pill>
+      </span>
+    );
+  }
+  if (planState === "suspended") {
+    return (
+      <span>
+        <Pill tone="danger" title={s.planSuspendedHint}>
+          {s.planSuspended}
+        </Pill>
+      </span>
+    );
+  }
+  return null;
+}
+
 export function PolicyCell({ applied, latest }: { applied?: number; latest?: number }) {
   if (latest === undefined) return <span className="dash-muted">—</span>;
   if (applied === latest) return <span className="dash-mono">{s.policyCurrent(latest)}</span>;

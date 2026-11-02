@@ -132,6 +132,8 @@ function Device({ d, liveness }: { d: Detail; liveness: QueryState<DeviceLivenes
       {r?.outOfSupport ? <InlineNotice tone="warning" title={s.outOfSupportWarning} /> : null}
       {r?.kioskError ? <InlineNotice tone="danger" title={s.kioskError(r.kioskError)} /> : null}
       {r?.restartPending ? <InlineNotice tone="accent" title={s.restartPending} /> : null}
+      {/* Reported empty (not just missing): the agent has no key to check a signed policy with. */}
+      {!d.revoked && r?.trustedKeyIds?.length === 0 ? <InlineNotice tone="warning" title={s.noTrustedKeyTitle} detail={s.noTrustedKeyDetail} /> : null}
       {d.flags.rotateCredential ? <InlineNotice tone="neutral" title={s.rotatePending} /> : null}
 
       <div className="dash-grid dash-grid--main">
@@ -151,6 +153,7 @@ function Device({ d, liveness }: { d: Detail; liveness: QueryState<DeviceLivenes
                   <KV label={s.kioskPhase} value={strings.kioskPhase[r.kioskPhase ?? "unknown"]} />
                   <KV label={s.shellHealth} value={strings.shellHealth[r.shellHealth ?? "unknown"]} />
                   <KV label={s.lockdown} value={r.lockdownLevel ?? "—"} />
+                  <KV label={s.trustedKeys} value={<TrustedKeys ids={r.trustedKeyIds} />} />
                 </>
               ) : null}
             </dl>
@@ -230,6 +233,22 @@ function Device({ d, liveness }: { d: Detail; liveness: QueryState<DeviceLivenes
   );
 }
 
+/** The key ids the PC reports it trusts (`trustedKeyIds`); missing = an older agent that does not report them. */
+function TrustedKeys({ ids }: { ids: string[] | undefined }) {
+  if (ids === undefined) return <>—</>;
+  if (ids.length === 0) return <>{s.trustedKeysNone}</>;
+  return (
+    <span className="dash-wrap" title={s.trustedKeysCount(ids.length)}>
+      {ids.map((id, i) => (
+        <span key={id}>
+          {i > 0 ? ", " : ""}
+          <span className="dash-mono">{id}</span>
+        </span>
+      ))}
+    </span>
+  );
+}
+
 function KV({ label, value }: { label: string; value: ReactNode }) {
   return (
     <div className="dash-kv__item">
@@ -244,6 +263,7 @@ function Installs({ deviceId }: { deviceId: string }) {
   const retry = useRetryApp();
   const toast = useToast();
   const canAct = useCan("admin");
+  const [confirming, setConfirming] = useState<DeviceInstallRow | null>(null);
   const cols: Column<DeviceInstallRow>[] = [
     {
       key: "app",
@@ -272,12 +292,9 @@ function Installs({ deviceId }: { deviceId: string }) {
           <Button
             variant="ghost"
             className="dash-btn--sm"
-            onClick={() =>
-              retry({ appId: i.appId }).then(
-                () => toast(strings.install.retried),
-                (e) => toast(messageFor(e), "danger"),
-              )
-            }
+            disabled={i.retryable === false}
+            title={i.retryable === false ? strings.install.retryUnavailable : undefined}
+            onClick={() => setConfirming(i)}
           >
             {strings.install.retry}
           </Button>
@@ -286,13 +303,28 @@ function Installs({ deviceId }: { deviceId: string }) {
   ];
   return (
     <Card title={s.installs} body="none">
+      {/* `apps:retry` restarts the app for every PC, so it is confirmed first. */}
+      <ConfirmDialog
+        open={confirming !== null}
+        title={strings.install.retryConfirmTitle(confirming?.appName ?? "")}
+        body={strings.install.retryConfirmBody(confirming?.appName ?? "")}
+        confirmLabel={strings.install.retryConfirmAction}
+        onConfirm={() => retry({ appId: confirming?.appId ?? "" })}
+        onDone={() => toast(strings.install.retried)}
+        onClose={() => setConfirming(null)}
+      />
       <PagedRegion state={installs} skeleton={<SkeletonRows rows={3} columns={3} />}>
         {(p) =>
-          p.items.length === 0 ? (
+          p.items.length === 0 && !p.canLoadMore ? (
             <EmptyState compact title={s.installsNone} />
           ) : (
             <>
-              <DataTable caption={s.installs} columns={cols} rows={p.items} getKey={(i) => i._id} />
+              {/* The server filters after paging, so a page can be short or empty while more rows exist. */}
+              {p.items.length === 0 ? (
+                <p className="dash-muted" style={{ padding: "12px clamp(16px, 2vw, 22px)" }}>{strings.common.emptyPageSoFar}</p>
+              ) : (
+                <DataTable caption={s.installs} columns={cols} rows={p.items} getKey={(i) => i._id} />
+              )}
               <LoadMore shown={p.items.length} canLoadMore={p.canLoadMore} isLoadingMore={p.isLoadingMore} loadMore={p.loadMore} />
             </>
           )

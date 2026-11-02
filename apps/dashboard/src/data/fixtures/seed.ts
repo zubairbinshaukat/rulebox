@@ -95,6 +95,8 @@ export interface DbDevice {
   enrolledAt: number;
   revision: number;
   rotateCredential: boolean;
+  /** The head's plan state ("ok" and undefined show nothing; a suspended organization overrides it). */
+  planState?: "ok" | "overLimit" | "suspended";
 }
 export interface DbReport {
   agentVersion?: string;
@@ -225,6 +227,8 @@ export interface DemoDb {
   keys: DbKey[];
   /** `orgStats.publishFailedAt`: set while the last publish failed for want of a key; undefined = it works. */
   publishFailedAt?: number;
+  /** A `rosterPending` row exists: a revocation / roster update is waiting for a usable key. */
+  rosterPending?: boolean;
   env: { key: boolean; next: boolean };
   nextId: number;
 }
@@ -574,6 +578,9 @@ export function seed(now: number = Date.now()): DemoDb {
       restartPending?: boolean;
       rotate?: boolean;
       ageDays?: number;
+      /** The signing keys the PC reports it trusts (default: the active key). */
+      trustedKeyIds?: string[];
+      planState?: DbDevice["planState"];
     } = {},
   ) => {
     const d: DbDevice = {
@@ -585,6 +592,7 @@ export function seed(now: number = Date.now()): DemoDb {
       enrolledAt: now - (o.ageDays ?? 30 + Math.floor(rand() * 60)) * DAY,
       revision: 0,
       rotateCredential: o.rotate ?? false,
+      planState: o.planState,
     };
     devices.push(d);
     const latest = 4 + Math.floor(rand() * 20);
@@ -615,7 +623,7 @@ export function seed(now: number = Date.now()): DemoDb {
         appliedVersion: latest - (o.lag ?? 0),
         shellHealth: o.shellHealth ?? "healthy",
         compat: compat(build, edition, ramMb, diskFreeGb),
-        trustedKeyIds: [keyId],
+        trustedKeyIds: o.trustedKeyIds ?? [keyId],
         restartPending: o.restartPending,
         outOfSupport: o.outOfSupport ?? false,
         updatedAt: now - Math.floor(rand() * 6) * HOUR,
@@ -633,9 +641,9 @@ export function seed(now: number = Date.now()): DemoDb {
   addDevice("COUNTER-03", gCounter, { online: false, ageDays: 12 });
   const dOffice1 = addDevice("OFFICE-MANAGER", gOffice, { kioskEnabled: false, ageDays: 11 });
   addDevice("OFFICE-ACCOUNTS", gOffice, { build: 19045, edition: "Professional", outOfSupport: true, ageDays: 10 });
-  addDevice("OFFICE-SCANNER", gOffice, { build: 26100, edition: "Core", outOfSupport: true, kioskPhase: "failed", kioskError: "desired_state_untrusted", shellHealth: "unhealthy", ageDays: 9 });
+  addDevice("OFFICE-SCANNER", gOffice, { build: 26100, edition: "Core", outOfSupport: true, kioskPhase: "failed", kioskError: "desired_state_untrusted", shellHealth: "unhealthy", trustedKeyIds: [], ageDays: 9 });
   addDevice("WAREHOUSE-RECEIVING-DOCK-EAST-TERMINAL-02-LEGACY-HARDWARE-ON-LOAN-FROM-HEAD-OFFICE", gNight, { lag: 2, ageDays: 8 });
-  addDevice("WAREHOUSE-01", gNight, { lag: 1, ramMb: 4096, diskFreeGb: 1, ageDays: 7 });
+  addDevice("WAREHOUSE-01", gNight, { lag: 1, ramMb: 4096, diskFreeGb: 1, planState: "overLimit", ageDays: 7 });
   addDevice("SPARE-LAPTOP-07", undefined, { ageDays: 6 });
   addDevice("NEW-PC-UNBOXED", undefined, { noReport: true, ageDays: 1 });
   addDevice("STOLEN-TABLET", gFront, { revoked: true, online: false, ageDays: 4 });

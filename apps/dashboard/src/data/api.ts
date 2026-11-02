@@ -152,6 +152,13 @@ export interface DataApi {
   useClearExitPin: Mutation<void>;
   useKeysScreen: () => QueryState<KeysScreen>;
   useRegisterKey: Mutation<void>;
+  /**
+   * "Publish again" after a failed publish (`publishFailedAt` is set): `keys:registerActive` without
+   * `force`, which registers nothing when the deployment's key is the active key and just signs and
+   * publishes every PC's policy again. Owner, major action (fresh step-up); `not_ready` while the
+   * deployment has no usable key, `conflict` when its key is not this organization's active key.
+   */
+  usePublishAgain: Mutation<void>;
   usePrepareRotation: Mutation<void>;
   useFinishRotation: Mutation<void>;
   useMembersScreen: () => QueryState<MembersScreen>;

@@ -9,13 +9,14 @@ import IconLayers from "~icons/solar/layers-linear";
 import IconWarn from "~icons/solar/danger-triangle-linear";
 import IconDanger from "~icons/solar/danger-circle-linear";
 import IconShield from "~icons/solar/shield-warning-linear";
+import IconUserWarn from "~icons/solar/user-block-rounded-linear";
 import IconCheck from "~icons/solar/check-circle-linear";
 import IconAdd from "~icons/solar/add-square-linear";
 import IconUserPlus from "~icons/solar/user-plus-rounded-linear";
 import IconWidgetAdd from "~icons/solar/widget-add-linear";
 import IconRight from "~icons/solar/alt-arrow-right-linear";
 import { useFailedInstalls, useOverview } from "../data";
-import type { OverviewScreen } from "../data/types";
+import { NO_GROUP_FILTER, type OverviewScreen } from "../data/types";
 import { AuditTimelineItem } from "../components/AuditItem";
 import { Card } from "../components/Card";
 import { EmptyState } from "../components/EmptyState";
@@ -62,17 +63,25 @@ function attentionOf(o: OverviewScreen): Attention[] {
   if (o.publishFailedAt !== null) {
     out.push({ key: "pub", icon: IconDanger, tone: "danger", title: s.publishFailedTitle, detail: s.publishFailedDetail, action: { to: "/settings?tab=signing", label: strings.common.open } });
   }
+  if (o.rosterPending) {
+    out.push({ key: "roster", icon: IconUserWarn, tone: "warning", title: s.rosterPendingTitle, detail: s.rosterPendingDetail, action: { to: "/settings?tab=signing", label: s.noKeyAction } });
+  }
   if (o.plan.status !== "active") {
     out.push({ key: "susp", icon: IconDanger, tone: "danger", title: s.suspendedTitle, detail: s.suspendedDetail });
   }
   for (const l of LIMITED) {
     const max = l.max(o.plan.limits);
-    if (max < NO_LIMIT && l.count(c) >= max) {
-      out.push({ key: `limit-${l.kind}`, icon: IconWarn, tone: "warning", title: s.limitTitle(s.limitKinds[l.kind]), detail: s.limitDetail });
+    if (max >= NO_LIMIT) continue;
+    const count = l.count(c);
+    // Exactly at the limit is information (nothing is wrong, nothing more can be added); only over it is urgent.
+    if (count > max) {
+      out.push({ key: `limit-${l.kind}`, icon: IconWarn, tone: "warning", title: s.overLimitTitle(s.limitKinds[l.kind]), detail: s.overLimitDetail });
+    } else if (count === max) {
+      out.push({ key: `limit-${l.kind}`, icon: IconWarn, tone: "accent", title: s.limitTitle(s.limitKinds[l.kind]), detail: s.limitDetail });
     }
   }
   if (c.noGroupDeviceCount > 0) {
-    out.push({ key: "grp", icon: IconLayers, tone: "warning", title: s.noGroupTitle(c.noGroupDeviceCount), detail: s.noGroupDetail, action: { to: "/devices", label: s.noGroupAction } });
+    out.push({ key: "grp", icon: IconLayers, tone: "warning", title: s.noGroupTitle(c.noGroupDeviceCount), detail: s.noGroupDetail, action: { to: `/devices?group=${NO_GROUP_FILTER}`, label: s.noGroupAction } });
   }
   if (c.deviceCount > 300) {
     out.push({ key: "big", icon: IconWarn, tone: "warning", title: s.largeFleetTitle, detail: s.largeFleetDetail });

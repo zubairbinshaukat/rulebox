@@ -106,6 +106,7 @@ function useLiveKeysScreen(): QueryState<KeysScreen> {
       envNextKeyPresent: data.env.next !== null,
       signing: data.signing,
       publishFailedAt: data.publishFailedAt,
+      rosterPending: data.rosterPending,
       keys: data.keys.map((k) => ({ keyId: k.keyId, fingerprint: k.fingerprint, status: k.status, createdAt: k.createdAt })),
       trust: hasNext && trusting !== undefined && total !== undefined ? { trusting, total } : null,
     };
@@ -581,6 +582,14 @@ export const liveApi: DataApi = {
   // ---- signing keys (Step 8). The three writes are Owner major actions (fresh step-up).
   useKeysScreen: useLiveKeysScreen,
   useRegisterKey() {
+    const register = useMutation(api.keys.registerActive);
+    const call = useCallback(async () => {
+      await register({});
+    }, [register]);
+    return useMapped(call);
+  },
+  usePublishAgain() {
+    // No `force`: with the active key in the deployment this is the retry, it registers nothing.
     const register = useMutation(api.keys.registerActive);
     const call = useCallback(async () => {
       await register({});

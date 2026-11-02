@@ -17,7 +17,8 @@ export const liveAppsApi: AppsApi = {
   useAppInstalls(appId, state) {
     const { isAuthenticated } = useConvexAuth();
     const r = usePaginatedQuery(api.apps.installs, isAuthenticated ? { appId, state } : "skip", { initialNumItems: PAGE_SIZE });
-    return usePagedState(r as UsePaginatedQueryResult<AppInstallRow>, PAGE_SIZE);
+    // Another app or state is another list: its rows must not show the previous ones while the first page loads.
+    return usePagedState(r as UsePaginatedQueryResult<AppInstallRow>, PAGE_SIZE, `${appId}:${state}`);
   },
 };
 

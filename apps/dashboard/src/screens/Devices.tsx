@@ -6,7 +6,7 @@ import IconAdd from "~icons/solar/add-square-linear";
 import IconRefresh from "~icons/solar/refresh-linear";
 import { useCheckNow, useCheckResult, useGroupsScreen } from "../data";
 import { useDevicesScreen } from "../data/devices";
-import type { DeviceRow } from "../data/types";
+import { NO_GROUP_FILTER, type DeviceRow } from "../data/types";
 import { Card } from "../components/Card";
 import { DataTable, type Column } from "../components/DataTable";
 import { EmptyState } from "../components/EmptyState";
@@ -17,7 +17,7 @@ import { PagedRegion, RegionBoundary } from "../components/Region";
 import { RoleGate } from "../components/RoleGate";
 import { SearchInput } from "../components/SearchInput";
 import { SkeletonRows } from "../components/Skeleton";
-import { DeviceOnline, KioskCell, PolicyCell } from "../components/DeviceCells";
+import { DeviceOnline, KioskCell, PlanStateBadge, PolicyCell } from "../components/DeviceCells";
 import { messageFor } from "../lib/errors";
 import { useCan } from "../lib/member";
 import { strings } from "../lib/strings";
@@ -84,7 +84,12 @@ function columns(now: number): Column<DeviceRow>[] {
     {
       key: "policy",
       header: s.colPolicy,
-      cell: (d) => <PolicyCell applied={d.report?.appliedVersion} latest={d.latestVersion} />,
+      cell: (d) => (
+        <span className="dash-cell-stack">
+          <PolicyCell applied={d.report?.appliedVersion} latest={d.latestVersion} />
+          <PlanStateBadge planState={d.planState} />
+        </span>
+      ),
     },
   ];
 }
@@ -141,7 +146,8 @@ export default function Devices() {
   const groups = useGroupsScreen();
   // `fleet:list` throws not_found for an id that is not a group of this organization (an old link, a deleted group):
   // such a value is dropped from the query and from the URL. Until the groups are known, a requested filter waits.
-  const known = groups.status === "ready" ? groups.data.some((g) => g._id === requested) : groups.status === "error";
+  const known =
+    requested === NO_GROUP_FILTER || (groups.status === "ready" ? groups.data.some((g) => g._id === requested) : groups.status === "error");
   const stale = requested !== "" && groups.status === "ready" && !known;
   const groupId = known ? requested : "";
   useEffect(() => {
@@ -188,12 +194,13 @@ export default function Devices() {
           }}
         >
           <option value="">{s.allGroups}</option>
+          <option value={NO_GROUP_FILTER}>{s.noGroupFilter}</option>
           {groups.status === "ready" ? groups.data.map((g) => <option key={g._id} value={g._id}>{g.name}</option>) : null}
         </Select>
       </div>
       {/* The paginated query throws its errors while rendering: the list gets its own boundary. */}
       <RegionBoundary>
-        {requested && groups.status === "loading" ? (
+        {requested && requested !== NO_GROUP_FILTER && groups.status === "loading" ? (
           <Card body="none">
             <SkeletonRows rows={8} columns={5} />
           </Card>

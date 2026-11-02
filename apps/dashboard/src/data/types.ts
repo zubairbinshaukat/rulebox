@@ -255,6 +255,11 @@ export interface KeysScreen {
   signing: "ok" | "missing" | "mismatch";
   /** When a publish last failed for want of a key (null when it works). */
   publishFailedAt: number | null;
+  /**
+   * A removal of a disabled employee is waiting to be signed (no usable key yet): their offline
+   * sign-in lasts on the group's PCs until the key is back (`keys:status`).
+   */
+  rosterPending: boolean;
   keys: PolicyKeyRow[];
   /** Devices that trust the `next` key, of all devices (null without a next key). */
   trust: { trusting: number; total: number } | null;
@@ -380,6 +385,12 @@ export interface DevicePresence {
   since: number | null;
 }
 
+/**
+ * What the PC's published head says about the plan: "overLimit" = the PC is over the plan's device
+ * limit and keeps its last policy; "suspended" = the organization is suspended. "ok" and null show nothing.
+ */
+export type DevicePlanState = "ok" | "overLimit" | "suspended";
+
 /** `fleet:list` row: `devices` + `deviceSummary` + `devicePresence`. Never `deviceLiveness` (rule 4). */
 export interface DeviceRow {
   _id: Id;
@@ -396,6 +407,8 @@ export interface DeviceRow {
     "agentVersion" | "osBuild" | "osEdition" | "kioskPhase" | "kioskError" | "appliedVersion" | "outOfSupport"
   > | null;
   latestVersion?: number;
+  /** From the head (`fleet:list`); null before the first publish. Only "overLimit" and "suspended" are shown. */
+  planState?: DevicePlanState | null;
 }
 
 /** `fleet:liveness`: the one liveness row of the watched device (plan 4.9). */
@@ -435,7 +448,9 @@ export interface DeviceDetail {
   groups: GroupOption[];
 }
 
-export type DeviceFilter = { groupId?: Id; search?: string };
+/** `fleet:list({ groupId: "none" })` lists the devices that have no group. */
+export const NO_GROUP_FILTER = "none";
+export type DeviceFilter = { groupId?: Id | typeof NO_GROUP_FILTER; search?: string };
 
 // ---------------------------------------------------------------- installs
 
@@ -470,6 +485,11 @@ export interface DeviceInstallRow {
   exitCode?: number;
   detail?: string;
   updatedAt: number;
+  /**
+   * False when the app is archived or has no install source (the server would refuse
+   * `apps:retry`). Not sent yet: absent means unknown, and Retry then stays available.
+   */
+  retryable?: boolean;
 }
 
 /** `apps:installs` row */
@@ -589,7 +609,10 @@ export interface DesktopSpec {
 }
 
 /** `apps:installSummary`: PCs per install state, each capped at 1001 ("1000+"); a state without PCs is absent. */
-export type InstallCounts = Partial<Record<InstallState, number>>;
+export type InstallCounts = Partial<Record<InstallState, number>> & {
+  /** Some state had more rows than the server read, so a count may be low: the screen says "at least". */
+  capped?: boolean;
+};
 
 export interface InstallSummary {
   installed: number;
@@ -757,5 +780,7 @@ export interface OverviewScreen {
   plan: { name: PlanName; status: PlanStatus; limits: PlanLimits };
   signing: OverviewSigning;
   publishFailedAt: number | null;
+  /** A revocation / roster update is waiting to be signed (`rosterPending` rows exist). */
+  rosterPending: boolean;
   recentAudit: AuditEntry[];
 }

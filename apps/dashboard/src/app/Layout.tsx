@@ -14,6 +14,7 @@ import { AccountMenu } from "./AccountMenu";
 import { ChunkErrorBoundary } from "./ChunkErrorBoundary";
 import { ConnectionBanner } from "./ConnectionBanner";
 import { Nav } from "./Nav";
+import { PublishBanner } from "./PublishBanner";
 import { StepUpProvider } from "../stepup/StepUpProvider";
 
 // `__DEMO__` is a build-time literal, so live builds drop this chunk entirely.
@@ -135,6 +136,7 @@ function Shell() {
           </header>
 
           <ConnectionBanner />
+          <PublishBanner />
           {versionMismatch ? (
             <div className="dash-banner dash-banner--accent" role="status">
               <span className="dash-banner__icon" aria-hidden="true">

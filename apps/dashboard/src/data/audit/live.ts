@@ -20,7 +20,7 @@ export const liveAuditApi: AuditApi = {
   useHistory(targetId) {
     const { isAuthenticated } = useConvexAuth();
     const r = usePaginatedQuery(api.audit.forTarget, isAuthenticated ? { targetId } : "skip", { initialNumItems: HISTORY_PAGE });
-    return usePagedState(r as UsePaginatedQueryResult<AuditEntry>, HISTORY_PAGE);
+    return usePagedState(r as UsePaginatedQueryResult<AuditEntry>, HISTORY_PAGE, targetId);
   },
 };
 

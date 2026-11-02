@@ -407,6 +407,17 @@ export function simulateConcurrentEdit() {
   notify();
 }
 
+/**
+ * "Simulate a failed publish" (`orgStats.publishFailedAt`) / "a roster update waiting for a key"
+ * (`rosterPending`): the global banner and the notices show up; Publish again clears both.
+ */
+export function simulatePublishTrouble(kind: "publish" | "roster") {
+  const d = state.db;
+  if (kind === "publish") d.publishFailedAt = Date.now();
+  else d.rosterPending = true;
+  notify();
+}
+
 // ---------------------------------------------------------------- reads
 
 function useVersion(): number {

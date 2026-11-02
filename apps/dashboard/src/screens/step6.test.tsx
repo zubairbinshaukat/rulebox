@@ -288,6 +288,24 @@ describe("stale clock and expiry labels", () => {
     rerender({ r: { results: [], status: "LoadingFirstPage", loadMore: () => undefined } });
     expect(result.current.status === "ready" && result.current.items).toBe(rows);
   });
+
+  it("usePagedState drops the kept rows when its resetKey changes (they belong to another list)", () => {
+    const rows = [row(1)];
+    const loading = { results: [], status: "LoadingFirstPage", loadMore: () => undefined } as unknown;
+    const { result, rerender } = renderHook(({ r, key }) => usePagedState(r as never, 50, key), {
+      initialProps: { r: { results: rows, status: "Exhausted", loadMore: () => undefined } as unknown, key: "installed" },
+    });
+    rerender({ r: loading, key: "installed" });
+    expect(result.current.status === "ready" && result.current.items).toBe(rows);
+    rerender({ r: loading, key: "failed" });
+    expect(result.current.status).toBe("loading");
+    const failedRows = [row(2)];
+    rerender({ r: { results: failedRows, status: "Exhausted", loadMore: () => undefined }, key: "failed" });
+    expect(result.current.status === "ready" && result.current.items).toBe(failedRows);
+    // Back to the first list while its page loads: the old "installed" rows are gone for good.
+    rerender({ r: loading, key: "installed" });
+    expect(result.current.status).toBe("loading");
+  });
 });
 
 describe("Create a code (enrollmentCodes.create)", () => {

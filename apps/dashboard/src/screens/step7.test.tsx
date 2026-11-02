@@ -158,12 +158,48 @@ describe("Devices (fleet:list)", () => {
     expect(cx.paged.at(-1)).toEqual({ name: "fleet:list", args: { groupId: "g1" } });
   });
 
+  it("offers a No group filter: it sends groupId none at once (no waiting for the groups) and keeps it in the URL", () => {
+    ui(<Devices />, "viewer", "/devices?group=none");
+    expect(cx.paged.at(-1)).toEqual({ name: "fleet:list", args: { groupId: "none" } });
+    expect((screen.getByLabelText(strings.devices.groupFilter) as HTMLSelectElement).value).toBe("none");
+  });
+
+  it("choosing No group in the filter lists the PCs without a group, and All groups goes back", async () => {
+    cx.results["groups:list"] = [{ _id: "g1", name: "Sales", createdAt: 1, revision: 0, devices: { count: 1, more: false }, employees: { count: 0, more: false } }];
+    ui(<Devices />, "viewer", "/devices");
+    const select = screen.getByLabelText(strings.devices.groupFilter) as HTMLSelectElement;
+    expect(within(select).getByRole("option", { name: strings.devices.noGroupFilter })).toBeTruthy();
+    fireEvent.change(select, { target: { value: "none" } });
+    await waitFor(() => expect(cx.paged.at(-1)).toEqual({ name: "fleet:list", args: { groupId: "none" } }));
+    fireEvent.change(select, { target: { value: "" } });
+    await waitFor(() => expect(cx.paged.at(-1)).toEqual({ name: "fleet:list", args: {} }));
+  });
+
+  it("badges a PC that is over the plan limit or suspended; ok, null and a missing state show nothing", () => {
+    cx.results["groups:list"] = [];
+    cx.pages["fleet:list"] = [
+      row("d1", "Over PC", { planState: "overLimit" }),
+      row("d2", "Suspended PC", { planState: "suspended" }),
+      row("d3", "Fine PC", { planState: "ok" }),
+      row("d4", "Unpublished PC", { planState: null }),
+      row("d5", "Older server PC"),
+    ];
+    ui(<Devices />, "viewer", "/devices");
+    const rows = within(screen.getByRole("table")).getAllByRole("row");
+    expect(within(rows[1]!).getByText(strings.devices.planOverLimit).getAttribute("title")).toBe(strings.devices.planOverLimitHint);
+    expect(within(rows[2]!).getByText(strings.devices.planSuspended)).toBeTruthy();
+    for (const i of [3, 4, 5]) {
+      expect(within(rows[i]!).queryByText(strings.devices.planOverLimit)).toBeNull();
+      expect(within(rows[i]!).queryByText(strings.devices.planSuspended)).toBeNull();
+    }
+  });
+
   it("ignores a group filter that is not a group of this organization and clears it from the URL", async () => {
     cx.results["groups:list"] = [{ _id: "g1", name: "Sales", createdAt: 1, revision: 0, devices: { count: 1, more: false }, employees: { count: 0, more: false } }];
-    ui(<Devices />, "viewer", "/devices?group=none");
+    ui(<Devices />, "viewer", "/devices?group=gone");
     await waitFor(() => expect(cx.paged.at(-1)).toEqual({ name: "fleet:list", args: {} }));
     // The unknown id never reaches fleet:list (it would throw not_found into the region boundary).
-    expect(cx.paged.some((p) => JSON.stringify(p.args).includes("none"))).toBe(false);
+    expect(cx.paged.some((p) => JSON.stringify(p.args).includes("gone"))).toBe(false);
     expect(screen.queryByRole("alert")).toBeNull();
     expect((screen.getByLabelText(strings.devices.groupFilter) as HTMLSelectElement).value).toBe("");
   });
@@ -239,6 +275,27 @@ describe("DeviceDetail (fleet:get)", () => {
     expect(screen.getByRole("heading", { level: 1, name: "Front desk" })).toBeTruthy();
     expect(screen.getByText(strings.device.lastContact)).toBeTruthy();
     await waitFor(() => expect(watch).toHaveBeenCalledWith({ deviceId: "d1" }));
+  });
+
+  it("lists the signing keys the PC trusts; reported empty it warns, reported nothing (older agent) it shows a dash and no warning", () => {
+    cx.fns["fleet:watch"] = vi.fn(async () => ({ fastUntil: null }));
+    cx.results["fleet:liveness"] = { lastContactAt: Date.now() - 20_000, online: true, fastUntil: null };
+    const withKeys = (trustedKeyIds?: string[]) => detail({ report: { agentVersion: "0.4.0", os: "Windows 11", osBuild: "26100", updatedAt: Date.now() - 60_000, trustedKeyIds } });
+    cx.results["fleet:get"] = withKeys(["a3f19c07d2e8b456", "00112233445566ff"]);
+    open();
+    expect(screen.getByText(strings.device.trustedKeys)).toBeTruthy();
+    expect(screen.getByText("a3f19c07d2e8b456")).toBeTruthy();
+    expect(screen.getByText("00112233445566ff")).toBeTruthy();
+    expect(screen.queryByText(strings.device.noTrustedKeyTitle)).toBeNull();
+    cleanup();
+    cx.results["fleet:get"] = withKeys([]);
+    open();
+    expect(screen.getByText(strings.device.noTrustedKeyTitle)).toBeTruthy();
+    expect(screen.getByText(strings.device.trustedKeysNone)).toBeTruthy();
+    cleanup();
+    cx.results["fleet:get"] = withKeys(undefined);
+    open();
+    expect(screen.queryByText(strings.device.noTrustedKeyTitle)).toBeNull();
   });
 
   it("subscribes to liveness next to fleet:get, and a PC that pinged but never reported still shows its last contact", () => {

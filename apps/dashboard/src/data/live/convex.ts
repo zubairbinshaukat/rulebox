@@ -105,16 +105,22 @@ export function useMemberQuery<Q extends FunctionReference<"query">>(
  * arrives, so the list does not flash a skeleton. `usePaginatedQuery` THROWS
  * query errors during render: a screen renders the list inside a
  * `RegionBoundary`, whose "Try again" subscribes again.
+ *
+ * `resetKey` names WHAT the list is about (for example the app and the install
+ * state). When it changes the kept rows belong to something else, so they are
+ * dropped and the list is "loading" until the new first page arrives, never the
+ * old rows. Leave it out when only a refresh of the same list is meant (the
+ * minute in `nowMs`).
  */
-export function usePagedState<T>(r: UsePaginatedQueryResult<T>, pageSize: number): PagedState<T> {
-  const [kept, setKept] = useState<T[] | null>(null);
+export function usePagedState<T>(r: UsePaginatedQueryResult<T>, pageSize: number, resetKey?: string): PagedState<T> {
+  const [kept, setKept] = useState<{ key: string | undefined; rows: T[] } | null>(null);
   const firstPage = r.status === "LoadingFirstPage";
-  if (!firstPage && kept !== r.results) setKept(r.results);
+  if (!firstPage && (kept === null || kept.rows !== r.results || kept.key !== resetKey)) setKept({ key: resetKey, rows: r.results });
   const { loadMore: more } = r;
   const loadMore = useCallback(() => more(pageSize), [more, pageSize]);
   if (firstPage) {
-    if (kept === null) return { status: "loading" };
-    return { status: "ready", items: kept, canLoadMore: false, isLoadingMore: false, loadMore: noop };
+    if (kept === null || kept.key !== resetKey) return { status: "loading" };
+    return { status: "ready", items: kept.rows, canLoadMore: false, isLoadingMore: false, loadMore: noop };
   }
   return {
     status: "ready",

@@ -76,6 +76,7 @@ export const {
   useClearExitPin,
   useKeysScreen,
   useRegisterKey,
+  usePublishAgain,
   usePrepareRotation,
   useFinishRotation,
   useMembersScreen,

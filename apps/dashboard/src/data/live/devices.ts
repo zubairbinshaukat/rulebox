@@ -51,6 +51,7 @@ export function deviceRowOf(r: ListRow): DeviceRow {
         }
       : null,
     latestVersion: r.latestVersion ?? undefined,
+    planState: r.planState ?? null,
   };
 }
 

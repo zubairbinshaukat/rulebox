@@ -7,6 +7,7 @@ import {
   setControls,
   setRoleOverride,
   simulateConcurrentEdit,
+  simulatePublishTrouble,
   useStoreVersion,
   type DemoControls,
 } from "./store";
@@ -19,6 +20,7 @@ export function useDemoControls() {
     setControls: (patch: Partial<DemoControls>) => setControls(patch),
     setRole: (role: Role | null) => setRoleOverride(role),
     simulateConcurrentEdit,
+    simulatePublishTrouble,
     reset: resetDemo,
   };
 }

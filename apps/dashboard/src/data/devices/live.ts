@@ -22,7 +22,7 @@ export const liveDevicesApi: DevicesApi = {
   useDeviceInstalls(deviceId) {
     const { isAuthenticated } = useConvexAuth();
     const r = usePaginatedQuery(api.fleet.installs, isAuthenticated ? { deviceId } : "skip", { initialNumItems: PAGE_SIZE });
-    return usePagedState(r as UsePaginatedQueryResult<DeviceInstallRow>, PAGE_SIZE);
+    return usePagedState(r as UsePaginatedQueryResult<DeviceInstallRow>, PAGE_SIZE, deviceId);
   },
 };
 

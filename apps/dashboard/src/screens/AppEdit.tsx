@@ -838,9 +838,15 @@ function InstallStatus({ d }: { d: AppDetail }) {
 
 function InstallCard({ d, counts }: { d: AppDetail; counts: InstallCounts }) {
   const present = INSTALL_STATES.filter((st) => (counts[st] ?? 0) > 0);
-  const [chosen, setState] = useState<InstallState>(present[0] ?? "installed");
-  // The chosen state may have emptied since (its last PC moved on): show the first that has PCs.
-  const state = present.includes(chosen) ? chosen : (present[0] ?? chosen);
+  // `chosen` is only ever a click. Until then the first state with PCs is shown (`anchor`), and it stays
+  // on screen when another state fills later (the first installed PC): the view only moves when the user
+  // clicks, or when the state on screen has no PCs left.
+  const [chosen, setState] = useState<InstallState | null>(null);
+  const [anchor, setAnchor] = useState<InstallState | null>(null);
+  const clicked = chosen !== null && present.includes(chosen) ? chosen : null;
+  const picked = clicked ?? (anchor !== null && present.includes(anchor) ? anchor : (present[0] ?? null));
+  if (clicked === null && anchor !== picked) setAnchor(picked);
+  const state = picked ?? "installed";
   const retry = useRetryApp();
   const toast = useToast();
   const [retrying, setRetrying] = useState(false);
@@ -888,6 +894,11 @@ function InstallCard({ d, counts }: { d: AppDetail; counts: InstallCounts }) {
               </button>
             ))}
           </div>
+          {counts.capped ? (
+            <p className="dash-list__meta" style={{ padding: "0 clamp(16px, 2vw, 22px) 12px" }}>
+              {s.installCapped}
+            </p>
+          ) : null}
           <InstallList appId={d._id} state={state} />
         </>
       )}
@@ -929,11 +940,16 @@ function InstallList({ appId, state }: { appId: string; state: InstallState }) {
   return (
     <PagedRegion state={rows} skeleton={<SkeletonRows rows={4} columns={3} />}>
       {(p) =>
-        p.items.length === 0 ? (
+        p.items.length === 0 && !p.canLoadMore ? (
           <EmptyState compact title={s.installStatusNone} />
         ) : (
           <>
-            <DataTable caption={s.installStatus} columns={cols} rows={p.items} getKey={(r) => r._id} />
+            {/* The server filters after paging, so a page can be short or empty while more rows exist. */}
+            {p.items.length === 0 ? (
+              <p className="dash-muted" style={{ padding: "12px clamp(16px, 2vw, 22px)" }}>{strings.common.emptyPageSoFar}</p>
+            ) : (
+              <DataTable caption={s.installStatus} columns={cols} rows={p.items} getKey={(r) => r._id} />
+            )}
             <LoadMore shown={p.items.length} canLoadMore={p.canLoadMore} isLoadingMore={p.isLoadingMore} loadMore={p.loadMore} />
           </>
         )

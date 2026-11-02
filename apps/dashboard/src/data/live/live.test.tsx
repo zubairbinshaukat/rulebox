@@ -421,6 +421,34 @@ describe("install status, overview, audit and history (Step 17)", () => {
     expect(lastRequest().args).toEqual({ appId: "a1" });
     expect(result.current).toEqual({ status: "ready", data: { installed: 12, failed: 1001, unsupported: 2 } });
   });
+
+  it("the install summary carries capped only when the server says so", () => {
+    cx.queryResult = { pending: 0, downloading: 0, installing: 0, installed: 1001, failed: 0, removing: 0, removed: 0, unsupported: 0, capped: true };
+    expect(renderHook(() => live.useAppInstallSummary("a1")).result.current).toEqual({ status: "ready", data: { installed: 1001, capped: true } });
+    cx.queryResult = { pending: 0, downloading: 0, installing: 0, installed: 3, failed: 0, removing: 0, removed: 0, unsupported: 0, capped: false };
+    expect(renderHook(() => live.useAppInstallSummary("a1")).result.current).toEqual({ status: "ready", data: { installed: 3 } });
+  });
+
+  it("the signing screen carries publishFailedAt and rosterPending from keys:status", () => {
+    cx.queryResult = {
+      keys: [],
+      signing: "missing",
+      env: { active: null, next: null },
+      publishFailedAt: 5,
+      rosterPending: true,
+    };
+    const { result } = renderHook(() => live.useKeysScreen());
+    expect(cx.requests.flatMap((r) => Object.values(r)).some((r) => getFunctionName((r as { query: FunctionReference<"query"> }).query) === "keys:status")).toBe(true);
+    expect(result.current).toMatchObject({ status: "ready", data: { publishFailedAt: 5, rosterPending: true, envKeyPresent: false } });
+  });
+
+  it("Publish again is keys:registerActive without force", async () => {
+    const register = vi.fn().mockResolvedValue({ keyId: "k", fingerprint: "f" });
+    cx.fns["keys:registerActive"] = register;
+    const { result } = renderHook(() => live.usePublishAgain());
+    await result.current();
+    expect(register).toHaveBeenCalledWith({});
+  });
 });
 
 describe("hooks that fail for want of a backend", () => {

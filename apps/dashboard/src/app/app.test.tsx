@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter, Route, Routes, useLocation } from "react-router";
 import type { Me, MeResult, SettingsScreen } from "../data/types";
 import { AppError } from "../lib/errors";
@@ -13,6 +13,8 @@ const mock = vi.hoisted(() => ({
   connected: true,
   settings: null as unknown,
   updateSettings: vi.fn(),
+  overview: { status: "loading" } as unknown,
+  publishAgain: vi.fn(),
 }));
 
 vi.mock("../data", () => ({
@@ -25,6 +27,8 @@ vi.mock("../data", () => ({
   useSettingsScreen: () => mock.settings,
   useUpdateSettings: () => mock.updateSettings,
   usePlan: () => ({ status: "loading" }),
+  useOverview: () => mock.overview,
+  usePublishAgain: () => mock.publishAgain,
 }));
 
 vi.mock("../data/stepup", () => ({
@@ -36,6 +40,7 @@ vi.mock("../data/stepup", () => ({
 import { RequireMember } from "./RequireMember";
 import { Layout } from "./Layout";
 import { ConnectionBanner } from "./ConnectionBanner";
+import { PublishBanner } from "./PublishBanner";
 import { RoleGate } from "../components/RoleGate";
 import { CopyField } from "../components/CopyField";
 import { LoadMore } from "../components/LoadMore";
@@ -76,6 +81,8 @@ beforeEach(() => {
   mock.me = owner;
   mock.connected = true;
   mock.updateSettings.mockReset();
+  mock.overview = { status: "loading" };
+  mock.publishAgain.mockReset();
 });
 
 describe("RequireMember", () => {
@@ -141,6 +148,92 @@ describe("ConnectionBanner", () => {
     act(() => vi.advanceTimersByTime(3100));
     expect(screen.getByText(strings.app.reconnecting)).toBeTruthy();
     vi.useRealTimers();
+  });
+});
+
+describe("PublishBanner", () => {
+  const failed = (publishFailedAt: number | null) => {
+    mock.overview = { status: "ready", data: { publishFailedAt, rosterPending: false } };
+  };
+  const show = (role: Me["role"] = "owner") =>
+    render(
+      <ToastProvider>
+        <MeContext.Provider value={{ ...owner, role }}>
+          <PublishBanner />
+        </MeContext.Provider>
+      </ToastProvider>,
+    );
+
+  it("is absent while the overview loads and while publishing works", () => {
+    show();
+    expect(screen.queryByRole("alert")).toBeNull();
+    cleanup();
+    failed(null);
+    show();
+    expect(screen.queryByRole("alert")).toBeNull();
+    expect(screen.queryByRole("button", { name: strings.publish.again })).toBeNull();
+  });
+
+  it("tells everyone that publishing failed; an Owner gets Publish again, an Admin is told to ask one", () => {
+    failed(Date.now() - 3600_000);
+    show("owner");
+    const banner = screen.getByRole("alert");
+    expect(banner.textContent).toContain(strings.publish.bannerTitle);
+    expect(screen.getByRole("button", { name: strings.publish.again })).toBeTruthy();
+    cleanup();
+    show("admin");
+    expect(screen.getByRole("alert").textContent).toContain("Ask an Owner");
+    expect(screen.queryByRole("button", { name: strings.publish.again })).toBeNull();
+  });
+
+  it("Publish again shows progress, calls the mutation once, then confirms with a toast", async () => {
+    failed(Date.now() - 1000);
+    let done: () => void = () => undefined;
+    const call = vi.fn(() => new Promise<void>((resolve) => (done = resolve)));
+    mock.publishAgain = call;
+    show();
+    fireEvent.click(screen.getByRole("button", { name: strings.publish.again }));
+    const busy = screen.getByRole("button", { name: strings.publish.publishing });
+    expect(busy.getAttribute("aria-busy")).toBe("true");
+    expect((busy as HTMLButtonElement).disabled).toBe(true);
+    expect(call).toHaveBeenCalledTimes(1);
+    await act(async () => done());
+    expect(screen.getByText(strings.publish.done)).toBeTruthy();
+    expect((screen.getByRole("button", { name: strings.publish.again }) as HTMLButtonElement).disabled).toBe(false);
+  });
+
+  it("a refusal stays on the banner in plain words: no key on the deployment, or another key", async () => {
+    failed(Date.now() - 1000);
+    mock.publishAgain = vi.fn(async () => {
+      throw new AppError({ code: "not_ready", detail: "RULEBOX_POLICY_KEY is not set or not 32 bytes of base64" });
+    });
+    show();
+    fireEvent.click(screen.getByRole("button", { name: strings.publish.again }));
+    expect(await screen.findByText(strings.publish.notReady)).toBeTruthy();
+    expect((screen.getByRole("button", { name: strings.publish.again }) as HTMLButtonElement).disabled).toBe(false);
+    cleanup();
+    mock.publishAgain = vi.fn(async () => {
+      throw new AppError({ code: "conflict", detail: "key_exists" });
+    });
+    show();
+    fireEvent.click(screen.getByRole("button", { name: strings.publish.again }));
+    expect(await screen.findByText(strings.publish.mismatch)).toBeTruthy();
+  });
+
+  it("is part of the signed-in shell", () => {
+    failed(Date.now() - 1000);
+    render(
+      <MemoryRouter initialEntries={["/"]}>
+        <MeContext.Provider value={owner}>
+          <Routes>
+            <Route element={<Layout />}>
+              <Route path="*" element={<p>page</p>} />
+            </Route>
+          </Routes>
+        </MeContext.Provider>
+      </MemoryRouter>,
+    );
+    expect(screen.getByText(strings.publish.bannerTitle)).toBeTruthy();
   });
 });
 

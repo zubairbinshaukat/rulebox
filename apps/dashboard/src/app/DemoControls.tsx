@@ -64,6 +64,24 @@ export default function DemoControls() {
             <Button
               variant="ghost"
               onClick={() => {
+                demo.simulatePublishTrouble("publish");
+                toast(d.simulatePublishFailedDone, "info");
+              }}
+            >
+              {d.simulatePublishFailed}
+            </Button>
+            <Button
+              variant="ghost"
+              onClick={() => {
+                demo.simulatePublishTrouble("roster");
+                toast(d.simulateRosterDone, "info");
+              }}
+            >
+              {d.simulateRoster}
+            </Button>
+            <Button
+              variant="ghost"
+              onClick={() => {
                 demo.reset();
                 toast(d.resetDone, "info");
               }}

@@ -18,6 +18,8 @@ export function appDetailOf(r: GetResult): AppDetail {
 export function installCountsOf(r: SummaryResult): InstallCounts {
   const out: InstallCounts = {};
   for (const state of INSTALL_STATES) if (r[state] > 0) out[state] = r[state];
+  // `capped` is optional on the server (absent unless a state hit the read cap).
+  if ("capped" in r && r.capped === true) out.capped = true;
   return out;
 }
 

@@ -19,6 +19,7 @@ import {
 } from "../fixtures/seed";
 import {
   INSTALL_STATES,
+  NO_GROUP_FILTER,
   type AppDetail,
   type AppKind,
   type AppOption,
@@ -123,7 +124,14 @@ function deviceRow(db: DemoDb, d: DbDevice): DeviceRow {
         }
       : null,
     latestVersion: latestVersion(db, d._id),
+    planState: planState(db, d),
   };
+}
+
+/** The head's plan state: a suspended organization suspends every PC; otherwise what the fixture says (null = never published). */
+function planState(db: DemoDb, d: DbDevice): DeviceRow["planState"] {
+  if (d.revoked) return null;
+  return db.org.plan.status !== "active" ? "suspended" : (d.planState ?? "ok");
 }
 
 function employeeRow(db: DemoDb, e: DemoDb["employees"][number]): EmployeeRow {
@@ -469,6 +477,7 @@ export const demoApi: DataApi = {
         plan: { name: db.org.plan.plan, status: db.org.plan.status, limits: db.org.plan.limits },
         signing: !active ? "none" : next ? "rotating" : "active",
         publishFailedAt: db.publishFailedAt ?? null,
+        rosterPending: db.rosterPending === true,
         recentAudit: [...db.audit].sort(byNewest).slice(0, 10).map(auditEntry),
       };
     });
@@ -1115,6 +1124,8 @@ export const demoApi: DataApi = {
       for (const s of INSTALL_STATES) {
         const c = db.installs.filter((i) => i.appId === a._id && i.state === s).length;
         if (c) counts[s] = Math.min(c, 1001);
+        // The server reads at most 1,001 rows per state: past that a count may be low.
+        if (c > 1001) counts.capped = true;
       }
       return counts;
     });
@@ -1499,7 +1510,8 @@ export const demoApi: DataApi = {
         envKeyPresent: db.env.key,
         envNextKeyPresent: db.env.next,
         signing: !db.env.key ? ("missing" as const) : hasActive ? ("ok" as const) : ("mismatch" as const),
-        publishFailedAt: null,
+        publishFailedAt: db.publishFailedAt ?? null,
+        rosterPending: db.rosterPending === true,
         keys: [...db.keys].sort((a, b) => a.createdAt - b.createdAt),
         trust: next
           ? {
@@ -1521,6 +1533,25 @@ export const demoApi: DataApi = {
           db.keys.push({ keyId, fingerprint: `SHA256:${token(43)}`, status: "active", createdAt: now });
           audit({ action: "policy.keyRegistered", summary: `Signing key ${keyId} registered.` });
         }),
+      [],
+    );
+  },
+
+  usePublishAgain() {
+    return useCallback(
+      () =>
+        runMutation(
+          "owner",
+          ({ db }) => {
+            // `keys:registerActive` without `force`: with the active key in the deployment it only publishes
+            // again (and signs the queued removals); nothing is registered or audited.
+            if (!db.env.key) fail("not_ready");
+            if (!db.keys.some((k) => k.status === "active")) fail("not_ready");
+            db.publishFailedAt = undefined;
+            db.rosterPending = false;
+          },
+          "fresh",
+        ),
       [],
     );
   },
@@ -1705,7 +1736,8 @@ export const demoDevicesApi: DevicesApi = {
     return useDemoPaged(`fleet:list:${groupId ?? ""}:${text}`, (db) => {
       requireReader();
       let list = db.devices;
-      if (groupId) list = list.filter((d) => d.groupId === groupId);
+      if (groupId === NO_GROUP_FILTER) list = list.filter((d) => !d.groupId);
+      else if (groupId) list = list.filter((d) => d.groupId === groupId);
       // `search_name` returns its best matches first; the demo keeps newest first.
       if (text) list = list.filter((d) => d.name.toLowerCase().includes(text));
       return [...list].sort((a, b) => b.enrolledAt - a.enrolledAt).map((d) => deviceRow(db, d));

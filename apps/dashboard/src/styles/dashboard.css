@@ -444,6 +444,14 @@ h3 {
   background: var(--rb-warning-soft);
   color: var(--rb-warning-text);
 }
+.dash-banner--danger {
+  background: var(--rb-danger-soft);
+  color: var(--rb-danger-text);
+}
+.dash-banner__error {
+  flex-basis: 100%;
+  font-weight: 600;
+}
 .dash-banner--accent {
   background: var(--rb-accent-soft);
   color: var(--rb-accent-text);

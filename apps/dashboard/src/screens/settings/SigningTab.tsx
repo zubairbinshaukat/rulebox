@@ -12,9 +12,11 @@ import { RoleGate } from "../../components/RoleGate";
 import { SkeletonBlock } from "../../components/Skeleton";
 import { useToast } from "../../lib/toast";
 import { formatDate } from "../../lib/format";
+import { publishErrorMessage, usePublishAgainFlow } from "../../lib/publish";
 import { strings } from "../../lib/strings";
 
 const s = strings.settings.signing;
+const p = strings.publish;
 const TONE: Record<PolicyKeyStatus, PillTone> = { active: "success", next: "accent", retired: "neutral" };
 
 /** `keys:status` + `keys:trustProgress` (Section 4.5). Register / rotate are Owner only. */
@@ -32,6 +34,7 @@ function Signing({ k }: { k: KeysScreen }) {
   const prepare = usePrepareRotation();
   const finish = useFinishRotation();
   const toast = useToast();
+  const again = usePublishAgainFlow();
   const [pending, setPending] = useState<"register" | "prepare" | null>(null);
   const [error, setError] = useState<unknown>(null);
   const [confirmFinish, setConfirmFinish] = useState(false);
@@ -57,7 +60,37 @@ function Signing({ k }: { k: KeysScreen }) {
     <>
       <Card title={strings.settings.tabs.signing} sub={s.lead}>
         <div className="dash-form">
-          {k.publishFailedAt !== null ? <InlineNotice tone="danger" title={s.publishFailed(formatDate(k.publishFailedAt))} /> : null}
+          {k.publishFailedAt !== null ? (
+            <InlineNotice
+              tone="danger"
+              title={s.publishFailed(formatDate(k.publishFailedAt))}
+              detail={p.signingHint}
+              action={
+                <RoleGate minRole="owner">
+                  <Button variant="ghost" className="dash-btn--sm" disabled={again.pending} aria-busy={again.pending} onClick={again.run}>
+                    {again.pending ? p.publishing : p.again}
+                  </Button>
+                </RoleGate>
+              }
+            />
+          ) : null}
+          <FormError error={again.error} describe={publishErrorMessage} />
+          {k.rosterPending ? (
+            <InlineNotice
+              tone="warning"
+              title={p.rosterTitle}
+              detail={p.rosterBody}
+              action={
+                k.publishFailedAt === null ? (
+                  <RoleGate minRole="owner">
+                    <Button variant="ghost" className="dash-btn--sm" disabled={again.pending} aria-busy={again.pending} onClick={again.run}>
+                      {again.pending ? p.publishing : p.again}
+                    </Button>
+                  </RoleGate>
+                ) : undefined
+              }
+            />
+          ) : null}
           {!k.envKeyPresent ? <InlineNotice tone="warning" title={s.envMissing} /> : null}
           {active && k.envKeyPresent && k.signing === "mismatch" ? (
             <InlineNotice tone="danger" title={s.mismatchTitle} detail={s.mismatchBody} />

@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { act, renderHook, waitFor } from "@testing-library/react";
 import { demoApi, demoDevicesApi, demoEmployeesApi } from "./hooks";
-import { db, resetDemo, setControls, setSession, simulateConcurrentEdit } from "./store";
+import { db, resetDemo, setControls, setSession, simulateConcurrentEdit, simulatePublishTrouble } from "./store";
 import { errorCodeOf } from "../../lib/errors";
 
 /** Signed in, MFA passed and step-up verified just now (writes need an unlocked session). */
@@ -187,5 +187,76 @@ describe("demo devices (plan Step 7)", () => {
     const first = await watch({ deviceId: id });
     expect(first.fastUntil).toBeGreaterThan(Date.now());
     await expect(watch({ deviceId: id })).resolves.toEqual(first);
+  });
+});
+describe("demo: Step 17 follow-ups", () => {
+  it("lists the PCs without a group for groupId none, and badges plan states", async () => {
+    resetDemo();
+    signInAs("owner@demo.rulebox.test");
+    const { result } = renderHook(() => demoDevicesApi.useDevicesScreen({ groupId: "none" }));
+    await waitFor(() => expect(result.current.status).toBe("ready"), { timeout: 3000 });
+    const r = result.current;
+    if (r.status !== "ready") throw new Error();
+    expect(r.items.length).toBeGreaterThan(0);
+    expect(r.items.every((d) => d.groupId === undefined)).toBe(true);
+    expect(r.items.length).toBe(db().devices.filter((d) => !d.groupId).length);
+
+    const all = renderHook(() => demoDevicesApi.useDevicesScreen({ search: "WAREHOUSE-01" }));
+    await waitFor(() => expect(all.result.current.status).toBe("ready"), { timeout: 3000 });
+    const row = all.result.current.status === "ready" ? all.result.current.items[0] : undefined;
+    expect(row?.planState).toBe("overLimit");
+  });
+
+  it("publish failed and a waiting roster update show on the overview and keys, and Publish again clears both", async () => {
+    resetDemo();
+    signInAs("owner@demo.rulebox.test");
+    simulatePublishTrouble("publish");
+    simulatePublishTrouble("roster");
+    const overview = renderHook(() => demoApi.useOverview());
+    await waitFor(() => expect(overview.result.current.status).toBe("ready"), { timeout: 3000 });
+    if (overview.result.current.status !== "ready") throw new Error();
+    expect(overview.result.current.data.publishFailedAt).not.toBeNull();
+    expect(overview.result.current.data.rosterPending).toBe(true);
+
+    const again = renderHook(() => demoApi.usePublishAgain()).result.current;
+    await again();
+    expect(db().publishFailedAt).toBeUndefined();
+    expect(db().rosterPending).toBe(false);
+    await waitFor(() => {
+      const o = overview.result.current;
+      expect(o.status === "ready" && o.data.publishFailedAt === null && !o.data.rosterPending).toBe(true);
+    });
+  });
+
+  it("Publish again is for Owners and needs a key on the deployment", async () => {
+    resetDemo();
+    signInAs("owner@demo.rulebox.test");
+    db().env.key = false;
+    const again = renderHook(() => demoApi.usePublishAgain()).result.current;
+    expect(errorCodeOf(await again().catch((e) => e))).toBe("not_ready");
+    resetDemo();
+    signInAs("auditor.with.a.really.long.mailbox.name@regional-compliance-office.demo.rulebox.test");
+    const asViewer = renderHook(() => demoApi.usePublishAgain()).result.current;
+    expect(errorCodeOf(await asViewer().catch((e) => e))).toBe("forbidden");
+  });
+
+  it("the install summary says capped when a state has more results than the server reads", async () => {
+    resetDemo();
+    signInAs("owner@demo.rulebox.test");
+    // The default fixtures stay under the cap (a PC has one result per app), so add enough results for one app.
+    const app = db().apps.find((a) => a.kind === "desktop")!;
+    const device = db().devices[0]!;
+    for (let n = 0; n < 1100; n++) db().installs.push({ _id: `ins_x${n}`, deviceId: device._id, appId: app._id, state: "installed", attempts: 1, updatedAt: Date.now() });
+    const big = renderHook(() => demoApi.useAppInstallSummary(app._id));
+    await waitFor(() => expect(big.result.current.status).toBe("ready"), { timeout: 3000 });
+    if (big.result.current.status !== "ready") throw new Error();
+    expect(big.result.current.data.installed).toBe(1001);
+    expect(big.result.current.data.capped).toBe(true);
+
+    resetDemo();
+    const small = renderHook(() => demoApi.useAppInstallSummary(app._id));
+    await waitFor(() => expect(small.result.current.status).toBe("ready"), { timeout: 3000 });
+    if (small.result.current.status !== "ready") throw new Error();
+    expect(small.result.current.data.capped).toBeUndefined();
   });
 });

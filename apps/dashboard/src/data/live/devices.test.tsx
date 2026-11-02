@@ -69,6 +69,7 @@ const serverRow = {
   presence: { online: false, since: 500, revoked: false },
   summary: { agentVersion: "0.4.0", windowsBuild: "26100", kioskPhase: "applied", outOfSupport: true, appliedVersion: 3, updatedAt: 9 },
   latestVersion: 4,
+  planState: "overLimit",
 };
 
 beforeEach(() => {
@@ -94,7 +95,15 @@ describe("row mapping", () => {
       presence: { online: false, since: 500 },
       report: { agentVersion: "0.4.0", osBuild: "26100", kioskPhase: "applied", appliedVersion: 3, outOfSupport: true },
       latestVersion: 4,
+      planState: "overLimit",
     });
+  });
+
+  it("the plan state is kept for the badge; a row without one (an older server, no head yet) reads as null", () => {
+    expect(deviceRowOf(asRow({ ...serverRow, planState: "suspended" })).planState).toBe("suspended");
+    expect(deviceRowOf(asRow({ ...serverRow, planState: null })).planState).toBeNull();
+    const old = Object.fromEntries(Object.entries(serverRow).filter(([key]) => key !== "planState"));
+    expect(deviceRowOf(asRow(old)).planState).toBeNull();
   });
 
   it("no summary yet: report null; no head yet: no latest version; revoked comes from the presence row", () => {

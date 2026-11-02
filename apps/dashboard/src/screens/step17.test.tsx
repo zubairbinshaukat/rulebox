@@ -18,6 +18,11 @@ const cx = vi.hoisted(() => ({
   paged: [] as { name: string; args: unknown }[],
   queried: [] as { name: string; args: unknown }[],
   fns: {} as Record<string, (args?: unknown) => Promise<unknown>>,
+  /** Paginated queries whose arguments this accepts are still loading their first page (no rows yet). */
+  loading: null as null | ((name: string, args: unknown) => boolean),
+  /** The status a paginated query reports (default "Exhausted"); "CanLoadMore" with few or no rows is a short page. */
+  statuses: {} as Record<string, string>,
+  loadMore: vi.fn(),
 }));
 
 vi.mock("convex/react", () => ({
@@ -32,7 +37,8 @@ vi.mock("convex/react", () => ({
   useQuery: () => undefined,
   usePaginatedQuery: (ref: FunctionReference<"query">, args: unknown) => {
     cx.paged.push({ name: getFunctionName(ref), args });
-    return { results: (cx.pages[getFunctionName(ref)] ??= []), status: "Exhausted", isLoading: false, loadMore: () => undefined };
+    if (cx.loading?.(getFunctionName(ref), args)) return { results: [], status: "LoadingFirstPage", isLoading: true, loadMore: () => undefined };
+    return { results: (cx.pages[getFunctionName(ref)] ??= []), status: cx.statuses[getFunctionName(ref)] ?? "Exhausted", isLoading: false, loadMore: cx.loadMore };
   },
   useAction: (ref: FunctionReference<"action">) => fnFor(getFunctionName(ref)),
   useMutation: (ref: FunctionReference<"mutation">) => fnFor(getFunctionName(ref)),
@@ -61,6 +67,8 @@ import Overview from "./Overview";
 import Audit from "./Audit";
 import AppEdit from "./AppEdit";
 import DeviceDetail from "./DeviceDetail";
+import { SigningTab } from "./settings/SigningTab";
+import { AppError } from "../lib/errors";
 
 const admin: Me = {
   email: "admin@x.test",
@@ -73,7 +81,11 @@ const admin: Me = {
 };
 
 function ui(node: ReactNode, role: Me["role"], path: string) {
-  return render(
+  return render(tree(node, role, path));
+}
+
+function tree(node: ReactNode, role: Me["role"], path: string) {
+  return (
     <ToastProvider>
       <MeContext.Provider value={{ ...admin, role }}>
         <MemoryRouter initialEntries={[path]}>
@@ -85,7 +97,7 @@ function ui(node: ReactNode, role: Me["role"], path: string) {
           </Routes>
         </MemoryRouter>
       </MeContext.Provider>
-    </ToastProvider>,
+    </ToastProvider>
   );
 }
 
@@ -95,6 +107,9 @@ beforeEach(() => {
   cx.paged = [];
   cx.queried = [];
   cx.fns = {};
+  cx.loading = null;
+  cx.statuses = {};
+  cx.loadMore.mockReset();
 });
 afterEach(cleanup);
 
@@ -119,6 +134,7 @@ const overviewData = (over: Record<string, unknown> = {}, c: Partial<typeof coun
   plan: { name: "team", status: "active", limits },
   signing: "active",
   publishFailedAt: null,
+  rosterPending: false,
   recentAudit: [],
   ...over,
 });
@@ -174,6 +190,22 @@ describe("Overview (overview:get)", () => {
     ]) {
       expect(screen.getByText(text), text).toBeTruthy();
     }
+  });
+
+  it("exactly at a limit is information: it is listed, but the lead stays calm", () => {
+    cx.results["overview:get"] = overviewData({ plan: { name: "free", status: "active", limits: { ...limits, maxDevices: 2 } } }, { deviceCount: 2 });
+    ui(<Overview />, "viewer", "/");
+    expect(screen.getByText(strings.overview.limitTitle(strings.overview.limitKinds.devices))).toBeTruthy();
+    expect(screen.getByText(strings.overview.leadCalm)).toBeTruthy();
+    expect(screen.queryByText(/need a look/)).toBeNull();
+  });
+
+  it("over a limit is urgent: its own wording and it counts in the lead", () => {
+    cx.results["overview:get"] = overviewData({ plan: { name: "free", status: "active", limits: { ...limits, maxDevices: 2 } } }, { deviceCount: 3 });
+    ui(<Overview />, "viewer", "/");
+    expect(screen.getByText(strings.overview.overLimitTitle(strings.overview.limitKinds.devices))).toBeTruthy();
+    expect(screen.queryByText(strings.overview.limitTitle(strings.overview.limitKinds.devices))).toBeNull();
+    expect(screen.getByText(strings.overview.leadAttention(1))).toBeTruthy();
   });
 
   it("a plan without limits (self-host) shows no limit warning", () => {
@@ -252,6 +284,32 @@ describe("AppEdit: install status (apps:installSummary, apps:installs)", () => {
     await waitFor(() => expect(lastPaged("apps:installs")).toEqual({ name: "apps:installs", args: { appId: "a1", state: "failed" } }));
   });
 
+  it("switching to a state whose first page is still loading never shows the previous state's rows", async () => {
+    cx.results["apps:get"] = program;
+    cx.results["apps:installSummary"] = { pending: 0, downloading: 0, installing: 0, installed: 7, failed: 1, removing: 0, removed: 0, unsupported: 0 };
+    cx.pages["apps:installs"] = [{ _id: "i1", deviceId: "d1", deviceName: "Front desk", state: "installed", attempts: 1, updatedAt: Date.now() }];
+    ui(<AppEdit />, "viewer", "/apps/a1");
+    expect(screen.getByRole("link", { name: "Front desk" })).toBeTruthy();
+    cx.loading = (name, args) => name === "apps:installs" && (args as { state: string }).state === "failed";
+    fireEvent.click(screen.getByRole("button", { name: new RegExp(`${strings.installState.failed}\\s*1$`) }));
+    await waitFor(() => expect(lastPaged("apps:installs")).toEqual({ name: "apps:installs", args: { appId: "a1", state: "failed" } }));
+    expect(screen.queryByRole("link", { name: "Front desk" })).toBeNull();
+  });
+
+  it("the state on screen does not move on its own when an earlier state fills later", () => {
+    cx.results["apps:get"] = program;
+    cx.results["apps:installSummary"] = { pending: 0, downloading: 0, installing: 0, installed: 0, failed: 2, removing: 0, removed: 0, unsupported: 0 };
+    const view = ui(<AppEdit />, "viewer", "/apps/a1");
+    expect(lastPaged("apps:installs")?.args).toEqual({ appId: "a1", state: "failed" });
+    // The first installed PC reports: the list stays on Failed until the user clicks Installed.
+    cx.results["apps:installSummary"] = { pending: 0, downloading: 0, installing: 0, installed: 1, failed: 2, removing: 0, removed: 0, unsupported: 0 };
+    view.rerender(tree(<AppEdit />, "viewer", "/apps/a1"));
+    expect(lastPaged("apps:installs")?.args).toEqual({ appId: "a1", state: "failed" });
+    expect(screen.getByRole("button", { name: new RegExp(`${strings.installState.failed}\\s*2$`) }).getAttribute("aria-pressed")).toBe("true");
+    fireEvent.click(screen.getByRole("button", { name: new RegExp(`${strings.installState.installed}\\s*1$`) }));
+    expect(lastPaged("apps:installs")?.args).toEqual({ appId: "a1", state: "installed" });
+  });
+
   it("an app no PC has reported on says so", () => {
     cx.results["apps:get"] = program;
     cx.results["apps:installSummary"] = { pending: 0, downloading: 0, installing: 0, installed: 0, failed: 0, removing: 0, removed: 0, unsupported: 0 };
@@ -296,5 +354,195 @@ describe("DeviceDetail: installs (fleet:installs) and history (audit:forTarget)"
     expect(within(docs).getByText(strings.installState.installed)).toBeTruthy();
     expect(within(docs).queryByRole("button", { name: strings.install.retry })).toBeNull();
     expect(screen.getByText("Renamed the PC Desk to Front desk")).toBeTruthy();
+  });
+
+  function withFailedInstall(extra: Record<string, unknown> = {}) {
+    cx.results["fleet:get"] = detail;
+    cx.results["fleet:liveness"] = { lastContactAt: Date.now(), online: true, fastUntil: null };
+    cx.fns["fleet:watch"] = async () => ({ fastUntil: null });
+    cx.pages["fleet:installs"] = [{ _id: "i1", appId: "a1", appName: "Reader", state: "failed", attempts: 3, updatedAt: Date.now(), ...extra }];
+  }
+
+  it("Retry asks first, says it affects every PC with the app, and only a confirm calls apps:retry", async () => {
+    withFailedInstall();
+    const retry = vi.fn(async () => undefined);
+    cx.fns["apps:retry"] = retry;
+    ui(<DeviceDetail />, "admin", "/devices/d1");
+    fireEvent.click(screen.getByRole("button", { name: strings.install.retry }));
+    const dialog = screen.getByRole("dialog");
+    expect(within(dialog).getByText(strings.install.retryConfirmBody("Reader"))).toBeTruthy();
+    expect(retry).not.toHaveBeenCalled();
+
+    fireEvent.click(within(dialog).getByRole("button", { name: strings.common.cancel }));
+    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(retry).not.toHaveBeenCalled();
+
+    fireEvent.click(screen.getByRole("button", { name: strings.install.retry }));
+    fireEvent.click(within(screen.getByRole("dialog")).getByRole("button", { name: strings.install.retryConfirmAction }));
+    await waitFor(() => expect(retry).toHaveBeenCalledWith({ appId: "a1" }));
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+    expect(screen.getByText(strings.install.retried)).toBeTruthy();
+  });
+
+  it("Retry is disabled, with the reason, for an app the server says cannot be retried", () => {
+    withFailedInstall({ retryable: false });
+    ui(<DeviceDetail />, "admin", "/devices/d1");
+    const button = screen.getByRole("button", { name: strings.install.retry }) as HTMLButtonElement;
+    expect(button.disabled).toBe(true);
+    expect(button.getAttribute("title")).toBe(strings.install.retryUnavailable);
+  });
+
+  it("the history of another PC does not show this PC's rows while its first page loads", () => {
+    withFailedInstall();
+    cx.pages["audit:forTarget"] = [entry("e1", { summary: "Renamed the PC Desk to Front desk" })];
+    const view = ui(<DeviceDetail />, "viewer", "/devices/d1");
+    expect(screen.getByText("Renamed the PC Desk to Front desk")).toBeTruthy();
+    cx.loading = (name) => name === "audit:forTarget";
+    cx.results["fleet:get"] = { ...detail, _id: "d2" };
+    view.rerender(tree(<DeviceDetail />, "viewer", "/devices/d1"));
+    expect(screen.queryByText("Renamed the PC Desk to Front desk")).toBeNull();
+  });
+});
+
+describe("Step 17 follow-ups: roster notice, no-group link, short pages, capped counts", () => {
+  it("Overview: a waiting roster update is listed and points to the signing settings; without one it is absent", () => {
+    cx.results["overview:get"] = overviewData({ rosterPending: true });
+    ui(<Overview />, "viewer", "/");
+    expect(screen.getByText(strings.overview.rosterPendingTitle)).toBeTruthy();
+    expect(screen.getByText(strings.overview.rosterPendingDetail)).toBeTruthy();
+    const item = screen.getByText(strings.overview.rosterPendingTitle).closest("li") as HTMLElement;
+    expect(within(item).getByRole("link", { name: strings.overview.noKeyAction }).getAttribute("href")).toBe("/settings?tab=signing");
+    cleanup();
+    cx.results["overview:get"] = overviewData({ rosterPending: false });
+    ui(<Overview />, "viewer", "/");
+    expect(screen.queryByText(strings.overview.rosterPendingTitle)).toBeNull();
+  });
+
+  it("Overview: the no-group warning opens the device list already filtered to PCs without a group", () => {
+    cx.results["overview:get"] = overviewData({}, { noGroupDeviceCount: 2 });
+    ui(<Overview />, "viewer", "/");
+    const item = screen.getByText(strings.overview.noGroupTitle(2)).closest("li") as HTMLElement;
+    expect(within(item).getByRole("link", { name: strings.overview.noGroupAction }).getAttribute("href")).toBe("/devices?group=none");
+  });
+
+  it("AppEdit: a short or empty page with more to load still offers Load more, and loads the next page", () => {
+    cx.results["apps:get"] = program;
+    cx.results["apps:installSummary"] = { pending: 0, downloading: 0, installing: 0, installed: 0, failed: 3, removing: 0, removed: 0, unsupported: 0 };
+    cx.pages["apps:installs"] = [];
+    cx.statuses["apps:installs"] = "CanLoadMore";
+    ui(<AppEdit />, "viewer", "/apps/a1");
+    expect(screen.getByText(strings.common.emptyPageSoFar)).toBeTruthy();
+    expect(screen.queryByText(strings.appEdit.installStatusNone)).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: strings.common.loadMore }));
+    expect(cx.loadMore).toHaveBeenCalledWith(50);
+  });
+
+  it("AppEdit: an empty list that is exhausted says nothing is there, without Load more", () => {
+    cx.results["apps:get"] = program;
+    cx.results["apps:installSummary"] = { pending: 0, downloading: 0, installing: 0, installed: 0, failed: 3, removing: 0, removed: 0, unsupported: 0 };
+    cx.pages["apps:installs"] = [];
+    ui(<AppEdit />, "viewer", "/apps/a1");
+    expect(screen.getAllByText(strings.appEdit.installStatusNone).length).toBeGreaterThanOrEqual(1);
+    expect(screen.queryByRole("button", { name: strings.common.loadMore })).toBeNull();
+  });
+
+  it("AppEdit: a capped summary says the counts mean at least; an exact one does not", () => {
+    cx.results["apps:get"] = program;
+    cx.results["apps:installSummary"] = { pending: 0, downloading: 0, installing: 0, installed: 1001, failed: 0, removing: 0, removed: 0, unsupported: 0, capped: true };
+    ui(<AppEdit />, "viewer", "/apps/a1");
+    expect(screen.getByText(strings.appEdit.installCapped)).toBeTruthy();
+    expect(screen.getByRole("button", { name: new RegExp(`${strings.installState.installed}\\s*1,?000\\+`) })).toBeTruthy();
+    cleanup();
+    cx.results["apps:installSummary"] = { pending: 0, downloading: 0, installing: 0, installed: 12, failed: 0, removing: 0, removed: 0, unsupported: 0 };
+    ui(<AppEdit />, "viewer", "/apps/a1");
+    expect(screen.queryByText(strings.appEdit.installCapped)).toBeNull();
+  });
+
+  it("DeviceDetail: an empty page with more to load shows Load more instead of 'no apps are assigned'", () => {
+    cx.results["fleet:get"] = {
+      _id: "d1",
+      name: "Front desk",
+      revision: 7,
+      kioskEnabled: true,
+      enrolledAt: Date.now() - 3_600_000,
+      group: { _id: "g1", name: "Sales" },
+      state: "active",
+      presence: { online: true, since: 1, revoked: false },
+      summary: null,
+      report: null,
+      versions: [],
+      flags: { noGroup: false, revoked: false, rotateCredential: false },
+      groups: [{ _id: "g1", name: "Sales" }],
+    };
+    cx.results["fleet:liveness"] = { lastContactAt: Date.now(), online: true, fastUntil: null };
+    cx.fns["fleet:watch"] = async () => ({ fastUntil: null });
+    cx.pages["fleet:installs"] = [];
+    cx.statuses["fleet:installs"] = "CanLoadMore";
+    ui(<DeviceDetail />, "viewer", "/devices/d1");
+    expect(screen.queryByText(strings.device.installsNone)).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: strings.common.loadMore }));
+    expect(cx.loadMore).toHaveBeenCalledWith(50);
+  });
+});
+
+describe("Settings, Signing: publish again and the waiting roster update (keys:status, keys:registerActive)", () => {
+  const keys = (over: Record<string, unknown> = {}) => ({
+    keys: [{ keyId: "a3f19c07d2e8b456", fingerprint: "SHA256:abc", status: "active", createdAt: 1 }],
+    signing: "ok",
+    env: { active: { keyId: "a3f19c07d2e8b456", fingerprint: "SHA256:abc" }, next: null },
+    publishFailedAt: null,
+    rosterPending: false,
+    ...over,
+  });
+
+  it("a failed publish offers Publish again to an Owner: it calls registerActive without force, with progress", async () => {
+    cx.results["keys:status"] = keys({ publishFailedAt: Date.now() - 60_000 });
+    let done: () => void = () => undefined;
+    const call = vi.fn(() => new Promise<unknown>((resolve) => (done = () => resolve({ keyId: "a3f19c07d2e8b456", fingerprint: "SHA256:abc" }))));
+    cx.fns["keys:registerActive"] = call;
+    ui(<SigningTab />, "owner", "/");
+    fireEvent.click(screen.getByRole("button", { name: strings.publish.again }));
+    expect(call).toHaveBeenCalledWith({});
+    const busy = screen.getByRole("button", { name: strings.publish.publishing }) as HTMLButtonElement;
+    expect(busy.disabled).toBe(true);
+    expect(busy.getAttribute("aria-busy")).toBe("true");
+    done();
+    await waitFor(() => expect(screen.getByText(strings.publish.done)).toBeTruthy());
+  });
+
+  it("a refusal shows a plain sentence under the notice", async () => {
+    cx.results["keys:status"] = keys({ publishFailedAt: Date.now() - 60_000 });
+    cx.fns["keys:registerActive"] = async () => {
+      throw new AppError({ code: "not_ready", detail: "RULEBOX_POLICY_KEY is not set or not 32 bytes of base64" });
+    };
+    ui(<SigningTab />, "owner", "/");
+    fireEvent.click(screen.getByRole("button", { name: strings.publish.again }));
+    expect(await screen.findByText(strings.publish.notReady)).toBeTruthy();
+  });
+
+  it("an Admin sees the failure but no Publish again button", () => {
+    cx.results["keys:status"] = keys({ publishFailedAt: Date.now() - 60_000 });
+    ui(<SigningTab />, "admin", "/");
+    expect(screen.getByText(strings.publish.signingHint)).toBeTruthy();
+    expect(screen.queryByRole("button", { name: strings.publish.again })).toBeNull();
+  });
+
+  it("a waiting roster update is explained, with one Publish again button even when publishing also failed", () => {
+    cx.results["keys:status"] = keys({ rosterPending: true });
+    ui(<SigningTab />, "owner", "/");
+    expect(screen.getByText(strings.publish.rosterTitle)).toBeTruthy();
+    expect(screen.getByText(strings.publish.rosterBody)).toBeTruthy();
+    expect(screen.getAllByRole("button", { name: strings.publish.again })).toHaveLength(1);
+    cleanup();
+    cx.results["keys:status"] = keys({ rosterPending: true, publishFailedAt: Date.now() - 1000 });
+    ui(<SigningTab />, "owner", "/");
+    expect(screen.getAllByRole("button", { name: strings.publish.again })).toHaveLength(1);
+  });
+
+  it("with nothing wrong there is no notice and no Publish again", () => {
+    cx.results["keys:status"] = keys();
+    ui(<SigningTab />, "owner", "/");
+    expect(screen.queryByText(strings.publish.rosterTitle)).toBeNull();
+    expect(screen.queryByRole("button", { name: strings.publish.again })).toBeNull();
   });
 });
