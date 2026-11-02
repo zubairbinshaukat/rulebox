@@ -455,13 +455,15 @@ describe("apps: plan limit, archive, delete, retry", () => {
     const orgId = await makeOrg(t);
     const a = await admin(t, orgId);
     const id = await a.as.mutation(api.apps.createDesktop, desktop("Reader"));
-    const { deviceId } = await enrollDevice(t, orgId);
+    const g = await group(t, orgId);
+    const { deviceId } = await enrollDevice(t, orgId, { groupId: g });
+    const { assignmentId } = await a.as.mutation(api.groups.assignApp, { groupId: g, appId: id, audience: "everyone", pinnedTaskbar: false, pinnedDesktop: false });
     await t.finishAllScheduledFunctions(vi.runAllTimers);
     await a.as.action(api.apps.saveIcon, { appId: id, png: TINY_PNG });
     const storageId = (await appRow(t, id))!.icon!.storageId;
     await t.run(async (ctx) => {
       for (let i = 0; i < 230; i++) {
-        await ctx.db.insert("installResults", { orgId, deviceId, appId: id, state: i % 2 ? "installed" : "failed", appRevision: 0, attempts: 0, updatedAt: i });
+        await ctx.db.insert("installResults", { orgId, deviceId, appId: id, groupId: g, state: i % 2 ? "installed" : "failed", appRevision: 0, attempts: 0, updatedAt: i });
       }
       const e = await ctx.db.insert("employees", { orgId, name: "E", username: "e", searchText: "e", disabled: false, credentialRevision: 0, revision: 0, createdAt: 0 });
       await ctx.db.insert("employeeApps", { orgId, employeeId: e, appId: id });
@@ -471,12 +473,15 @@ describe("apps: plan limit, archive, delete, retry", () => {
       await ctx.db.patch(st._id, { failedInstallCount: 120 });
     });
     await a.as.mutation(api.apps.setArchived, { appId: id, archived: true });
+    // Step 17 review: archiving takes the app's 115 failed results out of the count at once.
+    expect((await stats(t, orgId))?.failedInstallCount).toBe(5);
+    await a.as.mutation(api.groups.unassignApp, { assignmentId });
     await a.as.mutation(api.apps.remove, { appId: id });
     await t.finishAllScheduledFunctions(vi.runAllTimers);
-    // Review of Step 12: the failed rows deleted by the purge come off `failedInstallCount`.
+    // The purge deletes rows that no longer count: the counter does not move again.
     expect((await stats(t, orgId))?.failedInstallCount).toBe(5);
     await t.run(async (ctx) => {
-      expect(await ctx.db.query("installResults").withIndex("by_app_state", (q) => q.eq("appId", id)).first()).toBeNull();
+      expect(await ctx.db.query("installResults").withIndex("by_app_state_updated", (q) => q.eq("appId", id)).first()).toBeNull();
       expect(await ctx.db.query("employeeApps").withIndex("by_app", (q) => q.eq("appId", id)).first()).toBeNull();
       expect(await ctx.storage.get(storageId)).toBeNull();
     });
@@ -865,19 +870,35 @@ describe("no unbounded reads", () => {
 
 // ---------------------------------------------------------------- install status (plan Step 17 items 1-2)
 
-/** A bare device row (no credentials): enough for the install lists, which join only its name. */
+/** The organization's "Floor" group (made once): the bare devices are in it. */
+async function floorGroup(t: T, orgId: Id<"organizations">) {
+  return await t.run(async (ctx) => {
+    const g = await ctx.db.query("groups").withIndex("by_org_name", (q) => q.eq("orgId", orgId).eq("name", "Floor")).first();
+    return g?._id ?? (await ctx.db.insert("groups", { orgId, name: "Floor", revision: 0, createdAt: 0 }));
+  });
+}
+
+/** A bare device row in the "Floor" group (no credentials): enough for the install lists, which join only its name. */
 async function bareDevice(t: T, orgId: Id<"organizations">, name: string) {
+  const groupId = await floorGroup(t, orgId);
   return await t.run(async (ctx) => {
     const enrollmentTokenId = await ctx.db.insert("enrollmentTokens", { orgId, tokenHash: `${name}`.padEnd(64, "x"), expiresAt: 0, usesLeft: 0, createdAt: 0 });
-    return await ctx.db.insert("devices", { orgId, name, enrolledAt: 0, enrollmentTokenId });
+    return await ctx.db.insert("devices", { orgId, name, enrolledAt: 0, enrollmentTokenId, groupId });
   });
 }
 
 type SeedState = "pending" | "installed" | "failed" | "removed" | "unsupported";
-async function seedInstall(t: T, orgId: Id<"organizations">, deviceId: Id<"devices">, appId: Id<"apps">, state: SeedState, extra: { detail?: string; exitCode?: number; updatedAt?: number } = {}) {
-  return await t.run((ctx) =>
-    ctx.db.insert("installResults", { orgId, deviceId, appId, state, appRevision: 0, attempts: state === "failed" ? 3 : 1, updatedAt: extra.updatedAt ?? 1_000, ...extra }),
-  );
+/** A result tagged with the device's group, the app assigned to that group (so it counts) unless `assign: false`. */
+async function seedInstall(t: T, orgId: Id<"organizations">, deviceId: Id<"devices">, appId: Id<"apps">, state: SeedState, extra: { detail?: string; exitCode?: number; updatedAt?: number; assign?: boolean } = {}) {
+  const { assign, ...fields } = extra;
+  return await t.run(async (ctx) => {
+    const groupId = (await ctx.db.get(deviceId))?.groupId;
+    if (groupId !== undefined && assign !== false) {
+      const has = await ctx.db.query("appAssignments").withIndex("by_group_app", (q) => q.eq("groupId", groupId).eq("appId", appId)).first();
+      if (has === null) await ctx.db.insert("appAssignments", { orgId, groupId, appId, audience: "everyone", pinnedTaskbar: false, pinnedDesktop: false });
+    }
+    return await ctx.db.insert("installResults", { orgId, deviceId, appId, groupId, state, appRevision: 0, attempts: state === "failed" ? 3 : 1, updatedAt: fields.updatedAt ?? 1_000, ...fields });
+  });
 }
 
 describe("apps:installSummary", () => {
@@ -901,12 +922,13 @@ describe("apps:installSummary", () => {
     expect(await viewer.as.query(api.apps.installSummary, { appId: app })).toEqual({ ...zero, installed: 2, failed: 1 });
 
     // Over the cap: the count stops at 1,001, which the screen shows as "1000+".
+    const floor = await floorGroup(t, orgId);
     await t.run(async (ctx) => {
       for (let i = 0; i < 1_002; i++) {
-        await ctx.db.insert("installResults", { orgId, deviceId: d1, appId: other, state: "installed", appRevision: 0, attempts: 1, updatedAt: i });
+        await ctx.db.insert("installResults", { orgId, deviceId: d1, appId: other, groupId: floor, state: "installed", appRevision: 0, attempts: 1, updatedAt: i });
       }
     });
-    expect(await viewer.as.query(api.apps.installSummary, { appId: other })).toEqual({ ...zero, pending: 1, installed: 1_001 });
+    expect(await viewer.as.query(api.apps.installSummary, { appId: other })).toEqual({ ...zero, pending: 1, installed: 1_001, capped: true });
   });
 
   test("another organization's app is not_found; every role may read it", async () => {
@@ -929,7 +951,8 @@ describe("apps:installSummary", () => {
     for (const s of ["installed", "failed", "pending"] as const) await seedInstall(t, orgId, d, app, s);
     const { io } = await probe(() => a.as.query(api.apps.installSummary, { appId: app }));
     expect(io.tables.has("devices")).toBe(false);
-    expect(io.reads).toBeLessThanOrEqual(3 + 1 + 3);
+    // + the one assignment row (the results count only for its group; Step 17 review).
+    expect(io.reads).toBeLessThanOrEqual(3 + 1 + 3 + 1);
   });
 });
 
@@ -966,5 +989,76 @@ describe("apps:installs", () => {
     expect(p3.isDone).toBe(true);
     await expectCode(q(null, 51), "invalid_argument");
     await expect(a.as.query(api.apps.installs, { appId: app, state: "nonsense" as never, paginationOpts: { numItems: 2, cursor: null } })).rejects.toThrow();
+  });
+});
+
+describe("install status follows the assignment (Step 17 review)", () => {
+  test("an unassigned group's results and an archived app's results stop counting in the summary, the list and failedInstallCount; assigning again brings them back", async () => {
+    const t = await setupAuth();
+    const orgId = await makeOrg(t);
+    const a = await admin(t, orgId);
+    const app = await a.as.mutation(api.apps.createDesktop, desktop("Acme"));
+    const front = await group(t, orgId, "Front");
+    const back = await group(t, orgId, "Back");
+    const devices = await t.run(async (ctx) => {
+      const mk = async (name: string, groupId: Id<"groups">) => {
+        const enrollmentTokenId = await ctx.db.insert("enrollmentTokens", { orgId, tokenHash: name.padEnd(64, "y"), expiresAt: 0, usesLeft: 0, createdAt: 0 });
+        return await ctx.db.insert("devices", { orgId, name, enrolledAt: 0, enrollmentTokenId, groupId });
+      };
+      return { f1: await mk("F1", front), f2: await mk("F2", front), b1: await mk("B1", back) };
+    });
+    const assign = async (groupId: Id<"groups">) =>
+      (await a.as.mutation(api.groups.assignApp, { groupId, appId: app, audience: "everyone", pinnedTaskbar: false, pinnedDesktop: false })).assignmentId;
+    const frontA = await assign(front);
+    await assign(back);
+    await t.run(async (ctx) => {
+      const row = (deviceId: Id<"devices">, groupId: Id<"groups">, state: "failed" | "installed", updatedAt: number) =>
+        ctx.db.insert("installResults", { orgId, deviceId, appId: app, groupId, state, appRevision: 0, attempts: 1, updatedAt });
+      await row(devices.f1, front, "failed", 10);
+      await row(devices.f2, front, "installed", 20);
+      await row(devices.b1, back, "failed", 30);
+      const st = (await ctx.db.query("orgStats").withIndex("by_org", (q) => q.eq("orgId", orgId)).unique())!;
+      await ctx.db.patch(st._id, { failedInstallCount: 2 });
+    });
+    const summary = () => a.as.query(api.apps.installSummary, { appId: app });
+    const failedNames = async () => (await a.as.query(api.apps.installs, { appId: app, state: "failed", paginationOpts: { numItems: 10, cursor: null } })).page.map((r) => r.deviceName);
+    expect(await summary()).toMatchObject({ installed: 1, failed: 2 });
+    expect(await failedNames()).toEqual(["B1", "F1"]); // newest updatedAt first
+
+    await a.as.mutation(api.groups.unassignApp, { assignmentId: frontA });
+    expect(await summary()).toMatchObject({ installed: 0, failed: 1 });
+    expect(await failedNames()).toEqual(["B1"]);
+    expect((await stats(t, orgId))?.failedInstallCount).toBe(1);
+    expect((await a.as.query(api.overview.failedInstalls, {})).map((r) => r.deviceName)).toEqual(["B1"]);
+
+    await a.as.mutation(api.apps.setArchived, { appId: app, archived: true });
+    expect(await summary()).toMatchObject({ installed: 0, failed: 0 });
+    expect(await failedNames()).toEqual([]);
+    expect((await stats(t, orgId))?.failedInstallCount).toBe(0);
+    expect(await a.as.query(api.overview.failedInstalls, {})).toEqual([]);
+
+    await a.as.mutation(api.apps.setArchived, { appId: app, archived: false });
+    expect((await stats(t, orgId))?.failedInstallCount).toBe(1);
+    await assign(front);
+    expect((await stats(t, orgId))?.failedInstallCount).toBe(2);
+    expect(await summary()).toMatchObject({ installed: 1, failed: 2 });
+  });
+
+  test("more failed results than one transaction counts: the counter is left to stats:reconcile, which is scheduled", async () => {
+    vi.useFakeTimers();
+    const t = await setupAuth();
+    const orgId = await makeOrg(t);
+    const a = await admin(t, orgId);
+    const app = await a.as.mutation(api.apps.createDesktop, desktop("Acme"));
+    const g = await group(t, orgId);
+    const d = await bareDevice(t, orgId, "PC");
+    await t.run(async (ctx) => {
+      for (let i = 0; i < 501; i++) {
+        await ctx.db.insert("installResults", { orgId, deviceId: d, appId: app, groupId: g, state: "failed", appRevision: 0, attempts: 1, updatedAt: i });
+      }
+    });
+    await a.as.mutation(api.groups.assignApp, { groupId: g, appId: app, audience: "everyone", pinnedTaskbar: false, pinnedDesktop: false });
+    await t.finishAllScheduledFunctions(vi.runAllTimers);
+    expect((await stats(t, orgId))?.failedInstallCount).toBe(501);
   });
 });

@@ -7,8 +7,10 @@ import { normalizeEmail } from "./lib/crypto";
 import { writeStatus, type StatusInput } from "./lib/deviceReport";
 import { fail } from "./lib/errors";
 import { bumpOnline, minuteBucket, offlineAfterBucket, orgPingInterval } from "./lib/presence";
+import { loadOrgPlan } from "./lib/plans";
 import {
-  AUDIT_RETENTION_DAYS,
+  AUDIT_PRUNE_BATCH,
+  MAX_AUDIT_RETENTION_DAYS,
   AUTH_RATE_LIMIT_REFILL_MS,
   DAY_MS,
   FLEET_CHECK_RETENTION_MS,
@@ -48,7 +50,9 @@ import { clearMfa } from "./lib/sessions";
 // - authRateLimits  Convex Auth's per-account failure rows fully refilled
 //                   (last attempt more than an hour ago), paged.
 // - invites         `invites.by_expires_at` below now - INVITE_RETENTION_MS.
-// - auditLog        `auditLog.by_at` below the retention cutoff.
+// - auditLog        starts `pruneAudit` (per-organization retention by plan,
+//                   A14) and deletes `auditLog.by_at` rows older than the
+//                   longest retention any plan may set (MAX_AUDIT_RETENTION_DAYS).
 // - rateLimiter     the component's `clearAll` for rows created more than
 //                   RATE_LIMIT_ROW_MAX_AGE_MS ago (100 per component call, it
 //                   reschedules itself).
@@ -146,12 +150,16 @@ async function runStage(ctx: MutationCtx, current: Stage, now: number, cursor: s
       return { done: rows.length < MAINTENANCE_BATCH, cursor: null };
     }
     case "auditLog": {
+      // Retention is per organization (A14): `pruneAudit` walks them. This stage only starts that
+      // walk and removes rows beyond the longest retention any plan may have (a backstop for rows
+      // of an organization that no longer exists).
+      if (cursor === null) await ctx.scheduler.runAfter(0, internal.maintenance.pruneAudit, { now });
       const rows = await ctx.db
         .query("auditLog")
-        .withIndex("by_at", (q) => q.lt("at", now - AUDIT_RETENTION_DAYS * DAY_MS))
+        .withIndex("by_at", (q) => q.lt("at", now - MAX_AUDIT_RETENTION_DAYS * DAY_MS))
         .take(MAINTENANCE_BATCH);
       for (const row of rows) await ctx.db.delete(row._id);
-      return { done: rows.length < MAINTENANCE_BATCH, cursor: null };
+      return { done: rows.length < MAINTENANCE_BATCH, cursor: "backstop" };
     }
     case "rateLimiter":
       // Resets buckets created more than 7 days ago (they refill anyway; at
@@ -194,6 +202,40 @@ export const daily = internalMutation({
       if (next !== undefined) await ctx.scheduler.runAfter(0, internal.maintenance.daily, { stage: next, now });
     }
     return null;
+  },
+});
+
+/**
+ * Audit retention per plan (plan Step 17 item 8, A14; 4.11 amended): one
+ * organization per run (`organizations`, one per page), its rows below
+ * `now - orgPlans.limits.auditRetentionDays` (`auditLog.by_org_at`), at most
+ * AUDIT_PRUNE_BATCH per run; a full batch runs again on the same
+ * organization, then the walk moves on. Started by the daily job; `now` is
+ * fixed for the whole walk. An organization without a plan row uses its
+ * deployment default (`loadOrgPlan`).
+ */
+export const pruneAudit = internalMutation({
+  args: { cursor: v.optional(v.union(v.string(), v.null())), now: v.optional(v.number()) },
+  returns: v.object({ deleted: v.number(), done: v.boolean() }),
+  handler: async (ctx, args) => {
+    const now = args.now ?? Date.now();
+    const cursor = args.cursor ?? null;
+    const page = await ctx.db.query("organizations").paginate({ numItems: 1, cursor });
+    const org = page.page[0];
+    if (org === undefined) return { deleted: 0, done: true };
+    const plan = await loadOrgPlan(ctx, org._id);
+    const cutoff = now - plan.limits.auditRetentionDays * DAY_MS;
+    const rows = await ctx.db
+      .query("auditLog")
+      .withIndex("by_org_at", (q) => q.eq("orgId", org._id).lt("at", cutoff))
+      .take(AUDIT_PRUNE_BATCH);
+    for (const row of rows) await ctx.db.delete(row._id);
+    if (rows.length === AUDIT_PRUNE_BATCH) {
+      await ctx.scheduler.runAfter(0, internal.maintenance.pruneAudit, { cursor, now });
+      return { deleted: rows.length, done: false };
+    }
+    if (!page.isDone) await ctx.scheduler.runAfter(0, internal.maintenance.pruneAudit, { cursor: page.continueCursor, now });
+    return { deleted: rows.length, done: page.isDone };
   },
 });
 

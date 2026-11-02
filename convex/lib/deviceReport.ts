@@ -91,6 +91,8 @@ export async function writeStatus(
     outOfSupport: isOutOfSupport(osBuild, osEdition, now),
     appliedVersion,
     diskBand: diskBandOf(diskFreeGb),
+    // Also on the summary so `keys:trustProgress` never reads the large report.
+    trustedKeyIds: nn(s.trustedKeyIds),
   };
   const summary = await ctx.db
     .query("deviceSummary")

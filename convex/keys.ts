@@ -62,6 +62,12 @@ export const status = memberQuery("viewer")({
     signing: v.union(v.literal("ok"), v.literal("missing"), v.literal("mismatch")),
     env: v.object({ active: envKey, next: envKey }),
     publishFailedAt: v.union(v.number(), v.null()),
+    /**
+     * Some disabled employees' removals could not be signed yet (no usable key):
+     * their offline sign-in on the group's PCs lasts until the key is back
+     * (Step 11 review item 14; Step 17 follow-up). One `rosterPending.by_org` read.
+     */
+    rosterPending: v.boolean(),
   }),
   handler: async (ctx) => {
     const rows = await orgPolicyKeys(ctx, ctx.orgId);
@@ -70,11 +76,16 @@ export const status = memberQuery("viewer")({
       .query("orgStats")
       .withIndex("by_org", (q) => q.eq("orgId", ctx.orgId))
       .unique();
+    const pending = await ctx.db
+      .query("rosterPending")
+      .withIndex("by_org", (q) => q.eq("orgId", ctx.orgId))
+      .first();
     return {
       keys: rows.map(rowOf),
       signing: signing.ok ? ("ok" as const) : signing.reason,
       env: { active: envKeyOf("active"), next: envKeyOf("next") },
       publishFailedAt: stats?.publishFailedAt ?? null,
+      rosterPending: pending !== null,
     };
   },
 });
@@ -82,7 +93,8 @@ export const status = memberQuery("viewer")({
 /**
  * "N of M devices trust the new key" (viewer), one page of up to
  * MAX_TRUST_PAGE devices (`devices.by_org`) joined with their presence
- * (revoked devices are not counted) and report (`trustedKeyIds`). The Signing
+ * (revoked devices are not counted) and summary (`trustedKeyIds`; the report
+ * only for a summary written before that field existed). The Signing
  * tab loads the pages one after another and sums them, only while a `next`
  * key exists.
  */
@@ -114,11 +126,21 @@ export const trustProgress = memberQuery("viewer")({
       if (presence?.revoked === true || (presence === null && d.revoked === true)) continue;
       total++;
       if (next === null) continue;
-      const report = await ctx.db
-        .query("deviceReports")
+      // The small summary row carries `trustedKeyIds` (Step 17 follow-up); a summary
+      // written before that field existed falls back to the report once.
+      const summary = await ctx.db
+        .query("deviceSummary")
         .withIndex("by_device", (q) => q.eq("deviceId", d._id))
         .unique();
-      if (report?.trustedKeyIds?.includes(next.keyId) === true) trustNext++;
+      let trusted = summary?.trustedKeyIds;
+      if (trusted === undefined) {
+        const report = await ctx.db
+          .query("deviceReports")
+          .withIndex("by_device", (q) => q.eq("deviceId", d._id))
+          .unique();
+        trusted = report?.trustedKeyIds;
+      }
+      if (trusted?.includes(next.keyId) === true) trustNext++;
     }
     return { page: { total, trustNext }, isDone: result.isDone, continueCursor: result.continueCursor };
   },

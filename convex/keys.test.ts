@@ -209,6 +209,21 @@ describe("rotation (plan 4.5)", () => {
     expect(b.deviceId).toBeDefined();
     await expectCode(viewer.as.query(api.keys.trustProgress, { paginationOpts: { numItems: 201, cursor: null } }), "invalid_argument");
   });
+
+  test("trustProgress reads the summary's trustedKeyIds (written by the report), never the report once the summary has it", async () => {
+    const t = await setupAuth();
+    const orgId = await makeOrg(t);
+    const viewer = await asMember(t, { role: "viewer", orgId });
+    const a = await enrollDevice(t, orgId);
+    await insertKeyRow(t, orgId, TEST_KEY_2, "next");
+    await t.mutation(api.deviceApi.report, { deviceId: a.deviceId, deviceSecret: a.secret, status: { agentVersion: "1.0.0", trustedKeyIds: [TEST_KEY.keyId, TEST_KEY_2.keyId] } });
+    const summary = await t.run((ctx) => ctx.db.query("deviceSummary").withIndex("by_device", (q) => q.eq("deviceId", a.deviceId)).unique());
+    expect(summary?.trustedKeyIds).toEqual([TEST_KEY.keyId, TEST_KEY_2.keyId]);
+    const { probe } = await import("../tests/convex/devices");
+    const { result, io } = await probe(() => viewer.as.query(api.keys.trustProgress, { paginationOpts: { numItems: 200, cursor: null } }));
+    expect(result.page).toEqual({ total: 1, trustNext: 1 });
+    expect(io.tables.has("deviceReports")).toBe(false);
+  });
 });
 
 describe("many retired keys", () => {

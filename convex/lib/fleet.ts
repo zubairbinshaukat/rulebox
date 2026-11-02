@@ -1,6 +1,7 @@
 import type { Doc, Id } from "../_generated/dataModel";
-import type { DatabaseReader, DatabaseWriter } from "../_generated/server";
+import type { DatabaseReader, MutationCtx } from "../_generated/server";
 import type { CredentialState } from "./deviceAuth";
+import { retagDeviceInstalls } from "./installs";
 import { bumpOrgStatsIfPresent } from "./plans";
 import { markRevoked } from "./presence";
 
@@ -32,7 +33,7 @@ export async function credOf(ctx: { db: DatabaseReader }, device: Doc<"devices">
  * row, or null when it was already revoked or is gone (nothing written).
  */
 export async function revokeDevice(
-  ctx: { db: DatabaseWriter },
+  ctx: Pick<MutationCtx, "db" | "scheduler">,
   cred: CredRef,
   now: number,
 ): Promise<Doc<"devices"> | null> {
@@ -54,5 +55,7 @@ export async function revokeDevice(
     outOfSupportCount: summary?.outOfSupport === true ? -1 : 0,
   });
   await markRevoked(ctx, { deviceId: device._id, orgId: device.orgId }, now);
+  // A revoked PC's install results stop counting (`failedInstallCount`, lists; Step 17 review).
+  await retagDeviceInstalls(ctx, device, undefined);
   return device;
 }

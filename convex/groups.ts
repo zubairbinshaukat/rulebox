@@ -5,6 +5,7 @@ import { writeAudit } from "./lib/audit";
 import { checkRevision, getInOrg, nextRevision } from "./lib/authz";
 import { changeMemberships, membershipsOf } from "./lib/employeeSync";
 import { fail } from "./lib/errors";
+import { failedFollowAssignment } from "./lib/installs";
 import { memberMutation, memberQuery } from "./lib/functions";
 import {
   GROUP_COUNT_CAP,
@@ -363,6 +364,8 @@ export const assignApp = memberMutation("admin")({
       pinnedTaskbar: args.pinnedTaskbar,
       pinnedDesktop: args.pinnedDesktop,
     });
+    // Results the group's PCs reported earlier for this app count again (Step 17 review).
+    await failedFollowAssignment(ctx, ctx.orgId, app, group._id, 1);
     await writeAudit(ctx, {
       orgId: ctx.orgId,
       actor: ctx.actor,
@@ -412,6 +415,8 @@ export const unassignApp = memberMutation("admin")({
     const group = await ctx.db.get(a.groupId);
     const app = await ctx.db.get(a.appId);
     await ctx.db.delete(a._id);
+    // The group's results for this app stop counting (the agent reports nothing for an unassigned app).
+    if (app !== null) await failedFollowAssignment(ctx, ctx.orgId, app, a.groupId, -1);
     await writeAudit(ctx, {
       orgId: ctx.orgId,
       actor: ctx.actor,

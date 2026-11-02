@@ -265,6 +265,8 @@ export default defineSchema({
   })
     .index("by_org", ["orgId"])
     .index("by_group", ["groupId"])
+    // `fleet:list({ groupId: "none" })`: the organization's devices without a group.
+    .index("by_org_group", ["orgId", "groupId"])
     // DEPRECATED: enrollment idempotency for devices enrolled before the
     // credentials split; removed with the narrow step.
     .index("by_secret_hash", ["secretHash"])
@@ -336,6 +338,10 @@ export default defineSchema({
     outOfSupport: v.boolean(),
     appliedVersion: v.optional(v.number()),
     diskBand: v.optional(diskBand),
+    // Copied from the report (Step 17 follow-up): `keys:trustProgress` reads this
+    // small row instead of `deviceReports` (compat up to 32 KB). Changes only
+    // when the agent's trusted keys change (rotation).
+    trustedKeyIds: v.optional(v.array(v.string())),
     updatedAt: v.number(),
   }).index("by_device", ["deviceId"]),
 
@@ -647,11 +653,18 @@ export default defineSchema({
     exitCode: v.optional(v.number()),
     detail: v.optional(v.string()),
     updatedAt: v.number(),
+    // The PC's group (Step 17 review): written by every report, re-tagged by
+    // `fleet:move`, cleared by a revoke. A row counts only while this group
+    // still assigns the app and the app is not archived (lib/installs.ts).
+    // Missing on rows written before the field existed (they count nowhere
+    // until the PC reports again).
+    groupId: v.optional(v.id("groups")),
   })
-    .index("by_device", ["deviceId"])
+    // "Newest first" means newest `updatedAt` (Step 17 review), not creation.
+    .index("by_device_updated", ["deviceId", "updatedAt"])
     .index("by_device_app", ["deviceId", "appId"])
-    .index("by_app_state", ["appId", "state"])
-    .index("by_org_state", ["orgId", "state"]),
+    .index("by_app_state_updated", ["appId", "state", "updatedAt"])
+    .index("by_org_state_updated", ["orgId", "state", "updatedAt"]),
 
   // tiny
   wingetCache: defineTable({

@@ -87,6 +87,20 @@ describe("overview:get", () => {
     expect((await v.as.query(api.overview.get, {})).signing).toBe("rotating");
   });
 
+  test("rosterPending: true while a disabled employee's removal waits for a key; another organization's rows never show", async () => {
+    const t = await setupAuth();
+    const orgId = await makeOrg(t);
+    const other = await makeOrg(t, "Other");
+    const v = await viewerOf(t, orgId);
+    expect((await v.as.query(api.overview.get, {})).rosterPending).toBe(false);
+    const g = await t.run((ctx) => ctx.db.insert("groups", { orgId: other, name: "G", revision: 0, createdAt: 0 }));
+    await t.run((ctx) => ctx.db.insert("rosterPending", { orgId: other, groupId: g, employeeId: "e1" }));
+    expect((await v.as.query(api.overview.get, {})).rosterPending).toBe(false);
+    expect((await (await viewerOf(t, other)).as.query(api.overview.get, {})).rosterPending).toBe(true);
+    expect((await (await viewerOf(t, other)).as.query(api.keys.status, {})).rosterPending).toBe(true);
+    expect((await v.as.query(api.keys.status, {})).rosterPending).toBe(false);
+  });
+
   test("another organization's counters, devices and audit rows never show", async () => {
     const t = await setupAuth();
     const orgId = await makeOrg(t);
@@ -158,13 +172,20 @@ describe("overview:failedInstalls", () => {
   async function seed(t: T, orgId: Id<"organizations">, n: number) {
     return await t.run(async (ctx) => {
       const ids: Id<"installResults">[] = [];
+      // The PCs are in a group that assigns the apps: only such results count (Step 17 review).
+      const groupId = await ctx.db.insert("groups", { orgId, name: "Floor", revision: 0, createdAt: 0 });
+      const assign = (appId: Id<"apps">) => ctx.db.insert("appAssignments", { orgId, groupId, appId, audience: "everyone", pinnedTaskbar: false, pinnedDesktop: false });
       for (let i = 0; i < n; i++) {
         const tok = await ctx.db.insert("enrollmentTokens", { orgId, tokenHash: `f${i}`.padEnd(64, "0"), expiresAt: 0, usesLeft: 0, createdAt: 0 });
-        const deviceId = await ctx.db.insert("devices", { orgId, name: `PC ${i}`, enrolledAt: 0, enrollmentTokenId: tok });
+        const deviceId = await ctx.db.insert("devices", { orgId, name: `PC ${i}`, enrolledAt: 0, enrollmentTokenId: tok, groupId });
         const appId = await ctx.db.insert("apps", { orgId, name: `App ${i}`, kind: "web", archived: false, revision: 0, createdAt: 0 });
-        ids.push(await ctx.db.insert("installResults", { orgId, deviceId, appId, state: "failed", appRevision: 0, attempts: 3, detail: "The download did not match its checksum.", updatedAt: i }));
+        await assign(appId);
+        // Inserted in reverse `updatedAt` order: the list is by `updatedAt`, not creation.
+        ids.push(await ctx.db.insert("installResults", { orgId, deviceId, appId, groupId, state: "failed", appRevision: 0, attempts: 3, detail: "The download did not match its checksum.", updatedAt: 1_000 - i }));
         // Not failed: never listed.
-        await ctx.db.insert("installResults", { orgId, deviceId, appId: await ctx.db.insert("apps", { orgId, name: `Ok ${i}`, kind: "web", archived: false, revision: 0, createdAt: 0 }), state: "installed", appRevision: 0, attempts: 1, updatedAt: i });
+        const ok = await ctx.db.insert("apps", { orgId, name: `Ok ${i}`, kind: "web", archived: false, revision: 0, createdAt: 0 });
+        await assign(ok);
+        await ctx.db.insert("installResults", { orgId, deviceId, appId: ok, groupId, state: "installed", appRevision: 0, attempts: 1, updatedAt: i });
       }
       return ids;
     });
@@ -179,7 +200,7 @@ describe("overview:failedInstalls", () => {
     const v = await viewerOf(t, orgId);
     const rows = await v.as.query(api.overview.failedInstalls, {});
     expect(rows).toHaveLength(OVERVIEW_FAILED_INSTALLS);
-    expect(rows[0]).toMatchObject({ deviceName: "PC 24", appName: "App 24", detail: "The download did not match its checksum." });
+    expect(rows[0]).toMatchObject({ deviceName: "PC 0", appName: "App 0", detail: "The download did not match its checksum." });
     expect(rows.every((r) => !r.deviceName.startsWith("Other"))).toBe(true);
     expectNoSecrets(rows);
     const foreign = await viewerOf(t, other);

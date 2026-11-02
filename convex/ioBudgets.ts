@@ -97,11 +97,12 @@ export const IO_BUDGETS: Record<string, IoBudget> = {
   "deviceApi:verifyEmployee": { maxReads: 9 + 6, maxReadBytes: 8_192, maxWrites: 5, maxWriteBytes: 2_048 },
   // credentials; status: summary + report (2 reads, <= 2 writes, compat <= 32 KB) + orgStats on
   // an outOfSupport flip; installs (<= 50): app + result each (<= 100 reads, <= 50 writes) +
-  // orgStats; audit (<= 50): device + one event-key lookup each (+ the dropped row). A replay
+  // orgStats; Step 17 review: + the device (its group tags every row) + <= 2 assignment lookups per result
+  // (does the result count before / after); audit (<= 50): device + one event-key lookup each (+ the dropped row). A replay
   // writes nothing (`deviceApi.test.ts` measures it).
-  "deviceApi:report": { maxReads: 1 + 3 + 101 + 52, maxReadBytes: 120_000, maxWrites: 2 + 1 + 51 + 51, maxWriteBytes: 90_000 },
+  "deviceApi:report": { maxReads: 1 + 3 + 101 + 1 + 100 + 52, maxReadBytes: 120_000, maxWrites: 2 + 1 + 51 + 51, maxWriteBytes: 90_000 },
   "deviceApi:reportAudit": { maxReads: 1 + 52, maxReadBytes: 40_000, maxWrites: 51, maxWriteBytes: 40_000 },
-  "deviceApi:reportInstalls": { maxReads: 1 + 101, maxReadBytes: 60_000, maxWrites: 51, maxWriteBytes: 20_000 },
+  "deviceApi:reportInstalls": { maxReads: 1 + 101 + 1 + 100, maxReadBytes: 60_000, maxWrites: 51, maxWriteBytes: 20_000 },
   // credentials (wrapper; + its settle patch), credentials again, device; writes: credentials, audit.
   "deviceApi:rotateCredential": { maxReads: 3, maxReadBytes: 2_048, maxWrites: 3, maxWriteBytes: 1_024 },
 
@@ -119,12 +120,15 @@ export const IO_BUDGETS: Record<string, IoBudget> = {
   "fleet:rename": { maxReads: 5, maxReadBytes: 4_096, maxWrites: 2, maxWriteBytes: 1_024 },
   // device, credentials, group, orgStats, publishQueue; writes: device, orgStats, queue, audit
   // (+ one scheduled publish run). Measured 8 / 1.7 KB, 4 writes.
-  "fleet:move": { maxReads: 9, maxReadBytes: 6_144, maxWrites: 4, maxWriteBytes: 2_048 },
+  // Step 17 review: + the PC's install results re-tagged (<= 200 per run, `stats:retagDevice` continues)
+  // with the app and the old / new assignment of each failed one; + their patches and orgStats.
+  "fleet:move": { maxReads: 9 + 200 + 200 + 400, maxReadBytes: 400_000, maxWrites: 4 + 200 + 1, maxWriteBytes: 60_000 },
   // device, credentials, (off: step-up row again), publishQueue; writes: device, queue, audit.
   "fleet:setKiosk": { maxReads: 9, maxReadBytes: 6_144, maxWrites: 3, maxWriteBytes: 2_048 },
   // device, credentials, device again, summary, orgStats, liveness, shard, presence; writes:
   // credentials, orgStats, liveness, shard, presence, audit. Already revoked: 0 writes.
-  "fleet:revoke": { maxReads: 13, maxReadBytes: 8_192, maxWrites: 6, maxWriteBytes: 2_048 },
+  // Step 17 review: + the PC's install results un-tagged (as fleet:move).
+  "fleet:revoke": { maxReads: 13 + 200 + 200 + 200, maxReadBytes: 400_000, maxWrites: 6 + 200, maxWriteBytes: 60_000 },
   // device, credentials, the 6 per-device rows; deletes them + the device, audit, one scheduled
   // purge (installResults / documents, PURGE_BATCH per run). Not revoked: 0 writes.
   "fleet:remove": { maxReads: 12, maxReadBytes: 49_152, maxWrites: 8, maxWriteBytes: 1_024 },
@@ -145,10 +149,11 @@ export const IO_BUDGETS: Record<string, IoBudget> = {
 
   // ---- Step 8: Settings -> Signing (keys.ts). Wrapper 3 reads (+1 step-up for writes).
   // key rows (3 index reads, a few rows), the env key's row, orgStats.
-  "keys:status": { maxReads: 3 + 10, maxReadBytes: 6_144, maxWrites: 0, maxWriteBytes: 0, live: true },
-  // next key + one page of <= 200 devices x (device, presence, report: compat <= 32 KB).
-  // RISK: a page of 200 devices with large compat reports reads up to ~6 MB; the tab loads
-  // pages only while a rotation is prepared (rare).
+  // Step 17 follow-up: + one `rosterPending` row (`rosterPending` flag).
+  "keys:status": { maxReads: 3 + 11, maxReadBytes: 6_144, maxWrites: 0, maxWriteBytes: 0, live: true },
+  // next key + one page of <= 200 devices x (device, presence, summary). Step 17 follow-up: the
+  // summary carries `trustedKeyIds`; the report (compat <= 32 KB) is read only for a summary written
+  // before that field existed (it is rewritten at the agent's next report). The byte cap keeps that worst case.
   "keys:trustProgress": { maxReads: 3 + 1 + 600, maxReadBytes: 6_500_000, maxWrites: 0, maxWriteBytes: 0, live: true },
   // key by id, key rows; writes: retire old rows (force), insert, audit, queue + scheduled run.
   "keys:registerActive": { maxReads: 4 + 12, maxReadBytes: 8_192, maxWrites: 8, maxWriteBytes: 4_096 },
@@ -176,7 +181,8 @@ export const IO_BUDGETS: Record<string, IoBudget> = {
   // app, file types (only when the file argument is cleared), publishApp; unchanged: 1 read, 0 writes.
   "apps:update": { maxReads: 4 + 1 + 1 + 501 + 51 + 51 * 21 + 1, maxReadBytes: 250_000, maxWrites: 4, maxWriteBytes: 8_192 },
   // app, orgPlans/orgStats when restoring, publishApp; writes: app, orgStats, audit, queue (+ scheduled run).
-  "apps:setArchived": { maxReads: 4 + 1 + 3 + 501 + 51 + 51 * 21 + 1, maxReadBytes: 250_000, maxWrites: 5, maxWriteBytes: 4_096 },
+  // Step 17 review: + assignments (<= 500) and <= 501 failed results (failedInstallCount follows).
+  "apps:setArchived": { maxReads: 4 + 1 + 3 + 501 + 51 + 51 * 21 + 1 + 500 + 501, maxReadBytes: 500_000, maxWrites: 5, maxWriteBytes: 4_096 },
   // app, assignments `.first()`, file types `.first()`; writes: app, audit, one scheduled purge (+ icon file).
   "apps:remove": { maxReads: 4 + 3, maxReadBytes: 6_144, maxWrites: 3, maxWriteBytes: 2_048 },
   // app, publishApp; writes: app, audit, queue (`purgeApp`, internal: <= 100 install results + <= 100 grants per run).
@@ -194,10 +200,11 @@ export const IO_BUDGETS: Record<string, IoBudget> = {
   // rule, app, publishApp; writes: delete, audit, queue.
   "fileHandlers:remove": { maxReads: 4 + 2 + 501 + 51 + 51 * 21 + 1, maxReadBytes: 250_000, maxWrites: 4, maxWriteBytes: 2_048 },
   // group, app, assignment `.first()`, assignments (<= 150), publish queue; writes: assignment, audit, queue.
-  "groups:assignApp": { maxReads: 4 + 2 + 1 + 150 + 1, maxReadBytes: 60_000, maxWrites: 4, maxWriteBytes: 2_048 },
+  // Step 17 review: + <= 501 failed results of the app (does the group's count move) + orgStats.
+  "groups:assignApp": { maxReads: 4 + 2 + 1 + 150 + 1 + 501 + 1, maxReadBytes: 60_000, maxWrites: 4, maxWriteBytes: 2_048 },
   // assignment, group, app, queue; unchanged: 1 read, 0 writes.
   "groups:updateAssignment": { maxReads: 4 + 4, maxReadBytes: 6_144, maxWrites: 3, maxWriteBytes: 2_048 },
-  "groups:unassignApp": { maxReads: 4 + 4, maxReadBytes: 6_144, maxWrites: 4, maxWriteBytes: 2_048 },
+  "groups:unassignApp": { maxReads: 4 + 4 + 501 + 1, maxReadBytes: 250_000, maxWrites: 5, maxWriteBytes: 2_048 },
 
   // ---- Step 11: employees. Worst cases are the caps (100 groups, 50 grants per employee);
   // a typical call (1-3 groups, no grants) reads under 20 documents.
@@ -237,17 +244,18 @@ export const IO_BUDGETS: Record<string, IoBudget> = {
   // (~1 MB) and re-runs on every result change of that app while its page is open. It is a query of its
   // own (not part of `apps:get`) and subscribed only by the open App page's install panel; a counter per
   // (app, state) would replace it if a rollout to thousands of PCs is ever watched live.
-  "apps:installSummary": { maxReads: 3 + 1 + 5 * 1_001, maxReadBytes: 1_100_000, maxWrites: 0, maxWriteBytes: 0, live: true },
-  // app + a page of <= 50 results + their devices (one get each).
-  "apps:installs": { maxReads: 3 + 1 + 50 + 50, maxReadBytes: 60_000, maxWrites: 0, maxWriteBytes: 0, live: true },
-  // device + a page of <= 50 results + their apps (one get each; an app spec is ~1-2 KB).
-  "fleet:installs": { maxReads: 3 + 1 + 50 + 50, maxReadBytes: 160_000, maxWrites: 0, maxWriteBytes: 0, live: true },
+  "apps:installSummary": { maxReads: 3 + 1 + 500 + 5 * 1_001, maxReadBytes: 1_100_000, maxWrites: 0, maxWriteBytes: 0, live: true },
+  // app + its assignments (<= 500; only results of an assigning group count) + a page of <= 50 results + their devices.
+  "apps:installs": { maxReads: 3 + 1 + 500 + 50 + 50, maxReadBytes: 60_000, maxWrites: 0, maxWriteBytes: 0, live: true },
+  // device + its group's assignments (<= 150) + a page of <= 50 results + their apps (one get each; an app spec is ~1-2 KB).
+  "fleet:installs": { maxReads: 3 + 1 + 150 + 50 + 50, maxReadBytes: 160_000, maxWrites: 0, maxWriteBytes: 0, live: true },
   // Plan row (A7): <= 60 documents, <= 32 KB. counters, <= 4 online shards, plan (+ platformSettings
-  // before migration), 2 key rows, 10 audit rows = ~24; never a device, liveness, payload or result row.
+  // before migration), 2 key rows, 10 audit rows, 1 rosterPending row = ~25; never a device, liveness, payload or result row.
   // Re-runs on a counter change, a PC going online / offline and a new audit row; never on a ping.
   "overview:get": { maxReads: 60, maxReadBytes: 32_768, maxWrites: 0, maxWriteBytes: 0, live: true },
-  // <= 20 failed results + their PCs and apps (cached per call); subscribed only while `failedInstallCount` > 0.
-  "overview:failedInstalls": { maxReads: 3 + 20 + 20 + 20, maxReadBytes: 80_000, maxWrites: 0, maxWriteBytes: 0, live: true },
+  // Step 17 review: <= 100 failed results examined (newest `updatedAt`) for 20 that count, their apps and
+  // (group, app) assignments (cached per call) and the 20 PCs; subscribed only while `failedInstallCount` > 0.
+  "overview:failedInstalls": { maxReads: 3 + 100 + 100 + 100 + 20, maxReadBytes: 300_000, maxWrites: 0, maxWriteBytes: 0, live: true },
   // A page of <= 50 audit rows (~300 B each). Re-runs when a row is written inside the loaded range.
   "audit:list": { maxReads: 3 + 50, maxReadBytes: 40_000, maxWrites: 0, maxWriteBytes: 0, live: true },
   "audit:forTarget": { maxReads: 3 + 50, maxReadBytes: 40_000, maxWrites: 0, maxWriteBytes: 0, live: true },

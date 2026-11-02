@@ -2,7 +2,8 @@ import { v } from "convex/values";
 import type { Doc, Id } from "./_generated/dataModel";
 import { auditEntryOf, auditEntryValue } from "./lib/audit";
 import { memberQuery } from "./lib/functions";
-import { OVERVIEW_AUDIT_ROWS, OVERVIEW_FAILED_INSTALLS, PRESENCE_SHARDS } from "./lib/limits";
+import { liveChecker } from "./lib/installs";
+import { OVERVIEW_AUDIT_ROWS, OVERVIEW_FAILED_INSTALLS, OVERVIEW_FAILED_SCAN, PRESENCE_SHARDS } from "./lib/limits";
 import { loadOrgPlan } from "./lib/plans";
 import { planLimits, planName, planStatus } from "./lib/validators";
 
@@ -41,6 +42,8 @@ export const get = memberQuery("viewer")({
     signing: v.union(v.literal("none"), v.literal("active"), v.literal("rotating")),
     publishFailedAt: v.union(v.number(), v.null()),
     recentAudit: v.array(auditEntryValue),
+    /** Disabled employees' removals wait for a signing key (their offline sign-in still works); see `keys:status`. */
+    rosterPending: v.boolean(),
   }),
   handler: async (ctx) => {
     const stats = await ctx.db
@@ -65,6 +68,10 @@ export const get = memberQuery("viewer")({
       .withIndex("by_org_at", (q) => q.eq("orgId", ctx.orgId))
       .order("desc")
       .take(OVERVIEW_AUDIT_ROWS);
+    const rosterPending = await ctx.db
+      .query("rosterPending")
+      .withIndex("by_org", (q) => q.eq("orgId", ctx.orgId))
+      .first();
     return {
       counts: {
         deviceCount: stats?.deviceCount ?? 0,
@@ -80,14 +87,18 @@ export const get = memberQuery("viewer")({
       signing: active === null ? ("none" as const) : next !== null ? ("rotating" as const) : ("active" as const),
       publishFailedAt: stats?.publishFailedAt ?? null,
       recentAudit: audit.map(auditEntryOf),
+      rosterPending: rosterPending !== null,
     };
   },
 });
 
 /**
- * The newest failed installs, with the PC and the app (viewer):
- * `installResults.by_org_state` `failed`, `.take(OVERVIEW_FAILED_INSTALLS)`. The
- * overview subscribes only while its `failedInstallCount` is above zero, so an
+ * The newest failed installs (by `updatedAt`), with the PC and the app
+ * (viewer): `installResults.by_org_state_updated` `failed`, newest first, at
+ * most OVERVIEW_FAILED_SCAN rows examined to find OVERVIEW_FAILED_INSTALLS that
+ * still COUNT (lib/installs.ts: the PC's group still assigns the app, the app is
+ * not archived, the PC is not revoked) - the same rule as `failedInstallCount`.
+ * The overview subscribes only while that counter is above zero, so an
  * organization with nothing failed never reads `installResults` at all. A PC or
  * app removed since (results are purged in batches) is left out.
  */
@@ -107,18 +118,20 @@ export const failedInstalls = memberQuery("viewer")({
   handler: async (ctx) => {
     const rows = await ctx.db
       .query("installResults")
-      .withIndex("by_org_state", (q) => q.eq("orgId", ctx.orgId).eq("state", "failed"))
+      .withIndex("by_org_state_updated", (q) => q.eq("orgId", ctx.orgId).eq("state", "failed"))
       .order("desc")
-      .take(OVERVIEW_FAILED_INSTALLS);
+      .take(OVERVIEW_FAILED_SCAN);
     const devices = new Map<Id<"devices">, Doc<"devices"> | null>();
-    const apps = new Map<Id<"apps">, Doc<"apps"> | null>();
+    const check = liveChecker(ctx);
     const out = [];
     for (const r of rows) {
+      if (out.length >= OVERVIEW_FAILED_INSTALLS) break;
+      if (!(await check.live(r.groupId, r.appId))) continue;
       if (!devices.has(r.deviceId)) devices.set(r.deviceId, await ctx.db.get(r.deviceId));
-      if (!apps.has(r.appId)) apps.set(r.appId, await ctx.db.get(r.appId));
       const device = devices.get(r.deviceId);
-      const app = apps.get(r.appId);
-      if (device == null || app == null) continue;
+      const app = await check.app(r.appId);
+      // The row's tag is the PC's group (re-tagged on move, cleared on revoke).
+      if (device == null || app === null || device.groupId !== r.groupId) continue;
       out.push({ _id: r._id, deviceId: r.deviceId, deviceName: device.name, appId: r.appId, appName: app.name, detail: r.detail, updatedAt: r.updatedAt });
     }
     return out;

@@ -6,6 +6,10 @@ const crons = cronJobs();
 // Audit retention, old invites, dead MFA sessions (plan Step 3.6).
 crons.daily("cleanup", { hourUTC: 3, minuteUTC: 0 }, internal.maintenance.daily, {});
 
+// Exact recount of every organization's counters (plan Step 17 item 9), one
+// organization at a time, paged; writes only what differs.
+crons.daily("reconcile counters", { hourUTC: 4, minuteUTC: 0 }, internal.stats.reconcileAll, {});
+
 // Online -> offline for devices past their deadline (plan 4.9 amended, A3).
 // Reads only the devices that just went silent: an idle fleet costs one empty
 // index read per run.

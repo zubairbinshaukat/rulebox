@@ -215,9 +215,10 @@ describe("deviceApi:verifyEmployee (plan 4.12)", () => {
   });
 
   test("per-device limit: 30 failures per minute, then lockedOut with retryAfterMs; other devices are not affected", async () => {
-    const s = await seed();
+    // Seed on the frozen clock: a limiter bucket must never see time run backwards.
     const t0 = Date.UTC(2026, 10, 1, 11, 0, 0);
     at(t0);
+    const s = await seed();
     for (let i = 0; i < 30; i++) expect((await verify(s.t, s.device, `nobody${i}`, PASSWORD)).kind).toBe("wrongCredentials");
     const limited = await verify(s.t, s.device, "maya", PASSWORD);
     expect(limited.kind).toBe("lockedOut");
@@ -365,6 +366,25 @@ describe("deviceApi:report audit part (plan 4.11)", () => {
     expect(row("4").summary).not.toContain("clock");
   });
 
+  test("clock (Step 17 review): a time ahead of the server by less than 7 days is clamped to the server's now", async () => {
+    const now = Date.UTC(2026, 10, 2, 12, 0, 0);
+    at(now - DAY_MS);
+    const s = await seed();
+    at(now);
+    const records = [
+      record("6".repeat(32), { atMs: now + 6 * DAY_MS }),
+      record("7".repeat(32), { atMs: now + 1_000 }),
+      record("8".repeat(32), { atMs: now - 1_000, serverTimeOffsetMs: 3_000 }),
+    ];
+    await s.t.mutation(api.deviceApi.reportAudit, { ...creds(s.device), records, dropped: 0 });
+    const rows = new Map((await auditRows(s.t, s.orgId)).map((r) => [r.eventKey, r]));
+    for (const c of ["6", "7", "8"]) {
+      const r = rows.get(`dev:${s.device.deviceId}:${c.repeat(32)}`)!;
+      expect(r.at, c).toBe(now);
+      expect(r.summary, c).not.toContain("clock");
+    }
+  });
+
   test("dropped > 0: one device.auditDropped row, not repeated on a replay; > 50 records refused", async () => {
     const s = await seed();
     const records = [record("f".repeat(32))];
@@ -427,7 +447,12 @@ describe("deviceApi:report installs part (plan 4.8 amended, A12)", () => {
           createdAt: Date.now(),
         });
       const foreignOrg = await ctx.db.insert("organizations", { name: "Other" });
-      return { a: await mk(s.orgId, "A"), b: await mk(s.orgId, "B"), c: await mk(s.orgId, "C"), foreign: await mk(foreignOrg, "F") };
+      const ids = { a: await mk(s.orgId, "A"), b: await mk(s.orgId, "B"), c: await mk(s.orgId, "C"), foreign: await mk(foreignOrg, "F") };
+      // Assigned to the PC's group: only then do their results count (Step 17 review).
+      for (const appId of [ids.a, ids.b, ids.c]) {
+        await ctx.db.insert("appAssignments", { orgId: s.orgId, groupId: s.groupId, appId, audience: "everyone", pinnedTaskbar: false, pinnedDesktop: false });
+      }
+      return ids;
     });
   }
   const result = (appId: string, state: string, extra: Record<string, unknown> = {}) => ({
@@ -440,7 +465,7 @@ describe("deviceApi:report installs part (plan 4.8 amended, A12)", () => {
     ...extra,
   });
   async function installRows(s: Seed) {
-    return await s.t.run((ctx) => ctx.db.query("installResults").withIndex("by_device", (q) => q.eq("deviceId", s.device.deviceId)).take(100));
+    return await s.t.run((ctx) => ctx.db.query("installResults").withIndex("by_device_updated", (q) => q.eq("deviceId", s.device.deviceId)).take(100));
   }
 
   test("upsert, write only on change; passing states and foreign or unknown apps ignored but accepted; failedInstallCount kept", async () => {
@@ -496,6 +521,42 @@ describe("deviceApi:report installs part (plan 4.8 amended, A12)", () => {
     expect((await auditRows(s.t, s.orgId)).filter((r) => r.action === "device.adminExitWrongPin")).toHaveLength(1);
   });
 
+  test("a state this server does not know (a newer agent) is ignored but accepted; the rest of the report goes through", async () => {
+    const s = await seed();
+    const ids = await apps(s);
+    const out = await s.t.mutation(api.deviceApi.report, {
+      ...creds(s.device),
+      status: { agentVersion: "9.9.9" },
+      installs: [result(ids.a, "verifying"), result(ids.b, "failed", { detail: "exit_code" }), result(ids.c, "")],
+      audit: { records: [record("4".repeat(32))], dropped: 0 },
+    });
+    expect(out).toEqual({ accepted: { installs: 3, audit: 1 } });
+    expect((await installRows(s)).map((r) => [r.appId, r.state])).toEqual([[ids.b, "failed"]]);
+    const summary = await s.t.run((ctx) => ctx.db.query("deviceSummary").withIndex("by_device", (q) => q.eq("deviceId", s.device.deviceId)).unique());
+    expect(summary?.agentVersion).toBe("9.9.9");
+  });
+
+  test("rows are tagged with the PC's group; a failure of an app the group does not assign (or an archived app) is stored but not counted", async () => {
+    const s = await seed();
+    const ids = await apps(s);
+    const stats = async () => (await s.t.run((ctx) => ctx.db.query("orgStats").withIndex("by_org", (q) => q.eq("orgId", s.orgId)).unique()))?.failedInstallCount ?? 0;
+    const { loose, archived } = await s.t.run(async (ctx) => {
+      const base = { orgId: s.orgId, kind: "web" as const, revision: 1, createdAt: 0 };
+      const loose = await ctx.db.insert("apps", { ...base, name: "Loose", archived: false });
+      const archived = await ctx.db.insert("apps", { ...base, name: "Old", archived: true });
+      await ctx.db.insert("appAssignments", { orgId: s.orgId, groupId: s.groupId, appId: archived, audience: "everyone", pinnedTaskbar: false, pinnedDesktop: false });
+      return { loose, archived };
+    });
+    await s.t.mutation(api.deviceApi.report, { ...creds(s.device), installs: [result(loose, "failed"), result(archived, "failed"), result(ids.a, "failed")] });
+    const rows = await installRows(s);
+    expect(rows).toHaveLength(3);
+    expect(rows.every((r) => r.groupId === s.groupId)).toBe(true);
+    expect(await stats()).toBe(1);
+    // A failure turning into success of an uncounted app does not lower the count.
+    await s.t.mutation(api.deviceApi.report, { ...creds(s.device), installs: [result(loose, "installed")] });
+    expect(await stats()).toBe(1);
+  });
+
   test("a bad count or more than 50 results is refused and nothing is written", async () => {
     const s = await seed();
     const ids = await apps(s);
@@ -546,8 +607,9 @@ describe("deviceApi:report batched (A12)", () => {
     const replay = await probe(() => s.t.mutation(api.deviceApi.report, args));
     expect(replay.result).toEqual(first.result);
     expect(replay.io.writes).toBe(0);
-    // 1 credentials + summary + report + 3 apps + 3 install rows + device + 5 event keys.
-    expect(replay.io.reads).toBe(15);
+    // 1 credentials + summary + report + 3 apps + 3 install rows + device (read for the install tag
+    // and again for the audit part) + 5 event keys.
+    expect(replay.io.reads).toBe(16);
     expect(replay.io.tables.has("deviceCredentials")).toBe(true);
   });
 
@@ -632,8 +694,8 @@ describe("deviceApi:rotateCredential (Step 12 item 4, A2)", () => {
   });
 
   test("the dashboard's rotate request is not required; a rotation costs 2 write tokens, its idempotent retry none; over the limit it is refused and not applied", async () => {
-    const s = await seed();
     at(Date.UTC(2026, 10, 1, 15, 0, 0));
+    const s = await seed();
     const left = async () => (await s.t.run((ctx) => rateLimiter.getValue(ctx, "deviceWrites", { key: s.device.deviceId }))).value;
     const newHash = sha256HexSync(NEW_SECRET);
     expect((await credRow(s))?.rotate).toBeUndefined();

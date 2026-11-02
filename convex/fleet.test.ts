@@ -221,7 +221,8 @@ describe("fleet writes", () => {
 
     await expectCode(stale.as.mutation(api.fleet.remove, { deviceId: d.deviceId }), "step_up_required");
     await t.run((ctx) => ctx.db.insert("desiredStates", { orgId, scope: d.deviceId, version: 1, doc: {} }));
-    // Two failed install results and one installed: the purge lowers `failedInstallCount` by the failed ones.
+    // Two failed install results and one installed of the revoked PC (untagged, as a revoke leaves them):
+    // they no longer count, so the purge leaves `failedInstallCount` alone (Step 17 review).
     await t.run(async (ctx) => {
       const mk = (name: string) =>
         ctx.db.insert("apps", {
@@ -239,7 +240,7 @@ describe("fleet writes", () => {
       await row(await mk("B"), "failed");
       await row(await mk("C"), "installed");
       const st = (await ctx.db.query("orgStats").withIndex("by_org", (q) => q.eq("orgId", orgId)).unique())!;
-      await ctx.db.patch(st._id, { failedInstallCount: 3 }); // 2 of this device + 1 elsewhere
+      await ctx.db.patch(st._id, { failedInstallCount: 1 }); // 1 elsewhere
     });
     await a.as.mutation(api.fleet.remove, { deviceId: d.deviceId });
     await t.finishAllScheduledFunctions(() => {});
@@ -370,13 +371,17 @@ describe("fleet:installs", () => {
   test("one PC's results newest first with the app names, paginated; nothing of another PC or organization", async () => {
     const t = await setupAuth();
     const orgId = await makeOrg(t);
-    const mine = await enrollDevice(t, orgId, { name: "Front desk" });
-    const second = await enrollDevice(t, orgId, { name: "Back office" });
+    const groupId = await t.run((ctx) => ctx.db.insert("groups", { orgId, name: "Floor", revision: 0, createdAt: 0 }));
+    const mine = await enrollDevice(t, orgId, { name: "Front desk", groupId });
+    const second = await enrollDevice(t, orgId, { name: "Back office", groupId });
     const apps = [await seedApp(t, orgId, "Docs"), await seedApp(t, orgId, "Reader"), await seedApp(t, orgId, "Notes")];
     const gone = await seedApp(t, orgId, "Deleted");
     await t.run(async (ctx) => {
+      for (const appId of [...apps, gone]) {
+        await ctx.db.insert("appAssignments", { orgId, groupId, appId, audience: "everyone", pinnedTaskbar: false, pinnedDesktop: false });
+      }
       const row = (deviceId: Id<"devices">, appId: Id<"apps">, state: "installed" | "failed" | "pending", updatedAt: number) =>
-        ctx.db.insert("installResults", { orgId, deviceId, appId, state, appRevision: 1, attempts: 1, updatedAt, ...(state === "failed" ? { detail: "The download did not match its checksum.", exitCode: 7 } : {}) });
+        ctx.db.insert("installResults", { orgId, deviceId, appId, groupId, state, appRevision: 1, attempts: 1, updatedAt, ...(state === "failed" ? { detail: "The download did not match its checksum.", exitCode: 7 } : {}) });
       await row(mine.deviceId, apps[0]!, "installed", 1);
       await row(mine.deviceId, apps[1]!, "failed", 2);
       await row(mine.deviceId, gone, "installed", 3);
@@ -411,5 +416,108 @@ describe("fleet:installs", () => {
     const d = await enrollDevice(t, orgId);
     const viewer = await asMember(t, { role: "viewer", orgId });
     expect(await viewer.as.query(api.fleet.installs, { deviceId: d.deviceId, ...page() })).toMatchObject({ page: [], isDone: true });
+  });
+});
+
+describe("install results follow the PC (Step 17 review)", () => {
+  async function setup() {
+    vi.useFakeTimers();
+    const t = await setupAuth();
+    const orgId = await makeOrg(t);
+    const a = await admin(t, orgId);
+    const mkGroup = (name: string) => t.run((ctx) => ctx.db.insert("groups", { orgId, name, revision: 0, createdAt: 0 }));
+    const front = await mkGroup("Front");
+    const back = await mkGroup("Back");
+    const d = await enrollDevice(t, orgId, { name: "Desk", groupId: front });
+    const { reader, wiki } = await t.run(async (ctx) => {
+      const reader = await ctx.db.insert("apps", {
+        orgId,
+        name: "Reader",
+        kind: "desktop",
+        desktop: {
+          source: "msi",
+          exe: "{ProgramFiles}\\R\\r.exe",
+          args: [],
+          fileArgTemplate: [],
+          resetFolders: [],
+          install: { kind: "msi", url: "https://dl.example.com/r.msi", sha256: "ab".repeat(32), sizeBytes: 1, silentArgs: [], successExitCodes: [0], removeWhenUnassigned: true },
+        },
+        archived: false,
+        revision: 1,
+        createdAt: 0,
+      });
+      const wiki = await ctx.db.insert("apps", { orgId, name: "Wiki", kind: "web", archived: false, revision: 1, createdAt: 0 });
+      // Front assigns both apps, Back only the reader.
+      for (const [groupId, appId] of [[front, reader], [front, wiki], [back, reader]] as const) {
+        await ctx.db.insert("appAssignments", { orgId, groupId, appId, audience: "everyone", pinnedTaskbar: false, pinnedDesktop: false });
+      }
+      return { reader, wiki };
+    });
+    const report = (appId: Id<"apps">, state: "failed" | "installed") =>
+      t.mutation(api.deviceApi.report, { deviceId: d.deviceId, deviceSecret: d.secret, installs: [{ appId, state, appRevision: 1, attempts: 1 }] });
+    await report(reader, "failed");
+    await report(wiki, "failed");
+    await t.finishAllScheduledFunctions(vi.runAllTimers);
+    const failed = async () => (await orgStatsOf(t, orgId))?.failedInstallCount ?? 0;
+    const installs = async () => (await a.as.query(api.fleet.installs, { deviceId: d.deviceId, ...page() })).page;
+    return { t, orgId, a, front, back, d, reader, wiki, failed, installs };
+  }
+
+  test("a move re-tags the PC's results: the new group's apps count, the old group's stop; retryable says what Retry may do", async () => {
+    const { t, a, back, d, reader, wiki, failed, installs } = await setup();
+    expect(await failed()).toBe(2);
+    const rows = await installs();
+    expect(rows.map((r) => [r.appName, r.retryable])).toEqual(expect.arrayContaining([["Reader", true], ["Wiki", false]]));
+    expect(rows).toHaveLength(2);
+
+    const revision = (await a.as.query(api.fleet.get, { deviceId: d.deviceId })).revision;
+    await a.as.mutation(api.fleet.move, { deviceId: d.deviceId, expectedRevision: revision, groupId: back });
+    expect(await failed()).toBe(1);
+    expect((await installs()).map((r) => r.appName)).toEqual(["Reader"]);
+    const tags = await t.run((ctx) => ctx.db.query("installResults").withIndex("by_device_updated", (q) => q.eq("deviceId", d.deviceId)).take(10));
+    expect(tags.every((r) => r.groupId === back)).toBe(true);
+    expect((await a.as.query(api.overview.failedInstalls, {})).map((r) => r.appId)).toEqual([reader]);
+    expect(wiki).toBeDefined();
+  });
+
+  test("a revoke clears the tags: nothing of the PC counts or is listed any more", async () => {
+    const { a, d, failed, installs } = await setup();
+    await a.as.mutation(api.fleet.revoke, { deviceId: d.deviceId });
+    expect(await failed()).toBe(0);
+    expect(await installs()).toEqual([]);
+    expect(await a.as.query(api.overview.failedInstalls, {})).toEqual([]);
+  });
+
+  test("an archived app's rows are not retryable and not listed", async () => {
+    const { a, reader, installs } = await setup();
+    await a.as.mutation(api.apps.setArchived, { appId: reader, archived: true });
+    expect((await installs()).map((r) => r.appName)).toEqual(["Wiki"]);
+  });
+});
+
+describe("fleet:list follow-ups (Step 17)", () => {
+  test('groupId "none" lists only the devices without a group; planState comes from the head', async () => {
+    const t = await setupAuth();
+    const orgId = await makeOrg(t);
+    const g = await t.run((ctx) => ctx.db.insert("groups", { orgId, name: "Floor", revision: 0, createdAt: 0 }));
+    const loose = await enrollDevice(t, orgId, { name: "Loose" });
+    await enrollDevice(t, orgId, { name: "Placed", groupId: g });
+    const other = await makeOrg(t, "Other");
+    await enrollDevice(t, other, { name: "Theirs" });
+    const viewer = await asMember(t, { role: "viewer", orgId });
+    const none = await viewer.as.query(api.fleet.list, { ...page(), groupId: "none" });
+    expect(none.page.map((r) => r.name)).toEqual(["Loose"]);
+    expect(none.page[0]?.planState).toBeNull();
+    const searched = await viewer.as.query(api.fleet.list, { ...page(), groupId: "none", search: "Placed" });
+    expect(searched.page).toEqual([]);
+
+    await t.mutation(internal.publish.run, { orgId });
+    await t.run(async (ctx) => {
+      const head = (await ctx.db.query("desiredHeads").withIndex("by_device", (q) => q.eq("deviceId", loose.deviceId)).unique())!;
+      await ctx.db.patch(head._id, { planState: "overLimit" });
+    });
+    const all = await viewer.as.query(api.fleet.list, page());
+    expect(all.page.find((r) => r.name === "Loose")?.planState).toBe("overLimit");
+    expect(all.page.find((r) => r.name === "Placed")?.planState).toBe("ok");
   });
 });

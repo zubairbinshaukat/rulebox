@@ -50,7 +50,12 @@ export const RECOVERY_CODE_COUNT = 10;
 
 /** Audit (plan 4.11). */
 export const AUDIT_SUMMARY_MAX = 300;
-export const AUDIT_RETENTION_DAYS = 365;
+/**
+ * Retention is per organization (`orgPlans.limits.auditRetentionDays`, A14;
+ * `maintenance:pruneAudit`). This is the most a plan may set (`limitsProblem`)
+ * and the daily backstop for rows no organization owns any more.
+ */
+export const MAX_AUDIT_RETENTION_DAYS = 3650;
 /** Invites are deleted this long after they expired (plan Step 3.6). */
 export const INVITE_RETENTION_MS = 30 * DAY_MS;
 
@@ -231,6 +236,26 @@ export const MAX_FILE_HANDLERS = 200;
 export const INSTALL_COUNT_CAP = 1_000;
 export const MAX_INSTALL_PAGE = 50;
 export const OVERVIEW_FAILED_INSTALLS = 20;
+/**
+ * Failed results the overview's list examines (newest first) to find
+ * OVERVIEW_FAILED_INSTALLS that still count (assigned, app not archived, PC not
+ * revoked; Step 17 review).
+ */
+export const OVERVIEW_FAILED_SCAN = 100;
+/**
+ * Failed results of one app read when an assign / unassign / archive / restore
+ * moves `failedInstallCount` (lib/installs.ts); above it `stats:reconcile` is
+ * scheduled for the organization.
+ */
+export const FAILED_DELTA_CAP = 500;
+/** A PC's install results re-tagged per transaction after a move or revoke (`stats:retagDevice` continues). */
+export const INSTALL_RETAG_BATCH = 200;
+/** `stats:reconcile`: devices / employees / failed results per run of one stage (each run is one transaction). */
+export const RECONCILE_DEVICE_BATCH = 200;
+export const RECONCILE_EMPLOYEE_BATCH = 1_000;
+export const RECONCILE_FAILED_BATCH = 200;
+/** `maintenance:pruneAudit`: audit rows deleted per run (one organization per run, A14). */
+export const AUDIT_PRUNE_BATCH = 500;
 /** Rows of a removed app deleted per run of `apps:purgeApp` (it reschedules while full). */
 export const APP_PURGE_BATCH = 100;
 /** Icons: a PNG of at most 32 KiB and 512 x 512 pixels (plan Step 10 "Do NOT"). */

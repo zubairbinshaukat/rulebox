@@ -1,7 +1,7 @@
 import type { Doc, Id } from "../_generated/dataModel";
 import { env, type DatabaseReader, type DatabaseWriter } from "../_generated/server";
 import { fail } from "./errors";
-import { MINUTE_MS, HOUR_MS } from "./limits";
+import { MAX_AUDIT_RETENTION_DAYS, MINUTE_MS, HOUR_MS } from "./limits";
 import type { PlanLimits, PlanName, PlanStatus } from "./validators";
 
 // Plans, limits and the ping interval (plan 4.2.1 / Step 5 item 8, A1, A4;
@@ -262,7 +262,7 @@ export function limitsProblem(limits: PlanLimits): string | null {
     if (field === "watchMode") continue;
     if (typeof value !== "number" || !Number.isSafeInteger(value) || value < 0) return field;
   }
-  if (limits.auditRetentionDays < 1 || limits.auditRetentionDays > 3650) return "auditRetentionDays";
+  if (limits.auditRetentionDays < 1 || limits.auditRetentionDays > MAX_AUDIT_RETENTION_DAYS) return "auditRetentionDays";
   return null;
 }
 

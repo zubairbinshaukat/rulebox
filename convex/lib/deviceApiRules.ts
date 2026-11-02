@@ -65,7 +65,10 @@ export function cleanUsername(username: string | null | undefined): string | nul
 /**
  * When a device record happened (4.11): device time corrected by the offset it
  * knew, unless that is more than 7 days ahead of the server or before the
- * device enrolled (then server receive time and `clockWrong`).
+ * device enrolled (then server receive time and `clockWrong`). A time ahead of
+ * the server by less than that is clamped to the server's `now` (Step 17
+ * review): a fast clock must not pin rows to the top of the newest-first
+ * audit lists.
  */
 export function recordTime(
   r: { atMs: number; serverTimeOffsetMs?: number | null },
@@ -75,7 +78,7 @@ export function recordTime(
   const offset = r.serverTimeOffsetMs;
   const at = typeof offset === "number" && Number.isFinite(offset) ? r.atMs + offset : r.atMs;
   if (!Number.isFinite(at) || at > now + AUDIT_FUTURE_SLACK_MS || at < enrolledAt) return { at: now, clockWrong: true };
-  return { at, clockWrong: false };
+  return { at: Math.min(at, now), clockWrong: false };
 }
 
 /** The fixed summary of a device record. Names only: never a PIN, password or hash. */
@@ -123,6 +126,12 @@ export const INSTALL_DETAILS: ReadonlySet<string> = new Set([
 
 /** The install states a report stores (A12, 4.8 amended): `pending` (accepted) and the terminal ones. */
 export const STORED_INSTALL_STATES: ReadonlySet<string> = new Set(["pending", "installed", "failed", "removed", "unsupported"]);
+export type StoredInstallState = "pending" | "installed" | "failed" | "removed" | "unsupported";
+
+/** True for a state a report stores; anything else (a passing state, or one a newer agent invented) is ignored. */
+export function isStoredInstallState(state: string): state is StoredInstallState {
+  return STORED_INSTALL_STATES.has(state);
+}
 
 /** A non-negative whole number that JSON carries exactly. */
 export function isCount(n: number): boolean {

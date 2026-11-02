@@ -20,7 +20,7 @@ import {
   MAX_REPORT_INSTALLS,
   recordSummary,
   recordTime,
-  STORED_INSTALL_STATES,
+  isStoredInstallState,
   validRecordId,
   VERIFY_RESERVE_BELOW,
 } from "./lib/deviceApiRules";
@@ -29,12 +29,13 @@ import { normalizeUsername } from "./lib/employeeRules";
 import { fail } from "./lib/errors";
 import { deviceMutation, deviceSelfCheckedAction, type DeviceIdentity } from "./lib/functions";
 import { MAX_EMPLOYEE_PASSWORD, MAX_USERNAME } from "./lib/limits";
+import { liveChecker } from "./lib/installs";
 import { scopedDb } from "./lib/orgDb";
 import { bumpOrgStatsIfPresent } from "./lib/plans";
 import { contactDue, recordContact } from "./lib/presence";
 import { consumeOrFail, consumeQuietly, rateLimiter } from "./lib/rateLimits";
 import { sha256HexSync } from "./lib/crypto";
-import { DEFAULT_ORG_SETTINGS, installState } from "./lib/validators";
+import { DEFAULT_ORG_SETTINGS } from "./lib/validators";
 
 // The agent's device API (plan Step 12; 4.11, 4.12, 5.1 as amended by A2, A9,
 // A12). Every function authenticates with the device id + secret; unknown,
@@ -378,7 +379,9 @@ type AuditRecord = Infer<typeof auditRecord>;
 
 const installResult = v.object({
   appId: v.string(),
-  state: installState,
+  // A string, not the stored union (Step 17 review): a newer agent's state must not fail the
+  // whole report and stall its queue. States outside STORED_INSTALL_STATES are ignored but acked.
+  state: v.string(),
   appRevision: v.number(),
   attempts: v.number(),
   exitCode: v.optional(v.union(v.number(), v.null())),
@@ -499,19 +502,25 @@ async function ingestAudit(
  * Install results (4.8 amended, A12): `pending` and the terminal states are
  * upserted per (device, app) and written only when a field differs; the
  * passing states (`downloading`, `installing`, `removing`) and apps that are
- * not in the device's organization are ignored but counted as accepted.
- * `orgStats.failedInstallCount` moves in the same mutation. A `detail` outside
+ * not in the device's organization are ignored but counted as accepted, and so
+ * is a `state` this server does not know (a newer agent). Every row is tagged
+ * with the PC's group; `orgStats.failedInstallCount` (live failed rows only,
+ * lib/installs.ts) moves in the same mutation. A `detail` outside
  * the fixed list is dropped (the result is stored without it). Returns
  * `accepted` (= every result) and the rows written.
  */
 async function ingestInstalls(ctx: Ctx, results: InstallResult[], now: number): Promise<{ accepted: number; written: number }> {
   let failedDelta = 0;
   let written = 0;
+  // Tag every row with the PC's group; `failedInstallCount` counts only rows that are live
+  // (lib/installs.ts), before and after this write.
+  const groupId = results.length > 0 ? (await deviceRow(ctx)).groupId : undefined;
+  const check = liveChecker(ctx);
   for (const r of results) {
-    if (!STORED_INSTALL_STATES.has(r.state)) continue;
+    if (!isStoredInstallState(r.state)) continue;
     const appId = ctx.db.normalizeId("apps", r.appId);
     // The scoped `get` answers null for another organization's app.
-    const app = appId === null ? null : await ctx.db.get(appId);
+    const app = appId === null ? null : await check.app(appId);
     if (app === null) continue;
     const next = {
       state: r.state,
@@ -519,7 +528,9 @@ async function ingestInstalls(ctx: Ctx, results: InstallResult[], now: number): 
       attempts: r.attempts,
       exitCode: r.exitCode ?? undefined,
       detail: cleanInstallDetail(r.detail),
+      groupId,
     };
+    const counts = next.state === "failed" && (await check.live(groupId, app._id)) ? 1 : 0;
     const row = await ctx.db
       .query("installResults")
       .withIndex("by_device_app", (q) => q.eq("deviceId", ctx.device._id).eq("appId", app._id))
@@ -527,7 +538,7 @@ async function ingestInstalls(ctx: Ctx, results: InstallResult[], now: number): 
     if (row === null) {
       await ctx.db.insert("installResults", { orgId: ctx.device.orgId, deviceId: ctx.device._id, appId: app._id, ...next, updatedAt: now });
       written++;
-      if (next.state === "failed") failedDelta++;
+      failedDelta += counts;
       continue;
     }
     const same =
@@ -535,13 +546,14 @@ async function ingestInstalls(ctx: Ctx, results: InstallResult[], now: number): 
       row.appRevision === next.appRevision &&
       row.attempts === next.attempts &&
       row.exitCode === next.exitCode &&
-      row.detail === next.detail;
+      row.detail === next.detail &&
+      row.groupId === next.groupId;
     if (same) continue;
-    // `undefined` removes a stale exit code or detail.
+    const counted = row.state === "failed" && (await check.live(row.groupId, app._id)) ? 1 : 0;
+    // `undefined` removes a stale exit code, detail or tag.
     await ctx.db.patch(row._id, { ...next, updatedAt: now });
     written++;
-    if (row.state === "failed" && next.state !== "failed") failedDelta--;
-    if (row.state !== "failed" && next.state === "failed") failedDelta++;
+    failedDelta += counts - counted;
   }
   if (failedDelta !== 0) {
     await bumpOrgStatsIfPresent(ctx, ctx.device.orgId, { failedInstallCount: failedDelta });

@@ -25,7 +25,9 @@ import {
   MAX_INSTALL_PAGE,
   WINGET_CACHE_MS,
 } from "./lib/limits";
-import { assertWithinLimit, bumpOrgStats, bumpOrgStatsIfPresent, bumpStats } from "./lib/plans";
+import { STORED_INSTALL_STATES } from "./lib/deviceApiRules";
+import { assignedGroupsOf, failedFollowArchive } from "./lib/installs";
+import { assertWithinLimit, bumpOrgStats, bumpStats } from "./lib/plans";
 import { consumeOrFail } from "./lib/rateLimits";
 import { audience, appKind, desktopSpec, installState, webSpec, wingetResolved } from "./lib/validators";
 import { iconDataUrl, fetchWebMeta as scanWebMeta, pngSize } from "./lib/webmeta";
@@ -217,10 +219,17 @@ export const get = memberQuery("viewer")({
 const INSTALL_STATES = installState.members.map((m) => m.value);
 
 /**
- * How many PCs are in each install state for one app (viewer): per state
- * `installResults.by_app_state` `.take(INSTALL_COUNT_CAP + 1)`, so a count is at
- * most 1,001 and the screen shows "1000+" above 1,000. A query of its own: the
+ * How many PCs are in each install state for one app (viewer). Only results
+ * that COUNT (lib/installs.ts): tagged with a group that still assigns the app;
+ * an archived app has none. Per state `installResults.by_app_state_updated`
+ * `.take(INSTALL_COUNT_CAP + 1)` (no join: the tag is on the row), so a count
+ * is at most 1,001 and the screen shows "1000+" above 1,000. `capped` (added
+ * in the Step 17 review): some state had more rows than were read, so its
+ * count may be low when many of those rows are stale. A query of its own: the
  * results change with every PC's report, so `apps:get` must not carry them.
+ * Decision (Step 17 review, finding 4): kept as a bounded read rather than a
+ * per-(app, state) counter, which every move / revoke / assign / archive would
+ * have to keep exact.
  */
 export const installSummary = memberQuery("viewer")({
   args: { appId: v.string() },
@@ -233,6 +242,7 @@ export const installSummary = memberQuery("viewer")({
     removing: v.number(),
     removed: v.number(),
     unsupported: v.number(),
+    capped: v.optional(v.boolean()),
   }),
   handler: async (ctx, args) => {
     const app = await getInOrg(ctx, "apps", args.appId, ctx.orgId);
@@ -246,21 +256,30 @@ export const installSummary = memberQuery("viewer")({
       removed: 0,
       unsupported: 0,
     };
+    if (app.archived) return counts;
+    const groups = await assignedGroupsOf(ctx, app._id);
+    if (groups.size === 0) return counts;
+    let capped = false;
     for (const state of INSTALL_STATES) {
+      // The passing states are never stored (deviceApi:report ignores them): no read.
+      if (!STORED_INSTALL_STATES.has(state)) continue;
       const rows = await ctx.db
         .query("installResults")
-        .withIndex("by_app_state", (q) => q.eq("appId", app._id).eq("state", state))
+        .withIndex("by_app_state_updated", (q) => q.eq("appId", app._id).eq("state", state))
         .take(INSTALL_COUNT_CAP + 1);
-      counts[state] = rows.length;
+      if (rows.length > INSTALL_COUNT_CAP) capped = true;
+      counts[state] = rows.filter((r) => r.groupId !== undefined && groups.has(r.groupId)).length;
     }
-    return counts;
+    return capped ? { ...counts, capped } : counts;
   },
 });
 
 /**
  * The PCs that are in one install `state` for an app (viewer, paginated by
- * `installResults.by_app_state`, newest first), each with its name. A PC that
- * was removed since (its results are purged in batches) is left out.
+ * `installResults.by_app_state_updated`, newest `updatedAt` first), each with
+ * its name. Only results that count (lib/installs.ts; none for an archived
+ * app): a page may hold fewer rows than asked for. A PC that was removed since
+ * (its results are purged in batches) is left out.
  */
 export const installs = memberQuery("viewer")({
   args: { appId: v.string(), state: installState, paginationOpts: paginationOptsValidator },
@@ -282,11 +301,13 @@ export const installs = memberQuery("viewer")({
     const app = await getInOrg(ctx, "apps", args.appId, ctx.orgId);
     const result = await ctx.db
       .query("installResults")
-      .withIndex("by_app_state", (q) => q.eq("appId", app._id).eq("state", args.state))
+      .withIndex("by_app_state_updated", (q) => q.eq("appId", app._id).eq("state", args.state))
       .order("desc")
       .paginate(args.paginationOpts);
+    const groups = app.archived ? new Set<Id<"groups">>() : await assignedGroupsOf(ctx, app._id);
     const page = [];
     for (const r of result.page) {
+      if (r.groupId === undefined || !groups.has(r.groupId)) continue;
       const device = await ctx.db.get(r.deviceId);
       if (device === null) continue;
       page.push({
@@ -487,6 +508,8 @@ export const setArchived = memberMutation("admin")({
     await ctx.db.patch(app._id, { archived: args.archived, revision: nextRevision(app) });
     if (stats !== null) await bumpStats(ctx, stats, { appCount: 1 });
     else await bumpOrgStats(ctx, ctx.orgId, { appCount: -1 });
+    // An archived app's failed results stop counting; restoring brings them back (Step 17 review).
+    await failedFollowArchive(ctx, ctx.orgId, app._id, args.archived ? -1 : 1);
     await writeAudit(ctx, {
       orgId: ctx.orgId,
       actor: ctx.actor,
@@ -550,19 +573,15 @@ export const purgeApp = internalMutation({
   handler: async (ctx, args) => {
     const installs = await ctx.db
       .query("installResults")
-      .withIndex("by_app_state", (q) => q.eq("appId", args.appId))
+      .withIndex("by_app_state_updated", (q) => q.eq("appId", args.appId))
       .take(APP_PURGE_BATCH);
     const grants = await ctx.db
       .query("employeeApps")
       .withIndex("by_app", (q) => q.eq("appId", args.appId))
       .take(APP_PURGE_BATCH);
-    // `orgStats.failedInstallCount` counts failed rows: lower it by the failed ones deleted.
-    let failed = 0;
-    for (const row of installs) {
-      if (row.state === "failed") failed++;
-      await ctx.db.delete(row._id);
-    }
-    if (failed > 0 && installs[0] !== undefined) await bumpOrgStatsIfPresent(ctx, installs[0].orgId, { failedInstallCount: -failed });
+    // `failedInstallCount` does not move: only an archived app can be deleted, and archiving
+    // already took its failed results out of the count (lib/installs.ts).
+    for (const row of installs) await ctx.db.delete(row._id);
     for (const row of grants) await ctx.db.delete(row._id);
     if (installs.length === APP_PURGE_BATCH || grants.length === APP_PURGE_BATCH) {
       await ctx.scheduler.runAfter(0, internal.apps.purgeApp, { appId: args.appId });

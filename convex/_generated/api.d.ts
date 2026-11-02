@@ -47,6 +47,7 @@ import type * as lib_fleet from "../lib/fleet.js";
 import type * as lib_functions from "../lib/functions.js";
 import type * as lib_hostRules from "../lib/hostRules.js";
 import type * as lib_hotkey from "../lib/hotkey.js";
+import type * as lib_installs from "../lib/installs.js";
 import type * as lib_lifecycle from "../lib/lifecycle.js";
 import type * as lib_limits from "../lib/limits.js";
 import type * as lib_members from "../lib/members.js";
@@ -79,6 +80,7 @@ import type * as presence from "../presence.js";
 import type * as publish from "../publish.js";
 import type * as settings from "../settings.js";
 import type * as setup from "../setup.js";
+import type * as stats from "../stats.js";
 import type * as stepUp from "../stepUp.js";
 
 import type {
@@ -127,6 +129,7 @@ declare const fullApi: ApiFromModules<{
   "lib/functions": typeof lib_functions;
   "lib/hostRules": typeof lib_hostRules;
   "lib/hotkey": typeof lib_hotkey;
+  "lib/installs": typeof lib_installs;
   "lib/lifecycle": typeof lib_lifecycle;
   "lib/limits": typeof lib_limits;
   "lib/members": typeof lib_members;
@@ -159,6 +162,7 @@ declare const fullApi: ApiFromModules<{
   publish: typeof publish;
   settings: typeof settings;
   setup: typeof setup;
+  stats: typeof stats;
   stepUp: typeof stepUp;
 }>;
 

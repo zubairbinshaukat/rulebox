@@ -182,6 +182,32 @@ describe("maintenance:daily (A10)", () => {
     expect(left.limits).toEqual(["underAttack"]);
   });
 
+  test("audit retention per plan (A14): a free org's rows older than 30 days are pruned in batches, a custom org's are kept", async () => {
+    const t = await setupAuth();
+    const now = Date.now();
+    const free = await makeOrg(t, "Free", { plan: "free" });
+    const custom = await makeOrg(t, "Custom");
+    const seed = (orgId: Id<"organizations">, n: number, ageDays: number, summary: string) =>
+      t.run(async (ctx) => {
+        for (let i = 0; i < n; i++) {
+          await ctx.db.insert("auditLog", { orgId, at: now - ageDays * DAY_MS - i, actorType: "system", actorLabel: "x", action: "group.created", summary });
+        }
+      });
+    await seed(free, 501, 31, "old"); // more than one batch
+    await seed(free, 1, 29, "recent");
+    await seed(custom, 2, 31, "kept");
+    await seed(custom, 1, 400, "too old");
+    const first = await t.mutation(internal.maintenance.pruneAudit, { now });
+    expect(first.done).toBe(false);
+    await t.finishAllScheduledFunctions(() => {});
+    const left = async (orgId: Id<"organizations">) =>
+      (await t.run((ctx) => ctx.db.query("auditLog").withIndex("by_org_at", (q) => q.eq("orgId", orgId)).take(1000))).map((r) => r.summary);
+    expect((await left(free)).filter((s) => s === "old")).toEqual([]);
+    expect(await left(free)).toContain("recent");
+    expect((await left(custom)).filter((s) => s === "kept")).toHaveLength(2);
+    expect(await left(custom)).not.toContain("too old");
+  });
+
   test("rate-limiter rows older than 7 days are cleared; new ones stay", async () => {
     const t = await setupAuth();
     const { rateLimiter } = await import("./lib/rateLimits");
