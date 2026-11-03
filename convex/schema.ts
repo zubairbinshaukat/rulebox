@@ -66,6 +66,12 @@ export default defineSchema({
     groupCount: v.optional(v.number()),
     memberCount: v.optional(v.number()), // active members
     noGroupDeviceCount: v.optional(v.number()),
+    // Revoked devices (Phase 4b): still listed by `fleet:list` until removed, so a
+    // devices total = deviceCount + revokedDeviceCount (and the "No group" filter
+    // adds revokedNoGroupDeviceCount). Bumped by the revoke (lib/fleet.ts) and
+    // `fleet:remove`; recounted by `stats:reconcile`.
+    revokedDeviceCount: v.optional(v.number()),
+    revokedNoGroupDeviceCount: v.optional(v.number()),
     outOfSupportCount: v.optional(v.number()),
     failedInstallCount: v.optional(v.number()),
     activeEnrollmentCodes: v.optional(v.number()),
@@ -267,6 +273,9 @@ export default defineSchema({
     .index("by_group", ["groupId"])
     // `fleet:list({ groupId: "none" })`: the organization's devices without a group.
     .index("by_org_group", ["orgId", "groupId"])
+    // Phase 4b list sorts (lib/listing.ts): devices by name, whole org or within a group / "No group".
+    .index("by_org_name", ["orgId", "name"])
+    .index("by_org_group_name", ["orgId", "groupId", "name"])
     // DEPRECATED: enrollment idempotency for devices enrolled before the
     // credentials split; removed with the narrow step.
     .index("by_secret_hash", ["secretHash"])
@@ -390,6 +399,8 @@ export default defineSchema({
   })
     .index("by_org", ["orgId"])
     .index("by_org_username", ["orgId", "username"])
+    // Phase 4b list sort by name (lib/listing.ts).
+    .index("by_org_name", ["orgId", "name"])
     .searchIndex("search_text", { searchField: "searchText", filterFields: ["orgId"] }),
 
   // grows (1 per employee); read only by deviceApi:verifyEmployee
@@ -441,7 +452,10 @@ export default defineSchema({
     createdAt: v.number(),
   })
     .index("by_org", ["orgId"])
-    .index("by_org_archived", ["orgId", "archived"]),
+    .index("by_org_archived", ["orgId", "archived"])
+    // Phase 4b list sort and search (lib/listing.ts).
+    .index("by_org_archived_name", ["orgId", "archived", "name"])
+    .searchIndex("search_name", { searchField: "name", filterFields: ["orgId", "archived"] }),
 
   // grows
   appAssignments: defineTable({
@@ -494,6 +508,8 @@ export default defineSchema({
     .index("by_org", ["orgId"])
     .index("by_token_hash", ["tokenHash"])
     .index("by_org_created", ["orgId", "createdAt"])
+    // Phase 4b list sort by expiry (lib/listing.ts).
+    .index("by_org_expires", ["orgId", "expiresAt"])
     // groups:delete: unexpired codes that still enroll into a group (Step 5;
     // added to plan 4.3, `has_dependents` without a scan of the org's codes).
     .index("by_group_expires", ["groupId", "expiresAt"]),

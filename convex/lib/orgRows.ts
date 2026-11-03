@@ -63,10 +63,16 @@ async function recount(ctx: Db, orgId: Id<"organizations">): Promise<Recount> {
   let deviceCount = 0;
   let noGroup = 0;
   let outOfSupport = 0;
+  let revoked = 0;
+  let revokedNoGroup = 0;
   const online = new Map<number, number>();
   for (const d of devices) {
     const cred = await credOf(ctx, d);
-    if (cred.state === "revoked") continue;
+    if (cred.state === "revoked") {
+      revoked++;
+      if (d.groupId === undefined) revokedNoGroup++;
+      continue;
+    }
     deviceCount++;
     if (d.groupId === undefined) noGroup++;
     const summary = await ctx.db
@@ -90,6 +96,8 @@ async function recount(ctx: Db, orgId: Id<"organizations">): Promise<Recount> {
       deviceCount,
       noGroupDeviceCount: noGroup,
       outOfSupportCount: outOfSupport,
+      revokedDeviceCount: revoked,
+      revokedNoGroupDeviceCount: revokedNoGroup,
     },
     online,
     wrote,

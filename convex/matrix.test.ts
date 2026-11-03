@@ -301,6 +301,12 @@ const ROWS: Row[] = [
     expect: { ...VIEWER_ANY_MFA, default: "mfa_invalid_code", foreign: "mfa_invalid_code" },
   },
   { name: "members:list", call: (a) => a.query(api.members.list, {}), expect: { ...VIEWER, foreign: "ok" } },
+  { name: "members:page", call: (a) => a.query(api.members.page, { paginationOpts: { numItems: 10, cursor: null } }), expect: { ...VIEWER, foreign: "ok" } },
+  {
+    name: "members:invitesPage",
+    call: (a) => a.query(api.members.invitesPage, { paginationOpts: { numItems: 10, cursor: null }, nowMs: Date.now() }),
+    expect: { ...VIEWER, foreign: "ok" },
+  },
   {
     name: "members:invite",
     call: (a) => a.action(api.members.invite, { email: "fresh@acme.test", role: "viewer" }),
@@ -387,6 +393,7 @@ const ROWS: Row[] = [
   { name: "settings:setExitPin", call: (a) => a.action(api.settings.setExitPin, { pin: "246813" }), expect: ADMIN_MAJOR },
   { name: "settings:clearExitPin", call: (a) => a.mutation(api.settings.clearExitPin, {}), expect: ADMIN_MAJOR },
   { name: "groups:list", call: (a) => a.query(api.groups.list, {}), expect: { ...VIEWER, foreign: "ok" } },
+  { name: "groups:page", call: (a) => a.query(api.groups.page, { paginationOpts: { numItems: 10, cursor: null } }), expect: { ...VIEWER, foreign: "ok" } },
   { name: "groups:get", call: (a, f) => a.query(api.groups.get, { groupId: f.groupId }), expect: { ...VIEWER, foreign: "not_found" } },
   { name: "groups:create", call: (a) => a.mutation(api.groups.create, { name: unique() }), expect: ADMIN_UNLOCKED },
   {
@@ -540,6 +547,7 @@ const ROWS: Row[] = [
     expect: { ...ADMIN_UNLOCKED, default: "invalid_argument" },
   },
   { name: "fileHandlers:list", call: (a) => a.query(api.fileHandlers.list, {}), expect: { ...VIEWER, foreign: "ok" } },
+  { name: "fileHandlers:page", call: (a) => a.query(api.fileHandlers.page, { paginationOpts: { numItems: 10, cursor: null } }), expect: { ...VIEWER, foreign: "ok" } },
   {
     name: "fileHandlers:set",
     call: (a, f) => a.mutation(api.fileHandlers.set, { extension: ".pdf", appId: f.desktopAppId }),
@@ -577,6 +585,10 @@ const ROWS: Row[] = [
     expect: { ...VIEWER, foreign: "ok" },
   },
   { name: "employees:search", call: (a) => a.query(api.employees.search, { text: "maya" }), expect: { ...VIEWER, foreign: "ok" } },
+  // Counts read only the caller's own counter row: a foreign owner gets THEIR total.
+  { name: "employees:count", call: (a) => a.query(api.employees.count, {}), expect: { ...VIEWER, foreign: "ok" } },
+  { name: "fleet:count", call: (a) => a.query(api.fleet.count, {}), expect: { ...VIEWER, foreign: "ok" } },
+  { name: "apps:count", call: (a) => a.query(api.apps.count, { archived: false }), expect: { ...VIEWER, foreign: "ok" } },
   { name: "employees:options", call: (a) => a.query(api.employees.options, {}), expect: { ...VIEWER, foreign: "ok" } },
   { name: "employees:get", call: (a, f) => a.query(api.employees.get, { employeeId: f.employeeId }), expect: { ...VIEWER, foreign: "not_found" } },
   {
@@ -662,6 +674,11 @@ const ROWS: Row[] = [
   },
   { name: "overview:get", call: (a) => a.query(api.overview.get, {}), expect: { ...VIEWER, foreign: "ok" } },
   { name: "overview:failedInstalls", call: (a) => a.query(api.overview.failedInstalls, {}), expect: { ...VIEWER, foreign: "ok" } },
+  {
+    name: "overview:failedInstallsPage",
+    call: (a) => a.query(api.overview.failedInstallsPage, { paginationOpts: { numItems: 10, cursor: null } }),
+    expect: { ...VIEWER, foreign: "ok" },
+  },
   { name: "audit:list", call: (a) => a.query(api.audit.list, { paginationOpts: { numItems: 10, cursor: null } }), expect: { ...VIEWER, foreign: "ok" } },
   {
     name: "audit:forTarget",

@@ -8,6 +8,7 @@ import { checkRevision, getInOrg, nextRevision } from "./lib/authz";
 import { normalizeDeviceName } from "./lib/enrollmentCodes";
 import { fail } from "./lib/errors";
 import { credOf, revokeDevice } from "./lib/fleet";
+import { checkPageSize, cleanSearch, countResult, orgStatsRow, pickSort, sortArg } from "./lib/listing";
 import { memberMutation, memberQuery } from "./lib/functions";
 import { assignedAppsOf, retagDeviceInstalls } from "./lib/installs";
 import {
@@ -17,7 +18,6 @@ import {
   MAX_GROUP_APPS,
   MAX_GROUPS_JOINED,
   MAX_INSTALL_PAGE,
-  MAX_SEARCH_TEXT,
   MINUTE_MS,
   PURGE_BATCH,
   WATCH_MIN_EXTEND_MS,
@@ -132,67 +132,70 @@ async function groupNamesOf(ctx: { db: DatabaseReader }, orgId: Id<"organization
   return new Map(groups.map((g) => [g._id as string, g.name]));
 }
 
-function cleanSearch(text: string | undefined): string | undefined {
-  if (text === undefined) return undefined;
-  const t = text.trim();
-  if (t.length > MAX_SEARCH_TEXT) fail("invalid_argument", { field: "search" });
-  return t === "" ? undefined : t;
-}
-
 /** `fleet:list({ groupId: "none" })`: devices without a group. */
 const NO_GROUP = "none";
 
 /**
- * One page of the organization's devices (viewer): newest first, or the
- * search index's best matches when `search` is given; `groupId` narrows
- * either ("none" = devices without a group). At most MAX_FLEET_PAGE rows;
- * ~4 reads per row. `planState` (from the head; null before the first publish)
- * drives the "Over plan limit - not updated" badge.
+ * One page of the organization's devices (viewer; list contract in
+ * lib/listing.ts). `sort` keys: "created" (default, newest first; `by_org`,
+ * `by_group`, `by_org_group`) and "name" (`by_org_name`, `by_org_group_name`),
+ * both directions. `search`: the search index's best matches (relevance
+ * order: `sort` is ignored). `groupId` narrows any of them ("none" = devices
+ * without a group). Revoked devices are listed (until removed). At most
+ * MAX_FLEET_PAGE rows; ~4 reads per row. `planState` (from the head; null
+ * before the first publish) drives the "Over plan limit - not updated" badge.
  */
 export const list = memberQuery("viewer")({
   args: {
     paginationOpts: paginationOptsValidator,
     groupId: v.optional(v.string()),
     search: v.optional(v.string()),
+    sort: sortArg,
   },
   returns: paginationResultValidator(deviceRow),
   handler: async (ctx, args) => {
-    const numItems = args.paginationOpts.numItems;
-    if (!Number.isInteger(numItems) || numItems < 1 || numItems > MAX_FLEET_PAGE) {
-      fail("invalid_argument", { field: "paginationOpts" });
-    }
+    checkPageSize(args.paginationOpts.numItems, MAX_FLEET_PAGE);
+    const sort = pickSort("devices", args.sort);
     // "none" (Step 17 follow-up): the devices without a group (`devices.by_org_group`).
     const noGroup = args.groupId === NO_GROUP;
     const groupId =
       args.groupId === undefined || noGroup ? undefined : (await getInOrg(ctx, "groups", args.groupId, ctx.orgId))._id;
     const search = cleanSearch(args.search);
+    const grouped = groupId !== undefined || noGroup;
+    const devices = ctx.db.query("devices");
 
     const result =
       search !== undefined
-        ? await ctx.db
-            .query("devices")
+        ? await devices
             .withSearchIndex("search_name", (q) => {
               const s = q.search("name", search).eq("orgId", ctx.orgId);
-              return groupId !== undefined || noGroup ? s.eq("groupId", groupId) : s;
+              return grouped ? s.eq("groupId", groupId) : s;
             })
             .paginate(args.paginationOpts)
-        : noGroup
-          ? await ctx.db
-              .query("devices")
-              .withIndex("by_org_group", (q) => q.eq("orgId", ctx.orgId).eq("groupId", undefined))
-              .order("desc")
-              .paginate(args.paginationOpts)
-          : groupId !== undefined
-            ? await ctx.db
-                .query("devices")
-                .withIndex("by_group", (q) => q.eq("groupId", groupId))
-                .order("desc")
+        : sort.key === "name"
+          ? grouped
+            ? await devices
+                .withIndex("by_org_group_name", (q) => q.eq("orgId", ctx.orgId).eq("groupId", groupId))
+                .order(sort.dir)
                 .paginate(args.paginationOpts)
-            : await ctx.db
-                .query("devices")
-                .withIndex("by_org", (q) => q.eq("orgId", ctx.orgId))
-                .order("desc")
-                .paginate(args.paginationOpts);
+            : await devices
+                .withIndex("by_org_name", (q) => q.eq("orgId", ctx.orgId))
+                .order(sort.dir)
+                .paginate(args.paginationOpts)
+          : noGroup
+            ? await devices
+                .withIndex("by_org_group", (q) => q.eq("orgId", ctx.orgId).eq("groupId", undefined))
+                .order(sort.dir)
+                .paginate(args.paginationOpts)
+            : groupId !== undefined
+              ? await devices
+                  .withIndex("by_group", (q) => q.eq("groupId", groupId))
+                  .order(sort.dir)
+                  .paginate(args.paginationOpts)
+              : await devices
+                  .withIndex("by_org", (q) => q.eq("orgId", ctx.orgId))
+                  .order(sort.dir)
+                  .paginate(args.paginationOpts);
 
     const groupNames = result.page.some((d) => d.groupId !== undefined)
       ? await groupNamesOf(ctx, ctx.orgId)
@@ -200,6 +203,28 @@ export const list = memberQuery("viewer")({
     const page = [];
     for (const d of result.page) page.push(await rowOf(ctx, d, groupNames));
     return { ...result, page };
+  },
+});
+
+/**
+ * The total for the devices table (viewer; lib/listing.ts): the rows
+ * `fleet:list` would page through with the same filter. Reads ONLY `orgStats`
+ * (never a device), in a query of its own so a counter write never re-runs the
+ * list. Exact for the whole organization (`deviceCount` + `revokedDeviceCount`:
+ * revoked devices stay listed until removed) and for `groupId: "none"`
+ * (`noGroupDeviceCount` + `revokedNoGroupDeviceCount`); `null` for one group or
+ * any search (no counter: the pager shows no total).
+ */
+export const count = memberQuery("viewer")({
+  args: { groupId: v.optional(v.string()), search: v.optional(v.string()) },
+  returns: countResult,
+  handler: async (ctx, args) => {
+    if (cleanSearch(args.search) !== undefined) return { total: null };
+    if (args.groupId !== undefined && args.groupId !== NO_GROUP) return { total: null };
+    const stats = await orgStatsRow(ctx);
+    if (stats === null) return { total: null };
+    if (args.groupId === NO_GROUP) return { total: (stats.noGroupDeviceCount ?? 0) + (stats.revokedNoGroupDeviceCount ?? 0) };
+    return { total: stats.deviceCount + (stats.revokedDeviceCount ?? 0) };
   },
 });
 
@@ -289,7 +314,8 @@ export const get = memberQuery("viewer")({
 
 /**
  * One PC's install results for its detail page (viewer, paginated by
- * `installResults.by_device_updated`, newest `updatedAt` first), each with its
+ * `installResults.by_device_updated`, newest `updatedAt` first; `sort` key
+ * "updated" either way, lib/listing.ts), each with its
  * app's name. Only results that count (lib/installs.ts: the PC's group still
  * assigns the app, the app is not archived; none for a revoked PC), so a page
  * may hold fewer rows than asked for. An app that was deleted since (its
@@ -297,7 +323,7 @@ export const get = memberQuery("viewer")({
  * false when `apps:retry` would refuse the app (archived, or no install source).
  */
 export const installs = memberQuery("viewer")({
-  args: { deviceId: v.string(), paginationOpts: paginationOptsValidator },
+  args: { deviceId: v.string(), paginationOpts: paginationOptsValidator, sort: sortArg },
   returns: paginationResultValidator(
     v.object({
       _id: v.id("installResults"),
@@ -312,13 +338,13 @@ export const installs = memberQuery("viewer")({
     }),
   ),
   handler: async (ctx, args) => {
-    const numItems = args.paginationOpts.numItems;
-    if (!Number.isInteger(numItems) || numItems < 1 || numItems > MAX_INSTALL_PAGE) fail("invalid_argument", { field: "paginationOpts" });
+    checkPageSize(args.paginationOpts.numItems, MAX_INSTALL_PAGE);
+    const sort = pickSort("installs", args.sort);
     const device = await getInOrg(ctx, "devices", args.deviceId, ctx.orgId);
     const result = await ctx.db
       .query("installResults")
       .withIndex("by_device_updated", (q) => q.eq("deviceId", device._id))
-      .order("desc")
+      .order(sort.dir)
       .paginate(args.paginationOpts);
     const assigned = device.groupId === undefined ? new Set<Id<"apps">>() : await assignedAppsOf(ctx, device.groupId, MAX_GROUP_APPS);
     const page = [];
@@ -461,7 +487,8 @@ export const revoke = memberMutation("admin", { major: "fleet:revoke" })({
 /**
  * Remove a REVOKED device (admin, major; `conflict` while it is not revoked).
  * Deletes its rows now and its install results and documents in batches
- * (`fleet:purgeDevice`). Counters do not move: revoke already lowered them.
+ * (`fleet:purgeDevice`). The live counters do not move (revoke already lowered
+ * them); `revokedDeviceCount` (and `revokedNoGroupDeviceCount`) drop by one.
  */
 export const remove = memberMutation("admin", { major: "fleet:remove" })({
   args: { deviceId: v.string() },
@@ -478,6 +505,11 @@ export const remove = memberMutation("admin", { major: "fleet:remove" })({
       if (row !== null) await ctx.db.delete(row._id);
     }
     await ctx.db.delete(device._id);
+    // It leaves the list: the revoked counters (the devices total) follow.
+    await bumpOrgStatsIfPresent(ctx, ctx.orgId, {
+      revokedDeviceCount: -1,
+      revokedNoGroupDeviceCount: device.groupId === undefined ? -1 : 0,
+    });
     await ctx.scheduler.runAfter(0, internal.fleet.purgeDevice, { deviceId: device._id });
     await writeAudit(ctx, {
       orgId: ctx.orgId,

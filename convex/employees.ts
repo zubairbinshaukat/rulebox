@@ -28,6 +28,7 @@ import {
 } from "./lib/employeeSync";
 import { fail } from "./lib/errors";
 import { memberAction, memberMutation, memberQuery } from "./lib/functions";
+import { checkPageSize, cleanSearch, countResult, orgStatsRow, pickSort, sortArg } from "./lib/listing";
 import {
   EMPLOYEE_ROW_GROUPS,
   MAX_APP_OPTIONS,
@@ -107,22 +108,58 @@ async function rowsOf(ctx: { db: DatabaseReader }, orgId: Id<"organizations">, e
 }
 
 /**
- * The organization's employees, newest first (viewer, paginated by
- * `employees.by_org`), or the members of one group (`groupMembers.by_group`).
- * Per row: its first groups. Never a password, a hash or the lockout.
+ * The organization's employees (viewer; list contract in lib/listing.ts), or
+ * the members of one group. Per row: its first groups. Never a password, a
+ * hash or the lockout.
+ * - No search: `sort` keys "created" (default, newest first; `by_org`), "name"
+ *   (`by_org_name`) and "username" (`by_org_username`), both directions. With
+ *   `groupId` only "created" is allowed, and it means "added to the group"
+ *   (`groupMembers.by_group`; the membership rows carry no name), anything else
+ *   is `invalid_argument` field "sort".
+ * - `search` (name or username words, `search_text`): relevance order, `sort`
+ *   ignored, paginated like any list. With `groupId` each hit of the page is
+ *   checked with one `groupMembers.by_group_employee` read and non-members are
+ *   dropped, so a page may be short (bounded: one check per hit, never more
+ *   hits than `numItems`); `isDone` decides Next.
  */
 export const list = memberQuery("viewer")({
-  args: { paginationOpts: paginationOptsValidator, groupId: v.optional(v.string()) },
+  args: {
+    paginationOpts: paginationOptsValidator,
+    groupId: v.optional(v.string()),
+    search: v.optional(v.string()),
+    sort: sortArg,
+  },
   returns: paginationResultValidator(employeeRow),
   handler: async (ctx, args) => {
-    const numItems = args.paginationOpts.numItems;
-    if (!Number.isInteger(numItems) || numItems < 1 || numItems > MAX_EMPLOYEE_PAGE) fail("invalid_argument", { field: "paginationOpts" });
-    if (args.groupId !== undefined) {
-      const group = await getInOrg(ctx, "groups", args.groupId, ctx.orgId);
+    checkPageSize(args.paginationOpts.numItems, MAX_EMPLOYEE_PAGE);
+    const sort = pickSort("employees", args.sort);
+    const group = args.groupId === undefined ? null : await getInOrg(ctx, "groups", args.groupId, ctx.orgId);
+    const raw = cleanSearch(args.search);
+    if (raw !== undefined) {
+      const text = searchQuery(raw, MAX_SEARCH_TEXT);
+      const result = await ctx.db
+        .query("employees")
+        .withSearchIndex("search_text", (q) => q.search("searchText", text).eq("orgId", ctx.orgId))
+        .paginate(args.paginationOpts);
+      const kept: Doc<"employees">[] = [];
+      for (const e of result.page) {
+        if (group !== null) {
+          const member = await ctx.db
+            .query("groupMembers")
+            .withIndex("by_group_employee", (q) => q.eq("groupId", group._id).eq("employeeId", e._id))
+            .first();
+          if (member === null) continue;
+        }
+        kept.push(e);
+      }
+      return { ...result, page: await rowsOf(ctx, ctx.orgId, kept) };
+    }
+    if (group !== null) {
+      if (sort.key !== "created") fail("invalid_argument", { field: "sort" });
       const result = await ctx.db
         .query("groupMembers")
         .withIndex("by_group", (q) => q.eq("groupId", group._id))
-        .order("desc")
+        .order(sort.dir)
         .paginate(args.paginationOpts);
       const employees: Doc<"employees">[] = [];
       for (const m of result.page) {
@@ -131,12 +168,38 @@ export const list = memberQuery("viewer")({
       }
       return { ...result, page: await rowsOf(ctx, ctx.orgId, employees) };
     }
-    const result = await ctx.db
-      .query("employees")
-      .withIndex("by_org", (q) => q.eq("orgId", ctx.orgId))
-      .order("desc")
-      .paginate(args.paginationOpts);
+    const employees = ctx.db.query("employees");
+    const result =
+      sort.key === "name"
+        ? await employees
+            .withIndex("by_org_name", (q) => q.eq("orgId", ctx.orgId))
+            .order(sort.dir)
+            .paginate(args.paginationOpts)
+        : sort.key === "username"
+          ? await employees
+              .withIndex("by_org_username", (q) => q.eq("orgId", ctx.orgId))
+              .order(sort.dir)
+              .paginate(args.paginationOpts)
+          : await employees
+              .withIndex("by_org", (q) => q.eq("orgId", ctx.orgId))
+              .order(sort.dir)
+              .paginate(args.paginationOpts);
     return { ...result, page: await rowsOf(ctx, ctx.orgId, result.page) };
+  },
+});
+
+/**
+ * The total for the employees table (viewer; lib/listing.ts): `employeeCount`
+ * from `orgStats` only, for the unfiltered list; `null` with a group filter or
+ * a search (no exact counter).
+ */
+export const count = memberQuery("viewer")({
+  args: { groupId: v.optional(v.string()), search: v.optional(v.string()) },
+  returns: countResult,
+  handler: async (ctx, args) => {
+    if (args.groupId !== undefined || cleanSearch(args.search) !== undefined) return { total: null };
+    const stats = await orgStatsRow(ctx);
+    return { total: stats === null ? null : (stats.employeeCount ?? 0) };
   },
 });
 
@@ -147,6 +210,8 @@ export const list = memberQuery("viewer")({
  * field, so up to MAX_EMPLOYEE_SEARCH_SCAN hits are examined (one index range
  * each) until MAX_EMPLOYEE_SEARCH members are found; `capped` is also set when
  * that scan ran out, because the answer may then be incomplete.
+ * Phase 4b: tables search with `employees:list({ search })` (paginated); this
+ * bounded form stays for the employee picker.
  */
 export const search = memberQuery("viewer")({
   args: { text: v.string(), groupId: v.optional(v.string()) },

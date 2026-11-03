@@ -1,3 +1,4 @@
+import { paginationOptsValidator } from "convex/server";
 import { v } from "convex/values";
 import { internal } from "./_generated/api";
 import type { Doc, Id } from "./_generated/dataModel";
@@ -7,7 +8,8 @@ import { checkRevision, getInOrg, nextRevision } from "./lib/authz";
 import { codeHash, INVITE_CODE_LENGTH, normalizeEmail, randomCrockford } from "./lib/crypto";
 import { fail } from "./lib/errors";
 import { memberAction, memberMutation, memberQuery } from "./lib/functions";
-import { INVITE_TTL_MS, MAX_INVITES_LISTED, MAX_MEMBERS, MAX_MEMBERSHIPS, RESET_CODE_TTL_MS } from "./lib/limits";
+import { INVITE_TTL_MS, MAX_INVITES_LISTED, MAX_MEMBERS, MAX_MEMBERSHIPS, MINUTE_MS, RESET_CODE_TTL_MS } from "./lib/limits";
+import { boundedPageValidator, byField, checkPageSize, cleanSearch, matches, pageInMemory, pickSort, sortArg } from "./lib/listing";
 import { assertNotLastOwner } from "./lib/members";
 import { assertWithinLimit, bumpOrgStats, bumpStats } from "./lib/plans";
 import { consumeOrFail } from "./lib/rateLimits";
@@ -82,6 +84,102 @@ export const list = memberQuery("viewer")({
         expiresAt: i.expiresAt,
         usedAt: i.usedAt,
       })),
+    };
+  },
+});
+
+const memberRow = v.object({
+  _id: v.id("members"),
+  email: v.string(),
+  role,
+  status: memberStatus,
+  createdAt: v.number(),
+  mfaEnrolled: v.boolean(),
+  isYou: v.boolean(),
+  revision: v.number(),
+});
+
+/** Roles in the order the members table sorts them (most rights first when ascending). */
+const ROLE_RANK: Record<Doc<"members">["role"], number> = { owner: 0, admin: 1, viewer: 2 };
+
+/**
+ * One page of the organization's members for the members table (viewer; list
+ * contract in lib/listing.ts). A SMALL bounded table: at most MAX_MEMBERS rows
+ * are read (`members.by_org_user`), filtered by `search` (email contains,
+ * case-insensitive), sorted by `sort` ("email" A-Z by default, "role",
+ * "status" or "created") and paged in the query, with the exact `total` (the
+ * `memberCount` counter leaves out disabled members, so it is not used). The
+ * MFA row is read for the page's rows only.
+ */
+export const page = memberQuery("viewer")({
+  args: { paginationOpts: paginationOptsValidator, search: v.optional(v.string()), sort: sortArg },
+  returns: boundedPageValidator(memberRow),
+  handler: async (ctx, args) => {
+    checkPageSize(args.paginationOpts.numItems);
+    const sort = pickSort("members", args.sort);
+    const search = cleanSearch(args.search);
+    const rows = await ctx.db
+      .query("members")
+      .withIndex("by_org_user", (q) => q.eq("orgId", ctx.orgId))
+      .take(MAX_MEMBERS);
+    const get = (m: Doc<"members">): string | number =>
+      sort.key === "role" ? ROLE_RANK[m.role] : sort.key === "status" ? m.status : sort.key === "created" ? m.createdAt : m.email;
+    const kept = rows.filter((m) => matches(search, m.email)).sort(byField(get, sort.dir));
+    const result = pageInMemory(kept, args.paginationOpts);
+    const page = [];
+    for (const m of result.page) {
+      const s = await ctx.db
+        .query("memberSecrets")
+        .withIndex("by_user", (q) => q.eq("userId", m.userId))
+        .first();
+      page.push({
+        _id: m._id,
+        email: m.email,
+        role: m.role,
+        status: m.status,
+        createdAt: m.createdAt,
+        mfaEnrolled: s?.totpSecret !== undefined,
+        isYou: m._id === ctx.member._id,
+        revision: m.revision,
+      });
+    }
+    return { ...result, page };
+  },
+});
+
+/**
+ * One page of the organization's PENDING invites (unused, not expired at
+ * `nowMs`, the client's clock rounded down to the minute as in
+ * `enrollmentCodes:list`) for the invites table (viewer). Bounded: the newest
+ * MAX_INVITES_LISTED invites are read (`invites.by_org`), then searched (email
+ * contains), sorted ("created" newest first by default, "email", "expires")
+ * and paged in the query, with the exact `total`.
+ */
+export const invitesPage = memberQuery("viewer")({
+  args: { paginationOpts: paginationOptsValidator, nowMs: v.number(), search: v.optional(v.string()), sort: sortArg },
+  returns: boundedPageValidator(
+    v.object({ _id: v.id("invites"), email: v.string(), role, kind: inviteKind, expiresAt: v.number(), createdAt: v.number() }),
+  ),
+  handler: async (ctx, args) => {
+    if (!Number.isFinite(args.nowMs) || args.nowMs < 0) fail("invalid_argument", { field: "nowMs" });
+    checkPageSize(args.paginationOpts.numItems);
+    const sort = pickSort("invites", args.sort);
+    const search = cleanSearch(args.search);
+    const now = Math.floor(args.nowMs / MINUTE_MS) * MINUTE_MS;
+    const invites = await ctx.db
+      .query("invites")
+      .withIndex("by_org", (q) => q.eq("orgId", ctx.orgId))
+      .order("desc")
+      .take(MAX_INVITES_LISTED);
+    const get = (i: Doc<"invites">): string | number =>
+      sort.key === "email" ? i.email : sort.key === "expires" ? i.expiresAt : i._creationTime;
+    const kept = invites
+      .filter((i) => i.usedAt === undefined && i.expiresAt > now && matches(search, i.email))
+      .sort(byField(get, sort.dir));
+    const result = pageInMemory(kept, args.paginationOpts);
+    return {
+      ...result,
+      page: result.page.map((i) => ({ _id: i._id, email: i.email, role: i.role, kind: i.kind, expiresAt: i.expiresAt, createdAt: i._creationTime })),
     };
   },
 });

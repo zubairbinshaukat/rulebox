@@ -164,8 +164,10 @@ export const MAX_RECOUNT_DEVICES = 2_000;
 /** Devices (plan Step 7). */
 /** Device pages (`fleet:list`): at most this many rows per page (post-Phase-5 2.5). */
 export const MAX_FLEET_PAGE = 50;
-/** `fleet:list` search text. */
+/** List search text (lib/listing.ts `cleanSearch`; Phase 4b list contract). */
 export const MAX_SEARCH_TEXT = 100;
+/** Rows per page of any dashboard list (lib/listing.ts; the pager offers 10, 25, 50). */
+export const MAX_LIST_PAGE = 50;
 /** Group names joined into a device page (`groups.by_org`, tiny). */
 export const MAX_GROUPS_JOINED = 500;
 /** `maintenance:migrateDevices` and the purge of a removed device: rows per run. */

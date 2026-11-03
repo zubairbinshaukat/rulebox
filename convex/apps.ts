@@ -12,6 +12,7 @@ import { deepEqual } from "./lib/deepEqual";
 import { programDenied } from "./lib/denyList";
 import { fail } from "./lib/errors";
 import { memberAction, memberMutation, memberQuery } from "./lib/functions";
+import { checkPageSize, cleanSearch, countResult, orgStatsRow, pickSort, sortArg } from "./lib/listing";
 import { webUrlProblem } from "./lib/hostRules";
 import {
   APP_EMPLOYEE_COUNT_CAP,
@@ -77,21 +78,35 @@ const appRow = v.object({
 });
 
 /**
- * The organization's apps, newest first (viewer, paginated by
- * `apps.by_org_archived`). Per row: its group count (one capped index read)
- * and icon address. Never `installResults`.
+ * The organization's apps, archived or not (viewer; list contract in
+ * lib/listing.ts). `sort` keys: "created" (default, newest first;
+ * `apps.by_org_archived`) and "name" (`by_org_archived_name`), both
+ * directions. `search`: name words (`apps.search_name`, filtered by org and
+ * `archived`), relevance order, `sort` ignored. Per row: its group count (one
+ * capped index read) and icon address. Never `installResults`.
  */
 export const list = memberQuery("viewer")({
-  args: { paginationOpts: paginationOptsValidator, archived: v.boolean() },
+  args: { paginationOpts: paginationOptsValidator, archived: v.boolean(), search: v.optional(v.string()), sort: sortArg },
   returns: paginationResultValidator(appRow),
   handler: async (ctx, args) => {
-    const numItems = args.paginationOpts.numItems;
-    if (!Number.isInteger(numItems) || numItems < 1 || numItems > MAX_APP_PAGE) fail("invalid_argument", { field: "paginationOpts" });
-    const result = await ctx.db
-      .query("apps")
-      .withIndex("by_org_archived", (q) => q.eq("orgId", ctx.orgId).eq("archived", args.archived))
-      .order("desc")
-      .paginate(args.paginationOpts);
+    checkPageSize(args.paginationOpts.numItems, MAX_APP_PAGE);
+    const sort = pickSort("apps", args.sort);
+    const search = cleanSearch(args.search);
+    const apps = ctx.db.query("apps");
+    const result =
+      search !== undefined
+        ? await apps
+            .withSearchIndex("search_name", (q) => q.search("name", search).eq("orgId", ctx.orgId).eq("archived", args.archived))
+            .paginate(args.paginationOpts)
+        : sort.key === "name"
+          ? await apps
+              .withIndex("by_org_archived_name", (q) => q.eq("orgId", ctx.orgId).eq("archived", args.archived))
+              .order(sort.dir)
+              .paginate(args.paginationOpts)
+          : await apps
+              .withIndex("by_org_archived", (q) => q.eq("orgId", ctx.orgId).eq("archived", args.archived))
+              .order(sort.dir)
+              .paginate(args.paginationOpts);
     const page = [];
     for (const a of result.page) {
       const groups = await ctx.db
@@ -113,6 +128,21 @@ export const list = memberQuery("viewer")({
       });
     }
     return { ...result, page };
+  },
+});
+
+/**
+ * The total for the apps table (viewer; lib/listing.ts): `appCount` from
+ * `orgStats` only (it counts NON-archived apps), so exact for
+ * `archived: false` without a search; `null` for the archived tab or a search.
+ */
+export const count = memberQuery("viewer")({
+  args: { archived: v.boolean(), search: v.optional(v.string()) },
+  returns: countResult,
+  handler: async (ctx, args) => {
+    if (args.archived || cleanSearch(args.search) !== undefined) return { total: null };
+    const stats = await orgStatsRow(ctx);
+    return { total: stats === null ? null : (stats.appCount ?? 0) };
   },
 });
 
@@ -276,13 +306,14 @@ export const installSummary = memberQuery("viewer")({
 
 /**
  * The PCs that are in one install `state` for an app (viewer, paginated by
- * `installResults.by_app_state_updated`, newest `updatedAt` first), each with
+ * `installResults.by_app_state_updated`, newest `updatedAt` first; `sort` key
+ * "updated" either way, lib/listing.ts), each with
  * its name. Only results that count (lib/installs.ts; none for an archived
  * app): a page may hold fewer rows than asked for. A PC that was removed since
  * (its results are purged in batches) is left out.
  */
 export const installs = memberQuery("viewer")({
-  args: { appId: v.string(), state: installState, paginationOpts: paginationOptsValidator },
+  args: { appId: v.string(), state: installState, paginationOpts: paginationOptsValidator, sort: sortArg },
   returns: paginationResultValidator(
     v.object({
       _id: v.id("installResults"),
@@ -296,13 +327,13 @@ export const installs = memberQuery("viewer")({
     }),
   ),
   handler: async (ctx, args) => {
-    const numItems = args.paginationOpts.numItems;
-    if (!Number.isInteger(numItems) || numItems < 1 || numItems > MAX_INSTALL_PAGE) fail("invalid_argument", { field: "paginationOpts" });
+    checkPageSize(args.paginationOpts.numItems, MAX_INSTALL_PAGE);
+    const sort = pickSort("installs", args.sort);
     const app = await getInOrg(ctx, "apps", args.appId, ctx.orgId);
     const result = await ctx.db
       .query("installResults")
       .withIndex("by_app_state_updated", (q) => q.eq("appId", app._id).eq("state", args.state))
-      .order("desc")
+      .order(sort.dir)
       .paginate(args.paginationOpts);
     const groups = app.archived ? new Set<Id<"groups">>() : await assignedGroupsOf(ctx, app._id);
     const page = [];

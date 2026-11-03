@@ -29,7 +29,8 @@ export async function credOf(ctx: { db: DatabaseReader }, device: Doc<"devices">
 /**
  * Revoke a device: credentials state `revoked` (any later call is refused),
  * counters (`deviceCount`, `noGroupDeviceCount`, `outOfSupportCount` count
- * non-revoked devices only), presence offline + revoked. Returns the device
+ * non-revoked devices only; `revokedDeviceCount` / `revokedNoGroupDeviceCount`
+ * count the revoked ones until `fleet:remove`), presence offline + revoked. Returns the device
  * row, or null when it was already revoked or is gone (nothing written).
  */
 export async function revokeDevice(
@@ -53,6 +54,9 @@ export async function revokeDevice(
     deviceCount: -1,
     noGroupDeviceCount: device.groupId === undefined ? -1 : 0,
     outOfSupportCount: summary?.outOfSupport === true ? -1 : 0,
+    // Still listed until removed (Phase 4b: the devices total = deviceCount + revokedDeviceCount).
+    revokedDeviceCount: 1,
+    revokedNoGroupDeviceCount: device.groupId === undefined ? 1 : 0,
   });
   await markRevoked(ctx, { deviceId: device._id, orgId: device.orgId }, now);
   // A revoked PC's install results stop counting (`failedInstallCount`, lists; Step 17 review).

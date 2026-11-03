@@ -209,7 +209,7 @@ export const IO_BUDGETS: Record<string, IoBudget> = {
   // ---- Step 11: employees. Worst cases are the caps (100 groups, 50 grants per employee);
   // a typical call (1-3 groups, no grants) reads under 20 documents.
   // wrapper (3) + a page of <= 50 + the groups (<= 500, tiny) + <= 6 memberships per row (+ 50 gets for a group's page).
-  "employees:list": { maxReads: 3 + 1 + 50 + 50 + 500 + 50 * 6, maxReadBytes: 400_000, maxWrites: 0, maxWriteBytes: 0, live: true },
+  // Phase 4b: the row is restated (with the search + group checks) in the Phase 4b block below.
   // wrapper + group + <= 51 hits + a membership check each + groups + rows' memberships.
   "employees:search": { maxReads: 3 + 1 + 51 + 51 + 500 + 50 * 6, maxReadBytes: 400_000, maxWrites: 0, maxWriteBytes: 0, live: true },
   // wrapper + groups (<= 500) + apps (<= 500) + the organization.
@@ -259,4 +259,29 @@ export const IO_BUDGETS: Record<string, IoBudget> = {
   // A page of <= 50 audit rows (~300 B each). Re-runs when a row is written inside the loaded range.
   "audit:list": { maxReads: 3 + 50, maxReadBytes: 40_000, maxWrites: 0, maxWriteBytes: 0, live: true },
   "audit:forTarget": { maxReads: 3 + 50, maxReadBytes: 40_000, maxWrites: 0, maxWriteBytes: 0, live: true },
+
+  // ---- Phase 4b Part A: server-driven lists (lib/listing.ts). `sort` / `search` / page size do not
+  // change the rows above: a sort is one index range like the default order (fleet:list,
+  // employees:list, apps:list, enrollmentCodes:list, audit:list / forTarget, apps:installs,
+  // fleet:installs), a search reads one page of hits. Exceptions are re-stated below.
+  // employees:list with `search` + `groupId`: + one `groupMembers.by_group_employee` check per hit (<= 50).
+  "employees:list": { maxReads: 3 + 1 + 50 + 50 + 50 + 500 + 50 * 6, maxReadBytes: 400_000, maxWrites: 0, maxWriteBytes: 0, live: true },
+  // Totals (`<table>:count`): wrapper + the one `orgStats` row (~400 B), never a list row. Re-run on any
+  // counter write of the organization, which is why they are separate from the lists.
+  "fleet:count": { maxReads: 3 + 1, maxReadBytes: 2_048, maxWrites: 0, maxWriteBytes: 0, live: true },
+  "employees:count": { maxReads: 3 + 1, maxReadBytes: 2_048, maxWrites: 0, maxWriteBytes: 0, live: true },
+  "apps:count": { maxReads: 3 + 1, maxReadBytes: 2_048, maxWrites: 0, maxWriteBytes: 0, live: true },
+  // Small bounded tables, sorted / searched / paged in the query with an exact `total`:
+  // groups (<= 500 rows, ~200 B) + the page's device / employee counts (`.take(501)` each, as groups:list
+  // but for <= numItems groups instead of all of them). Free tenant (3 groups, 2 PCs, 25 employees): ~35.
+  // RISK (unchanged from groups:list): a page of 50 big groups reads up to 50 x 1,002 count rows.
+  "groups:page": { maxReads: 3 + 500 + 100, maxReadBytes: 140_000, maxWrites: 0, maxWriteBytes: 0, live: true },
+  // members (<= 200) + the page's MFA rows (<= 50).
+  "members:page": { maxReads: 3 + 200 + 50, maxReadBytes: 90_000, maxWrites: 0, maxWriteBytes: 0, live: true },
+  // the newest invites (<= 100).
+  "members:invitesPage": { maxReads: 3 + 100, maxReadBytes: 40_000, maxWrites: 0, maxWriteBytes: 0, live: true },
+  // rules (<= 201) + one app per distinct program (<= 201; app specs ~1-2 KB).
+  "fileHandlers:page": { maxReads: 3 + 201 + 201, maxReadBytes: 450_000, maxWrites: 0, maxWriteBytes: 0, live: true },
+  // a page of <= 50 failed results, their apps and (group, app) assignments (cached per call), their PCs.
+  "overview:failedInstallsPage": { maxReads: 3 + 50 + 50 + 50 + 50, maxReadBytes: 160_000, maxWrites: 0, maxWriteBytes: 0, live: true },
 };

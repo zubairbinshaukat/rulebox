@@ -1,3 +1,4 @@
+import { paginationOptsValidator } from "convex/server";
 import { v } from "convex/values";
 import type { Doc, Id } from "./_generated/dataModel";
 import type { DatabaseReader } from "./_generated/server";
@@ -7,6 +8,7 @@ import { changeMemberships, membershipsOf } from "./lib/employeeSync";
 import { fail } from "./lib/errors";
 import { failedFollowAssignment } from "./lib/installs";
 import { memberMutation, memberQuery } from "./lib/functions";
+import { boundedPageValidator, byField, checkPageSize, cleanSearch, matches, pageInMemory, pickSort, sortArg } from "./lib/listing";
 import {
   GROUP_COUNT_CAP,
   MAX_EMPLOYEE_GROUPS,
@@ -80,6 +82,36 @@ export const list = memberQuery("viewer")({
     const out = [];
     for (const g of groups) out.push(rowOf(g, await countsOf(ctx, g._id)));
     return out.sort((a, b) => a.name.localeCompare(b.name));
+  },
+});
+
+/**
+ * One page of the organization's groups for the groups table (viewer; list
+ * contract in lib/listing.ts). Groups are a SMALL bounded table: the query
+ * reads at most MAX_GROUPS_LISTED rows (`groups.by_org`), keeps those whose
+ * name or description contains `search` (case-insensitive), sorts them by
+ * `sort` ("name" A-Z by default, or "created") and returns one page with the
+ * exact `total` (no counter needed: `groupCount` leaves out the default
+ * group). Device and employee counts are read for the page's rows only.
+ */
+export const page = memberQuery("viewer")({
+  args: { paginationOpts: paginationOptsValidator, search: v.optional(v.string()), sort: sortArg },
+  returns: boundedPageValidator(groupRow),
+  handler: async (ctx, args) => {
+    checkPageSize(args.paginationOpts.numItems);
+    const sort = pickSort("groups", args.sort);
+    const search = cleanSearch(args.search);
+    const groups = await ctx.db
+      .query("groups")
+      .withIndex("by_org", (q) => q.eq("orgId", ctx.orgId))
+      .take(MAX_GROUPS_LISTED);
+    const kept = groups
+      .filter((g) => matches(search, g.name, g.description))
+      .sort(sort.key === "name" ? byField((g) => g.name, sort.dir) : byField((g) => g.createdAt ?? g._creationTime, sort.dir));
+    const result = pageInMemory(kept, args.paginationOpts);
+    const rows = [];
+    for (const g of result.page) rows.push(rowOf(g, await countsOf(ctx, g._id)));
+    return { ...result, page: rows };
   },
 });
 

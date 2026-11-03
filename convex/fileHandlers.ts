@@ -1,3 +1,4 @@
+import { paginationOptsValidator } from "convex/server";
 import { v } from "convex/values";
 import type { Doc } from "./_generated/dataModel";
 import { publishApp } from "./lib/appPublish";
@@ -6,6 +7,7 @@ import { getInOrg } from "./lib/authz";
 import { extensionProblem, normalizeExtension, programDenied } from "./lib/denyList";
 import { fail } from "./lib/errors";
 import { memberMutation, memberQuery } from "./lib/functions";
+import { boundedPageValidator, byField, checkPageSize, cleanSearch, matches, pageInMemory, pickSort, sortArg } from "./lib/listing";
 import { MAX_FILE_HANDLERS, MAX_APP_OPTIONS } from "./lib/limits";
 import { appKind } from "./lib/validators";
 
@@ -60,6 +62,41 @@ export const list = memberQuery("viewer")({
         .map((a) => ({ _id: a._id, name: a.name, kind: a.kind, canOpenFiles: true as const }))
         .sort((a, b) => a.name.localeCompare(b.name)),
     };
+  },
+});
+
+/**
+ * One page of the file-type rules for the file types table (viewer; list
+ * contract in lib/listing.ts). A SMALL bounded table (<= MAX_FILE_HANDLERS
+ * rules, `fileHandlers.by_org_ext`): searched (extension or program name
+ * contains, case-insensitive), sorted ("extension" A-Z by default, or "app" =
+ * program name) and paged in the query, with the exact `total`. The program
+ * picker is `apps:options` (its `canOpenFiles` is the same rule), subscribed
+ * only while the "add rule" dialog is open.
+ */
+export const page = memberQuery("viewer")({
+  args: { paginationOpts: paginationOptsValidator, search: v.optional(v.string()), sort: sortArg },
+  returns: boundedPageValidator(v.object({ _id: v.id("fileHandlers"), extension: v.string(), appId: v.id("apps"), appName: v.string() })),
+  handler: async (ctx, args) => {
+    checkPageSize(args.paginationOpts.numItems);
+    const sort = pickSort("fileTypes", args.sort);
+    const search = cleanSearch(args.search);
+    const handlers = await ctx.db
+      .query("fileHandlers")
+      .withIndex("by_org_ext", (q) => q.eq("orgId", ctx.orgId))
+      .take(MAX_FILE_HANDLERS + 1);
+    // Program names: one get per distinct app (rules point at a handful of programs).
+    const names = new Map<string, string>();
+    const rows = [];
+    for (const h of handlers) {
+      if (!names.has(h.appId)) names.set(h.appId, (await ctx.db.get(h.appId))?.name ?? "");
+      rows.push({ _id: h._id, extension: h.extension, appId: h.appId, appName: names.get(h.appId) ?? "" });
+    }
+    const kept = rows
+      .filter((r) => matches(search, r.extension, r.appName))
+      // Ties on the program are broken by extension (unique per organization).
+      .sort(byField((r) => (sort.key === "app" ? `${r.appName}\u0000${r.extension}` : r.extension), sort.dir));
+    return pageInMemory(kept, args.paginationOpts);
   },
 });
 

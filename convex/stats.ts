@@ -44,6 +44,8 @@ const PAGED_FIELDS = [
   "deviceCount",
   "noGroupDeviceCount",
   "outOfSupportCount",
+  "revokedDeviceCount",
+  "revokedNoGroupDeviceCount",
   "employeeCount",
   "activeEmployeeCount",
   "failedInstallCount",
@@ -54,6 +56,9 @@ const acc = v.object({
   deviceCount: v.number(),
   noGroupDeviceCount: v.number(),
   outOfSupportCount: v.number(),
+  // Phase 4b. Optional: a run scheduled before they existed carries none (its snapshot neither, so they are skipped).
+  revokedDeviceCount: v.optional(v.number()),
+  revokedNoGroupDeviceCount: v.optional(v.number()),
   employeeCount: v.number(),
   activeEmployeeCount: v.number(),
   failedInstallCount: v.number(),
@@ -65,6 +70,8 @@ const snapshot = v.object({
   deviceCount: v.number(),
   noGroupDeviceCount: v.number(),
   outOfSupportCount: v.number(),
+  revokedDeviceCount: v.optional(v.number()),
+  revokedNoGroupDeviceCount: v.optional(v.number()),
   employeeCount: v.number(),
   activeEmployeeCount: v.number(),
   failedInstallCount: v.number(),
@@ -77,6 +84,8 @@ function emptyAcc(): Acc {
     deviceCount: 0,
     noGroupDeviceCount: 0,
     outOfSupportCount: 0,
+    revokedDeviceCount: 0,
+    revokedNoGroupDeviceCount: 0,
     employeeCount: 0,
     activeEmployeeCount: 0,
     failedInstallCount: 0,
@@ -118,7 +127,11 @@ async function devicesStage(ctx: MutationCtx, orgId: Id<"organizations">, cursor
     .withIndex("by_org", (q) => q.eq("orgId", orgId))
     .paginate({ numItems: RECONCILE_DEVICE_BATCH, cursor });
   for (const d of page.page) {
-    if ((await credOf(ctx, d)).state === "revoked") continue;
+    if ((await credOf(ctx, d)).state === "revoked") {
+      a.revokedDeviceCount = (a.revokedDeviceCount ?? 0) + 1;
+      if (d.groupId === undefined) a.revokedNoGroupDeviceCount = (a.revokedNoGroupDeviceCount ?? 0) + 1;
+      continue;
+    }
     a.deviceCount++;
     if (d.groupId === undefined) a.noGroupDeviceCount++;
     const summary = await ctx.db
@@ -173,7 +186,8 @@ async function finish(ctx: MutationCtx, stats: Doc<"orgStats">, a: Acc, start: S
       skipped.push(f);
       continue;
     }
-    if (current !== a[f]) patch[f] = a[f];
+    const want = a[f] ?? 0;
+    if (current !== want) patch[f] = want;
   }
 
   // Small tables: exact in this transaction (or left alone above their cap).

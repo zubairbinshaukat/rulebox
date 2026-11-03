@@ -148,6 +148,8 @@ export type CounterField =
   | "groupCount"
   | "memberCount"
   | "noGroupDeviceCount"
+  | "revokedDeviceCount"
+  | "revokedNoGroupDeviceCount"
   | "outOfSupportCount"
   | "failedInstallCount"
   | "activeEnrollmentCodes";

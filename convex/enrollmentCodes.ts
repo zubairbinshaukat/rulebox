@@ -15,6 +15,7 @@ import {
 import { codeState, countsAsActive, normalizeLabel, recountActiveCodes } from "./lib/enrollmentCodes";
 import { fail } from "./lib/errors";
 import { memberAction, memberMutation, memberQuery } from "./lib/functions";
+import { checkPageSize, pickSort, sortArg } from "./lib/listing";
 import {
   MAX_CODE_LABEL,
   MAX_CODE_PAGE,
@@ -166,25 +167,32 @@ const codeRow = v.object({
 
 /**
  * The organization's codes, newest first (viewer, paginated by
- * `enrollmentTokens.by_org_created`). `nowMs` is the client's clock; it is
+ * `enrollmentTokens.by_org_created`; `sort` keys "created" (default) and
+ * "expires" (`by_org_expires`), both directions, lib/listing.ts; no search and
+ * no total: `activeEnrollmentCodes` counts only usable codes). `nowMs` is the client's clock; it is
  * rounded down to the minute so the subscription re-runs at most once a
  * minute and the query never calls `Date.now()`. Never the code or the hash.
  */
 export const list = memberQuery("viewer")({
-  args: { paginationOpts: paginationOptsValidator, nowMs: v.number() },
+  args: { paginationOpts: paginationOptsValidator, nowMs: v.number(), sort: sortArg },
   returns: paginationResultValidator(codeRow),
   handler: async (ctx, args) => {
     if (!Number.isFinite(args.nowMs) || args.nowMs < 0) fail("invalid_argument", { field: "nowMs" });
-    const numItems = args.paginationOpts.numItems;
-    if (!Number.isInteger(numItems) || numItems < 1 || numItems > MAX_CODE_PAGE) {
-      fail("invalid_argument", { field: "paginationOpts" });
-    }
+    checkPageSize(args.paginationOpts.numItems, MAX_CODE_PAGE);
+    const sort = pickSort("enrollmentCodes", args.sort);
     const now = Math.floor(args.nowMs / MINUTE_MS) * MINUTE_MS;
-    const result = await ctx.db
-      .query("enrollmentTokens")
-      .withIndex("by_org_created", (q) => q.eq("orgId", ctx.orgId))
-      .order("desc")
-      .paginate(args.paginationOpts);
+    const result =
+      sort.key === "expires"
+        ? await ctx.db
+            .query("enrollmentTokens")
+            .withIndex("by_org_expires", (q) => q.eq("orgId", ctx.orgId))
+            .order(sort.dir)
+            .paginate(args.paginationOpts)
+        : await ctx.db
+            .query("enrollmentTokens")
+            .withIndex("by_org_created", (q) => q.eq("orgId", ctx.orgId))
+            .order(sort.dir)
+            .paginate(args.paginationOpts);
 
     // Per-call caches: a page of 50 codes usually names a handful of groups and members.
     const groupNames = new Map<Id<"groups">, string | undefined>();

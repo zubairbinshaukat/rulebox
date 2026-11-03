@@ -50,6 +50,7 @@ import type * as lib_hotkey from "../lib/hotkey.js";
 import type * as lib_installs from "../lib/installs.js";
 import type * as lib_lifecycle from "../lib/lifecycle.js";
 import type * as lib_limits from "../lib/limits.js";
+import type * as lib_listing from "../lib/listing.js";
 import type * as lib_members from "../lib/members.js";
 import type * as lib_orgDb from "../lib/orgDb.js";
 import type * as lib_orgRows from "../lib/orgRows.js";
@@ -132,6 +133,7 @@ declare const fullApi: ApiFromModules<{
   "lib/installs": typeof lib_installs;
   "lib/lifecycle": typeof lib_lifecycle;
   "lib/limits": typeof lib_limits;
+  "lib/listing": typeof lib_listing;
   "lib/members": typeof lib_members;
   "lib/orgDb": typeof lib_orgDb;
   "lib/orgRows": typeof lib_orgRows;
