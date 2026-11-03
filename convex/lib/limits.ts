@@ -43,9 +43,10 @@ export const AUTH_RATE_LIMIT_REFILL_MS = HOUR_MS;
 /** Rate-limiter component rows created longer ago than this are cleared daily. */
 export const RATE_LIMIT_ROW_MAX_AGE_MS = 7 * DAY_MS;
 
-/** TOTP (plan Step 3.4). */
+/** TOTP (plan Step 3.4). Not enforced since Phase 4b; removed in WP5b. */
 export const TOTP_MAX_FAILURES = 5;
 export const TOTP_LOCK_MS = 15 * MINUTE_MS;
+/** Recovery codes per set (TOTP enrolment, and since Phase 4b the action PIN's fallback). */
 export const RECOVERY_CODE_COUNT = 10;
 
 /** Audit (plan 4.11). */
@@ -93,7 +94,7 @@ export const STEP_UP_MAX_AGE_MS = 8 * HOUR_MS;
 export const STEP_UP_ACTIVITY_QUANTUM_MS = 4 * MINUTE_MS;
 /** A verification more than this far in the future (clock step between servers) is ignored. */
 export const STEP_UP_CLOCK_SLACK_MS = MINUTE_MS;
-/** First factor without a step-up: only this soon after a password (+ TOTP) sign-in. */
+/** First action PIN without a step-up: only this soon after a password sign-in (Phase 4b: no TOTP). */
 export const STEP_UP_BOOTSTRAP_MS = 15 * MINUTE_MS;
 /** WebAuthn challenges: single use, this long. */
 export const STEP_UP_CHALLENGE_TTL_MS = 2 * MINUTE_MS;
@@ -105,8 +106,33 @@ export const MAX_STEP_UP_SESSIONS = 100;
 export const PIN_FREE_FAILURES = 2;
 export const PIN_BACKOFF_BASE_MS = 30_000;
 export const PIN_BACKOFF_MAX_MS = 15 * MINUTE_MS;
-/** Failures since the last success after which the action PIN is disabled until reset. */
+/**
+ * Failures since the last success after which the action PIN is LOCKED for
+ * PIN_LOCKOUT_MS (Phase 4b owner decision 2026-11-03: it was disabled until
+ * reset, which let a password thief lock the owner out). Passkey, recovery
+ * code, email reset and an Owner reset still work while it is locked.
+ */
 export const PIN_HARD_LIMIT = 10;
+export const PIN_LOCKOUT_MS = 24 * HOUR_MS;
+
+/**
+ * Forgot PIN by email (Phase 4b Part C). A link token lives PIN_RESET_TTL_MS;
+ * rows are pruned by the daily job PIN_RESET_RETENTION_MS after creation.
+ * MAX_PIN_RESETS_READ bounds the per-user read that retires older tokens.
+ */
+export const PIN_RESET_TTL_MS = 30 * MINUTE_MS;
+export const PIN_RESET_RETENTION_MS = 7 * DAY_MS;
+export const MAX_PIN_RESETS_READ = 10;
+/** Raw link tokens longer than this are refused before hashing (a token is 43 base64url characters). */
+export const MAX_PIN_RESET_TOKEN = 128;
+
+/** Outgoing mail (lib/mail.ts): one request deadline; at most one retry. */
+export const MAIL_TIMEOUT_MS = 10_000;
+export const MAX_MAIL_SUBJECT = 200;
+export const MAX_MAIL_TEXT = 4_000;
+
+/** Platform secrets (Phase 4b Part C): longest value accepted by `platform:setSecret`. */
+export const MAX_PLATFORM_SECRET = 2_048;
 export const MAX_PASSKEY_NAME = 64;
 /** A WebAuthn response JSON larger than this is refused before parsing. */
 export const MAX_WEBAUTHN_RESPONSE_BYTES = 32 * 1024;

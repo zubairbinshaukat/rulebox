@@ -13,12 +13,18 @@ import { checkStepUpOrFail, touchActivity, type MajorAction, type StepUpLevel } 
 // (plan Phase 4, rule 3; a lint rule forbids `query` / `mutation` / `action`
 // imports anywhere else).
 //
-// - member*: signed-in members of an organization, by minimum role. Owners
-//   and Admins also need a TOTP-verified session (`mfa_required`) unless the
-//   function is one of the five mfa:* entry points (`skipMfa`).
+// - member*: signed-in members of an organization, by minimum role. (Until
+//   Phase 4b Owners and Admins also needed a TOTP-verified session,
+//   `mfa_required`; the code path stays, never taken, until WP5b.)
 // - device*: the agent with its device id + secret (consumed by the wrapper).
 // - public*: unauthenticated; ONLY health:ping, account:me,
-//   account:redeemReset and enrollment:enroll.
+//   account:redeemReset, account:requestPinReset, account:redeemPinReset
+//   (checks the session itself) and enrollment:enroll.
+//
+// Phase 4b: TOTP is no longer enforced (`mfaRequiredFor` is false), and the
+// step-up check answers `step_up_setup_required` for EVERY role until the
+// person has set the action PIN, so a member who has not finished sign-in
+// (no PIN) can only read, set the PIN, lock, sign out or reset.
 
 export type { Role };
 
@@ -239,5 +245,5 @@ export const publicMutation = customMutation(mutation, {
   args: {},
   input: async (ctx) => ({ ctx: { db: scopedDb(ctx.db, null) }, args: {} as NoArgs }),
 });
-/** ONLY account:redeemReset. */
+/** ONLY account:redeemReset, account:requestPinReset, account:redeemPinReset. */
 export const publicAction = customAction(action, NoOp);

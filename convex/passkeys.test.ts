@@ -17,11 +17,21 @@ afterEach(() => {
   vi.useRealTimers();
 });
 
-async function owner(t: T): Promise<Member> {
-  return await asMember(t, { role: "owner", mfa: true });
+/**
+ * A member who finished sign-in: the action PIN is required first (Phase 4b),
+ * and setting it from the fresh sign-in unlocks the session (fresh), so a
+ * passkey can be added right away.
+ */
+async function withPin(m: Member): Promise<Member> {
+  await m.as.action(api.stepUp.setActionPin, { pin: "246813" });
+  return m;
 }
 
-/** Register a passkey for `m` (bootstrap when it is the first factor). */
+async function owner(t: T): Promise<Member> {
+  return await withPin(await asMember(t, { role: "owner" }));
+}
+
+/** Register a passkey for `m` (needs a fresh step-up; the PIN's bootstrap counts). */
 async function register(m: Member, auth?: SoftAuthenticator) {
   const a = auth ?? (await SoftAuthenticator.create());
   const begin = await m.as.action(api.passkeys.beginRegistration, {});
@@ -39,7 +49,33 @@ async function row(t: T, sessionId: Id<"authSessions">) {
 }
 
 describe("passkey registration", () => {
-  test("first passkey right after sign-in: stored, unlocks the session, never returned in full", async () => {
+  test("no passkey before the action PIN (Phase 4b): a passkey is never the first factor", async () => {
+    const t = await setupAuth();
+    const m = await asMember(t, { role: "viewer" });
+    await expect(m.as.action(api.passkeys.beginRegistration, {})).rejects.toMatchObject({ data: { code: "step_up_setup_required", detail: "pin" } });
+    // A legacy passkey-only person (registered before Phase 4b) cannot unlock with it until the PIN is set.
+    await t.run((ctx) =>
+      ctx.db.insert("passkeys", {
+        userId: m.userId,
+        credentialId: "legacy-cred",
+        credentialPublicKey: "x",
+        counter: 0,
+        transports: [],
+        name: "Old",
+        aaguid: "",
+        deviceType: "multiDevice",
+        backedUp: true,
+        createdAt: Date.now(),
+      }),
+    );
+    await expect(m.as.action(api.passkeys.beginVerification, {})).rejects.toMatchObject({ data: { code: "step_up_setup_required", detail: "pin" } });
+    await expectCode(m.as.mutation(api.stepUp.keepAlive, {}), "step_up_setup_required");
+    // ...and the fresh sign-in may set it (bootstrap is for the PIN, passkeys or not).
+    await withPin(m);
+    await m.as.mutation(api.stepUp.keepAlive, {});
+  });
+
+  test("first passkey after the PIN: stored, never returned in full; the session stays unlocked by the PIN", async () => {
     const t = await setupAuth();
     const o = await owner(t);
     const begin = await o.as.action(api.passkeys.beginRegistration, {});
@@ -63,7 +99,7 @@ describe("passkey registration", () => {
     await o.as.action(api.passkeys.finishRegistration, { responseJson: a.register(begin.optionsJson), name: "Laptop" });
     const key = await t.run((ctx) => ctx.db.query("passkeys").withIndex("by_user", (q) => q.eq("userId", o.userId)).first());
     expect(key).toMatchObject({ credentialId: a.credentialId, counter: 1, transports: ["internal"], name: "Laptop" });
-    expect((await row(t, o.sessionId))?.method).toBe("passkey");
+    expect((await row(t, o.sessionId))?.method).toBe("actionPin");
     const status = await o.as.query(api.stepUp.status, {});
     expect(status.passkeys).toHaveLength(1);
     expectNoSecrets(status, [a.credentialId, key!.credentialPublicKey]);
@@ -95,7 +131,7 @@ describe("passkey registration", () => {
     await expect(o.as.action(api.passkeys.finishRegistration, { responseJson: a.register(begin.optionsJson) })).rejects.toMatchObject({
       data: { code: "conflict", detail: "passkey exists" },
     });
-    const other = await asMember(t, { role: "admin", mfa: true, orgId: o.orgId });
+    const other = await withPin(await asMember(t, { role: "admin", orgId: o.orgId }));
     begin = await other.as.action(api.passkeys.beginRegistration, {});
     await expectCode(other.as.action(api.passkeys.finishRegistration, { responseJson: a.register(begin.optionsJson) }), "conflict");
     // Not fresh any more.
@@ -147,7 +183,7 @@ describe("passkey verification", () => {
     for (const c of [{ origin: "https://evil.test" }, { rpId: "evil.test" }, { flags: FLAG_UP }, { badSignature: true }]) {
       await expectCode(verifyWith(o, a, c), "step_up_invalid");
     }
-    const other = await asMember(t, { role: "admin", mfa: true, orgId: o.orgId });
+    const other = await withPin(await asMember(t, { role: "admin", orgId: o.orgId }));
     const theirs = await register(other);
     const begin = await o.as.action(api.passkeys.beginVerification, {});
     await expectCode(o.as.action(api.passkeys.finishVerification, { responseJson: await theirs.a.assert(begin.optionsJson) }), "step_up_invalid");
@@ -184,7 +220,7 @@ describe("passkey verification", () => {
 });
 
 describe("passkey management", () => {
-  test("removing the passkey this session used ends the unlock; the last factor stays; rename", async () => {
+  test("removing the passkey this session used ends the unlock; every passkey may go, the PIN never; rename", async () => {
     const t = await setupAuth();
     const o = await owner(t);
     const first = await register(o);
@@ -196,24 +232,39 @@ describe("passkey management", () => {
     await o.as.mutation(api.stepUp.removePasskey, { passkeyId: first.passkeyId });
     expect(await row(t, o.sessionId)).toBeNull();
     await verifyWith(o, second.a);
-    await expectCode(o.as.mutation(api.stepUp.removePasskey, { passkeyId: second.passkeyId }), "step_up_last_factor");
-    // With an action PIN as well, the last passkey may go; then the PIN is the last factor.
-    await o.as.action(api.stepUp.setActionPin, { pin: "246813" });
+    // The required action PIN stays, so the last passkey may go too.
     await o.as.mutation(api.stepUp.removePasskey, { passkeyId: second.passkeyId });
     await o.as.action(api.stepUp.verifyActionPin, { pin: "246813" });
-    await expectCode(o.as.mutation(api.stepUp.clearActionPin, {}), "step_up_last_factor");
+    // The PIN can never be removed, even with a passkey (Phase 4b).
+    await register(o);
+    await expect(o.as.mutation(api.stepUp.clearActionPin, {})).rejects.toMatchObject({ data: { code: "step_up_last_factor" } });
   });
 
   test("a forgotten action PIN is changed after a passkey step-up (the passkey is on this device)", async () => {
     const t = await setupAuth();
     const o = await owner(t);
     const { a } = await register(o);
-    await o.as.action(api.stepUp.setActionPin, { pin: "246813" });
     vi.useFakeTimers({ toFake: ["Date"] });
     vi.setSystemTime(Date.now() + 6 * MINUTE_MS);
     await expectCode(o.as.action(api.stepUp.setActionPin, { pin: "731942" }), "step_up_required");
     await verifyWith(o, a);
     await o.as.action(api.stepUp.setActionPin, { pin: "731942" });
+  });
+
+  test("a PIN in its 24 h lockout: a passkey still unlocks, and then the PIN can be changed", async () => {
+    const t = await setupAuth();
+    const o = await owner(t);
+    const { a } = await register(o);
+    await t.run(async (ctx) => {
+      const f = (await ctx.db.query("stepUpFactors").withIndex("by_user", (q) => q.eq("userId", o.userId)).first())!;
+      await ctx.db.patch(f._id, { pinFailuresTotal: 10, pinFailures: 0, pinLockedUntil: Date.now() + 24 * 60 * MINUTE_MS });
+    });
+    await o.as.mutation(api.stepUp.lock, {});
+    await expect(o.as.action(api.stepUp.verifyActionPin, { pin: "246813" })).rejects.toMatchObject({ data: { code: "step_up_locked", detail: "lockout" } });
+    await verifyWith(o, a);
+    await o.as.mutation(api.stepUp.keepAlive, {});
+    await o.as.action(api.stepUp.setActionPin, { pin: "731942" });
+    await o.as.action(api.stepUp.verifyActionPin, { pin: "731942" });
   });
 
   test("passkeys off when not configured (fail closed); the PIN still works", async () => {
@@ -224,7 +275,7 @@ describe("passkey management", () => {
     try {
       await expect(o.as.action(api.passkeys.beginRegistration, {})).rejects.toMatchObject({ data: { code: "not_ready", detail: "passkeys not configured" } });
       expect((await o.as.query(api.stepUp.status, {})).passkeysAvailable).toBe(false);
-      await o.as.action(api.stepUp.setActionPin, { pin: "246813" });
+      await o.as.action(api.stepUp.verifyActionPin, { pin: "246813" });
     } finally {
       process.env.RULEBOX_WEBAUTHN_ORIGINS = saved;
     }

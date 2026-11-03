@@ -14,6 +14,7 @@ import {
   MAX_PASSKEYS,
   MAX_STEP_UP_SESSIONS,
   PIN_HARD_LIMIT,
+  PIN_LOCKOUT_MS,
   STEP_UP_BOOTSTRAP_MS,
   STEP_UP_CHALLENGE_TTL_MS,
   STEP_UP_FRESH_MS,
@@ -21,16 +22,22 @@ import {
   STEP_UP_KEEPALIVE_MS,
   STEP_UP_MAX_AGE_MS,
 } from "./lib/limits";
+import { pinLockedMail } from "./lib/mail";
 import { checkOrFail, consumeQuietly, consumeOrFail } from "./lib/rateLimits";
+import { matchRecoveryHash, newRecoveryCodes, recoveryHash } from "./lib/recoveryCodes";
 import {
   actionPinProblem,
   authorizeFactorChange,
   deleteStepUpSessions,
   factorsOf,
   hasFactor,
+  hasPin,
   markVerified,
   passkeysOf,
   pinBackoffMs,
+  pinHardLocked,
+  pinLockedUntil,
+  sessionIsFresh,
   stepUpRowOf,
   type Who,
 } from "./lib/stepUp";
@@ -124,27 +131,34 @@ export const status = memberQuery("viewer")({
       lastActiveAt: v.union(v.number(), v.null()),
       method: v.union(v.literal("actionPin"), v.literal("passkey"), v.null()),
     }),
-    /** With no factor yet: setup without a step-up is allowed until then (fresh sign-in). */
+    /** With no action PIN yet: setting one without a step-up is allowed until then (fresh sign-in). */
     bootstrapUntil: v.union(v.number(), v.null()),
     policy: v.object({ idleMs: v.number(), keepAliveMs: v.number(), freshMs: v.number(), maxAgeMs: v.number() }),
+    // Phase 4b (additive): unused recovery codes of the action PIN, and
+    // whether `lockedUntil` is the 24 h lockout (else a short backoff).
+    recoveryCodesLeft: v.number(),
+    pinLockout: v.boolean(),
   }),
   handler: async (ctx) => {
     const f = await factorsOf(ctx, ctx.userId);
     const keys = await passkeysOf(ctx, ctx.userId);
     const row = await stepUpRowOf(ctx, who(ctx));
     const pinSet = f?.actionPinHash !== undefined;
-    const disabled = pinSet && (f.pinDisabledAt !== undefined || f.pinFailuresTotal >= PIN_HARD_LIMIT);
+    const lockout = pinSet && pinHardLocked(f);
+    const until = pinSet ? pinLockedUntil(f) : 0;
     let bootstrapUntil: number | null = null;
-    if (!pinSet && keys.length === 0) {
+    if (!pinSet) {
       const session = await ctx.db.get(ctx.sessionId);
       if (session !== null) bootstrapUntil = session._creationTime + STEP_UP_BOOTSTRAP_MS;
     }
     return {
       actionPin: {
         set: pinSet,
-        lockedUntil: pinSet && f.pinLockedUntil > 0 ? f.pinLockedUntil : null,
-        disabled,
-        attemptsBeforeDisable: pinSet ? Math.max(0, PIN_HARD_LIMIT - f.pinFailuresTotal) : PIN_HARD_LIMIT,
+        lockedUntil: until > 0 ? until : null,
+        // Since Phase 4b the PIN is never disabled: the hard limit locks it for 24 hours.
+        disabled: false,
+        // Wrong attempts left before the 24 h lockout (0 while it lasts).
+        attemptsBeforeDisable: pinSet && !lockout ? Math.max(0, PIN_HARD_LIMIT - f.pinFailuresTotal) : pinSet ? 0 : PIN_HARD_LIMIT,
       },
       passkeys: keys.map((k) => ({
         _id: k._id,
@@ -167,6 +181,8 @@ export const status = memberQuery("viewer")({
         freshMs: STEP_UP_FRESH_MS,
         maxAgeMs: STEP_UP_MAX_AGE_MS,
       },
+      recoveryCodesLeft: f?.recoveryHashes?.length ?? 0,
+      pinLockout: lockout,
     };
   },
 });
@@ -199,11 +215,11 @@ export const lock = memberMutation("viewer", { stepUp: "none" })({
 // ---------------------------------------------------------------- action PIN
 
 /**
- * Set or change the action PIN. The first factor: right after a password
- * (+ TOTP) sign-in (bootstrap). A change: after a fresh step-up with the
- * current PIN or a passkey (a forgotten PIN is changed after a passkey
- * step-up). A hard-disabled PIN is replaced the same way, or reset by an
- * Owner / a recovery code.
+ * Set or change the action PIN (required for every member since Phase 4b).
+ * The first one: right after a password sign-in (bootstrap, no TOTP). A
+ * change: after a fresh step-up with the current PIN or a passkey (a
+ * forgotten or locked PIN is changed after a passkey step-up), or by email
+ * (`account:redeemPinReset`), a recovery code or an Owner reset.
  */
 export const setActionPin = memberAction("viewer", { stepUp: "none" })({
   args: { pin: v.string() },
@@ -237,8 +253,8 @@ export const verifyActionPin = memberAction("viewer", { stepUp: "none" })({
       await verifySecret(pin, DUMMY_PHC); // equal work
       fail("not_ready", { detail: "no action PIN" });
     }
-    if (attempt.kind === "disabled") fail("step_up_locked", { detail: "disabled" });
-    if (attempt.kind === "locked") fail("step_up_locked", { retryAfterMs: attempt.retryAfterMs });
+    // `detail: "lockout"`: the 24 h lockout after PIN_HARD_LIMIT failures (else a short backoff).
+    if (attempt.kind === "locked") fail("step_up_locked", { retryAfterMs: attempt.retryAfterMs, detail: attempt.lockout ? "lockout" : undefined });
     if (await verifySecret(pin, attempt.hash)) {
       const now = Date.now();
       await ctx.runMutation(internal.stepUp.finishPinSuccess, { ...who(ctx), now });
@@ -246,38 +262,23 @@ export const verifyActionPin = memberAction("viewer", { stepUp: "none" })({
     }
     await consumeQuietly(ctx, "stepUpFailuresGlobal");
     if (attempt.total === PIN_HARD_LIMIT) {
-      await ctx.runMutation(internal.stepUp.auditPinDisabled, { orgId: ctx.orgId, actor: ctx.actor });
-      fail("step_up_locked", { detail: "disabled" });
+      await ctx.runMutation(internal.stepUp.auditPinDisabled, { userId: ctx.userId, orgId: ctx.orgId, actor: ctx.actor });
+      fail("step_up_locked", { retryAfterMs: PIN_LOCKOUT_MS, detail: "lockout" });
     }
     fail("step_up_invalid", { retryAfterMs: attempt.nextDelayMs > 0 ? attempt.nextDelayMs : undefined });
   },
 });
 
-/** Remove the action PIN (major). Refused when it is the person's last factor. */
+/**
+ * Remove the action PIN: always refused since Phase 4b (every member must
+ * have one; change it with `setActionPin` or reset it instead). Still major,
+ * so a stale session learns nothing either.
+ */
 export const clearActionPin = memberMutation("viewer", { major: "stepUp:clearActionPin" })({
   args: {},
   returns: v.null(),
-  handler: async (ctx) => {
-    const f = await factorsOf(ctx, ctx.userId);
-    if (f?.actionPinHash === undefined) return null;
-    const keys = await passkeysOf(ctx, ctx.userId);
-    if (!keys.some((k) => k.disabledAt === undefined)) fail("step_up_last_factor");
-    await ctx.db.patch(f._id, {
-      actionPinHash: undefined,
-      actionPinSetAt: undefined,
-      pinFailures: 0,
-      pinFailuresTotal: 0,
-      pinLockedUntil: 0,
-      pinDisabledAt: undefined,
-    });
-    // Sessions unlocked with the PIN lose that unlock (the method is gone).
-    const rows = await ctx.db
-      .query("stepUpSessions")
-      .withIndex("by_user", (q) => q.eq("userId", ctx.userId))
-      .take(MAX_STEP_UP_SESSIONS);
-    for (const r of rows) if (r.method === "actionPin") await ctx.db.delete(r._id);
-    await audit(ctx, ctx.orgId, ctx.actor, "member.actionPinCleared", `${ctx.member.email} removed their action PIN`);
-    return null;
+  handler: async () => {
+    fail("step_up_last_factor", { detail: "the action PIN is required" });
   },
 });
 
@@ -309,7 +310,8 @@ export const renamePasskey = memberMutation("viewer")({
 
 /**
  * Remove one of the caller's passkeys (major). Refused when it is the last
- * factor (no action PIN and no other usable passkey). Every session unlocked
+ * factor (no action PIN and no other usable passkey: legacy rows only since
+ * Phase 4b, where every unlocked member has a PIN). Every session unlocked
  * with this passkey, the current one included, loses its unlock.
  */
 export const removePasskey = memberMutation("viewer", { major: "stepUp:removePasskey" })({
@@ -319,8 +321,8 @@ export const removePasskey = memberMutation("viewer", { major: "stepUp:removePas
     const key = await ownPasskey(ctx, args.passkeyId);
     const f = await factorsOf(ctx, ctx.userId);
     const others = (await passkeysOf(ctx, ctx.userId)).filter((k) => k._id !== key._id && k.disabledAt === undefined);
-    const pinUsable = f?.actionPinHash !== undefined && f.pinDisabledAt === undefined;
-    if (!pinUsable && others.length === 0) fail("step_up_last_factor");
+    // The action PIN (required, even while locked) is always left; this guards legacy rows only.
+    if (f?.actionPinHash === undefined && others.length === 0) fail("step_up_last_factor");
     await ctx.db.delete(key._id);
     await deleteStepUpSessions(ctx, ctx.userId, key._id, MAX_STEP_UP_SESSIONS);
     await audit(ctx, ctx.orgId, ctx.actor, "member.passkeyRemoved", `${ctx.member.email} removed the passkey "${key.name}"`);
@@ -330,9 +332,27 @@ export const removePasskey = memberMutation("viewer", { major: "stepUp:removePas
 
 // ---------------------------------------------------------------- resets
 
-async function clearAllFactors(ctx: Pick<MutationCtx, "db">, userId: Id<"users">): Promise<void> {
+/**
+ * Remove the action PIN, every passkey and every step-up row of a person. The
+ * unused recovery codes are kept (`keepRecovery` replaces them, e.g. without
+ * the one just used): they belong to the person and stay a fallback.
+ */
+async function clearAllFactors(ctx: Pick<MutationCtx, "db">, userId: Id<"users">, keepRecovery?: string[]): Promise<void> {
   const f = await factorsOf(ctx, userId);
-  if (f !== null) await ctx.db.delete(f._id);
+  const keep = keepRecovery ?? f?.recoveryHashes ?? [];
+  if (f !== null && keep.length === 0) await ctx.db.delete(f._id);
+  else if (f !== null) {
+    await ctx.db.patch(f._id, {
+      actionPinHash: undefined,
+      actionPinSetAt: undefined,
+      pinFailures: 0,
+      pinFailuresTotal: 0,
+      pinLockedUntil: 0,
+      pinDisabledAt: undefined,
+      webauthnUserId: undefined,
+      recoveryHashes: keep,
+    });
+  }
   for (const k of await passkeysOf(ctx, userId)) await ctx.db.delete(k._id);
   await deleteStepUpSessions(ctx, userId, undefined, MAX_STEP_UP_SESSIONS);
   // A registration begun before the reset must not finish after it.
@@ -345,7 +365,7 @@ async function clearAllFactors(ctx: Pick<MutationCtx, "db">, userId: Id<"users">
 
 /**
  * An Owner removes another member's action PIN and passkeys (major). The
- * member then sets new ones after a fresh password + TOTP sign-in. Refused
+ * member then sets a new PIN after a fresh password sign-in. Refused
  * for yourself (use a recovery code) and for a person who is also an active
  * member of another organization (step-up belongs to the person; an Owner of
  * one organization must not change it for another: they use a recovery code
@@ -375,15 +395,24 @@ export const resetMember = memberMutation("owner", { major: "stepUp:resetMember"
 });
 
 /**
- * Lost every factor: a fresh password + TOTP sign-in (session younger than
- * STEP_UP_BOOTSTRAP_MS) plus one MFA recovery code removes the action PIN and
- * all passkeys; the session can then set new ones (bootstrap). Never by email
- * alone. Recovery-code failures share the TOTP lockout counter.
+ * Lost or locked PIN: a fresh password sign-in (session younger than
+ * STEP_UP_BOOTSTRAP_MS) plus one recovery code removes the action PIN and all
+ * passkeys; the session then sets a new PIN (bootstrap). Never by email alone.
+ *
+ * - Codes of the action PIN (`stepUp:generateRecoveryCodes`, Phase 4b): no
+ *   TOTP needed; a wrong code answers `step_up_invalid` and is bounded by the
+ *   per-user `recoveryCodePerUser` bucket (checked first, consumed on a
+ *   failure) and the global step-up failure bucket.
+ * - Legacy codes of a TOTP enrolment (only when the person has no PIN codes):
+ *   unchanged, the session must have passed TOTP and failures share the TOTP
+ *   lockout (`mfa_invalid_code` / `mfa_locked`). Removed in WP5b.
  */
 export const resetWithRecoveryCode = memberAction("viewer", { stepUp: "none" })({
   args: { code: v.string() },
   returns: v.null(),
   handler: async (ctx, args) => {
+    await checkOrFail(ctx, "stepUpFailuresGlobal");
+    await checkOrFail(ctx, "recoveryCodePerUser", ctx.userId);
     const result = await ctx.runMutation(internal.stepUp.recoveryReset, {
       ...who(ctx),
       orgId: ctx.orgId,
@@ -392,10 +421,53 @@ export const resetWithRecoveryCode = memberAction("viewer", { stepUp: "none" })(
       now: Date.now(),
     });
     if (result.kind === "ok") return null;
-    if (result.kind === "locked") fail("mfa_locked", { retryAfterMs: result.retryAfterMs });
     if (result.kind === "reauthenticate") fail("step_up_setup_required", { detail: "reauthenticate" });
     if (result.kind === "noMfa") fail("not_ready", { detail: "no recovery codes" });
+    await consumeQuietly(ctx, "recoveryCodePerUser", ctx.userId);
+    await consumeQuietly(ctx, "stepUpFailuresGlobal");
+    if (result.kind === "invalid") fail("step_up_invalid");
+    if (result.kind === "locked") fail("mfa_locked", { retryAfterMs: result.retryAfterMs });
     fail("mfa_invalid_code");
+  },
+});
+
+/**
+ * New recovery codes for the action PIN (major: fresh step-up; the PIN's
+ * bootstrap counts, so the setup screen calls it right after `setActionPin`).
+ * RECOVERY_CODE_COUNT codes, returned ONCE, stored as SHA-256 only; they
+ * replace any previous set. Each one works once with `resetWithRecoveryCode`.
+ */
+export const generateRecoveryCodes = memberAction("viewer", { major: "stepUp:generateRecoveryCodes" })({
+  args: {},
+  returns: v.array(v.string()),
+  handler: async (ctx) => {
+    const codes = newRecoveryCodes(ctx);
+    await ctx.runMutation(internal.stepUp.storeRecoveryCodes, {
+      userId: ctx.userId,
+      orgId: ctx.orgId,
+      actor: ctx.actor,
+      hashes: codes.map(recoveryHash),
+    });
+    return codes;
+  },
+});
+
+export const storeRecoveryCodes = internalMutation({
+  args: { userId: v.id("users"), orgId: v.id("organizations"), actor: actorArg, hashes: v.array(v.string()) },
+  returns: v.null(),
+  handler: async (ctx, args) => {
+    const f = await factorsOf(ctx, args.userId);
+    // The wrapper's fresh step-up implies a PIN (see `hasPin`); re-checked here.
+    if (f === null || f.actionPinHash === undefined) fail("step_up_setup_required", { detail: "pin" });
+    await ctx.db.patch(f._id, { recoveryHashes: args.hashes, recoveryCreatedAt: Date.now() });
+    await audit(
+      ctx,
+      args.orgId,
+      args.actor,
+      "member.recoveryCodesGenerated",
+      `${args.actor.label} created ${args.hashes.length} new recovery codes for their action PIN`,
+    );
+    return null;
   },
 });
 
@@ -425,7 +497,7 @@ export const storeActionPin = internalMutation({
     };
     if (f === null) await ctx.db.insert("stepUpFactors", { userId: args.userId, ...fields });
     else await ctx.db.patch(f._id, fields);
-    // The first factor, set right after a password (+ TOTP) sign-in, unlocks the session.
+    // The first PIN, set right after a password sign-in, unlocks the session (and makes it fresh).
     if (mode === "bootstrap") await markVerified(ctx, args, "actionPin", now);
     await audit(
       ctx,
@@ -440,8 +512,7 @@ export const storeActionPin = internalMutation({
 
 const pinAttempt = v.union(
   v.object({ kind: v.literal("noPin") }),
-  v.object({ kind: v.literal("disabled") }),
-  v.object({ kind: v.literal("locked"), retryAfterMs: v.number() }),
+  v.object({ kind: v.literal("locked"), retryAfterMs: v.number(), lockout: v.boolean() }),
   v.object({ kind: v.literal("go"), hash: v.string(), total: v.number(), nextDelayMs: v.number() }),
 );
 
@@ -449,8 +520,15 @@ const pinAttempt = v.union(
  * Reserve one attempt BEFORE the Argon2 check: the attempt counts as a
  * failure until `finishPinSuccess` says otherwise. Parallel attempts
  * serialize on this row, so each is counted; a crash between begin and
- * finish leaves it counted (fail closed). The PIN_HARD_LIMIT-th failure
- * disables the PIN until it is reset.
+ * finish leaves it counted (fail closed).
+ *
+ * The PIN_HARD_LIMIT-th failure since the last success LOCKS the PIN for
+ * PIN_LOCKOUT_MS (Phase 4b; it used to disable it until reset, which let a
+ * password thief lock the owner out for good). `pinFailuresTotal` stays at
+ * the limit as the lockout marker and `pinFailures` restarts, so after the
+ * lockout the next attempt starts a fresh count with the normal backoff.
+ * `pinDisabledAt` is never written (a legacy value is cleared here once its
+ * lockout ended).
  */
 export const beginPinAttempt = internalMutation({
   args: { userId: v.id("users"), now: v.number() },
@@ -458,16 +536,19 @@ export const beginPinAttempt = internalMutation({
   handler: async (ctx, args) => {
     const f = await factorsOf(ctx, args.userId);
     if (f === null || f.actionPinHash === undefined) return { kind: "noPin" as const };
-    if (f.pinDisabledAt !== undefined || f.pinFailuresTotal >= PIN_HARD_LIMIT) return { kind: "disabled" as const };
-    if (f.pinLockedUntil > args.now) return { kind: "locked" as const, retryAfterMs: f.pinLockedUntil - args.now };
-    const failures = f.pinFailures + 1;
-    const total = f.pinFailuresTotal + 1;
-    const nextDelayMs = pinBackoffMs(failures);
+    const lockout = pinHardLocked(f);
+    const until = pinLockedUntil(f);
+    if (until > args.now) return { kind: "locked" as const, retryAfterMs: until - args.now, lockout };
+    // A lockout that ended starts the count over.
+    const failures = (lockout ? 0 : f.pinFailures) + 1;
+    const total = (lockout ? 0 : f.pinFailuresTotal) + 1;
+    const locksOut = total >= PIN_HARD_LIMIT;
+    const nextDelayMs = locksOut ? PIN_LOCKOUT_MS : pinBackoffMs(failures);
     await ctx.db.patch(f._id, {
-      pinFailures: failures,
+      pinFailures: locksOut ? 0 : failures,
       pinFailuresTotal: total,
       pinLockedUntil: nextDelayMs > 0 ? args.now + nextDelayMs : 0,
-      pinDisabledAt: total >= PIN_HARD_LIMIT ? args.now : undefined,
+      pinDisabledAt: undefined,
     });
     return { kind: "go" as const, hash: f.actionPinHash, total, nextDelayMs };
   },
@@ -485,8 +566,13 @@ export const finishPinSuccess = internalMutation({
   },
 });
 
+/**
+ * The PIN_HARD_LIMIT-th failure: audit `member.actionPinLocked` and send the
+ * person a "your PIN is locked" notice (best effort: the scheduled mail runs
+ * after this commits and its failure changes nothing here).
+ */
 export const auditPinDisabled = internalMutation({
-  args: { orgId: v.id("organizations"), actor: actorArg },
+  args: { userId: v.id("users"), orgId: v.id("organizations"), actor: actorArg },
   returns: v.null(),
   handler: async (ctx, args) => {
     await audit(
@@ -494,8 +580,11 @@ export const auditPinDisabled = internalMutation({
       args.orgId,
       args.actor,
       "member.actionPinLocked",
-      `The action PIN of ${args.actor.label} was turned off after ${PIN_HARD_LIMIT} wrong attempts`,
+      `The action PIN of ${args.actor.label} was locked for 24 hours after ${PIN_HARD_LIMIT} wrong attempts`,
     );
+    const user = await ctx.db.get(args.userId);
+    const to = user?.email ?? args.actor.label;
+    await ctx.scheduler.runAfter(0, internal.mail.send, { to, ...pinLockedMail() });
     return null;
   },
 });
@@ -508,12 +597,29 @@ export const recoveryReset = internalMutation({
     v.object({ kind: v.literal("locked"), retryAfterMs: v.number() }),
     v.object({ kind: v.literal("reauthenticate") }),
     v.object({ kind: v.literal("noMfa") }),
+    // Legacy TOTP code, wrong: shares the TOTP lockout (answered mfa_invalid_code).
+    v.object({ kind: v.literal("invalidLegacy") }),
   ),
   handler: async (ctx, args) => {
-    const session = await ctx.db.get(args.sessionId);
-    if (session === null || args.now - session._creationTime > STEP_UP_BOOTSTRAP_MS) {
-      return { kind: "reauthenticate" as const };
+    if (!(await sessionIsFresh(ctx, args.sessionId, args.now))) return { kind: "reauthenticate" as const };
+    // Codes of the action PIN (Phase 4b): no TOTP involved.
+    const f = await factorsOf(ctx, args.userId);
+    const hashes = f?.recoveryHashes ?? [];
+    if (hashes.length > 0) {
+      const index = matchRecoveryHash(hashes, args.code);
+      if (index === null) return { kind: "invalid" as const };
+      const left = hashes.filter((_, i) => i !== index);
+      await clearAllFactors(ctx, args.userId, left);
+      await audit(
+        ctx,
+        args.orgId,
+        args.actor,
+        "member.stepUpReset",
+        `${args.actor.label} reset their action PIN and passkeys with a recovery code (${left.length} left)`,
+      );
+      return { kind: "ok" as const };
     }
+    // Legacy: recovery codes of a TOTP enrolment (removed in WP5b).
     const s = await secretsOf(ctx, args.userId);
     if (s === null || s.totpSecret === undefined) return { kind: "noMfa" as const };
     const passed = await ctx.db
@@ -526,7 +632,7 @@ export const recoveryReset = internalMutation({
     const index = matchRecoveryCode(s, args.code);
     if (index === null) {
       const r = await recordFailure(ctx, s, args.now);
-      return r.kind === "locked" ? { kind: "locked" as const, retryAfterMs: r.retryAfterMs } : { kind: "invalid" as const };
+      return r.kind === "locked" ? { kind: "locked" as const, retryAfterMs: r.retryAfterMs } : { kind: "invalidLegacy" as const };
     }
     await ctx.db.patch(s._id, { recoveryHashes: s.recoveryHashes.filter((_, i) => i !== index), totpFailures: 0 });
     await clearAllFactors(ctx, args.userId);
@@ -561,7 +667,8 @@ export const createChallenge = internalMutation({
     const keys = await passkeysOf(ctx, args.userId);
     let webauthnUserId = args.webauthnUserIdCandidate;
     if (args.purpose === "register") {
-      await authorizeFactorChange(ctx, args, args.now);
+      // Phase 4b: the action PIN first (bootstrap is for the PIN only), then optional passkeys.
+      await authorizeFactorChange(ctx, args, args.now, "passkey");
       if (keys.length >= MAX_PASSKEYS) fail("conflict", { detail: "passkey limit" });
       const f = await factorsOf(ctx, args.userId);
       if (f?.webauthnUserId !== undefined) webauthnUserId = f.webauthnUserId;
@@ -577,6 +684,9 @@ export const createChallenge = internalMutation({
       }
     } else if (!keys.some((k) => k.disabledAt === undefined)) {
       fail("not_ready", { detail: "no passkey" });
+    } else if (!(await hasPin(ctx, args.userId))) {
+      // A passkey registered before Phase 4b without a PIN: set the PIN first (see `hasPin`).
+      fail("step_up_setup_required", { detail: "pin" });
     }
     await consumeOrFail(ctx, "stepUpChallenge", args.userId);
     const previous = await ctx.db
@@ -673,7 +783,6 @@ export const storePasskey = internalMutation({
     if (clash !== null) fail("conflict", { detail: "passkey exists" });
     const keys = await passkeysOf(ctx, args.userId);
     if (keys.length >= MAX_PASSKEYS) fail("conflict", { detail: "passkey limit" });
-    const firstFactor = !(await hasFactor(ctx, args.userId));
     const passkeyId = await ctx.db.insert("passkeys", {
       userId: args.userId,
       credentialId: args.credentialId,
@@ -686,9 +795,8 @@ export const storePasskey = internalMutation({
       backedUp: args.backedUp,
       createdAt: now,
     });
-    // The registration ceremony itself proved possession with user
-    // verification; for a first factor (bootstrap) it unlocks the session.
-    if (firstFactor) await markVerified(ctx, args, "passkey", now, passkeyId);
+    // Since Phase 4b a passkey is never the first factor (the PIN comes first and
+    // its bootstrap already unlocked the session), so registering unlocks nothing.
     await audit(ctx, args.orgId, args.actor, "member.passkeyAdded", `${args.actor.label} added the passkey "${name}"`);
     return { passkeyId };
   },
@@ -702,6 +810,8 @@ export const finishPasskeySuccess = internalMutation({
     if (key === null || key.userId !== args.userId || key.disabledAt !== undefined) return false;
     // Re-check under serialization: two assertions racing with the same counter.
     if ((key.counter > 0 || args.newCounter > 0) && args.newCounter <= key.counter) return false;
+    // Invariant of `hasPin`: no step-up row for a person without an action PIN.
+    if (!(await hasPin(ctx, args.userId))) return false;
     await ctx.db.patch(key._id, { counter: args.newCounter, lastUsedAt: args.now });
     await markVerified(ctx, args, "passkey", args.now, key._id);
     return true;

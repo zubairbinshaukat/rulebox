@@ -106,8 +106,9 @@ const optionsResult = v.object({ optionsJson: v.string(), expiresAt: v.number() 
 // ---------------------------------------------------------------- registration
 
 /**
- * Start adding a passkey: the first factor right after sign-in (bootstrap), or
- * an extra one after a fresh step-up. Returns the options for
+ * Start adding a passkey: an optional extra after the action PIN, with a fresh
+ * step-up (the PIN's bootstrap counts). Since Phase 4b a passkey is never the
+ * first factor (`step_up_setup_required`, detail "pin"). Returns the options for
  * `navigator.credentials.create` as JSON (pass to @simplewebauthn/browser
  * `startRegistration({ optionsJSON })`).
  */

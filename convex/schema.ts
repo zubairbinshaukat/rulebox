@@ -113,6 +113,28 @@ export default defineSchema({
     revision: v.number(),
   }).index("by_key", ["key"]),
 
+  // tiny (one row per allow-listed name, lib/platformSecrets.ts). PLATFORM
+  // settings the operator enters (Phase 4b Part C: the Resend key, its from
+  // address, the dashboard origin), never a tenant's. AES-256-GCM with the
+  // deployment's RULEBOX_PLATFORM_KEY; the name is the additional data.
+  // Written only by platform:setSecret / clearSecret (internal); read only by
+  // lib/platformSecrets.ts. No public function returns a field of it.
+  platformSecrets: defineTable({
+    name: v.string(),
+    ciphertext: v.string(), // standard base64 (ciphertext + GCM tag)
+    iv: v.string(), // standard base64, 12 bytes
+    updatedAt: v.number(),
+  }).index("by_name", ["name"]),
+
+  // tiny (append-only). Platform-level events that belong to no organization
+  // (auditLog requires one): which platform secret changed, never its value.
+  platformAudit: defineTable({
+    at: v.number(),
+    action: v.union(v.literal("platform.secretSet"), v.literal("platform.secretCleared")),
+    name: v.string(),
+    actor: v.string(), // "cli" until the operator console exists
+  }).index("by_at", ["at"]),
+
   // tiny
   members: defineTable({
     orgId: v.id("organizations"),
@@ -181,9 +203,30 @@ export default defineSchema({
     pinFailures: v.number(), // consecutive, drives the backoff
     pinFailuresTotal: v.number(), // since the last success; PIN_HARD_LIMIT disables
     pinLockedUntil: v.number(),
+    // Legacy (before Phase 4b): the hard limit used to disable the PIN. Never
+    // written any more; a row that still has it is treated as locked until
+    // pinDisabledAt + PIN_LOCKOUT_MS. Narrowed away in WP5b.
     pinDisabledAt: v.optional(v.number()),
     webauthnUserId: v.optional(v.string()), // base64url, 16 random bytes; WebAuthn user.id
+    // Recovery codes of the action PIN (Phase 4b): SHA-256 hex of each unused
+    // code, written only by stepUp:generateRecoveryCodes and consumed by
+    // stepUp:resetWithRecoveryCode. Kept when the PIN and passkeys are reset.
+    recoveryHashes: v.optional(v.array(v.string())),
+    recoveryCreatedAt: v.optional(v.number()),
   }).index("by_user", ["userId"]),
+
+  // tiny (forgot PIN by email, Phase 4b Part C). One row per emailed link:
+  // SHA-256 of the 256-bit token only, single use, PIN_RESET_TTL_MS; pruned by
+  // the daily job PIN_RESET_RETENTION_MS after creation. Never returned.
+  pinResets: defineTable({
+    userId: v.id("users"),
+    tokenHash: v.string(), // SHA-256 hex
+    createdAt: v.number(),
+    expiresAt: v.number(),
+    usedAt: v.optional(v.number()),
+  })
+    .index("by_token_hash", ["tokenHash"])
+    .index("by_user_created", ["userId", "createdAt"]),
 
   // tiny (<= MAX_PASSKEYS per user). Public keys only; nothing here is secret,
   // but only `id`, `name`, dates and flags ever leave the server.

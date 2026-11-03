@@ -6,6 +6,8 @@ import {
   PIN_BACKOFF_BASE_MS,
   PIN_BACKOFF_MAX_MS,
   PIN_FREE_FAILURES,
+  PIN_HARD_LIMIT,
+  PIN_LOCKOUT_MS,
   STEP_UP_ACTIVITY_QUANTUM_MS,
   STEP_UP_BOOTSTRAP_MS,
   STEP_UP_CLOCK_SLACK_MS,
@@ -50,8 +52,10 @@ export const MAJOR_ACTIONS = {
   "members:setDisabled": { when: "always", why: "disables or enables a member" },
   "members:createResetCode": { when: "always", why: "lets someone set a member's password" },
   "members:resetMfa": { when: "always", why: "removes a member's second factor" },
-  // Step-up factors themselves.
+  // Step-up factors themselves. (`clearActionPin` always refuses since Phase
+  // 4b: the PIN is required; it stays major so it cannot even be probed stale.)
   "stepUp:clearActionPin": { when: "always", why: "removes a step-up factor" },
+  "stepUp:generateRecoveryCodes": { when: "always", why: "replaces the recovery codes of the action PIN" },
   "stepUp:removePasskey": { when: "always", why: "removes a step-up factor" },
   "stepUp:resetMember": { when: "always", why: "removes another member's step-up factors" },
   // Step 5: organization settings and groups.
@@ -145,9 +149,39 @@ export async function stepUpRowOf(ctx: { db: DatabaseReader }, who: Who): Promis
 }
 
 /**
- * A person "has a factor" when an action PIN is stored (even a disabled one:
- * otherwise guessing it into the hard lock would let a fresh sign-in set a new
- * one) or any passkey is registered (even a suspended one).
+ * The action PIN is REQUIRED for every member (Phase 4b): until one is
+ * stored, member writes answer `step_up_setup_required`. A locked PIN still
+ * counts (otherwise guessing it into the lockout would let a fresh sign-in set
+ * a new one).
+ *
+ * Invariant: a `stepUpSessions` row is only written for a person with a PIN
+ * (`markVerified` callers check it; the PIN cannot be removed, and every
+ * reset that removes it also deletes the person's step-up rows), so a valid
+ * row proves the PIN exists without reading `stepUpFactors` on every write.
+ */
+export async function hasPin(ctx: { db: DatabaseReader }, userId: Id<"users">): Promise<boolean> {
+  const f = await factorsOf(ctx, userId);
+  return f?.actionPinHash !== undefined;
+}
+
+/** True when the PIN is in its PIN_LOCKOUT_MS lockout state (hard limit reached, or a legacy "disabled" row). */
+export function pinHardLocked(f: Doc<"stepUpFactors">): boolean {
+  return f.pinDisabledAt !== undefined || f.pinFailuresTotal >= PIN_HARD_LIMIT;
+}
+
+/**
+ * When the PIN may be tried again (0 = now). A legacy row disabled before
+ * Phase 4b is locked until `pinDisabledAt + PIN_LOCKOUT_MS`.
+ */
+export function pinLockedUntil(f: Doc<"stepUpFactors">): number {
+  if (f.pinDisabledAt !== undefined) return Math.max(f.pinLockedUntil, f.pinDisabledAt + PIN_LOCKOUT_MS);
+  return f.pinLockedUntil;
+}
+
+/**
+ * A person "has a factor" when an action PIN is stored (even a locked one) or
+ * any passkey is registered (even a suspended one). Used by the Owner reset
+ * (nothing to reset otherwise).
  */
 export async function hasFactor(ctx: { db: DatabaseReader }, userId: Id<"users">): Promise<boolean> {
   const f = await factorsOf(ctx, userId);
@@ -173,8 +207,9 @@ export function stepUpState(row: Doc<"stepUpSessions"> | null, now: number): Ste
 
 /**
  * Throw unless the session meets `level`: `step_up_setup_required` when the
- * person has no factor yet, else `step_up_required` (detail = the level).
- * Success costs one read (the session's step-up row).
+ * person has no action PIN yet (every role; a passkey alone is not enough),
+ * else `step_up_required` (detail = the level). Success costs one read (the
+ * session's step-up row; see the invariant at `hasPin`).
  */
 export async function checkStepUpOrFail(
   ctx: { db: DatabaseReader },
@@ -185,7 +220,7 @@ export async function checkStepUpOrFail(
   const row = await stepUpRowOf(ctx, who);
   const state = stepUpState(row, now);
   if (row !== null && (level === "fresh" ? state.fresh : state.unlocked)) return row;
-  if (!(await hasFactor(ctx, who.userId))) fail("step_up_setup_required", { detail: level });
+  if (!(await hasPin(ctx, who.userId))) fail("step_up_setup_required", { detail: level });
   fail("step_up_required", { detail: level });
 }
 
@@ -225,33 +260,35 @@ export async function markVerified(
   else await ctx.db.patch(existing._id, fields);
 }
 
+/** True when the session was created (a password sign-in) less than STEP_UP_BOOTSTRAP_MS ago. */
+export async function sessionIsFresh(ctx: { db: DatabaseReader }, sessionId: Id<"authSessions">, now: number): Promise<boolean> {
+  const session = await ctx.db.get(sessionId);
+  return session !== null && now - session._creationTime <= STEP_UP_BOOTSTRAP_MS;
+}
+
 /**
- * May this session add or change a factor? "bootstrap": the person has none
- * yet and signed in with their password (and TOTP when enrolled) less than
- * STEP_UP_BOOTSTRAP_MS ago. "fresh": a fresh step-up. Otherwise it throws:
- * `step_up_setup_required` (detail "reauthenticate": sign in again) or
- * `step_up_required` (detail "fresh").
+ * May this session set or change the action PIN (`factor: "pin"`) or add a
+ * passkey (`"passkey"`)?
+ *
+ * - No PIN yet, `"pin"`: "bootstrap" when the session comes from a password
+ *   sign-in less than STEP_UP_BOOTSTRAP_MS ago (Convex Auth's only provider is
+ *   the password; the session row's creation time is the sign-in). Since
+ *   Phase 4b no TOTP is asked for, also not from members who still have a
+ *   TOTP enrolment (legacy; WP5b removes it). Else `step_up_setup_required`
+ *   (detail "reauthenticate": sign in again).
+ * - No PIN yet, `"passkey"`: `step_up_setup_required` (detail "pin"): the
+ *   PIN comes first, a passkey is an optional extra.
+ * - A PIN exists: "fresh" after a fresh step-up, else `step_up_required`.
  */
 export async function authorizeFactorChange(
   ctx: { db: DatabaseReader },
   who: Who,
   now: number,
+  factor: "pin" | "passkey" = "pin",
 ): Promise<"bootstrap" | "fresh"> {
-  if (!(await hasFactor(ctx, who.userId))) {
-    const session = await ctx.db.get(who.sessionId);
-    const recent = session !== null && now - session._creationTime <= STEP_UP_BOOTSTRAP_MS;
-    if (!recent) fail("step_up_setup_required", { detail: "reauthenticate" });
-    const mfa = await ctx.db
-      .query("memberSecrets")
-      .withIndex("by_user", (q) => q.eq("userId", who.userId))
-      .first();
-    if (mfa?.totpSecret !== undefined) {
-      const passed = await ctx.db
-        .query("mfaSessions")
-        .withIndex("by_session", (q) => q.eq("sessionId", who.sessionId))
-        .first();
-      if (passed === null) fail("mfa_required");
-    }
+  if (!(await hasPin(ctx, who.userId))) {
+    if (factor === "passkey") fail("step_up_setup_required", { detail: "pin" });
+    if (!(await sessionIsFresh(ctx, who.sessionId, now))) fail("step_up_setup_required", { detail: "reauthenticate" });
     return "bootstrap";
   }
   await checkStepUpOrFail(ctx, who, "fresh", now);

@@ -181,12 +181,16 @@ const VIEWER_ANY_MFA: Row["expect"] = {
   device: "unauthenticated",
   disabled: "forbidden",
 };
-const VIEWER: Row["expect"] = { ...VIEWER_ANY_MFA, adminNoMfa: "mfa_required", ownerNoMfa: "mfa_required" };
+// Phase 4b: TOTP is no longer enforced, so `adminNoMfa` / `ownerNoMfa` read
+// like everyone else; having no action PIN either, every write of theirs
+// answers `step_up_setup_required` (the PIN is required for every role).
+const VIEWER: Row["expect"] = { ...VIEWER_ANY_MFA };
+const NO_PIN = "step_up_setup_required";
 const OWNER: Row["expect"] = {
   default: "forbidden",
   unauth: "unauthenticated",
   device: "unauthenticated",
-  ownerNoMfa: "mfa_required",
+  ownerNoMfa: NO_PIN,
   owner: "ok",
   // Owner of another organization: the id is not in their org.
   foreign: "not_found",
@@ -199,6 +203,8 @@ const OWNER: Row["expect"] = {
 const UNLOCKED: Row["expect"] = {
   ...VIEWER,
   viewer: "step_up_setup_required",
+  adminNoMfa: NO_PIN,
+  ownerNoMfa: NO_PIN,
   ownerIdle: "step_up_required",
   ownerNoFactor: "step_up_setup_required",
 };
@@ -210,8 +216,8 @@ const ADMIN_UNLOCKED: Row["expect"] = {
   unauth: "unauthenticated",
   device: "unauthenticated",
   viewer: "forbidden",
-  adminNoMfa: "mfa_required",
-  ownerNoMfa: "mfa_required",
+  adminNoMfa: NO_PIN,
+  ownerNoMfa: NO_PIN,
   disabled: "forbidden",
   ownerIdle: "step_up_required",
   ownerNoFactor: "step_up_setup_required",
@@ -231,6 +237,19 @@ const ROWS: Row[] = [
     name: "account:redeemReset",
     call: (a) => a.action(api.account.redeemReset, { email: `t${Math.random().toString(36).slice(2)}@acme.test`, code: "WRONG", newPassword: "valid pass 1234" }),
     expect: { default: "invite_invalid" }, // public; needs a valid code whoever calls
+  },
+  // Phase 4b Part C: forgot PIN by email. Public; the same answer for everyone (mail is off here).
+  {
+    name: "account:requestPinReset",
+    call: (a) => a.action(api.account.requestPinReset, { email: `t${Math.random().toString(36).slice(2)}@acme.test` }),
+    expect: { default: "ok" },
+  },
+  {
+    // Needs a signed-in (fresh) session; the link token decides the rest. A disabled member's session
+    // still exists in this fixture (setDisabled deletes it in real life): the token check refuses it.
+    name: "account:redeemPinReset",
+    call: (a) => a.action(api.account.redeemPinReset, { token: "not-a-link-token", newPin: "246813" }),
+    expect: { default: "step_up_invalid", unauth: "unauthenticated", device: "unauthenticated" },
   },
   {
     name: "enrollment:enroll",
@@ -338,7 +357,7 @@ const ROWS: Row[] = [
   {
     name: "stepUp:verifyActionPin",
     call: (a) => a.action(api.stepUp.verifyActionPin, { pin: "246813" }),
-    expect: { ...VIEWER, default: "step_up_invalid", viewer: "not_ready", ownerNoFactor: "not_ready" },
+    expect: { ...VIEWER, default: "step_up_invalid", viewer: "not_ready", adminNoMfa: "not_ready", ownerNoMfa: "not_ready", ownerNoFactor: "not_ready" },
   },
   {
     name: "stepUp:clearActionPin",
@@ -362,9 +381,16 @@ const ROWS: Row[] = [
     expect: { ...VIEWER, default: "not_ready" },
   },
   {
+    // Phase 4b: returns the new codes once (not a stored secret); a fresh step-up on any role.
+    name: "stepUp:generateRecoveryCodes",
+    call: (a) => a.action(api.stepUp.generateRecoveryCodes, {}),
+    expect: SELF_MAJOR,
+  },
+  {
     name: "passkeys:beginRegistration",
     call: (a) => a.action(api.passkeys.beginRegistration, {}),
-    expect: { ...VIEWER, ownerStale: "step_up_required", ownerIdle: "step_up_required" },
+    // Phase 4b: the action PIN first (no passkey bootstrap), then a fresh step-up.
+    expect: { ...VIEWER, ownerStale: "step_up_required", ownerIdle: "step_up_required", viewer: NO_PIN, adminNoMfa: NO_PIN, ownerNoMfa: NO_PIN, ownerNoFactor: NO_PIN },
   },
   {
     name: "passkeys:finishRegistration",
@@ -654,8 +680,6 @@ const ROWS: Row[] = [
       unauth: "unauthenticated",
       device: "unauthenticated",
       viewer: "forbidden",
-      adminNoMfa: "mfa_required",
-      ownerNoMfa: "mfa_required",
       disabled: "forbidden",
       foreign: "not_found",
     },
@@ -695,7 +719,7 @@ const STEP_UP_EXEMPT = new Set([
   // A view aid of the device page (renews watch mode while the page is visible; the page is hidden when locked).
   "fleet:watch",
   // not member functions
-  "account:redeemReset", "enrollment:enroll", "devices:heartbeat", "devices:unenroll", "devices:ping",
+  "account:redeemReset", "account:requestPinReset", "account:redeemPinReset", "enrollment:enroll", "devices:heartbeat", "devices:unenroll", "devices:ping",
   "deviceApi:verifyEmployee", "deviceApi:report", "deviceApi:reportAudit", "deviceApi:reportInstalls", "deviceApi:rotateCredential",
 ]);
 

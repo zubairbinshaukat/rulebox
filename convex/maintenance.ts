@@ -19,6 +19,7 @@ import {
   MAX_MEMBERSHIPS,
   MIGRATION_DEVICE_BATCH,
   MIGRATION_ORG_BATCH,
+  PIN_RESET_RETENTION_MS,
   RATE_LIMIT_ROW_MAX_AGE_MS,
   REFRESH_TOKEN_USED_GRACE_MS,
   SESSION_INACTIVE_MS,
@@ -59,6 +60,7 @@ import { clearMfa } from "./lib/sessions";
 // - stepUpSessions  step-up rows created more than SESSION_TOTAL_MS ago.
 // - stepUpChallenges expired WebAuthn challenges (`by_expires_at`).
 // - fleetChecks     "Check now" rows created more than a day ago.
+// - pinResets       forgot-PIN link rows created more than PIN_RESET_RETENTION_MS ago.
 //
 // At most MAINTENANCE_BATCH rows per run; a stage reschedules itself while a
 // batch is full, then the next stage starts. `now` is fixed for the whole
@@ -76,6 +78,7 @@ const STAGES = [
   "stepUpSessions",
   "stepUpChallenges",
   "fleetChecks",
+  "pinResets",
 ] as const;
 type Stage = (typeof STAGES)[number];
 const stage = v.union(...STAGES.map((s) => v.literal(s)));
@@ -85,7 +88,7 @@ type StageResult = { done: boolean; cursor: string | null };
 /** Delete rows of `table` created before `before`, oldest first, one batch. */
 async function deleteCreatedBefore(
   ctx: MutationCtx,
-  table: "authSessions" | "mfaSessions" | "authRefreshTokens" | "stepUpSessions" | "fleetChecks",
+  table: "authSessions" | "mfaSessions" | "authRefreshTokens" | "stepUpSessions" | "fleetChecks" | "pinResets",
   before: number,
 ): Promise<StageResult> {
   const rows = await ctx.db
@@ -181,6 +184,9 @@ async function runStage(ctx: MutationCtx, current: Stage, now: number, cursor: s
     case "fleetChecks":
       // "Check now" rows are read for 60 s after the click; keep them a day.
       return await deleteCreatedBefore(ctx, "fleetChecks", now - FLEET_CHECK_RETENTION_MS);
+    case "pinResets":
+      // Forgot-PIN links (Phase 4b): expired after 30 minutes, kept a week for support questions.
+      return await deleteCreatedBefore(ctx, "pinResets", now - PIN_RESET_RETENTION_MS);
   }
 }
 

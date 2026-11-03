@@ -1,6 +1,6 @@
 import { hmac } from "@noble/hashes/hmac.js";
 import { sha1 } from "@noble/hashes/legacy.js";
-import { base32Decode, constantTimeEqual, CROCKFORD, normalizeCrockford, sha256HexSync } from "./crypto";
+import { base32Decode, constantTimeEqual } from "./crypto";
 
 // TOTP, RFC 6238: HMAC-SHA-1, 6 digits, 30-second steps, window +-1 step.
 
@@ -66,14 +66,5 @@ export function otpauthUri(email: string, secretBase32: string): string {
   return `otpauth://totp/${label}?secret=${secretBase32}&issuer=Rulebox&algorithm=SHA1&digits=6&period=30`;
 }
 
-/** SHA-256 of the normalized code (`XXXX-XXXX`, Crockford). */
-export function recoveryHash(code: string): string {
-  const n = normalizeCrockford(code);
-  return sha256HexSync(n.length === 8 ? `${n.slice(0, 4)}-${n.slice(4)}` : n);
-}
-
-/** Plausible recovery code: 8 Crockford characters after normalization. */
-export function isRecoveryShape(code: string): boolean {
-  const n = normalizeCrockford(code);
-  return n.length === 8 && [...n].every((c) => CROCKFORD.includes(c));
-}
+// Recovery codes moved to lib/recoveryCodes.ts (Phase 4b: they outlive TOTP).
+export { isRecoveryShape, recoveryHash } from "./recoveryCodes";

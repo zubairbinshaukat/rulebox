@@ -165,13 +165,41 @@ describe("sign-up and sign-in through Convex Auth", () => {
     const t = await setupAuth();
     const { orgId, inviteCode, token } = await joined(t);
     const me = await asToken(t, token).query(api.account.me, {});
-    expect(me).toMatchObject({ email: "owner@acme.test", role: "owner", orgId, mfa: { required: true, verified: false } });
+    // Phase 4b: TOTP not required; the action PIN is, and it is not set yet.
+    expect(me).toMatchObject({
+      email: "owner@acme.test",
+      role: "owner",
+      orgId,
+      mfa: { required: false, verified: false },
+      pin: { required: true, set: false, locked: false, resetByEmail: false },
+    });
     expectNoSecrets(me, [inviteCode]);
     // Same code again, other email or same email: refused.
     await expectCode(
       signIn(t, { flow: "signUp", email: "x@acme.test", password: PASSWORD, inviteCode }),
       "invite_invalid",
     );
+  });
+
+  test("an invited member (any role) can do nothing until the action PIN is set, then sets it from the fresh sign-in", async () => {
+    const t = await setupAuth();
+    const { orgId } = await joined(t);
+    const code = "7K2M9QX4RZ0A8B6C5D3E1F7K2M";
+    await t.run((ctx) =>
+      ctx.db.insert("invites", { orgId, email: "viewer@acme.test", role: "viewer", kind: "join", tokenHash: codeHash(code), expiresAt: Date.now() + 60_000 }),
+    );
+    const r = await signIn(t, { flow: "signUp", email: "viewer@acme.test", password: PASSWORD, inviteCode: code });
+    const viewer = asToken(t, r.tokens!.token);
+    expect(await viewer.query(api.account.me, {})).toMatchObject({ role: "viewer", pin: { required: true, set: false } });
+    // Reads work (the dashboard routes to PIN setup); every write is refused until the PIN exists.
+    await viewer.query(api.stepUp.status, {});
+    await expectCode(viewer.mutation(api.stepUp.keepAlive, {}), "step_up_setup_required");
+    await expectCode(viewer.mutation(api.stepUp.clearActionPin, {}), "step_up_setup_required");
+    // A passkey alone does not finish sign-in: the PIN comes first.
+    await expect(viewer.action(api.passkeys.beginRegistration, {})).rejects.toMatchObject({ data: { code: "step_up_setup_required", detail: "pin" } });
+    await viewer.action(api.stepUp.setActionPin, { pin: "246813" });
+    await viewer.mutation(api.stepUp.keepAlive, {});
+    expect(await viewer.query(api.account.me, {})).toMatchObject({ pin: { set: true, locked: false } });
   });
 
   test("open sign-up is impossible", async () => {

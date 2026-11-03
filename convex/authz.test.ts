@@ -8,7 +8,7 @@ import {
   makeOrg,
   type T,
 } from "../tests/convex/identity";
-import { assertInOrg, checkRevision, nextRevision, requireMember, roleRank } from "./lib/authz";
+import { assertInOrg, checkRevision, mfaRequiredFor, nextRevision, requireMember, roleRank } from "./lib/authz";
 import { insertMembership } from "./lib/members";
 import schema from "./schema";
 import { modules } from "./test.setup";
@@ -64,22 +64,27 @@ describe("requireMember", () => {
     await expectCode(admin.as.run((ctx) => requireMember(ctx, "owner")), "forbidden");
   });
 
-  test("mfa_required for an admin or owner without an mfaSessions row; success with one", async () => {
+  // Phase 4b (owner decision 2026-11-03): TOTP is no longer required for any
+  // role; the action PIN at sign-in replaces it (stepUp.test.ts, matrix.test.ts).
+  test("TOTP is not enforced: an admin or owner without an mfaSessions row passes, with or without skipMfa", async () => {
     const t = setup();
     const orgId = await makeOrg(t);
     const admin = await asMember(t, { role: "admin", orgId });
     const owner = await asMember(t, { role: "owner", orgId });
-    await expectCode(admin.as.run((ctx) => requireMember(ctx, "viewer")), "mfa_required");
-    await expectCode(owner.as.run((ctx) => requireMember(ctx, "viewer")), "mfa_required");
-    // skipMfa is for the five mfa:* functions only.
+    expect(mfaRequiredFor("owner")).toBe(false);
+    expect(mfaRequiredFor("admin")).toBe(false);
+    expect(mfaRequiredFor("viewer")).toBe(false);
+    expect((await admin.as.run((ctx) => requireMember(ctx, "viewer"))).member._id).toBe(admin.memberId);
+    expect((await owner.as.run((ctx) => requireMember(ctx, "owner"))).member._id).toBe(owner.memberId);
     expect((await admin.as.run((ctx) => requireMember(ctx, "viewer", { skipMfa: true }))).orgId).toBe(orgId);
+    // A session that did pass TOTP (legacy) is not treated differently.
     await t.run((ctx) =>
       ctx.db.insert("mfaSessions", { sessionId: admin.sessionId, userId: admin.userId, verifiedAt: Date.now() }),
     );
     expect((await admin.as.run((ctx) => requireMember(ctx, "admin"))).member._id).toBe(admin.memberId);
   });
 
-  test("an mfaSessions row of another user does not count", async () => {
+  test("an mfaSessions row of another user changes nothing either", async () => {
     const t = setup();
     const orgId = await makeOrg(t);
     const admin = await asMember(t, { role: "admin", orgId });
@@ -87,7 +92,7 @@ describe("requireMember", () => {
     await t.run((ctx) =>
       ctx.db.insert("mfaSessions", { sessionId: admin.sessionId, userId: other.userId, verifiedAt: Date.now() }),
     );
-    await expectCode(admin.as.run((ctx) => requireMember(ctx, "viewer")), "mfa_required");
+    expect((await admin.as.run((ctx) => requireMember(ctx, "viewer"))).member.role).toBe("admin");
   });
 
   test("a viewer without MFA passes", async () => {

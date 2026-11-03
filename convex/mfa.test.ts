@@ -59,10 +59,10 @@ describe("mfa functions", () => {
   test("setup: begin returns the secret once, confirm stores it and returns 10 codes once", async () => {
     const t = await setupAuth();
     const m = await asMember(t, { role: "admin" });
-    // Before MFA an admin can reach only the mfa:* functions.
-    await expectCode(m.as.query(api.members.list, {}), "mfa_required");
+    // Phase 4b: TOTP is no longer required (the action PIN is), so an admin reads without it.
+    expect((await m.as.query(api.members.list, {})).members.length).toBeGreaterThan(0);
     const before = await m.as.query(api.mfa.status, {});
-    expect(before).toMatchObject({ enrolled: false, required: true, verified: false });
+    expect(before).toMatchObject({ enrolled: false, required: false, verified: false });
     const setup = await m.as.action(api.mfa.beginSetup, {});
     expect(setup.uri).toContain(`secret=${setup.secret}`);
     expect(base32Decode(setup.secret)?.length).toBe(20);
@@ -81,8 +81,8 @@ describe("mfa functions", () => {
     expect(s?.totpPending).toBeUndefined();
     expect(JSON.stringify(s?.recoveryHashes)).not.toContain(codes[0]!);
     await expectCode(m.as.action(api.mfa.beginSetup, {}), "mfa_already_enabled");
-    // Now the gate is open for this session.
-    expect((await m.as.query(api.members.list, {})).members.length).toBeGreaterThan(0);
+    // Legacy: this session counts as TOTP-verified (no longer required by anything).
+    expect((await m.as.query(api.mfa.status, {})).verified).toBe(true);
   });
 
   test("verify: a new session needs a code; replay refused; 5 failures lock 15 minutes", async () => {
@@ -91,11 +91,13 @@ describe("mfa functions", () => {
     // A second session of the same user (no MFA row yet).
     const s2 = await t.run((ctx) => ctx.db.insert("authSessions", { userId: m.userId, expirationTime: Date.now() + 3_600_000 }));
     const as2 = t.withIdentity({ subject: `${m.userId}|${s2}` });
-    await expectCode(as2.run((ctx) => requireMember(ctx, "admin")), "mfa_required");
+    // Phase 4b: not verified yet, but TOTP no longer gates anything.
+    expect((await as2.run((ctx) => requireMember(ctx, "admin"))).member.role).toBe("admin");
+    expect((await as2.query(api.mfa.status, {})).verified).toBe(false);
     // The code used by confirmSetup (same step) is a replay.
     await expectCode(as2.action(api.mfa.verify, { code: codeFor(m.secret) }), "mfa_invalid_code");
     await as2.action(api.mfa.verify, { code: codeFor(m.secret, 1) });
-    expect((await as2.run((ctx) => requireMember(ctx, "admin"))).member.role).toBe("admin");
+    expect((await as2.query(api.mfa.status, {})).verified).toBe(true);
 
     const s3 = await t.run((ctx) => ctx.db.insert("authSessions", { userId: m.userId, expirationTime: Date.now() + 3_600_000 }));
     const as3 = t.withIdentity({ subject: `${m.userId}|${s3}` });

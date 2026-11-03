@@ -18,6 +18,11 @@ const app = defineApp({
     // Hosted (pooled) deployment (plan Step 5, A1): new organizations get the
     // "free" plan instead of the self-host "custom" plan.
     RULEBOX_HOSTED: v.optional(v.literal("1")),
+    // Platform secrets master key (Phase 4b Part C): standard base64 of 32
+    // random bytes, set by the operator. Read only by lib/platformSecrets.ts.
+    // Missing or invalid: platform secrets cannot be set or read and the
+    // forgot-PIN email is off.
+    RULEBOX_PLATFORM_KEY: v.optional(v.string()),
   },
 });
 app.use(rateLimiter);

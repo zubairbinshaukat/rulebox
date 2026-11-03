@@ -4,11 +4,12 @@ import type { Doc, Id } from "./_generated/dataModel";
 import { internalMutation, type DatabaseReader, type MutationCtx } from "./_generated/server";
 import { writeAudit } from "./lib/audit";
 import { mfaRequiredFor, sessionHasMfa } from "./lib/authz";
-import { base32Encode, constantTimeEqual, randomBytes, randomCrockford } from "./lib/crypto";
+import { base32Encode, randomBytes } from "./lib/crypto";
 import { fail } from "./lib/errors";
 import { memberAction, memberQuery } from "./lib/functions";
-import { RECOVERY_CODE_COUNT, TOTP_LOCK_MS, TOTP_MAX_FAILURES } from "./lib/limits";
-import { isRecoveryShape, otpauthUri, recoveryHash, verifyTotp } from "./lib/totp";
+import { TOTP_LOCK_MS, TOTP_MAX_FAILURES } from "./lib/limits";
+import { matchRecoveryHash, newRecoveryCodes, recoveryHash } from "./lib/recoveryCodes";
+import { otpauthUri, verifyTotp } from "./lib/totp";
 
 // TOTP second factor (plan Step 3.4, PRD 12.3). The five entry points skip
 // the MFA gate (they are how a session passes it) and accept any role.
@@ -60,12 +61,7 @@ export function lockedFor(s: Doc<"memberSecrets">, now: number): number | null {
  * early exit). Shared with the step-up reset (plan 4.16). Null when none matched.
  */
 export function matchRecoveryCode(s: Doc<"memberSecrets">, code: string): number | null {
-  const presented = isRecoveryShape(code) ? recoveryHash(code) : "";
-  let index = -1;
-  s.recoveryHashes.forEach((h, i) => {
-    if (constantTimeEqual(h, presented) && presented !== "" && index === -1) index = i;
-  });
-  return index === -1 ? null : index;
+  return matchRecoveryHash(s.recoveryHashes, code);
 }
 
 /** Count a failure; the 5th consecutive one locks for 15 minutes. */
@@ -129,11 +125,7 @@ export const confirmSetup = memberAction("viewer", opts)({
   args: { code: v.string() },
   returns: v.array(v.string()),
   handler: async (ctx, args) => {
-    const codes: string[] = [];
-    for (let i = 0; i < RECOVERY_CODE_COUNT; i++) {
-      const raw = randomCrockford(ctx, 8);
-      codes.push(`${raw.slice(0, 4)}-${raw.slice(4)}`);
-    }
+    const codes = newRecoveryCodes(ctx);
     const result: Attempt = await ctx.runMutation(internal.mfa.finishSetup, {
       userId: ctx.userId,
       sessionId: ctx.sessionId,

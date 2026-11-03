@@ -284,4 +284,23 @@ export const IO_BUDGETS: Record<string, IoBudget> = {
   "fileHandlers:page": { maxReads: 3 + 201 + 201, maxReadBytes: 450_000, maxWrites: 0, maxWriteBytes: 0, live: true },
   // a page of <= 50 failed results, their apps and (group, app) assignments (cached per call), their PCs.
   "overview:failedInstallsPage": { maxReads: 3 + 50 + 50 + 50 + 50, maxReadBytes: 160_000, maxWrites: 0, maxWriteBytes: 0, live: true },
+
+  // ---- Phase 4b Parts B and C: PIN at sign-in, recovery codes, forgot PIN by email.
+  // Public query (signed-out: 0-1 reads): session, memberships (<= 20), their orgs, memberSecrets
+  // (legacy, removed in WP5b), mfaSessions, + the PIN row (stepUpFactors) + 3 platformSecrets
+  // existence reads (`resetByEmail`; tiny rows, change only when the operator sets a secret).
+  "account:me": { maxReads: 1 + 20 + 20 + 2 + 1 + 3, maxReadBytes: 24_000, maxWrites: 0, maxWriteBytes: 0, live: true },
+  // Public action, the same work for every email: 2 limiter rows (read + write each) and one
+  // scheduled run. The scheduled `deliverPinReset` (only with mail configured): 3 secret reads, then
+  // createPinReset: user by email, memberships (<= 20), the person's newest links (<= 10, unused ones
+  // deleted), insert, one audit row per active membership (<= 20); then one Resend call.
+  "account:requestPinReset": { maxReads: 2 + 3 + 1 + 20 + 10, maxReadBytes: 24_000, maxWrites: 3 + 1 + 10 + 20, maxWriteBytes: 16_000 },
+  // Public action: session (query), limiter (1 read, 1 write); finishPinReset: token row, session,
+  // PIN row, the person's links (<= 10), their sessions (<= 101) + refresh tokens (~2 each) + MFA /
+  // step-up rows (<= 100 each) for the sign-out of every other session, step-up row, user,
+  // memberships (<= 20); writes: token, PIN row, deletes, step-up row, one audit row per membership,
+  // one scheduled notice. A wrong / spent token: 1-2 reads, 0-1 write (the burn).
+  "account:redeemPinReset": { maxReads: 3 + 3 + 10 + 101 + 202 + 200 + 2 + 20, maxReadBytes: 160_000, maxWrites: 2 + 10 + 101 + 202 + 200 + 1 + 20 + 1, maxWriteBytes: 32_000 },
+  // authorize (wrapper + step-up row) + PIN row; writes: PIN row (10 hashes, ~700 B), audit.
+  "stepUp:generateRecoveryCodes": { maxReads: 4 + 1, maxReadBytes: 4_096, maxWrites: 2, maxWriteBytes: 2_048 },
 };

@@ -14,9 +14,14 @@ export function roleRank(role: Role): number {
   return RANK[role];
 }
 
-/** Owners and Admins must pass the TOTP gate (PRD 12.3); Viewers may. */
+/**
+ * TOTP is no longer required for any role (Phase 4b owner decision
+ * 2026-11-03, against PRD 12.3 / 16: the action PIN at sign-in replaces it).
+ * Kept, always false, until WP5b removes TOTP with the dashboard's `/mfa`.
+ */
 export function mfaRequiredFor(role: Role): boolean {
-  return role === "owner" || role === "admin";
+  void role;
+  return false;
 }
 
 export type AuthedCtx = { db: DatabaseReader; auth: Auth };
@@ -109,6 +114,7 @@ export async function requireMember(
 
   if (roleRank(member.role) < roleRank(minRole)) fail("forbidden");
 
+  // Never true since Phase 4b (mfaRequiredFor is false): TOTP is not enforced.
   if (opts.skipMfa !== true && mfaRequiredFor(member.role)) {
     if (!(await sessionHasMfa(ctx, signedIn))) fail("mfa_required");
   }

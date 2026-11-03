@@ -173,3 +173,112 @@ installs, one group's devices or any search. `groups:list`, `members:list`,
 unchanged for today's dashboard; WP3 moves the tables to the new `*:page`
 queries (the file-types picker becomes `apps:options`, subscribed while the
 dialog is open) and they can be removed afterwards.
+
+## Status: WP5a auth backend, additive stage (2026-11-03, done, not committed)
+
+Backend of Parts B and C, ADDITIVE: no public signature or return shape
+changed, no TOTP code, `mfa:*` function, `me.mfa` field, schema field or test
+was deleted (the dashboard still calls them until WP5b).
+
+**Part B, PIN at sign-in.**
+- TOTP is no longer enforced: `mfaRequiredFor` is false for every role, so
+  `requireMember` never throws `mfa_required`; `me.mfa.required` is false.
+- The action PIN is required for every role: until it exists every member
+  write answers `step_up_setup_required` (a passkey alone does not count;
+  `passkeys:beginRegistration` without a PIN answers it with detail `pin`,
+  and a legacy passkey-only person cannot verify with it until the PIN is
+  set). Reads stay open so the dashboard can route to setup. Additive
+  `me.pin = { required, set, locked, lockedUntil?, resetByEmail }`.
+- First PIN (bootstrap): a session less than 15 minutes old (password
+  sign-in), no TOTP asked, also not for members with a legacy enrolment.
+- `stepUp:clearActionPin` always refuses (`step_up_last_factor`); changing
+  the PIN still needs a fresh step-up.
+- 10 failures since the last success now LOCK the PIN for 24 hours
+  (`PIN_LOCKOUT_MS`), never disable it: `pinDisabledAt` is no longer written
+  (a legacy value counts as locked until `pinDisabledAt + 24 h`), the count
+  starts over after the lockout, `member.actionPinLocked` is audited and a
+  "your PIN is locked" email is scheduled (best effort). Error:
+  `step_up_locked` with `retryAfterMs` and detail `lockout` (no more detail
+  `disabled`). Recovery while locked: passkey, recovery code, email link,
+  Owner reset. Additive `stepUp:status` fields `pinLockout`,
+  `recoveryCodesLeft`; `actionPin.disabled` is always false.
+- Recovery codes of the PIN: `stepUp:generateRecoveryCodes` (major, fresh
+  step-up; the bootstrap counts) returns 10 codes once, stored as SHA-256 in
+  `stepUpFactors.recoveryHashes`. `stepUp:resetWithRecoveryCode` uses them
+  without TOTP (wrong code: `step_up_invalid`; bucket `recoveryCodePerUser`
+  5 per 15 min); legacy TOTP codes keep the old path. Remaining codes survive
+  the PIN / passkey reset.
+- Invariant (saves a read on every write): a `stepUpSessions` row is only
+  written for a person with a PIN.
+
+**Part C, forgot PIN by email.**
+- `account:requestPinReset({ email })` (public): per-email (3 / hour) and
+  global (30 / minute) buckets, then always `{ ok: true }`; it only schedules
+  `account:deliverPinReset({ email })`, which (mail on, active member)
+  creates a 256-bit token, stores its SHA-256 in `pinResets` (30 minutes,
+  older links retired), audits `member.pinResetRequested` and emails
+  `<dashboardOrigin>/pin-reset?token=...`. The token never sits in the
+  scheduler.
+- `account:redeemPinReset({ token, newPin })` (public): needs a signed-in
+  session less than 15 minutes old whose user is the token's (the link alone
+  is never enough); bucket `pinResetRedeem` 10 per 15 min; single use (a link
+  presented by another person's session is spent too). Sets the PIN, clears
+  the lockout, ends every other session (refresh tokens, MFA and step-up
+  rows), unlocks this one, audits `member.pinReset`, schedules "your PIN was
+  reset". Every token problem: `step_up_invalid`.
+- Mail: `lib/mail.ts` `sendMail` / internal `mail:send`, Resend
+  `POST /emails`, 10 s deadline, one retry (network, timeout, 429, 5xx) with
+  an `Idempotency-Key`, logs only outcome and status. Resend free-tier limits
+  are NOT verified.
+- Platform secrets: table `platformSecrets` (AES-256-GCM, name as additional
+  data, master key env `RULEBOX_PLATFORM_KEY`), allow-list `resendApiKey`,
+  `resendFrom`, `dashboardOrigin`; internal `platform:setSecret`,
+  `storeSecret`, `clearSecret`, `readSecret`, `status`, `checkSecrets`.
+  Changes are logged in the new platform-level table `platformAudit` (the
+  org audit log needs an organization). No public function returns any of it.
+- `scripts/platform-secret.mjs` is the interim stand-in for the operator
+  console (run by the owner only, never by an agent): `generate-key`, `set`
+  (hidden prompt, encrypts locally, sends only ciphertext), `clear`,
+  `status`, `check`.
+- Maintenance: daily stage `pinResets` deletes rows older than 7 days.
+
+**Owner to do (not done by WP5a).** Generate the master key
+(`node scripts/platform-secret.mjs generate-key --out <file>`) and set it as
+`RULEBOX_PLATFORM_KEY` on each deployment; create a Resend account, verify
+the sending domain, then `set resendApiKey`, `set resendFrom`,
+`set dashboardOrigin` and `check`. Until then the forgot-PIN email is off
+(`me.pin.resetByEmail` false) and Owner reset, passkey and recovery codes
+still work.
+
+**Not verified (no live account or deployment).** A real Resend send (request
+shape follows Resend's documented API; tests mock `fetch`), Resend's free-tier
+quota, `convex run` with the script against a deployment, and the hand-written
+`_generated/api.d.ts` / `server.d.ts` (`RULEBOX_PLATFORM_KEY`) entries:
+regenerate with `npx convex dev` once a deployment is at hand.
+
+**WP5b must remove / narrow.** `convex/mfa.ts`, `convex/lib/totp.ts` (keep
+`lib/recoveryCodes.ts`), `mfa.test.ts`, the `mfa:*` rows and the
+`adminNoMfa` / `ownerNoMfa` callers in `matrix.test.ts`, `mfaRequiredFor`,
+`sessionHasMfa`, `skipMfa` (authz, functions, `account:authorize`),
+`me.mfa`, `members:resetMfa` (+ MAJOR_ACTIONS row), `maintenance:resetMfaByEmail`,
+`clearMfa` / `deleteMfaSessions` / `account:signOutMfa` naming, the
+`mfaSessions` maintenance stage, error codes `mfa_*`, audit actions
+`member.mfaEnabled` / `mfaReset` / `recoveryCodeUsed` / `actionPinCleared`,
+`TOTP_*` limits, the legacy branch of `stepUp:recoveryReset`, then narrow the
+schema (widen-then-narrow): drop `mfaSessions`, `memberSecrets` (after a
+migration copies nothing: TOTP recovery codes are not carried over) and
+`stepUpFactors.pinDisabledAt`; `asMember({ mfa })` in `tests/convex`.
+Frontend: route on `me.pin`, `/pin-reset?token=` page (strip the token from
+the URL with `history.replaceState` and send no referrer), lockout copy for
+detail `lockout`, recovery-code screen, demo hooks.
+
+**Deviations / open points.** The redeem needs the password sign-in to be
+less than 15 minutes old (stronger than "a signed-in session"). A passkey can
+no longer be registered before the PIN (the plan's "optional passkey step
+after the PIN"). After a lockout ends an attacker with the password gets 10
+more guesses a day (about 3,650 a year against 10^6+ PINs) and each lockout
+emails the person; a stricter long-term limit is an owner decision. Legacy
+step-up rows of passkey-only people (before this deploy) stay valid for at
+most 8 hours. `eslint.config.js` (outside `convex/`) has no rule yet that
+limits `RULEBOX_PLATFORM_KEY` to `lib/platformSecrets.ts`; `platform.test.ts`
+scans the sources for the table instead.

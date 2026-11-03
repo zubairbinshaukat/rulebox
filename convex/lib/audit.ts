@@ -31,6 +31,10 @@ export const AUDIT_ACTIONS = [
   "member.passkeyRemoved",
   "member.passkeyCloneDetected",
   "member.stepUpReset",
+  // Phase 4b: recovery codes of the action PIN and the forgot-PIN email.
+  "member.recoveryCodesGenerated",
+  "member.pinResetRequested",
+  "member.pinReset",
   "group.created",
   "group.renamed",
   "group.updated", // description only (Step 5)

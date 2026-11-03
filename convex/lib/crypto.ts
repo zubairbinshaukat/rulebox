@@ -147,6 +147,11 @@ export function base64Encode(bytes: Uint8Array): string {
   return out;
 }
 
+/** base64url without padding of raw bytes (random tokens in links). */
+export function base64UrlOfBytes(bytes: Uint8Array): string {
+  return base64Encode(bytes).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+}
+
 /**
  * Decode standard base64 with padding. Strict: only the canonical encoding of
  * some byte string is accepted (length a multiple of 4, padding only at the

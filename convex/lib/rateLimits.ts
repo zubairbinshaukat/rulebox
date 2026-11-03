@@ -70,6 +70,20 @@ export const rateLimiter = new RateLimiter(components.rateLimiter, {
   // `members:invite`, per organization; consumed in the mutation that stores
   // the invite (a refused invite rolls it back: only real invites count).
   inviteCreate: { kind: "token bucket", rate: 30, period: HOUR_MS, capacity: 30 },
+  // Forgot PIN (Phase 4b Part C). `account:requestPinReset`: per email (key =
+  // SHA-256 of the normalized address, consumed whether or not the account
+  // exists) and one deployment-wide bucket (Convex sees no client IP), both
+  // consumed before anything else, so a mail bomb against one address or the
+  // Resend quota is bounded.
+  pinResetPerEmail: { kind: "token bucket", rate: 3, period: HOUR_MS, capacity: 3 },
+  pinResetGlobal: { kind: "token bucket", rate: 30, period: MINUTE_MS, capacity: 30 },
+  // `account:redeemPinReset`, per user (key = user id), consumed before the
+  // token is looked up (the token has 256 bits; this bounds Argon2 work).
+  pinResetRedeem: { kind: "token bucket", rate: 10, period: 15 * MINUTE_MS, capacity: 10 },
+  // `stepUp:resetWithRecoveryCode` for recovery codes of the action PIN (no
+  // TOTP row to carry a lockout): per user, CHECKED first and consumed only
+  // on a wrong code. Legacy TOTP codes keep the TOTP lockout counter.
+  recoveryCodePerUser: { kind: "token bucket", rate: 5, period: 15 * MINUTE_MS, capacity: 5 },
 });
 
 export type LimitName =
@@ -86,7 +100,11 @@ export type LimitName =
   | "employeeWrites"
   | "verifyPerDevice"
   | "deviceWrites"
-  | "inviteCreate";
+  | "inviteCreate"
+  | "pinResetPerEmail"
+  | "pinResetGlobal"
+  | "pinResetRedeem"
+  | "recoveryCodePerUser";
 
 /** Read-only: throw `rate_limited` when the bucket is empty, without consuming. */
 export async function checkOrFail(
