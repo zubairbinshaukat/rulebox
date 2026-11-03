@@ -3,7 +3,7 @@
  * one teal accent, light + dark). Layout uses logical properties so a
  * right-to-left language mirrors without extra rules.
  *
- * Breakpoints:  < 768 phone (menu button + sheet, cards instead of tables)
+ * Breakpoints:  < 768 phone (menu button + sheet; tables scroll sideways, or show as cards)
  *               768–1099 tablet (icon rail)
  *               ≥ 1100 laptop/desktop (full sidebar)
  */
@@ -938,6 +938,25 @@ a.dash-stat:hover {
   height: 36px;
   font-size: 18px;
 }
+/* Search on Enter: room for the clear button and the Enter hint. */
+.dash-search--enter .rb-input {
+  padding-inline-end: 92px;
+}
+.dash-search__hint {
+  position: absolute;
+  inset-inline-end: 44px;
+  top: 50%;
+  margin-top: -11px;
+  padding: 2px 7px;
+  border: 1px solid var(--rb-line);
+  border-radius: 6px;
+  background: var(--rb-paper);
+  color: var(--rb-muted);
+  font-family: var(--rb-font-mono);
+  font-size: 11px;
+  line-height: 16px;
+  pointer-events: none;
+}
 .dash-filters {
   display: flex;
   flex-wrap: wrap;
@@ -959,13 +978,86 @@ a.dash-stat:hover {
 
 /* ------------------------------------------------------------ tables */
 
+/* DataTable (components/DataTable.tsx): toolbar, surface, table, footer. */
+.dash-dt {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-width: 0;
+}
+.dash-dt:not([data-framed]) {
+  gap: 0;
+}
+.dash-dt__toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px 12px;
+  min-width: 0;
+}
+.dash-dt:not([data-framed]) .dash-dt__toolbar {
+  padding: 14px clamp(16px, 2vw, 22px) 12px;
+}
+.dash-dt__tools {
+  display: flex;
+  flex: 1 1 auto;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px 12px;
+  min-width: 0;
+}
+.dash-dt__sortsel {
+  display: none;
+  flex: 0 1 230px;
+  min-width: 160px;
+}
+/* Cards have no header row to sort by: the toolbar offers a select instead (only when this table is shown as cards). */
+html[data-view="cards"] .dash-dt:has(.dash-table--stack) .dash-dt__sortsel {
+  display: flex;
+}
+.dash-dt__toolbar .rb-seg button {
+  height: 32px;
+}
+.dash-viewswitch button {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.dash-viewswitch svg {
+  font-size: 16px;
+}
+.dash-dt__surface {
+  min-width: 0;
+}
+/* The card clips its contents, so the header row and the hovered last row follow the rounded corners.
+   Scoped to cards that hold a table: other cards keep their focus rings and shadows unclipped. */
+.dash-dt__surface.dash-card,
+.dash-card:has(.dash-table-wrap) {
+  overflow: clip;
+}
+.dash-dt__footer {
+  padding: 12px;
+  border-top: 1px solid var(--rb-line);
+}
+
 .dash-table-wrap {
   min-width: 0;
   overflow-x: auto;
-  border-radius: 0 0 var(--dash-radius) var(--dash-radius);
+}
+/* Sticky header: it sticks to the top of this box, so the box needs a height (the `maxHeight` prop). */
+.dash-table-wrap--scroll {
+  overflow-y: auto;
+  overscroll-behavior: contain;
 }
 .dash-table-wrap:focus-visible {
   outline-offset: -2px;
+}
+.dash-table-wrap[data-busy] tbody {
+  opacity: 0.55;
+}
+/* Table view scrolls sideways instead of squeezing the columns, at every width. */
+.dash-table-wrap .rb-table {
+  min-width: 680px;
 }
 .dash-table-wrap .rb-table th:first-child,
 .dash-table-wrap .rb-table td:first-child {
@@ -978,6 +1070,65 @@ a.dash-stat:hover {
 .dash-table-wrap .rb-table th {
   background: var(--rb-surface);
   top: 0;
+}
+/* A framed table starts at the card's top edge: its header corners take the card's radius. */
+.dash-dt[data-framed] .dash-dt__surface > .dash-table-wrap:first-child th:first-child {
+  border-start-start-radius: calc(var(--dash-radius) - 1px);
+}
+.dash-dt[data-framed] .dash-dt__surface > .dash-table-wrap:first-child th:last-child {
+  border-start-end-radius: calc(var(--dash-radius) - 1px);
+}
+
+/* Sortable header: a button inside the th. */
+.dash-th-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin: -5px -8px;
+  padding: 5px 8px;
+  border-radius: 8px;
+  font: inherit;
+  letter-spacing: inherit;
+  text-transform: inherit;
+  color: inherit;
+  text-align: start;
+  white-space: nowrap;
+  cursor: pointer;
+}
+.dash-th-btn:hover,
+.dash-th-btn[data-active="true"] {
+  color: var(--rb-ink);
+}
+.dash-th-btn:hover {
+  background: var(--rb-hover);
+}
+.dash-th-btn__icon {
+  flex: none;
+  font-size: 14px;
+  opacity: 0.55;
+}
+.dash-th-btn[data-active="true"] .dash-th-btn__icon {
+  opacity: 1;
+  color: var(--rb-accent-text);
+}
+.dash-table-wrap .rb-table th:focus-within {
+  z-index: 2;
+}
+
+/* A clickable row (onRowClick): the name link keeps keyboard, ctrl-click and middle-click. */
+.rb-table tbody tr[data-clickable] {
+  cursor: pointer;
+}
+.rb-table tbody tr[data-clickable]:active {
+  background: color-mix(in srgb, var(--rb-hover) 70%, var(--rb-line));
+}
+.rb-table tbody tr[data-clickable]:has(.dash-cell--name a:focus-visible) {
+  outline: 2px solid var(--rb-accent);
+  outline-offset: -2px;
+  background: var(--rb-hover);
+}
+.rb-table tbody tr[data-clickable] .dash-cell--name a:focus-visible {
+  outline: none;
 }
 .rb-table td.dash-cell--name {
   max-width: 340px;
@@ -1018,78 +1169,81 @@ a.dash-stat:hover {
   text-overflow: ellipsis;
 }
 
-/* Phones (< 768, the breakpoint above): each row becomes a small card; cells show their column name. */
-@media (max-width: 767px) {
-  .dash-table--stack thead {
-    position: absolute;
-    width: 1px;
-    height: 1px;
-    overflow: hidden;
-    clip: rect(0 0 0 0);
-  }
-  .dash-table--stack,
-  .dash-table--stack tbody,
-  .dash-table--stack tr,
-  .dash-table--stack td {
-    display: block;
-    width: 100%;
-  }
-  .dash-table--stack tr {
-    padding: 12px 16px;
-    border-bottom: 1px solid var(--rb-line);
-  }
-  .dash-table--stack tbody tr:last-child {
-    border-bottom: 0;
-  }
-  .dash-table--stack td,
-  .dash-table-wrap .dash-table--stack td:first-child,
-  .dash-table-wrap .dash-table--stack td:last-child {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 12px;
-    min-height: 30px;
-    padding: 4px 0;
-    border: 0;
-    max-width: none;
-    text-align: end;
-  }
-  .dash-table--stack td > * {
-    min-width: 0;
-  }
-  .dash-table--stack td::before {
-    content: attr(data-label);
-    flex: none;
-    max-width: 45%;
-    font-size: 12.5px;
-    font-weight: 600;
-    color: var(--rb-muted);
-    text-align: start;
-  }
-  .dash-table--stack td[data-primary="true"],
-  .dash-table-wrap .dash-table--stack td[data-primary="true"] {
-    justify-content: flex-start;
-    text-align: start;
-    padding-bottom: 6px;
-    font-size: 15px;
-  }
-  .dash-table--stack td[data-primary="true"]::before {
-    display: none;
-  }
-  .dash-table--stack td.dash-cell--actions {
-    justify-content: flex-end;
-    width: 100%;
-    padding-top: 8px;
-  }
-  .dash-table--stack td.dash-cell--actions::before {
-    display: none;
-  }
-  .dash-table--stack td[data-empty="true"] {
-    display: none;
-  }
-  .dash-table-wrap {
-    overflow-x: visible;
-  }
+/* Cards view (Settings > View, or the switch above a table): each row becomes a small card, at every width;
+   cells show their column name. `html[data-view]` is set before the first paint (src/boot/boot.js).
+   `stack={false}` tables have no `dash-table--stack` class and stay tables. */
+html[data-view="cards"] .dash-table-wrap:has(> .dash-table--stack) {
+  overflow-x: visible;
+}
+html[data-view="cards"] .dash-table-wrap .dash-table--stack {
+  min-width: 0;
+}
+html[data-view="cards"] .dash-table--stack thead {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+}
+html[data-view="cards"] .dash-table--stack,
+html[data-view="cards"] .dash-table--stack tbody,
+html[data-view="cards"] .dash-table--stack tr,
+html[data-view="cards"] .dash-table--stack td {
+  display: block;
+  width: 100%;
+}
+html[data-view="cards"] .dash-table--stack tr {
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--rb-line);
+}
+html[data-view="cards"] .dash-table--stack tbody tr:last-child {
+  border-bottom: 0;
+}
+html[data-view="cards"] .dash-table--stack td,
+html[data-view="cards"] .dash-table-wrap .dash-table--stack td:first-child,
+html[data-view="cards"] .dash-table-wrap .dash-table--stack td:last-child {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  min-height: 30px;
+  padding: 4px 0;
+  border: 0;
+  max-width: none;
+  text-align: end;
+}
+html[data-view="cards"] .dash-table--stack td > * {
+  min-width: 0;
+}
+html[data-view="cards"] .dash-table--stack td::before {
+  content: attr(data-label);
+  flex: none;
+  max-width: 45%;
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--rb-muted);
+  text-align: start;
+}
+html[data-view="cards"] .dash-table--stack td[data-primary="true"],
+html[data-view="cards"] .dash-table-wrap .dash-table--stack td[data-primary="true"] {
+  justify-content: flex-start;
+  text-align: start;
+  padding-bottom: 6px;
+  font-size: 15px;
+}
+html[data-view="cards"] .dash-table--stack td[data-primary="true"]::before {
+  display: none;
+}
+html[data-view="cards"] .dash-table--stack td.dash-cell--actions {
+  justify-content: flex-end;
+  width: 100%;
+  padding-top: 8px;
+}
+html[data-view="cards"] .dash-table--stack td.dash-cell--actions::before {
+  display: none;
+}
+html[data-view="cards"] .dash-table--stack td[data-empty="true"] {
+  display: none;
 }
 
 .dash-list {
@@ -1647,6 +1801,138 @@ a.dash-stat:hover {
     height: 1px;
     overflow: hidden;
     clip: rect(0 0 0 0);
+  }
+}
+
+/* ------------------------------------------------------------ pager */
+
+/* "147 records · Page 1 of 15", the page buttons, rows per page: a rounded frosted bar. */
+.dash-pager {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+  align-items: center;
+  gap: 8px 16px;
+  padding: 8px 12px 8px 18px;
+  border: 1px solid var(--rb-line);
+  border-radius: var(--rb-r-xl);
+  background: color-mix(in srgb, var(--rb-surface) 55%, var(--rb-hover));
+  -webkit-backdrop-filter: blur(10px);
+  backdrop-filter: blur(10px);
+}
+[data-lite="true"] .dash-pager {
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
+}
+.dash-pager__summary {
+  min-width: 0;
+  font-size: 13px;
+  color: var(--rb-muted);
+  font-variant-numeric: tabular-nums;
+}
+.dash-pager__nav {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  max-width: 100%;
+  justify-self: center;
+}
+.dash-pager__pages {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  margin: 0;
+  padding: 4px;
+  list-style: none;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+.dash-pager__pages > li {
+  flex: none;
+}
+.dash-pager[data-loading] .dash-pager__pages {
+  opacity: 0.6;
+}
+.dash-pager__btn,
+.dash-pager__gap {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 36px;
+  height: 36px;
+  padding: 0 10px;
+  border-radius: var(--rb-r-md);
+  font-size: 14px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+.dash-pager__btn {
+  flex: none;
+  border: 1px solid transparent;
+  background: var(--rb-hover);
+  color: var(--rb-ink);
+  cursor: pointer;
+  transition: background var(--rb-duration) var(--rb-ease);
+}
+.dash-pager__btn:hover:not(:disabled):not([aria-current="page"]) {
+  background: var(--rb-line);
+}
+.dash-pager__btn[aria-current="page"] {
+  background: var(--rb-accent);
+  color: var(--rb-on-ink);
+  cursor: default;
+}
+.dash-pager__btn--arrow {
+  padding: 0;
+  border-color: var(--rb-line);
+  background: var(--rb-surface);
+  font-size: 18px;
+}
+.dash-pager__btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+.dash-pager__gap {
+  flex: none;
+  border: 1px dashed color-mix(in srgb, var(--rb-line-strong) 55%, transparent);
+  color: var(--rb-muted);
+  user-select: none;
+}
+.dash-pager__size {
+  display: flex;
+  align-items: center;
+  justify-self: end;
+  gap: 10px;
+}
+.dash-pager__size-label {
+  font-size: 13px;
+  color: var(--rb-muted);
+  white-space: nowrap;
+}
+.dash-pager__size .rb-select {
+  width: 84px;
+}
+@media (max-width: 719px) {
+  /* Phones: one column; the number strip scrolls sideways when it is wider than the screen. */
+  .dash-pager {
+    grid-template-columns: minmax(0, 1fr);
+    justify-items: stretch;
+    padding: 10px 12px;
+  }
+  .dash-pager__summary {
+    text-align: center;
+  }
+  .dash-pager__size {
+    justify-self: stretch;
+    justify-content: space-between;
+  }
+}
+@media (pointer: coarse) {
+  .dash-pager__btn,
+  .dash-pager__gap {
+    min-width: 44px;
+    height: 44px;
   }
 }
 
@@ -2240,6 +2526,19 @@ a.dash-stat:hover {
   .dash-status__dot {
     forced-color-adjust: none;
   }
+  .dash-pager,
+  .dash-pager__btn {
+    border: 1px solid CanvasText;
+  }
+  .dash-pager__btn[aria-current="page"] {
+    background: Highlight;
+    color: HighlightText;
+    forced-color-adjust: none;
+  }
+  .dash-pager__btn:disabled {
+    color: GrayText;
+    border-color: GrayText;
+  }
 }
 
 /* Print: the audit log prints as a plain table. */
@@ -2248,6 +2547,8 @@ a.dash-stat:hover {
   .dash-top,
   .dash-banner,
   .dash-loadmore,
+  .dash-pager,
+  .dash-dt__toolbar,
   .dash-head__actions,
   .dash-toasts,
   .dash-skip {

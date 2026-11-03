@@ -151,6 +151,35 @@ export const strings = {
     timeZone: (tz: string) => `Times are shown in ${tz}.`,
   },
 
+  /** The generic table (components/DataTable.tsx), its view switch and the pager. */
+  table: {
+    view: "View",
+    viewTable: "Table",
+    viewCards: "Cards",
+    sortSelect: "Sort by",
+    sortOption: (column: string, dir: "asc" | "desc") => `${column}, ${dir === "asc" ? "ascending" : "descending"}`,
+    emptyTitle: "Nothing here yet",
+    updating: "Updating…",
+  },
+
+  pager: {
+    nav: "Pagination",
+    previous: "Previous page",
+    next: "Next page",
+    goTo: (page: number) => `Page ${formatNumber(page)}`,
+    records: (n: number) => `${formatNumber(n)} ${n === 1 ? "record" : "records"}`,
+    pageOf: (page: number, pages: number) => `Page ${formatNumber(page)} of ${formatNumber(pages)}`,
+    page: (page: number) => `Page ${formatNumber(page)}`,
+    rowsPerPage: "Rows per page",
+    gap: "More pages",
+  },
+
+  /** The search box fires on Enter (components/SearchInput.tsx). */
+  search: {
+    hint: "Press Enter to search",
+    enterKey: "Enter",
+  },
+
   errors: {
     unknown: "Something went wrong. Try again.",
     unauthenticated: "Your session ended. Sign in again.",

@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import source from "./boot.js?raw";
 
 const MAP = {
@@ -22,6 +22,7 @@ describe("boot.js", () => {
     sessionStorage.clear();
     document.head.innerHTML = "";
     document.documentElement.removeAttribute("data-theme");
+    document.documentElement.removeAttribute("data-view");
   });
   afterEach(() => window.history.replaceState(null, "", "/"));
 
@@ -40,6 +41,31 @@ describe("boot.js", () => {
     localStorage.setItem("rulebox.theme", "light");
     boot("/sign-in", false);
     expect(document.documentElement.hasAttribute("data-theme")).toBe(false);
+  });
+
+  it("applies the saved list view before the first paint, the table by default", () => {
+    const view = () => document.documentElement.getAttribute("data-view");
+    boot("/sign-in", false);
+    expect(view()).toBe("table");
+    localStorage.setItem("rulebox.view", "cards");
+    boot("/sign-in", false);
+    expect(view()).toBe("cards");
+    localStorage.setItem("rulebox.view", "grid");
+    boot("/sign-in", false);
+    expect(view()).toBe("table");
+  });
+
+  it("falls back to the table when storage is blocked", () => {
+    const spy = vi.spyOn(Storage.prototype, "getItem").mockImplementation(() => {
+      throw new Error("blocked");
+    });
+    try {
+      boot("/sign-in", false);
+      expect(document.documentElement.getAttribute("data-view")).toBe("table");
+      expect(document.documentElement.getAttribute("data-theme")).toBe("auto");
+    } finally {
+      spy.mockRestore();
+    }
   });
 
   it("preloads the chunks of the URL's screen", () => {

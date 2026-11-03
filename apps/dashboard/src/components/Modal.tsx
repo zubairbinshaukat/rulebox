@@ -1,4 +1,5 @@
 import type { FormEvent, ReactNode } from "react";
+import { createPortal } from "react-dom";
 import { Dialog } from "@rulebox/ui";
 
 export interface ModalProps {
@@ -18,6 +19,12 @@ export interface ModalProps {
  * dashboard's look: a bottom sheet below 640 px, and a CSS entrance on open
  * (`.dash-dialog` in dashboard.css: transform + opacity only, fade only with
  * reduced motion or Lite).
+ *
+ * Rendered through a portal into `document.body`: the dialog's backdrop is
+ * `position: fixed`, and an ancestor with `backdrop-filter` (the top bar), a
+ * transform or a clip would otherwise become its containing block and cut the
+ * dialog off at the ancestor's edge (the demo controls, opened from the top bar).
+ * Events still bubble through the React tree, so `onSubmit` and handlers work.
  */
 export function Modal({ open, title, onClose, children, actions, wide, onSubmit, className }: ModalProps) {
   if (!open) return null;
@@ -41,9 +48,10 @@ export function Modal({ open, title, onClose, children, actions, wide, onSubmit,
     </>
   );
 
-  return (
+  return createPortal(
     <Dialog open title={title} onClose={onClose} className={cls}>
       {content}
-    </Dialog>
+    </Dialog>,
+    document.body,
   );
 }

@@ -7,6 +7,7 @@ import IconDown from "~icons/solar/alt-arrow-down-linear";
 import { useAuthActions } from "../data";
 import { useMember } from "../lib/member";
 import { strings } from "../lib/strings";
+import { ViewSwitch } from "../components/ViewSwitch";
 import { useTheme } from "./theme";
 import IconLock from "~icons/solar/lock-keyhole-minimalistic-linear";
 import { secShell } from "../lib/stepup/strings-shell";
@@ -85,6 +86,12 @@ export function AccountMenu() {
               {strings.app.theme}
             </p>
             <SegmentedControl<Theme> options={THEMES} value={theme} onChange={setTheme} aria-label={strings.app.theme} />
+          </div>
+          <div className="dash-popover__section">
+            <p className="dash-overline" style={{ marginBottom: 8 }}>
+              {strings.table.view}
+            </p>
+            <ViewSwitch />
           </div>
           <MenuList aria-label={strings.app.accountMenu(me.email)}>
             <MenuItem

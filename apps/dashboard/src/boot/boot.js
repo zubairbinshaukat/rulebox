@@ -3,7 +3,8 @@
 // scripts. The build emits it as a hashed asset (vite.config.ts, plugin
 // "rulebox-boot") and fills in the route map.
 //
-// 1. Applies the saved theme, so a dark-mode user never sees a light flash.
+// 1. Applies the saved theme (and the saved list view, table or cards), so a
+//    dark-mode user never sees a light flash or a table turning into cards.
 // 2. Build only: starts downloading the chunks of the screen this URL shows,
 //    in parallel with the entry script instead of after it (one network round
 //    trip less: ~0.5 s on a slow phone connection). A member screen without a
@@ -17,6 +18,15 @@
     // Storage blocked: follow the system.
   }
   if (theme !== "light") document.documentElement.setAttribute("data-theme", theme);
+
+  // The list view (table or cards), see lib/viewMode.ts. Table unless "cards" is saved.
+  var view = "table";
+  try {
+    if (window.localStorage.getItem("rulebox.view") === "cards") view = "cards";
+  } catch (e) {
+    // Storage blocked: the table.
+  }
+  document.documentElement.setAttribute("data-view", view);
 
   // { f: files, r: { routeKey: file indexes }, p: public route keys }, see route-table.ts.
   var map = /*RB_ROUTES*/ null;

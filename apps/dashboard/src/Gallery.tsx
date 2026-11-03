@@ -32,6 +32,10 @@ import {
   type Theme,
 } from "@rulebox/ui";
 import { useTheme } from "./app/theme";
+import { DataTable, type Column, type SortState } from "./components/DataTable";
+import { EmptyState } from "./components/EmptyState";
+import { Pager } from "./components/Pager";
+import { SearchInput } from "./components/SearchInput";
 
 import Home2Linear from "~icons/solar/home-2-linear";
 import Home2Duo from "~icons/solar/home-2-bold-duotone";
@@ -264,6 +268,88 @@ function LogoSection() {
   );
 }
 
+const TABLE_ROWS = Array.from({ length: 147 }, (_, i) => ({ id: String(i + 1), name: `PC-${String(i + 1).padStart(3, "0")}`, ring: i % 3 === 0 ? "Pilot" : "Stable", apps: (i * 7) % 23 }));
+
+/** The generic DataTable, its search box, view switch and Pager, on sample rows (the sort and pages run on the client here). */
+function TableSection() {
+  const [sort, setSort] = useState<SortState>({ key: "name", dir: "asc" });
+  const [search, setSearch] = useState("");
+  const [size, setSize] = useState(10);
+  const [page, setPage] = useState(1);
+  const [state, setState] = useState<"ready" | "loading" | "empty" | "error">("ready");
+  const filtered = TABLE_ROWS.filter((r) => r.name.toLowerCase().includes(search.toLowerCase()));
+  const sorted = [...filtered].sort((a, b) => {
+    const x = sort.key === "apps" ? a.apps : a[sort.key as "name" | "ring"];
+    const y = sort.key === "apps" ? b.apps : b[sort.key as "name" | "ring"];
+    return (x < y ? -1 : x > y ? 1 : 0) * (sort.dir === "asc" ? 1 : -1);
+  });
+  const pages = Math.max(1, Math.ceil(sorted.length / size));
+  const shown = sorted.slice((Math.min(page, pages) - 1) * size, Math.min(page, pages) * size);
+  const reachable = new Set([1, Math.max(1, Math.min(page, pages) - 1), Math.min(page, pages), Math.min(pages, page + 1), pages]);
+  const cols: Column<(typeof TABLE_ROWS)[number]>[] = [
+    { key: "name", header: "Name", primary: true, sortable: true, cell: (r) => <a className="dash-link dash-link--plain" href={`#${r.id}`} onClick={(e) => e.preventDefault()}>{r.name}</a> },
+    { key: "ring", header: "Ring", sortable: true, cell: (r) => <Pill tone={r.ring === "Pilot" ? "accent" : "neutral"}>{r.ring}</Pill> },
+    { key: "apps", header: "Apps", numeric: true, sortable: true, sortDefaultDir: "desc", cell: (r) => r.apps },
+  ];
+  return (
+    <Section
+      title="Data table and pager"
+      description="Sortable headers, whole-row click, Enter-to-search, Table | Cards view, loading / empty / error states, Pager."
+      action={
+        <SegmentedControl
+          options={[{ value: "ready", label: "Rows" }, { value: "loading", label: "Loading" }, { value: "empty", label: "Empty" }, { value: "error", label: "Error" }]}
+          value={state}
+          onChange={setState}
+          aria-label="Table state"
+        />
+      }
+    >
+      <DataTable
+        framed
+        caption="Sample PCs"
+        columns={cols}
+        rows={shown}
+        getKey={(r) => r.id}
+        sort={sort}
+        onSortChange={(s) => {
+          setSort(s);
+          setPage(1);
+        }}
+        onRowClick={(r) => window.alert(`Open ${r.name}`)}
+        state={state === "ready" && shown.length === 0 ? "empty" : state}
+        empty={<EmptyState title="No PCs match" body="Try another search." />}
+        error={new Error("sample")}
+        onRetry={() => setState("ready")}
+        toolbar={
+          <SearchInput
+            label="Search PCs"
+            placeholder="Search by name"
+            value={search}
+            onSearch={(t) => {
+              setSearch(t);
+              setPage(1);
+            }}
+          />
+        }
+        footer={
+          <Pager
+            page={Math.min(page, pages)}
+            pageSize={size}
+            total={sorted.length}
+            reachablePages={reachable}
+            hasNext={page < pages}
+            onPage={setPage}
+            onPageSize={(n) => {
+              setSize(n);
+              setPage(1);
+            }}
+          />
+        }
+      />
+    </Section>
+  );
+}
+
 /** `/gallery` (members only): the design system with its own theme and Lite switches. */
 export default function GalleryScreen() {
   const [theme, setTheme] = useTheme();
@@ -482,6 +568,8 @@ export function Gallery({ theme, onTheme, lite, onLite }: GalleryProps) {
               </div>
             </Section>
           </div>
+
+          <TableSection />
 
           {/* App tiles */}
           <Section title="App tiles" description="Staff App desktop. Dot = open, badge = notifications. size + hue props.">
