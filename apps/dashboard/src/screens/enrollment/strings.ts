@@ -58,6 +58,7 @@ export const enrollText = {
   colGroup: "Group",
   colUses: "Uses",
   colExpires: "Expires",
+  colCreated: "Created",
   colState: "State",
   colCreatedBy: "Created by",
   states: {

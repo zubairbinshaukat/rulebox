@@ -192,44 +192,73 @@ describe("queries", () => {
   });
 });
 
-describe("device list (paginated)", () => {
+describe("device list (one page per subscription)", () => {
+  const page = (rows: unknown[], over: Record<string, unknown> = {}) => ({ page: rows, isDone: true, continueCursor: "c1", ...over });
+  const lastArgs = () => cx.requests.at(-1)!.q!.args as Record<string, unknown>;
+  const lastName = () => getFunctionName((cx.requests.at(-1)!.q as unknown as { query: FunctionReference<"query"> }).query);
+  const Q = { numItems: 10, cursor: null as string | null };
+
   it("is skipped until the session is confirmed", () => {
     cx.auth = { isLoading: true, isAuthenticated: false };
-    renderHook(() => liveDevicesApi.useDevicesScreen({}));
-    expect(cx.paged.at(-1)).toEqual({ name: "fleet:list", args: "skip" });
+    renderHook(() => liveDevicesApi.useDevicesScreen(Q));
+    expect(cx.requests.flatMap((r) => Object.keys(r))).toEqual([]);
   });
 
-  it("sends only the arguments that are set; the search is fleet:list's own", () => {
-    renderHook(() => liveDevicesApi.useDevicesScreen({}));
-    expect(cx.paged.at(-1)!.args).toEqual({});
-    renderHook(() => liveDevicesApi.useDevicesScreen({ groupId: "g1", search: "front" }));
-    expect(cx.paged.at(-1)).toEqual({ name: "fleet:list", args: { groupId: "g1", search: "front" } });
+  it("sends the page size, cursor, sort and group as arguments of fleet:list; a plain query, not usePaginatedQuery", () => {
+    cx.queryResult = page([]);
+    renderHook(() => liveDevicesApi.useDevicesScreen({ ...Q, sort: { key: "created", dir: "desc" } }));
+    expect(lastName()).toBe("fleet:list");
+    expect(lastArgs()).toEqual({ paginationOpts: { numItems: 10, cursor: null }, sort: { key: "created", dir: "desc" } });
+    renderHook(() => liveDevicesApi.useDevicesScreen({ numItems: 25, cursor: "cur-7", groupId: "g1", sort: { key: "name", dir: "asc" } }));
+    expect(lastArgs()).toEqual({ paginationOpts: { numItems: 25, cursor: "cur-7" }, groupId: "g1", sort: { key: "name", dir: "asc" } });
+    // The server's own paginated hook is never used (it would accumulate pages).
+    expect(cx.paged).toEqual([]);
   });
 
-  it("maps the rows, offers Load more while pages remain", () => {
-    cx.pageResults = [serverRow];
-    cx.pageStatus = "CanLoadMore";
-    const { result } = renderHook(() => liveDevicesApi.useDevicesScreen({}));
+  it("a search is fleet:list's own argument and the server ignores the sort for it, so none is sent", () => {
+    cx.queryResult = page([]);
+    renderHook(() => liveDevicesApi.useDevicesScreen({ ...Q, search: " front ", sort: { key: "name", dir: "asc" } }));
+    expect(lastArgs()).toEqual({ paginationOpts: { numItems: 10, cursor: null }, search: "front" });
+  });
+
+  it("the total is fleet:count, a query of its own, with the same group and search", () => {
+    cx.queryResult = { total: 524 };
+    const none = renderHook(() => liveDevicesApi.useDevicesCount({}));
+    expect(lastName()).toBe("fleet:count");
+    expect(lastArgs()).toEqual({});
+    expect(none.result.current).toBe(524);
+    cx.queryResult = { total: null };
+    const some = renderHook(() => liveDevicesApi.useDevicesCount({ groupId: "g1", search: "x" }));
+    expect(lastArgs()).toEqual({ groupId: "g1", search: "x" });
+    expect(some.result.current).toBeNull();
+    cx.queryResult = undefined;
+    expect(renderHook(() => liveDevicesApi.useDevicesCount({})).result.current).toBeUndefined();
+  });
+
+  it("maps the rows and hands the cursor to the pager; isDone says whether Next exists", () => {
+    cx.queryResult = page([serverRow], { isDone: false, continueCursor: "next-cursor" });
+    const { result } = renderHook(() => liveDevicesApi.useDevicesScreen(Q));
     if (result.current.status !== "ready") throw new Error("expected ready");
     expect(result.current.items[0]).toMatchObject({ _id: "d1", presence: { online: false, since: 500 }, latestVersion: 4 });
-    expect(result.current.canLoadMore).toBe(true);
+    expect(result.current).toMatchObject({ isDone: false, continueCursor: "next-cursor", total: null });
   });
 
   it("the first page is loading", () => {
-    cx.pageStatus = "LoadingFirstPage";
-    const { result } = renderHook(() => liveDevicesApi.useDevicesScreen({}));
+    cx.queryResult = undefined;
+    const { result } = renderHook(() => liveDevicesApi.useDevicesScreen(Q));
     expect(result.current.status).toBe("loading");
   });
 
-  it("install results are fleet:installs of that PC, paginated; skipped until the session is confirmed", () => {
-    cx.pageResults = [{ _id: "i1", appId: "a1", appName: "Docs", state: "failed", attempts: 3, updatedAt: 5 }];
-    cx.pageStatus = "Exhausted";
-    const { result } = renderHook(() => liveDevicesApi.useDeviceInstalls("d1"));
-    expect(cx.paged.at(-1)).toEqual({ name: "fleet:installs", args: { deviceId: "d1" } });
-    expect(result.current).toMatchObject({ status: "ready", items: [{ _id: "i1", appName: "Docs", state: "failed" }], canLoadMore: false });
+  it("install results are fleet:installs of that PC, sorted by updated only; skipped until the session is confirmed", () => {
+    cx.queryResult = page([{ _id: "i1", appId: "a1", appName: "Docs", state: "failed", attempts: 3, updatedAt: 5 }]);
+    const { result } = renderHook(() => liveDevicesApi.useDeviceInstalls("d1", { ...Q, sort: { key: "updated", dir: "asc" } }));
+    expect(lastName()).toBe("fleet:installs");
+    expect(lastArgs()).toEqual({ deviceId: "d1", paginationOpts: { numItems: 10, cursor: null }, sort: { key: "updated", dir: "asc" } });
+    expect(result.current).toMatchObject({ status: "ready", items: [{ _id: "i1", appName: "Docs", state: "failed" }], isDone: true });
     cx.auth = { isLoading: true, isAuthenticated: false };
-    renderHook(() => liveDevicesApi.useDeviceInstalls("d1"));
-    expect(cx.paged.at(-1)).toEqual({ name: "fleet:installs", args: "skip" });
+    cx.requests = [];
+    renderHook(() => liveDevicesApi.useDeviceInstalls("d1", Q));
+    expect(cx.requests.flatMap((r) => Object.keys(r))).toEqual([]);
   });
 });
 

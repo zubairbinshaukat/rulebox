@@ -1,5 +1,5 @@
-import type { ComponentType, ReactNode, SVGProps } from "react";
-import { Link } from "react-router";
+import { useMemo, type ComponentType, type ReactNode, type SVGProps } from "react";
+import { Link, useNavigate } from "react-router";
 import IconMonitor from "~icons/solar/monitor-linear";
 import IconPulse from "~icons/solar/wi-fi-router-minimalistic-linear";
 import IconUsers from "~icons/solar/users-group-rounded-linear";
@@ -15,18 +15,21 @@ import IconAdd from "~icons/solar/add-square-linear";
 import IconUserPlus from "~icons/solar/user-plus-rounded-linear";
 import IconWidgetAdd from "~icons/solar/widget-add-linear";
 import IconRight from "~icons/solar/alt-arrow-right-linear";
-import { useFailedInstalls, useOverview } from "../data";
-import { NO_GROUP_FILTER, type OverviewScreen } from "../data/types";
+import { useFailedInstallsPage, useOverview } from "../data";
+import { NO_GROUP_FILTER, type FailedInstallRow, type OverviewScreen } from "../data/types";
 import { AuditTimelineItem } from "../components/AuditItem";
 import { Card } from "../components/Card";
+import { type Column } from "../components/DataTable";
 import { EmptyState } from "../components/EmptyState";
 import { installDetail } from "../lib/install";
 import { PageHeader } from "../components/PageHeader";
 import { QueryRegion } from "../components/Region";
 import { RelativeTime } from "../components/RelativeTime";
 import { RoleGate } from "../components/RoleGate";
+import { ServerTable } from "../components/ServerTable";
 import { SkeletonRows, SkeletonStats } from "../components/Skeleton";
 import { formatCount } from "../lib/format";
+import { useListPaging, useListView, type ListConfig } from "../lib/listView";
 import { strings } from "../lib/strings";
 import { useNow } from "../lib/useNow";
 
@@ -110,52 +113,64 @@ function Stat({ to, icon: I, value, label, hint }: { to: string; icon: Icon; val
   );
 }
 
+/** `overview:failedInstallsPage`: newest update first; "updated" is the only order the server knows. */
+const FAILED_LIST: ListConfig = { sorts: ["updated"], defaultSort: { key: "updated", dir: "desc" }, storage: "local" };
+
 /**
- * The failed-installs card. Its list (`overview:failedInstalls`) is subscribed
- * only while the counter of `overview:get` says something failed, so an
- * organization with nothing failed never reads an install result.
+ * The failed-installs card: a table of its own, one page at a time. The list is subscribed only
+ * while the counter of `overview:get` says something failed, so an organization with nothing
+ * failed never reads an install result. The counter is also the total.
  */
 function FailedInstalls({ count }: { count: number }) {
-  const failed = useFailedInstalls(count > 0);
+  const navigate = useNavigate();
+  const paging = useListPaging(useListView(FAILED_LIST), { total: count });
+  const failed = useFailedInstallsPage({ ...paging.query, enabled: count > 0 });
+  const cols = useMemo<Column<FailedInstallRow>[]>(
+    () => [
+      {
+        key: "app",
+        header: s.colApp,
+        primary: true,
+        cell: (f) => (
+          <span className="dash-cell-stack">
+            <Link className="dash-link dash-link--plain dash-truncate" to={`/apps/${f.appId}`} title={f.appName}>
+              {f.appName}
+            </Link>
+            <span className="dash-cell-sub" title={installDetail(f.detail)}>
+              {installDetail(f.detail)}
+            </span>
+          </span>
+        ),
+      },
+      {
+        key: "device",
+        header: s.colDevice,
+        cell: (f) => (
+          <Link className="dash-link dash-truncate" to={`/devices/${f.deviceId}`} title={f.deviceName}>
+            {f.deviceName}
+          </Link>
+        ),
+      },
+      { key: "updated", header: s.colUpdated, sortable: true, sortDefaultDir: "desc", cell: (f) => <RelativeTime ms={f.updatedAt} /> },
+    ],
+    [],
+  );
   return (
-    <Card title={s.failedInstalls} body="flush" actions={count > 0 ? <span className="dash-chip">{formatCount(count, 999)}</span> : null}>
+    <Card title={s.failedInstalls} body="none" className="dash-card--tight" actions={count > 0 ? <span className="dash-chip">{formatCount(count, 999)}</span> : null}>
       {count === 0 ? (
         <EmptyState compact icon={<IconCheck />} title={s.failedInstallsNone} />
       ) : (
-        <QueryRegion state={failed} skeleton={<SkeletonRows rows={3} columns={2} />}>
-          {(rows) =>
-            rows.length === 0 ? (
-              <EmptyState compact icon={<IconCheck />} title={s.failedInstallsNone} />
-            ) : (
-              <>
-                <ul className="dash-list">
-                  {rows.map((f) => (
-                    <li key={f._id} className="dash-list__item">
-                      <span className="dash-list__icon dash-list__icon--danger" aria-hidden="true">
-                        <IconDanger />
-                      </span>
-                      <div className="dash-list__body">
-                        <p className="dash-list__title dash-truncate">
-                          <Link className="dash-link dash-link--plain" to={`/apps/${f.appId}`}>
-                            {f.appName}
-                          </Link>{" "}
-                          <span className="dash-muted">·</span>{" "}
-                          <Link className="dash-link" to={`/devices/${f.deviceId}`}>
-                            {f.deviceName}
-                          </Link>
-                        </p>
-                        <p className="dash-list__meta">
-                          {installDetail(f.detail)} · <RelativeTime ms={f.updatedAt} />
-                        </p>
-                      </div>
-                    </li>
-                  ))}
-                </ul>
-                {count > rows.length ? <p className="dash-list__meta" style={{ padding: "10px clamp(16px, 2vw, 22px)" }}>{s.failedInstallsShown(rows.length, count)}</p> : null}
-              </>
-            )
-          }
-        </QueryRegion>
+        <ServerTable
+          caption={s.failedInstalls}
+          columns={cols}
+          getKey={(f) => f._id}
+          paging={paging}
+          list={failed}
+          total={count}
+          onRowClick={(f) => navigate(`/devices/${f.deviceId}`)}
+          empty={<EmptyState compact icon={<IconCheck />} title={s.failedInstallsNone} />}
+          skeletonRows={3}
+        />
       )}
     </Card>
   );

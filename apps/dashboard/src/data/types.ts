@@ -116,7 +116,7 @@ export interface MfaSetup {
   uri: string;
 }
 
-/** `members:list` row */
+/** `members:page` row */
 export interface MemberRow {
   _id: Id;
   email: string;
@@ -127,17 +127,14 @@ export interface MemberRow {
   isYou: boolean;
   revision: number;
 }
+/** `members:invitesPage` row (pending invites and reset codes only). */
 export interface InviteRow {
   _id: Id;
   email: string;
   role: Role;
   kind: "join" | "passwordReset";
   expiresAt: number;
-  usedAt?: number;
-}
-export interface MembersScreen {
-  members: MemberRow[];
-  invites: InviteRow[];
+  createdAt: number;
 }
 
 // ---------------------------------------------------------------- step-up (plan 4.16)
@@ -631,7 +628,9 @@ export interface AppRow {
   hue?: number;
   iconUrl?: string;
   archived: boolean;
-  /** `apps:list` reads at most 10 assignments per app: `groupCountMore` = more than `groupCount` ("10+"). */
+  /** When the app was added. `apps:list` does not return it yet (backend gap: the "Added" column shows a dash until it does). */
+  createdAt?: number;
+  /** `apps:list` reads at most 10 assignments per app: `groupCount` is capped ("10+" with `groupCountMore`). */
   groupCount: number;
   groupCountMore: boolean;
   summary: InstallSummary | null;
@@ -697,10 +696,12 @@ export interface WingetResolved {
 
 // ---------------------------------------------------------------- file types
 
-/** `fileHandlers:list` */
-export interface FileTypesScreen {
-  rows: { _id: Id; extension: string; appId: Id; appName: string }[];
-  appOptions: AppOption[];
+/** `fileHandlers:page` row. The program picker of the add dialog is `apps:options` (`useAppOptions`). */
+export interface FileTypeRow {
+  _id: Id;
+  extension: string;
+  appId: Id;
+  appName: string;
 }
 
 // ---------------------------------------------------------------- enrollment

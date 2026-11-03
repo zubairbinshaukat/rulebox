@@ -2,7 +2,8 @@ import { StrictMode, type ReactNode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter, Route, Routes, useLocation } from "react-router";
-import type { Me, MembersScreen, MfaStatus, QueryState } from "../data/types";
+import type { ServerList } from "../data/serverList";
+import type { InviteRow, MemberRow, Me, MfaStatus, QueryState } from "../data/types";
 import { AppError } from "../lib/errors";
 import { MeContext } from "../lib/member";
 import { reportUnauthenticated } from "../lib/session";
@@ -23,12 +24,14 @@ const m = vi.hoisted(() => ({
   verify: vi.fn(),
   recovery: vi.fn(),
   members: { status: "loading" } as unknown,
+  invites: { status: "loading" } as unknown,
   changeRole: vi.fn(),
   setDisabled: vi.fn(),
   noop: vi.fn(async () => undefined),
 }));
 
 vi.mock("../data/stepup", () => ({ useResetMemberStepUp: () => vi.fn() }));
+vi.mock("../data/members", () => ({ useMembersPage: () => m.members, useInvitesPage: () => m.invites }));
 
 vi.mock("../data", () => {
   const actions = { signIn: m.signIn, signUp: m.signUp, signOut: m.signOut };
@@ -45,7 +48,6 @@ vi.mock("../data", () => {
     useConfirmMfaSetup: () => m.confirm,
     useVerifyMfa: () => m.verify,
     useRedeemRecoveryCode: () => m.recovery,
-    useMembersScreen: () => m.members,
     useChangeRole: () => m.changeRole,
     useSetMemberDisabled: () => m.setDisabled,
     useInviteMember: () => m.noop,
@@ -113,6 +115,7 @@ beforeEach(() => {
   m.signOut.mockClear();
   m.mfaStatus = { status: "loading" };
   m.members = { status: "loading" };
+  m.invites = { status: "loading" };
   window.localStorage.clear();
   window.sessionStorage.clear();
 });
@@ -408,36 +411,34 @@ describe("AppErrorBoundary", () => {
 // ---------------------------------------------------------------- members (stale edit)
 
 describe("Members: expectedRevision and stale edit", () => {
-  const screenData = (revision: number, role: Me["role"] = "admin"): QueryState<MembersScreen> => ({
-    status: "ready",
-    data: {
-      members: [
-        { _id: "me", email: "owner@x.test", role: "owner", status: "active", createdAt: 1, mfaEnrolled: true, isYou: true, revision: 0 },
-        { _id: "m2", email: "sam@x.test", role, status: "active", createdAt: 2, mfaEnrolled: true, isYou: false, revision },
-      ],
-      invites: [
-        { _id: "i1", email: "open@x.test", role: "viewer", kind: "join", expiresAt: Date.now() + 60_000 },
-        { _id: "i2", email: "used@x.test", role: "viewer", kind: "join", expiresAt: Date.now() + 60_000, usedAt: 5 },
-        { _id: "i3", email: "old@x.test", role: "viewer", kind: "join", expiresAt: Date.now() - 60_000 },
-      ],
-    },
-  });
+  const page = <T,>(items: T[]): ServerList<T> => ({ status: "ready", items, isDone: true, continueCursor: `o:${items.length}`, total: items.length, busy: false });
+  const screenData = (revision: number, role: Me["role"] = "admin"): ServerList<MemberRow> =>
+    page<MemberRow>([
+      { _id: "me", email: "owner@x.test", role: "owner", status: "active", createdAt: 1, mfaEnrolled: true, isYou: true, revision: 0 },
+      { _id: "m2", email: "sam@x.test", role, status: "active", createdAt: 2, mfaEnrolled: true, isYou: false, revision },
+    ]);
   const tree = () => (
-    <ToastProvider>
-      <MeContext.Provider value={owner}>
-        <MembersTab />
-      </MeContext.Provider>
-    </ToastProvider>
+    <MemoryRouter>
+      <ToastProvider>
+        <MeContext.Provider value={owner}>
+          <MembersTab />
+        </MeContext.Provider>
+      </ToastProvider>
+    </MemoryRouter>
   );
 
-  it("lists only open invites", () => {
+  it("lists the pending invites the server returns (a table of their own); none pending hides the card", () => {
     m.members = screenData(1);
-    render(tree());
+    const open: InviteRow = { _id: "i1", email: "open@x.test", role: "viewer", kind: "join", expiresAt: Date.now() + 60_000, createdAt: 1 };
+    m.invites = page([open]);
+    const view = render(tree());
     expect(screen.getByText("open@x.test")).toBeTruthy();
-    expect(screen.queryByText("used@x.test")).toBeNull();
-    expect(screen.queryByText("old@x.test")).toBeNull();
+    expect(screen.getByRole("button", { name: `${strings.settings.members.revokeInvite}: open@x.test` })).toBeTruthy();
+    view.unmount();
+    m.invites = page<InviteRow>([]);
+    render(tree());
+    expect(screen.queryByText(strings.settings.members.pendingInvites)).toBeNull();
   });
-
   it("role change sends the opened revision; stale_edit offers Reload, which takes the current row", async () => {
     m.members = screenData(3);
     m.changeRole.mockRejectedValueOnce(new AppError({ code: "stale_edit" })).mockResolvedValueOnce(undefined);

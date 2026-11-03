@@ -3,20 +3,21 @@ import { Link, useNavigate } from "react-router";
 import { Button, Input, Textarea } from "@rulebox/ui";
 import IconLayers from "~icons/solar/layers-linear";
 import IconAdd from "~icons/solar/add-circle-linear";
-import { useCreateGroup, useGroupsScreen, usePlan } from "../data";
+import { useCreateGroup, useGroupsPage, usePlan } from "../data";
+import { useAdoptedTotal } from "../data/serverList";
 import type { GroupRow } from "../data/types";
-import { Card } from "../components/Card";
-import { DataTable, type Column } from "../components/DataTable";
+import { type Column } from "../components/DataTable";
 import { EmptyState } from "../components/EmptyState";
 import { Field } from "../components/Field";
 import { FormError } from "../components/FormError";
 import { Modal } from "../components/Modal";
 import { PageHeader } from "../components/PageHeader";
-import { QueryRegion } from "../components/Region";
+import { RelativeTime } from "../components/RelativeTime";
 import { RoleGate } from "../components/RoleGate";
-import { SkeletonRows } from "../components/Skeleton";
+import { ServerTable } from "../components/ServerTable";
 import { useToast } from "../lib/toast";
 import { formatCount } from "../lib/format";
+import { useListPaging, useListView, type ListConfig } from "../lib/listView";
 import { strings } from "../lib/strings";
 import { useForm } from "../lib/useForm";
 import * as v from "../lib/validate";
@@ -26,16 +27,24 @@ import { plan as planText, UNLIMITED } from "./settings/strings";
 
 const s = strings.groups;
 
-/** `groups:list`: every group with capped device and employee counts ("500+"). */
+/** `groups:page`: A-Z by default, or newest first. A small bounded table: the page carries its exact total and offset cursors. */
+const LIST: ListConfig = { sorts: ["name", "created"], defaultSort: { key: "name", dir: "asc" } };
+
+/** `groups:page`: one page of groups with capped device and employee counts ("500+"). */
 export default function Groups() {
-  const groups = useGroupsScreen();
+  const navigate = useNavigate();
   const [creating, setCreating] = useState(false);
+  const [total, adopt] = useAdoptedTotal();
+  const paging = useListPaging(useListView(LIST), { total, offset: true });
+  const groups = useGroupsPage(paging.query);
+  adopt(groups);
   const cols = useMemo<Column<GroupRow>[]>(
     () => [
       {
         key: "name",
         header: s.colName,
         primary: true,
+        sortable: true,
         cell: (g) => (
           <span className="dash-cell-stack">
             <Link className="dash-link dash-link--plain dash-truncate" to={`/groups/${g._id}`} title={g.name}>
@@ -51,6 +60,14 @@ export default function Groups() {
       },
       { key: "devices", header: s.colDevices, numeric: true, cell: (g) => formatCount(g.deviceCount, 500) },
       { key: "employees", header: s.colEmployees, numeric: true, cell: (g) => formatCount(g.employeeCount, 500) },
+      {
+        key: "created",
+        header: s.colCreated,
+        sortable: true,
+        sortDefaultDir: "desc",
+        isEmpty: (g) => g.createdAt === undefined,
+        cell: (g) => (g.createdAt === undefined ? <span className="dash-muted">—</span> : <RelativeTime ms={g.createdAt} />),
+      },
     ],
     [],
   );
@@ -67,17 +84,18 @@ export default function Groups() {
   return (
     <div className="dash-page">
       <PageHeader title={s.title} lead={s.lead} actions={add} />
-      <Card body="none">
-        <QueryRegion state={groups} skeleton={<SkeletonRows rows={5} columns={3} />}>
-          {(list) =>
-            list.length === 0 ? (
-              <EmptyState icon={<IconLayers />} title={s.emptyTitle} body={s.emptyBody} action={add} />
-            ) : (
-              <DataTable caption={s.title} columns={cols} rows={list} getKey={(g) => g._id} />
-            )
-          }
-        </QueryRegion>
-      </Card>
+      <ServerTable
+        framed
+        caption={s.title}
+        columns={cols}
+        getKey={(g) => g._id}
+        paging={paging}
+        list={groups}
+        total={groups.status === "ready" ? groups.total : total}
+        search={{ label: s.searchLabel, placeholder: s.searchPlaceholder }}
+        onRowClick={(g) => navigate(`/groups/${g._id}`)}
+        empty={<EmptyState icon={<IconLayers />} title={s.emptyTitle} body={s.emptyBody} action={add} />}
+      />
       {creating ? <CreateGroupDialog onClose={() => setCreating(false)} /> : null}
     </div>
   );

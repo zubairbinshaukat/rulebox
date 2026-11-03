@@ -1,24 +1,26 @@
 import { useMemo } from "react";
-import { Link, useSearchParams } from "react-router";
+import { Link, useNavigate } from "react-router";
 import { Pill, SegmentedControl } from "@rulebox/ui";
 import IconWidget from "~icons/solar/widget-2-linear";
 import IconGlobal from "~icons/solar/global-linear";
 import IconMonitor from "~icons/solar/monitor-linear";
-import { useAppsScreen } from "../data/apps";
+import { useAppsCount, useAppsScreen } from "../data/apps";
 import type { AppRow, InstallSummary } from "../data/types";
 import { AppGlyph } from "../components/AppGlyph";
-import { Card } from "../components/Card";
-import { DataTable, type Column } from "../components/DataTable";
+import type { Column } from "../components/DataTable";
 import { EmptyState } from "../components/EmptyState";
-import { LoadMore } from "../components/LoadMore";
 import { PageHeader } from "../components/PageHeader";
-import { PagedRegion } from "../components/Region";
+import { RelativeTime } from "../components/RelativeTime";
 import { RoleGate } from "../components/RoleGate";
-import { SkeletonRows } from "../components/Skeleton";
+import { ServerTable } from "../components/ServerTable";
 import { formatCount } from "../lib/format";
+import { useListPaging, useListView, type ListConfig } from "../lib/listView";
 import { strings } from "../lib/strings";
 
 const s = strings.apps;
+
+/** Server sort keys of `apps:list`; the first is the default (newest first). */
+const LIST: ListConfig = { sorts: ["created", "name"], defaultSort: { key: "created", dir: "desc" }, filters: ["archived"] };
 
 function Summary({ summary }: { summary: InstallSummary | null }) {
   if (!summary) return <span className="dash-muted">{s.noInstalls}</span>;
@@ -39,11 +41,17 @@ function Summary({ summary }: { summary: InstallSummary | null }) {
   );
 }
 
-/** `apps:list` (paginated), active or archived. */
+/**
+ * `apps:list`, one page at a time: sort, search (Enter), page size and page live in the URL; the archived tab is
+ * the `archived` parameter. The total is `apps:count` (the active tab, no search).
+ */
 export default function Apps() {
-  const [params, setParams] = useSearchParams();
-  const archived = params.get("archived") === "1";
-  const apps = useAppsScreen({ archived });
+  const navigate = useNavigate();
+  const view = useListView(LIST);
+  const archived = view.filters.archived === "1";
+  const total = useAppsCount({ archived, search: view.search });
+  const paging = useListPaging(view, { total });
+  const apps = useAppsScreen({ archived, ...paging.query });
 
   const cols = useMemo<Column<AppRow>[]>(
     () => [
@@ -51,6 +59,7 @@ export default function Apps() {
         key: "name",
         header: s.colName,
         primary: true,
+        sortable: true,
         cell: (a) => (
           <span className="dash-row" style={{ flexWrap: "nowrap", minWidth: 0 }}>
             <AppGlyph name={a.name} hue={a.hue} iconUrl={a.iconUrl} />
@@ -80,6 +89,14 @@ export default function Apps() {
       },
       { key: "groups", header: s.colGroups, cell: (a) => (a.groupCount ? s.groups(a.groupCount, a.groupCountMore) : <span className="dash-muted">—</span>) },
       { key: "installs", header: s.colInstalls, isEmpty: (a) => a.kind === "web", cell: (a) => (a.kind === "web" ? <span className="dash-muted">—</span> : <Summary summary={a.summary} />) },
+      {
+        key: "created",
+        header: s.colAdded,
+        sortable: true,
+        sortDefaultDir: "desc",
+        isEmpty: (a) => a.createdAt === undefined,
+        cell: (a) => (a.createdAt === undefined ? <span className="dash-muted">—</span> : <RelativeTime ms={a.createdAt} />),
+      },
     ],
     [],
   );
@@ -100,35 +117,36 @@ export default function Apps() {
   return (
     <div className="dash-page">
       <PageHeader title={s.title} lead={s.lead} actions={add} />
-      <div className="dash-filters">
-        <SegmentedControl<"active" | "archived">
-          aria-label={s.showArchived}
-          options={[
-            { value: "active", label: s.active },
-            { value: "archived", label: s.archived },
-          ]}
-          value={archived ? "archived" : "active"}
-          onChange={(val) => setParams(val === "archived" ? { archived: "1" } : {}, { replace: true })}
-        />
-      </div>
-      <Card body="none">
-        <PagedRegion state={apps} skeleton={<SkeletonRows rows={6} columns={4} />}>
-          {(p) =>
-            p.items.length === 0 ? (
-              archived ? (
-                <EmptyState icon={<IconWidget />} title={s.emptyArchivedTitle} body={s.emptyArchivedBody} />
-              ) : (
-                <EmptyState icon={<IconWidget />} title={s.emptyTitle} body={s.emptyBody} action={add} />
-              )
-            ) : (
-              <>
-                <DataTable caption={s.title} columns={cols} rows={p.items} getKey={(a) => a._id} />
-                <LoadMore shown={p.items.length} canLoadMore={p.canLoadMore} isLoadingMore={p.isLoadingMore} loadMore={p.loadMore} />
-              </>
-            )
-          }
-        </PagedRegion>
-      </Card>
+      <ServerTable<AppRow>
+        framed
+        caption={s.title}
+        columns={cols}
+        getKey={(a) => a._id}
+        paging={paging}
+        list={apps}
+        total={typeof total === "number" ? total : null}
+        search={{ label: s.searchLabel, placeholder: s.searchPlaceholder }}
+        sortByRelevanceWhenSearching
+        onRowClick={(a) => navigate(`/apps/${a._id}`)}
+        filters={
+          <SegmentedControl<"active" | "archived">
+            aria-label={s.showArchived}
+            options={[
+              { value: "active", label: s.active },
+              { value: "archived", label: s.archived },
+            ]}
+            value={archived ? "archived" : "active"}
+            onChange={(val) => view.setFilter("archived", val === "archived" ? "1" : null)}
+          />
+        }
+        empty={
+          archived ? (
+            <EmptyState icon={<IconWidget />} title={s.emptyArchivedTitle} body={s.emptyArchivedBody} />
+          ) : (
+            <EmptyState icon={<IconWidget />} title={s.emptyTitle} body={s.emptyBody} action={add} />
+          )
+        }
+      />
     </div>
   );
 }

@@ -10,9 +10,10 @@ import { strings } from "../lib/strings";
 
 // Phase 4 Step 6: the Enrollment screen against the LIVE data seam with the
 // Convex React hooks mocked. Queries answer from `cx.results[<name>]`, the
-// paginated list from `cx.paged` (an Error is thrown, as usePaginatedQuery
-// does), mutations / actions call `cx.fns[<name>]`.
-type Paged = { results: unknown[]; status: string; loadMore: (n: number) => void } | Error;
+// list page from `cx.paged` (an Error is returned, as `useQueries` does; the
+// status "CanLoadMore" means the server has more rows after this page),
+// mutations / actions call `cx.fns[<name>]`.
+type Paged = { results: unknown[]; status: string } | Error;
 const cx = vi.hoisted(() => ({
   results: {} as Record<string, unknown>,
   fns: {} as Record<string, (args?: unknown) => Promise<unknown>>,
@@ -23,15 +24,18 @@ const cx = vi.hoisted(() => ({
 vi.mock("convex/react", () => ({
   useConvexAuth: () => ({ isLoading: false, isAuthenticated: true }),
   useQueries: (req: Record<string, { query: FunctionReference<"query">; args: unknown }>) =>
-    Object.fromEntries(Object.entries(req).map(([k, r]) => [k, cx.results[getFunctionName(r.query)]])),
+    Object.fromEntries(
+      Object.entries(req).map(([k, r]) => {
+        const name = getFunctionName(r.query);
+        if (name !== "enrollmentCodes:list") return [k, cx.results[name]];
+        cx.pagedArgs.push(r.args);
+        const p = cx.paged as Paged;
+        if (p instanceof Error) return [k, p];
+        if (p.status === "LoadingFirstPage") return [k, undefined];
+        return [k, { page: p.results, isDone: p.status === "Exhausted", continueCursor: `c:${p.results.length}` }];
+      }),
+    ),
   useQuery: () => undefined,
-  usePaginatedQuery: (ref: FunctionReference<"query">, args: unknown, opts: { initialNumItems: number }) => {
-    if (getFunctionName(ref) !== "enrollmentCodes:list" || opts.initialNumItems !== 50) throw new Error("unexpected paginated query");
-    cx.pagedArgs.push(args);
-    const r = cx.paged as Paged;
-    if (r instanceof Error) throw r;
-    return r;
-  },
   useAction: (ref: FunctionReference<"action">) => fnFor(getFunctionName(ref)),
   useMutation: (ref: FunctionReference<"mutation">) => fnFor(getFunctionName(ref)),
   useConvexConnectionState: () => ({ isWebSocketConnected: true }),
@@ -120,7 +124,7 @@ const row = (i: number, over: Partial<EnrollmentCodeRow> = {}): EnrollmentCodeRo
   ...over,
 });
 
-const ready = (results: unknown[], status = "Exhausted", loadMore: (n: number) => void = () => undefined) => ({ results, status, loadMore });
+const ready = (results: unknown[], status = "Exhausted") => ({ results, status });
 
 /** A code in the exact format of `formatEnrollmentCode` (RBX1. + base64url, no padding). */
 const CODE = `RBX1.${btoa("https://peaceful-peccary-48.convex.cloud#0123456789ABCDEFGHJK").replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "")}`;
@@ -159,11 +163,13 @@ describe("Enrollment list (enrollmentCodes:list)", () => {
     expect(screen.queryByText(s.emptyTitle)).toBeNull();
   });
 
-  it("asks for a page of 50 with nowMs rounded to the minute", () => {
+  it("asks for one page of 10, newest first, with nowMs rounded to the minute", () => {
     ui();
-    const args = cx.pagedArgs[0] as { nowMs: number };
+    const args = cx.pagedArgs[0] as { nowMs: number; paginationOpts: unknown; sort: unknown };
     expect(args.nowMs % 60_000).toBe(0);
     expect(Date.now() - args.nowMs).toBeLessThan(60_000);
+    expect(args.paginationOpts).toEqual({ numItems: 10, cursor: null });
+    expect(args.sort).toEqual({ key: "created", dir: "desc" });
   });
 
   it("empty: 'No codes yet.' with the create action", () => {
@@ -173,15 +179,14 @@ describe("Enrollment list (enrollmentCodes:list)", () => {
     expect(screen.getAllByRole("button", { name: s.create }).length).toBe(2);
   });
 
-  it("an error shows Try again, which subscribes again", () => {
-    vi.spyOn(console, "error").mockImplementation(() => undefined);
+  it("an error shows Try again, which subscribes again", async () => {
     cx.paged = new ConvexError({ code: "forbidden" });
     ui();
     expect(screen.getByText(strings.common.regionFailed)).toBeTruthy();
     expect(screen.getByText(strings.errors.forbidden)).toBeTruthy();
     cx.paged = ready([row(1)]);
     fireEvent.click(screen.getByRole("button", { name: strings.common.tryAgain }));
-    expect(screen.getByRole("table")).toBeTruthy();
+    expect(await screen.findByRole("table")).toBeTruthy();
   });
 
   it("rows: state badge (colour + text), '2 of 5 used', relative expiry, group link, creator", () => {
@@ -213,26 +218,24 @@ describe("Enrollment list (enrollmentCodes:list)", () => {
     expect(within(table).getAllByRole("button", { name: /^Revoke/ }).length).toBe(1);
   });
 
-  it("Load more asks for 50 more until exhausted and renders exactly the pages loaded", () => {
-    const loadMore = vi.fn();
-    const first = Array.from({ length: 50 }, (_, i) => row(i));
-    cx.paged = ready(first, "CanLoadMore", loadMore);
+  it("pages by cursor: Next opens the next page with the cursor the server gave; no total, so only Previous / Next and Page N", () => {
+    const first = Array.from({ length: 10 }, (_, i) => row(i));
+    cx.paged = ready(first, "CanLoadMore");
     const view = ui();
-    expect(screen.getAllByRole("row").length).toBe(51); // header + 50
-    fireEvent.click(screen.getByRole("button", { name: strings.common.loadMore }));
-    expect(loadMore).toHaveBeenCalledWith(50);
+    expect(screen.getAllByRole("row").length).toBe(11); // header + 10
+    expect(screen.getByText(strings.pager.page(1))).toBeTruthy();
+    expect(screen.queryByText(/records/)).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: strings.pager.next }));
+    expect((cx.pagedArgs.at(-1) as { paginationOpts: unknown }).paginationOpts).toEqual({ numItems: 10, cursor: "c:10" });
+    expect(screen.getByText(strings.pager.page(2))).toBeTruthy();
 
-    cx.paged = ready(first, "LoadingMore");
+    cx.paged = ready(Array.from({ length: 4 }, (_, i) => row(100 + i)));
     view.rerender(tree("admin"));
-    expect((screen.getByRole("button", { name: strings.common.loadingMore }) as HTMLButtonElement).disabled).toBe(true);
-
-    cx.paged = ready([...first, ...Array.from({ length: 12 }, (_, i) => row(100 + i))]);
-    view.rerender(tree("admin"));
-    expect(screen.getAllByRole("row").length).toBe(63);
-    expect(screen.queryByRole("button", { name: strings.common.loadMore })).toBeNull();
-    expect(screen.getByText(strings.common.endOfList)).toBeTruthy();
+    expect(screen.getAllByRole("row").length).toBe(5);
+    expect((screen.getByRole("button", { name: strings.pager.next }) as HTMLButtonElement).disabled).toBe(true);
+    fireEvent.click(screen.getByRole("button", { name: strings.pager.previous }));
+    expect((cx.pagedArgs.at(-1) as { paginationOpts: unknown }).paginationOpts).toEqual({ numItems: 10, cursor: null });
   });
-
   it("viewer: read-only (no Create, no Revoke) and the viewer's empty sentence", () => {
     ui("viewer");
     expect(screen.queryByRole("button", { name: s.create })).toBeNull();
@@ -266,16 +269,6 @@ describe("stale clock and expiry labels", () => {
     expect(minutes()).toEqual([Date.UTC(2026, 9, 27, 10, 0)]);
     act(() => vi.advanceTimersByTime(30_000)); // 10:01:10
     expect(minutes()).toEqual([Date.UTC(2026, 9, 27, 10, 0), Date.UTC(2026, 9, 27, 10, 1)]);
-  });
-
-  it("after Load more the minute stops moving (a new nowMs would reset the pages)", () => {
-    vi.useFakeTimers({ toFake: ["Date", "setInterval", "clearInterval", "setTimeout", "clearTimeout"] });
-    vi.setSystemTime(NOW);
-    cx.paged = ready(Array.from({ length: 50 }, (_, i) => row(i)), "CanLoadMore", vi.fn());
-    ui();
-    fireEvent.click(screen.getByRole("button", { name: strings.common.loadMore }));
-    act(() => vi.advanceTimersByTime(120_000));
-    expect(new Set(cx.pagedArgs.map((a) => (a as { nowMs: number }).nowMs)).size).toBe(1);
   });
 
   it("usePagedState keeps the rows on screen while a new minute's first page loads", () => {

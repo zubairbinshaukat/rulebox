@@ -15,7 +15,7 @@ import {
   useWatchDevice,
 } from "../data";
 import { useDeviceInstalls } from "../data/devices";
-import type { DeviceDetail as Detail, DeviceInstallRow, DeviceLiveness, QueryState } from "../data/types";
+import type { DeviceDetail as Detail, DeviceInstallRow, DeviceLiveness, DocVersion, QueryState } from "../data/types";
 import { Card } from "../components/Card";
 import { ConfirmDialog } from "../components/ConfirmDialog";
 import { DataTable, type Column } from "../components/DataTable";
@@ -26,15 +26,16 @@ import { FormError } from "../components/FormError";
 import { HistoryPanel } from "../components/HistoryPanel";
 import { InstallStatePill } from "../components/InstallState";
 import { installDetail } from "../lib/install";
-import { LoadMore } from "../components/LoadMore";
 import { Modal } from "../components/Modal";
 import { InlineNotice } from "../components/Notice";
 import { PageHeader } from "../components/PageHeader";
-import { PagedRegion, QueryRegion, RegionBoundary } from "../components/Region";
+import { QueryRegion } from "../components/Region";
+import { ServerTable } from "../components/ServerTable";
 import { RelativeTime } from "../components/RelativeTime";
 import { RoleGate } from "../components/RoleGate";
+import { useListPaging, useListView, type ListConfig } from "../lib/listView";
 import { useCan } from "../lib/member";
-import { SkeletonBlock, SkeletonRows } from "../components/Skeleton";
+import { SkeletonBlock } from "../components/Skeleton";
 import { useToast } from "../lib/toast";
 import { formatDate, formatDateTime, formatGb, formatNumber } from "../lib/format";
 import { messageFor } from "../lib/errors";
@@ -160,11 +161,9 @@ function Device({ d, liveness }: { d: Detail; liveness: QueryState<DeviceLivenes
             {r ? null : <EmptyState compact title={s.compatNone} />}
           </Card>
 
-          <RegionBoundary>
-            <Installs deviceId={d._id} />
-          </RegionBoundary>
+          <Installs deviceId={d._id} />
 
-          <Card title={s.policy}>
+          <Card title={s.policy} className="dash-card--tight">
             <div className="dash-form">
               {latest === undefined ? (
                 <p className="dash-muted">{s.versionsNone}</p>
@@ -172,18 +171,12 @@ function Device({ d, liveness }: { d: Detail; liveness: QueryState<DeviceLivenes
                 <InlineNotice tone={waiting ? "warning" : "success"} title={waiting ? s.waiting(r?.appliedVersion, latest) : s.upToDate} />
               )}
               {d.versions.length ? (
-                <ol className="dash-list" aria-label={s.versions}>
-                  {d.versions.map((ver) => (
-                    <li key={ver.version} className="dash-list__item" style={{ paddingInline: 0 }}>
-                      <span className="dash-chip dash-mono">v{formatNumber(ver.version)}</span>
-                      <div className="dash-list__body">
-                        <p className="dash-list__title">{ver.reason}</p>
-                        <p className="dash-list__meta">{formatDateTime(ver.createdAt)}</p>
-                      </div>
-                      {r?.appliedVersion === ver.version ? <Pill tone="success">{s.applied}</Pill> : null}
-                    </li>
-                  ))}
-                </ol>
+                <DataTable
+                  caption={s.versions}
+                  columns={versionCols(r?.appliedVersion)}
+                  rows={d.versions}
+                  getKey={(ver) => String(ver.version)}
+                />
               ) : null}
             </div>
           </Card>
@@ -233,6 +226,21 @@ function Device({ d, liveness }: { d: Detail; liveness: QueryState<DeviceLivenes
   );
 }
 
+/** The recent policy versions (`fleet:get` carries the last few: a small table, no paging). */
+function versionCols(applied: number | undefined): Column<DocVersion>[] {
+  return [
+    { key: "version", header: s.versionCol, primary: true, cell: (v) => <span className="dash-chip dash-mono">v{formatNumber(v.version)}</span> },
+    { key: "reason", header: s.versionReason, cell: (v) => v.reason },
+    { key: "date", header: s.versionDate, cell: (v) => formatDateTime(v.createdAt) },
+    {
+      key: "applied",
+      header: s.applied,
+      isEmpty: (v) => applied !== v.version,
+      cell: (v) => (applied === v.version ? <Pill tone="success">{s.applied}</Pill> : null),
+    },
+  ];
+}
+
 /** The key ids the PC reports it trusts (`trustedKeyIds`); missing = an older agent that does not report them. */
 function TrustedKeys({ ids }: { ids: string[] | undefined }) {
   if (ids === undefined) return <>—</>;
@@ -258,8 +266,13 @@ function KV({ label, value }: { label: string; value: ReactNode }) {
   );
 }
 
+/** `fleet:installs`: newest update first, the only order the server knows; no total (one page at a time). */
+const INSTALLS_LIST: ListConfig = { sorts: ["updated"], defaultSort: { key: "updated", dir: "desc" }, storage: "local" };
+
 function Installs({ deviceId }: { deviceId: string }) {
-  const installs = useDeviceInstalls(deviceId);
+  const navigate = useNavigate();
+  const paging = useListPaging(useListView(INSTALLS_LIST), { total: null });
+  const installs = useDeviceInstalls(deviceId, paging.query);
   const retry = useRetryApp();
   const toast = useToast();
   const canAct = useCan("admin");
@@ -280,8 +293,9 @@ function Installs({ deviceId }: { deviceId: string }) {
       key: "detail",
       header: strings.common.details,
       isEmpty: (i) => i.state !== "failed",
-      cell: (i) => (i.state === "failed" ? <span className="dash-muted" style={{ fontSize: 13 }}>{installDetail(i.detail)}</span> : <RelativeTime ms={i.updatedAt} />),
+      cell: (i) => (i.state === "failed" ? <span className="dash-muted" style={{ fontSize: 13 }}>{installDetail(i.detail)}</span> : null),
     },
+    { key: "updated", header: s.colUpdated, sortable: true, sortDefaultDir: "desc", cell: (i) => <RelativeTime ms={i.updatedAt} /> },
     {
       key: "act",
       header: strings.common.actions,
@@ -302,7 +316,7 @@ function Installs({ deviceId }: { deviceId: string }) {
     },
   ];
   return (
-    <Card title={s.installs} body="none">
+    <Card title={s.installs} body="none" className="dash-card--tight">
       {/* `apps:retry` restarts the app for every PC, so it is confirmed first. */}
       <ConfirmDialog
         open={confirming !== null}
@@ -313,23 +327,17 @@ function Installs({ deviceId }: { deviceId: string }) {
         onDone={() => toast(strings.install.retried)}
         onClose={() => setConfirming(null)}
       />
-      <PagedRegion state={installs} skeleton={<SkeletonRows rows={3} columns={3} />}>
-        {(p) =>
-          p.items.length === 0 && !p.canLoadMore ? (
-            <EmptyState compact title={s.installsNone} />
-          ) : (
-            <>
-              {/* The server filters after paging, so a page can be short or empty while more rows exist. */}
-              {p.items.length === 0 ? (
-                <p className="dash-muted" style={{ padding: "12px clamp(16px, 2vw, 22px)" }}>{strings.common.emptyPageSoFar}</p>
-              ) : (
-                <DataTable caption={s.installs} columns={cols} rows={p.items} getKey={(i) => i._id} />
-              )}
-              <LoadMore shown={p.items.length} canLoadMore={p.canLoadMore} isLoadingMore={p.isLoadingMore} loadMore={p.loadMore} />
-            </>
-          )
-        }
-      </PagedRegion>
+      <ServerTable
+        caption={s.installs}
+        columns={cols}
+        getKey={(i) => i._id}
+        paging={paging}
+        list={installs}
+        total={null}
+        onRowClick={(i) => navigate(`/apps/${i.appId}`)}
+        empty={<EmptyState compact title={s.installsNone} />}
+        skeletonRows={3}
+      />
     </Card>
   );
 }

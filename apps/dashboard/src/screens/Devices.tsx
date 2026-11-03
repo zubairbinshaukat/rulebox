@@ -1,28 +1,27 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Link, useSearchParams } from "react-router";
+import { Link, useNavigate, useSearchParams } from "react-router";
 import { Button, Pill, Select } from "@rulebox/ui";
 import IconMonitor from "~icons/solar/monitor-linear";
 import IconAdd from "~icons/solar/add-square-linear";
 import IconRefresh from "~icons/solar/refresh-linear";
 import { useCheckNow, useCheckResult, useGroupsScreen } from "../data";
-import { useDevicesScreen } from "../data/devices";
-import { NO_GROUP_FILTER, type DeviceRow } from "../data/types";
+import { useDevicesCount, useDevicesScreen } from "../data/devices";
+import { NO_GROUP_FILTER, type DeviceRow, type GroupRow, type QueryState } from "../data/types";
 import { Card } from "../components/Card";
-import { DataTable, type Column } from "../components/DataTable";
+import { type Column } from "../components/DataTable";
 import { EmptyState } from "../components/EmptyState";
-import { LoadMore } from "../components/LoadMore";
 import { InlineNotice } from "../components/Notice";
 import { PageHeader } from "../components/PageHeader";
-import { PagedRegion, RegionBoundary } from "../components/Region";
+import { RelativeTime } from "../components/RelativeTime";
 import { RoleGate } from "../components/RoleGate";
-import { SearchInput } from "../components/SearchInput";
+import { ServerTable } from "../components/ServerTable";
 import { SkeletonRows } from "../components/Skeleton";
 import { DeviceOnline, KioskCell, PlanStateBadge, PolicyCell } from "../components/DeviceCells";
 import { messageFor } from "../lib/errors";
+import { useListPaging, useListView, type ListConfig } from "../lib/listView";
 import { useCan } from "../lib/member";
 import { strings } from "../lib/strings";
 import { useToast } from "../lib/toast";
-import { useDebounced } from "../lib/useDebounced";
 import { useNow } from "../lib/useNow";
 
 const s = strings.devices;
@@ -30,8 +29,8 @@ const s = strings.devices;
 /** `MAX_CHECK_DEVICES` of convex/lib/limits.ts, and how long the result stays subscribed. */
 const MAX_CHECK_DEVICES = 50;
 const CHECK_WATCH_MS = 60_000;
-/** `MAX_SEARCH_TEXT` of convex/fleet.ts: `fleet:list` throws `invalid_argument` above it. */
-const MAX_SEARCH_TEXT = 100;
+/** `fleet:list`: newest first by default; the name is the other index-backed order. A search is ordered by relevance. */
+const LIST: ListConfig = { sorts: ["created", "name"], defaultSort: { key: "created", dir: "desc" }, filters: ["group"] };
 
 function columns(now: number): Column<DeviceRow>[] {
   return [
@@ -39,6 +38,7 @@ function columns(now: number): Column<DeviceRow>[] {
       key: "name",
       header: s.colName,
       primary: true,
+      sortable: true,
       cell: (d) => (
         <span className="dash-cell-stack">
           <Link className="dash-link dash-link--plain dash-truncate" to={`/devices/${d._id}`} title={d.name}>
@@ -81,6 +81,7 @@ function columns(now: number): Column<DeviceRow>[] {
         ),
     },
     { key: "kiosk", header: s.colKiosk, cell: (d) => <KioskCell row={d} /> },
+    { key: "created", header: s.colEnrolled, sortable: true, sortDefaultDir: "desc", cell: (d) => <RelativeTime ms={d.enrolledAt} /> },
     {
       key: "policy",
       header: s.colPolicy,
@@ -137,12 +138,10 @@ function CheckResultNotice({ checkId, onEnd }: { checkId: string; onEnd: () => v
   return <InlineNotice tone={answered === total ? "success" : "neutral"} title={s.checkResult(answered, total)} />;
 }
 
-/** `fleet:list` (search and group filter are its arguments); admins can "Check now" the visible PCs. */
+/** `fleet:list` (one page; sort, search and group filter are its arguments); admins can "Check now" the visible PCs. */
 export default function Devices() {
   const [params, setParams] = useSearchParams();
   const requested = params.get("group") ?? "";
-  const [search, setSearch] = useState("");
-  const debounced = useDebounced(search.trim().slice(0, MAX_SEARCH_TEXT), 250);
   const groups = useGroupsScreen();
   // `fleet:list` throws not_found for an id that is not a group of this organization (an old link, a deleted group):
   // such a value is dropped from the query and from the URL. Until the groups are known, a requested filter waits.
@@ -171,93 +170,84 @@ export default function Devices() {
           </RoleGate>
         }
       />
-      <div className="dash-filters">
-        <SearchInput
-          value={search}
-          onChange={(text) => setSearch(text.slice(0, MAX_SEARCH_TEXT))}
-          label={s.searchLabel}
-          placeholder={s.searchPlaceholder}
-          maxLength={MAX_SEARCH_TEXT}
-        />
-        <label className="dash-sr" htmlFor="device-group-filter">
-          {s.groupFilter}
-        </label>
-        <Select
-          id="device-group-filter"
-          compact
-          value={groupId}
-          onChange={(e) => {
-            const next = new URLSearchParams(params);
-            if (e.target.value) next.set("group", e.target.value);
-            else next.delete("group");
-            setParams(next, { replace: true });
-          }}
-        >
-          <option value="">{s.allGroups}</option>
-          <option value={NO_GROUP_FILTER}>{s.noGroupFilter}</option>
-          {groups.status === "ready" ? groups.data.map((g) => <option key={g._id} value={g._id}>{g.name}</option>) : null}
-        </Select>
-      </div>
-      {/* The paginated query throws its errors while rendering: the list gets its own boundary. */}
-      <RegionBoundary>
-        {requested && requested !== NO_GROUP_FILTER && groups.status === "loading" ? (
-          <Card body="none">
-            <SkeletonRows rows={8} columns={5} />
-          </Card>
-        ) : (
-          <DeviceList groupId={groupId || undefined} search={debounced || undefined} />
-        )}
-      </RegionBoundary>
+      {requested && requested !== NO_GROUP_FILTER && groups.status === "loading" ? (
+        <Card body="none">
+          <SkeletonRows rows={8} columns={5} />
+        </Card>
+      ) : (
+        <DeviceList groupId={groupId} groups={groups} />
+      )}
     </div>
   );
 }
 
-function DeviceList({ groupId, search }: { groupId?: string; search?: string }) {
-  const devices = useDevicesScreen({ groupId, search });
+function DeviceList({ groupId, groups }: { groupId: string; groups: QueryState<GroupRow[]> }) {
+  const navigate = useNavigate();
+  // The count needs the applied search; the pager needs the count.
+  const view = useListView(LIST);
+  const total = useDevicesCount({ groupId: groupId || undefined, search: view.search });
+  const paging = useListPaging(view, { total });
+  const devices = useDevicesScreen({ ...paging.query, groupId: groupId || undefined });
   const now = useNow(30_000);
   const cols = useMemo(() => columns(now), [now]);
-  const filtered = Boolean(groupId || search);
   const [checkId, setCheckId] = useState<string | null>(null);
   const endCheck = useCallback(() => setCheckId(null), []);
   const canCheck = useCan("admin");
+  const rows = devices.status === "ready" ? devices.items : [];
+
+  const filters = (
+    <>
+      <label className="dash-sr" htmlFor="device-group-filter">
+        {s.groupFilter}
+      </label>
+      <Select id="device-group-filter" compact value={groupId} onChange={(e) => paging.view.setFilter("group", e.target.value || null)}>
+        <option value="">{s.allGroups}</option>
+        <option value={NO_GROUP_FILTER}>{s.noGroupFilter}</option>
+        {groups.status === "ready" ? groups.data.map((g) => <option key={g._id} value={g._id}>{g.name}</option>) : null}
+      </Select>
+    </>
+  );
 
   return (
     <>
-      {canCheck && devices.status === "ready" && devices.items.length > 0 ? (
+      {canCheck && devices.status === "ready" && rows.length > 0 ? (
         <div className="dash-row" style={{ justifyContent: "flex-end" }}>
-          <CheckNowButton ids={devices.items.filter((d) => !d.revoked).map((d) => d._id)} onStarted={setCheckId} />
+          <CheckNowButton ids={rows.filter((d) => !d.revoked).map((d) => d._id)} onStarted={setCheckId} />
         </div>
       ) : null}
       {checkId ? <CheckResultNotice key={checkId} checkId={checkId} onEnd={endCheck} /> : null}
-      <Card body="none">
-        <PagedRegion state={devices} skeleton={<SkeletonRows rows={8} columns={5} />}>
-          {(d) =>
-            d.items.length === 0 ? (
-              filtered ? (
-                <EmptyState icon={<IconMonitor />} title={s.noMatchTitle} body={s.noMatchBody} />
-              ) : (
-                <EmptyState
-                  icon={<IconMonitor />}
-                  title={s.emptyTitle}
-                  body={s.emptyBody}
-                  action={
-                    <RoleGate minRole="admin">
-                      <Link to="/enrollment" className="rb-btn rb-btn--primary">
-                        {s.emptyAction}
-                      </Link>
-                    </RoleGate>
-                  }
-                />
-              )
-            ) : (
-              <>
-                <DataTable caption={s.title} columns={cols} rows={d.items} getKey={(r) => r._id} isDim={(r) => r.revoked} />
-                <LoadMore shown={d.items.length} canLoadMore={d.canLoadMore} isLoadingMore={d.isLoadingMore} loadMore={d.loadMore} />
-              </>
-            )
-          }
-        </PagedRegion>
-      </Card>
+      <ServerTable
+        framed
+        caption={s.title}
+        columns={cols}
+        getKey={(d) => d._id}
+        paging={paging}
+        list={devices}
+        total={total ?? null}
+        search={{ label: s.searchLabel, placeholder: s.searchPlaceholder }}
+        sortByRelevanceWhenSearching
+        filters={filters}
+        isDim={(d) => d.revoked}
+        onRowClick={(d) => navigate(`/devices/${d._id}`)}
+        empty={
+          groupId ? (
+            <EmptyState icon={<IconMonitor />} title={s.noMatchTitle} body={s.noMatchBody} />
+          ) : (
+            <EmptyState
+              icon={<IconMonitor />}
+              title={s.emptyTitle}
+              body={s.emptyBody}
+              action={
+                <RoleGate minRole="admin">
+                  <Link to="/enrollment" className="rb-btn rb-btn--primary">
+                    {s.emptyAction}
+                  </Link>
+                </RoleGate>
+              }
+            />
+          )
+        }
+      />
     </>
   );
 }

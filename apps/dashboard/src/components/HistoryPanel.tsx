@@ -1,34 +1,59 @@
+import { useMemo } from "react";
 import { useHistory } from "../data/audit";
-import type { Id } from "../data/types";
+import type { AuditEntry, Id } from "../data/types";
+import { actionLabel } from "../lib/audit";
+import { useListPaging, useListView, type ListConfig } from "../lib/listView";
 import { strings } from "../lib/strings";
-import { AuditTimelineItem } from "./AuditItem";
+import { ActorLabel } from "./AuditItem";
 import { Card } from "./Card";
+import type { Column } from "./DataTable";
 import { EmptyState } from "./EmptyState";
-import { LoadMore } from "./LoadMore";
-import { PagedRegion } from "./Region";
-import { SkeletonRows } from "./Skeleton";
+import { RelativeTime } from "./RelativeTime";
+import { ServerTable } from "./ServerTable";
 
-/** The audit history of one device, employee, app or group (`audit:forTarget`, paginated). */
+/** `audit:forTarget` sorts by time ("at") only. The panel keeps its page, size and direction in component state (a detail page has other lists). */
+const LIST: ListConfig = { sorts: ["at"], defaultSort: { key: "at", dir: "desc" }, storage: "local" };
+
+/** The audit history of one device, employee, app or group (`audit:forTarget`), one page at a time. No total. */
 export function HistoryPanel({ targetId, title = strings.device.history }: { targetId: Id; title?: string }) {
-  const history = useHistory(targetId);
+  const view = useListView(LIST);
+  // Another target is another list: start over on its first page.
+  const paging = useListPaging(view, { total: null, scope: targetId });
+  const history = useHistory(targetId, paging.query);
+
+  const cols = useMemo<Column<AuditEntry>[]>(
+    () => [
+      {
+        key: "what",
+        header: strings.audit.colAction,
+        primary: true,
+        cell: (e) => (
+          <span className="dash-cell-stack">
+            <strong style={{ fontWeight: 600 }}>{actionLabel(e.action)}</strong>
+            {e.summary ? <span className="dash-wrap dash-cell-sub" style={{ whiteSpace: "normal" }}>{e.summary}</span> : null}
+            <span className="dash-cell-sub">
+              <ActorLabel entry={e} />
+            </span>
+          </span>
+        ),
+      },
+      { key: "at", header: strings.audit.colTime, sortable: true, sortDefaultDir: "desc", cell: (e) => <RelativeTime ms={e.at} /> },
+    ],
+    [],
+  );
+
   return (
-    <Card title={title} body="flush">
-      <PagedRegion state={history} skeleton={<SkeletonRows rows={3} columns={2} />}>
-        {(h) =>
-          h.items.length === 0 ? (
-            <EmptyState compact title={strings.audit.historyNone} />
-          ) : (
-            <>
-              <ul className="dash-timeline">
-                {h.items.map((e) => (
-                  <AuditTimelineItem key={e._id} entry={e} showTarget={false} />
-                ))}
-              </ul>
-              <LoadMore shown={h.items.length} canLoadMore={h.canLoadMore} isLoadingMore={h.isLoadingMore} loadMore={h.loadMore} />
-            </>
-          )
-        }
-      </PagedRegion>
+    <Card title={title} body="none" className="dash-card--tight">
+      <ServerTable<AuditEntry>
+        caption={title}
+        columns={cols}
+        getKey={(e) => e._id}
+        paging={paging}
+        list={history}
+        total={null}
+        skeletonRows={3}
+        empty={<EmptyState compact title={strings.audit.historyNone} />}
+      />
     </Card>
   );
 }

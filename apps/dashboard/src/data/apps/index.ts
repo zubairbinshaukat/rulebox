@@ -8,4 +8,4 @@ import type { AppsApi } from "./api";
 
 const api: AppsApi = appsApi;
 
-export const { useAppsScreen, useAppInstalls } = api;
+export const { useAppsScreen, useAppsCount, useAppInstalls, useFileTypesPage } = api;

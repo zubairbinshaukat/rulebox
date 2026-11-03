@@ -13,7 +13,7 @@ import {
   useUpdateGroup,
 } from "../data";
 import { useDevicesScreen } from "../data/devices";
-import { useEmployeesScreen } from "../data/employees";
+import { useEmployeePicker, useEmployeesScreen } from "../data/employees";
 import type { AssignmentRow, DeviceRow, EmployeeRow, GroupDetail as Detail } from "../data/types";
 import { AppGlyph } from "../components/AppGlyph";
 import { Card } from "../components/Card";
@@ -24,19 +24,19 @@ import { EmptyState } from "../components/EmptyState";
 import { Field } from "../components/Field";
 import { FormError } from "../components/FormError";
 import { HistoryPanel } from "../components/HistoryPanel";
-import { LoadMore } from "../components/LoadMore";
 import { Modal } from "../components/Modal";
 import { InlineNotice } from "../components/Notice";
 import { PageHeader } from "../components/PageHeader";
-import { PagedRegion, QueryRegion, RegionBoundary } from "../components/Region";
+import { QueryRegion } from "../components/Region";
+import { ServerTable } from "../components/ServerTable";
 import { RoleGate } from "../components/RoleGate";
+import { useListPaging, useListView, type ListConfig } from "../lib/listView";
 import { useCan } from "../lib/member";
 import { SearchInput } from "../components/SearchInput";
-import { SkeletonBlock, SkeletonRows } from "../components/Skeleton";
+import { SkeletonBlock } from "../components/Skeleton";
 import { useToast } from "../lib/toast";
 import { messageFor } from "../lib/errors";
 import { strings } from "../lib/strings";
-import { useDebounced } from "../lib/useDebounced";
 import { useForm } from "../lib/useForm";
 import * as v from "../lib/validate";
 import { AssignAppDialog, EditAssignmentDialog } from "./groups/AssignmentDialogs";
@@ -97,9 +97,7 @@ function Group({ g }: { g: Detail }) {
 
       <Assignments g={g} />
       <div className="dash-grid dash-grid--2">
-        <RegionBoundary>
-          <GroupDevices groupId={g._id} />
-        </RegionBoundary>
+        <GroupDevices groupId={g._id} />
         <GroupEmployees groupId={g._id} />
       </div>
       <HistoryPanel targetId={g._id} />
@@ -285,8 +283,14 @@ function Assignments({ g }: { g: Detail }) {
     </Card>
   );
 }
+/** A group's devices and employees come in one order (the server's default: newest first, employees as added). */
+const MEMBERS_LIST: ListConfig = { sorts: ["created"], defaultSort: { key: "created", dir: "desc" }, storage: "local" };
+
 function GroupDevices({ groupId }: { groupId: string }) {
-  const devices = useDevicesScreen({ groupId });
+  const navigate = useNavigate();
+  // `fleet:count` has no counter for one group, so the pager shows Previous / Next and "Page N" only.
+  const paging = useListPaging(useListView(MEMBERS_LIST), { total: null });
+  const devices = useDevicesScreen({ ...paging.query, groupId });
   const cols = useMemo<Column<DeviceRow>[]>(
     () => [
       {
@@ -304,27 +308,27 @@ function GroupDevices({ groupId }: { groupId: string }) {
     [],
   );
   return (
-    <Card title={s.devices} body="none">
-      <div style={{ paddingTop: 12 }}>
-        <PagedRegion state={devices} skeleton={<SkeletonRows rows={4} columns={2} />}>
-          {(p) =>
-            p.items.length === 0 ? (
-              <EmptyState compact title={s.devicesNone} />
-            ) : (
-              <>
-                <DataTable caption={s.devices} columns={cols} rows={p.items} getKey={(d) => d._id} isDim={(d) => d.revoked} />
-                <LoadMore shown={p.items.length} canLoadMore={p.canLoadMore} isLoadingMore={p.isLoadingMore} loadMore={p.loadMore} />
-              </>
-            )
-          }
-        </PagedRegion>
-      </div>
+    <Card title={s.devices} body="none" className="dash-card--tight">
+      <ServerTable
+        caption={s.devices}
+        columns={cols}
+        getKey={(d) => d._id}
+        paging={paging}
+        list={devices}
+        total={null}
+        isDim={(d) => d.revoked}
+        onRowClick={(d) => navigate(`/devices/${d._id}`)}
+        empty={<EmptyState compact title={s.devicesNone} />}
+        skeletonRows={4}
+      />
     </Card>
   );
 }
 
 function GroupEmployees({ groupId }: { groupId: string }) {
-  const employees = useEmployeesScreen({ groupId });
+  const navigate = useNavigate();
+  const paging = useListPaging(useListView(MEMBERS_LIST), { total: null });
+  const employees = useEmployeesScreen({ ...paging.query, groupId });
   const canAct = useCan("admin");
   const remove = useRemoveGroupEmployee();
   const toast = useToast();
@@ -368,6 +372,7 @@ function GroupEmployees({ groupId }: { groupId: string }) {
     <Card
       title={s.employees}
       body="none"
+      className="dash-card--tight"
       actions={
         ready ? (
           <RoleGate minRole="admin">
@@ -379,74 +384,88 @@ function GroupEmployees({ groupId }: { groupId: string }) {
         ) : undefined
       }
     >
-      <div style={{ paddingTop: 12 }}>
-        <PagedRegion state={employees} skeleton={<SkeletonRows rows={4} columns={2} />}>
-          {(p) =>
-            p.items.length === 0 ? (
-              <EmptyState compact title={s.employeesNone} />
-            ) : (
-              <>
-                <DataTable caption={s.employees} columns={cols} rows={p.items} getKey={(e) => e._id} isDim={(e) => e.disabled} />
-                <LoadMore shown={p.items.length} canLoadMore={p.canLoadMore} isLoadingMore={p.isLoadingMore} loadMore={p.loadMore} />
-              </>
-            )
-          }
-        </PagedRegion>
-      </div>
+      <ServerTable
+        caption={s.employees}
+        columns={cols}
+        getKey={(e) => e._id}
+        paging={paging}
+        list={employees}
+        total={null}
+        isDim={(e) => e.disabled}
+        onRowClick={(e) => navigate(`/employees/${e._id}`)}
+        empty={<EmptyState compact title={s.employeesNone} />}
+        skeletonRows={4}
+      />
       {adding ? <AddEmployeeDialog groupId={groupId} onClose={() => setAdding(false)} /> : null}
     </Card>
   );
 }
 
+/** The employee picker: `employees:search` (the best matches, a bounded read), run on Enter. */
 function AddEmployeeDialog({ groupId, onClose }: { groupId: string; onClose: () => void }) {
   const [search, setSearch] = useState("");
-  const debounced = useDebounced(search.trim(), 250);
-  const results = useEmployeesScreen({ search: debounced || " " });
+  const results = useEmployeePicker(search);
   const add = useAddGroupEmployee();
   const toast = useToast();
   const [added, setAdded] = useState<Set<string>>(new Set());
+  const cols: Column<EmployeeRow>[] = [
+    {
+      key: "name",
+      header: strings.employees.colName,
+      primary: true,
+      cell: (e) => (
+        <span className="dash-cell-stack">
+          <span className="dash-truncate" title={e.name}>{e.name}</span>
+          <span className="dash-cell-sub dash-mono">{e.username}</span>
+        </span>
+      ),
+    },
+    {
+      key: "act",
+      header: strings.common.actions,
+      actions: true,
+      cell: (e) =>
+        added.has(e._id) || e.groups.some((g) => g._id === groupId) ? (
+          <Pill tone="success">{strings.common.done}</Pill>
+        ) : (
+          <Button
+            variant="ghost"
+            className="dash-btn--sm"
+            aria-label={`${strings.common.add}: ${e.name}`}
+            onClick={() =>
+              add({ groupId, employeeId: e._id }).then(
+                () => setAdded((set) => new Set(set).add(e._id)),
+                (err) => toast(messageFor(err), "danger"),
+              )
+            }
+          >
+            {strings.common.add}
+          </Button>
+        ),
+    },
+  ];
+  const rows = results.status === "ready" ? results.data.rows : [];
   return (
     <Modal open title={s.addEmployeeTitle} onClose={onClose} wide actions={<Button onClick={onClose}>{strings.common.done}</Button>}>
       <div className="dash-form">
-        <SearchInput value={search} onChange={setSearch} label={s.employeeSearch} placeholder={strings.employees.searchPlaceholder} />
-        <PagedRegion state={results} skeleton={<SkeletonRows rows={3} columns={1} />}>
-          {(p) =>
-            !debounced ? null : p.items.length === 0 ? (
-              <EmptyState compact title={strings.employees.noMatchTitle} />
-            ) : (
-              <ul className="dash-list" style={{ maxHeight: 320, overflowY: "auto" }}>
-                {p.items.map((e) => {
-                  const inGroup = added.has(e._id) || e.groups.some((g) => g._id === groupId);
-                  return (
-                    <li key={e._id} className="dash-list__item" style={{ paddingInline: 0 }}>
-                      <div className="dash-list__body">
-                        <p className="dash-list__title dash-truncate">{e.name}</p>
-                        <p className="dash-list__meta dash-mono">{e.username}</p>
-                      </div>
-                      {inGroup ? (
-                        <Pill tone="success">{strings.common.done}</Pill>
-                      ) : (
-                        <Button
-                          variant="ghost"
-                          className="dash-btn--sm"
-                          aria-label={`${strings.common.add}: ${e.name}`}
-                          onClick={() =>
-                            add({ groupId, employeeId: e._id }).then(
-                              () => setAdded((set) => new Set(set).add(e._id)),
-                              (err) => toast(messageFor(err), "danger"),
-                            )
-                          }
-                        >
-                          {strings.common.add}
-                        </Button>
-                      )}
-                    </li>
-                  );
-                })}
-              </ul>
-            )
-          }
-        </PagedRegion>
+        <SearchInput value={search} onSearch={setSearch} label={s.employeeSearch} placeholder={strings.employees.searchPlaceholder} />
+        {search === "" ? null : (
+          <>
+            {results.status === "ready" && results.data.capped ? <InlineNotice tone="neutral" title={strings.devices.searchCap} /> : null}
+            <DataTable
+              caption={s.addEmployeeTitle}
+              columns={cols}
+              rows={rows}
+              getKey={(e) => e._id}
+              stack={false}
+              state={results.status === "loading" ? "loading" : results.status === "error" ? "error" : rows.length === 0 ? "empty" : "ready"}
+              error={results.status === "error" ? results.error : undefined}
+              onRetry={results.status === "error" ? results.retry : undefined}
+              empty={<EmptyState compact title={strings.employees.noMatchTitle} />}
+              skeletonRows={3}
+            />
+          </>
+        )}
       </div>
     </Modal>
   );

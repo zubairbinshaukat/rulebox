@@ -1,18 +1,27 @@
-import type { EmployeeRow, Id, PagedState } from "../types";
+import type { ListQuery, ServerList } from "../serverList";
+import type { EmployeeRow, QueryState } from "../types";
+
+export interface EmployeesFilter {
+  groupId?: string;
+  search?: string;
+}
 
 /**
- * The paginated employee list (plan Step 11). A seam of their own, like
- * `../devices` and `../apps`: the live list needs Convex's `usePaginatedQuery`,
- * which must not reach the first load (sign-in). Only the lazy Employees and
- * Group detail screens import `data/employees`.
+ * The server-driven employee list (plan Step 11, Phase 4b). A seam of its own, like
+ * `../devices`: only the lazy Employees and Group detail screens import `data/employees`.
  */
 export interface EmployeesApi {
+  /** `employees:count` (`employeeCount` from `orgStats`): `null` with a group filter or a search, `undefined` while it loads. */
+  useEmployeesCount: (filter: EmployeesFilter) => number | null | undefined;
   /**
-   * `employees:list({ groupId? })`, paginated (50), newest first; with `search`
-   * the best matches of `employees:search` (at most 50, `searchCapped` when
-   * there were more). Text that is empty after trimming (the group page's
-   * "add" dialog before anything is typed) subscribes to nothing and shows no
-   * rows.
+   * `employees:list`, one page. Sort keys: `created` (newest first, the default), `name`, `username`; with a
+   * `groupId` only `created` (= added to the group). A `search` (name or username words) makes the server ignore
+   * `sort`; with a group filter the page may be short (non-members are dropped after paging).
    */
-  useEmployeesScreen: (filter: { groupId?: Id; search?: string }) => PagedState<EmployeeRow> & { searchCapped?: boolean };
+  useEmployeesScreen: (query: ListQuery & { groupId?: string }) => ServerList<EmployeeRow>;
+  /**
+   * `employees:search`, the bounded picker form (best matches, `capped` = there may be more): the group page's
+   * "Add employee" dialog. Blank text subscribes to nothing and shows no rows.
+   */
+  useEmployeePicker: (text: string) => QueryState<{ rows: EmployeeRow[]; capped: boolean }>;
 }

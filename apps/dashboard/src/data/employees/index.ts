@@ -8,4 +8,4 @@ import type { EmployeesApi } from "./api";
 
 const api: EmployeesApi = employeesApi;
 
-export const { useEmployeesScreen } = api;
+export const { useEmployeesCount, useEmployeesScreen, useEmployeePicker } = api;

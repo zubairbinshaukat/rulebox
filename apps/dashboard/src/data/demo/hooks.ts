@@ -39,6 +39,8 @@ import {
   type MeResult,
   type OverviewScreen,
 } from "../types";
+import type { ServerList } from "../serverList";
+import { byKey, contains, relevance, useDemoServerPage } from "./lists";
 import * as validate from "../../lib/validate";
 import {
   bumpFailedSignIns,
@@ -56,12 +58,12 @@ import {
   setSession,
   sleep,
   startHeartbeats,
-  useDemoPaged,
   useDemoQuery,
   useStoreVersion,
 } from "./store";
 
 const SERVER_API_VERSION = 1;
+const NO_FAILED: ServerList<never> = { status: "ready", items: [], isDone: true, continueCursor: "", total: 0, busy: false };
 const MIN = 60_000;
 const DAY = 24 * 60 * MIN;
 
@@ -483,14 +485,14 @@ export const demoApi: DataApi = {
     });
   },
 
-  useFailedInstalls(enabled) {
-    return useDemoQuery(`overview:failedInstalls:${enabled}`, (db) => {
+  // `overview:failedInstallsPage`: sort key "updated" only; the total is `overview:get`'s `failedInstallCount`.
+  useFailedInstallsPage({ enabled, ...query }) {
+    const page = useDemoServerPage("overview:failedInstallsPage", `failed:${enabled}`, query, (db, sort) => {
       requireReader();
       if (!enabled) return [];
       return db.installs
         .filter((i) => i.state === "failed")
-        .sort((a, b) => b.updatedAt - a.updatedAt)
-        .slice(0, 20)
+        .sort(byKey((i) => i.updatedAt, sort?.dir ?? "desc"))
         .map((i) => ({
           _id: i._id,
           deviceId: i.deviceId,
@@ -501,6 +503,7 @@ export const demoApi: DataApi = {
           updatedAt: i.updatedAt,
         }));
     });
+    return enabled ? page : NO_FAILED;
   },
 
   // ---- devices (the paginated lists: `demoDevicesApi` below)
@@ -719,6 +722,33 @@ export const demoApi: DataApi = {
           employeeCount: Math.min(db.groupMembers.filter((m) => m.groupId === g._id).length, 501),
         }));
     });
+  },
+
+  // `groups:page`: a bounded list with offset cursors and its exact total inside the page; the search is "contains" on name and description.
+  useGroupsPage(query) {
+    return useDemoServerPage(
+      "groups:page",
+      "groups",
+      query,
+      (db, sort, search) => {
+        requireReader();
+        const key = sort?.key ?? "name";
+        if (key !== "name" && key !== "created") fail("invalid_argument", { field: "sort" });
+        return db.groups
+          .filter((g) => !search || contains(search, g.name, g.description))
+          .sort(byKey((g) => (key === "name" ? g.name : g.createdAt), sort?.dir ?? "asc"))
+          .map((g) => ({
+            _id: g._id,
+            name: g.name,
+            description: g.description,
+            revision: g.revision,
+            createdAt: g.createdAt,
+            deviceCount: Math.min(db.devices.filter((d) => d.groupId === g._id).length, 501),
+            employeeCount: Math.min(db.groupMembers.filter((m) => m.groupId === g._id).length, 501),
+          }));
+      },
+      "o",
+    );
   },
 
   useGroupDetail(groupId) {
@@ -1344,18 +1374,7 @@ export const demoApi: DataApi = {
   },
 
   // ---- file types
-  useFileTypesScreen() {
-    return useDemoQuery("fileHandlers:list", (db) => {
-      requireReader();
-      return {
-        rows: [...db.fileHandlers]
-          .sort((a, b) => a.extension.localeCompare(b.extension))
-          .map((f) => ({ ...f, appName: db.apps.find((a) => a._id === f.appId)?.name ?? "" })),
-        appOptions: appOptions(db).filter((a) => a.canOpenFiles),
-      };
-    });
-  },
-
+  // (the rules table is `useFileTypesPage` in the apps seam; the program picker is `useAppOptions`)
   useSetFileHandler() {
     return useCallback(
       ({ extension, appId }) =>
@@ -1595,30 +1614,7 @@ export const demoApi: DataApi = {
     );
   },
 
-  useMembersScreen() {
-    return useDemoQuery("members:list", (db) => {
-      const me = requireReader();
-      return {
-        members: [...db.members]
-          .sort((a, b) => a.createdAt - b.createdAt)
-          .slice(0, 200)
-          .map((m) => ({
-            _id: m._id,
-            email: m.email,
-            role: m._id === me._id ? me.role : m.role,
-            status: m.status,
-            createdAt: m.createdAt,
-            mfaEnrolled: m.mfa.enrolled,
-            isYou: m._id === me._id,
-            revision: m.revision,
-          })),
-        invites: db.invites
-          .filter((i) => !i.usedAt && i.expiresAt > Date.now())
-          .map((i) => ({ _id: i._id, email: i.email, role: i.role, kind: i.kind, expiresAt: i.expiresAt })),
-      };
-    });
-  },
-
+  // (the members and invites tables are `useMembersPage` / `useInvitesPage` in the members seam)
   useInviteMember() {
     return useCallback(
       ({ email, role }) =>
@@ -1628,7 +1624,7 @@ export const demoApi: DataApi = {
           if (db.members.some((m) => m.email === addr)) fail("already_member");
           const code = token(20);
           const expiresAt = now + 7 * DAY;
-          db.invites.push({ _id: newId("inv"), email: addr, role, kind: "join", code, expiresAt });
+          db.invites.push({ _id: newId("inv"), email: addr, role, kind: "join", code, expiresAt, createdAt: now });
           audit({ action: "member.invited", targetLabel: addr, summary: `Invited ${addr} as ${role}.` });
           return { code, expiresAt };
         }, "fresh"),
@@ -1689,7 +1685,7 @@ export const demoApi: DataApi = {
           if (m.status !== "active") fail("account_disabled");
           const code = token(20);
           const expiresAt = now + DAY;
-          db.invites.push({ _id: newId("inv"), email: m.email, role: m.role, kind: "passwordReset", code, expiresAt });
+          db.invites.push({ _id: newId("inv"), email: m.email, role: m.role, kind: "passwordReset", code, expiresAt, createdAt: now });
           audit({ action: "member.resetCodeCreated", targetLabel: m.email, summary: "Password reset code created." });
           return { code, expiresAt };
         }, "fresh"),
@@ -1729,27 +1725,46 @@ function republishGroup(db: DemoDb, groupId: string, reason: string) {
   for (const d of db.devices) if (d.groupId === groupId) bumpVersion(db, d._id, reason);
 }
 
+/** The total of the devices table (`fleet:count`): null for one group or a search, like the server. */
+function deviceTotal(db: DemoDb, { groupId, search }: { groupId?: string; search?: string }): number | null {
+  if (search?.trim()) return null;
+  if (groupId === NO_GROUP_FILTER) return db.devices.filter((d) => !d.groupId).length;
+  if (groupId) return null;
+  return db.devices.length;
+}
+
 /** Device lists: their own seam (`data/devices`), re-exported by `data/devices/demo.ts`. */
 export const demoDevicesApi: DevicesApi = {
-  useDevicesScreen({ groupId, search }) {
-    const text = search?.trim().toLowerCase() ?? "";
-    return useDemoPaged(`fleet:list:${groupId ?? ""}:${text}`, (db) => {
+  useDevicesCount(filter) {
+    const q = useDemoQuery(`fleet:count:${filter.groupId ?? ""}:${filter.search?.trim() ?? ""}`, (db) => {
       requireReader();
+      return deviceTotal(db, filter);
+    });
+    return q.status === "ready" ? q.data : q.status === "error" ? null : undefined;
+  },
+
+  useDevicesScreen({ groupId, ...query }) {
+    return useDemoServerPage("fleet:list", groupId ?? "", query, (db, sort, search) => {
+      requireReader();
+      if (sort && sort.key !== "created" && sort.key !== "name") fail("invalid_argument", { field: "sort" });
+      if (groupId && groupId !== NO_GROUP_FILTER) find(db.groups, groupId);
       let list = db.devices;
       if (groupId === NO_GROUP_FILTER) list = list.filter((d) => !d.groupId);
       else if (groupId) list = list.filter((d) => d.groupId === groupId);
-      // `search_name` returns its best matches first; the demo keeps newest first.
-      if (text) list = list.filter((d) => d.name.toLowerCase().includes(text));
-      return [...list].sort((a, b) => b.enrolledAt - a.enrolledAt).map((d) => deviceRow(db, d));
+      // A search is the index's best matches in relevance order: `sort` is ignored.
+      const ordered = search
+        ? relevance(list, search, (d) => d.name, (d) => d.enrolledAt)
+        : [...list].sort(sort?.key === "name" ? byKey((d) => d.name, sort.dir) : byKey((d) => d.enrolledAt, sort?.dir ?? "desc"));
+      return ordered.map((d) => deviceRow(db, d));
     });
   },
 
-  useDeviceInstalls(deviceId) {
-    return useDemoPaged(`fleet:installs:${deviceId}`, (db) => {
+  useDeviceInstalls(deviceId, query) {
+    return useDemoServerPage("fleet:installs", deviceId, query, (db, sort) => {
       requireReader();
       return db.installs
         .filter((i) => i.deviceId === deviceId)
-        .sort((a, b) => b.updatedAt - a.updatedAt)
+        .sort(byKey((i) => i.updatedAt, sort?.dir ?? "desc"))
         .map((i) => ({
           _id: i._id,
           appId: i.appId,
@@ -1766,11 +1781,13 @@ export const demoDevicesApi: DevicesApi = {
 
 /** Enrollment codes: their own seam (`data/enrollment`), re-exported by `data/enrollment/demo.ts`. */
 export const demoEnrollmentApi: EnrollmentApi = {
-  useEnrollmentScreen(nowMinute) {
-    return useDemoPaged(`enrollmentCodes:list:${nowMinute}`, (db) => {
+  useEnrollmentScreen(nowMinute, query) {
+    // `enrollmentCodes:list`: sort keys created (default, newest first) and expires; no search, no total.
+    return useDemoServerPage("enrollmentCodes:list", "", query, (db, sort) => {
       requireReader();
+      if (sort && sort.key !== "created" && sort.key !== "expires") fail("invalid_argument", { field: "sort" });
       return [...db.tokens]
-        .sort((a, b) => b.createdAt - a.createdAt)
+        .sort(sort?.key === "expires" ? byKey((t) => t.expiresAt, sort.dir) : byKey((t) => t.createdAt, sort?.dir ?? "desc"))
         .map((t) => ({
           _id: t._id,
           label: t.label,
@@ -1837,51 +1854,95 @@ export const dataApi = demoApi;
 
 /** Audit lists: their own seam (data/audit), re-exported by data/audit/demo.ts. */
 export const demoAuditApi: AuditApi = {
-  useAuditScreen() {
-    return useDemoPaged("audit:list", (db) => {
+  // `audit:list`: sort key "at" only (newest first by default), no search, no total.
+  useAuditScreen(query) {
+    return useDemoServerPage("audit:list", "", query, (db, sort) => {
       requireReader();
-      return [...db.audit].sort(byNewest).map(auditEntry);
+      if (sort && sort.key !== "at") fail("invalid_argument", { field: "sort" });
+      return [...db.audit].sort(byKey((e) => e.at, sort?.dir ?? "desc")).map(auditEntry);
     });
   },
 
-  useHistory(targetId) {
-    return useDemoPaged(`audit:forTarget:${targetId}`, (db) => {
+  // `audit:forTarget`: the same for one device, employee, app or group.
+  useHistory(targetId, query) {
+    return useDemoServerPage("audit:forTarget", targetId, query, (db, sort) => {
       requireReader();
-      return db.audit.filter((e) => e.targetId === targetId).sort(byNewest).map(auditEntry);
+      if (sort && sort.key !== "at") fail("invalid_argument", { field: "sort" });
+      return db.audit
+        .filter((e) => e.targetId === targetId)
+        .sort(byKey((e) => e.at, sort?.dir ?? "desc"))
+        .map(auditEntry);
     });
   },
 };
 
 /** App lists: their own seam (data/apps), re-exported by data/apps/demo.ts. */
 export const demoAppsApi: AppsApi = {
-  useAppsScreen({ archived }) {
-    return useDemoPaged(`apps:list:${archived}`, (db) => {
+  // `apps:list`: sort keys created (default, newest first) and name; a search is the name index's best matches
+  // (`sort` ignored).
+  useAppsScreen({ archived, ...query }) {
+    return useDemoServerPage("apps:list", String(archived), query, (db, sort, search) => {
       requireReader();
-      return db.apps
-        .filter((a) => a.archived === archived)
-        .sort((a, b) => b.createdAt - a.createdAt)
-        .map(
-          (a): AppRow => ({
-            _id: a._id,
-            name: a.name,
-            description: a.description,
-            kind: a.kind,
-            source: a.desktop?.source,
-            hue: a.hue,
-            iconUrl: a.iconUrl,
-            archived: a.archived,
-            ...appGroupCount(db.assignments.filter((x) => x.appId === a._id).length),
-            summary: a.kind === "desktop" ? installSummary(db, a._id) : null,
-          }),
-        );
+      if (sort && sort.key !== "created" && sort.key !== "name") fail("invalid_argument", { field: "sort" });
+      const list = db.apps.filter((a) => a.archived === archived);
+      const ordered = search
+        ? relevance(list, search, (a) => a.name, (a) => a.createdAt)
+        : [...list].sort(sort?.key === "name" ? byKey((a) => a.name, sort.dir) : byKey((a) => a.createdAt, sort?.dir ?? "desc"));
+      return ordered.map(
+        (a): AppRow => ({
+          _id: a._id,
+          name: a.name,
+          description: a.description,
+          kind: a.kind,
+          source: a.desktop?.source,
+          hue: a.hue,
+          iconUrl: a.iconUrl,
+          archived: a.archived,
+          createdAt: a.createdAt,
+          ...appGroupCount(db.assignments.filter((x) => x.appId === a._id).length),
+          summary: a.kind === "desktop" ? installSummary(db, a._id) : null,
+        }),
+      );
     });
   },
 
-  useAppInstalls(appId, state) {
-    return useDemoPaged(`apps:installs:${appId}:${state}`, (db) => {      requireReader();
+  // `apps:count`: `appCount` counts the non-archived apps; null for the archived tab or a search.
+  useAppsCount({ archived, search }) {
+    const text = search?.trim() ?? "";
+    const q = useDemoQuery(`apps:count:${archived}:${text}`, (db) => {
+      requireReader();
+      return archived || text ? null : db.apps.filter((a) => !a.archived).length;
+    });
+    return q.status === "ready" ? q.data : q.status === "error" ? null : undefined;
+  },
+
+  // `fileHandlers:page`: a bounded list (offset cursors, exact total inside the page); contains-search on the
+  // extension and the program name; sort keys extension (default) and app.
+  useFileTypesPage(query) {
+    return useDemoServerPage(
+      "fileHandlers:page",
+      "",
+      query,
+      (db, sort, search) => {
+        requireReader();
+        if (sort && sort.key !== "extension" && sort.key !== "app") fail("invalid_argument", { field: "sort" });
+        return db.fileHandlers
+          .map((f) => ({ _id: f._id, extension: f.extension, appId: f.appId, appName: db.apps.find((a) => a._id === f.appId)?.name ?? "" }))
+          .filter((r) => !search || contains(search, r.extension, r.appName))
+          .sort(byKey((r) => (sort?.key === "app" ? `${r.appName}\u0000${r.extension}` : r.extension), sort?.dir ?? "asc"));
+      },
+      "o",
+    );
+  },
+
+  // `apps:installs`: sort key "updated" only, no search, no total.
+  useAppInstalls(appId, state, query) {
+    return useDemoServerPage("apps:installs", `${appId}:${state}`, query, (db, sort) => {
+      requireReader();
+      if (sort && sort.key !== "updated") fail("invalid_argument", { field: "sort" });
       return db.installs
         .filter((i) => i.appId === appId && i.state === state)
-        .sort((a, b) => b.updatedAt - a.updatedAt)
+        .sort(byKey((i) => i.updatedAt, sort?.dir ?? "desc"))
         .map((i) => ({
           _id: i._id,
           deviceId: i.deviceId,
@@ -1898,29 +1959,46 @@ export const demoAppsApi: AppsApi = {
 
 /** Employee list: its own seam (data/employees), re-exported by data/employees/demo.ts. */
 export const demoEmployeesApi: EmployeesApi = {
-  useEmployeesScreen({ groupId, search }) {
-    const text = search?.trim().toLowerCase() ?? "";
-    // Asked to search for nothing (the group page's add dialog before typing): no rows.
-    const idle = search !== undefined && text === "";
-    const paged = useDemoPaged(`employees:list:${groupId ?? ""}:${text}:${idle}`, (db) => {
+  // `employees:count`: the whole organization only; null with a group filter or a search.
+  useEmployeesCount({ groupId, search }) {
+    const q = useDemoQuery(`employees:count:${groupId ?? ""}:${search?.trim() ?? ""}`, (db) => {
       requireReader();
-      if (idle) return [];
+      return groupId || search?.trim() ? null : db.employees.length;
+    });
+    return q.status === "ready" ? q.data : q.status === "error" ? null : undefined;
+  },
+
+  useEmployeesScreen({ groupId, ...query }) {
+    return useDemoServerPage("employees:list", groupId ?? "", query, (db, sort, search) => {
+      requireReader();
+      const key = sort?.key ?? "created";
+      if (key !== "created" && key !== "name" && key !== "username") fail("invalid_argument", { field: "sort" });
+      if (groupId) {
+        find(db.groups, groupId);
+        // As the server: a group's members come in the order they were added, nothing else.
+        if (!search && key !== "created") fail("invalid_argument", { field: "sort" });
+      }
       let list = db.employees;
       if (groupId) {
         const ids = new Set(db.groupMembers.filter((m) => m.groupId === groupId).map((m) => m.employeeId));
         list = list.filter((e) => ids.has(e._id));
       }
-      if (text) {
-        return list
-          .filter((e) => `${e.name} ${e.username}`.toLowerCase().includes(text))
-          .slice(0, 51)
-          .map((e) => employeeRow(db, e));
-      }
-      return [...list].sort((a, b) => b.createdAt - a.createdAt).map((e) => employeeRow(db, e));
+      const ordered = search
+        ? relevance(list, search, (e) => `${e.name} ${e.username}`, (e) => e.createdAt)
+        : [...list].sort(byKey((e) => (key === "name" ? e.name : key === "username" ? e.username : e.createdAt), sort?.dir ?? "desc"));
+      return ordered.map((e) => employeeRow(db, e));
     });
-    if (text && paged.status === "ready") {
-      return { ...paged, canLoadMore: false, searchCapped: paged.canLoadMore };
-    }
-    return paged;
+  },
+
+  // `employees:search`: the bounded picker form.
+  useEmployeePicker(text) {
+    const t = text.trim();
+    const q = useDemoQuery(`employees:search:${t}`, (db) => {
+      requireReader();
+      if (!t) return { rows: [] as EmployeeRow[], capped: false };
+      const hits = relevance(db.employees, t, (e) => `${e.name} ${e.username}`, (e) => e.createdAt);
+      return { rows: hits.slice(0, 50).map((e) => employeeRow(db, e)), capped: hits.length > 50 };
+    });
+    return t ? q : { status: "ready", data: { rows: [], capped: false } };
   },
 };

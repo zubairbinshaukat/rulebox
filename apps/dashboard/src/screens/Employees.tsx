@@ -1,27 +1,28 @@
-import { useMemo, useState } from "react";
-import { Link, useSearchParams } from "react-router";
+import { useMemo } from "react";
+import { Link, useNavigate } from "react-router";
 import { Pill, Select } from "@rulebox/ui";
 import IconUsers from "~icons/solar/users-group-rounded-linear";
 import IconUserPlus from "~icons/solar/user-plus-rounded-linear";
 import { useGroupsScreen } from "../data";
-import { useEmployeesScreen } from "../data/employees";
+import { useEmployeesCount, useEmployeesScreen } from "../data/employees";
 import type { EmployeeRow } from "../data/types";
-import { Card } from "../components/Card";
-import { DataTable, type Column } from "../components/DataTable";
+import { type Column } from "../components/DataTable";
 import { EmptyState } from "../components/EmptyState";
-import { LoadMore } from "../components/LoadMore";
-import { InlineNotice } from "../components/Notice";
 import { PageHeader } from "../components/PageHeader";
-import { PagedRegion } from "../components/Region";
 import { RoleGate } from "../components/RoleGate";
-import { SearchInput } from "../components/SearchInput";
-import { SkeletonRows } from "../components/Skeleton";
+import { ServerTable } from "../components/ServerTable";
 import { StatusDot } from "../components/StatusDot";
 import { formatGb } from "../lib/format";
+import { useListPaging, useListView, type ListConfig, type ListPaging } from "../lib/listView";
 import { strings } from "../lib/strings";
-import { useDebounced } from "../lib/useDebounced";
 
 const s = strings.employees;
+
+/**
+ * `employees:list`: newest first by default (no column of its own: the row has no date), `name` and `username`
+ * are the other index-backed orders. With a group filter the server only knows "added to the group", i.e. the default.
+ */
+const LIST: ListConfig = { sorts: ["created", "name", "username"], defaultSort: { key: "created", dir: "desc" }, filters: ["group"] };
 
 function quotaLabel(quotaGb: number | undefined): string {
   if (quotaGb === undefined) return s.defaultQuota;
@@ -29,14 +30,36 @@ function quotaLabel(quotaGb: number | undefined): string {
   return formatGb(quotaGb);
 }
 
-/** `employees:list` (paginated) or `employees:search` while the search box has text. */
+/**
+ * The paging the table sees. A group's members have one order (the default), so no header is a sort button
+ * there. Without a group, the default order has no column: a third click on a header goes back to it.
+ */
+function tableView(paging: ListPaging, grouped: boolean): ListPaging {
+  const { view } = paging;
+  if (grouped) return { ...paging, view: { ...view, sort: LIST.defaultSort, setSort: () => undefined } };
+  return {
+    ...paging,
+    view: {
+      ...view,
+      setSort: (next) => {
+        const back = view.sort.key === next.key && view.sort.key !== LIST.defaultSort.key && next.dir === "asc";
+        view.setSort(back ? LIST.defaultSort : next);
+      },
+    },
+  };
+}
+
+/** `employees:list` (one page); the search is `employees:list`'s own, paginated like any list. */
 export default function Employees() {
-  const [params, setParams] = useSearchParams();
-  const groupId = params.get("group") ?? "";
-  const [search, setSearch] = useState("");
-  const debounced = useDebounced(search.trim(), 250);
+  const navigate = useNavigate();
   const groups = useGroupsScreen();
-  const employees = useEmployeesScreen({ groupId: groupId || undefined, search: debounced || undefined });
+  // The count needs the applied search and group; the pager needs the count.
+  const view = useListView(LIST);
+  const groupId = view.filters.group ?? "";
+  const total = useEmployeesCount({ groupId: groupId || undefined, search: view.search });
+  const paging = useListPaging(view, { total });
+  // A group's members have one order (the default), whatever a stale URL says.
+  const employees = useEmployeesScreen({ ...paging.query, sort: groupId ? LIST.defaultSort : paging.query.sort, groupId: groupId || undefined });
 
   const cols = useMemo<Column<EmployeeRow>[]>(
     () => [
@@ -44,13 +67,14 @@ export default function Employees() {
         key: "name",
         header: s.colName,
         primary: true,
+        sortable: !groupId,
         cell: (e) => (
           <Link className="dash-link dash-link--plain dash-truncate" to={`/employees/${e._id}`} title={e.name}>
             {e.name}
           </Link>
         ),
       },
-      { key: "username", header: s.colUsername, cell: (e) => <span className="dash-mono dash-truncate" title={e.username}>{e.username}</span> },
+      { key: "username", header: s.colUsername, sortable: !groupId, cell: (e) => <span className="dash-mono dash-truncate" title={e.username}>{e.username}</span> },
       {
         key: "groups",
         header: s.colGroups,
@@ -78,7 +102,7 @@ export default function Employees() {
         cell: (e) => (e.disabled ? <StatusDot tone="neutral" label={s.disabled} /> : <StatusDot tone="success" label={s.active} />),
       },
     ],
-    [],
+    [groupId],
   );
 
   const add = (
@@ -90,52 +114,42 @@ export default function Employees() {
     </RoleGate>
   );
 
+  const filters = (
+    <>
+      <label className="dash-sr" htmlFor="employee-group-filter">
+        {strings.devices.groupFilter}
+      </label>
+      <Select id="employee-group-filter" compact value={groupId} onChange={(e) => paging.view.setFilter("group", e.target.value || null)}>
+        <option value="">{strings.devices.allGroups}</option>
+        {groups.status === "ready" ? groups.data.map((g) => <option key={g._id} value={g._id}>{g.name}</option>) : null}
+      </Select>
+    </>
+  );
+
   return (
     <div className="dash-page">
       <PageHeader title={s.title} lead={s.lead} actions={add} />
-      <div className="dash-filters">
-        <SearchInput value={search} onChange={setSearch} label={s.searchLabel} placeholder={s.searchPlaceholder} />
-        <label className="dash-sr" htmlFor="employee-group-filter">
-          {strings.devices.groupFilter}
-        </label>
-        <Select
-          id="employee-group-filter"
-          compact
-          value={groupId}
-          onChange={(e) => {
-            const next = new URLSearchParams(params);
-            if (e.target.value) next.set("group", e.target.value);
-            else next.delete("group");
-            setParams(next, { replace: true });
-          }}
-        >
-          <option value="">{strings.devices.allGroups}</option>
-          {groups.status === "ready" ? groups.data.map((g) => <option key={g._id} value={g._id}>{g.name}</option>) : null}
-        </Select>
-      </div>
-      <Card body="none">
-        <PagedRegion state={employees} skeleton={<SkeletonRows rows={8} columns={4} />}>
-          {(p) =>
-            p.items.length === 0 ? (
-              debounced || groupId ? (
-                <EmptyState icon={<IconUsers />} title={s.noMatchTitle} body={s.noMatchBody} />
-              ) : (
-                <EmptyState icon={<IconUsers />} title={s.emptyTitle} body={s.emptyBody} action={add} />
-              )
-            ) : (
-              <>
-                {"searchCapped" in employees && employees.searchCapped ? (
-                  <div style={{ padding: 12 }}>
-                    <InlineNotice tone="neutral" title={strings.devices.searchCap} />
-                  </div>
-                ) : null}
-                <DataTable caption={s.title} columns={cols} rows={p.items} getKey={(e) => e._id} isDim={(e) => e.disabled} />
-                <LoadMore shown={p.items.length} canLoadMore={p.canLoadMore} isLoadingMore={p.isLoadingMore} loadMore={p.loadMore} />
-              </>
-            )
-          }
-        </PagedRegion>
-      </Card>
+      <ServerTable
+        framed
+        caption={s.title}
+        columns={cols}
+        getKey={(e) => e._id}
+        paging={tableView(paging, Boolean(groupId))}
+        list={employees}
+        total={total ?? null}
+        search={{ label: s.searchLabel, placeholder: s.searchPlaceholder }}
+        sortByRelevanceWhenSearching
+        filters={filters}
+        isDim={(e) => e.disabled}
+        onRowClick={(e) => navigate(`/employees/${e._id}`)}
+        empty={
+          groupId ? (
+            <EmptyState icon={<IconUsers />} title={s.noMatchTitle} body={s.noMatchBody} />
+          ) : (
+            <EmptyState icon={<IconUsers />} title={s.emptyTitle} body={s.emptyBody} action={add} />
+          )
+        }
+      />
     </div>
   );
 }

@@ -1,14 +1,24 @@
-import type { AppInstallRow, AppRow, Id, InstallState, PagedState } from "../types";
+import type { ListQuery, ServerList } from "../serverList";
+import type { AppInstallRow, AppRow, FileTypeRow, Id, InstallState } from "../types";
 
 /**
- * The paginated app lists (plan Step 10). A seam of their own, like
- * `../devices` and `../enrollment`: the live lists need Convex's
- * `usePaginatedQuery`, which must not reach the first load (sign-in). Only the
- * lazy Apps and App screens import `data/apps`.
+ * The server-driven app lists (plan Step 10, Phase 4b). A seam of their own, like
+ * `../devices`: only the lazy Apps, App and File types screens import `data/apps`.
+ * Each hook answers ONE page (a cursor stack lives in the screen, `useListPaging`).
  */
 export interface AppsApi {
-  /** `apps:list({ archived })`, paginated (50), newest first. */
-  useAppsScreen: (filter: { archived: boolean }) => PagedState<AppRow>;
-  /** `apps:installs` (Step 17): paginated install results of one app in one state. */
-  useAppInstalls: (appId: Id, state: InstallState) => PagedState<AppInstallRow>;
+  /**
+   * `apps:list`: sort keys `created` (default, newest first) and `name`; a `search` (name words, relevance
+   * order) ignores `sort` on the server. `archived` is the tab.
+   */
+  useAppsScreen: (query: ListQuery & { archived: boolean }) => ServerList<AppRow>;
+  /** `apps:count`: the total of the active tab; `null` for the archived tab or a search, `undefined` while it loads. */
+  useAppsCount: (filter: { archived: boolean; search?: string }) => number | null | undefined;
+  /** `apps:installs`: install results of one app in one state, sort key `updated` only, no total. */
+  useAppInstalls: (appId: Id, state: InstallState, query: ListQuery) => ServerList<AppInstallRow>;
+  /**
+   * `fileHandlers:page`: a bounded list with its exact `total` inline and offset cursors. Sort keys `extension`
+   * (default) and `app`; the search is a contains match on extension and program name.
+   */
+  useFileTypesPage: (query: ListQuery) => ServerList<FileTypeRow>;
 }

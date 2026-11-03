@@ -1,46 +1,57 @@
 import { useMemo, useState } from "react";
-import { Link } from "react-router";
+import { Link, useNavigate } from "react-router";
 import { Button, Input, Select } from "@rulebox/ui";
 import IconDoc from "~icons/solar/document-text-linear";
 import IconAdd from "~icons/solar/add-circle-linear";
-import { useFileTypesScreen, useRemoveFileHandler, useSetFileHandler } from "../data";
-import type { AppOption, FileTypesScreen } from "../data/types";
-import { Card } from "../components/Card";
+import { useAppOptions, useRemoveFileHandler, useSetFileHandler } from "../data";
+import { useFileTypesPage } from "../data/apps";
+import { useAdoptedTotal } from "../data/serverList";
+import type { AppOption, FileTypeRow } from "../data/types";
 import { ConfirmDialog } from "../components/ConfirmDialog";
-import { DataTable, type Column } from "../components/DataTable";
+import type { Column } from "../components/DataTable";
 import { EmptyState } from "../components/EmptyState";
 import { Field } from "../components/Field";
 import { FormError } from "../components/FormError";
 import { Modal } from "../components/Modal";
 import { InlineNotice } from "../components/Notice";
 import { PageHeader } from "../components/PageHeader";
-import { QueryRegion } from "../components/Region";
+import { RegionError } from "../components/Region";
 import { RoleGate } from "../components/RoleGate";
+import { ServerTable } from "../components/ServerTable";
+import { SkeletonBlock } from "../components/Skeleton";
 import { useCan } from "../lib/member";
-import { SkeletonRows } from "../components/Skeleton";
+import { useListPaging, useListView, type ListConfig } from "../lib/listView";
 import { useToast } from "../lib/toast";
 import { strings } from "../lib/strings";
 import { useForm } from "../lib/useForm";
 import * as v from "../lib/validate";
 
 const s = strings.fileTypes;
-type Row = FileTypesScreen["rows"][number];
 
-/** `fileHandlers:list`: extension → app. Executables and scripts can never be added (PRD 7.3). */
+/** `fileHandlers:page` sort keys; the first is the default (A to Z). A bounded table: offset cursors, exact total inside the page. */
+const LIST: ListConfig = { sorts: ["extension", "app"], defaultSort: { key: "extension", dir: "asc" } };
+
+/** File types: extension → app, one page at a time. Executables and scripts can never be added (PRD 7.3). */
 export default function FileTypes() {
-  const screen = useFileTypesScreen();
+  const navigate = useNavigate();
+  const view = useListView(LIST);
+  const [total, adoptTotal] = useAdoptedTotal();
+  const paging = useListPaging(view, { total, offset: true });
+  const rules = useFileTypesPage(paging.query);
+  adoptTotal(rules);
   const canAct = useCan("admin");
   const [adding, setAdding] = useState(false);
-  const [removing, setRemoving] = useState<Row | null>(null);
+  const [removing, setRemoving] = useState<FileTypeRow | null>(null);
   const remove = useRemoveFileHandler();
   const toast = useToast();
 
-  const cols = useMemo<Column<Row>[]>(
+  const cols = useMemo<Column<FileTypeRow>[]>(
     () => [
-      { key: "ext", header: s.colExtension, primary: true, cell: (r) => <span className="dash-chip dash-mono">{r.extension}</span> },
+      { key: "extension", header: s.colExtension, primary: true, sortable: true, cell: (r) => <span className="dash-chip dash-mono">{r.extension}</span> },
       {
         key: "app",
         header: s.colApp,
+        sortable: true,
         cell: (r) => (
           <Link className="dash-link dash-truncate" to={`/apps/${r.appId}`}>
             {r.appName}
@@ -53,7 +64,7 @@ export default function FileTypes() {
               key: "act",
               header: strings.common.actions,
               actions: true,
-              cell: (r: Row) => (
+              cell: (r: FileTypeRow) => (
                 <Button variant="danger-ghost" className="dash-btn--sm" aria-label={`${strings.common.remove} ${r.extension}`} onClick={() => setRemoving(r)}>
                   {strings.common.remove}
                 </Button>
@@ -77,20 +88,19 @@ export default function FileTypes() {
   return (
     <div className="dash-page">
       <PageHeader title={s.title} lead={s.lead} actions={add} />
-      <Card body="none">
-        <QueryRegion state={screen} skeleton={<SkeletonRows rows={5} columns={2} />}>
-          {(data) => (
-            <>
-              {data.rows.length === 0 ? (
-                <EmptyState icon={<IconDoc />} title={s.emptyTitle} body={s.emptyBody} action={add} />
-              ) : (
-                <DataTable caption={s.title} columns={cols} rows={data.rows} getKey={(r) => r._id} />
-              )}
-              {adding ? <AddDialog options={data.appOptions} onClose={() => setAdding(false)} /> : null}
-            </>
-          )}
-        </QueryRegion>
-      </Card>
+      <ServerTable<FileTypeRow>
+        framed
+        caption={s.title}
+        columns={cols}
+        getKey={(r) => r._id}
+        paging={paging}
+        list={rules}
+        total={total}
+        search={{ label: s.searchLabel, placeholder: s.searchPlaceholder }}
+        onRowClick={(r) => navigate(`/apps/${r.appId}`)}
+        empty={<EmptyState icon={<IconDoc />} title={s.emptyTitle} body={s.emptyBody} action={add} />}
+      />
+      {adding ? <AddDialog onClose={() => setAdding(false)} /> : null}
       <ConfirmDialog
         open={removing !== null}
         title={s.removeTitle(removing?.extension ?? "")}
@@ -105,7 +115,30 @@ export default function FileTypes() {
   );
 }
 
-function AddDialog({ options, onClose }: { options: AppOption[]; onClose: () => void }) {
+/** The program picker is `apps:options`, subscribed only while this dialog is open. */
+function AddDialog({ onClose }: { onClose: () => void }) {
+  const apps = useAppOptions();
+  if (apps.status !== "ready") {
+    return (
+      <Modal
+        open
+        title={s.addTitle}
+        onClose={onClose}
+        actions={
+          <Button variant="ghost" onClick={onClose}>
+            {strings.common.cancel}
+          </Button>
+        }
+      >
+        {apps.status === "loading" ? <SkeletonBlock lines={3} /> : <RegionError error={apps.error} onRetry={apps.retry} />}
+      </Modal>
+    );
+  }
+  // `apps:options` lists every active app with a `canOpenFiles` flag; only programs that can open files are offered.
+  return <AddForm options={apps.data.filter((a) => a.canOpenFiles)} onClose={onClose} />;
+}
+
+function AddForm({ options, onClose }: { options: AppOption[]; onClose: () => void }) {
   const set = useSetFileHandler();
   const toast = useToast();
   const f = useForm({ extension: "", appId: options[0]?._id ?? "" }, (x) => ({

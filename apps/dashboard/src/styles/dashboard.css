@@ -1006,6 +1006,17 @@ a.dash-stat:hover {
   gap: 10px 12px;
   min-width: 0;
 }
+/* A filter select in the toolbar sits next to the search box, not on a row of its own. */
+.dash-dt__tools .rb-select {
+  width: auto;
+  flex: 0 1 240px;
+  min-width: 160px;
+}
+@media (max-width: 599px) {
+  .dash-dt__tools .rb-select {
+    flex-basis: 100%;
+  }
+}
 .dash-dt__sortsel {
   display: none;
   flex: 0 1 230px;
@@ -1038,6 +1049,18 @@ html[data-view="cards"] .dash-dt:has(.dash-table--stack) .dash-dt__sortsel {
 .dash-dt__footer {
   padding: 12px;
   border-top: 1px solid var(--rb-line);
+}
+/* A line of help in the toolbar (ordered by relevance) or above the pager (an empty page). */
+.dash-dt__note {
+  margin: 0;
+  font-size: 13px;
+}
+.dash-dt__footer > .dash-dt__note {
+  padding: 4px 8px 12px;
+}
+/* A table inside a narrow side card (history, group assignments): no 680px floor, the cells wrap instead. */
+.dash-card--tight .dash-table-wrap .rb-table {
+  min-width: 0;
 }
 
 .dash-table-wrap {
@@ -1132,6 +1155,12 @@ html[data-view="cards"] .dash-dt:has(.dash-table--stack) .dash-dt__sortsel {
 }
 .rb-table td.dash-cell--name {
   max-width: 340px;
+}
+/* In a narrow card the name column takes what is left and cuts a long name with an ellipsis. */
+html:not([data-view="cards"]) .dash-card--tight .rb-table td.dash-cell--name {
+  width: 100%;
+  max-width: 0;
+  overflow: hidden;
 }
 .rb-table td.dash-cell--actions {
   text-align: end;
@@ -1915,6 +1944,24 @@ html[data-view="cards"] .dash-table--stack td[data-empty="true"] {
 }
 @media (max-width: 719px) {
   /* Phones: one column; the number strip scrolls sideways when it is wider than the screen. */
+  .dash-pager {
+    grid-template-columns: minmax(0, 1fr);
+    justify-items: stretch;
+    padding: 10px 12px;
+  }
+  .dash-pager__summary {
+    text-align: center;
+  }
+  .dash-pager__size {
+    justify-self: stretch;
+    justify-content: space-between;
+  }
+}
+/* A pager inside a narrow card (a detail page's side column) stacks like on a phone, whatever the screen. */
+.dash-dt__footer {
+  container-type: inline-size;
+}
+@container (max-width: 679px) {
   .dash-pager {
     grid-template-columns: minmax(0, 1fr);
     justify-items: stretch;

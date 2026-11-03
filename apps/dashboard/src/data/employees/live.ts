@@ -1,35 +1,33 @@
 /**
- * Live employee list (plan Step 11, `convex/employees.ts`). Paginated, so it is
- * a seam of its own: `usePaginatedQuery` must stay out of the first load.
- *
- * Two server queries behind one hook: `employees:list` (a page of 50, optionally
- * one group's members) while the search box is empty, `employees:search` (the
- * best 50, optionally within the group) while it has text. Only one of them is
- * subscribed at a time; the other gets `"skip"`.
+ * Live employee list (plan Step 11, Phase 4b; `convex/employees.ts`). One page per
+ * subscription (`useServerPage`), the total from `employees:count` (a separate small
+ * query). `employees:search` stays for the group page's bounded picker.
  */
-import { useConvexAuth, usePaginatedQuery, type UsePaginatedQueryResult } from "convex/react";
 import { api } from "@convex/_generated/api";
-import { useMemberQuery, usePagedState } from "../live/convex";
-import { PAGE_SIZE, type EmployeeRow, type PagedState } from "../types";
+import { useMemberQuery } from "../live/convex";
+import { useServerCount, useServerPage } from "../live/serverList";
+import { listArgs } from "../serverList";
+import type { EmployeeRow, QueryState } from "../types";
 import type { EmployeesApi } from "./api";
 
-const READY_EMPTY: PagedState<EmployeeRow> = { status: "ready", items: [], canLoadMore: false, isLoadingMore: false, loadMore: () => undefined };
+const NO_PICK: QueryState<{ rows: EmployeeRow[]; capped: boolean }> = { status: "ready", data: { rows: [], capped: false } };
 
 export const liveEmployeesApi: EmployeesApi = {
-  useEmployeesScreen({ groupId, search }) {
-    const { isAuthenticated } = useConvexAuth();
+  useEmployeesCount({ groupId, search }) {
     const text = search?.trim();
-    const searching = text !== undefined && text !== "";
-    // Asked to search for nothing: no subscription at all.
-    const idle = search !== undefined && !searching;
-    const list = usePaginatedQuery(api.employees.list, isAuthenticated && !searching && !idle ? { groupId } : "skip", { initialNumItems: PAGE_SIZE });
-    const listed = usePagedState(list as UsePaginatedQueryResult<EmployeeRow>, PAGE_SIZE);
-    const found = useMemberQuery(api.employees.search, searching ? { text, groupId } : "skip");
-    if (idle) return READY_EMPTY;
-    if (!searching) return listed;
-    if (found.status === "loading") return { status: "loading" };
-    if (found.status === "error") return found;
-    return { status: "ready", items: found.data.rows, canLoadMore: false, isLoadingMore: false, loadMore: () => undefined, searchCapped: found.data.capped };
+    return useServerCount(api.employees.count, { ...(groupId ? { groupId } : {}), ...(text ? { search: text } : {}) });
+  },
+  useEmployeesScreen({ groupId, ...query }) {
+    // The server ignores `sort` for a search, and with a group filter only knows "created" (= added to the group).
+    const searching = Boolean(query.search?.trim());
+    const sort = searching ? undefined : groupId && query.sort ? { key: "created", dir: query.sort.dir } : query.sort;
+    const args = { ...listArgs({ ...query, sort }), ...(groupId ? { groupId } : {}) };
+    return useServerPage<EmployeeRow>(api.employees.list, args, groupId ?? "");
+  },
+  useEmployeePicker(text) {
+    const t = text.trim();
+    const found = useMemberQuery(api.employees.search, t ? { text: t } : "skip");
+    return t ? found : NO_PICK;
   },
 };
 

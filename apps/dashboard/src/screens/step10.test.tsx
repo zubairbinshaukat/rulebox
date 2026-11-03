@@ -14,8 +14,6 @@ import { strings } from "../lib/strings";
 // covers the backend).
 const cx = vi.hoisted(() => ({
   results: {} as Record<string, unknown>,
-  pages: {} as Record<string, unknown[]>,
-  paged: [] as { name: string; args: unknown }[],
   queried: [] as { name: string; args: unknown }[],
   fns: {} as Record<string, (args?: unknown) => Promise<unknown>>,
 }));
@@ -30,10 +28,6 @@ vi.mock("convex/react", () => ({
       }),
     ),
   useQuery: () => undefined,
-  usePaginatedQuery: (ref: FunctionReference<"query">, args: unknown) => {
-    cx.paged.push({ name: getFunctionName(ref), args });
-    return { results: (cx.pages[getFunctionName(ref)] ??= []), status: "Exhausted", isLoading: false, loadMore: () => undefined };
-  },
   useAction: (ref: FunctionReference<"action">) => fnFor(getFunctionName(ref)),
   useMutation: (ref: FunctionReference<"mutation">) => fnFor(getFunctionName(ref)),
   useConvexConnectionState: () => ({ isWebSocketConnected: true }),
@@ -96,12 +90,14 @@ function ui(node: ReactNode, role: Me["role"], path: string) {
 
 beforeEach(() => {
   cx.results = {};
-  cx.pages = {};
-  cx.paged = [];
   cx.queried = [];
   cx.fns = {};
 });
 afterEach(cleanup);
+
+/** A list page as the server answers it (`paginationOpts` queries). */
+const pageOf = (rows: unknown[], extra: object = {}) => ({ page: rows, isDone: true, continueCursor: `c:${rows.length}`, ...extra });
+const lastArgs = (name: string) => cx.queried.filter((q) => q.name === name).at(-1)?.args;
 
 const sha = "ab".repeat(32);
 const webApp = {
@@ -121,12 +117,12 @@ const webApp = {
 
 describe("Apps list (apps:list)", () => {
   it("asks for the active or the archived page, shows rows with the icon, source and group count; no install numbers yet", () => {
-    cx.pages["apps:list"] = [
+    cx.results["apps:list"] = pageOf([
       { _id: "a1", name: "Docs", kind: "web", archived: false, groupCount: 2, groupCountMore: false, summary: null, iconUrl: "https://x.convex.cloud/api/storage/1" },
       { _id: "a2", name: "Reader", kind: "desktop", source: "msi", archived: false, groupCount: 0, groupCountMore: false, summary: null },
-    ];
+    ]);
     ui(<Apps />, "viewer", "/apps");
-    expect(cx.paged.at(-1)).toEqual({ name: "apps:list", args: { archived: false } });
+    expect(lastArgs("apps:list")).toEqual({ archived: false, paginationOpts: { numItems: 10, cursor: null }, sort: { key: "created", dir: "desc" } });
     expect(screen.getByRole("link", { name: "Docs" }).getAttribute("href")).toBe("/apps/a1");
     expect(screen.getByText("2 groups")).toBeTruthy();
     expect(screen.getByText(strings.apps.sources.msi)).toBeTruthy();
@@ -137,14 +133,15 @@ describe("Apps list (apps:list)", () => {
   });
 
   it("a long group list is shown as 10+ (the query reads only the first assignments)", () => {
-    cx.pages["apps:list"] = [{ _id: "a1", name: "Busy", kind: "web", archived: false, groupCount: 10, groupCountMore: true, summary: null }];
+    cx.results["apps:list"] = pageOf([{ _id: "a1", name: "Busy", kind: "web", archived: false, groupCount: 10, groupCountMore: true, summary: null }]);
     ui(<Apps />, "viewer", "/apps");
     expect(screen.getByText("10+ groups")).toBeTruthy();
   });
 
   it("archived apps are a separate page of the same query", () => {
+    cx.results["apps:list"] = pageOf([]);
     ui(<Apps />, "admin", "/apps?archived=1");
-    expect(cx.paged.at(-1)).toEqual({ name: "apps:list", args: { archived: true } });
+    expect(lastArgs("apps:list")).toMatchObject({ archived: true });
     expect(screen.getByText(strings.apps.emptyArchivedTitle)).toBeTruthy();
   });
 });
@@ -225,7 +222,7 @@ describe("AppEdit: a website", () => {
     const update = vi.fn().mockRejectedValueOnce(new ConvexError({ code: "stale_edit" })).mockResolvedValueOnce({ revision: 4 });
     cx.fns["apps:update"] = update;
     ui(<AppEdit />, "admin", "/apps/a1");
-    expect(cx.queried.at(-1)).toEqual({ name: "apps:get", args: { appId: "a1" } });
+    expect(cx.queried.find((q) => q.name === "apps:get")).toEqual({ name: "apps:get", args: { appId: "a1" } });
     fireEvent.change(screen.getByRole("textbox", { name: new RegExp(`^${strings.appEdit.name}`) }), { target: { value: "Docs 2" } });
     fireEvent.click(screen.getByRole("button", { name: strings.common.saveChanges }));
     await waitFor(() => expect(update).toHaveBeenCalledTimes(1));
@@ -334,14 +331,17 @@ describe("AppEdit: a Windows program", () => {
   });
 });
 
-describe("File types (fileHandlers:list)", () => {
-  const data = {
-    rows: [{ _id: "h1", extension: ".pdf", appId: "a2", appName: "Reader" }],
-    appOptions: [{ _id: "a2", name: "Reader", kind: "desktop", canOpenFiles: true }],
-  };
+describe("File types (fileHandlers:page, apps:options)", () => {
+  const data = pageOf([{ _id: "h1", extension: ".pdf", appId: "a2", appName: "Reader" }], { total: 1, continueCursor: "o:1" });
+  // `apps:options` lists every active app with a `canOpenFiles` flag; the dialog offers only the programs that can open files.
+  const options = [
+    { _id: "a2", name: "Reader", kind: "desktop", canOpenFiles: true },
+    { _id: "a1", name: "Docs", kind: "web", canOpenFiles: false },
+  ];
 
   it("lists the rules; adding sends the normalized extension and the app; removing sends the rule id", async () => {
-    cx.results["fileHandlers:list"] = data;
+    cx.results["fileHandlers:page"] = data;
+    cx.results["apps:options"] = options;
     const set = vi.fn(async () => null);
     const remove = vi.fn(async () => null);
     cx.fns["fileHandlers:set"] = set;
@@ -361,7 +361,8 @@ describe("File types (fileHandlers:list)", () => {
   });
 
   it("executables and scripts are refused in the dialog before the server is asked", async () => {
-    cx.results["fileHandlers:list"] = data;
+    cx.results["fileHandlers:page"] = data;
+    cx.results["apps:options"] = options;
     const set = vi.fn(async () => null);
     cx.fns["fileHandlers:set"] = set;
     ui(<FileTypes />, "admin", "/file-types");
@@ -376,7 +377,8 @@ describe("File types (fileHandlers:list)", () => {
   });
 
   it("a viewer sees the rules without add or remove", () => {
-    cx.results["fileHandlers:list"] = data;
+    cx.results["fileHandlers:page"] = data;
+    cx.results["apps:options"] = options;
     ui(<FileTypes />, "viewer", "/file-types");
     expect(screen.getByText(".pdf")).toBeTruthy();
     expect(screen.queryByRole("button", { name: strings.fileTypes.add })).toBeNull();

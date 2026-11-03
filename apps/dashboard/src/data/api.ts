@@ -14,14 +14,12 @@ import type {
   EmployeeDetail,
   EmployeeInput,
   FailedInstallRow,
-  FileTypesScreen,
   GroupDetail,
   GroupRow,
   Id,
   InstallCounts,
   KeysScreen,
   MeResult,
-  MembersScreen,
   MfaSetup,
   MfaStatus,
   OrgSettings,
@@ -35,6 +33,7 @@ import type {
   WebMeta,
   WingetResolved,
 } from "./types";
+import type { ListQuery, ServerList } from "./serverList";
 
 type Mutation<A, R = void> = () => (args: A) => Promise<R>;
 
@@ -66,8 +65,11 @@ export interface DataApi {
   // ---- overview. `overview:get` has no arguments: it re-runs on counter, presence and audit
   // changes only, never on a ping.
   useOverview: () => QueryState<OverviewScreen>;
-  /** `overview:failedInstalls` (the newest 20). Subscribed only while `enabled`, that is while the counter says there are some. */
-  useFailedInstalls: (enabled: boolean) => QueryState<FailedInstallRow[]>;
+  /**
+   * `overview:failedInstallsPage`: one page of failed installs, sort key `updated` only. `total` is `overview:get`'s
+   * `failedInstallCount`. Subscribed only while `enabled`, that is while the counter says there are some.
+   */
+  useFailedInstallsPage: (query: ListQuery & { enabled: boolean }) => ServerList<FailedInstallRow>;
 
   // ---- devices (fleet:*). The two paginated lists (`useDevicesScreen`,
   // `useDeviceInstalls`) are in their own seam, `./devices`.
@@ -89,7 +91,10 @@ export interface DataApi {
   useRequestRotation: Mutation<{ deviceId: Id }>;
 
   // ---- groups
+  /** Every group with capped counts (`groups:list`): the group pickers and filters. The Groups table uses `useGroupsPage`. */
   useGroupsScreen: () => QueryState<GroupRow[]>;
+  /** `groups:page`: a bounded list with its exact total inline and offset cursors. Sort keys `name` (default) and `created`; the search is a contains match on name and description. */
+  useGroupsPage: (query: ListQuery) => ServerList<GroupRow>;
   useGroupDetail: (groupId: Id) => QueryState<GroupDetail>;
   useCreateGroup: Mutation<{ name: string; description?: string }, Id>;
   /** `description`: undefined = unchanged, "" = cleared (the server's rule). */
@@ -136,7 +141,7 @@ export interface DataApi {
   useSaveAppIcon: Mutation<{ appId: Id; png: string }>;
 
   // ---- file types
-  useFileTypesScreen: () => QueryState<FileTypesScreen>;
+  // (the rules table, `useFileTypesPage`, is in the apps seam, `./apps`; the program picker is `useAppOptions`)
   useSetFileHandler: Mutation<{ extension: string; appId: Id }>;
   useRemoveFileHandler: Mutation<{ handlerId: Id }>;
 
@@ -161,7 +166,7 @@ export interface DataApi {
   usePublishAgain: Mutation<void>;
   usePrepareRotation: Mutation<void>;
   useFinishRotation: Mutation<void>;
-  useMembersScreen: () => QueryState<MembersScreen>;
+  // (the members and invites tables, `useMembersPage` / `useInvitesPage`, are in their own seam, `./members`)
   useInviteMember: Mutation<{ email: string; role: Role }, { code: string; expiresAt: number }>;
   useRevokeInvite: Mutation<{ inviteId: Id }>;
   useChangeRole: Mutation<{ memberId: Id; role: Role; expectedRevision: number }>;

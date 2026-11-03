@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import raw from "../../../../crates/rulebox-ipc/tests/vectors/hotkeys.json?raw";
+import resetRaw from "../../../../crates/rulebox-policy/tests/vectors/reset-folders.json?raw";
 import { strings } from "./strings";
 import * as v from "./validate";
 
@@ -161,5 +162,32 @@ describe("MFA codes", () => {
     expect(v.normalizeRecoveryCode("abcd efgh")).toBe("ABCD-EFGH");
     expect(v.recoveryCode("abcd-efgh")).toBeNull();
     expect(v.recoveryCode("abc")).toBeTruthy();
+  });
+});
+
+// The shared reset-folder vectors (Step 16 review): `convex/lib/pathRules.ts` (the source), the Rust
+// `rulebox-policy` paths and this port must agree on every entry.
+type ResetKind = "root" | "path" | "denied";
+const resetVectors = JSON.parse(resetRaw) as { deny: string[][]; accept: string[]; reject: [string, ResetKind][] };
+
+describe("reset folders = convex/lib/pathRules.ts resetFoldersProblem (crates/rulebox-policy/tests/vectors/reset-folders.json)", () => {
+  it("the vector file is complete and the deny list is the same list", () => {
+    expect(resetVectors.accept).toHaveLength(12);
+    expect(resetVectors.reject).toHaveLength(26);
+    expect(v.RESET_DENY).toEqual(resetVectors.deny);
+  });
+  it.each(resetVectors.accept)("accepts %s", (folder) => {
+    expect(v.resetFolders([folder])).toBeNull();
+  });
+  it.each(resetVectors.reject)("refuses %s (%s)", (folder, kind) => {
+    const problem = v.resetFolders([folder]);
+    expect(problem).toBeTruthy();
+    // A denied folder says why; the others get the format sentence.
+    expect(problem === strings.validate.resetFolderDenied(folder)).toBe(kind === "denied");
+  });
+  it("accepts a list of at most 20 folders and refuses 21", () => {
+    const ok = Array.from({ length: 20 }, (_, i) => `{LocalAppData}\\Vendor${i}`);
+    expect(v.resetFolders(ok)).toBeNull();
+    expect(v.resetFolders([...ok, "{LocalAppData}\\Extra"])).toBe(strings.validate.tooManyResetFolders);
   });
 });

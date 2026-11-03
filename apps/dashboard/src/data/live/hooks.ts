@@ -18,18 +18,28 @@ import {
   useQuery,
   type RequestForQueries,
 } from "convex/react";
-import { makeFunctionReference } from "convex/server";
+import { makeFunctionReference, type FunctionReturnType } from "convex/server";
 import { useCallback, useMemo, useState } from "react";
 import { api } from "@convex/_generated/api";
 import type { DataApi } from "../api";
-import { cappedNumber, type Audience, type FailedInstallRow, type KeysScreen, type MeResult, type QueryState, type Role } from "../types";
+import { cappedNumber, type Audience, type FailedInstallRow, type GroupRow, type KeysScreen, type MeResult, type QueryState, type Role } from "../types";
+import { listArgs, type ServerList } from "../serverList";
+import { useMappedList } from "./mapList";
+import { useServerPage } from "./serverList";
 import { appDetailOf, installCountsOf, NEW_APP } from "./apps";
 import { deviceDetailOf } from "./devices";
 import { employeeDetailOf, newEmployeeOf } from "./employees";
 import { mapError, useMapped, useMappedState, useMemberQuery } from "./convex";
 
 /** What the overview shows while it does not subscribe to the failed-installs list (nothing failed). */
-const EMPTY_FAILED: QueryState<FailedInstallRow[]> = { status: "ready", data: [] };
+const NO_FAILED: ServerList<never> = { status: "ready", items: [], isDone: true, continueCursor: "", total: 0, busy: false };
+
+type GroupPageRow = FunctionReturnType<typeof api.groups.page>["page"][number];
+
+/** `groups:page` row: the counts arrive as `{ count, more }` and become one capped number. */
+function groupRowOf({ devices, employees, ...g }: GroupPageRow): GroupRow {
+  return { ...g, deviceCount: cappedNumber(devices), employeeCount: cappedNumber(employees) };
+}
 
 /** Convex Auth sign-in through the "password" credentials provider (convex/auth.ts). */
 function useLiveAuthActions() {
@@ -177,9 +187,11 @@ export const liveApi: DataApi = {
   useOverview() {
     return useMemberQuery(api.overview.get, {});
   },
-  useFailedInstalls(enabled) {
-    const q = useMemberQuery(api.overview.failedInstalls, enabled ? {} : "skip");
-    return enabled ? q : EMPTY_FAILED;
+  useFailedInstallsPage({ enabled, ...query }) {
+    // `overview:failedInstallsPage` sorts by "updated" only; the total is `overview:get`'s `failedInstallCount`.
+    const args = enabled ? { paginationOpts: listArgs(query).paginationOpts, sort: { key: "updated", dir: query.sort?.dir ?? "desc" } } : "skip";
+    const page = useServerPage<FailedInstallRow>(api.overview.failedInstallsPage, args, "failed");
+    return enabled ? page : NO_FAILED;
   },
 
   // ---- devices (Step 7). The paginated lists are in `../devices/live.ts`. Admin writes
@@ -267,6 +279,11 @@ export const liveApi: DataApi = {
     return useMappedState(q, (rows) =>
       rows.map(({ devices, employees, ...g }) => ({ ...g, deviceCount: cappedNumber(devices), employeeCount: cappedNumber(employees) })),
     );
+  },
+  // `groups:page`: the groups table. A bounded read: the page carries its exact `total` and uses offset cursors.
+  useGroupsPage(query) {
+    const page = useServerPage<GroupPageRow>(api.groups.page, listArgs(query), "groups");
+    return useMappedList(page, groupRowOf);
   },
   useGroupDetail(groupId) {
     const q = useMemberQuery(api.groups.get, { groupId });
@@ -524,10 +541,7 @@ export const liveApi: DataApi = {
     return useMapped(call);
   },
 
-  // ---- file types (Step 10). Removing a rule is a major action.
-  useFileTypesScreen() {
-    return useMemberQuery(api.fileHandlers.list, {});
-  },
+  // ---- file types (Step 10). Removing a rule is a major action. The rules table is `useFileTypesPage` (apps seam).
   useSetFileHandler() {
     const set = useMutation(api.fileHandlers.set);
     const call = useCallback(
@@ -611,9 +625,7 @@ export const liveApi: DataApi = {
     return useMapped(call);
   },
   // ---- members (Owner-only changes; codes are returned once and kept in component state)
-  useMembersScreen() {
-    return useMemberQuery(api.members.list, {});
-  },
+  // The members and invites tables are `useMembersPage` / `useInvitesPage` (members seam).
   useInviteMember() {
     return useMapped(useAction(api.members.invite));
   },

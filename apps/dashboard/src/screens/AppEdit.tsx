@@ -45,13 +45,16 @@ import { FormError } from "../components/FormError";
 import { HistoryPanel } from "../components/HistoryPanel";
 import { InstallStatePill } from "../components/InstallState";
 import { installDetail } from "../lib/install";
-import { LoadMore } from "../components/LoadMore";
 import { Modal } from "../components/Modal";
 import { InlineNotice } from "../components/Notice";
 import { PageHeader } from "../components/PageHeader";
-import { PagedRegion, QueryRegion } from "../components/Region";
+import { Pager } from "../components/Pager";
+import { QueryRegion } from "../components/Region";
 import { RelativeTime } from "../components/RelativeTime";
 import { RoleGate } from "../components/RoleGate";
+import { ServerTable } from "../components/ServerTable";
+import { PAGE_SIZES } from "../lib/cursorPager";
+import { useListPaging, useListView, type ListConfig } from "../lib/listView";
 import { useCan } from "../lib/member";
 import { SkeletonBlock, SkeletonRows } from "../components/Skeleton";
 import { useToast } from "../lib/toast";
@@ -716,12 +719,76 @@ function ArchiveActions({ d }: { d: AppDetail }) {
   );
 }
 
+type AssignmentItem = AppDetail["assignments"][number];
+
+/**
+ * The groups that assign this app. They come with `apps:get` (the server reads them bounded), so the table only
+ * shows a slice of what is already loaded: nothing is sorted or filtered here and no query is added. The pager
+ * appears once there is more than one page.
+ */
+function AssignmentsTable({ rows }: { rows: AssignmentItem[] }) {
+  const navigate = useNavigate();
+  const [size, setSize] = useState<number>(PAGE_SIZES[0]);
+  const [page, setPage] = useState(1);
+  const pages = Math.max(1, Math.ceil(rows.length / size));
+  const current = Math.min(page, pages);
+  const cols = useMemo<Column<AssignmentItem>[]>(
+    () => [
+      {
+        key: "group",
+        header: strings.enrollment.group,
+        primary: true,
+        // One column in the narrow side card: the group, and under it who gets the app and where it is pinned.
+        cell: (a) => (
+          <span className="dash-cell-stack">
+            <Link className="dash-link dash-link--plain dash-truncate" to={`/groups/${a.groupId}`} title={a.groupName}>
+              {a.groupName}
+            </Link>
+            <span className="dash-cell-sub" style={{ whiteSpace: "normal" }}>
+              {a.audience === "everyone" ? strings.group.audienceEveryone : strings.group.audienceSelected}
+              {a.pinnedTaskbar ? ` · ${strings.group.pinnedTaskbar}` : ""}
+              {a.pinnedDesktop ? ` · ${strings.group.pinnedDesktop}` : ""}
+            </span>
+          </span>
+        ),
+      },
+    ],
+    [],
+  );
+  return (
+    <DataTable
+      caption={s.assignments}
+      columns={cols}
+      rows={rows.slice((current - 1) * size, current * size)}
+      getKey={(a) => a._id}
+      onRowClick={(a) => navigate(`/groups/${a.groupId}`)}
+      footer={
+        rows.length > PAGE_SIZES[0] ? (
+          <Pager
+            page={current}
+            pageSize={size}
+            total={rows.length}
+            hasNext={current < pages}
+            reachablePages={new Set(Array.from({ length: pages }, (_, i) => i + 1))}
+            onPage={setPage}
+            onPageSize={(n) => {
+              setSize(n);
+              setPage(1);
+            }}
+          />
+        ) : undefined
+      }
+    />
+  );
+}
+
 function AssignmentsCard({ d }: { d: AppDetail }) {
   const [assigning, setAssigning] = useState(false);
   return (
     <Card
       title={s.assignments}
-      body="flush"
+      body="none"
+      className="dash-card--tight"
       actions={
         !d.archived ? (
           <RoleGate minRole="admin">
@@ -736,22 +803,7 @@ function AssignmentsCard({ d }: { d: AppDetail }) {
       {d.assignments.length === 0 ? (
         <EmptyState compact title={s.assignmentsNone} />
       ) : (
-        <ul className="dash-list">
-          {d.assignments.map((a) => (
-            <li key={a._id} className="dash-list__item">
-              <div className="dash-list__body">
-                <Link className="dash-link dash-link--plain dash-truncate" to={`/groups/${a.groupId}`} title={a.groupName}>
-                  {a.groupName}
-                </Link>
-                <p className="dash-list__meta">
-                  {a.audience === "everyone" ? strings.group.audienceEveryone : strings.group.audienceSelected}
-                  {a.pinnedTaskbar ? ` · ${strings.group.pinnedTaskbar}` : ""}
-                  {a.pinnedDesktop ? ` · ${strings.group.pinnedDesktop}` : ""}
-                </p>
-              </div>
-            </li>
-          ))}
-        </ul>
+        <AssignmentsTable rows={d.assignments} />
       )}
       {d.directEmployeeCount > 0 ? (
         <p className="dash-muted" style={{ padding: "12px 22px 16px", fontSize: 13 }}>
@@ -906,8 +958,14 @@ function InstallCard({ d, counts }: { d: AppDetail; counts: InstallCounts }) {
   );
 }
 
+/** `apps:installs` sorts by time ("updated") only. Local state: the page also holds other lists. */
+const INSTALLS_LIST: ListConfig = { sorts: ["updated"], defaultSort: { key: "updated", dir: "desc" }, storage: "local" };
+
 function InstallList({ appId, state }: { appId: string; state: InstallState }) {
-  const rows = useAppInstalls(appId, state);
+  const view = useListView(INSTALLS_LIST);
+  // Another app or install state is another list: start over on its first page.
+  const paging = useListPaging(view, { total: null, scope: `${appId}:${state}` });
+  const rows = useAppInstalls(appId, state, paging.query);
   const cols = useMemo<Column<AppInstallRow>[]>(
     () => [
       {
@@ -924,6 +982,7 @@ function InstallList({ appId, state }: { appId: string; state: InstallState }) {
       {
         key: "detail",
         header: strings.common.details,
+        isEmpty: (r) => r.state !== "failed",
         cell: (r) =>
           r.state === "failed" ? (
             <span className="dash-muted" style={{ fontSize: 13 }}>
@@ -931,29 +990,25 @@ function InstallList({ appId, state }: { appId: string; state: InstallState }) {
               {r.exitCode !== undefined ? ` · ${strings.install.exitCode(r.exitCode)}` : ""}
             </span>
           ) : (
-            <RelativeTime ms={r.updatedAt} />
+            <span className="dash-muted">—</span>
           ),
       },
+      { key: "updated", header: s.colUpdated, sortable: true, sortDefaultDir: "desc", cell: (r) => <RelativeTime ms={r.updatedAt} /> },
     ],
     [],
   );
+  const navigate = useNavigate();
   return (
-    <PagedRegion state={rows} skeleton={<SkeletonRows rows={4} columns={3} />}>
-      {(p) =>
-        p.items.length === 0 && !p.canLoadMore ? (
-          <EmptyState compact title={s.installStatusNone} />
-        ) : (
-          <>
-            {/* The server filters after paging, so a page can be short or empty while more rows exist. */}
-            {p.items.length === 0 ? (
-              <p className="dash-muted" style={{ padding: "12px clamp(16px, 2vw, 22px)" }}>{strings.common.emptyPageSoFar}</p>
-            ) : (
-              <DataTable caption={s.installStatus} columns={cols} rows={p.items} getKey={(r) => r._id} />
-            )}
-            <LoadMore shown={p.items.length} canLoadMore={p.canLoadMore} isLoadingMore={p.isLoadingMore} loadMore={p.loadMore} />
-          </>
-        )
-      }
-    </PagedRegion>
+    <ServerTable<AppInstallRow>
+      caption={s.installStatus}
+      columns={cols}
+      getKey={(r) => r._id}
+      paging={paging}
+      list={rows}
+      total={null}
+      skeletonRows={4}
+      onRowClick={(r) => navigate(`/devices/${r.deviceId}`)}
+      empty={<EmptyState compact title={s.installStatusNone} />}
+    />
   );
 }

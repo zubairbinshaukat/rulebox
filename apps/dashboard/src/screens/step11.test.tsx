@@ -102,8 +102,18 @@ beforeEach(() => {
   cx.paged = [];
   cx.queried = [];
   cx.fns = {};
+  localStorage.clear();
+  sessionStorage.clear();
+  document.documentElement.removeAttribute("data-view");
 });
 afterEach(cleanup);
+
+interface ListCall {
+  paginationOpts: { numItems: number; cursor: string | null };
+  sort?: { key: string; dir: string };
+  search?: string;
+  groupId?: string;
+}
 
 const row = (id: string, name: string, over: Record<string, unknown> = {}) => ({
   _id: id,
@@ -138,12 +148,19 @@ const detail = (over: Record<string, unknown> = {}) => ({
   ...over,
 });
 
-describe("Employees list (employees:list / employees:search)", () => {
+describe("Employees list (employees:list, one server-driven page at a time)", () => {
+  const listPage = (rows: unknown[], over: Record<string, unknown> = {}) => ({ page: rows, isDone: true, continueCursor: "cur-next", ...over });
+  const last = (name: string) => [...cx.queried].reverse().find((q) => q.name === name);
+  const listArgs = () => last("employees:list")!.args as unknown as ListCall;
+  const DEFAULT_ARGS = { paginationOpts: { numItems: 10, cursor: null }, sort: { key: "created", dir: "desc" } };
+  const header = (name: string) => screen.getByRole("columnheader", { name: new RegExp(name) });
+
   it("lists a page with groups, quota and status; a viewer cannot add", () => {
-    cx.pages["employees:list"] = [row("e1", "Maya Lee", { quotaGb: 25 }), row("e2", "Noor Ali", { disabled: true, groups: [] })];
+    cx.results["employees:list"] = listPage([row("e1", "Maya Lee", { quotaGb: 25 }), row("e2", "Noor Ali", { disabled: true, groups: [] })]);
     cx.results["groups:list"] = [groupRow];
     ui(<Employees />, "viewer", "/employees");
-    expect(cx.paged.at(-1)).toEqual({ name: "employees:list", args: {} });
+    expect(listArgs()).toEqual(DEFAULT_ARGS);
+    expect(last("employees:count")!.args).toEqual({});
     expect(screen.getByRole("link", { name: "Maya Lee" }).getAttribute("href")).toBe("/employees/e1");
     expect(screen.getAllByText("Sales").length).toBeGreaterThan(0);
     expect(screen.getByText("25 GB")).toBeTruthy();
@@ -151,21 +168,92 @@ describe("Employees list (employees:list / employees:search)", () => {
     expect(screen.queryByRole("link", { name: strings.employees.add })).toBeNull();
   });
 
-  it("typing subscribes to employees:search and stops the list; the cap is announced", async () => {
-    cx.pages["employees:list"] = [row("e1", "Maya Lee")];
+  it("a search is employees:list's own argument, run on Enter; the server ranks it, so no sort is sent, and there is no total", async () => {
+    cx.results["employees:list"] = listPage([row("e1", "Maya Lee")]);
+    cx.results["employees:count"] = { total: 140 };
     cx.results["groups:list"] = [];
     ui(<Employees />, "admin", "/employees");
-    fireEvent.change(screen.getByRole("searchbox"), { target: { value: "maya" } });
-    cx.results["employees:search"] = { rows: [row("e1", "Maya Lee")], capped: true };
-    await waitFor(() => expect(cx.queried.some((q) => q.name === "employees:search" && JSON.stringify(q.args) === JSON.stringify({ text: "maya" }))).toBe(true));
-    await waitFor(() => expect(cx.paged.at(-1)?.args).toBe("skip"));
-    await waitFor(() => expect(screen.getByText(strings.devices.searchCap)).toBeTruthy());
+    expect(screen.getByText(`${strings.pager.records(140)} · ${strings.pager.pageOf(1, 14)}`)).toBeTruthy();
+    const box = screen.getByRole("searchbox");
+    fireEvent.change(box, { target: { value: "maya" } });
+    // Typing alone asks the server for nothing new.
+    expect(listArgs()).toEqual(DEFAULT_ARGS);
+    cx.results["employees:count"] = { total: null };
+    fireEvent.submit(box.closest("form")!);
+    await waitFor(() => expect(listArgs()).toEqual({ paginationOpts: { numItems: 10, cursor: null }, search: "maya" }));
+    expect(last("employees:count")!.args).toEqual({ search: "maya" });
+    expect(cx.queried.some((q) => q.name === "employees:search")).toBe(false);
+    expect(screen.getByText(strings.pager.page(1))).toBeTruthy();
   });
 
-  it("the group filter goes to the server as groupId", () => {
+  it("the group filter goes to the server as groupId; a group's members have one order, so no header sorts", () => {
     cx.results["groups:list"] = [groupRow];
-    ui(<Employees />, "admin", "/employees?group=g1");
-    expect(cx.paged.at(-1)).toEqual({ name: "employees:list", args: { groupId: "g1" } });
+    cx.results["employees:list"] = listPage([row("e1", "Maya Lee")]);
+    ui(<Employees />, "admin", "/employees?group=g1&sort=name&dir=asc");
+    expect(listArgs()).toEqual({ paginationOpts: { numItems: 10, cursor: null }, groupId: "g1", sort: { key: "created", dir: "desc" } });
+    expect(within(header(strings.employees.colName)).queryByRole("button")).toBeNull();
+    expect(last("employees:count")!.args).toEqual({ groupId: "g1" });
+  });
+
+  it("sorts by name and username on the server; a third click on a header returns to the newest-first default", async () => {
+    cx.results["groups:list"] = [];
+    cx.results["employees:list"] = listPage([row("e1", "Maya Lee")]);
+    ui(<Employees />, "admin", "/employees");
+    const sortButton = (name: string) => within(header(name)).getByRole("button");
+    fireEvent.click(sortButton(strings.employees.colName));
+    await waitFor(() => expect(listArgs().sort).toEqual({ key: "name", dir: "asc" }));
+    fireEvent.click(sortButton(strings.employees.colName));
+    await waitFor(() => expect(listArgs().sort).toEqual({ key: "name", dir: "desc" }));
+    fireEvent.click(sortButton(strings.employees.colName));
+    await waitFor(() => expect(listArgs().sort).toEqual({ key: "created", dir: "desc" }));
+    fireEvent.click(sortButton(strings.employees.colUsername));
+    await waitFor(() => expect(listArgs().sort).toEqual({ key: "username", dir: "asc" }));
+    expect(header(strings.employees.colUsername).getAttribute("aria-sort")).toBe("ascending");
+    // Not every column sorts: the server has no order by groups, storage or status.
+    expect(within(header(strings.employees.colGroups)).queryByRole("button")).toBeNull();
+  });
+
+  it("URL state: page size and sort are read back, invalid values fall back; page and size changes reset to page 1", async () => {
+    cx.results["groups:list"] = [];
+    cx.results["employees:count"] = { total: 140 };
+    cx.results["employees:list"] = listPage([row("e1", "Maya Lee")], { isDone: false, continueCursor: "cur-2" });
+    ui(<Employees />, "admin", "/employees?size=25&sort=username&dir=desc");
+    expect(listArgs()).toEqual({ paginationOpts: { numItems: 25, cursor: null }, sort: { key: "username", dir: "desc" } });
+    fireEvent.click(screen.getByRole("button", { name: strings.pager.next }));
+    await waitFor(() => expect(listArgs().paginationOpts).toEqual({ numItems: 25, cursor: "cur-2" }));
+    fireEvent.change(screen.getByLabelText(strings.pager.rowsPerPage), { target: { value: "50" } });
+    await waitFor(() => expect(listArgs().paginationOpts).toEqual({ numItems: 50, cursor: null }));
+    cleanup();
+    ui(<Employees />, "admin", "/employees?size=9&sort=password&dir=asc");
+    expect(listArgs()).toEqual(DEFAULT_ARGS);
+  });
+
+  it("the whole row opens the employee; the name stays a real link", async () => {
+    cx.results["groups:list"] = [];
+    cx.results["employees:list"] = listPage([row("e1", "Maya Lee", { quotaGb: 25 })]);
+    ui(<Employees />, "admin", "/employees");
+    fireEvent.click(screen.getByText("25 GB"));
+    await waitFor(() => expect(screen.getByTestId("where").textContent).toBe("/employees/e1"));
+  });
+
+  it("the cards view lists the same employees as cards", () => {
+    cx.results["groups:list"] = [];
+    cx.results["employees:list"] = listPage([row("e1", "Maya Lee")]);
+    ui(<Employees />, "admin", "/employees");
+    fireEvent.click(screen.getByRole("radio", { name: strings.table.viewCards }));
+    expect(document.documentElement.getAttribute("data-view")).toBe("cards");
+    expect(screen.getByRole("link", { name: "Maya Lee" })).toBeTruthy();
+    expect(screen.getByLabelText(strings.table.sortSelect)).toBeTruthy();
+  });
+
+  it("an empty organization says so; an empty search says nothing matched", () => {
+    cx.results["groups:list"] = [];
+    cx.results["employees:list"] = listPage([]);
+    ui(<Employees />, "admin", "/employees");
+    expect(screen.getByText(strings.employees.emptyTitle)).toBeTruthy();
+    cleanup();
+    ui(<Employees />, "admin", "/employees?q=zzz");
+    expect(screen.getByText(strings.table.noResults("zzz"))).toBeTruthy();
   });
 });
 
@@ -359,30 +447,45 @@ describe("Group page employees", () => {
     group: { _id: "g1", name: "Sales", revision: 0, createdAt: 1, isDefault: false, devices: { count: 0, more: false }, employees: { count: 1, more: false } },
     apps: [],
   };
+  const listPage = (rows: unknown[]) => ({ page: rows, isDone: true, continueCursor: "c" });
 
   it("lists the members from employees:list({ groupId }) and removes one", async () => {
     cx.results["groups:get"] = group;
-    cx.pages["employees:list"] = [row("e1", "Maya Lee")];
+    cx.results["employees:list"] = listPage([row("e1", "Maya Lee")]);
     const remove = vi.fn(async () => null);
     cx.fns["groups:removeEmployee"] = remove;
     ui(<GroupDetail />, "admin", "/groups/g1");
-    expect(cx.paged.some((p) => p.name === "employees:list" && JSON.stringify(p.args) === JSON.stringify({ groupId: "g1" }))).toBe(true);
+    expect(cx.queried.find((p) => p.name === "employees:list")!.args).toEqual({ paginationOpts: { numItems: 10, cursor: null }, sort: { key: "created", dir: "desc" }, groupId: "g1" });
     fireEvent.click(screen.getByRole("button", { name: `${strings.group.removeEmployee}: Maya Lee` }));
     await waitFor(() => expect(remove).toHaveBeenCalledWith({ groupId: "g1", employeeId: "e1" }));
   });
 
-  it("the add dialog subscribes to nothing until something is typed, then searches the organization and adds", async () => {
+  it("the whole member row opens the employee, but its Remove button does not", async () => {
     cx.results["groups:get"] = group;
-    cx.pages["employees:list"] = [];
+    cx.results["employees:list"] = listPage([row("e1", "Maya Lee")]);
+    cx.fns["groups:removeEmployee"] = vi.fn(async () => null);
+    ui(<GroupDetail />, "admin", "/groups/g1");
+    fireEvent.click(screen.getByRole("button", { name: `${strings.group.removeEmployee}: Maya Lee` }));
+    expect(screen.getByTestId("where").textContent).toBe("/groups/g1");
+    fireEvent.click(screen.getByText("maya.lee"));
+    await waitFor(() => expect(screen.getByTestId("where").textContent).toBe("/employees/e1"));
+  });
+
+  it("the add dialog subscribes to nothing until Enter, then searches the organization (employees:search) and adds", async () => {
+    cx.results["groups:get"] = group;
+    cx.results["employees:list"] = listPage([]);
     const add = vi.fn(async () => null);
     cx.fns["groups:addEmployee"] = add;
     ui(<GroupDetail />, "admin", "/groups/g1");
     fireEvent.click(screen.getByRole("button", { name: strings.group.addEmployee }));
     const dialog = screen.getByRole("dialog");
-    // the dialog's own list hook is idle: no employees:list subscription for it, no search
+    // Idle until something is searched for: no employees:search subscription.
     expect(cx.queried.some((q) => q.name === "employees:search")).toBe(false);
-    fireEvent.change(within(dialog).getByRole("searchbox"), { target: { value: "noor" } });
+    const box = within(dialog).getByRole("searchbox");
+    fireEvent.change(box, { target: { value: "noor" } });
+    expect(cx.queried.some((q) => q.name === "employees:search")).toBe(false);
     cx.results["employees:search"] = { rows: [row("e2", "Noor Ali", { groups: [] })], capped: false };
+    fireEvent.submit(box.closest("form")!);
     await waitFor(() => expect(cx.queried.some((q) => q.name === "employees:search" && JSON.stringify(q.args) === JSON.stringify({ text: "noor" }))).toBe(true));
     await waitFor(() => within(dialog).getByText("Noor Ali"));
     fireEvent.click(within(dialog).getByRole("button", { name: `${strings.common.add}: Noor Ali` }));

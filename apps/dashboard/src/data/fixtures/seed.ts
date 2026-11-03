@@ -25,6 +25,7 @@ import type {
   WebSpec,
 } from "../types";
 import { DEFAULT_WEB_PERMISSIONS } from "../types";
+import { padListFixtures } from "./listRows";
 
 const GIB = 1024 * 1024 * 1024;
 
@@ -78,6 +79,7 @@ export interface DbInvite {
   code: string;
   expiresAt: number;
   usedAt?: number;
+  createdAt?: number;
 }
 export interface DbGroup {
   _id: string;
@@ -377,7 +379,17 @@ export function seed(now: number = Date.now()): DemoDb {
     40,
   );
   const gTraining = mkGroup("Training room", "Spare PCs for onboarding.", 12);
-  const groups = [gFront, gCounter, gOffice, gNight, gTraining];
+  // Seven more, small or empty, so the Groups table has two pages at the default page size of 10.
+  const extraGroups = [
+    mkGroup("Reception", "Visitor sign-in screens.", 90),
+    mkGroup("Meeting rooms", "Shared PCs in the meeting rooms.", 85),
+    mkGroup("Showroom", undefined, 70),
+    mkGroup("Returns desk", "Handles refunds and exchanges.", 60),
+    mkGroup("Kitchen display", "Order screens in the kitchen.", 33),
+    mkGroup("Loaner pool", "PCs lent out for a day or two.", 25),
+    mkGroup("Lobby kiosks", undefined, 5),
+  ];
+  const groups = [gFront, gCounter, gOffice, gNight, gTraining, ...extraGroups];
 
   // ---- apps
   const web = (url: string, extra: string[] = []): WebSpec => ({
@@ -841,7 +853,7 @@ export function seed(now: number = Date.now()): DemoDb {
     },
   ];
 
-  return {
+  const db: DemoDb = {
     org: {
       _id: "org_0001",
       name: "Harbor & Pine Pharmacy",
@@ -880,4 +892,7 @@ export function seed(now: number = Date.now()): DemoDb {
     env: { key: true, next: false },
     nextId,
   };
+  // Extra apps, file types, members, invites and codes: several pages in the server-driven tables.
+  padListFixtures(db, now);
+  return db;
 }

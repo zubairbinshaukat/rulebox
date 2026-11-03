@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { MemoryRouter, Route, Routes } from "react-router";
 import { getFunctionName, type FunctionReference } from "convex/server";
 import { ConvexError } from "convex/values";
@@ -21,12 +21,19 @@ const cx = vi.hoisted(() => ({
   /** `usePaginatedQuery` answers by function name: rows of one loaded, exhausted page. */
   pages: {} as Record<string, unknown[]>,
   fns: {} as Record<string, (args?: unknown) => Promise<unknown>>,
+  /** Every query subscribed to, with its arguments (list pages are plain queries with `paginationOpts`). */
+  queried: [] as { name: string; args: Record<string, unknown> }[],
 }));
 
 vi.mock("convex/react", () => ({
   useConvexAuth: () => ({ isLoading: false, isAuthenticated: true }),
   useQueries: (req: Record<string, { query: FunctionReference<"query">; args: unknown }>) =>
-    Object.fromEntries(Object.entries(req).map(([k, r]) => [k, cx.results[getFunctionName(r.query)]])),
+    Object.fromEntries(
+      Object.entries(req).map(([k, r]) => {
+        cx.queried.push({ name: getFunctionName(r.query), args: r.args as Record<string, unknown> });
+        return [k, cx.results[getFunctionName(r.query)]];
+      }),
+    ),
   useQuery: () => undefined,
   usePaginatedQuery: (ref: FunctionReference<"query">) => ({
     results: cx.pages[getFunctionName(ref)] ?? cx.none,
@@ -91,6 +98,13 @@ function ui(node: ReactNode, role: Me["role"] = "admin", path = "/") {
   );
 }
 
+interface ListCall {
+  paginationOpts: { numItems: number; cursor: string | null };
+  sort?: { key: string; dir: string };
+  search?: string;
+  groupId?: string;
+}
+
 const settingsData = (revision = 4, setAt?: number) => ({
   name: "Acme",
   revision,
@@ -130,6 +144,10 @@ beforeEach(() => {
   cx.results = {};
   cx.pages = {};
   cx.fns = {};
+  cx.queried = [];
+  localStorage.clear();
+  sessionStorage.clear();
+  document.documentElement.removeAttribute("data-view");
 });
 
 let offHandler: (() => void) | null = null;
@@ -138,11 +156,18 @@ afterEach(() => {
   offHandler = null;
 });
 
-describe("Groups list (groups:list)", () => {
-  it("loading shows skeleton rows, then the list with capped counts (500+)", () => {
+describe("Groups list (groups:page, one server-driven page at a time)", () => {
+  /** `groups:page` answers a bounded list: a page of rows, offset cursors and the exact total. */
+  const groupsPage = (rows: unknown[], total = rows.length, over: Record<string, unknown> = {}) => ({ page: rows, isDone: true, continueCursor: `o:${rows.length}`, total, ...over });
+  const lastArgs = () => [...cx.queried].reverse().find((q) => q.name === "groups:page")!.args as unknown as ListCall;
+  const DEFAULT_ARGS = { paginationOpts: { numItems: 10, cursor: null }, sort: { key: "name", dir: "asc" } };
+  const header = (name: string) => screen.getByRole("columnheader", { name: new RegExp(name) });
+  const many = (n: number) => Array.from({ length: n }, (_, i) => groupRow(`g${i + 1}`, `Group ${String(i + 1).padStart(2, "0")}`));
+
+  it("loading shows skeleton rows, then the list with capped counts (500+) and the total", () => {
     const { rerender } = ui(<Groups />, "admin", "/groups");
     expect(screen.queryByRole("table")).toBeNull();
-    cx.results["groups:list"] = [groupRow("g1", "Front desk", 500, true), groupRow("g2", "Office", 2)];
+    cx.results["groups:page"] = groupsPage([groupRow("g1", "Front desk", 500, true), groupRow("g2", "Office", 2)]);
     rerender(
       <ToastProvider>
         <MeContext.Provider value={admin}>
@@ -155,30 +180,34 @@ describe("Groups list (groups:list)", () => {
     const table = screen.getByRole("table");
     expect(within(table).getByText("500+")).toBeTruthy();
     expect(within(table).getByText("2")).toBeTruthy();
+    expect(lastArgs()).toEqual(DEFAULT_ARGS);
+    // The bounded list carries its exact total: no separate count query.
+    expect(screen.getByText(`${strings.pager.records(2)} · ${strings.pager.pageOf(1, 1)}`)).toBeTruthy();
+    expect(cx.queried.some((q) => q.name === "groups:count")).toBe(false);
   });
 
   it("empty: one sentence and the primary action; a viewer gets no action", () => {
-    cx.results["groups:list"] = [];
+    cx.results["groups:page"] = groupsPage([]);
     ui(<Groups />, "admin", "/groups");
     expect(screen.getByText(strings.groups.emptyTitle)).toBeTruthy();
     expect(screen.getAllByRole("button", { name: strings.groups.add }).length).toBe(2);
   });
 
   it("viewer: read-only (no New group)", () => {
-    cx.results["groups:list"] = [groupRow("g1", "Front desk")];
+    cx.results["groups:page"] = groupsPage([groupRow("g1", "Front desk")]);
     ui(<Groups />, "viewer", "/groups");
     expect(screen.queryByRole("button", { name: strings.groups.add })).toBeNull();
   });
 
   it("an error shows Try again", () => {
-    cx.results["groups:list"] = new ConvexError({ code: "forbidden" });
+    cx.results["groups:page"] = new ConvexError({ code: "forbidden" });
     ui(<Groups />, "admin", "/groups");
     expect(screen.getByText(strings.common.regionFailed)).toBeTruthy();
     expect(screen.getByRole("button", { name: strings.common.tryAgain })).toBeTruthy();
   });
 
   it("the 4th group on the Free plan is refused with the plan-limit message (and no upgrade button)", async () => {
-    cx.results["groups:list"] = [groupRow("g1", "A"), groupRow("g2", "B"), groupRow("g3", "C")];
+    cx.results["groups:page"] = groupsPage([groupRow("g1", "A"), groupRow("g2", "B"), groupRow("g3", "C")]);
     cx.results["settings:plan"] = freePlan;
     const create = vi.fn(async () => {
       throw new ConvexError({ code: "plan_limit", detail: "groups" });
@@ -198,7 +227,7 @@ describe("Groups list (groups:list)", () => {
   });
 
   it("a taken name is shown under the name field (conflict, aria-describedby)", async () => {
-    cx.results["groups:list"] = [groupRow("g1", "Front desk")];
+    cx.results["groups:page"] = groupsPage([groupRow("g1", "Front desk")]);
     cx.fns["groups:create"] = vi.fn(async () => {
       throw new ConvexError({ code: "conflict", field: "name" });
     });
@@ -212,8 +241,89 @@ describe("Groups list (groups:list)", () => {
     expect(input.getAttribute("aria-invalid")).toBe("true");
     expect(input.getAttribute("aria-describedby")).toContain(error.closest("p")!.id);
   });
-});
 
+  it("URL state: size, sort and search are read from the query string, invalid values fall back to the defaults", () => {
+    cx.results["groups:page"] = groupsPage(many(3));
+    ui(<Groups />, "admin", "/groups?size=25&sort=created&dir=desc&q=fr");
+    expect(lastArgs()).toEqual({ paginationOpts: { numItems: 25, cursor: null }, sort: { key: "created", dir: "desc" }, search: "fr" });
+    expect((screen.getByRole("searchbox") as HTMLInputElement).value).toBe("fr");
+    cleanup();
+    ui(<Groups />, "admin", "/groups?size=13&sort=devices&dir=up&page=zero");
+    expect(lastArgs()).toEqual(DEFAULT_ARGS);
+  });
+
+  it("a header click sorts on the server; the Created column starts newest first; Devices and Employees do not sort", async () => {
+    cx.results["groups:page"] = groupsPage(many(3));
+    ui(<Groups />, "admin", "/groups");
+    expect(header(strings.groups.colName).getAttribute("aria-sort")).toBe("ascending");
+    fireEvent.click(within(header(strings.groups.colName)).getByRole("button"));
+    await waitFor(() => expect(lastArgs().sort).toEqual({ key: "name", dir: "desc" }));
+    fireEvent.click(within(header(strings.groups.colCreated)).getByRole("button"));
+    await waitFor(() => expect(lastArgs().sort).toEqual({ key: "created", dir: "desc" }));
+    expect(within(header(strings.groups.colDevices)).queryByRole("button")).toBeNull();
+  });
+
+  it("searches on Enter (contains), and the sort still applies; a new search starts over on page 1", async () => {
+    cx.results["groups:page"] = groupsPage(many(10), 12, { isDone: false, continueCursor: "o:10" });
+    ui(<Groups />, "admin", "/groups");
+    fireEvent.click(screen.getByRole("button", { name: strings.pager.next }));
+    await waitFor(() => expect(lastArgs().paginationOpts).toEqual({ numItems: 10, cursor: "o:10" }));
+    const box = screen.getByRole("searchbox");
+    fireEvent.change(box, { target: { value: "grou" } });
+    expect(lastArgs().paginationOpts.cursor).toBe("o:10");
+    fireEvent.submit(box.closest("form")!);
+    await waitFor(() => expect(lastArgs()).toEqual({ ...DEFAULT_ARGS, search: "grou" }));
+  });
+
+  it("pages: the exact total in the pager, the last page by the opposite order, size change resets to page 1", async () => {
+    cx.results["groups:page"] = groupsPage(many(10), 25, { isDone: false, continueCursor: "o:10" });
+    ui(<Groups />, "admin", "/groups");
+    expect(screen.getByText(`${strings.pager.records(25)} · ${strings.pager.pageOf(1, 3)}`)).toBeTruthy();
+    // The last page is one cheap query: the opposite order, 25 mod 10 = 5 rows, shown reversed.
+    cx.results["groups:page"] = groupsPage(many(25).slice(20).reverse(), 25, { isDone: true });
+    fireEvent.click(within(screen.getByRole("navigation", { name: strings.pager.nav })).getByRole("button", { name: strings.pager.goTo(3) }));
+    await waitFor(() => expect(lastArgs()).toEqual({ paginationOpts: { numItems: 5, cursor: null }, sort: { key: "name", dir: "desc" } }));
+    const names = within(screen.getByRole("table")).getAllByRole("link").map((l) => l.textContent);
+    expect(names).toEqual(["Group 21", "Group 22", "Group 23", "Group 24", "Group 25"]);
+    fireEvent.change(screen.getByLabelText(strings.pager.rowsPerPage), { target: { value: "25" } });
+    await waitFor(() => expect(lastArgs().paginationOpts).toEqual({ numItems: 25, cursor: null }));
+  });
+
+  it("a refresh on ?page=2 opens page 2 straight away (offset cursors need no earlier pages)", async () => {
+    cx.results["groups:page"] = groupsPage([groupRow("g11", "Group 11"), groupRow("g12", "Group 12")], 12);
+    ui(<Groups />, "admin", "/groups?page=2");
+    await waitFor(() => expect(lastArgs().paginationOpts).toEqual({ numItems: 10, cursor: "o:10" }));
+    expect(screen.getByText(`${strings.pager.records(12)} · ${strings.pager.pageOf(2, 2)}`)).toBeTruthy();
+  });
+
+  it("the whole row opens the group; the name stays a real link", async () => {
+    cx.results["groups:page"] = groupsPage([groupRow("g1", "Front desk", 3)]);
+    render(
+      <ToastProvider>
+        <MeContext.Provider value={admin}>
+          <MemoryRouter initialEntries={["/groups"]}>
+            <Routes>
+              <Route path="/groups" element={<Groups />} />
+              <Route path="/groups/:id" element={<p>group page</p>} />
+            </Routes>
+          </MemoryRouter>
+        </MeContext.Provider>
+      </ToastProvider>,
+    );
+    expect(screen.getByRole("link", { name: "Front desk" }).getAttribute("href")).toBe("/groups/g1");
+    fireEvent.click(within(screen.getByRole("table")).getByText("3"));
+    expect(await screen.findByText("group page")).toBeTruthy();
+  });
+
+  it("the cards view draws the groups as cards", () => {
+    cx.results["groups:page"] = groupsPage(many(2));
+    ui(<Groups />, "admin", "/groups");
+    fireEvent.click(screen.getByRole("radio", { name: strings.table.viewCards }));
+    expect(document.documentElement.getAttribute("data-view")).toBe("cards");
+    expect(screen.getByRole("link", { name: "Group 01" })).toBeTruthy();
+    expect(screen.getByLabelText(strings.table.sortSelect)).toBeTruthy();
+  });
+});
 describe("Group detail (groups:get)", () => {
   const detail = (revision: number, name = "Office", devices = 0) => ({
     group: { ...groupRow("g1", name, devices), revision, description: "Back office" },
@@ -222,20 +332,25 @@ describe("Group detail (groups:get)", () => {
 
   it("admins can assign apps; the devices (Step 7) and the history (Step 17) are live", () => {
     cx.results["groups:get"] = detail(0);
-    cx.pages["fleet:list"] = [
-      {
-        _id: "d1",
-        name: "Front desk",
-        groupId: "g1",
-        groupName: "Office",
-        kioskEnabled: true,
-        enrolledAt: 1,
-        revision: 0,
-        presence: { online: true, since: 1, revoked: false },
-        summary: { outOfSupport: false, kioskPhase: "applied", updatedAt: 1 },
-        latestVersion: null,
-      },
-    ];
+    cx.results["audit:forTarget"] = { page: [], isDone: true, continueCursor: "c" };
+    cx.results["fleet:list"] = {
+      page: [
+        {
+          _id: "d1",
+          name: "Front desk",
+          groupId: "g1",
+          groupName: "Office",
+          kioskEnabled: true,
+          enrolledAt: 1,
+          revision: 0,
+          presence: { online: true, since: 1, revoked: false },
+          summary: { outOfSupport: false, kioskPhase: "applied", updatedAt: 1 },
+          latestVersion: null,
+        },
+      ],
+      isDone: true,
+      continueCursor: "c",
+    };
     ui(<GroupDetail />, "admin", "/groups/g1");
     expect(screen.getByRole("heading", { level: 1, name: "Office" })).toBeTruthy();
     expect(screen.getByText("Notepad")).toBeTruthy();

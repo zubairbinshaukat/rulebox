@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { act, renderHook, waitFor } from "@testing-library/react";
+import { renderHook, waitFor } from "@testing-library/react";
 import { demoApi, demoDevicesApi, demoEmployeesApi } from "./hooks";
 import { db, resetDemo, setControls, setSession, simulateConcurrentEdit, simulatePublishTrouble } from "./store";
 import { errorCodeOf } from "../../lib/errors";
@@ -11,29 +11,123 @@ function signInAs(email: string) {
   setSession({ memberId: m._id, mfaVerified: true, createdAt: now, stepUp: { verifiedAt: now, lastActiveAt: now, method: "actionPin" } });
 }
 
-describe("demo data layer", () => {
-  it("paginates 50 at a time and reports exhaustion", async () => {
+/** One page of the first query (page 1 of 50 unless said otherwise). */
+const Q = { numItems: 50, cursor: null as string | null };
+
+async function ready<T extends { status: string }>(result: { current: T }): Promise<Extract<T, { status: "ready" }>> {
+  await waitFor(() => expect(result.current.status).toBe("ready"), { timeout: 4000 });
+  return result.current as Extract<T, { status: "ready" }>;
+}
+
+describe("demo lists follow the server-driven list contract", () => {
+  it("pages by cursor with the requested page size, and reports the last page", async () => {
     resetDemo();
     signInAs("owner@demo.rulebox.test");
-    const { result } = renderHook(() => demoEmployeesApi.useEmployeesScreen({}));
-    await waitFor(() => expect(result.current.status).toBe("ready"), { timeout: 3000 });
-    const total = db().employees.length; // 140
-    let loaded = 50;
-    while (true) {
-      const r = result.current;
-      if (r.status !== "ready") throw new Error("not ready");
-      expect(r.items).toHaveLength(Math.min(loaded, total));
-      if (!r.canLoadMore) break;
-      act(() => r.loadMore());
-      loaded += 50;
-      await waitFor(() => {
-        const s = result.current;
-        expect(s.status === "ready" && !s.isLoadingMore && s.items.length === Math.min(loaded, total)).toBe(true);
-      }, { timeout: 3000 });
+    const total = db().employees.length;
+    const { result, rerender } = renderHook(({ cursor }) => demoEmployeesApi.useEmployeesScreen({ numItems: 25, cursor }), { initialProps: { cursor: null as string | null } });
+    const seen: string[] = [];
+    let page = await ready(result);
+    for (;;) {
+      expect(page.items.length).toBeLessThanOrEqual(25);
+      seen.push(...page.items.map((e) => e._id));
+      if (page.isDone) break;
+      const cursor = page.continueCursor;
+      rerender({ cursor });
+      await waitFor(() => expect(result.current.status === "ready" && result.current.continueCursor !== cursor).toBe(true), { timeout: 4000 });
+      page = await ready(result);
     }
-    expect(loaded).toBeGreaterThanOrEqual(total);
+    // Every employee exactly once: no row is lost or repeated between pages.
+    expect(seen).toHaveLength(total);
+    expect(new Set(seen).size).toBe(total);
   });
 
+  it("sorts on the server by the key and direction asked for, ties by id", async () => {
+    resetDemo();
+    signInAs("owner@demo.rulebox.test");
+    const asc = renderHook(() => demoDevicesApi.useDevicesScreen({ ...Q, sort: { key: "name", dir: "asc" } }));
+    const desc = renderHook(() => demoDevicesApi.useDevicesScreen({ ...Q, sort: { key: "name", dir: "desc" } }));
+    const a = (await ready(asc.result)).items.map((d) => d.name);
+    const d = (await ready(desc.result)).items.map((x) => x.name);
+    expect(a).toEqual([...a].sort((x, y) => (x < y ? -1 : x > y ? 1 : 0)));
+    expect(d).toEqual([...d].sort((x, y) => (x < y ? 1 : x > y ? -1 : 0)));
+    expect(a[0]).not.toBe(d[0]);
+    const newest = renderHook(() => demoDevicesApi.useDevicesScreen(Q));
+    const times = (await ready(newest.result)).items.map((x) => x.enrolledAt);
+    expect(times).toEqual([...times].sort((x, y) => y - x));
+  });
+
+  it("the last page is the same list read in the opposite order with total mod pageSize rows", async () => {
+    resetDemo();
+    signInAs("owner@demo.rulebox.test");
+    const count = renderHook(() => demoDevicesApi.useDevicesCount({}));
+    await waitFor(() => expect(count.result.current).toBe(db().devices.length), { timeout: 4000 });
+    const total = db().devices.length;
+    const size = 25;
+    const sort = { key: "name", dir: "asc" as const };
+    const last = renderHook(() => demoDevicesApi.useDevicesScreen({ numItems: total % size || size, cursor: null, sort: { ...sort, dir: "desc" } }));
+    const rows = (await ready(last.result)).items.map((x) => x.name).reverse();
+    const everything = renderHook(() => demoDevicesApi.useDevicesScreen({ numItems: 50, cursor: null, sort }));
+    expect(rows).toHaveLength(total % size || size);
+    // The tail of the ascending order is what the reverse read returns once the screen reverses it.
+    const all = db().devices.map((x) => x.name).sort((x, y) => (x < y ? -1 : x > y ? 1 : 0));
+    expect(rows).toEqual(all.slice(total - rows.length));
+    expect((await ready(everything.result)).items).toHaveLength(50);
+  });
+
+  it("a search is ordered by relevance (sort ignored) and has no total; counts are null for one group", async () => {
+    resetDemo();
+    signInAs("owner@demo.rulebox.test");
+    const search = renderHook(() => demoDevicesApi.useDevicesScreen({ ...Q, search: "warehouse", sort: { key: "name", dir: "desc" } }));
+    const names = (await ready(search.result)).items.map((x) => x.name);
+    expect(names.length).toBeGreaterThan(1);
+    expect(names[0]!.toLowerCase().startsWith("warehouse")).toBe(true);
+    const counts = [
+      renderHook(() => demoDevicesApi.useDevicesCount({ search: "warehouse" })),
+      renderHook(() => demoDevicesApi.useDevicesCount({ groupId: db().groups[0]!._id })),
+      renderHook(() => demoDevicesApi.useDevicesCount({ groupId: "none" })),
+      renderHook(() => demoEmployeesApi.useEmployeesCount({})),
+      renderHook(() => demoEmployeesApi.useEmployeesCount({ search: "a" })),
+    ];
+    await waitFor(() => expect(counts.every((c) => c.result.current !== undefined)).toBe(true), { timeout: 4000 });
+    expect(counts.map((c) => c.result.current)).toEqual([null, null, db().devices.filter((d) => !d.groupId).length, db().employees.length, null]);
+  });
+
+  it("groups are a bounded list: offset cursors, the exact total in the page, contains-search", async () => {
+    resetDemo();
+    signInAs("owner@demo.rulebox.test");
+    const groups = db().groups.length;
+    expect(groups).toBeGreaterThanOrEqual(12);
+    const first = renderHook(() => demoApi.useGroupsPage({ numItems: 10, cursor: null }));
+    const p1 = await ready(first.result);
+    expect(p1).toMatchObject({ total: groups, isDone: false, continueCursor: "o:10" });
+    expect(p1.items.map((g) => g.name)).toEqual([...p1.items.map((g) => g.name)].sort((x, y) => (x < y ? -1 : 1)));
+    const second = renderHook(() => demoApi.useGroupsPage({ numItems: 10, cursor: "o:10" }));
+    const p2 = await ready(second.result);
+    expect(p2.items).toHaveLength(groups - 10);
+    expect(p2.isDone).toBe(true);
+    const found = renderHook(() => demoApi.useGroupsPage({ numItems: 10, cursor: null, search: "RECEPT" }));
+    const f = await ready(found.result);
+    expect(f.items.map((g) => g.name)).toEqual(["Reception"]);
+    expect(f.total).toBe(1);
+    const bad = renderHook(() => demoApi.useGroupsPage({ numItems: 10, cursor: null, sort: { key: "devices", dir: "asc" } }));
+    await waitFor(() => expect(bad.result.current.status).toBe("error"), { timeout: 4000 });
+  });
+
+  it("a group's members are listed in the order they were added only; the picker is a bounded search", async () => {
+    resetDemo();
+    signInAs("owner@demo.rulebox.test");
+    const front = db().groups.find((g) => g.name === "Front desk")!;
+    const named = renderHook(() => demoEmployeesApi.useEmployeesScreen({ ...Q, groupId: front._id, sort: { key: "name", dir: "asc" } }));
+    await waitFor(() => expect(named.result.current.status).toBe("error"), { timeout: 4000 });
+    const pick = renderHook(() => demoEmployeesApi.useEmployeePicker("mar"));
+    await waitFor(() => expect(pick.result.current.status).toBe("ready"), { timeout: 4000 });
+    const p = pick.result.current;
+    expect(p.status === "ready" && p.data.rows.length > 0 && p.data.rows.length <= 50).toBe(true);
+    expect(renderHook(() => demoEmployeesApi.useEmployeePicker("  ")).result.current).toEqual({ status: "ready", data: { rows: [], capped: false } });
+  });
+});
+
+describe("demo data layer", () => {
   it("refuses a save after someone else's edit (stale_edit)", async () => {
     resetDemo();
     signInAs("owner@demo.rulebox.test");
@@ -114,7 +208,7 @@ describe("demo devices (plan Step 7)", () => {
   it("rows and the detail carry the presence transition: online PCs, offline since, revoked", async () => {
     resetDemo();
     signInAs("owner@demo.rulebox.test");
-    const list = renderHook(() => demoDevicesApi.useDevicesScreen({}));
+    const list = renderHook(() => demoDevicesApi.useDevicesScreen(Q));
     await waitFor(() => expect(list.result.current.status).toBe("ready"), { timeout: 3000 });
     const r = list.result.current;
     if (r.status !== "ready") throw new Error();
@@ -132,7 +226,7 @@ describe("demo devices (plan Step 7)", () => {
     resetDemo();
     signInAs("owner@demo.rulebox.test");
     const name = db().devices[0]!.name;
-    const list = renderHook(() => demoDevicesApi.useDevicesScreen({ search: name.slice(0, 5) }));
+    const list = renderHook(() => demoDevicesApi.useDevicesScreen({ ...Q, search: name.slice(0, 5) }));
     await waitFor(() => expect(list.result.current.status).toBe("ready"), { timeout: 3000 });
     const r = list.result.current;
     expect(r.status === "ready" && r.items.some((d) => d.name === name)).toBe(true);
@@ -193,7 +287,7 @@ describe("demo: Step 17 follow-ups", () => {
   it("lists the PCs without a group for groupId none, and badges plan states", async () => {
     resetDemo();
     signInAs("owner@demo.rulebox.test");
-    const { result } = renderHook(() => demoDevicesApi.useDevicesScreen({ groupId: "none" }));
+    const { result } = renderHook(() => demoDevicesApi.useDevicesScreen({ ...Q, groupId: "none" }));
     await waitFor(() => expect(result.current.status).toBe("ready"), { timeout: 3000 });
     const r = result.current;
     if (r.status !== "ready") throw new Error();
@@ -201,7 +295,7 @@ describe("demo: Step 17 follow-ups", () => {
     expect(r.items.every((d) => d.groupId === undefined)).toBe(true);
     expect(r.items.length).toBe(db().devices.filter((d) => !d.groupId).length);
 
-    const all = renderHook(() => demoDevicesApi.useDevicesScreen({ search: "WAREHOUSE-01" }));
+    const all = renderHook(() => demoDevicesApi.useDevicesScreen({ ...Q, search: "WAREHOUSE-01" }));
     await waitFor(() => expect(all.result.current.status).toBe("ready"), { timeout: 3000 });
     const row = all.result.current.status === "ready" ? all.result.current.items[0] : undefined;
     expect(row?.planState).toBe("overLimit");

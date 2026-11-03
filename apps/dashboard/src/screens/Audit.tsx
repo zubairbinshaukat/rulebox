@@ -6,27 +6,35 @@ import { useAuditScreen } from "../data/audit";
 import type { AuditEntry } from "../data/types";
 import { ActorLabel, TargetLink } from "../components/AuditItem";
 import { actionLabel } from "../lib/audit";
-import { Card } from "../components/Card";
-import { DataTable, type Column } from "../components/DataTable";
+import type { Column } from "../components/DataTable";
 import { EmptyState } from "../components/EmptyState";
-import { LoadMore } from "../components/LoadMore";
 import { PageHeader } from "../components/PageHeader";
-import { PagedRegion } from "../components/Region";
 import { RelativeTime } from "../components/RelativeTime";
-import { SkeletonRows } from "../components/Skeleton";
+import { ServerTable } from "../components/ServerTable";
 import { formatDateTime, timeZoneName } from "../lib/format";
+import { useListPaging, useListView, type ListConfig } from "../lib/listView";
 import { strings } from "../lib/strings";
 
 const s = strings.audit;
 
-/** `audit:list`: newest first, "Load more", actor and target links, relative + absolute time. */
+/** `audit:list` sorts by time ("at") only, newest first. No search and no total. */
+const LIST: ListConfig = { sorts: ["at"], defaultSort: { key: "at", dir: "desc" } };
+
+/**
+ * `audit:list`, one page at a time (page, page size and the sort direction live in the URL): actor and target
+ * links, relative + absolute time. No total, so the pager shows Previous / Next and "Page N".
+ */
 export default function Audit() {
-  const audit = useAuditScreen();
+  const view = useListView(LIST);
+  const paging = useListPaging(view, { total: null });
+  const audit = useAuditScreen(paging.query);
   const cols = useMemo<Column<AuditEntry>[]>(
     () => [
       {
-        key: "time",
+        key: "at",
         header: s.colTime,
+        sortable: true,
+        sortDefaultDir: "desc",
         cell: (e) => (
           <span className="dash-cell-stack" style={{ minWidth: 130 }}>
             <RelativeTime ms={e.at} />
@@ -64,20 +72,17 @@ export default function Audit() {
           </Button>
         }
       />
-      <Card body="none">
-        <PagedRegion state={audit} skeleton={<SkeletonRows rows={10} columns={4} />}>
-          {(p) =>
-            p.items.length === 0 ? (
-              <EmptyState icon={<IconHistory />} title={s.emptyTitle} body={s.emptyBody} />
-            ) : (
-              <>
-                <DataTable caption={s.title} columns={cols} rows={p.items} getKey={(e) => e._id} />
-                <LoadMore shown={p.items.length} canLoadMore={p.canLoadMore} isLoadingMore={p.isLoadingMore} loadMore={p.loadMore} />
-              </>
-            )
-          }
-        </PagedRegion>
-      </Card>
+      <ServerTable<AuditEntry>
+        framed
+        caption={s.title}
+        columns={cols}
+        getKey={(e) => e._id}
+        paging={paging}
+        list={audit}
+        total={null}
+        skeletonRows={10}
+        empty={<EmptyState icon={<IconHistory />} title={s.emptyTitle} body={s.emptyBody} />}
+      />
     </div>
   );
 }

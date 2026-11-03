@@ -1,14 +1,15 @@
-import type { AuditEntry, Id, PagedState } from "../types";
+import type { ListQuery, ServerList } from "../serverList";
+import type { AuditEntry, Id } from "../types";
 
 /**
- * The paginated audit lists (plan Step 17). A seam of their own, like
- * `../devices` and `../apps`: the live lists need Convex's `usePaginatedQuery`,
- * which must not reach the first load (sign-in). Only the lazy Audit screen and
- * the history panel of the detail screens import `data/audit`.
+ * The server-driven audit lists (plan Step 17, Phase 4b). A seam of their own, like
+ * `../devices` and `../apps`: only the lazy Audit screen and the history panel of the detail
+ * screens import `data/audit`. Sort key `at` only (newest first by default), no search and
+ * no total (no exact counter): the pager shows Previous / Next and "Page N".
  */
 export interface AuditApi {
-  /** `audit:list`, paginated (50), newest first. */
-  useAuditScreen: () => PagedState<AuditEntry>;
-  /** `audit:forTarget({ targetId })`, paginated (10, then 10 more), newest first: one device, employee, app or group. */
-  useHistory: (targetId: Id) => PagedState<AuditEntry>;
+  /** `audit:list`, one page. */
+  useAuditScreen: (query: ListQuery) => ServerList<AuditEntry>;
+  /** `audit:forTarget({ targetId })`, one page: one device, employee, app or group. */
+  useHistory: (targetId: Id, query: ListQuery) => ServerList<AuditEntry>;
 }

@@ -198,7 +198,7 @@ describe("member queries (useQueries, no throw during render)", () => {
 
   it("an error becomes status error with a mapped code; retry re-subscribes", async () => {
     cx.queryResult = new ConvexError({ code: "forbidden" });
-    const { result } = renderHook(() => live.useMembersScreen());
+    const { result } = renderHook(() => live.useMfaStatus());
     expect(result.current.status).toBe("error");
     if (result.current.status !== "error") return;
     expect(errorCodeOf(result.current.error)).toBe("forbidden");
@@ -403,15 +403,31 @@ describe("install status, overview, audit and history (Step 17)", () => {
     expect(result.current).toEqual({ status: "ready", data: cx.queryResult });
   });
 
-  it("the failed-installs list subscribes only while it is enabled; disabled it answers an empty list", () => {
+  it("the failed-installs page subscribes only while it is enabled; disabled it answers an empty page", () => {
     cx.requests = [];
-    const off = renderHook(() => live.useFailedInstalls(false));
-    expect(off.result.current).toEqual({ status: "ready", data: [] });
+    const query = { numItems: 10, cursor: null, sort: { key: "updated", dir: "desc" as const } };
+    const off = renderHook(() => live.useFailedInstallsPage({ ...query, enabled: false }));
+    expect(off.result.current).toMatchObject({ status: "ready", items: [], isDone: true });
     expect(cx.requests.flatMap((r) => Object.values(r))).toEqual([]);
-    cx.queryResult = [{ _id: "i1", deviceId: "d1", deviceName: "PC", appId: "a1", appName: "Docs", updatedAt: 1 }];
-    const on = renderHook(() => live.useFailedInstalls(true));
-    expect(getFunctionName(lastRequest().query)).toBe("overview:failedInstalls");
-    expect(on.result.current).toEqual({ status: "ready", data: cx.queryResult });
+    cx.queryResult = { page: [{ _id: "i1", deviceId: "d1", deviceName: "PC", appId: "a1", appName: "Docs", updatedAt: 1 }], isDone: false, continueCursor: "cur1" };
+    const on = renderHook(() => live.useFailedInstallsPage({ ...query, enabled: true }));
+    expect(getFunctionName(lastRequest().query)).toBe("overview:failedInstallsPage");
+    // One page: the cursor and the page size go to the server; "updated" is the only sort key.
+    expect(lastRequest().args).toEqual({ paginationOpts: { numItems: 10, cursor: null }, sort: { key: "updated", dir: "desc" } });
+    expect(on.result.current).toMatchObject({ status: "ready", items: [{ _id: "i1" }], isDone: false, continueCursor: "cur1" });
+  });
+
+  it("the groups table is groups:page: sort, search and the page cursor are arguments; the exact total comes back in the page", () => {
+    cx.queryResult = {
+      page: [{ _id: "g1", name: "Front", revision: 0, createdAt: 5, isDefault: false, devices: { count: 3, more: false }, employees: { count: 600, more: true } }],
+      isDone: true,
+      continueCursor: "o:10",
+      total: 1,
+    };
+    const { result } = renderHook(() => live.useGroupsPage({ numItems: 10, cursor: "o:10", sort: { key: "created", dir: "desc" }, search: " fr " }));
+    expect(getFunctionName(lastRequest().query)).toBe("groups:page");
+    expect(lastRequest().args).toEqual({ paginationOpts: { numItems: 10, cursor: "o:10" }, sort: { key: "created", dir: "desc" }, search: "fr" });
+    expect(result.current).toMatchObject({ status: "ready", total: 1, items: [{ _id: "g1", deviceCount: 3, employeeCount: 501 }] });
   });
 
   it("the install summary is apps:installSummary; only the states that have PCs come back", () => {

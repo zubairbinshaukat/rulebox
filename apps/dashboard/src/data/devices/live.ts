@@ -1,28 +1,34 @@
 /**
- * Live device lists (plan Step 7, `convex/fleet.ts`). Paginated, so they are
- * a seam of their own: `usePaginatedQuery` must stay out of the first load.
+ * Live device lists (plan Step 7, Phase 4b; `convex/fleet.ts`). One page per
+ * subscription (`useServerPage`: a plain query with `paginationOpts`, never
+ * `usePaginatedQuery`), so only the visible page is subscribed. The total is
+ * `fleet:count`, a separate small query that reads `orgStats` only.
  */
-import { useConvexAuth, usePaginatedQuery, type UsePaginatedQueryResult } from "convex/react";
-import { useMemo } from "react";
 import { api } from "@convex/_generated/api";
+import { useServerCount, useServerPage } from "../live/serverList";
+import { useMappedList } from "../live/mapList";
 import { deviceRowOf } from "../live/devices";
-import { usePagedState } from "../live/convex";
-import { PAGE_SIZE, type DeviceInstallRow, type DeviceRow } from "../types";
+import { listArgs, type ListQuery } from "../serverList";
+import type { DeviceInstallRow } from "../types";
 import type { DevicesApi } from "./api";
 
+/** While a search is set the server ignores `sort` (relevance order): none is sent. */
+const searched = (q: ListQuery): ListQuery => (q.search?.trim() ? { ...q, sort: undefined } : q);
+
 export const liveDevicesApi: DevicesApi = {
-  useDevicesScreen({ groupId, search }) {
-    const { isAuthenticated } = useConvexAuth();
-    // `fleet:list` does the name search itself (the search index, same pages); only defined arguments are sent.
-    const args = useMemo(() => ({ ...(groupId ? { groupId } : {}), ...(search ? { search } : {}) }), [groupId, search]);
-    const r = usePaginatedQuery(api.fleet.list, isAuthenticated ? args : "skip", { initialNumItems: PAGE_SIZE });
-    const results = useMemo(() => r.results.map(deviceRowOf), [r.results]);
-    return usePagedState({ ...r, results } as UsePaginatedQueryResult<DeviceRow>, PAGE_SIZE);
+  useDevicesCount({ groupId, search }) {
+    const text = search?.trim();
+    return useServerCount(api.fleet.count, { ...(groupId ? { groupId } : {}), ...(text ? { search: text } : {}) });
   },
-  useDeviceInstalls(deviceId) {
-    const { isAuthenticated } = useConvexAuth();
-    const r = usePaginatedQuery(api.fleet.installs, isAuthenticated ? { deviceId } : "skip", { initialNumItems: PAGE_SIZE });
-    return usePagedState(r as UsePaginatedQueryResult<DeviceInstallRow>, PAGE_SIZE, deviceId);
+  useDevicesScreen({ groupId, ...query }) {
+    const args = { ...listArgs(searched(query)), ...(groupId ? { groupId } : {}) };
+    const page = useServerPage<Parameters<typeof deviceRowOf>[0]>(api.fleet.list, args, groupId ?? "");
+    return useMappedList(page, deviceRowOf);
+  },
+  useDeviceInstalls(deviceId, query) {
+    // `fleet:installs` sorts by "updated" only, and has no search.
+    const args = { deviceId, paginationOpts: listArgs(query).paginationOpts, sort: { key: "updated", dir: query.sort?.dir ?? "desc" } };
+    return useServerPage<DeviceInstallRow>(api.fleet.installs, args, deviceId);
   },
 };
 

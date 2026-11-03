@@ -1,4 +1,4 @@
-import { memo, useEffect, useId, useMemo, useRef, useState, type ReactNode } from "react";
+import { useEffect, useId, useMemo, useRef, useState, type ReactNode } from "react";
 import { Link } from "react-router";
 import { Button, Input, Pill, Select, type PillTone } from "@rulebox/ui";
 import IconAdd from "~icons/solar/add-square-linear";
@@ -6,21 +6,19 @@ import IconKey from "~icons/solar/key-minimalistic-linear";
 import { useGroupsScreen, usePlan } from "../data";
 import { useCreateEnrollmentCode, useEnrollmentScreen, useRevokeEnrollmentCode } from "../data/enrollment";
 import type { EnrollmentCodeRow, EnrollmentCodeState, GroupRow } from "../data/types";
-import { Card } from "../components/Card";
 import { ConfirmDialog } from "../components/ConfirmDialog";
 import { CopyField } from "../components/CopyField";
-import { DataTable, type Column } from "../components/DataTable";
+import type { Column } from "../components/DataTable";
 import { EmptyState } from "../components/EmptyState";
 import { Field } from "../components/Field";
 import { FormError } from "../components/FormError";
-import { LoadMore } from "../components/LoadMore";
 import { Modal } from "../components/Modal";
 import { InlineNotice } from "../components/Notice";
 import { PageHeader } from "../components/PageHeader";
-import { PagedRegion, RegionBoundary } from "../components/Region";
 import { RelativeTime } from "../components/RelativeTime";
 import { RoleGate } from "../components/RoleGate";
-import { SkeletonRows } from "../components/Skeleton";
+import { ServerTable } from "../components/ServerTable";
+import { useListPaging, useListView, type ListConfig } from "../lib/listView";
 import { useCan } from "../lib/member";
 import { useToast } from "../lib/toast";
 import { formatDateTime } from "../lib/format";
@@ -83,11 +81,7 @@ export default function Enrollment() {
         <InlineNotice tone="warning" title={s.noGroups} action={<Link className="rb-btn rb-btn--ghost dash-btn--sm" to="/groups">{s.addGroup}</Link>} />
       ) : null}
       {created ? <OneTimeCode created={created} onClose={() => setCreated(null)} /> : null}
-      <Card body="none">
-        <RegionBoundary>
-          <CodeList canAct={canAct} onRevoke={setRevoking} emptyAction={add} />
-        </RegionBoundary>
-      </Card>
+      <CodeList canAct={canAct} onRevoke={setRevoking} emptyAction={add} />
       {creating && groupList ? (
         <CreateDialog
           groups={groupList}
@@ -114,51 +108,19 @@ export default function Enrollment() {
   );
 }
 
+/** `enrollmentCodes:list` sort keys; the first is the default (newest first). No search and no total. */
+const LIST: ListConfig = { sorts: ["created", "expires"], defaultSort: { key: "created", dir: "desc" } };
+
 /**
- * The list. `nowMs` is the minute, so the subscription changes at most once a
- * minute. A new `nowMs` restarts the pagination at the first page, so once
- * more pages are loaded the minute stops moving: the rows' expiry and state
- * keep ticking on their own (`displayState`) without a new query.
+ * The list, one page at a time (page, page size and sort live in the URL). `nowMs` is the minute, so the
+ * subscription changes at most once a minute; the rows' expiry and state also keep ticking on their own
+ * (`displayState`) without a new query. Action rows: a click on the row does nothing.
  */
 function CodeList({ canAct, onRevoke, emptyAction }: { canAct: boolean; onRevoke: (row: EnrollmentCodeRow) => void; emptyAction: ReactNode }) {
   const minute = useMinute();
-  const [extraPages, setExtraPages] = useState(false);
-  const [queryMinute, setQueryMinute] = useState(minute);
-  if (!extraPages && queryMinute !== minute) setQueryMinute(minute);
-  const codes = useEnrollmentScreen(queryMinute);
-  return (
-    <PagedRegion state={codes} skeleton={<SkeletonRows rows={5} columns={5} />}>
-      {(p) =>
-        p.items.length === 0 ? (
-          <EmptyState icon={<IconKey />} title={s.emptyTitle} body={canAct ? s.emptyBody : s.emptyBodyViewer} action={emptyAction} />
-        ) : (
-          <>
-            <CodesTable rows={p.items} canAct={canAct} onRevoke={onRevoke} />
-            <LoadMore
-              shown={p.items.length}
-              canLoadMore={p.canLoadMore}
-              isLoadingMore={p.isLoadingMore}
-              loadMore={() => {
-                setExtraPages(true);
-                p.loadMore();
-              }}
-            />
-          </>
-        )
-      }
-    </PagedRegion>
-  );
-}
-
-const CodesTable = memo(function CodesTable({
-  rows,
-  canAct,
-  onRevoke,
-}: {
-  rows: EnrollmentCodeRow[];
-  canAct: boolean;
-  onRevoke: (row: EnrollmentCodeRow) => void;
-}) {
+  const view = useListView(LIST);
+  const paging = useListPaging(view, { total: null });
+  const codes = useEnrollmentScreen(minute, paging.query);
   const cols = useMemo<Column<EnrollmentCodeRow>[]>(
     () => [
       {
@@ -166,13 +128,8 @@ const CodesTable = memo(function CodesTable({
         header: s.colLabel,
         primary: true,
         cell: (c) => (
-          <span className="dash-cell-stack">
-            <span className={["dash-truncate", c.label ? "" : "dash-muted"].join(" ")} title={c.label} style={{ fontWeight: 600 }}>
-              {c.label ?? s.unlabeled}
-            </span>
-            <span className="dash-cell-sub">
-              <RelativeTime ms={c.createdAt} />
-            </span>
+          <span className={["dash-truncate", c.label ? "" : "dash-muted"].join(" ")} title={c.label} style={{ fontWeight: 600 }}>
+            {c.label ?? s.unlabeled}
           </span>
         ),
       },
@@ -189,7 +146,8 @@ const CodesTable = memo(function CodesTable({
           ),
       },
       { key: "uses", header: s.colUses, cell: (c) => <span className="dash-mono">{s.used(Math.max(0, c.usesTotal - c.usesLeft), c.usesTotal)}</span> },
-      { key: "expires", header: s.colExpires, cell: (c) => <RelativeTime ms={c.expiresAt} /> },
+      { key: "created", header: s.colCreated, sortable: true, sortDefaultDir: "desc", cell: (c) => <RelativeTime ms={c.createdAt} /> },
+      { key: "expires", header: s.colExpires, sortable: true, sortDefaultDir: "desc", cell: (c) => <RelativeTime ms={c.expiresAt} /> },
       { key: "state", header: s.colState, cell: (c) => <StateCell row={c} /> },
       {
         key: "by",
@@ -215,9 +173,20 @@ const CodesTable = memo(function CodesTable({
     ],
     [canAct, onRevoke],
   );
-  return <DataTable caption={s.listCaption} columns={cols} rows={rows} getKey={(c) => c._id} isDim={(c) => c.state !== "active"} />;
-});
-
+  return (
+    <ServerTable<EnrollmentCodeRow>
+      framed
+      caption={s.listCaption}
+      columns={cols}
+      getKey={(c) => c._id}
+      isDim={(c) => c.state !== "active"}
+      paging={paging}
+      list={codes}
+      total={null}
+      empty={<EmptyState icon={<IconKey />} title={s.emptyTitle} body={canAct ? s.emptyBody : s.emptyBodyViewer} action={emptyAction} />}
+    />
+  );
+}
 /** Colour and text; re-renders on its own clock (30 s), not the table's. */
 function StateCell({ row }: { row: EnrollmentCodeRow }) {
   const state = displayState(row, useNow(30_000));

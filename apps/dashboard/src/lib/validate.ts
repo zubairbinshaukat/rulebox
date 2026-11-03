@@ -280,8 +280,35 @@ export function wingetId(value: string): Check {
   return /^[A-Za-z0-9][A-Za-z0-9-]*(\.[A-Za-z0-9][A-Za-z0-9._-]*)+$/.test(t) && t.length <= 128 ? null : v.wingetId;
 }
 
-/** Reset folders (Section 4.12): `{LocalAppData}\<rel>` / `{RoamingAppData}\<rel>`, 1–6 components. */
+/**
+ * Mirrors `RESET_DENY` of convex/lib/pathRules.ts and crates/rulebox-policy/src/paths.rs (Step 16 review):
+ * folders below `{LocalAppData}` / `{RoamingAppData}` a reset may never touch (DPAPI keys, saved credentials,
+ * certificates, the Windows shell's data, the Staff App's own data, anything named `Rulebox`). The shared
+ * vectors (crates/rulebox-policy/tests/vectors/reset-folders.json) pin all three.
+ */
+export const RESET_DENY: readonly (readonly string[])[] = [
+  ["Microsoft", "Credentials"],
+  ["Microsoft", "Crypto"],
+  ["Microsoft", "Protect"],
+  ["Microsoft", "SystemCertificates"],
+  ["Microsoft", "Vault"],
+  ["Microsoft", "Windows"],
+  ["dev.rulebox.staff"],
+  ["Rulebox"],
+];
+
+/** The folder and a `RESET_DENY` entry agree, ignoring case, on their common length (the entry, inside it, or a folder that contains it). */
+function resetDenied(rest: string[]): boolean {
+  return RESET_DENY.some((entry) => {
+    const n = Math.min(entry.length, rest.length);
+    for (let i = 0; i < n; i++) if (entry[i]!.toLowerCase() !== rest[i]!.toLowerCase()) return false;
+    return true;
+  });
+}
+
+/** Reset folders (Section 4.12): `{LocalAppData}\<rel>` / `{RoamingAppData}\<rel>`, 1–6 components, at most 20, not on the deny list. */
 export function resetFolders(list: string[]): Check {
+  if (list.length > 20) return v.tooManyResetFolders;
   for (const item of list) {
     const prefix = ["{LocalAppData}\\", "{RoamingAppData}\\"].find((p) => item.startsWith(p));
     if (!prefix) return v.resetFolder(item);
@@ -289,6 +316,7 @@ export function resetFolders(list: string[]): Check {
     if (rest.length < 1 || rest.length > 6 || !rest.every(pathComponent)) {
       return v.resetFolder(item);
     }
+    if (resetDenied(rest)) return v.resetFolderDenied(item);
   }
   return null;
 }

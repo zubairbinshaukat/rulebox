@@ -18,6 +18,8 @@ const cx = vi.hoisted(() => ({
   pages: {} as Record<string, unknown[]>,
   paged: [] as { name: string; args: unknown }[],
   queried: [] as string[],
+  /** Every query the screen subscribed to (Phase 4b lists are plain queries with `paginationOpts`). */
+  queries: [] as { name: string; args: Record<string, unknown> }[],
   fns: {} as Record<string, (args?: unknown) => Promise<unknown>>,
 }));
 
@@ -27,6 +29,7 @@ vi.mock("convex/react", () => ({
     Object.fromEntries(
       Object.entries(req).map(([k, r]) => {
         cx.queried.push(getFunctionName(r.query));
+        cx.queries.push({ name: getFunctionName(r.query), args: r.args as Record<string, unknown> });
         return [k, cx.results[getFunctionName(r.query)]];
       }),
     ),
@@ -83,6 +86,13 @@ function ui(node: ReactNode, role: Me["role"], path: string) {
   );
 }
 
+interface ListCall {
+  paginationOpts: { numItems: number; cursor: string | null };
+  sort?: { key: string; dir: string };
+  search?: string;
+  groupId?: string;
+}
+
 const HOUR = 3_600_000;
 const row = (id: string, name: string, over: Record<string, unknown> = {}) => ({
   _id: id,
@@ -123,21 +133,53 @@ beforeEach(() => {
   cx.pages = {};
   cx.paged = [];
   cx.queried = [];
+  cx.queries = [];
   cx.fns = {};
+  localStorage.clear();
+  sessionStorage.clear();
+  document.documentElement.removeAttribute("data-view");
 });
 
 afterEach(() => {
   vi.useRealTimers();
 });
 
-describe("Devices (fleet:list)", () => {
+describe("Devices (fleet:list, one server-driven page at a time)", () => {
+  const GROUP = { _id: "g1", name: "Sales", createdAt: 1, revision: 0, devices: { count: 1, more: false }, employees: { count: 0, more: false } };
+  const listPage = (rows: unknown[], over: Record<string, unknown> = {}) => ({ page: rows, isDone: true, continueCursor: "cur-next", ...over });
+  const lastQuery = (name: string) => [...cx.queries].reverse().find((q) => q.name === name);
+  const listArgs = () => lastQuery("fleet:list")!.args as unknown as ListCall;
+  const DEFAULT_ARGS = { paginationOpts: { numItems: 10, cursor: null }, sort: { key: "created", dir: "desc" } };
+  const pagerNav = () => screen.getByRole("navigation", { name: strings.pager.nav });
+  const submitSearch = (text: string) => {
+    const box = screen.getByRole("searchbox") as HTMLInputElement;
+    fireEvent.change(box, { target: { value: text } });
+    fireEvent.submit(box.closest("form")!);
+  };
+
+  /** `/devices` plus a stand-in detail route, to see where a click goes. */
+  function uiNav(path: string) {
+    return render(
+      <ToastProvider>
+        <MeContext.Provider value={{ ...admin, role: "viewer" }}>
+          <MemoryRouter initialEntries={[path]}>
+            <Routes>
+              <Route path="/devices" element={<Devices />} />
+              <Route path="/devices/:id" element={<p>detail page</p>} />
+            </Routes>
+          </MemoryRouter>
+        </MeContext.Provider>
+      </ToastProvider>,
+    );
+  }
+
   it("shows online and offline from the presence row, the group, the summary and the policy columns", () => {
     cx.results["groups:list"] = [];
-    cx.pages["fleet:list"] = [
+    cx.results["fleet:list"] = listPage([
       row("d1", "Front desk"),
       row("d2", "Back office PC", { presence: { online: false, since: Date.now() - 3 * HOUR, revoked: false }, groupId: undefined, groupName: undefined }),
       row("d3", "Never seen", { presence: { online: false, since: null, revoked: false }, summary: null, latestVersion: null }),
-    ];
+    ]);
     ui(<Devices />, "viewer", "/devices");
     const table = screen.getByRole("table");
     const rows = within(table).getAllByRole("row");
@@ -149,41 +191,44 @@ describe("Devices (fleet:list)", () => {
     expect(within(rows[3]!).getByText(strings.common.neverSeen)).toBeTruthy();
     // The viewer sees no admin action.
     expect(screen.queryByRole("button", { name: strings.devices.checkNow })).toBeNull();
-    expect(cx.paged.at(-1)).toEqual({ name: "fleet:list", args: {} });
+    // One page, newest first, ten rows: the default list arguments.
+    expect(listArgs()).toEqual(DEFAULT_ARGS);
+    expect(lastQuery("fleet:count")!.args).toEqual({});
   });
 
-  it("passes the group filter to the list", () => {
-    cx.results["groups:list"] = [{ _id: "g1", name: "Sales", createdAt: 1, revision: 0, devices: { count: 1, more: false }, employees: { count: 0, more: false } }];
+  it("passes the group filter to the list and to the count", () => {
+    cx.results["groups:list"] = [GROUP];
     ui(<Devices />, "viewer", "/devices?group=g1");
-    expect(cx.paged.at(-1)).toEqual({ name: "fleet:list", args: { groupId: "g1" } });
+    expect(listArgs()).toEqual({ ...DEFAULT_ARGS, groupId: "g1" });
+    expect(lastQuery("fleet:count")!.args).toEqual({ groupId: "g1" });
   });
 
   it("offers a No group filter: it sends groupId none at once (no waiting for the groups) and keeps it in the URL", () => {
     ui(<Devices />, "viewer", "/devices?group=none");
-    expect(cx.paged.at(-1)).toEqual({ name: "fleet:list", args: { groupId: "none" } });
+    expect(listArgs()).toEqual({ ...DEFAULT_ARGS, groupId: "none" });
     expect((screen.getByLabelText(strings.devices.groupFilter) as HTMLSelectElement).value).toBe("none");
   });
 
   it("choosing No group in the filter lists the PCs without a group, and All groups goes back", async () => {
-    cx.results["groups:list"] = [{ _id: "g1", name: "Sales", createdAt: 1, revision: 0, devices: { count: 1, more: false }, employees: { count: 0, more: false } }];
+    cx.results["groups:list"] = [GROUP];
     ui(<Devices />, "viewer", "/devices");
     const select = screen.getByLabelText(strings.devices.groupFilter) as HTMLSelectElement;
     expect(within(select).getByRole("option", { name: strings.devices.noGroupFilter })).toBeTruthy();
     fireEvent.change(select, { target: { value: "none" } });
-    await waitFor(() => expect(cx.paged.at(-1)).toEqual({ name: "fleet:list", args: { groupId: "none" } }));
+    await waitFor(() => expect(listArgs()).toEqual({ ...DEFAULT_ARGS, groupId: "none" }));
     fireEvent.change(select, { target: { value: "" } });
-    await waitFor(() => expect(cx.paged.at(-1)).toEqual({ name: "fleet:list", args: {} }));
+    await waitFor(() => expect(listArgs()).toEqual(DEFAULT_ARGS));
   });
 
   it("badges a PC that is over the plan limit or suspended; ok, null and a missing state show nothing", () => {
     cx.results["groups:list"] = [];
-    cx.pages["fleet:list"] = [
+    cx.results["fleet:list"] = listPage([
       row("d1", "Over PC", { planState: "overLimit" }),
       row("d2", "Suspended PC", { planState: "suspended" }),
       row("d3", "Fine PC", { planState: "ok" }),
       row("d4", "Unpublished PC", { planState: null }),
       row("d5", "Older server PC"),
-    ];
+    ]);
     ui(<Devices />, "viewer", "/devices");
     const rows = within(screen.getByRole("table")).getAllByRole("row");
     expect(within(rows[1]!).getByText(strings.devices.planOverLimit).getAttribute("title")).toBe(strings.devices.planOverLimitHint);
@@ -195,53 +240,169 @@ describe("Devices (fleet:list)", () => {
   });
 
   it("ignores a group filter that is not a group of this organization and clears it from the URL", async () => {
-    cx.results["groups:list"] = [{ _id: "g1", name: "Sales", createdAt: 1, revision: 0, devices: { count: 1, more: false }, employees: { count: 0, more: false } }];
+    cx.results["groups:list"] = [GROUP];
     ui(<Devices />, "viewer", "/devices?group=gone");
-    await waitFor(() => expect(cx.paged.at(-1)).toEqual({ name: "fleet:list", args: {} }));
-    // The unknown id never reaches fleet:list (it would throw not_found into the region boundary).
-    expect(cx.paged.some((p) => JSON.stringify(p.args).includes("gone"))).toBe(false);
+    await waitFor(() => expect(listArgs()).toEqual(DEFAULT_ARGS));
+    // The unknown id never reaches fleet:list (it would answer not_found).
+    expect(cx.queries.some((q) => JSON.stringify(q.args).includes("gone"))).toBe(false);
     expect(screen.queryByRole("alert")).toBeNull();
     expect((screen.getByLabelText(strings.devices.groupFilter) as HTMLSelectElement).value).toBe("");
   });
 
   it("waits for the groups before running a list that has a group filter", () => {
     ui(<Devices />, "viewer", "/devices?group=g1");
-    expect(cx.paged).toEqual([]);
+    expect(cx.queries.filter((q) => q.name === "fleet:list")).toEqual([]);
   });
 
-  it("caps the search text at 100 characters, typed, pasted or both", async () => {
+  it("searches on Enter, not while typing, at most 100 characters; a search sends no sort (the server ranks by relevance)", async () => {
     cx.results["groups:list"] = [];
     ui(<Devices />, "viewer", "/devices");
     const box = screen.getByRole("searchbox") as HTMLInputElement;
     expect(box.maxLength).toBe(100);
-    fireEvent.change(box, { target: { value: "x".repeat(150) } });
-    expect(box.value).toHaveLength(100);
-    await waitFor(() => expect(cx.paged.at(-1)).toEqual({ name: "fleet:list", args: { search: "x".repeat(100) } }));
+    fireEvent.change(box, { target: { value: "front" } });
+    expect(listArgs()).toEqual(DEFAULT_ARGS);
+    fireEvent.submit(box.closest("form")!);
+    await waitFor(() => expect(listArgs()).toEqual({ paginationOpts: { numItems: 10, cursor: null }, search: "front" }));
+    expect(lastQuery("fleet:count")!.args).toEqual({ search: "front" });
+    submitSearch("x".repeat(150));
+    await waitFor(() => expect(listArgs().search).toBe("x".repeat(100)));
+    // The sort headers are inactive while the matches come by relevance.
+    expect(screen.getByText(strings.table.byRelevance)).toBeTruthy();
   });
 
-  it("with more than 50 PCs loaded, Check now says it checks the first 50", async () => {
+  it("keeps the page, page size, sort, search and group in the URL and reads them back; invalid values fall back to the defaults", () => {
+    cx.results["groups:list"] = [GROUP];
+    cx.results["fleet:list"] = listPage([row("d1", "Front desk")]);
+    ui(<Devices />, "viewer", "/devices?size=25&sort=name&dir=desc&group=g1");
+    expect(listArgs()).toEqual({ paginationOpts: { numItems: 25, cursor: null }, groupId: "g1", sort: { key: "name", dir: "desc" } });
+    expect((screen.getByLabelText(strings.pager.rowsPerPage) as HTMLSelectElement).value).toBe("25");
+    cleanup();
+    cx.queries = [];
+    ui(<Devices />, "viewer", "/devices?size=7&sort=bogus&dir=sideways&page=-3");
+    expect(listArgs()).toEqual(DEFAULT_ARGS);
+    expect((screen.getByLabelText(strings.pager.rowsPerPage) as HTMLSelectElement).value).toBe("10");
+  });
+
+  it("a header click sorts on the server (name first A-Z, then Z-A); the active column says so with aria-sort", async () => {
     cx.results["groups:list"] = [];
-    cx.pages["fleet:list"] = Array.from({ length: 60 }, (_, i) => row(`d${i}`, `PC ${i}`));
+    cx.results["fleet:list"] = listPage([row("d1", "Front desk")]);
+    ui(<Devices />, "viewer", "/devices");
+    const header = (name: string) => screen.getByRole("columnheader", { name: new RegExp(name) });
+    expect(header(strings.devices.colEnrolled).getAttribute("aria-sort")).toBe("descending");
+    fireEvent.click(within(header(strings.devices.colName)).getByRole("button"));
+    await waitFor(() => expect(listArgs().sort).toEqual({ key: "name", dir: "asc" }));
+    expect(header(strings.devices.colName).getAttribute("aria-sort")).toBe("ascending");
+    fireEvent.click(within(header(strings.devices.colName)).getByRole("button"));
+    await waitFor(() => expect(listArgs().sort).toEqual({ key: "name", dir: "desc" }));
+    // Columns the server cannot sort by are no buttons.
+    expect(within(header(strings.devices.colStatus)).queryByRole("button")).toBeNull();
+  });
+
+  it("shows the total and the page count; with a search or one group there is no total, only Page N", () => {
+    cx.results["groups:list"] = [GROUP];
+    cx.results["fleet:count"] = { total: 524 };
+    cx.results["fleet:list"] = listPage([row("d1", "Front desk")], { isDone: false });
+    ui(<Devices />, "viewer", "/devices");
+    expect(screen.getByText(`${strings.pager.records(524)} · ${strings.pager.pageOf(1, 53)}`)).toBeTruthy();
+    expect(within(pagerNav()).getByRole("button", { name: strings.pager.goTo(53) })).toBeTruthy();
+    cleanup();
+    cx.results["fleet:count"] = { total: null };
+    ui(<Devices />, "viewer", "/devices?group=g1");
+    expect(screen.getByText(strings.pager.page(1))).toBeTruthy();
+    expect(within(pagerNav()).queryByRole("button", { name: strings.pager.goTo(53) })).toBeNull();
+  });
+
+  it("Next page asks for the cursor the server gave; a sort, search or page size change starts over on page 1", async () => {
+    cx.results["groups:list"] = [];
+    cx.results["fleet:count"] = { total: 524 };
+    cx.results["fleet:list"] = listPage([row("d1", "Front desk")], { isDone: false, continueCursor: "cur-2" });
+    ui(<Devices />, "viewer", "/devices");
+    fireEvent.click(screen.getByRole("button", { name: strings.pager.next }));
+    await waitFor(() => expect(listArgs().paginationOpts).toEqual({ numItems: 10, cursor: "cur-2" }));
+    expect(screen.getByText(`${strings.pager.records(524)} · ${strings.pager.pageOf(2, 53)}`)).toBeTruthy();
+    fireEvent.click(within(screen.getByRole("columnheader", { name: new RegExp(strings.devices.colName) })).getByRole("button"));
+    await waitFor(() => expect(listArgs().paginationOpts).toEqual({ numItems: 10, cursor: null }));
+    expect(screen.getByText(`${strings.pager.records(524)} · ${strings.pager.pageOf(1, 53)}`)).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: strings.pager.next }));
+    await waitFor(() => expect(listArgs().paginationOpts.cursor).toBe("cur-2"));
+    fireEvent.change(screen.getByLabelText(strings.pager.rowsPerPage), { target: { value: "25" } });
+    await waitFor(() => expect(listArgs().paginationOpts).toEqual({ numItems: 25, cursor: null }));
+    fireEvent.click(screen.getByRole("button", { name: strings.pager.next }));
+    await waitFor(() => expect(listArgs().paginationOpts.cursor).toBe("cur-2"));
+    submitSearch("fro");
+    await waitFor(() => expect(listArgs()).toEqual({ paginationOpts: { numItems: 25, cursor: null }, search: "fro" }));
+  });
+
+  it("the last page is the same list read in the opposite order with total mod page size rows, shown reversed", async () => {
+    cx.results["groups:list"] = [];
+    cx.results["fleet:count"] = { total: 524 };
+    cx.results["fleet:list"] = listPage([row("d1", "Front desk")], { isDone: false });
+    ui(<Devices />, "viewer", "/devices");
+    cx.results["fleet:list"] = listPage([row("a", "Newest"), row("b", "Second"), row("c", "Third"), row("d", "Fourth")], { isDone: true });
+    fireEvent.click(within(pagerNav()).getByRole("button", { name: strings.pager.goTo(53) }));
+    await waitFor(() => expect(listArgs()).toEqual({ paginationOpts: { numItems: 4, cursor: null }, sort: { key: "created", dir: "asc" } }));
+    const names = within(screen.getByRole("table"))
+      .getAllByRole("row")
+      .slice(1)
+      .map((r) => within(r).getAllByRole("link")[0]!.textContent);
+    // The server's reverse read comes oldest first; the screen shows the usual order.
+    expect(names).toEqual(["Fourth", "Third", "Second", "Newest"]);
+    expect(screen.getByText(`${strings.pager.records(524)} · ${strings.pager.pageOf(53, 53)}`)).toBeTruthy();
+  });
+
+  it("the whole row opens the PC and the name stays a real link", async () => {
+    cx.results["groups:list"] = [];
+    cx.results["fleet:list"] = listPage([row("d1", "Front desk")]);
+    uiNav("/devices");
+    const link = screen.getByRole("link", { name: "Front desk" });
+    expect(link.getAttribute("href")).toBe("/devices/d1");
+    fireEvent.click(within(screen.getByRole("table")).getByText("26100"));
+    expect(await screen.findByText("detail page")).toBeTruthy();
+  });
+
+  it("the cards view draws the same rows as cards, with a sort select", () => {
+    cx.results["groups:list"] = [];
+    cx.results["fleet:list"] = listPage([row("d1", "Front desk")]);
+    ui(<Devices />, "viewer", "/devices");
+    fireEvent.click(screen.getByRole("radio", { name: strings.table.viewCards }));
+    expect(document.documentElement.getAttribute("data-view")).toBe("cards");
+    expect(screen.queryByRole("region", { name: strings.devices.title })).toBeNull();
+    expect(screen.getByRole("link", { name: "Front desk" })).toBeTruthy();
+    const select = screen.getByLabelText(strings.table.sortSelect) as HTMLSelectElement;
+    fireEvent.change(select, { target: { value: "name:asc" } });
+    expect(listArgs().sort).toEqual({ key: "name", dir: "asc" });
+  });
+
+  it("Check now asks the PCs of a page of 50", async () => {
+    cx.results["groups:list"] = [];
+    cx.results["fleet:list"] = listPage(Array.from({ length: 50 }, (_, i) => row(`d${i}`, `PC ${i}`)));
     const checkNow = vi.fn(async () => ({ checkId: "c1" }));
     cx.fns["fleet:checkNow"] = checkNow;
-    ui(<Devices />, "admin", "/devices");
-    expect(screen.queryByRole("button", { name: strings.devices.checkNow })).toBeNull();
-    fireEvent.click(screen.getByRole("button", { name: strings.devices.checkNowFirst(50) }));
+    ui(<Devices />, "admin", "/devices?size=50");
+    expect(listArgs().paginationOpts).toEqual({ numItems: 50, cursor: null });
+    fireEvent.click(screen.getByRole("button", { name: strings.devices.checkNow }));
     await waitFor(() => expect(checkNow).toHaveBeenCalledOnce());
     const calls = checkNow.mock.calls as unknown as [{ deviceIds: string[] }][];
     expect(calls[0]![0].deviceIds).toHaveLength(50);
   });
 
-  it("an empty fleet points an admin at the enrollment screen", () => {
-    cx.results["groups:list"] = [];
+  it("an empty fleet points an admin at the enrollment screen; an empty filter says nothing matches", () => {
+    cx.results["groups:list"] = [GROUP];
+    cx.results["fleet:list"] = listPage([]);
     ui(<Devices />, "admin", "/devices");
     expect(screen.getByText(strings.devices.emptyTitle)).toBeTruthy();
     expect(screen.getAllByRole("link", { name: /enrollment code|Add a PC/i }).length).toBeGreaterThan(0);
+    cleanup();
+    ui(<Devices />, "admin", "/devices?group=g1");
+    expect(screen.getByText(strings.devices.noMatchTitle)).toBeTruthy();
+    cleanup();
+    ui(<Devices />, "admin", "/devices?q=zzz");
+    expect(screen.getByText(strings.table.noResults("zzz"))).toBeTruthy();
   });
 
   it("Check now asks the visible, non-revoked PCs and shows who answered", async () => {
     cx.results["groups:list"] = [];
-    cx.pages["fleet:list"] = [row("d1", "Front desk"), row("d2", "Old PC", { presence: { online: false, since: 1, revoked: true } })];
+    cx.results["fleet:list"] = listPage([row("d1", "Front desk"), row("d2", "Old PC", { presence: { online: false, since: 1, revoked: true } })]);
     const checkNow = vi.fn(async () => ({ checkId: "c1" }));
     cx.fns["fleet:checkNow"] = checkNow;
     ui(<Devices />, "admin", "/devices");
@@ -253,13 +414,20 @@ describe("Devices (fleet:list)", () => {
 
   it("Check now: the 1-per-minute limit is shown as a sentence", async () => {
     cx.results["groups:list"] = [];
-    cx.pages["fleet:list"] = [row("d1", "Front desk")];
+    cx.results["fleet:list"] = listPage([row("d1", "Front desk")]);
     cx.fns["fleet:checkNow"] = vi.fn(async () => {
       throw new ConvexError({ code: "rate_limited" });
     });
     ui(<Devices />, "admin", "/devices");
     fireEvent.click(screen.getByRole("button", { name: strings.devices.checkNow }));
     expect(await screen.findByText(strings.errors.rateLimited)).toBeTruthy();
+  });
+
+  it("a failing list is a visible error with Try again, not a blank page", () => {
+    cx.results["groups:list"] = [];
+    cx.results["fleet:list"] = new ConvexError({ code: "internal" });
+    ui(<Devices />, "viewer", "/devices");
+    expect(screen.getByRole("alert").textContent).toContain(strings.common.regionFailed);
   });
 });
 
