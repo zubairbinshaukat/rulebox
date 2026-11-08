@@ -7,6 +7,7 @@ import {
   DAY_MS,
   HOUR_MS,
   JWT_DURATION_MS,
+  MIGRATION_DEVICE_BATCH,
   MINUTE_MS,
   SESSION_INACTIVE_MS,
   SESSION_TOTAL_MS,
@@ -72,7 +73,7 @@ describe("JWT lifetime and revocation (A10)", () => {
 
   test("mutations and actions refuse a session past its expiry; queries only read", async () => {
     const t = await setupAuth();
-    const owner = await asMember(t, { role: "owner", mfa: true });
+    const owner = await asMember(t, { role: "owner" });
     await t.run((ctx) => ctx.db.patch(owner.sessionId, { expirationTime: Date.now() - 1 }));
     // Mutation wrapper (members:revokeInvite) and action wrapper (members:invite).
     const inviteId = await t.run((ctx) =>
@@ -81,21 +82,20 @@ describe("JWT lifetime and revocation (A10)", () => {
     await expectCode(owner.as.mutation(api.members.revokeInvite, { inviteId }), "unauthenticated");
     await expectCode(owner.as.action(api.members.invite, { email: "y@acme.test", role: "viewer" }), "unauthenticated");
     // A query still answers within the last JWT's lifetime (no Date.now() in queries).
-    expect((await owner.as.query(api.members.list, {})).members.length).toBe(1);
+    expect((await owner.as.query(api.members.page, { paginationOpts: { numItems: 50, cursor: null } })).page.length).toBe(1);
   });
 });
 
 describe("maintenance:daily (A10)", () => {
-  test("deletes expired sessions, old MFA rows, expired and used refresh tokens; keeps the active token and its parent", async () => {
+  test("deletes expired sessions, expired and used refresh tokens; keeps the active token and its parent", async () => {
     const t = await setupAuth();
     const now = Date.now();
 
-    // An expired session (created 8 days ago) with an MFA row and a token.
+    // An expired session (created 8 days ago) with a token.
     const { user, ...old } = await at(now - SESSION_TOTAL_MS - DAY_MS, () =>
       t.run(async (ctx) => {
         const user = await ctx.db.insert("users", { email: "u@acme.test" });
         const s = await ctx.db.insert("authSessions", { userId: user, expirationTime: Date.now() + SESSION_TOTAL_MS });
-        await ctx.db.insert("mfaSessions", { sessionId: s, userId: user, verifiedAt: Date.now() });
         const tok = await ctx.db.insert("authRefreshTokens", { sessionId: s, expirationTime: Date.now() + SESSION_INACTIVE_MS });
         return { user, s, tok };
       }),
@@ -105,7 +105,6 @@ describe("maintenance:daily (A10)", () => {
     const live = await at(now - 4 * HOUR_MS, () =>
       t.run(async (ctx) => {
         const s = await ctx.db.insert("authSessions", { userId: user, expirationTime: Date.now() + SESSION_TOTAL_MS });
-        await ctx.db.insert("mfaSessions", { sessionId: s, userId: user, verifiedAt: Date.now() });
         return s;
       }),
     );
@@ -138,14 +137,12 @@ describe("maintenance:daily (A10)", () => {
       oldSession: await ctx.db.get(old.s),
       oldToken: await ctx.db.get(old.tok),
       liveSession: await ctx.db.get(live),
-      mfa: (await ctx.db.query("mfaSessions").withIndex("by_user", (q) => q.eq("userId", user)).take(10)).map((r) => r.sessionId),
       tokens: (await ctx.db.query("authRefreshTokens").withIndex("sessionId", (q) => q.eq("sessionId", live)).take(10)).map((r) => r._id),
       grace: await ctx.db.get(g1),
     }));
     expect(left.oldSession).toBeNull();
     expect(left.oldToken).toBeNull();
     expect(left.liveSession).not.toBeNull();
-    expect(left.mfa).toEqual([live]);
     // t1, t2 deleted; t3 (parent of the active token) and t4 (active) kept.
     expect(new Set(left.tokens)).toEqual(new Set([t3, t4]));
     expect(left.grace).not.toBeNull();
@@ -222,5 +219,43 @@ describe("maintenance:daily (A10)", () => {
     // A cleared row reads as a full bucket with ts 0; the new one keeps its state.
     expect(values.old.ts).toBe(0);
     expect(values.fresh.ts).toBeGreaterThan(0);
+  });
+});
+
+describe("maintenance:dropTotpTables (WP5b, TOTP removal migration)", () => {
+  test("deletes every memberSecrets and mfaSessions row in bounded batches, leaves other tables alone, and can run again", async () => {
+    const t = await setupAuth();
+    const owner = await asMember(t, { role: "owner" });
+    const total = MIGRATION_DEVICE_BATCH + 20;
+    await t.run(async (ctx) => {
+      for (let i = 0; i < total; i++) {
+        const userId = await ctx.db.insert("users", { email: `totp${i}@acme.test` });
+        await ctx.db.insert("memberSecrets", {
+          userId,
+          totpSecret: "JBSWY3DPEHPK3PXP",
+          recoveryHashes: [],
+          lastTotpStep: 0,
+          totpFailures: 0,
+          totpLockedUntil: 0,
+        });
+        await ctx.db.insert("mfaSessions", { sessionId: owner.sessionId, userId, verifiedAt: Date.now() });
+      }
+    });
+    // One run is bounded: a full batch of each table, then it schedules itself.
+    const first = await t.mutation(internal.maintenance.dropTotpTables, {});
+    expect(first).toEqual({ memberSecrets: MIGRATION_DEVICE_BATCH, mfaSessions: MIGRATION_DEVICE_BATCH, done: false });
+    await t.finishAllScheduledFunctions(() => {});
+    const left = await t.run(async (ctx) => ({
+      secrets: await ctx.db.query("memberSecrets").take(5),
+      sessions: await ctx.db.query("mfaSessions").take(5),
+      authSession: await ctx.db.get(owner.sessionId),
+      member: await ctx.db.get(owner.memberId),
+    }));
+    expect(left.secrets).toEqual([]);
+    expect(left.sessions).toEqual([]);
+    expect(left.authSession).not.toBeNull();
+    expect(left.member).not.toBeNull();
+    // Idempotent: nothing left, nothing deleted, done.
+    expect(await t.mutation(internal.maintenance.dropTotpTables, {})).toEqual({ memberSecrets: 0, mfaSessions: 0, done: true });
   });
 });

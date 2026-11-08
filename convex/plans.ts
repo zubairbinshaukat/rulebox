@@ -1,7 +1,7 @@
 import { v } from "convex/values";
 import { internal } from "./_generated/api";
 import type { Doc } from "./_generated/dataModel";
-import { internalMutation, internalQuery } from "./_generated/server";
+import { internalQuery, internalMutation } from "./lib/functions";
 import { writeAudit, type AuditActor } from "./lib/audit";
 import { fail } from "./lib/errors";
 import {

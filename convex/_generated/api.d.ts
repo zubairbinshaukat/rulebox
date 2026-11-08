@@ -13,7 +13,6 @@ import type * as apps from "../apps.js";
 import type * as audit from "../audit.js";
 import type * as auth from "../auth.js";
 import type * as crons from "../crons.js";
-import type * as dev from "../dev.js";
 import type * as deviceApi from "../deviceApi.js";
 import type * as devices from "../devices.js";
 import type * as employees from "../employees.js";
@@ -64,12 +63,12 @@ import type * as lib_presence from "../lib/presence.js";
 import type * as lib_publish from "../lib/publish.js";
 import type * as lib_rateLimits from "../lib/rateLimits.js";
 import type * as lib_recoveryCodes from "../lib/recoveryCodes.js";
+import type * as lib_retry from "../lib/retry.js";
 import type * as lib_roster from "../lib/roster.js";
 import type * as lib_safeFetch from "../lib/safeFetch.js";
 import type * as lib_sessions from "../lib/sessions.js";
 import type * as lib_signing from "../lib/signing.js";
 import type * as lib_stepUp from "../lib/stepUp.js";
-import type * as lib_totp from "../lib/totp.js";
 import type * as lib_validators from "../lib/validators.js";
 import type * as lib_webauthnConfig from "../lib/webauthnConfig.js";
 import type * as lib_webmeta from "../lib/webmeta.js";
@@ -77,7 +76,6 @@ import type * as lib_winget from "../lib/winget.js";
 import type * as mail from "../mail.js";
 import type * as maintenance from "../maintenance.js";
 import type * as members from "../members.js";
-import type * as mfa from "../mfa.js";
 import type * as overview from "../overview.js";
 import type * as passkeys from "../passkeys.js";
 import type * as plans from "../plans.js";
@@ -88,6 +86,7 @@ import type * as settings from "../settings.js";
 import type * as setup from "../setup.js";
 import type * as stats from "../stats.js";
 import type * as stepUp from "../stepUp.js";
+import type * as testing from "../testing.js";
 
 import type {
   ApiFromModules,
@@ -101,7 +100,6 @@ declare const fullApi: ApiFromModules<{
   audit: typeof audit;
   auth: typeof auth;
   crons: typeof crons;
-  dev: typeof dev;
   deviceApi: typeof deviceApi;
   devices: typeof devices;
   employees: typeof employees;
@@ -152,12 +150,12 @@ declare const fullApi: ApiFromModules<{
   "lib/publish": typeof lib_publish;
   "lib/rateLimits": typeof lib_rateLimits;
   "lib/recoveryCodes": typeof lib_recoveryCodes;
+  "lib/retry": typeof lib_retry;
   "lib/roster": typeof lib_roster;
   "lib/safeFetch": typeof lib_safeFetch;
   "lib/sessions": typeof lib_sessions;
   "lib/signing": typeof lib_signing;
   "lib/stepUp": typeof lib_stepUp;
-  "lib/totp": typeof lib_totp;
   "lib/validators": typeof lib_validators;
   "lib/webauthnConfig": typeof lib_webauthnConfig;
   "lib/webmeta": typeof lib_webmeta;
@@ -165,7 +163,6 @@ declare const fullApi: ApiFromModules<{
   mail: typeof mail;
   maintenance: typeof maintenance;
   members: typeof members;
-  mfa: typeof mfa;
   overview: typeof overview;
   passkeys: typeof passkeys;
   plans: typeof plans;
@@ -176,6 +173,7 @@ declare const fullApi: ApiFromModules<{
   setup: typeof setup;
   stats: typeof stats;
   stepUp: typeof stepUp;
+  testing: typeof testing;
 }>;
 
 /**

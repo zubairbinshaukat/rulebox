@@ -5,6 +5,7 @@ import { constantTimeEqual, normalizeEmail } from "./crypto";
 import { fail } from "./errors";
 import { MAX_MEMBERSHIPS } from "./limits";
 import { insertMembership } from "./members";
+import { pruneOldSessions } from "./sessions";
 
 // Convex Auth callbacks (plan Step 3.1), kept here so tests can call them
 // directly. They run inside Convex Auth's `auth:store` mutation.
@@ -83,4 +84,6 @@ export async function beforeSessionCreation(
     .withIndex("by_user", (q) => q.eq("userId", args.userId))
     .take(MAX_MEMBERSHIPS);
   if (!rows.some((m) => m.status === "active")) fail("account_disabled");
+  // Keep the session count bounded so "end every session" stays one transaction.
+  await pruneOldSessions(ctx, args.userId);
 }

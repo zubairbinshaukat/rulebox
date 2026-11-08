@@ -165,15 +165,16 @@ describe("sign-up and sign-in through Convex Auth", () => {
     const t = await setupAuth();
     const { orgId, inviteCode, token } = await joined(t);
     const me = await asToken(t, token).query(api.account.me, {});
-    // Phase 4b: TOTP not required; the action PIN is, and it is not set yet.
+    // The action PIN is required, and it is not set yet.
     expect(me).toMatchObject({
       email: "owner@acme.test",
       role: "owner",
       orgId,
-      mfa: { required: false, verified: false },
-      pin: { required: true, set: false, locked: false, resetByEmail: false },
+      pin: { required: true, set: false },
     });
     expectNoSecrets(me, [inviteCode]);
+    // Security review finding 7: only stable fields (no lockout, counter or mail flag: those are in stepUp:status.pin).
+    expect(Object.keys((me as { pin: object }).pin).sort()).toEqual(["required", "set"]);
     // Same code again, other email or same email: refused.
     await expectCode(
       signIn(t, { flow: "signUp", email: "x@acme.test", password: PASSWORD, inviteCode }),
@@ -199,7 +200,7 @@ describe("sign-up and sign-in through Convex Auth", () => {
     await expect(viewer.action(api.passkeys.beginRegistration, {})).rejects.toMatchObject({ data: { code: "step_up_setup_required", detail: "pin" } });
     await viewer.action(api.stepUp.setActionPin, { pin: "246813" });
     await viewer.mutation(api.stepUp.keepAlive, {});
-    expect(await viewer.query(api.account.me, {})).toMatchObject({ pin: { set: true, locked: false } });
+    expect(await viewer.query(api.account.me, {})).toMatchObject({ pin: { required: true, set: true } });
   });
 
   test("open sign-up is impossible", async () => {
@@ -292,6 +293,68 @@ describe("account:me", () => {
     const me = await a.as.query(api.account.me, {});
     expect(me).toMatchObject({ role: "viewer", memberships: [{ orgId: a.orgId, orgName: "Acme", role: "viewer" }] });
   });
+});
+
+describe("account:changePassword (security review finding 5)", () => {
+  const NEW = "brand new pass 77";
+
+  async function ownerWithPin(t: T) {
+    const inv = await ownerInvite(t);
+    const first = await signIn(t, { flow: "signUp", email: "owner@acme.test", password: PASSWORD, inviteCode: inv.inviteCode });
+    const as = asToken(t, first.tokens!.token);
+    await as.action(api.stepUp.setActionPin, { pin: "246813" }); // bootstrap: unlocks and freshens this session
+    return { ...inv, as, firstToken: first.tokens!.token };
+  }
+
+  test("needs the PIN step-up AND the current password; signs out every other session, keeps this one, audits, mails", async () => {
+    const t = await setupAuth();
+    const { orgId, as, firstToken } = await ownerWithPin(t);
+    // A second session (another sign-in with the password: the "thief").
+    const other = await signIn(t, { flow: "signIn", email: "owner@acme.test", password: PASSWORD });
+    const otherAs = asToken(t, other.tokens!.token);
+    // Password alone is not enough: that session has no step-up.
+    await expectCode(otherAs.action(api.account.changePassword, { currentPassword: PASSWORD, newPassword: NEW }), "step_up_required");
+    // The right PIN step-up but a wrong current password: one generic answer, nothing changes.
+    await expect(as.action(api.account.changePassword, { currentPassword: "wrong wrong 123", newPassword: NEW })).rejects.toMatchObject({
+      data: { code: "invalid_argument", field: "currentPassword" },
+    });
+    await expectCode(as.action(api.account.changePassword, { currentPassword: PASSWORD, newPassword: "short1" }), "invalid_argument");
+    await expectCode(as.action(api.account.changePassword, { currentPassword: PASSWORD, newPassword: PASSWORD }), "invalid_argument");
+    expect((await signIn(t, { flow: "signIn", email: "owner@acme.test", password: PASSWORD })).tokens?.token).toBeTruthy();
+
+    await as.action(api.account.changePassword, { currentPassword: PASSWORD, newPassword: NEW });
+    // The new password signs in, the old one does not.
+    expect((await signIn(t, { flow: "signIn", email: "owner@acme.test", password: NEW })).tokens?.token).toBeTruthy();
+    await errorOf(signIn(t, { flow: "signIn", email: "owner@acme.test", password: PASSWORD }));
+    // Every OTHER session ended; this one stays signed in and unlocked.
+    expect(await otherAs.query(api.account.me, {})).toBeNull();
+    expect(await asToken(t, firstToken).query(api.account.me, {})).toMatchObject({ email: "owner@acme.test" });
+    await as.mutation(api.stepUp.keepAlive, {});
+    // Audited (no password anywhere) and the person is told.
+    const audit = await t.run((ctx) => ctx.db.query("auditLog").withIndex("by_org_at", (q) => q.eq("orgId", orgId)).take(30));
+    expect(audit.map((a) => a.action)).toContain("member.passwordChanged");
+    expectNoSecrets(audit, [PASSWORD, NEW]);
+    const scheduled = await t.run((ctx) => ctx.db.system.query("_scheduled_functions").take(50));
+    expect(scheduled.some((s) => s.name.includes("mail") && JSON.stringify(s.args).includes("password was changed"))).toBe(true);
+    expectNoSecrets(scheduled, [PASSWORD, NEW]);
+  });
+
+  test("a person without a PIN yet, or signed out, cannot change the password", async () => {
+    const t = await setupAuth();
+    const inv = await ownerInvite(t);
+    const first = await signIn(t, { flow: "signUp", email: "owner@acme.test", password: PASSWORD, inviteCode: inv.inviteCode });
+    await expectCode(asToken(t, first.tokens!.token).action(api.account.changePassword, { currentPassword: PASSWORD, newPassword: NEW }), "step_up_setup_required");
+    await expectCode(t.action(api.account.changePassword, { currentPassword: PASSWORD, newPassword: NEW }), "unauthenticated");
+  });
+
+  test("guessing the current password is rate limited per person (5 per hour)", async () => {
+    const t = await setupAuth();
+    const { as } = await ownerWithPin(t);
+    for (let i = 0; i < 5; i++) {
+      await expectCode(as.action(api.account.changePassword, { currentPassword: `wrong guess ${i} x`, newPassword: NEW }), "invalid_argument");
+    }
+    await expectCode(as.action(api.account.changePassword, { currentPassword: PASSWORD, newPassword: NEW }), "rate_limited");
+  }, 30_000);
 });
 
 describe("account:redeemReset", () => {

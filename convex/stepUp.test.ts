@@ -1,19 +1,27 @@
-import { afterEach, describe, expect, test, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import { setupAuth } from "../tests/convex/auth";
 import { asMember, expectCode, expectNoSecrets, identityFor, makeOrg, type Member, type T } from "../tests/convex/identity";
 import { api } from "./_generated/api";
 import type { Id } from "./_generated/dataModel";
-import { MINUTE_MS, HOUR_MS, PIN_HARD_LIMIT, PIN_LOCKOUT_MS, STEP_UP_ACTIVITY_QUANTUM_MS } from "./lib/limits";
-import { recoveryHash } from "./lib/totp";
+import { MINUTE_MS, HOUR_MS, PIN_HARD_LIMIT, PIN_LOCKOUT_MS, PIN_LOCKOUT_STEPS_MS, PIN_WARN_AT, STEP_UP_ACTIVITY_QUANTUM_MS } from "./lib/limits";
+import { recoveryHash } from "./lib/recoveryCodes";
 import { actionPinProblem, pinBackoffMs } from "./lib/stepUp";
+
+declare const process: { env: Record<string, string | undefined> };
 
 // Step-up authentication (plan 4.16, Step 5a): action PIN, windows, lockout,
 // resets, multi-organization. Passkeys: passkeys.test.ts.
 
 const PIN = "246813";
+const PEPPER = "test-recovery-pepper-0123456789abcdef-xyz";
+
+beforeEach(() => {
+  process.env.RULEBOX_RECOVERY_PEPPER = PEPPER;
+});
 
 afterEach(() => {
   vi.useRealTimers();
+  delete process.env.RULEBOX_RECOVERY_PEPPER;
 });
 
 /** Move the server clock (Date only; convex-test keeps creation times increasing). */
@@ -23,18 +31,16 @@ function setNow(ms: number): void {
 }
 
 async function owner(t: T, orgId?: Id<"organizations">): Promise<Member> {
-  const m = await asMember(t, { role: "owner", mfa: true, orgId });
+  const m = await asMember(t, { role: "owner", orgId });
   // asMember sessions last an hour; some tests move the clock further.
   await t.run((ctx) => ctx.db.patch(m.sessionId, { expirationTime: Date.now() + 7 * 24 * HOUR_MS }));
   return m;
 }
 
-async function newSession(t: T, m: Member, mfa = true) {
-  const sessionId = await t.run(async (ctx) => {
-    const s = await ctx.db.insert("authSessions", { userId: m.userId, expirationTime: Date.now() + 7 * 24 * HOUR_MS });
-    if (mfa) await ctx.db.insert("mfaSessions", { sessionId: s, userId: m.userId, verifiedAt: Date.now() });
-    return s;
-  });
+async function newSession(t: T, m: Member) {
+  const sessionId = await t.run((ctx) =>
+    ctx.db.insert("authSessions", { userId: m.userId, expirationTime: Date.now() + 7 * 24 * HOUR_MS }),
+  );
   return { sessionId, as: identityFor(t, m.userId, sessionId) };
 }
 
@@ -46,11 +52,16 @@ async function factors(t: T, userId: Id<"users">) {
   return await t.run((ctx) => ctx.db.query("stepUpFactors").withIndex("by_user", (q) => q.eq("userId", userId)).first());
 }
 
+/** The attempt counters (`pinCounters`, split from `stepUpFactors` by the security review). */
+async function counters(t: T, userId: Id<"users">) {
+  return await t.run((ctx) => ctx.db.query("pinCounters").withIndex("by_user", (q) => q.eq("userId", userId)).first());
+}
+
 /**
  * Guess wrong PINs as `m` from `start`, waiting out every backoff, until the
  * hard lockout. Returns the failures counted and the time of the locking one.
  */
-async function guessUntilLockout(t: T, m: { as: Member["as"]; userId: Id<"users"> }, start: number) {
+async function guessUntilLockout(t: T, m: { as: Member["as"]; userId: Id<"users"> }, start: number, lockoutMs: number = PIN_LOCKOUT_MS) {
   let now = start;
   let failures = 0;
   for (;;) {
@@ -62,15 +73,15 @@ async function guessUntilLockout(t: T, m: { as: Member["as"]; userId: Id<"users"
       const data = (e as { data?: { code: string; retryAfterMs?: number; detail?: string } }).data;
       if (data?.code === "step_up_locked" && data.detail === "lockout") {
         failures++;
-        expect(data.retryAfterMs).toBe(PIN_LOCKOUT_MS);
+        expect(data.retryAfterMs).toBe(lockoutMs);
         return { failures, lockedAt: now };
       } else if (data?.code === "step_up_locked") {
         now += (data.retryAfterMs ?? 0) + 1;
       } else {
         expect(data?.code).toBe("step_up_invalid");
         failures++;
-        const f = await factors(t, m.userId);
-        expect(f!.pinFailuresTotal).toBe(failures); // committed by the internal mutation
+        const c = await counters(t, m.userId);
+        expect(c!.streak).toBe(failures); // committed by the internal mutation, although the action threw
       }
     }
   }
@@ -139,19 +150,15 @@ describe("bootstrap: the first factor", () => {
     await expect(o.as.action(api.stepUp.setActionPin, { pin: PIN })).rejects.toMatchObject({
       data: { code: "step_up_setup_required", detail: "reauthenticate" },
     });
-    // Signing in again (password + TOTP) gives a new session: bootstrap works.
+    // Signing in again with the password gives a new session: bootstrap works.
     const again = await newSession(t, o);
     await again.as.action(api.stepUp.setActionPin, { pin: PIN });
     expect((await again.as.query(api.stepUp.status, {})).actionPin.set).toBe(true);
   });
 
-  test("Phase 4b: the first PIN needs only the fresh password sign-in, also for a person with a (legacy) TOTP enrolment", async () => {
+  test("the first PIN needs only the fresh password sign-in", async () => {
     const t = await setupAuth();
     const v = await asMember(t, { role: "viewer" });
-    await t.run((ctx) =>
-      ctx.db.insert("memberSecrets", { userId: v.userId, totpSecret: "JBSWY3DPEHPK3PXP", recoveryHashes: [], lastTotpStep: 0, totpFailures: 0, totpLockedUntil: 0 }),
-    );
-    // No mfaSessions row for this session: no longer needed.
     await v.as.action(api.stepUp.setActionPin, { pin: PIN });
     expect((await v.as.query(api.stepUp.status, {})).session.method).toBe("actionPin");
   });
@@ -163,7 +170,7 @@ describe("bootstrap: the first factor", () => {
     const v = await asMember(t, { role: "viewer", orgId: o.orgId });
     for (const m of [o, a, v]) {
       await expectCode(m.as.mutation(api.stepUp.keepAlive, {}), "step_up_setup_required");
-      expect(await m.as.query(api.account.me, {})).toMatchObject({ pin: { required: true, set: false, locked: false } });
+      expect(await m.as.query(api.account.me, {})).toMatchObject({ pin: { required: true, set: false } });
     }
     await expectCode(a.as.mutation(api.groups.create, { name: "Ops" }), "step_up_setup_required");
     await expectCode(o.as.mutation(api.members.setDisabled, { memberId: v.memberId, disabled: true, expectedRevision: 0 }), "step_up_setup_required");
@@ -256,7 +263,7 @@ describe("windows: unlocked (idle 10 min) and fresh (5 min)", () => {
     const t = await setupAuth();
     const o = await owner(t);
     await o.as.action(api.stepUp.setActionPin, { pin: PIN });
-    const admin = await asMember(t, { role: "admin", mfa: true, orgId: o.orgId });
+    const admin = await asMember(t, { role: "admin", orgId: o.orgId });
     await t.run((ctx) =>
       ctx.db.insert("stepUpSessions", { sessionId: admin.sessionId, userId: admin.userId, verifiedAt: Date.now(), lastActiveAt: Date.now(), method: "actionPin" }),
     );
@@ -293,7 +300,7 @@ describe("action PIN: change, brute force, resets", () => {
     expect(failures).toBe(PIN_HARD_LIMIT);
     const f = await factors(t, o.userId);
     expect(f!.pinDisabledAt).toBeUndefined();
-    expect(f!.pinLockedUntil).toBe(lockedAt + PIN_LOCKOUT_MS);
+    expect(await counters(t, o.userId)).toMatchObject({ lockedUntil: lockedAt + PIN_LOCKOUT_MS, lockout: true });
     // Locked: even the right PIN is refused, with the time left.
     setNow(now + HOUR_MS);
     await expect(o.as.action(api.stepUp.verifyActionPin, { pin: PIN })).rejects.toMatchObject({
@@ -304,15 +311,71 @@ describe("action PIN: change, brute force, resets", () => {
     const scheduled = await t.run((ctx) => ctx.db.system.query("_scheduled_functions").take(20));
     expect(scheduled.some((s) => s.name.includes("mail") && (s.args[0] as { to?: string }).to === o.email)).toBe(true);
     const status = await o.as.query(api.stepUp.status, {});
-    expect(status).toMatchObject({ pinLockout: true, actionPin: { set: true, disabled: false, lockedUntil: lockedAt + PIN_LOCKOUT_MS } });
-    expect(await o.as.query(api.account.me, {})).toMatchObject({ pin: { set: true, locked: true, lockedUntil: lockedAt + PIN_LOCKOUT_MS } });
+    expect(status).toMatchObject({
+      actionPin: { set: true, disabled: false, lockedUntil: lockedAt + PIN_LOCKOUT_MS },
+      pin: { set: true, lockKind: "lockout", lockedUntil: lockedAt + PIN_LOCKOUT_MS, failedSinceUnlock: PIN_HARD_LIMIT },
+    });
+    // `account:me` stays small and stable: a wrong PIN never re-runs it (finding 7).
+    expect(await o.as.query(api.account.me, {})).toMatchObject({ pin: { required: true, set: true } });
     // A locked PIN still counts: a fresh sign-in cannot just set a new one.
     const again = await newSession(t, o);
     await expectCode(again.as.action(api.stepUp.setActionPin, { pin: "731942" }), "step_up_required");
     // After 24 h the right PIN works again and clears everything.
     setNow(lockedAt + PIN_LOCKOUT_MS + 1);
     await o.as.action(api.stepUp.verifyActionPin, { pin: PIN });
-    expect(await factors(t, o.userId)).toMatchObject({ pinFailures: 0, pinFailuresTotal: 0, pinLockedUntil: 0 });
+    expect(await counters(t, o.userId)).toMatchObject({ failures: 0, streak: 0, sinceUnlock: 0, lockedUntil: 0, lockout: false });
+  });
+
+  test("wrong guesses are never silent (finding 4): the person can see the count, the audit log and an email at 5", async () => {
+    const t = await setupAuth();
+    const o = await owner(t);
+    await o.as.action(api.stepUp.setActionPin, { pin: PIN });
+    const mailsTo = async () =>
+      (await t.run((ctx) => ctx.db.system.query("_scheduled_functions").take(50))).filter((s) => s.name.includes("mail")).length;
+    let now = Date.now();
+    for (let i = 1; i <= PIN_WARN_AT; i++) {
+      setNow(now);
+      try {
+        await o.as.action(api.stepUp.verifyActionPin, { pin: "731942" });
+      } catch (e) {
+        const data = (e as { data: { retryAfterMs?: number } }).data;
+        now += (data.retryAfterMs ?? 0) + 1;
+      }
+      // The status the lock screen reads counts every wrong attempt since the last unlock.
+      expect((await o.as.query(api.stepUp.status, {})).pin.failedSinceUnlock).toBe(i);
+      if (i < PIN_WARN_AT) expect(await auditActions(t, o.orgId)).not.toContain("member.actionPinWrongAttempts");
+    }
+    expect(await auditActions(t, o.orgId)).toContain("member.actionPinWrongAttempts");
+    expect(await mailsTo()).toBe(2); // the "PIN was set" notice, then the wrong-attempts one
+    // Unlocking resets what is shown.
+    setNow(now + HOUR_MS);
+    await o.as.action(api.stepUp.verifyActionPin, { pin: PIN });
+    expect((await o.as.query(api.stepUp.status, {})).pin.failedSinceUnlock).toBe(0);
+  });
+
+  test("a thief guessing a few times a day while the owner unlocks daily is still locked out (30-day window, a success does not reset it)", async () => {
+    const t = await setupAuth();
+    const o = await owner(t);
+    await o.as.action(api.stepUp.setActionPin, { pin: PIN });
+    let now = Date.now();
+    let lockedOut = false;
+    for (let day = 0; day < 6 && !lockedOut; day++) {
+      for (let i = 0; i < 2 && !lockedOut; i++) {
+        setNow(now);
+        try {
+          await o.as.action(api.stepUp.verifyActionPin, { pin: "731942" });
+        } catch (e) {
+          const data = (e as { data: { code: string; detail?: string; retryAfterMs?: number } }).data;
+          if (data.detail === "lockout") lockedOut = true;
+          else now += (data.retryAfterMs ?? 0) + 1;
+        }
+      }
+      now += 5 * MINUTE_MS;
+      setNow(now);
+      if (!lockedOut) await o.as.action(api.stepUp.verifyActionPin, { pin: PIN }); // the owner unlocks: streak resets
+      now += 24 * HOUR_MS;
+    }
+    expect(lockedOut).toBe(true);
   });
 
   test("an attacker with only the password cannot permanently disable the PIN: each lockout ends, the count starts over", async () => {
@@ -320,19 +383,21 @@ describe("action PIN: change, brute force, resets", () => {
     const o = await owner(t);
     await o.as.action(api.stepUp.setActionPin, { pin: PIN });
     // The attacker signs in with the stolen password (a fresh session) and guesses.
-    const thief = await newSession(t, o, false);
+    const thief = await newSession(t, o);
     let now = Date.now();
     for (let round = 0; round < 2; round++) {
-      const r = await guessUntilLockout(t, { ...o, ...thief }, now);
+      // Repeated lockouts last longer each time (24 h, then 72 h, then 7 days).
+      const ms = PIN_LOCKOUT_STEPS_MS[round]!;
+      const r = await guessUntilLockout(t, { ...o, ...thief }, now, ms);
       expect(r.failures).toBe(PIN_HARD_LIMIT);
       const f = await factors(t, o.userId);
       expect(f!.pinDisabledAt).toBeUndefined();
-      now = r.lockedAt + PIN_LOCKOUT_MS + 1;
+      now = r.lockedAt + ms + 1;
       setNow(now);
     }
     // The owner's PIN is intact and works once the lockout ended.
     await o.as.action(api.stepUp.verifyActionPin, { pin: PIN });
-    expect((await factors(t, o.userId))?.pinFailuresTotal).toBe(0);
+    expect((await counters(t, o.userId))?.streak).toBe(0);
   });
 
   test("a legacy disabled PIN (before Phase 4b) is only locked until 24 h after it was disabled", async () => {
@@ -347,7 +412,8 @@ describe("action PIN: change, brute force, resets", () => {
     await expect(o.as.action(api.stepUp.verifyActionPin, { pin: PIN })).rejects.toMatchObject({ data: { code: "step_up_locked", detail: "lockout" } });
     setNow(disabledAt + PIN_LOCKOUT_MS + 1);
     await o.as.action(api.stepUp.verifyActionPin, { pin: PIN });
-    expect((await factors(t, o.userId))?.pinDisabledAt).toBeUndefined();
+    expect(await counters(t, o.userId)).toMatchObject({ lockedUntil: 0, lockout: false, streak: 0, sinceUnlock: 0 });
+    await o.as.action(api.stepUp.verifyActionPin, { pin: PIN });
   });
 
   test("a locked PIN: an Owner reset still works (passkey: passkeys.test.ts; email: pinReset.test.ts)", async () => {
@@ -357,13 +423,20 @@ describe("action PIN: change, brute force, resets", () => {
     const admin = await asMember(t, { role: "admin", orgId: o.orgId });
     await t.run((ctx) => ctx.db.patch(admin.sessionId, { expirationTime: Date.now() + 7 * 24 * HOUR_MS }));
     await admin.as.action(api.stepUp.setActionPin, { pin: "582019" });
+    // A password thief with a fresh session of the admin, open while the Owner resets (the race of finding 6).
+    const thief = await newSession(t, admin);
     const r = await guessUntilLockout(t, admin, Date.now());
     setNow(r.lockedAt + MINUTE_MS);
     // Owner reset of the locked member (the owner re-verifies first: time moved on).
     await o.as.action(api.stepUp.verifyActionPin, { pin: PIN });
     await o.as.mutation(api.stepUp.resetMember, { memberId: admin.memberId });
     expect(await factors(t, admin.userId)).toBeNull();
-    const fresh = await newSession(t, admin, false);
+    expect(await counters(t, admin.userId)).toBeNull();
+    // Every session of the member ended with the reset: the racing session cannot fill the empty PIN.
+    await expectCode(thief.as.action(api.stepUp.setActionPin, { pin: "731942" }), "unauthenticated");
+    await expectCode(admin.as.action(api.stepUp.setActionPin, { pin: "731942" }), "unauthenticated");
+    // Only a session created by a NEW password sign-in after the reset can set the first PIN.
+    const fresh = await newSession(t, admin);
     await fresh.as.action(api.stepUp.setActionPin, { pin: "906417" });
   });
 
@@ -374,41 +447,21 @@ describe("action PIN: change, brute force, resets", () => {
     await expectCode(o.as.action(api.stepUp.verifyActionPin, { pin: "731942" }), "step_up_invalid");
     await expectCode(o.as.action(api.stepUp.verifyActionPin, { pin: "731942" }), "step_up_invalid");
     await o.as.action(api.stepUp.verifyActionPin, { pin: PIN });
-    expect(await factors(t, o.userId)).toMatchObject({ pinFailures: 0, pinFailuresTotal: 0, pinLockedUntil: 0 });
+    expect(await counters(t, o.userId)).toMatchObject({ failures: 0, streak: 0, sinceUnlock: 0, lockedUntil: 0 });
   });
 
-  test("lost PIN: a recovery code after a fresh password + TOTP sign-in clears the factors; an old session cannot", async () => {
+  test("a recovery reset before any recovery codes were generated answers not_ready and changes nothing", async () => {
     const t = await setupAuth();
-    const o = await owner(t);
-    await o.as.action(api.stepUp.setActionPin, { pin: PIN });
-    const code = "ABCD-EFGH";
-    await t.run((ctx) =>
-      ctx.db.insert("memberSecrets", {
-        userId: o.userId,
-        totpSecret: "JBSWY3DPEHPK3PXP",
-        recoveryHashes: [recoveryHash(code), recoveryHash("WXYZ-2345")],
-        lastTotpStep: 0,
-        totpFailures: 0,
-        totpLockedUntil: 0,
-      }),
-    );
-    setNow(Date.now() + 20 * MINUTE_MS);
-    await expectCode(o.as.action(api.stepUp.resetWithRecoveryCode, { code }), "step_up_setup_required");
-    const fresh = await newSession(t, o);
-    await expectCode(fresh.as.action(api.stepUp.resetWithRecoveryCode, { code: "QQQQ-QQQQ" }), "mfa_invalid_code");
-    const s = await t.run((ctx) => ctx.db.query("memberSecrets").withIndex("by_user", (q) => q.eq("userId", o.userId)).first());
-    expect(s!.totpFailures).toBe(1);
-    await fresh.as.action(api.stepUp.resetWithRecoveryCode, { code });
-    expect(await factors(t, o.userId)).toBeNull();
-    expect(await stepUpRow(t, o.sessionId)).toBeNull();
-    await fresh.as.action(api.stepUp.setActionPin, { pin: "731942" });
-    expect(await auditActions(t, o.orgId)).toContain("member.stepUpReset");
-    // The code is used up.
-    const fresh2 = await newSession(t, o);
-    await expectCode(fresh2.as.action(api.stepUp.resetWithRecoveryCode, { code }), "mfa_invalid_code");
+    const v = await asMember(t, { role: "viewer" });
+    await v.as.action(api.stepUp.setActionPin, { pin: PIN });
+    const thief = await newSession(t, v);
+    await expectCode(thief.as.action(api.stepUp.resetWithRecoveryCode, { code: "AAAA-AAAA", newPin: "731942" }), "not_ready");
+    expect((await factors(t, v.userId))?.actionPinHash).toBeDefined();
+    await v.as.action(api.stepUp.verifyActionPin, { pin: PIN });
+    expect(await auditActions(t, v.orgId)).not.toContain("member.stepUpReset");
   });
 
-  test("recovery codes of the PIN (no TOTP): generated once after the PIN, hashed, one use each, kept across the reset", async () => {
+  test("recovery codes of the PIN: generated once after the PIN, hashed, one use each, the reset sets the new PIN in one transaction", async () => {
     const t = await setupAuth();
     const v = await asMember(t, { role: "viewer" });
     await t.run((ctx) => ctx.db.patch(v.sessionId, { expirationTime: Date.now() + 7 * 24 * HOUR_MS }));
@@ -423,61 +476,110 @@ describe("action PIN: change, brute force, resets", () => {
     expect(f!.recoveryHashes).toEqual(codes.map(recoveryHash));
     expect(JSON.stringify(f)).not.toContain(codes[0]!);
     const status = await v.as.query(api.stepUp.status, {});
-    expect(status.recoveryCodesLeft).toBe(10);
+    expect(status.pin.recoveryCodesLeft).toBe(10);
     expectNoSecrets(status, codes);
     expectNoSecrets(await v.as.query(api.account.me, {}), codes);
     const audit = await t.run((ctx) => ctx.db.query("auditLog").withIndex("by_org_at", (q) => q.eq("orgId", v.orgId)).take(20));
     expect(audit.map((a) => a.action)).toContain("member.recoveryCodesGenerated");
     expectNoSecrets(audit, codes);
-    // No memberSecrets / TOTP row was involved.
-    expect(await t.run((ctx) => ctx.db.query("memberSecrets").withIndex("by_user", (q) => q.eq("userId", v.userId)).first())).toBeNull();
 
     // Stale: generating again needs a fresh step-up.
     setNow(Date.now() + 6 * MINUTE_MS);
     await expectCode(v.as.action(api.stepUp.generateRecoveryCodes, {}), "step_up_required");
 
-    // Lost PIN: a fresh sign-in + one code resets the PIN; a wrong code is step_up_invalid.
-    const fresh = await newSession(t, v, false);
-    await expectCode(fresh.as.action(api.stepUp.resetWithRecoveryCode, { code: "QQQQ-QQQQ" }), "step_up_invalid");
-    await fresh.as.action(api.stepUp.resetWithRecoveryCode, { code: codes[3]!.toLowerCase() });
+    // Lost PIN: a fresh sign-in + one code + the NEW PIN. A wrong code is step_up_invalid; a call without newPin is refused.
+    const fresh = await newSession(t, v);
+    await expectCode(fresh.as.action(api.stepUp.resetWithRecoveryCode, { code: "QQQQ-QQQQ", newPin: "731942" }), "step_up_invalid");
+    // `newPin` is a required argument: a call without it never reaches the handler (the argument validator refuses it).
+    await expect(fresh.as.action(api.stepUp.resetWithRecoveryCode, { code: codes[3]! } as never)).rejects.toThrow();
+    await expectCode(fresh.as.action(api.stepUp.resetWithRecoveryCode, { code: codes[3]!, newPin: "123456" }), "invalid_argument");
+    await fresh.as.action(api.stepUp.resetWithRecoveryCode, { code: codes[3]!.toLowerCase(), newPin: "731942" });
+    // Atomic (finding 6): the PIN is never empty. It is the new one at once, this session is unlocked, the old session ended.
     const after = await factors(t, v.userId);
-    expect(after!.actionPinHash).toBeUndefined();
+    expect(after!.actionPinHash).toBeDefined();
     expect(after!.recoveryHashes).toHaveLength(9); // the other codes stay
     expect(await stepUpRow(t, v.sessionId)).toBeNull();
-    await fresh.as.action(api.stepUp.setActionPin, { pin: "731942" });
-    expect((await fresh.as.query(api.stepUp.status, {})).recoveryCodesLeft).toBe(9);
+    expect(await t.run((ctx) => ctx.db.get(v.sessionId))).toBeNull();
+    expect((await stepUpRow(t, fresh.sessionId))?.method).toBe("actionPin");
+    await fresh.as.mutation(api.stepUp.keepAlive, {});
+    await fresh.as.action(api.stepUp.verifyActionPin, { pin: "731942" });
+    await expectCode(fresh.as.action(api.stepUp.verifyActionPin, { pin: PIN }), "step_up_invalid");
+    expect((await fresh.as.query(api.stepUp.status, {})).pin.recoveryCodesLeft).toBe(9);
+    expect(await auditActions(t, v.orgId)).toContain("member.stepUpReset");
     // Used up; another code still works (fresh sign-in again).
-    const fresh2 = await newSession(t, v, false);
-    await expectCode(fresh2.as.action(api.stepUp.resetWithRecoveryCode, { code: codes[3]! }), "step_up_invalid");
-    await fresh2.as.action(api.stepUp.resetWithRecoveryCode, { code: codes[4]! });
+    const fresh2 = await newSession(t, v);
+    await expectCode(fresh2.as.action(api.stepUp.resetWithRecoveryCode, { code: codes[3]!, newPin: "906417" }), "step_up_invalid");
+    await fresh2.as.action(api.stepUp.resetWithRecoveryCode, { code: codes[4]!, newPin: "906417" });
     // An old session cannot use a code.
     setNow(Date.now() + 20 * MINUTE_MS);
-    await expectCode(fresh2.as.action(api.stepUp.resetWithRecoveryCode, { code: codes[5]! }), "step_up_setup_required");
+    await expectCode(fresh2.as.action(api.stepUp.resetWithRecoveryCode, { code: codes[5]!, newPin: "582019" }), "step_up_setup_required");
   });
 
-  test("recovery codes: wrong guesses are rate limited per person (5 per 15 minutes)", async () => {
+  test("reset atomicity (finding 6): a session that was open before a recovery reset cannot fill the empty PIN or survive", async () => {
+    const t = await setupAuth();
+    const v = await asMember(t, { role: "viewer" });
+    await t.run((ctx) => ctx.db.patch(v.sessionId, { expirationTime: Date.now() + 7 * 24 * HOUR_MS }));
+    await v.as.action(api.stepUp.setActionPin, { pin: PIN });
+    const codes = await v.as.action(api.stepUp.generateRecoveryCodes, {});
+    // A racing password thief with a fresh session of the same person.
+    const thief = await newSession(t, v);
+    const owner1 = await newSession(t, v);
+    await owner1.as.action(api.stepUp.resetWithRecoveryCode, { code: codes[0]!, newPin: "731942" });
+    // The thief's session is gone: it cannot set (or overwrite) the PIN.
+    await expectCode(thief.as.action(api.stepUp.setActionPin, { pin: "906417" }), "unauthenticated");
+    // The PIN is the owner's new one.
+    await owner1.as.action(api.stepUp.verifyActionPin, { pin: "731942" });
+  });
+
+  test("recovery codes: the rate limit is charged BEFORE the work (5 per 15 minutes per person), also in a parallel burst", async () => {
     const t = await setupAuth();
     const v = await asMember(t, { role: "viewer" });
     await v.as.action(api.stepUp.setActionPin, { pin: PIN });
     const codes = await v.as.action(api.stepUp.generateRecoveryCodes, {});
-    for (let i = 0; i < 5; i++) await expectCode(v.as.action(api.stepUp.resetWithRecoveryCode, { code: "QQQQ-QQQQ" }), "step_up_invalid");
+    for (let i = 0; i < 5; i++) await expectCode(v.as.action(api.stepUp.resetWithRecoveryCode, { code: "QQQQ-QQQQ", newPin: "731942" }), "step_up_invalid");
     // Even the right code waits now.
-    await expectCode(v.as.action(api.stepUp.resetWithRecoveryCode, { code: codes[0]! }), "rate_limited");
+    await expectCode(v.as.action(api.stepUp.resetWithRecoveryCode, { code: codes[0]!, newPin: "731942" }), "rate_limited");
     expect((await factors(t, v.userId))!.recoveryHashes).toHaveLength(10);
+    // A burst of parallel guesses by another person: at most 5 get through to the check.
+    const w = await asMember(t, { role: "viewer" });
+    await w.as.action(api.stepUp.setActionPin, { pin: PIN });
+    await w.as.action(api.stepUp.generateRecoveryCodes, {});
+    const results = await Promise.allSettled(
+      Array.from({ length: 12 }, () => w.as.action(api.stepUp.resetWithRecoveryCode, { code: "QQQQ-QQQQ", newPin: "731942" })),
+    );
+    const codesSeen = results.map((r) => (r.status === "rejected" ? ((r.reason as { data?: { code?: string } }).data?.code ?? "other") : "ok"));
+    expect(codesSeen.filter((c) => c === "step_up_invalid")).toHaveLength(5);
+    expect(codesSeen.filter((c) => c === "rate_limited")).toHaveLength(7);
   });
+
+  test("one person cannot block everyone's PIN unlocks: a flood of recovery-code guesses barely touches the global bucket", async () => {
+    const t = await setupAuth();
+    const attacker = await asMember(t, { role: "viewer" });
+    await attacker.as.action(api.stepUp.setActionPin, { pin: PIN });
+    await attacker.as.action(api.stepUp.generateRecoveryCodes, {});
+    // 350 attempts (> the 300-token global bucket): only 5 are charged to the person, so only 5 reach the global bucket.
+    for (let i = 0; i < 350; i++) {
+      await attacker.as.action(api.stepUp.resetWithRecoveryCode, { code: "QQQQ-QQQQ", newPin: "731942" }).catch(() => undefined);
+    }
+    // Someone else with a wrong PIN still gets a normal answer (not rate_limited), and the right PIN works.
+    const other = await asMember(t, { role: "viewer" });
+    await other.as.action(api.stepUp.setActionPin, { pin: "582019" });
+    await expectCode(other.as.action(api.stepUp.verifyActionPin, { pin: "731942" }), "step_up_invalid");
+    await other.as.action(api.stepUp.verifyActionPin, { pin: "582019" });
+  }, 120_000);
 
   test("another Owner resets a member's factors; not their own, not a member of another organization", async () => {
     const t = await setupAuth();
     const o = await owner(t);
     await o.as.action(api.stepUp.setActionPin, { pin: PIN });
-    const admin = await asMember(t, { role: "admin", mfa: true, orgId: o.orgId });
+    const admin = await asMember(t, { role: "admin", orgId: o.orgId });
     await admin.as.action(api.stepUp.setActionPin, { pin: "731942" });
     await o.as.mutation(api.stepUp.resetMember, { memberId: admin.memberId });
     expect(await factors(t, admin.userId)).toBeNull();
     expect(await stepUpRow(t, admin.sessionId)).toBeNull();
     await expectCode(o.as.mutation(api.stepUp.resetMember, { memberId: o.memberId }), "forbidden");
     // A person who is also active in another organization.
-    const other = await asMember(t, { role: "admin", mfa: true, orgId: o.orgId });
+    const other = await asMember(t, { role: "admin", orgId: o.orgId });
     const orgB = await makeOrg(t, "Beta");
     await t.run((ctx) =>
       ctx.db.insert("members", { orgId: orgB, userId: other.userId, email: other.email, role: "owner", status: "active", createdAt: Date.now(), revision: 0 }),

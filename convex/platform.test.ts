@@ -98,24 +98,27 @@ describe("platform secrets", () => {
     await expectCode(t.mutation(internal.platform.storeSecret, { name: "resendFrom", ciphertext: "AAAA", iv: "AAAA" }), "invalid_argument");
   });
 
-  test("never in a public answer: me only says whether reset by email is on", async () => {
+  test("never in a public answer: stepUp:status only says whether reset by email is on (account:me says nothing)", async () => {
     const t = await setupAuth();
     process.env.RULEBOX_PLATFORM_KEY = TEST_MASTER_KEY;
     const m = await asMember(t, { role: "owner" });
     await giveStepUp(t, m);
-    expect(await m.as.query(api.account.me, {})).toMatchObject({ pin: { resetByEmail: false } });
+    expect((await m.as.query(api.stepUp.status, {})).pin.resetByEmail).toBe(false);
     await setAll(t);
     const rows = await t.run((ctx) => ctx.db.query("platformSecrets").take(10));
     const secrets = [...Object.values(VALUES), ...rows.flatMap((r) => [r.ciphertext, r.iv])];
     const me = await m.as.query(api.account.me, {});
-    expect(me).toMatchObject({ pin: { resetByEmail: true } });
+    // Finding 7: `me` reads no platform row at all, so it does not even say whether mail is on.
+    expect(JSON.stringify(me)).not.toContain("resetByEmail");
     expectNoSecrets(me, secrets);
-    expectNoSecrets(await m.as.query(api.stepUp.status, {}), secrets);
+    const status = await m.as.query(api.stepUp.status, {});
+    expect(status.pin.resetByEmail).toBe(true);
+    expectNoSecrets(status, secrets);
     expectNoSecrets(await m.as.query(api.settings.get, {}), secrets);
-    expectNoSecrets(await m.as.query(api.members.list, {}), secrets);
+    expectNoSecrets(await m.as.query(api.members.page, { paginationOpts: { numItems: 50, cursor: null } }), secrets);
     // Without the master key the flow is off again.
     delete process.env.RULEBOX_PLATFORM_KEY;
-    expect(await m.as.query(api.account.me, {})).toMatchObject({ pin: { resetByEmail: false } });
+    expect((await m.as.query(api.stepUp.status, {})).pin.resetByEmail).toBe(false);
   });
 
   test("source scan: only the platform modules touch the table, and no public function reads a secret", async () => {

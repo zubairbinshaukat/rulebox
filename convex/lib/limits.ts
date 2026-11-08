@@ -26,6 +26,12 @@ export const RESET_CODE_TTL_MS = DAY_MS;
 export const SESSION_TOTAL_MS = 7 * DAY_MS;
 export const SESSION_INACTIVE_MS = 12 * HOUR_MS;
 /**
+ * Most Convex Auth sessions one person keeps. A new sign-in past it deletes the
+ * oldest ones (`pruneOldSessions`), so "end every session" (`deleteUserSessions`)
+ * stays one bounded transaction. Far above real use (a few browsers).
+ */
+export const MAX_USER_SESSIONS = 25;
+/**
  * Member JWT lifetime (A10, owner Q7: 60 minutes, was 10). Revocation stays
  * instant: `getSignedIn` reads the `authSessions` row on every call, and
  * mutations/actions also refuse a session past its `expirationTime`.
@@ -43,10 +49,7 @@ export const AUTH_RATE_LIMIT_REFILL_MS = HOUR_MS;
 /** Rate-limiter component rows created longer ago than this are cleared daily. */
 export const RATE_LIMIT_ROW_MAX_AGE_MS = 7 * DAY_MS;
 
-/** TOTP (plan Step 3.4). Not enforced since Phase 4b; removed in WP5b. */
-export const TOTP_MAX_FAILURES = 5;
-export const TOTP_LOCK_MS = 15 * MINUTE_MS;
-/** Recovery codes per set (TOTP enrolment, and since Phase 4b the action PIN's fallback). */
+/** Recovery codes per set (the action PIN's fallback). */
 export const RECOVERY_CODE_COUNT = 10;
 
 /** Audit (plan 4.11). */
@@ -114,6 +117,19 @@ export const PIN_BACKOFF_MAX_MS = 15 * MINUTE_MS;
  */
 export const PIN_HARD_LIMIT = 10;
 export const PIN_LOCKOUT_MS = 24 * HOUR_MS;
+/**
+ * Long-term PIN limit (Phase 4b security review): failures are also counted
+ * in a rolling PIN_WINDOW_MS window that a success does NOT reset (a password
+ * thief cannot hide behind the victim's daily unlock). PIN_HARD_LIMIT failures
+ * in the window since the last lockout lock the PIN too, and each lockout in
+ * the window is longer than the one before (PIN_LOCKOUT_STEPS_MS; the first
+ * equals PIN_LOCKOUT_MS). MAX_PIN_WINDOW_ENTRIES bounds the stored timestamps.
+ */
+export const PIN_WINDOW_MS = 30 * DAY_MS;
+export const PIN_LOCKOUT_STEPS_MS = [PIN_LOCKOUT_MS, 72 * HOUR_MS, 7 * DAY_MS] as const;
+export const MAX_PIN_WINDOW_ENTRIES = 64;
+/** "N wrong PIN attempts on your account" email after this many failures since the last unlock. */
+export const PIN_WARN_AT = 5;
 
 /**
  * Forgot PIN by email (Phase 4b Part C). A link token lives PIN_RESET_TTL_MS;
@@ -182,7 +198,9 @@ export const PUBLISH_DEBOUNCE_MS = 1_500;
 export const MAX_PUBLISH_TARGETS = 500;
 
 /** `maintenance:migratePlans`: organizations per run, and the most rows it recounts per table. */
-export const MIGRATION_ORG_BATCH = 20;
+// One per run: a single large organization's recount (up to MAX_RECOUNT_DEVICES x ~4 reads, plus
+// the other tables) already uses about half of Convex's 16,384-document read limit.
+export const MIGRATION_ORG_BATCH = 1;
 export const MAX_RECOUNT_ROWS = 5_000;
 /** Devices recounted per organization (each costs up to 4 reads: device, credentials, summary, presence). */
 export const MAX_RECOUNT_DEVICES = 2_000;
@@ -259,17 +277,10 @@ export const APP_EMPLOYEE_COUNT_CAP = 1_000;
 export const MAX_FILE_HANDLERS = 200;
 /**
  * `apps:installSummary` counts each state up to this many rows ("1000+" above it, plan Step 17 item 1);
- * `apps:installs` / `fleet:installs` page size cap; failed installs the overview lists.
+ * `apps:installs` / `fleet:installs` page size cap;.
  */
 export const INSTALL_COUNT_CAP = 1_000;
 export const MAX_INSTALL_PAGE = 50;
-export const OVERVIEW_FAILED_INSTALLS = 20;
-/**
- * Failed results the overview's list examines (newest first) to find
- * OVERVIEW_FAILED_INSTALLS that still count (assigned, app not archived, PC not
- * revoked; Step 17 review).
- */
-export const OVERVIEW_FAILED_SCAN = 100;
 /**
  * Failed results of one app read when an assign / unassign / archive / restore
  * moves `failedInstallCount` (lib/installs.ts); above it `stats:reconcile` is

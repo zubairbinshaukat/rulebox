@@ -21,7 +21,7 @@ const asc = (key: string) => ({ sort: { key, dir: "asc" as const } });
 const desc = (key: string) => ({ sort: { key, dir: "desc" as const } });
 
 async function admin(t: T, orgId: Id<"organizations">) {
-  const m = await asMember(t, { role: "admin", mfa: true, orgId });
+  const m = await asMember(t, { role: "admin", orgId });
   await giveStepUp(t, m);
   return m;
 }
@@ -181,7 +181,7 @@ describe("fleet:count", () => {
     expect(loose2).toBeDefined();
 
     // Another organization's counter is never read.
-    const foreign = await asMember(t, { role: "owner", mfa: true, orgId: await makeOrg(t, "Other") });
+    const foreign = await asMember(t, { role: "owner", orgId: await makeOrg(t, "Other") });
     expect((await foreign.as.query(api.fleet.count, {})).total).toBe(0);
   });
 
@@ -361,7 +361,7 @@ describe("small bounded tables: groups, members, invites, file types", () => {
   test("members:page and members:invitesPage", async () => {
     const t = await setupAuth();
     const orgId = await makeOrg(t);
-    const owner = await asMember(t, { role: "owner", mfa: true, orgId, email: "zoe@acme.test" });
+    const owner = await asMember(t, { role: "owner", orgId, email: "zoe@acme.test" });
     await asMember(t, { role: "viewer", orgId, email: "amy@acme.test" });
     await asMember(t, { role: "admin", orgId, email: "bob@acme.test", status: "disabled" });
     await asMember(t, { role: "owner", orgId: await makeOrg(t, "Other"), email: "eve@other.test" });
@@ -446,13 +446,11 @@ describe("install lists: 'updated' either way", () => {
     const failed = async (args: object) => (await v.as.query(api.overview.failedInstallsPage, { ...page(), ...args })).page.map((r) => r.deviceName);
     expect(await failed({})).toEqual(["PC2", "PC1"]);
     expect(await failed(asc("updated"))).toEqual(["PC1", "PC2"]);
-    // The widget is unchanged.
-    expect((await v.as.query(api.overview.failedInstalls, {})).map((r) => r.deviceName)).toEqual(["PC2", "PC1"]);
     await expectCode(v.as.query(api.apps.installs, { appId, state: "failed", ...page(), ...asc("device") }), "invalid_argument");
     await expectCode(v.as.query(api.overview.failedInstallsPage, page(51)), "invalid_argument");
 
     // Another organization sees none of it.
-    const foreign = await asMember(t, { role: "owner", mfa: true, orgId: await makeOrg(t, "Other") });
+    const foreign = await asMember(t, { role: "owner", orgId: await makeOrg(t, "Other") });
     expect((await foreign.as.query(api.overview.failedInstallsPage, page())).page).toEqual([]);
     expect((await foreign.as.query(api.groups.page, page())).total).toBe(0);
     expect((await foreign.as.query(api.fileHandlers.page, page())).total).toBe(0);

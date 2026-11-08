@@ -14,6 +14,23 @@ afterEach(() => {
   delete process.env.RULEBOX_HOSTED;
 });
 
+/** Runs `maintenance:migratePlans` page by page (what its self-scheduling does) until done. */
+async function migrateAll(t: T) {
+  let cursor: string | null = null;
+  let organizations = 0;
+  let changed = 0;
+  for (;;) {
+    const res: { organizations: number; changed: number; done: boolean; next: string | null } = await t.mutation(
+      internal.maintenance.migratePlans,
+      { cursor },
+    );
+    organizations += res.organizations;
+    changed += res.changed;
+    if (res.done) return { organizations, changed };
+    cursor = res.next;
+  }
+}
+
 async function planRow(t: T, orgId: Id<"organizations">) {
   return await t.run((ctx) => ctx.db.query("orgPlans").withIndex("by_org", (q) => q.eq("orgId", orgId)).unique());
 }
@@ -70,7 +87,9 @@ describe("maintenance:migratePlans", () => {
     await asMember(t, { role: "viewer", orgId, status: "disabled" });
     const bare = await t.run((ctx) => ctx.db.insert("organizations", { name: "Phase 2 seed" }));
 
-    expect(await t.mutation(internal.maintenance.migratePlans, {})).toEqual({ organizations: 2, changed: 2, done: true });
+    // MIGRATION_ORG_BATCH is 1: each run handles one organization (it schedules the next one itself;
+    // here every scheduled run is executed in place).
+    expect(await migrateAll(t)).toEqual({ organizations: 2, changed: 2 });
     const org = await t.run((ctx) => ctx.db.get(orgId));
     expect(org?.maxDevices).toBeUndefined();
     expect((await planRow(t, orgId))?.limits.maxDevices).toBe(5);
@@ -86,7 +105,7 @@ describe("maintenance:migratePlans", () => {
     expect(global).toMatchObject({ pingIntervalMs: 1_800_000, revision: 0 });
 
     // Second run: nothing to write.
-    expect(await t.mutation(internal.maintenance.migratePlans, {})).toEqual({ organizations: 2, changed: 0, done: true });
+    expect(await migrateAll(t)).toEqual({ organizations: 2, changed: 0 });
   });
 });
 
@@ -153,7 +172,7 @@ describe("maxMembers", () => {
   test("invite refused at the limit; the join itself enforces it; enable checks it; disable frees a slot", async () => {
     const t = await setupAuth();
     const orgId = await makeOrg(t, "Acme", { plan: "free" }); // maxMembers 2
-    const owner = await asMember(t, { role: "owner", mfa: true, orgId });
+    const owner = await asMember(t, { role: "owner", orgId });
     await giveStepUp(t, owner);
     const viewer = await asMember(t, { role: "viewer", orgId });
     // asMember inserts directly; set the counter the join path would have kept.

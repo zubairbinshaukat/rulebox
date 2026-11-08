@@ -1,7 +1,8 @@
 import { v } from "convex/values";
 import { internal } from "./_generated/api";
 import type { Doc, Id } from "./_generated/dataModel";
-import { internalMutation, type MutationCtx } from "./_generated/server";
+import { type MutationCtx } from "./_generated/server";
+import { internalMutation } from "./lib/functions";
 import { recountActiveCodes } from "./lib/enrollmentCodes";
 import { credOf } from "./lib/fleet";
 import { liveChecker, retagDeviceInstalls } from "./lib/installs";

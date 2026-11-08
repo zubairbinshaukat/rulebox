@@ -14,16 +14,6 @@ export function roleRank(role: Role): number {
   return RANK[role];
 }
 
-/**
- * TOTP is no longer required for any role (Phase 4b owner decision
- * 2026-11-03, against PRD 12.3 / 16: the action PIN at sign-in replaces it).
- * Kept, always false, until WP5b removes TOTP with the dashboard's `/mfa`.
- */
-export function mfaRequiredFor(role: Role): boolean {
-  void role;
-  return false;
-}
-
 export type AuthedCtx = { db: DatabaseReader; auth: Auth };
 
 export type SignedIn = {
@@ -64,20 +54,8 @@ export async function membershipsOf(
     .take(MAX_MEMBERSHIPS);
 }
 
-/** True when this session passed TOTP (one verification covers every organization). */
-export async function sessionHasMfa(
-  ctx: { db: DatabaseReader },
-  signedIn: SignedIn,
-): Promise<boolean> {
-  const row = await ctx.db
-    .query("mfaSessions")
-    .withIndex("by_session", (q) => q.eq("sessionId", signedIn.sessionId))
-    .first();
-  return row !== null && row.userId === signedIn.userId;
-}
-
 /** `now`: server time, passed by mutations and actions only (session expiry). */
-export type MemberOpts = { skipMfa?: true; orgId?: Id<"organizations">; now?: number };
+export type MemberOpts = { orgId?: Id<"organizations">; now?: number };
 
 export type MemberContext = {
   member: Doc<"members">;
@@ -113,11 +91,6 @@ export async function requireMember(
   }
 
   if (roleRank(member.role) < roleRank(minRole)) fail("forbidden");
-
-  // Never true since Phase 4b (mfaRequiredFor is false): TOTP is not enforced.
-  if (opts.skipMfa !== true && mfaRequiredFor(member.role)) {
-    if (!(await sessionHasMfa(ctx, signedIn))) fail("mfa_required");
-  }
 
   return {
     member,

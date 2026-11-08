@@ -19,14 +19,12 @@ export const AUDIT_ACTIONS = [
   "member.enabled",
   "member.resetCodeCreated",
   "member.passwordReset",
-  "member.mfaEnabled",
-  "member.mfaReset",
-  "member.recoveryCodeUsed",
   // Step-up (plan 4.16). Written in the organization the person acted in.
   "member.actionPinSet",
   "member.actionPinChanged",
-  "member.actionPinCleared",
   "member.actionPinLocked",
+  // Phase 4b security review (finding 4): PIN_WARN_AT wrong PINs since the last unlock.
+  "member.actionPinWrongAttempts",
   "member.passkeyAdded",
   "member.passkeyRemoved",
   "member.passkeyCloneDetected",
@@ -35,6 +33,8 @@ export const AUDIT_ACTIONS = [
   "member.recoveryCodesGenerated",
   "member.pinResetRequested",
   "member.pinReset",
+  // Phase 4b security review: self-service password change.
+  "member.passwordChanged",
   "group.created",
   "group.renamed",
   "group.updated", // description only (Step 5)

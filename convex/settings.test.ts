@@ -13,7 +13,7 @@ import { DEFAULT_ORG_SETTINGS, type OrgSettings } from "./lib/validators";
 // Settings → Organization and Admin exit (plan Step 5, 4.10).
 
 async function admin(t: T, orgId: Id<"organizations">, stepUp: "fresh" | "stale" = "fresh") {
-  const m = await asMember(t, { role: "admin", mfa: true, orgId });
+  const m = await asMember(t, { role: "admin", orgId });
   if (stepUp === "fresh") await giveStepUp(t, m);
   else await giveStepUp(t, m, { verifiedAgoMs: 6 * MINUTE_MS, activeAgoMs: 0 });
   return m;

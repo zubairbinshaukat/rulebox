@@ -126,6 +126,20 @@ export default defineSchema({
     updatedAt: v.number(),
   }).index("by_name", ["name"]),
 
+  // tiny (one row per flag; Phase 4b security review). Derived platform state
+  // that hot queries may read instead of the secrets: "mail" = the Resend key,
+  // from address and dashboard origin are stored, DECRYPT with this
+  // deployment's master key and are valid. Recomputed only when a secret
+  // changes (platform:storeSecret / setSecret / clearSecret / checkSecrets),
+  // never on a read. `stamps`: the `updatedAt` of each secret it was computed
+  // from (a late recompute over older rows is ignored).
+  platformFlags: defineTable({
+    name: v.string(),
+    ready: v.boolean(),
+    checkedAt: v.number(),
+    stamps: v.array(v.union(v.number(), v.null())),
+  }).index("by_name", ["name"]),
+
   // tiny (append-only). Platform-level events that belong to no organization
   // (auditLog requires one): which platform secret changed, never its value.
   platformAudit: defineTable({
@@ -167,9 +181,12 @@ export default defineSchema({
     // maintenance: invites expired more than INVITE_RETENTION_MS ago (A10)
     .index("by_expires_at", ["expiresAt"]),
 
-  // tiny (1 per user: the authenticator belongs to the person).
-  // Written only by mfa:confirmSetup / mfa:verify / mfa:useRecoveryCode and
-  // the reset functions; never returned by a query (plan 4.7).
+  // DEPRECATED (Phase 4b WP5b, TOTP removed; widen-then-narrow). Nothing reads
+  // or writes `memberSecrets` or `mfaSessions` any more. They stay in the
+  // schema only so a deploy does not fail on rows that dev data may still hold.
+  // Their indexes are already gone. `maintenance:dropTotpTables` deletes every
+  // row; after it has run on a deployment, delete both definitions below (the
+  // narrow step, one more deploy).
   memberSecrets: defineTable({
     userId: v.id("users"),
     totpSecret: v.optional(v.string()), // base32
@@ -179,19 +196,15 @@ export default defineSchema({
     lastTotpStep: v.number(),
     totpFailures: v.number(),
     totpLockedUntil: v.number(),
-  }).index("by_user", ["userId"]),
+  }),
 
-  // small (1 per signed-in session that passed TOTP)
   mfaSessions: defineTable({
     sessionId: v.id("authSessions"),
     userId: v.id("users"),
     verifiedAt: v.number(),
-  })
-    .index("by_session", ["sessionId"])
-    .index("by_user", ["userId"]),
-
+  }),
   // ---- Step-up authentication (plan 4.16, Step 5a). Belongs to the USER
-  // (like MFA), never to an organization. Never returned by a query except
+  // (like the account), never to an organization. Never returned by a query except
   // the fields `stepUp:status` names.
 
   // tiny (1 per user). The ACTION PIN: confirms major dashboard actions. Not
@@ -213,6 +226,25 @@ export default defineSchema({
     // stepUp:resetWithRecoveryCode. Kept when the PIN and passkeys are reset.
     recoveryHashes: v.optional(v.array(v.string())),
     recoveryCreatedAt: v.optional(v.number()),
+  }).index("by_user", ["userId"]),
+
+  // tiny (1 per user who ever typed a wrong PIN; Phase 4b security review).
+  // The action PIN's attempt counters, OUT of `stepUpFactors` (data-access
+  // rule 4: they change on every attempt; `account:me` reads `stepUpFactors`).
+  // Written only by stepUp:beginPinAttempt / finishPinSuccess and deleted
+  // whenever a new PIN is stored or the factors are reset. Read by
+  // `stepUp:status` (the caller's own row). Supersedes the legacy counter
+  // fields of `stepUpFactors` (seeded from them once; narrowed in WP5b).
+  pinCounters: defineTable({
+    userId: v.id("users"),
+    failures: v.number(), // consecutive, drives the backoff
+    streak: v.number(), // since the last success or lockout; PIN_HARD_LIMIT locks
+    sinceUnlock: v.number(), // since the last success (shown to the person; warn email)
+    lockedUntil: v.number(), // 0 = not locked
+    lockout: v.boolean(), // `lockedUntil` is a lockout (else a short backoff)
+    // Rolling PIN_WINDOW_MS window, NOT reset by a success (<= MAX_PIN_WINDOW_ENTRIES each).
+    windowFailures: v.array(v.number()),
+    windowLockouts: v.array(v.number()),
   }).index("by_user", ["userId"]),
 
   // tiny (forgot PIN by email, Phase 4b Part C). One row per emailed link:
@@ -652,7 +684,7 @@ export default defineSchema({
   // desiredVersions. Phase 2 rows (unsigned) are NOT copied; they are read
   // only by the `devices:desiredState` fallback for a device the publisher
   // has not reached yet, by the first publish (so a new version is above the
-  // one the device applied) and by `dev.ts` (retired in Step 20).
+  // one the device applied) (`dev.ts` was deleted in Step 20).
   // `maintenance:dropDesiredStates` deletes the rows; the table is removed
   // from the schema once it is empty on every deployment.
   desiredStates: defineTable({

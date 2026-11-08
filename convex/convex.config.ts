@@ -23,6 +23,10 @@ const app = defineApp({
     // Missing or invalid: platform secrets cannot be set or read and the
     // forgot-PIN email is off.
     RULEBOX_PLATFORM_KEY: v.optional(v.string()),
+    // Pepper for the recovery-code HMAC (lib/recoveryCodes.ts): at least 32
+    // random characters, set by the operator. Missing: recovery codes can be
+    // neither created nor used (`not_ready`).
+    RULEBOX_RECOVERY_PEPPER: v.optional(v.string()),
   },
 });
 app.use(rateLimiter);

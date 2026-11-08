@@ -2,7 +2,7 @@ import { calculateRateLimit } from "@convex-dev/rate-limiter";
 import { v, type Infer } from "convex/values";
 import { internal } from "./_generated/api";
 import type { Doc } from "./_generated/dataModel";
-import { internalMutation, internalQuery, type DatabaseWriter } from "./_generated/server";
+import { type DatabaseWriter } from "./_generated/server";
 import { DUMMY_PHC, verifier } from "./lib/argon";
 import { writeAudit, type AuditActor } from "./lib/audit";
 import { checkDevice } from "./lib/deviceAuth";
@@ -27,7 +27,7 @@ import {
 import { statusValidator, writeStatus } from "./lib/deviceReport";
 import { normalizeUsername } from "./lib/employeeRules";
 import { fail } from "./lib/errors";
-import { deviceMutation, deviceSelfCheckedAction, type DeviceIdentity } from "./lib/functions";
+import { type DeviceIdentity, deviceMutation, deviceSelfCheckedAction, internalMutation, internalQuery } from "./lib/functions";
 import { MAX_EMPLOYEE_PASSWORD, MAX_USERNAME } from "./lib/limits";
 import { liveChecker } from "./lib/installs";
 import { scopedDb } from "./lib/orgDb";

@@ -8,7 +8,7 @@ import {
   makeOrg,
   type T,
 } from "../tests/convex/identity";
-import { assertInOrg, checkRevision, mfaRequiredFor, nextRevision, requireMember, roleRank } from "./lib/authz";
+import { assertInOrg, checkRevision, nextRevision, requireMember, roleRank } from "./lib/authz";
 import { insertMembership } from "./lib/members";
 import schema from "./schema";
 import { modules } from "./test.setup";
@@ -33,7 +33,7 @@ describe("requireMember", () => {
   test("unauthenticated when the subject names another user's session", async () => {
     const t = setup();
     const a = await asMember(t, { role: "viewer" });
-    const b = await asMember(t, { role: "owner", mfa: true, orgId: a.orgId });
+    const b = await asMember(t, { role: "owner", orgId: a.orgId });
     const forged = identityFor(t, a.userId, b.sessionId);
     await expectCode(forged.run((ctx) => requireMember(ctx, "viewer")), "unauthenticated");
   });
@@ -46,7 +46,7 @@ describe("requireMember", () => {
 
   test("forbidden for a disabled member", async () => {
     const t = setup();
-    const m = await asMember(t, { role: "owner", mfa: true, status: "disabled" });
+    const m = await asMember(t, { role: "owner", status: "disabled" });
     await expectCode(m.as.run((ctx) => requireMember(ctx, "viewer")), "forbidden");
   });
 
@@ -56,49 +56,23 @@ describe("requireMember", () => {
     const t = setup();
     const orgId = await makeOrg(t);
     const viewer = await asMember(t, { role: "viewer", orgId });
-    const admin = await asMember(t, { role: "admin", mfa: true, orgId });
-    const owner = await asMember(t, { role: "owner", mfa: true, orgId });
+    const admin = await asMember(t, { role: "admin", orgId });
+    const owner = await asMember(t, { role: "owner", orgId });
     await expectCode(viewer.as.run((ctx) => requireMember(ctx, "admin")), "forbidden");
     expect((await admin.as.run((ctx) => requireMember(ctx, "admin"))).member.role).toBe("admin");
     expect((await owner.as.run((ctx) => requireMember(ctx, "admin"))).member.role).toBe("owner");
     await expectCode(admin.as.run((ctx) => requireMember(ctx, "owner")), "forbidden");
   });
 
-  // Phase 4b (owner decision 2026-11-03): TOTP is no longer required for any
-  // role; the action PIN at sign-in replaces it (stepUp.test.ts, matrix.test.ts).
-  test("TOTP is not enforced: an admin or owner without an mfaSessions row passes, with or without skipMfa", async () => {
+  test("every role passes with just a live session: no second factor is checked in requireMember", async () => {
     const t = setup();
     const orgId = await makeOrg(t);
+    const viewer = await asMember(t, { role: "viewer", orgId });
     const admin = await asMember(t, { role: "admin", orgId });
     const owner = await asMember(t, { role: "owner", orgId });
-    expect(mfaRequiredFor("owner")).toBe(false);
-    expect(mfaRequiredFor("admin")).toBe(false);
-    expect(mfaRequiredFor("viewer")).toBe(false);
+    expect((await viewer.as.run((ctx) => requireMember(ctx, "viewer"))).member.role).toBe("viewer");
     expect((await admin.as.run((ctx) => requireMember(ctx, "viewer"))).member._id).toBe(admin.memberId);
     expect((await owner.as.run((ctx) => requireMember(ctx, "owner"))).member._id).toBe(owner.memberId);
-    expect((await admin.as.run((ctx) => requireMember(ctx, "viewer", { skipMfa: true }))).orgId).toBe(orgId);
-    // A session that did pass TOTP (legacy) is not treated differently.
-    await t.run((ctx) =>
-      ctx.db.insert("mfaSessions", { sessionId: admin.sessionId, userId: admin.userId, verifiedAt: Date.now() }),
-    );
-    expect((await admin.as.run((ctx) => requireMember(ctx, "admin"))).member._id).toBe(admin.memberId);
-  });
-
-  test("an mfaSessions row of another user changes nothing either", async () => {
-    const t = setup();
-    const orgId = await makeOrg(t);
-    const admin = await asMember(t, { role: "admin", orgId });
-    const other = await asMember(t, { role: "viewer", orgId });
-    await t.run((ctx) =>
-      ctx.db.insert("mfaSessions", { sessionId: admin.sessionId, userId: other.userId, verifiedAt: Date.now() }),
-    );
-    expect((await admin.as.run((ctx) => requireMember(ctx, "viewer"))).member.role).toBe("admin");
-  });
-
-  test("a viewer without MFA passes", async () => {
-    const t = setup();
-    const viewer = await asMember(t, { role: "viewer" });
-    expect((await viewer.as.run((ctx) => requireMember(ctx, "viewer"))).member.role).toBe("viewer");
   });
 });
 
@@ -143,8 +117,8 @@ describe("two organizations, one user", () => {
   async function twoOrgs(t: T) {
     const orgA = await makeOrg(t, "A");
     const orgB = await makeOrg(t, "B");
-    const inA = await asMember(t, { role: "admin", mfa: true, orgId: orgA, email: "both@acme.test" });
-    // Same user, second membership (new session; the MFA row covers only the first).
+    const inA = await asMember(t, { role: "admin", orgId: orgA, email: "both@acme.test" });
+    // Same user, second membership (new session).
     const inB = await asMember(t, { role: "viewer", orgId: orgB, userId: inA.userId, email: "both@acme.test" });
     return { orgA, orgB, inA, inB };
   }
@@ -186,10 +160,10 @@ describe("two organizations, one user", () => {
     await expectCode(inA.as.run((ctx) => requireMember(ctx, "viewer")), "forbidden");
   });
 
-  test("one MFA verification covers every organization of that session", async () => {
+  test("one session covers every organization of that person", async () => {
     const t = setup();
     const { orgB, inA } = await twoOrgs(t);
-    // Promote the user in B to admin: the session that verified for A covers B.
+    // Promote the user in B to admin: the session that signed in for A covers B.
     await t.run(async (ctx) => {
       const rows = await ctx.db
         .query("members")

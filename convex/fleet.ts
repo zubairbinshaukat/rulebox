@@ -2,14 +2,14 @@ import { paginationOptsValidator, paginationResultValidator } from "convex/serve
 import { v } from "convex/values";
 import { internal } from "./_generated/api";
 import type { Doc, Id } from "./_generated/dataModel";
-import { internalMutation, type DatabaseReader } from "./_generated/server";
+import { type DatabaseReader } from "./_generated/server";
 import { writeAudit } from "./lib/audit";
 import { checkRevision, getInOrg, nextRevision } from "./lib/authz";
 import { normalizeDeviceName } from "./lib/enrollmentCodes";
 import { fail } from "./lib/errors";
 import { credOf, revokeDevice } from "./lib/fleet";
 import { checkPageSize, cleanSearch, countResult, orgStatsRow, pickSort, sortArg } from "./lib/listing";
-import { memberMutation, memberQuery } from "./lib/functions";
+import { internalMutation, memberMutation, memberQuery } from "./lib/functions";
 import { assignedAppsOf, retagDeviceInstalls } from "./lib/installs";
 import {
   KEEP_VERSIONS,
@@ -603,7 +603,10 @@ async function livenessOf(ctx: { db: DatabaseReader }, deviceId: Id<"devices">) 
  * Today's (Phase 2) agent sees it at its next regular ping; the head signal of
  * Step 8 makes it immediate.
  */
-export const watch = memberMutation("viewer", { stepUp: "none" })({
+// `stepUp: "pinSet"` (security review finding 14): no unlock needed (a view aid
+// that may renew while the lock screen is up), but a person who has not set
+// the PIN (has not finished sign-in) cannot make devices ping faster.
+export const watch = memberMutation("viewer", { stepUp: "pinSet" })({
   args: { deviceId: v.string() },
   returns: v.object({ fastUntil: v.union(v.number(), v.null()) }),
   handler: async (ctx, args) => {

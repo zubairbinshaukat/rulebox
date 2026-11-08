@@ -1,11 +1,9 @@
 import { v } from "convex/values";
 import { components, internal } from "./_generated/api";
 import type { Doc } from "./_generated/dataModel";
-import { internalMutation, type MutationCtx } from "./_generated/server";
-import { SYSTEM_ACTOR, writeAudit } from "./lib/audit";
-import { normalizeEmail } from "./lib/crypto";
+import { type MutationCtx } from "./_generated/server";
+import { internalMutation } from "./lib/functions";
 import { writeStatus, type StatusInput } from "./lib/deviceReport";
-import { fail } from "./lib/errors";
 import { bumpOnline, minuteBucket, offlineAfterBucket, orgPingInterval } from "./lib/presence";
 import { loadOrgPlan } from "./lib/plans";
 import {
@@ -16,7 +14,6 @@ import {
   FLEET_CHECK_RETENTION_MS,
   INVITE_RETENTION_MS,
   MAINTENANCE_BATCH,
-  MAX_MEMBERSHIPS,
   MIGRATION_DEVICE_BATCH,
   MIGRATION_ORG_BATCH,
   PIN_RESET_RETENTION_MS,
@@ -26,7 +23,6 @@ import {
   SESSION_TOTAL_MS,
 } from "./lib/limits";
 import { ensureOrgRows } from "./lib/orgRows";
-import { clearMfa } from "./lib/sessions";
 
 // Daily cleanup (crons.ts; plan Step 3.6 and its A10 follow-up).
 //
@@ -35,11 +31,6 @@ import { clearMfa } from "./lib/sessions";
 //
 // - sessions        `authSessions` created more than SESSION_TOTAL_MS ago
 //                   (Convex Auth sets expirationTime = creation + that value).
-// - mfaSessions     `mfaSessions` created more than SESSION_TOTAL_MS ago (a row
-//                   is created after its session, so that session has
-//                   expired). Younger orphans (after a sign-out) are harmless:
-//                   `requireMember` checks the session row first and session
-//                   ids are never reused.
 // - refreshExpired  `authRefreshTokens` created more than SESSION_INACTIVE_MS
 //                   ago (expirationTime = creation + that value).
 // - refreshUsed     younger tokens, paged by creation time: deleted when used
@@ -68,7 +59,6 @@ import { clearMfa } from "./lib/sessions";
 
 const STAGES = [
   "sessions",
-  "mfaSessions",
   "refreshExpired",
   "refreshUsed",
   "authRateLimits",
@@ -88,7 +78,7 @@ type StageResult = { done: boolean; cursor: string | null };
 /** Delete rows of `table` created before `before`, oldest first, one batch. */
 async function deleteCreatedBefore(
   ctx: MutationCtx,
-  table: "authSessions" | "mfaSessions" | "authRefreshTokens" | "stepUpSessions" | "fleetChecks" | "pinResets",
+  table: "authSessions" | "authRefreshTokens" | "stepUpSessions" | "fleetChecks" | "pinResets",
   before: number,
 ): Promise<StageResult> {
   const rows = await ctx.db
@@ -136,8 +126,6 @@ async function runStage(ctx: MutationCtx, current: Stage, now: number, cursor: s
   switch (current) {
     case "sessions":
       return await deleteCreatedBefore(ctx, "authSessions", now - SESSION_TOTAL_MS);
-    case "mfaSessions":
-      return await deleteCreatedBefore(ctx, "mfaSessions", now - SESSION_TOTAL_MS);
     case "refreshExpired":
       return await deleteCreatedBefore(ctx, "authRefreshTokens", now - SESSION_INACTIVE_MS);
     case "refreshUsed":
@@ -170,8 +158,8 @@ async function runStage(ctx: MutationCtx, current: Stage, now: number, cursor: s
       await ctx.runMutation(components.rateLimiter.lib.clearAll, { before: now - RATE_LIMIT_ROW_MAX_AGE_MS });
       return { done: true, cursor: null };
     case "stepUpSessions":
-      // Same rule as mfaSessions: created after its session, so older than
-      // SESSION_TOTAL_MS means the session has expired.
+      // Created after its session, so older than SESSION_TOTAL_MS means the
+      // session has expired.
       return await deleteCreatedBefore(ctx, "stepUpSessions", now - SESSION_TOTAL_MS);
     case "stepUpChallenges": {
       const rows = await ctx.db
@@ -259,7 +247,13 @@ export const pruneAudit = internalMutation({
  */
 export const migratePlans = internalMutation({
   args: { cursor: v.optional(v.union(v.string(), v.null())) },
-  returns: v.object({ organizations: v.number(), changed: v.number(), done: v.boolean() }),
+  returns: v.object({
+    organizations: v.number(),
+    changed: v.number(),
+    done: v.boolean(),
+    /** Where the next (self-scheduled) run continues; null when done. */
+    next: v.union(v.string(), v.null()),
+  }),
   handler: async (ctx, args) => {
     const page = await ctx.db
       .query("organizations")
@@ -272,7 +266,7 @@ export const migratePlans = internalMutation({
     if (!page.isDone) {
       await ctx.scheduler.runAfter(0, internal.maintenance.migratePlans, { cursor: page.continueCursor });
     }
-    return { organizations: page.page.length, changed, done: page.isDone };
+    return { organizations: page.page.length, changed, done: page.isDone, next: page.isDone ? null : page.continueCursor };
   },
 });
 
@@ -524,39 +518,25 @@ export const dropDesiredStates = internalMutation({
 });
 
 /**
- * CLI fallback when the only Owner lost their authenticator and recovery
- * codes (plan edge case 24):
- *   npx convex run maintenance:resetMfaByEmail '{"email":"owner@acme.test"}'
+ * Phase 4b WP5b migration, WIDEN half of removing TOTP: delete every row of the
+ * deprecated `memberSecrets` (TOTP secrets and TOTP recovery hashes; nothing is
+ * carried over) and `mfaSessions` tables, MIGRATION_DEVICE_BATCH rows of each
+ * per run, then it reschedules itself until both are empty. Idempotent (an
+ * empty table is a no-op) and safe to run while the app is live: nothing reads
+ * or writes either table any more. Afterwards both tables can be removed from
+ * `schema.ts` (the narrow step, one more deploy).
+ *   npx convex run maintenance:dropTotpTables '{}'
  */
-export const resetMfaByEmail = internalMutation({
-  args: { email: v.string() },
-  returns: v.object({ reset: v.boolean() }),
-  handler: async (ctx, args) => {
-    const email = normalizeEmail(args.email);
-    if (email === null) fail("invalid_argument", { field: "email" });
-    const user = await ctx.db
-      .query("users")
-      .withIndex("email", (q) => q.eq("email", email))
-      .first();
-    if (user === null) fail("not_found");
-    const reset = await clearMfa(ctx, user._id);
-    if (reset) {
-      const memberships = await ctx.db
-        .query("members")
-        .withIndex("by_user", (q) => q.eq("userId", user._id))
-        .take(MAX_MEMBERSHIPS);
-      for (const m of memberships) {
-        await writeAudit(ctx, {
-          orgId: m.orgId,
-          actor: SYSTEM_ACTOR,
-          action: "member.mfaReset",
-          targetType: "member",
-          targetId: m._id,
-          targetLabel: m.email,
-          summary: `Two-step sign-in reset from the command line for ${m.email}`,
-        });
-      }
-    }
-    return { reset };
+export const dropTotpTables = internalMutation({
+  args: {},
+  returns: v.object({ memberSecrets: v.number(), mfaSessions: v.number(), done: v.boolean() }),
+  handler: async (ctx) => {
+    const secrets = await ctx.db.query("memberSecrets").withIndex("by_creation_time").take(MIGRATION_DEVICE_BATCH);
+    for (const row of secrets) await ctx.db.delete(row._id);
+    const sessions = await ctx.db.query("mfaSessions").withIndex("by_creation_time").take(MIGRATION_DEVICE_BATCH);
+    for (const row of sessions) await ctx.db.delete(row._id);
+    const done = secrets.length < MIGRATION_DEVICE_BATCH && sessions.length < MIGRATION_DEVICE_BATCH;
+    if (!done) await ctx.scheduler.runAfter(0, internal.maintenance.dropTotpTables, {});
+    return { memberSecrets: secrets.length, mfaSessions: sessions.length, done };
   },
 });

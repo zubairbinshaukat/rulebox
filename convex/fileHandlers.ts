@@ -8,8 +8,7 @@ import { extensionProblem, normalizeExtension, programDenied } from "./lib/denyL
 import { fail } from "./lib/errors";
 import { memberMutation, memberQuery } from "./lib/functions";
 import { boundedPageValidator, byField, checkPageSize, cleanSearch, matches, pageInMemory, pickSort, sortArg } from "./lib/listing";
-import { MAX_FILE_HANDLERS, MAX_APP_OPTIONS } from "./lib/limits";
-import { appKind } from "./lib/validators";
+import { MAX_FILE_HANDLERS } from "./lib/limits";
 
 // File types (plan Step 10 item 7; PRD 7.3). A rule says "files ending in
 // .xyz open with this program". Only these rules decide what opens a file:
@@ -27,43 +26,6 @@ import { appKind } from "./lib/validators";
 function canOpenFiles(app: Doc<"apps">): boolean {
   return app.kind === "desktop" && !app.archived && (app.desktop?.fileArgTemplate.length ?? 0) > 0 && !programDenied(app.desktop?.exe ?? "");
 }
-
-/**
- * The organization's file-type rules (viewer), by extension, and the apps a
- * rule may point at (non-archived programs with a file argument).
- */
-export const list = memberQuery("viewer")({
-  args: {},
-  returns: v.object({
-    rows: v.array(v.object({ _id: v.id("fileHandlers"), extension: v.string(), appId: v.id("apps"), appName: v.string() })),
-    appOptions: v.array(v.object({ _id: v.id("apps"), name: v.string(), kind: appKind, canOpenFiles: v.literal(true) })),
-  }),
-  handler: async (ctx) => {
-    const handlers = await ctx.db
-      .query("fileHandlers")
-      .withIndex("by_org_ext", (q) => q.eq("orgId", ctx.orgId))
-      .take(MAX_FILE_HANDLERS + 1);
-    const apps = await ctx.db
-      .query("apps")
-      .withIndex("by_org_archived", (q) => q.eq("orgId", ctx.orgId).eq("archived", false))
-      .take(MAX_APP_OPTIONS);
-    const names = new Map<string, string>(apps.map((a) => [a._id, a.name]));
-    const rows = [];
-    for (const h of handlers) {
-      // A rule can point at an archived app (it is dormant until restored): look the name up.
-      let appName = names.get(h.appId);
-      if (appName === undefined) appName = (await ctx.db.get(h.appId))?.name ?? "";
-      rows.push({ _id: h._id, extension: h.extension, appId: h.appId, appName });
-    }
-    return {
-      rows,
-      appOptions: apps
-        .filter(canOpenFiles)
-        .map((a) => ({ _id: a._id, name: a.name, kind: a.kind, canOpenFiles: true as const }))
-        .sort((a, b) => a.name.localeCompare(b.name)),
-    };
-  },
-});
 
 /**
  * One page of the file-type rules for the file types table (viewer; list

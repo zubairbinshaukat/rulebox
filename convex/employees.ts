@@ -2,7 +2,7 @@ import { paginationOptsValidator, paginationResultValidator } from "convex/serve
 import { v } from "convex/values";
 import { internal } from "./_generated/api";
 import type { Doc, Id } from "./_generated/dataModel";
-import { internalMutation, internalQuery, type DatabaseReader, type MutationCtx } from "./_generated/server";
+import { type DatabaseReader, type MutationCtx } from "./_generated/server";
 import { ARGON2_PARAMS, hashSecret } from "./lib/argon";
 import { writeAudit, type AuditActor } from "./lib/audit";
 import { checkRevision, getInOrg, nextRevision } from "./lib/authz";
@@ -27,7 +27,7 @@ import {
   type RosterPlan,
 } from "./lib/employeeSync";
 import { fail } from "./lib/errors";
-import { memberAction, memberMutation, memberQuery } from "./lib/functions";
+import { internalMutation, internalQuery, memberAction, memberMutation, memberQuery } from "./lib/functions";
 import { checkPageSize, cleanSearch, countResult, orgStatsRow, pickSort, sortArg } from "./lib/listing";
 import {
   EMPLOYEE_ROW_GROUPS,

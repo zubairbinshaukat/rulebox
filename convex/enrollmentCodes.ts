@@ -2,7 +2,7 @@ import { paginationOptsValidator, paginationResultValidator } from "convex/serve
 import { v } from "convex/values";
 import { internal } from "./_generated/api";
 import type { Id } from "./_generated/dataModel";
-import { env, internalMutation } from "./_generated/server";
+import { env } from "./_generated/server";
 import { writeAudit } from "./lib/audit";
 import { getInOrg } from "./lib/authz";
 import {
@@ -14,7 +14,7 @@ import {
 } from "./lib/crypto";
 import { codeState, countsAsActive, normalizeLabel, recountActiveCodes } from "./lib/enrollmentCodes";
 import { fail } from "./lib/errors";
-import { memberAction, memberMutation, memberQuery } from "./lib/functions";
+import { internalMutation, memberAction, memberMutation, memberQuery } from "./lib/functions";
 import { checkPageSize, pickSort, sortArg } from "./lib/listing";
 import {
   MAX_CODE_LABEL,

@@ -2,47 +2,54 @@ import { customAction, customMutation, customQuery, NoOp } from "convex-helpers/
 import { v } from "convex/values";
 import { internal } from "../_generated/api";
 import type { Doc, Id } from "../_generated/dataModel";
-import { action, mutation, query } from "../_generated/server";
+import {
+  action,
+  internalMutation as rawInternalMutation,
+  internalQuery as rawInternalQuery,
+  mutation,
+  query,
+} from "../_generated/server";
 import { requireMember, type Role } from "./authz";
 import { checkDevice, settleRotation, type CredentialState, type DeviceCheck, type DeviceCred } from "./deviceAuth";
 import { fail } from "./errors";
 import { scopedDb, type OrgScope } from "./orgDb";
-import { checkStepUpOrFail, touchActivity, type MajorAction, type StepUpLevel } from "./stepUp";
+import { checkStepUpOrFail, hasPin, touchActivity, type MajorAction, type StepUpLevel } from "./stepUp";
 
 // The only place that turns Convex's raw builders into public functions
 // (plan Phase 4, rule 3; a lint rule forbids `query` / `mutation` / `action`
-// imports anywhere else).
+// imports anywhere else) and into probe-counted internal queries / mutations
+// (the same rule forbids `internalQuery` / `internalMutation` from the
+// generated module).
 //
-// - member*: signed-in members of an organization, by minimum role. (Until
-//   Phase 4b Owners and Admins also needed a TOTP-verified session,
-//   `mfa_required`; the code path stays, never taken, until WP5b.)
+// - member*: signed-in members of an organization, by minimum role.
 // - device*: the agent with its device id + secret (consumed by the wrapper).
 // - public*: unauthenticated; ONLY health:ping, account:me,
-//   account:redeemReset, account:requestPinReset, account:redeemPinReset
-//   (checks the session itself) and enrollment:enroll.
+//   account:redeemReset, account:requestPinReset and account:redeemPinReset
+//   (both check the signed-in session themselves) and enrollment:enroll.
 //
-// Phase 4b: TOTP is no longer enforced (`mfaRequiredFor` is false), and the
-// step-up check answers `step_up_setup_required` for EVERY role until the
+// The step-up check answers `step_up_setup_required` for EVERY role until the
 // person has set the action PIN, so a member who has not finished sign-in
 // (no PIN) can only read, set the PIN, lock, sign out or reset.
 
 export type { Role };
 
 /**
- * - `skipMfa`: the mfa:* entry points (how a session passes MFA); also skips
- *   step-up.
  * - `major`: a major action (plan 4.16): needs a fresh step-up. The name must
  *   be this function's own `file:name` and be listed in `MAJOR_ACTIONS`
  *   (`stepUp.test.ts` checks both).
  * - `stepUp: "none"`: the step-up entry points themselves (verify, set up,
- *   lock). Every other member mutation or action needs an UNLOCKED session.
- *   Queries never check step-up (the dashboard's idle lock hides screens).
+ *   lock, recovery). Every other member mutation or action needs an UNLOCKED
+ *   session. Queries never check step-up (the dashboard's idle lock hides
+ *   screens).
+ * - `stepUp: "pinSet"`: no unlock needed, but the person must have finished
+ *   sign-in (an action PIN exists; else `step_up_setup_required`). Only for
+ *   view aids that keep working while the lock screen is up (`fleet:watch`).
  */
-export type MemberOpts = { skipMfa?: true; stepUp?: "none"; major?: MajorAction };
+export type MemberOpts = { stepUp?: "none" | "pinSet"; major?: MajorAction };
 
 export function stepUpLevelOf(opts: MemberOpts): StepUpLevel | null {
   if (opts.major !== undefined) return "fresh";
-  if (opts.skipMfa === true || opts.stepUp === "none") return null;
+  if (opts.stepUp === "none" || opts.stepUp === "pinSet") return null;
   return "unlocked";
 }
 
@@ -72,12 +79,12 @@ function actorOf(member: Doc<"members">): AuditActorCtx {
 // device credentials) run on the unscoped database, counted by the I/O probe
 // when it is on.
 
-export function memberQuery(minRole: Role, opts: MemberOpts = {}) {
+export function memberQuery(minRole: Role) {
   return customQuery(query, {
     args: orgIdArg,
     input: async (ctx, args) => {
       const db = scopedDb(ctx.db, null);
-      const m = await requireMember({ db, auth: ctx.auth }, minRole, { skipMfa: opts.skipMfa, orgId: args.orgId });
+      const m = await requireMember({ db, auth: ctx.auth }, minRole, { orgId: args.orgId });
       const member: MemberCtx = { ...m, actor: actorOf(m.member) };
       return { ctx: { ...member, db: scopedDb(db, { orgId: m.orgId, checked: new Set() }) }, args: {} as NoArgs };
     },
@@ -90,12 +97,14 @@ export function memberMutation(minRole: Role, opts: MemberOpts = {}) {
     input: async (ctx, args) => {
       const now = Date.now();
       const db = scopedDb(ctx.db, null);
-      const m = await requireMember({ db, auth: ctx.auth }, minRole, { skipMfa: opts.skipMfa, orgId: args.orgId, now });
+      const m = await requireMember({ db, auth: ctx.auth }, minRole, { orgId: args.orgId, now });
       const level = stepUpLevelOf(opts);
       if (level !== null) {
         const row = await checkStepUpOrFail({ db }, m, level, now);
         // A member write is activity: at most one patch per quantum.
         await touchActivity({ db }, row, now);
+      } else if (opts.stepUp === "pinSet" && !(await hasPin({ db }, m.userId))) {
+        fail("step_up_setup_required", { detail: "pin" });
       }
       const member: MemberCtx = { ...m, actor: actorOf(m.member) };
       return { ctx: { ...member, db: scopedDb(db, { orgId: m.orgId, checked: new Set() }) }, args: {} as NoArgs };
@@ -110,10 +119,10 @@ export function memberAction(minRole: Role, opts: MemberOpts = {}) {
     input: async (ctx, args): Promise<{ ctx: MemberCtx; args: NoArgs }> => {
       const m: Omit<MemberCtx, "actor"> = await ctx.runQuery(internal.account.authorize, {
         minRole,
-        skipMfa: opts.skipMfa === true,
         orgId: args.orgId,
         now: Date.now(),
         stepUp: stepUpLevelOf(opts) ?? undefined,
+        pinSet: opts.stepUp === "pinSet" ? true : undefined,
       });
       return { ctx: { ...m, actor: actorOf(m.member) }, args: {} };
     },
@@ -247,3 +256,21 @@ export const publicMutation = customMutation(mutation, {
 });
 /** ONLY account:redeemReset, account:requestPinReset, account:redeemPinReset. */
 export const publicAction = customAction(action, NoOp);
+
+// ---------------------------------------------------------------- internal
+
+// Internal queries and mutations (scheduler, actions, CLI). They add nothing to
+// the handler's own arguments and no checks: the only difference from the raw
+// builders is that `ctx.db` is counted by the I/O probe when it is on (the same
+// counting layer the public wrappers use), so `ioBudgets.test.ts` can budget
+// them too. With the probe off, `scopedDb(db, null)` returns `db` itself: no
+// proxy, no cost. Internal ACTIONS keep the raw builder (they have no `db`; the
+// internal queries and mutations they call are counted).
+export const internalQuery = customQuery(rawInternalQuery, {
+  args: {},
+  input: async (ctx) => ({ ctx: { db: scopedDb(ctx.db, null) }, args: {} as NoArgs }),
+});
+export const internalMutation = customMutation(rawInternalMutation, {
+  args: {},
+  input: async (ctx) => ({ ctx: { db: scopedDb(ctx.db, null) }, args: {} as NoArgs }),
+});

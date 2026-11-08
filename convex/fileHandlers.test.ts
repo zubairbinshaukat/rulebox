@@ -85,7 +85,7 @@ const program = (name: string, over: Record<string, unknown> = {}) => ({
 });
 
 async function admin(t: T, orgId: Id<"organizations">, stepUp: "fresh" | "stale" = "fresh") {
-  const m = await asMember(t, { role: "admin", mfa: true, orgId });
+  const m = await asMember(t, { role: "admin", orgId });
   if (stepUp === "fresh") await giveStepUp(t, m);
   else await giveStepUp(t, m, { verifiedAgoMs: 6 * MINUTE_MS, activeAgoMs: 0 });
   return m;
@@ -93,6 +93,11 @@ async function admin(t: T, orgId: Id<"organizations">, stepUp: "fresh" | "stale"
 
 async function rules(t: T, orgId: Id<"organizations">) {
   return (await t.run((ctx) => ctx.db.query("fileHandlers").withIndex("by_org_ext", (q) => q.eq("orgId", orgId)).take(300))).map((r) => [r.extension, r.appId]);
+}
+
+/** The programs the "add rule" dialog offers (`apps:options`, programs that can open files). */
+async function openers(a: Awaited<ReturnType<typeof admin>>) {
+  return (await a.as.query(api.apps.options, {})).filter((o) => o.canOpenFiles);
 }
 
 describe("fileHandlers", () => {
@@ -145,10 +150,9 @@ describe("fileHandlers", () => {
     for (const appId of [noFiles, site, archived]) {
       await expectCode(a.as.mutation(api.fileHandlers.set, { extension: ".pdf", appId }), "invalid_argument");
     }
-    const list = await a.as.query(api.fileHandlers.list, {});
-    expect(list.appOptions).toEqual([]); // none of the three can open files
+    expect(await openers(a)).toEqual([]); // none of the three can open files
     const ok = await a.as.mutation(api.apps.createDesktop, program("Reader"));
-    expect((await a.as.query(api.fileHandlers.list, {})).appOptions).toEqual([{ _id: ok, name: "Reader", kind: "desktop", canOpenFiles: true }]);
+    expect(await openers(a)).toEqual([{ _id: ok, name: "Reader", kind: "desktop", canOpenFiles: true }]);
   });
 
   test("a shell, script host or runtime can never be the target of a rule: .txt does not open with wscript.exe", async () => {
@@ -171,7 +175,7 @@ describe("fileHandlers", () => {
       }),
     );
     await expectCode(a.as.mutation(api.fileHandlers.set, { extension: ".txt", appId: legacy }), "invalid_argument");
-    expect((await a.as.query(api.fileHandlers.list, {})).appOptions).toEqual([]);
+    expect(await openers(a)).toEqual([]);
     expect(await rules(t, orgId)).toEqual([]);
     // a normal program is still fine, including a System32 one such as notepad
     const notepad = await a.as.mutation(api.apps.createDesktop, program("Notepad", { exe: "{SystemRoot}\\System32\\notepad.exe" }));
@@ -188,8 +192,8 @@ describe("fileHandlers", () => {
     await a.as.mutation(api.fileHandlers.set, { extension: ".txt", appId: viewer });
     await a.as.mutation(api.fileHandlers.set, { extension: ".docx", appId: reader });
     await a.as.mutation(api.apps.setArchived, { appId: viewer, archived: true });
-    const list = await a.as.query(api.fileHandlers.list, {});
-    expect(list.rows.map((r) => [r.extension, r.appName])).toEqual([
+    const list = await a.as.query(api.fileHandlers.page, { paginationOpts: { numItems: 50, cursor: null } });
+    expect(list.page.map((r) => [r.extension, r.appName])).toEqual([
       [".docx", "Reader"],
       [".txt", "Viewer"],
     ]);
@@ -206,9 +210,9 @@ describe("fileHandlers", () => {
     await expectCode(a.as.mutation(api.fileHandlers.set, { extension: ".pdf", appId: reader }), "too_large");
     // moving an existing extension is not a new rule
     await a.as.mutation(api.fileHandlers.set, { extension: ".x000", appId: reader });
-    const list = await probe(() => a.as.query(api.fileHandlers.list, {}));
-    expect(list.result.rows).toHaveLength(MAX_FILE_HANDLERS);
-    expect(list.io.reads).toBeLessThanOrEqual(3 + MAX_FILE_HANDLERS + 1 + 500 + 10);
+    const list = await probe(() => a.as.query(api.fileHandlers.page, { paginationOpts: { numItems: 50, cursor: null } }));
+    expect(list.result.total).toBe(MAX_FILE_HANDLERS);
+    expect(list.io.reads).toBeLessThanOrEqual(3 + MAX_FILE_HANDLERS + 1 + 1);
   });
 
   test("viewers read but cannot write; remove needs a fresh step-up; other organizations see nothing", async () => {
@@ -219,9 +223,9 @@ describe("fileHandlers", () => {
     await a.as.mutation(api.fileHandlers.set, { extension: ".pdf", appId: reader });
     const handlerId = (await t.run((ctx) => ctx.db.query("fileHandlers").withIndex("by_org_ext", (q) => q.eq("orgId", orgId)).first()))!._id;
 
-    const v = await asMember(t, { role: "viewer", mfa: true, orgId });
+    const v = await asMember(t, { role: "viewer", orgId });
     await giveStepUp(t, v);
-    expect((await v.as.query(api.fileHandlers.list, {})).rows).toHaveLength(1);
+    expect((await v.as.query(api.fileHandlers.page, { paginationOpts: { numItems: 50, cursor: null } })).page).toHaveLength(1);
     await expectCode(v.as.mutation(api.fileHandlers.set, { extension: ".txt", appId: reader }), "forbidden");
     await expectCode(v.as.mutation(api.fileHandlers.remove, { handlerId }), "forbidden");
 
@@ -230,7 +234,7 @@ describe("fileHandlers", () => {
     await stale.as.mutation(api.fileHandlers.set, { extension: ".txt", appId: reader }); // set is an ordinary write
 
     const other = await admin(t, await makeOrg(t, "Other"));
-    expect((await other.as.query(api.fileHandlers.list, {})).rows).toEqual([]);
+    expect((await other.as.query(api.fileHandlers.page, { paginationOpts: { numItems: 50, cursor: null } })).page).toEqual([]);
     await expectCode(other.as.mutation(api.fileHandlers.remove, { handlerId }), "not_found");
     await a.as.mutation(api.fileHandlers.remove, { handlerId });
     expect(await rules(t, orgId)).toEqual([[".txt", reader]]);

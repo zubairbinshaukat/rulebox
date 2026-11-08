@@ -201,16 +201,6 @@ export function isAgentAcceptableUrl(url: string): boolean {
   );
 }
 
-/** Throwing form for the CLI helpers (`dev.ts`). */
-export function assertAgentAcceptableUrl(url: string): void {
-  if (!isAgentAcceptableUrl(url)) {
-    throw new Error(
-      `The agent only accepts an https:// URL with a host and no path ` +
-        `(got ${url}). A local deployment cannot be used for enrollment.`,
-    );
-  }
-}
-
 /** True when `text` contains a C0 control character or DEL. */
 export function hasControlChar(text: string): boolean {
   for (let i = 0; i < text.length; i++) {
@@ -230,44 +220,3 @@ export function normalizeEmail(input: string): string | null {
   return email;
 }
 
-// ---------------------------------------------------------------- base32 (RFC 4648)
-
-const B32 = "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567";
-
-/** RFC 4648 base32 without padding (the form authenticator apps expect). */
-export function base32Encode(bytes: Uint8Array): string {
-  let out = "";
-  let buffer = 0;
-  let bits = 0;
-  for (const byte of bytes) {
-    buffer = (buffer << 8) | byte;
-    bits += 8;
-    while (bits >= 5) {
-      out += B32.charAt((buffer >>> (bits - 5)) & 31);
-      bits -= 5;
-    }
-    buffer &= (1 << bits) - 1;
-  }
-  if (bits > 0) out += B32.charAt((buffer << (5 - bits)) & 31);
-  return out;
-}
-
-/** Decode RFC 4648 base32 (case-insensitive, padding ignored). Null on a bad character. */
-export function base32Decode(text: string): Uint8Array | null {
-  const clean = text.toUpperCase().replace(/=+$/, "");
-  const out: number[] = [];
-  let buffer = 0;
-  let bits = 0;
-  for (const ch of clean) {
-    const value = B32.indexOf(ch);
-    if (value < 0) return null;
-    buffer = (buffer << 5) | value;
-    bits += 5;
-    if (bits >= 8) {
-      out.push((buffer >>> (bits - 8)) & 0xff);
-      bits -= 8;
-    }
-    buffer &= (1 << bits) - 1;
-  }
-  return new Uint8Array(out);
-}

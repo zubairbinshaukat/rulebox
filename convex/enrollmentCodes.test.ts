@@ -67,7 +67,7 @@ function tokenOf(code: string): string {
 // ---------------------------------------------------------------- fixtures
 
 async function admin(t: T, orgId: Id<"organizations">, stepUp: "fresh" | "stale" = "fresh") {
-  const m = await asMember(t, { role: "admin", mfa: true, orgId });
+  const m = await asMember(t, { role: "admin", orgId });
   if (stepUp === "fresh") await giveStepUp(t, m);
   else await giveStepUp(t, m, { verifiedAgoMs: 6 * MINUTE_MS, activeAgoMs: 0 });
   return m;

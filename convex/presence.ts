@@ -1,6 +1,6 @@
 import { v } from "convex/values";
 import { internal } from "./_generated/api";
-import { internalMutation } from "./_generated/server";
+import { internalMutation } from "./lib/functions";
 import { PING_PROPAGATION_BATCH, PING_PROPAGATION_ORG_BATCH, SWEEP_BATCH } from "./lib/limits";
 import { markOffline, minuteBucket, orgPingInterval } from "./lib/presence";
 

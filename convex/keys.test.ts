@@ -26,7 +26,7 @@ afterEach(() => {
 const drain = (t: T) => t.finishAllScheduledFunctions(vi.runAllTimers);
 
 async function owner(t: T, orgId: Id<"organizations">) {
-  const m = await asMember(t, { role: "owner", mfa: true, orgId });
+  const m = await asMember(t, { role: "owner", orgId });
   await giveStepUp(t, m);
   return m;
 }
@@ -133,10 +133,10 @@ describe("keys:registerActive and enrollment's root of trust", () => {
   test("only the Owner, with a fresh step-up", async () => {
     const t = await setupAuth();
     const orgId = await makeOrg(t, "Acme", { noKey: true });
-    const admin = await asMember(t, { role: "admin", mfa: true, orgId });
+    const admin = await asMember(t, { role: "admin", orgId });
     await giveStepUp(t, admin);
     await expectCode(admin.as.mutation(api.keys.registerActive, {}), "forbidden");
-    const stale = await asMember(t, { role: "owner", mfa: true, orgId });
+    const stale = await asMember(t, { role: "owner", orgId });
     await giveStepUp(t, stale, { verifiedAgoMs: 6 * 60_000, activeAgoMs: 0 });
     await expectCode(stale.as.mutation(api.keys.registerActive, {}), "step_up_required");
   });

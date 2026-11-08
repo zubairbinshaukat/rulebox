@@ -6,7 +6,7 @@ import { TEST_KEY_2 } from "../tests/convex/keys";
 import { api } from "./_generated/api";
 import type { Id } from "./_generated/dataModel";
 import { writeAudit } from "./lib/audit";
-import { MINUTE_MS, OVERVIEW_AUDIT_ROWS, OVERVIEW_FAILED_INSTALLS } from "./lib/limits";
+import { MINUTE_MS, OVERVIEW_AUDIT_ROWS } from "./lib/limits";
 
 // The overview (plan Step 17 items 3, 6, 7; A3, A7): one small query that
 // re-runs on counter, presence and audit changes only.
@@ -168,7 +168,10 @@ describe("overview:get", () => {
   });
 });
 
-describe("overview:failedInstalls", () => {
+/** The overview widget shows this many failed installs. */
+const FAILED_ROWS = 20;
+
+describe("overview:failedInstallsPage (the overview widget's rows)", () => {
   async function seed(t: T, orgId: Id<"organizations">, n: number) {
     return await t.run(async (ctx) => {
       const ids: Id<"installResults">[] = [];
@@ -195,16 +198,16 @@ describe("overview:failedInstalls", () => {
     const t = await setupAuth();
     const orgId = await makeOrg(t);
     const other = await makeOrg(t, "Other");
-    await seed(t, orgId, OVERVIEW_FAILED_INSTALLS + 5);
+    await seed(t, orgId, FAILED_ROWS + 5);
     await seed(t, other, 2);
     const v = await viewerOf(t, orgId);
-    const rows = await v.as.query(api.overview.failedInstalls, {});
-    expect(rows).toHaveLength(OVERVIEW_FAILED_INSTALLS);
+    const rows = (await v.as.query(api.overview.failedInstallsPage, { paginationOpts: { numItems: FAILED_ROWS, cursor: null } })).page;
+    expect(rows).toHaveLength(FAILED_ROWS);
     expect(rows[0]).toMatchObject({ deviceName: "PC 0", appName: "App 0", detail: "The download did not match its checksum." });
     expect(rows.every((r) => !r.deviceName.startsWith("Other"))).toBe(true);
     expectNoSecrets(rows);
     const foreign = await viewerOf(t, other);
-    expect(await foreign.as.query(api.overview.failedInstalls, {})).toHaveLength(2);
+    expect((await foreign.as.query(api.overview.failedInstallsPage, { paginationOpts: { numItems: 50, cursor: null } })).page).toHaveLength(2);
   });
 
   test("a removed PC or app is left out; an organization with nothing failed gets an empty list", async () => {
@@ -216,7 +219,7 @@ describe("overview:failedInstalls", () => {
       await ctx.db.delete(row.deviceId);
     });
     const v = await viewerOf(t, orgId);
-    expect((await v.as.query(api.overview.failedInstalls, {})).map((r) => r.deviceName)).toEqual(["PC 1"]);
-    expect(await (await viewerOf(t, await makeOrg(t, "Empty"))).as.query(api.overview.failedInstalls, {})).toEqual([]);
+    expect((await v.as.query(api.overview.failedInstallsPage, { paginationOpts: { numItems: 50, cursor: null } })).page.map((r) => r.deviceName)).toEqual(["PC 1"]);
+    expect((await (await viewerOf(t, await makeOrg(t, "Empty"))).as.query(api.overview.failedInstallsPage, { paginationOpts: { numItems: 50, cursor: null } })).page).toEqual([]);
   });
 });

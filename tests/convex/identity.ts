@@ -67,7 +67,7 @@ export type Member = {
 let counter = 0;
 
 /**
- * Inserts `users`, `authSessions`, `members` (and `mfaSessions` when `mfa`),
+ * Inserts `users`, `authSessions` and `members`,
  * returns the identity-bound accessor plus the ids. Pass `userId` to add a
  * second membership for the same person (a new session is created).
  */
@@ -75,7 +75,6 @@ export async function asMember(
   t: T,
   opts: {
     role: Role;
-    mfa?: boolean;
     orgId?: Id<"organizations">;
     status?: "active" | "disabled";
     userId?: Id<"users">;
@@ -99,9 +98,6 @@ export async function asMember(
       createdAt: Date.now(),
       revision: 0,
     });
-    if (opts.mfa === true) {
-      await ctx.db.insert("mfaSessions", { sessionId, userId, verifiedAt: Date.now() });
-    }
     return { userId, sessionId, memberId };
   });
   return { ...ids, orgId, email, as: identityFor(t, ids.userId, ids.sessionId) };

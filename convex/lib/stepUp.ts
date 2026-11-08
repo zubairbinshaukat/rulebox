@@ -3,11 +3,14 @@ import type { DatabaseReader, DatabaseWriter } from "../_generated/server";
 import { fail } from "./errors";
 import {
   MAX_PASSKEYS,
+  MAX_PIN_WINDOW_ENTRIES,
   PIN_BACKOFF_BASE_MS,
   PIN_BACKOFF_MAX_MS,
   PIN_FREE_FAILURES,
   PIN_HARD_LIMIT,
   PIN_LOCKOUT_MS,
+  PIN_LOCKOUT_STEPS_MS,
+  PIN_WINDOW_MS,
   STEP_UP_ACTIVITY_QUANTUM_MS,
   STEP_UP_BOOTSTRAP_MS,
   STEP_UP_CLOCK_SLACK_MS,
@@ -45,13 +48,14 @@ export type MajorActionSpec = {
  * function cannot forget it (the test checks them as soon as they exist).
  */
 export const MAJOR_ACTIONS = {
-  // Members, roles, MFA (exist today).
+  // Members and roles.
   "members:invite": { when: "always", why: "gives a person access" },
   "members:revokeInvite": { when: "always", why: "deletes an invite or reset code" },
   "members:changeRole": { when: "always", why: "changes a role" },
   "members:setDisabled": { when: "always", why: "disables or enables a member" },
   "members:createResetCode": { when: "always", why: "lets someone set a member's password" },
-  "members:resetMfa": { when: "always", why: "removes a member's second factor" },
+  // Phase 4b security review: self-service password change (also needs the current password).
+  "account:changePassword": { when: "always", why: "changes the sign-in password" },
   // Step-up factors themselves. (`clearActionPin` always refuses since Phase
   // 4b: the PIN is required; it stays major so it cannot even be probed stale.)
   "stepUp:clearActionPin": { when: "always", why: "removes a step-up factor" },
@@ -156,26 +160,230 @@ export async function stepUpRowOf(ctx: { db: DatabaseReader }, who: Who): Promis
  *
  * Invariant: a `stepUpSessions` row is only written for a person with a PIN
  * (`markVerified` callers check it; the PIN cannot be removed, and every
- * reset that removes it also deletes the person's step-up rows), so a valid
- * row proves the PIN exists without reading `stepUpFactors` on every write.
+ * reset that removes it also deletes ALL the person's step-up rows, walking
+ * the whole per-user range: `deleteStepUpSessions`), so a valid row proves
+ * the PIN exists without reading `stepUpFactors` on every write.
  */
 export async function hasPin(ctx: { db: DatabaseReader }, userId: Id<"users">): Promise<boolean> {
   const f = await factorsOf(ctx, userId);
   return f?.actionPinHash !== undefined;
 }
 
-/** True when the PIN is in its PIN_LOCKOUT_MS lockout state (hard limit reached, or a legacy "disabled" row). */
-export function pinHardLocked(f: Doc<"stepUpFactors">): boolean {
-  return f.pinDisabledAt !== undefined || f.pinFailuresTotal >= PIN_HARD_LIMIT;
+// ---------------------------------------------------------------- PIN attempt counters (`pinCounters`)
+//
+// Phase 4b security review. The counters live in their own row (they change on
+// every attempt; `account:me` reads `stepUpFactors` and must not re-run then).
+//
+// - `failures`: consecutive failures, drives the short backoff.
+// - `streak`: failures since the last success or lockout; PIN_HARD_LIMIT locks.
+// - `windowFailures`: timestamps of failures in the last PIN_WINDOW_MS, NOT
+//   reset by a success. PIN_HARD_LIMIT of them since the last lockout lock as
+//   well, so a password thief guessing a few times a day while the owner
+//   unlocks daily is still locked out after PIN_HARD_LIMIT guesses.
+// - `windowLockouts`: lockouts in the window; each lockout lasts
+//   PIN_LOCKOUT_STEPS_MS[number of earlier lockouts in the window] (24 h,
+//   72 h, then 7 days).
+// - `sinceUnlock`: failures since the last success (shown to the person; the
+//   PIN_WARN_AT-th one emails them).
+
+export type PinCounters = {
+  failures: number;
+  streak: number;
+  sinceUnlock: number;
+  lockedUntil: number;
+  lockout: boolean;
+  windowFailures: number[];
+  windowLockouts: number[];
+};
+
+export const NO_PIN_COUNTERS: PinCounters = {
+  failures: 0,
+  streak: 0,
+  sinceUnlock: 0,
+  lockedUntil: 0,
+  lockout: false,
+  windowFailures: [],
+  windowLockouts: [],
+};
+
+export async function pinCountersRowOf(ctx: { db: DatabaseReader }, userId: Id<"users">): Promise<Doc<"pinCounters"> | null> {
+  return await ctx.db
+    .query("pinCounters")
+    .withIndex("by_user", (q) => q.eq("userId", userId))
+    .first();
 }
 
 /**
- * When the PIN may be tried again (0 = now). A legacy row disabled before
- * Phase 4b is locked until `pinDisabledAt + PIN_LOCKOUT_MS`.
+ * The counters of a person: their `pinCounters` row, else seeded from the
+ * legacy fields of `stepUpFactors` (rows written before the review: a hard
+ * limit reached, or a pre-Phase-4b "disabled" PIN locked until
+ * `pinDisabledAt + PIN_LOCKOUT_MS`).
  */
-export function pinLockedUntil(f: Doc<"stepUpFactors">): number {
-  if (f.pinDisabledAt !== undefined) return Math.max(f.pinLockedUntil, f.pinDisabledAt + PIN_LOCKOUT_MS);
-  return f.pinLockedUntil;
+export function pinCountersOf(row: Doc<"pinCounters"> | null, f: Doc<"stepUpFactors"> | null): PinCounters {
+  if (row !== null) {
+    const { failures, streak, sinceUnlock, lockedUntil, lockout, windowFailures, windowLockouts } = row;
+    return { failures, streak, sinceUnlock, lockedUntil, lockout, windowFailures, windowLockouts };
+  }
+  if (f === null) return NO_PIN_COUNTERS;
+  const legacyLock = f.pinDisabledAt !== undefined || f.pinFailuresTotal >= PIN_HARD_LIMIT;
+  const lockedUntil = f.pinDisabledAt !== undefined ? Math.max(f.pinLockedUntil, f.pinDisabledAt + PIN_LOCKOUT_MS) : f.pinLockedUntil;
+  return {
+    failures: legacyLock ? 0 : f.pinFailures,
+    streak: legacyLock ? 0 : f.pinFailuresTotal,
+    sinceUnlock: f.pinFailuresTotal,
+    lockedUntil,
+    lockout: legacyLock,
+    windowFailures: [],
+    windowLockouts: legacyLock && lockedUntil > 0 ? [lockedUntil - PIN_LOCKOUT_MS] : [],
+  };
+}
+
+function lastN(list: number[]): number[] {
+  return list.length > MAX_PIN_WINDOW_ENTRIES ? list.slice(-MAX_PIN_WINDOW_ENTRIES) : list;
+}
+
+/** Failures in the window after the last lockout in it (stored entries; pruned on every write). */
+export function windowSinceLockout(c: PinCounters): number {
+  const last = c.windowLockouts.at(-1) ?? 0;
+  return c.windowFailures.filter((t) => t > last).length;
+}
+
+export type PinReservation = {
+  next: PinCounters;
+  /** The wait before the next attempt (a backoff, or the lockout when `locksOut`). */
+  nextDelayMs: number;
+  locksOut: boolean;
+};
+
+/**
+ * Count one failed attempt at `now` (the caller checked `lockedUntil <= now`).
+ * A lockout that ended starts the streak and the backoff over; the window
+ * keeps its history.
+ */
+export function reservePinFailure(c: PinCounters, now: number): PinReservation {
+  const since = now - PIN_WINDOW_MS;
+  const fresh = c.lockout; // the previous lockout ended (else the caller refused)
+  const priorLockouts = c.windowLockouts.filter((t) => t > since);
+  const windowFailures = lastN([...c.windowFailures.filter((t) => t > since), now]);
+  const failures = (fresh ? 0 : c.failures) + 1;
+  const streak = (fresh ? 0 : c.streak) + 1;
+  const sinceUnlock = c.sinceUnlock + 1;
+  const lastLockout = priorLockouts.at(-1) ?? 0;
+  const inWindow = windowFailures.filter((t) => t > lastLockout).length;
+  if (streak >= PIN_HARD_LIMIT || inWindow >= PIN_HARD_LIMIT) {
+    const ms = PIN_LOCKOUT_STEPS_MS[Math.min(priorLockouts.length, PIN_LOCKOUT_STEPS_MS.length - 1)]!;
+    return {
+      next: {
+        failures: 0,
+        streak: 0,
+        sinceUnlock,
+        lockedUntil: now + ms,
+        lockout: true,
+        windowFailures,
+        windowLockouts: lastN([...priorLockouts, now]),
+      },
+      nextDelayMs: ms,
+      locksOut: true,
+    };
+  }
+  const nextDelayMs = pinBackoffMs(failures);
+  return {
+    next: {
+      failures,
+      streak,
+      sinceUnlock,
+      lockedUntil: nextDelayMs > 0 ? now + nextDelayMs : 0,
+      lockout: false,
+      windowFailures,
+      windowLockouts: priorLockouts,
+    },
+    nextDelayMs,
+    locksOut: false,
+  };
+}
+
+function withoutOne(list: number[], value: number): number[] {
+  const i = list.lastIndexOf(value);
+  return i < 0 ? list : [...list.slice(0, i), ...list.slice(i + 1)];
+}
+
+/**
+ * The attempt reserved at `reservedAt` was the right PIN: it is not a failure
+ * (removed from the window, with the lockout it may have triggered), and the
+ * streak, backoff and "since unlock" count start over. The window's other
+ * failures stay (a success does not reset the long-term limit).
+ */
+export function pinSuccess(c: PinCounters, reservedAt: number): PinCounters {
+  return {
+    failures: 0,
+    streak: 0,
+    sinceUnlock: 0,
+    lockedUntil: 0,
+    lockout: false,
+    windowFailures: withoutOne(c.windowFailures, reservedAt),
+    windowLockouts: withoutOne(c.windowLockouts, reservedAt),
+  };
+}
+
+/** Write the counters row (insert, patch, or nothing when unchanged). */
+export async function writePinCounters(
+  ctx: { db: DatabaseWriter },
+  userId: Id<"users">,
+  row: Doc<"pinCounters"> | null,
+  next: PinCounters,
+): Promise<void> {
+  if (row === null) {
+    await ctx.db.insert("pinCounters", { userId, ...next });
+    return;
+  }
+  const same =
+    row.failures === next.failures &&
+    row.streak === next.streak &&
+    row.sinceUnlock === next.sinceUnlock &&
+    row.lockedUntil === next.lockedUntil &&
+    row.lockout === next.lockout &&
+    row.windowFailures.join() === next.windowFailures.join() &&
+    row.windowLockouts.join() === next.windowLockouts.join();
+  if (!same) await ctx.db.patch(row._id, next);
+}
+
+/** A new PIN (set, changed, reset) or a factor reset: the old PIN's counters go. */
+export async function deletePinCounters(ctx: { db: DatabaseWriter }, userId: Id<"users">): Promise<void> {
+  const row = await pinCountersRowOf(ctx, userId);
+  if (row !== null) await ctx.db.delete(row._id);
+}
+
+/**
+ * Store a new action PIN hash for a person (insert or patch their factor
+ * row) and drop the old PIN's counters. The only writer of `actionPinHash`.
+ * Returns true when it replaced an existing PIN.
+ */
+export async function storePinHash(ctx: { db: DatabaseWriter }, userId: Id<"users">, hash: string, now: number): Promise<boolean> {
+  const f = await factorsOf(ctx, userId);
+  const fields = {
+    actionPinHash: hash,
+    actionPinSetAt: now,
+    // Legacy counter fields (superseded by `pinCounters`; narrowed in WP5b).
+    pinFailures: 0,
+    pinFailuresTotal: 0,
+    pinLockedUntil: 0,
+    pinDisabledAt: undefined,
+  };
+  if (f === null) await ctx.db.insert("stepUpFactors", { userId, ...fields });
+  else await ctx.db.patch(f._id, fields);
+  await deletePinCounters(ctx, userId);
+  return f?.actionPinHash !== undefined;
+}
+
+/** What the lock screen shows (no clock: the client compares `lockedUntil` with its own time). */
+export function pinView(c: PinCounters) {
+  return {
+    lockedUntil: c.lockedUntil > 0 ? c.lockedUntil : null,
+    lockKind: c.lockedUntil > 0 ? (c.lockout ? ("lockout" as const) : ("backoff" as const)) : null,
+    failedSinceUnlock: c.sinceUnlock,
+    // After a lockout ends the count starts over; stale window entries (> 30 days) are pruned on the next attempt.
+    attemptsBeforeLockout: c.lockout ? PIN_HARD_LIMIT : Math.max(0, PIN_HARD_LIMIT - Math.max(c.streak, windowSinceLockout(c))),
+  };
 }
 
 /**
@@ -272,9 +480,7 @@ export async function sessionIsFresh(ctx: { db: DatabaseReader }, sessionId: Id<
  *
  * - No PIN yet, `"pin"`: "bootstrap" when the session comes from a password
  *   sign-in less than STEP_UP_BOOTSTRAP_MS ago (Convex Auth's only provider is
- *   the password; the session row's creation time is the sign-in). Since
- *   Phase 4b no TOTP is asked for, also not from members who still have a
- *   TOTP enrolment (legacy; WP5b removes it). Else `step_up_setup_required`
+ *   the password; the session row's creation time is the sign-in). Else `step_up_setup_required`
  *   (detail "reauthenticate": sign in again).
  * - No PIN yet, `"passkey"`: `step_up_setup_required` (detail "pin"): the
  *   PIN comes first, a passkey is an optional extra.
@@ -295,18 +501,42 @@ export async function authorizeFactorChange(
   return "fresh";
 }
 
-/** Delete every step-up row of a user (optionally only those verified with one passkey). */
+/**
+ * Most step-up rows (or WebAuthn challenges) of ONE user a reset walks. Far
+ * above real use (one row per signed-in session, sessions last 7 days); above
+ * it the reset throws and rolls back (fail closed) rather than leave a row
+ * that would still "prove" a removed PIN (see `hasPin`).
+ */
+const MAX_USER_ROWS_WALKED = 5_000;
+
+/**
+ * Delete every step-up row of a user (optionally only those verified with one
+ * passkey, or all but `except`). Walks the whole per-user index range (not a
+ * fixed `.take`), so the invariant at `hasPin` holds for any number of rows.
+ */
 export async function deleteStepUpSessions(
   ctx: { db: DatabaseWriter },
   userId: Id<"users">,
   onlyPasskey?: Id<"passkeys">,
-  limit = 100,
+  except?: Id<"authSessions">,
 ): Promise<void> {
-  const rows = await ctx.db
-    .query("stepUpSessions")
-    .withIndex("by_user", (q) => q.eq("userId", userId))
-    .take(limit);
-  for (const r of rows) {
-    if (onlyPasskey === undefined || r.passkeyId === onlyPasskey) await ctx.db.delete(r._id);
+  let seen = 0;
+  const victims: Id<"stepUpSessions">[] = [];
+  for await (const r of ctx.db.query("stepUpSessions").withIndex("by_user", (q) => q.eq("userId", userId))) {
+    if (++seen > MAX_USER_ROWS_WALKED) throw new Error("deleteStepUpSessions: too many rows for one user");
+    if (r.sessionId === except) continue;
+    if (onlyPasskey === undefined || r.passkeyId === onlyPasskey) victims.push(r._id);
   }
+  for (const id of victims) await ctx.db.delete(id);
+}
+
+/** Delete every WebAuthn challenge of a user (a registration begun before a reset must not finish after it). */
+export async function deleteChallenges(ctx: { db: DatabaseWriter }, userId: Id<"users">): Promise<void> {
+  let seen = 0;
+  const victims: Id<"stepUpChallenges">[] = [];
+  for await (const c of ctx.db.query("stepUpChallenges").withIndex("by_user", (q) => q.eq("userId", userId))) {
+    if (++seen > MAX_USER_ROWS_WALKED) throw new Error("deleteChallenges: too many rows for one user");
+    victims.push(c._id);
+  }
+  for (const id of victims) await ctx.db.delete(id);
 }

@@ -15,7 +15,7 @@ afterEach(() => {
 });
 
 async function admin(t: T, orgId: Id<"organizations">, stepUp: "fresh" | "stale" = "fresh") {
-  const m = await asMember(t, { role: "admin", mfa: true, orgId });
+  const m = await asMember(t, { role: "admin", orgId });
   if (stepUp === "fresh") await giveStepUp(t, m);
   else await giveStepUp(t, m, { verifiedAgoMs: 6 * MINUTE_MS, activeAgoMs: 0 });
   return m;
@@ -278,6 +278,7 @@ describe("watch mode and check now (plan 4.9)", () => {
     const d = await enrollDevice(t, orgId);
     await t.mutation(internal.publish.run, { orgId }); // the device's head (Step 8)
     const viewer = await asMember(t, { role: "viewer", orgId });
+    await giveStepUp(t, viewer, { none: true }); // watch needs a finished sign-in (a PIN), not an unlock
     const w1 = await viewer.as.mutation(api.fleet.watch, { deviceId: d.deviceId });
     expect(w1.fastUntil).toBe(Math.ceil((start + 5 * MINUTE_MS) / MINUTE_MS) * MINUTE_MS);
     // Step 8: the head carries it to the agent's subscription at once.
@@ -307,6 +308,7 @@ describe("watch mode and check now (plan 4.9)", () => {
     const orgId = await makeOrg(t);
     const d = await enrollDevice(t, orgId);
     const viewer = await asMember(t, { role: "viewer", orgId });
+    await giveStepUp(t, viewer, { none: true });
     // Clearing `fastUntil` between calls makes every call a write.
     const clear = () =>
       t.run(async (ctx) => {
@@ -476,7 +478,7 @@ describe("install results follow the PC (Step 17 review)", () => {
     expect((await installs()).map((r) => r.appName)).toEqual(["Reader"]);
     const tags = await t.run((ctx) => ctx.db.query("installResults").withIndex("by_device_updated", (q) => q.eq("deviceId", d.deviceId)).take(10));
     expect(tags.every((r) => r.groupId === back)).toBe(true);
-    expect((await a.as.query(api.overview.failedInstalls, {})).map((r) => r.appId)).toEqual([reader]);
+    expect((await a.as.query(api.overview.failedInstallsPage, { paginationOpts: { numItems: 50, cursor: null } })).page.map((r) => r.appId)).toEqual([reader]);
     expect(wiki).toBeDefined();
   });
 
@@ -485,7 +487,7 @@ describe("install results follow the PC (Step 17 review)", () => {
     await a.as.mutation(api.fleet.revoke, { deviceId: d.deviceId });
     expect(await failed()).toBe(0);
     expect(await installs()).toEqual([]);
-    expect(await a.as.query(api.overview.failedInstalls, {})).toEqual([]);
+    expect((await a.as.query(api.overview.failedInstallsPage, { paginationOpts: { numItems: 50, cursor: null } })).page).toEqual([]);
   });
 
   test("an archived app's rows are not retryable and not listed", async () => {

@@ -3,12 +3,13 @@ import { convexAuth, createAccount, retrieveAccount } from "@convex-dev/auth/ser
 import { ConvexError } from "convex/values";
 import { Scrypt } from "lucia";
 import { internal } from "./_generated/api";
+import type { Id } from "./_generated/dataModel";
 import type { MutationCtx } from "./_generated/server";
 import { beforeSessionCreation, createOrUpdateUser } from "./lib/authCallbacks";
 import { codeHash, normalizeEmail, sha256HexSync } from "./lib/crypto";
 import { fail } from "./lib/errors";
 import { JWT_DURATION_MS, SESSION_INACTIVE_MS, SESSION_TOTAL_MS } from "./lib/limits";
-import { consumeOrFail } from "./lib/rateLimits";
+import { checkOrFail, consumeQuietly } from "./lib/rateLimits";
 
 // Member sign-in (plan Step 3.1, D3): Convex Auth with ONE credentials
 // provider, id "password", flows "signIn" and "signUp" only.
@@ -59,47 +60,63 @@ const password = ConvexCredentials({
     const secret = str(params.password);
     if (email === null || secret === null || secret.length > 256) invalidCredentials();
 
-    // Counted per email whether or not an account exists (1 row write).
-    await consumeOrFail(ctx, "signInPerEmail", sha256HexSync(email));
+    // Only FAILED attempts are charged (security review): a success writes nothing, so typing a
+    // victim's email cannot burn the budget of their working sign-ins, and the budget is the same
+    // whether or not an account exists. The bucket is read first (an empty one refuses even the
+    // right password, like Convex Auth's own 10-failures-per-hour limit). Sign-up has its own key,
+    // so failed sign-ups for an email cannot lock that email's sign-in. Parallel attempts can all
+    // pass the read before any is charged: Convex Auth's per-account failure limit and the Scrypt
+    // cost bound that.
+    const key = sha256HexSync(flow === "signUp" ? `signUp:${email}` : email);
+    await checkOrFail(ctx, "signInPerEmail", key);
 
-    if (flow === "signUp") {
-      validatePasswordRequirements(secret);
-      const inviteCode = str(params.inviteCode);
-      if (inviteCode === null) fail("invite_invalid");
-      const inviteTokenHash = codeHash(inviteCode);
-      const usable: boolean = await ctx.runQuery(internal.account.checkJoinInvite, {
-        tokenHash: inviteTokenHash,
-        email,
-      });
-      if (!usable) fail("invite_invalid");
+    const attempt = async (): Promise<{ userId: Id<"users"> }> => {
+      if (flow === "signUp") {
+        validatePasswordRequirements(secret);
+        const inviteCode = str(params.inviteCode);
+        if (inviteCode === null) fail("invite_invalid");
+        const inviteTokenHash = codeHash(inviteCode);
+        const usable: boolean = await ctx.runQuery(internal.account.checkJoinInvite, {
+          tokenHash: inviteTokenHash,
+          email,
+        });
+        if (!usable) fail("invite_invalid");
+        try {
+          const { user } = await createAccount(ctx, {
+            provider: "password",
+            account: { id: email, secret },
+            profile: { email, inviteTokenHash },
+            shouldLinkViaEmail: false,
+            shouldLinkViaPhone: false,
+          });
+          return { userId: user._id };
+        } catch (e) {
+          if (e instanceof ConvexError) throw e;
+          // "Account <email> already exists" with a different password.
+          invalidCredentials();
+        }
+      }
+
       try {
-        const { user } = await createAccount(ctx, {
+        const { user } = await retrieveAccount(ctx, {
           provider: "password",
           account: { id: email, secret },
-          profile: { email, inviteTokenHash },
-          shouldLinkViaEmail: false,
-          shouldLinkViaPhone: false,
         });
         return { userId: user._id };
       } catch (e) {
-        if (e instanceof ConvexError) throw e;
-        // "Account <email> already exists" with a different password.
+        if (e instanceof Error && e.message === "InvalidAccountId") {
+          // No such account: spend the same Scrypt work as a wrong password.
+          await scrypt.verify(DUMMY_HASH, secret);
+        }
         invalidCredentials();
       }
-    }
+    };
 
     try {
-      const { user } = await retrieveAccount(ctx, {
-        provider: "password",
-        account: { id: email, secret },
-      });
-      return { userId: user._id };
+      return await attempt();
     } catch (e) {
-      if (e instanceof Error && e.message === "InvalidAccountId") {
-        // No such account: spend the same Scrypt work as a wrong password.
-        await scrypt.verify(DUMMY_HASH, secret);
-      }
-      invalidCredentials();
+      await consumeQuietly(ctx, "signInPerEmail", key);
+      throw e;
     }
   },
   crypto: {

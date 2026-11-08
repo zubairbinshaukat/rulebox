@@ -26,7 +26,7 @@ afterEach(() => {
 });
 
 async function admin(t: T, orgId: Id<"organizations">, stepUp: "fresh" | "stale" = "fresh") {
-  const m = await asMember(t, { role: "admin", mfa: true, orgId });
+  const m = await asMember(t, { role: "admin", orgId });
   if (stepUp === "fresh") await giveStepUp(t, m);
   else await giveStepUp(t, m, { verifiedAgoMs: 6 * MINUTE_MS, activeAgoMs: 0 });
   return m;
@@ -316,7 +316,7 @@ describe("apps: authorization and organizations", () => {
   test("a viewer cannot create, change or delete; an admin with a stale step-up cannot delete", async () => {
     const t = await setupAuth();
     const orgId = await makeOrg(t);
-    const v = await asMember(t, { role: "viewer", mfa: true, orgId });
+    const v = await asMember(t, { role: "viewer", orgId });
     await giveStepUp(t, v);
     await expectCode(v.as.mutation(api.apps.createWeb, web("X")), "forbidden");
     await expectCode(v.as.mutation(api.apps.createDesktop, desktop("X")), "forbidden");
@@ -363,7 +363,7 @@ describe("apps: authorization and organizations", () => {
 
     // nothing of B's shows up in A's lists
     expect((await a.as.query(api.apps.list, { paginationOpts: { numItems: 10, cursor: null }, archived: false })).page.map((r) => r.name)).toEqual(["A app"]);
-    expect((await a.as.query(api.fileHandlers.list, {})).rows).toEqual([]);
+    expect((await a.as.query(api.fileHandlers.page, { paginationOpts: { numItems: 50, cursor: null } })).page).toEqual([]);
     expect((await a.as.query(api.apps.get, { appId: appA })).groupOptions.map((g) => g.name)).toEqual(["A group"]);
     // and B's data is untouched
     expect((await appRow(t, appB))?.archived).toBe(false);
@@ -1029,13 +1029,13 @@ describe("install status follows the assignment (Step 17 review)", () => {
     expect(await summary()).toMatchObject({ installed: 0, failed: 1 });
     expect(await failedNames()).toEqual(["B1"]);
     expect((await stats(t, orgId))?.failedInstallCount).toBe(1);
-    expect((await a.as.query(api.overview.failedInstalls, {})).map((r) => r.deviceName)).toEqual(["B1"]);
+    expect((await a.as.query(api.overview.failedInstallsPage, { paginationOpts: { numItems: 50, cursor: null } })).page.map((r) => r.deviceName)).toEqual(["B1"]);
 
     await a.as.mutation(api.apps.setArchived, { appId: app, archived: true });
     expect(await summary()).toMatchObject({ installed: 0, failed: 0 });
     expect(await failedNames()).toEqual([]);
     expect((await stats(t, orgId))?.failedInstallCount).toBe(0);
-    expect(await a.as.query(api.overview.failedInstalls, {})).toEqual([]);
+    expect((await a.as.query(api.overview.failedInstallsPage, { paginationOpts: { numItems: 50, cursor: null } })).page).toEqual([]);
 
     await a.as.mutation(api.apps.setArchived, { appId: app, archived: false });
     expect((await stats(t, orgId))?.failedInstallCount).toBe(1);

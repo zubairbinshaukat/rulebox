@@ -1,7 +1,8 @@
 import { v } from "convex/values";
 import { internal } from "./_generated/api";
 import type { Id } from "./_generated/dataModel";
-import { internalAction, internalMutation, type MutationCtx } from "./_generated/server";
+import { internalAction, type MutationCtx } from "./_generated/server";
+import { internalMutation } from "./lib/functions";
 import { SYSTEM_ACTOR, writeAudit } from "./lib/audit";
 import { codeHash, INVITE_CODE_LENGTH, normalizeEmail, randomCrockford } from "./lib/crypto";
 import { fail } from "./lib/errors";
@@ -19,7 +20,7 @@ export const createOwnerInvite = internalAction({
     email: v.string(),
     allowAdditionalOrg: v.optional(v.boolean()),
     // Adopt an existing organization that has no members yet (for example one
-    // made by the Phase 2 `dev:seedOrg`) instead of creating a new one.
+    // made by the Phase 2 `dev:seedOrg`, which no longer exists) instead of creating a new one.
     existingOrgId: v.optional(v.id("organizations")),
   },
   returns: v.object({ orgId: v.id("organizations"), inviteCode: v.string(), expiresAt: v.number() }),

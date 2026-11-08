@@ -34,7 +34,7 @@ afterEach(() => {
 });
 
 async function admin(t: T, orgId: Id<"organizations">, stepUp: "fresh" | "stale" = "fresh") {
-  const m = await asMember(t, { role: "admin", mfa: true, orgId });
+  const m = await asMember(t, { role: "admin", orgId });
   if (stepUp === "fresh") await giveStepUp(t, m);
   else await giveStepUp(t, m, { verifiedAgoMs: 6 * MINUTE_MS, activeAgoMs: 0 });
   return m;
@@ -878,7 +878,7 @@ describe("employees: authorization", () => {
     const orgId = await makeOrg(t);
     const fresh = await admin(t, orgId);
     const stale = await admin(t, orgId, "stale");
-    const idle = await asMember(t, { role: "admin", mfa: true, orgId });
+    const idle = await asMember(t, { role: "admin", orgId });
     await giveStepUp(t, idle, { verifiedAgoMs: 20 * MINUTE_MS });
     const id = await newEmployee(fresh, { username: "maya" });
     await expectCode(idle.as.mutation(api.employees.setDisabled, { employeeId: id, disabled: true }), "step_up_required");
@@ -1097,7 +1097,7 @@ describe("employees: review fixes", () => {
 
 describe("employees: revocation is never blocked by a missing signing key", () => {
   async function ownerOf(t: T, orgId: Id<"organizations">) {
-    const m = await asMember(t, { role: "owner", mfa: true, orgId });
+    const m = await asMember(t, { role: "owner", orgId });
     await giveStepUp(t, m);
     return m;
   }

@@ -5,7 +5,7 @@ import { retagDeviceInstalls } from "./installs";
 import { bumpOrgStatsIfPresent } from "./plans";
 import { markRevoked } from "./presence";
 
-// Device lifecycle helpers shared by `devices:unenroll`, `fleet:*`, `dev:*`
+// Device lifecycle helpers shared by `devices:unenroll`, `fleet:*`
 // and the migrations (plan Step 7 items 4, 7, 13).
 
 export type CredRef = {

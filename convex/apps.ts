@@ -2,7 +2,7 @@ import { paginationOptsValidator, paginationResultValidator } from "convex/serve
 import { v, type Infer } from "convex/values";
 import { internal } from "./_generated/api";
 import type { Doc, Id } from "./_generated/dataModel";
-import { env, internalMutation, internalQuery } from "./_generated/server";
+import { env } from "./_generated/server";
 import { publishApp } from "./lib/appPublish";
 import { writeAudit } from "./lib/audit";
 import { checkRevision, getInOrg, nextRevision } from "./lib/authz";
@@ -11,7 +11,7 @@ import { base64Decode, sha256HexOfBytes } from "./lib/crypto";
 import { deepEqual } from "./lib/deepEqual";
 import { programDenied } from "./lib/denyList";
 import { fail } from "./lib/errors";
-import { memberAction, memberMutation, memberQuery } from "./lib/functions";
+import { internalMutation, internalQuery, memberAction, memberMutation, memberQuery } from "./lib/functions";
 import { checkPageSize, cleanSearch, countResult, orgStatsRow, pickSort, sortArg } from "./lib/listing";
 import { webUrlProblem } from "./lib/hostRules";
 import {

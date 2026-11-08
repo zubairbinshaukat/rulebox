@@ -96,6 +96,13 @@ function challengeMatcher(hash: string) {
   return (challenge: string) => constantTimeEqual(sha256HexSync(challenge), hash);
 }
 
+/**
+ * A failed ceremony whose challenge WAS consumed: counts in the global step-up
+ * failure bucket. Challenges come from the per-user `stepUpChallenge` bucket,
+ * so one account adds at most that many failures to the global bucket. A
+ * response without a live challenge of this session is refused without
+ * touching it (security review finding 2: else anyone could drain it).
+ */
 async function failed(ctx: Parameters<typeof consumeQuietly>[0]): Promise<never> {
   await consumeQuietly(ctx, "stepUpFailuresGlobal");
   fail("step_up_invalid");
@@ -158,7 +165,7 @@ export const finishRegistration = memberAction("viewer", { stepUp: "none" })({
       challengeHash,
       now: Date.now(),
     });
-    if (!consumed.ok) return await failed(ctx);
+    if (!consumed.ok) fail("step_up_invalid");
     let info;
     try {
       const result = await verifyRegistrationResponse({
@@ -238,7 +245,8 @@ export const finishVerification = memberAction("viewer", { stepUp: "none" })({
       credentialId: response.id,
       now: Date.now(),
     });
-    if (!consumed.ok || consumed.passkey === null) return await failed(ctx);
+    if (!consumed.ok) fail("step_up_invalid");
+    if (consumed.passkey === null) return await failed(ctx);
     const key = consumed.passkey;
     let newCounter: number;
     try {

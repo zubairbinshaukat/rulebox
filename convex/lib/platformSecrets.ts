@@ -15,10 +15,11 @@ import { MAX_PLATFORM_SECRET } from "./limits";
 //   base64 of 32 bytes), read only here.
 // - Missing or invalid master key: nothing can be set or read, and every
 //   feature that needs a secret is off (fail closed).
-// - Readers: `getSecret` (actions only; decrypts) and `mailReady` (a query
-//   helper that answers only "is it set", never a value). No public function
-//   returns a field of `platformSecrets` (`platform.test.ts` scans the
-//   sources).
+// - Readers: `getSecret` (actions only; decrypts) and `platform:mailInputs`
+//   (internal, for the "mail" flag recompute). Hot queries read only the
+//   derived `platformFlags` "mail" row (`mailReadyFlag`), never a secret row.
+//   No public function returns a field of `platformSecrets`
+//   (`platform.test.ts` scans the sources).
 
 export const PLATFORM_SECRET_NAMES = ["resendApiKey", "resendFrom", "dashboardOrigin"] as const;
 export type PlatformSecretName = (typeof PLATFORM_SECRET_NAMES)[number];
@@ -121,15 +122,35 @@ export async function secretRow(ctx: { db: DatabaseReader }, name: PlatformSecre
     .first();
 }
 
+/** The "mail" row of `platformFlags` (see schema), or null. */
+export async function mailFlagRow(ctx: { db: DatabaseReader }) {
+  return await ctx.db
+    .query("platformFlags")
+    .withIndex("by_name", (q) => q.eq("name", "mail"))
+    .first();
+}
+
 /**
- * Is the forgot-PIN email on? The master key is valid and the three settings
- * are stored (3 index reads; no value is decrypted or returned). A wrong
- * master key still answers true here; `getSecret` then fails closed.
+ * Is the forgot-PIN email on? ONE small read: the "mail" flag, computed when
+ * a secret changes by decrypting and validating all three settings with this
+ * deployment's master key (`platform:refreshMailFlag`), plus the env check (a
+ * key removed later turns it off at once). A master key REPLACED by another
+ * valid one is only noticed by the next `checkSecrets` (the CLI's `check`);
+ * until then `getSecret` fails closed and no mail goes out.
  */
-export async function mailReady(ctx: { db: DatabaseReader }): Promise<boolean> {
+export async function mailReadyFlag(ctx: { db: DatabaseReader }): Promise<boolean> {
   if (platformKeyBytes() === null) return false;
-  for (const name of PLATFORM_SECRET_NAMES) {
-    if ((await secretRow(ctx, name)) === null) return false;
+  return (await mailFlagRow(ctx))?.ready === true;
+}
+
+/** Decrypt and validate the three mail settings (actions only); true when all are usable. */
+export async function mailSettingsUsable(sealed: (SealedSecret | null)[]): Promise<boolean> {
+  if (platformKeyBytes() === null || sealed.length !== PLATFORM_SECRET_NAMES.length) return false;
+  for (let i = 0; i < PLATFORM_SECRET_NAMES.length; i++) {
+    const name = PLATFORM_SECRET_NAMES[i]!;
+    const s = sealed[i];
+    const value = s === null || s === undefined ? null : await openSecret(name, s);
+    if (value === null || platformSecretProblem(name, value) !== null) return false;
   }
   return true;
 }

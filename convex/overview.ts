@@ -5,7 +5,7 @@ import type { DatabaseReader } from "./_generated/server";
 import { auditEntryOf, auditEntryValue } from "./lib/audit";
 import { memberQuery } from "./lib/functions";
 import { liveChecker } from "./lib/installs";
-import { MAX_INSTALL_PAGE, OVERVIEW_AUDIT_ROWS, OVERVIEW_FAILED_INSTALLS, OVERVIEW_FAILED_SCAN, PRESENCE_SHARDS } from "./lib/limits";
+import { MAX_INSTALL_PAGE, OVERVIEW_AUDIT_ROWS, PRESENCE_SHARDS } from "./lib/limits";
 import { checkPageSize, pickSort, sortArg } from "./lib/listing";
 import { loadOrgPlan } from "./lib/plans";
 import { planLimits, planName, planStatus } from "./lib/validators";
@@ -106,31 +106,8 @@ const failedRow = v.object({
 });
 
 /**
- * The newest failed installs (by `updatedAt`), with the PC and the app
- * (viewer): `installResults.by_org_state_updated` `failed`, newest first, at
- * most OVERVIEW_FAILED_SCAN rows examined to find OVERVIEW_FAILED_INSTALLS that
- * still COUNT (lib/installs.ts: the PC's group still assigns the app, the app is
- * not archived, the PC is not revoked) - the same rule as `failedInstallCount`.
- * The overview subscribes only while that counter is above zero, so an
- * organization with nothing failed never reads `installResults` at all. A PC or
- * app removed since (results are purged in batches) is left out.
- */
-export const failedInstalls = memberQuery("viewer")({
-  args: {},
-  returns: v.array(failedRow),
-  handler: async (ctx) => {
-    const rows = await ctx.db
-      .query("installResults")
-      .withIndex("by_org_state_updated", (q) => q.eq("orgId", ctx.orgId).eq("state", "failed"))
-      .order("desc")
-      .take(OVERVIEW_FAILED_SCAN);
-    return await liveFailedRows(ctx, rows, OVERVIEW_FAILED_INSTALLS);
-  },
-});
-
-/**
  * The failed installs as a table (viewer; list contract in lib/listing.ts):
- * the same rows as `failedInstalls` (only results that still count), paginated
+ * the failed installs that still count, paginated
  * by `installResults.by_org_state_updated`, `sort` key "updated" (newest first
  * by default, either direction). A page holds at most `numItems` raw results,
  * so it may be short when some no longer count; `isDone` decides Next. The

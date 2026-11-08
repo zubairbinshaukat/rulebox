@@ -8,7 +8,6 @@ import { ConvexError } from "convex/values";
 export const ERROR_CODES = [
   "unauthenticated",
   "forbidden",
-  "mfa_required",
   "not_found",
   "invalid_argument",
   "stale_edit",
@@ -18,9 +17,6 @@ export const ERROR_CODES = [
   "not_ready",
   "invite_invalid",
   "account_disabled",
-  "mfa_invalid_code",
-  "mfa_locked",
-  "mfa_already_enabled",
   "winget_unsupported",
   "winget_unreachable",
   "webmeta_failed",

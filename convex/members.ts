@@ -2,91 +2,23 @@ import { paginationOptsValidator } from "convex/server";
 import { v } from "convex/values";
 import { internal } from "./_generated/api";
 import type { Doc, Id } from "./_generated/dataModel";
-import { internalMutation, type MutationCtx } from "./_generated/server";
+import { type MutationCtx } from "./_generated/server";
 import { writeAudit } from "./lib/audit";
 import { checkRevision, getInOrg, nextRevision } from "./lib/authz";
 import { codeHash, INVITE_CODE_LENGTH, normalizeEmail, randomCrockford } from "./lib/crypto";
 import { fail } from "./lib/errors";
-import { memberAction, memberMutation, memberQuery } from "./lib/functions";
+import { internalMutation, memberAction, memberMutation, memberQuery } from "./lib/functions";
 import { INVITE_TTL_MS, MAX_INVITES_LISTED, MAX_MEMBERS, MAX_MEMBERSHIPS, MINUTE_MS, RESET_CODE_TTL_MS } from "./lib/limits";
 import { boundedPageValidator, byField, checkPageSize, cleanSearch, matches, pageInMemory, pickSort, sortArg } from "./lib/listing";
 import { assertNotLastOwner } from "./lib/members";
 import { assertWithinLimit, bumpOrgStats, bumpStats } from "./lib/plans";
 import { consumeOrFail } from "./lib/rateLimits";
-import { clearMfa, deleteUserSessions } from "./lib/sessions";
+import { deleteUserSessions } from "./lib/sessions";
 import { inviteKind, memberStatus, role } from "./lib/validators";
 
-// Members screen (plan Step 3.5). Everything except `list` is Owner-only
+// Members screen (plan Step 3.5). Everything except the `page` / `invitesPage` lists is Owner-only
 // (matrix 4.6). Invite and reset codes are made in actions (random values),
 // stored as SHA-256 only, and returned exactly once.
-
-/** Members and invites of the caller's organization. Never a hash or secret. */
-export const list = memberQuery("viewer")({
-  args: {},
-  returns: v.object({
-    members: v.array(
-      v.object({
-        _id: v.id("members"),
-        email: v.string(),
-        role,
-        status: memberStatus,
-        createdAt: v.number(),
-        mfaEnrolled: v.boolean(),
-        isYou: v.boolean(),
-        revision: v.number(),
-      }),
-    ),
-    invites: v.array(
-      v.object({
-        _id: v.id("invites"),
-        email: v.string(),
-        role,
-        kind: inviteKind,
-        expiresAt: v.number(),
-        usedAt: v.optional(v.number()),
-      }),
-    ),
-  }),
-  handler: async (ctx) => {
-    const rows = await ctx.db
-      .query("members")
-      .withIndex("by_org_user", (q) => q.eq("orgId", ctx.orgId))
-      .take(MAX_MEMBERS);
-    const members = [];
-    for (const m of rows) {
-      const s = await ctx.db
-        .query("memberSecrets")
-        .withIndex("by_user", (q) => q.eq("userId", m.userId))
-        .first();
-      members.push({
-        _id: m._id,
-        email: m.email,
-        role: m.role,
-        status: m.status,
-        createdAt: m.createdAt,
-        mfaEnrolled: s?.totpSecret !== undefined,
-        isYou: m._id === ctx.member._id,
-        revision: m.revision,
-      });
-    }
-    const invites = await ctx.db
-      .query("invites")
-      .withIndex("by_org", (q) => q.eq("orgId", ctx.orgId))
-      .order("desc")
-      .take(MAX_INVITES_LISTED);
-    return {
-      members,
-      invites: invites.map((i) => ({
-        _id: i._id,
-        email: i.email,
-        role: i.role,
-        kind: i.kind,
-        expiresAt: i.expiresAt,
-        usedAt: i.usedAt,
-      })),
-    };
-  },
-});
 
 const memberRow = v.object({
   _id: v.id("members"),
@@ -94,7 +26,6 @@ const memberRow = v.object({
   role,
   status: memberStatus,
   createdAt: v.number(),
-  mfaEnrolled: v.boolean(),
   isYou: v.boolean(),
   revision: v.number(),
 });
@@ -108,8 +39,7 @@ const ROLE_RANK: Record<Doc<"members">["role"], number> = { owner: 0, admin: 1, 
  * are read (`members.by_org_user`), filtered by `search` (email contains,
  * case-insensitive), sorted by `sort` ("email" A-Z by default, "role",
  * "status" or "created") and paged in the query, with the exact `total` (the
- * `memberCount` counter leaves out disabled members, so it is not used). The
- * MFA row is read for the page's rows only.
+ * `memberCount` counter leaves out disabled members, so it is not used).
  */
 export const page = memberQuery("viewer")({
   args: { paginationOpts: paginationOptsValidator, search: v.optional(v.string()), sort: sortArg },
@@ -126,23 +56,15 @@ export const page = memberQuery("viewer")({
       sort.key === "role" ? ROLE_RANK[m.role] : sort.key === "status" ? m.status : sort.key === "created" ? m.createdAt : m.email;
     const kept = rows.filter((m) => matches(search, m.email)).sort(byField(get, sort.dir));
     const result = pageInMemory(kept, args.paginationOpts);
-    const page = [];
-    for (const m of result.page) {
-      const s = await ctx.db
-        .query("memberSecrets")
-        .withIndex("by_user", (q) => q.eq("userId", m.userId))
-        .first();
-      page.push({
-        _id: m._id,
-        email: m.email,
-        role: m.role,
-        status: m.status,
-        createdAt: m.createdAt,
-        mfaEnrolled: s?.totpSecret !== undefined,
-        isYou: m._id === ctx.member._id,
-        revision: m.revision,
-      });
-    }
+    const page = result.page.map((m) => ({
+      _id: m._id,
+      email: m.email,
+      role: m.role,
+      status: m.status,
+      createdAt: m.createdAt,
+      isYou: m._id === ctx.member._id,
+      revision: m.revision,
+    }));
     return { ...result, page };
   },
 });
@@ -390,26 +312,5 @@ export const storeResetCode = internalMutation({
       summary: `Created a password reset code for ${target.email}`,
     });
     return expiresAt;
-  },
-});
-
-/** Clear a member's authenticator and recovery codes (Owner). They enrol again. */
-export const resetMfa = memberMutation("owner", { major: "members:resetMfa" })({
-  args: { memberId: v.string() },
-  returns: v.null(),
-  handler: async (ctx, args) => {
-    const target = await getInOrg(ctx, "members", args.memberId, ctx.orgId);
-    const changed = await clearMfa(ctx, target.userId);
-    if (!changed) return null;
-    await writeAudit(ctx, {
-      orgId: ctx.orgId,
-      actor: ctx.actor,
-      action: "member.mfaReset",
-      targetType: "member",
-      targetId: target._id,
-      targetLabel: target.email,
-      summary: `Reset two-step sign-in for ${target.email}`,
-    });
-    return null;
   },
 });

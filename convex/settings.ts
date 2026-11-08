@@ -1,12 +1,12 @@
 import { v } from "convex/values";
 import { internal } from "./_generated/api";
 import type { Id } from "./_generated/dataModel";
-import { internalMutation, type DatabaseWriter } from "./_generated/server";
+import { type DatabaseWriter } from "./_generated/server";
 import { hashSecret } from "./lib/argon";
 import { writeAudit } from "./lib/audit";
 import { checkRevision, nextRevision } from "./lib/authz";
 import { fail } from "./lib/errors";
-import { memberAction, memberMutation, memberQuery } from "./lib/functions";
+import { internalMutation, memberAction, memberMutation, memberQuery } from "./lib/functions";
 import { changedSettings, exitPinProblem, normalizeOrgName, normalizeSettings } from "./lib/orgSettings";
 import { counterOf, effectivePingInterval, LIMITS, loadOrgPlan, loadOrgStats, loadPlatformSettings } from "./lib/plans";
 import { requestPublish } from "./lib/publish";

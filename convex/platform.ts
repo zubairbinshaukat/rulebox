@@ -1,11 +1,19 @@
 import { v } from "convex/values";
 import { internal } from "./_generated/api";
-import { internalAction, internalMutation, internalQuery } from "./_generated/server";
+import {
+  internalAction,
+  type ActionCtx,
+  type DatabaseReader,
+  type DatabaseWriter,
+} from "./_generated/server";
+import { internalQuery, internalMutation } from "./lib/functions";
 import { base64Decode } from "./lib/crypto";
 import { fail } from "./lib/errors";
 import { MAX_PLATFORM_SECRET } from "./lib/limits";
 import {
   isPlatformSecretName,
+  mailFlagRow,
+  mailSettingsUsable,
   openSecret,
   PLATFORM_SECRET_NAMES,
   platformKeyBytes,
@@ -27,6 +35,13 @@ import {
 // process list); `setSecret` (encrypts on the server) is for the future
 // operator console. Nothing here returns a value: `status` / `checkSecrets`
 // answer which names are set, decrypt and are valid.
+//
+// The "mail" flag (`platformFlags`, Phase 4b security review): the lock
+// screen's "reset by email is on" without reading or decrypting a secret per
+// query. Recomputed by decrypting all three settings whenever one changes
+// (`storeSecret` schedules it, `setSecret` and `checkSecrets` run it,
+// `clearSecret` turns it off). After replacing RULEBOX_PLATFORM_KEY, run
+// `check` so the flag follows.
 
 const name = v.string();
 
@@ -45,13 +60,19 @@ export const setSecret = internalAction({
     if (problem !== null) fail("invalid_argument", { field: "value", detail: problem });
     const sealed = await sealSecret(ctx, n, args.value);
     if (sealed === null) fail("not_ready", { detail: "RULEBOX_PLATFORM_KEY is missing or invalid" });
-    await ctx.runMutation(internal.platform.storeSecret, { name: n, ...sealed });
+    await ctx.runMutation(internal.platform.storeSecret, { name: n, ...sealed, refresh: false });
+    await refreshMail(ctx);
     return null;
   },
 });
 
+/**
+ * Store an encrypted value (the CLI's path: it encrypts locally). Schedules
+ * the "mail" flag recompute (`refresh: false` only from `setSecret`, which
+ * recomputes it itself).
+ */
 export const storeSecret = internalMutation({
-  args: { name, ciphertext: v.string(), iv: v.string() },
+  args: { name, ciphertext: v.string(), iv: v.string(), refresh: v.optional(v.boolean()) },
   returns: v.null(),
   handler: async (ctx, args) => {
     const n = checkedName(args.name);
@@ -64,6 +85,7 @@ export const storeSecret = internalMutation({
     if (row === null) await ctx.db.insert("platformSecrets", { name: n, ciphertext: args.ciphertext, iv: args.iv, updatedAt: now });
     else await ctx.db.patch(row._id, { ciphertext: args.ciphertext, iv: args.iv, updatedAt: now });
     await ctx.db.insert("platformAudit", { at: now, action: "platform.secretSet", name: n, actor: "cli" });
+    if (args.refresh !== false) await ctx.scheduler.runAfter(0, internal.platform.refreshMailFlag, {});
     return null;
   },
 });
@@ -78,7 +100,75 @@ export const clearSecret = internalMutation({
     if (row === null) return false;
     await ctx.db.delete(row._id);
     await ctx.db.insert("platformAudit", { at: Date.now(), action: "platform.secretCleared", name: n, actor: "cli" });
+    // Every secret is needed for mail: it is off now (no decrypt needed to know).
+    await writeMailFlag(ctx, false, await currentStamps(ctx));
     return true;
+  },
+});
+
+// ---------------------------------------------------------------- the "mail" flag (platformFlags)
+
+async function currentStamps(ctx: { db: DatabaseReader }): Promise<(number | null)[]> {
+  const stamps: (number | null)[] = [];
+  for (const n of PLATFORM_SECRET_NAMES) stamps.push((await secretRow(ctx, n))?.updatedAt ?? null);
+  return stamps;
+}
+
+/** Write the flag only when it changed (rule 5: write only on change). */
+async function writeMailFlag(ctx: { db: DatabaseWriter }, ready: boolean, stamps: (number | null)[]): Promise<void> {
+  const row = await mailFlagRow(ctx);
+  if (row === null) {
+    await ctx.db.insert("platformFlags", { name: "mail", ready, checkedAt: Date.now(), stamps });
+  } else if (row.ready !== ready || row.stamps.join() !== stamps.join()) {
+    await ctx.db.patch(row._id, { ready, checkedAt: Date.now(), stamps });
+  }
+}
+
+const sealedRow = v.union(v.null(), v.object({ ciphertext: v.string(), iv: v.string(), updatedAt: v.number() }));
+
+/** The three mail settings, sealed, in PLATFORM_SECRET_NAMES order (for the flag recompute only). */
+export const mailInputs = internalQuery({
+  args: {},
+  returns: v.array(sealedRow),
+  handler: async (ctx) => {
+    const out = [];
+    for (const n of PLATFORM_SECRET_NAMES) {
+      const row = await secretRow(ctx, n);
+      out.push(row === null ? null : { ciphertext: row.ciphertext, iv: row.iv, updatedAt: row.updatedAt });
+    }
+    return out;
+  },
+});
+
+/** Store a recomputed flag unless a secret changed since it was computed (a newer recompute is on its way). */
+export const setMailFlag = internalMutation({
+  args: { ready: v.boolean(), stamps: v.array(v.union(v.number(), v.null())) },
+  returns: v.boolean(),
+  handler: async (ctx, args) => {
+    const now = await currentStamps(ctx);
+    if (now.join() !== args.stamps.join()) return false;
+    await writeMailFlag(ctx, args.ready, now);
+    return true;
+  },
+});
+
+type Sealed = { ciphertext: string; iv: string; updatedAt: number } | null;
+
+/** Decrypt + validate the three settings with this deployment's master key, then store the flag. Actions only. */
+async function refreshMail(ctx: Pick<ActionCtx, "runQuery" | "runMutation">): Promise<boolean> {
+  const inputs: Sealed[] = await ctx.runQuery(internal.platform.mailInputs, {});
+  const ready = await mailSettingsUsable(inputs);
+  await ctx.runMutation(internal.platform.setMailFlag, { ready, stamps: inputs.map((s) => s?.updatedAt ?? null) });
+  return ready;
+}
+
+/** Recompute the "mail" flag (scheduled by `storeSecret`). */
+export const refreshMailFlag = internalAction({
+  args: {},
+  returns: v.null(),
+  handler: async (ctx): Promise<null> => {
+    await refreshMail(ctx);
+    return null;
   },
 });
 
@@ -112,6 +202,8 @@ export const checkSecrets = internalAction({
       const value: string | null = sealed === null ? null : await openSecret(n, sealed);
       secrets.push({ name: n, set: sealed !== null, decrypts: value !== null, valid: value !== null && platformSecretProblem(n, value) === null });
     }
+    // Also re-derives the "mail" flag (e.g. after RULEBOX_PLATFORM_KEY was replaced).
+    await refreshMail(ctx);
     return { masterKey: platformKeyBytes() !== null, secrets };
   },
 });

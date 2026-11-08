@@ -28,7 +28,8 @@ export default tseslint.config(
     },
   },
   // Convex: every public function goes through convex/lib/functions.ts
-  // (plan Phase 4, rule 3). Internal builders stay allowed.
+  // (plan Phase 4, rule 3). Internal queries / mutations too (I/O probe);
+  // internal actions have no db and stay allowed.
   {
     files: ["convex/**/*.ts"],
     ignores: [
@@ -43,8 +44,8 @@ export default tseslint.config(
         {
           paths: ["./_generated/server", "../_generated/server"].map((name) => ({
             name,
-            importNames: ["query", "mutation", "action"],
-            message: "Use the wrappers in convex/lib/functions.ts",
+            importNames: ["query", "mutation", "action", "internalQuery", "internalMutation"],
+            message: "Use the wrappers in convex/lib/functions.ts (internalQuery / internalMutation are counted by the I/O probe there)",
           })),
         },
       ],

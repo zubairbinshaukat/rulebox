@@ -1,11 +1,10 @@
 import { v } from "convex/values";
-import { internalQuery } from "./_generated/server";
 import { writeAudit } from "./lib/audit";
 import { checkDevice, type CredentialState } from "./lib/deviceAuth";
 import { statusValidator, writeStatus } from "./lib/deviceReport";
 import { revokeDevice } from "./lib/fleet";
 import { fail } from "./lib/errors";
-import { deviceMutation, deviceQuery, phase2DeviceMutation, phase2DeviceQuery } from "./lib/functions";
+import { deviceMutation, deviceQuery, internalQuery, phase2DeviceMutation, phase2DeviceQuery } from "./lib/functions";
 import { MAX_ROSTER_FETCH } from "./lib/limits";
 import { orgPolicyKeys, publishedKey, publishedKeysOf } from "./lib/policyKeys";
 import { recordContact } from "./lib/presence";
