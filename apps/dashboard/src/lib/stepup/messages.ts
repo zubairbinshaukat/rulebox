@@ -1,4 +1,5 @@
 import { messageFor, toAppError } from "../errors";
+import { strings } from "../strings";
 import { isPasskeyCancel, isPasskeyDuplicate } from "./passkey";
 import { sec } from "./strings";
 
@@ -13,7 +14,12 @@ export function stepUpMessage(e: unknown): string {
   if (app?.code === "conflict" && app.detail === "passkey limit") return sec.passkeyLimit(10);
   if (app?.code === "conflict" && app.detail === "passkey exists") return sec.passkeyDuplicate;
   if (app?.code === "forbidden" && app.detail === "member of another organization") return sec.resetMemberOtherOrg;
-  if (!app) {
+  if (app?.code === "invalid_argument") {
+    // A PIN the server refused (the form mirrors the rules, so this is a drift or a race).
+    if (app.field === "pin" || app.field === "newPin") return app.detail === "6 to 12 digits" ? strings.validate.pin : strings.validate.pinWeak;
+    if (app.field === "currentPassword") return sec.passwordWrong;
+    if (app.field === "newPassword") return app.detail === "same as current" ? sec.passwordSame : strings.validate.passwordMember;
+  }  if (!app) {
     if (isPasskeyCancel(e)) return sec.passkeyCancelled;
     if (isPasskeyDuplicate(e)) return sec.passkeyDuplicate;
     if (e instanceof Error && /WebAuthn is not supported/.test(e.message)) return sec.passkeyUnsupported;

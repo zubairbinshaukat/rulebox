@@ -12,3 +12,15 @@
 # (Not set on /* as well: Pages joins two values of one header with a comma.)
 /assets/*
   Cache-Control: public, max-age=31536000, immutable
+
+# The deployment's backend address, read at start: never cached.
+/config.json
+  Cache-Control: no-store
+
+# The forgot-PIN page (its link carries a secret in the URL fragment; the page strips it,
+# and nothing of the address may travel in a Referer). Pages joins the values of one header
+# from every matching rule with a comma ("strict-origin-when-cross-origin, no-referrer"), and
+# a browser takes the LAST valid policy of such a list: no-referrer. (This file has no way to
+# leave a path out of "/*". vercel.json does it with a negative match instead.)
+/pin-reset
+  Referrer-Policy: no-referrer

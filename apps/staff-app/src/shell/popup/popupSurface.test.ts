@@ -8,7 +8,10 @@ import { describe, expect, it } from "vitest";
  * windows beneath unblurred, which made the text hard to read. Their panels
  * must be opaque, with no backdrop-filter. The taskbar pills (.rb-dock) stay glass.
  */
-const components = readFileSync(new URL("../../../../../packages/ui/src/components.css", import.meta.url), "utf8");
+const components =
+  readFileSync(new URL("../../../../../packages/ui/src/components.css", import.meta.url), "utf8") +
+  "\n" +
+  readFileSync(new URL("../../../../../packages/ui/src/components-staff.css", import.meta.url), "utf8");
 const tokens = readFileSync(new URL("../../../../../packages/ui/src/tokens.css", import.meta.url), "utf8");
 const popupRoot = readFileSync(new URL("./PopupRoot.tsx", import.meta.url), "utf8");
 

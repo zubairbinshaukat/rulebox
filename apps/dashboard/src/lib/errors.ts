@@ -22,10 +22,6 @@ export class AppError extends Error {
   }
 }
 
-export function isAppError(e: unknown): e is AppError {
-  return e instanceof AppError;
-}
-
 const KNOWN_CODES: ReadonlySet<string> = new Set(ERROR_CODES);
 
 /**
@@ -60,8 +56,6 @@ export function messageForCode(code: ErrorCode, data?: Omit<ErrorData, "code">):
       return e.unauthenticated;
     case "forbidden":
       return e.forbidden;
-    case "mfa_required":
-      return e.mfaRequired;
     case "not_found":
       return e.notFound;
     case "invalid_argument":
@@ -87,12 +81,6 @@ export function messageForCode(code: ErrorCode, data?: Omit<ErrorData, "code">):
       return e.inviteInvalid;
     case "account_disabled":
       return e.accountDisabled;
-    case "mfa_invalid_code":
-      return e.mfaInvalidCode;
-    case "mfa_locked":
-      return data?.retryAfterMs ? e.mfaLockedFor(data.retryAfterMs) : e.mfaLocked;
-    case "mfa_already_enabled":
-      return e.mfaAlreadyEnabled;
     case "winget_unsupported":
       return data?.detail ? e.wingetUnsupportedBecause(data.detail) : e.wingetUnsupported;
     case "winget_unreachable":
@@ -116,7 +104,8 @@ export function messageForCode(code: ErrorCode, data?: Omit<ErrorData, "code">):
     case "step_up_invalid":
       return data?.retryAfterMs ? e.stepUpInvalidWait(data.retryAfterMs) : e.stepUpInvalid;
     case "step_up_locked":
-      return data?.detail === "disabled" || !data?.retryAfterMs ? e.stepUpDisabled : e.stepUpLocked(data.retryAfterMs);
+      if (!data?.retryAfterMs) return e.stepUpLockedNoWait;
+      return data.detail === "lockout" ? e.stepUpLockout(data.retryAfterMs) : e.stepUpLocked(data.retryAfterMs);
     case "step_up_last_factor":
       return e.stepUpLastFactor;
     case "plan_limit":

@@ -15,9 +15,10 @@ import { RoleGate } from "../components/RoleGate";
 import { ServerTable } from "../components/ServerTable";
 import { formatCount } from "../lib/format";
 import { useListPaging, useListView, type ListConfig } from "../lib/listView";
-import { strings } from "../lib/strings";
+import { appsStrings } from "../lib/screenStrings/apps";
+import { installStateStrings } from "../lib/screenStrings/installState";
 
-const s = strings.apps;
+const s = appsStrings;
 
 /** Server sort keys of `apps:list`; the first is the default (newest first). */
 const LIST: ListConfig = { sorts: ["created", "name"], defaultSort: { key: "created", dir: "desc" }, filters: ["archived"] };
@@ -34,8 +35,8 @@ function Summary({ summary }: { summary: InstallSummary | null }) {
         <span style={{ width: pct(summary.inProgress), background: "var(--rb-muted)" }} />
       </span>
       <span className="dash-cell-sub" style={{ whiteSpace: "normal" }}>
-        {formatCount(summary.installed, 1000)} {strings.installState.installed.toLowerCase()} · {formatCount(summary.failed, 1000)}{" "}
-        {strings.installState.failed.toLowerCase()} · {formatCount(summary.inProgress, 1000)} {strings.installState.pending.toLowerCase()}
+        {formatCount(summary.installed, 1000)} {installStateStrings.installed.toLowerCase()} · {formatCount(summary.failed, 1000)}{" "}
+        {installStateStrings.failed.toLowerCase()} · {formatCount(summary.inProgress, 1000)} {installStateStrings.pending.toLowerCase()}
       </span>
     </span>
   );

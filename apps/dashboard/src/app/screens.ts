@@ -8,7 +8,7 @@ const LOADERS: Record<ScreenName, Loader> = {
   SignIn: () => import("../screens/SignIn"),
   Join: () => import("../screens/Join"),
   Reset: () => import("../screens/Reset"),
-  Mfa: () => import("../screens/Mfa"),
+  PinReset: () => import("../screens/PinReset"),
   Layout: () => import("./Layout").then((m) => ({ default: m.Layout })),
   Overview: () => import("../screens/Overview"),
   Devices: () => import("../screens/Devices"),

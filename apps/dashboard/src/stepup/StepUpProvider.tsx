@@ -12,14 +12,15 @@ const LockScreen = lazy(() => import("./LockScreen"));
 const SetupScreen = lazy(() => import("./SetupScreen"));
 
 /**
- * Step-up for the signed-in shell (plan 4.16): feeds `stepUp:status` and the
- * keep-alive / lock calls to the controller, and shows, instead of the
- * screens, the first-factor setup (Owner / Admin without a factor) or the
- * lock screen (idle), plus the confirm dialog for calls that need it.
+ * Step-up for the signed-in shell (plan 4.16, Phase 4b): feeds `stepUp:status`
+ * and the keep-alive / lock calls to the controller, and shows, instead of the
+ * screens, the PIN setup (`me.pin.required && !me.pin.set`, every role) or the
+ * PIN screen (on every page load, after idle time and "Lock now"), plus the
+ * confirm dialog for calls that need it.
  */
 export function StepUpProvider({ children, options }: { children: ReactNode; options?: ControllerOptions }) {
   const me = useMember();
-  const [controller] = useState(() => new StepUpController({ idleOverrideMs: __STEPUP_TEST_IDLE_MS__, ...options }));
+  const [controller] = useState(() => new StepUpController({ idleOverrideMs: __STEPUP_TEST_IDLE_MS__, lockOnStart: true, ...options }));
   const status = useStepUpStatus();
   const keepAlive = useKeepAlive();
   const lock = useLockSession();
@@ -31,14 +32,21 @@ export function StepUpProvider({ children, options }: { children: ReactNode; opt
     return () => controller.stop();
   }, [controller]);
   useEffect(() => controller.onStatus(st), [controller, st]);
+  // The idle lock needs to know there is a PIN before `stepUp:status` has loaded (or if it never does).
+  useEffect(() => controller.noteFactor(me.pin.set), [controller, me.pin.set]);
   // Every write of the data seam asks this shell for a confirmation (lib/stepUpRetry.ts).
   useEffect(() => setStepUpHandler((e) => controller.request(e)), [controller]);
 
   const snap = useSyncExternalStore(controller.subscribe, controller.getSnapshot, controller.getSnapshot);
-  const needsSetup = st !== null && me.role !== "viewer" && !st.actionPin.set && st.passkeys.length === 0;
+  // `account:me` knows at once (no wait for the status query): no flash of the dashboard before PIN setup.
+  const needsSetup = me.pin.required && !me.pin.set;
 
   let body: ReactNode = children;
-  if (needsSetup || snap.setupActive) body = <SetupScreen controller={controller} />;
+  // A lock (idle, another tab, the server) wins over the setup screen: the recovery codes it may be
+  // showing are dropped with it, and a new set is made when setup comes back. (The start lock, reason
+  // "load", does not: with no PIN yet there is nothing to ask for, and no lock screen should flash.)
+  const lockedOverSetup = snap.locked && snap.reason !== "load";
+  if ((needsSetup || snap.setupActive) && !lockedOverSetup) body = <SetupScreen controller={controller} />;
   else if (snap.locked) body = <LockScreen controller={controller} email={me.email} reason={snap.reason} />;
 
   return (

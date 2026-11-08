@@ -5,6 +5,7 @@ import { useVerifyActionPin } from "../data/stepup";
 import type { StepUpStatus, StepUpVerified } from "../data/types";
 import { InlineNotice } from "../components/Notice";
 import { toAppError } from "../lib/errors";
+import { formatDateTime } from "../lib/format";
 import { strings } from "../lib/strings";
 import { stepUpMessage } from "../lib/stepup/messages";
 import { cancelPasskeyPrompt, isPasskeyCancel, passkeysSupported } from "../lib/stepup/passkey";
@@ -17,19 +18,23 @@ interface Wait {
   /** Local time when the next PIN try is allowed. */
   until: number;
   message: string;
+  /** The long lockout (24 hours or more): the PIN field is hidden, not just disabled. */
+  lockout: boolean;
 }
 
-/** The wait the server already reports (`actionPin.lockedUntil`, server time). */
+/** The wait the server already reports (`pin.lockedUntil`, server time). */
 function initialWait(status: StepUpStatus, controller: StepUpController | null): Wait | null {
-  const until = status.actionPin.lockedUntil;
-  if (until === null || status.actionPin.disabled) return null;
+  const until = status.pin.lockedUntil;
+  if (until === null) return null;
   const local = controller ? controller.toLocal(until) : until;
   const left = local - Date.now();
-  return left > 0 ? { until: local, message: sec.pinLockedWait(left) } : null;
+  if (left <= 0) return null;
+  const lockout = status.pin.lockKind === "lockout";
+  return { until: local, message: lockout ? sec.pinLockout(formatDateTime(local)) : sec.pinLockedWait(left), lockout };
 }
 
 /**
- * Confirm with a passkey (first, when one can be used here) or the action PIN.
+ * Confirm with a passkey (first, when one can be used here) or the PIN.
  * Used by the confirm dialog and the lock screen. The PIN lives only in this
  * component's state and is cleared after every try and on unmount.
  */
@@ -72,8 +77,10 @@ export function FactorForm({
 
   const usablePasskeys = status.passkeys.filter((k) => !k.suspended).length;
   const canPasskey = status.passkeysAvailable && usablePasskeys > 0 && passkeysSupported();
-  const pinUsable = status.actionPin.set && !status.actionPin.disabled;
-  const triesLeft = status.actionPin.attemptsBeforeDisable;
+  const lockedOut = wait?.lockout === true;
+  const pinUsable = status.pin.set && !lockedOut;
+  const failed = status.pin.failedSinceUnlock;
+  const triesLeft = status.pin.attemptsBeforeLockout;
 
   async function onPasskey() {
     if (busy) return;
@@ -113,7 +120,9 @@ export function FactorForm({
       const app = toAppError(err);
       const ms = app?.retryAfterMs;
       if (ms && (app.code === "step_up_invalid" || app.code === "step_up_locked")) {
-        setWait({ until: Date.now() + ms, message: stepUpMessage(err) });
+        const lockout = app.code === "step_up_locked" && app.detail === "lockout";
+        const until = Date.now() + ms;
+        setWait({ until, message: lockout ? sec.pinLockout(formatDateTime(until)) : stepUpMessage(err), lockout });
       } else setError(stepUpMessage(err));
       pinRef.current?.focus();
     } finally {
@@ -172,13 +181,13 @@ export function FactorForm({
               {sec.pinHint}
             </p>
           </div>
-          {triesLeft > 0 && triesLeft < 10 ? <p className="dash-muted su-factor__tries">{sec.pinTriesLeft(triesLeft)}</p> : null}
+          {failed > 0 && triesLeft > 0 ? <p className="dash-muted su-factor__tries">{sec.pinTriesLeft(failed, triesLeft)}</p> : null}
           <Button type="submit" className={canPasskey ? undefined : "dash-btn--accent"} disabled={busy !== null || wait !== null} aria-busy={busy === "pin"}>
             {busy === "pin" ? sec.confirming : submitLabel}
           </Button>
         </form>
-      ) : status.actionPin.disabled ? (
-        <InlineNotice tone="warning" title={canPasskey ? strings.errors.stepUpDisabled : sec.pinDisabledNoPasskey} />
+      ) : lockedOut ? (
+        <p className="dash-muted">{sec.pinLockoutHelp}</p>
       ) : !canPasskey ? (
         <InlineNotice tone="warning" title={usablePasskeys > 0 && status.passkeysAvailable ? sec.passkeyUnsupported : sec.notReady["passkeys not configured"]!} />
       ) : null}

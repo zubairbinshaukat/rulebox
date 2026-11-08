@@ -34,8 +34,8 @@ export default function Join() {
           e.preventDefault();
           void f.submit(async (x) => {
             await signUp({ inviteCode: x.code.trim(), email: x.email.trim(), password: x.password });
-            // The new member sets up two-step sign-in next (Owner/Admin) or lands on the overview.
-            navigate("/mfa", { replace: true });
+            // The new member chooses a PIN next: the signed-in shell shows PIN setup until they have one.
+            navigate("/", { replace: true });
           }, form.current);
         }}
       >

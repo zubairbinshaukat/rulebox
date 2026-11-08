@@ -16,7 +16,6 @@ export type Id = string;
 export const ERROR_CODES = [
   "unauthenticated",
   "forbidden",
-  "mfa_required",
   "not_found",
   "invalid_argument",
   "stale_edit",
@@ -26,9 +25,6 @@ export const ERROR_CODES = [
   "not_ready",
   "invite_invalid",
   "account_disabled",
-  "mfa_invalid_code",
-  "mfa_locked",
-  "mfa_already_enabled",
   "winget_unsupported",
   "winget_unreachable",
   "webmeta_failed",
@@ -65,20 +61,6 @@ export type QueryState<T> =
   | { status: "error"; error: unknown; retry: () => void }
   | { status: "ready"; data: T };
 
-/** `usePaginatedQuery` mirror. `canLoadMore` false = Convex status `Exhausted`. */
-export type PagedState<T> =
-  | { status: "loading" }
-  | { status: "error"; error: unknown; retry: () => void }
-  | {
-      status: "ready";
-      items: T[];
-      canLoadMore: boolean;
-      isLoadingMore: boolean;
-      loadMore: () => void;
-    };
-
-export const PAGE_SIZE = 50;
-
 // ---------------------------------------------------------------- accounts
 
 export type Role = "owner" | "admin" | "viewer";
@@ -91,7 +73,12 @@ export interface Me {
   status: MemberStatus;
   orgId: Id;
   orgName: string;
-  mfa: { enrolled: boolean; required: boolean; verified: boolean };
+  /**
+   * Phase 4b: every member must set an action PIN. `set` false: the dashboard shows PIN setup
+   * (every member write answers `step_up_setup_required` until then). Lockout counts and
+   * "reset by email" are in `stepUp:status.pin`, not here.
+   */
+  pin: { required: boolean; set: boolean };
   serverApiVersion: number;
 }
 export interface NoAccess {
@@ -101,21 +88,6 @@ export interface NoAccess {
 /** `undefined` while loading, `null` when signed out. */
 export type MeResult = Me | NoAccess | null;
 
-/** `mfa:status` */
-export interface MfaStatus {
-  enrolled: boolean;
-  required: boolean;
-  verified: boolean;
-  lockedUntil: number | null;
-  recoveryCodesLeft: number;
-}
-
-/** `mfa:beginSetup` */
-export interface MfaSetup {
-  secret: string;
-  uri: string;
-}
-
 /** `members:page` row */
 export interface MemberRow {
   _id: Id;
@@ -123,7 +95,6 @@ export interface MemberRow {
   role: Role;
   status: MemberStatus;
   createdAt: number;
-  mfaEnrolled: boolean;
   isYou: boolean;
   revision: number;
 }
@@ -151,9 +122,43 @@ export interface PasskeyRow {
   suspended: boolean;
 }
 
+/**
+ * `stepUp:status.pin` (the lock screen\x27s source). `lockedUntil` is server time; the PIN is locked
+ * while it is in the future: `lockKind` "lockout" is the long lockout (24 h, 72 h, 7 days),
+ * "backoff" a short wait after a few wrong tries. `attemptsBeforeLockout` counts down from 10.
+ * (The server still sends the Phase 4 `actionPin` object too; the dashboard ignores it.)
+ */
+export interface PinStatus {
+  set: boolean;
+  lockedUntil: number | null;
+  lockKind: "backoff" | "lockout" | null;
+  failedSinceUnlock: number;
+  attemptsBeforeLockout: number;
+  recoveryCodesLeft: number;
+  /** The forgot-PIN email is configured on this deployment. */
+  resetByEmail: boolean;
+}
+
+/**
+ * `stepUp:status.pin`, the lock screen's source. `lockedUntil` is server time: the PIN is locked
+ * while it is in the future. `lockKind` "lockout" is the long lockout (24 h, 72 h, 7 days),
+ * "backoff" a short wait after a few wrong tries. `attemptsBeforeLockout` counts down from 10.
+ * (The server still sends the Phase 4 `actionPin` object too; the dashboard ignores it.)
+ */
+export interface PinStatus {
+  set: boolean;
+  lockedUntil: number | null;
+  lockKind: "backoff" | "lockout" | null;
+  failedSinceUnlock: number;
+  attemptsBeforeLockout: number;
+  recoveryCodesLeft: number;
+  /** The forgot-PIN email is configured on this deployment. */
+  resetByEmail: boolean;
+}
+
 /** `stepUp:status`. Every timestamp is server time. */
 export interface StepUpStatus {
-  actionPin: { set: boolean; lockedUntil: number | null; disabled: boolean; attemptsBeforeDisable: number };
+  pin: PinStatus;
   passkeys: PasskeyRow[];
   /** False when the deployment has no WebAuthn configuration (the PIN keeps working). */
   passkeysAvailable: boolean;
@@ -447,7 +452,6 @@ export interface DeviceDetail {
 
 /** `fleet:list({ groupId: "none" })` lists the devices that have no group. */
 export const NO_GROUP_FILTER = "none";
-export type DeviceFilter = { groupId?: Id | typeof NO_GROUP_FILTER; search?: string };
 
 // ---------------------------------------------------------------- installs
 

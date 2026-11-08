@@ -32,7 +32,18 @@ vi.mock("../data", () => ({
 }));
 
 vi.mock("../data/stepup", () => ({
-  useStepUpStatus: () => ({ status: "loading" }),
+  // Ready, with no PIN: the shell's start lock opens at once (these tests are about the shell, not the PIN screen).
+  useStepUpStatus: () => ({
+    status: "ready",
+    data: {
+      pin: { set: false, lockedUntil: null, lockKind: null, failedSinceUnlock: 0, attemptsBeforeLockout: 10, recoveryCodesLeft: 0, resetByEmail: false },
+      passkeys: [],
+      passkeysAvailable: false,
+      session: { verifiedAt: null, lastActiveAt: null, method: null },
+      bootstrapUntil: null,
+      policy: { idleMs: 600000, keepAliveMs: 300000, freshMs: 300000, maxAgeMs: 28800000 },
+    },
+  }),
   useKeepAlive: () => async () => ({ serverNow: Date.now() }),
   useLockSession: () => async () => undefined,
 }));
@@ -43,7 +54,6 @@ import { ConnectionBanner } from "./ConnectionBanner";
 import { PublishBanner } from "./PublishBanner";
 import { RoleGate } from "../components/RoleGate";
 import { CopyField } from "../components/CopyField";
-import { LoadMore } from "../components/LoadMore";
 import { OrganizationTab } from "../screens/settings/OrganizationTab";
 import { ToastProvider } from "./Toasts";
 
@@ -53,7 +63,7 @@ const owner: Me = {
   status: "active",
   orgId: "org",
   orgName: "Acme",
-  mfa: { enrolled: true, required: true, verified: true },
+  pin: { required: true, set: true },
   serverApiVersion: 1,
 };
 
@@ -67,7 +77,6 @@ function renderGate(path: string) {
     <MemoryRouter initialEntries={[path]}>
       <Routes>
         <Route path="/sign-in" element={<Where />} />
-        <Route path="/mfa" element={<Where />} />
         <Route element={<RequireMember />}>
           <Route path="*" element={<p>inside</p>} />
         </Route>
@@ -97,14 +106,9 @@ describe("RequireMember", () => {
     renderGate("/");
     expect(screen.getByRole("heading", { name: strings.app.noAccessTitle })).toBeTruthy();
   });
-  it("sends an Owner without a verified second factor to /mfa", () => {
-    mock.me = { ...owner, mfa: { enrolled: true, required: true, verified: false } };
+  it("lets a member without a PIN yet in: PIN setup is the step-up shell's job, not the gate's", () => {
+    mock.me = { ...owner, pin: { required: true, set: false } };
     renderGate("/audit");
-    expect(screen.getByTestId("where").textContent).toBe("/mfa?next=%2Faudit");
-  });
-  it("lets a Viewer without MFA in (not required)", () => {
-    mock.me = { ...owner, role: "viewer", mfa: { enrolled: false, required: false, verified: false } };
-    renderGate("/");
     expect(screen.getByText("inside")).toBeTruthy();
   });
   it("renders the screen for a verified member", () => {
@@ -280,20 +284,6 @@ describe("CopyField", () => {
     expect(document.activeElement).toBe(input);
     expect(input.selectionStart).toBe(0);
     expect(input.selectionEnd).toBe("RBX1.secret".length);
-  });
-});
-
-describe("LoadMore", () => {
-  it("shows the button while more pages exist and removes it when exhausted", () => {
-    const loadMore = vi.fn();
-    const { rerender } = render(<LoadMore shown={50} canLoadMore isLoadingMore={false} loadMore={loadMore} />);
-    fireEvent.click(screen.getByRole("button", { name: strings.common.loadMore }));
-    expect(loadMore).toHaveBeenCalledOnce();
-    rerender(<LoadMore shown={100} canLoadMore isLoadingMore loadMore={loadMore} />);
-    expect((screen.getByRole("button", { name: strings.common.loadingMore }) as HTMLButtonElement).disabled).toBe(true);
-    rerender(<LoadMore shown={120} canLoadMore={false} isLoadingMore={false} loadMore={loadMore} />);
-    expect(screen.queryByRole("button")).toBeNull();
-    expect(screen.getByText(strings.common.endOfList)).toBeTruthy();
   });
 });
 

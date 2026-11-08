@@ -35,8 +35,9 @@ function NoAccess() {
 
 /**
  * Gate for every signed-in screen (Step 4 #3): signed out → `/sign-in?next=…`,
- * no member row → "no access", Owner/Admin without a verified second factor →
- * `/mfa?next=…`; otherwise the member is provided to the screens.
+ * no member row → "no access"; otherwise the member is provided to the screens.
+ * The PIN (setup, then the screen on every load) is the step-up shell's job
+ * (`stepup/StepUpProvider.tsx`, inside the layout).
  */
 export function RequireMember() {
   const { isLoading, isAuthenticated } = useAuthState();
@@ -51,7 +52,6 @@ export function RequireMember() {
   if (!isAuthenticated) return <Navigate to={withNext("/sign-in", here)} replace />;
   if (me === undefined || me === null) return <FullPageSpinner />;
   if ("noAccess" in me) return <NoAccess />;
-  if (me.mfa.required && !me.mfa.verified) return <Navigate to={withNext("/mfa", here)} replace />;
 
   return (
     <MeContext.Provider value={me}>

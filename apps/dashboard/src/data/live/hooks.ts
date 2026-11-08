@@ -1,5 +1,5 @@
 /**
- * Live implementation (real Convex backend). Session, sign-in, MFA, account
+ * Live implementation (real Convex backend). Session, sign-in, account
  * and members are wired to the Phase 4 Step 3 functions (Step 4); settings,
  * the plan and groups to Step 5's (enrollment codes, Step 6: `../enrollment/`;
  * devices, Step 7: here and `../devices/`; signing keys, Step 8; apps,
@@ -89,7 +89,7 @@ function useTrustTotals(enabled: boolean): { trusting: number; total: number } |
   const lastPage = last !== undefined && !(last instanceof Error) ? (last as TrustPage) : null;
   const more = lastPage !== null && !lastPage.isDone ? lastPage.continueCursor : null;
   // The next page's subscription is added during render (React's "adjust state
-  // while rendering" pattern, as `usePagedState` does).
+  // while rendering" pattern).
   if (more !== null && !cursors.includes(more)) setCursors([...cursors, more]);
   if (!enabled || pages.some((p) => p === undefined || p instanceof Error) || more !== null) return undefined;
   let trusting = 0;
@@ -148,39 +148,6 @@ export const liveApi: DataApi = {
   useConnectionState() {
     const { isWebSocketConnected } = useConvexConnectionState();
     return { isWebSocketConnected };
-  },
-
-  // ---- MFA (actions except `status`)
-  useMfaStatus() {
-    return useMemberQuery(api.mfa.status, {});
-  },
-  useBeginMfaSetup() {
-    const begin = useAction(api.mfa.beginSetup);
-    const call = useCallback(async () => await begin({}), [begin]);
-    return useMapped(call);
-  },
-  useConfirmMfaSetup() {
-    return useMapped(useAction(api.mfa.confirmSetup));
-  },
-  useVerifyMfa() {
-    const verify = useAction(api.mfa.verify);
-    const call = useCallback(
-      async (a: { code: string }) => {
-        await verify(a);
-      },
-      [verify],
-    );
-    return useMapped(call);
-  },
-  useRedeemRecoveryCode() {
-    const redeem = useAction(api.mfa.useRecoveryCode);
-    const call = useCallback(
-      async (a: { code: string }) => {
-        await redeem(a);
-      },
-      [redeem],
-    );
-    return useMapped(call);
   },
 
   // ---- overview (Step 17). The failed-installs list is a second query, subscribed only while the counter is above zero.
@@ -661,16 +628,6 @@ export const liveApi: DataApi = {
   },
   useCreateResetCode() {
     return useMapped(useAction(api.members.createResetCode));
-  },
-  useResetMemberMfa() {
-    const reset = useMutation(api.members.resetMfa);
-    const call = useCallback(
-      async (a: { memberId: string }) => {
-        await reset(a);
-      },
-      [reset],
-    );
-    return useMapped(call);
   },
 };
 

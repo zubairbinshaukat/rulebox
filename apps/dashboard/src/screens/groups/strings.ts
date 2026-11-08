@@ -1,7 +1,7 @@
 /**
  * Groups list and detail (plan Step 5): the sentences added with the live
  * backend. A lazily loaded part of `lib/strings.ts`; the older group
- * sentences shared with other screens stay in `strings.groups` / `strings.group`.
+ * sentences shared with other screens stay in `groupsStrings` / `groupStrings`.
  */
 import { formatNumber, plural } from "../../lib/format";
 

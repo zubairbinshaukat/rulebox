@@ -5,6 +5,7 @@ import { formatCount, plural } from "./format";
 import { safeNext, withNext } from "./next";
 import { signInMessage } from "./signin";
 import { strings } from "./strings";
+import { groupsStrings } from "./screenStrings/groups";
 
 describe("safeNext (open-redirect guard)", () => {
   it("keeps same-site paths", () => {
@@ -43,7 +44,8 @@ describe("messageFor", () => {
     expect(messageFor({ data: { code: 42 } })).toBe(strings.errors.unknown);
   });
   it("uses extra data where it helps", () => {
-    expect(messageForCode("mfa_locked", { retryAfterMs: 15 * 60_000 })).toContain("15 minutes");
+    expect(messageForCode("step_up_locked", { retryAfterMs: 15 * 60_000 })).toContain("15 minutes");
+    expect(messageForCode("step_up_locked", { retryAfterMs: 86_400_000, detail: "lockout" })).toContain("locked for 1 day");
     expect(messageForCode("winget_unsupported", { detail: "only a user installer" })).toContain("only a user installer");
   });
   it("sign-in shows the rate-limit sentence and hides which credential was wrong", () => {
@@ -62,7 +64,7 @@ describe("counts and plurals", () => {
     expect(strings.counts.devices(0)).toBe("0 devices");
     expect(strings.counts.devices(1)).toBe("1 device");
     expect(strings.counts.devices(2)).toBe("2 devices");
-    expect(strings.groups.devices(501)).toBe("500+ devices");
+    expect(groupsStrings.devices(501)).toBe("500+ devices");
     expect(plural(0, { one: "a", other: "b", zero: "none" })).toBe("none");
   });
 });

@@ -40,10 +40,17 @@ import { useToast } from "../lib/toast";
 import { formatDate, formatDateTime, formatGb, formatNumber } from "../lib/format";
 import { messageFor } from "../lib/errors";
 import { strings } from "../lib/strings";
+import { appEditStrings } from "../lib/screenStrings/appEdit";
+import { appsStrings } from "../lib/screenStrings/apps";
+import { deviceStrings } from "../lib/screenStrings/device";
+import { devicesStrings } from "../lib/screenStrings/devices";
+import { installStrings } from "../lib/screenStrings/install";
+import { kioskPhaseStrings } from "../lib/screenStrings/kioskPhase";
+import { shellHealthStrings } from "../lib/screenStrings/shellHealth";
 import { useNow } from "../lib/useNow";
 import * as v from "../lib/validate";
 
-const s = strings.device;
+const s = deviceStrings;
 
 /** The page renews watch mode (`fleet:watch`, 5 minutes) a little before it runs out. */
 const WATCH_RENEW_MS = 4 * 60_000;
@@ -82,7 +89,7 @@ export default function DeviceDetail() {
   return (
     <div className="dash-page">
       {detail.status === "loading" ? <PageHeader title={strings.app.loading} back={{ to: "/devices", label: s.back }} /> : null}
-      {detail.status === "error" ? <PageHeader title={strings.devices.title} back={{ to: "/devices", label: s.back }} /> : null}
+      {detail.status === "error" ? <PageHeader title={devicesStrings.title} back={{ to: "/devices", label: s.back }} /> : null}
       <QueryRegion
         state={detail}
         skeleton={
@@ -114,7 +121,7 @@ function Device({ d, liveness }: { d: Detail; liveness: QueryState<DeviceLivenes
           <>
             <DeviceOnline presence={d.presence} now={now} />
             <KioskCell row={d} />
-            {r?.outOfSupport ? <Pill tone="danger">{strings.devices.outOfSupport}</Pill> : null}
+            {r?.outOfSupport ? <Pill tone="danger">{devicesStrings.outOfSupport}</Pill> : null}
           </>
         }
         actions={
@@ -151,8 +158,8 @@ function Device({ d, liveness }: { d: Detail; liveness: QueryState<DeviceLivenes
                   <KV label={s.edition} value={r.osEdition ?? "—"} />
                   <KV label={s.ram} value={r.ramMb ? formatGb(Math.round(r.ramMb / 1024)) : "—"} />
                   <KV label={s.diskFree} value={r.diskFreeGb !== undefined ? formatGb(r.diskFreeGb) : "—"} />
-                  <KV label={s.kioskPhase} value={strings.kioskPhase[r.kioskPhase ?? "unknown"]} />
-                  <KV label={s.shellHealth} value={strings.shellHealth[r.shellHealth ?? "unknown"]} />
+                  <KV label={s.kioskPhase} value={kioskPhaseStrings[r.kioskPhase ?? "unknown"]} />
+                  <KV label={s.shellHealth} value={shellHealthStrings[r.shellHealth ?? "unknown"]} />
                   <KV label={s.lockdown} value={r.lockdownLevel ?? "—"} />
                   <KV label={s.trustedKeys} value={<TrustedKeys ids={r.trustedKeyIds} />} />
                 </>
@@ -280,7 +287,7 @@ function Installs({ deviceId }: { deviceId: string }) {
   const cols: Column<DeviceInstallRow>[] = [
     {
       key: "app",
-      header: strings.apps.colName,
+      header: appsStrings.colName,
       primary: true,
       cell: (i) => (
         <Link className="dash-link dash-link--plain dash-truncate" to={`/apps/${i.appId}`}>
@@ -288,7 +295,7 @@ function Installs({ deviceId }: { deviceId: string }) {
         </Link>
       ),
     },
-    { key: "state", header: strings.appEdit.installState, cell: (i) => <InstallStatePill state={i.state} /> },
+    { key: "state", header: appEditStrings.installState, cell: (i) => <InstallStatePill state={i.state} /> },
     {
       key: "detail",
       header: strings.common.details,
@@ -307,10 +314,10 @@ function Installs({ deviceId }: { deviceId: string }) {
             variant="ghost"
             className="dash-btn--sm"
             disabled={i.retryable === false}
-            title={i.retryable === false ? strings.install.retryUnavailable : undefined}
+            title={i.retryable === false ? installStrings.retryUnavailable : undefined}
             onClick={() => setConfirming(i)}
           >
-            {strings.install.retry}
+            {installStrings.retry}
           </Button>
         ) : null,
     },
@@ -320,11 +327,11 @@ function Installs({ deviceId }: { deviceId: string }) {
       {/* `apps:retry` restarts the app for every PC, so it is confirmed first. */}
       <ConfirmDialog
         open={confirming !== null}
-        title={strings.install.retryConfirmTitle(confirming?.appName ?? "")}
-        body={strings.install.retryConfirmBody(confirming?.appName ?? "")}
-        confirmLabel={strings.install.retryConfirmAction}
+        title={installStrings.retryConfirmTitle(confirming?.appName ?? "")}
+        body={installStrings.retryConfirmBody(confirming?.appName ?? "")}
+        confirmLabel={installStrings.retryConfirmAction}
         onConfirm={() => retry({ appId: confirming?.appId ?? "" })}
-        onDone={() => toast(strings.install.retried)}
+        onDone={() => toast(installStrings.retried)}
         onClose={() => setConfirming(null)}
       />
       <ServerTable
@@ -401,7 +408,7 @@ function Settings({ d }: { d: Detail }) {
             <Field label={s.group}>
               {(p) => (
                 <Select {...p} value={groupId} onChange={(e) => setGroupId(e.target.value)}>
-                  {groupId === "" ? <option value="">{strings.devices.noGroup}</option> : null}
+                  {groupId === "" ? <option value="">{devicesStrings.noGroup}</option> : null}
                   {d.groups.map((g) => (
                     <option key={g._id} value={g._id}>
                       {g.name}
@@ -431,7 +438,7 @@ function Settings({ d }: { d: Detail }) {
           </form>
         ) : (
           <dl className="dash-kv" style={{ gridTemplateColumns: "1fr" }}>
-            <KV label={s.group} value={d.group?.name ?? strings.devices.noGroup} />
+            <KV label={s.group} value={d.group?.name ?? devicesStrings.noGroup} />
           </dl>
         )}
       </div>

@@ -3,7 +3,8 @@ import { useHistory } from "../data/audit";
 import type { AuditEntry, Id } from "../data/types";
 import { actionLabel } from "../lib/audit";
 import { useListPaging, useListView, type ListConfig } from "../lib/listView";
-import { strings } from "../lib/strings";
+import { auditStrings } from "../lib/screenStrings/audit";
+import { deviceStrings } from "../lib/screenStrings/device";
 import { ActorLabel } from "./AuditItem";
 import { Card } from "./Card";
 import type { Column } from "./DataTable";
@@ -15,7 +16,7 @@ import { ServerTable } from "./ServerTable";
 const LIST: ListConfig = { sorts: ["at"], defaultSort: { key: "at", dir: "desc" }, storage: "local" };
 
 /** The audit history of one device, employee, app or group (`audit:forTarget`), one page at a time. No total. */
-export function HistoryPanel({ targetId, title = strings.device.history }: { targetId: Id; title?: string }) {
+export function HistoryPanel({ targetId, title = deviceStrings.history }: { targetId: Id; title?: string }) {
   const view = useListView(LIST);
   // Another target is another list: start over on its first page.
   const paging = useListPaging(view, { total: null, scope: targetId });
@@ -25,7 +26,7 @@ export function HistoryPanel({ targetId, title = strings.device.history }: { tar
     () => [
       {
         key: "what",
-        header: strings.audit.colAction,
+        header: auditStrings.colAction,
         primary: true,
         cell: (e) => (
           <span className="dash-cell-stack">
@@ -37,7 +38,7 @@ export function HistoryPanel({ targetId, title = strings.device.history }: { tar
           </span>
         ),
       },
-      { key: "at", header: strings.audit.colTime, sortable: true, sortDefaultDir: "desc", cell: (e) => <RelativeTime ms={e.at} /> },
+      { key: "at", header: auditStrings.colTime, sortable: true, sortDefaultDir: "desc", cell: (e) => <RelativeTime ms={e.at} /> },
     ],
     [],
   );
@@ -52,7 +53,7 @@ export function HistoryPanel({ targetId, title = strings.device.history }: { tar
         list={history}
         total={null}
         skeletonRows={3}
-        empty={<EmptyState compact title={strings.audit.historyNone} />}
+        empty={<EmptyState compact title={auditStrings.historyNone} />}
       />
     </Card>
   );

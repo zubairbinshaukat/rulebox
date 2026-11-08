@@ -61,11 +61,17 @@ import { useToast } from "../lib/toast";
 import { formatBytes, formatCount, shortHex } from "../lib/format";
 import { messageFor } from "../lib/errors";
 import { strings } from "../lib/strings";
+import { appEditStrings } from "../lib/screenStrings/appEdit";
+import { appsStrings } from "../lib/screenStrings/apps";
+import { devicesStrings } from "../lib/screenStrings/devices";
+import { groupStrings } from "../lib/screenStrings/group";
+import { installStrings } from "../lib/screenStrings/install";
+import { installStateStrings } from "../lib/screenStrings/installState";
 import { useForm } from "../lib/useForm";
 import { assignmentErrorMessage } from "./groups/errors";
 import * as v from "../lib/validate";
 
-const s = strings.appEdit;
+const s = appEditStrings;
 const HUES = [175, 150, 100, 60, 40, 20, 0, 330, 300, 260, 220, 200];
 const SOURCES: DesktopSource[] = ["winget", "msi", "exe", "portable", "preinstalled"];
 
@@ -188,7 +194,7 @@ export default function AppEdit() {
   return (
     <div className="dash-page">
       {detail.status !== "ready" ? (
-        <PageHeader title={detail.status === "loading" ? strings.app.loading : strings.apps.title} back={{ to: "/apps", label: s.back }} />
+        <PageHeader title={detail.status === "loading" ? strings.app.loading : appsStrings.title} back={{ to: "/apps", label: s.back }} />
       ) : null}
       <QueryRegion state={detail} skeleton={<div className="dash-card dash-card--pad"><SkeletonBlock lines={6} /></div>}>
         {(d) => <AppScreen key={`${d._id}:${kind ?? d.kind}`} d={d} kind={kind ?? d.kind} isNew={isNew} />}
@@ -215,9 +221,9 @@ function AppScreen({ d, kind, isNew }: { d: AppDetail; kind: AppKind; isNew: boo
         meta={
           !isNew ? (
             <>
-              <Pill tone="accent">{kind === "web" ? strings.apps.web : strings.apps.desktop}</Pill>
-              {d.desktop ? <Pill>{strings.apps.sources[d.desktop.source]}</Pill> : null}
-              {d.archived ? <Pill tone="warning">{strings.apps.archived}</Pill> : null}
+              <Pill tone="accent">{kind === "web" ? appsStrings.web : appsStrings.desktop}</Pill>
+              {d.desktop ? <Pill>{appsStrings.sources[d.desktop.source]}</Pill> : null}
+              {d.archived ? <Pill tone="warning">{appsStrings.archived}</Pill> : null}
             </>
           ) : undefined
         }
@@ -464,7 +470,7 @@ function AppForm({
                 <div style={{ overflowX: "auto", maxWidth: "100%" }}>
                   <SegmentedControl<DesktopSource>
                     aria-label={s.source}
-                    options={SOURCES.map((src) => ({ value: src, label: strings.apps.sources[src] }))}
+                    options={SOURCES.map((src) => ({ value: src, label: appsStrings.sources[src] }))}
                     value={x.source}
                     onChange={(src) => {
                       f.set("source", src);
@@ -637,7 +643,7 @@ function ResolvedSummary({ r }: { r: WingetResolved }) {
       </div>
       <div className="dash-kv__item">
         <dt>{s.kind}</dt>
-        <dd>{strings.apps.sources[r.install.kind]}</dd>
+        <dd>{appsStrings.sources[r.install.kind]}</dd>
       </div>
       <div className="dash-kv__item">
         <dt>{s.sha256}</dt>
@@ -745,9 +751,9 @@ function AssignmentsTable({ rows }: { rows: AssignmentItem[] }) {
               {a.groupName}
             </Link>
             <span className="dash-cell-sub" style={{ whiteSpace: "normal" }}>
-              {a.audience === "everyone" ? strings.group.audienceEveryone : strings.group.audienceSelected}
-              {a.pinnedTaskbar ? ` · ${strings.group.pinnedTaskbar}` : ""}
-              {a.pinnedDesktop ? ` · ${strings.group.pinnedDesktop}` : ""}
+              {a.audience === "everyone" ? groupStrings.audienceEveryone : groupStrings.audienceSelected}
+              {a.pinnedTaskbar ? ` · ${groupStrings.pinnedTaskbar}` : ""}
+              {a.pinnedDesktop ? ` · ${groupStrings.pinnedDesktop}` : ""}
             </span>
           </span>
         ),
@@ -858,18 +864,18 @@ function AssignToGroup({ d, onClose }: { d: AppDetail; onClose: () => void }) {
             </Select>
           )}
         </Field>
-        <Field label={strings.group.audience}>
+        <Field label={groupStrings.audience}>
           {(p) => (
             <Select {...p} value={f.values.audience} onChange={(e) => f.set("audience", e.target.value as Audience)}>
-              <option value="everyone">{strings.group.audienceEveryone}</option>
-              <option value="selected">{strings.group.audienceSelected}</option>
+              <option value="everyone">{groupStrings.audienceEveryone}</option>
+              <option value="selected">{groupStrings.audienceSelected}</option>
             </Select>
           )}
         </Field>
-        <FieldSet legend={strings.group.pins}>
+        <FieldSet legend={groupStrings.pins}>
           <div className="dash-checks dash-checks--inline">
-            <Checkbox label={strings.group.pinTaskbar} checked={f.values.pinnedTaskbar} onChange={(e) => f.set("pinnedTaskbar", e.target.checked)} />
-            <Checkbox label={strings.group.pinDesktop} checked={f.values.pinnedDesktop} onChange={(e) => f.set("pinnedDesktop", e.target.checked)} />
+            <Checkbox label={groupStrings.pinTaskbar} checked={f.values.pinnedTaskbar} onChange={(e) => f.set("pinnedTaskbar", e.target.checked)} />
+            <Checkbox label={groupStrings.pinDesktop} checked={f.values.pinnedDesktop} onChange={(e) => f.set("pinnedDesktop", e.target.checked)} />
           </div>
         </FieldSet>
         <FormError error={f.serverError} describe={assignmentErrorMessage} />
@@ -919,7 +925,7 @@ function InstallCard({ d, counts }: { d: AppDetail; counts: InstallCounts }) {
                 retry({ appId: d._id }).then(
                   () => {
                     setRetrying(false);
-                    toast(strings.install.retried);
+                    toast(installStrings.retried);
                   },
                   (e) => {
                     setRetrying(false);
@@ -928,7 +934,7 @@ function InstallCard({ d, counts }: { d: AppDetail; counts: InstallCounts }) {
                 );
               }}
             >
-              {strings.install.retry}
+              {installStrings.retry}
             </Button>
           </RoleGate>
         ) : undefined
@@ -941,7 +947,7 @@ function InstallCard({ d, counts }: { d: AppDetail; counts: InstallCounts }) {
           <div className="dash-row" style={{ padding: "12px clamp(16px, 2vw, 22px)" }} role="group" aria-label={s.installState}>
             {present.map((st) => (
               <button key={st} type="button" className="dash-state-btn" aria-pressed={state === st} onClick={() => setState(st)}>
-                {strings.installState[st]}
+                {installStateStrings[st]}
                 <span className="dash-state-btn__count">{formatCount(counts[st] ?? 0, 1000)}</span>
               </button>
             ))}
@@ -970,7 +976,7 @@ function InstallList({ appId, state }: { appId: string; state: InstallState }) {
     () => [
       {
         key: "device",
-        header: strings.devices.colName,
+        header: devicesStrings.colName,
         primary: true,
         cell: (r) => (
           <Link className="dash-link dash-link--plain dash-truncate" to={`/devices/${r.deviceId}`}>
@@ -987,7 +993,7 @@ function InstallList({ appId, state }: { appId: string; state: InstallState }) {
           r.state === "failed" ? (
             <span className="dash-muted" style={{ fontSize: 13 }}>
               {installDetail(r.detail)}
-              {r.exitCode !== undefined ? ` · ${strings.install.exitCode(r.exitCode)}` : ""}
+              {r.exitCode !== undefined ? ` · ${installStrings.exitCode(r.exitCode)}` : ""}
             </span>
           ) : (
             <span className="dash-muted">—</span>

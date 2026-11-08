@@ -5,7 +5,7 @@ import { messageFor, errorCodeOf, toAppError } from "../lib/errors";
 import { reportUnauthenticated } from "../lib/session";
 import { strings } from "../lib/strings";
 import { NOT_DEPLOYED } from "../data/api";
-import type { PagedState, QueryState } from "../data/types";
+import type { QueryState } from "../data/types";
 import { EmptyState } from "./EmptyState";
 
 /** The "this part didn't load" panel with Try again. */
@@ -88,19 +88,4 @@ export function QueryRegion<T>({
   if (state.status === "loading") return <>{skeleton}</>;
   if (state.status === "error") return <RegionError error={state.error} onRetry={state.retry} />;
   return <RegionBoundary>{children(state.data)}</RegionBoundary>;
-}
-
-/** Same for a paginated list. */
-export function PagedRegion<T>({
-  state,
-  skeleton,
-  children,
-}: {
-  state: PagedState<T>;
-  skeleton: ReactNode;
-  children: (ready: Extract<PagedState<T>, { status: "ready" }>) => ReactNode;
-}) {
-  if (state.status === "loading") return <>{skeleton}</>;
-  if (state.status === "error") return <RegionError error={state.error} onRetry={state.retry} />;
-  return <RegionBoundary>{children(state)}</RegionBoundary>;
 }

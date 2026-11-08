@@ -18,8 +18,9 @@ import "./stepup.css";
 /**
  * The confirm dialog (plan 4.16, dashboard flow 2): a call failed with
  * `step_up_required` or `step_up_setup_required`. Passkey first when one can
- * be used here, the action PIN always; without any factor, the first PIN is
- * set right here (it unlocks the session). Closing it cancels the call.
+ * be used here, the PIN always; without a PIN (only before Phase 4b data),
+ * the first PIN is set right here (it unlocks the session). Closing it
+ * cancels the call.
  */
 export default function StepUpDialog({
   error,
@@ -35,8 +36,7 @@ export default function StepUpDialog({
   const app = toAppError(error);
   const [reauth, setReauth] = useState(app?.code === "step_up_setup_required" && app.detail === "reauthenticate");
   const st = status.status === "ready" ? status.data : null;
-  const hasFactor = st ? st.actionPin.set || st.passkeys.length > 0 : true;
-  const setup = st !== null && !hasFactor;
+  const setup = st !== null && !st.pin.set;
 
   const title = reauth ? sec.reauthTitle : setup ? sec.noFactorTitle : sec.confirmTitle;
   const lead = reauth

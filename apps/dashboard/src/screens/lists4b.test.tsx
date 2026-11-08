@@ -7,6 +7,12 @@ import type { Me } from "../data/types";
 import { MeContext } from "../lib/member";
 import { VIEW_KEY } from "../lib/viewMode";
 import { strings } from "../lib/strings";
+import { appEditStrings } from "../lib/screenStrings/appEdit";
+import { appsStrings } from "../lib/screenStrings/apps";
+import { auditStrings } from "../lib/screenStrings/audit";
+import { fileTypesStrings } from "../lib/screenStrings/fileTypes";
+import { installStateStrings } from "../lib/screenStrings/installState";
+import { settingsStrings } from "../lib/screenStrings/settings";
 
 // Phase 4b, work package 3b: Apps, App (assignments, installs), Audit, File types, Enrollment, Settings > Members
 // and the history panel against the LIVE data seam with the Convex React hooks mocked. What is checked here is
@@ -74,7 +80,7 @@ const me: Me = {
   status: "active",
   orgId: "org",
   orgName: "Acme",
-  mfa: { enrolled: true, required: true, verified: true },
+  pin: { required: true, set: true },
   serverApiVersion: 1,
 };
 
@@ -143,12 +149,12 @@ describe("Apps: URL state, sort, search, pager", () => {
     cx.results["apps:list"] = page(apps(3));
     ui(<Apps />, "/apps?size=25&sort=name&dir=desc");
     expect(last("apps:list")).toEqual({ archived: false, paginationOpts: { numItems: 25, cursor: null }, sort: { key: "name", dir: "desc" } });
-    expect(header(strings.apps.colName).getAttribute("aria-sort")).toBe("descending");
+    expect(header(appsStrings.colName).getAttribute("aria-sort")).toBe("descending");
     cleanup();
     cx.requests = [];
     ui(<Apps />, "/apps?size=7&sort=bogus&dir=up&page=-3&archived=maybe");
     expect(last("apps:list")).toEqual({ archived: false, paginationOpts: { numItems: 10, cursor: null }, sort: { key: "created", dir: "desc" } });
-    expect(header(strings.apps.colAdded).getAttribute("aria-sort")).toBe("descending");
+    expect(header(appsStrings.colAdded).getAttribute("aria-sort")).toBe("descending");
   });
 
   it("clicking a sort header sends that sort to the server, toggles it, and starts over on page 1", () => {
@@ -158,14 +164,14 @@ describe("Apps: URL state, sort, search, pager", () => {
     expect(where()).toBe("/apps?page=2");
     expect(last("apps:list")).toMatchObject({ paginationOpts: { numItems: 10, cursor: "CUR1" } });
 
-    fireEvent.click(within(header(strings.apps.colName)).getByRole("button"));
+    fireEvent.click(within(header(appsStrings.colName)).getByRole("button"));
     expect(where()).toBe("/apps?sort=name&dir=asc");
     expect(last("apps:list")).toEqual({ archived: false, paginationOpts: { numItems: 10, cursor: null }, sort: { key: "name", dir: "asc" } });
-    expect(header(strings.apps.colName).getAttribute("aria-sort")).toBe("ascending");
-    fireEvent.click(within(header(strings.apps.colName)).getByRole("button"));
+    expect(header(appsStrings.colName).getAttribute("aria-sort")).toBe("ascending");
+    fireEvent.click(within(header(appsStrings.colName)).getByRole("button"));
     expect(last("apps:list")).toMatchObject({ sort: { key: "name", dir: "desc" } });
     // The date column's first click is "newest first" (sortDefaultDir).
-    fireEvent.click(within(header(strings.apps.colAdded)).getByRole("button"));
+    fireEvent.click(within(header(appsStrings.colAdded)).getByRole("button"));
     expect(where()).toBe("/apps");
     expect(last("apps:list")).toMatchObject({ sort: { key: "created", dir: "desc" } });
   });
@@ -174,14 +180,14 @@ describe("Apps: URL state, sort, search, pager", () => {
     cx.results["apps:list"] = page(apps(2));
     ui(<Apps />, "/apps");
     const before = cx.requests.filter((r) => r.name === "apps:list").length;
-    fireEvent.change(searchBox(strings.apps.searchLabel), { target: { value: "pos" } });
+    fireEvent.change(searchBox(appsStrings.searchLabel), { target: { value: "pos" } });
     expect(cx.requests.filter((r) => r.name === "apps:list").length).toBe(before);
-    fireEvent.submit(searchBox(strings.apps.searchLabel).closest("form")!);
+    fireEvent.submit(searchBox(appsStrings.searchLabel).closest("form")!);
     expect(where()).toBe("/apps?q=pos");
     // The index answers by relevance: no sort is sent, the headers are not sort buttons, the count takes the search.
     expect(last("apps:list")).toEqual({ archived: false, paginationOpts: { numItems: 10, cursor: null }, search: "pos" });
     expect(last("apps:count")).toEqual({ archived: false, search: "pos" });
-    expect(within(header(strings.apps.colName)).queryByRole("button")).toBeNull();
+    expect(within(header(appsStrings.colName)).queryByRole("button")).toBeNull();
     expect(screen.getByText(strings.table.byRelevance)).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: strings.common.clearSearch }));
     expect(where()).toBe("/apps");
@@ -192,7 +198,7 @@ describe("Apps: URL state, sort, search, pager", () => {
   it("a search restored from the URL shows in the box; no result says so", () => {
     cx.results["apps:list"] = page([]);
     ui(<Apps />, "/apps?q=zzz");
-    expect(searchBox(strings.apps.searchLabel).value).toBe("zzz");
+    expect(searchBox(appsStrings.searchLabel).value).toBe("zzz");
     expect(screen.getByText(strings.table.noResults("zzz"))).toBeTruthy();
   });
 
@@ -248,7 +254,7 @@ describe("Apps: URL state, sort, search, pager", () => {
     fireEvent.change(screen.getByLabelText(strings.pager.rowsPerPage), { target: { value: "50" } });
     expect(where()).toBe("/apps?sort=name&dir=asc&size=50");
     expect(last("apps:list")).toEqual({ archived: false, paginationOpts: { numItems: 50, cursor: null }, sort: { key: "name", dir: "asc" } });
-    fireEvent.click(screen.getByRole("radio", { name: strings.apps.archived }));
+    fireEvent.click(screen.getByRole("radio", { name: appsStrings.archived }));
     expect(where()).toContain("archived=1");
     expect(where()).not.toContain("page=");
   });
@@ -267,7 +273,7 @@ describe("Apps: URL state, sort, search, pager", () => {
     localStorage.setItem(VIEW_KEY, "cards");
     cx.results["apps:list"] = page(apps(2));
     ui(<Apps />, "/apps");
-    expect(screen.getByRole("table", { name: strings.apps.title }).className).toContain("dash-table--stack");
+    expect(screen.getByRole("table", { name: appsStrings.title }).className).toContain("dash-table--stack");
     const select = screen.getByLabelText(strings.table.sortSelect) as HTMLSelectElement;
     fireEvent.change(select, { target: { value: "name:desc" } });
     expect(where()).toBe("/apps?sort=name&dir=desc");
@@ -282,7 +288,7 @@ describe("Apps: URL state, sort, search, pager", () => {
     cleanup();
     cx.results["apps:list"] = page([]);
     ui(<Apps />, "/apps?archived=1");
-    expect(screen.getByText(strings.apps.emptyArchivedTitle)).toBeTruthy();
+    expect(screen.getByText(appsStrings.emptyArchivedTitle)).toBeTruthy();
   });
 });
 
@@ -298,10 +304,10 @@ describe("Audit: time sort, Previous / Next, no total", () => {
     fireEvent.click(screen.getByRole("button", { name: strings.pager.next }));
     expect(last("audit:list")).toMatchObject({ paginationOpts: { numItems: 10, cursor: "CUR1" } });
     expect(where()).toBe("/audit?page=2");
-    fireEvent.click(within(header(strings.audit.colTime)).getByRole("button"));
+    fireEvent.click(within(header(auditStrings.colTime)).getByRole("button"));
     expect(last("audit:list")).toEqual({ paginationOpts: { numItems: 10, cursor: null }, sort: { key: "at", dir: "asc" } });
     expect(where()).toBe("/audit?sort=at&dir=asc");
-    expect(header(strings.audit.colTime).getAttribute("aria-sort")).toBe("ascending");
+    expect(header(auditStrings.colTime).getAttribute("aria-sort")).toBe("ascending");
   });
 
   it("has no search box, and a refresh on page 3 falls back to page 1 (no cursors, no total)", async () => {
@@ -315,7 +321,7 @@ describe("Audit: time sort, Previous / Next, no total", () => {
   it("an empty log says so", () => {
     cx.results["audit:list"] = page([]);
     ui(<Audit />, "/audit");
-    expect(screen.getByText(strings.audit.emptyTitle)).toBeTruthy();
+    expect(screen.getByText(auditStrings.emptyTitle)).toBeTruthy();
   });
 });
 
@@ -332,7 +338,7 @@ describe("File types: a bounded table with offset cursors and an inline total", 
     await waitFor(() => expect(last("fileHandlers:page")).toMatchObject({ paginationOpts: { numItems: 10, cursor: "o:10" } }));
     expect(screen.getByText(`${strings.pager.records(14)} · ${strings.pager.pageOf(2, 2)}`)).toBeTruthy();
     expect(where()).toBe("/file-types?page=2");
-    fireEvent.click(within(header(strings.fileTypes.colApp)).getByRole("button"));
+    fireEvent.click(within(header(fileTypesStrings.colApp)).getByRole("button"));
     expect(last("fileHandlers:page")).toEqual({ paginationOpts: { numItems: 10, cursor: null }, sort: { key: "app", dir: "asc" } });
     expect(where()).toBe("/file-types?sort=app&dir=asc");
   });
@@ -347,7 +353,7 @@ describe("File types: a bounded table with offset cursors and an inline total", 
   it("Enter searches the server (contains on extension or program); the box offers no live search", () => {
     cx.results["fileHandlers:page"] = page(rules(1), { total: 1, continueCursor: "o:1" });
     ui(<FileTypes />, "/file-types");
-    enter(strings.fileTypes.searchLabel, "pdf");
+    enter(fileTypesStrings.searchLabel, "pdf");
     expect(last("fileHandlers:page")).toEqual({ paginationOpts: { numItems: 10, cursor: null }, sort: { key: "extension", dir: "asc" }, search: "pdf" });
     expect(where()).toBe("/file-types?q=pdf");
   });
@@ -369,7 +375,7 @@ describe("File types: a bounded table with offset cursors and an inline total", 
     cx.results["apps:options"] = [{ _id: "a9", name: "Reader", kind: "desktop", canOpenFiles: true }];
     ui(<FileTypes />, "/file-types");
     expect(cx.requests.some((r) => r.name === "apps:options")).toBe(false);
-    fireEvent.click(screen.getByRole("button", { name: strings.fileTypes.add }));
+    fireEvent.click(screen.getByRole("button", { name: fileTypesStrings.add }));
     expect(cx.requests.some((r) => r.name === "apps:options")).toBe(true);
     expect(screen.getByRole("option", { name: "Reader" })).toBeTruthy();
   });
@@ -421,7 +427,6 @@ describe("Settings > Members: two lists on one page", () => {
     role: "viewer",
     status: "active",
     createdAt: 1_000 * i,
-    mfaEnrolled: false,
     isYou: false,
     revision: 0,
     ...over,
@@ -443,10 +448,10 @@ describe("Settings > Members: two lists on one page", () => {
     expect(where()).toBe("/settings?tab=members&page=2");
 
     // Invites: a header click and a search use the prefixed names.
-    fireEvent.click(within(header(strings.settings.members.colExpires)).getByRole("button"));
+    fireEvent.click(within(header(settingsStrings.members.colExpires)).getByRole("button"));
     expect(last("members:invitesPage")).toMatchObject({ sort: { key: "expires", dir: "asc" } });
     expect(where()).toBe("/settings?tab=members&page=2&isort=expires&idir=asc");
-    enter(strings.settings.members.invitesSearchLabel, "invitee1");
+    enter(settingsStrings.members.invitesSearchLabel, "invitee1");
     expect(last("members:invitesPage")).toMatchObject({ search: "invitee1" });
     expect(where()).toContain("iq=invitee1");
     // Both totals are the exact ones the server reported.
@@ -458,20 +463,20 @@ describe("Settings > Members: two lists on one page", () => {
     cx.results["members:page"] = page([member(1)], { total: 1, continueCursor: "o:1" });
     cx.results["members:invitesPage"] = page([], { total: 0, continueCursor: "o:0" });
     ui(<MembersTab />, "/settings?tab=members&page=1");
-    fireEvent.click(within(header(strings.settings.members.colRole)).getByRole("button"));
+    fireEvent.click(within(header(settingsStrings.members.colRole)).getByRole("button"));
     expect(last("members:page")).toEqual({ paginationOpts: { numItems: 10, cursor: null }, sort: { key: "role", dir: "asc" } });
     expect(where()).toBe("/settings?tab=members&sort=role&dir=asc");
     // No pending invites: no invites card.
-    expect(screen.queryByText(strings.settings.members.pendingInvites)).toBeNull();
+    expect(screen.queryByText(settingsStrings.members.pendingInvites)).toBeNull();
   });
 
   it("Revoke on an invite row is a button of the row; the member actions stay buttons too", () => {
     cx.results["members:page"] = page([member(1)], { total: 1, continueCursor: "o:1" });
     cx.results["members:invitesPage"] = page([invite(1)], { total: 1, continueCursor: "o:1" });
     ui(<MembersTab />, "/settings?tab=members", "owner");
-    fireEvent.click(screen.getByRole("button", { name: `${strings.settings.members.revokeInvite}: invitee1@x.test` }));
+    fireEvent.click(screen.getByRole("button", { name: `${settingsStrings.members.revokeInvite}: invitee1@x.test` }));
     expect(screen.getByRole("dialog")).toBeTruthy();
-    expect(screen.getByRole("button", { name: `${strings.settings.members.changeRole}: user01@x.test` })).toBeTruthy();
+    expect(screen.getByRole("button", { name: `${settingsStrings.members.changeRole}: user01@x.test` })).toBeTruthy();
   });
 });
 
@@ -494,7 +499,7 @@ describe("HistoryPanel: a small list in a card", () => {
   it("an empty history says so", () => {
     cx.results["audit:forTarget"] = page([]);
     ui(<HistoryPanel targetId="d1" />, "/apps/a1");
-    expect(screen.getByText(strings.audit.historyNone)).toBeTruthy();
+    expect(screen.getByText(auditStrings.historyNone)).toBeTruthy();
   });
 });
 
@@ -527,7 +532,7 @@ describe("App page: install status and group assignments", () => {
   it("assignments are a table with a small pager once there are more than 10; the row opens the group", () => {
     cx.results["apps:get"] = { ...program, assignments: Array.from({ length: 12 }, (_, i) => assignment(i)) };
     ui(<AppEdit />, "/apps/a1");
-    const table = screen.getByRole("table", { name: strings.appEdit.assignments });
+    const table = screen.getByRole("table", { name: appEditStrings.assignments });
     expect(within(table).getAllByRole("row")).toHaveLength(11); // header + 10
     fireEvent.click(screen.getByRole("button", { name: strings.pager.goTo(2) }));
     expect(within(table).getAllByRole("row")).toHaveLength(3); // header + 2
@@ -541,7 +546,7 @@ describe("App page: install status and group assignments", () => {
   it("a few assignments show no pager", () => {
     cx.results["apps:get"] = { ...program, assignments: [assignment(1), assignment(2)] };
     ui(<AppEdit />, "/apps/a1");
-    const table = screen.getByRole("table", { name: strings.appEdit.assignments });
+    const table = screen.getByRole("table", { name: appEditStrings.assignments });
     expect(within(table).getAllByRole("row")).toHaveLength(3);
     expect(screen.queryByRole("button", { name: strings.pager.goTo(2) })).toBeNull();
   });
@@ -555,10 +560,10 @@ describe("App page: install status and group assignments", () => {
     expect(last("apps:installs")).toEqual({ appId: "a1", state: "installed", paginationOpts: { numItems: 10, cursor: null }, sort: { key: "updated", dir: "desc" } });
     fireEvent.click(screen.getByRole("button", { name: strings.pager.next }));
     expect(last("apps:installs")).toMatchObject({ paginationOpts: { numItems: 10, cursor: "CUR1" } });
-    fireEvent.click(within(header(strings.appEdit.colUpdated)).getByRole("button"));
+    fireEvent.click(within(header(appEditStrings.colUpdated)).getByRole("button"));
     expect(last("apps:installs")).toMatchObject({ paginationOpts: { numItems: 10, cursor: null }, sort: { key: "updated", dir: "asc" } });
     fireEvent.click(screen.getByRole("button", { name: strings.pager.next }));
-    fireEvent.click(screen.getByRole("button", { name: new RegExp(`${strings.installState.failed}\\s*3$`) }));
+    fireEvent.click(screen.getByRole("button", { name: new RegExp(`${installStateStrings.failed}\\s*3$`) }));
     expect(last("apps:installs")).toMatchObject({ state: "failed", paginationOpts: { numItems: 10, cursor: null } });
     // The URL is not touched by a list inside a card.
     expect(where()).toBe("/apps/a1");

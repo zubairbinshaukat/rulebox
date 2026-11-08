@@ -7,7 +7,7 @@ satisfy the same `DataApi` type (`api.ts`):
   `VITE_DEMO=1` (`pnpm --filter @rulebox/dashboard dev:demo`, `build:demo`,
   `preview:demo`). Reactive like Convex, with simulated latency, connection
   loss (writes queue), failing queries and stale edits (top-bar demo controls).
-- `live/hooks.ts` — the real backend. Session, sign-in, MFA, account and
+- `live/hooks.ts` — the real backend. Session, sign-in, account and
   members are live (Step 4, against the Step 3 functions); settings, the plan
   and groups since Step 5; enrollment codes since Step 6, the device
   lists since Step 7, the app lists since Step 10 and the employee list since Step 11 (each in its own
@@ -32,26 +32,15 @@ Replace the hook body in `live/hooks.ts`; screens do not change.
   `unauthenticated` also fires `reportUnauthenticated()` (`lib/session.ts`):
   `useSessionGuard` sends the person to `/sign-in?next=…&expired=1`.
   `account:me` (public) stays a plain `useQuery`.
-- **Paginated** (`PagedState<T>`): `usePagedState(usePaginatedQuery(api.x.y, isAuthenticated ? args : "skip", { initialNumItems: 50 }), 50)`
-  (`live/convex.ts`) → `items = results`, `canLoadMore = status === "CanLoadMore" || status === "LoadingMore"`,
-  `isLoadingMore = status === "LoadingMore"`, `loadMore = () => loadMore(50)`,
-  `"LoadingFirstPage"` → `{ status: "loading" }` (or the previous rows while new
-  arguments load). Two rules: `usePaginatedQuery` **throws** query errors during
-  render, so the screen renders the list inside a `RegionBoundary`; and it is
-  ~1 KB gzip that must stay out of the first load: put the hooks in a seam of
-  their own that only the lazy screen imports (as `enrollment/`), never in
-  `live/hooks.ts` (`vite.config.ts` keeps `use_paginated_query` out of
-  `vendor-convex`). A changed argument restarts at page 1, so a screen whose
-  argument moves (Enrollment's `nowMs` minute) stops moving it once more
-  pages are loaded.
+- **Paginated** (`ServerList<T>`, Phase 4b): `useServerPage(api.x.page, args, identity)` (`live/serverList.ts`): a plain query with `paginationOpts` that subscribes to ONE page, with the cursor stack in the screen (`useCursorPager`); never `usePaginatedQuery`, which accumulates pages. `useServerCount` reads the `<table>:count` total. Sorting, search and filters are arguments of the query. The hooks live in a seam of their own that only the lazy screen imports (`apps/`, `audit/`, `enrollment/`, `members/`, `devices/`, `employees/`).
 - **Mutation / action**: `useMapped(useMutation(api.x.y))` /
   `useMapped(useAction(api.x.y))`: a thrown `ConvexError` with a known code
   becomes an `AppError` (`toAppError`, `lib/errors.ts`); anything else is
   passed on and shown only as the generic sentence. Toggles add
   `.withOptimisticUpdate(...)` (archive, pins; not the device kiosk switch).
 - **Actions resolve before the queries update.** When the screen must wait
-  for the result to show (for example `mfa:verify` → `verified`), wait for the
-  query, not the promise (see `screens/Mfa.tsx`).
+  for the result to show (for example `stepUp:verifyActionPin` → the unlock), wait
+  for the query, not the promise (the controller does: `lib/stepup/controller.ts`).
 
 ## Hook → Convex function
 
@@ -64,24 +53,21 @@ Status: **live** = wired in `live/hooks.ts` (or in the hook's own seam).
 | `useAuthActions` | `useAuthActions()` from `@convex-dev/auth/react`: `signIn("password", { flow: "signIn", email, password })`, sign-up `signIn("password", { flow: "signUp", inviteCode, email, password })`, `signOut()`. A wrong email or password is a plain error without a code (shown as "Email or password is not right."); coded: `rate_limited`, `invite_invalid`, `invalid_argument {field:"password"}`, `account_disabled` | live |
 | `useRedeemReset` | `useAction(api.account.redeemReset)` → `null` | live |
 | `useConnectionState` | `useConvexConnectionState()` | live |
-| `useMfaStatus` | `api.mfa.status` (query) | live |
-| `useBeginMfaSetup` / `useConfirmMfaSetup` | `useAction(api.mfa.beginSetup)` → `{ secret, uri }` / `useAction(api.mfa.confirmSetup)` → `string[]` (recovery codes, once) | live |
-| `useVerifyMfa` / `useRedeemRecoveryCode` | `useAction(api.mfa.verify)` / `useAction(api.mfa.useRecoveryCode)` (**actions**, so the lockout counter commits) | live |
 | `useOverview` | `api.overview.get` (no arguments: the `orgStats` counters, the sum of the `orgPresence` shards as `onlineCount`, the plan, the key state, `publishFailedAt` and the newest 10 audit rows; about 25 documents; re-runs on counter, presence and audit changes, never on a ping) | live |
-| `useFailedInstalls(enabled)` | `api.overview.failedInstalls` (the newest 20 failed results with PC and app names). Subscribed only while `enabled`, that is while `failedInstallCount` is above zero; disabled it answers an empty list without a subscription | live |
-| `useDevicesScreen({ groupId, search })` | `usePaginatedQuery(api.fleet.list, { groupId?, search? })` (50 per page; search is an argument of the same query, at most 100 characters; `groupId` must be a real group id, there is no "no group" filter). `presence` (`{ online, since, revoked }`) is on every `DeviceRow`, so there is no separate live-status query. In `data/devices/` | live |
+| `useFailedInstallsPage({ enabled, ...query })` | `useServerPage(api.overview.failedInstallsPage, …)` (one page of failed results with PC and app names; sort key `updated` only; the total is `overview:get`'s `failedInstallCount`). Subscribed only while `enabled`, that is while `failedInstallCount` is above zero; disabled it answers an empty list without a subscription | live |
+| `useDevicesScreen(query)` / `useDevicesCount(filter)` | `useServerPage(api.fleet.list, …)` / `useServerCount(api.fleet.count, …)` (one page per subscription; sort, search at most 100 characters and the group filter are arguments; `groupId` must be a real group id or the "no group" sentinel). `presence` (`{ online, since, revoked }`) is on every `DeviceRow`, so there is no separate live-status query. In `data/devices/` | live |
 | `useDeviceDetail` | `api.fleet.get` (`DeviceDetail` has `presence` too) | live |
 | `useDeviceLiveness(id)` | `api.fleet.liveness({ deviceId })` → `{ lastContactAt, online, fastUntil }`; the detail screen calls it next to `useDeviceDetail`, not inside the loaded page | live |
 | `useWatchDevice` | `useMapped(useMutation(api.fleet.watch))` → `{ fastUntil }` (on open, then every 4 minutes while visible) | live |
 | `useCheckNow` / `useCheckResult(checkId)` | `api.fleet.checkNow({ deviceIds })` (admin, first 50 shown, 1 per minute) → `{ checkId }` / `api.fleet.checkResult({ checkId })` (subscribed for 60 s) | live |
-| `useDeviceInstalls` | `usePaginatedQuery(api.fleet.installs, { deviceId })` (in `data/devices/`) | live |
+| `useDeviceInstalls` | `useServerPage(api.fleet.installs, { deviceId })` (in `data/devices/`) | live |
 | `useRenameDevice` / `useMoveDevice` / `useSetKiosk` / `useRevokeDevice` / `useRemoveDevice` / `useRequestRotation` | `api.fleet.rename` / `move` / `setKiosk` / `revoke` / `remove` / `requestCredentialRotation`. `rename`, `move` and `setKiosk` take `expectedRevision` (`stale_edit` when the PC changed); `setKiosk` is not optimistic (turning it off is a major action with a fresh step-up) | live |
 | `useGroupsScreen` | `api.groups.list` (`{ count, more }` per count → one number capped at 501, "500+") | live |
 | `useGroupDetail` | `api.groups.get` → `{ group, apps }` mapped to `GroupDetail` (assignment `_id` = the `appAssignments` id) | live |
 | `useCreateGroup` / `useUpdateGroup` / `useDeleteGroup` | `api.groups.create` → id (`plan_limit` detail "groups", `conflict` field "name") / `rename` (`expectedRevision`; description undefined = unchanged, "" = cleared) → `{ revision }` / `remove` (major; `has_dependents` detail lists what to move first) | live |
 | `useAssignApp` / `useUpdateAssignment` / `useUnassignApp` | `api.groups.assignApp` (`conflict` field `app`, `too_large` detail `group apps`, `invalid_argument` field `app` for an archived app) / `updateAssignment` (optimistic on `groups:get`; nothing changed = no write) / `unassignApp`; each republishes the group | live |
 | `useAddGroupEmployee` / `useRemoveGroupEmployee` | `api.groups.addEmployee` / `removeEmployee` (already a member / not a member = no write; each appends one signed roster entry for the group, and republishes it only when the employee has direct apps; `too_large` detail `employee groups` / `group employees`) | live |
-| `useEmployeesScreen({ groupId, search })` | `usePaginatedQuery(api.employees.list, { groupId? })` (50 per page, newest first, each row with its first 5 groups) while the search box is empty, `api.employees.search({ text, groupId? })` (best 50, `searchCapped`) while it has text; text that is blank after trimming subscribes to nothing. In `data/employees/` | live |
+| `useEmployeesScreen(query)` / `useEmployeesCount(filter)` | `useServerPage(api.employees.list, …)` / `useServerCount(api.employees.count, …)` (one page per subscription, each row with its first 5 groups; sort, search and the group filter are arguments). `useEmployeePicker(text)` is `api.employees.search({ text })` (best 50, `capped`); blank text subscribes to nothing. In `data/employees/` | live |
 | `useEmployeeDetail(id \| "new")` | `api.employees.get` (never a hash: `passwordSet` comes from `passwordSetAt`; the lockout row is shown only while `lockedUntil` is in the future) / `api.employees.options` for "new" (the pickers + `defaultQuotaGb`) | live |
 | `useCreateEmployee` | `useAction(api.employees.create)` → id (an action: the optional first password is hashed on the server; `conflict` field `username`, `invalid_argument` field `name` / `username` / `quotaGb` / `password` with detail `length` or `username`, `plan_limit` detail `employees`, `not_ready` detail `signing key`, `rate_limited`) | live |
 | `useUpdateEmployee` | `api.employees.save`: profile, groups and direct apps in one transaction with one revision check (all stored or none; a part that changes nothing writes nothing). Resolves to `{ revision }`, which the form sends next | live |
@@ -105,7 +91,7 @@ Status: **live** = wired in `live/hooks.ts` (or in the hook's own seam).
 | `usePublishAgain` | `api.keys.registerActive` without `force` (Owner, major): with the active key in the deployment it registers nothing and publishes every PC again; the failure signal is `publishFailedAt` (`overview:get` / `keys:status`, which also carry `rosterPending`). The global banner (`app/PublishBanner.tsx`) and the Signing tab use it through `lib/publish.ts`. `not_ready` = no key on the deployment, `conflict` = another key | live |
 | `useMembersPage(query)` / `useInvitesPage(nowMinute, query)` | `members:page` / `members:invitesPage` (bounded: offset cursors, exact `total` in the page; members sort email / role / status / created, invites created / email / expires; contains-search on the email). In `data/members/` | live |
 | `useInviteMember` / `useCreateResetCode` | `useAction(api.members.invite)` / `useAction(api.members.createResetCode)` → `{ code, expiresAt }` (code shown once, kept in component state only) | live |
-| `useRevokeInvite` / `useResetMemberMfa` | `useMutation(api.members.revokeInvite)` / `useMutation(api.members.resetMfa)` | live |
+| `useRevokeInvite` | `useMutation(api.members.revokeInvite)` | live |
 | `useChangeRole` / `useSetMemberDisabled` | `useMutation(api.members.changeRole)` / `useMutation(api.members.setDisabled)`, both with `expectedRevision` (`stale_edit` when the member changed) | live |
 
 ## Enrollment-code hooks (`data/enrollment/`, plan Step 6)
@@ -113,12 +99,12 @@ Status: **live** = wired in `live/hooks.ts` (or in the hook's own seam).
 Same pattern as the step-up seam below (`EnrollmentApi` in `enrollment/api.ts`,
 `enrollment/live.ts`, demo hooks in `demo/hooks.ts` re-exported by
 `enrollment/demo.ts`, picked by the `@rulebox/enrollment-impl` alias). Only
-`screens/Enrollment.tsx` imports it, so `usePaginatedQuery` never reaches
+`screens/Enrollment.tsx` imports it, so the paging code never reaches
 sign-in.
 
 | Hook | Convex | Status |
 |---|---|---|
-| `useEnrollmentScreen(nowMinute)` | `usePaginatedQuery(api.enrollmentCodes.list, { nowMs })` (50 per page; `nowMs` = the minute) | live |
+| `useEnrollmentScreen(nowMinute, query)` | `useServerPage(api.enrollmentCodes.list, { nowMs, … })` (one page per subscription; `nowMs` = the minute) | live |
 | `useCreateEnrollmentCode` | `useAction(api.enrollmentCodes.create)` → `{ code, expiresAt }` (code shown once, kept in component state only; `plan_limit` detail `enrollmentCodes` / `suspended`, `invalid_argument` field `uses` / `ttlMinutes` / `label`, `not_found` group, `not_ready` URL) | live |
 | `useRevokeEnrollmentCode` | `useMutation(api.enrollmentCodes.revoke)` (major: fresh step-up) | live |
 
@@ -127,8 +113,8 @@ sign-in.
 The same pattern a third time: `DevicesApi` in `devices/api.ts`, `devices/live.ts`,
 demo hooks in `demo/hooks.ts` re-exported by `devices/demo.ts`, picked by the
 `@rulebox/devices-impl` alias (`vite.config.ts` and the `paths` entry in
-`tsconfig.json`). It holds the two `usePaginatedQuery` hooks, `useDevicesScreen`
-and `useDeviceInstalls`, so it is imported only by the lazy Devices, Device
+`tsconfig.json`). It holds the paginated hooks, `useDevicesScreen`
+and `useDeviceInstalls` (and the count), so it is imported only by the lazy Devices, Device
 detail and Group detail screens and stays out of the `core` chunk. Every other device hook
 (`useDeviceDetail`, `useDeviceLiveness`, `useWatchDevice`, `useCheckNow`,
 `useCheckResult`, the writes) is in `DataApi` / `live/hooks.ts`.
@@ -162,32 +148,39 @@ Everything else about employees is in `DataApi` / `live/hooks.ts` (`live/employe
 A second, smaller seam with the same rules (`StepUpApi` in `stepup/api.ts`,
 `stepup/live.ts` and `stepup/demo.ts`, picked by the `@rulebox/stepup-impl`
 alias). It is kept out of `DataApi` and out of the `core` chunk so the sign-in
-page never downloads it: only the signed-in shell (`stepup/StepUpProvider.tsx`)
-and Settings → Security import `data/stepup`.
+page never downloads it: only the signed-in shell (`stepup/StepUpProvider.tsx`),
+Settings → Security and the `/pin-reset` page import `data/stepup`.
 
-Writes that may need a confirmation go through `useStepUpAction(hook())`
-(`src/stepup/context.ts`): on `step_up_required` / `step_up_setup_required`
-the confirm dialog opens and the call is retried once; cancelled, the original
-error is thrown. Every member write needs an unlocked session on the server,
-so wrap each new mutation hook a screen uses this way (Members tab: all six).
+Writes that may need a confirmation go through `withStepUp`
+(`src/lib/stepUpRetry.ts`), which the seam applies itself (`useMapped` /
+`runMutation` in `live/convex.ts`, `runMutation` in `demo/store.ts`): on
+`step_up_required` / `step_up_setup_required` the confirm dialog opens and the
+call is retried once; cancelled, the original error is thrown. Every member
+write needs an unlocked session on the server, so build each new mutation hook
+on those helpers and a screen needs nothing extra.
 The demo store applies the same rule (`runMutation(role, fn, "unlocked" |
-"fresh" | "none")`); the demo Owner's action PIN is `482915`.
+"fresh" | "none")`); the demo Owner's PIN is `482915` (recovery code `7KQ2-M9XD`), the
+other demo members have none and set one after signing in. The demo "email" for Forgot PIN
+is the fixed link `/pin-reset#token=demo-pin-reset-token`.
 
 | Hook | Convex | Status |
 |---|---|---|
 | `useStepUpStatus` | `api.stepUp.status` (any role; server timestamps, never a hash or credential id) | live |
 | `useVerifyActionPin` | `useAction(api.stepUp.verifyActionPin)` → `{ verifiedAt, freshUntil, serverNow }` | live |
-| `useSetActionPin` / `useClearActionPin` | `useAction(api.stepUp.setActionPin)` (bootstrap or fresh) / `useMutation(api.stepUp.clearActionPin)` (major) | live |
+| `useSetActionPin` | `useAction(api.stepUp.setActionPin)` (the first PIN right after a password sign-in, or a change after a fresh step-up) | live |
+| `useGenerateRecoveryCodes` | `useAction(api.stepUp.generateRecoveryCodes)` → 10 codes, once (major; the bootstrap counts as fresh) | live |
 | `useBeginPasskeyVerification` / `useFinishPasskeyVerification` | `useAction(api.passkeys.beginVerification)` → `{ optionsJson, expiresAt }` / `finishVerification({ responseJson })`; the ceremony runs in `lib/stepup/passkey.ts` (`@simplewebauthn/browser`, loaded on first use) | live |
 | `useBeginPasskeyRegistration` / `useFinishPasskeyRegistration` | `useAction(api.passkeys.beginRegistration)` / `finishRegistration({ responseJson, name })` | live |
 | `useRenamePasskey` / `useRemovePasskey` | `useMutation(api.stepUp.renamePasskey)` / `removePasskey` (major) | live |
 | `useKeepAlive` / `useLockSession` | `useMutation(api.stepUp.keepAlive)` (at most every `policy.keepAliveMs`, only on input) / `api.stepUp.lock` | live |
 | `useResetMemberStepUp` | `useMutation(api.stepUp.resetMember)` (Owner, major) | live |
-| `useResetStepUpWithRecoveryCode` | `useAction(api.stepUp.resetWithRecoveryCode)` | live |
+| `useResetStepUpWithRecoveryCode` | `useAction(api.stepUp.resetWithRecoveryCode)` with `{ code, newPin }` (password sign-in under 15 minutes old) | live |
+| `useRequestPinReset` | `useAction(api.account.requestPinReset)`: no arguments, session-bound, always `{ ok }` | live |
+| `useRedeemPinReset` | `useAction(api.account.redeemPinReset)` with `{ token, newPin }` (the `/pin-reset#token=` token; every token problem is `step_up_invalid`) | live |
+| `useChangePassword` | `useAction(api.account.changePassword)` with `{ currentPassword, newPassword }` (major: fresh step-up) | live |
 
 Shapes the plan does not pin down and the backend must match (or the types
 change):
 `AppDetail.groupOptions`, `DeviceRow` without `deviceStatus`.
 (`EmployeeDetail.groupOptions/appOptions/defaultQuotaGb` now match `employees:get`.)
-(`MfaStatus` and `MembersScreen` now match Step 3's functions; `account:me`
-also returns `memberships`, unused until v2.)
+(`account:me` also returns `memberships`, unused until v2.)

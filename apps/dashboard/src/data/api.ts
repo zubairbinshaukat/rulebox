@@ -20,8 +20,6 @@ import type {
   InstallCounts,
   KeysScreen,
   MeResult,
-  MfaSetup,
-  MfaStatus,
   OrgSettings,
   OverviewScreen,
   PlanScreen,
@@ -54,13 +52,6 @@ export interface DataApi {
   };
   useRedeemReset: Mutation<{ email: string; code: string; newPassword: string }>;
   useConnectionState: () => { isWebSocketConnected: boolean };
-
-  // ---- MFA (mfa:*)
-  useMfaStatus: () => QueryState<MfaStatus>;
-  useBeginMfaSetup: Mutation<void, MfaSetup>;
-  useConfirmMfaSetup: Mutation<{ code: string }, string[]>;
-  useVerifyMfa: Mutation<{ code: string }>;
-  useRedeemRecoveryCode: Mutation<{ code: string }>;
 
   // ---- overview. `overview:get` has no arguments: it re-runs on counter, presence and audit
   // changes only, never on a ping.
@@ -172,5 +163,4 @@ export interface DataApi {
   useChangeRole: Mutation<{ memberId: Id; role: Role; expectedRevision: number }>;
   useSetMemberDisabled: Mutation<{ memberId: Id; disabled: boolean; expectedRevision: number }>;
   useCreateResetCode: Mutation<{ memberId: Id }, { code: string; expiresAt: number }>;
-  useResetMemberMfa: Mutation<{ memberId: Id }>;
 }

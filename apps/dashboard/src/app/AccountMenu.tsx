@@ -98,7 +98,7 @@ export function AccountMenu() {
               icon={<IconShield />}
               onSelect={() => {
                 setOpen(false);
-                navigate("/mfa");
+                navigate("/settings?tab=security");
               }}
             >
               {strings.app.security}

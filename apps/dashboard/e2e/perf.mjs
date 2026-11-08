@@ -138,10 +138,10 @@ async function demoSession() {
   await page.getByLabel("Email").fill("owner@demo.rulebox.test");
   await page.getByLabel("Password", { exact: true }).fill("rulebox-demo-1");
   await page.getByRole("button", { name: "Sign in" }).click();
-  await page.waitForURL(/\/mfa/);
-  await page.getByLabel("6-digit code").fill("123456");
-  await page.getByRole("button", { name: "Verify" }).click();
-  await page.waitForURL((u) => !u.pathname.startsWith("/mfa"));
+  // The PIN screen (every page load asks for the PIN, Phase 4b).
+  await page.getByLabel("PIN", { exact: true }).fill("482915");
+  await page.getByRole("button", { name: "Unlock" }).click();
+  await page.getByRole("heading", { name: "Enter your PIN" }).waitFor({ state: "detached" });
   const value = await page.evaluate(() => sessionStorage.getItem("rulebox.demo.session"));
   await ctx.close();
   return value;
@@ -158,7 +158,8 @@ async function measure(route) {
     reducedMotion: "no-preference",
   });
   if (session) {
-    // The seeded demo Owner, already past MFA (src/data/demo/store.ts keeps it in session storage).
+    // The signed-in demo Owner (src/data/demo/store.ts keeps it in session storage). Every load of a member
+    // route still starts at the PIN screen (Phase 4b), so those routes measure the PIN screen.
     await ctx.addInitScript((s) => sessionStorage.setItem("rulebox.demo.session", s), session);
   }
   await ctx.addInitScript(() => {

@@ -11,6 +11,11 @@ import "./styles/dashboard.css";
 import { AppErrorBoundary } from "./app/AppErrorBoundary";
 import { IS_DEMO } from "./data";
 import { App } from "./App";
+import { resolveConvexUrl } from "./lib/convexUrl";
+import { captureResetToken } from "./lib/pinResetLink";
+
+// The forgot-PIN link carries its token in the URL fragment: first of all, take it out of the address bar.
+if (window.location.pathname.replace(/\/+$/, "") === "/pin-reset") captureResetToken();
 
 const root = createRoot(document.getElementById("root")!);
 
@@ -26,19 +31,22 @@ if (IS_DEMO) {
   // Demo mode: in-memory fixtures, no backend (see src/data/README.md).
   root.render(shell(<App />));
 } else {
-  const url = import.meta.env.VITE_CONVEX_URL as string | undefined;
-  if (!url) {
-    root.render(
-      <main style={{ padding: 32, maxWidth: 560 }}>
-        <h1 style={{ fontSize: 20, fontWeight: 500 }}>Missing VITE_CONVEX_URL</h1>
-        <p>
-          Copy <code>.env.example</code> to <code>.env.local</code> in <code>apps/dashboard</code> and set{" "}
-          <code>VITE_CONVEX_URL</code> to your Convex deployment URL, then restart the dev server. To look around
-          without a backend, run <code>pnpm --filter @rulebox/dashboard dev:demo</code>.
-        </p>
-      </main>,
-    );
-  } else {
+  // `/config.json` first (one build, any backend), else the build's `VITE_CONVEX_URL` (lib/convexUrl.ts).
+  void resolveConvexUrl(import.meta.env.VITE_CONVEX_URL as string | undefined).then((url) => {
+    if (!url) {
+      root.render(
+        <main style={{ padding: 32, maxWidth: 560 }}>
+          <h1 style={{ fontSize: 20, fontWeight: 500 }}>Missing Convex URL</h1>
+          <p>
+            Put <code>{'{ "convexUrl": "https://..." }'}</code> in <code>/config.json</code> next to the page, or copy{" "}
+            <code>.env.example</code> to <code>.env.local</code> in <code>apps/dashboard</code> and set{" "}
+            <code>VITE_CONVEX_URL</code> to your Convex deployment URL, then restart the dev server. To look around
+            without a backend, run <code>pnpm --filter @rulebox/dashboard dev:demo</code>.
+          </p>
+        </main>,
+      );
+      return;
+    }
     const convex = new ConvexReactClient(url);
     root.render(
       shell(
@@ -50,5 +58,5 @@ if (IS_DEMO) {
         </ConvexAuthProvider>,
       ),
     );
-  }
+  });
 }

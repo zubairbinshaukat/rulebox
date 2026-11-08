@@ -12,7 +12,7 @@ import { errorCodeOf } from "../../lib/errors";
 function signInAs(email: string) {
   const m = db().members.find((x) => x.email === email)!;
   const now = Date.now();
-  setSession({ memberId: m._id, mfaVerified: true, createdAt: now, stepUp: { verifiedAt: now, lastActiveAt: now, method: "actionPin" } });
+  setSession({ memberId: m._id, createdAt: now, stepUp: { verifiedAt: now, lastActiveAt: now, method: "actionPin" } });
 }
 function fresh() {
   resetDemo();

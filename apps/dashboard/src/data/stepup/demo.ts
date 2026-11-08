@@ -2,7 +2,10 @@
  * Demo step-up hooks (`VITE_DEMO=1`): the rules of `convex/stepUp.ts` and
  * `convex/passkeys.ts` against the in-memory store, so every screen state can
  * be tried without a backend. The demo Owner's action PIN is
- * `DEMO_ACTION_PIN`.
+ * `DEMO_ACTION_PIN`; the other demo members have none and set one right after
+ * signing in. "Forgot PIN" sends no email: the link
+ * `/pin-reset#token=DEMO_PIN_RESET_TOKEN` always works for a signed-in member
+ * whose password sign-in is under 15 minutes old.
  *
  * Passkeys use the browser's real WebAuthn prompt (relying party = this
  * host), but the demo "server" only checks the challenge and the credential
@@ -12,15 +15,19 @@ import { useCallback } from "react";
 import type { StepUpStatus } from "../types";
 import { actionPinProblem } from "../../lib/stepup/pin";
 import { withStepUp } from "../../lib/stepUpRetry";
+import * as validate from "../../lib/validate";
+import { DEMO_PIN_RESET_TOKEN } from "../fixtures/seed";
 import {
   STEP_UP,
   authorizeFactorChange,
   clearSessionStepUp,
   currentMember,
+  db as getDb,
   factorsFor,
   factorsOf,
   fail,
   hasFactor,
+  hasPin,
   latency,
   markVerified,
   newId,
@@ -89,13 +96,47 @@ function consume(purpose: "register" | "verify", responseJson: string): { id: st
   return { id: parsed.id };
 }
 
-function clearAllFactors(memberId: string) {
+type Counters = { pinFailures: number; pinLockedUntil: number; pinLockKind: "backoff" | "lockout" | null };
+
+function clearPinCounters(f: Counters) {
+  f.pinFailures = 0;
+  f.pinLockedUntil = 0;
+  f.pinLockKind = null;
+}
+
+/** A new PIN: stored, with its counters and any lockout cleared (`storePinHash`). */
+function storePin(memberId: string, pin: string) {
+  const f = factorsFor(memberId);
+  f.pin = pin;
+  clearPinCounters(f);
+}
+
+/** Removes the PIN, its counters and every passkey; the unused recovery codes stay (`keepRecovery` replaces them). */
+function clearAllFactors(memberId: string, keepRecovery?: string[]) {
   const f = factorsFor(memberId);
   f.pin = undefined;
-  f.pinFailures = 0;
-  f.pinFailuresTotal = 0;
-  f.pinLockedUntil = 0;
+  clearPinCounters(f);
   f.passkeys = [];
+  if (keepRecovery) f.recoveryCodes = keepRecovery;
+}
+
+const CROCKFORD = "0123456789ABCDEFGHJKMNPQRSTVWXYZ";
+
+function newRecoveryCodes(): string[] {
+  const bytes = new Uint8Array(80);
+  crypto.getRandomValues(bytes);
+  return Array.from({ length: 10 }, (_, i) => {
+    let s = "";
+    for (let j = 0; j < 8; j++) s += CROCKFORD[bytes[i * 8 + j]! % 32];
+    return `${s.slice(0, 4)}-${s.slice(4)}`;
+  });
+}
+
+/** Both the recovery reset and the emailed link need a password sign-in under 15 minutes old. */
+function requireFreshSignIn() {
+  const s = session();
+  if (!s || Date.now() - (s.createdAt ?? 0) > STEP_UP.bootstrapMs) fail("step_up_setup_required", { detail: "reauthenticate" });
+  return s;
 }
 
 const verified = (now: number) => ({ verifiedAt: now, freshUntil: now + STEP_UP.freshMs, serverNow: now });
@@ -108,12 +149,17 @@ export const demoStepUpApi: StepUpApi = {
       const s = session();
       const pinSet = f?.pin !== undefined;
       const now = Date.now();
+      const locked = pinSet && f.pinLockedUntil > now;
+      const longLockout = locked && f.pinLockKind === "lockout";
       return {
-        actionPin: {
+        pin: {
           set: pinSet,
-          lockedUntil: pinSet && f.pinLockedUntil > now ? f.pinLockedUntil : null,
-          disabled: pinSet && f.pinFailuresTotal >= STEP_UP.pinHardLimit,
-          attemptsBeforeDisable: pinSet ? Math.max(0, STEP_UP.pinHardLimit - f.pinFailuresTotal) : STEP_UP.pinHardLimit,
+          lockedUntil: locked ? f.pinLockedUntil : null,
+          lockKind: locked ? f.pinLockKind : null,
+          failedSinceUnlock: pinSet ? f.pinFailures : 0,
+          attemptsBeforeLockout: pinSet && !longLockout ? Math.max(0, STEP_UP.pinHardLimit - f.pinFailures) : STEP_UP.pinHardLimit,
+          recoveryCodesLeft: f?.recoveryCodes.length ?? 0,
+          resetByEmail: true,
         },
         passkeys: (f?.passkeys ?? []).map((k) => ({
           _id: k._id,
@@ -129,7 +175,7 @@ export const demoStepUpApi: StepUpApi = {
           lastActiveAt: s?.stepUp?.lastActiveAt ?? null,
           method: s?.stepUp?.method ?? null,
         },
-        bootstrapUntil: hasFactor(m._id) ? null : (s?.createdAt ?? 0) + STEP_UP.bootstrapMs,
+        bootstrapUntil: pinSet ? null : (s?.createdAt ?? 0) + STEP_UP.bootstrapMs,
         policy: { idleMs: STEP_UP.idleMs, keepAliveMs: STEP_UP.keepAliveMs, freshMs: STEP_UP.freshMs, maxAgeMs: STEP_UP.maxAgeMs },
       };
     });
@@ -142,22 +188,25 @@ export const demoStepUpApi: StepUpApi = {
       const f = factorsOf(m._id);
       const now = Date.now();
       if (!f || f.pin === undefined) fail("not_ready", { detail: "no action PIN" });
-      if (f.pinFailuresTotal >= STEP_UP.pinHardLimit) fail("step_up_locked", { detail: "disabled" });
-      if (f.pinLockedUntil > now) fail("step_up_locked", { retryAfterMs: f.pinLockedUntil - now });
+      if (f.pinLockedUntil > now) {
+        fail("step_up_locked", { retryAfterMs: f.pinLockedUntil - now, detail: f.pinLockKind === "lockout" ? "lockout" : undefined });
+      }
+      // A lockout that has ended: the count starts over.
+      if (f.pinLockKind === "lockout") clearPinCounters(f);
       // Reserved before the check, like the backend: an attempt counts until it succeeds.
       f.pinFailures++;
-      f.pinFailuresTotal++;
-      const next = pinBackoffMs(f.pinFailures);
+      const right = pin === f.pin;
+      const locksOut = !right && f.pinFailures >= STEP_UP.pinHardLimit;
+      const next = locksOut ? STEP_UP.pinLockoutMs : pinBackoffMs(f.pinFailures);
       f.pinLockedUntil = next > 0 ? now + next : 0;
-      if (pin === f.pin) {
-        f.pinFailures = 0;
-        f.pinFailuresTotal = 0;
-        f.pinLockedUntil = 0;
+      f.pinLockKind = locksOut ? "lockout" : next > 0 ? "backoff" : null;
+      if (right) {
+        clearPinCounters(f);
         markVerified("actionPin", now);
         return verified(now);
       }
       touch();
-      if (f.pinFailuresTotal >= STEP_UP.pinHardLimit) fail("step_up_locked", { detail: "disabled" });
+      if (locksOut) fail("step_up_locked", { retryAfterMs: STEP_UP.pinLockoutMs, detail: "lockout" });
       fail("step_up_invalid", { retryAfterMs: next > 0 ? next : undefined });
     }, []);
   },
@@ -170,24 +219,23 @@ export const demoStepUpApi: StepUpApi = {
       const m = me();
       const now = Date.now();
       const mode = authorizeFactorChange(m, now);
-      const f = factorsFor(m._id);
-      Object.assign(f, { pin, pinFailures: 0, pinFailuresTotal: 0, pinLockedUntil: 0 });
+      storePin(m._id, pin);
       if (mode === "bootstrap") markVerified("actionPin", now);
       touch();
     }), []);
   },
 
-  useClearActionPin() {
+  useGenerateRecoveryCodes() {
     return useCallback(
       () =>
         runMutation(
           "viewer",
-          ({ me: m }) => {
-            const f = factorsOf(m._id);
-            if (!f || f.pin === undefined) return;
-            if (!f.passkeys.some((k) => !k.suspended)) fail("step_up_last_factor");
-            Object.assign(f, { pin: undefined, pinFailures: 0, pinFailuresTotal: 0, pinLockedUntil: 0 });
-            if (session()?.stepUp?.method === "actionPin") clearSessionStepUp();
+          ({ me: m, audit }) => {
+            if (!hasPin(m._id)) fail("step_up_setup_required", { detail: "pin" });
+            const codes = newRecoveryCodes();
+            factorsFor(m._id).recoveryCodes = codes;
+            audit({ action: "member.recoveryCodesGenerated", targetLabel: m.email, summary: "New recovery codes for the action PIN." });
+            return codes;
           },
           "fresh",
         ),
@@ -231,6 +279,8 @@ export const demoStepUpApi: StepUpApi = {
     return useCallback(() => withStepUp(async () => {
       await sleep(latency());
       const m = me();
+      // A passkey can only be added after the PIN (Phase 4b).
+      if (!hasPin(m._id)) fail("step_up_setup_required", { detail: "pin" });
       authorizeFactorChange(m, Date.now());
       const keys = factorsOf(m._id)?.passkeys ?? [];
       if (keys.length >= STEP_UP.maxPasskeys) fail("conflict", { detail: "passkey limit" });
@@ -259,11 +309,9 @@ export const demoStepUpApi: StepUpApi = {
       const f = factorsFor(m._id);
       if (f.passkeys.some((k) => k.credentialId === id)) fail("conflict", { detail: "passkey exists" });
       if (f.passkeys.length >= STEP_UP.maxPasskeys) fail("conflict", { detail: "passkey limit" });
-      const first = !hasFactor(m._id);
       const now = Date.now();
       const passkeyId = newId("pk");
       f.passkeys.push({ _id: passkeyId, credentialId: id, name: clean, createdAt: now, synced: false, suspended: false });
-      if (first) markVerified("passkey", now, passkeyId);
       touch();
       return { passkeyId };
     }, []);
@@ -292,9 +340,6 @@ export const demoStepUpApi: StepUpApi = {
             const f = factorsOf(m._id);
             const key = f?.passkeys.find((k) => k._id === passkeyId);
             if (!f || !key) fail("not_found");
-            const others = f.passkeys.filter((k) => k._id !== passkeyId && !k.suspended);
-            const pinUsable = f.pin !== undefined && f.pinFailuresTotal < STEP_UP.pinHardLimit;
-            if (!pinUsable && others.length === 0) fail("step_up_last_factor");
             f.passkeys = f.passkeys.filter((k) => k._id !== passkeyId);
             if (session()?.stepUp?.passkeyId === passkeyId) clearSessionStepUp();
           },
@@ -333,21 +378,63 @@ export const demoStepUpApi: StepUpApi = {
   },
 
   useResetStepUpWithRecoveryCode() {
-    return useCallback(async ({ code }) => {
+    return useCallback(async ({ code, newPin }) => {
       await sleep(latency());
       const m = me();
-      const s = session();
-      if (!s || Date.now() - (s.createdAt ?? 0) > STEP_UP.bootstrapMs || !s.mfaVerified) {
-        fail("step_up_setup_required", { detail: "reauthenticate" });
-      }
-      if (!m.mfa.enrolled) fail("not_ready", { detail: "no recovery codes" });
-      const norm = code.trim().toUpperCase();
-      const i = m.mfa.recoveryCodes.indexOf(norm);
-      if (i < 0) fail("mfa_invalid_code");
-      m.mfa.recoveryCodes.splice(i, 1);
-      clearAllFactors(m._id);
+      const s = requireFreshSignIn();
+      const problem = actionPinProblem(newPin);
+      if (problem !== null) fail("invalid_argument", { field: "newPin", detail: problem });
+      const f = factorsFor(m._id);
+      if (f.recoveryCodes.length === 0) fail("not_ready", { detail: "no recovery codes" });
+      const i = f.recoveryCodes.indexOf(validate.normalizeRecoveryCode(code));
+      if (i < 0) fail("step_up_invalid");
+      // The PIN is set in the same step; the unused codes stay, the passkeys go, this session is unlocked.
+      clearAllFactors(m._id, f.recoveryCodes.filter((_, j) => j !== i));
+      storePin(m._id, newPin);
       setSession({ ...s, stepUp: undefined });
+      markVerified("actionPin", Date.now());
     }, []);
+  },
+
+  useRequestPinReset() {
+    // The demo sends no email: the link is `/pin-reset#token=…` (see the hint on the lock screen).
+    return useCallback(async () => {
+      await sleep(latency());
+      me();
+    }, []);
+  },
+
+  useRedeemPinReset() {
+    return useCallback(async ({ token, newPin }) => {
+      await sleep(latency());
+      const m = me();
+      requireFreshSignIn();
+      const problem = actionPinProblem(newPin);
+      if (problem !== null) fail("invalid_argument", { field: "newPin", detail: problem });
+      if (token !== DEMO_PIN_RESET_TOKEN) fail("step_up_invalid");
+      storePin(m._id, newPin);
+      markVerified("actionPin", Date.now());
+      touch();
+    }, []);
+  },
+
+  useChangePassword() {
+    return useCallback(
+      ({ currentPassword, newPassword }) =>
+        runMutation(
+          "viewer",
+          ({ me: m, audit }) => {
+            const row = getDb().members.find((x) => x._id === m._id);
+            if (!row || row.password !== currentPassword) fail("invalid_argument", { field: "currentPassword" });
+            if (validate.memberPassword(newPassword)) fail("invalid_argument", { field: "password" });
+            if (newPassword === currentPassword) fail("invalid_argument", { field: "newPassword", detail: "same as current" });
+            row.password = newPassword;
+            audit({ action: "member.passwordChanged", targetLabel: m.email, summary: "Password changed." });
+          },
+          "fresh",
+        ),
+      [],
+    );
   },
 };
 

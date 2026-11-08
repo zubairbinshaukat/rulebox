@@ -8,6 +8,9 @@ import type { Me, PlanScreen } from "../data/types";
 import { MeContext } from "../lib/member";
 import { setStepUpHandler } from "../lib/stepUpRetry";
 import { strings } from "../lib/strings";
+import { auditStrings } from "../lib/screenStrings/audit";
+import { groupStrings } from "../lib/screenStrings/group";
+import { groupsStrings } from "../lib/screenStrings/groups";
 
 // Phase 4 Step 5 screens against the LIVE data seam with the Convex React
 // hooks mocked: every query answers from `cx.results[<function name>]`, every
@@ -78,7 +81,7 @@ const admin: Me = {
   status: "active",
   orgId: "org",
   orgName: "Acme",
-  mfa: { enrolled: true, required: true, verified: true },
+  pin: { required: true, set: true },
   serverApiVersion: 1,
 };
 
@@ -189,14 +192,14 @@ describe("Groups list (groups:page, one server-driven page at a time)", () => {
   it("empty: one sentence and the primary action; a viewer gets no action", () => {
     cx.results["groups:page"] = groupsPage([]);
     ui(<Groups />, "admin", "/groups");
-    expect(screen.getByText(strings.groups.emptyTitle)).toBeTruthy();
-    expect(screen.getAllByRole("button", { name: strings.groups.add }).length).toBe(2);
+    expect(screen.getByText(groupsStrings.emptyTitle)).toBeTruthy();
+    expect(screen.getAllByRole("button", { name: groupsStrings.add }).length).toBe(2);
   });
 
   it("viewer: read-only (no New group)", () => {
     cx.results["groups:page"] = groupsPage([groupRow("g1", "Front desk")]);
     ui(<Groups />, "viewer", "/groups");
-    expect(screen.queryByRole("button", { name: strings.groups.add })).toBeNull();
+    expect(screen.queryByRole("button", { name: groupsStrings.add })).toBeNull();
   });
 
   it("an error shows Try again", () => {
@@ -214,10 +217,10 @@ describe("Groups list (groups:page, one server-driven page at a time)", () => {
     });
     cx.fns["groups:create"] = create;
     ui(<Groups />, "admin", "/groups");
-    fireEvent.click(screen.getByRole("button", { name: strings.groups.add }));
+    fireEvent.click(screen.getByRole("button", { name: groupsStrings.add }));
     const dialog = screen.getByRole("dialog");
     expect(within(dialog).getByText(groupText.usage(3, 3, "Free"))).toBeTruthy();
-    fireEvent.change(within(dialog).getByLabelText(new RegExp(strings.groups.name)), { target: { value: "D" } });
+    fireEvent.change(within(dialog).getByLabelText(new RegExp(groupsStrings.name)), { target: { value: "D" } });
     fireEvent.click(within(dialog).getByRole("button", { name: strings.common.create }));
     const message = planLimitMessage("groups", "free", 3);
     expect(await within(dialog).findByText(message)).toBeTruthy();
@@ -232,9 +235,9 @@ describe("Groups list (groups:page, one server-driven page at a time)", () => {
       throw new ConvexError({ code: "conflict", field: "name" });
     });
     ui(<Groups />, "admin", "/groups");
-    fireEvent.click(screen.getByRole("button", { name: strings.groups.add }));
+    fireEvent.click(screen.getByRole("button", { name: groupsStrings.add }));
     const dialog = screen.getByRole("dialog");
-    const input = within(dialog).getByLabelText(new RegExp(strings.groups.name)) as HTMLInputElement;
+    const input = within(dialog).getByLabelText(new RegExp(groupsStrings.name)) as HTMLInputElement;
     fireEvent.change(input, { target: { value: "Front desk" } });
     fireEvent.click(within(dialog).getByRole("button", { name: strings.common.create }));
     const error = await within(dialog).findByText(groupText.nameTaken);
@@ -255,12 +258,12 @@ describe("Groups list (groups:page, one server-driven page at a time)", () => {
   it("a header click sorts on the server; the Created column starts newest first; Devices and Employees do not sort", async () => {
     cx.results["groups:page"] = groupsPage(many(3));
     ui(<Groups />, "admin", "/groups");
-    expect(header(strings.groups.colName).getAttribute("aria-sort")).toBe("ascending");
-    fireEvent.click(within(header(strings.groups.colName)).getByRole("button"));
+    expect(header(groupsStrings.colName).getAttribute("aria-sort")).toBe("ascending");
+    fireEvent.click(within(header(groupsStrings.colName)).getByRole("button"));
     await waitFor(() => expect(lastArgs().sort).toEqual({ key: "name", dir: "desc" }));
-    fireEvent.click(within(header(strings.groups.colCreated)).getByRole("button"));
+    fireEvent.click(within(header(groupsStrings.colCreated)).getByRole("button"));
     await waitFor(() => expect(lastArgs().sort).toEqual({ key: "created", dir: "desc" }));
-    expect(within(header(strings.groups.colDevices)).queryByRole("button")).toBeNull();
+    expect(within(header(groupsStrings.colDevices)).queryByRole("button")).toBeNull();
   });
 
   it("searches on Enter (contains), and the sort still applies; a new search starts over on page 1", async () => {
@@ -354,18 +357,18 @@ describe("Group detail (groups:get)", () => {
     ui(<GroupDetail />, "admin", "/groups/g1");
     expect(screen.getByRole("heading", { level: 1, name: "Office" })).toBeTruthy();
     expect(screen.getByText("Notepad")).toBeTruthy();
-    expect(screen.getByRole("button", { name: strings.group.assign })).toBeTruthy();
+    expect(screen.getByRole("button", { name: groupStrings.assign })).toBeTruthy();
     expect(screen.getByRole("link", { name: "Front desk" }).getAttribute("href")).toBe("/devices/d1");
-    expect(screen.getAllByText(strings.audit.historyNone).length).toBeGreaterThanOrEqual(1);
+    expect(screen.getAllByText(auditStrings.historyNone).length).toBeGreaterThanOrEqual(1);
   });
 
   it("viewers see the assigned apps without the buttons", () => {
     cx.results["groups:get"] = detail(0);
     ui(<GroupDetail />, "viewer", "/groups/g1");
     expect(screen.getByText("Notepad")).toBeTruthy();
-    expect(screen.queryByRole("button", { name: strings.group.assign })).toBeNull();
+    expect(screen.queryByRole("button", { name: groupStrings.assign })).toBeNull();
     expect(screen.queryByRole("button", { name: `${strings.common.edit} Notepad` })).toBeNull();
-    expect(screen.queryByRole("button", { name: `${strings.group.unassign} Notepad` })).toBeNull();
+    expect(screen.queryByRole("button", { name: `${groupStrings.unassign} Notepad` })).toBeNull();
   });
 
   it("assign: picks an app (those already in the group are left out), sends the audience and pins", async () => {
@@ -377,13 +380,13 @@ describe("Group detail (groups:get)", () => {
     const assign = vi.fn(async () => ({ assignmentId: "as2" }));
     cx.fns["groups:assignApp"] = assign;
     ui(<GroupDetail />, "admin", "/groups/g1");
-    fireEvent.click(screen.getByRole("button", { name: strings.group.assign }));
+    fireEvent.click(screen.getByRole("button", { name: groupStrings.assign }));
     const dialog = await screen.findByRole("dialog");
-    const picker = within(dialog).getByLabelText(new RegExp(`^${strings.group.app}`)) as HTMLSelectElement;
+    const picker = within(dialog).getByLabelText(new RegExp(`^${groupStrings.app}`)) as HTMLSelectElement;
     expect([...picker.options].map((o) => o.textContent)).toEqual(["Wiki"]);
-    fireEvent.change(within(dialog).getByLabelText(strings.group.audience), { target: { value: "selected" } });
-    fireEvent.click(within(dialog).getByLabelText(strings.group.pinTaskbar));
-    fireEvent.click(within(dialog).getByRole("button", { name: strings.group.assign }));
+    fireEvent.change(within(dialog).getByLabelText(groupStrings.audience), { target: { value: "selected" } });
+    fireEvent.click(within(dialog).getByLabelText(groupStrings.pinTaskbar));
+    fireEvent.click(within(dialog).getByRole("button", { name: groupStrings.assign }));
     await waitFor(() => expect(assign).toHaveBeenCalledWith({ groupId: "g1", appId: "a2", audience: "selected", pinnedTaskbar: true, pinnedDesktop: true }));
   });
 
@@ -395,11 +398,11 @@ describe("Group detail (groups:get)", () => {
       .mockRejectedValueOnce(new ConvexError({ code: "conflict", field: "app" }))
       .mockRejectedValueOnce(new ConvexError({ code: "too_large", detail: "group apps" }));
     ui(<GroupDetail />, "admin", "/groups/g1");
-    fireEvent.click(screen.getByRole("button", { name: strings.group.assign }));
+    fireEvent.click(screen.getByRole("button", { name: groupStrings.assign }));
     const dialog = await screen.findByRole("dialog");
-    fireEvent.click(within(dialog).getByRole("button", { name: strings.group.assign }));
+    fireEvent.click(within(dialog).getByRole("button", { name: groupStrings.assign }));
     expect(await within(dialog).findByText(groupText.alreadyAssigned)).toBeTruthy();
-    fireEvent.click(within(dialog).getByRole("button", { name: strings.group.assign }));
+    fireEvent.click(within(dialog).getByRole("button", { name: groupStrings.assign }));
     expect(await within(dialog).findByText(groupText.tooManyApps)).toBeTruthy();
   });
 
@@ -412,15 +415,15 @@ describe("Group detail (groups:get)", () => {
     ui(<GroupDetail />, "admin", "/groups/g1");
     fireEvent.click(screen.getByRole("button", { name: `${strings.common.edit} Notepad` }));
     let dialog = await screen.findByRole("dialog");
-    fireEvent.click(within(dialog).getByLabelText(strings.group.pinDesktop));
+    fireEvent.click(within(dialog).getByLabelText(groupStrings.pinDesktop));
     fireEvent.click(within(dialog).getByRole("button", { name: strings.common.save }));
     await waitFor(() => expect(update).toHaveBeenCalledWith({ assignmentId: "as1", audience: "everyone", pinnedTaskbar: true, pinnedDesktop: true }));
     await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
 
-    fireEvent.click(screen.getByRole("button", { name: `${strings.group.unassign} Notepad` }));
+    fireEvent.click(screen.getByRole("button", { name: `${groupStrings.unassign} Notepad` }));
     dialog = await screen.findByRole("dialog");
     expect(unassign).not.toHaveBeenCalled();
-    fireEvent.click(within(dialog).getByRole("button", { name: strings.group.unassign }));
+    fireEvent.click(within(dialog).getByRole("button", { name: groupStrings.unassign }));
     await waitFor(() => expect(unassign).toHaveBeenCalledWith({ assignmentId: "as1" }));
   });
 
@@ -456,7 +459,7 @@ describe("Group detail (groups:get)", () => {
     const view = ui(<GroupDetail />, "admin", "/groups/g1");
     fireEvent.click(screen.getByRole("button", { name: strings.common.edit }));
     let dialog = screen.getByRole("dialog");
-    fireEvent.change(within(dialog).getByLabelText(new RegExp(strings.groups.name)), { target: { value: "Mine" } });
+    fireEvent.change(within(dialog).getByLabelText(new RegExp(groupsStrings.name)), { target: { value: "Mine" } });
     fireEvent.click(within(dialog).getByRole("button", { name: strings.common.save }));
     expect(await within(dialog).findByText(strings.common.staleTitle)).toBeTruthy();
     expect(rename.mock.calls[0]![0]).toMatchObject({ groupId: "g1", expectedRevision: 2, name: "Mine", description: "Back office" });
@@ -476,8 +479,8 @@ describe("Group detail (groups:get)", () => {
     );
     dialog = screen.getByRole("dialog");
     fireEvent.click(within(dialog).getByRole("button", { name: strings.common.reload }));
-    expect((within(dialog).getByLabelText(new RegExp(strings.groups.name)) as HTMLInputElement).value).toBe("Theirs");
-    fireEvent.change(within(dialog).getByLabelText(new RegExp(strings.groups.description)), { target: { value: "" } });
+    expect((within(dialog).getByLabelText(new RegExp(groupsStrings.name)) as HTMLInputElement).value).toBe("Theirs");
+    fireEvent.change(within(dialog).getByLabelText(new RegExp(groupsStrings.description)), { target: { value: "" } });
     fireEvent.click(within(dialog).getByRole("button", { name: strings.common.save }));
     await waitFor(() => expect(rename).toHaveBeenCalledTimes(2));
     // "" clears the description on the server.

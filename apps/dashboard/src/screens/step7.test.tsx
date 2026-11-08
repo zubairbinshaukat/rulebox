@@ -8,6 +8,8 @@ import type { Me } from "../data/types";
 import { MeContext } from "../lib/member";
 import { setStepUpHandler } from "../lib/stepUpRetry";
 import { strings } from "../lib/strings";
+import { deviceStrings } from "../lib/screenStrings/device";
+import { devicesStrings } from "../lib/screenStrings/devices";
 
 // Phase 4 Step 7 screens (Devices, DeviceDetail) against the LIVE data seam
 // with the Convex React hooks mocked: queries answer from `cx.results`,
@@ -67,7 +69,7 @@ const admin: Me = {
   status: "active",
   orgId: "org",
   orgName: "Acme",
-  mfa: { enrolled: true, required: true, verified: true },
+  pin: { required: true, set: true },
   serverApiVersion: 1,
 };
 
@@ -187,10 +189,10 @@ describe("Devices (fleet:list, one server-driven page at a time)", () => {
     expect(within(rows[1]!).getByText("26100")).toBeTruthy();
     expect(within(rows[2]!).getByText(strings.common.offline)).toBeTruthy();
     expect(within(rows[2]!).getByText(/^since /)).toBeTruthy();
-    expect(within(rows[2]!).getByText(strings.devices.noGroup)).toBeTruthy();
+    expect(within(rows[2]!).getByText(devicesStrings.noGroup)).toBeTruthy();
     expect(within(rows[3]!).getByText(strings.common.neverSeen)).toBeTruthy();
     // The viewer sees no admin action.
-    expect(screen.queryByRole("button", { name: strings.devices.checkNow })).toBeNull();
+    expect(screen.queryByRole("button", { name: devicesStrings.checkNow })).toBeNull();
     // One page, newest first, ten rows: the default list arguments.
     expect(listArgs()).toEqual(DEFAULT_ARGS);
     expect(lastQuery("fleet:count")!.args).toEqual({});
@@ -206,14 +208,14 @@ describe("Devices (fleet:list, one server-driven page at a time)", () => {
   it("offers a No group filter: it sends groupId none at once (no waiting for the groups) and keeps it in the URL", () => {
     ui(<Devices />, "viewer", "/devices?group=none");
     expect(listArgs()).toEqual({ ...DEFAULT_ARGS, groupId: "none" });
-    expect((screen.getByLabelText(strings.devices.groupFilter) as HTMLSelectElement).value).toBe("none");
+    expect((screen.getByLabelText(devicesStrings.groupFilter) as HTMLSelectElement).value).toBe("none");
   });
 
   it("choosing No group in the filter lists the PCs without a group, and All groups goes back", async () => {
     cx.results["groups:list"] = [GROUP];
     ui(<Devices />, "viewer", "/devices");
-    const select = screen.getByLabelText(strings.devices.groupFilter) as HTMLSelectElement;
-    expect(within(select).getByRole("option", { name: strings.devices.noGroupFilter })).toBeTruthy();
+    const select = screen.getByLabelText(devicesStrings.groupFilter) as HTMLSelectElement;
+    expect(within(select).getByRole("option", { name: devicesStrings.noGroupFilter })).toBeTruthy();
     fireEvent.change(select, { target: { value: "none" } });
     await waitFor(() => expect(listArgs()).toEqual({ ...DEFAULT_ARGS, groupId: "none" }));
     fireEvent.change(select, { target: { value: "" } });
@@ -231,11 +233,11 @@ describe("Devices (fleet:list, one server-driven page at a time)", () => {
     ]);
     ui(<Devices />, "viewer", "/devices");
     const rows = within(screen.getByRole("table")).getAllByRole("row");
-    expect(within(rows[1]!).getByText(strings.devices.planOverLimit).getAttribute("title")).toBe(strings.devices.planOverLimitHint);
-    expect(within(rows[2]!).getByText(strings.devices.planSuspended)).toBeTruthy();
+    expect(within(rows[1]!).getByText(devicesStrings.planOverLimit).getAttribute("title")).toBe(devicesStrings.planOverLimitHint);
+    expect(within(rows[2]!).getByText(devicesStrings.planSuspended)).toBeTruthy();
     for (const i of [3, 4, 5]) {
-      expect(within(rows[i]!).queryByText(strings.devices.planOverLimit)).toBeNull();
-      expect(within(rows[i]!).queryByText(strings.devices.planSuspended)).toBeNull();
+      expect(within(rows[i]!).queryByText(devicesStrings.planOverLimit)).toBeNull();
+      expect(within(rows[i]!).queryByText(devicesStrings.planSuspended)).toBeNull();
     }
   });
 
@@ -246,7 +248,7 @@ describe("Devices (fleet:list, one server-driven page at a time)", () => {
     // The unknown id never reaches fleet:list (it would answer not_found).
     expect(cx.queries.some((q) => JSON.stringify(q.args).includes("gone"))).toBe(false);
     expect(screen.queryByRole("alert")).toBeNull();
-    expect((screen.getByLabelText(strings.devices.groupFilter) as HTMLSelectElement).value).toBe("");
+    expect((screen.getByLabelText(devicesStrings.groupFilter) as HTMLSelectElement).value).toBe("");
   });
 
   it("waits for the groups before running a list that has a group filter", () => {
@@ -288,14 +290,14 @@ describe("Devices (fleet:list, one server-driven page at a time)", () => {
     cx.results["fleet:list"] = listPage([row("d1", "Front desk")]);
     ui(<Devices />, "viewer", "/devices");
     const header = (name: string) => screen.getByRole("columnheader", { name: new RegExp(name) });
-    expect(header(strings.devices.colEnrolled).getAttribute("aria-sort")).toBe("descending");
-    fireEvent.click(within(header(strings.devices.colName)).getByRole("button"));
+    expect(header(devicesStrings.colEnrolled).getAttribute("aria-sort")).toBe("descending");
+    fireEvent.click(within(header(devicesStrings.colName)).getByRole("button"));
     await waitFor(() => expect(listArgs().sort).toEqual({ key: "name", dir: "asc" }));
-    expect(header(strings.devices.colName).getAttribute("aria-sort")).toBe("ascending");
-    fireEvent.click(within(header(strings.devices.colName)).getByRole("button"));
+    expect(header(devicesStrings.colName).getAttribute("aria-sort")).toBe("ascending");
+    fireEvent.click(within(header(devicesStrings.colName)).getByRole("button"));
     await waitFor(() => expect(listArgs().sort).toEqual({ key: "name", dir: "desc" }));
     // Columns the server cannot sort by are no buttons.
-    expect(within(header(strings.devices.colStatus)).queryByRole("button")).toBeNull();
+    expect(within(header(devicesStrings.colStatus)).queryByRole("button")).toBeNull();
   });
 
   it("shows the total and the page count; with a search or one group there is no total, only Page N", () => {
@@ -320,7 +322,7 @@ describe("Devices (fleet:list, one server-driven page at a time)", () => {
     fireEvent.click(screen.getByRole("button", { name: strings.pager.next }));
     await waitFor(() => expect(listArgs().paginationOpts).toEqual({ numItems: 10, cursor: "cur-2" }));
     expect(screen.getByText(`${strings.pager.records(524)} · ${strings.pager.pageOf(2, 53)}`)).toBeTruthy();
-    fireEvent.click(within(screen.getByRole("columnheader", { name: new RegExp(strings.devices.colName) })).getByRole("button"));
+    fireEvent.click(within(screen.getByRole("columnheader", { name: new RegExp(devicesStrings.colName) })).getByRole("button"));
     await waitFor(() => expect(listArgs().paginationOpts).toEqual({ numItems: 10, cursor: null }));
     expect(screen.getByText(`${strings.pager.records(524)} · ${strings.pager.pageOf(1, 53)}`)).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: strings.pager.next }));
@@ -366,7 +368,7 @@ describe("Devices (fleet:list, one server-driven page at a time)", () => {
     ui(<Devices />, "viewer", "/devices");
     fireEvent.click(screen.getByRole("radio", { name: strings.table.viewCards }));
     expect(document.documentElement.getAttribute("data-view")).toBe("cards");
-    expect(screen.queryByRole("region", { name: strings.devices.title })).toBeNull();
+    expect(screen.queryByRole("region", { name: devicesStrings.title })).toBeNull();
     expect(screen.getByRole("link", { name: "Front desk" })).toBeTruthy();
     const select = screen.getByLabelText(strings.table.sortSelect) as HTMLSelectElement;
     fireEvent.change(select, { target: { value: "name:asc" } });
@@ -380,7 +382,7 @@ describe("Devices (fleet:list, one server-driven page at a time)", () => {
     cx.fns["fleet:checkNow"] = checkNow;
     ui(<Devices />, "admin", "/devices?size=50");
     expect(listArgs().paginationOpts).toEqual({ numItems: 50, cursor: null });
-    fireEvent.click(screen.getByRole("button", { name: strings.devices.checkNow }));
+    fireEvent.click(screen.getByRole("button", { name: devicesStrings.checkNow }));
     await waitFor(() => expect(checkNow).toHaveBeenCalledOnce());
     const calls = checkNow.mock.calls as unknown as [{ deviceIds: string[] }][];
     expect(calls[0]![0].deviceIds).toHaveLength(50);
@@ -390,11 +392,11 @@ describe("Devices (fleet:list, one server-driven page at a time)", () => {
     cx.results["groups:list"] = [GROUP];
     cx.results["fleet:list"] = listPage([]);
     ui(<Devices />, "admin", "/devices");
-    expect(screen.getByText(strings.devices.emptyTitle)).toBeTruthy();
+    expect(screen.getByText(devicesStrings.emptyTitle)).toBeTruthy();
     expect(screen.getAllByRole("link", { name: /enrollment code|Add a PC/i }).length).toBeGreaterThan(0);
     cleanup();
     ui(<Devices />, "admin", "/devices?group=g1");
-    expect(screen.getByText(strings.devices.noMatchTitle)).toBeTruthy();
+    expect(screen.getByText(devicesStrings.noMatchTitle)).toBeTruthy();
     cleanup();
     ui(<Devices />, "admin", "/devices?q=zzz");
     expect(screen.getByText(strings.table.noResults("zzz"))).toBeTruthy();
@@ -407,9 +409,9 @@ describe("Devices (fleet:list, one server-driven page at a time)", () => {
     cx.fns["fleet:checkNow"] = checkNow;
     ui(<Devices />, "admin", "/devices");
     cx.results["fleet:checkResult"] = { requestedAt: 1, items: [{ deviceId: "d1", answered: true }] };
-    fireEvent.click(screen.getByRole("button", { name: strings.devices.checkNow }));
+    fireEvent.click(screen.getByRole("button", { name: devicesStrings.checkNow }));
     await waitFor(() => expect(checkNow).toHaveBeenCalledWith({ deviceIds: ["d1"] }));
-    expect(await screen.findByText(strings.devices.checkResult(1, 1))).toBeTruthy();
+    expect(await screen.findByText(devicesStrings.checkResult(1, 1))).toBeTruthy();
   });
 
   it("Check now: the 1-per-minute limit is shown as a sentence", async () => {
@@ -419,7 +421,7 @@ describe("Devices (fleet:list, one server-driven page at a time)", () => {
       throw new ConvexError({ code: "rate_limited" });
     });
     ui(<Devices />, "admin", "/devices");
-    fireEvent.click(screen.getByRole("button", { name: strings.devices.checkNow }));
+    fireEvent.click(screen.getByRole("button", { name: devicesStrings.checkNow }));
     expect(await screen.findByText(strings.errors.rateLimited)).toBeTruthy();
   });
 
@@ -441,7 +443,7 @@ describe("DeviceDetail (fleet:get)", () => {
     cx.fns["fleet:watch"] = watch;
     open();
     expect(screen.getByRole("heading", { level: 1, name: "Front desk" })).toBeTruthy();
-    expect(screen.getByText(strings.device.lastContact)).toBeTruthy();
+    expect(screen.getByText(deviceStrings.lastContact)).toBeTruthy();
     await waitFor(() => expect(watch).toHaveBeenCalledWith({ deviceId: "d1" }));
   });
 
@@ -451,19 +453,19 @@ describe("DeviceDetail (fleet:get)", () => {
     const withKeys = (trustedKeyIds?: string[]) => detail({ report: { agentVersion: "0.4.0", os: "Windows 11", osBuild: "26100", updatedAt: Date.now() - 60_000, trustedKeyIds } });
     cx.results["fleet:get"] = withKeys(["a3f19c07d2e8b456", "00112233445566ff"]);
     open();
-    expect(screen.getByText(strings.device.trustedKeys)).toBeTruthy();
+    expect(screen.getByText(deviceStrings.trustedKeys)).toBeTruthy();
     expect(screen.getByText("a3f19c07d2e8b456")).toBeTruthy();
     expect(screen.getByText("00112233445566ff")).toBeTruthy();
-    expect(screen.queryByText(strings.device.noTrustedKeyTitle)).toBeNull();
+    expect(screen.queryByText(deviceStrings.noTrustedKeyTitle)).toBeNull();
     cleanup();
     cx.results["fleet:get"] = withKeys([]);
     open();
-    expect(screen.getByText(strings.device.noTrustedKeyTitle)).toBeTruthy();
-    expect(screen.getByText(strings.device.trustedKeysNone)).toBeTruthy();
+    expect(screen.getByText(deviceStrings.noTrustedKeyTitle)).toBeTruthy();
+    expect(screen.getByText(deviceStrings.trustedKeysNone)).toBeTruthy();
     cleanup();
     cx.results["fleet:get"] = withKeys(undefined);
     open();
-    expect(screen.queryByText(strings.device.noTrustedKeyTitle)).toBeNull();
+    expect(screen.queryByText(deviceStrings.noTrustedKeyTitle)).toBeNull();
   });
 
   it("subscribes to liveness next to fleet:get, and a PC that pinged but never reported still shows its last contact", () => {
@@ -476,10 +478,10 @@ describe("DeviceDetail (fleet:get)", () => {
     cx.fns["fleet:watch"] = vi.fn(async () => ({ fastUntil: null }));
     cleanup();
     open();
-    expect(screen.getByText(strings.device.lastContact)).toBeTruthy();
+    expect(screen.getByText(deviceStrings.lastContact)).toBeTruthy();
     expect(screen.queryByText(strings.common.neverSeen)).toBeNull();
     // The report-less Status card and the Compatibility card both say there is no report yet.
-    expect(screen.getAllByText(strings.device.compatNone)).toHaveLength(2);
+    expect(screen.getAllByText(deviceStrings.compatNone)).toHaveLength(2);
   });
 
   it("shows a dash, not 'Not seen yet', when the liveness query fails; 'Not seen yet' when it says never", () => {
@@ -525,7 +527,7 @@ describe("DeviceDetail (fleet:get)", () => {
     cx.results["fleet:get"] = detail({ group: null, flags: { noGroup: true, revoked: false, rotateCredential: false } });
     cx.fns["fleet:watch"] = vi.fn(async () => ({ fastUntil: null }));
     open();
-    expect(screen.getByText(strings.device.noGroupWarning)).toBeTruthy();
+    expect(screen.getByText(deviceStrings.noGroupWarning)).toBeTruthy();
   });
 
   it("kiosk off sends the revision, and the fresh step-up dialog is retried once", async () => {
@@ -552,9 +554,9 @@ describe("DeviceDetail (fleet:get)", () => {
     const revoke = vi.fn(async () => null);
     cx.fns["fleet:revoke"] = revoke;
     open();
-    fireEvent.click(screen.getByRole("button", { name: strings.device.revoke }));
+    fireEvent.click(screen.getByRole("button", { name: deviceStrings.revoke }));
     const dialog = screen.getByRole("dialog");
-    const confirm = within(dialog).getByRole("button", { name: strings.device.revoke });
+    const confirm = within(dialog).getByRole("button", { name: deviceStrings.revoke });
     expect((confirm as HTMLButtonElement).disabled).toBe(true);
     fireEvent.change(within(dialog).getByRole("textbox"), { target: { value: "Front desk" } });
     fireEvent.click(confirm);
@@ -568,13 +570,13 @@ describe("DeviceDetail (fleet:get)", () => {
     cx.fns["fleet:move"] = move;
     const view = open();
     fireEvent.change(screen.getByRole("combobox"), { target: { value: "g2" } });
-    fireEvent.click(screen.getByRole("button", { name: strings.device.move }));
+    fireEvent.click(screen.getByRole("button", { name: deviceStrings.move }));
     await waitFor(() => expect(move).toHaveBeenCalledWith({ deviceId: "d1", expectedRevision: 7, groupId: "g2" }));
     view.unmount();
 
     open("viewer");
     expect(screen.queryByRole("switch")).toBeNull();
-    expect(screen.queryByRole("button", { name: strings.device.revoke })).toBeNull();
+    expect(screen.queryByRole("button", { name: deviceStrings.revoke })).toBeNull();
     expect(screen.queryByRole("button", { name: strings.common.rename })).toBeNull();
   });
 

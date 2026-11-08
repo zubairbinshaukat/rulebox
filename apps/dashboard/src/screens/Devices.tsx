@@ -20,11 +20,11 @@ import { DeviceOnline, KioskCell, PlanStateBadge, PolicyCell } from "../componen
 import { messageFor } from "../lib/errors";
 import { useListPaging, useListView, type ListConfig } from "../lib/listView";
 import { useCan } from "../lib/member";
-import { strings } from "../lib/strings";
+import { devicesStrings } from "../lib/screenStrings/devices";
 import { useToast } from "../lib/toast";
 import { useNow } from "../lib/useNow";
 
-const s = strings.devices;
+const s = devicesStrings;
 
 /** `MAX_CHECK_DEVICES` of convex/lib/limits.ts, and how long the result stays subscribed. */
 const MAX_CHECK_DEVICES = 50;

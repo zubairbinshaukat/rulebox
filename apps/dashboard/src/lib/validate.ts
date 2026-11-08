@@ -8,22 +8,6 @@ import { strings } from "./strings";
 const v = strings.validate;
 export type Check = string | null;
 
-/** Keeps the first error per field; `null` fields are dropped. */
-export type FieldErrors<K extends string> = Partial<Record<K, string>>;
-
-export function collect<K extends string>(checks: Record<K, Check>): FieldErrors<K> {
-  const out: FieldErrors<K> = {};
-  for (const key of Object.keys(checks) as K[]) {
-    const msg = checks[key];
-    if (msg) out[key] = msg;
-  }
-  return out;
-}
-
-export function hasErrors(errors: Record<string, string | undefined>): boolean {
-  return Object.values(errors).some(Boolean);
-}
-
 // The server's rule (`normalizeOrgName`, groups `normalizeName`): C0 controls and DEL.
 // eslint-disable-next-line no-control-regex
 const CONTROL = /[\u0000-\u001f\u007f]/;
@@ -448,12 +432,7 @@ export function exitPin(value: string): Check {
   return p === null ? null : p === "6 to 12 digits" ? v.pin : v.pinWeak;
 }
 
-// ---------------------------------------------------------------- MFA
-
-export function totpCode(value: string): Check {
-  const t = value.replace(/\s/g, "");
-  return /^\d{6}$/.test(t) ? null : v.totp;
-}
+// ---------------------------------------------------------------- recovery codes
 
 export function normalizeRecoveryCode(value: string): string {
   const t = value.toUpperCase().replace(/[\s-]/g, "");

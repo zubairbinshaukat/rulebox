@@ -56,7 +56,7 @@ describe("withStepUp (the data seam's retry)", () => {
 
 function status(over: Partial<StepUpStatus["session"]> = {}, pin = true): StepUpStatus {
   return {
-    actionPin: { set: pin, lockedUntil: null, disabled: false, attemptsBeforeDisable: 10 },
+    pin: { set: pin, lockedUntil: null, lockKind: null, failedSinceUnlock: 0, attemptsBeforeLockout: 10, recoveryCodesLeft: 0, resetByEmail: true },
     passkeys: [],
     passkeysAvailable: true,
     session: { verifiedAt: 1000, lastActiveAt: 1000, method: "actionPin", ...over },
@@ -87,7 +87,7 @@ describe("StepUpController", () => {
   let win: Window;
   let doc: Document & { visibilityState: string };
 
-  function make(extra: { openChannel?: OpenChannel; idleOverrideMs?: number } = {}) {
+  function make(extra: { openChannel?: OpenChannel; idleOverrideMs?: number; lockOnStart?: boolean } = {}) {
     const c = new StepUpController({
       wallNow: () => wall,
       monoNow: () => mono,
@@ -96,6 +96,7 @@ describe("StepUpController", () => {
       doc,
       openChannel: extra.openChannel ?? (() => null),
       idleOverrideMs: extra.idleOverrideMs,
+      lockOnStart: extra.lockOnStart,
     });
     const deps = {
       keepAlive: vi.fn(async () => ({ serverNow: wall + 5000 })),
@@ -152,6 +153,30 @@ describe("StepUpController", () => {
     c.onStatus(status({ verifiedAt: null, lastActiveAt: null, method: null }, false));
     advance(700_000);
     expect(c.getSnapshot().locked).toBe(false);
+  });
+
+  it("idle lock does not fail open when stepUp:status never loads: account:me says there is a PIN", () => {
+    const { c, deps } = make();
+    c.start();
+    c.noteFactor(true);
+    advance(601_000);
+    expect(c.getSnapshot()).toMatchObject({ locked: true, reason: "idle" });
+    expect(deps.lock).toHaveBeenCalledOnce();
+  });
+
+  it("no PIN according to account:me: no idle lock; the status answer wins over account:me afterwards", () => {
+    const a = make();
+    a.c.start();
+    a.c.noteFactor(false);
+    advance(601_000);
+    expect(a.c.getSnapshot().locked).toBe(false);
+
+    const b = make();
+    b.c.start();
+    b.c.onStatus(status({}, false));
+    b.c.noteFactor(true); // a stale account:me must not turn the lock on once the status said otherwise
+    advance(601_000);
+    expect(b.c.getSnapshot().locked).toBe(false);
   });
 
   it("after sleep: the timer is late, but becoming visible checks the elapsed time at once", () => {
@@ -275,6 +300,36 @@ describe("StepUpController", () => {
     expect(c.getSnapshot().request).toBeNull();
     // While locked no dialog opens.
     await expect(c.request(e)).resolves.toBe(false);
+  });
+
+  it("lock on load: starts locked, ignores the verification the server already has, opens only on a new one or an unlock", () => {
+    const { c, deps } = make({ lockOnStart: true });
+    c.start();
+    expect(c.getSnapshot()).toMatchObject({ locked: true, reason: "load" });
+    // The first answer shows the session verified earlier (another tab, or this tab before a reload): still locked.
+    c.onStatus(status({ verifiedAt: 1000 }));
+    expect(c.getSnapshot().locked).toBe(true);
+    c.onStatus(status({ verifiedAt: 1000 }));
+    expect(c.getSnapshot().locked).toBe(true);
+    // Per tab: nothing was told to the server.
+    expect(deps.lock).not.toHaveBeenCalled();
+    // A verification made after the load (here or in another tab) opens it.
+    c.onStatus(status({ verifiedAt: 2000 }));
+    expect(c.getSnapshot().locked).toBe(false);
+  });
+
+  it("lock on load: an own verification opens it; a member without a PIN is not locked", () => {
+    const own = make({ lockOnStart: true });
+    own.c.start();
+    own.c.onStatus(status({ verifiedAt: null }));
+    expect(own.c.getSnapshot().locked).toBe(true);
+    own.c.unlocked(wall);
+    expect(own.c.getSnapshot().locked).toBe(false);
+
+    const none = make({ lockOnStart: true });
+    none.c.start();
+    none.c.onStatus(status({ verifiedAt: null }, false));
+    expect(none.c.getSnapshot().locked).toBe(false);
   });
 
   it("the dev-server idle override replaces the server's policy", () => {

@@ -19,13 +19,14 @@ import { useToast } from "../lib/toast";
 import { formatCount } from "../lib/format";
 import { useListPaging, useListView, type ListConfig } from "../lib/listView";
 import { strings } from "../lib/strings";
+import { groupsStrings } from "../lib/screenStrings/groups";
 import { useForm } from "../lib/useForm";
 import * as v from "../lib/validate";
 import { groupFieldError, groupErrorMessage } from "./groups/errors";
 import { groupText } from "./groups/strings";
 import { plan as planText, UNLIMITED } from "./settings/strings";
 
-const s = strings.groups;
+const s = groupsStrings;
 
 /** `groups:page`: A-Z by default, or newest first. A small bounded table: the page carries its exact total and offset cursors. */
 const LIST: ListConfig = { sorts: ["name", "created"], defaultSort: { key: "name", dir: "asc" } };

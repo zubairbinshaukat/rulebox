@@ -1,3 +1,5 @@
+/* Shared by the dashboard and the Staff App: the reset, the shared components and the logo animation
+   (the Spinner uses it). The Staff App's own components are in `@rulebox/ui/staff.css`. */
 @import "./components.css";
 @import "./logo-motion.css";
 

@@ -119,6 +119,40 @@ function bootScript(): Plugin {
   };
 }
 
+/** Solar icons of the signed-in shell (nav, account menu, tables) and the Overview: one chunk (see `codeSplitting`). */
+const SHELL_ICONS = [
+  "add-square",
+  "alt-arrow-down",
+  "alt-arrow-left",
+  "alt-arrow-right",
+  "arrow-down",
+  "arrow-up",
+  "bolt",
+  "document-text",
+  "hamburger-menu",
+  "history",
+  "home-2",
+  "key-minimalistic",
+  "layers",
+  "list",
+  "lock-keyhole-minimalistic",
+  "logout-2",
+  "magnifier",
+  "monitor",
+  "refresh",
+  "settings",
+  "shield-check",
+  "shield-warning",
+  "sort-vertical",
+  "user-block-rounded",
+  "user-plus-rounded",
+  "user-rounded",
+  "users-group-rounded",
+  "wi-fi-router-minimalistic",
+  "widget-2",
+  "widget-4",
+  "widget-add",
+];
 export default defineConfig(({ mode, command }) => {
   const demo = loadEnv(mode, process.cwd(), "VITE_").VITE_DEMO === "1";
   // Test hook for the end-to-end run (plan 4.16): a shorter idle lock, only on
@@ -154,6 +188,10 @@ export default defineConfig(({ mode, command }) => {
   build: {
     target: "es2022",
     rollupOptions: {
+      // `@rulebox/ui` has no side effects (its stylesheets are imported by main.tsx, never by a
+      // component), so a component nobody imports (the Staff App's title bar, tiles, ...) is dropped
+      // instead of riding along in `core` through the barrel `index.ts`.
+      treeshake: { moduleSideEffects: [{ test: /[\\/]packages[\\/]ui[\\/]src[\\/]/, sideEffects: false }] },
       output: {
         // React with the router, and the Convex client, change rarely: each its own
         // long-cached chunk, so an app update re-downloads only the app's code.
@@ -172,8 +210,16 @@ export default defineConfig(({ mode, command }) => {
             // (Scripts only: the stylesheets stay one file, in their import order.)
             // `lib/stepup/` and `data/stepup/` stay out: step-up code is loaded only
             // by the signed-in shell and the Security tab, never by sign-in. So do
-            // `data/enrollment/` (only the Enrollment screen) and `data/devices/`, `data/apps/`, `data/employees/` and `data/audit/`
-            { name: "core", test: /([\\/]apps[\\/]dashboard[\\/]src[\\/](lib|data)|[\\/]packages[\\/]ui[\\/]src)[\\/](?!(stepup|enrollment|devices|apps|employees|audit|members)[\\/]).*\.tsx?$/ },
+            // The `@rulebox/ui` components only the Gallery uses (AppTile, TitleBar, LogoMotion, ...) stay\n            // out too: they load with the Gallery, not with every page.\n            // `data/enrollment/` (only the Enrollment screen) and `data/devices/`, `data/apps/`, `data/employees/` and `data/audit/`
+            // Solar icons are one small module each, with the same wrapper code. The ones the
+            // signed-in shell and the Overview use (SHELL_ICONS) go in one file, which compresses
+            // far better than a dozen tiny ones; the few sign-in and entry icons and the icons
+            // of the other screens stay out, so no page loads icons it does not draw.
+            { name: "icons", test: new RegExp(`~icons[\\\\/]solar[\\\\/](${SHELL_ICONS.join("|")})-(linear|bold-duotone)\\.jsx$`) },
+            { name: "core", test: /([\\/]apps[\\/]dashboard[\\/]src[\\/](lib|data)|[\\/]packages[\\/]ui[\\/]src)[\\/](?!(stepup|screenStrings|enrollment|devices|apps|employees|audit|members)[\\/])(?!components[\\/](AppTile|FileChip|IconButton|LogoMotion|Notice|Panel|ProgressBar|Slider|StatCard|Surface|Tabs|TitleBar)\.).*\.tsx?$/ },
+            // The four tiny page parts every signed-in screen shares (card, page header, relative time,
+            // role gate) ride along: four 0.2 to 0.5 KB files cost more in headers than here, in one.
+            { name: "core", test: /[\\/]apps[\\/]dashboard[\\/]src[\\/]components[\\/](Card|PageHeader|RelativeTime|RoleGate)\.tsx$/ },
           ],
         },
       },

@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { act, renderHook } from "@testing-library/react";
 import { getFunctionName, type FunctionReference } from "convex/server";
 import { ConvexError } from "convex/values";
-import { AppError, errorCodeOf, messageFor } from "../../lib/errors";
+import { AppError, errorCodeOf, messageFor, toAppError } from "../../lib/errors";
 import { onUnauthenticated } from "../../lib/session";
 import { signInMessage } from "../../lib/signin";
 import { strings } from "../../lib/strings";
@@ -174,13 +174,13 @@ describe("sign-in, join, reset", () => {
 describe("member queries (useQueries, no throw during render)", () => {
   it("are skipped until the session is confirmed", () => {
     cx.auth = { isLoading: false, isAuthenticated: false };
-    const { result } = renderHook(() => live.useMfaStatus());
+    const { result } = renderHook(() => live.useOverview());
     expect(result.current.status).toBe("loading");
     expect(cx.requests.at(-1)).toEqual({});
   });
 
   it("keep one subscription across renders (api.x.y is a new Proxy on every access)", () => {
-    const { rerender } = renderHook(() => live.useMfaStatus());
+    const { rerender } = renderHook(() => live.useOverview());
     rerender();
     rerender();
     expect(cx.requests.length).toBeGreaterThanOrEqual(3);
@@ -188,7 +188,7 @@ describe("member queries (useQueries, no throw during render)", () => {
   });
 
   it("loading, then ready", () => {
-    const { result, rerender } = renderHook(() => live.useMfaStatus());
+    const { result, rerender } = renderHook(() => live.useOverview());
     expect(result.current.status).toBe("loading");
     expect(Object.keys(cx.requests.at(-1)!)).toEqual(["q"]);
     cx.queryResult = { enrolled: true, required: true, verified: false, lockedUntil: null, recoveryCodesLeft: 10 };
@@ -198,7 +198,7 @@ describe("member queries (useQueries, no throw during render)", () => {
 
   it("an error becomes status error with a mapped code; retry re-subscribes", async () => {
     cx.queryResult = new ConvexError({ code: "forbidden" });
-    const { result } = renderHook(() => live.useMfaStatus());
+    const { result } = renderHook(() => live.useOverview());
     expect(result.current.status).toBe("error");
     if (result.current.status !== "error") return;
     expect(errorCodeOf(result.current.error)).toBe("forbidden");
@@ -218,46 +218,69 @@ describe("member queries (useQueries, no throw during render)", () => {
     const seen = vi.fn();
     const off = onUnauthenticated(seen);
     cx.queryResult = new ConvexError({ code: "unauthenticated" });
-    const { rerender } = renderHook(() => live.useMfaStatus());
+    const { rerender } = renderHook(() => live.useOverview());
     rerender();
     expect(seen).toHaveBeenCalledTimes(1);
     off();
   });
 });
 
-describe("MFA actions", () => {
-  it("beginSetup returns the secret and URI from the action", async () => {
-    cx.fns["mfa:beginSetup"] = vi.fn(async () => ({ secret: "ABCD", uri: "otpauth://totp/x" }));
-    const { result } = renderHook(() => live.useBeginMfaSetup());
-    await expect(result.current()).resolves.toEqual({ secret: "ABCD", uri: "otpauth://totp/x" });
+describe("PIN calls", () => {
+  it("requestPinReset takes no arguments (it is bound to the signed-in session)", async () => {
+    const request = vi.fn(async () => ({ ok: true }));
+    cx.fns["account:requestPinReset"] = request;
+    const { result } = renderHook(() => liveStepUpApi.useRequestPinReset());
+    await expect(result.current()).resolves.toBeUndefined();
+    expect(request).toHaveBeenCalledWith({});
   });
 
-  it("confirmSetup returns the recovery codes", async () => {
-    cx.fns["mfa:confirmSetup"] = vi.fn(async () => ["AAAA-BBBB"]);
-    const { result } = renderHook(() => live.useConfirmMfaSetup());
-    await expect(result.current({ code: "123456" })).resolves.toEqual(["AAAA-BBBB"]);
+  it("redeemPinReset sends the token and the new PIN; every token problem is step_up_invalid", async () => {
+    const redeem = vi.fn().mockResolvedValueOnce(null).mockRejectedValueOnce(new ConvexError({ code: "step_up_invalid" }));
+    cx.fns["account:redeemPinReset"] = redeem;
+    const { result } = renderHook(() => liveStepUpApi.useRedeemPinReset());
+    await expect(result.current({ token: "t0k", newPin: "482915" })).resolves.toBeUndefined();
+    expect(redeem).toHaveBeenCalledWith({ token: "t0k", newPin: "482915" });
+    expect(errorCodeOf(await rejection(result.current({ token: "old", newPin: "482915" })))).toBe("step_up_invalid");
   });
 
-  it("verify: a wrong code and the lockout map to their codes", async () => {
-    cx.fns["mfa:verify"] = vi
-      .fn()
-      .mockRejectedValueOnce(new ConvexError({ code: "mfa_invalid_code" }))
-      .mockRejectedValueOnce(new ConvexError({ code: "mfa_locked", retryAfterMs: 900_000 }));
-    const { result } = renderHook(() => live.useVerifyMfa());
-    expect(messageFor(await rejection(result.current({ code: "000000" })))).toBe(strings.errors.mfaInvalidCode);
-    const locked = await rejection(result.current({ code: "000000" }));
-    expect(errorCodeOf(locked)).toBe("mfa_locked");
-    expect(messageFor(locked)).toBe(strings.errors.mfaLockedFor(900_000));
+  it("changePassword sends both passwords; a wrong current one is invalid_argument on currentPassword", async () => {
+    const change = vi.fn().mockRejectedValue(new ConvexError({ code: "invalid_argument", field: "currentPassword" }));
+    cx.fns["account:changePassword"] = change;
+    const { result } = renderHook(() => liveStepUpApi.useChangePassword());
+    const e = await rejection(result.current({ currentPassword: "wrong-one-1", newPassword: "a-new-password-2" }));
+    expect(change).toHaveBeenCalledWith({ currentPassword: "wrong-one-1", newPassword: "a-new-password-2" });
+    expect(toAppError(e)).toMatchObject({ code: "invalid_argument", field: "currentPassword" });
+  });
+
+  it("resetWithRecoveryCode sends the new PIN with the code", async () => {
+    const reset = vi.fn(async () => null);
+    cx.fns["stepUp:resetWithRecoveryCode"] = reset;
+    const { result } = renderHook(() => liveStepUpApi.useResetStepUpWithRecoveryCode());
+    await result.current({ code: "ABCD-EFGH", newPin: "482915" });
+    expect(reset).toHaveBeenCalledWith({ code: "ABCD-EFGH", newPin: "482915" });
+  });
+
+  it("generateRecoveryCodes returns the codes the action returns", async () => {
+    cx.fns["stepUp:generateRecoveryCodes"] = vi.fn(async () => ["AAAA-BBBB", "CCCC-DDDD"]);
+    const { result } = renderHook(() => liveStepUpApi.useGenerateRecoveryCodes());
+    await expect(result.current()).resolves.toEqual(["AAAA-BBBB", "CCCC-DDDD"]);
+  });
+
+  it("a locked PIN says how long and what else works", async () => {
+    cx.fns["stepUp:verifyActionPin"] = vi.fn().mockRejectedValue(new ConvexError({ code: "step_up_locked", retryAfterMs: 86_400_000, detail: "lockout" }));
+    const { result } = renderHook(() => liveStepUpApi.useVerifyActionPin());
+    const e = await rejection(result.current({ pin: "000000" }));
+    expect(messageFor(e)).toBe(strings.errors.stepUpLockout(86_400_000));
   });
 
   it("an unauthenticated action reports the expired session", async () => {
     const seen = vi.fn();
     const off = onUnauthenticated(seen);
-    cx.fns["mfa:useRecoveryCode"] = vi.fn(async () => {
+    cx.fns["account:requestPinReset"] = vi.fn(async () => {
       throw new ConvexError({ code: "unauthenticated" });
     });
-    const { result } = renderHook(() => live.useRedeemRecoveryCode());
-    expect(errorCodeOf(await rejection(result.current({ code: "AAAA-BBBB" })))).toBe("unauthenticated");
+    const { result } = renderHook(() => liveStepUpApi.useRequestPinReset());
+    expect(errorCodeOf(await rejection(result.current()))).toBe("unauthenticated");
     expect(seen).toHaveBeenCalledOnce();
     off();
   });

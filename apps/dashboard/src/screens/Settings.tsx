@@ -2,7 +2,7 @@ import { lazy, Suspense, useRef, type KeyboardEvent } from "react";
 import { useSearchParams } from "react-router";
 import { PageHeader } from "../components/PageHeader";
 import { SkeletonBlock } from "../components/Skeleton";
-import { strings } from "../lib/strings";
+import { settingsStrings } from "../lib/screenStrings/settings";
 import { sec } from "../lib/stepup/strings";
 import { AboutTab } from "./settings/AboutTab";
 import { AdminExitTab } from "./settings/AdminExitTab";
@@ -16,7 +16,7 @@ const SecurityTab = lazy(() => import("./settings/SecurityTab"));
 const TABS = ["organization", "adminExit", "signing", "members", "security", "about"] as const;
 type Tab = (typeof TABS)[number];
 
-const tabLabel = (t: Tab) => (t === "security" ? sec.tab : strings.settings.tabs[t]);
+const tabLabel = (t: Tab) => (t === "security" ? sec.tab : settingsStrings.tabs[t]);
 
 /** Settings with tabs (`?tab=`): each tab is one query (`settings:get`, `keys:status`, `members:list`, `stepUp:status`). */
 export default function Settings() {
@@ -44,8 +44,8 @@ export default function Settings() {
 
   return (
     <div className="dash-page">
-      <PageHeader title={strings.settings.title} lead={strings.settings.lead} />
-      <div role="tablist" aria-label={strings.settings.title} className="dash-tabs" onKeyDown={onKeyDown}>
+      <PageHeader title={settingsStrings.title} lead={settingsStrings.lead} />
+      <div role="tablist" aria-label={settingsStrings.title} className="dash-tabs" onKeyDown={onKeyDown}>
         {TABS.map((t) => (
           <button
             key={t}

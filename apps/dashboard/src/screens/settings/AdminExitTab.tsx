@@ -16,6 +16,7 @@ import { useCan } from "../../lib/member";
 import { SkeletonBlock } from "../../components/Skeleton";
 import { useToast } from "../../lib/toast";
 import { strings } from "../../lib/strings";
+import { settingsStrings } from "../../lib/screenStrings/settings";
 import { useForm } from "../../lib/useForm";
 import * as v from "../../lib/validate";
 import { exit as s, exitPinMessage, hotkeyMessage } from "./strings";
@@ -64,7 +65,7 @@ function ExitForm({ data, onReload }: { data: SettingsScreen; onReload: () => vo
   );
 
   return (
-    <Card title={strings.settings.tabs.adminExit} sub={s.lead}>
+    <Card title={settingsStrings.tabs.adminExit} sub={s.lead}>
       <form
         ref={form}
         className="dash-form"

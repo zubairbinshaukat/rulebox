@@ -97,7 +97,6 @@ export function padListFixtures(db: DemoDb, now: number): void {
       createdAt: now - (80 - i * 6) * DAY,
       revision: 0,
       password: owner.password,
-      mfa: { enrolled: i % 2 === 0, recoveryCodes: [] },
     });
   });
 

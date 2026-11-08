@@ -2392,18 +2392,6 @@ html[data-view="cards"] .dash-table--stack td[data-empty="true"] {
   border: 0;
   margin: 4px 0;
 }
-.dash-loadmore {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 6px;
-  padding: 14px 16px 18px;
-  border-top: 1px solid var(--rb-line);
-}
-.dash-loadmore__status {
-  font-size: 12.5px;
-  color: var(--rb-muted);
-}
 .dash-fullpage {
   display: grid;
   place-items: center;
@@ -2593,7 +2581,6 @@ html[data-view="cards"] .dash-table--stack td[data-empty="true"] {
   .dash-side,
   .dash-top,
   .dash-banner,
-  .dash-loadmore,
   .dash-pager,
   .dash-dt__toolbar,
   .dash-head__actions,

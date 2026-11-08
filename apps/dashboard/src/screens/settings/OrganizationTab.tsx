@@ -12,6 +12,7 @@ import { useCan } from "../../lib/member";
 import { SkeletonBlock } from "../../components/Skeleton";
 import { useToast } from "../../lib/toast";
 import { strings } from "../../lib/strings";
+import { settingsStrings } from "../../lib/screenStrings/settings";
 import { useForm } from "../../lib/useForm";
 import * as v from "../../lib/validate";
 import { org as s, plan as planText, UNLIMITED } from "./strings";
@@ -57,7 +58,7 @@ function OrgForm({ data, onReload }: { data: SettingsScreen; onReload: () => voi
   const server = (field: string) => serverFieldError(f.serverError, field, () => strings.errors.invalidArgument);
 
   return (
-    <Card title={strings.settings.tabs.organization}>
+    <Card title={settingsStrings.tabs.organization}>
       <form
         ref={form}
         className="dash-form"

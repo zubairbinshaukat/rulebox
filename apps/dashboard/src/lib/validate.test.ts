@@ -155,10 +155,8 @@ describe("apps", () => {
   });
 });
 
-describe("MFA codes", () => {
-  it("TOTP and recovery codes", () => {
-    expect(v.totpCode("123 456")).toBeNull();
-    expect(v.totpCode("12345")).toBeTruthy();
+describe("recovery codes", () => {
+  it("normalize and check the XXXX-XXXX shape", () => {
     expect(v.normalizeRecoveryCode("abcd efgh")).toBe("ABCD-EFGH");
     expect(v.recoveryCode("abcd-efgh")).toBeNull();
     expect(v.recoveryCode("abc")).toBeTruthy();
@@ -184,6 +182,16 @@ describe("reset folders = convex/lib/pathRules.ts resetFoldersProblem (crates/ru
     expect(problem).toBeTruthy();
     // A denied folder says why; the others get the format sentence.
     expect(problem === strings.validate.resetFolderDenied(folder)).toBe(kind === "denied");
+  });
+  it("a denied folder is named in a clear sentence, whichever line of the list it is on, and the first problem wins", () => {
+    const folder = "{RoamingAppData}\\Microsoft\\Protect";
+    const message = v.resetFolders(["{LocalAppData}\\Vendor\\App", folder]);
+    expect(message).toBe(strings.validate.resetFolderDenied(folder));
+    expect(message).toContain(folder);
+    expect(message).toMatch(/Windows or Rulebox data/);
+    // A parent of a denied folder is denied too (it would delete the child), a sibling is not.
+    expect(v.resetFolders(["{RoamingAppData}\\Microsoft", "{LocalAppData}\\C:bad"])).toBe(strings.validate.resetFolderDenied("{RoamingAppData}\\Microsoft"));
+    expect(v.resetFolders(["{RoamingAppData}\\Microsoft\\Teams"])).toBeNull();
   });
   it("accepts a list of at most 20 folders and refuses 21", () => {
     const ok = Array.from({ length: 20 }, (_, i) => `{LocalAppData}\\Vendor${i}`);

@@ -36,12 +36,8 @@ export const liveStepUpApi: StepUpApi = {
   useSetActionPin() {
     return useVoid(useAction(api.stepUp.setActionPin));
   },
-  useClearActionPin() {
-    const clear = useMutation(api.stepUp.clearActionPin);
-    const call = useCallback(async () => {
-      await clear({});
-    }, [clear]);
-    return useMapped(call);
+  useGenerateRecoveryCodes() {
+    return useNoArgs(useAction(api.stepUp.generateRecoveryCodes));
   },
   useBeginPasskeyVerification() {
     return useNoArgs(useAction(api.passkeys.beginVerification));
@@ -85,6 +81,19 @@ export const liveStepUpApi: StepUpApi = {
   },
   useResetStepUpWithRecoveryCode() {
     return useVoid(useAction(api.stepUp.resetWithRecoveryCode));
+  },
+  useRequestPinReset() {
+    const request = useAction(api.account.requestPinReset);
+    const call = useCallback(async () => {
+      await request({});
+    }, [request]);
+    return useMapped(call);
+  },
+  useRedeemPinReset() {
+    return useVoid(useAction(api.account.redeemPinReset));
+  },
+  useChangePassword() {
+    return useVoid(useAction(api.account.changePassword));
   },
 };
 

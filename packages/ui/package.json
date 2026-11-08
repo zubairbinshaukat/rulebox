@@ -8,7 +8,8 @@
     "./tokens.css": "./src/tokens.css",
     "./fonts.css": "./src/fonts.css",
     "./fonts-latin.css": "./src/fonts-latin.css",
-    "./base.css": "./src/base.css"
+    "./base.css": "./src/base.css",
+    "./staff.css": "./src/components-staff.css"
   },
   "scripts": {
     "typecheck": "tsc --noEmit -p tsconfig.json"

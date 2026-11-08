@@ -19,11 +19,6 @@ export const {
   useAuthActions,
   useRedeemReset,
   useConnectionState,
-  useMfaStatus,
-  useBeginMfaSetup,
-  useConfirmMfaSetup,
-  useVerifyMfa,
-  useRedeemRecoveryCode,
   useOverview,
   useFailedInstallsPage,
   useDeviceDetail,
@@ -84,7 +79,6 @@ export const {
   useChangeRole,
   useSetMemberDisabled,
   useCreateResetCode,
-  useResetMemberMfa,
 } = api;
 
 /** Must match `SERVER_API_VERSION` in `convex/lib/limits.ts` (edge case 14). */

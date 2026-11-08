@@ -2,9 +2,11 @@ import { Pill } from "@rulebox/ui";
 import type { DevicePresence, DeviceRow } from "../data/types";
 import { formatDateTimeLong, formatRelative } from "../lib/format";
 import { strings } from "../lib/strings";
+import { devicesStrings } from "../lib/screenStrings/devices";
+import { kioskPhaseStrings } from "../lib/screenStrings/kioskPhase";
 import { StatusDot } from "./StatusDot";
 
-const s = strings.devices;
+const s = devicesStrings;
 
 /**
  * Online / offline from `devicePresence` (Section 4.9: a transition, never a
@@ -33,7 +35,7 @@ export function KioskCell({ row }: { row: Pick<DeviceRow, "kioskEnabled" | "revo
   const tone = phase === "applied" ? "success" : phase === "failed" ? "danger" : "neutral";
   return (
     <Pill tone={tone} dot>
-      {strings.kioskPhase[phase]}
+      {kioskPhaseStrings[phase]}
     </Pill>
   );
 }

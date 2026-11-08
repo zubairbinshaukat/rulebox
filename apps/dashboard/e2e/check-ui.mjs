@@ -39,6 +39,14 @@ async function newPage({ width, height, theme, reduced = true }) {
     }
   }, theme);
   const page = await ctx.newPage();
+  // Every page load of a signed-in member starts at the PIN screen (Phase 4b): open it after each `goto`.
+  const goto = page.goto.bind(page);
+  page.goto = async (url, options) => {
+    const response = await goto(url, options);
+    const lockShown = await page.getByRole("heading", { name: "Enter your PIN" }).waitFor({ timeout: 1500 }).then(() => true, () => false);
+    if (lockShown) await unlock(page);
+    return response;
+  };
   page.on("pageerror", (e) => console.log(`  [pageerror] ${e.message}`));
   page.on("console", (m) => {
     if (m.type() === "error") console.log(`  [console] ${m.text()}`);
@@ -62,11 +70,16 @@ async function signIn(page) {
   await page.getByLabel("Email").fill("owner@demo.rulebox.test");
   await page.getByLabel("Password", { exact: true }).fill("rulebox-demo-1");
   await page.getByRole("button", { name: "Sign in" }).click();
-  await page.waitForURL(/\/mfa/);
+  await unlock(page);
+}
+
+/** The PIN screen that every page load of a signed-in member starts with (the demo Owner's PIN). */
+async function unlock(page) {
+  await page.getByRole("heading", { name: "Enter your PIN" }).waitFor();
   await settle(page);
-  await page.getByLabel("6-digit code").fill("123456");
-  await page.getByRole("button", { name: "Verify" }).click();
-  await page.waitForURL((u) => !u.pathname.startsWith("/mfa"));
+  await page.getByLabel("PIN", { exact: true }).fill("482915");
+  await page.getByRole("button", { name: "Unlock" }).click();
+  await page.getByRole("heading", { name: "Enter your PIN" }).waitFor({ state: "detached" });
   await settle(page);
 }
 
@@ -82,20 +95,21 @@ async function confirmStepUp(page) {
 
 /** Ids are deterministic (seeded fixtures): read them once from the lists. */
 async function discover(page) {
-  const href = async (path, text) => {
-    await page.goto(`${BASE}${path}`);
+  // Lists are server-paged now, so a row that is not on the first page is found by searching for its name.
+  const href = async (path, text, search = false) => {
+    await page.goto(`${BASE}${path}${search && text ? `?q=${encodeURIComponent(text)}` : ""}`);
     await settle(page);
     const link = text ? page.getByRole("link", { name: text, exact: true }).first() : page.locator("table a").first();
     return link.getAttribute("href");
   };
   return {
-    device: await href("/devices", "OFFICE-SCANNER"),
-    deviceLong: await href("/devices", "WAREHOUSE-RECEIVING-DOCK-EAST-TERMINAL-02-LEGACY-HARDWARE-ON-LOAN-FROM-HEAD-OFFICE"),
-    group: await href("/groups", "Pharmacy counter"),
-    groupEmpty: await href("/groups", "Training room"),
+    device: await href("/devices", "OFFICE-SCANNER", true),
+    deviceLong: await href("/devices", "WAREHOUSE-RECEIVING-DOCK-EAST-TERMINAL-02-LEGACY-HARDWARE-ON-LOAN-FROM-HEAD-OFFICE", true),
+    group: await href("/groups", "Pharmacy counter", true),
+    groupEmpty: await href("/groups", "Training room", true),
     employee: await href("/employees?group=", null),
-    app: await href("/apps", "7-Zip"),
-    appWeb: await href("/apps", "Point of Sale"),
+    app: await href("/apps", "7-Zip", true),
+    appWeb: await href("/apps", "Point of Sale", true),
   };
 }
 
@@ -150,7 +164,7 @@ if (run("shots")) {
         await settle(page);
         await page.screenshot({ path: join(OUT, `${name}-${w}-${theme}.png`), fullPage: true });
       }
-      // MFA setup + recovery codes: join as the invited admin.
+      // PIN setup, recovery codes and the passkey offer: join as the invited admin.
       await page.goto(`${BASE}/join`);
       await settle(page);
       await page.getByLabel("Invite code").fill("JOIN-DEMO-2026");
@@ -158,35 +172,32 @@ if (run("shots")) {
       await page.getByLabel("New password").fill("a-long-password-1");
       await page.getByLabel("Repeat the password").fill("a-long-password-1");
       await page.getByRole("button", { name: "Create account" }).click();
-      await page.waitForURL(/\/mfa/);
-      await page.getByText("Enter the 6-digit code the app shows.").waitFor();
+      await page.getByRole("heading", { name: "Set your PIN" }).waitFor();
       await settle(page);
-      await page.screenshot({ path: join(OUT, `mfa-setup-${w}-${theme}.png`), fullPage: true });
-      await page.getByLabel("6-digit code").fill("123456");
-      await page.getByRole("button", { name: "Confirm" }).click();
-      await page.getByText("Save your recovery codes").waitFor();
+      await page.screenshot({ path: join(OUT, `pin-setup-${w}-${theme}.png`), fullPage: true });
+      await page.getByLabel("New PIN").fill("482916");
+      await page.getByLabel("Repeat the PIN").fill("482916");
+      await page.getByRole("button", { name: "Save PIN" }).click();
+      await page.getByRole("heading", { name: "Save your recovery codes" }).waitFor();
+      await page.getByRole("list", { name: "Recovery codes" }).waitFor();
       await settle(page);
-      await page.screenshot({ path: join(OUT, `mfa-recovery-${w}-${theme}.png`), fullPage: true });
-      // Step-up: an Admin without an action PIN sets one first.
+      await page.screenshot({ path: join(OUT, `pin-recovery-${w}-${theme}.png`), fullPage: true });
       await page.getByLabel("I stored these codes somewhere safe").check();
-      await page.getByRole("button", { name: "I saved them" }).click();
-      await page.getByRole("heading", { name: "Protect important actions" }).waitFor();
+      await page.getByRole("button", { name: "Continue" }).click();
+      await page.getByRole("heading", { name: "Add a passkey? (optional)" }).waitFor();
       await settle(page);
-      await page.screenshot({ path: join(OUT, `stepup-setup-${w}-${theme}.png`), fullPage: true });
-      // Sign out, then sign in as the owner (MFA verify screen).
+      await page.screenshot({ path: join(OUT, `pin-passkey-${w}-${theme}.png`), fullPage: true });
+      // Sign out, then sign in as the owner (the PIN screen).
       await page.evaluate(() => sessionStorage.clear());
       await page.goto(`${BASE}/sign-in`);
       await settle(page);
       await page.getByLabel("Email").fill("owner@demo.rulebox.test");
       await page.getByLabel("Password", { exact: true }).fill("rulebox-demo-1");
       await page.getByRole("button", { name: "Sign in" }).click();
-      await page.waitForURL(/\/mfa/);
-      await page.getByText("Enter your code").waitFor();
+      await page.getByRole("heading", { name: "Enter your PIN" }).waitFor();
       await settle(page);
-      await page.screenshot({ path: join(OUT, `mfa-verify-${w}-${theme}.png`), fullPage: true });
-      await page.getByLabel("6-digit code").fill("123456");
-      await page.getByRole("button", { name: "Verify" }).click();
-      await page.waitForURL((u) => !u.pathname.startsWith("/mfa"));
+      await page.screenshot({ path: join(OUT, `pin-lock-${w}-${theme}.png`), fullPage: true });
+      await unlock(page);
       const ids = await discover(page);
       for (const [name, path] of routes(ids)) {
         await page.goto(`${BASE}${path}`);
@@ -295,13 +306,13 @@ if (run("keyboard")) {
   await page.keyboard.press("Tab");
   await page.keyboard.type("rulebox-demo-1");
   await page.keyboard.press("Enter");
-  await page.waitForURL(/\/mfa/);
+  await page.getByRole("heading", { name: "Enter your PIN" }).waitFor();
   await settle(page);
-  await page.keyboard.type("123456");
+  await page.keyboard.type("482915");
   await page.keyboard.press("Enter");
-  await page.waitForURL((u) => !u.pathname.startsWith("/mfa"));
+  await page.getByRole("heading", { name: "Enter your PIN" }).waitFor({ state: "detached" });
   await settle(page);
-  report.keyboard.push({ step: "sign-in + MFA by keyboard", ok: true, url: page.url() });
+  report.keyboard.push({ step: "sign-in + PIN by keyboard", ok: true, url: page.url() });
   // Skip link.
   await page.keyboard.press("Tab");
   const skip = await page.evaluate(() => document.activeElement?.textContent);

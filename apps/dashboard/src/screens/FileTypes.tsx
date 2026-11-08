@@ -23,10 +23,11 @@ import { useCan } from "../lib/member";
 import { useListPaging, useListView, type ListConfig } from "../lib/listView";
 import { useToast } from "../lib/toast";
 import { strings } from "../lib/strings";
+import { fileTypesStrings } from "../lib/screenStrings/fileTypes";
 import { useForm } from "../lib/useForm";
 import * as v from "../lib/validate";
 
-const s = strings.fileTypes;
+const s = fileTypesStrings;
 
 /** `fileHandlers:page` sort keys; the first is the default (A to Z). A bounded table: offset cursors, exact total inside the page. */
 const LIST: ListConfig = { sorts: ["extension", "app"], defaultSort: { key: "extension", dir: "asc" } };

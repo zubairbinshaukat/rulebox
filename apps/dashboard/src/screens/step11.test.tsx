@@ -7,6 +7,9 @@ import type { ReactNode } from "react";
 import type { Me } from "../data/types";
 import { MeContext } from "../lib/member";
 import { strings } from "../lib/strings";
+import { employeeStrings } from "../lib/screenStrings/employee";
+import { employeesStrings } from "../lib/screenStrings/employees";
+import { groupStrings } from "../lib/screenStrings/group";
 
 // Phase 4 Step 11 screens (Employees, EmployeeDetail, the group page's
 // employees) against the LIVE data seam with the Convex React hooks mocked:
@@ -69,7 +72,7 @@ const admin: Me = {
   status: "active",
   orgId: "org",
   orgName: "Acme",
-  mfa: { enrolled: true, required: true, verified: true },
+  pin: { required: true, set: true },
   serverApiVersion: 1,
 };
 
@@ -164,8 +167,8 @@ describe("Employees list (employees:list, one server-driven page at a time)", ()
     expect(screen.getByRole("link", { name: "Maya Lee" }).getAttribute("href")).toBe("/employees/e1");
     expect(screen.getAllByText("Sales").length).toBeGreaterThan(0);
     expect(screen.getByText("25 GB")).toBeTruthy();
-    expect(screen.getByText(strings.employees.disabled)).toBeTruthy();
-    expect(screen.queryByRole("link", { name: strings.employees.add })).toBeNull();
+    expect(screen.getByText(employeesStrings.disabled)).toBeTruthy();
+    expect(screen.queryByRole("link", { name: employeesStrings.add })).toBeNull();
   });
 
   it("a search is employees:list's own argument, run on Enter; the server ranks it, so no sort is sent, and there is no total", async () => {
@@ -191,7 +194,7 @@ describe("Employees list (employees:list, one server-driven page at a time)", ()
     cx.results["employees:list"] = listPage([row("e1", "Maya Lee")]);
     ui(<Employees />, "admin", "/employees?group=g1&sort=name&dir=asc");
     expect(listArgs()).toEqual({ paginationOpts: { numItems: 10, cursor: null }, groupId: "g1", sort: { key: "created", dir: "desc" } });
-    expect(within(header(strings.employees.colName)).queryByRole("button")).toBeNull();
+    expect(within(header(employeesStrings.colName)).queryByRole("button")).toBeNull();
     expect(last("employees:count")!.args).toEqual({ groupId: "g1" });
   });
 
@@ -200,17 +203,17 @@ describe("Employees list (employees:list, one server-driven page at a time)", ()
     cx.results["employees:list"] = listPage([row("e1", "Maya Lee")]);
     ui(<Employees />, "admin", "/employees");
     const sortButton = (name: string) => within(header(name)).getByRole("button");
-    fireEvent.click(sortButton(strings.employees.colName));
+    fireEvent.click(sortButton(employeesStrings.colName));
     await waitFor(() => expect(listArgs().sort).toEqual({ key: "name", dir: "asc" }));
-    fireEvent.click(sortButton(strings.employees.colName));
+    fireEvent.click(sortButton(employeesStrings.colName));
     await waitFor(() => expect(listArgs().sort).toEqual({ key: "name", dir: "desc" }));
-    fireEvent.click(sortButton(strings.employees.colName));
+    fireEvent.click(sortButton(employeesStrings.colName));
     await waitFor(() => expect(listArgs().sort).toEqual({ key: "created", dir: "desc" }));
-    fireEvent.click(sortButton(strings.employees.colUsername));
+    fireEvent.click(sortButton(employeesStrings.colUsername));
     await waitFor(() => expect(listArgs().sort).toEqual({ key: "username", dir: "asc" }));
-    expect(header(strings.employees.colUsername).getAttribute("aria-sort")).toBe("ascending");
+    expect(header(employeesStrings.colUsername).getAttribute("aria-sort")).toBe("ascending");
     // Not every column sorts: the server has no order by groups, storage or status.
-    expect(within(header(strings.employees.colGroups)).queryByRole("button")).toBeNull();
+    expect(within(header(employeesStrings.colGroups)).queryByRole("button")).toBeNull();
   });
 
   it("URL state: page size and sort are read back, invalid values fall back; page and size changes reset to page 1", async () => {
@@ -250,7 +253,7 @@ describe("Employees list (employees:list, one server-driven page at a time)", ()
     cx.results["groups:list"] = [];
     cx.results["employees:list"] = listPage([]);
     ui(<Employees />, "admin", "/employees");
-    expect(screen.getByText(strings.employees.emptyTitle)).toBeTruthy();
+    expect(screen.getByText(employeesStrings.emptyTitle)).toBeTruthy();
     cleanup();
     ui(<Employees />, "admin", "/employees?q=zzz");
     expect(screen.getByText(strings.table.noResults("zzz"))).toBeTruthy();
@@ -312,7 +315,7 @@ describe("EmployeeDetail (employees:get)", () => {
       throw new ConvexError({ code: "stale_edit" });
     };
     ui(<EmployeeDetail />, "admin", "/employees/e1");
-    fireEvent.change(screen.getByLabelText(new RegExp(strings.employee.name)), { target: { value: "Maya L" } });
+    fireEvent.change(screen.getByLabelText(new RegExp(employeeStrings.name)), { target: { value: "Maya L" } });
     fireEvent.click(screen.getByRole("button", { name: strings.common.saveChanges }));
     await waitFor(() => expect(screen.getByText(strings.common.staleTitle)).toBeTruthy());
   });
@@ -322,7 +325,7 @@ describe("EmployeeDetail (employees:get)", () => {
     const set = vi.fn(async () => null);
     cx.fns["employees:setPassword"] = set;
     ui(<EmployeeDetail />, "admin", "/employees/e1");
-    fireEvent.click(screen.getByRole("button", { name: strings.employee.setPassword }));
+    fireEvent.click(screen.getByRole("button", { name: employeeStrings.setPassword }));
     const dialog = screen.getByRole("dialog");
     const first = within(dialog).getByLabelText(new RegExp(`^${strings.auth.newPassword}`)) as HTMLInputElement;
     const second = within(dialog).getByLabelText(new RegExp(`^${strings.auth.repeatPassword}`)) as HTMLInputElement;
@@ -331,12 +334,12 @@ describe("EmployeeDetail (employees:get)", () => {
     // too short and not equal: nothing is sent
     fireEvent.change(first, { target: { value: "short" } });
     fireEvent.change(second, { target: { value: "other" } });
-    fireEvent.click(within(dialog).getByRole("button", { name: strings.employee.setPassword }));
+    fireEvent.click(within(dialog).getByRole("button", { name: employeeStrings.setPassword }));
     await waitFor(() => expect(within(dialog).getAllByText(strings.validate.passwordEmployee).length).toBeGreaterThan(0));
     expect(set).not.toHaveBeenCalled();
     fireEvent.change(first, { target: { value: "correct horse" } });
     fireEvent.change(second, { target: { value: "correct horse" } });
-    fireEvent.click(within(dialog).getByRole("button", { name: strings.employee.setPassword }));
+    fireEvent.click(within(dialog).getByRole("button", { name: employeeStrings.setPassword }));
     await waitFor(() => expect(set).toHaveBeenCalledWith({ employeeId: "e1", password: "correct horse" }));
     await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
     expect(document.body.textContent).not.toContain("correct horse");
@@ -347,13 +350,13 @@ describe("EmployeeDetail (employees:get)", () => {
     const unlock = vi.fn(async () => null);
     cx.fns["employees:unlock"] = unlock;
     ui(<EmployeeDetail />, "admin", "/employees/e1");
-    expect(screen.getByText(strings.employee.lockedTitle)).toBeTruthy();
-    fireEvent.click(screen.getByRole("button", { name: strings.employee.unlock }));
+    expect(screen.getByText(employeeStrings.lockedTitle)).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: employeeStrings.unlock }));
     await waitFor(() => expect(unlock).toHaveBeenCalledWith({ employeeId: "e1" }));
     cleanup();
     cx.results["employees:get"] = { ...detail(), lockout: { failures: 10, lockedUntil: Date.now() - 1000 } };
     ui(<EmployeeDetail />, "admin", "/employees/e1");
-    expect(screen.queryByText(strings.employee.lockedTitle)).toBeNull();
+    expect(screen.queryByText(employeeStrings.lockedTitle)).toBeNull();
   });
 
   it("disable and delete: the delete needs the username typed and a disabled employee", async () => {
@@ -374,8 +377,8 @@ describe("EmployeeDetail (employees:get)", () => {
     const set = vi.fn(async () => null);
     cx.fns["employees:setDisabled"] = set;
     ui(<EmployeeDetail />, "admin", "/employees/e1");
-    fireEvent.click(screen.getByRole("button", { name: strings.employee.disable }));
-    fireEvent.click(within(screen.getByRole("dialog")).getByRole("button", { name: strings.employee.disable }));
+    fireEvent.click(screen.getByRole("button", { name: employeeStrings.disable }));
+    fireEvent.click(within(screen.getByRole("dialog")).getByRole("button", { name: employeeStrings.disable }));
     await waitFor(() => expect(set).toHaveBeenCalledWith({ employeeId: "e1", disabled: true }));
   });
 
@@ -389,9 +392,9 @@ describe("EmployeeDetail (employees:get)", () => {
     cx.fns["employees:create"] = create;
     ui(<EmployeeDetail />, "admin", "/employees/new");
     expect(cx.queried.some((q) => q.name === "employees:get")).toBe(false);
-    fireEvent.change(screen.getByLabelText(new RegExp(strings.employee.name)), { target: { value: "Noor Ali" } });
+    fireEvent.change(screen.getByLabelText(new RegExp(employeeStrings.name)), { target: { value: "Noor Ali" } });
     fireEvent.click(screen.getByLabelText("Sales"));
-    fireEvent.change(screen.getByLabelText(new RegExp(strings.employee.passwordInitial)), { target: { value: "12345678" } });
+    fireEvent.change(screen.getByLabelText(new RegExp(employeeStrings.passwordInitial)), { target: { value: "12345678" } });
     fireEvent.click(screen.getByRole("button", { name: strings.common.create }));
     await waitFor(() => expect(create).toHaveBeenCalled());
     expect(create).toHaveBeenCalledWith({
@@ -419,7 +422,7 @@ describe("EmployeeDetail (employees:get)", () => {
       throw new ConvexError({ code: "plan_limit", detail: "employees" });
     };
     ui(<EmployeeDetail />, "admin", "/employees/new");
-    fireEvent.change(screen.getByLabelText(new RegExp(strings.employee.name)), { target: { value: "Noor" } });
+    fireEvent.change(screen.getByLabelText(new RegExp(employeeStrings.name)), { target: { value: "Noor" } });
     fireEvent.click(screen.getByRole("button", { name: strings.common.create }));
     await waitFor(() => expect(screen.getByText(strings.errors.planLimit)).toBeTruthy());
   });
@@ -456,7 +459,7 @@ describe("Group page employees", () => {
     cx.fns["groups:removeEmployee"] = remove;
     ui(<GroupDetail />, "admin", "/groups/g1");
     expect(cx.queried.find((p) => p.name === "employees:list")!.args).toEqual({ paginationOpts: { numItems: 10, cursor: null }, sort: { key: "created", dir: "desc" }, groupId: "g1" });
-    fireEvent.click(screen.getByRole("button", { name: `${strings.group.removeEmployee}: Maya Lee` }));
+    fireEvent.click(screen.getByRole("button", { name: `${groupStrings.removeEmployee}: Maya Lee` }));
     await waitFor(() => expect(remove).toHaveBeenCalledWith({ groupId: "g1", employeeId: "e1" }));
   });
 
@@ -465,7 +468,7 @@ describe("Group page employees", () => {
     cx.results["employees:list"] = listPage([row("e1", "Maya Lee")]);
     cx.fns["groups:removeEmployee"] = vi.fn(async () => null);
     ui(<GroupDetail />, "admin", "/groups/g1");
-    fireEvent.click(screen.getByRole("button", { name: `${strings.group.removeEmployee}: Maya Lee` }));
+    fireEvent.click(screen.getByRole("button", { name: `${groupStrings.removeEmployee}: Maya Lee` }));
     expect(screen.getByTestId("where").textContent).toBe("/groups/g1");
     fireEvent.click(screen.getByText("maya.lee"));
     await waitFor(() => expect(screen.getByTestId("where").textContent).toBe("/employees/e1"));
@@ -477,7 +480,7 @@ describe("Group page employees", () => {
     const add = vi.fn(async () => null);
     cx.fns["groups:addEmployee"] = add;
     ui(<GroupDetail />, "admin", "/groups/g1");
-    fireEvent.click(screen.getByRole("button", { name: strings.group.addEmployee }));
+    fireEvent.click(screen.getByRole("button", { name: groupStrings.addEmployee }));
     const dialog = screen.getByRole("dialog");
     // Idle until something is searched for: no employees:search subscription.
     expect(cx.queried.some((q) => q.name === "employees:search")).toBe(false);

@@ -2,7 +2,10 @@
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 
-const css = readFileSync(new URL("../../../../packages/ui/src/components.css", import.meta.url), "utf8");
+const css =
+  readFileSync(new URL("../../../../packages/ui/src/components.css", import.meta.url), "utf8") +
+  "\n" +
+  readFileSync(new URL("../../../../packages/ui/src/components-staff.css", import.meta.url), "utf8");
 
 /** The declarations of the first rule whose selector list contains `selector`. */
 function rule(selector: string): string {

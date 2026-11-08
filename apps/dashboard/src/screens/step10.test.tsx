@@ -7,6 +7,9 @@ import type { ReactNode } from "react";
 import type { Me } from "../data/types";
 import { MeContext } from "../lib/member";
 import { strings } from "../lib/strings";
+import { appEditStrings } from "../lib/screenStrings/appEdit";
+import { appsStrings } from "../lib/screenStrings/apps";
+import { fileTypesStrings } from "../lib/screenStrings/fileTypes";
 
 // Phase 4 Step 10 screens (Apps, AppEdit, File types) against the LIVE data
 // seam with the Convex React hooks mocked: queries answer from `cx.results`,
@@ -61,7 +64,7 @@ const admin: Me = {
   status: "active",
   orgId: "org",
   orgName: "Acme",
-  mfa: { enrolled: true, required: true, verified: true },
+  pin: { required: true, set: true },
   serverApiVersion: 1,
 };
 
@@ -125,11 +128,11 @@ describe("Apps list (apps:list)", () => {
     expect(lastArgs("apps:list")).toEqual({ archived: false, paginationOpts: { numItems: 10, cursor: null }, sort: { key: "created", dir: "desc" } });
     expect(screen.getByRole("link", { name: "Docs" }).getAttribute("href")).toBe("/apps/a1");
     expect(screen.getByText("2 groups")).toBeTruthy();
-    expect(screen.getByText(strings.apps.sources.msi)).toBeTruthy();
-    expect(screen.getByText(strings.apps.noInstalls)).toBeTruthy();
+    expect(screen.getByText(appsStrings.sources.msi)).toBeTruthy();
+    expect(screen.getByText(appsStrings.noInstalls)).toBeTruthy();
     expect(document.querySelector("img[src='https://x.convex.cloud/api/storage/1']")).not.toBeNull();
     // a viewer cannot add
-    expect(screen.queryByRole("link", { name: strings.apps.addWeb })).toBeNull();
+    expect(screen.queryByRole("link", { name: appsStrings.addWeb })).toBeNull();
   });
 
   it("a long group list is shown as 10+ (the query reads only the first assignments)", () => {
@@ -142,7 +145,7 @@ describe("Apps list (apps:list)", () => {
     cx.results["apps:list"] = pageOf([]);
     ui(<Apps />, "admin", "/apps?archived=1");
     expect(lastArgs("apps:list")).toMatchObject({ archived: true });
-    expect(screen.getByText(strings.apps.emptyArchivedTitle)).toBeTruthy();
+    expect(screen.getByText(appsStrings.emptyArchivedTitle)).toBeTruthy();
   });
 });
 
@@ -154,12 +157,12 @@ describe("AppEdit: a website", () => {
     cx.fns["apps:saveIcon"] = saveIcon;
     cx.fns["apps:fetchWebMeta"] = vi.fn(async () => ({ name: "Example Docs", hue: 150, iconPreviewUrl: "data:image/png;base64,AAAA" }));
     ui(<AppEdit />, "admin", "/apps/new?kind=web");
-    fireEvent.change(screen.getByRole("textbox", { name: new RegExp(`^${strings.appEdit.url}`) }), { target: { value: "https://docs.example.com" } });
-    fireEvent.click(screen.getByRole("button", { name: strings.appEdit.fetch }));
-    expect(await screen.findByText(strings.appEdit.fetchedWithIcon)).toBeTruthy();
-    expect(screen.getByText(strings.appEdit.iconPreview)).toBeTruthy();
-    expect((screen.getByRole("textbox", { name: new RegExp(`^${strings.appEdit.name}`) }) as HTMLInputElement).value).toBe("Example Docs");
-    fireEvent.change(screen.getByRole("textbox", { name: new RegExp(`^${strings.appEdit.allowedDomains}`) }), { target: { value: "*.cdn.example.com" } });
+    fireEvent.change(screen.getByRole("textbox", { name: new RegExp(`^${appEditStrings.url}`) }), { target: { value: "https://docs.example.com" } });
+    fireEvent.click(screen.getByRole("button", { name: appEditStrings.fetch }));
+    expect(await screen.findByText(appEditStrings.fetchedWithIcon)).toBeTruthy();
+    expect(screen.getByText(appEditStrings.iconPreview)).toBeTruthy();
+    expect((screen.getByRole("textbox", { name: new RegExp(`^${appEditStrings.name}`) }) as HTMLInputElement).value).toBe("Example Docs");
+    fireEvent.change(screen.getByRole("textbox", { name: new RegExp(`^${appEditStrings.allowedDomains}`) }), { target: { value: "*.cdn.example.com" } });
     fireEvent.click(screen.getByRole("button", { name: strings.common.create }));
     await waitFor(() => expect(saveIcon).toHaveBeenCalledWith({ appId: "a9", png: "data:image/png;base64,AAAA" }));
     expect(createWeb).toHaveBeenCalledWith({
@@ -178,12 +181,12 @@ describe("AppEdit: a website", () => {
     cx.fns["apps:saveIcon"] = saveIcon;
     cx.fns["apps:fetchWebMeta"] = vi.fn(async () => ({ name: "Docs", iconPreviewUrl: "data:image/png;base64,AAAA" }));
     ui(<AppEdit />, "admin", "/apps/new?kind=web");
-    const url = screen.getByRole("textbox", { name: new RegExp(`^${strings.appEdit.url}`) });
+    const url = screen.getByRole("textbox", { name: new RegExp(`^${appEditStrings.url}`) });
     fireEvent.change(url, { target: { value: "https://docs.example.com" } });
-    fireEvent.click(screen.getByRole("button", { name: strings.appEdit.fetch }));
-    await screen.findByText(strings.appEdit.iconPreview);
+    fireEvent.click(screen.getByRole("button", { name: appEditStrings.fetch }));
+    await screen.findByText(appEditStrings.iconPreview);
     fireEvent.change(url, { target: { value: "https://other.example.org" } });
-    expect(screen.queryByText(strings.appEdit.iconPreview)).toBeNull();
+    expect(screen.queryByText(appEditStrings.iconPreview)).toBeNull();
     fireEvent.click(screen.getByRole("button", { name: strings.common.create }));
     await waitFor(() => expect(screen.getByTestId("where").textContent).toBe("/apps/a9"));
     expect(saveIcon).not.toHaveBeenCalled();
@@ -196,11 +199,11 @@ describe("AppEdit: a website", () => {
     });
     cx.fns["apps:fetchWebMeta"] = vi.fn(async () => ({ name: "Docs", iconPreviewUrl: "data:image/png;base64,AAAA" }));
     ui(<AppEdit />, "admin", "/apps/new?kind=web");
-    fireEvent.change(screen.getByRole("textbox", { name: new RegExp(`^${strings.appEdit.url}`) }), { target: { value: "https://docs.example.com" } });
-    fireEvent.click(screen.getByRole("button", { name: strings.appEdit.fetch }));
-    await screen.findByText(strings.appEdit.fetchedWithIcon);
+    fireEvent.change(screen.getByRole("textbox", { name: new RegExp(`^${appEditStrings.url}`) }), { target: { value: "https://docs.example.com" } });
+    fireEvent.click(screen.getByRole("button", { name: appEditStrings.fetch }));
+    await screen.findByText(appEditStrings.fetchedWithIcon);
     fireEvent.click(screen.getByRole("button", { name: strings.common.create }));
-    expect(await screen.findByText(new RegExp(strings.appEdit.iconNotSaved))).toBeTruthy();
+    expect(await screen.findByText(new RegExp(appEditStrings.iconNotSaved))).toBeTruthy();
     await waitFor(() => expect(screen.getByTestId("where").textContent).toBe("/apps/a9"));
   });
 
@@ -208,11 +211,11 @@ describe("AppEdit: a website", () => {
     const createWeb = vi.fn(async () => "a9");
     cx.fns["apps:createWeb"] = createWeb;
     ui(<AppEdit />, "admin", "/apps/new?kind=web");
-    fireEvent.change(screen.getByRole("textbox", { name: new RegExp(`^${strings.appEdit.name}`) }), { target: { value: "Docs" } });
-    fireEvent.change(screen.getByRole("textbox", { name: new RegExp(`^${strings.appEdit.url}`) }), { target: { value: "http://docs.example.com" } });
+    fireEvent.change(screen.getByRole("textbox", { name: new RegExp(`^${appEditStrings.name}`) }), { target: { value: "Docs" } });
+    fireEvent.change(screen.getByRole("textbox", { name: new RegExp(`^${appEditStrings.url}`) }), { target: { value: "http://docs.example.com" } });
     fireEvent.click(screen.getByRole("button", { name: strings.common.create }));
     expect(await screen.findByText(strings.validate.httpsUrl)).toBeTruthy();
-    fireEvent.change(screen.getByRole("textbox", { name: new RegExp(`^${strings.appEdit.url}`) }), { target: { value: "https://10.0.0.1" } });
+    fireEvent.change(screen.getByRole("textbox", { name: new RegExp(`^${appEditStrings.url}`) }), { target: { value: "https://10.0.0.1" } });
     expect(await screen.findByText(strings.validate.privateHost)).toBeTruthy();
     expect(createWeb).not.toHaveBeenCalled();
   });
@@ -223,7 +226,7 @@ describe("AppEdit: a website", () => {
     cx.fns["apps:update"] = update;
     ui(<AppEdit />, "admin", "/apps/a1");
     expect(cx.queried.find((q) => q.name === "apps:get")).toEqual({ name: "apps:get", args: { appId: "a1" } });
-    fireEvent.change(screen.getByRole("textbox", { name: new RegExp(`^${strings.appEdit.name}`) }), { target: { value: "Docs 2" } });
+    fireEvent.change(screen.getByRole("textbox", { name: new RegExp(`^${appEditStrings.name}`) }), { target: { value: "Docs 2" } });
     fireEvent.click(screen.getByRole("button", { name: strings.common.saveChanges }));
     await waitFor(() => expect(update).toHaveBeenCalledTimes(1));
     expect(update.mock.calls[0]![0]).toMatchObject({ appId: "a1", expectedRevision: 3, web: { name: "Docs 2", url: "https://docs.example.com" } });
@@ -240,11 +243,11 @@ describe("AppEdit: a website", () => {
     const assign = vi.fn().mockRejectedValueOnce(new ConvexError({ code: "conflict", field: "app" })).mockResolvedValueOnce({ assignmentId: "x" });
     cx.fns["groups:assignApp"] = assign;
     ui(<AppEdit />, "admin", "/apps/a1");
-    fireEvent.click(screen.getByRole("button", { name: strings.appEdit.assign }));
+    fireEvent.click(screen.getByRole("button", { name: appEditStrings.assign }));
     const dialog = await screen.findByRole("dialog");
-    fireEvent.click(within(dialog).getByRole("button", { name: strings.appEdit.assign }));
+    fireEvent.click(within(dialog).getByRole("button", { name: appEditStrings.assign }));
     expect(await within(dialog).findByText("This group already has this app.")).toBeTruthy();
-    fireEvent.click(within(dialog).getByRole("button", { name: strings.appEdit.assign }));
+    fireEvent.click(within(dialog).getByRole("button", { name: appEditStrings.assign }));
     await waitFor(() => expect(assign).toHaveBeenCalledTimes(2));
     expect(assign).toHaveBeenLastCalledWith({ appId: "a1", groupId: "g1", audience: "everyone", pinnedTaskbar: false, pinnedDesktop: true });
   });
@@ -256,7 +259,7 @@ describe("AppEdit: a website", () => {
     cx.fns["apps:setArchived"] = setArchived;
     cx.fns["apps:remove"] = remove;
     ui(<AppEdit />, "admin", "/apps/a1");
-    fireEvent.click(screen.getByRole("button", { name: strings.appEdit.unarchive }));
+    fireEvent.click(screen.getByRole("button", { name: appEditStrings.unarchive }));
     await waitFor(() => expect(setArchived).toHaveBeenCalledWith({ appId: "a1", archived: false }));
     fireEvent.click(screen.getByRole("button", { name: strings.common.delete }));
     const dialog = await screen.findByRole("dialog");
@@ -288,12 +291,12 @@ describe("AppEdit: a Windows program", () => {
     cx.fns["apps:resolveWinget"] = resolve;
     cx.fns["apps:createDesktop"] = createDesktop;
     ui(<AppEdit />, "admin", "/apps/new?kind=desktop");
-    fireEvent.change(screen.getByRole("textbox", { name: new RegExp(`^${strings.appEdit.wingetId}`) }), { target: { value: "7zip.7zip" } });
-    fireEvent.click(screen.getByRole("button", { name: strings.appEdit.resolve }));
-    expect(await screen.findByText(strings.appEdit.resolved("7zip.7zip", "24.08"))).toBeTruthy();
+    fireEvent.change(screen.getByRole("textbox", { name: new RegExp(`^${appEditStrings.wingetId}`) }), { target: { value: "7zip.7zip" } });
+    fireEvent.click(screen.getByRole("button", { name: appEditStrings.resolve }));
+    expect(await screen.findByText(appEditStrings.resolved("7zip.7zip", "24.08"))).toBeTruthy();
     expect(resolve).toHaveBeenCalledWith({ packageId: "7zip.7zip", version: undefined });
-    expect((screen.getByRole("textbox", { name: new RegExp(`^${strings.appEdit.name}`) }) as HTMLInputElement).value).toBe("7-Zip");
-    fireEvent.change(screen.getByRole("textbox", { name: new RegExp(`^${strings.appEdit.exe}`) }), { target: { value: "{ProgramFiles}\\7-Zip\\7zFM.exe" } });
+    expect((screen.getByRole("textbox", { name: new RegExp(`^${appEditStrings.name}`) }) as HTMLInputElement).value).toBe("7-Zip");
+    fireEvent.change(screen.getByRole("textbox", { name: new RegExp(`^${appEditStrings.exe}`) }), { target: { value: "{ProgramFiles}\\7-Zip\\7zFM.exe" } });
     fireEvent.click(screen.getByRole("button", { name: strings.common.create }));
     await waitFor(() => expect(createDesktop).toHaveBeenCalledTimes(1));
     expect(createDesktop.mock.calls[0]![0]).toMatchObject({
@@ -309,10 +312,10 @@ describe("AppEdit: a Windows program", () => {
       .mockRejectedValueOnce(new ConvexError({ code: "winget_unsupported", detail: "it only offers a per-user installer" }))
       .mockRejectedValueOnce(new ConvexError({ code: "winget_unreachable" }));
     ui(<AppEdit />, "admin", "/apps/new?kind=desktop");
-    fireEvent.change(screen.getByRole("textbox", { name: new RegExp(`^${strings.appEdit.wingetId}`) }), { target: { value: "Spotify.Spotify" } });
-    fireEvent.click(screen.getByRole("button", { name: strings.appEdit.resolve }));
+    fireEvent.change(screen.getByRole("textbox", { name: new RegExp(`^${appEditStrings.wingetId}`) }), { target: { value: "Spotify.Spotify" } });
+    fireEvent.click(screen.getByRole("button", { name: appEditStrings.resolve }));
     expect(await screen.findByText(strings.errors.wingetUnsupportedBecause("it only offers a per-user installer"))).toBeTruthy();
-    fireEvent.click(screen.getByRole("button", { name: strings.appEdit.resolve }));
+    fireEvent.click(screen.getByRole("button", { name: appEditStrings.resolve }));
     expect(await screen.findByText(strings.errors.wingetUnreachable)).toBeTruthy();
   });
 
@@ -320,10 +323,10 @@ describe("AppEdit: a Windows program", () => {
     const createDesktop = vi.fn(async () => "a8");
     cx.fns["apps:createDesktop"] = createDesktop;
     ui(<AppEdit />, "admin", "/apps/new?kind=desktop");
-    fireEvent.click(screen.getByRole("radio", { name: strings.apps.sources.preinstalled }));
-    fireEvent.change(screen.getByRole("textbox", { name: new RegExp(`^${strings.appEdit.name}`) }), { target: { value: "Tool" } });
+    fireEvent.click(screen.getByRole("radio", { name: appsStrings.sources.preinstalled }));
+    fireEvent.change(screen.getByRole("textbox", { name: new RegExp(`^${appEditStrings.name}`) }), { target: { value: "Tool" } });
     for (const bad of ["C:\\x.exe", "{ProgramFiles}\\a\\b.bat", "{ProgramFiles}\\..\\x.exe"]) {
-      fireEvent.change(screen.getByRole("textbox", { name: new RegExp(`^${strings.appEdit.exe}`) }), { target: { value: bad } });
+      fireEvent.change(screen.getByRole("textbox", { name: new RegExp(`^${appEditStrings.exe}`) }), { target: { value: bad } });
       fireEvent.click(screen.getByRole("button", { name: strings.common.create }));
       expect(await screen.findByText(strings.validate.exePath)).toBeTruthy();
     }
@@ -348,9 +351,9 @@ describe("File types (fileHandlers:page, apps:options)", () => {
     cx.fns["fileHandlers:remove"] = remove;
     ui(<FileTypes />, "admin", "/file-types");
     expect(screen.getByText(".pdf")).toBeTruthy();
-    fireEvent.click(screen.getByRole("button", { name: strings.fileTypes.add }));
+    fireEvent.click(screen.getByRole("button", { name: fileTypesStrings.add }));
     const dialog = await screen.findByRole("dialog");
-    fireEvent.change(within(dialog).getByLabelText(new RegExp(`^${strings.fileTypes.extension}`)), { target: { value: "DOCX" } });
+    fireEvent.change(within(dialog).getByLabelText(new RegExp(`^${fileTypesStrings.extension}`)), { target: { value: "DOCX" } });
     fireEvent.click(within(dialog).getByRole("button", { name: strings.common.add }));
     await waitFor(() => expect(set).toHaveBeenCalledWith({ extension: ".docx", appId: "a2" }));
 
@@ -366,10 +369,10 @@ describe("File types (fileHandlers:page, apps:options)", () => {
     const set = vi.fn(async () => null);
     cx.fns["fileHandlers:set"] = set;
     ui(<FileTypes />, "admin", "/file-types");
-    fireEvent.click(screen.getByRole("button", { name: strings.fileTypes.add }));
+    fireEvent.click(screen.getByRole("button", { name: fileTypesStrings.add }));
     const dialog = await screen.findByRole("dialog");
     for (const ext of ["exe", ".BAT", "ps1", "msi"]) {
-      fireEvent.change(within(dialog).getByLabelText(new RegExp(`^${strings.fileTypes.extension}`)), { target: { value: ext } });
+      fireEvent.change(within(dialog).getByLabelText(new RegExp(`^${fileTypesStrings.extension}`)), { target: { value: ext } });
       fireEvent.click(within(dialog).getByRole("button", { name: strings.common.add }));
       expect(await within(dialog).findByText(strings.validate.extensionDenied)).toBeTruthy();
     }
@@ -381,7 +384,7 @@ describe("File types (fileHandlers:page, apps:options)", () => {
     cx.results["apps:options"] = options;
     ui(<FileTypes />, "viewer", "/file-types");
     expect(screen.getByText(".pdf")).toBeTruthy();
-    expect(screen.queryByRole("button", { name: strings.fileTypes.add })).toBeNull();
+    expect(screen.queryByRole("button", { name: fileTypesStrings.add })).toBeNull();
     expect(screen.queryByRole("button", { name: `${strings.common.remove} .pdf` })).toBeNull();
   });
 });

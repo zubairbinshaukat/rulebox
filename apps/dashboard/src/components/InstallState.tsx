@@ -1,6 +1,6 @@
 import { Pill, type PillTone } from "@rulebox/ui";
 import type { InstallState } from "../data/types";
-import { strings } from "../lib/strings";
+import { installStateStrings } from "../lib/screenStrings/installState";
 
 const TONE: Record<InstallState, PillTone> = {
   installed: "success",
@@ -20,7 +20,7 @@ export function InstallStatePill({ state }: { state: InstallState }) {
   return (
     <Pill tone={TONE[state]} dot={!BUSY.includes(state)}>
       {BUSY.includes(state) ? <span className="dash-spin" aria-hidden="true" style={{ width: 10, height: 10 }} /> : null}
-      {strings.installState[state]}
+      {installStateStrings[state]}
     </Pill>
   );
 }

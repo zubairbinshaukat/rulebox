@@ -5,7 +5,6 @@ import {
   useChangeRole,
   useCreateResetCode,
   useInviteMember,
-  useResetMemberMfa,
   useRevokeInvite,
   useSetMemberDisabled,
 } from "../../data";
@@ -34,11 +33,12 @@ import { secShell as sec } from "../../lib/stepup/strings-shell";
 import { useResetMemberStepUp } from "../../data/stepup";
 import { needsStepUp } from "../../stepup/context";
 import { strings } from "../../lib/strings";
+import { settingsStrings } from "../../lib/screenStrings/settings";
 import { useForm } from "../../lib/useForm";
 import { useMinute } from "../../lib/useNow";
 import * as v from "../../lib/validate";
 
-const s = strings.settings.members;
+const s = settingsStrings.members;
 const ROLES: Role[] = ["owner", "admin", "viewer"];
 
 /** `members:page` sort keys (the first is the default, A to Z). Small bounded table: offset cursors, exact total inside the page. */
@@ -50,7 +50,6 @@ type Dialog =
   | { kind: "invite" }
   | { kind: "role"; member: MemberRow }
   | { kind: "disable"; member: MemberRow }
-  | { kind: "resetMfa"; member: MemberRow }
   | { kind: "resetStepUp"; member: MemberRow }
   | { kind: "code"; title: string; body: string; code: string }
   | { kind: "revokeInvite"; invite: InviteRow };
@@ -67,7 +66,6 @@ export function MembersTab() {
   // Every change here is a major action (plan 4.16): the data seam opens the
   // confirm dialog when the last confirmation is stale, then retries once.
   const setDisabled = useSetMemberDisabled();
-  const resetMfa = useResetMemberMfa();
   const resetCode = useCreateResetCode();
   const revokeInvite = useRevokeInvite();
   const resetStepUp = useResetMemberStepUp();
@@ -107,7 +105,6 @@ export function MembersTab() {
         cell: (x) => (x.status === "active" ? <StatusDot tone="success" label={s.active} /> : <StatusDot tone="neutral" label={s.disabled} />),
       },
       { key: "created", header: s.colJoined, sortable: true, cell: (x) => <RelativeTime ms={x.createdAt} /> },
-      { key: "mfa", header: s.colMfa, cell: (x) => (x.mfaEnrolled ? <Pill tone="success" dot>{s.mfaOn}</Pill> : <Pill dot>{s.mfaOff}</Pill>) },
       ...(isOwner
         ? [
             {
@@ -134,11 +131,6 @@ export function MembersTab() {
                     >
                       {s.resetCode}
                     </Button>
-                    {x.mfaEnrolled ? (
-                      <Button variant="ghost" className="dash-btn--sm" onClick={() => setDialog({ kind: "resetMfa", member: x })} aria-label={`${s.resetMfa}: ${x.email}`}>
-                        {s.resetMfa}
-                      </Button>
-                    ) : null}
                     <Button
                       variant="ghost"
                       className="dash-btn--sm"
@@ -178,7 +170,7 @@ export function MembersTab() {
   return (
     <>
       <Card
-        title={strings.settings.tabs.members}
+        title={settingsStrings.tabs.members}
         sub={s.lead}
         body="none"
         actions={
@@ -198,7 +190,7 @@ export function MembersTab() {
           ) : null}
           <ServerTable<MemberRow>
             viewSwitch
-            caption={strings.settings.tabs.members}
+            caption={settingsStrings.tabs.members}
             columns={cols}
             getKey={(x) => x._id}
             isDim={(x) => x.status === "disabled"}
@@ -240,16 +232,6 @@ export function MembersTab() {
             ? setDisabled({ memberId: dialog.member._id, disabled: true, expectedRevision: dialog.member.revision })
             : Promise.resolve()
         }
-        onDone={() => toast(s.saved)}
-        onClose={() => setDialog(null)}
-      />
-      <ConfirmDialog
-        open={dialog?.kind === "resetMfa"}
-        title={dialog?.kind === "resetMfa" ? s.resetMfaTitle(dialog.member.email) : ""}
-        body={s.resetMfaBody}
-        confirmLabel={s.resetMfa}
-        danger
-        onConfirm={() => (dialog?.kind === "resetMfa" ? resetMfa({ memberId: dialog.member._id }) : Promise.resolve())}
         onDone={() => toast(s.saved)}
         onClose={() => setDialog(null)}
       />

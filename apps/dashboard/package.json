@@ -28,8 +28,7 @@
     "gsap": "catalog:",
     "react": "catalog:",
     "react-dom": "catalog:",
-    "react-router": "catalog:",
-    "uqr": "catalog:"
+    "react-router": "catalog:"
   },
   "devDependencies": {
     "@axe-core/playwright": "catalog:",

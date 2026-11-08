@@ -13,7 +13,7 @@ const THEMES = [
   { value: "auto", label: strings.app.themeAuto },
 ] as const;
 
-/** Sign-in, join, reset and MFA: brand panel + one focused card. */
+/** Sign-in, join, reset, PIN screens: brand panel + one focused card. */
 export function AuthShell({
   title,
   lead,
@@ -29,7 +29,7 @@ export function AuthShell({
 }) {
   const [theme, setTheme] = useTheme();
   // This screen is on screen now: fetch what comes after sign-in while the user types.
-  useEffect(() => prefetchWhenIdle(["Mfa", "Layout", "Overview"]), []);
+  useEffect(() => prefetchWhenIdle(["Layout", "Overview"]), []);
   useEffect(() => {
     document.title = `${title} · ${strings.app.name}`;
   }, [title]);

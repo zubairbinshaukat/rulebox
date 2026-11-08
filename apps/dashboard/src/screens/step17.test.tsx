@@ -6,6 +6,11 @@ import type { ReactNode } from "react";
 import type { Me } from "../data/types";
 import { MeContext } from "../lib/member";
 import { strings } from "../lib/strings";
+import { appEditStrings } from "../lib/screenStrings/appEdit";
+import { auditStrings } from "../lib/screenStrings/audit";
+import { deviceStrings } from "../lib/screenStrings/device";
+import { installStrings } from "../lib/screenStrings/install";
+import { installStateStrings } from "../lib/screenStrings/installState";
 
 // Phase 4 Step 17 screens (Overview, Audit, the install cards of AppEdit and
 // DeviceDetail, the history panel) against the LIVE data seam with the Convex
@@ -81,7 +86,7 @@ const admin: Me = {
   status: "active",
   orgId: "org",
   orgName: "Acme",
-  mfa: { enrolled: true, required: true, verified: true },
+  pin: { required: true, set: true },
   serverApiVersion: 1,
 };
 
@@ -261,7 +266,7 @@ describe("Audit (audit:list)", () => {
 
   it("an empty log says so", () => {
     ui(<Audit />, "viewer", "/audit");
-    expect(screen.getByText(strings.audit.emptyTitle)).toBeTruthy();
+    expect(screen.getByText(auditStrings.emptyTitle)).toBeTruthy();
   });
 });
 
@@ -295,17 +300,17 @@ describe("AppEdit: install status (apps:installSummary, apps:installs)", () => {
     ui(<AppEdit />, "admin", "/apps/a1");
     expect(cx.queried.some((q) => q.name === "apps:installSummary" && JSON.stringify(q.args) === JSON.stringify({ appId: "a1" }))).toBe(true);
     // The tabs show the counts (the cap shows as 1,000+); the list asks for the first state that has PCs (installed).
-    expect(screen.getByRole("button", { name: new RegExp(`${strings.installState.failed}\\s*1,?000\\+`) })).toBeTruthy();
+    expect(screen.getByRole("button", { name: new RegExp(`${installStateStrings.failed}\\s*1,?000\\+`) })).toBeTruthy();
     expect(lastPaged("apps:installs")?.args).toEqual({ appId: "a1", state: "installed", paginationOpts: { numItems: 10, cursor: null }, sort: { key: "updated", dir: "desc" } });
-    expect(screen.getByRole("button", { name: strings.install.retry })).toBeTruthy();
+    expect(screen.getByRole("button", { name: installStrings.retry })).toBeTruthy();
   });
 
   it("choosing another state asks for that state; a viewer has no Retry", async () => {
     cx.results["apps:get"] = program;
     cx.results["apps:installSummary"] = { pending: 0, downloading: 0, installing: 0, installed: 7, failed: 1, removing: 0, removed: 0, unsupported: 0 };
     ui(<AppEdit />, "viewer", "/apps/a1");
-    expect(screen.queryByRole("button", { name: strings.install.retry })).toBeNull();
-    fireEvent.click(screen.getByRole("button", { name: new RegExp(`${strings.installState.failed}\\s*1$`) }));
+    expect(screen.queryByRole("button", { name: installStrings.retry })).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: new RegExp(`${installStateStrings.failed}\\s*1$`) }));
     await waitFor(() => expect(lastPaged("apps:installs")?.args).toMatchObject({ appId: "a1", state: "failed" }));
   });
 
@@ -316,7 +321,7 @@ describe("AppEdit: install status (apps:installSummary, apps:installs)", () => {
     ui(<AppEdit />, "viewer", "/apps/a1");
     expect(screen.getByRole("link", { name: "Front desk" })).toBeTruthy();
     cx.loading = (name, args) => name === "apps:installs" && (args as { state: string }).state === "failed";
-    fireEvent.click(screen.getByRole("button", { name: new RegExp(`${strings.installState.failed}\\s*1$`) }));
+    fireEvent.click(screen.getByRole("button", { name: new RegExp(`${installStateStrings.failed}\\s*1$`) }));
     await waitFor(() => expect(lastPaged("apps:installs")?.args).toMatchObject({ appId: "a1", state: "failed" }));
     expect(screen.queryByRole("link", { name: "Front desk" })).toBeNull();
   });
@@ -330,8 +335,8 @@ describe("AppEdit: install status (apps:installSummary, apps:installs)", () => {
     cx.results["apps:installSummary"] = { pending: 0, downloading: 0, installing: 0, installed: 1, failed: 2, removing: 0, removed: 0, unsupported: 0 };
     view.rerender(tree(<AppEdit />, "viewer", "/apps/a1"));
     expect(lastPaged("apps:installs")?.args).toMatchObject({ appId: "a1", state: "failed" });
-    expect(screen.getByRole("button", { name: new RegExp(`${strings.installState.failed}\\s*2$`) }).getAttribute("aria-pressed")).toBe("true");
-    fireEvent.click(screen.getByRole("button", { name: new RegExp(`${strings.installState.installed}\\s*1$`) }));
+    expect(screen.getByRole("button", { name: new RegExp(`${installStateStrings.failed}\\s*2$`) }).getAttribute("aria-pressed")).toBe("true");
+    fireEvent.click(screen.getByRole("button", { name: new RegExp(`${installStateStrings.installed}\\s*1$`) }));
     expect(lastPaged("apps:installs")?.args).toMatchObject({ appId: "a1", state: "installed" });
   });
 
@@ -339,7 +344,7 @@ describe("AppEdit: install status (apps:installSummary, apps:installs)", () => {
     cx.results["apps:get"] = program;
     cx.results["apps:installSummary"] = { pending: 0, downloading: 0, installing: 0, installed: 0, failed: 0, removing: 0, removed: 0, unsupported: 0 };
     ui(<AppEdit />, "viewer", "/apps/a1");
-    expect(screen.getAllByText(strings.appEdit.installStatusNone).length).toBeGreaterThanOrEqual(1);
+    expect(screen.getAllByText(appEditStrings.installStatusNone).length).toBeGreaterThanOrEqual(1);
   });
 });
 
@@ -373,11 +378,11 @@ describe("DeviceDetail: installs (fleet:installs) and history (audit:forTarget)"
     expect(lastPaged("fleet:installs")?.args).toMatchObject({ deviceId: "d1", paginationOpts: { numItems: 10, cursor: null }, sort: { key: "updated", dir: "desc" } });
     expect(cx.paged.some((p) => p.name === "audit:forTarget" && (p.args as { targetId: string }).targetId === "d1")).toBe(true);
     const reader = screen.getByRole("link", { name: "Reader" }).closest("tr") as HTMLElement;
-    expect(within(reader).getByText(strings.installState.failed)).toBeTruthy();
-    expect(within(reader).getByRole("button", { name: strings.install.retry })).toBeTruthy();
+    expect(within(reader).getByText(installStateStrings.failed)).toBeTruthy();
+    expect(within(reader).getByRole("button", { name: installStrings.retry })).toBeTruthy();
     const docs = screen.getByRole("link", { name: "Docs" }).closest("tr") as HTMLElement;
-    expect(within(docs).getByText(strings.installState.installed)).toBeTruthy();
-    expect(within(docs).queryByRole("button", { name: strings.install.retry })).toBeNull();
+    expect(within(docs).getByText(installStateStrings.installed)).toBeTruthy();
+    expect(within(docs).queryByRole("button", { name: installStrings.retry })).toBeNull();
     expect(screen.getByText("Renamed the PC Desk to Front desk")).toBeTruthy();
   });
 
@@ -393,28 +398,28 @@ describe("DeviceDetail: installs (fleet:installs) and history (audit:forTarget)"
     const retry = vi.fn(async () => undefined);
     cx.fns["apps:retry"] = retry;
     ui(<DeviceDetail />, "admin", "/devices/d1");
-    fireEvent.click(screen.getByRole("button", { name: strings.install.retry }));
+    fireEvent.click(screen.getByRole("button", { name: installStrings.retry }));
     const dialog = screen.getByRole("dialog");
-    expect(within(dialog).getByText(strings.install.retryConfirmBody("Reader"))).toBeTruthy();
+    expect(within(dialog).getByText(installStrings.retryConfirmBody("Reader"))).toBeTruthy();
     expect(retry).not.toHaveBeenCalled();
 
     fireEvent.click(within(dialog).getByRole("button", { name: strings.common.cancel }));
     expect(screen.queryByRole("dialog")).toBeNull();
     expect(retry).not.toHaveBeenCalled();
 
-    fireEvent.click(screen.getByRole("button", { name: strings.install.retry }));
-    fireEvent.click(within(screen.getByRole("dialog")).getByRole("button", { name: strings.install.retryConfirmAction }));
+    fireEvent.click(screen.getByRole("button", { name: installStrings.retry }));
+    fireEvent.click(within(screen.getByRole("dialog")).getByRole("button", { name: installStrings.retryConfirmAction }));
     await waitFor(() => expect(retry).toHaveBeenCalledWith({ appId: "a1" }));
     await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
-    expect(screen.getByText(strings.install.retried)).toBeTruthy();
+    expect(screen.getByText(installStrings.retried)).toBeTruthy();
   });
 
   it("Retry is disabled, with the reason, for an app the server says cannot be retried", () => {
     withFailedInstall({ retryable: false });
     ui(<DeviceDetail />, "admin", "/devices/d1");
-    const button = screen.getByRole("button", { name: strings.install.retry }) as HTMLButtonElement;
+    const button = screen.getByRole("button", { name: installStrings.retry }) as HTMLButtonElement;
     expect(button.disabled).toBe(true);
-    expect(button.getAttribute("title")).toBe(strings.install.retryUnavailable);
+    expect(button.getAttribute("title")).toBe(installStrings.retryUnavailable);
   });
 
   it("the history of another PC does not show this PC's rows while its first page loads", () => {
@@ -457,7 +462,7 @@ describe("Step 17 follow-ups: roster notice, no-group link, short pages, capped 
     cx.statuses["apps:installs"] = "CanLoadMore";
     ui(<AppEdit />, "viewer", "/apps/a1");
     expect(screen.getByText(strings.table.emptyPage)).toBeTruthy();
-    expect(screen.queryByText(strings.appEdit.installStatusNone)).toBeNull();
+    expect(screen.queryByText(appEditStrings.installStatusNone)).toBeNull();
     fireEvent.click(screen.getByRole("button", { name: strings.pager.next }));
     expect(lastPaged("apps:installs")?.args).toMatchObject({ appId: "a1", state: "failed", paginationOpts: { numItems: 10, cursor: "c:0" } });
   });
@@ -467,7 +472,7 @@ describe("Step 17 follow-ups: roster notice, no-group link, short pages, capped 
     cx.results["apps:installSummary"] = { pending: 0, downloading: 0, installing: 0, installed: 0, failed: 3, removing: 0, removed: 0, unsupported: 0 };
     cx.pages["apps:installs"] = [];
     ui(<AppEdit />, "viewer", "/apps/a1");
-    expect(screen.getAllByText(strings.appEdit.installStatusNone).length).toBeGreaterThanOrEqual(1);
+    expect(screen.getAllByText(appEditStrings.installStatusNone).length).toBeGreaterThanOrEqual(1);
     expect(screen.queryByRole("button", { name: strings.pager.next })).toBeNull();
   });
 
@@ -475,12 +480,12 @@ describe("Step 17 follow-ups: roster notice, no-group link, short pages, capped 
     cx.results["apps:get"] = program;
     cx.results["apps:installSummary"] = { pending: 0, downloading: 0, installing: 0, installed: 1001, failed: 0, removing: 0, removed: 0, unsupported: 0, capped: true };
     ui(<AppEdit />, "viewer", "/apps/a1");
-    expect(screen.getByText(strings.appEdit.installCapped)).toBeTruthy();
-    expect(screen.getByRole("button", { name: new RegExp(`${strings.installState.installed}\\s*1,?000\\+`) })).toBeTruthy();
+    expect(screen.getByText(appEditStrings.installCapped)).toBeTruthy();
+    expect(screen.getByRole("button", { name: new RegExp(`${installStateStrings.installed}\\s*1,?000\\+`) })).toBeTruthy();
     cleanup();
     cx.results["apps:installSummary"] = { pending: 0, downloading: 0, installing: 0, installed: 12, failed: 0, removing: 0, removed: 0, unsupported: 0 };
     ui(<AppEdit />, "viewer", "/apps/a1");
-    expect(screen.queryByText(strings.appEdit.installCapped)).toBeNull();
+    expect(screen.queryByText(appEditStrings.installCapped)).toBeNull();
   });
 
   it("DeviceDetail: an empty page with more to read offers Next instead of 'no apps are assigned'", () => {
@@ -504,7 +509,7 @@ describe("Step 17 follow-ups: roster notice, no-group link, short pages, capped 
     cx.pages["fleet:installs"] = [];
     cx.statuses["fleet:installs"] = "CanLoadMore";
     ui(<DeviceDetail />, "viewer", "/devices/d1");
-    expect(screen.queryByText(strings.device.installsNone)).toBeNull();
+    expect(screen.queryByText(deviceStrings.installsNone)).toBeNull();
     expect(screen.getByText(strings.table.emptyPage)).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: strings.pager.next }));
     expect(lastPaged("fleet:installs")?.args).toMatchObject({ deviceId: "d1", paginationOpts: { numItems: 10, cursor: "c:0" } });

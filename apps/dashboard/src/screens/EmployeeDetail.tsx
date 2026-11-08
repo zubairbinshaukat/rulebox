@@ -32,10 +32,13 @@ import { useToast } from "../lib/toast";
 import { formatGb, formatTime } from "../lib/format";
 import { messageFor } from "../lib/errors";
 import { strings } from "../lib/strings";
+import { employeeStrings } from "../lib/screenStrings/employee";
+import { employeesStrings } from "../lib/screenStrings/employees";
+import { groupsStrings } from "../lib/screenStrings/groups";
 import { useForm } from "../lib/useForm";
 import * as v from "../lib/validate";
 
-const s = strings.employee;
+const s = employeeStrings;
 
 interface ProfileValues extends Record<string, unknown> {
   name: string;
@@ -75,7 +78,7 @@ export default function EmployeeDetail() {
   return (
     <div className="dash-page">
       {detail.status !== "ready" ? (
-        <PageHeader title={detail.status === "loading" ? strings.app.loading : strings.employees.title} back={{ to: "/employees", label: s.back }} />
+        <PageHeader title={detail.status === "loading" ? strings.app.loading : employeesStrings.title} back={{ to: "/employees", label: s.back }} />
       ) : null}
       <QueryRegion state={detail} skeleton={<div className="dash-card dash-card--pad"><SkeletonBlock lines={6} /></div>}>
         {(d) => (isNew ? <NewEmployee d={d} /> : <ExistingEmployee d={d} />)}
@@ -135,11 +138,11 @@ function ExistingEmployee({ d }: { d: Detail }) {
         meta={
           <>
             <span className="dash-chip dash-mono">{d.username}</span>
-            {d.disabled ? <StatusDot tone="neutral" label={strings.employees.disabled} /> : <StatusDot tone="success" label={strings.employees.active} />}
+            {d.disabled ? <StatusDot tone="neutral" label={employeesStrings.disabled} /> : <StatusDot tone="success" label={employeesStrings.active} />}
           </>
         }
       />
-      {d.disabled ? <InlineNotice tone="neutral" title={strings.employees.disabled} detail={s.disabledHelp} /> : null}
+      {d.disabled ? <InlineNotice tone="neutral" title={employeesStrings.disabled} detail={s.disabledHelp} /> : null}
       {d.lockout ? <LockoutNotice d={d} /> : null}
 
       <div className="dash-grid dash-grid--main">
@@ -199,7 +202,7 @@ function ReadOnlyProfile({ d }: { d: Detail }) {
         </div>
         <div className="dash-kv__item">
           <dt>{s.quota}</dt>
-          <dd>{d.quotaGb === undefined ? `${strings.employees.defaultQuota} (${d.defaultQuotaGb ? formatGb(d.defaultQuotaGb) : strings.employees.unlimited})` : d.quotaGb === 0 ? strings.employees.unlimited : formatGb(d.quotaGb)}</dd>
+          <dd>{d.quotaGb === undefined ? `${employeesStrings.defaultQuota} (${d.defaultQuotaGb ? formatGb(d.defaultQuotaGb) : employeesStrings.unlimited})` : d.quotaGb === 0 ? employeesStrings.unlimited : formatGb(d.quotaGb)}</dd>
         </div>
         <div className="dash-kv__item">
           <dt>{s.groups}</dt>
@@ -283,7 +286,7 @@ function ProfileForm({
         </Field>
         <FieldSet legend={s.groups} hint={s.groupsHint}>
           {d.groupOptions.length === 0 ? (
-            <p className="dash-muted">{strings.groups.emptyBody}</p>
+            <p className="dash-muted">{groupsStrings.emptyBody}</p>
           ) : (
             <div className="dash-checks">
               {d.groupOptions.map((g) => (

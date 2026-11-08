@@ -10,11 +10,12 @@ import { QueryRegion } from "../../components/Region";
 import { SkeletonBlock } from "../../components/Skeleton";
 import { useToast } from "../../lib/toast";
 import { strings } from "../../lib/strings";
+import { groupStrings } from "../../lib/screenStrings/group";
 import { useForm } from "../../lib/useForm";
 import { assignmentErrorMessage } from "./errors";
 import { groupText } from "./strings";
 
-const s = strings.group;
+const s = groupStrings;
 
 type Fields = { audience: Audience; pinnedTaskbar: boolean; pinnedDesktop: boolean };
 

@@ -10,7 +10,7 @@ import { lazyScreen } from "./app/screens";
 const SignIn = lazyScreen("SignIn");
 const Join = lazyScreen("Join");
 const Reset = lazyScreen("Reset");
-const Mfa = lazyScreen("Mfa");
+const PinReset = lazyScreen("PinReset");
 const Layout = lazyScreen("Layout");
 const Overview = lazyScreen("Overview");
 const Devices = lazyScreen("Devices");
@@ -39,7 +39,8 @@ export function App() {
             <Route path="/sign-in" element={<SignIn />} />
             <Route path="/join" element={<Join />} />
             <Route path="/reset" element={<Reset />} />
-            <Route path="/mfa" element={<Mfa />} />
+            {/* Needs a session but not the PIN screen: the member who forgot the PIN lands here from the email. */}
+            <Route path="/pin-reset" element={<PinReset />} />
             <Route element={<RequireMember />}>
               <Route element={<Layout />}>
                 <Route index element={<Overview />} />

@@ -4,11 +4,11 @@ import { demoApi, demoDevicesApi, demoEmployeesApi } from "./hooks";
 import { db, resetDemo, setControls, setSession, simulateConcurrentEdit, simulatePublishTrouble } from "./store";
 import { errorCodeOf } from "../../lib/errors";
 
-/** Signed in, MFA passed and step-up verified just now (writes need an unlocked session). */
+/** Signed in and step-up verified just now (writes need an unlocked session). */
 function signInAs(email: string) {
   const m = db().members.find((x) => x.email === email)!;
   const now = Date.now();
-  setSession({ memberId: m._id, mfaVerified: true, createdAt: now, stepUp: { verifiedAt: now, lastActiveAt: now, method: "actionPin" } });
+  setSession({ memberId: m._id, createdAt: now, stepUp: { verifiedAt: now, lastActiveAt: now, method: "actionPin" } });
 }
 
 /** One page of the first query (page 1 of 50 unless said otherwise). */

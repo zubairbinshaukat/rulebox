@@ -16,6 +16,13 @@
  * `BROADCAST_EVERY_MS`) and about a lock, through a BroadcastChannel (no
  * storage, nothing secret). An unlock in one tab reaches the others through the
  * live `stepUp:status` query: a verification the locked tab has not seen before.
+ *
+ * Lock on every load (Phase 4b): with `lockOnStart` the controller begins
+ * locked (reason "load"), so every page load or new tab asks for the PIN
+ * before any screen mounts. That lock is per tab: nothing is told to the
+ * server or to the other tabs, and they stay as they are. The first
+ * `stepUp:status` answer is only noted (the verification the server already
+ * has is not a reason to open); a verification that appears after it unlocks.
  */
 import type { StepUpStatus } from "../../data/types";
 import { errorCodeOf } from "../errors";
@@ -40,7 +47,7 @@ export const openBroadcastChannel: OpenChannel = (onMessage) => {
   return { post: (m) => bc.postMessage(m), close: () => bc.close() };
 };
 
-export type LockReason = "idle" | "manual" | "elsewhere" | "server";
+export type LockReason = "idle" | "manual" | "elsewhere" | "server" | "load";
 
 /** Why a call needs a confirmation: the error it failed with. */
 export interface StepUpRequest {
@@ -70,6 +77,8 @@ export interface ControllerOptions {
   monoNow?: () => number;
   /** Idle limit instead of the server's policy (the dev-server test hook). */
   idleOverrideMs?: number;
+  /** Begin locked: every page load asks for the PIN (default false; the signed-in shell turns it on). */
+  lockOnStart?: boolean;
   win?: Window;
   doc?: Document;
 }
@@ -106,10 +115,13 @@ export class StepUpController {
   /** Server − local clock, from the latest `serverNow` answer. */
   private offset = 0;
   private hasFactor = false;
+  private statusSeen = false;
   private verifiedAt: number | null = null;
   /** While locked: the verification the lock replaced, and whether the server showed none since. */
   private lockedVerifiedAt: number | null = null;
   private sawNoVerification = false;
+  /** Locked at start: the first status answer only records the verification the server already has. */
+  private awaitingFirstStatus = false;
 
   private nextRequestId = 1;
   private waiting: { id: number; resolve: (ok: boolean) => void }[] = [];
@@ -132,6 +144,10 @@ export class StepUpController {
     this.lastWall = this.wallNow();
     this.lastMono = this.monoNow();
     if (this.idleOverrideMs > 0) this.idleMs = this.idleOverrideMs;
+    if (options.lockOnStart) {
+      this.snap = { ...this.snap, locked: true, reason: "load" };
+      this.awaitingFirstStatus = true;
+    }
   }
 
   // ------------------------------------------------------------ store
@@ -192,8 +208,17 @@ export class StepUpController {
     if (!status) return;
     if (this.idleOverrideMs <= 0) this.idleMs = status.policy.idleMs;
     this.keepAliveMs = status.policy.keepAliveMs;
-    this.hasFactor = status.actionPin.set || status.passkeys.length > 0;
+    this.statusSeen = true;
+    this.hasFactor = status.pin.set;
     this.verifiedAt = status.session.verifiedAt;
+    if (this.awaitingFirstStatus) {
+      this.awaitingFirstStatus = false;
+      this.lockedVerifiedAt = this.verifiedAt;
+      this.sawNoVerification = this.verifiedAt === null;
+      // No PIN yet: nothing to ask for (the setup screen is shown instead).
+      if (!status.pin.set) this.unlocked();
+      return;
+    }
     if (!this.snap.locked) {
       this.arm();
       return;
@@ -202,6 +227,15 @@ export class StepUpController {
     // lock (in this tab or another one). Server rows, no clocks compared.
     if (this.verifiedAt === null) this.sawNoVerification = true;
     else if (this.sawNoVerification || this.verifiedAt !== this.lockedVerifiedAt) this.unlocked();
+  }
+
+  /**
+   * Whether the member has a PIN, from `account:me` (known at once). Without it the idle lock would stay
+   * off until the first `stepUp:status` answer, and for good if that query never loads. The status
+   * answer overrides it.
+   */
+  noteFactor(hasFactor: boolean) {
+    if (!this.statusSeen) this.hasFactor = hasFactor;
   }
 
   noteServerNow(serverNow: number) {

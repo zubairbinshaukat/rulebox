@@ -25,7 +25,6 @@ function memberRows(db: DemoDb, me: { _id: string; role: Role }): MemberRow[] {
     role: m._id === me._id ? me.role : m.role,
     status: m.status,
     createdAt: m.createdAt,
-    mfaEnrolled: m.mfa.enrolled,
     isYou: m._id === me._id,
     revision: m.revision,
   }));

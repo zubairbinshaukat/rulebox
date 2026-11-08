@@ -48,11 +48,14 @@ export const DEMO_TEAM_LIMITS: PlanLimits = {
 };
 
 export const DEMO_PASSWORD = "rulebox-demo-1";
-export const DEMO_TOTP = "123456";
-/** The demo Owner's action PIN (step-up, plan 4.16); other demo members start without one. */
+/** The demo Owner's action PIN (step-up, plan 4.16); other demo members start without one (they see PIN setup after signing in). */
 export const DEMO_ACTION_PIN = "482915";
+/** The demo Owner's unused recovery codes (the PIN's fallback, `stepUp:resetWithRecoveryCode`). */
+export const DEMO_RECOVERY_CODES = ["7KQ2-M9XD", "4HTR-2WPZ", "Q8VN-3JCE"] as const;
 export const DEMO_INVITE_CODE = "JOIN-DEMO-2026";
 export const DEMO_RESET_CODE = "RESET-DEMO-2026";
+/** The forgot-PIN link of the demo: `/pin-reset#token=…`. No email is sent; this link always works. */
+export const DEMO_PIN_RESET_TOKEN = "demo-pin-reset-token";
 export const DEMO_OWNER_EMAIL = "owner@demo.rulebox.test";
 
 const MIN = 60_000;
@@ -69,7 +72,6 @@ export interface DbMember {
   createdAt: number;
   revision: number;
   password: string;
-  mfa: { enrolled: boolean; recoveryCodes: string[] };
 }
 export interface DbInvite {
   _id: string;
@@ -308,7 +310,6 @@ export function seed(now: number = Date.now()): DemoDb {
     createdAt: now - 120 * DAY,
     revision: 0,
     password: DEMO_PASSWORD,
-    mfa: { enrolled: true, recoveryCodes: ["7KQ2-M9XD", "4HTR-2WPZ", "Q8VN-3JCE"] },
   };
   const members: DbMember[] = [
     owner,
@@ -320,7 +321,6 @@ export function seed(now: number = Date.now()): DemoDb {
       createdAt: now - 90 * DAY,
       revision: 0,
       password: DEMO_PASSWORD,
-      mfa: { enrolled: true, recoveryCodes: [] },
     },
     {
       _id: id("mem"),
@@ -330,7 +330,6 @@ export function seed(now: number = Date.now()): DemoDb {
       createdAt: now - 30 * DAY,
       revision: 0,
       password: DEMO_PASSWORD,
-      mfa: { enrolled: false, recoveryCodes: [] },
     },
     {
       _id: id("mem"),
@@ -340,7 +339,6 @@ export function seed(now: number = Date.now()): DemoDb {
       createdAt: now - 200 * DAY,
       revision: 2,
       password: DEMO_PASSWORD,
-      mfa: { enrolled: true, recoveryCodes: [] },
     },
   ];
   const invites: DbInvite[] = [

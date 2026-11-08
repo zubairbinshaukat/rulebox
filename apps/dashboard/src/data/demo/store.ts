@@ -6,14 +6,15 @@
  *
  * Nothing here is used when `VITE_DEMO` is not "1".
  */
-import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
+import { useEffect, useMemo, useState, useSyncExternalStore } from "react";
 import { AppError } from "../../lib/errors";
 import { readStorage, writeStorage } from "../../lib/storage";
 import { withStepUp } from "../../lib/stepUpRetry";
-import { PAGE_SIZE, type ErrorCode, type PagedState, type QueryState, type Role } from "../types";
+import type { ErrorCode, QueryState, Role } from "../types";
 import {
   DEMO_ACTION_PIN,
   DEMO_OWNER_EMAIL,
+  DEMO_RECOVERY_CODES,
   pingIntervalFor,
   seed,
   type DbAudit,
@@ -39,7 +40,6 @@ export interface DemoStepUpRow {
 
 interface Session {
   memberId: string;
-  mfaVerified: boolean;
   /** When the password sign-in happened (the bootstrap window of plan 4.16). */
   createdAt?: number;
   stepUp?: DemoStepUpRow;
@@ -57,9 +57,13 @@ export interface DemoPasskey {
 }
 export interface DemoFactors {
   pin?: string;
+  /** Wrong PINs since the last success (or the end of a lockout). */
   pinFailures: number;
-  pinFailuresTotal: number;
   pinLockedUntil: number;
+  /** "lockout" = the long lockout (`PIN_LOCKOUT_MS`), "backoff" = a short wait. */
+  pinLockKind: "backoff" | "lockout" | null;
+  /** Unused recovery codes of the PIN (`XXXX-XXXX`). */
+  recoveryCodes: string[];
   passkeys: DemoPasskey[];
 }
 
@@ -76,13 +80,21 @@ export const STEP_UP = {
   pinBackoffBaseMs: 30_000,
   pinBackoffMaxMs: 15 * 60_000,
   pinHardLimit: 10,
+  pinLockoutMs: 24 * 60 * 60_000,
   maxPasskeys: 10,
 } as const;
 
 function seedFactors(db: DemoDb): Map<string, DemoFactors> {
   const map = new Map<string, DemoFactors>();
   const owner = db.members.find((m) => m.email === DEMO_OWNER_EMAIL);
-  if (owner) map.set(owner._id, { pin: DEMO_ACTION_PIN, pinFailures: 0, pinFailuresTotal: 0, pinLockedUntil: 0, passkeys: [] });
+  if (owner) map.set(owner._id, {
+      pin: DEMO_ACTION_PIN,
+      pinFailures: 0,
+      pinLockedUntil: 0,
+      pinLockKind: null,
+      recoveryCodes: [...DEMO_RECOVERY_CODES],
+      passkeys: [],
+    });
   return map;
 }
 
@@ -167,7 +179,7 @@ export function resetDemo() {
   state.failedSignIns = 0;
   const owner = state.db.members.find((m) => m.role === "owner");
   if (state.session && !state.db.members.some((m) => m._id === state.session!.memberId) && owner) {
-    setSession({ memberId: owner._id, mfaVerified: true });
+    setSession({ memberId: owner._id });
   }
   notify();
 }
@@ -191,13 +203,18 @@ export function factorsOf(memberId: string): DemoFactors | null {
 export function factorsFor(memberId: string): DemoFactors {
   let f = state.factors.get(memberId);
   if (!f) {
-    f = { pinFailures: 0, pinFailuresTotal: 0, pinLockedUntil: 0, passkeys: [] };
+    f = { pinFailures: 0, pinLockedUntil: 0, pinLockKind: null, recoveryCodes: [], passkeys: [] };
     state.factors.set(memberId, f);
   }
   return f;
 }
 
-/** A disabled PIN and a suspended passkey still count (the backend's `hasFactor`). */
+/** The person has an action PIN (the backend's `hasPin`): required for every member since Phase 4b. */
+export function hasPin(memberId: string): boolean {
+  return factorsOf(memberId)?.pin !== undefined;
+}
+
+/** A locked PIN and a suspended passkey still count (the backend's `hasFactor`). */
 export function hasFactor(memberId: string): boolean {
   const f = factorsOf(memberId);
   return f !== null && (f.pin !== undefined || f.passkeys.length > 0);
@@ -239,16 +256,15 @@ export function requireStepUp(me: DbMember, level: "unlocked" | "fresh", now: nu
     }
     return;
   }
-  if (!hasFactor(me._id)) fail("step_up_setup_required", { detail: level });
+  if (!hasPin(me._id)) fail("step_up_setup_required", { detail: level });
   fail("step_up_required", { detail: level });
 }
 
 /** `authorizeFactorChange`: "bootstrap" (no factor, fresh sign-in) or a fresh step-up. */
 export function authorizeFactorChange(me: DbMember, now: number): "bootstrap" | "fresh" {
-  if (!hasFactor(me._id)) {
+  if (!hasPin(me._id)) {
     const created = state.session?.createdAt ?? 0;
     if (now - created > STEP_UP.bootstrapMs) fail("step_up_setup_required", { detail: "reauthenticate" });
-    if (me.mfa.enrolled && !state.session?.mfaVerified) fail("mfa_required");
     return "bootstrap";
   }
   requireStepUp(me, "fresh", now);
@@ -456,36 +472,6 @@ export function useDemoQuery<T>(key: string, compute: (db: DemoDb) => T): QueryS
   if (settled.failed) return { status: "error", error: new Error("Network error (simulated)"), retry };
   if (!result.ok) return { status: "error", error: result.error, retry };
   return { status: "ready", data: result.data };
-}
-
-/**
- * A reactive paginated query (`usePaginatedQuery(…, { initialNumItems: 50 })`):
- * "Load more" adds 50; `canLoadMore` is false once everything is loaded.
- */
-export function useDemoPaged<T>(key: string, computeAll: (db: DemoDb) => T[]): PagedState<T> {
-  const q = useDemoQuery(key, computeAll);
-  const [pages, setPages] = useState<{ key: string; count: number; loading: boolean }>({
-    key,
-    count: PAGE_SIZE,
-    loading: false,
-  });
-  const current = pages.key === key ? pages : { key, count: PAGE_SIZE, loading: false };
-  const timer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
-  useEffect(() => () => clearTimeout(timer.current), []);
-
-  if (q.status !== "ready") return q;
-  const all = q.data;
-  return {
-    status: "ready",
-    items: all.slice(0, current.count),
-    canLoadMore: all.length > current.count,
-    isLoadingMore: current.loading,
-    loadMore: () => {
-      if (current.loading) return;
-      setPages({ key, count: current.count, loading: true });
-      timer.current = setTimeout(() => setPages({ key, count: current.count + PAGE_SIZE, loading: false }), latency());
-    },
-  };
 }
 
 /** For the session hooks: re-renders on every store change. */

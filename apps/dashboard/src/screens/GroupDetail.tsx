@@ -37,13 +37,17 @@ import { SkeletonBlock } from "../components/Skeleton";
 import { useToast } from "../lib/toast";
 import { messageFor } from "../lib/errors";
 import { strings } from "../lib/strings";
+import { devicesStrings } from "../lib/screenStrings/devices";
+import { employeesStrings } from "../lib/screenStrings/employees";
+import { groupStrings } from "../lib/screenStrings/group";
+import { groupsStrings } from "../lib/screenStrings/groups";
 import { useForm } from "../lib/useForm";
 import * as v from "../lib/validate";
 import { AssignAppDialog, EditAssignmentDialog } from "./groups/AssignmentDialogs";
 import { groupErrorMessage, groupFieldError } from "./groups/errors";
 import { groupText } from "./groups/strings";
 
-const s = strings.group;
+const s = groupStrings;
 
 /**
  * `groups:get` (+ the paginated devices `fleet:list({ groupId })` and
@@ -56,7 +60,7 @@ export default function GroupDetail() {
   const detail = useGroupDetail(id);
   return (
     <div className="dash-page">
-      {detail.status !== "ready" ? <PageHeader title={detail.status === "loading" ? strings.app.loading : strings.groups.title} back={{ to: "/groups", label: s.back }} /> : null}
+      {detail.status !== "ready" ? <PageHeader title={detail.status === "loading" ? strings.app.loading : groupsStrings.title} back={{ to: "/groups", label: s.back }} /> : null}
       <QueryRegion state={detail} skeleton={<div className="dash-card dash-card--pad"><SkeletonBlock lines={5} /></div>}>
         {(g) => <Group g={g} />}
       </QueryRegion>
@@ -75,8 +79,8 @@ function Group({ g }: { g: Detail }) {
         lead={g.description}
         meta={
           <>
-            <Pill>{strings.groups.devices(g.deviceCount)}</Pill>
-            <Pill>{strings.groups.employees(g.employeeCount)}</Pill>
+            <Pill>{groupsStrings.devices(g.deviceCount)}</Pill>
+            <Pill>{groupsStrings.employees(g.employeeCount)}</Pill>
           </>
         }
         actions={
@@ -139,10 +143,10 @@ function EditGroup({ g, onClose }: { g: Detail; onClose: () => void }) {
       }
     >
       <div className="dash-form">
-        <Field label={strings.groups.name} error={f.errors.name ?? groupFieldError(f.serverError, "name")} required>
+        <Field label={groupsStrings.name} error={f.errors.name ?? groupFieldError(f.serverError, "name")} required>
           {(p) => <Input {...p} value={f.values.name} onChange={(e) => f.set("name", e.target.value)} autoComplete="off" />}
         </Field>
-        <Field label={strings.groups.description} error={f.errors.description ?? groupFieldError(f.serverError, "description")} optional>
+        <Field label={groupsStrings.description} error={f.errors.description ?? groupFieldError(f.serverError, "description")} optional>
           {(p) => <Textarea {...p} rows={3} value={f.values.description} onChange={(e) => f.set("description", e.target.value)} />}
         </Field>
         <FormError
@@ -295,7 +299,7 @@ function GroupDevices({ groupId }: { groupId: string }) {
     () => [
       {
         key: "name",
-        header: strings.devices.colName,
+        header: devicesStrings.colName,
         primary: true,
         cell: (d) => (
           <Link className="dash-link dash-link--plain dash-truncate" to={`/devices/${d._id}`} title={d.name}>
@@ -303,7 +307,7 @@ function GroupDevices({ groupId }: { groupId: string }) {
           </Link>
         ),
       },
-      { key: "kiosk", header: strings.devices.colKiosk, cell: (d) => <KioskCell row={d} /> },
+      { key: "kiosk", header: devicesStrings.colKiosk, cell: (d) => <KioskCell row={d} /> },
     ],
     [],
   );
@@ -337,7 +341,7 @@ function GroupEmployees({ groupId }: { groupId: string }) {
   const cols: Column<EmployeeRow>[] = [
     {
       key: "name",
-      header: strings.employees.colName,
+      header: employeesStrings.colName,
       primary: true,
       cell: (e) => (
         <span className="dash-cell-stack">
@@ -411,7 +415,7 @@ function AddEmployeeDialog({ groupId, onClose }: { groupId: string; onClose: () 
   const cols: Column<EmployeeRow>[] = [
     {
       key: "name",
-      header: strings.employees.colName,
+      header: employeesStrings.colName,
       primary: true,
       cell: (e) => (
         <span className="dash-cell-stack">
@@ -448,10 +452,10 @@ function AddEmployeeDialog({ groupId, onClose }: { groupId: string; onClose: () 
   return (
     <Modal open title={s.addEmployeeTitle} onClose={onClose} wide actions={<Button onClick={onClose}>{strings.common.done}</Button>}>
       <div className="dash-form">
-        <SearchInput value={search} onSearch={setSearch} label={s.employeeSearch} placeholder={strings.employees.searchPlaceholder} />
+        <SearchInput value={search} onSearch={setSearch} label={s.employeeSearch} placeholder={employeesStrings.searchPlaceholder} />
         {search === "" ? null : (
           <>
-            {results.status === "ready" && results.data.capped ? <InlineNotice tone="neutral" title={strings.devices.searchCap} /> : null}
+            {results.status === "ready" && results.data.capped ? <InlineNotice tone="neutral" title={devicesStrings.searchCap} /> : null}
             <DataTable
               caption={s.addEmployeeTitle}
               columns={cols}
@@ -461,7 +465,7 @@ function AddEmployeeDialog({ groupId, onClose }: { groupId: string; onClose: () 
               state={results.status === "loading" ? "loading" : results.status === "error" ? "error" : rows.length === 0 ? "empty" : "ready"}
               error={results.status === "error" ? results.error : undefined}
               onRetry={results.status === "error" ? results.retry : undefined}
-              empty={<EmptyState compact title={strings.employees.noMatchTitle} />}
+              empty={<EmptyState compact title={employeesStrings.noMatchTitle} />}
               skeletonRows={3}
             />
           </>

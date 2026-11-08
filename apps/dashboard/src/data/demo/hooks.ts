@@ -12,7 +12,6 @@ import type { DevicesApi } from "../devices/api";
 import type { EmployeesApi } from "../employees/api";
 import type { EnrollmentApi } from "../enrollment/api";
 import {
-  DEMO_TOTP,
   type DbApp,
   type DbDevice,
   type DemoDb,
@@ -50,6 +49,7 @@ import {
   currentMember,
   db as getDb,
   fail,
+  hasPin,
   latency,
   newId,
   runMutation,
@@ -270,31 +270,12 @@ function meOf(): MeResult {
     status: m.status,
     orgId: getDb().org._id,
     orgName: getDb().org.name,
-    mfa: { enrolled: m.mfa.enrolled, required: m.role !== "viewer", verified: s.mfaVerified },
+    // Every member needs a PIN (Phase 4b); `set` follows the demo factors, so PIN setup shows until one exists.
+    pin: { required: true, set: hasPin(m._id) },
     serverApiVersion: SERVER_API_VERSION,
   };
   return me;
 }
-
-let mfaFailures = 0;
-let mfaLockedUntil = 0;
-
-function checkMfaLock() {
-  const now = Date.now();
-  if (mfaLockedUntil > now) fail("mfa_locked", { retryAfterMs: mfaLockedUntil - now });
-}
-
-function mfaFailed(): never {
-  mfaFailures++;
-  if (mfaFailures >= 5) {
-    mfaFailures = 0;
-    mfaLockedUntil = Date.now() + 15 * MIN;
-    fail("mfa_locked", { retryAfterMs: 15 * MIN });
-  }
-  fail("mfa_invalid_code");
-}
-
-let pendingSecret: string | null = null;
 
 // ---------------------------------------------------------------- the hooks
 
@@ -320,7 +301,7 @@ export const demoApi: DataApi = {
         if (!m || m.password !== password) throw new Error("InvalidSecret");
         if (m.status === "disabled") fail("account_disabled");
         clearFailedSignIns();
-        setSession({ memberId: m._id, mfaVerified: false, createdAt: Date.now() });
+        setSession({ memberId: m._id, createdAt: Date.now() });
       },
       signUp: async ({ inviteCode, email, password }) => {
         await sleep(latency());
@@ -342,7 +323,6 @@ export const demoApi: DataApi = {
           createdAt: Date.now(),
           revision: 0,
           password,
-          mfa: { enrolled: false, recoveryCodes: [] },
         });
         db.audit.push({
           _id: newId("aud"),
@@ -353,7 +333,7 @@ export const demoApi: DataApi = {
           action: "member.joined",
           summary: `Joined as ${inv.role}.`,
         });
-        setSession({ memberId: id, mfaVerified: false, createdAt: Date.now() });
+        setSession({ memberId: id, createdAt: Date.now() });
       },
       signOut: async () => {
         setSession(null);
@@ -381,81 +361,6 @@ export const demoApi: DataApi = {
   useConnectionState() {
     useStoreVersion();
     return { isWebSocketConnected: !controls().offline };
-  },
-
-  // ---- MFA
-  useMfaStatus() {
-    return useDemoQuery("mfa:status", () => {
-      const me = requireReader();
-      const s = session();
-      return {
-        enrolled: me.mfa.enrolled,
-        required: me.role !== "viewer",
-        verified: s?.mfaVerified ?? false,
-        lockedUntil: mfaLockedUntil > Date.now() ? mfaLockedUntil : null,
-        recoveryCodesLeft: me.mfa.recoveryCodes.length,
-      };
-    });
-  },
-
-  useBeginMfaSetup() {
-    return async () => {
-      await sleep(latency());
-      const me = currentMember();
-      if (!me) fail("unauthenticated");
-      if (me.mfa.enrolled) fail("mfa_already_enabled");
-      pendingSecret = pendingSecret ?? token(32).replace(/[^A-Z2-7]/g, "A");
-      const uri = `otpauth://totp/Rulebox:${encodeURIComponent(me.email)}?secret=${pendingSecret}&issuer=Rulebox&algorithm=SHA1&digits=6&period=30`;
-      return { secret: pendingSecret, uri };
-    };
-  },
-
-  useConfirmMfaSetup() {
-    return async ({ code }) => {
-      await sleep(latency());
-      checkMfaLock();
-      const m = getDb().members.find((x) => x._id === session()?.memberId);
-      if (!m) fail("unauthenticated");
-      if (m.mfa.enrolled) fail("mfa_already_enabled");
-      if (code.replace(/\s/g, "") !== DEMO_TOTP) mfaFailed();
-      const codes = Array.from({ length: 10 }, () => {
-        const t = token(8);
-        return `${t.slice(0, 4)}-${t.slice(4)}`;
-      });
-      m.mfa = { enrolled: true, recoveryCodes: codes };
-      pendingSecret = null;
-      mfaFailures = 0;
-      setSession({ ...session(), memberId: m._id, mfaVerified: true });
-      return codes;
-    };
-  },
-
-  useVerifyMfa() {
-    return async ({ code }) => {
-      await sleep(latency());
-      checkMfaLock();
-      const s = session();
-      if (!s) fail("unauthenticated");
-      if (code.replace(/\s/g, "") !== DEMO_TOTP) mfaFailed();
-      mfaFailures = 0;
-      setSession({ ...s, mfaVerified: true });
-    };
-  },
-
-  useRedeemRecoveryCode() {
-    return async ({ code }) => {
-      await sleep(latency());
-      checkMfaLock();
-      const s = session();
-      const m = getDb().members.find((x) => x._id === s?.memberId);
-      if (!s || !m) fail("unauthenticated");
-      const norm = validate.normalizeRecoveryCode(code);
-      const i = m.mfa.recoveryCodes.indexOf(norm);
-      if (i < 0) mfaFailed();
-      m.mfa.recoveryCodes.splice(i, 1);
-      mfaFailures = 0;
-      setSession({ ...s, mfaVerified: true });
-    };
   },
 
   // ---- overview
@@ -1688,18 +1593,6 @@ export const demoApi: DataApi = {
           db.invites.push({ _id: newId("inv"), email: m.email, role: m.role, kind: "passwordReset", code, expiresAt, createdAt: now });
           audit({ action: "member.resetCodeCreated", targetLabel: m.email, summary: "Password reset code created." });
           return { code, expiresAt };
-        }, "fresh"),
-      [],
-    );
-  },
-
-  useResetMemberMfa() {
-    return useCallback(
-      ({ memberId }) =>
-        runMutation("owner", ({ db, audit }) => {
-          const m = find(db.members, memberId);
-          m.mfa = { enrolled: false, recoveryCodes: [] };
-          audit({ action: "member.mfaReset", targetLabel: m.email, summary: "Two-step sign-in reset." });
         }, "fresh"),
       [],
     );

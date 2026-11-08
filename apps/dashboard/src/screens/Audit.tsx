@@ -14,8 +14,9 @@ import { ServerTable } from "../components/ServerTable";
 import { formatDateTime, timeZoneName } from "../lib/format";
 import { useListPaging, useListView, type ListConfig } from "../lib/listView";
 import { strings } from "../lib/strings";
+import { auditStrings } from "../lib/screenStrings/audit";
 
-const s = strings.audit;
+const s = auditStrings;
 
 /** `audit:list` sorts by time ("at") only, newest first. No search and no total. */
 const LIST: ListConfig = { sorts: ["at"], defaultSort: { key: "at", dir: "desc" } };

@@ -14,9 +14,10 @@ import { ServerTable } from "../components/ServerTable";
 import { StatusDot } from "../components/StatusDot";
 import { formatGb } from "../lib/format";
 import { useListPaging, useListView, type ListConfig, type ListPaging } from "../lib/listView";
-import { strings } from "../lib/strings";
+import { devicesStrings } from "../lib/screenStrings/devices";
+import { employeesStrings } from "../lib/screenStrings/employees";
 
-const s = strings.employees;
+const s = employeesStrings;
 
 /**
  * `employees:list`: newest first by default (no column of its own: the row has no date), `name` and `username`
@@ -117,10 +118,10 @@ export default function Employees() {
   const filters = (
     <>
       <label className="dash-sr" htmlFor="employee-group-filter">
-        {strings.devices.groupFilter}
+        {devicesStrings.groupFilter}
       </label>
       <Select id="employee-group-filter" compact value={groupId} onChange={(e) => paging.view.setFilter("group", e.target.value || null)}>
-        <option value="">{strings.devices.allGroups}</option>
+        <option value="">{devicesStrings.allGroups}</option>
         {groups.status === "ready" ? groups.data.map((g) => <option key={g._id} value={g._id}>{g.name}</option>) : null}
       </Select>
     </>

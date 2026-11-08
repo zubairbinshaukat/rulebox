@@ -9,11 +9,18 @@
           "value": "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https://*.convex.cloud; font-src 'self'; connect-src 'self' https://*.convex.cloud wss://*.convex.cloud https://*.convex.site; frame-ancestors 'none'; base-uri 'self'; form-action 'self'; object-src 'none'"
         },
         { "key": "X-Content-Type-Options", "value": "nosniff" },
-        { "key": "Referrer-Policy", "value": "strict-origin-when-cross-origin" },
         { "key": "X-Frame-Options", "value": "DENY" },
         { "key": "Permissions-Policy", "value": "camera=(), microphone=(), geolocation=(), payment=()" },
         { "key": "Cache-Control", "value": "no-cache" }
       ]
+    },
+    {
+      "source": "/((?!pin-reset(?:/|$)).*)",
+      "headers": [{ "key": "Referrer-Policy", "value": "strict-origin-when-cross-origin" }]
+    },
+    {
+      "source": "/pin-reset/?",
+      "headers": [{ "key": "Referrer-Policy", "value": "no-referrer" }]
     },
     {
       "source": "/assets/(.*)",

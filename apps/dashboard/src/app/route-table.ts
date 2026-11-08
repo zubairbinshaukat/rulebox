@@ -10,7 +10,7 @@ export const SCREEN_FILES = {
   SignIn: "src/screens/SignIn.tsx",
   Join: "src/screens/Join.tsx",
   Reset: "src/screens/Reset.tsx",
-  Mfa: "src/screens/Mfa.tsx",
+  PinReset: "src/screens/PinReset.tsx",
   Layout: "src/app/Layout.tsx",
   Overview: "src/screens/Overview.tsx",
   Devices: "src/screens/Devices.tsx",
@@ -32,7 +32,7 @@ export const SCREEN_FILES = {
 export type ScreenName = keyof typeof SCREEN_FILES;
 
 /**
- * Screens that work without a session. Every other path (also `/mfa`, which
+ * Screens that work without a session. Every other path (also `/pin-reset`, which
  * needs a signed-in member) lands on `/sign-in` when there is none, so the
  * boot script preloads the sign-in screen for it instead.
  */
@@ -49,7 +49,7 @@ export const ROUTE_SCREENS: Record<string, ScreenName[]> = {
   "/sign-in": ["SignIn"],
   "/join": ["Join"],
   "/reset": ["Reset"],
-  "/mfa": ["Mfa"],
+  "/pin-reset": ["PinReset"],
   "/": member("Overview"),
   "/devices": member("Devices"),
   "/devices/:": member("DeviceDetail"),

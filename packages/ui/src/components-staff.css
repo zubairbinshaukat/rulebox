@@ -1,0 +1,1818 @@
+/* Staff App component styles: app tiles, title bar, taskbar, sliders, tabs, file rows, and the rest of the desktop.
+   The dashboard does not load this file (only its Gallery does); the Staff App imports it after base.css.
+   Shared component styles live in components.css. */
+
+.rb-tile:focus-visible,
+.rb-icon-btn:focus-visible,
+.rb-tabs__btn:focus-visible,
+.rb-tabs__close:focus-visible,
+.rb-notice__dismiss:focus-visible,
+.rb-titlebar__controls button:focus-visible,
+.rb-slider__input:focus-visible {
+  outline: 2px solid var(--rb-focus);
+  outline-offset: 2px;
+}
+
+/* Panel (frosted card) */
+.rb-panel {
+  background: var(--rb-surface-glass);
+  -webkit-backdrop-filter: blur(var(--rb-blur));
+  backdrop-filter: blur(var(--rb-blur));
+  border: 1px solid var(--rb-glass-border);
+  border-radius: var(--rb-r-2xl);
+  box-shadow: var(--rb-shadow-lg);
+}
+.rb-panel--md {
+  border-radius: var(--rb-r-xl);
+  box-shadow: var(--rb-shadow-md);
+}
+
+/* App tile.
+   A card with the app's art top left, an optional count top right, and the
+   name and a two-line description at the bottom. Art is one of:
+   - a Solar glyph on a gradient square in the app's hue (`--glyph`),
+   - the app's own icon on a light plate, with a large faded copy of it in
+     the bottom right corner (`--image`),
+   - a soft tinted square with a glyph or letter (the older look; `--tint`).
+   Hover lifts the card and pops the art; only transform and opacity move. */
+.rb-tile {
+  --rb-tile-pad: 18px;
+  --rb-tile-art: 56px;
+  --rb-tile-art-r: 16px;
+  --rb-tile-glyph: 30px;
+  position: relative;
+  isolation: isolate;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  align-items: stretch;
+  gap: 10px;
+  text-align: left;
+  width: 168px;
+  height: 148px;
+  padding: var(--rb-tile-pad);
+  border-radius: var(--rb-r-22);
+  background: var(--rb-surface-glass);
+  border: 1px solid var(--rb-glass-border);
+  box-shadow: var(--rb-shadow-sm);
+  color: var(--rb-ink);
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+  transition: transform 0.28s var(--rb-ease);
+}
+/* The stronger hover shadow fades in on its own layer (opacity only). */
+.rb-tile::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  box-shadow: var(--rb-shadow-lg);
+  opacity: 0;
+  pointer-events: none;
+  z-index: -1;
+  transition: opacity 0.28s var(--rb-ease);
+}
+.rb-tile:hover {
+  transform: translateY(-4px);
+}
+.rb-tile:hover::after {
+  opacity: 1;
+}
+.rb-tile:active {
+  transform: translateY(-1px) scale(0.985);
+  transition-duration: 0.1s;
+}
+.rb-tile:focus-visible {
+  outline: 2px solid var(--rb-focus);
+  outline-offset: 3px;
+}
+.rb-tile--lg {
+  --rb-tile-pad: 20px;
+  --rb-tile-art: 64px;
+  --rb-tile-art-r: 18px;
+  --rb-tile-glyph: 34px;
+}
+.rb-tile--sm {
+  --rb-tile-pad: 14px;
+  --rb-tile-art: 44px;
+  --rb-tile-art-r: 13px;
+  --rb-tile-glyph: 24px;
+  border-radius: var(--rb-r-18);
+}
+
+/* Clips the faded corner copy to the card without clipping the card's shadow. */
+.rb-tile__clip {
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  overflow: hidden;
+  pointer-events: none;
+  z-index: -1;
+}
+/* Dark theme: a soft glow in the app's colour behind the art (static). */
+.rb-tile__clip::before {
+  content: "";
+  position: absolute;
+  left: -30%;
+  top: -40%;
+  width: 110%;
+  height: 110%;
+  background: radial-gradient(
+    closest-side,
+    oklch(0.62 0.15 var(--rb-hue, 175) / var(--rb-tile-glow)),
+    transparent
+  );
+}
+.rb-tile__mark {
+  position: absolute;
+  right: -14%;
+  bottom: -18%;
+  width: 60%;
+  aspect-ratio: 1;
+  object-fit: contain;
+  opacity: var(--rb-tile-mark);
+  transform: rotate(-6deg);
+  transition:
+    transform 0.4s var(--rb-ease),
+    opacity 0.4s var(--rb-ease);
+  user-select: none;
+}
+.rb-tile:hover .rb-tile__mark {
+  opacity: calc(var(--rb-tile-mark) + 0.05);
+  transform: rotate(-2deg) scale(1.06);
+}
+/* An app icon's corner copy: the logo's silhouette (never its own opaque background) in the
+   app's colour, cut out with a mask made once from the icon (`shell/iconArt.ts`). */
+.rb-tile__mark--mask {
+  background: oklch(0.6 0.15 var(--rb-hue, 175));
+  -webkit-mask: var(--rb-mark-url) center / contain no-repeat;
+  mask: var(--rb-mark-url) center / contain no-repeat;
+}
+/* A glyph's corner copy: the glyph itself, in the app's colour. */
+.rb-tile__mark--glyph {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 130px;
+  color: oklch(0.6 0.15 var(--rb-hue, 175));
+}
+.rb-tile__mark--glyph > svg {
+  width: 100%;
+  height: 100%;
+}
+
+.rb-tile__top {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 8px;
+  min-width: 0;
+}
+
+.rb-tile__icon {
+  position: relative;
+  flex: none;
+  width: var(--rb-tile-art);
+  height: var(--rb-tile-art);
+  border-radius: var(--rb-tile-art-r);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: calc(var(--rb-tile-art) * 0.36);
+  font-weight: 600;
+  letter-spacing: -0.02em;
+  transform-origin: 30% 30%;
+  transition: transform 0.36s var(--rb-ease-pop);
+  /* Compose at use-site so inline --rb-hue applies */
+  background: oklch(var(--rb-tint-bg-l) var(--rb-tint-bg-c) var(--rb-hue));
+  color: oklch(var(--rb-tint-fg-l) var(--rb-tint-fg-c) var(--rb-hue));
+}
+/* The art's own shadow, deeper on hover (opacity only). */
+.rb-tile__icon::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.36s var(--rb-ease);
+}
+.rb-tile:hover .rb-tile__icon {
+  transform: translate(-3px, -5px) scale(1.1);
+}
+.rb-tile:hover .rb-tile__icon::after {
+  opacity: 1;
+}
+
+.rb-tile__icon--glyph {
+  font-size: var(--rb-tile-glyph);
+  color: oklch(1 0 0);
+  background: linear-gradient(
+    150deg,
+    oklch(var(--rb-art-top-l) var(--rb-art-c) var(--rb-hue)),
+    oklch(var(--rb-art-bottom-l) var(--rb-art-c) calc(var(--rb-hue) + 12))
+  );
+  box-shadow:
+    inset 0 1px 0 oklch(1 0 0 / 0.32),
+    0 6px 14px -6px oklch(0.55 0.16 var(--rb-hue) / 0.55);
+}
+.rb-tile__icon--glyph::after {
+  box-shadow: 0 14px 26px -10px oklch(0.55 0.16 var(--rb-hue) / 0.6);
+}
+
+/* An app's own icon: its logo, cut out of the icon's background and scaled up until it spans about
+   93% of the rounded box (`data-icon-fit="logo"`, below). The logo has no box: it sits straight on
+   the surface, and the icon's old background colour is never drawn. Only a logo that would vanish
+   on the theme's surface is recoloured (`data-icon-recolor`, tokens `--rb-logo-filter-*`). A
+   picture that cannot be cut out (a photo) fills the box with `cover` on its flat colour
+   (`--rb-icon-edge`). `data-icon-kind="pending"` waits for the analysis (a frame or two) so the
+   wrong look does not flash first. */
+.rb-tile__icon--image {
+  background: var(
+    --rb-icon-edge,
+    linear-gradient(
+      150deg,
+      oklch(var(--rb-art-top-l) var(--rb-art-c) var(--rb-hue)),
+      oklch(var(--rb-art-bottom-l) var(--rb-art-c) calc(var(--rb-hue) + 12))
+    )
+  );
+  box-shadow: var(--rb-shadow-sm);
+}
+.rb-tile__icon--image::after {
+  box-shadow: var(--rb-shadow-md);
+}
+.rb-tile__img {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  display: block;
+  object-fit: cover;
+  border-radius: inherit;
+  user-select: none;
+}
+.rb-tile__icon--image[data-icon-kind="pending"] .rb-tile__img {
+  visibility: hidden;
+}
+/* `inset`: a transparent logo whose cut-out failed, the original with a margin on a plate in the app's
+   colour, dark under a light logo and light under a dark one. */
+.rb-tile__icon--image[data-icon-fit="inset"][data-icon-tone="light"],
+.rb-task__art--photo[data-icon-fit="inset"][data-icon-tone="light"] {
+  background: linear-gradient(150deg, oklch(0.36 0.08 var(--rb-hue)), oklch(0.25 0.06 calc(var(--rb-hue) + 12)));
+}
+.rb-tile__icon--image[data-icon-fit="inset"][data-icon-tone="dark"],
+.rb-task__art--photo[data-icon-fit="inset"][data-icon-tone="dark"] {
+  background: linear-gradient(150deg, oklch(0.98 0.02 var(--rb-hue)), oklch(0.92 0.045 calc(var(--rb-hue) + 12)));
+}
+.rb-tile__icon--image[data-icon-fit="inset"] .rb-tile__img,
+.rb-task__art--photo[data-icon-fit="inset"] img {
+  inset: 12%;
+  width: 76%;
+  height: 76%;
+  object-fit: contain;
+  border-radius: 0;
+}
+/* `logo`: the cut-out (iconCutout.ts) is already cropped to the logo plus a 3.5% margin, so `contain`
+   on the square box fills it. No box, no shadow, no ring: the box is transparent. */
+.rb-tile__icon--image[data-icon-fit="logo"],
+.rb-task__art--photo[data-icon-fit="logo"] {
+  background: none;
+  box-shadow: none;
+}
+.rb-tile__icon--image[data-icon-fit="logo"]::after {
+  box-shadow: none;
+}
+.rb-tile__icon--image[data-icon-fit="logo"] .rb-tile__img,
+.rb-task__art--photo[data-icon-fit="logo"] img {
+  object-fit: contain;
+  border-radius: 0;
+}
+/* A logo that would vanish on the theme's surface is recoloured, never boxed: the filter changes the
+   cut-out's colours only (its alpha stays), so no square and no halo. `none` where the logo reads. */
+.rb-tile__icon--image[data-icon-fit="logo"][data-icon-recolor="dark-logo"] .rb-tile__img,
+.rb-task__art--photo[data-icon-fit="logo"][data-icon-recolor="dark-logo"] img {
+  filter: var(--rb-logo-filter-dark);
+}
+.rb-tile__icon--image[data-icon-fit="logo"][data-icon-recolor="light-logo"] .rb-tile__img,
+.rb-task__art--photo[data-icon-fit="logo"][data-icon-recolor="light-logo"] img {
+  filter: var(--rb-logo-filter-light);
+}
+
+.rb-tile__count {
+  flex: none;
+  min-width: 24px;
+  height: 24px;
+  padding: 0 7px;
+  border-radius: 999px;
+  background: var(--rb-ink);
+  color: var(--rb-on-ink);
+  font-size: 12.5px;
+  font-weight: 600;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.rb-tile__text {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+  width: 100%;
+}
+.rb-tile__name {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  font-size: 16px;
+  font-weight: 600;
+  letter-spacing: -0.015em;
+}
+.rb-tile--lg .rb-tile__name {
+  font-size: 17px;
+}
+.rb-tile--sm .rb-tile__name {
+  font-size: 14px;
+}
+.rb-tile__name > span:first-child {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.rb-tile__desc {
+  font-size: 13px;
+  color: var(--rb-muted);
+  line-height: 1.38;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  overflow: hidden;
+}
+.rb-tile--sm .rb-tile__desc {
+  font-size: 12px;
+  -webkit-line-clamp: 1;
+}
+
+/* Lite and reduced motion: the card still answers hover, but nothing pops or drifts. */
+[data-lite="true"] .rb-tile:hover,
+[data-lite="true"] .rb-tile:hover .rb-tile__icon,
+[data-lite="true"] .rb-tile:hover .rb-tile__mark {
+  transform: none;
+}
+[data-lite="true"] .rb-tile__icon--glyph {
+  box-shadow: inset 0 1px 0 oklch(1 0 0 / 0.32);
+}
+/* Reduced motion. `:where(:root:not([data-force-motion]))` adds no specificity; the
+   attribute is set only by the debug builds' "Force full motion" switch (lib/devMotion.ts). */
+@media (prefers-reduced-motion: reduce) {
+  :where(:root:not([data-force-motion="true"])) .rb-tile,
+  :where(:root:not([data-force-motion="true"])) .rb-tile::after,
+  :where(:root:not([data-force-motion="true"])) .rb-tile__icon,
+  :where(:root:not([data-force-motion="true"])) .rb-tile__icon::after,
+  :where(:root:not([data-force-motion="true"])) .rb-tile__mark {
+    transition: none;
+  }
+  :where(:root:not([data-force-motion="true"])) .rb-tile:hover,
+  :where(:root:not([data-force-motion="true"])) .rb-tile:hover .rb-tile__icon,
+  :where(:root:not([data-force-motion="true"])) .rb-tile:hover .rb-tile__mark {
+    transform: none;
+  }
+}
+/* Document tabs under a built-in window's title bar (Lite mode keeps one
+   window with tabs). The active tab is the colour of the content below and
+   joins it; the others are quiet until hovered. */
+.rb-tabstrip {
+  display: flex;
+  align-items: flex-end;
+  gap: 2px;
+  flex: none;
+  height: 40px;
+  padding: 0 10px;
+  overflow-x: auto;
+  overflow-y: hidden;
+  scrollbar-width: none;
+  border-bottom: 1px solid var(--rb-line);
+}
+.rb-tabstrip__tab {
+  position: relative;
+  isolation: isolate;
+  display: flex;
+  align-items: center;
+  flex: 0 1 200px;
+  min-width: 96px;
+  height: 34px;
+  margin-bottom: -1px;
+  padding-right: 4px;
+  border: 1px solid transparent;
+  border-bottom: 0;
+  border-radius: 12px 12px 0 0;
+  color: var(--rb-muted);
+}
+.rb-tabstrip__tab::before {
+  content: "";
+  position: absolute;
+  inset: 3px 0 4px;
+  border-radius: 9px;
+  background: var(--rb-hover);
+  opacity: 0;
+  z-index: -1;
+  transition: opacity var(--rb-duration) var(--rb-ease);
+}
+.rb-tabstrip__tab:hover::before {
+  opacity: 1;
+}
+.rb-tabstrip__tab[data-active="true"] {
+  background: var(--rb-surface);
+  border-color: var(--rb-line);
+  color: var(--rb-ink);
+}
+.rb-tabstrip__tab[data-active="true"]::before {
+  display: none;
+}
+.rb-tabstrip__select {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: 1;
+  min-width: 0;
+  height: 100%;
+  padding: 0 4px 0 12px;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  text-align: left;
+}
+.rb-tabstrip__tab[data-active="true"] .rb-tabstrip__select {
+  font-weight: 600;
+}
+.rb-tabstrip__icon {
+  display: inline-flex;
+  flex: none;
+  color: var(--rb-muted);
+}
+.rb-tabstrip__tab[data-active="true"] .rb-tabstrip__icon {
+  color: var(--rb-accent);
+}
+.rb-tabstrip__title {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.rb-tabstrip__close {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--rb-muted);
+  cursor: pointer;
+  opacity: 0.85;
+  transition: opacity var(--rb-duration) var(--rb-ease);
+}
+.rb-tabstrip__close:hover,
+.rb-tabstrip__tab[data-active="true"] .rb-tabstrip__close {
+  opacity: 1;
+}
+.rb-tabstrip__close:hover {
+  color: var(--rb-danger-text);
+}
+.rb-tabstrip__select:focus-visible,
+.rb-tabstrip__close:focus-visible {
+  outline: 2px solid var(--rb-focus);
+  outline-offset: -2px;
+  border-radius: 8px;
+}
+
+/* Paging for a grid that does not fit (the desktop's app tiles): round
+   arrows at the sides, and dots in a pill with a sliding thumb under it. */
+.rb-page-arrow {
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  color: var(--rb-ink);
+  background: var(--rb-surface-glass);
+  border: 1px solid var(--rb-glass-border);
+  box-shadow: var(--rb-shadow-sm);
+  -webkit-backdrop-filter: blur(var(--rb-blur));
+  backdrop-filter: blur(var(--rb-blur));
+  cursor: pointer;
+  /* Large enough that the Solar chevron reads as a chevron, not a dot. */
+  font-size: 24px;
+  transition:
+    transform var(--rb-duration) var(--rb-ease),
+    opacity var(--rb-duration) var(--rb-ease);
+}
+.rb-page-arrow:hover:not(:disabled, [aria-disabled="true"]) {
+  transform: scale(1.07);
+}
+.rb-page-arrow:active:not(:disabled, [aria-disabled="true"]) {
+  transform: scale(0.96);
+}
+/* aria-disabled keeps the keyboard focus on the arrow when the last page is reached. */
+.rb-page-arrow:disabled,
+.rb-page-arrow[aria-disabled="true"] {
+  opacity: 0.35;
+  cursor: default;
+}
+.rb-page-arrow:focus-visible,
+.rb-pager__dot:focus-visible {
+  outline: 2px solid var(--rb-focus);
+  outline-offset: 2px;
+}
+.rb-pager {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+}
+.rb-pager__dots {
+  --rb-pager-step: 16px;
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  border-radius: 999px;
+  background: var(--rb-surface-glass);
+  border: 1px solid var(--rb-glass-border);
+  box-shadow: var(--rb-shadow-sm);
+  -webkit-backdrop-filter: blur(var(--rb-blur));
+  backdrop-filter: blur(var(--rb-blur));
+}
+.rb-pager__dot {
+  position: relative;
+  width: 8px;
+  height: 8px;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: var(--rb-muted);
+  opacity: 0.8;
+  cursor: pointer;
+  transition: opacity var(--rb-duration) var(--rb-ease);
+}
+/* A bigger target than the dot itself. */
+.rb-pager__dot::before {
+  content: "";
+  position: absolute;
+  inset: -6px -4px;
+}
+.rb-pager__dot:hover {
+  opacity: 1;
+}
+.rb-pager__thumb {
+  position: absolute;
+  top: 50%;
+  left: 12px;
+  width: 24px;
+  height: 8px;
+  margin-top: -4px;
+  border-radius: 999px;
+  background: var(--rb-ink);
+  pointer-events: none;
+  /* Centred on dot i: i steps along, then back by half the extra width. */
+  transform: translateX(calc(var(--rb-pager-index, 0) * var(--rb-pager-step) - 8px));
+  transition: transform 0.36s var(--rb-ease);
+}
+.rb-pager__caption {
+  font-size: 12px;
+  color: var(--rb-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.rb-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--rb-accent);
+  flex: none;
+}
+
+/* Title bar */
+.rb-titlebar {
+  height: var(--rb-titlebar);
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 0 6px 0 14px;
+  border-bottom: 1px solid var(--rb-line);
+  background: var(--rb-paper);
+}
+.rb-titlebar--unfocused .rb-titlebar__title {
+  color: var(--rb-muted);
+}
+.rb-titlebar__icon {
+  width: 22px;
+  height: 22px;
+  flex: none;
+  border-radius: 6px;
+  background: oklch(var(--rb-tint-bg-l) var(--rb-tint-bg-c) var(--rb-hue));
+  color: oklch(var(--rb-tint-fg-l) var(--rb-tint-fg-c) var(--rb-hue));
+  font-size: 11px;
+  font-weight: 600;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.rb-titlebar__title {
+  flex: 1;
+  min-width: 0;
+  font-size: 13.5px;
+  font-weight: 500;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.rb-titlebar__extra {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex: none;
+}
+.rb-titlebar__controls {
+  display: flex;
+  gap: 2px;
+  flex: none;
+}
+.rb-titlebar__controls button {
+  width: 38px;
+  height: 32px;
+  border-radius: var(--rb-r-sm);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--rb-muted);
+}
+.rb-titlebar__controls button:hover {
+  background: var(--rb-hover);
+  color: var(--rb-ink);
+}
+.rb-titlebar__controls button.rb-close:hover {
+  background: var(--rb-danger);
+  color: white;
+}
+
+/* Progress bar (scaleX keeps it compositor-only, PRD 25.3) */
+.rb-progress {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  width: 100%;
+}
+.rb-progress__meta {
+  display: flex;
+  justify-content: space-between;
+  font-size: 12.5px;
+  color: var(--rb-muted);
+  font-variant-numeric: tabular-nums;
+}
+.rb-progress__meta > span:first-child {
+  color: var(--rb-ink);
+  font-weight: 500;
+}
+.rb-progress__track {
+  height: 6px;
+  border-radius: 3px;
+  background: var(--rb-hover);
+  overflow: hidden;
+}
+.rb-progress__fill {
+  height: 100%;
+  border-radius: 3px;
+  transform-origin: left center;
+  transition: transform 0.4s var(--rb-ease);
+}
+.rb-progress__fill--accent { background: var(--rb-accent); }
+/* --rb-warning is 2:1 on the track; the darker shade keeps the fill readable (3:1). */
+.rb-progress__fill--warning { background: var(--rb-warning-text); }
+.rb-progress__fill--danger { background: var(--rb-danger); }
+
+/* Stat card */
+.rb-stat {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 20px;
+  border-radius: var(--rb-r-xl);
+  background: var(--rb-surface-glass);
+  -webkit-backdrop-filter: blur(var(--rb-blur));
+  backdrop-filter: blur(var(--rb-blur));
+  border: 1px solid var(--rb-glass-border);
+  box-shadow: var(--rb-shadow-sm);
+}
+.rb-stat__icon {
+  width: 40px;
+  height: 40px;
+  margin-bottom: 12px;
+  border-radius: var(--rb-r-md);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 22px;
+  background: var(--rb-accent-soft);
+  color: var(--rb-accent-text);
+}
+.rb-stat__value {
+  font-size: 30px;
+  font-weight: 500;
+  letter-spacing: -0.03em;
+  font-variant-numeric: tabular-nums;
+  line-height: 1.1;
+}
+.rb-stat__label {
+  font-size: 13px;
+  color: var(--rb-muted);
+}
+.rb-stat__hint {
+  margin-top: 6px;
+  font-size: 12px;
+  color: var(--rb-success-text);
+}
+
+/* Icon button */
+.rb-icon-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+  border-radius: var(--rb-r-md);
+  color: var(--rb-muted);
+  transition:
+    background var(--rb-duration) var(--rb-ease),
+    color var(--rb-duration) var(--rb-ease);
+}
+.rb-icon-btn:hover {
+  background: var(--rb-hover);
+  color: var(--rb-ink);
+}
+.rb-icon-btn--active {
+  background: var(--rb-raise);
+  color: var(--rb-ink);
+  box-shadow: var(--rb-shadow-sm);
+}
+.rb-icon-btn--32 {
+  width: 32px;
+  height: 32px;
+  font-size: 16px;
+}
+.rb-icon-btn--38 {
+  width: 38px;
+  height: 38px;
+  font-size: 18px;
+}
+.rb-icon-btn--44 {
+  width: 44px;
+  height: 44px;
+  font-size: 20px;
+}
+
+/* Surface (frosted containers) */
+.rb-surface {
+  background: var(--rb-glass-strong);
+  -webkit-backdrop-filter: blur(var(--rb-blur));
+  backdrop-filter: blur(var(--rb-blur));
+  border: 1px solid var(--rb-glass-border);
+}
+.rb-surface--popover {
+  /* SOLID. A popup is its own transparent window: nothing in its page sits
+     behind the panel to blur, and the OS composites any alpha straight over
+     the windows beneath, so the Start menu, account menu and quick settings
+     were hard to read. Opaque token, no backdrop-filter (also cheaper). Only
+     the taskbar pills and the desktop stay glass. */
+  background: var(--rb-surface);
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
+  /* The popup window is exactly the panel's size, so the shadow is clipped
+     and a white border vanishes over white content behind it (the corners
+     then read as patches). A visible hairline keeps the edge. */
+  border-color: var(--rb-line);
+  border-radius: var(--rb-r-xl);
+  box-shadow: var(--rb-shadow-popover);
+  z-index: var(--rb-z-popover);
+}
+.rb-surface--bar {
+  background: var(--rb-glass-bar);
+  border-radius: var(--rb-r-18);
+  box-shadow: var(--rb-shadow-md);
+}
+.rb-surface--window {
+  border-radius: var(--rb-r-lg);
+  box-shadow: var(--rb-shadow-window);
+  overflow: hidden;
+  background: var(--rb-surface);
+}
+
+/* The taskbar: three floating pills on a transparent strip. Start on the
+   left, the apps in the middle of the screen, the status cluster (notices,
+   network/volume/battery, clock, account) on the right. */
+.rb-taskbar {
+  display: grid;
+  /* The side pills never shrink below their content; on a narrow screen the
+     apps pill in the middle gives way (it scrolls) instead of sliding under
+     the tray. */
+  grid-template-columns: minmax(max-content, 1fr) minmax(96px, auto) minmax(max-content, 1fr);
+  align-items: center;
+  gap: 12px;
+  height: var(--rb-taskbar);
+}
+.rb-dock {
+  display: flex;
+  align-items: center;
+  height: var(--rb-taskbar);
+  padding: 0 8px;
+  gap: 6px;
+  min-width: 0;
+  border-radius: var(--rb-r-22);
+  background: var(--rb-glass-bar);
+  border: 1px solid var(--rb-glass-border);
+  /* No outer shadow: the taskbar window is clipped to the pills, so a shadow
+     could only show as a pale or dark fringe in the strip around them. */
+  -webkit-backdrop-filter: blur(var(--rb-blur));
+  backdrop-filter: blur(var(--rb-blur));
+}
+.rb-dock--start {
+  justify-self: start;
+  width: var(--rb-taskbar);
+  justify-content: center;
+  padding: 0;
+}
+.rb-dock--apps {
+  justify-self: center;
+  max-width: 100%;
+  overflow-x: auto;
+  overflow-y: hidden;
+  scrollbar-width: none;
+}
+.rb-dock--tray {
+  justify-self: end;
+  padding: 0 8px 0 8px;
+  gap: 8px;
+}
+/* Nothing in the tray shrinks or wraps (the clock stays on one line). */
+.rb-dock--tray > * {
+  flex: none;
+  white-space: nowrap;
+}
+/* A rounded chip inside the tray (the bell, the status group). The hover
+   tint is its own layer, so only opacity changes. */
+.rb-chip {
+  position: relative;
+  isolation: isolate;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  height: 40px;
+  min-width: 40px;
+  padding: 0 10px;
+  border-radius: 14px;
+  color: var(--rb-ink);
+  background: var(--rb-hover);
+  font-size: 13px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+.rb-chip::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  background: var(--rb-line);
+  opacity: 0;
+  z-index: -1;
+  transition: opacity var(--rb-duration) var(--rb-ease);
+}
+.rb-chip:hover::before {
+  opacity: 0.7;
+}
+.rb-chip:focus-visible,
+.rb-tray-button:focus-visible {
+  outline: 2px solid var(--rb-focus);
+  outline-offset: 2px;
+}
+.rb-chip--icon {
+  width: 40px;
+  padding: 0;
+}
+/* The small "something new" dot on the bell. */
+.rb-chip__dot {
+  position: absolute;
+  top: 7px;
+  right: 8px;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--rb-success);
+  box-shadow: 0 0 0 2px var(--rb-hover);
+}
+.rb-chip__good {
+  color: var(--rb-success-text);
+}
+.rb-chip__warn {
+  color: var(--rb-warning-text);
+}
+.rb-chip__bad {
+  color: var(--rb-danger-text);
+}
+.rb-chip__muted {
+  color: var(--rb-muted);
+}
+/* Debug builds: the resource chip. Dashed, so it never passes for product UI. */
+.rb-chip--dev {
+  gap: 8px;
+  padding: 0 10px 0 6px;
+  font-weight: 600;
+  border: 1px dashed var(--rb-line);
+}
+.rb-chip__devtag {
+  padding: 2px 5px;
+  border-radius: 6px;
+  background: var(--rb-warning-soft);
+  color: var(--rb-warning-text);
+  font-size: 9.5px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+}
+.rb-chip__stack {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  line-height: 1.15;
+  font-size: 11.5px;
+  font-family: var(--rb-font-mono);
+  font-weight: 500;
+  white-space: nowrap;
+}
+.rb-chip__stack > span:last-child {
+  font-size: 10.5px;
+}
+
+/* The resource monitor popup (debug builds). */
+.rb-monitor {
+  height: 100%;
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 16px;
+  color: var(--rb-ink);
+}
+.rb-monitor--waiting {
+  align-items: center;
+  justify-content: center;
+  color: var(--rb-muted);
+}
+.rb-monitor__head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+}
+.rb-monitor__eyebrow {
+  font-size: 11.5px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--rb-muted);
+}
+.rb-monitor__hint,
+.rb-monitor__foot {
+  font-size: 11.5px;
+  color: var(--rb-faint);
+}
+/* Developer switch under the list: "Force full motion". */
+.rb-monitor__toggle {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 10px 12px;
+  border-radius: 14px;
+  background: var(--rb-hover);
+}
+.rb-monitor__meters {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+}
+.rb-monitor__meter {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 10px 12px;
+  border-radius: 14px;
+  background: var(--rb-hover);
+}
+.rb-monitor__meter-label {
+  font-size: 11.5px;
+  color: var(--rb-muted);
+}
+.rb-monitor__meter-value {
+  font-size: 15px;
+  font-weight: 650;
+  font-family: var(--rb-font-mono);
+  white-space: nowrap;
+}
+.rb-monitor__total {
+  font-size: 13px;
+  color: var(--rb-muted);
+}
+.rb-monitor__total strong {
+  color: var(--rb-ink);
+  font-family: var(--rb-font-mono);
+}
+.rb-monitor__list {
+  flex: 1;
+  min-height: 0;
+  margin: 0 -6px;
+  padding: 0;
+  list-style: none;
+  overflow-y: auto;
+}
+.rb-monitor__row {
+  display: grid;
+  grid-template-columns: 10px minmax(0, 1fr) auto;
+  grid-template-rows: auto 4px;
+  column-gap: 10px;
+  row-gap: 5px;
+  align-items: center;
+  padding: 8px 6px;
+  border-radius: 10px;
+}
+.rb-monitor__row:hover {
+  background: var(--rb-hover);
+}
+.rb-monitor__dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+}
+.rb-monitor__name {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+.rb-monitor__title {
+  font-size: 13px;
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.rb-monitor__sub {
+  font-size: 11px;
+  color: var(--rb-muted);
+}
+.rb-monitor__figures {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  font-family: var(--rb-font-mono);
+  font-variant-numeric: tabular-nums;
+}
+.rb-monitor__mem {
+  font-size: 12.5px;
+  font-weight: 600;
+}
+.rb-monitor__mem--na {
+  font-family: var(--rb-font-sans);
+  font-size: 11.5px;
+  font-weight: 500;
+  color: var(--rb-faint);
+}
+.rb-monitor__cpu {
+  font-size: 11px;
+  color: var(--rb-muted);
+}
+.rb-monitor__bar {
+  grid-column: 2 / 4;
+  position: relative;
+  height: 4px;
+  border-radius: 2px;
+  background: var(--rb-line);
+  overflow: hidden;
+}
+.rb-monitor__bar--meter {
+  grid-column: auto;
+  margin-top: 2px;
+}
+/* Width by transform (scaleX from the left), so a change is a cheap transform. */
+.rb-monitor__fill {
+  position: absolute;
+  inset: 0;
+  transform-origin: left center;
+  transition: transform 0.6s var(--rb-ease);
+}
+
+/* Clock and avatar: plain buttons in the tray. */
+.rb-tray-button {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 999px;
+  color: var(--rb-ink);
+  transition: transform var(--rb-duration) var(--rb-ease);
+}
+.rb-tray-button:hover {
+  transform: scale(1.05);
+}
+
+/* An app's art on a taskbar button: the same looks as the tile's, smaller. */
+.rb-task__art {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 34px;
+  height: 34px;
+  border-radius: 11px;
+  font-size: 20px;
+  transition: transform var(--rb-duration) var(--rb-ease-pop);
+}
+.rb-task__art--glyph {
+  color: oklch(1 0 0);
+  background: linear-gradient(
+    150deg,
+    oklch(var(--rb-art-top-l) var(--rb-art-c) var(--rb-hue)),
+    oklch(var(--rb-art-bottom-l) var(--rb-art-c) calc(var(--rb-hue) + 12))
+  );
+  box-shadow:
+    inset 0 1px 0 oklch(1 0 0 / 0.3),
+    0 4px 10px -5px oklch(0.55 0.16 var(--rb-hue) / 0.6);
+}
+/* A program window's own icon (Windows gives it a small bitmap): on a light plate. */
+.rb-task__art--image {
+  background: var(--rb-icon-plate);
+  border: 1px solid var(--rb-icon-plate-border);
+  box-shadow: var(--rb-shadow-sm);
+}
+.rb-task__art--image img {
+  width: 22px;
+  height: 22px;
+  object-fit: contain;
+}
+/* A catalogue app's own icon: full-bleed in the rounded box, like the tile's (see `.rb-tile__icon--image`). */
+.rb-task__art--photo {
+  position: relative;
+  background: var(
+    --rb-icon-edge,
+    linear-gradient(
+      150deg,
+      oklch(var(--rb-art-top-l) var(--rb-art-c) var(--rb-hue)),
+      oklch(var(--rb-art-bottom-l) var(--rb-art-c) calc(var(--rb-hue) + 12))
+    )
+  );
+  box-shadow: var(--rb-shadow-sm);
+}
+.rb-task__art--photo img {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  display: block;
+  object-fit: cover;
+  border-radius: inherit;
+}
+.rb-task__art--photo[data-icon-kind="pending"] img {
+  visibility: hidden;
+}
+.rb-task__art--lg {
+  width: 56px;
+  height: 56px;
+  border-radius: 17px;
+  font-size: 30px;
+}
+.rb-task__art--lg.rb-task__art--image img {
+  width: 34px;
+  height: 34px;
+}
+.rb-task__art--sm {
+  width: 26px;
+  height: 26px;
+  border-radius: 8px;
+  font-size: 16px;
+}
+.rb-task:hover .rb-task__art {
+  transform: translateY(-2px) scale(1.06);
+}
+
+/* The app switcher (Alt+Tab): the chosen window's name on top, the windows
+   as cards, the keys at the bottom. The chosen card lifts (transform) and
+   gets an accent ring. */
+.rb-switcher {
+  height: 100%;
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 18px 18px 14px;
+}
+.rb-switcher--empty {
+  align-items: center;
+  justify-content: center;
+}
+.rb-switcher__head {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  min-width: 0;
+}
+.rb-switcher__eyebrow {
+  font-size: 11.5px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--rb-muted);
+}
+.rb-switcher__title {
+  max-width: 100%;
+  font-size: 17px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  color: var(--rb-ink);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.rb-switcher__list {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  align-items: stretch;
+  justify-content: safe center;
+  gap: 10px;
+  padding: 6px 4px;
+  overflow-x: auto;
+  overflow-y: hidden;
+  scrollbar-width: none;
+}
+.rb-switcher__item {
+  position: relative;
+  isolation: isolate;
+  flex: 0 0 128px;
+  /* Fixed: a long window title is cut with an ellipsis, never widens the card. */
+  width: 128px;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 12px 10px;
+  border: 0;
+  border-radius: 18px;
+  background: transparent;
+  color: var(--rb-ink);
+  font: inherit;
+  cursor: pointer;
+  transition: transform 0.22s var(--rb-ease);
+}
+.rb-switcher__item::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  background: var(--rb-hover);
+  opacity: 0;
+  z-index: -1;
+  transition: opacity 0.18s var(--rb-ease);
+}
+.rb-switcher__item:hover::before {
+  opacity: 0.6;
+}
+.rb-switcher__item[aria-selected="true"] {
+  transform: translateY(-3px);
+}
+.rb-switcher__item[aria-selected="true"]::before {
+  opacity: 1;
+  background: var(--rb-accent-soft);
+  box-shadow:
+    0 0 0 2px var(--rb-accent),
+    var(--rb-shadow-md);
+}
+.rb-switcher__item .rb-task__art {
+  margin-bottom: 4px;
+}
+.rb-switcher__label {
+  max-width: 100%;
+  font-size: 13px;
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.rb-switcher__sub {
+  max-width: 100%;
+  font-size: 11.5px;
+  color: var(--rb-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.rb-switcher__state {
+  font-size: 10.5px;
+  font-weight: 600;
+  color: var(--rb-muted);
+}
+.rb-switcher__hints {
+  display: flex;
+  justify-content: center;
+  flex-wrap: wrap;
+  gap: 6px 16px;
+  font-size: 11.5px;
+  color: var(--rb-muted);
+}
+.rb-kbd {
+  display: inline-block;
+  min-width: 20px;
+  padding: 1px 6px;
+  border-radius: 6px;
+  border: 1px solid var(--rb-line);
+  border-bottom-width: 2px;
+  background: var(--rb-surface);
+  color: var(--rb-ink);
+  font: inherit;
+  font-size: 11px;
+  font-weight: 600;
+  text-align: center;
+}
+@media (prefers-reduced-motion: reduce) {
+  :where(:root:not([data-force-motion="true"])) .rb-switcher__item[aria-selected="true"] {
+    transform: none;
+  }
+}
+[data-lite="true"] .rb-switcher__item[aria-selected="true"] {
+  transform: none;
+}
+/* In the apps pill the art itself answers hover; no tinted square behind it. */
+.rb-dock--apps .rb-task:hover {
+  background: transparent;
+}
+.rb-dock--apps .rb-task__icon {
+  width: auto;
+  height: auto;
+}
+/* Art on top, the open / active mark 5 px under it, the pair centred in the pill. */
+.rb-dock--apps {
+  padding: 0 10px;
+  gap: 4px;
+}
+.rb-dock--apps .rb-task {
+  width: 48px;
+  height: 50px;
+  align-items: flex-start;
+  padding-top: 4px;
+  border-radius: 14px;
+}
+.rb-dock--apps .rb-task__bar {
+  bottom: 3px;
+  height: 4px;
+}
+[data-lite="true"] .rb-task:hover .rb-task__art {
+  transform: none;
+}
+@media (prefers-reduced-motion: reduce) {
+  :where(:root:not([data-force-motion="true"])) .rb-task:hover .rb-task__art,
+  :where(:root:not([data-force-motion="true"])) .rb-tray-button:hover {
+    transform: none;
+  }
+}
+
+/* Taskbar task button: icon plus an open / active indicator under it.
+   The indicator animates only transform and opacity. */
+.rb-task {
+  position: relative;
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: var(--rb-taskbar-item);
+  height: var(--rb-taskbar-item);
+  border-radius: var(--rb-r-md);
+  color: var(--rb-ink);
+  transition: background var(--rb-duration) var(--rb-ease);
+}
+.rb-task:hover {
+  background: var(--rb-hover);
+}
+.rb-task:focus-visible {
+  outline: 2px solid var(--rb-focus);
+  outline-offset: 2px;
+}
+.rb-task__icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  font-size: 26px;
+  transition: opacity var(--rb-duration) var(--rb-ease);
+}
+.rb-task__icon img {
+  width: 26px;
+  height: 26px;
+  object-fit: contain;
+}
+.rb-task[data-minimized="true"] .rb-task__icon {
+  opacity: 0.6;
+}
+/* 18 px wide when active, scaled to 6 px otherwise (6 / 18). */
+.rb-task__bar {
+  position: absolute;
+  left: 50%;
+  bottom: 2px;
+  width: 18px;
+  height: 4px;
+  margin-left: -9px;
+  border-radius: 2px;
+  background: var(--rb-muted);
+  opacity: 0;
+  transform: scaleX(0.3334);
+  transition:
+    transform var(--rb-duration) var(--rb-ease),
+    opacity var(--rb-duration) var(--rb-ease);
+}
+.rb-task[data-open="true"] .rb-task__bar {
+  opacity: 1;
+}
+.rb-task[data-active="true"] .rb-task__bar {
+  background: var(--rb-accent);
+  transform: scaleX(1);
+}
+.rb-task[data-flashing="true"] .rb-task__bar {
+  background: var(--rb-accent);
+  opacity: 1;
+  transform: scaleX(1);
+  animation: rb-task-pulse 1s ease-in-out infinite;
+}
+.rb-task__warn {
+  position: absolute;
+  top: 5px;
+  right: 5px;
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  /* The darker warning shade: --rb-warning is only 2.3:1 on the surface ring. */
+  background: var(--rb-warning-text);
+  box-shadow: 0 0 0 2px var(--rb-surface);
+}
+.rb-task__count {
+  position: absolute;
+  top: 3px;
+  right: 3px;
+  min-width: 16px;
+  height: 16px;
+  padding: 0 4px;
+  border-radius: 8px;
+  background: var(--rb-ink);
+  color: var(--rb-on-ink);
+  font-size: 10.5px;
+  font-weight: 600;
+  line-height: 16px;
+  text-align: center;
+}
+@media (prefers-reduced-motion: reduce) {
+  :where(:root:not([data-force-motion="true"])) .rb-task[data-flashing="true"] .rb-task__bar {
+    animation: none;
+  }
+  :where(:root:not([data-force-motion="true"])) .rb-pager__thumb,
+  :where(:root:not([data-force-motion="true"])) .rb-progress__fill,
+  :where(:root:not([data-force-motion="true"])) .rb-monitor__fill,
+  :where(:root:not([data-force-motion="true"])) .rb-task__bar,
+  :where(:root:not([data-force-motion="true"])) .rb-switcher__item {
+    transition: none;
+  }
+}
+/* With no pulse (reduced motion, Lite) "needs attention" still differs from "active":
+   a taller bar in the warning shade, so it is not told by animation alone. */
+@media (prefers-reduced-motion: reduce) {
+  :where(:root:not([data-force-motion="true"])) .rb-task[data-flashing="true"] .rb-task__bar {
+    height: 6px;
+    background: var(--rb-warning-text);
+  }
+}
+[data-lite="true"] .rb-task[data-flashing="true"] .rb-task__bar {
+  height: 6px;
+  background: var(--rb-warning-text);
+}
+.rb-task-divider {
+  flex: none;
+  width: 1px;
+  height: 26px;
+  margin: 0 6px;
+  background: var(--rb-line);
+}
+
+/* Slider */
+.rb-slider {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  font-size: 13.5px;
+}
+.rb-slider[data-disabled] {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+.rb-slider__label {
+  flex: none;
+  min-width: 64px;
+  color: var(--rb-ink);
+  font-weight: 500;
+}
+.rb-slider__value {
+  flex: none;
+  min-width: 28px;
+  text-align: right;
+  color: var(--rb-muted);
+  font-variant-numeric: tabular-nums;
+}
+.rb-slider__input {
+  flex: 1;
+  min-width: 0;
+  height: 6px;
+  appearance: none;
+  -webkit-appearance: none;
+  border-radius: 3px;
+  background: linear-gradient(
+    to right,
+    var(--rb-accent) 0%,
+    var(--rb-accent) var(--rb-slider-pct, 0%),
+    var(--rb-hover) var(--rb-slider-pct, 0%),
+    var(--rb-hover) 100%
+  );
+  outline: none;
+  cursor: pointer;
+}
+.rb-slider__input::-webkit-slider-thumb {
+  appearance: none;
+  -webkit-appearance: none;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: var(--rb-surface);
+  border: 2px solid var(--rb-accent);
+  box-shadow: var(--rb-shadow-sm);
+  cursor: pointer;
+}
+.rb-slider__input::-moz-range-thumb {
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: var(--rb-surface);
+  border: 2px solid var(--rb-accent);
+  box-shadow: var(--rb-shadow-sm);
+  cursor: pointer;
+}
+
+/* A slider whose icon in front already says what it is (quick settings): the
+   name stays for screen readers and is not drawn. */
+.rb-slider--bare .rb-slider__label {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+/* The Files window's right-click menu items (their layout is inline): hover and keyboard focus tint. */
+.rb-ctx-item:hover:not(:disabled),
+.rb-ctx-item:focus-visible:not(:disabled) {
+  background: var(--rb-hover);
+}
+.rb-ctx-item:focus-visible {
+  outline-offset: -2px;
+}
+
+/*
+ * Files: rows, cards, navigation and the desktop's My files panel.
+ * Hover is a static tint (a colour change, nothing animates), so it is the same in
+ * Lite and with reduced motion. The tint is a few percent of the ink colour, so it
+ * shows on the page, on a surface and in the dark theme alike. A selected item keeps
+ * its own tint and gains a thin accent line on hover; keyboard focus stays the
+ * global 2 px ring (or the inline outline on a list row).
+ */
+.rb-file-row:hover,
+.rb-nav-btn:hover,
+.rb-crumb:hover,
+.rb-filter-btn:hover:not([aria-pressed="true"]) {
+  background: color-mix(in oklch, var(--rb-ink) 5.5%, transparent);
+}
+.rb-file-row[aria-selected="true"],
+.rb-nav-btn[aria-current="page"],
+.rb-file-card[aria-selected="true"] {
+  background: var(--rb-accent-soft);
+}
+.rb-file-row[aria-selected="true"]:hover,
+.rb-nav-btn[aria-current="page"]:hover,
+.rb-file-card[aria-selected="true"]:hover {
+  background: var(--rb-accent-soft);
+  box-shadow: inset 0 0 0 1px color-mix(in oklch, var(--rb-accent) 40%, transparent);
+}
+.rb-file-card {
+  border: 1px solid var(--rb-line);
+  background: var(--rb-surface);
+}
+.rb-file-card:hover:not([aria-selected="true"]) {
+  background: color-mix(in oklch, var(--rb-ink) 5.5%, var(--rb-surface));
+  border-color: color-mix(in oklch, var(--rb-accent) 45%, var(--rb-line));
+}
+.rb-panel-row {
+  background: var(--rb-bg);
+}
+.rb-panel-row:hover {
+  background: var(--rb-accent-soft);
+  box-shadow: inset 0 0 0 1px color-mix(in oklch, var(--rb-accent) 35%, transparent);
+}
+.rb-panel-row:focus-visible {
+  outline: 2px solid var(--rb-focus);
+  outline-offset: 1px;
+}
+.rb-nav-btn:focus-visible,
+.rb-crumb:focus-visible,
+.rb-filter-btn:focus-visible {
+  outline: 2px solid var(--rb-focus);
+  outline-offset: -2px;
+}
+
+/* Tabs */
+.rb-tabs {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  min-width: 0;
+}
+.rb-tabs__list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px;
+  padding: 0 4px;
+  border-bottom: 1px solid var(--rb-line);
+}
+.rb-tabs__tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  max-width: 200px;
+  border-radius: var(--rb-r-sm) var(--rb-r-sm) 0 0;
+}
+.rb-tabs__tab--active {
+  background: var(--rb-surface);
+  box-shadow: inset 0 -2px 0 var(--rb-accent);
+}
+.rb-tabs__btn {
+  height: 36px;
+  padding: 0 12px;
+  font-size: 13.5px;
+  font-weight: 500;
+  color: var(--rb-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 160px;
+}
+.rb-tabs__tab--active .rb-tabs__btn {
+  color: var(--rb-ink);
+}
+.rb-tabs__btn:hover {
+  color: var(--rb-ink);
+}
+.rb-tabs__close {
+  width: 24px;
+  height: 24px;
+  margin-right: 4px;
+  border-radius: 6px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--rb-faint);
+  font-size: 16px;
+  line-height: 1;
+}
+.rb-tabs__close:hover {
+  background: var(--rb-hover);
+  color: var(--rb-ink);
+}
+.rb-tabs__panel {
+  padding: 16px 4px 4px;
+  font-size: 14px;
+  color: var(--rb-muted);
+}
+
+/* File chip */
+.rb-file-chip {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  height: 22px;
+  min-width: 36px;
+  padding: 0 8px;
+  border-radius: 6px;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  background: oklch(var(--rb-tint-bg-l) var(--rb-tint-bg-c) var(--rb-hue));
+  color: oklch(var(--rb-tint-fg-l) var(--rb-tint-fg-c) var(--rb-hue));
+  font-family: var(--rb-font-mono);
+}
+
+/* Notice */
+.rb-notice {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 14px 16px;
+  border-radius: var(--rb-r-lg);
+  border: 1px solid var(--rb-line);
+  background: var(--rb-surface);
+  box-shadow: var(--rb-shadow-sm);
+}
+.rb-notice--neutral {
+  background: var(--rb-hover);
+}
+.rb-notice--accent {
+  background: var(--rb-accent-soft);
+  border-color: transparent;
+}
+.rb-notice--success {
+  background: var(--rb-success-soft);
+  border-color: transparent;
+}
+.rb-notice--warning {
+  background: var(--rb-warning-soft);
+  border-color: transparent;
+}
+.rb-notice--danger {
+  background: var(--rb-danger-soft);
+  border-color: transparent;
+}
+.rb-notice__icon {
+  flex: none;
+  font-size: 20px;
+  margin-top: 1px;
+}
+.rb-notice__text {
+  flex: 1;
+  min-width: 0;
+}
+.rb-notice__title {
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--rb-ink);
+}
+.rb-notice--accent .rb-notice__title { color: var(--rb-accent-text); }
+.rb-notice--success .rb-notice__title { color: var(--rb-success-text); }
+.rb-notice--warning .rb-notice__title { color: var(--rb-warning-text); }
+.rb-notice--danger .rb-notice__title { color: var(--rb-danger-text); }
+.rb-notice__detail {
+  margin-top: 2px;
+  font-size: 13px;
+  color: var(--rb-muted);
+  line-height: 1.4;
+}
+.rb-notice__dismiss {
+  flex: none;
+  width: 28px;
+  height: 28px;
+  margin: -4px -6px -4px 0;
+  border-radius: var(--rb-r-sm);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--rb-faint);
+  font-size: 18px;
+  line-height: 1;
+}
+.rb-notice__dismiss:hover {
+  background: oklch(0 0 0 / 0.06);
+  color: var(--rb-ink);
+}
+@keyframes rb-task-pulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.25;
+  }
+}

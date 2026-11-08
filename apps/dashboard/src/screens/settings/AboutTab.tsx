@@ -3,12 +3,13 @@ import { LogoMark } from "@rulebox/ui";
 import { DASHBOARD_API_VERSION, IS_DEMO } from "../../data";
 import { Card } from "../../components/Card";
 import { strings } from "../../lib/strings";
+import { settingsStrings } from "../../lib/screenStrings/settings";
 
-const s = strings.settings.about;
+const s = settingsStrings.about;
 
 export function AboutTab() {
   return (
-    <Card title={strings.settings.tabs.about}>
+    <Card title={settingsStrings.tabs.about}>
       <div className="dash-form">
         <div className="dash-row" style={{ gap: 16 }}>
           <LogoMark size={48} label={strings.app.name} />

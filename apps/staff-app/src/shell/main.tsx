@@ -4,6 +4,7 @@ import { setLite, setTheme, ErrorBoundary } from "@rulebox/ui";
 import "@rulebox/ui/fonts.css";
 import "@rulebox/ui/tokens.css";
 import "@rulebox/ui/base.css";
+import "@rulebox/ui/staff.css";
 
 import { startDevMotion, useForcedFullMotion } from "../lib/devMotion";
 import { installExitKey } from "../lib/exitKey";

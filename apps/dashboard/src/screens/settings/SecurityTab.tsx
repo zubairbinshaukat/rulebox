@@ -2,10 +2,10 @@ import { useState } from "react";
 import { Button, Input, Pill } from "@rulebox/ui";
 import IconKey from "~icons/solar/key-minimalistic-square-linear";
 import {
-  useClearActionPin,
+  useChangePassword,
+  useGenerateRecoveryCodes,
   useRemovePasskey,
   useRenamePasskey,
-  useResetStepUpWithRecoveryCode,
   useSetActionPin,
   useStepUpStatus,
 } from "../../data/stepup";
@@ -19,7 +19,9 @@ import { QueryRegion } from "../../components/Region";
 import { RelativeTime } from "../../components/RelativeTime";
 import { SkeletonBlock } from "../../components/Skeleton";
 import { formatDate, formatDateTime } from "../../lib/format";
-import { toAppError } from "../../lib/errors";
+import { AppError } from "../../lib/errors";
+import { PasswordInput } from "../../components/PasswordInput";
+import { useMember } from "../../lib/member";
 import { stepUpMessage } from "../../lib/stepup/messages";
 import { isPasskeyCancel, passkeysSupported } from "../../lib/stepup/passkey";
 import { sec } from "../../lib/stepup/strings";
@@ -29,6 +31,7 @@ import { useNow } from "../../lib/useNow";
 import * as v from "../../lib/validate";
 import { strings } from "../../lib/strings";
 import { useStepUpController } from "../../stepup/context";
+import { RecoveryCodes } from "../../stepup/RecoveryCodes";
 import { SetPinForm } from "../../stepup/SetPinForm";
 import { useAddPasskey } from "../../stepup/usePasskeys";
 import "../../stepup/stepup.css";
@@ -47,36 +50,40 @@ export default function SecurityTab() {
 
 type Dialog =
   | { kind: "pin" }
-  | { kind: "removePin" }
   | { kind: "addPasskey" }
+  | { kind: "password" }
+  | { kind: "newCodes" }
+  | { kind: "codes"; codes: string[] }
   | { kind: "rename"; key: PasskeyRow }
   | { kind: "removePasskey"; key: PasskeyRow };
 
 function Security({ st }: { st: StepUpStatus }) {
   const toast = useToast();
+  const me = useMember();
   const controller = useStepUpController();
   const setPin = useSetActionPin();
-  const clearPin = useClearActionPin();
+  const generateCodes = useGenerateRecoveryCodes();
   const removePasskey = useRemovePasskey();
   const [dialog, setDialog] = useState<Dialog | null>(null);
   const now = useNow(30_000);
 
-  const usableKeys = st.passkeys.filter((k) => !k.suspended);
-  const pinUsable = st.actionPin.set && !st.actionPin.disabled;
-  const canRemovePin = usableKeys.length > 0;
   const browserPasskeys = passkeysSupported();
   const canAddPasskey = st.passkeysAvailable && browserPasskeys && st.passkeys.length < MAX_PASSKEYS;
   const local = (ms: number) => (controller ? controller.toLocal(ms) : ms);
 
-  const pinState = !st.actionPin.set ? (
+  // A password change (and codes) need a fresh confirmation: ask first, then open the form.
+  const confirmFresh = async (): Promise<boolean> => {
+    if (!controller) return true;
+    const at = st.session.verifiedAt;
+    if (at !== null && controller.serverNow() - at <= st.policy.freshMs - 30_000) return true;
+    return await controller.request(new AppError({ code: "step_up_required", detail: "fresh" }));
+  };
+
+  const pinState = !st.pin.set ? (
     <Pill dot>{sec.pinNotSet}</Pill>
-  ) : st.actionPin.disabled ? (
-    <Pill tone="danger" dot>
-      {sec.pinOff}
-    </Pill>
-  ) : st.actionPin.lockedUntil !== null && local(st.actionPin.lockedUntil) > now ? (
+  ) : st.pin.lockedUntil !== null && local(st.pin.lockedUntil) > now ? (
     <Pill tone="warning" dot>
-      {sec.pinLockedUntil(formatDateTime(local(st.actionPin.lockedUntil)))}
+      {sec.pinLockedUntil(formatDateTime(local(st.pin.lockedUntil)))}
     </Pill>
   ) : (
     <Pill tone="success" dot>
@@ -92,30 +99,14 @@ function Security({ st }: { st: StepUpStatus }) {
         actions={
           <div className="su-actions">
             <Button variant="ghost" className="dash-btn--sm" onClick={() => setDialog({ kind: "pin" })}>
-              {st.actionPin.set ? sec.changePin : sec.setPinButton}
+              {st.pin.set ? sec.changePin : sec.setPinButton}
             </Button>
-            {st.actionPin.set ? (
-              <Button
-                variant="danger-ghost"
-                className="dash-btn--sm"
-                disabled={!canRemovePin}
-                aria-describedby={canRemovePin ? undefined : "su-pin-last"}
-                onClick={() => setDialog({ kind: "removePin" })}
-              >
-                {sec.removePin}
-              </Button>
-            ) : null}
           </div>
         }
       >
         <div className="dash-form">
           <div>{pinState}</div>
-          {st.actionPin.disabled ? <InlineNotice tone="warning" title={strings.errors.stepUpDisabled} /> : null}
-          {st.actionPin.set && !canRemovePin ? (
-            <p className="dash-muted" id="su-pin-last">
-              {sec.lastFactorHint}
-            </p>
-          ) : null}
+          <p className="dash-muted">{sec.pinRequiredHint}</p>
         </div>
       </Card>
 
@@ -143,7 +134,6 @@ function Security({ st }: { st: StepUpStatus }) {
         {st.passkeys.length ? (
           <ul className="dash-list" aria-label={sec.passkeysCard}>
             {st.passkeys.map((k) => {
-              const last = !pinUsable && usableKeys.filter((x) => x._id !== k._id).length === 0 && !k.suspended;
               return (
                 <li key={k._id} className="dash-list__item">
                   <div className="dash-list__body">
@@ -161,7 +151,6 @@ function Security({ st }: { st: StepUpStatus }) {
                       {k.lastUsedAt !== null ? sec.lastUsed(formatDateTime(local(k.lastUsedAt))) : sec.neverUsed}
                     </p>
                     {k.suspended ? <p className="dash-list__meta">{sec.suspendedHint}</p> : null}
-                    {last ? <p className="dash-list__meta">{sec.lastPasskeyHint}</p> : null}
                   </div>
                   <div className="su-actions">
                     <Button variant="ghost" className="dash-btn--sm" aria-label={`${strings.common.rename}: ${k.name}`} onClick={() => setDialog({ kind: "rename", key: k })}>
@@ -170,7 +159,6 @@ function Security({ st }: { st: StepUpStatus }) {
                     <Button
                       variant="danger-ghost"
                       className="dash-btn--sm"
-                      disabled={last}
                       aria-label={`${sec.removePasskey}: ${k.name}`}
                       onClick={() => setDialog({ kind: "removePasskey", key: k })}
                     >
@@ -187,7 +175,7 @@ function Security({ st }: { st: StepUpStatus }) {
       <Card
         title={sec.sessionCard}
         actions={
-          controller && (st.actionPin.set || st.passkeys.length > 0) ? (
+          controller && st.pin.set ? (
             <Button variant="ghost" className="dash-btn--sm" onClick={() => controller.lockNow("manual")}>
               {sec.lockNow}
             </Button>
@@ -204,11 +192,52 @@ function Security({ st }: { st: StepUpStatus }) {
         <p className="dash-muted">{sec.sessionLockHint}</p>
       </Card>
 
-      <RecoveryCard />
+      <Card
+        title={sec.recoveryCard}
+        sub={sec.recoveryCardSub}
+        actions={
+          <Button variant="ghost" className="dash-btn--sm" onClick={() => setDialog({ kind: "newCodes" })}>
+            {sec.recoveryCreate}
+          </Button>
+        }
+      >
+        <div className="dash-form">
+          <div>
+            {st.pin.recoveryCodesLeft > 0 ? (
+              <Pill tone="success" dot>
+                {sec.recoveryLeft(st.pin.recoveryCodesLeft)}
+              </Pill>
+            ) : (
+              <Pill tone="warning" dot>
+                {sec.recoveryNone}
+              </Pill>
+            )}
+          </div>
+          <p className="dash-muted">{sec.recoveryOtherWays}</p>
+        </div>
+      </Card>
+
+      <Card
+        title={sec.passwordCard}
+        sub={sec.passwordCardSub}
+        actions={
+          <Button
+            variant="ghost"
+            className="dash-btn--sm"
+            onClick={() =>
+              void confirmFresh().then((ok) => {
+                if (ok) setDialog({ kind: "password" });
+              })
+            }
+          >
+            {sec.passwordChange}
+          </Button>
+        }
+      />
 
       {dialog?.kind === "pin" ? (
-        <Modal open title={st.actionPin.set ? sec.changePinTitle : sec.setPinTitle} onClose={() => setDialog(null)}>
-          {st.actionPin.set ? <p className="dash-dialog__lead">{sec.pinChangeLead}</p> : null}
+        <Modal open title={st.pin.set ? sec.changePinTitle : sec.setPinTitle} onClose={() => setDialog(null)}>
+          {st.pin.set ? <p className="dash-dialog__lead">{sec.pinChangeLead}</p> : null}
           <SetPinForm
             autoFocus
             submitLabel={sec.setPin}
@@ -227,16 +256,33 @@ function Security({ st }: { st: StepUpStatus }) {
       ) : null}
       {dialog?.kind === "addPasskey" ? <AddPasskeyDialog onClose={() => setDialog(null)} /> : null}
       {dialog?.kind === "rename" ? <RenameDialog passkey={dialog.key} onClose={() => setDialog(null)} /> : null}
+      {dialog?.kind === "password" ? <PasswordDialog onClose={() => setDialog(null)} /> : null}
       <ConfirmDialog
-        open={dialog?.kind === "removePin"}
-        title={sec.removePinTitle}
-        body={sec.removePinBody}
-        confirmLabel={sec.removePin}
-        danger
-        onConfirm={() => clearPin()}
-        onDone={() => toast(sec.pinRemoved)}
-        onClose={() => setDialog(null)}
+        open={dialog?.kind === "newCodes"}
+        title={sec.recoveryCreateTitle}
+        body={sec.recoveryCreateBody}
+        confirmLabel={sec.recoveryCreate}
+        onConfirm={async () => {
+          const codes = await generateCodes();
+          setDialog({ kind: "codes", codes });
+        }}
+        onClose={() => setDialog((d) => (d?.kind === "newCodes" ? null : d))}
       />
+      {dialog?.kind === "codes" ? (
+        <Modal
+          open
+          title={sec.recoveryCreated}
+          onClose={() => setDialog(null)}
+          actions={
+            <Button className="dash-btn--accent" onClick={() => setDialog(null)}>
+              {strings.common.done}
+            </Button>
+          }
+        >
+          <p className="dash-dialog__lead">{sec.recoveryCreatedLead}</p>
+          <RecoveryCodes codes={dialog.codes} email={me.email} />
+        </Modal>
+      ) : null}
       <ConfirmDialog
         open={dialog?.kind === "removePasskey"}
         title={dialog?.kind === "removePasskey" ? sec.removePasskeyTitle(dialog.key.name) : ""}
@@ -345,55 +391,50 @@ function RenameDialog({ passkey, onClose }: { passkey: PasskeyRow; onClose: () =
   );
 }
 
-/** Lost every factor: fresh sign-in + TOTP + one MFA recovery code (plan 4.16 table, case (b)). */
-function RecoveryCard() {
-  const reset = useResetStepUpWithRecoveryCode();
+/** Current password + new password twice; the confirmation (PIN or passkey) came first. */
+function PasswordDialog({ onClose }: { onClose: () => void }) {
+  const change = useChangePassword();
   const toast = useToast();
-  const [reauth, setReauth] = useState(false);
-  const f = useForm({ code: "" }, (x) => ({ code: v.recoveryCode(x.code) ?? undefined }));
+  const f = useForm({ current: "", next: "", repeat: "" }, (x) => ({
+    current: x.current ? undefined : strings.validate.required,
+    next: v.memberPassword(x.next) ?? undefined,
+    repeat: v.same(x.next, x.repeat, strings.validate.passwordsDiffer) ?? undefined,
+  }));
   return (
-    <Card title={sec.recoveryCard} sub={sec.recoveryLead}>
-      <form
-        className="dash-form"
-        noValidate
-        onSubmit={(e) => {
-          e.preventDefault();
-          void f.submit(async (x) => {
-            setReauth(false);
-            try {
-              await reset({ code: v.normalizeRecoveryCode(x.code) });
-            } catch (err) {
-              const app = toAppError(err);
-              if (app?.code === "step_up_setup_required" && app.detail === "reauthenticate") setReauth(true);
-              throw err;
-            }
-            f.reset({ code: "" });
-            toast(sec.recoveryDone);
-          });
-        }}
-      >
-        <Field label={sec.recoveryCode} error={f.errors.code}>
-          {(p) => (
-            <Input
-              {...p}
-              className="dash-mono"
-              autoComplete="off"
-              autoCapitalize="characters"
-              spellCheck={false}
-              maxLength={12}
-              value={f.values.code}
-              onChange={(e) => f.set("code", e.target.value)}
-              style={{ maxWidth: 240 }}
-            />
-          )}
-        </Field>
-        {f.serverError ? <InlineNotice tone={reauth ? "warning" : "danger"} alert title={stepUpMessage(f.serverError)} /> : null}
-        <div>
-          <Button type="submit" variant="ghost" disabled={f.pending} aria-busy={f.pending}>
-            {f.pending ? strings.common.saving : sec.recoveryReset}
+    <Modal
+      open
+      title={sec.passwordChange}
+      onClose={() => !f.pending && onClose()}
+      onSubmit={() =>
+        void f.submit(async (x) => {
+          await change({ currentPassword: x.current, newPassword: x.next });
+          toast(sec.passwordChanged);
+          onClose();
+        })
+      }
+      actions={
+        <>
+          <Button variant="ghost" onClick={onClose} disabled={f.pending}>
+            {strings.common.cancel}
           </Button>
-        </div>
-      </form>
-    </Card>
+          <Button type="submit" className="dash-btn--accent" disabled={f.pending} aria-busy={f.pending}>
+            {f.pending ? sec.passwordSaving : sec.passwordChange}
+          </Button>
+        </>
+      }
+    >
+      <div className="dash-form">
+        <Field label={sec.passwordCurrent} error={f.errors.current} required>
+          {(p) => <PasswordInput {...p} autoFocus autoComplete="current-password" value={f.values.current} onChange={(e) => f.set("current", e.target.value)} />}
+        </Field>
+        <Field label={sec.passwordNew} hint={sec.passwordRules} error={f.errors.next} required>
+          {(p) => <PasswordInput {...p} autoComplete="new-password" value={f.values.next} onChange={(e) => f.set("next", e.target.value)} />}
+        </Field>
+        <Field label={sec.passwordRepeat} error={f.errors.repeat} required>
+          {(p) => <PasswordInput {...p} autoComplete="new-password" value={f.values.repeat} onChange={(e) => f.set("repeat", e.target.value)} />}
+        </Field>
+        {f.serverError ? <InlineNotice tone="danger" alert title={stepUpMessage(f.serverError)} /> : null}
+      </div>
+    </Modal>
   );
 }

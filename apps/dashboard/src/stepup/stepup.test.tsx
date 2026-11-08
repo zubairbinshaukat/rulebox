@@ -21,7 +21,9 @@ const m = vi.hoisted(() => ({
   finishVerify: vi.fn(),
   beginRegister: vi.fn(),
   finishRegister: vi.fn(),
-  clearPin: vi.fn(),
+  generate: vi.fn(),
+  requestReset: vi.fn(),
+  changePassword: vi.fn(),
   removePasskey: vi.fn(),
   renamePasskey: vi.fn(),
   recovery: vi.fn(),
@@ -45,7 +47,9 @@ vi.mock("../data/stepup", async () => {
   useFinishPasskeyVerification: () => m.finishVerify,
   useBeginPasskeyRegistration: () => m.beginRegister,
   useFinishPasskeyRegistration: () => m.finishRegister,
-  useClearActionPin: () => m.clearPin,
+  useGenerateRecoveryCodes: () => seam(m.generate),
+  useRequestPinReset: () => m.requestReset,
+  useChangePassword: () => seam(m.changePassword),
   useRemovePasskey: () => m.removePasskey,
   useRenamePasskey: () => m.renamePasskey,
   useResetStepUpWithRecoveryCode: () => m.recovery,
@@ -76,13 +80,24 @@ const owner: Me = {
   status: "active",
   orgId: "org",
   orgName: "Acme",
-  mfa: { enrolled: true, required: true, verified: true },
+  pin: { required: true, set: true },
   serverApiVersion: 1,
 };
 
+const pinOf = (over: Partial<StepUpStatus["pin"]> = {}): StepUpStatus["pin"] => ({
+  set: true,
+  lockedUntil: null,
+  lockKind: null,
+  failedSinceUnlock: 0,
+  attemptsBeforeLockout: 10,
+  recoveryCodesLeft: 3,
+  resetByEmail: true,
+  ...over,
+});
+
 function st(over: Partial<StepUpStatus> = {}, session: Partial<StepUpStatus["session"]> = {}): StepUpStatus {
   return {
-    actionPin: { set: true, lockedUntil: null, disabled: false, attemptsBeforeDisable: 10 },
+    pin: pinOf(),
     passkeys: [],
     passkeysAvailable: true,
     session: { verifiedAt: null, lastActiveAt: null, method: null, ...session },
@@ -122,12 +137,16 @@ function Probe({ action }: { action: () => Promise<string> }) {
   );
 }
 
-function ui(children: React.ReactNode, options?: ConstructorParameters<typeof import("../lib/stepup/controller").StepUpController>[0]) {
+function ui(
+  children: React.ReactNode,
+  options?: ConstructorParameters<typeof import("../lib/stepup/controller").StepUpController>[0],
+  member: Me = owner,
+) {
   return render(
     <MemoryRouter>
       <ToastProvider>
-        <MeContext.Provider value={owner}>
-          <StepUpProvider options={{ openChannel: () => null, isRealInput: () => true, ...options }}>{children}</StepUpProvider>
+        <MeContext.Provider value={member}>
+          <StepUpProvider options={{ openChannel: () => null, isRealInput: () => true, lockOnStart: false, ...options }}>{children}</StepUpProvider>
         </MeContext.Provider>
       </ToastProvider>
     </MemoryRouter>,
@@ -207,19 +226,21 @@ describe("confirm dialog and retry", () => {
     expect((screen.getByRole("button", { name: sec.confirm }) as HTMLButtonElement).disabled).toBe(true);
   });
 
-  it("a server-reported lock (lockedUntil) and a turned-off PIN are shown", async () => {
-    m.status = ready(st({ actionPin: { set: true, lockedUntil: Date.now() + 60_000, disabled: false, attemptsBeforeDisable: 7 } }));
-    const { unmount } = ui(<Probe action={vi.fn().mockRejectedValue(required())} />);
-    fireEvent.click(screen.getByRole("button", { name: "Do it" }));
-    await screen.findByRole("dialog");
-    expect(screen.getByText(/Too many wrong PINs/)).toBeTruthy();
-    expect(screen.getByText(sec.pinTriesLeft(7))).toBeTruthy();
-    unmount();
-    m.status = ready(st({ actionPin: { set: true, lockedUntil: null, disabled: true, attemptsBeforeDisable: 0 } }));
+  it("a server-reported short wait and the tries already used are shown", async () => {
+    m.status = ready(st({ pin: pinOf({ lockedUntil: Date.now() + 60_000, lockKind: "backoff", failedSinceUnlock: 3, attemptsBeforeLockout: 7 }) }));
     ui(<Probe action={vi.fn().mockRejectedValue(required())} />);
     fireEvent.click(screen.getByRole("button", { name: "Do it" }));
     await screen.findByRole("dialog");
-    expect(screen.getByText(sec.pinDisabledNoPasskey)).toBeTruthy();
+    expect(screen.getByText(/Too many wrong PINs/)).toBeTruthy();
+    expect(screen.getByText(sec.pinTriesLeft(3, 7))).toBeTruthy();
+  });
+
+  it("the long lockout hides the PIN field and says until when", async () => {
+    m.status = ready(st({ pin: pinOf({ lockedUntil: Date.now() + 24 * 3600_000, lockKind: "lockout", failedSinceUnlock: 10 }) }));
+    ui(<Probe action={vi.fn().mockRejectedValue(required())} />);
+    fireEvent.click(screen.getByRole("button", { name: "Do it" }));
+    await screen.findByRole("dialog");
+    expect(screen.getByText(/Your PIN is locked until/)).toBeTruthy();
     expect(screen.queryByLabelText(sec.pin)).toBeNull();
   });
 
@@ -244,15 +265,15 @@ describe("confirm dialog and retry", () => {
     expect(JSON.parse((m.finishVerify.mock.calls[0]![0] as { responseJson: string }).responseJson)).toMatchObject({ id: "cred" });
   });
 
-  it("no factor yet: the dialog sets the first PIN, then retries", async () => {
-    m.status = ready(st({ actionPin: { set: false, lockedUntil: null, disabled: false, attemptsBeforeDisable: 10 } }));
-    // A Viewer (no forced setup screen) hitting a write that needs a factor.
+  it("no PIN yet (status): the dialog sets the first PIN, then retries", async () => {
+    m.status = ready(st({ pin: pinOf({ set: false }) }));
+    // A write that needs a PIN while the setup screen is not up (account:me still said "set").
     const action = vi.fn().mockRejectedValueOnce(new AppError({ code: "step_up_setup_required" })).mockResolvedValueOnce("ok");
     m.setPin.mockResolvedValue(undefined);
     render(
       <MemoryRouter>
-        <MeContext.Provider value={{ ...owner, role: "viewer" }}>
-          <StepUpProvider options={{ openChannel: () => null }}>
+        <MeContext.Provider value={owner}>
+          <StepUpProvider options={{ openChannel: () => null, lockOnStart: false }}>
             <Probe action={action} />
           </StepUpProvider>
         </MeContext.Provider>
@@ -269,6 +290,102 @@ describe("confirm dialog and retry", () => {
     fireEvent.change(screen.getByLabelText(sec.repeatPin), { target: { value: "482915" } });
     fireEvent.click(screen.getByRole("button", { name: sec.setPin }));
     await waitFor(() => expect(screen.getByTestId("out").textContent).toBe("done:ok"));
+  });
+});
+
+describe("lock on every load", () => {
+  it("asks for the PIN before any screen, shows the tries left, and a wrong then right PIN opens it", async () => {
+    m.status = ready(st({ pin: pinOf({ failedSinceUnlock: 2, attemptsBeforeLockout: 8 }) }, { verifiedAt: 5, lastActiveAt: 5, method: "actionPin" }));
+    m.verifyPin.mockRejectedValueOnce(new AppError({ code: "step_up_invalid" })).mockResolvedValueOnce(verified);
+    ui(<p>secret screen</p>, { lockOnStart: true });
+    expect(await screen.findByRole("heading", { name: sec.lockTitle })).toBeTruthy();
+    // The server's earlier verification of this session is NOT an unlock for a freshly loaded tab.
+    expect(screen.queryByText("secret screen")).toBeNull();
+    expect(screen.getByText(sec.lockLeadLoad("owner@x.test"))).toBeTruthy();
+    expect(screen.getByText(sec.pinTriesLeft(2, 8))).toBeTruthy();
+    // Per tab: the server is not told to lock.
+    expect(m.lock).not.toHaveBeenCalled();
+    fireEvent.change(screen.getByLabelText(sec.pin), { target: { value: "111222" } });
+    fireEvent.click(screen.getByRole("button", { name: sec.unlock }));
+    expect(await screen.findByText(strings.errors.stepUpInvalid)).toBeTruthy();
+    fireEvent.change(screen.getByLabelText(sec.pin), { target: { value: "482915" } });
+    fireEvent.click(screen.getByRole("button", { name: sec.unlock }));
+    expect(await screen.findByText("secret screen")).toBeTruthy();
+  });
+
+  it("the long lockout is shown with the other ways in", async () => {
+    m.status = ready(st({ pin: pinOf({ lockedUntil: Date.now() + 20 * 3600_000, lockKind: "lockout" }) }));
+    ui(<p>secret screen</p>, { lockOnStart: true });
+    expect(await screen.findByText(/Your PIN is locked until/)).toBeTruthy();
+    expect(screen.getByText(sec.pinLockoutHelp)).toBeTruthy();
+    expect(screen.queryByLabelText(sec.pin)).toBeNull();
+    expect(screen.getByRole("button", { name: sec.forgotPin })).toBeTruthy();
+    expect(screen.getByRole("button", { name: sec.useRecoveryCode })).toBeTruthy();
+  });
+
+  it("Forgot PIN: no email field, one neutral sentence", async () => {
+    m.requestReset.mockResolvedValue(undefined);
+    ui(<p>secret screen</p>, { lockOnStart: true });
+    fireEvent.click(await screen.findByRole("button", { name: sec.forgotPin }));
+    expect(await screen.findByText(sec.forgotSent("owner@x.test"))).toBeTruthy();
+    expect(m.requestReset).toHaveBeenCalledWith();
+    expect(screen.queryByLabelText(/email/i)).toBeNull();
+  });
+
+  it("Forgot PIN says so when the email flow is off", async () => {
+    m.status = ready(st({ pin: pinOf({ resetByEmail: false }) }));
+    ui(<p>secret screen</p>, { lockOnStart: true });
+    expect(await screen.findByText(sec.emailOff)).toBeTruthy();
+    expect(screen.queryByRole("button", { name: sec.forgotPin })).toBeNull();
+  });
+
+  it("recovery code: asks for the code AND a new PIN, then opens", async () => {
+    m.recovery.mockResolvedValue(undefined);
+    ui(<p>secret screen</p>, { lockOnStart: true });
+    fireEvent.click(await screen.findByRole("button", { name: sec.useRecoveryCode }));
+    fireEvent.change(screen.getByLabelText(sec.recoveryCode), { target: { value: "abcd efgh" } });
+    fireEvent.change(screen.getByLabelText(sec.newPin), { target: { value: "123456" } });
+    fireEvent.change(screen.getByLabelText(sec.repeatPin), { target: { value: "123456" } });
+    fireEvent.click(screen.getByRole("button", { name: sec.recoveryUseSubmit }));
+    expect(await screen.findByText(strings.validate.pinWeak)).toBeTruthy();
+    expect(m.recovery).not.toHaveBeenCalled();
+    fireEvent.change(screen.getByLabelText(sec.newPin), { target: { value: "482915" } });
+    fireEvent.change(screen.getByLabelText(sec.repeatPin), { target: { value: "482915" } });
+    fireEvent.click(screen.getByRole("button", { name: sec.recoveryUseSubmit }));
+    await waitFor(() => expect(m.recovery).toHaveBeenCalledWith({ code: "ABCD-EFGH", newPin: "482915" }));
+    expect(await screen.findByText("secret screen")).toBeTruthy();
+  });
+
+  it("recovery code, sign-in too old: asks to sign in again", async () => {
+    m.recovery.mockRejectedValue(new AppError({ code: "step_up_setup_required", detail: "reauthenticate" }));
+    ui(<p>secret screen</p>, { lockOnStart: true });
+    fireEvent.click(await screen.findByRole("button", { name: sec.useRecoveryCode }));
+    fireEvent.change(screen.getByLabelText(sec.recoveryCode), { target: { value: "ABCD-EFGH" } });
+    fireEvent.change(screen.getByLabelText(sec.newPin), { target: { value: "482915" } });
+    fireEvent.change(screen.getByLabelText(sec.repeatPin), { target: { value: "482915" } });
+    fireEvent.click(screen.getByRole("button", { name: sec.recoveryUseSubmit }));
+    expect(await screen.findByRole("button", { name: sec.signOutAndIn })).toBeTruthy();
+  });
+
+  it("recovery code, refused: the code and the PIN are not kept in the fields", async () => {
+    m.recovery.mockRejectedValue(new AppError({ code: "step_up_invalid" }));
+    ui(<p>secret screen</p>, { lockOnStart: true });
+    fireEvent.click(await screen.findByRole("button", { name: sec.useRecoveryCode }));
+    fireEvent.change(screen.getByLabelText(sec.recoveryCode), { target: { value: "ABCD-EFGH" } });
+    fireEvent.change(screen.getByLabelText(sec.newPin), { target: { value: "482915" } });
+    fireEvent.change(screen.getByLabelText(sec.repeatPin), { target: { value: "482915" } });
+    fireEvent.click(screen.getByRole("button", { name: sec.recoveryUseSubmit }));
+    await screen.findByRole("alert");
+    for (const label of [sec.recoveryCode, sec.newPin, sec.repeatPin]) {
+      expect((screen.getByLabelText(label) as HTMLInputElement).value).toBe("");
+    }
+  });
+
+  it("no recovery codes left: the link is replaced by a sentence", async () => {
+    m.status = ready(st({ pin: pinOf({ recoveryCodesLeft: 0 }) }));
+    ui(<p>secret screen</p>, { lockOnStart: true });
+    expect(await screen.findByText(sec.noRecoveryCodes)).toBeTruthy();
+    expect(screen.queryByRole("button", { name: sec.useRecoveryCode })).toBeNull();
   });
 });
 
@@ -309,7 +426,7 @@ describe("idle lock", () => {
       <MemoryRouter>
         <ToastProvider>
           <MeContext.Provider value={owner}>
-            <StepUpProvider options={{ openChannel: () => null }}>{probe}</StepUpProvider>
+            <StepUpProvider options={{ openChannel: () => null, lockOnStart: false }}>{probe}</StepUpProvider>
           </MeContext.Provider>
         </ToastProvider>
       </MemoryRouter>
@@ -340,54 +457,142 @@ describe("idle lock", () => {
   });
 });
 
-describe("first-factor setup", () => {
-  it("an Owner without a factor sees the setup screen first; Continue only after the PIN; sign-out always", async () => {
-    m.status = ready(st({ actionPin: { set: false, lockedUntil: null, disabled: false, attemptsBeforeDisable: 10 }, bootstrapUntil: Date.now() + 600_000 }));
-    m.setPin.mockResolvedValue(undefined);
-    const { rerender } = ui(<p>overview</p>);
-    expect(await screen.findByRole("heading", { name: sec.setupTitle })).toBeTruthy();
-    expect(screen.queryByText("overview")).toBeNull();
-    expect(screen.getByRole("button", { name: sec.signOut })).toBeTruthy();
-    expect(screen.queryByRole("button", { name: sec.setupDone })).toBeNull();
-    fireEvent.change(screen.getByLabelText(sec.newPin), { target: { value: "482915" } });
-    fireEvent.change(screen.getByLabelText(sec.repeatPin), { target: { value: "482915" } });
+describe("PIN setup after the first sign-in", () => {
+  const noPin = { ...owner, pin: { required: true, set: false } } satisfies Me;
+  const fillPin = (pin: string) => {
+    fireEvent.change(screen.getByLabelText(sec.newPin), { target: { value: pin } });
+    fireEvent.change(screen.getByLabelText(sec.repeatPin), { target: { value: pin } });
     fireEvent.click(screen.getByRole("button", { name: sec.setPin }));
-    expect(await screen.findByText(sec.pinSaved)).toBeTruthy();
-    // The query now shows the PIN; the screen stays until Continue.
-    m.status = ready(st({}, { verifiedAt: 5, lastActiveAt: 5, method: "actionPin" }));
-    rerender(
+  };
+  const CODES = ["AAAA-BBBB", "CCCC-DDDD"];
+  /** `account:me` shows the PIN once it is saved: the same tree with the member that has one. */
+  const pinSaved = (view: ReturnType<typeof ui>) =>
+    view.rerender(
       <MemoryRouter>
         <ToastProvider>
           <MeContext.Provider value={owner}>
-            <StepUpProvider options={{ openChannel: () => null }}>
+            <StepUpProvider options={{ openChannel: () => null, lockOnStart: true }}>
               <p>overview</p>
             </StepUpProvider>
           </MeContext.Provider>
         </ToastProvider>
       </MemoryRouter>,
     );
-    fireEvent.click(await screen.findByRole("button", { name: sec.setupDone }));
+
+  it("PIN (with the warning) → recovery codes shown once → passkey offer with Skip → the dashboard", async () => {
+    (window as { PublicKeyCredential?: unknown }).PublicKeyCredential = function PublicKeyCredential() {};
+    m.status = ready(st({ pin: pinOf({ set: false }), bootstrapUntil: Date.now() + 600_000 }));
+    m.setPin.mockResolvedValue(undefined);
+    m.generate.mockResolvedValue(CODES);
+    const view = ui(<p>overview</p>, { lockOnStart: true }, noPin);
+    expect(await screen.findByRole("heading", { name: sec.setupTitle })).toBeTruthy();
+    expect(screen.queryByText("overview")).toBeNull();
+    expect(screen.getByText(sec.setupWarnTitle)).toBeTruthy();
+    expect(screen.getByRole("button", { name: sec.signOut })).toBeTruthy();
+    // Two different PINs are refused before any call.
+    fireEvent.change(screen.getByLabelText(sec.newPin), { target: { value: "482915" } });
+    fireEvent.change(screen.getByLabelText(sec.repeatPin), { target: { value: "482916" } });
+    fireEvent.click(screen.getByRole("button", { name: sec.setPin }));
+    expect(await screen.findByText(strings.validate.pinsDiffer)).toBeTruthy();
+    expect(m.setPin).not.toHaveBeenCalled();
+    fillPin("482915");
+    expect(await screen.findByRole("heading", { name: sec.codesTitle })).toBeTruthy();
+    expect(m.setPin).toHaveBeenCalledWith({ pin: "482915" });
+    expect(await screen.findByText("AAAA-BBBB")).toBeTruthy();
+    expect(screen.getByRole("button", { name: sec.codesDownload })).toBeTruthy();
+    expect(screen.getByRole("button", { name: /Copy/ })).toBeTruthy();
+    // The codes are never stored in the browser.
+    expect(JSON.stringify({ ...window.localStorage, ...window.sessionStorage })).not.toContain("AAAA-BBBB");
+    // Continue stays off until the box is ticked.
+    const cont = screen.getByRole("button", { name: sec.codesContinue }) as HTMLButtonElement;
+    expect(cont.disabled).toBe(true);
+    fireEvent.click(screen.getByRole("checkbox", { name: sec.codesSaved }));
+    expect(cont.disabled).toBe(false);
+    // The PIN exists now; the screen stays up until the last step.
+    m.status = ready(st({}, { verifiedAt: 5, lastActiveAt: 5, method: "actionPin" }));
+    pinSaved(view);
+    fireEvent.click(cont);
+    expect(await screen.findByRole("heading", { name: sec.setupPasskeyTitle })).toBeTruthy();
+    expect(screen.queryByText("AAAA-BBBB")).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: sec.setupPasskeySkip }));
     expect(await screen.findByText("overview")).toBeTruthy();
   });
 
-  it("too long after sign-in: asks to sign in again (the Owner is never locked out)", async () => {
-    m.status = ready(st({ actionPin: { set: false, lockedUntil: null, disabled: false, attemptsBeforeDisable: 10 } }));
-    m.setPin.mockRejectedValue(new AppError({ code: "step_up_setup_required", detail: "reauthenticate" }));
-    ui(<p>overview</p>);
+  it("no passkey step when this browser cannot use passkeys", async () => {
+    m.status = ready(st({ pin: pinOf({ set: false }) }));
+    m.setPin.mockResolvedValue(undefined);
+    m.generate.mockResolvedValue(CODES);
+    const view = ui(<p>overview</p>, { lockOnStart: true }, noPin);
     await screen.findByRole("heading", { name: sec.setupTitle });
-    fireEvent.change(screen.getByLabelText(sec.newPin), { target: { value: "482915" } });
-    fireEvent.change(screen.getByLabelText(sec.repeatPin), { target: { value: "482915" } });
-    fireEvent.click(screen.getByRole("button", { name: sec.setPin }));
+    fillPin("482915");
+    await screen.findByRole("list", { name: sec.codesList });
+    pinSaved(view);
+    fireEvent.click(screen.getByRole("checkbox", { name: sec.codesSaved }));
+    fireEvent.click(screen.getByRole("button", { name: sec.setupDone }));
+    expect(await screen.findByText("overview")).toBeTruthy();
+  });
+
+  it("a failed code creation offers Try again", async () => {
+    m.status = ready(st({ pin: pinOf({ set: false }) }));
+    m.setPin.mockResolvedValue(undefined);
+    m.generate.mockRejectedValueOnce(new AppError({ code: "rate_limited" })).mockResolvedValueOnce(CODES);
+    ui(<p>overview</p>, { lockOnStart: true }, noPin);
+    await screen.findByRole("heading", { name: sec.setupTitle });
+    fillPin("482915");
+    fireEvent.click(await screen.findByRole("button", { name: sec.codesRetry }));
+    expect(await screen.findByText("AAAA-BBBB")).toBeTruthy();
+  });
+
+  it("an idle lock while the recovery codes are shown drops them; the PIN brings setup back with a fresh set", async () => {
+    m.status = ready(st({ pin: pinOf({ set: false }) }));
+    m.setPin.mockResolvedValue(undefined);
+    m.generate.mockResolvedValueOnce(CODES).mockResolvedValueOnce(["EEEE-FFFF", "GGGG-HHHH"]);
+    m.verifyPin.mockResolvedValue(verified);
+    const view = ui(<p>overview</p>, { lockOnStart: true, idleOverrideMs: 1500 }, noPin);
+    await screen.findByRole("heading", { name: sec.setupTitle });
+    fillPin("482915");
+    expect(await screen.findByText("AAAA-BBBB")).toBeTruthy();
+    m.status = ready(st({}, { verifiedAt: 5, lastActiveAt: 5, method: "actionPin" }));
+    pinSaved(view);
+    // No input: the idle limit passes while the codes are on screen.
+    expect(await screen.findByRole("heading", { name: sec.lockTitle }, { timeout: 4000 })).toBeTruthy();
+    expect(screen.queryByText("AAAA-BBBB")).toBeNull();
+    expect(screen.queryByRole("heading", { name: sec.codesTitle })).toBeNull();
+    fireEvent.change(screen.getByLabelText(sec.pin), { target: { value: "482915" } });
+    fireEvent.click(screen.getByRole("button", { name: sec.unlock }));
+    // Back in setup at the codes step (the PIN is set): a new set, the old one is not shown again.
+    expect(await screen.findByText("EEEE-FFFF")).toBeTruthy();
+    expect(screen.queryByText("AAAA-BBBB")).toBeNull();
+    expect(m.setPin).toHaveBeenCalledTimes(1);
+    expect(m.generate).toHaveBeenCalledTimes(2);
+  });
+
+  it("a refused PIN is not kept in the fields", async () => {
+    m.status = ready(st({ pin: pinOf({ set: false }) }));
+    m.setPin.mockRejectedValue(new AppError({ code: "rate_limited" }));
+    ui(<p>overview</p>, { lockOnStart: true }, noPin);
+    await screen.findByRole("heading", { name: sec.setupTitle });
+    fillPin("482915");
+    await screen.findByRole("alert");
+    expect((screen.getByLabelText(sec.newPin) as HTMLInputElement).value).toBe("");
+    expect((screen.getByLabelText(sec.repeatPin) as HTMLInputElement).value).toBe("");
+  });
+
+  it("too long after sign-in: asks to sign in again", async () => {
+    m.status = ready(st({ pin: pinOf({ set: false }) }));
+    m.setPin.mockRejectedValue(new AppError({ code: "step_up_setup_required", detail: "reauthenticate" }));
+    ui(<p>overview</p>, { lockOnStart: true }, noPin);
+    await screen.findByRole("heading", { name: sec.setupTitle });
+    fillPin("482915");
     fireEvent.click(await screen.findByRole("button", { name: sec.signOutAndIn }));
     await waitFor(() => expect(m.signOut).toHaveBeenCalled());
   });
 });
 
 describe("Settings → Security", () => {
-  it("lists passkeys, keeps the last factor, and shows 'passkeys off'", async () => {
+  it("lists passkeys, shows that passkeys are off, and has no way to remove the PIN", async () => {
     m.status = ready(
       st({
-        actionPin: { set: false, lockedUntil: null, disabled: false, attemptsBeforeDisable: 10 },
         passkeys: [{ _id: "pk1", name: "Laptop", createdAt: 1_700_000_000_000, lastUsedAt: null, synced: true, suspended: false }],
         passkeysAvailable: false,
       }),
@@ -396,8 +601,8 @@ describe("Settings → Security", () => {
     expect(await screen.findByText("Laptop")).toBeTruthy();
     expect(screen.getByText(sec.synced)).toBeTruthy();
     expect(screen.getByText(sec.passkeysOff)).toBeTruthy();
-    expect((screen.getByRole("button", { name: `${sec.removePasskey}: Laptop` }) as HTMLButtonElement).disabled).toBe(true);
-    expect(screen.getByText(sec.lastPasskeyHint)).toBeTruthy();
+    expect(screen.getByText(sec.pinRequiredHint)).toBeTruthy();
+    expect(screen.queryByRole("button", { name: /Remove PIN/ })).toBeNull();
     expect(screen.queryByRole("button", { name: sec.addPasskey })).toBeNull();
   });
 
@@ -416,5 +621,60 @@ describe("Settings → Security", () => {
     await waitFor(() => expect(m.setPin).toHaveBeenCalledTimes(2));
     expect(m.setPin).toHaveBeenLastCalledWith({ pin: "90817263" });
     expect(await screen.findByText(sec.pinSaved)).toBeTruthy();
+  });
+
+  it("recovery codes: shows how many are left; new codes need a confirmation and are shown once", async () => {
+    m.status = ready(st({ pin: pinOf({ recoveryCodesLeft: 4 }) }));
+    m.generate.mockRejectedValueOnce(required()).mockResolvedValueOnce(["EEEE-FFFF"]);
+    m.verifyPin.mockResolvedValue(verified);
+    ui(<SecurityTab />);
+    expect(await screen.findByText(sec.recoveryLeft(4))).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: sec.recoveryCreate }));
+    const ask = await screen.findByRole("dialog", { name: sec.recoveryCreateTitle });
+    fireEvent.click(within(ask).getByRole("button", { name: sec.recoveryCreate }));
+    const confirm = await screen.findByRole("dialog", { name: sec.confirmTitle });
+    fireEvent.change(within(confirm).getByLabelText(sec.pin), { target: { value: "482915" } });
+    fireEvent.click(within(confirm).getByRole("button", { name: sec.confirm }));
+    expect(within(await screen.findByRole("list", { name: sec.codesList })).getByText("EEEE-FFFF")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: strings.common.done }));
+    await waitFor(() => expect(screen.queryByRole("list", { name: sec.codesList })).toBeNull());
+  });
+
+  it("change password: the confirmation comes first, then current + new + repeat are sent", async () => {
+    // Confirmed 20 minutes ago: the confirm dialog opens BEFORE the form.
+    m.status = ready(st({}, { verifiedAt: Date.now() - 20 * 60_000, lastActiveAt: Date.now(), method: "actionPin" }));
+    m.verifyPin.mockResolvedValue(verified);
+    m.changePassword.mockResolvedValue(undefined);
+    ui(<SecurityTab />);
+    fireEvent.click(await screen.findByRole("button", { name: sec.passwordChange }));
+    const confirm = await screen.findByRole("dialog", { name: sec.confirmTitle });
+    expect(screen.queryByLabelText(sec.passwordCurrent)).toBeNull();
+    fireEvent.change(within(confirm).getByLabelText(sec.pin), { target: { value: "482915" } });
+    fireEvent.click(within(confirm).getByRole("button", { name: sec.confirm }));
+    const current = await screen.findByLabelText(sec.passwordCurrent, { selector: "input" });
+    fireEvent.change(current, { target: { value: "old-password-1" } });
+    fireEvent.change(screen.getByLabelText(sec.passwordNew, { selector: "input" }), { target: { value: "short1" } });
+    fireEvent.change(screen.getByLabelText(sec.passwordRepeat, { selector: "input" }), { target: { value: "short1" } });
+    const submit = () => screen.getAllByRole("button", { name: sec.passwordChange }).at(-1)!;
+    fireEvent.click(submit());
+    expect(await screen.findByText(strings.validate.passwordMember)).toBeTruthy();
+    expect(m.changePassword).not.toHaveBeenCalled();
+    fireEvent.change(screen.getByLabelText(sec.passwordNew, { selector: "input" }), { target: { value: "a-new-password-2" } });
+    fireEvent.change(screen.getByLabelText(sec.passwordRepeat, { selector: "input" }), { target: { value: "a-new-password-2" } });
+    fireEvent.click(submit());
+    await waitFor(() => expect(m.changePassword).toHaveBeenCalledWith({ currentPassword: "old-password-1", newPassword: "a-new-password-2" }));
+    expect(await screen.findByText(sec.passwordChanged)).toBeTruthy();
+  });
+
+  it("change password: a wrong current password is said plainly", async () => {
+    m.status = ready(st({}, { verifiedAt: Date.now(), lastActiveAt: Date.now(), method: "actionPin" }));
+    m.changePassword.mockRejectedValue(new AppError({ code: "invalid_argument", field: "currentPassword" }));
+    ui(<SecurityTab />);
+    fireEvent.click(await screen.findByRole("button", { name: sec.passwordChange }));
+    fireEvent.change(await screen.findByLabelText(sec.passwordCurrent, { selector: "input" }), { target: { value: "wrong-password-1" } });
+    fireEvent.change(screen.getByLabelText(sec.passwordNew, { selector: "input" }), { target: { value: "a-new-password-2" } });
+    fireEvent.change(screen.getByLabelText(sec.passwordRepeat, { selector: "input" }), { target: { value: "a-new-password-2" } });
+    fireEvent.click(screen.getAllByRole("button", { name: sec.passwordChange }).at(-1)!);
+    expect(await screen.findByText(sec.passwordWrong)).toBeTruthy();
   });
 });

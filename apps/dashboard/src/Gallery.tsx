@@ -31,6 +31,7 @@ import {
   type LogoAnimation,
   type Theme,
 } from "@rulebox/ui";
+import "@rulebox/ui/staff.css";
 import { useTheme } from "./app/theme";
 import { DataTable, type Column, type SortState } from "./components/DataTable";
 import { EmptyState } from "./components/EmptyState";

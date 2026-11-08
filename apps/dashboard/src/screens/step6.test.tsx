@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { act, fireEvent, render, renderHook, screen, waitFor, within } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { Link, MemoryRouter, Route, Routes } from "react-router";
 import { getFunctionName, type FunctionReference } from "convex/server";
 import { ConvexError } from "convex/values";
@@ -60,7 +60,6 @@ import Enrollment from "./Enrollment";
 import { codeBlocks, displayState, labelProblem, ttlMinutesOf, validateEnrollForm } from "./enrollment/model";
 import { enrollText as s } from "./enrollment/strings";
 import { planLimitMessage, plan as planText } from "./settings/strings";
-import { usePagedState } from "../data/live/convex";
 
 const admin: Me = {
   email: "admin@x.test",
@@ -68,7 +67,7 @@ const admin: Me = {
   status: "active",
   orgId: "org",
   orgName: "Acme",
-  mfa: { enrolled: true, required: true, verified: true },
+  pin: { required: true, set: true },
   serverApiVersion: 1,
 };
 
@@ -269,35 +268,6 @@ describe("stale clock and expiry labels", () => {
     expect(minutes()).toEqual([Date.UTC(2026, 9, 27, 10, 0)]);
     act(() => vi.advanceTimersByTime(30_000)); // 10:01:10
     expect(minutes()).toEqual([Date.UTC(2026, 9, 27, 10, 0), Date.UTC(2026, 9, 27, 10, 1)]);
-  });
-
-  it("usePagedState keeps the rows on screen while a new minute's first page loads", () => {
-    const rows = [row(1)];
-    const { result, rerender } = renderHook(({ r }) => usePagedState(r as never, 50), {
-      initialProps: { r: { results: [], status: "LoadingFirstPage", loadMore: () => undefined } as unknown },
-    });
-    expect(result.current.status).toBe("loading");
-    rerender({ r: { results: rows, status: "Exhausted", loadMore: () => undefined } });
-    rerender({ r: { results: [], status: "LoadingFirstPage", loadMore: () => undefined } });
-    expect(result.current.status === "ready" && result.current.items).toBe(rows);
-  });
-
-  it("usePagedState drops the kept rows when its resetKey changes (they belong to another list)", () => {
-    const rows = [row(1)];
-    const loading = { results: [], status: "LoadingFirstPage", loadMore: () => undefined } as unknown;
-    const { result, rerender } = renderHook(({ r, key }) => usePagedState(r as never, 50, key), {
-      initialProps: { r: { results: rows, status: "Exhausted", loadMore: () => undefined } as unknown, key: "installed" },
-    });
-    rerender({ r: loading, key: "installed" });
-    expect(result.current.status === "ready" && result.current.items).toBe(rows);
-    rerender({ r: loading, key: "failed" });
-    expect(result.current.status).toBe("loading");
-    const failedRows = [row(2)];
-    rerender({ r: { results: failedRows, status: "Exhausted", loadMore: () => undefined }, key: "failed" });
-    expect(result.current.status === "ready" && result.current.items).toBe(failedRows);
-    // Back to the first list while its page loads: the old "installed" rows are gone for good.
-    rerender({ r: loading, key: "installed" });
-    expect(result.current.status).toBe("loading");
   });
 });
 

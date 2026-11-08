@@ -8,7 +8,8 @@ import { newPinError, pinInput } from "../lib/stepup/pin";
 import { sec } from "../lib/stepup/strings";
 import { useForm } from "../lib/useForm";
 
-function PinField({
+/** A PIN input: digits only, never offered to a password manager (a one-off secret typed each time). */
+export function PinField({
   p,
   value,
   onChange,
@@ -71,7 +72,14 @@ export function SetPinForm({
       onSubmit={(e) => {
         e.preventDefault();
         void f.submit(async (x) => {
-          await onSave(x.pin);
+          try {
+            await onSave(x.pin);
+          } catch (err) {
+            // A refused PIN is not kept in the fields (the person types it again).
+            f.set("pin", "");
+            f.set("repeat", "");
+            throw err;
+          }
           f.reset({ pin: "", repeat: "" });
         }, form.current);
       }}

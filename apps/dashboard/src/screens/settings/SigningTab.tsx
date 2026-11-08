@@ -14,8 +14,9 @@ import { useToast } from "../../lib/toast";
 import { formatDate } from "../../lib/format";
 import { publishErrorMessage, usePublishAgainFlow } from "../../lib/publish";
 import { strings } from "../../lib/strings";
+import { settingsStrings } from "../../lib/screenStrings/settings";
 
-const s = strings.settings.signing;
+const s = settingsStrings.signing;
 const p = strings.publish;
 const TONE: Record<PolicyKeyStatus, PillTone> = { active: "success", next: "accent", retired: "neutral" };
 
@@ -58,7 +59,7 @@ function Signing({ k }: { k: KeysScreen }) {
 
   return (
     <>
-      <Card title={strings.settings.tabs.signing} sub={s.lead}>
+      <Card title={settingsStrings.tabs.signing} sub={s.lead}>
         <div className="dash-form">
           {k.publishFailedAt !== null ? (
             <InlineNotice
@@ -121,7 +122,7 @@ function Signing({ k }: { k: KeysScreen }) {
             />
           ) : null}
           {k.keys.length ? (
-            <ul className="dash-list" aria-label={strings.settings.tabs.signing}>
+            <ul className="dash-list" aria-label={settingsStrings.tabs.signing}>
               {k.keys.map((key) => (
                 <li key={key.keyId} className="dash-list__item" style={{ paddingInline: 0, alignItems: "flex-start" }}>
                   <div className="dash-list__body">
