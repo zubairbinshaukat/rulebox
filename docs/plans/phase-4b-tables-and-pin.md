@@ -103,10 +103,15 @@ hosting the settings tabs; reuse the tab components, keep `/settings` working.
 ## Part C: forgot PIN by email
 
 - "Forgot PIN?" on the lock screen sends a single-use, short-lived, hashed
-  token by email (Resend). Same response whether or not the account exists;
-  rate limited by email and by token hash.
-- The link opens a page that requires the password sign-in too, then lets the
-  member set a new PIN. All other sessions end, a "your PIN was reset" email
+  token by email (Resend). **The request is session-bound (owner decision,
+  recorded 2026-11-06): it takes no email input and mails the signed-in
+  user**, so there is no account to hide and no enumeration question; it is
+  rate limited by user and by token hash. (`account:requestPinReset()` takes no
+  arguments; resolved in the WP5a fix pass, 2026-11-06.)
+- The link (`/pin-reset#token=...`, in the URL fragment, which browsers never
+  send to a server; the page strips it at once with `history.replaceState` and
+  is served with `Referrer-Policy: no-referrer`) opens a page that requires
+  the password sign-in too, then lets the member set a new PIN. All other sessions end, a "your PIN was reset" email
   goes out, and the event is audited. Never email alone (plan 4.16).
 - Platform setting `resendApiKey` (and from-address): a server-only table, never
   returned to any client, encrypted with a master key from the deployment env,
@@ -120,6 +125,17 @@ PRD 12.3 and 16 (two-factor wording), plan 4.16 (never e-mail alone, TOTP
 bootstrap), D3, Q2 and goal 1 in `phase-4-dashboard-state.md`, the deviations
 table, post-phase-5 lines 669 and 926 (TOTP), PRD 11.1 (list rules: sort, search
 and counts), and a new PRD note for the operator-owned Resend key.
+
+**Done (docs pass, 2026-11-06):** `docs/prd.md` 11.1 (rules 3, 7, 8), 12.3
+(sign-in bullet, Resend key note) and 16 (Authentication and Email rows);
+`phase-4-dashboard-state.md` goal 1, rule 2, 4.1 to 4.7, 4.13, 4.16, Steps 3, 4,
+5a, 18 and 19 text, edge case 24, the security checklist, D1, D3, the
+deviations table and Q2, each marked "(changed 2026-11-03, Phase 4b)".
+`post-phase-5-architecture-and-io.md` (TOTP / MFA mentions at the
+`requireMember` read cost, the sign-in I/O row, the platform console's "MFA" row,
+the authorization table, tenant deletion and the step-up row; the console's own
+WebAuthn tests are unrelated and unchanged).
+**Not done:** `docs/plans/README.md` (the owner's own edit).
 
 ## Work packages and order
 
@@ -212,13 +228,22 @@ was deleted (the dashboard still calls them until WP5b).
   written for a person with a PIN.
 
 **Part C, forgot PIN by email.**
-- `account:requestPinReset({ email })` (public): per-email (3 / hour) and
-  global (30 / minute) buckets, then always `{ ok: true }`; it only schedules
-  `account:deliverPinReset({ email })`, which (mail on, active member)
-  creates a 256-bit token, stores its SHA-256 in `pinResets` (30 minutes,
-  older links retired), audits `member.pinResetRequested` and emails
-  `<dashboardOrigin>/pin-reset?token=...`. The token never sits in the
-  scheduler.
+- `account:requestPinReset()` (public action, **no arguments, session-bound**;
+  fix pass 2026-11-06): needs a signed-in session of an active member and mails
+  only that person's own address. Per-user (`pinResetPerUser`, 3 / hour) bucket
+  first, then global (`pinResetGlobal`, 30 / minute), then always
+  `{ ok: true }`; it only schedules `account:deliverPinReset({ userId })`,
+  which (mail on, active member) creates a 256-bit token, stores its SHA-256 in
+  `pinResets` (30 minutes, older links retired), audits
+  `member.pinResetRequested` and emails
+  `<dashboardOrigin>/pin-reset#token=...` (URL fragment). The token never sits
+  in the scheduler. The page strips the fragment with `history.replaceState`
+  and is served with `Referrer-Policy: no-referrer`.
+- `account:changePassword({ currentPassword, newPassword })` (self-service
+  password change, major action): needs a fresh step-up and the current
+  password (any problem with it answers `invalid_argument`, field
+  `currentPassword`); per-user bucket `passwordChange` (5 / hour); revokes
+  every other session, keeps this one; audited and a notice is mailed.
 - `account:redeemPinReset({ token, newPin })` (public): needs a signed-in
   session less than 15 minutes old whose user is the token's (the link alone
   is never enough); bucket `pinResetRedeem` 10 per 15 min; single use (a link
@@ -268,9 +293,20 @@ regenerate with `npx convex dev` once a deployment is at hand.
 schema (widen-then-narrow): drop `mfaSessions`, `memberSecrets` (after a
 migration copies nothing: TOTP recovery codes are not carried over) and
 `stepUpFactors.pinDisabledAt`; `asMember({ mfa })` in `tests/convex`.
-Frontend: route on `me.pin`, `/pin-reset?token=` page (strip the token from
-the URL with `history.replaceState` and send no referrer), lockout copy for
+Frontend: route on `me.pin`, `/pin-reset#token=` page (strip the fragment from
+the URL with `history.replaceState`; serve it with `Referrer-Policy:
+no-referrer`, so `apps/dashboard/vercel.json` and `public/_headers`, which
+now say `strict-origin-when-cross-origin`, need a rule for that path), lockout copy for
 detail `lockout`, recovery-code screen, demo hooks.
+
+**Conflicts with the owner's brief: resolved in the WP5a fix pass
+(2026-11-06).** (1) The forgot-PIN request is session-bound: 
+`account:requestPinReset()` takes no arguments and mails the signed-in user.
+(2) The link is `/pin-reset#token=...` (URL fragment), stripped by the page and
+served with `Referrer-Policy: no-referrer`. (3) Self-service password change
+is `account:changePassword`. The earlier WP5a text (`requestPinReset({ email })`,
+`?token=`) is superseded. Still open for WP5b: the dashboard header files do not
+yet send `no-referrer` for `/pin-reset`.
 
 **Deviations / open points.** The redeem needs the password sign-in to be
 less than 15 minutes old (stronger than "a signed-in session"). A passkey can
@@ -282,3 +318,12 @@ step-up rows of passkey-only people (before this deploy) stay valid for at
 most 8 hours. `eslint.config.js` (outside `convex/`) has no rule yet that
 limits `RULEBOX_PLATFORM_KEY` to `lib/platformSecrets.ts`; `platform.test.ts`
 scans the sources for the table instead.
+
+## Status: WP5b, reviews and cleanup (2026-11-08, done, not committed)
+
+- **WP5b frontend:** PIN setup (with "don't forget" and an optional passkey), lock on every load, `/pin-reset#token=` page, self-service password change, Security tab, recovery codes. The backend TOTP code is removed. `memberSecrets`, `mfaSessions` and `stepUpFactors.pinDisabledAt` stay in the schema as deprecated until `maintenance:dropTotpTables` has run on every deployment; drop them in a later deploy.
+- **Settings gear panel (owner decision 1):** dropped at the owner's request on 2026-11-03; settings stay a sidebar link and the `/settings` page.
+- **Security review of the WP5b frontend:** no critical or high findings. The `index.html` referrer meta tag that overrode `no-referrer` on `/pin-reset` is removed. Recovery codes unmount on an idle lock, the idle lock no longer fails open before `stepUp:status` loads, PIN and code fields clear after a failed try, and the reset token is forgotten on Cancel. Accepted: the per-tab lock is a UI gate (the server's step-up is the real check).
+- **Dead code removed:** `members:list`, `fileHandlers:list`, `overview:failedInstalls`, `LoadMore`, `QrCode` and `uqr`.
+- **Size:** every budget met without raising it. Per-screen strings, an icons chunk, and staff-only CSS split out of `@rulebox/ui` (`@rulebox/ui/staff.css`; the dashboard loads only the shared part).
+- **Owner to do:** `convex env set RULEBOX_RECOVERY_PEPPER`, `RULEBOX_PLATFORM_KEY` + `scripts/platform-secret.mjs`, run `npx convex dev` (check `_generated` matches the hand edits), run `maintenance:dropTotpTables`, then narrow the schema.

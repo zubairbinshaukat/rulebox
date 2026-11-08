@@ -131,7 +131,7 @@ mod tests {
 
     #[test]
     fn the_code_the_server_helper_produces_parses() {
-        // The exact string `convex/dev.ts` -> createEnrollmentCode builds, with the
+        // The exact string `formatEnrollmentCode` (convex/lib/crypto.ts) builds, with the
         // same base64url alphabet and no padding (a length that needs padding).
         let url = "https://abc.convex.cloud";
         let encoded = URL_SAFE_NO_PAD.encode(format!("{url}#{TOKEN}"));

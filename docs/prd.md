@@ -464,10 +464,12 @@ device list.
 |---|---|---|
 | 1 | **One query per screen.** Queries join data on the server and return exactly what the screen shows; no chains of 10+ small client calls | Dashboard, Staff App |
 | 2 | **Indexed reads only.** Every query uses an index; no full-table filters | All Convex functions |
-| 3 | **Paginate growing data.** Never load a growing table in full; lists paginate, "latest" views take a fixed number of rows | Audit log, devices, employees, install results, history |
+| 3 | **Paginate growing data.** Never load a growing table in full; lists paginate, "latest" views take a fixed number of rows. Lists use cursor pagination (`.paginate()`), and sorting and search are part of the query (rule 7) (extended 2026-11-03, Phase 4b) | Audit log, devices, employees, install results, history |
 | 4 | **Separate fast-changing data.** Online status and last-seen time are stored apart from device records so heartbeats do not refresh device lists | Devices |
 | 5 | **Write only on change.** Heartbeats and status reports write only when something changed; the live connection is the primary online signal | Agent |
 | 6 | **One subscription per agent.** Each agent subscribes to its own desired state and does not poll | Agent |
+| 7 | **Lists are server-driven** (added 2026-11-03, Phase 4b). Sorting, search and cursor pagination happen in the Convex query (an index per sort key, a search index or name-prefix range for search); the browser never loads rows to sort or filter them. Search runs on **Enter**, not on every keystroke. Page size is 10, 25 or 50. Totals ("147 records · Page 1 of 15") come from `orgStats` counters through a **separate small count query**, never inside the list query, so a hot counter does not re-run every open list; tables with no exact counter show no total (Previous / Next only). Sort, search, filter and page size reset to page 1 and live in the URL | Dashboard |
+| 8 | **One generic table component** (added 2026-11-03, Phase 4b). Every dashboard list uses the same `DataTable`: sortable headers, whole-row click (a real link stays in the name cell), loading / empty / error states and the pager (`147 records · Page 1 of 15`, `‹ 1 2 … 15 ›`, rows per page). A global **Table | Cards** switch (stored as `rulebox.view`) changes the layout of every list at once | Dashboard |
 
 ---
 
@@ -517,8 +519,32 @@ optional extra.
 Because the agent can install software on every device, the backend is
 effectively a remote-execution system and is protected accordingly.
 
-- **Admin authentication:** two-factor authentication required for Owner
-  and Admin roles.
+- **Dashboard sign-in (changed 2026-11-03, Phase 4b):** email and password,
+  then a **required PIN** for every member of every role. This replaces the
+  earlier "two-factor authentication (authenticator app) required for Owner
+  and Admin": the owner removed the authenticator app (TOTP) on purpose.
+  - The PIN is checked by the server (Argon2, rate limited) and can never be
+    removed. A **passkey** (fingerprint / face ID) can be added after the
+    PIN; it is offered, never required.
+  - The dashboard **locks on every page load / reopen** (per tab) and asks for
+    the PIN or the passkey again.
+  - **Lockout:** too many wrong PIN guesses lock the PIN for **24 hours** (it
+    is never disabled for good, so a password thief cannot lock the owner
+    out) and the member gets an email notice.
+  - **Recovery codes** are a PIN fallback, shown once.
+  - **Forgot PIN** sends a single-use, short-lived reset link by email
+    (`/pin-reset#token`). The request is **session-bound**: it takes no email
+    input and mails the signed-in user. Redeeming the link also needs a
+    recent password sign-in; the link alone is never enough. A reset ends all
+    other sessions, emails the member and is audited.
+  - **Self-service password change** is included.
+  - **Email provider:** Resend (free tier). The API key is an
+    **operator-owned platform secret**, not a tenant setting: it is entered in
+    the operator console, stored encrypted like the installer-hosting keys,
+    and never returned to any client. Until the console exists it is set
+    through an internal mutation or `scripts/platform-secret.mjs`. With no key
+    the forgot-PIN email is off (an Owner reset, a passkey or a recovery
+    code still work).
 - **Enrollment tokens:** short-lived, single-use or limited-use, revocable
   from the dashboard.
 - **Hash verification:** every installer and portable executable is
@@ -688,7 +714,8 @@ All components use free tiers or free-for-open-source services.
 |---|---|
 | Dashboard | Vite + React + TypeScript, custom UI |
 | Backend and database | Convex (cloud free tier) |
-| Authentication | Convex Auth (with 2FA for admins) |
+| Authentication | Convex Auth (password) plus a required PIN for every member and optional passkeys (changed 2026-11-03, Phase 4b; was "with 2FA for admins", the authenticator app is removed) |
+| Email (forgot-PIN, security notices) | Resend, free tier; the API key is an operator-owned platform secret (Section 12.3) (added 2026-11-03, Phase 4b) |
 | Staff App | Tauri v2 + Vite + React, custom UI |
 | Shell integration | Rust with the `windows` crate (Win32 window, shell and compositor APIs) |
 | Window materials | Mica/Acrylic effects on Windows 11 via Tauri window effects |

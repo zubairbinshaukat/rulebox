@@ -14,6 +14,20 @@ third-party assets and libraries, which keep their own licenses.
 | [docx-preview](https://github.com/VolodymyrBaydalka/docxjs) | Volodymyr Baydalka | [Apache-2.0](https://www.apache.org/licenses/LICENSE-2.0) | Word (.docx) viewer. |
 | [SheetJS Community Edition](https://sheetjs.com) (xlsx 0.20.3) | SheetJS LLC | [Apache-2.0](https://www.apache.org/licenses/LICENSE-2.0) | Spreadsheet (.xlsx) viewer. Vendored as vendor/xlsx-0.20.3.tgz (SHA-256 8DC73FC3B00203E72D176E85B50938627C7B086E607C682E8D3C22C02BB99FE8). |
 | [DOMPurify](https://github.com/cure53/DOMPurify) | Cure53 and contributors | [MPL-2.0 or Apache-2.0](https://github.com/cure53/DOMPurify/blob/main/LICENSE) | Cleans the Word viewer's output before it is shown. |
+| [Convex](https://www.convex.dev) (`convex`) | Convex, Inc. | [Apache-2.0](https://www.apache.org/licenses/LICENSE-2.0) | Backend platform client and server libraries (backend, dashboard). |
+| [Convex Auth](https://labs.convex.dev/auth) (`@convex-dev/auth`) | Convex, Inc. | [Apache-2.0](https://www.apache.org/licenses/LICENSE-2.0) | Member sign-in (backend and dashboard). |
+| [convex-helpers](https://github.com/get-convex/convex-helpers) | Convex, Inc. | [Apache-2.0](https://www.apache.org/licenses/LICENSE-2.0) | Custom function wrappers (backend). |
+| [Convex Rate Limiter](https://github.com/get-convex/rate-limiter) (`@convex-dev/rate-limiter`) | Convex, Inc. | [Apache-2.0](https://www.apache.org/licenses/LICENSE-2.0) | Rate limits on sign-in, enrollment and PIN attempts (backend). |
+| [@noble/ed25519](https://github.com/paulmillr/noble-ed25519) | Paul Miller | [MIT](https://github.com/paulmillr/noble-ed25519/blob/main/LICENSE) | Signs policy documents (backend). |
+| [@noble/hashes](https://github.com/paulmillr/noble-hashes) | Paul Miller | [MIT](https://github.com/paulmillr/noble-hashes/blob/main/LICENSE) | SHA-256, SHA-512 and HMAC (backend). |
+| [hash-wasm](https://github.com/Daninet/hash-wasm) | Dani Biro | [MIT](https://github.com/Daninet/hash-wasm/blob/master/LICENSE) | Argon2id for PINs and passwords (backend). |
+| [@simplewebauthn/server and browser](https://simplewebauthn.dev) | Matthew Miller | [MIT](https://github.com/MasterKale/SimpleWebAuthn/blob/master/LICENSE.md) | Passkeys for step-up confirmation (backend, dashboard). |
+| [Auth.js core](https://authjs.dev) (`@auth/core`) | Balazs Orban and contributors | [ISC](https://github.com/nextauthjs/next-auth/blob/main/LICENSE) | Used by Convex Auth for the password provider (backend). |
+| [Lucia](https://lucia-auth.com) (`lucia`) | pilcrowOnPaper | [MIT](https://github.com/lucia-auth/lucia/blob/main/LICENSE) | Scrypt password hashing (backend). |
+| [yaml](https://eemeli.org/yaml/) | Eemeli Aro | [ISC](https://github.com/eemeli/yaml/blob/main/LICENSE) | Reads winget manifests (backend). |
+| [React Router](https://reactrouter.com) (`react-router`) | Remix Software | [MIT](https://github.com/remix-run/react-router/blob/main/LICENSE.md) | Dashboard routing. |
+| [ed25519-dalek](https://github.com/dalek-cryptography/curve25519-dalek) | isis lovecruft, Henry de Valence and contributors | [BSD-3-Clause](https://github.com/dalek-cryptography/curve25519-dalek/blob/main/ed25519-dalek/LICENSE) | Verifies signed policies (agent, `rulebox-policy` crate). |
+| [reqwest](https://github.com/seanmonstar/reqwest) | Sean McArthur | [MIT or Apache-2.0](https://github.com/seanmonstar/reqwest#license) | HTTPS downloads of installers (agent). |
 
 Keep this file up to date whenever a bundled asset or library with
 attribution or non-MIT terms is added.

@@ -17,8 +17,10 @@
 >    `guard::require_test_machine()` first, like the Phase 2 ones. **Never
 >    create the test-machine marker, on any machine.**
 > 2. **Secrets never reach a reader that does not need them.** The device
->    secret, employee password hashes, the exit-PIN hash, TOTP secrets,
->    recovery codes, enrollment tokens and the policy signing key are
+>    secret, employee password hashes, the exit-PIN hash, the action-PIN
+>    hash (TOTP secrets were removed 2026-11-03, Phase 4b), the PIN
+>    recovery codes, the platform secrets (Resend key; Phase 4b),
+>    enrollment tokens and the policy signing key are
 >    never returned by a dashboard query, never written to the audit log,
 >    never logged, and never added to `rulebox_policy::DesiredState` (that
 >    type is sent whole to the Staff session). Each one has exactly one
@@ -56,7 +58,8 @@ a primary source; the plan says how each one gets confirmed.
 ## Updates since this plan was written
 
 - **2026-10-20, Section 21 answered:** recommended options for Q1 (a),
-  Q2 (a) and Q5 (a); Q3 and Q4 stay deferred. No step changes.
+  Q2 (a) and Q5 (a); Q3 and Q4 stay deferred. No step changes. (Q2's
+  "own TOTP" was dropped by the owner on 2026-11-03, Phase 4b; see below.)
 - **2026-10-27, Step 0 preflight:** node 24.15.0, pnpm 12.8.1, rustc
   1.99.0; free D: 47.6 GB, C: 29.4 GB; `target\` 7.1 GB; tree clean at
   `0f49ea5`. Phase 3 Step 19 is not committed, so Step 15 stays blocked.
@@ -270,6 +273,26 @@ a primary source; the plan says how each one gets confirmed.
   (7) Not done: the "Over plan limit" badge (`fleet:list` does not return
   `planState`), `useDeviceInstalls` (stays `not_ready` until Step 17), versions
   and the policy column (null until Step 8). (8) `narrowDevices` has NOT run.
+- **2026-11-03, owner decisions: Phase 4b** (`docs/plans/phase-4b-tables-and-pin.md`;
+  PRD 11.1 rules 7-8, 12.3 and 16 amended the same day). Two changes to this
+  plan. (1) **TOTP is removed on purpose** (goal 1, 4.16, D3, Q2, Step 3's MFA
+  block, deviations table). Sign-in is password, then a **required PIN** for
+  every role; a passkey is offered but skippable; the dashboard locks on every
+  load; 10 failures give a 24-hour lockout (never a permanent disable) plus an
+  email; PIN recovery codes stay; **forgot-PIN** is an email link
+  (`/pin-reset#token`) through Resend (free tier). The request is
+  **session-bound** (no email input; it mails the signed-in user) and the
+  redeem needs a password sign-in under 15 minutes old. The Resend key is an
+  **operator-owned platform secret** (`platformSecrets`, AES-256-GCM), entered
+  in the operator console (interim: internal mutation or
+  `scripts/platform-secret.mjs`). Self-service password change is included.
+  (2) **All lists are server-driven** (sort, Enter-search and cursor
+  pagination in the Convex query, counts from `orgStats` in a separate count
+  query, one generic `DataTable`, whole-row click, a global Table | Cards
+  switch `rulebox.view`, a pager with rows per page). Step text below that
+  still says TOTP or MFA describes what was built in Steps 1-5a and is kept as
+  history; each such block carries a "(changed 2026-11-03, Phase 4b)" note and
+  WP5b removes the code.
 
 ---
 
@@ -280,13 +303,19 @@ At the end of Phase 4:
 1. An organization deploys its own Convex backend and dashboard. The
    first **Owner** is created from the command line; further members are
    invited by the Owner. Members sign in with email and password, and
-   Owners and Admins must pass a **TOTP second factor** (PRD 12.3).
+   then a **required PIN** (every role; optional passkey; 24-hour lockout;
+   recovery codes; forgot-PIN by email link; PRD 12.3). The authenticator
+   app (TOTP second factor) was removed on purpose (changed 2026-11-03,
+   Phase 4b; see `phase-4b-tables-and-pin.md`).
    Roles are **Owner, Admin, Viewer** (PRD 15).
 2. The dashboard manages **groups, devices, employees, apps, file
    handlers, enrollment codes and organization settings** (kiosk on/off
    per device, hidden admin exit PIN and key combination, power options,
    offline sign-in days, default quota). Every screen is backed by one
-   query (PRD 11.1 rule 1), long lists are paginated, and the UI follows
+   query (PRD 11.1 rule 1), long lists are server-driven (sort, Enter
+   search and cursor pagination in the Convex query, one generic table with a
+   Table | Cards switch; PRD 11.1 rules 7 and 8; changed 2026-11-03,
+   Phase 4b), and the UI follows
    the Rulebox design system with Solar icons, offline-bundled assets,
    light/dark and reduced motion.
 3. Every change produces a new, **versioned, Ed25519-signed desired state**
@@ -328,7 +357,7 @@ user (Step 21).
 | Installer **uploads** (MSI/EXE stored by Rulebox). Phase 4 accepts an `https://` URL plus SHA-256 only. Convex file storage is too small for installers (PRD 16 names Cloudflare R2) | Phase 6 or later (Section 21, Q4) |
 | Branding beyond the organization name: logo, colours, wallpaper on devices (PRD 3.1). Phase 4 stores the name; the `branding.logo` field stays `null` | Section 21, Q3 |
 | Agent self-update, Staff App update channels and deadlines (PRD 23) | v1.x / later |
-| Multi-organization in one deployment, plugin system for app types, `npx create-rulebox` (PRD 17 v2). The schema keeps `orgId` on every row (including `policyKeys`), the membership lookup already returns a list, and MFA hangs off the user, so v2 needs no data migration. What v2 still builds is listed in Section 4.6 "Ready for more than one organization" | v2 |
+| Multi-organization in one deployment, plugin system for app types, `npx create-rulebox` (PRD 17 v2). The schema keeps `orgId` on every row (including `policyKeys`), the membership lookup already returns a list, and the PIN and passkeys hang off the user (MFA did until 2026-11-03, Phase 4b), so v2 needs no data migration. What v2 still builds is listed in Section 4.6 "Ready for more than one organization" | v2 |
 | MSI installer, release builds, code signing, hosting the dashboard on Cloudflare Pages / Vercel (Phase 4 writes the header files but does not deploy) | Phase 6 |
 | Idle auto-logout, shift hours (PRD 4.7, 24.5) | later |
 | Uninstalling EXE-type apps (only MSI and portable apps are removed when unassigned; Section 4.8) | later |
@@ -457,7 +486,7 @@ improvise. Section 19 lists every decision this plan made on its own.
 ```
  Dashboard (browser)                 Convex deployment                         Device
  ───────────────────                 ─────────────────                         ──────
- member signs in ──Convex Auth──▶ users/authSessions + members + mfaSessions
+ member signs in ──Convex Auth──▶ users/authSessions + members + stepUpSessions (PIN; mfaSessions removed 2026-11-03, Phase 4b)
  edits settings ──memberMutation──▶ config tables ──requestPublish()──▶ publishQueue
                                                          │ scheduler (1.5 s debounce)
                                                          ▼
@@ -504,7 +533,7 @@ Legend: **grows** = never `.collect()`; list with `.paginate()`, "latest"
 with `.take(n)`. **tiny** = at most a few rows per organization; reading
 all rows of one organization through an index with `.take(LIMIT)` is
 allowed where LIMIT is named. Every table has `orgId` or hangs off a row that does (except the
-per-user MFA tables, `wingetCache` and the Convex Auth tables), and every query filters on it through an
+per-user MFA and PIN tables, `platformSecrets`, `wingetCache` and the Convex Auth tables), and every query filters on it through an
 index.
 
 All fields below are exact. `v.optional` marks fields that existing
@@ -518,8 +547,8 @@ Phase 2 rows lack or that are truly optional. Timestamps are Unix ms
 | `orgStats` | tiny (1 per org) | `orgId`, `deviceCount: number`, `pingIntervalMs: number` | `by_org [orgId]` |
 | `members` | tiny | `orgId`, `userId: v.id("users")`, `email: string` (lower-case), `role: "owner"\|"admin"\|"viewer"`, `status: "active"\|"disabled"`, `createdAt: number`, `revision: number` | `by_user [userId]` (one row per membership, read with `.take(MAX_MEMBERSHIPS)`), `by_org_user [orgId, userId]` (uniqueness), `by_org_email [orgId, email]`, `by_org_role [orgId, role]` |
 | `invites` | tiny | `orgId`, `email: string` (lower-case), `role`, `kind: "join"\|"passwordReset"`, `tokenHash: string` (SHA-256 hex), `expiresAt: number`, `createdBy: v.optional(v.id("members"))`, `usedAt: v.optional(number)` | `by_token_hash [tokenHash]`, `by_email [email]`, `by_org [orgId]` |
-| `memberSecrets` | tiny (1 per **user**, not per membership: the authenticator belongs to the person) | `userId: v.id("users")`, `totpSecret: v.optional(string)` (base32), `totpPending: v.optional(string)`, `totpEnabledAt: v.optional(number)`, `recoveryHashes: v.array(string)` (SHA-256 hex), `lastTotpStep: number`, `totpFailures: number`, `totpLockedUntil: number` | `by_user [userId]` |
-| `mfaSessions` | small (1 per signed-in session) | `sessionId: v.id("authSessions")`, `userId: v.id("users")`, `verifiedAt: number` (one verification covers every organization of that session) | `by_session [sessionId]`, `by_user [userId]` |
+| `memberSecrets` **(TOTP fields removed on purpose, changed 2026-11-03, Phase 4b; the table is dropped by WP5b, widen then narrow, TOTP recovery codes are not carried over)** | tiny (1 per **user**, not per membership: the authenticator belongs to the person) | `userId: v.id("users")`, `totpSecret: v.optional(string)` (base32), `totpPending: v.optional(string)`, `totpEnabledAt: v.optional(number)`, `recoveryHashes: v.array(string)` (SHA-256 hex), `lastTotpStep: number`, `totpFailures: number`, `totpLockedUntil: number` | `by_user [userId]` |
+| `mfaSessions` **(removed on purpose, changed 2026-11-03, Phase 4b; replaced by `stepUpSessions`, 4.16)** | small (1 per signed-in session) | `sessionId: v.id("authSessions")`, `userId: v.id("users")`, `verifiedAt: number` (one verification covers every organization of that session) | `by_session [sessionId]`, `by_user [userId]` |
 | `groups` | tiny | `orgId`, `name: string`, `description: v.optional(string)`, `revision: v.optional(number)`, `createdAt: v.optional(number)` | `by_org [orgId]` (exists), `by_org_name [orgId, name]` |
 | `devices` | **grows** | Phase 2 identity fields (`orgId`, `groupId`, `name`, `secretHash`, `revoked`, `enrolledAt`, `enrollmentTokenId`, `hardwareIdHash`) plus `previousSecretHash: v.optional(string)`, `rotateCredential: v.optional(boolean)`, `kioskEnabled: v.optional(boolean)` (missing = true), `revision: v.optional(number)`. **The 12 reported status fields are removed** (moved to `deviceReports`) | `by_org [orgId]`, `by_group [groupId]` (exist), `by_secret_hash` (exists), `by_previous_secret_hash [previousSecretHash]`; search index `search_name { searchField: "name", filterFields: ["orgId"] }` |
 | `deviceReports` | grows (1 per device) | `deviceId`, `orgId`, the 12 status fields of Phase 2 (`agentVersion` … `compat`) plus `trustedKeyIds: v.optional(v.array(string))`, `outOfSupport: boolean`, `updatedAt: number` | `by_device [deviceId]` |
@@ -614,7 +643,7 @@ A query not in this table does not exist in Phase 4. Every
 | `invites.by_token_hash` | join, password reset |
 | `invites.by_email` | `profile()` / `createOrUpdateUser` |
 | `invites.by_org` | members screen (`.take(100)`, newest first) |
-| `memberSecrets.by_user`, `mfaSessions.by_session`, `mfaSessions.by_user` | MFA |
+| `memberSecrets.by_user`, `mfaSessions.by_session`, `mfaSessions.by_user` | MFA (removed with the tables, changed 2026-11-03, Phase 4b; the step-up indexes of 4.16 serve the PIN) |
 | `groups.by_org` | group list (`.take(500)`, tiny), group pickers |
 | `groups.by_org_name` | duplicate name check |
 | `devices.by_org` | device list (`paginate`), publisher "all devices" (`paginate` in batches) |
@@ -960,9 +989,13 @@ export const deviceQuery, deviceMutation, deviceAction;
    The client's `orgId` only selects among memberships the server just
    loaded; the organization is never taken from the client alone.
 3. Role rank (`viewer < admin < owner`) below `minRole` → `forbidden`.
-4. For role `owner` or `admin`: `getAuthSessionId(ctx)` must have an
-   `mfaSessions` row → otherwise `mfa_required`. (Viewers may enable
-   TOTP; it is not required.)
+4. ~~For role `owner` or `admin`: `getAuthSessionId(ctx)` must have an
+   `mfaSessions` row → otherwise `mfa_required`.~~ **Removed (changed
+   2026-11-03, Phase 4b):** there is no TOTP gate; `mfaRequiredFor` is false
+   for every role and `requireMember` never throws `mfa_required`. The
+   second gate is the required PIN: until it is set, every member write
+   answers `step_up_setup_required` (reads stay open so the dashboard can
+   route to setup; see 4.16).
 5. Returns `{ member, orgId: member.orgId }`. **Every** id argument a
    handler receives is then checked with `assertInOrg(doc, orgId)`
    (throws `not_found`, never `forbidden`, so other organizations' ids
@@ -984,10 +1017,10 @@ credentials; it can only touch its own device's rows.
 | `auth:*` (Convex Auth sign-in/out, refresh) | Convex Auth | ✓ | ✓ | ✓ | ✓ | — |
 | `account:me` | query | returns `null` | ✓ | ✓ | ✓ | — |
 | `account:redeemReset` | action | ✓ (needs a valid reset code) | — | — | — | — |
-| `mfa:status`, `mfa:beginSetup`, `mfa:confirmSetup`, `mfa:verify`, `mfa:useRecoveryCode` | mixed | — | ✓ | ✓ (before MFA) | ✓ (before MFA) | — |
+| ~~`mfa:status`, `mfa:beginSetup`, `mfa:confirmSetup`, `mfa:verify`, `mfa:useRecoveryCode`~~ **(removed, changed 2026-11-03, Phase 4b; replaced by the `stepUp:*` and `passkeys:*` functions of 4.16 and the forgot-PIN functions `account:requestPinReset` / `redeemPinReset`, session-bound, no email input)** | mixed | — | ✓ | ✓ (before MFA) | ✓ (before MFA) | — |
 | Every **query** in `overview`, `fleet`, `groups`, `employees`, `apps`, `fileHandlers`, `enrollmentCodes`, `audit`, `settings`, `keys` and `members:list` (for example `fleet:list`, `fleet:liveStatus`, `fleet:installs`, `apps:installSummary`, `keys:trustProgress`) | query | — | ✓ | ✓ | ✓ | — |
 | Every create/update/delete in `groups`, `fleet` (rename, move, kiosk, revoke, remove, rotate credential), `employees` (incl. `setPassword` action), `apps` (incl. `resolveWinget`, `fetchWebMeta` actions), `fileHandlers`, `enrollmentCodes`, `settings` (incl. `setExitPin` action) | mutation/action | — | — | ✓ | ✓ | — |
-| `members:*` (invite, change role, disable, password-reset code, reset someone's TOTP), `keys:registerActive`, `keys:prepareRotation`, `keys:finishRotation` | mutation/action | — | — | — | ✓ | — |
+| `members:*` (invite, change role, disable, password-reset code, reset someone's TOTP [`resetMfa`, removed 2026-11-03, Phase 4b; an Owner resets a PIN with `stepUp:resetMember`]), `keys:registerActive`, `keys:prepareRotation`, `keys:finishRotation` | mutation/action | — | — | — | ✓ | — |
 | `enrollment:enroll` | mutation (public, token-checked, rate-limited) | ✓ token | — | — | — | — |
 | `devices:desiredState`, `devices:heartbeat`, `devices:unenroll` | Phase 2 device functions | — | — | — | — | ✓ |
 | `deviceApi:verifyEmployee`, `deviceApi:reportAudit`, `deviceApi:reportInstalls`, `deviceApi:rotateCredential` | device | — | — | — | — | ✓ |
@@ -1036,7 +1069,7 @@ already has it, so `orgId` is required from the start on `members`,
 
 | Edge case | Rule |
 |---|---|
-| Same person, two organizations | Two `members` rows, one `users` row. MFA (`memberSecrets`, `mfaSessions`) belongs to the user, so they enrol an authenticator once and one verification covers the session |
+| Same person, two organizations | Two `members` rows, one `users` row. The PIN and passkeys (`stepUpFactors`, `passkeys`, `stepUpSessions`) belong to the user, so they set a PIN once and one verification covers the session (changed 2026-11-03, Phase 4b; was MFA: `memberSecrets`, `mfaSessions`) |
 | Duplicate membership | Convex indexes do not enforce uniqueness. Every insert into `members` first reads `by_org_user` in the same mutation (mutations are serializable, so two racing joins cannot both pass) and returns the existing row or `already_member` |
 | Disabling in one organization | `members:setDisabled` calls `invalidateSessions` and deletes the user's `mfaSessions` **only when the user has no other active membership**. Otherwise the disabled row alone blocks them, because `requireMember` checks it on every call |
 | Last Owner | Counted per organization (`members.by_org_role`), never per user |
@@ -1082,14 +1115,17 @@ change in v2" is checked on every run.
 | Employee password | Argon2id PHC in `employeeSecrets` | `employees:setPassword` action (via internal mutation) | `deviceApi:verifyEmployee` (via internal query) | returned, logged, in the document |
 | Exit PIN | Argon2id PHC in `orgSecrets.exitPinHash` | `settings:setExitPin` action | `publish:run` → document → agent | returned by `settings:get` (it returns `pinSet: boolean` only) |
 | Member password | Convex Auth (`authAccounts`, Scrypt) | Convex Auth, `account:redeemReset` | Convex Auth | touched by our code otherwise |
-| TOTP secret | base32 in `memberSecrets.totpSecret` | `mfa:confirmSetup` | `mfa:verify` | returned after `beginSetup` |
-| Recovery codes | SHA-256 hex list | `mfa:confirmSetup` (shown once) | `mfa:useRecoveryCode` | stored plain |
+| ~~TOTP secret~~ (removed 2026-11-03, Phase 4b) | ~~base32 in `memberSecrets.totpSecret`~~ | ~~`mfa:confirmSetup`~~ | ~~`mfa:verify`~~ | ~~returned after `beginSetup`~~ |
+| Action PIN (member) | Argon2id PHC in `stepUpFactors.actionPinHash` | `stepUp:setActionPin` action, `account:redeemPinReset` | `stepUp:verifyActionPin` action | returned, logged, emailed (changed 2026-11-03, Phase 4b) |
+| Forgot-PIN token | SHA-256 hex in `pinResets` (256-bit token, 30 minutes, single use) | `account:deliverPinReset` (mails `/pin-reset#token`) | `account:redeemPinReset` | stored plain, logged, kept in the scheduler (changed 2026-11-03, Phase 4b) |
+| Platform secrets (`resendApiKey`, `resendFrom`, `dashboardOrigin`) | AES-256-GCM in `platformSecrets` (master key env `RULEBOX_PLATFORM_KEY`), operator-owned | internal `platform:setSecret` (interim `scripts/platform-secret.mjs`; later the operator console) | `lib/platformSecrets.ts` (mail sending only) | returned by any public function (changed 2026-11-03, Phase 4b) |
+| Recovery codes (PIN fallback) | SHA-256 hex list in `stepUpFactors.recoveryHashes` | `stepUp:generateRecoveryCodes` (10 codes, shown once; was `mfa:confirmSetup`, changed 2026-11-03, Phase 4b) | `stepUp:resetWithRecoveryCode` (was `mfa:useRecoveryCode`) | stored plain |
 | Invite / reset code | SHA-256 hex | `members:invite`, `members:createResetCode`, `setup:createOwnerInvite` (shown once) | `auth.ts` `profile()`, `account:redeemReset` | stored plain |
 | Policy signing seed | env `RULEBOX_POLICY_KEY` (+ `_NEXT`) | the Owner with the CLI | `convex/lib/signing.ts` | in the DB, the repo, the browser, a log |
 
 A test (`convex/secrets.test.ts`, Step 18) calls **every** public query
 as an Owner and asserts that no returned value contains `$argon2`, a
-64-hex string equal to any stored hash, or a TOTP secret.
+64-hex string equal to any stored hash, or a platform secret (TOTP secrets no longer exist; changed 2026-11-03, Phase 4b).
 
 ### 4.8 Apps, catalogue and installs
 
@@ -1490,7 +1526,8 @@ inside `<RequireMember>` (Step 4).
 | `/sign-in` | Email + password; link "Have an invite code?" | — | public |
 | `/join` | Invite code + email + new password (sign-up flow) | — | public |
 | `/reset` | Reset code + email + new password | — | public |
-| `/mfa` | Set up TOTP (QR as `otpauth://` text + secret in groups of 4, confirm code, show recovery codes once) or enter a code / recovery code | `mfa:status` | signed in |
+| ~~`/mfa`~~ | ~~Set up TOTP (QR as `otpauth://` text + secret in groups of 4, confirm code, show recovery codes once) or enter a code / recovery code~~ **Removed (changed 2026-11-03, Phase 4b).** Replaced by the PIN screen after the password: set the PIN (warning "do not forget your PIN", how to reset it by email), optional skippable passkey, recovery codes shown once; on every load the lock screen asks for the PIN (passkey prompt first when one exists), with "Forgot PIN?" | `me.pin` / `stepUp:status` | signed in |
+| `/pin-reset#token` | Forgot-PIN link target (changed 2026-11-03, Phase 4b): the token is stripped from the URL with `history.replaceState` and no referrer is sent (the link is `/pin-reset#token=...`, in the URL fragment, and the page is served with `Referrer-Policy: no-referrer`; `requestPinReset()` takes no arguments); needs a password sign-in under 15 minutes old, then sets a new PIN | `account:redeemPinReset` | signed in |
 | `/` | Overview: device totals, seen-recently count, failed installs (latest 20), recent audit (10), warnings (no signing key, devices without group, out-of-support devices) | `overview:get` | viewer |
 | `/devices` | Device list: name, group, online dot + "last seen", agent version, Windows build (red badge when out of support), kiosk phase, applied/desired version; filter by group; search by name; "Load more" | `fleet:list` (+ `fleet:liveStatus` for the visible ids; + `fleet:search` when the search box is used) | viewer |
 | `/devices/:id` | Device detail: identity, status, compatibility report, kiosk switch, group picker, rename, apps and install states (paginated), last 5 document versions, history panel; actions Revoke, Remove, Rotate credential | `fleet:get` (+ `fleet:liveStatus`, `audit:forTarget`) | viewer / admin |
@@ -1503,9 +1540,22 @@ inside `<RequireMember>` (Step 4).
 | `/file-types` | Extension → app table, add/remove | `fileHandlers:list` | viewer / admin |
 | `/enrollment` | Create code (group required, uses 1–100, expiry 15 min–7 days, label); the code is shown **once** in a copy field with "Copied" feedback; list (paginated) with state (active / used up / expired / revoked) and Revoke | `enrollmentCodes:list` | viewer / admin |
 | `/audit` | Audit log, newest first, "Load more"; each row: time, actor, action, target link, summary | `audit:list` | viewer |
-| `/settings` | Tabs: Organization (name, offline days, default quota, power options), Admin exit (enabled, key combination, set / clear PIN), Signing (key id, fingerprint, device trust counts, register / rotate, loss instructions), Members (Owner: invite, roles, disable, reset code, reset 2FA), About (versions, Solar credit "Icons: Solar by 480 Design (CC BY 4.0)", GSAP notice) | `settings:get` (+ `members:list` on that tab, `keys:status` on Signing) | viewer / admin / owner per tab |
+| `/settings` | Tabs: Organization (name, offline days, default quota, power options), Admin exit (enabled, key combination, set / clear PIN), Signing (key id, fingerprint, device trust counts, register / rotate, loss instructions), Members (Owner: invite, roles, disable, reset code, reset action PIN and passkeys [was "reset 2FA", changed 2026-11-03, Phase 4b]), Security (PIN change, passkeys, recovery codes, password change), About (versions, Solar credit "Icons: Solar by 480 Design (CC BY 4.0)", GSAP notice) | `settings:get` (+ `members:list` on that tab, `keys:status` on Signing) | viewer / admin / owner per tab |
 | `/gallery` | The existing design-system gallery (members only) | — | viewer |
 | `*` | Not found | — | — |
+
+**List screens (changed 2026-11-03, Phase 4b).** Every list in the table
+above (Devices, Groups, Group detail, Employees, Apps, File types,
+Enrollment, Audit, install lists, members, invites, overview lists) is
+server-driven and drawn by one generic `DataTable`: sortable headers, search on
+Enter, cursor pagination with a pager (`147 records · Page 1 of 15`,
+`‹ 1 2 … 15 ›`, rows per page 10 / 25 / 50), whole-row click, and a global
+Table | Cards switch (`rulebox.view`). Where a row above says "Load more",
+"paginated" or names `fleet:search` / `employees:search`, read the Phase 4b
+contract instead (`*:list` / `*:page` with `paginationOpts`, `sort`, `search`;
+totals from a separate `*:count` query on `orgStats`). Settings opens from a
+gear icon beside the avatar as an anchored panel; `/settings` stays as a deep
+link.
 
 **Amended screen data (A3, A7, A8, A17, 3.3 of the post-Phase-5 plan):**
 
@@ -1640,7 +1690,7 @@ block) and reference with `catalog:`:
 | `@convex-dev/rate-limiter` | `0.4.2` | root | enroll / verify / invite limits |
 | `convex-helpers` | `0.1.128` | root | `customQuery` / `customMutation` / `customAction` |
 | `@noble/ed25519` | `3.2.0` | root | signing in a mutation |
-| `@noble/hashes` | `2.4.0` | root | SHA-512 for noble, HMAC-SHA1 for TOTP |
+| `@noble/hashes` | `2.4.0` | root | SHA-512 for noble (HMAC-SHA1 for TOTP, no longer needed since 2026-11-03, Phase 4b) |
 | `hash-wasm` | `4.12.0` | root | Argon2id in default-runtime actions (WebAssembly is supported there) |
 | `yaml` | latest 2.x at Step 10, **(unverified)** | root | winget manifests |
 | `react-router` | `8.5.0` (published 2026-10-19; pnpm's default `minimumReleaseAge` of 1 day lets it install after 2026-10-20 13:49 UTC; if refused, use `8.4.0`) | dashboard | routing |
@@ -1669,7 +1719,30 @@ add `ring`, `rustls`, `openssl`, `async-trait` or any winget crate.
 
 ### 4.16 Step-up authentication: action PIN and passkeys (owner decision 2026-10-27)
 
-**Goal.** A signed-in dashboard session (password + TOTP) is not enough
+> **Changed 2026-11-03, Phase 4b (owner decision).** TOTP is removed on
+> purpose and the **PIN is now the required second step of sign-in** for
+> every role, not only a gate for major actions. What changes in this
+> section: (1) a PIN is required for every member (until it exists every
+> member write answers `step_up_setup_required`; reads stay open so the
+> dashboard can route to setup; a passkey alone does not count and cannot be
+> registered before the PIN); (2) the passkey is offered after the PIN and
+> can be skipped; the PIN can never be removed (`stepUp:clearActionPin`
+> always answers `step_up_last_factor`); (3) the dashboard locks on every page
+> load / reopen (per tab); (4) **10 failures lock the PIN for 24 hours**
+> (`PIN_LOCKOUT_MS`, `detail: "lockout"`) with an email notice, never
+> "disable"; (5) PIN recovery codes (`stepUp:generateRecoveryCodes`, 10 codes,
+> SHA-256) replace the TOTP recovery codes; (6) **forgot-PIN by email**:
+> `account:requestPinReset` is **session-bound** (no email input, it mails
+> the signed-in user), the link is single use and short lived (30 minutes,
+> hashed token), and `account:redeemPinReset` needs a password sign-in under
+> 15 minutes old, ends every other session, emails "your PIN was reset" and
+> audits it; "never e-mail alone" still holds because the link alone is
+> never enough; (7) mail goes through Resend with an **operator-owned** key
+> (`platformSecrets`, see 4.7). The text below is the 2026-10-27 design;
+> where it says TOTP, MFA or "disable", read the list above.
+
+**Goal.** A signed-in dashboard session (password + ~~TOTP~~ required PIN,
+changed 2026-11-03, Phase 4b) is not enough
 for dangerous changes. Each member confirms with an **action PIN** or a
 **passkey**: an idle session (10 minutes) is re-confirmed, and **major
 actions** always need a confirmation from the last 5 minutes. Nothing here
@@ -1682,7 +1755,7 @@ exit, `orgSecrets.exitPinHash`, `settings:setExitPin`) are different
 secrets; code, strings, audit actions and tables never use one name for
 the other, and neither is accepted for the other.
 
-**Ownership.** Step-up belongs to the **person** (`users` row), like MFA:
+**Ownership.** Step-up belongs to the **person** (`users` row), as MFA did:
 one action PIN and one passkey list per person; a verification unlocks
 the **session** (`authSessions` row) in every organization of that person.
 Audit rows go to the organization the person acted in.
@@ -1728,14 +1801,15 @@ row per session, written **on verification**, never per call:
   bounds are: nothing without a factor if the victim's session was locked;
   if it was unlocked, non-major writes for at most 8 hours from the
   victim's last verification, and **major actions only within 5 minutes**
-  of it. A stolen password + TOTP gives a **new** session that has no
+  of it. A stolen password (+ TOTP before 2026-11-03, Phase 4b) gives a **new** session that has no
   step-up at all. Reads are not step-up gated (they are protected by the
   session; the idle lock is a privacy screen).
 
 **Major actions** (`MAJOR_ACTIONS` in `convex/lib/stepUp.ts`, one typed
 table read by the wrappers and the tests): `members:invite`,
 `revokeInvite`, `changeRole`, `setDisabled`, `createResetCode`,
-`resetMfa`; `stepUp:clearActionPin`, `removePasskey`, `resetMember`;
+`resetMfa` (removed 2026-11-03, Phase 4b); `stepUp:clearActionPin` (now
+always refused), `removePasskey`, `resetMember`;
 planned: `settings:setExitPin`, `clearExitPin`, `settings:update` (only
 when it changes the admin exit), `groups:delete`, `enrollmentCodes:revoke`,
 `fleet:setKiosk` (only when it turns kiosk mode off), `fleet:revoke`,
@@ -1748,7 +1822,7 @@ console's own step-up (post-Phase-5 5.3). A function is marked with
 `memberMutation(role, { major: "<file>:<name>" })`; a conditional one
 calls `requireStepUp(ctx, "fresh")`. Every other member mutation or action
 needs an **unlocked** session (the wrapper's default); exempt are only the
-MFA and step-up entry points (`stepUp: "none"` / `skipMfa`). Queries never
+step-up entry points (`stepUp: "none"`; `skipMfa` was removed 2026-11-03, Phase 4b). Queries never
 check step-up.
 
 **Action PIN.** 6–12 ASCII digits (same length rule as the exit PIN):
@@ -1760,14 +1834,16 @@ a repeated pattern (`121212`, `123123`), an up/down run with wrap
 password" cannot happen: passwords need a letter. Hashed with Argon2id
 (`hash-wasm`, m=19456 KiB, t=2, p=1) in a default-runtime action.
 **Lockout:** 2 free failures, then 30 s doubling to 15 min between tries;
-**10 failures since the last success disable the PIN** (audit
-`member.actionPinLocked`) until a passkey step-up sets a new one, an
-Owner resets it, or a recovery code is used. Each attempt is **reserved
+**10 failures since the last success lock the PIN for 24 hours** (audit
+`member.actionPinLocked`, email notice; changed 2026-11-03, Phase 4b, was
+"disable the PIN" so a password thief could lock the owner out for good)
+until the lockout ends, a passkey step-up sets a new PIN, an Owner resets
+it, a recovery code is used, or the email link is redeemed. Each attempt is **reserved
 before** the Argon2 check by an internal mutation (counts as a failure
 until the success mutation clears it), so parallel guesses each count and
 a crash fails closed; the public action throws only after the counter
-committed (Step 3's MFA lesson). A disabled PIN still counts as a factor,
-so guessing it into the hard lock never opens the bootstrap path.
+committed (Step 3's MFA lesson). A locked PIN still counts as a factor,
+so guessing it into the lockout never opens the bootstrap path.
 Global failure bucket `stepUpFailuresGlobal` (300/min, 4 shards; Convex
 functions see no client IP, so there is no per-IP bucket) is checked
 before and consumed only on a failure.
@@ -1796,11 +1872,12 @@ every failure is `step_up_invalid`.
 
 | Situation | Rule |
 |---|---|
-| No factor yet (first major action) | `step_up_setup_required`; the dashboard opens setup. **Bootstrap:** a session younger than 15 min (fresh password sign-in) that passed TOTP when TOTP is enrolled may set the first PIN or passkey, which also unlocks it. An Owner who never set one is never locked out: sign out and in again (`detail: "reauthenticate"`) |
+| No factor yet (first major action) | `step_up_setup_required`; the dashboard opens setup. **Bootstrap:** a session younger than 15 min (fresh password sign-in) may set the first PIN, which also unlocks it (changed 2026-11-03, Phase 4b: no TOTP is asked, the first factor is always the PIN, a passkey cannot come first). An Owner who never set one is never locked out: sign out and in again (`detail: "reauthenticate"`) |
 | Add a second passkey, change the PIN | fresh step-up (PIN or passkey) |
 | Forgot the PIN, has a passkey | passkey step-up, then `setActionPin` |
+| Forgot the PIN, no passkey, mail on | "Forgot PIN?" → email link (`/pin-reset#token`, Phase 4b) → password sign-in ≤ 15 min → new PIN; every other session ends |
 | Lost the passkey, knows the PIN | PIN step-up, then remove the lost passkey (major) |
-| Lost every factor | (a) another Owner: `stepUp:resetMember` (major; not for yourself; refused when the person is also active in another organization, because step-up belongs to the person); (b) yourself: `stepUp:resetWithRecoveryCode` = fresh sign-in (≤ 15 min) + TOTP + one MFA recovery code (shares the TOTP lockout); then bootstrap; (c) the only Owner without recovery codes: the operator's CLI (`maintenance:resetMfaByEmail` pattern; to add with Step 20) |
+| Lost every factor | (a) another Owner: `stepUp:resetMember` (major; not for yourself; refused when the person is also active in another organization, because step-up belongs to the person); (b) yourself: `stepUp:resetWithRecoveryCode` = fresh sign-in (≤ 15 min) + one PIN recovery code (own bucket `recoveryCodePerUser`, 5 per 15 min; changed 2026-11-03, Phase 4b, was + TOTP + MFA recovery code); then bootstrap; (c) **forgot-PIN email link** (new, Phase 4b): `account:requestPinReset` (session-bound, no email input) mails a single-use link, `account:redeemPinReset` needs a password sign-in ≤ 15 min old (the link alone never suffices); off when the operator has set no Resend key; (d) the only Owner without recovery codes or mail: the operator's CLI (`maintenance:resetMfaByEmail` pattern, renamed for the PIN; to add with Step 20) |
 | Remove the last factor | refused (`step_up_last_factor`) |
 | Device without WebAuthn | action PIN |
 | Passkey on another device | action PIN (or the phone via hybrid transport) |
@@ -1825,7 +1902,7 @@ ignored, the client shows windows relative to `serverNow`.
 
 | Function | Kind | Use |
 |---|---|---|
-| `stepUp:status` | query (any role) | `actionPin { set, lockedUntil, disabled, attemptsBeforeDisable }`, `passkeys [{ _id, name, createdAt, lastUsedAt, synced, suspended }]`, `passkeysAvailable`, `session { verifiedAt, lastActiveAt, method }`, `bootstrapUntil`, `policy { idleMs, keepAliveMs, freshMs, maxAgeMs }` |
+| `stepUp:status` | query (any role) | `actionPin { set, lockedUntil, disabled (always false since Phase 4b), attemptsBeforeDisable }`, plus `pinLockout`, `recoveryCodesLeft` and `me.pin = { required, set, locked, lockedUntil?, resetByEmail }` (added 2026-11-03, Phase 4b), `passkeys [{ _id, name, createdAt, lastUsedAt, synced, suspended }]`, `passkeysAvailable`, `session { verifiedAt, lastActiveAt, method }`, `bootstrapUntil`, `policy { idleMs, keepAliveMs, freshMs, maxAgeMs }` |
 | `stepUp:setActionPin({ pin })` | action | bootstrap or after a fresh step-up |
 | `stepUp:verifyActionPin({ pin })` | action | → `{ verifiedAt, freshUntil, serverNow }` |
 | `passkeys:beginVerification()` / `finishVerification({ responseJson })` | Node actions | options JSON for `navigator.credentials.get` (`@simplewebauthn/browser` `startAuthentication({ optionsJSON })`); the credential's `toJSON()` string back |
@@ -1838,15 +1915,16 @@ ignored, the client shows windows relative to `serverNow`.
 Error codes: `step_up_required` (`detail`: `unlocked` / `fresh`),
 `step_up_setup_required` (`detail: "reauthenticate"` when the session is
 too old to bootstrap), `step_up_invalid` (`retryAfterMs` when the next try
-waits), `step_up_locked` (`retryAfterMs`, or `detail: "disabled"`),
+waits), `step_up_locked` (`retryAfterMs`; `detail: "lockout"` for the 24-hour lockout, `"disabled"` no longer used since 2026-11-03, Phase 4b),
 `step_up_last_factor`; `not_ready` with `detail` `"no action PIN"`,
 `"no passkey"`, `"passkeys not configured"`, `"no recovery codes"`.
 
 **Dashboard flows (for the UI step; not built in Step 5a):**
 
-1. After sign-in + TOTP, an Owner or Admin without a factor sees "Protect
-   important actions" (set PIN and/or add a passkey) before the overview;
-   a Viewer sees it on the Security page only.
+1. After the password, every member (all roles; changed 2026-11-03,
+   Phase 4b) without a PIN sees the PIN setup screen ("do not forget your
+   PIN", how to reset it by email), then the optional, skippable passkey
+   step and the recovery codes, before the overview. No role can skip the PIN.
 2. Any call answering `step_up_required` / `step_up_setup_required` opens
    the confirm dialog (passkey button first when `passkeysAvailable` and a
    passkey exists and `PublicKeyCredential` is present; PIN field always
@@ -1934,7 +2012,7 @@ The `AgentSnapshot` does not change (the catalogue is not in it, and the
 | 0 | Preflight | dev | — | nothing |
 | 1 | Tooling and test harness | dev | 0 | root, `convex/`, dashboard config |
 | 2 | Schema v2, function wrappers, errors, audit helper | dev | 1 | `convex/` |
-| 3 | Member accounts: Convex Auth, invites, owner bootstrap, MFA | dev | 2 | `convex/` |
+| 3 | Member accounts: Convex Auth, invites, owner bootstrap, MFA (MFA part removed 2026-11-03, Phase 4b; replaced by the PIN of 4.16) | dev | 2 | `convex/` |
 | 4 | Dashboard foundation | dev | 3 | dashboard, `packages/ui` |
 | 5 | Organization settings, exit PIN, groups (+ `orgPlans`, `platformSettings`, `orgStats` counters) | dev | 4, 5a | `convex/`, dashboard |
 | 5a | Step-up authentication: action PIN and passkeys (Section 4.16; backend first, dashboard UI after) | dev | 4 | `convex/`, root deps, dashboard error mirror; dashboard UI later |
@@ -1988,7 +2066,7 @@ Rules for every step:
 - Convex: every public function through a wrapper (rule 3); `args` and
   `returns` validators on every function; errors are
   `fail(code, extra?)` from `convex/lib/errors.ts`; random values
-  (tokens, salts, TOTP secrets, recovery codes) are made **only in
+  (tokens, salts, recovery codes; TOTP secrets until 2026-11-03, Phase 4b) are made **only in
   actions** (`crypto.getRandomValues` in queries and mutations is a
   seeded generator, not a secure source).
 - Icons: Solar only, `-linear`, active nav `-bold-duotone`
@@ -2218,7 +2296,16 @@ argument; add a `.filter()`.
 
 ### Step 3 — Member accounts: Convex Auth, invites, owner bootstrap, MFA
 
-**PRD:** 12.3 (2FA for Owner and Admin), 15 (roles). **Files:**
+> **Superseded in part (changed 2026-11-03, Phase 4b).** This step was
+> built with a TOTP second factor. The owner removed TOTP on purpose: item 4
+> (MFA), the MFA parts of items 3 and 5 (`me.mfa`, `resetMfa`,
+> `mfaSessions` cleanup, `resetMfaByEmail`), test 4 and every `mfa` file below
+> describe code that WP5b deletes (`convex/mfa.ts`, `lib/totp.ts`,
+> `mfa.test.ts`). The replacement is the required PIN of 4.16 and the
+> forgot-PIN email flow (`phase-4b-tables-and-pin.md`, Parts B and C). Items 1,
+> 2, 6 and the rest of 3 and 5 stand. Do not rebuild TOTP from this text.
+
+**PRD:** 12.3 (changed 2026-11-03, Phase 4b: required PIN, no 2FA by authenticator app; was "2FA for Owner and Admin"), 15 (roles). **Files:**
 `convex/auth.config.ts`, `convex/auth.ts`, `convex/http.ts`,
 `convex/setup.ts`, `convex/account.ts`, `convex/mfa.ts`,
 `convex/members.ts`, `convex/lib/{totp,crypto,rateLimits}.ts`,
@@ -2290,7 +2377,7 @@ argument; add a `.filter()`.
    exact helper names and whether they run in an action: check the
    package's exports; if `modifyAccountCredentials` is missing, stop and
    ask.
-4. **MFA** (`mfa.ts`, `lib/totp.ts`): TOTP per RFC 6238, SHA-1, 6
+4. **MFA (removed 2026-11-03, Phase 4b; history only)** (`mfa.ts`, `lib/totp.ts`): TOTP per RFC 6238, SHA-1, 6
    digits, 30 s, window ±1 step, HMAC from `@noble/hashes`.
    - `status` (member query, any role, MFA not required).
    - `beginSetup` (action): 20 random bytes → base32 secret stored as
@@ -2336,7 +2423,7 @@ argument; add a `.filter()`.
    expired, used or other-email invite → `invite_invalid`; with a valid
    one → member with the invite's role, invite marked used.
 3. `beforeSessionCreation` refuses a disabled member.
-4. TOTP: the RFC 6238 SHA-1 test vectors (seed
+4. TOTP (removed 2026-11-03, Phase 4b; history only): the RFC 6238 SHA-1 test vectors (seed
    `12345678901234567890`, times 59 → `287082`, 1111111109 → `081804`,
    1234567890 → `005924`, 2000000000 → `279037`, using the last 6
    digits) pass; window ±1 accepted, ±2 refused; replay refused; 5
@@ -2357,7 +2444,7 @@ an unused owner invite.
 
 **Do NOT:** enable any other Convex Auth provider; store TOTP secrets in
 `users`; return a secret from a query; skip the MFA rule for admins in
-any wrapper.
+any wrapper (since 2026-11-03, Phase 4b: skip the PIN rule for any role).
 
 **Follow-up (A10, owner Q7; a separate commit after Step 4):**
 
@@ -2412,13 +2499,15 @@ additions; tests in `src/**/*.test.tsx`.
    `ConvexAuthProvider` (from `@convex-dev/auth/react`), then
    `BrowserRouter`, then `App`. Keep the missing-URL message.
 2. `App.tsx`: routes of Section 4.13. Public: `/sign-in`, `/join`,
-   `/reset`. Signed-in but MFA allowed: `/mfa`. Everything else under
+   `/reset`. Signed-in but MFA allowed: `/mfa` (replaced 2026-11-03, Phase 4b
+   by the PIN setup / lock screen and `/pin-reset#token`). Everything else under
    `<Route element={<RequireMember />}><Route element={<Layout />}>…`.
 3. `RequireMember`: `useConvexAuth()`; while loading → full-page
    `Spinner`; not authenticated → `<Navigate to={"/sign-in?next=" + encodeURIComponent(path)} />`;
    `account:me` → `noAccess` → page "This account has no access to
-   Rulebox" with Sign out; `mfa.required && !mfa.verified` →
-   `/mfa?next=…`; else `<Outlet context={me} />`. `next` is accepted only
+   Rulebox" with Sign out; ~~`mfa.required && !mfa.verified` →
+   `/mfa?next=…`~~ (changed 2026-11-03, Phase 4b: `me.pin.required &&
+   !me.pin.set` → PIN setup, a locked tab → the PIN lock screen); else `<Outlet context={me} />`. `next` is accepted only
    when it starts with `/` and not `//` (open-redirect guard; unit test).
 4. `Layout`: left navigation (Overview, Devices, Groups, Employees,
    Apps, File types, Enrollment, Audit log, Settings) with Solar
@@ -2432,15 +2521,21 @@ additions; tests in `src/**/*.test.tsx`.
    Join (invite code, email, password twice, calls
    `signIn("password", formData)` with `flow: "signUp"` and
    `inviteCode`); Reset (code, email, password twice →
-   `account:redeemReset`, then to `/sign-in`); Mfa (setup or verify,
+   `account:redeemReset`, then to `/sign-in`); ~~Mfa (setup or verify,
    recovery code link; after setup shows the 10 recovery codes with
    "I saved them" before continuing; QR drawn from the `otpauth://` URI
    with `uqr` 0.1.3 `encode()` into `<rect>` elements, plus the secret
-   in groups of four for manual entry).
+   in groups of four for manual entry)~~ (removed 2026-11-03, Phase 4b; the
+   PIN screens replace it: set PIN, optional passkey, 10 recovery codes
+   shown once, lock screen with "Forgot PIN?"; no QR code is needed, so
+   `uqr` can go).
 6. **Shared components** (`apps/dashboard/src/components/`):
    `DataTable` (semantic `<table>`, sticky header, row link via an
    explicit "Open" link or the name cell link, never a clickable `<tr>`
-   only), `LoadMore`, `StatusDot` (colour **and** text), `Field` (label,
+   only; **changed 2026-11-03, Phase 4b:** one generic server-driven table,
+   the whole row is clickable and a real link stays in the name cell, with
+   sortable headers, Enter search, a pager and the Table | Cards switch),
+   `LoadMore` (replaced by the pager in Phase 4b), `StatusDot` (colour **and** text), `Field` (label,
    input slot, hint, error with `aria-describedby`), `ConfirmDialog`
    (typed confirmation for destructive actions: the user types the
    name), `EmptyState`, `PageHeader`, `CopyField` (read-only input +
@@ -2478,7 +2573,7 @@ additions; tests in `src/**/*.test.tsx`.
     `vite preview` is covered too.
 
 **Tests (Vitest + Testing Library, Convex hooks mocked):**
-`RequireMember` redirects (signed out, no access, MFA needed, OK);
+`RequireMember` redirects (signed out, no access, PIN needed [was MFA needed, changed 2026-11-03, Phase 4b], OK);
 `next` guard rejects `//evil.test` and `https://evil.test`;
 `messageFor` covers every `ErrorCode` (exhaustive switch, a test
 iterates the union through a const list); `CopyField` fallback; SignIn
@@ -2486,13 +2581,13 @@ shows the rate-limit sentence; `Layout` marks the active nav item with
 `aria-current="page"`.
 
 **Verify:** typecheck, lint, test; `pnpm dev:dashboard`; join with the
-owner invite of Step 3, set up TOTP with a real authenticator app (or
-compute codes with a small script from the shown secret), sign out, sign
-in, MFA prompt, recovery code once. Screenshots: sign-in, join, MFA
-setup, MFA verify, layout with placeholder overview — light, dark,
+owner invite of Step 3, set the PIN (was: set up TOTP with a real
+authenticator app; changed 2026-11-03, Phase 4b), sign out, sign
+in, PIN prompt, recovery code once. Screenshots: sign-in, join, PIN
+setup, PIN lock screen, layout with placeholder overview — light, dark,
 narrow.
 
-**Done when:** the full sign-in and MFA loop works against the dev
+**Done when:** the full sign-in and PIN loop (was: MFA loop) works against the dev
 deployment, tests pass, screenshots taken.
 
 **Do NOT:** store anything about the session yourself (Convex Auth
@@ -2523,11 +2618,11 @@ error mirror `apps/dashboard/src/data/types.ts` + `lib/errors.ts` +
 5. Maintenance: step-up rows by age, challenges by expiry.
 
 **Tests:** PIN rules; backoff table; bootstrap and the "never locked out"
-Owner; TOTP required for bootstrap when enrolled; fresh / unlocked / idle /
+Owner; TOTP required for bootstrap when enrolled (removed 2026-11-03, Phase 4b: the bootstrap needs only a password sign-in under 15 minutes old); fresh / unlocked / idle /
 8-hour windows; keep-alive writes at most once per quantum; lock; another
 session of the same person stays locked; multi-organization; expired
 session; disabled member; change needs fresh; lockout counters persist,
-hard disable + audit, disabled PIN blocks bootstrap; recovery reset; Owner
+hard disable + audit, disabled PIN blocks bootstrap (changed 2026-11-03, Phase 4b: 24-hour lockout + audit + email, a locked PIN blocks bootstrap); recovery reset; Owner
 reset rules; last factor; passkeys: registration options, bootstrap,
 no-UV / wrong origin / wrong RP ID / wrong type / replay, duplicate and
 foreign credential, limit, verification + counter, replay, expiry, second
@@ -4939,7 +5034,7 @@ it).
    public function of `api` (built by walking the generated `api`
    object; the test fails when a function is missing from the table)
    with its minimum role or "device" / "public". For each function and
-   each of {signed out, viewer, admin without MFA, admin, owner, device,
+   each of {signed out, viewer, admin without a PIN [was: without MFA, changed 2026-11-03, Phase 4b], admin, owner, device,
    other org's owner} it calls with minimal valid arguments and asserts
    allowed or the exact refusal code.
 2. **Secrets test:** Section 4.7.
@@ -5009,9 +5104,14 @@ the user's consent and numbers reported; checklist done.
    `E2E <runId>` and returns an owner invite code; `testing:seedDevice`
    creates a fake device with a known secret in a group; `testing:deleteOrg`
    removes everything of an org (batched). `helpers.ts` calls them with
-   `npx convex run` and computes TOTP codes with `@noble/hashes`.
-4. Specs: `auth.spec.ts` (join with invite, MFA setup, sign out, sign in
-   with TOTP, recovery code, wrong password message); `roles.spec.ts`
+   `npx convex run` (it no longer computes TOTP codes; changed 2026-11-03,
+   Phase 4b: the seed sets a known PIN through a guarded testing function).
+4. Specs: `auth.spec.ts` (join with invite, PIN setup, sign out, sign in
+   with password + PIN, lock on reload, lockout after repeated wrong PINs,
+   recovery code, wrong password message; was MFA setup / TOTP, changed
+   2026-11-03, Phase 4b; the forgot-PIN email is not run end to end, the
+   test mocks the mail); `tables.spec.ts` (new, Phase 4b: sort, Enter
+   search, paging and the Table | Cards switch on one list); `roles.spec.ts`
    (viewer sees no edit buttons and a direct mutation attempt from the
    page's console fails with `forbidden`); `apps-groups.spec.ts` (web
    app via form, assign to group, device page shows a higher document
@@ -5204,7 +5304,7 @@ tested" with the reason) in `phase-4-vm-results.md`.
 | 21 | Installer URL now serves a different file | Hash mismatch → `failed/hash_mismatch`; the admin re-resolves | 14 |
 | 22 | Another MSI install running (1618) | Retry in 2 minutes, not counted | 14 |
 | 23 | Install needs a reboot (3010) | `installed` + `restartPending` shown on the device page; the agent never reboots | 14 |
-| 24 | Member loses their authenticator | Recovery code; else an Owner resets their MFA; the only Owner uses the CLI `maintenance:resetMfaByEmail` | 3 |
+| 24 | Member forgets their PIN (was: loses their authenticator; changed 2026-11-03, Phase 4b) | Passkey, recovery code, or the forgot-PIN email link (session-bound, needs a recent password sign-in); else an Owner resets their PIN (`stepUp:resetMember`); the only Owner uses the operator CLI (the `maintenance:resetMfaByEmail` pattern, renamed) | 3 |
 | 25 | Last Owner tries to leave / demote | `last_owner` | 3 |
 | 26 | XSS in an app name or employee name | React escaping only; no `dangerouslySetInnerHTML`; CSP blocks inline script | 4 |
 | 27 | Very long names / Unicode | Names 1–100 characters (devices 100, employees 100, apps 60, groups 60), trimmed, control characters refused; display truncates with CSS and a `title` | 2 |
@@ -5238,7 +5338,8 @@ Walked in Step 18; each line ticked or reported.
       test covers every function in `api`.
 - [ ] Every id argument is checked with `assertInOrg`; cross-org test
       green.
-- [ ] Admin and Owner functions require an MFA-verified session.
+- [ ] Every member write (all roles) requires a PIN-verified session (was: Admin and Owner functions require an MFA-verified session; changed 2026-11-03, Phase 4b).
+- [ ] The Resend key and the other platform secrets are never returned by a public function, a log or the audit log; only `lib/platformSecrets.ts` reads `RULEBOX_PLATFORM_KEY` (Phase 4b).
 - [ ] Open sign-up impossible (no invite → refused), invite and reset
       codes single-use, hashed, expiring, rate-limited.
 - [ ] No query returns a secret (Section 4.7 test).
@@ -5336,7 +5437,7 @@ agent `enroll`/`recover`/`unenroll` without `--simulate`,
 
 | Risk | Detail | Handling |
 |---|---|---|
-| Convex Auth is beta (0.0.96) | "may change in backward-incompatible ways"; no TOTP; no setting to close sign-up | Pinned version; sign-up closed in `profile` + `createOrUpdateUser`; own TOTP (Step 3); open question Q2 offers Better Auth |
+| Convex Auth is beta (0.0.96) | "may change in backward-incompatible ways"; no TOTP; no setting to close sign-up | Pinned version; sign-up closed in `profile` + `createOrUpdateUser`; own TOTP (Step 3; replaced by the required PIN, changed 2026-11-03, Phase 4b); open question Q2 offers Better Auth |
 | Convex Auth tokens in `localStorage` | Any XSS can steal the refresh token | CSP, no HTML injection, short idle timeout, documented mitigation (clear `authSessions`, rotate keys) |
 | Ed25519 signing in mutations | Convex's own WebCrypto signing is documented as actions-only | Pure-JS `@noble/ed25519` in the mutation; a deployed check in Step 8 (Stop-and-ask item) |
 | `crypto.getRandomValues` in queries/mutations | Seeded per execution, not a secure source | Rule: random only in actions |
@@ -5425,7 +5526,7 @@ post-Phase-5 1.4 B, estimates until measured):**
 
 1. Steps 1–22 **Done when** checks pass; the final report is written.
 2. A new organization can be set up from the README alone: deploy,
-   owner invite, MFA, signing key, enrollment code, enrolled VM.
+   owner invite, PIN (was MFA; changed 2026-11-03, Phase 4b), signing key, enrollment code, enrolled VM.
 3. Every document a device applies is signed and verified; a tampered
    or replayed one is refused on the VM.
 4. Employees sign in online through Convex and offline through the
@@ -5444,9 +5545,9 @@ PRD 21.1 decisions are untouched. These are this plan's own:
 
 | # | Decision | Reason |
 |---|---|---|
-| D1 | One organization per deployment in the UI; `orgId` on every row; `setup:createOwnerInvite` refuses a second org unless asked (tests and e2e use extra orgs) | PRD 17 puts multi-org in v2; the schema, the membership lookup, MFA and the signing-key table are ready for it (Section 4.6) and cross-org isolation is still tested |
+| D1 | One organization per deployment in the UI; `orgId` on every row; `setup:createOwnerInvite` refuses a second org unless asked (tests and e2e use extra orgs) | PRD 17 puts multi-org in v2; the schema, the membership lookup, the PIN tables (were: MFA, changed 2026-11-03, Phase 4b) and the signing-key table are ready for it (Section 4.6) and cross-org isolation is still tested |
 | D2 | Roles Owner / Admin / Viewer with the matrix of 4.6 | PRD 15 |
-| D3 | Convex Auth Password provider + our own TOTP gate per session (`mfaSessions`) | Convex Auth has no 2FA; PRD 12.3 requires it for Owner/Admin; keeps the PRD's named auth library |
+| D3 | **Changed 2026-11-03, Phase 4b (owner decision):** Convex Auth Password provider + a **required PIN** for every role after the password (Argon2, 24-hour lockout after 10 failures, recovery codes, optional passkey, lock on every page load, forgot-PIN by Resend email link; `stepUp*` tables). ~~Our own TOTP gate per session (`mfaSessions`)~~ is removed on purpose | Convex Auth has no 2FA; the owner chose a PIN over an authenticator app knowingly (it replaces PRD 12.3's "2FA for Owner and Admin"); keeps the PRD's named auth library |
 | D4 | Devices keep the 256-bit secret as credential, plus dashboard-triggered rotation | Convex documents shared-secret checks for service authentication; JWT needs signing infrastructure and token expiry on an open Rust socket is undocumented (Q1 asks the user) |
 | D5 | One materialized document per device, signed at write time, 5 versions kept | Cheap agent query, device-bound signatures, history for Phase 5 |
 | D6 | Sign the exact payload bytes; no canonical JSON | Removes JS/Rust canonicalizer mismatch (JWS approach) |
@@ -5471,8 +5572,9 @@ Do not edit the PRD in this phase; give this list to the user.
 
 | PRD section | Deviation or proposed change | Why |
 |---|---|---|
-| 12.3 ("2FA required for Owner and Admin") | Implemented as our own TOTP layer on top of Convex Auth, with recovery codes; Viewers optional | Convex Auth has no 2FA |
-| 16 ("Convex Auth with 2FA") | Same as above; name the TOTP layer | Gap |
+| 12.3 ("2FA required for Owner and Admin") | **Changed 2026-11-03, Phase 4b (owner decision; PRD 12.3 amended the same day):** no authenticator app. A required PIN for every role after the password, 24-hour lockout, recovery codes, optional passkey, lock on every load, forgot-PIN by email link (session-bound), Resend key owned by the operator. ~~Was: our own TOTP layer with recovery codes; Viewers optional~~ | Owner removed TOTP on purpose; Convex Auth has no 2FA |
+| 16 ("Convex Auth with 2FA") | **Changed 2026-11-03, Phase 4b (PRD 16 amended):** "Convex Auth (password) plus a required PIN and optional passkeys"; new row for email (Resend free tier). ~~Was: name the TOTP layer~~ | Gap |
+| 11.1 (list rules, Phase 4b) | **Added 2026-11-03 (PRD 11.1 amended):** rule 7 lists are server-driven (sort, Enter search, cursor pagination in the query; counts from `orgStats` in a separate count query) and rule 8 one generic table with a Table \| Cards switch; rule 3 extended | Owner decision, Phase 4b |
 | 12.3 ("signed by an organization key") | One Ed25519 key per deployment, held in a Convex env var, rotated by endorsement; documents bound to device id and version; no expiry | Defines the mechanism; the key lives with the backend, so signing protects against tampering in the DB, in transit and on the device, and against replay/rollback — **not** against someone who controls the Convex deployment |
 | 12.3 ("installer manifests are signed") | The installer URL and SHA-256 are inside the signed document; there is no separate manifest | One signature covers both |
 | 6 (Custom installer "installer upload") | URL + SHA-256 only in v1 Phase 4; uploads later (Q4) | Free-tier storage; PRD 16 already says R2 |
@@ -5488,7 +5590,7 @@ Do not edit the PRD in this phase; give this list to the user.
 | 3.1 ("branding: logo, colors, wallpaper") | Name only in Phase 4 (Q3) | Needs Staff App work and asset delivery |
 | 11 ("interval 2 → 5 → 10 minutes"; amended 2026-10-27, A22) | The interval is a setting: global default 30 minutes, per-tenant override; real time on demand (watch mode, Check now); replaces the fleet-size row above | Owner Q2; pings dominate database I/O on the free plan |
 | 11.1 rule 4 (A22) | Add: "dashboards read transitions and counters, never timestamps that change on a timer" | Read amplification of every open list |
-| 12.3 / 15 (new: step-up) | Owners and Admins confirm major actions with an action PIN or a passkey (fresh within 5 minutes); an idle dashboard session (10 minutes) is re-confirmed | Owner decision 2026-10-27; PRD has no step-up yet |
+| 12.3 / 15 (new: step-up; extended 2026-11-03, Phase 4b: the PIN is required for every role at sign-in, see the 12.3 row above) | Owners and Admins confirm major actions with an action PIN or a passkey (fresh within 5 minutes); an idle dashboard session (10 minutes) is re-confirmed | Owner decision 2026-10-27; PRD has no step-up yet |
 | 16 (A22) | Installer storage via the provider pool of the post-Phase-5 plan, not R2 only | Owner Q4 |
 | 22.6 (A22) | CPU/memory pressure as a daily summary, never per ping | Write budget |
 
@@ -5499,7 +5601,7 @@ Do not edit the PRD in this phase; give this list to the user.
 | # | Question | Options | Recommendation |
 |---|---|---|---|
 | Q1 | Device authentication ("proper auth in Phase 4") | (a) Keep the device secret, add rotation from the dashboard (D4). (b) Short-lived JWTs minted by an HTTP action (`customJwt`, RS256/ES256) with `set_auth_callback` in the agent | **(a).** It is Convex's documented pattern for services; (b) adds a token signer, JWKS handling and an unverified behaviour (expiry on an open socket) for no gain against an attacker who already has the device secret |
-| Q2 | Member auth library | (a) Convex Auth 0.0.96 + own TOTP (D3). (b) Better Auth Convex component 0.12.5 with its two-factor plugin | **(a).** It is what the PRD names; TOTP is small and fully tested here. (b) changes Steps 3–4 |
+| Q2 | Member auth library | (a) Convex Auth 0.0.96 + own TOTP (D3). (b) Better Auth Convex component 0.12.5 with its two-factor plugin | **(a).** It is what the PRD names; TOTP is small and fully tested here. (b) changes Steps 3–4. **Answer kept (Convex Auth), second factor changed 2026-11-03, Phase 4b (owner decision):** the "own TOTP" half of (a) is dropped on purpose and replaced by the required PIN (D3, 4.16); option (b) stays rejected |
 | Q3 | Branding on devices (logo, colours, wallpaper) | (a) Later (Phase 6 polish). (b) Add to Phase 4 (agent caches the logo, Staff App shows it) | **(a).** Phase 4 is already the largest phase |
 | Q4 | Installer uploads | (a) URL + hash only now; uploads with R2 later. (b) Allow small uploads (≤ 50 MB) to Convex file storage now | **(a).** 1 GB storage / 1 GB egress per month is used up by one installer on 20 PCs |
 | Q5 | Offline sign-in default | (a) 3 days (PRD 13.6 #6). (b) 7 days | **(a)** |
@@ -5575,3 +5677,9 @@ Dashboard
 - https://pnpm.io/settings/dependency-resolution
 
 
+
+## Status: Steps 18 and 20 (2026-11-08, done, not committed)
+
+- **Step 18:** authorization matrix (rows in `tests/convex/matrixRows.ts`, walks every module of `api.d.ts`, new suspended-org caller), `crossOrg.test.ts` (with the cross-tenant property test), `secrets.test.ts`, `ioBudgets.test.ts` (every public AND internal function has a row and stays within it on the large-org fixture; internal queries/mutations now go through counting wrappers in `lib/functions.ts`), step-up review. Rows that need real Convex Auth, Argon2 or WebAuthn stay marked ESTIMATE. Convex tests 796 -> 1243. `maintenance:migratePlans` now runs one organization per run (a large organization's recount is about half of Convex's 16,384-read limit). Section 9 checklist walked: backend items ticked; agent-side items (signed-first verification, installer rules, path re-validation, no secrets in agent logs) confirmed only by the Rust tests, re-check on the VM. Items 5 and 10 (load check, `fleet-sim.mjs`) NOT run: they need the owner's consent and a separate lab project.
+- **Step 20:** `convex/dev.ts` deleted; guarded seed functions in `convex/testing.ts` (`RULEBOX_ALLOW_TEST_SEED=1`, test-named orgs only, batched `deleteOrg`); README "Run your own Rulebox backend"; `THIRD_PARTY_NOTICES.md` licences checked (`uqr` not added: removed; the ping argument is `pingIntervalMs`, not `ms`); dashboard reads `/config.json` (`convexUrl`, fallback `VITE_CONVEX_URL`, not in the demo build).
+- **Left:** Step 19 (Playwright: needs the owner's OK to download Chromium and run against dev), Step 21 (owner's VM run), Step 22 (wrap-up).

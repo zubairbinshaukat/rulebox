@@ -141,6 +141,163 @@ assets/brand/   Logo files (SVG, PNG, ICO)
 docs/           Product spec and phase plans
 ```
 
+## Run your own Rulebox backend
+
+Rulebox runs on a [Convex](https://www.convex.dev) deployment that you own.
+Do these steps once. Every command runs from the repo root in PowerShell.
+Add `--prod` to a `convex` command to aim it at your production deployment.
+The free Convex tier is enough to start.
+
+> [!WARNING]
+> Never set `RULEBOX_ALLOW_TEST_SEED` on a production deployment. It
+> unlocks the test-data functions in `convex/testing.ts`, which are only for
+> a throwaway dev deployment.
+
+**1. Create the project and push the code**
+
+```powershell
+pnpm install
+npx convex login
+npx convex deploy
+```
+
+`npx convex deploy` asks you to create a project the first time. Copy the
+deployment URL it prints (`https://<name>.convex.cloud`).
+
+**2. Set up sign-in keys**
+
+```powershell
+npx @convex-dev/auth --prod
+```
+
+This creates the keys that sign member sessions and stores them in the
+deployment's environment. Use the same tool without `--prod` for a dev
+deployment.
+
+**3. Create the first Owner**
+
+```powershell
+npx convex run setup:createOwnerInvite '{"orgName":"Acme","email":"you@example.com"}' --prod
+```
+
+It prints a one-time invite code. Open the dashboard at `/join`, enter the
+code, choose a password, then set your action PIN (6 to 12 digits). You
+need the PIN for sensitive actions and after the screen locks. Save the
+recovery codes the dashboard offers.
+
+**4. Create and register the policy signing key**
+
+Policies sent to PCs are signed. The private key stays in your Convex
+environment and the public key is registered in the dashboard.
+
+```powershell
+node scripts/policy-key.mjs generate --out .tmp/policy-key.seed
+npx convex env set RULEBOX_POLICY_KEY (Get-Content .tmp/policy-key.seed -Raw).Trim() --prod
+Remove-Item .tmp/policy-key.seed
+```
+
+Keep a private backup of the key (a password manager is fine); if you lose
+it, PCs must be re-enrolled. Then, in the dashboard, open **Settings,
+Signing** and register the key. No PC can enroll before you do this.
+`node scripts/policy-key.mjs public --in <file>` prints the key id and public
+key of an existing seed file.
+
+**5. Deploy the dashboard**
+
+Build it with your deployment URL:
+
+```powershell
+$env:VITE_CONVEX_URL = "https://<name>.convex.cloud"
+pnpm --filter @rulebox/dashboard build
+```
+
+Upload `apps/dashboard/dist` to any static host. Single-page-app routing
+(every path serves `index.html`) and the security headers matter:
+`apps/dashboard/public/_headers` is ready for Cloudflare Pages (it is copied
+into `dist`) and `apps/dashboard/vercel.json` for Vercel. On another host,
+copy the same headers: a strict Content-Security-Policy, `X-Frame-Options:
+DENY`, and `Referrer-Policy: no-referrer` on `/pin-reset`.
+
+> [!NOTE]
+> The dashboard reads its Convex URL from `/config.json` at start
+> (`{ "convexUrl": "https://..." }`, placed next to `index.html`), so one build
+> can serve several deployments. Without that file it uses `VITE_CONVEX_URL`
+> from the build.
+
+**6. Passkeys (optional but recommended)**
+
+Passkeys let members confirm sensitive actions with a fingerprint or
+security key. Set the web address of your dashboard:
+
+```powershell
+npx convex env set RULEBOX_WEBAUTHN_RP_ID dashboard.example.com --prod
+npx convex env set RULEBOX_WEBAUTHN_ORIGINS https://dashboard.example.com --prod
+npx convex env set RULEBOX_WEBAUTHN_RP_NAME "Acme Rulebox" --prod
+```
+
+`RULEBOX_WEBAUTHN_RP_ID` is the domain only. `RULEBOX_WEBAUTHN_ORIGINS` is
+a comma-separated list of exact origins. `RULEBOX_WEBAUTHN_RP_NAME` is
+optional (default `Rulebox`). Without the first two, passkeys are off.
+
+**7. Recovery codes and forgot-PIN email**
+
+Recovery codes need a server-side secret (at least 32 random characters):
+
+```powershell
+npx convex env set RULEBOX_RECOVERY_PEPPER (node -e "console.log(require('crypto').randomBytes(32).toString('base64'))") --prod
+```
+
+Without it, recovery codes cannot be created or used. To send "forgot PIN"
+emails through [Resend](https://resend.com), store the mail settings as
+encrypted platform secrets. Run this yourself, never through an automated
+tool, because it handles a live API key:
+
+```powershell
+node scripts/platform-secret.mjs generate-key --out .tmp/platform.key
+npx convex env set RULEBOX_PLATFORM_KEY (Get-Content .tmp/platform.key -Raw).Trim() --prod
+node scripts/platform-secret.mjs set resendApiKey --key-file .tmp/platform.key --prod
+node scripts/platform-secret.mjs set resendFrom --key-file .tmp/platform.key --prod
+node scripts/platform-secret.mjs set dashboardOrigin --key-file .tmp/platform.key --prod
+node scripts/platform-secret.mjs check --prod
+```
+
+Each `set` asks for the value. `resendFrom` looks like
+`Rulebox <no-reply@your.domain>` and `dashboardOrigin` like
+`https://dashboard.example.com`. Keep `.tmp/platform.key` somewhere safe
+(you need it to change a secret later) and out of git. Until these are set
+the forgot-PIN email is off.
+
+**How a member who forgot their PIN gets back in**
+
+1. **Email link** (needs step 7). On the lock screen, choose forgot PIN. The
+   link goes to the signed-in member's own address and opens `/pin-reset`.
+2. **Recovery code.** Use one of the codes saved earlier.
+3. **Passkey.** Unlock with a passkey, then change the PIN in Settings.
+4. **An Owner resets it.** The Owner removes the member's PIN and passkeys
+   in **Settings, Members**. The member signs in again and sets a new PIN.
+   An Owner cannot reset themselves (use 1 to 3) or a person who also
+   belongs to another organization.
+
+**8. Optional settings**
+
+- `GITHUB_TOKEN`: a read-only GitHub token. It raises the rate limit when
+  Rulebox looks up winget apps. Without it, lookups can fail when GitHub is
+  busy. `npx convex env set GITHUB_TOKEN <token> --prod`
+- **Ping interval.** How often idle PCs report in. The default is 30
+  minutes; allowed values are 1 minute to 6 hours. Change it for everyone,
+  or for one organization:
+
+  ```powershell
+  npx convex run plans:setGlobalPingInterval '{"pingIntervalMs":1800000}' --prod
+  npx convex run plans:setOrgPingInterval '{"orgId":"<organization id>","pingIntervalMs":300000}' --prod
+  npx convex run plans:setOrgPingInterval '{"orgId":"<organization id>","pingIntervalMs":null}' --prod
+  ```
+
+  The last command removes the organization's own value so it follows the
+  global one again.
+- `RULEBOX_HOSTED`: leave it unset when you run Rulebox for yourself. It is
+  only for a shared, multi-customer deployment.
+
 ## Docs
 
 - [Product spec (PRD)](docs/prd.md)
