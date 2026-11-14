@@ -2,7 +2,7 @@ import { paginationOptsValidator, paginationResultValidator } from "convex/serve
 import { v, type Infer } from "convex/values";
 import { internal } from "./_generated/api";
 import type { Doc, Id } from "./_generated/dataModel";
-import { env } from "./_generated/server";
+import { env, type DatabaseReader } from "./_generated/server";
 import { publishApp } from "./lib/appPublish";
 import { writeAudit } from "./lib/audit";
 import { checkRevision, getInOrg, nextRevision } from "./lib/authz";
@@ -15,8 +15,10 @@ import { internalMutation, internalQuery, memberAction, memberMutation, memberQu
 import { checkPageSize, cleanSearch, countResult, orgStatsRow, pickSort, sortArg } from "./lib/listing";
 import { webUrlProblem } from "./lib/hostRules";
 import {
+  APP_DENIAL_DAYS,
   APP_EMPLOYEE_COUNT_CAP,
   APP_PURGE_BATCH,
+  DAY_MS,
   INSTALL_COUNT_CAP,
   MAX_APP_ASSIGNMENTS,
   MAX_APP_OPTIONS,
@@ -24,13 +26,16 @@ import {
   MAX_APP_PAGE,
   MAX_GROUPS_JOINED,
   MAX_INSTALL_PAGE,
+  MAX_PERMISSION_SNAPSHOT_GROUPS,
   WINGET_CACHE_MS,
 } from "./lib/limits";
 import { STORED_INSTALL_STATES } from "./lib/deviceApiRules";
 import { assignedGroupsOf, failedFollowArchive } from "./lib/installs";
 import { assertWithinLimit, bumpOrgStats, bumpStats } from "./lib/plans";
 import { consumeOrFail } from "./lib/rateLimits";
-import { audience, appKind, desktopSpec, installState, webSpec, wingetResolved } from "./lib/validators";
+import { audience, appKind, desktopSpec, installState, webPermissions, webSpec, wingetResolved } from "./lib/validators";
+import { snapshotGroupConfig } from "./lib/groupConfig";
+import { serverDay } from "./lib/lockdownReports";
 import { iconDataUrl, fetchWebMeta as scanWebMeta, pngSize } from "./lib/webmeta";
 import { resolveWinget as resolveFromGithub } from "./lib/winget";
 
@@ -50,6 +55,9 @@ import { resolveWinget as resolveFromGithub } from "./lib/winget";
  * 50 x 11 = 550 rows. The screen shows "10+ groups" when `groupCountMore`.
  */
 export const APP_LIST_GROUP_CAP = 10;
+
+/** The eight permissions of PRD 24.1, in the order the dashboard shows them. */
+const WEB_PERMISSION_KEYS = ["camera", "microphone", "screenShare", "clipboardRead", "notifications", "downloads", "printing", "geolocation"] as const;
 
 const actorArg = v.object({ type: v.literal("member"), id: v.string(), label: v.string() });
 
@@ -161,9 +169,33 @@ const assignmentRow = v.object({
 });
 
 /**
+ * "Blocked in the last 30 days" for a web app (Phase 5 Step 11, plan 4.13): the organization's daily
+ * security rows of the last `APP_DENIAL_DAYS` server days (`orgSecurityDaily.by_org_day`, `.take(30)`,
+ * newest first), the app's rows summed per permission kind in memory. Only a count per (app, kind, day) is
+ * ever stored: never a page, origin or employee. At most 30 documents; they change once a day (the rollup).
+ */
+async function denialsOf(ctx: { db: DatabaseReader; orgId: Id<"organizations"> }, app: Doc<"apps">): Promise<{ kind: string; count: number }[]> {
+  if (app.kind !== "web") return [];
+  const since = serverDay(Date.now() - (APP_DENIAL_DAYS - 1) * DAY_MS);
+  const days = await ctx.db
+    .query("orgSecurityDaily")
+    .withIndex("by_org_day", (q) => q.eq("orgId", ctx.orgId).gte("day", since))
+    .order("desc")
+    .take(APP_DENIAL_DAYS);
+  const sums = new Map<string, number>();
+  for (const day of days) {
+    for (const d of day.permissionDenials) {
+      if (d.appId === app._id && d.count > 0) sums.set(d.kind, (sums.get(d.kind) ?? 0) + d.count);
+    }
+  }
+  return [...sums.entries()].map(([kind, count]) => ({ kind, count })).sort((a, b) => b.count - a.count || (a.kind < b.kind ? -1 : 1));
+}
+
+/**
  * One app for its edit screen (viewer): the spec, its assignments with group
  * names, the file types it opens, the number of employees who have it directly
- * (`.take(1001)`: shown "1000+"), and the group picker. The install counts
+ * (`.take(1001)`: shown "1000+"), the group picker and, for a website, its
+ * 30-day permission denial counts (`denials30d`). The install counts
  * (`apps:installSummary`) come with Step 17.
  */
 export const get = memberQuery("viewer")({
@@ -184,6 +216,8 @@ export const get = memberQuery("viewer")({
     fileTypes: v.array(v.string()),
     directEmployeeCount: v.number(),
     groupOptions: v.array(v.object({ _id: v.id("groups"), name: v.string() })),
+    /** Blocked permission requests of the last 30 days, per kind, most first (web apps; empty for a program or no denials). */
+    denials30d: v.array(v.object({ kind: v.string(), count: v.number() })),
   }),
   handler: async (ctx, args) => {
     const app = await getInOrg(ctx, "apps", args.appId, ctx.orgId);
@@ -225,6 +259,7 @@ export const get = memberQuery("viewer")({
       .withIndex("by_app", (q) => q.eq("appId", app._id))
       .take(APP_EMPLOYEE_COUNT_CAP + 1);
     return {
+      denials30d: await denialsOf(ctx, app),
       _id: app._id,
       name: app.name,
       description: app.description,
@@ -387,7 +422,8 @@ const webInput = {
 /**
  * Add a website (admin). `invalid_argument` names the field (`url`,
  * `allowedDomains`, `name`...); `plan_limit` (detail "apps") at the plan's
- * `maxApps`. Permissions are the defaults (PRD 24.1): not editable yet.
+ * `maxApps`. Permissions start at the PRD 24.1 defaults with printing allowed
+ * (`NEW_WEB_APP_PERMISSIONS`); `apps:setPermissions` changes them.
  */
 export const createWeb = memberMutation("admin")({
   args: webInput,
@@ -519,6 +555,49 @@ export const update = memberMutation("admin")({
       targetLabel: fields.name,
       summary: `Changed the app ${fields.name}`,
     });
+    await publishApp(ctx, ctx.orgId, app._id);
+    return { revision };
+  },
+});
+
+/**
+ * Change a website's eight permissions (admin; plan 4.13, PRD 24.1). `stale_edit` when someone saved in
+ * between (`expectedRevision`); `invalid_argument` (field "appId") for a program. The same permissions
+ * again = no write, no new revision, no publish. A change bumps the revision, audits
+ * `app.permissionsChanged` (the summary names the permissions that changed, nothing else), snapshots the
+ * configuration of the groups that assign the app (`snapshotGroupConfig`, at most
+ * `MAX_PERMISSION_SNAPSHOT_GROUPS`) and republishes every group that carries the app (`publishApp`): the app
+ * record is still read live by the publisher, so the publish is what puts the change in the documents.
+ */
+export const setPermissions = memberMutation("admin")({
+  args: { appId: v.string(), permissions: webPermissions, expectedRevision: v.number() },
+  returns: v.object({ revision: v.number() }),
+  handler: async (ctx, args) => {
+    const app = await getInOrg(ctx, "apps", args.appId, ctx.orgId);
+    checkRevision(app, args.expectedRevision);
+    if (app.kind !== "web" || app.web === undefined) fail("invalid_argument", { field: "appId" });
+    const before = app.web.permissions;
+    const changed = WEB_PERMISSION_KEYS.filter((k) => before[k] !== args.permissions[k]);
+    if (changed.length === 0) return { revision: app.revision };
+
+    const revision = nextRevision(app);
+    await ctx.db.patch(app._id, { web: { ...app.web, permissions: { ...args.permissions } }, revision });
+    await writeAudit(ctx, {
+      orgId: ctx.orgId,
+      actor: ctx.actor,
+      action: "app.permissionsChanged",
+      targetType: "app",
+      targetId: app._id,
+      targetLabel: app.name,
+      summary: `Changed permissions of ${app.name}: ${changed.map((k) => `${k} ${args.permissions[k] ? "allowed" : "blocked"}`).join(", ")}`,
+    });
+    const assigned = await ctx.db
+      .query("appAssignments")
+      .withIndex("by_app", (q) => q.eq("appId", app._id))
+      .take(MAX_PERMISSION_SNAPSHOT_GROUPS + 1);
+    for (const a of assigned.slice(0, MAX_PERMISSION_SNAPSHOT_GROUPS)) {
+      await snapshotGroupConfig(ctx, a.groupId, `Permissions of ${app.name}`, ctx.member._id);
+    }
     await publishApp(ctx, ctx.orgId, app._id);
     return { revision };
   },

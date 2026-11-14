@@ -11,6 +11,7 @@
 
 use std::fmt;
 
+use rulebox_policy::notice::BroadcastStyle;
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
@@ -40,6 +41,91 @@ pub struct ShellState {
     #[serde(skip)]
     #[ts(skip)]
     pub pending_end: Option<SessionEndedReason>,
+    /// (Protocol 1.3) Set while the administrator has locked the device: the lock view
+    /// covers every monitor and nobody can sign in. Kept while the agent link is down (a lock
+    /// never lifts because the pipe dropped); only a snapshot without it clears it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub device_lock: Option<DeviceLockDto>,
+    /// (Protocol 1.3) The active broadcasts, newest first. Plain text: the page must show
+    /// `title` and `body` as text, never as HTML.
+    #[serde(default)]
+    pub broadcasts: Vec<BroadcastDto>,
+    /// (Protocol 1.3) The agent says whether the PC has printers (`None`: an older agent,
+    /// the app's own `printing` permission alone decides).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub printing_available: Option<bool>,
+}
+
+/// What the lock view shows (`AgentSnapshot.deviceLock`). No employee, nothing secret.
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub struct DeviceLockDto {
+    pub lock_id: String,
+    pub message: String,
+    pub contact: Option<String>,
+}
+
+/// One announcement (`AgentSnapshot.broadcasts`).
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub struct BroadcastDto {
+    pub id: String,
+    pub style: BroadcastStyle,
+    pub title: String,
+    pub body: String,
+    pub ack_required: bool,
+    pub acknowledged: bool,
+}
+
+impl BroadcastDto {
+    /// A full-screen notice that still waits for "OK" (an `Unknown` style is shown as a banner).
+    pub fn needs_full_screen(&self) -> bool {
+        self.style == BroadcastStyle::Fullscreen && !self.acknowledged
+    }
+}
+
+/// Pure: the 1.3 parts of a snapshot as the shell state keeps them. An older agent's snapshot
+/// has none of them: no lock, no broadcasts, no printing fact.
+pub fn notices_from_snapshot(
+    snap: &rulebox_ipc::types::AgentSnapshot,
+) -> (Option<DeviceLockDto>, Vec<BroadcastDto>, Option<bool>) {
+    let lock = snap.device_lock.as_ref().map(|lock| DeviceLockDto {
+        lock_id: lock.lock_id.clone(),
+        message: lock.message.clone(),
+        contact: lock.contact.clone(),
+    });
+    let broadcasts = snap
+        .broadcasts
+        .iter()
+        .map(|view| BroadcastDto {
+            id: view.id.clone(),
+            style: view.style,
+            title: view.title.clone(),
+            body: view.body.clone(),
+            ack_required: view.ack_required,
+            acknowledged: view.acknowledged,
+        })
+        .collect();
+    (lock, broadcasts, snap.printing.map(|printing| printing.available))
+}
+
+/// Pure: how the Windows-key filter must run for this snapshot (plan P7). `Unknown` (a value a
+/// newer agent adds) is the stricter reading, `swallow`; an agent without the field (1.2) or
+/// without the capability leaves the Phase 3 behaviour (`pass`).
+pub fn win_combos_mode(snap: Option<&rulebox_ipc::types::AgentSnapshot>) -> rulebox_desktop::winkey::WinCombos {
+    use rulebox_desktop::winkey::WinCombos as Mode;
+    use rulebox_policy::lockdown::WinCombos as Wire;
+    match snap.and_then(|snap| snap.keyboard) {
+        None => Mode::Pass,
+        Some(keyboard) => match keyboard.win_combos {
+            Wire::Pass => Mode::Pass,
+            Wire::Swallow | Wire::Unknown => Mode::Swallow,
+        },
+    }
 }
 
 impl ShellState {
@@ -61,6 +147,9 @@ impl ShellState {
             capabilities: Vec::new(),
             session_ended: None,
             pending_end: None,
+            device_lock: None,
+            broadcasts: Vec::new(),
+            printing_available: None,
         }
     }
 }
@@ -73,16 +162,24 @@ pub enum SessionEndedReason {
     EmployeeRemoved,
     CredentialChanged,
     Revoked,
+    /// (1.3) The administrator locked the device.
+    DeviceLocked,
     Unknown,
 }
 
-/// What the agent pushes besides state snapshots (protocol 1.2 events).
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+/// What the agent pushes besides state snapshots (protocol 1.2 and 1.3 events).
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub enum AgentEvent {
     /// `apps.changed`: ask `apps.list` again.
     AppsChanged,
     /// `session.ended`: the agent has already cleared the employee session.
     SessionEnded(SessionEndedReason),
+    /// (1.3) `device.lockChanged`: the snapshot has the new lock (or none).
+    DeviceLockChanged,
+    /// (1.3) `broadcasts.changed`: the snapshot has the new list.
+    BroadcastsChanged,
+    /// (1.3) `program.blocked`: a short notice, plain text.
+    ProgramBlocked(String),
 }
 
 /// Pure: the wire event as a Staff event. Link and state events are handled by
@@ -97,8 +194,12 @@ pub fn map_client_event(event: &rulebox_ipc::client::ClientEvent) -> Option<Agen
             Wire::EmployeeRemoved => SessionEndedReason::EmployeeRemoved,
             Wire::CredentialChanged => SessionEndedReason::CredentialChanged,
             Wire::Revoked => SessionEndedReason::Revoked,
+            Wire::DeviceLocked => SessionEndedReason::DeviceLocked,
             Wire::Unknown => SessionEndedReason::Unknown,
         })),
+        ClientEvent::DeviceLockChanged => Some(AgentEvent::DeviceLockChanged),
+        ClientEvent::BroadcastsChanged => Some(AgentEvent::BroadcastsChanged),
+        ClientEvent::ProgramBlocked { display_name } => Some(AgentEvent::ProgramBlocked(display_name.clone())),
         ClientEvent::Linked(_)
         | ClientEvent::Unlinked
         | ClientEvent::StateChanged(_)
@@ -509,6 +610,8 @@ pub enum SignInOutcome {
     OfflineExpired,
     /// (1.2) The password is right, but this employee may not sign in on this PC.
     NotAllowedHere,
+    /// (1.3) The device is locked by the administrator (the lock view shows; nobody signs in).
+    DeviceLocked,
     /// Flat wire sent an unknown outcome string.
     Unknown,
 }
@@ -623,6 +726,7 @@ pub fn map_sign_in_result(wire: rulebox_ipc::requests::SignInResult) -> SignInOu
         Wire::OfflineNeverSignedIn => SignInOutcome::OfflineNeverSignedIn,
         Wire::OfflineExpired => SignInOutcome::OfflineExpired,
         Wire::NotAllowedHere => SignInOutcome::NotAllowedHere,
+        Wire::DeviceLocked => SignInOutcome::DeviceLocked,
         Wire::Unknown => SignInOutcome::Unknown,
     }
 }

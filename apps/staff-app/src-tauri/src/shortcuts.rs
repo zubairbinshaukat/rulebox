@@ -106,6 +106,10 @@ pub fn start(app: &AppHandle, host: &Arc<DesktopHost>, state: AppState) {
         let mut registered: HashMap<i32, Combo> = HashMap::new();
         let mut snapshot = state.agent().snapshot();
         let mut hook_installed = false;
+        // (Phase 5 Step 12) How the hook treats Windows-key combinations. It follows the agent's
+        // snapshot; while the link is down the last known mode stays (a dropped pipe must not
+        // release the keys). Until the first snapshot arrives it is `pass`, the Phase 3 behaviour.
+        let mut mode = winkey::WinCombos::Pass;
         let mut check = tokio::time::interval(HOOK_CHECK);
         check.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
         let mut next_registration = tokio::time::Instant::now();
@@ -113,8 +117,13 @@ pub fn start(app: &AppHandle, host: &Arc<DesktopHost>, state: AppState) {
         loop {
             if tokio::time::Instant::now() >= next_registration {
                 registered = apply(&host, wanted(&state), registered).await;
+                if let Some(snap) = snapshot.borrow().as_ref() {
+                    mode = crate::model::win_combos_mode(Some(snap));
+                }
                 if !hook_installed {
-                    hook_installed = install_hook(&host).await;
+                    hook_installed = install_hook(&host, mode).await;
+                } else {
+                    set_hook_mode(&host, mode).await;
                 }
                 next_registration = tokio::time::Instant::now() + RETRY;
             }
@@ -172,13 +181,26 @@ async fn apply(
     done.await.unwrap_or_default()
 }
 
-async fn install_hook(host: &Arc<DesktopHost>) -> bool {
-    let Some(done) = host.run_on_loop(|ctx, token| winkey::install_on_loop(token, ctx.hwnd)) else {
+/// Makes a running hook helper follow `mode` (it is restarted only when the mode differs).
+async fn set_hook_mode(host: &Arc<DesktopHost>, mode: winkey::WinCombos) {
+    let Some(done) = host.run_on_loop(move |ctx, token| winkey::set_mode_on_loop(token, ctx.hwnd, mode)) else {
+        return;
+    };
+    match done.await {
+        Ok(Ok(true)) => tracing::info!(mode = mode.word(), "the Windows-key hook follows the keyboard policy"),
+        Ok(Ok(false)) => {}
+        Ok(Err(error)) => tracing::warn!(%error, "the Windows-key hook could not change its mode"),
+        Err(_) => {}
+    }
+}
+
+async fn install_hook(host: &Arc<DesktopHost>, mode: winkey::WinCombos) -> bool {
+    let Some(done) = host.run_on_loop(move |ctx, token| winkey::install_on_loop(token, ctx.hwnd, mode)) else {
         return false;
     };
     match done.await {
         Ok(Ok(())) => {
-            tracing::info!("the Windows-key hook is installed");
+            tracing::info!(mode = mode.word(), "the Windows-key hook is installed");
             true
         }
         Ok(Err(error)) => {

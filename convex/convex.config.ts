@@ -23,6 +23,14 @@ const app = defineApp({
     // Missing or invalid: platform secrets cannot be set or read and the
     // forgot-PIN email is off.
     RULEBOX_PLATFORM_KEY: v.optional(v.string()),
+    // Deployment master key (Phase 5 Step 10, plan 4.18): standard base64 of 32
+    // random bytes, made by `scripts/master-key.mjs generate` and set by the
+    // operator. It wraps every organization's signing seed and sealing key
+    // (`orgKeys`). Read only by lib/keyring.ts. `_NEXT` exists only during a
+    // master-key rotation (`keys:rewrapAll`). Missing or invalid: no org key can be
+    // created or opened, and signing falls back to the deployment key (Phase 4).
+    RULEBOX_MASTER_KEY: v.optional(v.string()),
+    RULEBOX_MASTER_KEY_NEXT: v.optional(v.string()),
     // Pepper for the recovery-code HMAC (lib/recoveryCodes.ts): at least 32
     // random characters, set by the operator. Missing: recovery codes can be
     // neither created nor used (`not_ready`).

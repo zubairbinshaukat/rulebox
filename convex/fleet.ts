@@ -549,10 +549,30 @@ export const purgeDevice = internalMutation({
       .query("desiredVersions")
       .withIndex("by_device_version", (q) => q.eq("deviceId", args.deviceId))
       .take(PURGE_BATCH);
+    // Phase 5 (Step 10): the PC's finding links, sealed Wi-Fi boxes, apply report and lock. Its
+    // daily security rows age out by themselves (14 days, `security:rollup`).
+    const findings = await ctx.db
+      .query("lockdownFindingDevices")
+      .withIndex("by_device", (q) => q.eq("deviceId", args.deviceId))
+      .take(PURGE_BATCH);
+    const sealed = await ctx.db
+      .query("deviceSealedSecrets")
+      .withIndex("by_device_target", (q) => q.eq("deviceId", args.deviceId))
+      .take(PURGE_BATCH);
+    const applyReport = await ctx.db
+      .query("deviceApplyReports")
+      .withIndex("by_device", (q) => q.eq("deviceId", args.deviceId))
+      .take(PURGE_BATCH);
+    const locks = await ctx.db
+      .query("deviceLocks")
+      .withIndex("by_device", (q) => q.eq("deviceId", args.deviceId))
+      .take(PURGE_BATCH);
     // `failedInstallCount` does not move: only a revoked PC is removed, and the revoke already
     // took its results out of the count (lib/installs.ts, Step 17 review).
-    for (const row of [...installs, ...docs, ...scoped, ...bodies, ...versions]) await ctx.db.delete(row._id);
-    if ([installs, docs, scoped, bodies, versions].some((rows) => rows.length === PURGE_BATCH)) {
+    for (const row of [...installs, ...docs, ...scoped, ...bodies, ...versions, ...findings, ...sealed, ...applyReport, ...locks]) {
+      await ctx.db.delete(row._id);
+    }
+    if ([installs, docs, scoped, bodies, versions, findings, sealed, applyReport, locks].some((rows) => rows.length === PURGE_BATCH)) {
       await ctx.scheduler.runAfter(0, internal.fleet.purgeDevice, args);
     }
     return null;

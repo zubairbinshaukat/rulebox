@@ -5,6 +5,7 @@ import type { DatabaseWriter } from "../_generated/server";
 import { deepEqual } from "./deepEqual";
 import { isOutOfSupport } from "./lifecycle";
 import { bumpOrgStatsIfPresent } from "./plans";
+import type { SecurityPostureValue } from "./lockdownValidators";
 import type { DiskBand } from "./validators";
 import { sanitizeVersion } from "./versions";
 
@@ -39,8 +40,42 @@ export const statusValidator = v.object({
   compat: v.optional(v.any()),
   trustedKeyIds: v.optional(v.union(v.array(v.string()), v.null())),
   restartPending: v.optional(v.union(v.boolean(), v.null())),
+  // Phase 5 (plan 4.2, 4.16), added BEFORE any agent sends them. `security` is `any` on the
+  // wire so a newer agent's extra posture field cannot fail (and stall) the whole report;
+  // `cleanSecurity` keeps only the known, bounded fields.
+  security: v.optional(v.union(v.any(), v.null())),
+  capabilities: v.optional(v.union(v.array(v.string()), v.null())),
 });
 export type StatusInput = Infer<typeof statusValidator>;
+
+const CODE = /^[A-Za-z0-9_.:-]{1,32}$/;
+const POLICY_ID = /^[A-Za-z0-9{}_.-]{1,64}$/;
+
+/** The posture the agent reported, reduced to the fields of 4.16 with bounded fixed codes; undefined when nothing usable is left. */
+export function cleanSecurity(raw: unknown): SecurityPostureValue | undefined {
+  if (raw === null || typeof raw !== "object" || Array.isArray(raw)) return undefined;
+  const r = raw as Record<string, unknown>;
+  const out: SecurityPostureValue = {};
+  if (typeof r.safeModeAgent === "boolean") out.safeModeAgent = r.safeModeAgent;
+  for (const k of ["autoRecovery", "serviceAcl", "secureBoot", "bitLocker", "tpm"] as const) {
+    const x = r[k];
+    if (typeof x === "string" && CODE.test(x)) out[k] = x;
+  }
+  if (typeof r.aclDrift === "number" && Number.isSafeInteger(r.aclDrift) && r.aclDrift >= 0 && r.aclDrift <= 1_000_000) out.aclDrift = r.aclDrift;
+  if (Array.isArray(r.ciPolicies)) {
+    out.ciPolicies = r.ciPolicies.filter((x): x is string => typeof x === "string" && POLICY_ID.test(x)).slice(0, 20);
+  }
+  return Object.keys(out).length === 0 ? undefined : out;
+}
+
+/** A capability is `name/version` (`lockdown/1`): the code characters plus `/`. */
+const CAPABILITY = /^[A-Za-z0-9_.:/-]{1,32}$/;
+
+/** Capability codes (`lockdown/1`, ...): at most 20, each a short code; others are dropped. */
+export function cleanCapabilities(raw: string[] | null | undefined): string[] | undefined {
+  if (raw === null || raw === undefined) return undefined;
+  return [...new Set(raw.filter((c) => CAPABILITY.test(c)))].slice(0, 20).sort();
+}
 
 /** Free disk space band (post-Phase-5 plan 2.6). */
 export function diskBandOf(gb: number | undefined): DiskBand | undefined {
@@ -132,6 +167,8 @@ export async function writeStatus(
     compat: nn(s.compat),
     trustedKeyIds: nn(s.trustedKeyIds),
     restartPending: nn(s.restartPending),
+    security: cleanSecurity(s.security),
+    capabilities: cleanCapabilities(s.capabilities),
   };
   let reportWritten = false;
   if (report === null) {

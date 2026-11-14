@@ -85,6 +85,13 @@ export const DEFAULT_WEB_PERMISSIONS: Infer<typeof webPermissions> = {
   geolocation: false,
 };
 
+/**
+ * What a NEW web app starts with (Phase 5 Step 11): PRD 24.1 says printing is "allowed if the device has
+ * printers configured", so the app allows it and the Staff App also checks `printing.available`. Existing
+ * rows keep what they have; `DEFAULT_WEB_PERMISSIONS` stays the Rust `WebPermissions::default` (printing off).
+ */
+export const NEW_WEB_APP_PERMISSIONS: Infer<typeof webPermissions> = { ...DEFAULT_WEB_PERMISSIONS, printing: true };
+
 export const webSpec = v.object({
   url: v.string(),
   allowedDomains: v.array(v.string()),

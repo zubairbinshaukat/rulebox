@@ -453,6 +453,9 @@ export const liveApi: DataApi = {
     );
     return useMapped(call);
   },
+  useSetAppPermissions() {
+    return useMapped(useMutation(api.apps.setPermissions));
+  },
   useSetAppArchived() {
     const base = useMutation(api.apps.setArchived);
     const set = useMemo(

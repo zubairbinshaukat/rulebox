@@ -1136,6 +1136,26 @@ pub fn on_menu_event(app: &AppHandle, menu_id: &str) {
     });
 }
 
+/// (Protocol 1.3) The employee pressed "OK" on a broadcast. Only an id the shell is showing is
+/// forwarded; the agent queues one acknowledgement (never the employee) and the next snapshot marks
+/// the broadcast as acknowledged. An agent without broadcasts has nothing to acknowledge.
+#[tauri::command]
+pub async fn broadcast_ack(
+    window: Window,
+    state: State<'_, AppState>,
+    id: String,
+) -> Result<(), CommandError> {
+    require_label(&window, "shell-")?;
+    if !state.read(|shell| shell.broadcasts.iter().any(|broadcast| broadcast.id == id)) {
+        return Ok(());
+    }
+    match state.agent().ack_broadcast(id).await {
+        Ok(_) => Ok(()),
+        Err(error) if error.is_unsupported() => Ok(()),
+        Err(error) => Err(CommandError::Failed(error.to_string())),
+    }
+}
+
 /// Re-fetch the employee catalogue (empty / error desktop actions).
 #[tauri::command]
 pub async fn refresh_catalogue(
@@ -1200,6 +1220,34 @@ pub fn spawn_dev_cmd_poller(state: AppState) {
         /// Make the demo agent send `session.ended` with this reason (protocol 1.2).
         #[serde(default)]
         session_ended: Option<crate::model::SessionEndedReason>,
+        /// (Protocol 1.3) Lock the demo device (`on: true`, with a message) or unlock it.
+        #[serde(default)]
+        device_lock: Option<DevLock>,
+        /// (Protocol 1.3) Replace the demo agent's broadcast list.
+        #[serde(default)]
+        broadcasts: Option<Vec<DevBroadcast>>,
+    }
+
+    #[derive(Debug, Deserialize)]
+    #[serde(rename_all = "camelCase")]
+    struct DevLock {
+        on: bool,
+        #[serde(default)]
+        message: String,
+        #[serde(default)]
+        contact: Option<String>,
+    }
+
+    #[derive(Debug, Deserialize)]
+    #[serde(rename_all = "camelCase")]
+    struct DevBroadcast {
+        id: String,
+        /// `banner` or `fullscreen`.
+        style: String,
+        title: String,
+        body: String,
+        #[serde(default)]
+        ack_required: bool,
     }
 
     #[derive(Debug, Deserialize)]
@@ -1267,6 +1315,32 @@ pub fn spawn_dev_cmd_poller(state: AppState) {
             }
             if let Some(reason) = cmd.session_ended {
                 state.agent().dev_emit(crate::model::AgentEvent::SessionEnded(reason));
+            }
+            if let Some(lock) = cmd.device_lock {
+                let view = lock.on.then(|| rulebox_ipc::types::DeviceLockView {
+                    lock_id: "dev-lock".into(),
+                    message: lock.message,
+                    contact: lock.contact,
+                });
+                state.agent().dev_set_lock(view);
+            }
+            if let Some(list) = cmd.broadcasts {
+                let views = list
+                    .into_iter()
+                    .map(|item| rulebox_ipc::types::BroadcastView {
+                        id: item.id,
+                        style: if item.style == "fullscreen" {
+                            rulebox_policy::notice::BroadcastStyle::Fullscreen
+                        } else {
+                            rulebox_policy::notice::BroadcastStyle::Banner
+                        },
+                        title: item.title,
+                        body: item.body,
+                        ack_required: item.ack_required,
+                        acknowledged: false,
+                    })
+                    .collect();
+                state.agent().dev_set_broadcasts(views);
             }
             if let Some(n) = cmd.demo_apps {
                 let items = crate::agent::demo::sample_apps_for(Some(n));

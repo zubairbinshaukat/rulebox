@@ -23,6 +23,15 @@ pub enum Win32Error {
     /// 2245, which Windows also returns for any other policy failure).
     #[error("password rejected by local policy")]
     PasswordPolicy,
+    /// (Phase 5 Step 3, plan 4.5 rule 2) A write outside the fixed allow-list of keys
+    /// (`machinereg` / `staffreg`) or a name that is never written. Returned before the
+    /// guard and before any API call; nothing was touched.
+    #[error("{0}")]
+    Forbidden(String),
+    /// (Phase 5 Step 3) The function exists so the seam and the guard are in place, but
+    /// the Windows mechanism behind it is written by the step named in the text.
+    #[error("not available yet: {0}")]
+    Unsupported(&'static str),
 }
 
 impl Win32Error {

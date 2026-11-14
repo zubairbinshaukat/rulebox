@@ -106,6 +106,26 @@ export default tseslint.config(
       ],
     },
   },
+  // The deployment master key (Phase 5 Step 10, plan 4.18) is read ONLY by convex/lib/keyring.ts.
+  {
+    files: ["convex/**/*.ts"],
+    ignores: ["convex/lib/keyring.ts", "convex/convex.config.ts", "convex/**/*.test.ts"],
+    rules: {
+      "no-restricted-properties": [
+        "error",
+        ...["RULEBOX_MASTER_KEY", "RULEBOX_MASTER_KEY_NEXT"].map((property) => ({
+          object: "env",
+          property,
+          message: "Only convex/lib/keyring.ts reads the master key.",
+        })),
+        ...["RULEBOX_MASTER_KEY", "RULEBOX_MASTER_KEY_NEXT"].map((property) => ({
+          object: "process.env",
+          property,
+          message: "Only convex/lib/keyring.ts reads the master key.",
+        })),
+      ],
+    },
+  },
   // Convex logs: never arguments or values (plan Section 8).
   {
     files: ["convex/**/*.ts"],

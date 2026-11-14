@@ -72,6 +72,8 @@ function outcomeToError(outcome: SignInOutcomeDto): InlineError | null {
   if (outcome === "offlineNeverSignedIn") return { kind: "offlineNever" };
   if (outcome === "offlineExpired") return { kind: "offlineExpired" };
   if (outcome === "notAllowedHere") return { kind: "notAllowed" };
+  // A locked PC shows the lock view instead of this form; if the answer still arrives here, say it plainly.
+  if (outcome === "deviceLocked") return { kind: "unknown" };
   if (outcome === "unknown") return { kind: "unknown" };
   if (typeof outcome === "object" && outcome && "lockedOut" in outcome) {
     return { kind: "locked", until: Date.now() + outcome.lockedOut.retryAfterMs };
@@ -123,6 +125,7 @@ function sessionEndedText(reason: SessionEndedReason): string {
       return "Your password was changed. Sign in again.";
     case "revoked":
       return "This PC was removed from your organization.";
+    case "deviceLocked":
     case "unknown":
       return "You were signed out.";
   }

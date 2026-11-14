@@ -194,6 +194,43 @@ mod tests {
         assert_eq!(parse("Ctrl+\u{00e9}"), Err(HotkeyError::UnknownToken("\u{00e9}".into())));
     }
 
+    /// The exit combination can never contain the Windows key (plan Phase 5, Step 12 item 2):
+    /// the Windows-key filter of the Staff App (`rulebox_desktop::winkey`) swallows keys pressed
+    /// while that key is held, so the two cannot collide. Pinned three ways: no spelling of
+    /// the key parses, the type has no field for it, and no key the grammar can name is one.
+    #[test]
+    fn the_windows_key_cannot_be_part_of_the_exit_combination() {
+        for text in [
+            "Win+Ctrl+F12",
+            "Ctrl+Win+F12",
+            "Ctrl+Windows+A",
+            "Alt+LWin+A",
+            "Alt+RWin+A",
+            "Ctrl+Super+A",
+            "Ctrl+Meta+A",
+            "Ctrl+Cmd+A",
+            "Ctrl+Shift+Win",
+            "Win+A",
+            "win+ctrl+a",
+        ] {
+            assert!(parse(text).is_err(), "{text:?} must not parse");
+        }
+        // A key is a letter, a digit or F1..F12: none of their virtual-key codes is VK_LWIN (0x5B),
+        // VK_RWIN (0x5C) or VK_APPS (0x5D).
+        for c in 'A'..='Z' {
+            let vk = parse(&format!("Ctrl+{c}")).unwrap().virtual_key();
+            assert!(!(0x5B..=0x5D).contains(&vk), "{c}: {vk:#x}");
+        }
+        for n in 0..=9 {
+            assert!(!(0x5B..=0x5D).contains(&parse(&format!("Ctrl+{n}")).unwrap().virtual_key()));
+        }
+        for n in 1..=12 {
+            assert!(!(0x5B..=0x5D).contains(&parse(&format!("Ctrl+F{n}")).unwrap().virtual_key()));
+        }
+        // The parsed value has exactly the modifiers Ctrl, Alt and Shift.
+        let Hotkey { ctrl: _, alt: _, shift: _, key: _ } = parse("Ctrl+F12").unwrap();
+    }
+
     #[test]
     fn virtual_keys() {
         let vk = |text: &str| parse(text).unwrap().virtual_key();

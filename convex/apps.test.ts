@@ -76,7 +76,8 @@ describe("apps: create, read, update", () => {
     expect(app.web).toEqual({
       url: "https://docs.example.com/start",
       allowedDomains: ["docs.example.com", "*.cdn.example.com"],
-      permissions: { camera: false, microphone: false, screenShare: false, clipboardRead: false, notifications: true, downloads: true, printing: false, geolocation: false },
+      // PRD 24.1 defaults; printing is allowed from Phase 5 on (the Staff App also needs a printer).
+      permissions: { camera: false, microphone: false, screenShare: false, clipboardRead: false, notifications: true, downloads: true, printing: true, geolocation: false },
     });
     expect((await stats(t, orgId))?.appCount).toBe(1);
     expect(await actions(t, orgId)).toEqual(["app.created"]);
@@ -1060,5 +1061,157 @@ describe("install status follows the assignment (Step 17 review)", () => {
     await a.as.mutation(api.groups.assignApp, { groupId: g, appId: app, audience: "everyone", pinnedTaskbar: false, pinnedDesktop: false });
     await t.finishAllScheduledFunctions(vi.runAllTimers);
     expect((await stats(t, orgId))?.failedInstallCount).toBe(501);
+  });
+});
+// ---------------------------------------------------------------- web app permissions (Phase 5 Step 11, plan 4.13)
+
+describe("apps:setPermissions", () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+  });
+  const drain = (t: T) => t.finishAllScheduledFunctions(vi.runAllTimers);
+  const ALLOWED = { camera: false, microphone: true, screenShare: false, clipboardRead: false, notifications: true, downloads: true, printing: true, geolocation: false };
+
+  async function setup() {
+    const t = await setupAuth();
+    const orgId = await makeOrg(t);
+    const a = await admin(t, orgId);
+    const groupId = await group(t, orgId);
+    const { deviceId } = await enrollDevice(t, orgId, { groupId });
+    const app = await a.as.mutation(api.apps.createWeb, web("Meet"));
+    await a.as.mutation(api.groups.assignApp, { groupId, appId: app, audience: "everyone", pinnedTaskbar: false, pinnedDesktop: true });
+    await drain(t);
+    return { t, orgId, a, groupId, deviceId, app };
+  }
+
+  async function catalogPermissions(t: T, deviceId: Id<"devices">, appId: Id<"apps">) {
+    const head = await t.run((ctx) => ctx.db.query("desiredHeads").withIndex("by_device", (q) => q.eq("deviceId", deviceId)).unique());
+    const body = head === null ? null : await t.run((ctx) => ctx.db.get(head.bodyId));
+    const doc = (JSON.parse(body!.payload) as { doc: { catalog: { id: string; web?: { permissions: Record<string, boolean> } }[] } }).doc;
+    return doc.catalog.find((c) => c.id === appId)?.web?.permissions;
+  }
+
+  test("an admin saves: revision +1, audit names what changed (no address), the group is snapshotted and the device document carries it", async () => {
+    const { t, orgId, a, groupId, deviceId, app } = await setup();
+    expect((await catalogPermissions(t, deviceId, app))?.microphone).toBe(false);
+
+    expect(await a.as.mutation(api.apps.setPermissions, { appId: app, expectedRevision: 0, permissions: ALLOWED })).toEqual({ revision: 1 });
+    expect((await appRow(t, app))?.web?.permissions).toEqual(ALLOWED);
+    expect((await appRow(t, app))?.web?.url).toBe("https://docs.example.com/start"); // only the permissions change
+    const log = (await t.run((ctx) => ctx.db.query("auditLog").withIndex("by_org_at", (q) => q.eq("orgId", orgId)).take(100))).filter((r) => r.action === "app.permissionsChanged");
+    expect(log).toHaveLength(1);
+    expect(log[0]).toMatchObject({ targetId: app, targetLabel: "Meet", summary: "Changed permissions of Meet: microphone allowed" });
+    expect(log[0]!.summary).not.toContain("http");
+
+    const versions = await t.run((ctx) => ctx.db.query("groupConfigs").withIndex("by_group_version", (q) => q.eq("groupId", groupId)).collect());
+    expect(versions.length).toBeGreaterThanOrEqual(1); // the group has a configuration version now
+    expect(await t.run((ctx) => ctx.db.query("groupRollouts").withIndex("by_group", (q) => q.eq("groupId", groupId)).unique())).not.toBeNull();
+
+    await drain(t);
+    expect((await catalogPermissions(t, deviceId, app))?.microphone).toBe(true);
+  });
+
+  test("the same permissions again write nothing and publish nothing; a stale revision is refused", async () => {
+    const { t, orgId, a, app } = await setup();
+    const current = (await appRow(t, app))!.web!.permissions;
+    const same = await probe(() => a.as.mutation(api.apps.setPermissions, { appId: app, expectedRevision: 0, permissions: current }));
+    expect(same.result).toEqual({ revision: 0 });
+    expect(same.io.writes).toBe(0);
+    expect(await queueOf(t, orgId)).toBeNull();
+
+    await a.as.mutation(api.apps.setPermissions, { appId: app, expectedRevision: 0, permissions: ALLOWED });
+    await expectCode(a.as.mutation(api.apps.setPermissions, { appId: app, expectedRevision: 0, permissions: { ...ALLOWED, camera: true } }), "stale_edit");
+    expect((await appRow(t, app))?.web?.permissions.camera).toBe(false);
+    // a second save of the new state is a no-op again
+    expect(await a.as.mutation(api.apps.setPermissions, { appId: app, expectedRevision: 1, permissions: ALLOWED })).toEqual({ revision: 1 });
+  });
+
+  test("a Viewer cannot save; neither can another organization's admin; a program has no permissions", async () => {
+    const { t, orgId, a, app } = await setup();
+    const v = await asMember(t, { role: "viewer", orgId });
+    await giveStepUp(t, v);
+    await expectCode(v.as.mutation(api.apps.setPermissions, { appId: app, expectedRevision: 0, permissions: ALLOWED }), "forbidden");
+    expect((await appRow(t, app))?.web?.permissions.microphone).toBe(false);
+
+    const other = await admin(t, await makeOrg(t, "Other"));
+    await expectCode(other.as.mutation(api.apps.setPermissions, { appId: app, expectedRevision: 0, permissions: ALLOWED }), "not_found");
+
+    const program = await a.as.mutation(api.apps.createDesktop, desktop("Acme"));
+    await expectCode(a.as.mutation(api.apps.setPermissions, { appId: program, expectedRevision: 0, permissions: ALLOWED }), "invalid_argument");
+  });
+
+  test("saving a site's other settings keeps its permissions; existing rows are not rewritten", async () => {
+    const { t, a, app } = await setup();
+    await a.as.mutation(api.apps.setPermissions, { appId: app, expectedRevision: 0, permissions: { ...ALLOWED, printing: false } });
+    await a.as.mutation(api.apps.update, { appId: app, expectedRevision: 1, web: web("Meet 2") });
+    expect((await appRow(t, app))?.web?.permissions).toEqual({ ...ALLOWED, printing: false });
+  });
+
+  test("more than 10 groups: the first 10 are snapshotted, every group still gets a publish", async () => {
+    const t = await setupAuth();
+    const orgId = await makeOrg(t);
+    const a = await admin(t, orgId);
+    const app = await a.as.mutation(api.apps.createWeb, web("Meet"));
+    const groups: Id<"groups">[] = [];
+    for (let i = 0; i < 12; i++) {
+      const g = await group(t, orgId, `G${i}`);
+      groups.push(g);
+      await a.as.mutation(api.groups.assignApp, { groupId: g, appId: app, audience: "everyone", pinnedTaskbar: false, pinnedDesktop: false });
+    }
+    await drain(t);
+    await a.as.mutation(api.apps.setPermissions, { appId: app, expectedRevision: 0, permissions: ALLOWED });
+    const snapshotted = await t.run(async (ctx) => (await ctx.db.query("groupConfigs").withIndex("by_group_version", (q) => q.eq("groupId", groups[0]!)).first()) !== null);
+    expect(snapshotted).toBe(true);
+    const total = await t.run(async (ctx) => (await ctx.db.query("groupConfigs").collect()).length);
+    expect(total).toBe(10);
+    expect([...((await queueOf(t, orgId))?.groupIds ?? [])].sort()).toEqual([...groups].sort());
+  });
+});
+
+describe("apps:get denials30d", () => {
+  const dayAgo = (n: number) => new Date(Date.now() - n * 86_400_000).toISOString().slice(0, 10);
+  const blocked = { appLocker: 0, appControl: 0, procWatch: 0, elevation: 0 };
+  async function seedDay(t: T, orgId: Id<"organizations">, day: string, permissionDenials: { appId: string; kind: string; count: number }[]) {
+    await t.run((ctx) => ctx.db.insert("orgSecurityDaily", { orgId, day, blocked, permissionDenials, devicesReporting: 1 }));
+  }
+
+  test("counts sum across days per kind, only for this app and this organization, newest 30 days only, biggest first", async () => {
+    const t = await setupAuth();
+    const orgId = await makeOrg(t);
+    const a = await admin(t, orgId);
+    const v = await asMember(t, { role: "viewer", orgId });
+    const app = await a.as.mutation(api.apps.createWeb, web("Meet"));
+    const other = await a.as.mutation(api.apps.createWeb, web("Wiki", { url: "https://wiki.example.com" }));
+    expect((await v.as.query(api.apps.get, { appId: app })).denials30d).toEqual([]); // nothing reported yet
+
+    await seedDay(t, orgId, dayAgo(1), [{ appId: app, kind: "microphone", count: 20 }, { appId: app, kind: "camera", count: 5 }, { appId: other, kind: "microphone", count: 999 }]);
+    await seedDay(t, orgId, dayAgo(2), [{ appId: app, kind: "microphone", count: 21 }, { appId: app, kind: "geolocation", count: 1 }]);
+    await seedDay(t, orgId, dayAgo(29), [{ appId: app, kind: "camera", count: 7 }]); // the oldest day still inside the window
+    await seedDay(t, orgId, dayAgo(30), [{ appId: app, kind: "camera", count: 1000 }]); // outside it
+    // another organization's row naming the same id string is never read
+    const foreign = await makeOrg(t, "Other");
+    await seedDay(t, foreign, dayAgo(1), [{ appId: app, kind: "printing", count: 5000 }]);
+
+    expect((await v.as.query(api.apps.get, { appId: app })).denials30d).toEqual([
+      { kind: "microphone", count: 41 },
+      { kind: "camera", count: 12 },
+      { kind: "geolocation", count: 1 },
+    ]);
+    expect((await v.as.query(api.apps.get, { appId: other })).denials30d).toEqual([{ kind: "microphone", count: 999 }]);
+  });
+
+  test("a program has none; the query reads at most 30 daily rows however many days exist", async () => {
+    const t = await setupAuth();
+    const orgId = await makeOrg(t);
+    const a = await admin(t, orgId);
+    const program = await a.as.mutation(api.apps.createDesktop, desktop("Acme"));
+    const app = await a.as.mutation(api.apps.createWeb, web("Meet"));
+    await seedDay(t, orgId, dayAgo(1), [{ appId: program, kind: "camera", count: 3 }]);
+    expect((await a.as.query(api.apps.get, { appId: program })).denials30d).toEqual([]);
+    for (let i = 2; i < 80; i++) await seedDay(t, orgId, dayAgo(i), [{ appId: app, kind: "camera", count: 1 }]);
+    const { result, io } = await probe(() => a.as.query(api.apps.get, { appId: app }));
+    expect(result.denials30d).toEqual([{ kind: "camera", count: 28 }]); // days 2..29
+    expect(io.tables.has("orgSecurityDaily")).toBe(true);
+    expect(io.reads).toBeLessThan(3 + 1 + 1 + 1 + 30 + 10); // wrapper, app, groups, the 30 rows, small change
   });
 });

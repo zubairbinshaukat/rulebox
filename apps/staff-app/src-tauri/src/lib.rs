@@ -3,6 +3,7 @@
 pub mod agent;
 pub mod appwin;
 pub mod commands;
+pub mod covers;
 pub mod exit;
 pub mod files;
 pub mod fullscreen;
@@ -61,6 +62,13 @@ fn shell_mode_dto(mode: rulebox_desktop::ShellMode) -> ShellModeDto {
     }
 }
 
+/// How long a `--simulate-crash-loop` process lives (long enough to say `shell.ready`).
+#[cfg(debug_assertions)]
+const SIMULATED_CRASH_DELAY_SECS: u64 = 5;
+/// `STATUS_ACCESS_VIOLATION`, what a real crash leaves as the exit code.
+#[cfg(debug_assertions)]
+const SIMULATED_CRASH_EXIT_CODE: i32 = 0xC000_0005_u32 as i32;
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     install_panic_hook();
@@ -75,6 +83,19 @@ pub fn run() {
         Err(error) => {
             eprintln!("logging init failed: {error}");
         }
+    }
+
+    // (Phase 5 Step 9) Debug builds only. `--simulate-crash-loop` ends the process abnormally a few
+    // seconds after it started, when it has told the agent it is ready: every start the launcher makes
+    // then crashes, so the VM run of Phase 5 Step 21 can watch the agent's last-known-good rollback.
+    // A release build has no such flag.
+    #[cfg(debug_assertions)]
+    if std::env::args_os().any(|arg| arg == "--simulate-crash-loop") {
+        tracing::warn!("--simulate-crash-loop: this process will end abnormally in {SIMULATED_CRASH_DELAY_SECS} s");
+        std::thread::spawn(|| {
+            std::thread::sleep(std::time::Duration::from_secs(SIMULATED_CRASH_DELAY_SECS));
+            std::process::exit(SIMULATED_CRASH_EXIT_CODE);
+        });
     }
 
     // Every coordinate the shell handles is a physical pixel.
@@ -154,6 +175,7 @@ pub fn run() {
             commands::task_menu,
             commands::show_desktop,
             commands::refresh_catalogue,
+            commands::broadcast_ack,
             commands::open_doc,
             commands::win_minimize,
             commands::win_toggle_maximize,

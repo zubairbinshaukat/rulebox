@@ -116,6 +116,7 @@ const webApp = {
   fileTypes: [],
   directEmployeeCount: 0,
   groupOptions: [{ _id: "g1", name: "Sales" }],
+  denials30d: [] as { kind: string; count: number }[],
 };
 
 describe("Apps list (apps:list)", () => {
@@ -274,6 +275,93 @@ describe("AppEdit: a website", () => {
     ui(<AppEdit />, "viewer", "/apps/a1");
     expect(screen.queryByRole("button", { name: strings.common.saveChanges })).toBeNull();
     expect(screen.getByText(strings.app.readOnly)).toBeTruthy();
+  });
+});
+
+describe("AppEdit: site permissions (apps:setPermissions, apps:get denials30d; Phase 5 Step 11)", () => {
+  const withDenials = { ...webApp, denials30d: [{ kind: "microphone", count: 41 }, { kind: "camera", count: 12 }, { kind: "printing", count: 2 }] };
+  const permCard = () => screen.getByRole("list", { name: appEditStrings.permissions });
+  const kindsOn = () => within(permCard()).getAllByRole("switch").map((el) => el.getAttribute("aria-checked") === "true");
+
+  it("shows all eight switches in the saved state, each with its default, and the printing note", () => {
+    cx.results["apps:get"] = withDenials;
+    ui(<AppEdit />, "admin", "/apps/a1");
+    // camera, microphone, screen sharing, clipboard, notifications, downloads, printing, location
+    expect(kindsOn()).toEqual([false, false, false, false, true, true, false, false]);
+    const rows = within(permCard()).getAllByRole("listitem");
+    expect(rows).toHaveLength(8);
+    expect(within(rows[0]!).getByText(appEditStrings.permissionDefault(false))).toBeTruthy(); // camera
+    expect(within(rows[4]!).getByText(appEditStrings.permissionDefault(true))).toBeTruthy(); // notifications
+    expect(within(rows[6]!).getByText(appEditStrings.permissionDefault(true))).toBeTruthy(); // printing is allowed by default (PRD 24.1)
+    expect(screen.getByText(appEditStrings.printingNote)).toBeTruthy();
+    // nothing to save until something changes
+    expect((screen.getByRole("button", { name: appEditStrings.permissionsSave }) as HTMLButtonElement).disabled).toBe(true);
+  });
+
+  it("the 30-day counts list each kind; Allow flips and highlights the switch without saving; Save sends the revision and the draft", async () => {
+    cx.results["apps:get"] = withDenials;
+    const save = vi.fn(async () => ({ revision: 4 }));
+    cx.fns["apps:setPermissions"] = save;
+    ui(<AppEdit />, "admin", "/apps/a1");
+    expect(screen.getByText(appEditStrings.blocked30)).toBeTruthy();
+    expect(screen.getByText(appEditStrings.blockedCount("41"))).toBeTruthy();
+    expect(screen.getByText(appEditStrings.blockedCount("12"))).toBeTruthy();
+
+    fireEvent.click(screen.getByRole("button", { name: appEditStrings.allowKind("Microphone") }));
+    expect(save).not.toHaveBeenCalled();
+    expect(kindsOn()[1]).toBe(true);
+    expect(within(permCard()).getAllByRole("listitem")[1]!.hasAttribute("data-highlight")).toBe(true);
+    expect(screen.getByText(appEditStrings.allowKindDone)).toBeTruthy();
+    fireEvent.click(within(permCard()).getAllByRole("switch")[0]!); // camera on too: the highlight moves off
+    expect(within(permCard()).getAllByRole("listitem")[1]!.hasAttribute("data-highlight")).toBe(false);
+
+    fireEvent.click(screen.getByRole("button", { name: appEditStrings.permissionsSave }));
+    await waitFor(() => expect(save).toHaveBeenCalledTimes(1));
+    expect(save).toHaveBeenCalledWith({
+      appId: "a1",
+      expectedRevision: 3,
+      permissions: { camera: true, microphone: true, screenShare: false, clipboardRead: false, notifications: true, downloads: true, printing: false, geolocation: false },
+    });
+    expect(await screen.findByText(appEditStrings.permissionsSaved)).toBeTruthy();
+  });
+
+  it("the next save uses the revision the server returned; a stale edit offers Reload and keeps the draft", async () => {
+    cx.results["apps:get"] = webApp;
+    const save = vi.fn().mockResolvedValueOnce({ revision: 4 }).mockRejectedValueOnce(new ConvexError({ code: "stale_edit" }));
+    cx.fns["apps:setPermissions"] = save;
+    ui(<AppEdit />, "admin", "/apps/a1");
+    fireEvent.click(within(permCard()).getAllByRole("switch")[2]!);
+    fireEvent.click(screen.getByRole("button", { name: appEditStrings.permissionsSave }));
+    await waitFor(() => expect(save).toHaveBeenCalledTimes(1));
+    fireEvent.click(within(permCard()).getAllByRole("switch")[3]!);
+    fireEvent.click(screen.getByRole("button", { name: appEditStrings.permissionsSave }));
+    await waitFor(() => expect(save).toHaveBeenCalledTimes(2));
+    expect(save.mock.calls[1]![0]).toMatchObject({ expectedRevision: 4 });
+    expect(await screen.findByText(strings.common.staleTitle)).toBeTruthy();
+  });
+
+  it("a viewer sees the switches and the counts but cannot change or save anything", () => {
+    cx.results["apps:get"] = withDenials;
+    ui(<AppEdit />, "viewer", "/apps/a1");
+    expect(within(permCard()).getAllByRole("switch").every((el) => (el as HTMLButtonElement).disabled)).toBe(true);
+    expect(screen.queryByRole("button", { name: appEditStrings.permissionsSave })).toBeNull();
+    expect(screen.queryByRole("button", { name: appEditStrings.allowKind("Microphone") })).toBeNull();
+    expect(screen.getByText(appEditStrings.blockedCount("41"))).toBeTruthy();
+    expect(screen.getByText(appEditStrings.permissionsReadOnly)).toBeTruthy();
+  });
+
+  it("no denials says so; an already allowed kind has no Allow button; a program has no permissions card", () => {
+    cx.results["apps:get"] = { ...webApp, denials30d: [{ kind: "notifications", count: 3 }] };
+    ui(<AppEdit />, "admin", "/apps/a1");
+    expect(screen.queryByRole("button", { name: appEditStrings.allowKind("Notifications") })).toBeNull();
+    cleanup();
+    cx.results["apps:get"] = webApp;
+    ui(<AppEdit />, "admin", "/apps/a1");
+    expect(screen.getByText(appEditStrings.blocked30None)).toBeTruthy();
+    cleanup();
+    cx.results["apps:get"] = { _id: "a2", name: "Reader", kind: "desktop", archived: false, revision: 1, createdAt: 1, assignments: [], fileTypes: [], directEmployeeCount: 0, groupOptions: [], denials30d: [], desktop: { source: "preinstalled", exe: "{ProgramFiles}\\R\\r.exe", args: [], fileArgTemplate: [], resetFolders: [] } };
+    ui(<AppEdit />, "admin", "/apps/a2");
+    expect(screen.queryByText(appEditStrings.blocked30)).toBeNull();
   });
 });
 

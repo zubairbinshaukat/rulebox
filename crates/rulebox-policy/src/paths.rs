@@ -255,6 +255,40 @@ pub fn expand_exe(exe: &str, app_id: &str, portable: bool, roots: &PathRoots) ->
     Ok(path)
 }
 
+/// (Phase 5 Step 1, plan 4.3) The shape check of an exception `path`: a Phase 4
+/// template that starts with `{ProgramFiles}\`, `{ProgramFilesX86}\` or
+/// `{RuleboxApps}\` (never `{SystemRoot}`: Windows' own programs are allowed by the
+/// layers themselves), 1-8 components with the template character rules, ending in
+/// `.exe`, and not a program of [`DENY_PROGRAMS`]. Does not expand anything (no
+/// roots needed: the agent expands the template when it builds a rule).
+pub fn exception_path_problem(template: &str) -> Option<PathProblem> {
+    let rest = [PROGRAM_FILES, PROGRAM_FILES_X86, RULEBOX_APPS]
+        .iter()
+        .find_map(|prefix| template.strip_prefix(prefix));
+    let Some(rest) = rest else {
+        return Some(PathProblem::UnknownRoot);
+    };
+    let parts: Vec<&str> = rest.split('\\').collect();
+    if parts.len() > 8 {
+        return Some(PathProblem::ComponentCount);
+    }
+    if !parts.iter().all(|c| valid_component(c)) {
+        return Some(PathProblem::BadComponent);
+    }
+    if !parts.last().is_some_and(|last| last.to_ascii_lowercase().ends_with(".exe")) {
+        return Some(PathProblem::NotExe);
+    }
+    if program_denied(template) {
+        return Some(PathProblem::Denied);
+    }
+    // 260 characters is the Windows path limit; the longest root a template can expand
+    // to is not known here, so the template itself is held to the same bound.
+    if template.chars().count() > MAX_EXE_PATH {
+        return Some(PathProblem::TooLong);
+    }
+    None
+}
+
 /// `args`: at most 16 entries of at most 200 characters, no control characters.
 pub fn check_args(list: &[String]) -> Result<(), PathProblem> {
     if list.len() > MAX_APP_ARGS {

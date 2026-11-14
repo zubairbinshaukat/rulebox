@@ -4,8 +4,9 @@ use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 
 use crate::requests::{
-    AdminExitSubmitParams, AdminExitSubmitResult, AppsListResult, SessionGetResult, SignInParams,
-    SignInResult, VerifyPasswordParams, VerifyPasswordResult,
+    AdminExitSubmitParams, AdminExitSubmitResult, AppsListResult, BroadcastAckParams, OkResult,
+    ReportDenialsParams, SessionGetResult, SignInParams, SignInResult, VerifyPasswordParams,
+    VerifyPasswordResult,
 };
 use crate::types::{AgentSnapshot, HelloParams, HelloResult};
 
@@ -28,6 +29,13 @@ pub mod events {
     pub const APPS_CHANGED: &str = "apps.changed";
     /// (1.2) `SessionEndedData`: the agent ended the employee session itself.
     pub const SESSION_ENDED: &str = "session.ended";
+    /// (1.3) `{}`: the device lock was set or cleared; read the snapshot.
+    pub const DEVICE_LOCK_CHANGED: &str = "device.lockChanged";
+    /// (1.3) `{}`: the broadcast list changed; read the snapshot. At most one per 2 seconds.
+    pub const BROADCASTS_CHANGED: &str = "broadcasts.changed";
+    /// (1.3) `ProgramBlockedData`: the process watch ended a Staff program. At most once
+    /// per program per session.
+    pub const PROGRAM_BLOCKED: &str = "program.blocked";
 }
 
 /// First request on every connection; triggers peer verification.
@@ -110,9 +118,40 @@ impl Method for AdminExitSubmit {
     type Result = AdminExitSubmitResult;
 }
 
+/// (1.3, capability `broadcasts`) The employee pressed "OK" on a broadcast; the agent
+/// queues one acknowledgement.
+pub struct BroadcastAcknowledge;
+impl Method for BroadcastAcknowledge {
+    const NAME: &'static str = "broadcast.acknowledge";
+    type Params = BroadcastAckParams;
+    type Result = OkResult;
+}
+
+/// (1.3, capability `permissionReports`) The Staff App's per-app denial counters.
+pub struct WebappReportDenials;
+impl Method for WebappReportDenials {
+    const NAME: &'static str = "webapp.reportDenials";
+    type Params = ReportDenialsParams;
+    type Result = OkResult;
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn protocol_1_3_names_match_the_contract() {
+        assert_eq!(BroadcastAcknowledge::NAME, "broadcast.acknowledge");
+        assert_eq!(WebappReportDenials::NAME, "webapp.reportDenials");
+        assert_eq!(events::DEVICE_LOCK_CHANGED, "device.lockChanged");
+        assert_eq!(events::BROADCASTS_CHANGED, "broadcasts.changed");
+        assert_eq!(events::PROGRAM_BLOCKED, "program.blocked");
+        assert_eq!(crate::CAP_DEVICE_LOCK, "deviceLock");
+        assert_eq!(crate::CAP_BROADCASTS, "broadcasts");
+        assert_eq!(crate::CAP_KEYBOARD_POLICY, "keyboardPolicy");
+        assert_eq!(crate::CAP_PERMISSION_REPORTS, "permissionReports");
+        assert_eq!((crate::PROTOCOL_MAJOR, crate::PROTOCOL_MINOR), (1, 3));
+    }
 
     #[test]
     fn empty_is_an_object() {

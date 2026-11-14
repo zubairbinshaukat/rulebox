@@ -6,6 +6,7 @@ import { internalMutation } from "./lib/functions";
 import { SYSTEM_ACTOR, writeAudit } from "./lib/audit";
 import { codeHash, INVITE_CODE_LENGTH, normalizeEmail, randomCrockford } from "./lib/crypto";
 import { fail } from "./lib/errors";
+import { masterKeyAvailable } from "./lib/keyring";
 import { OWNER_INVITE_TTL_MS } from "./lib/limits";
 import { ensureOrgRows } from "./lib/orgRows";
 import { DEFAULT_ORG_SETTINGS } from "./lib/validators";
@@ -40,6 +41,17 @@ export const createOwnerInvite = internalAction({
         tokenHash: codeHash(inviteCode),
       },
     );
+    // Phase 5 (plan 4.18): a new organization gets its OWN signing and sealing keys when the
+    // deployment has a master key. Best effort: the invite is already stored, and an organization
+    // without keys keeps working with the deployment key (the owner can run `keys:createOrgKeys`
+    // again; it is idempotent).
+    if (masterKeyAvailable()) {
+      try {
+        await ctx.runAction(internal.keys.createOrgKeys, { orgId: stored.orgId });
+      } catch {
+        console.warn("setup: could not create the organization's keys");
+      }
+    }
     return { orgId: stored.orgId, inviteCode, expiresAt: stored.expiresAt };
   },
 });

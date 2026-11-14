@@ -1,0 +1,13 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "cover",
+  "description": "The lock and full-screen-notice windows on every monitor (Phase 5 Step 12). They read the shell state, say OK to a broadcast and reach the hidden administrator exit. Nothing else: no sign-in, no launching.",
+  "windows": ["shell-cover-*"],
+  "permissions": [
+    "core:event:default",
+    "allow-shell-state",
+    "allow-broadcast-ack",
+    "allow-admin-exit-open",
+    "allow-admin-exit-hotkey"
+  ]
+}

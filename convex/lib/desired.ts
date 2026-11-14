@@ -1,6 +1,9 @@
 import type { CatalogApp, CatalogWebPermissions } from "@rulebox/types";
 import { sha256HexSync } from "./crypto";
 import { programDenied } from "./denyList";
+import type { GroupConfigContent } from "./groupConfig";
+import { MAX_ACTIVE_BROADCASTS, MAX_DEVICE_PRINTERS, MAX_DEVICE_WIFI, MAX_GROUP_EXCEPTIONS } from "./limits";
+import type { RingValue, SealedBoxValue } from "./lockdownValidators";
 import type { OrgSettings } from "./validators";
 
 // The signed desired-state document, version 2 (plan 4.4 as amended by A5,
@@ -65,7 +68,40 @@ export type BuildApp = {
   icon?: { url: string; sha256: string };
 };
 
+/**
+ * The Phase 5 inputs of one device's document (plan 4.3). Absent (`undefined`) = the
+ * document is the Phase 4 document, byte for byte: a group that never had a Phase 5
+ * configuration, on a device with no lock, no broadcast and no USB window, gets none of the
+ * new keys.
+ */
+export type Phase5Input = {
+  /** The group configuration version this device's ring points to (4.14), or null when the group has none. */
+  config: { groupId: string; version: number; ring: RingValue; content: GroupConfigContent } | null;
+  /** This device's sealed Wi-Fi passphrases by profile id (`deviceSealedSecrets`, only current ones). */
+  sealed: Record<string, SealedBoxValue>;
+  /** Live (not ring-gated): `deviceLocks` of this device. */
+  deviceLock: { lockId: string; message: string; contact: string | null; lockedAtMs: number } | null;
+  /** Live: the "Allow USB for this PC" window; ignored when it is not in the future of `nowMs`. */
+  usbTempAllowUntilMs: number | null;
+  /** Live: the newest active broadcasts for this device (at most MAX_ACTIVE_BROADCASTS, expired ones already dropped). */
+  broadcasts: DocBroadcast[];
+  /** The publisher's clock for this run (decides `usbTempAllow`). */
+  nowMs: number;
+};
+
+export type DocBroadcast = {
+  id: string;
+  style: "banner" | "fullscreen";
+  title: string;
+  body: string;
+  expiresAtMs: number | null;
+  ackRequired: boolean;
+  issuedAtMs: number;
+};
+
 export type BuildInput = {
+  /** Phase 5 sections (4.3). Optional so every Phase 4 caller and vector stays as it was. */
+  phase5?: Phase5Input;
   org: { _id: string; name: string };
   settings: OrgSettings;
   /** Argon2id PHC of the device exit PIN, or null when none is set. */
@@ -271,7 +307,75 @@ export function buildDeviceDoc(input: BuildInput, version = 0): DesiredDocV2 {
   if (input.relocate !== undefined) {
     doc.relocate = { url: input.relocate.url, deviceId: input.relocate.deviceId, notBefore: input.relocate.notBefore };
   }
+  if (input.phase5 !== undefined) addPhase5Keys(doc, input.phase5);
   return doc;
+}
+
+/** Limits of plan 4.3 rule 4 that the builder must not exceed (the agent refuses the whole document above them). */
+const MAX_LOCK_MESSAGE = 300;
+const MAX_LOCK_CONTACT = 100;
+
+/**
+ * The agent-only keys of Phase 5 after `offlineDays`, in the order of plan 4.3:
+ * `lockdown`, `wifi`, `wifiManagedOnly`, `printers` (ring-gated, only with a group
+ * configuration), then the live `deviceLock`, `usbTempAllow`, `broadcasts`, then `config`.
+ * Shapes and key order are those of `crates/rulebox-policy/tests/vectors/lockdown.json`.
+ * Throws (the publisher records `policy.publishFailed`) when a limit would be exceeded.
+ */
+function addPhase5Keys(doc: DesiredDocV2, p: Phase5Input): void {
+  const c = p.config;
+  if (c !== null) {
+    if (c.content.lockdown.exceptions.length > MAX_GROUP_EXCEPTIONS) throw new Error("too many exceptions");
+    if (c.content.wifi.length > MAX_DEVICE_WIFI || c.content.printers.length > MAX_DEVICE_PRINTERS) throw new Error("too many items");
+    doc.lockdown = c.content.lockdown;
+    doc.wifi = c.content.wifi.map((w) => ({
+      id: w.id,
+      ssid: w.ssid,
+      hidden: w.hidden,
+      security: w.security,
+      autoConnect: w.autoConnect,
+      revision: w.revision,
+      sealed: sealedOf(p.sealed[w.id]),
+    }));
+    doc.wifiManagedOnly = c.content.wifiManagedOnly;
+    doc.printers = c.content.printers.map((x) => ({
+      id: x.id,
+      name: x.name,
+      kind: x.kind,
+      address: x.address,
+      port: x.port,
+      queue: x.queue,
+      driver: x.driver,
+      isDefault: x.isDefault,
+      revision: x.revision,
+    }));
+  }
+  if (p.deviceLock !== null && (p.deviceLock.message.length > MAX_LOCK_MESSAGE || (p.deviceLock.contact?.length ?? 0) > MAX_LOCK_CONTACT)) {
+    throw new Error("lock text too long");
+  }
+  doc.deviceLock =
+    p.deviceLock === null
+      ? null
+      : { lockId: p.deviceLock.lockId, message: p.deviceLock.message, contact: p.deviceLock.contact, lockedAtMs: p.deviceLock.lockedAtMs };
+  doc.usbTempAllow = p.usbTempAllowUntilMs !== null && p.usbTempAllowUntilMs > p.nowMs ? { untilMs: p.usbTempAllowUntilMs } : null;
+  if (p.broadcasts.length > MAX_ACTIVE_BROADCASTS) throw new Error("too many broadcasts");
+  doc.broadcasts = [...p.broadcasts]
+    .sort((a, b) => byText(a.id, b.id))
+    .map((b) => ({
+      id: b.id,
+      style: b.style,
+      title: b.title,
+      body: b.body,
+      expiresAtMs: b.expiresAtMs,
+      ackRequired: b.ackRequired,
+      issuedAtMs: b.issuedAtMs,
+    }));
+  if (c !== null) doc.config = { groupId: c.groupId, version: c.version, ring: c.ring };
+}
+
+/** A sealed box in the key order of the Rust struct, or null (no box yet: the agent reports `waiting_for_key`). */
+function sealedOf(b: SealedBoxValue | undefined): SealedBoxValue | null {
+  return b === undefined ? null : { v: b.v, keyId: b.keyId, epk: b.epk, nonce: b.nonce, ct: b.ct };
 }
 
 /** 4.4 rule 5: SHA-256 hex of the document with `version` 0 (the same content gives the same hash). */

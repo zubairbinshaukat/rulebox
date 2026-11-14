@@ -9,6 +9,8 @@ use futures_util::future::BoxFuture;
 use thiserror::Error;
 use tokio::sync::{broadcast, watch};
 
+use rulebox_ipc::requests::DenialCount;
+
 use crate::model::{
     AdminExitOutcome, AgentEvent, AgentLink, AppEntry, Employee, SignInOutcome, SignInRequest,
     VerifyOutcome,
@@ -28,6 +30,12 @@ pub trait AgentPort: Send + Sync + 'static {
     /// Debug only (the dev command file): send `event` as if the agent had.
     #[cfg(debug_assertions)]
     fn dev_emit(&self, _event: AgentEvent) {}
+    /// Debug only (the dev command file): the demo agent locks (`Some`) or unlocks the device.
+    #[cfg(debug_assertions)]
+    fn dev_set_lock(&self, _lock: Option<rulebox_ipc::types::DeviceLockView>) {}
+    /// Debug only: the demo agent replaces its broadcast list.
+    #[cfg(debug_assertions)]
+    fn dev_set_broadcasts(&self, _list: Vec<rulebox_ipc::types::BroadcastView>) {}
     /// `session.get`: the employee the agent holds a session for, `None` when it
     /// has none. The shell asks after a lost push or a re-link, to be sure that
     /// it is not showing a session the agent no longer has.
@@ -42,6 +50,11 @@ pub trait AgentPort: Send + Sync + 'static {
     ) -> BoxFuture<'_, Result<VerifyOutcome, AgentError>>;
     fn apps(&self) -> BoxFuture<'_, Result<Vec<AppEntry>, AgentError>>;
     fn admin_exit(&self, pin: String) -> BoxFuture<'_, Result<AdminExitOutcome, AgentError>>;
+    /// (1.3, capability `broadcasts`) The employee pressed "OK". `true` when the agent
+    /// queued (or already had) the acknowledgement.
+    fn ack_broadcast(&self, id: String) -> BoxFuture<'_, Result<bool, AgentError>>;
+    /// (1.3, capability `permissionReports`) The per-app denial counters since the last report.
+    fn report_denials(&self, counts: Vec<DenialCount>) -> BoxFuture<'_, Result<(), AgentError>>;
 }
 
 #[derive(Debug, Error, Clone, PartialEq, Eq)]
@@ -61,6 +74,11 @@ pub enum AgentError {
 }
 
 impl AgentError {
+    /// This agent lacks the capability: an older agent, nothing to show and no error.
+    pub fn is_unsupported(&self) -> bool {
+        matches!(self, AgentError::Unsupported)
+    }
+
     /// The agent answered "no employee is signed in" (`not_signed_in`).
     pub fn is_not_signed_in(&self) -> bool {
         matches!(self, AgentError::Rejected { code, .. } if code == "not_signed_in")

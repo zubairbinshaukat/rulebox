@@ -18,7 +18,9 @@ import {
 } from "../fixtures/seed";
 import {
   INSTALL_STATES,
+  NEW_WEB_APP_PERMISSIONS,
   NO_GROUP_FILTER,
+  WEB_PERMISSION_KEYS,
   type AppDetail,
   type AppKind,
   type AppOption,
@@ -1028,6 +1030,7 @@ export const demoApi: DataApi = {
           fileTypes: [],
           directEmployeeCount: 0,
           groupOptions: groupOptions(db),
+          denials30d: [],
         };
       }
       const a = find(db.apps, appId);
@@ -1047,6 +1050,7 @@ export const demoApi: DataApi = {
         fileTypes: db.fileHandlers.filter((f) => f.appId === a._id).map((f) => f.extension).sort(),
         directEmployeeCount: Math.min(db.employeeApps.filter((m) => m.appId === a._id).length, 1001),
         groupOptions: groupOptions(db),
+        denials30d: a.kind === "web" ? [...(db.appDenials.get(a._id) ?? [])].sort((x, y) => y.count - x.count || (x.kind < y.kind ? -1 : 1)) : [],
       };
     });
   },
@@ -1084,7 +1088,7 @@ export const demoApi: DataApi = {
             web: {
               url: input.url.trim(),
               allowedDomains: [...new Set([host, ...input.allowedDomains])],
-              permissions: { camera: false, microphone: false, screenShare: false, clipboardRead: false, notifications: true, downloads: true, printing: false, geolocation: false },
+              permissions: { ...NEW_WEB_APP_PERMISSIONS },
             },
             archived: false,
             revision: 1,
@@ -1134,7 +1138,7 @@ export const demoApi: DataApi = {
             a.hue = web.hue;
             if (validate.webUrl(web.url)) fail("invalid_argument", { field: "url" });
             const host = new URL(web.url).hostname;
-            a.web = { ...(a.web ?? { permissions: { camera: false, microphone: false, screenShare: false, clipboardRead: false, notifications: true, downloads: true, printing: false, geolocation: false } }), url: web.url.trim(), allowedDomains: [...new Set([host, ...web.allowedDomains])] };
+            a.web = { ...(a.web ?? { permissions: { ...NEW_WEB_APP_PERMISSIONS } }), url: web.url.trim(), allowedDomains: [...new Set([host, ...web.allowedDomains])] };
           }
           if (desktop && a.kind === "desktop") {
             a.name = nameOrFail(desktop.name, validate.NAME_MAX.app);
@@ -1144,6 +1148,30 @@ export const demoApi: DataApi = {
           }
           a.revision++;
           audit({ action: "app.updated", targetType: "app", targetId: a._id, targetLabel: a.name, summary: "App settings changed." });
+        }),
+      [],
+    );
+  },
+
+  useSetAppPermissions() {
+    return useCallback(
+      ({ appId, expectedRevision, permissions }) =>
+        runMutation("admin", ({ db, audit }) => {
+          const a = find(db.apps, appId);
+          checkRevision(a, expectedRevision);
+          if (a.kind !== "web" || !a.web) fail("invalid_argument", { field: "appId" });
+          const changed = WEB_PERMISSION_KEYS.filter((k) => a.web!.permissions[k] !== permissions[k]);
+          if (changed.length === 0) return { revision: a.revision };
+          a.web = { ...a.web, permissions: { ...permissions } };
+          a.revision++;
+          audit({
+            action: "app.permissionsChanged",
+            targetType: "app",
+            targetId: a._id,
+            targetLabel: a.name,
+            summary: `Changed permissions of ${a.name}: ${changed.map((k) => `${k} ${permissions[k] ? "allowed" : "blocked"}`).join(", ")}`,
+          });
+          return { revision: a.revision };
         }),
       [],
     );

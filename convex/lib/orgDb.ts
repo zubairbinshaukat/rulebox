@@ -28,8 +28,12 @@ export const ORG_TABLES: ReadonlySet<string> = new Set(
     .map(([name]) => name),
 );
 
-/** Fields holding the id of a row of the same organization. */
-const ID_FIELDS = new Set(["deviceId", "groupId", "employeeId", "appId", "scope", "rosterGroupId"]);
+/**
+ * Fields holding the id of a row of the same organization. Phase 5 Step 10 adds `findingId` (`lockdownFindingDevices.by_finding_device`,
+ * after the finding was read through its `(orgId, fingerprint)` index) and `broadcastId` (`broadcastAcks.by_broadcast_device`, after the
+ * broadcast was read with the scoped `get`, which answers null for another organization's).
+ */
+const ID_FIELDS = new Set(["deviceId", "groupId", "employeeId", "appId", "scope", "rosterGroupId", "findingId", "broadcastId"]);
 /** Arrays of such ids (validated when the row was written, e.g. `fleetChecks.deviceIds`). */
 const ID_ARRAY_FIELDS = new Set(["deviceIds", "groupIds"]);
 

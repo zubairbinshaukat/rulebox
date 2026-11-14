@@ -174,6 +174,11 @@ export const FORBIDDEN_KEYS = [
   // Enrollment (Step 6): a list or device row never carries the raw token or the device secret hash.
   "token",
   "deviceSecretHash",
+  // Phase 5 Step 10 (plan 4.18): wrapped organization keys, a Wi-Fi passphrase (at rest), sealed boxes and the device sealing key.
+  "wrapped",
+  "passphrase",
+  "sealed",
+  "sealPublicKey",
 ];
 
 /**

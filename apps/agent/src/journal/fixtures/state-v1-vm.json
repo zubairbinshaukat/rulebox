@@ -1,0 +1,69 @@
+{
+  "schema": 1,
+  "enrollment": {
+    "convexUrl": "https://example-0000.convex.cloud",
+    "deviceId": "dev00000000000000000000000000001",
+    "orgId": "org00000000000000000000000000001",
+    "deviceName": "TEST-VM",
+    "enrolledAtMs": 1761600000000,
+    "revoked": false,
+    "allowJoined": false
+  },
+  "pendingEnrollment": null,
+  "staff": {
+    "sid": "S-1-5-21-1111111111-2222222222-3333333333-1001",
+    "userName": "RuleboxStaff",
+    "profileDir": "C:\\Users\\RuleboxStaff"
+  },
+  "kiosk": {
+    "applied": "enabled",
+    "lastError": null,
+    "failures": 0,
+    "lsaTakenOver": true,
+    "staffHive": {
+      "fingerprint": "S-1-5-21-1111111111-2222222222-3333333333-1001|policyShell|\"C:\\Program Files\\Rulebox\\rulebox-shell.exe\"",
+      "complete": true
+    }
+  },
+  "journal": [
+    {
+      "key": { "path": "SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion\\Winlogon", "name": "AutoAdminLogon" },
+      "original": { "string": "1" }
+    },
+    {
+      "key": { "path": "SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion\\Winlogon", "name": "DefaultUserName" },
+      "original": { "string": "Owner" }
+    },
+    {
+      "key": { "path": "SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion\\Winlogon", "name": "DefaultDomainName" },
+      "original": "absent"
+    },
+    {
+      "key": { "path": "SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion\\Winlogon", "name": "DefaultPassword" },
+      "original": "inSecrets"
+    },
+    {
+      "key": { "path": "SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion\\Winlogon", "name": "AutoLogonCount" },
+      "original": { "dword": 3 }
+    },
+    {
+      "key": { "path": "SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Policies\\System", "name": "DisableAutomaticRestartSignOn" },
+      "original": "absent"
+    },
+    {
+      "key": { "path": "SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Policies\\System", "name": "EnableFirstLogonAnimation" },
+      "original": { "dword": 1 }
+    },
+    {
+      "key": { "path": "SOFTWARE\\Policies\\Microsoft\\Windows\\OOBE", "name": "DisablePrivacyExperience" },
+      "original": "absent"
+    }
+  ],
+  "lastAppliedVersion": 42,
+  "lastWallClockMs": 1761700000000,
+  "trustedKeys": [
+    { "keyId": "21fe31dfa154a261", "publicKey": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=" }
+  ],
+  "lastDocKeyId": "21fe31dfa154a261",
+  "acceptedVersion": 42
+}

@@ -27,8 +27,72 @@ macro_rules! unknown_on_new_values {
 
 pub mod catalog;
 pub mod envelope;
+pub mod lockdown;
+pub mod network;
+pub mod notice;
 pub mod paths;
 pub mod roster;
+pub mod seal;
+
+use lockdown::{ConfigRef, LimitError, LockdownPolicy, UsbTempAllow};
+use network::{PrinterSpec, WifiProfile, MAX_PRINTERS, MAX_WIFI_PROFILES};
+use notice::{Broadcast, DeviceLock, MAX_ACTIVE_BROADCASTS};
+
+/// (Phase 5 Step 1, plan 4.3) The agent-only keys that Phase 5 adds to the signed
+/// document, after `offlineDays`. It reads **only** those keys: the Phase 2 and
+/// Phase 4 keys stay with [`DesiredState`] and the agent's own parsers, and a key
+/// this struct does not know is ignored (no `deny_unknown_fields`), exactly like a
+/// Phase 4 agent ignores these. Every field has a default, so a Phase 4 document
+/// parses to [`AgentDoc::default`]: `lockdown` absent means every layer off and
+/// everything restored (compatibility rule 1).
+///
+/// **Not exported to TypeScript and never sent to the Staff App**: it holds the
+/// sealed Wi-Fi boxes. [`DesiredState`] does not change.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+pub struct AgentDoc {
+    /// `None` (absent or `null`) = all Phase 5 layers off.
+    pub lockdown: Option<LockdownPolicy>,
+    pub wifi: Vec<WifiProfile>,
+    pub wifi_managed_only: bool,
+    pub printers: Vec<PrinterSpec>,
+    pub device_lock: Option<DeviceLock>,
+    pub usb_temp_allow: Option<UsbTempAllow>,
+    pub broadcasts: Vec<Broadcast>,
+    pub config: Option<ConfigRef>,
+}
+
+impl AgentDoc {
+    /// Reads the Phase 5 keys from the verified document (`Payload::doc`). An
+    /// unknown enum value becomes `Unknown`; a value of the wrong type is an error.
+    pub fn from_doc(doc: &serde_json::Value) -> Result<Self, serde_json::Error> {
+        Self::deserialize(doc)
+    }
+
+    /// All limits of plan 4.3 rule 4. The agent refuses the whole document
+    /// (`policy_rejected`) when one is exceeded. `now_ms` decides which broadcasts
+    /// are active (an expired one that is still listed does not count).
+    pub fn check_limits(&self, now_ms: u64) -> Result<(), LimitError> {
+        if let Some(lockdown) = &self.lockdown {
+            lockdown.check_limits()?;
+        }
+        if self.wifi.len() > MAX_WIFI_PROFILES {
+            return Err(LimitError::TooManyWifi);
+        }
+        self.wifi.iter().try_for_each(WifiProfile::check_limits)?;
+        if self.printers.len() > MAX_PRINTERS {
+            return Err(LimitError::TooManyPrinters);
+        }
+        self.printers.iter().try_for_each(PrinterSpec::check_limits)?;
+        if let Some(lock) = &self.device_lock {
+            lock.check_limits()?;
+        }
+        if self.broadcasts.iter().filter(|b| b.is_active(now_ms)).count() > MAX_ACTIVE_BROADCASTS {
+            return Err(LimitError::TooManyBroadcasts);
+        }
+        self.broadcasts.iter().try_for_each(Broadcast::check_limits)
+    }
+}
 
 /// The example desired state from PRD Section 10.
 pub const EXAMPLE_DESIRED_STATE_JSON: &str = r#"{

@@ -23,7 +23,49 @@ pub enum Decision {
     Deny,
 }
 
+/// The eight permission names of PRD 24.1, as they go to the agent in `webapp.reportDenials`
+/// (plan Phase 5, 4.13). Autoplay and the unknown kinds are not among them and are never counted.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub enum DenialKind {
+    Camera,
+    Microphone,
+    ScreenShare,
+    ClipboardRead,
+    Notifications,
+    Downloads,
+    Printing,
+    Geolocation,
+}
+
+impl DenialKind {
+    /// The name on the wire (the keys of `WebPermissions`).
+    pub fn wire(self) -> &'static str {
+        match self {
+            DenialKind::Camera => "camera",
+            DenialKind::Microphone => "microphone",
+            DenialKind::ScreenShare => "screenShare",
+            DenialKind::ClipboardRead => "clipboardRead",
+            DenialKind::Notifications => "notifications",
+            DenialKind::Downloads => "downloads",
+            DenialKind::Printing => "printing",
+            DenialKind::Geolocation => "geolocation",
+        }
+    }
+}
+
 impl PermissionKind {
+    /// The counter this refusal belongs to; `None` for autoplay and the kinds no rule names.
+    pub fn denial_kind(self) -> Option<DenialKind> {
+        match self {
+            PermissionKind::Camera => Some(DenialKind::Camera),
+            PermissionKind::Microphone => Some(DenialKind::Microphone),
+            PermissionKind::Geolocation => Some(DenialKind::Geolocation),
+            PermissionKind::Notifications => Some(DenialKind::Notifications),
+            PermissionKind::ClipboardRead => Some(DenialKind::ClipboardRead),
+            PermissionKind::Autoplay | PermissionKind::Other => None,
+        }
+    }
+
     /// "Microphone", for a notice such as "Microphone is not allowed for this app."
     pub fn label(self) -> &'static str {
         match self {

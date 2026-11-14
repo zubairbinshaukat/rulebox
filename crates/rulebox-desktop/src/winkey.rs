@@ -9,11 +9,23 @@
 //! * It reads no key content. The state is two flags; there is no buffer of
 //!   key codes or characters, nothing is written anywhere, nothing is logged
 //!   from the callback.
-//! * It never swallows an event. The plan also wanted the release swallowed
-//!   "so nothing else reacts"; but a release that never arrives leaves the
-//!   Windows key logically down for the whole system (every later key would
-//!   behave as Win+key). With no Explorer in a shell-mode session nothing else
-//!   reacts to a lone Windows key anyway, so every event is passed on.
+//! * It never swallows the Windows key itself, nor any key **release**. The plan
+//!   also wanted the release swallowed "so nothing else reacts"; but a release
+//!   that never arrives leaves a key logically down for the whole system (every
+//!   later key would behave as Win+key, or as Ctrl+key). With no Explorer in a
+//!   shell-mode session nothing else reacts to a lone Windows key anyway, so
+//!   those events are always passed on.
+//! * (Phase 5 Step 12, plan P7) When the organization's `keyboard.winCombos` is
+//!   `swallow` ([`WinCombos::Swallow`]), the helper also **swallows the key-down
+//!   of any other key pressed while the Windows key is held**, so Win+R, Win+E,
+//!   Win+D, Win+Tab, Win+I and the like never reach Windows. A lone Windows key
+//!   still opens Rulebox's Start. `pass` (the default of a helper started
+//!   without the mode) is the Phase 3 behaviour exactly. The decision is
+//!   [`WinKeyState::decide`], pure and tested with recorded sequences.
+//!   Swallowing is a keyboard convenience, not a security boundary: keys that
+//!   another program injects are never touched (they are not the user's), and
+//!   `Win+L` is handled by Windows before a hook sees it (the machine policy
+//!   `DisableLockWorkstation` covers it, plan 4.7).
 //! * The callback does flag updates and one `PostMessageW`, nothing else.
 //!
 //! **The hook runs in a helper process**, the same exe started with
@@ -62,7 +74,8 @@ pub const WINKEY_HOOK_ENABLED: bool = true;
 pub const WM_WINKEY_START: u32 = WM_APP + 1;
 
 /// The command-line switch that starts the exe as the hook helper:
-/// `<exe> --rulebox-winkey-hook <message window> <shell process id>`.
+/// `<exe> --rulebox-winkey-hook <message window> <shell process id> [pass|swallow]`.
+/// The mode defaults to `pass` (the Phase 3 behaviour) when it is missing.
 pub const HELPER_SWITCH: &str = "--rulebox-winkey-hook";
 
 /// A hook that takes longer than this in one call is on its way to being
@@ -95,6 +108,51 @@ pub enum Action {
     Nothing,
     /// Toggle the Start menu.
     ToggleStart,
+}
+
+/// What the helper does with Windows-key combinations (`keyboard.winCombos`).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum WinCombos {
+    /// The Phase 3 behaviour: every event goes on.
+    #[default]
+    Pass,
+    /// Swallow the key-down of any key pressed while the Windows key is held.
+    Swallow,
+}
+
+impl WinCombos {
+    /// The helper's command-line word for the mode.
+    pub const fn word(self) -> &'static str {
+        match self {
+            WinCombos::Pass => "pass",
+            WinCombos::Swallow => "swallow",
+        }
+    }
+
+    /// Pure: the mode a command-line word names. Anything unknown is `Pass`: a helper
+    /// that cannot read its mode must not block keys.
+    pub fn from_word(word: &str) -> Self {
+        if word == WinCombos::Swallow.word() {
+            WinCombos::Swallow
+        } else {
+            WinCombos::Pass
+        }
+    }
+}
+
+/// Whether the key event goes on to the system.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Verdict {
+    Pass,
+    /// The hook returns 1: nothing else sees the event.
+    Swallow,
+}
+
+/// The answer for one key event.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Decision {
+    pub action: Action,
+    pub verdict: Verdict,
 }
 
 /// Two flags and nothing else: no key code, no character, no timestamp buffer.
@@ -136,6 +194,18 @@ impl WinKeyState {
         }
         Action::Nothing
     }
+
+    /// [`step`](Self::step) plus the verdict. In `Swallow` mode the key-down of any other
+    /// key that arrives while the Windows key is held is swallowed. Never swallowed: the
+    /// Windows key's own events, every key release (a swallowed release would leave the
+    /// key logically down for the whole system), and injected events.
+    pub fn decide(&mut self, key: KeyInput, mode: WinCombos) -> Decision {
+        // Read before `step` changes the flags.
+        let combination_key = !key.injected && !key.up && !is_win(key.vk) && self.win_down;
+        let action = self.step(key);
+        let verdict = if mode == WinCombos::Swallow && combination_key { Verdict::Swallow } else { Verdict::Pass };
+        Decision { action, verdict }
+    }
 }
 
 // ---- The hook itself (in the helper process) ---------------------------------
@@ -146,6 +216,8 @@ static STATE: Mutex<WinKeyState> = Mutex::new(WinKeyState {
     clean: false,
 });
 static TARGET: AtomicIsize = AtomicIsize::new(0);
+/// True when this helper swallows Windows-key combinations (set once, before the hook is installed).
+static SWALLOW: AtomicBool = AtomicBool::new(false);
 static SLOW_CALLS: AtomicU32 = AtomicU32::new(0);
 static INSTALLED: AtomicBool = AtomicBool::new(false);
 
@@ -202,11 +274,12 @@ fn hook_thread(ready: mpsc::Sender<Result<u32>>) {
 }
 
 /// Install the hook on its own thread, once. `hwnd` gets `WM_WINKEY_START`.
-fn install_hook(hwnd: isize) -> Result<Hook> {
+fn install_hook(hwnd: isize, mode: WinCombos) -> Result<Hook> {
     if INSTALLED.swap(true, Ordering::SeqCst) {
         return Err(DesktopError::Refused("the Windows-key hook is already installed".into()));
     }
     TARGET.store(hwnd, Ordering::SeqCst);
+    SWALLOW.store(mode == WinCombos::Swallow, Ordering::SeqCst);
     SLOW_CALLS.store(0, Ordering::SeqCst);
     if let Ok(mut state) = STATE.lock() {
         *state = WinKeyState::default();
@@ -249,11 +322,13 @@ unsafe extern "system" fn callback(code: i32, wparam: WPARAM, lparam: LPARAM) ->
                 up: matches!(message, WM_KEYUP | WM_SYSKEYUP),
                 injected: info.flags.0 & LLKHF_INJECTED.0 != 0,
             };
+            let mode = if SWALLOW.load(Ordering::Relaxed) { WinCombos::Swallow } else { WinCombos::Pass };
             // `try_lock`: never wait for anything inside the hook.
-            let action = match STATE.try_lock() {
-                Ok(mut state) => state.step(key),
-                Err(_) => Action::Nothing,
+            let decision = match STATE.try_lock() {
+                Ok(mut state) => state.decide(key, mode),
+                Err(_) => Decision { action: Action::Nothing, verdict: Verdict::Pass },
             };
+            let action = decision.action;
             if action == Action::ToggleStart {
                 let target = TARGET.load(Ordering::SeqCst);
                 if target != 0 {
@@ -268,12 +343,16 @@ unsafe extern "system" fn callback(code: i32, wparam: WPARAM, lparam: LPARAM) ->
                     };
                 }
             }
+            if decision.verdict == Verdict::Swallow {
+                // A key pressed together with the Windows key: nobody else sees it.
+                return LRESULT(1);
+            }
         }
         if started.elapsed().as_millis() > SLOW_CALL_MS {
             SLOW_CALLS.fetch_add(1, Ordering::SeqCst);
         }
     }
-    // Every event goes on to the next hook and the program that gets it.
+    // Every other event goes on to the next hook and the program that gets it.
     // SAFETY: forwarding the arguments we were given.
     unsafe { CallNextHookEx(None, code, wparam, lparam) }
 }
@@ -298,22 +377,24 @@ pub fn health(slow_calls: u32, reinstalls_done: u32) -> Health {
 }
 
 /// Pure: the helper's arguments after the exe name, when they ask for the
-/// helper. `Some(None)` is the switch with unusable arguments.
-fn parse_helper_args(args: &[OsString]) -> Option<Option<(isize, u32)>> {
+/// helper. `Some(None)` is the switch with unusable arguments. The optional
+/// fourth word is the mode; a missing or unknown one is `pass`.
+fn parse_helper_args(args: &[OsString]) -> Option<Option<(isize, u32, WinCombos)>> {
     if args.first()?.to_str() != Some(HELPER_SWITCH) {
         return None;
     }
     let number = |at: usize| args.get(at).and_then(|arg| arg.to_str());
     let hwnd = number(1).and_then(|text| text.parse::<isize>().ok()).filter(|hwnd| *hwnd != 0);
     let parent = number(2).and_then(|text| text.parse::<u32>().ok()).filter(|pid| *pid != 0);
-    Some(hwnd.zip(parent))
+    let mode = number(3).map(WinCombos::from_word).unwrap_or_default();
+    Some(hwnd.zip(parent).map(|(hwnd, parent)| (hwnd, parent, mode)))
 }
 
 /// Run as the hook helper when the command line asks for it; returns the exit
 /// code then. `None`: this is a normal start, carry on.
 pub fn helper_main(args: impl IntoIterator<Item = OsString>) -> Option<i32> {
     let args: Vec<OsString> = args.into_iter().skip(1).collect();
-    let Some((hwnd, parent)) = parse_helper_args(&args)? else {
+    let Some((hwnd, parent, mode)) = parse_helper_args(&args)? else {
         return Some(EXIT_BAD_ARGS);
     };
     if !WINKEY_HOOK_ENABLED {
@@ -323,7 +404,7 @@ pub fn helper_main(args: impl IntoIterator<Item = OsString>) -> Option<i32> {
     let Ok(parent) = (unsafe { OpenProcess(PROCESS_SYNCHRONIZE, false, parent) }) else {
         return Some(EXIT_BAD_ARGS);
     };
-    let code = run_helper(hwnd, |timeout| {
+    let code = run_helper(hwnd, mode, |timeout| {
         // SAFETY: `parent` is a valid handle until it is closed below.
         unsafe { WaitForSingleObject(parent, timeout.as_millis() as u32) == WAIT_OBJECT_0 }
     });
@@ -335,8 +416,8 @@ pub fn helper_main(args: impl IntoIterator<Item = OsString>) -> Option<i32> {
 /// The helper's life: hook installed, then every few seconds check the shell
 /// is still there and the hook is healthy. `parent_gone` waits up to the
 /// given time and says whether the shell process ended.
-fn run_helper(hwnd: isize, parent_gone: impl Fn(Duration) -> bool) -> i32 {
-    let Ok(mut hook) = install_hook(hwnd) else {
+fn run_helper(hwnd: isize, mode: WinCombos, parent_gone: impl Fn(Duration) -> bool) -> i32 {
+    let Ok(mut hook) = install_hook(hwnd, mode) else {
         return EXIT_INSTALL_FAILED;
     };
     let mut reinstalls = 0;
@@ -353,7 +434,7 @@ fn run_helper(hwnd: isize, parent_gone: impl Fn(Duration) -> bool) -> i32 {
             Health::Reinstall => {
                 reinstalls += 1;
                 drop(hook);
-                match install_hook(hwnd) {
+                match install_hook(hwnd, mode) {
                     Ok(new) => hook = new,
                     Err(_) => return EXIT_INSTALL_FAILED,
                 }
@@ -388,8 +469,8 @@ impl Drop for Helper {
     }
 }
 
-/// Start the helper for the message window `hwnd`.
-pub fn install(_token: &ShellToken, hwnd: isize) -> Result<Helper> {
+/// Start the helper for the message window `hwnd`, in the given mode.
+pub fn install(_token: &ShellToken, hwnd: isize, mode: WinCombos) -> Result<Helper> {
     if !WINKEY_HOOK_ENABLED {
         return Err(DesktopError::Refused("the Windows-key hook is switched off".into()));
     }
@@ -399,6 +480,7 @@ pub fn install(_token: &ShellToken, hwnd: isize) -> Result<Helper> {
         .arg(HELPER_SWITCH)
         .arg(hwnd.to_string())
         .arg(std::process::id().to_string())
+        .arg(mode.word())
         .stdin(Stdio::null())
         .stdout(Stdio::null())
         .stderr(Stdio::null())
@@ -412,13 +494,40 @@ thread_local! {
     /// The helper belongs to the loop thread: started, checked and ended there.
     static HELPER: RefCell<Option<Helper>> = const { RefCell::new(None) };
     static RESTARTS: Cell<u32> = const { Cell::new(0) };
+    /// The mode the running (or the next) helper has.
+    static MODE: Cell<WinCombos> = const { Cell::new(WinCombos::Pass) };
 }
 
-/// Start the helper and keep it on this (the loop) thread.
-pub fn install_on_loop(token: &ShellToken, hwnd: isize) -> Result<()> {
-    let helper = install(token, hwnd)?;
+/// Start the helper in `mode` and keep it on this (the loop) thread.
+pub fn install_on_loop(token: &ShellToken, hwnd: isize, mode: WinCombos) -> Result<()> {
+    let helper = install(token, hwnd, mode)?;
+    MODE.with(|slot| slot.set(mode));
     HELPER.with(|slot| *slot.borrow_mut() = Some(helper));
     Ok(())
+}
+
+/// The mode of the helper that runs (or last ran) on this loop thread.
+pub fn mode_on_loop() -> WinCombos {
+    MODE.with(Cell::get)
+}
+
+/// Change the mode of a running helper: it is ended and started again in `mode`
+/// (a hook cannot change its mode from outside; a restart takes a few milliseconds
+/// and lets no key through wrongly, it only passes them for that moment). Does nothing
+/// when the mode is already `mode`. `Ok(false)` when no helper is running.
+pub fn set_mode_on_loop(token: &ShellToken, hwnd: isize, mode: WinCombos) -> Result<bool> {
+    if mode_on_loop() == mode {
+        return Ok(HELPER.with(|slot| slot.borrow().is_some()));
+    }
+    let running = HELPER.with(|slot| slot.borrow().is_some());
+    MODE.with(|slot| slot.set(mode));
+    if !running {
+        return Ok(false);
+    }
+    remove_on_loop();
+    RESTARTS.with(|count| count.set(0));
+    install_on_loop(token, hwnd, mode)?;
+    Ok(true)
 }
 
 /// End the helper if it is running. Safe to call anywhere on the loop thread.
@@ -449,7 +558,7 @@ pub fn tick(token: &ShellToken, hwnd: isize) {
         return;
     }
     RESTARTS.with(|count| count.set(restarts + 1));
-    match install_on_loop(token, hwnd) {
+    match install_on_loop(token, hwnd, mode_on_loop()) {
         Ok(()) => tracing::warn!(?code, "the Windows-key helper ended and was started again"),
         Err(error) => tracing::warn!(%error, "the Windows-key helper could not be started again"),
     }
@@ -482,10 +591,35 @@ mod health_tests {
         let args = |list: &[&str]| list.iter().map(OsString::from).collect::<Vec<_>>();
         assert_eq!(parse_helper_args(&args(&[])), None);
         assert_eq!(parse_helper_args(&args(&["--other", "1", "2"])), None);
-        assert_eq!(parse_helper_args(&args(&[HELPER_SWITCH, "4242", "77"])), Some(Some((4242, 77))));
+        // No mode word (a Phase 3 shell): `pass`, exactly the old behaviour.
+        assert_eq!(parse_helper_args(&args(&[HELPER_SWITCH, "4242", "77"])), Some(Some((4242, 77, WinCombos::Pass))));
         assert_eq!(parse_helper_args(&args(&[HELPER_SWITCH, "x", "77"])), Some(None));
         assert_eq!(parse_helper_args(&args(&[HELPER_SWITCH, "0", "77"])), Some(None));
         assert_eq!(parse_helper_args(&args(&[HELPER_SWITCH, "4242"])), Some(None));
+    }
+
+    #[test]
+    fn the_mode_word_selects_swallow_and_anything_else_passes() {
+        let args = |list: &[&str]| list.iter().map(OsString::from).collect::<Vec<_>>();
+        assert_eq!(
+            parse_helper_args(&args(&[HELPER_SWITCH, "4242", "77", "swallow"])),
+            Some(Some((4242, 77, WinCombos::Swallow)))
+        );
+        assert_eq!(
+            parse_helper_args(&args(&[HELPER_SWITCH, "4242", "77", "pass"])),
+            Some(Some((4242, 77, WinCombos::Pass)))
+        );
+        // A word nobody knows must never turn the filter on.
+        for word in ["Swallow", "", "explode", "1"] {
+            assert_eq!(
+                parse_helper_args(&args(&[HELPER_SWITCH, "4242", "77", word])),
+                Some(Some((4242, 77, WinCombos::Pass))),
+                "{word:?}"
+            );
+        }
+        for mode in [WinCombos::Pass, WinCombos::Swallow] {
+            assert_eq!(WinCombos::from_word(mode.word()), mode);
+        }
     }
 }
 
@@ -571,11 +705,183 @@ mod tests {
         assert_eq!(state, WinKeyState::default(), "typing leaves no trace");
     }
 
+    // ---- Phase 5 Step 12: swallowing Windows-key combinations (plan P7) ------------
+
+    const TAB: u32 = 0x09;
+    const D: u32 = 0x44;
+    const SHIFT: u32 = 0xA0;
+    const F12: u32 = 0x7B;
+
+    /// Runs a recorded sequence through `decide`; what happened to each event.
+    fn decisions(mode: WinCombos, sequence: &[KeyInput]) -> Vec<Decision> {
+        let mut state = WinKeyState::default();
+        sequence.iter().map(|key| state.decide(*key, mode)).collect()
+    }
+
+    fn swallowed(mode: WinCombos, sequence: &[KeyInput]) -> Vec<bool> {
+        decisions(mode, sequence).iter().map(|d| d.verdict == Verdict::Swallow).collect()
+    }
+
+    fn toggles_with(mode: WinCombos, sequence: &[KeyInput]) -> usize {
+        decisions(mode, sequence).iter().filter(|d| d.action == Action::ToggleStart).count()
+    }
+
+    #[test]
+    fn swallow_mode_swallows_the_key_down_of_a_combination_and_nothing_else() {
+        // Win+R: the R press never reaches Windows; the Windows key and every release go on.
+        assert_eq!(
+            swallowed(WinCombos::Swallow, &[down(LWIN), down(R), up(R), up(LWIN)]),
+            [false, true, false, false]
+        );
+        // Win+Shift+D: both the Shift and the D presses are part of a combination.
+        assert_eq!(
+            swallowed(WinCombos::Swallow, &[down(RWIN), down(SHIFT), down(D), up(D), up(SHIFT), up(RWIN)]),
+            [false, true, true, false, false, false]
+        );
+        // Win+Tab and Win+E, one after the other with the Windows key held throughout.
+        assert_eq!(
+            swallowed(WinCombos::Swallow, &[down(LWIN), down(TAB), up(TAB), down(E), up(E), up(LWIN)]),
+            [false, true, false, true, false, false]
+        );
+    }
+
+    #[test]
+    fn a_lone_windows_key_still_opens_start_and_is_never_swallowed() {
+        let lone = [down(LWIN), up(LWIN)];
+        assert_eq!(swallowed(WinCombos::Swallow, &lone), [false, false]);
+        assert_eq!(toggles_with(WinCombos::Swallow, &lone), 1);
+        assert_eq!(toggles_with(WinCombos::Swallow, &[down(RWIN), down(RWIN), up(RWIN)]), 1, "repeat, right key");
+        // A combination does not toggle Start, in either mode.
+        for mode in [WinCombos::Pass, WinCombos::Swallow] {
+            assert_eq!(toggles_with(mode, &[down(LWIN), down(R), up(R), up(LWIN)]), 0);
+        }
+        // Two quick taps are two toggles.
+        assert_eq!(toggles_with(WinCombos::Swallow, &[down(LWIN), up(LWIN), down(LWIN), up(LWIN)]), 2);
+    }
+
+    #[test]
+    fn pass_mode_swallows_nothing_ever() {
+        let all = [
+            down(LWIN),
+            down(R),
+            up(R),
+            down(TAB),
+            up(TAB),
+            down(SHIFT),
+            up(SHIFT),
+            up(LWIN),
+            down(RWIN),
+            down(E),
+            up(RWIN),
+            up(E),
+        ];
+        assert!(swallowed(WinCombos::Pass, &all).iter().all(|swallowed| !swallowed));
+        // And its actions are exactly those of the Phase 3 `step`.
+        let mut plain = WinKeyState::default();
+        let mut decided = WinKeyState::default();
+        for key in all {
+            assert_eq!(decided.decide(key, WinCombos::Pass).action, plain.step(key));
+        }
+        assert_eq!(WinCombos::default(), WinCombos::Pass);
+    }
+
+    #[test]
+    fn no_key_release_and_no_windows_key_event_is_ever_swallowed() {
+        // Worst case for a stuck key: Ctrl held first, then Win, a combination key, and every release
+        // in the awkward order (Win released first, the combination key and Ctrl afterwards).
+        let sequence = [down(CTRL), down(LWIN), down(R), up(LWIN), up(R), up(CTRL)];
+        let result = decisions(WinCombos::Swallow, &sequence);
+        for (key, decision) in sequence.iter().zip(&result) {
+            if key.up || is_win(key.vk) {
+                assert_eq!(decision.verdict, Verdict::Pass, "{key:?}");
+            }
+        }
+        assert_eq!(
+            result.iter().map(|d| d.verdict == Verdict::Swallow).collect::<Vec<_>>(),
+            [false, false, true, false, false, false]
+        );
+    }
+
+    #[test]
+    fn keys_without_the_windows_key_are_never_touched() {
+        // Ordinary typing, Ctrl+C, Alt+Tab and the exit combination, in swallow mode.
+        let typing = [down(R), up(R), down(CTRL), down(0x43), up(0x43), up(CTRL), down(0x12), down(TAB), up(TAB), up(0x12)];
+        assert!(swallowed(WinCombos::Swallow, &typing).iter().all(|swallowed| !swallowed));
+        // After a Windows-key combination ended, typing is free again.
+        assert_eq!(
+            swallowed(WinCombos::Swallow, &[down(LWIN), down(R), up(R), up(LWIN), down(R), up(R)]),
+            [false, true, false, false, false, false]
+        );
+        // A Windows key released with no press seen (it went down before the helper started) swallows nothing.
+        assert_eq!(swallowed(WinCombos::Swallow, &[up(LWIN), down(R), up(R)]), [false, false, false]);
+    }
+
+    #[test]
+    fn injected_events_are_never_swallowed_and_do_not_start_a_combination() {
+        let injected = |vk, up| KeyInput { vk, up, injected: true };
+        // A program's own Win+R (an on-screen keyboard, a script) is not the user at the keyboard.
+        assert_eq!(
+            swallowed(WinCombos::Swallow, &[injected(LWIN, false), injected(R, false), injected(R, true), injected(LWIN, true)]),
+            [false; 4]
+        );
+        // An injected key while the user holds the Windows key is not swallowed either.
+        assert_eq!(swallowed(WinCombos::Swallow, &[down(LWIN), injected(R, false), up(LWIN)]), [false; 3]);
+    }
+
+    /// The administrator exit (a registered hotkey) can never contain the Windows key, so the
+    /// filter can never swallow it: every combination the grammar can express, played as key
+    /// events with no Windows key in it, passes untouched and opens nothing.
+    #[test]
+    fn every_key_the_admin_exit_can_use_passes_in_swallow_mode() {
+        let letters = 0x41..=0x5A_u32;
+        let digits = 0x30..=0x39_u32;
+        let functions = 0x70..=0x7B_u32;
+        for key in letters.chain(digits).chain(functions) {
+            // Ctrl or Alt is required; Shift is optional: six modifier sets.
+            for (ctrl, alt, shift) in [
+                (true, false, false),
+                (false, true, false),
+                (true, true, false),
+                (true, false, true),
+                (false, true, true),
+                (true, true, true),
+            ] {
+                let mut presses = Vec::new();
+                if ctrl {
+                    presses.push(CTRL);
+                }
+                if alt {
+                    presses.push(0xA4);
+                }
+                if shift {
+                    presses.push(SHIFT);
+                }
+                presses.push(key);
+                let sequence: Vec<KeyInput> =
+                    presses.iter().map(|vk| down(*vk)).chain(presses.iter().rev().map(|vk| up(*vk))).collect();
+                let result = decisions(WinCombos::Swallow, &sequence);
+                assert!(
+                    result.iter().all(|d| d.verdict == Verdict::Pass && d.action == Action::Nothing),
+                    "key {key:#x} with ctrl={ctrl} alt={alt} shift={shift}"
+                );
+            }
+        }
+        // The default combination, spelled out.
+        assert!(swallowed(WinCombos::Swallow, &[down(CTRL), down(SHIFT), down(F12), up(F12), up(SHIFT), up(CTRL)])
+            .iter()
+            .all(|swallowed| !swallowed));
+        // And none of those keys is a Windows key, so the filter's "Windows key held" never starts.
+        assert!(!is_win(CTRL) && !is_win(SHIFT) && !is_win(0xA4) && !is_win(F12));
+        for vk in (0x41..=0x5A).chain(0x30..=0x39).chain(0x70..=0x7B) {
+            assert!(!is_win(vk), "{vk:#x}");
+        }
+    }
+
     #[test]
     fn the_hook_cannot_be_installed_twice() {
         // The guard is checked on the flag, without touching the real hook.
         INSTALLED.store(true, Ordering::SeqCst);
-        assert!(install_hook(1).is_err());
+        assert!(install_hook(1, WinCombos::Swallow).is_err());
         INSTALLED.store(false, Ordering::SeqCst);
     }
 }

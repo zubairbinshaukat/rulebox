@@ -68,6 +68,12 @@ export const rateLimiter = new RateLimiter(components.rateLimiter, {
   // a healthy agent (a report per minute, a few audit records). A compromised
   // device can add at most 3,600 rows per hour.
   deviceWrites: { kind: "token bucket", rate: 60, period: MINUTE_MS, capacity: 600 },
+  // Phase 5 Step 10 (plan 4.19): the lockdown reports (`deviceApi:reportApply`, `reportFindings`,
+  // `reportSecurityDaily`, `reportAcks`, `registerSealKey`), per device (key = device id), ONE token
+  // per call that really wrote something (an unchanged report is free), consumed at the end so a
+  // refused call rolls its writes back. A healthy agent sends well under 10 a day; 60 an hour
+  // bounds a compromised one. (`deviceWrites` is charged per row as well.)
+  deviceReports: { kind: "token bucket", rate: 60, period: HOUR_MS, capacity: 60 },
   // `members:invite`, per organization; consumed in the mutation that stores
   // the invite (a refused invite rolls it back: only real invites count).
   inviteCreate: { kind: "token bucket", rate: 30, period: HOUR_MS, capacity: 30 },
@@ -104,6 +110,7 @@ export type LimitName =
   | "employeeWrites"
   | "verifyPerDevice"
   | "deviceWrites"
+  | "deviceReports"
   | "inviteCreate"
   | "pinResetPerUser"
   | "pinResetGlobal"

@@ -5,6 +5,7 @@ import type { Doc, Id } from "./_generated/dataModel";
 import { type DatabaseReader, type MutationCtx } from "./_generated/server";
 import { internalMutation } from "./lib/functions";
 import { SYSTEM_ACTOR, writeAudit } from "./lib/audit";
+import { base64Decode } from "./lib/crypto";
 import {
   buildDeviceDoc,
   buildPayload,
@@ -13,8 +14,14 @@ import {
   utf8Length,
   type BuildApp,
   type BuildInput,
+  type DocBroadcast,
+  type Phase5Input,
 } from "./lib/desired";
+import { configForRing, newGroupConfigCache, type GroupConfigCache, type GroupConfigContent } from "./lib/groupConfig";
+import type { RingValue, SealedBoxValue } from "./lib/lockdownValidators";
 import {
+  BROADCAST_READ,
+  MAX_ACTIVE_BROADCASTS,
   KEEP_VERSIONS,
   GROUP_LOAD_WORST_DOCS,
   GROUP_LOAD_WORST_RANGES,
@@ -207,6 +214,99 @@ export async function loadGroupInputs(
 }
 type PlanState = Doc<"desiredHeads">["planState"];
 
+/** Live broadcasts of one target, newest first, without cancelled and expired ones (`broadcasts.by_target_created`, <= BROADCAST_READ rows). */
+async function liveBroadcasts(
+  ctx: { db: DatabaseReader },
+  orgId: Id<"organizations">,
+  kind: "group" | "device",
+  id: string,
+  now: number,
+): Promise<DocBroadcast[]> {
+  const rows = await ctx.db
+    .query("broadcasts")
+    .withIndex("by_target_created", (q) => q.eq("target.kind", kind).eq("target.id", id))
+    .order("desc")
+    .take(BROADCAST_READ);
+  return rows
+    .filter((b) => b.orgId === orgId && b.cancelledAt === undefined && (b.expiresAt === undefined || b.expiresAt > now))
+    .map((b) => ({
+      id: b._id as string,
+      style: b.style,
+      title: b.title,
+      body: b.body,
+      expiresAtMs: b.expiresAt ?? null,
+      ackRequired: b.ackRequired,
+      issuedAtMs: b.createdAt,
+    }));
+}
+
+/** The device's sealed Wi-Fi boxes that are current: for this profile revision and this device's sealing key. */
+async function sealedBoxesOf(
+  ctx: { db: DatabaseReader },
+  device: Doc<"devices">,
+  wifi: GroupConfigContent["wifi"],
+): Promise<Record<string, SealedBoxValue>> {
+  const out: Record<string, SealedBoxValue> = {};
+  if (device.sealKeyId === undefined) return out;
+  for (const w of wifi) {
+    if (!w.hasPassphrase) continue;
+    const row = await ctx.db
+      .query("deviceSealedSecrets")
+      .withIndex("by_device_target", (q) => q.eq("deviceId", device._id).eq("purpose", "wifi").eq("targetId", w.id))
+      .first();
+    if (row === null || row.targetRevision !== w.revision || row.sealKeyId !== device.sealKeyId) continue;
+    const raw = base64Decode(row.sealed);
+    if (raw === null) continue;
+    try {
+      const box = JSON.parse(new TextDecoder().decode(raw)) as SealedBoxValue;
+      if (box.v === 1 && typeof box.ct === "string") out[w.id] = box;
+    } catch {
+      // A damaged box is treated as missing (the agent reports `waiting_for_key`).
+    }
+  }
+  return out;
+}
+
+/**
+ * The Phase 5 inputs of one device (plan 4.3, 4.14, 4.17): the group configuration its ring
+ * points to, its sealed Wi-Fi boxes and the live lock, broadcasts and USB window. `undefined`
+ * (no Phase 5 data at all) keeps the document exactly the Phase 4 one.
+ */
+async function loadPhase5(ctx: { db: DatabaseReader }, run: RunState, device: Doc<"devices">): Promise<Phase5Input | undefined> {
+  const ring: RingValue = device.ring ?? "everyone";
+  const cfg = device.groupId === undefined ? null : await configForRing(ctx, device.groupId, ring, run.configs);
+  const lock = await ctx.db
+    .query("deviceLocks")
+    .withIndex("by_device", (q) => q.eq("deviceId", device._id))
+    .first();
+
+  let groupLive: DocBroadcast[] = [];
+  if (device.groupId !== undefined) {
+    const cached = run.groupBroadcasts.get(device.groupId);
+    groupLive = cached ?? (await liveBroadcasts(ctx, device.orgId, "group", device.groupId, run.now));
+    if (cached === undefined) run.groupBroadcasts.set(device.groupId, groupLive);
+  }
+  const deviceLive = await liveBroadcasts(ctx, device.orgId, "device", device._id, run.now);
+  const broadcasts = [...groupLive, ...deviceLive]
+    .sort((a, b) => b.issuedAtMs - a.issuedAtMs || (a.id < b.id ? -1 : 1))
+    .slice(0, MAX_ACTIVE_BROADCASTS);
+  const usbUntil = device.usbTempAllowUntil !== undefined && device.usbTempAllowUntil > run.now ? device.usbTempAllowUntil : null;
+
+  if (cfg === null && lock === null && broadcasts.length === 0 && usbUntil === null) return undefined;
+  return {
+    config:
+      cfg === null || device.groupId === undefined
+        ? null
+        : { groupId: device.groupId, version: cfg.version, ring, content: cfg.content },
+    sealed: cfg === null ? {} : await sealedBoxesOf(ctx, device, cfg.content.wifi),
+    deviceLock:
+      lock === null ? null : { lockId: lock.lockId, message: lock.message, contact: lock.contact ?? null, lockedAtMs: lock.lockedAt },
+    usbTempAllowUntilMs: usbUntil,
+    broadcasts,
+    nowMs: run.now,
+  };
+}
+
 /**
  * The newest version a device may already have applied before its first head:
  * Phase 2 documents (device or group scope, unsigned) and its last report.
@@ -238,6 +338,9 @@ async function legacyVersionFloor(ctx: { db: DatabaseReader }, device: Doc<"devi
 type RunState = {
   org: OrgInputs;
   key: SigningKey;
+  /** Phase 5: group configuration pointers / versions and group-target broadcasts, loaded once per group per run. */
+  configs: GroupConfigCache;
+  groupBroadcasts: Map<string, DocBroadcast[]>;
   groups: Map<string, GroupInputs>;
   seen: Set<string>;
   now: number;
@@ -286,7 +389,9 @@ async function publishDevice(ctx: MutationCtx, run: RunState, device: Doc<"devic
     run.docs += load.docs;
   }
 
+  const phase5 = await loadPhase5(ctx, run, device);
   const input: BuildInput = {
+    ...(phase5 === undefined ? {} : { phase5 }),
     org: { _id: run.org.org._id, name: run.org.org.name },
     settings: run.org.settings,
     pinHash: run.org.pinHash,
@@ -464,6 +569,8 @@ export const run = internalMutation({
     const runState: RunState = {
       org: await loadOrgInputs(ctx, org),
       key: signing.key,
+      configs: newGroupConfigCache(),
+      groupBroadcasts: new Map(),
       groups: new Map(),
       seen: new Set(),
       now,

@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, test } from "vitest";
 import { allKeys, FORBIDDEN_KEYS } from "../tests/convex/identity";
+import { addWifi, createKeys, giveSealKey, MASTER_A, setMaster } from "../tests/convex/phase5";
 import { DEVICE_CALLS, fixture, outcome, publicFunctions, ROWS, type Caller, type Fixture } from "../tests/convex/matrixRows";
 import { api, internal } from "./_generated/api";
 import { sha256HexSync } from "./lib/crypto";
@@ -28,8 +29,13 @@ const MASTER_KEY = btoa(String.fromCharCode(...Array.from({ length: 32 }, (_, i)
 const SECRET_FIELDS = [
   "secretHash", "previousSecretHash", "tokenHash", "passwordHash", "exitPinHash", "actionPinHash", "challengeHash",
   "hardwareIdHash", "totpSecret", "totpPending", "credentialPublicKey", "webauthnUserId", "ciphertext", "iv", "secret",
+  // Phase 5 Step 10: wrapped org keys, sealed Wi-Fi boxes (stored as base64 of the JSON box) and the device sealing key.
+  "wrapped", "sealed", "sealPublicKey",
 ] as const;
 const SECRET_ARRAY_FIELDS = ["recoveryHashes"] as const;
+
+/** Phase 5: the Wi-Fi passphrase in the clear (never stored, never returned) and the master key. */
+const WIFI_PASSPHRASE = "leak-test-wifi-passphrase-9876";
 
 const hex = (seed: string) => sha256HexSync(`secrets-test-${seed}`);
 
@@ -83,16 +89,25 @@ async function seedSecrets(f: Fixture): Promise<void> {
     if (device !== null) await ctx.db.patch(device._id, { hardwareIdHash: hex("hardware") });
   });
   for (const [name, value] of Object.entries(PLATFORM_VALUES)) await f.t.action(internal.platform.setSecret, { name, value });
+  // Phase 5 Step 10: the organization's own sealing key (wrapped), a Wi-Fi profile whose passphrase is encrypted at rest, the
+  // device's sealing key and the box sealed for it (a real `seal:forDevices` run).
+  await createKeys(f.t, f.orgId);
+  await addWifi(f.t, f.orgId, { groupIds: [f.groupId], passphrase: WIFI_PASSPHRASE });
+  await giveSealKey(f.t, f.deviceId);
+  await f.t.action(internal.seal.forDevices, { orgId: f.orgId, deviceIds: [f.deviceId] });
 }
 
 /** Every secret value in the deployment (as stored), plus the platform secrets in the clear. */
 async function harvest(f: Fixture): Promise<string[]> {
   const stored = await f.t.run(async (ctx) => {
     const out: string[] = [];
-    const tables = ["devices", "deviceCredentials", "enrollmentTokens", "invites", "employeeSecrets", "orgSecrets", "stepUpFactors", "pinResets", "passkeys", "stepUpChallenges", "memberSecrets", "platformSecrets"] as const;
+    const tables = ["devices", "deviceCredentials", "enrollmentTokens", "invites", "employeeSecrets", "orgSecrets", "stepUpFactors", "pinResets", "passkeys", "stepUpChallenges", "memberSecrets", "platformSecrets", "orgKeys", "wifiProfiles", "deviceSealedSecrets"] as const;
     for (const table of tables) {
       for (const doc of (await ctx.db.query(table).collect()) as unknown as Record<string, unknown>[]) {
         for (const field of SECRET_FIELDS) if (typeof doc[field] === "string") out.push(doc[field]);
+        // `wifiProfiles.passphrase` is `{ keyId, sealed }`: the ciphertext at rest.
+        const passphrase = doc.passphrase as { sealed?: unknown } | undefined;
+        if (typeof passphrase?.sealed === "string") out.push(passphrase.sealed);
         for (const field of SECRET_ARRAY_FIELDS) {
           const list = doc[field];
           if (Array.isArray(list)) for (const x of list) if (typeof x === "string") out.push(x);
@@ -101,7 +116,7 @@ async function harvest(f: Fixture): Promise<string[]> {
     }
     return out;
   });
-  return [...new Set([...stored, ...Object.values(PLATFORM_VALUES)])].filter((s) => s.length >= 8);
+  return [...new Set([...stored, ...Object.values(PLATFORM_VALUES), WIFI_PASSPHRASE, MASTER_A])].filter((s) => s.length >= 8);
 }
 
 /** The text of an outcome: the returned value or the error (its code and data). */
@@ -120,10 +135,12 @@ async function auditText(f: Fixture): Promise<string> {
 beforeEach(() => {
   process.env.RULEBOX_RECOVERY_PEPPER = "secrets-test-recovery-pepper-0123456789";
   process.env.RULEBOX_PLATFORM_KEY = MASTER_KEY;
+  setMaster(MASTER_A); // the deployment master key of the keyring (Phase 5): the organization keys are wrapped with it
 });
 afterEach(() => {
   delete process.env.RULEBOX_RECOVERY_PEPPER;
   delete process.env.RULEBOX_PLATFORM_KEY;
+  setMaster(undefined);
 });
 
 const CALLERS_SCANNED: Caller[] = ["owner", "admin", "viewer", "foreign", "ownerStale", "unauth"];
@@ -141,6 +158,20 @@ describe("secrets (plan 4.7)", () => {
     const stored = await f.t.run((ctx) => ctx.db.query("platformSecrets").collect());
     expect(stored.length).toBe(3);
     expect(JSON.stringify(stored)).not.toContain("LeakTestKey");
+    // Phase 5: the wrapped org key, the encrypted passphrase and the sealed box are really there, and none holds the plaintext.
+    expect(secrets.filter((s) => s !== WIFI_PASSPHRASE && s !== MASTER_A).length).toBeGreaterThan(30);
+    const phase5 = await f.t.run(async (ctx) => ({
+      keys: await ctx.db.query("orgKeys").collect(),
+      wifi: await ctx.db.query("wifiProfiles").collect(),
+      boxes: await ctx.db.query("deviceSealedSecrets").collect(),
+      device: await ctx.db.get(f.deviceId),
+    }));
+    expect(phase5.keys.length).toBeGreaterThanOrEqual(1);
+    expect(phase5.wifi[0]!.passphrase?.sealed).toBeDefined();
+    expect(phase5.boxes).toHaveLength(1);
+    expect(phase5.device!.sealPublicKey).toBeDefined();
+    expect(JSON.stringify(phase5)).not.toContain(WIFI_PASSPHRASE);
+    expect(JSON.stringify(phase5)).not.toContain(MASTER_A);
   });
 
   const rows = ROWS.map((r) => [r.name, r] as const);

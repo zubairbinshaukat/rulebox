@@ -240,7 +240,7 @@ describe("web addresses", () => {
     expect(w).toEqual({
       url: "https://Docs.Example.com/x",
       allowedDomains: ["docs.example.com", "*.cdn.example.com", "api.example.com"],
-      permissions: DEFAULT_WEB_PERMISSIONS,
+      permissions: { ...DEFAULT_WEB_PERMISSIONS, printing: true }, // a new site allows printing (Phase 5 Step 11)
     });
     const many = Array.from({ length: 21 }, (_, i) => `h${i}.example.com`);
     expect(() => normalizeWeb("https://example.com", many)).toThrow();

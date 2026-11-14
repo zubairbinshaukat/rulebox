@@ -38,6 +38,7 @@ function baseShell(over: Partial<ShellState> = {}): ShellState {
     notices: [],
     banner: null,
     capabilities: ["session", "apps", "adminExit", "state", "health"],
+    broadcasts: [],
     ...over,
   };
 }

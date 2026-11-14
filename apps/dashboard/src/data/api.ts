@@ -29,6 +29,7 @@ import type {
   SettingsScreen,
   WebAppInput,
   WebMeta,
+  WebPermissions,
   WingetResolved,
 } from "./types";
 import type { ListQuery, ServerList } from "./serverList";
@@ -123,6 +124,11 @@ export interface DataApi {
   useCreateWebApp: Mutation<WebAppInput, Id>;
   useCreateDesktopApp: Mutation<DesktopAppInput, Id>;
   useUpdateApp: Mutation<{ appId: Id; expectedRevision: number; web?: WebAppInput; desktop?: DesktopAppInput }>;
+  /**
+   * `apps:setPermissions` (admin, `expectedRevision`): the eight permissions of a website, saved on their own so the
+   * form's other fields are untouched. Resolves to the revision to send next (the same one when nothing changed).
+   */
+  useSetAppPermissions: Mutation<{ appId: Id; expectedRevision: number; permissions: WebPermissions }, { revision: number }>;
   useSetAppArchived: Mutation<{ appId: Id; archived: boolean }>;
   useDeleteApp: Mutation<{ appId: Id }>;
   useRetryApp: Mutation<{ appId: Id }>;

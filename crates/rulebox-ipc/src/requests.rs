@@ -61,6 +61,8 @@ pub enum SignInOutcome {
     /// (1.2) The password is right, but the employee may not sign in on this PC
     /// (not in its group; offline: not in its signed roster).
     NotAllowedHere,
+    /// (1.3) The device is locked: nobody can sign in until the lock is removed.
+    DeviceLocked,
     Unknown,
 }
 
@@ -82,6 +84,9 @@ pub enum SessionEndReason {
     CredentialChanged,
     /// The PC's enrollment was revoked.
     Revoked,
+    /// (1.3) The administrator locked the device (plan Phase 5, 4.17). A 1.2 client
+    /// reads it as `Unknown`.
+    DeviceLocked,
     Unknown,
 }
 
@@ -276,12 +281,72 @@ unknown_on_new_values!(SignInOutcome {
     OfflineNeverSignedIn => "offlineNeverSignedIn",
     OfflineExpired => "offlineExpired",
     NotAllowedHere => "notAllowedHere",
+    DeviceLocked => "deviceLocked",
 });
 unknown_on_new_values!(SessionEndReason {
     EmployeeRemoved => "employeeRemoved",
     CredentialChanged => "credentialChanged",
     Revoked => "revoked",
+    DeviceLocked => "deviceLocked",
 });
+
+/// (1.3) Parameters of `broadcast.acknowledge`: the employee pressed "OK".
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct BroadcastAckParams {
+    pub id: String,
+}
+
+/// (1.3) Result of `broadcast.acknowledge` and `webapp.reportDenials`.
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct OkResult {
+    #[serde(default)]
+    pub ok: bool,
+}
+
+/// (1.3) The most entries one `webapp.reportDenials` call may carry.
+pub const MAX_DENIAL_ENTRIES: usize = 100;
+/// (1.3) The largest count one entry may carry.
+pub const MAX_DENIAL_COUNT: u64 = 10_000;
+/// (1.3) The eight permission names of a web app (PRD 24.1), as they appear in `kind`.
+pub const PERMISSION_KINDS: [&str; 8] = [
+    "camera",
+    "microphone",
+    "screenShare",
+    "clipboardRead",
+    "notifications",
+    "downloads",
+    "printing",
+    "geolocation",
+];
+
+/// (1.3) One counter of `webapp.reportDenials`: how often `app_id` asked for `kind`
+/// and was refused since the last report. Never a page address, time or employee.
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct DenialCount {
+    pub app_id: String,
+    pub kind: String,
+    pub count: u64,
+}
+
+/// (1.3) Parameters of `webapp.reportDenials`.
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct ReportDenialsParams {
+    pub counts: Vec<DenialCount>,
+}
+
+/// (1.3) Data of the `program.blocked` event.
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct ProgramBlockedData {
+    pub display_name: String,
+}
+
+/// (1.3) The longest `displayName` of `program.blocked`, in characters.
+pub const MAX_PROGRAM_NAME_CHARS: usize = 100;
 unknown_on_new_values!(VerifyOutcome {
     Ok => "ok",
     WrongCredentials => "wrongCredentials",
@@ -459,10 +524,11 @@ mod tests {
             S::OfflineNeverSignedIn,
             S::OfflineExpired,
             S::NotAllowedHere,
+            S::DeviceLocked,
             S::Unknown,
         ]);
         use SessionEndReason as R;
-        check(&[R::EmployeeRemoved, R::CredentialChanged, R::Revoked, R::Unknown]);
+        check(&[R::EmployeeRemoved, R::CredentialChanged, R::Revoked, R::DeviceLocked, R::Unknown]);
         check(&[VerifyOutcome::Ok, VerifyOutcome::WrongCredentials, VerifyOutcome::LockedOut, VerifyOutcome::Unknown]);
         check(&[AppKind::Builtin, AppKind::Web, AppKind::Desktop, AppKind::Unknown]);
         check(&[
@@ -494,6 +560,44 @@ mod tests {
         let later: SessionEndedData = serde_json::from_value(json!({ "reason": "deviceMoved" })).unwrap();
         assert_eq!(later.reason, SessionEndReason::Unknown);
         assert_eq!(serde_json::from_str::<SignInOutcome>("\"notAllowedHere\"").unwrap(), SignInOutcome::NotAllowedHere);
+    }
+
+    /// (1.3) The new request, result, event data and the two new enum values.
+    #[test]
+    fn protocol_1_3_golden_json() {
+        let ack: BroadcastAckParams = golden(json!({ "id": "bc_1" }));
+        assert_eq!(ack.id, "bc_1");
+        assert!(golden::<OkResult>(json!({ "ok": true })).ok);
+        // A result without `ok` reads as false, never as an error.
+        assert!(!serde_json::from_value::<OkResult>(json!({})).unwrap().ok);
+
+        let denials: ReportDenialsParams = golden(json!({ "counts": [
+            { "appId": "orders-web", "kind": "camera", "count": 3 },
+            { "appId": "orders-web", "kind": "screenShare", "count": 1 }
+        ] }));
+        assert_eq!(denials.counts.len(), 2);
+        assert!(denials.counts.iter().all(|c| PERMISSION_KINDS.contains(&c.kind.as_str())));
+
+        let blocked: ProgramBlockedData = golden(json!({ "displayName": "Tor Browser" }));
+        assert_eq!(blocked.display_name, "Tor Browser");
+
+        let locked: SignInResult = golden(json!({
+            "outcome": "deviceLocked", "employee": null, "filesRoot": null,
+            "offline": false, "retryAfterMs": null
+        }));
+        assert_eq!(locked.outcome, SignInOutcome::DeviceLocked);
+        let ended: SessionEndedData = golden(json!({ "reason": "deviceLocked" }));
+        assert_eq!(ended.reason, SessionEndReason::DeviceLocked);
+    }
+
+    #[test]
+    fn permission_kind_names_are_the_eight_of_prd_24_1() {
+        let defaults = serde_json::to_value(WebPermissions::default()).unwrap();
+        let mut keys: Vec<&str> = defaults.as_object().unwrap().keys().map(String::as_str).collect();
+        keys.sort_unstable();
+        let mut kinds = PERMISSION_KINDS.to_vec();
+        kinds.sort_unstable();
+        assert_eq!(keys, kinds, "the report names must be the keys of WebPermissions");
     }
 
     #[test]

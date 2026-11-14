@@ -40,6 +40,8 @@ const SHELL_COMMANDS: &[&str] = &[
     "task_menu",
     "show_desktop",
     "refresh_catalogue",
+    // Protocol 1.3 (Phase 5 Step 12): "OK" on a broadcast.
+    "broadcast_ack",
     "open_doc",
     // Files (Step 12): the desktop panel and the Start menu only read.
     "fs_list",

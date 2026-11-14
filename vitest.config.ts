@@ -11,6 +11,9 @@ export default defineConfig({
           name: "convex",
           include: ["convex/**/*.test.ts"],
           environment: "edge-runtime",
+          // Heavy files (auth, ioBudgets) run in parallel and can pass 5 s
+          // under load; they finish fine alone. Generous cap, not a hang guard.
+          testTimeout: 30_000,
           server: { deps: { inline: ["convex-test"] } },
         },
       },

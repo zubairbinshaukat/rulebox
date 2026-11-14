@@ -25,6 +25,7 @@ use tokio_util::sync::CancellationToken;
 pub mod convex;
 #[cfg(test)]
 pub mod fake;
+pub mod reports;
 pub mod task;
 pub mod value;
 
@@ -52,6 +53,16 @@ pub trait Backend: Send + Sync {
     /// changed), install results and audit records in one call. Each part keeps
     /// the server's own idempotency rule, so a repeated batch is harmless.
     fn report<'a>(&'a self, auth: &DeviceAuth, batch: &ReportBatch) -> BoxFuture<'a, Result<ReportAccepted, BackendError>>;
+
+    /// (Phase 5 Step 9) One lockdown report (`deviceApi:reportApply`, `reportFindings`
+    /// or `reportSecurityDaily`; the functions arrive with Step 10). Each is idempotent on
+    /// the server, so a repeated call after a lost answer is harmless. The default is
+    /// "not supported": a backend that does not know the call is `Rejected`, and the
+    /// caller keeps the report and tries again later.
+    fn lockdown_report<'a>(&'a self, auth: &DeviceAuth, call: &reports::LockdownCall) -> BoxFuture<'a, Result<(), BackendError>> {
+        let _ = (auth, call);
+        Box::pin(async { Err(BackendError::Rejected { code: CODE_NOT_SUPPORTED.to_string() }) })
+    }
 
     /// (Phase 4 Step 13) The action `deviceApi:verifyEmployee`: one online check of
     /// a username and password. The password is an argument of this one call and
@@ -98,6 +109,9 @@ pub const CODE_DEVICE_REJECTED: &str = "device_rejected";
 pub const CODE_CONFLICT: &str = "conflict";
 /// (Step 13) `rotateCredential` for a device without a credentials row.
 pub const CODE_NOT_READY: &str = "not_ready";
+/// (Phase 5 Step 9) The backend has no such call (a [`Backend`] that does not override
+/// `lockdown_report`).
+pub const CODE_NOT_SUPPORTED: &str = "not_supported";
 
 /// (Phase 4 Step 13) The live backend and the credentials of this device, while
 /// the backend task runs. The employee directory and the report sink are built

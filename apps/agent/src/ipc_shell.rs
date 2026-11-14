@@ -9,7 +9,7 @@ use std::sync::Arc;
 use futures_util::future::BoxFuture;
 use futures_util::FutureExt;
 use rulebox_ipc::methods::{events, Method, ShellHeartbeat, ShellReady, StateGet};
-use rulebox_ipc::requests::{SessionEndReason, SessionEndedData};
+use rulebox_ipc::requests::{ProgramBlockedData, SessionEndReason, SessionEndedData, MAX_PROGRAM_NAME_CHARS};
 use rulebox_ipc::server::{Connection, PeerInfo, PipeListener};
 use rulebox_ipc::types::{AgentSnapshot, ClientRole, ShutdownReason};
 use rulebox_ipc::{ErrorCode, Frame, RpcError, CAPABILITIES, HELLO_DEADLINE};
@@ -72,6 +72,27 @@ impl ShellBroadcast {
     pub fn session_ended(&self, reason: SessionEndReason) {
         let data = serde_json::to_value(SessionEndedData { reason }).unwrap_or(serde_json::Value::Null);
         let _ = self.tx.send(Frame::Event { event: events::SESSION_ENDED.to_string(), data });
+    }
+
+    /// (1.3) `device.lockChanged` with `{}`: the lock was set or cleared.
+    pub fn device_lock_changed(&self) {
+        let frame = Frame::Event { event: events::DEVICE_LOCK_CHANGED.to_string(), data: serde_json::json!({}) };
+        let _ = self.tx.send(frame);
+    }
+
+    /// (1.3) `broadcasts.changed` with `{}`. The caller keeps to one per 2 seconds.
+    pub fn broadcasts_changed(&self) {
+        let frame = Frame::Event { event: events::BROADCASTS_CHANGED.to_string(), data: serde_json::json!({}) };
+        let _ = self.tx.send(frame);
+    }
+
+    /// (1.3) `program.blocked` with `{ displayName }`, cut to 100 characters. The caller sends
+    /// it at most once per program per session. (Step 20 calls it from the process watch.)
+    #[allow(dead_code)]
+    pub fn program_blocked(&self, display_name: &str) {
+        let display_name: String = display_name.chars().take(MAX_PROGRAM_NAME_CHARS).collect();
+        let data = serde_json::to_value(ProgramBlockedData { display_name }).unwrap_or(serde_json::Value::Null);
+        let _ = self.tx.send(Frame::Event { event: events::PROGRAM_BLOCKED.to_string(), data });
     }
 
     fn sender(&self) -> broadcast::Sender<Frame> {
@@ -605,13 +626,60 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn hello_answers_protocol_1_2_with_the_always_present_capabilities() {
+    async fn hello_answers_protocol_1_3_with_the_always_present_capabilities() {
         let rig = Rig::start(Vec::new());
         let mut client = RawClient::connect(&rig.name).await;
         let hello = hello(&mut client).await;
-        assert_eq!(hello.protocol, ProtocolVersion { major: 1, minor: 2 });
+        assert_eq!(hello.protocol, ProtocolVersion { major: 1, minor: 3 });
         assert_eq!(hello.capabilities, ["state", "health"]);
         assert_eq!(hello.agent_version, env!("CARGO_PKG_VERSION"));
+        rig.stop().await;
+    }
+
+    /// Recorded transcripts of a 1.1 and a 1.2 Staff App (the exact frame text each put on
+    /// the pipe): the 1.3 agent accepts both hellos, answers state.get with a snapshot those
+    /// clients can read, and keeps the other frames working. The unit-level twin of this is
+    /// `crates/rulebox-ipc/tests/compat_1_1_1_2.rs`.
+    #[tokio::test]
+    async fn recorded_1_1_and_1_2_client_transcripts_work_on_a_1_3_agent() {
+        const HELLOS: [&str; 2] = [
+            r#"{"t":"req","id":0,"method":"hello","params":{"protocol":{"major":1,"minor":1},"client":{"role":"shell","name":"rulebox-staff","version":"0.1.0"}}}"#,
+            r#"{"t":"req","id":0,"method":"hello","params":{"protocol":{"major":1,"minor":2},"client":{"role":"shell","name":"rulebox-staff","version":"0.2.0"}}}"#,
+        ];
+        const REST: [&str; 3] = [
+            r#"{"t":"req","id":1,"method":"state.get","params":{}}"#,
+            r#"{"t":"req","id":2,"method":"shell.ready","params":{}}"#,
+            r#"{"t":"req","id":3,"method":"shell.heartbeat","params":{}}"#,
+        ];
+        let rig = Rig::start(Vec::new());
+        for hello_text in HELLOS {
+            let mut client = RawClient::connect(&rig.name).await;
+            let hello: Frame = serde_json::from_str(hello_text).unwrap();
+            client.send(hello).await;
+            let answer = client.recv().await.expect("the hello answer");
+            let Frame::Response { id: 0, ok: true, result: Some(result), .. } = answer else {
+                panic!("the hello of an older minor must be accepted: {answer:?}");
+            };
+            assert_eq!(result["protocol"], json!({ "major": 1, "minor": 3 }));
+            for text in REST {
+                let request: Frame = serde_json::from_str(text).unwrap();
+                client.send(request).await;
+            }
+            let mut snapshot = None;
+            for _ in 0..3 {
+                match client.recv().await.expect("an answer") {
+                    Frame::Response { id: 1, ok: true, result: Some(result), .. } => snapshot = Some(result),
+                    Frame::Response { ok: true, .. } => {}
+                    other => panic!("unexpected {other:?}"),
+                }
+            }
+            let snapshot = snapshot.expect("the snapshot");
+            // Every key a 1.1 client reads is there; the 1.3 additions come with it and are ignored.
+            for key in ["agentVersion", "enrollment", "kiosk", "displayMode", "desiredStateVersion", "adminExit"] {
+                assert!(snapshot.get(key).is_some(), "{key}");
+            }
+            assert!(snapshot.get("deviceLock").is_some() && snapshot.get("broadcasts").is_some());
+        }
         rig.stop().await;
     }
 
@@ -734,6 +802,30 @@ mod tests {
                 other => panic!("unexpected {other:?}"),
             }
         }
+        rig.stop().await;
+    }
+
+    /// (1.3) The three new events reach a client with their documented data.
+    #[tokio::test]
+    async fn the_1_3_events_carry_their_documented_data() {
+        let rig = Rig::start(Vec::new());
+        let mut client = RawClient::connect(&rig.name).await;
+        hello(&mut client).await;
+
+        rig.broadcast.device_lock_changed();
+        rig.broadcast.broadcasts_changed();
+        rig.broadcast.program_blocked(&"p".repeat(300));
+        let mut seen = Vec::new();
+        for _ in 0..3 {
+            match client.recv().await.expect("an event") {
+                Frame::Event { event, data } => seen.push((event, data)),
+                other => panic!("unexpected {other:?}"),
+            }
+        }
+        assert_eq!(seen[0], ("device.lockChanged".to_string(), json!({})));
+        assert_eq!(seen[1], ("broadcasts.changed".to_string(), json!({})));
+        assert_eq!(seen[2].0, "program.blocked");
+        assert_eq!(seen[2].1["displayName"].as_str().map(|name| name.chars().count()), Some(100));
         rig.stop().await;
     }
 

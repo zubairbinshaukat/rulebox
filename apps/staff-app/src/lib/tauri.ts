@@ -80,6 +80,7 @@ export type SignInOutcomeDto =
   | "offlineNeverSignedIn"
   | "offlineExpired"
   | "notAllowedHere"
+  | "deviceLocked"
   | "unknown";
 
 /** Externally-tagged serde shape of `VerifyOutcome`. */
@@ -182,6 +183,8 @@ type Commands = {
   fs_open: { args: { path: string }; result: OpenAction };
   fs_open_with: { args: { path: string }; result: OpenAction };
   viewer_fullscreen: { args: { on: boolean }; result: void };
+  /** (Protocol 1.3) "OK" on a broadcast: the agent queues one acknowledgement. */
+  broadcast_ack: { args: { id: string }; result: void };
 };
 
 export function call<K extends keyof Commands>(

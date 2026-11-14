@@ -107,8 +107,10 @@ pub fn read_state(
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => return (StateReading::Missing, true),
         Err(error) => return (StateReading::Unreadable(error.to_string()), true),
     };
-    match serde_json::from_slice::<AgentState>(&bytes) {
-        Ok(state) => (StateReading::Readable(Box::new(state)), true),
+    // A schema 1 file is migrated in memory only; `recover` writes nothing it did not
+    // have to (the state file is replaced at the end of the run, in schema 2).
+    match crate::state::parse_state(&bytes) {
+        Ok((state, _migrated)) => (StateReading::Readable(Box::new(state)), true),
         Err(error) => (StateReading::Unreadable(format!("it does not parse: {error}")), true),
     }
 }
@@ -203,11 +205,14 @@ pub struct Plan {
     pub notes: Vec<String>,
 }
 
-fn data_of(original: &OriginalValue) -> Option<RegData> {
+/// The registry data an original stands for: `Some(None)` = delete the value,
+/// `None` = this original does not fit a registry value.
+fn data_of(original: &OriginalValue) -> Option<Option<RegData>> {
     match original {
-        OriginalValue::Absent | OriginalValue::InSecrets => None,
-        OriginalValue::Dword(value) => Some(RegData::Dword(*value)),
-        OriginalValue::String(text) => Some(RegData::String(text.clone())),
+        OriginalValue::Absent | OriginalValue::InSecrets | OriginalValue::NotPresent => Some(None),
+        OriginalValue::Dword(value) => Some(Some(RegData::Dword(*value))),
+        OriginalValue::String(text) => Some(Some(RegData::String(text.clone()))),
+        _ => None,
     }
 }
 
@@ -225,12 +230,24 @@ pub fn plan(facts: &Facts) -> Plan {
         StateReading::Readable(state) => {
             // Step 3. The journal is in the order the values were first changed.
             let password_lost = state.journal.iter().any(|entry| entry.original == OriginalValue::InSecrets);
+            // Journal v2 also holds service, policy, Wi-Fi and printer entries
+            // (Phase 5). `recover` restores the registry values it can; the rest is
+            // left alone and named in the notes. (Their `Platform` calls arrive in
+            // Phase 5 Step 3 onward and join this loop then.)
+            let mut skipped = 0usize;
             for entry in &state.journal {
+                let Some(key) = entry.machine_key() else {
+                    skipped += 1;
+                    continue;
+                };
                 if entry.original == OriginalValue::InSecrets {
-                    steps.push(Step::DropPasswordValue { key: entry.key.clone() });
+                    steps.push(Step::DropPasswordValue { key: key.clone() });
                     continue;
                 }
-                let mut data = data_of(&entry.original);
+                let Some(mut data) = data_of(&entry.original) else {
+                    skipped += 1;
+                    continue;
+                };
                 // The owner's password cannot come back, so putting automatic sign-in
                 // back to "1" would make Windows try the owner's account with no
                 // password at every start (and count each try as a failed sign-in).
@@ -239,7 +256,7 @@ pub fn plan(facts: &Facts) -> Plan {
                 // replaced (`lsa_taken_over`): `recover` deletes the Staff password
                 // from the LSA and cannot read the original (only SYSTEM can).
                 if (password_lost || state.kiosk.lsa_taken_over)
-                    && entry.key == winlogon(AUTO_ADMIN_LOGON)
+                    && *key == winlogon(AUTO_ADMIN_LOGON)
                     && data == Some(RegData::String("1".to_string()))
                 {
                     data = Some(RegData::String("0".to_string()));
@@ -249,7 +266,15 @@ pub fn plan(facts: &Facts) -> Plan {
                             .to_string(),
                     );
                 }
-                steps.push(Step::RestoreValue { key: entry.key.clone(), data });
+                steps.push(Step::RestoreValue { key: key.clone(), data });
+            }
+            if skipped > 0 {
+                notes.push(format!(
+                    "{skipped} journal entr{} for other settings (services, policies, Wi-Fi, printers) {} not \
+                     restored by this build of `recover`; they stay in the journal.",
+                    if skipped == 1 { "y" } else { "ies" },
+                    if skipped == 1 { "was" } else { "were" },
+                ));
             }
             if password_lost {
                 notes.push(
@@ -411,7 +436,7 @@ struct Outcome {
 /// take-over are forgotten once undone, or the next Enable would believe they are
 /// still in place.
 fn apply_to_state(state: &mut AgentState, outcome: &Outcome) {
-    state.journal.retain(|entry| !outcome.restored.contains(&entry.key));
+    state.journal.retain(|entry| entry.machine_key().is_none_or(|key| !outcome.restored.contains(key)));
     if outcome.lsa_default_password_ok {
         state.kiosk.lsa_taken_over = false;
     }
@@ -685,7 +710,7 @@ mod tests {
     }
 
     fn entry(name: &str, original: OriginalValue) -> JournalEntry {
-        JournalEntry { key: winlogon(name), original }
+        JournalEntry::machine(winlogon(name), original, 0)
     }
 
     // -- the pure decisions (plan unit test 2) ---------------------------------------------
@@ -734,13 +759,14 @@ mod tests {
         let journal = vec![
             entry("AutoAdminLogon", OriginalValue::Absent),
             entry("DefaultUserName", OriginalValue::String("Owner".into())),
-            JournalEntry {
-                key: RegValueRef {
+            JournalEntry::machine(
+                RegValueRef {
                     path: r"SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System".into(),
                     name: "EnableFirstLogonAnimation".into(),
                 },
-                original: OriginalValue::Dword(1),
-            },
+                OriginalValue::Dword(1),
+                0,
+            ),
         ];
         let result = plan(&facts(readable(journal, true), Some("RuleboxStaff"), Some("S-1-5-21-1-2-3-1001")));
         assert_eq!(
@@ -859,7 +885,7 @@ mod tests {
         };
         apply_to_state(&mut state, &outcome);
         assert_eq!(state.journal.len(), 1);
-        assert_eq!(state.journal[0].key.name, "DefaultUserName");
+        assert_eq!(state.journal[0].key_name(), "DefaultUserName");
         assert!(!state.kiosk.lsa_taken_over);
         assert!(state.kiosk.staff_hive.is_none());
         assert_eq!(state.kiosk.applied, KioskApplied::Disabled);
@@ -1114,7 +1140,7 @@ mod tests {
         // The entry that was not restored is still in the journal for next time.
         let saved = world.state_file();
         assert_eq!(saved.journal.len(), 1);
-        assert_eq!(saved.journal[0].key.name, "AutoAdminLogon");
+        assert_eq!(saved.journal[0].key_name(), "AutoAdminLogon");
         assert_eq!(saved.kiosk.applied, KioskApplied::Disabled);
         assert!(world.paths.recovered_flag().is_file(), "the flag holds the kiosk off even so");
     }

@@ -39,7 +39,9 @@ use crate::ipc_admin::{self, AdminPipe, WithStatusExtra};
 use crate::ipc_shell::{self, ShellBroadcast, ShellExtension, ShellPipe, ShellSignal};
 use crate::kiosk::{kiosk_status, spawn_reconciler, ReconcilerDeps};
 use crate::kiosk_control::KioskControl;
+use crate::lockdown::daily::DailyCounters;
 use crate::lockout::LockoutStore;
+use crate::notice::{run_notices, AckQueue, DailyDenials, DenialSink, NoticeExtension, NoticeHub};
 use crate::paths::{DataPaths, InstallPaths};
 use crate::platform::{Platform, ShellMechanism};
 use crate::session::{SessionDeps, SessionManager, SessionTimeouts};
@@ -79,11 +81,15 @@ pub struct AgentConfig {
     /// (Step 9) Where the Staff account's shell value is written: `"policyShell"`
     /// (default) or `"winlogonShell"` (plan Section 10.2, "Sign-in and shell").
     pub shell_mechanism: ShellMechanism,
+    /// (Phase 5 Step 4, plan 4.6 I7) The user sets this after checklist row E-71 passed on
+    /// the VM: an administrator can still sign in with the admin tiles hidden. Until then
+    /// a document with `hideAdminTiles` is refused (`admin_signin_unverified`).
+    pub admin_signin_verified: bool,
 }
 
 impl Default for AgentConfig {
     fn default() -> Self {
-        Self { kill_hung_shell: true, shell_mechanism: ShellMechanism::default() }
+        Self { kill_hung_shell: true, shell_mechanism: ShellMechanism::default(), admin_signin_verified: false }
     }
 }
 
@@ -276,6 +282,12 @@ pub fn initial_snapshot(
         admin_exit: None,
         power: None,
         org_name: None,
+        // Protocol 1.3 fields: set from the policy just below (the broadcasts by the notice hub).
+        device_lock: None,
+        broadcasts: Vec::new(),
+        keyboard: None,
+        printing: None,
+        network: None,
     };
     policy.apply_to_snapshot(&mut snapshot);
     snapshot
@@ -349,6 +361,26 @@ pub async fn run(
 
     // State and secrets, shared by the backend task and the enrollment flow.
     let shared = SharedState::new(store, state.clone(), Arc::clone(&deps.platform));
+    // (Phase 5 Step 2) Settle what a crash or power cut left in the journal before
+    // anything is applied: a `Pending` entry whose value never changed is dropped, one
+    // that changed becomes `Applied`, a `Restoring` one is restored again.
+    {
+        let ctx = crate::journal::JournalCtx { platform: deps.platform.as_ref(), shared: shared.as_ref() };
+        let report = crate::journal::startup_recover(&ctx);
+        if !report.unknown.is_empty() {
+            tracing::error!(
+                code = crate::journal::JOURNAL_UNKNOWN_TARGET,
+                count = report.unknown.len(),
+                "the journal holds targets this agent cannot restore; nothing new is applied"
+            );
+        }
+        if !report.restore.failed.is_empty() {
+            tracing::warn!(ids = ?report.restore.failed_ids(), "restore_incomplete: a restore will be tried again");
+        }
+        if !report.dropped.is_empty() || !report.kept.is_empty() {
+            tracing::info!(dropped = report.dropped.len(), kept = report.kept.len(), "settled the journal after a restart");
+        }
+    }
 
     // (1.1) Employee session, lockouts, offline cache and audit queue.
     let now_ms: Arc<dyn Fn() -> u64 + Send + Sync> = Arc::new(unix_ms);
@@ -385,6 +417,9 @@ pub async fn run(
     let install_policy_rx = policy_rx.clone();
     // (Step 16) The session cleanup reads the catalogue when a round starts.
     let cleanup_policy_rx = policy_rx.clone();
+    // (Phase 5 Step 12) The notice hub (broadcasts, acknowledgements) and the 1.3 requests.
+    let notice_policy_rx = policy_rx.clone();
+    let notice_ext_policy_rx = policy_rx.clone();
     let (roster_tx, roster_rx) = watch::channel(RosterState::load(&deps.paths.roster()));
     let roster_tx = Arc::new(roster_tx);
     let directory: Arc<dyn EmployeeDirectory> = match deps.directory {
@@ -570,6 +605,29 @@ pub async fn run(
         ));
     }
     tasks.spawn(run_session_events(session_events_rx, broadcast.clone(), shutdown.clone()));
+    // (Phase 5 Step 12) The broadcast list of the snapshot, the acknowledgement queue and the
+    // events of protocol 1.3. The denial counters of the Staff App go to the daily security
+    // counters (the demo world has none). Sending them is the reporter's job (Step 20).
+    let notice_hub = NoticeHub::new(
+        AckQueue::open(deps.paths.broadcast_acks()).context("open broadcast-acks.json")?,
+        snapshot_handle.clone(),
+        broadcast.clone(),
+        Arc::clone(&now_ms),
+    );
+    let denial_sink: Option<Arc<dyn DenialSink>> = if deps.sim.demo {
+        None
+    } else {
+        let counters = DailyCounters::open(deps.paths.security_daily()).context("open security-daily.json")?;
+        Some(Arc::new(DailyDenials::new(counters)))
+    };
+    let notice_extension = NoticeExtension::new(
+        Arc::clone(&notice_hub),
+        notice_ext_policy_rx,
+        snapshot_rx.clone(),
+        denial_sink,
+        Arc::clone(&now_ms),
+    );
+    tasks.spawn(run_notices(notice_hub, notice_policy_rx, shutdown.clone()));
     tasks.spawn(sync_session(session_sync.0, session_sync.1, Arc::clone(&session), shutdown.clone()));
     tasks.spawn(clear_session_when_not_enrolled(
         snapshot_rx.clone(),
@@ -610,6 +668,7 @@ pub async fn run(
             extensions: vec![
                 Arc::clone(&admin_exit) as Arc<dyn ShellExtension>,
                 Arc::clone(&session) as Arc<dyn ShellExtension>,
+                Arc::new(notice_extension) as Arc<dyn ShellExtension>,
             ],
             staff_sid_rx,
         },
@@ -908,7 +967,22 @@ mod tests {
         let (client, mut events) = IpcClient::spawn_with(info, config(shell_name));
         match tokio::time::timeout(Duration::from_secs(10), events.recv()).await.unwrap().unwrap() {
             ClientEvent::Linked(hello) => {
-                assert_eq!(hello.capabilities, ["state", "health", "adminExit", "session", "apps", "appsChanged", "sessionEnded"]);
+                assert_eq!(
+                    hello.capabilities,
+                    [
+                        "state",
+                        "health",
+                        "adminExit",
+                        "session",
+                        "apps",
+                        "appsChanged",
+                        "sessionEnded",
+                        "deviceLock",
+                        "broadcasts",
+                        "keyboardPolicy",
+                        "permissionReports"
+                    ]
+                );
             }
             other => panic!("unexpected {other:?}"),
         }
@@ -1032,9 +1106,13 @@ mod tests {
         let linked = tokio::time::timeout(Duration::from_secs(10), events.recv()).await.unwrap().unwrap();
         match linked {
             ClientEvent::Linked(hello) => {
-                assert_eq!((hello.protocol.major, hello.protocol.minor), (1, 2));
-                // No employee directory: no `session` or `apps`; the exit is always listed.
-                assert_eq!(hello.capabilities, ["state", "health", "adminExit"]);
+                assert_eq!((hello.protocol.major, hello.protocol.minor), (1, 3));
+                // No employee directory: no `session` or `apps`; the exit and the 1.3 capabilities
+                // are always listed.
+                assert_eq!(
+                    hello.capabilities,
+                    ["state", "health", "adminExit", "deviceLock", "broadcasts", "keyboardPolicy", "permissionReports"]
+                );
             }
             other => panic!("unexpected {other:?}"),
         }

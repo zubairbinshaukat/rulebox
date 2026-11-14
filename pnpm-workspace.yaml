@@ -45,6 +45,10 @@ catalog:
   convex-helpers: 0.1.128
   "@noble/ed25519": 3.2.0
   "@noble/hashes": 2.4.0
+  # Phase 5 Step 1: sealed-box test vectors (scripts/vectors/seal.mjs); Step 10 uses them in Convex actions.
+  # Both 2.4.0 published 2026-08-27 (checked 2026-11-08).
+  "@noble/curves": 2.4.0
+  "@noble/ciphers": 2.4.0
   hash-wasm: 4.12.0
   # Step 10: winget installer manifests (untrusted YAML, parsed in an action). 2.9.1 published 2026-09-11 (checked 2026-11-01).
   yaml: 2.9.1

@@ -1,0 +1,204 @@
+/*
+ * The device lock view, the full-screen notice and the broadcast strip (Phase 5 Step 12).
+ * Everything is token-driven (light, dark). No `backdrop-filter` of its own: the shared
+ * Panel and Backdrop already drop their blur and blobs in Lite mode. The only things that
+ * move are opacity and transform (GSAP, through lib/motion.ts).
+ *
+ * The text of a broadcast or a lock message is plain text: it is rendered as text nodes and
+ * kept as the administrator typed it (line breaks included), long words wrap.
+ */
+.rb-cover {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  background: var(--rb-bg);
+  color: var(--rb-ink);
+  font-family: var(--rb-font-sans);
+}
+
+.rb-cover__center {
+  position: relative;
+  z-index: 1;
+  height: 100%;
+  box-sizing: border-box;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+}
+
+/* The element the entrance animation moves; the card inside never has a transform of its own. */
+.rb-cover__wrap {
+  width: 100%;
+  max-width: 520px;
+}
+
+.rb-cover__card {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 36px 36px 32px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 14px;
+  text-align: center;
+}
+
+.rb-cover__icon {
+  display: grid;
+  place-items: center;
+  width: 64px;
+  height: 64px;
+  border-radius: var(--rb-r-xl);
+  background: var(--rb-accent-soft);
+  color: var(--rb-accent-text);
+}
+
+.rb-cover__org {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13.5px;
+  font-weight: 600;
+  color: var(--rb-muted);
+}
+
+.rb-cover__title {
+  margin: 0;
+  font-size: 24px;
+  line-height: 1.2;
+  font-weight: 650;
+}
+
+.rb-cover__text {
+  margin: 0;
+  max-width: 100%;
+  font-size: 15.5px;
+  line-height: 1.5;
+  /* The administrator's own line breaks stay; long words and addresses wrap. */
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.rb-cover__contact {
+  margin: 4px 0 0;
+  max-width: 100%;
+  font-size: 14px;
+  color: var(--rb-muted);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.rb-cover__contact strong {
+  color: var(--rb-ink);
+  font-weight: 600;
+}
+
+.rb-cover__error {
+  margin: 0;
+  font-size: 13.5px;
+  color: var(--rb-danger-text);
+}
+
+/* The strip above the taskbar pills (it lives in the taskbar window, next to the toasts). */
+.rb-announce {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: calc(var(--rb-taskbar) + var(--rb-taskbar-inset) + 10px);
+  display: flex;
+  justify-content: center;
+  /* Only the card takes the pointer (the window region says the same). */
+  pointer-events: none;
+}
+
+.rb-announce__box {
+  pointer-events: auto;
+  width: min(560px, calc(100vw - 2 * var(--rb-taskbar-inset)));
+  border-radius: var(--rb-r-22);
+}
+
+@media (min-width: 1400px) {
+  /* Wide screens: keep clear of the toast cards on the right. */
+  .rb-announce__box {
+    width: min(560px, calc(100vw - 800px));
+  }
+}
+
+.rb-announce__card {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  box-sizing: border-box;
+  padding: 12px 12px 12px 14px;
+  border-radius: var(--rb-r-22);
+  /* Solid: nothing shows through (a window region has no edge fade). */
+  background: var(--rb-surface);
+  border: 1px solid var(--rb-line);
+  color: var(--rb-ink);
+  font-size: 13.5px;
+  line-height: 1.4;
+}
+
+.rb-announce__icon {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  border-radius: var(--rb-r-md);
+  background: var(--rb-accent-soft);
+  color: var(--rb-accent-text);
+}
+
+.rb-announce__text {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.rb-announce__title {
+  font-weight: 650;
+  overflow-wrap: anywhere;
+}
+
+.rb-announce__body {
+  color: var(--rb-muted);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  /* A long text scrolls inside the card instead of growing past the window. */
+  max-height: 140px;
+  overflow-y: auto;
+}
+
+.rb-announce__actions {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.rb-announce__close {
+  display: grid;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  border: 0;
+  border-radius: 50%;
+  background: transparent;
+  color: var(--rb-muted);
+  cursor: pointer;
+}
+
+.rb-announce__close:hover {
+  background: var(--rb-line);
+  color: var(--rb-ink);
+}
+
+.rb-announce__error {
+  margin: 4px 0 0;
+  font-size: 12.5px;
+  color: var(--rb-danger-text);
+}

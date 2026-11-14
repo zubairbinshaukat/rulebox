@@ -121,6 +121,36 @@ impl DataPaths {
         self.state_dir().join("employee-cache.json")
     }
 
+    /// (Phase 5 Step 9) The findings the device has seen: at most 500 fingerprints.
+    pub fn findings(&self) -> PathBuf {
+        self.state_dir().join("findings.json")
+    }
+
+    /// (Phase 5 Step 9) The event-log bookmark of each channel the findings come from.
+    pub fn findings_state(&self) -> PathBuf {
+        self.state_dir().join("findings-state.json")
+    }
+
+    /// (Phase 5 Step 9) The last-known-good lockdown document and the refused configurations.
+    pub fn lkg(&self) -> PathBuf {
+        self.state_dir().join("lkg.json")
+    }
+
+    /// (Phase 5 Step 9) The security counters per server day, until the server has them.
+    pub fn security_daily(&self) -> PathBuf {
+        self.state_dir().join("security-daily.json")
+    }
+
+    /// (Phase 5 Step 12) The broadcasts the employee acknowledged, until the server has them.
+    pub fn broadcast_acks(&self) -> PathBuf {
+        self.state_dir().join("broadcast-acks.json")
+    }
+
+    /// (Phase 5 Step 9) The apply report waiting, and the hash the server last accepted.
+    pub fn apply_report(&self) -> PathBuf {
+        self.state_dir().join("apply-report.json")
+    }
+
     /// (1.1) Audit records the backend has not accepted yet.
     pub fn audit_queue(&self) -> PathBuf {
         self.state_dir().join("audit-queue.json")

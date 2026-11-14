@@ -11,6 +11,95 @@ use tokio_util::sync::CancellationToken;
 pub mod sim;
 pub mod windows;
 
+// (Phase 5 Step 3, plan 4.5) The value types of the new seam methods are the ones
+// `rulebox-win32` defines, so the two sides cannot drift apart.
+pub use rulebox_win32::accounts::LockoutPolicy;
+pub use rulebox_win32::applocker::{AppLockerState, Mechanism as AppLockerMechanism};
+pub use rulebox_win32::etw::{ProcessSink, ProcessStart, TraceHandle, TraceStats};
+pub use rulebox_win32::eventlog::EventRecord;
+pub use rulebox_win32::fileid::{FileIdentity, FileStamp};
+pub use rulebox_win32::process::ProcessInfo;
+pub use rulebox_win32::posture::SecurityPosture;
+pub use rulebox_win32::printing::{PrinterInfo, PrinterSpec};
+pub use rulebox_win32::service::ServiceConfig;
+pub use rulebox_win32::wlan::WlanState;
+
+/// (Phase 5 Step 3, plan 4.5 and its guard rules) Every `Platform` method that changes
+/// the machine, or is only allowed on a test machine. `WindowsPlatform` must start each
+/// of them with `guard()?;` (after, at most, a pure rule check that touches nothing);
+/// `apps/agent/tests/guard_coverage.rs` reads this list and `platform/windows.rs` as
+/// text and fails when one is missing or unguarded. A new mutating trait method that is
+/// not added here fails the same test.
+// (Phase 5 Step 3) Nothing calls the new seam yet: the layers of Steps 4 to 20 do.
+#[allow(dead_code)]
+pub const MUTATING_METHODS: &[&str] = &[
+    "create_staff_user",
+    "set_user_password",
+    "test_logon",
+    "ensure_profile",
+    "delete_staff_user",
+    "write_machine_value",
+    "lsa_secret_get",
+    "lsa_secret_set",
+    "set_staff_shell",
+    "set_staff_user_policy",
+    "logoff_session",
+    "launch_in_session",
+    "terminate_process",
+    "secrets_save",
+    "run_installer",
+    "place_portable",
+    "remove_portable",
+    "reset_folder",
+    // Phase 5 Step 3.
+    "write_staff_value",
+    "delete_staff_value",
+    "deploy_ci_policy",
+    "remove_ci_policy",
+    "set_applocker_policy",
+    "clear_applocker_policy",
+    "set_service_start",
+    "set_service_security",
+    "set_service_required_privileges",
+    "set_account_lockout",
+    "wlan_set_profile",
+    "wlan_delete_profile",
+    "wlan_set_filters",
+    "printer_add",
+    "printer_delete",
+    "printer_set_security",
+    "bcd_set",
+    "start_process_trace",
+    "stop_process_trace",
+    "set_path_acl",
+    // Phase 5 Step 5.
+    "remove_safe_boot_entry",
+    // Phase 5 Step 6.
+    "refresh_ci_policies",
+];
+
+/// (Phase 5 Step 3, plan 4.5 rule 2) Whether `path` may get a new ACL: it is the install
+/// folder or the agent's `state` folder, or below one of them (case-insensitive, whole
+/// folder names, no `..`). Checked before the guard in `WindowsPlatform` and in
+/// `SimPlatform`.
+// (Phase 5 Step 3) Nothing calls the new seam yet: the layers of Steps 4 to 20 do.
+#[allow(dead_code)]
+pub fn acl_target_allowed(install_root: &Path, state_dir: &Path, path: &Path) -> bool {
+    fn normal(path: &Path) -> Option<String> {
+        let text = path.to_string_lossy().replace('/', "\\").to_ascii_lowercase();
+        let trimmed = text.trim_end_matches('\\').to_string();
+        let plain = !trimmed.is_empty() && trimmed.split('\\').all(|part| !matches!(part, "" | "." | ".."));
+        // A UNC or device path starts with an empty segment and is not plain.
+        (plain && trimmed.len() > 2 && trimmed.as_bytes()[1] == b':').then_some(trimmed)
+    }
+    let Some(target) = normal(path) else {
+        return false;
+    };
+    [install_root, state_dir].into_iter().filter_map(normal).any(|root| {
+        target == root || (target.starts_with(&root) && target.as_bytes().get(root.len()) == Some(&b'\\'))
+    })
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct OsInfo {
     pub build: u32,
@@ -47,6 +136,22 @@ pub struct LocalUser {
     pub sid: String,
     pub comment: String,
     pub disabled: bool,
+}
+
+/// (Phase 5 Step 5) An enabled local account with administrator rights.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LocalAdminAccount {
+    pub sid: String,
+    /// The account name (`SpecialAccounts\UserList` is keyed by it).
+    pub name: String,
+}
+
+/// (Phase 5 Step 7) One folder and its DACL, as the writable-folder scan reads them.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FolderAcl {
+    pub path: String,
+    /// The DACL as SDDL (`D:...`).
+    pub sddl: String,
 }
 
 /// What the Staff account is created with.
@@ -183,6 +288,8 @@ pub enum ResetOutcome {
     InUse,
 }
 
+// (Phase 5 Step 3) Nothing calls the new seam yet: the layers of Steps 4 to 20 do.
+#[allow(dead_code)]
 pub trait Platform: Send + Sync + 'static {
     // read-only
     fn os_info(&self) -> Result<OsInfo, PlatformError>;
@@ -199,6 +306,9 @@ pub trait Platform: Send + Sync + 'static {
     /// (Phase 4 Step 13) Whether `path` is an existing file. Read-only: a desktop
     /// app is "installed" when its exe exists until Step 14's install records.
     fn file_exists(&self, path: &Path) -> bool;
+    /// Already unprotected. (Moved up from the mutating group in Phase 5 Step 3: it only
+    /// reads, and `MUTATING_METHODS` is checked against the groups.)
+    fn secrets_load(&self) -> Result<Option<Vec<u8>>, PlatformError>;
     /// (Phase 4 Step 13) The roots a catalogue path template expands to.
     fn path_roots(&self) -> Result<rulebox_policy::paths::PathRoots, PlatformError>;
     /// (Phase 4 Step 14) Free bytes on the system drive (the install disk check).
@@ -215,6 +325,66 @@ pub trait Platform: Send + Sync + 'static {
     /// cleanup does not look). `None` when it cannot tell: the hive is not loaded.
     /// Read-only: it never loads the hive.
     fn staff_app_data_redirected(&self, sid: &str, profile: &Path) -> Result<Option<bool>, PlatformError>;
+
+    // read-only, Phase 5 Step 3 (plan 4.5). None of these changes a value. The journal
+    // reads the original of each through them before a layer writes (plan 4.4).
+    /// The names of the values directly under an HKLM key (empty when the key is absent).
+    /// Lets the device-class rules pick free names in the deny list and check it (4.7a).
+    fn list_machine_value_names(&self, path: &str) -> Result<Vec<String>, PlatformError>;
+    /// A value in the Staff hive (`path` relative to the hive, under
+    /// `staffreg::ALLOWED_ROOTS`). `Ok(None)`: absent, or the Staff account is gone. On a
+    /// machine that is not a test machine a signed-out Staff hive cannot be read (mounting
+    /// it is guarded) and the answer is a `Guard` error.
+    fn read_staff_value(&self, sid: &str, path: &str, name: &str) -> Result<Option<RegData>, PlatformError>;
+    /// Ids (lowercase GUIDs) of the `.cip` files in the active App Control folder.
+    fn list_ci_policies(&self) -> Result<Vec<String>, PlatformError>;
+    /// (Phase 5 Step 6) The bytes of `{policy_id}.cip` in the active folder; `Ok(None)`:
+    /// no such file. The journal compares them with the embedded policy.
+    fn read_ci_policy(&self, policy_id: &str) -> Result<Option<Vec<u8>>, PlatformError>;
+    fn get_applocker_policy(&self) -> Result<AppLockerState, PlatformError>;
+    /// `Ok(None)`: no such service.
+    fn query_service(&self, name: &str) -> Result<Option<ServiceConfig>, PlatformError>;
+    /// The service's DACL as SDDL (the journal's `Sddl` original). `Ok(None)`: no such service.
+    fn get_service_security(&self, name: &str) -> Result<Option<String>, PlatformError>;
+    /// The service's required privileges (the journal's `MultiString` original).
+    fn get_service_required_privileges(&self, name: &str) -> Result<Vec<String>, PlatformError>;
+    fn get_account_lockout(&self) -> Result<LockoutPolicy, PlatformError>;
+    fn wlan_list(&self) -> Result<WlanState, PlatformError>;
+    fn printer_list(&self) -> Result<Vec<PrinterInfo>, PlatformError>;
+    /// A queue's DACL as SDDL (the journal's `Sddl` original). `Ok(None)`: no such queue.
+    fn printer_get_security(&self, name: &str) -> Result<Option<String>, PlatformError>;
+    fn bcd_get(&self, object: &str, element: &str) -> Result<Option<String>, PlatformError>;
+    /// Up to `max` events of an audit channel after `after_record_id`, oldest first.
+    fn read_event_log(&self, channel: &str, after_record_id: u64, max: usize) -> Result<Vec<EventRecord>, PlatformError>;
+    fn read_security_posture(&self) -> Result<SecurityPosture, PlatformError>;
+    /// The DACL of a file or folder as SDDL (flags included). `Ok(None)`: it does not exist.
+    fn get_path_acl(&self, path: &Path) -> Result<Option<String>, PlatformError>;
+    /// (Phase 5 Step 5) Every enabled local account with administrator rights, by SID with
+    /// its account name (the admin-tile list is keyed by name; the SID is how an account
+    /// is recognised). Read-only.
+    fn enabled_local_admin_accounts(&self) -> Result<Vec<LocalAdminAccount>, PlatformError>;
+    /// (Phase 5 Step 7) The SID of every enabled local account (administrators and standard
+    /// users, the Staff account included). The AppLocker layer gives each one that is not
+    /// the Staff account an allow-all rule. Read-only.
+    fn enabled_local_account_sids(&self) -> Result<Vec<String>, PlatformError>;
+    /// (Phase 5 Step 7) The DACL of `root` and of the folders below it, down to `max_depth`
+    /// levels (links are never followed; `WinSxS` is skipped). The AppLocker layer's
+    /// writable-folder scan of the Windows folder. Read-only.
+    fn folder_acls(&self, root: &Path, max_depth: u32) -> Result<Vec<FolderAcl>, PlatformError>;
+    // (Phase 5 Step 8) What the process watchdog (L5) reads. None of these changes anything.
+    /// The image, session and owner of a process; `Ok(None)`: it has ended or cannot be opened.
+    fn process_info(&self, pid: u32) -> Result<Option<ProcessInfo>, PlatformError>;
+    /// Every describable process of a session (the watchdog's snapshot fallback and catch-up).
+    fn session_processes(&self, session_id: u32) -> Result<Vec<ProcessInfo>, PlatformError>;
+    /// Size and times of a file: the key of the signature cache. `Ok(None)`: no such file.
+    fn file_stamp(&self, path: &Path) -> Result<Option<FileStamp>, PlatformError>;
+    /// The signer and the version-resource names of a file. `Ok(None)`: no such file.
+    fn file_identity(&self, path: &Path) -> Result<Option<FileIdentity>, PlatformError>;
+    /// The SHA-256 (lower-case hex) of a file of at most `max_bytes`; `Ok(None)`: no such file or
+    /// it is bigger.
+    fn file_sha256(&self, path: &Path, max_bytes: u64) -> Result<Option<String>, PlatformError>;
+    /// The kernel's loss counters of a running process trace (edge case 45).
+    fn process_trace_stats(&self, handle: TraceHandle) -> Result<TraceStats, PlatformError>;
 
     // mutating: every `WindowsPlatform` implementation calls `guard::require_test_machine()` first
     fn create_staff_user(&self, spec: &StaffUserSpec, password: &str) -> Result<String, PlatformError>;
@@ -238,8 +408,6 @@ pub trait Platform: Send + Sync + 'static {
     fn launch_in_session(&self, session_id: u32, expected_sid: &str, exe: &Path) -> Result<u32, PlatformError>;
     /// Ends `pid` only if its image and its owner are the expected ones.
     fn terminate_process(&self, pid: u32, expected_image: &Path, expected_sid: &str) -> Result<(), PlatformError>;
-    /// Already unprotected.
-    fn secrets_load(&self) -> Result<Option<Vec<u8>>, PlatformError>;
     fn secrets_save(&self, plaintext: &[u8]) -> Result<(), PlatformError>;
     /// (Phase 4 Step 14) Runs one installer as SYSTEM, without a window, in a
     /// kill-on-close job with its own fresh TEMP folder, and waits for it and
@@ -278,4 +446,47 @@ pub trait Platform: Send + Sync + 'static {
         template: &str,
         cancel: &CancellationToken,
     ) -> Result<ResetOutcome, PlatformError>;
+
+    // mutating, Phase 5 Step 3 (plan 4.5): each `WindowsPlatform` method checks its
+    // allow-list (if it has one) and then the guard before anything else, and the
+    // `rulebox-win32` function it calls does the same again.
+    /// Writes a value in the Staff hive. `path` must be under `staffreg::ALLOWED_ROOTS`
+    /// and `Shell` is never written here (`Refused`/`Other` before the guard).
+    fn write_staff_value(&self, sid: &str, path: &str, name: &str, data: &RegData) -> Result<(), PlatformError>;
+    fn delete_staff_value(&self, sid: &str, path: &str, name: &str) -> Result<(), PlatformError>;
+    /// Copies a binary App Control policy into the active folder as `{policy_id}.cip`.
+    fn deploy_ci_policy(&self, policy_id: &str, binary: &[u8]) -> Result<(), PlatformError>;
+    fn remove_ci_policy(&self, policy_id: &str) -> Result<(), PlatformError>;
+    /// (Phase 5 Step 6) `CiTool --refresh`: load the policies of the active folder now
+    /// (Windows 11 22H2 and later). An error means the change waits for a restart.
+    fn refresh_ci_policies(&self) -> Result<(), PlatformError>;
+    fn set_applocker_policy(&self, xml: &str, mechanism: AppLockerMechanism) -> Result<(), PlatformError>;
+    fn clear_applocker_policy(&self, mechanism: AppLockerMechanism) -> Result<(), PlatformError>;
+    /// `start`: 2 automatic, 3 manual, 4 disabled. The agent's own service stays automatic.
+    fn set_service_start(&self, name: &str, start: u32) -> Result<(), PlatformError>;
+    /// The Rulebox agent service only.
+    fn set_service_security(&self, name: &str, sddl: &str) -> Result<(), PlatformError>;
+    /// The Rulebox agent service only. An empty list removes the limit.
+    fn set_service_required_privileges(&self, name: &str, privileges: &[&str]) -> Result<(), PlatformError>;
+    fn set_account_lockout(&self, policy: LockoutPolicy) -> Result<(), PlatformError>;
+    /// The profile name inside the XML must start with `Rulebox-`.
+    fn wlan_set_profile(&self, xml_with_key: &str) -> Result<(), PlatformError>;
+    fn wlan_delete_profile(&self, name: &str) -> Result<(), PlatformError>;
+    /// The user permit list; empty removes the filter.
+    fn wlan_set_filters(&self, ssids: &[&str]) -> Result<(), PlatformError>;
+    fn printer_add(&self, spec: &PrinterSpec) -> Result<(), PlatformError>;
+    /// Only a queue named `<display name> (Rulebox)`.
+    fn printer_delete(&self, name: &str) -> Result<(), PlatformError>;
+    fn printer_set_security(&self, name: &str, sddl: &str) -> Result<(), PlatformError>;
+    /// Only `{current}` `recoveryenabled` (`Yes` / `No`).
+    fn bcd_set(&self, object: &str, element: &str, value: &str) -> Result<(), PlatformError>;
+    /// Starts the process-start trace; events arrive in `sink` on the trace's thread.
+    fn start_process_trace(&self, sink: ProcessSink) -> Result<TraceHandle, PlatformError>;
+    fn stop_process_trace(&self, handle: TraceHandle) -> Result<(), PlatformError>;
+    /// Replaces the DACL of a file or folder. Only the install folder and the agent's
+    /// `state` folder, or below them ([`acl_target_allowed`]).
+    fn set_path_acl(&self, path: &Path, sddl: &str) -> Result<(), PlatformError>;
+    /// (Phase 5 Step 5) Deletes `SafeBoot\<mode>\RuleboxAgent` (`Minimal` or `Network`), the
+    /// agent's own Safe Mode key, and nothing else.
+    fn remove_safe_boot_entry(&self, mode: &str) -> Result<(), PlatformError>;
 }

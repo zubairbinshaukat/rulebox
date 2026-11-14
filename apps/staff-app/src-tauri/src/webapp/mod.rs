@@ -368,7 +368,10 @@ fn handle_download(state: &AppState, info: &Arc<WebWindow>, event: DownloadEvent
                 DownloadDecision::QuotaFull => Some("Storage is full. Delete files to save new ones."),
             };
             if let Some(text) = refusal {
-                state.note_web_denial(&info.app_id);
+                // Only "this app may not download" is a permission refusal; a blocked file type or a
+                // full folder is not, and is not part of the report.
+                let kind = (decision == DownloadDecision::NotAllowed).then_some(permissions::DenialKind::Downloads);
+                state.note_web_denial(&info.app_id, kind);
                 state.notify(NoticeTone::Warning, text, Some(info.app_name.clone()));
                 return false;
             }

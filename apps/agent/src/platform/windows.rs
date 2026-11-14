@@ -3,16 +3,17 @@
 //!
 //! - every mutating method checks the test-machine guard **first**, before any
 //!   lookup, so the dev machine can never reach a half-way change;
-//! - machine writes are limited to the short list in
-//!   `rulebox_win32::autologon::set_machine_value`, checked before the guard;
+//! - machine writes are limited to `rulebox_win32::machinereg::ALLOWED_ROOTS` and Staff
+//!   hive writes to `staffreg::ALLOWED_ROOTS`, checked before the guard (Phase 5 Step 3);
 //! - the secrets file is protected with DPAPI under the service's own key.
 
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use anyhow::{bail, Context};
-use rulebox_win32::accounts;
-use rulebox_win32::autologon::set_machine_value;
+use rulebox_win32::{
+    accounts, applocker, bcd, codeintegrity, etw, eventlog, fileid, machinereg, posture, printing, service, staffreg, wlan,
+};
 use rulebox_win32::guard::require_test_machine;
 use rulebox_win32::registry::{self, get_hklm, RegValue};
 use rulebox_win32::shellreg::{self, Mechanism};
@@ -24,9 +25,12 @@ use serde::Deserialize;
 use tokio_util::sync::CancellationToken;
 
 use super::{
-    BootIdentity, InstallerCommand, InstallerExit, LocalUser, OsInfo, Platform, PlatformError, RegData, RegValueRef,
-    ResetOutcome, SessionInfo, SessionState, ShellBinaries, ShellMechanism, StaffUserSpec,
+    acl_target_allowed, AppLockerMechanism, AppLockerState, BootIdentity, EventRecord, InstallerCommand, InstallerExit,
+    FileIdentity, FileStamp, LocalUser, LockoutPolicy, OsInfo, Platform, PlatformError, PrinterInfo, PrinterSpec,
+    ProcessInfo, ProcessSink, RegData, RegValueRef, ResetOutcome, SecurityPosture, ServiceConfig, SessionInfo,
+    SessionState, ShellBinaries, ShellMechanism, StaffUserSpec, TraceHandle, TraceStats, WlanState,
 };
+use super::{FolderAcl, LocalAdminAccount};
 use crate::cleanup::{resolve_reset, shell_folder_is_default};
 use crate::installs::{
     installer_program_allowed, is_in_use, is_reparse_point, portable_dir_ok, portable_target_ok, wait_for_installer,
@@ -37,6 +41,8 @@ use crate::state::write_atomic;
 
 const WINLOGON_KEY: &str = rulebox_win32::autologon::WINLOGON_KEY;
 const POLICIES_SYSTEM_KEY: &str = r"SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System";
+/// (Phase 5 Step 7) The most folders one `folder_acls` scan returns.
+const FOLDER_SCAN_LIMIT: usize = 60_000;
 
 pub struct WindowsPlatform {
     install: InstallPaths,
@@ -49,7 +55,7 @@ impl WindowsPlatform {
     }
 }
 
-fn map_err(error: Win32Error) -> PlatformError {
+pub(super) fn map_err(error: Win32Error) -> PlatformError {
     match error {
         Win32Error::Guard(message) => PlatformError::Guard(message),
         Win32Error::AlreadyExists => PlatformError::AlreadyExists,
@@ -59,7 +65,10 @@ fn map_err(error: Win32Error) -> PlatformError {
         Win32Error::Api { api, code } => PlatformError::Win32 { api, code },
         Win32Error::Nt { api, status } => PlatformError::Win32 { api, code: status as u32 },
         Win32Error::Busy => PlatformError::Other("busy".into()),
-        Win32Error::Invalid(message) => PlatformError::Other(message),
+        // A write outside an allow-list (Phase 5 Step 3): the same kind of refusal the
+        // Phase 2 list check gave, with the same wording.
+        Win32Error::Invalid(message) | Win32Error::Forbidden(message) => PlatformError::Other(message),
+        Win32Error::Unsupported(what) => PlatformError::Refused(what),
     }
 }
 
@@ -276,9 +285,11 @@ impl Platform for WindowsPlatform {
             RegData::Dword(number) => RegValue::Dword(*number),
             RegData::String(text) => RegValue::String(text.clone()),
         });
-        // The list check comes first (and fails without touching anything); the
-        // guard is applied inside `set_machine_value`.
-        set_machine_value(&key.path, &key.name, value.as_ref()).map_err(map_err)
+        // The key list check comes first (and fails without touching anything), then
+        // the guard, which `machinereg` applies again before the write.
+        machinereg::check_write(&key.path, &key.name, value.as_ref()).map_err(map_err)?;
+        guard()?;
+        machinereg::set_machine_value(&key.path, &key.name, value.as_ref()).map_err(map_err)
     }
 
     fn lsa_secret_get(&self, name: &str) -> Result<Option<String>, PlatformError> {
@@ -529,6 +540,296 @@ impl Platform for WindowsPlatform {
         }
         Ok(Some(redirected))
     }
+
+    // -- Phase 5 Step 3 (plan 4.5) ----------------------------------------------------
+
+    fn list_machine_value_names(&self, path: &str) -> Result<Vec<String>, PlatformError> {
+        machinereg::list_value_names(path).map_err(map_err)
+    }
+
+    fn read_staff_value(&self, sid: &str, path: &str, name: &str) -> Result<Option<RegData>, PlatformError> {
+        let sid = parse_sid(sid)?;
+        // The account (and with it the hive) may be gone: nothing is there to read.
+        let profile = match accounts::profile_path(&sid) {
+            Ok(profile) => profile,
+            Err(Win32Error::NotFound) => return Ok(None),
+            Err(error) => return Err(map_err(error)),
+        };
+        let value = staffreg::read_value(&sid, &profile, path, name).map_err(map_err)?;
+        Ok(value.map(reg_data))
+    }
+
+    fn list_ci_policies(&self) -> Result<Vec<String>, PlatformError> {
+        codeintegrity::list_policies().map_err(map_err)
+    }
+
+    fn read_ci_policy(&self, policy_id: &str) -> Result<Option<Vec<u8>>, PlatformError> {
+        codeintegrity::read_policy(policy_id).map_err(map_err)
+    }
+
+    fn get_applocker_policy(&self) -> Result<AppLockerState, PlatformError> {
+        applocker::get_policy().map_err(map_err)
+    }
+
+    fn query_service(&self, name: &str) -> Result<Option<ServiceConfig>, PlatformError> {
+        service::query(name).map_err(map_err)
+    }
+
+    fn get_service_security(&self, name: &str) -> Result<Option<String>, PlatformError> {
+        service::get_security(name).map_err(map_err)
+    }
+
+    fn get_service_required_privileges(&self, name: &str) -> Result<Vec<String>, PlatformError> {
+        service::get_required_privileges(name).map_err(map_err)
+    }
+
+    fn get_account_lockout(&self) -> Result<LockoutPolicy, PlatformError> {
+        accounts::get_account_lockout().map_err(map_err)
+    }
+
+    fn wlan_list(&self) -> Result<WlanState, PlatformError> {
+        wlan::list().map_err(map_err)
+    }
+
+    fn printer_list(&self) -> Result<Vec<PrinterInfo>, PlatformError> {
+        printing::list().map_err(map_err)
+    }
+
+    fn printer_get_security(&self, name: &str) -> Result<Option<String>, PlatformError> {
+        printing::get_security(name).map_err(map_err)
+    }
+
+    fn bcd_get(&self, object: &str, element: &str) -> Result<Option<String>, PlatformError> {
+        bcd::get(object, element).map_err(map_err)
+    }
+
+    fn read_event_log(&self, channel: &str, after_record_id: u64, max: usize) -> Result<Vec<EventRecord>, PlatformError> {
+        eventlog::read(channel, after_record_id, max).map_err(map_err)
+    }
+
+    fn read_security_posture(&self) -> Result<SecurityPosture, PlatformError> {
+        posture::read_security_posture().map_err(map_err)
+    }
+
+    fn get_path_acl(&self, path: &Path) -> Result<Option<String>, PlatformError> {
+        security::get_path_dacl(path).map_err(map_err)
+    }
+
+    fn enabled_local_admin_accounts(&self) -> Result<Vec<LocalAdminAccount>, PlatformError> {
+        let admins = accounts::enabled_local_admins().map_err(map_err)?;
+        Ok(admins
+            .into_iter()
+            .map(|user| LocalAdminAccount { sid: user.sid.as_str().to_string(), name: user.name })
+            .collect())
+    }
+
+    fn enabled_local_account_sids(&self) -> Result<Vec<String>, PlatformError> {
+        let accounts = accounts::enabled_local_accounts().map_err(map_err)?;
+        Ok(accounts.into_iter().map(|user| user.sid.as_str().to_string()).collect())
+    }
+
+    fn folder_acls(&self, root: &Path, max_depth: u32) -> Result<Vec<FolderAcl>, PlatformError> {
+        // WinSxS is the component store: huge, and not writable by standard users.
+        let folders = security::list_folder_dacls(root, max_depth, &["WinSxS"], FOLDER_SCAN_LIMIT).map_err(map_err)?;
+        Ok(folders.into_iter().map(|(path, sddl)| FolderAcl { path, sddl }).collect())
+    }
+
+    fn process_info(&self, pid: u32) -> Result<Option<ProcessInfo>, PlatformError> {
+        process::process_info(pid).map_err(map_err)
+    }
+
+    fn session_processes(&self, session_id: u32) -> Result<Vec<ProcessInfo>, PlatformError> {
+        process::session_processes(session_id).map_err(map_err)
+    }
+
+    fn file_stamp(&self, path: &Path) -> Result<Option<FileStamp>, PlatformError> {
+        fileid::file_stamp(path).map_err(map_err)
+    }
+
+    fn file_identity(&self, path: &Path) -> Result<Option<FileIdentity>, PlatformError> {
+        fileid::file_identity(path).map_err(map_err)
+    }
+
+    fn file_sha256(&self, path: &Path, max_bytes: u64) -> Result<Option<String>, PlatformError> {
+        use sha2::{Digest, Sha256};
+        use std::io::Read;
+        let mut file = match std::fs::File::open(path) {
+            Ok(file) => file,
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+            Err(e) => return Err(io_err(e)),
+        };
+        if file.metadata().map_err(io_err)?.len() > max_bytes {
+            return Ok(None);
+        }
+        let mut hasher = Sha256::new();
+        let mut chunk = vec![0u8; 64 * 1024];
+        loop {
+            let read = file.read(&mut chunk).map_err(io_err)?;
+            if read == 0 {
+                break;
+            }
+            hasher.update(&chunk[..read]);
+        }
+        Ok(Some(hasher.finalize().iter().map(|byte| format!("{byte:02x}")).collect()))
+    }
+
+    fn process_trace_stats(&self, handle: TraceHandle) -> Result<TraceStats, PlatformError> {
+        etw::trace_stats(handle).map_err(map_err)
+    }
+
+    fn write_staff_value(&self, sid: &str, path: &str, name: &str, data: &RegData) -> Result<(), PlatformError> {
+        staffreg::check_write(path, name).map_err(map_err)?;
+        guard()?;
+        let sid = parse_sid(sid)?;
+        let profile = accounts::profile_path(&sid).map_err(map_err)?;
+        staffreg::write_value(&sid, &profile, path, name, &reg_value(data)).map_err(map_err)
+    }
+
+    fn delete_staff_value(&self, sid: &str, path: &str, name: &str) -> Result<(), PlatformError> {
+        staffreg::check_write(path, name).map_err(map_err)?;
+        guard()?;
+        let sid = parse_sid(sid)?;
+        let profile = accounts::profile_path(&sid).map_err(map_err)?;
+        staffreg::delete_value(&sid, &profile, path, name).map_err(map_err)
+    }
+
+    fn deploy_ci_policy(&self, policy_id: &str, binary: &[u8]) -> Result<(), PlatformError> {
+        codeintegrity::check_policy_id(policy_id).map_err(map_err)?;
+        guard()?;
+        codeintegrity::deploy_policy(policy_id, binary).map_err(map_err)
+    }
+
+    fn remove_ci_policy(&self, policy_id: &str) -> Result<(), PlatformError> {
+        codeintegrity::check_policy_id(policy_id).map_err(map_err)?;
+        guard()?;
+        codeintegrity::remove_policy(policy_id).map_err(map_err)
+    }
+
+    fn refresh_ci_policies(&self) -> Result<(), PlatformError> {
+        guard()?;
+        codeintegrity::refresh().map_err(map_err)
+    }
+
+    fn set_applocker_policy(&self, xml: &str, mechanism: AppLockerMechanism) -> Result<(), PlatformError> {
+        guard()?;
+        applocker::set_policy(xml, mechanism).map_err(map_err)
+    }
+
+    fn clear_applocker_policy(&self, mechanism: AppLockerMechanism) -> Result<(), PlatformError> {
+        guard()?;
+        applocker::clear_policy(mechanism).map_err(map_err)
+    }
+
+    fn set_service_start(&self, name: &str, start: u32) -> Result<(), PlatformError> {
+        service::check_start(name, start).map_err(map_err)?;
+        guard()?;
+        service::set_start(name, start).map_err(map_err)
+    }
+
+    fn set_service_security(&self, name: &str, sddl: &str) -> Result<(), PlatformError> {
+        service::check_agent_only(name).map_err(map_err)?;
+        guard()?;
+        service::set_security(name, sddl).map_err(map_err)
+    }
+
+    fn set_service_required_privileges(&self, name: &str, privileges: &[&str]) -> Result<(), PlatformError> {
+        service::check_agent_only(name).map_err(map_err)?;
+        guard()?;
+        service::set_required_privileges(name, privileges).map_err(map_err)
+    }
+
+    fn set_account_lockout(&self, policy: LockoutPolicy) -> Result<(), PlatformError> {
+        guard()?;
+        accounts::set_account_lockout(policy).map_err(map_err)
+    }
+
+    fn wlan_set_profile(&self, xml_with_key: &str) -> Result<(), PlatformError> {
+        wlan::check_profile_xml(xml_with_key).map_err(map_err)?;
+        guard()?;
+        wlan::set_profile(xml_with_key).map_err(map_err)
+    }
+
+    fn wlan_delete_profile(&self, name: &str) -> Result<(), PlatformError> {
+        wlan::check_profile_name(name).map_err(map_err)?;
+        guard()?;
+        wlan::delete_profile(name).map_err(map_err)
+    }
+
+    fn wlan_set_filters(&self, ssids: &[&str]) -> Result<(), PlatformError> {
+        wlan::check_filters(ssids).map_err(map_err)?;
+        guard()?;
+        wlan::set_filters(ssids).map_err(map_err)
+    }
+
+    fn printer_add(&self, spec: &PrinterSpec) -> Result<(), PlatformError> {
+        printing::check_spec(spec).map_err(map_err)?;
+        guard()?;
+        printing::add(spec).map_err(map_err)
+    }
+
+    fn printer_delete(&self, name: &str) -> Result<(), PlatformError> {
+        printing::check_own_name(name).map_err(map_err)?;
+        guard()?;
+        printing::delete(name).map_err(map_err)
+    }
+
+    fn printer_set_security(&self, name: &str, sddl: &str) -> Result<(), PlatformError> {
+        printing::check_plain_name(name).map_err(map_err)?;
+        guard()?;
+        printing::set_security(name, sddl).map_err(map_err)
+    }
+
+    fn bcd_set(&self, object: &str, element: &str, value: &str) -> Result<(), PlatformError> {
+        bcd::check_set(object, element, value).map_err(map_err)?;
+        guard()?;
+        bcd::set(object, element, value).map_err(map_err)
+    }
+
+    fn start_process_trace(&self, sink: ProcessSink) -> Result<TraceHandle, PlatformError> {
+        guard()?;
+        etw::start_trace(sink).map_err(map_err)
+    }
+
+    fn stop_process_trace(&self, handle: TraceHandle) -> Result<(), PlatformError> {
+        guard()?;
+        etw::stop_trace(handle).map_err(map_err)
+    }
+
+    fn set_path_acl(&self, path: &Path, sddl: &str) -> Result<(), PlatformError> {
+        if !acl_target_allowed(self.install.root(), &self.data.state_dir(), path) {
+            return Err(PlatformError::Refused("not a Rulebox folder"));
+        }
+        guard()?;
+        // A link on the target would send the new ACL somewhere else.
+        if is_reparse_point(path).unwrap_or(false) {
+            return Err(PlatformError::Refused("the folder is a link"));
+        }
+        security::set_path_dacl(path, sddl).map_err(map_err)
+    }
+
+    fn remove_safe_boot_entry(&self, mode: &str) -> Result<(), PlatformError> {
+        machinereg::check_safe_boot_mode(mode).map_err(map_err)?;
+        guard()?;
+        machinereg::delete_safe_boot_entry(mode).map_err(map_err)
+    }
+}
+
+// (Phase 5 Step 3) Nothing calls the new seam yet: the layers of Steps 4 to 20 do.
+#[allow(dead_code)]
+fn reg_data(value: RegValue) -> RegData {
+    match value {
+        RegValue::Dword(number) => RegData::Dword(number),
+        RegValue::String(text) => RegData::String(text),
+    }
+}
+
+// (Phase 5 Step 3) Nothing calls the new seam yet: the layers of Steps 4 to 20 do.
+#[allow(dead_code)]
+fn reg_value(data: &RegData) -> RegValue {
+    match data {
+        RegData::Dword(number) => RegValue::Dword(*number),
+        RegData::String(text) => RegValue::String(text.clone()),
+    }
 }
 
 /// `<profile>`'s `AppData` and `Local`/`Roaming`: shared with the Staff session
@@ -725,6 +1026,123 @@ mod tests {
             "reset_folder",
             p.reset_folder(Path::new(r"C:\rulebox-test-no-such-profile"), r"{LocalAppData}\Acme", &never),
         );
+
+        // (Phase 5 Step 3) Every new mutating method, with arguments that pass its own
+        // rule check, so the guard is what stops it.
+        let staff_key = r"Software\Microsoft\Windows\CurrentVersion\Policies\System";
+        let policy = "8a6eb3cd-ba2e-4a97-a1f9-4f4a3b1c0001";
+        let wlan_xml = "<WLANProfile><name>Rulebox-ab12</name></WLANProfile>";
+        let spec = PrinterSpec { name: "Front (Rulebox)".into(), port: "IP_1".into(), driver: "Driver".into() };
+        blocked("write_staff_value", p.write_staff_value(sid, staff_key, "NoRun", &RegData::Dword(1)));
+        blocked("delete_staff_value", p.delete_staff_value(sid, staff_key, "NoRun"));
+        blocked("deploy_ci_policy", p.deploy_ci_policy(policy, b"cip"));
+        blocked("remove_ci_policy", p.remove_ci_policy(policy));
+        blocked("refresh_ci_policies", p.refresh_ci_policies());
+        blocked("set_applocker_policy", p.set_applocker_policy("<AppLockerPolicy/>", AppLockerMechanism::Local));
+        blocked("clear_applocker_policy", p.clear_applocker_policy(AppLockerMechanism::Csp));
+        blocked("set_service_start", p.set_service_start("Spooler", 4));
+        blocked("set_service_security", p.set_service_security("RuleboxAgent", "D:P(A;;GA;;;SY)"));
+        blocked("set_service_required_privileges", p.set_service_required_privileges("RuleboxAgent", &[]));
+        blocked("set_account_lockout", p.set_account_lockout(LockoutPolicy { threshold: 5, duration_s: 900, window_s: 900 }));
+        blocked("wlan_set_profile", p.wlan_set_profile(wlan_xml));
+        blocked("wlan_delete_profile", p.wlan_delete_profile("Rulebox-ab12"));
+        blocked("wlan_set_filters", p.wlan_set_filters(&["Acme"]));
+        blocked("printer_add", p.printer_add(&spec));
+        blocked("printer_delete", p.printer_delete("Front (Rulebox)"));
+        blocked("printer_set_security", p.printer_set_security("Microsoft Print to PDF", "D:P(A;;GA;;;SY)"));
+        blocked("bcd_set", p.bcd_set("{current}", "recoveryenabled", "No"));
+        blocked("remove_safe_boot_entry", p.remove_safe_boot_entry("Minimal"));
+        blocked("start_process_trace", p.start_process_trace(Box::new(|_| {})));
+        blocked("stop_process_trace", p.stop_process_trace(TraceHandle(1)));
+        blocked(
+            "set_path_acl",
+            p.set_path_acl(&InstallPaths::new(PathBuf::from(r"C:\rulebox-test-no-such-install")).root().join("x"), "D:P(A;;GA;;;SY)"),
+        );
+    }
+
+    /// (Phase 5 Step 3, plan 4.5 rule 2) A value outside an allow-list is refused before
+    /// the guard, on every machine, and nothing is touched.
+    #[test]
+    fn writes_outside_the_allow_lists_are_refused_before_the_guard() {
+        let p = platform();
+        let sid = "S-1-5-21-1-2-3-1001";
+        let other = |result: Result<(), PlatformError>, needle: &str| match result {
+            Err(PlatformError::Other(message)) => assert!(message.contains(needle), "{message}"),
+            other => panic!("expected a list refusal, got {other:?}"),
+        };
+        // Machine keys: the Run key, a service key, the Safe Mode root itself.
+        for path in [
+            r"SOFTWARE\Microsoft\Windows\CurrentVersion\Run",
+            r"SYSTEM\CurrentControlSet\Services\RuleboxAgent",
+            r"SYSTEM\CurrentControlSet\Control\SafeBoot\Minimal",
+            r"SOFTWARE\Policies\Microsoft\Windows\DeviceInstall\Settings",
+        ] {
+            let key = RegValueRef { path: path.into(), name: "X".into() };
+            other(p.write_machine_value(&key, Some(&RegData::Dword(1))), "not one Rulebox writes");
+        }
+        // Inside the roots the guard is next (device installation restrictions, Safe Mode).
+        let guarded = |path: &str, name: &str| {
+            let key = RegValueRef { path: path.into(), name: name.into() };
+            p.write_machine_value(&key, Some(&RegData::Dword(1)))
+        };
+        if on_dev_machine() {
+            for (path, name) in [
+                (r"SOFTWARE\Policies\Microsoft\Windows\DeviceInstall\Restrictions", "DenyDeviceClasses"),
+                (r"SOFTWARE\Policies\Microsoft\Windows\DeviceInstall\Restrictions\DenyDeviceClasses", "1"),
+                (r"SYSTEM\CurrentControlSet\Control\SafeBoot\Minimal\RuleboxAgent", ""),
+                (r"SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System", "HideFastUserSwitching"),
+            ] {
+                assert!(matches!(guarded(path, name), Err(PlatformError::Guard(_))), "{path}");
+            }
+        }
+        // Staff keys and the shell value.
+        other(p.write_staff_value(sid, r"Software\Classes", "X", &RegData::Dword(1)), "not one Rulebox writes");
+        other(p.delete_staff_value(sid, r"Software\Microsoft\Windows\CurrentVersion\RunOnce", "X"), "not one Rulebox writes");
+        other(
+            p.write_staff_value(sid, r"Software\Microsoft\Windows\CurrentVersion\Policies\System", "Shell", &RegData::String("x".into())),
+            "set_user_shell",
+        );
+        // The other rules.
+        other(p.deploy_ci_policy("not-a-guid", b"x"), "GUID");
+        other(p.set_service_start("RuleboxAgent", 4), "automatically");
+        other(p.set_service_security("Spooler", "D:"), "agent service");
+        other(p.wlan_set_profile("<WLANProfile><name>Home</name></WLANProfile>"), "Rulebox");
+        other(p.wlan_delete_profile("Home"), "Rulebox");
+        other(p.printer_delete("Microsoft Print to PDF"), "Rulebox made");
+        other(p.bcd_set("{bootmgr}", "displayorder", "x"), "not one Rulebox changes");
+        other(p.remove_safe_boot_entry("Option"), "not one Rulebox writes");
+        assert!(matches!(
+            p.set_path_acl(Path::new(r"C:\Windows"), "D:P(A;;GA;;;SY)"),
+            Err(PlatformError::Refused(_))
+        ));
+        assert!(matches!(
+            p.set_path_acl(Path::new(r"C:\rulebox-test-no-such-install\..\Windows"), "D:P(A;;GA;;;SY)"),
+            Err(PlatformError::Refused(_))
+        ));
+    }
+
+    /// (Phase 5 Step 3) The read-only methods answer on the dev machine and change
+    /// nothing. `#[ignore]`d: they read the real registry, service manager, spooler,
+    /// WLAN service and event log, so the user runs them by hand.
+    #[test]
+    #[ignore = "reads the real machine (services, spooler, WLAN, event log); run by hand"]
+    fn smoke_read_only_seam_methods() {
+        let p = platform();
+        println!("posture: {:?}", p.read_security_posture().unwrap());
+        println!("ci policies: {:?}", p.list_ci_policies().unwrap());
+        println!("applocker: {:?}", p.get_applocker_policy().unwrap());
+        println!("wlan: {:?}", p.wlan_list().unwrap());
+        println!("printers: {:?}", p.printer_list().unwrap());
+        println!("lockout: {:?}", p.get_account_lockout().unwrap());
+        println!("event log: {}", p.read_event_log("Microsoft-Windows-CodeIntegrity/Operational", 0, 5).unwrap().len());
+        assert!(p.query_service("EventLog").unwrap().is_some());
+        assert!(p.query_service("RuleboxNoSuchService").unwrap().is_none());
+        assert!(p.get_service_security("EventLog").unwrap().is_some());
+        assert!(p.get_path_acl(Path::new(&std::env::var("SystemRoot").unwrap())).unwrap().is_some());
+        assert!(!p.list_machine_value_names(r"SOFTWARE\Microsoft\Windows NT\CurrentVersion").unwrap().is_empty());
+        // (Step 5) The BCD reader runs `bcdedit /enum {current}` (read-only).
+        println!("recoveryenabled: {:?}", p.bcd_get("{current}", "recoveryenabled"));
+        println!("local admins: {:?}", p.enabled_local_admin_accounts().unwrap());
     }
 
     #[test]

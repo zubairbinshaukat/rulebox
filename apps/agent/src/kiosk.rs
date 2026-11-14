@@ -39,6 +39,7 @@ use crate::admin_exit::{run_exit, ExitRequest, AUTO_ADMIN_LOGON, WINLOGON_KEY};
 use crate::agent::{AgentConfig, FILES_BASE_DIR};
 use crate::compat;
 use crate::ipc_shell::ShellBroadcast;
+use crate::journal::{self, Change, JournalCtx, JournalError, JournalOwner};
 use crate::kiosk_control::KioskControl;
 use crate::paths::InstallPaths;
 use crate::platform::{
@@ -46,8 +47,7 @@ use crate::platform::{
 };
 use crate::session::SessionManager;
 use crate::state::{
-    AgentState, JournalEntry, KioskApplied, KioskRecord, OriginalValue, SharedState, SnapshotHandle,
-    StaffAccount, StaffHiveRecord,
+    AgentState, KioskApplied, KioskRecord, SharedState, SnapshotHandle, StaffAccount, StaffHiveRecord,
 };
 
 // -- names and values (plan Sections 4.3 and 5.6) -------------------------------------
@@ -141,6 +141,23 @@ pub enum KioskError {
     Persist(String),
     #[error("{}", .0.iter().map(ToString::to_string).collect::<Vec<_>>().join("; "))]
     Multiple(Vec<KioskError>),
+    /// (Phase 5 Step 2) The journal holds a target this build cannot restore (written
+    /// by a newer agent that was rolled back). Nothing is applied and the kiosk stays
+    /// as it is; `recover` from the newer binary restores it (plan 4.4, edge case 52).
+    #[error("the journal holds a target this agent cannot restore")]
+    JournalUnknownTarget,
+}
+
+impl From<JournalError> for KioskError {
+    fn from(error: JournalError) -> Self {
+        match error {
+            JournalError::Platform(error) => KioskError::Platform(error),
+            JournalError::Persist(text) => KioskError::Persist(text),
+            JournalError::UnknownTarget => KioskError::JournalUnknownTarget,
+            #[cfg(test)]
+            JournalError::Crashed => KioskError::Platform(PlatformError::Other("crash injected".to_string())),
+        }
+    }
 }
 
 impl KioskError {
@@ -155,6 +172,7 @@ impl KioskError {
             KioskError::Platform(PlatformError::Guard(_)) => "guard_blocked".to_string(),
             KioskError::Platform(_) => "platform_error".to_string(),
             KioskError::Persist(_) => "state_not_saved".to_string(),
+            KioskError::JournalUnknownTarget => journal::JOURNAL_UNKNOWN_TARGET.to_string(),
             KioskError::Multiple(errors) => {
                 errors.first().map_or_else(|| "platform_error".to_string(), KioskError::code)
             }
@@ -169,7 +187,7 @@ impl KioskError {
         match self {
             KioskError::Blocked(_) | KioskError::StaffAccountConflict | KioskError::StaffAccountDisabled => true,
             KioskError::Multiple(errors) => errors.iter().any(KioskError::must_not_stay_enabled),
-            KioskError::Platform(_) | KioskError::Persist(_) => false,
+            KioskError::Platform(_) | KioskError::Persist(_) | KioskError::JournalUnknownTarget => false,
         }
     }
 }
@@ -278,6 +296,11 @@ impl Kiosk<'_> {
     /// Section 5.6 "Enable": the steps in order, stopping at the first failure. The
     /// caller decides about the rollback (`enable_or_rollback`).
     pub fn enable(&mut self, opts: EnableOptions) -> Result<(), KioskError> {
+        // 0. (Phase 5 Step 2, invariant I8) A journal entry this build cannot restore
+        //    stops everything: nothing new is written that could not be undone.
+        if self.shared.read(|state| journal::unknown_target(state).is_some()) {
+            return Err(KioskError::JournalUnknownTarget);
+        }
         // 1. Blockers.
         self.check_blockers()?;
         // 2. The Staff account.
@@ -318,7 +341,10 @@ impl Kiosk<'_> {
         match self.enable(opts) {
             Ok(()) => Ok(()),
             Err(error) => {
-                if !was_enabled || error.must_not_stay_enabled() {
+                // An unknown journal target is "keep the kiosk as it is": no rollback
+                // either, because the rollback could not restore that entry.
+                let keep = matches!(error, KioskError::JournalUnknownTarget);
+                if !keep && (!was_enabled || error.must_not_stay_enabled()) {
                     if let Err(rollback) = self.disable() {
                         tracing::error!("the rollback after a failed kiosk enable also failed: {rollback}");
                     }
@@ -461,40 +487,30 @@ impl Kiosk<'_> {
     /// keeps the original once and never overwrites it), and the journal entry is
     /// saved before the value is written.
     fn apply_machine_values(&self, exit_hold: bool) -> Result<(), KioskError> {
+        // (Phase 5 Step 5, plan 4.16) A Safe Mode boot holds automatic sign-in off exactly
+        // like the admin exit does, for that boot only: the next normal boot's enable
+        // writes "1" again, and Disable restores the journalled original either way.
+        let exit_hold = exit_hold || crate::lockdown::boot::in_safe_mode(self.platform);
         let computer_name = self.platform.computer_name()?;
+        let ctx = JournalCtx { platform: self.platform, shared: self.shared };
+        let version = self.shared.read(|state| state.last_applied_version);
         for (key, target) in wanted_machine_values(&computer_name, exit_hold) {
-            let current = self.platform.read_machine_value(&key)?;
             // `AutoAdminLogon` is also written by the admin exit (`run_exit`, to "0"),
             // outside this function. Its original is therefore journaled even when it
             // already equals the target (an owner who used automatic sign-in), so a
             // Disable during an exit hold puts that original back.
             let always_journal = key.path == WINLOGON_KEY && key.name == AUTO_ADMIN_LOGON;
-            if current == target && !always_journal {
-                continue;
+            // The owner's plaintext password goes to the secrets file, never into
+            // `agent-state.json`.
+            let secret = is_plaintext_default_password(&key);
+            let mut change = Change::machine(JournalOwner::Kiosk, key, target).since(version);
+            if always_journal {
+                change = change.always_record();
             }
-            let journaled = self.shared.read(|state| state.journal.iter().any(|entry| entry.key == key));
-            if journaled && current == target {
-                continue;
+            if secret {
+                change = change.secret_original();
             }
-            if !journaled {
-                let original = match &current {
-                    None => OriginalValue::Absent,
-                    Some(RegData::Dword(value)) => OriginalValue::Dword(*value),
-                    // The owner's plaintext password goes to the secrets file, never
-                    // into `agent-state.json`.
-                    Some(RegData::String(text)) if is_plaintext_default_password(&key) => {
-                        self.shared.update_secrets(|secrets| {
-                            secrets.original_default_password_registry = Some(text.clone());
-                        })?;
-                        OriginalValue::InSecrets
-                    }
-                    Some(RegData::String(text)) => OriginalValue::String(text.clone()),
-                };
-                self.save(|state| state.journal.push(JournalEntry { key: key.clone(), original }))?;
-            }
-            if current != target {
-                self.platform.write_machine_value(&key, target.as_ref())?;
-            }
+            journal::change(&ctx, &change)?;
         }
         Ok(())
     }
@@ -587,32 +603,10 @@ impl Kiosk<'_> {
     pub fn restore_machine(&mut self) -> Result<(), KioskError> {
         let mut errors: Vec<KioskError> = Vec::new();
 
-        // 1. Machine values.
-        let entries = self.shared.read(|state| state.journal.clone());
-        for entry in entries {
-            match self.restore_entry(&entry) {
-                Ok(()) => {
-                    let key = entry.key.clone();
-                    if let Err(error) = self.save(|state| state.journal.retain(|e| e.key != key)) {
-                        errors.push(error);
-                    }
-                }
-                Err(error) => errors.push(error),
-            }
-        }
-        let secret_still_needed = self
-            .shared
-            .read(|state| state.journal.iter().any(|entry| entry.original == OriginalValue::InSecrets));
-        if !secret_still_needed {
-            let kept = self.shared.secrets(|secrets| secrets.original_default_password_registry.is_some());
-            if matches!(kept, Ok(true)) {
-                if let Err(error) =
-                    self.shared.update_secrets(|secrets| secrets.original_default_password_registry = None)
-                {
-                    errors.push(error.into());
-                }
-            }
-        }
+        // 1. Everything in the journal, last written first (journal v2, plan 4.4). An
+        //    entry that fails stays `Restoring` and is tried again at the next call.
+        let ctx = JournalCtx { platform: self.platform, shared: self.shared };
+        errors.extend(journal::restore_all(&ctx).into_errors().into_iter().map(KioskError::from));
 
         // 2. The LSA secret: the original back, or gone. Untouched when it was
         //    never taken over, so a rollback cannot delete the owner's own.
@@ -680,27 +674,6 @@ impl Kiosk<'_> {
         gone(self.platform.set_staff_shell(sid, ShellMechanism::PolicyShell, None))?;
         gone(self.platform.set_staff_shell(sid, ShellMechanism::WinlogonShell, None))?;
         gone(self.platform.set_staff_user_policy(sid, DISABLE_LOCK_WORKSTATION, None))
-    }
-
-    fn restore_entry(&self, entry: &JournalEntry) -> Result<(), KioskError> {
-        let data = match &entry.original {
-            OriginalValue::Absent => None,
-            OriginalValue::Dword(value) => Some(RegData::Dword(*value)),
-            OriginalValue::String(text) => Some(RegData::String(text.clone())),
-            OriginalValue::InSecrets => {
-                let kept = self.shared.secrets(|secrets| secrets.original_default_password_registry.clone())?;
-                match kept {
-                    Some(text) => Some(RegData::String(text)),
-                    None => {
-                        return Err(KioskError::Platform(PlatformError::Other(
-                            "the original auto sign-in password is not in the secrets file".to_string(),
-                        )));
-                    }
-                }
-            }
-        };
-        self.platform.write_machine_value(&entry.key, data.as_ref())?;
-        Ok(())
     }
 
     /// Step 5 of Disable: `applied = Disabled`. The error fields are the caller's.

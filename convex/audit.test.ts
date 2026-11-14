@@ -2,6 +2,7 @@ import { convexTest } from "convex-test";
 import { afterEach, beforeEach, describe, expect, test } from "vitest";
 import { setupAuth } from "../tests/convex/auth";
 import { probe } from "../tests/convex/devices";
+import dashboardAuditLabels from "../apps/dashboard/src/lib/screenStrings/audit.ts?raw";
 import { asMember, expectCode, expectNoSecrets, makeOrg, type T } from "../tests/convex/identity";
 import { api } from "./_generated/api";
 import type { Id } from "./_generated/dataModel";
@@ -98,6 +99,12 @@ describe("looksSecret", () => {
 
   test("the action list has no duplicates", () => {
     expect(new Set(AUDIT_ACTIONS).size).toBe(AUDIT_ACTIONS.length);
+  });
+
+  test("every Phase 5 action has a label in the dashboard (apps/dashboard/src/lib/screenStrings/audit.ts)", () => {
+    const phase5 = AUDIT_ACTIONS.slice(AUDIT_ACTIONS.indexOf("lockdown.settingsChanged"));
+    expect(phase5.length).toBeGreaterThan(30);
+    for (const action of phase5) expect(dashboardAuditLabels, `no label for ${action}`).toContain(`"${action}": "`);
   });
 });
 

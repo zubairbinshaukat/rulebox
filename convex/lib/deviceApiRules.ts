@@ -37,6 +37,13 @@ const KIND_ACTIONS: Record<string, AuditAction> = {
   adminExitLockedOut: "device.adminExitLockedOut",
   adminExitFailed: "device.adminExitFailed",
   employeeLockedOut: "device.employeeLockedOut",
+  // Phase 5 Step 9 (`apps/agent/src/audit.rs`): events a device reports about its own lockdown.
+  deviceLockdownRefused: "device.lockdownRefused",
+  deviceLockdownRolledBack: "device.lockdownRolledBack",
+  deviceTamperDetected: "device.tamperDetected",
+  deviceDriftReasserted: "device.driftReasserted",
+  deviceSafeModeBlocked: "device.safeModeBlocked",
+  deviceClockJump: "device.clockJump",
 };
 
 /** The audit action of a record kind, or null for an unknown kind (the record is skipped). */
@@ -101,6 +108,24 @@ export function recordSummary(
       break;
     case "device.adminExitFailed":
       text = `The admin exit failed on the PC ${device}`;
+      break;
+    case "device.lockdownRefused":
+      text = `The PC ${device} refused a lockdown policy`;
+      break;
+    case "device.lockdownRolledBack":
+      text = `The PC ${device} rolled back a lockdown policy to its last working one`;
+      break;
+    case "device.tamperDetected":
+      text = `Tampering with Rulebox was detected on the PC ${device}`;
+      break;
+    case "device.driftReasserted":
+      text = `The PC ${device} put a changed lockdown setting back`;
+      break;
+    case "device.safeModeBlocked":
+      text = `A sign-in to the Staff account in Safe Mode was blocked on the PC ${device}`;
+      break;
+    case "device.clockJump":
+      text = `The clock of the PC ${device} jumped`;
       break;
     default:
       text = `${who} was locked out after too many wrong passwords on the PC ${device}`;

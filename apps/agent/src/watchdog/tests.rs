@@ -823,3 +823,69 @@ fn the_simulated_staff_session_gate_is_always_on() {
     let gate = sim_gate();
     assert_eq!(gate(), Gate { kiosk_enabled: true, staff_sid: Some(SIM_STAFF_SID.to_string()) });
 }
+
+// -- the last-known-good sink (Phase 5 Step 9) --------------------------------------------
+
+#[derive(Default)]
+struct RecordingSink {
+    events: Mutex<Vec<String>>,
+}
+
+impl RecordingSink {
+    fn events(&self) -> Vec<String> {
+        crate::state::lock(&self.events).clone()
+    }
+}
+
+impl crate::lockdown::lkg::ShellHealthSink for RecordingSink {
+    fn ui_alive(&self, _now_ms: u64) {
+        crate::state::lock(&self.events).push("alive".into());
+    }
+
+    fn shell_crashed(&self, _now_ms: u64) {
+        crate::state::lock(&self.events).push("crash".into());
+    }
+
+    fn staff_session(&self, active: bool, _now_ms: u64) {
+        crate::state::lock(&self.events).push(format!("session:{active}"));
+    }
+}
+
+#[tokio::test(start_paused = true)]
+async fn the_sink_hears_the_session_the_heartbeats_and_a_crash() {
+    let mut rig = Rig::new();
+    let sink = Arc::new(RecordingSink::default());
+    rig.task.set_health_sink(sink.clone());
+    rig.add_launcher();
+    rig.task.evaluate().await;
+    rig.staff_app_connects(1, 7001);
+    rig.heartbeat(1, 7001);
+    rig.task.evaluate().await;
+    // The Staff App dies while the Staff session is active.
+    rig.task.on_signal(ShellSignal::Closed { connection_id: 1 }, Instant::now());
+    assert_eq!(sink.events(), ["session:true", "alive", "alive", "crash"]);
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_connection_that_never_became_ready_or_a_closed_one_without_a_session_is_no_crash() {
+    let mut rig = Rig::new();
+    let sink = Arc::new(RecordingSink::default());
+    rig.task.set_health_sink(sink.clone());
+    rig.add_launcher();
+    rig.task.evaluate().await;
+    // Connected, never ready, closed: not a crash.
+    rig.task.on_signal(ShellSignal::Connected { connection_id: 2, pid: 7002, role: ClientRole::Shell }, Instant::now());
+    rig.task.on_signal(ShellSignal::Closed { connection_id: 2 }, Instant::now());
+    // The launcher's short calls are not Staff Apps.
+    rig.task.on_signal(ShellSignal::Connected { connection_id: 3, pid: 900, role: ClientRole::Launcher }, Instant::now());
+    rig.task.on_signal(ShellSignal::Closed { connection_id: 3 }, Instant::now());
+    assert_eq!(sink.events(), ["session:true"]);
+    // Nobody is signed in to Windows any more: the session ends, and a close then is no crash.
+    rig.staff_app_connects(4, 7004);
+    rig.set_gate(|gate| gate.kiosk_enabled = false);
+    rig.step(1).await;
+    rig.task.on_signal(ShellSignal::Closed { connection_id: 4 }, Instant::now());
+    let events = sink.events();
+    assert_eq!(events.last().map(String::as_str), Some("session:false"), "{events:?}");
+    assert!(!events.contains(&"crash".to_string()));
+}

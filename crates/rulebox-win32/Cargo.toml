@@ -18,22 +18,41 @@ windows = { workspace = true, features = [
     "Wdk_Storage_FileSystem",
     "Win32_System_IO",
     "Win32_Foundation",
+    # (Phase 5 Step 3) PRINTER_INFO_2W holds a DEVMODEW (printing.rs).
+    "Win32_Graphics_Gdi",
+    # (Phase 5 Step 3) printing.rs, service.rs, wlan.rs, eventlog.rs.
+    "Win32_Graphics_Printing",
     "Win32_NetworkManagement_NetManagement",
+    "Win32_NetworkManagement_Ndis",
+    "Win32_NetworkManagement_WiFi",
     "Win32_Security",
     "Win32_Security_Authentication_Identity",
     "Win32_Security_Authorization",
     "Win32_Security_Cryptography",
+    # (Phase 5 Step 8) fileid.rs: who signed a program file (WinVerifyTrust, catalog lookup).
+    "Win32_Security_Cryptography_Catalog",
+    "Win32_Security_Cryptography_Sip",
+    "Win32_Security_WinTrust",
     "Win32_Storage_FileSystem",
     "Win32_System_Com",
+    # (Phase 5 Step 8) etw.rs: the process-start trace session (EVENT_TRACE_LOGFILEW needs Time).
+    "Win32_System_Diagnostics_Etw",
+    "Win32_System_Time",
     "Win32_System_Diagnostics_ToolHelp",
     "Win32_System_Environment",
+    "Win32_System_EventLog",
     # (Phase 4 Step 14 review) The installer's kill-on-close job (job.rs).
     "Win32_System_JobObjects",
     "Win32_System_Pipes",
     "Win32_System_Registry",
     "Win32_System_RemoteDesktop",
+    "Win32_System_Services",
     "Win32_System_SystemInformation",
     "Win32_System_Threading",
+    # (Phase 5 Step 5) wmi.rs: a read-only WMI query for BitLocker and the TPM.
+    "Win32_System_Ole",
+    "Win32_System_Variant",
+    "Win32_System_Wmi",
     "Win32_UI_Shell",
 ] }
 

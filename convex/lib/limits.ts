@@ -365,3 +365,46 @@ export const GROUP_LOAD_WORST_DOCS =
   1 + MAX_GROUP_APPS + MAX_GROUP_APPS + MAX_GROUP_GRANT_EMPLOYEES * (MAX_EMPLOYEE_APPS + 1) + MAX_GROUP_GRANT_APPS;
 /** Pending roster removals signed per `employees:resyncRoster` run (it reschedules while full). */
 export const ROSTER_RESYNC_BATCH = 50;
+
+// ---------------------------------------------------------------- Phase 5 (Step 10)
+/** `keys:rewrapAll`: orgKeys rows re-wrapped per run (it reschedules while full). */
+export const REWRAP_BATCH = 50;
+/** `deviceApi:reportFindings`: fingerprints per call (plan 4.19). */
+export const MAX_FINDINGS_PER_CALL = 50;
+/** `deviceApi:reportApply`: Wi-Fi profile / printer states per report (plan 4.2). */
+export const MAX_ITEM_STATES = 50;
+/** `deviceApi:reportSecurityDaily`: permission-denial rows per device day, and per organization day (plan 4.2). */
+export const MAX_PERMISSION_DENIALS = 100;
+export const MAX_ORG_PERMISSION_DENIALS = 500;
+/** `deviceApi:reportAcks`: acknowledgements per call (the document carries at most 5 broadcasts). */
+export const MAX_ACKS_PER_CALL = 20;
+/** Lockdown limits of plan 4.3 rule 4 / 4.2 (the Rust side has the same numbers). */
+export const MAX_GROUP_EXCEPTIONS = 200;
+export const MAX_WIFI_PROFILES = 50;
+export const MAX_DEVICE_WIFI = 20;
+export const MAX_DEVICE_PRINTERS = 20;
+export const MAX_ORG_PRINTERS = 100;
+export const MAX_ACTIVE_BROADCASTS = 5;
+/** `groupConfigs.config` in UTF-8 bytes, and how many versions per group are kept (plan 4.14). */
+export const MAX_GROUP_CONFIG_BYTES = 262_144;
+export const KEEP_GROUP_CONFIGS = 20;
+export const PRUNE_GROUP_CONFIGS_PER_RUN = 10;
+/** `security:rollup`: device rows per run; retention batches (plan 4.19, Step 10 item 7). */
+export const SECURITY_ROLLUP_BATCH = 200;
+export const DEVICE_SECURITY_RETENTION_DAYS = 14;
+export const ORG_SECURITY_RETENTION_DAYS = 90;
+export const SECURITY_RETENTION_BATCH = 200;
+/** `apps:get`: the days of denial counts shown on the app page (plan 4.13: the last 30 `orgSecurityDaily` rows). */
+export const APP_DENIAL_DAYS = 30;
+/**
+ * `apps:setPermissions`: groups that assign the app and get their configuration snapshotted in the same
+ * transaction (each snapshot reads up to ~570 documents). More groups: the rest are published through the
+ * live catalogue only (the app record is not part of the snapshot until Step 16).
+ */
+export const MAX_PERMISSION_SNAPSHOT_GROUPS = 10;
+/** `seal:forDevices`: devices sealed per run (each needs one box per assigned profile). */
+export const SEAL_DEVICES_PER_RUN = 25;
+/** Live broadcasts read per target when a document is built (the newest MAX_ACTIVE_BROADCASTS are kept). */
+export const BROADCAST_READ = 10;
+/** The server day a security summary may name: today, or this many days back (clock slack). */
+export const SECURITY_DAY_SLACK = 2;

@@ -235,6 +235,35 @@ const TINY_PNG_B64 = btoa(
   String.fromCharCode(0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 13, 0x49, 0x48, 0x44, 0x52, 0, 0, 0, 1, 0, 0, 0, 1, 8, 6, 0, 0, 0, 0x1f, 0x15, 0xc4, 0x89),
 );
 const unique = () => `G ${Math.random().toString(36).slice(2, 10)}`;
+/** Valid arguments of the Phase 5 device reports (Step 10); the matrix presents a wrong secret, the I/O and secrets tests the real one. */
+const OFF_LAYER = { mode: "off", state: "off" };
+export const APPLY_REPORT = {
+  appliedVersion: 1,
+  state: "applied",
+  layers: { staff: OFF_LAYER, machine: OFF_LAYER, appLocker: OFF_LAYER, appControl: OFF_LAYER, procWatch: OFF_LAYER, boot: OFF_LAYER, performance: OFF_LAYER },
+  wifi: [] as { profileId: string; revision: number; state: string }[],
+  printers: [] as { printerId: string; revision: number; state: string }[],
+  capabilities: ["lockdown/1"],
+  contentHash: "c".repeat(64),
+};
+export const FINDING = {
+  fingerprint: "d".repeat(64),
+  layer: "appLocker",
+  fileName: "tool.exe",
+  folderClass: "userProfile",
+  signer: "Contoso Ltd",
+  product: "Tool",
+  sha256: "e".repeat(64),
+};
+export const SECURITY_DAILY = {
+  day: new Date().toISOString().slice(0, 10),
+  blocked: { appLocker: 2, appControl: 0, procWatch: 1, elevation: 0 },
+  permissionDenials: [] as { appId: string; kind: string; count: number }[],
+  drift: 0,
+  tamper: 0,
+};
+/** A valid X25519 public key (the base point's u = 9 is a fine public key; any 32 non-zero bytes that are not low-order work). */
+export const SEAL_PUBLIC_KEY = btoa(String.fromCharCode(...Array.from({ length: 32 }, (_, i) => (i === 0 ? 9 : 0))));
 const fakePasskeyId = "jh7bp5vtxgdvg1vq4dzkrymc8s8gvwzm";
 
 export const ROWS: Row[] = [
@@ -316,6 +345,32 @@ export const ROWS: Row[] = [
   {
     name: "deviceApi:rotateCredential",
     call: (a) => a.mutation(api.deviceApi.rotateCredential, { ...deviceArgs, newSecretHash: "a".repeat(64) }),
+    expect: { default: "device_rejected" },
+  },
+  // Phase 5 Step 10: the lockdown reports and the sealing key. Device credentials only; no member identity helps.
+  {
+    name: "deviceApi:reportApply",
+    call: (a) => a.mutation(api.deviceApi.reportApply, { ...deviceArgs, ...APPLY_REPORT }),
+    expect: { default: "device_rejected" },
+  },
+  {
+    name: "deviceApi:reportFindings",
+    call: (a) => a.mutation(api.deviceApi.reportFindings, { ...deviceArgs, findings: [] }),
+    expect: { default: "device_rejected" },
+  },
+  {
+    name: "deviceApi:reportSecurityDaily",
+    call: (a) => a.mutation(api.deviceApi.reportSecurityDaily, { ...deviceArgs, ...SECURITY_DAILY }),
+    expect: { default: "device_rejected" },
+  },
+  {
+    name: "deviceApi:reportAcks",
+    call: (a) => a.mutation(api.deviceApi.reportAcks, { ...deviceArgs, acks: [] }),
+    expect: { default: "device_rejected" },
+  },
+  {
+    name: "deviceApi:registerSealKey",
+    call: (a) => a.mutation(api.deviceApi.registerSealKey, { ...deviceArgs, publicKey: SEAL_PUBLIC_KEY }),
     expect: { default: "device_rejected" },
   },
   { name: "members:page", call: (a) => a.query(api.members.page, { paginationOpts: { numItems: 10, cursor: null } }), expect: { ...VIEWER, foreign: "ok" } },
@@ -509,6 +564,9 @@ export const ROWS: Row[] = [
   { name: "keys:registerActive", call: (a) => a.mutation(api.keys.registerActive, {}), expect: { ...OWNER, owner: "ok", foreign: "ok" } },
   { name: "keys:prepareRotation", call: (a) => a.mutation(api.keys.prepareRotation, {}), expect: { ...OWNER, owner: "not_ready", foreign: "not_ready" } },
   { name: "keys:finishRotation", call: (a) => a.mutation(api.keys.finishRotation, {}), expect: { ...OWNER, owner: "conflict", foreign: "conflict" } },
+  // Phase 5 Step 10: the test deployment has no master key, so an Owner with a fresh step-up reaches the handler and is
+  // refused `not_ready` (the I/O test runs the complete call with a master key set). A major action like the three above.
+  { name: "keys:migrateFromEnv", call: (a) => a.action(api.keys.migrateFromEnv, {}), expect: { ...OWNER, owner: "not_ready", foreign: "not_ready" } },
   // ---- Step 10: apps, assignments, file types. Writes that need nothing but the caller's rights
   // are chosen so that every allowed caller gets the same answer (no-op updates, or a refusal
   // that comes after the authorization); the foreign owner acts on THEIR organization.
@@ -538,6 +596,12 @@ export const ROWS: Row[] = [
     // The same values again: no write, every allowed caller gets the same answer.
     call: (a, f) =>
       a.mutation(api.apps.update, { appId: f.appId, expectedRevision: 0, web: { name: "Docs", url: "https://example.com", allowedDomains: [] } }),
+    expect: { ...ADMIN_UNLOCKED, foreign: "not_found" },
+  },
+  {
+    name: "apps:setPermissions",
+    // The app's own permissions again: no write, every allowed caller gets the same answer.
+    call: (a, f) => a.mutation(api.apps.setPermissions, { appId: f.appId, expectedRevision: 0, permissions: DEFAULT_WEB_PERMISSIONS }),
     expect: { ...ADMIN_UNLOCKED, foreign: "not_found" },
   },
   {
@@ -717,6 +781,7 @@ export const STEP_UP_EXEMPT = new Set([
   // not member functions
   "account:redeemReset", "account:requestPinReset", "account:redeemPinReset", "enrollment:enroll", "devices:heartbeat", "devices:unenroll", "devices:ping",
   "deviceApi:verifyEmployee", "deviceApi:report", "deviceApi:reportAudit", "deviceApi:reportInstalls", "deviceApi:rotateCredential",
+  "deviceApi:reportApply", "deviceApi:reportFindings", "deviceApi:reportSecurityDaily", "deviceApi:reportAcks", "deviceApi:registerSealKey",
 ]);
 
 export async function outcome(p: Promise<unknown>): Promise<{ result: string; value: unknown }> {
@@ -784,6 +849,28 @@ export const DEVICE_CALLS: Record<string, (f: Fixture, c?: { deviceId: string; d
   "deviceApi:reportAudit": async (f, c = creds(f)) => () => f.t.mutation(api.deviceApi.reportAudit, { ...c, records: [], dropped: 0 }),
   "deviceApi:reportInstalls": async (f, c = creds(f)) => () => f.t.mutation(api.deviceApi.reportInstalls, { ...c, results: [] }),
   "deviceApi:rotateCredential": async (f, c = creds(f)) => () => f.t.mutation(api.deviceApi.rotateCredential, { ...c, newSecretHash: sha256HexSync("a new secret") }),
+  "deviceApi:reportApply": async (f, c = creds(f)) => () => f.t.mutation(api.deviceApi.reportApply, { ...c, ...APPLY_REPORT }),
+  "deviceApi:reportFindings": async (f, c = creds(f)) => () => f.t.mutation(api.deviceApi.reportFindings, { ...c, findings: [FINDING] }),
+  "deviceApi:reportSecurityDaily": async (f, c = creds(f)) => () => f.t.mutation(api.deviceApi.reportSecurityDaily, { ...c, ...SECURITY_DAILY }),
+  "deviceApi:reportAcks": async (f, given) => {
+    const c = given ?? creds(f);
+    // With credentials passed in (the cross-organization walk, which must leave the fixture untouched) nothing is seeded.
+    if (given !== undefined) return () => f.t.mutation(api.deviceApi.reportAcks, { ...c, acks: [{ broadcastId: "jh7bp5vtxgdvg1vq4dzkrymc8s8gvwzm", atMs: Date.now() }] });
+    // A live broadcast aimed at the device's group: the one acknowledgement is stored.
+    const broadcastId = await f.t.run((ctx) =>
+      ctx.db.insert("broadcasts", {
+        orgId: f.orgId,
+        target: { kind: "group", id: f.groupId },
+        style: "banner",
+        title: "Hello",
+        body: "Body",
+        ackRequired: true,
+        createdAt: Date.now() - 1000,
+      }),
+    );
+    return () => f.t.mutation(api.deviceApi.reportAcks, { ...c, acks: [{ broadcastId, atMs: Date.now() }] });
+  },
+  "deviceApi:registerSealKey": async (f, c = creds(f)) => () => f.t.mutation(api.deviceApi.registerSealKey, { ...c, publicKey: SEAL_PUBLIC_KEY }),
   "enrollment:enroll": async (f) => {
     const token = newToken();
     await f.t.run((ctx) =>

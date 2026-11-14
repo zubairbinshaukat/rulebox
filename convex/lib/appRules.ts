@@ -11,7 +11,7 @@ import {
   MAX_SUCCESS_EXIT_CODES,
 } from "./limits";
 import { APP_ID_PLACEHOLDER, argsProblem, exePathProblem, fileArgProblem, resetFoldersProblem } from "./pathRules";
-import { DEFAULT_WEB_PERMISSIONS, type desktopSpec, type installSpec } from "./validators";
+import { NEW_WEB_APP_PERMISSIONS, type desktopSpec, type installSpec } from "./validators";
 
 // Validation and normalization of what an admin submits for an app (plan Step
 // 10 item 3). PURE apart from `fail`, which throws a `ConvexError`. Every
@@ -48,13 +48,14 @@ export function normalizeHue(hue: number | undefined): number | undefined {
 /**
  * A web app's address and allowed domains. The URL's own host is always
  * allowed and listed first; the rest keep the admin's order, de-duplicated.
- * Permissions are not editable in Phase 4 (`DEFAULT_WEB_PERMISSIONS`).
+ * `permissions` is what a new app starts with (`NEW_WEB_APP_PERMISSIONS`); `apps:update` passes the app's
+ * own, and `apps:setPermissions` is the only way to change them.
  */
 export function normalizeWeb(
   url: string,
   allowedDomains: string[],
-  permissions = DEFAULT_WEB_PERMISSIONS,
-): { url: string; allowedDomains: string[]; permissions: typeof DEFAULT_WEB_PERMISSIONS } {
+  permissions = NEW_WEB_APP_PERMISSIONS,
+): { url: string; allowedDomains: string[]; permissions: typeof NEW_WEB_APP_PERMISSIONS } {
   const trimmed = url.trim();
   if (webUrlProblem(trimmed) !== null || trimmed.length > MAX_APP_URL) fail("invalid_argument", { field: "url" });
   const host = new URL(trimmed).hostname.toLowerCase();

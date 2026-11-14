@@ -513,6 +513,8 @@ fn clip_taskbar_to_strip(app: &AppHandle, mode: ShellMode) {
 /// Place the windows for the monitor as it is now. Shell mode also
 /// (re)reserves the work area.
 pub fn reapply(app: &AppHandle, host: &Arc<DesktopHost>) {
+    // A lock or a full-screen notice covers every monitor, so a monitor that came or went matters.
+    crate::covers::reapply(app);
     let monitor = current_monitor();
     let zone = taskbar_zone_px(monitor.scale);
     // The taskbar window is the strip plus the room for toasts above it.

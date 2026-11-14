@@ -2,7 +2,9 @@
 import type { AgentLinkDto } from "./AgentLinkDto";
 import type { AgentSummary } from "./AgentSummary";
 import type { BannerDto } from "./BannerDto";
+import type { BroadcastDto } from "./BroadcastDto";
 import type { CatalogState } from "./CatalogState";
+import type { DeviceLockDto } from "./DeviceLockDto";
 import type { DisplayPrefs } from "./DisplayPrefs";
 import type { NoticeItem } from "./NoticeItem";
 import type { SessionEndedReason } from "./SessionEndedReason";
@@ -16,4 +18,20 @@ export type ShellState = { mode: ShellModeDto, link: AgentLinkDto, agent: AgentS
  * Why the agent ended the last employee session (protocol 1.2). The
  * sign-in screen shows it until the next sign-in attempt.
  */
-sessionEnded?: SessionEndedReason, };
+sessionEnded?: SessionEndedReason, 
+/**
+ * (Protocol 1.3) Set while the administrator has locked the device: the lock view
+ * covers every monitor and nobody can sign in. Kept while the agent link is down (a lock
+ * never lifts because the pipe dropped); only a snapshot without it clears it.
+ */
+deviceLock?: DeviceLockDto, 
+/**
+ * (Protocol 1.3) The active broadcasts, newest first. Plain text: the page must show
+ * `title` and `body` as text, never as HTML.
+ */
+broadcasts: Array<BroadcastDto>, 
+/**
+ * (Protocol 1.3) The agent says whether the PC has printers (`None`: an older agent,
+ * the app's own `printing` permission alone decides).
+ */
+printingAvailable?: boolean, };

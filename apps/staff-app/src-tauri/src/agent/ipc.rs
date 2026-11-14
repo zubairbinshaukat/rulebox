@@ -5,13 +5,16 @@ use std::sync::{Arc, Mutex};
 use futures_util::future::BoxFuture;
 use rulebox_ipc::client::{CallError, ClientConfig, ClientEvent, IpcClient, LinkState};
 use rulebox_ipc::methods::{
-    AdminExitSubmit, AppsList, Empty, SessionGet, SessionSignIn, SessionSignOut,
-    SessionVerifyPassword, ShellHeartbeat, ShellReady,
+    AdminExitSubmit, AppsList, BroadcastAcknowledge, Empty, SessionGet, SessionSignIn,
+    SessionSignOut, SessionVerifyPassword, ShellHeartbeat, ShellReady, WebappReportDenials,
 };
-use rulebox_ipc::requests::{AdminExitSubmitParams, SignInParams, VerifyPasswordParams};
+use rulebox_ipc::requests::{
+    AdminExitSubmitParams, BroadcastAckParams, DenialCount, ReportDenialsParams, SignInParams,
+    VerifyPasswordParams,
+};
 use rulebox_ipc::envelope::ErrorCode;
 use rulebox_ipc::types::{AgentSnapshot, ClientInfo, ClientRole, HelloResult};
-use rulebox_ipc::{CAP_ADMIN_EXIT, CAP_APPS, CAP_SESSION};
+use rulebox_ipc::{CAP_ADMIN_EXIT, CAP_APPS, CAP_BROADCASTS, CAP_PERMISSION_REPORTS, CAP_SESSION};
 use tokio::sync::{broadcast, mpsc, watch};
 
 use super::{AgentError, AgentPort};
@@ -86,7 +89,11 @@ impl IpcAgent {
                     ClientEvent::ShuttingDown { .. } => {
                         // Banner wiring lands with session / boot steps.
                     }
-                    ClientEvent::AppsChanged | ClientEvent::SessionEnded(_) => {
+                    ClientEvent::AppsChanged
+                    | ClientEvent::SessionEnded(_)
+                    | ClientEvent::DeviceLockChanged
+                    | ClientEvent::BroadcastsChanged
+                    | ClientEvent::ProgramBlocked { .. } => {
                         if let Some(event) = map_client_event(&event) {
                             // No receiver (before the shell starts listening) is fine.
                             let _ = pump.events_tx.send(event);
@@ -306,6 +313,32 @@ impl AgentPort for IpcAgent {
                 .await
                 .map_err(map_call_error)?;
             Ok(map_admin_exit_result(result))
+        })
+    }
+
+    fn ack_broadcast(&self, id: String) -> BoxFuture<'_, Result<bool, AgentError>> {
+        Box::pin(async move {
+            // A 1.2 agent has no broadcasts, so there is nothing to acknowledge.
+            self.require_cap(CAP_BROADCASTS)?;
+            let result = self
+                .shared
+                .client
+                .call::<BroadcastAcknowledge>(BroadcastAckParams { id })
+                .await
+                .map_err(map_call_error)?;
+            Ok(result.ok)
+        })
+    }
+
+    fn report_denials(&self, counts: Vec<DenialCount>) -> BoxFuture<'_, Result<(), AgentError>> {
+        Box::pin(async move {
+            self.require_cap(CAP_PERMISSION_REPORTS)?;
+            self.shared
+                .client
+                .call::<WebappReportDenials>(ReportDenialsParams { counts })
+                .await
+                .map(|_| ())
+                .map_err(map_call_error)
         })
     }
 }

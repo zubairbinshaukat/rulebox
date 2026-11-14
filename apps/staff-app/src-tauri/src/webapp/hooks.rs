@@ -31,7 +31,7 @@ use windows::core::{Interface, PWSTR};
 
 use super::barhost;
 use super::nav::Look;
-use super::permissions::{decide, denial_notice, Decision, PermissionKind};
+use super::permissions::{decide, denial_notice, Decision, DenialKind, PermissionKind};
 use super::WebWindow;
 use crate::model::NoticeTone;
 use crate::state::AppState;
@@ -271,7 +271,7 @@ unsafe fn permission_requests(core: &ICoreWebView2, context: &Arc<HookContext>) 
                 }
                 tracing::info!(app = %context.window.app_id, ?kind, origin_allowed, ?decision, "web permission request");
                 if decision == Decision::Deny && kind != PermissionKind::Autoplay {
-                    context.state.note_web_denial(&context.window.app_id);
+                    context.state.note_web_denial(&context.window.app_id, kind.denial_kind());
                     context
                         .state
                         .notify(NoticeTone::Neutral, denial_notice(kind), Some(context.window.app_name.clone()));
@@ -337,7 +337,7 @@ unsafe fn screen_capture(core: &ICoreWebView2, context: &Arc<HookContext>) -> wi
                 if let Some(args) = args {
                     if !context.window.permissions.screen_share {
                         args.SetCancel(true)?;
-                        context.state.note_web_denial(&context.window.app_id);
+                        context.state.note_web_denial(&context.window.app_id, Some(DenialKind::ScreenShare));
                         context.state.notify(
                             NoticeTone::Neutral,
                             "Screen sharing is not allowed for this app.",

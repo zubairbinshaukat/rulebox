@@ -32,6 +32,9 @@ mod phase4_step15_tests;
 #[cfg(all(test, debug_assertions))]
 mod webnav_tests;
 
+#[cfg(all(test, debug_assertions))]
+mod phase5_step12_tests;
+
 // Step 3 tests live here: the lib unit-test / integration-test harnesses exit
 // with STATUS_ENTRYPOINT_NOT_FOUND (0xC0000139) on this Windows + Tauri link,
 // but the bin harness (this file) starts cleanly.
@@ -147,6 +150,9 @@ mod step3_tests {
             ],
             session_ended: None,
             pending_end: None,
+            device_lock: None,
+            broadcasts: Vec::new(),
+            printing_available: None,
         }
     }
 
@@ -239,7 +245,9 @@ mod step3_tests {
             },
             "notices": [],
             "banner": null,
-            "capabilities": ["state", "health", "session", "apps", "adminExit"]
+            "capabilities": ["state", "health", "session", "apps", "adminExit"],
+            // Protocol 1.3: an empty list; `deviceLock` and `printingAvailable` are left out when unset.
+            "broadcasts": []
         });
         assert_eq!(value, expected);
         let text = serde_json::to_string(&state).expect("text");

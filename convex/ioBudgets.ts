@@ -116,6 +116,21 @@ export const IO_BUDGETS: Record<string, IoBudget> = {
   "deviceApi:reportInstalls": { maxReads: 1 + 101 + 1 + 100, maxReadBytes: 60_000, maxWrites: 51, maxWriteBytes: 20_000 },
   // credentials (wrapper; + its settle patch), credentials again, device; writes: credentials, audit.
   "deviceApi:rotateCredential": { maxReads: 3, maxReadBytes: 2_048, maxWrites: 3, maxWriteBytes: 1_024 },
+  // ---- Phase 5 Step 10: the lockdown reports (plan 4.11, 4.19). Every one writes NOTHING when nothing changed (the write-count
+  // tests in `lockdownReports.test.ts` pin that); the numbers below are the call that does write. The rate limiter (one
+  // `deviceReports` token per call that wrote, `deviceWrites` per row) is a component call, not counted.
+  // credentials (wrapper), the device's one report row, the group named in `config`; writes: the report (insert or replace, ~2.5 KB).
+  "deviceApi:reportApply": { maxReads: 4, maxReadBytes: 8_192, maxWrites: 2, maxWriteBytes: 6_144 },
+  // credentials; per finding (<= MAX_FINDINGS_PER_CALL = 50): the finding by (org, fingerprint) and, when it exists, the (finding, device) link;
+  // writes per NEW pair: the link + the finding (insert, or patch of `deviceCount`). A repeat reads 2 and writes 0.
+  "deviceApi:reportFindings": { maxReads: 1 + 2 * 50, maxReadBytes: 40_000, maxWrites: 2 * 50, maxWriteBytes: 60_000 },
+  // credentials, the device's row of that day; writes: insert or patch of the day's row (<= 100 denials, ~1.5 KB typical, ~7 KB worst).
+  "deviceApi:reportSecurityDaily": { maxReads: 3, maxReadBytes: 12_288, maxWrites: 2, maxWriteBytes: 12_288 },
+  // credentials, the device; per acknowledgement (<= MAX_ACKS_PER_CALL = 20): the broadcast and the device's ack row; writes: one ack row each.
+  "deviceApi:reportAcks": { maxReads: 2 + 2 * 20, maxReadBytes: 24_000, maxWrites: 20 + 1, maxWriteBytes: 8_192 },
+  // credentials, the device, and on a REPLACEMENT the old key's sealed boxes (<= MAX_DEVICE_WIFI + 1); writes: the device patch + those
+  // boxes deleted (+ the credentials settle patch) and one scheduled `seal:forDevices`. A repeat of the same key writes nothing.
+  "deviceApi:registerSealKey": { maxReads: 2 + 21, maxReadBytes: 24_576, maxWrites: 1 + 21 + 1, maxWriteBytes: 4_096 },
 
   // ---- Step 7: fleet (dashboard). Member wrapper = 3 reads; writes + step-up row = 4.
   // One page: 50 x (devices + summary + presence) + groups map (tiny) + wrapper. Measured for 50
@@ -161,7 +176,9 @@ export const IO_BUDGETS: Record<string, IoBudget> = {
   // ---- Step 8: Settings -> Signing (keys.ts). Wrapper 3 reads (+1 step-up for writes).
   // key rows (3 index reads, a few rows), the env key's row, orgStats.
   // Step 17 follow-up: + one `rosterPending` row (`rosterPending` flag).
-  "keys:status": { maxReads: 3 + 11, maxReadBytes: 6_144, maxWrites: 0, maxWriteBytes: 0, live: true },
+  // Phase 5 Step 10: + the organization's own signing key row (`loadOrgSigningKey` reads it to open the seed) and the two
+  // active `orgKeys` rows (signing, sealing) for the `orgKeys` block: +3 reads of rows that hold a wrapped key (~0.3 KB each).
+  "keys:status": { maxReads: 3 + 11 + 3, maxReadBytes: 8_192, maxWrites: 0, maxWriteBytes: 0, live: true },
   // next key + one page of <= 200 devices x (device, presence, summary). Step 17 follow-up: the
   // summary carries `trustedKeyIds`; the report (compat <= 32 KB) is read only for a summary written
   // before that field existed (it is rewritten at the agent's next report). The byte cap keeps that worst case.
@@ -172,6 +189,8 @@ export const IO_BUDGETS: Record<string, IoBudget> = {
   "keys:prepareRotation": { maxReads: 4 + 3, maxReadBytes: 4_096, maxWrites: 2, maxWriteBytes: 2_048 },
   // key rows; writes: retire old, activate next, audit, queue + scheduled run.
   "keys:finishRotation": { maxReads: 4 + 11, maxReadBytes: 8_192, maxWrites: 5, maxWriteBytes: 3_072 },
+  // Phase 5 Step 10 (an action): authorize (4) + `storeMigratedKey` (its own row below); the env seed and the master key never touch the database.
+  "keys:migrateFromEnv": { maxReads: 4 + 4, maxReadBytes: 6_144, maxWrites: 4, maxWriteBytes: 3_072 },
 
   // ---- Step 10: apps, assignments, file types. Wrapper 3 reads (+1 step-up for writes). A change
   // that alters a document ends in `publishApp`: assignments by app (<= 501), grants (<= 51) with
@@ -182,7 +201,10 @@ export const IO_BUDGETS: Record<string, IoBudget> = {
   // (20 apps, 3 groups) reads ~80.
   "apps:list": { maxReads: 3 + 50 + 50 * 101, maxReadBytes: 900_000, maxWrites: 0, maxWriteBytes: 0, live: true },
   // app, assignments (<= 500), groups (<= 500), file types (<= 201), direct grants (<= 1,001).
-  "apps:get": { maxReads: 3 + 1 + 500 + 500 + 201 + 1001, maxReadBytes: 700_000, maxWrites: 0, maxWriteBytes: 0, live: true },
+  // Phase 5 Step 11: + the last 30 `orgSecurityDaily` rows (a website only; each <= 500 denial rows of ~90 B =
+  // 45 KB worst case, a few hundred bytes in practice). They change once a day (the 01:00 UTC rollup), so the
+  // subscription is not re-run by device reports. UNSURE: the byte cap is the worst case, not a measurement.
+  "apps:get": { maxReads: 3 + 1 + 500 + 500 + 201 + 1001 + 30, maxReadBytes: 2_000_000, maxWrites: 0, maxWriteBytes: 0, live: true },
   // <= 500 non-archived apps (the group page's picker; subscribed only while its dialog is open).
   "apps:options": { maxReads: 3 + 500, maxReadBytes: 500_000, maxWrites: 0, maxWriteBytes: 0, live: true },
   // orgPlans, orgStats (+ platformSettings before migration); writes: app, orgStats, audit.
@@ -191,6 +213,13 @@ export const IO_BUDGETS: Record<string, IoBudget> = {
   "apps:createDesktop": { maxReads: 4 + 3, maxReadBytes: 4_096, maxWrites: 4, maxWriteBytes: 8_192 },
   // app, file types (only when the file argument is cleared), publishApp; unchanged: 1 read, 0 writes.
   "apps:update": { maxReads: 4 + 1 + 1 + 501 + 51 + 51 * 21 + 1, maxReadBytes: 250_000, maxWrites: 4, maxWriteBytes: 8_192 },
+  // Phase 5 Step 11. Same permissions again: app only (wrapper + 1 read, 0 writes). A change: app, assignments
+  // (<= 11), one `snapshotGroupConfig` per group (<= 10; each worst case: group, lockdown, org, exceptions
+  // 2 x 201, Wi-Fi 51, printers 101, newest version, rollout, prune 10 = ~570 reads) and publishApp (as
+  // `apps:update`). Writes: app, audit, per group <= 13 (version, rollout, <= 10 pruned versions, queue merge)
+  // + queue. Bytes: a snapshot is <= 256 KiB (MAX_GROUP_CONFIG_BYTES) but a typical one is ~2 KB.
+  // UNSURE: worst-case numbers, not measured (the matrix call is the no-change case).
+  "apps:setPermissions": { maxReads: 4 + 1 + 11 + 10 * 570 + 501 + 51 + 51 * 21 + 1, maxReadBytes: 2_500_000, maxWrites: 4 + 10 * 13, maxWriteBytes: 2_700_000 },
   // app, orgPlans/orgStats when restoring, publishApp; writes: app, orgStats, audit, queue (+ scheduled run).
   // Step 17 review: + assignments (<= 500) and <= 501 failed results (failedInstallCount follows).
   "apps:setArchived": { maxReads: 4 + 1 + 3 + 501 + 51 + 51 * 21 + 1 + 500 + 501, maxReadBytes: 500_000, maxWrites: 5, maxWriteBytes: 4_096 },
@@ -463,6 +492,34 @@ export const IO_BUDGETS: Record<string, IoBudget> = {
   // MEASURED 2 reads / 0.6 KB (credentials, device). The first call of every device ACTION.
   "devices:authorizeDevice": { maxReads: 3, maxReadBytes: 2_048, maxWrites: 0, maxWriteBytes: 0 },
 
+  // ---- Phase 5 Step 10: per-organization keys (internal; every row holds a WRAPPED key, never returned to a client).
+  // An internal action's number is the sum of the internal functions it calls.
+  // org, the two active-key checks, the registered key; writes: 2 key rows + the registered key + audit + the publish request
+  // (queue read + insert + one scheduled run). A Phase 4 organization (registered key) writes only the sealing row + audit.
+  "keys:storeOrgKeys": { maxReads: 7, maxReadBytes: 4_096, maxWrites: 6, maxWriteBytes: 3_072 },
+  "keys:createOrgKeys": { maxReads: 7, maxReadBytes: 4_096, maxWrites: 6, maxWriteBytes: 3_072 },
+  // the signing row check, the registered key, the sealing check; writes: 2 key rows + audit.
+  "keys:storeMigratedKey": { maxReads: 4, maxReadBytes: 3_072, maxWrites: 3, maxWriteBytes: 2_048 },
+  // REWRAP_BATCH = 50 rows of `orgKeys.by_master_key` (~0.3 KB each).
+  "keys:rewrapBatch": { maxReads: 50, maxReadBytes: 20_000, maxWrites: 0, maxWriteBytes: 0 },
+  // per update (<= 50): the row (compare-and-set) + a patch; one audit row per organization touched (worst: 50 organizations).
+  "keys:storeRewrapped": { maxReads: 50, maxReadBytes: 20_000, maxWrites: 50 + 50, maxWriteBytes: 30_000 },
+  // rewrapBatch + storeRewrapped, then at most one rescheduled run.
+  "keys:rewrapAll": { maxReads: 100, maxReadBytes: 40_000, maxWrites: 100, maxWriteBytes: 30_000 },
+  // Wi-Fi sealing (4.18): SEAL_DEVICES_PER_RUN = 25 devices per run, each with <= MAX_DEVICE_WIFI = 20 assigned profiles.
+  // jobs: the sealing key, <= 51 profiles, per device the device + one sealed-box lookup per assigned profile
+  // (typical: 1-3 profiles a group, so ~75-100 reads; the cap is 25 x 21).
+  "seal:jobs": { maxReads: 1 + 51 + 25 * (1 + 20), maxReadBytes: 420_000, maxWrites: 0, maxWriteBytes: 0 },
+  // per box (<= 25 x 20): the device, the profile and the old box; writes: one box each (insert or patch) + the publish request.
+  "seal:storeSealed": { maxReads: 3 * 25 * 20 + 1, maxReadBytes: 900_000, maxWrites: 25 * 20 + 2, maxWriteBytes: 450_000 },
+  // jobs + storeSealed; the X25519 / HKDF / XChaCha work is CPU, not I/O.
+  "seal:forDevices": { maxReads: (1 + 51 + 25 * 21) + (3 * 25 * 20 + 1), maxReadBytes: 1_320_000, maxWrites: 25 * 20 + 2, maxWriteBytes: 450_000 },
+  // Security counters (4.2, 4.19): one organization per step. A full step reads the org page (1), yesterday's device rows (<= 200),
+  // the org row of that day (1) and the expired rows (<= 200 device days + <= 200 organization days); writes the org row (1) and
+  // deletes those. Typical rows are < 1 KB (<= 10 denials); the worst row is ~7 KB (device, 100 denials) or ~35 KB (organization,
+  // 500 denials), so a full backlog stays under Convex's 16 MiB read limit.
+  "security:rollup": { maxReads: 1 + 200 + 1 + 200 + 200, maxReadBytes: 1_500_000, maxWrites: 1 + 200 + 200, maxWriteBytes: 8_192 },
+
   // ---- employees
   // MEASURED 4 reads (1 group, 1 app). Worst case: username check + groups (<= 100) + apps (<= 50).
   "employees:createPrecheck": { maxReads: 1 + 100 + 50, maxReadBytes: 100_000, maxWrites: 0, maxWriteBytes: 0 },
@@ -481,7 +538,9 @@ export const IO_BUDGETS: Record<string, IoBudget> = {
   "enrollmentCodes:storeCode": { maxReads: 5 + 201, maxReadBytes: 90_000, maxWrites: 3, maxWriteBytes: 1_536 },
   // MEASURED (full batch: 100 install results) 102 reads / 30 KB, 102 writes. Worst case: 5 tables x PURGE_BATCH (100): install results,
   // documents (x2 indexes), bodies (<= ~13 KB typical, up to the payload cap), versions; it reschedules while any is full.
-  "fleet:purgeDevice": { maxReads: 5 * 100 + 2, maxReadBytes: 1_600_000, maxWrites: 5 * 100, maxWriteBytes: 4_096 },
+  // Phase 5 Step 10: + 4 tables x PURGE_BATCH (finding links, sealed Wi-Fi boxes, the apply report, the lock): 9 tables, <= 100 rows each.
+  // MEASURED (100 install results + 100 finding links + 20 sealed boxes + the report + the lock) 224 reads / 73 KB, 224 deletes.
+  "fleet:purgeDevice": { maxReads: 9 * 100 + 2, maxReadBytes: 1_800_000, maxWrites: 9 * 100, maxWriteBytes: 4_096 },
   // MEASURED 2 reads / 0.4 KB (the sealed API key and sender; the Resend call is outside the database).
   "mail:send": { maxReads: 3, maxReadBytes: 2_048, maxWrites: 0, maxWriteBytes: 0 },
 
@@ -541,7 +600,13 @@ export const IO_BUDGETS: Record<string, IoBudget> = {
   // MEASURED (all 200 PCs queued; 10 groups of 3 apps) 274 reads / 89 KB, 74 writes / 167 KB for one batch of PUBLISH_BATCH = 25 PCs:
   // ~11 reads per PC (mostly the group loads, shared inside the run) and ~3 writes per PC (a ~6 KB signed document body + head + version).
   // The design ceiling is higher for groups with many apps and grants (RUN_DOC_BUDGET = 18,000 documents; `publishBudget.test.ts`).
-  "publish:run": { maxReads: 340, maxReadBytes: 115_000, maxWrites: 95, maxWriteBytes: 215_000 },
+  // Phase 5 Step 10: per PC + its lock (1) + its own broadcasts (<= 10, usually 0) + one sealed-box lookup per Wi-Fi profile with a
+  // passphrase; per group in the run (cached) + its rollout (1), the configuration of each ring's version (1-3 rows of ~3-12 KB) and
+  // its broadcasts (<= 10). Budgeted for 25 PCs in 10 groups with <= 3 broadcasts and <= 3 profiles each; documents grow by the
+  // Phase 5 keys (typical 12 KB, worst 64 KB: plan 4.3), so a batch writes up to 25 x ~16 KB. MEASURED on the fixture without Phase 5
+  // data: unchanged (274 reads / 89 KB, 74 writes / 167 KB); with a configuration, a Wi-Fi box and 2 broadcasts per group, a lock on
+  // every 10th PC: 346 reads / 137 KB, 77 writes / 222 KB (`ioInternal.ts`, second case).
+  "publish:run": { maxReads: 340 + 25 * 7 + 10 * 8, maxReadBytes: 300_000, maxWrites: 95, maxWriteBytes: 450_000 },
   // MEASURED 2 reads, 4 writes. Without the authorize (4) of `settings:setExitPin`: org, orgSecrets, publishQueue.
   "settings:storeExitPin": { maxReads: 4, maxReadBytes: 3_072, maxWrites: 5, maxWriteBytes: 2_048 },
   // MEASURED 4 reads, 8 writes: a new organization, its Default group, plan, counters and secrets rows, the invite, audit.

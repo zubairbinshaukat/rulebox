@@ -20,7 +20,7 @@ use rulebox_win32::Win32Error;
 use crate::codec::{frame_or_end, FrameCodec};
 use crate::envelope::{ErrorCode, Frame, RpcError};
 use crate::methods::{events, Hello, Method};
-use crate::requests::{SessionEndReason, SessionEndedData};
+use crate::requests::{ProgramBlockedData, SessionEndReason, SessionEndedData, MAX_PROGRAM_NAME_CHARS};
 use crate::types::{
     AgentSnapshot, ClientInfo, HelloParams, HelloResult, ProtocolVersion, ShutdownReason,
     ShuttingDownData,
@@ -46,6 +46,13 @@ pub enum ClientEvent {
     AppsChanged,
     /// (1.2) `session.ended`: the agent ended the employee session.
     SessionEnded(SessionEndReason),
+    /// (1.3) `device.lockChanged`: the lock was set or cleared; read the snapshot.
+    DeviceLockChanged,
+    /// (1.3) `broadcasts.changed`: the list changed; read the snapshot.
+    BroadcastsChanged,
+    /// (1.3) `program.blocked`: a Staff program was ended; show a short notice. The name
+    /// is plain text of at most 100 characters.
+    ProgramBlocked { display_name: String },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -456,6 +463,14 @@ fn parse_event(event: &str, data: serde_json::Value) -> Option<ClientEvent> {
             let data: SessionEndedData = serde_json::from_value(data).ok()?;
             Some(ClientEvent::SessionEnded(data.reason))
         }
+        events::DEVICE_LOCK_CHANGED => Some(ClientEvent::DeviceLockChanged),
+        events::BROADCASTS_CHANGED => Some(ClientEvent::BroadcastsChanged),
+        events::PROGRAM_BLOCKED => {
+            let data: ProgramBlockedData = serde_json::from_value(data).ok()?;
+            // The agent already cuts the name; a longer one is cut here too, never trusted.
+            let display_name = data.display_name.chars().take(MAX_PROGRAM_NAME_CHARS).collect();
+            Some(ClientEvent::ProgramBlocked { display_name })
+        }
         _ => None,
     }
 }
@@ -478,6 +493,27 @@ mod tests {
         ));
         // Data of the wrong shape is ignored, like any other unparsable event.
         assert!(parse_event("session.ended", json!({})).is_none());
+    }
+
+    #[test]
+    fn protocol_1_3_events_parse() {
+        assert!(matches!(parse_event("device.lockChanged", json!({})), Some(ClientEvent::DeviceLockChanged)));
+        assert!(matches!(parse_event("broadcasts.changed", json!({})), Some(ClientEvent::BroadcastsChanged)));
+        match parse_event("program.blocked", json!({ "displayName": "Tor Browser" })) {
+            Some(ClientEvent::ProgramBlocked { display_name }) => assert_eq!(display_name, "Tor Browser"),
+            other => panic!("unexpected {other:?}"),
+        }
+        // An over-long name is cut, not trusted; data of the wrong shape is ignored.
+        let long = "x".repeat(500);
+        match parse_event("program.blocked", json!({ "displayName": long })) {
+            Some(ClientEvent::ProgramBlocked { display_name }) => assert_eq!(display_name.chars().count(), 100),
+            other => panic!("unexpected {other:?}"),
+        }
+        assert!(parse_event("program.blocked", json!({})).is_none());
+        assert!(matches!(
+            parse_event("session.ended", json!({ "reason": "deviceLocked" })),
+            Some(ClientEvent::SessionEnded(SessionEndReason::DeviceLocked))
+        ));
     }
 
     /// A client of an older minor (or this one, for a newer agent's event) skips an

@@ -581,6 +581,30 @@ export const DEFAULT_WEB_PERMISSIONS: WebPermissions = {
   geolocation: false,
 };
 
+/**
+ * What a NEW web app starts with (PRD 24.1; the server's `NEW_WEB_APP_PERMISSIONS`): printing is allowed here, and
+ * the Staff App still needs a printer on the PC. Shown as "Default" next to each toggle.
+ */
+export const NEW_WEB_APP_PERMISSIONS: WebPermissions = { ...DEFAULT_WEB_PERMISSIONS, printing: true };
+
+/** The eight permissions in the order the editor shows them. */
+export const WEB_PERMISSION_KEYS: readonly (keyof WebPermissions)[] = [
+  "camera",
+  "microphone",
+  "screenShare",
+  "clipboardRead",
+  "notifications",
+  "downloads",
+  "printing",
+  "geolocation",
+];
+
+/** "Blocked in the last 30 days" for one permission (`apps:get` `denials30d`): a count, never a page or an employee. */
+export interface PermissionDenialCount {
+  kind: string;
+  count: number;
+}
+
 export interface WebSpec {
   url: string;
   allowedDomains: string[];
@@ -664,6 +688,8 @@ export interface AppDetail {
   fileTypes: string[];
   directEmployeeCount: number;
   groupOptions: GroupOption[];
+  /** Blocked permission requests of the last 30 days, per kind, most first (websites only). */
+  denials30d: PermissionDenialCount[];
 }
 
 export interface WebAppInput {

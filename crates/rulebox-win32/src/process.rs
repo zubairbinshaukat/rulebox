@@ -93,6 +93,71 @@ pub fn find_by_image(session_id: u32, image: &Path) -> Result<Vec<u32>> {
     Ok(found)
 }
 
+/// What the process watchdog needs to know about one process (Phase 5 Step 8): read-only.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ProcessInfo {
+    pub pid: u32,
+    pub session_id: u32,
+    /// The full image path (a Win32 path, not a device path).
+    pub image: PathBuf,
+    /// The token user, as a SID string.
+    pub user_sid: String,
+}
+
+/// The image, session and owner of `pid`. `Ok(None)`: the process has ended, or it cannot be
+/// opened (a protected process); the caller never acts on a process it cannot describe.
+/// Read-only.
+pub fn process_info(pid: u32) -> Result<Option<ProcessInfo>> {
+    let Ok(process) = open_process(pid, PROCESS_QUERY_LIMITED_INFORMATION) else {
+        return Ok(None);
+    };
+    let mut session_id = 0u32;
+    // SAFETY: `session_id` is a valid out pointer.
+    if unsafe { ProcessIdToSessionId(pid, &mut session_id) }.is_err() {
+        return Ok(None);
+    }
+    let Some(image) = image_of_handle(&process) else {
+        return Ok(None);
+    };
+    let mut token = HANDLE::default();
+    // SAFETY: `token` is a valid out pointer; `process` is a valid process handle.
+    if unsafe { OpenProcessToken(process.raw(), TOKEN_QUERY, &mut token) }.is_err() {
+        return Ok(None);
+    }
+    let token = OwnedHandle::new(token)?;
+    let Ok(user) = user_sid_of_token(&token) else {
+        return Ok(None);
+    };
+    Ok(Some(ProcessInfo { pid, session_id, image, user_sid: user.as_str().to_string() }))
+}
+
+/// Every process of `session_id` that can be described (the watchdog's snapshot fallback, edge
+/// case 44). Read-only.
+pub fn session_processes(session_id: u32) -> Result<Vec<ProcessInfo>> {
+    // SAFETY: a snapshot of all processes; the handle is owned by the guard below.
+    let snapshot = unsafe { CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0) }
+        .map_err(|e| api_err("CreateToolhelp32Snapshot", &e))?;
+    let snapshot = OwnedHandle::new(snapshot)?;
+    let mut found = Vec::new();
+    let mut entry = PROCESSENTRY32W { dwSize: std::mem::size_of::<PROCESSENTRY32W>() as u32, ..Default::default() };
+    // SAFETY: `entry` has its size set; `snapshot` is a valid snapshot handle.
+    let mut more = unsafe { Process32FirstW(snapshot.raw(), &mut entry) }.is_ok();
+    while more {
+        let mut process_session = 0u32;
+        // SAFETY: `process_session` is a valid out pointer.
+        let in_session = unsafe { ProcessIdToSessionId(entry.th32ProcessID, &mut process_session) }.is_ok()
+            && process_session == session_id;
+        if in_session {
+            if let Some(info) = process_info(entry.th32ProcessID)? {
+                found.push(info);
+            }
+        }
+        // SAFETY: as above.
+        more = unsafe { Process32NextW(snapshot.raw(), &mut entry) }.is_ok();
+    }
+    Ok(found)
+}
+
 /// Ends `pid` if its image is `expected_image` and its owner is `expected_user`.
 ///
 /// DESTRUCTIVE: guarded.
@@ -267,6 +332,17 @@ mod tests {
         unsafe { ProcessIdToSessionId(std::process::id(), &mut session) }.unwrap();
         let found = find_by_image(session, &exe).unwrap();
         assert!(found.contains(&std::process::id()), "{found:?}");
+    }
+
+    #[test]
+    fn this_process_describes_itself_and_a_missing_one_is_none() {
+        let info = process_info(std::process::id()).unwrap().unwrap();
+        assert_eq!(info.pid, std::process::id());
+        assert_eq!(normalized(&info.image), normalized(&std::env::current_exe().unwrap()));
+        assert_eq!(info.user_sid, crate::sid::current_user_sid().unwrap().as_str());
+        assert!(session_processes(info.session_id).unwrap().iter().any(|p| p.pid == info.pid));
+        // No process has this id (ids are multiples of four).
+        assert_eq!(process_info(0xFFFF_FFF3).unwrap(), None);
     }
 
     #[test]

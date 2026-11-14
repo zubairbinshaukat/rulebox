@@ -24,6 +24,8 @@
     "@auth/core": "catalog:",
     "@convex-dev/auth": "catalog:",
     "@convex-dev/rate-limiter": "catalog:",
+    "@noble/ciphers": "catalog:",
+    "@noble/curves": "catalog:",
     "@noble/ed25519": "catalog:",
     "@noble/hashes": "catalog:",
     "@simplewebauthn/server": "catalog:",

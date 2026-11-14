@@ -39,10 +39,11 @@ use tokio::time::Instant;
 use tokio_util::sync::CancellationToken;
 
 use crate::ipc_shell::ShellSignal;
+use crate::lockdown::lkg::ShellHealthSink;
 use crate::paths::InstallPaths;
 use crate::platform::windows::staff_app_exe;
 use crate::platform::{Platform, PlatformError, SessionState};
-use crate::state::{KioskApplied, SharedState, SnapshotHandle};
+use crate::state::{unix_ms, KioskApplied, SharedState, SnapshotHandle};
 
 /// How often the task looks, while the kiosk is enabled.
 pub const TICK: Duration = Duration::from_secs(5);
@@ -409,13 +410,33 @@ pub struct WatchdogTask {
     health: ShellHealth,
     /// The last lookup failed (logged once until a lookup works again).
     lookup_failed: bool,
+    /// (Phase 5 Step 9) Where the Staff App's sign of life and its crashes go: the last-known-good
+    /// monitor. `ui_alive` is the `shell.ready` / `shell.heartbeat` signal.
+    health_sink: Option<Arc<dyn ShellHealthSink>>,
+    /// The Staff session was active at the last look (what the sink was last told).
+    staff_active: bool,
 }
 
 impl WatchdogTask {
     pub fn new(deps: WatchdogDeps) -> Self {
         let watchdog = Watchdog::new(deps.kill_hung_shell);
         let health = deps.snapshot.current().shell.health;
-        Self { deps, watchdog, table: ClientTable::default(), health, lookup_failed: false }
+        Self {
+            deps,
+            watchdog,
+            table: ClientTable::default(),
+            health,
+            lookup_failed: false,
+            health_sink: None,
+            staff_active: false,
+        }
+    }
+
+    /// (Phase 5 Step 9) Tells `sink` about heartbeats, crashes and the Staff session. The agent
+    /// wires its last-known-good monitor in here in Step 20.
+    #[allow(dead_code)]
+    pub fn set_health_sink(&mut self, sink: Arc<dyn ShellHealthSink>) {
+        self.health_sink = Some(sink);
     }
 
     /// Records a shell-pipe signal. Returns true when a decision may have changed.
@@ -438,6 +459,9 @@ impl WatchdogTask {
                 Some(conn) => {
                     conn.ready_at = Some(now);
                     tracing::info!(connection_id, pid, "shell.ready");
+                    if let Some(sink) = &self.health_sink {
+                        sink.ui_alive(unix_ms());
+                    }
                     true
                 }
                 None => false,
@@ -450,6 +474,9 @@ impl WatchdogTask {
                     let first = conn.last_heartbeat.is_none();
                     conn.last_heartbeat = Some(now);
                     conn.ready_at.get_or_insert(now);
+                    if let Some(sink) = &self.health_sink {
+                        sink.ui_alive(unix_ms());
+                    }
                     if first {
                         tracing::info!(connection_id, pid, "shell.heartbeat (first on this connection)");
                     } else {
@@ -462,7 +489,15 @@ impl WatchdogTask {
             },
             ShellSignal::Closed { connection_id } => {
                 self.table.others.remove(&connection_id);
-                self.table.shells.remove(&connection_id).is_some()
+                let gone = self.table.shells.remove(&connection_id);
+                // A Staff App that had said it was ready, gone while the Staff session is active, is
+                // a crash for the last-known-good probation (a hung one ended by `terminate` is too).
+                if let (Some(conn), Some(sink)) = (&gone, &self.health_sink) {
+                    if conn.ready_at.is_some() && self.staff_active {
+                        sink.shell_crashed(unix_ms());
+                    }
+                }
+                gone.is_some()
             }
         }
     }
@@ -492,6 +527,13 @@ impl WatchdogTask {
         };
 
         let now = Instant::now();
+        let staff_active = observed.kiosk_enabled && observed.staff_session.is_some();
+        if staff_active != self.staff_active {
+            self.staff_active = staff_active;
+            if let Some(sink) = &self.health_sink {
+                sink.staff_session(staff_active, unix_ms());
+            }
+        }
         let input = WatchdogInput {
             kiosk_enabled: observed.kiosk_enabled,
             staff_session: observed.staff_session,

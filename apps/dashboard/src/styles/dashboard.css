@@ -2490,6 +2490,55 @@ html[data-view="cards"] .dash-table--stack td[data-empty="true"] {
   gap: 12px;
 }
 
+/* Web app permissions (Phase 5 Step 11): one row per permission, the default on the right. */
+.dash-perm {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+}
+.dash-perm__row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px 16px;
+  padding: 10px 8px;
+  border-radius: 10px;
+  border-bottom: 1px solid var(--rb-line);
+}
+.dash-perm__row:last-child {
+  border-bottom: 0;
+}
+.dash-perm__row[data-highlight] {
+  background: color-mix(in oklch, var(--rb-accent) 12%, transparent);
+  box-shadow: inset 0 0 0 2px var(--rb-accent);
+}
+.dash-perm__default {
+  font-size: 13px;
+  color: var(--rb-muted);
+}
+.dash-perm__counts {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.dash-perm__count {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px 16px;
+}
+.dash-perm__num {
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+}
+
 /* ------------------------------------------------------------ entrances (PRD 25) */
 
 /* Each entrance plays once when its element mounts (pages remount on every

@@ -1,15 +1,28 @@
+import { bytesToHex } from "@noble/hashes/utils.js";
 import { paginationOptsValidator } from "convex/server";
 import { v } from "convex/values";
+import { internal } from "./_generated/api";
 import type { Doc, Id } from "./_generated/dataModel";
-import type { DatabaseWriter } from "./_generated/server";
-import { writeAudit } from "./lib/audit";
+import { internalAction, type DatabaseReader, type DatabaseWriter } from "./_generated/server";
+import { SYSTEM_ACTOR, writeAudit } from "./lib/audit";
+import { randomBytes } from "./lib/crypto";
 import { scheduleRosterResync } from "./lib/employeeSync";
 import { fail } from "./lib/errors";
-import { memberMutation, memberQuery, type AuditActorCtx } from "./lib/functions";
-import { MAX_TRUST_PAGE } from "./lib/limits";
+import { internalMutation, internalQuery, memberAction, memberMutation, memberQuery, type AuditActorCtx } from "./lib/functions";
+import { masterKeyAvailable, masterKeyIds, rewrapSecret, wrapSecret, type KeyBinding } from "./lib/keyring";
+import { MAX_TRUST_PAGE, REWRAP_BATCH } from "./lib/limits";
+import { orgKeyPurpose } from "./lib/lockdownValidators";
 import { orgPolicyKeys } from "./lib/policyKeys";
 import { requestPublish } from "./lib/publish";
-import { endorsementMessage, envPublicKey, fingerprintOf, loadOrgSigningKey, signWith } from "./lib/signing";
+import {
+  endorsementMessage,
+  envPublicKey,
+  fingerprintOf,
+  keyFromSeed,
+  loadOrgSigningKey,
+  signWith,
+  withEnvSigningSeed,
+} from "./lib/signing";
 import { policyKeyStatus } from "./lib/validators";
 
 // Settings -> Signing (plan 4.5, Step 8 item 6). The private seeds live ONLY
@@ -68,6 +81,18 @@ export const status = memberQuery("viewer")({
      * (Step 11 review item 14; Step 17 follow-up). One `rosterPending.by_org` read.
      */
     rosterPending: v.boolean(),
+    /**
+     * Phase 5 Step 10 (plan 4.18, 4.20): this organization's OWN keys. `master`: the
+     * deployment has a usable master key. `signing` / `sealing`: ids and where the signing
+     * key came from ("env" = moved from the deployment key by `migrateFromEnv`), never any
+     * key material. `locked`: the organization has keys but this deployment cannot open them.
+     */
+    orgKeys: v.object({
+      master: v.boolean(),
+      signing: v.union(v.object({ keyId: v.string(), fingerprint: v.string(), origin: v.union(v.literal("env"), v.literal("generated")) }), v.null()),
+      sealing: v.union(v.object({ keyId: v.string() }), v.null()),
+      locked: v.boolean(),
+    }),
   }),
   handler: async (ctx) => {
     const rows = await orgPolicyKeys(ctx, ctx.orgId);
@@ -80,15 +105,39 @@ export const status = memberQuery("viewer")({
       .query("rosterPending")
       .withIndex("by_org", (q) => q.eq("orgId", ctx.orgId))
       .first();
+    const ownSigning = await activeOrgKeyRow(ctx, ctx.orgId, "signing");
+    const ownSealing = await activeOrgKeyRow(ctx, ctx.orgId, "sealing");
     return {
       keys: rows.map(rowOf),
       signing: signing.ok ? ("ok" as const) : signing.reason,
       env: { active: envKeyOf("active"), next: envKeyOf("next") },
       publishFailedAt: stats?.publishFailedAt ?? null,
       rosterPending: pending !== null,
+      orgKeys: {
+        master: masterKeyAvailable(),
+        signing:
+          ownSigning === null
+            ? null
+            : { keyId: ownSigning.keyId, fingerprint: fingerprintOf(ownSigning.keyId), origin: ownSigning.origin ?? ("generated" as const) },
+        sealing: ownSealing === null ? null : { keyId: ownSealing.keyId },
+        locked: (ownSigning !== null || ownSealing !== null) && !masterKeyAvailable(),
+      },
     };
   },
 });
+
+/** The organization's active `orgKeys` row of `purpose` (1 read). The row holds the wrapped key: callers return only ids. */
+async function activeOrgKeyRow(ctx: { db: DatabaseReader }, orgId: Id<"organizations">, purpose: "signing" | "sealing") {
+  return await ctx.db
+    .query("orgKeys")
+    .withIndex("by_org_purpose_status", (q) => q.eq("orgId", orgId).eq("purpose", purpose).eq("status", "active"))
+    .first();
+}
+
+/** Refuse the Phase 4 env-key functions for an organization whose keys live in the keyring. */
+async function refuseWhenKeyringOwns(ctx: { db: DatabaseWriter }, orgId: Id<"organizations">): Promise<void> {
+  if ((await activeOrgKeyRow(ctx, orgId, "signing")) !== null) fail("conflict", { detail: "org_keys" });
+}
 
 /**
  * "N of M devices trust the new key" (viewer), one page of up to
@@ -157,7 +206,7 @@ async function audit(
   ctx: { db: DatabaseWriter },
   orgId: Id<"organizations">,
   actor: AuditActorCtx,
-  action: "policy.keyRegistered" | "policy.rotationPrepared" | "policy.rotationFinished",
+  action: "policy.keyRegistered" | "policy.rotationPrepared" | "policy.rotationFinished" | "org.keysCreated",
   summary: string,
 ) {
   await writeAudit(ctx, { orgId, actor, action, targetType: "organization", targetId: orgId, summary });
@@ -185,6 +234,7 @@ export const registerActive = memberMutation("owner", { major: "keys:registerAct
   args: { force: v.optional(v.boolean()) },
   returns: v.object({ keyId: v.string(), fingerprint: v.string() }),
   handler: async (ctx, args) => {
+    await refuseWhenKeyringOwns(ctx, ctx.orgId);
     const env = envPublicKey("active");
     if (env === null) fail("not_ready", { detail: "RULEBOX_POLICY_KEY is not set or not 32 bytes of base64" });
     const known = await keyRowById(ctx, ctx.orgId, env.keyId);
@@ -239,6 +289,7 @@ export const prepareRotation = memberMutation("owner", { major: "keys:prepareRot
   args: {},
   returns: v.object({ keyId: v.string(), fingerprint: v.string() }),
   handler: async (ctx) => {
+    await refuseWhenKeyringOwns(ctx, ctx.orgId);
     const signer = await loadOrgSigningKey(ctx, ctx.orgId, "active");
     if (!signer.ok) fail("not_ready", { detail: `active signing key ${signer.reason}` });
     const next = envPublicKey("next");
@@ -276,6 +327,7 @@ export const finishRotation = memberMutation("owner", { major: "keys:finishRotat
   args: {},
   returns: v.object({ keyId: v.string(), fingerprint: v.string() }),
   handler: async (ctx) => {
+    await refuseWhenKeyringOwns(ctx, ctx.orgId);
     const rows = await orgPolicyKeys(ctx, ctx.orgId);
     const next = rows.find((r) => r.status === "next");
     if (next === undefined) fail("conflict", { detail: "no rotation prepared" });
@@ -289,5 +341,239 @@ export const finishRotation = memberMutation("owner", { major: "keys:finishRotat
     await requestPublish(ctx, ctx.orgId, { allDevices: true });
     await scheduleRosterResync(ctx, ctx.orgId);
     return { keyId: next.keyId, fingerprint: fingerprintOf(next.keyId) };
+  },
+});
+
+// ---------------------------------------------------------------- per-organization keys (Phase 5 Step 10, plan 4.18)
+
+const actorValue = v.object({ type: v.literal("member"), id: v.string(), label: v.string() });
+const wrappedKey = v.object({ keyId: v.string(), wrapped: v.string(), masterKeyId: v.string() });
+
+/** A random 16-hex key id for a symmetric key (signing keys use the id of their public key). */
+function randomKeyId(ctx: { runAction: unknown }): string {
+  return bytesToHex(randomBytes(ctx, 8));
+}
+
+function bindingOf(orgId: Id<"organizations">, purpose: "signing" | "sealing", keyId: string): KeyBinding {
+  return { orgId, purpose, keyId };
+}
+
+/**
+ * Create the organization's own keys (Ed25519 signing seed + 32-byte sealing key), wrapped
+ * by the master key (action: the seed and the nonces need real randomness). Internal: the
+ * owner bootstrap (`setup:createOwnerInvite`) and the operator call it. An organization that
+ * already has an active signing key in `policyKeys` (a Phase 4 organization) keeps it and
+ * gets only the sealing key: `migrateFromEnv` moves the signing key. Idempotent.
+ */
+export const createOrgKeys = internalAction({
+  args: { orgId: v.id("organizations") },
+  returns: v.object({ signing: v.string(), sealing: v.string() }),
+  handler: async (ctx, args): Promise<{ signing: string; sealing: string }> => {
+    if (!masterKeyAvailable()) return { signing: "no_master_key", sealing: "no_master_key" };
+    const seed = randomBytes(ctx, 32);
+    const signingKey = keyFromSeed(seed);
+    const signing = wrapSecret(ctx, seed, bindingOf(args.orgId, "signing", signingKey.keyId));
+    const sealKeyId = randomKeyId(ctx);
+    const sealing = wrapSecret(ctx, randomBytes(ctx, 32), bindingOf(args.orgId, "sealing", sealKeyId));
+    if (signing === null || sealing === null) return { signing: "no_master_key", sealing: "no_master_key" };
+    return await ctx.runMutation(internal.keys.storeOrgKeys, {
+      orgId: args.orgId,
+      signing: { keyId: signingKey.keyId, publicKey: signingKey.publicKeyB64, ...signing },
+      sealing: { keyId: sealKeyId, ...sealing },
+    });
+  },
+});
+
+export const storeOrgKeys = internalMutation({
+  args: {
+    orgId: v.id("organizations"),
+    signing: v.object({ keyId: v.string(), publicKey: v.string(), wrapped: v.string(), masterKeyId: v.string() }),
+    sealing: wrappedKey,
+  },
+  returns: v.object({ signing: v.string(), sealing: v.string() }),
+  handler: async (ctx, args) => {
+    const org = await ctx.db.get(args.orgId);
+    if (org === null) fail("not_found");
+    const now = Date.now();
+    let signing = "exists";
+    let sealing = "exists";
+    if ((await activeOrgKeyRow(ctx, args.orgId, "signing")) === null) {
+      const registered = await ctx.db
+        .query("policyKeys")
+        .withIndex("by_org_status", (q) => q.eq("orgId", args.orgId).eq("status", "active"))
+        .first();
+      if (registered !== null) {
+        signing = "legacy";
+      } else {
+        const { publicKey, ...row } = args.signing;
+        await ctx.db.insert("orgKeys", { orgId: args.orgId, purpose: "signing", status: "active", createdAt: now, ...row });
+        await ctx.db.insert("policyKeys", { orgId: args.orgId, keyId: row.keyId, publicKey, status: "active", createdAt: now });
+        signing = "created";
+      }
+    }
+    if ((await activeOrgKeyRow(ctx, args.orgId, "sealing")) === null) {
+      await ctx.db.insert("orgKeys", { orgId: args.orgId, purpose: "sealing", status: "active", createdAt: now, ...args.sealing });
+      sealing = "created";
+    }
+    if (signing === "created" || sealing === "created") {
+      await writeAudit(ctx, {
+        orgId: args.orgId,
+        actor: SYSTEM_ACTOR,
+        action: "org.keysCreated",
+        targetType: "organization",
+        targetId: args.orgId,
+        summary:
+          signing === "created"
+            ? `Created the organization's own signing key ${fingerprintOf(args.signing.keyId)} and sealing key`
+            : "Created the organization's own sealing key",
+      });
+      if (signing === "created") await requestPublish(ctx, args.orgId, { allDevices: true });
+    }
+    return { signing, sealing };
+  },
+});
+
+/**
+ * Wrap the deployment's current signing seed (`RULEBOX_POLICY_KEY`) as THIS organization's
+ * own signing key (Owner, major; once). The key id does not change, so no device is
+ * re-enrolled and nothing is republished. Also creates the organization's sealing key.
+ * `not_ready` without a usable master key or env seed; `conflict` when the env key is not
+ * this organization's registered active key (`key_not_registered`) or the organization
+ * already has its own keys (`already_migrated`).
+ */
+export const migrateFromEnv = memberAction("owner", { major: "keys:migrateFromEnv" })({
+  args: {},
+  returns: v.object({ keyId: v.string(), fingerprint: v.string() }),
+  handler: async (ctx): Promise<{ keyId: string; fingerprint: string }> => {
+    if (!masterKeyAvailable()) fail("not_ready", { detail: "RULEBOX_MASTER_KEY is not set or not 32 bytes of base64" });
+    const signing = withEnvSigningSeed("active", (seedBytes, info) => {
+      const w = wrapSecret(ctx, seedBytes, bindingOf(ctx.orgId, "signing", info.keyId));
+      return w === null ? null : { keyId: info.keyId, publicKey: info.publicKey, ...w };
+    });
+    if (signing === null || signing === undefined) fail("not_ready", { detail: "RULEBOX_POLICY_KEY is not set or not 32 bytes of base64" });
+    const sealKeyId = randomKeyId(ctx);
+    const sealing = wrapSecret(ctx, randomBytes(ctx, 32), bindingOf(ctx.orgId, "sealing", sealKeyId));
+    if (sealing === null) fail("not_ready", { detail: "RULEBOX_MASTER_KEY is not set or not 32 bytes of base64" });
+    await ctx.runMutation(internal.keys.storeMigratedKey, {
+      orgId: ctx.orgId,
+      actor: ctx.actor,
+      signing,
+      sealing: { keyId: sealKeyId, ...sealing },
+    });
+    return { keyId: signing.keyId, fingerprint: fingerprintOf(signing.keyId) };
+  },
+});
+
+export const storeMigratedKey = internalMutation({
+  args: {
+    orgId: v.id("organizations"),
+    actor: actorValue,
+    signing: v.object({ keyId: v.string(), publicKey: v.string(), wrapped: v.string(), masterKeyId: v.string() }),
+    sealing: wrappedKey,
+  },
+  returns: v.null(),
+  handler: async (ctx, args) => {
+    if ((await activeOrgKeyRow(ctx, args.orgId, "signing")) !== null) fail("conflict", { detail: "already_migrated" });
+    const registered = await ctx.db
+      .query("policyKeys")
+      .withIndex("by_org_key_id", (q) => q.eq("orgId", args.orgId).eq("keyId", args.signing.keyId))
+      .first();
+    if (registered === null || registered.status !== "active" || registered.publicKey !== args.signing.publicKey) {
+      fail("conflict", { detail: "key_not_registered" });
+    }
+    const now = Date.now();
+    const { publicKey: _publicKey, ...row } = args.signing;
+    void _publicKey;
+    await ctx.db.insert("orgKeys", { orgId: args.orgId, purpose: "signing", status: "active", origin: "env", createdAt: now, ...row });
+    if ((await activeOrgKeyRow(ctx, args.orgId, "sealing")) === null) {
+      await ctx.db.insert("orgKeys", { orgId: args.orgId, purpose: "sealing", status: "active", createdAt: now, ...args.sealing });
+    }
+    await audit(
+      ctx,
+      args.orgId,
+      args.actor,
+      "org.keysCreated",
+      `Moved the signing key ${fingerprintOf(args.signing.keyId)} into the organization's own keys`,
+    );
+    return null;
+  },
+});
+
+/** One batch of `orgKeys` rows still wrapped by `masterKeyId` (internal: the rows hold wrapped keys, never returned to a client). */
+export const rewrapBatch = internalQuery({
+  args: { masterKeyId: v.string() },
+  returns: v.array(
+    v.object({
+      id: v.id("orgKeys"),
+      orgId: v.id("organizations"),
+      purpose: orgKeyPurpose,
+      keyId: v.string(),
+      wrapped: v.string(),
+      masterKeyId: v.string(),
+    }),
+  ),
+  handler: async (ctx, args) => {
+    const rows = await ctx.db
+      .query("orgKeys")
+      .withIndex("by_master_key", (q) => q.eq("masterKeyId", args.masterKeyId))
+      .take(REWRAP_BATCH);
+    return rows.map((r) => ({ id: r._id, orgId: r.orgId, purpose: r.purpose, keyId: r.keyId, wrapped: r.wrapped, masterKeyId: r.masterKeyId }));
+  },
+});
+
+export const storeRewrapped = internalMutation({
+  args: {
+    updates: v.array(v.object({ id: v.id("orgKeys"), from: v.string(), wrapped: v.string(), masterKeyId: v.string() })),
+  },
+  returns: v.number(),
+  handler: async (ctx, args) => {
+    const orgs = new Set<Id<"organizations">>();
+    let done = 0;
+    for (const u of args.updates.slice(0, REWRAP_BATCH)) {
+      const row = await ctx.db.get(u.id);
+      // Compare-and-set: a row that changed meanwhile (or was already moved) is left alone.
+      if (row === null || row.masterKeyId !== u.from) continue;
+      await ctx.db.patch(row._id, { wrapped: u.wrapped, masterKeyId: u.masterKeyId });
+      orgs.add(row.orgId);
+      done++;
+    }
+    for (const orgId of orgs) {
+      await writeAudit(ctx, {
+        orgId,
+        actor: SYSTEM_ACTOR,
+        action: "org.keysRewrapped",
+        targetType: "organization",
+        targetId: orgId,
+        summary: "Wrapped the organization's keys with the new deployment master key",
+      });
+    }
+    return done;
+  },
+});
+
+/**
+ * Master key rotation (operator, rare; plan 4.18): with `RULEBOX_MASTER_KEY_NEXT` set,
+ * re-wrap every `orgKeys` row that the active master key wraps, `REWRAP_BATCH` per run, and
+ * reschedule while a run made progress. Then the operator swaps the two env values.
+ * Rows that cannot be opened are counted in `failed` and left alone (a run with no
+ * progress does not reschedule).
+ */
+export const rewrapAll = internalAction({
+  args: {},
+  returns: v.object({ rewrapped: v.number(), failed: v.number(), state: v.string() }),
+  handler: async (ctx): Promise<{ rewrapped: number; failed: number; state: string }> => {
+    const ids = masterKeyIds();
+    if (ids.active === null || ids.next === null) return { rewrapped: 0, failed: 0, state: "no_next_key" };
+    const rows = await ctx.runQuery(internal.keys.rewrapBatch, { masterKeyId: ids.active });
+    const updates = [];
+    let failed = 0;
+    for (const r of rows) {
+      const w = rewrapSecret(ctx, r, bindingOf(r.orgId, r.purpose, r.keyId));
+      if (w === null) failed++;
+      else updates.push({ id: r.id, from: r.masterKeyId, ...w });
+    }
+    const rewrapped = updates.length === 0 ? 0 : await ctx.runMutation(internal.keys.storeRewrapped, { updates });
+    if (rows.length === REWRAP_BATCH && rewrapped > 0) await ctx.scheduler.runAfter(0, internal.keys.rewrapAll, {});
+    return { rewrapped, failed, state: rows.length === 0 ? "done" : "ok" };
   },
 });

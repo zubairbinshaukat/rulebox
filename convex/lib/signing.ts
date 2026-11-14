@@ -4,6 +4,7 @@ import { bytesToHex, utf8ToBytes } from "@noble/hashes/utils.js";
 import type { Doc, Id } from "../_generated/dataModel";
 import { env, type DatabaseReader } from "../_generated/server";
 import { base64Decode, base64Encode } from "./crypto";
+import { openOrgKey } from "./keyring";
 
 // Policy signing (plan 4.5, Step 8 items 1 and 9; A11). Ed25519 (RFC 8032)
 // in pure JS (@noble/ed25519 with @noble/hashes SHA-512), so documents are
@@ -16,8 +17,10 @@ import { base64Decode, base64Encode } from "./crypto";
 // same function call: it is never stored, returned by a function, logged or
 // put in an error. Every signer gets its key from `loadOrgSigningKey`, which
 // also checks that the organization registered that key (`policyKeys`).
-// Phase 5 swaps the body of `loadSigningKey` for per-organization keys
-// without touching any caller.
+// Phase 5 Step 10: `loadOrgSigningKey` prefers the organization's OWN key from the
+// keyring (`orgKeys`, wrapped by the deployment master key); the env seed stays only
+// for organizations that have none yet (and is read by `withEnvSigningSeed` for the
+// one-time `keys:migrateFromEnv`). No caller changed.
 
 ed.hashes.sha512 = sha512;
 
@@ -83,23 +86,48 @@ export function envPublicKey(which: Which): PublicKeyInfo | null {
   return key === null ? null : { keyId: key.keyId, publicKey: key.publicKeyB64 };
 }
 
+/**
+ * The ONE route for the deployment's env seed to leave this module (Phase 5 Step 10,
+ * plan 4.18): `keys:migrateFromEnv` hands it to the keyring to wrap it as the
+ * organization's signing key (same key id, so no device is re-enrolled). `use` runs
+ * in the caller's action (`handle`) and must not store, log or return the seed itself. Null when
+ * the env holds no valid seed.
+ */
+export function withEnvSigningSeed<R>(which: Which, handle: (seedBytes: Uint8Array, info: PublicKeyInfo) => R): R | null {
+  const key = loadSigningKey(which);
+  return key === null ? null : handle(key.seed, { keyId: key.keyId, publicKey: key.publicKeyB64 });
+}
+
 export type OrgKeyResult =
   | { ok: true; key: SigningKey; row: Doc<"policyKeys"> }
-  /** missing: no (valid) env seed. mismatch: the org has no `policyKeys` row with that key in this status. */
+  /** missing: no usable seed (no env seed, or the organization's wrapped key cannot be opened). mismatch: the org has no `policyKeys` row with that key in this status. */
   | { ok: false; reason: "missing" | "mismatch" };
 
 /**
- * THE signing entry point (A11): the environment's `which` key, only when the
- * organization registered exactly that key with status `which`. 1 read
- * (`policyKeys.by_org_key_id`). Anything else is refused, so a key set on the
- * deployment can never sign for an organization that did not register it.
+ * THE signing entry point (A11). The organization's key of status `which`, only when
+ * the organization registered exactly that key (`policyKeys`, 1 read through
+ * `by_org_key_id`). Anything else is refused, so a key can never sign for an
+ * organization that did not register it.
+ *
+ * Where the key comes from (Phase 5 Step 10, plan 4.18):
+ * 1. The organization has `orgKeys` rows: its OWN signing seed, opened with the
+ *    deployment master key (`lib/keyring.ts`). When it cannot be opened (master key
+ *    missing or wrong) the answer is `missing`; the deployment key is NOT tried, so a
+ *    stale env seed can never sign for an organization that has its own key.
+ * 2. No `orgKeys` row (an organization not migrated yet): the deployment's env seed
+ *    `RULEBOX_POLICY_KEY[_NEXT]`, exactly as in Phase 4. `keys:migrateFromEnv` moves an
+ *    organization from 2 to 1; the env variable goes away once every one has moved.
  */
 export async function loadOrgSigningKey(
   ctx: { db: DatabaseReader },
   orgId: Id<"organizations">,
   which: Which,
 ): Promise<OrgKeyResult> {
-  const key = loadSigningKey(which);
+  const own = await openOrgKey(ctx, orgId, "signing", which);
+  let key: SigningKey | null;
+  if (own.kind === "locked") return { ok: false, reason: "missing" };
+  if (own.kind === "open") key = keyFromSeed(own.key.secret);
+  else key = loadSigningKey(which);
   if (key === null) return { ok: false, reason: "missing" };
   const row = await ctx.db
     .query("policyKeys")

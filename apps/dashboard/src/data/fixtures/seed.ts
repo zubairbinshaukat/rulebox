@@ -224,6 +224,8 @@ export interface DemoDb {
   apps: DbApp[];
   assignments: DbAssignment[];
   employeeApps: { employeeId: string; appId: string }[];
+  /** `orgSecurityDaily` summed over the last 30 days, per website: blocked permission requests per kind (counts only). */
+  appDenials: Map<string, { kind: string; count: number }[]>;
   fileHandlers: { _id: string; extension: string; appId: string }[];
   tokens: DbToken[];
   installs: DbInstall[];
@@ -882,6 +884,10 @@ export function seed(now: number = Date.now()): DemoDb {
     apps,
     assignments,
     employeeApps,
+    appDenials: new Map([
+      [aPos._id, [{ kind: "microphone", count: 41 }, { kind: "camera", count: 12 }]],
+      [aMail._id, [{ kind: "clipboardRead", count: 4 }]],
+    ]),
     fileHandlers,
     tokens,
     installs,

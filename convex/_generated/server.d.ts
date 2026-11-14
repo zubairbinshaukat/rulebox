@@ -33,6 +33,8 @@ type Env = {
   readonly GITHUB_TOKEN: string | undefined;
   readonly RULEBOX_ALLOW_TEST_SEED: "1" | undefined;
   readonly RULEBOX_HOSTED: "1" | undefined;
+  readonly RULEBOX_MASTER_KEY: string | undefined;
+  readonly RULEBOX_MASTER_KEY_NEXT: string | undefined;
   readonly RULEBOX_PLATFORM_KEY: string | undefined;
   readonly RULEBOX_POLICY_KEY: string | undefined;
   readonly RULEBOX_POLICY_KEY_NEXT: string | undefined;

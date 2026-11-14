@@ -56,6 +56,7 @@ export const {
   useCreateWebApp,
   useCreateDesktopApp,
   useUpdateApp,
+  useSetAppPermissions,
   useSetAppArchived,
   useDeleteApp,
   useRetryApp,

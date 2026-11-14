@@ -171,6 +171,35 @@ describe("demo data layer", () => {
     expect((refused as { detail?: string }).detail).toContain("devices");
   });
 
+  it("web app permissions (Step 11): fixtures carry 30-day counts, a save follows apps:setPermissions, new sites allow printing", async () => {
+    resetDemo();
+    signInAs("owner@demo.rulebox.test");
+    const pos = db().apps.find((a) => a.name === "Point of Sale")!;
+    const detail = renderHook(() => demoApi.useAppDetail(pos._id));
+    expect((await ready(detail.result)).data.denials30d).toEqual([{ kind: "microphone", count: 41 }, { kind: "camera", count: 12 }]);
+    const reader = db().apps.find((a) => a.kind === "desktop")!;
+    expect((await ready(renderHook(() => demoApi.useAppDetail(reader._id)).result)).data.denials30d).toEqual([]);
+
+    const save = renderHook(() => demoApi.useSetAppPermissions()).result.current;
+    const next = { ...pos.web!.permissions, microphone: true };
+    expect(await save({ appId: pos._id, expectedRevision: pos.revision + 5, permissions: next }).catch((e) => e)).toMatchObject({ code: "stale_edit" });
+    const before = pos.revision;
+    expect(await save({ appId: pos._id, expectedRevision: before, permissions: next })).toEqual({ revision: before + 1 });
+    expect(db().apps.find((a) => a._id === pos._id)!.web!.permissions.microphone).toBe(true);
+    expect(db().audit.some((e) => e.action === "app.permissionsChanged" && e.targetId === pos._id)).toBe(true);
+    // the same permissions again: nothing changes
+    expect(await save({ appId: pos._id, expectedRevision: before + 1, permissions: next })).toEqual({ revision: before + 1 });
+    // a program has none; a viewer cannot save
+    expect(await save({ appId: reader._id, expectedRevision: reader.revision, permissions: next }).catch((e) => e)).toMatchObject({ code: "invalid_argument", field: "appId" });
+
+    const create = renderHook(() => demoApi.useCreateWebApp()).result.current;
+    const id = await create({ name: "Meet", url: "https://meet.example.com", allowedDomains: [] });
+    expect(db().apps.find((a) => a._id === id)!.web!.permissions).toMatchObject({ printing: true, camera: false, notifications: true });
+
+    signInAs("auditor.with.a.really.long.mailbox.name@regional-compliance-office.demo.rulebox.test");
+    expect(errorCodeOf(await save({ appId: pos._id, expectedRevision: before + 1, permissions: { ...next, camera: true } }).catch((e) => e))).toBe("forbidden");
+  });
+
   it("refuses writes from viewers (forbidden)", async () => {
     resetDemo();
     signInAs("auditor.with.a.really.long.mailbox.name@regional-compliance-office.demo.rulebox.test");

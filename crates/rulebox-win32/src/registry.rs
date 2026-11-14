@@ -8,13 +8,14 @@
 use std::path::Path;
 use std::time::Duration;
 
-use windows::core::PCWSTR;
+use windows::core::{PCWSTR, PWSTR};
 use windows::Win32::Foundation::{
-    ERROR_FILE_NOT_FOUND, ERROR_MORE_DATA, ERROR_SHARING_VIOLATION, ERROR_SUCCESS, WIN32_ERROR,
+    ERROR_FILE_NOT_FOUND, ERROR_MORE_DATA, ERROR_NO_MORE_ITEMS, ERROR_SHARING_VIOLATION, ERROR_SUCCESS,
+    WIN32_ERROR,
 };
 use windows::Win32::System::Registry::{
-    RegCloseKey, RegCreateKeyExW, RegDeleteValueW, RegGetValueW, RegLoadKeyW, RegOpenKeyExW,
-    RegSetValueExW, RegUnLoadKeyW, HKEY, HKEY_LOCAL_MACHINE, HKEY_USERS, KEY_QUERY_VALUE, KEY_READ,
+    RegCloseKey, RegCreateKeyExW, RegDeleteKeyExW, RegDeleteTreeW, RegDeleteValueW, RegEnumValueW, RegGetValueW, RegLoadKeyW, RegOpenKeyExW, RegQueryInfoKeyW,
+    RegSetValueExW, RegUnLoadKeyW, HKEY, HKEY_LOCAL_MACHINE, HKEY_USERS, KEY_ALL_ACCESS, KEY_QUERY_VALUE, KEY_READ,
     KEY_SET_VALUE, KEY_WOW64_64KEY, KEY_WRITE, REG_DWORD, REG_OPTION_NON_VOLATILE, REG_SAM_FLAGS,
     REG_SZ, REG_VALUE_TYPE, RRF_RT_REG_DWORD, RRF_RT_REG_SZ,
 };
@@ -213,6 +214,96 @@ pub fn set_hklm(path: &str, name: &str, value: Option<&RegValue>) -> Result<()> 
             None => Ok(()),
         },
     }
+}
+
+/// (Phase 5 Step 5) Deletes the key `HKLM\<path>` (64-bit view) if it has no subkeys. A
+/// key that does not exist succeeds. Callers restrict which keys reach this
+/// (`machinereg::delete_safe_boot_entry`).
+///
+/// DESTRUCTIVE: guarded.
+pub fn delete_hklm_key(path: &str) -> Result<()> {
+    require_test_machine()?;
+    let wide = to_wide(path);
+    // SAFETY: `wide` is NUL-terminated and outlives the call; the 64-bit view flag is
+    // the documented `samDesired` value for `RegDeleteKeyExW`.
+    let status = unsafe { RegDeleteKeyExW(HKEY_LOCAL_MACHINE, PCWSTR(wide.as_ptr()), KEY_WOW64_64KEY.0, None) };
+    if status == ERROR_FILE_NOT_FOUND || status == ERROR_SUCCESS {
+        return Ok(());
+    }
+    Err(status_err("RegDeleteKeyExW", status))
+}
+
+/// (Phase 5 Step 7) Deletes the key `HKLM\<path>` (64-bit view) with everything below it. A
+/// key that does not exist succeeds. Callers restrict which keys reach this
+/// (`applocker::clear_policy`: the AppLocker collection keys only).
+///
+/// DESTRUCTIVE: guarded.
+pub fn delete_hklm_tree(path: &str) -> Result<()> {
+    require_test_machine()?;
+    let Some(key) = open_key(HKEY_LOCAL_MACHINE, path, KEY_ALL_ACCESS | KEY_WOW64_64KEY)? else {
+        return Ok(());
+    };
+    // SAFETY: the key is open with full access; a null sub key means the key itself, so its
+    // subkeys and values go and the (now empty) key stays for the delete below.
+    let status = unsafe { RegDeleteTreeW(key.0, PCWSTR::null()) };
+    if status != ERROR_SUCCESS {
+        return Err(status_err("RegDeleteTreeW", status));
+    }
+    drop(key);
+    let wide = to_wide(path);
+    // SAFETY: `wide` is NUL-terminated and outlives the call.
+    let status = unsafe { RegDeleteKeyExW(HKEY_LOCAL_MACHINE, PCWSTR(wide.as_ptr()), KEY_WOW64_64KEY.0, None) };
+    if status == ERROR_FILE_NOT_FOUND || status == ERROR_SUCCESS {
+        return Ok(());
+    }
+    Err(status_err("RegDeleteKeyExW", status))
+}
+
+/// (Phase 5 Step 3) The names of the values directly under `HKLM\<path>` (64-bit
+/// view), in the order the registry lists them; empty when the key does not exist.
+/// Read-only. The agent uses it to pick free names in a policy list key (the device
+/// installation restrictions) and to check what is there.
+pub fn list_hklm_value_names(path: &str) -> Result<Vec<String>> {
+    let Some(key) = open_key(HKEY_LOCAL_MACHINE, path, KEY_QUERY_VALUE | KEY_WOW64_64KEY)? else {
+        return Ok(Vec::new());
+    };
+    let mut names = Vec::new();
+    // A value name is at most 16,383 characters.
+    let mut buffer = vec![0u16; 16_384];
+    for index in 0u32.. {
+        let mut length = u32::try_from(buffer.len()).unwrap_or(u32::MAX);
+        // SAFETY: the key is open with KEY_QUERY_VALUE; `buffer` holds `length` UTF-16
+        // units; no type or data is asked for.
+        let status = unsafe {
+            RegEnumValueW(key.0, index, Some(PWSTR(buffer.as_mut_ptr())), &mut length, None, None, None, None)
+        };
+        if status == ERROR_NO_MORE_ITEMS {
+            break;
+        }
+        if status != ERROR_SUCCESS {
+            return Err(status_err("RegEnumValueW", status));
+        }
+        names.push(String::from_utf16_lossy(&buffer[..(length as usize).min(buffer.len())]));
+    }
+    Ok(names)
+}
+
+/// (Phase 5 Step 3) How many subkeys `HKLM\<path>` has (64-bit view); `None` when the key
+/// does not exist. Read-only.
+pub fn count_hklm_subkeys(path: &str) -> Result<Option<u32>> {
+    let Some(key) = open_key(HKEY_LOCAL_MACHINE, path, KEY_QUERY_VALUE | KEY_WOW64_64KEY)? else {
+        return Ok(None);
+    };
+    let mut subkeys = 0u32;
+    // SAFETY: the key is open; only the subkey count out pointer is passed, every other
+    // optional argument is null.
+    let status = unsafe {
+        RegQueryInfoKeyW(key.0, None, None, None, Some(&mut subkeys), None, None, None, None, None, None, None)
+    };
+    if status != ERROR_SUCCESS {
+        return Err(status_err("RegQueryInfoKeyW", status));
+    }
+    Ok(Some(subkeys))
 }
 
 /// (Phase 4 Step 16 review) Reads `HKEY_USERS\<SID>\<subkey>\<name>` only when

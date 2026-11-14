@@ -27,7 +27,9 @@
 >    edition: `rulebox-agent.exe`, `rulebox-shell.exe`, the Staff App under
 >    `versions\`, the hidden admin exit (key combination + PIN), Shift at
 >    startup, "Disable kiosk" from the dashboard, and `rulebox-agent recover`
->    run by an administrator. Each is an invariant with a test (Section 4.6).
+>    run by an administrator. Also never blocked: keyboards, mice, touch
+>    input, USB hubs and the device's built-in devices (invariant I10, 4.7a).
+>    Each is an invariant with a test (Section 4.6).
 >    A document that would break one is refused by the agent before anything
 >    is written.
 > 3. **Journal first, undo on Disable.** The Phase 2 rule (original value
@@ -64,6 +66,22 @@ primary source; each says how it gets confirmed (almost always the VM runs
 of Steps 21 and 22).
 
 ---
+
+## Changes 2026-11-08
+
+- **Answers accepted:** the owner accepted every recommendation, Q1a to Q13a
+  (Section 20 now has an Answer column).
+- **Step 14b Drivers added** (printers, scanners, other devices pushed from
+  the dashboard; Step 14 may now use them).
+- **USB per-class rules** (owner decision, extends Q4): USB control is per
+  device class (storage / printers / imaging and cameras / phones / other),
+  never all-or-nothing. Keyboards, mice, touch, pens, hubs, composite parents
+  and built-in devices are never blocked: new invariant **I10**
+  (`would_block_input_device`, 4.6), design in new **4.7a**, desired-state key
+  `lockdown.usb` replaces `usbStorage` (4.3), machine-side keys in 4.8,
+  Steps 4, 5, 19, 21, 22, edge cases 56 and 62-69, checklist rows E-39,
+  E-66..E-69 (E-66 rewritten: it used to block "unlisted classes" including
+  keyboards), decision D24, Section 21 and 22 additions.
 
 ## Updates since this plan was written
 
@@ -413,7 +431,10 @@ the non-secret views named in 4.12.
     "procWatch":  { "mode": "audit" },
     "exceptions": [ /* ExceptionRule, sorted by id, ≤ 200 */ ],
     "keyboard":   { "winCombos": "swallow" },                           // pass | swallow (Q7)
-    "usbStorage": "allow",                                              // allow | readOnly | block (Q4)
+    "usb": { "storage": "allow",                                        // allow | readOnly | block (Q4)
+             "printers": "allow", "imaging": "allow",                   // allow | block
+             "phones": "allow", "other": "allow",                       // allow | block (4.7a)
+             "retroactive": false },                                    // also act on devices already installed; never HID/hubs (I10)
     "accessibilityTools": false,                                        // true = Narrator, magnifier, OSK allowed for Staff
     "boot":       { "autoRecovery": "off", "safeModeGuard": true },      // autoRecovery: leave | off
     "performance": { "staffTuning": true, "kioskProfile": true, "noPrinting": false }
@@ -425,6 +446,7 @@ the non-secret views named in 4.12.
   "printers": [ { "id": "k7…", "name": "Front desk", "kind": "ipp", "address": "https://10.0.0.20:631/ipp/print",
                   "port": null, "queue": null, "driver": "Microsoft IPP Class Driver", "isDefault": true, "revision": 2 } ],
   "deviceLock": null,                             // or { "lockId", "message", "contact", "lockedAtMs" }
+  "usbTempAllow": null,                           // or { "untilMs" } per device, ≤ 8 h, live (not ring-gated); lifts the USB class blocks for this PC (never adds HID rules)
   "broadcasts": [ { "id": "k5…", "style": "banner", "title": "Maintenance", "body": "…",
                     "expiresAtMs": 1761000000000, "ackRequired": true, "issuedAtMs": 1760990000000 } ],
   "config": { "groupId": "k1…", "version": 14, "ring": "pilot" }
@@ -465,7 +487,9 @@ pub struct ConfigRef { pub group_id: String, #[ts(type = "number")] pub version:
 when a sub-key is missing): every `staff` and `machine` boolean `true`;
 `accountLockout` `{10, 15, 15}`; all three layer modes `audit`;
 `appControl.level` `recommendedBlocks`; `exceptions` `[]`;
-`keyboard.winCombos` `swallow`; `usbStorage` `allow`;
+`keyboard.winCombos` `swallow`; `usb.storage`, `usb.printers`, `usb.imaging`,
+`usb.phones`, `usb.other` all `allow`, `usb.retroactive` `false`;
+`usbTempAllow` `null`;
 `accessibilityTools` `false`; `boot.autoRecovery` `off` (the agent uses
 `leave` while BitLocker protects the OS volume, 4.16); `safeModeGuard`
 `true`; `performance` `{ true, true, false }`; `wifi` / `printers` /
@@ -494,7 +518,7 @@ when a sub-key is missing): every `staff` and `machine` boolean `true`;
    4.14): `apps`, `catalog`, `fileHandlers`, `allowedSites`, `lockdown`,
    `wifi` (without the sealed boxes), `wifiManagedOnly`, `printers`.
    **Not** ring-gated (always live): `employees`, `adminExit`, `power`,
-   `kioskEnabled`, `deviceLock`, `broadcasts`, keys, `offlineDays`.
+   `kioskEnabled`, `deviceLock`, `usbTempAllow`, `broadcasts`, keys, `offlineDays`.
    Locks, broadcasts and the directory must never wait for a pilot.
 
 ### 4.4 Journal v2 and the apply transaction
@@ -644,6 +668,7 @@ test on **generated output** (not on intentions) and a VM row.
 | I7 | An administrator can still sign in | `hideAdminTiles` only after E-71 is recorded as passed (agent-config flag set by the user after the VM run); account lockout threshold ≥ 5 | `admin_signin_unverified`, `lockout_threshold_too_low` | unit; E-71 |
 | I8 | Restore is always possible | Every write goes through the journal; unknown journal targets stop the apply | `journal_unknown_target` | journal tests |
 | I9 | Nothing is enforced without a prior audit period on this device | A layer switched to `enforce` that has never run in `audit` on this device runs 24 h in `audit` first and reports layer state `auditFirst` (the dashboard explains); the admin can skip this per device | `audit_first` (informational, not a refusal) | unit |
+| I10 | Keyboards, mice, touchpads, touch screens, pens, HID barcode scanners, USB hubs and root hubs, composite parents, Bluetooth input and the device's built-in devices are never blocked or removed (added 2026-11-08) | Deny tables (`USB_CLASSES`) are generated from a fixed const and compared with the `NEVER_BLOCK` const on every apply; there is no switch, no exception kind and no retroactive removal that can name those classes; a document or generated list that intersects them is refused (4.7a) | `would_block_input_device` | generated-output test over every USB switch × retroactive; E-67 (must pass) |
 
 A refusal writes nothing, keeps the previous applied state, reports
 `refused` with the code and audits `device.lockdownRefused`. The
@@ -679,10 +704,79 @@ removal of Staff entries, Step 18).
 | `accessibilityHotkeys` | `Control Panel\Accessibility\{StickyKeys,FilterKeys,ToggleKeys,MouseKeys}\Flags` (REG_SZ, hotkey bit cleared from the original value) | Accessibility shortcut keys do not trigger | E-50..E-59 |
 | `officeMacros` | `Software\Policies\Microsoft\Office\16.0\{word,excel,powerpoint}\security\VBAWarnings = 4`, `…\blockcontentexecutionfrominternet = 1` | Macros disabled without prompt (PRD 13.1) | E-20..E-29 |
 | (always with `noWakePassword`) | `Software\Policies\Microsoft\Windows\Control Panel\Desktop\ScreenSaverIsSecure` (REG_SZ `"0"`) | No password prompt after the screen saver | E-01..E-09 |
-| `usbStorage` (`readOnly` / `block`) | `Software\Policies\Microsoft\Windows\RemovableStorageDevices\Deny_Write = 1`, or `…\Deny_All = 1` (user-scope policy) | Removable storage read-only or unavailable for Staff only; admins unaffected | E-60..E-69 |
+| `usb.storage` (`readOnly` / `block`) | `Software\Policies\Microsoft\Windows\RemovableStorageDevices\Deny_Write = 1`, or `…\Deny_All = 1` (user-scope policy) | Removable storage (USB drives, card readers) read-only or unavailable for Staff only; admins unaffected | E-39, E-66..E-69 |
+| `usb.phones` = `block` | `…\RemovableStorageDevices\{WPD class GUIDs}\Deny_Read = 1`, `Deny_Write = 1` for the Windows Portable Devices GUIDs (unverified; phones/MTP cameras) | Phones and MTP devices unavailable for Staff only | E-66..E-69 |
 
 Each value is journalled with owner `L1`; `false` for a key means "restore
 that value". The list is the complete set; adding one is a plan change.
+
+### 4.7a USB control per device class (owner decision 2026-11-08, extends Q4)
+
+USB control is **per device class, never all-or-nothing**. "Most computers use
+a USB mouse and keyboard; if USB is not allowed, mouse and keyboard must still
+work; USB drives or printers can be blocked separately; if only printers are
+allowed, USB drives can't be used."
+
+**Groups and switches** (`lockdown.usb`, 4.3). Defaults: everything allowed;
+storage allowed by default and switchable (Q4).
+
+| Group | Values | Class (setup class names; GUIDs copied from Microsoft's table at build time, unverified) | Mechanism |
+|---|---|---|---|
+| `storage` | `allow` / `readOnly` / `block` | DiskDrive, CDROM, removable volumes (card readers inside printers too) | Staff-hive RemovableStorageDevices policy (4.7), Staff only |
+| `printers` | `allow` / `block` | Printer (USB printers) | DeviceInstall deny classes (4.8), machine-wide |
+| `imaging` | `allow` / `block` | Image (scanners, still cameras), Camera (webcams) | DeviceInstall deny classes (4.8), machine-wide |
+| `phones` | `allow` / `block` | WPD (Windows Portable Devices: phones, MTP) | Staff-hive RemovableStorageDevices WPD entries (4.7); the machine-wide class entry only if the Staff-scope policy proves insufficient |
+| `other` | `allow` / `block` | A **fixed list** of known unwanted classes (for example serial ports, modems, infrared, 1394), not a catch-all; network adapters are in the list only when the admin ticks "network adapters" (edge 65) | DeviceInstall deny classes (4.8), machine-wide |
+
+`retroactive` (default `false`): also remove matching devices that are
+already installed. Without it, blocking only affects **newly attached**
+devices (Windows installs restrictions at device installation time, so an
+already installed device keeps working until removed).
+
+**Never blocked, by any Rulebox policy (invariant I10, 4.6):** HID (keyboards,
+mice, touchpads, touch screens, pens, barcode scanners that act as keyboards),
+the keyboard and mouse classes, USB hubs and root hubs, composite-device
+parents (class USB), Bluetooth radios and Bluetooth keyboards and mice, and
+the device's own built-in devices (internal keyboard, touchpad, display,
+system devices). They are in a fixed `NEVER_BLOCK` const, not in any switch;
+the dashboard shows only the text "Keyboards, mice and touch screens always
+work."
+
+**Mechanism research (starting points in Section 22; mechanism details are
+unverified, settle in the VM run and the real-laptop pilot):**
+
+- *Device installation restrictions by setup class.* Group Policy "Prevent
+  installation of devices using drivers that match these device setup
+  classes" = registry `HKLM\SOFTWARE\Policies\Microsoft\Windows\DeviceInstall\Restrictions`
+  (`DenyDeviceClasses`, list subkey of class GUIDs, `DenyDeviceClassesRetroactive`
+  for the "also apply to matching devices that are already installed" box);
+  MDM equivalent `DeviceInstallation/PreventInstallationOfMatchingDeviceSetupClasses`
+  (plus `…Retroactive`). These are machine-wide: they also affect
+  administrators. Rulebox does **not** use the catch-all "prevent installation
+  of devices not described by other policy settings" (it would hit built-in
+  and input devices).
+- *Removable Storage Access policy* (`RemovableStorageDevices`: `Deny_Read`,
+  `Deny_Write`, `Deny_All`, and per-class GUID subkeys) is available per user,
+  which is why `storage` and `phones` stay Staff-only and read-only is
+  possible (device installation restrictions are install/not-install only).
+- *Composite devices.* A composite USB device is a parent (class USB, driver
+  `usbccgp`) with child functions that each have their own class (HID,
+  DiskDrive, Printer, Image, audio). The deny classes name the **child
+  function's class**, so a keyboard with a built-in card reader keeps its
+  keyboard, a USB headset keeps audio and its HID buttons, and a multifunction
+  printer prints while its card reader is blocked. A device that Windows binds
+  as one function of a blocked class cannot be split: it stays allowed (safer)
+  and is reported as `usb_combo_unsplit`.
+- *Retroactive removal* uses the retroactive flag only for classes in
+  `USB_CLASSES`, and never for anything in `NEVER_BLOCK`.
+- Rulebox's own driver installs (Step 14b) for a blocked class fail by
+  design; network printers (print queues, not PnP printer devices) must keep
+  working with `printers = block` (VM check, Step 21 item 12).
+
+**Scope rule:** storage and phones apply to the Staff account only; printers,
+imaging and other apply to the whole PC (the dashboard says "applies to
+everyone on this PC, including administrators" next to those switches).
+Admin-exit session: see edge case 62.
 
 ### 4.8 L2 — Machine policy catalogue
 
@@ -707,6 +801,7 @@ so next to each switch.
 | `restrictPrinterDrivers` | `Printers\PointAndPrint\RestrictDriverInstallationToAdministrators = 1` | Only administrators install printer drivers | E-20..E-29 |
 | `fileOutputPrinters` | `printer_set_security`: deny the Staff SID "Print" on printers whose port is a file-output port (identified by port type, not by localized name) | Print-to-file printers unusable for Staff; admins unaffected | E-20..E-29 |
 | `boot.safeModeGuard` | SafeBoot `Minimal` and `Network` keys for `RuleboxAgent` (4.16) | Agent runs in Safe Mode | E-60..E-69 |
+| `usb.printers` / `usb.imaging` / `usb.other` = `block` (and `usb.phones` where the Staff-scope policy is not enough) | `SOFTWARE\Policies\Microsoft\Windows\DeviceInstall\Restrictions`: `DenyDeviceClasses = 1`, list subkey `DenyDeviceClasses` with the group's class GUIDs from `USB_CLASSES`, and `DenyDeviceClassesRetroactive = 1` only when `usb.retroactive` is on (4.7a; unverified, settle in the VM run) | New devices of the blocked classes are not installed; **applies to every account on the PC, including administrators** (the dashboard says so next to each switch) | E-66..E-69 |
 
 Everything is journalled with owner `L2` or `L7` and restored on Disable.
 
@@ -1240,7 +1335,7 @@ icons, light/dark, 390 px layout, Viewers read-only).
 
 | Route | Query (one per screen) | What it shows / does |
 |---|---|---|
-| `/groups/:id/lockdown` | `lockdown:groupView` | Layer cards L1–L7 with mode switches (`off`/`audit`/`enforce`), the App Control level, staff/machine toggles with plain-language help, USB, accessibility, keyboard; "Audit findings: 12 new" link; save → `lockdown:saveGroup({ expectedRevision })` |
+| `/groups/:id/lockdown` | `lockdown:groupView` | Layer cards L1–L7 with mode switches (`off`/`audit`/`enforce`), the App Control level, staff/machine toggles with plain-language help, **USB section per device group** (storage allowed / read-only / blocked; printers, scanners and cameras, phones, other: allowed / blocked; "also apply to devices already plugged in"; the fixed, non-editable line "Keyboards, mice and touch screens always work."; warning on "other"), accessibility, keyboard; "Audit findings: 12 new" link; save → `lockdown:saveGroup({ expectedRevision })` |
 | `/groups/:id/rollout` | `rollouts:groupView` | Rings toggle, pointer per ring with version + reason, health counts (4.14), Promote / Promote all / Rollback (version picker of the last 20), auto-promotion settings, halted banner with Resume |
 | `/lockdown/findings` | `lockdown:findings` (paginated, `by_org_status_seen`) | "Would be blocked" grouped by program: file name, signer, folder class, layer, devices, last seen; actions **Allow for app…** (creates an exception, publisher rule preferred, hash fallback, path only for admin-only folders) and **Ignore** |
 | `/networks` | `networks:list` | Wi-Fi profiles and printers with group chips; per-item apply status counts (applied / failed / waiting) |
@@ -1494,13 +1589,22 @@ from a scratch copy (show the failing output, then restore).
    apply/restore through `journal::change` with owner `L1`;
    accessibility flags are computed from the original value (only the
    hotkey bit changes) and the original string is journalled.
-2. `invariants.rs`: I1–I9 of 4.6 with `facts` from read-only seam
-   methods; refusal codes as in the table.
+2. `invariants.rs`: I1–I10 of 4.6 with `facts` from read-only seam
+   methods; refusal codes as in the table. I10 (never block input devices,
+   hubs or built-in devices) checks the **generated** deny tables of 4.7a
+   against the fixed never-block set.
+2a. Staff-scope USB rules of 4.7a (`usb.storage` and `usb.phones` through
+   the Staff-hive removable-storage policy), from `STAFF_ITEMS`.
 3. Hook `validate` into `lockdown::apply` before step 3 of 4.11.
 4. Tests: each item on/off/on again is idempotent; restore returns the
    exact original (absent, DWORD, string); hive not loaded → mounted
    (SimPlatform); every refusal code reachable; a document that sets
-   `hideAdminTiles` without the E-71 flag is refused.
+   `hideAdminTiles` without the E-71 flag is refused. **I10 test:** for
+   every combination of the five USB switches and `retroactive`, the
+   generated deny classes never contain HID, keyboard, mouse, USB hub / root
+   hub, Bluetooth, system or built-in-device classes, and a document or a
+   hand-built deny list that does is refused with
+   `would_block_input_device`.
 
 **Verify:** `cargo clippy -p rulebox-agent -p rulebox-win32 --all-targets -- -D warnings`;
 `cargo test -p rulebox-agent -p rulebox-win32`.
@@ -1527,14 +1631,28 @@ item not in 4.7. Checklist rows owned: E-01..E-29, E-70..E-74.
    read-only, which works inside a service),
    `autoRecovery` with the BitLocker rule, posture reader.
 3. Disconnected Staff sessions: keep the Phase 2 rule.
+3a. USB device classes (4.7a): the machine-wide part (`usb.printers`,
+   `usb.imaging`, `usb.other`, and `usb.storage` where the policy needs a
+   class entry) as data: a `const USB_CLASSES` table of group → class GUIDs,
+   written under the DeviceInstall restrictions key with journal owner `L2`;
+   `retroactive` removal only for classes in that table; the never-block set
+   is a separate const that `invariants.rs` (I10) compares against. Add
+   `SOFTWARE\Policies\Microsoft\Windows\DeviceInstall\Restrictions` to
+   `machinereg::ALLOWED_ROOTS`. `usbTempAllow` expiry handled by the agent
+   timer (no polling of the server).
 4. Tests: every item journalled and restored; lockout threshold < 5
    refused; BitLocker on → `autoRecovery` left alone; Safe Mode start →
    auto sign-in held off for that boot only and restored after; posture
-   values map to the report enum.
+   values map to the report enum; every USB group maps to the expected
+deny keys and none of them is HID/hub; temporary allow ends on time and
+restores the deny keys; restore of the DeviceInstall keys returns the exact
+original (absent / present).
 
 **Verify / Done when:** as Step 4.
 **Do NOT:** change BCD when BitLocker protects the OS volume; touch an
-account by display name. Rows owned: E-01..E-09, E-60..E-69.
+account by display name; add a catch-all "deny everything not listed"
+device-installation rule (it would block built-in and input devices).
+Rows owned: E-01..E-09, E-60..E-69.
 
 ---
 
@@ -1824,6 +1942,42 @@ a print server or the network.
 
 ---
 
+### Step 14b — Drivers (printers, scanners, other devices)
+
+Added 2026-11-08 by owner decision. Step 14 only uses drivers already on the
+PC; this step lets the admin push them. Not in the PRD yet: add a PRD 24.2
+bullet ("Drivers") when the step is built.
+
+**Machine:** dev, then the VM. **Files:** `convex/drivers.ts` (or a new
+app type beside `apps.ts`), dashboard Drivers form, `apps/agent/src/installs/`
+(reuse the Phase 4 Step 14 install engine), `crates/rulebox-win32`, tests.
+
+1. New app type `driver`: either an INF package (zip with `.inf`, `.cat`,
+   `.sys`) installed with `pnputil /add-driver <inf> /install`, or a
+   vendor's silent EXE/MSI with its silent flags. Same rules as every
+   installer: https only, SHA-256 verified, signed manifest, installed as
+   SYSTEM with no window in the Staff session.
+2. Signature: refuse an INF package whose catalog is not validly signed
+   (Windows would prompt; a prompt in the Staff session is a bug).
+3. No tile: a driver never appears in the Start menu, desktop or taskbar.
+4. Restart: reuse the engine's 3010 / 1641 "restart pending until the next
+   boot" handling (already in `installs/engine.rs`); the dashboard shows
+   "restart needed".
+5. Assigned per group like apps; removal with `pnputil /delete-driver
+   <oem#.inf> /uninstall` only for packages Rulebox installed (journalled).
+6. Printers (Step 14) may pick a driver delivered by this step, which
+   replaces "driver must already be on the PC".
+7. Scanners: the driver only; scanning itself happens in the vendor's app
+   (add it as a normal app) or Windows Scan, if allowed. Scanner settings
+   stay admin-only.
+8. Tests: unsigned INF refused; hash mismatch; restart pending; removal
+   touches only Rulebox-installed packages.
+
+**Do NOT:** install drivers from Windows Update on demand, from a print
+server, or from a URL that is not in the signed manifest.
+
+---
+
 ### Step 15 — Device lock and broadcasts
 
 **Machine:** dev. **PRD:** 24.4. **Files:** `convex/{devices,broadcasts}.ts`,
@@ -1942,7 +2096,13 @@ WinRM if enabled, Code Integrity); change Defender or Update settings.
    to administrators" sentence for App Control.
 4. Fixtures for demo mode covering every layer state and refusal code.
 5. Tests: Viewer read-only; refusal codes mapped to sentences (one test
-   per code); findings pagination.
+   per code, including `would_block_input_device`); findings pagination.
+6. USB section of the group lockdown tab (4.20, 4.7a): the five per-class
+   switches, the retroactive checkbox and the fixed line "Keyboards, mice
+   and touch screens always work." (not editable, no switch); **Allow USB
+   for this PC** on the device page (temporary, max 8 h). Test: the line is
+   always rendered, no control can target HID or hubs, the warning for
+   "Block other USB devices" shows.
 
 **Verify:** `pnpm test:convex`; dashboard `typecheck|lint|test`;
 screenshots of every new screen (light/dark, 1280/390).
@@ -2030,6 +2190,17 @@ Runs (each records pass/fail, timing, and the screen or log evidence):
     writes per report observed in the Convex dashboard's function logs.
 11. The Phase 2 re-check items still open (exit-hold timing, kill-on-close
     job, `recover` for LSA owners).
+12. **USB per class (4.7a, E-66..E-69).** Hyper-V passes a USB device to a
+    guest only through enhanced-session redirection or a vendor tool, so
+    this run is partial: if a device can be passed, test one USB stick
+    (storage allow / read-only / block, new and already plugged in) and
+    one USB printer or camera if available; the VM's own virtual keyboard
+    and mouse must keep working with every switch on `block`. Anything the
+    VM cannot test is recorded as `pilot` and moves to the first real-laptop
+    pilot (Phase 6): E-67 (keyboard/mouse/composite/Bluetooth) is mandatory
+    there. Also read the effective registry keys after apply and compare
+    with 4.7a (key names, class GUIDs), and check that the Step 14 network
+    printers still install with the printers class set to `block`.
 
 **Done when:** every row has a result; failures are written up with
 evidence; the user reverts the VM to its checkpoint afterwards.
@@ -2047,6 +2218,8 @@ before/after comparison.
    the check described in the row's "VM check" column as the Staff user,
    records **pass/fail** and evidence (audit row, findings entry, or the
    screen), and notes the residual risk if any.
+   E-66..E-69 (USB classes) need physical USB devices: run them on a
+   real laptop when the VM cannot; E-67 must pass before Phase 5 closes.
 2. Rows E-70..E-74 (the way back) run **first and last**: hidden exit,
    Shift at startup, Disable kiosk from the dashboard, `recover`, admin
    sign-in through "Other user".
@@ -2155,7 +2328,7 @@ by Rulebox (Sections 4 and 5); the checks are run by the tester in the VM
 | E-36 | Windows built-in tools (command line, shells, registry editor, system settings) | Block rules for the tools; policies hide Settings and Control Panel | Pass: none of them can be started from any Rulebox path | An administrator keeps access by design |
 | E-37 | Legacy components that run code (help viewers, script engines) | Block rules from Microsoft's recommended list for the tools that are not needed | Pass: the listed components are blocked | New components in later builds; the list is reviewed each Windows feature update |
 | E-38 | Task Scheduler and services entries added by a user | Staff has no rights to create them | Pass: a Staff process cannot create a task or service | An administrator process can |
-| E-39 | Portable apps copied from a USB stick | USB storage read-only by default (Q4); allow list ignores unknown programs | Pass: a program on a USB stick does not run | If a group allows USB writes, the allow list is the only barrier |
+| E-39 | Portable apps copied from a USB stick | USB storage switch set to read-only or blocked for the group (default is allowed, Q4); allow list ignores unknown programs | Pass: with storage `readOnly` a program cannot be copied onto the stick, and a program on a USB stick does not run (checked in each storage mode) | If a group allows USB storage, the allow list is the only barrier |
 
 | E-40 | Link to an address outside the allow list | Web window navigation gate shows the blocked page | Pass: the blocked page appears | None |
 | E-41 | Pop-up or new window from a site | New-window handler denies or reuses the same window when allowed | Pass: no extra window opens for an unlisted address | None |
@@ -2178,7 +2351,10 @@ by Rulebox (Sections 4 and 5); the checks are run by the tester in the VM
 | E-63 | Network shares and remote tools | Remote tools blocked for Staff; file sharing off for the Staff folder | Pass: the Staff account has no share access to other machines | A managed-network policy can limit it further (Q8) |
 | E-64 | Second user account created by someone | Staff cannot create accounts; the agent reports new local accounts as findings | Pass: a new account shows as a finding within the report interval | An administrator can create one |
 | E-65 | Windows Update and restart prompts | Update policy set; restarts at configured hours | Pass: no restart prompt interrupts the Staff session | Feature updates can reset settings: the agent re-applies and reports drift |
-| E-66 | USB devices that act as keyboards or network cards | Device installation limited to the classes the group allows | Pass: an unlisted class is not installed for Staff | A trusted-looking keyboard device cannot be told apart |
+| E-66 | USB drives, printers, scanners, cameras and phones (per-class rules, 4.7a; rewritten 2026-11-08, the old row blocked "unlisted classes" including keyboards) | Per-group switches by class: storage allow/read-only/block, printers, imaging and cameras, phones, other. Machine-wide device installation deny classes for printers, imaging, phones and other; Staff-scope removable-storage policy for storage | Pass: each class set to block does not become usable for new devices (after replug), each class set to allow works, and an unrelated class is unaffected (storage blocked: printer still prints) | A USB device that pretends to be a different class (a drive that presents as a keyboard) is not told apart; keyboards are never blocked on purpose (E-67) |
+| E-67 | Keyboards, mice, touch screens, pens, barcode scanners acting as keyboards, hubs and composite parents under every USB setting | Invariant I10: no deny table contains HID, keyboard, mouse, USB hub or root-hub classes; validator refuses any document that would | **Must pass:** with every USB switch on `block`, the USB mouse and keyboard still work after replug and reboot, a Bluetooth mouse still pairs, and a composite device (keyboard with card reader, headset) keeps its HID/audio part while the storage part is blocked. Real laptop where the VM cannot pass USB through | A device that presents itself with a blocked class cannot be told apart from the real thing |
+| E-68 | Printer-only group (printers allowed, storage blocked) and multifunction printers | Class-by-class rules; the printer function stays allowed, the card-reader storage function is blocked | Pass: the USB printer prints, a card inserted in the printer's reader is not available to Staff, a USB stick is not available to Staff | A printer whose firmware presents storage and printing as one function (settle on the pilot) |
+| E-69 | Devices already plugged in when the policy arrives, and the temporary allow | New devices only by default; retroactive removal only from deny classes; **Allow USB for this PC** temporary override ends by itself | Pass: a stick already inserted keeps working until replug unless retroactive is on; the override ends within the minute after its time and the rule applies again; HID is never removed by retroactive | Employee data on a stick that is ejected (the Staff App warns first) |
 
 | E-70 | Hidden administrator exit (the owner's way back) | Hotkey and PIN checked by the agent; works with every policy in force; never blocked by App Control or the watchdog | **Must pass:** the exit dialog opens with the key combination and accepts the right PIN | If the PIN is lost, `recover` (E-73) |
 | E-71 | "Other user" sign-in tile | Hiding admin tiles is allowed only while this check passes on the build in use | **Must pass:** after all policies the sign-in screen still offers a way to sign in as another account | A Windows update could change the screen: re-checked each feature update |
@@ -2195,7 +2371,7 @@ by Rulebox (Sections 4 and 5); the checks are run by the tester in the VM
 | E-82 | Broadcast message | Shown on the lock screen and desktop; cannot be dismissed into a bypass | Pass: the message appears and does not unlock anything | None |
 | E-83 | Offline device during a ring rollout | Offline devices keep the last applied version and take new ones when they return | Pass: an offline device applies the new version once and not older ones | A device offline for weeks follows the offline sign-in limits |
 | E-84 | Replay of an older signed policy | Version must be higher than the last applied; signature checked | Pass: the older document is refused and logged | None |
-| E-85 | Policy that would remove the way back | Safety invariants refuse it before applying (refusal codes I1–I9) | Pass: the policy is refused with the matching code and the device keeps the old one | A rule outside the invariants: reported by the audit step |
+| E-85 | Policy that would remove the way back | Safety invariants refuse it before applying (refusal codes I1–I10) | Pass: the policy is refused with the matching code and the device keeps the old one | A rule outside the invariants: reported by the audit step |
 | E-86 | Policy applied half way (power loss) | Journal v2 finishes or rolls back at the next start | Pass: after a power cut during apply the device ends in the old or the new state, never between | Disk write failures are reported |
 | E-87 | App Control or AppLocker blocking Rulebox itself | Rulebox files are allowed by publisher and path; audit mode first | Pass: in enforce mode the agent, the launcher and the Staff App all start | A new build with a changed signature needs the allow rule updated first |
 | E-88 | Antivirus quarantining a Rulebox file | Install guide lists the exclusion request; the agent reports missing files | Pass: a removed file is reported and repaired from the version store | Third-party products differ |
@@ -2204,6 +2380,7 @@ by Rulebox (Sections 4 and 5); the checks are run by the tester in the VM
 
 ### Checklist notes
 
+- E-67 is a **must-pass** row like the way back (E-70..E-74): a policy that cost the owner the keyboard or mouse is a stop-ship bug. It needs a real laptop or a PC with USB devices; Hyper-V can pass a USB device to the guest only through limited routes (enhanced session redirection or a vendor tool), so record it as `pilot` in the VM results file when the VM cannot test it and run it on the first real-laptop pilot (Phase 6).
 - Counts: 74 rows are written; numbers inside a range that are unused are free for new routes. Add a row inside a range when a VM run finds a new route.
 - A failed row is a bug in the control, not a note: fix, then re-run the row.
 - Rows depending on a Windows build record the build in the VM results file (Step 22).
@@ -2270,12 +2447,20 @@ by Rulebox (Sections 4 and 5); the checks are run by the tester in the VM
 | 53 | `unenroll` while layers are in `enforce` | Restore everything first (journal), then remove the enrollment; the order is tested | 20 |
 | 54 | BitLocker on and `autoRecovery: off` requested | Agent uses `leave` (4.16) to avoid a BitLocker recovery prompt after a BCD change **(unverified whether that element is validated)**; dashboard explains | 5 |
 | 55 | Accessibility needs of an employee | `accessibilityTools: true` per group allows the Windows accessibility tools for Staff (they stay blocked otherwise); the Staff App's own accessibility features (Phase 3) are always on | 4 |
-| 56 | USB storage blocked while an employee needs to hand in files | Policy per group; the dashboard text says the Staff App has no other export path in v1 | 4 |
+| 56 | USB storage blocked while an employee needs to hand in files | Policy per group (`usb.storage`, 4.7a); the dashboard text says the Staff App has no other export path in v1; keyboards and mice are unaffected by any USB setting | 4, 5 |
 | 57 | Findings flood (a misbehaving app starts thousands of processes) | Agent dedupes by fingerprint and counts locally; ≤ 50 fingerprints per flush, ≤ 4 flushes/day; counts go only to the daily summary | 9 |
 | 58 | Convex down when the device wants to report | Reports stay in local files (findings ≤ 500 fingerprints, daily counters merge); sent later; oldest dropped with a `findingsDropped` count | 9 |
 | 59 | Document over the size limit after many exceptions | Server refuses at save time (`too_many_exceptions` at 200); publisher refuses at build (`document too large`) as in Phase 4 | 10 |
 | 60 | Safe Mode with Networking vs Minimal | Agent registered for both; in either the Staff session is kept out and audited | 5 |
 | 61 | Employee locks the screen (Phase 3 P12 "Lock") while L1 hides Lock in Ctrl+Alt+Del | The Staff App's lock is its own screen (convenience, Phase 3 7.6), not Windows' lock; Windows' lock stays disabled | 4 |
+| 62 | Admin needs a USB stick for maintenance (USB rules added 2026-11-08, see 4.7a) | Storage rules are Staff-scope (Staff hive): the admin account in the admin-exit session is not restricted by them. Machine-wide class rules (printers, imaging, phones, other) stay on in the admin-exit session; they are per class, so an admin who needs one can switch it for the group or, per device, use **Allow USB for this PC** on the device page (temporary, max 8 h, then automatically back; carried in the live `usbTempAllow` field, not ring-gated, audited `device.usbTempAllow`). It never changes the invariant (I10) | 4, 5, 19 |
+| 63 | The only keyboard (or mouse) on the PC is USB and a policy push would block it | Cannot happen: HID, keyboard, mouse, USB hub and root-hub classes are not in any deny table; `validate` refuses a document or a generated deny list that contains one (`would_block_input_device`), keeps the previous state and audits `device.lockdownRefused`; Bluetooth keyboards and mice are in the same never-blocked set | 4 |
+| 64 | Printer-only group (USB printers allowed, storage blocked) with a multifunction printer | The printer function (class Printer, print queue) works; the card-reader storage function enumerates as its own child device and is blocked by the storage rule; scanner function follows `usb.imaging`. The dashboard help for `usb.storage` says "also blocks memory-card readers inside printers" | 5, 19 |
+| 65 | USB-to-Ethernet or USB Wi-Fi adapter | Network class is not in the `other` deny list unless the admin picks **Block other USB devices** and ticks the extra "network adapters" box; the dashboard warns "this can take the PC offline and then Rulebox cannot reach it" (same reasoning as Q8 and I5); a block that would disconnect the current link is refused with `would_disconnect` | 5, 19 |
+| 66 | USB drives (or printers, cameras) already plugged in when the policy arrives | Default is **new devices only**. With `usb.retroactive: true` the agent also removes matching already-installed devices, only from the fixed deny classes; a mounted drive in use by Staff is ejected after the Staff App warns the employee (or at next sign-in); HID and hubs are never touched by retroactive removal. Storage read-only/blocked in the Staff hive applies to already-mounted drives at the next access | 4, 5 |
+| 67 | Staff opens a blocked USB device | Windows shows its own "Access is denied" or nothing. If feasible the Staff App shows its own message "USB drives are turned off on this PC" when a removable volume arrives while `usb.storage` is `block` **(unverified: needs a device-arrival notification in the Staff session, settle in the VM run or pilot)**; if not feasible, the dashboard text and the install guide say what employees will see | 12, 21 |
+| 68 | Composite USB devices: keyboard with a built-in card reader, USB headset (audio + HID buttons), printer/scanner combos, a phone that also acts as a mass-storage or network device | Blocking targets the **child function's class** (storage, printer, imaging, phone), never the parent composite (class USB), so the HID part, the hub and the audio part keep working. If a Windows build binds a combo to a class we cannot split, the group keeps the safer outcome: the device stays allowed and the agent reports `usb_combo_unsplit` as a finding **(unverified, VM and real-laptop pilot)** | 5, 21 |
+| 69 | Retroactive removal and `recover` | Retroactive removal and the deny keys are journalled (owner `L2`/`L1`); Disable kiosk, `unenroll` and `recover` remove the deny keys and leave devices installed (a removed device returns on replug or `pnputil /scan-devices`). `recover` works with no USB keyboard dependency beyond what Windows itself needs | 5, 20 |
 
 ## 8. Observability
 
@@ -2397,7 +2582,7 @@ the rows inside a range are free.
 | E-30..E-39 | Program start control (unlisted programs, scripts, installers, user-writable folders, elevation) |
 | E-40..E-49 | Web apps and links (external protocols, downloads, browser hand-off, permissions) |
 | E-50..E-59 | Accessibility tools and sign-in-screen tools |
-| E-60..E-69 | Boot, recovery, Safe Mode, physical access, network |
+| E-60..E-69 | Boot, recovery, Safe Mode, physical access, network, USB device classes (E-66..E-69) |
 | E-70..E-74 | **The way back** (must pass): hidden exit, Shift at startup, Disable kiosk, `recover`, admin sign-in |
 | E-75..E-79 | Tamper (service, files, registry, clock) |
 | E-80..E-89 | Device lock, broadcasts, offline and policy replay |
@@ -2524,6 +2709,7 @@ PRD 21.1 decisions are untouched. These are this plan's own:
 | D21 | Lost-device lock = message + sign-in refusal; no wipe, no location | PRD 24.4; no usage tracking |
 | D22 | Web app printing default `true`, effective only with printers | PRD 24.1 |
 | D23 | Every mutating seam method guarded twice; the dev machine never gets the marker | Rule 1 |
+| D24 | USB control is per device class, never all-or-nothing; keyboards, mice, touch, pens, hubs, composite parents and built-in devices are never blocked (invariant I10, 4.6) | Owner decision 2026-11-08: most PCs use USB mouse and keyboard; printers can be allowed while drives are blocked |
 
 ## 19. Deviations from the PRD (tell the user)
 
@@ -2538,7 +2724,7 @@ Do not edit the PRD in this phase; give this list to the user.
 | 12.2 / 13.1 ("Boot into Safe Mode … disable advanced boot options") | Agent runs in Safe Mode and keeps Staff out; automatic WinRE failover off when safe to do so; firmware passwords and BitLocker are reported, not configured | Changing firmware or encryption is out of scope and risky |
 | 12.3 ("signed by an organization key") | Per-organization signing keys wrapped by a deployment master key held in the environment | Shared deployment; operator still holds the master key |
 | 24.2 ("passwords stored encrypted on the server") | Encrypted at rest with a per-organization key **and** sealed per device | Stronger; documents and backups never hold a usable passphrase |
-| 24.2 (printer "driver from an approved list") | Approved list = inbox class drivers + names the org adds; drivers must already be on the PC | No driver downloads |
+| 24.2 (printer "driver from an approved list") | Approved list = inbox class drivers + names the org adds + drivers pushed by Step 14b (signed INF or silent vendor installer, hash-verified; changed 2026-11-08 by owner decision) | Drivers come only from the signed manifest, never from a print server or Windows Update on demand |
 | 24.3 ("return a group to any previous version") | The last 20 group configuration versions | Bounded storage |
 | 24.3 ("every desired-state change can be sent to a ring") | Locks, broadcasts, employees, admin exit and keys are never ring-gated | They must apply at once |
 | 24.4 ("only the admin exit or an unlock ends it") | The admin exit ends the Staff session but the lock returns at re-arm; only an unlock ends it | Otherwise an admin exit would silently unlock a lost device |
@@ -2550,23 +2736,25 @@ Do not edit the PRD in this phase; give this list to the user.
 
 ## 20. Open questions for the user
 
-The plan assumes the **recommended** option for each.
+**Answered 2026-11-08: the owner accepted the recommendation (a) for every
+question, Q1a to Q13a.** The questions stay here as the record. Q4 was
+extended the same day: USB control is per device class (4.7a, invariant I10).
 
-| # | Question | Options | Recommendation |
-|---|---|---|---|
-| Q1 | App Control default level | (a) Microsoft's recommended block rules only; `allowlist` opt-in per group. (b) `allowlist` by default | **(a).** App Control is device-wide; the allowlist level also restricts administrators and needs per-PC review |
-| Q2 | How long a new organization stays in `audit` before the dashboard suggests `enforce` | (a) 7 days. (b) 14 days. (c) No suggestion | **(a)**, and the overview warns after 14 days |
-| Q3 | 802.1X / EAP Wi-Fi with certificates | (a) v1.x. (b) Phase 5 | **(a).** Needs certificate distribution and is untestable on Hyper-V |
-| Q4 | USB storage default | (a) Allowed, per-group switch to read-only or blocked. (b) Blocked by default | **(a).** Employees often need it; the switch is one click |
-| Q5 | Hide administrator tiles on the sign-in screen | (a) Hide every enabled local admin, only after VM row E-71 confirms "Other user" is offered. (b) Hide only the admin chosen at enrollment. (c) Do not hide | **(a)** (PRD 13.6 #8) |
-| Q6 | Automatic ring promotion default | (a) Off; auto-halt always on; auto-rollback of pilot on. (b) On with 24 h bake | **(a)** |
-| Q7 | Windows-key combinations | (a) Staff App hook swallows them when `keyboard.winCombos = swallow` (default). (b) Policy only | **(a).** Without Explorer the policy alone has no effect |
-| Q8 | "Managed networks only" default | (a) Off. (b) On when at least one profile exists | **(a).** It also restricts administrators and can take a PC offline |
-| Q9 | Where per-organization keys live | (a) Wrapped by a master key in the Convex environment. (b) External key service (cloud KMS) | **(a)** for the free plan; (b) when a paying tier exists |
-| Q10 | Lost-device lock scope | (a) Message + sign-in refusal; admin exit still works. (b) Also block Wi-Fi / USB while locked | **(a).** (b) can strand the device offline so an unlock never arrives |
-| Q11 | Per-user tuning (22.2) and kiosk performance profile (22.3) | (a) Phase 5 Step 18. (b) Phase 6 | **(a).** Same journal machinery; measured in Step 21 |
-| Q12 | Home edition if AppLocker or App Control is refused | (a) Allow enrollment with "Reduced protection" badge (L1, L2, L5–L7). (b) Block Home | **(a).** Many target laptops run Home; the dashboard is honest about it |
-| Q13 | Windows accessibility tools for Staff | (a) Blocked by default, per-group switch. (b) Allowed by default | **(a)**, with the Staff App's own accessibility always on |
+| # | Question | Options | Recommendation | Answer |
+|---|---|---|---|---|
+| Q1 | App Control default level | (a) Microsoft's recommended block rules only; `allowlist` opt-in per group. (b) `allowlist` by default | **(a).** App Control is device-wide; the allowlist level also restricts administrators and needs per-PC review | Accepted (a), 2026-11-08 |
+| Q2 | How long a new organization stays in `audit` before the dashboard suggests `enforce` | (a) 7 days. (b) 14 days. (c) No suggestion | **(a)**, and the overview warns after 14 days | Accepted (a), 2026-11-08 |
+| Q3 | 802.1X / EAP Wi-Fi with certificates | (a) v1.x. (b) Phase 5 | **(a).** Needs certificate distribution and is untestable on Hyper-V | Accepted (a), 2026-11-08 |
+| Q4 | USB storage default | (a) Allowed, per-group switch to read-only or blocked. (b) Blocked by default | **(a).** Employees often need it; the switch is one click | Accepted (a), 2026-11-08; extended: per device class (4.7a) |
+| Q5 | Hide administrator tiles on the sign-in screen | (a) Hide every enabled local admin, only after VM row E-71 confirms "Other user" is offered. (b) Hide only the admin chosen at enrollment. (c) Do not hide | **(a)** (PRD 13.6 #8) | Accepted (a), 2026-11-08 |
+| Q6 | Automatic ring promotion default | (a) Off; auto-halt always on; auto-rollback of pilot on. (b) On with 24 h bake | **(a)** | Accepted (a), 2026-11-08 |
+| Q7 | Windows-key combinations | (a) Staff App hook swallows them when `keyboard.winCombos = swallow` (default). (b) Policy only | **(a).** Without Explorer the policy alone has no effect | Accepted (a), 2026-11-08 |
+| Q8 | "Managed networks only" default | (a) Off. (b) On when at least one profile exists | **(a).** It also restricts administrators and can take a PC offline | Accepted (a), 2026-11-08 |
+| Q9 | Where per-organization keys live | (a) Wrapped by a master key in the Convex environment. (b) External key service (cloud KMS) | **(a)** for the free plan; (b) when a paying tier exists | Accepted (a), 2026-11-08 |
+| Q10 | Lost-device lock scope | (a) Message + sign-in refusal; admin exit still works. (b) Also block Wi-Fi / USB while locked | **(a).** (b) can strand the device offline so an unlock never arrives | Accepted (a), 2026-11-08 |
+| Q11 | Per-user tuning (22.2) and kiosk performance profile (22.3) | (a) Phase 5 Step 18. (b) Phase 6 | **(a).** Same journal machinery; measured in Step 21 | Accepted (a), 2026-11-08 |
+| Q12 | Home edition if AppLocker or App Control is refused | (a) Allow enrollment with "Reduced protection" badge (L1, L2, L5–L7). (b) Block Home | **(a).** Many target laptops run Home; the dashboard is honest about it | Accepted (a), 2026-11-08 |
+| Q13 | Windows accessibility tools for Staff | (a) Blocked by default, per-group switch. (b) Allowed by default | **(a)**, with the Staff App's own accessibility always on | Accepted (a), 2026-11-08 |
 
 ## 21. Could not be verified
 
@@ -2594,6 +2782,12 @@ run; every signature is a specification.
 - Convex free-plan I/O figures (Phase 4 verified 1 GB on 2026-10-20; the
   referral figure is not verified) — post-Phase-5 I/O pass.
 - ARM64 behaviour of every layer — no ARM64 VM; recorded as untested.
+- USB per-class rules (4.7a): the exact class GUID lists, whether
+  `DenyDeviceClasses` on the child function leaves the composite parent and
+  its HID child working on real hardware, the effect of "retroactive", how
+  the policy behaves on Home, whether the Staff session can show a friendly
+  message — Step 21 (Hyper-V cannot pass USB through reliably) and the
+  real-laptop pilot of Phase 6.
 
 ## 22. Sources
 
@@ -2651,6 +2845,15 @@ Cryptography
 - https://www.rfc-editor.org/rfc/rfc7748 · https://www.rfc-editor.org/rfc/rfc5869 · https://datatracker.ietf.org/doc/html/draft-irtf-cfrg-xchacha
 - https://github.com/paulmillr/noble-curves · https://github.com/paulmillr/noble-ciphers
 - https://docs.rs/x25519-dalek · https://docs.rs/chacha20poly1305 · https://docs.rs/hkdf
+
+Devices and USB (added 2026-11-08; starting points, re-read at Steps 4, 5 and 21)
+- https://learn.microsoft.com/en-us/windows/client-management/mdm/policy-csp-deviceinstallation
+- https://learn.microsoft.com/en-us/windows/client-management/mdm/policy-csp-admx-deviceinstallation
+- https://learn.microsoft.com/en-us/windows/client-management/mdm/policy-csp-storage (removable storage access)
+- https://learn.microsoft.com/en-us/windows/client-management/mdm/policy-csp-admx-removablestorage
+- https://learn.microsoft.com/en-us/windows/client-management/manage-device-installation-with-group-policy
+- https://learn.microsoft.com/en-us/windows-hardware/drivers/install/system-defined-device-setup-classes-available-to-vendors (class GUIDs)
+- https://learn.microsoft.com/en-us/windows-hardware/drivers/usbcon/usb-common-class-generic-parent-driver (composite devices, `usbccgp`)
 
 Convex
 - https://docs.convex.dev/production/state/limits · https://docs.convex.dev/scheduling/cron-jobs · https://docs.convex.dev/production/environment-variables

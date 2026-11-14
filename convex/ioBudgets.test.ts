@@ -3,6 +3,7 @@ import { probe } from "../tests/convex/devices";
 import { asMember, makeOrg } from "../tests/convex/identity";
 import { INTERNAL_CALLS, internalEnv, UNMEASURED, type InternalCase } from "../tests/convex/ioInternal";
 import { LARGE, seedLargeOrg } from "../tests/convex/largeOrg";
+import { MASTER_A, setMaster } from "../tests/convex/phase5";
 import { DEVICE_CALLS, expectedFor, fixture, type Fixture, internalFunctions, outcome, publicFunctions, ROWS, type Caller, type Row } from "../tests/convex/matrixRows";
 import { api } from "./_generated/api";
 import { sha256HexSync } from "./lib/crypto";
@@ -51,6 +52,11 @@ const SUBSCRIBE_EXCEPTIONS: Record<string, string[]> = {
  */
 const COMPLETE_CALLS: Record<string, (f: Fixture) => Promise<() => Promise<unknown>>> = {
   "employees:setPassword": async (f) => () => f.accessor.admin.action(api.employees.setPassword, { employeeId: f.employeeId, password: "12345678" }),
+  // Phase 5 Step 10: the Owner moves the deployment key into the organization's own keys (a throwaway master key is set).
+  "keys:migrateFromEnv": async (f) => {
+    setMaster(MASTER_A);
+    return () => f.accessor.owner.action(api.keys.migrateFromEnv, {});
+  },
   "account:redeemPinReset": async (f) => {
     const m = await asMember(f.t, { role: "viewer", orgId: f.orgId }); // a session created just now is "fresh"
     await f.t.run((ctx) =>
@@ -77,6 +83,7 @@ describe("I/O budgets (plan Step 18 item 9)", () => {
   afterEach(() => {
     vi.useRealTimers();
     delete process.env.RULEBOX_RECOVERY_PEPPER;
+    setMaster(undefined); // `keys:migrateFromEnv` runs complete with a throwaway master key
   });
 
   test("every public AND internal function has a row, and every row names one", async () => {
@@ -149,6 +156,8 @@ describe("I/O budgets: internal functions", () => {
     delete process.env.RULEBOX_RECOVERY_PEPPER;
     delete process.env.RULEBOX_ALLOW_TEST_SEED;
     delete process.env.RULEBOX_PLATFORM_KEY;
+    // Phase 5 Step 10: the cases that need the keyring set a throwaway master key.
+    setMaster(undefined);
     vi.unstubAllGlobals();
   });
 

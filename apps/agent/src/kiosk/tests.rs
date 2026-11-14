@@ -19,7 +19,7 @@ use crate::ipc_shell::ShellExtension;
 use crate::lockout::LockoutStore;
 use crate::platform::sim::{SimOp, SimPlatform};
 use crate::session::{SessionDeps, SessionTimeouts};
-use crate::state::{Enrollment, StateStore};
+use crate::state::{Enrollment, OriginalValue, StateStore};
 use crate::testutil::{test_snapshot, TempDir};
 
 const OWNER_PLAIN: &str = "owner-plaintext-pw";
@@ -253,7 +253,7 @@ fn a_fresh_machine_gets_the_account_the_values_and_the_secret() {
 
     // One journal entry per value that was changed (the two deletions of values that
     // were not there change nothing), each with its original.
-    let names: Vec<&str> = state.journal.iter().map(|entry| entry.key.name.as_str()).collect();
+    let names: Vec<&str> = state.journal.iter().map(|entry| entry.key_name()).collect();
     assert_eq!(
         names,
         [
@@ -300,6 +300,29 @@ fn the_machine_wide_shell_values_are_never_written() {
     rig.kiosk().disable().unwrap();
     assert_eq!(rig.winlogon("Shell"), Some(Rig::text("explorer.exe")));
     assert_eq!(rig.winlogon("Userinit"), Some(Rig::text(r"C:\Windows\system32\userinit.exe,")));
+}
+
+/// (Phase 5 Step 5, plan 4.16) A Safe Mode boot holds automatic sign-in off for that
+/// boot only; the next normal boot writes "1" again; Disable restores the original.
+#[test]
+fn a_safe_mode_boot_holds_automatic_sign_in_off_for_that_boot_only() {
+    let option = "SYSTEM\\CurrentControlSet\\Control\\SafeBoot\\Option";
+    let rig = Rig::new();
+    rig.owner_autologon();
+    rig.set(option, "OptionValue", RegData::Dword(1));
+    enable(&rig).unwrap();
+    assert_eq!(rig.winlogon("AutoAdminLogon"), Some(Rig::text("0")), "Safe Mode: the Staff account is not signed in");
+    // The values the rest of the kiosk needs are written as always.
+    assert_eq!(rig.winlogon("DefaultUserName"), Some(Rig::text(STAFF_USER_NAME)));
+    // The next boot is a normal one: the same enable arms it again.
+    rig.platform.with_world(|w| {
+        w.machine_values.remove(&Rig::key(option, "OptionValue"));
+    });
+    enable(&rig).unwrap();
+    assert_eq!(rig.winlogon("AutoAdminLogon"), Some(Rig::text("1")));
+    // And Disable still puts the owner's own value back.
+    rig.kiosk().disable().unwrap();
+    assert_eq!(rig.winlogon("AutoAdminLogon"), Some(Rig::text("1")), "the owner's original was \"1\"");
 }
 
 #[test]
@@ -363,7 +386,7 @@ fn an_owners_own_auto_sign_in_comes_back_exactly_and_the_password_never_reaches_
     assert!(state
         .journal
         .iter()
-        .any(|entry| entry.key.name == "DefaultPassword" && entry.original == OriginalValue::InSecrets));
+        .any(|entry| entry.key_name() == "DefaultPassword" && entry.original == OriginalValue::InSecrets));
     for text in [
         serde_json::to_string(&state).unwrap(),
         std::fs::read_to_string(rig.dir.path().join("state").join("agent-state.json")).unwrap(),
@@ -455,7 +478,7 @@ fn power_loss_at_every_mutating_step_is_finished_by_the_next_enable() {
         assert_eq!(rig.lsa(LSA_DEFAULT_PASSWORD), Some(rig.staff_password()), "the secret works: {op:?} #{skip}");
         assert_eq!(rig.lsa(LSA_PENDING), None, "{op:?} #{skip}");
         // One journal entry per value, never duplicated.
-        let mut names: Vec<_> = state.journal.iter().map(|e| e.key.name.clone()).collect();
+        let mut names: Vec<_> = state.journal.iter().map(|e| e.key_name().to_string()).collect();
         names.sort();
         names.dedup();
         assert_eq!(names.len(), state.journal.len(), "{op:?} #{skip}");
@@ -629,7 +652,7 @@ fn a_value_changed_behind_the_agents_back_is_fixed_alone() {
     assert_eq!(rig.winlogon("DefaultUserName"), Some(Rig::text("RuleboxStaff")));
     // The journal still has the original (absent), not the drifted value.
     let state = rig.shared.get();
-    let entry = state.journal.iter().find(|e| e.key.name == "DefaultUserName").unwrap();
+    let entry = state.journal.iter().find(|e| e.key_name() == "DefaultUserName").unwrap();
     assert_eq!(entry.original, OriginalValue::Absent);
 }
 
@@ -1123,7 +1146,7 @@ async fn an_exit_turns_auto_sign_in_off_signs_out_and_holds_it_off_through_reass
 
     // The journal was not touched by the hold: the original is still "absent".
     let state = r.state();
-    let entry = state.journal.iter().find(|e| e.key.name == "AutoAdminLogon").unwrap();
+    let entry = state.journal.iter().find(|e| e.key_name() == "AutoAdminLogon").unwrap();
     assert_eq!(entry.original, OriginalValue::Absent);
 }
 

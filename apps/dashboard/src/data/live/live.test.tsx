@@ -377,6 +377,12 @@ describe("apps, assignments and file types (Step 10)", () => {
     await renderHook(() => live.useUpdateApp()).result.current({ appId: "a1", expectedRevision: 2, web: input });
     expect(cx.fns["apps:update"]).toHaveBeenCalledWith({ appId: "a1", expectedRevision: 2, web: input });
 
+    // Phase 5 Step 11: permissions are saved on their own; the answer carries the revision to send next.
+    const permissions = { camera: false, microphone: true, screenShare: false, clipboardRead: false, notifications: true, downloads: true, printing: true, geolocation: false };
+    cx.fns["apps:setPermissions"] = vi.fn(async () => ({ revision: 3 }));
+    expect(await renderHook(() => live.useSetAppPermissions()).result.current({ appId: "a1", expectedRevision: 2, permissions })).toEqual({ revision: 3 });
+    expect(cx.fns["apps:setPermissions"]).toHaveBeenCalledWith({ appId: "a1", expectedRevision: 2, permissions });
+
     cx.fns["groups:assignApp"] = vi.fn(async () => ({ assignmentId: "as" }));
     await renderHook(() => live.useAssignApp()).result.current({ groupId: "g1", appId: "a1", audience: "selected", pinnedTaskbar: true, pinnedDesktop: false });
     expect(cx.fns["groups:assignApp"]).toHaveBeenCalledWith({ groupId: "g1", appId: "a1", audience: "selected", pinnedTaskbar: true, pinnedDesktop: false });

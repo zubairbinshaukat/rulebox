@@ -1,0 +1,878 @@
+<AppLockerPolicy Version="1">
+  <RuleCollection Type="Exe" EnforcementMode="AuditOnly">
+    <FilePathRule Id="7f1fb2a4-eb6b-80f8-b26f-df96618f864e" Name="Rulebox: Administrators" Description="Administrators can start anything (the way back, invariant I6)" UserOrGroupSid="S-1-5-32-544" Action="Allow">
+      <Conditions>
+        <FilePathCondition Path="*"/>
+      </Conditions>
+    </FilePathRule>
+    <FilePathRule Id="87c05ef6-b674-84fe-bc52-4c39eac0605e" Name="Rulebox: system principal S-1-5-18" Description="SYSTEM: the agent runs installers and tools as SYSTEM" UserOrGroupSid="S-1-5-18" Action="Allow">
+      <Conditions>
+        <FilePathCondition Path="*"/>
+      </Conditions>
+    </FilePathRule>
+    <FilePathRule Id="9df75606-d352-8ee3-b8a4-165d40033a49" Name="Rulebox: system principal S-1-5-19" Description="LOCAL SERVICE: Windows services run from the Windows folder" UserOrGroupSid="S-1-5-19" Action="Allow">
+      <Conditions>
+        <FilePathCondition Path="*"/>
+      </Conditions>
+    </FilePathRule>
+    <FilePathRule Id="30a9d219-eeac-8cbb-ad35-ef4c9c115d45" Name="Rulebox: system principal S-1-5-20" Description="NETWORK SERVICE: Windows services run from the Windows folder" UserOrGroupSid="S-1-5-20" Action="Allow">
+      <Conditions>
+        <FilePathCondition Path="*"/>
+      </Conditions>
+    </FilePathRule>
+    <FilePathRule Id="f2069729-6fe4-8834-9d5e-757b22be4417" Name="Rulebox: system principal S-1-5-6" Description="SERVICE: every service logon session" UserOrGroupSid="S-1-5-6" Action="Allow">
+      <Conditions>
+        <FilePathCondition Path="*"/>
+      </Conditions>
+    </FilePathRule>
+    <FilePathRule Id="2b8b3b63-96cb-8568-91a9-aee72bb8e585" Name="Rulebox: system principal S-1-5-90-0" Description="Window Manager Group: the desktop window manager of the Staff session" UserOrGroupSid="S-1-5-90-0" Action="Allow">
+      <Conditions>
+        <FilePathCondition Path="*"/>
+      </Conditions>
+    </FilePathRule>
+    <FilePathRule Id="65d7b9d0-dd9d-894d-bbaf-d06c5c01cfcb" Name="Rulebox: local account S-1-5-21-1000-2000-3000-1001" Description="Every other enabled local account can start anything; only Staff is restricted" UserOrGroupSid="S-1-5-21-1000-2000-3000-1001" Action="Allow">
+      <Conditions>
+        <FilePathCondition Path="*"/>
+      </Conditions>
+    </FilePathRule>
+    <FilePathRule Id="2e5b4864-363d-8f21-bb56-39dfdba6572e" Name="Rulebox: local account S-1-5-21-1000-2000-3000-1002" Description="Every other enabled local account can start anything; only Staff is restricted" UserOrGroupSid="S-1-5-21-1000-2000-3000-1002" Action="Allow">
+      <Conditions>
+        <FilePathCondition Path="*"/>
+      </Conditions>
+    </FilePathRule>
+    <FilePathRule Id="e8348f5c-c954-8f26-a7c5-82c194868334" Name="Rulebox: Rulebox and WebView2 folders" Description="Everyone can start Rulebox and the WebView2 runtime (invariants I1 and I2)" UserOrGroupSid="S-1-1-0" Action="Allow">
+      <Conditions>
+        <FilePathCondition Path="C:\Program Files (x86)\Microsoft\EdgeWebView\*"/>
+      </Conditions>
+    </FilePathRule>
+    <FilePathRule Id="6f5135e6-5a85-8e53-abd4-9afbb4e2e639" Name="Rulebox: Rulebox and WebView2 folders" Description="Everyone can start Rulebox and the WebView2 runtime (invariants I1 and I2)" UserOrGroupSid="S-1-1-0" Action="Allow">
+      <Conditions>
+        <FilePathCondition Path="C:\Program Files\Rulebox\*"/>
+      </Conditions>
+    </FilePathRule>
+    <FilePathRule Id="47561b21-978f-884f-ba17-70f78ada8dae" Name="Rulebox: Staff, Windows folder" Description="Staff can start Windows&apos; own programs except the folders users can write to and the listed tools" UserOrGroupSid="S-1-5-21-1-1-1-2001" Action="Allow">
+      <Conditions>
+        <FilePathCondition Path="C:\Windows\*"/>
+      </Conditions>
+      <Exceptions>
+        <FilePathCondition Path="C:\Windows\debug\WIA\*"/>
+        <FilePathCondition Path="C:\Windows\PLA\Reports\*"/>
+        <FilePathCondition Path="C:\Windows\PLA\Rules\*"/>
+        <FilePathCondition Path="C:\Windows\PLA\Templates\*"/>
+        <FilePathCondition Path="C:\Windows\Registration\CRMLog\*"/>
+        <FilePathCondition Path="C:\Windows\System32\com\dmp\*"/>
+        <FilePathCondition Path="C:\Windows\System32\FxsTmp\*"/>
+        <FilePathCondition Path="C:\Windows\System32\Microsoft\Crypto\RSA\MachineKeys\*"/>
+        <FilePathCondition Path="C:\Windows\System32\spool\drivers\color\*"/>
+        <FilePathCondition Path="C:\Windows\System32\spool\PRINTERS\*"/>
+        <FilePathCondition Path="C:\Windows\System32\spool\SERVERS\*"/>
+        <FilePathCondition Path="C:\Windows\System32\Tasks\*"/>
+        <FilePathCondition Path="C:\Windows\SysWOW64\com\dmp\*"/>
+        <FilePathCondition Path="C:\Windows\SysWOW64\FxsTmp\*"/>
+        <FilePathCondition Path="C:\Windows\SysWOW64\Tasks\*"/>
+        <FilePathCondition Path="C:\Windows\Tasks\*"/>
+        <FilePathCondition Path="C:\Windows\Temp\*"/>
+        <FilePathCondition Path="C:\Windows\tracing\*"/>
+        <FilePathCondition Path="C:\Windows\Vendor\Cache\*"/>
+        <FilePathCondition Path="C:\Windows\Vendor\Reports\*"/>
+        <FilePathCondition Path="C:\Windows\explorer.exe"/>
+        <FilePathCondition Path="C:\Windows\hh.exe"/>
+        <FilePathCondition Path="C:\Windows\Microsoft.NET\Framework64\v2.0.50727\addinprocess.exe"/>
+        <FilePathCondition Path="C:\Windows\Microsoft.NET\Framework64\v2.0.50727\addinprocess32.exe"/>
+        <FilePathCondition Path="C:\Windows\Microsoft.NET\Framework64\v2.0.50727\addinutil.exe"/>
+        <FilePathCondition Path="C:\Windows\Microsoft.NET\Framework64\v2.0.50727\csc.exe"/>
+        <FilePathCondition Path="C:\Windows\Microsoft.NET\Framework64\v2.0.50727\dfsvc.exe"/>
+        <FilePathCondition Path="C:\Windows\Microsoft.NET\Framework64\v2.0.50727\ieexec.exe"/>
+        <FilePathCondition Path="C:\Windows\Microsoft.NET\Framework64\v2.0.50727\installutil.exe"/>
+        <FilePathCondition Path="C:\Windows\Microsoft.NET\Framework64\v2.0.50727\jsc.exe"/>
+        <FilePathCondition Path="C:\Windows\Microsoft.NET\Framework64\v2.0.50727\msbuild.exe"/>
+        <FilePathCondition Path="C:\Windows\Microsoft.NET\Framework64\v2.0.50727\regasm.exe"/>
+        <FilePathCondition Path="C:\Windows\Microsoft.NET\Framework64\v2.0.50727\regsvcs.exe"/>
+        <FilePathCondition Path="C:\Windows\Microsoft.NET\Framework64\v2.0.50727\vbc.exe"/>
+        <FilePathCondition Path="C:\Windows\Microsoft.NET\Framework64\v4.0.30319\addinprocess.exe"/>
+        <FilePathCondition Path="C:\Windows\Microsoft.NET\Framework64\v4.0.30319\addinprocess32.exe"/>
+        <FilePathCondition Path="C:\Windows\Microsoft.NET\Framework64\v4.0.30319\addinutil.exe"/>
+        <FilePathCondition Path="C:\Windows\Microsoft.NET\Framework64\v4.0.30319\csc.exe"/>
+        <FilePathCondition Path="C:\Windows\Microsoft.NET\Framework64\v4.0.30319\dfsvc.exe"/>
+        <FilePathCondition Path="C:\Windows\Microsoft.NET\Framework64\v4.0.30319\ieexec.exe"/>
+        <FilePathCondition Path="C:\Windows\Microsoft.NET\Framework64\v4.0.30319\installutil.exe"/>
+        <FilePathCondition Path="C:\Windows\Microsoft.NET\Framework64\v4.0.30319\jsc.exe"/>
+        <FilePathCondition Path="C:\Windows\Microsoft.NET\Framework64\v4.0.30319\msbuild.exe"/>
+        <FilePathCondition Path="C:\Windows\Microsoft.NET\Framework64\v4.0.30319\regasm.exe"/>
+        <FilePathCondition Path="C:\Windows\Microsoft.NET\Framework64\v4.0.30319\regsvcs.exe"/>
+        <FilePathCondition Path="C:\Windows\Microsoft.NET\Framework64\v4.0.30319\vbc.exe"/>
+        <FilePathCondition Path="C:\Windows\Microsoft.NET\Framework\v2.0.50727\addinprocess.exe"/>
+        <FilePathCondition Path="C:\Windows\Microsoft.NET\Framework\v2.0.50727\addinprocess32.exe"/>
+        <FilePathCondition Path="C:\Windows\Microsoft.NET\Framework\v2.0.50727\addinutil.exe"/>
+        <FilePathCondition Path="C:\Windows\Microsoft.NET\Framework\v2.0.50727\csc.exe"/>
+        <FilePathCondition Path="C:\Windows\Microsoft.NET\Framework\v2.0.50727\dfsvc.exe"/>
+        <FilePathCondition Path="C:\Windows\Microsoft.NET\Framework\v2.0.50727\ieexec.exe"/>
+        <FilePathCondition Path="C:\Windows\Microsoft.NET\Framework\v2.0.50727\installutil.exe"/>
+        <FilePathCondition Path="C:\Windows\Microsoft.NET\Framework\v2.0.50727\jsc.exe"/>
+        <FilePathCondition Path="C:\Windows\Microsoft.NET\Framework\v2.0.50727\msbuild.exe"/>
+        <FilePathCondition Path="C:\Windows\Microsoft.NET\Framework\v2.0.50727\regasm.exe"/>
+        <FilePathCondition Path="C:\Windows\Microsoft.NET\Framework\v2.0.50727\regsvcs.exe"/>
+        <FilePathCondition Path="C:\Windows\Microsoft.NET\Framework\v2.0.50727\vbc.exe"/>
+        <FilePathCondition Path="C:\Windows\Microsoft.NET\Framework\v4.0.30319\addinprocess.exe"/>
+        <FilePathCondition Path="C:\Windows\Microsoft.NET\Framework\v4.0.30319\addinprocess32.exe"/>
+        <FilePathCondition Path="C:\Windows\Microsoft.NET\Framework\v4.0.30319\addinutil.exe"/>
+        <FilePathCondition Path="C:\Windows\Microsoft.NET\Framework\v4.0.30319\csc.exe"/>
+        <FilePathCondition Path="C:\Windows\Microsoft.NET\Framework\v4.0.30319\dfsvc.exe"/>
+        <FilePathCondition Path="C:\Windows\Microsoft.NET\Framework\v4.0.30319\ieexec.exe"/>
+        <FilePathCondition Path="C:\Windows\Microsoft.NET\Framework\v4.0.30319\installutil.exe"/>
+        <FilePathCondition Path="C:\Windows\Microsoft.NET\Framework\v4.0.30319\jsc.exe"/>
+        <FilePathCondition Path="C:\Windows\Microsoft.NET\Framework\v4.0.30319\msbuild.exe"/>
+        <FilePathCondition Path="C:\Windows\Microsoft.NET\Framework\v4.0.30319\regasm.exe"/>
+        <FilePathCondition Path="C:\Windows\Microsoft.NET\Framework\v4.0.30319\regsvcs.exe"/>
+        <FilePathCondition Path="C:\Windows\Microsoft.NET\Framework\v4.0.30319\vbc.exe"/>
+        <FilePathCondition Path="C:\Windows\regedit.exe"/>
+        <FilePathCondition Path="C:\Windows\System32\at.exe"/>
+        <FilePathCondition Path="C:\Windows\System32\bash.exe"/>
+        <FilePathCondition Path="C:\Windows\System32\bcdedit.exe"/>
+        <FilePathCondition Path="C:\Windows\System32\bitsadmin.exe"/>
+        <FilePathCondition Path="C:\Windows\System32\cacls.exe"/>
+        <FilePathCondition Path="C:\Windows\System32\certreq.exe"/>
+        <FilePathCondition Path="C:\Windows\System32\certutil.exe"/>
+        <FilePathCondition Path="C:\Windows\System32\cmd.exe"/>
+        <FilePathCondition Path="C:\Windows\System32\cmstp.exe"/>
+        <FilePathCondition Path="C:\Windows\System32\control.exe"/>
+        <FilePathCondition Path="C:\Windows\System32\cscript.exe"/>
+        <FilePathCondition Path="C:\Windows\System32\diskpart.exe"/>
+        <FilePathCondition Path="C:\Windows\System32\dism.exe"/>
+        <FilePathCondition Path="C:\Windows\System32\esentutl.exe"/>
+        <FilePathCondition Path="C:\Windows\System32\eventvwr.exe"/>
+        <FilePathCondition Path="C:\Windows\System32\expand.exe"/>
+        <FilePathCondition Path="C:\Windows\System32\extrac32.exe"/>
+        <FilePathCondition Path="C:\Windows\System32\forfiles.exe"/>
+        <FilePathCondition Path="C:\Windows\System32\ftp.exe"/>
+        <FilePathCondition Path="C:\Windows\System32\icacls.exe"/>
+        <FilePathCondition Path="C:\Windows\System32\infdefaultinstall.exe"/>
+        <FilePathCondition Path="C:\Windows\System32\magnify.exe"/>
+        <FilePathCondition Path="C:\Windows\System32\makecab.exe"/>
+        <FilePathCondition Path="C:\Windows\System32\mavinject.exe"/>
+        <FilePathCondition Path="C:\Windows\System32\mmc.exe"/>
+        <FilePathCondition Path="C:\Windows\System32\msconfig.exe"/>
+        <FilePathCondition Path="C:\Windows\System32\msdt.exe"/>
+        <FilePathCondition Path="C:\Windows\System32\mshta.exe"/>
+        <FilePathCondition Path="C:\Windows\System32\msiexec.exe"/>
+        <FilePathCondition Path="C:\Windows\System32\narrator.exe"/>
+        <FilePathCondition Path="C:\Windows\System32\net.exe"/>
+        <FilePathCondition Path="C:\Windows\System32\net1.exe"/>
+        <FilePathCondition Path="C:\Windows\System32\netsh.exe"/>
+        <FilePathCondition Path="C:\Windows\System32\odbcconf.exe"/>
+        <FilePathCondition Path="C:\Windows\System32\OpenSSH\scp.exe"/>
+        <FilePathCondition Path="C:\Windows\System32\OpenSSH\sftp.exe"/>
+        <FilePathCondition Path="C:\Windows\System32\OpenSSH\ssh.exe"/>
+        <FilePathCondition Path="C:\Windows\System32\osk.exe"/>
+        <FilePathCondition Path="C:\Windows\System32\pcalua.exe"/>
+        <FilePathCondition Path="C:\Windows\System32\pcwrun.exe"/>
+        <FilePathCondition Path="C:\Windows\System32\pnputil.exe"/>
+        <FilePathCondition Path="C:\Windows\System32\presentationhost.exe"/>
+        <FilePathCondition Path="C:\Windows\System32\print.exe"/>
+        <FilePathCondition Path="C:\Windows\System32\reg.exe"/>
+        <FilePathCondition Path="C:\Windows\System32\regedt32.exe"/>
+        <FilePathCondition Path="C:\Windows\System32\regini.exe"/>
+        <FilePathCondition Path="C:\Windows\System32\regsvr32.exe"/>
+        <FilePathCondition Path="C:\Windows\System32\replace.exe"/>
+        <FilePathCondition Path="C:\Windows\System32\rpcping.exe"/>
+        <FilePathCondition Path="C:\Windows\System32\runas.exe"/>
+        <FilePathCondition Path="C:\Windows\System32\rundll32.exe"/>
+        <FilePathCondition Path="C:\Windows\System32\runonce.exe"/>
+        <FilePathCondition Path="C:\Windows\System32\sc.exe"/>
+        <FilePathCondition Path="C:\Windows\System32\schtasks.exe"/>
+        <FilePathCondition Path="C:\Windows\System32\sdclt.exe"/>
+        <FilePathCondition Path="C:\Windows\System32\sethc.exe"/>
+        <FilePathCondition Path="C:\Windows\System32\syncappvpublishingserver.exe"/>
+        <FilePathCondition Path="C:\Windows\System32\takeown.exe"/>
+        <FilePathCondition Path="C:\Windows\System32\taskmgr.exe"/>
+        <FilePathCondition Path="C:\Windows\System32\telnet.exe"/>
+        <FilePathCondition Path="C:\Windows\System32\tftp.exe"/>
+        <FilePathCondition Path="C:\Windows\System32\ttdinject.exe"/>
+        <FilePathCondition Path="C:\Windows\System32\utilman.exe"/>
+        <FilePathCondition Path="C:\Windows\System32\wbem\wmic.exe"/>
+        <FilePathCondition Path="C:\Windows\System32\wevtutil.exe"/>
+        <FilePathCondition Path="C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe"/>
+        <FilePathCondition Path="C:\Windows\System32\WindowsPowerShell\v1.0\powershell_ise.exe"/>
+        <FilePathCondition Path="C:\Windows\System32\winrs.exe"/>
+        <FilePathCondition Path="C:\Windows\System32\wscript.exe"/>
+        <FilePathCondition Path="C:\Windows\System32\wsl.exe"/>
+        <FilePathCondition Path="C:\Windows\System32\wusa.exe"/>
+        <FilePathCondition Path="C:\Windows\System32\xwizard.exe"/>
+        <FilePathCondition Path="C:\Windows\SysWOW64\at.exe"/>
+        <FilePathCondition Path="C:\Windows\SysWOW64\bash.exe"/>
+        <FilePathCondition Path="C:\Windows\SysWOW64\bcdedit.exe"/>
+        <FilePathCondition Path="C:\Windows\SysWOW64\bitsadmin.exe"/>
+        <FilePathCondition Path="C:\Windows\SysWOW64\cacls.exe"/>
+        <FilePathCondition Path="C:\Windows\SysWOW64\certreq.exe"/>
+        <FilePathCondition Path="C:\Windows\SysWOW64\certutil.exe"/>
+        <FilePathCondition Path="C:\Windows\SysWOW64\cmd.exe"/>
+        <FilePathCondition Path="C:\Windows\SysWOW64\cmstp.exe"/>
+        <FilePathCondition Path="C:\Windows\SysWOW64\control.exe"/>
+        <FilePathCondition Path="C:\Windows\SysWOW64\cscript.exe"/>
+        <FilePathCondition Path="C:\Windows\SysWOW64\diskpart.exe"/>
+        <FilePathCondition Path="C:\Windows\SysWOW64\dism.exe"/>
+        <FilePathCondition Path="C:\Windows\SysWOW64\esentutl.exe"/>
+        <FilePathCondition Path="C:\Windows\SysWOW64\eventvwr.exe"/>
+        <FilePathCondition Path="C:\Windows\SysWOW64\expand.exe"/>
+        <FilePathCondition Path="C:\Windows\SysWOW64\extrac32.exe"/>
+        <FilePathCondition Path="C:\Windows\SysWOW64\forfiles.exe"/>
+        <FilePathCondition Path="C:\Windows\SysWOW64\ftp.exe"/>
+        <FilePathCondition Path="C:\Windows\SysWOW64\icacls.exe"/>
+        <FilePathCondition Path="C:\Windows\SysWOW64\infdefaultinstall.exe"/>
+        <FilePathCondition Path="C:\Windows\SysWOW64\magnify.exe"/>
+        <FilePathCondition Path="C:\Windows\SysWOW64\makecab.exe"/>
+        <FilePathCondition Path="C:\Windows\SysWOW64\mavinject.exe"/>
+        <FilePathCondition Path="C:\Windows\SysWOW64\mmc.exe"/>
+        <FilePathCondition Path="C:\Windows\SysWOW64\msconfig.exe"/>
+        <FilePathCondition Path="C:\Windows\SysWOW64\msdt.exe"/>
+        <FilePathCondition Path="C:\Windows\SysWOW64\mshta.exe"/>
+        <FilePathCondition Path="C:\Windows\SysWOW64\msiexec.exe"/>
+        <FilePathCondition Path="C:\Windows\SysWOW64\narrator.exe"/>
+        <FilePathCondition Path="C:\Windows\SysWOW64\net.exe"/>
+        <FilePathCondition Path="C:\Windows\SysWOW64\net1.exe"/>
+        <FilePathCondition Path="C:\Windows\SysWOW64\netsh.exe"/>
+        <FilePathCondition Path="C:\Windows\SysWOW64\odbcconf.exe"/>
+        <FilePathCondition Path="C:\Windows\SysWOW64\osk.exe"/>
+        <FilePathCondition Path="C:\Windows\SysWOW64\pcalua.exe"/>
+        <FilePathCondition Path="C:\Windows\SysWOW64\pcwrun.exe"/>
+        <FilePathCondition Path="C:\Windows\SysWOW64\pnputil.exe"/>
+        <FilePathCondition Path="C:\Windows\SysWOW64\presentationhost.exe"/>
+        <FilePathCondition Path="C:\Windows\SysWOW64\print.exe"/>
+        <FilePathCondition Path="C:\Windows\SysWOW64\reg.exe"/>
+        <FilePathCondition Path="C:\Windows\SysWOW64\regedt32.exe"/>
+        <FilePathCondition Path="C:\Windows\SysWOW64\regini.exe"/>
+        <FilePathCondition Path="C:\Windows\SysWOW64\regsvr32.exe"/>
+        <FilePathCondition Path="C:\Windows\SysWOW64\replace.exe"/>
+        <FilePathCondition Path="C:\Windows\SysWOW64\rpcping.exe"/>
+        <FilePathCondition Path="C:\Windows\SysWOW64\runas.exe"/>
+        <FilePathCondition Path="C:\Windows\SysWOW64\rundll32.exe"/>
+        <FilePathCondition Path="C:\Windows\SysWOW64\runonce.exe"/>
+        <FilePathCondition Path="C:\Windows\SysWOW64\sc.exe"/>
+        <FilePathCondition Path="C:\Windows\SysWOW64\schtasks.exe"/>
+        <FilePathCondition Path="C:\Windows\SysWOW64\sdclt.exe"/>
+        <FilePathCondition Path="C:\Windows\SysWOW64\sethc.exe"/>
+        <FilePathCondition Path="C:\Windows\SysWOW64\syncappvpublishingserver.exe"/>
+        <FilePathCondition Path="C:\Windows\SysWOW64\takeown.exe"/>
+        <FilePathCondition Path="C:\Windows\SysWOW64\taskmgr.exe"/>
+        <FilePathCondition Path="C:\Windows\SysWOW64\telnet.exe"/>
+        <FilePathCondition Path="C:\Windows\SysWOW64\tftp.exe"/>
+        <FilePathCondition Path="C:\Windows\SysWOW64\ttdinject.exe"/>
+        <FilePathCondition Path="C:\Windows\SysWOW64\utilman.exe"/>
+        <FilePathCondition Path="C:\Windows\SysWOW64\wbem\wmic.exe"/>
+        <FilePathCondition Path="C:\Windows\SysWOW64\wevtutil.exe"/>
+        <FilePathCondition Path="C:\Windows\SysWOW64\WindowsPowerShell\v1.0\powershell.exe"/>
+        <FilePathCondition Path="C:\Windows\SysWOW64\WindowsPowerShell\v1.0\powershell_ise.exe"/>
+        <FilePathCondition Path="C:\Windows\SysWOW64\winrs.exe"/>
+        <FilePathCondition Path="C:\Windows\SysWOW64\wscript.exe"/>
+        <FilePathCondition Path="C:\Windows\SysWOW64\wsl.exe"/>
+        <FilePathCondition Path="C:\Windows\SysWOW64\wusa.exe"/>
+        <FilePathCondition Path="C:\Windows\SysWOW64\xwizard.exe"/>
+        <FilePublisherCondition PublisherName="*" ProductName="*" BinaryName="ADDINPROCESS.EXE">
+          <BinaryVersionRange LowSection="*" HighSection="*"/>
+        </FilePublisherCondition>
+        <FilePublisherCondition PublisherName="*" ProductName="*" BinaryName="ADDINPROCESS32.EXE">
+          <BinaryVersionRange LowSection="*" HighSection="*"/>
+        </FilePublisherCondition>
+        <FilePublisherCondition PublisherName="*" ProductName="*" BinaryName="ADDINUTIL.EXE">
+          <BinaryVersionRange LowSection="*" HighSection="*"/>
+        </FilePublisherCondition>
+        <FilePublisherCondition PublisherName="*" ProductName="*" BinaryName="AT.EXE">
+          <BinaryVersionRange LowSection="*" HighSection="*"/>
+        </FilePublisherCondition>
+        <FilePublisherCondition PublisherName="*" ProductName="*" BinaryName="BASH.EXE">
+          <BinaryVersionRange LowSection="*" HighSection="*"/>
+        </FilePublisherCondition>
+        <FilePublisherCondition PublisherName="*" ProductName="*" BinaryName="BCDEDIT.EXE">
+          <BinaryVersionRange LowSection="*" HighSection="*"/>
+        </FilePublisherCondition>
+        <FilePublisherCondition PublisherName="*" ProductName="*" BinaryName="BITSADMIN.EXE">
+          <BinaryVersionRange LowSection="*" HighSection="*"/>
+        </FilePublisherCondition>
+        <FilePublisherCondition PublisherName="*" ProductName="*" BinaryName="CACLS.EXE">
+          <BinaryVersionRange LowSection="*" HighSection="*"/>
+        </FilePublisherCondition>
+        <FilePublisherCondition PublisherName="*" ProductName="*" BinaryName="CERTREQ.EXE">
+          <BinaryVersionRange LowSection="*" HighSection="*"/>
+        </FilePublisherCondition>
+        <FilePublisherCondition PublisherName="*" ProductName="*" BinaryName="CERTUTIL.EXE">
+          <BinaryVersionRange LowSection="*" HighSection="*"/>
+        </FilePublisherCondition>
+        <FilePublisherCondition PublisherName="*" ProductName="*" BinaryName="CMD.EXE">
+          <BinaryVersionRange LowSection="*" HighSection="*"/>
+        </FilePublisherCondition>
+        <FilePublisherCondition PublisherName="*" ProductName="*" BinaryName="CMSTP.EXE">
+          <BinaryVersionRange LowSection="*" HighSection="*"/>
+        </FilePublisherCondition>
+        <FilePublisherCondition PublisherName="*" ProductName="*" BinaryName="CONTROL.EXE">
+          <BinaryVersionRange LowSection="*" HighSection="*"/>
+        </FilePublisherCondition>
+        <FilePublisherCondition PublisherName="*" ProductName="*" BinaryName="CSC.EXE">
+          <BinaryVersionRange LowSection="*" HighSection="*"/>
+        </FilePublisherCondition>
+        <FilePublisherCondition PublisherName="*" ProductName="*" BinaryName="CSCRIPT.EXE">
+          <BinaryVersionRange LowSection="*" HighSection="*"/>
+        </FilePublisherCondition>
+        <FilePublisherCondition PublisherName="*" ProductName="*" BinaryName="DFSVC.EXE">
+          <BinaryVersionRange LowSection="*" HighSection="*"/>
+        </FilePublisherCondition>
+        <FilePublisherCondition PublisherName="*" ProductName="*" BinaryName="DISKPART.EXE">
+          <BinaryVersionRange LowSection="*" HighSection="*"/>
+        </FilePublisherCondition>
+        <FilePublisherCondition PublisherName="*" ProductName="*" BinaryName="DISM.EXE">
+          <BinaryVersionRange LowSection="*" HighSection="*"/>
+        </FilePublisherCondition>
+        <FilePublisherCondition PublisherName="*" ProductName="*" BinaryName="ESENTUTL.EXE">
+          <BinaryVersionRange LowSection="*" HighSection="*"/>
+        </FilePublisherCondition>
+        <FilePublisherCondition PublisherName="*" ProductName="*" BinaryName="EVENTVWR.EXE">
+          <BinaryVersionRange LowSection="*" HighSection="*"/>
+        </FilePublisherCondition>
+        <FilePublisherCondition PublisherName="*" ProductName="*" BinaryName="EXPAND.EXE">
+          <BinaryVersionRange LowSection="*" HighSection="*"/>
+        </FilePublisherCondition>
+        <FilePublisherCondition PublisherName="*" ProductName="*" BinaryName="EXPLORER.EXE">
+          <BinaryVersionRange LowSection="*" HighSection="*"/>
+        </FilePublisherCondition>
+        <FilePublisherCondition PublisherName="*" ProductName="*" BinaryName="EXTRAC32.EXE">
+          <BinaryVersionRange LowSection="*" HighSection="*"/>
+        </FilePublisherCondition>
+        <FilePublisherCondition PublisherName="*" ProductName="*" BinaryName="FORFILES.EXE">
+          <BinaryVersionRange LowSection="*" HighSection="*"/>
+        </FilePublisherCondition>
+        <FilePublisherCondition PublisherName="*" ProductName="*" BinaryName="FTP.EXE">
+          <BinaryVersionRange LowSection="*" HighSection="*"/>
+        </FilePublisherCondition>
+        <FilePublisherCondition PublisherName="*" ProductName="*" BinaryName="HH.EXE">
+          <BinaryVersionRange LowSection="*" HighSection="*"/>
+        </FilePublisherCondition>
+        <FilePublisherCondition PublisherName="*" ProductName="*" BinaryName="ICACLS.EXE">
+          <BinaryVersionRange LowSection="*" HighSection="*"/>
+        </FilePublisherCondition>
+        <FilePublisherCondition PublisherName="*" ProductName="*" BinaryName="IEEXEC.EXE">
+          <BinaryVersionRange LowSection="*" HighSection="*"/>
+        </FilePublisherCondition>
+        <FilePublisherCondition PublisherName="*" ProductName="*" BinaryName="INFDEFAULTINSTALL.EXE">
+          <BinaryVersionRange LowSection="*" HighSection="*"/>
+        </FilePublisherCondition>
+        <FilePublisherCondition PublisherName="*" ProductName="*" BinaryName="INSTALLUTIL.EXE">
+          <BinaryVersionRange LowSection="*" HighSection="*"/>
+        </FilePublisherCondition>
+        <FilePublisherCondition PublisherName="*" ProductName="*" BinaryName="JSC.EXE">
+          <BinaryVersionRange LowSection="*" HighSection="*"/>
+        </FilePublisherCondition>
+        <FilePublisherCondition PublisherName="*" ProductName="*" BinaryName="MAGNIFY.EXE">
+          <BinaryVersionRange LowSection="*" HighSection="*"/>
+        </FilePublisherCondition>
+        <FilePublisherCondition PublisherName="*" ProductName="*" BinaryName="MAKECAB.EXE">
+          <BinaryVersionRange LowSection="*" HighSection="*"/>
+        </FilePublisherCondition>
+        <FilePublisherCondition PublisherName="*" ProductName="*" BinaryName="MAVINJECT.EXE">
+          <BinaryVersionRange LowSection="*" HighSection="*"/>
+        </FilePublisherCondition>
+        <FilePublisherCondition PublisherName="*" ProductName="*" BinaryName="MMC.EXE">
+          <BinaryVersionRange LowSection="*" HighSection="*"/>
+        </FilePublisherCondition>
+        <FilePublisherCondition PublisherName="*" ProductName="*" BinaryName="MSBUILD.EXE">
+          <BinaryVersionRange LowSection="*" HighSection="*"/>
+        </FilePublisherCondition>
+        <FilePublisherCondition PublisherName="*" ProductName="*" BinaryName="MSCONFIG.EXE">
+          <BinaryVersionRange LowSection="*" HighSection="*"/>
+        </FilePublisherCondition>
+        <FilePublisherCondition PublisherName="*" ProductName="*" BinaryName="MSDT.EXE">
+          <BinaryVersionRange LowSection="*" HighSection="*"/>
+        </FilePublisherCondition>
+        <FilePublisherCondition PublisherName="*" ProductName="*" BinaryName="MSHTA.EXE">
+          <BinaryVersionRange LowSection="*" HighSection="*"/>
+        </FilePublisherCondition>
+        <FilePublisherCondition PublisherName="*" ProductName="*" BinaryName="MSIEXEC.EXE">
+          <BinaryVersionRange LowSection="*" HighSection="*"/>
+        </FilePublisherCondition>
+        <FilePublisherCondition PublisherName="*" ProductName="*" BinaryName="NARRATOR.EXE">
+          <BinaryVersionRange LowSection="*" HighSection="*"/>
+        </FilePublisherCondition>
+        <FilePublisherCondition PublisherName="*" ProductName="*" BinaryName="NET.EXE">
+          <BinaryVersionRange LowSection="*" HighSection="*"/>
+        </FilePublisherCondition>
+        <FilePublisherCondition PublisherName="*" ProductName="*" BinaryName="NET1.EXE">
+          <BinaryVersionRange LowSection="*" HighSection="*"/>
+        </FilePublisherCondition>
+        <FilePublisherCondition PublisherName="*" ProductName="*" BinaryName="NETSH.EXE">
+          <BinaryVersionRange LowSection="*" HighSection="*"/>
+        </FilePublisherCondition>
+        <FilePublisherCondition PublisherName="*" ProductName="*" BinaryName="ODBCCONF.EXE">
+          <BinaryVersionRange LowSection="*" HighSection="*"/>
+        </FilePublisherCondition>
+        <FilePublisherCondition PublisherName="*" ProductName="*" BinaryName="OSK.EXE">
+          <BinaryVersionRange LowSection="*" HighSection="*"/>
+        </FilePublisherCondition>
+        <FilePublisherCondition PublisherName="*" ProductName="*" BinaryName="PCALUA.EXE">
+          <BinaryVersionRange LowSection="*" HighSection="*"/>
+        </FilePublisherCondition>
+        <FilePublisherCondition PublisherName="*" ProductName="*" BinaryName="PCWRUN.EXE">
+          <BinaryVersionRange LowSection="*" HighSection="*"/>
+        </FilePublisherCondition>
+        <FilePublisherCondition PublisherName="*" ProductName="*" BinaryName="PNPUTIL.EXE">
+          <BinaryVersionRange LowSection="*" HighSection="*"/>
+        </FilePublisherCondition>
+        <FilePublisherCondition PublisherName="*" ProductName="*" BinaryName="POWERSHELL.EXE">
+          <BinaryVersionRange LowSection="*" HighSection="*"/>
+        </FilePublisherCondition>
+        <FilePublisherCondition PublisherName="*" ProductName="*" BinaryName="POWERSHELL_ISE.EXE">
+          <BinaryVersionRange LowSection="*" HighSection="*"/>
+        </FilePublisherCondition>
+        <FilePublisherCondition PublisherName="*" ProductName="*" BinaryName="PRESENTATIONHOST.EXE">
+          <BinaryVersionRange LowSection="*" HighSection="*"/>
+        </FilePublisherCondition>
+        <FilePublisherCondition PublisherName="*" ProductName="*" BinaryName="PRINT.EXE">
+          <BinaryVersionRange LowSection="*" HighSection="*"/>
+        </FilePublisherCondition>
+        <FilePublisherCondition PublisherName="*" ProductName="*" BinaryName="REG.EXE">
+          <BinaryVersionRange LowSection="*" HighSection="*"/>
+        </FilePublisherCondition>
+        <FilePublisherCondition PublisherName="*" ProductName="*" BinaryName="REGASM.EXE">
+          <BinaryVersionRange LowSection="*" HighSection="*"/>
+        </FilePublisherCondition>
+        <FilePublisherCondition PublisherName="*" ProductName="*" BinaryName="REGEDIT.EXE">
+          <BinaryVersionRange LowSection="*" HighSection="*"/>
+        </FilePublisherCondition>
+        <FilePublisherCondition PublisherName="*" ProductName="*" BinaryName="REGEDT32.EXE">
+          <BinaryVersionRange LowSection="*" HighSection="*"/>
+        </FilePublisherCondition>
+        <FilePublisherCondition PublisherName="*" ProductName="*" BinaryName="REGINI.EXE">
+          <BinaryVersionRange LowSection="*" HighSection="*"/>
+        </FilePublisherCondition>
+        <FilePublisherCondition PublisherName="*" ProductName="*" BinaryName="REGSVCS.EXE">
+          <BinaryVersionRange LowSection="*" HighSection="*"/>
+        </FilePublisherCondition>
+        <FilePublisherCondition PublisherName="*" ProductName="*" BinaryName="REGSVR32.EXE">
+          <BinaryVersionRange LowSection="*" HighSection="*"/>
+        </FilePublisherCondition>
+        <FilePublisherCondition PublisherName="*" ProductName="*" BinaryName="REPLACE.EXE">
+          <BinaryVersionRange LowSection="*" HighSection="*"/>
+        </FilePublisherCondition>
+        <FilePublisherCondition PublisherName="*" ProductName="*" BinaryName="RPCPING.EXE">
+          <BinaryVersionRange LowSection="*" HighSection="*"/>
+        </FilePublisherCondition>
+        <FilePublisherCondition PublisherName="*" ProductName="*" BinaryName="RUNAS.EXE">
+          <BinaryVersionRange LowSection="*" HighSection="*"/>
+        </FilePublisherCondition>
+        <FilePublisherCondition PublisherName="*" ProductName="*" BinaryName="RUNDLL32.EXE">
+          <BinaryVersionRange LowSection="*" HighSection="*"/>
+        </FilePublisherCondition>
+        <FilePublisherCondition PublisherName="*" ProductName="*" BinaryName="RUNONCE.EXE">
+          <BinaryVersionRange LowSection="*" HighSection="*"/>
+        </FilePublisherCondition>
+        <FilePublisherCondition PublisherName="*" ProductName="*" BinaryName="SC.EXE">
+          <BinaryVersionRange LowSection="*" HighSection="*"/>
+        </FilePublisherCondition>
+        <FilePublisherCondition PublisherName="*" ProductName="*" BinaryName="SCHTASKS.EXE">
+          <BinaryVersionRange LowSection="*" HighSection="*"/>
+        </FilePublisherCondition>
+        <FilePublisherCondition PublisherName="*" ProductName="*" BinaryName="SCP.EXE">
+          <BinaryVersionRange LowSection="*" HighSection="*"/>
+        </FilePublisherCondition>
+        <FilePublisherCondition PublisherName="*" ProductName="*" BinaryName="SDCLT.EXE">
+          <BinaryVersionRange LowSection="*" HighSection="*"/>
+        </FilePublisherCondition>
+        <FilePublisherCondition PublisherName="*" ProductName="*" BinaryName="SETHC.EXE">
+          <BinaryVersionRange LowSection="*" HighSection="*"/>
+        </FilePublisherCondition>
+        <FilePublisherCondition PublisherName="*" ProductName="*" BinaryName="SFTP.EXE">
+          <BinaryVersionRange LowSection="*" HighSection="*"/>
+        </FilePublisherCondition>
+        <FilePublisherCondition PublisherName="*" ProductName="*" BinaryName="SSH.EXE">
+          <BinaryVersionRange LowSection="*" HighSection="*"/>
+        </FilePublisherCondition>
+        <FilePublisherCondition PublisherName="*" ProductName="*" BinaryName="SYNCAPPVPUBLISHINGSERVER.EXE">
+          <BinaryVersionRange LowSection="*" HighSection="*"/>
+        </FilePublisherCondition>
+        <FilePublisherCondition PublisherName="*" ProductName="*" BinaryName="TAKEOWN.EXE">
+          <BinaryVersionRange LowSection="*" HighSection="*"/>
+        </FilePublisherCondition>
+        <FilePublisherCondition PublisherName="*" ProductName="*" BinaryName="TASKMGR.EXE">
+          <BinaryVersionRange LowSection="*" HighSection="*"/>
+        </FilePublisherCondition>
+        <FilePublisherCondition PublisherName="*" ProductName="*" BinaryName="TELNET.EXE">
+          <BinaryVersionRange LowSection="*" HighSection="*"/>
+        </FilePublisherCondition>
+        <FilePublisherCondition PublisherName="*" ProductName="*" BinaryName="TFTP.EXE">
+          <BinaryVersionRange LowSection="*" HighSection="*"/>
+        </FilePublisherCondition>
+        <FilePublisherCondition PublisherName="*" ProductName="*" BinaryName="TTDINJECT.EXE">
+          <BinaryVersionRange LowSection="*" HighSection="*"/>
+        </FilePublisherCondition>
+        <FilePublisherCondition PublisherName="*" ProductName="*" BinaryName="UTILMAN.EXE">
+          <BinaryVersionRange LowSection="*" HighSection="*"/>
+        </FilePublisherCondition>
+        <FilePublisherCondition PublisherName="*" ProductName="*" BinaryName="VBC.EXE">
+          <BinaryVersionRange LowSection="*" HighSection="*"/>
+        </FilePublisherCondition>
+        <FilePublisherCondition PublisherName="*" ProductName="*" BinaryName="WEVTUTIL.EXE">
+          <BinaryVersionRange LowSection="*" HighSection="*"/>
+        </FilePublisherCondition>
+        <FilePublisherCondition PublisherName="*" ProductName="*" BinaryName="WINRS.EXE">
+          <BinaryVersionRange LowSection="*" HighSection="*"/>
+        </FilePublisherCondition>
+        <FilePublisherCondition PublisherName="*" ProductName="*" BinaryName="WMIC.EXE">
+          <BinaryVersionRange LowSection="*" HighSection="*"/>
+        </FilePublisherCondition>
+        <FilePublisherCondition PublisherName="*" ProductName="*" BinaryName="WSCRIPT.EXE">
+          <BinaryVersionRange LowSection="*" HighSection="*"/>
+        </FilePublisherCondition>
+        <FilePublisherCondition PublisherName="*" ProductName="*" BinaryName="WSL.EXE">
+          <BinaryVersionRange LowSection="*" HighSection="*"/>
+        </FilePublisherCondition>
+        <FilePublisherCondition PublisherName="*" ProductName="*" BinaryName="WUSA.EXE">
+          <BinaryVersionRange LowSection="*" HighSection="*"/>
+        </FilePublisherCondition>
+        <FilePublisherCondition PublisherName="*" ProductName="*" BinaryName="XWIZARD.EXE">
+          <BinaryVersionRange LowSection="*" HighSection="*"/>
+        </FilePublisherCondition>
+      </Exceptions>
+    </FilePathRule>
+    <FilePathRule Id="3ee0a90d-1f16-8ca3-823a-f7198085f647" Name="Rulebox: Staff, catalogue app folder" Description="Staff can start a catalogue app from its admin-only folder" UserOrGroupSid="S-1-5-21-1-1-1-2001" Action="Allow">
+      <Conditions>
+        <FilePathCondition Path="C:\Program Files\Acme\*"/>
+      </Conditions>
+    </FilePathRule>
+    <FileHashRule Id="28833f14-7e6b-8ed8-9411-8178086441ae" Name="Rulebox: Staff, hash exception" Description="An exception of the organization&apos;s policy" UserOrGroupSid="S-1-5-21-1-1-1-2001" Action="Allow">
+      <Conditions>
+        <FileHashCondition>
+          <FileHash Type="SHA256" Data="0xABABABABABABABABABABABABABABABABABABABABABABABABABABABABABABABAB" SourceFileName="exception-ex-hash" SourceFileLength="0"/>
+        </FileHashCondition>
+      </Conditions>
+    </FileHashRule>
+    <FilePathRule Id="e95dfb76-2b83-8e64-b279-14da05ca70a2" Name="Rulebox: Staff, path exception" Description="An exception of the organization&apos;s policy" UserOrGroupSid="S-1-5-21-1-1-1-2001" Action="Allow">
+      <Conditions>
+        <FilePathCondition Path="C:\Program Files\Acme\tool.exe"/>
+      </Conditions>
+    </FilePathRule>
+    <FilePublisherRule Id="17495f31-29af-8397-b603-00e4528a28c9" Name="Rulebox: Staff, publisher exception" Description="An exception of the organization&apos;s policy" UserOrGroupSid="S-1-5-21-1-1-1-2001" Action="Allow">
+      <Conditions>
+        <FilePublisherCondition PublisherName="O=Acme &amp; Sons, CN=&quot;Acme&quot;" ProductName="Tool" BinaryName="*">
+          <BinaryVersionRange LowSection="*" HighSection="*"/>
+        </FilePublisherCondition>
+      </Conditions>
+    </FilePublisherRule>
+  </RuleCollection>
+  <RuleCollection Type="Msi" EnforcementMode="AuditOnly">
+    <FilePathRule Id="65371de9-a915-83ba-be77-bec3769baa85" Name="Rulebox: Administrators" Description="Administrators can start anything (the way back, invariant I6)" UserOrGroupSid="S-1-5-32-544" Action="Allow">
+      <Conditions>
+        <FilePathCondition Path="*"/>
+      </Conditions>
+    </FilePathRule>
+    <FilePathRule Id="ee911e66-aaa3-84cb-9e64-78df78be88bd" Name="Rulebox: system principal S-1-5-18" Description="SYSTEM: the agent runs installers and tools as SYSTEM" UserOrGroupSid="S-1-5-18" Action="Allow">
+      <Conditions>
+        <FilePathCondition Path="*"/>
+      </Conditions>
+    </FilePathRule>
+    <FilePathRule Id="a4e4fb85-36ee-8487-8ea0-b692a687364a" Name="Rulebox: system principal S-1-5-19" Description="LOCAL SERVICE: Windows services run from the Windows folder" UserOrGroupSid="S-1-5-19" Action="Allow">
+      <Conditions>
+        <FilePathCondition Path="*"/>
+      </Conditions>
+    </FilePathRule>
+    <FilePathRule Id="1ef8fdba-0a55-80cb-85d5-e0b84e41dc35" Name="Rulebox: system principal S-1-5-20" Description="NETWORK SERVICE: Windows services run from the Windows folder" UserOrGroupSid="S-1-5-20" Action="Allow">
+      <Conditions>
+        <FilePathCondition Path="*"/>
+      </Conditions>
+    </FilePathRule>
+    <FilePathRule Id="0543ee1c-34a1-8366-bb56-1590749ee1d1" Name="Rulebox: system principal S-1-5-6" Description="SERVICE: every service logon session" UserOrGroupSid="S-1-5-6" Action="Allow">
+      <Conditions>
+        <FilePathCondition Path="*"/>
+      </Conditions>
+    </FilePathRule>
+    <FilePathRule Id="a8a7dd1e-eb56-876e-870e-b756aeba4b30" Name="Rulebox: system principal S-1-5-90-0" Description="Window Manager Group: the desktop window manager of the Staff session" UserOrGroupSid="S-1-5-90-0" Action="Allow">
+      <Conditions>
+        <FilePathCondition Path="*"/>
+      </Conditions>
+    </FilePathRule>
+    <FilePathRule Id="e75bd2da-2ae1-850f-b958-88c59bfece48" Name="Rulebox: local account S-1-5-21-1000-2000-3000-1001" Description="Every other enabled local account can start anything; only Staff is restricted" UserOrGroupSid="S-1-5-21-1000-2000-3000-1001" Action="Allow">
+      <Conditions>
+        <FilePathCondition Path="*"/>
+      </Conditions>
+    </FilePathRule>
+    <FilePathRule Id="25ec5d05-f3af-833d-9b5d-78e7e73d525d" Name="Rulebox: local account S-1-5-21-1000-2000-3000-1002" Description="Every other enabled local account can start anything; only Staff is restricted" UserOrGroupSid="S-1-5-21-1000-2000-3000-1002" Action="Allow">
+      <Conditions>
+        <FilePathCondition Path="*"/>
+      </Conditions>
+    </FilePathRule>
+    <FilePathRule Id="c2ba577e-2868-8441-98da-d5704c016009" Name="Rulebox: Rulebox and WebView2 folders" Description="Everyone can start Rulebox and the WebView2 runtime (invariants I1 and I2)" UserOrGroupSid="S-1-1-0" Action="Allow">
+      <Conditions>
+        <FilePathCondition Path="C:\Program Files (x86)\Microsoft\EdgeWebView\*"/>
+      </Conditions>
+    </FilePathRule>
+    <FilePathRule Id="6b7f4142-b50c-8303-8b25-11039b7bf2b4" Name="Rulebox: Rulebox and WebView2 folders" Description="Everyone can start Rulebox and the WebView2 runtime (invariants I1 and I2)" UserOrGroupSid="S-1-1-0" Action="Allow">
+      <Conditions>
+        <FilePathCondition Path="C:\Program Files\Rulebox\*"/>
+      </Conditions>
+    </FilePathRule>
+    <FilePathRule Id="54654ae4-6277-86c1-bfdd-4766013a3d3f" Name="Rulebox: Staff, Windows folder" Description="Staff can start Windows&apos; own programs except the folders users can write to and the listed tools" UserOrGroupSid="S-1-5-21-1-1-1-2001" Action="Allow">
+      <Conditions>
+        <FilePathCondition Path="C:\Windows\*"/>
+      </Conditions>
+      <Exceptions>
+        <FilePathCondition Path="C:\Windows\debug\WIA\*"/>
+        <FilePathCondition Path="C:\Windows\PLA\Reports\*"/>
+        <FilePathCondition Path="C:\Windows\PLA\Rules\*"/>
+        <FilePathCondition Path="C:\Windows\PLA\Templates\*"/>
+        <FilePathCondition Path="C:\Windows\Registration\CRMLog\*"/>
+        <FilePathCondition Path="C:\Windows\System32\com\dmp\*"/>
+        <FilePathCondition Path="C:\Windows\System32\FxsTmp\*"/>
+        <FilePathCondition Path="C:\Windows\System32\Microsoft\Crypto\RSA\MachineKeys\*"/>
+        <FilePathCondition Path="C:\Windows\System32\spool\drivers\color\*"/>
+        <FilePathCondition Path="C:\Windows\System32\spool\PRINTERS\*"/>
+        <FilePathCondition Path="C:\Windows\System32\spool\SERVERS\*"/>
+        <FilePathCondition Path="C:\Windows\System32\Tasks\*"/>
+        <FilePathCondition Path="C:\Windows\SysWOW64\com\dmp\*"/>
+        <FilePathCondition Path="C:\Windows\SysWOW64\FxsTmp\*"/>
+        <FilePathCondition Path="C:\Windows\SysWOW64\Tasks\*"/>
+        <FilePathCondition Path="C:\Windows\Tasks\*"/>
+        <FilePathCondition Path="C:\Windows\Temp\*"/>
+        <FilePathCondition Path="C:\Windows\tracing\*"/>
+        <FilePathCondition Path="C:\Windows\Vendor\Cache\*"/>
+        <FilePathCondition Path="C:\Windows\Vendor\Reports\*"/>
+      </Exceptions>
+    </FilePathRule>
+    <FilePathRule Id="9da0f2f7-8bb5-879f-ac59-3392247b477a" Name="Rulebox: Staff, catalogue app folder" Description="Staff can start a catalogue app from its admin-only folder" UserOrGroupSid="S-1-5-21-1-1-1-2001" Action="Allow">
+      <Conditions>
+        <FilePathCondition Path="C:\Program Files\Acme\*"/>
+      </Conditions>
+    </FilePathRule>
+    <FileHashRule Id="e8477acb-f782-84dc-b603-e8224db8d563" Name="Rulebox: Staff, hash exception" Description="An exception of the organization&apos;s policy" UserOrGroupSid="S-1-5-21-1-1-1-2001" Action="Allow">
+      <Conditions>
+        <FileHashCondition>
+          <FileHash Type="SHA256" Data="0xABABABABABABABABABABABABABABABABABABABABABABABABABABABABABABABAB" SourceFileName="exception-ex-hash" SourceFileLength="0"/>
+        </FileHashCondition>
+      </Conditions>
+    </FileHashRule>
+    <FilePathRule Id="7cfb667d-b8e3-820c-9aed-51192e9241c1" Name="Rulebox: Staff, path exception" Description="An exception of the organization&apos;s policy" UserOrGroupSid="S-1-5-21-1-1-1-2001" Action="Allow">
+      <Conditions>
+        <FilePathCondition Path="C:\Program Files\Acme\tool.exe"/>
+      </Conditions>
+    </FilePathRule>
+    <FilePublisherRule Id="6898b654-4c7a-82e2-9613-9150908e3d90" Name="Rulebox: Staff, publisher exception" Description="An exception of the organization&apos;s policy" UserOrGroupSid="S-1-5-21-1-1-1-2001" Action="Allow">
+      <Conditions>
+        <FilePublisherCondition PublisherName="O=Acme &amp; Sons, CN=&quot;Acme&quot;" ProductName="Tool" BinaryName="*">
+          <BinaryVersionRange LowSection="*" HighSection="*"/>
+        </FilePublisherCondition>
+      </Conditions>
+    </FilePublisherRule>
+  </RuleCollection>
+  <RuleCollection Type="Script" EnforcementMode="AuditOnly">
+    <FilePathRule Id="e9bc20e5-6958-8020-affe-9b9892fb3fdb" Name="Rulebox: Administrators" Description="Administrators can start anything (the way back, invariant I6)" UserOrGroupSid="S-1-5-32-544" Action="Allow">
+      <Conditions>
+        <FilePathCondition Path="*"/>
+      </Conditions>
+    </FilePathRule>
+    <FilePathRule Id="02f966d6-b126-88b0-8269-ec735d5ee489" Name="Rulebox: system principal S-1-5-18" Description="SYSTEM: the agent runs installers and tools as SYSTEM" UserOrGroupSid="S-1-5-18" Action="Allow">
+      <Conditions>
+        <FilePathCondition Path="*"/>
+      </Conditions>
+    </FilePathRule>
+    <FilePathRule Id="0bde797e-d7f4-8c88-ae92-c2dba96c51e8" Name="Rulebox: system principal S-1-5-19" Description="LOCAL SERVICE: Windows services run from the Windows folder" UserOrGroupSid="S-1-5-19" Action="Allow">
+      <Conditions>
+        <FilePathCondition Path="*"/>
+      </Conditions>
+    </FilePathRule>
+    <FilePathRule Id="58d19c5e-fc37-83a4-a989-280e55ae1014" Name="Rulebox: system principal S-1-5-20" Description="NETWORK SERVICE: Windows services run from the Windows folder" UserOrGroupSid="S-1-5-20" Action="Allow">
+      <Conditions>
+        <FilePathCondition Path="*"/>
+      </Conditions>
+    </FilePathRule>
+    <FilePathRule Id="55ad2a23-1a3d-8850-9991-f19a917518c0" Name="Rulebox: system principal S-1-5-6" Description="SERVICE: every service logon session" UserOrGroupSid="S-1-5-6" Action="Allow">
+      <Conditions>
+        <FilePathCondition Path="*"/>
+      </Conditions>
+    </FilePathRule>
+    <FilePathRule Id="7b229f92-c8bb-81b3-ae5f-258d2511aca1" Name="Rulebox: system principal S-1-5-90-0" Description="Window Manager Group: the desktop window manager of the Staff session" UserOrGroupSid="S-1-5-90-0" Action="Allow">
+      <Conditions>
+        <FilePathCondition Path="*"/>
+      </Conditions>
+    </FilePathRule>
+    <FilePathRule Id="84b2b69d-43a4-843b-9388-fca85cbb5fae" Name="Rulebox: local account S-1-5-21-1000-2000-3000-1001" Description="Every other enabled local account can start anything; only Staff is restricted" UserOrGroupSid="S-1-5-21-1000-2000-3000-1001" Action="Allow">
+      <Conditions>
+        <FilePathCondition Path="*"/>
+      </Conditions>
+    </FilePathRule>
+    <FilePathRule Id="80f26afe-d155-810b-8db5-d2ce355c43b2" Name="Rulebox: local account S-1-5-21-1000-2000-3000-1002" Description="Every other enabled local account can start anything; only Staff is restricted" UserOrGroupSid="S-1-5-21-1000-2000-3000-1002" Action="Allow">
+      <Conditions>
+        <FilePathCondition Path="*"/>
+      </Conditions>
+    </FilePathRule>
+    <FilePathRule Id="209c14ba-ae72-8caa-97ec-fb9e47f197b1" Name="Rulebox: Rulebox and WebView2 folders" Description="Everyone can start Rulebox and the WebView2 runtime (invariants I1 and I2)" UserOrGroupSid="S-1-1-0" Action="Allow">
+      <Conditions>
+        <FilePathCondition Path="C:\Program Files (x86)\Microsoft\EdgeWebView\*"/>
+      </Conditions>
+    </FilePathRule>
+    <FilePathRule Id="3efc31e2-9550-8ebd-b32a-2134ca27283c" Name="Rulebox: Rulebox and WebView2 folders" Description="Everyone can start Rulebox and the WebView2 runtime (invariants I1 and I2)" UserOrGroupSid="S-1-1-0" Action="Allow">
+      <Conditions>
+        <FilePathCondition Path="C:\Program Files\Rulebox\*"/>
+      </Conditions>
+    </FilePathRule>
+    <FilePathRule Id="3ecf8513-6642-8287-b050-b6ad9b154446" Name="Rulebox: Staff, Windows folder" Description="Staff can start Windows&apos; own programs except the folders users can write to and the listed tools" UserOrGroupSid="S-1-5-21-1-1-1-2001" Action="Allow">
+      <Conditions>
+        <FilePathCondition Path="C:\Windows\*"/>
+      </Conditions>
+      <Exceptions>
+        <FilePathCondition Path="C:\Windows\debug\WIA\*"/>
+        <FilePathCondition Path="C:\Windows\PLA\Reports\*"/>
+        <FilePathCondition Path="C:\Windows\PLA\Rules\*"/>
+        <FilePathCondition Path="C:\Windows\PLA\Templates\*"/>
+        <FilePathCondition Path="C:\Windows\Registration\CRMLog\*"/>
+        <FilePathCondition Path="C:\Windows\System32\com\dmp\*"/>
+        <FilePathCondition Path="C:\Windows\System32\FxsTmp\*"/>
+        <FilePathCondition Path="C:\Windows\System32\Microsoft\Crypto\RSA\MachineKeys\*"/>
+        <FilePathCondition Path="C:\Windows\System32\spool\drivers\color\*"/>
+        <FilePathCondition Path="C:\Windows\System32\spool\PRINTERS\*"/>
+        <FilePathCondition Path="C:\Windows\System32\spool\SERVERS\*"/>
+        <FilePathCondition Path="C:\Windows\System32\Tasks\*"/>
+        <FilePathCondition Path="C:\Windows\SysWOW64\com\dmp\*"/>
+        <FilePathCondition Path="C:\Windows\SysWOW64\FxsTmp\*"/>
+        <FilePathCondition Path="C:\Windows\SysWOW64\Tasks\*"/>
+        <FilePathCondition Path="C:\Windows\Tasks\*"/>
+        <FilePathCondition Path="C:\Windows\Temp\*"/>
+        <FilePathCondition Path="C:\Windows\tracing\*"/>
+        <FilePathCondition Path="C:\Windows\Vendor\Cache\*"/>
+        <FilePathCondition Path="C:\Windows\Vendor\Reports\*"/>
+      </Exceptions>
+    </FilePathRule>
+    <FilePathRule Id="616e4fb0-54a1-860b-bdee-2a04ae9252c4" Name="Rulebox: Staff, catalogue app folder" Description="Staff can start a catalogue app from its admin-only folder" UserOrGroupSid="S-1-5-21-1-1-1-2001" Action="Allow">
+      <Conditions>
+        <FilePathCondition Path="C:\Program Files\Acme\*"/>
+      </Conditions>
+    </FilePathRule>
+    <FileHashRule Id="b9140911-7a63-88f9-80e7-57ef769629d3" Name="Rulebox: Staff, hash exception" Description="An exception of the organization&apos;s policy" UserOrGroupSid="S-1-5-21-1-1-1-2001" Action="Allow">
+      <Conditions>
+        <FileHashCondition>
+          <FileHash Type="SHA256" Data="0xABABABABABABABABABABABABABABABABABABABABABABABABABABABABABABABAB" SourceFileName="exception-ex-hash" SourceFileLength="0"/>
+        </FileHashCondition>
+      </Conditions>
+    </FileHashRule>
+    <FilePathRule Id="111b6e0d-bffc-8b23-9980-983a880f57a5" Name="Rulebox: Staff, path exception" Description="An exception of the organization&apos;s policy" UserOrGroupSid="S-1-5-21-1-1-1-2001" Action="Allow">
+      <Conditions>
+        <FilePathCondition Path="C:\Program Files\Acme\tool.exe"/>
+      </Conditions>
+    </FilePathRule>
+    <FilePublisherRule Id="6a303155-70a5-834c-9e31-9d3197c8794c" Name="Rulebox: Staff, publisher exception" Description="An exception of the organization&apos;s policy" UserOrGroupSid="S-1-5-21-1-1-1-2001" Action="Allow">
+      <Conditions>
+        <FilePublisherCondition PublisherName="O=Acme &amp; Sons, CN=&quot;Acme&quot;" ProductName="Tool" BinaryName="*">
+          <BinaryVersionRange LowSection="*" HighSection="*"/>
+        </FilePublisherCondition>
+      </Conditions>
+    </FilePublisherRule>
+  </RuleCollection>
+  <RuleCollection Type="Appx" EnforcementMode="AuditOnly">
+    <FilePublisherRule Id="64730958-b566-82b9-a5e6-b50582bb8a6b" Name="Rulebox: Administrators" Description="Administrators can start any packaged app" UserOrGroupSid="S-1-5-32-544" Action="Allow">
+      <Conditions>
+        <FilePublisherCondition PublisherName="*" ProductName="*" BinaryName="*">
+          <BinaryVersionRange LowSection="*" HighSection="*"/>
+        </FilePublisherCondition>
+      </Conditions>
+    </FilePublisherRule>
+    <FilePublisherRule Id="77b1e830-aa90-82ff-89f9-b9bd915cf5e6" Name="Rulebox: system principal S-1-5-18" Description="SYSTEM: the agent runs installers and tools as SYSTEM" UserOrGroupSid="S-1-5-18" Action="Allow">
+      <Conditions>
+        <FilePublisherCondition PublisherName="*" ProductName="*" BinaryName="*">
+          <BinaryVersionRange LowSection="*" HighSection="*"/>
+        </FilePublisherCondition>
+      </Conditions>
+    </FilePublisherRule>
+    <FilePublisherRule Id="9cd29374-5e0b-8f9c-afcf-05488a77f71c" Name="Rulebox: system principal S-1-5-19" Description="LOCAL SERVICE: Windows services run from the Windows folder" UserOrGroupSid="S-1-5-19" Action="Allow">
+      <Conditions>
+        <FilePublisherCondition PublisherName="*" ProductName="*" BinaryName="*">
+          <BinaryVersionRange LowSection="*" HighSection="*"/>
+        </FilePublisherCondition>
+      </Conditions>
+    </FilePublisherRule>
+    <FilePublisherRule Id="ee0039a9-3e93-8b6e-bff9-6381984847f8" Name="Rulebox: system principal S-1-5-20" Description="NETWORK SERVICE: Windows services run from the Windows folder" UserOrGroupSid="S-1-5-20" Action="Allow">
+      <Conditions>
+        <FilePublisherCondition PublisherName="*" ProductName="*" BinaryName="*">
+          <BinaryVersionRange LowSection="*" HighSection="*"/>
+        </FilePublisherCondition>
+      </Conditions>
+    </FilePublisherRule>
+    <FilePublisherRule Id="99ed1f41-bfe1-873b-8d17-41c69d4c9b9c" Name="Rulebox: system principal S-1-5-6" Description="SERVICE: every service logon session" UserOrGroupSid="S-1-5-6" Action="Allow">
+      <Conditions>
+        <FilePublisherCondition PublisherName="*" ProductName="*" BinaryName="*">
+          <BinaryVersionRange LowSection="*" HighSection="*"/>
+        </FilePublisherCondition>
+      </Conditions>
+    </FilePublisherRule>
+    <FilePublisherRule Id="33eed46d-546b-8a98-a642-8223538ed4ba" Name="Rulebox: system principal S-1-5-90-0" Description="Window Manager Group: the desktop window manager of the Staff session" UserOrGroupSid="S-1-5-90-0" Action="Allow">
+      <Conditions>
+        <FilePublisherCondition PublisherName="*" ProductName="*" BinaryName="*">
+          <BinaryVersionRange LowSection="*" HighSection="*"/>
+        </FilePublisherCondition>
+      </Conditions>
+    </FilePublisherRule>
+    <FilePublisherRule Id="cf9fbb5f-f37d-8a85-8fe6-bdf4624aed47" Name="Rulebox: local account S-1-5-21-1000-2000-3000-1001" Description="Every other enabled local account can start any packaged app" UserOrGroupSid="S-1-5-21-1000-2000-3000-1001" Action="Allow">
+      <Conditions>
+        <FilePublisherCondition PublisherName="*" ProductName="*" BinaryName="*">
+          <BinaryVersionRange LowSection="*" HighSection="*"/>
+        </FilePublisherCondition>
+      </Conditions>
+    </FilePublisherRule>
+    <FilePublisherRule Id="336d5bc4-2392-8dd2-99c3-6c0f1158792c" Name="Rulebox: local account S-1-5-21-1000-2000-3000-1002" Description="Every other enabled local account can start any packaged app" UserOrGroupSid="S-1-5-21-1000-2000-3000-1002" Action="Allow">
+      <Conditions>
+        <FilePublisherCondition PublisherName="*" ProductName="*" BinaryName="*">
+          <BinaryVersionRange LowSection="*" HighSection="*"/>
+        </FilePublisherCondition>
+      </Conditions>
+    </FilePublisherRule>
+    <FilePublisherRule Id="b9d82bec-0281-8de4-9f3b-a50b71360b66" Name="Rulebox: Staff, package Microsoft.AAD.BrokerPlugin" Description="A package the Windows session needs" UserOrGroupSid="S-1-5-21-1-1-1-2001" Action="Allow">
+      <Conditions>
+        <FilePublisherCondition PublisherName="CN=Microsoft Windows, O=Microsoft Corporation, L=Redmond, S=Washington, C=US" ProductName="Microsoft.AAD.BrokerPlugin" BinaryName="*">
+          <BinaryVersionRange LowSection="*" HighSection="*"/>
+        </FilePublisherCondition>
+      </Conditions>
+    </FilePublisherRule>
+    <FilePublisherRule Id="3ce07cb3-2b39-8ffd-8331-b5dfa6146868" Name="Rulebox: Staff, package Microsoft.AccountsControl" Description="A package the Windows session needs" UserOrGroupSid="S-1-5-21-1-1-1-2001" Action="Allow">
+      <Conditions>
+        <FilePublisherCondition PublisherName="CN=Microsoft Windows, O=Microsoft Corporation, L=Redmond, S=Washington, C=US" ProductName="Microsoft.AccountsControl" BinaryName="*">
+          <BinaryVersionRange LowSection="*" HighSection="*"/>
+        </FilePublisherCondition>
+      </Conditions>
+    </FilePublisherRule>
+    <FilePublisherRule Id="5663a528-acd1-8f11-ab07-361f5fed3112" Name="Rulebox: Staff, package Microsoft.CredDialogHost" Description="A package the Windows session needs" UserOrGroupSid="S-1-5-21-1-1-1-2001" Action="Allow">
+      <Conditions>
+        <FilePublisherCondition PublisherName="CN=Microsoft Windows, O=Microsoft Corporation, L=Redmond, S=Washington, C=US" ProductName="Microsoft.CredDialogHost" BinaryName="*">
+          <BinaryVersionRange LowSection="*" HighSection="*"/>
+        </FilePublisherCondition>
+      </Conditions>
+    </FilePublisherRule>
+    <FilePublisherRule Id="5bb67342-15fb-8051-bb56-59eab24dd4c6" Name="Rulebox: Staff, package Microsoft.LockApp" Description="A package the Windows session needs" UserOrGroupSid="S-1-5-21-1-1-1-2001" Action="Allow">
+      <Conditions>
+        <FilePublisherCondition PublisherName="CN=Microsoft Windows, O=Microsoft Corporation, L=Redmond, S=Washington, C=US" ProductName="Microsoft.LockApp" BinaryName="*">
+          <BinaryVersionRange LowSection="*" HighSection="*"/>
+        </FilePublisherCondition>
+      </Conditions>
+    </FilePublisherRule>
+    <FilePublisherRule Id="f5871813-a9d9-8024-b077-2d9d5cbcb652" Name="Rulebox: Staff, package Microsoft.Windows.CloudExperienceHost" Description="A package the Windows session needs" UserOrGroupSid="S-1-5-21-1-1-1-2001" Action="Allow">
+      <Conditions>
+        <FilePublisherCondition PublisherName="CN=Microsoft Windows, O=Microsoft Corporation, L=Redmond, S=Washington, C=US" ProductName="Microsoft.Windows.CloudExperienceHost" BinaryName="*">
+          <BinaryVersionRange LowSection="*" HighSection="*"/>
+        </FilePublisherCondition>
+      </Conditions>
+    </FilePublisherRule>
+    <FilePublisherRule Id="d206f733-1db0-89c2-81de-20ffad9b552b" Name="Rulebox: Staff, package Microsoft.Windows.ShellExperienceHost" Description="A package the Windows session needs" UserOrGroupSid="S-1-5-21-1-1-1-2001" Action="Allow">
+      <Conditions>
+        <FilePublisherCondition PublisherName="CN=Microsoft Windows, O=Microsoft Corporation, L=Redmond, S=Washington, C=US" ProductName="Microsoft.Windows.ShellExperienceHost" BinaryName="*">
+          <BinaryVersionRange LowSection="*" HighSection="*"/>
+        </FilePublisherCondition>
+      </Conditions>
+    </FilePublisherRule>
+    <FilePublisherRule Id="478b9fb6-0bf4-8443-bf6d-adf34a37820e" Name="Rulebox: Staff, package Microsoft.Windows.StartMenuExperienceHost" Description="A package the Windows session needs" UserOrGroupSid="S-1-5-21-1-1-1-2001" Action="Allow">
+      <Conditions>
+        <FilePublisherCondition PublisherName="CN=Microsoft Windows, O=Microsoft Corporation, L=Redmond, S=Washington, C=US" ProductName="Microsoft.Windows.StartMenuExperienceHost" BinaryName="*">
+          <BinaryVersionRange LowSection="*" HighSection="*"/>
+        </FilePublisherCondition>
+      </Conditions>
+    </FilePublisherRule>
+    <FilePublisherRule Id="ea61a6fe-34bc-8af8-bacd-25d2b4829622" Name="Rulebox: Staff, package MicrosoftWindows.Client.CBS" Description="A package the Windows session needs" UserOrGroupSid="S-1-5-21-1-1-1-2001" Action="Allow">
+      <Conditions>
+        <FilePublisherCondition PublisherName="CN=Microsoft Windows, O=Microsoft Corporation, L=Redmond, S=Washington, C=US" ProductName="MicrosoftWindows.Client.CBS" BinaryName="*">
+          <BinaryVersionRange LowSection="*" HighSection="*"/>
+        </FilePublisherCondition>
+      </Conditions>
+    </FilePublisherRule>
+  </RuleCollection>
+</AppLockerPolicy>

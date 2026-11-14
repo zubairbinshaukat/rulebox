@@ -142,6 +142,7 @@ pub fn apply_sign_in_outcome(state: &AppState, outcome: SignInOutcome) -> Result
         | SignInOutcome::OfflineNeverSignedIn
         | SignInOutcome::OfflineExpired
         | SignInOutcome::NotAllowedHere
+        | SignInOutcome::DeviceLocked
         | SignInOutcome::Unknown => {
             // Return to SignedOut with the previous "last" (if any) so the
             // returning-employee form stays available. Form errors live in React.
@@ -380,7 +381,9 @@ pub fn apply_session_ended(
             EndedPlan::Recorded
         }
         SessionState::SignedOut { .. } => {
-            if reason == SessionEndedReason::Unknown {
+            // Nobody is signed in: `Unknown` has nobody to tell, and a lock has its own full-screen view
+            // (no note on the sign-in screen that would still be there after the unlock).
+            if matches!(reason, SessionEndedReason::Unknown | SessionEndedReason::DeviceLocked) {
                 return EndedPlan::Ignore;
             }
             shell.session_ended = Some(reason);
@@ -751,7 +754,10 @@ pub fn finish_signed_out(state: &AppState, last: Option<EmployeeBrief>) {
     state.update(|shell| {
         let mut last = last;
         if let Some(reason) = shell.pending_end.take() {
-            shell.session_ended = Some(reason);
+            // A lock is shown by its own view and leaves no note on the sign-in screen.
+            if reason != SessionEndedReason::DeviceLocked {
+                shell.session_ended = Some(reason);
+            }
             if forgets_returning_employee(reason) {
                 last = None;
             }
@@ -764,6 +770,8 @@ pub fn finish_signed_out(state: &AppState, last: Option<EmployeeBrief>) {
         };
         shell.tasks.clear();
     });
+    // The web apps' denial counters go to the agent when the employee leaves (plan 4.12).
+    state.flush_denials_soon();
 }
 
 /// The log out for a session the agent already ended, when the shell's windows

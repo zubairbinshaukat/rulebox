@@ -59,6 +59,11 @@ fn snapshot() -> AgentSnapshot {
         admin_exit: None,
         power: None,
         org_name: None,
+        device_lock: None,
+        broadcasts: Vec::new(),
+        keyboard: None,
+        printing: None,
+        network: None,
     }
 }
 

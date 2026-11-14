@@ -37,6 +37,15 @@ getrandom = "0.4.3"
 argon2 = "0.6.0"
 # Phase 4 Step 9: policy signatures (plan 4.5; `verify_strict`). Checked 2026-11-01.
 ed25519-dalek = "3.0.0"
+# Phase 5 Step 1: sealed boxes `rulebox.seal/1` (plan 4.18). Newer majors than plan 4.22
+# lists (x25519-dalek 2, chacha20poly1305 0.10, hkdf 0.12) so the workspace has ONE
+# digest 0.11 / curve25519-dalek 5 stack. Exact pins; checked on crates.io 2026-11-08
+# (x25519-dalek 3.0.0 published 2026-07-06, chacha20poly1305 0.11.0 2026-06-28,
+# hkdf 0.13.0 2026-03-30, zeroize 1.9.1 2026-10-06 is already in Cargo.lock).
+x25519-dalek = { version = "=3.0.0", features = ["static_secrets"] }
+chacha20poly1305 = { version = "=0.11.0", default-features = false, features = ["alloc"] }
+hkdf = "=0.13.0"
+zeroize = "=1.9.1"
 # Phase 4 Step 14: installer and icon downloads (plan 4.15). SChannel through
 # native-tls like the Convex client; no rustls / aws-lc. Already in Cargo.lock (Tauri).
 reqwest = { version = "0.13.5", default-features = false, features = ["native-tls", "stream", "http2", "system-proxy"] }

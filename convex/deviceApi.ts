@@ -1,4 +1,5 @@
 import { calculateRateLimit } from "@convex-dev/rate-limiter";
+import { x25519 } from "@noble/curves/ed25519.js";
 import { v, type Infer } from "convex/values";
 import { internal } from "./_generated/api";
 import type { Doc } from "./_generated/dataModel";
@@ -24,11 +25,25 @@ import {
   validRecordId,
   VERIFY_RESERVE_BELOW,
 } from "./lib/deviceApiRules";
-import { statusValidator, writeStatus } from "./lib/deviceReport";
+import { cleanCapabilities, statusValidator, writeStatus } from "./lib/deviceReport";
+import { layerStates } from "./lib/lockdownValidators";
+import {
+  addBlocked,
+  applyStateOf,
+  cleanCode,
+  cleanDaily,
+  cleanFindings,
+  cleanItems,
+  cleanLayer,
+  isZeroDaily,
+  mergeDenials,
+  ringOf,
+} from "./lib/lockdownReports";
+import { decodeSealPublicKey, sealKeyIdOf } from "./lib/sealbox";
 import { normalizeUsername } from "./lib/employeeRules";
 import { fail } from "./lib/errors";
 import { type DeviceIdentity, deviceMutation, deviceSelfCheckedAction, internalMutation, internalQuery } from "./lib/functions";
-import { MAX_EMPLOYEE_PASSWORD, MAX_USERNAME } from "./lib/limits";
+import { MAX_ACKS_PER_CALL, MAX_DEVICE_WIFI, MAX_EMPLOYEE_PASSWORD, MAX_PERMISSION_DENIALS, MAX_USERNAME } from "./lib/limits";
 import { liveChecker } from "./lib/installs";
 import { scopedDb } from "./lib/orgDb";
 import { bumpOrgStatsIfPresent } from "./lib/plans";
@@ -664,5 +679,265 @@ export const rotateCredential = deviceMutation({
     // Two rows written (credentials, audit); the idempotent retry above writes none and costs nothing.
     await chargeWrites(ctx, ctx.device._id, 2);
     return { kind: "ok" as const };
+  },
+});
+
+// ---------------------------------------------------------------- Phase 5 lockdown reports (plan 4.11, 4.17, 4.19; Step 10)
+//
+// All five are CHANGE-DRIVEN: a call that finds nothing to change writes no document, takes no
+// rate-limit token and costs the agent nothing (the write-count tests in `lockdownReports.test.ts`
+// pin every one of them). A call that writes takes one `deviceReports` token (60 an hour per
+// device) and one `deviceWrites` token per document written, at the END, so a refused call rolls
+// everything back. The payloads are those of `apps/agent/src/backend/reports.rs`; a value this
+// server does not know is stored as a fixed code or dropped, never a reason to stall the agent.
+
+/** Charge a report that wrote `rows` documents (nothing when it wrote none). */
+async function chargeReport(ctx: Parameters<typeof consumeOrFail>[0], deviceId: string, rows: number): Promise<void> {
+  if (rows <= 0) return;
+  await consumeOrFail(ctx, "deviceReports", deviceId, 1);
+  await consumeOrFail(ctx, "deviceWrites", deviceId, rows);
+}
+
+const wifiItem = v.object({ profileId: v.string(), revision: v.number(), state: v.string(), detail: v.optional(v.string()) });
+const printerItem = v.object({ printerId: v.string(), revision: v.number(), state: v.string(), detail: v.optional(v.string()) });
+
+/**
+ * The agent's apply report (4.11), sent when the applied version, a layer state, a Wi-Fi or
+ * printer state or the last-known-good version changed. Upserts the device's one
+ * `deviceApplyReports` row ONLY when the agent's content hash differs from the stored one: an
+ * unchanged report writes nothing. Free text is never stored (fixed codes only).
+ */
+export const reportApply = deviceMutation({
+  args: {
+    appliedVersion: v.number(),
+    config: v.optional(v.object({ groupId: v.string(), version: v.number(), ring: v.string() })),
+    state: v.string(),
+    refusal: v.optional(v.string()),
+    layers: layerStates,
+    wifi: v.array(wifiItem),
+    printers: v.array(printerItem),
+    lkgVersion: v.optional(v.number()),
+    capabilities: v.array(v.string()),
+    contentHash: v.string(),
+  },
+  returns: v.object({ written: v.boolean() }),
+  handler: async (ctx, args) => {
+    if (!/^[0-9a-f]{64}$/.test(args.contentHash)) fail("invalid_argument", { field: "contentHash" });
+    if (!isCount(args.appliedVersion)) fail("invalid_argument", { field: "appliedVersion" });
+    if (args.lkgVersion !== undefined && !isCount(args.lkgVersion)) fail("invalid_argument", { field: "lkgVersion" });
+    if (args.capabilities.length > 50) fail("invalid_argument", { field: "capabilities" });
+    const existing = await ctx.db
+      .query("deviceApplyReports")
+      .withIndex("by_device", (q) => q.eq("deviceId", ctx.device._id))
+      .unique();
+    if (existing !== null && existing.contentHash === args.contentHash) return { written: false };
+
+    const wifi = cleanItems("wifi", "profileId", args.wifi);
+    const printers = cleanItems("printers", "printerId", args.printers);
+    let config: Doc<"deviceApplyReports">["config"];
+    if (args.config !== undefined && isCount(args.config.version)) {
+      // The scoped `get` answers null for another organization's group.
+      const gid = ctx.db.normalizeId("groups", args.config.groupId);
+      const group = gid === null ? null : await ctx.db.get(gid);
+      if (group !== null) config = { groupId: group._id, version: args.config.version, ring: ringOf(args.config.ring) };
+    }
+    const row = {
+      orgId: ctx.device.orgId,
+      deviceId: ctx.device._id,
+      appliedVersion: args.appliedVersion,
+      config,
+      state: applyStateOf(args.state),
+      refusal: cleanCode(args.refusal, 64),
+      layers: {
+        staff: cleanLayer(args.layers.staff),
+        machine: cleanLayer(args.layers.machine),
+        appLocker: cleanLayer(args.layers.appLocker),
+        appControl: cleanLayer(args.layers.appControl),
+        procWatch: cleanLayer(args.layers.procWatch),
+        boot: cleanLayer(args.layers.boot),
+        performance: cleanLayer(args.layers.performance),
+      },
+      wifi,
+      printers,
+      lkgVersion: args.lkgVersion,
+      capabilities: cleanCapabilities(args.capabilities) ?? [],
+      contentHash: args.contentHash,
+      updatedAt: Date.now(),
+    };
+    if (existing === null) await ctx.db.insert("deviceApplyReports", row);
+    else await ctx.db.replace(existing._id, row);
+    await chargeReport(ctx, ctx.device._id, 1);
+    return { written: true };
+  },
+});
+
+/**
+ * New program fingerprints (4.10), at most 50 per call, each new to THIS device (the agent never
+ * re-sends one). Upserts `lockdownFindings` by `(orgId, fingerprint)`; inserts the
+ * `lockdownFindingDevices` row only when the (finding, device) pair is new; a repeat writes
+ * nothing. No path, title or command line is accepted (`cleanFindings`). `accepted` = findings
+ * sent, so the agent may drop them from its queue.
+ */
+export const reportFindings = deviceMutation({
+  args: {
+    findings: v.array(
+      v.object({
+        fingerprint: v.string(),
+        layer: v.string(),
+        fileName: v.string(),
+        folderClass: v.string(),
+        signer: v.optional(v.string()),
+        product: v.optional(v.string()),
+        sha256: v.optional(v.string()),
+      }),
+    ),
+  },
+  returns: v.object({ accepted: v.number() }),
+  handler: async (ctx, args) => {
+    const findings = cleanFindings(args.findings);
+    const now = Date.now();
+    let written = 0;
+    for (const f of findings) {
+      const finding = await ctx.db
+        .query("lockdownFindings")
+        .withIndex("by_org_fingerprint", (q) => q.eq("orgId", ctx.device.orgId).eq("fingerprint", f.fingerprint))
+        .unique();
+      if (finding === null) {
+        const findingId = await ctx.db.insert("lockdownFindings", {
+          orgId: ctx.device.orgId,
+          ...f,
+          firstSeenAt: now,
+          lastSeenAt: now,
+          deviceCount: 1,
+          sampleDeviceId: ctx.device._id,
+          status: "new",
+        });
+        await ctx.db.insert("lockdownFindingDevices", { orgId: ctx.device.orgId, findingId, deviceId: ctx.device._id, firstSeenAt: now });
+        written += 2;
+        continue;
+      }
+      const seen = await ctx.db
+        .query("lockdownFindingDevices")
+        .withIndex("by_finding_device", (q) => q.eq("findingId", finding._id).eq("deviceId", ctx.device._id))
+        .first();
+      if (seen !== null) continue; // this device reported it before: nothing to change
+      await ctx.db.insert("lockdownFindingDevices", { orgId: ctx.device.orgId, findingId: finding._id, deviceId: ctx.device._id, firstSeenAt: now });
+      await ctx.db.patch(finding._id, { deviceCount: finding.deviceCount + 1, lastSeenAt: Math.max(finding.lastSeenAt, now) });
+      written += 2;
+    }
+    await chargeReport(ctx, ctx.device._id, written);
+    return { accepted: args.findings.length };
+  },
+});
+
+/**
+ * One device's security counters for one server (UTC) day (4.2): blocked programs per layer,
+ * refused elevation prompts, web-app permission denials, drift and tamper counts. A day with
+ * every counter zero writes nothing. A second call for the same day MERGES BY ADDING (the plan's
+ * rule; the agent sends at most one per day). One row per device per day, kept 14 days.
+ */
+export const reportSecurityDaily = deviceMutation({
+  args: {
+    day: v.string(),
+    blocked: v.object({ appLocker: v.number(), appControl: v.number(), procWatch: v.number(), elevation: v.number() }),
+    permissionDenials: v.array(v.object({ appId: v.string(), kind: v.string(), count: v.number() })),
+    drift: v.number(),
+    tamper: v.number(),
+  },
+  returns: v.object({ written: v.boolean() }),
+  handler: async (ctx, args) => {
+    const now = Date.now();
+    const d = cleanDaily(args, now);
+    if (isZeroDaily(d)) return { written: false };
+    const row = await ctx.db
+      .query("deviceSecurityDaily")
+      .withIndex("by_device_day", (q) => q.eq("deviceId", ctx.device._id).eq("day", d.day))
+      .unique();
+    if (row === null) {
+      await ctx.db.insert("deviceSecurityDaily", { orgId: ctx.device.orgId, deviceId: ctx.device._id, ...d });
+    } else {
+      await ctx.db.patch(row._id, {
+        blocked: addBlocked(row.blocked, d.blocked),
+        permissionDenials: mergeDenials([...row.permissionDenials, ...d.permissionDenials], MAX_PERMISSION_DENIALS),
+        drift: row.drift + d.drift,
+        tamper: row.tamper + d.tamper,
+      });
+    }
+    await chargeReport(ctx, ctx.device._id, 1);
+    return { written: true };
+  },
+});
+
+/**
+ * Broadcast acknowledgements (4.17): one `broadcastAcks` row per device per broadcast, never the
+ * employee's identity. A broadcast that is not this PC's (another organization's, or aimed at
+ * another group or device) or an id that is not a broadcast is ignored but counted as accepted.
+ * A repeated acknowledgement writes nothing.
+ */
+export const reportAcks = deviceMutation({
+  args: { acks: v.array(v.object({ broadcastId: v.string(), atMs: v.number() })) },
+  returns: v.object({ accepted: v.number() }),
+  handler: async (ctx, args) => {
+    if (args.acks.length > MAX_ACKS_PER_CALL) fail("invalid_argument", { field: "acks" });
+    const now = Date.now();
+    const device = await deviceRow(ctx);
+    let written = 0;
+    for (const a of args.acks) {
+      const id = ctx.db.normalizeId("broadcasts", a.broadcastId);
+      const b = id === null ? null : await ctx.db.get(id);
+      if (b === null) continue;
+      const mine = b.target.kind === "device" ? b.target.id === device._id : device.groupId !== undefined && b.target.id === device.groupId;
+      if (!mine) continue;
+      const had = await ctx.db
+        .query("broadcastAcks")
+        .withIndex("by_broadcast_device", (q) => q.eq("broadcastId", b._id).eq("deviceId", device._id))
+        .first();
+      if (had !== null) continue;
+      const at = Number.isFinite(a.atMs) ? Math.min(Math.max(a.atMs, b.createdAt), now) : now;
+      await ctx.db.insert("broadcastAcks", { orgId: device.orgId, broadcastId: b._id, deviceId: device._id, at });
+      written++;
+    }
+    await chargeReport(ctx, ctx.device._id, written);
+    return { accepted: args.acks.length };
+  },
+});
+
+/**
+ * The agent's X25519 sealing public key (4.18). The device's secret already authenticated this
+ * call, which is the "proof of device identity" of edge case 35: a first key is stored, the
+ * same key again is a no-op, and a DIFFERENT key replaces the old one (the agent lost its
+ * private half). A replacement drops the device's sealed boxes (they were for the old key) and
+ * the device is sealed again (`seal:forDevices`) and published.
+ */
+export const registerSealKey = deviceMutation({
+  args: { publicKey: v.string() },
+  returns: v.object({ keyId: v.string(), changed: v.boolean() }),
+  handler: async (ctx, args) => {
+    const pk = decodeSealPublicKey(args.publicKey);
+    if (pk === null) fail("invalid_argument", { field: "publicKey" });
+    try {
+      // A low-order point gives an all-zero shared secret (the library refuses it).
+      x25519.getSharedSecret(new Uint8Array(32).fill(7), pk);
+    } catch {
+      fail("invalid_argument", { field: "publicKey" });
+    }
+    const keyId = sealKeyIdOf(pk);
+    const device = await deviceRow(ctx);
+    if (device.sealPublicKey === args.publicKey.trim() && device.sealKeyId === keyId) return { keyId, changed: false };
+    let written = 1;
+    if (device.sealPublicKey !== undefined) {
+      const stale = await ctx.db
+        .query("deviceSealedSecrets")
+        .withIndex("by_device_target", (q) => q.eq("deviceId", device._id).eq("purpose", "wifi"))
+        .take(MAX_DEVICE_WIFI + 1);
+      for (const s of stale) {
+        await ctx.db.delete(s._id);
+        written++;
+      }
+    }
+    await ctx.db.patch(device._id, { sealPublicKey: args.publicKey.trim(), sealKeyId: keyId });
+    await ctx.scheduler.runAfter(0, internal.seal.forDevices, { orgId: device.orgId, deviceIds: [device._id] });
+    await chargeReport(ctx, ctx.device._id, written);
+    return { keyId, changed: true };
   },
 });

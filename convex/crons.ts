@@ -10,6 +10,11 @@ crons.daily("cleanup", { hourUTC: 3, minuteUTC: 0 }, internal.maintenance.daily,
 // organization at a time, paged; writes only what differs.
 crons.daily("reconcile counters", { hourUTC: 4, minuteUTC: 0 }, internal.stats.reconcileAll, {});
 
+// Phase 5 (Step 10): yesterday's per-device security counters become one row per organization,
+// and expired counter rows go (device days 14 d, organization days 90 d). One organization per
+// step, paged and rescheduled; an organization without rows costs three empty ranges.
+crons.daily("security rollup", { hourUTC: 1, minuteUTC: 0 }, internal.security.rollup, {});
+
 // Online -> offline for devices past their deadline (plan 4.9 amended, A3).
 // Reads only the devices that just went silent: an idle fleet costs one empty
 // index read per run.

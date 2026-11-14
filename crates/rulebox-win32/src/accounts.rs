@@ -10,10 +10,10 @@ use std::path::PathBuf;
 use windows::core::{PCWSTR, PWSTR};
 use windows::Win32::Foundation::HANDLE;
 use windows::Win32::NetworkManagement::NetManagement::{
-    NetLocalGroupAddMembers, NetUserAdd, NetUserDel, NetUserEnum, NetUserGetInfo, NetUserSetInfo,
-    FILTER_NORMAL_ACCOUNT, LOCALGROUP_MEMBERS_INFO_0, UF_ACCOUNTDISABLE, UF_DONT_EXPIRE_PASSWD,
-    UF_PASSWD_CANT_CHANGE, UF_SCRIPT, USER_ACCOUNT_FLAGS, USER_INFO_1, USER_INFO_1003, USER_INFO_1011,
-    USER_PRIV_ADMIN, USER_PRIV_USER,
+    NetLocalGroupAddMembers, NetUserAdd, NetUserDel, NetUserEnum, NetUserGetInfo, NetUserModalsGet,
+    NetUserModalsSet, NetUserSetInfo, FILTER_NORMAL_ACCOUNT, LOCALGROUP_MEMBERS_INFO_0, UF_ACCOUNTDISABLE,
+    UF_DONT_EXPIRE_PASSWD, UF_PASSWD_CANT_CHANGE, UF_SCRIPT, USER_ACCOUNT_FLAGS, USER_INFO_1,
+    USER_INFO_1003, USER_INFO_1011, USER_MODALS_INFO_3, USER_PRIV_ADMIN, USER_PRIV_USER,
 };
 use windows::Win32::Security::{LogonUserW, LOGON32_LOGON_NETWORK, LOGON32_PROVIDER_DEFAULT, PSID};
 use windows::Win32::UI::Shell::{CreateProfile, DeleteProfileW};
@@ -148,6 +148,43 @@ pub fn enabled_local_admins() -> Result<Vec<UserInfo>> {
     Ok(admins)
 }
 
+/// (Phase 5 Step 7) Every enabled local account, administrators and standard users alike,
+/// by SID. The AppLocker layer gives each one that is not the Staff account an allow-all
+/// rule. Read-only.
+pub fn enabled_local_accounts() -> Result<Vec<UserInfo>> {
+    let mut buffer: *mut u8 = std::ptr::null_mut();
+    let (mut read, mut total) = (0u32, 0u32);
+    // SAFETY: a null server name is the local machine; the out pointers are valid.
+    let status = unsafe {
+        NetUserEnum(PCWSTR::null(), 1, FILTER_NORMAL_ACCOUNT, &mut buffer, MAX_PREFERRED_LENGTH, &mut read, &mut total, None)
+    };
+    let guard = NetApiBuffer::new(buffer);
+    if status != 0 {
+        return Err(code_err("NetUserEnum", status));
+    }
+    let mut accounts = Vec::new();
+    for index in 0..read as usize {
+        // SAFETY: the API returned `read` consecutive USER_INFO_1 entries starting at
+        // `buffer`, which `guard` keeps alive.
+        let entry = unsafe { &*guard.as_ptr().cast::<USER_INFO_1>().add(index) };
+        if entry.usri1_flags.0 & UF_ACCOUNTDISABLE.0 != 0 {
+            continue;
+        }
+        let name = pwstr_to_string(entry.usri1_name);
+        let Some(sid) = lookup_account_name(&name)? else {
+            continue;
+        };
+        accounts.push(UserInfo {
+            name,
+            sid,
+            comment: pwstr_to_string(entry.usri1_comment),
+            disabled: false,
+            is_admin: entry.usri1_priv == USER_PRIV_ADMIN,
+        });
+    }
+    Ok(accounts)
+}
+
 /// Creates a standard (non-administrator) local user that is a member of the
 /// built-in Users group and returns its SID.
 ///
@@ -274,6 +311,60 @@ pub fn set_password(name: &str, password: &str) -> Result<()> {
     }
 }
 
+/// The machine's account lockout policy (`NetUserModals` level 3). Durations are in
+/// seconds; a threshold of 0 means "never lock out" (the Windows default).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct LockoutPolicy {
+    pub threshold: u32,
+    pub duration_s: u32,
+    pub window_s: u32,
+}
+
+/// Reads the account lockout policy. Read-only.
+pub fn get_account_lockout() -> Result<LockoutPolicy> {
+    let mut buffer: *mut u8 = std::ptr::null_mut();
+    // SAFETY: a null server name is the local machine; `buffer` is a valid out pointer.
+    let status = unsafe { NetUserModalsGet(PCWSTR::null(), 3, &mut buffer) };
+    let guard = NetApiBuffer::new(buffer);
+    if status != 0 {
+        return Err(code_err("NetUserModalsGet", status));
+    }
+    // SAFETY: on success `buffer` points at one USER_MODALS_INFO_3, which `guard` frees.
+    let info = unsafe { &*guard.as_ptr().cast::<USER_MODALS_INFO_3>() };
+    Ok(LockoutPolicy {
+        threshold: info.usrmod3_lockout_threshold,
+        duration_s: info.usrmod3_lockout_duration,
+        window_s: info.usrmod3_lockout_observation_window,
+    })
+}
+
+/// Sets the account lockout policy. This module does not judge the values: the
+/// invariant of plan 4.6 (I7: threshold 5 or more) refuses a document that is too weak,
+/// and a restore has to be able to put any original back.
+///
+/// DESTRUCTIVE: guarded.
+pub fn set_account_lockout(policy: LockoutPolicy) -> Result<()> {
+    require_test_machine()?;
+    // The window cannot be longer than the lockout duration (Windows refuses it).
+    if policy.threshold > 0 && policy.window_s > policy.duration_s {
+        return Err(Win32Error::Invalid("the observation window is longer than the lockout duration".into()));
+    }
+    let info = USER_MODALS_INFO_3 {
+        usrmod3_lockout_duration: policy.duration_s,
+        usrmod3_lockout_observation_window: policy.window_s,
+        usrmod3_lockout_threshold: policy.threshold,
+    };
+    // SAFETY: `info` is a valid USER_MODALS_INFO_3 that outlives the call; a null server
+    // name is the local machine.
+    let status = unsafe {
+        NetUserModalsSet(PCWSTR::null(), 3, std::ptr::from_ref(&info).cast::<u8>(), None)
+    };
+    if status != 0 {
+        return Err(code_err("NetUserModalsSet", status));
+    }
+    Ok(())
+}
+
 /// Checks `name`/`password` with a network logon. `Ok(false)` for a wrong
 /// password or a refused account; any other failure is an error.
 ///
@@ -396,6 +487,14 @@ pub fn delete_user_and_profile(sid: &Sid, name: &str) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_lockout_policy_reads_and_its_writer_meets_the_guard() {
+        let policy = get_account_lockout().unwrap();
+        if !crate::guard::is_test_machine() {
+            assert!(matches!(set_account_lockout(policy), Err(Win32Error::Guard(_))));
+        }
+    }
 
     #[test]
     fn user_names_are_plain() {

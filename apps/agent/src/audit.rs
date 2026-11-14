@@ -54,6 +54,16 @@ pub enum AuditKind {
     AdminExitLockedOut,
     AdminExitFailed,
     EmployeeLockedOut,
+    // (Phase 5 Step 9, plan 4.2) Events a device reports about its own lockdown. On the
+    // wire they are `deviceLockdownRefused` and so on; the server (Step 10) records them
+    // as `device.lockdownRefused`, ... `detail` is a fixed code, never a path or free text.
+    DeviceLockdownRefused,
+    DeviceLockdownRolledBack,
+    DeviceTamperDetected,
+    /// The first drift per item per day only.
+    DeviceDriftReasserted,
+    DeviceSafeModeBlocked,
+    DeviceClockJump,
 }
 
 impl AuditKind {

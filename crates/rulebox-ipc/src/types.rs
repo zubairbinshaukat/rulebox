@@ -5,6 +5,8 @@
 //! macro (see `lib.rs`), so a newer agent can add values without breaking an
 //! older client (plan Section 6.5).
 
+use rulebox_policy::lockdown::WinCombos;
+use rulebox_policy::notice::BroadcastStyle;
 use rulebox_policy::DesiredState;
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
@@ -162,6 +164,75 @@ pub struct AgentSnapshot {
     /// (1.1) Organization name. Null means use `desiredState.branding.name`.
     #[serde(default)]
     pub org_name: Option<String>,
+    /// (1.3) Set while the device is locked by the administrator (plan Phase 5, 4.12 and
+    /// 4.17). A 1.2 agent never sends it; a reader treats missing and `null` alike.
+    #[serde(default)]
+    pub device_lock: Option<DeviceLockView>,
+    /// (1.3) Active broadcasts, newest first, at most 5. The agent drops expired ones.
+    #[serde(default)]
+    pub broadcasts: Vec<BroadcastView>,
+    /// (1.3) Keyboard policy. `None` from a 1.2 agent: Windows-key combinations pass.
+    #[serde(default)]
+    pub keyboard: Option<KeyboardView>,
+    /// (1.3) Whether the PC has printers the organization set up. `None` from a 1.2
+    /// agent: a web app's own `printing` permission alone decides.
+    #[serde(default)]
+    pub printing: Option<PrintingView>,
+    /// (1.3) Status of the managed Wi-Fi (Phase 3 P11: status only).
+    #[serde(default)]
+    pub network: Option<NetworkView>,
+}
+
+/// (1.3) What the lock view shows. Nothing secret, never an employee.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub struct DeviceLockView {
+    pub lock_id: String,
+    pub message: String,
+    #[serde(default)]
+    pub contact: Option<String>,
+}
+
+/// (1.3) One announcement for the Staff session. `title` and `body` are plain text:
+/// a client must never render them as HTML.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub struct BroadcastView {
+    pub id: String,
+    pub style: BroadcastStyle,
+    pub title: String,
+    pub body: String,
+    pub ack_required: bool,
+    /// True once this PC has queued an acknowledgement for it.
+    pub acknowledged: bool,
+}
+
+/// (1.3) `keyboard` of the snapshot. `Unknown` (a value a newer agent adds) is
+/// treated like `swallow` by the Staff App: the stricter reading.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub struct KeyboardView {
+    pub win_combos: WinCombos,
+}
+
+/// (1.3) `printers` is non-empty (and the Spooler runs).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub struct PrintingView {
+    pub available: bool,
+}
+
+/// (1.3) Managed Wi-Fi status.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub struct NetworkView {
+    pub managed_only: bool,
+    pub ssids: Vec<String>,
 }
 
 /// (1.1) Whether the hidden admin exit is available and its key combination.
@@ -269,6 +340,22 @@ mod tests {
             admin_exit: Some(AdminExitInfo { enabled: true, hotkey: "Ctrl+Shift+F12".into() }),
             power: Some(PowerOptions { sleep: true, restart: false, shut_down: true }),
             org_name: Some("Demo Company".into()),
+            device_lock: Some(DeviceLockView {
+                lock_id: "lock_1".into(),
+                message: "Call IT".into(),
+                contact: Some("it@example.test".into()),
+            }),
+            broadcasts: vec![BroadcastView {
+                id: "bc_1".into(),
+                style: BroadcastStyle::Fullscreen,
+                title: "Maintenance".into(),
+                body: "Back at <b>noon</b> & later.".into(),
+                ack_required: true,
+                acknowledged: false,
+            }],
+            keyboard: Some(KeyboardView { win_combos: WinCombos::Swallow }),
+            printing: Some(PrintingView { available: true }),
+            network: Some(NetworkView { managed_only: true, ssids: vec!["Shop".into()] }),
         }
     }
 
@@ -298,7 +385,14 @@ mod tests {
             "clockSuspect": true,
             "adminExit": { "enabled": true, "hotkey": "Ctrl+Shift+F12" },
             "power": { "sleep": true, "restart": false, "shutDown": true },
-            "orgName": "Demo Company"
+            "orgName": "Demo Company",
+            "deviceLock": { "lockId": "lock_1", "message": "Call IT", "contact": "it@example.test" },
+            "broadcasts": [{ "id": "bc_1", "style": "fullscreen", "title": "Maintenance",
+                             "body": "Back at <b>noon</b> & later.", "ackRequired": true,
+                             "acknowledged": false }],
+            "keyboard": { "winCombos": "swallow" },
+            "printing": { "available": true },
+            "network": { "managedOnly": true, "ssids": ["Shop"] }
         });
         let snapshot = full_snapshot();
         assert_eq!(serde_json::to_value(&snapshot).unwrap(), expected);
@@ -323,6 +417,11 @@ mod tests {
             admin_exit: None,
             power: None,
             org_name: None,
+            device_lock: None,
+            broadcasts: Vec::new(),
+            keyboard: None,
+            printing: None,
+            network: None,
         };
         let value = serde_json::to_value(&snapshot).unwrap();
         assert_eq!(value["device"], json!(null));
@@ -333,7 +432,39 @@ mod tests {
         assert_eq!(value["adminExit"], json!(null));
         assert_eq!(value["power"], json!(null));
         assert_eq!(value["orgName"], json!(null));
+        // The 1.3 fields are present too: null, or an empty list.
+        assert_eq!(value["deviceLock"], json!(null));
+        assert_eq!(value["broadcasts"], json!([]));
+        assert_eq!(value["keyboard"], json!(null));
+        assert_eq!(value["printing"], json!(null));
+        assert_eq!(value["network"], json!(null));
         assert_eq!(serde_json::from_value::<AgentSnapshot>(value).unwrap(), snapshot);
+    }
+
+    /// A 1.2 agent does not send the five 1.3 keys; a 1.3 client reads "nothing".
+    #[test]
+    fn snapshot_from_a_1_2_agent_parses() {
+        let mut value = serde_json::to_value(full_snapshot()).unwrap();
+        let object = value.as_object_mut().unwrap();
+        for key in ["deviceLock", "broadcasts", "keyboard", "printing", "network"] {
+            assert!(object.remove(key).is_some());
+        }
+        let parsed = serde_json::from_value::<AgentSnapshot>(value).unwrap();
+        assert_eq!(parsed.device_lock, None);
+        assert!(parsed.broadcasts.is_empty());
+        assert_eq!((parsed.keyboard, parsed.printing, parsed.network), (None, None, None));
+        assert_eq!(parsed.org_name.as_deref(), Some("Demo Company"));
+    }
+
+    #[test]
+    fn new_1_3_enum_values_from_a_later_agent_are_unknown() {
+        let view: BroadcastView = serde_json::from_value(json!({
+            "id": "b", "style": "hologram", "title": "t", "body": "b", "ackRequired": false, "acknowledged": true
+        }))
+        .unwrap();
+        assert_eq!(view.style, BroadcastStyle::Unknown);
+        let keyboard: KeyboardView = serde_json::from_value(json!({ "winCombos": "explode" })).unwrap();
+        assert_eq!(keyboard.win_combos, WinCombos::Unknown);
     }
 
     /// A 1.0 agent does not send the three 1.1 keys; a 1.1 client reads `None`.

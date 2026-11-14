@@ -77,6 +77,8 @@ export const MAJOR_ACTIONS = {
   "keys:registerActive": { when: "always", why: "signing key" },
   "keys:prepareRotation": { when: "always", why: "signing key" },
   "keys:finishRotation": { when: "always", why: "signing key" },
+  // Phase 5 Step 10: wraps the deployment signing key as the organization's own key.
+  "keys:migrateFromEnv": { when: "always", why: "signing key" },
   // Step 10-11: apps and employees (deletes).
   "apps:remove": { when: "always", why: "deletes an app" },
   "fileHandlers:remove": { when: "always", why: "deletes a file type rule" },

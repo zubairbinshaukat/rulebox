@@ -42,6 +42,14 @@ fn contains_ignore_case(list: &[&str], name: &str) -> bool {
 ///
 /// DESTRUCTIVE: guarded.
 pub fn set_winlogon_value(name: &str, value: Option<&RegValue>) -> Result<()> {
+    check_winlogon_value(name, value)?;
+    set_hklm(WINLOGON_KEY, name, value)
+}
+
+/// The name rules for a write under `Winlogon` (no API call, no guard). Shared with
+/// `machinereg`, so a layer cannot write a value through the wider allow-list that
+/// this function refuses.
+pub fn check_winlogon_value(name: &str, value: Option<&RegValue>) -> Result<()> {
     if contains_ignore_case(FORBIDDEN_WINLOGON_VALUES, name) {
         return Err(Win32Error::Invalid(format!("the Winlogon value {name:?} is never written")));
     }
@@ -51,7 +59,7 @@ pub fn set_winlogon_value(name: &str, value: Option<&RegValue>) -> Result<()> {
     if name.eq_ignore_ascii_case("AutoLogonCount") && value.is_some() {
         return Err(Win32Error::Invalid("AutoLogonCount is only ever deleted".into()));
     }
-    set_hklm(WINLOGON_KEY, name, value)
+    Ok(())
 }
 
 /// Writes (`Some`) or deletes (`None`) one machine value from the short list

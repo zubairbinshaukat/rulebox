@@ -10,11 +10,14 @@
 import { internal } from "../../convex/_generated/api";
 import type { Id } from "../../convex/_generated/dataModel";
 import { base64Encode, sha256HexSync } from "../../convex/lib/crypto";
+import { snapshotGroupConfig } from "../../convex/lib/groupConfig";
 import { requestPublish } from "../../convex/lib/publish";
 import { recoveryHash } from "../../convex/lib/recoveryCodes";
 import { MINUTE_MS } from "../../convex/lib/limits";
 import { giveStepUp, makeOrg, asMember, type Member } from "./identity";
+import { TEST_KEY } from "./keys";
 import { seedLargeOrg, LARGE } from "./largeOrg";
+import { addWifi, createKeys, MASTER_A, MASTER_B, sealKeyPair, setMaster } from "./phase5";
 import type { Fixture } from "./matrixRows";
 
 declare const process: { env: Record<string, string | undefined> };
@@ -87,6 +90,63 @@ const winget = {
 
 const OLD = 400 * 24 * 60 * MINUTE_MS;
 
+const FAKE_WRAPPED = { wrapped: "AAAA", masterKeyId: "0123456789abcdef" };
+const FAKE_SIGNING = { keyId: "1111111111111111", publicKey: base64Encode(Uint8Array.from({ length: 32 }, (_, i) => i + 1)), ...FAKE_WRAPPED };
+const FAKE_SEALING = { keyId: "2222222222222222", ...FAKE_WRAPPED };
+
+/** `n` `orgKeys` rows of the fixture's organization wrapped by `masterKeyId` (alternating purposes). */
+async function insertOrgKeyRows(c: InternalEnv, n: number, masterKeyId: string): Promise<Id<"orgKeys">[]> {
+  return await c.f.t.run(async (ctx) => {
+    const ids: Id<"orgKeys">[] = [];
+    for (let i = 0; i < n; i++) {
+      ids.push(
+        await ctx.db.insert("orgKeys", {
+          orgId: c.f.orgId,
+          purpose: i % 2 === 0 ? "signing" : "sealing",
+          keyId: `${String(i).padStart(16, "0")}`,
+          wrapped: "AAAA",
+          masterKeyId,
+          status: i < 2 ? "active" : "retired",
+          createdAt: Date.now(),
+        }),
+      );
+    }
+    return ids;
+  });
+}
+
+/**
+ * The fixture's organization with its own keys (a master key is set), `profiles` Wi-Fi profiles with a real passphrase
+ * assigned to its group, and 25 devices of that group that each registered a sealing key.
+ */
+async function sealingSetup(c: InternalEnv, profiles: number): Promise<{ deviceIds: Id<"devices">[]; profiles: { id: Id<"wifiProfiles">; revision: number }[] }> {
+  setMaster(MASTER_A);
+  await createKeys(c.f.t, c.f.orgId);
+  const out: { id: Id<"wifiProfiles">; revision: number }[] = [];
+  for (let i = 0; i < profiles; i++) out.push({ id: await addWifi(c.f.t, c.f.orgId, { groupIds: [c.f.groupId], ssid: `Net ${i}` }), revision: 1 });
+  const kp = sealKeyPair();
+  // Direct inserts: enrolling 25 PCs through the API would trip the enrollment rate limit.
+  const deviceIds = await c.f.t.run(async (ctx) => {
+    const ids: Id<"devices">[] = [];
+    for (let i = 0; i < 25; i++) {
+      ids.push(
+        await ctx.db.insert("devices", {
+          orgId: c.f.orgId,
+          groupId: c.f.groupId,
+          name: `Seal ${i}`,
+          enrolledAt: Date.now() - i,
+          enrollmentTokenId: c.f.tokenId,
+          revision: 0,
+          sealPublicKey: kp.publicB64,
+          sealKeyId: kp.keyId,
+        }),
+      );
+    }
+    return ids;
+  });
+  return { deviceIds, profiles: out };
+}
+
 export const INTERNAL_CALLS: Record<string, InternalCase | InternalCase[]> = {
   // ---------------------------------------------------------------- account
   "account:authorize": async (c) => () =>
@@ -155,6 +215,85 @@ export const INTERNAL_CALLS: Record<string, InternalCase | InternalCase[]> = {
   "deviceApi:reserveAttempt": async (c) => () => c.f.t.mutation(internal.deviceApi.reserveAttempt, { deviceId: c.f.deviceId }),
   "devices:authorizeDevice": async (c) => () => c.f.t.query(internal.devices.authorizeDevice, { deviceId: c.f.deviceId, deviceSecret: c.f.deviceSecret }),
 
+  // ---------------------------------------------------------------- Phase 5 Step 10: keys, sealing, security counters.
+  // The master key is the test's own (RULEBOX_MASTER_KEY); `ioBudgets.test.ts` removes it after every case.
+  // A Phase 4 organization (it has its registered key): only the sealing key is made. A new organization: both, a publish.
+  "keys:createOrgKeys": [
+    async (c) => {
+      setMaster(MASTER_A);
+      return () => c.f.t.action(internal.keys.createOrgKeys, { orgId: c.f.orgId });
+    },
+    async (c) => {
+      setMaster(MASTER_A);
+      const orgId = await makeOrg(c.f.t, "Fresh", { noKey: true });
+      return () => c.f.t.action(internal.keys.createOrgKeys, { orgId });
+    },
+  ],
+  "keys:storeOrgKeys": async (c) => {
+    const orgId = await makeOrg(c.f.t, "Fresh", { noKey: true });
+    return () => c.f.t.mutation(internal.keys.storeOrgKeys, { orgId, signing: FAKE_SIGNING, sealing: FAKE_SEALING });
+  },
+  "keys:storeMigratedKey": async (c) => () =>
+    c.f.t.mutation(internal.keys.storeMigratedKey, {
+      orgId: c.f.orgId,
+      actor: c.actor,
+      signing: { keyId: TEST_KEY.keyId, publicKey: TEST_KEY.publicKeyB64, wrapped: "AAAA", masterKeyId: "0123456789abcdef" },
+      sealing: FAKE_SEALING,
+    }),
+  // A full batch (REWRAP_BATCH) of rows still wrapped by the old master key.
+  "keys:rewrapBatch": async (c) => {
+    await insertOrgKeyRows(c, 50, "aaaaaaaaaaaaaaaa");
+    return () => c.f.t.query(internal.keys.rewrapBatch, { masterKeyId: "aaaaaaaaaaaaaaaa" });
+  },
+  "keys:storeRewrapped": async (c) => {
+    const ids = await insertOrgKeyRows(c, 50, "aaaaaaaaaaaaaaaa");
+    return () =>
+      c.f.t.mutation(internal.keys.storeRewrapped, { updates: ids.map((id) => ({ id, from: "aaaaaaaaaaaaaaaa", wrapped: "BBBB", masterKeyId: "bbbbbbbbbbbbbbbb" })) });
+  },
+  // Real rows of five organizations (two keys each) are opened with master key A and wrapped again with master key B.
+  "keys:rewrapAll": async (c) => {
+    setMaster(MASTER_A);
+    for (let i = 0; i < 5; i++) await createKeys(c.f.t, await makeOrg(c.f.t, `Rewrap ${i}`, { noKey: true }));
+    setMaster(MASTER_A, MASTER_B);
+    return () => c.f.t.action(internal.keys.rewrapAll, {});
+  },
+  // 25 devices (SEAL_DEVICES_PER_RUN) of one group, each with a sealing key; 2 Wi-Fi profiles with a passphrase are assigned to the group.
+  "seal:jobs": async (c) => {
+    const { deviceIds } = await sealingSetup(c, 2);
+    return () => c.f.t.query(internal.seal.jobs, { orgId: c.f.orgId, deviceIds });
+  },
+  "seal:storeSealed": async (c) => {
+    const { deviceIds, profiles } = await sealingSetup(c, 2);
+    const kp = sealKeyPair();
+    const rows = deviceIds.flatMap((deviceId) => profiles.map((p) => ({ deviceId, profileId: p.id, revision: p.revision, sealKeyId: kp.keyId, sealed: "AAAA" })));
+    return () => c.f.t.mutation(internal.seal.storeSealed, { orgId: c.f.orgId, rows });
+  },
+  "seal:forDevices": async (c) => {
+    const { deviceIds } = await sealingSetup(c, 2);
+    return () => c.f.t.action(internal.seal.forDevices, { orgId: c.f.orgId, deviceIds });
+  },
+  // Yesterday's rows of 200 devices folded into one organization row, plus a full batch of expired device and organization rows.
+  "security:rollup": [
+    async (c) => {
+      const day = new Date(Date.now() - 86_400_000).toISOString().slice(0, 10);
+      await c.f.t.run(async (ctx) => {
+        const devices = await ctx.db.query("devices").withIndex("by_org", (q) => q.eq("orgId", c.f.orgId)).take(200);
+        const blocked = { appLocker: 3, appControl: 1, procWatch: 0, elevation: 2 };
+        const permissionDenials = [{ appId: c.f.appId as string, kind: "camera", count: 2 }];
+        for (const d of devices) {
+          await ctx.db.insert("deviceSecurityDaily", { orgId: c.f.orgId, deviceId: d._id, day, blocked, permissionDenials, drift: 0, tamper: 0 });
+          await ctx.db.insert("deviceSecurityDaily", { orgId: c.f.orgId, deviceId: d._id, day: "2020-01-01", blocked, permissionDenials, drift: 0, tamper: 0 });
+        }
+        for (let i = 0; i < 200; i++) {
+          await ctx.db.insert("orgSecurityDaily", { orgId: c.f.orgId, day: `2019-01-${String((i % 28) + 1).padStart(2, "0")}`, blocked, permissionDenials: [], devicesReporting: 1 });
+        }
+      });
+      return () => c.f.t.mutation(internal.security.rollup, { orgId: c.f.orgId, orgCreated: Date.now() });
+    },
+    // The start of the nightly walk: the first organization, nothing to fold.
+    async (c) => () => c.f.t.mutation(internal.security.rollup, {}),
+  ],
+
   // ---------------------------------------------------------------- employees
   "employees:createPrecheck": async (c) => () =>
     c.f.t.query(internal.employees.createPrecheck, { orgId: c.f.orgId, username: "newbie", groupIds: [c.f.groupId], appIds: [c.f.appId] }),
@@ -180,6 +319,37 @@ export const INTERNAL_CALLS: Record<string, InternalCase | InternalCase[]> = {
       for (let i = 0; i < 100; i++) {
         await ctx.db.insert("installResults", { orgId: c.f.orgId, deviceId: c.f.deviceId, appId: c.f.appId, state: "failed", appRevision: 0, attempts: 1, updatedAt: Date.now() - i });
       }
+      // Phase 5 (Step 10): the PC's finding links (a full batch), 20 sealed Wi-Fi boxes, its apply report and its lock.
+      const findingId = await ctx.db.insert("lockdownFindings", {
+        orgId: c.f.orgId,
+        fingerprint: "f".repeat(64),
+        layer: "appLocker",
+        fileName: "tool.exe",
+        folderClass: "other",
+        firstSeenAt: Date.now(),
+        lastSeenAt: Date.now(),
+        deviceCount: 1,
+        sampleDeviceId: c.f.deviceId,
+        status: "new",
+      });
+      for (let i = 0; i < 100; i++) await ctx.db.insert("lockdownFindingDevices", { orgId: c.f.orgId, findingId, deviceId: c.f.deviceId, firstSeenAt: Date.now() - i });
+      for (let i = 0; i < 20; i++) {
+        await ctx.db.insert("deviceSealedSecrets", { orgId: c.f.orgId, deviceId: c.f.deviceId, purpose: "wifi", targetId: `profile-${i}`, targetRevision: 1, sealKeyId: "k", sealed: "A".repeat(600), createdAt: Date.now() });
+      }
+      const layer = { mode: "off", state: "off" };
+      await ctx.db.insert("deviceApplyReports", {
+        orgId: c.f.orgId,
+        deviceId: c.f.deviceId,
+        appliedVersion: 1,
+        state: "applied",
+        layers: { staff: layer, machine: layer, appLocker: layer, appControl: layer, procWatch: layer, boot: layer, performance: layer },
+        wifi: [],
+        printers: [],
+        capabilities: [],
+        contentHash: "a".repeat(64),
+        updatedAt: Date.now(),
+      });
+      await ctx.db.insert("deviceLocks", { orgId: c.f.orgId, deviceId: c.f.deviceId, lockId: "lock-1", message: "Locked", lockedAt: Date.now() });
     });
     return () => c.f.t.mutation(internal.fleet.purgeDevice, { deviceId: c.f.deviceId });
   },
@@ -271,10 +441,47 @@ export const INTERNAL_CALLS: Record<string, InternalCase | InternalCase[]> = {
     return () => c.f.t.mutation(internal.presence.applyPingInterval, { orgId: c.f.orgId });
   },
   // Every PC of the organization is waiting for a new document: one batch of PUBLISH_BATCH devices is built and signed.
-  "publish:run": async (c) => {
-    await c.f.t.run((ctx) => requestPublish(ctx, c.f.orgId, { allDevices: true }));
-    return () => c.f.t.mutation(internal.publish.run, { orgId: c.f.orgId });
-  },
+  "publish:run": [
+    async (c) => {
+      await c.f.t.run((ctx) => requestPublish(ctx, c.f.orgId, { allDevices: true }));
+      return () => c.f.t.mutation(internal.publish.run, { orgId: c.f.orgId });
+    },
+    // Phase 5 data on every PC: each group has a configuration version (with a Wi-Fi profile that has a passphrase), 2 live broadcasts,
+    // every PC a sealing key and a current sealed box, every 10th PC a lock.
+    async (c) => {
+      setMaster(MASTER_A);
+      await createKeys(c.f.t, c.f.orgId);
+      const groups = await c.f.t.run((ctx) => ctx.db.query("groups").withIndex("by_org_name", (q) => q.eq("orgId", c.f.orgId)).take(50));
+      const wifi = await addWifi(c.f.t, c.f.orgId, { groupIds: groups.map((g) => g._id) });
+      const kp = sealKeyPair();
+      const box = base64Encode(new TextEncoder().encode(JSON.stringify({ v: 1, keyId: kp.keyId, epk: "A".repeat(43) + "=", nonce: "B".repeat(32), ct: "C".repeat(120) })));
+      await c.f.t.run(async (ctx) => {
+        for (const g of groups) {
+          await snapshotGroupConfig(ctx, g._id, "io");
+          for (let i = 0; i < 2; i++) {
+            await ctx.db.insert("broadcasts", {
+              orgId: c.f.orgId,
+              target: { kind: "group", id: g._id },
+              style: "banner",
+              title: `Notice ${i}`,
+              body: "Please save your work before 17:00.",
+              ackRequired: false,
+              createdAt: Date.now() - i * 1000,
+            });
+          }
+        }
+        const devices = await ctx.db.query("devices").withIndex("by_org", (q) => q.eq("orgId", c.f.orgId)).take(300);
+        let n = 0;
+        for (const d of devices) {
+          await ctx.db.patch(d._id, { sealPublicKey: kp.publicB64, sealKeyId: kp.keyId });
+          await ctx.db.insert("deviceSealedSecrets", { orgId: c.f.orgId, deviceId: d._id, purpose: "wifi", targetId: wifi, targetRevision: 1, sealKeyId: kp.keyId, sealed: box, createdAt: Date.now() });
+          if (n++ % 10 === 0) await ctx.db.insert("deviceLocks", { orgId: c.f.orgId, deviceId: d._id, lockId: `lock-${n}`, message: "This PC is locked.", lockedAt: Date.now() });
+        }
+        await requestPublish(ctx, c.f.orgId, { allDevices: true });
+      });
+      return () => c.f.t.mutation(internal.publish.run, { orgId: c.f.orgId });
+    },
+  ],
   "settings:storeExitPin": async (c) => () => c.f.t.mutation(internal.settings.storeExitPin, { orgId: c.f.orgId, actor: c.actor, phc: PHC }),
   "setup:createOwnerInvite": async (c) => () =>
     c.f.t.action(internal.setup.createOwnerInvite, { orgName: "Io Org", email: "io-owner@acme.test", allowAdditionalOrg: true }),

@@ -39,8 +39,14 @@ struct Inner {
     files_root: Mutex<Option<String>>,
     /// The signed-in employee's file session and the `fileHandlers` table.
     files: Arc<crate::files::FilesHub>,
-    /// How often each web app asked for something it may not have (PRD 24.1; reported in Phase 4).
+    /// How often each web app asked for something it may not have (PRD 24.1): the total per app.
     web_denials: Mutex<std::collections::HashMap<String, u32>>,
+    /// (Phase 5 Step 12) The same refusals per `(app id, permission name)`, waiting to be reported to
+    /// the agent (`webapp.reportDenials`). Only these two strings and a number: never a page address,
+    /// a time or the employee (plan 4.13).
+    denial_counts: Mutex<std::collections::BTreeMap<(String, String), u32>>,
+    /// A report is on its way: a second one waits for the next turn.
+    denial_flush_running: AtomicBool,
     /// Theme of the sign-in screen (organization / dev setting). An employee's
     /// choice replaces `display.theme` only while they are signed in.
     org_theme: Mutex<crate::model::ThemeDto>,
@@ -66,6 +72,8 @@ impl AppState {
                 files_root: Mutex::new(None),
                 files: Arc::new(crate::files::FilesHub::default()),
                 web_denials: Mutex::new(std::collections::HashMap::new()),
+                denial_counts: Mutex::new(std::collections::BTreeMap::new()),
+                denial_flush_running: AtomicBool::new(false),
                 org_theme: Mutex::new(org_theme),
                 #[cfg(debug_assertions)]
                 dev_hold_link: AtomicBool::new(false),
@@ -105,11 +113,74 @@ impl AppState {
         self.inner.dev_hold_link.load(Ordering::SeqCst)
     }
 
-    /// A web app asked for a permission or a download it may not have.
-    pub fn note_web_denial(&self, app_id: &str) {
+    /// A web app asked for a permission or a download it may not have. `kind` is the permission it
+    /// asked for (`None`: a refusal that is no permission, such as a blocked file type; it only
+    /// counts in the app's total).
+    pub fn note_web_denial(&self, app_id: &str, kind: Option<crate::webapp::permissions::DenialKind>) {
         if let Ok(mut counts) = self.inner.web_denials.lock() {
-            *counts.entry(app_id.to_string()).or_insert(0) += 1;
+            let total = counts.entry(app_id.to_string()).or_insert(0);
+            *total = total.saturating_add(1);
         }
+        if let Some(kind) = kind {
+            if let Ok(mut counts) = self.inner.denial_counts.lock() {
+                let count = counts.entry((app_id.to_string(), kind.wire().to_string())).or_insert(0);
+                *count = count.saturating_add(1);
+            }
+        }
+    }
+
+    /// The next report for the agent: at most 100 entries of at most 10,000 each; what does not fit
+    /// stays for the next one. The caller gives them back with [`Self::restore_denial_counts`] when
+    /// the agent could not take them.
+    pub fn take_denial_counts(&self) -> Vec<rulebox_ipc::requests::DenialCount> {
+        use rulebox_ipc::requests::{DenialCount, MAX_DENIAL_COUNT, MAX_DENIAL_ENTRIES};
+
+        let Ok(mut counts) = self.inner.denial_counts.lock() else {
+            return Vec::new();
+        };
+        let keys: Vec<(String, String)> = counts.keys().take(MAX_DENIAL_ENTRIES).cloned().collect();
+        let mut report = Vec::with_capacity(keys.len());
+        for key in keys {
+            let total = counts.get(&key).copied().unwrap_or(0);
+            let send = u64::from(total).min(MAX_DENIAL_COUNT);
+            if send > 0 {
+                report.push(DenialCount { app_id: key.0.clone(), kind: key.1.clone(), count: send });
+            }
+            match u64::from(total).checked_sub(send).filter(|rest| *rest > 0) {
+                Some(rest) => {
+                    counts.insert(key, u32::try_from(rest).unwrap_or(u32::MAX));
+                }
+                None => {
+                    counts.remove(&key);
+                }
+            }
+        }
+        report
+    }
+
+    /// Gives counts back that the agent did not take (it was unreachable); they are added to
+    /// whatever was counted meanwhile.
+    pub fn restore_denial_counts(&self, report: Vec<rulebox_ipc::requests::DenialCount>) {
+        if let Ok(mut counts) = self.inner.denial_counts.lock() {
+            for entry in report {
+                let count = counts.entry((entry.app_id, entry.kind)).or_insert(0);
+                *count = count.saturating_add(u32::try_from(entry.count).unwrap_or(u32::MAX));
+            }
+        }
+    }
+
+    /// How many `(app, permission)` pairs wait for a report.
+    pub fn pending_denial_pairs(&self) -> usize {
+        self.inner.denial_counts.lock().map_or(0, |counts| counts.len())
+    }
+
+    /// Reports the waiting counts in the background (log out calls this: plan 4.12, "at sign-out").
+    pub fn flush_denials_soon(&self) {
+        if self.pending_denial_pairs() == 0 {
+            return;
+        }
+        let state = self.clone();
+        spawn_bg(async move { flush_denials(&state).await });
     }
 
     pub fn web_denials(&self, app_id: &str) -> u32 {
@@ -348,7 +419,51 @@ impl AppState {
         }
         // The administrator-exit dialog has its own small page and its own event.
         crate::exit::push_if_changed(&app, self);
+        // The lock and the full-screen notice also cover the other monitors: those windows follow
+        // the state here, and do nothing when nothing they depend on changed.
+        crate::covers::follow_state(&app, self);
     }
+}
+
+/// How often the waiting denial counters are reported to the agent (plan 4.12: at most once per 60 s).
+pub const DENIAL_FLUSH_INTERVAL: Duration = Duration::from_secs(60);
+
+/// Reports the waiting denial counters every `every`, forever (the app starts it once).
+pub async fn run_denial_flush(state: AppState, every: Duration) {
+    let mut ticker = tokio::time::interval(every);
+    ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+    // The first tick is immediate and has nothing to say.
+    ticker.tick().await;
+    loop {
+        ticker.tick().await;
+        flush_denials(&state).await;
+    }
+}
+
+/// Sends the waiting per-app denial counters to the agent (`webapp.reportDenials`). One report at a
+/// time. An agent without the capability (1.2) keeps them waiting; so does one that cannot be reached.
+pub async fn flush_denials(state: &AppState) {
+    use rulebox_ipc::CAP_PERMISSION_REPORTS;
+
+    if state.inner.denial_flush_running.swap(true, Ordering::SeqCst) {
+        return;
+    }
+    let agent = state.agent();
+    let counts = if agent.capabilities().iter().any(|capability| capability == CAP_PERMISSION_REPORTS) {
+        state.take_denial_counts()
+    } else {
+        Vec::new()
+    };
+    if !counts.is_empty() {
+        match agent.report_denials(counts.clone()).await {
+            Ok(()) => tracing::debug!(entries = counts.len(), "reported the web app denial counters"),
+            Err(error) => {
+                tracing::debug!(?error, "could not report the denial counters; they are kept");
+                state.restore_denial_counts(counts);
+            }
+        }
+    }
+    state.inner.denial_flush_running.store(false, Ordering::SeqCst);
 }
 
 /// Spawn a future on the current Tokio handle, or on Tauri's runtime.
@@ -375,6 +490,12 @@ pub fn spawn_agent_tasks(state: AppState) {
     let events = state.agent().events();
     spawn_bg(async move {
         pump_agent_events(event_state, events).await;
+    });
+
+    // (Phase 5 Step 12) The web apps' denial counters go to the agent once a minute, and at log out.
+    let flush_state = state.clone();
+    spawn_bg(async move {
+        run_denial_flush(flush_state, DENIAL_FLUSH_INTERVAL).await;
     });
 
     let beat_state = state;
@@ -437,6 +558,19 @@ pub async fn pump_agent_events(
                     running.abort();
                 }
                 crate::commands::end_session_from_agent(&state, reason).await;
+            }
+            // The snapshot that carries the lock or the list arrives on its own channel and is
+            // applied there; these two events only say "look again", which is already done.
+            Ok(AgentEvent::DeviceLockChanged | AgentEvent::BroadcastsChanged) => {
+                tracing::debug!("the agent says its lock or broadcasts changed");
+            }
+            Ok(AgentEvent::ProgramBlocked(name)) => {
+                // Plain text, already cut by the agent; shown as a notice, never as HTML.
+                state.notify(
+                    crate::model::NoticeTone::Warning,
+                    format!("{name} was stopped."),
+                    Some("That program is not allowed on this PC.".to_string()),
+                );
             }
             Err(RecvError::Lagged(missed)) => {
                 // Rare. A lost `apps.changed` is cured by asking again. A lost
@@ -520,8 +654,8 @@ fn apply_link(state: &AppState, link: crate::model::AgentLink) {
     }
 }
 
-fn apply_snapshot(state: &AppState, snap: Option<rulebox_ipc::types::AgentSnapshot>) {
-    use crate::model::{agent_summary_from_snapshot, AgentLinkDto};
+pub fn apply_snapshot(state: &AppState, snap: Option<rulebox_ipc::types::AgentSnapshot>) {
+    use crate::model::{agent_summary_from_snapshot, notices_from_snapshot, AgentLinkDto};
     use rulebox_ipc::types::DisplayMode;
 
     #[cfg(debug_assertions)]
@@ -541,7 +675,7 @@ fn apply_snapshot(state: &AppState, snap: Option<rulebox_ipc::types::AgentSnapsh
         }
     }
 
-    state.update(|s| {
+    let lock_changed = state.modify(|s| {
         match snap {
             Some(ref snap) => {
                 s.agent = Some(agent_summary_from_snapshot(snap));
@@ -549,12 +683,31 @@ fn apply_snapshot(state: &AppState, snap: Option<rulebox_ipc::types::AgentSnapsh
                 if s.link == AgentLinkDto::Linked && s.capabilities.is_empty() {
                     // keep capabilities from hello; snapshot does not carry them
                 }
+                // (1.3) The lock, the broadcasts and the printing fact follow the snapshot. A 1.2 agent
+                // has none of them: no lock, no list.
+                let (lock, broadcasts, printing) = notices_from_snapshot(snap);
+                let changed = lock.is_some() && lock != s.device_lock;
+                s.device_lock = lock;
+                s.broadcasts = broadcasts;
+                s.printing_available = printing;
+                changed
             }
             None => {
                 if s.link != AgentLinkDto::Linked {
                     s.agent = None;
                 }
+                // The pipe dropped: nothing is known to have changed. A lock never lifts because the
+                // link did, and the notices stay as they were until a snapshot says otherwise.
+                false
             }
         }
     });
+    if lock_changed {
+        // A lock ends the employee session here at once; the agent ends its own (Step 15) and may
+        // say so too, which finds nobody signed in and does nothing.
+        let state = state.clone();
+        spawn_bg(async move {
+            crate::commands::end_session_from_agent(&state, crate::model::SessionEndedReason::DeviceLocked).await;
+        });
+    }
 }

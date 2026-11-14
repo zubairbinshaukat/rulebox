@@ -214,6 +214,11 @@ mod tests {
             admin_exit: None,
             power: None,
             org_name: None,
+            device_lock: None,
+            broadcasts: Vec::new(),
+            keyboard: None,
+            printing: None,
+            network: None,
         };
         // A 1.0 agent sends no `extra`.
         let mut value = serde_json::json!({ "snapshot": serde_json::to_value(&snapshot).unwrap() });

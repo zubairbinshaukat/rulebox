@@ -16,6 +16,7 @@ use windows::Win32::Security::{
     TokenElevation, ACL, DACL_SECURITY_INFORMATION, LUID_AND_ATTRIBUTES, OWNER_SECURITY_INFORMATION,
     PROTECTED_DACL_SECURITY_INFORMATION, PSECURITY_DESCRIPTOR, PSID, SECURITY_ATTRIBUTES,
     SE_PRIVILEGE_ENABLED, TOKEN_ADJUST_PRIVILEGES, TOKEN_ELEVATION, TOKEN_PRIVILEGES, TOKEN_QUERY,
+    UNPROTECTED_DACL_SECURITY_INFORMATION,
 };
 use windows::Win32::Storage::FileSystem::{CreateDirectoryW, FILE_ATTRIBUTE_REPARSE_POINT};
 use windows::Win32::System::Threading::{GetCurrentProcess, OpenProcessToken};
@@ -251,6 +252,157 @@ pub fn enable_privileges(names: &[&str]) -> Result<()> {
     Ok(())
 }
 
+/// The DACL of a security descriptor as SDDL (`D:...`), flags included (`P`, `AI`).
+pub(crate) fn dacl_sddl_of(descriptor: PSECURITY_DESCRIPTOR) -> Result<String> {
+    let mut text = PWSTR::null();
+    // SAFETY: the caller passes a valid descriptor; `text` is a valid out pointer.
+    unsafe {
+        ConvertSecurityDescriptorToStringSecurityDescriptorW(
+            descriptor,
+            SDDL_REVISION_1,
+            DACL_SECURITY_INFORMATION,
+            &mut text,
+            None,
+        )
+    }
+    .map_err(|e| api_err("ConvertSecurityDescriptorToStringSecurityDescriptorW", &e))?;
+    let guard = LocalAllocGuard::new(text.0.cast())?;
+    // SAFETY: on success the API returns a NUL-terminated string, freed by `guard`.
+    Ok(unsafe { from_wide_ptr(guard.as_ptr().cast()) })
+}
+
+impl SecurityAttributes {
+    /// The descriptor, valid while `self` lives.
+    pub(crate) fn descriptor(&self) -> PSECURITY_DESCRIPTOR {
+        PSECURITY_DESCRIPTOR(self.descriptor.as_ptr())
+    }
+
+    /// Whether the SDDL's DACL is marked protected (`D:P...`, no inheritance).
+    pub(crate) fn dacl_is_protected(sddl: &str) -> bool {
+        split_dacl(sddl).0.contains('P')
+    }
+}
+
+/// An ACL target must be an absolute local path with no `..`, no stream and no wildcard.
+/// No API call.
+pub fn check_acl_path(path: &Path) -> Result<()> {
+    let text = path.to_string_lossy();
+    let rest = text.get(2..).unwrap_or("");
+    let drive_ok = text.len() > 2 && text.as_bytes()[0].is_ascii_alphabetic() && text.as_bytes()[1] == b':';
+    let bad = !drive_ok
+        || rest.contains(':')
+        || text.contains(['*', '?', '<', '>', '|', '"'])
+        || text.starts_with(r"\\")
+        || path.components().any(|c| matches!(c, std::path::Component::ParentDir | std::path::Component::CurDir));
+    if bad {
+        return Err(Win32Error::Forbidden(format!("{text:?} is not an absolute local path")));
+    }
+    Ok(())
+}
+
+/// The DACL of a file or folder as SDDL, flags included. `Ok(None)` when it does not
+/// exist. Read-only.
+pub fn get_path_dacl(path: &Path) -> Result<Option<String>> {
+    check_acl_path(path)?;
+    if std::fs::symlink_metadata(path).is_err_and(|e| e.kind() == std::io::ErrorKind::NotFound) {
+        return Ok(None);
+    }
+    let wide = to_wide(&path.to_string_lossy());
+    let mut psd = PSECURITY_DESCRIPTOR::default();
+    // SAFETY: `wide` is NUL-terminated; the out pointer is valid. The returned
+    // descriptor is freed by `guard`.
+    let status = unsafe {
+        GetNamedSecurityInfoW(
+            PCWSTR(wide.as_ptr()),
+            SE_FILE_OBJECT,
+            DACL_SECURITY_INFORMATION,
+            None,
+            None,
+            None,
+            None,
+            &mut psd,
+        )
+    };
+    if status != ERROR_SUCCESS {
+        return Err(code_err("GetNamedSecurityInfoW", status.0));
+    }
+    let guard = LocalAllocGuard::new(psd.0)?;
+    dacl_sddl_of(PSECURITY_DESCRIPTOR(guard.as_ptr())).map(Some)
+}
+
+/// (Phase 5 Step 7) The DACL of `root` and of every folder below it, down to `max_depth`
+/// levels, as (path, SDDL) pairs, at most `max_entries` of them. Folders named in
+/// `skip_names` (case-insensitive, any level) are neither listed nor entered; links and
+/// junctions are never followed or listed; a folder that cannot be read is left out. The
+/// AppLocker layer uses it to find the folders under the Windows folder that standard users
+/// can write to. Read-only.
+pub fn list_folder_dacls(root: &Path, max_depth: u32, skip_names: &[&str], max_entries: usize) -> Result<Vec<(String, String)>> {
+    check_acl_path(root)?;
+    let mut out: Vec<(String, String)> = Vec::new();
+    let mut pending: Vec<(std::path::PathBuf, u32)> = vec![(root.to_path_buf(), 0)];
+    while let Some((folder, depth)) = pending.pop() {
+        if out.len() >= max_entries {
+            break;
+        }
+        if let Ok(Some(sddl)) = get_path_dacl(&folder) {
+            out.push((folder.to_string_lossy().into_owned(), sddl));
+        }
+        if depth >= max_depth {
+            continue;
+        }
+        let Ok(entries) = std::fs::read_dir(&folder) else {
+            continue;
+        };
+        for entry in entries.flatten() {
+            let Ok(meta) = std::fs::symlink_metadata(entry.path()) else {
+                continue;
+            };
+            let linked = meta.file_attributes() & FILE_ATTRIBUTE_REPARSE_POINT.0 != 0;
+            let name = entry.file_name().to_string_lossy().to_ascii_lowercase();
+            if meta.is_dir() && !linked && !skip_names.iter().any(|skip| skip.eq_ignore_ascii_case(&name)) {
+                pending.push((entry.path(), depth + 1));
+            }
+        }
+    }
+    out.sort();
+    Ok(out)
+}
+
+/// Replaces the DACL of a file or folder with `sddl` (`D:...`). A `P` flag in the SDDL
+/// makes it protected from inheritance, no `P` makes it inheriting: so the SDDL that
+/// [`get_path_dacl`] returned restores the original exactly. The caller restricts which
+/// folders reach this (the agent: its own install and data folders).
+///
+/// DESTRUCTIVE: guarded.
+pub fn set_path_dacl(path: &Path, sddl: &str) -> Result<()> {
+    check_acl_path(path)?;
+    require_test_machine()?;
+    let attrs = SecurityAttributes::from_sddl(sddl)?;
+    let dacl = attrs.dacl()?;
+    let flag = if SecurityAttributes::dacl_is_protected(sddl) {
+        PROTECTED_DACL_SECURITY_INFORMATION
+    } else {
+        UNPROTECTED_DACL_SECURITY_INFORMATION
+    };
+    let wide = to_wide(&path.to_string_lossy());
+    // SAFETY: `wide` is NUL-terminated; `dacl` points into the descriptor owned by `attrs`.
+    let status = unsafe {
+        SetNamedSecurityInfoW(
+            PCWSTR(wide.as_ptr()),
+            SE_FILE_OBJECT,
+            DACL_SECURITY_INFORMATION | flag,
+            None,
+            None,
+            Some(dacl),
+            None,
+        )
+    };
+    if status != ERROR_SUCCESS {
+        return Err(code_err("SetNamedSecurityInfoW", status.0));
+    }
+    Ok(())
+}
+
 /// True when this process runs with an elevated token (an administrator who
 /// accepted the UAC prompt, or SYSTEM). The same `TokenElevation` test the admin
 /// pipe applies to its clients. Read-only: it changes nothing, so it is not guarded.
@@ -323,6 +475,42 @@ mod tests {
         let err = create_protected_dir(Path::new(r"C:\rulebox-guard-test-must-not-exist\x")).unwrap_err();
         assert!(matches!(err, Win32Error::Guard(_)));
         assert!(!Path::new(r"C:\rulebox-guard-test-must-not-exist").exists());
+    }
+
+    #[test]
+    fn acl_targets_must_be_plain_absolute_local_paths() {
+        assert!(check_acl_path(Path::new(r"C:\Program Files\Rulebox")).is_ok());
+        for bad in [
+            r"Rulebox",
+            r"\Program Files",
+            r"\\server\share\x",
+            r"C:\Program Files\..\Windows",
+            r"C:\Program Files\Rulebox:stream",
+            r"C:\Program Files\*",
+            r"C:",
+        ] {
+            assert!(matches!(check_acl_path(Path::new(bad)), Err(Win32Error::Forbidden(_))), "{bad}");
+        }
+    }
+
+    #[test]
+    fn set_path_dacl_checks_the_path_then_the_guard_and_changes_nothing() {
+        let sddl = "D:P(A;OICI;FA;;;SY)";
+        assert!(matches!(set_path_dacl(Path::new(r"..\x"), sddl), Err(Win32Error::Forbidden(_))));
+        if !crate::guard::is_test_machine() {
+            let err = set_path_dacl(Path::new(r"C:\rulebox-guard-test-must-not-exist"), sddl).unwrap_err();
+            assert!(matches!(err, Win32Error::Guard(_)));
+        }
+    }
+
+    #[test]
+    fn a_path_dacl_reads_back_and_a_missing_path_is_none() {
+        assert_eq!(get_path_dacl(Path::new(r"C:\rulebox-no-such-dir-xyz")).unwrap(), None);
+        let windows = std::env::var_os("SystemRoot").unwrap_or_else(|| r"C:\Windows".into());
+        let sddl = get_path_dacl(Path::new(&windows)).unwrap().unwrap();
+        assert!(sddl.starts_with("D:"), "{sddl}");
+        // What was read can be parsed again (the restore path).
+        assert!(SecurityAttributes::from_sddl(&sddl).is_ok());
     }
 
     #[test]

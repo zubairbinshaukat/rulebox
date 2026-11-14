@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-broadcast-ack"
+description = "Enables the broadcast_ack command without any pre-configured scope."
+commands.allow = ["broadcast_ack"]
+
+[[permission]]
+identifier = "deny-broadcast-ack"
+description = "Denies the broadcast_ack command without any pre-configured scope."
+commands.deny = ["broadcast_ack"]

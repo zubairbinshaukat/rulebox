@@ -22,7 +22,6 @@ import {
 } from "../data";
 import { useAppInstalls } from "../data/apps";
 import {
-  DEFAULT_WEB_PERMISSIONS,
   INSTALL_STATES,
   type AppDetail,
   type AppInstallRow,
@@ -32,9 +31,9 @@ import {
   type DesktopSpec,
   type InstallCounts,
   type InstallState,
-  type WebPermissions,
   type WingetResolved,
 } from "../data/types";
+import { AppPermissions } from "./AppPermissions";
 import { AppGlyph } from "../components/AppGlyph";
 import { Card } from "../components/Card";
 import { ConfirmDialog } from "../components/ConfirmDialog";
@@ -246,6 +245,19 @@ function AppScreen({ d, kind, isNew }: { d: AppDetail; kind: AppKind; isNew: boo
               setFormKey((k) => k + 1);
             }}
           />
+          {!isNew && kind === "web" && d.web ? (
+            <AppPermissions
+              key={formKey}
+              d={d}
+              revision={revision}
+              readOnly={!canAct}
+              onSaved={setRevision}
+              onReload={() => {
+                setRevision(d.revision);
+                setFormKey((k) => k + 1);
+              }}
+            />
+          ) : null}
           {!isNew && kind === "desktop" ? <InstallStatus d={d} /> : null}
         </div>
         {!isNew ? (
@@ -376,8 +388,6 @@ function AppForm({
     }
   }
 
-  const permissions = Object.entries(DEFAULT_WEB_PERMISSIONS) as [keyof WebPermissions, boolean][];
-
   return (
     <form
       ref={form}
@@ -452,15 +462,7 @@ function AppForm({
                   <Textarea {...p} rows={3} spellCheck={false} autoCapitalize="off" className="dash-mono" value={x.domains} onChange={(e) => f.set("domains", e.target.value)} />
                 )}
               </Field>
-              <FieldSet legend={s.permissions} hint={s.permissionsHint}>
-                <div className="dash-pills">
-                  {permissions.map(([key, on]) => (
-                    <Pill key={key} tone={on ? "success" : "neutral"} dot>
-                      {s.permissionNames[key]}: {on ? strings.common.yes : strings.common.no}
-                    </Pill>
-                  ))}
-                </div>
-              </FieldSet>
+              {isNew ? <p className="dash-muted">{s.permissionsHint}</p> : null}
             </div>
           </Card>
         ) : (

@@ -1,6 +1,7 @@
-//! The agent <-> shell IPC contract (protocol 1.1): message types, framing codec
+//! The agent <-> shell IPC contract (protocol 1.3): message types, framing codec
 //! and error codes. See `docs/plans/phase-2-agent-core.md` Section 6 (1.1 is the
-//! additive addendum in 6.11; nothing of 1.0 changed).
+//! additive addendum in 6.11; nothing of 1.0 changed), Phase 4 Section 5.2 (1.2) and
+//! `docs/plans/phase-5-lockdown.md` Section 4.12 (1.3).
 //!
 //! TypeScript types for `types.rs` are generated with ts-rs into
 //! `packages/types/src/generated/` (run `pnpm gen:types`). The 1.1 request and
@@ -47,7 +48,16 @@ pub const PROTOCOL_MAJOR: u16 = 1;
 /// (Phase 4 Step 13) 1.2 adds the `apps.changed` and `session.ended` events and
 /// the sign-in outcome `notAllowedHere` (plan Phase 4, Section 5.2). Additive: a
 /// 1.1 client ignores the events and reads the outcome as `Unknown`.
-pub const PROTOCOL_MINOR: u16 = 2;
+///
+/// (Phase 5 Step 12) 1.3 adds the device lock, broadcasts, keyboard, printing and
+/// network fields of the snapshot, the events `device.lockChanged`,
+/// `broadcasts.changed` and `program.blocked`, the requests `broadcast.acknowledge`
+/// and `webapp.reportDenials`, and the value `deviceLocked` of the sign-in outcome
+/// and of the `session.ended` reason (plan Phase 5, 4.12 and 4.17). Additive: a 1.1
+/// or 1.2 client ignores the events and the new snapshot keys and reads the new
+/// values as `Unknown`; a 1.3 client on an older agent finds the capabilities
+/// missing and shows nothing of it.
+pub const PROTOCOL_MINOR: u16 = 3;
 
 /// Pipe the Staff App connects to.
 pub const SHELL_PIPE: &str = r"\\.\pipe\dev.rulebox.agent.shell";
@@ -80,3 +90,12 @@ pub const CAP_ADMIN_EXIT: &str = "adminExit";
 pub const CAP_APPS_CHANGED: &str = "appsChanged";
 /// (1.2) The agent sends `session.ended`; listed with `session`.
 pub const CAP_SESSION_ENDED: &str = "sessionEnded";
+/// (1.3) The snapshot's `deviceLock` and the event `device.lockChanged`; always on a 1.3 agent.
+pub const CAP_DEVICE_LOCK: &str = "deviceLock";
+/// (1.3) The snapshot's `broadcasts`, the event `broadcasts.changed` and the request
+/// `broadcast.acknowledge`.
+pub const CAP_BROADCASTS: &str = "broadcasts";
+/// (1.3) The snapshot's `keyboard` (Windows-key combinations).
+pub const CAP_KEYBOARD_POLICY: &str = "keyboardPolicy";
+/// (1.3) The request `webapp.reportDenials`.
+pub const CAP_PERMISSION_REPORTS: &str = "permissionReports";

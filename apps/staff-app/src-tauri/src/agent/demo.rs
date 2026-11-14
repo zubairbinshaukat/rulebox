@@ -112,6 +112,17 @@ fn demo_snapshot() -> AgentSnapshot {
             shut_down: true,
         }),
         org_name: Some("Demo Org".into()),
+        // Protocol 1.3: no lock, no broadcasts, the Phase 3 keyboard, no printers.
+        device_lock: None,
+        broadcasts: Vec::new(),
+        keyboard: Some(rulebox_ipc::types::KeyboardView {
+            win_combos: rulebox_policy::lockdown::WinCombos::Pass,
+        }),
+        printing: Some(rulebox_ipc::types::PrintingView { available: false }),
+        network: Some(rulebox_ipc::types::NetworkView {
+            managed_only: false,
+            ssids: Vec::new(),
+        }),
     }
 }
 
@@ -353,6 +364,19 @@ pub struct DemoAgent {
     apps_delay: Mutex<Duration>,
     /// How long the answer to `session.signIn` takes to arrive (the session is set at once).
     sign_in_delay: Mutex<Duration>,
+    /// (1.3) What the administrator set: laid over the demo snapshot every time it is published.
+    notices: Mutex<DemoNotices>,
+    /// (1.3) What `webapp.reportDenials` received, oldest first.
+    reported: Mutex<Vec<rulebox_ipc::requests::DenialCount>>,
+}
+
+/// The 1.3 parts of the demo snapshot.
+#[derive(Default)]
+struct DemoNotices {
+    lock: Option<rulebox_ipc::types::DeviceLockView>,
+    broadcasts: Vec<rulebox_ipc::types::BroadcastView>,
+    keyboard: Option<rulebox_policy::lockdown::WinCombos>,
+    printing: Option<bool>,
 }
 
 impl DemoAgent {
@@ -360,6 +384,8 @@ impl DemoAgent {
         let (link_tx, link_rx) = watch::channel(AgentLink::Linked);
         let (snap_tx, snap_rx) = watch::channel(Some(demo_snapshot()));
         Self {
+            notices: Mutex::new(DemoNotices::default()),
+            reported: Mutex::new(Vec::new()),
             link_tx,
             link_rx,
             snap_tx,
@@ -394,6 +420,65 @@ impl DemoAgent {
         if let Ok(mut slot) = self.apps_delay.lock() {
             *slot = delay;
         }
+    }
+
+    /// The demo snapshot with the administrator's lock, broadcasts and keyboard laid over it.
+    fn publish_snapshot(&self) {
+        let mut snapshot = demo_snapshot();
+        if let Ok(notices) = self.notices.lock() {
+            snapshot.device_lock = notices.lock.clone();
+            snapshot.broadcasts = notices.broadcasts.clone();
+            if let Some(combos) = notices.keyboard {
+                snapshot.keyboard = Some(rulebox_ipc::types::KeyboardView { win_combos: combos });
+            }
+            if let Some(available) = notices.printing {
+                snapshot.printing = Some(rulebox_ipc::types::PrintingView { available });
+            }
+        }
+        let _ = self.snap_tx.send(Some(snapshot));
+    }
+
+    /// Lock (or unlock) the demo device, as the dashboard's Lock button would. The agent sends the
+    /// snapshot and then `device.lockChanged`; a lock also ends the employee session.
+    pub fn set_lock(&self, lock: Option<rulebox_ipc::types::DeviceLockView>) {
+        let locked = lock.is_some();
+        if let Ok(mut notices) = self.notices.lock() {
+            notices.lock = lock;
+        }
+        if locked {
+            if let Ok(mut slot) = self.session.lock() {
+                slot.employee = None;
+            }
+        }
+        self.publish_snapshot();
+        let _ = self.events_tx.send(AgentEvent::DeviceLockChanged);
+        if locked {
+            let _ = self
+                .events_tx
+                .send(AgentEvent::SessionEnded(crate::model::SessionEndedReason::DeviceLocked));
+        }
+    }
+
+    /// Replace the demo broadcasts, as a dashboard "send" would.
+    pub fn set_broadcasts(&self, broadcasts: Vec<rulebox_ipc::types::BroadcastView>) {
+        if let Ok(mut notices) = self.notices.lock() {
+            notices.broadcasts = broadcasts;
+        }
+        self.publish_snapshot();
+        let _ = self.events_tx.send(AgentEvent::BroadcastsChanged);
+    }
+
+    /// Change the keyboard policy of the demo agent (`keyboard.winCombos`).
+    pub fn set_win_combos(&self, combos: rulebox_policy::lockdown::WinCombos) {
+        if let Ok(mut notices) = self.notices.lock() {
+            notices.keyboard = Some(combos);
+        }
+        self.publish_snapshot();
+    }
+
+    /// What the agent has been told about denials so far.
+    pub fn reported_denials(&self) -> Vec<rulebox_ipc::requests::DenialCount> {
+        self.reported.lock().map(|reported| reported.clone()).unwrap_or_default()
     }
 
     /// The agent ended the session but its push never reached the shell
@@ -435,6 +520,10 @@ impl AgentPort for DemoAgent {
         caps.push(CAP_ADMIN_EXIT.to_string());
         caps.push(CAP_APPS_CHANGED.to_string());
         caps.push(CAP_SESSION_ENDED.to_string());
+        caps.push(rulebox_ipc::CAP_DEVICE_LOCK.to_string());
+        caps.push(rulebox_ipc::CAP_BROADCASTS.to_string());
+        caps.push(rulebox_ipc::CAP_KEYBOARD_POLICY.to_string());
+        caps.push(rulebox_ipc::CAP_PERMISSION_REPORTS.to_string());
         caps
     }
 
@@ -452,6 +541,14 @@ impl AgentPort for DemoAgent {
         let _ = self.events_tx.send(event);
     }
 
+    fn dev_set_lock(&self, lock: Option<rulebox_ipc::types::DeviceLockView>) {
+        self.set_lock(lock);
+    }
+
+    fn dev_set_broadcasts(&self, list: Vec<rulebox_ipc::types::BroadcastView>) {
+        self.set_broadcasts(list);
+    }
+
     fn session_get(&self) -> BoxFuture<'_, Result<Option<Employee>, AgentError>> {
         let employee = self.session.lock().ok().and_then(|slot| slot.employee.clone());
         Box::pin(ready(Ok(employee)))
@@ -459,7 +556,7 @@ impl AgentPort for DemoAgent {
 
     fn ready(&self) -> BoxFuture<'_, Result<(), AgentError>> {
         self.ready_count.fetch_add(1, Ordering::Relaxed);
-        let _ = self.snap_tx.send(Some(demo_snapshot()));
+        self.publish_snapshot();
         Box::pin(ready(Ok(())))
     }
 
@@ -591,10 +688,41 @@ impl AgentPort for DemoAgent {
             }
         })
     }
+
+    fn ack_broadcast(&self, id: String) -> BoxFuture<'_, Result<bool, AgentError>> {
+        let known = self.notices.lock().is_ok_and(|mut notices| {
+            match notices.broadcasts.iter_mut().find(|view| view.id == id) {
+                Some(view) => {
+                    view.acknowledged = true;
+                    true
+                }
+                None => false,
+            }
+        });
+        if known {
+            self.publish_snapshot();
+            let _ = self.events_tx.send(AgentEvent::BroadcastsChanged);
+        }
+        Box::pin(ready(Ok(known)))
+    }
+
+    fn report_denials(
+        &self,
+        counts: Vec<rulebox_ipc::requests::DenialCount>,
+    ) -> BoxFuture<'_, Result<(), AgentError>> {
+        if let Ok(mut reported) = self.reported.lock() {
+            reported.extend(counts);
+        }
+        Box::pin(ready(Ok(())))
+    }
 }
 
 impl DemoAgent {
     fn sign_in_now(&self, req: SignInRequest) -> Result<SignInOutcome, AgentError> {
+        // A locked device refuses every sign-in, before it looks at the name or the password.
+        if self.notices.lock().is_ok_and(|notices| notices.lock.is_some()) {
+            return Ok(SignInOutcome::DeviceLocked);
+        }
         let mut slot = self
             .session
             .lock()

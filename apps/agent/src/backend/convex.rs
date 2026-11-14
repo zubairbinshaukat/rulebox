@@ -25,6 +25,7 @@ use tokio_util::sync::CancellationToken;
 use rulebox_policy::envelope::{Endorsement, PublishedKey, SignedEnvelope, TrustedKey};
 use rulebox_policy::roster::{RosterEntry, RosterSnapshot};
 
+use super::reports::{lockdown_args, LockdownCall};
 use super::value::{from_json, to_json};
 use super::{
     Backend, BackendError, BackendEvent, BackendFactory, DesiredFetch, DeviceAuth, EnrollRequest,
@@ -601,6 +602,16 @@ impl Backend for ConvexBackend {
         async move {
             let json = self.mutation(FN_REPORT, args).await?;
             parse_report_response(&json)
+        }
+        .boxed()
+    }
+
+    fn lockdown_report<'a>(&'a self, auth: &DeviceAuth, call: &LockdownCall) -> BoxFuture<'a, Result<(), BackendError>> {
+        let name = call.function();
+        let args = lockdown_args(auth, call);
+        async move {
+            self.mutation(name, args).await?;
+            Ok(())
         }
         .boxed()
     }

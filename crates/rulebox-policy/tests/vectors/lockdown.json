@@ -1,0 +1,134 @@
+{
+  "note": "Hand-written for Phase 5 Step 1 (plan 4.3). `phase4` is a Phase 2/4 document without any Phase 5 key; `phase5Keys` holds every agent-only key of 4.3 with every field written out and non-default values, so serializing the parsed AgentDoc gives it back exactly. The Convex builder (Step 10) will emit the same shapes. The sealed box is a syntactically valid dummy; real boxes are in seal.json.",
+  "phase4": {
+    "kioskEnabled": true,
+    "apps": ["files", "app_test_web_1"],
+    "allowedSites": [],
+    "fileHandlers": { ".docx": "app_test_desktop_1" },
+    "storage": { "defaultQuotaGb": 10 },
+    "branding": { "name": "Acme Test", "logo": null },
+    "version": 7,
+    "adminExit": { "enabled": true, "hotkey": "Ctrl+Shift+F12" },
+    "power": { "sleep": true, "restart": true, "shutDown": false },
+    "orgName": "Acme Test",
+    "catalog": [],
+    "rosterGroupId": "grp_test_vector_1",
+    "offlineDays": 3
+  },
+  "desiredStateJson": "{\"kioskEnabled\":true,\"apps\":[\"files\",\"app_test_web_1\"],\"allowedSites\":[],\"fileHandlers\":{\".docx\":\"app_test_desktop_1\"},\"storage\":{\"defaultQuotaGb\":10},\"branding\":{\"name\":\"Acme Test\",\"logo\":null},\"version\":7}",
+  "phase5Keys": {
+    "lockdown": {
+      "staff": {
+        "taskManager": true,
+        "run": true,
+        "commandPrompt": true,
+        "registryTools": true,
+        "settings": false,
+        "signOut": true,
+        "changePassword": true,
+        "hideDrives": true,
+        "accessibilityHotkeys": true,
+        "officeMacros": false
+      },
+      "machine": {
+        "hideSwitchUser": true,
+        "hideSignInPower": true,
+        "denyElevationRequests": true,
+        "hideAdminTiles": false,
+        "noWakePassword": true,
+        "restrictPrinterDrivers": true,
+        "fileOutputPrinters": false,
+        "accountLockout": { "threshold": 8, "durationMin": 30, "windowMin": 20 }
+      },
+      "appLocker": { "mode": "enforce" },
+      "appControl": { "mode": "audit", "level": "allowlist" },
+      "procWatch": { "mode": "off" },
+      "exceptions": [
+        {
+          "id": "ex_hash_1",
+          "appId": null,
+          "kind": "hash",
+          "publisher": null,
+          "sha256": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+          "path": null,
+          "layers": ["appLocker", "procWatch"]
+        },
+        {
+          "id": "ex_path_1",
+          "appId": "app_test_desktop_1",
+          "kind": "path",
+          "publisher": null,
+          "sha256": null,
+          "path": "{ProgramFiles}\\Writer\\writer.exe",
+          "layers": ["appLocker"]
+        },
+        {
+          "id": "ex_pub_1",
+          "appId": null,
+          "kind": "publisher",
+          "publisher": { "subject": "CN=Acme Ltd, O=Acme Ltd, C=US", "product": "Acme Tool", "fileName": null },
+          "sha256": null,
+          "path": null,
+          "layers": ["procWatch"]
+        }
+      ],
+      "keyboard": { "winCombos": "pass" },
+      "usb": {
+        "storage": "readOnly",
+        "printers": "allow",
+        "imaging": "block",
+        "phones": "block",
+        "other": "allow",
+        "retroactive": true
+      },
+      "accessibilityTools": true,
+      "boot": { "autoRecovery": "leave", "safeModeGuard": true },
+      "performance": { "staffTuning": true, "kioskProfile": false, "noPrinting": true }
+    },
+    "wifi": [
+      {
+        "id": "wifi_test_vector_1",
+        "ssid": "Acme-Staff",
+        "hidden": false,
+        "security": "wpa2Personal",
+        "autoConnect": true,
+        "revision": 3,
+        "sealed": {
+          "v": 1,
+          "keyId": "0123456789abcdef",
+          "epk": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=",
+          "nonce": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+          "ct": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=="
+        }
+      }
+    ],
+    "wifiManagedOnly": true,
+    "printers": [
+      {
+        "id": "printer_test_vector_1",
+        "name": "Front desk",
+        "kind": "ipp",
+        "address": "https://10.0.0.20:631/ipp/print",
+        "port": null,
+        "queue": null,
+        "driver": "Microsoft IPP Class Driver",
+        "isDefault": true,
+        "revision": 2
+      }
+    ],
+    "deviceLock": { "lockId": "lock_test_vector_1", "message": "This PC is locked. Call IT.", "contact": "+1 555 0100", "lockedAtMs": 1760990000000 },
+    "usbTempAllow": { "untilMs": 1760995000000 },
+    "broadcasts": [
+      {
+        "id": "bc_test_vector_1",
+        "style": "banner",
+        "title": "Maintenance",
+        "body": "Back at noon.",
+        "expiresAtMs": 1761000000000,
+        "ackRequired": true,
+        "issuedAtMs": 1760990000000
+      }
+    ],
+    "config": { "groupId": "grp_test_vector_1", "version": 14, "ring": "pilot" }
+  }
+}

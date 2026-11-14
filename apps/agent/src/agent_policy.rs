@@ -10,10 +10,15 @@
 use std::fmt;
 
 use rulebox_ipc::hotkey::{self, DEFAULT_ADMIN_EXIT_HOTKEY};
-use rulebox_ipc::types::{AdminExitInfo, AgentSnapshot, PowerOptions};
+use rulebox_ipc::types::{
+    AdminExitInfo, AgentSnapshot, DeviceLockView, KeyboardView, NetworkView, PowerOptions, PrintingView,
+};
 use serde_json::Value;
 
 use rulebox_policy::catalog::CatalogApp;
+use rulebox_policy::lockdown::{KeyboardPolicy, WinCombos, MAX_ID_CHARS};
+use rulebox_policy::network::MAX_WIFI_PROFILES;
+use rulebox_policy::notice::{Broadcast, DeviceLock, MAX_LOCK_CONTACT, MAX_LOCK_MESSAGE};
 
 use crate::catalog::catalog_from_doc;
 use crate::kdf;
@@ -77,6 +82,70 @@ pub struct AgentPolicy {
     pub catalog_problem: Option<String>,
     /// (Step 13) `doc.rosterGroupId`: whose signed roster decides offline sign-in.
     pub roster_group_id: Option<String>,
+    /// (Phase 5 Step 12) `doc.deviceLock`, text cut to the plan's limits. Never part of
+    /// `DesiredState`; the snapshot carries only the lock view.
+    pub device_lock: Option<DeviceLock>,
+    /// (Step 12) `doc.broadcasts` as listed (expired ones included: only the notice hub
+    /// knows the server time). Entries that do not parse or break the text limits are dropped.
+    pub broadcasts: Vec<Broadcast>,
+    /// (Step 12) `doc.lockdown.keyboard.winCombos`. `None` = no lockdown section, which means
+    /// every layer off: Windows-key combinations pass.
+    pub win_combos: Option<WinCombos>,
+    /// (Step 12) `doc.printers` is not empty. (The Spooler check joins it with Step 14.)
+    pub printers_assigned: bool,
+    /// (Step 12) `doc.wifiManagedOnly`.
+    pub wifi_managed_only: bool,
+    /// (Step 12) The SSIDs of `doc.wifi`, for the status the Staff App shows.
+    pub wifi_ssids: Vec<String>,
+}
+
+/// Parses the entries of a JSON list one by one, so one bad entry does not cost the others.
+fn parse_list<T: serde::de::DeserializeOwned>(doc: &Value, key: &str) -> Vec<T> {
+    let Some(entries) = doc.get(key).and_then(Value::as_array) else {
+        return Vec::new();
+    };
+    entries
+        .iter()
+        .filter_map(|entry| match serde_json::from_value::<T>(entry.clone()) {
+            Ok(parsed) => Some(parsed),
+            Err(error) => {
+                tracing::warn!(key, %error, "an entry of the document does not parse and is skipped");
+                None
+            }
+        })
+        .collect()
+}
+
+/// At most `max` characters.
+fn cut(text: &str, max: usize) -> String {
+    text.chars().take(max).collect()
+}
+
+/// `doc.deviceLock`: a lock that does not parse as a whole is still a lock (fail closed), so a
+/// missing `lockId` or text only loses what it cannot say; a value of the wrong type is no lock.
+fn lock_from_doc(doc: &Value) -> Option<DeviceLock> {
+    let value = doc.get("deviceLock").filter(|value| !value.is_null())?;
+    let object = value.as_object()?;
+    let text = |key: &str| object.get(key).and_then(Value::as_str);
+    Some(DeviceLock {
+        lock_id: cut(text("lockId").unwrap_or("lock"), MAX_ID_CHARS),
+        message: cut(text("message").unwrap_or(""), MAX_LOCK_MESSAGE),
+        contact: text("contact").map(str::trim).filter(|c| !c.is_empty()).map(|c| cut(c, MAX_LOCK_CONTACT)),
+        locked_at_ms: object.get("lockedAtMs").and_then(Value::as_u64).unwrap_or(0),
+    })
+}
+
+/// `doc.lockdown.keyboard.winCombos`.
+fn win_combos_from_doc(doc: &Value) -> Option<WinCombos> {
+    let lockdown = doc.get("lockdown").filter(|value| value.is_object())?;
+    // A lockdown section without the key takes the policy default.
+    Some(
+        lockdown
+            .get("keyboard")
+            .and_then(|keyboard| keyboard.get("winCombos"))
+            .and_then(|value| serde_json::from_value::<WinCombos>(value.clone()).ok())
+            .unwrap_or(KeyboardPolicy::default().win_combos),
+    )
 }
 
 impl AgentPolicy {
@@ -94,6 +163,25 @@ impl AgentPolicy {
             catalog,
             catalog_problem,
             roster_group_id: doc.get("rosterGroupId").and_then(Value::as_str).map(str::to_string),
+            device_lock: lock_from_doc(doc),
+            broadcasts: parse_list::<Broadcast>(doc, "broadcasts")
+                .into_iter()
+                .filter(|broadcast| broadcast.check_limits().is_ok())
+                .collect(),
+            win_combos: win_combos_from_doc(doc),
+            printers_assigned: doc.get("printers").and_then(Value::as_array).is_some_and(|list| !list.is_empty()),
+            wifi_managed_only: doc.get("wifiManagedOnly").and_then(Value::as_bool).unwrap_or(false),
+            wifi_ssids: doc
+                .get("wifi")
+                .and_then(Value::as_array)
+                .map(|list| {
+                    list.iter()
+                        .filter_map(|profile| profile.get("ssid").and_then(Value::as_str))
+                        .map(str::to_string)
+                        .take(MAX_WIFI_PROFILES)
+                        .collect()
+                })
+                .unwrap_or_default(),
             admin_exit: AdminExitPolicy::from_value(doc.get("adminExit")),
             power: doc.get("power").and_then(|value| serde_json::from_value(value.clone()).ok()),
             org_name: doc
@@ -114,6 +202,16 @@ impl AgentPolicy {
         });
         snapshot.power = self.power;
         snapshot.org_name = self.org_name.clone();
+        // (1.3) Nothing secret: the lock's text, the keyboard mode and two status flags. The
+        // broadcast list is the notice hub's (it knows the server time and the acknowledgements).
+        snapshot.device_lock = self.device_lock.as_ref().map(|lock| DeviceLockView {
+            lock_id: lock.lock_id.clone(),
+            message: lock.message.clone(),
+            contact: lock.contact.clone(),
+        });
+        snapshot.keyboard = Some(KeyboardView { win_combos: self.win_combos.unwrap_or(WinCombos::Pass) });
+        snapshot.printing = Some(PrintingView { available: self.printers_assigned });
+        snapshot.network = Some(NetworkView { managed_only: self.wifi_managed_only, ssids: self.wifi_ssids.clone() });
     }
 }
 

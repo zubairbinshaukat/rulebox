@@ -23,6 +23,7 @@ use super::{
     Backend, BackendError, BackendEvent, DesiredFetch, DeviceAuth, EnrollRequest, EnrollResponse, Head, PingResponse,
     ReportAccepted, ReportBatch, RosterFetch, VerifyAnswer, CODE_DEVICE_REJECTED, CODE_NOT_FOUND,
 };
+use super::reports::LockdownCall;
 use crate::state::lock;
 use crate::testutil::signing::{envelope, test_key, trusted_of};
 
@@ -83,6 +84,17 @@ struct Inner {
     desired_calls: Mutex<Vec<u64>>,
     roster_script: Mutex<VecDeque<Result<RosterFetch, BackendError>>>,
     roster_calls: Mutex<Vec<u64>>,
+    lockdown_script: Mutex<VecDeque<Result<(), BackendError>>>,
+    lockdown_calls: Mutex<Vec<LockdownCallRecord>>,
+}
+
+/// (Phase 5 Step 9) One `lockdown_report` call.
+#[derive(Debug, Clone)]
+pub struct LockdownCallRecord {
+    #[allow(dead_code)]
+    pub at: Instant,
+    pub auth: DeviceAuth,
+    pub call: LockdownCall,
 }
 
 #[derive(Clone)]
@@ -121,8 +133,20 @@ impl FakeBackend {
                 desired_calls: Mutex::new(Vec::new()),
                 roster_script: Mutex::new(VecDeque::new()),
                 roster_calls: Mutex::new(Vec::new()),
+                lockdown_script: Mutex::new(VecDeque::new()),
+                lockdown_calls: Mutex::new(Vec::new()),
             }),
         }
+    }
+
+    /// (Phase 5 Step 9) The answer of the next lockdown report (default: accepted).
+    pub fn script_lockdown(&self, result: Result<(), BackendError>) {
+        lock(&self.inner.lockdown_script).push_back(result);
+    }
+
+    /// (Phase 5 Step 9) Every lockdown report call so far, in order.
+    pub fn lockdown_calls(&self) -> Vec<LockdownCallRecord> {
+        lock(&self.inner.lockdown_calls).clone()
     }
 
     /// What `fetchDesired(version)` answers from now on.
@@ -361,6 +385,20 @@ impl Backend for FakeBackend {
                 return Err(rejected());
             }
             lock(&self.inner.report_script).pop_front().unwrap_or(Ok(all))
+        }
+        .boxed()
+    }
+
+    fn lockdown_report<'a>(&'a self, auth: &DeviceAuth, call: &LockdownCall) -> BoxFuture<'a, Result<(), BackendError>> {
+        let record = LockdownCallRecord { at: Instant::now(), auth: auth.clone(), call: call.clone() };
+        async move {
+            let rejected_secret = self.is_rejected(&record.auth);
+            lock(&self.inner.lockdown_calls).push(record);
+            self.inner.changed.notify_waiters();
+            if rejected_secret {
+                return Err(rejected());
+            }
+            lock(&self.inner.lockdown_script).pop_front().unwrap_or(Ok(()))
         }
         .boxed()
     }

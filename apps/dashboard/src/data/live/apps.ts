@@ -35,4 +35,5 @@ export const NEW_APP: AppDetail = {
   fileTypes: [],
   directEmployeeCount: 0,
   groupOptions: [],
+  denials30d: [],
 };
