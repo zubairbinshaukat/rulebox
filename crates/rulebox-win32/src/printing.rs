@@ -8,14 +8,17 @@
 //!   printers of plan 4.8 are Windows' own queues), but the name must be a plain queue
 //!   name: no `\`, no `,`, no control characters.
 //!
-//! Driver choice and the approved-driver list are the agent's job (Step 14b); `add` only
-//! passes the names it is given to Windows, which refuses a driver that is not installed.
+//! Driver choice and the approved-driver list are the agent's job (Step 14; Step 14b adds pushing drivers); `add` only
+//! passes the names it is given to Windows, which refuses a driver that is not installed. Step 14 adds the comment
+//! field (the stored printer id), the driver list, Standard TCP/IP ports (`Rulebox_<id>`) and per-machine share
+//! connections. Every writer checks its rules first, then the guard.
 
 use windows::core::{PCWSTR, PWSTR};
+use windows::Win32::Foundation::HANDLE;
 use windows::Win32::Graphics::Printing::{
-    AddPrinterW, ClosePrinter, DeletePrinter, EnumPrintersW, GetPrinterW, OpenPrinterW, SetPrinterW,
-    PRINTER_ACCESS_RIGHTS, PRINTER_ALL_ACCESS, PRINTER_DEFAULTSW, PRINTER_ENUM_CONNECTIONS, PRINTER_ENUM_LOCAL,
-    PRINTER_HANDLE, PRINTER_INFO_2W, PRINTER_INFO_3,
+    AddPrinterW, ClosePrinter, DeletePrinter, EnumPortsW, EnumPrinterDriversW, EnumPrintersW, GetPrinterW, OpenPrinterW,
+    SetPrinterW, XcvDataW, DRIVER_INFO_1W, PORT_INFO_1W, PRINTER_ACCESS_RIGHTS, PRINTER_ALL_ACCESS, PRINTER_DEFAULTSW,
+    PRINTER_ENUM_CONNECTIONS, PRINTER_ENUM_LOCAL, PRINTER_HANDLE, PRINTER_INFO_2W, PRINTER_INFO_3,
 };
 use windows::Win32::Security::PSECURITY_DESCRIPTOR;
 
@@ -32,15 +35,21 @@ const READ_CONTROL: u32 = 0x0002_0000;
 const INSUFFICIENT_BUFFER: u32 = 122;
 /// `ERROR_INVALID_PRINTER_NAME`.
 const INVALID_PRINTER_NAME: u32 = 1801;
+/// `ERROR_ALREADY_EXISTS` and `ERROR_UNKNOWN_PORT` (what the port monitor answers).
+const ERROR_ALREADY_EXISTS: u32 = 183;
+const ERROR_UNKNOWN_PORT: u32 = 1796;
 
 /// A queue Rulebox is asked to create.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PrinterSpec {
     /// `<display name> (Rulebox)`.
     pub name: String,
-    /// An existing port (`IP_192.168.1.20`, a WSD or IPP port); creating ports is Step 14b.
+    /// An existing port: one of ours (`Rulebox_<id>`, see [`add_port`]) or, for an IPP printer, the printer's URL.
     pub port: String,
     pub driver: String,
+    /// The queue's comment field. Rulebox stores `rulebox:<printer id>` here, so a queue is found by id even when
+    /// somebody renamed it (plan 4.15).
+    pub comment: String,
 }
 
 /// One queue as `list` reports it.
@@ -50,6 +59,8 @@ pub struct PrinterInfo {
     pub port: String,
     pub driver: String,
     pub attributes: u32,
+    /// The comment field (see [`PrinterSpec::comment`]).
+    pub comment: String,
 }
 
 /// A printer handle closed on drop.
@@ -167,11 +178,270 @@ pub fn list() -> Result<Vec<PrinterInfo>> {
             port: pwstr_to_string(info.pPortName),
             driver: pwstr_to_string(info.pDriverName),
             attributes: info.Attributes,
+            comment: pwstr_to_string(info.pComment),
         });
     }
     Ok(out)
 }
 
+/// The names of the printer drivers in the Windows driver store (current architecture). Read-only. The agent never
+/// installs a driver (plan 4.15): a printer whose driver is not in this list is `driver_missing`.
+pub fn list_drivers() -> Result<Vec<String>> {
+    let (mut needed, mut returned) = (0u32, 0u32);
+    // SAFETY: no buffer, size 0: only the size is asked for. Null name and environment: this machine, this architecture.
+    let first = unsafe { EnumPrinterDriversW(PCWSTR::null(), PCWSTR::null(), 1, None, &mut needed, &mut returned) };
+    if let Err(e) = first {
+        match api_err("EnumPrinterDriversW", &e) {
+            Win32Error::Api { code: INSUFFICIENT_BUFFER, .. } => {}
+            other => return Err(other),
+        }
+    }
+    if needed == 0 {
+        return Ok(Vec::new());
+    }
+    let mut buffer = aligned(needed as usize);
+    // SAFETY: the buffer holds at least `needed` bytes and is 8-byte aligned.
+    unsafe { EnumPrinterDriversW(PCWSTR::null(), PCWSTR::null(), 1, Some(as_bytes(&mut buffer)), &mut needed, &mut returned) }
+        .map_err(|e| api_err("EnumPrinterDriversW", &e))?;
+    let first = buffer.as_ptr().cast::<DRIVER_INFO_1W>();
+    let mut out = Vec::with_capacity(returned as usize);
+    for i in 0..returned as usize {
+        // SAFETY: the call wrote `returned` consecutive DRIVER_INFO_1W structures at the start of `buffer`.
+        out.push(pwstr_to_string(unsafe { &*first.add(i) }.pName));
+    }
+    Ok(out)
+}
+
+// ---- ports (Standard TCP/IP port monitor) ---------------------------------------------------------------------------
+
+/// The prefix of every port Rulebox creates, so it only ever deletes a port it made.
+pub const PORT_PREFIX: &str = "Rulebox_";
+/// Longest port name (`PORT_DATA_1.sztPortName` is 64 characters with the terminator).
+const MAX_PORT_NAME: usize = 63;
+/// `PORT_DATA_1` field sizes: host 48, LPR queue 32 characters.
+const MAX_PORT_HOST: usize = 48;
+const MAX_PORT_QUEUE: usize = 32;
+/// `SERVER_ACCESS_ADMINISTER`: what the Xcv port of a print monitor needs.
+const SERVER_ACCESS_ADMINISTER: u32 = 1;
+/// The Xcv name of the Standard TCP/IP port monitor.
+const TCP_MONITOR: &str = ",XcvMonitor Standard TCP/IP Port";
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PortProtocol {
+    /// Raw TCP (usually 9100).
+    RawTcp,
+    /// LPR / LPD (port 515, queue name required).
+    Lpr,
+}
+
+/// A Standard TCP/IP port Rulebox is asked to create.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PortSpec {
+    /// `Rulebox_<printer id>`.
+    pub name: String,
+    pub protocol: PortProtocol,
+    pub host: String,
+    /// The TCP port (raw); LPR ignores it (515).
+    pub number: u16,
+    /// The LPR queue; empty for raw.
+    pub queue: String,
+}
+
+/// `PORT_DATA_1` (tcpmon): the layout `XcvData("AddPort")` expects.
+#[repr(C)]
+struct PortData1 {
+    port_name: [u16; 64],
+    version: u32,
+    protocol: u32,
+    size: u32,
+    reserved: u32,
+    host: [u16; 49],
+    snmp_community: [u16; 33],
+    double_spool: u32,
+    queue: [u16; 33],
+    ip_address: [u16; 16],
+    reserved2: [u8; 540],
+    port_number: u32,
+    snmp_enabled: u32,
+    snmp_dev_index: u32,
+}
+
+fn fill<const N: usize>(target: &mut [u16; N], text: &str) {
+    for (slot, unit) in target.iter_mut().zip(text.encode_utf16().take(N - 1)) {
+        *slot = unit;
+    }
+}
+
+/// A port name Rulebox may add or delete: `Rulebox_<id>`, plain characters, at most 63.
+pub fn check_own_port_name(name: &str) -> Result<()> {
+    let plain = name.len() > PORT_PREFIX.len()
+        && name.len() <= MAX_PORT_NAME
+        && name.starts_with(PORT_PREFIX)
+        && !name.chars().any(|c| c.is_control() || matches!(c, '\\' | ',' | '/' | ' '));
+    if plain {
+        Ok(())
+    } else {
+        Err(Win32Error::Forbidden(format!("{name:?} is not a port Rulebox made")))
+    }
+}
+
+/// The rules of [`add_port`] (no API call, no guard).
+pub fn check_port_spec(spec: &PortSpec) -> Result<()> {
+    check_own_port_name(&spec.name)?;
+    let host_ok = !spec.host.is_empty() && spec.host.chars().count() <= MAX_PORT_HOST && !spec.host.chars().any(|c| c.is_control() || c.is_whitespace());
+    if !host_ok {
+        return Err(Win32Error::Forbidden("the port host is not valid".into()));
+    }
+    let queue_ok = spec.queue.chars().count() <= MAX_PORT_QUEUE && !spec.queue.chars().any(|c| c.is_control() || c.is_whitespace());
+    if !queue_ok || (spec.protocol == PortProtocol::Lpr && spec.queue.is_empty()) || (spec.protocol == PortProtocol::RawTcp && !spec.queue.is_empty()) {
+        return Err(Win32Error::Forbidden("the port queue is not valid".into()));
+    }
+    if spec.protocol == PortProtocol::RawTcp && spec.number == 0 {
+        return Err(Win32Error::Forbidden("the port number is not valid".into()));
+    }
+    Ok(())
+}
+
+/// Names of the ports on this machine. Read-only.
+pub fn list_ports() -> Result<Vec<String>> {
+    let (mut needed, mut returned) = (0u32, 0u32);
+    // SAFETY: no buffer, size 0: only the size is asked for. A null name is this machine.
+    let first = unsafe { EnumPortsW(PCWSTR::null(), 1, None, &mut needed, &mut returned) }.ok();
+    if let Err(e) = first {
+        match api_err("EnumPortsW", &e) {
+            Win32Error::Api { code: INSUFFICIENT_BUFFER, .. } => {}
+            other => return Err(other),
+        }
+    }
+    if needed == 0 {
+        return Ok(Vec::new());
+    }
+    let mut buffer = aligned(needed as usize);
+    // SAFETY: the buffer holds at least `needed` bytes and is 8-byte aligned.
+    unsafe { EnumPortsW(PCWSTR::null(), 1, Some(as_bytes(&mut buffer)), &mut needed, &mut returned) }
+        .ok()
+        .map_err(|e| api_err("EnumPortsW", &e))?;
+    let first = buffer.as_ptr().cast::<PORT_INFO_1W>();
+    let mut out = Vec::with_capacity(returned as usize);
+    for i in 0..returned as usize {
+        // SAFETY: the call wrote `returned` consecutive PORT_INFO_1W structures at the start of `buffer`.
+        out.push(pwstr_to_string(unsafe { &*first.add(i) }.pName));
+    }
+    Ok(out)
+}
+
+/// One Xcv call to the Standard TCP/IP port monitor.
+fn xcv(command: &str, input: &[u8]) -> Result<()> {
+    let monitor = open(TCP_MONITOR, SERVER_ACCESS_ADMINISTER)?.ok_or(Win32Error::NotFound)?;
+    let name = to_wide(command);
+    let (mut needed, mut status) = (0u32, 0u32);
+    // SAFETY: the Xcv handle is open; `name` is NUL-terminated; `input` outlives the call; no output is expected.
+    unsafe {
+        XcvDataW(
+            HANDLE(monitor.0.Value),
+            PCWSTR(name.as_ptr()),
+            Some(input),
+            None,
+            &mut needed,
+            Some(&mut status),
+        )
+    }
+    .ok()
+    .map_err(|e| api_err("XcvDataW", &e))?;
+    if status != 0 {
+        return Err(Win32Error::Api { api: "XcvDataW", code: status });
+    }
+    Ok(())
+}
+
+/// Creates a Standard TCP/IP port (raw or LPR). A port of that name that exists already is `AlreadyExists`.
+///
+/// DESTRUCTIVE: guarded. UNVERIFIED on a real print spooler (Step 21).
+pub fn add_port(spec: &PortSpec) -> Result<()> {
+    check_port_spec(spec)?;
+    require_test_machine()?;
+    // SAFETY: PortData1 is plain old data; all-zero is a valid value.
+    let mut data: PortData1 = unsafe { std::mem::zeroed() };
+    fill(&mut data.port_name, &spec.name);
+    data.version = 1;
+    data.protocol = if spec.protocol == PortProtocol::RawTcp { 1 } else { 2 };
+    data.size = std::mem::size_of::<PortData1>() as u32;
+    fill(&mut data.host, &spec.host);
+    fill(&mut data.queue, &spec.queue);
+    data.port_number = if spec.protocol == PortProtocol::Lpr { 515 } else { u32::from(spec.number) };
+    // SAFETY: `data` is a live, initialised repr(C) value; the slice covers exactly its bytes.
+    let bytes = unsafe { std::slice::from_raw_parts(std::ptr::from_ref(&data).cast::<u8>(), std::mem::size_of::<PortData1>()) };
+    match xcv("AddPort", bytes) {
+        Err(Win32Error::Api { code: ERROR_ALREADY_EXISTS, .. }) => Err(Win32Error::AlreadyExists),
+        other => other,
+    }
+}
+
+/// Deletes a port Rulebox made (a port that is not there is fine).
+///
+/// DESTRUCTIVE: guarded.
+pub fn delete_port(name: &str) -> Result<()> {
+    check_own_port_name(name)?;
+    require_test_machine()?;
+    let wide = to_wide(name);
+    // SAFETY: the slice covers exactly the UTF-16 units (with the terminator) of `wide`.
+    let bytes = unsafe { std::slice::from_raw_parts(wide.as_ptr().cast::<u8>(), wide.len() * 2) };
+    match xcv("DeletePort", bytes) {
+        Err(Win32Error::Api { code: ERROR_UNKNOWN_PORT, .. }) => Ok(()),
+        other => other,
+    }
+}
+
+// ---- per-machine share connections ----------------------------------------------------------------------------------
+
+/// A share name `\\server\queue`: two plain parts, nothing else.
+pub fn check_share_name(unc: &str) -> Result<()> {
+    let ok = unc.len() <= 255
+        && unc.strip_prefix("\\\\").is_some_and(|rest| {
+            let mut parts = rest.split('\\');
+            let (server, queue, more) = (parts.next(), parts.next(), parts.next());
+            more.is_none()
+                && server.is_some_and(|s| !s.is_empty() && !s.chars().any(|c| c.is_control() || c.is_whitespace() || matches!(c, ',' | '/' | '"')))
+                && queue.is_some_and(|q| !q.trim().is_empty() && !q.chars().any(|c| c.is_control() || matches!(c, ',' | '/' | '"')))
+        });
+    if ok {
+        Ok(())
+    } else {
+        Err(Win32Error::Forbidden(format!("{unc:?} is not a printer share name")))
+    }
+}
+
+fn printui(flag: &str, unc: &str) -> Result<()> {
+    let root = std::env::var_os("SystemRoot").map(std::path::PathBuf::from).unwrap_or_else(|| std::path::PathBuf::from(r"C:\Windows"));
+    let mut command = std::process::Command::new(root.join(r"System32\rundll32.exe"));
+    command.arg("printui.dll,PrintUIEntry").arg(flag).arg(format!("/n{unc}"));
+    {
+        use std::os::windows::process::CommandExt;
+        command.creation_flags(0x0800_0000); // CREATE_NO_WINDOW
+    }
+    let status = command.status().map_err(|_| Win32Error::Api { api: "PrintUIEntry", code: 0 })?;
+    if status.success() {
+        Ok(())
+    } else {
+        Err(Win32Error::Api { api: "PrintUIEntry", code: status.code().map_or(0, |c| c as u32) })
+    }
+}
+
+/// Adds a per-machine printer connection (`PrintUIEntry /ga`): every user gets the printer at sign-in, no driver is
+/// fetched by Rulebox. DESTRUCTIVE: guarded. UNVERIFIED on a real print server (Step 21): whether Windows pulls the
+/// driver from the server in this call is the open question of plan 4.15 (`driver_not_approved`).
+pub fn connect_share(unc: &str) -> Result<()> {
+    check_share_name(unc)?;
+    require_test_machine()?;
+    printui("/ga", unc)
+}
+
+/// Removes a per-machine printer connection (`PrintUIEntry /gd`). DESTRUCTIVE: guarded.
+pub fn disconnect_share(unc: &str) -> Result<()> {
+    check_share_name(unc)?;
+    require_test_machine()?;
+    printui("/gd", unc)
+}
 /// Creates a local queue on an existing port with an installed driver.
 ///
 /// DESTRUCTIVE: guarded.
@@ -183,8 +453,10 @@ pub fn add(spec: &PrinterSpec) -> Result<()> {
     let mut driver = to_wide(&spec.driver);
     let mut processor = to_wide("winprint");
     let mut datatype = to_wide("RAW");
+    let mut comment = to_wide(&spec.comment);
     let info = PRINTER_INFO_2W {
         pPrinterName: PWSTR(name.as_mut_ptr()),
+        pComment: PWSTR(comment.as_mut_ptr()),
         pPortName: PWSTR(port.as_mut_ptr()),
         pDriverName: PWSTR(driver.as_mut_ptr()),
         pPrintProcessor: PWSTR(processor.as_mut_ptr()),
@@ -257,7 +529,7 @@ mod tests {
     use super::*;
 
     fn spec(name: &str) -> PrinterSpec {
-        PrinterSpec { name: name.into(), port: "IP_192.168.1.20".into(), driver: "Microsoft IPP Class Driver".into() }
+        PrinterSpec { name: name.into(), port: "IP_192.168.1.20".into(), driver: "Microsoft IPP Class Driver".into(), comment: "rulebox:k7".into() }
     }
 
     #[test]
@@ -291,6 +563,47 @@ mod tests {
         }
     }
 
+    fn port(name: &str) -> PortSpec {
+        PortSpec { name: name.into(), protocol: PortProtocol::RawTcp, host: "10.0.0.20".into(), number: 9100, queue: String::new() }
+    }
+
+    #[test]
+    fn only_rulebox_ports_are_added_or_deleted() {
+        assert!(check_port_spec(&port("Rulebox_k7")).is_ok());
+        assert!(check_port_spec(&PortSpec { protocol: PortProtocol::Lpr, queue: "lp".into(), ..port("Rulebox_k7") }).is_ok());
+        for bad in ["IP_10.0.0.20", "Rulebox_", "rulebox_k7", "Rulebox_a b", "Rulebox_a,b", "Rulebox_a\\b", &format!("Rulebox_{}", "x".repeat(60))] {
+            assert!(matches!(check_port_spec(&port(bad)), Err(Win32Error::Forbidden(_))), "{bad}");
+            assert!(matches!(delete_port(bad), Err(Win32Error::Forbidden(_))), "{bad}");
+            assert!(matches!(add_port(&port(bad)), Err(Win32Error::Forbidden(_))), "{bad}");
+        }
+        // Raw needs a port number and no queue; LPR needs a queue; the host is at most 48 characters, no spaces.
+        assert!(check_port_spec(&PortSpec { number: 0, ..port("Rulebox_k7") }).is_err());
+        assert!(check_port_spec(&PortSpec { queue: "lp".into(), ..port("Rulebox_k7") }).is_err());
+        assert!(check_port_spec(&PortSpec { protocol: PortProtocol::Lpr, ..port("Rulebox_k7") }).is_err());
+        assert!(check_port_spec(&PortSpec { protocol: PortProtocol::Lpr, queue: "x".repeat(33), ..port("Rulebox_k7") }).is_err());
+        assert!(check_port_spec(&PortSpec { host: "a".repeat(49), ..port("Rulebox_k7") }).is_err());
+        assert!(check_port_spec(&PortSpec { host: "a b".into(), ..port("Rulebox_k7") }).is_err());
+        assert!(check_port_spec(&PortSpec { host: String::new(), ..port("Rulebox_k7") }).is_err());
+    }
+
+    #[test]
+    fn share_names_are_two_plain_parts() {
+        for ok in [r"\\print01\hp", r"\\10.0.0.5\Front desk"] {
+            assert!(check_share_name(ok).is_ok(), "{ok}");
+        }
+        for bad in [r"print01\hp", r"\\print01", r"\\print01\", r"\\\hp", r"\\print01\a\b", r"\\pr int\hp", r"\\print01\a,b", "//print01/hp", ""] {
+            assert!(matches!(check_share_name(bad), Err(Win32Error::Forbidden(_))), "{bad}");
+            assert!(matches!(connect_share(bad), Err(Win32Error::Forbidden(_))), "{bad}");
+            assert!(matches!(disconnect_share(bad), Err(Win32Error::Forbidden(_))), "{bad}");
+        }
+    }
+
+    #[test]
+    fn port_data_has_the_layout_tcpmon_expects() {
+        // 128 + 4*4 + 98 (+2) + 66 + 2 + 4 (double spool) + 66 + 32 + 540 + 4*3, with C padding: 950 -> 952 + 12.
+        assert_eq!(std::mem::size_of::<PortData1>(), 964);
+    }
+
     #[test]
     fn security_names_are_plain() {
         assert!(matches!(get_security(r"\\server\queue"), Err(Win32Error::Forbidden(_))));
@@ -305,12 +618,18 @@ mod tests {
         assert!(matches!(add(&spec("Front desk (Rulebox)")), Err(Win32Error::Guard(_))));
         assert!(matches!(delete("Front desk (Rulebox)"), Err(Win32Error::Guard(_))));
         assert!(matches!(set_security("Microsoft Print to PDF", "D:P(A;;GA;;;SY)"), Err(Win32Error::Guard(_))));
+        assert!(matches!(add_port(&port("Rulebox_k7")), Err(Win32Error::Guard(_))));
+        assert!(matches!(delete_port("Rulebox_k7"), Err(Win32Error::Guard(_))));
+        assert!(matches!(connect_share(r"\\print01\hp"), Err(Win32Error::Guard(_))));
+        assert!(matches!(disconnect_share(r"\\print01\hp"), Err(Win32Error::Guard(_))));
     }
 
     /// Reads the real printer list; never writes. Run by hand.
     #[test]
     #[ignore = "reads the real print spooler"]
     fn smoke_list() {
+        println!("drivers: {:?}", list_drivers().unwrap());
+        println!("ports: {:?}", list_ports().unwrap());
         for printer in list().unwrap() {
             println!("{printer:?}");
             if let Some(sddl) = get_security(&printer.name).unwrap() {

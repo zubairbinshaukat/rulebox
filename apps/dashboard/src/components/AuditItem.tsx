@@ -13,6 +13,8 @@ const TARGET_ROUTES: Record<string, string> = {
   group: "/groups/",
   // Phase 5 Step 13: the Wi-Fi audit rows (`wifi.created` ...) name the profile.
   wifi: "/networks/wifi/",
+  // Phase 5 Step 14: the printer audit rows (`printer.created` ...).
+  printer: "/networks/printers/",
 };
 
 

@@ -20,7 +20,7 @@ pub use rulebox_win32::eventlog::EventRecord;
 pub use rulebox_win32::fileid::{FileIdentity, FileStamp};
 pub use rulebox_win32::process::ProcessInfo;
 pub use rulebox_win32::posture::SecurityPosture;
-pub use rulebox_win32::printing::{PrinterInfo, PrinterSpec};
+pub use rulebox_win32::printing::{PortProtocol, PortSpec, PrinterInfo, PrinterSpec};
 pub use rulebox_win32::service::ServiceConfig;
 pub use rulebox_win32::wlan::WlanState;
 
@@ -68,6 +68,11 @@ pub const MUTATING_METHODS: &[&str] = &[
     "printer_add",
     "printer_delete",
     "printer_set_security",
+    // Phase 5 Step 14.
+    "printer_port_add",
+    "printer_port_delete",
+    "printer_share_connect",
+    "printer_share_disconnect",
     "bcd_set",
     "start_process_trace",
     "stop_process_trace",
@@ -353,6 +358,10 @@ pub trait Platform: Send + Sync + 'static {
     fn printer_list(&self) -> Result<Vec<PrinterInfo>, PlatformError>;
     /// A queue's DACL as SDDL (the journal's `Sddl` original). `Ok(None)`: no such queue.
     fn printer_get_security(&self, name: &str) -> Result<Option<String>, PlatformError>;
+    /// (Phase 5 Step 14) The names of the printer drivers in the driver store. Read-only: the agent never installs one.
+    fn printer_drivers(&self) -> Result<Vec<String>, PlatformError>;
+    /// (Phase 5 Step 14) The names of the printer ports on this machine.
+    fn printer_ports(&self) -> Result<Vec<String>, PlatformError>;
     fn bcd_get(&self, object: &str, element: &str) -> Result<Option<String>, PlatformError>;
     /// Up to `max` events of an audit channel after `after_record_id`, oldest first.
     fn read_event_log(&self, channel: &str, after_record_id: u64, max: usize) -> Result<Vec<EventRecord>, PlatformError>;
@@ -478,6 +487,13 @@ pub trait Platform: Send + Sync + 'static {
     /// Only a queue named `<display name> (Rulebox)`.
     fn printer_delete(&self, name: &str) -> Result<(), PlatformError>;
     fn printer_set_security(&self, name: &str, sddl: &str) -> Result<(), PlatformError>;
+    /// (Phase 5 Step 14) A Standard TCP/IP port (raw or LPR) named `Rulebox_<id>`; `AlreadyExists` when it is there.
+    fn printer_port_add(&self, spec: &PortSpec) -> Result<(), PlatformError>;
+    /// Only a port named `Rulebox_<id>`; one that is not there is fine.
+    fn printer_port_delete(&self, name: &str) -> Result<(), PlatformError>;
+    /// (Phase 5 Step 14) A per-machine connection to `\\server\queue`.
+    fn printer_share_connect(&self, unc: &str) -> Result<(), PlatformError>;
+    fn printer_share_disconnect(&self, unc: &str) -> Result<(), PlatformError>;
     /// Only `{current}` `recoveryenabled` (`Yes` / `No`).
     fn bcd_set(&self, object: &str, element: &str, value: &str) -> Result<(), PlatformError>;
     /// Starts the process-start trace; events arrive in `sink` on the trace's thread.

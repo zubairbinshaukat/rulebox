@@ -415,6 +415,20 @@ export const MAX_WIFI_LIST_GROUPS = 10;
 /** `networks:wifiDetail`: groups and apply reports per group read for the counts. */
 export const MAX_WIFI_DETAIL_GROUPS = 10;
 export const MAX_WIFI_DETAIL_REPORTS = 200;
+/** Printers (Phase 5 Step 14, plan 4.2 / 4.15): the same string limits as `PrinterSpec` in `rulebox-policy`. */
+export const MAX_PRINTER_NAME = 60;
+export const MAX_PRINTER_ADDRESS = 255;
+export const MAX_PRINTER_QUEUE = 64;
+export const MAX_PRINTER_DRIVER = 100;
+/** `orgSettings.phase5Settings.approvedPrinterDrivers`: names an organization adds to the inbox list. */
+export const MAX_APPROVED_PRINTER_DRIVERS = 20;
+/**
+ * Windows' Standard TCP/IP port (raw and LPR printers) stores the host in 48 characters and the LPR queue in 32
+ * (`PORT_DATA_1`), so a longer value cannot be created on the PC. DEVIATION from plan 4.2 (host up to 253, queue up
+ * to 64); `ipp` and `share` keep the plan's limits.
+ */
+export const MAX_TCP_PORT_HOST = 48;
+export const MAX_LPR_QUEUE = 32;
 /** Sealed boxes deleted per transaction when a profile goes away or becomes open. */
 export const SEALED_PURGE_BATCH = 100;
 /** `seal:forDevices`: devices sealed per run (each needs one box per assigned profile). */

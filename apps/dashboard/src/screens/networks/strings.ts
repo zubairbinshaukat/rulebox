@@ -1,11 +1,13 @@
 /**
- * Networks (Phase 5 Step 13): Wi-Fi profiles. A lazily loaded part of the dashboard's sentences (only the Networks
+ * Networks (Phase 5 Steps 13 and 14): Wi-Fi profiles and printers. A lazily loaded part of the dashboard's sentences (only the Networks
  * and Wi-Fi screens import it). Plain words: the people using this run a shop, not a data centre.
  */
 import type { PassphraseProblem, SsidProblem } from "../../lib/wifiRules";
 import { MAX_SSID_BYTES, MAX_WIFI_PROFILES } from "../../lib/wifiRules";
+import type { AddressProblem, NameProblem, PortProblem, QueueProblem } from "../../lib/printerRules";
+import { MAX_LPR_QUEUE, MAX_PRINTERS, MAX_PRINTER_NAME, MAX_TCP_HOST } from "../../lib/printerRules";
 import { formatNumber, plural } from "../../lib/format";
-import type { WifiSecurity } from "../../data/types";
+import type { PrinterKind, WifiSecurity } from "../../data/types";
 
 export const networksStrings = {
   title: "Networks",
@@ -122,10 +124,97 @@ export const networksStrings = {
   countsCapped: (sampled: number) => `Based on the first ${formatNumber(sampled)} PCs of each group.`,
   countsSampled: (sampled: number) => `${formatNumber(sampled)} ${plural(sampled, { one: "PC", other: "PCs" })} counted.`,
 
-  /** `too_large` (detail "groups") and the plan limit of the Wi-Fi calls, as sentences; null = the usual one. */
+  // ---- printers (Step 14)
+  printersSection: "Printers",
+  newPrinter: "New printer",
+  printersLead: "Printers your PCs set up on their own. Only the drivers already on the PC are used: Rulebox never installs a driver.",
+  emptyPrintersTitle: "No printers yet",
+  emptyPrintersBody: "Add a printer and give it to a group. Its PCs then set it up by themselves, and the printer shows up in every program's Print window.",
+  kindNames: {
+    ipp: "Network printer (IPP)",
+    raw: "Raw TCP/IP (port 9100)",
+    lpr: "LPR queue",
+    share: "Shared by a server",
+  } satisfies Record<PrinterKind, string>,
+  kindShort: { ipp: "IPP", raw: "Raw TCP", lpr: "LPR", share: "Shared" } satisfies Record<PrinterKind, string>,
+  kindHelp: {
+    ipp: "The usual choice for a modern network printer. Works with the IPP class driver that comes with Windows.",
+    raw: "Sends the print job straight to the printer's TCP port. Needs a driver that is already on the PC.",
+    lpr: "For older printers and print servers that use the LPR protocol. Needs a queue name.",
+    share: "A printer that a Windows server shares as \\\\server\\name. The PCs connect to it; Rulebox never takes a driver from the server.",
+  } satisfies Record<PrinterKind, string>,
+  defaultBadge: (count: number) => `Default in ${formatNumber(count)} ${plural(count, { one: "group", other: "groups" })}`,
+  kindLabel: "How the printer is reached",
+  printerCountsNone: "No PC has reported this printer yet.",
+  driverLabel: "Driver",
+  addressLabel: {
+    ipp: "Printer address (URL)",
+    raw: "Printer address",
+    lpr: "Printer address",
+    share: "Shared name",
+  } satisfies Record<PrinterKind, string>,
+  addressHint: {
+    ipp: "For example ipp://10.0.0.20/ipp/print or https://printer.example/ipp/print. No user name or password in the address.",
+    raw: `An IP address or a name, for example 10.0.0.20. At most ${MAX_TCP_HOST} characters.`,
+    lpr: `An IP address or a name, for example 10.0.0.20. At most ${MAX_TCP_HOST} characters.`,
+    share: "Written like \\\\print-server\\Front-desk.",
+  } satisfies Record<PrinterKind, string>,
+  addressProblems: {
+    empty: "Enter the printer's address.",
+    length: `That address is too long (raw and LPR printers: at most ${MAX_TCP_HOST} characters).`,
+    scheme: "Start the address with ipp:// or https://.",
+    credentials: "Remove the user name and password from the address.",
+    host: "Use an IP address or a name made of letters, digits and hyphens. Leave the port out here.",
+    port: "The port in the address must be a number from 1 to 65535.",
+    path: "Add the path after the host, usually /ipp/print.",
+    share: "Write the shared name as \\\\server\\name.",
+    characters: "Remove spaces, commas and special characters that a printer address cannot have.",
+  } satisfies Record<AddressProblem, string>,
+  port: "Port",
+  portHint: "Leave empty for 9100, the port almost every printer listens on.",
+  portProblems: { range: "Use a whole number from 1 to 65535, or leave it empty." } satisfies Record<PortProblem, string>,
+  queue: "Queue name",
+  queueHint: `The queue the printer's LPR service expects, at most ${MAX_LPR_QUEUE} characters.`,
+  queueProblems: {
+    required: "Enter the queue name.",
+    length: `A queue name is at most ${MAX_LPR_QUEUE} characters.`,
+    characters: "A queue name has no spaces or control characters.",
+  } satisfies Record<QueueProblem, string>,
+  printerNameHint: "Shown in the Print window on the PCs as the name followed by (Rulebox).",
+  printerNameProblems: {
+    empty: "Enter a name.",
+    length: `Use at most ${MAX_PRINTER_NAME} characters.`,
+    characters: "Leave out backslashes, commas, slashes and line breaks.",
+  } satisfies Record<NameProblem, string>,
+  driverHint: "The driver must already be on the PC: Rulebox never installs one and never takes one from a print server. A PC without it reports 'driver missing'.",
+  driverNotListed: "Not on the approved list any more",
+  printerGroupsHint: "The PCs in these groups get this printer. Changes reach them with the group's next configuration.",
+  defaultsLegend: "Default printer",
+  defaultsHint: "Tick the groups where this printer is the one that prints first. A group has one default printer.",
+  defaultIn: (group: string) => `Default in ${group}`,
+  noDefaultGroups: "Pick at least one group above to choose where it is the default.",
+  createPrinter: "Add printer",
+  printerSaved: "Printer saved.",
+  printerCreated: (name: string) => `${name} added.`,
+  printerDeleted: (name: string) => `${name} removed.`,
+  printerDeleteTitle: (name: string) => `Remove ${name}?`,
+  printerDeleteBody: "The printer is taken away from every group. The PCs remove the printer they set up for it. This can't be undone.",
+  removePrinter: "Remove printer",
+  printerCountsSub: "How the PCs of the assigned groups report this printer. Counted when you open this page.",
+  printerApplied: "Set up",
+  printerFailed: "Failed",
+  printerLoading: "Loading printers",
+  printerTitle: "Printer",
+  printerNewTitle: "New printer",
+  nameTaken: "Another printer already has this name.",
+  defaultTaken: "Another printer is already the default for one of these groups. Turn that one off first.",
+  driverRefused: "That driver is not on the approved list.",
+
+  /** `too_large` (detail "groups" / "printers") and the plan limit of the Wi-Fi and printer calls, as sentences; null = the usual one. */
   describeError: (code: string, detail: string | undefined, limit = 0): string | null => {
+    if (code === "too_large" && detail === "printers") return `You can have at most ${formatNumber(MAX_PRINTERS)} printers. Remove one first.`;
     if (code === "too_large" && detail === "groups") {
-      return `One save can touch at most ${formatNumber(limit)} ${plural(limit, { one: "group", other: "groups" })}: the groups the network is in now plus the ones you pick. A network in more groups than that can't be changed or removed here yet.`;
+      return `One save can touch at most ${formatNumber(limit)} ${plural(limit, { one: "group", other: "groups" })}: the groups it is in now plus the ones you pick. Something in more groups than that can't be changed or removed here yet.`;
     }
     if (code === "too_large" && detail === "wifi") return `You can have at most ${formatNumber(MAX_WIFI_PROFILES)} Wi-Fi networks. Remove one first.`;
     if (code === "not_ready" && detail === "sealing_key") {

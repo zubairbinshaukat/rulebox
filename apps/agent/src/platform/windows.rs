@@ -26,7 +26,7 @@ use tokio_util::sync::CancellationToken;
 
 use super::{
     acl_target_allowed, AppLockerMechanism, AppLockerState, BootIdentity, EventRecord, InstallerCommand, InstallerExit,
-    FileIdentity, FileStamp, LocalUser, LockoutPolicy, OsInfo, Platform, PlatformError, PrinterInfo, PrinterSpec,
+    FileIdentity, FileStamp, LocalUser, LockoutPolicy, OsInfo, Platform, PlatformError, PortSpec, PrinterInfo, PrinterSpec,
     ProcessInfo, ProcessSink, RegData, RegValueRef, ResetOutcome, SecurityPosture, ServiceConfig, SessionInfo,
     SessionState, ShellBinaries, ShellMechanism, StaffUserSpec, TraceHandle, TraceStats, WlanState,
 };
@@ -599,6 +599,14 @@ impl Platform for WindowsPlatform {
         printing::get_security(name).map_err(map_err)
     }
 
+    fn printer_drivers(&self) -> Result<Vec<String>, PlatformError> {
+        printing::list_drivers().map_err(map_err)
+    }
+
+    fn printer_ports(&self) -> Result<Vec<String>, PlatformError> {
+        printing::list_ports().map_err(map_err)
+    }
+
     fn bcd_get(&self, object: &str, element: &str) -> Result<Option<String>, PlatformError> {
         bcd::get(object, element).map_err(map_err)
     }
@@ -777,6 +785,30 @@ impl Platform for WindowsPlatform {
         printing::check_plain_name(name).map_err(map_err)?;
         guard()?;
         printing::set_security(name, sddl).map_err(map_err)
+    }
+
+    fn printer_port_add(&self, spec: &PortSpec) -> Result<(), PlatformError> {
+        printing::check_port_spec(spec).map_err(map_err)?;
+        guard()?;
+        printing::add_port(spec).map_err(map_err)
+    }
+
+    fn printer_port_delete(&self, name: &str) -> Result<(), PlatformError> {
+        printing::check_own_port_name(name).map_err(map_err)?;
+        guard()?;
+        printing::delete_port(name).map_err(map_err)
+    }
+
+    fn printer_share_connect(&self, unc: &str) -> Result<(), PlatformError> {
+        printing::check_share_name(unc).map_err(map_err)?;
+        guard()?;
+        printing::connect_share(unc).map_err(map_err)
+    }
+
+    fn printer_share_disconnect(&self, unc: &str) -> Result<(), PlatformError> {
+        printing::check_share_name(unc).map_err(map_err)?;
+        guard()?;
+        printing::disconnect_share(unc).map_err(map_err)
     }
 
     fn bcd_set(&self, object: &str, element: &str, value: &str) -> Result<(), PlatformError> {
@@ -1032,7 +1064,7 @@ mod tests {
         let staff_key = r"Software\Microsoft\Windows\CurrentVersion\Policies\System";
         let policy = "8a6eb3cd-ba2e-4a97-a1f9-4f4a3b1c0001";
         let wlan_xml = "<WLANProfile><name>Rulebox-ab12</name></WLANProfile>";
-        let spec = PrinterSpec { name: "Front (Rulebox)".into(), port: "IP_1".into(), driver: "Driver".into() };
+        let spec = PrinterSpec { name: "Front (Rulebox)".into(), port: "IP_1".into(), driver: "Driver".into(), comment: String::new() };
         blocked("write_staff_value", p.write_staff_value(sid, staff_key, "NoRun", &RegData::Dword(1)));
         blocked("delete_staff_value", p.delete_staff_value(sid, staff_key, "NoRun"));
         blocked("deploy_ci_policy", p.deploy_ci_policy(policy, b"cip"));
@@ -1050,6 +1082,11 @@ mod tests {
         blocked("printer_add", p.printer_add(&spec));
         blocked("printer_delete", p.printer_delete("Front (Rulebox)"));
         blocked("printer_set_security", p.printer_set_security("Microsoft Print to PDF", "D:P(A;;GA;;;SY)"));
+        let port = PortSpec { name: "Rulebox_k7".into(), protocol: crate::platform::PortProtocol::RawTcp, host: "10.0.0.20".into(), number: 9100, queue: String::new() };
+        blocked("printer_port_add", p.printer_port_add(&port));
+        blocked("printer_port_delete", p.printer_port_delete("Rulebox_k7"));
+        blocked("printer_share_connect", p.printer_share_connect(r"\\print01\hp"));
+        blocked("printer_share_disconnect", p.printer_share_disconnect(r"\\print01\hp"));
         blocked("bcd_set", p.bcd_set("{current}", "recoveryenabled", "No"));
         blocked("remove_safe_boot_entry", p.remove_safe_boot_entry("Minimal"));
         blocked("start_process_trace", p.start_process_trace(Box::new(|_| {})));
@@ -1109,6 +1146,8 @@ mod tests {
         other(p.wlan_set_profile("<WLANProfile><name>Home</name></WLANProfile>"), "Rulebox");
         other(p.wlan_delete_profile("Home"), "Rulebox");
         other(p.printer_delete("Microsoft Print to PDF"), "Rulebox made");
+        other(p.printer_port_delete("IP_10.0.0.20"), "port Rulebox made");
+        other(p.printer_share_connect("print01\\hp"), "printer share name");
         other(p.bcd_set("{bootmgr}", "displayorder", "x"), "not one Rulebox changes");
         other(p.remove_safe_boot_entry("Option"), "not one Rulebox writes");
         assert!(matches!(

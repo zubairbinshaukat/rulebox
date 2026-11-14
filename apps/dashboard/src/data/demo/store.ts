@@ -419,7 +419,7 @@ export function checkRevision(doc: { revision?: number }, expected: number) {
 export function simulateConcurrentEdit() {
   const d = state.db;
   d.org.revision++;
-  for (const list of [d.groups, d.devices, d.employees, d.apps, d.members, d.wifi]) for (const row of list) row.revision++;
+  for (const list of [d.groups, d.devices, d.employees, d.apps, d.members, d.wifi, d.printers]) for (const row of list) row.revision++;
   notify();
 }
 

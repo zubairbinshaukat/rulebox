@@ -74,6 +74,10 @@ pub struct AgentState {
     /// contains or derives from a passphrase.
     #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
     pub wlan_marks: std::collections::BTreeMap<String, String>,
+    /// (Phase 5 Step 14) `rev<revision>:<hash>` of each print queue, port and share connection the agent made, keyed by the
+    /// journal entry id (`printer:<id>`, `printer-port:<name>`, `printer-share:<unc>`). A different mark means "rebuild it".
+    #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
+    pub printer_marks: std::collections::BTreeMap<String, String>,
 }
 
 impl AgentState {
@@ -103,6 +107,7 @@ impl Default for AgentState {
             applocker_restart: None,
             seal_key_registered: None,
             wlan_marks: std::collections::BTreeMap::new(),
+            printer_marks: std::collections::BTreeMap::new(),
         }
     }
 }

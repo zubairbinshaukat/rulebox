@@ -12,7 +12,7 @@ use tokio_util::sync::CancellationToken;
 
 use super::{
     acl_target_allowed, AppLockerMechanism, AppLockerState, BootIdentity, EventRecord, InstallerCommand, InstallerExit,
-    FileIdentity, FileStamp, LocalUser, LockoutPolicy, OsInfo, Platform, PlatformError, PrinterInfo, PrinterSpec,
+    FileIdentity, FileStamp, LocalUser, LockoutPolicy, OsInfo, Platform, PlatformError, PortSpec, PrinterInfo, PrinterSpec,
     ProcessInfo, ProcessSink, ProcessStart, RegData, RegValueRef, ResetOutcome, SecurityPosture, ServiceConfig,
     SessionInfo, ShellBinaries, ShellMechanism, StaffUserSpec, TraceHandle, TraceStats, WlanState,
 };
@@ -78,6 +78,8 @@ pub enum SimOp {
     WlanList,
     PrinterList,
     PrinterGetSecurity,
+    PrinterDrivers,
+    PrinterPorts,
     BcdGet,
     ReadEventLog,
     ReadSecurityPosture,
@@ -99,6 +101,10 @@ pub enum SimOp {
     PrinterAdd,
     PrinterDelete,
     PrinterSetSecurity,
+    PrinterPortAdd,
+    PrinterPortDelete,
+    PrinterShareConnect,
+    PrinterShareDisconnect,
     BcdSet,
     StartProcessTrace,
     StopProcessTrace,
@@ -152,6 +158,8 @@ impl SimOp {
                 | SimOp::WlanList
                 | SimOp::PrinterList
                 | SimOp::PrinterGetSecurity
+                | SimOp::PrinterDrivers
+                | SimOp::PrinterPorts
                 | SimOp::BcdGet
                 | SimOp::ReadEventLog
                 | SimOp::ReadSecurityPosture
@@ -268,6 +276,11 @@ pub struct SimWorld {
     pub wlan_profiles: std::collections::BTreeMap<String, String>,
     pub wlan_allowed: Vec<String>,
     pub printers: Vec<SimPrinter>,
+    /// (Step 14) The driver store, the ports (`PORTPROMPT:`, `FILE:` and the `Rulebox_` ones) and the per-machine share
+    /// connections. A printer needs an installed driver and an existing port (or, for IPP, its URL), as on Windows.
+    pub printer_drivers: Vec<String>,
+    pub printer_ports: Vec<SimPort>,
+    pub printer_shares: Vec<String>,
     /// BCD elements: (object, element) to value.
     pub bcd: HashMap<(String, String), String>,
     /// Event logs by channel; `read_event_log` filters by record number.
@@ -347,9 +360,21 @@ impl SimWorld {
                     port: "PORTPROMPT:".into(),
                     driver: "Microsoft Print To PDF".into(),
                     attributes: 64,
+                    comment: String::new(),
                 },
                 sddl: Some("D:(A;;LCSWSDRCWDWO;;;WD)(A;OIIO;RPWPSDRCWDWO;;;WD)".into()),
             }],
+            printer_drivers: [
+                "Microsoft IPP Class Driver",
+                "Microsoft PCL6 Class Driver",
+                "Microsoft PS Class Driver",
+                "Generic / Text Only",
+                "Microsoft Print To PDF",
+            ]
+            .map(String::from)
+            .to_vec(),
+            printer_ports: vec![SimPort::named("PORTPROMPT:"), SimPort::named("FILE:")],
+            printer_shares: Vec::new(),
             bcd: HashMap::new(),
             event_logs: HashMap::new(),
             posture: SecurityPosture {
@@ -386,6 +411,20 @@ pub struct SimService {
     pub start: u32,
     pub sddl: String,
     pub privileges: Vec<String>,
+}
+
+/// A simulated printer port; `spec` is set for the ones the agent created.
+#[derive(Debug, Clone)]
+#[allow(dead_code)]
+pub struct SimPort {
+    pub name: String,
+    pub spec: Option<PortSpec>,
+}
+
+impl SimPort {
+    fn named(name: &str) -> Self {
+        Self { name: name.to_string(), spec: None }
+    }
 }
 
 /// A simulated print queue and its DACL.
@@ -994,6 +1033,16 @@ impl Platform for SimPlatform {
         Ok(lock(&self.world).printers.iter().map(|printer| printer.info.clone()).collect())
     }
 
+    fn printer_drivers(&self) -> Result<Vec<String>, PlatformError> {
+        self.check(SimOp::PrinterDrivers)?;
+        Ok(lock(&self.world).printer_drivers.clone())
+    }
+
+    fn printer_ports(&self) -> Result<Vec<String>, PlatformError> {
+        self.check(SimOp::PrinterPorts)?;
+        Ok(lock(&self.world).printer_ports.iter().map(|p| p.name.clone()).collect())
+    }
+
     fn printer_get_security(&self, name: &str) -> Result<Option<String>, PlatformError> {
         self.check(SimOp::PrinterGetSecurity)?;
         printing::check_plain_name(name).map_err(map_err)?;
@@ -1250,11 +1299,20 @@ impl Platform for SimPlatform {
         self.check(SimOp::PrinterAdd)?;
         printing::check_spec(spec).map_err(map_err)?;
         let mut world = lock(&self.world);
+        // As on Windows: an unknown driver (1797) or port (1796) is refused. An IPP printer's port is its URL.
+        if !world.printer_drivers.iter().any(|d| d.eq_ignore_ascii_case(&spec.driver)) {
+            return Err(PlatformError::Win32 { api: "AddPrinterW", code: 1797 });
+        }
+        let is_url = spec.port.starts_with("ipp://") || spec.port.starts_with("https://");
+        if !is_url && !world.printer_ports.iter().any(|p| p.name == spec.port) {
+            return Err(PlatformError::Win32 { api: "AddPrinterW", code: 1796 });
+        }
         let info = PrinterInfo {
             name: spec.name.clone(),
             port: spec.port.clone(),
             driver: spec.driver.clone(),
             attributes: 64,
+            comment: spec.comment.clone(),
         };
         match world.printers.iter_mut().find(|p| p.info.name == spec.name) {
             Some(existing) => existing.info = info,
@@ -1280,6 +1338,46 @@ impl Platform for SimPlatform {
             }
             None => Err(PlatformError::NotFound),
         }
+    }
+
+    fn printer_port_add(&self, spec: &PortSpec) -> Result<(), PlatformError> {
+        self.check(SimOp::PrinterPortAdd)?;
+        printing::check_port_spec(spec).map_err(map_err)?;
+        let mut world = lock(&self.world);
+        if world.printer_ports.iter().any(|p| p.name == spec.name) {
+            return Err(PlatformError::AlreadyExists);
+        }
+        world.printer_ports.push(SimPort { name: spec.name.clone(), spec: Some(spec.clone()) });
+        Ok(())
+    }
+
+    fn printer_port_delete(&self, name: &str) -> Result<(), PlatformError> {
+        self.check(SimOp::PrinterPortDelete)?;
+        printing::check_own_port_name(name).map_err(map_err)?;
+        let mut world = lock(&self.world);
+        // Windows refuses to delete a port a queue still uses (ERROR_BUSY, 170).
+        if world.printers.iter().any(|p| p.info.port == name) {
+            return Err(PlatformError::Win32 { api: "XcvDataW", code: 170 });
+        }
+        world.printer_ports.retain(|p| p.name != name);
+        Ok(())
+    }
+
+    fn printer_share_connect(&self, unc: &str) -> Result<(), PlatformError> {
+        self.check(SimOp::PrinterShareConnect)?;
+        printing::check_share_name(unc).map_err(map_err)?;
+        let mut world = lock(&self.world);
+        if !world.printer_shares.iter().any(|s| s == unc) {
+            world.printer_shares.push(unc.to_string());
+        }
+        Ok(())
+    }
+
+    fn printer_share_disconnect(&self, unc: &str) -> Result<(), PlatformError> {
+        self.check(SimOp::PrinterShareDisconnect)?;
+        printing::check_share_name(unc).map_err(map_err)?;
+        lock(&self.world).printer_shares.retain(|s| s != unc);
+        Ok(())
     }
 
     fn bcd_set(&self, object: &str, element: &str, value: &str) -> Result<(), PlatformError> {

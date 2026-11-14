@@ -758,9 +758,33 @@ export interface WifiRow {
   groups: GroupOption[];
 }
 
-/** `networks:list`. Printers join it in Step 14. */
+/** `printers.kind` (plan 4.15): IPP URL, raw TCP, LPR, or a shared queue on a server. */
+export type PrinterKind = "ipp" | "raw" | "lpr" | "share";
+
+/** One printer as `networks:list` and `networks:printerDetail` return it. */
+export interface PrinterRow {
+  _id: Id;
+  name: string;
+  kind: PrinterKind;
+  address: string;
+  /** Raw TCP only; empty = 9100. */
+  port: number | null;
+  /** LPR only. */
+  queue: string | null;
+  driver: string;
+  revision: number;
+  /** All assigned groups; `groups` carries only the first few. */
+  groupCount: number;
+  /** The groups this printer is the default of (a number: the screen only says "default for N"). */
+  defaultGroupCount: number;
+  groups: GroupOption[];
+}
+
+/** `networks:list`: Wi-Fi profiles, printers and the driver names the picker offers (the inbox class drivers plus the ones the organization approved). */
 export interface NetworksScreen {
   wifi: WifiRow[];
+  printers: PrinterRow[];
+  approvedDrivers: string[];
 }
 
 /**
@@ -779,6 +803,27 @@ export interface WifiApplyCounts {
 export interface WifiDetail extends WifiRow {
   groupIds: Id[];
   counts: WifiApplyCounts;
+}
+
+/** `networks:printerDetail`: the row, the group ids and the apply counts (same shape as a Wi-Fi profile's). */
+export interface PrinterDetail extends PrinterRow {
+  groupIds: Id[];
+  defaultForGroupIds: Id[];
+  counts: WifiApplyCounts;
+}
+
+/** `networks:savePrinter`: no `id` creates; `id` + `expectedRevision` updates. */
+export interface PrinterInput {
+  id?: Id;
+  expectedRevision?: number;
+  name: string;
+  kind: PrinterKind;
+  address: string;
+  port?: number;
+  queue?: string;
+  driver: string;
+  groupIds: Id[];
+  defaultForGroupIds: Id[];
 }
 
 /** `networks:saveWifi`: no `id` creates; `id` + `expectedRevision` updates. Never carries a passphrase. */

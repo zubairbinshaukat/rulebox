@@ -64,6 +64,8 @@ import type * as lib_plans from "../lib/plans.js";
 import type * as lib_platformSecrets from "../lib/platformSecrets.js";
 import type * as lib_policyKeys from "../lib/policyKeys.js";
 import type * as lib_presence from "../lib/presence.js";
+import type * as lib_printerAddress from "../lib/printerAddress.js";
+import type * as lib_printerDrivers from "../lib/printerDrivers.js";
 import type * as lib_publish from "../lib/publish.js";
 import type * as lib_rateLimits from "../lib/rateLimits.js";
 import type * as lib_recoveryCodes from "../lib/recoveryCodes.js";
@@ -160,6 +162,8 @@ declare const fullApi: ApiFromModules<{
   "lib/platformSecrets": typeof lib_platformSecrets;
   "lib/policyKeys": typeof lib_policyKeys;
   "lib/presence": typeof lib_presence;
+  "lib/printerAddress": typeof lib_printerAddress;
+  "lib/printerDrivers": typeof lib_printerDrivers;
   "lib/publish": typeof lib_publish;
   "lib/rateLimits": typeof lib_rateLimits;
   "lib/recoveryCodes": typeof lib_recoveryCodes;

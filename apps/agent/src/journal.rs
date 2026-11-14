@@ -26,7 +26,7 @@
 use serde::{Deserialize, Serialize};
 
 use crate::network::SecretText;
-use crate::platform::{AppLockerMechanism, LockoutPolicy, Platform, PlatformError, RegData, RegValueRef};
+use crate::platform::{AppLockerMechanism, LockoutPolicy, Platform, PlatformError, PortSpec, PrinterSpec, RegData, RegValueRef};
 use crate::state::{unix_ms, AgentState, SharedState};
 
 /// The error code of an apply that is refused because the journal holds a target
@@ -320,6 +320,13 @@ pub enum Desired {
     WlanProfile { xml: SecretText, mark: String },
     /// (Step 13) The WLAN user permit list (managed networks only): the allowed SSIDs.
     WlanFilters(Vec<String>),
+    /// (Step 14) A print queue Rulebox creates (`spec.comment` = `rulebox:<printer id>`) and the mark the agent keeps for it
+    /// (`AgentState.printer_marks`: the printer revision and a hash of everything that goes into the queue).
+    PrinterQueue { spec: PrinterSpec, mark: String },
+    /// (Step 14) A Standard TCP/IP port `Rulebox_<id>` (raw or LPR).
+    PrinterPort { spec: PortSpec, mark: String },
+    /// (Step 14) A per-machine connection to a printer share; the target names the `\\server\queue`.
+    PrinterShare { mark: String },
 }
 
 /// (Step 7) What the agent state remembers about the AppLocker policy it installed: the hash of
@@ -362,6 +369,28 @@ pub fn wlan_profile_id(name: &str) -> String {
     format!("{WLAN_ID_PREFIX}{name}")
 }
 
+/// `printer:<printer id>` (a queue), `printer-port:<port name>`, `printer-share:<\\\\server\\queue>` (Step 14).
+pub fn printer_queue_id(printer_id: &str) -> String {
+    format!("{PRINTER_QUEUE_PREFIX}{printer_id}")
+}
+
+pub fn printer_port_id(port_name: &str) -> String {
+    format!("{PRINTER_PORT_PREFIX}{port_name}")
+}
+
+pub fn printer_share_id(unc: &str) -> String {
+    format!("{PRINTER_SHARE_PREFIX}{unc}")
+}
+
+pub const PRINTER_QUEUE_PREFIX: &str = "printer:";
+pub const PRINTER_PORT_PREFIX: &str = "printer-port:";
+pub const PRINTER_SHARE_PREFIX: &str = "printer-share:";
+
+/// The comment Rulebox writes into the queue (plan 4.15: found by id, not by name).
+pub fn printer_comment(printer_id: &str) -> String {
+    format!("rulebox:{printer_id}")
+}
+
 /// The id prefix of the Wi-Fi profile entries.
 pub const WLAN_ID_PREFIX: &str = "wlan:";
 /// The id of the WLAN permit-list entry (`wlan:filters`; no profile name can be `filters`, they
@@ -391,6 +420,9 @@ enum Value {
     Wlan(Option<String>),
     /// (Step 13) The WLAN user permit list.
     WlanFilters(Vec<String>),
+    /// (Step 14) A Rulebox print queue, port or share connection: None when it is not there, else the mark
+    /// the agent kept for it (`unmanaged` when it is there but the agent has no mark).
+    Printer(Option<String>),
 }
 
 impl Change {
@@ -540,6 +572,46 @@ impl Change {
         }
     }
 
+    /// (Step 14) The print queue of printer `printer_id` (`spec.comment` must be `rulebox:<id>`), id `printer:<id>`. The
+    /// original is always "not present": the queue is Rulebox's, so restore deletes it.
+    pub fn printer_queue(printer_id: &str, spec: PrinterSpec, mark: &str) -> Self {
+        Self {
+            id: printer_queue_id(printer_id),
+            owner: JournalOwner::Printer,
+            target: JournalTarget::Printer { name: printer_id.to_string() },
+            desired: Desired::PrinterQueue { spec, mark: mark.to_string() },
+            since_version: 0,
+            always_record: false,
+            secret_original: false,
+        }
+    }
+
+    /// (Step 14) The Standard TCP/IP port `spec.name`, id `printer-port:<name>`.
+    pub fn printer_port(spec: PortSpec, mark: &str) -> Self {
+        Self {
+            id: printer_port_id(&spec.name),
+            owner: JournalOwner::Printer,
+            target: JournalTarget::PrinterPort { name: spec.name.clone() },
+            desired: Desired::PrinterPort { spec, mark: mark.to_string() },
+            since_version: 0,
+            always_record: false,
+            secret_original: false,
+        }
+    }
+
+    /// (Step 14) The per-machine connection to `unc`, id `printer-share:<unc>`.
+    pub fn printer_share(unc: &str, mark: &str) -> Self {
+        Self {
+            id: printer_share_id(unc),
+            owner: JournalOwner::Printer,
+            target: JournalTarget::Printer { name: unc.to_string() },
+            desired: Desired::PrinterShare { mark: mark.to_string() },
+            since_version: 0,
+            always_record: false,
+            secret_original: false,
+        }
+    }
+
     pub fn since(mut self, version: u64) -> Self {
         self.since_version = version;
         self
@@ -614,6 +686,8 @@ fn original_of(
         Value::Wlan(_) => return Ok(OriginalValue::NotPresent),
         Value::WlanFilters(list) if list.is_empty() => return Ok(OriginalValue::NotPresent),
         Value::WlanFilters(list) => return Ok(OriginalValue::MultiString(list.clone())),
+        // (Step 14) A queue found by our comment, a `Rulebox_` port and a connection the agent made: restore removes them.
+        Value::Printer(_) => return Ok(OriginalValue::NotPresent),
     };
     Ok(match current {
         // A Safe Mode key that was not there is restored by deleting the key.
@@ -653,6 +727,8 @@ pub fn change(ctx: &JournalCtx<'_>, change: &Change) -> Result<ChangeOutcome, Jo
         (JournalTarget::PrinterSecurity { .. }, Desired::PrinterSddl(sddl)) => Value::Sddl(Some(sddl.clone())),
         (JournalTarget::WlanProfile { .. }, Desired::WlanProfile { mark, .. }) => Value::Wlan(Some(mark.clone())),
         (JournalTarget::WlanFilters, Desired::WlanFilters(list)) => Value::WlanFilters(list.clone()),
+        (JournalTarget::Printer { .. }, Desired::PrinterQueue { mark, .. } | Desired::PrinterShare { mark }) => Value::Printer(Some(mark.clone())),
+        (JournalTarget::PrinterPort { .. }, Desired::PrinterPort { mark, .. }) => Value::Printer(Some(mark.clone())),
         _ => return Err(JournalError::Platform(PlatformError::Refused("unsupported journal target"))),
     };
     let current = read_current(ctx, &change.target)?;
@@ -704,6 +780,27 @@ pub fn change(ctx: &JournalCtx<'_>, change: &Change) -> Result<ChangeOutcome, Jo
                 ctx.platform.wlan_set_profile(xml.expose())?;
                 persist(ctx, |state| {
                     state.wlan_marks.insert(name.clone(), mark.clone());
+                })?;
+            }
+            (JournalTarget::Printer { .. }, Desired::PrinterQueue { spec, mark }) => {
+                ctx.platform.printer_add(spec)?;
+                let key = change.id.clone();
+                persist(ctx, |state| {
+                    state.printer_marks.insert(key, mark.clone());
+                })?;
+            }
+            (JournalTarget::Printer { name }, Desired::PrinterShare { mark }) => {
+                ctx.platform.printer_share_connect(name)?;
+                let key = change.id.clone();
+                persist(ctx, |state| {
+                    state.printer_marks.insert(key, mark.clone());
+                })?;
+            }
+            (JournalTarget::PrinterPort { .. }, Desired::PrinterPort { spec, mark }) => {
+                ctx.platform.printer_port_add(spec)?;
+                let key = change.id.clone();
+                persist(ctx, |state| {
+                    state.printer_marks.insert(key, mark.clone());
                 })?;
             }
             _ => write_value(ctx, &change.target, &desired)?,
@@ -782,6 +879,24 @@ fn read_current(ctx: &JournalCtx<'_>, target: &JournalTarget) -> Result<Value, J
             let present = ctx.platform.wlan_list()?.profiles.iter().any(|profile| profile == name);
             Ok(Value::Wlan(present.then(|| {
                 ctx.shared.read(|state| state.wlan_marks.get(name).cloned()).unwrap_or_else(|| "unmanaged".to_string())
+            })))
+        }
+        // (Step 14) A queue is found by the id in its comment (a renamed queue still matches), a port by its name; a share
+        // connection is per machine and not visible to SYSTEM, so only the agent's own mark says it is there.
+        JournalTarget::Printer { name } if name.starts_with("\\\\") => {
+            Ok(Value::Printer(ctx.shared.read(|state| state.printer_marks.get(&printer_share_id(name)).cloned())))
+        }
+        JournalTarget::Printer { name } => {
+            let comment = printer_comment(name);
+            let present = ctx.platform.printer_list()?.iter().any(|queue| queue.comment == comment);
+            Ok(Value::Printer(present.then(|| {
+                ctx.shared.read(|state| state.printer_marks.get(&printer_queue_id(name)).cloned()).unwrap_or_else(|| "unmanaged".to_string())
+            })))
+        }
+        JournalTarget::PrinterPort { name } => {
+            let present = ctx.platform.printer_ports()?.iter().any(|port| port == name);
+            Ok(Value::Printer(present.then(|| {
+                ctx.shared.read(|state| state.printer_marks.get(&printer_port_id(name)).cloned()).unwrap_or_else(|| "unmanaged".to_string())
             })))
         }
         JournalTarget::WlanFilters => {
@@ -1035,11 +1150,41 @@ fn write_original(ctx: &JournalCtx<'_>, entry: &JournalEntry) -> Result<(), Jour
             }
             _ => Err(JournalError::Platform(PlatformError::Refused("original does not fit the WLAN permit list"))),
         },
+        // (Step 14) A share connection is removed; a queue is deleted under the name it has now (found by its comment); a
+        // port is deleted last (the journal restores the last written first, and the port was written before its queue).
+        JournalTarget::Printer { name } => match &entry.original {
+            OriginalValue::NotPresent | OriginalValue::Absent => {
+                if name.starts_with("\\\\") {
+                    ctx.platform.printer_share_disconnect(name)?;
+                } else {
+                    let comment = printer_comment(name);
+                    let queue = ctx.platform.printer_list()?.into_iter().find(|queue| queue.comment == comment);
+                    if let Some(queue) = queue {
+                        ctx.platform.printer_delete(&queue.name)?;
+                    }
+                }
+                forget_printer_mark(ctx, &entry.id)
+            }
+            _ => Err(JournalError::Platform(PlatformError::Refused("original does not fit a printer"))),
+        },
+        JournalTarget::PrinterPort { name } => match &entry.original {
+            OriginalValue::NotPresent | OriginalValue::Absent => {
+                ctx.platform.printer_port_delete(name)?;
+                forget_printer_mark(ctx, &entry.id)
+            }
+            _ => Err(JournalError::Platform(PlatformError::Refused("original does not fit a printer port"))),
+        },
         JournalTarget::Unknown(_) => Err(JournalError::UnknownTarget),
         // The layers of Steps 8 to 19 give the rest a restore; until then a journal that
         // holds one cannot be restored here.
         _ => Err(JournalError::Platform(PlatformError::Refused("no restore for this journal target yet"))),
     }
+}
+
+fn forget_printer_mark(ctx: &JournalCtx<'_>, id: &str) -> Result<(), JournalError> {
+    persist(ctx, |state| {
+        state.printer_marks.remove(id);
+    })
 }
 
 /// The registry data an original stands for (`None` = delete the value).
@@ -1103,6 +1248,8 @@ pub fn startup_recover(ctx: &JournalCtx<'_>) -> StartupReport {
                     | JournalTarget::BcdElement { .. }
                     | JournalTarget::CiPolicy { .. }
                     | JournalTarget::WlanProfile { .. }
+                    | JournalTarget::Printer { .. }
+                    | JournalTarget::PrinterPort { .. }
                     | JournalTarget::WlanFilters => {
                         match read_current(ctx, target) {
                             Ok(current) => original_matches(ctx, &current, &entry.original),
@@ -1142,6 +1289,7 @@ fn original_matches(ctx: &JournalCtx<'_>, current: &Value, original: &OriginalVa
         (Value::Bcd(now), OriginalValue::BcdValue(was)) => return now == was,
         (Value::Ci(now), OriginalValue::NotPresent | OriginalValue::Absent) => return now.is_none(),
         (Value::Wlan(now), OriginalValue::NotPresent | OriginalValue::Absent) => return now.is_none(),
+        (Value::Printer(now), OriginalValue::NotPresent | OriginalValue::Absent) => return now.is_none(),
         (Value::WlanFilters(now), OriginalValue::NotPresent | OriginalValue::Absent) => return now.is_empty(),
         (Value::WlanFilters(now), OriginalValue::MultiString(was)) => return now == was,
         (Value::Reg(current), _) => current,

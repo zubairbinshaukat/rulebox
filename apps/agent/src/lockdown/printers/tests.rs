@@ -68,7 +68,7 @@ impl Rig {
     fn add_printer(&self, name: &str, port: &str) {
         self.platform.with_world(|w| {
             w.printers.push(SimPrinter {
-                info: PrinterInfo { name: name.into(), port: port.into(), driver: "Driver".into(), attributes: 64 },
+                info: PrinterInfo { name: name.into(), port: port.into(), driver: "Driver".into(), attributes: 64, comment: String::new() },
                 sddl: Some(DEFAULT_DACL.into()),
             });
         });
@@ -243,7 +243,7 @@ fn only_the_documents_with_the_switch_on_change_anything() {
     assert_eq!(rig.mutating(), before);
     assert_eq!(rig.sddl(PDF).as_deref(), Some(DEFAULT_DACL));
     // Adding a queue through the seam keeps working with its own rules.
-    let spec = PrinterSpec { name: "Front desk (Rulebox)".into(), port: "IP_192.168.1.20".into(), driver: "Microsoft IPP Class Driver".into() };
+    let spec = PrinterSpec { name: "Front desk (Rulebox)".into(), port: "https://192.168.1.20/ipp/print".into(), driver: "Microsoft IPP Class Driver".into(), comment: String::new() };
     rig.platform.printer_add(&spec).unwrap();
     rig.apply(&Rig::doc(true));
     assert!(!denies_print(&rig.sddl("Front desk (Rulebox)").unwrap(), STAFF));

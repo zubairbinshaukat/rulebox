@@ -9,6 +9,8 @@ import { internalMutation, memberMutation, memberQuery } from "./lib/functions";
 import { snapshotGroupConfig } from "./lib/groupConfig";
 import {
   MAX_NETWORK_GROUPS,
+  MAX_ORG_PRINTERS,
+  MAX_PRINTER_NAME,
   MAX_NETWORK_SNAPSHOT_GROUPS,
   MAX_WIFI_DETAIL_GROUPS,
   MAX_WIFI_DETAIL_REPORTS,
@@ -16,14 +18,17 @@ import {
   MAX_WIFI_LIST_GROUPS,
   SEALED_PURGE_BATCH,
 } from "./lib/limits";
-import { wifiSecurity } from "./lib/lockdownValidators";
+import { printerKind, wifiSecurity } from "./lib/lockdownValidators";
+import { approvedPrinterDrivers, checkPrinterDriver } from "./lib/printerDrivers";
+import { checkPrinterTarget } from "./lib/printerAddress";
 
 // Wi-Fi profiles: list, detail, save, delete (Phase 5 Step 13, plan 4.15, 4.20). The passphrase is NOT here:
 // only the ACTION `wifi:setPassphrase` (wifi.ts) accepts it. No function in this file returns a passphrase,
 // a key id or a sealed box.
 //
 // CONTRACT (the dashboard types against this block):
-//   networks:list        query, viewer, args {}                       -> { wifi: WifiRow[] }
+//   networks:list        query, viewer, args {}                       -> { wifi: WifiRow[], printers: PrinterRow[],
+//                                                                         approvedDrivers: string[] }
 //   networks:wifiDetail  query, viewer, args { id: string }           -> WifiDetail
 //   networks:saveWifi    mutation, admin, args { id?: string, expectedRevision?: number, name: string,
 //                          ssid: string, hidden: boolean, security: "open"|"wpa2Personal"|"wpa3Personal"|
@@ -44,6 +49,22 @@ import { wifiSecurity } from "./lib/lockdownValidators";
 //   WifiDetail = WifiRow & { groupIds: Id<"groups">[], counts: { applied, failed, waiting, unsupported,
 //                  sampled, capped: boolean } }   (counts: the latest apply report of each device of the
 //                  assigned groups, at most 200 reports per group and 10 groups; `capped` = truncated)
+
+// Printers (Phase 5 Step 14, plan 4.15, 4.20) share this file and the Networks list with Wi-Fi:
+//   networks:printerDetail  query, viewer, args { id: string }        -> PrinterDetail
+//   networks:savePrinter    mutation, admin, args { id?: string, expectedRevision?: number, name: string,
+//                             kind: "ipp"|"raw"|"lpr"|"share", address: string, port?: number, queue?: string,
+//                             driver: string, groupIds: string[], defaultForGroupIds: string[] }
+//                           -> { id: Id<"printers">, revision: number }
+//                           Errors: invalid_argument (field name|address|port|queue|driver|groupIds|defaultForGroupIds|
+//                           expectedRevision; detail, e.g. name "taken", driver "not_approved", defaultForGroupIds "taken"),
+//                           not_found, stale_edit, too_large (detail "printers" = 100 per organization; "groups" = more
+//                           than 10 groups touched). The driver must be on the approved list (the inbox class drivers plus
+//                           `phase5Settings.approvedPrinterDrivers`); the agent never installs one.
+//   networks:deletePrinter  mutation, admin, args { id: string }      -> null
+//   PrinterRow    = { _id, name, kind, address, port: number | null, queue: string | null, driver, revision,
+//                     groupCount, defaultGroupCount, groups: { _id, name }[] }   (first MAX_WIFI_LIST_GROUPS groups)
+//   PrinterDetail = PrinterRow & { groupIds, defaultForGroupIds, counts: same shape as WifiDetail.counts }
 
 const MAX_NAME = 60;
 const MAX_SSID_BYTES = 32;
@@ -87,7 +108,63 @@ const wifiDetailValue = v.object({
   }),
 });
 
+const printerRow = v.object({
+  _id: v.id("printers"),
+  name: v.string(),
+  kind: printerKind,
+  address: v.string(),
+  port: v.union(v.number(), v.null()),
+  queue: v.union(v.string(), v.null()),
+  driver: v.string(),
+  revision: v.number(),
+  groupCount: v.number(),
+  defaultGroupCount: v.number(),
+  groups: v.array(groupRef),
+});
+
+const applyCounts = v.object({
+  applied: v.number(),
+  failed: v.number(),
+  waiting: v.number(),
+  unsupported: v.number(),
+  sampled: v.number(),
+  capped: v.boolean(),
+});
+
+const printerDetailValue = v.object({
+  _id: v.id("printers"),
+  name: v.string(),
+  kind: printerKind,
+  address: v.string(),
+  port: v.union(v.number(), v.null()),
+  queue: v.union(v.string(), v.null()),
+  driver: v.string(),
+  revision: v.number(),
+  groupCount: v.number(),
+  defaultGroupCount: v.number(),
+  groups: v.array(groupRef),
+  groupIds: v.array(v.id("groups")),
+  defaultForGroupIds: v.array(v.id("groups")),
+  counts: applyCounts,
+});
+
 type GroupReader = { db: { get(id: Id<"groups">): Promise<Doc<"groups"> | null> } };
+
+function printerRowOf(p: Doc<"printers">, groups: { _id: Id<"groups">; name: string }[]) {
+  return {
+    _id: p._id,
+    name: p.name,
+    kind: p.kind,
+    address: p.address,
+    port: p.port ?? null,
+    queue: p.queue ?? null,
+    driver: p.driver,
+    revision: p.revision,
+    groupCount: p.groupIds.length,
+    defaultGroupCount: p.defaultForGroupIds.length,
+    groups,
+  };
+}
 
 function rowOf(p: Doc<"wifiProfiles">, groups: { _id: Id<"groups">; name: string }[]) {
   return {
@@ -128,12 +205,14 @@ async function groupsOf(
 // ---------------------------------------------------------------- reads
 
 /**
- * The organization's Wi-Fi profiles (viewer): one index read of at most MAX_WIFI_PROFILES rows plus the names of
- * the first MAX_WIFI_LIST_GROUPS groups of each. Never a passphrase, key or box.
+ * The organization's Wi-Fi profiles and printers (viewer; one query per screen): one index read of at most
+ * MAX_WIFI_PROFILES / MAX_ORG_PRINTERS rows plus the names of the first MAX_WIFI_LIST_GROUPS groups of each (one
+ * cache for both lists) and the organization row (the approved printer drivers, for the form's picker). Never a
+ * passphrase, key or box.
  */
 export const list = memberQuery("viewer")({
   args: {},
-  returns: v.object({ wifi: v.array(wifiRow) }),
+  returns: v.object({ wifi: v.array(wifiRow), printers: v.array(printerRow), approvedDrivers: v.array(v.string()) }),
   handler: async (ctx) => {
     const rows = await ctx.db
       .query("wifiProfiles")
@@ -145,7 +224,17 @@ export const list = memberQuery("viewer")({
       wifi.push(rowOf(p, await groupsOf(ctx, p.groupIds, MAX_WIFI_LIST_GROUPS, cache)));
     }
     wifi.sort((a, b) => a.name.localeCompare(b.name) || (a._id < b._id ? -1 : 1));
-    return { wifi };
+    const printerDocs = await ctx.db
+      .query("printers")
+      .withIndex("by_org", (q) => q.eq("orgId", ctx.orgId))
+      .take(MAX_ORG_PRINTERS + 1);
+    const printers = [];
+    for (const p of printerDocs.slice(0, MAX_ORG_PRINTERS)) {
+      printers.push(printerRowOf(p, await groupsOf(ctx, p.groupIds, MAX_WIFI_LIST_GROUPS, cache)));
+    }
+    printers.sort((a, b) => a.name.localeCompare(b.name) || (a._id < b._id ? -1 : 1));
+    const org = await ctx.db.get(ctx.orgId);
+    return { wifi, printers, approvedDrivers: approvedPrinterDrivers(org?.phase5Settings?.approvedPrinterDrivers) };
   },
 });
 
@@ -381,6 +470,205 @@ export const deleteWifi = memberMutation("admin")({
       summary: `Removed the Wi-Fi network ${p.name}`,
     });
     await snapshotGroups(ctx, p.groupIds, `Removed Wi-Fi ${p.name}`, ctx.member._id);
+    return null;
+  },
+});
+
+// ---------------------------------------------------------------- printers (Phase 5 Step 14)
+
+/** The trimmed display name (1-60): the queue is `<name> (Rulebox)`, so no `\`, `,` or `/` (Windows queue-name rules). */
+export function checkPrinterName(name: string): string {
+  const n = name.trim();
+  if (n.length === 0) fail("invalid_argument", { field: "name", detail: "empty" });
+  if (n.length > MAX_PRINTER_NAME) fail("invalid_argument", { field: "name", detail: "length" });
+  if (hasControlChars(n) || /[\\,/]/.test(n)) fail("invalid_argument", { field: "name", detail: "characters" });
+  return n;
+}
+
+/**
+ * One printer with the apply counts (viewer). Counts come from the latest apply report of each device of the assigned
+ * groups, bounded exactly like `wifiDetail` (MAX_WIFI_DETAIL_REPORTS per group over MAX_WIFI_DETAIL_GROUPS groups;
+ * `capped` says the sample was cut). `not_found` for another organization's id.
+ */
+export const printerDetail = memberQuery("viewer")({
+  args: { id: v.string() },
+  returns: printerDetailValue,
+  handler: async (ctx, args) => {
+    const p = await getInOrg(ctx, "printers", args.id, ctx.orgId);
+    const cache = new Map<string, { _id: Id<"groups">; name: string } | null>();
+    const groups = await groupsOf(ctx, p.groupIds, MAX_WIFI_LIST_GROUPS, cache);
+    const counts = { applied: 0, failed: 0, waiting: 0, unsupported: 0, sampled: 0, capped: p.groupIds.length > MAX_WIFI_DETAIL_GROUPS };
+    for (const groupId of p.groupIds.slice(0, MAX_WIFI_DETAIL_GROUPS)) {
+      const reports = await ctx.db
+        .query("deviceApplyReports")
+        .withIndex("by_org_config", (q) => q.eq("orgId", ctx.orgId).eq("config.groupId", groupId))
+        .take(MAX_WIFI_DETAIL_REPORTS + 1);
+      if (reports.length > MAX_WIFI_DETAIL_REPORTS) counts.capped = true;
+      for (const r of reports.slice(0, MAX_WIFI_DETAIL_REPORTS)) {
+        const item = r.printers.find((x) => x.printerId === p._id);
+        if (item === undefined) continue;
+        counts[bucketOf(item.state)]++;
+        counts.sampled++;
+      }
+    }
+    return { ...printerRowOf(p, groups), groupIds: [...p.groupIds], defaultForGroupIds: [...p.defaultForGroupIds], counts };
+  },
+});
+
+/**
+ * Create or change a printer (admin). Create: no `id`. Update: `id` and `expectedRevision` (`stale_edit`). The driver must be
+ * on the approved list; the address, port and queue follow `lib/printerAddress.ts`; the display name is unique in the
+ * organization (case-insensitive, `name` "taken"); a group has at most one default printer (`defaultForGroupIds` "taken": turn
+ * the other one off first) and a default must be a group the printer is assigned to ("not_assigned"). No change = no write.
+ * A change bumps the revision, audits `printer.created` / `printer.updated` and makes the configuration of every group the
+ * printer was in or is now in a new version (at most MAX_NETWORK_SNAPSHOT_GROUPS groups per save, else `too_large`
+ * detail "groups"), so the agent applies it.
+ */
+export const savePrinter = memberMutation("admin")({
+  args: {
+    id: v.optional(v.string()),
+    expectedRevision: v.optional(v.number()),
+    name: v.string(),
+    kind: printerKind,
+    address: v.string(),
+    port: v.optional(v.number()),
+    queue: v.optional(v.string()),
+    driver: v.string(),
+    groupIds: v.array(v.string()),
+    defaultForGroupIds: v.array(v.string()),
+  },
+  returns: v.object({ id: v.id("printers"), revision: v.number() }),
+  handler: async (ctx, args) => {
+    const name = checkPrinterName(args.name);
+    const target = checkPrinterTarget(args.kind, args.address, args.port, args.queue);
+    if (args.groupIds.length > MAX_NETWORK_GROUPS || args.defaultForGroupIds.length > MAX_NETWORK_GROUPS) {
+      fail("invalid_argument", { field: "groupIds", detail: "too_many" });
+    }
+    const org = await ctx.db.get(ctx.orgId);
+    const driver = checkPrinterDriver(args.driver, approvedPrinterDrivers(org?.phase5Settings?.approvedPrinterDrivers));
+    const groupIds: Id<"groups">[] = [];
+    for (const raw of args.groupIds) {
+      const g = await getInOrg(ctx, "groups", raw, ctx.orgId);
+      if (!groupIds.includes(g._id)) groupIds.push(g._id);
+    }
+    groupIds.sort();
+    const defaults: Id<"groups">[] = [];
+    for (const raw of args.defaultForGroupIds) {
+      const g = await getInOrg(ctx, "groups", raw, ctx.orgId);
+      if (!groupIds.includes(g._id)) fail("invalid_argument", { field: "defaultForGroupIds", detail: "not_assigned" });
+      if (!defaults.includes(g._id)) defaults.push(g._id);
+    }
+    defaults.sort();
+
+    if (args.id === undefined) {
+      if (args.expectedRevision !== undefined) fail("invalid_argument", { field: "expectedRevision" });
+    } else if (args.expectedRevision === undefined) {
+      fail("invalid_argument", { field: "expectedRevision" });
+    }
+    const own = args.id === undefined ? null : await getInOrg(ctx, "printers", args.id, ctx.orgId);
+    if (own !== null) checkRevision(own, args.expectedRevision as number);
+
+    const all = await ctx.db
+      .query("printers")
+      .withIndex("by_org", (q) => q.eq("orgId", ctx.orgId))
+      .take(MAX_ORG_PRINTERS + 1);
+    const others = all.filter((p) => own === null || p._id !== own._id);
+    if (own === null && all.length >= MAX_ORG_PRINTERS) fail("too_large", { detail: "printers" });
+    if (others.some((p) => p.name.toLowerCase() === name.toLowerCase())) fail("invalid_argument", { field: "name", detail: "taken" });
+    if (defaults.some((g) => others.some((p) => p.defaultForGroupIds.includes(g)))) {
+      fail("invalid_argument", { field: "defaultForGroupIds", detail: "taken" });
+    }
+
+    if (own === null) {
+      if (groupIds.length > MAX_NETWORK_SNAPSHOT_GROUPS) fail("too_large", { detail: "groups" });
+      const id = await ctx.db.insert("printers", {
+        orgId: ctx.orgId,
+        name,
+        kind: args.kind,
+        address: target.address,
+        ...(target.port === null ? {} : { port: target.port }),
+        ...(target.queue === null ? {} : { queue: target.queue }),
+        driver,
+        groupIds,
+        defaultForGroupIds: defaults,
+        revision: 1,
+        createdAt: Date.now(),
+      });
+      await writeAudit(ctx, {
+        orgId: ctx.orgId,
+        actor: ctx.actor,
+        action: "printer.created",
+        targetType: "printer",
+        targetId: id,
+        targetLabel: name,
+        summary: `Added the printer ${name}`,
+      });
+      await snapshotGroups(ctx, groupIds, `Printer ${name}`, ctx.member._id);
+      return { id, revision: 1 };
+    }
+
+    const before = [...own.groupIds].sort();
+    const unchanged =
+      own.name === name &&
+      own.kind === args.kind &&
+      own.address === target.address &&
+      (own.port ?? null) === target.port &&
+      (own.queue ?? null) === target.queue &&
+      own.driver === driver &&
+      sameSet(before, groupIds) &&
+      sameSet([...own.defaultForGroupIds].sort(), defaults);
+    if (unchanged) return { id: own._id, revision: own.revision };
+
+    const touched = new Set<Id<"groups">>([...before, ...groupIds]);
+    if (touched.size > MAX_NETWORK_SNAPSHOT_GROUPS) fail("too_large", { detail: "groups" });
+    const revision = own.revision + 1;
+    await ctx.db.patch(own._id, {
+      name,
+      kind: args.kind,
+      address: target.address,
+      port: target.port ?? undefined,
+      queue: target.queue ?? undefined,
+      driver,
+      groupIds,
+      defaultForGroupIds: defaults,
+      revision,
+    });
+    await writeAudit(ctx, {
+      orgId: ctx.orgId,
+      actor: ctx.actor,
+      action: "printer.updated",
+      targetType: "printer",
+      targetId: own._id,
+      targetLabel: name,
+      summary: `Changed the printer ${name}`,
+    });
+    await snapshotGroups(ctx, touched, `Printer ${name}`, ctx.member._id);
+    return { id: own._id, revision };
+  },
+});
+
+/**
+ * Delete a printer (admin). The configuration of every group it was assigned to becomes a new version without it, so the
+ * documents drop it and the agent removes the `<name> (Rulebox)` queue it created (and its port). At most
+ * MAX_NETWORK_SNAPSHOT_GROUPS groups (else `too_large`, detail "groups").
+ */
+export const deletePrinter = memberMutation("admin")({
+  args: { id: v.string() },
+  returns: v.null(),
+  handler: async (ctx, args) => {
+    const p = await getInOrg(ctx, "printers", args.id, ctx.orgId);
+    if (p.groupIds.length > MAX_NETWORK_SNAPSHOT_GROUPS) fail("too_large", { detail: "groups" });
+    await ctx.db.delete(p._id);
+    await writeAudit(ctx, {
+      orgId: ctx.orgId,
+      actor: ctx.actor,
+      action: "printer.deleted",
+      targetType: "printer",
+      targetId: p._id,
+      targetLabel: p.name,
+      summary: `Removed the printer ${p.name}`,
+    });
+    await snapshotGroups(ctx, p.groupIds, `Removed printer ${p.name}`, ctx.member._id);
     return null;
   },
 });

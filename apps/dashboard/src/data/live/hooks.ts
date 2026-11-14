@@ -480,6 +480,23 @@ export const liveApi: DataApi = {
   useSetWifiPassphrase() {
     return useMapped(useAction(api.wifi.setPassphrase));
   },
+  // ---- printers (Phase 5 Step 14): same module, same rules.
+  usePrinterDetail(id) {
+    return useMemberQuery(api.networks.printerDetail, { id });
+  },
+  useSavePrinter() {
+    return useMapped(useMutation(api.networks.savePrinter));
+  },
+  useDeletePrinter() {
+    const remove = useMutation(api.networks.deletePrinter);
+    const call = useCallback(
+      async (a: { id: string }) => {
+        await remove(a);
+      },
+      [remove],
+    );
+    return useMapped(call);
+  },
   useSetAppArchived() {
     const base = useMutation(api.apps.setArchived);
     const set = useMemo(

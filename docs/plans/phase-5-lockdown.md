@@ -1940,6 +1940,27 @@ dashboard checks + screenshots.
 **Verify / Done when / Do NOT:** as Step 13; never install a driver from
 a print server or the network.
 
+**Built 2026-11-15 (SimPlatform only, not committed).** Deviations and open
+points:
+
+- Raw and LPR hosts are limited to 48 characters and an LPR queue to 32
+  (the `PORT_DATA_1` fields of the Standard TCP/IP port monitor); `ipp` and
+  `share` keep the 255 limit of 4.2. Server and agent both refuse longer ones.
+- A group has at most one default printer (`savePrinter` refuses a second
+  with `defaultForGroupIds` / `taken`); a default must be a group the printer
+  is assigned to. At most 10 groups touched per save, like Wi-Fi.
+- The agent cannot know the approved list (it is not in the signed document):
+  it checks that the driver is in the local driver store (`driver_missing`).
+  `driver_not_approved` for a share whose server offers another driver is NOT
+  enforced: a per-machine connection is not visible to SYSTEM. Open question.
+- No dashboard control edits `approvedPrinterDrivers` yet (the picker shows the
+  inbox list plus whatever the field holds). Open question.
+- UNVERIFIED until Step 21: port creation through `XcvData("AddPort")`, an IPP
+  queue whose port is the printer URL, per-machine connections through
+  `PrintUIEntry /ga`, and whether that call pulls a driver from the server.
+- `printing.available` still means "printers non-empty" (the Spooler running
+  check needs a service-state read in the seam).
+
 ---
 
 ### Step 14b — Drivers (printers, scanners, other devices)

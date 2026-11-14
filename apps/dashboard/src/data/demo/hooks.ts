@@ -14,6 +14,7 @@ import type { EnrollmentApi } from "../enrollment/api";
 import {
   type DbApp,
   type DbDevice,
+  type DbPrinter,
   type DbWifi,
   type DemoDb,
 } from "../fixtures/seed";
@@ -40,6 +41,8 @@ import {
   type Me,
   type MeResult,
   type NetworksScreen,
+  type PrinterDetail,
+  type PrinterRow,
   type OverviewScreen,
   type WifiApplyCounts,
   type WifiDetail,
@@ -49,6 +52,7 @@ import type { ServerList } from "../serverList";
 import { byKey, contains, relevance, useDemoServerPage } from "./lists";
 import * as validate from "../../lib/validate";
 import { MAX_WIFI_GROUPS_PER_SAVE, MAX_WIFI_NAME, MAX_WIFI_PROFILES, WIFI_SECURITIES, passphraseProblem, ssidProblem } from "../../lib/wifiRules";
+import { MAX_PRINTERS, PRINTER_KINDS, addressProblem, driverChoices, portProblem, printerNameProblem, queueProblem } from "../../lib/printerRules";
 import {
   bumpFailedSignIns,
   checkRevision,
@@ -122,6 +126,37 @@ function wifiCounts(db: DemoDb, w: DbWifi): WifiApplyCounts {
   const unsupported = needsKey ? 0 : Math.floor(sampled / 10);
   const failed = needsKey ? 0 : sampled >= 5 ? 1 : 0;
   return { applied: sampled - waiting - unsupported - failed, failed, waiting, unsupported, sampled, capped };
+}
+
+/** The first 10 group names of a printer, like the server (the detail page's picker has the full list). */
+function printerRow(db: DemoDb, p: DbPrinter): PrinterRow {
+  return {
+    _id: p._id,
+    name: p.name,
+    kind: p.kind,
+    address: p.address,
+    port: p.port,
+    queue: p.queue,
+    driver: p.driver,
+    revision: p.revision,
+    groupCount: p.groupIds.length,
+    defaultGroupCount: p.defaultForGroupIds.length,
+    groups: p.groupIds.map((id) => ({ _id: id, name: groupName(db, id) ?? "" })).sort((a, b) => a.name.localeCompare(b.name)).slice(0, 10),
+  };
+}
+
+/** What `networks:printerDetail` counts: derived from the PCs of the assigned groups, never random (a demo has no apply reports). */
+function printerCounts(db: DemoDb, p: DbPrinter): WifiApplyCounts {
+  const PER_GROUP = 200;
+  let sampled = 0;
+  let capped = false;
+  for (const g of p.groupIds) {
+    const n = db.devices.filter((d) => d.groupId === g && !d.revoked).length;
+    sampled += Math.min(n, PER_GROUP);
+    capped ||= n > PER_GROUP;
+  }
+  const failed = sampled >= 5 ? 1 : 0;
+  return { applied: sampled - failed, failed, waiting: 0, unsupported: 0, sampled, capped };
 }
 
 function canOpenFiles(a: DbApp) {
@@ -783,6 +818,10 @@ export const demoApi: DataApi = {
             if (dependents.length > 0) fail("has_dependents", { detail: dependents.join(", ") });
             db.groups = db.groups.filter((x) => x._id !== groupId);
             for (const w of db.wifi) w.groupIds = w.groupIds.filter((x) => x !== groupId);
+            for (const p of db.printers) {
+              p.groupIds = p.groupIds.filter((x) => x !== groupId);
+              p.defaultForGroupIds = p.defaultForGroupIds.filter((x) => x !== groupId);
+            }
             audit({ action: "group.deleted", targetType: "group", targetId: g._id, targetLabel: g.name, summary: `Deleted the group ${g.name}` });
           },
           "fresh",
@@ -1352,7 +1391,11 @@ export const demoApi: DataApi = {
   useNetworks() {
     return useDemoQuery("networks:list", (db): NetworksScreen => {
       requireReader();
-      return { wifi: [...db.wifi].sort((a, b) => a.name.localeCompare(b.name)).map((w) => wifiRow(db, w)) };
+      return {
+        wifi: [...db.wifi].sort((a, b) => a.name.localeCompare(b.name)).map((w) => wifiRow(db, w)),
+        printers: [...db.printers].sort((a, b) => a.name.localeCompare(b.name)).map((p) => printerRow(db, p)),
+        approvedDrivers: driverChoices(db.approvedDrivers),
+      };
     });
   },
 
@@ -1446,6 +1489,87 @@ export const demoApi: DataApi = {
           w.revision++;
           audit({ action: "wifi.passphraseSet", targetType: "wifi", targetId: w._id, targetLabel: w.name, summary: `Replaced the password of ${w.name}` });
           return { revision: w.revision };
+        }),
+      [],
+    );
+  },
+
+  // ---- printers (Phase 5 Step 14). The demo twin of `networks:printerDetail` / `savePrinter` / `deletePrinter`.
+  usePrinterDetail(id) {
+    return useDemoQuery(`networks:printerDetail:${id}`, (db): PrinterDetail => {
+      requireReader();
+      const p = find(db.printers, id);
+      return { ...printerRow(db, p), groupIds: [...p.groupIds], defaultForGroupIds: [...p.defaultForGroupIds], counts: printerCounts(db, p) };
+    });
+  },
+
+  useSavePrinter() {
+    return useCallback(
+      (input) =>
+        runMutation("admin", ({ db, audit }) => {
+          const name = input.name.trim();
+          const nameProblem = printerNameProblem(name);
+          if (nameProblem !== null) fail("invalid_argument", { field: "name", detail: nameProblem });
+          if (!PRINTER_KINDS.includes(input.kind)) fail("invalid_argument", { field: "kind" });
+          const addr = addressProblem(input.kind, input.address);
+          if (addr !== null) fail("invalid_argument", { field: "address", detail: addr });
+          const address = input.address.trim();
+          if (input.kind === "raw" && input.port !== undefined && portProblem(String(input.port)) !== null) fail("invalid_argument", { field: "port", detail: "range" });
+          if (input.kind !== "raw" && input.port !== undefined) fail("invalid_argument", { field: "port", detail: "not_used" });
+          const queue = input.queue?.trim() ? input.queue.trim() : null;
+          if (input.kind === "lpr") {
+            const q = queueProblem(queue ?? "");
+            if (q !== null) fail("invalid_argument", { field: "queue", detail: q });
+          } else if (queue !== null) {
+            fail("invalid_argument", { field: "queue", detail: "not_used" });
+          }
+          const driver = driverChoices(db.approvedDrivers).find((d) => d.toLowerCase() === input.driver.trim().toLowerCase());
+          if (driver === undefined) fail("invalid_argument", { field: "driver", detail: "not_approved" });
+          const groupIds = [...new Set(input.groupIds)];
+          for (const g of groupIds) if (!db.groups.some((x) => x._id === g)) fail("not_found");
+          const defaults = [...new Set(input.defaultForGroupIds)];
+          for (const g of defaults) if (!groupIds.includes(g)) fail("invalid_argument", { field: "defaultForGroupIds", detail: "not_assigned" });
+          const existing = input.id === undefined ? null : find(db.printers, input.id);
+          if (existing) checkRevision(existing, input.expectedRevision ?? -1);
+          const others = db.printers.filter((p) => p !== existing);
+          if (!existing && db.printers.length >= MAX_PRINTERS) fail("too_large", { detail: "printers" });
+          if (others.some((p) => p.name.toLowerCase() === name.toLowerCase())) fail("invalid_argument", { field: "name", detail: "taken" });
+          if (defaults.some((g) => others.some((p) => p.defaultForGroupIds.includes(g)))) fail("invalid_argument", { field: "defaultForGroupIds", detail: "taken" });
+          const before = existing?.groupIds ?? [];
+          const touched = new Set([...before, ...groupIds]).size;
+          const port = input.kind === "raw" && input.port !== undefined ? input.port : null;
+          const fields = { name, kind: input.kind, address, port, queue, driver: driver as string, groupIds, defaultForGroupIds: defaults };
+
+          if (!existing) {
+            if (touched > MAX_WIFI_GROUPS_PER_SAVE) fail("too_large", { detail: "groups" });
+            const row: DbPrinter = { _id: newId("printer"), ...fields, revision: 1 };
+            db.printers.push(row);
+            audit({ action: "printer.created", targetType: "printer", targetId: row._id, targetLabel: name, summary: `Added the printer ${name}` });
+            return { id: row._id, revision: row.revision };
+          }
+          const same =
+            existing.name === name && existing.kind === fields.kind && existing.address === address && existing.port === port && existing.queue === queue &&
+            existing.driver === fields.driver && existing.groupIds.length === groupIds.length && groupIds.every((g) => existing.groupIds.includes(g)) &&
+            existing.defaultForGroupIds.length === defaults.length && defaults.every((g) => existing.defaultForGroupIds.includes(g));
+          if (same) return { id: existing._id, revision: existing.revision };
+          if (touched > MAX_WIFI_GROUPS_PER_SAVE) fail("too_large", { detail: "groups" });
+          Object.assign(existing, fields);
+          existing.revision++;
+          audit({ action: "printer.updated", targetType: "printer", targetId: existing._id, targetLabel: name, summary: `Changed the printer ${name}` });
+          return { id: existing._id, revision: existing.revision };
+        }),
+      [],
+    );
+  },
+
+  useDeletePrinter() {
+    return useCallback(
+      ({ id }) =>
+        runMutation("admin", ({ db, audit }) => {
+          const p = find(db.printers, id);
+          if (p.groupIds.length > MAX_WIFI_GROUPS_PER_SAVE) fail("too_large", { detail: "groups" });
+          db.printers = db.printers.filter((x) => x._id !== id);
+          audit({ action: "printer.deleted", targetType: "printer", targetId: p._id, targetLabel: p.name, summary: `Removed the printer ${p.name}` });
         }),
       [],
     );

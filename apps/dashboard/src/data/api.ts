@@ -24,6 +24,8 @@ import type {
   OrgSettings,
   OverviewScreen,
   PlanScreen,
+  PrinterDetail,
+  PrinterInput,
   QueryState,
   Role,
   SettingsSaved,
@@ -140,8 +142,8 @@ export interface DataApi {
   /** `apps:saveIcon`: stores the PNG `useFetchWebMeta` previewed (its `data:` URL), after the app is saved. */
   useSaveAppIcon: Mutation<{ appId: Id; png: string }>;
 
-  // ---- networks (Phase 5 Step 13). Wi-Fi only; printers join in Step 14.
-  /** `networks:list` (viewer): one subscription, no passphrase and no per-device counts. */
+  // ---- networks (Phase 5 Steps 13 and 14): Wi-Fi profiles and printers.
+  /** `networks:list` (viewer): one subscription for both lists and the approved driver names; no passphrase and no per-device counts. */
   useNetworks: () => QueryState<NetworksScreen>;
   /** `networks:wifiDetail` (viewer) with the apply counts, computed on demand. A NEW network has no detail: its screen builds the blank form itself. */
   useWifiDetail: (id: Id) => QueryState<WifiDetail>;
@@ -154,6 +156,12 @@ export interface DataApi {
    * answer ever returns it. Resolves to the revision to send next.
    */
   useSetWifiPassphrase: Mutation<{ id: Id; passphrase: string; expectedRevision: number }, { revision: number }>;
+  /** `networks:printerDetail` (viewer) with the apply counts, computed on demand. A NEW printer has no detail: its screen builds the blank form itself. */
+  usePrinterDetail: (id: Id) => QueryState<PrinterDetail>;
+  /** `networks:savePrinter` (admin): create, or update with `expectedRevision`. Resolves to the id and the revision to send next. */
+  useSavePrinter: Mutation<PrinterInput, { id: Id; revision: number }>;
+  /** `networks:deletePrinter` (admin): the printer leaves every PC's document and the PCs remove the queue they made. */
+  useDeletePrinter: Mutation<{ id: Id }>;
 
   // ---- file types
   // (the rules table, `useFileTypesPage`, is in the apps seam, `./apps`; the program picker is `useAppOptions`)

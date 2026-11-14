@@ -23,6 +23,7 @@ import type {
   Role,
   ShellHealth,
   WebSpec,
+  PrinterKind,
   WifiSecurity,
 } from "../types";
 import { DEFAULT_WEB_PERMISSIONS } from "../types";
@@ -186,6 +187,18 @@ export interface DbWifi {
   groupIds: string[];
   revision: number;
 }
+export interface DbPrinter {
+  _id: string;
+  name: string;
+  kind: PrinterKind;
+  address: string;
+  port: number | null;
+  queue: string | null;
+  driver: string;
+  groupIds: string[];
+  defaultForGroupIds: string[];
+  revision: number;
+}
 export interface DbAudit {
   _id: string;
   at: number;
@@ -241,6 +254,10 @@ export interface DemoDb {
   appDenials: Map<string, { kind: string; count: number }[]>;
   /** `wifiProfiles` (Phase 5 Step 13): never a passphrase, only whether one is set and when. */
   wifi: DbWifi[];
+  /** `printers` (Phase 5 Step 14). */
+  printers: DbPrinter[];
+  /** `orgSettings.phase5Settings.approvedPrinterDrivers`: the driver names the organization added to the inbox list. */
+  approvedDrivers: string[];
   fileHandlers: { _id: string; extension: string; appId: string }[];
   tokens: DbToken[];
   installs: DbInstall[];
@@ -908,6 +925,12 @@ export function seed(now: number = Date.now()): DemoDb {
       { _id: id("wifi"), name: "Back office (hidden)", ssid: "Harbor-Office", hidden: true, security: "wpa2Personal", autoConnect: true, hasPassphrase: true, passphraseSetAt: now - 40 * DAY, groupIds: [gOffice._id], revision: 2 },
       { _id: id("wifi"), name: "Training room", ssid: "Harbor-Training", hidden: false, security: "wpa3Personal", autoConnect: false, hasPassphrase: false, passphraseSetAt: null, groupIds: [], revision: 1 },
     ],
+    printers: [
+      { _id: id("printer"), name: "Front desk", kind: "ipp", address: "ipp://10.0.20.15:631/ipp/print", port: null, queue: null, driver: "Microsoft IPP Class Driver", groupIds: [gFront._id, gCounter._id], defaultForGroupIds: [gFront._id], revision: 2 },
+      { _id: id("printer"), name: "Warehouse label printer", kind: "raw", address: "10.0.20.31", port: 9100, queue: null, driver: "Generic / Text Only", groupIds: [gCounter._id], defaultForGroupIds: [], revision: 1 },
+      { _id: id("printer"), name: "Office laser", kind: "share", address: "\\\\print01\\Office-Laser", port: null, queue: null, driver: "Microsoft PCL6 Class Driver", groupIds: [gOffice._id], defaultForGroupIds: [gOffice._id], revision: 1 },
+    ],
+    approvedDrivers: [],
     fileHandlers,
     tokens,
     installs,

@@ -170,8 +170,9 @@ fn printers_only_rulebox_queues_are_added_or_deleted_any_queue_gets_a_security_d
     let (_dir, sim) = sim();
     let spec = PrinterSpec {
         name: "Front desk (Rulebox)".into(),
-        port: "IP_192.168.1.20".into(),
+        port: "https://192.168.1.20/ipp/print".into(),
         driver: "Microsoft IPP Class Driver".into(),
+        comment: String::new(),
     };
     sim.printer_add(&spec).unwrap();
     assert!(sim.printer_list().unwrap().iter().any(|p| p.name == spec.name && p.port == spec.port));
@@ -358,7 +359,7 @@ fn every_new_method_can_be_failed_and_is_in_the_call_log() {
     assert!(sim.wlan_delete_profile("Rulebox-ab12").is_err());
     sim.fail_next(SimOp::WlanSetFilters, fail());
     assert!(sim.wlan_set_filters(&["Acme"]).is_err());
-    let spec = PrinterSpec { name: "A (Rulebox)".into(), port: "P".into(), driver: "D".into() };
+    let spec = PrinterSpec { name: "A (Rulebox)".into(), port: "P".into(), driver: "D".into(), comment: String::new() };
     sim.fail_next(SimOp::PrinterAdd, fail());
     assert!(sim.printer_add(&spec).is_err());
     sim.fail_next(SimOp::PrinterDelete, fail());

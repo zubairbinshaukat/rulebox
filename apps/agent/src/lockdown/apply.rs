@@ -98,6 +98,8 @@ pub struct ApplyOutcome {
     /// (Step 13) A fixed code when the "managed networks only" permit list could not be set or
     /// restored; the apply report has no field for it yet (open question, Step 20).
     pub wifi_filters_error: Option<&'static str>,
+    /// (Step 14) One state per printer of the document (`applied | failed`), for the apply report.
+    pub printers: Vec<PrinterItemState>,
 }
 
 /// Step 2 of the transaction: the invariants of 4.6. A refusal writes nothing. The layers
@@ -126,6 +128,11 @@ fn run_layer(ctx: &ApplyCtx<'_>, doc: &AgentDoc, layer: Layer) -> LayerState {
 /// (Step 13) The Wi-Fi layer reports through the apply report's `wifi` items, not a layer state.
 fn run_wifi(ctx: &ApplyCtx<'_>, doc: &AgentDoc) -> crate::network::wifi::WifiOutcome {
     crate::network::wifi::apply(ctx, doc)
+}
+
+/// (Step 14) The printer layer reports through the apply report's `printers` items, not a layer state.
+fn run_printers(ctx: &ApplyCtx<'_>, doc: &AgentDoc) -> crate::network::printers::PrinterOutcome {
+    crate::network::printers::apply(ctx, doc)
 }
 
 /// The state of an apply report for these layers (plan 4.2 `deviceApplyReports.state`): `failed`
@@ -173,7 +180,10 @@ impl ApplyOutcome {
                 .into_iter()
                 .take(MAX_ITEM_STATES)
                 .collect(),
-            printers: extras.printers.into_iter().take(MAX_ITEM_STATES).collect(),
+            printers: if extras.printers.is_empty() { self.printers.clone() } else { extras.printers }
+                .into_iter()
+                .take(MAX_ITEM_STATES)
+                .collect(),
             lkg_version: extras.lkg_version,
             capabilities: extras.capabilities,
         }
@@ -225,9 +235,13 @@ pub fn apply(ctx: &ApplyCtx<'_>, doc: &AgentDoc) -> Result<ApplyOutcome, ApplyRe
     let mut layers = LayerStates::all_off();
     let mut ran = Vec::with_capacity(APPLY_ORDER.len());
     let mut wifi = crate::network::wifi::WifiOutcome::default();
+    let mut printers = crate::network::printers::PrinterOutcome::default();
     for layer in APPLY_ORDER {
         if layer == Layer::Wifi {
             wifi = run_wifi(ctx, doc);
+        }
+        if layer == Layer::Printers {
+            printers = run_printers(ctx, doc);
         }
         let state = run_layer(ctx, doc, layer);
         ran.push(layer);
@@ -243,7 +257,7 @@ pub fn apply(ctx: &ApplyCtx<'_>, doc: &AgentDoc) -> Result<ApplyOutcome, ApplyRe
             Layer::Wifi | Layer::Printers => {}
         }
     }
-    Ok(ApplyOutcome { layers, ran, wifi: wifi.items, wifi_filters_error: wifi.filters_error })
+    Ok(ApplyOutcome { layers, ran, wifi: wifi.items, wifi_filters_error: wifi.filters_error, printers: printers.items })
 }
 
 #[cfg(test)]

@@ -19,6 +19,7 @@ const Groups = lazyScreen("Groups");
 const GroupDetail = lazyScreen("GroupDetail");
 const Networks = lazyScreen("Networks");
 const WifiEdit = lazyScreen("WifiEdit");
+const PrinterEdit = lazyScreen("PrinterEdit");
 const Employees = lazyScreen("Employees");
 const EmployeeDetail = lazyScreen("EmployeeDetail");
 const Apps = lazyScreen("Apps");
@@ -53,6 +54,8 @@ export function App() {
                 <Route path="networks" element={<Networks />} />
                 <Route path="networks/wifi/new" element={<WifiEdit />} />
                 <Route path="networks/wifi/:id" element={<WifiEdit />} />
+                <Route path="networks/printers/new" element={<PrinterEdit />} />
+                <Route path="networks/printers/:id" element={<PrinterEdit />} />
                 <Route path="employees" element={<Employees />} />
                 <Route path="employees/new" element={<EmployeeDetail />} />
                 <Route path="employees/:id" element={<EmployeeDetail />} />

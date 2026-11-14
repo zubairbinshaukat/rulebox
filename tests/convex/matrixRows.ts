@@ -44,6 +44,8 @@ export type Fixture = {
   handlerId: Id<"fileHandlers">;
   /** A WPA2 Wi-Fi profile ("Acme-Staff", revision 1, no passphrase) assigned to `groupId`. */
   wifiId: Id<"wifiProfiles">;
+  /** A raw-TCP printer "Front desk" (Microsoft PCL6 Class Driver, revision 1) assigned to `groupId`, default there. */
+  printerId: Id<"printers">;
   /** An enabled employee in no group. */
   employeeId: Id<"employees">;
   /** The device's stored secret hashes (current and previous). */
@@ -129,6 +131,19 @@ export async function fixture(given?: T): Promise<Fixture> {
       createdAt: Date.now(),
     }),
   );
+  const printerId = await t.run((ctx) =>
+    ctx.db.insert("printers", {
+      orgId,
+      name: "Front desk",
+      kind: "raw",
+      address: "10.0.0.20",
+      driver: "Microsoft PCL6 Class Driver",
+      groupIds: [groupId],
+      defaultForGroupIds: [groupId],
+      revision: 1,
+      createdAt: Date.now(),
+    }),
+  );
   const employeeId = await t.run((ctx) =>
     ctx.db.insert("employees", {
       orgId,
@@ -172,6 +187,7 @@ export async function fixture(given?: T): Promise<Fixture> {
     assignmentId,
     handlerId,
     wifiId,
+    printerId,
     employeeId,
     storedHashes,
     accessor: {
@@ -653,6 +669,33 @@ export const ROWS: Row[] = [
     call: (a, f) => a.action(api.wifi.setPassphrase, { id: f.wifiId, passphrase: "short", expectedRevision: 1 }),
     expect: { ...ADMIN_UNLOCKED, default: "invalid_argument", foreign: "not_found" },
   },
+  // Phase 5 Step 14: printers (the printer as it is = no change; a fresh printer is deleted).
+  { name: "networks:printerDetail", call: (a, f) => a.query(api.networks.printerDetail, { id: f.printerId }), expect: { ...VIEWER, foreign: "not_found" } },
+  {
+    name: "networks:savePrinter",
+    call: (a, f) =>
+      a.mutation(api.networks.savePrinter, {
+        id: f.printerId,
+        expectedRevision: 1,
+        name: "Front desk",
+        kind: "raw",
+        address: "10.0.0.20",
+        driver: "Microsoft PCL6 Class Driver",
+        groupIds: [f.groupId],
+        defaultForGroupIds: [f.groupId],
+      }),
+    expect: { ...ADMIN_UNLOCKED, foreign: "not_found" },
+  },
+  {
+    name: "networks:deletePrinter",
+    call: async (a, f) => {
+      const id = await f.t.run((ctx) =>
+        ctx.db.insert("printers", { orgId: f.orgId, name: "Spare", kind: "raw", address: "10.0.0.21", driver: "Generic / Text Only", groupIds: [], defaultForGroupIds: [], revision: 1, createdAt: Date.now() }),
+      );
+      return a.mutation(api.networks.deletePrinter, { id });
+    },
+    expect: { ...ADMIN_UNLOCKED, foreign: "not_found" },
+  },
   {
     name: "apps:setArchived",
     call: (a, f) => a.mutation(api.apps.setArchived, { appId: f.appId, archived: false }),
@@ -836,8 +879,8 @@ export const STEP_UP_EXEMPT = new Set([
 export async function outcome(p: Promise<unknown>): Promise<{ result: string; value: unknown }> {
   try {
     const value = await p;
-    // `kind` is the Phase 2 wire answer of the device functions; `apps:get` has a `kind` field of its own.
-    if (value !== null && typeof value === "object" && "kind" in value && !["ok", "web", "desktop"].includes((value as { kind: string }).kind)) {
+    // `kind` is the Phase 2 wire answer of the device functions; `apps:get` and `networks:printerDetail` have a `kind` field of their own.
+    if (value !== null && typeof value === "object" && "kind" in value && !["ok", "web", "desktop", "ipp", "raw", "lpr", "share"].includes((value as { kind: string }).kind)) {
       return { result: `kind:${(value as { kind: string }).kind}`, value };
     }
     return { result: "ok", value };

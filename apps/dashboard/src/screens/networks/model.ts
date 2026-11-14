@@ -1,4 +1,22 @@
-import type { WifiDetail } from "../../data/types";
+import type { PrinterDetail, WifiDetail } from "../../data/types";
+
+/** The blank form of `/networks/printers/new` (nothing is subscribed): the usual modern printer, with the class driver Windows ships. */
+export const BLANK_PRINTER: PrinterDetail = {
+  _id: "new",
+  name: "",
+  kind: "ipp",
+  address: "",
+  port: null,
+  queue: null,
+  driver: "Microsoft IPP Class Driver",
+  revision: 0,
+  groupCount: 0,
+  defaultGroupCount: 0,
+  groups: [],
+  groupIds: [],
+  defaultForGroupIds: [],
+  counts: { applied: 0, failed: 0, waiting: 0, unsupported: 0, sampled: 0, capped: false },
+};
 
 /** The blank form of `/networks/wifi/new` (nothing is subscribed): a secured network, as recommended. */
 export const BLANK_WIFI: WifiDetail = {

@@ -276,6 +276,65 @@ describe("demo data layer", () => {
     expect(await save(input).catch((e) => e)).toMatchObject({ code: "too_large", detail: "wifi" });
   });
 
+  it("printers (Step 14): create, edit, delete; the driver must be approved; names and defaults are unique; the rules follow the server", async () => {
+    resetDemo();
+    signInAs("owner@demo.rulebox.test");
+    const list = (await ready(renderHook(() => demoApi.useNetworks()).result)).data;
+    expect(list.printers.map((p) => p.name)).toEqual(["Front desk", "Office laser", "Warehouse label printer"]);
+    expect(list.approvedDrivers).toEqual(["Microsoft IPP Class Driver", "Microsoft PCL6 Class Driver", "Microsoft PS Class Driver", "Generic / Text Only"]);
+
+    const save = renderHook(() => demoApi.useSavePrinter()).result.current;
+    // The first group is where "Front desk" is already the default; the second has no default printer.
+    const [g1, g2] = db().groups.map((g) => g._id);
+    const input = { name: "Reception", kind: "ipp" as const, address: "ipp://10.0.30.5/ipp/print", driver: "Microsoft IPP Class Driver", groupIds: [g2!], defaultForGroupIds: [] as string[] };
+    const created = await save(input);
+    expect(created.revision).toBe(1);
+    expect(db().audit.some((e) => e.action === "printer.created" && e.targetId === created.id)).toBe(true);
+    expect((await ready(renderHook(() => demoApi.usePrinterDetail(created.id)).result)).data).toMatchObject({ groupIds: [g2], defaultForGroupIds: [], port: null, queue: null });
+
+    const bad = async (over: object) => ((await save({ ...input, ...over }).catch((e) => e)) as { code: string; field?: string; detail?: string });
+    expect(await bad({ driver: "HP Evil Driver" })).toMatchObject({ code: "invalid_argument", field: "driver", detail: "not_approved" });
+    expect(await bad({ address: "ipp://u:p@10.0.0.1/ipp/print" })).toMatchObject({ field: "address", detail: "credentials" });
+    expect(await bad({ kind: "raw", address: "10.0.0.1", port: 70000 })).toMatchObject({ field: "port" });
+    expect(await bad({ kind: "lpr", address: "10.0.0.1" })).toMatchObject({ field: "queue", detail: "required" });
+    expect(await bad({ name: "A\\B" })).toMatchObject({ field: "name", detail: "characters" });
+    expect(await bad({ name: "front DESK" })).toMatchObject({ field: "name", detail: "taken" });
+    expect(await bad({ defaultForGroupIds: [g1!] })).toMatchObject({ field: "defaultForGroupIds", detail: "not_assigned" });
+    expect(await bad({ groupIds: ["nope"] })).toMatchObject({ code: "not_found" });
+    // "Front desk" is already the default of its group: a second default there is refused.
+    const front = db().printers.find((p) => p.name === "Front desk")!;
+    const frontGroup = front.defaultForGroupIds[0]!;
+    expect(await bad({ name: "Second", groupIds: [frontGroup], defaultForGroupIds: [frontGroup] })).toMatchObject({ field: "defaultForGroupIds", detail: "taken" });
+    expect(await save({ ...input, id: created.id, expectedRevision: 9 }).catch((e) => e)).toMatchObject({ code: "stale_edit" });
+    const eleven = db().groups.slice(0, 11).map((g) => g._id);
+    expect(await bad({ name: "Wide", groupIds: eleven })).toMatchObject({ code: "too_large", detail: "groups" });
+
+    // No change: no new revision. A change bumps it and audits.
+    expect(await save({ ...input, id: created.id, expectedRevision: 1 })).toEqual({ id: created.id, revision: 1 });
+    expect(await save({ ...input, id: created.id, expectedRevision: 1, name: "Reception desk", defaultForGroupIds: [g2!] })).toEqual({ id: created.id, revision: 2 });
+    expect(db().audit.some((e) => e.action === "printer.updated" && e.targetId === created.id)).toBe(true);
+    const raw = await save({ name: "Labels", kind: "raw", address: "10.0.30.6", port: 9101, driver: "generic / text only", groupIds: [], defaultForGroupIds: [] });
+    expect(db().printers.find((p) => p._id === raw.id)).toMatchObject({ port: 9101, queue: null, driver: "Generic / Text Only" });
+
+    // Deleting a group takes it out of the printers; delete removes the printer.
+    await renderHook(() => demoApi.useDeletePrinter()).result.current({ id: created.id });
+    expect(db().printers.some((p) => p._id === created.id)).toBe(false);
+    expect(db().audit.some((e) => e.action === "printer.deleted" && e.targetId === created.id)).toBe(true);
+    expect(await renderHook(() => demoApi.useDeletePrinter()).result.current({ id: created.id }).catch((e) => e)).toMatchObject({ code: "not_found" });
+  }, 30_000);
+
+  it("printers: a viewer reads but cannot write; at most 100 printers", async () => {
+    resetDemo();
+    signInAs("auditor.with.a.really.long.mailbox.name@regional-compliance-office.demo.rulebox.test");
+    const input = { name: "X", kind: "raw" as const, address: "10.0.0.9", driver: "Generic / Text Only", groupIds: [], defaultForGroupIds: [] };
+    expect(errorCodeOf(await renderHook(() => demoApi.useSavePrinter()).result.current(input).catch((e) => e))).toBe("forbidden");
+    expect(errorCodeOf(await renderHook(() => demoApi.useDeletePrinter()).result.current({ id: db().printers[0]!._id }).catch((e) => e))).toBe("forbidden");
+    expect((await ready(renderHook(() => demoApi.useNetworks()).result)).data.printers).toHaveLength(3);
+    signInAs("owner@demo.rulebox.test");
+    while (db().printers.length < 100) db().printers.push({ ...db().printers[0]!, _id: `fill${db().printers.length}`, name: `Fill ${db().printers.length}`, groupIds: [], defaultForGroupIds: [] });
+    expect(await renderHook(() => demoApi.useSavePrinter()).result.current(input).catch((e) => e)).toMatchObject({ code: "too_large", detail: "printers" });
+  });
+
   it("refuses writes from viewers (forbidden)", async () => {
     resetDemo();
     signInAs("auditor.with.a.really.long.mailbox.name@regional-compliance-office.demo.rulebox.test");

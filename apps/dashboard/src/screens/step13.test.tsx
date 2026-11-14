@@ -123,6 +123,8 @@ describe("Networks list (networks:list)", () => {
         { ...shop, _id: "w2", name: "Back office", ssid: "Acme-Office", hidden: true, security: "wpa2Personal", hasPassphrase: false, passphraseSetAt: null, groupCount: 0, groups: [] },
         { ...shop, _id: "w3", name: "Guests", ssid: "Acme-Guest", security: "open", hasPassphrase: false, passphraseSetAt: null, groupCount: 1, groups: [{ _id: "g9", name: "Lobby" }] },
       ],
+      printers: [],
+      approvedDrivers: [],
     };
     ui(<Networks />, "admin", "/networks");
     expect((cx.queried.find((q) => q.name === "networks:list")!.args)).toEqual({});
@@ -147,7 +149,7 @@ describe("Networks list (networks:list)", () => {
   });
 
   it("a viewer sees the list read-only: no New, no Edit", () => {
-    cx.results["networks:list"] = { wifi: [shop] };
+    cx.results["networks:list"] = { wifi: [shop], printers: [], approvedDrivers: [] };
     ui(<Networks />, "viewer", "/networks");
     expect(screen.getByText(s.readOnly)).toBeTruthy();
     expect(screen.queryByRole("link", { name: s.newWifi })).toBeNull();
@@ -156,7 +158,7 @@ describe("Networks list (networks:list)", () => {
   });
 
   it("an empty organization gets the empty state with the add action (admins only)", () => {
-    cx.results["networks:list"] = { wifi: [] };
+    cx.results["networks:list"] = { wifi: [], printers: [], approvedDrivers: [] };
     ui(<Networks />, "admin", "/networks");
     expect(screen.getByText(s.emptyTitle)).toBeTruthy();
     expect(screen.getAllByRole("link", { name: s.newWifi })).toHaveLength(2);

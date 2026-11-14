@@ -355,11 +355,11 @@ describe("step-up (data/stepup/live.ts)", () => {
 
 describe("networks (Phase 5 Step 13)", () => {
   it("the list is networks:list with no arguments; one network is networks:wifiDetail with its id", () => {
-    cx.queryResult = { wifi: [] };
+    cx.queryResult = { wifi: [], printers: [], approvedDrivers: [] };
     const list = renderHook(() => live.useNetworks());
     const req = Object.values(cx.requests.at(-1)!)[0] as { args: unknown };
     expect(req.args).toEqual({});
-    expect(list.result.current).toEqual({ status: "ready", data: { wifi: [] } });
+    expect(list.result.current).toEqual({ status: "ready", data: { wifi: [], printers: [], approvedDrivers: [] } });
 
     cx.queryResult = { _id: "w1", name: "Shop", revision: 2 };
     const one = renderHook(() => live.useWifiDetail("w1"));
@@ -387,6 +387,32 @@ describe("networks (Phase 5 Step 13)", () => {
     });
     const e = await rejection(set({ id: "w1", passphrase: "x", expectedRevision: 3 }));
     expect(toAppError(e)).toMatchObject({ code: "invalid_argument", field: "passphrase", detail: "length" });
+  });
+});
+
+describe("printers (Phase 5 Step 14)", () => {
+  it("one printer is networks:printerDetail with its id", () => {
+    cx.queryResult = { _id: "p1", name: "Front desk", revision: 2 };
+    const one = renderHook(() => live.usePrinterDetail("p1"));
+    expect((Object.values(cx.requests.at(-1)!)[0] as { args: unknown }).args).toEqual({ id: "p1" });
+    expect(one.result.current).toMatchObject({ status: "ready", data: { _id: "p1", revision: 2 } });
+  });
+
+  it("save and delete go to their functions; errors keep their code and detail", async () => {
+    const input = { name: "Front desk", kind: "ipp" as const, address: "ipp://10.0.0.20/ipp/print", driver: "Microsoft IPP Class Driver", groupIds: ["g1"], defaultForGroupIds: ["g1"] };
+    cx.fns["networks:savePrinter"] = vi.fn(async () => ({ id: "p1", revision: 1 }));
+    expect(await renderHook(() => live.useSavePrinter()).result.current(input)).toEqual({ id: "p1", revision: 1 });
+    expect(cx.fns["networks:savePrinter"]).toHaveBeenCalledWith(input);
+
+    cx.fns["networks:deletePrinter"] = vi.fn(async () => null);
+    await expect(renderHook(() => live.useDeletePrinter()).result.current({ id: "p1" })).resolves.toBeUndefined();
+    expect(cx.fns["networks:deletePrinter"]).toHaveBeenCalledWith({ id: "p1" });
+
+    cx.fns["networks:savePrinter"] = vi.fn(async () => {
+      throw new ConvexError({ code: "invalid_argument", field: "driver", detail: "not_approved" });
+    });
+    const e = await rejection(renderHook(() => live.useSavePrinter()).result.current(input));
+    expect(toAppError(e)).toMatchObject({ code: "invalid_argument", field: "driver", detail: "not_approved" });
   });
 });
 
