@@ -9,6 +9,9 @@ import { Splash } from "./boot/Splash";
 import { StatusScreen, type StatusKind } from "./boot/StatusScreen";
 import { useLogoSequence } from "./boot/useLogoSequence";
 import { Desktop } from "./desktop/Desktop";
+import { BroadcastFullscreen } from "./notice/BroadcastFullscreen";
+import { DeviceLock } from "./notice/DeviceLock";
+import { pickFullscreen } from "./notice/logic";
 import { LockScreen } from "./signin/LockScreen";
 import { SignIn } from "./signin/SignIn";
 
@@ -105,11 +108,21 @@ export function DesktopRoot() {
     }
   };
 
+  // The device lock is checked first (before the splash and the boot status): a lock never lifts
+  // because the agent link dropped, and nothing may show a sign-in or a desktop under it. A
+  // full-screen notice that still waits for "OK" comes next, after the boot status.
+  const orgName = shell.agent?.orgName ?? null;
+  const fullscreenNotice = pickFullscreen(shell.broadcasts);
+
   let body: ReactNode;
-  if (splashActive) {
+  if (shell.deviceLock) {
+    body = <DeviceLock lock={shell.deviceLock} orgName={orgName} />;
+  } else if (splashActive) {
     body = <Splash seq={splash} />;
   } else if (bootStatus) {
     body = <StatusScreen kind={bootStatus} />;
+  } else if (fullscreenNotice) {
+    body = <BroadcastFullscreen key={fullscreenNotice.id} broadcast={fullscreenNotice} orgName={orgName} />;
   } else if (shell.session.status === "signingOut") {
     body = (
       <main

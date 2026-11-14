@@ -4,6 +4,7 @@ import { Backdrop } from "@rulebox/ui";
 
 import { useDocumentTitle } from "../../lib/a11y";
 import { call } from "../../lib/tauri";
+import { BroadcastBanner } from "../notice/BroadcastBanner";
 import { AppGrid } from "./AppGrid";
 import { formatDesktopDate, greetingFor } from "./greeting";
 import { MyFilesPanel } from "./MyFilesPanel";
@@ -63,6 +64,7 @@ export function Desktop({ shell, employee }: DesktopProps) {
       }}
     >
       <Backdrop />
+      <BroadcastBanner broadcasts={shell.broadcasts} />
       <header style={{ display: "flex", flexDirection: "column", gap: 6, position: "relative", zIndex: 1 }}>
         <div
           style={{

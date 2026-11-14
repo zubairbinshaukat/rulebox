@@ -17,13 +17,15 @@ const DesktopRoot = lazy(() => import("./DesktopRoot").then((m) => ({ default: m
 const DevOverlay = lazy(() => import("./DevOverlay").then((m) => ({ default: m.DevOverlay })));
 const PopupRoot = lazy(() => import("./popup/PopupRoot").then((m) => ({ default: m.PopupRoot })));
 const Taskbar = lazy(() => import("./taskbar/Taskbar").then((m) => ({ default: m.Taskbar })));
+// The cover windows (lock / full-screen notice on every monitor) parse nothing else.
+const CoverRoot = lazy(() => import("./notice/CoverRoot").then((m) => ({ default: m.CoverRoot })));
 // The logo bench exists only in a build made with VITE_RB_BENCH=1 (Step 17 measurements).
 const LogoBench = import.meta.env.VITE_RB_BENCH ? lazy(() => import("./bench/LogoBench")) : null;
 
-/** Which of the three shell windows this page is: `#/desktop|taskbar|popup`. */
-function routeOf(hash: string): "desktop" | "taskbar" | "popup" {
+/** Which shell window this page is: `#/desktop|taskbar|popup|cover`. */
+function routeOf(hash: string): "desktop" | "taskbar" | "popup" | "cover" {
   const name = hash.replace(/^#\/?/, "");
-  return name === "taskbar" || name === "popup" ? name : "desktop";
+  return name === "taskbar" || name === "popup" || name === "cover" ? name : "desktop";
 }
 
 export function ShellRoot() {
@@ -68,6 +70,13 @@ export function ShellRoot() {
       </Suspense>
     );
   }
+  if (route === "cover") {
+    return (
+      <Suspense fallback={null}>
+        <CoverRoot />
+      </Suspense>
+    );
+  }
   if (LogoBench && window.location.hash === "#/bench-logo") {
     return (
       <Suspense fallback={null}>
@@ -84,8 +93,9 @@ export function ShellRoot() {
 }
 
 // The popup and taskbar windows are transparent: only their rounded panels
-// paint, so the desktop shows around them.
-if (routeOf(window.location.hash) !== "desktop") {
+// paint, so the desktop shows around them. A cover window is opaque (it hides what is under it).
+const pageRoute = routeOf(window.location.hash);
+if (pageRoute === "taskbar" || pageRoute === "popup") {
   document.documentElement.classList.add("rb-page-transparent");
 }
 

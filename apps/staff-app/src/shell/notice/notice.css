@@ -100,29 +100,18 @@
   color: var(--rb-danger-text);
 }
 
-/* The strip above the taskbar pills (it lives in the taskbar window, next to the toasts). */
+/*
+ * The broadcast strip at the top of the desktop. It is the first item of the desktop's column
+ * (in the page flow, above the greeting), so nothing is covered; the element is the one the
+ * entrance animation moves (opacity and transform only).
+ */
 .rb-announce {
-  position: absolute;
-  left: 0;
-  right: 0;
-  bottom: calc(var(--rb-taskbar) + var(--rb-taskbar-inset) + 10px);
-  display: flex;
-  justify-content: center;
-  /* Only the card takes the pointer (the window region says the same). */
-  pointer-events: none;
-}
-
-.rb-announce__box {
-  pointer-events: auto;
-  width: min(560px, calc(100vw - 2 * var(--rb-taskbar-inset)));
-  border-radius: var(--rb-r-22);
-}
-
-@media (min-width: 1400px) {
-  /* Wide screens: keep clear of the toast cards on the right. */
-  .rb-announce__box {
-    width: min(560px, calc(100vw - 800px));
-  }
+  position: relative;
+  z-index: 2;
+  flex: none;
+  width: 100%;
+  max-width: 720px;
+  align-self: center;
 }
 
 .rb-announce__card {
@@ -132,7 +121,7 @@
   box-sizing: border-box;
   padding: 12px 12px 12px 14px;
   border-radius: var(--rb-r-22);
-  /* Solid: nothing shows through (a window region has no edge fade). */
+  /* Solid, no blur: nothing shows through and Lite mode needs no special case. */
   background: var(--rb-surface);
   border: 1px solid var(--rb-line);
   color: var(--rb-ink);
