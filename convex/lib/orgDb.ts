@@ -33,7 +33,7 @@ export const ORG_TABLES: ReadonlySet<string> = new Set(
  * after the finding was read through its `(orgId, fingerprint)` index) and `broadcastId` (`broadcastAcks.by_broadcast_device`, after the
  * broadcast was read with the scoped `get`, which answers null for another organization's).
  */
-const ID_FIELDS = new Set(["deviceId", "groupId", "employeeId", "appId", "scope", "rosterGroupId", "findingId", "broadcastId"]);
+const ID_FIELDS = new Set(["deviceId", "groupId", "employeeId", "appId", "scope", "rosterGroupId", "findingId", "broadcastId", "driverId"]);
 /** Arrays of such ids (validated when the row was written, e.g. `fleetChecks.deviceIds`). */
 const ID_ARRAY_FIELDS = new Set(["deviceIds", "groupIds"]);
 

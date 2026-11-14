@@ -91,6 +91,8 @@ export * from "./generated/CatalogKind";
 export * from "./generated/CatalogTool";
 export * from "./generated/CatalogWebPermissions";
 export * from "./generated/DesktopSpec";
+export * from "./generated/DriverKind";
+export * from "./generated/DriverSpec";
 export * from "./generated/IconRef";
 export * from "./generated/InstallKind";
 export * from "./generated/InstallSpec";

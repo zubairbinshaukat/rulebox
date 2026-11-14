@@ -567,12 +567,17 @@ export const purgeDevice = internalMutation({
       .query("deviceLocks")
       .withIndex("by_device", (q) => q.eq("deviceId", args.deviceId))
       .take(PURGE_BATCH);
+    // Step 14b: the PC's driver results.
+    const driverResults = await ctx.db
+      .query("driverResults")
+      .withIndex("by_device_driver", (q) => q.eq("deviceId", args.deviceId))
+      .take(PURGE_BATCH);
     // `failedInstallCount` does not move: only a revoked PC is removed, and the revoke already
     // took its results out of the count (lib/installs.ts, Step 17 review).
-    for (const row of [...installs, ...docs, ...scoped, ...bodies, ...versions, ...findings, ...sealed, ...applyReport, ...locks]) {
+    for (const row of [...installs, ...docs, ...scoped, ...bodies, ...versions, ...findings, ...sealed, ...applyReport, ...locks, ...driverResults]) {
       await ctx.db.delete(row._id);
     }
-    if ([installs, docs, scoped, bodies, versions, findings, sealed, applyReport, locks].some((rows) => rows.length === PURGE_BATCH)) {
+    if ([installs, docs, scoped, bodies, versions, findings, sealed, applyReport, locks, driverResults].some((rows) => rows.length === PURGE_BATCH)) {
       await ctx.scheduler.runAfter(0, internal.fleet.purgeDevice, args);
     }
     return null;

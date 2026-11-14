@@ -2,7 +2,7 @@ import type { CatalogApp, CatalogWebPermissions } from "@rulebox/types";
 import { sha256HexSync } from "./crypto";
 import { programDenied } from "./denyList";
 import type { GroupConfigContent } from "./groupConfig";
-import { MAX_ACTIVE_BROADCASTS, MAX_DEVICE_PRINTERS, MAX_DEVICE_WIFI, MAX_GROUP_EXCEPTIONS } from "./limits";
+import { MAX_ACTIVE_BROADCASTS, MAX_DEVICE_DRIVERS, MAX_DEVICE_PRINTERS, MAX_DEVICE_WIFI, MAX_GROUP_EXCEPTIONS } from "./limits";
 import type { RingValue, SealedBoxValue } from "./lockdownValidators";
 import type { OrgSettings } from "./validators";
 
@@ -317,7 +317,7 @@ const MAX_LOCK_CONTACT = 100;
 
 /**
  * The agent-only keys of Phase 5 after `offlineDays`, in the order of plan 4.3:
- * `lockdown`, `wifi`, `wifiManagedOnly`, `printers` (ring-gated, only with a group
+ * `lockdown`, `wifi`, `wifiManagedOnly`, `printers`, `drivers` (Step 14b; ring-gated, only with a group
  * configuration), then the live `deviceLock`, `usbTempAllow`, `broadcasts`, then `config`.
  * Shapes and key order are those of `crates/rulebox-policy/tests/vectors/lockdown.json`.
  * Throws (the publisher records `policy.publishFailed`) when a limit would be exceeded.
@@ -326,7 +326,10 @@ function addPhase5Keys(doc: DesiredDocV2, p: Phase5Input): void {
   const c = p.config;
   if (c !== null) {
     if (c.content.lockdown.exceptions.length > MAX_GROUP_EXCEPTIONS) throw new Error("too many exceptions");
-    if (c.content.wifi.length > MAX_DEVICE_WIFI || c.content.printers.length > MAX_DEVICE_PRINTERS) throw new Error("too many items");
+    const drivers = c.content.drivers ?? [];
+    if (c.content.wifi.length > MAX_DEVICE_WIFI || c.content.printers.length > MAX_DEVICE_PRINTERS || drivers.length > MAX_DEVICE_DRIVERS) {
+      throw new Error("too many items");
+    }
     doc.lockdown = c.content.lockdown;
     doc.wifi = c.content.wifi.map((w) => ({
       id: w.id,
@@ -348,6 +351,19 @@ function addPhase5Keys(doc: DesiredDocV2, p: Phase5Input): void {
       driver: x.driver,
       isDefault: x.isDefault,
       revision: x.revision,
+    }));
+    // A group configuration made before Step 14b (or without drivers) has no `drivers`: the document still says so (an empty list).
+    doc.drivers = drivers.map((d) => ({
+      id: d.id,
+      name: d.name,
+      kind: d.kind,
+      url: d.url,
+      sha256: d.sha256,
+      sizeBytes: d.sizeBytes,
+      inf: d.inf,
+      silentArgs: d.silentArgs,
+      successExitCodes: d.successExitCodes,
+      revision: d.revision,
     }));
   }
   if (p.deviceLock !== null && (p.deviceLock.message.length > MAX_LOCK_MESSAGE || (p.deviceLock.contact?.length ?? 0) > MAX_LOCK_CONTACT)) {

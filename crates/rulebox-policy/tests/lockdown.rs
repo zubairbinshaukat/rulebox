@@ -36,7 +36,7 @@ fn phase_4_document_means_no_phase_5_keys() {
     let agent = AgentDoc::from_doc(&v["phase4"]).unwrap();
     assert_eq!(agent, AgentDoc::default());
     assert!(agent.lockdown.is_none(), "absent lockdown = every layer off and restored");
-    assert!(agent.wifi.is_empty() && agent.printers.is_empty() && agent.broadcasts.is_empty());
+    assert!(agent.wifi.is_empty() && agent.printers.is_empty() && agent.drivers.is_empty() && agent.broadcasts.is_empty());
     assert!(!agent.wifi_managed_only);
     assert!(agent.device_lock.is_none() && agent.usb_temp_allow.is_none() && agent.config.is_none());
     assert_eq!(agent.check_limits(NOW), Ok(()));
@@ -48,7 +48,7 @@ fn defaults_round_trip() {
     let value = serde_json::to_value(&agent).unwrap();
     // The documented order of the keys (serde_json::Value sorts keys, so look at the text).
     let text = serde_json::to_string(&agent).unwrap();
-    let order = ["lockdown", "wifi", "wifiManagedOnly", "printers", "deviceLock", "usbTempAllow", "broadcasts", "config"];
+    let order = ["lockdown", "wifi", "wifiManagedOnly", "printers", "drivers", "deviceLock", "usbTempAllow", "broadcasts", "config"];
     let at: Vec<usize> = order.iter().map(|key| text.find(&format!("\"{key}\":")).unwrap()).collect();
     assert!(at.windows(2).all(|pair| pair[0] < pair[1]), "{text}");
     assert_eq!(value.as_object().unwrap().len(), order.len());

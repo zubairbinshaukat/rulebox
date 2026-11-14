@@ -18,7 +18,7 @@ import { giveStepUp, makeOrg, asMember, type Member } from "./identity";
 import { TEST_KEY } from "./keys";
 import { seedLargeOrg, LARGE } from "./largeOrg";
 import { addWifi, createKeys, MASTER_A, MASTER_B, sealKeyPair, setMaster } from "./phase5";
-import type { Fixture } from "./matrixRows";
+import { DRIVER_ROW, type Fixture } from "./matrixRows";
 
 declare const process: { env: Record<string, string | undefined> };
 
@@ -268,6 +268,18 @@ export const INTERNAL_CALLS: Record<string, InternalCase | InternalCase[]> = {
       return id;
     });
     return () => c.f.t.mutation(internal.networks.purgeSealed, { profileId });
+  },
+  // Phase 5 Step 14b. A deleted driver with a full batch of results (one per PC row, so 100 rows of its own).
+  "drivers:purgeResults": async (c) => {
+    const driverId = await c.f.t.run(async (ctx) => {
+      const id = await ctx.db.insert("drivers", DRIVER_ROW(c.f.orgId, "Gone driver", []));
+      for (let i = 0; i < 100; i++) {
+        await ctx.db.insert("driverResults", { orgId: c.f.orgId, deviceId: c.f.deviceId, driverId: id, state: "installed", driverRevision: 1, attempts: 0, updatedAt: Date.now() + i });
+      }
+      await ctx.db.delete(id);
+      return id;
+    });
+    return () => c.f.t.mutation(internal.drivers.purgeResults, { driverId });
   },
   "wifi:target": async (c) => {
     setMaster(MASTER_A);

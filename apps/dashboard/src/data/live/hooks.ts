@@ -497,6 +497,36 @@ export const liveApi: DataApi = {
     );
     return useMapped(call);
   },
+  // ---- drivers (Phase 5 Step 14b): `convex/drivers.ts`, plus the approved printer driver names in `convex/networks.ts`.
+  useDriverDetail(id) {
+    return useMemberQuery(api.drivers.detail, { id });
+  },
+  useSaveDriver() {
+    return useMapped(useMutation(api.drivers.save));
+  },
+  useDeleteDriver() {
+    const remove = useMutation(api.drivers.remove);
+    const call = useCallback(
+      async (a: { id: string }) => {
+        await remove(a);
+      },
+      [remove],
+    );
+    return useMapped(call);
+  },
+  useRetryDriver() {
+    const retry = useMutation(api.drivers.retry);
+    const call = useCallback(
+      async (a: { id: string }) => {
+        await retry(a);
+      },
+      [retry],
+    );
+    return useMapped(call);
+  },
+  useSetApprovedPrinterDrivers() {
+    return useMapped(useMutation(api.networks.setApprovedPrinterDrivers));
+  },
   useSetAppArchived() {
     const base = useMutation(api.apps.setArchived);
     const set = useMemo(

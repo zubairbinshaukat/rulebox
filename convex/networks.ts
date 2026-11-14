@@ -6,10 +6,13 @@ import { writeAudit } from "./lib/audit";
 import { checkRevision, getInOrg } from "./lib/authz";
 import { fail } from "./lib/errors";
 import { internalMutation, memberMutation, memberQuery } from "./lib/functions";
-import { snapshotGroupConfig } from "./lib/groupConfig";
+import { groupsOf, hasControlChars, sameSet, snapshotGroups } from "./lib/networkShared";
 import {
+  MAX_APPROVED_PRINTER_DRIVERS,
   MAX_NETWORK_GROUPS,
+  MAX_ORG_DRIVERS,
   MAX_ORG_PRINTERS,
+  MAX_PRINTER_DRIVER,
   MAX_PRINTER_NAME,
   MAX_NETWORK_SNAPSHOT_GROUPS,
   MAX_WIFI_DETAIL_GROUPS,
@@ -19,8 +22,9 @@ import {
   SEALED_PURGE_BATCH,
 } from "./lib/limits";
 import { printerKind, wifiSecurity } from "./lib/lockdownValidators";
-import { approvedPrinterDrivers, checkPrinterDriver } from "./lib/printerDrivers";
+import { addedPrinterDrivers, approvedPrinterDrivers, checkPrinterDriver, INBOX_PRINTER_DRIVERS } from "./lib/printerDrivers";
 import { checkPrinterTarget } from "./lib/printerAddress";
+import { driverRowOf, driverRowValue } from "./drivers";
 
 // Wi-Fi profiles: list, detail, save, delete (Phase 5 Step 13, plan 4.15, 4.20). The passphrase is NOT here:
 // only the ACTION `wifi:setPassphrase` (wifi.ts) accepts it. No function in this file returns a passphrase,
@@ -28,7 +32,11 @@ import { checkPrinterTarget } from "./lib/printerAddress";
 //
 // CONTRACT (the dashboard types against this block):
 //   networks:list        query, viewer, args {}                       -> { wifi: WifiRow[], printers: PrinterRow[],
-//                                                                         approvedDrivers: string[] }
+//                                                                         drivers: DriverRow[] (drivers.ts, Step 14b),
+//                                                                         approvedDrivers: string[] (inbox class drivers + names the admin
+//                                                                         added + names the delivered driver packages provide, for the printer
+//                                                                         picker), addedDrivers: string[] (only the admin-added names, for the
+//                                                                         editable card) }
 //   networks:wifiDetail  query, viewer, args { id: string }           -> WifiDetail
 //   networks:saveWifi    mutation, admin, args { id?: string, expectedRevision?: number, name: string,
 //                          ssid: string, hidden: boolean, security: "open"|"wpa2Personal"|"wpa3Personal"|
@@ -59,8 +67,16 @@ import { checkPrinterTarget } from "./lib/printerAddress";
 //                           Errors: invalid_argument (field name|address|port|queue|driver|groupIds|defaultForGroupIds|
 //                           expectedRevision; detail, e.g. name "taken", driver "not_approved", defaultForGroupIds "taken"),
 //                           not_found, stale_edit, too_large (detail "printers" = 100 per organization; "groups" = more
-//                           than 10 groups touched). The driver must be on the approved list (the inbox class drivers plus
-//                           `phase5Settings.approvedPrinterDrivers`); the agent never installs one.
+//                           than 10 groups touched). The driver must be on the approved list (the inbox class drivers, the
+//                           `phase5Settings.approvedPrinterDrivers` the admin added, and the names `provides` of the organization's
+//                           drivers, Step 14b); the printer layer itself never installs one (a driver package does).
+//   networks:setApprovedPrinterDrivers  mutation, admin, args { names: string[] } -> { addedDrivers: string[] }
+//                           Owner decision 2a (2026-11-15). Replaces the admin-added names: each trimmed, 1-100 characters, no control
+//                           characters (invalid_argument field "names", detail "empty" | "length" | "characters"), duplicates
+//                           (case-insensitive) and names equal to an inbox class driver dropped; more than 20 left: too_large detail
+//                           "names". No change = no write, no audit. Audits `printers.driversChanged`. It does NOT snapshot any group: the
+//                           documents carry the driver name and the agent checks its own driver store, so the list only gates later
+//                           `savePrinter` calls, and a printer that uses a name taken off the list keeps working.
 //   networks:deletePrinter  mutation, admin, args { id: string }      -> null
 //   PrinterRow    = { _id, name, kind, address, port: number | null, queue: string | null, driver, revision,
 //                     groupCount, defaultGroupCount, groups: { _id, name }[] }   (first MAX_WIFI_LIST_GROUPS groups)
@@ -148,8 +164,6 @@ const printerDetailValue = v.object({
   counts: applyCounts,
 });
 
-type GroupReader = { db: { get(id: Id<"groups">): Promise<Doc<"groups"> | null> } };
-
 function printerRowOf(p: Doc<"printers">, groups: { _id: Id<"groups">; name: string }[]) {
   return {
     _id: p._id,
@@ -182,26 +196,6 @@ function rowOf(p: Doc<"wifiProfiles">, groups: { _id: Id<"groups">; name: string
   };
 }
 
-/** The first `cap` groups of a profile that still exist (a deleted group is skipped), names from a per-query cache. */
-async function groupsOf(
-  ctx: GroupReader,
-  ids: Id<"groups">[],
-  cap: number,
-  cache: Map<string, { _id: Id<"groups">; name: string } | null>,
-): Promise<{ _id: Id<"groups">; name: string }[]> {
-  const out: { _id: Id<"groups">; name: string }[] = [];
-  for (const id of ids.slice(0, cap)) {
-    let hit = cache.get(id);
-    if (hit === undefined) {
-      const g = await ctx.db.get(id);
-      hit = g === null ? null : { _id: g._id, name: g.name };
-      cache.set(id, hit);
-    }
-    if (hit !== null) out.push(hit);
-  }
-  return out;
-}
-
 // ---------------------------------------------------------------- reads
 
 /**
@@ -212,7 +206,13 @@ async function groupsOf(
  */
 export const list = memberQuery("viewer")({
   args: {},
-  returns: v.object({ wifi: v.array(wifiRow), printers: v.array(printerRow), approvedDrivers: v.array(v.string()) }),
+  returns: v.object({
+    wifi: v.array(wifiRow),
+    printers: v.array(printerRow),
+    drivers: v.array(driverRowValue),
+    approvedDrivers: v.array(v.string()),
+    addedDrivers: v.array(v.string()),
+  }),
   handler: async (ctx) => {
     const rows = await ctx.db
       .query("wifiProfiles")
@@ -233,8 +233,24 @@ export const list = memberQuery("viewer")({
       printers.push(printerRowOf(p, await groupsOf(ctx, p.groupIds, MAX_WIFI_LIST_GROUPS, cache)));
     }
     printers.sort((a, b) => a.name.localeCompare(b.name) || (a._id < b._id ? -1 : 1));
+    const driverDocs = await ctx.db
+      .query("drivers")
+      .withIndex("by_org", (q) => q.eq("orgId", ctx.orgId))
+      .take(MAX_ORG_DRIVERS + 1);
+    const drivers = [];
+    for (const d of driverDocs.slice(0, MAX_ORG_DRIVERS)) {
+      drivers.push(driverRowOf(d, await groupsOf(ctx, d.groupIds, MAX_WIFI_LIST_GROUPS, cache)));
+    }
+    drivers.sort((a, b) => a.name.localeCompare(b.name) || (a._id < b._id ? -1 : 1));
     const org = await ctx.db.get(ctx.orgId);
-    return { wifi, printers, approvedDrivers: approvedPrinterDrivers(org?.phase5Settings?.approvedPrinterDrivers) };
+    const added = org?.phase5Settings?.approvedPrinterDrivers;
+    return {
+      wifi,
+      printers,
+      drivers,
+      approvedDrivers: approvedPrinterDrivers(added, drivers.flatMap((d) => d.provides)),
+      addedDrivers: addedPrinterDrivers(added),
+    };
   },
 });
 
@@ -279,14 +295,6 @@ export const wifiDetail = memberQuery("viewer")({
 
 // ---------------------------------------------------------------- writes
 
-function hasControlChars(text: string): boolean {
-  for (const ch of text) {
-    const c = ch.codePointAt(0) ?? 0;
-    if (c < 0x20 || c === 0x7f || (c >= 0x80 && c < 0xa0)) return true;
-  }
-  return false;
-}
-
 /** The trimmed profile name (1-60), or `invalid_argument`. */
 export function checkWifiName(name: string): string {
   const n = name.trim();
@@ -302,21 +310,6 @@ export function checkSsid(ssid: string): string {
   if (new TextEncoder().encode(ssid).length > MAX_SSID_BYTES) fail("invalid_argument", { field: "ssid", detail: "length" });
   if (hasControlChars(ssid)) fail("invalid_argument", { field: "ssid", detail: "characters" });
   return ssid;
-}
-
-const sameSet = (a: readonly string[], b: readonly string[]): boolean => a.length === b.length && a.every((x, i) => x === b[i]);
-
-/** Snapshot the configuration of every still existing group in `ids` (cap MAX_NETWORK_SNAPSHOT_GROUPS). */
-async function snapshotGroups(
-  ctx: Parameters<typeof snapshotGroupConfig>[0] & GroupReader,
-  ids: Iterable<Id<"groups">>,
-  reason: string,
-  by: Id<"members">,
-): Promise<void> {
-  for (const id of ids) {
-    if ((await ctx.db.get(id)) === null) continue;
-    await snapshotGroupConfig(ctx, id, reason, by);
-  }
 }
 
 /**
@@ -545,7 +538,17 @@ export const savePrinter = memberMutation("admin")({
       fail("invalid_argument", { field: "groupIds", detail: "too_many" });
     }
     const org = await ctx.db.get(ctx.orgId);
-    const driver = checkPrinterDriver(args.driver, approvedPrinterDrivers(org?.phase5Settings?.approvedPrinterDrivers));
+    const added = org?.phase5Settings?.approvedPrinterDrivers;
+    let approved = approvedPrinterDrivers(added);
+    // The organization's driver packages are read only when the name is not already on the inbox / added list.
+    if (!approved.some((x) => x.toLowerCase() === args.driver.trim().toLowerCase())) {
+      const delivered = await ctx.db
+        .query("drivers")
+        .withIndex("by_org", (q) => q.eq("orgId", ctx.orgId))
+        .take(MAX_ORG_DRIVERS);
+      approved = approvedPrinterDrivers(added, delivered.flatMap((d) => d.provides));
+    }
+    const driver = checkPrinterDriver(args.driver, approved);
     const groupIds: Id<"groups">[] = [];
     for (const raw of args.groupIds) {
       const g = await getInOrg(ctx, "groups", raw, ctx.orgId);
@@ -670,5 +673,50 @@ export const deletePrinter = memberMutation("admin")({
     });
     await snapshotGroups(ctx, p.groupIds, `Removed printer ${p.name}`, ctx.member._id);
     return null;
+  },
+});
+
+// ---------------------------------------------------------------- approved printer drivers (Phase 5 Step 14b, owner decision 2a)
+
+/**
+ * Replace the printer driver names the admin approved (admin; `networks:list` returns them as `addedDrivers`). Each name is trimmed,
+ * 1-MAX_PRINTER_DRIVER characters without control characters (`invalid_argument`, field "names"); duplicates (case-insensitive,
+ * the first spelling wins) and the inbox class drivers are dropped; more than MAX_APPROVED_PRINTER_DRIVERS left is `too_large`
+ * (detail "names"). Nothing is written (and nothing audited) when the resulting list equals the stored one. Audits
+ * `printers.driversChanged`. No group is snapshotted: the documents carry the driver NAME, the agent checks its own driver store
+ * (`driver_missing`), and the list only gates `savePrinter`, so a printer that uses a name taken off the list keeps working.
+ */
+export const setApprovedPrinterDrivers = memberMutation("admin")({
+  args: { names: v.array(v.string()) },
+  returns: v.object({ addedDrivers: v.array(v.string()) }),
+  handler: async (ctx, args) => {
+    // A cheap early guard on the input size (the real cap is applied after dropping duplicates and inbox names).
+    if (args.names.length > MAX_APPROVED_PRINTER_DRIVERS * 5) fail("too_large", { detail: "names" });
+    const list: string[] = [];
+    for (const raw of args.names) {
+      const name = raw.trim();
+      if (name.length === 0) fail("invalid_argument", { field: "names", detail: "empty" });
+      if (name.length > MAX_PRINTER_DRIVER) fail("invalid_argument", { field: "names", detail: "length" });
+      if (hasControlChars(name)) fail("invalid_argument", { field: "names", detail: "characters" });
+      const lower = name.toLowerCase();
+      if (INBOX_PRINTER_DRIVERS.some((x) => x.toLowerCase() === lower) || list.some((x) => x.toLowerCase() === lower)) continue;
+      list.push(name);
+    }
+    if (list.length > MAX_APPROVED_PRINTER_DRIVERS) fail("too_large", { detail: "names" });
+    const org = await ctx.db.get(ctx.orgId);
+    if (org === null) fail("not_found");
+    const before = addedPrinterDrivers(org.phase5Settings?.approvedPrinterDrivers);
+    if (before.length === list.length && before.every((x, i) => x === list[i])) return { addedDrivers: before };
+    await ctx.db.patch(ctx.orgId, { phase5Settings: { ...org.phase5Settings, approvedPrinterDrivers: list } });
+    await writeAudit(ctx, {
+      orgId: ctx.orgId,
+      actor: ctx.actor,
+      action: "printers.driversChanged",
+      targetType: "organization",
+      targetId: ctx.orgId,
+      targetLabel: org.name,
+      summary: `Changed the approved printer drivers (${list.length} added)`,
+    });
+    return { addedDrivers: list };
   },
 });

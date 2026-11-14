@@ -51,19 +51,20 @@ use tokio::sync::watch;
 use tokio_util::sync::CancellationToken;
 
 use super::download::{check_https, part_path, Downloader};
+use super::drivers_rules::DriverRecord;
 use super::report::report_of;
 use super::{
     download_deadline, exe_install_command, icons, is_reparse_point, is_safe_id, is_sha256, judge_install,
     judge_removal, msi_install_command, msi_removal_command, open_verified, product_code, Detail, ExitVerdict,
     FileCheckError, BACKOFF_MINUTES, BUSY_RETRY, BUSY_WINDOW, EXE_POLL, KEEP_MSI_LOGS, MAX_DOWNLOAD_BYTES,
-    MAX_FAILURES,
+    MAX_FAILURES, MSI_REBOOT_INITIATED, MSI_REBOOT_REQUIRED,
 };
 use crate::agent_policy::AgentPolicy;
 use crate::backend::InstallReport;
 use crate::paths::DataPaths;
 use crate::platform::{BootIdentity, InstallerCommand, InstallerExit, Platform, PlatformError};
 use crate::report::ReportQueue;
-use crate::state::{lock, read_json, remove_file_if_exists, write_atomic};
+use crate::state::{lock, read_json, remove_file_if_exists, write_atomic, SharedState};
 
 pub const INSTALLS_SCHEMA: u32 = 1;
 
@@ -235,11 +236,14 @@ pub struct InstallsFile {
     /// without the wall clock (`rebooted_since`).
     pub restart_boot: Option<BootMark>,
     pub apps: BTreeMap<String, InstallRecord>,
+    /// (Phase 5 Step 14b) The drivers of the signed document, by driver id. Never a tile: nothing reads this for
+    /// visibility. A file written before Step 14b has no such map.
+    pub drivers: BTreeMap<String, DriverRecord>,
 }
 
 impl Default for InstallsFile {
     fn default() -> Self {
-        Self { schema: INSTALLS_SCHEMA, restart_pending_since_ms: None, restart_boot: None, apps: BTreeMap::new() }
+        Self { schema: INSTALLS_SCHEMA, restart_pending_since_ms: None, restart_boot: None, apps: BTreeMap::new(), drivers: BTreeMap::new() }
     }
 }
 
@@ -336,6 +340,16 @@ impl InstallBook {
     /// The server accepted `report`: mark it, and forget a finished removal.
     pub fn ack(&self, report: &InstallReport) {
         self.update(|file| {
+            // (Step 14b) A driver's result travels the same way, under the driver's id.
+            if let Some(record) = file.drivers.get_mut(&report.app_id) {
+                if record.reported.as_ref() == Some(report) {
+                    record.acked = true;
+                    if record.removal && record.state == LocalState::Removed {
+                        file.drivers.remove(&report.app_id);
+                    }
+                }
+                return;
+            }
             let Some(record) = file.apps.get_mut(&report.app_id) else { return };
             if record.reported.as_ref() != Some(report) {
                 return;
@@ -377,6 +391,14 @@ fn fail_record(record: &mut InstallRecord, detail: Option<Detail>, exit_code: Op
     record.detail = detail.map(|d| d.as_str().to_string());
     record.last_exit_code = exit_code;
     record.next_try_ms = backoff_after(record.attempts).map_or(0, |wait| now.saturating_add(ms(wait)));
+}
+
+/// What one download needs (an app's installer, or a driver's file).
+struct DownloadFile<'a> {
+    url: &'a str,
+    sha256: &'a str,
+    size_bytes: u64,
+    ext: &'static str,
 }
 
 /// What the engine installs, checked from a catalogue entry.
@@ -482,12 +504,22 @@ pub struct EngineDeps {
     pub install_timeout: Duration,
     /// After a successful install the program must exist within this long.
     pub exe_wait: Duration,
+    /// (Step 14b) The agent state: a driver package the engine published is written into the journal, so a restore of
+    /// everything (un-enrolling) removes it again.
+    pub shared: Arc<SharedState>,
 }
 
 struct Engine {
     deps: EngineDeps,
     /// Icon hashes tried in this run (a failing icon is not fetched in a loop).
     icons_tried: HashSet<String>,
+}
+
+/// The next operation: an app or a driver (Step 14b), an install or a removal.
+struct Job {
+    id: String,
+    removal: bool,
+    driver: bool,
 }
 
 /// How an operation ended, before it is written down.
@@ -567,6 +599,28 @@ impl Engine {
                     }
                 }
             }
+            // (Step 14b) The same for drivers.
+            for record in file.drivers.values_mut() {
+                match record.state {
+                    LocalState::Downloading => {
+                        tracing::info!("a driver download was interrupted; it starts again");
+                        record.state = if record.removal { LocalState::Removing } else { LocalState::Pending };
+                    }
+                    LocalState::Installing => {
+                        tracing::warn!("the agent stopped while a driver installer ran; counted as a failed attempt");
+                        record.fail(None, None, now);
+                        out.extend(record.mark());
+                    }
+                    _ => {}
+                }
+                if !record.acked {
+                    if let Some(report) = &record.reported {
+                        if !out.iter().any(|r: &InstallReport| r.app_id == report.app_id) {
+                            out.push(report.clone());
+                        }
+                    }
+                }
+            }
             out
         });
         self.push(reports);
@@ -575,10 +629,23 @@ impl Engine {
         if let Some(since) = file.restart_pending_since_ms {
             match self.deps.platform.boot_identity() {
                 Ok(now) if rebooted_since(file.restart_boot.as_ref(), since, &now) => {
-                    self.deps.book.update(|file| {
+                    let reports = self.deps.book.update(|file| {
                         file.restart_pending_since_ms = None;
                         file.restart_boot = None;
+                        // (Step 14b) The restart a driver asked for happened: its "restart needed" (installed with exit
+                        // code 3010 / 1641) goes away on the dashboard.
+                        let mut out = Vec::new();
+                        for record in file.drivers.values_mut() {
+                            if record.state == LocalState::Installed
+                                && record.last_exit_code.is_some_and(|code| code == i64::from(MSI_REBOOT_REQUIRED) || code == i64::from(MSI_REBOOT_INITIATED))
+                            {
+                                record.last_exit_code = None;
+                                out.extend(record.mark());
+                            }
+                        }
+                        out
                     });
+                    self.push(reports);
                     self.deps.report.set_restart_pending(false);
                 }
                 Ok(_) => self.deps.report.set_restart_pending(true),
@@ -591,6 +658,8 @@ impl Engine {
         self.clean_downloads();
         // TEMP folders of installer runs a crash left behind.
         super::sweep_run_temps(&self.deps.paths.installer_temp_dir());
+        // (Step 14b) Driver zips a crash left extracted.
+        super::unzip::remove_tree(&self.deps.paths.drivers_dir().join("work"));
     }
 
     /// Deletes `.part` files and every download no waiting install needs.
@@ -601,6 +670,8 @@ impl Engine {
             .values()
             .filter(|r| !r.removal && r.runnable())
             .map(InstallRecord::file_name)
+            // (Step 14b) A driver still waiting for its download or install keeps its file too.
+            .chain(file.drivers.values().filter(|r| !r.removal && r.runnable()).map(DriverRecord::file_name))
             .collect();
         let dir = self.deps.paths.downloads_dir();
         let Ok(entries) = std::fs::read_dir(&dir) else { return };
@@ -777,13 +848,20 @@ impl Engine {
 
     /// The next operation that is due: `(app id, is a removal)`. Installs wait for
     /// the connection.
-    fn next_job(&self, online: bool) -> Option<(String, bool)> {
+    fn next_job(&self, online: bool) -> Option<Job> {
         let now = self.now();
         let file = self.deps.book.snapshot();
         file.apps
             .values()
             .find(|r| r.runnable() && r.next_try_ms <= now && (r.removal || online))
-            .map(|r| (r.app_id.clone(), r.removal))
+            .map(|r| Job { id: r.app_id.clone(), removal: r.removal, driver: false })
+            // (Step 14b) Apps first, then drivers.
+            .or_else(|| {
+                file.drivers
+                    .values()
+                    .find(|r| r.runnable() && r.next_try_ms <= now && (r.removal || online))
+                    .map(|r| Job { id: r.driver_id.clone(), removal: r.removal, driver: true })
+            })
     }
 
     /// When the earliest waiting operation comes due (Unix ms).
@@ -793,6 +871,7 @@ impl Engine {
             .values()
             .filter(|r| r.runnable() && (r.removal || online))
             .map(|r| r.next_try_ms)
+            .chain(file.drivers.values().filter(|r| r.runnable() && (r.removal || online)).map(|r| r.next_try_ms))
             .min()
     }
 
@@ -870,6 +949,12 @@ impl Engine {
 
     /// Download (or reuse) the installer; `Err(None)` = the agent is stopping.
     async fn download(&self, app_id: &str, spec: &Spec, shutdown: &CancellationToken) -> Result<PathBuf, Option<Detail>> {
+        let file = DownloadFile { url: &spec.url, sha256: &spec.sha256, size_bytes: spec.size_bytes, ext: spec.kind.ext() };
+        self.download_file(app_id, &file, shutdown).await
+    }
+
+    /// The download of any installer file (an app's, or a driver's zip / exe / msi, Step 14b).
+    async fn download_file(&self, app_id: &str, spec: &DownloadFile<'_>, shutdown: &CancellationToken) -> Result<PathBuf, Option<Detail>> {
         let dir = self.deps.paths.downloads_dir();
         if let Err(error) = std::fs::create_dir_all(&dir) {
             tracing::error!("cannot create the downloads folder: {error}");
@@ -884,10 +969,10 @@ impl Engine {
         // once it is known.
         let need = if spec.size_bytes > 0 { spec.size_bytes.saturating_mul(3) } else { MAX_DOWNLOAD_BYTES };
         self.check_disk(app_id, need)?;
-        let dest = dir.join(format!("{}.{}", spec.sha256, spec.kind.ext()));
+        let dest = dir.join(format!("{}.{}", spec.sha256, spec.ext));
         let mut reused = false;
         if dest.exists() {
-            match open_verified(&dest, &spec.sha256) {
+            match open_verified(&dest, spec.sha256) {
                 Ok(_) => {
                     tracing::info!(app_id, "reusing the installer downloaded earlier");
                     reused = true;
@@ -903,7 +988,7 @@ impl Engine {
             tracing::info!(app_id, "downloading the installer");
             tokio::select! {
                 () = shutdown.cancelled() => return Err(None),
-                result = tokio::time::timeout(deadline, self.deps.downloader.fetch(&spec.url, &dest, &spec.sha256, max)) => match result {
+                result = tokio::time::timeout(deadline, self.deps.downloader.fetch(spec.url, &dest, spec.sha256, max)) => match result {
                     Ok(Ok(())) => {}
                     Ok(Err(error)) => {
                         tracing::warn!(app_id, "download failed: {error}");
@@ -1235,6 +1320,7 @@ pub async fn run_install_task(
         let mut wake = None;
         if enrolled {
             engine.reconcile(&policy);
+            engine.reconcile_drivers(&policy);
             if online && policy.has_document {
                 if catalog_seen.as_ref() != Some(&policy.catalog) {
                     // A new catalogue: icons that failed before may work now.
@@ -1246,8 +1332,12 @@ pub async fn run_install_task(
                     return;
                 }
             }
-            if let Some((app_id, removal)) = engine.next_job(online) {
-                engine.run_job(&app_id, removal, &policy, &shutdown).await;
+            if let Some(job) = engine.next_job(online) {
+                if job.driver {
+                    engine.run_driver_job(&job.id, job.removal, &policy, &shutdown).await;
+                } else {
+                    engine.run_job(&job.id, job.removal, &policy, &shutdown).await;
+                }
                 continue;
             }
             wake = engine.next_wake(online);
@@ -1277,6 +1367,9 @@ pub async fn run_install_task(
         }
     }
 }
+
+#[path = "drivers.rs"]
+mod drivers;
 
 #[cfg(test)]
 #[path = "engine_tests.rs"]

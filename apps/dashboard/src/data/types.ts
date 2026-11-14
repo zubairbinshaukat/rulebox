@@ -784,7 +784,74 @@ export interface PrinterRow {
 export interface NetworksScreen {
   wifi: WifiRow[];
   printers: PrinterRow[];
+  /** (Step 14b) The drivers Rulebox delivers to PCs. */
+  drivers: DriverRow[];
+  /** The names the printer picker offers: the inbox class drivers, the names an admin added and the names delivered drivers provide. */
   approvedDrivers: string[];
+  /** (Step 14b) Only the names an admin added (`orgSettings.phase5Settings.approvedPrinterDrivers`): what the Approved printer drivers card edits. */
+  addedDrivers: string[];
+}
+
+/** `drivers.kind` (Step 14b): a zip with an INF, or a vendor's silent installer. */
+export type DriverKind = "inf" | "exe" | "msi";
+export type DriverClass = "printer" | "scanner" | "other";
+
+/** One driver as `networks:list` and `drivers:detail` return it. */
+export interface DriverRow {
+  _id: Id;
+  name: string;
+  kind: DriverKind;
+  deviceClass: DriverClass;
+  /** 0 = unknown. */
+  sizeBytes: number;
+  revision: number;
+  /** The printer driver names this package makes available to the printer form. */
+  provides: string[];
+  /** All assigned groups; `groups` carries only the first few. */
+  groupCount: number;
+  groups: GroupOption[];
+}
+
+/** How the PCs of the assigned groups report one driver, counted on demand (detail screen only). */
+export interface DriverCounts {
+  installed: number;
+  failed: number;
+  pending: number;
+  removed: number;
+  unsupported: number;
+  /** Installed, and the installer asked for a restart (3010 / 1641) that has not happened yet. */
+  restartNeeded: number;
+  sampled: number;
+  capped: boolean;
+}
+
+/** `drivers:detail`. */
+export interface DriverDetail extends DriverRow {
+  url: string;
+  sha256: string;
+  /** Zip drivers: the INF inside the archive. */
+  inf: string | null;
+  silentArgs: string[];
+  successExitCodes: number[];
+  groupIds: Id[];
+  counts: DriverCounts;
+}
+
+/** `drivers:save`: no `id` creates; `id` + `expectedRevision` updates. */
+export interface DriverInput {
+  id?: Id;
+  expectedRevision?: number;
+  name: string;
+  kind: DriverKind;
+  deviceClass: DriverClass;
+  url: string;
+  sha256: string;
+  sizeBytes: number;
+  inf?: string;
+  silentArgs: string[];
+  successExitCodes: number[];
+  provides: string[];
+  groupIds: Id[];
 }
 
 /**

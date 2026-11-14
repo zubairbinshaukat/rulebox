@@ -46,6 +46,8 @@ export type Fixture = {
   wifiId: Id<"wifiProfiles">;
   /** A raw-TCP printer "Front desk" (Microsoft PCL6 Class Driver, revision 1) assigned to `groupId`, default there. */
   printerId: Id<"printers">;
+  /** (Step 14b) An INF driver "Front desk driver" (revision 1) assigned to `groupId`. */
+  driverId: Id<"drivers">;
   /** An enabled employee in no group. */
   employeeId: Id<"employees">;
   /** The device's stored secret hashes (current and previous). */
@@ -144,6 +146,7 @@ export async function fixture(given?: T): Promise<Fixture> {
       createdAt: Date.now(),
     }),
   );
+  const driverId = await t.run((ctx) => ctx.db.insert("drivers", DRIVER_ROW(orgId, "Front desk driver", [groupId])));
   const employeeId = await t.run((ctx) =>
     ctx.db.insert("employees", {
       orgId,
@@ -188,6 +191,7 @@ export async function fixture(given?: T): Promise<Fixture> {
     handlerId,
     wifiId,
     printerId,
+    driverId,
     employeeId,
     storedHashes,
     accessor: {
@@ -206,6 +210,24 @@ export async function fixture(given?: T): Promise<Fixture> {
     },
   };
 }
+
+/** A valid INF driver row (Step 14b). */
+export const DRIVER_ROW = (orgId: Id<"organizations">, name: string, groupIds: Id<"groups">[]) => ({
+  orgId,
+  name,
+  kind: "inf" as const,
+  deviceClass: "printer" as const,
+  url: "https://downloads.example.test/front-desk.zip",
+  sha256: "a".repeat(64),
+  sizeBytes: 1_000_000,
+  inf: "Drivers/front.inf",
+  silentArgs: [] as string[],
+  successExitCodes: [] as number[],
+  provides: ["Front Desk Series"],
+  groupIds,
+  revision: 1,
+  createdAt: Date.now(),
+});
 
 export type Expect = "ok" | string;
 export type Row = {
@@ -696,6 +718,49 @@ export const ROWS: Row[] = [
     },
     expect: { ...ADMIN_UNLOCKED, foreign: "not_found" },
   },
+  // Phase 5 Step 14b: the approved printer driver names (no names = no change), and drivers (the driver as it is = no change; a fresh one is deleted / retried).
+  {
+    name: "networks:setApprovedPrinterDrivers",
+    call: (a) => a.mutation(api.networks.setApprovedPrinterDrivers, { names: [] }),
+    expect: { ...ADMIN_UNLOCKED, foreign: "ok" },
+  },
+  { name: "drivers:detail", call: (a, f) => a.query(api.drivers.detail, { id: f.driverId }), expect: { ...VIEWER, foreign: "not_found" } },
+  {
+    name: "drivers:save",
+    call: (a, f) =>
+      a.mutation(api.drivers.save, {
+        id: f.driverId,
+        expectedRevision: 1,
+        name: "Front desk driver",
+        kind: "inf",
+        deviceClass: "printer",
+        url: "https://downloads.example.test/front-desk.zip",
+        sha256: "a".repeat(64),
+        sizeBytes: 1_000_000,
+        inf: "Drivers/front.inf",
+        silentArgs: [],
+        successExitCodes: [],
+        provides: ["Front Desk Series"],
+        groupIds: [f.groupId],
+      }),
+    expect: { ...ADMIN_UNLOCKED, foreign: "not_found" },
+  },
+  {
+    name: "drivers:remove",
+    call: async (a, f) => {
+      const id = await f.t.run((ctx) => ctx.db.insert("drivers", DRIVER_ROW(f.orgId, "Spare driver", [])));
+      return a.mutation(api.drivers.remove, { id });
+    },
+    expect: { ...ADMIN_UNLOCKED, foreign: "not_found" },
+  },
+  {
+    name: "drivers:retry",
+    call: async (a, f) => {
+      const id = await f.t.run((ctx) => ctx.db.insert("drivers", DRIVER_ROW(f.orgId, "Retry driver", [])));
+      return a.mutation(api.drivers.retry, { id });
+    },
+    expect: { ...ADMIN_UNLOCKED, foreign: "not_found" },
+  },
   {
     name: "apps:setArchived",
     call: (a, f) => a.mutation(api.apps.setArchived, { appId: f.appId, archived: false }),
@@ -880,7 +945,7 @@ export async function outcome(p: Promise<unknown>): Promise<{ result: string; va
   try {
     const value = await p;
     // `kind` is the Phase 2 wire answer of the device functions; `apps:get` and `networks:printerDetail` have a `kind` field of their own.
-    if (value !== null && typeof value === "object" && "kind" in value && !["ok", "web", "desktop", "ipp", "raw", "lpr", "share"].includes((value as { kind: string }).kind)) {
+    if (value !== null && typeof value === "object" && "kind" in value && !["ok", "web", "desktop", "ipp", "raw", "lpr", "share", "inf", "exe", "msi"].includes((value as { kind: string }).kind)) {
       return { result: `kind:${(value as { kind: string }).kind}`, value };
     }
     return { result: "ok", value };

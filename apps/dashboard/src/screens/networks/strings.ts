@@ -7,7 +7,21 @@ import { MAX_SSID_BYTES, MAX_WIFI_PROFILES } from "../../lib/wifiRules";
 import type { AddressProblem, NameProblem, PortProblem, QueueProblem } from "../../lib/printerRules";
 import { MAX_LPR_QUEUE, MAX_PRINTERS, MAX_PRINTER_NAME, MAX_TCP_HOST } from "../../lib/printerRules";
 import { formatNumber, plural } from "../../lib/format";
-import type { PrinterKind, WifiSecurity } from "../../data/types";
+import type { DriverClass, DriverKind, PrinterKind, WifiSecurity } from "../../data/types";
+import type { AddedProblem, ArgsProblem, CodesProblem, HashProblem, InfProblem, NameProblem as DriverNameProblem, ProvidesProblem, SizeProblem, UrlProblem } from "../../lib/driverRules";
+import {
+  MAX_ADDED_NAME,
+  MAX_ADDED_NAMES,
+  MAX_DRIVERS,
+  MAX_DRIVER_INF,
+  MAX_DRIVER_NAME,
+  MAX_DRIVER_URL,
+  MAX_PROVIDED_NAME,
+  MAX_PROVIDES,
+  MAX_SILENT_ARG,
+  MAX_SILENT_ARGS,
+  MAX_SUCCESS_CODES,
+} from "../../lib/driverRules";
 
 export const networksStrings = {
   title: "Networks",
@@ -127,7 +141,7 @@ export const networksStrings = {
   // ---- printers (Step 14)
   printersSection: "Printers",
   newPrinter: "New printer",
-  printersLead: "Printers your PCs set up on their own. Only the drivers already on the PC are used: Rulebox never installs a driver.",
+  printersLead: "Printers your PCs set up on their own. A printer uses a driver that Windows ships, one you approved, or one a Drivers entry delivers.",
   emptyPrintersTitle: "No printers yet",
   emptyPrintersBody: "Add a printer and give it to a group. Its PCs then set it up by themselves, and the printer shows up in every program's Print window.",
   kindNames: {
@@ -186,7 +200,9 @@ export const networksStrings = {
     length: `Use at most ${MAX_PRINTER_NAME} characters.`,
     characters: "Leave out backslashes, commas, slashes and line breaks.",
   } satisfies Record<NameProblem, string>,
-  driverHint: "The driver must already be on the PC: Rulebox never installs one and never takes one from a print server. A PC without it reports 'driver missing'.",
+  driverHint:
+    "Pick a Windows driver, one you approved, or one delivered by a Drivers entry assigned to the same groups. Rulebox never takes a driver from a print server. A PC without the driver reports 'driver missing'.",
+  driverDelivered: "delivered",
   driverNotListed: "Not on the approved list any more",
   printerGroupsHint: "The PCs in these groups get this printer. Changes reach them with the group's next configuration.",
   defaultsLegend: "Default printer",
@@ -210,12 +226,145 @@ export const networksStrings = {
   defaultTaken: "Another printer is already the default for one of these groups. Turn that one off first.",
   driverRefused: "That driver is not on the approved list.",
 
+  // ---- drivers (Step 14b)
+  driversSection: "Drivers",
+  driversLead: "Printer, scanner and other device drivers your PCs install on their own, in the background. A driver is never shown as an app.",
+  newDriver: "New driver",
+  emptyDriversTitle: "No drivers yet",
+  emptyDriversBody: "Add a driver package or a vendor installer and give it to a group. Its PCs install it by themselves; nobody sees a window.",
+  driverKindShort: { inf: "Driver package", exe: "Installer (.exe)", msi: "Installer (.msi)" } satisfies Record<DriverKind, string>,
+  driverKindNames: {
+    inf: "Driver package (zip with an .inf file)",
+    exe: "Vendor installer (.exe)",
+    msi: "Vendor installer (.msi)",
+  } satisfies Record<DriverKind, string>,
+  driverKindHelp: {
+    inf: "A zip that holds the .inf file, its signed .cat file and the driver files. Installed with Windows' own driver tool; removed again when you take it away.",
+    exe: "The vendor's own installer, run silently with the arguments you give. It is not removed again when you take it away.",
+    msi: "The vendor's .msi installer, run silently by Windows Installer. It is not removed again when you take it away.",
+  } satisfies Record<DriverKind, string>,
+  driverClassShort: { printer: "Printer", scanner: "Scanner", other: "Other device" } satisfies Record<DriverClass, string>,
+  driverClassLabel: "Device class",
+  driverClassHint: "Only used for your own overview. If you block this class under USB rules, Windows will also refuse this driver (by design).",
+  driverLoading: "Loading drivers",
+  driverTitle: "Driver",
+  driverNewTitle: "New driver",
+  driverKind: "What you are delivering",
+  driverUrl: "Download link",
+  driverUrlHint: "Only https links. Rulebox does not host files; paste the download link and its SHA-256.",
+  driverSha: "SHA-256",
+  driverShaHint: "The 64 characters the vendor publishes. The file is checked against it before it runs; a different file is never installed.",
+  driverSize: "Size in bytes",
+  driverSizeHint: "Helps the PC check it has enough free space. Leave empty if you do not know.",
+  driverInf: "INF file inside the zip",
+  driverInfHint: "The path of the .inf file in the zip, for example Drivers\\brother.inf. Windows must trust the driver's signature, otherwise it is refused.",
+  driverArgs: "Silent arguments (one per line)",
+  driverArgsHint: "What makes the installer run without a window, for example /S or /quiet. A .msi gets its own silent switches and needs none.",
+  driverCodes: "Extra success exit codes",
+  driverCodesHint: "Comma separated, for example 0, 3010. 3010 and 1641 mean 'done, restart needed'.",
+  driverProvides: "Printer driver names it delivers",
+  driverProvidesHint: "The names Windows shows for the driver once it is installed, for example HP Universal Printing PCL 6. They then appear in the printer form.",
+  driverGroupsHint: "The PCs in these groups install this driver. Changes reach them with the group's next configuration.",
+  driverRules: "Only https links. The file is checked against the SHA-256 before it runs. Windows must trust the driver's signature, otherwise it is refused. The driver is installed in the background; no window is shown to staff. A driver is never shown as an app.",
+  createDriver: "Add driver",
+  driverSaved: "Driver saved.",
+  driverCreated: (name: string) => `${name} added.`,
+  driverDeleted: (name: string) => `${name} removed.`,
+  driverRetried: "The PCs will try again.",
+  driverNameTaken: "Another driver already has this name.",
+  driverNameHint: "Only for you, to tell drivers apart. Employees never see it.",
+  driverNameProblems: {
+    empty: "Enter a name.",
+    length: `Use at most ${MAX_DRIVER_NAME} characters.`,
+    characters: "Remove line breaks and special control characters.",
+  } satisfies Record<DriverNameProblem, string>,
+  driverUrlProblems: {
+    empty: "Paste the download link.",
+    length: `A link is at most ${MAX_DRIVER_URL} characters.`,
+    scheme: "The link must start with https://.",
+    characters: "Remove spaces and special characters from the link.",
+  } satisfies Record<UrlProblem, string>,
+  driverShaProblems: {
+    empty: "Paste the SHA-256 of the file.",
+    format: "A SHA-256 is exactly 64 digits and letters from 0 to 9 and a to f.",
+  } satisfies Record<HashProblem, string>,
+  driverSizeProblems: {
+    number: "Use a whole number of bytes, or leave it empty.",
+    range: "The file can be at most 4 GiB (4294967296 bytes).",
+  } satisfies Record<SizeProblem, string>,
+  driverInfProblems: {
+    empty: "Enter the path of the .inf file inside the zip.",
+    length: `The path is at most ${MAX_DRIVER_INF} characters.`,
+    extension: "The path must end in .inf.",
+    path: "Use a path inside the zip, like Drivers\\brother.inf: no leading slash, no .. and no colon.",
+  } satisfies Record<InfProblem, string>,
+  driverArgsProblems: {
+    required: "A vendor .exe installer needs at least one silent argument.",
+    count: `At most ${MAX_SILENT_ARGS} arguments.`,
+    length: `An argument is at most ${MAX_SILENT_ARG} characters.`,
+    characters: "Remove special control characters from the arguments.",
+  } satisfies Record<ArgsProblem, string>,
+  driverCodesProblems: {
+    number: "Use whole numbers separated by commas.",
+    count: `At most ${MAX_SUCCESS_CODES} codes.`,
+  } satisfies Record<CodesProblem, string>,
+  driverProvidesProblems: {
+    count: `At most ${MAX_PROVIDES} names.`,
+    length: `A name is at most ${MAX_PROVIDED_NAME} characters.`,
+    characters: "Remove special control characters from the names.",
+  } satisfies Record<ProvidesProblem, string>,
+  driverCountsTitle: "On the PCs",
+  driverCountsSub: "How the PCs of the assigned groups report this driver. Counted when you open this page.",
+  driverCountsNone: "No PC has reported this driver yet.",
+  driverInstalled: "Installed",
+  driverFailed: "Failed",
+  driverPending: "Waiting or installing",
+  driverRestart: "Restart needed",
+  driverRemoved: "Removed",
+  driverUnsupported: "Not usable",
+  retryTitle: "Try again",
+  retryBody: "A PC that failed several times stops trying. This asks every PC to start over with the driver, for example after you fixed the link.",
+  retryDriver: "Ask the PCs to retry",
+  removeDriver: "Remove driver",
+  driverDeleteTitle: (name: string) => `Remove ${name}?`,
+  driverDeleteBody:
+    "The driver is taken away from every group. A driver package (zip) that Rulebox installed is removed from the PCs again; a vendor installer is left in place. This can't be undone.",
+  driverMeta: (kind: string, klass: string) => `${kind} · ${klass}`,
+  driverProvidesLine: (names: string) => `Provides: ${names}`,
+  driverDeliveredLine: (names: string) => `Delivered by Rulebox: ${names}`,
+  driverSizeText: (bytes: number) => (bytes > 0 ? `${formatNumber(Math.round(bytes / 1_000_000))} MB` : ""),
+
+  // ---- approved printer drivers (Step 14b)
+  approvedTitle: "Approved printer drivers",
+  approvedLead: "The printer form only offers these. The Windows drivers are always there; add the name of any other driver already on your PCs.",
+  approvedBuiltIn: "Built into Windows",
+  approvedAdded: "Names you added",
+  approvedNone: "You have not added any names.",
+  approvedField: "Add a driver name",
+  approvedFieldHint: `Exactly as Windows shows it. At most ${MAX_ADDED_NAMES} names, ${MAX_ADDED_NAME} characters each.`,
+  approvedAdd: "Add name",
+  approvedRemove: (name: string) => `Remove ${name}`,
+  approvedSave: "Save names",
+  approvedSaved: "Approved drivers saved.",
+  approvedUnsaved: "You have unsaved changes.",
+  approvedProblems: {
+    empty: "Enter a name.",
+    length: `A name is at most ${MAX_ADDED_NAME} characters.`,
+    characters: "Remove line breaks and special control characters.",
+    count: `At most ${MAX_ADDED_NAMES} names.`,
+  } satisfies Record<AddedProblem, string>,
+  approvedDuplicate: "That name is already in the list.",
+  approvedBuiltInName: "That is a built-in Windows driver and is always approved.",
+  approvedLimit: `You can add at most ${MAX_ADDED_NAMES} names.`,
+
   /** `too_large` (detail "groups" / "printers") and the plan limit of the Wi-Fi and printer calls, as sentences; null = the usual one. */
   describeError: (code: string, detail: string | undefined, limit = 0): string | null => {
     if (code === "too_large" && detail === "printers") return `You can have at most ${formatNumber(MAX_PRINTERS)} printers. Remove one first.`;
     if (code === "too_large" && detail === "groups") {
       return `One save can touch at most ${formatNumber(limit)} ${plural(limit, { one: "group", other: "groups" })}: the groups it is in now plus the ones you pick. Something in more groups than that can't be changed or removed here yet.`;
     }
+    if (code === "too_large" && detail === "drivers") return `You can have at most ${formatNumber(MAX_DRIVERS)} drivers. Remove one first.`;
+    if (code === "too_large" && detail === "names") return `You can add at most ${formatNumber(MAX_ADDED_NAMES)} driver names.`;
     if (code === "too_large" && detail === "wifi") return `You can have at most ${formatNumber(MAX_WIFI_PROFILES)} Wi-Fi networks. Remove one first.`;
     if (code === "not_ready" && detail === "sealing_key") {
       return "The organization's encryption key isn't set up yet, so a password can't be stored. An Owner can finish the key setup in Settings, Signing.";

@@ -41,6 +41,8 @@ pub enum LimitError {
     TooManyWifi,
     #[error("more than 20 printers")]
     TooManyPrinters,
+    #[error("more than 20 drivers")]
+    TooManyDrivers,
     #[error("more than 5 active broadcasts")]
     TooManyBroadcasts,
     #[error("a text is longer than its limit")]

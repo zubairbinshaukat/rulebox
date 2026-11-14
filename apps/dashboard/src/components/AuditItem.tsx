@@ -15,6 +15,8 @@ const TARGET_ROUTES: Record<string, string> = {
   wifi: "/networks/wifi/",
   // Phase 5 Step 14: the printer audit rows (`printer.created` ...).
   printer: "/networks/printers/",
+  // Phase 5 Step 14b: the driver audit rows (driver.created ...).
+  driver: "/networks/drivers/",
 };
 
 

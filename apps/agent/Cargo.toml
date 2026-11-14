@@ -23,6 +23,8 @@ zeroize.workspace = true
 # (Phase 4 Step 14) Installer and icon downloads, `https://` only.
 reqwest.workspace = true
 sha2.workspace = true
+# (Phase 5 Step 14b) Unpacks driver zips (installs/unzip.rs).
+zip.workspace = true
 futures-util.workspace = true
 serde.workspace = true
 serde_json.workspace = true

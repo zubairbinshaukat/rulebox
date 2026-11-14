@@ -17,7 +17,7 @@ use serde_json::Value;
 
 use rulebox_policy::catalog::CatalogApp;
 use rulebox_policy::lockdown::{KeyboardPolicy, WinCombos, MAX_ID_CHARS};
-use rulebox_policy::network::MAX_WIFI_PROFILES;
+use rulebox_policy::network::{DriverSpec, MAX_DRIVERS, MAX_WIFI_PROFILES};
 use rulebox_policy::notice::{Broadcast, DeviceLock, MAX_LOCK_CONTACT, MAX_LOCK_MESSAGE};
 
 use crate::catalog::catalog_from_doc;
@@ -97,6 +97,9 @@ pub struct AgentPolicy {
     pub wifi_managed_only: bool,
     /// (Step 12) The SSIDs of `doc.wifi`, for the status the Staff App shows.
     pub wifi_ssids: Vec<String>,
+    /// (Step 14b) `doc.drivers`: driver packages the install engine puts on the PC. Entries that do not parse or break
+    /// the size limits are dropped. Never a tile, never part of the snapshot.
+    pub drivers: Vec<DriverSpec>,
 }
 
 /// Parses the entries of a JSON list one by one, so one bad entry does not cost the others.
@@ -169,6 +172,17 @@ impl AgentPolicy {
                 .filter(|broadcast| broadcast.check_limits().is_ok())
                 .collect(),
             win_combos: win_combos_from_doc(doc),
+            drivers: parse_list::<DriverSpec>(doc, "drivers")
+                .into_iter()
+                .take(MAX_DRIVERS)
+                .filter(|driver| match driver.check_limits() {
+                    Ok(()) => true,
+                    Err(error) => {
+                        tracing::warn!(%error, "a driver of the document breaks a size limit and is skipped");
+                        false
+                    }
+                })
+                .collect(),
             printers_assigned: doc.get("printers").and_then(Value::as_array).is_some_and(|list| !list.is_empty()),
             wifi_managed_only: doc.get("wifiManagedOnly").and_then(Value::as_bool).unwrap_or(false),
             wifi_ssids: doc
@@ -299,6 +313,27 @@ mod tests {
 
     fn doc(admin_exit: Value) -> Value {
         json!({ "adminExit": admin_exit })
+    }
+
+    #[test]
+    fn drivers_are_read_one_by_one_and_a_bad_one_is_skipped() {
+        let good = |id: &str| {
+            json!({ "id": id, "name": "Brother", "kind": "inf", "url": "https://example.com/b.zip", "sha256": "a".repeat(64),
+                    "sizeBytes": 10, "inf": "x64/b.inf", "silentArgs": [], "successExitCodes": [], "revision": 2 })
+        };
+        let long_name = json!({ "id": "long", "name": "x".repeat(61), "kind": "exe", "url": "https://e.com/x", "sha256": "a".repeat(64),
+                                 "sizeBytes": 1, "inf": null, "silentArgs": ["/S"], "successExitCodes": [0], "revision": 1 });
+        let document = json!({ "drivers": [good("d1"), { "id": 5 }, long_name, good("d2")] });
+        let policy = AgentPolicy::from_doc(Some(&document));
+        assert_eq!(policy.drivers.iter().map(|d| d.id.as_str()).collect::<Vec<_>>(), ["d1", "d2"]);
+        assert_eq!(policy.drivers[0].revision, 2);
+        // An unknown kind parses as Unknown (the engine reports it unsupported); an absent key means none.
+        let mut odd = good("d3");
+        odd["kind"] = json!("usb-fairy");
+        let policy = AgentPolicy::from_doc(Some(&json!({ "drivers": [odd] })));
+        assert_eq!(policy.drivers[0].kind, rulebox_policy::network::DriverKind::Unknown);
+        assert!(AgentPolicy::from_doc(Some(&json!({}))).drivers.is_empty());
+        assert!(AgentPolicy::from_doc(Some(&json!({ "drivers": "no" }))).drivers.is_empty());
     }
 
     #[test]

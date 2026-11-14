@@ -25,6 +25,8 @@ import {
   atRestBox,
   blockedCounts,
   broadcastStyle,
+  driverClass,
+  driverKind,
   exceptionRule,
   findingLayer,
   findingStatus,
@@ -991,6 +993,42 @@ export default defineSchema({
     revision: v.number(),
     createdAt: v.number(),
   }).index("by_org", ["orgId"]),
+
+  // tiny (<= 50 per org, MAX_ORG_DRIVERS). Phase 5 Step 14b: a driver package pushed to groups (PRD 24.2). `inf` is the
+  // path of the .inf inside the zip (kind "inf" only); `silentArgs` / `successExitCodes` belong to kind "exe" only;
+  // `provides` are the printer driver names the package makes available (offered to the printer form).
+  drivers: defineTable({
+    orgId: v.id("organizations"),
+    name: v.string(), // <= 60
+    kind: driverKind,
+    deviceClass: driverClass,
+    url: v.string(),
+    sha256: v.string(),
+    sizeBytes: v.number(),
+    inf: v.optional(v.string()),
+    silentArgs: v.array(v.string()),
+    successExitCodes: v.array(v.number()),
+    provides: v.array(v.string()),
+    groupIds: v.array(v.id("groups")),
+    revision: v.number(),
+    createdAt: v.number(),
+  }).index("by_org", ["orgId"]),
+
+  // grows (devices x drivers). The latest result of each driver on each PC; written only when a field differs.
+  driverResults: defineTable({
+    orgId: v.id("organizations"),
+    deviceId: v.id("devices"),
+    driverId: v.id("drivers"),
+    state: installState,
+    driverRevision: v.number(),
+    attempts: v.number(),
+    exitCode: v.optional(v.number()),
+    detail: v.optional(v.string()),
+    groupId: v.optional(v.id("groups")),
+    updatedAt: v.number(),
+  })
+    .index("by_device_driver", ["deviceId", "driverId"])
+    .index("by_driver_state_updated", ["driverId", "state", "updatedAt"]),
 
   // grows (pruned to 20 per group). The ring-gated inputs of one group at one version (4.14).
   groupConfigs: defineTable({

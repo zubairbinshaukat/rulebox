@@ -3877,6 +3877,7 @@ dependencies = [
  "windows-service",
  "x25519-dalek",
  "zeroize",
+ "zip",
 ]
 
 [[package]]

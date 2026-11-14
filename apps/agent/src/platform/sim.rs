@@ -23,10 +23,11 @@ use rulebox_win32::{applocker, bcd, codeintegrity, eventlog, machinereg, printin
 use super::windows::map_err;
 use crate::cleanup::resolve_reset;
 use crate::installs::{
-    installer_program_allowed, portable_dir_ok, portable_target_ok, MSI_REBOOT_INITIATED, MSI_REBOOT_REQUIRED,
+    hex_lower, installer_command_allowed, is_published_inf, portable_dir_ok, portable_target_ok, MSI_REBOOT_INITIATED, MSI_REBOOT_REQUIRED,
     MSI_SUCCESS, MSI_UNKNOWN_PRODUCT,
 };
 use crate::state::write_atomic;
+use sha2::{Digest, Sha256};
 
 /// Operations a test can make fail with `SimPlatform::fail_next`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -103,6 +104,9 @@ pub enum SimOp {
     PrinterSetSecurity,
     PrinterPortAdd,
     PrinterPortDelete,
+    // Phase 5 Step 14b.
+    DriverPackageDelete,
+    DriverStoreInfs,
     PrinterShareConnect,
     PrinterShareDisconnect,
     BcdSet,
@@ -160,6 +164,7 @@ impl SimOp {
                 | SimOp::PrinterGetSecurity
                 | SimOp::PrinterDrivers
                 | SimOp::PrinterPorts
+                | SimOp::DriverStoreInfs
                 | SimOp::BcdGet
                 | SimOp::ReadEventLog
                 | SimOp::ReadSecurityPosture
@@ -238,6 +243,14 @@ pub struct SimWorld {
     pub installer_creates_exe: bool,
     /// (Step 14) Every installer run, in order (nothing is ever executed).
     pub installer_runs: Vec<InstallerCommand>,
+    /// (Step 14b) The `oem<N>.inf` packages of the fake driver store, and the number the next one gets.
+    pub driver_store: std::collections::BTreeSet<String>,
+    pub next_oem: u32,
+    /// (Step 14b) False: `pnputil /add-driver` succeeds but adds no new name (the package was already in the store).
+    pub driver_add_publishes: bool,
+    /// (Step 14b) Every `driver_package_delete` call (including those that failed), and whether the next ones fail.
+    pub driver_deletes: Vec<String>,
+    pub driver_delete_fails: bool,
     /// (Step 14, tests) At each run, try to open the installer file for writing
     /// and record whether that was refused (the engine must hold it locked).
     pub probe_lock: bool,
@@ -336,6 +349,11 @@ impl SimWorld {
             installer_exits: VecDeque::new(),
             installer_creates_exe: true,
             installer_runs: Vec::new(),
+            driver_store: std::collections::BTreeSet::new(),
+            next_oem: 1,
+            driver_add_publishes: true,
+            driver_deletes: Vec::new(),
+            driver_delete_fails: false,
             probe_lock: false,
             lock_probes: Vec::new(),
             dirs: std::collections::HashSet::new(),
@@ -838,7 +856,7 @@ impl Platform for SimPlatform {
         self.check(SimOp::RunInstaller)?;
         let system_root = sim_path_roots().system_root.map(PathBuf::from);
         let downloads = self.data_dir.join("downloads");
-        if !installer_program_allowed(&cmd.program, system_root.as_deref(), &downloads) {
+        if !installer_command_allowed(&cmd.program, &cmd.args, system_root.as_deref(), &downloads, &self.data_dir.join("drivers")) {
             return Err(PlatformError::Other("program not allowed".into()));
         }
         let hangs = {
@@ -860,6 +878,32 @@ impl Platform for SimPlatform {
             world.lock_probes.push(refused);
         }
         let exit = world.installer_exits.pop_front().unwrap_or(InstallerExit::Code(0));
+        // (Step 14b) pnputil: a success publishes (or deletes) an `oem<N>.inf` of the fake store.
+        if let (InstallerExit::Code(MSI_SUCCESS | MSI_REBOOT_REQUIRED | MSI_REBOOT_INITIATED), Some(root)) = (exit, &system_root) {
+            if cmd.program.file_name().is_some_and(|n| n.eq_ignore_ascii_case("pnputil.exe")) {
+                let inf_dir = root.join("INF");
+                match cmd.args.first().map(String::as_str) {
+                    Some("/add-driver") if world.driver_add_publishes => {
+                        let name = format!("oem{}.inf", world.next_oem);
+                        world.next_oem += 1;
+                        let bytes = cmd.args.get(1).cloned().unwrap_or_default();
+                        let sha = hex_lower(&Sha256::digest(bytes.as_bytes()));
+                        world.programs.insert(
+                            acl_key(&inf_dir.join(&name)),
+                            SimProgram { stamp: FileStamp { created: 1, modified: 1, size: 100 }, identity: FileIdentity::default(), sha256: Some(sha) },
+                        );
+                        world.driver_store.insert(name);
+                    }
+                    Some("/delete-driver") => {
+                        if let Some(name) = cmd.args.get(1) {
+                            world.driver_store.remove(&name.to_ascii_lowercase());
+                            world.programs.remove(&acl_key(&inf_dir.join(name)));
+                        }
+                    }
+                    _ => {}
+                }
+            }
+        }
         if let (InstallerExit::Code(code), Some(exe)) = (exit, &cmd.expected_exe) {
             let success = matches!(code, MSI_SUCCESS | MSI_REBOOT_REQUIRED | MSI_REBOOT_INITIATED)
                 || (cmd.removal && code == MSI_UNKNOWN_PRODUCT);
@@ -870,6 +914,26 @@ impl Platform for SimPlatform {
             }
         }
         Ok(exit)
+    }
+
+    fn driver_package_delete(&self, published: &str) -> Result<(), PlatformError> {
+        self.check(SimOp::DriverPackageDelete)?;
+        if !is_published_inf(published) {
+            return Err(PlatformError::Refused("not a published driver name"));
+        }
+        let name = published.to_ascii_lowercase();
+        let mut world = lock(&self.world);
+        world.driver_deletes.push(name.clone());
+        if world.driver_delete_fails {
+            return Err(PlatformError::Other("pnputil could not delete the package".into()));
+        }
+        if !world.driver_store.remove(&name) {
+            return Err(PlatformError::NotFound);
+        }
+        if let Some(root) = sim_path_roots().system_root {
+            world.programs.remove(&acl_key(&Path::new(&root).join("INF").join(&name)));
+        }
+        Ok(())
     }
 
     fn place_portable(&self, from: &Path, to: &Path) -> Result<(), PlatformError> {
@@ -1036,6 +1100,11 @@ impl Platform for SimPlatform {
     fn printer_drivers(&self) -> Result<Vec<String>, PlatformError> {
         self.check(SimOp::PrinterDrivers)?;
         Ok(lock(&self.world).printer_drivers.clone())
+    }
+
+    fn driver_store_infs(&self) -> Result<Vec<String>, PlatformError> {
+        self.check(SimOp::DriverStoreInfs)?;
+        Ok(lock(&self.world).driver_store.iter().cloned().collect())
     }
 
     fn printer_ports(&self) -> Result<Vec<String>, PlatformError> {

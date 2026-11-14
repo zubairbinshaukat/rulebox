@@ -2550,6 +2550,25 @@ html[data-view="cards"] .dash-table--stack td[data-empty="true"] {
   gap: 6px;
   margin-top: 4px;
 }
+ul.dash-net__chips {
+  list-style: none;
+  padding: 0;
+}
+.dash-chip__remove {
+  appearance: none;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  line-height: 1;
+  padding: 0 2px;
+  cursor: pointer;
+  opacity: 0.7;
+}
+.dash-chip__remove:hover,
+.dash-chip__remove:focus-visible {
+  opacity: 1;
+}
 .dash-net__warn {
   color: var(--rb-warning-text);
 }

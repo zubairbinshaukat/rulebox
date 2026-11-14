@@ -4,10 +4,12 @@ import { sha256HexSync } from "./crypto";
 import { fail } from "./errors";
 import {
   KEEP_GROUP_CONFIGS,
+  MAX_DEVICE_DRIVERS,
   MAX_DEVICE_PRINTERS,
   MAX_DEVICE_WIFI,
   MAX_GROUP_CONFIG_BYTES,
   MAX_GROUP_EXCEPTIONS,
+  MAX_ORG_DRIVERS,
   MAX_ORG_PRINTERS,
   MAX_WIFI_PROFILES,
   PRUNE_GROUP_CONFIGS_PER_RUN,
@@ -80,11 +82,27 @@ export type ConfigPrinter = {
   revision: number;
 };
 
+/** (Step 14b) A driver package as the document carries it (key order = `rulebox_policy::DriverSpec`). */
+export type ConfigDriver = {
+  id: string;
+  name: string;
+  kind: Doc<"drivers">["kind"];
+  url: string;
+  sha256: string;
+  sizeBytes: number;
+  inf: string | null;
+  silentArgs: string[];
+  successExitCodes: number[];
+  revision: number;
+};
+
 export type GroupConfigContent = {
   lockdown: DocLockdown;
   wifiManagedOnly: boolean;
   wifi: ConfigWifi[];
   printers: ConfigPrinter[];
+  /** Absent in versions made before Step 14b, and omitted from the stored text when empty (their content hash stays the same). */
+  drivers?: ConfigDriver[];
 };
 
 const byId = <T extends { id: string }>(a: T, b: T): number => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0);
@@ -116,6 +134,8 @@ export type ConfigInputs = {
     Doc<"printers">,
     "_id" | "name" | "kind" | "address" | "port" | "queue" | "driver" | "revision" | "groupIds" | "defaultForGroupIds"
   >[];
+  /** (Step 14b) The organization's driver packages; this function keeps those assigned to `groupId`. */
+  drivers: Pick<Doc<"drivers">, "_id" | "name" | "kind" | "url" | "sha256" | "sizeBytes" | "inf" | "silentArgs" | "successExitCodes" | "revision" | "groupIds">[];
 };
 
 /**
@@ -155,6 +175,22 @@ export function buildGroupConfig(groupId: string, input: ConfigInputs): GroupCon
     }))
     .sort(byId);
   if (printers.length > MAX_DEVICE_PRINTERS) fail("invalid_argument", { field: "printers", detail: "too_many" });
+  const drivers: ConfigDriver[] = input.drivers
+    .filter((d) => (d.groupIds as string[]).includes(groupId))
+    .map((d) => ({
+      id: d._id,
+      name: d.name,
+      kind: d.kind,
+      url: d.url,
+      sha256: d.sha256,
+      sizeBytes: d.sizeBytes,
+      inf: d.inf ?? null,
+      silentArgs: [...d.silentArgs],
+      successExitCodes: [...d.successExitCodes],
+      revision: d.revision,
+    }))
+    .sort(byId);
+  if (drivers.length > MAX_DEVICE_DRIVERS) fail("invalid_argument", { field: "drivers", detail: "too_many" });
   return {
     lockdown: {
       staff: { ...s.staff },
@@ -172,12 +208,15 @@ export function buildGroupConfig(groupId: string, input: ConfigInputs): GroupCon
     wifiManagedOnly: s.wifiManagedOnly,
     wifi,
     printers,
+    drivers,
   };
 }
 
 /** The text that is stored and hashed. */
 export function serializeGroupConfig(content: GroupConfigContent): string {
-  const text = JSON.stringify(content);
+  // An empty `drivers` is left out, so a group without drivers keeps the content hash it had before Step 14b.
+  const { drivers, ...rest } = content;
+  const text = JSON.stringify(drivers === undefined || drivers.length === 0 ? rest : content);
   if (new TextEncoder().encode(text).length > MAX_GROUP_CONFIG_BYTES) fail("invalid_argument", { field: "groupConfig", detail: "too_large" });
   return text;
 }
@@ -227,7 +266,11 @@ export async function loadConfigInputs(
     .query("printers")
     .withIndex("by_org", (q) => q.eq("orgId", orgId))
     .take(MAX_ORG_PRINTERS + 1);
-  return { settings, exceptions: [...own, ...orgWide], wifi, printers };
+  const drivers = await ctx.db
+    .query("drivers")
+    .withIndex("by_org", (q) => q.eq("orgId", orgId))
+    .take(MAX_ORG_DRIVERS + 1);
+  return { settings, exceptions: [...own, ...orgWide], wifi, printers, drivers };
 }
 
 export type SnapshotResult = { changed: boolean; version: number };

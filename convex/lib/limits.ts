@@ -429,6 +429,21 @@ export const MAX_APPROVED_PRINTER_DRIVERS = 20;
  */
 export const MAX_TCP_PORT_HOST = 48;
 export const MAX_LPR_QUEUE = 32;
+/**
+ * Drivers (Phase 5 Step 14b, plan 4.15 / PRD 24.2): packages pushed to a group. Per organization, per device document,
+ * and the strings an admin may enter. A save touches at most MAX_NETWORK_SNAPSHOT_GROUPS groups, like the printers.
+ */
+export const MAX_ORG_DRIVERS = 50;
+export const MAX_DEVICE_DRIVERS = 20;
+export const MAX_DRIVER_NAME = 60;
+export const MAX_DRIVER_INF = 120;
+export const MAX_DRIVER_ARGS = 16;
+export const MAX_DRIVER_EXIT_CODES = 8;
+export const MAX_DRIVER_PROVIDES = 10;
+/** `drivers:detail`: result rows read for the counts (`capped` says the sample was cut). */
+export const MAX_DRIVER_DETAIL_RESULTS = 200;
+/** Rows of `driverResults` deleted per transaction when a driver is deleted (a full batch schedules the next one). */
+export const DRIVER_RESULT_PURGE_BATCH = 100;
 /** Sealed boxes deleted per transaction when a profile goes away or becomes open. */
 export const SEALED_PURGE_BATCH = 100;
 /** `seal:forDevices`: devices sealed per run (each needs one box per assigned profile). */

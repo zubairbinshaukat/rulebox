@@ -14,6 +14,7 @@ import type { EnrollmentApi } from "../enrollment/api";
 import {
   type DbApp,
   type DbDevice,
+  type DbDriver,
   type DbPrinter,
   type DbWifi,
   type DemoDb,
@@ -40,6 +41,9 @@ import {
   type InstallSummary,
   type Me,
   type MeResult,
+  type DriverCounts,
+  type DriverDetail,
+  type DriverRow,
   type NetworksScreen,
   type PrinterDetail,
   type PrinterRow,
@@ -52,7 +56,23 @@ import type { ServerList } from "../serverList";
 import { byKey, contains, relevance, useDemoServerPage } from "./lists";
 import * as validate from "../../lib/validate";
 import { MAX_WIFI_GROUPS_PER_SAVE, MAX_WIFI_NAME, MAX_WIFI_PROFILES, WIFI_SECURITIES, passphraseProblem, ssidProblem } from "../../lib/wifiRules";
-import { MAX_PRINTERS, PRINTER_KINDS, addressProblem, driverChoices, portProblem, printerNameProblem, queueProblem } from "../../lib/printerRules";
+import {
+  DRIVER_CLASSES,
+  DRIVER_KINDS,
+  MAX_ADDED_NAMES,
+  MAX_DRIVERS,
+  addedNameProblem,
+  dedupeNames,
+  driverNameProblem,
+  driverUrlProblem,
+  infProblem,
+  providesProblem,
+  sha256Problem,
+  silentArgsProblem,
+  sizeProblem,
+  codesProblem,
+} from "../../lib/driverRules";
+import { INBOX_DRIVERS, MAX_PRINTERS, PRINTER_KINDS, addressProblem, driverChoices, portProblem, printerNameProblem, queueProblem } from "../../lib/printerRules";
 import {
   bumpFailedSignIns,
   checkRevision,
@@ -157,6 +177,42 @@ function printerCounts(db: DemoDb, p: DbPrinter): WifiApplyCounts {
   }
   const failed = sampled >= 5 ? 1 : 0;
   return { applied: sampled - failed, failed, waiting: 0, unsupported: 0, sampled, capped };
+}
+
+/** The first 10 group names of a driver, like the server. */
+function driverRow(db: DemoDb, d: DbDriver): DriverRow {
+  return {
+    _id: d._id,
+    name: d.name,
+    kind: d.kind,
+    deviceClass: d.deviceClass,
+    sizeBytes: d.sizeBytes,
+    revision: d.revision,
+    provides: [...d.provides],
+    groupCount: d.groupIds.length,
+    groups: d.groupIds.map((id) => ({ _id: id, name: groupName(db, id) ?? "" })).sort((a, b) => a.name.localeCompare(b.name)).slice(0, 10),
+  };
+}
+
+/** What `drivers:detail` counts: derived from the PCs of the assigned groups, never random (a demo has no install reports). */
+function driverCounts(db: DemoDb, d: DbDriver): DriverCounts {
+  const PER_GROUP = 200;
+  let sampled = 0;
+  let capped = false;
+  for (const g of d.groupIds) {
+    const n = db.devices.filter((x) => x.groupId === g && !x.revoked).length;
+    sampled += Math.min(n, PER_GROUP);
+    capped ||= n > PER_GROUP;
+  }
+  const failed = sampled >= 5 ? 1 : 0;
+  const restartNeeded = sampled >= 3 && d.successExitCodes.includes(3010) ? 1 : 0;
+  const pending = sampled >= 4 ? 1 : 0;
+  return { installed: sampled - failed - pending, failed, pending, removed: 0, unsupported: 0, restartNeeded, sampled, capped };
+}
+
+/** The driver names the printer picker offers: inbox, the names an admin added, and what delivered drivers provide. */
+function approvedNames(db: DemoDb): string[] {
+  return driverChoices([...db.approvedDrivers, ...db.drivers.flatMap((d) => d.provides)]);
 }
 
 function canOpenFiles(a: DbApp) {
@@ -818,6 +874,7 @@ export const demoApi: DataApi = {
             if (dependents.length > 0) fail("has_dependents", { detail: dependents.join(", ") });
             db.groups = db.groups.filter((x) => x._id !== groupId);
             for (const w of db.wifi) w.groupIds = w.groupIds.filter((x) => x !== groupId);
+            for (const d of db.drivers) d.groupIds = d.groupIds.filter((x) => x !== groupId);
             for (const p of db.printers) {
               p.groupIds = p.groupIds.filter((x) => x !== groupId);
               p.defaultForGroupIds = p.defaultForGroupIds.filter((x) => x !== groupId);
@@ -1394,7 +1451,9 @@ export const demoApi: DataApi = {
       return {
         wifi: [...db.wifi].sort((a, b) => a.name.localeCompare(b.name)).map((w) => wifiRow(db, w)),
         printers: [...db.printers].sort((a, b) => a.name.localeCompare(b.name)).map((p) => printerRow(db, p)),
-        approvedDrivers: driverChoices(db.approvedDrivers),
+        drivers: [...db.drivers].sort((a, b) => a.name.localeCompare(b.name)).map((d) => driverRow(db, d)),
+        approvedDrivers: approvedNames(db),
+        addedDrivers: [...db.approvedDrivers],
       };
     });
   },
@@ -1523,7 +1582,7 @@ export const demoApi: DataApi = {
           } else if (queue !== null) {
             fail("invalid_argument", { field: "queue", detail: "not_used" });
           }
-          const driver = driverChoices(db.approvedDrivers).find((d) => d.toLowerCase() === input.driver.trim().toLowerCase());
+          const driver = approvedNames(db).find((d) => d.toLowerCase() === input.driver.trim().toLowerCase());
           if (driver === undefined) fail("invalid_argument", { field: "driver", detail: "not_approved" });
           const groupIds = [...new Set(input.groupIds)];
           for (const g of groupIds) if (!db.groups.some((x) => x._id === g)) fail("not_found");
@@ -1570,6 +1629,141 @@ export const demoApi: DataApi = {
           if (p.groupIds.length > MAX_WIFI_GROUPS_PER_SAVE) fail("too_large", { detail: "groups" });
           db.printers = db.printers.filter((x) => x._id !== id);
           audit({ action: "printer.deleted", targetType: "printer", targetId: p._id, targetLabel: p.name, summary: `Removed the printer ${p.name}` });
+        }),
+      [],
+    );
+  },
+
+  // ---- drivers (Phase 5 Step 14b). The demo twin of `drivers:detail` / `save` / `delete` / `retry` and the approved-names call.
+  useDriverDetail(id) {
+    return useDemoQuery(`drivers:detail:${id}`, (db): DriverDetail => {
+      requireReader();
+      const d = find(db.drivers, id);
+      return {
+        ...driverRow(db, d),
+        url: d.url,
+        sha256: d.sha256,
+        inf: d.inf,
+        silentArgs: [...d.silentArgs],
+        successExitCodes: [...d.successExitCodes],
+        groupIds: [...d.groupIds],
+        counts: driverCounts(db, d),
+      };
+    });
+  },
+
+  useSaveDriver() {
+    return useCallback(
+      (input) =>
+        runMutation("admin", ({ db, audit }) => {
+          const name = input.name.trim();
+          const nameProblem = driverNameProblem(name);
+          if (nameProblem !== null) fail("invalid_argument", { field: "name", detail: nameProblem });
+          if (!DRIVER_KINDS.includes(input.kind)) fail("invalid_argument", { field: "kind" });
+          if (!DRIVER_CLASSES.includes(input.deviceClass)) fail("invalid_argument", { field: "deviceClass" });
+          const urlProblem = driverUrlProblem(input.url);
+          if (urlProblem !== null) fail("invalid_argument", { field: "url", detail: urlProblem });
+          const hashProblem = sha256Problem(input.sha256);
+          if (hashProblem !== null) fail("invalid_argument", { field: "sha256", detail: hashProblem });
+          if (sizeProblem(String(input.sizeBytes)) !== null) fail("invalid_argument", { field: "sizeBytes" });
+          let inf: string | null = null;
+          if (input.kind === "inf") {
+            const p = infProblem(input.inf ?? "");
+            if (p !== null) fail("invalid_argument", { field: "inf", detail: p });
+            inf = (input.inf ?? "").trim();
+          } else if (input.inf !== undefined && input.inf.trim() !== "") {
+            fail("invalid_argument", { field: "inf", detail: "not_allowed" });
+          }
+          const silentArgs = input.kind === "exe" ? input.silentArgs : [];
+          if (input.kind === "exe") {
+            const p = silentArgsProblem(silentArgs);
+            if (p !== null) fail("invalid_argument", { field: "silentArgs", detail: p });
+          }
+          if (input.kind === "exe" && codesProblem(input.successExitCodes.join(",")) !== null) fail("invalid_argument", { field: "successExitCodes" });
+          const provides = dedupeNames(input.provides.map((n) => n.trim()).filter((n) => n !== ""));
+          const providesIssue = providesProblem(provides);
+          if (providesIssue !== null) fail("invalid_argument", { field: "provides", detail: providesIssue });
+          const groupIds = [...new Set(input.groupIds)];
+          for (const g of groupIds) if (!db.groups.some((x) => x._id === g)) fail("not_found");
+          const existing = input.id === undefined ? null : find(db.drivers, input.id);
+          if (existing) checkRevision(existing, input.expectedRevision ?? -1);
+          const others = db.drivers.filter((x) => x !== existing);
+          if (!existing && db.drivers.length >= MAX_DRIVERS) fail("too_large", { detail: "drivers" });
+          if (others.some((x) => x.name.toLowerCase() === name.toLowerCase())) fail("invalid_argument", { field: "name", detail: "taken" });
+          const touched = new Set([...(existing?.groupIds ?? []), ...groupIds]).size;
+          const fields = {
+            name,
+            kind: input.kind,
+            deviceClass: input.deviceClass,
+            url: input.url.trim(),
+            sha256: input.sha256.trim().toLowerCase(),
+            sizeBytes: input.sizeBytes,
+            inf,
+            silentArgs: [...silentArgs],
+            successExitCodes: input.kind === "exe" ? [...new Set(input.successExitCodes)].filter((c) => c !== 0).sort((a, b) => a - b) : [],
+            provides,
+            groupIds,
+          };
+          if (!existing) {
+            if (touched > MAX_WIFI_GROUPS_PER_SAVE) fail("too_large", { detail: "groups" });
+            const row: DbDriver = { _id: newId("driver"), ...fields, revision: 1 };
+            db.drivers.push(row);
+            audit({ action: "driver.created", targetType: "driver", targetId: row._id, targetLabel: name, summary: `Added the driver ${name}` });
+            return { id: row._id, revision: row.revision };
+          }
+          const same = (Object.keys(fields) as (keyof typeof fields)[]).every((k) => JSON.stringify(existing[k]) === JSON.stringify(fields[k]));
+          if (same) return { id: existing._id, revision: existing.revision };
+          if (touched > MAX_WIFI_GROUPS_PER_SAVE) fail("too_large", { detail: "groups" });
+          Object.assign(existing, fields);
+          existing.revision++;
+          audit({ action: "driver.updated", targetType: "driver", targetId: existing._id, targetLabel: name, summary: `Changed the driver ${name}` });
+          return { id: existing._id, revision: existing.revision };
+        }),
+      [],
+    );
+  },
+
+  useDeleteDriver() {
+    return useCallback(
+      ({ id }) =>
+        runMutation("admin", ({ db, audit }) => {
+          const d = find(db.drivers, id);
+          if (d.groupIds.length > MAX_WIFI_GROUPS_PER_SAVE) fail("too_large", { detail: "groups" });
+          db.drivers = db.drivers.filter((x) => x._id !== id);
+          audit({ action: "driver.deleted", targetType: "driver", targetId: d._id, targetLabel: d.name, summary: `Removed the driver ${d.name}` });
+        }),
+      [],
+    );
+  },
+
+  useRetryDriver() {
+    return useCallback(
+      ({ id }) =>
+        runMutation("admin", ({ db, audit }) => {
+          const d = find(db.drivers, id);
+          d.revision++;
+          audit({ action: "driver.retried", targetType: "driver", targetId: d._id, targetLabel: d.name, summary: `Asked the PCs to try the driver ${d.name} again` });
+        }),
+      [],
+    );
+  },
+
+  useSetApprovedPrinterDrivers() {
+    return useCallback(
+      ({ names }) =>
+        runMutation("admin", ({ db, audit }) => {
+          const trimmed = names.map((n) => n.trim());
+          for (const n of trimmed) {
+            const p = addedNameProblem(n);
+            if (p !== null) fail("invalid_argument", { field: "names", detail: p });
+          }
+          const kept = dedupeNames(trimmed).filter((n) => !INBOX_DRIVERS.some((x) => x.toLowerCase() === n.toLowerCase()));
+          if (kept.length > MAX_ADDED_NAMES) fail("too_large", { detail: "names" });
+          if (JSON.stringify(kept) !== JSON.stringify(db.approvedDrivers)) {
+            db.approvedDrivers = kept;
+            audit({ action: "printers.driversChanged", targetType: "organization", targetId: db.org._id, targetLabel: "Approved printer drivers", summary: "Changed the approved printer drivers" });
+          }
+          return { addedDrivers: [...db.approvedDrivers] };
         }),
       [],
     );

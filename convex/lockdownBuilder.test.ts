@@ -2,9 +2,9 @@ import { describe, expect, test } from "vitest";
 import lockdownRaw from "../crates/rulebox-policy/tests/vectors/lockdown.json?raw";
 import { VECTOR_INPUT } from "../tests/convex/vectors";
 import { buildDeviceDoc, type DocBroadcast, type Phase5Input } from "./lib/desired";
-import type { ConfigPrinter, ConfigWifi, DocException, DocLockdown, GroupConfigContent } from "./lib/groupConfig";
+import type { ConfigDriver, ConfigPrinter, ConfigWifi, DocException, DocLockdown, GroupConfigContent } from "./lib/groupConfig";
 import type { SealedBoxValue } from "./lib/lockdownValidators";
-import { MAX_ACTIVE_BROADCASTS, MAX_DEVICE_PRINTERS, MAX_DEVICE_WIFI, MAX_GROUP_EXCEPTIONS } from "./lib/limits";
+import { MAX_ACTIVE_BROADCASTS, MAX_DEVICE_DRIVERS, MAX_DEVICE_PRINTERS, MAX_DEVICE_WIFI, MAX_GROUP_EXCEPTIONS } from "./lib/limits";
 
 // The Phase 5 keys of the desired-state document (plan 4.3; Step 10 item 5), pinned against the vector the Rust side parses
 // (`crates/rulebox-policy/tests/vectors/lockdown.json`): the builder must emit exactly those keys, shapes and key order.
@@ -16,6 +16,7 @@ type Vector = {
     wifi: (Omit<ConfigWifi, "hasPassphrase"> & { sealed: SealedBoxValue })[];
     wifiManagedOnly: boolean;
     printers: ConfigPrinter[];
+    drivers: ConfigDriver[];
     deviceLock: { lockId: string; message: string; contact: string | null; lockedAtMs: number };
     usbTempAllow: { untilMs: number };
     broadcasts: DocBroadcast[];
@@ -34,6 +35,7 @@ function vectorInput(): Phase5Input {
     wifiManagedOnly: p5.wifiManagedOnly,
     wifi: p5.wifi.map((w) => ({ id: w.id, ssid: w.ssid, hidden: w.hidden, security: w.security, autoConnect: w.autoConnect, revision: w.revision, hasPassphrase: true })),
     printers: p5.printers,
+    drivers: p5.drivers,
   };
   return {
     config: { groupId: p5.config.groupId, version: p5.config.version, ring: p5.config.ring, content },
@@ -45,7 +47,7 @@ function vectorInput(): Phase5Input {
   };
 }
 
-const PHASE5_KEYS = ["lockdown", "wifi", "wifiManagedOnly", "printers", "deviceLock", "usbTempAllow", "broadcasts", "config"];
+const PHASE5_KEYS = ["lockdown", "wifi", "wifiManagedOnly", "printers", "drivers", "deviceLock", "usbTempAllow", "broadcasts", "config"];
 const phase5Part = (doc: Record<string, unknown>) => Object.fromEntries(PHASE5_KEYS.filter((k) => k in doc).map((k) => [k, doc[k]]));
 
 describe("lockdown.json (shared with the agent)", () => {
@@ -58,6 +60,31 @@ describe("lockdown.json (shared with the agent)", () => {
     expect(keys.indexOf("offlineDays")).toBeLessThan(keys.indexOf("lockdown"));
     const phase4 = buildDeviceDoc(VECTOR_INPUT, 7);
     expect(JSON.stringify(Object.fromEntries(Object.entries(doc).filter(([k]) => !PHASE5_KEYS.includes(k))))).toBe(JSON.stringify(phase4));
+  });
+
+  test("drivers (Step 14b): every field in the contract's key order, an empty list when the configuration has none or predates drivers", () => {
+    const driver: ConfigDriver = {
+      id: "drv_1",
+      name: "Front desk driver",
+      kind: "inf",
+      url: "https://downloads.example.test/front.zip",
+      sha256: "a".repeat(64),
+      sizeBytes: 1000,
+      inf: "Drivers/front.inf",
+      silentArgs: [],
+      successExitCodes: [],
+      revision: 3,
+    };
+    const base = vectorInput();
+    const withDrivers = (drivers: ConfigDriver[] | undefined): Phase5Input => ({ ...base, config: { ...base.config!, content: { ...base.config!.content, drivers } } });
+    const doc = buildDeviceDoc({ ...VECTOR_INPUT, phase5: withDrivers([driver]) }, 7);
+    expect(JSON.stringify(doc.drivers)).toBe(
+      '[{"id":"drv_1","name":"Front desk driver","kind":"inf","url":"https://downloads.example.test/front.zip","sha256":"' +
+        "a".repeat(64) +
+        '","sizeBytes":1000,"inf":"Drivers/front.inf","silentArgs":[],"successExitCodes":[],"revision":3}]',
+    );
+    expect(buildDeviceDoc({ ...VECTOR_INPUT, phase5: withDrivers(undefined) }, 7).drivers).toEqual([]);
+    expect(() => buildDeviceDoc({ ...VECTOR_INPUT, phase5: withDrivers(Array.from({ length: MAX_DEVICE_DRIVERS + 1 }, (_, i) => ({ ...driver, id: `d${i}` }))) }, 7)).toThrow();
   });
 
   test("no Phase 5 input: the document is the Phase 4 document byte for byte (no new key)", () => {

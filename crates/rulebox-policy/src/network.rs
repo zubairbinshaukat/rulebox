@@ -1,5 +1,5 @@
-//! Wi-Fi profiles and printers of the agent-only desired-state keys (plan Phase 5,
-//! Section 4.3 and 4.15): `wifi`, `wifiManagedOnly` and `printers`. Pure data.
+//! Wi-Fi profiles, printers and drivers of the agent-only desired-state keys (plan Phase 5,
+//! Section 4.3 and 4.15): `wifi`, `wifiManagedOnly`, `printers` and `drivers`. Pure data.
 //!
 //! A Wi-Fi passphrase is never a field of [`WifiProfile`]: it travels only as a
 //! [`SealedBox`] (`seal.rs`) addressed to one device, and the agent opens it just
@@ -25,6 +25,18 @@ pub const MAX_PRINTER_ADDRESS: usize = 255;
 pub const MAX_PRINTER_QUEUE: usize = 64;
 /// Printer driver name, in characters.
 pub const MAX_PRINTER_DRIVER: usize = 100;
+/// `drivers` entries per device (Step 14b).
+pub const MAX_DRIVERS: usize = 20;
+/// Driver display name, in characters.
+pub const MAX_DRIVER_NAME: usize = 60;
+/// Driver download URL, in characters.
+pub const MAX_DRIVER_URL: usize = 2048;
+/// The `.inf` path inside a driver zip, in characters.
+pub const MAX_DRIVER_INF: usize = 120;
+/// Silent arguments of an EXE driver.
+pub const MAX_DRIVER_ARGS: usize = 16;
+/// Success exit codes of a vendor driver installer.
+pub const MAX_DRIVER_EXIT_CODES: usize = 8;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, TS)]
 #[serde(rename_all = "camelCase")]
@@ -92,6 +104,47 @@ pub struct PrinterSpec {
     pub revision: u64,
 }
 
+/// How a driver is put on the PC (Step 14b).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub enum DriverKind {
+    /// A zip with an `.inf`, its signed catalog and the files, installed with `pnputil /add-driver`.
+    Inf,
+    /// A vendor installer with silent arguments.
+    Exe,
+    Msi,
+    Unknown,
+}
+unknown_on_new_values!(DriverKind { Inf => "inf", Exe => "exe", Msi => "msi" });
+
+/// One driver package pushed to the device (Step 14b). Never shown as a tile.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub struct DriverSpec {
+    pub id: String,
+    pub name: String,
+    pub kind: DriverKind,
+    /// `https://` only.
+    pub url: String,
+    /// 64 lower-case hex.
+    pub sha256: String,
+    /// 0 = unknown.
+    #[ts(type = "number")]
+    pub size_bytes: u64,
+    /// `inf` only: the relative path of the `.inf` inside the zip.
+    #[serde(default)]
+    pub inf: Option<String>,
+    /// `exe` only.
+    #[serde(default)]
+    pub silent_args: Vec<String>,
+    #[serde(default)]
+    pub success_exit_codes: Vec<i32>,
+    #[ts(type = "number")]
+    pub revision: u64,
+}
+
 fn within(text: &str, max: usize) -> Result<(), LimitError> {
     if text.chars().count() > max {
         return Err(LimitError::TextTooLong);
@@ -129,9 +182,73 @@ impl PrinterSpec {
     }
 }
 
+impl DriverSpec {
+    /// The string sizes and list lengths of Step 14b. (The agent checks the values themselves, URL scheme, hash and
+    /// path shape, again when it installs.)
+    pub fn check_limits(&self) -> Result<(), LimitError> {
+        if self.name.trim().is_empty() || self.url.trim().is_empty() {
+            return Err(LimitError::TextEmpty);
+        }
+        within(&self.id, crate::lockdown::MAX_ID_CHARS)?;
+        within(&self.name, MAX_DRIVER_NAME)?;
+        within(&self.url, MAX_DRIVER_URL)?;
+        if let Some(inf) = &self.inf {
+            within(inf, MAX_DRIVER_INF)?;
+        }
+        if self.silent_args.len() > MAX_DRIVER_ARGS || self.success_exit_codes.len() > MAX_DRIVER_EXIT_CODES {
+            return Err(LimitError::TextTooLong);
+        }
+        if crate::paths::check_args(&self.silent_args).is_err() {
+            return Err(LimitError::TextTooLong);
+        }
+        Ok(())
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn driver() -> DriverSpec {
+        DriverSpec {
+            id: "d1".into(),
+            name: "Brother HL".into(),
+            kind: DriverKind::Inf,
+            url: "https://example.com/brother.zip".into(),
+            sha256: "a".repeat(64),
+            size_bytes: 1000,
+            inf: Some("drv/brother.inf".into()),
+            silent_args: Vec::new(),
+            success_exit_codes: Vec::new(),
+            revision: 3,
+        }
+    }
+
+    #[test]
+    fn driver_parses_in_contract_order_and_unknown_kind_is_kept() {
+        let text = serde_json::to_string(&driver()).unwrap();
+        assert!(text.starts_with(r#"{"id":"d1","name":"Brother HL","kind":"inf","url":"#), "{text}");
+        let order = ["id", "name", "kind", "url", "sha256", "sizeBytes", "inf", "silentArgs", "successExitCodes", "revision"];
+        let at: Vec<usize> = order.iter().map(|k| text.find(&format!("\"{k}\":")).unwrap()).collect();
+        assert!(at.windows(2).all(|w| w[0] < w[1]), "{text}");
+        let again: DriverSpec = serde_json::from_str(&text).unwrap();
+        assert_eq!(again, driver());
+        let mut value = serde_json::to_value(driver()).unwrap();
+        value["kind"] = "usb-fairy".into();
+        let parsed: DriverSpec = serde_json::from_value(value).unwrap();
+        assert_eq!(parsed.kind, DriverKind::Unknown);
+    }
+
+    #[test]
+    fn driver_limits() {
+        assert_eq!(driver().check_limits(), Ok(()));
+        assert_eq!(DriverSpec { name: "x".repeat(61), ..driver() }.check_limits(), Err(LimitError::TextTooLong));
+        assert_eq!(DriverSpec { name: " ".into(), ..driver() }.check_limits(), Err(LimitError::TextEmpty));
+        assert_eq!(DriverSpec { inf: Some("x".repeat(121)), ..driver() }.check_limits(), Err(LimitError::TextTooLong));
+        assert_eq!(DriverSpec { silent_args: vec!["/S".into(); 17], ..driver() }.check_limits(), Err(LimitError::TextTooLong));
+        assert_eq!(DriverSpec { success_exit_codes: vec![0; 9], ..driver() }.check_limits(), Err(LimitError::TextTooLong));
+        assert_eq!(DriverSpec { silent_args: vec!["a\nb".into()], ..driver() }.check_limits(), Err(LimitError::TextTooLong));
+    }
 
     fn printer() -> PrinterSpec {
         PrinterSpec {

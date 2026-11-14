@@ -148,13 +148,13 @@ export const IO_BUDGETS: Record<string, IoBudget> = {
   // (+ one scheduled publish run). Measured 8 / 1.7 KB, 4 writes.
   // Step 17 review: + the PC's install results re-tagged (<= 200 per run, `stats:retagDevice` continues)
   // with the app and the old / new assignment of each failed one; + their patches and orgStats.
-  "fleet:move": { maxReads: 9 + 200 + 200 + 400, maxReadBytes: 400_000, maxWrites: 4 + 200 + 1, maxWriteBytes: 60_000 },
+  "fleet:move": { maxReads: 9 + 50 + 200 + 200 + 400, maxReadBytes: 400_000, maxWrites: 4 + 50 + 200 + 1, maxWriteBytes: 60_000 },
   // device, credentials, (off: step-up row again), publishQueue; writes: device, queue, audit.
   "fleet:setKiosk": { maxReads: 9, maxReadBytes: 6_144, maxWrites: 3, maxWriteBytes: 2_048 },
   // device, credentials, device again, summary, orgStats, liveness, shard, presence; writes:
   // credentials, orgStats, liveness, shard, presence, audit. Already revoked: 0 writes.
-  // Step 17 review: + the PC's install results un-tagged (as fleet:move).
-  "fleet:revoke": { maxReads: 13 + 200 + 200 + 200, maxReadBytes: 400_000, maxWrites: 6 + 200, maxWriteBytes: 60_000 },
+  // Step 17 review: + the PC's install results un-tagged (as fleet:move). Step 14b: + <= 50 driver results re-tagged (first page only).
+  "fleet:revoke": { maxReads: 13 + 50 + 200 + 200 + 200, maxReadBytes: 400_000, maxWrites: 6 + 50 + 200, maxWriteBytes: 60_000 },
   // device, credentials, the 6 per-device rows; deletes them + the device, audit, one scheduled
   // purge (installResults / documents, PURGE_BATCH per run). Not revoked: 0 writes.
   "fleet:remove": { maxReads: 12, maxReadBytes: 49_152, maxWrites: 8, maxWriteBytes: 1_024 },
@@ -219,7 +219,7 @@ export const IO_BUDGETS: Record<string, IoBudget> = {
   // `apps:update`). Writes: app, audit, per group <= 13 (version, rollout, <= 10 pruned versions, queue merge)
   // + queue. Bytes: a snapshot is <= 256 KiB (MAX_GROUP_CONFIG_BYTES) but a typical one is ~2 KB.
   // UNSURE: worst-case numbers, not measured (the matrix call is the no-change case).
-  "apps:setPermissions": { maxReads: 4 + 1 + 11 + 10 * 570 + 501 + 51 + 51 * 21 + 1, maxReadBytes: 2_500_000, maxWrites: 4 + 10 * 13, maxWriteBytes: 2_700_000 },
+  "apps:setPermissions": { maxReads: 4 + 1 + 11 + 10 * 621 + 501 + 51 + 51 * 21 + 1, maxReadBytes: 2_500_000, maxWrites: 4 + 10 * 13, maxWriteBytes: 2_700_000 },
   // app, orgPlans/orgStats when restoring, publishApp; writes: app, orgStats, audit, queue (+ scheduled run).
   // Step 17 review: + assignments (<= 500) and <= 501 failed results (failedInstallCount follows).
   "apps:setArchived": { maxReads: 4 + 1 + 3 + 501 + 51 + 51 * 21 + 1 + 500 + 501, maxReadBytes: 500_000, maxWrites: 5, maxWriteBytes: 4_096 },
@@ -510,31 +510,48 @@ export const IO_BUDGETS: Record<string, IoBudget> = {
   // the no-change / refused cases); a snapshot of one group reads up to ~570 documents (see `apps:setPermissions`).
   // wrapper (4) + <= 51 profiles + the names of <= 10 groups each (a per-query cache, so <= the organization's groups; 10 x 50 at worst).
   // Step 14: + <= 101 printers (names of their first 10 groups come from the same per-query cache) + the organization row.
-  "networks:list": { maxReads: 4 + 51 + 101 + 1 + 10 * 50, maxReadBytes: 400_000, maxWrites: 0, maxWriteBytes: 0 },
+  // Step 14b: + <= 51 drivers (MAX_ORG_DRIVERS; their group names come from the same cache).
+  // NOTE (Step 14b): a group snapshot now also reads the organization's drivers (<= 51), so the "~570" of the rows below is 621 (10 x 621).
+  "networks:list": { maxReads: 4 + 51 + 101 + 51 + 1 + 10 * 50, maxReadBytes: 450_000, maxWrites: 0, maxWriteBytes: 0 },
   // wrapper (4) + the profile + <= 10 group names + <= 10 groups x (200 + 1) apply reports (~1-3 KB each; a report only changes when
   // a PC's state does). The dashboard screen subscribes to it: that is why the sample is capped.
   "networks:wifiDetail": { maxReads: 4 + 1 + 10 + 10 * 201, maxReadBytes: 6_500_000, maxWrites: 0, maxWriteBytes: 0 },
   // wrapper (4) + profile + <= 100 group checks + the count of profiles (50) + 10 existence checks + 10 snapshots (~570 each). Writes: profile,
   // audit, per group <= 13 (version, rollout, pruned versions, queue). The boxes of a profile that becomes open go in `networks:purgeSealed`.
-  "networks:saveWifi": { maxReads: 4 + 1 + 100 + 50 + 10 + 10 * 570 + 1, maxReadBytes: 2_500_000, maxWrites: 1 + 1 + 10 * 13 + 3, maxWriteBytes: 2_700_000 },
+  "networks:saveWifi": { maxReads: 4 + 1 + 100 + 50 + 10 + 10 * 621 + 1, maxReadBytes: 2_500_000, maxWrites: 1 + 1 + 10 * 13 + 3, maxWriteBytes: 2_700_000 },
   // wrapper (4) + profile + <= 10 snapshots; writes: profile, audit, per group <= 13; boxes: `networks:purgeSealed`.
-  "networks:deleteWifi": { maxReads: 4 + 1 + 10 + 10 * 570 + 1, maxReadBytes: 2_500_000, maxWrites: 1 + 1 + 10 * 13 + 3, maxWriteBytes: 2_700_000 },
+  "networks:deleteWifi": { maxReads: 4 + 1 + 10 + 10 * 621 + 1, maxReadBytes: 2_500_000, maxWrites: 1 + 1 + 10 * 13 + 3, maxWriteBytes: 2_700_000 },
   // ---- Phase 5 Step 14: printers (plan 4.15, 4.20). UNSURE like the Wi-Fi rows: the matrix calls are the no-change / refused cases.
   // Same shape as `networks:wifiDetail`.
   "networks:printerDetail": { maxReads: 4 + 1 + 10 + 10 * 201, maxReadBytes: 6_500_000, maxWrites: 0, maxWriteBytes: 0 },
   // wrapper (4) + organization row + <= 100 group checks (groups + defaults) + printer + <= 101 printers (name / default checks)
   // + <= 10 existence checks + 10 snapshots (~570 each). Writes: printer, audit, per group <= 13.
-  "networks:savePrinter": { maxReads: 4 + 1 + 200 + 1 + 101 + 10 + 10 * 570 + 1, maxReadBytes: 2_500_000, maxWrites: 1 + 1 + 10 * 13 + 3, maxWriteBytes: 2_700_000 },
+  "networks:savePrinter": { maxReads: 4 + 1 + 200 + 1 + 50 + 101 + 10 + 10 * 621 + 1, maxReadBytes: 2_500_000, maxWrites: 1 + 1 + 10 * 13 + 3, maxWriteBytes: 2_700_000 },
   // wrapper (4) + printer + <= 10 snapshots; writes: printer, audit, per group <= 13.
-  "networks:deletePrinter": { maxReads: 4 + 1 + 10 + 10 * 570 + 1, maxReadBytes: 2_500_000, maxWrites: 1 + 1 + 10 * 13 + 3, maxWriteBytes: 2_700_000 },
+  "networks:deletePrinter": { maxReads: 4 + 1 + 10 + 10 * 621 + 1, maxReadBytes: 2_500_000, maxWrites: 1 + 1 + 10 * 13 + 3, maxWriteBytes: 2_700_000 },
+  // Step 14b: the approved printer driver names: wrapper (4) + the organization row; writes: the organization patch + audit. No snapshot (documents carry
+  // the driver name; the agent checks its local store). No change: 5 reads, 0 writes.
+  "networks:setApprovedPrinterDrivers": { maxReads: 5, maxReadBytes: 4_096, maxWrites: 2, maxWriteBytes: 4_096 },
+  // ---- Phase 5 Step 14b: drivers (PRD 24.2). UNSURE like the rows above: the matrix calls are the no-change / refused cases.
+  // wrapper (4) + the driver + <= 10 group names + <= 201 results (~0.3 KB each; a row only changes when a PC's state does). The Networks screen
+  // does not subscribe to it (`networks:list` carries the rows only).
+  "drivers:detail": { maxReads: 4 + 1 + 10 + 201, maxReadBytes: 150_000, maxWrites: 0, maxWriteBytes: 0 },
+  // wrapper (4) + <= 100 group checks + the driver + <= 51 drivers (name / cap checks) + <= 10 existence checks + 10 snapshots (621 each). Writes:
+  // driver, audit, per group <= 13.
+  "drivers:save": { maxReads: 4 + 100 + 1 + 51 + 10 + 10 * 621 + 1, maxReadBytes: 2_500_000, maxWrites: 1 + 1 + 10 * 13 + 3, maxWriteBytes: 2_700_000 },
+  // wrapper (4) + driver + <= 10 snapshots; writes: driver, audit, per group <= 13; its results: `drivers:purgeResults`.
+  "drivers:remove": { maxReads: 4 + 1 + 10 + 10 * 621 + 1, maxReadBytes: 2_500_000, maxWrites: 1 + 1 + 10 * 13 + 3, maxWriteBytes: 2_700_000 },
+  "drivers:retry": { maxReads: 4 + 1 + 10 + 10 * 621 + 1, maxReadBytes: 2_500_000, maxWrites: 1 + 1 + 10 * 13 + 3, maxWriteBytes: 2_700_000 },
+  // one batch of results (DRIVER_RESULT_PURGE_BATCH = 100): reads and deletes.
+  "drivers:purgeResults": { maxReads: 100, maxReadBytes: 60_000, maxWrites: 100, maxWriteBytes: 60_000 },
   // one batch of boxes (SEALED_PURGE_BATCH = 100): reads and deletes.
   "networks:purgeSealed": { maxReads: 100, maxReadBytes: 60_000, maxWrites: 100, maxWriteBytes: 60_000 },
   // authorize (4) + `wifi:target` (profile + sealing key) + `wifi:storePassphrase` + the limiter row; no database read happens for the
   // passphrase itself (an action).
-  "wifi:setPassphrase": { maxReads: 4 + 2 + 1 + 1 + 10 + 10 * 570 + 2, maxReadBytes: 2_500_000, maxWrites: 1 + 1 + 10 * 13 + 3, maxWriteBytes: 2_700_000 },
+  "wifi:setPassphrase": { maxReads: 4 + 2 + 1 + 1 + 10 + 10 * 621 + 2, maxReadBytes: 2_500_000, maxWrites: 1 + 1 + 10 * 13 + 3, maxWriteBytes: 2_700_000 },
   "wifi:target": { maxReads: 2, maxReadBytes: 4_096, maxWrites: 0, maxWriteBytes: 0 },
   // profile, <= 10 group checks and snapshots; writes: profile, audit, per group <= 13.
-  "wifi:storePassphrase": { maxReads: 1 + 10 + 10 * 570 + 1, maxReadBytes: 2_500_000, maxWrites: 1 + 1 + 10 * 13 + 3, maxWriteBytes: 2_700_000 },
+  "wifi:storePassphrase": { maxReads: 1 + 10 + 10 * 621 + 1, maxReadBytes: 2_500_000, maxWrites: 1 + 1 + 10 * 13 + 3, maxWriteBytes: 2_700_000 },
   // Wi-Fi sealing (4.18): SEAL_DEVICES_PER_RUN = 25 devices per run, each with <= MAX_DEVICE_WIFI = 20 assigned profiles.
   // jobs: the sealing key, <= 51 profiles, per device the device + one sealed-box lookup per assigned profile
   // (typical: 1-3 profiles a group, so ~75-100 reads; the cap is 25 x 21).
@@ -569,7 +586,7 @@ export const IO_BUDGETS: Record<string, IoBudget> = {
   // documents (x2 indexes), bodies (<= ~13 KB typical, up to the payload cap), versions; it reschedules while any is full.
   // Phase 5 Step 10: + 4 tables x PURGE_BATCH (finding links, sealed Wi-Fi boxes, the apply report, the lock): 9 tables, <= 100 rows each.
   // MEASURED (100 install results + 100 finding links + 20 sealed boxes + the report + the lock) 224 reads / 73 KB, 224 deletes.
-  "fleet:purgeDevice": { maxReads: 9 * 100 + 2, maxReadBytes: 1_800_000, maxWrites: 9 * 100, maxWriteBytes: 4_096 },
+  "fleet:purgeDevice": { maxReads: 10 * 100 + 2, maxReadBytes: 1_900_000, maxWrites: 10 * 100, maxWriteBytes: 4_096 },
   // MEASURED 2 reads / 0.4 KB (the sealed API key and sender; the Resend call is outside the database).
   "mail:send": { maxReads: 3, maxReadBytes: 2_048, maxWrites: 0, maxWriteBytes: 0 },
 

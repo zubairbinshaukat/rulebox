@@ -1,4 +1,4 @@
-import type { PrinterDetail, WifiDetail } from "../../data/types";
+import type { DriverDetail, PrinterDetail, WifiDetail } from "../../data/types";
 
 /** The blank form of `/networks/printers/new` (nothing is subscribed): the usual modern printer, with the class driver Windows ships. */
 export const BLANK_PRINTER: PrinterDetail = {
@@ -47,3 +47,23 @@ export function touchedGroups(before: readonly string[], after: readonly string[
 export function sameGroups(before: readonly string[], after: readonly string[]): boolean {
   return before.length === after.length && after.every((g) => before.includes(g));
 }
+
+/** The blank form of `/networks/drivers/new` (nothing is subscribed): a driver package for a printer. */
+export const BLANK_DRIVER: DriverDetail = {
+  _id: "new",
+  name: "",
+  kind: "inf",
+  deviceClass: "printer",
+  sizeBytes: 0,
+  revision: 0,
+  provides: [],
+  groupCount: 0,
+  groups: [],
+  url: "",
+  sha256: "",
+  inf: null,
+  silentArgs: [],
+  successExitCodes: [],
+  groupIds: [],
+  counts: { installed: 0, failed: 0, pending: 0, removed: 0, unsupported: 0, restartNeeded: 0, sampled: 0, capped: false },
+};

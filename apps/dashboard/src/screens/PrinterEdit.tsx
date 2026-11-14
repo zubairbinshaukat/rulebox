@@ -239,6 +239,8 @@ function PrinterForm({
   });
   const touched = touchedGroups(savedGroups, f.values.groupIds);
   const approved = networks.status === "ready" ? networks.data.approvedDrivers : driverChoices([]);
+  // Names a Drivers entry delivers are tagged (they only work on PCs of the groups that entry is assigned to).
+  const delivered = new Set((networks.status === "ready" ? networks.data.drivers : []).flatMap((d) => d.provides.map((n) => n.toLowerCase())));
   // A driver the printer has but the list no longer offers stays selectable (and is marked) so a save does not silently change it.
   const choices = approved.includes(f.values.driver) || f.values.driver === "" ? approved : [...approved, f.values.driver];
   const describe = (e: unknown) => {
@@ -314,7 +316,7 @@ function PrinterForm({
             <Select {...p} value={f.values.driver} onChange={(e) => f.set("driver", e.target.value)}>
               {choices.map((name) => (
                 <option key={name} value={name}>
-                  {approved.includes(name) ? name : `${name} (${s.driverNotListed})`}
+                  {!approved.includes(name) ? `${name} (${s.driverNotListed})` : delivered.has(name.toLowerCase()) ? `${name} (${s.driverDelivered})` : name}
                 </option>
               ))}
             </Select>

@@ -116,6 +116,7 @@
         "revision": 2
       }
     ],
+    "drivers": [],
     "deviceLock": { "lockId": "lock_test_vector_1", "message": "This PC is locked. Call IT.", "contact": "+1 555 0100", "lockedAtMs": 1760990000000 },
     "usbTempAllow": { "untilMs": 1760995000000 },
     "broadcasts": [

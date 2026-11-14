@@ -2,7 +2,7 @@ import { calculateRateLimit } from "@convex-dev/rate-limiter";
 import { x25519 } from "@noble/curves/ed25519.js";
 import { v, type Infer } from "convex/values";
 import { internal } from "./_generated/api";
-import type { Doc } from "./_generated/dataModel";
+import type { Doc, Id } from "./_generated/dataModel";
 import { type DatabaseWriter } from "./_generated/server";
 import { DUMMY_PHC, verifier } from "./lib/argon";
 import { writeAudit, type AuditActor } from "./lib/audit";
@@ -22,6 +22,7 @@ import {
   recordSummary,
   recordTime,
   isStoredInstallState,
+  type StoredInstallState,
   validRecordId,
   VERIFY_RESERVE_BELOW,
 } from "./lib/deviceApiRules";
@@ -514,6 +515,52 @@ async function ingestAudit(
 }
 
 /**
+ * One driver result (Step 14b): upserted per (device, driver) into `driverResults`, written only when a field differs. A driver of
+ * another organization, an unknown id and a passing state are ignored (the caller still counts them as accepted). It does not touch
+ * `orgStats.failedInstallCount` (drivers are not apps). Returns the rows written.
+ */
+async function ingestDriverResult(
+  ctx: Ctx,
+  r: InstallResult,
+  state: StoredInstallState,
+  groupId: Id<"groups"> | undefined,
+  now: number,
+): Promise<number> {
+  const driverId = ctx.db.normalizeId("drivers", r.appId);
+  if (driverId === null) return 0;
+  // The scoped `get` answers null for another organization's driver.
+  const driver = await ctx.db.get(driverId);
+  if (driver === null) return 0;
+  const next = {
+    state,
+    driverRevision: r.appRevision,
+    attempts: r.attempts,
+    exitCode: r.exitCode ?? undefined,
+    detail: cleanInstallDetail(r.detail),
+    groupId,
+  };
+  const row = await ctx.db
+    .query("driverResults")
+    .withIndex("by_device_driver", (q) => q.eq("deviceId", ctx.device._id).eq("driverId", driver._id))
+    .first();
+  if (row === null) {
+    await ctx.db.insert("driverResults", { orgId: ctx.device.orgId, deviceId: ctx.device._id, driverId: driver._id, ...next, updatedAt: now });
+    return 1;
+  }
+  const same =
+    row.state === next.state &&
+    row.driverRevision === next.driverRevision &&
+    row.attempts === next.attempts &&
+    row.exitCode === next.exitCode &&
+    row.detail === next.detail &&
+    row.groupId === next.groupId;
+  if (same) return 0;
+  // `undefined` removes a stale exit code, detail or tag.
+  await ctx.db.patch(row._id, { ...next, updatedAt: now });
+  return 1;
+}
+
+/**
  * Install results (4.8 amended, A12): `pending` and the terminal states are
  * upserted per (device, app) and written only when a field differs; the
  * passing states (`downloading`, `installing`, `removing`) and apps that are
@@ -521,8 +568,8 @@ async function ingestAudit(
  * is a `state` this server does not know (a newer agent). Every row is tagged
  * with the PC's group; `orgStats.failedInstallCount` (live failed rows only,
  * lib/installs.ts) moves in the same mutation. A `detail` outside
- * the fixed list is dropped (the result is stored without it). Returns
- * `accepted` (= every result) and the rows written.
+ * the fixed list is dropped (the result is stored without it). An id that is a driver (Step 14b) goes to `driverResults`
+ * (`ingestDriverResult`; `appRevision` is then the driver revision). Returns `accepted` (= every result) and the rows written.
  */
 async function ingestInstalls(ctx: Ctx, results: InstallResult[], now: number): Promise<{ accepted: number; written: number }> {
   let failedDelta = 0;
@@ -534,8 +581,13 @@ async function ingestInstalls(ctx: Ctx, results: InstallResult[], now: number): 
   for (const r of results) {
     if (!isStoredInstallState(r.state)) continue;
     const appId = ctx.db.normalizeId("apps", r.appId);
+    if (appId === null) {
+      // Step 14b: the id of a driver (`drivers`), reported through the same list with `appRevision` = the driver revision.
+      written += await ingestDriverResult(ctx, r, r.state, groupId, now);
+      continue;
+    }
     // The scoped `get` answers null for another organization's app.
-    const app = appId === null ? null : await check.app(appId);
+    const app = await check.app(appId);
     if (app === null) continue;
     const next = {
       state: r.state,

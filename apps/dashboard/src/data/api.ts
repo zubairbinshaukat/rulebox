@@ -24,6 +24,8 @@ import type {
   OrgSettings,
   OverviewScreen,
   PlanScreen,
+  DriverDetail,
+  DriverInput,
   PrinterDetail,
   PrinterInput,
   QueryState,
@@ -162,6 +164,17 @@ export interface DataApi {
   useSavePrinter: Mutation<PrinterInput, { id: Id; revision: number }>;
   /** `networks:deletePrinter` (admin): the printer leaves every PC's document and the PCs remove the queue they made. */
   useDeletePrinter: Mutation<{ id: Id }>;
+  // ---- drivers (Phase 5 Step 14b)
+  /** `drivers:detail` (viewer) with the install counts, computed on demand. A NEW driver has no detail: its screen builds the blank form itself. */
+  useDriverDetail: (id: Id) => QueryState<DriverDetail>;
+  /** `drivers:save` (admin): create, or update with `expectedRevision`. Resolves to the id and the revision to send next. */
+  useSaveDriver: Mutation<DriverInput, { id: Id; revision: number }>;
+  /** `drivers:delete` (admin): the driver leaves every PC's document; the PCs remove the driver packages Rulebox installed. */
+  useDeleteDriver: Mutation<{ id: Id }>;
+  /** `drivers:retry` (admin): bumps the revision so PCs that gave up try the driver again. */
+  useRetryDriver: Mutation<{ id: Id }>;
+  /** `networks:setApprovedPrinterDrivers` (admin): replaces the names the organization added to the approved list. */
+  useSetApprovedPrinterDrivers: Mutation<{ names: string[] }, { addedDrivers: string[] }>;
 
   // ---- file types
   // (the rules table, `useFileTypesPage`, is in the apps seam, `./apps`; the program picker is `useAppOptions`)

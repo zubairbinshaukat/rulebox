@@ -18,6 +18,7 @@ const LOADERS: Record<ScreenName, Loader> = {
   Networks: () => import("../screens/Networks"),
   WifiEdit: () => import("../screens/WifiEdit"),
   PrinterEdit: () => import("../screens/PrinterEdit"),
+  DriverEdit: () => import("../screens/DriverEdit"),
   Employees: () => import("../screens/Employees"),
   EmployeeDetail: () => import("../screens/EmployeeDetail"),
   Apps: () => import("../screens/Apps"),

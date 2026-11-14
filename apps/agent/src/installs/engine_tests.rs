@@ -63,6 +63,7 @@ struct Rig {
     paths: DataPaths,
     policy_tx: watch::Sender<AgentPolicy>,
     snapshot_tx: watch::Sender<AgentSnapshot>,
+    shared: Arc<SharedState>,
     shutdown: CancellationToken,
     task: Option<JoinHandle<()>>,
     visible_calls: Arc<AtomicUsize>,
@@ -90,7 +91,13 @@ fn rig_in(dir: TempDir) -> Rig {
         report.set_install_ack(Arc::new(move |r| book.ack(r)));
     }
     let policy = AgentPolicy { has_document: true, ..AgentPolicy::default() };
+    let shared = SharedState::new(
+        crate::state::StateStore::open(&dir.path().join("agent-state")).unwrap(),
+        crate::state::AgentState::default(),
+        Arc::clone(&sim) as Arc<dyn Platform>,
+    );
     Rig {
+        shared,
         dir,
         sim,
         downloader: FakeDownloader::new(),
@@ -126,6 +133,7 @@ impl Rig {
             }),
             install_timeout: Duration::from_secs(1800),
             exe_wait: Duration::from_secs(10),
+            shared: Arc::clone(&self.shared),
         };
         self.task = Some(tokio::spawn(run_install_task(
             deps,
@@ -1067,4 +1075,505 @@ fn a_corrupt_installs_file_is_moved_aside() {
     let book = InstallBook::open(path.clone());
     assert!(book.snapshot().apps.is_empty());
     assert!(!path.exists(), "moved aside");
+}
+
+// ---------------------------------------------------------------- Phase 5 Step 14b: drivers
+
+use crate::installs::drivers_rules::{DriverRecord, DriverRecordKind};
+use crate::platform::FileIdentity;
+use rulebox_policy::network::{DriverKind, DriverSpec};
+
+fn zip_bytes(entries: &[(&str, &[u8])]) -> Vec<u8> {
+    use std::io::Write;
+    let mut writer = zip::ZipWriter::new(std::io::Cursor::new(Vec::new()));
+    let options = zip::write::SimpleFileOptions::default().compression_method(zip::CompressionMethod::Deflated);
+    for (name, bytes) in entries {
+        writer.start_file(*name, options).unwrap();
+        writer.write_all(bytes).unwrap();
+    }
+    writer.finish().unwrap().into_inner()
+}
+
+fn inf_text(catalogs: &[&str]) -> String {
+    let mut text = String::from("[Version]\r\nSignature=\"$Windows NT$\"\r\nClass=Printer\r\n");
+    for name in catalogs {
+        text.push_str(&format!("CatalogFile={name}\r\n"));
+    }
+    text.push_str("[Manufacturer]\r\n\"Brother\"=Brother,NTamd64\r\n");
+    text
+}
+
+/// A package whose INF is `x64/b.inf` and names `b.cat`.
+fn good_zip() -> Vec<u8> {
+    zip_bytes(&[("x64/b.inf", inf_text(&["b.cat"]).as_bytes()), ("x64/b.cat", b"cat"), ("x64/b.sys", b"sys")])
+}
+
+fn driver(id: &str, kind: DriverKind, bytes: &[u8], revision: u64) -> DriverSpec {
+    DriverSpec {
+        id: id.into(),
+        name: format!("Driver {id}"),
+        kind,
+        url: url(id, bytes),
+        sha256: sha(bytes),
+        size_bytes: bytes.len() as u64,
+        inf: (kind == DriverKind::Inf).then(|| "x64/b.inf".to_string()),
+        silent_args: if kind == DriverKind::Exe { vec!["/S".into(), "/quiet".into()] } else { Vec::new() },
+        success_exit_codes: vec![0],
+        revision,
+    }
+}
+
+impl Rig {
+    fn set_drivers(&self, drivers: Vec<DriverSpec>) {
+        self.policy_tx.send_modify(|p| p.drivers = drivers);
+    }
+
+    fn serve_driver(&self, spec: &DriverSpec, bytes: &[u8]) {
+        self.downloader.serve(&spec.url, bytes);
+    }
+
+    fn driver_record(&self, id: &str) -> Option<DriverRecord> {
+        self.book.snapshot().drivers.get(id).cloned()
+    }
+
+    fn driver_state(&self, id: &str) -> Option<LocalState> {
+        self.driver_record(id).map(|r| r.state)
+    }
+
+    /// Marks `x64/<name>` of the package with this SHA-256 as validly signed.
+    fn sign(&self, zip_sha: &str, name: &str) {
+        let path = self.paths.driver_work_dir(zip_sha).join("x64").join(name);
+        let identity = FileIdentity { signer: Some("CN=Vendor, O=Vendor Ltd".into()), original_name: None, product: None };
+        self.sim.add_program(&path.to_string_lossy(), identity, None);
+    }
+
+    fn journal_ids(&self) -> Vec<String> {
+        self.shared.read(|state| state.journal.iter().map(|entry| entry.id.clone()).collect())
+    }
+
+    fn store(&self) -> Vec<String> {
+        self.sim.with_world(|w| w.driver_store.iter().cloned().collect())
+    }
+
+    fn deletes(&self) -> Vec<String> {
+        self.sim.with_world(|w| w.driver_deletes.clone())
+    }
+
+    fn work_dir_exists(&self) -> bool {
+        self.paths.drivers_dir().join("work").exists() && std::fs::read_dir(self.paths.drivers_dir().join("work")).is_ok_and(|mut d| d.next().is_some())
+    }
+
+    /// The reports the server would get for `id`, the last one first.
+    fn driver_reports(&self, id: &str) -> Vec<crate::backend::InstallReport> {
+        self.report.queued_installs().into_iter().filter(|r| r.app_id == id).collect()
+    }
+}
+
+const OEM_SHA_A: &str = "1111111111111111111111111111111111111111111111111111111111111111";
+
+#[tokio::test(start_paused = true)]
+async fn an_inf_driver_is_installed_with_pnputil_journalled_and_is_never_a_tile() {
+    let mut rig = rig();
+    let bytes = good_zip();
+    let spec = driver("drv1", DriverKind::Inf, &bytes, 1);
+    rig.serve_driver(&spec, &bytes);
+    rig.sign(&spec.sha256, "b.cat");
+    rig.set_drivers(vec![spec.clone()]);
+    rig.start();
+    rig.until("installed", |r| r.driver_state("drv1") == Some(LocalState::Installed)).await;
+
+    let runs = rig.runs();
+    assert_eq!(runs.len(), 1);
+    let work = rig.paths.driver_work_dir(&spec.sha256);
+    assert_eq!(runs[0].program, Path::new(r"C:\Windows\System32\pnputil.exe"));
+    assert_eq!(runs[0].args, ["/add-driver".to_string(), work.join("x64").join("b.inf").to_string_lossy().into_owned(), "/install".to_string()]);
+    assert_eq!(runs[0].expected_exe, None);
+    assert_eq!(rig.store(), ["oem1.inf"]);
+    let record = rig.driver_record("drv1").unwrap();
+    assert_eq!(record.packages.len(), 1);
+    assert_eq!(record.packages[0].published, "oem1.inf");
+    assert_eq!(rig.journal_ids(), ["driver:drv1:oem1.inf"]);
+    // Nothing of the run is left on disk, and the zip is deleted after success.
+    assert!(!rig.work_dir_exists(), "the extraction folder is deleted");
+    assert!(rig.downloads().is_empty());
+    // Reported under the driver's id, like an app's result.
+    let reports = rig.driver_reports("drv1");
+    assert_eq!((reports.len(), reports[0].state, reports[0].attempts, reports[0].exit_code), (1, InstallState::Installed, 0, None));
+    // Never a tile: no app is installed or visible, and the apps' records are untouched.
+    assert!(rig.book.installed_ids().is_empty());
+    assert!(rig.book.snapshot().apps.is_empty());
+    assert_eq!(rig.visible_calls.load(Ordering::SeqCst), 0, "no apps.changed for a driver");
+    rig.stop().await;
+}
+
+async fn refused_as(detail: &str, zip: Vec<u8>, sign_cat: bool) {
+    let mut rig = rig();
+    let spec = driver("drv1", DriverKind::Inf, &zip, 1);
+    rig.serve_driver(&spec, &zip);
+    if sign_cat {
+        rig.sign(&spec.sha256, "b.cat");
+    }
+    rig.set_drivers(vec![spec]);
+    rig.start();
+    rig.until("failed", |r| r.driver_state("drv1") == Some(LocalState::Failed)).await;
+    let record = rig.driver_record("drv1").unwrap();
+    assert_eq!(record.detail.as_deref(), Some(detail));
+    assert!(rig.runs().is_empty(), "pnputil is never started: {detail}");
+    assert!(rig.store().is_empty() && rig.journal_ids().is_empty());
+    assert!(!rig.work_dir_exists(), "nothing stays extracted");
+    assert!(rig.downloads().is_empty(), "the refused zip is deleted");
+    let reports = rig.driver_reports("drv1");
+    assert_eq!((reports[0].state, reports[0].detail.as_deref()), (InstallState::Failed, Some(detail)));
+    rig.stop().await;
+}
+
+#[tokio::test(start_paused = true)]
+async fn an_unsigned_inf_catalog_is_refused_and_pnputil_never_runs() {
+    // The catalog is there but has no valid signature.
+    refused_as("unsigned_driver", good_zip(), false).await;
+    // The INF names no catalog at all.
+    refused_as("unsigned_driver", zip_bytes(&[("x64/b.inf", inf_text(&[]).as_bytes()), ("x64/b.sys", b"sys")]), true).await;
+    // The INF names a catalog that is not in the package.
+    refused_as("unsigned_driver", zip_bytes(&[("x64/b.inf", inf_text(&["gone.cat"]).as_bytes())]), true).await;
+    // One of two catalogs is unsigned (only b.cat is marked).
+    refused_as(
+        "unsigned_driver",
+        zip_bytes(&[("x64/b.inf", inf_text(&["b.cat", "c.cat"]).as_bytes()), ("x64/b.cat", b"1"), ("x64/c.cat", b"2")]),
+        true,
+    )
+    .await;
+}
+
+#[tokio::test(start_paused = true)]
+async fn an_unsafe_zip_or_a_missing_inf_is_refused_before_anything_runs() {
+    refused_as("bad_package", zip_bytes(&[("../evil.inf", b"x"), ("x64/b.inf", inf_text(&["b.cat"]).as_bytes())]), true).await;
+    refused_as("bad_package", zip_bytes(&[("x64/b.inf", b"x"), ("/abs.cat", b"x")]), true).await;
+    refused_as("bad_package", zip_bytes(&[("other/a.inf", inf_text(&["b.cat"]).as_bytes())]), true).await;
+    refused_as("bad_package", b"MZ this is not a zip".to_vec(), true).await;
+    // The INF entry of the document names a path that is not plain: the entry is unsupported, nothing is downloaded.
+    let mut rig = rig();
+    let bytes = good_zip();
+    let mut spec = driver("drv1", DriverKind::Inf, &bytes, 1);
+    spec.inf = Some("../x64/b.inf".into());
+    rig.serve_driver(&spec, &bytes);
+    rig.set_drivers(vec![spec]);
+    rig.start();
+    rig.until("unsupported", |r| r.driver_state("drv1") == Some(LocalState::Unsupported)).await;
+    assert!(rig.runs().is_empty() && rig.downloader.calls().is_empty());
+    assert_eq!(rig.driver_reports("drv1")[0].detail.as_deref(), Some("unsupported"));
+    rig.stop().await;
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_hash_mismatch_runs_nothing() {
+    let mut rig = rig();
+    let bytes = good_zip();
+    let spec = driver("drv1", DriverKind::Inf, &bytes, 1);
+    // The server hands out other bytes than the signed document's hash.
+    rig.serve_driver(&spec, b"tampered package");
+    rig.sign(&spec.sha256, "b.cat");
+    rig.set_drivers(vec![spec]);
+    rig.start();
+    rig.until("failed", |r| r.driver_state("drv1") == Some(LocalState::Failed)).await;
+    assert_eq!(rig.driver_record("drv1").unwrap().detail.as_deref(), Some("hash_mismatch"));
+    assert!(rig.runs().is_empty() && rig.store().is_empty() && !rig.work_dir_exists());
+    assert!(rig.downloads().is_empty(), "no file of the mismatching download stays");
+    rig.stop().await;
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_driver_that_asks_for_a_restart_is_installed_and_the_restart_clears_after_the_boot() {
+    let mut rig = rig();
+    let bytes = good_zip();
+    let spec = driver("drv1", DriverKind::Inf, &bytes, 1);
+    rig.serve_driver(&spec, &bytes);
+    rig.sign(&spec.sha256, "b.cat");
+    rig.set_drivers(vec![spec]);
+    rig.sim.with_world(|w| w.installer_exits.push_back(InstallerExit::Code(3010)));
+    rig.start();
+    rig.until("installed", |r| r.driver_state("drv1") == Some(LocalState::Installed)).await;
+    assert_eq!(rig.report.restart_pending(), Some(true));
+    assert!(rig.book.snapshot().restart_pending_since_ms.is_some());
+    assert_eq!(rig.driver_record("drv1").unwrap().last_exit_code, Some(3010));
+    assert_eq!(rig.driver_reports("drv1")[0].exit_code, Some(3010), "the dashboard shows restart needed");
+    assert_eq!(rig.store(), ["oem1.inf"], "3010 still published the package");
+    rig.stop().await;
+
+    // The PC booted: the flag and the driver's "restart needed" go, and the new result is reported.
+    rig.sim.with_world(|w| w.boot_id = Some(101));
+    rig.start();
+    rig.until("cleared", |r| r.report.restart_pending().is_none()).await;
+    rig.until("re-reported", |r| r.driver_reports("drv1").first().is_some_and(|x| x.exit_code.is_none())).await;
+    let record = rig.driver_record("drv1").unwrap();
+    assert_eq!((record.state, record.last_exit_code), (LocalState::Installed, None));
+    assert_eq!(rig.runs().len(), 1, "not installed again");
+    rig.stop().await;
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_busy_installer_is_retried_without_counting_and_a_failure_backs_off() {
+    let mut rig = rig();
+    let bytes = good_zip();
+    let spec = driver("drv1", DriverKind::Inf, &bytes, 1);
+    rig.serve_driver(&spec, &bytes);
+    rig.sign(&spec.sha256, "b.cat");
+    rig.set_drivers(vec![spec.clone()]);
+    rig.sim.with_world(|w| {
+        w.installer_exits.push_back(InstallerExit::Code(1618));
+        w.installer_exits.push_back(InstallerExit::Code(1));
+    });
+    rig.start();
+    rig.until("first run", |r| r.runs().len() == 1).await;
+    rig.settle().await;
+    let record = rig.driver_record("drv1").unwrap();
+    assert_eq!((record.state, record.attempts), (LocalState::Pending, 0));
+    assert!(rig.driver_reports("drv1").iter().all(|r| r.state == InstallState::Pending), "busy is not reported");
+    assert!(!rig.work_dir_exists());
+    advance(BUSY_RETRY + Duration::from_secs(5)).await;
+    rig.until("second run", |r| r.runs().len() == 2).await;
+    rig.until("failed", |r| r.driver_state("drv1") == Some(LocalState::Failed)).await;
+    let record = rig.driver_record("drv1").unwrap();
+    assert_eq!((record.attempts, record.last_exit_code, record.detail.as_deref()), (1, Some(1), Some("exit_code")));
+    assert!(rig.store().is_empty(), "a failed pnputil published nothing");
+    // The next try after one minute succeeds (sign again: the extraction was deleted and made anew).
+    advance(Duration::from_secs(61)).await;
+    rig.until("installed", |r| r.driver_state("drv1") == Some(LocalState::Installed)).await;
+    assert_eq!(rig.runs().len(), 3);
+    rig.stop().await;
+}
+
+#[tokio::test(start_paused = true)]
+async fn removal_deletes_only_the_packages_rulebox_published() {
+    let mut rig = rig();
+    // A package of someone else is in the store already.
+    rig.sim.with_world(|w| {
+        w.driver_store.insert("oem9.inf".to_string());
+        w.next_oem = 10;
+    });
+    rig.sim.add_program(r"C:\Windows\INF\oem9.inf", FileIdentity::default(), Some(OEM_SHA_A));
+    let bytes = good_zip();
+    let spec = driver("drv1", DriverKind::Inf, &bytes, 1);
+    rig.serve_driver(&spec, &bytes);
+    rig.sign(&spec.sha256, "b.cat");
+    rig.set_drivers(vec![spec]);
+    rig.start();
+    rig.until("installed", |r| r.driver_state("drv1") == Some(LocalState::Installed)).await;
+    assert_eq!(rig.store(), ["oem10.inf", "oem9.inf"]);
+    assert_eq!(rig.driver_record("drv1").unwrap().packages.iter().map(|p| p.published.clone()).collect::<Vec<_>>(), ["oem10.inf"]);
+
+    // Unassigned: Rulebox removes its own package and leaves the other one alone.
+    rig.set_drivers(Vec::new());
+    rig.until("removed", |r| r.driver_state("drv1") == Some(LocalState::Removed)).await;
+    assert_eq!(rig.deletes(), ["oem10.inf"]);
+    assert_eq!(rig.store(), ["oem9.inf"]);
+    assert!(rig.journal_ids().is_empty(), "the entry is gone with the package");
+    assert_eq!(rig.driver_reports("drv1")[0].state, InstallState::Removed);
+    // Acknowledged: the record is forgotten.
+    rig.report.accept_installs();
+    rig.until("forgotten", |r| r.driver_record("drv1").is_none()).await;
+    rig.stop().await;
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_package_whose_file_changed_is_not_deleted() {
+    // Windows reused the name `oem1.inf` for another package: Rulebox's record no longer matches the file.
+    let mut rig = rig();
+    let bytes = good_zip();
+    let spec = driver("drv1", DriverKind::Inf, &bytes, 1);
+    rig.serve_driver(&spec, &bytes);
+    rig.sign(&spec.sha256, "b.cat");
+    rig.set_drivers(vec![spec]);
+    rig.start();
+    rig.until("installed", |r| r.driver_state("drv1") == Some(LocalState::Installed)).await;
+    rig.sim.add_program(r"C:\Windows\INF\oem1.inf", FileIdentity::default(), Some(OEM_SHA_A));
+    rig.set_drivers(Vec::new());
+    rig.until("removed", |r| r.driver_state("drv1") == Some(LocalState::Removed)).await;
+    assert!(rig.deletes().is_empty(), "nothing is deleted: {:?}", rig.deletes());
+    assert_eq!(rig.store(), ["oem1.inf"]);
+    assert!(rig.journal_ids().is_empty(), "the entry is forgotten, never restored later");
+    rig.stop().await;
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_package_that_was_already_in_the_store_is_never_removed() {
+    let mut rig = rig();
+    rig.sim.with_world(|w| w.driver_add_publishes = false);
+    let bytes = good_zip();
+    let spec = driver("drv1", DriverKind::Inf, &bytes, 1);
+    rig.serve_driver(&spec, &bytes);
+    rig.sign(&spec.sha256, "b.cat");
+    rig.set_drivers(vec![spec]);
+    rig.start();
+    rig.until("installed", |r| r.driver_state("drv1") == Some(LocalState::Installed)).await;
+    assert!(rig.driver_record("drv1").unwrap().packages.is_empty() && rig.journal_ids().is_empty());
+    rig.set_drivers(Vec::new());
+    rig.until("dropped", |r| r.driver_record("drv1").is_none()).await;
+    rig.settle().await;
+    assert!(rig.deletes().is_empty());
+    assert_eq!(rig.runs().len(), 1, "only the add ran");
+    rig.stop().await;
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_failing_removal_is_retried_and_keeps_the_package_recorded() {
+    let mut rig = rig();
+    let bytes = good_zip();
+    let spec = driver("drv1", DriverKind::Inf, &bytes, 1);
+    rig.serve_driver(&spec, &bytes);
+    rig.sign(&spec.sha256, "b.cat");
+    rig.set_drivers(vec![spec]);
+    rig.start();
+    rig.until("installed", |r| r.driver_state("drv1") == Some(LocalState::Installed)).await;
+    rig.sim.with_world(|w| w.driver_delete_fails = true);
+    rig.set_drivers(Vec::new());
+    rig.until("failed", |r| r.driver_state("drv1") == Some(LocalState::Failed)).await;
+    let record = rig.driver_record("drv1").unwrap();
+    assert_eq!((record.removal, record.detail.as_deref(), record.packages.len()), (true, Some("remove_failed"), 1));
+    assert_eq!(rig.journal_ids().len(), 1, "still journalled: a restore can try again");
+    rig.sim.with_world(|w| w.driver_delete_fails = false);
+    // A removal does not wait for the connection; the retry comes after the backoff.
+    advance(Duration::from_secs(61)).await;
+    rig.until("removed", |r| r.driver_state("drv1") == Some(LocalState::Removed)).await;
+    assert!(rig.store().is_empty());
+    rig.stop().await;
+}
+
+#[tokio::test(start_paused = true)]
+async fn exe_and_msi_drivers_run_once_and_are_never_removed() {
+    let mut rig = rig();
+    let exe_bytes = b"vendor exe";
+    let msi_bytes = b"vendor msi";
+    let exe = driver("drvexe", DriverKind::Exe, exe_bytes, 1);
+    let msi = driver("drvmsi", DriverKind::Msi, msi_bytes, 1);
+    rig.serve_driver(&exe, exe_bytes);
+    rig.serve_driver(&msi, msi_bytes);
+    rig.set_drivers(vec![exe.clone(), msi.clone()]);
+    rig.start();
+    rig.until("both installed", |r| {
+        r.driver_state("drvexe") == Some(LocalState::Installed) && r.driver_state("drvmsi") == Some(LocalState::Installed)
+    })
+    .await;
+    let runs = rig.runs();
+    assert_eq!(runs.len(), 2);
+    let exe_run = runs.iter().find(|r| r.program.extension().is_some_and(|e| e == "exe") && r.program.starts_with(rig.paths.downloads_dir())).unwrap();
+    assert_eq!(exe_run.args, ["/S", "/quiet"], "silent arguments one by one");
+    assert_eq!(exe_run.expected_exe, None);
+    let msi_run = runs.iter().find(|r| r.program == Path::new(r"C:\Windows\System32\msiexec.exe")).unwrap();
+    assert_eq!(&msi_run.args[2..4], ["/qn", "/norestart"]);
+    assert!(rig.book.installed_ids().is_empty() && rig.store().is_empty());
+    // Restarting the agent does not install them again.
+    rig.stop().await;
+    rig.book = InstallBook::open(rig.paths.installs());
+    rig.start();
+    rig.settle().await;
+    assert_eq!(rig.runs().len(), 2);
+    // Unassigned: forgotten, never uninstalled (there is nothing Rulebox can remove).
+    rig.set_drivers(Vec::new());
+    rig.until("forgotten", |r| r.book.snapshot().drivers.is_empty()).await;
+    rig.settle().await;
+    assert_eq!(rig.runs().len(), 2);
+    assert!(rig.deletes().is_empty());
+    rig.stop().await;
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_new_revision_retries_a_failed_driver_and_a_new_version_installs_again() {
+    let mut rig = rig();
+    let exe_bytes = b"vendor exe v1";
+    let spec = driver("drv1", DriverKind::Exe, exe_bytes, 1);
+    rig.serve_driver(&spec, exe_bytes);
+    rig.sim.with_world(|w| w.installer_exits.extend((0..6).map(|_| InstallerExit::Code(5))));
+    rig.set_drivers(vec![spec.clone()]);
+    rig.start();
+    for (step, wait) in [(1usize, 0u64), (2, 61), (3, 301), (4, 901), (5, 3601), (6, 21_601)] {
+        advance(Duration::from_secs(wait)).await;
+        rig.until("a failed run", |r| r.runs().len() >= step && r.driver_record("drv1").is_some_and(|x| x.attempts as usize == step)).await;
+    }
+    assert_eq!(rig.driver_record("drv1").unwrap().attempts, 6);
+    advance(Duration::from_secs(100_000)).await;
+    rig.settle().await;
+    assert_eq!(rig.runs().len(), 6, "the sixth failure is final until the revision changes");
+    // Retry: the same file, a new revision.
+    rig.set_drivers(vec![DriverSpec { revision: 2, ..spec.clone() }]);
+    rig.until("installed", |r| r.driver_state("drv1") == Some(LocalState::Installed)).await;
+    assert_eq!(rig.driver_record("drv1").unwrap().revision, 2);
+    // A new version (another hash) is installed again.
+    let v2 = b"vendor exe v2";
+    let spec2 = DriverSpec { revision: 3, ..driver("drv1", DriverKind::Exe, v2, 3) };
+    rig.serve_driver(&spec2, v2);
+    rig.set_drivers(vec![spec2]);
+    rig.until("v2 run", |r| r.runs().len() == 8).await;
+    rig.until("v2 installed", |r| r.driver_record("drv1").is_some_and(|x| x.sha256 == sha(v2) && x.state == LocalState::Installed)).await;
+    rig.stop().await;
+}
+
+#[tokio::test(start_paused = true)]
+async fn an_unknown_driver_kind_is_unsupported_and_nothing_is_downloaded() {
+    let mut rig = rig();
+    let bytes = b"x";
+    let spec = driver("drv1", DriverKind::Unknown, bytes, 1);
+    rig.serve_driver(&spec, bytes);
+    rig.set_drivers(vec![spec]);
+    rig.start();
+    rig.until("unsupported", |r| r.driver_state("drv1") == Some(LocalState::Unsupported)).await;
+    assert!(rig.runs().is_empty() && rig.downloader.calls().is_empty());
+    rig.stop().await;
+}
+
+#[tokio::test(start_paused = true)]
+async fn restoring_everything_removes_the_rulebox_installed_packages_and_only_those() {
+    use crate::journal::{restore_all, JournalCtx};
+    let mut rig = rig();
+    rig.sim.with_world(|w| {
+        w.driver_store.insert("oem9.inf".to_string());
+        w.next_oem = 10;
+    });
+    rig.sim.add_program(r"C:\Windows\INF\oem9.inf", FileIdentity::default(), Some(OEM_SHA_A));
+    let bytes = good_zip();
+    let spec = driver("drv1", DriverKind::Inf, &bytes, 1);
+    rig.serve_driver(&spec, &bytes);
+    rig.sign(&spec.sha256, "b.cat");
+    rig.set_drivers(vec![spec]);
+    rig.start();
+    rig.until("installed", |r| r.driver_state("drv1") == Some(LocalState::Installed)).await;
+    rig.stop().await;
+    let platform = Arc::clone(&rig.sim) as Arc<dyn Platform>;
+    let ctx = JournalCtx { platform: platform.as_ref(), shared: rig.shared.as_ref() };
+    let report = restore_all(&ctx);
+    assert!(report.failed.is_empty(), "{:?}", report.failed);
+    assert_eq!(rig.deletes(), ["oem10.inf"]);
+    assert_eq!(rig.store(), ["oem9.inf"]);
+    assert!(rig.journal_ids().is_empty());
+}
+
+#[test]
+fn installs_json_from_before_drivers_loads_and_a_driver_record_survives_a_round_trip() {
+    let old = r#"{"schema":1,"restartPendingSinceMs":null,"restartBoot":null,"apps":{}}"#;
+    let file: InstallsFile = serde_json::from_str(old).unwrap();
+    assert!(file.drivers.is_empty());
+    let mut file = file;
+    let mut record = DriverRecord::new("drv1", DriverRecordKind::Inf, &"a".repeat(64), 3, LocalState::Installed);
+    record.add_package(crate::installs::drivers_rules::DriverPackage { published: "oem3.inf".into(), sha256: "b".repeat(64) });
+    file.drivers.insert("drv1".into(), record.clone());
+    let text = serde_json::to_string(&file).unwrap();
+    let back: InstallsFile = serde_json::from_str(&text).unwrap();
+    assert_eq!(back.drivers.get("drv1"), Some(&record));
+    // The file on disk through the book.
+    let dir = TempDir::new();
+    let path = dir.path().join("installs.json");
+    std::fs::write(&path, &text).unwrap();
+    let book = InstallBook::open(path);
+    assert_eq!(book.snapshot().drivers.len(), 1);
+    assert!(book.installed_ids().is_empty(), "a driver is never an installed app");
+}
+
+#[tokio::test(start_paused = true)]
+async fn driver_folders_a_crash_left_behind_are_deleted_at_start() {
+    let mut rig = rig();
+    let stale = rig.paths.driver_work_dir(&"c".repeat(64));
+    std::fs::create_dir_all(stale.join("x64")).unwrap();
+    std::fs::write(stale.join("x64").join("b.inf"), b"left over").unwrap();
+    rig.start();
+    rig.until("swept", |r| !r.work_dir_exists()).await;
+    rig.stop().await;
 }

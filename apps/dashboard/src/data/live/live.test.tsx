@@ -355,11 +355,11 @@ describe("step-up (data/stepup/live.ts)", () => {
 
 describe("networks (Phase 5 Step 13)", () => {
   it("the list is networks:list with no arguments; one network is networks:wifiDetail with its id", () => {
-    cx.queryResult = { wifi: [], printers: [], approvedDrivers: [] };
+    cx.queryResult = { wifi: [], printers: [], drivers: [], approvedDrivers: [], addedDrivers: [] };
     const list = renderHook(() => live.useNetworks());
     const req = Object.values(cx.requests.at(-1)!)[0] as { args: unknown };
     expect(req.args).toEqual({});
-    expect(list.result.current).toEqual({ status: "ready", data: { wifi: [], printers: [], approvedDrivers: [] } });
+    expect(list.result.current).toEqual({ status: "ready", data: { wifi: [], printers: [], drivers: [], approvedDrivers: [], addedDrivers: [] } });
 
     cx.queryResult = { _id: "w1", name: "Shop", revision: 2 };
     const one = renderHook(() => live.useWifiDetail("w1"));
@@ -416,6 +416,48 @@ describe("printers (Phase 5 Step 14)", () => {
   });
 });
 
+describe("drivers (Phase 5 Step 14b)", () => {
+  it("one driver is drivers:detail with its id", () => {
+    cx.queryResult = { _id: "d1", name: "Brother", revision: 2 };
+    const one = renderHook(() => live.useDriverDetail("d1"));
+    expect((Object.values(cx.requests.at(-1)!)[0] as { args: unknown }).args).toEqual({ id: "d1" });
+    expect(one.result.current).toMatchObject({ status: "ready", data: { _id: "d1", revision: 2 } });
+  });
+
+  it("save, delete, retry and the approved names go to their functions; errors keep their code and detail", async () => {
+    const input = {
+      name: "Brother",
+      kind: "inf" as const,
+      deviceClass: "printer" as const,
+      url: "https://x.test/a.zip",
+      sha256: "a".repeat(64),
+      sizeBytes: 0,
+      inf: "a.inf",
+      silentArgs: [],
+      successExitCodes: [],
+      provides: [],
+      groupIds: ["g1"],
+    };
+    cx.fns["drivers:save"] = vi.fn(async () => ({ id: "d1", revision: 1 }));
+    expect(await renderHook(() => live.useSaveDriver()).result.current(input)).toEqual({ id: "d1", revision: 1 });
+    expect(cx.fns["drivers:save"]).toHaveBeenCalledWith(input);
+
+    cx.fns["drivers:remove"] = vi.fn(async () => null);
+    await expect(renderHook(() => live.useDeleteDriver()).result.current({ id: "d1" })).resolves.toBeUndefined();
+    expect(cx.fns["drivers:remove"]).toHaveBeenCalledWith({ id: "d1" });
+    cx.fns["drivers:retry"] = vi.fn(async () => null);
+    await expect(renderHook(() => live.useRetryDriver()).result.current({ id: "d1" })).resolves.toBeUndefined();
+    expect(cx.fns["drivers:retry"]).toHaveBeenCalledWith({ id: "d1" });
+    cx.fns["networks:setApprovedPrinterDrivers"] = vi.fn(async () => ({ addedDrivers: ["A"] }));
+    expect(await renderHook(() => live.useSetApprovedPrinterDrivers()).result.current({ names: ["A"] })).toEqual({ addedDrivers: ["A"] });
+
+    cx.fns["drivers:save"] = vi.fn(async () => {
+      throw new ConvexError({ code: "invalid_argument", field: "sha256", detail: "format" });
+    });
+    const e = await rejection(renderHook(() => live.useSaveDriver()).result.current(input));
+    expect(toAppError(e)).toMatchObject({ code: "invalid_argument", field: "sha256", detail: "format" });
+  });
+});
 describe("apps, assignments and file types (Step 10)", () => {
   it("a new app asks the server for nothing; an existing one is apps:get (the install counts are a query of their own)", () => {
     const fresh = renderHook(() => live.useAppDetail("new"));

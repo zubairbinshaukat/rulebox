@@ -760,3 +760,77 @@ fn a_staff_change_needs_the_account_and_stays_inside_the_roots() {
     let outside = Change::staff(JournalOwner::L1, r"Software\Classes", "X", Some(RegData::Dword(1)));
     assert!(change(&rig.ctx(), &outside).is_err());
 }
+// ---------------------------------------------------------------- Phase 5 Step 14b: driver packages
+
+#[test]
+fn a_driver_package_entry_is_recorded_once_restored_by_name_and_spelled_on_disk() {
+    let rig = Rig::new();
+    rig.platform.with_world(|w| {
+        w.driver_store.insert("oem4.inf".to_string());
+    });
+    rig.platform.add_program(r"C:\Windows\INF\oem4.inf", Default::default(), Some("aa"));
+    let ctx = rig.ctx();
+    record_driver_package(&ctx, "drv1", "OEM4.INF", "aa", 7).unwrap();
+    record_driver_package(&ctx, "drv1", "oem4.inf", "aa", 8).unwrap();
+    let entries = rig.shared.read(|s| s.journal.clone());
+    assert_eq!(entries.len(), 1, "written once per id");
+    assert_eq!(entries[0].id, "driver:drv1:oem4.inf");
+    assert_eq!((entries[0].owner, entries[0].phase, &entries[0].original), (JournalOwner::Driver, EntryPhase::Applied, &OriginalValue::NotPresent));
+    let text = serde_json::to_value(&entries[0]).unwrap();
+    assert_eq!(text["owner"], "driver");
+    assert_eq!(text["target"], json!({ "driverPackage": { "published": "oem4.inf", "sha256": "aa" } }));
+    // Anything but a published name is refused.
+    for bad in ["netcfg.inf", r"..\oem4.inf", "*", "oem4.inf /force"] {
+        assert!(record_driver_package(&ctx, "drv1", bad, "aa", 1).is_err(), "{bad}");
+    }
+    // Start-up leaves an applied entry alone; a restore deletes the package.
+    let startup = startup_recover(&ctx);
+    assert!(startup.dropped.is_empty() && startup.restore.restored.is_empty());
+    assert_eq!(rig.platform.with_world(|w| w.driver_deletes.len()), 0);
+    let report = restore_all(&ctx);
+    assert_eq!(report.restored, ["driver:drv1:oem4.inf"]);
+    assert_eq!(rig.platform.with_world(|w| w.driver_deletes.clone()), ["oem4.inf"]);
+    assert!(rig.shared.read(|s| s.journal.is_empty()));
+}
+
+#[test]
+fn a_package_that_changed_or_vanished_is_not_deleted_by_a_restore() {
+    for (store_has_it, sha) in [(false, Some("aa")), (true, Some("bb")), (true, None)] {
+        let rig = Rig::new();
+        rig.platform.with_world(|w| {
+            if store_has_it {
+                w.driver_store.insert("oem4.inf".to_string());
+            }
+        });
+        if let Some(sha) = sha {
+            rig.platform.add_program(r"C:\Windows\INF\oem4.inf", Default::default(), Some(sha));
+        }
+        record_driver_package(&rig.ctx(), "drv1", "oem4.inf", "aa", 1).unwrap();
+        let report = restore_all(&rig.ctx());
+        assert_eq!(report.restored.len(), 1, "forgotten, not failed");
+        assert!(rig.platform.with_world(|w| w.driver_deletes.is_empty()), "store {store_has_it} sha {sha:?}");
+    }
+}
+
+#[test]
+fn a_pending_driver_entry_is_never_settled_by_a_guess() {
+    let rig = Rig::new();
+    rig.shared
+        .update(|state| {
+            state.journal.push(JournalEntry {
+                id: "driver:d:oem4.inf".into(),
+                owner: JournalOwner::Driver,
+                target: JournalTarget::DriverPackage { published: "oem4.inf".into(), sha256: "aa".into() },
+                original: OriginalValue::NotPresent,
+                phase: EntryPhase::Pending,
+                since_version: 0,
+                recorded_at_ms: 0,
+                last_error: None,
+            });
+        })
+        .unwrap();
+    let report = startup_recover(&rig.ctx());
+    assert!(report.dropped.is_empty() && report.kept.is_empty());
+    assert_eq!(rig.shared.read(|s| s.journal[0].phase), EntryPhase::Pending, "left exactly as it is");
+    assert!(rig.platform.with_world(|w| w.driver_deletes.is_empty()));
+}

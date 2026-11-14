@@ -33,7 +33,7 @@ use super::{
 use super::{FolderAcl, LocalAdminAccount};
 use crate::cleanup::{resolve_reset, shell_folder_is_default};
 use crate::installs::{
-    installer_program_allowed, is_in_use, is_reparse_point, portable_dir_ok, portable_target_ok, wait_for_installer,
+    installer_command_allowed, is_in_use, is_published_inf, is_reparse_point, pnputil_path, portable_dir_ok, portable_target_ok, wait_for_installer,
     InstallerWait, RunTemp, RunningInstaller, INSTALLER_TAIL_GRACE,
 };
 use crate::paths::{data_dir_action, DataDirAction, DataPaths, InstallPaths};
@@ -392,7 +392,7 @@ impl Platform for WindowsPlatform {
         use std::os::windows::io::AsHandle;
         use std::os::windows::process::CommandExt;
         let system_root = system_root();
-        if !installer_program_allowed(&cmd.program, system_root.as_deref(), &self.data.downloads_dir()) {
+        if !installer_command_allowed(&cmd.program, &cmd.args, system_root.as_deref(), &self.data.downloads_dir(), &self.data.drivers_dir()) {
             return Err(PlatformError::Other("program not allowed".into()));
         }
         guard()?;
@@ -437,6 +437,35 @@ impl Platform for WindowsPlatform {
         drop(run);
         drop(temp);
         ended.map_err(io_err)
+    }
+
+    fn driver_package_delete(&self, published: &str) -> Result<(), PlatformError> {
+        if !is_published_inf(published) {
+            return Err(PlatformError::Refused("not a published driver name"));
+        }
+        guard()?;
+        let published = published.to_ascii_lowercase();
+        let root = system_root().ok_or_else(|| PlatformError::Other("the Windows folder is not known".into()))?;
+        let cmd = InstallerCommand {
+            program: pnputil_path(&root),
+            args: vec!["/delete-driver".into(), published.clone(), "/uninstall".into()],
+            working_dir: root.join("System32"),
+            expected_exe: None,
+            removal: true,
+        };
+        match self.run_installer(&cmd, Duration::from_secs(10 * 60), &CancellationToken::new())? {
+            InstallerExit::Code(0 | 3010) => Ok(()),
+            InstallerExit::Code(_) => {
+                // pnputil answers a generic failure for a package that is not there; the store says which it was.
+                if self.driver_store_infs()?.contains(&published) {
+                    Err(PlatformError::Other("pnputil could not delete the package".into()))
+                } else {
+                    Err(PlatformError::NotFound)
+                }
+            }
+            InstallerExit::TimedOut => Err(PlatformError::Other("pnputil did not finish in time".into())),
+            InstallerExit::Cancelled => Err(PlatformError::Other("cancelled".into())),
+        }
     }
 
     fn place_portable(&self, from: &Path, to: &Path) -> Result<(), PlatformError> {
@@ -605,6 +634,19 @@ impl Platform for WindowsPlatform {
 
     fn printer_ports(&self) -> Result<Vec<String>, PlatformError> {
         printing::list_ports().map_err(map_err)
+    }
+
+    fn driver_store_infs(&self) -> Result<Vec<String>, PlatformError> {
+        let root = system_root().ok_or_else(|| PlatformError::Other("the Windows folder is not known".into()))?;
+        let mut names: Vec<String> = std::fs::read_dir(root.join("INF"))
+            .map_err(io_err)?
+            .flatten()
+            .filter(|entry| entry.file_type().is_ok_and(|kind| kind.is_file()))
+            .map(|entry| entry.file_name().to_string_lossy().to_ascii_lowercase())
+            .filter(|name| is_published_inf(name))
+            .collect();
+        names.sort();
+        Ok(names)
     }
 
     fn bcd_get(&self, object: &str, element: &str) -> Result<Option<String>, PlatformError> {
@@ -1085,6 +1127,7 @@ mod tests {
         let port = PortSpec { name: "Rulebox_k7".into(), protocol: crate::platform::PortProtocol::RawTcp, host: "10.0.0.20".into(), number: 9100, queue: String::new() };
         blocked("printer_port_add", p.printer_port_add(&port));
         blocked("printer_port_delete", p.printer_port_delete("Rulebox_k7"));
+        blocked("driver_package_delete", p.driver_package_delete("oem12.inf"));
         blocked("printer_share_connect", p.printer_share_connect(r"\\print01\hp"));
         blocked("printer_share_disconnect", p.printer_share_disconnect(r"\\print01\hp"));
         blocked("bcd_set", p.bcd_set("{current}", "recoveryenabled", "No"));
@@ -1243,9 +1286,36 @@ mod tests {
                 other => panic!("expected a refusal, got {other:?}"),
             }
         }
+        // (Step 14b) pnputil only with its two fixed command lines: any other arguments are refused first.
+        let pnputil = pnputil_path(&system_root().unwrap());
+        for args in [vec!["/delete-driver", "*", "/uninstall"], vec!["/enum-drivers"], vec!["/add-driver", "*.inf", "/install"]] {
+            let cmd = InstallerCommand {
+                program: pnputil.clone(),
+                args: args.iter().map(|a| (*a).to_string()).collect(),
+                working_dir: downloads.clone(),
+                expected_exe: None,
+                removal: false,
+            };
+            match p.run_installer(&cmd, Duration::from_secs(1), &CancellationToken::new()) {
+                Err(PlatformError::Other(message)) => assert_eq!(message, "program not allowed", "{args:?}"),
+                other => panic!("expected a refusal, got {other:?}"),
+            }
+        }
+        assert!(matches!(p.driver_package_delete(r"..\x.inf"), Err(PlatformError::Refused(_))));
+        assert!(matches!(p.driver_package_delete("*"), Err(PlatformError::Refused(_))));
+        assert!(matches!(p.driver_package_delete("netcfg.inf"), Err(PlatformError::Refused(_))));
         let outside = Path::new(r"C:\rulebox-test-no-such-install\rulebox-agent.exe");
         assert!(matches!(p.place_portable(outside, outside), Err(PlatformError::Other(_))));
         assert!(matches!(p.remove_portable(Path::new(r"C:\rulebox-test-no-such-install")), Err(PlatformError::Other(_))));
+    }
+
+    #[test]
+    fn the_driver_store_is_listed_read_only_with_published_names_only() {
+        let names = platform().driver_store_infs().unwrap();
+        assert!(names.iter().all(|name| is_published_inf(name) && *name == name.to_ascii_lowercase()), "{names:?}");
+        let mut sorted = names.clone();
+        sorted.sort();
+        assert_eq!(names, sorted);
     }
 
     #[test]

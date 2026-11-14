@@ -90,7 +90,7 @@ const GROUPS = Array.from({ length: 12 }, (_, i) => groupRow(`g${i + 1}`, `Group
 const DRIVERS = ["Microsoft IPP Class Driver", "Microsoft PCL6 Class Driver", "Microsoft PS Class Driver", "Generic / Text Only", "HP Universal Printing PCL 6"];
 
 beforeEach(() => {
-  cx.results = { "groups:list": GROUPS, "networks:list": { wifi: [], printers: [], approvedDrivers: DRIVERS } };
+  cx.results = { "groups:list": GROUPS, "networks:list": { wifi: [], printers: [], drivers: [], addedDrivers: [], approvedDrivers: DRIVERS } };
   cx.queried = [];
   cx.fns = {};
 });
@@ -120,7 +120,7 @@ describe("Printers on the Networks list", () => {
   it("lists each printer with its kind, address, driver, default badge and group chips; an admin can add and edit", () => {
     cx.results["networks:list"] = {
       wifi: [],
-      approvedDrivers: DRIVERS,
+      drivers: [], addedDrivers: [], approvedDrivers: DRIVERS,
       printers: [
         { ...front, groupCount: 6, groups: [1, 2, 3, 4, 5, 6].map((n) => ({ _id: `g${n}`, name: `Group ${n}` })) },
         { ...front, _id: "p2", name: "Labels", kind: "raw", address: "10.0.0.31", port: 9101, driver: "Generic / Text Only", groupCount: 0, defaultGroupCount: 0, groups: [] },
@@ -147,7 +147,7 @@ describe("Printers on the Networks list", () => {
     expect(screen.getByText(s.emptyPrintersTitle)).toBeTruthy();
     expect(screen.getAllByRole("link", { name: s.newPrinter })).toHaveLength(2);
     cleanup();
-    cx.results["networks:list"] = { wifi: [], approvedDrivers: DRIVERS, printers: [front] };
+    cx.results["networks:list"] = { wifi: [], drivers: [], addedDrivers: [], approvedDrivers: DRIVERS, printers: [front] };
     ui(<Networks />, "viewer", "/networks");
     expect(screen.queryByRole("link", { name: s.newPrinter })).toBeNull();
     expect(screen.queryByRole("link", { name: `${s.edit} Front desk` })).toBeNull();
@@ -237,7 +237,7 @@ describe("New printer (/networks/printers/new)", () => {
     ui(<PrinterEdit />, "admin", "/networks/printers/new");
     const options = within(screen.getByLabelText(s.driverLabel)).getAllByRole("option").map((o) => o.textContent);
     expect(options).toEqual(DRIVERS);
-    expect(screen.getByText(/must already be on the PC/)).toBeTruthy();
+    expect(screen.getByText(/delivered by a Drivers entry/)).toBeTruthy();
   });
 
   it("refuses a save that touches more than 10 groups before calling the server; says in words what the server refuses", async () => {

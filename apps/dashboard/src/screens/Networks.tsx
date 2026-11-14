@@ -3,7 +3,8 @@ import IconWifi from "~icons/solar/wi-fi-router-minimalistic-linear";
 import IconAdd from "~icons/solar/add-circle-linear";
 import IconPrinter from "~icons/solar/printer-linear";
 import { useNetworks } from "../data";
-import type { PrinterRow, WifiRow } from "../data/types";
+import IconDriver from "~icons/solar/server-square-linear";
+import type { DriverRow, PrinterRow, WifiRow } from "../data/types";
 import { Card } from "../components/Card";
 import { EmptyState } from "../components/EmptyState";
 import { InlineNotice } from "../components/Notice";
@@ -13,6 +14,7 @@ import { RoleGate } from "../components/RoleGate";
 import { SkeletonBlock } from "../components/Skeleton";
 import { formatDate } from "../lib/format";
 import { useCan } from "../lib/member";
+import { ApprovedDrivers } from "./networks/ApprovedDrivers";
 import { networksStrings as s } from "./networks/strings";
 
 /** Group chips shown per row; the rest is "+N more" (the detail page lists them all). */
@@ -113,8 +115,33 @@ function PrinterItem({ p, canEdit }: { p: PrinterRow; canEdit: boolean }) {
   );
 }
 
+function DriverItem({ d, canEdit }: { d: DriverRow; canEdit: boolean }) {
+  return (
+    <li className="dash-list__item dash-net__item">
+      <span className="dash-list__icon dash-list__icon--accent" aria-hidden="true">
+        <IconDriver />
+      </span>
+      <div className="dash-list__body">
+        <Link className="dash-link dash-list__title dash-wrap" to={`/networks/drivers/${d._id}`}>
+          {d.name}
+        </Link>
+        <span className="dash-list__meta">
+          <span className="dash-chip">{s.driverKindShort[d.kind]}</span> <span className="dash-chip">{s.driverClassShort[d.deviceClass]}</span>
+        </span>
+        {d.provides.length > 0 ? <span className="dash-list__meta dash-wrap">{s.driverProvidesLine(d.provides.join(", "))}</span> : null}
+        <GroupChips groups={d.groups} groupCount={d.groupCount} />
+      </div>
+      {canEdit ? (
+        <Link className="rb-btn rb-btn--ghost dash-btn--sm" to={`/networks/drivers/${d._id}`} aria-label={`${s.edit} ${d.name}`}>
+          {s.edit}
+        </Link>
+      ) : null}
+    </li>
+  );
+}
+
 /**
- * `networks:list`: one subscription for the whole screen, Wi-Fi and printers (each section is its own Card). No passphrase and no
+ * `networks:list`: one subscription for the whole screen, Wi-Fi, printers and drivers (each section is its own Card). No passphrase and no
  * per-device counts here: those would re-run the list on every device report (the counts are on the detail pages).
  */
 export default function Networks() {
@@ -136,10 +163,19 @@ export default function Networks() {
       </Link>
     </RoleGate>
   );
+  const addDriver = (
+    <RoleGate minRole="admin">
+      <Link className="rb-btn rb-btn--primary" to="/networks/drivers/new">
+        <IconAdd aria-hidden="true" />
+        {s.newDriver}
+      </Link>
+    </RoleGate>
+  );
   const add = (
     <>
       {addWifi}
       {addPrinter}
+      {addDriver}
     </>
   );
   return (
@@ -178,6 +214,18 @@ export default function Networks() {
                 </ul>
               )}
             </Card>
+            <Card title={s.driversSection} sub={s.driversLead} body="flush">
+              {data.drivers.length === 0 ? (
+                <EmptyState icon={<IconDriver />} title={s.emptyDriversTitle} body={s.emptyDriversBody} action={addDriver} />
+              ) : (
+                <ul className="dash-list" aria-label={s.driversSection}>
+                  {data.drivers.map((d) => (
+                    <DriverItem key={d._id} d={d} canEdit={canAct} />
+                  ))}
+                </ul>
+              )}
+            </Card>
+            <ApprovedDrivers added={data.addedDrivers} drivers={data.drivers} />
           </div>
         )}
       </QueryRegion>

@@ -8,6 +8,7 @@
 //! - [`engine`]: the state machine and `installs.json`, one operation at a time.
 //! - [`report`]: what the server is told (`pending` and the terminal states, A12).
 //! - [`icons`]: the icon cache.
+//! - [`drivers_rules`] and [`unzip`]: the pure parts of the Step 14b driver installs.
 //!
 //! This file holds the fixed rules shared by the engine and both platforms: the
 //! closed list of result details, which programs may be started, the exact
@@ -28,8 +29,10 @@ use crate::platform::{InstallerCommand, InstallerExit};
 
 pub mod download;
 pub mod engine;
+pub mod drivers_rules;
 pub mod icons;
 pub mod report;
+pub mod unzip;
 
 /// An installer still running after this long is killed (`failed` / `timeout`).
 pub const INSTALL_TIMEOUT: Duration = Duration::from_secs(30 * 60);
@@ -94,10 +97,14 @@ pub enum Detail {
     Unsupported,
     Busy,
     RemoveFailed,
+    /// (Step 14b) The INF package's catalog is not validly signed (or missing): nothing was installed.
+    UnsignedDriver,
+    /// (Step 14b) The zip was refused (unsafe path, too big, no such `.inf`).
+    BadPackage,
 }
 
 impl Detail {
-    pub const ALL: [Detail; 10] = [
+    pub const ALL: [Detail; 12] = [
         Detail::DownloadFailed,
         Detail::HashMismatch,
         Detail::TooLarge,
@@ -108,6 +115,8 @@ impl Detail {
         Detail::Unsupported,
         Detail::Busy,
         Detail::RemoveFailed,
+        Detail::UnsignedDriver,
+        Detail::BadPackage,
     ];
 
     pub fn as_str(self) -> &'static str {
@@ -122,6 +131,8 @@ impl Detail {
             Detail::Unsupported => "unsupported",
             Detail::Busy => "busy",
             Detail::RemoveFailed => "remove_failed",
+            Detail::UnsignedDriver => "unsigned_driver",
+            Detail::BadPackage => "bad_package",
         }
     }
 
@@ -214,6 +225,51 @@ pub fn installer_program_allowed(program: &Path, system_root: Option<&Path>, dow
         .or_else(|| name.strip_suffix(".msi"))
         .is_some_and(is_sha256);
     plain_absolute(downloads) && lower(parent) == lower(downloads) && named_by_hash
+}
+
+/// `%SystemRoot%\System32\pnputil.exe` (Step 14b, drivers only: see [`installer_command_allowed`]).
+pub fn pnputil_path(system_root: &Path) -> PathBuf {
+    system_root.join("System32").join("pnputil.exe")
+}
+
+/// `oem<digits>.inf`: the name Windows gives a package it published into the driver store (any case).
+pub fn is_published_inf(name: &str) -> bool {
+    let lower = name.to_ascii_lowercase();
+    lower
+        .strip_prefix("oem")
+        .and_then(|rest| rest.strip_suffix(".inf"))
+        .is_some_and(|digits| !digits.is_empty() && digits.len() <= 9 && digits.bytes().all(|b| b.is_ascii_digit()))
+}
+
+/// (Step 14b) The program rule of [`installer_program_allowed`] **plus** exactly two `pnputil` command lines, and nothing
+/// else of System32:
+/// - `pnputil /add-driver <inf> /install`, `<inf>` a plain absolute path ending `.inf` inside `drivers_root` (the folder a
+///   verified zip was extracted into; no wildcard, no relative path);
+/// - `pnputil /delete-driver oem<N>.inf /uninstall`, nothing but the published name (no path, no `*`).
+///
+/// `pnputil` itself stays on the Staff deny list: only this SYSTEM service starts it.
+pub fn installer_command_allowed(
+    program: &Path,
+    args: &[String],
+    system_root: Option<&Path>,
+    downloads: &Path,
+    drivers_root: &Path,
+) -> bool {
+    if let Some(root) = system_root {
+        if plain_absolute(program) && plain_absolute(root) && lower(program) == lower(&pnputil_path(root)) {
+            return match args {
+                [verb, inf, flag] if verb == "/add-driver" && flag == "/install" => {
+                    let path = Path::new(inf);
+                    !inf.contains(['*', '?', '<', '>', '|', '"'])
+                        && path.extension().is_some_and(|e| e.eq_ignore_ascii_case("inf"))
+                        && below(drivers_root, path).is_some_and(|rest| rest.len() >= 2)
+                }
+                [verb, name, flag] if verb == "/delete-driver" && flag == "/uninstall" => is_published_inf(name),
+                _ => false,
+            };
+        }
+    }
+    installer_program_allowed(program, system_root, downloads)
 }
 
 /// `to` is `<apps>\<app id>\<file>.exe`: exactly two plain components below the
@@ -605,6 +661,8 @@ mod tests {
             "unsupported",
             "busy",
             "remove_failed",
+            "unsigned_driver",
+            "bad_package",
         ];
         let ours: Vec<&str> = Detail::ALL.iter().map(|d| d.as_str()).collect();
         assert_eq!(ours, server);
@@ -671,6 +729,91 @@ mod tests {
         }
         // No known Windows folder: msiexec is refused too.
         assert!(!installer_program_allowed(Path::new(r"C:\Windows\System32\msiexec.exe"), None, downloads));
+    }
+
+    #[test]
+    fn pnputil_is_allowed_only_with_the_two_driver_command_lines() {
+        let root = Path::new(r"C:\Windows");
+        let downloads = Path::new(r"C:\ProgramData\Rulebox\downloads");
+        let drivers = Path::new(r"C:\ProgramData\Rulebox\drivers");
+        let sha = "a".repeat(64);
+        let pnputil = r"C:\Windows\System32\pnputil.exe";
+        let run = |program: &str, args: &[&str]| {
+            let args: Vec<String> = args.iter().map(|a| (*a).to_string()).collect();
+            installer_command_allowed(Path::new(program), &args, Some(root), downloads, drivers)
+        };
+        let inf = format!(r"C:\ProgramData\Rulebox\drivers\{sha}\sub\brother.inf");
+        assert!(run(pnputil, &["/add-driver", &inf, "/install"]));
+        assert!(run(r"c:\windows\system32\PNPUTIL.EXE", &["/add-driver", &inf.to_uppercase(), "/install"]));
+        assert!(run(pnputil, &["/delete-driver", "oem12.inf", "/uninstall"]));
+        assert!(run(pnputil, &["/delete-driver", "OEM7.INF", "/uninstall"]));
+        // Everything refused before still is, and the old cases are unchanged.
+        assert!(run(r"C:\Windows\System32\msiexec.exe", &["/i", "x.msi"]));
+        assert!(run(&format!(r"C:\ProgramData\Rulebox\downloads\{sha}.exe"), &["/S"]));
+        for program in [
+            r"C:\Windows\System32\cmd.exe",
+            r"C:\Windows\System32\powershell.exe",
+            r"C:\Windows\System32\reg.exe",
+            r"C:\Windows\System32\sc.exe",
+            r"C:\Windows\SysWOW64\pnputil.exe",
+            r"C:\Temp\pnputil.exe",
+            r"C:\Windows\System32\drivers\pnputil.exe",
+            r"pnputil.exe",
+        ] {
+            assert!(!run(program, &["/add-driver", &inf, "/install"]), "{program}");
+            assert!(!run(program, &["/delete-driver", "oem12.inf", "/uninstall"]), "{program}");
+        }
+        let other_inf = r"C:\ProgramData\Rulebox\downloads\x.inf".to_string();
+        let traversal = format!(r"C:\ProgramData\Rulebox\drivers\{sha}\..\..\evil.inf");
+        let ads = format!(r"C:\ProgramData\Rulebox\drivers\{sha}\a.inf:evil");
+        let wildcard = format!(r"C:\ProgramData\Rulebox\drivers\{sha}\*.inf");
+        let direct = r"C:\ProgramData\Rulebox\drivers\a.inf".to_string();
+        let not_inf = format!(r"C:\ProgramData\Rulebox\drivers\{sha}\a.exe");
+        let unc = format!(r"\\server\share\{sha}\a.inf");
+        for args in [
+            vec!["/add-driver", "*.inf", "/install"],
+            vec!["/add-driver", "brother.inf", "/install"],
+            vec!["/add-driver", &other_inf, "/install"],
+            vec!["/add-driver", &traversal, "/install"],
+            vec!["/add-driver", &ads, "/install"],
+            vec!["/add-driver", &wildcard, "/install"],
+            vec!["/add-driver", &direct, "/install"],
+            vec!["/add-driver", &not_inf, "/install"],
+            vec!["/add-driver", &unc, "/install"],
+            vec!["/add-driver", &inf],
+            vec!["/add-driver", &inf, "/install", "/subdirs"],
+            vec!["/add-driver", &inf, "/install", "/reboot"],
+            vec!["/add-driver", &inf, "/subdirs"],
+            vec!["/delete-driver", "oem12.inf"],
+            vec!["/delete-driver", "oem12.inf", "/uninstall", "/force"],
+            vec!["/delete-driver", "oem12.inf", "/force"],
+            vec!["/delete-driver", "*", "/uninstall"],
+            vec!["/delete-driver", "*.inf", "/uninstall"],
+            vec!["/delete-driver", r"C:\Windows\INF\oem12.inf", "/uninstall"],
+            vec!["/delete-driver", "oem.inf", "/uninstall"],
+            vec!["/delete-driver", "oem12.inf.exe", "/uninstall"],
+            vec!["/delete-driver", "netcfg.inf", "/uninstall"],
+            vec!["/enum-drivers"],
+            vec!["/delete-driver", "oem12.inf", "/uninstall", "&", "calc"],
+            vec![],
+        ] {
+            assert!(!run(pnputil, &args), "{args:?}");
+        }
+        // No known Windows folder: pnputil is refused too.
+        let args = vec!["/delete-driver".to_string(), "oem1.inf".to_string(), "/uninstall".to_string()];
+        assert!(!installer_command_allowed(Path::new(pnputil), &args, None, downloads, drivers));
+        // The bare program rule never names pnputil.
+        assert!(!installer_program_allowed(Path::new(pnputil), Some(root), downloads));
+    }
+
+    #[test]
+    fn published_names() {
+        for good in ["oem1.inf", "OEM123.INF", "oem000012.inf"] {
+            assert!(is_published_inf(good), "{good}");
+        }
+        for bad in ["oem.inf", "oemx.inf", "oem1.inf ", "xoem1.inf", "oem1.infx", r"..\oem1.inf", "oem1234567890.inf", "oem1.inf:s"] {
+            assert!(!is_published_inf(bad), "{bad}");
+        }
     }
 
     #[test]

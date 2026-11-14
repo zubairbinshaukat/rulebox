@@ -1158,6 +1158,13 @@ pushed from the dashboard.
 - **Printers:** admins add network printers (IP or share path, driver from
   an approved list) per group; the agent installs them. Print Spooler stays
   enabled on these devices (Section 22.3).
+- **Drivers:** admins can also push a printer, scanner or other device
+  driver to a group, as a driver package (zip with an `.inf` and a signed
+  catalog) or a vendor's silent installer. It follows the same rules as
+  any installer (https, checked hash, signed list, no window shown to
+  staff), never appears as a tile, and may ask for a restart. A printer
+  can then use a driver delivered this way. Only drivers Rulebox installed
+  are ever removed.
 - Quick settings (Section 4.2) lists only the networks allowed by policy,
   if the admin enables "Managed networks only".
 

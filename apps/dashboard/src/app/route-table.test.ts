@@ -30,6 +30,8 @@ describe("route table", () => {
     expect(screensForPath("/networks/wifi/k57abc")).toEqual(["Layout", "WifiEdit"]);
     expect(screensForPath("/networks/printers/new")).toEqual(["Layout", "PrinterEdit"]);
     expect(screensForPath("/networks/printers/k57abc")).toEqual(["Layout", "PrinterEdit"]);
+    expect(screensForPath("/networks/drivers/new")).toEqual(["Layout", "DriverEdit"]);
+    expect(screensForPath("/networks/drivers/k57abc")).toEqual(["Layout", "DriverEdit"]);
     expect(screensForPath("/devices/a/b")).toEqual([]);
     expect(screensForPath("/gallery")).toEqual([]);
   });

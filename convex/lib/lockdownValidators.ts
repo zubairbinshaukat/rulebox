@@ -124,6 +124,9 @@ export const wifiSecurity = v.union(
   v.literal("wpa2Wpa3Personal"),
 );
 export const printerKind = v.union(v.literal("ipp"), v.literal("raw"), v.literal("lpr"), v.literal("share"));
+/** Step 14b: how a driver package is installed, and what it is for. */
+export const driverKind = v.union(v.literal("inf"), v.literal("exe"), v.literal("msi"));
+export const driverClass = v.union(v.literal("printer"), v.literal("scanner"), v.literal("other"));
 
 /** `{ v, keyId, epk, nonce, ct }` of `rulebox.seal/1` (4.18). Every binary field is base64. */
 export const sealedBox = v.object({ v: v.number(), keyId: v.string(), epk: v.string(), nonce: v.string(), ct: v.string() });

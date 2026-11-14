@@ -1,7 +1,7 @@
 import { internal } from "../_generated/api";
 import type { Doc, Id } from "../_generated/dataModel";
 import type { DatabaseReader, MutationCtx } from "../_generated/server";
-import { FAILED_DELTA_CAP, INSTALL_RETAG_BATCH, MAX_APP_ASSIGNMENTS } from "./limits";
+import { FAILED_DELTA_CAP, INSTALL_RETAG_BATCH, MAX_APP_ASSIGNMENTS, MAX_ORG_DRIVERS } from "./limits";
 import { bumpOrgStatsIfPresent } from "./plans";
 
 // Which install results COUNT (Step 17 review, owner decision: install status
@@ -142,6 +142,19 @@ export async function retagDeviceInstalls(
   const check = liveChecker(ctx);
   let delta = 0;
   let written = 0;
+  // Step 14b: the PC's driver results carry the same tag (nothing counts them; the driver page counts the assigned groups only).
+  // At most MAX_ORG_DRIVERS rows (one per driver), on the first page only.
+  if (cursor === null) {
+    const driverRows = await ctx.db
+      .query("driverResults")
+      .withIndex("by_device_driver", (q) => q.eq("deviceId", device._id))
+      .take(MAX_ORG_DRIVERS);
+    for (const r of driverRows) {
+      if (r.groupId === groupId) continue;
+      await ctx.db.patch(r._id, { groupId });
+      written++;
+    }
+  }
   for (const r of page.page) {
     if (r.groupId === groupId) continue;
     if (r.state === "failed") {

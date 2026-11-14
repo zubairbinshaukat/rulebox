@@ -281,7 +281,7 @@ describe("demo data layer", () => {
     signInAs("owner@demo.rulebox.test");
     const list = (await ready(renderHook(() => demoApi.useNetworks()).result)).data;
     expect(list.printers.map((p) => p.name)).toEqual(["Front desk", "Office laser", "Warehouse label printer"]);
-    expect(list.approvedDrivers).toEqual(["Microsoft IPP Class Driver", "Microsoft PCL6 Class Driver", "Microsoft PS Class Driver", "Generic / Text Only"]);
+    expect(list.approvedDrivers).toEqual(["Microsoft IPP Class Driver", "Microsoft PCL6 Class Driver", "Microsoft PS Class Driver", "Generic / Text Only", "Brother HL-L2350DW series"]);
 
     const save = renderHook(() => demoApi.useSavePrinter()).result.current;
     // The first group is where "Front desk" is already the default; the second has no default printer.
@@ -335,6 +335,100 @@ describe("demo data layer", () => {
     expect(await renderHook(() => demoApi.useSavePrinter()).result.current(input).catch((e) => e)).toMatchObject({ code: "too_large", detail: "printers" });
   });
 
+  it("drivers (Step 14b): create, edit, retry, delete; the rules follow the server; delivered names reach the printer picker", async () => {
+    resetDemo();
+    signInAs("owner@demo.rulebox.test");
+    const list = (await ready(renderHook(() => demoApi.useNetworks()).result)).data;
+    expect(list.drivers.map((d) => d.name)).toEqual(["Brother laser printer driver", "Flatbed scanner"]);
+    expect(list.addedDrivers).toEqual([]);
+
+    const save = renderHook(() => demoApi.useSaveDriver()).result.current;
+    const [g1, g2] = db().groups.map((g) => g._id);
+    const input = {
+      name: "Zebra labels",
+      kind: "inf" as const,
+      deviceClass: "printer" as const,
+      url: "https://downloads.example.test/zebra.zip",
+      sha256: "AB".repeat(32),
+      sizeBytes: 1000,
+      inf: "zebra\\zd.inf",
+      silentArgs: [] as string[],
+      successExitCodes: [] as number[],
+      provides: ["ZDesigner ZD420", "zdesigner zd420", "  "],
+      groupIds: [g2!],
+    };
+    const created = await save(input);
+    expect(created.revision).toBe(1);
+    expect(db().drivers.find((d) => d._id === created.id)).toMatchObject({ sha256: "ab".repeat(32), provides: ["ZDesigner ZD420"], inf: "zebra\\zd.inf" });
+    expect(db().audit.some((e) => e.action === "driver.created" && e.targetId === created.id)).toBe(true);
+    expect((await ready(renderHook(() => demoApi.useNetworks()).result)).data.approvedDrivers).toContain("ZDesigner ZD420");
+
+    const bad = async (over: object) => (await save({ ...input, ...over }).catch((e) => e)) as { code: string; field?: string; detail?: string };
+    expect(await bad({ name: "" })).toMatchObject({ field: "name", detail: "empty" });
+    expect(await bad({ name: "brother LASER printer driver" })).toMatchObject({ field: "name", detail: "taken" });
+    expect(await bad({ url: "http://x.test/a.zip" })).toMatchObject({ field: "url", detail: "scheme" });
+    expect(await bad({ sha256: "abc" })).toMatchObject({ field: "sha256", detail: "format" });
+    expect(await bad({ sizeBytes: 5 * 1024 * 1024 * 1024 })).toMatchObject({ field: "sizeBytes" });
+    expect(await bad({ inf: "..\\evil.inf" })).toMatchObject({ field: "inf", detail: "path" });
+    expect(await bad({ inf: "zd.txt" })).toMatchObject({ field: "inf", detail: "extension" });
+    expect(await bad({ kind: "exe", inf: undefined })).toMatchObject({ field: "silentArgs", detail: "required" });
+    expect(await bad({ inf: "x.inf", kind: "msi" })).toMatchObject({ field: "inf", detail: "not_allowed" });
+    expect(await bad({ kind: "exe", inf: undefined, silentArgs: ["/S"], successExitCodes: Array.from({ length: 9 }, (_, i) => i) })).toMatchObject({ field: "successExitCodes" });
+    expect(await bad({ provides: Array.from({ length: 11 }, (_, i) => `n${i}`) })).toMatchObject({ field: "provides", detail: "count" });
+    expect(await bad({ groupIds: ["nope"] })).toMatchObject({ code: "not_found" });
+    expect(await bad({ name: "Wide", groupIds: db().groups.slice(0, 11).map((g) => g._id) })).toMatchObject({ code: "too_large", detail: "groups" });
+    expect(await save({ ...input, id: created.id, expectedRevision: 9 }).catch((e) => e)).toMatchObject({ code: "stale_edit" });
+
+    // No change: no new revision. A change bumps it and audits. Retry bumps it too.
+    expect(await save({ ...input, id: created.id, expectedRevision: 1 })).toEqual({ id: created.id, revision: 1 });
+    expect(await save({ ...input, id: created.id, expectedRevision: 1, groupIds: [g1!, g2!] })).toEqual({ id: created.id, revision: 2 });
+    expect(db().audit.some((e) => e.action === "driver.updated" && e.targetId === created.id)).toBe(true);
+    await renderHook(() => demoApi.useRetryDriver()).result.current({ id: created.id });
+    expect(db().drivers.find((d) => d._id === created.id)!.revision).toBe(3);
+    expect(db().audit.some((e) => e.action === "driver.retried" && e.targetId === created.id)).toBe(true);
+    const exe = await save({ ...input, name: "Scanner two", kind: "exe", inf: undefined, silentArgs: ["/S"], successExitCodes: [3010, 0, 3010] });
+    expect((await ready(renderHook(() => demoApi.useDriverDetail(exe.id)).result)).data).toMatchObject({ kind: "exe", inf: null, silentArgs: ["/S"], successExitCodes: [3010] });
+
+    // Deleting a group takes it out of the drivers; delete removes the driver.
+    await renderHook(() => demoApi.useDeleteDriver()).result.current({ id: created.id });
+    expect(db().drivers.some((d) => d._id === created.id)).toBe(false);
+    expect(db().audit.some((e) => e.action === "driver.deleted" && e.targetId === created.id)).toBe(true);
+    expect(await renderHook(() => demoApi.useDeleteDriver()).result.current({ id: created.id }).catch((e) => e)).toMatchObject({ code: "not_found" });
+  }, 30_000);
+
+  it("drivers: a viewer reads but cannot write; at most 50 drivers", async () => {
+    resetDemo();
+    signInAs("auditor.with.a.really.long.mailbox.name@regional-compliance-office.demo.rulebox.test");
+    const input = { name: "X", kind: "msi" as const, deviceClass: "other" as const, url: "https://x.test/a.msi", sha256: "a".repeat(64), sizeBytes: 0, silentArgs: [], successExitCodes: [], provides: [], groupIds: [] };
+    expect(errorCodeOf(await renderHook(() => demoApi.useSaveDriver()).result.current(input).catch((e) => e))).toBe("forbidden");
+    expect(errorCodeOf(await renderHook(() => demoApi.useDeleteDriver()).result.current({ id: db().drivers[0]!._id }).catch((e) => e))).toBe("forbidden");
+    expect(errorCodeOf(await renderHook(() => demoApi.useRetryDriver()).result.current({ id: db().drivers[0]!._id }).catch((e) => e))).toBe("forbidden");
+    expect(errorCodeOf(await renderHook(() => demoApi.useSetApprovedPrinterDrivers()).result.current({ names: ["A"] }).catch((e) => e))).toBe("forbidden");
+    expect((await ready(renderHook(() => demoApi.useNetworks()).result)).data.drivers).toHaveLength(2);
+    signInAs("owner@demo.rulebox.test");
+    while (db().drivers.length < 50) db().drivers.push({ ...db().drivers[0]!, _id: `fill${db().drivers.length}`, name: `Fill ${db().drivers.length}`, groupIds: [] });
+    expect(await renderHook(() => demoApi.useSaveDriver()).result.current(input).catch((e) => e)).toMatchObject({ code: "too_large", detail: "drivers" });
+  });
+
+  it("approved printer drivers (Step 14b): the admin list is trimmed, deduplicated, without inbox names, at most 20; printers may then use a name", async () => {
+    resetDemo();
+    signInAs("owner@demo.rulebox.test");
+    const set = renderHook(() => demoApi.useSetApprovedPrinterDrivers()).result.current;
+    expect(await set({ names: [" HP Universal ", "hp universal", "Generic / Text Only", "Canon UFR II"] })).toEqual({ addedDrivers: ["HP Universal", "Canon UFR II"] });
+    expect(db().audit.some((e) => e.action === "printers.driversChanged")).toBe(true);
+    const net = (await ready(renderHook(() => demoApi.useNetworks()).result)).data;
+    expect(net.addedDrivers).toEqual(["HP Universal", "Canon UFR II"]);
+    expect(net.approvedDrivers).toContain("Canon UFR II");
+    const before = db().audit.length;
+    await set({ names: ["HP Universal", "Canon UFR II"] });
+    expect(db().audit.length).toBe(before);
+    expect(await set({ names: [" "] }).catch((e) => e)).toMatchObject({ field: "names", detail: "empty" });
+    expect(await set({ names: ["x".repeat(101)] }).catch((e) => e)).toMatchObject({ field: "names", detail: "length" });
+    expect(await set({ names: Array.from({ length: 21 }, (_, i) => `Driver ${i}`) }).catch((e) => e)).toMatchObject({ code: "too_large", detail: "names" });
+    const save = renderHook(() => demoApi.useSavePrinter()).result.current;
+    const ok = await save({ name: "Canon one", kind: "raw", address: "10.0.0.9", driver: "canon ufr ii", groupIds: [], defaultForGroupIds: [] });
+    expect(db().printers.find((p) => p._id === ok.id)!.driver).toBe("Canon UFR II");
+  });
   it("refuses writes from viewers (forbidden)", async () => {
     resetDemo();
     signInAs("auditor.with.a.really.long.mailbox.name@regional-compliance-office.demo.rulebox.test");

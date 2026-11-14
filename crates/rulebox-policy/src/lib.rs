@@ -35,7 +35,7 @@ pub mod roster;
 pub mod seal;
 
 use lockdown::{ConfigRef, LimitError, LockdownPolicy, UsbTempAllow};
-use network::{PrinterSpec, WifiProfile, MAX_PRINTERS, MAX_WIFI_PROFILES};
+use network::{DriverSpec, PrinterSpec, WifiProfile, MAX_DRIVERS, MAX_PRINTERS, MAX_WIFI_PROFILES};
 use notice::{Broadcast, DeviceLock, MAX_ACTIVE_BROADCASTS};
 
 /// (Phase 5 Step 1, plan 4.3) The agent-only keys that Phase 5 adds to the signed
@@ -56,6 +56,8 @@ pub struct AgentDoc {
     pub wifi: Vec<WifiProfile>,
     pub wifi_managed_only: bool,
     pub printers: Vec<PrinterSpec>,
+    /// (Step 14b) Driver packages pushed to the device, after `printers`.
+    pub drivers: Vec<DriverSpec>,
     pub device_lock: Option<DeviceLock>,
     pub usb_temp_allow: Option<UsbTempAllow>,
     pub broadcasts: Vec<Broadcast>,
@@ -84,6 +86,10 @@ impl AgentDoc {
             return Err(LimitError::TooManyPrinters);
         }
         self.printers.iter().try_for_each(PrinterSpec::check_limits)?;
+        if self.drivers.len() > MAX_DRIVERS {
+            return Err(LimitError::TooManyDrivers);
+        }
+        self.drivers.iter().try_for_each(DriverSpec::check_limits)?;
         if let Some(lock) = &self.device_lock {
             lock.check_limits()?;
         }

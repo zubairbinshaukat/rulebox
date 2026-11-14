@@ -1997,6 +1997,37 @@ app type beside `apps.ts`), dashboard Drivers form, `apps/agent/src/installs/`
 **Do NOT:** install drivers from Windows Update on demand, from a print
 server, or from a URL that is not in the signed manifest.
 
+**Built 2026-11-15 (SimPlatform / convex-test only, not committed).** Deviations
+and open points:
+
+- A driver is NOT a row of `apps`: it has its own table `drivers` (<= 50 per org),
+  assigned per group through the group configuration snapshot (10-group cap, like
+  printers) and sent in the signed document's new `drivers` key (after `printers`,
+  <= 20 per device). Reason: tiles, audiences, file handlers and employees of the
+  app catalogue are all wrong for a driver ("no tile" holds by construction).
+- Results use the existing install report channel: `appId` = the driver id, stored in
+  `driverResults`. New fixed details `unsigned_driver` and `bad_package`.
+  "Restart needed" = `installed` with exit code 3010/1641; the agent clears it (and
+  re-reports) after the next boot.
+- The engine (`installs/engine.rs`) runs drivers in the same task (`installs/drivers.rs`,
+  `unzip.rs`, `drivers_rules.rs`); `installs.json` gained `drivers`.
+- The admin types the zip's INF path and the model names the package provides
+  (`provides`); the server cannot read the zip. Hash and URL are pasted (no upload).
+- pnputil is allowed only as `/add-driver <inf under <data>\drivers> /install` and
+  `/delete-driver oemN.inf /uninstall` (`installer_command_allowed`). The catalog check
+  is `file_identity(cat).signer`. Removal only for INF packages Rulebox installed, only
+  while the `oemN.inf` file still has the recorded SHA-256; vendor exe/msi drivers are
+  never removed. Journal entry per package (`driver:<id>:<oemN.inf>`), so restore-all
+  removes them.
+- Owner decision 2a built: `networks:setApprovedPrinterDrivers` + "Approved printer
+  drivers" card (no re-snapshot needed: documents carry the name only). Delivered
+  names are offered in the printer picker.
+- UNVERIFIED until Step 21: real pnputil exit codes and whether every add makes a new
+  `oemN.inf`, WinVerifyTrust on a `.cat`, the zip reopened while locked.
+- Open: Step 20's reconciler must retry a printer whose delivered driver is installed
+  later (`driver_missing` today); the server does not check that the driver's groups
+  cover the printer's groups.
+
 ---
 
 ### Step 15 — Device lock and broadcasts

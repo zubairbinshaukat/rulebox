@@ -561,6 +561,7 @@ pub async fn run(
                 on_visible_change: Arc::new(move || session_for_installs.resync()),
                 install_timeout: INSTALL_TIMEOUT,
                 exe_wait: EXE_WAIT,
+                shared: Arc::clone(&shared),
             },
             install_policy_rx,
             snapshot_rx.clone(),

@@ -45,6 +45,7 @@ const BUDGET = {
       "Networks",
       "WifiEdit",
       "PrinterEdit",
+      "DriverEdit",
       "Enrollment",
       "Audit",
       "Settings",

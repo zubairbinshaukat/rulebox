@@ -193,6 +193,17 @@ impl DataPaths {
         self.root.join("icons")
     }
 
+    /// (Step 14b) Driver zips while they are extracted and installed: `<drivers>\work\<sha256>`. Inside the protected
+    /// data directory like `downloads`. Emptied after every run and at start-up.
+    pub fn drivers_dir(&self) -> PathBuf {
+        self.root.join("drivers")
+    }
+
+    /// (Step 14b) The extraction folder of one driver zip.
+    pub fn driver_work_dir(&self, sha256: &str) -> PathBuf {
+        self.drivers_dir().join("work").join(sha256)
+    }
+
     /// (Step 14) The MSI log of one app's last install or removal.
     pub fn install_log(&self, app_id: &str) -> PathBuf {
         self.logs_dir().join(format!("install-{app_id}.log"))

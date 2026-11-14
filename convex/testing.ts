@@ -361,6 +361,7 @@ function deviceChildren(ctx: MutationCtx, deviceId: Id<"devices">): Fetch[] {
     (n) => db.query("desiredBodies").withIndex("by_device_version", (q) => q.eq("deviceId", deviceId)).take(n),
     (n) => db.query("desiredVersions").withIndex("by_device_version", (q) => q.eq("deviceId", deviceId)).take(n),
     (n) => db.query("installResults").withIndex("by_device_updated", (q) => q.eq("deviceId", deviceId)).take(n),
+    (n) => db.query("driverResults").withIndex("by_device_driver", (q) => q.eq("deviceId", deviceId)).take(n),
     (n) => db.query("desiredStates").withIndex("by_device_version", (q) => q.eq("deviceId", deviceId)).take(n),
     (n) => db.query("desiredStates").withIndex("by_scope_version", (q) => q.eq("scope", scope)).take(n),
   ];
@@ -446,6 +447,7 @@ async function sweepOrg(ctx: MutationCtx, orgId: Id<"organizations">, b: Budget)
     (n) => db.query("rosterPending").withIndex("by_org", (q) => q.eq("orgId", orgId)).take(n),
     (n) => db.query("fileHandlers").withIndex("by_org_ext", (q) => q.eq("orgId", orgId)).take(n),
     (n) => db.query("apps").withIndex("by_org", (q) => q.eq("orgId", orgId)).take(n),
+    (n) => db.query("drivers").withIndex("by_org", (q) => q.eq("orgId", orgId)).take(n),
     (n) => db.query("enrollmentTokens").withIndex("by_org", (q) => q.eq("orgId", orgId)).take(n),
     (n) => db.query("invites").withIndex("by_org", (q) => q.eq("orgId", orgId)).take(n),
     (n) => db.query("publishQueue").withIndex("by_org", (q) => q.eq("orgId", orgId)).take(n),

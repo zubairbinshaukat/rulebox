@@ -71,6 +71,8 @@ pub const MUTATING_METHODS: &[&str] = &[
     // Phase 5 Step 14.
     "printer_port_add",
     "printer_port_delete",
+    // Phase 5 Step 14b.
+    "driver_package_delete",
     "printer_share_connect",
     "printer_share_disconnect",
     "bcd_set",
@@ -216,7 +218,7 @@ pub enum RegData {
 
 /// (Phase 4 Step 14) One installer run. `program` must be
 /// `%SystemRoot%\System32\msiexec.exe` or a file inside `<data>\downloads\`
-/// (`installs::installer_program_allowed`); anything else is refused before it
+/// (`installs::installer_command_allowed`: also `pnputil` with two fixed command lines, Step 14b); anything else is refused before it
 /// starts. `args` are passed one by one with the Windows quoting rules of
 /// `std::process::Command` (no shell is involved, so a quote or `&` in an argument
 /// is never a second command).
@@ -360,7 +362,10 @@ pub trait Platform: Send + Sync + 'static {
     fn printer_get_security(&self, name: &str) -> Result<Option<String>, PlatformError>;
     /// (Phase 5 Step 14) The names of the printer drivers in the driver store. Read-only: the agent never installs one.
     fn printer_drivers(&self) -> Result<Vec<String>, PlatformError>;
-    /// (Phase 5 Step 14) The names of the printer ports on this machine.
+    /// (Phase 5 Step 14b) The `oem<N>.inf` packages in the driver store (`%SystemRoot%\INF`), lower case, sorted. Read-only:
+    /// the install engine compares it before and after `pnputil /add-driver` to learn the name Windows gave a package.
+    fn driver_store_infs(&self) -> Result<Vec<String>, PlatformError>;
+    /// (Phase 5 Step 14b) The names of the printer ports on this machine.
     fn printer_ports(&self) -> Result<Vec<String>, PlatformError>;
     fn bcd_get(&self, object: &str, element: &str) -> Result<Option<String>, PlatformError>;
     /// Up to `max` events of an audit channel after `after_record_id`, oldest first.
@@ -434,6 +439,10 @@ pub trait Platform: Send + Sync + 'static {
     /// `<install>\apps\`; creates the parent folders; refuses reparse points.
     /// `InUse` when the old program is running.
     fn place_portable(&self, from: &Path, to: &Path) -> Result<(), PlatformError>;
+    /// (Phase 5 Step 14b) Deletes one package Rulebox published, `pnputil /delete-driver <oem<N>.inf> /uninstall`, through
+    /// the same job-object run as an installer. Only a name of the form `oem<N>.inf` is accepted (anything else is
+    /// `Refused` before the guard). `NotFound`: no such package. Blocking.
+    fn driver_package_delete(&self, published: &str) -> Result<(), PlatformError>;
     /// (Step 14) Deletes a portable app's folder, only below `<install>\apps\`;
     /// refuses reparse points. A folder that is not there is fine. `InUse` when the
     /// program is running.

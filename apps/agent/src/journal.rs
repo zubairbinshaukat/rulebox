@@ -48,6 +48,8 @@ pub enum JournalOwner {
     Wifi,
     Printer,
     Perf,
+    /// (Step 14b) A driver package Rulebox put into the driver store.
+    Driver,
 }
 
 #[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
@@ -80,6 +82,9 @@ pub enum JournalTarget {
     Printer { name: String },
     PrinterPort { name: String },
     PrinterSecurity { printer_key: String },
+    /// (Step 14b) A package `oem<N>.inf` Rulebox published into the driver store; restore deletes it, but only while
+    /// that file still has the SHA-256 recorded here (Windows reuses an `oem<N>.inf` name for another package).
+    DriverPackage { published: String, sha256: String },
     BcdElement { object: String, element: String },
     AccountLockoutPolicy,
     SafeBootEntry { mode: String },
@@ -382,6 +387,12 @@ pub fn printer_share_id(unc: &str) -> String {
     format!("{PRINTER_SHARE_PREFIX}{unc}")
 }
 
+/// (Step 14b) `driver:<driver id>:<oem<N>.inf>`.
+pub fn driver_id(driver_id: &str, published: &str) -> String {
+    format!("{DRIVER_ID_PREFIX}{driver_id}:{}", published.to_ascii_lowercase())
+}
+
+pub const DRIVER_ID_PREFIX: &str = "driver:";
 pub const PRINTER_QUEUE_PREFIX: &str = "printer:";
 pub const PRINTER_PORT_PREFIX: &str = "printer-port:";
 pub const PRINTER_SHARE_PREFIX: &str = "printer-share:";
@@ -703,6 +714,37 @@ fn original_of(
             OriginalValue::InSecrets
         }
         Some(RegData::String(text)) => OriginalValue::String(text.clone()),
+    })
+}
+
+/// (Step 14b) Writes down a driver package that is ALREADY in the driver store (the install engine ran `pnputil` itself, a
+/// long job that cannot go through [`change`]): an `Applied` entry whose original is "not present", so a restore deletes
+/// the package again (`Platform::driver_package_delete`, which only ever acts on `oem<N>.inf`). Written once per id.
+pub fn record_driver_package(
+    ctx: &JournalCtx<'_>,
+    driver_id_text: &str,
+    published: &str,
+    sha256: &str,
+    since_version: u64,
+) -> Result<(), JournalError> {
+    if !crate::installs::is_published_inf(published) {
+        return Err(JournalError::Platform(PlatformError::Refused("not a published driver name")));
+    }
+    let id = driver_id(driver_id_text, published);
+    let entry = JournalEntry {
+        id: id.clone(),
+        owner: JournalOwner::Driver,
+        target: JournalTarget::DriverPackage { published: published.to_ascii_lowercase(), sha256: sha256.to_string() },
+        original: OriginalValue::NotPresent,
+        phase: EntryPhase::Applied,
+        since_version,
+        recorded_at_ms: unix_ms(),
+        last_error: None,
+    };
+    persist(ctx, |state| {
+        if !state.journal.iter().any(|e| e.id == id) {
+            state.journal.push(entry);
+        }
     })
 }
 
@@ -1174,10 +1216,38 @@ fn write_original(ctx: &JournalCtx<'_>, entry: &JournalEntry) -> Result<(), Jour
             }
             _ => Err(JournalError::Platform(PlatformError::Refused("original does not fit a printer port"))),
         },
+        // (Step 14b) A package Rulebox published: deleted (a package that is already gone is fine).
+        JournalTarget::DriverPackage { published, sha256 } => match &entry.original {
+            OriginalValue::NotPresent | OriginalValue::Absent => driver_package_back(ctx, published, sha256),
+            _ => Err(JournalError::Platform(PlatformError::Refused("original does not fit a driver package"))),
+        },
         JournalTarget::Unknown(_) => Err(JournalError::UnknownTarget),
         // The layers of Steps 8 to 19 give the rest a restore; until then a journal that
         // holds one cannot be restored here.
         _ => Err(JournalError::Platform(PlatformError::Refused("no restore for this journal target yet"))),
+    }
+}
+
+/// (Step 14b) Deletes a package Rulebox published, but only the very file it published: not in the store any more, or a
+/// file with another SHA-256 (the name was reused by another package), is "already gone" and nothing is deleted.
+fn driver_package_back(ctx: &JournalCtx<'_>, published: &str, sha256: &str) -> Result<(), JournalError> {
+    if !ctx.platform.driver_store_infs()?.iter().any(|name| name.eq_ignore_ascii_case(published)) {
+        return Ok(());
+    }
+    let system_root = ctx.platform.path_roots()?.system_root;
+    let Some(system_root) = system_root else {
+        return Err(JournalError::Platform(PlatformError::Other("the Windows folder is not known".into())));
+    };
+    let file = std::path::Path::new(&system_root).join("INF").join(published);
+    match ctx.platform.file_sha256(&file, 64 * 1024 * 1024)? {
+        Some(now) if now.eq_ignore_ascii_case(sha256) => match ctx.platform.driver_package_delete(published) {
+            Ok(()) | Err(PlatformError::NotFound) => Ok(()),
+            Err(error) => Err(error.into()),
+        },
+        _ => {
+            tracing::info!("a driver package Rulebox published is gone or is not the same file any more; nothing is deleted");
+            Ok(())
+        }
     }
 }
 
@@ -1239,6 +1309,8 @@ pub fn startup_recover(ctx: &JournalCtx<'_>) -> StartupReport {
             (JournalTarget::Unknown(_), _) => report.unknown.push(entry.id.clone()),
             (_, EntryPhase::Restoring) => restoring.push(entry.id.clone()),
             (_, EntryPhase::Applied) => {}
+            // (Step 14b) Only ever written as `Applied`; one that is not is left exactly as it is, never deleted by a guess.
+            (JournalTarget::DriverPackage { .. }, EntryPhase::Pending) => {}
             (target, EntryPhase::Pending) => {
                 let untouched = match target {
                     JournalTarget::MachineValue(_)
