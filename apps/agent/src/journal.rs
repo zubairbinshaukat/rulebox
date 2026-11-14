@@ -25,6 +25,7 @@
 
 use serde::{Deserialize, Serialize};
 
+use crate::network::SecretText;
 use crate::platform::{AppLockerMechanism, LockoutPolicy, Platform, PlatformError, RegData, RegValueRef};
 use crate::state::{unix_ms, AgentState, SharedState};
 
@@ -314,6 +315,11 @@ pub enum Desired {
     ServiceStart(u32),
     /// (Step 7) The DACL of a print queue, as SDDL.
     PrinterSddl(String),
+    /// (Step 13) A Wi-Fi profile: the XML (with the passphrase inside, so a [`SecretText`]) and the
+    /// mark the agent keeps for it (`AgentState.wlan_marks`; never derived from the passphrase).
+    WlanProfile { xml: SecretText, mark: String },
+    /// (Step 13) The WLAN user permit list (managed networks only): the allowed SSIDs.
+    WlanFilters(Vec<String>),
 }
 
 /// (Step 7) What the agent state remembers about the AppLocker policy it installed: the hash of
@@ -351,6 +357,17 @@ pub fn printer_security_id(name: &str) -> String {
     format!("printer-sec:{name}")
 }
 
+/// `wlan:<profile name>` (the `WlanProfile` target; the name starts with `Rulebox-`).
+pub fn wlan_profile_id(name: &str) -> String {
+    format!("{WLAN_ID_PREFIX}{name}")
+}
+
+/// The id prefix of the Wi-Fi profile entries.
+pub const WLAN_ID_PREFIX: &str = "wlan:";
+/// The id of the WLAN permit-list entry (`wlan:filters`; no profile name can be `filters`, they
+/// all start with `Rulebox-`).
+pub const WLAN_FILTERS_ID: &str = "wlan:filters";
+
 /// The default value of the agent's Safe Mode key (plan 4.16).
 pub const SAFE_BOOT_VALUE: &str = "Service";
 
@@ -369,6 +386,11 @@ enum Value {
     Service(Option<u32>),
     /// (Step 7) A print queue's DACL; None when there is no such queue.
     Sddl(Option<String>),
+    /// (Step 13) A Wi-Fi profile: None when there is none of that name, else the mark of what the
+    /// agent installed (`unmanaged` when the profile is there but the agent has no mark for it).
+    Wlan(Option<String>),
+    /// (Step 13) The WLAN user permit list.
+    WlanFilters(Vec<String>),
 }
 
 impl Change {
@@ -491,6 +513,33 @@ impl Change {
         }
     }
 
+    /// (Step 13) A Wi-Fi profile `name` (`Rulebox-<id>`), id `wlan:<name>`. The original is always
+    /// "not present": the name is Rulebox's, so restore deletes the profile.
+    pub fn wlan_profile(name: &str, xml: SecretText, mark: &str) -> Self {
+        Self {
+            id: wlan_profile_id(name),
+            owner: JournalOwner::Wifi,
+            target: JournalTarget::WlanProfile { name: name.to_string() },
+            desired: Desired::WlanProfile { xml, mark: mark.to_string() },
+            since_version: 0,
+            always_record: false,
+            secret_original: false,
+        }
+    }
+
+    /// (Step 13) The WLAN user permit list, id `wlan:filters`.
+    pub fn wlan_filters(ssids: Vec<String>) -> Self {
+        Self {
+            id: WLAN_FILTERS_ID.to_string(),
+            owner: JournalOwner::Wifi,
+            target: JournalTarget::WlanFilters,
+            desired: Desired::WlanFilters(ssids),
+            since_version: 0,
+            always_record: false,
+            secret_original: false,
+        }
+    }
+
     pub fn since(mut self, version: u64) -> Self {
         self.since_version = version;
         self
@@ -561,6 +610,10 @@ fn original_of(
         Value::Service(None) => return Err(JournalError::Platform(PlatformError::NotFound)),
         Value::Sddl(Some(sddl)) => return Ok(OriginalValue::Sddl(sddl.clone())),
         Value::Sddl(None) => return Err(JournalError::Platform(PlatformError::NotFound)),
+        // (Step 13) A Rulebox-named profile is Rulebox's: whatever is there now, restore removes it.
+        Value::Wlan(_) => return Ok(OriginalValue::NotPresent),
+        Value::WlanFilters(list) if list.is_empty() => return Ok(OriginalValue::NotPresent),
+        Value::WlanFilters(list) => return Ok(OriginalValue::MultiString(list.clone())),
     };
     Ok(match current {
         // A Safe Mode key that was not there is restored by deleting the key.
@@ -598,6 +651,8 @@ pub fn change(ctx: &JournalCtx<'_>, change: &Change) -> Result<ChangeOutcome, Jo
         (JournalTarget::AppLockerPolicy, Desired::AppLocker { hash, .. }) => Value::AppLocker(Some(hash.clone())),
         (JournalTarget::ServiceStart { .. }, Desired::ServiceStart(start)) => Value::Service(Some(*start)),
         (JournalTarget::PrinterSecurity { .. }, Desired::PrinterSddl(sddl)) => Value::Sddl(Some(sddl.clone())),
+        (JournalTarget::WlanProfile { .. }, Desired::WlanProfile { mark, .. }) => Value::Wlan(Some(mark.clone())),
+        (JournalTarget::WlanFilters, Desired::WlanFilters(list)) => Value::WlanFilters(list.clone()),
         _ => return Err(JournalError::Platform(PlatformError::Refused("unsupported journal target"))),
     };
     let current = read_current(ctx, &change.target)?;
@@ -644,6 +699,12 @@ pub fn change(ctx: &JournalCtx<'_>, change: &Change) -> Result<ChangeOutcome, Jo
                 ctx.platform.set_applocker_policy(xml, *mechanism)?;
                 let mark = AppLockerMark { hash: hash.clone(), mechanism: mechanism_word(*mechanism).to_string() };
                 persist(ctx, |state| state.applocker = Some(mark))?;
+            }
+            (JournalTarget::WlanProfile { name }, Desired::WlanProfile { xml, mark }) => {
+                ctx.platform.wlan_set_profile(xml.expose())?;
+                persist(ctx, |state| {
+                    state.wlan_marks.insert(name.clone(), mark.clone());
+                })?;
             }
             _ => write_value(ctx, &change.target, &desired)?,
         }
@@ -717,6 +778,18 @@ fn read_current(ctx: &JournalCtx<'_>, target: &JournalTarget) -> Result<Value, J
         }
         JournalTarget::ServiceStart { name } => Ok(Value::Service(ctx.platform.query_service(name)?.map(|svc| svc.start))),
         JournalTarget::PrinterSecurity { printer_key } => Ok(Value::Sddl(ctx.platform.printer_get_security(printer_key)?)),
+        JournalTarget::WlanProfile { name } => {
+            let present = ctx.platform.wlan_list()?.profiles.iter().any(|profile| profile == name);
+            Ok(Value::Wlan(present.then(|| {
+                ctx.shared.read(|state| state.wlan_marks.get(name).cloned()).unwrap_or_else(|| "unmanaged".to_string())
+            })))
+        }
+        JournalTarget::WlanFilters => {
+            // Sorted: the permit list is a set, and Windows may hand it back in another order.
+            let mut list = ctx.platform.wlan_list()?.allowed_ssids;
+            list.sort();
+            Ok(Value::WlanFilters(list))
+        }
         _ => Err(JournalError::Platform(PlatformError::Refused("unsupported journal target"))),
     }
 }
@@ -743,6 +816,10 @@ fn write_value(ctx: &JournalCtx<'_>, target: &JournalTarget, value: &Value) -> R
         (JournalTarget::ServiceStart { name }, Value::Service(Some(start))) => Ok(ctx.platform.set_service_start(name, *start)?),
         (JournalTarget::PrinterSecurity { printer_key }, Value::Sddl(Some(sddl))) => {
             Ok(ctx.platform.printer_set_security(printer_key, sddl)?)
+        }
+        (JournalTarget::WlanFilters, Value::WlanFilters(list)) => {
+            let refs: Vec<&str> = list.iter().map(String::as_str).collect();
+            Ok(ctx.platform.wlan_set_filters(&refs)?)
         }
         _ => Err(JournalError::Platform(PlatformError::Refused("unsupported journal target"))),
     }
@@ -938,6 +1015,26 @@ fn write_original(ctx: &JournalCtx<'_>, entry: &JournalEntry) -> Result<(), Jour
             },
             _ => Err(JournalError::Platform(PlatformError::Refused("original does not fit a print queue's DACL"))),
         },
+        // (Step 13) A Wi-Fi profile that Rulebox added is deleted (one that is already gone is fine),
+        // and its mark forgotten.
+        JournalTarget::WlanProfile { name } => match &entry.original {
+            OriginalValue::NotPresent | OriginalValue::Absent => {
+                ctx.platform.wlan_delete_profile(name)?;
+                persist(ctx, |state| {
+                    state.wlan_marks.remove(name);
+                })
+            }
+            _ => Err(JournalError::Platform(PlatformError::Refused("original does not fit a Wi-Fi profile"))),
+        },
+        // (Step 13) The permit list goes back to what it was (none: removed).
+        JournalTarget::WlanFilters => match &entry.original {
+            OriginalValue::NotPresent | OriginalValue::Absent => Ok(ctx.platform.wlan_set_filters(&[])?),
+            OriginalValue::MultiString(list) => {
+                let refs: Vec<&str> = list.iter().map(String::as_str).collect();
+                Ok(ctx.platform.wlan_set_filters(&refs)?)
+            }
+            _ => Err(JournalError::Platform(PlatformError::Refused("original does not fit the WLAN permit list"))),
+        },
         JournalTarget::Unknown(_) => Err(JournalError::UnknownTarget),
         // The layers of Steps 8 to 19 give the rest a restore; until then a journal that
         // holds one cannot be restored here.
@@ -1004,7 +1101,9 @@ pub fn startup_recover(ctx: &JournalCtx<'_>) -> StartupReport {
                     | JournalTarget::SafeBootEntry { .. }
                     | JournalTarget::AccountLockoutPolicy
                     | JournalTarget::BcdElement { .. }
-                    | JournalTarget::CiPolicy { .. } => {
+                    | JournalTarget::CiPolicy { .. }
+                    | JournalTarget::WlanProfile { .. }
+                    | JournalTarget::WlanFilters => {
                         match read_current(ctx, target) {
                             Ok(current) => original_matches(ctx, &current, &entry.original),
                             // Cannot compare: keep it as it is and look again at the next start.
@@ -1042,6 +1141,9 @@ fn original_matches(ctx: &JournalCtx<'_>, current: &Value, original: &OriginalVa
         }
         (Value::Bcd(now), OriginalValue::BcdValue(was)) => return now == was,
         (Value::Ci(now), OriginalValue::NotPresent | OriginalValue::Absent) => return now.is_none(),
+        (Value::Wlan(now), OriginalValue::NotPresent | OriginalValue::Absent) => return now.is_none(),
+        (Value::WlanFilters(now), OriginalValue::NotPresent | OriginalValue::Absent) => return now.is_empty(),
+        (Value::WlanFilters(now), OriginalValue::MultiString(was)) => return now == was,
         (Value::Reg(current), _) => current,
         _ => return false,
     };

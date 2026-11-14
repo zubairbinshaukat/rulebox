@@ -12,6 +12,9 @@ import WidgetLinear from "~icons/solar/widget-2-linear";
 import WidgetDuo from "~icons/solar/widget-2-bold-duotone";
 import DocLinear from "~icons/solar/document-text-linear";
 import DocDuo from "~icons/solar/document-text-bold-duotone";
+// The router icon: its linear form is already in the shell's icon chunk (Overview), so only the active form is new.
+import WifiLinear from "~icons/solar/wi-fi-router-minimalistic-linear";
+import WifiDuo from "~icons/solar/wi-fi-router-minimalistic-bold-duotone";
 import AddLinear from "~icons/solar/add-square-linear";
 import AddDuo from "~icons/solar/add-square-bold-duotone";
 import HistoryLinear from "~icons/solar/history-linear";
@@ -39,6 +42,7 @@ const NAV_SECTIONS: { label: string; items: NavItem[] }[] = [
       { to: "/", label: n.overview, icon: HomeLinear, activeIcon: HomeDuo, end: true },
       { to: "/devices", label: n.devices, icon: MonitorLinear, activeIcon: MonitorDuo },
       { to: "/groups", label: n.groups, icon: LayersLinear, activeIcon: LayersDuo },
+      { to: "/networks", label: n.networks, icon: WifiLinear, activeIcon: WifiDuo },
       { to: "/enrollment", label: n.enrollment, icon: AddLinear, activeIcon: AddDuo },
     ],
   },

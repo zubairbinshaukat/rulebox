@@ -200,6 +200,82 @@ describe("demo data layer", () => {
     expect(errorCodeOf(await save({ appId: pos._id, expectedRevision: before + 1, permissions: { ...next, camera: true } }).catch((e) => e))).toBe("forbidden");
   });
 
+  it("Wi-Fi networks (Step 13): create, edit, set a password, delete; the password is never kept; the rules follow the server", async () => {
+    resetDemo();
+    signInAs("owner@demo.rulebox.test");
+    const list = renderHook(() => demoApi.useNetworks());
+    const first = (await ready(list.result)).data.wifi;
+    expect(first.map((w) => w.name)).toEqual(["Back office (hidden)", "Shop floor", "Training room"]);
+    // No row, whatever its security, carries more than the fact that a password is set.
+    expect(JSON.stringify(first)).not.toMatch(/passphrase"?:\s*"/i);
+
+    const save = renderHook(() => demoApi.useSaveWifi()).result.current;
+    const setPassphrase = renderHook(() => demoApi.useSetWifiPassphrase()).result.current;
+    const groupId = db().groups[0]!._id;
+    const input = { name: "Guest", ssid: "Café-Gäste", hidden: false, security: "wpa2Personal" as const, autoConnect: true, groupIds: [groupId] };
+    const created = await save(input);
+    expect(created.revision).toBe(1);
+    expect(db().audit.some((e) => e.action === "wifi.created" && e.targetId === created.id)).toBe(true);
+    const detail = renderHook(() => demoApi.useWifiDetail(created.id));
+    expect((await ready(detail.result)).data).toMatchObject({ hasPassphrase: false, passphraseSetAt: null, groupIds: [groupId], groupCount: 1 });
+
+    // Rules: 32 BYTES of SSID (not characters), control characters, groups, stale edits.
+    expect(await save({ ...input, ssid: "é".repeat(17) }).catch((e) => e)).toMatchObject({ code: "invalid_argument", field: "ssid" });
+    expect(await save({ ...input, ssid: "a\nb" }).catch((e) => e)).toMatchObject({ code: "invalid_argument", field: "ssid" });
+    expect(await save({ ...input, name: "  " }).catch((e) => e)).toMatchObject({ code: "invalid_argument", field: "name" });
+    expect(await save({ ...input, groupIds: ["nope"] }).catch((e) => e)).toMatchObject({ code: "not_found" });
+    expect(await save({ ...input, id: created.id, expectedRevision: 9 }).catch((e) => e)).toMatchObject({ code: "stale_edit" });
+    const eleven = db().groups.slice(0, 11).map((g) => g._id);
+    expect(eleven).toHaveLength(11);
+    expect(await save({ ...input, groupIds: eleven }).catch((e) => e)).toMatchObject({ code: "too_large", detail: "groups" });
+    const ten = await save({ ...input, name: "Ten", groupIds: eleven.slice(0, 10) });
+    expect(ten).toMatchObject({ revision: 1 });
+    // The groups a save TOUCHES are the ones the network is in now plus the picked ones: swapping one of ten for another is 11.
+    expect(await save({ ...input, id: ten.id, expectedRevision: 1, name: "Ten", groupIds: [...eleven.slice(1, 11)] }).catch((e) => e)).toMatchObject({ code: "too_large", detail: "groups" });
+    expect(await save({ ...input, id: ten.id, expectedRevision: 1, name: "Ten", groupIds: eleven.slice(0, 10) })).toEqual({ id: ten.id, revision: 1 }); // nothing changed: allowed
+
+    // No change: no new revision. A change bumps it and audits.
+    expect(await save({ ...input, id: created.id, expectedRevision: 1 })).toEqual({ id: created.id, revision: 1 });
+    expect(await save({ ...input, id: created.id, expectedRevision: 1, hidden: true })).toEqual({ id: created.id, revision: 2 });
+    expect(db().audit.some((e) => e.action === "wifi.updated" && e.targetId === created.id)).toBe(true);
+
+    // The password: validated, stored as a fact only, the revision moves, the audit row says nothing about the text.
+    expect(await setPassphrase({ id: created.id, passphrase: "short", expectedRevision: 2 }).catch((e) => e)).toMatchObject({ code: "invalid_argument", field: "passphrase", detail: "length" });
+    expect(await setPassphrase({ id: created.id, passphrase: "pässwörd-123", expectedRevision: 2 }).catch((e) => e)).toMatchObject({ field: "passphrase", detail: "characters" });
+    const secret = "correct horse battery";
+    expect(await setPassphrase({ id: created.id, passphrase: secret, expectedRevision: 2 })).toEqual({ revision: 3 });
+    expect(await setPassphrase({ id: created.id, passphrase: "a".repeat(64), expectedRevision: 3 })).toEqual({ revision: 4 });
+    expect(await setPassphrase({ id: created.id, passphrase: secret, expectedRevision: 3 }).catch((e) => e)).toMatchObject({ code: "stale_edit" });
+    const row = db().wifi.find((w) => w._id === created.id)!;
+    expect(row.hasPassphrase).toBe(true);
+    expect(JSON.stringify(row)).not.toContain(secret);
+    expect(JSON.stringify(db().audit)).not.toContain(secret);
+    const openId = (await save({ ...input, name: "Open", security: "open" as const })).id;
+    expect(await setPassphrase({ id: openId, passphrase: secret, expectedRevision: 1 }).catch((e) => e)).toMatchObject({ code: "invalid_argument", field: "id", detail: "open" });
+
+    // Counts follow the assigned groups; delete removes the profile and its group chips.
+    const counts = (await ready(renderHook(() => demoApi.useWifiDetail(created.id)).result)).data.counts;
+    expect(counts.applied + counts.failed + counts.waiting + counts.unsupported).toBe(counts.sampled);
+    await renderHook(() => demoApi.useDeleteWifi()).result.current({ id: created.id });
+    expect(db().wifi.some((w) => w._id === created.id)).toBe(false);
+    expect(db().audit.some((e) => e.action === "wifi.deleted" && e.targetId === created.id)).toBe(true);
+    expect(await renderHook(() => demoApi.useDeleteWifi()).result.current({ id: created.id }).catch((e) => e)).toMatchObject({ code: "not_found" });
+    // Every demo write waits ~300 ms like a network call: this test makes about twenty.
+  }, 30_000);
+
+  it("Wi-Fi networks: a viewer reads but cannot write; at most 50 networks", async () => {
+    resetDemo();
+    signInAs("auditor.with.a.really.long.mailbox.name@regional-compliance-office.demo.rulebox.test");
+    const input = { name: "X", ssid: "X", hidden: false, security: "open" as const, autoConnect: true, groupIds: [] };
+    expect(errorCodeOf(await renderHook(() => demoApi.useSaveWifi()).result.current(input).catch((e) => e))).toBe("forbidden");
+    expect(errorCodeOf(await renderHook(() => demoApi.useSetWifiPassphrase()).result.current({ id: db().wifi[0]!._id, passphrase: "correct horse", expectedRevision: 1 }).catch((e) => e))).toBe("forbidden");
+    expect((await ready(renderHook(() => demoApi.useNetworks()).result)).data.wifi).toHaveLength(3);
+    signInAs("owner@demo.rulebox.test");
+    const save = renderHook(() => demoApi.useSaveWifi()).result.current;
+    while (db().wifi.length < 50) db().wifi.push({ ...db().wifi[0]!, _id: `fill${db().wifi.length}`, groupIds: [] });
+    expect(await save(input).catch((e) => e)).toMatchObject({ code: "too_large", detail: "wifi" });
+  });
+
   it("refuses writes from viewers (forbidden)", async () => {
     resetDemo();
     signInAs("auditor.with.a.really.long.mailbox.name@regional-compliance-office.demo.rulebox.test");

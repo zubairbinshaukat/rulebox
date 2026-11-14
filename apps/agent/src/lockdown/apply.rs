@@ -92,6 +92,12 @@ pub struct ApplyOutcome {
     pub layers: LayerStates,
     /// The layers that ran, in the order they ran.
     pub ran: Vec<Layer>,
+    /// (Step 13) One state per Wi-Fi profile of the document (`applied | waiting_for_key | failed |
+    /// unsupported`), for the apply report.
+    pub wifi: Vec<WifiItemState>,
+    /// (Step 13) A fixed code when the "managed networks only" permit list could not be set or
+    /// restored; the apply report has no field for it yet (open question, Step 20).
+    pub wifi_filters_error: Option<&'static str>,
 }
 
 /// Step 2 of the transaction: the invariants of 4.6. A refusal writes nothing. The layers
@@ -115,6 +121,11 @@ fn run_layer(ctx: &ApplyCtx<'_>, doc: &AgentDoc, layer: Layer) -> LayerState {
         Layer::AppLocker => applocker::apply(ctx, doc),
         _ => LayerState::off_ok(),
     }
+}
+
+/// (Step 13) The Wi-Fi layer reports through the apply report's `wifi` items, not a layer state.
+fn run_wifi(ctx: &ApplyCtx<'_>, doc: &AgentDoc) -> crate::network::wifi::WifiOutcome {
+    crate::network::wifi::apply(ctx, doc)
 }
 
 /// The state of an apply report for these layers (plan 4.2 `deviceApplyReports.state`): `failed`
@@ -157,7 +168,11 @@ impl ApplyOutcome {
             state: state_of(&self.layers),
             refusal: None,
             layers: self.layers.clone(),
-            wifi: extras.wifi.into_iter().take(MAX_ITEM_STATES).collect(),
+            // The extras win when the caller has its own (the last-known-good path); else what this apply did.
+            wifi: if extras.wifi.is_empty() { self.wifi.clone() } else { extras.wifi }
+                .into_iter()
+                .take(MAX_ITEM_STATES)
+                .collect(),
             printers: extras.printers.into_iter().take(MAX_ITEM_STATES).collect(),
             lkg_version: extras.lkg_version,
             capabilities: extras.capabilities,
@@ -209,7 +224,11 @@ pub fn apply(ctx: &ApplyCtx<'_>, doc: &AgentDoc) -> Result<ApplyOutcome, ApplyRe
 
     let mut layers = LayerStates::all_off();
     let mut ran = Vec::with_capacity(APPLY_ORDER.len());
+    let mut wifi = crate::network::wifi::WifiOutcome::default();
     for layer in APPLY_ORDER {
+        if layer == Layer::Wifi {
+            wifi = run_wifi(ctx, doc);
+        }
         let state = run_layer(ctx, doc, layer);
         ran.push(layer);
         match layer {
@@ -224,7 +243,7 @@ pub fn apply(ctx: &ApplyCtx<'_>, doc: &AgentDoc) -> Result<ApplyOutcome, ApplyRe
             Layer::Wifi | Layer::Printers => {}
         }
     }
-    Ok(ApplyOutcome { layers, ran })
+    Ok(ApplyOutcome { layers, ran, wifi: wifi.items, wifi_filters_error: wifi.filters_error })
 }
 
 #[cfg(test)]

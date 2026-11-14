@@ -42,6 +42,8 @@ export type Fixture = {
   desktopAppId: Id<"apps">;
   assignmentId: Id<"appAssignments">;
   handlerId: Id<"fileHandlers">;
+  /** A WPA2 Wi-Fi profile ("Acme-Staff", revision 1, no passphrase) assigned to `groupId`. */
+  wifiId: Id<"wifiProfiles">;
   /** An enabled employee in no group. */
   employeeId: Id<"employees">;
   /** The device's stored secret hashes (current and previous). */
@@ -114,6 +116,19 @@ export async function fixture(given?: T): Promise<Fixture> {
     const handlerId = await ctx.db.insert("fileHandlers", { orgId, extension: ".txt", appId: desktopAppId });
     return { appId, desktopAppId, assignmentId, handlerId };
   });
+  const wifiId = await t.run((ctx) =>
+    ctx.db.insert("wifiProfiles", {
+      orgId,
+      name: "Acme staff",
+      ssid: "Acme-Staff",
+      hidden: false,
+      security: "wpa2Personal",
+      autoConnect: true,
+      groupIds: [groupId],
+      revision: 1,
+      createdAt: Date.now(),
+    }),
+  );
   const employeeId = await t.run((ctx) =>
     ctx.db.insert("employees", {
       orgId,
@@ -156,6 +171,7 @@ export async function fixture(given?: T): Promise<Fixture> {
     desktopAppId,
     assignmentId,
     handlerId,
+    wifiId,
     employeeId,
     storedHashes,
     accessor: {
@@ -603,6 +619,39 @@ export const ROWS: Row[] = [
     // The app's own permissions again: no write, every allowed caller gets the same answer.
     call: (a, f) => a.mutation(api.apps.setPermissions, { appId: f.appId, expectedRevision: 0, permissions: DEFAULT_WEB_PERMISSIONS }),
     expect: { ...ADMIN_UNLOCKED, foreign: "not_found" },
+  },
+  // Phase 5 Step 13: Wi-Fi profiles. Writes are the profile as it is (no change), a too-short passphrase, and a fresh profile each call.
+  { name: "networks:list", call: (a) => a.query(api.networks.list, {}), expect: { ...VIEWER, foreign: "ok" } },
+  { name: "networks:wifiDetail", call: (a, f) => a.query(api.networks.wifiDetail, { id: f.wifiId }), expect: { ...VIEWER, foreign: "not_found" } },
+  {
+    name: "networks:saveWifi",
+    call: (a, f) =>
+      a.mutation(api.networks.saveWifi, {
+        id: f.wifiId,
+        expectedRevision: 1,
+        name: "Acme staff",
+        ssid: "Acme-Staff",
+        hidden: false,
+        security: "wpa2Personal",
+        autoConnect: true,
+        groupIds: [f.groupId],
+      }),
+    expect: { ...ADMIN_UNLOCKED, foreign: "not_found" },
+  },
+  {
+    name: "networks:deleteWifi",
+    call: async (a, f) => {
+      const id = await f.t.run((ctx) =>
+        ctx.db.insert("wifiProfiles", { orgId: f.orgId, name: "Spare", ssid: "Spare", hidden: false, security: "open", autoConnect: true, groupIds: [], revision: 1, createdAt: Date.now() }),
+      );
+      return a.mutation(api.networks.deleteWifi, { id });
+    },
+    expect: { ...ADMIN_UNLOCKED, foreign: "not_found" },
+  },
+  {
+    name: "wifi:setPassphrase",
+    call: (a, f) => a.action(api.wifi.setPassphrase, { id: f.wifiId, passphrase: "short", expectedRevision: 1 }),
+    expect: { ...ADMIN_UNLOCKED, default: "invalid_argument", foreign: "not_found" },
   },
   {
     name: "apps:setArchived",

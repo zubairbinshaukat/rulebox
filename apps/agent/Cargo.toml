@@ -17,6 +17,9 @@ bytes.workspace = true
 clap.workspace = true
 convex.workspace = true
 getrandom.workspace = true
+# (Phase 5 Step 13) The device sealing key (X25519) and zeroized passphrase buffers.
+x25519-dalek.workspace = true
+zeroize.workspace = true
 # (Phase 4 Step 14) Installer and icon downloads, `https://` only.
 reqwest.workspace = true
 sha2.workspace = true
@@ -42,6 +45,10 @@ tokio-util = { workspace = true, features = ["codec"] }
 futures-util = { workspace = true, features = ["sink"] }
 # (Phase 4 Step 9) Signs test documents like the server does.
 ed25519-dalek.workspace = true
+# (Phase 5 Step 13) Seals test passphrases for the Wi-Fi tests the way the server does.
+hkdf.workspace = true
+chacha20poly1305.workspace = true
 
 [lints]
 workspace = true
+

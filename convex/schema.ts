@@ -953,6 +953,11 @@ export default defineSchema({
     security: wifiSecurity,
     autoConnect: v.boolean(),
     passphrase: v.optional(atRestBox),
+    // Step 13 (deviation from plan 4.18): the profile revision the at-rest box was encrypted under (its AAD). Any
+    // edit of the profile bumps `revision`, but a mutation cannot re-encrypt, so the AAD keeps this value.
+    // Missing = `revision`. `passphraseSetAt`: when the passphrase was set (the form shows "set on 12 Oct").
+    passphraseRev: v.optional(v.number()),
+    passphraseSetAt: v.optional(v.number()),
     groupIds: v.array(v.id("groups")), // <= 100
     revision: v.number(),
     createdAt: v.number(),

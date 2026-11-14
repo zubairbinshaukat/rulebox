@@ -506,6 +506,26 @@ export const IO_BUDGETS: Record<string, IoBudget> = {
   "keys:storeRewrapped": { maxReads: 50, maxReadBytes: 20_000, maxWrites: 50 + 50, maxWriteBytes: 30_000 },
   // rewrapBatch + storeRewrapped, then at most one rescheduled run.
   "keys:rewrapAll": { maxReads: 100, maxReadBytes: 40_000, maxWrites: 100, maxWriteBytes: 30_000 },
+  // ---- Phase 5 Step 13: Wi-Fi profiles (plan 4.15, 4.20). UNSURE: the worst cases below are not measured (the matrix calls are
+  // the no-change / refused cases); a snapshot of one group reads up to ~570 documents (see `apps:setPermissions`).
+  // wrapper (4) + <= 51 profiles + the names of <= 10 groups each (a per-query cache, so <= the organization's groups; 10 x 50 at worst).
+  "networks:list": { maxReads: 4 + 51 + 10 * 50, maxReadBytes: 150_000, maxWrites: 0, maxWriteBytes: 0 },
+  // wrapper (4) + the profile + <= 10 group names + <= 10 groups x (200 + 1) apply reports (~1-3 KB each; a report only changes when
+  // a PC's state does). The dashboard screen subscribes to it: that is why the sample is capped.
+  "networks:wifiDetail": { maxReads: 4 + 1 + 10 + 10 * 201, maxReadBytes: 6_500_000, maxWrites: 0, maxWriteBytes: 0 },
+  // wrapper (4) + profile + <= 100 group checks + the count of profiles (50) + 10 existence checks + 10 snapshots (~570 each). Writes: profile,
+  // audit, per group <= 13 (version, rollout, pruned versions, queue). The boxes of a profile that becomes open go in `networks:purgeSealed`.
+  "networks:saveWifi": { maxReads: 4 + 1 + 100 + 50 + 10 + 10 * 570 + 1, maxReadBytes: 2_500_000, maxWrites: 1 + 1 + 10 * 13 + 3, maxWriteBytes: 2_700_000 },
+  // wrapper (4) + profile + <= 10 snapshots; writes: profile, audit, per group <= 13; boxes: `networks:purgeSealed`.
+  "networks:deleteWifi": { maxReads: 4 + 1 + 10 + 10 * 570 + 1, maxReadBytes: 2_500_000, maxWrites: 1 + 1 + 10 * 13 + 3, maxWriteBytes: 2_700_000 },
+  // one batch of boxes (SEALED_PURGE_BATCH = 100): reads and deletes.
+  "networks:purgeSealed": { maxReads: 100, maxReadBytes: 60_000, maxWrites: 100, maxWriteBytes: 60_000 },
+  // authorize (4) + `wifi:target` (profile + sealing key) + `wifi:storePassphrase` + the limiter row; no database read happens for the
+  // passphrase itself (an action).
+  "wifi:setPassphrase": { maxReads: 4 + 2 + 1 + 1 + 10 + 10 * 570 + 2, maxReadBytes: 2_500_000, maxWrites: 1 + 1 + 10 * 13 + 3, maxWriteBytes: 2_700_000 },
+  "wifi:target": { maxReads: 2, maxReadBytes: 4_096, maxWrites: 0, maxWriteBytes: 0 },
+  // profile, <= 10 group checks and snapshots; writes: profile, audit, per group <= 13.
+  "wifi:storePassphrase": { maxReads: 1 + 10 + 10 * 570 + 1, maxReadBytes: 2_500_000, maxWrites: 1 + 1 + 10 * 13 + 3, maxWriteBytes: 2_700_000 },
   // Wi-Fi sealing (4.18): SEAL_DEVICES_PER_RUN = 25 devices per run, each with <= MAX_DEVICE_WIFI = 20 assigned profiles.
   // jobs: the sealing key, <= 51 profiles, per device the device + one sealed-box lookup per assigned profile
   // (typical: 1-3 profiles a group, so ~75-100 reads; the cap is 25 x 21).

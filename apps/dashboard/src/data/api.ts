@@ -20,6 +20,7 @@ import type {
   InstallCounts,
   KeysScreen,
   MeResult,
+  NetworksScreen,
   OrgSettings,
   OverviewScreen,
   PlanScreen,
@@ -30,6 +31,8 @@ import type {
   WebAppInput,
   WebMeta,
   WebPermissions,
+  WifiDetail,
+  WifiInput,
   WingetResolved,
 } from "./types";
 import type { ListQuery, ServerList } from "./serverList";
@@ -136,6 +139,21 @@ export interface DataApi {
   useFetchWebMeta: Mutation<{ url: string }, WebMeta>;
   /** `apps:saveIcon`: stores the PNG `useFetchWebMeta` previewed (its `data:` URL), after the app is saved. */
   useSaveAppIcon: Mutation<{ appId: Id; png: string }>;
+
+  // ---- networks (Phase 5 Step 13). Wi-Fi only; printers join in Step 14.
+  /** `networks:list` (viewer): one subscription, no passphrase and no per-device counts. */
+  useNetworks: () => QueryState<NetworksScreen>;
+  /** `networks:wifiDetail` (viewer) with the apply counts, computed on demand. A NEW network has no detail: its screen builds the blank form itself. */
+  useWifiDetail: (id: Id) => QueryState<WifiDetail>;
+  /** `networks:saveWifi` (admin): create, or update with `expectedRevision`. Resolves to the id and the revision to send next. */
+  useSaveWifi: Mutation<WifiInput, { id: Id; revision: number }>;
+  /** `networks:deleteWifi` (admin): the profile leaves every PC's document and the PCs remove it. */
+  useDeleteWifi: Mutation<{ id: Id }>;
+  /**
+   * `wifi:setPassphrase` (admin ACTION: encrypted on the server). The passphrase goes in the call and nowhere else; no query or
+   * answer ever returns it. Resolves to the revision to send next.
+   */
+  useSetWifiPassphrase: Mutation<{ id: Id; passphrase: string; expectedRevision: number }, { revision: number }>;
 
   // ---- file types
   // (the rules table, `useFileTypesPage`, is in the apps seam, `./apps`; the program picker is `useAppOptions`)

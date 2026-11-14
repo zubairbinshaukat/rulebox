@@ -25,6 +25,8 @@ use crate::lockdown::LayerStates;
 pub const FN_REPORT_APPLY: &str = "deviceApi:reportApply";
 pub const FN_REPORT_FINDINGS: &str = "deviceApi:reportFindings";
 pub const FN_REPORT_SECURITY_DAILY: &str = "deviceApi:reportSecurityDaily";
+/// (Step 13) The device's X25519 sealing key, sent once per key (`network::sealkey`).
+pub const FN_REGISTER_SEAL_KEY: &str = "deviceApi:registerSealKey";
 
 /// At most this many fingerprints in one `reportFindings` call (plan 4.19).
 pub const MAX_FINDINGS_PER_CALL: usize = 50;
@@ -164,6 +166,8 @@ pub enum LockdownCall {
     /// At most [`MAX_FINDINGS_PER_CALL`] new fingerprints.
     Findings(Vec<FindingReport>),
     SecurityDaily(SecurityDaily),
+    /// (Step 13) `registerSealKey`: standard base64 of the 32-byte public sealing key.
+    RegisterSealKey { public_key: String },
 }
 
 impl LockdownCall {
@@ -173,6 +177,7 @@ impl LockdownCall {
             LockdownCall::Apply(_) => FN_REPORT_APPLY,
             LockdownCall::Findings(_) => FN_REPORT_FINDINGS,
             LockdownCall::SecurityDaily(_) => FN_REPORT_SECURITY_DAILY,
+            LockdownCall::RegisterSealKey { .. } => FN_REGISTER_SEAL_KEY,
         }
     }
 
@@ -188,6 +193,7 @@ impl LockdownCall {
             }
             LockdownCall::Findings(findings) => serde_json::json!({ "findings": findings }),
             LockdownCall::SecurityDaily(daily) => serde_json::to_value(daily).unwrap_or(serde_json::Value::Null),
+            LockdownCall::RegisterSealKey { public_key } => serde_json::json!({ "publicKey": public_key }),
         }
     }
 }
@@ -247,6 +253,10 @@ mod tests {
         assert!(findings.contains_key("findings"));
         let daily = lockdown_args(&auth, &LockdownCall::SecurityDaily(SecurityDaily { day: "2026-11-08".into(), ..SecurityDaily::default() }));
         assert!(daily.contains_key("day") && daily.contains_key("blocked"));
+        let seal = lockdown_args(&auth, &LockdownCall::RegisterSealKey { public_key: "AAAA".into() });
+        assert!(seal.contains_key("deviceId") && seal.contains_key("deviceSecret") && seal.contains_key("publicKey"));
+        assert_eq!(seal.len(), 3);
+        assert_eq!(LockdownCall::RegisterSealKey { public_key: "AAAA".into() }.function(), "deviceApi:registerSealKey");
     }
 
     #[test]

@@ -456,6 +456,30 @@ export const liveApi: DataApi = {
   useSetAppPermissions() {
     return useMapped(useMutation(api.apps.setPermissions));
   },
+  // ---- networks (Phase 5 Step 13). `networks:list` and `networks:wifiDetail` never carry a passphrase;
+  // the passphrase goes only into the action `wifi:setPassphrase`.
+  useNetworks() {
+    return useMemberQuery(api.networks.list, {});
+  },
+  useWifiDetail(id) {
+    return useMemberQuery(api.networks.wifiDetail, { id });
+  },
+  useSaveWifi() {
+    return useMapped(useMutation(api.networks.saveWifi));
+  },
+  useDeleteWifi() {
+    const remove = useMutation(api.networks.deleteWifi);
+    const call = useCallback(
+      async (a: { id: string }) => {
+        await remove(a);
+      },
+      [remove],
+    );
+    return useMapped(call);
+  },
+  useSetWifiPassphrase() {
+    return useMapped(useAction(api.wifi.setPassphrase));
+  },
   useSetAppArchived() {
     const base = useMutation(api.apps.setArchived);
     const set = useMemo(

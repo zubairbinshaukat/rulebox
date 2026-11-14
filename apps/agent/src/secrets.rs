@@ -19,6 +19,10 @@ pub struct Secrets {
     pub rotating_device_secret: Option<String>,
     pub original_default_password_registry: Option<String>,
     pub original_default_password_lsa: Option<String>,
+    /// (Phase 5 Step 13) The device's X25519 sealing key (32 bytes, base64): Wi-Fi
+    /// passphrases arrive sealed to its public half (plan 4.18). Created on the first Phase 5
+    /// start (`network::sealkey`), never leaves this file.
+    pub seal_secret: Option<String>,
 }
 
 impl std::fmt::Debug for Secrets {
@@ -57,6 +61,7 @@ mod tests {
             rotating_device_secret: Some("ef".repeat(32)),
             original_default_password_registry: Some("hunter2-reg".into()),
             original_default_password_lsa: Some("hunter2-lsa".into()),
+            seal_secret: Some("c2VhbC1zZWNyZXQtMzItYnl0ZXMtbG9uZy1ub3BlISE=".into()),
         }
     }
 
@@ -64,7 +69,7 @@ mod tests {
     fn debug_output_has_no_secret() {
         let text = format!("{:?} {:#?}", filled(), filled());
         assert!(text.contains("<redacted>"));
-        for secret in ["abab", "cdcd", "efef", "hunter2"] {
+        for secret in ["abab", "cdcd", "efef", "hunter2", "c2VhbC1zZWNyZXQ"] {
             assert!(!text.contains(secret), "{text}");
         }
     }

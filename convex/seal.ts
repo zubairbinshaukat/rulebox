@@ -23,6 +23,8 @@ const job = v.object({
   sealKeyId: v.string(),
   profileId: v.id("wifiProfiles"),
   revision: v.number(),
+  /** The revision the at-rest box was encrypted under (its AAD): `passphraseRev ?? revision` (Step 13). */
+  atRestRevision: v.number(),
   atRest: atRestBox,
 });
 
@@ -55,6 +57,7 @@ export const jobs = internalQuery({
       sealKeyId: string;
       profileId: Id<"wifiProfiles">;
       revision: number;
+      atRestRevision: number;
       atRest: { keyId: string; sealed: string };
     }[] = [];
     if (withSecret.length > 0) {
@@ -68,7 +71,7 @@ export const jobs = internalQuery({
             .withIndex("by_device_target", (q) => q.eq("deviceId", device._id).eq("purpose", "wifi").eq("targetId", p._id))
             .first();
           if (have !== null && have.targetRevision === p.revision && have.sealKeyId === device.sealKeyId) continue;
-          out.push({ deviceId: device._id, publicKey: device.sealPublicKey, sealKeyId: device.sealKeyId, profileId: p._id, revision: p.revision, atRest: p.passphrase });
+          out.push({ deviceId: device._id, publicKey: device.sealPublicKey, sealKeyId: device.sealKeyId, profileId: p._id, revision: p.revision, atRestRevision: p.passphraseRev ?? p.revision, atRest: p.passphrase });
         }
       }
     }
@@ -137,8 +140,8 @@ export const forDevices = internalAction({
     let skipped = 0;
     const plain = new Map<string, string | null>();
     for (const j of plan.jobs) {
-      const k = `${j.profileId}:${j.revision}`;
-      if (!plain.has(k)) plain.set(k, decryptAtRest(key, j.atRest, { orgId: args.orgId, profileId: j.profileId, revision: j.revision }));
+      const k = `${j.profileId}:${j.atRestRevision}`;
+      if (!plain.has(k)) plain.set(k, decryptAtRest(key, j.atRest, { orgId: args.orgId, profileId: j.profileId, revision: j.atRestRevision }));
       const passphrase = plain.get(k) ?? null;
       const box =
         passphrase === null ? null : sealForDevice(ctx, passphrase, j.publicKey, { orgId: args.orgId, deviceId: j.deviceId, profileId: j.profileId });

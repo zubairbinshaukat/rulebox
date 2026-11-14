@@ -1250,7 +1250,7 @@ before the first outside tenant (Section 3.3).
 | Deployment master key (32 bytes) | Operator, `scripts/master-key.mjs generate` | Convex env `RULEBOX_MASTER_KEY` (base64), optional `RULEBOX_MASTER_KEY_NEXT` | operator | `convex/lib/keyring.ts` |
 | Org signing seed (Ed25519) | action `keys:createOrgKeys` (on org creation and for migration) | `orgKeys.wrapped` (XChaCha20-Poly1305, AAD = `orgId‖purpose‖keyId`) | `keyring.ts` | `keyring.ts` → `signing.ts` |
 | Org sealing key (32 bytes, symmetric) | same action | `orgKeys` purpose `sealing` | `keyring.ts` | `keyring.ts` |
-| Wi-Fi passphrase at rest | `wifi:setPassphrase` | `wifiProfiles.passphrase.sealed` (XChaCha20-Poly1305 under the org sealing key, AAD = `orgId‖profileId‖revision`) | that action | `seal.forDevices` |
+| Wi-Fi passphrase at rest | `wifi:setPassphrase` | `wifiProfiles.passphrase.sealed` (XChaCha20-Poly1305 under the org sealing key, AAD = `orgId‖profileId‖passphraseRev`; owner decision 2026-11-14: the stored passphrase has its own `passphraseRev` + `passphraseSetAt` so a name/SSID/group edit, which bumps `revision`, does not make it undecryptable; per-device boxes still use the profile `revision`, so every edit reseals) | that action | `seal.forDevices` |
 | Device sealing key (X25519) | agent, at enrollment or first Phase 5 start | private: `Secrets` (DPAPI machine); public: `devices.sealPublicKey` | agent | agent |
 | Per-device sealed passphrase | `seal.forDevices` | `deviceSealedSecrets.sealed`, then inside the signed document | that action | agent |
 

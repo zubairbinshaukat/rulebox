@@ -27,6 +27,7 @@ mod kiosk_control;
 mod lockdown;
 mod lockout;
 mod logging;
+mod network;
 mod notice;
 mod paths;
 mod platform;

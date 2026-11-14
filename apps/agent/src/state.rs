@@ -64,6 +64,16 @@ pub struct AgentState {
     /// `restartPending` until the PC has booted (same mark as App Control's).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub applocker_restart: Option<crate::lockdown::appcontrol::CiRestartMark>,
+    /// (Phase 5 Step 13) The id of the sealing key whose public half the server has
+    /// (`deviceApi:registerSealKey` is sent once per key, plan 4.18).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub seal_key_registered: Option<String>,
+    /// (Phase 5 Step 13) What the agent wrote for each Wi-Fi profile it owns, by profile name:
+    /// `rev<revision>:<sha256 of the profile XML built WITHOUT the passphrase>`. The key cannot be
+    /// read back from Windows, so this mark says "this is the revision we installed"; it never
+    /// contains or derives from a passphrase.
+    #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
+    pub wlan_marks: std::collections::BTreeMap<String, String>,
 }
 
 impl AgentState {
@@ -91,6 +101,8 @@ impl Default for AgentState {
             ci_restart: None,
             applocker: None,
             applocker_restart: None,
+            seal_key_registered: None,
+            wlan_marks: std::collections::BTreeMap::new(),
         }
     }
 }

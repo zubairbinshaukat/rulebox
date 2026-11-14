@@ -2539,6 +2539,68 @@ html[data-view="cards"] .dash-table--stack td[data-empty="true"] {
   font-weight: 600;
 }
 
+/* Networks (Phase 5 Step 13): Wi-Fi list rows, the form's switches and the apply counts. */
+.dash-net__item {
+  align-items: flex-start;
+}
+.dash-net__chips {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  margin-top: 4px;
+}
+.dash-net__warn {
+  color: var(--rb-warning-text);
+}
+.dash-net__over {
+  color: var(--rb-danger-text);
+  font-weight: 600;
+}
+.dash-net__switch {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.dash-checks--scroll {
+  max-height: 260px;
+  overflow-y: auto;
+  padding-inline-end: 4px;
+}
+.dash-net__counts {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 130px), 1fr));
+  gap: 12px;
+  margin: 0 0 10px;
+}
+.dash-net__count {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 10px 12px;
+  border-radius: 12px;
+  background: var(--rb-hover);
+}
+.dash-net__count dt {
+  font-size: 12.5px;
+  color: var(--rb-muted);
+}
+.dash-net__count dd {
+  margin: 0;
+  font-size: 22px;
+  font-weight: 650;
+  font-variant-numeric: tabular-nums;
+}
+.dash-net__count--ok dd {
+  color: var(--rb-success-text);
+}
+.dash-net__count--wait dd {
+  color: var(--rb-warning-text);
+}
+.dash-net__count--bad dd {
+  color: var(--rb-danger-text);
+}
+
 /* ------------------------------------------------------------ entrances (PRD 25) */
 
 /* Each entrance plays once when its element mounts (pages remount on every

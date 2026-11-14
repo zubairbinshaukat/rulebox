@@ -3,7 +3,7 @@ import { probe } from "../tests/convex/devices";
 import { asMember, makeOrg } from "../tests/convex/identity";
 import { INTERNAL_CALLS, internalEnv, UNMEASURED, type InternalCase } from "../tests/convex/ioInternal";
 import { LARGE, seedLargeOrg } from "../tests/convex/largeOrg";
-import { MASTER_A, setMaster } from "../tests/convex/phase5";
+import { createKeys, MASTER_A, setMaster } from "../tests/convex/phase5";
 import { DEVICE_CALLS, expectedFor, fixture, type Fixture, internalFunctions, outcome, publicFunctions, ROWS, type Caller, type Row } from "../tests/convex/matrixRows";
 import { api } from "./_generated/api";
 import { sha256HexSync } from "./lib/crypto";
@@ -56,6 +56,12 @@ const COMPLETE_CALLS: Record<string, (f: Fixture) => Promise<() => Promise<unkno
   "keys:migrateFromEnv": async (f) => {
     setMaster(MASTER_A);
     return () => f.accessor.owner.action(api.keys.migrateFromEnv, {});
+  },
+  // Phase 5 Step 13: a real passphrase, encrypted under the organization's sealing key (a throwaway master key is set).
+  "wifi:setPassphrase": async (f) => {
+    setMaster(MASTER_A);
+    await createKeys(f.t, f.orgId);
+    return () => f.accessor.admin.action(api.wifi.setPassphrase, { id: f.wifiId, passphrase: "correct horse battery", expectedRevision: 1 });
   },
   "account:redeemPinReset": async (f) => {
     const m = await asMember(f.t, { role: "viewer", orgId: f.orgId }); // a session created just now is "fresh"

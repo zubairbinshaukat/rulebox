@@ -3854,11 +3854,13 @@ dependencies = [
  "argon2",
  "base64 0.23.1",
  "bytes",
+ "chacha20poly1305",
  "clap",
  "convex",
  "ed25519-dalek",
  "futures-util",
  "getrandom 0.4.3",
+ "hkdf",
  "reqwest",
  "rulebox-ipc",
  "rulebox-policy",
@@ -3873,6 +3875,8 @@ dependencies = [
  "tracing-appender",
  "tracing-subscriber",
  "windows-service",
+ "x25519-dalek",
+ "zeroize",
 ]
 
 [[package]]

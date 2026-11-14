@@ -734,6 +734,65 @@ export interface FileTypeRow {
   appName: string;
 }
 
+// ---------------------------------------------------------------- networks (Phase 5 Step 13)
+
+/** `wifiProfiles.security` (802.1X / EAP is not part of Phase 5). */
+export type WifiSecurity = "open" | "wpa2Personal" | "wpa3Personal" | "wpa2Wpa3Personal";
+
+/**
+ * One Wi-Fi profile as `networks:list` and `networks:wifiDetail` return it. There is NO passphrase here, ever:
+ * `hasPassphrase` and `passphraseSetAt` are all the dashboard learns about it.
+ */
+export interface WifiRow {
+  _id: Id;
+  name: string;
+  ssid: string;
+  hidden: boolean;
+  security: WifiSecurity;
+  autoConnect: boolean;
+  hasPassphrase: boolean;
+  passphraseSetAt: number | null;
+  revision: number;
+  /** All assigned groups; `groups` carries only the first few (the list screen shows a handful of chips). */
+  groupCount: number;
+  groups: GroupOption[];
+}
+
+/** `networks:list`. Printers join it in Step 14. */
+export interface NetworksScreen {
+  wifi: WifiRow[];
+}
+
+/**
+ * How the PCs of the assigned groups report one profile (`networks:wifiDetail`, on demand, detail screen only):
+ * counted over at most `sampled` devices, `capped` when there were more.
+ */
+export interface WifiApplyCounts {
+  applied: number;
+  failed: number;
+  waiting: number;
+  unsupported: number;
+  sampled: number;
+  capped: boolean;
+}
+
+export interface WifiDetail extends WifiRow {
+  groupIds: Id[];
+  counts: WifiApplyCounts;
+}
+
+/** `networks:saveWifi`: no `id` creates; `id` + `expectedRevision` updates. Never carries a passphrase. */
+export interface WifiInput {
+  id?: Id;
+  expectedRevision?: number;
+  name: string;
+  ssid: string;
+  hidden: boolean;
+  security: WifiSecurity;
+  autoConnect: boolean;
+  groupIds: Id[];
+}
+
 // ---------------------------------------------------------------- enrollment
 
 export type EnrollmentCodeState = "active" | "usedUp" | "expired" | "revoked";

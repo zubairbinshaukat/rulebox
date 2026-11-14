@@ -402,6 +402,21 @@ export const APP_DENIAL_DAYS = 30;
  * live catalogue only (the app record is not part of the snapshot until Step 16).
  */
 export const MAX_PERMISSION_SNAPSHOT_GROUPS = 10;
+/**
+ * Wi-Fi profiles (Phase 5 Step 13): `networks:saveWifi` / `deleteWifi` snapshot the configuration of every group the
+ * profile was in or is put in, in the same transaction (each snapshot reads up to ~570 documents), so a save may touch
+ * at most this many groups (`too_large`, detail "groups"). DEVIATION from plan 4.2 (a profile in up to 100 groups).
+ */
+export const MAX_NETWORK_SNAPSHOT_GROUPS = 10;
+/** Group ids accepted in one `saveWifi` call (cheap early guard; the snapshot cap above is the real one). */
+export const MAX_NETWORK_GROUPS = 100;
+/** `networks:list`: group names shown per profile (the row also carries the total). */
+export const MAX_WIFI_LIST_GROUPS = 10;
+/** `networks:wifiDetail`: groups and apply reports per group read for the counts. */
+export const MAX_WIFI_DETAIL_GROUPS = 10;
+export const MAX_WIFI_DETAIL_REPORTS = 200;
+/** Sealed boxes deleted per transaction when a profile goes away or becomes open. */
+export const SEALED_PURGE_BATCH = 100;
 /** `seal:forDevices`: devices sealed per run (each needs one box per assigned profile). */
 export const SEAL_DEVICES_PER_RUN = 25;
 /** Live broadcasts read per target when a document is built (the newest MAX_ACTIVE_BROADCASTS are kept). */

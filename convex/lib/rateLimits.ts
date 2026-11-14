@@ -53,6 +53,9 @@ export const rateLimiter = new RateLimiter(components.rateLimiter, {
   // costs one Argon2id hash (~100-300 ms of CPU) in an action: 300 per hour per
   // organization, consumed before hashing.
   employeeWrites: { kind: "token bucket", rate: 300, period: HOUR_MS, capacity: 300 },
+  // `wifi:setPassphrase` (Phase 5 Step 13), per organization: each call decrypts the sealing key and re-encrypts a
+  // passphrase, and makes every device of the groups re-seal it. 30 an hour is far above an admin typing passwords.
+  wifiPassphrase: { kind: "token bucket", rate: 30, period: HOUR_MS, capacity: 30 },
   // Device API (plan Step 12 item 5, A9; 4.12). `deviceApi:verifyEmployee`, per
   // device (key = device id): CHECKED (read-only) before the Argon2id verify and
   // consumed only on a wrong password, so a successful sign-in writes no row.
@@ -108,6 +111,7 @@ export type LimitName =
   | "webMeta"
   | "wingetResolve"
   | "employeeWrites"
+  | "wifiPassphrase"
   | "verifyPerDevice"
   | "deviceWrites"
   | "deviceReports"

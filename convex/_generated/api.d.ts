@@ -81,6 +81,7 @@ import type * as lib_winget from "../lib/winget.js";
 import type * as mail from "../mail.js";
 import type * as maintenance from "../maintenance.js";
 import type * as members from "../members.js";
+import type * as networks from "../networks.js";
 import type * as overview from "../overview.js";
 import type * as passkeys from "../passkeys.js";
 import type * as plans from "../plans.js";
@@ -94,6 +95,7 @@ import type * as setup from "../setup.js";
 import type * as stats from "../stats.js";
 import type * as stepUp from "../stepUp.js";
 import type * as testing from "../testing.js";
+import type * as wifi from "../wifi.js";
 
 import type {
   ApiFromModules,
@@ -175,6 +177,7 @@ declare const fullApi: ApiFromModules<{
   mail: typeof mail;
   maintenance: typeof maintenance;
   members: typeof members;
+  networks: typeof networks;
   overview: typeof overview;
   passkeys: typeof passkeys;
   plans: typeof plans;
@@ -188,6 +191,7 @@ declare const fullApi: ApiFromModules<{
   stats: typeof stats;
   stepUp: typeof stepUp;
   testing: typeof testing;
+  wifi: typeof wifi;
 }>;
 
 /**

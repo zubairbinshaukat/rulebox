@@ -11,6 +11,8 @@ const TARGET_ROUTES: Record<string, string> = {
   employee: "/employees/",
   app: "/apps/",
   group: "/groups/",
+  // Phase 5 Step 13: the Wi-Fi audit rows (`wifi.created` ...) name the profile.
+  wifi: "/networks/wifi/",
 };
 
 

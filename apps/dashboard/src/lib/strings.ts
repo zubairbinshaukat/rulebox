@@ -68,6 +68,7 @@ export const strings = {
       overview: "Overview",
       devices: "Devices",
       groups: "Groups",
+      networks: "Networks",
       employees: "Employees",
       apps: "Apps",
       fileTypes: "File types",

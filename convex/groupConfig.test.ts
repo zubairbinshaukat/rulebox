@@ -297,12 +297,13 @@ describe("the publisher: ring pointers and the whole chain into a signed documen
       return (JSON.parse(env.payload) as { doc: { wifi: { sealed: unknown }[] } }).doc.wifi[0]!.sealed;
     };
     expect(await sealedOf()).not.toBeNull();
-    // The device replaced its key: the old box is useless and is not sent.
+    // The device replaced its key: the old box is useless and is not sent. Since Step 13 the publisher also asks for the sealing
+    // action, so the NEXT document carries a box for the new key (and the old key opens nothing).
     const other = sealKeyPair(8);
     await t.run((ctx) => ctx.db.patch(deviceId, { sealPublicKey: other.publicB64, sealKeyId: other.keyId }));
     await t.run((ctx) => requestPublish(ctx, orgId, { deviceIds: [deviceId] }));
     await drain(t);
-    expect(await sealedOf()).toBeNull();
+    expect(await sealedOf()).toMatchObject({ keyId: other.keyId });
     expect(kp.keyId).not.toBe(other.keyId);
   });
 

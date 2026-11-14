@@ -167,7 +167,7 @@ describe("secrets (plan 4.7)", () => {
       device: await ctx.db.get(f.deviceId),
     }));
     expect(phase5.keys.length).toBeGreaterThanOrEqual(1);
-    expect(phase5.wifi[0]!.passphrase?.sealed).toBeDefined();
+    expect(phase5.wifi.some((w) => w.passphrase?.sealed !== undefined)).toBe(true);
     expect(phase5.boxes).toHaveLength(1);
     expect(phase5.device!.sealPublicKey).toBeDefined();
     expect(JSON.stringify(phase5)).not.toContain(WIFI_PASSPHRASE);

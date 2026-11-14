@@ -141,6 +141,24 @@ describe("Layout", () => {
     expect(current[0]!.textContent).toContain(strings.app.nav.devices);
     expect(screen.getByText(strings.app.skipToContent).getAttribute("href")).toBe("#main");
   });
+
+  it("has a Networks entry (Phase 5 Step 13) that is current on its Wi-Fi pages", () => {
+    render(
+      <MemoryRouter initialEntries={["/networks/wifi/abc"]}>
+        <MeContext.Provider value={owner}>
+          <Routes>
+            <Route element={<Layout />}>
+              <Route path="*" element={<p>page</p>} />
+            </Route>
+          </Routes>
+        </MeContext.Provider>
+      </MemoryRouter>,
+    );
+    const nav = screen.getByRole("navigation", { name: strings.app.mainNav });
+    const link = Array.from(nav.querySelectorAll("a")).find((a) => a.textContent?.includes(strings.app.nav.networks));
+    expect(link?.getAttribute("href")).toBe("/networks");
+    expect(link?.getAttribute("aria-current")).toBe("page");
+  });
 });
 
 describe("ConnectionBanner", () => {

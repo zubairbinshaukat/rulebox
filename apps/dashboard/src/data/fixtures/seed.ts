@@ -23,6 +23,7 @@ import type {
   Role,
   ShellHealth,
   WebSpec,
+  WifiSecurity,
 } from "../types";
 import { DEFAULT_WEB_PERMISSIONS } from "../types";
 import { padListFixtures } from "./listRows";
@@ -173,6 +174,18 @@ export interface DbToken {
   createdAt: number;
   createdBy?: string;
 }
+export interface DbWifi {
+  _id: string;
+  name: string;
+  ssid: string;
+  hidden: boolean;
+  security: WifiSecurity;
+  autoConnect: boolean;
+  hasPassphrase: boolean;
+  passphraseSetAt: number | null;
+  groupIds: string[];
+  revision: number;
+}
 export interface DbAudit {
   _id: string;
   at: number;
@@ -226,6 +239,8 @@ export interface DemoDb {
   employeeApps: { employeeId: string; appId: string }[];
   /** `orgSecurityDaily` summed over the last 30 days, per website: blocked permission requests per kind (counts only). */
   appDenials: Map<string, { kind: string; count: number }[]>;
+  /** `wifiProfiles` (Phase 5 Step 13): never a passphrase, only whether one is set and when. */
+  wifi: DbWifi[];
   fileHandlers: { _id: string; extension: string; appId: string }[];
   tokens: DbToken[];
   installs: DbInstall[];
@@ -888,6 +903,11 @@ export function seed(now: number = Date.now()): DemoDb {
       [aPos._id, [{ kind: "microphone", count: 41 }, { kind: "camera", count: 12 }]],
       [aMail._id, [{ kind: "clipboardRead", count: 4 }]],
     ]),
+    wifi: [
+      { _id: id("wifi"), name: "Shop floor", ssid: "Harbor-Staff", hidden: false, security: "wpa2Wpa3Personal", autoConnect: true, hasPassphrase: true, passphraseSetAt: now - 12 * DAY, groupIds: [gFront._id, gCounter._id], revision: 3 },
+      { _id: id("wifi"), name: "Back office (hidden)", ssid: "Harbor-Office", hidden: true, security: "wpa2Personal", autoConnect: true, hasPassphrase: true, passphraseSetAt: now - 40 * DAY, groupIds: [gOffice._id], revision: 2 },
+      { _id: id("wifi"), name: "Training room", ssid: "Harbor-Training", hidden: false, security: "wpa3Personal", autoConnect: false, hasPassphrase: false, passphraseSetAt: null, groupIds: [], revision: 1 },
+    ],
     fileHandlers,
     tokens,
     installs,

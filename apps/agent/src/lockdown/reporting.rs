@@ -212,6 +212,8 @@ impl LockdownOutbox {
                 self.collector.store.mark_reported(&ids, now_ms, &server_day(now_ms, offset));
                 self.collector.save();
             }
+            // The key registration is recorded by whoever sends it (`AgentState.seal_key_registered`).
+            LockdownCall::RegisterSealKey { .. } => {}
             LockdownCall::SecurityDaily(summary) => {
                 self.daily.ack(&summary.day);
                 if let Err(error) = self.daily.save_if_dirty() {

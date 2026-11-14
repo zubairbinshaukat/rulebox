@@ -14,6 +14,7 @@ import type { EnrollmentApi } from "../enrollment/api";
 import {
   type DbApp,
   type DbDevice,
+  type DbWifi,
   type DemoDb,
 } from "../fixtures/seed";
 import {
@@ -38,11 +39,16 @@ import {
   type InstallSummary,
   type Me,
   type MeResult,
+  type NetworksScreen,
   type OverviewScreen,
+  type WifiApplyCounts,
+  type WifiDetail,
+  type WifiRow,
 } from "../types";
 import type { ServerList } from "../serverList";
 import { byKey, contains, relevance, useDemoServerPage } from "./lists";
 import * as validate from "../../lib/validate";
+import { MAX_WIFI_GROUPS_PER_SAVE, MAX_WIFI_NAME, MAX_WIFI_PROFILES, WIFI_SECURITIES, passphraseProblem, ssidProblem } from "../../lib/wifiRules";
 import {
   bumpFailedSignIns,
   checkRevision,
@@ -82,6 +88,40 @@ function groupOptions(db: DemoDb): GroupOption[] {
     .map((g) => ({ _id: g._id, name: g.name }))
     .sort((a, b) => a.name.localeCompare(b.name))
     .slice(0, 500);
+}
+
+function wifiRow(db: DemoDb, w: DbWifi): WifiRow {
+  return {
+    _id: w._id,
+    name: w.name,
+    ssid: w.ssid,
+    hidden: w.hidden,
+    security: w.security,
+    autoConnect: w.autoConnect,
+    hasPassphrase: w.hasPassphrase,
+    passphraseSetAt: w.passphraseSetAt,
+    revision: w.revision,
+    groupCount: w.groupIds.length,
+    // Like the server: the first 10 only (the detail page's picker has the full list).
+    groups: w.groupIds.map((id) => ({ _id: id, name: groupName(db, id) ?? "" })).sort((a, b) => a.name.localeCompare(b.name)).slice(0, 10),
+  };
+}
+
+/** What `networks:wifiDetail` counts: the PCs of the assigned groups (first 200 per group), by what they report. Demo: derived, never random. */
+function wifiCounts(db: DemoDb, w: DbWifi): WifiApplyCounts {
+  const WIFI_COUNT_PER_GROUP = 200;
+  let sampled = 0;
+  let capped = false;
+  for (const g of w.groupIds) {
+    const n = db.devices.filter((d) => d.groupId === g && !d.revoked).length;
+    sampled += Math.min(n, WIFI_COUNT_PER_GROUP);
+    capped ||= n > WIFI_COUNT_PER_GROUP;
+  }
+  const needsKey = w.security !== "open" && !w.hasPassphrase;
+  const waiting = needsKey ? sampled : 0;
+  const unsupported = needsKey ? 0 : Math.floor(sampled / 10);
+  const failed = needsKey ? 0 : sampled >= 5 ? 1 : 0;
+  return { applied: sampled - waiting - unsupported - failed, failed, waiting, unsupported, sampled, capped };
 }
 
 function canOpenFiles(a: DbApp) {
@@ -742,6 +782,7 @@ export const demoApi: DataApi = {
             ].filter((x) => x !== null);
             if (dependents.length > 0) fail("has_dependents", { detail: dependents.join(", ") });
             db.groups = db.groups.filter((x) => x._id !== groupId);
+            for (const w of db.wifi) w.groupIds = w.groupIds.filter((x) => x !== groupId);
             audit({ action: "group.deleted", targetType: "group", targetId: g._id, targetLabel: g.name, summary: `Deleted the group ${g.name}` });
           },
           "fresh",
@@ -1301,6 +1342,110 @@ export const demoApi: DataApi = {
           const a = find(db.apps, appId);
           a.iconUrl = png;
           audit({ action: "app.updated", targetType: "app", targetId: a._id, targetLabel: a.name, summary: "Icon changed." });
+        }),
+      [],
+    );
+  },
+
+  // ---- networks (Phase 5 Step 13). The demo twin of convex/networks.ts and convex/wifi.ts: the passphrase is checked
+  // and then dropped on the floor, exactly like a client could never read it back.
+  useNetworks() {
+    return useDemoQuery("networks:list", (db): NetworksScreen => {
+      requireReader();
+      return { wifi: [...db.wifi].sort((a, b) => a.name.localeCompare(b.name)).map((w) => wifiRow(db, w)) };
+    });
+  },
+
+  useWifiDetail(id) {
+    return useDemoQuery(`networks:wifiDetail:${id}`, (db): WifiDetail => {
+      requireReader();
+      const w = find(db.wifi, id);
+      return { ...wifiRow(db, w), groupIds: [...w.groupIds], counts: wifiCounts(db, w) };
+    });
+  },
+
+  useSaveWifi() {
+    return useCallback(
+      (input) =>
+        runMutation("admin", ({ db, audit }) => {
+          const name = nameOrFail(input.name, MAX_WIFI_NAME);
+          if (ssidProblem(input.ssid) !== null) fail("invalid_argument", { field: "ssid" });
+          if (!WIFI_SECURITIES.includes(input.security)) fail("invalid_argument", { field: "security" });
+          const groupIds = [...new Set(input.groupIds)];
+          for (const g of groupIds) if (!db.groups.some((x) => x._id === g)) fail("not_found");
+          const existing = input.id === undefined ? null : find(db.wifi, input.id);
+          if (existing) checkRevision(existing, input.expectedRevision ?? -1);
+          const before = existing?.groupIds ?? [];
+          const changed = groupIds.filter((g) => !before.includes(g)).length + before.filter((g) => !groupIds.includes(g)).length;
+          // The server snapshots every group the profile is in or goes into, in the same call: at most 10 of them.
+          const touched = new Set([...before, ...groupIds]).size;
+
+          if (!existing) {
+            if (touched > MAX_WIFI_GROUPS_PER_SAVE) fail("too_large", { detail: "groups" });
+            if (db.wifi.length >= MAX_WIFI_PROFILES) fail("too_large", { detail: "wifi" });
+            const row: DbWifi = {
+              _id: newId("wifi"),
+              name,
+              ssid: input.ssid,
+              hidden: input.hidden,
+              security: input.security,
+              autoConnect: input.autoConnect,
+              hasPassphrase: false,
+              passphraseSetAt: null,
+              groupIds,
+              revision: 1,
+            };
+            db.wifi.push(row);
+            audit({ action: "wifi.created", targetType: "wifi", targetId: row._id, targetLabel: name, summary: `Added the Wi-Fi network ${name}` });
+            return { id: row._id, revision: row.revision };
+          }
+          const same =
+            existing.name === name && existing.ssid === input.ssid && existing.hidden === input.hidden && existing.security === input.security &&
+            existing.autoConnect === input.autoConnect && changed === 0;
+          if (same) return { id: existing._id, revision: existing.revision };
+          if (touched > MAX_WIFI_GROUPS_PER_SAVE) fail("too_large", { detail: "groups" });
+          // An open network has no password: switching to it drops the one that was set.
+          if (input.security === "open" && existing.security !== "open") {
+            existing.hasPassphrase = false;
+            existing.passphraseSetAt = null;
+          }
+          Object.assign(existing, { name, ssid: input.ssid, hidden: input.hidden, security: input.security, autoConnect: input.autoConnect, groupIds });
+          existing.revision++;
+          audit({ action: "wifi.updated", targetType: "wifi", targetId: existing._id, targetLabel: name, summary: `Changed the Wi-Fi network ${name}` });
+          return { id: existing._id, revision: existing.revision };
+        }),
+      [],
+    );
+  },
+
+  useDeleteWifi() {
+    return useCallback(
+      ({ id }) =>
+        runMutation("admin", ({ db, audit }) => {
+          const w = find(db.wifi, id);
+          if (w.groupIds.length > MAX_WIFI_GROUPS_PER_SAVE) fail("too_large", { detail: "groups" });
+          db.wifi = db.wifi.filter((x) => x._id !== id);
+          audit({ action: "wifi.deleted", targetType: "wifi", targetId: w._id, targetLabel: w.name, summary: `Removed the Wi-Fi network ${w.name}` });
+        }),
+      [],
+    );
+  },
+
+  useSetWifiPassphrase() {
+    return useCallback(
+      ({ id, passphrase, expectedRevision }) =>
+        runMutation("admin", ({ db, audit, now }) => {
+          const w = find(db.wifi, id);
+          checkRevision(w, expectedRevision);
+          if (w.security === "open") fail("invalid_argument", { field: "id", detail: "open" });
+          const problem = passphraseProblem(passphrase);
+          if (problem !== null) fail("invalid_argument", { field: "passphrase", detail: problem === "chars" ? "characters" : "length" });
+          // Only the fact is kept. The text is never stored, audited or returned.
+          w.hasPassphrase = true;
+          w.passphraseSetAt = now;
+          w.revision++;
+          audit({ action: "wifi.passphraseSet", targetType: "wifi", targetId: w._id, targetLabel: w.name, summary: `Replaced the password of ${w.name}` });
+          return { revision: w.revision };
         }),
       [],
     );

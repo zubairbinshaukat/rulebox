@@ -25,6 +25,9 @@ describe("route table", () => {
     expect(screensForPath("/devices/")).toEqual(["Layout", "Devices"]);
     expect(screensForPath("/devices/k57abc")).toEqual(["Layout", "DeviceDetail"]);
     expect(screensForPath("/apps/new")).toEqual(["Layout", "AppEdit"]);
+    expect(screensForPath("/networks")).toEqual(["Layout", "Networks"]);
+    expect(screensForPath("/networks/wifi/new")).toEqual(["Layout", "WifiEdit"]);
+    expect(screensForPath("/networks/wifi/k57abc")).toEqual(["Layout", "WifiEdit"]);
     expect(screensForPath("/devices/a/b")).toEqual([]);
     expect(screensForPath("/gallery")).toEqual([]);
   });

@@ -353,6 +353,43 @@ describe("step-up (data/stepup/live.ts)", () => {
   });
 });
 
+describe("networks (Phase 5 Step 13)", () => {
+  it("the list is networks:list with no arguments; one network is networks:wifiDetail with its id", () => {
+    cx.queryResult = { wifi: [] };
+    const list = renderHook(() => live.useNetworks());
+    const req = Object.values(cx.requests.at(-1)!)[0] as { args: unknown };
+    expect(req.args).toEqual({});
+    expect(list.result.current).toEqual({ status: "ready", data: { wifi: [] } });
+
+    cx.queryResult = { _id: "w1", name: "Shop", revision: 2 };
+    const one = renderHook(() => live.useWifiDetail("w1"));
+    expect((Object.values(cx.requests.at(-1)!)[0] as { args: unknown }).args).toEqual({ id: "w1" });
+    expect(one.result.current).toMatchObject({ status: "ready", data: { _id: "w1", revision: 2 } });
+  });
+
+  it("save, delete and the passphrase go to their functions; the passphrase only to the action; errors keep their code", async () => {
+    const input = { name: "Shop", ssid: "Acme", hidden: false, security: "wpa2Personal" as const, autoConnect: true, groupIds: ["g1"] };
+    cx.fns["networks:saveWifi"] = vi.fn(async () => ({ id: "w1", revision: 1 }));
+    expect(await renderHook(() => live.useSaveWifi()).result.current(input)).toEqual({ id: "w1", revision: 1 });
+    expect(cx.fns["networks:saveWifi"]).toHaveBeenCalledWith(input);
+
+    cx.fns["networks:deleteWifi"] = vi.fn(async () => null);
+    await expect(renderHook(() => live.useDeleteWifi()).result.current({ id: "w1" })).resolves.toBeUndefined();
+    expect(cx.fns["networks:deleteWifi"]).toHaveBeenCalledWith({ id: "w1" });
+
+    cx.fns["wifi:setPassphrase"] = vi.fn(async () => ({ revision: 3 }));
+    const set = renderHook(() => live.useSetWifiPassphrase()).result.current;
+    expect(await set({ id: "w1", passphrase: "correct horse", expectedRevision: 2 })).toEqual({ revision: 3 });
+    expect(cx.fns["wifi:setPassphrase"]).toHaveBeenCalledWith({ id: "w1", passphrase: "correct horse", expectedRevision: 2 });
+
+    cx.fns["wifi:setPassphrase"] = vi.fn(async () => {
+      throw new ConvexError({ code: "invalid_argument", field: "passphrase", detail: "length" });
+    });
+    const e = await rejection(set({ id: "w1", passphrase: "x", expectedRevision: 3 }));
+    expect(toAppError(e)).toMatchObject({ code: "invalid_argument", field: "passphrase", detail: "length" });
+  });
+});
+
 describe("apps, assignments and file types (Step 10)", () => {
   it("a new app asks the server for nothing; an existing one is apps:get (the install counts are a query of their own)", () => {
     const fresh = renderHook(() => live.useAppDetail("new"));

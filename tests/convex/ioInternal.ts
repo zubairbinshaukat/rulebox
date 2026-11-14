@@ -258,6 +258,31 @@ export const INTERNAL_CALLS: Record<string, InternalCase | InternalCase[]> = {
     return () => c.f.t.action(internal.keys.rewrapAll, {});
   },
   // 25 devices (SEAL_DEVICES_PER_RUN) of one group, each with a sealing key; 2 Wi-Fi profiles with a passphrase are assigned to the group.
+  // Phase 5 Step 13. A profile with a full batch of boxes; a secured profile in the fixture's group; the target lookup with a sealing key.
+  "networks:purgeSealed": async (c) => {
+    const profileId = await c.f.t.run(async (ctx) => {
+      const id = await ctx.db.insert("wifiProfiles", { orgId: c.f.orgId, name: "Gone", ssid: "Gone", hidden: false, security: "wpa2Personal", autoConnect: true, groupIds: [], revision: 1, createdAt: Date.now() });
+      for (let i = 0; i < 100; i++) {
+        await ctx.db.insert("deviceSealedSecrets", { orgId: c.f.orgId, deviceId: c.f.deviceId, purpose: "wifi", targetId: id, targetRevision: 1, sealKeyId: `k${i}`, sealed: "AAAA", createdAt: Date.now() });
+      }
+      return id;
+    });
+    return () => c.f.t.mutation(internal.networks.purgeSealed, { profileId });
+  },
+  "wifi:target": async (c) => {
+    setMaster(MASTER_A);
+    await createKeys(c.f.t, c.f.orgId);
+    return () => c.f.t.query(internal.wifi.target, { orgId: c.f.orgId, id: c.f.wifiId });
+  },
+  "wifi:storePassphrase": async (c) => () =>
+    c.f.t.mutation(internal.wifi.storePassphrase, {
+      orgId: c.f.orgId,
+      actor: c.actor,
+      by: c.f.targetMemberId,
+      id: c.f.wifiId,
+      expectedRevision: 1,
+      atRest: { keyId: "0123456789abcdef", sealed: "AAAA" },
+    }),
   "seal:jobs": async (c) => {
     const { deviceIds } = await sealingSetup(c, 2);
     return () => c.f.t.query(internal.seal.jobs, { orgId: c.f.orgId, deviceIds });

@@ -292,13 +292,20 @@ async function loadPhase5(ctx: { db: DatabaseReader }, run: RunState, device: Do
     .slice(0, MAX_ACTIVE_BROADCASTS);
   const usbUntil = device.usbTempAllowUntil !== undefined && device.usbTempAllowUntil > run.now ? device.usbTempAllowUntil : null;
 
+  const sealed = cfg === null ? {} : await sealedBoxesOf(ctx, device, cfg.content.wifi);
+  // A secured profile without a current box for a device that CAN be sealed for: the document goes out without it
+  // (the agent says `waiting_for_key`) and the sealing action runs; its boxes make the next publish carry them.
+  if (cfg !== null && device.sealKeyId !== undefined && device.sealPublicKey !== undefined && cfg.content.wifi.some((w) => w.hasPassphrase && sealed[w.id] === undefined)) {
+    run.needSeal.add(device._id);
+  }
+
   if (cfg === null && lock === null && broadcasts.length === 0 && usbUntil === null) return undefined;
   return {
     config:
       cfg === null || device.groupId === undefined
         ? null
         : { groupId: device.groupId, version: cfg.version, ring, content: cfg.content },
-    sealed: cfg === null ? {} : await sealedBoxesOf(ctx, device, cfg.content.wifi),
+    sealed,
     deviceLock:
       lock === null ? null : { lockId: lock.lockId, message: lock.message, contact: lock.contact ?? null, lockedAtMs: lock.lockedAt },
     usbTempAllowUntilMs: usbUntil,
@@ -343,6 +350,8 @@ type RunState = {
   groupBroadcasts: Map<string, DocBroadcast[]>;
   groups: Map<string, GroupInputs>;
   seen: Set<string>;
+  /** Devices that have a sealing key and need a Wi-Fi box they do not have yet (Step 13): `seal:forDevices` once per run. */
+  needSeal: Set<Id<"devices">>;
   now: number;
   bytes: number;
   /** Groups loaded so far in this run, and the ranges / documents their loads read (the run budget). */
@@ -573,6 +582,7 @@ export const run = internalMutation({
       groupBroadcasts: new Map(),
       groups: new Map(),
       seen: new Set(),
+      needSeal: new Set(),
       now,
       bytes: 0,
       groupLoads: 0,
@@ -641,6 +651,10 @@ export const run = internalMutation({
         patch.publishBytesToday = (stats.publishBytesDay === day ? (stats.publishBytesToday ?? 0) : 0) + runState.bytes;
       }
       await ctx.db.patch(stats._id, patch);
+    }
+
+    if (runState.needSeal.size > 0) {
+      await ctx.scheduler.runAfter(0, internal.seal.forDevices, { orgId: args.orgId, deviceIds: [...runState.needSeal] });
     }
 
     if (deviceIds.length === 0 && groupIds.length === 0 && !allDevices) {
