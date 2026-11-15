@@ -387,6 +387,9 @@ const MAX_REWRITES: usize = 512;
 struct DriftGate {
     rewrites: Vec<Rewrite>,
     muted: std::collections::HashSet<String>,
+    /// (Phase 5 Step 17) Journal ids of tamper-protection items (service DACL, privileges,
+    /// folder ACLs) that were written again; `lockdown::tamper` reads them, not the drift tracker.
+    tampered: Vec<String>,
 }
 
 impl SharedState {
@@ -412,6 +415,26 @@ impl SharedState {
     /// are changes, not drift).
     pub fn take_rewrites(&self) -> Vec<Rewrite> {
         std::mem::take(&mut lock(&self.drift).rewrites)
+    }
+
+    /// (Phase 5 Step 17) `journal::change` put a tamper-protection item back (`id` is its
+    /// journal id). Kept apart from the rewrites: these are counted and audited as tampering.
+    pub fn note_tamper(&self, id: &str) {
+        let mut gate = lock(&self.drift);
+        if gate.tampered.len() < MAX_REWRITES {
+            gate.tampered.push(id.to_string());
+        }
+    }
+
+    /// The tamper-protection items put back since the last call.
+    pub fn take_tampered(&self) -> Vec<String> {
+        std::mem::take(&mut lock(&self.drift).tampered)
+    }
+
+    /// Drops the notes about `id` (the value did not read back as written, so the "repair"
+    /// says nothing about tampering).
+    pub fn forget_tamper(&self, id: &str) {
+        lock(&self.drift).tampered.retain(|noted| noted != id);
     }
 
     /// True while the drift guard leaves this target alone ("fighting").

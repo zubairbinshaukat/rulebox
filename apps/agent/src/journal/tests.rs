@@ -132,6 +132,7 @@ fn every_target_and_original_survives_a_round_trip() {
         JournalTarget::SafeBootEntry { mode: "Minimal".into() },
         JournalTarget::ServiceSecurity { name: "RuleboxAgent".into() },
         JournalTarget::ServicePrivileges { name: "RuleboxAgent".into() },
+        JournalTarget::PathAcl { path: r"C:\Program Files\Rulebox".into() },
     ];
     for target in targets {
         let back: JournalTarget = serde_json::from_value(serde_json::to_value(&target).unwrap()).unwrap();

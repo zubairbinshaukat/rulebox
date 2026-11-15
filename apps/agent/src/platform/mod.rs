@@ -343,6 +343,10 @@ pub trait Platform: Send + Sync + 'static {
     /// machine that is not a test machine a signed-out Staff hive cannot be read (mounting
     /// it is guarded) and the answer is a `Guard` error.
     fn read_staff_value(&self, sid: &str, path: &str, name: &str) -> Result<Option<RegData>, PlatformError>;
+    /// (Phase 5 Step 18) The names of the values directly under a Staff hive key (`path` under
+    /// `staffreg::ALLOWED_ROOTS`): the Staff start-up entries. Empty when the key is absent or
+    /// the Staff account is gone. Same guard rule as `read_staff_value` for a signed-out hive.
+    fn list_staff_value_names(&self, sid: &str, path: &str) -> Result<Vec<String>, PlatformError>;
     /// Ids (lowercase GUIDs) of the `.cip` files in the active App Control folder.
     fn list_ci_policies(&self) -> Result<Vec<String>, PlatformError>;
     /// (Phase 5 Step 6) The bytes of `{policy_id}.cip` in the active folder; `Ok(None)`:

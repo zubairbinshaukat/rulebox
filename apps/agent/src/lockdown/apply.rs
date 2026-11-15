@@ -121,6 +121,8 @@ fn run_layer(ctx: &ApplyCtx<'_>, doc: &AgentDoc, layer: Layer) -> LayerState {
         Layer::Boot => boot::apply(ctx, doc),
         Layer::AppControl => appcontrol::apply(ctx, doc),
         Layer::AppLocker => applocker::apply(ctx, doc),
+        // (Step 18) Per-user tuning and the kiosk performance profile.
+        Layer::Performance => super::perf::apply(ctx, doc),
         _ => LayerState::off_ok(),
     }
 }

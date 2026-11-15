@@ -31,7 +31,12 @@ impl Rig {
     fn new() -> Self {
         let dir = TempDir::new();
         let platform = Arc::new(SimPlatform::new(dir.path().to_path_buf()));
-        platform.with_world(|w| w.strict_machine_keys = true);
+        platform.with_world(|w| {
+            w.strict_machine_keys = true;
+            // (Step 17) No agent service on this simulated PC: these tests are about the boot
+            // items only. Tamper protection has its own (`tamper/tests.rs`).
+            w.services.remove(rulebox_win32::service::AGENT_SERVICE);
+        });
         let dyn_platform: Arc<dyn Platform> = platform.clone();
         let shared = SharedState::new(StateStore::open(&dir.path().join("state")).unwrap(), AgentState::default(), dyn_platform);
         Self { _dir: dir, platform, shared }

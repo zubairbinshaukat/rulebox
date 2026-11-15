@@ -29,6 +29,11 @@ pub const SAFE_BOOT_ROOTS: &[&str] = &[
 /// `DenyDeviceClasses`, `DenyDeviceClassesRetroactive` and the list subkey.
 pub const DEVICE_INSTALL_RESTRICTIONS: &str = r"SOFTWARE\Policies\Microsoft\Windows\DeviceInstall\Restrictions";
 
+/// (Step 18) `AllowTelemetry` lives here.
+pub const DATA_COLLECTION: &str = r"SOFTWARE\Policies\Microsoft\Windows\DataCollection";
+/// (Step 18) `DODownloadMode` lives here.
+pub const DELIVERY_OPTIMIZATION: &str = r"SOFTWARE\Policies\Microsoft\Windows\DeliveryOptimization";
+
 /// Every key set_machine_value can write (plan 4.5, 4.8, the Phase 2 roots, and the
 /// device-class key of 4.7a, which 4.8's list did not name: added in Step 3). The whole
 /// subtree of each is writable, except Winlogon (only the Phase 2 value names, and its
@@ -44,6 +49,10 @@ pub const ALLOWED_ROOTS: &[&str] = &[
     r"SYSTEM\CurrentControlSet\Control\SafeBoot\Minimal",
     r"SYSTEM\CurrentControlSet\Control\SafeBoot\Network",
     DEVICE_INSTALL_RESTRICTIONS,
+    // (Step 18, PRD 22.3) The kiosk performance profile: the diagnostic data level and
+    // Delivery Optimization's download mode (peer sharing off). Policy keys only.
+    DATA_COLLECTION,
+    DELIVERY_OPTIMIZATION,
 ];
 
 fn is_subtree_root(root: &str) -> bool {

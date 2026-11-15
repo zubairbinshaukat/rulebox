@@ -90,6 +90,8 @@ pub enum JournalTarget {
     SafeBootEntry { mode: String },
     ServiceSecurity { name: String },
     ServicePrivileges { name: String },
+    /// (Step 17) The DACL of a Rulebox folder (the install folder or the `state` folder).
+    PathAcl { path: String },
     #[serde(untagged)]
     Unknown(serde_json::Value),
 }
@@ -332,6 +334,35 @@ pub enum Desired {
     PrinterPort { spec: PortSpec, mark: String },
     /// (Step 14) A per-machine connection to a printer share; the target names the `\\server\queue`.
     PrinterShare { mark: String },
+    /// (Step 17) The DACL of the agent service or of a Rulebox folder, as SDDL.
+    Sddl(String),
+    /// (Step 17) The required privileges of the agent service.
+    Privileges(Vec<String>),
+}
+
+/// (Step 17) `svc-sec:<service name>`.
+pub fn service_security_id(name: &str) -> String {
+    format!("svc-sec:{name}")
+}
+
+/// (Step 17) `svc-priv:<service name>`.
+pub fn service_privileges_id(name: &str) -> String {
+    format!("svc-priv:{name}")
+}
+
+/// (Step 17) `path-acl:<label>`: the label is a fixed word (`install`, `state`), never the path.
+pub fn path_acl_id(label: &str) -> String {
+    format!("path-acl:{label}")
+}
+
+/// (Step 17) The targets of tamper protection (plan 4.16). One of them that no longer holds its
+/// value was changed by somebody with administrator rights: `change` notes it for
+/// `lockdown::tamper` instead of the drift tracker.
+fn is_tamper_target(target: &JournalTarget) -> bool {
+    matches!(
+        target,
+        JournalTarget::ServiceSecurity { .. } | JournalTarget::ServicePrivileges { .. } | JournalTarget::PathAcl { .. }
+    )
 }
 
 /// (Step 7) What the agent state remembers about the AppLocker policy it installed: the hash of
@@ -434,9 +465,67 @@ enum Value {
     /// (Step 14) A Rulebox print queue, port or share connection: None when it is not there, else the mark
     /// the agent kept for it (`unmanaged` when it is there but the agent has no mark).
     Printer(Option<String>),
+    /// (Step 17) The required privileges of a service (compared as a set).
+    Privileges(Vec<String>),
+}
+
+/// Whether a target holds the wanted value. Two DACLs are compared without the flags Windows
+/// adds by itself when it stores one (`rulebox_win32::security::same_dacl`).
+fn same_value(a: &Value, b: &Value) -> bool {
+    match (a, b) {
+        (Value::Sddl(Some(a)), Value::Sddl(Some(b))) => rulebox_win32::security::same_dacl(a, b),
+        // The list is a set: Windows may hand it back in another order.
+        (Value::Privileges(a), Value::Privileges(b)) => sorted(a) == sorted(b),
+        _ => a == b,
+    }
+}
+
+fn sorted(list: &[String]) -> Vec<String> {
+    let mut list = list.to_vec();
+    list.sort();
+    list
 }
 
 impl Change {
+    /// (Step 17) The DACL of the agent service, id `svc-sec:<name>`.
+    pub fn service_security(owner: JournalOwner, name: &str, sddl: &str) -> Self {
+        Self {
+            id: service_security_id(name),
+            owner,
+            target: JournalTarget::ServiceSecurity { name: name.to_string() },
+            desired: Desired::Sddl(sddl.to_string()),
+            since_version: 0,
+            always_record: false,
+            secret_original: false,
+        }
+    }
+
+    /// (Step 17) The required privileges of the agent service, id `svc-priv:<name>`.
+    pub fn service_privileges(owner: JournalOwner, name: &str, privileges: &[&str]) -> Self {
+        Self {
+            id: service_privileges_id(name),
+            owner,
+            target: JournalTarget::ServicePrivileges { name: name.to_string() },
+            desired: Desired::Privileges(privileges.iter().map(|p| (*p).to_string()).collect()),
+            since_version: 0,
+            always_record: false,
+            secret_original: false,
+        }
+    }
+
+    /// (Step 17) The DACL of a Rulebox folder, id `path-acl:<label>`.
+    pub fn path_acl(owner: JournalOwner, label: &str, path: &std::path::Path, sddl: &str) -> Self {
+        Self {
+            id: path_acl_id(label),
+            owner,
+            target: JournalTarget::PathAcl { path: path.to_string_lossy().into_owned() },
+            desired: Desired::Sddl(sddl.to_string()),
+            since_version: 0,
+            always_record: false,
+            secret_original: false,
+        }
+    }
+
     pub fn machine(owner: JournalOwner, key: RegValueRef, desired: Option<RegData>) -> Self {
         Self {
             id: machine_id(&key),
@@ -699,6 +788,8 @@ fn original_of(
         Value::WlanFilters(list) => return Ok(OriginalValue::MultiString(list.clone())),
         // (Step 14) A queue found by our comment, a `Rulebox_` port and a connection the agent made: restore removes them.
         Value::Printer(_) => return Ok(OriginalValue::NotPresent),
+        // (Step 17) An empty list means "no limit": restore sets exactly that again.
+        Value::Privileges(list) => return Ok(OriginalValue::MultiString(list.clone())),
     };
     Ok(match current {
         // A Safe Mode key that was not there is restored by deleting the key.
@@ -771,6 +862,10 @@ pub fn change(ctx: &JournalCtx<'_>, change: &Change) -> Result<ChangeOutcome, Jo
         (JournalTarget::WlanFilters, Desired::WlanFilters(list)) => Value::WlanFilters(list.clone()),
         (JournalTarget::Printer { .. }, Desired::PrinterQueue { mark, .. } | Desired::PrinterShare { mark }) => Value::Printer(Some(mark.clone())),
         (JournalTarget::PrinterPort { .. }, Desired::PrinterPort { mark, .. }) => Value::Printer(Some(mark.clone())),
+        (JournalTarget::ServiceSecurity { .. } | JournalTarget::PathAcl { .. }, Desired::Sddl(sddl)) => {
+            Value::Sddl(Some(sddl.clone()))
+        }
+        (JournalTarget::ServicePrivileges { .. }, Desired::Privileges(list)) => Value::Privileges(list.clone()),
         _ => return Err(JournalError::Platform(PlatformError::Refused("unsupported journal target"))),
     };
     let current = read_current(ctx, &change.target)?;
@@ -779,7 +874,7 @@ pub fn change(ctx: &JournalCtx<'_>, change: &Change) -> Result<ChangeOutcome, Jo
     let recorded_now = match &existing {
         Some(_) => false,
         None => {
-            if current == desired && !change.always_record {
+            if same_value(&current, &desired) && !change.always_record {
                 return Ok(ChangeOutcome::Unchanged);
             }
             let original = original_of(ctx, &change.target, &current, change.secret_original)?;
@@ -799,7 +894,7 @@ pub fn change(ctx: &JournalCtx<'_>, change: &Change) -> Result<ChangeOutcome, Jo
     };
     crash_point!(AfterPending);
 
-    let needs_write = current != desired;
+    let needs_write = !same_value(&current, &desired);
     // (Phase 5 Step 9, plan 4.11 "Drift") A target Rulebox already applied that no longer holds
     // its value was changed by something else. A target the drift guard has muted ("fighting")
     // is left alone; otherwise the write below is noted so the reconcile pass can count it.
@@ -850,7 +945,11 @@ pub fn change(ctx: &JournalCtx<'_>, change: &Change) -> Result<ChangeOutcome, Jo
     }
     crash_point!(AfterWrite);
     if drifted {
-        ctx.shared.note_rewrite(&change.id, change.owner);
+        if is_tamper_target(&change.target) {
+            ctx.shared.note_tamper(&change.id);
+        } else {
+            ctx.shared.note_rewrite(&change.id, change.owner);
+        }
     }
 
     let needs_mark = recorded_now
@@ -947,6 +1046,15 @@ fn read_current(ctx: &JournalCtx<'_>, target: &JournalTarget) -> Result<Value, J
             list.sort();
             Ok(Value::WlanFilters(list))
         }
+        // (Step 17) The agent service's DACL and privileges, and a Rulebox folder's DACL.
+        JournalTarget::ServiceSecurity { name } => Ok(Value::Sddl(ctx.platform.get_service_security(name)?)),
+        JournalTarget::ServicePrivileges { name } => {
+            if ctx.platform.query_service(name)?.is_none() {
+                return Err(JournalError::Platform(PlatformError::NotFound));
+            }
+            Ok(Value::Privileges(ctx.platform.get_service_required_privileges(name)?))
+        }
+        JournalTarget::PathAcl { path } => Ok(Value::Sddl(ctx.platform.get_path_acl(std::path::Path::new(path))?)),
         _ => Err(JournalError::Platform(PlatformError::Refused("unsupported journal target"))),
     }
 }
@@ -977,6 +1085,16 @@ fn write_value(ctx: &JournalCtx<'_>, target: &JournalTarget, value: &Value) -> R
         (JournalTarget::WlanFilters, Value::WlanFilters(list)) => {
             let refs: Vec<&str> = list.iter().map(String::as_str).collect();
             Ok(ctx.platform.wlan_set_filters(&refs)?)
+        }
+        (JournalTarget::ServiceSecurity { name }, Value::Sddl(Some(sddl))) => {
+            Ok(ctx.platform.set_service_security(name, sddl)?)
+        }
+        (JournalTarget::ServicePrivileges { name }, Value::Privileges(list)) => {
+            let refs: Vec<&str> = list.iter().map(String::as_str).collect();
+            Ok(ctx.platform.set_service_required_privileges(name, &refs)?)
+        }
+        (JournalTarget::PathAcl { path }, Value::Sddl(Some(sddl))) => {
+            Ok(ctx.platform.set_path_acl(std::path::Path::new(path), sddl)?)
         }
         _ => Err(JournalError::Platform(PlatformError::Refused("unsupported journal target"))),
     }
@@ -1221,10 +1339,25 @@ fn write_original(ctx: &JournalCtx<'_>, entry: &JournalEntry) -> Result<(), Jour
             OriginalValue::NotPresent | OriginalValue::Absent => driver_package_back(ctx, published, sha256),
             _ => Err(JournalError::Platform(PlatformError::Refused("original does not fit a driver package"))),
         },
+        // (Step 17) The agent service's DACL and privileges and a Rulebox folder's DACL go back to
+        // what they were; a service or folder that is gone has nothing to restore.
+        JournalTarget::ServiceSecurity { .. } | JournalTarget::PathAcl { .. } => match &entry.original {
+            OriginalValue::Sddl(sddl) => gone_is_fine(write_value(ctx, &entry.target, &Value::Sddl(Some(sddl.clone())))),
+            _ => Err(JournalError::Platform(PlatformError::Refused("original does not fit a DACL"))),
+        },
+        JournalTarget::ServicePrivileges { .. } => match &entry.original {
+            OriginalValue::MultiString(list) => gone_is_fine(write_value(ctx, &entry.target, &Value::Privileges(list.clone()))),
+            _ => Err(JournalError::Platform(PlatformError::Refused("original does not fit a privilege list"))),
+        },
         JournalTarget::Unknown(_) => Err(JournalError::UnknownTarget),
-        // The layers of Steps 8 to 19 give the rest a restore; until then a journal that
-        // holds one cannot be restored here.
-        _ => Err(JournalError::Platform(PlatformError::Refused("no restore for this journal target yet"))),
+    }
+}
+
+fn gone_is_fine(result: Result<(), JournalError>) -> Result<(), JournalError> {
+    match result {
+        // "File not found" and "path not found" are how a missing folder answers.
+        Err(JournalError::Platform(PlatformError::NotFound | PlatformError::Win32 { code: 2 | 3, .. })) => Ok(()),
+        other => other,
     }
 }
 
@@ -1322,6 +1455,9 @@ pub fn startup_recover(ctx: &JournalCtx<'_>) -> StartupReport {
                     | JournalTarget::WlanProfile { .. }
                     | JournalTarget::Printer { .. }
                     | JournalTarget::PrinterPort { .. }
+                    | JournalTarget::ServiceSecurity { .. }
+                    | JournalTarget::ServicePrivileges { .. }
+                    | JournalTarget::PathAcl { .. }
                     | JournalTarget::WlanFilters => {
                         match read_current(ctx, target) {
                             Ok(current) => original_matches(ctx, &current, &entry.original),
@@ -1364,6 +1500,10 @@ fn original_matches(ctx: &JournalCtx<'_>, current: &Value, original: &OriginalVa
         (Value::Printer(now), OriginalValue::NotPresent | OriginalValue::Absent) => return now.is_none(),
         (Value::WlanFilters(now), OriginalValue::NotPresent | OriginalValue::Absent) => return now.is_empty(),
         (Value::WlanFilters(now), OriginalValue::MultiString(was)) => return now == was,
+        (Value::Sddl(now), OriginalValue::Sddl(was)) => {
+            return now.as_deref().is_some_and(|now| rulebox_win32::security::same_dacl(now, was))
+        }
+        (Value::Privileges(now), OriginalValue::MultiString(was)) => return sorted(now) == sorted(was),
         (Value::Reg(current), _) => current,
         _ => return false,
     };

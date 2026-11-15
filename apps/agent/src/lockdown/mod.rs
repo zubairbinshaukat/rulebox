@@ -20,6 +20,9 @@
 //! rollback) and `reporting` (the change-driven, batched calls to the backend; the payloads are in
 //! `backend::reports`). Step 10 writes the Convex functions they call.
 //!
+//! Step 17 added the tamper part of L7 (`tamper`: the agent service's DACL and required
+//! privileges, the ACL self-check of the Rulebox folders, and the clock-jump watch).
+//!
 //! Not wired into the reconciler yet (Step 20 does that), so the items are unused in
 //! a non-test build for now.
 #![allow(dead_code)]
@@ -37,10 +40,13 @@ pub mod findings;
 pub mod invariants;
 pub mod lkg;
 pub mod machine;
+// (Step 18) Per-user tuning and the kiosk performance profile (PRD 22.2, 22.3).
+pub mod perf;
 pub mod printers;
 pub mod procwatch;
 pub mod reporting;
 pub mod staff;
+pub mod tamper;
 pub mod usb;
 
 /// What a layer reports as its mode (`layerState.mode`, plan 4.11).

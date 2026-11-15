@@ -30,7 +30,8 @@ struct Module {
 
 const MODULES: &[Module] = &[
     Module { file: "machinereg", read_only: &["get_machine_value", "list_value_names"], guarded: 2 },
-    Module { file: "staffreg", read_only: &["read_value"], guarded: 2 },
+    // (Step 18) `list_value_names` only reads (the Staff start-up entries).
+    Module { file: "staffreg", read_only: &["read_value", "list_value_names"], guarded: 2 },
     // (Step 6) `read_policy` and `citool_available` only read; `refresh` (CiTool) is guarded.
     Module { file: "codeintegrity", read_only: &["active_dir", "list_policies", "read_policy", "citool_available"], guarded: 3 },
     Module { file: "applocker", read_only: &["get_policy"], guarded: 2 },
@@ -246,9 +247,14 @@ fn a_staff_write_outside_the_roots_is_forbidden_before_any_hive_is_opened() {
 #[test]
 fn both_root_lists_are_what_the_plan_says() {
     // 4.7 (Staff) and 4.8 (machine) plus the Phase 2 roots and the 4.7a device-class key.
-    assert_eq!(staffreg::ALLOWED_ROOTS.len(), 12);
+    // (Step 18) Staff 12 -> 16: the Copilot and tips user policies (`WindowsCopilot`, `CloudContent`),
+    // `Explorer\VisualEffects` and `Control Panel\Desktop\WindowMetrics` (PRD 22.2). Machine 9 -> 11:
+    // the `DataCollection` and `DeliveryOptimization` policy keys (PRD 22.3).
+    assert_eq!(staffreg::ALLOWED_ROOTS.len(), 16);
     assert!(staffreg::ALLOWED_ROOTS.contains(&r"Software\Policies\Microsoft\Windows\RemovableStorageDevices"));
-    assert_eq!(machinereg::ALLOWED_ROOTS.len(), 9);
+    assert_eq!(machinereg::ALLOWED_ROOTS.len(), 11);
+    assert!(machinereg::ALLOWED_ROOTS.contains(&machinereg::DATA_COLLECTION));
+    assert!(machinereg::ALLOWED_ROOTS.contains(&machinereg::DELIVERY_OPTIMIZATION));
     assert!(machinereg::ALLOWED_ROOTS.contains(&machinereg::DEVICE_INSTALL_RESTRICTIONS));
     // Nothing that opens the way to a shell, a service or start-up code.
     for root in machinereg::ALLOWED_ROOTS.iter().chain(staffreg::ALLOWED_ROOTS) {

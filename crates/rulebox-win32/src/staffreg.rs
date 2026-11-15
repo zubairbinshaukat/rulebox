@@ -13,7 +13,7 @@ use std::path::Path;
 
 use crate::error::{Result, Win32Error};
 use crate::guard::require_test_machine;
-use crate::registry::{get_loaded_user_value, with_user_hive, RegValue};
+use crate::registry::{get_loaded_user_value, list_loaded_user_value_names, with_user_hive, RegValue};
 use crate::sid::Sid;
 
 /// Keys (relative to the user's hive) whose whole subtree may be written: plan 4.7.
@@ -34,6 +34,13 @@ pub const ALLOWED_ROOTS: &[&str] = &[
     r"Software\Microsoft\Windows\CurrentVersion\BackgroundAccessApplications",
     // Read, and journalled removal of Staff entries (Step 18).
     r"Software\Microsoft\Windows\CurrentVersion\Run",
+    // Step 18 tuning (PRD 22.2), added when the step was built: Copilot and tips have a user
+    // policy only under these two keys; "best performance" is `VisualFXSetting`; the window
+    // animation is `MinAnimate`.
+    r"Software\Policies\Microsoft\Windows\WindowsCopilot",
+    r"Software\Policies\Microsoft\Windows\CloudContent",
+    r"Software\Microsoft\Windows\CurrentVersion\Explorer\VisualEffects",
+    r"Control Panel\Desktop\WindowMetrics",
 ];
 
 fn forbidden(path: &str) -> Win32Error {
@@ -78,6 +85,19 @@ pub fn read_value(sid: &Sid, profile: &Path, path: &str, name: &str) -> Result<O
         return Ok(found);
     }
     with_user_hive(sid, profile, |hive| hive.get(path, name))
+}
+
+/// (Phase 5 Step 18) The value names directly under `<hive of sid>\<path>` (the Staff
+/// start-up entries); empty when the key does not exist. Same rules as [`read_value`]: a
+/// signed-in user's hive is read as it is, a signed-out one has to be mounted, which the
+/// guard covers. Never changes a value.
+pub fn list_value_names(sid: &Sid, profile: &Path, path: &str) -> Result<Vec<String>> {
+    check_path(path)?;
+    let path = path.trim_matches('\\');
+    if let Some(found) = list_loaded_user_value_names(sid, path)? {
+        return Ok(found);
+    }
+    with_user_hive(sid, profile, |hive| hive.value_names(path))
 }
 
 /// Writes one value in the hive of `sid`.
@@ -156,6 +176,10 @@ mod tests {
             Err(Win32Error::Forbidden(_))
         ));
         assert!(matches!(read_value(&sid, profile, r"Software\Classes", "X"), Err(Win32Error::Forbidden(_))));
+        assert!(matches!(
+            list_value_names(&sid, profile, r"Software\Microsoft\Windows\CurrentVersion\RunOnce"),
+            Err(Win32Error::Forbidden(_))
+        ));
     }
 
     #[test]

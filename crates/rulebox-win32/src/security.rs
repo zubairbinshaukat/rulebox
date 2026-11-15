@@ -29,6 +29,25 @@ use crate::util::{from_wide_ptr, to_wide, LocalAllocGuard, OwnedHandle};
 /// SYSTEM and Administrators full control, nobody else, no inheritance from the parent.
 pub const PROTECTED_DIR_SDDL: &str = "D:P(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)";
 
+/// (Phase 5 Step 17, plan 4.16) The install folder (`%ProgramFiles%\Rulebox`): SYSTEM and
+/// Administrators full control, Users read and execute (`0x1200a9`), no inheritance from the
+/// parent. A standard user (the Staff account) can run the programs and cannot change them.
+pub const INSTALL_DIR_SDDL: &str = "D:P(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)(A;OICI;0x1200a9;;;BU)";
+
+/// (Phase 5 Step 17) A DACL as it is compared: the flags Windows adds by itself when it
+/// stores one (`AI` auto-inherited, `AR` auto-inherit requested) are dropped; `P`
+/// (protected) and the entries, in their order, stay. No API call.
+pub fn normalize_dacl(sddl: &str) -> String {
+    let (flags, aces) = split_dacl(sddl);
+    let flags = flags.replace("AI", "").replace("AR", "");
+    format!("D:{flags}{aces}")
+}
+
+/// (Phase 5 Step 17) Whether two DACLs say the same thing ([`normalize_dacl`]).
+pub fn same_dacl(a: &str, b: &str) -> bool {
+    normalize_dacl(a) == normalize_dacl(b)
+}
+
 /// A security descriptor built from SDDL, with the `SECURITY_ATTRIBUTES` that
 /// points at it. Owns both; pass `as_ptr()` as `lpSecurityAttributes`.
 pub struct SecurityAttributes {
@@ -455,6 +474,30 @@ mod tests {
         assert!(!dacl_matches("D:AI(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)"));
         // Extra entry.
         assert!(!dacl_matches("D:P(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)(A;OICI;FA;;;WD)"));
+    }
+
+    #[test]
+    fn dacls_compare_without_the_flags_windows_adds() {
+        assert_eq!(normalize_dacl("D:PAI(A;OICI;FA;;;SY)"), "D:P(A;OICI;FA;;;SY)");
+        assert_eq!(normalize_dacl("D:AI(A;OICIID;FA;;;SY)"), "D:(A;OICIID;FA;;;SY)");
+        assert!(same_dacl("D:PAI(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)", PROTECTED_DIR_SDDL));
+        assert!(same_dacl("D:(A;;LC;;;IU)", "D:AR(A;;LC;;;IU)"));
+        // Protection, an extra entry, another right and another order all count.
+        assert!(!same_dacl("D:AI(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)", PROTECTED_DIR_SDDL));
+        assert!(!same_dacl("D:P(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)(A;OICI;FA;;;WD)", PROTECTED_DIR_SDDL));
+        assert!(!same_dacl("D:P(A;OICI;FA;;;BA)(A;OICI;FA;;;SY)", PROTECTED_DIR_SDDL));
+        assert!(!same_dacl(INSTALL_DIR_SDDL, "D:P(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)(A;OICI;FA;;;BU)"));
+    }
+
+    #[test]
+    fn the_install_folder_dacl_lets_users_run_and_not_write() {
+        assert_eq!(INSTALL_DIR_SDDL, "D:P(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)(A;OICI;0x1200a9;;;BU)");
+        // The state folder's entries, plus read and execute for Users.
+        assert!(INSTALL_DIR_SDDL.starts_with(PROTECTED_DIR_SDDL));
+        // 0x1200a9 = FILE_GENERIC_READ | FILE_GENERIC_EXECUTE: no write (0x2), append (0x4),
+        // delete (0x10000) or change of the DACL (0x40000).
+        assert_eq!(0x0012_00a9u32 & (0x2 | 0x4 | 0x40 | 0x100 | 0x1_0000 | 0x4_0000 | 0x8_0000), 0);
+        assert!(SecurityAttributes::from_sddl(INSTALL_DIR_SDDL).unwrap().dacl().is_ok());
     }
 
     #[test]

@@ -1,6 +1,7 @@
 //! L7, the boot part (plan 4.16): the agent's Safe Mode registration, the Safe Mode
 //! behaviour, automatic failover to the recovery environment and the physical-protection
-//! report. (Service security, privileges and ACL self-checks are Step 17.)
+//! report. (Service security, privileges and ACL self-checks are Step 17: `tamper.rs`, which
+//! [`apply`] calls.)
 //!
 //! * **Safe Mode registration.** `SafeBoot\Minimal\RuleboxAgent` and
 //!   `SafeBoot\Network\RuleboxAgent`, default value `Service`, journalled as
@@ -106,6 +107,9 @@ pub fn apply(ctx: &ApplyCtx<'_>, doc: &AgentDoc) -> LayerState {
         }
     }
 
+    // (Step 17) Tamper protection: the service DACL and privileges, the folder ACLs.
+    super::tamper::apply(ctx, policy.is_some(), &mut tally, &mut restore);
+
     restore_present(ctx, &restore, &mut tally);
     LayerState { mode, state: tally.status(), detail: tally.detail() }
 }
@@ -125,6 +129,13 @@ pub struct SecurityReport {
     pub auto_recovery: &'static str,
     /// The agent is registered for both Safe Mode flavours.
     pub safe_mode_agent: bool,
+    /// (Step 17) `"ok"` or `"drift"`; absent while tamper protection is off. Filled by
+    /// `tamper::TamperTracker::fill_report`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub service_acl: Option<&'static str>,
+    /// (Step 17) Folder ACL repairs since the agent started; absent while tamper protection is off.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub acl_drift: Option<u64>,
 }
 
 /// Maps the raw readings to the report. `recovery_enabled` is `bcd_get` of the element.
@@ -150,6 +161,8 @@ pub fn report_from(posture: &SecurityPosture, recovery_enabled: Option<&str>, sa
         },
         auto_recovery: if recovery_enabled.is_some_and(|word| word.eq_ignore_ascii_case("No")) { "off" } else { "on" },
         safe_mode_agent,
+        service_acl: None,
+        acl_drift: None,
     }
 }
 

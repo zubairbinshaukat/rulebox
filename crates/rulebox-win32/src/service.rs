@@ -35,6 +35,42 @@ pub const START_AUTO: u32 = 2;
 pub const START_MANUAL: u32 = 3;
 pub const START_DISABLED: u32 = 4;
 
+/// (Phase 5 Step 17, plan 4.16) The DACL of the agent service: SYSTEM and Administrators
+/// have every right; a signed-in user (`IU`) and any authenticated user (`AU`) can only ask
+/// for the status (`LC`): no stop, no start, no configuration, no read of the DACL.
+/// Administrators keep everything on purpose: they need it for `recover` and for upgrades.
+pub const AGENT_SERVICE_SDDL: &str =
+    "D:(A;;CCDCLCSWRPWPDTLOCRSDRCWDWO;;;SY)(A;;CCDCLCSWRPWPDTLOCRSDRCWDWO;;;BA)(A;;LC;;;IU)(A;;LC;;;AU)";
+
+/// (Phase 5 Step 17, plan 4.16) The privileges the agent service keeps; Windows removes every
+/// other one from its token at the next start. This is the plan's starting list.
+/// `SeLoadDriverPrivilege` is in it because the agent publishes printer drivers (Step 14b).
+// TODO(Step 21): measure on the VM which of these the agent really uses and shorten the list.
+pub const AGENT_REQUIRED_PRIVILEGES: &[&str] = &[
+    "SeTcbPrivilege",
+    "SeAssignPrimaryTokenPrivilege",
+    "SeIncreaseQuotaPrivilege",
+    "SeSecurityPrivilege",
+    "SeBackupPrivilege",
+    "SeRestorePrivilege",
+    "SeTakeOwnershipPrivilege",
+    "SeDebugPrivilege",
+    "SeShutdownPrivilege",
+    "SeSystemProfilePrivilege",
+    "SeImpersonatePrivilege",
+    "SeChangeNotifyPrivilege",
+    "SeCreateGlobalPrivilege",
+    "SeLoadDriverPrivilege",
+];
+
+/// A service cannot start without this one (it is what lets a process walk folders).
+pub const CHANGE_NOTIFY_PRIVILEGE: &str = "SeChangeNotifyPrivilege";
+
+/// The rights an administrator must keep on the agent service: change the configuration,
+/// start, stop, delete, and replace the DACL.
+const ADMIN_MUST_KEEP: u32 = 0x0002 | 0x0010 | 0x0020 | 0x0001_0000 | 0x0004_0000;
+const SERVICE_ALL_ACCESS_MASK: u32 = 0x000F_01FF;
+
 /// `READ_CONTROL` and `WRITE_DAC`, the standard rights for reading and replacing a DACL.
 const READ_CONTROL: u32 = 0x0002_0000;
 const WRITE_DAC: u32 = 0x0004_0000;
@@ -92,6 +128,95 @@ pub fn check_agent_only(name: &str) -> Result<()> {
         Ok(())
     } else {
         Err(Win32Error::Forbidden("only the Rulebox agent service's security is changed".into()))
+    }
+}
+
+/// (Phase 5 Step 17) The rule of a required-privileges list (no API call, no guard). An
+/// empty list is fine (it removes the limit). Any other list must hold
+/// `SeChangeNotifyPrivilege` (without it the service would not start), must not name a
+/// privilege twice, and every name looks like `Se...Privilege`.
+pub fn check_required_privileges(privileges: &[&str]) -> Result<()> {
+    if privileges.is_empty() {
+        return Ok(());
+    }
+    for (index, name) in privileges.iter().enumerate() {
+        let plain = name.len() > "SePrivilege".len()
+            && name.starts_with("Se")
+            && name.ends_with("Privilege")
+            && name.chars().all(|c| c.is_ascii_alphanumeric());
+        if !plain {
+            return Err(Win32Error::Forbidden(format!("{name:?} is not a privilege name")));
+        }
+        if privileges[..index].iter().any(|earlier| earlier.eq_ignore_ascii_case(name)) {
+            return Err(Win32Error::Forbidden(format!("{name} is listed twice")));
+        }
+    }
+    if !privileges.iter().any(|name| name.eq_ignore_ascii_case(CHANGE_NOTIFY_PRIVILEGE)) {
+        return Err(Win32Error::Forbidden(format!(
+            "the list has no {CHANGE_NOTIFY_PRIVILEGE}: the service would not start"
+        )));
+    }
+    Ok(())
+}
+
+/// The access mask of an SDDL rights field of a service ACE (`CCDCLC...`, `GA`, or `0x...`).
+/// A letter pair this does not know adds nothing.
+fn service_rights_mask(rights: &str) -> u32 {
+    if let Some(hex) = rights.strip_prefix("0x").or_else(|| rights.strip_prefix("0X")) {
+        return u32::from_str_radix(hex, 16).unwrap_or(0);
+    }
+    let bytes = rights.as_bytes();
+    let mut mask = 0u32;
+    for pair in bytes.chunks(2) {
+        mask |= match pair {
+            b"CC" => 0x0001,
+            b"DC" => 0x0002,
+            b"LC" => 0x0004,
+            b"SW" => 0x0008,
+            b"RP" => 0x0010,
+            b"WP" => 0x0020,
+            b"DT" => 0x0040,
+            b"LO" => 0x0080,
+            b"CR" => 0x0100,
+            b"SD" => 0x0001_0000,
+            b"RC" => 0x0002_0000,
+            b"WD" => 0x0004_0000,
+            b"WO" => 0x0008_0000,
+            b"GA" => SERVICE_ALL_ACCESS_MASK,
+            _ => 0,
+        };
+    }
+    mask
+}
+
+/// (Phase 5 Step 17) The rule of a DACL for the agent service (no API call, no guard):
+/// Administrators keep the rights to configure, start, stop and delete the service and to
+/// replace its DACL, and no entry denies Administrators or SYSTEM anything. Rulebox never
+/// makes its service unstoppable for an administrator (they need it for `recover` and for
+/// upgrades).
+pub fn check_service_sddl(sddl: &str) -> Result<()> {
+    if !sddl.starts_with("D:") {
+        return Err(Win32Error::Forbidden("the service security text has no DACL".into()));
+    }
+    let mut admin_mask = 0u32;
+    for ace in sddl.split('(').skip(1) {
+        let ace = ace.split(')').next().unwrap_or("");
+        let fields: Vec<&str> = ace.split(';').collect();
+        let (Some(kind), Some(rights), Some(sid)) = (fields.first(), fields.get(2), fields.get(5)) else {
+            return Err(Win32Error::Forbidden("the service security text has a broken entry".into()));
+        };
+        let trusted = matches!(*sid, "BA" | "SY" | "S-1-5-32-544" | "S-1-5-18");
+        if kind.starts_with('D') && trusted {
+            return Err(Win32Error::Forbidden("the service DACL must not deny Administrators or SYSTEM".into()));
+        }
+        if *kind == "A" && matches!(*sid, "BA" | "S-1-5-32-544") {
+            admin_mask |= service_rights_mask(rights);
+        }
+    }
+    if admin_mask & ADMIN_MUST_KEEP == ADMIN_MUST_KEEP {
+        Ok(())
+    } else {
+        Err(Win32Error::Forbidden("the service DACL must leave Administrators able to stop and change the service".into()))
     }
 }
 
@@ -206,6 +331,7 @@ pub fn get_security(name: &str) -> Result<Option<String>> {
 /// DESTRUCTIVE: guarded.
 pub fn set_security(name: &str, sddl: &str) -> Result<()> {
     check_agent_only(name)?;
+    check_service_sddl(sddl)?;
     require_test_machine()?;
     let attrs = SecurityAttributes::from_sddl(sddl)?;
     let service = require_service(name, WRITE_DAC)?;
@@ -273,6 +399,7 @@ fn parse_multi_string(multi: PWSTR) -> Vec<String> {
 /// DESTRUCTIVE: guarded.
 pub fn set_required_privileges(name: &str, privileges: &[&str]) -> Result<()> {
     check_agent_only(name)?;
+    check_required_privileges(privileges)?;
     require_test_machine()?;
     if privileges.iter().any(|p| p.is_empty() || !p.chars().all(|c| c.is_ascii_alphanumeric())) {
         return Err(Win32Error::Invalid("a privilege name is letters and digits".into()));
@@ -338,8 +465,98 @@ mod tests {
             return;
         }
         assert!(matches!(set_start("Spooler", START_DISABLED), Err(Win32Error::Guard(_))));
-        assert!(matches!(set_security(AGENT_SERVICE, "D:P(A;;GA;;;SY)"), Err(Win32Error::Guard(_))));
-        assert!(matches!(set_required_privileges(AGENT_SERVICE, &["SeTcbPrivilege"]), Err(Win32Error::Guard(_))));
+        assert!(matches!(set_security(AGENT_SERVICE, AGENT_SERVICE_SDDL), Err(Win32Error::Guard(_))));
+        assert!(matches!(set_required_privileges(AGENT_SERVICE, AGENT_REQUIRED_PRIVILEGES), Err(Win32Error::Guard(_))));
+        assert!(matches!(set_required_privileges(AGENT_SERVICE, &[]), Err(Win32Error::Guard(_))));
+    }
+
+    // -- Phase 5 Step 17 ---------------------------------------------------------------------
+
+    #[test]
+    fn the_agent_service_dacl_is_the_one_of_plan_4_16() {
+        assert_eq!(
+            AGENT_SERVICE_SDDL,
+            "D:(A;;CCDCLCSWRPWPDTLOCRSDRCWDWO;;;SY)(A;;CCDCLCSWRPWPDTLOCRSDRCWDWO;;;BA)(A;;LC;;;IU)(A;;LC;;;AU)"
+        );
+        // SYSTEM and Administrators: every service right.
+        assert_eq!(service_rights_mask("CCDCLCSWRPWPDTLOCRSDRCWDWO"), SERVICE_ALL_ACCESS_MASK);
+        // Everybody else: query the status, nothing more (no stop 0x20, no config 0x2).
+        assert_eq!(service_rights_mask("LC"), 0x0004);
+        let others: Vec<&str> = AGENT_SERVICE_SDDL.split('(').skip(3).collect();
+        assert_eq!(others, ["A;;LC;;;IU)", "A;;LC;;;AU)"]);
+        assert!(check_service_sddl(AGENT_SERVICE_SDDL).is_ok());
+        // Windows can parse it (a pure conversion: nothing on the machine changes).
+        assert!(SecurityAttributes::from_sddl(AGENT_SERVICE_SDDL).is_ok());
+    }
+
+    #[test]
+    fn a_service_dacl_never_locks_administrators_out() {
+        // What Windows gives a new service, and a hex or generic spelling of full control.
+        for good in [
+            "D:(A;;CCLCSWRPWPDTLOCRRC;;;SY)(A;;CCDCLCSWRPWPDTLOCRSDRCWDWO;;;BA)(A;;CCLCSWLOCRRC;;;IU)(A;;CCLCSWLOCRRC;;;SU)",
+            "D:(A;;GA;;;SY)(A;;GA;;;BA)",
+            "D:(A;;0xf01ff;;;S-1-5-32-544)",
+        ] {
+            assert!(check_service_sddl(good).is_ok(), "{good}");
+        }
+        for bad in [
+            // No entry for Administrators at all.
+            "D:P(A;;GA;;;SY)",
+            // Administrators cannot stop it (no WP).
+            "D:(A;;GA;;;SY)(A;;CCDCLCSWRPDTLOCRSDRCWDWO;;;BA)",
+            // Administrators cannot replace the DACL (no WD).
+            "D:(A;;GA;;;SY)(A;;CCDCLCSWRPWPDTLOCRSDRCWO;;;BA)",
+            // A deny entry for Administrators or SYSTEM.
+            "D:(D;;WP;;;BA)(A;;GA;;;BA)",
+            "D:(D;;WP;;;SY)(A;;GA;;;BA)",
+            "D:",
+            "garbage",
+            "D:(A;;GA)",
+        ] {
+            assert!(matches!(check_service_sddl(bad), Err(Win32Error::Forbidden(_))), "{bad}");
+            assert!(matches!(set_security(AGENT_SERVICE, bad), Err(Win32Error::Forbidden(_))), "{bad}");
+        }
+    }
+
+    #[test]
+    fn the_required_privileges_are_the_starting_list_and_pass_the_rule() {
+        assert!(check_required_privileges(AGENT_REQUIRED_PRIVILEGES).is_ok());
+        assert_eq!(AGENT_REQUIRED_PRIVILEGES.len(), 14);
+        for needed in [
+            "SeTcbPrivilege",
+            "SeAssignPrimaryTokenPrivilege",
+            "SeIncreaseQuotaPrivilege",
+            "SeBackupPrivilege",
+            "SeRestorePrivilege",
+            "SeChangeNotifyPrivilege",
+        ] {
+            assert!(AGENT_REQUIRED_PRIVILEGES.contains(&needed), "{needed}");
+        }
+    }
+
+    #[test]
+    fn a_privilege_list_without_change_notify_is_refused() {
+        // The service would not start with it.
+        let without: Vec<&str> =
+            AGENT_REQUIRED_PRIVILEGES.iter().copied().filter(|name| *name != CHANGE_NOTIFY_PRIVILEGE).collect();
+        assert_eq!(without.len(), AGENT_REQUIRED_PRIVILEGES.len() - 1);
+        let error = check_required_privileges(&without).unwrap_err();
+        assert!(matches!(&error, Win32Error::Forbidden(text) if text.contains("would not start")), "{error:?}");
+        // Refused before the guard and before any API call.
+        assert!(matches!(set_required_privileges(AGENT_SERVICE, &without), Err(Win32Error::Forbidden(_))));
+        assert!(matches!(set_required_privileges(AGENT_SERVICE, &["SeTcbPrivilege"]), Err(Win32Error::Forbidden(_))));
+        // An empty list removes the limit: allowed.
+        assert!(check_required_privileges(&[]).is_ok());
+        // Not a privilege name, or the same one twice.
+        for bad in [
+            vec!["SeChangeNotifyPrivilege", "Administrator"],
+            vec!["SeChangeNotifyPrivilege", "Se Tcb Privilege"],
+            vec!["SeChangeNotifyPrivilege", ""],
+            vec!["SeChangeNotifyPrivilege", "SePrivilege"],
+            vec!["SeChangeNotifyPrivilege", "sechangenotifyprivilege"],
+        ] {
+            assert!(matches!(check_required_privileges(&bad), Err(Win32Error::Forbidden(_))), "{bad:?}");
+        }
     }
 
     #[test]

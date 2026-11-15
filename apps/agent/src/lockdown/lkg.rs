@@ -53,9 +53,11 @@ pub const CRASH_WATCH_MS: u64 = 5 * 60_000;
 /// Refused configurations kept (plan 4.11 step 3 and Step 16: bounded to 20 entries, the oldest goes first).
 pub const MAX_REFUSED: usize = 20;
 
-/// The layers a rollback undoes: L1 to L4 and L7 (L5, the process watch, writes no journal entry).
-pub const ROLLBACK_OWNERS: [JournalOwner; 5] =
-    [JournalOwner::L1, JournalOwner::L2, JournalOwner::L3, JournalOwner::L4, JournalOwner::L7];
+/// The layers a rollback undoes: L1 to L4 and L7 (L5, the process watch, writes no journal entry),
+/// and (Step 18) the performance layer: a tuning value or a disabled service of the failed version
+/// may be what broke the Staff App, so it goes back with the rest.
+pub const ROLLBACK_OWNERS: [JournalOwner; 6] =
+    [JournalOwner::L1, JournalOwner::L2, JournalOwner::L3, JournalOwner::L4, JournalOwner::L7, JournalOwner::Perf];
 
 /// Why a candidate was rolled back.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

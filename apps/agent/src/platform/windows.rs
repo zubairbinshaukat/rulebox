@@ -588,6 +588,17 @@ impl Platform for WindowsPlatform {
         Ok(value.map(reg_data))
     }
 
+    fn list_staff_value_names(&self, sid: &str, path: &str) -> Result<Vec<String>, PlatformError> {
+        let sid = parse_sid(sid)?;
+        // The account (and with it the hive) may be gone: nothing is there to list.
+        let profile = match accounts::profile_path(&sid) {
+            Ok(profile) => profile,
+            Err(Win32Error::NotFound) => return Ok(Vec::new()),
+            Err(error) => return Err(map_err(error)),
+        };
+        staffreg::list_value_names(&sid, &profile, path).map_err(map_err)
+    }
+
     fn list_ci_policies(&self) -> Result<Vec<String>, PlatformError> {
         codeintegrity::list_policies().map_err(map_err)
     }
@@ -778,12 +789,14 @@ impl Platform for WindowsPlatform {
 
     fn set_service_security(&self, name: &str, sddl: &str) -> Result<(), PlatformError> {
         service::check_agent_only(name).map_err(map_err)?;
+        service::check_service_sddl(sddl).map_err(map_err)?;
         guard()?;
         service::set_security(name, sddl).map_err(map_err)
     }
 
     fn set_service_required_privileges(&self, name: &str, privileges: &[&str]) -> Result<(), PlatformError> {
         service::check_agent_only(name).map_err(map_err)?;
+        service::check_required_privileges(privileges).map_err(map_err)?;
         guard()?;
         service::set_required_privileges(name, privileges).map_err(map_err)
     }
@@ -1115,7 +1128,7 @@ mod tests {
         blocked("set_applocker_policy", p.set_applocker_policy("<AppLockerPolicy/>", AppLockerMechanism::Local));
         blocked("clear_applocker_policy", p.clear_applocker_policy(AppLockerMechanism::Csp));
         blocked("set_service_start", p.set_service_start("Spooler", 4));
-        blocked("set_service_security", p.set_service_security("RuleboxAgent", "D:P(A;;GA;;;SY)"));
+        blocked("set_service_security", p.set_service_security("RuleboxAgent", service::AGENT_SERVICE_SDDL));
         blocked("set_service_required_privileges", p.set_service_required_privileges("RuleboxAgent", &[]));
         blocked("set_account_lockout", p.set_account_lockout(LockoutPolicy { threshold: 5, duration_s: 900, window_s: 900 }));
         blocked("wlan_set_profile", p.wlan_set_profile(wlan_xml));
@@ -1186,6 +1199,9 @@ mod tests {
         other(p.deploy_ci_policy("not-a-guid", b"x"), "GUID");
         other(p.set_service_start("RuleboxAgent", 4), "automatically");
         other(p.set_service_security("Spooler", "D:"), "agent service");
+        // (Step 17) Refused before the guard: Administrators locked out, no SeChangeNotifyPrivilege.
+        other(p.set_service_security("RuleboxAgent", "D:P(A;;GA;;;SY)"), "Administrators");
+        other(p.set_service_required_privileges("RuleboxAgent", &["SeTcbPrivilege"]), "would not start");
         other(p.wlan_set_profile("<WLANProfile><name>Home</name></WLANProfile>"), "Rulebox");
         other(p.wlan_delete_profile("Home"), "Rulebox");
         other(p.printer_delete("Microsoft Print to PDF"), "Rulebox made");

@@ -69,6 +69,8 @@ pub enum SimOp {
     // Phase 5 Step 3 (plan 4.5). Reads first, then the mutating ones.
     ListMachineValueNames,
     ReadStaffValue,
+    // Phase 5 Step 18 (read-only).
+    ListStaffValueNames,
     ListCiPolicies,
     ReadCiPolicy,
     GetApplockerPolicy,
@@ -152,6 +154,7 @@ impl SimOp {
                 | SimOp::AppDataRedirected
                 | SimOp::ListMachineValueNames
                 | SimOp::ReadStaffValue
+                | SimOp::ListStaffValueNames
                 | SimOp::ListCiPolicies
                 | SimOp::ReadCiPolicy
                 | SimOp::GetApplockerPolicy
@@ -1032,6 +1035,20 @@ impl Platform for SimPlatform {
         Ok(lock(&self.world).staff_values.get(&staff_key(sid, path, name)).cloned())
     }
 
+    fn list_staff_value_names(&self, sid: &str, path: &str) -> Result<Vec<String>, PlatformError> {
+        self.check(SimOp::ListStaffValueNames)?;
+        staffreg::check_path(path).map_err(map_err)?;
+        let (sid, path, _) = staff_key(sid, path, "");
+        let mut names: Vec<String> = lock(&self.world)
+            .staff_values
+            .keys()
+            .filter(|(s, p, _)| *s == sid && *p == path)
+            .map(|(_, _, name)| name.clone())
+            .collect();
+        names.sort();
+        Ok(names)
+    }
+
     fn list_ci_policies(&self) -> Result<Vec<String>, PlatformError> {
         self.check(SimOp::ListCiPolicies)?;
         Ok(lock(&self.world).ci_policies.keys().cloned().collect())
@@ -1312,6 +1329,8 @@ impl Platform for SimPlatform {
     fn set_service_security(&self, name: &str, sddl: &str) -> Result<(), PlatformError> {
         self.check(SimOp::SetServiceSecurity)?;
         service::check_agent_only(name).map_err(map_err)?;
+        // (Step 17) Administrators are never locked out of the service.
+        service::check_service_sddl(sddl).map_err(map_err)?;
         match lock(&self.world).services.get_mut(name) {
             Some(svc) => {
                 svc.sddl = sddl.to_string();
@@ -1324,9 +1343,11 @@ impl Platform for SimPlatform {
     fn set_service_required_privileges(&self, name: &str, privileges: &[&str]) -> Result<(), PlatformError> {
         self.check(SimOp::SetServiceRequiredPrivileges)?;
         service::check_agent_only(name).map_err(map_err)?;
+        // (Step 17) A list without `SeChangeNotifyPrivilege` would stop the service from starting.
+        service::check_required_privileges(privileges).map_err(map_err)?;
         match lock(&self.world).services.get_mut(name) {
             Some(svc) => {
-                svc.privileges = privileges.iter().map(|p| (*p).to_string()).collect();
+                svc.privileges =privileges.iter().map(|p| (*p).to_string()).collect();
                 Ok(())
             }
             None => Err(PlatformError::NotFound),

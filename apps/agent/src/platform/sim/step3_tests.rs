@@ -117,15 +117,20 @@ fn services_keep_start_security_and_privileges_with_the_real_rules() {
     assert_eq!(sim.query_service("RuleboxAgent").unwrap(), Some(ServiceConfig { start: 2 }));
 
     let original = sim.get_service_security("RuleboxAgent").unwrap().unwrap();
-    sim.set_service_security("RuleboxAgent", "D:P(A;;GA;;;SY)").unwrap();
-    assert_eq!(sim.get_service_security("RuleboxAgent").unwrap().as_deref(), Some("D:P(A;;GA;;;SY)"));
+    sim.set_service_security("RuleboxAgent", "D:(A;;GA;;;SY)(A;;GA;;;BA)").unwrap();
+    assert_eq!(sim.get_service_security("RuleboxAgent").unwrap().as_deref(), Some("D:(A;;GA;;;SY)(A;;GA;;;BA)"));
+    // (Step 17) A DACL that locks Administrators out is refused and nothing changes.
+    assert!(is_other(&sim.set_service_security("RuleboxAgent", "D:P(A;;GA;;;SY)").unwrap_err(), "Administrators"));
+    assert_eq!(sim.get_service_security("RuleboxAgent").unwrap().as_deref(), Some("D:(A;;GA;;;SY)(A;;GA;;;BA)"));
     sim.set_service_security("RuleboxAgent", &original).unwrap();
     assert_eq!(sim.get_service_security("NoSuchService").unwrap(), None);
     // Only the agent's own service gets a new security descriptor or privilege list.
     assert!(is_other(&sim.set_service_security("Spooler", "D:P(A;;GA;;;SY)").unwrap_err(), "agent service"));
     assert!(is_other(&sim.set_service_required_privileges("Spooler", &[]).unwrap_err(), "agent service"));
-    sim.set_service_required_privileges("RuleboxAgent", &["SeTcbPrivilege", "SeBackupPrivilege"]).unwrap();
-    assert_eq!(sim.get_service_required_privileges("RuleboxAgent").unwrap(), ["SeTcbPrivilege", "SeBackupPrivilege"]);
+    // (Step 17) A list without `SeChangeNotifyPrivilege` is refused: the service would not start.
+    assert!(is_other(&sim.set_service_required_privileges("RuleboxAgent", &["SeTcbPrivilege"]).unwrap_err(), "would not start"));
+    sim.set_service_required_privileges("RuleboxAgent", &["SeTcbPrivilege", "SeChangeNotifyPrivilege"]).unwrap();
+    assert_eq!(sim.get_service_required_privileges("RuleboxAgent").unwrap(), ["SeTcbPrivilege", "SeChangeNotifyPrivilege"]);
     sim.set_service_required_privileges("RuleboxAgent", &[]).unwrap();
     assert!(sim.get_service_required_privileges("RuleboxAgent").unwrap().is_empty());
 }

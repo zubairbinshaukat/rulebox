@@ -502,6 +502,31 @@ fn failure_actions() -> ServiceFailureActions {
     }
 }
 
+/// (Phase 5 Step 17, plan 4.16) The service's required privileges and its DACL: only SYSTEM and
+/// Administrators can stop or change it. A failure does not stop the install: the agent
+/// asserts both again on every reconcile pass while a lockdown policy is applied
+/// (`lockdown::tamper`). Both calls are guarded again inside `rulebox-win32`.
+fn harden_service(out: &mut dyn Write) {
+    use rulebox_win32::service::{set_required_privileges, set_security, AGENT_REQUIRED_PRIVILEGES, AGENT_SERVICE_SDDL};
+    // The privileges first: they need the right to change the configuration.
+    let privileges = set_required_privileges(SERVICE_NAME, AGENT_REQUIRED_PRIVILEGES);
+    let dacl = set_security(SERVICE_NAME, AGENT_SERVICE_SDDL);
+    match (privileges, dacl) {
+        (Ok(()), Ok(())) => {
+            let _ = writeln!(
+                out,
+                "Service protected: {} privileges kept; only SYSTEM and Administrators can stop or change it.",
+                AGENT_REQUIRED_PRIVILEGES.len()
+            );
+        }
+        (privileges, dacl) => {
+            for error in [privileges.err(), dacl.err()].into_iter().flatten() {
+                let _ = writeln!(out, "warning: the service could not be protected yet ({error}); the agent tries again.");
+            }
+        }
+    }
+}
+
 /// `service install`. Returns the exit code.
 pub fn run_install(out: &mut dyn Write, err: &mut dyn Write) -> u8 {
     let result = (|| {
@@ -575,6 +600,8 @@ pub fn install_at(exe: &Path, install: &InstallPaths, paths: &DataPaths, out: &m
         "Service {SERVICE_NAME} {} (automatic start, LocalSystem, restart after 1 s, 5 s, 30 s).",
         if created { "created" } else { "updated" }
     );
+    // (Phase 5 Step 17) Before the start, so the first run already has the short token.
+    harden_service(out);
 
     match service.start::<&str>(&[]) {
         Ok(()) => {
@@ -836,6 +863,25 @@ mod tests {
         let delays: Vec<u64> = list.iter().map(|action| action.delay.as_secs()).collect();
         assert_eq!(delays, [1, 5, 30]);
         assert_eq!((actions.reboot_msg, actions.command), (None, None));
+    }
+
+    /// (Phase 5 Step 17) What `service install` protects the service with is what the
+    /// reconciler asserts, for the same service, and it passes the two rules.
+    #[test]
+    fn install_protects_the_service_the_tamper_layer_watches() {
+        use rulebox_win32::service::{
+            check_required_privileges, check_service_sddl, AGENT_REQUIRED_PRIVILEGES, AGENT_SERVICE, AGENT_SERVICE_SDDL,
+        };
+        assert_eq!(SERVICE_NAME, AGENT_SERVICE);
+        assert!(check_service_sddl(AGENT_SERVICE_SDDL).is_ok(), "Administrators can still stop and change it");
+        assert!(check_required_privileges(AGENT_REQUIRED_PRIVILEGES).is_ok());
+        // On the dev machine the guard stops both calls: nothing changes, the install goes on.
+        if !rulebox_win32::guard::is_test_machine() {
+            let mut out = Vec::new();
+            harden_service(&mut out);
+            let text = String::from_utf8(out).unwrap();
+            assert_eq!(text.matches("warning: the service could not be protected yet").count(), 2, "{text}");
+        }
     }
 
     #[test]

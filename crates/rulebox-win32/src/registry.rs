@@ -267,6 +267,11 @@ pub fn list_hklm_value_names(path: &str) -> Result<Vec<String>> {
     let Some(key) = open_key(HKEY_LOCAL_MACHINE, path, KEY_QUERY_VALUE | KEY_WOW64_64KEY)? else {
         return Ok(Vec::new());
     };
+    value_names(&key)
+}
+
+/// The names of the values directly under an open key, in the order the registry lists them.
+fn value_names(key: &RegKey) -> Result<Vec<String>> {
     let mut names = Vec::new();
     // A value name is at most 16,383 characters.
     let mut buffer = vec![0u16; 16_384];
@@ -320,6 +325,19 @@ pub fn get_loaded_user_value(sid: &Sid, subkey: &str, name: &str) -> Result<Opti
     }
 }
 
+/// (Phase 5 Step 18) The value names directly under `HKEY_USERS\<SID>\<subkey>`, only when
+/// that user's hive is already loaded. `Ok(None)`: the hive is not loaded; an absent key is
+/// an empty list. Read-only: it never loads a hive, so it is not guarded.
+pub fn list_loaded_user_value_names(sid: &Sid, subkey: &str) -> Result<Option<Vec<String>>> {
+    let Some(root) = open_key(HKEY_USERS, sid.as_str(), KEY_QUERY_VALUE)? else {
+        return Ok(None);
+    };
+    match open_key(root.0, subkey, KEY_QUERY_VALUE)? {
+        Some(key) => value_names(&key).map(Some),
+        None => Ok(Some(Vec::new())),
+    }
+}
+
 /// The root of one user's hive (`HKEY_USERS\<SID>` or the temporary mount). It
 /// exists only inside `with_user_hive`, so a function that takes a `HiveKey` can
 /// reach that user's hive and nothing else (in particular never `HKLM`).
@@ -333,6 +351,15 @@ impl HiveKey {
         match open_key(self.root.0, subkey, KEY_QUERY_VALUE)? {
             Some(key) => read_value(&key, name),
             None => Ok(None),
+        }
+    }
+
+    /// (Phase 5 Step 18) The value names directly under `<hive>\<subkey>`; empty when the
+    /// key is absent. Read-only.
+    pub fn value_names(&self, subkey: &str) -> Result<Vec<String>> {
+        match open_key(self.root.0, subkey, KEY_QUERY_VALUE)? {
+            Some(key) => value_names(&key),
+            None => Ok(Vec::new()),
         }
     }
 
