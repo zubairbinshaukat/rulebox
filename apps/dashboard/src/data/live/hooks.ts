@@ -275,6 +275,35 @@ export const liveApi: DataApi = {
     );
     return useMapped(call);
   },
+  // ---- rollout rings and rollback (Phase 5 Step 16, plan 4.14). `groupView` is quiet; `health` moves with every apply report, so the
+  // screen subscribes to it separately. `rollback` is a major action: `useMapped` opens the step-up dialog and retries once.
+  useRolloutView(groupId) {
+    return useMemberQuery(api.rollouts.groupView, { groupId });
+  },
+  useRolloutHealth(groupId) {
+    return useMemberQuery(api.rollouts.health, { groupId });
+  },
+  useSetRolloutEnabled() {
+    return useMapped(useMutation(api.rollouts.setEnabled));
+  },
+  useSetAutoPromote() {
+    return useMapped(useMutation(api.rollouts.setAutoPromote));
+  },
+  useSetRings() {
+    return useMapped(useMutation(api.rollouts.setRings));
+  },
+  usePromoteRollout() {
+    return useMapped(useMutation(api.rollouts.promote));
+  },
+  usePromoteAll() {
+    return useMapped(useMutation(api.rollouts.promoteAll));
+  },
+  useRollback() {
+    return useMapped(useMutation(api.rollouts.rollback));
+  },
+  useResumeRollout() {
+    return useMapped(useMutation(api.rollouts.resume));
+  },
   // ---- groups (Step 5). Counts arrive as `{ count, more }` and become one capped number.
   useGroupsScreen() {
     const q = useMemberQuery(api.groups.list, {});

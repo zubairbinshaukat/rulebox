@@ -106,6 +106,8 @@ export const AUDIT_ACTIONS = [
   "rollout.halted",
   "rollout.resumed",
   "rollout.rolledBack",
+  // Step 16 (not in the plan list): a change of the automatic-promotion settings.
+  "rollout.settingsChanged",
   "device.ringChanged",
   "device.locked",
   "device.unlocked",

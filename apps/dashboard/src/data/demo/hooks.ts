@@ -16,11 +16,17 @@ import {
   type DbDevice,
   type DbDriver,
   type DbPrinter,
+  type DbRollout,
   type DbWifi,
   type DemoDb,
 } from "../fixtures/seed";
 import {
   INSTALL_STATES,
+  MAX_BAKE_HOURS,
+  MAX_FAILURE_PCT,
+  MAX_RING_LIST,
+  MIN_BAKE_HOURS,
+  MIN_FAILURE_PCT,
   NEW_WEB_APP_PERMISSIONS,
   NO_GROUP_FILTER,
   WEB_PERMISSION_KEYS,
@@ -49,6 +55,10 @@ import {
   type PrinterDetail,
   type PrinterRow,
   type OverviewScreen,
+  type Ring,
+  type RolloutHealth,
+  type RolloutRow,
+  type RolloutView,
   type WifiApplyCounts,
   type WifiDetail,
   type WifiRow,
@@ -344,6 +354,116 @@ function requireAdmin() {
   if (me.role !== "admin" && me.role !== "owner") fail("forbidden");
   return me;
 }
+
+// ---------------------------------------------------------------- rollout rings (Phase 5 Step 16, the twin of convex/rollouts.ts)
+
+type Pointers = DbRollout["pointers"];
+
+/** The ring that is receiving the newest version: pilot while pilot is ahead of early, then early while early is ahead of everyone. */
+function stageOf(p: Pointers): { ring: "pilot" | "early"; version: number } | null {
+  if (p.pilot !== p.early) return { ring: "pilot", version: p.pilot };
+  if (p.early !== p.everyone) return { ring: "early", version: p.early };
+  return null;
+}
+
+function rolloutRow(r: DbRollout): RolloutRow {
+  return {
+    enabled: r.enabled,
+    pointers: { ...r.pointers },
+    autoPromote: { ...r.autoPromote },
+    autoRollback: r.autoRollback,
+    state: r.state,
+    haltReason: r.haltReason,
+    stageStartedAt: r.stageStartedAt,
+    revision: r.revision,
+  };
+}
+
+function ringOf(d: DbDevice): Ring {
+  return d.ring ?? "everyone";
+}
+
+function rolloutViewOf(db: DemoDb, groupId: string): RolloutView {
+  const g = find(db.groups, groupId);
+  const r = db.rollouts.get(g._id) ?? null;
+  const devices = db.devices.filter((d) => d.groupId === g._id);
+  return {
+    groupName: g.name,
+    rollout: r ? rolloutRow(r) : null,
+    versions: r ? [...r.versions].sort((a, b) => b.version - a.version).map((v) => ({ ...v })) : [],
+    stage: r && r.enabled ? stageOf(r.pointers) : null,
+    devices: devices.slice(0, MAX_RING_LIST).map((d) => ({ _id: d._id, name: d.name, ring: ringOf(d) })),
+    devicesTruncated: devices.length > MAX_RING_LIST,
+  };
+}
+
+const RING_COUNT_CAP = 200;
+const HEALTH_READ = 1001;
+
+/** `rollouts:health`: the stage's ring and version against the PCs' apply reports; only PCs in the ring now count. */
+function rolloutHealthOf(db: DemoDb, groupId: string): RolloutHealth {
+  const g = find(db.groups, groupId);
+  const r = db.rollouts.get(g._id);
+  const stage = r && r.enabled ? stageOf(r.pointers) : null;
+  if (!stage) return { stage: null, ringSize: 0, ringCapped: false, applied: 0, failed: 0, partial: 0, waiting: 0, pilotRolledBack: false, reportsCapped: false };
+  const inRing = db.devices.filter((d) => d.groupId === g._id && ringOf(d) === stage.ring);
+  const members = inRing.slice(0, RING_COUNT_CAP);
+  let applied = 0;
+  let failed = 0;
+  let partial = 0;
+  for (const d of members) {
+    const rep = db.applyReports.get(d._id);
+    if (!rep || rep.version !== stage.version) continue;
+    if (rep.state === "applied") applied++;
+    else if (rep.state === "partial") partial++;
+    else failed++;
+  }
+  const pilotRolledBack = db.devices.some((d) => {
+    const rep = db.applyReports.get(d._id);
+    return d.groupId === g._id && ringOf(d) === "pilot" && rep?.version === stage.version && rep.state === "rolledBack";
+  });
+  return {
+    stage,
+    ringSize: members.length,
+    ringCapped: inRing.length > RING_COUNT_CAP,
+    applied,
+    failed,
+    partial,
+    waiting: Math.max(0, members.length - applied - failed - partial),
+    pilotRolledBack,
+    reportsCapped: db.applyReports.size >= HEALTH_READ,
+  };
+}
+
+/** The group's rollout row for a change: created with a first configuration version when the group has none; `stale_edit` on a wrong revision. */
+function rolloutForChange(db: DemoDb, groupId: string, expected: number, now: number): { group: DemoDb["groups"][number]; rollout: DbRollout } {
+  const group = find(db.groups, groupId);
+  let rollout = db.rollouts.get(group._id);
+  if (!rollout) {
+    rollout = {
+      enabled: false,
+      pointers: { pilot: 1, early: 1, everyone: 1 },
+      autoPromote: { enabled: false, bakeHours: 24, maxFailurePct: 10 },
+      autoRollback: true,
+      state: "idle",
+      haltReason: null,
+      stageStartedAt: null,
+      revision: 0,
+      versions: [{ version: 1, reason: "Rollout rings", createdAt: now }],
+    };
+    db.rollouts.set(group._id, rollout);
+  }
+  checkRevision(rollout, expected);
+  return { group, rollout };
+}
+
+/** Rings on needs a pilot PC that stays (`leaving` = PCs about to leave the ring). */
+function requirePilotDevice(db: DemoDb, groupId: string, leaving: string[] = []) {
+  const left = new Set(leaving);
+  if (!db.devices.some((d) => d.groupId === groupId && !d.revoked && d.ring === "pilot" && !left.has(d._id))) fail("conflict", { detail: "no_pilot_devices" });
+}
+
+const wholeBetween = (n: number, min: number, max: number) => Number.isInteger(n) && n >= min && n <= max;
 
 function find<T extends { _id: string }>(list: T[], id: string): T {
   const row = list.find((x) => x._id === id);
@@ -884,6 +1004,202 @@ export const demoApi: DataApi = {
           if (b.cancelledAt !== null) return;
           b.cancelledAt = now;
           audit({ action: "broadcast.cancelled", targetType: "broadcast", targetId: b._id, targetLabel: b.title, summary: `Cancelled the message "${b.title}"` });
+        }),
+      [],
+    );
+  },
+  // ---- rollout rings and rollback (Phase 5 Step 16). Every write checks the row's revision (`stale_edit`) and bumps it.
+  useRolloutView(groupId) {
+    return useDemoQuery(`rollouts:groupView:${groupId}`, (db) => {
+      requireReader();
+      return rolloutViewOf(db, groupId);
+    });
+  },
+  useRolloutHealth(groupId) {
+    return useDemoQuery(`rollouts:health:${groupId}`, (db) => {
+      requireReader();
+      return rolloutHealthOf(db, groupId);
+    });
+  },
+  useSetRolloutEnabled() {
+    return useCallback(
+      ({ groupId, enabled, expectedRevision }) =>
+        runMutation("admin", ({ db, audit, now }) => {
+          const { group, rollout } = rolloutForChange(db, groupId, expectedRevision, now);
+          if (rollout.enabled === enabled) return { revision: rollout.revision };
+          if (enabled) {
+            requirePilotDevice(db, group._id);
+            rollout.enabled = true;
+            rollout.revision++;
+            audit({ action: "rollout.enabled", targetType: "group", targetId: group._id, targetLabel: group.name, summary: `Turned on rollout rings for the group ${group.name}` });
+            return { revision: rollout.revision };
+          }
+          const newest = Math.max(...rollout.versions.map((v) => v.version), rollout.pointers.pilot);
+          rollout.enabled = false;
+          rollout.pointers = { pilot: newest, early: newest, everyone: newest };
+          rollout.state = "idle";
+          rollout.haltReason = null;
+          rollout.stageStartedAt = null;
+          rollout.revision++;
+          audit({ action: "rollout.disabled", targetType: "group", targetId: group._id, targetLabel: group.name, summary: `Turned off rollout rings for the group ${group.name}` });
+          return { revision: rollout.revision };
+        }),
+      [],
+    );
+  },
+  useSetAutoPromote() {
+    return useCallback(
+      ({ groupId, enabled, bakeHours, maxFailurePct, autoRollback, expectedRevision }) =>
+        runMutation("admin", ({ db, audit, now }) => {
+          if (!wholeBetween(bakeHours, MIN_BAKE_HOURS, MAX_BAKE_HOURS)) fail("invalid_argument", { field: "bakeHours" });
+          if (!wholeBetween(maxFailurePct, MIN_FAILURE_PCT, MAX_FAILURE_PCT)) fail("invalid_argument", { field: "maxFailurePct" });
+          const { group, rollout } = rolloutForChange(db, groupId, expectedRevision, now);
+          const a = rollout.autoPromote;
+          if (a.enabled === enabled && a.bakeHours === bakeHours && a.maxFailurePct === maxFailurePct && rollout.autoRollback === autoRollback) return { revision: rollout.revision };
+          rollout.autoPromote = { enabled, bakeHours, maxFailurePct };
+          rollout.autoRollback = autoRollback;
+          rollout.revision++;
+          audit({
+            action: "rollout.settingsChanged",
+            targetType: "group",
+            targetId: group._id,
+            targetLabel: group.name,
+            summary: `Changed the rollout settings of the group ${group.name} (automatic promotion ${enabled ? "on" : "off"}, ${bakeHours} h, ${maxFailurePct} %)`,
+          });
+          return { revision: rollout.revision };
+        }),
+      [],
+    );
+  },
+  useSetRings() {
+    return useCallback(
+      ({ groupId, deviceIds, ring, expectedRevision }) =>
+        runMutation("admin", ({ db, audit, now }) => {
+          if (deviceIds.length === 0 || deviceIds.length > MAX_RING_LIST) fail("invalid_argument", { field: "deviceIds" });
+          const { group, rollout } = rolloutForChange(db, groupId, expectedRevision, now);
+          const changed: DbDevice[] = [];
+          for (const id of new Set(deviceIds)) {
+            const d = find(db.devices, id);
+            if (d.groupId !== group._id) fail("invalid_argument", { field: "deviceIds" });
+            if (d.revoked) fail("conflict", { detail: "device revoked" });
+            if (ringOf(d) !== ring) changed.push(d);
+          }
+          if (changed.length === 0) return { revision: rollout.revision, changed: 0 };
+          if (rollout.enabled && ring !== "pilot") {
+            const leaving = changed.filter((d) => d.ring === "pilot").map((d) => d._id);
+            if (leaving.length > 0) requirePilotDevice(db, group._id, leaving);
+          }
+          for (const d of changed) {
+            d.ring = ring === "everyone" ? undefined : ring;
+            d.revision++;
+          }
+          rollout.revision++;
+          const first = changed[0]!;
+          audit({
+            action: "device.ringChanged",
+            targetType: changed.length === 1 ? "device" : "group",
+            targetId: changed.length === 1 ? first._id : group._id,
+            targetLabel: changed.length === 1 ? first.name : group.name,
+            summary: changed.length === 1 ? `Put the PC ${first.name} in the ${ring} ring` : `Put ${changed.length} PCs of the group ${group.name} in the ${ring} ring`,
+          });
+          return { revision: rollout.revision, changed: changed.length };
+        }),
+      [],
+    );
+  },
+  usePromoteRollout() {
+    return useCallback(
+      ({ groupId, to, expectedRevision }) =>
+        runMutation("admin", ({ db, audit, now }) => {
+          const { group, rollout } = rolloutForChange(db, groupId, expectedRevision, now);
+          if (!rollout.enabled) fail("conflict", { detail: "rings_disabled" });
+          if (rollout.state === "halted") fail("conflict", { detail: "halted" });
+          const p = rollout.pointers;
+          if (to === "early" ? p.pilot === p.early : p.early === p.everyone) fail("conflict", { detail: "nothing_to_promote" });
+          rollout.pointers = to === "early" ? { ...p, early: p.pilot } : { ...p, everyone: p.early };
+          const stage = stageOf(rollout.pointers);
+          rollout.state = stage ? "rolling" : "idle";
+          rollout.stageStartedAt = stage ? now : null;
+          rollout.haltReason = null;
+          rollout.revision++;
+          audit({ action: "rollout.promoted", targetType: "group", targetId: group._id, targetLabel: group.name, summary: `Promoted the configuration of the group ${group.name} to the ${to} ring` });
+          return { revision: rollout.revision };
+        }),
+      [],
+    );
+  },
+  usePromoteAll() {
+    return useCallback(
+      ({ groupId, expectedRevision }) =>
+        runMutation("admin", ({ db, audit, now }) => {
+          const { group, rollout } = rolloutForChange(db, groupId, expectedRevision, now);
+          if (!rollout.enabled) fail("conflict", { detail: "rings_disabled" });
+          if (rollout.state === "halted") fail("conflict", { detail: "halted" });
+          const p = rollout.pointers;
+          if (stageOf(p) === null) fail("conflict", { detail: "nothing_to_promote" });
+          rollout.pointers = { pilot: p.pilot, early: p.pilot, everyone: p.pilot };
+          rollout.state = "idle";
+          rollout.stageStartedAt = null;
+          rollout.haltReason = null;
+          rollout.revision++;
+          audit({ action: "rollout.promoted", targetType: "group", targetId: group._id, targetLabel: group.name, summary: `Promoted the configuration of the group ${group.name} to every ring` });
+          return { revision: rollout.revision };
+        }),
+      [],
+    );
+  },
+  // A major action (plan 4.14): the demo wants a fresh step-up like the server.
+  useRollback() {
+    return useCallback(
+      ({ groupId, toVersion, rings, expectedRevision }) =>
+        runMutation(
+          "admin",
+          ({ db, audit, now }) => {
+            if (!Number.isInteger(toVersion) || toVersion < 1) fail("invalid_argument", { field: "toVersion" });
+            if (rings.length === 0 || rings.length > 3) fail("invalid_argument", { field: "rings" });
+            const { group, rollout } = rolloutForChange(db, groupId, expectedRevision, now);
+            if (!rollout.versions.some((v) => v.version === toVersion)) fail("conflict", { detail: "version_missing" });
+            const chosen = new Set<Ring>(rollout.enabled ? rings : ["pilot", "early", "everyone"]);
+            const p = rollout.pointers;
+            const next = {
+              pilot: chosen.has("pilot") ? toVersion : p.pilot,
+              early: chosen.has("early") ? toVersion : p.early,
+              everyone: chosen.has("everyone") ? toVersion : p.everyone,
+            };
+            if (next.pilot === p.pilot && next.early === p.early && next.everyone === p.everyone) return { revision: rollout.revision };
+            const idle = stageOf(next) === null;
+            rollout.pointers = next;
+            rollout.state = idle ? "idle" : "halted";
+            rollout.haltReason = idle ? null : "rolled_back";
+            rollout.stageStartedAt = null;
+            rollout.revision++;
+            audit({
+              action: "rollout.rolledBack",
+              targetType: "group",
+              targetId: group._id,
+              targetLabel: group.name,
+              summary: `Rolled the group ${group.name} back to configuration version ${toVersion} (${[...chosen].join(", ")})`,
+            });
+            return { revision: rollout.revision };
+          },
+          "fresh",
+        ),
+      [],
+    );
+  },
+  useResumeRollout() {
+    return useCallback(
+      ({ groupId, expectedRevision }) =>
+        runMutation("admin", ({ db, audit, now }) => {
+          const { group, rollout } = rolloutForChange(db, groupId, expectedRevision, now);
+          if (rollout.state !== "halted") fail("conflict", { detail: "not_halted" });
+          const stage = stageOf(rollout.pointers);
+          rollout.state = stage ? "rolling" : "idle";
+          rollout.haltReason = null;
+          rollout.stageStartedAt = stage ? now : null;
+          rollout.revision++;
+          audit({ action: "rollout.resumed", targetType: "group", targetId: group._id, targetLabel: group.name, summary: `Resumed the rollout of the group ${group.name}` });
+          return { revision: rollout.revision };
         }),
       [],
     );

@@ -1031,3 +1031,57 @@ export interface OverviewScreen {
   rosterPending: boolean;
   recentAudit: AuditEntry[];
 }
+
+// ---------------------------------------------------------------- rollout rings (Phase 5 Step 16, plan 4.14)
+
+export type Ring = "pilot" | "early" | "everyone";
+export const RINGS: readonly Ring[] = ["pilot", "early", "everyone"];
+export type RolloutPhase = "idle" | "rolling" | "halted";
+
+/** Limits of the auto-promotion settings (`convex/lib/limits.ts`): whole numbers. */
+export const MIN_BAKE_HOURS = 1;
+export const MAX_BAKE_HOURS = 168;
+export const MIN_FAILURE_PCT = 1;
+export const MAX_FAILURE_PCT = 100;
+/** How many PCs `rollouts:groupView` lists, and how many a ring change may take at once. */
+export const MAX_RING_LIST = 100;
+
+/** The group's rollout row. `revision` is what every rollout mutation sends back as `expectedRevision`. */
+export interface RolloutRow {
+  enabled: boolean;
+  /** The configuration version each ring follows. */
+  pointers: { pilot: number; early: number; everyone: number };
+  autoPromote: { enabled: boolean; bakeHours: number; maxFailurePct: number };
+  autoRollback: boolean;
+  state: RolloutPhase;
+  /** `failure_rate`, `pilot_rolled_back`, `rolled_back`; unknown codes are shown generically. */
+  haltReason: string | null;
+  stageStartedAt: number | null;
+  revision: number;
+}
+
+/** `rollouts:groupView`: small and quiet; the numbers that move with every report are in `RolloutHealth`. */
+export interface RolloutView {
+  groupName: string;
+  /** null = the group has no configuration version yet. */
+  rollout: RolloutRow | null;
+  /** The versions a rollback can go to, newest first. */
+  versions: { version: number; reason: string; createdAt: number }[];
+  /** The stage in flight (null when rings are off or every ring follows one version). */
+  stage: { ring: "pilot" | "early"; version: number } | null;
+  devices: { _id: Id; name: string; ring: Ring }[];
+  devicesTruncated: boolean;
+}
+
+/** `rollouts:health`: the stage in flight. All zeros and `stage: null` when nothing is rolling out. */
+export interface RolloutHealth {
+  stage: { ring: "pilot" | "early"; version: number } | null;
+  ringSize: number;
+  ringCapped: boolean;
+  applied: number;
+  failed: number;
+  partial: number;
+  waiting: number;
+  pilotRolledBack: boolean;
+  reportsCapped: boolean;
+}

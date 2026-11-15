@@ -109,6 +109,7 @@ export const auditStrings = {
     "rollout.halted": "Rollout paused",
     "rollout.resumed": "Rollout resumed",
     "rollout.rolledBack": "Rollout rolled back",
+    "rollout.settingsChanged": "Rollout settings changed",
     "device.ringChanged": "PC rollout stage changed",
     "device.locked": "PC locked",
     "device.unlocked": "PC unlocked",

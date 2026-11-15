@@ -2110,6 +2110,29 @@ checks + screenshots.
 **Do NOT:** ring-gate locks, broadcasts, employees or keys; delete a
 `groupConfigs` version that a pointer references.
 
+**Built 2026-11-15 (SimPlatform / convex-test / mocked hooks only, not committed).**
+Deviations and open points:
+
+- `convex/rollouts.ts` (+ `lib/rollouts.ts`): `groupView`, `health`, `setEnabled`, `setAutoPromote`, `setRings`
+  (bulk and single PC; the device page of Step 19 uses it), `promote`, `promoteAll`, `rollback`, `resume`, and the
+  internal `tick` (cron every 15 min, pages `groupRollouts.by_state_stage` for `rolling`, one scheduled `evaluate`
+  per group). `rollouts:health` is its own query, not part of `groupView`: it reads up to 1001 apply reports and
+  re-runs on each of them, so the cheap view must not subscribe to it. `rollouts:rollback` is a major action
+  (`MAJOR_ACTIONS`). New audit action `rollout.settingsChanged` (not in the 4.2 list).
+- `groupRollouts.versions` (new, optional): the list the screen and the rollback picker use, kept by
+  `snapshotGroupConfig`, so no 256 KB configuration row is read to show a version list. A pointer move now bumps
+  `revision`. Index `devices.by_group_ring`. Revoking a PC clears its ring (it would count as "waiting" for ever).
+- Health adds a `partial` count (neither success nor failure); only PCs that are in the ring now count.
+  A rollback with rings on leaves the rollout `halted` (reason `rolled_back`) unless every pointer ends up equal.
+- Wi-Fi boxes on an older pointer: the publisher accepts a box sealed for the same profile revision or a newer
+  one; the box is bound to the PC, not to a revision, and only the live passphrase exists. So a PC on an older
+  ring pointer gets the LIVE passphrase for the older SSID settings (matches a real password change; a profile
+  deleted or made open since leaves it `waiting_for_key`).
+- NOT done (owner question): app / catalogue ring-gating. Plan 4.3 rule 6 lists `apps`, `catalog`, `fileHandlers`,
+  `allowedSites` as ring-gated, but they are still read live by the publisher (Step 10 scope choice); the Step 16
+  item list does not move them. Moving them touches every Phase 4 catalogue mutation and the Phase 4 vectors.
+- The 10-group snapshot caps are unchanged (the plan has no batching item); see the report for the question.
+- Agent: `MAX_REFUSED` 50 -> 20 (4.11). The apply report already carried `config`; the live wiring is Step 20.
 ---
 
 ### Step 17 — Tamper protection: service DACL, privileges, ACL self-check, clock

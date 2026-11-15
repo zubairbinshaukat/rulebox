@@ -18,7 +18,7 @@ import { giveStepUp, makeOrg, asMember, type Member } from "./identity";
 import { TEST_KEY } from "./keys";
 import { seedLargeOrg, LARGE } from "./largeOrg";
 import { addWifi, createKeys, MASTER_A, MASTER_B, sealKeyPair, setMaster } from "./phase5";
-import { DRIVER_ROW, type Fixture } from "./matrixRows";
+import { APPLY_REPORT, DRIVER_ROW, type Fixture } from "./matrixRows";
 
 declare const process: { env: Record<string, string | undefined> };
 
@@ -147,6 +147,39 @@ async function sealingSetup(c: InternalEnv, profiles: number): Promise<{ deviceI
   return { deviceIds, profiles: out };
 }
 
+/** The fixture group with rings on, pilot version 2 ahead of early / everyone 1 (state `rolling`), and `pilots` PCs in its pilot ring that applied version 2. */
+async function rollingRollout(c: InternalEnv, pilots: number): Promise<Id<"groupRollouts">> {
+  return await c.f.t.run(async (ctx) => {
+    const devices = await ctx.db.query("devices").withIndex("by_group", (q) => q.eq("groupId", c.f.groupId)).take(pilots);
+    for (const d of devices) {
+      await ctx.db.patch(d._id, { ring: "pilot" });
+      await ctx.db.insert("deviceApplyReports", {
+        orgId: c.f.orgId,
+        deviceId: d._id,
+        appliedVersion: 2,
+        config: { groupId: c.f.groupId, version: 2, ring: "pilot" },
+        state: "applied",
+        layers: APPLY_REPORT.layers,
+        wifi: [],
+        printers: [],
+        capabilities: [],
+        contentHash: "a".repeat(64),
+        updatedAt: Date.now(),
+      });
+    }
+    return await ctx.db.insert("groupRollouts", {
+      orgId: c.f.orgId,
+      groupId: c.f.groupId,
+      enabled: true,
+      pointers: { pilot: 2, early: 1, everyone: 1 },
+      autoPromote: { enabled: false, bakeHours: 24, maxFailurePct: 10 },
+      autoRollback: true,
+      state: "rolling",
+      stageStartedAt: Date.now(),
+      revision: 1,
+    });
+  });
+}
 export const INTERNAL_CALLS: Record<string, InternalCase | InternalCase[]> = {
   // ---------------------------------------------------------------- account
   "account:authorize": async (c) => () =>
@@ -476,6 +509,17 @@ export const INTERNAL_CALLS: Record<string, InternalCase | InternalCase[]> = {
   "presence:applyPingInterval": async (c) => {
     await c.f.t.mutation(internal.plans.setOrgPingInterval, { orgId: c.f.orgId, pingIntervalMs: 300_000 });
     return () => c.f.t.mutation(internal.presence.applyPingInterval, { orgId: c.f.orgId });
+  },
+  // Phase 5 Step 16. A rolling rollout whose pilot ring is 100 PCs of the fixture's group, each with an `applied` report for the stage's version
+  // (the worst the tick's evaluation reads is a full ring and a full report range; automatic promotion is off, so it decides nothing).
+  "rollouts:evaluate": async (c) => {
+    const rolloutId = await rollingRollout(c, 100);
+    return () => c.f.t.mutation(internal.rollouts.evaluate, { rolloutId });
+  },
+  // One rolling rollout: one page is read and its evaluation scheduled.
+  "rollouts:tick": async (c) => {
+    await rollingRollout(c, 0);
+    return () => c.f.t.mutation(internal.rollouts.tick, {});
   },
   // Every PC of the organization is waiting for a new document: one batch of PUBLISH_BATCH devices is built and signed.
   "publish:run": [

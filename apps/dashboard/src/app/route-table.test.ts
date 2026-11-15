@@ -33,6 +33,9 @@ describe("route table", () => {
     expect(screensForPath("/networks/drivers/new")).toEqual(["Layout", "DriverEdit"]);
     expect(screensForPath("/networks/drivers/k57abc")).toEqual(["Layout", "DriverEdit"]);
     expect(screensForPath("/broadcasts")).toEqual(["Layout", "Broadcasts"]);
+    expect(screensForPath("/groups/k57abc/rollout")).toEqual(["Layout", "Rollout"]);
+    expect(screensForPath("/groups/k57abc/rollout/")).toEqual(["Layout", "Rollout"]);
+    expect(screensForPath("/groups/k57abc/other")).toEqual([]);
     expect(screensForPath("/devices/a/b")).toEqual([]);
     expect(screensForPath("/gallery")).toEqual([]);
   });

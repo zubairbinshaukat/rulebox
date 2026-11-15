@@ -17,6 +17,7 @@ export const SCREEN_FILES = {
   DeviceDetail: "src/screens/DeviceDetail.tsx",
   Groups: "src/screens/Groups.tsx",
   GroupDetail: "src/screens/GroupDetail.tsx",
+  Rollout: "src/screens/Rollout.tsx",
   Networks: "src/screens/Networks.tsx",
   WifiEdit: "src/screens/WifiEdit.tsx",
   PrinterEdit: "src/screens/PrinterEdit.tsx",
@@ -60,6 +61,7 @@ export const ROUTE_SCREENS: Record<string, ScreenName[]> = {
   "/devices/:": member("DeviceDetail"),
   "/groups": member("Groups"),
   "/groups/:": member("GroupDetail"),
+  "/groups/:/rollout": member("Rollout"),
   "/networks": member("Networks"),
   "/networks/wifi/:": member("WifiEdit"),
   "/networks/printers/:": member("PrinterEdit"),
@@ -80,7 +82,10 @@ export function routeKey(pathname: string): string | null {
   const path = pathname.replace(/\/+$/, "") || "/";
   if (ROUTE_SCREENS[path]) return path;
   const withId = path.replace(/\/[^/]+$/, "/:");
-  return withId !== path && ROUTE_SCREENS[withId] ? withId : null;
+  if (withId !== path && ROUTE_SCREENS[withId]) return withId;
+  // An id in the middle: `/groups/abc/rollout` is `/groups/:/rollout`.
+  const inside = path.replace(/^(\/[^/]+\/)[^/]+(\/.+)$/, "$1:$2");
+  return inside !== path && ROUTE_SCREENS[inside] ? inside : null;
 }
 
 /** The screens a pathname needs (empty for an unknown path). */

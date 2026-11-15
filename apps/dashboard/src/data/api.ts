@@ -31,7 +31,10 @@ import type {
   PrinterDetail,
   PrinterInput,
   QueryState,
+  Ring,
   Role,
+  RolloutHealth,
+  RolloutView,
   SettingsSaved,
   SettingsScreen,
   WebAppInput,
@@ -102,6 +105,26 @@ export interface DataApi {
   useSendBroadcast: Mutation<BroadcastInput, { id: Id; targetCount: number }>;
   /** `broadcasts:cancel` (admin). */
   useCancelBroadcast: Mutation<{ id: Id }>;
+
+  // ---- rollout rings and rollback (Phase 5 Step 16, `convex/rollouts.ts`, plan 4.14). Every write takes the row's `expectedRevision` (0 = no row yet).
+  /** `rollouts:groupView` (viewer): the rollout row, the versions, the stage, up to 100 PCs with their ring. */
+  useRolloutView: (groupId: Id) => QueryState<RolloutView>;
+  /** `rollouts:health` (viewer): the stage in flight; a query of its own because it moves with every report. */
+  useRolloutHealth: (groupId: Id) => QueryState<RolloutHealth>;
+  /** `rollouts:setEnabled` (admin). On needs a pilot PC (`conflict` detail `no_pilot_devices`). */
+  useSetRolloutEnabled: Mutation<{ groupId: Id; enabled: boolean; expectedRevision: number }, { revision: number }>;
+  /** `rollouts:setAutoPromote` (admin): bake hours 1-168, failure percentage 1-100 (`invalid_argument` names the field). */
+  useSetAutoPromote: Mutation<{ groupId: Id; enabled: boolean; bakeHours: number; maxFailurePct: number; autoRollback: boolean; expectedRevision: number }, { revision: number }>;
+  /** `rollouts:setRings` (admin): 1-100 PCs into a ring. */
+  useSetRings: Mutation<{ groupId: Id; deviceIds: Id[]; ring: Ring; expectedRevision: number }, { revision: number; changed: number }>;
+  /** `rollouts:promote` (admin). */
+  usePromoteRollout: Mutation<{ groupId: Id; to: "early" | "everyone"; expectedRevision: number }, { revision: number }>;
+  /** `rollouts:promoteAll` (admin). */
+  usePromoteAll: Mutation<{ groupId: Id; expectedRevision: number }, { revision: number }>;
+  /** `rollouts:rollback` (admin, MAJOR: a fresh step-up, retried by the hook). */
+  useRollback: Mutation<{ groupId: Id; toVersion: number; rings: Ring[]; expectedRevision: number }, { revision: number }>;
+  /** `rollouts:resume` (admin): clears a halt. */
+  useResumeRollout: Mutation<{ groupId: Id; expectedRevision: number }, { revision: number }>;
 
   // ---- groups
   /** Every group with capped counts (`groups:list`): the group pickers and filters. The Groups table uses `useGroupsPage`. */

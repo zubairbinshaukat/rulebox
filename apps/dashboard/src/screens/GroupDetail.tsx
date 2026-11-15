@@ -4,6 +4,7 @@ import { Button, Input, Pill, Textarea } from "@rulebox/ui";
 import IconPen from "~icons/solar/pen-linear";
 import IconTrash from "~icons/solar/trash-bin-trash-linear";
 import IconAdd from "~icons/solar/add-circle-linear";
+import IconRocket from "~icons/solar/rocket-2-linear";
 import {
   useAddGroupEmployee,
   useDeleteGroup,
@@ -84,16 +85,23 @@ function Group({ g }: { g: Detail }) {
           </>
         }
         actions={
-          <RoleGate minRole="admin">
-            <Button variant="ghost" onClick={() => setEditing(true)}>
-              <IconPen aria-hidden="true" />
-              {strings.common.edit}
-            </Button>
-            <Button variant="danger-ghost" onClick={() => setDeleting(true)}>
-              <IconTrash aria-hidden="true" />
-              {strings.common.delete}
-            </Button>
-          </RoleGate>
+          <>
+            {/* Everyone may look at the rollout; only admins change it (the screen decides). */}
+            <Link className="rb-btn rb-btn--ghost" to={`/groups/${g._id}/rollout`}>
+              <IconRocket aria-hidden="true" />
+              {s.rollout}
+            </Link>
+            <RoleGate minRole="admin">
+              <Button variant="ghost" onClick={() => setEditing(true)}>
+                <IconPen aria-hidden="true" />
+                {strings.common.edit}
+              </Button>
+              <Button variant="danger-ghost" onClick={() => setDeleting(true)}>
+                <IconTrash aria-hidden="true" />
+                {strings.common.delete}
+              </Button>
+            </RoleGate>
+          </>
         }
       />
       {editing ? <EditGroup g={g} onClose={() => setEditing(false)} /> : null}

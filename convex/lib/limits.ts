@@ -466,3 +466,21 @@ export const MAX_BROADCAST_LIFETIME_MS = 365 * 24 * 60 * 60 * 1000;
 export const MAX_BROADCAST_PAGE = 50;
 /** The server day a security summary may name: today, or this many days back (clock slack). */
 export const SECURITY_DAY_SLACK = 2;
+/**
+ * Rollout rings (Phase 5 Step 16, plan 4.14). Apply reports read per ring-health run (plan: `.take(1001)`), devices read to size a
+ * ring (`RING_COUNT_CAP + 1`; a ring above the cap is treated as that big, so the 50 % minimum of an automatic promotion is
+ * computed over at most this many PCs), devices listed on the rollout screen, devices changed by one bulk ring call.
+ */
+export const ROLLOUT_HEALTH_READ = 1001;
+export const RING_COUNT_CAP = 200;
+export const MAX_RING_LIST = 100;
+export const MAX_RING_BULK = 100;
+/** `rollouts:tick`: rollouts read per page (the evaluation of each runs in its own scheduled transaction). */
+export const ROLLOUT_TICK_PAGE = 25;
+/** Automatic promotion: bake time range in hours and the failure-percentage range (plan 4.14; defaults 24 h and 10 %). */
+export const MIN_BAKE_HOURS = 1;
+export const MAX_BAKE_HOURS = 168;
+export const MIN_FAILURE_PCT = 1;
+export const MAX_FAILURE_PCT = 100;
+/** Share of a ring that must have applied the version before an automatic promotion (plan 4.14: 50 %), and at least this many PCs. */
+export const PROMOTE_MIN_SHARE = 0.5;

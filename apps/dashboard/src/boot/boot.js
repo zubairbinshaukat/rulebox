@@ -47,6 +47,8 @@
 
   var path = window.location.pathname.replace(/\/+$/, "") || "/";
   var key = map.r[path] ? path : path.replace(/\/[^/]+$/, "/:");
+  // An id in the middle (/groups/abc/rollout is /groups/:/rollout).
+  if (!map.r[key]) key = path.replace(/^(\/[^/]+\/)[^/]+(\/.+)$/, "$1:$2");
   if (!map.r[key]) return;
   if (map.p.indexOf(key) < 0 && !hasSession()) key = "/sign-in";
   var list = map.r[key] || [];

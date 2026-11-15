@@ -2,8 +2,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import source from "./boot.js?raw";
 
 const MAP = {
-  f: ["/assets/SignIn-1.js", "/assets/Auth-2.js", "/assets/Layout-3.js", "/assets/Devices-4.js", "/assets/DeviceDetail-5.js"],
-  r: { "/sign-in": [0, 1], "/devices": [2, 3], "/devices/:": [2, 4] },
+  f: ["/assets/SignIn-1.js", "/assets/Auth-2.js", "/assets/Layout-3.js", "/assets/Devices-4.js", "/assets/DeviceDetail-5.js", "/assets/Rollout-6.js"],
+  r: { "/sign-in": [0, 1], "/devices": [2, 3], "/devices/:": [2, 4], "/groups/:/rollout": [2, 5] },
   p: ["/sign-in"],
 };
 
@@ -82,6 +82,12 @@ describe("boot.js", () => {
     localStorage.setItem("__convexAuthRefreshToken_https://x.convex.cloud", "t");
     boot("/devices/k57/");
     expect(preloads()).toEqual(["/assets/Layout-3.js", "/assets/DeviceDetail-5.js"]);
+  });
+
+  it("matches an id in the middle of the path", () => {
+    localStorage.setItem("__convexAuthRefreshToken_https://x.convex.cloud", "t");
+    boot("/groups/k57/rollout");
+    expect(preloads()).toEqual(["/assets/Layout-3.js", "/assets/Rollout-6.js"]);
   });
 
   it("does nothing for an unknown path", () => {

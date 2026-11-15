@@ -392,6 +392,8 @@ export default defineSchema({
     // Phase 4b list sorts (lib/listing.ts): devices by name, whole org or within a group / "No group".
     .index("by_org_name", ["orgId", "name"])
     .index("by_org_group_name", ["orgId", "groupId", "name"])
+    // Phase 5 Step 16: the PCs of one rollout ring in a group ("everyone" = value "everyone" or no value).
+    .index("by_group_ring", ["groupId", "ring"])
     // DEPRECATED: enrollment idempotency for devices enrolled before the
     // credentials split; removed with the narrow step.
     .index("by_secret_hash", ["secretHash"])
@@ -1053,6 +1055,9 @@ export default defineSchema({
     state: rolloutState,
     haltReason: v.optional(v.string()),
     stageStartedAt: v.optional(v.number()),
+    // Step 16: the versions the rollout screen lists (newest KEEP_GROUP_CONFIGS plus any a pointer still names), kept by
+    // snapshotGroupConfig so the screen never reads the (up to 256 KB) configuration rows. Missing = none known yet.
+    versions: v.optional(v.array(v.object({ version: v.number(), reason: v.string(), createdAt: v.number() }))),
     revision: v.number(),
   })
     .index("by_group", ["groupId"])

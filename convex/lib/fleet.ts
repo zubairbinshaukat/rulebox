@@ -46,6 +46,8 @@ export async function revokeDevice(
   } else {
     await ctx.db.patch(device._id, { revoked: true, rotateCredential: undefined });
   }
+  // Step 16: a revoked PC leaves its rollout ring, so it never counts as a PC that has not applied a version (ring health).
+  if (device.ring !== undefined) await ctx.db.patch(device._id, { ring: undefined });
   const summary = await ctx.db
     .query("deviceSummary")
     .withIndex("by_device", (q) => q.eq("deviceId", device._id))

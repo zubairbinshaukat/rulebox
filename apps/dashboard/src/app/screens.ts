@@ -15,6 +15,7 @@ const LOADERS: Record<ScreenName, Loader> = {
   DeviceDetail: () => import("../screens/DeviceDetail"),
   Groups: () => import("../screens/Groups"),
   GroupDetail: () => import("../screens/GroupDetail"),
+  Rollout: () => import("../screens/Rollout"),
   Networks: () => import("../screens/Networks"),
   WifiEdit: () => import("../screens/WifiEdit"),
   PrinterEdit: () => import("../screens/PrinterEdit"),

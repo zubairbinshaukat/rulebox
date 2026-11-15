@@ -20,4 +20,8 @@ crons.daily("security rollup", { hourUTC: 1, minuteUTC: 0 }, internal.security.r
 // index read per run.
 crons.interval("presence sweep", { minutes: 5 }, internal.presence.sweep, {});
 
+// Phase 5 Step 16: rollout rings. Every 15 minutes, the rollouts in state `rolling` are checked for a halt or an automatic promotion
+// (plan 4.14). Reads one empty `by_state_stage` range when nothing is rolling; each rolling group is evaluated in its own transaction.
+crons.interval("rollout tick", { minutes: 15 }, internal.rollouts.tick, {});
+
 export default crons;

@@ -410,6 +410,7 @@ fn a_refused_configuration_without_an_lkg_means_every_layer_off() {
 
 #[test]
 fn the_refused_list_is_bounded() {
+    assert_eq!(MAX_REFUSED, 20, "plan 4.11 step 3: at most 20 refused configurations");
     let rig = rig();
     for version in 1..=(MAX_REFUSED as u64 + 5) {
         rig.monitor.on_staff_session(true, T0);

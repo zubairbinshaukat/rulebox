@@ -617,6 +617,47 @@ export const ROWS: Row[] = [
     expect: { ...ADMIN_UNLOCKED, foreign: "not_found" },
   },
   { name: "broadcasts:cancel", call: (a, f) => a.mutation(api.broadcasts.cancel, { id: f.broadcastId }), expect: { ...ADMIN_UNLOCKED, foreign: "not_found" } },
+  // Phase 5 Step 16: rollout rings. The first mutation on a group without a rollout row creates it (revision 0) through a snapshot; the
+  // calls below change nothing when they succeed (rings off, default settings, the PC already in its ring) or are refused by state.
+  { name: "rollouts:groupView", call: (a, f) => a.query(api.rollouts.groupView, { groupId: f.groupId }), expect: { ...VIEWER, foreign: "not_found" } },
+  { name: "rollouts:health", call: (a, f) => a.query(api.rollouts.health, { groupId: f.groupId }), expect: { ...VIEWER, foreign: "not_found" } },
+  {
+    name: "rollouts:setEnabled",
+    call: (a, f) => a.mutation(api.rollouts.setEnabled, { groupId: f.groupId, enabled: false, expectedRevision: 0 }),
+    expect: { ...ADMIN_UNLOCKED, foreign: "not_found" },
+  },
+  {
+    name: "rollouts:setAutoPromote",
+    call: (a, f) =>
+      a.mutation(api.rollouts.setAutoPromote, { groupId: f.groupId, enabled: false, bakeHours: 24, maxFailurePct: 10, autoRollback: true, expectedRevision: 0 }),
+    expect: { ...ADMIN_UNLOCKED, foreign: "not_found" },
+  },
+  {
+    name: "rollouts:setRings",
+    call: (a, f) => a.mutation(api.rollouts.setRings, { groupId: f.groupId, deviceIds: [f.deviceId], ring: "everyone", expectedRevision: 0 }),
+    expect: { ...ADMIN_UNLOCKED, foreign: "not_found" },
+  },
+  {
+    name: "rollouts:promote",
+    call: (a, f) => a.mutation(api.rollouts.promote, { groupId: f.groupId, to: "early", expectedRevision: 0 }),
+    expect: { ...ADMIN_UNLOCKED, default: "conflict", foreign: "not_found" },
+  },
+  {
+    name: "rollouts:promoteAll",
+    call: (a, f) => a.mutation(api.rollouts.promoteAll, { groupId: f.groupId, expectedRevision: 0 }),
+    expect: { ...ADMIN_UNLOCKED, default: "conflict", foreign: "not_found" },
+  },
+  {
+    name: "rollouts:rollback",
+    // Rings are off, so all three pointers move to version 1, where they already are: no write.
+    call: (a, f) => a.mutation(api.rollouts.rollback, { groupId: f.groupId, toVersion: 1, rings: ["pilot"], expectedRevision: 0 }),
+    expect: { ...ADMIN_MAJOR, foreign: "not_found" },
+  },
+  {
+    name: "rollouts:resume",
+    call: (a, f) => a.mutation(api.rollouts.resume, { groupId: f.groupId, expectedRevision: 0 }),
+    expect: { ...ADMIN_UNLOCKED, default: "conflict", foreign: "not_found" },
+  },
   { name: "fleet:revoke", call: (a, f) => a.mutation(api.fleet.revoke, { deviceId: f.deviceId }), expect: { ...ADMIN_MAJOR, foreign: "not_found" } },
   {
     name: "fleet:remove",

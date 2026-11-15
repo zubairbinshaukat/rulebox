@@ -50,8 +50,8 @@ pub const CRASH_LIMIT: usize = 3;
 pub const CRASH_WINDOW_MS: u64 = 5 * 60_000;
 /// Crash loops are watched, and a healthy candidate is promoted, this long after its window started.
 pub const CRASH_WATCH_MS: u64 = 5 * 60_000;
-/// Refused configurations kept.
-pub const MAX_REFUSED: usize = 50;
+/// Refused configurations kept (plan 4.11 step 3 and Step 16: bounded to 20 entries, the oldest goes first).
+pub const MAX_REFUSED: usize = 20;
 
 /// The layers a rollback undoes: L1 to L4 and L7 (L5, the process watch, writes no journal entry).
 pub const ROLLBACK_OWNERS: [JournalOwner; 5] =

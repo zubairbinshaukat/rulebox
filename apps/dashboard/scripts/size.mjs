@@ -37,6 +37,7 @@ const BUDGET = {
       "DeviceDetail",
       "Groups",
       "GroupDetail",
+      "Rollout",
       "Employees",
       "EmployeeDetail",
       "Apps",

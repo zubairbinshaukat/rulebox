@@ -1,5 +1,6 @@
 export const groupStrings = {
   back: "All groups",
+  rollout: "Rollout",
   details: "Details",
   apps: "Apps",
   appsLead: "Apps every PC in this group gets.",

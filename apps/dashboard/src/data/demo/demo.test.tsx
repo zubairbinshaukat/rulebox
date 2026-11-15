@@ -663,3 +663,194 @@ describe("demo device lock and broadcasts (Phase 5 Step 15)", () => {
     await expect(send(input)).resolves.toBeDefined();
   }, 30_000);
 });
+describe("demo rollout rings and rollback (Phase 5 Step 16)", () => {
+  const VIEWER = "auditor.with.a.really.long.mailbox.name@regional-compliance-office.demo.rulebox.test";
+  const group = (name: string) => db().groups.find((g) => g.name === name)!;
+  const view = async (groupId: string) => {
+    const hook = renderHook(() => demoApi.useRolloutView(groupId));
+    return (await ready(hook.result)).data;
+  };
+  const rollRow = (name: string) => db().rollouts.get(group(name)._id)!;
+  const hooks = () => ({
+    enable: renderHook(() => demoApi.useSetRolloutEnabled()).result.current,
+    auto: renderHook(() => demoApi.useSetAutoPromote()).result.current,
+    rings: renderHook(() => demoApi.useSetRings()).result.current,
+    promote: renderHook(() => demoApi.usePromoteRollout()).result.current,
+    promoteAll: renderHook(() => demoApi.usePromoteAll()).result.current,
+    rollback: renderHook(() => demoApi.useRollback()).result.current,
+    resume: renderHook(() => demoApi.useResumeRollout()).result.current,
+  });
+  const code = (p: Promise<unknown>) => p.then(() => null, (e: unknown) => errorCodeOf(e));
+  const detail = (p: Promise<unknown>) => p.then(() => null, (e: unknown) => (e as { detail?: string }).detail ?? null);
+
+  it("seeds a rolling group, a halted one, one with rings off and one with no configuration yet", async () => {
+    resetDemo();
+    signInAs("owner@demo.rulebox.test");
+    const rolling = await view(group("Pharmacy counter")._id);
+    expect(rolling.rollout).toMatchObject({ enabled: true, state: "rolling", pointers: { pilot: 8, early: 7, everyone: 7 } });
+    expect(rolling.stage).toEqual({ ring: "pilot", version: 8 });
+    expect(rolling.versions.map((v) => v.version)).toEqual([8, 7, 6, 5, 4]);
+    expect(rolling.devices.map((d) => [d.name, d.ring])).toEqual([["COUNTER-01", "pilot"], ["COUNTER-02", "pilot"], ["COUNTER-03", "pilot"]]);
+    const halted = await view(group("Back office")._id);
+    expect(halted.rollout).toMatchObject({ state: "halted", haltReason: "failure_rate" });
+    const off = await view(group("Front desk")._id);
+    expect(off.rollout?.enabled).toBe(false);
+    expect(off.stage).toBeNull();
+    expect(off.devices).toHaveLength(100);
+    expect(off.devicesTruncated).toBe(true);
+    const none = await view(group("Training room")._id);
+    expect(none.rollout).toBeNull();
+    expect(none.versions).toEqual([]);
+  });
+
+  it("counts the stage's applied, failed and waiting PCs from their reports, and nothing when no stage is in flight", async () => {
+    resetDemo();
+    signInAs("owner@demo.rulebox.test");
+    const h = renderHook(() => demoApi.useRolloutHealth(group("Pharmacy counter")._id));
+    expect((await ready(h.result)).data).toMatchObject({ stage: { ring: "pilot", version: 8 }, ringSize: 3, applied: 1, failed: 1, partial: 0, waiting: 1, pilotRolledBack: false, ringCapped: false });
+    const idle = renderHook(() => demoApi.useRolloutHealth(group("Front desk")._id));
+    expect((await ready(idle.result)).data).toMatchObject({ stage: null, ringSize: 0, applied: 0, failed: 0, waiting: 0 });
+  });
+
+  it("turning rings on needs a pilot PC; turning them off moves every ring to the newest version; both are audited", async () => {
+    resetDemo();
+    signInAs("owner@demo.rulebox.test");
+    const { enable, rings } = hooks();
+    const front = group("Front desk");
+    expect(await detail(enable({ groupId: front._id, enabled: true, expectedRevision: 1 }))).toBe("no_pilot_devices");
+    const pc = db().devices.find((d) => d.groupId === front._id && !d.revoked)!;
+    const moved = await rings({ groupId: front._id, deviceIds: [pc._id], ring: "pilot", expectedRevision: 1 });
+    expect(moved).toEqual({ revision: 2, changed: 1 });
+    expect(await rings({ groupId: front._id, deviceIds: [pc._id], ring: "pilot", expectedRevision: 2 })).toEqual({ revision: 2, changed: 0 });
+    expect(await enable({ groupId: front._id, enabled: true, expectedRevision: 2 })).toEqual({ revision: 3 });
+    expect(db().audit.some((e) => e.action === "rollout.enabled")).toBe(true);
+    // With rings on, the last pilot PC may not leave the pilot ring.
+    expect(await detail(rings({ groupId: front._id, deviceIds: [pc._id], ring: "everyone", expectedRevision: 3 }))).toBe("no_pilot_devices");
+    expect(rollRow("Front desk").enabled).toBe(true);
+
+    const counter = rollRow("Pharmacy counter");
+    const counterId = group("Pharmacy counter")._id;
+    expect(await enable({ groupId: counterId, enabled: false, expectedRevision: counter.revision })).toEqual({ revision: 4 });
+    expect(counter).toMatchObject({ enabled: false, state: "idle", pointers: { pilot: 8, early: 8, everyone: 8 } });
+    expect(db().audit.some((e) => e.action === "rollout.disabled")).toBe(true);
+  });
+
+  it("refuses a wrong revision (stale_edit) and every write for a viewer", async () => {
+    resetDemo();
+    signInAs("owner@demo.rulebox.test");
+    const h = hooks();
+    const id = group("Pharmacy counter")._id;
+    expect(await code(h.promote({ groupId: id, to: "early", expectedRevision: 1 }))).toBe("stale_edit");
+    expect(await code(h.promoteAll({ groupId: id, expectedRevision: 0 }))).toBe("stale_edit");
+    signInAs(VIEWER);
+    expect(await code(h.promote({ groupId: id, to: "early", expectedRevision: 3 }))).toBe("forbidden");
+    expect(await code(h.enable({ groupId: id, enabled: false, expectedRevision: 3 }))).toBe("forbidden");
+    expect(await code(h.rollback({ groupId: id, toVersion: 7, rings: ["pilot"], expectedRevision: 3 }))).toBe("forbidden");
+    // A viewer may read.
+    expect((await view(id)).rollout?.revision).toBe(3);
+  });
+
+  it("promotes pilot to early to everyone, refuses when nothing is left to promote or the rollout is halted, and resume clears a halt", async () => {
+    resetDemo();
+    signInAs("owner@demo.rulebox.test");
+    const { promote, promoteAll, resume } = hooks();
+    const id = group("Pharmacy counter")._id;
+    const row = rollRow("Pharmacy counter");
+    expect(await detail(promote({ groupId: id, to: "everyone", expectedRevision: row.revision }))).toBe("nothing_to_promote");
+    await promote({ groupId: id, to: "early", expectedRevision: row.revision });
+    expect(row).toMatchObject({ pointers: { pilot: 8, early: 8, everyone: 7 }, state: "rolling" });
+    await promote({ groupId: id, to: "everyone", expectedRevision: row.revision });
+    expect(row).toMatchObject({ pointers: { pilot: 8, early: 8, everyone: 8 }, state: "idle", stageStartedAt: null });
+    expect(await detail(promoteAll({ groupId: id, expectedRevision: row.revision }))).toBe("nothing_to_promote");
+    expect(db().audit.filter((e) => e.action === "rollout.promoted")).toHaveLength(2);
+
+    const off = group("Front desk")._id;
+    expect(await detail(promote({ groupId: off, to: "early", expectedRevision: rollRow("Front desk").revision }))).toBe("rings_disabled");
+
+    const halted = group("Back office")._id;
+    const hrow = rollRow("Back office");
+    expect(await detail(promote({ groupId: halted, to: "early", expectedRevision: hrow.revision }))).toBe("halted");
+    expect(await detail(promoteAll({ groupId: halted, expectedRevision: hrow.revision }))).toBe("halted");
+    await resume({ groupId: halted, expectedRevision: hrow.revision });
+    expect(hrow).toMatchObject({ state: "rolling", haltReason: null });
+    expect(hrow.stageStartedAt).not.toBeNull();
+    expect(await detail(resume({ groupId: halted, expectedRevision: hrow.revision }))).toBe("not_halted");
+    await promoteAll({ groupId: halted, expectedRevision: hrow.revision });
+    expect(hrow).toMatchObject({ pointers: { pilot: 4, early: 4, everyone: 4 }, state: "idle" });
+    expect(db().audit.some((e) => e.action === "rollout.resumed")).toBe(true);
+  });
+
+  it("rolls the chosen rings back to a version that is kept: halted with a reason when the rings then differ, idle when they agree; a missing version is refused", async () => {
+    resetDemo();
+    signInAs("owner@demo.rulebox.test");
+    const { rollback } = hooks();
+    const id = group("Pharmacy counter")._id;
+    const row = rollRow("Pharmacy counter");
+    expect(await detail(rollback({ groupId: id, toVersion: 99, rings: ["pilot"], expectedRevision: row.revision }))).toBe("version_missing");
+    expect(await code(rollback({ groupId: id, toVersion: 6, rings: [], expectedRevision: row.revision }))).toBe("invalid_argument");
+    // The same pointers again: no write.
+    const before = row.revision;
+    expect(await rollback({ groupId: id, toVersion: 8, rings: ["pilot"], expectedRevision: before })).toEqual({ revision: before });
+    await rollback({ groupId: id, toVersion: 6, rings: ["pilot"], expectedRevision: before });
+    expect(row).toMatchObject({ pointers: { pilot: 6, early: 7, everyone: 7 }, state: "halted", haltReason: "rolled_back" });
+    expect(db().audit.some((e) => e.action === "rollout.rolledBack")).toBe(true);
+    await rollback({ groupId: id, toVersion: 6, rings: ["pilot", "early", "everyone"], expectedRevision: row.revision });
+    expect(row).toMatchObject({ pointers: { pilot: 6, early: 6, everyone: 6 }, state: "idle", haltReason: null });
+
+    // With rings off every ring goes back, whichever rings were asked for.
+    const off = rollRow("Front desk");
+    await rollback({ groupId: group("Front desk")._id, toVersion: 3, rings: ["pilot"], expectedRevision: off.revision });
+    expect(off.pointers).toEqual({ pilot: 3, early: 3, everyone: 3 });
+  });
+
+  it("rollback is a major action: it asks for a fresh step-up", async () => {
+    resetDemo();
+    signInAs("owner@demo.rulebox.test");
+    const m = db().members.find((x) => x.email === "owner@demo.rulebox.test")!;
+    // Verified, but long enough ago that only the unlocked level is met.
+    const stale = Date.now() - 10 * 60_000;
+    setSession({ memberId: m._id, createdAt: stale, stepUp: { verifiedAt: stale, lastActiveAt: Date.now(), method: "actionPin" } });
+    const { rollback, promote } = hooks();
+    const id = group("Pharmacy counter")._id;
+    const row = rollRow("Pharmacy counter");
+    expect(await code(rollback({ groupId: id, toVersion: 6, rings: ["pilot"], expectedRevision: row.revision }))).toBe("step_up_required");
+    expect(row.pointers.pilot).toBe(8);
+    // An ordinary rollout write needs only the unlocked level.
+    await expect(promote({ groupId: id, to: "early", expectedRevision: row.revision })).resolves.toBeDefined();
+  });
+
+  it("saves the automatic promotion settings in one write, validates them, and writes nothing when nothing changed", async () => {
+    resetDemo();
+    signInAs("owner@demo.rulebox.test");
+    const { auto } = hooks();
+    const id = group("Pharmacy counter")._id;
+    const row = rollRow("Pharmacy counter");
+    const base = { groupId: id, enabled: true, bakeHours: 48, maxFailurePct: 5, autoRollback: false, expectedRevision: row.revision };
+    for (const bakeHours of [0, 169, 2.5]) expect(await code(auto({ ...base, bakeHours }))).toBe("invalid_argument");
+    for (const maxFailurePct of [0, 101, 1.5]) expect(await code(auto({ ...base, maxFailurePct }))).toBe("invalid_argument");
+    const saved = await auto(base);
+    expect(row).toMatchObject({ autoPromote: { enabled: true, bakeHours: 48, maxFailurePct: 5 }, autoRollback: false });
+    expect(await auto({ ...base, expectedRevision: saved.revision })).toEqual(saved);
+    expect(db().audit.filter((e) => e.action === "rollout.settingsChanged")).toHaveLength(1);
+  });
+
+  it("puts PCs in rings: only PCs of the group, never a revoked one, at most 100 at a time", async () => {
+    resetDemo();
+    signInAs("owner@demo.rulebox.test");
+    const { rings } = hooks();
+    const front = group("Front desk");
+    const row = rollRow("Front desk");
+    const mine = db().devices.filter((d) => d.groupId === front._id && !d.revoked);
+    const other = db().devices.find((d) => d.groupId === group("Pharmacy counter")._id)!;
+    expect(await code(rings({ groupId: front._id, deviceIds: [], ring: "early", expectedRevision: row.revision }))).toBe("invalid_argument");
+    expect(await code(rings({ groupId: front._id, deviceIds: mine.slice(0, 101).map((d) => d._id), ring: "early", expectedRevision: row.revision }))).toBe("invalid_argument");
+    expect(await code(rings({ groupId: front._id, deviceIds: [other._id], ring: "early", expectedRevision: row.revision }))).toBe("invalid_argument");
+    const revoked = db().devices.find((d) => d.groupId === front._id && d.revoked)!;
+    expect(await detail(rings({ groupId: front._id, deviceIds: [revoked._id], ring: "early", expectedRevision: row.revision }))).toBe("device revoked");
+    await rings({ groupId: front._id, deviceIds: mine.slice(0, 3).map((d) => d._id), ring: "early", expectedRevision: row.revision });
+    expect(mine.slice(0, 3).every((d) => d.ring === "early")).toBe(true);
+    expect(db().audit.some((e) => e.action === "device.ringChanged")).toBe(true);
+    await rings({ groupId: front._id, deviceIds: [mine[0]!._id], ring: "everyone", expectedRevision: row.revision });
+    expect(mine[0]!.ring).toBeUndefined();
+  }, 15_000);
+});

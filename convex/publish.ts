@@ -240,7 +240,7 @@ async function liveBroadcasts(
     }));
 }
 
-/** The device's sealed Wi-Fi boxes that are current: for this profile revision and this device's sealing key. */
+/** The device's sealed Wi-Fi boxes that are current: sealed for this profile revision or a newer one, and for this device's sealing key. */
 async function sealedBoxesOf(
   ctx: { db: DatabaseReader },
   device: Doc<"devices">,
@@ -254,7 +254,9 @@ async function sealedBoxesOf(
       .query("deviceSealedSecrets")
       .withIndex("by_device_target", (q) => q.eq("deviceId", device._id).eq("purpose", "wifi").eq("targetId", w.id))
       .first();
-    if (row === null || row.targetRevision !== w.revision || row.sealKeyId !== device.sealKeyId) continue;
+    // A box for this profile revision OR A NEWER ONE: a PC on an older ring pointer (Step 16) names an older profile revision than the
+    // live one the box was sealed for. The box is bound to the device, not to a revision, and holds the live passphrase (the only one kept).
+    if (row === null || row.targetRevision < w.revision || row.sealKeyId !== device.sealKeyId) continue;
     const raw = base64Decode(row.sealed);
     if (raw === null) continue;
     try {

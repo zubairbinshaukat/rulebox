@@ -28,6 +28,8 @@ import type {
   DriverKind,
   WifiSecurity,
   BroadcastStyle,
+  Ring,
+  RolloutRow,
 } from "../types";
 import { DEFAULT_WEB_PERMISSIONS } from "../types";
 import { padListFixtures } from "./listRows";
@@ -106,6 +108,8 @@ export interface DbDevice {
   rotateCredential: boolean;
   /** The head's plan state ("ok" and undefined show nothing; a suspended organization overrides it). */
   planState?: "ok" | "overLimit" | "suspended";
+  /** Rollout ring (Phase 5 Step 16); undefined = everyone. */
+  ring?: Ring;
 }
 export interface DbReport {
   agentVersion?: string;
@@ -232,6 +236,15 @@ export interface DbBroadcast {
   targetCount: number;
   ackCount: number;
 }
+/** `groupRollouts` (Phase 5 Step 16), by group id: the row plus the versions a rollback can go to (newest first). */
+export interface DbRollout extends RolloutRow {
+  versions: { version: number; reason: string; createdAt: number }[];
+}
+/** `deviceApplyReports` (Phase 5 Step 16): the state a PC reported for one configuration version of its group. */
+export interface DbApplyReport {
+  version: number;
+  state: "applied" | "partial" | "failed" | "refused" | "rolledBack";
+}
 /** `deviceLocks` (Phase 5 Step 15), by device id. */
 export interface DbLock {
   lockId: string;
@@ -303,6 +316,9 @@ export interface DemoDb {
   /** `broadcasts` and `deviceLocks` (Phase 5 Step 15). */
   broadcasts: DbBroadcast[];
   locks: Map<string, DbLock>;
+  /** `groupRollouts` by group id (no row = the group has no configuration version yet) and the PCs' apply reports (Phase 5 Step 16). */
+  rollouts: Map<string, DbRollout>;
+  applyReports: Map<string, DbApplyReport>;
   fileHandlers: { _id: string; extension: string; appId: string }[];
   tokens: DbToken[];
   installs: DbInstall[];
@@ -726,11 +742,11 @@ export function seed(now: number = Date.now()): DemoDb {
 
   // A handful of hand-made PCs first (they sort to the end: lists are newest first).
   const dCounter1 = addDevice("COUNTER-01", gCounter, { ageDays: 14 });
-  addDevice("COUNTER-02", gCounter, { restartPending: true, ageDays: 13 });
-  addDevice("COUNTER-03", gCounter, { online: false, ageDays: 12 });
+  const dCounter2 = addDevice("COUNTER-02", gCounter, { restartPending: true, ageDays: 13 });
+  const dCounter3 = addDevice("COUNTER-03", gCounter, { online: false, ageDays: 12 });
   const dOffice1 = addDevice("OFFICE-MANAGER", gOffice, { kioskEnabled: false, ageDays: 11 });
-  addDevice("OFFICE-ACCOUNTS", gOffice, { build: 19045, edition: "Professional", outOfSupport: true, ageDays: 10 });
-  addDevice("OFFICE-SCANNER", gOffice, { build: 26100, edition: "Core", outOfSupport: true, kioskPhase: "failed", kioskError: "desired_state_untrusted", shellHealth: "unhealthy", trustedKeyIds: [], ageDays: 9 });
+  const dOffice2 = addDevice("OFFICE-ACCOUNTS", gOffice, { build: 19045, edition: "Professional", outOfSupport: true, ageDays: 10 });
+  const dOffice3 = addDevice("OFFICE-SCANNER", gOffice, { build: 26100, edition: "Core", outOfSupport: true, kioskPhase: "failed", kioskError: "desired_state_untrusted", shellHealth: "unhealthy", trustedKeyIds: [], ageDays: 9 });
   addDevice("WAREHOUSE-RECEIVING-DOCK-EAST-TERMINAL-02-LEGACY-HARDWARE-ON-LOAN-FROM-HEAD-OFFICE", gNight, { lag: 2, ageDays: 8 });
   addDevice("WAREHOUSE-01", gNight, { lag: 1, ramMb: 4096, diskFreeGb: 1, planState: "overLimit", ageDays: 7 });
   addDevice("SPARE-LAPTOP-07", undefined, { ageDays: 6 });
@@ -749,6 +765,66 @@ export function seed(now: number = Date.now()): DemoDb {
     });
     frontIds.push(d._id);
   }
+
+  // ---- rollout rings (Phase 5 Step 16): "Pharmacy counter" is rolling out (rings on, the pilot ring in flight), "Back office" is
+  // halted after too many failures, "Front desk" has rings off (and more PCs than the screen lists), "Warehouse ... Night Shift" has no
+  // configuration version yet (no row).
+  const versionList = (newest: number, reasons: string[]) => reasons.map((reason, i) => ({ version: newest - i, reason, createdAt: now - (i * 2 + 1) * DAY }));
+  dCounter1.ring = "pilot";
+  dCounter2.ring = "pilot";
+  dCounter3.ring = "pilot";
+  dOffice1.ring = "pilot";
+  dOffice2.ring = "early";
+  const applyReports = new Map<string, DbApplyReport>([
+    [dCounter1._id, { version: 8, state: "applied" }],
+    [dCounter3._id, { version: 8, state: "failed" }],
+    [dOffice1._id, { version: 4, state: "applied" }],
+    [dOffice3._id, { version: 4, state: "failed" }],
+  ]);
+  const rollouts = new Map<string, DbRollout>([
+    [
+      gCounter._id,
+      {
+        enabled: true,
+        pointers: { pilot: 8, early: 7, everyone: 7 },
+        autoPromote: { enabled: false, bakeHours: 24, maxFailurePct: 60 },
+        autoRollback: true,
+        state: "rolling",
+        haltReason: null,
+        stageStartedAt: now - 3 * HOUR,
+        revision: 3,
+        versions: versionList(8, ["Label printer assigned", "Lockdown settings changed", "App assigned", "Printer added", "Wi-Fi assigned"]),
+      },
+    ],
+    [
+      gOffice._id,
+      {
+        enabled: true,
+        pointers: { pilot: 4, early: 3, everyone: 3 },
+        autoPromote: { enabled: true, bakeHours: 12, maxFailurePct: 10 },
+        autoRollback: false,
+        state: "halted",
+        haltReason: "failure_rate",
+        stageStartedAt: null,
+        revision: 5,
+        versions: versionList(4, ["Exception added", "App assigned", "Lockdown settings changed", "Wi-Fi assigned"]),
+      },
+    ],
+    [
+      gFront._id,
+      {
+        enabled: false,
+        pointers: { pilot: 5, early: 5, everyone: 5 },
+        autoPromote: { enabled: false, bakeHours: 24, maxFailurePct: 10 },
+        autoRollback: true,
+        state: "idle",
+        haltReason: null,
+        stageStartedAt: null,
+        revision: 1,
+        versions: versionList(5, ["App assigned", "Lockdown settings changed", "App assigned", "Printer added", "Wi-Fi assigned"]),
+      },
+    ],
+  ]);
 
   // ---- installs
   const installs: DbInstall[] = [];
@@ -1014,6 +1090,8 @@ export function seed(now: number = Date.now()): DemoDb {
       { _id: id("bcast"), target: { kind: "group", id: gCounter._id }, style: "banner", title: "Fire drill", body: "There is a fire drill at 10:00.", expiresAt: now - 2 * DAY, ackRequired: false, createdAt: now - 3 * DAY - 3_600_000, cancelledAt: null, targetCount: 6, ackCount: 0 },
     ],
     locks: new Map(),
+    rollouts,
+    applyReports,
     fileHandlers,
     tokens,
     installs,

@@ -273,6 +273,27 @@ export async function loadConfigInputs(
   return { settings, exceptions: [...own, ...orgWide], wifi, printers, drivers };
 }
 
+/** One entry of `groupRollouts.versions`: what the rollout screen lists (never the configuration text). */
+export type ConfigVersionEntry = { version: number; reason: string; createdAt: number };
+
+/**
+ * The version list after `entry` is added: the newest KEEP_GROUP_CONFIGS versions plus any older one a pointer still names
+ * (those are never pruned). Null when the list would not change (no write). Sorted by version, newest last.
+ */
+export function withVersion(
+  current: ConfigVersionEntry[] | undefined,
+  entry: ConfigVersionEntry,
+  keepFrom: number,
+  pointers: { pilot: number; early: number; everyone: number },
+): ConfigVersionEntry[] | null {
+  const have = current ?? [];
+  const merged = have.some((e) => e.version === entry.version) ? have : [...have, entry];
+  const kept = merged
+    .filter((e) => e.version >= keepFrom || e.version === pointers.pilot || e.version === pointers.early || e.version === pointers.everyone)
+    .sort((a, b) => a.version - b.version);
+  const same = kept.length === have.length && kept.every((e, i) => e.version === have[i]?.version);
+  return same ? null : kept;
+}
 export type SnapshotResult = { changed: boolean; version: number };
 
 /**
@@ -325,34 +346,48 @@ export async function snapshotGroupConfig(
     });
   }
 
-  // Pointers.
+  // Pointers and the version list the rollout screen shows (so it never has to read the configurations themselves).
+  const entry: ConfigVersionEntry =
+    newest !== null && newest.contentHash === contentHash && newest.version === version
+      ? { version, reason: newest.reason, createdAt: newest.createdAt }
+      : { version, reason: reason.slice(0, 120), createdAt: now };
+  const keepFrom = version - (KEEP_GROUP_CONFIGS - 1);
+  let pointers: Doc<"groupRollouts">["pointers"];
   if (rollout === null) {
+    pointers = { pilot: version, early: version, everyone: version };
     await ctx.db.insert("groupRollouts", {
       orgId,
       groupId,
       enabled: false,
-      pointers: { pilot: version, early: version, everyone: version },
+      pointers,
       autoPromote: { enabled: false, bakeHours: 24, maxFailurePct: 10 },
       autoRollback: true,
       state: "idle",
+      versions: [entry],
       revision: 0,
     });
-  } else if (!rollout.enabled) {
-    const p = rollout.pointers;
-    if (p.pilot !== version || p.early !== version || p.everyone !== version) {
-      await ctx.db.patch(rollout._id, { pointers: { pilot: version, early: version, everyone: version } });
+  } else {
+    const patch: Partial<Doc<"groupRollouts">> = {};
+    pointers = rollout.pointers;
+    if (!rollout.enabled) {
+      if (pointers.pilot !== version || pointers.early !== version || pointers.everyone !== version) {
+        pointers = { pilot: version, early: version, everyone: version };
+        patch.pointers = pointers;
+      }
+    } else if (pointers.pilot !== version) {
+      pointers = { ...pointers, pilot: version };
+      patch.pointers = pointers;
+      patch.state = rollout.state === "halted" ? "halted" : "rolling";
+      patch.stageStartedAt = now;
     }
-  } else if (rollout.pointers.pilot !== version) {
-    await ctx.db.patch(rollout._id, {
-      pointers: { ...rollout.pointers, pilot: version },
-      state: rollout.state === "halted" ? "halted" : "rolling",
-      stageStartedAt: now,
-    });
+    // A pointer move bumps `revision`, so an admin acting on a screen from before it gets `stale_edit` (Step 16).
+    if (patch.pointers !== undefined) patch.revision = rollout.revision + 1;
+    const versions = withVersion(rollout.versions, entry, keepFrom, pointers);
+    if (versions !== null) patch.versions = versions;
+    if (Object.keys(patch).length > 0) await ctx.db.patch(rollout._id, patch);
   }
 
   // Prune old versions no pointer references.
-  const pointers = rollout?.pointers ?? { pilot: version, early: version, everyone: version };
-  const keepFrom = version - (KEEP_GROUP_CONFIGS - 1);
   if (keepFrom > 1) {
     const old = await ctx.db
       .query("groupConfigs")
@@ -363,7 +398,6 @@ export async function snapshotGroupConfig(
       await ctx.db.delete(row._id);
     }
   }
-
   await requestPublish(ctx, orgId, { groupIds: [groupId] });
   return { changed: true, version };
 }

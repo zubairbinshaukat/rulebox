@@ -551,6 +551,32 @@ export const IO_BUDGETS: Record<string, IoBudget> = {
   "broadcasts:send": { maxReads: 4 + 1 + GROUP_COUNT_CAP_READ + 42 + 2, maxReadBytes: 400_000, maxWrites: 3, maxWriteBytes: 4_096 },
   // wrapper (4) + the broadcast + its group + publish queue; writes: broadcast, queue, audit. Already cancelled: 0 writes.
   "broadcasts:cancel": { maxReads: 4 + 1 + 1 + 1, maxReadBytes: 6_144, maxWrites: 3, maxWriteBytes: 2_048 },
+  // ---- Phase 5 Step 16: rollout rings (plan 4.14, 4.20). UNSURE until measured: the matrix calls are the no-change / refused cases.
+  // wrapper (3) + group + rollout row + <= 101 of the group's PCs. The version list comes from the rollout row (`versions`), so no
+  // configuration text (up to 256 KB) is read. Re-runs when the rollout row or a PC row of the group changes (heartbeats are not in the PC row).
+  "rollouts:groupView": { maxReads: 3 + 1 + 1 + 101, maxReadBytes: 160_000, maxWrites: 0, maxWriteBytes: 0, live: true },
+  // wrapper (3) + group + rollout + the stage ring's PCs (<= 201) + the pilot ring's PCs when the stage is `early` (<= 200) + <= 1001 apply reports
+  // of the stage's version (~2 KB each). The heavy one: it re-runs when one of those reports changes, which is why it is not part of `groupView`.
+  // Nothing in flight (rings off or idle) = 5 reads. The tick's `evaluate` reads the same ranges.
+  "rollouts:health": { maxReads: 3 + 1 + 1 + 201 + 200 + 1001, maxReadBytes: 3_200_000, maxWrites: 0, maxWriteBytes: 0, live: true },
+  // The mutations below: wrapper + step-up (4), group, the rollout row; a group with no rollout row yet gets its first configuration version through one
+  // snapshot (~621 reads, 13 writes, like the Wi-Fi rows). Enabling reads <= 1 PC of the pilot ring; disabling reads the newest configuration (1 row).
+  // Writes: rollout, audit, publish queue (+ one scheduled run); no change = 0 writes after the snapshot.
+  "rollouts:setEnabled": { maxReads: 4 + 1 + 1 + 621 + 4, maxReadBytes: 2_500_000, maxWrites: 13 + 6, maxWriteBytes: 2_700_000 },
+  "rollouts:setAutoPromote": { maxReads: 4 + 1 + 1 + 621, maxReadBytes: 2_500_000, maxWrites: 13 + 3, maxWriteBytes: 2_700_000 },
+  // + <= 100 PCs x (PC + credentials) and <= 101 PCs of the pilot ring (the "pilot may not end up empty" check); writes: <= 100 PC rows too.
+  "rollouts:setRings": { maxReads: 4 + 1 + 1 + 621 + 200 + 101, maxReadBytes: 2_800_000, maxWrites: 13 + 100 + 4, maxWriteBytes: 2_900_000 },
+  "rollouts:promote": { maxReads: 4 + 1 + 1 + 621, maxReadBytes: 2_500_000, maxWrites: 13 + 4, maxWriteBytes: 2_700_000 },
+  "rollouts:promoteAll": { maxReads: 4 + 1 + 1 + 621, maxReadBytes: 2_500_000, maxWrites: 13 + 4, maxWriteBytes: 2_700_000 },
+  // + the chosen configuration row (<= 256 KB).
+  "rollouts:rollback": { maxReads: 4 + 1 + 1 + 621 + 1, maxReadBytes: 2_800_000, maxWrites: 13 + 4, maxWriteBytes: 2_700_000 },
+  "rollouts:resume": { maxReads: 4 + 1 + 1 + 621, maxReadBytes: 2_500_000, maxWrites: 13 + 3, maxWriteBytes: 2_700_000 },
+  // Cron every 15 minutes: one page (<= 25) of `groupRollouts.by_state_stage` in state `rolling` (an empty range when nothing rolls: 1 read);
+  // each rolling group is then evaluated in its own scheduled transaction. A full page schedules the next one.
+  "rollouts:tick": { maxReads: 26, maxReadBytes: 25_000, maxWrites: 0, maxWriteBytes: 0 },
+  // One rolling group: rollout, group, then the same ranges as `rollouts:health`. Writes only when it decides something (halt: rollout, audit x2,
+  // queue; promote: rollout, audit, queue).
+  "rollouts:evaluate": { maxReads: 2 + 201 + 200 + 1001, maxReadBytes: 3_200_000, maxWrites: 5, maxWriteBytes: 8_192 },
   // ---- Phase 5 Step 14b: drivers (PRD 24.2). UNSURE like the rows above: the matrix calls are the no-change / refused cases.
   // wrapper (4) + the driver + <= 10 group names + <= 201 results (~0.3 KB each; a row only changes when a PC's state does). The Networks screen
   // does not subscribe to it (`networks:list` carries the rows only).
