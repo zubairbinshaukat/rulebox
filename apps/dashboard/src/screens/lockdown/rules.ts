@@ -42,10 +42,20 @@ export function lockoutProblems(l: LockoutDraft): { threshold: boolean; duration
 
 /** The settings to save: the draft with the lockout fields as numbers (the saved lockout is kept while a field is invalid). */
 export function settingsOf(draft: LockdownSettings, l: LockoutDraft): LockdownSettings {
+  return withoutStaleConfirm(withLockout(draft, l));
+}
+
+function withLockout(draft: LockdownSettings, l: LockoutDraft): LockdownSettings {
   if (!l.on) return { ...draft, machine: { ...draft.machine, accountLockout: null } };
   const p = lockoutProblems(l);
   if (p.threshold || p.duration || p.window) return draft;
   return { ...draft, machine: { ...draft.machine, accountLockout: { threshold: Number(l.threshold.trim()), durationMin: Number(l.duration.trim()), windowMin: Number(l.window.trim()) } } };
+}
+
+/** "I understand this PC may go offline" only means something while "managed networks only" is on, and is never stored as false (as the server does). */
+function withoutStaleConfirm(s: LockdownSettings): LockdownSettings {
+  const { wifiManagedOnlyConfirmed, ...rest } = s;
+  return wifiManagedOnlyConfirmed === true && s.wifiManagedOnly ? { ...rest, wifiManagedOnlyConfirmed: true } : rest;
 }
 
 /** A text that is the same for equal settings whatever the order of their keys (the server does not promise one). */

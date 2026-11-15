@@ -147,6 +147,8 @@ export const lockdownStrings = {
   // ---- networks
   netTitle: "Networks",
   wifiManagedOnly: "Managed Wi-Fi networks only",
+  wifiManagedOnlyConfirm: "I understand this PC may go offline",
+  wifiManagedOnlyConfirmHint: "Tick this to apply the rule even if a PC is on another network now. That PC goes offline until it sees a network from the list.",
   wifiManagedOnlyHelp: `The PC can join only the Wi-Fi networks you assigned to this group. Needs at least one. ${EVERYONE}`,
   // ---- exceptions
   exceptionsTitle: "Exceptions",

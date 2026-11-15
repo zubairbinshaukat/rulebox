@@ -14,7 +14,6 @@ import {
   MAX_ORG_PRINTERS,
   MAX_PRINTER_DRIVER,
   MAX_PRINTER_NAME,
-  MAX_NETWORK_SNAPSHOT_GROUPS,
   MAX_WIFI_DETAIL_GROUPS,
   MAX_WIFI_DETAIL_REPORTS,
   MAX_WIFI_PROFILES,
@@ -45,7 +44,7 @@ import { driverRowOf, driverRowValue } from "./drivers";
 //                        create = no `id` (revision 1); update = `id` + `expectedRevision` (else invalid_argument,
 //                        field "expectedRevision"). Errors: invalid_argument (field name|ssid|groupIds|
 //                        expectedRevision, detail), not_found (profile or group of another org), stale_edit,
-//                        too_large (detail "wifi" = 50 profiles per org; "groups" = more than 10 groups touched).
+//                        too_large (detail "wifi" = 50 profiles per org; "groups" = more than 500 groups touched).
 //   networks:deleteWifi  mutation, admin, args { id: string }         -> null
 //   wifi:setPassphrase   action, admin, args { id: string, passphrase: string, expectedRevision: number }
 //                        -> { revision: number }. Errors: invalid_argument (field "passphrase", detail "length"|
@@ -67,7 +66,7 @@ import { driverRowOf, driverRowValue } from "./drivers";
 //                           Errors: invalid_argument (field name|address|port|queue|driver|groupIds|defaultForGroupIds|
 //                           expectedRevision; detail, e.g. name "taken", driver "not_approved", defaultForGroupIds "taken"),
 //                           not_found, stale_edit, too_large (detail "printers" = 100 per organization; "groups" = more
-//                           than 10 groups touched). The driver must be on the approved list (the inbox class drivers, the
+//                           than 500 groups touched). The driver must be on the approved list (the inbox class drivers, the
 //                           `phase5Settings.approvedPrinterDrivers` the admin added, and the names `provides` of the organization's
 //                           drivers, Step 14b); the printer layer itself never installs one (a driver package does).
 //   networks:setApprovedPrinterDrivers  mutation, admin, args { names: string[] } -> { addedDrivers: string[] }
@@ -339,8 +338,7 @@ export const purgeSealed = internalMutation({
  * `expectedRevision` (`stale_edit` when someone saved in between). No change = no write, no new revision, no
  * publish. A change bumps the revision (every device re-seals and re-applies the profile), audits
  * `wifi.created` / `wifi.updated`, makes the configuration of every group the profile was in or is now in a new
- * version (`snapshotGroupConfig`; at most MAX_NETWORK_SNAPSHOT_GROUPS groups per save, else `too_large`
- * detail "groups"). Switching to an open network drops the stored passphrase (its boxes are deleted by a scheduled `purgeSealed`).
+ * version (`snapshotGroupsBatched`: the first 10 groups in the call, the rest in scheduled batches). Switching to an open network drops the stored passphrase (its boxes are deleted by a scheduled `purgeSealed`).
  */
 export const saveWifi = memberMutation("admin")({
   args: {
@@ -367,7 +365,6 @@ export const saveWifi = memberMutation("admin")({
 
     if (args.id === undefined) {
       if (args.expectedRevision !== undefined) fail("invalid_argument", { field: "expectedRevision" });
-      if (groupIds.length > MAX_NETWORK_SNAPSHOT_GROUPS) fail("too_large", { detail: "groups" });
       const existing = await ctx.db
         .query("wifiProfiles")
         .withIndex("by_org", (q) => q.eq("orgId", ctx.orgId))
@@ -411,7 +408,6 @@ export const saveWifi = memberMutation("admin")({
     if (unchanged) return { id: p._id, revision: p.revision };
 
     const touched = new Set<Id<"groups">>([...before, ...groupIds]);
-    if (touched.size > MAX_NETWORK_SNAPSHOT_GROUPS) fail("too_large", { detail: "groups" });
     const revision = p.revision + 1;
     const dropSecret = args.security === "open" && p.passphrase !== undefined;
     await ctx.db.patch(p._id, {
@@ -450,7 +446,6 @@ export const deleteWifi = memberMutation("admin")({
   returns: v.null(),
   handler: async (ctx, args) => {
     const p = await getInOrg(ctx, "wifiProfiles", args.id, ctx.orgId);
-    if (p.groupIds.length > MAX_NETWORK_SNAPSHOT_GROUPS) fail("too_large", { detail: "groups" });
     await ctx.db.delete(p._id);
     await ctx.scheduler.runAfter(0, internal.networks.purgeSealed, { profileId: p._id });
     await writeAudit(ctx, {
@@ -514,8 +509,7 @@ export const printerDetail = memberQuery("viewer")({
  * organization (case-insensitive, `name` "taken"); a group has at most one default printer (`defaultForGroupIds` "taken": turn
  * the other one off first) and a default must be a group the printer is assigned to ("not_assigned"). No change = no write.
  * A change bumps the revision, audits `printer.created` / `printer.updated` and makes the configuration of every group the
- * printer was in or is now in a new version (at most MAX_NETWORK_SNAPSHOT_GROUPS groups per save, else `too_large`
- * detail "groups"), so the agent applies it.
+ * printer was in or is now in a new version (the first 10 groups in the call, the rest in scheduled batches), so the agent applies it.
  */
 export const savePrinter = memberMutation("admin")({
   args: {
@@ -583,7 +577,6 @@ export const savePrinter = memberMutation("admin")({
     }
 
     if (own === null) {
-      if (groupIds.length > MAX_NETWORK_SNAPSHOT_GROUPS) fail("too_large", { detail: "groups" });
       const id = await ctx.db.insert("printers", {
         orgId: ctx.orgId,
         name,
@@ -623,7 +616,6 @@ export const savePrinter = memberMutation("admin")({
     if (unchanged) return { id: own._id, revision: own.revision };
 
     const touched = new Set<Id<"groups">>([...before, ...groupIds]);
-    if (touched.size > MAX_NETWORK_SNAPSHOT_GROUPS) fail("too_large", { detail: "groups" });
     const revision = own.revision + 1;
     await ctx.db.patch(own._id, {
       name,
@@ -652,15 +644,14 @@ export const savePrinter = memberMutation("admin")({
 
 /**
  * Delete a printer (admin). The configuration of every group it was assigned to becomes a new version without it, so the
- * documents drop it and the agent removes the `<name> (Rulebox)` queue it created (and its port). At most
- * MAX_NETWORK_SNAPSHOT_GROUPS groups (else `too_large`, detail "groups").
+ * documents drop it and the agent removes the `<name> (Rulebox)` queue it created (and its port). The first 10 groups
+ * are snapshotted in the call, the rest in scheduled batches.
  */
 export const deletePrinter = memberMutation("admin")({
   args: { id: v.string() },
   returns: v.null(),
   handler: async (ctx, args) => {
     const p = await getInOrg(ctx, "printers", args.id, ctx.orgId);
-    if (p.groupIds.length > MAX_NETWORK_SNAPSHOT_GROUPS) fail("too_large", { detail: "groups" });
     await ctx.db.delete(p._id);
     await writeAudit(ctx, {
       orgId: ctx.orgId,

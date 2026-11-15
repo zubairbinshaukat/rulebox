@@ -1,13 +1,14 @@
 import { paginationOptsValidator, paginationResultValidator } from "convex/server";
 import { v } from "convex/values";
+import { internal } from "./_generated/api";
 import type { Doc, Id } from "./_generated/dataModel";
-import type { DatabaseReader } from "./_generated/server";
+import type { DatabaseReader, MutationCtx } from "./_generated/server";
 import { writeAudit } from "./lib/audit";
 import { getInOrg } from "./lib/authz";
 import { deepEqual } from "./lib/deepEqual";
 import { fail } from "./lib/errors";
 import { memberMutation, memberQuery } from "./lib/functions";
-import { newSnapshotCache, snapshotGroupConfig } from "./lib/groupConfig";
+import { newSnapshotCache, snapshotGroupConfig, type SnapshotCache } from "./lib/groupConfig";
 import {
   MAX_ALLOW_APPS,
   MAX_ALLOW_GROUPS,
@@ -21,6 +22,8 @@ import {
   MAX_WIFI_PROFILES,
   MIN_LOCKOUT_THRESHOLD,
   OPEN_FINDINGS_CAP,
+  SNAPSHOT_BATCH_GROUPS,
+  SNAPSHOT_SYNC_GROUPS,
 } from "./lib/limits";
 import { checkPageSize, pickSort, sortArg } from "./lib/listing";
 import {
@@ -43,7 +46,8 @@ import { requireStepUp } from "./lib/stepUp";
 //   other than a NEW finding.
 // - `findings` is one page of `lockdownFindings.by_org_status_seen` (index + cursor); `lockdownFindingDevices` is never read here.
 // - Every write that changes what PCs get takes a new group configuration version in the same transaction (`snapshotGroupConfig`,
-//   which also asks for the publish), so an "Allow" may name at most MAX_ALLOW_GROUPS groups.
+//   which also asks for the publish). An "Allow" may name at most MAX_ALLOW_GROUPS groups: the first SNAPSHOT_SYNC_GROUPS are done in
+//   the call, the rest by scheduled `groupBatches:allowBatch` runs (Step 20b).
 //
 // Rule 6 holds on this side too: nothing here stores or returns a full path, a command line or a window title. A path exception is a
 // TEMPLATE under an admin-only root (`{ProgramFiles}`, `{ProgramFilesX86}`, `{RuleboxApps}`) typed by the admin.
@@ -147,6 +151,12 @@ export const groupView = memberQuery("viewer")({
   },
 });
 
+/** `wifiManagedOnlyConfirmed` is stored only when it is true and "managed networks only" is on (else the key is left out), so equal settings stay equal. */
+function normalizeSettings(s: LockdownSettings): LockdownSettings {
+  const { wifiManagedOnlyConfirmed, ...rest } = s;
+  return wifiManagedOnlyConfirmed === true && s.wifiManagedOnly ? { ...rest, wifiManagedOnlyConfirmed: true } : rest;
+}
+
 function checkSettings(s: LockdownSettings): void {
   const l = s.machine.accountLockout;
   if (l !== null) {
@@ -176,12 +186,13 @@ const anyAudit = (s: LockdownSettings): boolean => LAYERS.some((k) => s[k].mode 
 export const update = memberMutation("admin")({
   args: { groupId: v.string(), settings: lockdownSettings, expectedRevision: v.number() },
   returns: v.object({ revision: v.number() }),
-  handler: async (ctx, args) => {
+  handler: async (ctx, rawArgs) => {
+    const args = { ...rawArgs, settings: normalizeSettings(rawArgs.settings) };
     const group = await getInOrg(ctx, "groups", args.groupId, ctx.orgId);
     const row = await lockdownRow(ctx, group._id);
     if ((row?.revision ?? 0) !== args.expectedRevision) fail("stale_edit");
     checkSettings(args.settings);
-    const current = await settingsOf(ctx, ctx.orgId, row);
+    const current = normalizeSettings(await settingsOf(ctx, ctx.orgId, row));
     if (deepEqual(current, args.settings)) return { revision: row?.revision ?? 0 };
 
     const modes = modesChanged(current, args.settings);
@@ -325,8 +336,10 @@ export function exceptionPath(folder: string, fileName: string): string {
  * watch (never App Control: `conflict`, detail `app_control_finding`). `kind`: "publisher" (the finding's signer, product and file
  * name; `conflict` detail `no_signer` for an unsigned program), "hash" (this exact file; `no_hash` when the PC sent none; breaks when
  * the program updates) or "path" (only for a program found under an admin-only folder, `path_not_admin_only` otherwise; the admin
- * types the folder template). A group that already has the same rule is skipped; a group at MAX_GROUP_EXCEPTIONS is `too_large`
- * (detail "exceptions"). The finding becomes `allowed`; each group gets a new configuration version; audits `lockdown.exceptionAdded`.
+ * types the folder template). A group that already has the same rule is skipped; one of the first SNAPSHOT_SYNC_GROUPS groups at
+ * MAX_GROUP_EXCEPTIONS is `too_large` (detail "exceptions"; a later group at the cap is skipped by its batch). The finding becomes
+ * `allowed`; each group gets a new configuration version (later groups a moment after the call); audits `lockdown.exceptionAdded`.
+ * `added` = groups added now plus groups handed to a batch.
  */
 export const allow = memberMutation("admin")({
   args: {
@@ -369,30 +382,29 @@ export const allow = memberMutation("admin")({
 
     const now = Date.now();
     const cache = newSnapshotCache();
+    // The first SNAPSHOT_SYNC_GROUPS groups get their exception and configuration version now; the others in scheduled batches (Step 20b).
     const added: Doc<"groups">[] = [];
-    for (const group of groups) {
-      const have = await ctx.db
-        .query("lockdownExceptions")
-        .withIndex("by_org_group", (q) => q.eq("orgId", ctx.orgId).eq("groupId", group._id))
-        .take(MAX_GROUP_EXCEPTIONS + 1);
-      if (have.some((e) => deepEqual(e.rule, rule))) continue;
-      if (have.length >= MAX_GROUP_EXCEPTIONS) fail("too_large", { detail: "exceptions" });
-      await ctx.db.insert("lockdownExceptions", {
-        orgId: ctx.orgId,
-        groupId: group._id,
-        appId: app?._id,
-        rule,
-        reason,
-        findingId: finding._id,
-        createdBy: ctx.member._id,
-        createdAt: now,
-      });
-      await snapshotGroupConfig(ctx, group._id, "Exception added", ctx.member._id, cache);
+    for (const group of groups.slice(0, SNAPSHOT_SYNC_GROUPS)) {
+      if (!(await addException(ctx, { orgId: ctx.orgId, group, rule, appId: app?._id, reason, findingId: finding._id, by: ctx.member._id, now, cache }))) continue;
       added.push(group);
     }
+    const later = groups.slice(SNAPSHOT_SYNC_GROUPS);
+    for (let i = 0; i < later.length; i += SNAPSHOT_BATCH_GROUPS) {
+      await ctx.scheduler.runAfter(0, internal.groupBatches.allowBatch, {
+        orgId: ctx.orgId,
+        groupIds: later.slice(i, i + SNAPSHOT_BATCH_GROUPS).map((g) => g._id),
+        rule,
+        ...(app === null ? {} : { appId: app._id }),
+        reason,
+        findingId: finding._id,
+        by: ctx.member._id,
+        now,
+      });
+    }
     if (finding.status !== "allowed") await ctx.db.patch(finding._id, { status: "allowed", decidedBy: ctx.member._id, decidedAt: now });
-    if (added.length > 0) {
-      const first = added[0]!;
+    const total = added.length + later.length;
+    if (total > 0) {
+      const first = added[0] ?? later[0]!;
       await writeAudit(ctx, {
         orgId: ctx.orgId,
         actor: ctx.actor,
@@ -401,14 +413,57 @@ export const allow = memberMutation("admin")({
         targetId: first._id,
         targetLabel: first.name,
         summary:
-          added.length === 1
+          total === 1
             ? `Allowed the program ${finding.fileName} for the group ${first.name} (${args.kind} rule)`
-            : `Allowed the program ${finding.fileName} for ${added.length} groups (${args.kind} rule)`,
+            : `Allowed the program ${finding.fileName} for ${total} groups (${args.kind} rule)`,
       });
     }
-    return { added: added.length };
+    return { added: total };
   },
 });
+
+/**
+ * (Step 20b) One group's exception for `allow` / `groupBatches:allowBatch`: nothing when the group already has the rule; `too_large`
+ * (detail "exceptions") at MAX_GROUP_EXCEPTIONS when `strict`; else inserts the row and takes a configuration version. True when added.
+ */
+export async function addException(
+  ctx: Pick<MutationCtx, "db" | "scheduler">,
+  a: {
+    orgId: Id<"organizations">;
+    group: Doc<"groups">;
+    rule: ExceptionRuleValue;
+    appId: Id<"apps"> | undefined;
+    reason: string;
+    findingId: Id<"lockdownFindings">;
+    by: Id<"members">;
+    now: number;
+    cache: SnapshotCache;
+    /** False in a scheduled batch: a group at the cap is skipped (there is no caller to refuse). */
+    strict?: boolean;
+  },
+): Promise<boolean> {
+  const have = await ctx.db
+    .query("lockdownExceptions")
+    .withIndex("by_org_group", (q) => q.eq("orgId", a.orgId).eq("groupId", a.group._id))
+    .take(MAX_GROUP_EXCEPTIONS + 1);
+  if (have.some((e) => deepEqual(e.rule, a.rule))) return false;
+  if (have.length >= MAX_GROUP_EXCEPTIONS) {
+    if (a.strict === false) return false;
+    fail("too_large", { detail: "exceptions" });
+  }
+  await ctx.db.insert("lockdownExceptions", {
+    orgId: a.orgId,
+    groupId: a.group._id,
+    appId: a.appId,
+    rule: a.rule,
+    reason: a.reason,
+    findingId: a.findingId,
+    createdBy: a.by,
+    createdAt: a.now,
+  });
+  await snapshotGroupConfig(ctx, a.group._id, "Exception added", a.by, a.cache);
+  return true;
+}
 
 /**
  * Ignore a finding (admin): it leaves the open list and nothing is allowed. Already ignored = no write; an allowed finding is

@@ -13,10 +13,10 @@ export const WIFI_SECURITIES: readonly ("wpa2Wpa3Personal" | "wpa2Personal" | "w
 ];
 
 /**
- * One save (and a delete) touches at most this many groups: the groups the network is in now plus the ones picked; the server makes
- * a new configuration for each of them in the same call (`MAX_NETWORK_SNAPSHOT_GROUPS`) and answers `too_large` detail "groups".
+ * A network, a printer or a driver can be in at most this many groups (`MAX_NETWORK_GROUPS` on the server). A save may touch any number of
+ * them: the server makes the first 10 configurations in the call and the rest a moment later (Step 20b).
  */
-export const MAX_WIFI_GROUPS_PER_SAVE = 10;
+export const MAX_WIFI_GROUPS = 100;
 
 /** An SSID is 1 to 32 BYTES of UTF-8 (802.11), not characters. */
 export const MAX_SSID_BYTES = 32;

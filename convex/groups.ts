@@ -1,5 +1,6 @@
 import { paginationOptsValidator } from "convex/server";
 import { v } from "convex/values";
+import { internal } from "./_generated/api";
 import type { Doc, Id } from "./_generated/dataModel";
 import type { DatabaseReader } from "./_generated/server";
 import { writeAudit } from "./lib/audit";
@@ -310,6 +311,9 @@ export const remove = memberMutation("admin", { major: "groups:remove" })({
       .withIndex("by_group", (q) => q.eq("groupId", group._id))
       .unique();
     if (lockdown !== null) await ctx.db.delete(lockdown._id);
+    // Step 20b: the rest (its id in Wi-Fi profiles, printers and drivers, its rollout row, its configurations and exceptions, its live
+    // broadcasts) is cleaned up by bounded scheduled steps.
+    await ctx.scheduler.runAfter(0, internal.groupBatches.cleanupDeletedGroup, { orgId: ctx.orgId, groupId: group._id });
     // The default group was never counted (it is not one of the plan's groups).
     if (group.isDefault !== true) await bumpOrgStats(ctx, ctx.orgId, { groupCount: -1 });
     await writeAudit(ctx, {

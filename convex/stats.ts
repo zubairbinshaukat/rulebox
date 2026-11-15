@@ -5,7 +5,7 @@ import { type MutationCtx } from "./_generated/server";
 import { internalMutation } from "./lib/functions";
 import { recountActiveCodes } from "./lib/enrollmentCodes";
 import { credOf } from "./lib/fleet";
-import { liveChecker, retagDeviceInstalls } from "./lib/installs";
+import { liveChecker, retagDeviceInstalls, retagDriverResultsPage } from "./lib/installs";
 import {
   MAX_MEMBERS,
   MAX_RECOUNT_ROWS,
@@ -325,6 +325,22 @@ export const retagDevice = internalMutation({
     if (device === null) return null;
     const revoked = (await credOf(ctx, device)).state === "revoked";
     await retagDeviceInstalls(ctx, device, revoked ? undefined : device.groupId, args.cursor);
+    return null;
+  },
+});
+
+/**
+ * (Step 20b) The rest of a PC's driver results after a move or revoke found more than one page (`retagDriverResultsPage`): a page of
+ * MAX_ORG_DRIVERS rows per run, tagged with the PC's group as it is NOW (none when revoked), rescheduling itself while rows are left.
+ */
+export const retagDriverResults = internalMutation({
+  args: { deviceId: v.id("devices"), cursor: v.union(v.string(), v.null()) },
+  returns: v.null(),
+  handler: async (ctx, args) => {
+    const device = await ctx.db.get(args.deviceId);
+    if (device === null) return null;
+    const revoked = (await credOf(ctx, device)).state === "revoked";
+    await retagDriverResultsPage(ctx, device, revoked ? undefined : device.groupId, args.cursor);
     return null;
   },
 });

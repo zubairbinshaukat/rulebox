@@ -22,6 +22,7 @@ import type * as enrollment from "../enrollment.js";
 import type * as enrollmentCodes from "../enrollmentCodes.js";
 import type * as fileHandlers from "../fileHandlers.js";
 import type * as fleet from "../fleet.js";
+import type * as groupBatches from "../groupBatches.js";
 import type * as groups from "../groups.js";
 import type * as health from "../health.js";
 import type * as http from "../http.js";
@@ -128,6 +129,7 @@ declare const fullApi: ApiFromModules<{
   enrollmentCodes: typeof enrollmentCodes;
   fileHandlers: typeof fileHandlers;
   fleet: typeof fleet;
+  groupBatches: typeof groupBatches;
   groups: typeof groups;
   health: typeof health;
   http: typeof http;

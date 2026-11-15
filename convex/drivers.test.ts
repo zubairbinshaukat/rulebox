@@ -7,7 +7,7 @@ import { api } from "./_generated/api";
 import type { Id } from "./_generated/dataModel";
 import { auditPolicy } from "./lib/audit";
 import { buildGroupConfig, serializeGroupConfig } from "./lib/groupConfig";
-import { MAX_DEVICE_DRIVERS, MAX_NETWORK_SNAPSHOT_GROUPS, MAX_ORG_DRIVERS } from "./lib/limits";
+import { MAX_DEVICE_DRIVERS, MAX_NETWORK_GROUPS, MAX_ORG_DRIVERS } from "./lib/limits";
 import { DEFAULT_LOCKDOWN_SETTINGS } from "./lib/lockdownValidators";
 
 // Drivers on the server (Phase 5 Step 14b, PRD 24.2): save / delete / retry / detail, the rules of every field, the group snapshot
@@ -184,12 +184,13 @@ describe("drivers:save", () => {
     const e2 = await setup();
     const groups = await e2.t.run(async (ctx) => {
       const ids: Id<"groups">[] = [];
-      for (let i = 0; i < MAX_NETWORK_SNAPSHOT_GROUPS + 1; i++) ids.push(await ctx.db.insert("groups", { orgId: e2.orgId, name: `G${i}`, revision: 0, createdAt: 1 }));
+      for (let i = 0; i < MAX_NETWORK_GROUPS + 1; i++) ids.push(await ctx.db.insert("groups", { orgId: e2.orgId, name: `G${i}`, revision: 0, createdAt: 1 }));
       return ids;
     });
-    await expect(e2.admin.mutation(api.drivers.save, driver(groups))).rejects.toThrow(/too_large/);
-    const ok = await e2.admin.mutation(api.drivers.save, driver(groups.slice(0, MAX_NETWORK_SNAPSHOT_GROUPS)));
-    await expect(e2.admin.mutation(api.drivers.save, { ...driver(groups.slice(1)), id: ok.id, expectedRevision: 1 })).rejects.toThrow(/too_large/);
+    await expect(e2.admin.mutation(api.drivers.save, driver(groups))).rejects.toThrow(/too_many/);
+    // Step 20b: more than 10 groups is fine (the rest is snapshotted by scheduled batches).
+    const ok = await e2.admin.mutation(api.drivers.save, driver(groups.slice(0, 11)));
+    await e2.admin.mutation(api.drivers.save, { ...driver(groups.slice(1, 13)), id: ok.id, expectedRevision: 1 });
   });
 
   test("a group of another organization is refused", async () => {
@@ -271,16 +272,16 @@ describe("drivers:detail, retry and remove", () => {
     await expect(e.admin.mutation(api.drivers.remove, { id: made.id })).rejects.toThrow(/not_found/);
   });
 
-  test("a driver assigned to more than 10 groups cannot be deleted or retried (the snapshot cap)", async () => {
+  test("a driver assigned to more than 10 groups can be deleted and retried (the rest is snapshotted by scheduled batches)", async () => {
     const e = await setup();
     const groups = await e.t.run(async (ctx) => {
       const ids: Id<"groups">[] = [];
-      for (let i = 0; i < MAX_NETWORK_SNAPSHOT_GROUPS + 1; i++) ids.push(await ctx.db.insert("groups", { orgId: e.orgId, name: `G${i}`, revision: 0, createdAt: 1 }));
+      for (let i = 0; i < 11; i++) ids.push(await ctx.db.insert("groups", { orgId: e.orgId, name: `G${i}`, revision: 0, createdAt: 1 }));
       return ids;
     });
     const id = await e.t.run((ctx) => ctx.db.insert("drivers", { orgId: e.orgId, name: "Wide", kind: "msi", deviceClass: "other", url: "https://x.example.test/a.msi", sha256: SHA, sizeBytes: 0, silentArgs: [], successExitCodes: [], provides: [], groupIds: groups, revision: 1, createdAt: 1 }));
-    await expect(e.admin.mutation(api.drivers.remove, { id })).rejects.toThrow(/too_large/);
-    await expect(e.admin.mutation(api.drivers.retry, { id })).rejects.toThrow(/too_large/);
+    await expect(e.admin.mutation(api.drivers.retry, { id })).resolves.toEqual({ revision: 2 });
+    await expect(e.admin.mutation(api.drivers.remove, { id })).resolves.toBeNull();
   });
 });
 

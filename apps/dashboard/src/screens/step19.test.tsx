@@ -16,7 +16,6 @@ import {
   type LockdownWarnings,
   type Me,
 } from "../data/types";
-import { APP_TOO_MANY_GROUPS, appErrorMessage, appMessageFor } from "../lib/screenStrings/appErrors";
 import { LAYER_DETAILS, REFUSAL_CODES, REFUSALS, layerDetailText, layerNoteOf, layerStateOf, protectionGaps, refusalText } from "./lockdown/codes";
 import { allowKinds, changedLayers, folderProblem, lockoutDraftOf, lockoutProblems, sameSettings, settingsOf } from "./lockdown/rules";
 import { MeContext } from "../lib/member";
@@ -291,13 +290,6 @@ describe("codes a PC reports, as sentences", () => {
     expect(lockdownErrorMessage(new ConvexError({ code: "forbidden" }))).toBeNull();
   });
 
-  it("an app in more than 10 groups gets its own sentence on the app screens", () => {
-    const e = new ConvexError({ code: "too_large", detail: "groups" });
-    expect(appErrorMessage(e)).toBe(APP_TOO_MANY_GROUPS);
-    expect(appMessageFor(e)).toBe("This app is in more than 10 groups. Remove it from some groups first, or wait for an update that handles larger changes.");
-    expect(appErrorMessage(new ConvexError({ code: "too_large", detail: "group apps" }))).toBeNull();
-    expect(appMessageFor(new ConvexError({ code: "too_large" }))).toBe(strings.errors.tooLarge);
-  });
 });
 
 describe("the group lockdown screen", () => {
@@ -401,6 +393,45 @@ describe("the group lockdown screen", () => {
     expect(await screen.findByText(s.managedEmpty)).toBeTruthy();
   });
 
+  it("'I understand this PC may go offline' shows only while managed networks only is on; ticked it is sent, not ticked it is left out (Step 20b)", async () => {
+    const save = vi.fn<(args?: unknown) => Promise<unknown>>(async () => ({ revision: 4 }));
+    cx.fns["lockdown:update"] = save;
+    ui(<Lockdown />);
+    const net = () => within(card(s.netTitle));
+    expect(net().queryByRole("checkbox", { name: /I understand this PC may go offline/ })).toBeNull();
+    fireEvent.click(net().getByRole("switch", { name: s.wifiManagedOnly }));
+    const box = net().getByRole("checkbox", { name: /I understand this PC may go offline/ }) as HTMLInputElement;
+    expect(box.checked).toBe(false);
+    fireEvent.click(box);
+    expect((net().getByRole("checkbox", { name: /I understand this PC may go offline/ }) as HTMLInputElement).checked).toBe(true);
+    fireEvent.click(screen.getByRole("button", { name: s.save }));
+    fireEvent.click(within(await screen.findByRole("dialog")).getByRole("button", { name: s.enforceConfirm }));
+    await waitFor(() => expect(save).toHaveBeenCalledTimes(1));
+    expect(save.mock.calls[0]![0]).toMatchObject({ settings: { wifiManagedOnly: true, wifiManagedOnlyConfirmed: true } });
+  });
+
+  it("not ticked, or ticked and then managed networks only switched off again: the key is not sent", async () => {
+    const save = vi.fn<(args?: unknown) => Promise<unknown>>(async () => ({ revision: 4 }));
+    cx.fns["lockdown:update"] = save;
+    ui(<Lockdown />);
+    const net = () => within(card(s.netTitle));
+    fireEvent.click(net().getByRole("switch", { name: s.wifiManagedOnly }));
+    fireEvent.click(screen.getByRole("button", { name: s.save }));
+    fireEvent.click(within(await screen.findByRole("dialog")).getByRole("button", { name: s.enforceConfirm }));
+    await waitFor(() => expect(save).toHaveBeenCalledTimes(1));
+    expect((save.mock.calls[0]![0] as { settings: LockdownSettings }).settings).not.toHaveProperty("wifiManagedOnlyConfirmed");
+    cleanup();
+    save.mockClear();
+    ui(<Lockdown />);
+    fireEvent.click(net().getByRole("switch", { name: s.wifiManagedOnly }));
+    fireEvent.click(net().getByRole("checkbox", { name: /I understand this PC may go offline/ }));
+    fireEvent.click(net().getByRole("switch", { name: s.wifiManagedOnly }));
+    expect(net().queryByRole("checkbox", { name: /I understand this PC may go offline/ })).toBeNull();
+    fireEvent.click(within(card(s.inputTitle)).getByRole("switch", { name: s.accessibilityTools }));
+    fireEvent.click(screen.getByRole("button", { name: s.save }));
+    await waitFor(() => expect(save).toHaveBeenCalledTimes(1));
+    expect((save.mock.calls[0]![0] as { settings: LockdownSettings }).settings).not.toHaveProperty("wifiManagedOnlyConfirmed");
+  });
   it("a stale edit offers Reload, which brings the saved values back", async () => {
     cx.fns["lockdown:update"] = vi.fn().mockRejectedValue(new ConvexError({ code: "stale_edit" }));
     ui(<Lockdown />);

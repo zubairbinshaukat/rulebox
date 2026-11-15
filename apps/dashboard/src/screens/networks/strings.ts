@@ -88,9 +88,7 @@ export const networksStrings = {
   groupsHint: "The PCs in these groups get this network. Changes reach them with the group's next configuration.",
   groupsServerRefused: "One of the groups no longer exists. Reload the page.",
   noGroupsExist: "There are no groups yet. Create a group first.",
-  groupsOver: (limit: number) =>
-    `One save can touch at most ${formatNumber(limit)} ${plural(limit, { one: "group", other: "groups" })}: the groups the network is in now plus the ones you pick. Pick fewer.`,
-  groupsTouched: (count: number, limit: number) => `${formatNumber(count)} of ${formatNumber(limit)} groups touched by this save`,
+  groupsOver: (limit: number) => `Pick at most ${formatNumber(limit)} ${plural(limit, { one: "group", other: "groups" })}.`,
   noPassphraseInForm: "The password is set separately, in the Password card.",
   create: "Add network",
   saved: "Network saved.",
@@ -357,12 +355,9 @@ export const networksStrings = {
   approvedBuiltInName: "That is a built-in Windows driver and is always approved.",
   approvedLimit: `You can add at most ${MAX_ADDED_NAMES} names.`,
 
-  /** `too_large` (detail "groups" / "printers") and the plan limit of the Wi-Fi and printer calls, as sentences; null = the usual one. */
-  describeError: (code: string, detail: string | undefined, limit = 0): string | null => {
+  /** `too_large` (detail "printers" / "drivers" / "names" / "wifi") and a few other codes of the Wi-Fi, printer and driver calls, as sentences; null = the usual one. */
+  describeError: (code: string, detail: string | undefined): string | null => {
     if (code === "too_large" && detail === "printers") return `You can have at most ${formatNumber(MAX_PRINTERS)} printers. Remove one first.`;
-    if (code === "too_large" && detail === "groups") {
-      return `One save can touch at most ${formatNumber(limit)} ${plural(limit, { one: "group", other: "groups" })}: the groups it is in now plus the ones you pick. Something in more groups than that can't be changed or removed here yet.`;
-    }
     if (code === "too_large" && detail === "drivers") return `You can have at most ${formatNumber(MAX_DRIVERS)} drivers. Remove one first.`;
     if (code === "too_large" && detail === "names") return `You can add at most ${formatNumber(MAX_ADDED_NAMES)} driver names.`;
     if (code === "too_large" && detail === "wifi") return `You can have at most ${formatNumber(MAX_WIFI_PROFILES)} Wi-Fi networks. Remove one first.`;

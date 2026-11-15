@@ -4,7 +4,6 @@ import { useSetAppPermissions } from "../data";
 import { NEW_WEB_APP_PERMISSIONS, WEB_PERMISSION_KEYS, type AppDetail, type WebPermissions } from "../data/types";
 import { Card } from "../components/Card";
 import { FormError } from "../components/FormError";
-import { appErrorMessage } from "../lib/screenStrings/appErrors";
 import { InlineNotice } from "../components/Notice";
 import { formatCount } from "../lib/format";
 import { appEditStrings } from "../lib/screenStrings/appEdit";
@@ -92,7 +91,7 @@ export function AppPermissions({
           <p className="dash-muted">{s.printingNote}</p>
           {!readOnly ? (
             <>
-              <FormError error={error} onReload={onReload} describe={appErrorMessage} />
+              <FormError error={error} onReload={onReload} />
               <div className="dash-form__actions">
                 <Button onClick={() => void save()} disabled={!dirty || pending} aria-busy={pending}>
                   {pending ? strings.common.saving : s.permissionsSave}

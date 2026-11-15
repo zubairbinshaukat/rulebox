@@ -240,7 +240,7 @@ describe("New printer (/networks/printers/new)", () => {
     expect(screen.getByText(/delivered by a Drivers entry/)).toBeTruthy();
   });
 
-  it("refuses a save that touches more than 10 groups before calling the server; says in words what the server refuses", async () => {
+  it("a save in more than 10 groups goes to the server; says in words what the server refuses", async () => {
     const save = vi.fn().mockRejectedValueOnce(new ConvexError({ code: "invalid_argument", field: "driver", detail: "not_approved" }))
       .mockRejectedValueOnce(new ConvexError({ code: "invalid_argument", field: "name", detail: "taken" }))
       .mockRejectedValueOnce(new ConvexError({ code: "invalid_argument", field: "defaultForGroupIds", detail: "taken" }))
@@ -250,13 +250,10 @@ describe("New printer (/networks/printers/new)", () => {
     type(s.name, "Front desk");
     type(s.addressLabel.ipp, "ipp://10.0.0.1/ipp/print");
     for (let i = 1; i <= 11; i++) fireEvent.click(screen.getByRole("checkbox", { name: `Group ${i}` }));
-    expect(screen.getByText(s.groupsTouched(11, 10))).toBeTruthy();
-    fireEvent.click(screen.getByRole("button", { name: s.createPrinter }));
-    expect(await screen.findByText(s.groupsOver(10))).toBeTruthy();
-    expect(save).not.toHaveBeenCalled();
-    fireEvent.click(screen.getByRole("checkbox", { name: "Group 11" }));
+    expect(screen.queryByText(/groups touched/)).toBeNull();
     fireEvent.click(screen.getByRole("button", { name: s.createPrinter }));
     expect(await screen.findByText(s.driverRefused)).toBeTruthy();
+    expect((save.mock.calls[0] as unknown as [{ groupIds: string[] }])[0].groupIds).toHaveLength(11);
     fireEvent.click(screen.getByRole("button", { name: s.createPrinter }));
     expect(await screen.findByText(s.nameTaken)).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: s.createPrinter }));

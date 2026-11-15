@@ -397,20 +397,25 @@ export const SECURITY_RETENTION_BATCH = 200;
 /** `apps:get`: the days of denial counts shown on the app page (plan 4.13: the last 30 `orgSecurityDaily` rows). */
 export const APP_DENIAL_DAYS = 30;
 /**
- * Catalogue edits (Phase 5 Step 16b): an app record, a file-type rule or a permission change snapshots the
- * configuration of every group that assigns the app, in the same transaction (each snapshot reads up to ~1,000
- * documents with a full catalogue). An edit that would touch more groups is refused (`too_large`, detail "groups"),
- * exactly as Wi-Fi profiles and printers are; Step 20 replaces the cap with scheduler batches.
+ * Group configuration snapshots in bulk (Phase 5 Step 20b, replaces the 10-group caps of Steps 13 to 16b). An edit that changes the
+ * configuration of many groups (an app record, a file-type rule, a permission change, a Wi-Fi profile, a printer, a driver, an
+ * "Allow") snapshots the first SNAPSHOT_SYNC_GROUPS groups in its own transaction (each snapshot reads up to ~1,000 documents with a
+ * full catalogue) and schedules `groupBatches:snapshotBatch` for the rest, SNAPSHOT_BATCH_GROUPS groups per transaction. A batch
+ * reads the live inputs when it runs, so it is idempotent and a later edit that lands first is never overwritten. More than
+ * MAX_SNAPSHOT_GROUPS_TOTAL groups (the most `groups:list` shows) is `too_large`, detail "groups".
  */
-export const MAX_CATALOG_SNAPSHOT_GROUPS = 10;
-/**
- * Wi-Fi profiles (Phase 5 Step 13): `networks:saveWifi` / `deleteWifi` snapshot the configuration of every group the
- * profile was in or is put in, in the same transaction (each snapshot reads up to ~570 documents), so a save may touch
- * at most this many groups (`too_large`, detail "groups"). DEVIATION from plan 4.2 (a profile in up to 100 groups).
- */
-export const MAX_NETWORK_SNAPSHOT_GROUPS = 10;
-/** Group ids accepted in one `saveWifi` call (cheap early guard; the snapshot cap above is the real one). */
+export const SNAPSHOT_SYNC_GROUPS = 10;
+export const SNAPSHOT_BATCH_GROUPS = 10;
+export const MAX_SNAPSHOT_GROUPS_TOTAL = 500;
+/** Group ids accepted in one `saveWifi` / `savePrinter` / `drivers:save` call, and chosen in one "Allow". */
 export const MAX_NETWORK_GROUPS = 100;
+/**
+ * Group delete cleanup (`groupBatches:cleanupDeletedGroup`): configurations and exceptions deleted per transaction (a configuration can be
+ * 256 KB), broadcasts cancelled per transaction (a full batch schedules the next one).
+ */
+export const GROUP_CLEANUP_CONFIGS = 10;
+export const GROUP_CLEANUP_EXCEPTIONS = 100;
+export const GROUP_CLEANUP_BROADCASTS = 50;
 /** `networks:list`: group names shown per profile (the row also carries the total). */
 export const MAX_WIFI_LIST_GROUPS = 10;
 /** `networks:wifiDetail`: groups and apply reports per group read for the counts. */
@@ -432,7 +437,7 @@ export const MAX_TCP_PORT_HOST = 48;
 export const MAX_LPR_QUEUE = 32;
 /**
  * Drivers (Phase 5 Step 14b, plan 4.15 / PRD 24.2): packages pushed to a group. Per organization, per device document,
- * and the strings an admin may enter. A save touches at most MAX_NETWORK_SNAPSHOT_GROUPS groups, like the printers.
+ * and the strings an admin may enter.
  */
 export const MAX_ORG_DRIVERS = 50;
 export const MAX_DEVICE_DRIVERS = 20;
@@ -486,12 +491,12 @@ export const MAX_FAILURE_PCT = 100;
 /**
  * Lockdown screens (Phase 5 Step 19, plan 4.20). Findings per page; open findings counted for the "N new" link (more shows as "50+");
  * exceptions listed on the group screen (newest first; the document still carries up to MAX_GROUP_EXCEPTIONS); groups one "Allow"
- * may add an exception to (each gets a new configuration version in the same transaction, like a Wi-Fi profile); the reason text.
+ * may add an exception to (the first SNAPSHOT_SYNC_GROUPS in the same transaction, the rest in scheduled batches); the reason text.
  */
 export const MAX_FINDINGS_PAGE = 50;
 export const OPEN_FINDINGS_CAP = 50;
 export const MAX_EXCEPTIONS_LISTED = 50;
-export const MAX_ALLOW_GROUPS = 10;
+export const MAX_ALLOW_GROUPS = MAX_NETWORK_GROUPS;
 export const MAX_EXCEPTION_REASON = 200;
 /** `lockdown:allowOptions`: programs offered in the "Allow for app" picker. */
 export const MAX_ALLOW_APPS = 200;

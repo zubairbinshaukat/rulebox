@@ -65,6 +65,11 @@ export const lockdownSettings = v.object({
   boot: v.object({ autoRecovery: v.union(v.literal("leave"), v.literal("off")), safeModeGuard: v.boolean() }),
   performance: v.object({ staffTuning: v.boolean(), kioskProfile: v.boolean(), noPrinting: v.boolean() }),
   wifiManagedOnly: v.boolean(),
+  /**
+   * (Step 20b) "I understand this PC may go offline": lifts the agent's `would_disconnect` refusal when "managed networks only" is on.
+   * Optional and never stored as `false` (`normalizeSettings` in lockdown.ts), so settings made before it exist stay equal.
+   */
+  wifiManagedOnlyConfirmed: v.optional(v.boolean()),
 });
 export type LockdownSettings = Infer<typeof lockdownSettings>;
 

@@ -19,7 +19,6 @@ import {
   DRIVER_RESULT_PURGE_BATCH,
   MAX_DRIVER_DETAIL_RESULTS,
   MAX_NETWORK_GROUPS,
-  MAX_NETWORK_SNAPSHOT_GROUPS,
   MAX_ORG_DRIVERS,
   MAX_WIFI_LIST_GROUPS,
 } from "./lib/limits";
@@ -39,7 +38,7 @@ import { groupsOf, sameSet, snapshotGroups, type GroupRef } from "./lib/networkS
 //                   create = no `id` (revision 1); update = `id` + `expectedRevision` (else invalid_argument, field "expectedRevision").
 //                   Errors: invalid_argument (field name|kind|deviceClass|url|sha256|sizeBytes|inf|silentArgs|successExitCodes|provides|
 //                   groupIds|expectedRevision; detail), not_found (driver or group of another org), stale_edit, too_large (detail "drivers" =
-//                   50 per organization; "groups" = more than 10 groups touched). `inf` is required for kind "inf" and refused for another
+//                   50 per organization; "groups" = more than 500 groups touched). `inf` is required for kind "inf" and refused for another
 //                   kind; `silentArgs` is required (1-16) for kind "exe" and dropped for another kind, like `successExitCodes`.
 //   drivers:delete  mutation, admin, args { id: string }                -> null
 //   drivers:retry   mutation, admin, args { id: string }                -> { revision: number } (bumps the revision: every PC that gave up tries again)
@@ -154,7 +153,7 @@ export const detail = memberQuery("viewer")({
  * Create or change a driver (admin). Create: no `id`. Update: `id` and `expectedRevision` (`stale_edit`). The values follow
  * `lib/driverRules.ts`; the name is unique in the organization (case-insensitive, `name` "taken"). No change = no write, no new revision.
  * A change bumps the revision, audits `driver.created` / `driver.updated` and makes the configuration of every group the driver was in
- * or is now in a new version (at most MAX_NETWORK_SNAPSHOT_GROUPS groups per save, else `too_large` detail "groups"), so the agent
+ * or is now in a new version (the first 10 groups in the call, the rest in scheduled batches), so the agent
  * installs, reinstalls or removes it. At most MAX_ORG_DRIVERS drivers per organization (`too_large` detail "drivers").
  */
 export const save = memberMutation("admin")({
@@ -209,7 +208,6 @@ export const save = memberMutation("admin")({
     }
 
     if (own === null) {
-      if (groupIds.length > MAX_NETWORK_SNAPSHOT_GROUPS) fail("too_large", { detail: "groups" });
       const id = await ctx.db.insert("drivers", {
         orgId: ctx.orgId,
         name,
@@ -257,7 +255,6 @@ export const save = memberMutation("admin")({
     if (unchanged) return { id: own._id, revision: own.revision };
 
     const touched = new Set<Id<"groups">>([...before, ...groupIds]);
-    if (touched.size > MAX_NETWORK_SNAPSHOT_GROUPS) fail("too_large", { detail: "groups" });
     const revision = own.revision + 1;
     await ctx.db.patch(own._id, {
       name,
@@ -289,15 +286,14 @@ export const save = memberMutation("admin")({
 
 /**
  * Delete a driver (admin). The configuration of every group it was assigned to becomes a new version without it (the agent removes
- * the package it installed, when it can), its results are deleted by a scheduled `drivers:purgeResults`. At most
- * MAX_NETWORK_SNAPSHOT_GROUPS groups (else `too_large`, detail "groups").
+ * the package it installed, when it can), its results are deleted by a scheduled `drivers:purgeResults`. The first 10 groups
+ * are snapshotted in the call, the rest in scheduled batches.
  */
 export const remove = memberMutation("admin")({
   args: { id: v.string() },
   returns: v.null(),
   handler: async (ctx, args) => {
     const d = await getInOrg(ctx, "drivers", args.id, ctx.orgId);
-    if (d.groupIds.length > MAX_NETWORK_SNAPSHOT_GROUPS) fail("too_large", { detail: "groups" });
     await ctx.db.delete(d._id);
     await ctx.scheduler.runAfter(0, internal.drivers.purgeResults, { driverId: d._id });
     await writeAudit(ctx, {
@@ -316,15 +312,14 @@ export const remove = memberMutation("admin")({
 
 /**
  * Try again (admin): bumps the revision without changing a field, so every PC that gave up on this driver (six failures wait for a new
- * revision) starts again. Audits `driver.retried`; the configuration of its groups becomes a new version (at most
- * MAX_NETWORK_SNAPSHOT_GROUPS groups, else `too_large` detail "groups").
+ * revision) starts again. Audits `driver.retried`; the configuration of its groups becomes a new version (the first 10 groups
+ * in the call, the rest in scheduled batches).
  */
 export const retry = memberMutation("admin")({
   args: { id: v.string() },
   returns: v.object({ revision: v.number() }),
   handler: async (ctx, args) => {
     const d = await getInOrg(ctx, "drivers", args.id, ctx.orgId);
-    if (d.groupIds.length > MAX_NETWORK_SNAPSHOT_GROUPS) fail("too_large", { detail: "groups" });
     const revision = d.revision + 1;
     await ctx.db.patch(d._id, { revision });
     await writeAudit(ctx, {

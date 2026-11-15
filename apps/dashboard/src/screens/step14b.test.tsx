@@ -332,7 +332,7 @@ describe("New driver (/networks/drivers/new)", () => {
     expect(save).toHaveBeenCalledWith(expect.objectContaining({ kind: "msi", silentArgs: [], successExitCodes: [] }));
   });
 
-  it("refuses a save that touches more than 10 groups before calling the server; says in words what the server refuses", async () => {
+  it("a save in more than 10 groups goes to the server; says in words what the server refuses", async () => {
     const save = vi
       .fn()
       .mockRejectedValueOnce(new ConvexError({ code: "invalid_argument", field: "name", detail: "taken" }))
@@ -345,13 +345,10 @@ describe("New driver (/networks/drivers/new)", () => {
     type(s.driverSha, SHA);
     type(s.driverInf, "z.inf");
     for (let i = 1; i <= 11; i++) fireEvent.click(screen.getByRole("checkbox", { name: `Group ${i}` }));
-    expect(screen.getByText(s.groupsTouched(11, 10))).toBeTruthy();
-    submit();
-    expect(await screen.findByText(s.groupsOver(10))).toBeTruthy();
-    expect(save).not.toHaveBeenCalled();
-    fireEvent.click(screen.getByRole("checkbox", { name: "Group 11" }));
+    expect(screen.queryByText(/groups touched/)).toBeNull();
     submit();
     expect(await screen.findByText(s.driverNameTaken)).toBeTruthy();
+    expect((save.mock.calls[0] as unknown as [{ groupIds: string[] }])[0].groupIds).toHaveLength(11);
     submit();
     expect(await screen.findByText(s.driverShaProblems.format)).toBeTruthy();
     submit();

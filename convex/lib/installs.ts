@@ -123,6 +123,39 @@ export async function failedFollowArchive(ctx: Writer, orgId: Id<"organizations"
 }
 
 /**
+ * (Step 20b) A PC's driver results tagged with `groupId` (undefined after a revoke). With `cursor` undefined (called from
+ * `retagDeviceInstalls`, which already paginates, and Convex allows one `.paginate()` per transaction) it reads the first MAX_ORG_DRIVERS
+ * rows with `.take`; when there are more it schedules `stats:retagDriverResults`. With a `cursor` (that scheduled run) it reads one page
+ * from it and schedules the next while rows are left. Returns the rows written.
+ */
+export async function retagDriverResultsPage(
+  ctx: Writer,
+  device: { _id: Id<"devices"> },
+  groupId: Id<"groups"> | undefined,
+  cursor?: string | null,
+): Promise<number> {
+  const q = ctx.db.query("driverResults").withIndex("by_device_driver", (x) => x.eq("deviceId", device._id));
+  let rows: Doc<"driverResults">[];
+  let next: string | null | undefined;
+  if (cursor === undefined) {
+    const all = await q.take(MAX_ORG_DRIVERS + 1);
+    rows = all.slice(0, MAX_ORG_DRIVERS);
+    next = all.length > MAX_ORG_DRIVERS ? null : undefined;
+  } else {
+    const page = await q.paginate({ numItems: MAX_ORG_DRIVERS, cursor });
+    rows = page.page;
+    next = page.isDone ? undefined : page.continueCursor;
+  }
+  let written = 0;
+  for (const r of rows) {
+    if (r.groupId === groupId) continue;
+    await ctx.db.patch(r._id, { groupId });
+    written++;
+  }
+  if (next !== undefined) await ctx.scheduler.runAfter(0, internal.stats.retagDriverResults, { deviceId: device._id, cursor: next });
+  return written;
+}
+/**
  * Tag a PC's install results with `groupId` (its new group; undefined after a
  * revoke) and move `failedInstallCount` by the failed rows that start or stop
  * counting. INSTALL_RETAG_BATCH rows per call (one page from `cursor`); when
@@ -143,18 +176,8 @@ export async function retagDeviceInstalls(
   let delta = 0;
   let written = 0;
   // Step 14b: the PC's driver results carry the same tag (nothing counts them; the driver page counts the assigned groups only).
-  // At most MAX_ORG_DRIVERS rows (one per driver), on the first page only.
-  if (cursor === null) {
-    const driverRows = await ctx.db
-      .query("driverResults")
-      .withIndex("by_device_driver", (q) => q.eq("deviceId", device._id))
-      .take(MAX_ORG_DRIVERS);
-    for (const r of driverRows) {
-      if (r.groupId === groupId) continue;
-      await ctx.db.patch(r._id, { groupId });
-      written++;
-    }
-  }
+  // One row per driver (<= MAX_ORG_DRIVERS), on the first page only; Step 20b: more than that is finished by `stats:retagDriverResults`.
+  if (cursor === null) written += await retagDriverResultsPage(ctx, device, groupId);
   for (const r of page.page) {
     if (r.groupId === groupId) continue;
     if (r.state === "failed") {

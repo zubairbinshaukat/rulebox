@@ -1,8 +1,8 @@
 import type { Id } from "../_generated/dataModel";
 import type { MutationCtx } from "../_generated/server";
 import { fail } from "./errors";
-import { newSnapshotCache, snapshotGroupConfig } from "./groupConfig";
-import { MAX_CATALOG_SNAPSHOT_GROUPS, MAX_GRANT_GROUPS, MAX_GRANT_LOOKUPS, MAX_PUBLISH_TARGETS } from "./limits";
+import { snapshotGroupsBatched } from "./groupConfig";
+import { MAX_GRANT_GROUPS, MAX_GRANT_LOOKUPS, MAX_PUBLISH_TARGETS, MAX_SNAPSHOT_GROUPS_TOTAL } from "./limits";
 import { requestPublish } from "./publish";
 
 // Which devices need a new document when an app changes (plan 4.4 `requestPublish`
@@ -52,10 +52,12 @@ export async function publishApp(ctx: Pick<MutationCtx, "db" | "scheduler">, org
 /**
  * (Phase 5 Step 16b, plan 4.14) Freeze a catalogue change: a new configuration version for every group that assigns one of
  * `appIds` (`snapshotGroupConfig`: rings off = every PC of the group at once; rings on = the pilot ring first). Call it AFTER
- * the write and before `publishApp`. More than MAX_CATALOG_SNAPSHOT_GROUPS groups = `too_large` (detail "groups"), which
- * rolls the whole mutation back. Groups that carry the app only through a direct employee grant are not snapshotted: those
- * read the app live (`publishApp` republishes them).
- * Cost: <= 11 assignments per app, then per group 1 existence read + one snapshot.
+ * the write and before `publishApp`. The first SNAPSHOT_SYNC_GROUPS groups are snapshotted in the call, the rest by scheduled
+ * `groupBatches:snapshotBatch` runs (Step 20b, `snapshotGroupsBatched`); more than MAX_SNAPSHOT_GROUPS_TOTAL groups = `too_large`
+ * (detail "groups"), which rolls the whole mutation back. Groups that carry the app only through a direct employee grant are not
+ * snapshotted: those read the app live (`publishApp` republishes them).
+ * Cost: assignments of each app (normally a handful, at most MAX_SNAPSHOT_GROUPS_TOTAL + 1), then per synchronous group 1 existence
+ * read + one snapshot.
  */
 export async function snapshotAppGroups(
   ctx: Pick<MutationCtx, "db" | "scheduler">,
@@ -68,13 +70,9 @@ export async function snapshotAppGroups(
     const rows = await ctx.db
       .query("appAssignments")
       .withIndex("by_app", (q) => q.eq("appId", appId))
-      .take(MAX_CATALOG_SNAPSHOT_GROUPS + 1);
+      .take(MAX_SNAPSHOT_GROUPS_TOTAL + 1);
     for (const r of rows) groupIds.add(r.groupId);
-    if (groupIds.size > MAX_CATALOG_SNAPSHOT_GROUPS) fail("too_large", { detail: "groups" });
+    if (groupIds.size > MAX_SNAPSHOT_GROUPS_TOTAL) fail("too_large", { detail: "groups" });
   }
-  const cache = newSnapshotCache();
-  for (const groupId of groupIds) {
-    if ((await ctx.db.get(groupId)) === null) continue; // an assignment left behind by a deleted group
-    await snapshotGroupConfig(ctx, groupId, reason, by, cache);
-  }
+  await snapshotGroupsBatched(ctx, groupIds, reason, by);
 }

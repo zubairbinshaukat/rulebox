@@ -507,9 +507,8 @@ export const createDesktop = memberMutation("admin")({
  * Nothing changed = no write, no new revision, no publish. A change bumps the
  * revision (the agent retries a failed install on a new revision), takes a new
  * configuration version of every group that assigns the app (Step 16b: the app
- * record is ring-gated; `too_large`, detail "groups", above
- * MAX_CATALOG_SNAPSHOT_GROUPS groups; the same holds for `setArchived`, `retry`
- * and the icon) and republishes the groups that carry the app.
+ * record is ring-gated; the first 10 groups in the call, the rest by scheduled batches: `snapshotGroupsBatched`; the same holds for
+ * `setArchived`, `retry` and the icon) and republishes the groups that carry the app.
  */
 export const update = memberMutation("admin")({
   args: {
@@ -567,8 +566,8 @@ export const update = memberMutation("admin")({
  * between (`expectedRevision`); `invalid_argument` (field "appId") for a program. The same permissions
  * again = no write, no new revision, no publish. A change bumps the revision, audits
  * `app.permissionsChanged` (the summary names the permissions that changed, nothing else), snapshots the
- * configuration of the groups that assign the app (`snapshotAppGroups`: ring-gated since Step 16b; more than
- * `MAX_CATALOG_SNAPSHOT_GROUPS` groups = `too_large`) and republishes the groups that carry the app only
+ * configuration of the groups that assign the app (`snapshotAppGroups`: ring-gated since Step 16b; the first 10 groups in the
+ * call, the rest by scheduled batches, Step 20b) and republishes the groups that carry the app only
  * through a direct grant (`publishApp`).
  */
 export const setPermissions = memberMutation("admin")({

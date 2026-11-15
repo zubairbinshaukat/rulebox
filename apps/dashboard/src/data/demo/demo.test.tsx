@@ -227,12 +227,12 @@ describe("demo data layer", () => {
     expect(await save({ ...input, id: created.id, expectedRevision: 9 }).catch((e) => e)).toMatchObject({ code: "stale_edit" });
     const eleven = db().groups.slice(0, 11).map((g) => g._id);
     expect(eleven).toHaveLength(11);
-    expect(await save({ ...input, groupIds: eleven }).catch((e) => e)).toMatchObject({ code: "too_large", detail: "groups" });
-    const ten = await save({ ...input, name: "Ten", groupIds: eleven.slice(0, 10) });
-    expect(ten).toMatchObject({ revision: 1 });
-    // The groups a save TOUCHES are the ones the network is in now plus the picked ones: swapping one of ten for another is 11.
-    expect(await save({ ...input, id: ten.id, expectedRevision: 1, name: "Ten", groupIds: [...eleven.slice(1, 11)] }).catch((e) => e)).toMatchObject({ code: "too_large", detail: "groups" });
-    expect(await save({ ...input, id: ten.id, expectedRevision: 1, name: "Ten", groupIds: eleven.slice(0, 10) })).toEqual({ id: ten.id, revision: 1 }); // nothing changed: allowed
+    // Step 20b: more than 10 groups is fine (the server snapshots the rest in scheduled batches); more than 100 is refused.
+    expect(await save({ ...input, groupIds: Array.from({ length: 101 }, (_, i) => `g${i}`) }).catch((e) => e)).toMatchObject({ code: "invalid_argument", field: "groupIds", detail: "too_many" });
+    const wide = await save({ ...input, name: "Wide", groupIds: eleven });
+    expect(wide).toMatchObject({ revision: 1 });
+    expect(await save({ ...input, id: wide.id, expectedRevision: 1, name: "Wide", groupIds: [...eleven.slice(1, 11)] })).toEqual({ id: wide.id, revision: 2 });
+    expect(await save({ ...input, id: wide.id, expectedRevision: 2, name: "Wide", groupIds: [...eleven.slice(1, 11)] })).toEqual({ id: wide.id, revision: 2 }); // nothing changed: allowed
 
     // No change: no new revision. A change bumps it and audits.
     expect(await save({ ...input, id: created.id, expectedRevision: 1 })).toEqual({ id: created.id, revision: 1 });
@@ -307,7 +307,8 @@ describe("demo data layer", () => {
     expect(await bad({ name: "Second", groupIds: [frontGroup], defaultForGroupIds: [frontGroup] })).toMatchObject({ field: "defaultForGroupIds", detail: "taken" });
     expect(await save({ ...input, id: created.id, expectedRevision: 9 }).catch((e) => e)).toMatchObject({ code: "stale_edit" });
     const eleven = db().groups.slice(0, 11).map((g) => g._id);
-    expect(await bad({ name: "Wide", groupIds: eleven })).toMatchObject({ code: "too_large", detail: "groups" });
+    expect(await bad({ name: "Wide", groupIds: Array.from({ length: 101 }, (_, i) => `g${i}`) })).toMatchObject({ code: "invalid_argument", field: "groupIds", detail: "too_many" });
+    expect(eleven).toHaveLength(11); // more than 10 groups is fine now (Step 20b)
 
     // No change: no new revision. A change bumps it and audits.
     expect(await save({ ...input, id: created.id, expectedRevision: 1 })).toEqual({ id: created.id, revision: 1 });
@@ -376,7 +377,7 @@ describe("demo data layer", () => {
     expect(await bad({ kind: "exe", inf: undefined, silentArgs: ["/S"], successExitCodes: Array.from({ length: 9 }, (_, i) => i) })).toMatchObject({ field: "successExitCodes" });
     expect(await bad({ provides: Array.from({ length: 11 }, (_, i) => `n${i}`) })).toMatchObject({ field: "provides", detail: "count" });
     expect(await bad({ groupIds: ["nope"] })).toMatchObject({ code: "not_found" });
-    expect(await bad({ name: "Wide", groupIds: db().groups.slice(0, 11).map((g) => g._id) })).toMatchObject({ code: "too_large", detail: "groups" });
+    expect(await bad({ name: "Wide", groupIds: Array.from({ length: 101 }, (_, i) => `g${i}`) })).toMatchObject({ code: "invalid_argument", field: "groupIds", detail: "too_many" });
     expect(await save({ ...input, id: created.id, expectedRevision: 9 }).catch((e) => e)).toMatchObject({ code: "stale_edit" });
 
     // No change: no new revision. A change bumps it and audits. Retry bumps it too.

@@ -8,7 +8,7 @@ import { api } from "./_generated/api";
 import type { Id } from "./_generated/dataModel";
 import { auditPolicy } from "./lib/audit";
 import { base64Decode } from "./lib/crypto";
-import { MAX_NETWORK_SNAPSHOT_GROUPS, MAX_WIFI_PROFILES } from "./lib/limits";
+import { MAX_NETWORK_GROUPS, MAX_WIFI_PROFILES } from "./lib/limits";
 import { openSealed } from "./lib/sealbox";
 import { checkPassphrase } from "./wifi";
 
@@ -110,7 +110,7 @@ describe("networks:saveWifi", () => {
     await expect(bad({}, [foreign])).rejects.toThrow(/not_found/);
   });
 
-  test("limits: 50 profiles per organization, at most 10 groups touched by one save", async () => {
+  test("limits: 50 profiles per organization, at most 100 groups in one save (more groups are NOT refused any more: they are snapshotted in batches)", async () => {
     const e = await setup();
     await e.t.run(async (ctx) => {
       for (let i = 0; i < MAX_WIFI_PROFILES; i++) {
@@ -121,11 +121,11 @@ describe("networks:saveWifi", () => {
     const e2 = await setup();
     const groups = await e2.t.run(async (ctx) => {
       const ids: Id<"groups">[] = [];
-      for (let i = 0; i < MAX_NETWORK_SNAPSHOT_GROUPS + 1; i++) ids.push(await ctx.db.insert("groups", { orgId: e2.orgId, name: `G${i}`, revision: 0, createdAt: 1 }));
+      for (let i = 0; i < MAX_NETWORK_GROUPS + 1; i++) ids.push(await ctx.db.insert("groups", { orgId: e2.orgId, name: `G${i}`, revision: 0, createdAt: 1 }));
       return ids;
     });
-    await expect(e2.admin.mutation(api.networks.saveWifi, profile(groups))).rejects.toThrow(/too_large/);
-    await e2.admin.mutation(api.networks.saveWifi, profile(groups.slice(0, MAX_NETWORK_SNAPSHOT_GROUPS)));
+    await expect(e2.admin.mutation(api.networks.saveWifi, profile(groups))).rejects.toThrow(/too_many/);
+    await e2.admin.mutation(api.networks.saveWifi, profile(groups.slice(0, 11)));
   });
 
   test("switching to an open network drops the stored passphrase and its boxes", async () => {

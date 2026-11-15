@@ -279,6 +279,15 @@ function Form({ groupId, v, onReload }: { groupId: string; v: LockdownView; onRe
         <Card title={s.netTitle}>
           <div className="dash-form">
             <SwitchLine label={s.wifiManagedOnly} hint={s.wifiManagedOnlyHelp} checked={draft.wifiManagedOnly} disabled={off} onChange={(on) => patch((d) => ({ ...d, wifiManagedOnly: on }))} />
+            {draft.wifiManagedOnly ? (
+              <Checkbox
+                label={s.wifiManagedOnlyConfirm}
+                hint={s.wifiManagedOnlyConfirmHint}
+                checked={draft.wifiManagedOnlyConfirmed === true}
+                disabled={off}
+                onChange={(e) => patch((d) => ({ ...d, wifiManagedOnlyConfirmed: e.target.checked }))}
+              />
+            ) : null}
           </div>
         </Card>
       </div>

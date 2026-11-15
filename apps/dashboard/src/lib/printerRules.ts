@@ -16,8 +16,8 @@ export const MAX_PRINTER_ADDRESS = 255;
 export const MAX_TCP_HOST = 48;
 export const MAX_LPR_QUEUE = 32;
 export const MAX_PRINTER_DRIVER = 100;
-/** One save touches at most this many groups, like Wi-Fi (`MAX_NETWORK_SNAPSHOT_GROUPS` on the server). */
-export const MAX_PRINTER_GROUPS_PER_SAVE = 10;
+/** A printer or a driver can be in at most this many groups, like a Wi-Fi network (`MAX_NETWORK_GROUPS` on the server). */
+export const MAX_PRINTER_GROUPS = 100;
 /** The class drivers Windows ships; the default list of the picker (`INBOX_PRINTER_DRIVERS` on the server). */
 export const INBOX_DRIVERS: readonly string[] = [
   "Microsoft IPP Class Driver",

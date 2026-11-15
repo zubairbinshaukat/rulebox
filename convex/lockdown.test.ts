@@ -8,7 +8,7 @@ import { api } from "./_generated/api";
 import type { Id } from "./_generated/dataModel";
 import { auditPolicy } from "./lib/audit";
 import { snapshotGroupConfig } from "./lib/groupConfig";
-import { DAY_MS, MINUTE_MS, OPEN_FINDINGS_CAP } from "./lib/limits";
+import { DAY_MS, MAX_ALLOW_GROUPS, MAX_GROUP_EXCEPTIONS, MINUTE_MS, OPEN_FINDINGS_CAP } from "./lib/limits";
 import { DEFAULT_LOCKDOWN_SETTINGS, type LockdownSettings } from "./lib/lockdownValidators";
 import { exceptionPath } from "./lockdown";
 
@@ -265,12 +265,12 @@ describe("lockdown:allow, ignore, removeException", () => {
     expect(() => exceptionPath("{ProgramFiles}\\PowerShell\\7", "pwsh.exe")).toThrow();
   });
 
-  test("more than 10 groups, no group and an unknown group are refused; a viewer cannot allow", async () => {
+  test("more than 100 groups, no group and an unknown group are refused; a viewer cannot allow", async () => {
     const e = await setup();
     const id = await addFinding(e);
     const many = await e.t.run(async (ctx) => {
       const ids: string[] = [];
-      for (let i = 0; i < 11; i++) ids.push(await ctx.db.insert("groups", { orgId: e.orgId, name: `G${i}`, revision: 0, createdAt: Date.now() }));
+      for (let i = 0; i < MAX_ALLOW_GROUPS + 1; i++) ids.push(await ctx.db.insert("groups", { orgId: e.orgId, name: `G${i}`, revision: 0, createdAt: Date.now() }));
       return ids;
     });
     expect(await detailOf(e.admin.mutation(api.lockdown.allow, { findingId: id, kind: "publisher", groupIds: many }))).toMatchObject({ code: "too_large", detail: "groups" });
@@ -280,6 +280,50 @@ describe("lockdown:allow, ignore, removeException", () => {
     expect((await findingOf(e, id))?.status).toBe("new");
   });
 
+  test("Step 20b: 25 groups get the exception, 10 in the call and the other 15 by scheduled batches; a group at the cap is skipped in a batch", async () => {
+    const e = await setup();
+    const id = await addFinding(e);
+    const many = await e.t.run(async (ctx) => {
+      const ids: Id<"groups">[] = [];
+      for (let i = 0; i < 25; i++) ids.push(await ctx.db.insert("groups", { orgId: e.orgId, name: `G${i}`, revision: 0, createdAt: Date.now() }));
+      return ids;
+    });
+    // The 25th group is full: its batch skips it, the call still succeeds.
+    await e.t.run(async (ctx) => {
+      for (let i = 0; i < MAX_GROUP_EXCEPTIONS; i++) {
+        await ctx.db.insert("lockdownExceptions", { orgId: e.orgId, groupId: many[24]!, rule: { kind: "hash", sha256: String(i).padStart(64, "0"), layers: ["appLocker"] }, reason: "", createdAt: 1 });
+      }
+    });
+    const count = () => e.t.run(async (ctx) => (await ctx.db.query("lockdownExceptions").collect()).filter((x) => x.findingId === id).length);
+    const versions = () => e.t.run(async (ctx) => (await ctx.db.query("groupConfigs").collect()).length);
+    const before = await versions();
+    expect(await e.admin.mutation(api.lockdown.allow, { findingId: id, kind: "publisher", groupIds: many })).toEqual({ added: 25 });
+    expect(await count()).toBe(10);
+    expect(await versions()).toBe(before + 10);
+    await e.t.finishAllScheduledFunctions(vi.runAllTimers);
+    expect(await count()).toBe(24);
+    expect(await versions()).toBe(before + 24);
+    expect((await findingOf(e, id))?.status).toBe("allowed");
+    expect(await audits(e)).toEqual(["lockdown.exceptionAdded"]);
+  });
+
+  test("Step 20b: wifiManagedOnlyConfirmed is stored only when true and managed-only is on, and it is part of the next configuration version", async () => {
+    const e = await setup();
+    const base = (await view(e)).settings;
+    const save = async (settings: object, expectedRevision: number) => e.admin.mutation(api.lockdown.update, { groupId: e.groupId, settings: settings as never, expectedRevision });
+    await e.t.run((ctx) => ctx.db.insert("wifiProfiles", { orgId: e.orgId, name: "A", ssid: "A", hidden: false, security: "open", autoConnect: true, groupIds: [e.groupId], revision: 1, createdAt: 1 }));
+    // Confirmed without managed-only is dropped: nothing changed, no write.
+    const noop = await probe(() => save({ ...base, wifiManagedOnlyConfirmed: true }, 0));
+    expect(noop.io.writes).toBe(0);
+    expect((await save({ ...base, wifiManagedOnly: true, wifiManagedOnlyConfirmed: true }, 0)).revision).toBe(1);
+    expect((await view(e)).settings).toMatchObject({ wifiManagedOnly: true, wifiManagedOnlyConfirmed: true });
+    const latest = async () => JSON.parse((await e.t.run((ctx) => ctx.db.query("groupConfigs").withIndex("by_group_version", (q) => q.eq("groupId", e.groupId)).order("desc").first()))!.config) as Record<string, unknown>;
+    expect(Object.keys(await latest()).slice(0, 4)).toEqual(["lockdown", "wifiManagedOnly", "wifiManagedOnlyConfirmed", "wifi"]);
+    // False is never stored: the key goes away again.
+    expect((await save({ ...base, wifiManagedOnly: true, wifiManagedOnlyConfirmed: false }, 1)).revision).toBe(2);
+    expect((await view(e)).settings).not.toHaveProperty("wifiManagedOnlyConfirmed");
+    expect(await latest()).not.toHaveProperty("wifiManagedOnlyConfirmed");
+  });
   test("ignore: the finding leaves the open list; again writes nothing; an allowed finding is refused", async () => {
     const e = await setup();
     const id = await addFinding(e);

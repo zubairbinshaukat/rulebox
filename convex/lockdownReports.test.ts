@@ -76,6 +76,27 @@ describe("deviceApi:reportApply", () => {
     expect(JSON.stringify(r)).not.toContain("Maya");
   });
 
+  // Step 20b: the codes the agent's Step 20 wiring sends must survive the cleaning (a code this server drops would hide the reason from the admin).
+  test("the Step 20 codes are kept: machine partial / wifi_filters_error, a failed connection, a performance restartPending", async () => {
+    const d = await setup();
+    await d.t.mutation(api.deviceApi.reportApply, {
+      ...d.creds,
+      ...APPLY_REPORT,
+      state: "partial",
+      layers: {
+        ...APPLY_REPORT.layers,
+        machine: { mode: "enforce", state: "partial", detail: "wifi_filters_error" },
+        performance: { mode: "enforce", state: "restartPending" },
+      },
+      wifi: [{ profileId: "p1", revision: 2, state: "failed", detail: "connect_failed" }],
+    });
+    const [r] = await rows(d.t, "deviceApplyReports");
+    expect(r!.layers.machine).toEqual({ mode: "enforce", state: "partial", detail: "wifi_filters_error" });
+    expect(r!.layers.performance).toEqual({ mode: "enforce", state: "restartPending" });
+    expect(r!.wifi).toEqual([{ profileId: "p1", revision: 2, state: "failed", detail: "connect_failed" }]);
+    expect(r!.state).toBe("partial");
+  });
+
   test("a group of another organization named in `config` is dropped; too many item states and a bad hash are refused", async () => {
     const d = await setup();
     const other = await setup(d.t);

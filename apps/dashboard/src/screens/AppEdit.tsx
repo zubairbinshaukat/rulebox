@@ -37,7 +37,6 @@ import { AppPermissions } from "./AppPermissions";
 import { AppGlyph } from "../components/AppGlyph";
 import { Card } from "../components/Card";
 import { ConfirmDialog } from "../components/ConfirmDialog";
-import { appErrorMessage, appMessageFor } from "../lib/screenStrings/appErrors";
 import { DataTable, type Column } from "../components/DataTable";
 import { EmptyState } from "../components/EmptyState";
 import { Field, FieldSet } from "../components/Field";
@@ -356,7 +355,7 @@ function AppForm({
       await saveIcon({ appId, png: fetchedIcon.data });
       setIcon(null);
     } catch (e) {
-      toast(`${s.iconNotSaved} ${appMessageFor(e)}`, "danger");
+      toast(`${s.iconNotSaved} ${messageFor(e)}`, "danger");
     }
   }
 
@@ -605,7 +604,7 @@ function AppForm({
       {!readOnly ? (
         <div className="dash-card dash-card--pad">
           <div className="dash-form">
-            <FormError error={f.serverError} onReload={onReload} describe={appErrorMessage} />
+            <FormError error={f.serverError} onReload={onReload} />
             {Object.values(f.errors).some(Boolean) ? (
               <InlineNotice tone="danger" title={strings.validate.fixErrors(Object.values(f.errors).filter(Boolean).length)} />
             ) : null}
@@ -686,7 +685,7 @@ function ArchiveActions({ d }: { d: AppDetail }) {
     <RoleGate minRole="admin">
       {d.archived ? (
         <>
-          <Button variant="ghost" onClick={() => setArchived({ appId: d._id, archived: false }).catch((e) => toast(appMessageFor(e), "danger"))}>
+          <Button variant="ghost" onClick={() => setArchived({ appId: d._id, archived: false }).catch((e) => toast(messageFor(e), "danger"))}>
             {s.unarchive}
           </Button>
           <Button variant="danger-ghost" onClick={() => setDialog("delete")}>
@@ -708,7 +707,6 @@ function ArchiveActions({ d }: { d: AppDetail }) {
         danger
         typeToConfirm={d.name}
         onConfirm={() => setArchived({ appId: d._id, archived: true })}
-        describeError={appErrorMessage}
         onClose={() => setDialog(null)}
       />
       <ConfirmDialog
@@ -719,7 +717,6 @@ function ArchiveActions({ d }: { d: AppDetail }) {
         danger
         typeToConfirm={d.name}
         onConfirm={() => del({ appId: d._id })}
-        describeError={appErrorMessage}
         onDone={() => {
           toast(s.deleted(d.name));
           navigate("/apps?archived=1", { replace: true });
@@ -934,7 +931,7 @@ function InstallCard({ d, counts }: { d: AppDetail; counts: InstallCounts }) {
                   },
                   (e) => {
                     setRetrying(false);
-                    toast(appMessageFor(e), "danger");
+                    toast(messageFor(e), "danger");
                   },
                 );
               }}

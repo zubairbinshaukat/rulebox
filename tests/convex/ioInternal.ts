@@ -584,6 +584,83 @@ export const INTERNAL_CALLS: Record<string, InternalCase | InternalCase[]> = {
   ],
   "stats:reconcileAll": async (c) => () => c.f.t.mutation(internal.stats.reconcileAll, {}),
   "stats:retagDevice": async (c) => () => c.f.t.mutation(internal.stats.retagDevice, { deviceId: c.f.deviceId, cursor: "" }),
+  // Phase 5 Step 20b. A full page (MAX_ORG_DRIVERS = 50) of the PC's driver results, all tagged with a group the PC has left.
+  "stats:retagDriverResults": async (c) => {
+    await c.f.t.run(async (ctx) => {
+      const gone = (await ctx.db.query("groups").withIndex("by_org_name", (q) => q.eq("orgId", c.f.orgId)).first())!._id;
+      for (let i = 0; i < 50; i++) {
+        const driverId = await ctx.db.insert("drivers", DRIVER_ROW(c.f.orgId, `Retag ${i}`, []));
+        await ctx.db.insert("driverResults", { orgId: c.f.orgId, deviceId: c.f.deviceId, driverId, state: "installed", driverRevision: 1, attempts: 0, groupId: gone, updatedAt: 1 });
+      }
+    });
+    return () => c.f.t.mutation(internal.stats.retagDriverResults, { deviceId: c.f.deviceId, cursor: null });
+  },
+  // Phase 5 Step 20b: the scheduled group batches. `snapshotBatch`: 10 groups of the fixture without a configuration yet (each takes version 1).
+  "groupBatches:snapshotBatch": async (c) => {
+    const groupIds = await c.f.t.run(async (ctx) => (await ctx.db.query("groups").withIndex("by_org_name", (q) => q.eq("orgId", c.f.orgId)).take(10)).map((g) => g._id));
+    return () => c.f.t.mutation(internal.groupBatches.snapshotBatch, { groupIds, reason: "Batch", by: c.f.targetMemberId });
+  },
+  // `allowBatch`: the same 10 groups get an exception for a finding.
+  "groupBatches:allowBatch": async (c) => {
+    const { groupIds, findingId } = await c.f.t.run(async (ctx) => {
+      const groups = await ctx.db.query("groups").withIndex("by_org_name", (q) => q.eq("orgId", c.f.orgId)).take(10);
+      const findingId = await ctx.db.insert("lockdownFindings", { orgId: c.f.orgId, fingerprint: "d".repeat(64), layer: "appLocker", fileName: "tool.exe", folderClass: "other", firstSeenAt: 1, lastSeenAt: 1, deviceCount: 1, sampleDeviceId: c.f.deviceId, status: "new" });
+      return { groupIds: groups.map((g) => g._id), findingId };
+    });
+    return () =>
+      c.f.t.mutation(internal.groupBatches.allowBatch, {
+        orgId: c.f.orgId,
+        groupIds,
+        rule: { kind: "hash", sha256: "e".repeat(64), layers: ["appLocker", "procWatch"] },
+        reason: "io",
+        findingId,
+        by: c.f.targetMemberId,
+        now: Date.now(),
+      });
+  },
+  // `cleanupDeletedGroup`: the first run of a deleted group that is in 50 Wi-Fi profiles, 100 printers and 50 drivers (the caps), with a rollout row;
+  // then the steps with full batches of live broadcasts (50), exceptions (100) and 256-KiB-class configurations (10, small here).
+  "groupBatches:cleanupDeletedGroup": [
+    async (c) => {
+      const gone = await c.f.t.run(async (ctx) => {
+        const g = await ctx.db.insert("groups", { orgId: c.f.orgId, name: "Gone", revision: 0, createdAt: 1 });
+        for (let i = 0; i < 50; i++) await ctx.db.insert("wifiProfiles", { orgId: c.f.orgId, name: `W${i}`, ssid: `W${i}`, hidden: false, security: "open", autoConnect: true, groupIds: [g], revision: 1, createdAt: 1 });
+        for (let i = 0; i < 100; i++) await ctx.db.insert("printers", { orgId: c.f.orgId, name: `P${i}`, kind: "raw", address: "10.0.0.1", driver: "Generic / Text Only", groupIds: [g], defaultForGroupIds: [g], revision: 1, createdAt: 1 });
+        for (let i = 0; i < 50; i++) await ctx.db.insert("drivers", DRIVER_ROW(c.f.orgId, `Gone ${i}`, [g]));
+        await ctx.db.insert("groupRollouts", { orgId: c.f.orgId, groupId: g, enabled: false, pointers: { pilot: 1, early: 1, everyone: 1 }, autoPromote: { enabled: false, bakeHours: 24, maxFailurePct: 10 }, autoRollback: true, state: "idle", revision: 0 });
+        await ctx.db.delete(g);
+        return g;
+      });
+      return () => c.f.t.mutation(internal.groupBatches.cleanupDeletedGroup, { orgId: c.f.orgId, groupId: gone });
+    },
+    async (c) => {
+      const gone = await c.f.t.run(async (ctx) => {
+        const g = await ctx.db.insert("groups", { orgId: c.f.orgId, name: "Gone", revision: 0, createdAt: 1 });
+        for (let i = 0; i < 50; i++) await ctx.db.insert("broadcasts", { orgId: c.f.orgId, target: { kind: "group", id: g }, style: "banner", title: "T", body: "B", ackRequired: false, createdAt: 10 + i });
+        await ctx.db.delete(g);
+        return g;
+      });
+      return () => c.f.t.mutation(internal.groupBatches.cleanupDeletedGroup, { orgId: c.f.orgId, groupId: gone, step: "broadcasts" });
+    },
+    async (c) => {
+      const gone = await c.f.t.run(async (ctx) => {
+        const g = await ctx.db.insert("groups", { orgId: c.f.orgId, name: "Gone", revision: 0, createdAt: 1 });
+        for (let i = 0; i < 100; i++) await ctx.db.insert("lockdownExceptions", { orgId: c.f.orgId, groupId: g, rule: { kind: "hash", sha256: String(i).padStart(64, "0"), layers: ["appLocker"] }, reason: "", createdAt: 1 });
+        await ctx.db.delete(g);
+        return g;
+      });
+      return () => c.f.t.mutation(internal.groupBatches.cleanupDeletedGroup, { orgId: c.f.orgId, groupId: gone, step: "exceptions" });
+    },
+    async (c) => {
+      const gone = await c.f.t.run(async (ctx) => {
+        const g = await ctx.db.insert("groups", { orgId: c.f.orgId, name: "Gone", revision: 0, createdAt: 1 });
+        for (let v = 1; v <= 10; v++) await ctx.db.insert("groupConfigs", { orgId: c.f.orgId, groupId: g, version: v, config: "x".repeat(20_000), contentHash: `h${v}`, createdAt: 1, reason: "x" });
+        await ctx.db.delete(g);
+        return g;
+      });
+      return () => c.f.t.mutation(internal.groupBatches.cleanupDeletedGroup, { orgId: c.f.orgId, groupId: gone, step: "configs" });
+    },
+  ],
 
   // ---------------------------------------------------------------- step-up
   "stepUp:storeRecoveryCodes": async (c) => () =>

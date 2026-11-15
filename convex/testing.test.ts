@@ -7,6 +7,8 @@ import { api, internal } from "./_generated/api";
 import type { Id } from "./_generated/dataModel";
 import { SYSTEM_ACTOR, writeAudit } from "./lib/audit";
 import { codeHash } from "./lib/crypto";
+import { DEFAULT_LOCKDOWN_SETTINGS } from "./lib/lockdownValidators";
+import schema from "./schema";
 import * as testing from "./testing";
 import source from "./testing.ts?raw";
 
@@ -271,4 +273,55 @@ describe("deleteOrg", () => {
     // Deleting again is a no-op.
     expect(await t.mutation(internal.testing.deleteOrg, { orgId: fleet.orgId })).toEqual({ done: true, deleted: 0 });
   }, 60_000);
-});
+
+  test("Step 20b: every Phase 5 table is removed too (no table keeps a row of the organization)", async () => {
+    vi.useFakeTimers();
+    const t = await setupAuth();
+    const fleet = await t.mutation(internal.testing.seedFleet, { count: 2, runId: "p5" });
+    const orgId = fleet.orgId;
+    const deviceId = fleet.devices[0]!.deviceId;
+    const seeded = await t.run(async (ctx) => {
+      const groupId = (await ctx.db.query("groups").withIndex("by_org", (q) => q.eq("orgId", orgId)).first())!._id;
+      const now = Date.now();
+      const blocked = { appLocker: 0, appControl: 0, procWatch: 0, elevation: 0 };
+      const off = { mode: "off", state: "ok" };
+      const driverId = await ctx.db.insert("drivers", { orgId, name: "D", kind: "inf", deviceClass: "printer", url: "https://x.example.test/a.zip", sha256: "a".repeat(64), sizeBytes: 1, inf: "a.inf", silentArgs: [], successExitCodes: [], provides: [], groupIds: [groupId], revision: 1, createdAt: now });
+      await ctx.db.insert("driverResults", { orgId, deviceId, driverId, state: "installed", driverRevision: 1, attempts: 0, groupId, updatedAt: now });
+      await ctx.db.insert("wifiProfiles", { orgId, name: "W", ssid: "W", hidden: false, security: "open", autoConnect: true, groupIds: [groupId], revision: 1, createdAt: now });
+      await ctx.db.insert("printers", { orgId, name: "P", kind: "raw", address: "10.0.0.1", driver: "Generic / Text Only", groupIds: [groupId], defaultForGroupIds: [], revision: 1, createdAt: now });
+      await ctx.db.insert("deviceSealedSecrets", { orgId, deviceId, purpose: "wifi", targetId: "w", targetRevision: 1, sealKeyId: "k", sealed: "AAAA", createdAt: now });
+      await ctx.db.insert("deviceApplyReports", { orgId, deviceId, appliedVersion: 1, state: "applied", layers: { staff: off, machine: off, appLocker: off, appControl: off, procWatch: off, boot: off, performance: off }, wifi: [], printers: [], capabilities: [], contentHash: "c".repeat(64), updatedAt: now });
+      await ctx.db.insert("deviceSecurityDaily", { orgId, deviceId, day: "2026-11-15", blocked, permissionDenials: [], drift: 0, tamper: 0 });
+      await ctx.db.insert("orgSecurityDaily", { orgId, day: "2026-11-15", blocked, permissionDenials: [], devicesReporting: 1 });
+      await ctx.db.insert("deviceLocks", { orgId, deviceId, lockId: "l", message: "m", lockedAt: now });
+      const findingId = await ctx.db.insert("lockdownFindings", { orgId, fingerprint: "d".repeat(64), layer: "appLocker", fileName: "a.exe", folderClass: "other", firstSeenAt: now, lastSeenAt: now, deviceCount: 1, sampleDeviceId: deviceId, status: "new" });
+      await ctx.db.insert("lockdownFindingDevices", { orgId, findingId, deviceId, firstSeenAt: now });
+      await ctx.db.insert("lockdownExceptions", { orgId, groupId, rule: { kind: "hash", sha256: "e".repeat(64), layers: ["appLocker"] }, reason: "", createdAt: now });
+      await ctx.db.insert("lockdownExceptions", { orgId, rule: { kind: "hash", sha256: "f".repeat(64), layers: ["appLocker"] }, reason: "", createdAt: now });
+      await ctx.db.insert("groupLockdown", { orgId, groupId, settings: DEFAULT_LOCKDOWN_SETTINGS, revision: 1 });
+      await ctx.db.insert("groupRollouts", { orgId, groupId, enabled: false, pointers: { pilot: 1, early: 1, everyone: 1 }, autoPromote: { enabled: false, bakeHours: 24, maxFailurePct: 10 }, autoRollback: true, state: "idle", revision: 0 });
+      await ctx.db.insert("groupConfigs", { orgId, groupId, version: 1, config: "{}", contentHash: "h", createdAt: now, reason: "x" });
+      const broadcastId = await ctx.db.insert("broadcasts", { orgId, target: { kind: "group", id: groupId }, style: "banner", title: "T", body: "B", ackRequired: true, createdAt: now });
+      await ctx.db.insert("broadcastAcks", { orgId, broadcastId, deviceId, at: now });
+      await ctx.db.insert("orgKeys", { orgId, purpose: "sealing", keyId: "0".repeat(16), wrapped: "AAAA", masterKeyId: "1".repeat(16), status: "active", createdAt: now });
+      return true;
+    });
+    expect(seeded).toBe(true);
+
+    for (let runs = 0; ; runs++) {
+      const r = await t.mutation(internal.testing.deleteOrg, { orgId });
+      if (r.done) break;
+      expect(runs).toBeLessThan(50);
+    }
+    await t.finishAllScheduledFunctions(vi.runAllTimers);
+    // No table of the schema keeps a row that names the organization (a Phase 5 table added later without a purge fails here).
+    const leftovers = await t.run(async (ctx) => {
+      const out: string[] = [];
+      for (const table of Object.keys(schema.tables)) {
+        const rows = (await ctx.db.query(table as never).collect()) as unknown as { orgId?: string }[];
+        if (rows.some((r) => r.orgId === orgId)) out.push(table);
+      }
+      return out;
+    });
+    expect(leftovers).toEqual([]);
+  }, 60_000);});

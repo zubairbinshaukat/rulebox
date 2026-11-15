@@ -139,9 +139,9 @@ describe("demo findings", () => {
     expect(await failure(allow({ findingId: unsigned._id, kind: "hash", groupIds: [g._id] }))).toMatchObject({ code: "conflict", detail: "no_hash" });
     expect(await failure(allow({ findingId: appControl._id, kind: "publisher", groupIds: [g._id] }))).toMatchObject({ code: "conflict", detail: "app_control_finding" });
     expect(await failure(allow({ findingId: signed._id, kind: "path", folder: "{ProgramFiles}\\Acme", groupIds: [g._id] }))).toMatchObject({ code: "conflict", detail: "path_not_admin_only" });
-    // 11 groups at once (ids are checked after the count, as on the server).
-    const eleven = Array.from({ length: 11 }, (_, i) => `group-${i}`);
-    expect(await failure(allow({ findingId: signed._id, kind: "publisher", groupIds: eleven }))).toMatchObject({ code: "too_large", detail: "groups" });
+    // More than 100 groups at once (ids are checked after the count, as on the server); Step 20b: 11 are fine.
+    const many = Array.from({ length: 101 }, (_, i) => `group-${i}`);
+    expect(await failure(allow({ findingId: signed._id, kind: "publisher", groupIds: many }))).toMatchObject({ code: "too_large", detail: "groups" });
 
     expect(await allow({ findingId: signed._id, kind: "publisher", groupIds: [g._id], reason: "Needed" })).toEqual({ added: 1 });
     expect(signed.status).toBe("allowed");

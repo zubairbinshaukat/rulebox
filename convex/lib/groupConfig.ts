@@ -1,3 +1,4 @@
+import { internal } from "../_generated/api";
 import type { Doc, Id } from "../_generated/dataModel";
 import type { DatabaseReader, MutationCtx } from "../_generated/server";
 import { sha256HexSync } from "./crypto";
@@ -14,8 +15,11 @@ import {
   MAX_GROUP_EXCEPTIONS,
   MAX_ORG_DRIVERS,
   MAX_ORG_PRINTERS,
+  MAX_SNAPSHOT_GROUPS_TOTAL,
   MAX_WIFI_PROFILES,
   PRUNE_GROUP_CONFIGS_PER_RUN,
+  SNAPSHOT_BATCH_GROUPS,
+  SNAPSHOT_SYNC_GROUPS,
 } from "./limits";
 import { DEFAULT_LOCKDOWN_SETTINGS, type LockdownSettings, type RingValue } from "./lockdownValidators";
 import { requestPublish } from "./publish";
@@ -30,8 +34,8 @@ import { requestPublish } from "./publish";
 // Step 16b (owner decision 2026-11-15): the Phase 4 catalogue inputs are frozen too, as the
 // optional `catalog` section: the group's app assignments, the records of the apps they name
 // and the file-type rules that point at those apps. Every mutation that changes one of them
-// snapshots the groups that assign the app (`lib/appPublish.ts` `snapshotAppGroups`, at most
-// MAX_CATALOG_SNAPSHOT_GROUPS, else `too_large`). STILL LIVE (the directory never waits for a
+// snapshots the groups that assign the app (`lib/appPublish.ts` `snapshotAppGroups`; the first
+// SNAPSHOT_SYNC_GROUPS at once, the rest in scheduled batches, Step 20b). STILL LIVE (the directory never waits for a
 // pilot, plan 4.3 rule 6): direct employee grants and the records of web apps a group carries
 // only through a grant. `allowedSites` is always empty, so there is nothing to freeze.
 // A group with no snapshot, or a version made before Step 16b (no `catalog`), is read live.
@@ -130,6 +134,8 @@ export type ConfigCatalog = {
 export type GroupConfigContent = {
   lockdown: DocLockdown;
   wifiManagedOnly: boolean;
+  /** (Step 20b) The admin ticked "I understand this PC may go offline". Only present when true (and `wifiManagedOnly` is on), so a version without it keeps its content hash. */
+  wifiManagedOnlyConfirmed?: boolean;
   wifi: ConfigWifi[];
   printers: ConfigPrinter[];
   /** Absent in versions made before Step 14b, and omitted from the stored text when empty (their content hash stays the same). */
@@ -349,6 +355,7 @@ export function buildGroupConfig(groupId: string, input: ConfigInputs): GroupCon
       performance: { ...s.performance },
     },
     wifiManagedOnly: s.wifiManagedOnly,
+    ...(s.wifiManagedOnly && s.wifiManagedOnlyConfirmed === true ? { wifiManagedOnlyConfirmed: true } : {}),
     wifi,
     printers,
     drivers,
@@ -379,7 +386,7 @@ export function parseGroupConfig(text: string): GroupConfigContent | null {
 // ---------------------------------------------------------------- loading and snapshotting
 
 /**
- * What several snapshots of ONE mutation share (Step 16b): an app edit snapshots up to MAX_CATALOG_SNAPSHOT_GROUPS groups, and each
+ * What several snapshots of ONE mutation share (Step 16b): an app edit snapshots up to SNAPSHOT_SYNC_GROUPS groups at once, and each
  * would read the organization's file-type rules and the same app rows again. Never kept across transactions.
  */
 export type SnapshotCache = { apps: Map<string, Doc<"apps"> | null>; fileHandlers: Map<string, Pick<Doc<"fileHandlers">, "extension" | "appId">[]> };
@@ -591,6 +598,37 @@ export async function snapshotGroupConfig(
   }
   await requestPublish(ctx, orgId, { groupIds: [groupId] });
   return { changed: true, version };
+}
+
+/**
+ * (Step 20b) Snapshot many groups: the first SNAPSHOT_SYNC_GROUPS (that still exist) in this transaction, the rest in scheduled
+ * `groupBatches:snapshotBatch` runs of SNAPSHOT_BATCH_GROUPS groups, each of which ends in the publish `snapshotGroupConfig` asks for.
+ * A batch builds the configuration from the live inputs when it runs, so it is idempotent and a later edit that lands first is
+ * kept (the batch sees it and writes nothing new when the content is the same). Duplicates are dropped; more than
+ * MAX_SNAPSHOT_GROUPS_TOTAL groups = `too_large` (detail "groups"), before anything is written. Returns how many were scheduled.
+ */
+export async function snapshotGroupsBatched(
+  ctx: Pick<MutationCtx, "db" | "scheduler">,
+  ids: Iterable<Id<"groups">>,
+  reason: string,
+  by?: Id<"members">,
+  cache: SnapshotCache = newSnapshotCache(),
+): Promise<number> {
+  const unique = [...new Set(ids)];
+  if (unique.length > MAX_SNAPSHOT_GROUPS_TOTAL) fail("too_large", { detail: "groups" });
+  for (const id of unique.slice(0, SNAPSHOT_SYNC_GROUPS)) {
+    if ((await ctx.db.get(id)) === null) continue; // a group that was deleted (an assignment or profile left behind)
+    await snapshotGroupConfig(ctx, id, reason, by, cache);
+  }
+  const rest = unique.slice(SNAPSHOT_SYNC_GROUPS);
+  for (let i = 0; i < rest.length; i += SNAPSHOT_BATCH_GROUPS) {
+    await ctx.scheduler.runAfter(0, internal.groupBatches.snapshotBatch, {
+      groupIds: rest.slice(i, i + SNAPSHOT_BATCH_GROUPS),
+      reason: reason.slice(0, 120),
+      ...(by === undefined ? {} : { by }),
+    });
+  }
+  return rest.length;
 }
 
 /** What the publisher keeps per group and run: the pointers (1 read) and the configurations it opened (1 read each). */

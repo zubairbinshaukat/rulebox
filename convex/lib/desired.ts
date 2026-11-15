@@ -321,7 +321,7 @@ export function buildDeviceDoc(input: BuildInput, version = 0): DesiredDocV2 {
 
 /**
  * The agent-only keys of Phase 5 after `offlineDays`, in the order of plan 4.3:
- * `lockdown`, `wifi`, `wifiManagedOnly`, `printers`, `drivers` (Step 14b; ring-gated, only with a group
+ * `lockdown`, `wifi`, `wifiManagedOnly`, `wifiManagedOnlyConfirmed` (Step 20b, only when true), `printers`, `drivers` (Step 14b; ring-gated, only with a group
  * configuration), then the live `deviceLock`, `usbTempAllow`, `broadcasts`, then `config`.
  * Shapes and key order are those of `crates/rulebox-policy/tests/vectors/lockdown.json`.
  * Throws (the publisher records `policy.publishFailed`) when a limit would be exceeded.
@@ -345,6 +345,8 @@ function addPhase5Keys(doc: DesiredDocV2, p: Phase5Input): void {
       sealed: sealedOf(p.sealed[w.id]),
     }));
     doc.wifiManagedOnly = c.content.wifiManagedOnly;
+    // Step 20b: right after `wifiManagedOnly`, omitted when false (ring-gated like the Wi-Fi list: it comes from the same configuration version).
+    if (c.content.wifiManagedOnly && c.content.wifiManagedOnlyConfirmed === true) doc.wifiManagedOnlyConfirmed = true;
     doc.printers = c.content.printers.map((x) => ({
       id: x.id,
       name: x.name,

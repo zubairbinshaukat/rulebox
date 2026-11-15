@@ -24,7 +24,6 @@ import { DeviceOnline, KioskCell } from "../components/DeviceCells";
 import { EmptyState } from "../components/EmptyState";
 import { Field } from "../components/Field";
 import { FormError } from "../components/FormError";
-import { appErrorMessage } from "../lib/screenStrings/appErrors";
 import { HistoryPanel } from "../components/HistoryPanel";
 import { InstallStatePill } from "../components/InstallState";
 import { installDetail } from "../lib/install";
@@ -351,7 +350,6 @@ function Installs({ deviceId }: { deviceId: string }) {
         body={installStrings.retryConfirmBody(confirming?.appName ?? "")}
         confirmLabel={installStrings.retryConfirmAction}
         onConfirm={() => retry({ appId: confirming?.appId ?? "" })}
-        describeError={appErrorMessage}
         onDone={() => toast(installStrings.retried)}
         onClose={() => setConfirming(null)}
       />

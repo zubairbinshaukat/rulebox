@@ -231,32 +231,30 @@ describe("New Wi-Fi network (/networks/wifi/new)", () => {
     await waitFor(() => expect(where()).toBe("/networks/wifi/w9"));
   });
 
-  it("refuses a save that touches more than 10 groups, in words, before calling the server", async () => {
+  it("a save in more than 10 groups goes to the server (Step 20b: the server batches them); the form allows up to 100", async () => {
     const save = vi.fn(async () => ({ id: "w9", revision: 1 }));
     cx.fns["networks:saveWifi"] = save;
     ui(<WifiEdit />, "admin", "/networks/wifi/new");
     type(s.name, "Shop");
     type(s.ssid, "Acme");
     for (let i = 1; i <= 11; i++) fireEvent.click(screen.getByRole("checkbox", { name: `Group ${i}` }));
-    expect(screen.getByText(s.groupsTouched(11, 10))).toBeTruthy();
+    expect(screen.queryByText(/groups touched/)).toBeNull();
     fireEvent.click(screen.getByRole("button", { name: s.create }));
-    expect(await screen.findByText(s.groupsOver(10))).toBeTruthy();
-    expect(save).not.toHaveBeenCalled();
+    await waitFor(() => expect(save).toHaveBeenCalledTimes(1));
+    expect((save.mock.calls[0] as unknown as [{ groupIds: string[] }])[0].groupIds).toHaveLength(11);
+    expect(s.groupsOver(100)).toBe("Pick at most 100 groups.");
   });
 
-  it("says in words when the server refuses too many groups or too many networks", async () => {
+  it("says in words when the server refuses too many networks", async () => {
     cx.fns["networks:saveWifi"] = vi
       .fn()
       .mockRejectedValueOnce(new ConvexError({ code: "too_large", detail: "wifi" }))
-      .mockRejectedValueOnce(new ConvexError({ code: "too_large", detail: "groups" }))
       .mockRejectedValueOnce(new ConvexError({ code: "invalid_argument", field: "ssid", detail: "characters" }));
     ui(<WifiEdit />, "admin", "/networks/wifi/new");
     type(s.name, "Shop");
     type(s.ssid, "Acme");
     fireEvent.click(screen.getByRole("button", { name: s.create }));
     expect(await screen.findByText(/at most 50 Wi-Fi networks/)).toBeTruthy();
-    fireEvent.click(screen.getByRole("button", { name: s.create }));
-    expect(await screen.findByText(/can touch at most 10 groups/)).toBeTruthy();
     // a server refusal about the SSID goes under the field, in our words
     fireEvent.click(screen.getByRole("button", { name: s.create }));
     expect(await screen.findByText(s.ssidServerRefused)).toBeTruthy();

@@ -17,7 +17,7 @@ import { SkeletonBlock } from "../components/Skeleton";
 import { toAppError } from "../lib/errors";
 import { useCan } from "../lib/member";
 import {
-  MAX_PRINTER_GROUPS_PER_SAVE,
+  MAX_PRINTER_GROUPS,
   MAX_PRINTER_NAME,
   PRINTER_KINDS,
   addressProblem,
@@ -29,7 +29,7 @@ import {
 import { strings } from "../lib/strings";
 import { useToast } from "../lib/toast";
 import { useForm } from "../lib/useForm";
-import { BLANK_PRINTER, touchedGroups } from "./networks/model";
+import { BLANK_PRINTER } from "./networks/model";
 import { networksStrings as s } from "./networks/strings";
 
 interface Values extends Record<string, unknown> {
@@ -222,8 +222,6 @@ function PrinterForm({
   onReload?: () => void;
 }) {
   const form = useRef<HTMLFormElement>(null);
-  // What the server has: a save touches the groups the printer is in now plus the picked ones (and again after each save).
-  const [savedGroups, setSavedGroups] = useState<string[]>(d.groupIds);
   const groups = useGroupsScreen();
   const networks = useNetworks();
   const f = useForm<Values>(valuesOf(d), (x) => {
@@ -234,10 +232,9 @@ function PrinterForm({
       address: address === null ? undefined : s.addressProblems[address],
       port: x.kind === "raw" && portProblem(x.port) !== null ? s.portProblems.range : undefined,
       queue: x.kind === "lpr" ? (queueProblem(x.queue) === null ? undefined : s.queueProblems[queueProblem(x.queue) ?? "required"]) : undefined,
-      groupIds: touchedGroups(savedGroups, x.groupIds) > MAX_PRINTER_GROUPS_PER_SAVE ? s.groupsOver(MAX_PRINTER_GROUPS_PER_SAVE) : undefined,
+      groupIds: x.groupIds.length > MAX_PRINTER_GROUPS ? s.groupsOver(MAX_PRINTER_GROUPS) : undefined,
     };
   });
-  const touched = touchedGroups(savedGroups, f.values.groupIds);
   const approved = networks.status === "ready" ? networks.data.approvedDrivers : driverChoices([]);
   // Names a Drivers entry delivers are tagged (they only work on PCs of the groups that entry is assigned to).
   const delivered = new Set((networks.status === "ready" ? networks.data.drivers : []).flatMap((d) => d.provides.map((n) => n.toLowerCase())));
@@ -245,7 +242,7 @@ function PrinterForm({
   const choices = approved.includes(f.values.driver) || f.values.driver === "" ? approved : [...approved, f.values.driver];
   const describe = (e: unknown) => {
     const a = toAppError(e);
-    return a ? s.describeError(a.code, a.detail, MAX_PRINTER_GROUPS_PER_SAVE) : null;
+    return a ? s.describeError(a.code, a.detail) : null;
   };
   const serverField = (field: string, text: string) => serverFieldError(f.serverError, field, () => text);
   const kind = f.values.kind;
@@ -261,7 +258,6 @@ function PrinterForm({
           e.preventDefault();
           void f.submit(async (x) => {
             await onSave(x);
-            setSavedGroups(x.groupIds);
           }, form.current);
         }}
       >
@@ -345,7 +341,6 @@ function PrinterForm({
               ))}
             </div>
           )}
-          {touched > 0 ? <p className="dash-cell-sub">{s.groupsTouched(touched, MAX_PRINTER_GROUPS_PER_SAVE)}</p> : null}
         </FieldSet>
         <FieldSet legend={s.defaultsLegend} hint={s.defaultsHint} error={serverField("defaultForGroupIds", s.defaultTaken)}>
           {selectedGroups.length === 0 ? (
@@ -431,7 +426,7 @@ function DeleteCard({ d }: { d: PrinterDetail }) {
         typeToConfirm={d.name}
         describeError={(e) => {
           const a = toAppError(e);
-          return a ? s.describeError(a.code, a.detail, MAX_PRINTER_GROUPS_PER_SAVE) : null;
+          return a ? s.describeError(a.code, a.detail) : null;
         }}
         onConfirm={() => del({ id: d._id })}
         onDone={() => {

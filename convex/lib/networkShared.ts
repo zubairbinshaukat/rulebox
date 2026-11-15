@@ -1,5 +1,5 @@
 import type { Doc, Id } from "../_generated/dataModel";
-import { newSnapshotCache, snapshotGroupConfig } from "./groupConfig";
+import { snapshotGroupsBatched } from "./groupConfig";
 
 // Helpers shared by the Networks screen's functions (`networks.ts`) and the drivers (`drivers.ts`, Phase 5 Step 14b).
 
@@ -31,17 +31,16 @@ export function hasControlChars(text: string): boolean {
 
 export const sameSet = (a: readonly string[], b: readonly string[]): boolean => a.length === b.length && a.every((x, i) => x === b[i]);
 
-/** Snapshot the configuration of every still existing group in `ids` (cap MAX_NETWORK_SNAPSHOT_GROUPS is the caller's check). */
+/**
+ * Snapshot the configuration of every still existing group in `ids`: the first SNAPSHOT_SYNC_GROUPS now, the rest in scheduled batches
+ * (Step 20b, `snapshotGroupsBatched`; more than MAX_SNAPSHOT_GROUPS_TOTAL groups = `too_large`).
+ */
 export async function snapshotGroups(
-  ctx: Parameters<typeof snapshotGroupConfig>[0] & GroupReader,
+  ctx: Parameters<typeof snapshotGroupsBatched>[0] & GroupReader,
   ids: Iterable<Id<"groups">>,
   reason: string,
   by: Id<"members">,
 ): Promise<void> {
   // Step 16b: a snapshot also freezes the group's catalogue; the organization's file-type rules and shared app rows are read once per call.
-  const cache = newSnapshotCache();
-  for (const id of ids) {
-    if ((await ctx.db.get(id)) === null) continue;
-    await snapshotGroupConfig(ctx, id, reason, by, cache);
-  }
+  await snapshotGroupsBatched(ctx, ids, reason, by);
 }

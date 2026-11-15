@@ -1151,6 +1151,8 @@ export interface LockdownSettings {
   boot: { autoRecovery: "leave" | "off"; safeModeGuard: boolean };
   performance: { staffTuning: boolean; kioskProfile: boolean; noPrinting: boolean };
   wifiManagedOnly: boolean;
+  /** "I understand this PC may go offline" (Step 20b): the PC applies "managed networks only" even when it is on another network. Missing = not ticked. */
+  wifiManagedOnlyConfirmed?: boolean;
 }
 
 /** The defaults of a new group (plan 4.3). */
@@ -1253,7 +1255,7 @@ export interface AllowInput {
 }
 
 /** Limits of the lockdown screens (`convex/lib/limits.ts`). */
-export const MAX_ALLOW_GROUPS = 10;
+export const MAX_ALLOW_GROUPS = 100;
 export const MAX_EXCEPTION_REASON = 200;
 export const OPEN_FINDINGS_CAP = 50;
 export const MAX_USB_ALLOW_HOURS = 8;

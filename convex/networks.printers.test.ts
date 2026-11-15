@@ -6,7 +6,7 @@ import { createKeys, MASTER_A, setMaster } from "../tests/convex/phase5";
 import { api } from "./_generated/api";
 import type { Id } from "./_generated/dataModel";
 import { auditPolicy } from "./lib/audit";
-import { MAX_NETWORK_SNAPSHOT_GROUPS, MAX_ORG_PRINTERS } from "./lib/limits";
+import { MAX_NETWORK_GROUPS, MAX_ORG_PRINTERS } from "./lib/limits";
 
 // Printers on the server (Phase 5 Step 14, plan 4.15, 4.20): save / delete / list / detail, the approved driver
 // list, the address rules, the one-default-per-group rule, the group snapshot cap and the signed document.
@@ -167,15 +167,13 @@ describe("networks:savePrinter", () => {
     const e2 = await setup();
     const groups = await e2.t.run(async (ctx) => {
       const ids: Id<"groups">[] = [];
-      for (let i = 0; i < MAX_NETWORK_SNAPSHOT_GROUPS + 1; i++) ids.push(await ctx.db.insert("groups", { orgId: e2.orgId, name: `G${i}`, revision: 0, createdAt: 1 }));
+      for (let i = 0; i < MAX_NETWORK_GROUPS + 1; i++) ids.push(await ctx.db.insert("groups", { orgId: e2.orgId, name: `G${i}`, revision: 0, createdAt: 1 }));
       return ids;
     });
-    await expect(e2.admin.mutation(api.networks.savePrinter, printer(groups))).rejects.toThrow(/too_large/);
-    const ok = await e2.admin.mutation(api.networks.savePrinter, printer(groups.slice(0, MAX_NETWORK_SNAPSHOT_GROUPS)));
-    // An update that would touch 11 groups (10 before + 1 new) is refused too.
-    await expect(
-      e2.admin.mutation(api.networks.savePrinter, { ...printer([...groups.slice(1, MAX_NETWORK_SNAPSHOT_GROUPS + 1)]), id: ok.id, expectedRevision: 1 }),
-    ).rejects.toThrow(/too_large/);
+    await expect(e2.admin.mutation(api.networks.savePrinter, printer(groups))).rejects.toThrow(/too_many/);
+    // Step 20b: more than 10 groups is fine (the rest is snapshotted by scheduled batches), also in an update that touches 11.
+    const ok = await e2.admin.mutation(api.networks.savePrinter, printer(groups.slice(0, 10)));
+    await e2.admin.mutation(api.networks.savePrinter, { ...printer([...groups.slice(1, 11)]), id: ok.id, expectedRevision: 1 });
   });
 });
 
@@ -251,14 +249,14 @@ describe("networks:list, printerDetail and deletePrinter", () => {
     expect((await e.viewer.query(api.networks.list, {})).printers.map((p) => p._id)).toEqual([keep.id]);
   });
 
-  test("deleting a printer assigned to more than 10 groups is refused (the snapshot cap)", async () => {
+  test("deleting a printer assigned to more than 10 groups works (the first 10 are snapshotted in the call, the rest in batches)", async () => {
     const e = await setup();
     const groups = await e.t.run(async (ctx) => {
       const ids: Id<"groups">[] = [];
-      for (let i = 0; i < MAX_NETWORK_SNAPSHOT_GROUPS + 1; i++) ids.push(await ctx.db.insert("groups", { orgId: e.orgId, name: `G${i}`, revision: 0, createdAt: 1 }));
+      for (let i = 0; i < 11; i++) ids.push(await ctx.db.insert("groups", { orgId: e.orgId, name: `G${i}`, revision: 0, createdAt: 1 }));
       return ids;
     });
     const id = await e.t.run((ctx) => ctx.db.insert("printers", { orgId: e.orgId, name: "Wide", kind: "raw", address: "10.0.0.3", driver: "Generic / Text Only", groupIds: groups, defaultForGroupIds: [], revision: 1, createdAt: 1 }));
-    await expect(e.admin.mutation(api.networks.deletePrinter, { id })).rejects.toThrow(/too_large/);
+    await expect(e.admin.mutation(api.networks.deletePrinter, { id })).resolves.toBeNull();
   });
 });

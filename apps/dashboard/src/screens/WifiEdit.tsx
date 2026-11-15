@@ -22,8 +22,8 @@ import { strings } from "../lib/strings";
 import { useToast } from "../lib/toast";
 import { useForm } from "../lib/useForm";
 import * as v from "../lib/validate";
-import { MAX_SSID_BYTES, MAX_WIFI_GROUPS_PER_SAVE, MAX_WIFI_NAME, WIFI_SECURITIES, ssidBytes, ssidProblem } from "../lib/wifiRules";
-import { BLANK_WIFI, touchedGroups } from "./networks/model";
+import { MAX_SSID_BYTES, MAX_WIFI_GROUPS, MAX_WIFI_NAME, WIFI_SECURITIES, ssidBytes, ssidProblem } from "../lib/wifiRules";
+import { BLANK_WIFI } from "./networks/model";
 import { PassphraseDialog } from "./networks/PassphraseDialog";
 import { networksStrings as s } from "./networks/strings";
 
@@ -242,22 +242,19 @@ function ProfileForm({
   onReload?: () => void;
 }) {
   const form = useRef<HTMLFormElement>(null);
-  // What the server has: a save touches the groups the network is in now plus the picked ones (and again after each save).
-  const [savedGroups, setSavedGroups] = useState<string[]>(d.groupIds);
   const groups = useGroupsScreen();
   const f = useForm<Values>(valuesOf(d), (x) => {
     const ssid = ssidProblem(x.ssid);
     return {
       name: v.name(x.name, MAX_WIFI_NAME) ? s.nameProblem(MAX_WIFI_NAME) : undefined,
       ssid: ssid === null ? undefined : s.ssidProblems[ssid],
-      groupIds: touchedGroups(savedGroups, x.groupIds) > MAX_WIFI_GROUPS_PER_SAVE ? s.groupsOver(MAX_WIFI_GROUPS_PER_SAVE) : undefined,
+      groupIds: x.groupIds.length > MAX_WIFI_GROUPS ? s.groupsOver(MAX_WIFI_GROUPS) : undefined,
     };
   });
   const used = ssidBytes(f.values.ssid);
-  const touched = touchedGroups(savedGroups, f.values.groupIds);
   const describe = (e: unknown) => {
     const a = toAppError(e);
-    return a ? s.describeError(a.code, a.detail, MAX_WIFI_GROUPS_PER_SAVE) : null;
+    return a ? s.describeError(a.code, a.detail) : null;
   };
   const serverField = (field: string, text: string) => serverFieldError(f.serverError, field, () => text);
 
@@ -271,7 +268,6 @@ function ProfileForm({
           e.preventDefault();
           void f.submit(async (x) => {
             await onSave(x);
-            setSavedGroups(x.groupIds);
           }, form.current);
         }}
       >
@@ -341,7 +337,6 @@ function ProfileForm({
               ))}
             </div>
           )}
-          {touched > 0 ? <p className="dash-cell-sub">{s.groupsTouched(touched, MAX_WIFI_GROUPS_PER_SAVE)}</p> : null}
         </FieldSet>
         {isNew && f.values.security !== "open" ? <p className="dash-muted">{s.noPassphraseInForm}</p> : null}
         <FormError error={f.serverError} onReload={onReload} fields={["name", "ssid", "groupIds"]} describe={describe} />
@@ -412,7 +407,7 @@ function DeleteCard({ d }: { d: WifiDetail }) {
         typeToConfirm={d.name}
         describeError={(e) => {
           const a = toAppError(e);
-          return a ? s.describeError(a.code, a.detail, MAX_WIFI_GROUPS_PER_SAVE) : null;
+          return a ? s.describeError(a.code, a.detail) : null;
         }}
         onConfirm={() => del({ id: d._id })}
         onDone={() => {

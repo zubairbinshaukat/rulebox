@@ -12,7 +12,6 @@ import type { Column } from "../components/DataTable";
 import { EmptyState } from "../components/EmptyState";
 import { Field } from "../components/Field";
 import { FormError } from "../components/FormError";
-import { appErrorMessage } from "../lib/screenStrings/appErrors";
 import { Modal } from "../components/Modal";
 import { InlineNotice } from "../components/Notice";
 import { PageHeader } from "../components/PageHeader";
@@ -110,7 +109,6 @@ export default function FileTypes() {
         confirmLabel={strings.common.remove}
         danger
         onConfirm={() => remove({ handlerId: removing!._id })}
-        describeError={appErrorMessage}
         onDone={() => toast(s.removed(removing?.extension ?? ""))}
         onClose={() => setRemoving(null)}
       />
@@ -190,7 +188,7 @@ function AddForm({ options, onClose }: { options: AppOption[]; onClose: () => vo
             </Select>
           )}
         </Field>
-        <FormError error={f.serverError} describe={appErrorMessage} />
+        <FormError error={f.serverError} />
       </div>
     </Modal>
   );

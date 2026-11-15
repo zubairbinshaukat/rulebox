@@ -47,7 +47,7 @@ function vectorInput(): Phase5Input {
   };
 }
 
-const PHASE5_KEYS = ["lockdown", "wifi", "wifiManagedOnly", "printers", "drivers", "deviceLock", "usbTempAllow", "broadcasts", "config"];
+const PHASE5_KEYS = ["lockdown", "wifi", "wifiManagedOnly", "wifiManagedOnlyConfirmed", "printers", "drivers", "deviceLock", "usbTempAllow", "broadcasts", "config"];
 const phase5Part = (doc: Record<string, unknown>) => Object.fromEntries(PHASE5_KEYS.filter((k) => k in doc).map((k) => [k, doc[k]]));
 
 describe("lockdown.json (shared with the agent)", () => {
@@ -60,6 +60,23 @@ describe("lockdown.json (shared with the agent)", () => {
     expect(keys.indexOf("offlineDays")).toBeLessThan(keys.indexOf("lockdown"));
     const phase4 = buildDeviceDoc(VECTOR_INPUT, 7);
     expect(JSON.stringify(Object.fromEntries(Object.entries(doc).filter(([k]) => !PHASE5_KEYS.includes(k))))).toBe(JSON.stringify(phase4));
+  });
+
+  test("wifiManagedOnlyConfirmed (Step 20b): right after wifiManagedOnly, only when true, ring-gated with the rest of the configuration", () => {
+    const withConfirmed = (over: Partial<GroupConfigContent>) => {
+      const input = vectorInput();
+      return buildDeviceDoc({ ...VECTOR_INPUT, phase5: { ...input, config: { ...input.config!, content: { ...input.config!.content, ...over } } } }, 7);
+    };
+    const on = withConfirmed({ wifiManagedOnly: true, wifiManagedOnlyConfirmed: true });
+    expect(Object.keys(on).filter((k) => PHASE5_KEYS.includes(k))).toEqual(["lockdown", "wifi", "wifiManagedOnly", "wifiManagedOnlyConfirmed", "printers", "drivers", "deviceLock", "usbTempAllow", "broadcasts", "config"]);
+    expect(on.wifiManagedOnlyConfirmed).toBe(true);
+    // Omitted when false or absent, and when managed-only itself is off.
+    expect(withConfirmed({ wifiManagedOnly: true, wifiManagedOnlyConfirmed: false })).not.toHaveProperty("wifiManagedOnlyConfirmed");
+    expect(withConfirmed({ wifiManagedOnly: true })).not.toHaveProperty("wifiManagedOnlyConfirmed");
+    expect(withConfirmed({ wifiManagedOnly: false, wifiManagedOnlyConfirmed: true })).not.toHaveProperty("wifiManagedOnlyConfirmed");
+    // A PC without a group configuration (a Phase 4 group) never gets it.
+    const input = vectorInput();
+    expect(buildDeviceDoc({ ...VECTOR_INPUT, phase5: { ...input, config: null } }, 7)).not.toHaveProperty("wifiManagedOnlyConfirmed");
   });
 
   test("drivers (Step 14b): every field in the contract's key order, an empty list when the configuration has none or predates drivers", () => {

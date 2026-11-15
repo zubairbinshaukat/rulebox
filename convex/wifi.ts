@@ -1,13 +1,11 @@
 import { v } from "convex/values";
 import { internal } from "./_generated/api";
-import type { Id } from "./_generated/dataModel";
 import { writeAudit } from "./lib/audit";
 import { getInOrg } from "./lib/authz";
 import { fail } from "./lib/errors";
 import { internalMutation, internalQuery, memberAction } from "./lib/functions";
-import { newSnapshotCache, snapshotGroupConfig } from "./lib/groupConfig";
+import { snapshotGroupsBatched } from "./lib/groupConfig";
 import { openWrappedRow } from "./lib/keyring";
-import { MAX_NETWORK_SNAPSHOT_GROUPS } from "./lib/limits";
 import { atRestBox } from "./lib/lockdownValidators";
 import { consumeOrFail } from "./lib/rateLimits";
 import { encryptAtRest } from "./lib/sealbox";
@@ -100,7 +98,6 @@ export const storePassphrase = internalMutation({
     const p = await getInOrg(ctx, "wifiProfiles", args.id, args.orgId);
     if (p.revision !== args.expectedRevision) fail("stale_edit");
     if (p.security === "open") fail("invalid_argument", { field: "id", detail: "open" });
-    if (p.groupIds.length > MAX_NETWORK_SNAPSHOT_GROUPS) fail("too_large", { detail: "groups" });
     const revision = p.revision + 1;
     await ctx.db.patch(p._id, { passphrase: args.atRest, passphraseRev: revision, passphraseSetAt: Date.now(), revision });
     await writeAudit(ctx, {
@@ -112,11 +109,8 @@ export const storePassphrase = internalMutation({
       targetLabel: p.name,
       summary: `Set a new passphrase for the Wi-Fi network ${p.name}`,
     });
-    const cache = newSnapshotCache(); // Step 16b: the catalogue inputs the groups share are read once
-    for (const gid of p.groupIds as Id<"groups">[]) {
-      if ((await ctx.db.get(gid)) === null) continue;
-      await snapshotGroupConfig(ctx, gid, `Wi-Fi ${p.name}`, args.by, cache);
-    }
+    // Step 20b: the first groups now, the rest in scheduled batches (a passphrase change reaches every group of the profile).
+    await snapshotGroupsBatched(ctx, p.groupIds, `Wi-Fi ${p.name}`, args.by);
     return { revision };
   },
 });

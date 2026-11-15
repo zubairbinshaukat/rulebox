@@ -67,7 +67,7 @@ export const page = memberQuery("viewer")({
  * moves it to another program. `invalid_argument` field "extension" with detail
  * "format" (not `.` and 1-10 letters or digits) or "denied" (executables,
  * scripts, installers...: PRD 7.3); field "app" when the program cannot open
- * files. Same program again = no write. `too_large` at 200 rules, and (detail "groups") when the programs are assigned to more than MAX_CATALOG_SNAPSHOT_GROUPS groups.
+ * files. Same program again = no write. `too_large` at 200 rules. The groups that assign the programs get a configuration version (the first 10 in the call, the rest in batches).
  */
 export const set = memberMutation("admin")({
   args: { extension: v.string(), appId: v.string() },
@@ -104,7 +104,7 @@ export const set = memberMutation("admin")({
       summary: `Files ending in ${extension} now open with ${app.name}`,
     });
     // Step 16b: file-type rules are ring-gated. One new configuration version for every group that assigns the program
-    // (and the one that lost the extension); `too_large` (detail "groups") above MAX_CATALOG_SNAPSHOT_GROUPS groups.
+    // (and the one that lost the extension); the first 10 groups at once, the rest by scheduled batches (Step 20b).
     await snapshotAppGroups(ctx, existing === null ? [app._id] : [existing.appId, app._id], `File type ${extension}`, ctx.member._id);
     if (existing !== null) await publishApp(ctx, ctx.orgId, existing.appId); // the program that lost the extension
     await publishApp(ctx, ctx.orgId, app._id);

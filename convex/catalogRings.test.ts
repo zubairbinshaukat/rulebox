@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import { setupAuth } from "../tests/convex/auth";
 import { enrollDevice, probe } from "../tests/convex/devices";
-import { asMember, expectCode, giveStepUp, makeOrg, type T } from "../tests/convex/identity";
+import { asMember, giveStepUp, makeOrg, type T } from "../tests/convex/identity";
 import { MASTER_A, setMaster } from "../tests/convex/phase5";
 import { api } from "./_generated/api";
 import type { Id } from "./_generated/dataModel";
@@ -298,8 +298,8 @@ describe("rings on: assignments, app records and file types go to the pilot ring
   });
 });
 
-describe("the snapshot cap", () => {
-  test("a file type whose program is assigned to more than 10 groups is refused with too_large and nothing is written", async () => {
+describe("many groups (Step 20b: scheduler batches replace the 10-group cap)", () => {
+  test("a file type whose program is assigned to 11 groups is saved: 10 groups get a version in the call, the 11th by a scheduled batch", async () => {
     const e = await setup();
     const reader = await e.admin.mutation(api.apps.createDesktop, program("Reader"));
     await e.t.run(async (ctx) => {
@@ -308,9 +308,14 @@ describe("the snapshot cap", () => {
         await ctx.db.insert("appAssignments", { orgId: e.orgId, groupId: g, appId: reader, audience: "everyone", pinnedTaskbar: false, pinnedDesktop: false });
       }
     });
-    await expectCode(e.admin.mutation(api.fileHandlers.set, { extension: "pdf", appId: reader }), "too_large");
-    expect(await e.t.run((ctx) => ctx.db.query("fileHandlers").collect())).toEqual([]);
-    expect(await e.t.run((ctx) => ctx.db.query("groupConfigs").collect())).toEqual([]);
-    await expectCode(e.admin.mutation(api.apps.retry, { appId: reader }), "too_large");
+    const versions = () => e.t.run(async (ctx) => (await ctx.db.query("groupConfigs").collect()).length);
+    await e.admin.mutation(api.fileHandlers.set, { extension: "pdf", appId: reader });
+    expect((await e.t.run((ctx) => ctx.db.query("fileHandlers").collect())).length).toBe(1);
+    expect(await versions()).toBe(10); // synchronous part
+    await drain(e.t);
+    expect(await versions()).toBe(11); // the batch of the 11th group
+    await e.admin.mutation(api.apps.retry, { appId: reader });
+    await drain(e.t);
+    expect(await versions()).toBe(22); // a retry bumps the app revision, so each of the 11 groups gets a new version (10 in the call, 1 later)
   });
 });

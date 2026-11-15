@@ -33,11 +33,11 @@ import {
   silentArgsProblem,
   sizeProblem,
 } from "../lib/driverRules";
-import { MAX_PRINTER_GROUPS_PER_SAVE } from "../lib/printerRules";
+import { MAX_PRINTER_GROUPS } from "../lib/printerRules";
 import { strings } from "../lib/strings";
 import { useToast } from "../lib/toast";
 import { useForm } from "../lib/useForm";
-import { BLANK_DRIVER, touchedGroups } from "./networks/model";
+import { BLANK_DRIVER } from "./networks/model";
 import { networksStrings as s } from "./networks/strings";
 
 interface Values extends Record<string, unknown> {
@@ -247,8 +247,6 @@ function DriverForm({
   onReload?: () => void;
 }) {
   const form = useRef<HTMLFormElement>(null);
-  // What the server has: a save touches the groups the driver is in now plus the picked ones (and again after each save).
-  const [savedGroups, setSavedGroups] = useState<string[]>(d.groupIds);
   const groups = useGroupsScreen();
   const f = useForm<Values>(valuesOf(d), (x) => {
     const name = driverNameProblem(x.name);
@@ -268,13 +266,12 @@ function DriverForm({
       args: args === null ? undefined : s.driverArgsProblems[args],
       codes: codes === null ? undefined : s.driverCodesProblems[codes],
       provides: provides === null ? undefined : s.driverProvidesProblems[provides],
-      groupIds: touchedGroups(savedGroups, x.groupIds) > MAX_PRINTER_GROUPS_PER_SAVE ? s.groupsOver(MAX_PRINTER_GROUPS_PER_SAVE) : undefined,
+      groupIds: x.groupIds.length > MAX_PRINTER_GROUPS ? s.groupsOver(MAX_PRINTER_GROUPS) : undefined,
     };
   });
-  const touched = touchedGroups(savedGroups, f.values.groupIds);
   const describe = (e: unknown) => {
     const a = toAppError(e);
-    return a ? s.describeError(a.code, a.detail, MAX_PRINTER_GROUPS_PER_SAVE) : null;
+    return a ? s.describeError(a.code, a.detail) : null;
   };
   const serverField = (field: string, text: string) => serverFieldError(f.serverError, field, () => text);
   const kind = f.values.kind;
@@ -289,7 +286,6 @@ function DriverForm({
           e.preventDefault();
           void f.submit(async (x) => {
             await onSave(x);
-            setSavedGroups(x.groupIds);
           }, form.current);
         }}
       >
@@ -376,7 +372,6 @@ function DriverForm({
               ))}
             </div>
           )}
-          {touched > 0 ? <p className="dash-cell-sub">{s.groupsTouched(touched, MAX_PRINTER_GROUPS_PER_SAVE)}</p> : null}
         </FieldSet>
         <FormError
           error={f.serverError}
@@ -482,7 +477,7 @@ function DeleteCard({ d }: { d: DriverDetail }) {
         typeToConfirm={d.name}
         describeError={(e) => {
           const a = toAppError(e);
-          return a ? s.describeError(a.code, a.detail, MAX_PRINTER_GROUPS_PER_SAVE) : null;
+          return a ? s.describeError(a.code, a.detail) : null;
         }}
         onConfirm={() => del({ id: d._id })}
         onDone={() => {

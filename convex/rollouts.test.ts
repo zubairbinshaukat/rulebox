@@ -442,6 +442,22 @@ describe("ring health and the tick", () => {
     expect(resumed.haltReason).toBeUndefined();
   });
 
+  // Step 20b: the agent reports a configuration it refused as `rolledBack` with the FAILED configuration in `config` and the lower version it
+  // is on now in `appliedVersion` (`report()` above always says 1). Ring health must count that as a failure of the config in `config`.
+  test("a rolledBack report whose appliedVersion is lower counts as a failure of the configuration it names", async () => {
+    const e = await setup({ rings: true });
+    await e.admin.mutation(api.rollouts.setRings, { groupId: e.groupId, deviceIds: [e.everyone.deviceId], ring: "pilot", expectedRevision: await rev(e) });
+    await addNetwork(e, "Guest"); // v2 on the pilot ring (2 PCs)
+    await report(e, e.pilot, 2, "pilot", "applied");
+    await report(e, e.everyone, 2, "pilot", "rolledBack");
+    const stored = await e.t.run((ctx) => ctx.db.query("deviceApplyReports").withIndex("by_device", (q) => q.eq("deviceId", e.everyone.deviceId)).unique());
+    expect(stored).toMatchObject({ appliedVersion: 1, config: { version: 2 }, state: "rolledBack" }); // lower than the configuration it names
+    expect(await health(e)).toMatchObject({ applied: 1, failed: 1, partial: 0, waiting: 0 });
+    // A rolledBack report that names an OLDER configuration (an earlier stage) does not count against the stage in flight.
+    await report(e, e.everyone, 1, "pilot", "rolledBack");
+    expect(await health(e)).toMatchObject({ applied: 1, failed: 0, waiting: 1 });
+  });
+
   test("the tick hands each rolling group to its own evaluation; idle, halted and ring-less groups cost nothing and are untouched", async () => {
     const e = await setup({ rings: true });
     await e.admin.mutation(api.rollouts.setAutoPromote, { groupId: e.groupId, enabled: true, bakeHours: 1, maxFailurePct: 50, autoRollback: true, expectedRevision: await rev(e) });

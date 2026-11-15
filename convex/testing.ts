@@ -362,6 +362,12 @@ function deviceChildren(ctx: MutationCtx, deviceId: Id<"devices">): Fetch[] {
     (n) => db.query("desiredVersions").withIndex("by_device_version", (q) => q.eq("deviceId", deviceId)).take(n),
     (n) => db.query("installResults").withIndex("by_device_updated", (q) => q.eq("deviceId", deviceId)).take(n),
     (n) => db.query("driverResults").withIndex("by_device_driver", (q) => q.eq("deviceId", deviceId)).take(n),
+    // Phase 5 (Step 20b): the PC's apply report, daily counters, lock, findings seen and sealed Wi-Fi boxes.
+    (n) => db.query("deviceApplyReports").withIndex("by_device", (q) => q.eq("deviceId", deviceId)).take(n),
+    (n) => db.query("deviceSecurityDaily").withIndex("by_device_day", (q) => q.eq("deviceId", deviceId)).take(n),
+    (n) => db.query("deviceLocks").withIndex("by_device", (q) => q.eq("deviceId", deviceId)).take(n),
+    (n) => db.query("lockdownFindingDevices").withIndex("by_device", (q) => q.eq("deviceId", deviceId)).take(n),
+    (n) => db.query("deviceSealedSecrets").withIndex("by_device_target", (q) => q.eq("deviceId", deviceId)).take(n),
     (n) => db.query("desiredStates").withIndex("by_device_version", (q) => q.eq("deviceId", deviceId)).take(n),
     (n) => db.query("desiredStates").withIndex("by_scope_version", (q) => q.eq("scope", scope)).take(n),
   ];
@@ -410,6 +416,10 @@ async function sweepOrg(ctx: MutationCtx, orgId: Id<"organizations">, b: Budget)
         (n) => db.query("groupMembers").withIndex("by_group", (q) => q.eq("groupId", id)).take(n),
         (n) => db.query("appAssignments").withIndex("by_group", (q) => q.eq("groupId", id)).take(n),
         (n) => db.query("rosterEntries").withIndex("by_group_epoch", (q) => q.eq("groupId", id)).take(n),
+        // Phase 5 (Step 20b): its lockdown settings, rollout row and configuration versions.
+        (n) => db.query("groupLockdown").withIndex("by_group", (q) => q.eq("groupId", id)).take(n),
+        (n) => db.query("groupRollouts").withIndex("by_group", (q) => q.eq("groupId", id)).take(n),
+        (n) => db.query("groupConfigs").withIndex("by_group_version", (q) => q.eq("groupId", id)).take(n),
       ];
       for (const fetch of fetches) if (!(await drain(ctx, b, fetch))) return false;
       const roster = await db.query("groupRoster").withIndex("by_group", (q) => q.eq("groupId", id)).first();
@@ -441,6 +451,19 @@ async function sweepOrg(ctx: MutationCtx, orgId: Id<"organizations">, b: Budget)
     }
   }
 
+  // Phase 5 (Step 20b): broadcasts with their acknowledgements.
+  for (;;) {
+    if (b.left <= 0) return false;
+    const batch = await db.query("broadcasts").withIndex("by_org_created", (q) => q.eq("orgId", orgId)).take(PARENT_BATCH);
+    if (batch.length === 0) break;
+    for (const broadcast of batch) {
+      const id = broadcast._id;
+      const fetch: Fetch = (n) => db.query("broadcastAcks").withIndex("by_broadcast", (q) => q.eq("broadcastId", id)).take(n);
+      if (!(await drain(ctx, b, fetch))) return false;
+      await dropRow(ctx, b, id);
+    }
+  }
+
   // The rows that carry the organization id directly.
   const direct: Fetch[] = [
     (n) => db.query("installResults").withIndex("by_org_state_updated", (q) => q.eq("orgId", orgId)).take(n),
@@ -456,6 +479,16 @@ async function sweepOrg(ctx: MutationCtx, orgId: Id<"organizations">, b: Budget)
     (n) => db.query("orgPresence").withIndex("by_org_shard", (q) => q.eq("orgId", orgId)).take(n),
     (n) => db.query("deviceLiveness").withIndex("by_org", (q) => q.eq("orgId", orgId)).take(n),
     (n) => db.query("deviceStatus").withIndex("by_org_last_seen", (q) => q.eq("orgId", orgId)).take(n),
+    // Phase 5 (Step 20b). `drivers` is above; the per-PC rows went with the devices, the per-group rows with the groups.
+    (n) => db.query("wifiProfiles").withIndex("by_org", (q) => q.eq("orgId", orgId)).take(n),
+    (n) => db.query("printers").withIndex("by_org", (q) => q.eq("orgId", orgId)).take(n),
+    (n) => db.query("lockdownExceptions").withIndex("by_org_group", (q) => q.eq("orgId", orgId)).take(n),
+    (n) => db.query("lockdownFindings").withIndex("by_org_fingerprint", (q) => q.eq("orgId", orgId)).take(n),
+    (n) => db.query("orgSecurityDaily").withIndex("by_org_day", (q) => q.eq("orgId", orgId)).take(n),
+    (n) => db.query("orgKeys").withIndex("by_org_purpose_status", (q) => q.eq("orgId", orgId)).take(n),
+    (n) => db.query("deviceApplyReports").withIndex("by_org_config", (q) => q.eq("orgId", orgId)).take(n),
+    (n) => db.query("deviceSecurityDaily").withIndex("by_org_day", (q) => q.eq("orgId", orgId)).take(n),
+    (n) => db.query("deviceLocks").withIndex("by_org", (q) => q.eq("orgId", orgId)).take(n),
   ];
   for (const fetch of direct) if (!(await drain(ctx, b, fetch))) return false;
 
@@ -517,7 +550,9 @@ async function dropUser(ctx: MutationCtx, b: Budget, userId: Id<"users">): Promi
  * `{ done, deleted }` for this run; call it again (or wait) until `done`.
  * The organization row goes last, so an interrupted run resumes by itself.
  * Not removed (no index to find them by organization): the pruned-daily
- * `fleetChecks` rows and a group's older roster snapshots.
+ * `fleetChecks` rows and a group's older roster snapshots. Phase 5 tables (Step 20b): all are removed (wifiProfiles, printers,
+ * drivers, driverResults, deviceSealedSecrets, deviceApplyReports, deviceSecurityDaily, orgSecurityDaily, deviceLocks, lockdown*,
+ * groupLockdown / groupRollouts / groupConfigs, broadcasts and broadcastAcks, orgKeys).
  */
 export const deleteOrg = internalMutation({
   args: { orgId: v.id("organizations") },

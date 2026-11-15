@@ -2360,6 +2360,28 @@ Agent part; the server follow-ups are 20b.
   notifications (`connect_failed`), the cost of one pass on a 4 GB PC (the Windows folder scan
   and four event-log reads run on every pass), the ETW trace under the live reconciler.
 
+**Built (20b) 2026-11-15 (server and dashboard, not committed, no server or VM touched).**
+
+- The 10-group caps are gone. `snapshotGroupsBatched` (`lib/groupConfig.ts`) snapshots the first 10 groups in the call and
+  schedules `groupBatches:snapshotBatch` for the rest (10 per run; each snapshot ends in its own publish; batches read the
+  live rows, so they are idempotent and a later edit that lands first wins). Used by Wi-Fi, printers, drivers, the
+  passphrase, app edits and permissions, file types, icon, archive, retry. `lockdown:allow` does the first 10 groups in the
+  call and the rest in `groupBatches:allowBatch` (a group at the 200-exception cap is skipped there). Bounds: 100 groups per
+  Wi-Fi, printer, driver and Allow call (`invalid_argument` / `too_many`), 500 groups per catalogue edit (`too_large`).
+  The dashboard's "more than 10 groups" messages, the "groups touched" hint and `appErrors.ts` are removed.
+- `groups:remove` schedules `groupBatches:cleanupDeletedGroup`: drops the id from Wi-Fi, printers (also defaults) and
+  drivers (revisions are not bumped), deletes its rollout row, cancels its live broadcasts (rows stay as history), deletes
+  its exceptions and configurations, in bounded steps.
+- `driverResults` re-tag on move or revoke: the first 50 rows in the call, the rest by `stats:retagDriverResults`.
+- `testing:deleteOrg` removes every Phase 5 table (a test checks every table of the schema).
+- `wifiManagedOnlyConfirmed`: optional key of the group lockdown settings (never stored as false, dropped when managed
+  networks only is off), frozen in the configuration, published right after `wifiManagedOnly` (ring-gated); the Networks
+  card has the checkbox "I understand this PC may go offline". No Rust change was needed.
+- Checked: `reportApply` keeps `wifi_filters_error`, `connect_failed` and `restartPending`; ring health counts a
+  `rolledBack` report (lower `appliedVersion`) as a failure of the configuration it names. Both have tests.
+- Not done: a group deleted while a batch is queued is simply skipped; no hard "added" count for `lockdown:allow` batches
+  (it returns groups added now plus groups handed to a batch).
+
 ---
 
 ### Step 21 — VM run 1: apply, audit, enforce, rings, rollback, restore (the user runs it)
