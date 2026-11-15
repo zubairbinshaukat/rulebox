@@ -778,7 +778,7 @@ async fn the_loop_ticks_wakes_on_session_events_and_stops_on_shutdown() {
         simulate: false,
         gate: Arc::new(|| Gate { kiosk_enabled: true, staff_sid: Some(STAFF.to_string()) }),
     };
-    let join = tokio::spawn(run(deps, signals_rx, events_rx, shutdown.clone()));
+    let join = tokio::spawn(run(deps, signals_rx, events_rx, None, shutdown.clone()));
     let settle = || async {
         for _ in 0..20 {
             tokio::task::yield_now().await;

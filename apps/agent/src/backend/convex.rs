@@ -877,6 +877,8 @@ mod tests {
             compat: json!({}),
             trusted_key_ids: None,
             restart_pending: None,
+            security: None,
+            capabilities: None,
         };
         let args = report_args(&auth(), &ReportBatch { status: Some(status), ..ReportBatch::default() });
         assert_eq!(keys(&args), ["deviceId", "deviceSecret", "status"]);

@@ -73,6 +73,8 @@ pub fn sample_status() -> crate::backend::StatusReport {
         compat: serde_json::json!({}),
         trusted_key_ids: None,
         restart_pending: None,
+        security: None,
+        capabilities: None,
     }
 }
 

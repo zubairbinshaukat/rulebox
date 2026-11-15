@@ -85,6 +85,11 @@ pub struct AgentState {
     /// (never offline, never a revocation, never an admin exit). Unenrolling and enrolling clear it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub device_lock: Option<rulebox_policy::notice::DeviceLock>,
+    /// (Phase 5 Step 20) A service start type was changed or put back by the performance layer
+    /// and Windows has not restarted since: the change takes effect at the next start, so the
+    /// device reports `restartPending` until then (same mark as App Control's).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub perf_restart: Option<crate::lockdown::appcontrol::CiRestartMark>,
 }
 
 impl AgentState {
@@ -116,6 +121,7 @@ impl Default for AgentState {
             wlan_marks: std::collections::BTreeMap::new(),
             printer_marks: std::collections::BTreeMap::new(),
             device_lock: None,
+            perf_restart: None,
         }
     }
 }
@@ -322,6 +328,12 @@ impl StateStore {
         Ok(Self { path: dir.join("agent-state.json") })
     }
 
+    /// (Phase 5 Step 20) The store of an existing state directory, without creating anything:
+    /// `recover` and `lockdown-status` never make or repair the folder.
+    pub fn at(dir: &Path) -> Self {
+        Self { path: dir.join("agent-state.json") }
+    }
+
     /// Reads the state. A schema 1 file is migrated first, before anything else
     /// sees it: the old file is copied to `state.v1.json` (once; an existing copy is
     /// never overwritten) and only then replaced by the v2 file. If the copy cannot
@@ -415,6 +427,13 @@ impl SharedState {
     /// are changes, not drift).
     pub fn take_rewrites(&self) -> Vec<Rewrite> {
         std::mem::take(&mut lock(&self.drift).rewrites)
+    }
+
+    /// (Phase 5 Step 20) Drops the rewrite notes about `id`: the agent itself changes that value
+    /// back and forth (`AutoAdminLogon`: the admin exit, the exit hold, a Safe Mode boot), so
+    /// writing it again is not drift.
+    pub fn forget_rewrite(&self, id: &str) {
+        lock(&self.drift).rewrites.retain(|noted| noted.id != id);
     }
 
     /// (Phase 5 Step 17) `journal::change` put a tamper-protection item back (`id` is its

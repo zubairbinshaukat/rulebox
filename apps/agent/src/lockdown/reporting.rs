@@ -33,6 +33,7 @@ use super::daily::{next_day_start_ms, server_day, DailyCounters};
 use super::findings::Collector;
 use crate::backend::reports::{ApplyReport, LockdownCall};
 use crate::backend::{BackendError, BackendLink};
+use crate::network::sealkey::{self, SealPublic};
 use crate::paths::DataPaths;
 use crate::report::{backoff_delay, LONG_OUTAGE, OUTAGE_REPORT_JITTER_MS};
 use crate::state::{lock, read_json, write_atomic};
@@ -157,6 +158,12 @@ pub struct LockdownOutbox {
     pub daily: DailyCounters,
     /// The server day to send is due now because an apply report just went out.
     piggyback: bool,
+    /// (Step 20, plan 4.18) The device sealing key the server does not have yet: one
+    /// `registerSealKey` call, sent before anything else. In memory only: the runtime offers it
+    /// again after a restart until `AgentState.seal_key_registered` says the server has it.
+    seal_pending: Option<SealPublic>,
+    /// The key id the server just took; the runtime writes it into the agent state.
+    seal_done: Option<String>,
 }
 
 impl LockdownOutbox {
@@ -166,12 +173,29 @@ impl LockdownOutbox {
             collector: Collector::open(paths.findings(), paths.findings_state())?,
             daily: DailyCounters::open(paths.security_daily())?,
             piggyback: false,
+            seal_pending: None,
+            seal_done: None,
         })
+    }
+
+    /// (Step 20) The sealing key to register (`None`: the server has it). Offering the same key
+    /// twice changes nothing.
+    pub fn offer_seal_key(&mut self, key: Option<SealPublic>) {
+        self.seal_pending = key;
+    }
+
+    /// The id of a key the server took since the last call.
+    pub fn take_seal_registered(&mut self) -> Option<String> {
+        self.seal_done.take()
     }
 
     /// The next call that is due, or `None`. `heartbeat`: the PC is talking to the server anyway
     /// (a ping went out), so a finished day may ride along.
     pub fn next_call(&mut self, now_ms: u64, offset: Option<i64>, heartbeat: bool) -> Option<LockdownCall> {
+        // The key first: without it the server cannot seal a Wi-Fi passphrase to this PC.
+        if let Some(call) = self.seal_pending.as_ref().and_then(|key| sealkey::pending_registration(None, key)) {
+            return Some(call);
+        }
         if self.apply.due_at().is_some_and(|due| due <= now_ms) {
             return self.apply.pending().cloned().map(|report| LockdownCall::Apply(Box::new(report)));
         }
@@ -196,7 +220,8 @@ impl LockdownOutbox {
     pub fn next_wakeup(&self, now_ms: u64, offset: Option<i64>) -> Option<u64> {
         let day = server_day(now_ms, offset);
         let findings = self.collector.store.flush_due(now_ms, &day, next_day_start_ms(now_ms, offset));
-        [self.apply.due_at(), findings].into_iter().flatten().min()
+        let seal = self.seal_pending.as_ref().map(|_| now_ms);
+        [self.apply.due_at(), findings, seal].into_iter().flatten().min()
     }
 
     /// The server took `call`.
@@ -212,8 +237,12 @@ impl LockdownOutbox {
                 self.collector.store.mark_reported(&ids, now_ms, &server_day(now_ms, offset));
                 self.collector.save();
             }
-            // The key registration is recorded by whoever sends it (`AgentState.seal_key_registered`).
-            LockdownCall::RegisterSealKey { .. } => {}
+            // The runtime records the key id in `AgentState.seal_key_registered` at its next pass.
+            LockdownCall::RegisterSealKey { public_key } => {
+                if self.seal_pending.as_ref().is_some_and(|key| key.public_b64 == *public_key) {
+                    self.seal_done = self.seal_pending.take().map(|key| key.key_id);
+                }
+            }
             // (Step 15) The acknowledgement queue marks its own records sent (`notice::run_ack_sender`).
             LockdownCall::Acks(_) => {}
             LockdownCall::SecurityDaily(summary) => {
@@ -232,9 +261,14 @@ impl LockdownOutbox {
 
     /// Unenroll: the reports belong to the organization the PC is leaving.
     pub fn clear(&mut self) -> std::io::Result<()> {
-        self.apply.clear()?;
-        self.collector.clear()?;
-        self.daily.clear()
+        self.seal_pending = None;
+        self.seal_done = None;
+        self.piggyback = false;
+        // Every part is cleared even when an earlier one failed; the first error is the answer.
+        let apply = self.apply.clear();
+        let findings = self.collector.clear();
+        let daily = self.daily.clear();
+        apply.and(findings).and(daily)
     }
 }
 
@@ -247,11 +281,25 @@ pub struct LockdownReporter {
     wake: Notify,
     heartbeat: AtomicBool,
     now_ms: Arc<dyn Fn() -> u64 + Send + Sync>,
+    /// (Step 20) Called each time the server took an apply report: the broadcast
+    /// acknowledgements ride along (`NoticeHub::flush_acks_now`).
+    on_apply_sent: Mutex<Option<Arc<dyn Fn() + Send + Sync>>>,
 }
 
 impl LockdownReporter {
     pub fn new(outbox: LockdownOutbox, now_ms: Arc<dyn Fn() -> u64 + Send + Sync>) -> Arc<Self> {
-        Arc::new(Self { outbox: Mutex::new(outbox), wake: Notify::new(), heartbeat: AtomicBool::new(false), now_ms })
+        Arc::new(Self {
+            outbox: Mutex::new(outbox),
+            wake: Notify::new(),
+            heartbeat: AtomicBool::new(false),
+            now_ms,
+            on_apply_sent: Mutex::new(None),
+        })
+    }
+
+    /// (Step 20) What runs when an apply report was delivered.
+    pub fn set_on_apply_sent(&self, hook: Arc<dyn Fn() + Send + Sync>) {
+        *lock(&self.on_apply_sent) = Some(hook);
     }
 
     /// An apply finished (or was refused, or rolled back): offer its report.
@@ -366,6 +414,12 @@ pub async fn run_lockdown_reporter(
                     retry_at = None;
                     let now_ms = (reporter.now_ms)();
                     lock(&reporter.outbox).delivered(&call, now_ms, offset);
+                    if matches!(call, LockdownCall::Apply(_)) {
+                        let hook = lock(&reporter.on_apply_sent).clone();
+                        if let Some(hook) = hook {
+                            hook();
+                        }
+                    }
                 }
                 Err(error) => {
                     failures = failures.saturating_add(1);

@@ -631,6 +631,14 @@ impl Platform for WindowsPlatform {
         wlan::list().map_err(map_err)
     }
 
+    fn wlan_current_ssid(&self) -> Result<Option<String>, PlatformError> {
+        wlan::current_ssid().map_err(map_err)
+    }
+
+    fn wlan_last_connect_failures(&self) -> Result<Vec<String>, PlatformError> {
+        wlan::last_connect_failures().map_err(map_err)
+    }
+
     fn printer_list(&self) -> Result<Vec<PrinterInfo>, PlatformError> {
         printing::list().map_err(map_err)
     }

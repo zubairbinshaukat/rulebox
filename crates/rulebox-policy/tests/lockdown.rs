@@ -268,3 +268,18 @@ fn seal_vectors_open_and_a_box_for_another_device_does_not() {
         assert!(got.is_err(), "{} must not open", case["name"]);
     }
 }
+
+/// (Phase 5 Step 20, plan 4.15) The administrator's "this PC may go offline" confirmation: an
+/// optional key after `wifiManagedOnly`, absent in every document made before it existed.
+#[test]
+fn the_managed_only_confirmation_is_optional_and_false_when_absent() {
+    let absent = AgentDoc::from_doc(&serde_json::json!({ "wifiManagedOnly": true })).unwrap();
+    assert!(absent.wifi_managed_only && !absent.wifi_managed_only_confirmed);
+    let confirmed =
+        AgentDoc::from_doc(&serde_json::json!({ "wifiManagedOnly": true, "wifiManagedOnlyConfirmed": true })).unwrap();
+    assert!(confirmed.wifi_managed_only_confirmed);
+    // A document without it serializes without it (older vectors stay byte for byte).
+    let json = serde_json::to_value(&absent).unwrap();
+    assert!(json.get("wifiManagedOnlyConfirmed").is_none());
+    assert_eq!(serde_json::to_value(&confirmed).unwrap()["wifiManagedOnlyConfirmed"], true);
+}

@@ -68,6 +68,13 @@ pub struct ReportQueue {
     last_status: Mutex<Option<String>>,
     /// (Step 14) An installer asked for a restart since the last boot.
     restart_pending: Mutex<bool>,
+    /// (Phase 5 Step 20) A lockdown layer waits for a restart (App Control, AppLocker, a service
+    /// start type). Its own flag: the install engine sets and clears `restart_pending` by itself.
+    lockdown_restart_pending: Mutex<bool>,
+    /// (Phase 5 Step 20) The physical-protection report of the last lockdown pass, and the
+    /// agent's capabilities.
+    security: Mutex<Option<serde_json::Value>>,
+    capabilities: Mutex<Option<Vec<String>>>,
     install_ack: Mutex<Option<InstallAck>>,
     wake: Notify,
 }
@@ -80,6 +87,9 @@ impl ReportQueue {
             status_source: Mutex::new(None),
             last_status: Mutex::new(None),
             restart_pending: Mutex::new(false),
+            lockdown_restart_pending: Mutex::new(false),
+            security: Mutex::new(None),
+            capabilities: Mutex::new(None),
             install_ack: Mutex::new(None),
             wake: Notify::new(),
         })
@@ -96,7 +106,37 @@ impl ReportQueue {
     /// (Step 14) The status field: `Some(true)` while a restart is pending, else
     /// left out (an absent field clears the stored value).
     pub fn restart_pending(&self) -> Option<bool> {
-        (*lock(&self.restart_pending)).then_some(true)
+        (*lock(&self.restart_pending) || *lock(&self.lockdown_restart_pending)).then_some(true)
+    }
+
+    /// (Phase 5 Step 20) A lockdown layer waits for a restart, or no longer does.
+    pub fn set_lockdown_restart_pending(&self, pending: bool) {
+        let changed = std::mem::replace(&mut *lock(&self.lockdown_restart_pending), pending) != pending;
+        if changed {
+            self.wake.notify_one();
+        }
+    }
+
+    /// (Phase 5 Step 20) The security posture for the next status (a change wakes the task).
+    pub fn set_security(&self, security: Option<serde_json::Value>) {
+        let mut current = lock(&self.security);
+        if *current != security {
+            *current = security;
+            self.wake.notify_one();
+        }
+    }
+
+    pub fn security(&self) -> Option<serde_json::Value> {
+        lock(&self.security).clone()
+    }
+
+    /// (Phase 5 Step 20) What this agent can do (`lockdown/1`).
+    pub fn set_capabilities(&self, capabilities: Vec<String>) {
+        *lock(&self.capabilities) = Some(capabilities);
+    }
+
+    pub fn capabilities(&self) -> Option<Vec<String>> {
+        lock(&self.capabilities).clone()
     }
 
     /// (Step 14) Where accepted install results are confirmed.

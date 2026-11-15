@@ -15,8 +15,9 @@
 //! * An item the document no longer lists, a printer whose revision changed (rebuilt) and the default when no printer is
 //!   default any more are restored through the journal.
 //!
-//! The states are `applied | failed`; `detail` is a fixed code, never Windows text. Not reached by the reconciler until
-//! Step 20.
+//! The states are `applied | failed`; `detail` is a fixed code, never Windows text. The lockdown runtime (Step 20) runs
+//! this on every reconcile pass, and again right after the install engine finished a driver job, so a printer that
+//! waited for a delivered driver (`driver_missing`) is created as soon as the driver is in the store.
 
 use std::net::{Ipv4Addr, Ipv6Addr};
 use std::str::FromStr;

@@ -179,6 +179,11 @@ fn check_network(doc: &AgentDoc, facts: &Facts) -> Result<(), Refusal> {
     if doc.wifi.is_empty() {
         return Err(Refusal::ManagedNetworksEmpty);
     }
+    // (Step 20) The administrator confirmed "this PC will go offline until it sees a managed
+    // network" (plan 4.15, edge case 34): the second refusal is lifted, never the first.
+    if doc.wifi_managed_only_confirmed {
+        return Ok(());
+    }
     if let Some(current) = &facts.current_ssid {
         if !doc.wifi.iter().any(|profile| profile.ssid == *current) {
             return Err(Refusal::WouldDisconnect);

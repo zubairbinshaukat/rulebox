@@ -80,6 +80,13 @@ pub enum Command {
         #[arg(long)]
         json: bool,
     },
+    /// (Phase 5) Read-only: the lockdown as the document asks for it against what the service
+    /// reported and what is on this PC now, the invariant self-check, the journal and the
+    /// posture. Needs an elevated prompt; changes nothing.
+    LockdownStatus {
+        #[arg(long)]
+        json: bool,
+    },
     /// (1.1) Hash an exit PIN: reads one line (6 to 12 digits) from standard input and
     /// prints the Argon2id hash. Touches no file, pipe or registry key.
     HashPin,
@@ -198,6 +205,8 @@ mod tests {
         assert_eq!(parse(&["recover"]), Command::Recover { yes: false });
         assert_eq!(parse(&["recover", "--yes"]), Command::Recover { yes: true });
         assert_eq!(parse(&["compat", "--json"]), Command::Compat { json: true });
+        assert_eq!(parse(&["lockdown-status"]), Command::LockdownStatus { json: false });
+        assert_eq!(parse(&["lockdown-status", "--json"]), Command::LockdownStatus { json: true });
         assert_eq!(parse(&["hash-pin"]), Command::HashPin);
     }
 

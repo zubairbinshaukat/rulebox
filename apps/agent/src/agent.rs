@@ -39,9 +39,12 @@ use crate::ipc_admin::{self, AdminPipe, WithStatusExtra};
 use crate::ipc_shell::{self, ShellBroadcast, ShellExtension, ShellPipe, ShellSignal};
 use crate::kiosk::{kiosk_status, spawn_reconciler, ReconcilerDeps};
 use crate::kiosk_control::KioskControl;
-use crate::lockdown::daily::DailyCounters;
+use crate::lockdown::lkg::{LkgMonitor, ShellHealthSink};
+use crate::lockdown::procwatch::BlockedProgram;
+use crate::lockdown::reporting::{run_lockdown_reporter, LockdownOutbox, LockdownReporter};
+use crate::lockdown::runtime::{LockdownRuntime, RuntimeDeps};
 use crate::lockout::LockoutStore;
-use crate::notice::{run_ack_sender, run_notices, AckQueue, DailyDenials, DenialSink, NoticeExtension, NoticeHub};
+use crate::notice::{run_ack_sender, run_notices, AckQueue, DenialSink, NoticeExtension, NoticeHub};
 use crate::paths::{DataPaths, InstallPaths};
 use crate::platform::{Platform, ShellMechanism};
 use crate::session::{SessionDeps, SessionManager, SessionTimeouts};
@@ -470,6 +473,31 @@ pub async fn run(
         now_ms: Arc::clone(&now_ms),
     });
 
+    // (Phase 5 Step 20) The lockdown runtime: the layers, the process watch, the last-known-good
+    // monitor and the reports, driven by the reconciler below. The demo world has no lockdown.
+    let lockdown: Option<Arc<LockdownRuntime>> = if deps.sim.demo {
+        None
+    } else {
+        let outbox = LockdownOutbox::open(&deps.paths).context("open the lockdown report files")?;
+        let lkg = Arc::new(LkgMonitor::open_in(&deps.paths).context("open lkg.json")?);
+        let blocked = broadcast.clone();
+        Some(LockdownRuntime::new(RuntimeDeps {
+            platform: Arc::clone(&deps.platform),
+            shared: Arc::clone(&shared),
+            paths: deps.paths.clone(),
+            install: deps.install.clone(),
+            admin_signin_verified: deps.config.admin_signin_verified,
+            reporter: LockdownReporter::new(outbox, Arc::clone(&now_ms)),
+            lkg,
+            audit: Arc::clone(&audit),
+            report: Arc::clone(&report),
+            snapshot: snapshot_handle.clone(),
+            now_ms: Arc::clone(&now_ms),
+            // program.blocked: the process watch says it once per program per session.
+            on_blocked: Some(Arc::new(move |program: BlockedProgram| blocked.program_blocked(&program.display_name))),
+        }))
+    };
+
     // The kiosk reconciler (Step 9): the only task that changes the machine. It is
     // the `KioskControl` of the backend task and the enrollment flow, and the
     // receiver of the exit requests.
@@ -486,6 +514,7 @@ pub async fn run(
             simulate: deps.simulate,
             staff_sid_tx,
             recovered_flag: deps.paths.recovered_flag(),
+            lockdown: lockdown.clone(),
         },
         exit_rx,
         shutdown.clone(),
@@ -509,6 +538,7 @@ pub async fn run(
         link: Arc::clone(&link),
         report: Arc::clone(&report),
         roster_tx,
+        lockdown: lockdown.clone(),
     });
     let runner = BackendRunner::new(Arc::clone(&task_ctx), shutdown.clone());
     let enroller = Arc::new(Enroller::new(EnrollDeps {
@@ -562,6 +592,11 @@ pub async fn run(
                 // A tile appeared or went: recompute the employee's apps
                 // (`apps.changed` when they differ).
                 on_visible_change: Arc::new(move || session_for_installs.resync()),
+                // (Phase 5 Step 20) A printer may have waited for this driver (`driver_missing`).
+                on_driver_change: {
+                    let reconciler = reconciler.clone();
+                    Arc::new(move || reconciler.lockdown_changed())
+                },
                 install_timeout: INSTALL_TIMEOUT,
                 exe_wait: EXE_WAIT,
                 shared: Arc::clone(&shared),
@@ -611,19 +646,29 @@ pub async fn run(
     tasks.spawn(run_session_events(session_events_rx, broadcast.clone(), shutdown.clone()));
     // (Phase 5 Step 12) The broadcast list of the snapshot, the acknowledgement queue and the
     // events of protocol 1.3. The denial counters of the Staff App go to the daily security
-    // counters (the demo world has none). Sending them is the reporter's job (Step 20).
+    // counters (the demo world has none): they live in the lockdown reporter's outbox, which
+    // sends a finished day and forgets everything on unenroll (Step 20).
     let notice_hub = NoticeHub::new(
         AckQueue::open(deps.paths.broadcast_acks()).context("open broadcast-acks.json")?,
         snapshot_handle.clone(),
         broadcast.clone(),
         Arc::clone(&now_ms),
     );
-    let denial_sink: Option<Arc<dyn DenialSink>> = if deps.sim.demo {
-        None
-    } else {
-        let counters = DailyCounters::open(deps.paths.security_daily()).context("open security-daily.json")?;
-        Some(Arc::new(DailyDenials::new(counters)))
-    };
+    let denial_sink: Option<Arc<dyn DenialSink>> =
+        lockdown.as_ref().map(|runtime| Arc::clone(runtime.reporter()) as Arc<dyn DenialSink>);
+    // (Step 20) The lockdown reports (apply, findings, daily counters, the sealing key). When an
+    // apply report went out, the waiting broadcast acknowledgements ride along.
+    if let Some(runtime) = &lockdown {
+        let hub = Arc::clone(&notice_hub);
+        runtime.reporter().set_on_apply_sent(Arc::new(move || hub.flush_acks_now()));
+        tasks.spawn(run_lockdown_reporter(
+            Arc::clone(runtime.reporter()),
+            Arc::clone(&link),
+            snapshot_rx.clone(),
+            Arc::new(os_jitter),
+            shutdown.clone(),
+        ));
+    }
     let notice_extension = NoticeExtension::new(
         Arc::clone(&notice_hub),
         notice_ext_policy_rx,
@@ -667,6 +712,8 @@ pub async fn run(
         },
         signals_rx,
         watchdog_events,
+        // (Phase 5 Step 20) Heartbeats, crashes and the Staff session feed the probation.
+        lockdown.as_ref().map(|runtime| Arc::clone(runtime.lkg()) as Arc<dyn ShellHealthSink>),
         shutdown.clone(),
     ));
     tasks.spawn(ipc_shell::run_pipe(

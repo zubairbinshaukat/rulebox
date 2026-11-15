@@ -2,8 +2,9 @@
 //! The private half lives only in `Secrets` (DPAPI machine scope on Windows); the public half
 //! goes to the server once (`deviceApi:registerSealKey`), which seals Wi-Fi passphrases to it.
 //!
-//! Nothing here logs a key. The reconciler (Step 20) calls [`ensure`] at start and sends
-//! [`pending_registration`]'s call, then records the key id in `AgentState.seal_key_registered`.
+//! Nothing here logs a key. The lockdown runtime (Step 20) calls [`ensure`] on every pass, offers
+//! the key to the reporter until the server took it (`LockdownOutbox::offer_seal_key`), and then
+//! records the key id in `AgentState.seal_key_registered`.
 
 use base64::engine::general_purpose::STANDARD;
 use base64::Engine as _;

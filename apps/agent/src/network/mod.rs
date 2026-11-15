@@ -1,10 +1,10 @@
 //! Wi-Fi (Phase 5 Step 13, plan 4.15 and 4.18): the device sealing key, the profile XML
 //! writer and the apply of the document's `wifi` / `wifiManagedOnly` keys; printers (Step 14).
 //!
-//! Not wired into the reconciler yet (Step 20 does that); the apply is reached through
-//! `lockdown::apply`, which runs it in `Layer::Wifi`, and the sealing key registration is a
-//! pure "is a call due" decision the reconciler will use. Printers live beside `wifi`
-//! in this module and run in `Layer::Printers`.
+//! The apply is reached through `lockdown::apply`, which runs it in `Layer::Wifi`; since Step 20
+//! the lockdown runtime (`lockdown::runtime`) calls that on every reconcile pass, creates the
+//! sealing key and offers its registration to the reporter. Printers live beside `wifi` in this
+//! module and run in `Layer::Printers`. Some helpers are read by the tests only.
 #![allow(dead_code)]
 
 use zeroize::{Zeroize, Zeroizing};

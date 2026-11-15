@@ -1,7 +1,8 @@
 //! (Phase 5 Step 9, plan 4.11 and 4.19) The payloads of the lockdown device reports and
 //! the arguments they become. Step 10 writes the Convex functions that receive them
 //! (`deviceApi:reportApply`, `reportFindings`, `reportSecurityDaily`); the agent side is
-//! complete without them, and nothing sends these calls until Step 20 wires the reconciler.
+//! complete without them. Since Step 20 the lockdown runtime offers them and
+//! `lockdown::reporting::run_lockdown_reporter` sends them.
 //!
 //! Every field is a number, a fixed code or a hash. **No path, window title, command
 //! line, document name or URL ever appears here** (plan rule 6); `findings` carries the

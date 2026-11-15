@@ -151,6 +151,12 @@ impl DataPaths {
         self.state_dir().join("apply-report.json")
     }
 
+    /// (Phase 5 Step 20) What the last lockdown pass did (version, layer states, Wi-Fi and
+    /// printer states): `rulebox-agent lockdown-status` reads it, nothing else does.
+    pub fn lockdown_last(&self) -> PathBuf {
+        self.state_dir().join("lockdown-last.json")
+    }
+
     /// (1.1) Audit records the backend has not accepted yet.
     pub fn audit_queue(&self) -> PathBuf {
         self.state_dir().join("audit-queue.json")

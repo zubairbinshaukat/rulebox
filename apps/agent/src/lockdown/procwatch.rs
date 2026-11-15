@@ -980,7 +980,7 @@ fn run(engine: &Engine, rx: &Receiver<Msg>, source: Source, stopping: &AtomicBoo
 
 // ---------------------------------------------------------------- the layer
 
-/// Holds the running watch between applies (the reconciler of Step 20 owns one). `apply` starts,
+/// Holds the running watch between applies (the lockdown runtime owns one, Step 20). `apply` starts,
 /// restarts or stops the watch to match the document and returns the layer's state.
 pub struct ProcWatchHost {
     platform: Arc<dyn Platform>,

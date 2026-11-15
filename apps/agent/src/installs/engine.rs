@@ -501,6 +501,9 @@ pub struct EngineDeps {
     /// A desktop app became visible or hidden, or an icon arrived: the session
     /// recomputes the signed-in employee's apps (and sends `apps.changed`).
     pub on_visible_change: Arc<dyn Fn() + Send + Sync>,
+    /// (Phase 5 Step 20) A driver job ended (installed, removed or failed): the reconciler applies
+    /// the printers again, so one that waited for a delivered driver (`driver_missing`) is created.
+    pub on_driver_change: Arc<dyn Fn() + Send + Sync>,
     pub install_timeout: Duration,
     /// After a successful install the program must exist within this long.
     pub exe_wait: Duration,

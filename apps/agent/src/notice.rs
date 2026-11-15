@@ -47,7 +47,9 @@ use crate::backend::reports::LockdownCall;
 use crate::backend::{BackendError, BackendLink};
 use crate::ipc_conn::{rpc_error, PeerCtx};
 use crate::ipc_shell::{ShellBroadcast, ShellExtension};
-use crate::lockdown::daily::{server_day, DailyCounters};
+use crate::lockdown::daily::server_day;
+#[cfg(test)]
+use crate::lockdown::daily::DailyCounters;
 use crate::report::backoff_delay;
 use crate::state::{lock, read_json, write_atomic, SnapshotHandle};
 
@@ -393,7 +395,6 @@ impl NoticeHub {
 
     /// An apply report is going out (Step 20 calls this when it sends one): the waiting acknowledgements
     /// ride along instead of waiting for [`ACK_FLUSH_AFTER`].
-    #[allow(dead_code)] // Step 20 calls it where the reconciler sends an apply report
     pub fn flush_acks_now(&self) {
         self.flush_requested.store(true, Ordering::SeqCst);
         self.ack_wake.notify_one();
@@ -533,16 +534,20 @@ pub trait DenialSink: Send + Sync + 'static {
     fn add(&self, day: &str, app_id: &str, kind: &str, count: u64);
 }
 
-/// The daily counters of `lockdown::daily` behind a lock (`security-daily.json`). Step 20 moves the
-/// counters into the `LockdownReporter`, which implements [`DenialSink`] too.
+/// The daily counters of `lockdown::daily` behind a lock (`security-daily.json`). Since Step 20
+/// the live agent's sink is the `LockdownReporter` (one owner of the file, cleared on unenroll);
+/// this one stays for the tests of the counting itself.
+#[cfg(test)]
 pub struct DailyDenials(Mutex<DailyCounters>);
 
+#[cfg(test)]
 impl DailyDenials {
     pub fn new(counters: DailyCounters) -> Self {
         Self(Mutex::new(counters))
     }
 }
 
+#[cfg(test)]
 impl DenialSink for DailyDenials {
     fn add(&self, day: &str, app_id: &str, kind: &str, count: u64) {
         let mut counters = lock(&self.0);

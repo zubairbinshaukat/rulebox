@@ -388,3 +388,43 @@ async fn the_wifi_and_printer_states_are_part_of_the_hash() {
     assert_eq!(rig.calls().len(), 2);
     rig.stop().await;
 }
+
+// ---------------------------------------------------------------- Step 20
+
+#[tokio::test(start_paused = true)]
+async fn a_delivered_apply_report_flushes_the_acknowledgements_and_nothing_else_does() {
+    let rig = rig();
+    let flushed = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    {
+        let flushed = Arc::clone(&flushed);
+        rig.reporter.set_on_apply_sent(Arc::new(move || {
+            flushed.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        }));
+    }
+    settle().await;
+    rig.reporter.heartbeat();
+    rig.after(5).await;
+    assert_eq!(flushed.load(std::sync::atomic::Ordering::SeqCst), 0, "no apply report went out");
+    rig.reporter.offer_apply(apply_report(3));
+    rig.after(31).await;
+    assert_eq!(rig.calls().len(), 1);
+    assert_eq!(flushed.load(std::sync::atomic::Ordering::SeqCst), 1, "once per delivered apply report");
+    rig.stop().await;
+}
+
+#[tokio::test(start_paused = true)]
+async fn the_sealing_key_is_registered_first_and_only_once() {
+    use crate::network::sealkey::SealPublic;
+    let rig = rig();
+    settle().await;
+    let key = SealPublic { public_b64: "AAAA".into(), key_id: "d280093620494f96".into() };
+    rig.reporter.with_outbox(|outbox| outbox.offer_seal_key(Some(key.clone())));
+    rig.after(1).await;
+    assert_eq!(rig.calls(), [LockdownCall::RegisterSealKey { public_key: "AAAA".into() }]);
+    assert_eq!(rig.reporter.with_outbox(|outbox| outbox.take_seal_registered()).as_deref(), Some("d280093620494f96"));
+    // Taken once; nothing is left to send, however long we wait.
+    assert_eq!(rig.reporter.with_outbox(|outbox| outbox.take_seal_registered()), None);
+    rig.after(48 * 3_600).await;
+    assert_eq!(rig.calls().len(), 1);
+    rig.stop().await;
+}

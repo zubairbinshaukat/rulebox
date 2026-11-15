@@ -881,6 +881,7 @@ impl RecRig {
             simulate,
             staff_sid_tx: sid_tx,
             recovered_flag: state_dir.join("recovered.flag"),
+            lockdown: None,
         });
         Self { rig, rec, snapshot, session, audit, events, sid_rx }
     }
@@ -1506,6 +1507,7 @@ async fn the_handle_reconciles_on_request_and_holds_the_kiosk_off_after_a_disabl
             simulate: false,
             staff_sid_tx: sid_tx,
             recovered_flag: rig.dir.path().join("state").join("recovered.flag"),
+            lockdown: None,
         },
         exit_rx,
         shutdown.clone(),
@@ -1562,4 +1564,143 @@ async fn a_session_event_does_not_undo_a_disable_until_a_new_document_arrives() 
 
     r.trigger(Trigger::DesiredChanged).await;
     assert_eq!(r.state().kiosk.applied, KioskApplied::Enabled);
+}
+
+// -- the lockdown layers (Phase 5 Step 20) ---------------------------------------------------------------
+
+mod lockdown_wiring {
+    use super::*;
+    use crate::agent::CachedDesired;
+    use crate::lockdown::lkg::LkgMonitor;
+    use crate::lockdown::reporting::{LockdownOutbox, LockdownReporter};
+    use crate::lockdown::runtime::{LastPass, LockdownRuntime, RuntimeDeps};
+    use crate::paths::DataPaths;
+    use crate::report::ReportQueue;
+    use crate::testutil::signing::{envelope, test_key, trusted_of};
+
+    const NOW: u64 = 1_760_000_000_000;
+
+    struct LockRig {
+        r: RecRig,
+        paths: DataPaths,
+        runtime: Arc<LockdownRuntime>,
+    }
+
+    fn lock_rig() -> LockRig {
+        let mut r = RecRig::new();
+        let paths = DataPaths::new(r.rig.dir.path().to_path_buf());
+        r.rig.shared.update(|state| state.trusted_keys = vec![trusted_of(&test_key())]).unwrap();
+        let now: Arc<dyn Fn() -> u64 + Send + Sync> = Arc::new(|| NOW);
+        let platform: Arc<dyn Platform> = r.rig.platform.clone();
+        let runtime = LockdownRuntime::new(RuntimeDeps {
+            platform,
+            shared: Arc::clone(&r.rig.shared),
+            paths: paths.clone(),
+            install: r.rig.install.clone(),
+            admin_signin_verified: true,
+            reporter: LockdownReporter::new(LockdownOutbox::open(&paths).unwrap(), Arc::clone(&now)),
+            lkg: Arc::new(LkgMonitor::open_in(&paths).unwrap()),
+            audit: Arc::clone(&r.audit),
+            report: ReportQueue::new(Arc::clone(&r.audit)),
+            snapshot: r.snapshot.clone(),
+            now_ms: now,
+            on_blocked: None,
+        });
+        r.rec.d.lockdown = Some(Arc::clone(&runtime));
+        LockRig { r, paths, runtime }
+    }
+
+    impl LockRig {
+        /// The backend task accepted a signed document: cached, then shown in the snapshot.
+        fn accept(&self, version: u64, mut doc: serde_json::Value) {
+            let enrollment = self.r.state().enrollment.unwrap();
+            doc["version"] = serde_json::json!(version);
+            let signed = envelope(&test_key(), &enrollment.org_id, &enrollment.device_id, version, &doc);
+            std::fs::write(self.paths.desired_state(), serde_json::to_vec(&CachedDesired::from_envelope(&signed)).unwrap()).unwrap();
+            self.r.want(true, version);
+        }
+
+        fn journal_has(&self, prefix: &str) -> bool {
+            self.r.state().journal.iter().any(|entry| entry.id.starts_with(prefix))
+        }
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn the_layers_are_applied_after_the_kiosk_and_everything_goes_with_unenroll() {
+        let mut l = lock_rig();
+        l.accept(
+            5,
+            serde_json::json!({
+                "lockdown": { "usb": { "storage": "block" }, "appControl": { "mode": "off" } },
+                "usbTempAllow": { "untilMs": NOW + 3_600_000 }
+            }),
+        );
+        l.r.trigger(Trigger::DesiredChanged).await;
+        assert_eq!(l.r.state().kiosk.applied, KioskApplied::Enabled);
+        assert!(l.journal_has("staff:"), "L1 was applied by the reconciler");
+        assert!(l.journal_has("svc-sec:"), "tamper protection too");
+        let last = LastPass::read(&l.paths).expect("the pass was recorded");
+        assert_eq!(last.version, 5);
+        // The reconciler's own timer stands at the end of the temporary USB allow (no polling).
+        let timer = l.r.rec.lockdown_at().expect("a timer for the end of the allow");
+        let wait = timer.saturating_duration_since(Instant::now());
+        assert!(wait >= Duration::from_secs(3_600) && wait < Duration::from_secs(3_602), "{wait:?}");
+        assert_eq!(l.r.rec.next_deadline(), Some(timer));
+
+        // A delivered driver landed: one more pass, nothing else.
+        let before = l.r.rig.all_calls().len();
+        l.r.trigger(Trigger::Lockdown).await;
+        assert!(l.r.rig.mutating_since(before).is_empty(), "an unchanged document writes nothing again");
+
+        // `unenroll`: Disable restores the whole journal and the runtime forgets the organization.
+        let (reply, answer) = oneshot::channel();
+        l.r.trigger(Trigger::Disable(reply)).await;
+        answer.await.unwrap().unwrap();
+        assert!(l.r.state().journal.is_empty(), "{:?}", l.r.state().journal);
+        assert_eq!(l.r.rec.lockdown_at(), None);
+        for file in [l.paths.lkg(), l.paths.lockdown_last(), l.paths.apply_report(), l.paths.security_daily()] {
+            assert!(!file.exists(), "{} was left behind", file.display());
+        }
+        assert_eq!(l.runtime.lkg().candidate_version(), None);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_document_that_turns_the_kiosk_off_restores_the_layers_and_reports_them_off() {
+        let mut l = lock_rig();
+        l.accept(5, serde_json::json!({ "lockdown": { "appControl": { "mode": "off" } } }));
+        l.r.trigger(Trigger::DesiredChanged).await;
+        assert!(l.journal_has("staff:"));
+        l.accept(6, serde_json::json!({ "lockdown": { "appControl": { "mode": "off" } } }));
+        l.r.want(false, 6);
+        l.r.trigger(Trigger::DesiredChanged).await;
+        assert_eq!(l.r.state().kiosk.applied, KioskApplied::Disabled);
+        assert!(l.r.state().journal.is_empty());
+        let last = LastPass::read(&l.paths).unwrap();
+        assert_eq!((last.version, last.layers), (6, crate::lockdown::LayerStates::all_off()));
+    }
+    #[tokio::test(start_paused = true)]
+    async fn a_staff_session_in_a_safe_mode_boot_is_signed_out_and_audited_and_an_admin_is_left_alone() {
+        let mut l = lock_rig();
+        l.accept(5, serde_json::json!({ "lockdown": { "appControl": { "mode": "off" } } }));
+        l.r.trigger(Trigger::DesiredChanged).await;
+        let staff_sid = l.r.rig.staff_sid();
+        l.r.rig.platform.add_session(3, Some(&staff_sid), true);
+        l.r.rig.platform.add_session(4, Some("S-1-5-21-1000-2000-3000-1001"), true);
+
+        // A normal boot: nothing happens to the Staff session.
+        let audits = l.r.audit.queued();
+        l.r.trigger(Trigger::Session).await;
+        assert_eq!(l.r.rig.count(SimOp::LogoffSession), 0);
+
+        // Safe Mode (Minimal): the Staff session goes, the administrator's stays, one audit record.
+        l.r.rig.set(r"SYSTEM\CurrentControlSet\Control\SafeBoot\Option", "OptionValue", RegData::Dword(1));
+        l.r.trigger(Trigger::Session).await;
+        assert_eq!(l.r.rig.count(SimOp::LogoffSession), 1);
+        let left: Vec<u32> = l.r.rig.platform.with_world(|w| w.sessions.iter().map(|s| s.id).collect());
+        assert_eq!(left, [4], "only the Staff session was signed out");
+        assert_eq!(l.r.audit.queued(), audits + 1, "device.safeModeBlocked");
+        // Nothing left to sign out: no second record.
+        l.r.trigger(Trigger::Session).await;
+        assert_eq!(l.r.audit.queued(), audits + 1);
+    }
 }

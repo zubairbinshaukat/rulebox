@@ -157,6 +157,11 @@ fn dispatch(cli: Cli) -> anyhow::Result<u8> {
             &mut std::io::stderr().lock(),
         )),
         Command::Compat { json } => run_compat(json, &mut std::io::stdout().lock()),
+        // (Phase 5 Step 20) Read-only, like `compat`: no logging, no pipe, nothing written.
+        Command::LockdownStatus { json } => {
+            logging::init_stderr_only();
+            Ok(lockdown::status::run(json, &mut std::io::stdout().lock(), &mut std::io::stderr().lock()))
+        }
         Command::HashPin => Ok(hash_pin(
             &mut std::io::stdin().lock(),
             &mut std::io::stdout().lock(),

@@ -291,6 +291,10 @@ pub struct SimWorld {
     pub wlan_interfaces: usize,
     pub wlan_profiles: std::collections::BTreeMap<String, String>,
     pub wlan_allowed: Vec<String>,
+    /// (Step 20) The SSID the simulated PC is connected to, and the Rulebox profiles whose last
+    /// connection attempt failed.
+    pub wlan_connected: Option<String>,
+    pub wlan_connect_failures: Vec<String>,
     pub printers: Vec<SimPrinter>,
     /// (Step 14) The driver store, the ports (`PORTPROMPT:`, `FILE:` and the `Rulebox_` ones) and the per-machine share
     /// connections. A printer needs an installed driver and an existing port (or, for IPP, its URL), as on Windows.
@@ -375,6 +379,8 @@ impl SimWorld {
             wlan_interfaces: 1,
             wlan_profiles: std::collections::BTreeMap::new(),
             wlan_allowed: Vec::new(),
+            wlan_connected: None,
+            wlan_connect_failures: Vec::new(),
             printers: vec![SimPrinter {
                 info: PrinterInfo {
                     name: "Microsoft Print to PDF".into(),
@@ -1107,6 +1113,16 @@ impl Platform for SimPlatform {
             profiles: world.wlan_profiles.keys().cloned().collect(),
             allowed_ssids: world.wlan_allowed.clone(),
         })
+    }
+
+    fn wlan_current_ssid(&self) -> Result<Option<String>, PlatformError> {
+        self.check(SimOp::WlanList)?;
+        Ok(lock(&self.world).wlan_connected.clone())
+    }
+
+    fn wlan_last_connect_failures(&self) -> Result<Vec<String>, PlatformError> {
+        self.check(SimOp::WlanList)?;
+        Ok(lock(&self.world).wlan_connect_failures.clone())
     }
 
     fn printer_list(&self) -> Result<Vec<PrinterInfo>, PlatformError> {

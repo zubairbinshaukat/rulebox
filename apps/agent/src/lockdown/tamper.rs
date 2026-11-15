@@ -207,7 +207,7 @@ pub struct TamperOutcome {
 }
 
 /// Turns the journal's tamper notes into counters, audit records and report fields. Held by
-/// the reconciler (Step 20); call [`finish_pass`](Self::finish_pass) after every apply.
+/// the lockdown runtime (Step 20), which calls [`finish_pass`](Self::finish_pass) after every apply.
 #[derive(Default)]
 pub struct TamperTracker {
     /// `(item, server day)` pairs already audited.

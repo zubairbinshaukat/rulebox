@@ -1153,6 +1153,16 @@ pub fn restore_ids(ctx: &JournalCtx<'_>, ids: &[String]) -> RestoreReport {
     restore_matching(ctx, |entry| ids.contains(&entry.id))
 }
 
+/// (Step 20) Restores the one entry with this id (`recover` runs the journal entry by entry and
+/// prints each result). No such entry is fine: it was restored before.
+pub fn restore_entry(ctx: &JournalCtx<'_>, id: &str) -> Result<(), JournalError> {
+    let entry = ctx.shared.read(|state| state.journal.iter().find(|entry| entry.id == id).cloned());
+    match entry {
+        Some(entry) => restore_one(ctx, &entry),
+        None => Ok(()),
+    }
+}
+
 /// Restores the whole journal, last written first.
 pub fn restore_all(ctx: &JournalCtx<'_>) -> RestoreReport {
     restore_matching(ctx, |_| true)

@@ -668,7 +668,8 @@ pub fn uninstall_at(force: bool, install: &InstallPaths, paths: &DataPaths, out:
             );
         }
         let _ = writeln!(out, "{reason} --force: running `recover` first.");
-        let platform = platform::windows::WindowsPlatform::new(install.clone(), paths.clone());
+        let platform: std::sync::Arc<dyn platform::Platform> =
+            std::sync::Arc::new(platform::windows::WindowsPlatform::new(install.clone(), paths.clone()));
         let stop = || stop_service(recover::SERVICE_STOP_WAIT);
         let env = RecoverEnv {
             platform: &platform,

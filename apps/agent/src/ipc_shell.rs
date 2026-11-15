@@ -87,8 +87,7 @@ impl ShellBroadcast {
     }
 
     /// (1.3) `program.blocked` with `{ displayName }`, cut to 100 characters. The caller sends
-    /// it at most once per program per session. (Step 20 calls it from the process watch.)
-    #[allow(dead_code)]
+    /// it at most once per program per session (the process watch's `BlockedHook`, Step 20).
     pub fn program_blocked(&self, display_name: &str) {
         let display_name: String = display_name.chars().take(MAX_PROGRAM_NAME_CHARS).collect();
         let data = serde_json::to_value(ProgramBlockedData { display_name }).unwrap_or(serde_json::Value::Null);

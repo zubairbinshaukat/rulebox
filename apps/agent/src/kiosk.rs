@@ -41,6 +41,7 @@ use crate::compat;
 use crate::ipc_shell::ShellBroadcast;
 use crate::journal::{self, Change, JournalCtx, JournalError, JournalOwner};
 use crate::kiosk_control::KioskControl;
+use crate::lockdown::runtime::LockdownRuntime;
 use crate::paths::InstallPaths;
 use crate::platform::{
     Platform, PlatformError, RegData, RegValueRef, SessionInfo, SessionState, ShellMechanism, StaffUserSpec,
@@ -511,6 +512,11 @@ impl Kiosk<'_> {
                 change = change.secret_original();
             }
             journal::change(&ctx, &change)?;
+            if always_journal {
+                // (Phase 5 Step 20) The agent itself moves this value between "0" and "1" (admin
+                // exit, exit hold, Safe Mode): putting it back is not drift and is not audited.
+                self.shared.forget_rewrite(&change.id);
+            }
         }
         Ok(())
     }
@@ -750,6 +756,9 @@ pub enum Trigger {
     Power,
     /// Every 10 minutes.
     Reassert,
+    /// (Phase 5 Step 20) Something the lockdown layers depend on changed outside the document
+    /// (a delivered driver was installed, so a printer that waited for it can be created).
+    Lockdown,
     /// `Admin`: enrollment finished, reconcile now and answer with the status.
     ReconcileNow(oneshot::Sender<KioskStatus>),
     /// `Admin`: `unenroll` wants Disable (Section 5.6) and holds the kiosk off until
@@ -766,6 +775,7 @@ impl Trigger {
             Trigger::SessionLocked { .. } => "session locked",
             Trigger::Power => "power",
             Trigger::Reassert => "reassert",
+            Trigger::Lockdown => "lockdown",
             Trigger::ReconcileNow(_) => "reconcile now",
             Trigger::Disable(_) => "disable",
         }
@@ -791,6 +801,9 @@ pub struct ReconcilerDeps {
     /// exists nothing is enabled, repaired or disabled: the kiosk is held off until
     /// the next `enroll` (which deletes it) or until an administrator does.
     pub recovered_flag: PathBuf,
+    /// (Phase 5 Step 20) The lockdown layers. `None` in the demo world and in the Phase 2 tests:
+    /// the reconciler then does exactly what it did before Phase 5.
+    pub lockdown: Option<Arc<LockdownRuntime>>,
 }
 
 enum Action {
@@ -812,7 +825,14 @@ pub struct Reconciler {
     lock_checks: Vec<(u32, Instant)>,
     /// The flag was seen present at the last reconcile (so it is logged once).
     recovered_logged: bool,
+    /// (Phase 5 Step 20) When the lockdown layers want another look without a trigger: a
+    /// temporary USB allow ends, or the last-known-good probation has a decision to make.
+    lockdown_at: Option<Instant>,
 }
+
+/// The lockdown timer never fires sooner than this after it was set (no tight loop, and the
+/// wall-clock deadline it stands for has certainly passed when it fires).
+const LOCKDOWN_TIMER_MARGIN: Duration = Duration::from_millis(250);
 
 impl Reconciler {
     pub fn new(deps: ReconcilerDeps) -> Self {
@@ -825,7 +845,13 @@ impl Reconciler {
             hold_check_at: None,
             lock_checks: Vec::new(),
             recovered_logged: false,
+            lockdown_at: None,
         }
+    }
+
+    #[cfg(test)]
+    pub fn lockdown_at(&self) -> Option<Instant> {
+        self.lockdown_at
     }
 
     /// True while `recovered.flag` exists. Looked at on every reconcile, so deleting
@@ -906,11 +932,53 @@ impl Reconciler {
                 self.housekeeping();
                 self.note_lock(session_id);
             }
-            Trigger::Startup | Trigger::Session | Trigger::Power | Trigger::Reassert => {
+            Trigger::Startup | Trigger::Session | Trigger::Power | Trigger::Reassert | Trigger::Lockdown => {
+                if matches!(trigger, Trigger::Session) {
+                    // A new Staff session may be told about a blocked program again.
+                    if let Some(lockdown) = &self.d.lockdown {
+                        lockdown.session_changed();
+                    }
+                }
                 self.housekeeping();
+                self.safe_mode_guard().await;
                 if !self.held_off {
                     self.reconcile().await;
                 }
+            }
+        }
+    }
+
+    /// (Phase 5 Step 20, plan 4.16, edge case 60) A Safe Mode boot never runs the Staff session:
+    /// automatic sign-in is already held off for that boot (`apply_machine_values`), and a Staff
+    /// session that appears anyway is signed out and audited (`device.safeModeBlocked`). An
+    /// administrator's session is never touched.
+    async fn safe_mode_guard(&mut self) {
+        let Some(lockdown) = self.d.lockdown.clone() else {
+            return;
+        };
+        if self.d.simulate {
+            return;
+        }
+        let state = self.d.shared.get();
+        let (KioskApplied::Enabled, Some(staff)) = (state.kiosk.applied, state.staff) else {
+            return;
+        };
+        if !crate::lockdown::boot::in_safe_mode(self.d.platform.as_ref()) {
+            return;
+        }
+        let Ok(sessions) = self.staff_sessions(&staff.sid) else {
+            return;
+        };
+        for session in sessions.into_iter().filter(|s| matches!(s.state, SessionState::Active | SessionState::Connected)) {
+            let platform = Arc::clone(&self.d.platform);
+            let id = session.id;
+            match tokio::task::spawn_blocking(move || platform.logoff_session(id)).await {
+                Ok(Ok(())) | Ok(Err(PlatformError::NotFound)) => {
+                    tracing::warn!(session_id = id, "Safe Mode: the Staff session was signed out");
+                    lockdown.audit_safe_mode_blocked();
+                }
+                Ok(Err(error)) => tracing::error!(session_id = id, "Safe Mode: cannot sign the Staff session out: {error}"),
+                Err(error) => tracing::error!("the sign-out task failed: {error}"),
             }
         }
     }
@@ -938,6 +1006,10 @@ impl Reconciler {
                 self.reconcile().await;
             }
         }
+        if self.lockdown_at.is_some_and(|at| at <= now) {
+            self.lockdown_at = None;
+            self.on_lockdown_due().await;
+        }
     }
 
     pub fn next_deadline(&self) -> Option<Instant> {
@@ -946,7 +1018,84 @@ impl Reconciler {
             .map(|(_, at)| *at)
             .chain(self.retry_at)
             .chain(self.hold_check_at)
+            .chain(self.lockdown_at)
             .min()
+    }
+
+    // -- the lockdown layers (Phase 5 Step 20) ------------------------------------------
+
+    /// The timer for a wall-clock moment (Unix ms) the lockdown runtime named.
+    fn lockdown_timer(&self, runtime: &LockdownRuntime, at_ms: u64) -> Instant {
+        let wait = Duration::from_millis(at_ms.saturating_sub(runtime.now_ms()));
+        Instant::now() + wait + LOCKDOWN_TIMER_MARGIN
+    }
+
+    /// One pass of the lockdown layers over the accepted document (the kiosk is on). Blocking
+    /// work, so it runs beside the loop; nothing else changes the machine meanwhile because
+    /// this is the reconciler's own loop.
+    async fn lockdown_pass(&mut self) {
+        let Some(runtime) = self.d.lockdown.clone() else {
+            return;
+        };
+        let worker = Arc::clone(&runtime);
+        match tokio::task::spawn_blocking(move || worker.pass()).await {
+            Ok(pass) => {
+                self.lockdown_at = pass.wake_at_ms.map(|at_ms| self.lockdown_timer(&runtime, at_ms));
+            }
+            Err(error) => tracing::error!("the lockdown pass failed: {error}"),
+        }
+    }
+
+    /// Carries out a rollback the last-known-good monitor decided, if one is waiting. Returns
+    /// whether it did (the caller then reconciles, which also sends the `rolledBack` report).
+    async fn lockdown_rollback(&mut self) -> bool {
+        let Some(runtime) = self.d.lockdown.clone() else {
+            return false;
+        };
+        let Some(reason) = runtime.lkg().take_pending() else {
+            return false;
+        };
+        match tokio::task::spawn_blocking(move || runtime.roll_back(reason)).await {
+            Ok(done) => done,
+            Err(error) => {
+                tracing::error!("the lockdown rollback failed: {error}");
+                false
+            }
+        }
+    }
+
+    /// The lockdown timer fell due: the last-known-good monitor looks at its clock (promotion,
+    /// or a Staff App that never showed up), then one reconcile re-applies and reports. That
+    /// reconcile is also what writes the USB class blocks again when a temporary allow ended.
+    async fn on_lockdown_due(&mut self) {
+        let Some(runtime) = self.d.lockdown.clone() else {
+            return;
+        };
+        runtime.tick();
+        self.lockdown_rollback().await;
+        if !self.held_off {
+            self.housekeeping();
+            self.reconcile().await;
+        }
+    }
+
+    /// The last-known-good monitor has news (the watchdog fed it): a rollback to carry out, or
+    /// a probation window that started, which only moves the timer.
+    async fn on_lockdown_wake(&mut self) {
+        let Some(runtime) = self.d.lockdown.clone() else {
+            return;
+        };
+        if self.lockdown_rollback().await {
+            if !self.held_off {
+                self.housekeeping();
+                self.reconcile().await;
+            }
+            return;
+        }
+        if let Some(at_ms) = runtime.lkg().next_deadline() {
+            let at = self.lockdown_timer(&runtime, at_ms);
+            self.lockdown_at = Some(self.lockdown_at.map_or(at, |current| current.min(at)));
+        }
     }
 
     // -- housekeeping: sessions and the hold --------------------------------------
@@ -1057,6 +1206,12 @@ impl Reconciler {
     /// the same time because this is the reconciler's own loop.
     pub async fn on_exit(&mut self, request: ExitRequest) {
         let kiosk_enabled = self.d.shared.read(|state| state.kiosk.applied == KioskApplied::Enabled);
+        // (Phase 5 Step 20) A correct PIN ends the Staff session on purpose. The Staff App that
+        // disappears with it must not count as a crash, or three admin exits in five minutes
+        // after a lockdown change would roll that change back (plan 4.11).
+        if let Some(lockdown) = &self.d.lockdown {
+            lockdown.expect_shell_exit();
+        }
         let result = run_exit(
             Arc::clone(&self.d.platform),
             kiosk_enabled,
@@ -1079,10 +1234,18 @@ impl Reconciler {
                 if is_off {
                     self.set_hold(Some(ExitHold::new(Instant::now())));
                     tracing::info!("exit hold set: automatic sign-in stays off for at most 5 minutes");
+                } else if !self.d.simulate {
+                    // Nothing was signed out (the request was withdrawn, or the kiosk is off).
+                    if let Some(lockdown) = &self.d.lockdown {
+                        lockdown.cancel_expected_exit();
+                    }
                 }
             }
             Err(error) => {
                 tracing::error!("the admin exit did not complete ({error}); automatic sign-in is armed again");
+                if let Some(lockdown) = &self.d.lockdown {
+                    lockdown.cancel_expected_exit();
+                }
                 self.set_hold(None);
                 if !self.held_off {
                     self.reconcile().await;
@@ -1120,7 +1283,14 @@ impl Reconciler {
         };
         let version = if enrollment.revoked { None } else { version };
         match action {
-            Action::Enable => self.run_enable(applied, version).await,
+            Action::Enable => {
+                self.run_enable(applied, version).await;
+                // (Phase 5 Step 20) The lockdown layers follow the kiosk: applied (and re-asserted)
+                // only while it is on. A revoked PC keeps what it has and still repairs drift.
+                if self.d.shared.read(|state| state.kiosk.applied == KioskApplied::Enabled) {
+                    self.lockdown_pass().await;
+                }
+            }
             Action::Disable => self.run_disable(applied == KioskApplied::Enabled, version).await,
             Action::Nothing => {}
         }
@@ -1233,6 +1403,7 @@ impl Reconciler {
                 tracing::info!("the kiosk is off: the PC is back to normal Windows");
                 self.set_hold(None);
                 self.note_success(version);
+                self.lockdown_disabled(false).await;
             }
             Err(error) => {
                 tracing::error!(code = %error.code(), "the kiosk could not be disabled: {error}");
@@ -1323,6 +1494,10 @@ impl Reconciler {
             return Ok(());
         }
         let grace_ms = u64::try_from(DISABLE_GRACE.as_millis()).unwrap_or(u64::MAX);
+        // (Phase 5 Step 20) The Staff App that goes away now was ended on purpose: not a crash.
+        if let Some(lockdown) = &self.d.lockdown {
+            lockdown.expect_shell_exit();
+        }
         self.d.broadcast.shutting_down(ShutdownReason::KioskDisabled, grace_ms);
         tokio::time::sleep(DISABLE_GRACE).await;
         // The session may have ended by itself during the wait.
@@ -1343,11 +1518,24 @@ impl Reconciler {
         }
     }
 
+    /// (Phase 5 Step 20) Every layer was restored with the journal: the process watch stops and
+    /// nothing stays on probation (`unenroll` also clears what belongs to the organization).
+    async fn lockdown_disabled(&mut self, unenroll: bool) {
+        self.lockdown_at = None;
+        let Some(runtime) = self.d.lockdown.clone() else {
+            return;
+        };
+        if let Err(error) = tokio::task::spawn_blocking(move || runtime.on_disabled(unenroll)).await {
+            tracing::error!("the lockdown cleanup failed: {error}");
+        }
+    }
+
     /// `KioskControl::disable` (for `unenroll`): Disable now, then hold the kiosk off.
     async fn disable_command(&mut self) -> Result<(), String> {
         let state = self.d.shared.get();
         if !self.needs_disable(&state) {
             self.held_off = true;
+            self.lockdown_disabled(true).await;
             return Ok(());
         }
         let sign_out = state.kiosk.applied == KioskApplied::Enabled;
@@ -1359,6 +1547,10 @@ impl Reconciler {
                 self.held_off = true;
                 self.retry_at = None;
                 self.set_hold(None);
+                // (Phase 5 Step 20) Unenroll: the reports, findings, daily counters (permission
+                // denials among them) and the last-known-good copy belong to the organization
+                // the PC leaves.
+                self.lockdown_disabled(true).await;
                 Ok(())
             }
             Err(error) => {
@@ -1385,8 +1577,17 @@ impl Reconciler {
         let mut reassert = tokio::time::interval_at(Instant::now() + REASSERT_INTERVAL, REASSERT_INTERVAL);
         reassert.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
         let mut exits_open = true;
+        // (Phase 5 Step 20) The last-known-good monitor wakes the loop when the watchdog gave it
+        // something to act on (a crash loop, a probation window that started).
+        let lkg = self.d.lockdown.as_ref().map(|lockdown| Arc::clone(lockdown.lkg()));
         loop {
             let deadline = self.next_deadline();
+            let lkg_news = async {
+                match &lkg {
+                    Some(monitor) => monitor.wake.notified().await,
+                    None => std::future::pending::<()>().await,
+                }
+            };
             let timer = async {
                 match deadline {
                     Some(at) => tokio::time::sleep_until(at).await,
@@ -1425,7 +1626,17 @@ impl Reconciler {
                         () = self.on_timer() => {}
                     }
                 }
+                () = lkg_news => {
+                    tokio::select! {
+                        () = shutdown.cancelled() => break,
+                        () = self.on_lockdown_wake() => {}
+                    }
+                }
             }
+        }
+        // The service stops: the process trace ends with it (plan 4.10). Nothing is restored.
+        if let Some(lockdown) = &self.d.lockdown {
+            lockdown.stop();
         }
     }
 }
@@ -1455,6 +1666,11 @@ impl ReconcilerHandle {
 
     pub fn power_resumed(&self) {
         self.send(Trigger::Power);
+    }
+
+    /// (Phase 5 Step 20) A delivered driver landed (or went): apply the lockdown layers again.
+    pub fn lockdown_changed(&self) {
+        self.send(Trigger::Lockdown);
     }
 }
 

@@ -23,15 +23,17 @@
 use std::collections::HashSet;
 use std::io::{BufRead, Write};
 use std::path::Path;
+use std::sync::Arc;
 
 use rulebox_win32::security::DirCheck;
 
 use crate::admin_exit::{AUTO_ADMIN_LOGON, WINLOGON_KEY};
+use crate::journal::{self, JournalCtx, JournalEntry, JournalTarget};
 use crate::kiosk::{LSA_DEFAULT_PASSWORD, LSA_PENDING, STAFF_COMMENT, STAFF_USER_NAME};
 use crate::paths::{DataPaths, InstallPaths};
 use crate::platform::{Platform, RegData, RegValueRef, ShellMechanism};
 use crate::service::StopOutcome;
-use crate::state::{unix_ms, write_atomic, AgentState, KioskApplied, OriginalValue};
+use crate::state::{unix_ms, write_atomic, AgentState, KioskApplied, OriginalValue, SharedState, StateStore};
 
 const DEFAULT_USER_NAME: &str = "DefaultUserName";
 const DISABLE_LOCK_WORKSTATION: &str = "DisableLockWorkstation";
@@ -117,7 +119,9 @@ pub fn read_state(
 
 /// What `recover` needs from the machine.
 pub struct RecoverEnv<'a> {
-    pub platform: &'a dyn Platform,
+    /// Shared (`Arc`) since Phase 5 Step 20: the journal restores every entry through the
+    /// agent's own `SharedState`, which holds the platform.
+    pub platform: &'a Arc<dyn Platform>,
     pub paths: &'a DataPaths,
     /// Checks the data directory (`security::verify_protected_dir` in production).
     pub verify_dir: &'a dyn Fn(&Path) -> rulebox_win32::Result<DirCheck>,
@@ -167,6 +171,11 @@ pub enum Step {
     /// Step 3: the original is the owner's plaintext password, which only SYSTEM can
     /// read; the value is deleted.
     DropPasswordValue { key: RegValueRef },
+    /// Step 3 (Phase 5 Step 20): a journal entry that is not a plain registry value (a Staff
+    /// setting, a service, an App Control or AppLocker policy, a Wi-Fi profile, a printer, a
+    /// driver package, the boot configuration, the lockout policy, a Safe Mode key, an ACL) is
+    /// put back through the journal's own restore. `label` names it for the administrator.
+    RestoreEntry { id: String, label: String },
     /// Step 4: `AutoAdminLogon` = `"0"` because the state is unknown and Windows is
     /// set to sign in as `RuleboxStaff`.
     SwitchOffAutoLogon,
@@ -185,6 +194,7 @@ impl Step {
             Step::RestoreValue { key, data: Some(_) } => format!("restore {}", key.name),
             Step::RestoreValue { key, data: None } => format!("remove {} (it did not exist before Rulebox)", key.name),
             Step::DropPasswordValue { key } => format!("remove {} (the original is not readable here)", key.name),
+            Step::RestoreEntry { label, .. } => label.clone(),
             Step::SwitchOffAutoLogon => "turn automatic sign-in off".to_string(),
             Step::DeleteLsaSecret { name } if *name == LSA_PENDING => {
                 "delete the pending Staff password secret".to_string()
@@ -216,6 +226,38 @@ fn data_of(original: &OriginalValue) -> Option<Option<RegData>> {
     }
 }
 
+/// True for an entry `recover` puts back itself as a registry value (the Phase 2 path, which
+/// also knows what to do about the owner's lost password). Everything else goes through the
+/// journal's restore.
+fn is_registry_step(entry: &JournalEntry) -> bool {
+    entry.machine_key().is_some() && (entry.original == OriginalValue::InSecrets || data_of(&entry.original).is_some())
+}
+
+/// What one journal entry's restore does, in the administrator's words. Only names Rulebox
+/// itself gave things (a profile `Rulebox-<id>`, a port `Rulebox_<id>`) or Windows' own names.
+fn entry_label(entry: &JournalEntry) -> String {
+    match &entry.target {
+        JournalTarget::MachineValue(key) => format!("restore {}", key.name),
+        JournalTarget::StaffValue { name, .. } => format!("restore the {STAFF_USER_NAME} setting {name}"),
+        JournalTarget::ServiceStart { name } => format!("restore the start type of the service {name}"),
+        JournalTarget::CiPolicy { policy_id } => format!("remove the App Control policy {policy_id}"),
+        JournalTarget::AppLockerPolicy => "remove the AppLocker policy".to_string(),
+        JournalTarget::WlanProfile { name } => format!("remove the Wi-Fi profile {name}"),
+        JournalTarget::WlanFilters => "restore the list of allowed Wi-Fi networks".to_string(),
+        JournalTarget::Printer { name } => format!("remove the printer {name}"),
+        JournalTarget::PrinterPort { name } => format!("remove the printer port {name}"),
+        JournalTarget::PrinterSecurity { .. } => "restore the permissions of a print queue".to_string(),
+        JournalTarget::DriverPackage { published, .. } => format!("remove the driver package {published}"),
+        JournalTarget::BcdElement { element, .. } => format!("restore the boot setting {element}"),
+        JournalTarget::AccountLockoutPolicy => "restore the account lockout policy".to_string(),
+        JournalTarget::SafeBootEntry { mode } => format!("remove the Safe Mode registration ({mode})"),
+        JournalTarget::ServiceSecurity { .. } => "restore the permissions of the agent service".to_string(),
+        JournalTarget::ServicePrivileges { .. } => "restore the privileges of the agent service".to_string(),
+        JournalTarget::PathAcl { .. } => "restore the permissions of a Rulebox folder".to_string(),
+        JournalTarget::Unknown(_) => "an entry of a newer agent".to_string(),
+    }
+}
+
 /// Plan Step 11, "recover", steps 3 to 7, as a pure function of what was found.
 pub fn plan(facts: &Facts) -> Plan {
     let mut steps: Vec<Step> = Vec::new();
@@ -230,14 +272,22 @@ pub fn plan(facts: &Facts) -> Plan {
         StateReading::Readable(state) => {
             // Step 3. The journal is in the order the values were first changed.
             let password_lost = state.journal.iter().any(|entry| entry.original == OriginalValue::InSecrets);
-            // Journal v2 also holds service, policy, Wi-Fi and printer entries
-            // (Phase 5). `recover` restores the registry values it can; the rest is
-            // left alone and named in the notes. (Their `Platform` calls arrive in
-            // Phase 5 Step 3 onward and join this loop then.)
-            let mut skipped = 0usize;
-            for entry in &state.journal {
+            // (Phase 5 Step 20) Journal v2 also holds Staff settings, services, App
+            // Control and AppLocker policies, Wi-Fi profiles, printers, driver packages,
+            // the boot configuration, the lockout policy, Safe Mode keys and ACLs. They
+            // go back first, last written first (the program-start layers before the
+            // policies they sit on), through the journal's own restore. Only an entry
+            // of a kind this build does not know stays.
+            let mut unknown = 0usize;
+            for entry in state.journal.iter().rev() {
+                if matches!(entry.target, JournalTarget::Unknown(_)) {
+                    unknown += 1;
+                } else if !is_registry_step(entry) {
+                    steps.push(Step::RestoreEntry { id: entry.id.clone(), label: entry_label(entry) });
+                }
+            }
+            for entry in state.journal.iter().filter(|entry| is_registry_step(entry)) {
                 let Some(key) = entry.machine_key() else {
-                    skipped += 1;
                     continue;
                 };
                 if entry.original == OriginalValue::InSecrets {
@@ -245,7 +295,6 @@ pub fn plan(facts: &Facts) -> Plan {
                     continue;
                 }
                 let Some(mut data) = data_of(&entry.original) else {
-                    skipped += 1;
                     continue;
                 };
                 // The owner's password cannot come back, so putting automatic sign-in
@@ -268,12 +317,12 @@ pub fn plan(facts: &Facts) -> Plan {
                 }
                 steps.push(Step::RestoreValue { key: key.clone(), data });
             }
-            if skipped > 0 {
+            if unknown > 0 {
                 notes.push(format!(
-                    "{skipped} journal entr{} for other settings (services, policies, Wi-Fi, printers) {} not \
-                     restored by this build of `recover`; they stay in the journal.",
-                    if skipped == 1 { "y" } else { "ies" },
-                    if skipped == 1 { "was" } else { "were" },
+                    "{unknown} journal entr{} written by a newer Rulebox agent and cannot be restored by this \
+                     build of `recover`; {} in the journal. Run `recover` from the newer agent.",
+                    if unknown == 1 { "y was" } else { "ies were" },
+                    if unknown == 1 { "it stays" } else { "they stay" },
                 ));
             }
             if password_lost {
@@ -482,9 +531,28 @@ pub fn execute(env: &RecoverEnv<'_>, facts: &Facts, plan: &Plan, service: StopOu
         }
     };
 
+    // (Phase 5 Step 20) The agent's own state, from the state folder alone (no service, no
+    // backend): the journal restores through it and saves after every entry, so a `recover`
+    // that is interrupted leaves an accurate journal for the next run.
+    let shared: Option<Arc<SharedState>> = match (&facts.state, facts.data_dir_trusted) {
+        (StateReading::Readable(state), true) => Some(SharedState::new(
+            StateStore::at(&env.paths.state_dir()),
+            state.as_ref().clone(),
+            Arc::clone(env.platform),
+        )),
+        _ => None,
+    };
+
     for step in &plan.steps {
         let description = step.describe();
         let result: Result<(), String> = match step {
+            Step::RestoreEntry { id, .. } => match &shared {
+                Some(shared) => {
+                    let ctx = JournalCtx { platform: env.platform.as_ref(), shared: shared.as_ref() };
+                    journal::restore_entry(&ctx, id).map_err(|error| error.to_string())
+                }
+                None => Err("the agent state is not readable".to_string()),
+            },
             Step::RestoreValue { key, data } => {
                 let result = env.platform.write_machine_value(key, data.as_ref()).map_err(|e| e.to_string());
                 if result.is_ok() {
@@ -511,13 +579,17 @@ pub fn execute(env: &RecoverEnv<'_>, facts: &Facts, plan: &Plan, service: StopOu
                 result
             }
             Step::ClearStaffHive { sid } => {
-                let result = clear_staff_hive(env.platform, sid);
+                let result = clear_staff_hive(env.platform.as_ref(), sid);
                 if result.is_err() {
                     outcome.staff_hive_ok = false;
                 }
                 result
             }
-            Step::MarkStateDisabled => mark_state_disabled(env.paths, facts, &outcome),
+            Step::MarkStateDisabled => match &shared {
+                // The journal entries restored above are already gone from this state.
+                Some(shared) => shared.update(|state| apply_to_state(state, &outcome)).map_err(|e| e.to_string()),
+                None => mark_state_disabled(env.paths, facts, &outcome),
+            },
         };
         match result {
             Ok(()) => done.push(description),
@@ -602,7 +674,8 @@ pub fn run_recover_at(
             return crate::ipc_admin::EXIT_ERROR;
         }
     }
-    let platform = crate::platform::windows::WindowsPlatform::new(install.clone(), paths.clone());
+    let platform: Arc<dyn Platform> =
+        Arc::new(crate::platform::windows::WindowsPlatform::new(install.clone(), paths.clone()));
     let stop = || crate::service::stop_service(SERVICE_STOP_WAIT);
     let env = RecoverEnv {
         platform: &platform,
@@ -987,8 +1060,9 @@ mod tests {
     fn run_with(world: &World, dir: DirCheck, stop: StopOutcome) -> RecoverReport {
         let verify = move |_: &Path| Ok(dir.clone());
         let stop_fn = move || stop.clone();
+        let dyn_platform: Arc<dyn Platform> = world.platform.clone();
         let env = RecoverEnv {
-            platform: world.platform.as_ref(),
+            platform: &dyn_platform,
             paths: &world.paths,
             verify_dir: &verify,
             stop_service: &stop_fn,
@@ -1176,8 +1250,9 @@ mod tests {
             stopped.set(stopped.get() + 1);
             StopOutcome::Stopped
         };
+        let dyn_platform: Arc<dyn Platform> = world.platform.clone();
         let env = RecoverEnv {
-            platform: world.platform.as_ref(),
+            platform: &dyn_platform,
             paths: &world.paths,
             verify_dir: &verify,
             stop_service: &stop,
@@ -1240,5 +1315,135 @@ mod tests {
         assert_eq!(std::fs::read(world.paths.agent_state()).unwrap(), bytes);
         assert_eq!(listing(&world), before);
         assert!(!world.paths.recovered_flag().exists());
+    }
+
+    // -- Phase 5 Step 20: every journal target type, offline, from the state folder alone --------
+
+    /// Enables the kiosk and applies a lockdown with a Wi-Fi profile, the permit list and a
+    /// printer, as the service would; returns the journal ids it left.
+    fn lockdown_applied(world: &World) -> Vec<String> {
+        use crate::lockdown::apply::{apply, ApplyCtx};
+        use crate::lockdown::invariants::Facts;
+        let shared = world.shared(World::enrolled_state());
+        world.enable_kiosk(&shared);
+        let doc = rulebox_policy::AgentDoc::from_doc(&serde_json::json!({
+            "lockdown": { "appLocker": { "mode": "enforce" }, "usb": { "storage": "block" } },
+            "wifi": [{ "id": "w1", "ssid": "Office", "hidden": false, "security": "open", "autoConnect": true, "revision": 1 }],
+            "wifiManagedOnly": true,
+            "printers": [{ "id": "p1", "name": "Front", "kind": "raw", "address": "10.0.0.21", "port": null, "queue": null,
+                           "driver": "Microsoft PCL6 Class Driver", "isDefault": true, "revision": 1 }]
+        }))
+        .unwrap();
+        let ctx = ApplyCtx {
+            journal: JournalCtx { platform: world.platform.as_ref(), shared: shared.as_ref() },
+            facts: Facts { admin_signin_verified: true, ..Facts::default() },
+            now_ms: 1_800_000_000_000,
+            version: 3,
+        };
+        apply(&ctx, &doc).unwrap();
+        shared.read(|state| state.journal.iter().map(|entry| entry.id.clone()).collect())
+    }
+
+    #[test]
+    fn recover_restores_every_journal_target_type_offline_with_entries_in_every_phase() {
+        use crate::journal::{EntryPhase, JournalOwner};
+        let world = World::new();
+        let services_before = world.platform.with_world(|w| {
+            let mut list: Vec<(String, u32, String)> =
+                w.services.iter().map(|(name, s)| (name.clone(), s.start, s.sddl.clone())).collect();
+            list.sort();
+            list
+        });
+        let ids = lockdown_applied(&world);
+        for prefix in ["hklm:", "staff:", "safeboot:", "svc-start:", "svc-sec:", "svc-priv:", "wlan:", "printer:", "printer-port:", "applocker:", "bcd:"] {
+            assert!(ids.iter().any(|id| id.starts_with(prefix)), "no {prefix} entry in {ids:?}");
+        }
+        assert!(world.platform.with_world(|w| !w.wlan_profiles.is_empty() && !w.staff_values.is_empty() && w.applocker_policy.is_some()));
+
+        // The file as a crash, a failed restore and a newer agent would leave it: one entry of
+        // each phase, and one target this build does not know.
+        let mut state = world.state_file();
+        let pending = state.journal.iter().position(|e| e.id.starts_with("staff:")).unwrap();
+        state.journal[pending].phase = EntryPhase::Pending;
+        let restoring = state.journal.iter().position(|e| e.id.starts_with("wlan:Rulebox-")).unwrap();
+        state.journal[restoring].phase = EntryPhase::Restoring;
+        state.journal[restoring].last_error = Some("platform_error".into());
+        let mut unknown = state.journal[pending].clone();
+        unknown.id = "gpu:0".into();
+        unknown.owner = JournalOwner::L2;
+        unknown.target = JournalTarget::Unknown(serde_json::json!({ "gpuOverclock": { "card": 0 } }));
+        state.journal.push(unknown);
+        let total = state.journal.len();
+        std::fs::write(world.paths.agent_state(), serde_json::to_vec_pretty(&state).unwrap()).unwrap();
+
+        // No service, no backend: only the state folder and the machine.
+        let report = run_with(&world, ok_dir(), StopOutcome::NotInstalled);
+        assert!(report.is_complete(), "{report:#?}");
+        // One line per entry: its result is printed.
+        for line in [
+            "remove the Wi-Fi profile Rulebox-w1",
+            "restore the list of allowed Wi-Fi networks",
+            "remove the AppLocker policy",
+            "remove the Safe Mode registration (Minimal)",
+            "restore the permissions of the agent service",
+            "restore the privileges of the agent service",
+            "restore the boot setting recoveryenabled",
+            "remove the printer p1",
+            "remove the printer port Rulebox_p1",
+        ] {
+            assert!(report.done.iter().any(|done| done == line), "{line:?} is not in {:#?}", report.done);
+        }
+        assert!(report.done.iter().any(|done| done.starts_with("restore the start type of the service ")));
+        assert!(report.done.iter().any(|done| done.starts_with("restore the RuleboxStaff setting ")));
+        assert!(report.done.len() >= total - 1, "{} of {total} entries have a line", report.done.len());
+        assert!(report.notes.iter().any(|note| note.contains("newer Rulebox agent")), "{:#?}", report.notes);
+        let mut printed = Vec::new();
+        report.print(&mut printed);
+        assert!(String::from_utf8(printed).unwrap().contains("  - remove the Wi-Fi profile Rulebox-w1"));
+
+        // The machine: every layer's change is gone.
+        world.platform.with_world(|w| {
+            assert!(w.wlan_profiles.is_empty() && w.wlan_allowed.is_empty(), "Wi-Fi");
+            assert!(w.staff_values.is_empty(), "Staff settings: {:?}", w.staff_values);
+            assert!(w.applocker_policy.is_none() || !w.applocker.has_rules(), "AppLocker");
+            assert!(w.printers.iter().all(|p| !p.info.comment.starts_with("rulebox:")), "printers");
+            assert!(w.printer_ports.iter().all(|p| !p.name.starts_with("Rulebox_")), "ports");
+            assert!(!w.machine_values.keys().any(|key| key.path.contains("SafeBoot")), "Safe Mode keys");
+            let mut services: Vec<(String, u32, String)> =
+                w.services.iter().map(|(name, s)| (name.clone(), s.start, s.sddl.clone())).collect();
+            services.sort();
+            assert_eq!(services, services_before, "service start types and the agent service's DACL");
+            assert!(w.services["RuleboxAgent"].privileges.is_empty(), "the privilege limit is gone");
+        });
+        // The state file: only the entry of the newer agent is left, and the kiosk is off.
+        let after = world.state_file();
+        assert_eq!(after.journal.iter().map(|e| e.id.as_str()).collect::<Vec<_>>(), ["gpu:0"]);
+        assert_eq!(after.kiosk.applied, KioskApplied::Disabled);
+        assert!(after.wlan_marks.is_empty() && after.printer_marks.is_empty() && after.applocker.is_none());
+        assert!(world.paths.recovered_flag().is_file());
+
+        // A second run has nothing left to do and is still complete.
+        let again = run_with(&world, ok_dir(), StopOutcome::NotInstalled);
+        assert!(again.is_complete(), "{again:#?}");
+        assert!(!again.done.iter().any(|done| done.contains("Wi-Fi")));
+    }
+
+    #[test]
+    fn an_entry_that_cannot_be_restored_is_reported_and_stays_for_the_next_run() {
+        let world = World::new();
+        lockdown_applied(&world);
+        world.platform.fail_next(SimOp::WlanDeleteProfile, PlatformError::AccessDenied);
+        let report = run_with(&world, ok_dir(), StopOutcome::NotInstalled);
+        assert!(!report.is_complete());
+        assert!(report.failed.iter().any(|line| line.starts_with("remove the Wi-Fi profile Rulebox-w1: ")), "{:#?}", report.failed);
+        // Every other step ran.
+        assert!(report.done.iter().any(|done| done == "remove the AppLocker policy"));
+        let state = world.state_file();
+        let left: Vec<&str> = state.journal.iter().map(|e| e.id.as_str()).collect();
+        assert_eq!(left, ["wlan:Rulebox-w1"], "kept, marked restoring, for the next run");
+        assert_eq!(state.journal[0].phase, crate::journal::EntryPhase::Restoring);
+        let again = run_with(&world, ok_dir(), StopOutcome::NotInstalled);
+        assert!(again.is_complete(), "{again:#?}");
+        assert!(world.state_file().journal.is_empty());
     }
 }

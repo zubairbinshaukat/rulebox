@@ -131,6 +131,7 @@ impl Rig {
             on_visible_change: Arc::new(move || {
                 visible.fetch_add(1, Ordering::SeqCst);
             }),
+            on_driver_change: Arc::new(|| {}),
             install_timeout: Duration::from_secs(1800),
             exe_wait: Duration::from_secs(10),
             shared: Arc::clone(&self.shared),

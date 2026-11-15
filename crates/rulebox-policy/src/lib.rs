@@ -55,6 +55,11 @@ pub struct AgentDoc {
     pub lockdown: Option<LockdownPolicy>,
     pub wifi: Vec<WifiProfile>,
     pub wifi_managed_only: bool,
+    /// (Step 20, plan 4.15) The administrator ticked "I understand this PC will go offline until
+    /// it sees a managed network": `wifiManagedOnly` is then applied even when the PC is on a
+    /// Wi-Fi network that is not in the list (no `would_disconnect` refusal). Absent = false.
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub wifi_managed_only_confirmed: bool,
     pub printers: Vec<PrinterSpec>,
     /// (Step 14b) Driver packages pushed to the device, after `printers`.
     pub drivers: Vec<DriverSpec>,

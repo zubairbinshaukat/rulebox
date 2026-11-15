@@ -15,10 +15,13 @@ use std::collections::BTreeSet;
 use windows::core::{GUID, PCWSTR};
 use windows::Win32::Foundation::{ERROR_NOT_FOUND, ERROR_SERVICE_NOT_ACTIVE, ERROR_SUCCESS, HANDLE};
 use windows::Win32::NetworkManagement::WiFi::{
-    dot11_BSS_type_infrastructure, wlan_filter_list_type_user_permit, WlanCloseHandle, WlanDeleteProfile,
-    WlanEnumInterfaces, WlanFreeMemory, WlanGetFilterList, WlanGetProfileList, WlanOpenHandle, WlanSetFilterList,
-    WlanSetProfile, DOT11_NETWORK, DOT11_NETWORK_LIST, WLAN_API_VERSION_2_0, WLAN_INTERFACE_INFO_LIST,
-    WLAN_PROFILE_INFO_LIST,
+    dot11_BSS_type_infrastructure, wlan_filter_list_type_user_permit, wlan_interface_state_connected,
+    wlan_intf_opcode_current_connection, wlan_notification_acm_connection_attempt_fail,
+    wlan_notification_acm_connection_complete, WlanCloseHandle, WlanDeleteProfile, WlanEnumInterfaces, WlanFreeMemory,
+    WlanGetFilterList, WlanGetProfileList, WlanOpenHandle, WlanQueryInterface, WlanRegisterNotification,
+    WlanSetFilterList, WlanSetProfile, DOT11_NETWORK, DOT11_NETWORK_LIST, L2_NOTIFICATION_DATA, WLAN_API_VERSION_2_0,
+    WLAN_CONNECTION_ATTRIBUTES, WLAN_CONNECTION_NOTIFICATION_DATA, WLAN_INTERFACE_INFO_LIST,
+    WLAN_NOTIFICATION_SOURCE_ACM, WLAN_PROFILE_INFO_LIST, WLAN_REASON_CODE_SUCCESS,
 };
 
 use crate::error::{code_err, Result, Win32Error};
@@ -150,6 +153,107 @@ pub fn list() -> Result<WlanState> {
         return Err(code_err("WlanGetFilterList", status));
     }
     Ok(WlanState { interfaces: guids.len(), profiles: names.into_iter().collect(), allowed_ssids: allowed })
+}
+
+/// (Phase 5 Step 20) The SSID the PC is connected to over Wi-Fi now; `None` when no wireless
+/// interface is connected (wired, offline, no adapter). Read-only.
+pub fn current_ssid() -> Result<Option<String>> {
+    let Some(client) = open()? else {
+        return Ok(None);
+    };
+    for guid in interface_guids(&client)? {
+        let mut size = 0u32;
+        let mut data: *mut std::ffi::c_void = std::ptr::null_mut();
+        // SAFETY: the client handle is open; `guid`, `size` and `data` are valid pointers.
+        let status = unsafe {
+            WlanQueryInterface(client.0, &guid, wlan_intf_opcode_current_connection, None, &mut size, &mut data, None)
+        };
+        // An interface that is not connected answers an error: look at the next one.
+        if status != ERROR_SUCCESS.0 || data.is_null() {
+            continue;
+        }
+        let _memory = WlanMemory(data.cast_const());
+        if (size as usize) < std::mem::size_of::<WLAN_CONNECTION_ATTRIBUTES>() {
+            continue;
+        }
+        // SAFETY: on success `data` points at a WLAN_CONNECTION_ATTRIBUTES of at least that size,
+        // valid until WlanFreeMemory.
+        let attributes = unsafe { &*data.cast::<WLAN_CONNECTION_ATTRIBUTES>() };
+        if attributes.isState == wlan_interface_state_connected {
+            let ssid = &attributes.wlanAssociationAttributes.dot11Ssid;
+            let len = (ssid.uSSIDLength as usize).min(32);
+            return Ok(Some(String::from_utf8_lossy(&ssid.ucSSID[..len]).into_owned()));
+        }
+    }
+    Ok(None)
+}
+
+/// (Phase 5 Step 20, edge case 32) Profile names whose last connection attempt failed, as the WLAN
+/// service told this process (connection notifications, no polling). A profile leaves the set
+/// when a later attempt with it succeeds.
+static CONNECT_FAILURES: std::sync::Mutex<BTreeSet<String>> = std::sync::Mutex::new(BTreeSet::new());
+/// The client handle the notifications arrive on, kept open for the life of the process.
+static NOTIFY_CLIENT: std::sync::OnceLock<Option<isize>> = std::sync::OnceLock::new();
+
+/// Called by the WLAN service on its own thread. Reads the fixed-size head of the notification
+/// only and never calls back into the WLAN API.
+unsafe extern "system" fn on_wlan_notification(data: *mut L2_NOTIFICATION_DATA, _context: *mut std::ffi::c_void) {
+    if data.is_null() {
+        return;
+    }
+    // SAFETY: the service hands a valid L2_NOTIFICATION_DATA for the length of the call.
+    let head = unsafe { &*data };
+    let complete = head.NotificationCode == wlan_notification_acm_connection_complete.0 as u32;
+    let failed = head.NotificationCode == wlan_notification_acm_connection_attempt_fail.0 as u32;
+    if head.NotificationSource != WLAN_NOTIFICATION_SOURCE_ACM || !(complete || failed) {
+        return;
+    }
+    if head.pData.is_null() || (head.dwDataSize as usize) < std::mem::size_of::<WLAN_CONNECTION_NOTIFICATION_DATA>() {
+        return;
+    }
+    // SAFETY: for these two codes `pData` is a WLAN_CONNECTION_NOTIFICATION_DATA of `dwDataSize` bytes.
+    let info = unsafe { &*head.pData.cast::<WLAN_CONNECTION_NOTIFICATION_DATA>() };
+    let name = utf16_name(&info.strProfileName);
+    if !name.starts_with(PROFILE_PREFIX) {
+        return;
+    }
+    let ok = complete && info.wlanReasonCode == WLAN_REASON_CODE_SUCCESS;
+    let mut failures = CONNECT_FAILURES.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+    if ok {
+        failures.remove(&name);
+    } else if failures.len() < 64 {
+        failures.insert(name);
+    }
+}
+
+/// Starts listening for connection notifications (once per process; a PC without the WLAN
+/// service has nothing to listen to). Changes nothing on the machine.
+fn ensure_notifications() -> bool {
+    NOTIFY_CLIENT
+        .get_or_init(|| {
+            let client = open().ok().flatten()?;
+            // SAFETY: the handle is open; the callback is a static function that lives as long as
+            // the process, and the handle is never closed (it is leaked below).
+            let status = unsafe {
+                WlanRegisterNotification(client.0, WLAN_NOTIFICATION_SOURCE_ACM, true, Some(on_wlan_notification), None, None, None)
+            };
+            if status != ERROR_SUCCESS.0 {
+                return None;
+            }
+            let raw = client.0 .0 as isize;
+            std::mem::forget(client);
+            Some(raw)
+        })
+        .is_some()
+}
+
+/// The Rulebox profiles (`Rulebox-<id>`) whose last connection attempt failed since this process
+/// started listening. The first call starts the listener and answers an empty list. Read-only.
+pub fn last_connect_failures() -> Result<Vec<String>> {
+    if !ensure_notifications() {
+        return Ok(Vec::new());
+    }
+    Ok(CONNECT_FAILURES.lock().unwrap_or_else(std::sync::PoisonError::into_inner).iter().cloned().collect())
 }
 
 /// The name inside `<WLANProfile><name>..</name>`, when it is one of Rulebox's.

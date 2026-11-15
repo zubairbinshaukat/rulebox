@@ -358,6 +358,8 @@ impl EnrollDeps {
             state.last_doc_key_id = None;
             // (Phase 5 Step 15) A lock belongs to the organization the PC leaves.
             state.device_lock = None;
+            // (Phase 5 Step 20) The new organization does not have this PC's sealing key yet.
+            state.seal_key_registered = None;
         }) {
             // The server has the device; a retry with the same code is idempotent.
             tracing::error!("cannot save the enrollment: {error}");
@@ -494,6 +496,9 @@ impl EnrollDeps {
             state.trusted_keys.clear();
             state.last_doc_key_id = None;
             state.device_lock = None;
+            // (Phase 5 Step 20) The sealing key is registered with the next organization again.
+            state.seal_key_registered = None;
+            state.perf_restart = None;
             if removed_staff {
                 state.kiosk = KioskRecord::default();
             }
@@ -728,6 +733,7 @@ mod tests {
                 link: crate::backend::BackendLink::new(),
                 report: crate::report::ReportQueue::new(Arc::clone(&parts.audit)),
                 roster_tx: Arc::new(tokio::sync::watch::channel(crate::roster::RosterState::default()).0),
+                lockdown: None,
             });
             let runner = BackendRunner::new(Arc::clone(&ctx), tokio_util::sync::CancellationToken::new());
             let enroller = Enroller::new(EnrollDeps {
@@ -1322,6 +1328,7 @@ mod tests {
             link: crate::backend::BackendLink::new(),
             report: Arc::clone(&rig.ctx.report),
             roster_tx: Arc::clone(&rig.ctx.roster_tx),
+            lockdown: None,
         });
         let runner = BackendRunner::new(Arc::clone(&ctx), tokio_util::sync::CancellationToken::new());
         let enroller = Enroller::new(EnrollDeps {

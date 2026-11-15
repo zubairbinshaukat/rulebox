@@ -314,12 +314,21 @@ pub struct StatusReport {
     /// the last boot; left out otherwise.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub restart_pending: Option<bool>,
+    /// (Phase 5 Step 20, plan 4.16) The physical-protection report (`lockdown::boot::SecurityReport`
+    /// as JSON): Secure Boot, BitLocker, TPM, auto-recovery, the Safe Mode registration, the
+    /// service DACL and folder-ACL repairs. Left out until the first lockdown pass read it.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub security: Option<serde_json::Value>,
+    /// (Phase 5 Step 20) What this agent can do (`lockdown/1`). Left out by an agent without the
+    /// lockdown runtime (the demo world).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub capabilities: Option<Vec<String>>,
 }
 
 /// The object keys of `StatusReport` that `devices:heartbeat` accepts (`convex/lib/deviceReport.ts`,
 /// `statusValidator`). A test pins the serialized key set to this list.
 #[cfg(test)]
-pub const STATUS_KEYS: [&str; 14] = [
+pub const STATUS_KEYS: [&str; 16] = [
     "agentVersion",
     "os",
     "osBuild",
@@ -334,6 +343,8 @@ pub const STATUS_KEYS: [&str; 14] = [
     "compat",
     "trustedKeyIds",
     "restartPending",
+    "security",
+    "capabilities",
 ];
 
 #[derive(Debug, Clone, PartialEq)]
@@ -488,6 +499,8 @@ mod tests {
             compat: serde_json::json!({ "blockers": [] }),
             trusted_key_ids: Some(vec!["21fe31dfa154a261".into()]),
             restart_pending: Some(false),
+            security: Some(serde_json::json!({ "secureBoot": "on" })),
+            capabilities: Some(vec!["lockdown/1".into()]),
         }
     }
 
@@ -528,6 +541,8 @@ mod tests {
             compat: serde_json::json!({}),
             trusted_key_ids: None,
             restart_pending: None,
+            security: None,
+            capabilities: None,
         };
         let keys = keys_of(&sparse);
         assert_eq!(keys.into_iter().collect::<Vec<_>>(), ["agentVersion", "compat"]);

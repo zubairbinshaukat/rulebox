@@ -361,6 +361,13 @@ pub trait Platform: Send + Sync + 'static {
     fn get_service_required_privileges(&self, name: &str) -> Result<Vec<String>, PlatformError>;
     fn get_account_lockout(&self) -> Result<LockoutPolicy, PlatformError>;
     fn wlan_list(&self) -> Result<WlanState, PlatformError>;
+    /// (Phase 5 Step 20, invariant I5) The Wi-Fi network the PC is connected to now; `None`:
+    /// wired, offline or no wireless adapter. Read-only.
+    fn wlan_current_ssid(&self) -> Result<Option<String>, PlatformError>;
+    /// (Phase 5 Step 20, edge case 32) The names of the Rulebox profiles (`Rulebox-<id>`) whose
+    /// last connection attempt failed, as the WLAN service's notifications said (no polling, no
+    /// scan). Empty until an attempt failed since the agent started. Read-only.
+    fn wlan_last_connect_failures(&self) -> Result<Vec<String>, PlatformError>;
     fn printer_list(&self) -> Result<Vec<PrinterInfo>, PlatformError>;
     /// A queue's DACL as SDDL (the journal's `Sddl` original). `Ok(None)`: no such queue.
     fn printer_get_security(&self, name: &str) -> Result<Option<String>, PlatformError>;

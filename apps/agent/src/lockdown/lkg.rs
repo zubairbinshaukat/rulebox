@@ -151,7 +151,14 @@ struct Inner {
     staff_active: bool,
     /// The decision waiting for the owner.
     pending: Option<RollbackReason>,
+    /// (Step 20) The agent itself is about to end the Staff App (an admin exit, Disable): until
+    /// this time, or until the Staff session is gone, a Staff App that goes away is not a crash.
+    expected_exit_until_ms: Option<u64>,
 }
+
+/// How long after the agent announced that it ends the Staff session a closed Staff App
+/// connection is still "expected" (the exit's 2 s grace plus the sign-out retries, with room).
+pub const EXPECTED_EXIT_MS: u64 = 60_000;
 
 /// The LKG store and the probation logic. Shared (`Arc`) between the watchdog, which feeds it, and
 /// the reconciler, which acts on its decisions.
@@ -170,7 +177,34 @@ impl LkgMonitor {
     pub fn open(path: PathBuf) -> std::io::Result<Self> {
         let mut file = read_json::<LkgFile>(&path)?.unwrap_or_default();
         file.schema = 1;
-        Ok(Self { path, inner: Mutex::new(Inner { file, staff_active: false, pending: None }), wake: Notify::new() })
+        Ok(Self {
+            path,
+            inner: Mutex::new(Inner { file, staff_active: false, pending: None, expected_exit_until_ms: None }),
+            wake: Notify::new(),
+        })
+    }
+
+    /// (Step 20) The agent is about to sign the Staff session out on purpose (a correct exit PIN,
+    /// Disable). The Staff App closing in the next [`EXPECTED_EXIT_MS`] is not a crash and never
+    /// counts toward a rollback.
+    pub fn expect_shell_exit(&self, now_ms: u64) {
+        lock(&self.inner).expected_exit_until_ms = Some(now_ms.saturating_add(EXPECTED_EXIT_MS));
+    }
+
+    /// The announced exit did not happen (the request was withdrawn, the sign-out failed).
+    pub fn cancel_expected_exit(&self) {
+        lock(&self.inner).expected_exit_until_ms = None;
+    }
+
+    /// (Step 20) The kiosk was disabled and every layer restored: nothing is on probation any
+    /// more, and no rollback may fire for a document that is no longer applied. The LKG copy and
+    /// the refused list stay.
+    pub fn drop_candidate(&self) {
+        let mut inner = lock(&self.inner);
+        inner.pending = None;
+        if inner.file.candidate.take().is_some() {
+            self.save(&inner);
+        }
     }
 
     fn save(&self, inner: &Inner) {
@@ -244,6 +278,10 @@ impl LkgMonitor {
             return;
         }
         inner.staff_active = active;
+        if !active {
+            // The session the agent ended is gone: the next Staff App that disappears is news again.
+            inner.expected_exit_until_ms = None;
+        }
         let mut changed = false;
         if let Some(candidate) = inner.file.candidate.as_mut() {
             if candidate.healthy_at_ms.is_none() {
@@ -256,6 +294,8 @@ impl LkgMonitor {
         }
         if changed {
             self.save(&inner);
+            // (Step 20) The owner's timer follows the window (`next_deadline` moved).
+            self.wake.notify_one();
         }
     }
 
@@ -275,6 +315,7 @@ impl LkgMonitor {
         }
         if changed {
             self.save(&inner);
+            self.wake.notify_one();
         }
         self.settle(&mut inner, now_ms)
     }
@@ -282,6 +323,10 @@ impl LkgMonitor {
     /// A Staff App crash seen by the launcher watchdog while the Staff session was active.
     pub fn on_shell_crash(&self, now_ms: u64) -> Option<LkgEvent> {
         let mut inner = lock(&self.inner);
+        // (Step 20) A deliberate admin exit or Disable ends the Staff App too: not a crash.
+        if inner.expected_exit_until_ms.is_some_and(|until| now_ms <= until) {
+            return None;
+        }
         let mut decided = None;
         if let Some(candidate) = inner.file.candidate.as_mut() {
             candidate.crashes.push(now_ms);
@@ -397,6 +442,7 @@ impl LkgMonitor {
             lockdown: safe.lockdown,
             wifi: safe.wifi,
             wifi_managed_only: safe.wifi_managed_only,
+            wifi_managed_only_confirmed: safe.wifi_managed_only_confirmed,
             printers: safe.printers,
             ..doc
         }
@@ -407,6 +453,7 @@ impl LkgMonitor {
         let mut inner = lock(&self.inner);
         inner.file = LkgFile { schema: 1, ..LkgFile::default() };
         inner.pending = None;
+        inner.expected_exit_until_ms = None;
         crate::state::remove_file_if_exists(&self.path)
     }
 }

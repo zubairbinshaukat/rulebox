@@ -11,8 +11,9 @@
 //!
 //! Step 6 added L4 (`appcontrol`). Step 7 added L3 (`applocker`, with the allow-list model of
 //! `allowlist`) and the file-output printers of L2 (`printers`). Step 8 added L5 (`procwatch`,
-//! on the process-start trace of `rulebox_win32::etw`); its `ProcWatchHost` is wired into the
-//! reconciler by Step 20, so `apply::run_layer` still reports L5 as off.
+//! on the process-start trace of `rulebox_win32::etw`); its `ProcWatchHost` holds a running
+//! trace, so it belongs to the runtime, not to `apply::run_layer` (which says "off" for L5 and
+//! is overwritten with the watch's own state by `runtime`).
 //!
 //! Step 9 added what the lockdown says about itself: `findings` (what the layers would stop or
 //! stopped, privacy-reduced), `daily` (the security counters per server day), `drift` (values
@@ -23,8 +24,11 @@
 //! Step 17 added the tamper part of L7 (`tamper`: the agent service's DACL and required
 //! privileges, the ACL self-check of the Rulebox folders, and the clock-jump watch).
 //!
-//! Not wired into the reconciler yet (Step 20 does that), so the items are unused in
-//! a non-test build for now.
+//! Step 20 wired all of it into the live agent: `runtime` is what the kiosk reconciler calls
+//! (one pass per trigger: apply, process watch, drift, tamper, findings, reports, probation), and
+//! `status` is the read-only `rulebox-agent lockdown-status`.
+//!
+//! Some helpers are only read by the tests and by `lockdown-status`.
 #![allow(dead_code)]
 
 use serde::{Deserialize, Serialize};
@@ -45,7 +49,10 @@ pub mod perf;
 pub mod printers;
 pub mod procwatch;
 pub mod reporting;
+// (Step 20) The live wiring and the read-only status command.
+pub mod runtime;
 pub mod staff;
+pub mod status;
 pub mod tamper;
 pub mod usb;
 

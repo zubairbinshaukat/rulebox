@@ -432,9 +432,8 @@ impl WatchdogTask {
         }
     }
 
-    /// (Phase 5 Step 9) Tells `sink` about heartbeats, crashes and the Staff session. The agent
-    /// wires its last-known-good monitor in here in Step 20.
-    #[allow(dead_code)]
+    /// (Phase 5 Step 9) Tells `sink` about heartbeats, crashes and the Staff session: the agent's
+    /// last-known-good monitor (wired by [`run`], Step 20).
     pub fn set_health_sink(&mut self, sink: Arc<dyn ShellHealthSink>) {
         self.health_sink = Some(sink);
     }
@@ -627,9 +626,14 @@ pub async fn run(
     deps: WatchdogDeps,
     mut signals: mpsc::UnboundedReceiver<ShellSignal>,
     mut events: mpsc::UnboundedReceiver<()>,
+    health_sink: Option<Arc<dyn ShellHealthSink>>,
     shutdown: CancellationToken,
 ) {
     let mut task = WatchdogTask::new(deps);
+    // (Phase 5 Step 20) The last-known-good monitor hears about heartbeats, crashes and the session.
+    if let Some(sink) = health_sink {
+        task.set_health_sink(sink);
+    }
     let mut tick = tokio::time::interval(TICK);
     tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
     let mut events_open = true;

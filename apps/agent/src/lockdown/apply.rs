@@ -6,7 +6,8 @@
 //! 2. `invariants::validate` (4.6, Step 4): `refused` with a code; nothing is written.
 //! 3. Apply the layers in [`APPLY_ORDER`], each through `journal::change`.
 //! 4. Each layer returns a [`LayerState`].
-//! 5. The caller records the result and sends one apply report (Step 20).
+//! 5. The caller (`runtime::LockdownRuntime::pass`, Step 20) adds the process watch, records the
+//!    result and offers one apply report.
 //!
 //! Before step 1 the journal is checked: an entry this build cannot restore stops the
 //! apply (`journal_unknown_target`, invariant I8) and nothing is written.
@@ -96,7 +97,7 @@ pub struct ApplyOutcome {
     /// unsupported`), for the apply report.
     pub wifi: Vec<WifiItemState>,
     /// (Step 13) A fixed code when the "managed networks only" permit list could not be set or
-    /// restored; the apply report has no field for it yet (open question, Step 20).
+    /// restored. The runtime (Step 20) reports it as the machine layer's `partial / wifi_filters_error`.
     pub wifi_filters_error: Option<&'static str>,
     /// (Step 14) One state per printer of the document (`applied | failed`), for the apply report.
     pub printers: Vec<PrinterItemState>,
@@ -222,17 +223,25 @@ impl ApplyRefusal {
     }
 }
 
-/// Applies a verified document's Phase 5 keys.
-pub fn apply(ctx: &ApplyCtx<'_>, doc: &AgentDoc) -> Result<ApplyOutcome, ApplyRefusal> {
+/// (Step 20) Everything that can refuse a document, without applying it: the journal check, the
+/// limits of 4.3 rule 4 and the invariants of 4.6. Read-only (`lockdown-status` runs it as its
+/// invariant self-check).
+pub fn check(ctx: &ApplyCtx<'_>, doc: &AgentDoc) -> Result<(), ApplyRefusal> {
     if ctx.journal.shared.read(|state| journal::unknown_target(state).is_some()) {
         return Err(ApplyRefusal::JournalUnknownTarget);
     }
     doc.check_limits(ctx.now_ms).map_err(ApplyRefusal::PolicyRejected)?;
+    let effective = usb::with_temp_allow(doc, ctx.now_ms);
+    validate_invariants(ctx, &effective)
+}
+
+/// Applies a verified document's Phase 5 keys.
+pub fn apply(ctx: &ApplyCtx<'_>, doc: &AgentDoc) -> Result<ApplyOutcome, ApplyRefusal> {
+    check(ctx, doc)?;
     // While a `usbTempAllow` runs, the USB class blocks are lifted for every layer; when
     // it has ended the next apply (the agent's own timer) writes them again.
     let effective = usb::with_temp_allow(doc, ctx.now_ms);
     let doc = &*effective;
-    validate_invariants(ctx, doc)?;
 
     let mut layers = LayerStates::all_off();
     let mut ran = Vec::with_capacity(APPLY_ORDER.len());

@@ -123,6 +123,10 @@ pub struct TaskContext {
     pub report: Arc<ReportQueue>,
     /// (Step 13) Every verified roster that was saved (the session layer reads it).
     pub roster_tx: Arc<watch::Sender<RosterState>>,
+    /// (Phase 5 Step 20) The lockdown runtime: told about every clock check (the clock-jump
+    /// watch) and every ping that went out (a finished day of counters may ride along). `None`
+    /// in the demo world and in tests that do not need it.
+    pub lockdown: Option<Arc<crate::lockdown::runtime::LockdownRuntime>>,
 }
 
 /// A random number in `0..=max` from the OS random source.
@@ -352,6 +356,11 @@ impl DesiredSync {
 /// does not raise the stored highest value: one wrong "forward" reading (a flat
 /// CMOS battery can give any date) would otherwise count as the floor forever.
 pub fn note_clock(ctx: &TaskContext) {
+    // (Phase 5 Step 17, wired in Step 20) The clock-jump watch looks first: it compares with the
+    // "highest clock seen" as it was before this check raises it.
+    if let Some(lockdown) = &ctx.lockdown {
+        lockdown.note_clock();
+    }
     let now = (ctx.now_ms)();
     let floor = ctx.shared.last_wall_clock_ms();
     let behind = floor > now && floor - now > CLOCK_SUSPECT_MS;
@@ -446,6 +455,9 @@ pub fn build_status(ctx: &TaskContext, desired_problem: Option<&str>) -> Option<
         trusted_key_ids: Some(trust::trusted_key_ids(&state.trusted_keys)),
         // (Step 14) Set by the install engine after an MSI returned 3010 / 1641.
         restart_pending: ctx.report.restart_pending(),
+        // (Phase 5 Step 20) Set by the lockdown runtime after each pass.
+        security: ctx.report.security(),
+        capabilities: ctx.report.capabilities(),
     })
 }
 
@@ -1249,6 +1261,10 @@ pub async fn run_backend_task(
                                 None => clear_server_time(&ctx),
                             }
                             note_clock(&ctx);
+                            // (Phase 5 Step 20) The PC is talking to the server anyway.
+                            if let Some(lockdown) = &ctx.lockdown {
+                                lockdown.heartbeat();
+                            }
                             pinger.note_plan_state(&answer.plan_state);
                             pinger.schedule(&ctx);
                             // Single flight: no rotation starts while a rotation call or a
@@ -1523,6 +1539,7 @@ mod tests {
                 link: BackendLink::new(),
                 report: crate::report::ReportQueue::new(audit),
                 roster_tx: Arc::new(watch::channel(RosterState::default()).0),
+                lockdown: None,
             });
             Self { dir, ctx, control, policy_rx, snapshot_rx, clock, jitter_ms }
         }

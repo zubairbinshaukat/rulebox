@@ -234,6 +234,8 @@ impl Engine {
             self.install_driver(id, &plan, &roots, shutdown).await
         };
         self.finish_driver(id, outcome);
+        // (Step 20) A printer of the document may have been waiting for this driver.
+        (self.deps.on_driver_change)();
     }
 
     async fn install_driver(&self, id: &str, plan: &DriverPlan, roots: &PathRoots, shutdown: &CancellationToken) -> Outcome {

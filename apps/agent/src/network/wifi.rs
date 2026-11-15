@@ -15,7 +15,9 @@
 //!   `would_disconnect`) are decided before any layer runs, in `lockdown::invariants`.
 //!
 //! The states are the fixed codes `applied | waiting_for_key | failed | unsupported`; `detail`
-//! is a fixed code too, never Windows text. Not reached by the reconciler until Step 20.
+//! is a fixed code too, never Windows text. The lockdown runtime (Step 20) adds two codes on top:
+//! ailed / connect_failed for an installed profile whose last connection attempt failed, and
+//! the machine layer's wifi_filters_error when the permit list could not be set or put back.
 
 use rulebox_policy::network::{WifiProfile, WifiSecurity};
 use rulebox_policy::seal::{open_sealed, SealError};

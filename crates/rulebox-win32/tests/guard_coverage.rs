@@ -36,7 +36,10 @@ const MODULES: &[Module] = &[
     Module { file: "codeintegrity", read_only: &["active_dir", "list_policies", "read_policy", "citool_available"], guarded: 3 },
     Module { file: "applocker", read_only: &["get_policy"], guarded: 2 },
     Module { file: "service", read_only: &["query", "get_security", "get_required_privileges"], guarded: 3 },
-    Module { file: "wlan", read_only: &["list"], guarded: 3 },
+    // (Step 20) `current_ssid` reads the interface's connection; `last_connect_failures` reads what the
+    // WLAN service's connection notifications told this process (registering for them changes nothing
+    // on the machine: no profile, no filter, no setting).
+    Module { file: "wlan", read_only: &["list", "current_ssid", "last_connect_failures"], guarded: 3 },
     // (Step 7) `is_file_output_port` only classifies a port name.
     // (Step 14) `list_drivers` and `list_ports` only read; `add_port`, `delete_port`, `connect_share` and `disconnect_share` are guarded.
     Module { file: "printing", read_only: &["list", "get_security", "is_file_output_port", "list_drivers", "list_ports"], guarded: 7 },
