@@ -2,7 +2,8 @@
 //!
 //! `CreateProcessW` with the full path as the application name, a quoted command
 //! line, the exe's folder as working directory and the launcher's own environment
-//! (the Staff user's). No arguments (plan Section 6.9).
+//! (the Staff user's). No arguments (plan Section 6.9); the only exception is the
+//! debug-only, test-machine-only crash-loop flag in `crashflag.rs`.
 
 use std::path::Path;
 use std::sync::OnceLock;
@@ -79,11 +80,23 @@ fn win32_code(e: &windows::core::Error) -> u32 {
     }
 }
 
-/// Starts `exe` and blocks until it ends. Returns its exit code.
-pub fn run_to_exit(exe: &Path) -> Result<u32, RunError> {
+/// The quoted command line: the exe, then each argument after a space. The arguments are
+/// fixed words from the launcher itself (see `crashflag.rs`), never user input.
+fn command_line_text(exe: &Path, args: &[&str]) -> String {
+    let mut text = format!("\"{}\"", exe.to_string_lossy());
+    for arg in args {
+        text.push(' ');
+        text.push_str(arg);
+    }
+    text
+}
+
+/// Starts `exe` and blocks until it ends. Returns its exit code. `args` is empty in every
+/// release build.
+pub fn run_to_exit(exe: &Path, args: &[&str]) -> Result<u32, RunError> {
     let app = to_wide(&exe.to_string_lossy());
     // The command line is writable memory (CreateProcessW may modify it).
-    let mut command_line = to_wide(&format!("\"{}\"", exe.to_string_lossy()));
+    let mut command_line = to_wide(&command_line_text(exe, args));
     let dir = exe.parent().map(|d| to_wide(&d.to_string_lossy()));
 
     let startup = STARTUPINFOW { cb: std::mem::size_of::<STARTUPINFOW>() as u32, ..Default::default() };
@@ -149,7 +162,17 @@ mod tests {
     fn a_program_that_ends_gives_its_exit_code() {
         let root = std::env::var_os("SystemRoot").expect("SystemRoot is always set on Windows");
         let exe = std::path::PathBuf::from(root).join("System32").join("whoami.exe");
-        assert_eq!(run_to_exit(&exe), Ok(0));
+        assert_eq!(run_to_exit(&exe, &[]), Ok(0));
+    }
+
+    #[test]
+    fn the_command_line_has_no_arguments_by_default_and_appends_them_when_given() {
+        let exe = Path::new(r"C:\Rulebox\versions\1.0.0\rulebox-staff.exe");
+        assert_eq!(command_line_text(exe, &[]), r#""C:\Rulebox\versions\1.0.0\rulebox-staff.exe""#);
+        assert_eq!(
+            command_line_text(exe, &["--simulate-crash-loop"]),
+            r#""C:\Rulebox\versions\1.0.0\rulebox-staff.exe" --simulate-crash-loop"#
+        );
     }
 
     /// The orphan found on the VM: when the launcher is killed, its Staff App must
@@ -184,7 +207,7 @@ mod tests {
     #[test]
     fn a_missing_exe_is_a_create_error() {
         let path = std::env::temp_dir().join("rulebox-shell-test-no-such-program.exe");
-        match run_to_exit(&path) {
+        match run_to_exit(&path, &[]) {
             Err(RunError::Create(code)) => assert!(code == 2 || code == 3, "unexpected code {code}"),
             other => panic!("expected a Create error, got {other:?}"),
         }

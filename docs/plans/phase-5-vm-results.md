@@ -167,7 +167,7 @@ Use the pilot ring. The VM is the only pilot device.
 | # | Do this | Expected | Result | Notes |
 |---|---|---|---|---|
 | 4-01 | Publish the prepared exception set that removes the WebView2 runtime from the Staff allow list (pilot only). | The validator **refuses** it: `would_block_rulebox`. The device keeps its old state. Dashboard shows the refusal in plain words. Audit `device.lockdownRefused`. | | |
-| 4-02 | Start the Staff App with the debug flag `--simulate-crash-loop` (it ends itself 5 s after `shell.ready`, exit code 0xC0000005). **How the launcher passes this flag is not defined in the plan.** Settle it before the run; see "Open points" at the bottom. Then publish a config the validator accepts. | The launcher watchdog sees 3 crashes in 5 minutes, or no `ui_alive` within 180 s. Seconds from apply to rollback recorded. | | |
+| 4-02 | Make the Staff App crash on every start, then publish a config the validator accepts. The debug launcher (`rulebox-shell.exe`, the debug build from P-05) passes the Staff App's debug flag `--simulate-crash-loop` (it ends itself 5 s after `shell.ready`, exit code 0xC0000005) only when **both** the flag file and the test-machine marker (P-03) are present. Steps, in the VM as admin: **(a)** create the empty flag file next to the launcher: `New-Item -ItemType File 'C:\Program Files\Rulebox\simulate-crash-loop.flag'`. **(b)** Sign in as the Staff user and let the Staff App run. The launcher reads the file at every Staff App start, so end the running Staff App once to restart it with the flag: `Stop-Process -Name rulebox-staff -Force` (the launcher starts it again by itself). Check the Staff user's `%LOCALAPPDATA%\Rulebox\logs\shell-launcher.log` for "found on a marked test machine" and for exit code `0xC0000005` about 5 s after each start. **(c)** Publish the config from the dashboard and note the time. **(d)** After 4-03 and 4-04, **delete the file**: `Remove-Item 'C:\Program Files\Rulebox\simulate-crash-loop.flag'`, and end the Staff App once more so it starts without the flag. Do not leave the file in place for rows 4-05 to 4-08 unless a row needs the crash again. A release build never reads the file; a missing marker makes the launcher log "ignored" and start the Staff App as normal. | The launcher watchdog sees 3 crashes in 5 minutes, or no `ui_alive` within 180 s. Seconds from apply to rollback recorded. | | |
 | 4-03 | Read the result: device page, agent log, Convex audit. | Agent restores the last-known-good lockdown by itself. Apply report `rolledBack`. Audit `device.lockdownRolledBack` (detail `crash_loop`). The Staff App runs again. | | |
 | 4-04 | Dashboard group page after 4-03. | Rollout is `halted` with a red banner and a reason. Pilot returns to the early version when auto-rollback is on. Screenshot `4-04-halted.png`. | | |
 | 4-05 | Publish the same bad config version again, and also send a broadcast. | The refused version is not applied again (reported `rolledBack`). The broadcast still arrives (non-gated keys keep working). | | |
@@ -557,10 +557,11 @@ When the whole run is done, revert the VM to its checkpoint so the next run star
 
 ## Open points before you start
 
-- **`--simulate-crash-loop` (row 4-02).** The Staff App has the flag (debug builds only). I found
-  no place in the launcher where it is passed, and the plan does not say how. Ask Claude to add
-  a way before the run (for example a flag file the debug launcher reads), or the row stays
-  `SKIP`.
+- **`--simulate-crash-loop` (row 4-02): settled.** The debug launcher passes the flag when the
+  file `simulate-crash-loop.flag` is in its install folder (`C:\Program Files\Rulebox\`) and the
+  test-machine marker is present (`apps/shell-launcher/src/crashflag.rs`). Release builds
+  compile it out. The exact steps are in row 4-02. Rebuild and re-copy `rulebox-shell.exe`
+  (P-05, P-06) so the VM has this change.
 - **Escape-row count.** The plan's checklist note says 74 rows are written. Section 6 actually has
   77 rows (E-01..E-06, E-10..E-19, E-20..E-25, E-30..E-39, E-40..E-48, E-50..E-55, E-60..E-69,
   E-70..E-79, E-80..E-89). This file lists all 77.

@@ -9,6 +9,7 @@
 #![cfg_attr(not(test), windows_subsystem = "windows")]
 
 mod backoff;
+mod crashflag;
 mod current;
 mod exit;
 mod fallback;
@@ -108,7 +109,10 @@ impl Host for RealHost {
     }
 
     fn run(&mut self, exe: &Path) -> Result<u32, RunError> {
-        process::run_to_exit(exe)
+        // Empty in every release build. In a debug build on a marked test machine it can
+        // carry `--simulate-crash-loop` (see `crashflag.rs`).
+        let args = crashflag::staff_args(&self.install_dir);
+        process::run_to_exit(exe, &args)
     }
 
     fn fallback(&mut self, reason: &str) -> FallbackChoice {
