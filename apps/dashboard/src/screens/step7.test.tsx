@@ -569,7 +569,8 @@ describe("DeviceDetail (fleet:get)", () => {
     const move = vi.fn(async () => ({ revision: 8 }));
     cx.fns["fleet:move"] = move;
     const view = open();
-    fireEvent.change(screen.getByRole("combobox"), { target: { value: "g2" } });
+    // (Phase 5 Step 19 added the ring and "Allow USB" selects: the group picker is named.)
+    fireEvent.change(screen.getByLabelText(deviceStrings.group), { target: { value: "g2" } });
     fireEvent.click(screen.getByRole("button", { name: deviceStrings.move }));
     await waitFor(() => expect(move).toHaveBeenCalledWith({ deviceId: "d1", expectedRevision: 7, groupId: "g2" }));
     view.unmount();

@@ -19,6 +19,7 @@ import {
   MAX_GROUP_NAME,
   MAX_GROUPS_LISTED,
 } from "./lib/limits";
+import { DEFAULT_LOCKDOWN_SETTINGS } from "./lib/lockdownValidators";
 import { assertWithinLimit, bumpOrgStats, bumpStats } from "./lib/plans";
 import { requestPublish } from "./lib/publish";
 import { appKind, audience } from "./lib/validators";
@@ -211,6 +212,13 @@ export const create = memberMutation("admin")({
       createdAt: Date.now(),
     });
     await bumpStats(ctx, stats, { groupCount: 1 });
+    // Phase 5 Step 19: the group starts with the lockdown defaults (program rules in audit mode), stored as its own row so the
+    // overview can warn when they are still in audit after 14 days (`groupLockdown.by_org_audit`). Same content as the fallback
+    // the builder used before, so the first configuration version does not change.
+    const org = await ctx.db.get(ctx.orgId);
+    const settings = org?.phase5Settings?.newGroupDefaults ?? DEFAULT_LOCKDOWN_SETTINGS;
+    const inAudit = settings.appLocker.mode === "audit" || settings.appControl.mode === "audit" || settings.procWatch.mode === "audit";
+    await ctx.db.insert("groupLockdown", { orgId: ctx.orgId, groupId, settings, revision: 0, auditSince: inAudit ? Date.now() : undefined });
     await writeAudit(ctx, {
       orgId: ctx.orgId,
       actor: ctx.actor,
@@ -296,6 +304,12 @@ export const remove = memberMutation("admin", { major: "groups:remove" })({
     if (dependents.length > 0) fail("has_dependents", { detail: dependents.join(", ") });
 
     await ctx.db.delete(group._id);
+    // Step 19: its lockdown settings row goes with it (else the overview would keep warning about a group that is gone).
+    const lockdown = await ctx.db
+      .query("groupLockdown")
+      .withIndex("by_group", (q) => q.eq("groupId", group._id))
+      .unique();
+    if (lockdown !== null) await ctx.db.delete(lockdown._id);
     // The default group was never counted (it is not one of the plan's groups).
     if (group.isDefault !== true) await bumpOrgStats(ctx, ctx.orgId, { groupCount: -1 });
     await writeAudit(ctx, {

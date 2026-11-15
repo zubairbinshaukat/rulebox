@@ -858,7 +858,12 @@ export default defineSchema({
     groupId: v.id("groups"),
     settings: lockdownSettings,
     revision: v.number(),
-  }).index("by_group", ["groupId"]),
+    // Step 19: when the group's program rules (AppLocker, App Control, process watch) first went into audit mode and at
+    // least one has stayed there since; missing = none is in audit. The overview reads the old ones through `by_org_audit`.
+    auditSince: v.optional(v.number()),
+  })
+    .index("by_group", ["groupId"])
+    .index("by_org_audit", ["orgId", "auditSince"]),
 
   // grows slowly (<= 200 per group, MAX_GROUP_EXCEPTIONS). `groupId` missing = the whole organization.
   lockdownExceptions: defineTable({
@@ -924,7 +929,9 @@ export default defineSchema({
     updatedAt: v.number(),
   })
     .index("by_device", ["deviceId"])
-    .index("by_org_config", ["orgId", "config.groupId", "config.version"]),
+    .index("by_org_config", ["orgId", "config.groupId", "config.version"])
+    // Step 19: the overview's "did not apply the lockdown policy" warning (refused, rolled back): a few rows, never a scan.
+    .index("by_org_state", ["orgId", "state"]),
 
   // grows (<= 1 per device per day, only non-zero days; 14-day retention)
   deviceSecurityDaily: defineTable({
@@ -1061,7 +1068,9 @@ export default defineSchema({
     revision: v.number(),
   })
     .index("by_group", ["groupId"])
-    .index("by_state_stage", ["state", "stageStartedAt"]),
+    .index("by_state_stage", ["state", "stageStartedAt"])
+    // Step 19: the overview's "rollout halted" warning.
+    .index("by_org_state", ["orgId", "state"]),
 
   // grows (1 per locked device)
   deviceLocks: defineTable({

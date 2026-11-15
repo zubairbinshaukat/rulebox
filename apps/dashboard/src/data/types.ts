@@ -452,6 +452,26 @@ export interface DeviceDetail {
   groups: GroupOption[];
 }
 
+/**
+ * The lockdown part of `fleet:get` (Phase 5 Step 19), read by the device page's Protection, Lockdown and USB cards through
+ * `useDeviceLockdown` (the lockdown seam). Same query and arguments as the page itself, so it is the SAME subscription.
+ */
+export interface DeviceLockdown {
+  /** The PC's rollout ring, its group and that group's rollout revision (what `rollouts:setRings` wants back). */
+  ring: Ring;
+  groupId: Id | null;
+  rolloutRevision: number;
+  revoked: boolean;
+  /** "Allow USB for this PC": until when (ms), or null. */
+  usbAllowUntil: number | null;
+  /** Physical protection as the agent reports it (plan 4.16); null until it reports. */
+  protection: SecurityPosture | null;
+  /** Does the agent know lockdown? null before its first report. */
+  lockdownCapable: boolean | null;
+  /** The PC's apply report (fixed codes only); null until it sends one. */
+  apply: ApplyReport | null;
+}
+
 /** `deviceLocks` of one PC: the text the lock view shows on every monitor. */
 export interface DeviceLock {
   lockId: string;
@@ -1030,6 +1050,8 @@ export interface OverviewScreen {
   /** A revocation / roster update is waiting to be signed (`rosterPending` rows exist). */
   rosterPending: boolean;
   recentAudit: AuditEntry[];
+  /** Phase 5 Step 19: lockdown warnings, at most three rows each. Missing on an older server: none. */
+  lockdown?: LockdownWarnings;
 }
 
 // ---------------------------------------------------------------- rollout rings (Phase 5 Step 16, plan 4.14)
@@ -1084,4 +1106,205 @@ export interface RolloutHealth {
   waiting: number;
   pilotRolledBack: boolean;
   reportsCapped: boolean;
+}
+
+// ---------------------------------------------------------------- lockdown (Phase 5 Step 19, plan 4.3, 4.20)
+
+export type LayerMode = "off" | "audit" | "enforce";
+export const LAYER_MODES: readonly LayerMode[] = ["off", "audit", "enforce"];
+export type AppControlLevel = "recommendedBlocks" | "allowlist";
+export type UsbStorageMode = "allow" | "readOnly" | "block";
+export type UsbSwitch = "allow" | "block";
+
+/** `groupLockdown.settings` (`convex/lib/lockdownValidators.ts`): `true` = restricted. */
+export interface LockdownSettings {
+  staff: {
+    taskManager: boolean;
+    run: boolean;
+    commandPrompt: boolean;
+    registryTools: boolean;
+    settings: boolean;
+    signOut: boolean;
+    changePassword: boolean;
+    hideDrives: boolean;
+    accessibilityHotkeys: boolean;
+    officeMacros: boolean;
+  };
+  machine: {
+    hideSwitchUser: boolean;
+    hideSignInPower: boolean;
+    denyElevationRequests: boolean;
+    hideAdminTiles: boolean;
+    noWakePassword: boolean;
+    restrictPrinterDrivers: boolean;
+    fileOutputPrinters: boolean;
+    /** null = leave the PC's own setting alone. */
+    accountLockout: { threshold: number; durationMin: number; windowMin: number } | null;
+  };
+  appLocker: { mode: LayerMode };
+  appControl: { mode: LayerMode; level: AppControlLevel };
+  procWatch: { mode: LayerMode };
+  keyboard: { winCombos: "pass" | "swallow" };
+  /** USB by device class. Keyboards, mice, touch screens and hubs are not here: nothing can block them. */
+  usb: { storage: UsbStorageMode; printers: UsbSwitch; imaging: UsbSwitch; phones: UsbSwitch; other: UsbSwitch; retroactive: boolean };
+  accessibilityTools: boolean;
+  boot: { autoRecovery: "leave" | "off"; safeModeGuard: boolean };
+  performance: { staffTuning: boolean; kioskProfile: boolean; noPrinting: boolean };
+  wifiManagedOnly: boolean;
+}
+
+/** The defaults of a new group (plan 4.3). */
+export const DEFAULT_LOCKDOWN_SETTINGS: LockdownSettings = {
+  staff: {
+    taskManager: true,
+    run: true,
+    commandPrompt: true,
+    registryTools: true,
+    settings: true,
+    signOut: true,
+    changePassword: true,
+    hideDrives: true,
+    accessibilityHotkeys: true,
+    officeMacros: true,
+  },
+  machine: {
+    hideSwitchUser: true,
+    hideSignInPower: true,
+    denyElevationRequests: true,
+    hideAdminTiles: true,
+    noWakePassword: true,
+    restrictPrinterDrivers: true,
+    fileOutputPrinters: true,
+    accountLockout: { threshold: 10, durationMin: 15, windowMin: 15 },
+  },
+  appLocker: { mode: "audit" },
+  appControl: { mode: "audit", level: "recommendedBlocks" },
+  procWatch: { mode: "audit" },
+  keyboard: { winCombos: "swallow" },
+  usb: { storage: "allow", printers: "allow", imaging: "allow", phones: "allow", other: "allow", retroactive: false },
+  accessibilityTools: false,
+  boot: { autoRecovery: "off", safeModeGuard: true },
+  performance: { staffTuning: true, kioskProfile: true, noPrinting: false },
+  wifiManagedOnly: false,
+};
+
+export type ExceptionKind = "publisher" | "hash" | "path";
+
+/** One exception of a group (`lockdown:groupView`). A hash rule shows only the start of the hash. */
+export interface ExceptionRow {
+  _id: Id;
+  rule: { kind: ExceptionKind; subject: string | null; product: string | null; fileName: string | null; hashStart: string | null; path: string | null };
+  appName: string | null;
+  reason: string;
+  createdAt: number;
+}
+
+/** `lockdown:groupView` */
+export interface LockdownView {
+  groupName: string;
+  settings: LockdownSettings;
+  /** What `lockdown:update` wants back as `expectedRevision` (0 = never saved). */
+  revision: number;
+  /** When the program rules went into audit mode; null when none is in audit. */
+  auditSince: number | null;
+  exceptions: ExceptionRow[];
+  exceptionsTruncated: boolean;
+  /** Open findings of the organization, capped: `openFindingsMore` = more than that. */
+  openFindings: number;
+  openFindingsMore: boolean;
+}
+
+export type FindingStatus = "new" | "allowed" | "ignored";
+export const FINDING_STATUSES: readonly FindingStatus[] = ["new", "allowed", "ignored"];
+export type FindingLayer = "appLocker" | "appControl" | "procWatch";
+
+/** `lockdown:findings` row: one program. Never a path, a command line or a list of PCs. */
+export interface FindingRow {
+  _id: Id;
+  layer: FindingLayer;
+  fileName: string;
+  /** `windows`, `programFiles`, `rulebox`, `userProfile`, `userTemp`, `removable`, `network`, `other`. */
+  folderClass: string;
+  signer: string | null;
+  product: string | null;
+  /** The PC sent the file's hash, so a hash rule can be made. */
+  hasHash: boolean;
+  deviceCount: number;
+  firstSeenAt: number;
+  lastSeenAt: number;
+  status: FindingStatus;
+}
+
+/** `lockdown:allowOptions`: the pickers of the "Allow for app" dialog. */
+export interface AllowOptions {
+  groups: GroupOption[];
+  apps: { _id: Id; name: string }[];
+}
+
+/** `lockdown:allow` */
+export interface AllowInput {
+  findingId: Id;
+  kind: ExceptionKind;
+  /** Path rules only: the folder template, e.g. `{ProgramFiles}\Acme`. */
+  folder?: string;
+  groupIds: Id[];
+  appId?: Id;
+  reason?: string;
+}
+
+/** Limits of the lockdown screens (`convex/lib/limits.ts`). */
+export const MAX_ALLOW_GROUPS = 10;
+export const MAX_EXCEPTION_REASON = 200;
+export const OPEN_FINDINGS_CAP = 50;
+export const MAX_USB_ALLOW_HOURS = 8;
+export const MIN_LOCKOUT_THRESHOLD = 5;
+export const MAX_LOCKOUT_THRESHOLD = 999;
+export const MAX_LOCKOUT_MINUTES = 99_999;
+
+export type LayerName = "staff" | "machine" | "appLocker" | "appControl" | "procWatch" | "boot" | "performance";
+export const LAYER_NAMES: readonly LayerName[] = ["staff", "machine", "appLocker", "appControl", "procWatch", "boot", "performance"];
+
+/** One layer of an apply report: fixed codes from the agent (unknown ones are shown as they are). */
+export interface LayerState {
+  mode: string;
+  state: string;
+  detail?: string;
+}
+
+export type ApplyState = "applied" | "partial" | "refused" | "failed" | "rolledBack";
+
+/** `deviceApplyReports` of one PC (plan 4.11). */
+export interface ApplyReport {
+  state: ApplyState;
+  /** The refusal code (plan 4.6), or null. */
+  refusal: string | null;
+  layers: Record<LayerName, LayerState>;
+  appliedVersion: number;
+  /** The last version that worked (the PC goes back to it when a new one breaks the Staff App). */
+  lkgVersion: number | null;
+  /** The group configuration version the PC applied. */
+  configVersion: number | null;
+  updatedAt: number;
+}
+
+/** `deviceReports.security` (plan 4.16): every field is optional, a fixed code or a count. */
+export interface SecurityPosture {
+  safeModeAgent?: boolean;
+  autoRecovery?: string;
+  serviceAcl?: string;
+  aclDrift?: number;
+  secureBoot?: string;
+  bitLocker?: string;
+  tpm?: string;
+  ciPolicies?: string[];
+}
+
+/** `overview:get` lockdown warnings: at most three rows each, `...More` = there are more. */
+export interface LockdownWarnings {
+  auditOverdue: { groupId: Id; name: string; since: number }[];
+  auditOverdueMore: boolean;
+  halted: { groupId: Id; name: string }[];
+  haltedMore: boolean;
+  notApplied: { deviceId: Id; name: string; state: "refused" | "rolledBack"; refusal: string | null }[];
+  notAppliedMore: boolean;
 }

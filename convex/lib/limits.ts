@@ -483,5 +483,26 @@ export const MIN_BAKE_HOURS = 1;
 export const MAX_BAKE_HOURS = 168;
 export const MIN_FAILURE_PCT = 1;
 export const MAX_FAILURE_PCT = 100;
+/**
+ * Lockdown screens (Phase 5 Step 19, plan 4.20). Findings per page; open findings counted for the "N new" link (more shows as "50+");
+ * exceptions listed on the group screen (newest first; the document still carries up to MAX_GROUP_EXCEPTIONS); groups one "Allow"
+ * may add an exception to (each gets a new configuration version in the same transaction, like a Wi-Fi profile); the reason text.
+ */
+export const MAX_FINDINGS_PAGE = 50;
+export const OPEN_FINDINGS_CAP = 50;
+export const MAX_EXCEPTIONS_LISTED = 50;
+export const MAX_ALLOW_GROUPS = 10;
+export const MAX_EXCEPTION_REASON = 200;
+/** `lockdown:allowOptions`: programs offered in the "Allow for app" picker. */
+export const MAX_ALLOW_APPS = 200;
+/** Account lockout (plan 4.6 I7, 4.8): the threshold may not be below 5; the same numbers as the agent's check. */
+export const MIN_LOCKOUT_THRESHOLD = 5;
+export const MAX_LOCKOUT_THRESHOLD = 999;
+export const MAX_LOCKOUT_MINUTES = 99_999;
+/** "Allow USB for this PC" (plan 4.3 `usbTempAllow`, edge case 62): whole hours, at most this many. */
+export const MAX_USB_ALLOW_HOURS = 8;
+/** Overview warnings (plan 4.20, Q2): program rules in audit mode for longer than this; rows shown per warning. */
+export const AUDIT_WARN_DAYS = 14;
+export const OVERVIEW_WARNING_ROWS = 3;
 /** Share of a ring that must have applied the version before an automatic promotion (plan 4.14: 50 %), and at least this many PCs. */
 export const PROMOTE_MIN_SHARE = 0.5;

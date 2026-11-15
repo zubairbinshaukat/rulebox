@@ -35,6 +35,8 @@ describe("route table", () => {
     expect(screensForPath("/broadcasts")).toEqual(["Layout", "Broadcasts"]);
     expect(screensForPath("/groups/k57abc/rollout")).toEqual(["Layout", "Rollout"]);
     expect(screensForPath("/groups/k57abc/rollout/")).toEqual(["Layout", "Rollout"]);
+    expect(screensForPath("/groups/k57abc/lockdown")).toEqual(["Layout", "Lockdown"]);
+    expect(screensForPath("/lockdown/findings")).toEqual(["Layout", "Findings"]);
     expect(screensForPath("/groups/k57abc/other")).toEqual([]);
     expect(screensForPath("/devices/a/b")).toEqual([]);
     expect(screensForPath("/gallery")).toEqual([]);

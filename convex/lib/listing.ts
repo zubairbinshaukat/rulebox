@@ -61,6 +61,8 @@ export const LIST_SORTS = {
   fileTypes: { extension: "memory", app: "memory" },
   // Phase 5 Step 15: broadcasts, newest first ("sent" = `createdAt`).
   broadcasts: { sent: "by_org_created" },
+  // Phase 5 Step 19: lockdown findings of one status, last seen first ("seen" = `lastSeenAt`).
+  findings: { seen: "by_org_status_seen" },
 } as const satisfies Record<string, Record<string, string>>;
 
 export type ListTable = keyof typeof LIST_SORTS;
@@ -79,6 +81,7 @@ const DEFAULT_DIR: Record<ListTable, SortDir> = {
   invites: "desc",
   fileTypes: "asc",
   broadcasts: "desc",
+  findings: "desc",
 };
 
 /** The validated sort: the table's default when omitted; an unknown key is `invalid_argument` (field "sort"). */

@@ -86,6 +86,7 @@ import type * as lib_validators from "../lib/validators.js";
 import type * as lib_webauthnConfig from "../lib/webauthnConfig.js";
 import type * as lib_webmeta from "../lib/webmeta.js";
 import type * as lib_winget from "../lib/winget.js";
+import type * as lockdown from "../lockdown.js";
 import type * as mail from "../mail.js";
 import type * as maintenance from "../maintenance.js";
 import type * as members from "../members.js";
@@ -191,6 +192,7 @@ declare const fullApi: ApiFromModules<{
   "lib/webauthnConfig": typeof lib_webauthnConfig;
   "lib/webmeta": typeof lib_webmeta;
   "lib/winget": typeof lib_winget;
+  lockdown: typeof lockdown;
   mail: typeof mail;
   maintenance: typeof maintenance;
   members: typeof members;

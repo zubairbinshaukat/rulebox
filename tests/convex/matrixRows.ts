@@ -6,6 +6,7 @@ import { enrollDevice, newToken } from "./devices";
 import { asMember, giveStepUp, makeOrg, codeOf, type T } from "./identity";
 import { sha256HexSync } from "../../convex/lib/crypto";
 import { MINUTE_MS } from "../../convex/lib/limits";
+import { DEFAULT_LOCKDOWN_SETTINGS } from "../../convex/lib/lockdownValidators";
 import { DEFAULT_ORG_SETTINGS, DEFAULT_WEB_PERMISSIONS } from "../../convex/lib/validators";
 import { api } from "../../convex/_generated/api";
 import type { Id } from "../../convex/_generated/dataModel";
@@ -50,6 +51,8 @@ export type Fixture = {
   driverId: Id<"drivers">;
   /** (Step 15) A live banner broadcast "Maintenance" aimed at `groupId`, no expiry, not cancelled. */
   broadcastId: Id<"broadcasts">;
+  /** (Step 19) A lockdown finding "tool.exe" (AppLocker, signed, NO file hash) that was ignored. */
+  findingId: Id<"lockdownFindings">;
   /** An enabled employee in no group. */
   employeeId: Id<"employees">;
   /** The device's stored secret hashes (current and previous). */
@@ -165,6 +168,21 @@ export async function fixture(given?: T): Promise<Fixture> {
       ackCount: 0,
     }),
   );
+  const findingId = await t.run((ctx) =>
+    ctx.db.insert("lockdownFindings", {
+      orgId,
+      fingerprint: "f".repeat(64),
+      layer: "appLocker",
+      fileName: "tool.exe",
+      folderClass: "userProfile",
+      signer: "Contoso Ltd",
+      firstSeenAt: Date.now(),
+      lastSeenAt: Date.now(),
+      deviceCount: 1,
+      sampleDeviceId: deviceId,
+      status: "ignored",
+    }),
+  );
   const employeeId = await t.run((ctx) =>
     ctx.db.insert("employees", {
       orgId,
@@ -211,6 +229,7 @@ export async function fixture(given?: T): Promise<Fixture> {
     printerId,
     driverId,
     broadcastId,
+    findingId,
     employeeId,
     storedHashes,
     accessor: {
@@ -661,6 +680,37 @@ export const ROWS: Row[] = [
     call: (a, f) => a.mutation(api.rollouts.resume, { groupId: f.groupId, expectedRevision: 0 }),
     expect: { ...ADMIN_UNLOCKED, default: "conflict", foreign: "not_found" },
   },
+  // Phase 5 Step 19: the lockdown screens. `update` sends the settings the group already has (no write; a mode change is major, lockdown.test.ts);
+  // `allow` asks for a hash rule of a finding that has no hash (refused the same way for every admin); `ignore` names a finding that is ignored
+  // already (no write); `removeException` names an exception that does not exist; `allowUsb` ends a window that is not open (no write).
+  { name: "lockdown:groupView", call: (a, f) => a.query(api.lockdown.groupView, { groupId: f.groupId }), expect: { ...VIEWER, foreign: "not_found" } },
+  {
+    name: "lockdown:findings",
+    call: (a) => a.query(api.lockdown.findings, { status: "new", paginationOpts: { numItems: 25, cursor: null } }),
+    expect: { ...VIEWER, foreign: "ok" },
+  },
+  {
+    name: "lockdown:allowOptions",
+    call: (a) => a.query(api.lockdown.allowOptions, {}),
+    expect: { ...VIEWER, viewer: "forbidden", foreign: "ok" },
+  },
+  {
+    name: "lockdown:update",
+    call: (a, f) => a.mutation(api.lockdown.update, { groupId: f.groupId, settings: DEFAULT_LOCKDOWN_SETTINGS, expectedRevision: 0 }),
+    expect: { ...ADMIN_UNLOCKED, foreign: "not_found" },
+  },
+  {
+    name: "lockdown:allow",
+    call: (a, f) => a.mutation(api.lockdown.allow, { findingId: f.findingId, kind: "hash", groupIds: [f.groupId] }),
+    expect: { ...ADMIN_UNLOCKED, default: "conflict", foreign: "not_found" },
+  },
+  { name: "lockdown:ignore", call: (a, f) => a.mutation(api.lockdown.ignore, { findingId: f.findingId }), expect: { ...ADMIN_UNLOCKED, foreign: "not_found" } },
+  {
+    name: "lockdown:removeException",
+    call: (a, f) => a.mutation(api.lockdown.removeException, { exceptionId: f.findingId }),
+    expect: { ...ADMIN_UNLOCKED, default: "not_found" },
+  },
+  { name: "fleet:allowUsb", call: (a, f) => a.mutation(api.fleet.allowUsb, { deviceId: f.deviceId, hours: 0 }), expect: { ...ADMIN_UNLOCKED, foreign: "not_found" } },
   { name: "fleet:revoke", call: (a, f) => a.mutation(api.fleet.revoke, { deviceId: f.deviceId }), expect: { ...ADMIN_MAJOR, foreign: "not_found" } },
   {
     name: "fleet:remove",

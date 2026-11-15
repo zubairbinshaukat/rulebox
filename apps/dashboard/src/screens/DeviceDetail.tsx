@@ -24,10 +24,12 @@ import { DeviceOnline, KioskCell } from "../components/DeviceCells";
 import { EmptyState } from "../components/EmptyState";
 import { Field } from "../components/Field";
 import { FormError } from "../components/FormError";
+import { appErrorMessage } from "../lib/screenStrings/appErrors";
 import { HistoryPanel } from "../components/HistoryPanel";
 import { InstallStatePill } from "../components/InstallState";
 import { installDetail } from "../lib/install";
 import { LockCard } from "./broadcasts/LockCard";
+import { LockdownCard, ProtectionCard, UsbAllowCard } from "./lockdown/DeviceCards";
 import { SendBroadcastDialog } from "./broadcasts/SendDialog";
 import { broadcastStrings } from "./broadcasts/strings";
 import { Modal } from "../components/Modal";
@@ -181,6 +183,8 @@ function Device({ d, liveness }: { d: Detail; liveness: QueryState<DeviceLivenes
             {r ? null : <EmptyState compact title={s.compatNone} />}
           </Card>
 
+          <LockdownCard deviceId={d._id} />
+
           <Installs deviceId={d._id} />
 
           <Card title={s.policy} className="dash-card--tight">
@@ -231,6 +235,8 @@ function Device({ d, liveness }: { d: Detail; liveness: QueryState<DeviceLivenes
         <div className="dash-stack">
           <Settings d={d} />
           <LockCard d={d} />
+          <ProtectionCard deviceId={d._id} />
+          <UsbAllowCard deviceId={d._id} />
           <Card title={s.identity}>
             <dl className="dash-kv" style={{ gridTemplateColumns: "1fr" }}>
               <KV label={s.enrolled} value={formatDate(d.enrolledAt)} />
@@ -345,6 +351,7 @@ function Installs({ deviceId }: { deviceId: string }) {
         body={installStrings.retryConfirmBody(confirming?.appName ?? "")}
         confirmLabel={installStrings.retryConfirmAction}
         onConfirm={() => retry({ appId: confirming?.appId ?? "" })}
+        describeError={appErrorMessage}
         onDone={() => toast(installStrings.retried)}
         onClose={() => setConfirming(null)}
       />

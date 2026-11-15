@@ -2133,6 +2133,26 @@ Deviations and open points:
   item list does not move them. Moving them touches every Phase 4 catalogue mutation and the Phase 4 vectors.
 - The 10-group snapshot caps are unchanged (the plan has no batching item); see the report for the question.
 - Agent: `MAX_REFUSED` 50 -> 20 (4.11). The apply report already carried `config`; the live wiring is Step 20.
+
+**Built (Step 16b) 2026-11-15 (convex-test only, not committed).** Owner decision 1a: the Phase 4 catalogue is ring-gated.
+
+- A configuration version now also holds `catalog`: the group's app assignments, the records of the assigned (non-archived) apps
+  and the file-type rules that point at them (`convex/lib/groupConfig.ts`). The publisher takes them from the version the PC's
+  ring points to (`convex/publish.ts`), so rings, promotion and rollback cover apps. A group with no version, or a version
+  made before 16b, is still read live. `allowedSites` is always empty: nothing to freeze.
+- Every catalogue mutation snapshots first: `groups:assignApp` / `updateAssignment` / `unassignApp` (one group);
+  `apps:update` / `setPermissions` / `setArchived` / `retry` / the icon and `fileHandlers:set` / `remove` (every group that
+  assigns the app, `snapshotAppGroups`). More than 10 groups (`MAX_CATALOG_SNAPSHOT_GROUPS`) = `too_large`, detail "groups",
+  as for Wi-Fi and printers. `apps:setPermissions` used to snapshot the first 10 groups silently; it now refuses too.
+- Still live (4.3 rule 6, the directory never waits): direct employee grants, and the record of a website a ring carries only
+  through a grant.
+- Phase 4 vectors: unchanged. With rings off, or on the newest pointer, the document is byte-for-byte the live one (test:
+  no new document when a version loses its `catalog`). Deviation: the first catalogue edit of a Phase 4 group gives it a
+  configuration version, so its documents gain the Phase 5 keys with the default lockdown settings (4.3 rule 1), as a Wi-Fi
+  assignment already did.
+- Open: an app deleted or an icon replaced after a version was taken stays as frozen in older versions (a rollback can bring a
+  deleted app back, without its icon); a 256 KiB version limit now also bounds the catalogue; the dashboard shows the general
+  "too large" sentence for the new refusal. The 10-group cap goes away with the Step 20 scheduler batches.
 ---
 
 ### Step 17 — Tamper protection: service DACL, privileges, ACL self-check, clock
@@ -2157,6 +2177,31 @@ Deviations and open points:
 for `recover` and Phase 6 upgrades); claim protection against an
 administrator. Rows: E-75..E-79.
 
+**Built 2026-11-15 (SimPlatform only, not committed, nothing run on a VM).**
+
+- `lockdown/tamper.rs`, called by `boot::apply` (L7): service DACL
+  `D:(A;;CCDCLCSWRPWPDTLOCRSDRCWDWO;;;SY)(A;;CCDCLCSWRPWPDTLOCRSDRCWDWO;;;BA)(A;;LC;;;IU)(A;;LC;;;AU)`,
+  the 4.16 privilege list plus `SeLoadDriverPrivilege` (driver publishing, Step 14b),
+  install folder `D:P(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)(A;OICI;0x1200a9;;;BU)`, state folder
+  = the Phase 2 DACL. On while the document has a `lockdown` section (there is no policy
+  switch per item); restored by the journal otherwise. Journal ids `svc-sec:RuleboxAgent`,
+  `svc-priv:RuleboxAgent`, `path-acl:install`, `path-acl:state` (new target `pathAcl`).
+- Rules checked before the guard: a privilege list without `SeChangeNotifyPrivilege` and a
+  service DACL that takes stop / configure / delete / write-DACL from Administrators are refused.
+- `service install` sets the privileges and the DACL too (a failure is a warning, the
+  reconciler asserts them again).
+- A repaired item is tampering, not drift: `TamperTracker` counts it in
+  `deviceSecurityDaily.tamper`, audits `device.tamperDetected` once per item per server day
+  (detail `service_acl | service_privileges | install_acl | state_acl`) and fills
+  `serviceAcl` / `aclDrift` (repairs since the agent started). No Convex change.
+- `ClockWatch`: wall clock against the tick count since boot, more than 10 minutes = one
+  `device.clockJump` (`back` / `forward`); a jump back raises `last_wall_clock_ms` by the time
+  that really passed.
+- Left for Step 20 (wiring): give `Facts.rulebox_folders`, call `TamperTracker::finish_pass` /
+  `fill_report` after each apply and `tamper::note_clock` beside `backend::task::note_clock`.
+- Left for Step 21 (VM): measure the privilege list; check how Windows spells the DACLs it
+  hands back (a mismatch shows as the layer note `acl_readback_differs`).
+
 ---
 
 ### Step 18 — Per-user tuning and kiosk performance profile
@@ -2180,6 +2225,23 @@ administrator. Rows: E-75..E-79.
 **Verify / Done when:** as Step 4.
 **Do NOT:** stop a service the admin needs for recovery (RPC, event log,
 WinRM if enabled, Code Integrity); change Defender or Update settings.
+
+**Built 2026-11-15 (SimPlatform only, not committed).** `lockdown/perf.rs`, journal owner `Perf`,
+runs as the `performance` layer (last in the apply order).
+
+- Staff tuning: 15 fixed values (`perf::STAFF_TUNING`) plus every text entry of the Staff `Run` key
+  (at most 64 per apply; an entry of another type stays, detail `startup_entry_kept`).
+- Kiosk profile: `WSearch`, `SysMain`, `XblAuthManager`, `XblGameSave`, `XboxNetApiSvc`, `XboxGipSvc`
+  to disabled (a missing service is skipped); `AllowTelemetry` 1, or 0 on Enterprise / Education / IoT /
+  Server; `DODownloadMode` 0. `Spooler` only with `kioskProfile` + `noPrinting` and no printers
+  (else detail `no_printing_ignored`, edge case 39).
+- New roots (4.7 / 4.8 lists need the update): Staff 12 -> 16 (`...\Windows\WindowsCopilot`,
+  `...\Windows\CloudContent`, `...\Explorer\VisualEffects`, `Control Panel\Desktop\WindowMetrics`);
+  machine 9 -> 11 (`...\Windows\DataCollection`, `...\Windows\DeliveryOptimization`). New read-only
+  seam method `list_staff_value_names`.
+- A start type takes effect at the next Windows start; no service is stopped. `Perf` joined the
+  last-known-good rollback owners (`lkg::ROLLBACK_OWNERS`). Unverified until the VM run (Step 21): delayed-start flag after a
+  restore, `TaskbarDa` write protection, the effect of each tuning value.
 
 ---
 
@@ -2214,6 +2276,26 @@ screenshots of every new screen (light/dark, 1280/390).
 **Do NOT:** show full paths or command lines (they never reach the
 server).
 
+**Built 2026-11-15 (convex-test and vitest only, not committed, no screenshots: no server was run).**
+
+- Server (`convex/lockdown.ts`): `groupView`, `update` (fresh step-up only when a program rule changes mode or App Control changes
+  level), `findings` (paginated, `by_org_status_seen`), `allowOptions`, `allow` (publisher, hash or admin-only-folder rule, up to 10
+  groups, marks the finding allowed), `ignore`, `removeException`; `fleet:allowUsb` (max 8 h, live) and the lockdown part of
+  `fleet:get` (ring, rollout revision, USB window, protection posture, apply report); `overview:get` carries three bounded warning
+  lists. New indexes: `groupLockdown.by_org_audit`, `deviceApplyReports.by_org_state`, `groupRollouts.by_org_state`. A new group gets
+  its own `groupLockdown` row (defaults, audit clock); deleting the group deletes it.
+- Dashboard: group Lockdown screen (`/groups/:id/lockdown`: rules, USB with the fixed "Keyboards, mice and touch screens always
+  work." line, Staff, PC, input, boot, performance, networks, exceptions; Enforce and managed-networks confirmations), Findings
+  (`/lockdown/findings`, Allow for app / Ignore), device Lockdown, Protection and Allow USB cards, overview warning lines (a lazy
+  chunk), demo-mode fixtures and store. Viewer: everything read-only.
+- Sentences: every refusal code of 4.6 and every layer or item note, including the Step 18 and 20a codes (`wifi_filters_error`,
+  `connect_failed`, the print service that stays on with printers, the performance layer's "restart needed"). A code a newer agent
+  sends is shown as "Code: x". Step 16b's `too_large` (detail "groups") has its own sentence on the app edit, permissions, archive,
+  retry, icon and file-type screens.
+- Size: the overview route went 0.5 KB over (routes plus a few lines); budget 165 / 27 -> 166 / 27.5. Needs owner OK.
+- Not built: a per-PC list of Wi-Fi or printer item results (the server keeps only counts on the network pages), so
+  `connect_failed` has a sentence but no screen that shows it yet. Screenshots (light/dark, 1280/390) still to take.
+
 ---
 
 ### Step 20 — Agent: full restore and `lockdown-status`
@@ -2242,6 +2324,41 @@ restores"). **Files:** `apps/agent/src/{recover.rs,kiosk.rs,cli.rs}`,
 **Do NOT:** run `export-baseline.ps1` or `lockdown-status` on the dev
 machine as part of verification beyond `-WhatIf`-style help output. Rows:
 E-70..E-74.
+
+**Built (20a) 2026-11-15 (SimPlatform only, not committed, nothing run on a VM or on the dev PC).**
+Agent part; the server follow-ups are 20b.
+
+- `lockdown/runtime.rs` (`LockdownRuntime`) is what the kiosk reconciler now calls after every
+  successful Enable (new document, 10-minute reassert, session / power event, a driver job that
+  ended): sealing key, `apply::apply`, the process watch (`ProcWatchHost`), drift and tamper
+  counting, findings, the apply report, the posture (`deviceReports.security`, with `ciPolicies`),
+  `capabilities: ["lockdown/1"]`, last-known-good probation and rollback, the `usbTempAllow`
+  timer. The lockdown layers exist only while the kiosk is on: Disable restores the whole journal.
+- Restore: Disable and `unenroll` already ran `journal::restore_all`; `recover` now restores every
+  journal target type too (entry by entry, last written first, each result printed), offline, from
+  the state folder alone. Only a target of a newer agent stays (named in the notes).
+- `rulebox-agent lockdown-status [--json]` (`lockdown/status.rs`), elevated, read-only: expected
+  against reported per layer (the service writes `lockdown-last.json` after each pass), live
+  checks, the invariant self-check, the journal summary, the posture. Exit code 1 when something
+  needs a look. `scripts/vm/export-baseline.ps1` is written and parse-checked, never run.
+- Decisions taken (owner rule "take the recommendation"): a failed permit list is the machine
+  layer's `partial / wifi_filters_error`; a failed connection is the Wi-Fi item
+  `failed / connect_failed`; `would_disconnect` is lifted by the new optional document key
+  `wifiManagedOnlyConfirmed` (the server does not send it yet: 20b); a changed service start type
+  is `performance: restartPending` and `restartPending` in the status until Windows restarted;
+  a refused configuration that arrives again is reported `rolledBack`; a deliberate admin exit or
+  Disable is never a Staff App crash (60 s, or until the Staff session is gone).
+- Also closed here (Step 5 left it open): in a Safe Mode boot a Staff session that appears is
+  signed out and audited (`device.safeModeBlocked`). The agent's own `AutoAdminLogon` changes
+  (admin exit, exit hold, Safe Mode) are not counted as drift.
+- Deviation: a restored `recoveryenabled` that was absent is written as `Yes` (the seam cannot
+  delete a BCD element, Step 5), so the Step 21 export shows that one line as a difference.
+- Not done: USB "retroactive" removal of installed devices (no seam enumerates devices; the
+  tables of Step 5 stay unused), and the drift tracker's "OS build changed" trigger (a build
+  change needs a restart, and every agent start re-applies).
+- UNVERIFIED until Step 21 / a real laptop: `WlanQueryInterface` and the WLAN connection
+  notifications (`connect_failed`), the cost of one pass on a 4 GB PC (the Windows folder scan
+  and four event-log reads run on every pass), the ETW trace under the live reconciler.
 
 ---
 

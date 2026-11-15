@@ -65,6 +65,7 @@ import {
 } from "../types";
 import type { ServerList } from "../serverList";
 import { byKey, contains, relevance, useDemoServerPage } from "./lists";
+import { lockdownWarningsOf } from "./lockdown";
 import * as validate from "../../lib/validate";
 import { BROADCAST_ACTIVE_MAX, BROADCAST_BODY_MAX, BROADCAST_TITLE_MAX, LOCK_CONTACT_MAX, LOCK_MESSAGE_MAX, noticeProblem } from "../../lib/noticeRules";
 import { MAX_WIFI_GROUPS_PER_SAVE, MAX_WIFI_NAME, MAX_WIFI_PROFILES, WIFI_SECURITIES, passphraseProblem, ssidProblem } from "../../lib/wifiRules";
@@ -648,6 +649,7 @@ export const demoApi: DataApi = {
         publishFailedAt: db.publishFailedAt ?? null,
         rosterPending: db.rosterPending === true,
         recentAudit: [...db.audit].sort(byNewest).slice(0, 10).map(auditEntry),
+        lockdown: lockdownWarningsOf(db, Date.now()),
       };
     });
   },

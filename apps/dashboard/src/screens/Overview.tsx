@@ -1,4 +1,4 @@
-import { useMemo, type ComponentType, type ReactNode, type SVGProps } from "react";
+import { lazy, Suspense, useMemo, type ComponentType, type ReactNode, type SVGProps } from "react";
 import { Link, useNavigate } from "react-router";
 import IconMonitor from "~icons/solar/monitor-linear";
 import IconPulse from "~icons/solar/wi-fi-router-minimalistic-linear";
@@ -34,6 +34,14 @@ import { strings } from "../lib/strings";
 import { useNow } from "../lib/useNow";
 
 const s = strings.overview;
+
+/** Phase 5 Step 19: the lockdown lines of the attention list are a chunk of their own, loaded only when there is one to show. */
+const LockdownAttention = lazy(() => import("./overview/LockdownAttention"));
+/** How many kinds of lockdown warnings the overview has (0 to 3; an older server sends none). */
+function lockdownKinds(o: OverviewScreen): number {
+  const l = o.lockdown;
+  return l ? +(l.notApplied.length > 0) + +(l.halted.length > 0) + +(l.auditOverdue.length > 0) : 0;
+}
 type Icon = ComponentType<SVGProps<SVGSVGElement>>;
 
 interface Attention {
@@ -184,7 +192,7 @@ export default function Overview() {
   const lead = (() => {
     if (overview.status !== "ready") return undefined;
     const o = overview.data;
-    const urgent = attentionOf(o).filter((a) => a.tone !== "accent").length + (o.counts.failedInstallCount > 0 ? 1 : 0);
+    const urgent = attentionOf(o).filter((a) => a.tone !== "accent").length + (o.counts.failedInstallCount > 0 ? 1 : 0) + lockdownKinds(o);
     return urgent ? s.leadAttention(urgent) : s.leadCalm;
   })();
 
@@ -228,10 +236,15 @@ export default function Overview() {
               <div className="dash-grid dash-grid--main">
                 <div className="dash-stack">
                   <Card title={s.attention} body="flush">
-                    {attention.length === 0 ? (
+                    {attention.length + lockdownKinds(o) === 0 ? (
                       <EmptyState compact title={s.attentionNone} />
                     ) : (
                       <ul className="dash-list">
+                        {o.lockdown && lockdownKinds(o) > 0 ? (
+                          <Suspense fallback={null}>
+                            <LockdownAttention w={o.lockdown} />
+                          </Suspense>
+                        ) : null}
                         {attention.map((a) => (
                           <li key={a.key} className="dash-list__item">
                             <span className={`dash-list__icon dash-list__icon--${a.tone}`} aria-hidden="true">

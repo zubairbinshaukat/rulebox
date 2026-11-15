@@ -181,6 +181,7 @@ export default defineConfig(({ mode, command }) => {
       "@rulebox/employees-impl": fileURLToPath(new URL(demo ? "./src/data/employees/demo.ts" : "./src/data/employees/live.ts", import.meta.url)),
       "@rulebox/audit-impl": fileURLToPath(new URL(demo ? "./src/data/audit/demo.ts" : "./src/data/audit/live.ts", import.meta.url)),
       "@rulebox/members-impl": fileURLToPath(new URL(demo ? "./src/data/members/demo.ts" : "./src/data/members/live.ts", import.meta.url)),
+      "@rulebox/lockdown-impl": fileURLToPath(new URL(demo ? "./src/data/lockdown/demo.ts" : "./src/data/lockdown/live.ts", import.meta.url)),
     },
   },
   server: { port: 5173, strictPort: true },
@@ -216,7 +217,7 @@ export default defineConfig(({ mode, command }) => {
             // far better than a dozen tiny ones; the few sign-in and entry icons and the icons
             // of the other screens stay out, so no page loads icons it does not draw.
             { name: "icons", test: new RegExp(`~icons[\\\\/]solar[\\\\/](${SHELL_ICONS.join("|")})-(linear|bold-duotone)\\.jsx$`) },
-            { name: "core", test: /([\\/]apps[\\/]dashboard[\\/]src[\\/](lib|data)|[\\/]packages[\\/]ui[\\/]src)[\\/](?!(stepup|screenStrings|enrollment|devices|apps|employees|audit|members)[\\/])(?!components[\\/](AppTile|FileChip|IconButton|LogoMotion|Notice|Panel|ProgressBar|Slider|StatCard|Surface|Tabs|TitleBar)\.).*\.tsx?$/ },
+            { name: "core", test: /([\\/]apps[\\/]dashboard[\\/]src[\\/](lib|data)|[\\/]packages[\\/]ui[\\/]src)[\\/](?!(stepup|screenStrings|enrollment|devices|apps|employees|audit|members|lockdown)[\\/])(?!components[\\/](AppTile|FileChip|IconButton|LogoMotion|Notice|Panel|ProgressBar|Slider|StatCard|Surface|Tabs|TitleBar)\.).*\.tsx?$/ },
             // The four tiny page parts every signed-in screen shares (card, page header, relative time,
             // role gate) ride along: four 0.2 to 0.5 KB files cost more in headers than here, in one.
             { name: "core", test: /[\\/]apps[\\/]dashboard[\\/]src[\\/]components[\\/](Card|PageHeader|RelativeTime|RoleGate)\.tsx$/ },

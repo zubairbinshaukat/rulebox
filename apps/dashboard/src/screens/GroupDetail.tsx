@@ -5,6 +5,7 @@ import IconPen from "~icons/solar/pen-linear";
 import IconTrash from "~icons/solar/trash-bin-trash-linear";
 import IconAdd from "~icons/solar/add-circle-linear";
 import IconRocket from "~icons/solar/rocket-2-linear";
+import IconShield from "~icons/solar/shield-check-linear";
 import {
   useAddGroupEmployee,
   useDeleteGroup,
@@ -86,7 +87,11 @@ function Group({ g }: { g: Detail }) {
         }
         actions={
           <>
-            {/* Everyone may look at the rollout; only admins change it (the screen decides). */}
+            {/* Everyone may look at the lockdown settings and the rollout; only admins change them (the screens decide). */}
+            <Link className="rb-btn rb-btn--ghost" to={`/groups/${g._id}/lockdown`}>
+              <IconShield aria-hidden="true" />
+              {s.lockdown}
+            </Link>
             <Link className="rb-btn rb-btn--ghost" to={`/groups/${g._id}/rollout`}>
               <IconRocket aria-hidden="true" />
               {s.rollout}

@@ -30,8 +30,15 @@ import type {
   BroadcastStyle,
   Ring,
   RolloutRow,
+  ApplyReport,
+  ExceptionRow,
+  FindingRow,
+  LayerState,
+  LockdownSettings,
+  SecurityPosture,
 } from "../types";
-import { DEFAULT_WEB_PERMISSIONS } from "../types";
+import { DEFAULT_LOCKDOWN_SETTINGS, DEFAULT_WEB_PERMISSIONS } from "../types";
+import { REFUSAL_CODES } from "../../screens/lockdown/codes";
 import { padListFixtures } from "./listRows";
 
 const GIB = 1024 * 1024 * 1024;
@@ -319,6 +326,17 @@ export interface DemoDb {
   /** `groupRollouts` by group id (no row = the group has no configuration version yet) and the PCs' apply reports (Phase 5 Step 16). */
   rollouts: Map<string, DbRollout>;
   applyReports: Map<string, DbApplyReport>;
+  /** `groupLockdown` by group id (Phase 5 Step 19); no row = the defaults, never saved. */
+  lockdown: Map<string, { settings: LockdownSettings; revision: number; auditSince: number | null }>;
+  /** `lockdownFindings`: one row per program (the hash itself is never in a row). */
+  findings: FindingRow[];
+  /** `lockdownExceptions` of the groups. */
+  exceptions: (ExceptionRow & { groupId: string; findingId?: string })[];
+  /** The PCs' full apply reports, their physical-protection reports, the live "Allow USB" windows, and agents from before lockdown. */
+  applyDetails: Map<string, ApplyReport>;
+  postures: Map<string, SecurityPosture>;
+  usbAllow: Map<string, number>;
+  oldAgents: Set<string>;
   fileHandlers: { _id: string; extension: string; appId: string }[];
   tokens: DbToken[];
   installs: DbInstall[];
@@ -748,11 +766,11 @@ export function seed(now: number = Date.now()): DemoDb {
   const dOffice2 = addDevice("OFFICE-ACCOUNTS", gOffice, { build: 19045, edition: "Professional", outOfSupport: true, ageDays: 10 });
   const dOffice3 = addDevice("OFFICE-SCANNER", gOffice, { build: 26100, edition: "Core", outOfSupport: true, kioskPhase: "failed", kioskError: "desired_state_untrusted", shellHealth: "unhealthy", trustedKeyIds: [], ageDays: 9 });
   addDevice("WAREHOUSE-RECEIVING-DOCK-EAST-TERMINAL-02-LEGACY-HARDWARE-ON-LOAN-FROM-HEAD-OFFICE", gNight, { lag: 2, ageDays: 8 });
-  addDevice("WAREHOUSE-01", gNight, { lag: 1, ramMb: 4096, diskFreeGb: 1, planState: "overLimit", ageDays: 7 });
+  const dWarehouse1 = addDevice("WAREHOUSE-01", gNight, { lag: 1, ramMb: 4096, diskFreeGb: 1, planState: "overLimit", ageDays: 7 });
   addDevice("SPARE-LAPTOP-07", undefined, { ageDays: 6 });
   addDevice("NEW-PC-UNBOXED", undefined, { noReport: true, ageDays: 1 });
   addDevice("STOLEN-TABLET", gFront, { revoked: true, online: false, ageDays: 4 });
-  addDevice("LOANER-03", undefined, { online: false, kioskPhase: "applying", ageDays: 3, rotate: true });
+  const dLoaner = addDevice("LOANER-03", undefined, { online: false, kioskPhase: "applying", ageDays: 3, rotate: true });
 
   // 512 front desk PCs: the "500+" cap and the 1000+ install rows.
   const frontIds: string[] = [];
@@ -825,6 +843,112 @@ export function seed(now: number = Date.now()): DemoDb {
       },
     ],
   ]);
+
+  // ---- lockdown (Phase 5 Step 19): every layer state and every refusal code is on some PC, so each sentence can be looked at.
+  const layer = (mode: string, state = "ok", detail?: string): LayerState => (detail === undefined ? { mode, state } : { mode, state, detail });
+  const applyOf = (o: Partial<Omit<ApplyReport, "layers">> & { layers?: Partial<ApplyReport["layers"]> } = {}): ApplyReport => ({
+    state: "applied",
+    refusal: null,
+    appliedVersion: 8,
+    lkgVersion: 8,
+    configVersion: 8,
+    updatedAt: now - 2 * HOUR,
+    ...o,
+    layers: {
+      staff: layer("on"),
+      machine: layer("on"),
+      appLocker: layer("audit"),
+      appControl: layer("audit"),
+      procWatch: layer("audit"),
+      boot: layer("on"),
+      performance: layer("on"),
+      ...o.layers,
+    },
+  });
+  const applyDetails = new Map<string, ApplyReport>([
+    [dCounter1._id, applyOf({ layers: { appLocker: layer("enforce"), procWatch: layer("enforce") } })],
+    [dCounter2._id, applyOf({ state: "partial", layers: { appLocker: layer("enforce"), appControl: layer("audit", "restartPending", "restart_needed"), performance: layer("on", "partial", "no_printing_ignored") } })],
+    [dCounter3._id, applyOf({ state: "failed", lkgVersion: 7, layers: { appLocker: layer("enforce", "failed", "applocker_foreign_policy"), procWatch: layer("enforce", "ok", "snapshot_fallback") } })],
+    [dOffice1._id, applyOf({ configVersion: 4, lkgVersion: 4, layers: { appLocker: layer("enforce", "auditFirst", "audit_first") } })],
+    [dOffice2._id, applyOf({ state: "partial", configVersion: 3, lkgVersion: 3, layers: { appControl: layer("audit", "unsupported", "os_too_old_for_app_control"), machine: layer("on", "partial", "fighting") } })],
+    [dOffice3._id, applyOf({ state: "partial", configVersion: 4, lkgVersion: 3, layers: { appLocker: layer("audit", "unsupported", "applocker_not_on_this_edition"), appControl: layer("audit", "unsupported"), performance: layer("on", "partial", "startup_entries_capped") } })],
+    [dWarehouse1._id, applyOf({ state: "rolledBack", refusal: "crash_loop", configVersion: 2, lkgVersion: 1 })],
+  ]);
+  // One Front desk PC per refusal code (plan 4.6).
+  REFUSAL_CODES.forEach((code, i) => {
+    const id = frontIds[i];
+    if (id !== undefined) applyDetails.set(id, applyOf({ state: "refused", refusal: code, configVersion: 5, lkgVersion: 4, appliedVersion: 4 }));
+  });
+  const postures = new Map<string, SecurityPosture>([
+    [dCounter1._id, { secureBoot: "on", bitLocker: "on", autoRecovery: "on", safeModeAgent: true, tpm: "ready", serviceAcl: "ok", aclDrift: 0, ciPolicies: [] }],
+    [dCounter2._id, { secureBoot: "on", bitLocker: "off", autoRecovery: "off", safeModeAgent: true, tpm: "present", serviceAcl: "ok", aclDrift: 0 }],
+    [dCounter3._id, { secureBoot: "on", bitLocker: "on", autoRecovery: "off", safeModeAgent: true, tpm: "ready", serviceAcl: "ok" }],
+    [dOffice2._id, { secureBoot: "unsupported", bitLocker: "off", autoRecovery: "on", safeModeAgent: false, tpm: "absent", serviceAcl: "drift", aclDrift: 2 }],
+    [dOffice3._id, { secureBoot: "off", bitLocker: "suspended", autoRecovery: "off", safeModeAgent: true, tpm: "present", serviceAcl: "ok" }],
+  ]);
+  const lockdown = new Map<string, { settings: LockdownSettings; revision: number; auditSince: number | null }>([
+    [
+      gCounter._id,
+      {
+        settings: { ...DEFAULT_LOCKDOWN_SETTINGS, appLocker: { mode: "enforce" }, procWatch: { mode: "enforce" }, usb: { ...DEFAULT_LOCKDOWN_SETTINGS.usb, storage: "readOnly" } },
+        revision: 4,
+        auditSince: now - 20 * DAY,
+      },
+    ],
+    [gOffice._id, { settings: DEFAULT_LOCKDOWN_SETTINGS, revision: 1, auditSince: now - 9 * DAY }],
+    [gFront._id, { settings: { ...DEFAULT_LOCKDOWN_SETTINGS, usb: { ...DEFAULT_LOCKDOWN_SETTINGS.usb, other: "block" } }, revision: 2, auditSince: now - 2 * DAY }],
+  ]);
+  const finding = (i: number, o: Partial<FindingRow> & Pick<FindingRow, "fileName">): FindingRow => ({
+    _id: id("find"),
+    layer: "appLocker",
+    folderClass: "userProfile",
+    signer: null,
+    product: null,
+    hasHash: true,
+    deviceCount: 1 + (i % 7),
+    firstSeenAt: now - (i + 3) * DAY,
+    lastSeenAt: now - i * 3 * HOUR - 20 * MIN,
+    status: "new",
+    ...o,
+  });
+  const findings: FindingRow[] = [
+    finding(0, { fileName: "LabelDesigner.exe", signer: "Zebra Technologies", product: "Label Designer", folderClass: "programFiles", deviceCount: 6 }),
+    finding(1, { fileName: "updater.exe", signer: "Contoso Ltd", product: "Contoso Updater", folderClass: "userProfile", deviceCount: 41 }),
+    finding(2, { fileName: "scan-helper.exe", folderClass: "userTemp", hasHash: true }),
+    finding(3, { fileName: "portable-notes.exe", folderClass: "removable", hasHash: false }),
+    finding(4, { fileName: "regedit.exe", signer: "Microsoft Windows", product: "Windows", folderClass: "windows", layer: "procWatch" }),
+    finding(5, { fileName: "driver-tool.exe", signer: "Realtek Semiconductor", folderClass: "programFiles", layer: "appControl" }),
+    finding(6, { fileName: "teams-helper.exe", signer: "Microsoft Corporation", product: "Microsoft Teams", folderClass: "userProfile", deviceCount: 12 }),
+    finding(7, { fileName: "setup.exe", folderClass: "network", hasHash: true }),
+    finding(8, { fileName: "pos-sync.exe", signer: "Harbor POS GmbH", product: "Harbor POS", folderClass: "rulebox" }),
+    finding(9, { fileName: "A-very-long-program-name-that-somebody-exported-from-a-vendor-portal-final-v2.exe", folderClass: "other" }),
+    finding(10, { fileName: "printer-status.exe", signer: "Brother Industries", product: "Status Monitor", folderClass: "programFiles" }),
+    finding(11, { fileName: "zoom-installer.exe", signer: "Zoom Video Communications", folderClass: "userProfile", layer: "procWatch" }),
+    finding(12, { fileName: "pharmacy-labels.exe", signer: "Harbor POS GmbH", product: "Label printing", folderClass: "programFiles", status: "allowed" }),
+    finding(13, { fileName: "legacy-report.exe", folderClass: "programFiles", status: "allowed" }),
+    finding(14, { fileName: "game-launcher.exe", signer: "Some Games Inc", folderClass: "userProfile", status: "ignored" }),
+    finding(15, { fileName: "toolbar-update.exe", folderClass: "userTemp", status: "ignored" }),
+  ];
+  const exceptions: DemoDb["exceptions"] = [
+    {
+      _id: id("exc"),
+      groupId: gCounter._id,
+      findingId: findings[12]!._id,
+      rule: { kind: "publisher", subject: "Harbor POS GmbH", product: "Label printing", fileName: "pharmacy-labels.exe", hashStart: null, path: null },
+      appName: null,
+      reason: "Needed for label printing",
+      createdAt: now - 6 * DAY,
+    },
+    {
+      _id: id("exc"),
+      groupId: gCounter._id,
+      findingId: findings[13]!._id,
+      rule: { kind: "hash", subject: null, product: null, fileName: null, hashStart: "9f2c41d07ab3", path: null },
+      appName: null,
+      reason: "",
+      createdAt: now - 3 * DAY,
+    },
+  ];
 
   // ---- installs
   const installs: DbInstall[] = [];
@@ -1092,6 +1216,13 @@ export function seed(now: number = Date.now()): DemoDb {
     locks: new Map(),
     rollouts,
     applyReports,
+    lockdown,
+    findings,
+    exceptions,
+    applyDetails,
+    postures,
+    usbAllow: new Map(),
+    oldAgents: new Set([dLoaner._id]),
     fileHandlers,
     tokens,
     installs,

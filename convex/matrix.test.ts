@@ -76,7 +76,7 @@ describe("authorization matrix (plan 4.6)", () => {
     const fns = await publicFunctions();
     const missing = Object.keys(MAJOR_ACTIONS).filter((n) => !fns.has(n)).sort();
     // Pinned: a typo or a rename of a major action fails here instead of silently dropping its step-up.
-    expect(missing).toEqual(["lockdown:update"]);
+    expect(missing).toEqual([]);
     for (const [name, spec] of Object.entries(MAJOR_ACTIONS)) {
       const fn = fns.get(name);
       if (fn === undefined) continue;

@@ -47,12 +47,14 @@ export const IO_BUDGETS: Record<string, IoBudget> = {
   // group + assignments (150) + their apps (150) + counts (1002).
   "groups:get": { maxReads: 3 + 1 + 150 + 150 + 1002, maxReadBytes: 600_000, maxWrites: 0, maxWriteBytes: 0, live: true },
   // name check, orgPlans, orgStats (+ platformSettings before migration); writes: group, orgStats, audit.
-  "groups:create": { maxReads: 8, maxReadBytes: 3_072, maxWrites: 3, maxWriteBytes: 1_536 },
+  // Phase 5 Step 19: + the organization row (new-group lockdown defaults); writes: + the group's `groupLockdown` row (~1 KB).
+  "groups:create": { maxReads: 9, maxReadBytes: 5_120, maxWrites: 4, maxWriteBytes: 3_072 },
   // group, name check; unchanged: 0 writes; else group + audit.
   "groups:rename": { maxReads: 6, maxReadBytes: 2_048, maxWrites: 2, maxWriteBytes: 1_024 },
   // group, 3 x `.first()` dependents, unexpired codes of the group (<= 100), orgStats;
   // writes: delete, orgStats, audit. Refused: 0 writes.
-  "groups:remove": { maxReads: 4 + 1 + 3 + 100 + 1, maxReadBytes: 40_960, maxWrites: 3, maxWriteBytes: 1_024 },
+  // Phase 5 Step 19: + the group's `groupLockdown` row (read and deleted).
+  "groups:remove": { maxReads: 4 + 1 + 3 + 100 + 1 + 1, maxReadBytes: 42_000, maxWrites: 4, maxWriteBytes: 1_024 },
 
   // ---- Step 6: enrollment codes.
   // authorize (4) + storeCode: group, orgPlans (+ platformSettings before migration), orgStats,
@@ -146,7 +148,10 @@ export const IO_BUDGETS: Record<string, IoBudget> = {
   // device, credentials, report (compat <= 32 KB), summary, presence, groups (tiny). Measured 8 / 2.1 KB.
   // Step 8: + the last 5 version rows (~150 B each).
   // Step 15: + the PC's lock (<= 1).
-  "fleet:get": { maxReads: 3 + 5 + 50 + 5 + 1, maxReadBytes: 50_176 + 1_024, maxWrites: 0, maxWriteBytes: 0, live: true },
+  // Step 19: + the PC's apply report (1 row, ~2.5 KB, written only when its content changes) and its group's rollout row (the ring picker).
+  "fleet:get": { maxReads: 3 + 5 + 50 + 5 + 1 + 2, maxReadBytes: 50_176 + 1_024 + 6_144, maxWrites: 0, maxWriteBytes: 0, live: true },
+  // Step 19 "Allow USB for this PC": device, credentials, publishQueue (+ step-up row); writes: device, queue, audit. Nothing to end: 0 writes.
+  "fleet:allowUsb": { maxReads: 9, maxReadBytes: 6_144, maxWrites: 3, maxWriteBytes: 2_048 },
   // Step 15 (plan 4.17): device, credentials, the old lock, publishQueue (+ step-up row); writes: old lock deleted, new lock, its `lockId` patch,
   // queue, audit (+ one scheduled publish run). The same text again: 0 writes.
   "fleet:lock": { maxReads: 12, maxReadBytes: 8_192, maxWrites: 6, maxWriteBytes: 4_096 },
@@ -326,7 +331,10 @@ export const IO_BUDGETS: Record<string, IoBudget> = {
   // Plan row (A7): <= 60 documents, <= 32 KB. counters, <= 4 online shards, plan (+ platformSettings
   // before migration), 2 key rows, 10 audit rows, 1 rosterPending row = ~25; never a device, liveness, payload or result row.
   // Re-runs on a counter change, a PC going online / offline and a new audit row; never on a ping.
-  "overview:get": { maxReads: 60, maxReadBytes: 32_768, maxWrites: 0, maxWriteBytes: 0, live: true },
+  // Phase 5 Step 19: + the lockdown warnings: four bounded index ranges of <= 4 rows each (`groupLockdown.by_org_audit`, `groupRollouts.by_org_state`,
+  // `deviceApplyReports.by_org_state` twice), normally EMPTY, + the names of <= 3 groups / 3 groups / 3 PCs. Worst case + 25 reads / ~32 KB (apply
+  // reports are ~2.5 KB, rollout rows ~1.5 KB). Re-runs when a row enters or leaves one of those ranges; never on a ping or an unchanged report.
+  "overview:get": { maxReads: 60, maxReadBytes: 65_536, maxWrites: 0, maxWriteBytes: 0, live: true },
   // A page of <= 50 audit rows (~300 B each). Re-runs when a row is written inside the loaded range.
   "audit:list": { maxReads: 3 + 50, maxReadBytes: 40_000, maxWrites: 0, maxWriteBytes: 0, live: true },
   "audit:forTarget": { maxReads: 3 + 50, maxReadBytes: 40_000, maxWrites: 0, maxWriteBytes: 0, live: true },
@@ -604,6 +612,23 @@ export const IO_BUDGETS: Record<string, IoBudget> = {
   // One rolling group: rollout, group, then the same ranges as `rollouts:health`. Writes only when it decides something (halt: rollout, audit x2,
   // queue; promote: rollout, audit, queue).
   "rollouts:evaluate": { maxReads: 2 + 201 + 200 + 1001, maxReadBytes: 3_200_000, maxWrites: 5, maxWriteBytes: 8_192 },
+  // ---- Phase 5 Step 19: the lockdown screens (plan 4.20). UNSURE until measured: the matrix calls are the no-change / refused cases.
+  // wrapper (3) + group + settings row (+ the organization row while the group has none) + the newest <= 51 exceptions (~0.5 KB) + the apps they
+  // name (<= 50, one get each, cached) + <= 51 open findings (~0.6 KB). Re-runs when the settings, an exception or an OPEN finding changes.
+  "lockdown:groupView": { maxReads: 3 + 1 + 1 + 1 + 51 + 50 + 51, maxReadBytes: 170_000, maxWrites: 0, maxWriteBytes: 0, live: true },
+  // wrapper (3) + one page of <= 50 findings (~0.6 KB each). `lockdownFindingDevices` is never read.
+  "lockdown:findings": { maxReads: 3 + 50, maxReadBytes: 40_000, maxWrites: 0, maxWriteBytes: 0, live: true },
+  // The "Allow for app" pickers, subscribed only while the dialog is open: wrapper (3) + <= 500 groups (~0.2 KB) + <= 200 apps (~2 KB).
+  "lockdown:allowOptions": { maxReads: 3 + 500 + 200, maxReadBytes: 520_000, maxWrites: 0, maxWriteBytes: 0, live: true },
+  // wrapper + step-up (4, + the step-up row again on a mode change) + group + settings row + organization + <= 51 Wi-Fi profiles (only when
+  // "managed networks only" is switched on) + one snapshot (<= 1121 reads, 13 writes); writes: settings row + <= 2 audit rows. No change: 0 writes.
+  "lockdown:update": { maxReads: 4 + 1 + 1 + 1 + 1 + 51 + 1121, maxReadBytes: 2_500_000, maxWrites: 13 + 1 + 2, maxWriteBytes: 2_700_000 },
+  // wrapper (4) + finding + app + <= 10 groups, each: its exceptions (<= 201) + one snapshot; writes per group: exception + <= 13; + finding + audit.
+  "lockdown:allow": { maxReads: 4 + 2 + 10 + 10 * 201 + 10 * 1121, maxReadBytes: 2_800_000, maxWrites: 10 * 14 + 2, maxWriteBytes: 2_700_000 },
+  // wrapper (4) + finding; writes: finding + audit. Already ignored: 0 writes.
+  "lockdown:ignore": { maxReads: 5, maxReadBytes: 4_096, maxWrites: 2, maxWriteBytes: 2_048 },
+  // wrapper (4) + exception + group + another exception of the finding (`.first()`) + the finding + one snapshot; writes: delete, finding, audit + <= 13.
+  "lockdown:removeException": { maxReads: 4 + 4 + 1121, maxReadBytes: 2_500_000, maxWrites: 13 + 3, maxWriteBytes: 2_700_000 },
   // ---- Phase 5 Step 14b: drivers (PRD 24.2). UNSURE like the rows above: the matrix calls are the no-change / refused cases.
   // wrapper (4) + the driver + <= 10 group names + <= 201 results (~0.3 KB each; a row only changes when a PC's state does). The Networks screen
   // does not subscribe to it (`networks:list` carries the rows only).

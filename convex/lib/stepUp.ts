@@ -87,6 +87,7 @@ export const MAJOR_ACTIONS = {
   "fleet:lock": { when: "always", why: "locks a device" },
   "fleet:unlock": { when: "always", why: "unlocks a device" },
   "rollouts:rollback": { when: "always", why: "rolls a group back to an older configuration version" },
+  // Step 19: fresh only when a program rule changes mode (off / audit / enforce) or App Control changes level.
   "lockdown:update": { when: "conditional", why: "publishes a policy that changes lock or kiosk settings" },
   // Plan and limit changes are made by an OPERATOR through the platform API,
   // never by a member function; the operator console has its own step-up

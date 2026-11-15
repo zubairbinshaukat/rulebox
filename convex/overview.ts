@@ -5,7 +5,7 @@ import type { DatabaseReader } from "./_generated/server";
 import { auditEntryOf, auditEntryValue } from "./lib/audit";
 import { memberQuery } from "./lib/functions";
 import { liveChecker } from "./lib/installs";
-import { MAX_INSTALL_PAGE, OVERVIEW_AUDIT_ROWS, PRESENCE_SHARDS } from "./lib/limits";
+import { AUDIT_WARN_DAYS, DAY_MS, MAX_INSTALL_PAGE, OVERVIEW_AUDIT_ROWS, OVERVIEW_WARNING_ROWS, PRESENCE_SHARDS } from "./lib/limits";
 import { checkPageSize, pickSort, sortArg } from "./lib/listing";
 import { loadOrgPlan } from "./lib/plans";
 import { planLimits, planName, planStatus } from "./lib/validators";
@@ -47,6 +47,21 @@ export const get = memberQuery("viewer")({
     recentAudit: v.array(auditEntryValue),
     /** Disabled employees' removals wait for a signing key (their offline sign-in still works); see `keys:status`. */
     rosterPending: v.boolean(),
+    /**
+     * Phase 5 Step 19 (plan 4.20): lockdown warnings, at most OVERVIEW_WARNING_ROWS rows each (`...More`: there are more).
+     * `auditOverdue`: groups whose program rules have been in audit mode for more than AUDIT_WARN_DAYS days; `halted`: groups
+     * whose rollout is halted; `notApplied`: PCs that refused the lockdown policy or rolled it back.
+     */
+    lockdown: v.object({
+      auditOverdue: v.array(v.object({ groupId: v.id("groups"), name: v.string(), since: v.number() })),
+      auditOverdueMore: v.boolean(),
+      halted: v.array(v.object({ groupId: v.id("groups"), name: v.string() })),
+      haltedMore: v.boolean(),
+      notApplied: v.array(
+        v.object({ deviceId: v.id("devices"), name: v.string(), state: v.union(v.literal("refused"), v.literal("rolledBack")), refusal: v.union(v.string(), v.null()) }),
+      ),
+      notAppliedMore: v.boolean(),
+    }),
   }),
   handler: async (ctx) => {
     const stats = await ctx.db
@@ -91,9 +106,59 @@ export const get = memberQuery("viewer")({
       publishFailedAt: stats?.publishFailedAt ?? null,
       recentAudit: audit.map(auditEntryOf),
       rosterPending: rosterPending !== null,
+      lockdown: await lockdownWarnings(ctx, ctx.orgId),
     };
   },
 });
+
+/**
+ * The lockdown warnings (Step 19): four bounded index ranges (`.take(OVERVIEW_WARNING_ROWS + 1)`), normally all empty, plus the name of
+ * each row's group or PC. Never a device list, a finding or a configuration. The 14-day cut is rounded down to the server day, so the
+ * range is the same all day.
+ */
+async function lockdownWarnings(ctx: { db: DatabaseReader }, orgId: Id<"organizations">) {
+  const take = OVERVIEW_WARNING_ROWS + 1;
+  const cut = Math.floor(Date.now() / DAY_MS) * DAY_MS - AUDIT_WARN_DAYS * DAY_MS;
+  const overdue = await ctx.db
+    .query("groupLockdown")
+    .withIndex("by_org_audit", (q) => q.eq("orgId", orgId).gt("auditSince", 0).lt("auditSince", cut))
+    .take(take);
+  const auditOverdue = [];
+  for (const row of overdue.slice(0, OVERVIEW_WARNING_ROWS)) {
+    const group = await ctx.db.get(row.groupId);
+    if (group !== null && row.auditSince !== undefined) auditOverdue.push({ groupId: group._id, name: group.name, since: row.auditSince });
+  }
+  const haltedRows = await ctx.db
+    .query("groupRollouts")
+    .withIndex("by_org_state", (q) => q.eq("orgId", orgId).eq("state", "halted"))
+    .take(take);
+  const halted = [];
+  for (const row of haltedRows.slice(0, OVERVIEW_WARNING_ROWS)) {
+    const group = await ctx.db.get(row.groupId);
+    if (group !== null) halted.push({ groupId: group._id, name: group.name });
+  }
+  const reports = [];
+  for (const state of ["refused", "rolledBack"] as const) {
+    const rows = await ctx.db
+      .query("deviceApplyReports")
+      .withIndex("by_org_state", (q) => q.eq("orgId", orgId).eq("state", state))
+      .take(take);
+    for (const r of rows) reports.push({ deviceId: r.deviceId, state, refusal: r.refusal ?? null });
+  }
+  const notApplied = [];
+  for (const r of reports.slice(0, OVERVIEW_WARNING_ROWS)) {
+    const device = await ctx.db.get(r.deviceId);
+    if (device !== null) notApplied.push({ deviceId: device._id, name: device.name, state: r.state, refusal: r.refusal });
+  }
+  return {
+    auditOverdue,
+    auditOverdueMore: overdue.length > OVERVIEW_WARNING_ROWS,
+    halted,
+    haltedMore: haltedRows.length > OVERVIEW_WARNING_ROWS,
+    notApplied,
+    notAppliedMore: reports.length > OVERVIEW_WARNING_ROWS,
+  };
+}
 
 const failedRow = v.object({
   _id: v.id("installResults"),

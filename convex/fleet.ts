@@ -12,6 +12,7 @@ import { checkPageSize, cleanSearch, countResult, orgStatsRow, pickSort, sortArg
 import { internalMutation, memberMutation, memberQuery } from "./lib/functions";
 import { assignedAppsOf, retagDeviceInstalls } from "./lib/installs";
 import { cleanNoticeText } from "./lib/noticeText";
+import { applyState, layerStates, ring as ringValidator, securityPosture, type RingValue } from "./lib/lockdownValidators";
 import {
   KEEP_VERSIONS,
   MAX_CHECK_DEVICES,
@@ -21,6 +22,8 @@ import {
   MAX_INSTALL_PAGE,
   MAX_LOCK_CONTACT,
   MAX_LOCK_MESSAGE,
+  MAX_USB_ALLOW_HOURS,
+  HOUR_MS,
   MINUTE_MS,
   PURGE_BATCH,
   WATCH_MIN_EXTEND_MS,
@@ -261,6 +264,28 @@ export const get = memberQuery("viewer")({
     lock: v.union(v.object({ lockId: v.string(), message: v.string(), contact: v.optional(v.string()), lockedAt: v.number() }), v.null()),
     /** Group picker options (`groups.by_org`, tiny). */
     groups: v.array(v.object({ _id: v.id("groups"), name: v.string() })),
+    /** Step 19: the PC's rollout ring and its group's rollout revision (what `rollouts:setRings` wants back; 0 = no rollout row yet). */
+    ring: ringValidator,
+    rolloutRevision: v.number(),
+    /** Step 19: "Allow USB for this PC" (plan 4.3 `usbTempAllow`): until when, or null. The caller compares it with its clock. */
+    usbAllowUntil: v.union(v.number(), v.null()),
+    /** Step 19: physical protection as the agent reports it (plan 4.16); null until it reports one. */
+    protection: v.union(securityPosture, v.null()),
+    /** Step 19: does the agent know lockdown ("lockdown/1")? null before its first report. */
+    lockdownCapable: v.union(v.boolean(), v.null()),
+    /** Step 19: the PC's apply report (plan 4.11): fixed codes only; null until it sends one. */
+    apply: v.union(
+      v.object({
+        state: applyState,
+        refusal: v.union(v.string(), v.null()),
+        layers: layerStates,
+        appliedVersion: v.number(),
+        lkgVersion: v.union(v.number(), v.null()),
+        configVersion: v.union(v.number(), v.null()),
+        updatedAt: v.number(),
+      }),
+      v.null(),
+    ),
   }),
   handler: async (ctx, args) => {
     const d = await getInOrg(ctx, "devices", args.deviceId, ctx.orgId);
@@ -284,7 +309,38 @@ export const get = memberQuery("viewer")({
       .query("deviceLocks")
       .withIndex("by_device", (q) => q.eq("deviceId", d._id))
       .first();
+    // Step 19: the apply report (one row, written only when its content changes) and the group's rollout row (for the ring picker).
+    const apply = await ctx.db
+      .query("deviceApplyReports")
+      .withIndex("by_device", (q) => q.eq("deviceId", d._id))
+      .first();
+    const groupId = d.groupId;
+    const rollout =
+      groupId === undefined
+        ? null
+        : await ctx.db
+            .query("groupRollouts")
+            .withIndex("by_group", (q) => q.eq("groupId", groupId))
+            .unique();
+    const capabilities = report?.capabilities ?? apply?.capabilities;
     return {
+      ring: (d.ring ?? "everyone") as RingValue,
+      rolloutRevision: rollout?.revision ?? 0,
+      usbAllowUntil: d.usbTempAllowUntil ?? null,
+      protection: report?.security ?? null,
+      lockdownCapable: report === null && apply === null ? null : (capabilities ?? []).includes("lockdown/1"),
+      apply:
+        apply === null
+          ? null
+          : {
+              state: apply.state,
+              refusal: apply.refusal ?? null,
+              layers: apply.layers,
+              appliedVersion: apply.appliedVersion,
+              lkgVersion: apply.lkgVersion ?? null,
+              configVersion: apply.config?.version ?? null,
+              updatedAt: apply.updatedAt,
+            },
       _id: d._id,
       name: d.name,
       revision: d.revision ?? 0,
@@ -450,6 +506,37 @@ export const unlock = memberMutation("admin", { major: "fleet:unlock" })({
       summary: `Unlocked the PC ${device.name}`,
     });
     return null;
+  },
+});
+
+/**
+ * "Allow USB for this PC" (admin; plan 4.3 `usbTempAllow`, edge case 62): lifts the USB class blocks on ONE PC for `hours` whole
+ * hours (1..MAX_USB_ALLOW_HOURS), then the group's rules apply again by themselves. `hours: 0` ends it now. It is live (not
+ * ring-gated) and never touches keyboards, mice or hubs (those are never blocked). A revoked PC is refused. Ending a window that
+ * is not open writes nothing. Audits `device.usbTempAllow` and publishes the device.
+ */
+export const allowUsb = memberMutation("admin")({
+  args: { deviceId: v.string(), hours: v.number() },
+  returns: v.object({ until: v.union(v.number(), v.null()) }),
+  handler: async (ctx, args) => {
+    if (!Number.isInteger(args.hours) || args.hours < 0 || args.hours > MAX_USB_ALLOW_HOURS) fail("invalid_argument", { field: "hours" });
+    const { device } = await activeDevice(ctx, args.deviceId);
+    const now = Date.now();
+    const open = device.usbTempAllowUntil !== undefined && device.usbTempAllowUntil > now;
+    if (args.hours === 0 && !open) return { until: null };
+    const until = args.hours === 0 ? undefined : now + args.hours * HOUR_MS;
+    await ctx.db.patch(device._id, { usbTempAllowUntil: until });
+    await requestPublish(ctx, ctx.orgId, { deviceIds: [device._id] });
+    await writeAudit(ctx, {
+      orgId: ctx.orgId,
+      actor: ctx.actor,
+      action: "device.usbTempAllow",
+      targetType: "device",
+      targetId: device._id,
+      targetLabel: device.name,
+      summary: args.hours === 0 ? `Ended the USB allowance on the PC ${device.name}` : `Allowed USB devices on the PC ${device.name} for ${args.hours} h`,
+    });
+    return { until: until ?? null };
   },
 });
 
