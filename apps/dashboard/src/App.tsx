@@ -28,6 +28,7 @@ const AppEdit = lazyScreen("AppEdit");
 const FileTypes = lazyScreen("FileTypes");
 const Enrollment = lazyScreen("Enrollment");
 const Audit = lazyScreen("Audit");
+const Broadcasts = lazyScreen("Broadcasts");
 const Settings = lazyScreen("Settings");
 const Gallery = lazyScreen("Gallery");
 const NotFound = lazyScreen("NotFound");
@@ -67,6 +68,7 @@ export function App() {
                 <Route path="apps/:id" element={<AppEdit />} />
                 <Route path="file-types" element={<FileTypes />} />
                 <Route path="enrollment" element={<Enrollment />} />
+                <Route path="broadcasts" element={<Broadcasts />} />
                 <Route path="audit" element={<Audit />} />
                 <Route path="settings" element={<Settings />} />
                 <Route path="gallery" element={<Gallery />} />

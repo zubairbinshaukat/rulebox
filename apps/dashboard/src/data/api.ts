@@ -4,6 +4,8 @@
  * one hook body for Convex is a local change (see README.md).
  */
 import type {
+  BroadcastInput,
+  BroadcastRow,
   AppDetail,
   AppOption,
   Audience,
@@ -88,6 +90,18 @@ export interface DataApi {
   useRevokeDevice: Mutation<{ deviceId: Id }>;
   useRemoveDevice: Mutation<{ deviceId: Id }>;
   useRequestRotation: Mutation<{ deviceId: Id }>;
+  /** `fleet:lock` (admin, major: fresh step-up, retried by the hook). Replaces an existing lock. */
+  useLockDevice: Mutation<{ deviceId: Id; message: string; contact?: string }, { lockId: string }>;
+  /** `fleet:unlock` (admin, major). */
+  useUnlockDevice: Mutation<{ deviceId: Id }>;
+
+  // ---- broadcasts (Phase 5 Step 15, `convex/broadcasts.ts`).
+  /** `broadcasts:list`: one page, newest first; sort key `sent` only, no search, the pager shows Previous / Next. */
+  useBroadcastsPage: (query: ListQuery) => ServerList<BroadcastRow>;
+  /** `broadcasts:send` (admin): a group or one PC; resolves to the new id and how many PCs it was aimed at. */
+  useSendBroadcast: Mutation<BroadcastInput, { id: Id; targetCount: number }>;
+  /** `broadcasts:cancel` (admin). */
+  useCancelBroadcast: Mutation<{ id: Id }>;
 
   // ---- groups
   /** Every group with capped counts (`groups:list`): the group pickers and filters. The Groups table uses `useGroupsPage`. */

@@ -16,7 +16,10 @@
 // minutes of activity (not counted below). Bytes are estimates (rows of
 // ~150-450 B). `live`: subscribed by the dashboard.
 
-export type IoBudget = { maxReads: number; maxReadBytes: number; maxWrites: number; maxWriteBytes: number; live?: true };
+/** `GROUP_COUNT_CAP + 1`: the devices read to count a group's PCs. */
+const GROUP_COUNT_CAP_READ = 501;
+
+export type IoBudget ={ maxReads: number; maxReadBytes: number; maxWrites: number; maxWriteBytes: number; live?: true };
 
 export const IO_BUDGETS: Record<string, IoBudget> = {
   // ---- Step 5: settings. `get` re-runs only when the organization row changes.
@@ -126,8 +129,9 @@ export const IO_BUDGETS: Record<string, IoBudget> = {
   "deviceApi:reportFindings": { maxReads: 1 + 2 * 50, maxReadBytes: 40_000, maxWrites: 2 * 50, maxWriteBytes: 60_000 },
   // credentials, the device's row of that day; writes: insert or patch of the day's row (<= 100 denials, ~1.5 KB typical, ~7 KB worst).
   "deviceApi:reportSecurityDaily": { maxReads: 3, maxReadBytes: 12_288, maxWrites: 2, maxWriteBytes: 12_288 },
-  // credentials, the device; per acknowledgement (<= MAX_ACKS_PER_CALL = 20): the broadcast and the device's ack row; writes: one ack row each.
-  "deviceApi:reportAcks": { maxReads: 2 + 2 * 20, maxReadBytes: 24_000, maxWrites: 20 + 1, maxWriteBytes: 8_192 },
+  // credentials, the device; per acknowledgement (<= MAX_ACKS_PER_CALL = 20): the broadcast and the device's ack row; writes: one ack row and
+  // (Step 15) the broadcast's `ackCount` patch each.
+  "deviceApi:reportAcks": { maxReads: 2 + 2 * 20, maxReadBytes: 24_000, maxWrites: 2 * 20 + 1, maxWriteBytes: 12_288 },
   // credentials, the device, and on a REPLACEMENT the old key's sealed boxes (<= MAX_DEVICE_WIFI + 1); writes: the device patch + those
   // boxes deleted (+ the credentials settle patch) and one scheduled `seal:forDevices`. A repeat of the same key writes nothing.
   "deviceApi:registerSealKey": { maxReads: 2 + 21, maxReadBytes: 24_576, maxWrites: 1 + 21 + 1, maxWriteBytes: 4_096 },
@@ -141,7 +145,13 @@ export const IO_BUDGETS: Record<string, IoBudget> = {
   "fleet:list": { maxReads: 300, maxReadBytes: 81_920, maxWrites: 0, maxWriteBytes: 0, live: true },
   // device, credentials, report (compat <= 32 KB), summary, presence, groups (tiny). Measured 8 / 2.1 KB.
   // Step 8: + the last 5 version rows (~150 B each).
-  "fleet:get": { maxReads: 3 + 5 + 50 + 5, maxReadBytes: 50_176, maxWrites: 0, maxWriteBytes: 0, live: true },
+  // Step 15: + the PC's lock (<= 1).
+  "fleet:get": { maxReads: 3 + 5 + 50 + 5 + 1, maxReadBytes: 50_176 + 1_024, maxWrites: 0, maxWriteBytes: 0, live: true },
+  // Step 15 (plan 4.17): device, credentials, the old lock, publishQueue (+ step-up row); writes: old lock deleted, new lock, its `lockId` patch,
+  // queue, audit (+ one scheduled publish run). The same text again: 0 writes.
+  "fleet:lock": { maxReads: 12, maxReadBytes: 8_192, maxWrites: 6, maxWriteBytes: 4_096 },
+  // device, the lock, publishQueue (+ step-up row); writes: lock deleted, queue, audit. Not locked: 0 writes.
+  "fleet:unlock": { maxReads: 9, maxReadBytes: 6_144, maxWrites: 3, maxWriteBytes: 2_048 },
   // device; writes: device, audit. Unchanged: 0 writes. Measured 5 / 1.1 KB, 2 writes.
   "fleet:rename": { maxReads: 5, maxReadBytes: 4_096, maxWrites: 2, maxWriteBytes: 1_024 },
   // device, credentials, group, orgStats, publishQueue; writes: device, orgStats, queue, audit
@@ -532,6 +542,15 @@ export const IO_BUDGETS: Record<string, IoBudget> = {
   // Step 14b: the approved printer driver names: wrapper (4) + the organization row; writes: the organization patch + audit. No snapshot (documents carry
   // the driver name; the agent checks its local store). No change: 5 reads, 0 writes.
   "networks:setApprovedPrinterDrivers": { maxReads: 5, maxReadBytes: 4_096, maxWrites: 2, maxWriteBytes: 4_096 },
+  // ---- Phase 5 Step 15: broadcasts (plan 4.17). UNSURE until measured: the matrix calls are the first-call cases.
+  // wrapper (3) + a page of <= 50 rows + the names of the groups / PCs they point to (a per-query cache, <= 50). Subscribed by the Broadcasts
+  // screen; it re-runs when a row of the page changes (an acknowledgement patches `ackCount`).
+  "broadcasts:list": { maxReads: 3 + 50 + 50, maxReadBytes: 80_000, maxWrites: 0, maxWriteBytes: 0, live: true },
+  // wrapper (4) + the target (a group + <= 501 of its PCs, or a PC + its credentials) + the two live-count ranges (<= 21 rows each) + the
+  // publish queue; writes: broadcast, queue, audit (+ one scheduled publish run). Refused: 0 writes.
+  "broadcasts:send": { maxReads: 4 + 1 + GROUP_COUNT_CAP_READ + 42 + 2, maxReadBytes: 400_000, maxWrites: 3, maxWriteBytes: 4_096 },
+  // wrapper (4) + the broadcast + its group + publish queue; writes: broadcast, queue, audit. Already cancelled: 0 writes.
+  "broadcasts:cancel": { maxReads: 4 + 1 + 1 + 1, maxReadBytes: 6_144, maxWrites: 3, maxWriteBytes: 2_048 },
   // ---- Phase 5 Step 14b: drivers (PRD 24.2). UNSURE like the rows above: the matrix calls are the no-change / refused cases.
   // wrapper (4) + the driver + <= 10 group names + <= 201 results (~0.3 KB each; a row only changes when a PC's state does). The Networks screen
   // does not subscribe to it (`networks:list` carries the rows only).

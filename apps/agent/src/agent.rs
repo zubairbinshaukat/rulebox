@@ -41,7 +41,7 @@ use crate::kiosk::{kiosk_status, spawn_reconciler, ReconcilerDeps};
 use crate::kiosk_control::KioskControl;
 use crate::lockdown::daily::DailyCounters;
 use crate::lockout::LockoutStore;
-use crate::notice::{run_notices, AckQueue, DailyDenials, DenialSink, NoticeExtension, NoticeHub};
+use crate::notice::{run_ack_sender, run_notices, AckQueue, DailyDenials, DenialSink, NoticeExtension, NoticeHub};
 use crate::paths::{DataPaths, InstallPaths};
 use crate::platform::{Platform, ShellMechanism};
 use crate::session::{SessionDeps, SessionManager, SessionTimeouts};
@@ -317,7 +317,10 @@ pub async fn run(
     } else {
         cached.as_ref().map(|(_, payload)| payload.doc.clone())
     };
-    let policy = AgentPolicy::from_doc(policy_doc.as_ref());
+    // (Phase 5 Step 15) A device lock survives a lost or unverifiable cache (`AgentState.device_lock`).
+    let cache_is_newest = cached.as_ref().is_some_and(|(_, payload)| payload.version >= state.accepted_version);
+    let policy = AgentPolicy::from_doc(policy_doc.as_ref())
+        .with_persisted_lock(state.device_lock.as_ref(), deps.sim.demo || cache_is_newest);
     drop(policy_doc);
     tracing::info!(
         enabled = policy.admin_exit.enabled,
@@ -503,7 +506,7 @@ pub async fn run(
         factory: Arc::clone(&deps.backend_factory),
         now_ms: Arc::clone(&now_ms),
         jitter: Arc::new(os_jitter),
-        link,
+        link: Arc::clone(&link),
         report: Arc::clone(&report),
         roster_tx,
     });
@@ -628,6 +631,16 @@ pub async fn run(
         denial_sink,
         Arc::clone(&now_ms),
     );
+    // (Step 15) The acknowledgements are sent by their own small task (the demo world has no backend).
+    if !deps.sim.demo {
+        tasks.spawn(run_ack_sender(
+            Arc::clone(&notice_hub),
+            Arc::clone(&link),
+            snapshot_rx.clone(),
+            Arc::new(os_jitter),
+            shutdown.clone(),
+        ));
+    }
     tasks.spawn(run_notices(notice_hub, notice_policy_rx, shutdown.clone()));
     tasks.spawn(sync_session(session_sync.0, session_sync.1, Arc::clone(&session), shutdown.clone()));
     tasks.spawn(clear_session_when_not_enrolled(
@@ -1560,6 +1573,168 @@ mod backend_tests {
         let (exit, _, err) = agent.unenroll(false).await;
         assert_eq!(exit, 0, "{err}");
         agent.wait_status(&["enrollment    : notEnrolled", "admin exit    : off"]).await;
+        agent.stop().await;
+    }
+
+    /// `document` with the device lock of plan 4.17.
+    fn locked_document(version: u64, lock_id: &str) -> serde_json::Value {
+        let mut doc = document(version, true, None);
+        doc["deviceLock"] = json!({ "lockId": lock_id, "message": "Call the front desk", "contact": "Ext 12", "lockedAtMs": 1 });
+        doc
+    }
+
+    /// Plan Step 15 tests: lock while an employee is signed in (session ended, sign-in refused), the admin
+    /// exit does not lift it, a restart offline keeps it, a lost cache keeps it, a revocation keeps it, and
+    /// only a newer verified document without a lock clears it (for good, also across a restart).
+    #[tokio::test]
+    async fn a_device_lock_ends_the_session_and_survives_exit_restart_lost_cache_and_revocation_until_a_document_unlocks() {
+        let dir = TempDir::new();
+        {
+            let paths = DataPaths::new(dir.path().to_path_buf());
+            let store = StateStore::open(&paths.state_dir()).unwrap();
+            let state = AgentState {
+                staff: Some(StaffAccount {
+                    sid: "S-1-5-21-1-1-1-2001".into(),
+                    user_name: "RuleboxStaff".into(),
+                    profile_dir: Some(dir.path().join("profile").to_string_lossy().into_owned()),
+                }),
+                ..AgentState::default()
+            };
+            store.save(&state).unwrap();
+        }
+        let state_file = dir.path().join("state").join("agent-state.json");
+        let saved_lock = || std::fs::read_to_string(&state_file).unwrap().contains("\"deviceLock\"");
+
+        // Run 1: an employee is signed in, then the lock arrives.
+        let fake = FakeBackend::new();
+        let agent = Running::start(deps_for(dir.path(), &fake)).await;
+        let (exit, _, err) = agent.enroll(code()).await;
+        assert_eq!(exit, 0, "{err}");
+        fake.push(BackendEvent::Connection(ConnectionStatus::Online));
+        push(&fake, 5, document(5, true, None));
+        agent.wait_status(&["policy        : version 5"]).await;
+        let (client, mut events) = agent.shell_client().await;
+        assert!(client.call::<StateGet>(Empty {}).await.unwrap().device_lock.is_none());
+        let signed_in =
+            client.call::<SessionSignIn>(SignInParams { username: "maya".into(), password: "demo".into() }).await.unwrap();
+        assert_eq!(signed_in.outcome, SignInOutcome::Ok);
+        assert!(!saved_lock());
+
+        push(&fake, 6, locked_document(6, "lock-1"));
+        let ended = loop {
+            match tokio::time::timeout(Duration::from_secs(10), events.recv()).await.unwrap().unwrap() {
+                ClientEvent::SessionEnded(reason) => break reason,
+                _ => continue,
+            }
+        };
+        assert_eq!(ended, rulebox_ipc::requests::SessionEndReason::DeviceLocked);
+        assert!(client.call::<SessionGet>(Empty {}).await.unwrap().employee.is_none());
+        let snapshot = client.call::<StateGet>(Empty {}).await.unwrap();
+        assert_eq!(snapshot.device_lock.as_ref().map(|lock| lock.lock_id.as_str()), Some("lock-1"));
+        assert_eq!(snapshot.device_lock.as_ref().and_then(|lock| lock.contact.as_deref()), Some("Ext 12"));
+        let refused =
+            client.call::<SessionSignIn>(SignInParams { username: "maya".into(), password: "demo".into() }).await.unwrap();
+        assert_eq!(refused.outcome, SignInOutcome::DeviceLocked);
+        assert!(saved_lock(), "the lock is on disk at accept time");
+
+        // The hidden admin exit still works, and it does not lift the lock.
+        let right = client.call::<AdminExitSubmit>(AdminExitSubmitParams { pin: PIN.into() }).await.unwrap();
+        assert_eq!(right.outcome, AdminExitOutcome::SigningOut);
+        tokio::time::sleep(Duration::from_millis(300)).await;
+        assert!(client.call::<StateGet>(Empty {}).await.unwrap().device_lock.is_some());
+        assert!(saved_lock());
+        drop(client);
+        agent.stop().await;
+
+        // Run 2: a restart with no connection and the cache GONE: still locked, sign-in refused.
+        std::fs::remove_file(dir.path().join("state").join("desired-state.json")).unwrap();
+        let silent = FakeBackend::new();
+        let agent = Running::start(deps_for(dir.path(), &silent)).await;
+        let (client, _events) = agent.shell_client().await;
+        let snapshot = client.call::<StateGet>(Empty {}).await.unwrap();
+        assert_eq!(snapshot.connection, ConnectionStatus::Offline);
+        assert_eq!(snapshot.device_lock.as_ref().map(|lock| lock.lock_id.as_str()), Some("lock-1"));
+        let refused =
+            client.call::<SessionSignIn>(SignInParams { username: "maya".into(), password: "demo".into() }).await.unwrap();
+        assert_eq!(refused.outcome, SignInOutcome::DeviceLocked);
+        drop(client);
+
+        // Revoked while locked: the lock stays.
+        silent.push(BackendEvent::Desired(DesiredFetch::Revoked));
+        agent.wait_status(&["enrollment    : revoked"]).await;
+        let (client, _events) = agent.shell_client().await;
+        assert!(client.call::<StateGet>(Empty {}).await.unwrap().device_lock.is_some());
+        drop(client);
+        agent.stop().await;
+
+        // Run 3: still revoked and locked after another restart. (A revoked PC does not sync, so nothing can unlock it.)
+        let silent = FakeBackend::new();
+        let agent = Running::start(deps_for(dir.path(), &silent)).await;
+        let (client, _events) = agent.shell_client().await;
+        let snapshot = client.call::<StateGet>(Empty {}).await.unwrap();
+        assert_eq!((snapshot.enrollment, snapshot.device_lock.is_some()), (EnrollmentStatus::Revoked, true));
+        drop(client);
+        agent.stop().await;
+    }
+
+    #[tokio::test]
+    async fn only_a_newer_verified_document_without_a_lock_unlocks_and_the_unlock_is_remembered() {
+        let dir = TempDir::new();
+        let state_file = dir.path().join("state").join("agent-state.json");
+        let fake = FakeBackend::new();
+        let agent = Running::start(deps_for(dir.path(), &fake)).await;
+        agent.enroll(code()).await;
+        fake.push(BackendEvent::Connection(ConnectionStatus::Online));
+        push(&fake, 5, locked_document(5, "lock-1"));
+        agent.wait_status(&["policy        : version 5"]).await;
+        let (client, _events) = agent.shell_client().await;
+        assert!(client.call::<StateGet>(Empty {}).await.unwrap().device_lock.is_some());
+
+        // The same version again, or an older document: not an unlock.
+        push(&fake, 4, document(4, true, None));
+        tokio::time::sleep(Duration::from_millis(300)).await;
+        assert!(client.call::<StateGet>(Empty {}).await.unwrap().device_lock.is_some(), "an older document cannot unlock");
+
+        // A newer one without the lock does.
+        push(&fake, 6, document(6, true, None));
+        agent.wait_status(&["policy        : version 6"]).await;
+        assert!(client.call::<StateGet>(Empty {}).await.unwrap().device_lock.is_none());
+        assert!(!std::fs::read_to_string(&state_file).unwrap().contains("\"deviceLock\""));
+        drop(client);
+        agent.stop().await;
+
+        let silent = FakeBackend::new();
+        let agent = Running::start(deps_for(dir.path(), &silent)).await;
+        let (client, _events) = agent.shell_client().await;
+        assert!(client.call::<StateGet>(Empty {}).await.unwrap().device_lock.is_none(), "the unlock survives a restart");
+        drop(client);
+        agent.stop().await;
+    }
+
+    #[tokio::test]
+    async fn an_older_cache_than_the_newest_accepted_document_keeps_the_lock_of_that_document() {
+        // The cache says "locked" (v5) but the newest accepted document (v6) said "unlocked" and the cache write
+        // was lost: the lock of the newest accepted document wins (and the other way round).
+        let dir = TempDir::new();
+        let fake = FakeBackend::new();
+        let agent = Running::start(deps_for(dir.path(), &fake)).await;
+        agent.enroll(code()).await;
+        fake.push(BackendEvent::Connection(ConnectionStatus::Online));
+        push(&fake, 5, locked_document(5, "lock-1"));
+        agent.wait_status(&["policy        : version 5"]).await;
+        agent.stop().await;
+        let paths = DataPaths::new(dir.path().to_path_buf());
+        let store = StateStore::open(&paths.state_dir()).unwrap();
+        let mut state = store.load().unwrap();
+        state.accepted_version = 6;
+        state.device_lock = None;
+        store.save(&state).unwrap();
+
+        let silent = FakeBackend::new();
+        let agent = Running::start(deps_for(dir.path(), &silent)).await;
+        let (client, _events) = agent.shell_client().await;
+        assert!(client.call::<StateGet>(Empty {}).await.unwrap().device_lock.is_none());
+        drop(client);
         agent.stop().await;
     }
 

@@ -78,6 +78,13 @@ pub struct AgentState {
     /// journal entry id (`printer:<id>`, `printer-port:<name>`, `printer-share:<unc>`). A different mark means "rebuild it".
     #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
     pub printer_marks: std::collections::BTreeMap<String, String>,
+    /// (Phase 5 Step 15, plan 4.17) The device lock of the newest accepted document, written at accept time
+    /// (`None` clears it). The lock is also in the cached document, but a lost or unverifiable
+    /// `desired-state.json` must not unlock a PC: at start the lock of the newest accepted document wins
+    /// whenever the cache is not that document. Only a newer verified document without a lock removes it
+    /// (never offline, never a revocation, never an admin exit). Unenrolling and enrolling clear it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub device_lock: Option<rulebox_policy::notice::DeviceLock>,
 }
 
 impl AgentState {
@@ -108,6 +115,7 @@ impl Default for AgentState {
             seal_key_registered: None,
             wlan_marks: std::collections::BTreeMap::new(),
             printer_marks: std::collections::BTreeMap::new(),
+            device_lock: None,
         }
     }
 }

@@ -947,6 +947,8 @@ export const reportAcks = deviceMutation({
       if (had !== null) continue;
       const at = Number.isFinite(a.atMs) ? Math.min(Math.max(a.atMs, b.createdAt), now) : now;
       await ctx.db.insert("broadcastAcks", { orgId: device.orgId, broadcastId: b._id, deviceId: device._id, at });
+      // The counter of the list ("acknowledged on 14 of 20 devices"): one patch per NEW ack row.
+      await ctx.db.patch(b._id, { ackCount: (b.ackCount ?? 0) + 1 });
       written++;
     }
     await chargeReport(ctx, ctx.device._id, written);

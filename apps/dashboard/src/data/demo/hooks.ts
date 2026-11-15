@@ -30,6 +30,7 @@ import {
   type AppRow,
   type AssignmentRow,
   type AuditEntry,
+  type BroadcastRow,
   type DevicePresence,
   type DeviceRow,
   type EmployeeDetail,
@@ -55,6 +56,7 @@ import {
 import type { ServerList } from "../serverList";
 import { byKey, contains, relevance, useDemoServerPage } from "./lists";
 import * as validate from "../../lib/validate";
+import { BROADCAST_ACTIVE_MAX, BROADCAST_BODY_MAX, BROADCAST_TITLE_MAX, LOCK_CONTACT_MAX, LOCK_MESSAGE_MAX, noticeProblem } from "../../lib/noticeRules";
 import { MAX_WIFI_GROUPS_PER_SAVE, MAX_WIFI_NAME, MAX_WIFI_PROFILES, WIFI_SECURITIES, passphraseProblem, ssidProblem } from "../../lib/wifiRules";
 import {
   DRIVER_CLASSES,
@@ -362,6 +364,13 @@ function base64Url(text: string) {
   return btoa(text).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
 }
 
+/** The demo twin of `convex/lib/noticeText.ts`: the trimmed text, or `invalid_argument` with the field. */
+function noticeText(value: string, max: number, field: string, opts: { multiline: boolean; optional?: boolean }): string {
+  if (noticeProblem(value, max, opts) !== null) fail("invalid_argument", { field });
+  const t = value.trim();
+  return opts.multiline ? t.replace(/\r\n?/g, "\n") : t;
+}
+
 function nameOrFail(value: string, max: number, field = "name") {
   if (validate.name(value, max)) fail("invalid_argument", { field });
   return value.trim();
@@ -562,6 +571,7 @@ export const demoApi: DataApi = {
         report: db.reports.get(d._id) ?? null,
         versions: (db.versions.get(d._id) ?? []).slice(0, 5),
         flags: { noGroup: !d.groupId, revoked: d.revoked, rotateCredential: d.rotateCredential },
+        lock: db.locks.get(d._id) ?? null,
         groups: groupOptions(db),
       };
     });
@@ -762,6 +772,122 @@ export const demoApi: DataApi = {
     });
   },
 
+  // Phase 5 Step 15 (plan 4.17): lock / unlock are major actions (fresh step-up).
+  useLockDevice() {
+    return useCallback(
+      ({ deviceId, message, contact }) =>
+        runMutation(
+          "admin",
+          ({ db, audit, now }) => {
+            const d = find(db.devices, deviceId);
+            if (d.revoked) fail("conflict", { detail: "device revoked" });
+            const text = noticeText(message, LOCK_MESSAGE_MAX, "message", { multiline: true });
+            const cleanContact = contact === undefined ? "" : noticeText(contact, LOCK_CONTACT_MAX, "contact", { multiline: false, optional: true });
+            const have = db.locks.get(d._id);
+            if (have && have.message === text && (have.contact ?? "") === cleanContact) return { lockId: have.lockId };
+            const lockId = newId("lock");
+            db.locks.set(d._id, { lockId, message: text, ...(cleanContact ? { contact: cleanContact } : {}), lockedAt: now });
+            bumpVersion(db, d._id, "locked");
+            audit({ action: "device.locked", targetType: "device", targetId: d._id, targetLabel: d.name, summary: `Locked the PC ${d.name}` });
+            return { lockId };
+          },
+          "fresh",
+        ),
+      [],
+    );
+  },
+  useUnlockDevice() {
+    return useCallback(
+      ({ deviceId }) =>
+        runMutation(
+          "admin",
+          ({ db, audit }) => {
+            const d = find(db.devices, deviceId);
+            if (!db.locks.delete(d._id)) return;
+            bumpVersion(db, d._id, "unlocked");
+            audit({ action: "device.unlocked", targetType: "device", targetId: d._id, targetLabel: d.name, summary: `Unlocked the PC ${d.name}` });
+          },
+          "fresh",
+        ),
+      [],
+    );
+  },
+
+  // `broadcasts:list`: newest first (sort key `sent`, either direction), the target's name, the two counters.
+  useBroadcastsPage(query) {
+    return useDemoServerPage("broadcasts:list", "broadcasts", query, (db, sort) => {
+      requireReader();
+      if (sort !== undefined && sort.key !== "sent") fail("invalid_argument", { field: "sort" });
+      return [...db.broadcasts]
+        .sort(byKey((b) => b.createdAt, sort?.dir ?? "desc"))
+        .map((b): BroadcastRow => {
+          const t = b.target;
+          const name = t.kind === "group" ? (db.groups.find((g) => g._id === t.id)?.name ?? null) : (db.devices.find((d) => d._id === t.id)?.name ?? null);
+          return { ...b, target: { ...t, name } };
+        });
+    });
+  },
+  useSendBroadcast() {
+    return useCallback(
+      (input) =>
+        runMutation("admin", ({ db, audit, now }) => {
+          const title = noticeText(input.title, BROADCAST_TITLE_MAX, "title", { multiline: false });
+          const body = noticeText(input.body, BROADCAST_BODY_MAX, "body", { multiline: true });
+          if (input.expiresAt !== undefined && (!Number.isFinite(input.expiresAt) || input.expiresAt <= now || input.expiresAt > now + 365 * DAY)) {
+            fail("invalid_argument", { field: "expiresAt" });
+          }
+          let targetName: string;
+          let targetCount: number;
+          if (input.target.kind === "group") {
+            const g = find(db.groups, input.target.id);
+            targetName = g.name;
+            targetCount = Math.min(db.devices.filter((d) => d.groupId === g._id && !d.revoked).length, 500);
+          } else {
+            const d = find(db.devices, input.target.id);
+            if (d.revoked) fail("conflict", { detail: "device revoked" });
+            targetName = d.name;
+            targetCount = 1;
+          }
+          const live = db.broadcasts.filter((b) => b.cancelledAt === null && (b.expiresAt === null || b.expiresAt > now)).length;
+          if (live >= BROADCAST_ACTIVE_MAX) fail("too_large", { detail: "active" });
+          const row = {
+            _id: newId("bcast"),
+            target: { kind: input.target.kind, id: input.target.id },
+            style: input.style,
+            title,
+            body,
+            expiresAt: input.expiresAt ?? null,
+            ackRequired: input.ackRequired,
+            createdAt: now,
+            cancelledAt: null,
+            targetCount,
+            ackCount: 0,
+          };
+          db.broadcasts.push(row);
+          audit({
+            action: "broadcast.sent",
+            targetType: "broadcast",
+            targetId: row._id,
+            targetLabel: title,
+            summary: `Sent the message "${title}" to ${input.target.kind === "group" ? "the group" : "the PC"} ${targetName}`,
+          });
+          return { id: row._id, targetCount };
+        }),
+      [],
+    );
+  },
+  useCancelBroadcast() {
+    return useCallback(
+      ({ id }) =>
+        runMutation("admin", ({ db, audit, now }) => {
+          const b = find(db.broadcasts, id);
+          if (b.cancelledAt !== null) return;
+          b.cancelledAt = now;
+          audit({ action: "broadcast.cancelled", targetType: "broadcast", targetId: b._id, targetLabel: b.title, summary: `Cancelled the message "${b.title}"` });
+        }),
+      [],
+    );
+  },
   // `groups:page`: a bounded list with offset cursors and its exact total inside the page; the search is "contains" on name and description.
   useGroupsPage(query) {
     return useDemoServerPage(

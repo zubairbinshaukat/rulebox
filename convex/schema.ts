@@ -1083,9 +1083,16 @@ export default defineSchema({
     createdBy: v.optional(v.id("members")),
     createdAt: v.number(),
     cancelledAt: v.optional(v.number()),
+    // Step 15: devices the broadcast was aimed at when it was sent (a device = 1; a group = its PCs, capped
+    // at GROUP_COUNT_CAP), and the devices that acknowledged it so far (`deviceApi:reportAcks` adds one per new
+    // ack row), so the list shows "14 of 20" without reading acknowledgement rows. Absent on older rows.
+    targetCount: v.optional(v.number()),
+    ackCount: v.optional(v.number()),
   })
     .index("by_org_created", ["orgId", "createdAt"])
-    .index("by_target_created", ["target.kind", "target.id", "createdAt"]),
+    .index("by_target_created", ["target.kind", "target.id", "createdAt"])
+    // Step 15: the "<= 20 active per organization" cap: never-cancelled rows by expiry (undefined = no expiry).
+    .index("by_org_open", ["orgId", "cancelledAt", "expiresAt"]),
 
   // grows. One row per device per broadcast; never the employee's identity.
   broadcastAcks: defineTable({

@@ -207,6 +207,18 @@ impl AgentPolicy {
         }
     }
 
+    /// (Phase 5 Step 15, plan 4.17) At start: `persisted` is the lock of the newest accepted document
+    /// (`AgentState.device_lock`). When the cached document is that document (`cache_is_newest`) the two
+    /// agree and nothing changes; when the cache is missing, did not verify or is older, the persisted
+    /// lock replaces whatever the cache said, so a lost cache never unlocks a PC.
+    #[must_use]
+    pub fn with_persisted_lock(mut self, persisted: Option<&DeviceLock>, cache_is_newest: bool) -> Self {
+        if !cache_is_newest {
+            self.device_lock = persisted.cloned();
+        }
+        self
+    }
+
     /// Sets the protocol 1.1 snapshot fields. The hash, its salt and the failure
     /// counter are never part of the snapshot.
     pub fn apply_to_snapshot(&self, snapshot: &mut AgentSnapshot) {

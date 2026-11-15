@@ -612,3 +612,54 @@ describe("demo: Step 17 follow-ups", () => {
     expect(small.result.current.data.capped).toBeUndefined();
   });
 });
+describe("demo device lock and broadcasts (Phase 5 Step 15)", () => {
+  it("lock replaces, the same text writes nothing, unlock removes it and both are audited; a revoked PC cannot be locked", async () => {
+    resetDemo();
+    signInAs("owner@demo.rulebox.test");
+    const lock = renderHook(() => demoApi.useLockDevice()).result.current;
+    const unlock = renderHook(() => demoApi.useUnlockDevice()).result.current;
+    const d = db().devices.find((x) => !x.revoked)!;
+    const first = await lock({ deviceId: d._id, message: "  Call IT  ", contact: " ext 1 " });
+    expect(db().locks.get(d._id)).toMatchObject({ lockId: first.lockId, message: "Call IT", contact: "ext 1" });
+    const audits = () => db().audit.filter((e) => e.action === "device.locked").length;
+    const before = audits();
+    expect(await lock({ deviceId: d._id, message: "Call IT", contact: "ext 1" })).toEqual(first);
+    expect(audits()).toBe(before);
+    const second = await lock({ deviceId: d._id, message: "Call IT now" });
+    expect(second.lockId).not.toBe(first.lockId);
+    expect(db().locks.get(d._id)!.contact).toBeUndefined();
+    const detail = renderHook(() => demoApi.useDeviceDetail(d._id));
+    expect((await ready(detail.result)).data.lock).toMatchObject({ lockId: second.lockId, message: "Call IT now" });
+    await unlock({ deviceId: d._id });
+    expect(db().locks.has(d._id)).toBe(false);
+    expect(db().audit.some((e) => e.action === "device.unlocked")).toBe(true);
+    await expect(lock({ deviceId: d._id, message: "  " })).rejects.toSatisfy((e) => errorCodeOf(e) === "invalid_argument");
+    const revoked = db().devices.find((x) => x.revoked);
+    if (revoked) await expect(lock({ deviceId: revoked._id, message: "x" })).rejects.toSatisfy((e) => errorCodeOf(e) === "conflict");
+  });
+
+  it("send validates, counts the group's PCs, caps live messages at 20 and cancel frees a place; the list is newest first", async () => {
+    resetDemo();
+    signInAs("owner@demo.rulebox.test");
+    const send = renderHook(() => demoApi.useSendBroadcast()).result.current;
+    const cancel = renderHook(() => demoApi.useCancelBroadcast()).result.current;
+    const group = db().groups[0]!;
+    const input = { target: { kind: "group" as const, id: group._id }, style: "banner" as const, title: "T", body: "B", ackRequired: true };
+    await expect(send({ ...input, title: " " })).rejects.toSatisfy((e) => errorCodeOf(e) === "invalid_argument");
+    await expect(send({ ...input, expiresAt: Date.now() - 1 })).rejects.toSatisfy((e) => errorCodeOf(e) === "invalid_argument");
+    const sent = await send(input);
+    expect(sent.targetCount).toBe(Math.min(db().devices.filter((x) => x.groupId === group._id && !x.revoked).length, 500));
+    expect(db().audit.some((e) => e.action === "broadcast.sent" && e.targetId === sent.id)).toBe(true);
+    const list = renderHook(() => demoApi.useBroadcastsPage({ numItems: 10, cursor: null }));
+    const page = await ready(list.result);
+    expect(page.items[0]!._id).toBe(sent.id);
+    expect(page.items.map((b) => b.createdAt)).toEqual([...page.items.map((b) => b.createdAt)].sort((x, y) => y - x));
+
+    let live = db().broadcasts.filter((b) => b.cancelledAt === null && (b.expiresAt === null || b.expiresAt > Date.now())).length;
+    for (; live < 20; live++) await send(input);
+    await expect(send(input)).rejects.toSatisfy((e) => errorCodeOf(e) === "too_large");
+    await cancel({ id: sent.id });
+    expect(db().broadcasts.find((b) => b._id === sent.id)!.cancelledAt).not.toBeNull();
+    await expect(send(input)).resolves.toBeDefined();
+  }, 30_000);
+});

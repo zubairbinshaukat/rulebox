@@ -11,6 +11,7 @@
 //! Passwords are never logged and never stored in plain text.
 
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
@@ -175,9 +176,18 @@ struct Inner {
     /// "cleanup owed" marker and keeps sign-in and cleanup apart (`cleanup.rs`).
     /// `None` in `--sim-demo` (no cleanup there).
     cleanup: Mutex<Option<Arc<CleanupGate>>>,
+    /// (Phase 5 Step 15, plan 4.17) The document has a device lock: every sign-in answers `deviceLocked`
+    /// and the session is gone. Set by `on_policy`; the snapshot (`deviceLock`, filled from the same policy
+    /// before the first request is served) says the same, so a sign-in right at start is refused too.
+    device_locked: AtomicBool,
 }
 
 impl Inner {
+    /// The PC is locked (plan 4.17): the policy said so, or the snapshot the Staff App sees does.
+    fn locked(&self) -> bool {
+        self.device_locked.load(Ordering::SeqCst) || self.snapshot_rx.borrow().device_lock.is_some()
+    }
+
     fn emit(&self, event: SessionEvent) {
         if let Some(tx) = lock(&self.events).as_ref() {
             let _ = tx.send(event);
@@ -241,6 +251,7 @@ impl SessionManager {
                 roster: Mutex::new(RosterView::default()),
                 events: Mutex::new(None),
                 cleanup: Mutex::new(None),
+                device_locked: AtomicBool::new(false),
             }),
         })
     }
@@ -263,6 +274,13 @@ impl SessionManager {
 
     /// (Step 13) A new agent policy (a verified document was accepted).
     pub fn on_policy(&self, policy: &AgentPolicy) {
+        // (Phase 5 Step 15) A device lock ends the employee session (`session.ended { deviceLocked }`) and
+        // refuses sign-in until a newer document without it arrives.
+        let locked = policy.device_lock.is_some();
+        self.inner.device_locked.store(locked, Ordering::SeqCst);
+        if locked {
+            self.end(SessionEndReason::DeviceLocked);
+        }
         {
             let mut view = lock(&self.inner.roster);
             view.doc_group = policy.roster_group_id.clone();
@@ -744,6 +762,10 @@ async fn sign_in(inner: &Arc<Inner>, params: SignInParams) -> Result<SignInResul
             return Err(rpc_error(ErrorCode::NotEnrolled, "This PC is not enrolled.", false));
         }
     }
+    // 1b. (Phase 5 Step 15) A locked PC signs nobody in: no password is looked at, nothing is counted.
+    if inner.locked() {
+        return Ok(outcome_only(SignInOutcome::DeviceLocked));
+    }
     // 2. Normalize and bound the input.
     let username = normalize_username(&params.username)?;
     check_password_length(&params.password)?;
@@ -787,7 +809,7 @@ async fn sign_in(inner: &Arc<Inner>, params: SignInParams) -> Result<SignInResul
         sign_in_checked(inner, &username, params.password, &files_base, &mut attempt),
     )
     .await;
-    match checked {
+    let result = match checked {
         Ok(result) => result,
         Err(_) => {
             if attempt.counted {
@@ -796,7 +818,17 @@ async fn sign_in(inner: &Arc<Inner>, params: SignInParams) -> Result<SignInResul
             tracing::warn!(username = %username, "sign-in check exceeded its time budget");
             Err(timeout_error())
         }
+    };
+    // A lock that arrived while the password was being checked wins: the session that was just started is
+    // taken back (the Staff App hears `deviceLocked` as the sign-in outcome, so no `session.ended` event).
+    if inner.locked() && matches!(&result, Ok(done) if done.outcome == SignInOutcome::Ok) {
+        if lock(&inner.session).take().is_some() {
+            tracing::info!("a sign-in finished while the PC was being locked; the session was taken back");
+            inner.ended();
+        }
+        return Ok(outcome_only(SignInOutcome::DeviceLocked));
     }
+    result
 }
 
 /// Steps 5 to 8. `attempt.counted` is true from step 6 until the failure is
@@ -2046,6 +2078,84 @@ mod tests {
         h.manager.end(SessionEndReason::Revoked);
         assert_eq!(events.try_recv(), Ok(SessionEvent::Ended(SessionEndReason::Revoked)));
         assert!(events.try_recv().is_err());
+    }
+
+    // -- Phase 5 Step 15: the device lock (plan 4.17) --------------------------------
+
+    fn locked(group: &str) -> AgentPolicy {
+        AgentPolicy {
+            device_lock: Some(rulebox_policy::notice::DeviceLock {
+                lock_id: "l1".into(),
+                message: "Call the front desk".into(),
+                contact: None,
+                locked_at_ms: 1,
+            }),
+            ..policy(group)
+        }
+    }
+
+    #[tokio::test]
+    async fn a_device_lock_ends_the_session_refuses_every_sign_in_without_counting_and_an_unlock_allows_it_again() {
+        let (h, mut events) = roster_harness(Vec::new());
+        assert_eq!(h.sign_in("maya", "demo").await.unwrap().outcome, SignInOutcome::Ok);
+        assert!(h.session_get().await.employee.is_some());
+
+        // The lock arrives while an employee is signed in: the session ends, the Staff App hears why.
+        h.manager.on_policy(&locked(GROUP));
+        assert_eq!(h.session_get().await.employee, None);
+        assert_eq!(events.try_recv(), Ok(SessionEvent::Ended(SessionEndReason::DeviceLocked)));
+        assert!(events.try_recv().is_err(), "once");
+
+        // Every sign-in is refused with its own outcome: right password, wrong password, any user. Nothing is counted.
+        for (user, password) in [("maya", "demo"), ("maya", "bad"), ("someone", "x")] {
+            let refused = h.sign_in(user, password).await.unwrap();
+            assert_eq!((refused.outcome, refused.employee), (SignInOutcome::DeviceLocked, None), "{user}");
+        }
+        assert_eq!(h.failures("maya"), 0);
+        assert!(!h.manager.is_active());
+        // The same lock again (a new document with the same lock) changes nothing.
+        h.manager.on_policy(&locked(GROUP));
+        assert!(events.try_recv().is_err());
+
+        // A document without the lock: sign-in works again.
+        h.manager.on_policy(&policy(GROUP));
+        assert_eq!(h.sign_in("maya", "demo").await.unwrap().outcome, SignInOutcome::Ok);
+    }
+
+    #[tokio::test]
+    async fn a_locked_pc_refuses_the_offline_sign_in_of_a_cached_employee_too() {
+        let (h, _events) = roster_harness(vec![rostered("maya", 1, 0)]);
+        h.manager.on_policy(&locked(GROUP));
+        h.set_online(false);
+        assert_eq!(h.sign_in("maya", "demo").await.unwrap().outcome, SignInOutcome::DeviceLocked);
+        h.set_online(true);
+        assert_eq!(h.sign_in("maya", "demo").await.unwrap().outcome, SignInOutcome::DeviceLocked);
+        // Only the document lifts it: offline, with the cache, the lock is still in force after a long time.
+        h.advance(40 * 24 * 3_600_000);
+        h.set_online(false);
+        assert_eq!(h.sign_in("maya", "demo").await.unwrap().outcome, SignInOutcome::DeviceLocked);
+    }
+
+    #[tokio::test]
+    async fn the_lock_in_the_snapshot_alone_refuses_a_sign_in_at_start() {
+        // A request served before `on_policy` ran (the snapshot is filled from the same policy at start).
+        let (h, _events) = roster_harness(Vec::new());
+        h.snapshot_tx.send_modify(|snapshot| {
+            snapshot.device_lock =
+                Some(rulebox_ipc::types::DeviceLockView { lock_id: "l1".into(), message: "Locked".into(), contact: None });
+        });
+        assert_eq!(h.sign_in("maya", "demo").await.unwrap().outcome, SignInOutcome::DeviceLocked);
+        h.snapshot_tx.send_modify(|snapshot| snapshot.device_lock = None);
+        assert_eq!(h.sign_in("maya", "demo").await.unwrap().outcome, SignInOutcome::Ok);
+    }
+
+    #[tokio::test]
+    async fn a_revoked_pc_stays_locked_and_a_not_enrolled_one_is_not_a_lock_case() {
+        let h = harness_with(Options { enrollment: EnrollmentStatus::Revoked, ..Options::default() });
+        h.manager.on_policy(&locked(GROUP));
+        // Revoked: the existing refusal comes first (a revoked PC signs nobody in, locked or not).
+        assert!(h.sign_in("maya", "demo").await.is_err());
+        assert!(h.manager.inner.locked(), "the lock is still in force");
     }
 
     #[tokio::test]

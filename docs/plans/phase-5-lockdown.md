@@ -2054,6 +2054,35 @@ checks + screenshots.
 **Done when:** all pass.
 **Do NOT:** add remote wipe, remote screenshots or location (non-goals).
 
+**Built 2026-11-15 (SimPlatform / convex-test / mocked hooks only, not committed).**
+Deviations and open points:
+
+- The lock functions are `fleet:lock` / `fleet:unlock` (not `devices:lock`: `devices.ts`
+  is the agent's module, `fleet.ts` the admin one), and both are major actions (fresh
+  step-up), as `MAJOR_ACTIONS` already said. Broadcasts are `convex/broadcasts.ts`
+  (`list`, `send`, `cancel`). The dashboard has no `routes/` folder: `screens/Broadcasts.tsx`
+  (route `/broadcasts`, nav "Messages"), `screens/broadcasts/`, and the lock card on the
+  device page. A one-PC message is sent from the device page ("Send a message to this PC").
+- `broadcasts` gained `targetCount` (PCs aimed at when sent, group capped at 500) and
+  `ackCount` (+1 per new ack row in `deviceApi:reportAcks`), so the list shows "14 of 20 PCs"
+  without reading ack rows, and the index `by_org_open [orgId, cancelledAt, expiresAt]`
+  for the "<= 20 live per organization" cap (two bounded ranges, <= 21 rows each).
+  `listing.ts` got the table `broadcasts` (sort key `sent`).
+- Agent: `AgentState.device_lock` (written at accept time; a lost, unverifiable or older
+  cache never unlocks), `SessionManager::on_policy` ends the session with `deviceLocked`,
+  every `session.signIn` answers `deviceLocked` (also when the snapshot alone says locked),
+  unenroll / enroll clear the lock. Acks go out in `notice::run_ack_sender`
+  (`LockdownCall::Acks` -> `deviceApi:reportAcks`) 10 minutes after the first one was
+  queued, or at once when `NoticeHub::flush_acks_now` is called: Step 20 must call it
+  where the reconciler sends an apply report (the reporter is not wired yet).
+- Open: a broadcast of a deleted group still counts against the 20 until cancelled
+  (Step 20 group-delete cleanup); `liveBroadcasts` reads the 10 newest rows of a target, so
+  more than 10 newer cancelled / expired rows can hide an older live one; the PCs list has
+  no "locked" badge (it would cost a read per row).
+- Not done here: VM proof of the lock view on every monitor, Win+L, hidden exit while
+  locked (Step 22); the admin exit -> re-arm path is covered up to "the lock is in the
+  state and the snapshot after the exit" (SimPlatform has no real re-arm).
+
 ---
 
 ### Step 16 — Rollout rings and rollback

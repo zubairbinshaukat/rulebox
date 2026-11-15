@@ -4,15 +4,18 @@
 //!
 //! * The device lock itself reaches the snapshot through `AgentPolicy::apply_to_snapshot`; the
 //!   hub only tells the clients (`device.lockChanged`) when it changes. What the agent *does*
-//!   about a lock (ends the session, refuses sign-in, survives a restart) is Step 15.
+//!   about a lock (Step 15): `SessionManager::on_policy` ends the session and refuses sign-in,
+//!   `AgentState.device_lock` keeps it across restarts, offline periods and revocations.
 //! * Broadcasts expire by **server time** (the device clock plus the offset learned at ping
 //!   time, plan 4.16), so a PC whose clock is two days wrong still drops them on time. The agent
 //!   removes an expired one from the snapshot itself; `broadcasts.changed` goes out at most once
 //!   per [`EVENT_GAP`].
 //! * An acknowledgement is queued once per broadcast, on disk (`broadcast-acks.json`), as
-//!   `{ broadcastId, atMs }`, the exact entry of `deviceApi:reportAcks`. Sending the queue (on
-//!   the next apply report, or after 10 minutes) is Step 15; [`AckQueue::pending`] and
-//!   [`AckQueue::mark_sent`] are its two calls. No employee is ever recorded.
+//!   `{ broadcastId, atMs }`, the exact entry of `deviceApi:reportAcks`. [`run_ack_sender`] sends
+//!   the queue (Step 15): one call per flush, at most [`MAX_ACKS_PER_CALL`] entries, when a flush
+//!   is asked for ([`NoticeHub::flush_acks_now`], the apply report path of Step 20) or
+//!   [`ACK_FLUSH_AFTER`] after the first one was queued, whichever comes first, only while online.
+//!   No employee is ever recorded.
 //! * Denial counters from the Staff App are untrusted input: the app must be in the device
 //!   catalogue, the kind one of the eight permission names, unknown entries are dropped, one
 //!   call carries at most 100 entries and 10,000 per entry. They are added to the daily security
@@ -20,6 +23,7 @@
 
 use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
@@ -29,19 +33,22 @@ use rulebox_ipc::methods::{BroadcastAcknowledge, Method, WebappReportDenials};
 use rulebox_ipc::requests::{
     BroadcastAckParams, OkResult, ReportDenialsParams, MAX_DENIAL_COUNT, MAX_DENIAL_ENTRIES, PERMISSION_KINDS,
 };
-use rulebox_ipc::types::{AgentSnapshot, BroadcastView};
+use rulebox_ipc::types::{AgentSnapshot, BroadcastView, ConnectionStatus, EnrollmentStatus};
 use rulebox_ipc::{ErrorCode, RpcError, CAP_BROADCASTS, CAP_DEVICE_LOCK, CAP_KEYBOARD_POLICY, CAP_PERMISSION_REPORTS};
 use rulebox_policy::lockdown::MAX_ID_CHARS;
 use rulebox_policy::notice::{Broadcast, MAX_ACTIVE_BROADCASTS};
 use serde::{Deserialize, Serialize};
-use tokio::sync::watch;
+use tokio::sync::{watch, Notify};
 use tokio::time::Instant;
 use tokio_util::sync::CancellationToken;
 
 use crate::agent_policy::AgentPolicy;
+use crate::backend::reports::LockdownCall;
+use crate::backend::{BackendError, BackendLink};
 use crate::ipc_conn::{rpc_error, PeerCtx};
 use crate::ipc_shell::{ShellBroadcast, ShellExtension};
 use crate::lockdown::daily::{server_day, DailyCounters};
+use crate::report::backoff_delay;
 use crate::state::{lock, read_json, write_atomic, SnapshotHandle};
 
 /// `broadcasts.changed` goes out at most this often (plan 4.12).
@@ -51,11 +58,11 @@ const MAX_SLEEP: Duration = Duration::from_secs(3_600);
 /// Acknowledgement records kept on disk: far more than the five active broadcasts can need.
 pub const MAX_ACK_RECORDS: usize = 100;
 /// Entries in one `deviceApi:reportAcks` call (`MAX_ACKS_PER_CALL` of `convex/lib/limits.ts`).
-#[allow(dead_code)] // Step 15 sends the queue
 pub const MAX_ACKS_PER_CALL: usize = 20;
-/// The Convex function the queue is sent to (Step 15 sends it).
-#[allow(dead_code)] // Step 15 sends the queue
-pub const FN_REPORT_ACKS: &str = "deviceApi:reportAcks";
+/// An acknowledgement waits at most this long for an apply report to carry it (plan 4.17).
+pub const ACK_FLUSH_AFTER: Duration = Duration::from_secs(600);
+/// After the server refused the call, ask again no sooner than this.
+const ACK_REJECTED_RETRY: Duration = Duration::from_secs(3_600);
 
 // ---------------------------------------------------------------- the broadcast list
 
@@ -91,7 +98,6 @@ pub fn next_expiry_ms(list: &[Broadcast], server_now_ms: u64) -> Option<u64> {
 /// One acknowledgement as `deviceApi:reportAcks` takes it. `at_ms` is server time.
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
-#[allow(dead_code)] // Step 15 sends the queue
 pub struct Ack {
     pub broadcast_id: String,
     pub at_ms: u64,
@@ -162,7 +168,6 @@ impl AckQueue {
     }
 
     /// The acknowledgements the server has not taken yet, oldest first, at most one call's worth.
-    #[allow(dead_code)] // Step 15 sends the queue
     pub fn pending(&self) -> Vec<Ack> {
         self.file
             .acks
@@ -174,7 +179,6 @@ impl AckQueue {
     }
 
     /// The server took these.
-    #[allow(dead_code)] // Step 15 sends the queue
     pub fn mark_sent(&mut self, ids: &[String]) {
         let mut changed = false;
         for record in &mut self.file.acks {
@@ -199,7 +203,6 @@ impl AckQueue {
     }
 
     /// Unenroll: the acknowledgements belong to the organization the PC is leaving.
-    #[allow(dead_code)] // Step 15 / 20 call it from the unenroll path
     pub fn clear(&mut self) -> std::io::Result<()> {
         self.file = AckFile { schema: 1, ..AckFile::default() };
         crate::state::remove_file_if_exists(&self.path)
@@ -269,6 +272,10 @@ pub struct NoticeHub {
     snapshot: SnapshotHandle,
     events: ShellBroadcast,
     now_ms: Arc<dyn Fn() -> u64 + Send + Sync>,
+    /// A new acknowledgement was queued, or a flush was asked for: [`run_ack_sender`] looks again.
+    ack_wake: Notify,
+    /// Send the queue now (an apply report is going out, plan 4.17) instead of waiting for [`ACK_FLUSH_AFTER`].
+    flush_requested: AtomicBool,
 }
 
 impl NoticeHub {
@@ -279,7 +286,14 @@ impl NoticeHub {
         now_ms: Arc<dyn Fn() -> u64 + Send + Sync>,
     ) -> Arc<Self> {
         let state = HubState { list: Vec::new(), lock_id: None, acks, gate: EventGate::default() };
-        Arc::new(Self { state: Mutex::new(state), snapshot, events, now_ms })
+        Arc::new(Self {
+            state: Mutex::new(state),
+            snapshot,
+            events,
+            now_ms,
+            ack_wake: Notify::new(),
+            flush_requested: AtomicBool::new(false),
+        })
     }
 
     /// The server's clock: the device's plus the offset the agent learned (none yet = trusted).
@@ -363,19 +377,128 @@ impl NoticeHub {
         }
         // The `acknowledged` flag of the view changed.
         self.refresh();
+        self.ack_wake.notify_one();
         true
     }
 
-    /// The acknowledgements waiting for the server (Step 15 sends them).
-    #[allow(dead_code)] // Step 15 sends the queue
+    /// The acknowledgements waiting for the server.
     pub fn pending_acks(&self) -> Vec<Ack> {
         lock(&self.state).acks.pending()
     }
 
     /// The server took these acknowledgements.
-    #[allow(dead_code)] // Step 15 sends the queue
     pub fn acks_sent(&self, ids: &[String]) {
         lock(&self.state).acks.mark_sent(ids);
+    }
+
+    /// An apply report is going out (Step 20 calls this when it sends one): the waiting acknowledgements
+    /// ride along instead of waiting for [`ACK_FLUSH_AFTER`].
+    #[allow(dead_code)] // Step 20 calls it where the reconciler sends an apply report
+    pub fn flush_acks_now(&self) {
+        self.flush_requested.store(true, Ordering::SeqCst);
+        self.ack_wake.notify_one();
+    }
+
+    /// Unenroll: the acknowledgements belong to the organization the PC left.
+    fn forget_acks(&self) {
+        if let Err(error) = lock(&self.state).acks.clear() {
+            tracing::error!("cannot delete broadcast-acks.json: {error}");
+        }
+    }
+}
+
+/// The acknowledgement sender (Step 15, plan 4.17): one `deviceApi:reportAcks` call per flush, never while
+/// offline, never on a timer that has nothing to say. A failed call keeps the queue and tries again with the
+/// Phase 4 full-jitter backoff; a server that refuses the call is asked again after an hour. A PC that is no
+/// longer enrolled forgets its acknowledgements.
+pub async fn run_ack_sender(
+    hub: Arc<NoticeHub>,
+    link: Arc<BackendLink>,
+    mut snapshot_rx: watch::Receiver<AgentSnapshot>,
+    jitter: Arc<dyn Fn(u64) -> u64 + Send + Sync>,
+    shutdown: CancellationToken,
+) {
+    let mut failures: u32 = 0;
+    let mut retry_at: Option<Instant> = None;
+    // When the oldest acknowledgement still waiting was first seen.
+    let mut waiting_since: Option<Instant> = None;
+    // No backend link (revoked, stopped): nothing can be sent until something wakes us.
+    let mut parked = false;
+    loop {
+        let (online, enrolled) = {
+            let snapshot = snapshot_rx.borrow_and_update();
+            (snapshot.connection == ConnectionStatus::Online, snapshot.enrollment != EnrollmentStatus::NotEnrolled)
+        };
+        if !enrolled {
+            hub.forget_acks();
+        }
+        let pending = hub.pending_acks();
+        if pending.is_empty() {
+            waiting_since = None;
+            hub.flush_requested.store(false, Ordering::SeqCst);
+        } else if waiting_since.is_none() {
+            waiting_since = Some(Instant::now());
+        }
+        let due = match waiting_since {
+            Some(_) if hub.flush_requested.load(Ordering::SeqCst) => Some(Instant::now()),
+            Some(since) => Some(since + ACK_FLUSH_AFTER),
+            None => None,
+        };
+        let at = if online && !parked { due.map(|due| [Some(due), retry_at].into_iter().flatten().max().unwrap_or(due)) } else { None };
+        let timer = async {
+            match at {
+                Some(at) => tokio::time::sleep_until(at).await,
+                None => std::future::pending::<()>().await,
+            }
+        };
+        tokio::select! {
+            () = shutdown.cancelled() => return,
+            () = hub.ack_wake.notified() => { parked = false; continue; }
+            changed = snapshot_rx.changed() => {
+                if changed.is_err() {
+                    shutdown.cancelled().await;
+                    return;
+                }
+                parked = false;
+                continue;
+            }
+            () = timer => {}
+        }
+
+        // Send what is waiting, one call (<= MAX_ACKS_PER_CALL entries) at a time.
+        loop {
+            let batch = hub.pending_acks();
+            if batch.is_empty() {
+                break;
+            }
+            let Some((backend, auth)) = link.get() else {
+                parked = true;
+                break;
+            };
+            let ids: Vec<String> = batch.iter().map(|ack| ack.broadcast_id.clone()).collect();
+            match backend.lockdown_report(&auth, &LockdownCall::Acks(batch)).await {
+                Ok(()) => {
+                    failures = 0;
+                    retry_at = None;
+                    hub.acks_sent(&ids);
+                }
+                Err(error) => {
+                    failures = failures.saturating_add(1);
+                    let delay = match error {
+                        BackendError::Rejected { .. } => ACK_REJECTED_RETRY.max(backoff_delay(failures, jitter.as_ref())),
+                        _ => backoff_delay(failures, jitter.as_ref()),
+                    };
+                    tracing::debug!(failures, delay_ms = delay.as_millis() as u64, "acknowledgements not delivered; retrying later");
+                    retry_at = Some(Instant::now() + delay);
+                    break;
+                }
+            }
+        }
+        // What was sent no longer waits; a new one starts its own 10 minutes.
+        if hub.pending_acks().is_empty() {
+            waiting_since = None;
+            hub.flush_requested.store(false, Ordering::SeqCst);
+        }
     }
 }
 

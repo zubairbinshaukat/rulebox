@@ -48,6 +48,8 @@ export type Fixture = {
   printerId: Id<"printers">;
   /** (Step 14b) An INF driver "Front desk driver" (revision 1) assigned to `groupId`. */
   driverId: Id<"drivers">;
+  /** (Step 15) A live banner broadcast "Maintenance" aimed at `groupId`, no expiry, not cancelled. */
+  broadcastId: Id<"broadcasts">;
   /** An enabled employee in no group. */
   employeeId: Id<"employees">;
   /** The device's stored secret hashes (current and previous). */
@@ -147,6 +149,19 @@ export async function fixture(given?: T): Promise<Fixture> {
     }),
   );
   const driverId = await t.run((ctx) => ctx.db.insert("drivers", DRIVER_ROW(orgId, "Front desk driver", [groupId])));
+  const broadcastId = await t.run((ctx) =>
+    ctx.db.insert("broadcasts", {
+      orgId,
+      target: { kind: "group", id: groupId },
+      style: "banner",
+      title: "Maintenance",
+      body: "The network is down tonight.",
+      ackRequired: false,
+      createdAt: Date.now(),
+      targetCount: 1,
+      ackCount: 0,
+    }),
+  );
   const employeeId = await t.run((ctx) =>
     ctx.db.insert("employees", {
       orgId,
@@ -192,6 +207,7 @@ export async function fixture(given?: T): Promise<Fixture> {
     wifiId,
     printerId,
     driverId,
+    broadcastId,
     employeeId,
     storedHashes,
     accessor: {
@@ -580,6 +596,27 @@ export const ROWS: Row[] = [
     call: (a, f) => a.mutation(api.fleet.setKiosk, { deviceId: f.deviceId, expectedRevision: 0, enabled: true }),
     expect: { ...ADMIN_UNLOCKED, foreign: "not_found" },
   },
+  // Phase 5 Step 15: the device lock (the same text again = no change) and broadcasts.
+  {
+    name: "fleet:lock",
+    call: (a, f) => a.mutation(api.fleet.lock, { deviceId: f.deviceId, message: "This PC is locked. Please call the front desk.", contact: "Front desk, ext. 12" }),
+    expect: { ...ADMIN_MAJOR, foreign: "not_found" },
+  },
+  { name: "fleet:unlock", call: (a, f) => a.mutation(api.fleet.unlock, { deviceId: f.deviceId }), expect: { ...ADMIN_MAJOR, foreign: "not_found" } },
+  { name: "broadcasts:list", call: (a) => a.query(api.broadcasts.list, { paginationOpts: { numItems: 25, cursor: null } }), expect: { ...VIEWER, foreign: "ok" } },
+  {
+    name: "broadcasts:send",
+    call: (a, f) =>
+      a.mutation(api.broadcasts.send, {
+        target: { kind: "group", id: f.groupId },
+        style: "banner",
+        title: "Maintenance",
+        body: "The network is down tonight.",
+        ackRequired: false,
+      }),
+    expect: { ...ADMIN_UNLOCKED, foreign: "not_found" },
+  },
+  { name: "broadcasts:cancel", call: (a, f) => a.mutation(api.broadcasts.cancel, { id: f.broadcastId }), expect: { ...ADMIN_UNLOCKED, foreign: "not_found" } },
   { name: "fleet:revoke", call: (a, f) => a.mutation(api.fleet.revoke, { deviceId: f.deviceId }), expect: { ...ADMIN_MAJOR, foreign: "not_found" } },
   {
     name: "fleet:remove",

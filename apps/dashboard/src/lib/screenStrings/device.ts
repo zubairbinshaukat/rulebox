@@ -17,6 +17,7 @@ export const deviceStrings = {
   shellHealth: "Staff App",
   lastReport: "Last report",
   lastContact: "Last contact",
+  lockedNotice: "This PC is locked. Nobody can sign in until you unlock it.",
   kiosk: "Kiosk mode",
   kioskHelp: "When off, the PC runs a normal Windows desktop for maintenance.",
   kioskOn: "Kiosk on",

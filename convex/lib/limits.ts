@@ -450,5 +450,15 @@ export const SEALED_PURGE_BATCH = 100;
 export const SEAL_DEVICES_PER_RUN = 25;
 /** Live broadcasts read per target when a document is built (the newest MAX_ACTIVE_BROADCASTS are kept). */
 export const BROADCAST_READ = 10;
+/** Device lock and broadcasts (Phase 5 Step 15, plan 4.17): text limits (the Rust side has the same numbers), the active cap per organization. */
+export const MAX_LOCK_MESSAGE = 300;
+export const MAX_LOCK_CONTACT = 100;
+export const MAX_BROADCAST_TITLE = 80;
+export const MAX_BROADCAST_BODY = 500;
+export const MAX_ORG_ACTIVE_BROADCASTS = 20;
+/** A broadcast's expiry may be at most this far ahead (an owner decision is open: the plan sets no upper bound). */
+export const MAX_BROADCAST_LIFETIME_MS = 365 * 24 * 60 * 60 * 1000;
+/** `broadcasts:list`: rows per page. */
+export const MAX_BROADCAST_PAGE = 50;
 /** The server day a security summary may name: today, or this many days back (clock slack). */
 export const SECURITY_DAY_SLACK = 2;

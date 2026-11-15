@@ -356,6 +356,8 @@ impl EnrollDeps {
             state.accepted_version = 0;
             state.trusted_keys = policy_keys;
             state.last_doc_key_id = None;
+            // (Phase 5 Step 15) A lock belongs to the organization the PC leaves.
+            state.device_lock = None;
         }) {
             // The server has the device; a retry with the same code is idempotent.
             tracing::error!("cannot save the enrollment: {error}");
@@ -491,6 +493,7 @@ impl EnrollDeps {
             state.accepted_version = 0;
             state.trusted_keys.clear();
             state.last_doc_key_id = None;
+            state.device_lock = None;
             if removed_staff {
                 state.kiosk = KioskRecord::default();
             }

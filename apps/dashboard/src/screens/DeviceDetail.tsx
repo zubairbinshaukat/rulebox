@@ -2,6 +2,7 @@ import { useEffect, useState, type ReactNode } from "react";
 import { Link, useNavigate, useParams } from "react-router";
 import { Button, Input, Pill, Select, Switch } from "@rulebox/ui";
 import IconPen from "~icons/solar/pen-linear";
+import IconBell from "~icons/solar/bell-linear";
 import {
   useDeviceDetail,
   useDeviceLiveness,
@@ -26,6 +27,9 @@ import { FormError } from "../components/FormError";
 import { HistoryPanel } from "../components/HistoryPanel";
 import { InstallStatePill } from "../components/InstallState";
 import { installDetail } from "../lib/install";
+import { LockCard } from "./broadcasts/LockCard";
+import { SendBroadcastDialog } from "./broadcasts/SendDialog";
+import { broadcastStrings } from "./broadcasts/strings";
 import { Modal } from "../components/Modal";
 import { InlineNotice } from "../components/Notice";
 import { PageHeader } from "../components/PageHeader";
@@ -111,6 +115,7 @@ function Device({ d, liveness }: { d: Detail; liveness: QueryState<DeviceLivenes
   const latest = d.versions[0]?.version;
   const waiting = latest !== undefined && r?.appliedVersion !== latest;
   const [renaming, setRenaming] = useState(false);
+  const [messaging, setMessaging] = useState(false);
 
   return (
     <>
@@ -126,6 +131,12 @@ function Device({ d, liveness }: { d: Detail; liveness: QueryState<DeviceLivenes
         }
         actions={
           <RoleGate minRole="admin">
+            {d.revoked ? null : (
+              <Button variant="ghost" onClick={() => setMessaging(true)}>
+                <IconBell aria-hidden="true" />
+                {broadcastStrings.sendToPc}
+              </Button>
+            )}
             <Button variant="ghost" onClick={() => setRenaming(true)}>
               <IconPen aria-hidden="true" />
               {strings.common.rename}
@@ -134,7 +145,9 @@ function Device({ d, liveness }: { d: Detail; liveness: QueryState<DeviceLivenes
         }
       />
       <RenameDialog d={d} open={renaming} onClose={() => setRenaming(false)} />
+      <SendBroadcastDialog open={messaging} target={{ kind: "device", id: d._id, name: d.name }} onClose={() => setMessaging(false)} />
 
+      {d.lock ? <InlineNotice tone="danger" title={s.lockedNotice} /> : null}
       {d.revoked ? <InlineNotice tone="danger" title={s.revoked} /> : null}
       {d.flags.noGroup && !d.revoked ? <InlineNotice tone="warning" title={s.noGroupWarning} /> : null}
       {r?.outOfSupport ? <InlineNotice tone="warning" title={s.outOfSupportWarning} /> : null}
@@ -217,6 +230,7 @@ function Device({ d, liveness }: { d: Detail; liveness: QueryState<DeviceLivenes
 
         <div className="dash-stack">
           <Settings d={d} />
+          <LockCard d={d} />
           <Card title={s.identity}>
             <dl className="dash-kv" style={{ gridTemplateColumns: "1fr" }}>
               <KV label={s.enrolled} value={formatDate(d.enrolledAt)} />

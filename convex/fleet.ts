@@ -11,6 +11,7 @@ import { credOf, revokeDevice } from "./lib/fleet";
 import { checkPageSize, cleanSearch, countResult, orgStatsRow, pickSort, sortArg } from "./lib/listing";
 import { internalMutation, memberMutation, memberQuery } from "./lib/functions";
 import { assignedAppsOf, retagDeviceInstalls } from "./lib/installs";
+import { cleanNoticeText } from "./lib/noticeText";
 import {
   KEEP_VERSIONS,
   MAX_CHECK_DEVICES,
@@ -18,6 +19,8 @@ import {
   MAX_GROUP_APPS,
   MAX_GROUPS_JOINED,
   MAX_INSTALL_PAGE,
+  MAX_LOCK_CONTACT,
+  MAX_LOCK_MESSAGE,
   MINUTE_MS,
   PURGE_BATCH,
   WATCH_MIN_EXTEND_MS,
@@ -254,6 +257,8 @@ export const get = memberQuery("viewer")({
     report: v.union(reportValue, v.null()),
     versions: v.array(v.object({ version: v.number(), createdAt: v.number(), reason: v.string() })),
     flags: v.object({ noGroup: v.boolean(), revoked: v.boolean(), rotateCredential: v.boolean() }),
+    /** Step 15: the PC's device lock (plan 4.17), or null. */
+    lock: v.union(v.object({ lockId: v.string(), message: v.string(), contact: v.optional(v.string()), lockedAt: v.number() }), v.null()),
     /** Group picker options (`groups.by_org`, tiny). */
     groups: v.array(v.object({ _id: v.id("groups"), name: v.string() })),
   }),
@@ -275,6 +280,10 @@ export const get = memberQuery("viewer")({
       .order("desc")
       .take(KEEP_VERSIONS);
     const rotateCredential = cred.row?.rotate === true || (cred.row === null && d.rotateCredential === true);
+    const deviceLock = await ctx.db
+      .query("deviceLocks")
+      .withIndex("by_device", (q) => q.eq("deviceId", d._id))
+      .first();
     return {
       _id: d._id,
       name: d.name,
@@ -307,6 +316,10 @@ export const get = memberQuery("viewer")({
             },
       versions: versions.map((r) => ({ version: r.version, createdAt: r.createdAt, reason: r.reason })),
       flags: { noGroup: d.groupId === undefined, revoked: cred.state === "revoked", rotateCredential },
+      lock:
+        deviceLock === null
+          ? null
+          : { lockId: deviceLock.lockId, message: deviceLock.message, contact: deviceLock.contact, lockedAt: deviceLock.lockedAt },
       groups: groups.map((g) => ({ _id: g._id, name: g.name })).sort((a, b) => a.name.localeCompare(b.name)),
     };
   },
@@ -366,6 +379,77 @@ export const installs = memberQuery("viewer")({
       });
     }
     return { ...result, page };
+  },
+});
+
+/**
+ * Lock a PC (admin, major action: fresh step-up, `MAJOR_ACTIONS`; plan 4.17). The agent ends the employee session, refuses every sign-in and shows the lock view on
+ * every monitor until `unlock`. An existing lock is replaced (a new `lockId`); the same text again writes nothing.
+ * A revoked PC cannot be locked (`conflict`; a lock that was set before the revoke stays in force on the PC).
+ * Audits `device.locked` and publishes the device.
+ */
+export const lock = memberMutation("admin", { major: "fleet:lock" })({
+  args: { deviceId: v.string(), message: v.string(), contact: v.optional(v.string()) },
+  returns: v.object({ lockId: v.string() }),
+  handler: async (ctx, args) => {
+    const { device } = await activeDevice(ctx, args.deviceId);
+    const message = cleanNoticeText(args.message, MAX_LOCK_MESSAGE, "message", { multiline: true });
+    const contactText = args.contact === undefined ? "" : cleanNoticeText(args.contact, MAX_LOCK_CONTACT, "contact", { multiline: false, optional: true });
+    const contact = contactText === "" ? undefined : contactText;
+    const existing = await ctx.db
+      .query("deviceLocks")
+      .withIndex("by_device", (q) => q.eq("deviceId", device._id))
+      .first();
+    if (existing !== null && existing.message === message && existing.contact === contact) return { lockId: existing.lockId };
+    if (existing !== null) await ctx.db.delete(existing._id);
+    const id = await ctx.db.insert("deviceLocks", {
+      orgId: ctx.orgId,
+      deviceId: device._id,
+      lockId: "",
+      message,
+      contact,
+      lockedAt: Date.now(),
+      lockedBy: ctx.member._id,
+    });
+    // The lock id is the row's id (plan 4.17).
+    await ctx.db.patch(id, { lockId: id });
+    await requestPublish(ctx, ctx.orgId, { deviceIds: [device._id] });
+    await writeAudit(ctx, {
+      orgId: ctx.orgId,
+      actor: ctx.actor,
+      action: "device.locked",
+      targetType: "device",
+      targetId: device._id,
+      targetLabel: device.name,
+      summary: `Locked the PC ${device.name}`,
+    });
+    return { lockId: id };
+  },
+});
+
+/** Unlock a PC (admin, major action: fresh step-up): deletes the lock, audits `device.unlocked`, publishes. Not locked = no write. Allowed for a revoked PC. */
+export const unlock = memberMutation("admin", { major: "fleet:unlock" })({
+  args: { deviceId: v.string() },
+  returns: v.null(),
+  handler: async (ctx, args) => {
+    const device = await getInOrg(ctx, "devices", args.deviceId, ctx.orgId);
+    const existing = await ctx.db
+      .query("deviceLocks")
+      .withIndex("by_device", (q) => q.eq("deviceId", device._id))
+      .first();
+    if (existing === null) return null;
+    await ctx.db.delete(existing._id);
+    await requestPublish(ctx, ctx.orgId, { deviceIds: [device._id] });
+    await writeAudit(ctx, {
+      orgId: ctx.orgId,
+      actor: ctx.actor,
+      action: "device.unlocked",
+      targetType: "device",
+      targetId: device._id,
+      targetLabel: device.name,
+      summary: `Unlocked the PC ${device.name}`,
+    });
+    return null;
   },
 });
 

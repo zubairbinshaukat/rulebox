@@ -22,7 +22,7 @@ import { makeFunctionReference, type FunctionReturnType } from "convex/server";
 import { useCallback, useMemo, useState } from "react";
 import { api } from "@convex/_generated/api";
 import type { DataApi } from "../api";
-import { cappedNumber, type Audience, type FailedInstallRow, type GroupRow, type KeysScreen, type MeResult, type QueryState, type Role } from "../types";
+import { cappedNumber, type Audience, type BroadcastRow, type FailedInstallRow, type GroupRow, type KeysScreen, type MeResult, type QueryState, type Role } from "../types";
 import { listArgs, type ServerList } from "../serverList";
 import { useMappedList } from "./mapList";
 import { useServerPage } from "./serverList";
@@ -240,6 +240,41 @@ export const liveApi: DataApi = {
     return useMapped(call);
   },
 
+  // Phase 5 Step 15 (plan 4.17): lock and unlock are major actions (fresh step-up, the dialog opens and the call is retried once).
+  useLockDevice() {
+    const lock = useMutation(api.fleet.lock);
+    const call = useCallback((a: { deviceId: string; message: string; contact?: string }) => lock(a), [lock]);
+    return useMapped(call);
+  },
+  useUnlockDevice() {
+    const unlock = useMutation(api.fleet.unlock);
+    const call = useCallback(
+      async (a: { deviceId: string }) => {
+        await unlock(a);
+      },
+      [unlock],
+    );
+    return useMapped(call);
+  },
+
+  // ---- broadcasts (Phase 5 Step 15). `broadcasts:list` has the sort key `sent` only and no search: only the page and the direction are sent.
+  useBroadcastsPage(query) {
+    const { paginationOpts } = listArgs(query);
+    return useServerPage<BroadcastRow>(api.broadcasts.list, { paginationOpts, sort: { key: "sent", dir: query.sort?.dir ?? "desc" } }, "broadcasts");
+  },
+  useSendBroadcast() {
+    return useMapped(useMutation(api.broadcasts.send));
+  },
+  useCancelBroadcast() {
+    const cancel = useMutation(api.broadcasts.cancel);
+    const call = useCallback(
+      async (a: { id: string }) => {
+        await cancel(a);
+      },
+      [cancel],
+    );
+    return useMapped(call);
+  },
   // ---- groups (Step 5). Counts arrive as `{ count, more }` and become one capped number.
   useGroupsScreen() {
     const q = useMemberQuery(api.groups.list, {});

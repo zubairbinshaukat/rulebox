@@ -20,6 +20,7 @@ use sha2::{Digest, Sha256};
 use super::value::from_json;
 use super::DeviceAuth;
 use crate::lockdown::LayerStates;
+use crate::notice::Ack;
 
 /// Convex function names (Step 10 creates them).
 pub const FN_REPORT_APPLY: &str = "deviceApi:reportApply";
@@ -27,6 +28,8 @@ pub const FN_REPORT_FINDINGS: &str = "deviceApi:reportFindings";
 pub const FN_REPORT_SECURITY_DAILY: &str = "deviceApi:reportSecurityDaily";
 /// (Step 13) The device's X25519 sealing key, sent once per key (`network::sealkey`).
 pub const FN_REGISTER_SEAL_KEY: &str = "deviceApi:registerSealKey";
+/// (Phase 5 Step 15) Broadcast acknowledgements (`notice::AckQueue`), one call per flush.
+pub const FN_REPORT_ACKS: &str = "deviceApi:reportAcks";
 
 /// At most this many fingerprints in one `reportFindings` call (plan 4.19).
 pub const MAX_FINDINGS_PER_CALL: usize = 50;
@@ -168,6 +171,8 @@ pub enum LockdownCall {
     SecurityDaily(SecurityDaily),
     /// (Step 13) `registerSealKey`: standard base64 of the 32-byte public sealing key.
     RegisterSealKey { public_key: String },
+    /// (Step 15) `reportAcks`: at most `notice::MAX_ACKS_PER_CALL` acknowledgements (broadcast id and server time, never an employee).
+    Acks(Vec<Ack>),
 }
 
 impl LockdownCall {
@@ -178,6 +183,7 @@ impl LockdownCall {
             LockdownCall::Findings(_) => FN_REPORT_FINDINGS,
             LockdownCall::SecurityDaily(_) => FN_REPORT_SECURITY_DAILY,
             LockdownCall::RegisterSealKey { .. } => FN_REGISTER_SEAL_KEY,
+            LockdownCall::Acks(_) => FN_REPORT_ACKS,
         }
     }
 
@@ -194,6 +200,7 @@ impl LockdownCall {
             LockdownCall::Findings(findings) => serde_json::json!({ "findings": findings }),
             LockdownCall::SecurityDaily(daily) => serde_json::to_value(daily).unwrap_or(serde_json::Value::Null),
             LockdownCall::RegisterSealKey { public_key } => serde_json::json!({ "publicKey": public_key }),
+            LockdownCall::Acks(acks) => serde_json::json!({ "acks": acks }),
         }
     }
 }
@@ -257,6 +264,17 @@ mod tests {
         assert!(seal.contains_key("deviceId") && seal.contains_key("deviceSecret") && seal.contains_key("publicKey"));
         assert_eq!(seal.len(), 3);
         assert_eq!(LockdownCall::RegisterSealKey { public_key: "AAAA".into() }.function(), "deviceApi:registerSealKey");
+    }
+
+    #[test]
+    fn the_acknowledgement_call_carries_the_broadcast_ids_and_times_only() {
+        let auth = DeviceAuth { device_id: "dev1".into(), device_secret: "s".into() };
+        let call = LockdownCall::Acks(vec![Ack { broadcast_id: "b1".into(), at_ms: 1_700_000_000_000 }]);
+        assert_eq!(call.function(), "deviceApi:reportAcks");
+        assert_eq!(call.body(), serde_json::json!({ "acks": [{ "broadcastId": "b1", "atMs": 1_700_000_000_000u64 }] }));
+        let args = lockdown_args(&auth, &call);
+        assert_eq!(args.len(), 3);
+        assert!(args.contains_key("deviceId") && args.contains_key("deviceSecret") && args.contains_key("acks"));
     }
 
     #[test]

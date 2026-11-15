@@ -2707,6 +2707,90 @@ ul.dash-net__chips {
 }
 
 /* Print: the audit log prints as a plain table. */
+/* Previews of what a PC shows for a broadcast or a lock (Phase 5 Step 15). A miniature: static, no motion. */
+.dash-preview {
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+}
+.dash-preview__cap {
+  font-size: 12.5px;
+  color: var(--rb-muted);
+}
+.dash-preview__screen {
+  border: 1px solid var(--rb-line);
+  border-radius: var(--rb-r-md);
+  background: var(--rb-paper);
+  min-height: 84px;
+  overflow: hidden;
+}
+.dash-preview__screen--cover {
+  display: grid;
+  place-items: center;
+  padding: 14px;
+  background: color-mix(in oklch, var(--rb-ink) 14%, var(--rb-paper));
+}
+.dash-preview__banner {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 12px;
+  background: var(--rb-accent-soft);
+  color: var(--rb-accent-text);
+  font-size: 13px;
+  overflow-wrap: anywhere;
+}
+.dash-preview__text {
+  flex: 1 1 auto;
+  min-width: 0;
+  white-space: pre-wrap;
+}
+.dash-preview__card {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  max-width: 100%;
+  padding: 14px 16px;
+  border: 1px solid var(--rb-line);
+  border-radius: var(--rb-r-md);
+  background: var(--rb-surface);
+  text-align: center;
+  overflow-wrap: anywhere;
+}
+.dash-preview__title {
+  font-size: 15px;
+}
+.dash-preview__org {
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--rb-muted);
+}
+.dash-preview__body,
+.dash-preview__contact {
+  margin: 0;
+  font-size: 13.5px;
+  white-space: pre-wrap;
+}
+.dash-preview__contact {
+  color: var(--rb-muted);
+}
+.dash-preview__btn {
+  flex: none;
+  padding: 3px 12px;
+  border-radius: 999px;
+  background: var(--rb-ink);
+  color: var(--rb-on-ink);
+  font-size: 12.5px;
+  font-weight: 600;
+}
+.dash-preview__btn--quiet {
+  background: transparent;
+  color: var(--rb-muted);
+  border: 1px solid var(--rb-line);
+}
 @media print {
   .dash-side,
   .dash-top,

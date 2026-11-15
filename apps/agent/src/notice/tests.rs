@@ -550,7 +550,185 @@ async fn the_daily_sink_adds_to_the_security_counters_and_keeps_only_numbers() {
 #[test]
 fn the_ack_entry_has_the_shape_of_the_server_call() {
     // `deviceApi:reportAcks({ acks: [{ broadcastId, atMs }] })` (convex/deviceApi.ts).
-    assert_eq!(FN_REPORT_ACKS, "deviceApi:reportAcks");
+    assert_eq!(crate::backend::reports::FN_REPORT_ACKS, "deviceApi:reportAcks");
     assert_eq!(serde_json::to_value(Ack { broadcast_id: "b".into(), at_ms: 7 }).unwrap(), json!({ "broadcastId": "b", "atMs": 7 }));
     assert_eq!(MAX_ACKS_PER_CALL, 20);
+}
+
+// ---- sending the acknowledgements (Step 15) ---------------------------------------------
+
+mod sender {
+    use super::*;
+    use crate::backend::fake::FakeBackend;
+    use crate::backend::reports::LockdownCall;
+    use crate::backend::{Backend, BackendError, BackendLink, DeviceAuth};
+
+    struct SenderRig {
+        hub: Arc<NoticeHub>,
+        snapshot: SnapshotHandle,
+        fake: FakeBackend,
+        link: Arc<BackendLink>,
+        shutdown: CancellationToken,
+        task: tokio::task::JoinHandle<()>,
+        dir: TempDir,
+    }
+
+    fn rig(online: bool) -> SenderRig {
+        let dir = TempDir::new();
+        let mut snapshot = test_snapshot();
+        snapshot.enrollment = EnrollmentStatus::Enrolled;
+        snapshot.connection = if online { ConnectionStatus::Online } else { ConnectionStatus::Offline };
+        snapshot.server_time_offset_ms = Some(0);
+        let (handle, rx) = SnapshotHandle::new(snapshot);
+        let fake = FakeBackend::new();
+        let link = BackendLink::new();
+        link.set(Arc::new(fake.clone()) as Arc<dyn Backend>, DeviceAuth { device_id: "dev-1".into(), device_secret: "s".into() });
+        let hub = NoticeHub::new(
+            AckQueue::open(dir.path().join("broadcast-acks.json")).unwrap(),
+            handle.clone(),
+            ShellBroadcast::new(),
+            Arc::new(|| T),
+        );
+        let shutdown = CancellationToken::new();
+        let jitter: Arc<dyn Fn(u64) -> u64 + Send + Sync> = Arc::new(|max| max);
+        let task = tokio::spawn(run_ack_sender(Arc::clone(&hub), Arc::clone(&link), rx, jitter, shutdown.clone()));
+        SenderRig { hub, snapshot: handle, fake, link, shutdown, task, dir }
+    }
+
+    async fn settle() {
+        for _ in 0..30 {
+            tokio::task::yield_now().await;
+        }
+    }
+
+    impl SenderRig {
+        async fn after(&self, secs: u64) {
+            tokio::time::sleep(Duration::from_secs(secs)).await;
+            settle().await;
+        }
+
+        fn calls(&self) -> Vec<LockdownCall> {
+            self.fake.lockdown_calls().into_iter().map(|record| record.call).collect()
+        }
+
+        fn go_online(&self, online: bool) {
+            self.snapshot.update(|s| s.connection = if online { ConnectionStatus::Online } else { ConnectionStatus::Offline });
+        }
+
+        fn listed(&self, ids: &[&str]) {
+            let list: Vec<Broadcast> = ids.iter().map(|id| broadcast(id, 1, None, true)).collect();
+            self.hub.on_policy(&policy_of(&doc_with(&list)));
+        }
+
+        async fn stop(self) {
+            self.shutdown.cancel();
+            self.task.await.unwrap();
+            drop(self.dir);
+        }
+    }
+
+    fn ack(id: &str) -> Ack {
+        Ack { broadcast_id: id.into(), at_ms: T }
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn an_acknowledgement_is_sent_ten_minutes_after_it_was_queued_once_and_never_again() {
+        let rig = rig(true);
+        settle().await;
+        rig.listed(&["b1"]);
+        assert!(rig.hub.acknowledge("b1"));
+        rig.after(599).await;
+        assert!(rig.calls().is_empty(), "it waits for an apply report for up to ten minutes");
+        rig.after(2).await;
+        assert_eq!(rig.calls(), [LockdownCall::Acks(vec![ack("b1")])]);
+        assert!(rig.hub.pending_acks().is_empty());
+        // A second OK, a restart of the list and a long wait: nothing more is ever sent for it.
+        assert!(rig.hub.acknowledge("b1"));
+        rig.listed(&["b1"]);
+        rig.after(48 * 3_600).await;
+        assert_eq!(rig.calls().len(), 1);
+        rig.stop().await;
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn an_apply_report_flushes_the_queue_at_once() {
+        let rig = rig(true);
+        settle().await;
+        rig.listed(&["b1", "b2"]);
+        assert!(rig.hub.acknowledge("b1") && rig.hub.acknowledge("b2"));
+        rig.after(5).await;
+        assert!(rig.calls().is_empty());
+        rig.hub.flush_acks_now();
+        rig.after(1).await;
+        assert_eq!(rig.calls(), [LockdownCall::Acks(vec![ack("b1"), ack("b2")])], "one call for the whole queue");
+        rig.stop().await;
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn nothing_is_sent_while_offline_and_the_queue_goes_out_when_the_connection_is_back() {
+        let rig = rig(false);
+        settle().await;
+        rig.listed(&["b1"]);
+        assert!(rig.hub.acknowledge("b1"));
+        rig.hub.flush_acks_now();
+        rig.after(3_600).await;
+        assert!(rig.calls().is_empty(), "the offline PC keeps the acknowledgement on disk");
+        rig.go_online(true);
+        rig.after(1).await;
+        assert_eq!(rig.calls(), [LockdownCall::Acks(vec![ack("b1")])]);
+        rig.stop().await;
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_failed_call_keeps_the_queue_and_is_tried_again_later() {
+        let rig = rig(true);
+        settle().await;
+        rig.fake.script_lockdown(Err(BackendError::Unreachable));
+        rig.listed(&["b1"]);
+        assert!(rig.hub.acknowledge("b1"));
+        rig.hub.flush_acks_now();
+        rig.after(1).await;
+        assert_eq!(rig.calls().len(), 1);
+        assert_eq!(rig.hub.pending_acks(), [ack("b1")], "not marked sent");
+        rig.after(600).await;
+        assert_eq!(rig.calls().len(), 2, "the retry");
+        assert!(rig.hub.pending_acks().is_empty());
+        rig.stop().await;
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn the_whole_active_set_goes_out_as_one_call() {
+        let rig = rig(true);
+        settle().await;
+        let ids: Vec<String> = (0..5).map(|i| format!("b{i}")).collect();
+        let refs: Vec<&str> = ids.iter().map(String::as_str).collect();
+        rig.listed(&refs);
+        for id in &refs {
+            assert!(rig.hub.acknowledge(id));
+        }
+        rig.hub.flush_acks_now();
+        rig.after(1).await;
+        let LockdownCall::Acks(first) = &rig.calls()[0] else { panic!("{:?}", rig.calls()) };
+        assert_eq!(first.len(), 5);
+        rig.stop().await;
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn an_unenrolled_pc_forgets_its_acknowledgements_and_a_revoked_one_keeps_them() {
+        let rig = rig(true);
+        settle().await;
+        rig.listed(&["b1"]);
+        assert!(rig.hub.acknowledge("b1"));
+        rig.snapshot.update(|s| s.enrollment = EnrollmentStatus::Revoked);
+        rig.link.clear();
+        rig.hub.flush_acks_now();
+        rig.after(10).await;
+        assert!(rig.calls().is_empty(), "no link: nothing is sent");
+        assert_eq!(rig.hub.pending_acks().len(), 1, "a revoked PC keeps what it has");
+        rig.snapshot.update(|s| s.enrollment = EnrollmentStatus::NotEnrolled);
+        rig.after(1).await;
+        assert!(rig.hub.pending_acks().is_empty());
+        assert!(!rig.dir.path().join("broadcast-acks.json").exists());
+        rig.stop().await;
+    }
 }

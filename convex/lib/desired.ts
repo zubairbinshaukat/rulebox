@@ -2,7 +2,15 @@ import type { CatalogApp, CatalogWebPermissions } from "@rulebox/types";
 import { sha256HexSync } from "./crypto";
 import { programDenied } from "./denyList";
 import type { GroupConfigContent } from "./groupConfig";
-import { MAX_ACTIVE_BROADCASTS, MAX_DEVICE_DRIVERS, MAX_DEVICE_PRINTERS, MAX_DEVICE_WIFI, MAX_GROUP_EXCEPTIONS } from "./limits";
+import {
+  MAX_ACTIVE_BROADCASTS,
+  MAX_DEVICE_DRIVERS,
+  MAX_DEVICE_PRINTERS,
+  MAX_DEVICE_WIFI,
+  MAX_GROUP_EXCEPTIONS,
+  MAX_LOCK_CONTACT,
+  MAX_LOCK_MESSAGE,
+} from "./limits";
 import type { RingValue, SealedBoxValue } from "./lockdownValidators";
 import type { OrgSettings } from "./validators";
 
@@ -310,10 +318,6 @@ export function buildDeviceDoc(input: BuildInput, version = 0): DesiredDocV2 {
   if (input.phase5 !== undefined) addPhase5Keys(doc, input.phase5);
   return doc;
 }
-
-/** Limits of plan 4.3 rule 4 that the builder must not exceed (the agent refuses the whole document above them). */
-const MAX_LOCK_MESSAGE = 300;
-const MAX_LOCK_CONTACT = 100;
 
 /**
  * The agent-only keys of Phase 5 after `offlineDays`, in the order of plan 4.3:

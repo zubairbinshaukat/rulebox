@@ -446,8 +446,53 @@ export interface DeviceDetail {
   report: DeviceReport | null;
   versions: DocVersion[];
   flags: { noGroup: boolean; revoked: boolean; rotateCredential: boolean };
+  /** Phase 5 Step 15: the PC's device lock (plan 4.17), or null. */
+  lock: DeviceLock | null;
   /** Group picker options (`groups.by_org` `.take(500)`). */
   groups: GroupOption[];
+}
+
+/** `deviceLocks` of one PC: the text the lock view shows on every monitor. */
+export interface DeviceLock {
+  lockId: string;
+  message: string;
+  contact?: string;
+  lockedAt: number;
+}
+
+/** Plain-text limits of the lock and broadcast forms (`convex/lib/limits.ts`; the agent has the same numbers). */
+export const LOCK_MESSAGE_MAX = 300;
+export const LOCK_CONTACT_MAX = 100;
+export const BROADCAST_TITLE_MAX = 80;
+export const BROADCAST_BODY_MAX = 500;
+export const BROADCAST_ACTIVE_MAX = 20;
+export type BroadcastStyle = "banner" | "fullscreen";
+
+/** One row of `broadcasts:list`. `status` is worked out by the screen from `cancelledAt` and `expiresAt` (the query reads no clock). */
+export interface BroadcastRow {
+  _id: Id;
+  /** `name` is null when the group or PC no longer exists. */
+  target: { kind: "group" | "device"; id: Id; name: string | null };
+  style: BroadcastStyle;
+  title: string;
+  body: string;
+  expiresAt: number | null;
+  ackRequired: boolean;
+  createdAt: number;
+  cancelledAt: number | null;
+  /** PCs it was aimed at when sent (a group's count is capped at 500) and the PCs that acknowledged it. */
+  targetCount: number;
+  ackCount: number;
+}
+
+/** `broadcasts:send`. `expiresAt` in ms, optional. */
+export interface BroadcastInput {
+  target: { kind: "group" | "device"; id: Id };
+  style: BroadcastStyle;
+  title: string;
+  body: string;
+  expiresAt?: number;
+  ackRequired: boolean;
 }
 
 /** `fleet:list({ groupId: "none" })` lists the devices that have no group. */

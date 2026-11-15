@@ -214,6 +214,8 @@ impl LockdownOutbox {
             }
             // The key registration is recorded by whoever sends it (`AgentState.seal_key_registered`).
             LockdownCall::RegisterSealKey { .. } => {}
+            // (Step 15) The acknowledgement queue marks its own records sent (`notice::run_ack_sender`).
+            LockdownCall::Acks(_) => {}
             LockdownCall::SecurityDaily(summary) => {
                 self.daily.ack(&summary.day);
                 if let Err(error) = self.daily.save_if_dirty() {

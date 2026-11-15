@@ -27,6 +27,7 @@ import type {
   DriverClass,
   DriverKind,
   WifiSecurity,
+  BroadcastStyle,
 } from "../types";
 import { DEFAULT_WEB_PERMISSIONS } from "../types";
 import { padListFixtures } from "./listRows";
@@ -217,6 +218,27 @@ export interface DbDriver {
   groupIds: string[];
   revision: number;
 }
+/** `broadcasts` (Phase 5 Step 15): `targetCount` / `ackCount` are the counters on the row. */
+export interface DbBroadcast {
+  _id: string;
+  target: { kind: "group" | "device"; id: string };
+  style: BroadcastStyle;
+  title: string;
+  body: string;
+  expiresAt: number | null;
+  ackRequired: boolean;
+  createdAt: number;
+  cancelledAt: number | null;
+  targetCount: number;
+  ackCount: number;
+}
+/** `deviceLocks` (Phase 5 Step 15), by device id. */
+export interface DbLock {
+  lockId: string;
+  message: string;
+  contact?: string;
+  lockedAt: number;
+}
 export interface DbAudit {
   _id: string;
   at: number;
@@ -278,6 +300,9 @@ export interface DemoDb {
   approvedDrivers: string[];
   /** `drivers` (Phase 5 Step 14b). */
   drivers: DbDriver[];
+  /** `broadcasts` and `deviceLocks` (Phase 5 Step 15). */
+  broadcasts: DbBroadcast[];
+  locks: Map<string, DbLock>;
   fileHandlers: { _id: string; extension: string; appId: string }[];
   tokens: DbToken[];
   installs: DbInstall[];
@@ -983,6 +1008,12 @@ export function seed(now: number = Date.now()): DemoDb {
         revision: 2,
       },
     ],
+    broadcasts: [
+      { _id: id("bcast"), target: { kind: "group", id: gFront._id }, style: "banner", title: "Till update tonight", body: "The tills restart at 18:30. Please finish open sales before then.", expiresAt: now + 6 * 3_600_000, ackRequired: false, createdAt: now - 2 * 3_600_000, cancelledAt: null, targetCount: 4, ackCount: 0 },
+      { _id: id("bcast"), target: { kind: "group", id: gOffice._id }, style: "fullscreen", title: "New privacy rules", body: "Please read the updated privacy rules and press OK.", expiresAt: null, ackRequired: true, createdAt: now - 3 * DAY, cancelledAt: null, targetCount: 5, ackCount: 3 },
+      { _id: id("bcast"), target: { kind: "group", id: gCounter._id }, style: "banner", title: "Fire drill", body: "There is a fire drill at 10:00.", expiresAt: now - 2 * DAY, ackRequired: false, createdAt: now - 3 * DAY - 3_600_000, cancelledAt: null, targetCount: 6, ackCount: 0 },
+    ],
+    locks: new Map(),
     fileHandlers,
     tokens,
     installs,

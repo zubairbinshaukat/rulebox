@@ -313,7 +313,27 @@ impl DesiredSync {
         }
         self.roster_group = doc.get("rosterGroupId").and_then(serde_json::Value::as_str).map(str::to_string);
 
-        let policy = AgentPolicy::from_doc(Some(&doc));
+        let mut policy = AgentPolicy::from_doc(Some(&doc));
+        if !write_cache {
+            // The replay of the cache at start: an older cache than the newest accepted document keeps that
+            // document's lock (the accept above has just raised `accepted_version` to this version at most).
+            let (accepted, persisted) = ctx.shared.read(|state| (state.accepted_version, state.device_lock.clone()));
+            policy = policy.with_persisted_lock(persisted.as_ref(), version >= accepted);
+        }
+        // (Phase 5 Step 15) The lock is persisted at accept time, before the policy is published: a newer
+        // verified document without a lock is the only thing that clears it (plan 4.17 rule 4 and 5).
+        let lock_now = policy.device_lock.clone();
+        let (_, saved) = ctx.shared.update_if(|state| {
+            if state.device_lock == lock_now {
+                ((), false)
+            } else {
+                state.device_lock = lock_now;
+                ((), true)
+            }
+        });
+        if let Err(error) = saved {
+            tracing::error!("cannot save the device lock: {error}");
+        }
         ctx.snapshot.update(|snapshot| apply_to_snapshot(snapshot, &desired, version, &policy));
         publish_policy(&ctx.policy_tx, policy);
         self.accepted = Some((version, envelope.payload.clone()));

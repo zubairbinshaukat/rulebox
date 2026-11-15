@@ -79,6 +79,8 @@ export function deviceDetailOf(d: GetResult): DeviceDetail {
     report,
     versions: d.versions,
     flags: d.flags,
+    // An older server (rolling deploy) has no `lock`: no lock.
+    lock: d.lock ?? null,
     groups: d.groups,
   };
 }
