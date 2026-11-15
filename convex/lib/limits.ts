@@ -397,11 +397,12 @@ export const SECURITY_RETENTION_BATCH = 200;
 /** `apps:get`: the days of denial counts shown on the app page (plan 4.13: the last 30 `orgSecurityDaily` rows). */
 export const APP_DENIAL_DAYS = 30;
 /**
- * `apps:setPermissions`: groups that assign the app and get their configuration snapshotted in the same
- * transaction (each snapshot reads up to ~570 documents). More groups: the rest are published through the
- * live catalogue only (the app record is not part of the snapshot until Step 16).
+ * Catalogue edits (Phase 5 Step 16b): an app record, a file-type rule or a permission change snapshots the
+ * configuration of every group that assigns the app, in the same transaction (each snapshot reads up to ~1,000
+ * documents with a full catalogue). An edit that would touch more groups is refused (`too_large`, detail "groups"),
+ * exactly as Wi-Fi profiles and printers are; Step 20 replaces the cap with scheduler batches.
  */
-export const MAX_PERMISSION_SNAPSHOT_GROUPS = 10;
+export const MAX_CATALOG_SNAPSHOT_GROUPS = 10;
 /**
  * Wi-Fi profiles (Phase 5 Step 13): `networks:saveWifi` / `deleteWifi` snapshot the configuration of every group the
  * profile was in or is put in, in the same transaction (each snapshot reads up to ~570 documents), so a save may touch

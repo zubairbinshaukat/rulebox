@@ -17,7 +17,7 @@ import {
   type DocBroadcast,
   type Phase5Input,
 } from "./lib/desired";
-import { configForRing, newGroupConfigCache, type GroupConfigCache, type GroupConfigContent } from "./lib/groupConfig";
+import { buildAppOf, configForRing, newGroupConfigCache, type ConfigCatalog, type GroupConfigCache, type GroupConfigContent } from "./lib/groupConfig";
 import type { RingValue, SealedBoxValue } from "./lib/lockdownValidators";
 import {
   BROADCAST_READ,
@@ -69,8 +69,14 @@ type OrgInputs = {
   pingIntervalMs: number;
 };
 
-/** Group-level inputs, loaded once per group per run and shared by its devices. */
-type GroupInputs = Pick<BuildInput, "group" | "assignments" | "apps" | "employees" | "employeeApps">;
+/**
+ * Group-level inputs, loaded once per group (and per configuration version, Step 16b) per run and shared by its devices.
+ * `fileHandlers` is set only when the catalogue comes from a configuration version (else the organization's live rules apply).
+ */
+type GroupInputs = Pick<BuildInput, "group" | "assignments" | "apps" | "employees" | "employeeApps"> & { fileHandlers?: BuildInput["fileHandlers"] };
+
+/** The live direct grants of a group's enabled members and what reading them cost. One load per group and run, whatever the ring. */
+export type GrantLoad = { employees: GroupInputs["employees"]; employeeApps: GroupInputs["employeeApps"]; ranges: number; docs: number };
 
 async function loadOrgInputs(ctx: { db: DatabaseReader }, org: Doc<"organizations">): Promise<OrgInputs> {
   const secrets = await ctx.db
@@ -113,11 +119,20 @@ export type GroupLoad = { inputs: GroupInputs; ranges: number; docs: number };
  * entry says some employees' direct apps were left out of this group's
  * documents (nothing loops, nothing throws). The returned cost lets the
  * publisher stop loading groups before its transaction limits.
+ *
+ * RING-GATED CATALOGUE (Step 16b, plan 4.3 rule 6): with `frozen` (the `catalog` of the
+ * configuration version the device's ring points to) the assignments, the records of the
+ * assigned apps and the file-type rules come from that version: no `appAssignments` range
+ * and no app reads. The direct grants stay live (the directory never waits for a pilot),
+ * and so does the record of a web app the frozen assignments do not name. `grants` shares
+ * the live grant load between the versions of one group in a run (rings mid-rollout).
  */
 export async function loadGroupInputs(
   ctx: Pick<MutationCtx, "db" | "storage">,
   orgId: Id<"organizations">,
   groupId: Id<"groups"> | undefined,
+  frozen?: ConfigCatalog,
+  grants?: Map<string, GrantLoad>,
 ): Promise<GroupLoad> {
   const none: GroupInputs = { group: null, assignments: [], apps: [], employees: [], employeeApps: [] };
   if (groupId === undefined) return { inputs: none, ranges: 0, docs: 0 };
@@ -125,13 +140,78 @@ export async function loadGroupInputs(
   let ranges = 1;
   let docs = group === null ? 0 : 1;
   if (group === null || group.orgId !== orgId) return { inputs: none, ranges, docs };
-  const rows = await ctx.db
-    .query("appAssignments")
-    .withIndex("by_group", (q) => q.eq("groupId", group._id))
-    .take(MAX_GROUP_APPS);
-  ranges++;
-  docs += rows.length;
+  let assignments: GroupInputs["assignments"];
+  if (frozen !== undefined) {
+    assignments = frozen.assignments;
+  } else {
+    const rows = await ctx.db
+      .query("appAssignments")
+      .withIndex("by_group", (q) => q.eq("groupId", group._id))
+      .take(MAX_GROUP_APPS);
+    ranges++;
+    docs += rows.length;
+    assignments = rows.map((a) => ({ appId: a.appId, audience: a.audience, pinnedTaskbar: a.pinnedTaskbar, pinnedDesktop: a.pinnedDesktop }));
+  }
 
+  let grant = grants?.get(group._id);
+  if (grant === undefined) {
+    grant = await loadGrants(ctx, orgId, group);
+    grants?.set(group._id, grant);
+    ranges += grant.ranges;
+    docs += grant.docs;
+  }
+  const { employees, employeeApps } = grant;
+
+  const apps: BuildApp[] = [];
+  // Frozen records first: an app the version's assignments name is never read live.
+  const frozenIds = new Set<string>(assignments.map((a) => a.appId));
+  if (frozen !== undefined) {
+    for (const a of frozen.apps) {
+      const url = a.icon !== null ? await ctx.storage.getUrl(a.icon.storageId as Id<"_storage">) : null;
+      apps.push(buildAppOf(a, a.icon !== null && url !== null ? { url, sha256: a.icon.sha256 } : undefined));
+    }
+  }
+  // Every other app an assignment or a grant names (assigned ones first), once.
+  const appIds = new Set<Id<"apps">>();
+  if (frozen === undefined) for (const a of assignments) appIds.add(a.appId as Id<"apps">);
+  for (const g of employeeApps) if (frozen === undefined || !frozenIds.has(g.appId)) appIds.add(g.appId as Id<"apps">);
+  ranges += appIds.size;
+  docs += appIds.size;
+  for (const appId of appIds) {
+    const app = await ctx.db.get(appId);
+    if (app === null || app.orgId !== orgId) continue;
+    const icon = app.icon !== undefined ? await ctx.storage.getUrl(app.icon.storageId) : null;
+    apps.push({
+      _id: app._id,
+      name: app.name,
+      description: app.description,
+      kind: app.kind,
+      hue: app.hue,
+      archived: app.archived,
+      revision: app.revision,
+      web: app.web,
+      desktop: app.desktop,
+      icon: app.icon !== undefined && icon !== null ? { url: icon, sha256: app.icon.sha256 } : undefined,
+    });
+  }
+  return {
+    inputs: {
+      group: { _id: group._id },
+      assignments,
+      apps,
+      employees,
+      employeeApps,
+      ...(frozen === undefined ? {} : { fileHandlers: frozen.fileHandlers }),
+    },
+    ranges,
+    docs,
+  };
+}
+
+/** The direct grants of the group's enabled members (see `loadGroupInputs`: bounded, degrades with one audit entry). */
+async function loadGrants(ctx: Pick<MutationCtx, "db">, orgId: Id<"organizations">, group: Doc<"groups">): Promise<GrantLoad> {
+  let ranges = 0;
+  let docs = 0;
   // Direct grants: only the enabled members that have any (the flag is never stale-false).
   const members = await ctx.db
     .query("groupMembers")
@@ -176,41 +256,7 @@ export async function loadGroupInputs(
       summary: `The group ${group.name} has too many employees or apps given directly: some were left out of its documents (limit ${MAX_GROUP_GRANT_EMPLOYEES} employees, ${MAX_GROUP_GRANT_APPS} apps)`,
     });
   }
-
-  // Every app an assignment or a grant names (assigned ones first), once.
-  const appIds = new Set<Id<"apps">>(rows.map((a) => a.appId));
-  for (const g of employeeApps) appIds.add(g.appId as Id<"apps">);
-  ranges += appIds.size;
-  docs += appIds.size;
-  const apps: BuildApp[] = [];
-  for (const appId of appIds) {
-    const app = await ctx.db.get(appId);
-    if (app === null || app.orgId !== orgId) continue;
-    const icon = app.icon !== undefined ? await ctx.storage.getUrl(app.icon.storageId) : null;
-    apps.push({
-      _id: app._id,
-      name: app.name,
-      description: app.description,
-      kind: app.kind,
-      hue: app.hue,
-      archived: app.archived,
-      revision: app.revision,
-      web: app.web,
-      desktop: app.desktop,
-      icon: app.icon !== undefined && icon !== null ? { url: icon, sha256: app.icon.sha256 } : undefined,
-    });
-  }
-  return {
-    inputs: {
-      group: { _id: group._id },
-      assignments: rows.map((a) => ({ appId: a.appId, audience: a.audience, pinnedTaskbar: a.pinnedTaskbar, pinnedDesktop: a.pinnedDesktop })),
-      apps,
-      employees,
-      employeeApps,
-    },
-    ranges,
-    docs,
-  };
+  return { employees, employeeApps, ranges, docs };
 }
 type PlanState = Doc<"desiredHeads">["planState"];
 
@@ -274,9 +320,13 @@ async function sealedBoxesOf(
  * points to, its sealed Wi-Fi boxes and the live lock, broadcasts and USB window. `undefined`
  * (no Phase 5 data at all) keeps the document exactly the Phase 4 one.
  */
-async function loadPhase5(ctx: { db: DatabaseReader }, run: RunState, device: Doc<"devices">): Promise<Phase5Input | undefined> {
-  const ring: RingValue = device.ring ?? "everyone";
-  const cfg = device.groupId === undefined ? null : await configForRing(ctx, device.groupId, ring, run.configs);
+async function loadPhase5(
+  ctx: { db: DatabaseReader },
+  run: RunState,
+  device: Doc<"devices">,
+  ring: RingValue,
+  cfg: Awaited<ReturnType<typeof configForRing>>,
+): Promise<Phase5Input | undefined> {
   const lock = await ctx.db
     .query("deviceLocks")
     .withIndex("by_device", (q) => q.eq("deviceId", device._id))
@@ -350,7 +400,10 @@ type RunState = {
   /** Phase 5: group configuration pointers / versions and group-target broadcasts, loaded once per group per run. */
   configs: GroupConfigCache;
   groupBroadcasts: Map<string, DocBroadcast[]>;
+  /** Keyed by group and, when the catalogue is ring-gated, by configuration version (Step 16b). */
   groups: Map<string, GroupInputs>;
+  /** The live direct grants per group (shared by the versions of one group). */
+  grants: Map<string, GrantLoad>;
   seen: Set<string>;
   /** Devices that have a sealing key and need a Wi-Fi box they do not have yet (Step 13): `seal:forDevices` once per run. */
   needSeal: Set<Id<"devices">>;
@@ -371,7 +424,12 @@ type RunState = {
  */
 async function publishDevice(ctx: MutationCtx, run: RunState, device: Doc<"devices">): Promise<"done" | "deferred"> {
   if (run.seen.has(device._id) || device.orgId !== run.org.org._id) return "done";
-  const groupKey = device.groupId ?? "";
+  // The configuration version this PC's ring points to (cached per group and version in the run): since Step 16b it also
+  // decides which catalogue the PC gets, so it is resolved before the group load.
+  const ring: RingValue = device.ring ?? "everyone";
+  const cfg = device.groupId === undefined ? null : await configForRing(ctx, device.groupId, ring, run.configs);
+  const frozen = cfg?.content.catalog;
+  const groupKey = device.groupId === undefined ? "" : frozen === undefined || cfg === null ? device.groupId : `${device.groupId}:${cfg.version}`;
   let group = run.groups.get(groupKey);
   if (
     group === undefined &&
@@ -392,7 +450,7 @@ async function publishDevice(ctx: MutationCtx, run: RunState, device: Doc<"devic
   const planState: PlanState = state === "overLimit" || state === "suspended" ? state : "ok";
 
   if (group === undefined) {
-    const load = await loadGroupInputs(ctx, device.orgId, device.groupId);
+    const load = await loadGroupInputs(ctx, device.orgId, device.groupId, frozen, run.grants);
     group = load.inputs;
     run.groups.set(groupKey, group);
     if (device.groupId !== undefined) run.groupLoads++;
@@ -400,14 +458,18 @@ async function publishDevice(ctx: MutationCtx, run: RunState, device: Doc<"devic
     run.docs += load.docs;
   }
 
-  const phase5 = await loadPhase5(ctx, run, device);
+  const phase5 = await loadPhase5(ctx, run, device, ring, cfg);
   const input: BuildInput = {
     ...(phase5 === undefined ? {} : { phase5 }),
     org: { _id: run.org.org._id, name: run.org.org.name },
     settings: run.org.settings,
     pinHash: run.org.pinHash,
-    ...group,
-    fileHandlers: run.org.fileHandlers,
+    group: group.group,
+    assignments: group.assignments,
+    apps: group.apps,
+    employees: group.employees,
+    employeeApps: group.employeeApps,
+    fileHandlers: group.fileHandlers ?? run.org.fileHandlers,
     device: { _id: device._id, kioskEnabled: device.kioskEnabled !== false },
   };
   const rosterGroupId = group.group !== null ? (group.group._id as Id<"groups">) : undefined;
@@ -583,6 +645,7 @@ export const run = internalMutation({
       configs: newGroupConfigCache(),
       groupBroadcasts: new Map(),
       groups: new Map(),
+      grants: new Map(),
       seen: new Set(),
       needSeal: new Set(),
       now,

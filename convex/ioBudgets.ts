@@ -221,38 +221,63 @@ export const IO_BUDGETS: Record<string, IoBudget> = {
   "apps:createWeb": { maxReads: 4 + 3, maxReadBytes: 4_096, maxWrites: 3, maxWriteBytes: 4_096 },
   // as createWeb, + the portable app's path patched once its id is known.
   "apps:createDesktop": { maxReads: 4 + 3, maxReadBytes: 4_096, maxWrites: 4, maxWriteBytes: 8_192 },
-  // app, file types (only when the file argument is cleared), publishApp; unchanged: 1 read, 0 writes.
-  "apps:update": { maxReads: 4 + 1 + 1 + 501 + 51 + 51 * 21 + 1, maxReadBytes: 250_000, maxWrites: 4, maxWriteBytes: 8_192 },
-  // Phase 5 Step 11. Same permissions again: app only (wrapper + 1 read, 0 writes). A change: app, assignments
-  // (<= 11), one `snapshotGroupConfig` per group (<= 10; each worst case: group, lockdown, org, exceptions
-  // 2 x 201, Wi-Fi 51, printers 101, newest version, rollout, prune 10 = ~570 reads) and publishApp (as
-  // `apps:update`). Writes: app, audit, per group <= 13 (version, rollout, <= 10 pruned versions, queue merge)
-  // + queue. Bytes: a snapshot is <= 256 KiB (MAX_GROUP_CONFIG_BYTES) but a typical one is ~2 KB.
-  // UNSURE: worst-case numbers, not measured (the matrix call is the no-change case).
-  "apps:setPermissions": { maxReads: 4 + 1 + 11 + 10 * 621 + 501 + 51 + 51 * 21 + 1, maxReadBytes: 2_500_000, maxWrites: 4 + 10 * 13, maxWriteBytes: 2_700_000 },
-  // app, orgPlans/orgStats when restoring, publishApp; writes: app, orgStats, audit, queue (+ scheduled run).
+  // ---- Phase 5 Step 16b: THE CATALOGUE IS RING-GATED (plan 4.3 rule 6, 4.14). Every change of an app record, a file-type rule or an
+  // assignment takes a new configuration version of the groups that assign the app, in the same transaction:
+  //   `snapshotAppGroups` = assignments by app (<= 11 per app; more than MAX_CATALOG_SNAPSHOT_GROUPS = 10 groups is refused with
+  //   `too_large` before any snapshot) + per group 1 existence read + one `snapshotGroupConfig`.
+  //   One snapshot, worst case: the Phase 5 inputs (621: group, lockdown, org, exceptions 2 x 201, Wi-Fi 51, printers 101, drivers 51,
+  //   newest version, rollout, prune 10) + the group's assignments (<= MAX_GROUP_APPS = 150) + their app rows (<= 150, each read once
+  //   per mutation) = 921, and the organization's file-type rules (<= 200) ONCE per mutation. Writes per group <= 13 (version, rollout,
+  //   <= 10 pruned versions, queue merge). A snapshot whose content did not change writes nothing.
+  //   TYPICAL (MEASURED, large-org fixture, groups of ~10 apps, no Phase 5 data): ~16 reads and 3 writes (~4 KB) per group:
+  //   `groups:assignApp` 20 reads / 5 writes, `fileHandlers:set` 20 / 5 for one group; `apps:attachIcon` 223 reads / 70 KB and
+  //   32 writes / 77 KB for an app in 10 groups. Before Step 16b the same edits cost 3-5 reads and 2-4 writes whatever the group count.
+  //   UNSURE: the worst-case byte caps (ten 256 KiB versions) are not measured.
+  // app, file types (only when the file argument is cleared), snapshotAppGroups, publishApp (assignments <= 10 after the cap, grants <= 51 with
+  // their groups, queue); unchanged: 1 read, 0 writes.
+  "apps:update": { maxReads: 4 + 1 + 1 + (11 + 10 + 10 * 921 + 200) + 10 + 51 + 51 * 21 + 1, maxReadBytes: 3_500_000, maxWrites: 4 + 10 * 13, maxWriteBytes: 2_700_000 },
+  // Phase 5 Step 11. Same permissions again: app only (wrapper + 1 read, 0 writes). A change: as `apps:update` (Step 16b: every
+  // assigning group is snapshotted or the save is refused; before, only the first 10 were).
+  "apps:setPermissions": { maxReads: 4 + 1 + (11 + 10 + 10 * 921 + 200) + 10 + 51 + 51 * 21 + 1, maxReadBytes: 3_500_000, maxWrites: 4 + 10 * 13, maxWriteBytes: 2_700_000 },
+  // app, orgPlans/orgStats when restoring, snapshotAppGroups, publishApp; writes: app, orgStats, audit, per group <= 13, queue.
   // Step 17 review: + assignments (<= 500) and <= 501 failed results (failedInstallCount follows).
-  "apps:setArchived": { maxReads: 4 + 1 + 3 + 501 + 51 + 51 * 21 + 1 + 500 + 501, maxReadBytes: 500_000, maxWrites: 5, maxWriteBytes: 4_096 },
+  "apps:setArchived": {
+    maxReads: 4 + 1 + 3 + (11 + 10 + 10 * 921 + 200) + 10 + 51 + 51 * 21 + 1 + 500 + 501,
+    maxReadBytes: 3_500_000,
+    maxWrites: 5 + 10 * 13,
+    maxWriteBytes: 2_700_000,
+  },
   // app, assignments `.first()`, file types `.first()`; writes: app, audit, one scheduled purge (+ icon file).
   "apps:remove": { maxReads: 4 + 3, maxReadBytes: 6_144, maxWrites: 3, maxWriteBytes: 2_048 },
-  // app, publishApp; writes: app, audit, queue (`purgeApp`, internal: <= 100 install results + <= 100 grants per run).
-  "apps:retry": { maxReads: 4 + 1 + 501 + 51 + 51 * 21 + 1, maxReadBytes: 250_000, maxWrites: 4, maxWriteBytes: 4_096 },
-  // authorize (4) + attachIcon: app, publishApp; writes: app, audit, queue. The upload is an action.
-  "apps:saveIcon": { maxReads: 4 + 1 + 501 + 51 + 51 * 21 + 1, maxReadBytes: 250_000, maxWrites: 4, maxWriteBytes: 4_096 },
+  // app, snapshotAppGroups (Step 16b: the revision is part of the frozen record, so a retry is ring-gated too), publishApp; writes: app,
+  // audit, per group <= 13, queue.
+  "apps:retry": { maxReads: 4 + 1 + (11 + 10 + 10 * 921 + 200) + 10 + 51 + 51 * 21 + 1, maxReadBytes: 3_500_000, maxWrites: 4 + 10 * 13, maxWriteBytes: 2_700_000 },
+  // authorize (4) + attachIcon (its own row below). The upload is an action.
+  "apps:saveIcon": { maxReads: 4 + 1 + (11 + 10 + 10 * 921 + 200) + 10 + 51 + 51 * 21 + 1, maxReadBytes: 3_500_000, maxWrites: 4 + 10 * 13, maxWriteBytes: 2_700_000 },
   // authorize (4) + 2 rate-limiter rows; the fetch is outside the database.
   "apps:fetchWebMeta": { maxReads: 6, maxReadBytes: 4_096, maxWrites: 1, maxWriteBytes: 512 },
   // authorize (4) + cache lookup + cache write + 2 rate-limiter rows (a cached answer reads 5).
   "apps:resolveWinget": { maxReads: 8, maxReadBytes: 8_192, maxWrites: 2, maxWriteBytes: 4_096 },
-  // app, rule by extension, rules (<= 200, only for a new one), publishApp x2; writes: rule, audit, queue.
-  "fileHandlers:set": { maxReads: 4 + 1 + 1 + 200 + 2 * (501 + 51 + 51 * 21) + 1, maxReadBytes: 500_000, maxWrites: 4, maxWriteBytes: 2_048 },
-  // rule, app, publishApp; writes: delete, audit, queue.
-  "fileHandlers:remove": { maxReads: 4 + 2 + 501 + 51 + 51 * 21 + 1, maxReadBytes: 250_000, maxWrites: 4, maxWriteBytes: 2_048 },
+  // app, rule by extension, rules (<= 200, only for a new one), snapshotAppGroups for the program and the one that lost the extension
+  // (2 x 11 assignments, <= 10 groups together), publishApp x2; writes: rule, audit, per group <= 13, queue.
+  // MEASURED (a program in one group of the fixture): 20 reads / 5.5 KB, 5 writes / 4.3 KB.
+  "fileHandlers:set": {
+    maxReads: 4 + 1 + 1 + 200 + (22 + 10 + 10 * 921 + 200) + 2 * (10 + 51 + 51 * 21) + 1,
+    maxReadBytes: 3_500_000,
+    maxWrites: 4 + 10 * 13,
+    maxWriteBytes: 2_700_000,
+  },
+  // rule, app, snapshotAppGroups, publishApp; writes: delete, audit, per group <= 13, queue. MEASURED (one group): 18 reads, 5 writes / 4.1 KB.
+  "fileHandlers:remove": { maxReads: 4 + 2 + (11 + 10 + 10 * 921 + 200) + 10 + 51 + 51 * 21 + 1, maxReadBytes: 3_500_000, maxWrites: 4 + 10 * 13, maxWriteBytes: 2_700_000 },
   // group, app, assignment `.first()`, assignments (<= 150), publish queue; writes: assignment, audit, queue.
   // Step 17 review: + <= 501 failed results of the app (does the group's count move) + orgStats.
-  "groups:assignApp": { maxReads: 4 + 2 + 1 + 150 + 1 + 501 + 1, maxReadBytes: 60_000, maxWrites: 4, maxWriteBytes: 2_048 },
-  // assignment, group, app, queue; unchanged: 1 read, 0 writes.
-  "groups:updateAssignment": { maxReads: 4 + 4, maxReadBytes: 6_144, maxWrites: 3, maxWriteBytes: 2_048 },
-  "groups:unassignApp": { maxReads: 4 + 4 + 501 + 1, maxReadBytes: 250_000, maxWrites: 5, maxWriteBytes: 2_048 },
+  // Step 16b: + ONE snapshot of the group (<= 921 + 200 reads, <= 13 writes; a version is <= 256 KiB and the newest one is read to compare).
+  // MEASURED (fixture group, ~10 apps): 20 reads / 6 KB, 5 writes / 4.8 KB.
+  "groups:assignApp": { maxReads: 4 + 2 + 1 + 150 + 1 + 501 + 1 + 921 + 200, maxReadBytes: 900_000, maxWrites: 4 + 13, maxWriteBytes: 300_000 },
+  // assignment, group, app, one snapshot, queue; unchanged: 1 read, 0 writes.
+  "groups:updateAssignment": { maxReads: 4 + 4 + 921 + 200, maxReadBytes: 900_000, maxWrites: 3 + 13, maxWriteBytes: 300_000 },
+  // MEASURED (fixture group): 15 reads / 4.3 KB, 5 writes / 3.6 KB.
+  "groups:unassignApp": { maxReads: 4 + 4 + 501 + 1 + 921 + 200, maxReadBytes: 900_000, maxWrites: 5 + 13, maxWriteBytes: 300_000 },
 
   // ---- Step 11: employees. Worst cases are the caps (100 groups, 50 grants per employee);
   // a typical call (1-3 groups, no grants) reads under 20 documents.
@@ -483,9 +508,9 @@ export const IO_BUDGETS: Record<string, IoBudget> = {
   "apps:purgeApp": { maxReads: 2 * 100 + 2, maxReadBytes: 60_000, maxWrites: 2 * 100, maxWriteBytes: 2_048 },
   // MEASURED 1 read (the app).
   "apps:iconTarget": { maxReads: 2, maxReadBytes: 2_048, maxWrites: 0, maxWriteBytes: 0 },
-  // MEASURED 1 read, 2 writes for an unassigned app (app patch, audit). An assigned app adds `publishApp`: assignments by app
-  // (<= 501), grants (<= 51) with their groups (<= 21 each), the publish queue; writes: app, audit, queue (+ run). As `apps:saveIcon`.
-  "apps:attachIcon": { maxReads: 1 + 501 + 51 + 51 * 21 + 1, maxReadBytes: 250_000, maxWrites: 4, maxWriteBytes: 4_096 },
+  // MEASURED 1 read, 2 writes for an unassigned app (app patch, audit). Step 16b: an assigned app adds `snapshotAppGroups` (see the
+  // note above `apps:update`) and `publishApp`. MEASURED for an app in 10 groups of ~10 apps: 223 reads / 70 KB, 32 writes / 77 KB.
+  "apps:attachIcon": { maxReads: 1 + (11 + 10 + 10 * 921 + 200) + 10 + 51 + 51 * 21 + 1, maxReadBytes: 3_500_000, maxWrites: 4 + 10 * 13, maxWriteBytes: 2_700_000 },
   // MEASURED 1 read (a cached answer, ~0.4 KB).
   "apps:cachedWinget": { maxReads: 2, maxReadBytes: 4_096, maxWrites: 0, maxWriteBytes: 0 },
   // MEASURED 0 reads + 1 write for a new answer; 1 read + 1 write for a replaced one.
@@ -521,24 +546,26 @@ export const IO_BUDGETS: Record<string, IoBudget> = {
   // wrapper (4) + <= 51 profiles + the names of <= 10 groups each (a per-query cache, so <= the organization's groups; 10 x 50 at worst).
   // Step 14: + <= 101 printers (names of their first 10 groups come from the same per-query cache) + the organization row.
   // Step 14b: + <= 51 drivers (MAX_ORG_DRIVERS; their group names come from the same cache).
-  // NOTE (Step 14b): a group snapshot now also reads the organization's drivers (<= 51), so the "~570" of the rows below is 621 (10 x 621).
+  // NOTE (Step 14b): a group snapshot now also reads the organization's drivers (<= 51), so the "~570" of the rows below is 621.
+  // NOTE (Step 16b): a snapshot also freezes the group's catalogue: + assignments (<= 150) + their app rows (<= 150) = 921 per group, and the
+  // organization's file-type rules (<= 200) once per call (10 x 921 + 200; a single snapshot 1121). Groups without apps add 1 read.
   "networks:list": { maxReads: 4 + 51 + 101 + 51 + 1 + 10 * 50, maxReadBytes: 450_000, maxWrites: 0, maxWriteBytes: 0 },
   // wrapper (4) + the profile + <= 10 group names + <= 10 groups x (200 + 1) apply reports (~1-3 KB each; a report only changes when
   // a PC's state does). The dashboard screen subscribes to it: that is why the sample is capped.
   "networks:wifiDetail": { maxReads: 4 + 1 + 10 + 10 * 201, maxReadBytes: 6_500_000, maxWrites: 0, maxWriteBytes: 0 },
   // wrapper (4) + profile + <= 100 group checks + the count of profiles (50) + 10 existence checks + 10 snapshots (~570 each). Writes: profile,
   // audit, per group <= 13 (version, rollout, pruned versions, queue). The boxes of a profile that becomes open go in `networks:purgeSealed`.
-  "networks:saveWifi": { maxReads: 4 + 1 + 100 + 50 + 10 + 10 * 621 + 1, maxReadBytes: 2_500_000, maxWrites: 1 + 1 + 10 * 13 + 3, maxWriteBytes: 2_700_000 },
+  "networks:saveWifi": { maxReads: 4 + 1 + 100 + 50 + 10 + (10 * 921 + 200) + 1, maxReadBytes: 2_500_000, maxWrites: 1 + 1 + 10 * 13 + 3, maxWriteBytes: 2_700_000 },
   // wrapper (4) + profile + <= 10 snapshots; writes: profile, audit, per group <= 13; boxes: `networks:purgeSealed`.
-  "networks:deleteWifi": { maxReads: 4 + 1 + 10 + 10 * 621 + 1, maxReadBytes: 2_500_000, maxWrites: 1 + 1 + 10 * 13 + 3, maxWriteBytes: 2_700_000 },
+  "networks:deleteWifi": { maxReads: 4 + 1 + 10 + (10 * 921 + 200) + 1, maxReadBytes: 2_500_000, maxWrites: 1 + 1 + 10 * 13 + 3, maxWriteBytes: 2_700_000 },
   // ---- Phase 5 Step 14: printers (plan 4.15, 4.20). UNSURE like the Wi-Fi rows: the matrix calls are the no-change / refused cases.
   // Same shape as `networks:wifiDetail`.
   "networks:printerDetail": { maxReads: 4 + 1 + 10 + 10 * 201, maxReadBytes: 6_500_000, maxWrites: 0, maxWriteBytes: 0 },
   // wrapper (4) + organization row + <= 100 group checks (groups + defaults) + printer + <= 101 printers (name / default checks)
   // + <= 10 existence checks + 10 snapshots (~570 each). Writes: printer, audit, per group <= 13.
-  "networks:savePrinter": { maxReads: 4 + 1 + 200 + 1 + 50 + 101 + 10 + 10 * 621 + 1, maxReadBytes: 2_500_000, maxWrites: 1 + 1 + 10 * 13 + 3, maxWriteBytes: 2_700_000 },
+  "networks:savePrinter": { maxReads: 4 + 1 + 200 + 1 + 50 + 101 + 10 + (10 * 921 + 200) + 1, maxReadBytes: 2_500_000, maxWrites: 1 + 1 + 10 * 13 + 3, maxWriteBytes: 2_700_000 },
   // wrapper (4) + printer + <= 10 snapshots; writes: printer, audit, per group <= 13.
-  "networks:deletePrinter": { maxReads: 4 + 1 + 10 + 10 * 621 + 1, maxReadBytes: 2_500_000, maxWrites: 1 + 1 + 10 * 13 + 3, maxWriteBytes: 2_700_000 },
+  "networks:deletePrinter": { maxReads: 4 + 1 + 10 + (10 * 921 + 200) + 1, maxReadBytes: 2_500_000, maxWrites: 1 + 1 + 10 * 13 + 3, maxWriteBytes: 2_700_000 },
   // Step 14b: the approved printer driver names: wrapper (4) + the organization row; writes: the organization patch + audit. No snapshot (documents carry
   // the driver name; the agent checks its local store). No change: 5 reads, 0 writes.
   "networks:setApprovedPrinterDrivers": { maxReads: 5, maxReadBytes: 4_096, maxWrites: 2, maxWriteBytes: 4_096 },
@@ -560,17 +587,17 @@ export const IO_BUDGETS: Record<string, IoBudget> = {
   // Nothing in flight (rings off or idle) = 5 reads. The tick's `evaluate` reads the same ranges.
   "rollouts:health": { maxReads: 3 + 1 + 1 + 201 + 200 + 1001, maxReadBytes: 3_200_000, maxWrites: 0, maxWriteBytes: 0, live: true },
   // The mutations below: wrapper + step-up (4), group, the rollout row; a group with no rollout row yet gets its first configuration version through one
-  // snapshot (~621 reads, 13 writes, like the Wi-Fi rows). Enabling reads <= 1 PC of the pilot ring; disabling reads the newest configuration (1 row).
+  // snapshot (<= 1121 reads with a full catalogue since Step 16b, 13 writes, like the Wi-Fi rows). Enabling reads <= 1 PC of the pilot ring; disabling reads the newest configuration (1 row).
   // Writes: rollout, audit, publish queue (+ one scheduled run); no change = 0 writes after the snapshot.
-  "rollouts:setEnabled": { maxReads: 4 + 1 + 1 + 621 + 4, maxReadBytes: 2_500_000, maxWrites: 13 + 6, maxWriteBytes: 2_700_000 },
-  "rollouts:setAutoPromote": { maxReads: 4 + 1 + 1 + 621, maxReadBytes: 2_500_000, maxWrites: 13 + 3, maxWriteBytes: 2_700_000 },
+  "rollouts:setEnabled": { maxReads: 4 + 1 + 1 + 1121 + 4, maxReadBytes: 2_500_000, maxWrites: 13 + 6, maxWriteBytes: 2_700_000 },
+  "rollouts:setAutoPromote": { maxReads: 4 + 1 + 1 + 1121, maxReadBytes: 2_500_000, maxWrites: 13 + 3, maxWriteBytes: 2_700_000 },
   // + <= 100 PCs x (PC + credentials) and <= 101 PCs of the pilot ring (the "pilot may not end up empty" check); writes: <= 100 PC rows too.
-  "rollouts:setRings": { maxReads: 4 + 1 + 1 + 621 + 200 + 101, maxReadBytes: 2_800_000, maxWrites: 13 + 100 + 4, maxWriteBytes: 2_900_000 },
-  "rollouts:promote": { maxReads: 4 + 1 + 1 + 621, maxReadBytes: 2_500_000, maxWrites: 13 + 4, maxWriteBytes: 2_700_000 },
-  "rollouts:promoteAll": { maxReads: 4 + 1 + 1 + 621, maxReadBytes: 2_500_000, maxWrites: 13 + 4, maxWriteBytes: 2_700_000 },
+  "rollouts:setRings": { maxReads: 4 + 1 + 1 + 1121 + 200 + 101, maxReadBytes: 2_800_000, maxWrites: 13 + 100 + 4, maxWriteBytes: 2_900_000 },
+  "rollouts:promote": { maxReads: 4 + 1 + 1 + 1121, maxReadBytes: 2_500_000, maxWrites: 13 + 4, maxWriteBytes: 2_700_000 },
+  "rollouts:promoteAll": { maxReads: 4 + 1 + 1 + 1121, maxReadBytes: 2_500_000, maxWrites: 13 + 4, maxWriteBytes: 2_700_000 },
   // + the chosen configuration row (<= 256 KB).
-  "rollouts:rollback": { maxReads: 4 + 1 + 1 + 621 + 1, maxReadBytes: 2_800_000, maxWrites: 13 + 4, maxWriteBytes: 2_700_000 },
-  "rollouts:resume": { maxReads: 4 + 1 + 1 + 621, maxReadBytes: 2_500_000, maxWrites: 13 + 3, maxWriteBytes: 2_700_000 },
+  "rollouts:rollback": { maxReads: 4 + 1 + 1 + 1121 + 1, maxReadBytes: 2_800_000, maxWrites: 13 + 4, maxWriteBytes: 2_700_000 },
+  "rollouts:resume": { maxReads: 4 + 1 + 1 + 1121, maxReadBytes: 2_500_000, maxWrites: 13 + 3, maxWriteBytes: 2_700_000 },
   // Cron every 15 minutes: one page (<= 25) of `groupRollouts.by_state_stage` in state `rolling` (an empty range when nothing rolls: 1 read);
   // each rolling group is then evaluated in its own scheduled transaction. A full page schedules the next one.
   "rollouts:tick": { maxReads: 26, maxReadBytes: 25_000, maxWrites: 0, maxWriteBytes: 0 },
@@ -583,20 +610,20 @@ export const IO_BUDGETS: Record<string, IoBudget> = {
   "drivers:detail": { maxReads: 4 + 1 + 10 + 201, maxReadBytes: 150_000, maxWrites: 0, maxWriteBytes: 0 },
   // wrapper (4) + <= 100 group checks + the driver + <= 51 drivers (name / cap checks) + <= 10 existence checks + 10 snapshots (621 each). Writes:
   // driver, audit, per group <= 13.
-  "drivers:save": { maxReads: 4 + 100 + 1 + 51 + 10 + 10 * 621 + 1, maxReadBytes: 2_500_000, maxWrites: 1 + 1 + 10 * 13 + 3, maxWriteBytes: 2_700_000 },
+  "drivers:save": { maxReads: 4 + 100 + 1 + 51 + 10 + (10 * 921 + 200) + 1, maxReadBytes: 2_500_000, maxWrites: 1 + 1 + 10 * 13 + 3, maxWriteBytes: 2_700_000 },
   // wrapper (4) + driver + <= 10 snapshots; writes: driver, audit, per group <= 13; its results: `drivers:purgeResults`.
-  "drivers:remove": { maxReads: 4 + 1 + 10 + 10 * 621 + 1, maxReadBytes: 2_500_000, maxWrites: 1 + 1 + 10 * 13 + 3, maxWriteBytes: 2_700_000 },
-  "drivers:retry": { maxReads: 4 + 1 + 10 + 10 * 621 + 1, maxReadBytes: 2_500_000, maxWrites: 1 + 1 + 10 * 13 + 3, maxWriteBytes: 2_700_000 },
+  "drivers:remove": { maxReads: 4 + 1 + 10 + (10 * 921 + 200) + 1, maxReadBytes: 2_500_000, maxWrites: 1 + 1 + 10 * 13 + 3, maxWriteBytes: 2_700_000 },
+  "drivers:retry": { maxReads: 4 + 1 + 10 + (10 * 921 + 200) + 1, maxReadBytes: 2_500_000, maxWrites: 1 + 1 + 10 * 13 + 3, maxWriteBytes: 2_700_000 },
   // one batch of results (DRIVER_RESULT_PURGE_BATCH = 100): reads and deletes.
   "drivers:purgeResults": { maxReads: 100, maxReadBytes: 60_000, maxWrites: 100, maxWriteBytes: 60_000 },
   // one batch of boxes (SEALED_PURGE_BATCH = 100): reads and deletes.
   "networks:purgeSealed": { maxReads: 100, maxReadBytes: 60_000, maxWrites: 100, maxWriteBytes: 60_000 },
   // authorize (4) + `wifi:target` (profile + sealing key) + `wifi:storePassphrase` + the limiter row; no database read happens for the
   // passphrase itself (an action).
-  "wifi:setPassphrase": { maxReads: 4 + 2 + 1 + 1 + 10 + 10 * 621 + 2, maxReadBytes: 2_500_000, maxWrites: 1 + 1 + 10 * 13 + 3, maxWriteBytes: 2_700_000 },
+  "wifi:setPassphrase": { maxReads: 4 + 2 + 1 + 1 + 10 + (10 * 921 + 200) + 2, maxReadBytes: 2_500_000, maxWrites: 1 + 1 + 10 * 13 + 3, maxWriteBytes: 2_700_000 },
   "wifi:target": { maxReads: 2, maxReadBytes: 4_096, maxWrites: 0, maxWriteBytes: 0 },
   // profile, <= 10 group checks and snapshots; writes: profile, audit, per group <= 13.
-  "wifi:storePassphrase": { maxReads: 1 + 10 + 10 * 621 + 1, maxReadBytes: 2_500_000, maxWrites: 1 + 1 + 10 * 13 + 3, maxWriteBytes: 2_700_000 },
+  "wifi:storePassphrase": { maxReads: 1 + 10 + (10 * 921 + 200) + 1, maxReadBytes: 2_500_000, maxWrites: 1 + 1 + 10 * 13 + 3, maxWriteBytes: 2_700_000 },
   // Wi-Fi sealing (4.18): SEAL_DEVICES_PER_RUN = 25 devices per run, each with <= MAX_DEVICE_WIFI = 20 assigned profiles.
   // jobs: the sealing key, <= 51 profiles, per device the device + one sealed-box lookup per assigned profile
   // (typical: 1-3 profiles a group, so ~75-100 reads; the cap is 25 x 21).
@@ -697,6 +724,10 @@ export const IO_BUDGETS: Record<string, IoBudget> = {
   // Phase 5 keys (typical 12 KB, worst 64 KB: plan 4.3), so a batch writes up to 25 x ~16 KB. MEASURED on the fixture without Phase 5
   // data: unchanged (274 reads / 89 KB, 74 writes / 167 KB); with a configuration, a Wi-Fi box and 2 broadcasts per group, a lock on
   // every 10th PC: 346 reads / 137 KB, 77 writes / 222 KB (`ioInternal.ts`, second case).
+  // Step 16b: a group with a configuration version takes its assignments, app records and file-type rules from that version (already
+  // read for the Phase 5 keys), so the assignment range and the app rows are no longer read: the second case now MEASURES
+  // 165 reads / 125 KB, 77 writes / 224 KB. Direct grants and the records of grant-only websites are still read live; with rings
+  // mid-rollout a group costs one catalogue build per distinct version (<= 3), the grant load once.
   "publish:run": { maxReads: 340 + 25 * 7 + 10 * 8, maxReadBytes: 300_000, maxWrites: 95, maxWriteBytes: 450_000 },
   // MEASURED 2 reads, 4 writes. Without the authorize (4) of `settings:setExitPin`: org, orgSecrets, publishQueue.
   "settings:storeExitPin": { maxReads: 4, maxReadBytes: 3_072, maxWrites: 5, maxWriteBytes: 2_048 },

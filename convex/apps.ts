@@ -3,7 +3,7 @@ import { v, type Infer } from "convex/values";
 import { internal } from "./_generated/api";
 import type { Doc, Id } from "./_generated/dataModel";
 import { env, type DatabaseReader } from "./_generated/server";
-import { publishApp } from "./lib/appPublish";
+import { publishApp, snapshotAppGroups } from "./lib/appPublish";
 import { writeAudit } from "./lib/audit";
 import { checkRevision, getInOrg, nextRevision } from "./lib/authz";
 import { normalizeAppDescription, normalizeAppName, normalizeDesktop, normalizeHue, normalizeWeb, withAppId, wingetIdProblem, wingetVersionProblem } from "./lib/appRules";
@@ -26,7 +26,6 @@ import {
   MAX_APP_PAGE,
   MAX_GROUPS_JOINED,
   MAX_INSTALL_PAGE,
-  MAX_PERMISSION_SNAPSHOT_GROUPS,
   WINGET_CACHE_MS,
 } from "./lib/limits";
 import { STORED_INSTALL_STATES } from "./lib/deviceApiRules";
@@ -34,7 +33,6 @@ import { assignedGroupsOf, failedFollowArchive } from "./lib/installs";
 import { assertWithinLimit, bumpOrgStats, bumpStats } from "./lib/plans";
 import { consumeOrFail } from "./lib/rateLimits";
 import { audience, appKind, desktopSpec, installState, webPermissions, webSpec, wingetResolved } from "./lib/validators";
-import { snapshotGroupConfig } from "./lib/groupConfig";
 import { serverDay } from "./lib/lockdownReports";
 import { iconDataUrl, fetchWebMeta as scanWebMeta, pngSize } from "./lib/webmeta";
 import { resolveWinget as resolveFromGithub } from "./lib/winget";
@@ -507,8 +505,11 @@ export const createDesktop = memberMutation("admin")({
  * Change an app (admin): pass `web` for a website, `desktop` for a program
  * (the kind never changes). `stale_edit` when someone saved in between.
  * Nothing changed = no write, no new revision, no publish. A change bumps the
- * revision (the agent retries a failed install on a new revision) and
- * republishes the groups that carry the app.
+ * revision (the agent retries a failed install on a new revision), takes a new
+ * configuration version of every group that assigns the app (Step 16b: the app
+ * record is ring-gated; `too_large`, detail "groups", above
+ * MAX_CATALOG_SNAPSHOT_GROUPS groups; the same holds for `setArchived`, `retry`
+ * and the icon) and republishes the groups that carry the app.
  */
 export const update = memberMutation("admin")({
   args: {
@@ -555,6 +556,7 @@ export const update = memberMutation("admin")({
       targetLabel: fields.name,
       summary: `Changed the app ${fields.name}`,
     });
+    await snapshotAppGroups(ctx, [app._id], `App ${fields.name}`, ctx.member._id);
     await publishApp(ctx, ctx.orgId, app._id);
     return { revision };
   },
@@ -565,9 +567,9 @@ export const update = memberMutation("admin")({
  * between (`expectedRevision`); `invalid_argument` (field "appId") for a program. The same permissions
  * again = no write, no new revision, no publish. A change bumps the revision, audits
  * `app.permissionsChanged` (the summary names the permissions that changed, nothing else), snapshots the
- * configuration of the groups that assign the app (`snapshotGroupConfig`, at most
- * `MAX_PERMISSION_SNAPSHOT_GROUPS`) and republishes every group that carries the app (`publishApp`): the app
- * record is still read live by the publisher, so the publish is what puts the change in the documents.
+ * configuration of the groups that assign the app (`snapshotAppGroups`: ring-gated since Step 16b; more than
+ * `MAX_CATALOG_SNAPSHOT_GROUPS` groups = `too_large`) and republishes the groups that carry the app only
+ * through a direct grant (`publishApp`).
  */
 export const setPermissions = memberMutation("admin")({
   args: { appId: v.string(), permissions: webPermissions, expectedRevision: v.number() },
@@ -591,21 +593,16 @@ export const setPermissions = memberMutation("admin")({
       targetLabel: app.name,
       summary: `Changed permissions of ${app.name}: ${changed.map((k) => `${k} ${args.permissions[k] ? "allowed" : "blocked"}`).join(", ")}`,
     });
-    const assigned = await ctx.db
-      .query("appAssignments")
-      .withIndex("by_app", (q) => q.eq("appId", app._id))
-      .take(MAX_PERMISSION_SNAPSHOT_GROUPS + 1);
-    for (const a of assigned.slice(0, MAX_PERMISSION_SNAPSHOT_GROUPS)) {
-      await snapshotGroupConfig(ctx, a.groupId, `Permissions of ${app.name}`, ctx.member._id);
-    }
+    await snapshotAppGroups(ctx, [app._id], `Permissions of ${app.name}`, ctx.member._id);
     await publishApp(ctx, ctx.orgId, app._id);
     return { revision };
   },
 });
 
 /**
- * Archive or restore an app (admin). An archived app disappears from every
- * device's document at once (and frees a plan slot); restoring needs a free
+ * Archive or restore an app (admin). An archived app disappears from the
+ * documents of every group that assigns it (rings on: the pilot ring first,
+ * Step 16b) and frees a plan slot; restoring needs a free
  * slot (`plan_limit`). Already in that state = no write.
  */
 export const setArchived = memberMutation("admin")({
@@ -629,6 +626,7 @@ export const setArchived = memberMutation("admin")({
       targetLabel: app.name,
       summary: args.archived ? `Archived the app ${app.name}` : `Restored the app ${app.name} from the archive`,
     });
+    await snapshotAppGroups(ctx, [app._id], args.archived ? `Archived ${app.name}` : `Restored ${app.name}`, ctx.member._id);
     await publishApp(ctx, ctx.orgId, app._id);
     return null;
   },
@@ -722,6 +720,7 @@ export const retry = memberMutation("admin")({
       targetLabel: app.name,
       summary: `Asked the PCs to retry installing ${app.name}`,
     });
+    await snapshotAppGroups(ctx, [app._id], `Retry of ${app.name}`, ctx.member._id);
     await publishApp(ctx, ctx.orgId, app._id);
     return { revision };
   },
@@ -806,6 +805,7 @@ export const attachIcon = internalMutation({
       targetLabel: app.name,
       summary: `Changed the icon of ${app.name}`,
     });
+    await snapshotAppGroups(ctx, [app._id], `Icon of ${app.name}`);
     await publishApp(ctx, args.orgId, app._id);
     return null;
   },

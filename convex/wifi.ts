@@ -5,7 +5,7 @@ import { writeAudit } from "./lib/audit";
 import { getInOrg } from "./lib/authz";
 import { fail } from "./lib/errors";
 import { internalMutation, internalQuery, memberAction } from "./lib/functions";
-import { snapshotGroupConfig } from "./lib/groupConfig";
+import { newSnapshotCache, snapshotGroupConfig } from "./lib/groupConfig";
 import { openWrappedRow } from "./lib/keyring";
 import { MAX_NETWORK_SNAPSHOT_GROUPS } from "./lib/limits";
 import { atRestBox } from "./lib/lockdownValidators";
@@ -112,9 +112,10 @@ export const storePassphrase = internalMutation({
       targetLabel: p.name,
       summary: `Set a new passphrase for the Wi-Fi network ${p.name}`,
     });
+    const cache = newSnapshotCache(); // Step 16b: the catalogue inputs the groups share are read once
     for (const gid of p.groupIds as Id<"groups">[]) {
       if ((await ctx.db.get(gid)) === null) continue;
-      await snapshotGroupConfig(ctx, gid, `Wi-Fi ${p.name}`, args.by);
+      await snapshotGroupConfig(ctx, gid, `Wi-Fi ${p.name}`, args.by, cache);
     }
     return { revision };
   },

@@ -1147,7 +1147,9 @@ describe("apps:setPermissions", () => {
     expect((await appRow(t, app))?.web?.permissions).toEqual({ ...ALLOWED, printing: false });
   });
 
-  test("more than 10 groups: the first 10 are snapshotted, every group still gets a publish", async () => {
+  // Step 16b (deliberate change): the app record is ring-gated, so an edit must snapshot EVERY group that assigns the app. More than
+  // MAX_CATALOG_SNAPSHOT_GROUPS groups is refused (as Wi-Fi profiles and printers are) instead of silently snapshotting the first 10.
+  test("more than 10 groups: every edit of the app record is refused with too_large and writes nothing; 10 groups pass", async () => {
     const t = await setupAuth();
     const orgId = await makeOrg(t);
     const a = await admin(t, orgId);
@@ -1159,12 +1161,25 @@ describe("apps:setPermissions", () => {
       await a.as.mutation(api.groups.assignApp, { groupId: g, appId: app, audience: "everyone", pinnedTaskbar: false, pinnedDesktop: false });
     }
     await drain(t);
+    const total = () => t.run(async (ctx) => (await ctx.db.query("groupConfigs").collect()).length);
+    expect(await total()).toBe(12); // one version per group, from its assignment
+    await expectCode(a.as.mutation(api.apps.setPermissions, { appId: app, expectedRevision: 0, permissions: ALLOWED }), "too_large");
+    await expectCode(a.as.mutation(api.apps.update, { appId: app, expectedRevision: 0, web: web("Meet 2") }), "too_large");
+    await expectCode(a.as.mutation(api.apps.setArchived, { appId: app, archived: true }), "too_large");
+    expect(await appRow(t, app)).toMatchObject({ name: "Meet", archived: false, revision: 0 });
+    expect(await total()).toBe(12);
+    expect(await queueOf(t, orgId)).toBeNull();
+
+    // Two groups fewer: the same save goes through and every remaining group gets a new version.
+    for (const g of groups.slice(10)) {
+      const row = await t.run((ctx) => ctx.db.query("appAssignments").withIndex("by_group_app", (q) => q.eq("groupId", g).eq("appId", app)).unique());
+      await a.as.mutation(api.groups.unassignApp, { assignmentId: row!._id });
+    }
+    await drain(t);
+    expect(await total()).toBe(14);
     await a.as.mutation(api.apps.setPermissions, { appId: app, expectedRevision: 0, permissions: ALLOWED });
-    const snapshotted = await t.run(async (ctx) => (await ctx.db.query("groupConfigs").withIndex("by_group_version", (q) => q.eq("groupId", groups[0]!)).first()) !== null);
-    expect(snapshotted).toBe(true);
-    const total = await t.run(async (ctx) => (await ctx.db.query("groupConfigs").collect()).length);
-    expect(total).toBe(10);
-    expect([...((await queueOf(t, orgId))?.groupIds ?? [])].sort()).toEqual([...groups].sort());
+    expect(await total()).toBe(24);
+    expect([...((await queueOf(t, orgId))?.groupIds ?? [])].sort()).toEqual([...groups.slice(0, 10)].sort());
   });
 });
 

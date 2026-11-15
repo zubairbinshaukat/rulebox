@@ -1,5 +1,5 @@
 import type { Doc, Id } from "../_generated/dataModel";
-import { snapshotGroupConfig } from "./groupConfig";
+import { newSnapshotCache, snapshotGroupConfig } from "./groupConfig";
 
 // Helpers shared by the Networks screen's functions (`networks.ts`) and the drivers (`drivers.ts`, Phase 5 Step 14b).
 
@@ -38,8 +38,10 @@ export async function snapshotGroups(
   reason: string,
   by: Id<"members">,
 ): Promise<void> {
+  // Step 16b: a snapshot also freezes the group's catalogue; the organization's file-type rules and shared app rows are read once per call.
+  const cache = newSnapshotCache();
   for (const id of ids) {
     if ((await ctx.db.get(id)) === null) continue;
-    await snapshotGroupConfig(ctx, id, reason, by);
+    await snapshotGroupConfig(ctx, id, reason, by, cache);
   }
 }

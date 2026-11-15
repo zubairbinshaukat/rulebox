@@ -1,12 +1,15 @@
 import type { Doc, Id } from "../_generated/dataModel";
 import type { DatabaseReader, MutationCtx } from "../_generated/server";
 import { sha256HexSync } from "./crypto";
+import type { BuildApp } from "./desired";
 import { fail } from "./errors";
 import {
   KEEP_GROUP_CONFIGS,
   MAX_DEVICE_DRIVERS,
   MAX_DEVICE_PRINTERS,
   MAX_DEVICE_WIFI,
+  MAX_FILE_HANDLERS,
+  MAX_GROUP_APPS,
   MAX_GROUP_CONFIG_BYTES,
   MAX_GROUP_EXCEPTIONS,
   MAX_ORG_DRIVERS,
@@ -24,12 +27,14 @@ import { requestPublish } from "./publish";
 // each device's document from the version its ring points to plus the LIVE inputs (lock,
 // broadcasts, USB allow window, the device's own sealed Wi-Fi boxes).
 //
-// SCOPE CHOICE (reported): the Phase 4 catalogue inputs (app assignments, app records, file
-// handlers, allowed sites) stay LIVE in the publisher for now. Moving them into the snapshot
-// would require every Phase 4 mutation that touches them to snapshot first and would change
-// what the Phase 4 tests build; Step 16 (rings) does that together with the ring gating of
-// apps. Nothing here changes a Phase 4 document: a group with no snapshot gets none of the
-// new keys.
+// Step 16b (owner decision 2026-11-15): the Phase 4 catalogue inputs are frozen too, as the
+// optional `catalog` section: the group's app assignments, the records of the apps they name
+// and the file-type rules that point at those apps. Every mutation that changes one of them
+// snapshots the groups that assign the app (`lib/appPublish.ts` `snapshotAppGroups`, at most
+// MAX_CATALOG_SNAPSHOT_GROUPS, else `too_large`). STILL LIVE (the directory never waits for a
+// pilot, plan 4.3 rule 6): direct employee grants and the records of web apps a group carries
+// only through a grant. `allowedSites` is always empty, so there is nothing to freeze.
+// A group with no snapshot, or a version made before Step 16b (no `catalog`), is read live.
 
 // ---------------------------------------------------------------- content (what is frozen)
 
@@ -96,6 +101,32 @@ export type ConfigDriver = {
   revision: number;
 };
 
+/** (Step 16b) One app assignment of the group as the builder needs it. */
+export type ConfigAssignment = { appId: string; audience: "everyone" | "selected"; pinnedTaskbar: boolean; pinnedDesktop: boolean };
+
+/**
+ * (Step 16b) A frozen app record: what `lib/desired.ts` `BuildApp` needs, absent optionals `null`. The icon is kept as its
+ * file-storage id (the publisher resolves the address; an icon replaced since then is simply left out).
+ */
+export type ConfigApp = {
+  id: string;
+  name: string;
+  description: string | null;
+  kind: "web" | "desktop";
+  hue: number | null;
+  revision: number;
+  web: NonNullable<BuildApp["web"]> | null;
+  desktop: (Omit<NonNullable<BuildApp["desktop"]>, "install"> & { install: (Omit<NonNullable<NonNullable<BuildApp["desktop"]>["install"]>, "productCode"> & { productCode: string | null }) | null }) | null;
+  icon: { storageId: string; sha256: string } | null;
+};
+
+/** (Step 16b) The ring-gated Phase 4 inputs of a group: assignments (by app id), their non-archived apps (by id), their file-type rules (by extension). */
+export type ConfigCatalog = {
+  assignments: ConfigAssignment[];
+  apps: ConfigApp[];
+  fileHandlers: { extension: string; appId: string }[];
+};
+
 export type GroupConfigContent = {
   lockdown: DocLockdown;
   wifiManagedOnly: boolean;
@@ -103,7 +134,117 @@ export type GroupConfigContent = {
   printers: ConfigPrinter[];
   /** Absent in versions made before Step 14b, and omitted from the stored text when empty (their content hash stays the same). */
   drivers?: ConfigDriver[];
+  /** (Step 16b) Absent in versions made before Step 16b: the publisher then reads the catalogue inputs live. */
+  catalog?: ConfigCatalog;
 };
+
+const byText = (a: string, b: string): number => (a < b ? -1 : a > b ? 1 : 0);
+
+/** PURE. A live app row as the frozen record, every object in a fixed key order (the text is hashed). */
+export function configApp(app: Doc<"apps">): ConfigApp {
+  const w = app.web;
+  const d = app.desktop;
+  const i = d?.install;
+  const p = w?.permissions;
+  return {
+    id: app._id,
+    name: app.name,
+    description: app.description ?? null,
+    kind: app.kind,
+    hue: app.hue ?? null,
+    revision: app.revision,
+    web:
+      app.kind !== "web" || w === undefined || p === undefined
+        ? null
+        : {
+            url: w.url,
+            allowedDomains: [...w.allowedDomains],
+            permissions: {
+              camera: p.camera,
+              microphone: p.microphone,
+              screenShare: p.screenShare,
+              clipboardRead: p.clipboardRead,
+              notifications: p.notifications,
+              downloads: p.downloads,
+              printing: p.printing,
+              geolocation: p.geolocation,
+            },
+          },
+    desktop:
+      app.kind !== "desktop" || d === undefined
+        ? null
+        : {
+            exe: d.exe,
+            args: [...d.args],
+            fileArgTemplate: [...d.fileArgTemplate],
+            install:
+              i === undefined
+                ? null
+                : {
+                    kind: i.kind,
+                    url: i.url,
+                    sha256: i.sha256,
+                    sizeBytes: i.sizeBytes,
+                    silentArgs: [...i.silentArgs],
+                    productCode: i.productCode ?? null,
+                    successExitCodes: [...i.successExitCodes],
+                    removeWhenUnassigned: i.removeWhenUnassigned,
+                  },
+            resetFolders: [...d.resetFolders],
+          },
+    icon: app.icon === undefined ? null : { storageId: app.icon.storageId, sha256: app.icon.sha256 },
+  };
+}
+
+/** PURE. A frozen record as the document builder's input (`icon` is the publisher's: it needs file storage). */
+export function buildAppOf(a: ConfigApp, icon: BuildApp["icon"]): BuildApp {
+  return {
+    _id: a.id,
+    name: a.name,
+    description: a.description ?? undefined,
+    kind: a.kind,
+    hue: a.hue ?? undefined,
+    archived: false,
+    revision: a.revision,
+    web: a.web ?? undefined,
+    desktop:
+      a.desktop === null
+        ? undefined
+        : { ...a.desktop, install: a.desktop.install === null ? undefined : { ...a.desktop.install, productCode: a.desktop.install.productCode ?? undefined } },
+    icon,
+  };
+}
+
+/** What `buildGroupConfig` freezes as the catalogue (Step 16b). */
+export type CatalogInputs = {
+  /** The group's assignments (`appAssignments.by_group`). */
+  assignments: Pick<Doc<"appAssignments">, "appId" | "audience" | "pinnedTaskbar" | "pinnedDesktop">[];
+  /** The apps the assignments name (archived ones are left out here, as the builder leaves them out). */
+  apps: Doc<"apps">[];
+  /** The organization's file-type rules; only those whose app the group assigns are kept. */
+  fileHandlers: Pick<Doc<"fileHandlers">, "extension" | "appId">[];
+};
+
+/** PURE. The frozen catalogue of one group: sorted, one assignment per app, archived apps and other groups' rules left out. */
+export function buildConfigCatalog(input: CatalogInputs): ConfigCatalog {
+  const seen = new Set<string>();
+  const assignments: ConfigAssignment[] = [];
+  for (const a of input.assignments) {
+    if (seen.has(a.appId)) continue;
+    seen.add(a.appId);
+    assignments.push({ appId: a.appId, audience: a.audience, pinnedTaskbar: a.pinnedTaskbar, pinnedDesktop: a.pinnedDesktop });
+  }
+  assignments.sort((x, y) => byText(x.appId, y.appId));
+  const apps = input.apps
+    .filter((a) => !a.archived && seen.has(a._id))
+    .map(configApp)
+    .sort(byId);
+  const fileHandlers = input.fileHandlers
+    .filter((h) => seen.has(h.appId))
+    .map((h) => ({ extension: h.extension, appId: h.appId as string }))
+    .sort((x, y) => byText(x.extension, y.extension));
+  return { assignments, apps, fileHandlers };
+}
 
 const byId = <T extends { id: string }>(a: T, b: T): number => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0);
 
@@ -136,6 +277,8 @@ export type ConfigInputs = {
   >[];
   /** (Step 14b) The organization's driver packages; this function keeps those assigned to `groupId`. */
   drivers: Pick<Doc<"drivers">, "_id" | "name" | "kind" | "url" | "sha256" | "sizeBytes" | "inf" | "silentArgs" | "successExitCodes" | "revision" | "groupIds">[];
+  /** (Step 16b) The catalogue inputs; absent = the version has no `catalog` (only hand-built inputs in tests leave it out). */
+  catalog?: CatalogInputs;
 };
 
 /**
@@ -209,6 +352,7 @@ export function buildGroupConfig(groupId: string, input: ConfigInputs): GroupCon
     wifi,
     printers,
     drivers,
+    ...(input.catalog === undefined ? {} : { catalog: buildConfigCatalog(input.catalog) }),
   };
 }
 
@@ -234,11 +378,56 @@ export function parseGroupConfig(text: string): GroupConfigContent | null {
 
 // ---------------------------------------------------------------- loading and snapshotting
 
+/**
+ * What several snapshots of ONE mutation share (Step 16b): an app edit snapshots up to MAX_CATALOG_SNAPSHOT_GROUPS groups, and each
+ * would read the organization's file-type rules and the same app rows again. Never kept across transactions.
+ */
+export type SnapshotCache = { apps: Map<string, Doc<"apps"> | null>; fileHandlers: Map<string, Pick<Doc<"fileHandlers">, "extension" | "appId">[]> };
+export function newSnapshotCache(): SnapshotCache {
+  return { apps: new Map(), fileHandlers: new Map() };
+}
+
+/** The live catalogue inputs of one group (Step 16b): its assignments (<= MAX_GROUP_APPS), their apps (one get each) and the organization's file-type rules. */
+async function loadCatalogInputs(
+  ctx: { db: DatabaseReader },
+  orgId: Id<"organizations">,
+  groupId: Id<"groups">,
+  cache: SnapshotCache,
+): Promise<CatalogInputs> {
+  const assignments = await ctx.db
+    .query("appAssignments")
+    .withIndex("by_group", (q) => q.eq("groupId", groupId))
+    .take(MAX_GROUP_APPS);
+  const apps: Doc<"apps">[] = [];
+  for (const a of assignments) {
+    let app = cache.apps.get(a.appId);
+    if (app === undefined) {
+      app = await ctx.db.get(a.appId);
+      cache.apps.set(a.appId, app);
+    }
+    if (app !== null && app.orgId === orgId) apps.push(app);
+  }
+  let fileHandlers = cache.fileHandlers.get(orgId);
+  if (fileHandlers === undefined) {
+    // No rule can matter to a group without assignments (a rule names a program, and a program reaches a PC only when its group assigns it).
+    fileHandlers =
+      assignments.length === 0
+        ? []
+        : await ctx.db
+            .query("fileHandlers")
+            .withIndex("by_org_ext", (q) => q.eq("orgId", orgId))
+            .take(MAX_FILE_HANDLERS);
+    if (assignments.length > 0) cache.fileHandlers.set(orgId, fileHandlers);
+  }
+  return { assignments, apps, fileHandlers };
+}
+
 /** Reads the live inputs of one group: bounded `.take`s through indexes, no scans. */
 export async function loadConfigInputs(
   ctx: { db: DatabaseReader },
   orgId: Id<"organizations">,
   groupId: Id<"groups">,
+  cache: SnapshotCache = newSnapshotCache(),
 ): Promise<ConfigInputs> {
   const lockdown = await ctx.db
     .query("groupLockdown")
@@ -270,7 +459,8 @@ export async function loadConfigInputs(
     .query("drivers")
     .withIndex("by_org", (q) => q.eq("orgId", orgId))
     .take(MAX_ORG_DRIVERS + 1);
-  return { settings, exceptions: [...own, ...orgWide], wifi, printers, drivers };
+  const catalog = await loadCatalogInputs(ctx, orgId, groupId, cache);
+  return { settings, exceptions: [...own, ...orgWide], wifi, printers, drivers, catalog };
 }
 
 /** One entry of `groupRollouts.versions`: what the rollout screen lists (never the configuration text). */
@@ -309,11 +499,12 @@ export async function snapshotGroupConfig(
   groupId: Id<"groups">,
   reason: string,
   createdBy?: Id<"members">,
+  cache?: SnapshotCache,
 ): Promise<SnapshotResult> {
   const group = await ctx.db.get(groupId);
   if (group === null) fail("not_found");
   const orgId = group.orgId;
-  const content = buildGroupConfig(groupId, await loadConfigInputs(ctx, orgId, groupId));
+  const content = buildGroupConfig(groupId, await loadConfigInputs(ctx, orgId, groupId, cache));
   const text = serializeGroupConfig(content);
   const contentHash = sha256HexSync(text);
 

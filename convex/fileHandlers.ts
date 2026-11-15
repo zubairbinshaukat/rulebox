@@ -1,7 +1,7 @@
 import { paginationOptsValidator } from "convex/server";
 import { v } from "convex/values";
 import type { Doc } from "./_generated/dataModel";
-import { publishApp } from "./lib/appPublish";
+import { publishApp, snapshotAppGroups } from "./lib/appPublish";
 import { writeAudit } from "./lib/audit";
 import { getInOrg } from "./lib/authz";
 import { extensionProblem, normalizeExtension, programDenied } from "./lib/denyList";
@@ -67,7 +67,7 @@ export const page = memberQuery("viewer")({
  * moves it to another program. `invalid_argument` field "extension" with detail
  * "format" (not `.` and 1-10 letters or digits) or "denied" (executables,
  * scripts, installers...: PRD 7.3); field "app" when the program cannot open
- * files. Same program again = no write. `too_large` at 200 rules.
+ * files. Same program again = no write. `too_large` at 200 rules, and (detail "groups") when the programs are assigned to more than MAX_CATALOG_SNAPSHOT_GROUPS groups.
  */
 export const set = memberMutation("admin")({
   args: { extension: v.string(), appId: v.string() },
@@ -93,7 +93,6 @@ export const set = memberMutation("admin")({
       await ctx.db.insert("fileHandlers", { orgId: ctx.orgId, extension, appId: app._id });
     } else {
       await ctx.db.patch(existing._id, { appId: app._id });
-      await publishApp(ctx, ctx.orgId, existing.appId); // the program that lost the extension
     }
     await writeAudit(ctx, {
       orgId: ctx.orgId,
@@ -104,6 +103,10 @@ export const set = memberMutation("admin")({
       targetLabel: app.name,
       summary: `Files ending in ${extension} now open with ${app.name}`,
     });
+    // Step 16b: file-type rules are ring-gated. One new configuration version for every group that assigns the program
+    // (and the one that lost the extension); `too_large` (detail "groups") above MAX_CATALOG_SNAPSHOT_GROUPS groups.
+    await snapshotAppGroups(ctx, existing === null ? [app._id] : [existing.appId, app._id], `File type ${extension}`, ctx.member._id);
+    if (existing !== null) await publishApp(ctx, ctx.orgId, existing.appId); // the program that lost the extension
     await publishApp(ctx, ctx.orgId, app._id);
     return null;
   },
@@ -126,6 +129,7 @@ export const remove = memberMutation("admin", { major: "fileHandlers:remove" })(
       targetLabel: app?.name,
       summary: `Files ending in ${handler.extension} no longer open from Rulebox`,
     });
+    await snapshotAppGroups(ctx, [handler.appId], `File type ${handler.extension} removed`, ctx.member._id);
     await publishApp(ctx, ctx.orgId, handler.appId);
     return null;
   },

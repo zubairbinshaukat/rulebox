@@ -119,6 +119,9 @@ export async function fixture(given?: T): Promise<Fixture> {
       createdAt: Date.now(),
     });
     const assignmentId = await ctx.db.insert("appAssignments", { orgId, groupId, appId: wiki, audience: "everyone", pinnedTaskbar: false, pinnedDesktop: true });
+    // Phase 5 Step 16b: the program is assigned to the group, so `fileHandlers:set` / `remove` take a real configuration version
+    // of one group (the catalogue is ring-gated) instead of measuring an app nobody carries.
+    await ctx.db.insert("appAssignments", { orgId, groupId, appId: desktopAppId, audience: "everyone", pinnedTaskbar: false, pinnedDesktop: false });
     const handlerId = await ctx.db.insert("fileHandlers", { orgId, extension: ".txt", appId: desktopAppId });
     return { appId, desktopAppId, assignmentId, handlerId };
   });

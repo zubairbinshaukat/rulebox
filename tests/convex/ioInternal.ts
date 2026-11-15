@@ -230,8 +230,15 @@ export const INTERNAL_CALLS: Record<string, InternalCase | InternalCase[]> = {
     return () => c.f.t.mutation(internal.apps.purgeApp, { appId: c.f.appId });
   },
   "apps:iconTarget": async (c) => () => c.f.t.query(internal.apps.iconTarget, { orgId: c.f.orgId, appId: c.f.appId }),
+  // Phase 5 Step 16b: the app is assigned to 10 groups (MAX_CATALOG_SNAPSHOT_GROUPS), so the icon change takes a configuration version of each.
   "apps:attachIcon": async (c) => {
-    const storageId = await c.f.t.run((ctx) => ctx.storage.store(new Blob([new Uint8Array(32)], { type: "image/png" })));
+    const storageId = await c.f.t.run(async (ctx) => {
+      const groups = await ctx.db.query("groups").withIndex("by_org_name", (q) => q.eq("orgId", c.f.orgId)).take(10);
+      for (const g of groups) {
+        await ctx.db.insert("appAssignments", { orgId: c.f.orgId, groupId: g._id, appId: c.f.appId, audience: "everyone", pinnedTaskbar: false, pinnedDesktop: false });
+      }
+      return await ctx.storage.store(new Blob([new Uint8Array(32)], { type: "image/png" }));
+    });
     return () => c.f.t.mutation(internal.apps.attachIcon, { orgId: c.f.orgId, actor: c.actor, appId: c.f.appId, storageId, sha256: "b".repeat(64), sizeBytes: 32 });
   },
   "apps:cachedWinget": async (c) => {

@@ -6,6 +6,7 @@ import { writeAudit } from "./lib/audit";
 import { checkRevision, getInOrg, nextRevision } from "./lib/authz";
 import { changeMemberships, membershipsOf } from "./lib/employeeSync";
 import { fail } from "./lib/errors";
+import { snapshotGroupConfig } from "./lib/groupConfig";
 import { failedFollowAssignment } from "./lib/installs";
 import { memberMutation, memberQuery } from "./lib/functions";
 import { boundedPageValidator, byField, checkPageSize, cleanSearch, matches, pageInMemory, pickSort, sortArg } from "./lib/listing";
@@ -407,6 +408,8 @@ export const assignApp = memberMutation("admin")({
       targetLabel: app.name,
       summary: `Assigned the app ${app.name} to the group ${group.name}`,
     });
+    // Step 16b: assignments are ring-gated (plan 4.3 rule 6): a new configuration version, then the publish.
+    await snapshotGroupConfig(ctx, group._id, `Assigned ${app.name}`, ctx.member._id);
     await requestPublish(ctx, ctx.orgId, { groupIds: [group._id] });
     return { assignmentId };
   },
@@ -433,6 +436,7 @@ export const updateAssignment = memberMutation("admin")({
       targetLabel: app?.name,
       summary: `Changed how ${app?.name ?? "an app"} is offered to the group ${group?.name ?? ""}`.trim(),
     });
+    if (group !== null) await snapshotGroupConfig(ctx, group._id, `Assignment of ${app?.name ?? "an app"}`, ctx.member._id);
     await requestPublish(ctx, ctx.orgId, { groupIds: [a.groupId] });
     return null;
   },
@@ -458,6 +462,7 @@ export const unassignApp = memberMutation("admin")({
       targetLabel: app?.name,
       summary: `Took the app ${app?.name ?? ""} away from the group ${group?.name ?? ""}`.replace(/\s+/g, " "),
     });
+    if (group !== null) await snapshotGroupConfig(ctx, group._id, `Assignment of ${app?.name ?? "an app"}`, ctx.member._id);
     await requestPublish(ctx, ctx.orgId, { groupIds: [a.groupId] });
     return null;
   },
