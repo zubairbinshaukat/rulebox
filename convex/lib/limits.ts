@@ -448,8 +448,12 @@ export const DRIVER_RESULT_PURGE_BATCH = 100;
 export const SEALED_PURGE_BATCH = 100;
 /** `seal:forDevices`: devices sealed per run (each needs one box per assigned profile). */
 export const SEAL_DEVICES_PER_RUN = 25;
-/** Live broadcasts read per target when a document is built (the newest MAX_ACTIVE_BROADCASTS are kept). */
-export const BROADCAST_READ = 10;
+/**
+ * Broadcast rows read per target when a document is built (newest first; cancelled and expired ones are skipped, then the
+ * newest MAX_ACTIVE_BROADCASTS are kept). 30, not 10 (owner 2026-11-15): more than this many newer cancelled/expired rows
+ * would hide an older live one. Reads only rows that exist, so the usual cost is unchanged.
+ */
+export const BROADCAST_READ = 30;
 /** Device lock and broadcasts (Phase 5 Step 15, plan 4.17): text limits (the Rust side has the same numbers), the active cap per organization. */
 export const MAX_LOCK_MESSAGE = 300;
 export const MAX_LOCK_CONTACT = 100;

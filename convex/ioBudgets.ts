@@ -665,9 +665,9 @@ export const IO_BUDGETS: Record<string, IoBudget> = {
   // MEASURED (all 200 PCs queued; 10 groups of 3 apps) 274 reads / 89 KB, 74 writes / 167 KB for one batch of PUBLISH_BATCH = 25 PCs:
   // ~11 reads per PC (mostly the group loads, shared inside the run) and ~3 writes per PC (a ~6 KB signed document body + head + version).
   // The design ceiling is higher for groups with many apps and grants (RUN_DOC_BUDGET = 18,000 documents; `publishBudget.test.ts`).
-  // Phase 5 Step 10: per PC + its lock (1) + its own broadcasts (<= 10, usually 0) + one sealed-box lookup per Wi-Fi profile with a
+  // Phase 5 Step 10: per PC + its lock (1) + its own broadcasts (<= BROADCAST_READ = 30, usually 0) + one sealed-box lookup per Wi-Fi profile with a
   // passphrase; per group in the run (cached) + its rollout (1), the configuration of each ring's version (1-3 rows of ~3-12 KB) and
-  // its broadcasts (<= 10). Budgeted for 25 PCs in 10 groups with <= 3 broadcasts and <= 3 profiles each; documents grow by the
+  // its broadcasts (<= 30). Budgeted for 25 PCs in 10 groups with <= 3 broadcasts and <= 3 profiles each; documents grow by the
   // Phase 5 keys (typical 12 KB, worst 64 KB: plan 4.3), so a batch writes up to 25 x ~16 KB. MEASURED on the fixture without Phase 5
   // data: unchanged (274 reads / 89 KB, 74 writes / 167 KB); with a configuration, a Wi-Fi box and 2 broadcasts per group, a lock on
   // every 10th PC: 346 reads / 137 KB, 77 writes / 222 KB (`ioInternal.ts`, second case).
