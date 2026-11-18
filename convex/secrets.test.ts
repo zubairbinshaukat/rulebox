@@ -217,7 +217,7 @@ describe("secrets (plan 4.7)", () => {
       if (name === "devices:unenroll" || name === "enrollment:enroll") continue;
       const r = await outcome((await make(f))());
       const text = JSON.stringify(r.value ?? null);
-      const documentCall = name === "devices:desiredState" || name === "devices:fetchDesired";
+      const documentCall = name === "devices:fetchDesired";
       for (const s of secrets) {
         if (documentCall && exitPin.includes(s)) continue;
         expect(text.includes(s), `${name} returned a stored secret`).toBe(false);

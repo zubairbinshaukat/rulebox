@@ -38,8 +38,8 @@ pub const FN_ENROLL: &str = "enrollment:enroll";
 pub const FN_HEAD_STATE: &str = "devices:headState";
 pub const FN_FETCH_DESIRED: &str = "devices:fetchDesired";
 pub const FN_FETCH_ROSTER: &str = "devices:fetchRoster";
-/// (Step 13) Liveness; it replaced `devices:heartbeat` (an alias the server keeps
-/// for Phase 2 agents).
+/// (Step 13) Liveness; it replaced `devices:heartbeat` (the server alias was
+/// removed in Phase 6 Step 3).
 pub const FN_PING: &str = "devices:ping";
 pub const FN_UNENROLL: &str = "devices:unenroll";
 /// (Step 13) The batched status, installs and audit records.
@@ -200,7 +200,7 @@ pub fn parse_enroll_response(json: &Json) -> Result<EnrollResponse, BackendError
 /// `{ nextPingInMs, planState, rotateCredential }` (`devices:ping`). A missing
 /// `rotateCredential` is false and a missing `planState` is `"ok"`, so a server
 /// that does not send them never starts a rotation; `serverTimeMs` is read when
-/// present (the `heartbeat` alias sends it; `ping` does not yet).
+/// present (`devices:ping` sends it).
 pub fn parse_ping_response(json: &Json) -> Result<PingResponse, BackendError> {
     if json.get("kind").and_then(Json::as_str) == Some("rejected") {
         return Err(BackendError::Rejected { code: super::CODE_DEVICE_REJECTED.to_string() });

@@ -5,6 +5,7 @@
 //! The agent does **not** decide "OS out of support" (PRD 13.6 #4): it reports
 //! `build`, `ubr` and `editionId`, and the backend applies lifecycle dates.
 
+use rulebox_ipc::types::LITE_MAX_RAM_MB;
 use serde::Serialize;
 
 use crate::platform::{OsInfo, Platform, PlatformError};
@@ -13,8 +14,6 @@ use crate::platform::{OsInfo, Platform, PlatformError};
 pub const MIN_BUILD: u32 = 19045;
 /// Free space on the system drive below this is a warning.
 pub const LOW_DISK_GB: u64 = 2;
-/// RAM at or below this selects Lite mode (PRD 22.5); information only.
-pub const LITE_MAX_RAM_MB: u64 = 4352;
 
 /// Things that stop enrollment (and the kiosk being enabled).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
@@ -244,13 +243,13 @@ mod tests {
         sim.with_world(|w| {
             w.os.system_disk_free_gb = 1;
             w.os.arch = "arm64".into();
-            w.os.ram_mb = 4352;
+            w.os.ram_mb = LITE_MAX_RAM_MB;
         });
         let report = build(&sim, None, false).unwrap();
         assert!(report.blockers.is_empty());
         assert_eq!(report.warnings, [Warning::LowDisk, Warning::Arm64Untested]);
         assert!(report.lite_mode);
-        sim.with_world(|w| w.os.ram_mb = 4353);
+        sim.with_world(|w| w.os.ram_mb = LITE_MAX_RAM_MB + 1);
         assert!(!build(&sim, None, false).unwrap().lite_mode);
     }
 

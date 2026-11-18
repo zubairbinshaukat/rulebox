@@ -130,7 +130,7 @@ describe("fleet:get", () => {
     const t = await setupAuth();
     const orgId = await makeOrg(t);
     const d = await enrollDevice(t, orgId);
-    await t.mutation(api.devices.heartbeat, {
+    await t.mutation(api.deviceApi.report, {
       deviceId: d.deviceId,
       deviceSecret: d.secret,
       status: { agentVersion: "0.4.0", osBuild: "26100.1", osEdition: "Enterprise", diskFreeGb: 12, compat: { blockers: [] } },
@@ -194,7 +194,7 @@ describe("fleet writes", () => {
     const t = await setupAuth();
     const orgId = await makeOrg(t, "Free", { plan: "free" });
     const d = await enrollDevice(t, orgId);
-    await t.mutation(api.devices.heartbeat, {
+    await t.mutation(api.deviceApi.report, {
       deviceId: d.deviceId,
       deviceSecret: d.secret,
       status: { agentVersion: "0.4.0", osBuild: "19045.1", osEdition: "Professional", compat: null },
@@ -210,8 +210,8 @@ describe("fleet writes", () => {
     await a.as.mutation(api.fleet.revoke, { deviceId: d.deviceId }); // idempotent
     expect(await orgStatsOf(t, orgId)).toMatchObject({ deviceCount: 0, noGroupDeviceCount: 0, outOfSupportCount: 0 });
     expect(await onlineCount(t, orgId)).toBe(0);
-    expect(await t.mutation(api.devices.heartbeat, { deviceId: d.deviceId, deviceSecret: d.secret })).toEqual({ kind: "rejected" });
-    expect(await t.query(api.devices.desiredState, { deviceId: d.deviceId, deviceSecret: d.secret })).toEqual({ kind: "revoked" });
+    await expectCode(t.mutation(api.devices.ping, { deviceId: d.deviceId, deviceSecret: d.secret }), "device_rejected");
+    expect(await t.query(api.devices.headState, { deviceId: d.deviceId, deviceSecret: d.secret })).toEqual({ kind: "revoked" });
     const listed = await a.as.query(api.fleet.list, page());
     expect(listed.page[0]?.presence).toMatchObject({ online: false, revoked: true });
     // A revoked device frees its plan slot (free plan: 2 devices).
@@ -249,7 +249,7 @@ describe("fleet writes", () => {
     expect(rows).toEqual({ device: null, cred: null, liveness: null, presence: null, summary: null, report: null });
     expect(await t.run((ctx) => ctx.db.query("desiredStates").withIndex("by_scope_version", (q) => q.eq("scope", d.deviceId)).first())).toBeNull();
     expect((await orgStatsOf(t, orgId))?.deviceCount).toBe(2);
-    expect(await t.query(api.devices.desiredState, { deviceId: d.deviceId, deviceSecret: d.secret })).toEqual({ kind: "unknownDevice" });
+    expect(await t.query(api.devices.headState, { deviceId: d.deviceId, deviceSecret: d.secret })).toEqual({ kind: "unknownDevice" });
     await expectCode(a.as.mutation(api.fleet.remove, { deviceId: d.deviceId }), "not_found");
     expect((await auditActions(t, orgId)).filter((x) => x.startsWith("device.r"))).toEqual(["device.revoked", "device.removed"]);
   });
@@ -261,7 +261,6 @@ describe("fleet writes", () => {
     const a = await admin(t, orgId);
     await a.as.mutation(api.fleet.requestCredentialRotation, { deviceId: d.deviceId });
     await a.as.mutation(api.fleet.requestCredentialRotation, { deviceId: d.deviceId });
-    expect(await t.mutation(api.devices.heartbeat, { deviceId: d.deviceId, deviceSecret: d.secret })).toMatchObject({ rotateCredential: true });
     expect(await t.mutation(api.devices.ping, { deviceId: d.deviceId, deviceSecret: d.secret })).toMatchObject({ rotateCredential: true });
     expect((await a.as.query(api.fleet.get, { deviceId: d.deviceId })).flags.rotateCredential).toBe(true);
     expect((await auditActions(t, orgId)).filter((x) => x === "device.credentialRotationRequested")).toHaveLength(1);
@@ -287,7 +286,7 @@ describe("watch mode and check now (plan 4.9)", () => {
     const again = await probe(() => viewer.as.mutation(api.fleet.watch, { deviceId: d.deviceId }));
     expect(again.result.fastUntil).toBe(w1.fastUntil);
     expect(again.io.writes).toBe(0);
-    expect(await t.mutation(api.devices.heartbeat, { deviceId: d.deviceId, deviceSecret: d.secret })).toMatchObject({ nextPingInMs: MINUTE_MS });
+    expect(await t.mutation(api.devices.ping, { deviceId: d.deviceId, deviceSecret: d.secret })).toMatchObject({ nextPingInMs: MINUTE_MS });
     expect(await viewer.as.query(api.fleet.liveness, { deviceId: d.deviceId })).toMatchObject({ online: true, fastUntil: w1.fastUntil });
     vi.setSystemTime(w1.fastUntil! + 1);
     expect(await t.mutation(api.devices.ping, { deviceId: d.deviceId, deviceSecret: d.secret })).toMatchObject({ nextPingInMs: 30 * MINUTE_MS });

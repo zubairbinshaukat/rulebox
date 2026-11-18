@@ -400,8 +400,6 @@ export const ROWS: Row[] = [
       }),
     expect: { default: "token_invalid" }, // token-checked whoever calls
   },
-  { name: "devices:desiredState", call: (a) => a.query(api.devices.desiredState, deviceArgs), expect: { default: "kind:unknownDevice" } },
-  { name: "devices:heartbeat", call: (a) => a.mutation(api.devices.heartbeat, deviceArgs), expect: { default: "kind:rejected" } },
   { name: "devices:unenroll", call: (a) => a.mutation(api.devices.unenroll, deviceArgs), expect: { default: "kind:rejected" } },
   // Step 7: the liveness ping of Phase 4 agents. Device credentials only; no member identity helps.
   { name: "devices:ping", call: (a) => a.mutation(api.devices.ping, deviceArgs), expect: { default: "device_rejected" } },
@@ -424,16 +422,6 @@ export const ROWS: Row[] = [
     expect: { default: "device_rejected" },
   },
   { name: "deviceApi:report", call: (a) => a.mutation(api.deviceApi.report, { ...deviceArgs }), expect: { default: "device_rejected" } },
-  {
-    name: "deviceApi:reportAudit",
-    call: (a) => a.mutation(api.deviceApi.reportAudit, { ...deviceArgs, records: [], dropped: 0 }),
-    expect: { default: "device_rejected" },
-  },
-  {
-    name: "deviceApi:reportInstalls",
-    call: (a) => a.mutation(api.deviceApi.reportInstalls, { ...deviceArgs, results: [] }),
-    expect: { default: "device_rejected" },
-  },
   {
     name: "deviceApi:rotateCredential",
     call: (a) => a.mutation(api.deviceApi.rotateCredential, { ...deviceArgs, newSecretHash: "a".repeat(64) }),
@@ -1067,8 +1055,8 @@ export const STEP_UP_EXEMPT = new Set([
   // A view aid of the device page (renews watch mode while the page is visible; the page is hidden when locked).
   "fleet:watch",
   // not member functions
-  "account:redeemReset", "account:requestPinReset", "account:redeemPinReset", "enrollment:enroll", "devices:heartbeat", "devices:unenroll", "devices:ping",
-  "deviceApi:verifyEmployee", "deviceApi:report", "deviceApi:reportAudit", "deviceApi:reportInstalls", "deviceApi:rotateCredential",
+  "account:redeemReset", "account:requestPinReset", "account:redeemPinReset", "enrollment:enroll", "devices:unenroll", "devices:ping",
+  "deviceApi:verifyEmployee", "deviceApi:report", "deviceApi:rotateCredential",
   "deviceApi:reportApply", "deviceApi:reportFindings", "deviceApi:reportSecurityDaily", "deviceApi:reportAcks", "deviceApi:registerSealKey",
 ]);
 
@@ -1125,17 +1113,13 @@ export const creds = (f: Fixture) => ({ deviceId: f.deviceId, deviceSecret: f.de
 
 /** Device functions are called with the REAL credentials of the fixture's device (the matrix rows present a wrong secret). */
 export const DEVICE_CALLS: Record<string, (f: Fixture, c?: { deviceId: string; deviceSecret: string }) => Promise<() => Promise<unknown>>> = {
-  "devices:desiredState": async (f, c = creds(f)) => () => f.t.query(api.devices.desiredState, c),
   "devices:headState": async (f, c = creds(f)) => () => f.t.query(api.devices.headState, c),
   "devices:fetchDesired": async (f, c = creds(f)) => () => f.t.query(api.devices.fetchDesired, { ...c, version: 1 }),
   "devices:fetchRoster": async (f, c = creds(f)) => () => f.t.query(api.devices.fetchRoster, { ...c, sinceEpoch: 0 }),
-  "devices:heartbeat": async (f, c = creds(f)) => () => f.t.mutation(api.devices.heartbeat, c),
   "devices:ping": async (f, c = creds(f)) => () => f.t.mutation(api.devices.ping, c),
   "devices:unenroll": async (f, c = creds(f)) => () => f.t.mutation(api.devices.unenroll, c),
   "deviceApi:verifyEmployee": async (f, c = creds(f)) => () => f.t.action(api.deviceApi.verifyEmployee, { ...c, username: "maya", password: "not the password" }),
   "deviceApi:report": async (f, c = creds(f)) => () => f.t.mutation(api.deviceApi.report, c),
-  "deviceApi:reportAudit": async (f, c = creds(f)) => () => f.t.mutation(api.deviceApi.reportAudit, { ...c, records: [], dropped: 0 }),
-  "deviceApi:reportInstalls": async (f, c = creds(f)) => () => f.t.mutation(api.deviceApi.reportInstalls, { ...c, results: [] }),
   "deviceApi:rotateCredential": async (f, c = creds(f)) => () => f.t.mutation(api.deviceApi.rotateCredential, { ...c, newSecretHash: sha256HexSync("a new secret") }),
   "deviceApi:reportApply": async (f, c = creds(f)) => () => f.t.mutation(api.deviceApi.reportApply, { ...c, ...APPLY_REPORT }),
   "deviceApi:reportFindings": async (f, c = creds(f)) => () => f.t.mutation(api.deviceApi.reportFindings, { ...c, findings: [FINDING] }),

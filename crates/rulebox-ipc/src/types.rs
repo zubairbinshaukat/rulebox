@@ -11,6 +11,11 @@ use rulebox_policy::DesiredState;
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
+/// RAM at or below this many MB selects Lite mode (PRD 22.5). The one definition:
+/// the agent's display-mode choice and its compatibility report both import it
+/// (Phase 6 Step 3).
+pub const LITE_MAX_RAM_MB: u64 = 4352;
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
 #[serde(rename_all = "camelCase")]
 #[ts(export)]

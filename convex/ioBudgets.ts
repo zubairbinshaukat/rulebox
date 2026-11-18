@@ -77,11 +77,6 @@ export const IO_BUDGETS: Record<string, IoBudget> = {
   // ---- Step 7: the agent's calls (plan 4.9, 5.1 amended). Measured with the probe
   // (convex-test, `JSON.stringify` bytes; patches counted as the patch value, so the
   // Convex-side write size is the full row + its index entries).
-  // The Phase 2 subscription: credentials, newest device-scope document (Phase 2 docs are
-  // small), the device row only when there is none (+ the group-scope document). Measured 2 / 0.5 KB.
-  // Step 8: the Phase 2 ALIAS reads the head and the newest body by id (~13 KB once; bodies
-  // never change, so it re-runs only on a new head); without a head, the Phase 2 rows as before.
-  "devices:desiredState": { maxReads: 5, maxReadBytes: 540_000, maxWrites: 0, maxWriteBytes: 0, live: true },
   // ---- Step 8: the signed document (A5, A6). The subscription: credentials, head, group roster,
   // <= 3 x key rows (a few). Plan 5.1: <= 20 documents, <= 2 KB (`devices.test.ts` measures it).
   "devices:headState": { maxReads: 20, maxReadBytes: 2_048, maxWrites: 0, maxWriteBytes: 0, live: true },
@@ -89,12 +84,6 @@ export const IO_BUDGETS: Record<string, IoBudget> = {
   "devices:fetchDesired": { maxReads: 2, maxReadBytes: 530_000, maxWrites: 0, maxWriteBytes: 0 },
   // One-shot: credentials, device, roster row, <= 201 entries (~300 B) or the snapshot.
   "devices:fetchRoster": { maxReads: 4 + 201, maxReadBytes: 80_000, maxWrites: 0, maxWriteBytes: 0 },
-  // Alias of ping + the status snapshot until deviceApi:report (Step 12). Typical (same minute):
-  // 2 reads / 0.5 KB, 0 writes; new minute: 1 write (liveness, ~250 B row); with a changed status:
-  // + summary and report (2 reads, <= 2 writes); outOfSupport flip: + orgStats; offline -> online:
-  // + presence and one shard (2 reads, 2 writes); pre-migration device: + devices row, orgPlans,
-  // platformSettings. Worst case below.
-  "devices:heartbeat": { maxReads: 10, maxReadBytes: 40_960, maxWrites: 7, maxWriteBytes: 36_864 },
   // Plan row (post-Phase-5 2.13) is "2 reads, 1 KB, 1 write, 512 B": that is the common case and
   // holds (measured 2 / 0.5 KB, 0-1 write). An offline -> online transition adds presence + shard
   // (4 reads, 3 writes); a settled rotation adds the credentials patch.
@@ -117,8 +106,6 @@ export const IO_BUDGETS: Record<string, IoBudget> = {
   // (does the result count before / after); audit (<= 50): device + one event-key lookup each (+ the dropped row). A replay
   // writes nothing (`deviceApi.test.ts` measures it).
   "deviceApi:report": { maxReads: 1 + 3 + 101 + 1 + 100 + 52, maxReadBytes: 120_000, maxWrites: 2 + 1 + 51 + 51, maxWriteBytes: 90_000 },
-  "deviceApi:reportAudit": { maxReads: 1 + 52, maxReadBytes: 40_000, maxWrites: 51, maxWriteBytes: 40_000 },
-  "deviceApi:reportInstalls": { maxReads: 1 + 101 + 1 + 100, maxReadBytes: 60_000, maxWrites: 51, maxWriteBytes: 20_000 },
   // credentials (wrapper; + its settle patch), credentials again, device; writes: credentials, audit.
   "deviceApi:rotateCredential": { maxReads: 3, maxReadBytes: 2_048, maxWrites: 3, maxWriteBytes: 1_024 },
   // ---- Phase 5 Step 10: the lockdown reports (plan 4.11, 4.19). Every one writes NOTHING when nothing changed (the write-count

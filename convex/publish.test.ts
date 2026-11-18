@@ -158,16 +158,11 @@ describe("publish:run", () => {
       const s = (await ctx.db.query("deviceSummary").withIndex("by_device", (q) => q.eq("deviceId", deviceId)).unique())!;
       await ctx.db.patch(s._id, { appliedVersion: 9 });
     });
-    // Before the first publish the Phase 2 alias still answers the Phase 2 row.
-    expect(await t.query(api.devices.desiredState, dev)).toEqual({
-      kind: "ok",
-      desired: { version: 4, doc: { kioskEnabled: true }, signature: null },
-    });
+    // Before the first publish the device has no head.
+    expect(await t.query(api.devices.headState, dev)).toMatchObject({ kind: "ok", head: null });
     await drain(t);
     expect((await rows(t, deviceId)).head?.version).toBe(10);
-    // The alias now answers the Phase 2 shape from the signed body.
-    const alias = await t.query(api.devices.desiredState, dev);
-    expect(alias).toMatchObject({ kind: "ok", desired: { version: 10, signature: null, doc: { kioskEnabled: true, version: 10 } } });
+    expect(await t.query(api.devices.headState, dev)).toMatchObject({ kind: "ok", head: { version: 10 } });
   });
 
   test(`batches of ${PUBLISH_BATCH}: the run reschedules itself until every device is done`, async () => {
@@ -334,14 +329,14 @@ describe("review fixes: hostile reported versions, a dead run, one bad device", 
   test.each(BAD_VERSIONS)("a report with appliedVersion %s is stored without it (summary and report); a sane one is kept", async (_name, bad) => {
     const t = await setupAuth();
     const { deviceId, dev } = await enrolled(t);
-    await t.mutation(api.devices.heartbeat, { ...dev, status: { agentVersion: "0.4.0", appliedVersion: 5 } });
+    await t.mutation(api.deviceApi.report, { ...dev, status: { agentVersion: "0.4.0", appliedVersion: 5 } });
     const stored = async () =>
       await t.run(async (ctx) => ({
         summary: (await ctx.db.query("deviceSummary").withIndex("by_device", (q) => q.eq("deviceId", deviceId)).unique())?.appliedVersion,
         report: (await ctx.db.query("deviceReports").withIndex("by_device", (q) => q.eq("deviceId", deviceId)).unique())?.appliedVersion,
       }));
     expect(await stored()).toEqual({ summary: 5, report: 5 });
-    await t.mutation(api.devices.heartbeat, { ...dev, status: { agentVersion: "0.4.0", appliedVersion: bad } });
+    await t.mutation(api.deviceApi.report, { ...dev, status: { agentVersion: "0.4.0", appliedVersion: bad } });
     expect(await stored()).toEqual({ summary: undefined, report: undefined });
   });
 
@@ -450,7 +445,7 @@ describe("devices:headState / fetchDesired / fetchRoster", () => {
     const t = await setupAuth();
     const { deviceId, dev } = await enrolled(t);
     await drain(t);
-    await t.mutation(api.devices.heartbeat, { ...dev, status: { agentVersion: "0.4.0", compat: { blockers: [] } } });
+    await t.mutation(api.deviceApi.report, { ...dev, status: { agentVersion: "0.4.0", compat: { blockers: [] } } });
     const { result, io } = await probe(() => t.query(api.devices.headState, dev));
     expect(result.kind).toBe("ok");
     const text = JSON.stringify(result);

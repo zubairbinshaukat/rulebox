@@ -9,7 +9,7 @@ use std::time::Duration;
 
 use anyhow::{bail, Context};
 use rulebox_ipc::types::{
-    AgentSnapshot, ConnectionStatus, DeviceInfo, DisplayMode, EnrollmentStatus, ShellHealth, ShellStatus,
+    AgentSnapshot, ConnectionStatus, DeviceInfo, DisplayMode, EnrollmentStatus, ShellHealth, ShellStatus, LITE_MAX_RAM_MB,
 };
 use rulebox_ipc::{ADMIN_PIPE, SHELL_PIPE, SIM_SUFFIX};
 use rulebox_policy::envelope::{verify_envelope, Payload, SignedEnvelope};
@@ -51,8 +51,6 @@ use crate::session::{SessionDeps, SessionManager, SessionTimeouts};
 use crate::state::{read_json, unix_ms, AgentState, SharedState, SnapshotHandle, StateStore};
 use crate::watchdog::{self, WatchdogDeps};
 
-/// RAM at or below this many MB selects Lite mode (PRD 22.5).
-const LITE_MODE_MAX_RAM_MB: u64 = 4352;
 /// How long `run` waits for the IPC tasks to wind down after shutdown.
 const TASK_WIND_DOWN: Duration = Duration::from_secs(5);
 /// The folder under the Staff profile that holds every employee's files folder.
@@ -255,7 +253,7 @@ pub fn initial_snapshot(
 ) -> AgentSnapshot {
     let ram_mb = platform.os_info().map(|os| os.ram_mb);
     let display_mode = match ram_mb {
-        Ok(mb) if mb <= LITE_MODE_MAX_RAM_MB => DisplayMode::Lite,
+        Ok(mb) if mb <= LITE_MAX_RAM_MB => DisplayMode::Lite,
         _ => DisplayMode::Standard,
     };
     let enrollment = match &state.enrollment {

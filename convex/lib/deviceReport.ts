@@ -12,8 +12,8 @@ import { sanitizeVersion } from "./versions";
 // The agent's status report, split by change rate (plan 4.2.1, A8; post-Phase-5
 // plan 2.6): `deviceSummary` holds the list columns, `deviceReports` the
 // detail. Each is written only when its own fields change; disk space is
-// compared as a band. Used by `devices:heartbeat` now and by
-// `deviceApi:report({ status })` from Step 12.
+// compared as a band. Used by `deviceApi:report({ status })` and by
+// enrollment.
 
 /** Nullable on the wire so a Rust `None` serializes to a clear. */
 const optionalString = v.optional(v.union(v.string(), v.null()));

@@ -62,8 +62,7 @@ export const rateLimiter = new RateLimiter(components.rateLimiter, {
   // Over the limit the device is answered `lockedOut` with `retryAfterMs`.
   verifyPerDevice: { kind: "token bucket", rate: 30, period: MINUTE_MS, capacity: 30 },
   // Device writes (review of Step 12), per device (key = device id): one token per
-  // ROW that `deviceApi:report` / `reportAudit` / `reportInstalls` /
-  // `rotateCredential` really wrote (status summary and report, install results,
+  // ROW that `deviceApi:report` / `rotateCredential` really wrote (status summary and report, install results,
   // audit rows), consumed at the END of the mutation, so a replay or an unchanged
   // report writes nothing and costs nothing (A10), and a refused call rolls its
   // writes back. The capacity holds a full agent audit queue (500 records) plus a

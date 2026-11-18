@@ -354,7 +354,7 @@ describe("deviceApi:report audit part (plan 4.11)", () => {
       record("3".repeat(32), { atMs: enrolledAt - 1 }),
       record("4".repeat(32), { atMs: now - 5_000 }),
     ];
-    await s.t.mutation(api.deviceApi.reportAudit, { ...creds(s.device), records, dropped: 0 });
+    await s.t.mutation(api.deviceApi.report, { ...creds(s.device), audit: { records, dropped: 0 } });
     const rows = new Map((await auditRows(s.t, s.orgId)).map((r) => [r.eventKey, r]));
     const row = (c: string) => rows.get(`dev:${s.device.deviceId}:${c.repeat(32)}`)!;
     expect(row("1").at).toBe(now - 6_000);
@@ -376,7 +376,7 @@ describe("deviceApi:report audit part (plan 4.11)", () => {
       record("7".repeat(32), { atMs: now + 1_000 }),
       record("8".repeat(32), { atMs: now - 1_000, serverTimeOffsetMs: 3_000 }),
     ];
-    await s.t.mutation(api.deviceApi.reportAudit, { ...creds(s.device), records, dropped: 0 });
+    await s.t.mutation(api.deviceApi.report, { ...creds(s.device), audit: { records, dropped: 0 } });
     const rows = new Map((await auditRows(s.t, s.orgId)).map((r) => [r.eventKey, r]));
     for (const c of ["6", "7", "8"]) {
       const r = rows.get(`dev:${s.device.deviceId}:${c.repeat(32)}`)!;
@@ -388,36 +388,36 @@ describe("deviceApi:report audit part (plan 4.11)", () => {
   test("dropped > 0: one device.auditDropped row, not repeated on a replay; > 50 records refused", async () => {
     const s = await seed();
     const records = [record("f".repeat(32))];
-    expect(await s.t.mutation(api.deviceApi.reportAudit, { ...creds(s.device), records, dropped: 3 })).toEqual({ accepted: 1 });
-    await s.t.mutation(api.deviceApi.reportAudit, { ...creds(s.device), records, dropped: 3 });
+    expect(await s.t.mutation(api.deviceApi.report, { ...creds(s.device), audit: { records, dropped: 3 } })).toEqual({ accepted: { installs: 0, audit: 1 } });
+    await s.t.mutation(api.deviceApi.report, { ...creds(s.device), audit: { records, dropped: 3 } });
     const dropped = (await auditRows(s.t, s.orgId)).filter((r) => r.action === "device.auditDropped");
     expect(dropped).toHaveLength(1);
     expect(dropped[0]?.summary).toBe("3 audit records were lost on the PC Desk 1 (its queue was full)");
     const many = Array.from({ length: 51 }, (_, i) => record(i.toString(16).padStart(32, "0")));
-    await expectCode(s.t.mutation(api.deviceApi.reportAudit, { ...creds(s.device), records: many, dropped: 0 }), "invalid_argument");
-    await expectCode(s.t.mutation(api.deviceApi.reportAudit, { ...creds(s.device), records: [], dropped: -1 }), "invalid_argument");
+    await expectCode(s.t.mutation(api.deviceApi.report, { ...creds(s.device), audit: { records: many, dropped: 0 } }), "invalid_argument");
+    await expectCode(s.t.mutation(api.deviceApi.report, { ...creds(s.device), audit: { records: [], dropped: -1 } }), "invalid_argument");
   });
 
   test("no valid record at all (unknown kinds, bad ids): all counted as accepted so the agent can ack; one auditDropped row, none on a replay or a re-batch", async () => {
     const s = await seed();
     const bad = [record("k".repeat(32), { kind: "fromTheFuture" }), record("not valid!", { kind: "adminExitFailed" })];
-    const args = { ...creds(s.device), records: bad, dropped: 2 };
-    expect(await s.t.mutation(api.deviceApi.reportAudit, args)).toEqual({ accepted: 2 });
+    const args = { ...creds(s.device), audit: { records: bad, dropped: 2 } };
+    expect(await s.t.mutation(api.deviceApi.report, args)).toEqual({ accepted: { installs: 0, audit: 2 } });
     const dropped = async () => (await auditRows(s.t, s.orgId)).filter((r) => r.action === "device.auditDropped");
     expect(await dropped()).toHaveLength(1);
     expect((await dropped())[0]?.summary).toBe(
       "4 audit records were lost on the PC Desk 1 (2 while its queue was full, 2 not understood by this server)",
     );
-    const replay = await probe(() => s.t.mutation(api.deviceApi.reportAudit, args));
-    expect(replay.result).toEqual({ accepted: 2 });
+    const replay = await probe(() => s.t.mutation(api.deviceApi.report, args));
+    expect(replay.result).toEqual({ accepted: { installs: 0, audit: 2 } });
     expect(replay.io.writes).toBe(0);
     // Re-batched (the queue grew, the first record is the same): still one row.
-    await s.t.mutation(api.deviceApi.reportAudit, { ...args, records: [...bad, record("m".repeat(32), { kind: "fromTheFuture" })], dropped: 2 });
+    await s.t.mutation(api.deviceApi.report, { ...args, audit: { records: [...bad, record("m".repeat(32), { kind: "fromTheFuture" })], dropped: 2 } });
     expect(await dropped()).toHaveLength(1);
     // Only malformed ids: the key is a hash of the batch, so a replay is still free.
-    const worse = { ...creds(s.device), records: [record("???", { kind: "adminExitFailed" })], dropped: 0 };
-    expect(await s.t.mutation(api.deviceApi.reportAudit, worse)).toEqual({ accepted: 1 });
-    const again = await probe(() => s.t.mutation(api.deviceApi.reportAudit, worse));
+    const worse = { ...creds(s.device), audit: { records: [record("???", { kind: "adminExitFailed" })], dropped: 0 } };
+    expect(await s.t.mutation(api.deviceApi.report, worse)).toEqual({ accepted: { installs: 0, audit: 1 } });
+    const again = await probe(() => s.t.mutation(api.deviceApi.report, worse));
     expect(again.io.writes).toBe(0);
     expect(await dropped()).toHaveLength(2);
   });
@@ -426,8 +426,8 @@ describe("deviceApi:report audit part (plan 4.11)", () => {
     const s = await seed();
     const other = await enrollDevice(s.t, s.orgId, { groupId: s.groupId, name: "Desk 2" });
     const records = [record("9".repeat(32))];
-    await s.t.mutation(api.deviceApi.reportAudit, { ...creds(s.device), records, dropped: 0 });
-    await s.t.mutation(api.deviceApi.reportAudit, { ...creds(other), records, dropped: 0 });
+    await s.t.mutation(api.deviceApi.report, { ...creds(s.device), audit: { records, dropped: 0 } });
+    await s.t.mutation(api.deviceApi.report, { ...creds(other), audit: { records, dropped: 0 } });
     const rows = (await auditRows(s.t, s.orgId)).filter((r) => r.action === "device.adminExitWrongPin");
     expect(rows.map((r) => r.actorId).sort()).toEqual([s.device.deviceId, other.deviceId].sort());
   });
@@ -478,13 +478,13 @@ describe("deviceApi:report installs part (plan 4.8 amended, A12)", () => {
       result(ids.foreign, "installed"),
       result("not-an-id", "installed"),
     ];
-    expect(await s.t.mutation(api.deviceApi.reportInstalls, { ...creds(s.device), results: batch })).toEqual({ accepted: 5 });
+    expect(await s.t.mutation(api.deviceApi.report, { ...creds(s.device), installs: batch })).toEqual({ accepted: { installs: 5, audit: 0 } });
     const rows = await installRows(s);
     expect(rows.map((r) => [r.appId, r.state]).sort()).toEqual([[ids.a, "installed"], [ids.b, "failed"]].sort());
     expect(rows.find((r) => r.appId === ids.b)).toMatchObject({ exitCode: 1603, detail: "exit_code", attempts: 2 });
     const stats = async () => (await s.t.run((ctx) => ctx.db.query("orgStats").withIndex("by_org", (q) => q.eq("orgId", s.orgId)).unique()))?.failedInstallCount ?? 0;
     expect(await stats()).toBe(1);
-    const again = await probe(() => s.t.mutation(api.deviceApi.reportInstalls, { ...creds(s.device), results: batch }));
+    const again = await probe(() => s.t.mutation(api.deviceApi.report, { ...creds(s.device), installs: batch }));
     expect(again.io.writes).toBe(0);
     // b installs on retry: exit code and detail are cleared, the failed count drops.
     await s.t.mutation(api.deviceApi.report, { ...creds(s.device), installs: [result(ids.b, "installed", { attempts: 3 })] });
@@ -635,13 +635,12 @@ describe("deviceApi:report batched (A12)", () => {
     await s.t.mutation(api.deviceApi.report, first);
     // 5 new rows do not fit: refused, and the rows are not there.
     await expectCode(s.t.mutation(api.deviceApi.report, { ...creds(s.device), audit: batch("b", 5) }), "rate_limited");
-    await expectCode(s.t.mutation(api.deviceApi.reportAudit, { ...creds(s.device), ...batch("b", 5) }), "rate_limited");
     const known = async (prefix: string) =>
       (await auditRows(s.t, s.orgId)).filter((r) => r.eventKey?.startsWith(`dev:${s.device.deviceId}:${prefix}`) === true).length;
     expect(await known("b")).toBe(0);
     expect(await left()).toBeCloseTo(3, 0);
     // 2 rows fit.
-    await s.t.mutation(api.deviceApi.reportAudit, { ...creds(s.device), ...batch("c", 2) });
+    await s.t.mutation(api.deviceApi.report, { ...creds(s.device), audit: batch("c", 2) });
     expect(await known("c")).toBe(2);
   });
 

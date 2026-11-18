@@ -436,7 +436,7 @@ function cleanInstallDetail(detail: string | null | undefined): string | undefin
  * Per-device write limit (`deviceWrites`): one token per row this call really
  * wrote, taken at the END so a call that wrote nothing (a replay, an unchanged
  * status) is free and a refused one (`rate_limited`) rolls back everything it
- * wrote. Called by `report`, `reportAudit`, `reportInstalls`, `rotateCredential`.
+ * wrote. Called by `report` and `rotateCredential`.
  */
 async function chargeWrites(ctx: Parameters<typeof consumeOrFail>[0], deviceId: string, rows: number): Promise<void> {
   if (rows > 0) await consumeOrFail(ctx, "deviceWrites", deviceId, rows);
@@ -662,30 +662,6 @@ export const report = deviceMutation({
     const audit = args.audit === undefined ? { accepted: 0, written: 0 } : await ingestAudit(ctx, args.audit, now);
     await chargeWrites(ctx, ctx.device._id, written + installs.written + audit.written);
     return { accepted: { installs: installs.accepted, audit: audit.accepted } };
-  },
-});
-
-/** Alias of `report({ audit })` (plan 5.1; kept until Phase 6). */
-export const reportAudit = deviceMutation({
-  args: { records: v.array(auditRecord), dropped: v.number() },
-  returns: v.object({ accepted: v.number() }),
-  handler: async (ctx, args) => {
-    checkAuditPart(args);
-    const audit = await ingestAudit(ctx, args, Date.now());
-    await chargeWrites(ctx, ctx.device._id, audit.written);
-    return { accepted: audit.accepted };
-  },
-});
-
-/** Alias of `report({ installs })` (plan 5.1; kept until Phase 6). */
-export const reportInstalls = deviceMutation({
-  args: { results: v.array(installResult) },
-  returns: v.object({ accepted: v.number() }),
-  handler: async (ctx, args) => {
-    checkInstalls(args.results);
-    const installs = await ingestInstalls(ctx, args.results, Date.now());
-    await chargeWrites(ctx, ctx.device._id, installs.written);
-    return { accepted: installs.accepted };
   },
 });
 

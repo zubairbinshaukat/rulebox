@@ -107,7 +107,7 @@ describe("cross-organization (plan Step 18 item 3)", () => {
     const b = await fixture(a.t);
     const before = await snapshot(a);
     const result = { appId: a.appId, state: "failed" as const, appRevision: 1, attempts: 3, exitCode: 1603, detail: "exit_code" };
-    const r = await outcome(a.t.mutation(api.deviceApi.reportInstalls, { deviceId: b.deviceId, deviceSecret: b.deviceSecret, results: [result] }));
+    const r = await outcome(a.t.mutation(api.deviceApi.report, { deviceId: b.deviceId, deviceSecret: b.deviceSecret, installs: [result] }));
     expect(r.result).toBe("ok"); // accepted (the agent must not stall) but ignored
     expect(await snapshot(a)).toEqual(before);
     const rows = await a.t.run((ctx) => ctx.db.query("installResults").collect());

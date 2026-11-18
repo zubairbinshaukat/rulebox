@@ -39,9 +39,6 @@ const SUBSCRIBE_EXCEPTIONS: Record<string, string[]> = {
   "fleet:checkResult": ["deviceLiveness"],
   // One lockout row of one employee on the employee's own page.
   "employees:get": ["employeeLockouts"],
-  // The agent's own Phase 2 subscription (an alias of the signed head): reads the newest body once per new head,
-  // or the Phase 2 `desiredStates` row of a device that has no head yet. Not a dashboard screen.
-  "devices:desiredState": ["desiredBodies", "desiredStates"],
 };
 
 /**

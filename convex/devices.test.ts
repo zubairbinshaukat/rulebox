@@ -12,10 +12,11 @@ import { MINUTE_MS } from "./lib/limits";
 import { scopedDb } from "./lib/orgDb";
 import { offlineAfterBucket } from "./lib/presence";
 
-// The agent's wire contract (plan 5.1 amended) on the Step 7 tables: the
-// installed Phase 2 agent (apps/agent/src/backend/convex.rs) calls
-// enrollment:enroll, devices:desiredState, devices:heartbeat and
-// devices:unenroll with exactly these argument and answer shapes.
+// The agent's wire contract (plan 5.1 amended) on the Step 7 tables: the agent
+// (apps/agent/src/backend/convex.rs) calls enrollment:enroll, devices:headState,
+// devices:ping, deviceApi:report and devices:unenroll with exactly these argument
+// and answer shapes. (The Phase 2 aliases devices:desiredState and devices:heartbeat
+// were removed in Phase 6 Step 3.)
 
 const SECRET = "device-secret-0123456789";
 const TOKEN = "ABCDEFGHJKMNPQRSTVWX";
@@ -112,78 +113,57 @@ async function enrolled(t: T): Promise<Id<"devices">> {
 }
 
 describe("devices (Phase 2 agent functions)", () => {
-  test("desiredState answers unknownDevice for a wrong secret or garbage id, ok otherwise", async () => {
+  test("headState answers unknownDevice for a wrong secret or garbage id, ok (no head yet) otherwise", async () => {
     const t = await setupAuth();
     const deviceId = await enrolled(t);
-    expect(await t.query(api.devices.desiredState, { deviceId, deviceSecret: "wrong" })).toEqual({ kind: "unknownDevice" });
-    expect(await t.query(api.devices.desiredState, { deviceId: "garbage", deviceSecret: SECRET })).toEqual({
+    expect(await t.query(api.devices.headState, { deviceId, deviceSecret: "wrong" })).toEqual({ kind: "unknownDevice" });
+    expect(await t.query(api.devices.headState, { deviceId: "garbage", deviceSecret: SECRET })).toEqual({
       kind: "unknownDevice",
     });
-    expect(await t.query(api.devices.desiredState, { deviceId, deviceSecret: SECRET })).toEqual({ kind: "ok", desired: null });
+    expect(await t.query(api.devices.headState, { deviceId, deviceSecret: SECRET })).toMatchObject({ kind: "ok", head: null });
   });
 
-  test("desiredState returns the newest Phase 2 document, device scope first, then the group's", async () => {
+  test("report: status written only on change, never `devices`", async () => {
     const t = await setupAuth();
     const deviceId = await enrolled(t);
-    const device = (await t.run((ctx) => ctx.db.get(deviceId)))!;
-    const groupId = await t.run((ctx) => ctx.db.insert("groups", { orgId: device.orgId, name: "G" }));
-    await t.run((ctx) => ctx.db.patch(deviceId, { groupId }));
-    await t.run((ctx) => ctx.db.insert("desiredStates", { orgId: device.orgId, scope: groupId, version: 7, doc: { kioskEnabled: false } }));
-    expect(await t.query(api.devices.desiredState, { deviceId, deviceSecret: SECRET })).toEqual({
-      kind: "ok",
-      desired: { version: 7, doc: { kioskEnabled: false }, signature: null },
-    });
-    await t.run(async (ctx) => {
-      await ctx.db.insert("desiredStates", { orgId: device.orgId, scope: deviceId, version: 1, doc: { kioskEnabled: false } });
-      await ctx.db.insert("desiredStates", { orgId: device.orgId, scope: deviceId, version: 2, doc: { kioskEnabled: true } });
-    });
-    expect(await t.query(api.devices.desiredState, { deviceId, deviceSecret: SECRET })).toEqual({
-      kind: "ok",
-      desired: { version: 2, doc: { kioskEnabled: true }, signature: null },
-    });
-  });
-
-  test("heartbeat: Phase 2 answer (+ additive keys), interval from the settings, status written only on change, never `devices`", async () => {
-    const t = await setupAuth();
-    const deviceId = await enrolled(t);
-    expect(await t.mutation(api.devices.heartbeat, { deviceId, deviceSecret: "wrong" })).toEqual({ kind: "rejected" });
+    await expect(t.mutation(api.deviceApi.report, { deviceId, deviceSecret: "wrong" })).rejects.toMatchObject({ data: { code: "device_rejected" } });
     const now = Date.now();
     at(now);
     const before = await t.run((ctx) => ctx.db.get(deviceId));
-    const first = await t.mutation(api.devices.heartbeat, { deviceId, deviceSecret: SECRET, status: AGENT_STATUS });
-    expect(first).toEqual({ kind: "ok", nextPingInMs: DEFAULT_INTERVAL, serverTimeMs: now, rotateCredential: false, planState: "ok" });
+    const first = await t.mutation(api.deviceApi.report, { deviceId, deviceSecret: SECRET, status: AGENT_STATUS });
+    expect(first).toEqual({ accepted: { installs: 0, audit: 0 } });
     const rows = await deviceRows(t, deviceId);
     expect(rows.summary).toMatchObject({ windowsBuild: "26100.4351", kioskPhase: "applied", appliedVersion: 3, diskBand: "20to50" });
     expect(rows.report).toMatchObject({ osEdition: "Professional", diskFreeGb: 31, shellHealth: "ok" });
 
     // Same status within the same minute: nothing is written at all.
-    const same = await probe(() => t.mutation(api.devices.heartbeat, { deviceId, deviceSecret: SECRET, status: AGENT_STATUS }));
-    expect(same.result).toMatchObject({ kind: "ok" });
+    const same = await probe(() => t.mutation(api.deviceApi.report, { deviceId, deviceSecret: SECRET, status: AGENT_STATUS }));
+    expect(same.result).toEqual({ accepted: { installs: 0, audit: 0 } });
     expect(same.io.writes).toBe(0);
     // Disk 31 -> 33 GB stays in the 20-50 band: no write either.
     const band = await probe(() =>
-      t.mutation(api.devices.heartbeat, { deviceId, deviceSecret: SECRET, status: { ...AGENT_STATUS, diskFreeGb: 33 } }),
+      t.mutation(api.deviceApi.report, { deviceId, deviceSecret: SECRET, status: { ...AGENT_STATUS, diskFreeGb: 33 } }),
     );
     expect(band.io.writes).toBe(0);
     // A list column changes: summary + report, nothing else.
     const phase = await probe(() =>
-      t.mutation(api.devices.heartbeat, { deviceId, deviceSecret: SECRET, status: { ...AGENT_STATUS, kioskPhase: "pending" } }),
+      t.mutation(api.deviceApi.report, { deviceId, deviceSecret: SECRET, status: { ...AGENT_STATUS, kioskPhase: "pending" } }),
     );
     expect(phase.io.writes).toBe(2);
-    expect([...phase.io.tables].sort()).toEqual(["deviceCredentials", "deviceLiveness", "deviceReports", "deviceSummary"]);
+    expect([...phase.io.tables].sort()).toEqual(["deviceCredentials", "deviceReports", "deviceSummary"]);
     // The device row (identity) never changes.
     expect(await t.run((ctx) => ctx.db.get(deviceId))).toEqual(before);
   });
 
-  test("heartbeat accepts the two Step 7 status keys before any agent sends them", async () => {
+  test("report accepts the two Step 7 status keys before any agent sends them", async () => {
     const t = await setupAuth();
     const deviceId = await enrolled(t);
     const status = { ...AGENT_STATUS, trustedKeyIds: ["0123456789abcdef"], restartPending: true };
-    expect(await t.mutation(api.devices.heartbeat, { deviceId, deviceSecret: SECRET, status })).toMatchObject({ kind: "ok" });
+    expect(await t.mutation(api.deviceApi.report, { deviceId, deviceSecret: SECRET, status })).toEqual({ accepted: { installs: 0, audit: 0 } });
     expect((await deviceRows(t, deviceId)).report).toMatchObject({ trustedKeyIds: ["0123456789abcdef"], restartPending: true });
     // Nulls (a Rust None) clear the fields again.
     const cleared = { ...AGENT_STATUS, trustedKeyIds: null, restartPending: null, kioskError: null };
-    await t.mutation(api.devices.heartbeat, { deviceId, deviceSecret: SECRET, status: cleared });
+    await t.mutation(api.deviceApi.report, { deviceId, deviceSecret: SECRET, status: cleared });
     const report = (await deviceRows(t, deviceId)).report!;
     expect(report.trustedKeyIds).toBeUndefined();
     expect(report.restartPending).toBeUndefined();
@@ -194,9 +174,9 @@ describe("devices (Phase 2 agent functions)", () => {
     const deviceId = await enrolled(t);
     const orgId = (await t.run((ctx) => ctx.db.get(deviceId)))!.orgId;
     expect(await t.mutation(api.devices.unenroll, { deviceId, deviceSecret: SECRET })).toEqual({ kind: "ok" });
-    expect(await t.query(api.devices.desiredState, { deviceId, deviceSecret: SECRET })).toEqual({ kind: "revoked" });
+    expect(await t.query(api.devices.headState, { deviceId, deviceSecret: SECRET })).toEqual({ kind: "revoked" });
     expect(await t.mutation(api.devices.unenroll, { deviceId, deviceSecret: SECRET })).toEqual({ kind: "rejected" });
-    expect(await t.mutation(api.devices.heartbeat, { deviceId, deviceSecret: SECRET })).toEqual({ kind: "rejected" });
+    await expect(t.mutation(api.deviceApi.report, { deviceId, deviceSecret: SECRET })).rejects.toMatchObject({ data: { code: "device_rejected" } });
     await expect(t.mutation(api.devices.ping, { deviceId, deviceSecret: SECRET })).rejects.toMatchObject({ data: { code: "device_rejected" } });
     expect(await orgStatsOf(t, orgId)).toMatchObject({ deviceCount: 0, noGroupDeviceCount: 0 });
     expect(await onlineCount(t, orgId)).toBe(0);
@@ -220,9 +200,9 @@ describe("checkDevice with credential rotation (plan 4.6)", () => {
     // A query never settles; a mutation with the old secret does not either.
     await t.run(async (ctx) => settleRotation(ctx, await checkDevice(ctx, { deviceId, deviceSecret: SECRET })));
     expect((await deviceRows(t, deviceId)).cred?.previousSecretHash).toBeDefined();
-    expect(await t.mutation(api.devices.heartbeat, { deviceId, deviceSecret: NEW })).toMatchObject({ kind: "ok" });
+    expect(await t.mutation(api.devices.ping, { deviceId, deviceSecret: NEW })).toMatchObject({ nextPingInMs: DEFAULT_INTERVAL });
     expect((await deviceRows(t, deviceId)).cred?.previousSecretHash).toBeUndefined();
-    expect(await t.query(api.devices.desiredState, { deviceId, deviceSecret: SECRET })).toEqual({ kind: "unknownDevice" });
+    expect(await t.query(api.devices.headState, { deviceId, deviceSecret: SECRET })).toEqual({ kind: "unknownDevice" });
   });
 
   test("checkDevice reads only deviceCredentials (one row)", async () => {
@@ -235,16 +215,15 @@ describe("checkDevice with credential rotation (plan 4.6)", () => {
     expect(io.readBytes).toBeLessThan(400);
   });
 
-  test("desiredState never reads presence, liveness, summary or report rows (status and pings do not re-run it)", async () => {
+  test("headState never reads presence, liveness, summary or report rows (status and pings do not re-run it)", async () => {
     const t = await setupAuth();
     const deviceId = await enrolled(t);
-    await t.mutation(api.devices.heartbeat, { deviceId, deviceSecret: SECRET, status: AGENT_STATUS });
-    const { io } = await probe(() => t.query(api.devices.desiredState, { deviceId, deviceSecret: SECRET }));
+    await t.mutation(api.deviceApi.report, { deviceId, deviceSecret: SECRET, status: AGENT_STATUS });
+    const { io } = await probe(() => t.query(api.devices.headState, { deviceId, deviceSecret: SECRET }));
     for (const table of ["deviceReports", "deviceSummary", "deviceLiveness", "devicePresence", "deviceStatus", "orgStats", "orgPlans"]) {
       expect(io.tables.has(table), table).toBe(false);
     }
-    // (Before the first publish: no head yet, so the Phase 2 fallback reads its rows.)
-    expect([...io.tables].sort()).toEqual(["desiredHeads", "desiredStates", "deviceCredentials", "devices"]);
+    expect([...io.tables].sort()).toEqual(["desiredHeads", "deviceCredentials", "policyKeys"]);
   });
 });
 
@@ -309,7 +288,7 @@ describe("ping interval from the settings, watch mode, check now (A4)", () => {
     const t = await setupAuth();
     const orgId = await makeOrg(t);
     const d = await enrollDevice(t, orgId);
-    const hb = () => t.mutation(api.devices.heartbeat, { deviceId: d.deviceId, deviceSecret: d.secret });
+    const hb = () => t.mutation(api.devices.ping, { deviceId: d.deviceId, deviceSecret: d.secret });
     expect(await hb()).toMatchObject({ nextPingInMs: DEFAULT_INTERVAL });
     await t.mutation(internal.plans.setOrgPingInterval, { orgId, pingIntervalMs: 5 * MINUTE_MS });
     await t.finishAllScheduledFunctions(() => {});
@@ -340,9 +319,10 @@ describe("Phase 2 device on the dev deployment: migration (A2, A3, A8; widen the
     const orgId = await makeOrg(t);
     const deviceId = await legacyDevice(t, orgId, { secret: VM_SECRET });
     await t.run((ctx) => ctx.db.insert("desiredStates", { orgId, scope: deviceId, version: 1, doc: { kioskEnabled: true } }));
-    expect(await t.query(api.devices.desiredState, { deviceId, deviceSecret: VM_SECRET })).toMatchObject({ kind: "ok", desired: { version: 1 } });
-    expect(await t.mutation(api.devices.heartbeat, statusCall(deviceId, VM_SECRET))).toMatchObject({ kind: "ok", nextPingInMs: DEFAULT_INTERVAL });
-    expect(await t.mutation(api.devices.heartbeat, { deviceId, deviceSecret: "wrong" })).toEqual({ kind: "rejected" });
+    expect(await t.query(api.devices.headState, { deviceId, deviceSecret: VM_SECRET })).toMatchObject({ kind: "ok", head: null });
+    expect(await t.mutation(api.deviceApi.report, statusCall(deviceId, VM_SECRET))).toEqual({ accepted: { installs: 0, audit: 0 } });
+    expect(await t.mutation(api.devices.ping, { deviceId, deviceSecret: VM_SECRET })).toMatchObject({ nextPingInMs: DEFAULT_INTERVAL });
+    await expect(t.mutation(api.devices.ping, { deviceId, deviceSecret: "wrong" })).rejects.toMatchObject({ data: { code: "device_rejected" } });
   });
 
   test("migrateDevices copies credentials, presence and status without touching the devices row; Phase 2 calls work after; idempotent; exact counters", async () => {
@@ -374,11 +354,11 @@ describe("Phase 2 device on the dev deployment: migration (A2, A3, A8; widen the
     expect(await onlineCount(t, orgId)).toBe(1);
 
     // Replay the Phase 2 agent's calls with the exact shapes it sends.
-    expect(await t.query(api.devices.desiredState, { deviceId: vm, deviceSecret: VM_SECRET })).toEqual({ kind: "ok", desired: null });
-    const hb = await t.mutation(api.devices.heartbeat, statusCall(vm, VM_SECRET));
-    expect(hb).toMatchObject({ kind: "ok", nextPingInMs: DEFAULT_INTERVAL, serverTimeMs: now });
-    expect(await t.mutation(api.devices.heartbeat, { deviceId: vm, deviceSecret: VM_SECRET })).toMatchObject({ kind: "ok" });
-    expect(await t.query(api.devices.desiredState, { deviceId: revoked, deviceSecret: "revoked-secret" })).toEqual({ kind: "revoked" });
+    expect(await t.query(api.devices.headState, { deviceId: vm, deviceSecret: VM_SECRET })).toMatchObject({ kind: "ok", head: null });
+    expect(await t.mutation(api.deviceApi.report, statusCall(vm, VM_SECRET))).toEqual({ accepted: { installs: 0, audit: 0 } });
+    expect(await t.mutation(api.devices.ping, { deviceId: vm, deviceSecret: VM_SECRET })).toMatchObject({ nextPingInMs: DEFAULT_INTERVAL, serverTimeMs: now });
+    expect(await t.mutation(api.devices.ping, { deviceId: vm, deviceSecret: VM_SECRET })).toMatchObject({ nextPingInMs: DEFAULT_INTERVAL });
+    expect(await t.query(api.devices.headState, { deviceId: revoked, deviceSecret: "revoked-secret" })).toEqual({ kind: "revoked" });
 
     // Second run: nothing to create.
     expect(await t.mutation(internal.maintenance.migrateDevices, {})).toEqual({ devices: 3, credentials: 0, liveness: 0, summaries: 0, done: true });
@@ -392,7 +372,7 @@ describe("Phase 2 device on the dev deployment: migration (A2, A3, A8; widen the
     const deviceId = await legacyDevice(t, orgId, { secret: "old" });
     await t.run((ctx) => ctx.db.patch(deviceId, { previousSecretHash: sha256HexSync("old"), secretHash: sha256HexSync("new") }));
     // The agent adopts the new secret before the migration ran: settled on the devices row.
-    expect(await t.mutation(api.devices.heartbeat, { deviceId, deviceSecret: "new" })).toMatchObject({ kind: "ok" });
+    expect(await t.mutation(api.devices.ping, { deviceId, deviceSecret: "new" })).toMatchObject({ nextPingInMs: DEFAULT_INTERVAL });
     await t.mutation(internal.maintenance.migrateDevices, {});
     const cred = (await deviceRows(t, deviceId)).cred!;
     expect(cred.secretHash).toBe(sha256HexSync("new"));
@@ -401,7 +381,7 @@ describe("Phase 2 device on the dev deployment: migration (A2, A3, A8; widen the
     await t.run((ctx) => ctx.db.patch(cred._id, { rotate: true }));
     await t.mutation(internal.maintenance.migrateDevices, {});
     expect((await deviceRows(t, deviceId)).cred?.rotate).toBe(true);
-    expect(await t.mutation(api.devices.heartbeat, { deviceId, deviceSecret: "new" })).toMatchObject({ rotateCredential: true });
+    expect(await t.mutation(api.devices.ping, { deviceId, deviceSecret: "new" })).toMatchObject({ rotateCredential: true });
   });
 
   test("narrowDevices removes the deprecated fields of migrated devices only; the agent keeps working", async () => {
@@ -418,7 +398,7 @@ describe("Phase 2 device on the dev deployment: migration (A2, A3, A8; widen the
     expect(d.compat).toBeUndefined();
     expect(d.name).toBe("RULEBOX");
     expect(await t.run((ctx) => ctx.db.query("deviceStatus").withIndex("by_device", (q) => q.eq("deviceId", migrated)).first())).toBeNull();
-    expect(await t.mutation(api.devices.heartbeat, statusCall(migrated, VM_SECRET))).toMatchObject({ kind: "ok" });
+    expect(await t.mutation(api.deviceApi.report, statusCall(migrated, VM_SECRET))).toEqual({ accepted: { installs: 0, audit: 0 } });
     expect((await t.run((ctx) => ctx.db.get(notYet)))?.secretHash).toBeDefined();
     expect(await t.mutation(internal.maintenance.narrowDevices, {})).toMatchObject({ narrowed: 0, skipped: 1 });
   });
@@ -458,7 +438,7 @@ describe("lifecycle and quantization", () => {
     const orgId = await makeOrg(t);
     const d = await enrollDevice(t, orgId);
     const send = (osBuild: string) =>
-      t.mutation(api.devices.heartbeat, { deviceId: d.deviceId, deviceSecret: d.secret, status: { ...AGENT_STATUS, osBuild, osEdition: "Professional" } });
+      t.mutation(api.deviceApi.report, { deviceId: d.deviceId, deviceSecret: d.secret, status: { ...AGENT_STATUS, osBuild, osEdition: "Professional" } });
     await send("19045.1");
     expect((await orgStatsOf(t, orgId))?.outOfSupportCount).toBe(1);
     await send("19045.2");

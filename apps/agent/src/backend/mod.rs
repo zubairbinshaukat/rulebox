@@ -148,8 +148,7 @@ impl BackendLink {
     }
 }
 
-/// (Step 13) The answer of `devices:ping` (`devices:heartbeat` answers the same
-/// keys). `rotateCredential` and `planState` missing mean `false` and `"ok"`;
+/// (Step 13) The answer of `devices:ping`. `rotateCredential` and `planState` missing mean `false` and `"ok"`;
 /// `serverTimeMs` is read when the server sends it.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PingResponse {
@@ -325,7 +324,7 @@ pub struct StatusReport {
     pub capabilities: Option<Vec<String>>,
 }
 
-/// The object keys of `StatusReport` that `devices:heartbeat` accepts (`convex/lib/deviceReport.ts`,
+/// The object keys of `StatusReport` that `deviceApi:report` accepts (`convex/lib/deviceReport.ts`,
 /// `statusValidator`). A test pins the serialized key set to this list.
 #[cfg(test)]
 pub const STATUS_KEYS: [&str; 16] = [
