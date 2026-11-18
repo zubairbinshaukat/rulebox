@@ -66,7 +66,9 @@ Rulebox feels like Windows, but simpler, cleaner and fully controlled:
 - Files such as documents, music and videos open with a double-click, just
   like in Windows.
 - The real Windows desktop, settings, browser and installers are not
-  available to employees.
+  available to employees. A web app may be opened in a locked-down Chrome
+  or Edge window if the administrator chooses that (changed 2026-11,
+  Phase 6).
 - Changes made in the dashboard are applied automatically to every
   affected PC.
 
@@ -264,8 +266,8 @@ employees as a standard icon in the Start menu, desktop or taskbar.
 | Type | How it is added | How it runs |
 |---|---|---|
 | **Winget app** (e.g. Zoom) | Selected from the winget catalog | Agent installs silently; Staff App launches the executable |
-| **Web app / PWA** | URL only | Opens in its own Rulebox window, restricted to an allowlist of domains |
-| **Custom installer (MSI/EXE)** | Installer upload plus silent-install flags | Agent downloads, verifies the hash, installs silently |
+| **Web app / PWA** | URL only | Opens in its own Rulebox window or, per app, in a locked-down Chrome or Edge app window, restricted to an allowlist of domains (changed 2026-11, Phase 6) |
+| **Custom installer (MSI/EXE)** | Installer URL (upload when hosting exists) plus silent-install flags, **pre-filled** from the detected installer type; optional answer file (changed 2026-11, Phase 6; Phase 4 already used URLs) | Agent downloads, verifies the hash, installs silently |
 | **Portable EXE** | Executable upload | Agent verifies the hash and copies it to the managed apps folder |
 
 App types are implemented as plugins so the community can add more
@@ -291,6 +293,10 @@ redirect to identity providers such as `login.microsoftonline.com` or
 `accounts.google.com`. Navigation to any other domain is blocked with a
 clear "not allowed" screen.
 
+**In browser mode (changed 2026-11, Phase 6):** the allowlist is the union
+of all browser web apps on the device, and the browser shows its own
+blocked page instead of the Rulebox "not allowed" screen.
+
 ### 6.3 Per-app settings
 
 - Pinned to taskbar or desktop
@@ -298,6 +304,10 @@ clear "not allowed" screen.
 - File types the app handles (Section 7)
 - Groups and employees allowed to use it
 - Web app permissions: camera, microphone, clipboard and more (Section 24.1)
+- Update mode: pinned, vendor or server-managed, for installed apps
+  (Section 23.2) (added 2026-11, Phase 6)
+- Opens in: the built-in Rulebox window or a locked-down Chrome or Edge
+  window, for web apps (added 2026-11, Phase 6)
 
 ---
 
@@ -340,6 +350,7 @@ associations.
   `.cmd`, `.ps1`, `.vbs`, `.js`, `.hta`, `.lnk` and similar.
 - Office macros are disabled by policy.
 - Files downloaded from web apps are saved only to the employee's folder.
+  Downloads are off in browser mode (v1) (changed 2026-11, Phase 6).
 - Every external file-handling app is added to the escape-test checklist
   (Section 13.1).
 
@@ -435,6 +446,10 @@ Benefits:
 - Offline devices converge automatically when they reconnect.
 - No stale commands are replayed.
 - Every change is versioned, which supports auditing and rollback.
+
+App versions that the server finds from a vendor feed are published as
+desired-state versions; devices never read vendor feeds (changed 2026-11,
+Phase 6).
 
 ---
 
@@ -549,6 +564,11 @@ effectively a remote-execution system and is protected accordingly.
   from the dashboard.
 - **Hash verification:** every installer and portable executable is
   verified against its SHA-256 hash before use.
+- **Publisher and feed checks (changed 2026-11, Phase 6):** an installer's
+  publisher (Authenticode signer) can optionally be set on the app and is
+  checked before it runs. Vendor feed signatures are verified by the
+  server, never by the device. The device verifies the SHA-256 that the
+  signed desired state names.
 - **Signed policies (v1):** desired-state documents and installer
   manifests are signed by an organization key; the agent rejects anything
   with an invalid signature.
@@ -580,7 +600,7 @@ The Staff App provides a secret key combination that prompts for a PIN.
 | Vector | Mitigation |
 |---|---|
 | File Open/Save dialogs in allowed apps (Zoom, Tally, LibreOffice) | App allowlisting; restricted dialogs; test each allowed app |
-| Links in allowed apps opening a browser | Route link handling to Rulebox or block it |
+| Links in allowed apps opening a browser | Route link handling to Rulebox or block it. Browser mode (per app, Chrome or Edge, changed 2026-11, Phase 6) adds: browser policy from the signed desired state with a URL blocklist and allowlist, developer tools, downloads, private windows, guest mode, extensions and sign-in off; one profile per employee; not available in Lite mode; added to the escape checklist |
 | Help windows and "Open file location" options | App allowlisting; test each allowed app |
 | Media players opening network URLs (VLC) | Restrict by policy; test |
 | Office macros | Disable by policy |
@@ -588,7 +608,7 @@ The Staff App provides a secret key combination that prompts for a PIN.
 | Ctrl + Alt + Del screen | Empty it via policy, including Switch user; the admin uses the hidden exit (Section 12.4) |
 | Windows key shortcuts | Disable via policy |
 | Boot into Safe Mode or recovery | BIOS/UEFI password, BitLocker, disable advanced boot options |
-| Apps that self-update or launch helper processes | Allowlist by publisher rather than path where possible |
+| Apps that self-update or launch helper processes | Allowlist by publisher rather than path where possible; see the per-app update modes in Section 23.2 (changed 2026-11, Phase 6) |
 
 ### 13.2 Windows edition differences
 
@@ -636,9 +656,17 @@ compatibility check (Section 14) detects what is available on each PC.
 - **Windows Update:** forced reboots can interrupt work; configure active
   hours and update policies from the dashboard.
 - **App self-updates:** apps like Zoom update themselves; allowlist rules
-  must not break when versions change.
+  must not break when versions change. **(changed 2026-11, Phase 6)** In
+  **Vendor** update mode the vendor's own updater owns the version after
+  the first install: Rulebox allows it by publisher, never reinstalls
+  because the catalogue hash changed, never downgrades, and re-runs the
+  bootstrap installer only when the installed version is below the
+  administrator's **minimum version**.
 - **Failed installs:** report the exit code and log to the dashboard;
-  retry with backoff; never show a half-installed app.
+  retry with backoff; never show a half-installed app. **(changed 2026-11,
+  Phase 6)** An installer that stops to wait for a click is reported as
+  **needs interaction** (not a bare timeout), so the administrator can fix
+  the silent switches or use an answer file.
 - **UAC prompts:** any action that triggers UAC in the Staff session is a
   bug; privileged work must go through the agent.
 - **Clock drift:** token and signature checks tolerate small clock
@@ -681,10 +709,12 @@ results clearly.
 |---|---|
 | Windows version and build | Block install |
 | Windows edition and available lockdown features | Install with reduced lockdown, or block, depending on organization policy |
-| WebView2 runtime | Install it automatically |
+| WebView2 runtime and **version** (changed 2026-11, Phase 6) | Installed by Rulebox Setup from the bundled bootstrapper (hash-verified; needs internet on Windows 10) |
 | Administrator rights | Block install |
 | Free disk space | Block install |
 | Existing kiosk or MDM software | Warn |
+| **Protection level: Full or Reduced** (added 2026-11, Phase 6) | Reduced when the edition lacks a lockdown layer (for example Home); install allowed with a badge in the dashboard |
+| **Windows Protected Print Mode** (added 2026-11, Phase 6) | Warn: printer drivers are refused while it is on |
 
 The result is sent to the dashboard during enrollment, so administrators
 can see which lockdown level each device supports.
@@ -700,8 +730,8 @@ can see which lockdown level each device supports.
 - **Everything is configuration:** branding, policies, apps, file handlers
   and storage quotas are managed from the dashboard.
 - **Multi-organization with roles:** Owner, Admin, Viewer.
-- **Pluggable app types:** Winget, Web, MSI, Portable, Script; the
-  community can add more.
+- **Pluggable app types:** Winget, Web, MSI, Portable; the community can
+  add more (a Script type is not in v1) (changed 2026-11, Phase 6).
 - **Quick start:** `npx create-rulebox` scaffolds a full deployment.
 
 ---
@@ -720,10 +750,11 @@ All components use free tiers or free-for-open-source services.
 | Shell integration | Rust with the `windows` crate (Win32 window, shell and compositor APIs) |
 | Window materials | Mica/Acrylic effects on Windows 11 via Tauri window effects |
 | Agent | Rust (`windows-service` crate + Convex Rust client) |
-| Installer storage | Cloudflare R2 (Convex file storage is too limited) |
-| App updates | Tauri updater + GitHub Releases |
+| Installer | WiX v7 MSI (hand-authored), per machine (changed 2026-11, Phase 6). **Licence note:** WiX v7 needs its Open Source Maintenance Fee (OSMF) EULA accepted, and a maintenance fee is due once revenue from projects that use WiX reaches US$10,000 a year |
+| Installer storage | Pilot: administrators give an https URL (for example GitHub Releases) and the SHA-256 is recorded. Uploads come with the hosting work in the hosting plan (pooled free object-storage accounts, provider decided when that work starts); Convex file storage is too limited (changed 2026-11, Phase 6; replaces "Cloudflare R2") |
+| App updates | Agent-installed; the Tauri update **format** only, no Tauri updater in the Staff session (Section 23.2) (changed 2026-11, Phase 6; was "Tauri updater + GitHub Releases") |
 | Dashboard hosting | Cloudflare Pages or Vercel |
-| Code signing | SignPath (free for open source) or Azure Trusted Signing |
+| Code signing | SignPath (free for open source), chosen (changed 2026-11, Phase 6; Azure Trusted Signing is no longer the alternative) |
 
 ---
 
@@ -968,7 +999,13 @@ setting it changes, so the restore is exact.
   - In Lite mode, built-in windows (file explorer, players, viewers) run as
     in-app windows inside one shared WebView instead of separate ones.
 - **One WebView2 environment** per signed-in employee, so all web app
-  windows share the same browser process.
+  windows share the same browser process. **(changed 2026-11, Phase 6)**
+  Browser-mode web apps (Chrome or Edge, Section 6) use one browser profile
+  per employee and are not available in Lite mode. Open web app windows
+  have a **window cap** (Lite default 3, Standard default 8, group setting
+  1-12); at the cap the Staff App asks which window to close and never
+  closes one silently. Browser windows count toward the cap; idle close
+  does not apply to them in v1.
 - **Suspension:** minimized web apps are suspended and asked to reduce
   memory use; they resume instantly when restored.
 - **Idle close:** web apps idle for longer than an admin-set time are
@@ -1017,7 +1054,7 @@ For best results on low-end laptops:
 |---|---|---|
 | Staff App | Agent | The Staff account is a standard user and cannot install software; the shell must not replace itself while running |
 | Agent | Agent (self-update) | Runs as SYSTEM; uses a separate updater process to replace itself |
-| Managed apps (winget, MSI, EXE) | Agent | Part of desired-state reconciliation (Section 10) |
+| Managed apps (winget, MSI, EXE) | Agent | Part of desired-state reconciliation (Section 10). **(changed 2026-11, Phase 6)** Each app has one of three update modes: **Pinned** (a different hash means install again), **Vendor self-update** (the vendor's own updater owns the version; optional minimum version) or **Rulebox-managed** (the server reads the vendor feed and publishes new versions into the signed desired state; rings and rollback apply) |
 
 The Staff App does **not** use the Tauri updater plugin to install itself.
 It reuses the Tauri updater **format** (`latest.json` plus update
@@ -1064,6 +1101,10 @@ so switching versions is a single, atomic change.
 If the employee never selects restart, the next start of Rulebox always
 uses the new version.
 
+**v1 note (changed 2026-11, Phase 6):** in v1 the agent updates Rulebox
+itself by a minimal MSI major upgrade, started only when no employee is
+signed in. The `versions\` layout and the restart flow above are v1.x.
+
 ### 23.5 What employees experience during a restart
 
 - Desktop apps such as Zoom keep running; they are separate processes.
@@ -1109,6 +1150,10 @@ There are two independent kinds of signing:
 
 ### 23.9 Agent self-update
 
+**v1 note (changed 2026-11, Phase 6):** v1 updates Rulebox (agent and Staff
+App together) by an agent-driven MSI major upgrade with no employee signed
+in; the updater-process flow below is v1.x.
+
 1. The agent downloads and verifies the new agent version.
 2. It starts a small updater process and stops itself.
 3. The updater replaces the agent files and starts the service.
@@ -1144,6 +1189,10 @@ web app can use the microphone while other web apps cannot.
 - Blocked requests show a short notice ("Microphone is not allowed for
   this app") and are counted on the dashboard so admins can spot missing
   permissions.
+- **Browser mode (changed 2026-11, Phase 6):** in a Chrome or Edge window
+  the permissions are enforced by browser policy per site, not by the Staff
+  App. Screen sharing and clipboard read stay blocked. There is no "not
+  allowed" notice and no counter, and downloads are off (Section 7.3).
 
 ### 24.2 Wi-Fi and printer profiles
 
@@ -1159,8 +1208,10 @@ pushed from the dashboard.
   an approved list) per group; the agent installs them. Print Spooler stays
   enabled on these devices (Section 22.3).
 - **Drivers:** admins can also push a printer, scanner or other device
-  driver to a group, as a driver package (zip with an `.inf` and a signed
-  catalog) or a vendor's silent installer. It follows the same rules as
+  driver to a group, as a signed INF driver package (zip with an `.inf` and
+  a signed catalog) or a vendor's silent installer, taken from the signed
+  manifest only (changed 2026-11, Phase 6; the bullet existed from Phase 5
+  Step 14b, wording aligned). It follows the same rules as
   any installer (https, checked hash, signed list, no window shown to
   staff), never appears as a tile, and may ask for a restart. A printer
   can then use a driver delivered this way. Only drivers Rulebox installed

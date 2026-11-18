@@ -49,6 +49,21 @@ Items marked **(unverified)** could not be confirmed from a primary source.
 Each says how it gets confirmed (almost always Step 2 or the VM runs).
 Nothing in this plan was compiled or run.
 
+## Updates since this plan was written
+
+- **2026-11-14:** the owner accepted every Section 19 recommendation
+  (Q13 Zahras POS confirmation still due before Step 23).
+- **2026-11-19:** the owner approved **Section 18 (PRD changes) in full**,
+  every row. Step 1 applied them to `docs/prd.md` (each changed paragraph
+  marked "(changed 2026-11, Phase 6)"). No row was rejected, so no steps are
+  removed (Steps 16-18 stay). Section 21.1 (locked decisions) was not
+  touched; no Decision 20 or 21 was added. Two rows needed no PRD text
+  (22.5, and the `guard.rs` / Phase 5 Section 16 rows belong to code and
+  plan docs, not the PRD); the 24.2 "Drivers" bullet already existed from
+  Phase 5 Step 14b and was only aligned.
+- **2026-11-19:** Phase 6 Step 3 is done (commit `73eb607`: device aliases
+  removed, one `LITE_MAX_RAM_MB`).
+
 ---
 
 ## 1. Goal
@@ -1006,6 +1021,9 @@ Rules for every step (Phase 4 and 5 rules apply, plus):
 5. Re-check the anchors of 3.2 that the next steps rely on (files move).
 6. Show the user Section 19 (open questions) and Section 18 (PRD changes)
    and wait. Record the answers here and in `docs/plans/README.md`.
+   **Recorded:** Section 19 answers 2026-11-14 (all recommended options,
+   see Section 19); Section 18 approved in full 2026-11-19 (see "Updates
+   since this plan was written").
 
 **Done when:** all recorded; the user answered Section 19.
 **Do NOT:** start a step whose prerequisites are missing.
@@ -2014,6 +2032,8 @@ plan's own:
 
 ## 18. PRD changes to make (tell the user; applied in Step 1 after sign-off)
 
+**Approved in full by the owner on 2026-11-19; applied to `docs/prd.md` in Step 1.**
+
 | PRD section | Change | Why |
 |---|---|---|
 | 2 (line 68) | "The real Windows … browser … not available" → add "A web app may be opened in a locked-down Chrome or Edge window if the administrator chooses that" | D-g |
@@ -2045,6 +2065,8 @@ plan's own:
 Q6 a, Q7 a, Q8 a, Q9 a, Q10 a, Q11 a, Q12 a, Q14 b; Q13 is the owner's Zahras POS confirmation, still due
 before Step 23). Section 18 PRD edits are applied in Step 1 when Phase 6 starts. **Phase 6 is on hold** until
 the owner says to start it (Phase 5 finishes first).
+**Update 2026-11-19:** answers are recorded; Phase 6 has started (Steps 1 and 3 done); Section 18 was
+approved in full on 2026-11-19 and applied to the PRD in Step 1.
 
 | # | Question | Options | Recommendation |
 |---|---|---|---|

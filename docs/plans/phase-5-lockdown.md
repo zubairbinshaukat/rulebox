@@ -2894,7 +2894,8 @@ Target: 4 GB RAM laptops in Lite mode (PRD 22).
   decides how release builds on customer PCs pass (signed installer
   context), without weakening the dev-machine protection.
 - **Code signing** lets AppLocker and App Control use publisher rules for
-  Rulebox instead of path rules; replace the invariant path rules then.
+  Rulebox instead of path rules; add publisher rules beside the invariant
+  path rules then (changed 2026-11, Phase 6).
 - **Installer compatibility check** reuses `read_security_posture`,
   edition detection and the AppLocker/App Control capability probes
   (read-only) to show "Full / Reduced protection" before install.
