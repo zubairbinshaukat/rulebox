@@ -1,0 +1,72 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Rulebox MSI, the agent service (plan Phase 6, Section 4.10).
+
+  Names and arguments must equal the agent's own `service install`
+  (apps\agent\src\service.rs: SERVICE_NAME, DISPLAY_NAME, service_info) and
+  AGENT_SERVICE in crates\rulebox-win32\src\service.rs. apps\installer\tests\package.test.ts
+  compares them.
+
+  No Account: the service runs as LocalSystem. The agent re-asserts its own security
+  descriptor and required privileges at every start, so the MSI does not set them.
+-->
+<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs"
+     xmlns:util="http://wixtoolset.org/schemas/v4/wxs/util">
+  <Fragment>
+    <ComponentGroup Id="ServiceGroup" Directory="INSTALLFOLDER">
+
+      <Component Id="RuleboxAgentComponent">
+        <File Id="RuleboxAgentExe" Name="rulebox-agent.exe" Source="$(BinDir)\rulebox-agent.exe" KeyPath="yes" />
+
+        <ServiceInstall
+            Id="RuleboxAgentService"
+            Name="RuleboxAgent"
+            DisplayName="Rulebox Agent"
+            Description="Enforces Rulebox kiosk settings on this PC."
+            Type="ownProcess"
+            Start="auto"
+            ErrorControl="normal"
+            Vital="yes"
+            Arguments="service run">
+          <!--
+            Restart on the first, second and third failure after 5 s; the failure count resets
+            after 1 day. Nested under ServiceInstall so it is applied with the install.
+            (The agent's own `service install` uses 1 s, 5 s, 30 s; the MSI uses one delay.)
+          -->
+          <util:ServiceConfig
+              FirstFailureActionType="restart"
+              SecondFailureActionType="restart"
+              ThirdFailureActionType="restart"
+              RestartServiceDelayInSeconds="5"
+              ResetPeriodInDays="1" />
+        </ServiceInstall>
+
+        <!-- Start at install, stop at install and uninstall (upgrade too), delete at uninstall. -->
+        <ServiceControl
+            Id="RuleboxAgentControl"
+            Name="RuleboxAgent"
+            Start="install"
+            Stop="both"
+            Remove="uninstall"
+            Wait="yes" />
+      </Component>
+
+      <!--
+        "Rulebox Setup" in the all-users Start menu: `rulebox-agent.exe setup` (plan 4.10.1).
+        The UI.wxs finish page opens this same shortcut. A shortcut cannot be a key path, so the
+        component is keyed by a registry value (HKLM, because the package is per machine).
+      -->
+      <Component Id="SetupShortcutComponent" Directory="RuleboxMenuFolder" Bitness="always64">
+        <Shortcut
+            Id="SetupShortcut"
+            Name="Rulebox Setup"
+            Description="Check this PC and connect it to your Rulebox dashboard"
+            Target="[#RuleboxAgentExe]"
+            Arguments="setup"
+            WorkingDirectory="INSTALLFOLDER" />
+        <RemoveFolder Id="RemoveRuleboxMenuFolder" On="uninstall" />
+        <RegistryValue Root="HKLM" Key="SOFTWARE\Rulebox\StartMenu" Name="Setup" Type="integer" Value="1" KeyPath="yes" />
+      </Component>
+    </ComponentGroup>
+  </Fragment>
+</Wix>

@@ -17,6 +17,14 @@ export default defineConfig({
           server: { deps: { inline: ["convex-test"] } },
         },
       },
+      // MSI sources, static checks (Phase 6 Step 7: apps/installer/tests).
+      {
+        test: {
+          name: "installer",
+          include: ["apps/installer/tests/**/*.test.ts"],
+          environment: "node",
+        },
+      },
       // Node scripts (Step 8: scripts/policy-key.mjs).
       {
         test: {

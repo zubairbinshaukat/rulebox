@@ -1,0 +1,40 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Rulebox MSI, the Staff App (PRD 23.3, plan Phase 6 Section 4.10).
+
+    rulebox-shell.exe                      the small stable launcher (registered as the shell)
+    current.json                           names the active version (written by build.ps1)
+    versions\<Version>\rulebox-staff.exe   the Staff App of this MSI
+
+  Later versions are added and switched by the agent (PRD 23.4), not by the MSI.
+  build.ps1 passes BinDir (the built binaries), StageDir and Version.
+-->
+<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs">
+  <Fragment>
+    <DirectoryRef Id="INSTALLFOLDER">
+      <Directory Id="VersionsFolder" Name="versions">
+        <Directory Id="CurrentVersionFolder" Name="$(Version)" />
+      </Directory>
+    </DirectoryRef>
+  </Fragment>
+
+  <Fragment>
+    <ComponentGroup Id="StaffAppGroup">
+      <Component Id="ShellLauncher" Directory="INSTALLFOLDER">
+        <File Id="RuleboxShellExe" Name="rulebox-shell.exe" Source="$(BinDir)\rulebox-shell.exe" KeyPath="yes" />
+      </Component>
+
+      <!--
+        {"version":"<Version>","exe":"versions\\<Version>\\rulebox-staff.exe"}
+        Written by build.ps1 into StageDir.
+      -->
+      <Component Id="CurrentPointer" Directory="INSTALLFOLDER">
+        <File Id="CurrentJson" Name="current.json" Source="$(StageDir)\current.json" KeyPath="yes" />
+      </Component>
+
+      <Component Id="StaffAppExecutable" Directory="CurrentVersionFolder">
+        <File Id="RuleboxStaffExe" Name="rulebox-staff.exe" Source="$(BinDir)\rulebox-staff.exe" KeyPath="yes" />
+      </Component>
+    </ComponentGroup>
+  </Fragment>
+</Wix>

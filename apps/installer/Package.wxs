@@ -1,0 +1,130 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Rulebox MSI, the package itself (plan Phase 6, Section 4.10).
+
+  Hand-authored WiX v7. Per machine, x64, no script or EXE custom action.
+  Built by build.ps1 (it passes Version, BinDir, RepoRoot, InstallerDir, StageDir).
+
+  Layout (PRD 23.3):
+    C:\Program Files\Rulebox\
+      rulebox-agent.exe                      (Service.wxs)
+      rulebox-shell.exe, current.json,
+      versions\<Version>\rulebox-staff.exe   (StaffApp.wxs)
+      MicrosoftEdgeWebview2Setup.exe, THIRD_PARTY_NOTICES.md, LICENSE   (here)
+
+  The install marker and the folder ACL below are read by the production guard
+  (crates\rulebox-win32\src\guard.rs). Do not change them without changing the guard.
+-->
+<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs">
+  <!--
+    The upgrade code is fixed forever (plan Section 10, rule 6). A different value makes
+    the next MSI a second product instead of an upgrade. apps\installer\tests\package.test.ts
+    pins it.
+  -->
+  <Package
+      Name="Rulebox"
+      Manufacturer="Rulebox"
+      Version="$(Version)"
+      UpgradeCode="76E0E816-6BEE-40CB-8BA0-6B32C8A1EB56"
+      Scope="perMachine"
+      InstallerVersion="500"
+      Language="1033"
+      Compressed="yes">
+
+    <SummaryInformation Description="Rulebox kiosk OS for Windows" />
+
+    <!--
+      Only the first three version fields count. afterInstallInitialize: the old product is
+      removed first, and a failed install rolls that removal back, so a failed upgrade leaves
+      the old version working.
+    -->
+    <MajorUpgrade
+        Schedule="afterInstallInitialize"
+        DowngradeErrorMessage="A newer version of Rulebox is already installed. To go back to an older version, turn the kiosk off, uninstall Rulebox, then install the older version." />
+
+    <MediaTemplate EmbedCab="yes" CompressionLevel="high" />
+
+    <Icon Id="RuleboxIcon.ico" SourceFile="$(RepoRoot)\apps\staff-app\src-tauri\icons\icon.ico" />
+    <Property Id="ARPPRODUCTICON" Value="RuleboxIcon.ico" />
+    <Property Id="ARPNOMODIFY" Value="1" />
+
+    <!--
+      The enrollment code for a silent install: msiexec /i Rulebox.msi /qn ENROLLCODE=<code>.
+      Hidden keeps the value out of the log; Secure lets it reach the elevated install.
+      It is written once, to HKLM\SOFTWARE\Rulebox\Install\Pending (below), and never shown.
+    -->
+    <Property Id="ENROLLCODE" Hidden="yes" Secure="yes" />
+
+    <StandardDirectory Id="ProgramFiles64Folder">
+      <Directory Id="INSTALLFOLDER" Name="Rulebox" />
+    </StandardDirectory>
+
+    <StandardDirectory Id="ProgramMenuFolder">
+      <Directory Id="RuleboxMenuFolder" Name="Rulebox" />
+    </StandardDirectory>
+
+    <!-- The dialogs (UI.wxs) and the launch conditions (Checks.wxs, pulled in through WINBUILD). -->
+    <UIRef Id="RuleboxUI" />
+    <PropertyRef Id="WINBUILD" />
+
+    <Feature Id="Main" Title="Rulebox" Level="1" AllowAdvertise="no" AllowAbsent="no">
+      <ComponentGroupRef Id="InstallFolderGroup" />
+      <ComponentGroupRef Id="ServiceGroup" />
+      <ComponentGroupRef Id="StaffAppGroup" />
+    </Feature>
+  </Package>
+
+  <Fragment>
+    <ComponentGroup Id="InstallFolderGroup" Directory="INSTALLFOLDER">
+
+      <!--
+        The folder ACL (the guard's `folder_is_admin_only`): SYSTEM and Administrators full
+        control, Users read and execute, no inheritance from Program Files. This is the same
+        text as INSTALL_DIR_SDDL in crates\rulebox-win32\src\security.rs; the static test
+        compares them. MsiLockPermissionsEx needs no custom action.
+      -->
+      <Component Id="InstallFolderAcl">
+        <CreateFolder>
+          <PermissionEx Sddl="D:P(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)(A;OICI;0x1200a9;;;BU)" />
+        </CreateFolder>
+      </Component>
+
+      <!--
+        The install marker (guard.rs: INSTALL_KEY, INSTALL_DIR_VALUE). The MSI writes
+        InstallDir and Version. The agent adds ComputerName (and KioskOn) itself; the MSI never
+        writes them. ForceDeleteOnUninstall removes the whole key, those values included.
+      -->
+      <Component Id="InstallMarker" Bitness="always64">
+        <RegistryKey Root="HKLM" Key="SOFTWARE\Rulebox\Install" ForceDeleteOnUninstall="yes">
+          <RegistryValue Id="InstallDirValue" Name="InstallDir" Type="string" Value="[INSTALLFOLDER]" KeyPath="yes" />
+          <RegistryValue Id="VersionValue" Name="Version" Type="string" Value="[ProductVersion]" />
+        </RegistryKey>
+      </Component>
+
+      <!--
+        The pending enrollment code, only when ENROLLCODE was given. SYSTEM and Administrators
+        only. The agent reads it at start, enrolls and deletes it.
+      -->
+      <Component Id="PendingEnrollment" Bitness="always64">
+        <Condition>ENROLLCODE</Condition>
+        <RegistryKey Root="HKLM" Key="SOFTWARE\Rulebox\Install\Pending" ForceDeleteOnUninstall="yes">
+          <RegistryValue Id="PendingCodeValue" Name="Code" Type="string" Value="[ENROLLCODE]" KeyPath="yes" />
+          <PermissionEx Sddl="D:P(A;OICI;KA;;;SY)(A;OICI;KA;;;BA)" />
+        </RegistryKey>
+      </Component>
+
+      <!-- WebView2: the Evergreen bootstrapper is installed, never run, by the MSI. -->
+      <Component Id="WebView2Bootstrapper">
+        <File Id="WebView2BootstrapperExe" Name="MicrosoftEdgeWebview2Setup.exe" Source="$(StageDir)\MicrosoftEdgeWebview2Setup.exe" KeyPath="yes" />
+      </Component>
+
+      <Component Id="Notices">
+        <File Id="ThirdPartyNotices" Name="THIRD_PARTY_NOTICES.md" Source="$(RepoRoot)\THIRD_PARTY_NOTICES.md" KeyPath="yes" />
+      </Component>
+
+      <Component Id="LicenseFile">
+        <File Id="LicenseText" Name="LICENSE" Source="$(RepoRoot)\LICENSE" KeyPath="yes" />
+      </Component>
+    </ComponentGroup>
+  </Fragment>
+</Wix>

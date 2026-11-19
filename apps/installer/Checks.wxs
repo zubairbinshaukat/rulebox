@@ -1,0 +1,55 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Rulebox MSI, launch conditions and the uninstall guard (plan Phase 6, Section 4.10).
+
+  Conditions only: no script and no EXE custom action. Each condition has one message.
+  Package.wxs references WINBUILD, which pulls this fragment in.
+
+  LaunchConditions runs After="CostFinalize" in both sequences, because
+  PrimaryVolumeSpaceAvailable is only known once costing has finished (the standard
+  position is earlier, so it is moved).
+-->
+<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs">
+  <Fragment>
+    <!--
+      Windows build number. VersionNT stops at the Windows 8.1 values on some hosts, so the
+      build comes from the registry (always the 64-bit view). A REG_SZ, read raw.
+    -->
+    <Property Id="WINBUILD">
+      <RegistrySearch Id="WinBuildSearch" Root="HKLM" Key="SOFTWARE\Microsoft\Windows NT\CurrentVersion" Name="CurrentBuildNumber" Type="raw" Bitness="always64" />
+    </Property>
+
+    <!--
+      The kiosk flag the agent keeps (plan 4.10: "KioskOn"). Raw: a DWORD arrives as "#1", a
+      string as "1". The agent does not write it yet (see the README follow-ups).
+    -->
+    <Property Id="KIOSKON">
+      <RegistrySearch Id="KioskOnSearch" Root="HKLM" Key="SOFTWARE\Rulebox\Install" Name="KioskOn" Type="raw" Bitness="always64" />
+    </Property>
+
+    <!-- Administrator. A silent install from a non-elevated shell stops here. -->
+    <Launch Condition="Installed OR Privileged" Message="Rulebox must be installed by an administrator. Right-click the installer and choose Run as administrator, or start it from an administrator command prompt." />
+
+    <!-- 64-bit Windows. -->
+    <Launch Condition="Installed OR VersionNT64" Message="Rulebox needs 64-bit Windows. This PC runs a 32-bit version of Windows." />
+
+    <!-- Windows 10 22H2 is build 19045; Windows 11 is higher. -->
+    <Launch Condition="Installed OR WINBUILD &gt;= 19045" Message="Rulebox needs Windows 10 version 22H2 (build 19045) or newer, or Windows 11. Update Windows, then run this installer again." />
+
+    <!-- 2 GiB free on the system drive; PrimaryVolumeSpaceAvailable is in KB. -->
+    <Launch Condition="Installed OR PrimaryVolumeSpaceAvailable &gt;= 2097152" Message="Rulebox needs 2 GB of free disk space. Free some space, then run this installer again." />
+
+    <!--
+      Uninstall guard: while the kiosk is on, removal is refused. Not during a major upgrade
+      (UPGRADINGPRODUCTCODE is set then). `rulebox-agent recover` works whatever the MSI says.
+    -->
+    <Launch Condition="NOT (Installed AND REMOVE=&quot;ALL&quot; AND NOT UPGRADINGPRODUCTCODE AND (KIOSKON=&quot;1&quot; OR KIOSKON=&quot;#1&quot;))" Message="Turn kiosk mode off first. Open the Rulebox dashboard, turn the kiosk off for this PC, then uninstall Rulebox." />
+
+    <InstallUISequence>
+      <LaunchConditions After="CostFinalize" />
+    </InstallUISequence>
+    <InstallExecuteSequence>
+      <LaunchConditions After="CostFinalize" />
+    </InstallExecuteSequence>
+  </Fragment>
+</Wix>
