@@ -1,8 +1,9 @@
 //! `WindowsPlatform`: the real `Platform`, a thin map onto `rulebox-win32`
 //! (plan Section 5.3, Step 10). It holds no logic of its own beyond three rules:
 //!
-//! - every mutating method checks the test-machine guard **first**, before any
-//!   lookup, so the dev machine can never reach a half-way change;
+//! - every mutating method checks the machine guard (`require_armed_machine`: the test
+//!   marker, or an armed production install) **first**, before any lookup, so the dev
+//!   machine can never reach a half-way change;
 //! - machine writes are limited to `rulebox_win32::machinereg::ALLOWED_ROOTS` and Staff
 //!   hive writes to `staffreg::ALLOWED_ROOTS`, checked before the guard (Phase 5 Step 3);
 //! - the secrets file is protected with DPAPI under the service's own key.
@@ -14,7 +15,7 @@ use anyhow::{bail, Context};
 use rulebox_win32::{
     accounts, applocker, bcd, codeintegrity, etw, eventlog, fileid, machinereg, posture, printing, service, staffreg, wlan,
 };
-use rulebox_win32::guard::require_test_machine;
+use rulebox_win32::guard::require_armed_machine;
 use rulebox_win32::registry::{self, get_hklm, RegValue};
 use rulebox_win32::shellreg::{self, Mechanism};
 use rulebox_win32::sid::Sid;
@@ -82,9 +83,9 @@ pub(super) fn map_err(error: Win32Error) -> PlatformError {
     }
 }
 
-/// The test-machine guard, as a `PlatformError`.
+/// The machine guard (a test machine, or an armed production install), as a `PlatformError`.
 fn guard() -> Result<(), PlatformError> {
-    require_test_machine().map_err(map_err)
+    require_armed_machine().map_err(map_err)
 }
 
 fn parse_sid(sid: &str) -> Result<Sid, PlatformError> {
@@ -1039,17 +1040,17 @@ pub fn ensure_data_dir(root: &Path) -> anyhow::Result<()> {
         true
     };
     // Every branch that changes the disk checks the guard first, so nothing (not
-    // even the removal of an empty folder) happens on a machine that is not a test
-    // machine.
+    // even the removal of an empty folder) happens on a machine that is not armed
+    // (a test machine, or an installed production build).
     match data_dir_action(&check, is_empty) {
         DataDirAction::Use => return Ok(()),
         DataDirAction::Refuse(reason) => bail!("the data directory {} is not safe to use: {reason}", root.display()),
         DataDirAction::Create | DataDirAction::FixDacl => {
-            require_test_machine().context("the data directory needs creating or repairing")?;
+            require_armed_machine().context("the data directory needs creating or repairing")?;
             security::create_protected_dir(root).context("create or repair the data directory")?;
         }
         DataDirAction::Recreate => {
-            require_test_machine().context("the data directory needs creating or repairing")?;
+            require_armed_machine().context("the data directory needs creating or repairing")?;
             std::fs::remove_dir(root)
                 .with_context(|| format!("remove the unprotected empty directory {}", root.display()))?;
             security::create_protected_dir(root).context("re-create the data directory")?;
@@ -1077,7 +1078,7 @@ mod tests {
     }
 
     fn on_dev_machine() -> bool {
-        !rulebox_win32::guard::is_test_machine()
+        !rulebox_win32::guard::is_armed_machine()
     }
 
     #[test]

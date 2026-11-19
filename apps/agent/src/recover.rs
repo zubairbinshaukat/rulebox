@@ -635,7 +635,7 @@ pub fn recover_machine(env: &RecoverEnv<'_>) -> RecoverReport {
 
 // -- the command ---------------------------------------------------------------------------
 
-/// `recover [--yes]`. Refuses on a machine that is not a test machine, before it
+/// `recover [--yes]`. Refuses on a machine that is not armed, before it
 /// reads or changes anything; then needs an elevated prompt and a confirmation.
 pub fn run_recover(yes: bool, input: &mut dyn BufRead, out: &mut dyn Write, err: &mut dyn Write) -> u8 {
     let (install, paths) = match (InstallPaths::from_known_folders(), DataPaths::from_known_folders()) {
@@ -657,9 +657,9 @@ pub fn run_recover_at(
     out: &mut dyn Write,
     err: &mut dyn Write,
 ) -> u8 {
-    // The guard first: on a machine that is not a test machine nothing at all is
-    // read, asked or changed.
-    if let Err(error) = crate::service::guard_destructive("recover") {
+    // The guard first: on a machine that is not armed (a test machine, or an installed
+    // production build) nothing at all is read, asked or changed.
+    if let Err(error) = crate::service::guard_armed("recover") {
         let _ = writeln!(err, "error: {error:#}");
         return crate::ipc_admin::EXIT_ERROR;
     }
@@ -1286,7 +1286,7 @@ mod tests {
 
     #[test]
     fn recover_is_refused_by_the_guard_before_anything_is_read_or_changed() {
-        if rulebox_win32::guard::is_test_machine() {
+        if rulebox_win32::guard::is_armed_machine() {
             return;
         }
         let world = World::new();

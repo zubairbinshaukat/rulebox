@@ -11,7 +11,9 @@
 //! automatic sign-in has already happened.
 //!
 //! `service install`, `service uninstall` and `recover` change the machine, so each
-//! one starts with the test-machine guard, before any lookup or prompt.
+//! one starts with a guard, before any lookup or prompt. The two service commands are dev
+//! and VM helpers and keep the test-machine door alone (`guard_destructive`); `recover`
+//! uses the armed guard (`guard_armed`), because it must work on an installed PC.
 
 use std::ffi::OsString;
 use std::io::Write;
@@ -384,14 +386,30 @@ fn scm_error(what: &str, error: &windows_service::Error) -> anyhow::Error {
 
 // -- the guard ---------------------------------------------------------------------------------------
 
-/// The first line of every command that changes accounts, services or Winlogon
-/// settings. Nothing is looked up, asked or written before it.
+/// The first line of the dev and VM commands `service install` and `service uninstall`.
+/// Nothing is looked up, asked or written before it. **Test door only** (plan Phase 6
+/// Section 4.11 and Step 5): in production the MSI installs and removes the service, so
+/// a production build refuses these two commands; an installed release is not a test
+/// machine. `tests/guard_coverage.rs` pins this as the agent's only test-door call.
 pub fn guard_destructive(command: &str) -> anyhow::Result<()> {
     rulebox_win32::guard::require_test_machine().map_err(|error| {
         anyhow!(
             "`{command}` is refused: {error}. It changes the service, accounts or Windows sign-in settings, \
              so it runs only on a test machine whose marker was created by hand \
-             (HKLM\\SOFTWARE\\Rulebox\\TestMachine, value ComputerName)."
+             (HKLM\\SOFTWARE\\Rulebox\\TestMachine, value ComputerName). Installed copies are managed by the MSI."
+        )
+    })
+}
+
+/// The first line of `recover`, the way back on any armed machine: a test machine, or an
+/// installed production build (plan Section 4.10: `recover` works whatever the MSI state).
+/// Nothing is looked up, asked or written before it.
+pub fn guard_armed(command: &str) -> anyhow::Result<()> {
+    rulebox_win32::guard::require_armed_machine().map_err(|error| {
+        anyhow!(
+            "`{command}` is refused: {error}. It changes accounts, services or Windows sign-in settings, \
+             so it runs only on an armed machine: a test machine whose marker was created by hand, \
+             or a Rulebox installation made by the MSI."
         )
     })
 }
@@ -877,7 +895,8 @@ mod tests {
         assert!(check_service_sddl(AGENT_SERVICE_SDDL).is_ok(), "Administrators can still stop and change it");
         assert!(check_required_privileges(AGENT_REQUIRED_PRIVILEGES).is_ok());
         // On the dev machine the guard stops both calls: nothing changes, the install goes on.
-        if !rulebox_win32::guard::is_test_machine() {
+        // (Both calls use the armed guard of `rulebox-win32`.)
+        if !rulebox_win32::guard::is_armed_machine() {
             let mut out = Vec::new();
             harden_service(&mut out);
             let text = String::from_utf8(out).unwrap();

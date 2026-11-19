@@ -285,8 +285,8 @@ fn run_with_runtime(deps: Deps) -> anyhow::Result<()> {
 /// directory. The protected-directory check (plan Section 5.1) runs first, before
 /// anything is read or written and before logging, which lives in that directory.
 /// If the check refuses, nothing is created and the exit code is 1. Creating or
-/// repairing the directory is guarded, so on a machine without the test-machine
-/// marker this ends here.
+/// repairing the directory is guarded, so on a machine that is not armed (no test
+/// marker, no production install) this ends here.
 fn run_real() -> anyhow::Result<u8> {
     let paths = DataPaths::from_known_folders()?;
     let install = InstallPaths::from_known_folders()?;

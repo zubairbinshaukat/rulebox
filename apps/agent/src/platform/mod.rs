@@ -419,7 +419,7 @@ pub trait Platform: Send + Sync + 'static {
     /// The kernel's loss counters of a running process trace (edge case 45).
     fn process_trace_stats(&self, handle: TraceHandle) -> Result<TraceStats, PlatformError>;
 
-    // mutating: every `WindowsPlatform` implementation calls `guard::require_test_machine()` first
+    // mutating: every `WindowsPlatform` implementation calls `guard::require_armed_machine()` first (via `guard()`)
     fn create_staff_user(&self, spec: &StaffUserSpec, password: &str) -> Result<String, PlatformError>;
     fn set_user_password(&self, user_name: &str, password: &str) -> Result<(), PlatformError>;
     fn test_logon(&self, user_name: &str, password: &str) -> Result<bool, PlatformError>;

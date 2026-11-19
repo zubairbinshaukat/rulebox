@@ -48,8 +48,8 @@ pub fn staff_args(_install_dir: &std::path::Path) -> Vec<&'static str> {
 /// The rule itself, separate from the disk and the registry so it can be tested.
 /// The marker is only asked when the flag file is present.
 #[cfg(debug_assertions)]
-fn decide(flag_file_present: bool, is_test_machine: impl FnOnce() -> bool) -> Vec<&'static str> {
-    if flag_file_present && is_test_machine() {
+fn decide(flag_file_present: bool, marker_names_this_pc: impl FnOnce() -> bool) -> Vec<&'static str> {
+    if flag_file_present && marker_names_this_pc() {
         vec![STAFF_ARG]
     } else {
         Vec::new()

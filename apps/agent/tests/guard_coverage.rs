@@ -257,3 +257,156 @@ fn the_two_trait_sections_are_found() {
     assert_eq!(find("set_path_acl"), Some(true));
     assert_eq!(find("lsa_secret_get"), Some(true), "a read that is only allowed on a test machine is listed");
 }
+
+// -- (Phase 6 Step 5, plan 4.11) the test-only door -------------------------------------------------
+//
+// `require_armed_machine` is the guard of everything that runs on an installed PC. The test-marker
+// door alone (`require_test_machine`, `is_test_machine`) is for dev and VM helpers. This scan lists
+// every non-test use of it in the agent, the shell launcher, the Staff App and the shared crates, so
+// a new one is a decision made here, in the open, and not an accident.
+
+/// (file relative to the repo root, how many uses, why the test door alone is right).
+const TEST_DOOR_USES: &[(&str, usize, &str)] = &[
+    (
+        "apps/agent/src/service.rs",
+        1,
+        "guard_destructive: `service install` and `service uninstall` are dev and VM commands; the MSI installs the service in production",
+    ),
+    (
+        "apps/shell-launcher/src/crashflag.rs",
+        1,
+        "the debug-only crash-loop flag: a release build has no code for it, and a test marker is required",
+    ),
+];
+
+fn repo_root() -> PathBuf {
+    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("..").join("..")
+}
+
+/// Every `.rs` file under `dir`, with `/` separators in the paths relative to the repo root.
+fn rust_files(dir: &std::path::Path, found: &mut Vec<PathBuf>) {
+    let Ok(entries) = std::fs::read_dir(dir) else { return };
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if path.is_dir() {
+            rust_files(&path, found);
+        } else if path.extension().is_some_and(|e| e == "rs") {
+            found.push(path);
+        }
+    }
+}
+
+/// The production part of a source file: nothing for test files, and nothing from the first
+/// `#[cfg(test)]` (or `#[cfg(all(test, ...))]`) on.
+fn production_code(relative: &str, text: &str) -> String {
+    let file_name = relative.rsplit('/').next().unwrap_or(relative);
+    if file_name == "tests.rs" || relative.contains("/tests/") {
+        return String::new();
+    }
+    let cut = text.lines().position(|l| l.trim_start().starts_with("#[cfg(test)]") || l.trim_start().starts_with("#[cfg(all(test"));
+    match cut {
+        Some(at) => text.lines().take(at).collect::<Vec<_>>().join("\n"),
+        None => text.to_string(),
+    }
+}
+
+fn count_test_door(code: &str) -> usize {
+    code.matches("require_test_machine").count() + code.matches("is_test_machine").count()
+}
+
+/// What is wrong with the test-door uses found: a use that is not listed, or a count that differs.
+fn test_door_problems(found: &[(String, usize)]) -> Vec<String> {
+    let mut problems = Vec::new();
+    for (file, count) in found {
+        match TEST_DOOR_USES.iter().find(|(name, _, _)| name == file) {
+            None => problems.push(format!("{file}: {count} use(s) of the test door alone; use the armed guard, or list it with a reason")),
+            Some((_, allowed, _)) if allowed != count => problems.push(format!("{file}: {count} use(s), the list says {allowed}")),
+            Some(_) => {}
+        }
+    }
+    for (name, _, _) in TEST_DOOR_USES {
+        if !found.iter().any(|(file, _)| file == name) {
+            problems.push(format!("{name} is listed but has no test-door use any more; remove it from the list"));
+        }
+    }
+    problems
+}
+
+fn scan_test_door_uses() -> (usize, Vec<(String, usize)>) {
+    let root = repo_root();
+    let mut roots = vec![
+        root.join("apps").join("agent").join("src"),
+        root.join("apps").join("shell-launcher").join("src"),
+        root.join("apps").join("staff-app").join("src-tauri").join("src"),
+    ];
+    if let Ok(entries) = std::fs::read_dir(root.join("crates")) {
+        roots.extend(entries.flatten().map(|e| e.path().join("src")));
+    }
+    let mut files = Vec::new();
+    for dir in &roots {
+        rust_files(dir, &mut files);
+    }
+    let mut found = Vec::new();
+    for path in &files {
+        let relative = path
+            .strip_prefix(&root)
+            .unwrap_or(path)
+            .to_string_lossy()
+            .replace('\\', "/")
+            .trim_start_matches("./")
+            .to_string();
+        if relative == "crates/rulebox-win32/src/guard.rs" {
+            continue; // the definitions
+        }
+        let text = std::fs::read_to_string(path).unwrap_or_else(|e| panic!("cannot read {}: {e}", path.display()));
+        let count = count_test_door(&production_code(&relative, &text));
+        if count > 0 {
+            found.push((relative, count));
+        }
+    }
+    (files.len(), found)
+}
+
+#[test]
+fn the_test_marker_alone_opens_only_the_listed_dev_helpers() {
+    let (scanned, found) = scan_test_door_uses();
+    assert!(scanned > 40, "the scan read too few files ({scanned})");
+    let problems = test_door_problems(&found);
+    assert!(problems.is_empty(), "{problems:#?}");
+    for (_, _, why) in TEST_DOOR_USES {
+        assert!(!why.is_empty());
+    }
+}
+
+#[test]
+fn the_test_door_scanner_notices_each_way_to_get_it_wrong() {
+    // An unlisted use, a changed count, a listed file with no use left.
+    assert_eq!(test_door_problems(&[("apps/agent/src/kiosk.rs".to_string(), 1)]).len(), 3);
+    let listed: Vec<(String, usize)> = TEST_DOOR_USES.iter().map(|(name, count, _)| (name.to_string(), *count)).collect();
+    assert!(test_door_problems(&listed).is_empty());
+    let mut more = listed.clone();
+    more[0].1 += 1;
+    assert_eq!(test_door_problems(&more).len(), 1);
+    // Test code is not counted; production code is.
+    let source = "fn a() { rulebox_win32::guard::require_test_machine(); }\n#[cfg(test)]\nmod tests { fn b() { is_test_machine(); } }\n";
+    assert_eq!(count_test_door(&production_code("apps/agent/src/x.rs", source)), 1);
+    assert_eq!(count_test_door(&production_code("apps/agent/src/x/tests.rs", source)), 0);
+    // The armed guard is not the test door.
+    assert_eq!(count_test_door("require_armed_machine(); is_armed_machine();"), 0);
+}
+
+#[test]
+fn recover_and_the_data_directory_use_the_armed_guard() {
+    // `recover` is the way back on an installed PC; creating the data directory happens at the
+    // service's first start. Neither may be limited to the test marker.
+    let recover = read("src/recover.rs");
+    assert!(production_code("apps/agent/src/recover.rs", &recover).contains("guard_armed(\"recover\")"));
+    let service = read("src/service.rs");
+    let service = production_code("apps/agent/src/service.rs", &service);
+    assert!(service.contains("guard_destructive(\"service install\")"));
+    assert!(service.contains("guard_destructive(\"service uninstall\")"));
+    let windows = read("src/platform/windows.rs");
+    let windows = production_code("apps/agent/src/platform/windows.rs", &windows);
+    assert!(windows.contains("require_armed_machine().map_err(map_err)"));
+    assert!(windows.matches("require_armed_machine().context(").count() == 2);
+}
