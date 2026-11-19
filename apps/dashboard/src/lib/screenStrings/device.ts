@@ -1,5 +1,20 @@
 import { n } from "../strings";
 
+const COMPAT_CODES: Record<string, string> = {
+  os_too_old: "Windows is older than Windows 10 22H2.",
+  s_mode: "Windows is in S mode.",
+  managed_device: "The PC is joined to a domain or Entra ID.",
+  no_other_admin: "There is no other enabled administrator account.",
+  legal_notice: "A sign-in legal notice is set.",
+  shell_binary_missing: "The Rulebox shell files are missing.",
+  webview2_too_old: "The WebView2 Runtime is missing or older than version 125.",
+  webview2_missing: "The WebView2 Runtime is not installed. Rulebox Setup installs it.",
+  low_disk: "Less than 2 GB is free on the system drive.",
+  arm64_untested: "ARM64 Windows is not tested yet.",
+  protected_print_on: "Windows protected print mode is on. Printers with third-party drivers would be removed.",
+  low_ram: "Less than 3 GB of memory, below the target hardware.",
+};
+
 export const deviceStrings = {
   back: "All devices",
   identity: "Identity",
@@ -42,6 +57,24 @@ export const deviceStrings = {
   warnings: "Warnings",
   liteMode: "Uses Lite mode (4 GB RAM or less)",
   noIssues: "No blockers or warnings.",
+  protection: "Protection",
+  protectionFull: "Full",
+  protectionReduced: "Reduced",
+  protectionNotReported: "Not reported",
+  reducedTitle: "Reduced protection",
+  reducedDetail: (missing: string[]) =>
+    `${missing.join(" and ")} cannot be used on this PC. It can still be enrolled; the other lockdown layers apply.`,
+  layerAppLocker: "AppLocker rules (Windows edition)",
+  layerAppControl: "App Control policies (Windows build)",
+  webview2: "WebView2 Runtime",
+  webview2Missing: "Not installed",
+  browsers: "Browsers found",
+  browserEdge: "Edge",
+  browserChrome: "Chrome",
+  browsersNone: "None",
+  notReported: "—",
+  /** The agent's codes in plain words; a code this dashboard does not know shows as it is. */
+  compatCode: (code: string): string => (Object.hasOwn(COMPAT_CODES, code) ? COMPAT_CODES[code]! : code),
   joined: "Joined to a domain or Entra ID",
   sMode: "S mode",
   arch: "Architecture",

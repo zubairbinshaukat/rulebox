@@ -27,7 +27,16 @@ export function compatOf(c: unknown): CompatReport | undefined {
   if (typeof c !== "object" || c === null) return undefined;
   const r = c as Partial<CompatReport>;
   if (typeof r.os !== "object" || r.os === null || !Array.isArray(r.blockers) || !Array.isArray(r.warnings)) return undefined;
-  return { ...r, liteMode: r.liteMode === true } as CompatReport;
+  const out = { ...r, liteMode: r.liteMode === true } as CompatReport;
+  // The Phase 6 fields (plan 4.12) arrive checked by the server; anything odd is left out, never shown wrong.
+  const x = r as Record<string, unknown>;
+  const flag = (o: unknown, k: string) => typeof (o as Record<string, unknown> | null)?.[k] === "boolean";
+  if (x.protection !== "full" && x.protection !== "reduced") delete out.protection;
+  if (typeof x.layers !== "object" || x.layers === null || !flag(x.layers, "appLocker") || !flag(x.layers, "appControl")) delete out.layers;
+  if (typeof x.browsers !== "object" || x.browsers === null || !flag(x.browsers, "edge") || !flag(x.browsers, "chrome")) delete out.browsers;
+  const w = x.webview2 as Record<string, unknown> | null | undefined;
+  if (typeof w !== "object" || w === null || typeof w.present !== "boolean") delete out.webview2;
+  return out;
 }
 
 export function deviceRowOf(r: ListRow): DeviceRow {

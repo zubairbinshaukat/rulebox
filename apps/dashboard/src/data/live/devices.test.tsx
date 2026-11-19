@@ -130,6 +130,25 @@ describe("row mapping", () => {
     expect(compatOf(null)).toBeUndefined();
   });
 
+  it("the Phase 6 compatibility fields are kept when well formed and left out when not", () => {
+    const base = { os: { build: 26100 }, blockers: [], warnings: [], liteMode: false };
+    const good = {
+      ...base,
+      webview2: { present: true, version: "131.0.1", source: "machine" },
+      protection: "reduced",
+      layers: { appLocker: false, appControl: true },
+      browsers: { edge: true, chrome: false },
+      protectedPrint: false,
+      lowRam: true,
+    };
+    expect(compatOf(good)).toMatchObject(good);
+    const bad = compatOf({ ...base, webview2: "x", protection: "half", layers: { appLocker: 1 }, browsers: null });
+    expect(bad).toBeDefined();
+    for (const key of ["webview2", "protection", "layers", "browsers"]) expect(key in bad!).toBe(false);
+    // An older agent sends none of them.
+    expect(compatOf(base)?.protection).toBeUndefined();
+  });
+
   it("the detail takes out-of-support from the summary and revoked from the flags", () => {
     const detail = deviceDetailOf(asDetail({
       _id: "d1",

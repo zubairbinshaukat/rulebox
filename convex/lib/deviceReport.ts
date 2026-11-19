@@ -2,6 +2,7 @@ import type { Infer } from "convex/values";
 import { v } from "convex/values";
 import type { Doc, Id } from "../_generated/dataModel";
 import type { DatabaseWriter } from "../_generated/server";
+import { cleanCompat } from "./compat";
 import { deepEqual } from "./deepEqual";
 import { isOutOfSupport } from "./lifecycle";
 import { bumpOrgStatsIfPresent } from "./plans";
@@ -164,7 +165,7 @@ export async function writeStatus(
     kioskError: nn(s.kioskError),
     appliedVersion,
     shellHealth: nn(s.shellHealth),
-    compat: nn(s.compat),
+    compat: cleanCompat(s.compat),
     trustedKeyIds: nn(s.trustedKeyIds),
     restartPending: nn(s.restartPending),
     security: cleanSecurity(s.security),

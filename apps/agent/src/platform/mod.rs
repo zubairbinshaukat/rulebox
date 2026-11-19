@@ -382,6 +382,14 @@ pub trait Platform: Send + Sync + 'static {
     /// Up to `max` events of an audit channel after `after_record_id`, oldest first.
     fn read_event_log(&self, channel: &str, after_record_id: u64, max: usize) -> Result<Vec<EventRecord>, PlatformError>;
     fn read_security_posture(&self) -> Result<SecurityPosture, PlatformError>;
+    /// (Phase 6 Step 6, plan 4.12) The WebView2 Runtime's `pv` value as the registry holds it
+    /// (`EdgeUpdate\Clients\{F3017226-...}`, per machine), `Ok(None)` when no key or no value.
+    /// Not interpreted here: `compat` decides that empty or `0.0.0.0` means absent.
+    fn webview2_version(&self) -> Result<Option<String>, PlatformError>;
+    /// (Phase 6 Step 6, plan 4.8 and 4.12) Whether Windows protected print mode is on (Windows
+    /// would remove printers that use third-party drivers). Read-only; `false` when the policy
+    /// is absent.
+    fn protected_print_on(&self) -> Result<bool, PlatformError>;
     /// The DACL of a file or folder as SDDL (flags included). `Ok(None)`: it does not exist.
     fn get_path_acl(&self, path: &Path) -> Result<Option<String>, PlatformError>;
     /// (Phase 5 Step 5) Every enabled local account with administrator rights, by SID with

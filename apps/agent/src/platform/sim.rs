@@ -128,6 +128,9 @@ pub enum SimOp {
     FileIdentity,
     FileSha256,
     ProcessTraceStats,
+    // Phase 6 Step 6 (read-only).
+    Webview2Version,
+    ProtectedPrintOn,
 }
 
 impl SimOp {
@@ -181,6 +184,8 @@ impl SimOp {
                 | SimOp::FileIdentity
                 | SimOp::FileSha256
                 | SimOp::ProcessTraceStats
+                | SimOp::Webview2Version
+                | SimOp::ProtectedPrintOn
         )
     }
 }
@@ -306,6 +311,10 @@ pub struct SimWorld {
     /// Event logs by channel; `read_event_log` filters by record number.
     pub event_logs: HashMap<String, Vec<EventRecord>>,
     pub posture: SecurityPosture,
+    /// (Phase 6 Step 6) The WebView2 Runtime's `pv` text (`None`: not installed) and whether
+    /// Windows protected print mode is on.
+    pub webview2_pv: Option<String>,
+    pub protected_print: bool,
     /// DACLs of files and folders (lowercase path to SDDL).
     pub path_acls: HashMap<String, String>,
     /// (Step 8) Program files the watchdog can ask about (lowercase path to what the file says).
@@ -410,6 +419,8 @@ impl SimWorld {
                 tpm: Tpm::Present,
                 ci_policies: Vec::new(),
             },
+            webview2_pv: Some("130.0.2849.80".into()),
+            protected_print: false,
             path_acls: HashMap::new(),
             programs: HashMap::new(),
             trace_stats: TraceStats::default(),
@@ -1180,6 +1191,16 @@ impl Platform for SimPlatform {
         let mut posture = world.posture.clone();
         posture.ci_policies = world.ci_policies.keys().cloned().collect();
         Ok(posture)
+    }
+
+    fn webview2_version(&self) -> Result<Option<String>, PlatformError> {
+        self.check(SimOp::Webview2Version)?;
+        Ok(lock(&self.world).webview2_pv.clone())
+    }
+
+    fn protected_print_on(&self) -> Result<bool, PlatformError> {
+        self.check(SimOp::ProtectedPrintOn)?;
+        Ok(lock(&self.world).protected_print)
     }
 
     fn get_path_acl(&self, path: &Path) -> Result<Option<String>, PlatformError> {

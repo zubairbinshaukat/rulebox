@@ -355,6 +355,14 @@ export interface CompatReport {
   blockers: string[];
   warnings: string[];
   liteMode: boolean;
+  // Phase 6 (plan 4.12). Absent in a report from an older agent.
+  webview2?: { present: boolean; version: string | null; source: string };
+  /** `reduced` when AppLocker rules (L3) or App Control (L4) are not available on the PC. */
+  protection?: "full" | "reduced";
+  layers?: { appLocker: boolean; appControl: boolean };
+  browsers?: { edge: boolean; chrome: boolean };
+  protectedPrint?: boolean;
+  lowRam?: boolean;
 }
 
 /** `deviceReports` row (the 12 Phase 2 status fields + Phase 4 additions). */

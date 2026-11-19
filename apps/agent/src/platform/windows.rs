@@ -41,6 +41,16 @@ use crate::state::write_atomic;
 
 const WINLOGON_KEY: &str = rulebox_win32::autologon::WINLOGON_KEY;
 const POLICIES_SYSTEM_KEY: &str = r"SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System";
+/// (Phase 6 Step 6) Where the WebView2 Runtime keeps its version (`pv`), in the order they are tried.
+const WEBVIEW2_KEYS: [&str; 2] = [
+    r"SOFTWARE\WOW6432Node\Microsoft\EdgeUpdate\Clients\{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}",
+    r"SOFTWARE\Microsoft\EdgeUpdate\Clients\{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}",
+];
+/// (Phase 6 Step 6) Windows protected print mode: the policy and the state (unverified, plan 4.8).
+const PROTECTED_PRINT_VALUES: [(&str, &str); 2] = [
+    (r"SOFTWARE\Policies\Microsoft\Windows NT\Printers\WPP", "WindowsProtectedPrintGroupPolicyState"),
+    (r"SYSTEM\CurrentControlSet\Control\Print\WPP", "EnabledNow"),
+];
 /// (Phase 5 Step 7) The most folders one `folder_acls` scan returns.
 const FOLDER_SCAN_LIMIT: usize = 60_000;
 
@@ -678,6 +688,32 @@ impl Platform for WindowsPlatform {
 
     fn read_security_posture(&self) -> Result<SecurityPosture, PlatformError> {
         posture::read_security_posture().map_err(map_err)
+    }
+
+    /// The Evergreen Runtime registers its `pv` under the 32-bit view of EdgeUpdate (`WOW6432Node`)
+    /// on a 64-bit Windows; the native path is the fallback. Per-machine only: the Staff account
+    /// is another user, so a runtime installed for someone else's profile is no use to it.
+    fn webview2_version(&self) -> Result<Option<String>, PlatformError> {
+        for path in WEBVIEW2_KEYS {
+            if let Some(RegValue::String(text)) = get_hklm(path, "pv").map_err(map_err)? {
+                if !text.trim().is_empty() {
+                    return Ok(Some(text));
+                }
+            }
+        }
+        Ok(None)
+    }
+
+    /// **Unverified** (plan 4.8, Step 2): the "Configure Windows protected print" policy
+    /// (`WindowsProtectedPrintGroupPolicyState`) and the state the print service keeps
+    /// (`Control\Print\WPP\EnabledNow`); either one at 1 counts as on.
+    fn protected_print_on(&self) -> Result<bool, PlatformError> {
+        for (path, name) in PROTECTED_PRINT_VALUES {
+            if let Some(RegValue::Dword(1)) = get_hklm(path, name).map_err(map_err)? {
+                return Ok(true);
+            }
+        }
+        Ok(false)
     }
 
     fn get_path_acl(&self, path: &Path) -> Result<Option<String>, PlatformError> {

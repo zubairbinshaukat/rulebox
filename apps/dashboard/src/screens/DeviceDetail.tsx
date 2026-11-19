@@ -213,15 +213,21 @@ function Device({ d, liveness }: { d: Detail; liveness: QueryState<DeviceLivenes
                   <KV label={s.arch} value={r.compat.os.arch} />
                   <KV label={s.sMode} value={r.compat.os.sMode ? strings.common.yes : strings.common.no} />
                   <KV label={s.joined} value={r.compat.os.domainJoined || r.compat.os.entraJoined ? strings.common.yes : strings.common.no} />
+                  <KV label={s.protection} value={<ProtectionLevel c={r.compat} />} />
+                  <KV label={s.webview2} value={<WebView2Value c={r.compat} />} />
+                  <KV label={s.browsers} value={<BrowsersValue c={r.compat} />} />
                 </dl>
+                {r.compat.protection === "reduced" ? (
+                  <InlineNotice tone="neutral" title={s.reducedTitle} detail={s.reducedDetail(missingLayers(r.compat))} />
+                ) : null}
                 {r.compat.blockers.length === 0 && r.compat.warnings.length === 0 ? (
                   <InlineNotice tone="success" title={s.noIssues} />
                 ) : null}
                 {r.compat.blockers.length ? (
-                  <InlineNotice tone="danger" title={s.blockers} detail={r.compat.blockers.join(", ")} />
+                  <InlineNotice tone="danger" title={s.blockers} detail={r.compat.blockers.map(s.compatCode).join(" ")} />
                 ) : null}
                 {r.compat.warnings.length ? (
-                  <InlineNotice tone="warning" title={s.warnings} detail={r.compat.warnings.join(", ")} />
+                  <InlineNotice tone="warning" title={s.warnings} detail={r.compat.warnings.map(s.compatCode).join(" ")} />
                 ) : null}
                 {r.compat.liteMode ? <p className="dash-muted">{s.liteMode}</p> : null}
               </div>
@@ -281,6 +287,42 @@ function TrustedKeys({ ids }: { ids: string[] | undefined }) {
       ))}
     </span>
   );
+}
+
+type Compat = NonNullable<NonNullable<Detail["report"]>["compat"]>;
+
+/** The layers the PC cannot use, in words (the agent's `layers`, plan 4.12). */
+function missingLayers(c: Compat): string[] {
+  const missing: string[] = [];
+  if (c.layers?.appLocker === false) missing.push(s.layerAppLocker);
+  if (c.layers?.appControl === false) missing.push(s.layerAppControl);
+  return missing;
+}
+
+function ProtectionLevel({ c }: { c: Compat }) {
+  if (c.protection === undefined) return <span className="dash-muted">{s.protectionNotReported}</span>;
+  return c.protection === "full" ? (
+    <Pill tone="success">{s.protectionFull}</Pill>
+  ) : (
+    <Pill tone="warning">{s.protectionReduced}</Pill>
+  );
+}
+
+function WebView2Value({ c }: { c: Compat }) {
+  if (c.webview2 === undefined) return <span className="dash-muted">{s.notReported}</span>;
+  return c.webview2.present && c.webview2.version ? (
+    <span className="dash-mono">{c.webview2.version}</span>
+  ) : (
+    <span>{s.webview2Missing}</span>
+  );
+}
+
+function BrowsersValue({ c }: { c: Compat }) {
+  if (c.browsers === undefined) return <span className="dash-muted">{s.notReported}</span>;
+  const found: string[] = [];
+  if (c.browsers.edge) found.push(s.browserEdge);
+  if (c.browsers.chrome) found.push(s.browserChrome);
+  return <span>{found.length ? found.join(", ") : s.browsersNone}</span>;
 }
 
 function KV({ label, value }: { label: string; value: ReactNode }) {

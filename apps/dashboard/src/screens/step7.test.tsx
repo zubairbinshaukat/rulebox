@@ -468,6 +468,68 @@ describe("DeviceDetail (fleet:get)", () => {
     expect(screen.queryByText(deviceStrings.noTrustedKeyTitle)).toBeNull();
   });
 
+  describe("compatibility card (Phase 6 Step 6)", () => {
+    const os = { build: 26100, ubr: 1, displayVersion: "24H2", editionId: "Professional", productType: 1, arch: "x86_64", sMode: false, domainJoined: false, entraJoined: false, ramMb: 8192, systemDiskFreeGb: 50 };
+    const withCompat = (compat: Record<string, unknown>) => {
+      cx.fns["fleet:watch"] = vi.fn(async () => ({ fastUntil: null }));
+      cx.results["fleet:liveness"] = { lastContactAt: Date.now() - 20_000, online: true, fastUntil: null };
+      cx.results["fleet:get"] = detail({ report: { agentVersion: "0.4.0", os: "Windows 11", osBuild: "26100", updatedAt: Date.now() - 60_000, compat } });
+    };
+    const card = () => within(screen.getByRole("region", { name: deviceStrings.compat }));
+
+    it("shows Full protection, the WebView2 version and the browsers found", () => {
+      withCompat({
+        os, blockers: [], warnings: [], liteMode: false,
+        webview2: { present: true, version: "131.0.2903.51", source: "machine" },
+        protection: "full", layers: { appLocker: true, appControl: true },
+        browsers: { edge: true, chrome: true }, protectedPrint: false, lowRam: false,
+      });
+      ui(<DeviceDetail />, "admin", "/devices/d1");
+      expect(card().getByText(deviceStrings.protection)).toBeTruthy();
+      expect(card().getByText(deviceStrings.protectionFull)).toBeTruthy();
+      expect(card().queryByText(deviceStrings.reducedTitle)).toBeNull();
+      expect(card().getByText("131.0.2903.51")).toBeTruthy();
+      expect(card().getByText("Edge, Chrome")).toBeTruthy();
+      expect(card().getByText(deviceStrings.noIssues)).toBeTruthy();
+    });
+
+    it("shows Reduced protection with the missing layers, a missing WebView2 and the warnings in words", () => {
+      withCompat({
+        os: { ...os, editionId: "CoreSingleLanguage" }, blockers: [], warnings: ["webview2_missing", "protected_print_on", "future_code"], liteMode: true,
+        webview2: { present: false, version: null, source: "none" },
+        protection: "reduced", layers: { appLocker: false, appControl: true },
+        browsers: { edge: false, chrome: false }, protectedPrint: true, lowRam: false,
+      });
+      ui(<DeviceDetail />, "admin", "/devices/d1");
+      expect(card().getByText(deviceStrings.protectionReduced)).toBeTruthy();
+      expect(card().getByText(deviceStrings.reducedTitle)).toBeTruthy();
+      expect(card().getByText(deviceStrings.reducedDetail([deviceStrings.layerAppLocker]))).toBeTruthy();
+      expect(card().getByText(deviceStrings.webview2Missing)).toBeTruthy();
+      expect(card().getByText(deviceStrings.browsersNone)).toBeTruthy();
+      const words = [deviceStrings.compatCode("webview2_missing"), deviceStrings.compatCode("protected_print_on"), "future_code"].join(" ");
+      expect(card().getByText(words)).toBeTruthy();
+      // A warning is not a blocker: no blocker notice, no "no issues".
+      expect(card().queryByText(deviceStrings.blockers)).toBeNull();
+      expect(card().queryByText(deviceStrings.noIssues)).toBeNull();
+    });
+
+    it("an older agent's report (no Phase 6 fields) shows dashes, never a wrong level", () => {
+      withCompat({ os, blockers: [], warnings: [], liteMode: false });
+      ui(<DeviceDetail />, "admin", "/devices/d1");
+      expect(card().getByText(deviceStrings.protectionNotReported)).toBeTruthy();
+      expect(card().queryByText(deviceStrings.protectionFull)).toBeNull();
+      expect(card().queryByText(deviceStrings.reducedTitle)).toBeNull();
+      expect(card().getAllByText(deviceStrings.notReported)).toHaveLength(2);
+    });
+
+    it("a blocker after the WebView2 install attempt is shown as a blocker", () => {
+      withCompat({ os, blockers: ["webview2_too_old"], warnings: [], liteMode: false, webview2: { present: true, version: "124.0.1", source: "machine" } });
+      ui(<DeviceDetail />, "admin", "/devices/d1");
+      expect(card().getByText(deviceStrings.blockers)).toBeTruthy();
+      expect(card().getByText(deviceStrings.compatCode("webview2_too_old"))).toBeTruthy();
+    });
+  });
+
   it("subscribes to liveness next to fleet:get, and a PC that pinged but never reported still shows its last contact", () => {
     // fleet:get has not answered yet: liveness is already requested (no waterfall).
     cx.results["fleet:liveness"] = { lastContactAt: Date.now() - 20_000, online: true, fastUntil: null };

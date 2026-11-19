@@ -385,6 +385,9 @@ function hex(rand: () => number, len: number): string {
 }
 
 function compat(build: number, edition: string, ramMb: number, diskGb: number, opts: Partial<CompatReport> = {}): CompatReport {
+  const appLocker = !/^(core|cloud)/i.test(edition);
+  const appControl = build >= 18362;
+  const lowRam = ramMb < 3072;
   return {
     os: {
       build,
@@ -400,8 +403,14 @@ function compat(build: number, edition: string, ramMb: number, diskGb: number, o
       systemDiskFreeGb: diskGb,
     },
     blockers: [],
-    warnings: diskGb < 2 ? ["low_disk"] : [],
+    warnings: [...(diskGb < 2 ? ["low_disk"] : []), ...(lowRam ? ["low_ram"] : [])],
     liteMode: ramMb <= 4352,
+    webview2: { present: true, version: "131.0.2903.51", source: "machine" },
+    protection: appLocker && appControl ? "full" : "reduced",
+    layers: { appLocker, appControl },
+    browsers: { edge: true, chrome: false },
+    protectedPrint: false,
+    lowRam,
     ...opts,
   };
 }
