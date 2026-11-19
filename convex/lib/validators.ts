@@ -109,6 +109,50 @@ export const installSpec = v.object({
   removeWhenUnassigned: v.boolean(),
 });
 
+/**
+ * (Phase 6, plan 4.2) How an app's version is kept. New multi-word values are snake_case (the Rust enums in
+ * `rulebox-policy` use the same literals).
+ */
+export const updateMode = v.union(v.literal("pinned"), v.literal("vendor"), v.literal("managed"));
+export const applyWhen = v.union(v.literal("boot_or_signed_out"), v.literal("when_closed"));
+
+/**
+ * (Phase 6, plan 4.2) What an admin saves for the update mode. `feed` and `autoPublish` are the SERVER's: they are never
+ * part of a device's document (`lib/desired.ts` copies only the fields a device needs). `pubkey` is the vendor's PUBLIC
+ * key (a minisign key, base64 of the `.pub` text), not a secret.
+ */
+export const updateSpec = v.object({
+  mode: updateMode,
+  // vendor
+  publisher: v.optional(v.string()), // Authenticode subject, <= 200
+  publisherProduct: v.optional(v.string()), // narrows the publisher rule, <= 100
+  minVersion: v.optional(v.string()),
+  // managed
+  feed: v.optional(v.object({ kind: v.literal("tauri"), url: v.string(), pubkey: v.string(), target: v.string() })),
+  autoPublish: v.optional(v.boolean()), // default true
+  applyWhen: v.optional(applyWhen), // default boot_or_signed_out
+  rollbackOnFail: v.optional(v.boolean()), // default true
+});
+
+/** (Phase 6, plan 4.2) Where the last check of a vendor feed ended (`appFeeds.status`; the feed resolver, Step 12, writes it). */
+export const appFeedStatus = v.union(
+  v.literal("ok"),
+  v.literal("unreachable"),
+  v.literal("bad_signature"),
+  v.literal("bad_feed"),
+  v.literal("too_large"),
+  v.literal("downgrade"),
+  v.literal("paused"),
+);
+
+/** (Phase 6) The installer one step back, kept by `apps:update` in Managed mode and swapped back by `apps:rollbackVersion`. */
+export const previousVersion = v.object({
+  version: v.string(),
+  url: v.string(),
+  sha256: v.string(),
+  sizeBytes: v.number(),
+});
+
 export const desktopSpec = v.object({
   source: v.union(
     v.literal("winget"),
@@ -124,6 +168,10 @@ export const desktopSpec = v.object({
   wingetId: v.optional(v.string()),
   wingetVersion: v.optional(v.string()),
   resetFolders: v.array(v.string()),
+  // Phase 6: all optional, so old rows stay valid (no migration).
+  version: v.optional(v.string()), // <= 40 chars of [0-9A-Za-z.+-]: the version this install delivers
+  update: v.optional(updateSpec),
+  previous: v.optional(previousVersion),
 });
 
 export const appKind = v.union(v.literal("web"), v.literal("desktop"));

@@ -575,6 +575,8 @@ export interface AppInstallRow {
   attempts: number;
   exitCode?: number;
   detail?: string;
+  /** The version the PC reports for the app (display only; absent until it reports one). */
+  installedVersion?: string;
   updatedAt: number;
 }
 
@@ -695,6 +697,40 @@ export interface InstallSpec {
   removeWhenUnassigned: boolean;
 }
 
+/** How a program's version is kept (Phase 6): left alone, kept by its vendor's own updater, or by Rulebox from the vendor's feed. */
+export type UpdateMode = "pinned" | "vendor" | "managed";
+export const UPDATE_MODES: UpdateMode[] = ["pinned", "vendor", "managed"];
+export type ApplyWhen = "boot_or_signed_out" | "when_closed";
+
+/** The vendor feed of a Managed program (`latest.json` of a Tauri updater). `pubkey` is the vendor's public key. */
+export interface FeedSpec {
+  kind: "tauri";
+  url: string;
+  pubkey: string;
+  target: string;
+}
+
+export interface UpdateSpec {
+  mode: UpdateMode;
+  // vendor
+  publisher?: string;
+  publisherProduct?: string;
+  minVersion?: string;
+  // managed
+  feed?: FeedSpec;
+  autoPublish?: boolean;
+  applyWhen?: ApplyWhen;
+  rollbackOnFail?: boolean;
+}
+
+/** The installer one step back (server-kept; what "Roll back" goes to). */
+export interface PreviousVersion {
+  version: string;
+  url: string;
+  sha256: string;
+  sizeBytes: number;
+}
+
 export interface DesktopSpec {
   source: DesktopSource;
   exe: string;
@@ -704,6 +740,26 @@ export interface DesktopSpec {
   wingetId?: string;
   wingetVersion?: string;
   resetFolders: string[];
+  /** The version this install delivers (Phase 6): display text for Pinned, an ordered version for Vendor `minVersion` and Managed. */
+  version?: string;
+  update?: UpdateSpec;
+  /** Set by the server only: the form never sends it. */
+  previous?: PreviousVersion;
+}
+
+/** Where the last check of a vendor feed ended (`apps:get` `feedStatus.status`). */
+export type FeedCheckStatus = "ok" | "unreachable" | "bad_signature" | "bad_feed" | "too_large" | "downgrade" | "paused";
+
+/** `apps:get` `feedStatus`: never the feed's address, key, hash or etag. Absent for an app without a feed. */
+export interface FeedStatus {
+  status: FeedCheckStatus;
+  /** Consecutive failed checks. */
+  failures: number;
+  lastCheckedAt?: number;
+  /** The newest version the feed listed. */
+  seenVersion?: string;
+  /** A version found but not yet published (auto-publish is off). */
+  pending?: { version: string; foundAt: number };
 }
 
 /** `apps:installSummary`: PCs per install state, each capped at 1001 ("1000+"); a state without PCs is absent. */
@@ -763,6 +819,8 @@ export interface AppDetail {
   groupOptions: GroupOption[];
   /** Blocked permission requests of the last 30 days, per kind, most first (websites only). */
   denials30d: PermissionDenialCount[];
+  /** Phase 6: the vendor feed's state, only for a Managed program with a feed. */
+  feedStatus?: FeedStatus;
 }
 
 export interface WebAppInput {

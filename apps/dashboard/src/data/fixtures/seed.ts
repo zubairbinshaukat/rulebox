@@ -176,6 +176,7 @@ export interface DbInstall {
   attempts: number;
   exitCode?: number;
   detail?: string;
+  installedVersion?: string;
   updatedAt: number;
 }
 export interface DbToken {
@@ -542,6 +543,7 @@ export function seed(now: number = Date.now()): DemoDb {
       source: "winget",
       wingetId: "VideoLAN.VLC",
       wingetVersion: "3.0.21",
+      version: "3.0.21",
       exe: "{ProgramFiles}\\VideoLAN\\VLC\\vlc.exe",
       args: [],
       fileArgTemplate: ["{file}"],
@@ -567,6 +569,7 @@ export function seed(now: number = Date.now()): DemoDb {
       source: "winget",
       wingetId: "7zip.7zip",
       wingetVersion: "24.08",
+      version: "24.08",
       exe: "{ProgramFiles}\\7-Zip\\7zFM.exe",
       args: [],
       fileArgTemplate: ["{file}"],
@@ -984,6 +987,8 @@ export function seed(now: number = Date.now()): DemoDb {
         attempts,
         exitCode,
         detail,
+        // Phase 6: what the PC reports once the app is there (the app's version, when it has one).
+        installedVersion: state === "installed" ? a.desktop?.version : undefined,
         updatedAt: now - Math.floor(rand() * 10 * DAY),
       });
     }

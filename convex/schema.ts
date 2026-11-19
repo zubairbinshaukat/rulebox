@@ -2,6 +2,7 @@ import { authTables } from "@convex-dev/auth/server";
 import { defineSchema, defineTable } from "convex/server";
 import { v } from "convex/values";
 import {
+  appFeedStatus,
   appKind,
   audience,
   auditActorType,
@@ -579,6 +580,25 @@ export default defineSchema({
     .index("by_org_archived_name", ["orgId", "archived", "name"])
     .searchIndex("search_name", { searchField: "name", filterFields: ["orgId", "archived"] }),
 
+  // tiny (Phase 6 Step 10, plan 4.2): one row per Rulebox-managed app WITH a vendor feed. Created, updated and deleted by
+  // `apps.ts` in the same mutation as the app; the feed resolver (Step 12, `feeds.ts`) is the only other writer. Never
+  // subscribed by a list: only `apps:get` reads one row.
+  appFeeds: defineTable({
+    orgId: v.id("organizations"),
+    appId: v.id("apps"),
+    nextCheckAt: v.number(),
+    lastCheckedAt: v.optional(v.number()),
+    status: appFeedStatus,
+    failures: v.number(), // consecutive
+    etag: v.optional(v.string()),
+    seenVersion: v.optional(v.string()),
+    pending: v.optional(v.object({ version: v.string(), url: v.string(), sha256: v.string(), sizeBytes: v.number(), foundAt: v.number() })),
+    // Bumped whenever an admin changes the feed settings, so a check that started before the change cannot write its result.
+    revision: v.number(),
+  })
+    .index("by_next_check", ["nextCheckAt"])
+    .index("by_app", ["appId"]),
+
   // grows
   appAssignments: defineTable({
     orgId: v.id("organizations"),
@@ -797,6 +817,9 @@ export default defineSchema({
     // Missing on rows written before the field existed (they count nowhere
     // until the PC reports again).
     groupId: v.optional(v.id("groups")),
+    // Phase 6 Step 10: the version the PC reports for the app (file version of its exe, else what the engine last
+    // installed). <= 40 chars of [0-9A-Za-z.+-]; written only when it differs (`deviceApi:report`).
+    installedVersion: v.optional(v.string()),
   })
     // "Newest first" means newest `updatedAt` (Step 17 review), not creation.
     .index("by_device_updated", ["deviceId", "updatedAt"])

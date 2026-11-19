@@ -2,7 +2,7 @@ import { internal } from "../_generated/api";
 import type { Doc, Id } from "../_generated/dataModel";
 import type { DatabaseReader, MutationCtx } from "../_generated/server";
 import { sha256HexSync } from "./crypto";
-import type { BuildApp } from "./desired";
+import { docUpdate, type BuildApp } from "./desired";
 import { fail } from "./errors";
 import {
   KEEP_GROUP_CONFIGS,
@@ -197,6 +197,9 @@ export function configApp(app: Doc<"apps">): ConfigApp {
                     removeWhenUnassigned: i.removeWhenUnassigned,
                   },
             resetFolders: [...d.resetFolders],
+            // Phase 6: only what a device may know (`docUpdate` drops the feed), left out when absent so an older version keeps its hash.
+            ...(d.version !== undefined ? { version: d.version } : {}),
+            ...(d.update !== undefined ? { update: docUpdate(d.update) } : {}),
           },
     icon: app.icon === undefined ? null : { storageId: app.icon.storageId, sha256: app.icon.sha256 },
   };

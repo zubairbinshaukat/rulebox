@@ -32,6 +32,7 @@ import {
   WEB_PERMISSION_KEYS,
   type AppDetail,
   type AppKind,
+  type DesktopSpec,
   type AppOption,
   type AppRow,
   type AssignmentRow,
@@ -67,6 +68,7 @@ import type { ServerList } from "../serverList";
 import { byKey, contains, relevance, useDemoServerPage } from "./lists";
 import { lockdownWarningsOf } from "./lockdown";
 import * as validate from "../../lib/validate";
+import * as rules from "../../lib/apps/updateRules";
 import { BROADCAST_ACTIVE_MAX, BROADCAST_BODY_MAX, BROADCAST_TITLE_MAX, LOCK_CONTACT_MAX, LOCK_MESSAGE_MAX, noticeProblem } from "../../lib/noticeRules";
 import { MAX_WIFI_GROUPS, MAX_WIFI_NAME, MAX_WIFI_PROFILES, WIFI_SECURITIES, passphraseProblem, ssidProblem } from "../../lib/wifiRules";
 import {
@@ -465,6 +467,47 @@ function requirePilotDevice(db: DemoDb, groupId: string, leaving: string[] = [])
 }
 
 const wholeBetween = (n: number, min: number, max: number) => Number.isInteger(n) && n >= min && n <= max;
+
+/**
+ * The demo's copy of what the server does to a program's versioning (`convex/lib/appRules.ts`): the refusals of plan 4.4 and
+ * `previous`, which is the server's field (what the form sends is ignored).
+ */
+function demoDesktop(old: DesktopSpec | undefined, input: DesktopSpec): DesktopSpec {
+  const next: DesktopSpec = { ...input };
+  delete next.previous; // the server's field: what the form sent is ignored
+  const browser = rules.browserAppOf(next.exe);
+  const mode = browser !== null ? "vendor" : (next.update?.mode ?? "pinned");
+  const version = next.version?.trim() || undefined;
+  delete next.version;
+  if (version !== undefined) next.version = version;
+  if (mode === "pinned") {
+    delete next.update;
+    return next;
+  }
+  if (mode === "vendor") {
+    const publisher = next.update?.publisher?.trim() || (browser === "chrome" ? "Google LLC" : browser === "edge" ? "Microsoft Corporation" : "");
+    if (!publisher) fail("invalid_argument", { field: "update.publisher", detail: "vendor_mode_needs_publisher" });
+    const product = next.update?.publisherProduct?.trim() || (next.update?.publisher?.trim() ? undefined : browser === "chrome" ? "Google Chrome" : browser === "edge" ? "Microsoft Edge" : undefined);
+    if (!product && rules.publisherTooBroad(publisher)) fail("invalid_argument", { field: "update.publisher", detail: "publisher_too_broad" });
+    const min = next.update?.minVersion?.trim() || undefined;
+    if (min) {
+      if (!rules.isOrderedVersion(min)) fail("invalid_argument", { field: "update.minVersion", detail: "version_not_ordered" });
+      if (!version || !rules.isOrderedVersion(version)) fail("invalid_argument", { field: "version", detail: "version_not_ordered" });
+      if (rules.numbersAbove(min, version)) fail("invalid_argument", { field: "update.minVersion", detail: "min_above_bootstrap" });
+    }
+    next.update = { mode: "vendor", publisher, ...(product ? { publisherProduct: product } : {}), ...(min ? { minVersion: min } : {}) };
+    return next;
+  }
+  if (!next.install) fail("invalid_argument", { field: "update.mode" });
+  if (!version || !rules.isOrderedVersion(version)) fail("invalid_argument", { field: "version", detail: "version_not_ordered" });
+  const u = next.update;
+  next.update = { mode: "managed", ...(u?.feed ? { feed: u.feed } : {}), ...(u?.autoPublish !== undefined ? { autoPublish: u.autoPublish } : {}), ...(u?.applyWhen ? { applyWhen: u.applyWhen } : {}), ...(u?.rollbackOnFail !== undefined ? { rollbackOnFail: u.rollbackOnFail } : {}) };
+  const before = old?.install;
+  if (before && next.install && (before.url !== next.install.url || before.sha256 !== next.install.sha256)) {
+    if (old?.version && rules.isOrderedVersion(old.version)) next.previous = { version: old.version, url: before.url, sha256: before.sha256, sizeBytes: before.sizeBytes };
+  } else if (old?.previous) next.previous = old.previous;
+  return next;
+}
 
 function find<T extends { _id: string }>(list: T[], id: string): T {
   const row = list.find((x) => x._id === id);
@@ -1632,6 +1675,8 @@ export const demoApi: DataApi = {
         directEmployeeCount: Math.min(db.employeeApps.filter((m) => m.appId === a._id).length, 1001),
         groupOptions: groupOptions(db),
         denials30d: a.kind === "web" ? [...(db.appDenials.get(a._id) ?? [])].sort((x, y) => y.count - x.count || (x.kind < y.kind ? -1 : 1)) : [],
+        // The resolver (Step 12) fills the real status: the demo shows a feed that has just been checked.
+        ...(a.desktop?.update?.mode === "managed" && a.desktop.update.feed ? { feedStatus: { status: "ok" as const, failures: 0, lastCheckedAt: Date.now() - 3 * 3_600_000, seenVersion: a.desktop.version } } : {}),
       };
     });
   },
@@ -1695,7 +1740,7 @@ export const demoApi: DataApi = {
             description: input.description?.trim() || undefined,
             kind: "desktop",
             hue: input.hue,
-            desktop: { ...input.desktop, exe },
+            desktop: demoDesktop(undefined, { ...input.desktop, exe }),
             archived: false,
             revision: 1,
             createdAt: now,
@@ -1725,7 +1770,7 @@ export const demoApi: DataApi = {
             a.name = nameOrFail(desktop.name, validate.NAME_MAX.app);
             a.description = desktop.description?.trim() || undefined;
             a.hue = desktop.hue;
-            a.desktop = { ...desktop.desktop, exe: desktop.desktop.exe.replace("{AppId}", a._id) };
+            a.desktop = demoDesktop(a.desktop, { ...desktop.desktop, exe: desktop.desktop.exe.replace("{AppId}", a._id) });
           }
           a.revision++;
           audit({ action: "app.updated", targetType: "app", targetId: a._id, targetLabel: a.name, summary: "App settings changed." });
@@ -1816,6 +1861,29 @@ export const demoApi: DataApi = {
             }
           }
           audit({ action: "app.retryRequested", targetType: "app", targetId: a._id, targetLabel: a.name, summary: "Retry requested for failed installs." });
+        }),
+      [],
+    );
+  },
+
+  useRollbackApp() {
+    return useCallback(
+      ({ appId, expectedRevision }) =>
+        runMutation("admin", ({ db, audit }) => {
+          const a = find(db.apps, appId);
+          checkRevision(a, expectedRevision);
+          const d = a.desktop;
+          if (a.kind !== "desktop" || !d || d.update?.mode !== "managed" || !d.install) fail("invalid_argument", { field: "appId" });
+          if (!d.previous) fail("invalid_argument", { field: "previous" });
+          const from = d.version;
+          const { previous } = d;
+          const next: DesktopSpec = { ...d, version: previous.version, install: { ...d.install, url: previous.url, sha256: previous.sha256, sizeBytes: previous.sizeBytes } };
+          if (from !== undefined) next.previous = { version: from, url: d.install.url, sha256: d.install.sha256, sizeBytes: d.install.sizeBytes };
+          else delete next.previous;
+          a.desktop = next;
+          a.revision++;
+          audit({ action: "app.updated", targetType: "app", targetId: a._id, targetLabel: a.name, summary: `Rolled back ${a.name} from ${from ?? "the current version"} to ${previous.version}` });
+          return { revision: a.revision };
         }),
       [],
     );
@@ -2590,6 +2658,7 @@ export const demoDevicesApi: DevicesApi = {
           attempts: i.attempts,
           exitCode: i.exitCode,
           detail: i.detail,
+          installedVersion: i.installedVersion,
           updatedAt: i.updatedAt,
         }));
     });
@@ -2768,6 +2837,7 @@ export const demoAppsApi: AppsApi = {
           attempts: i.attempts,
           exitCode: i.exitCode,
           detail: i.detail,
+          installedVersion: i.installedVersion,
           updatedAt: i.updatedAt,
         }));
     });

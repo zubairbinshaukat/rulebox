@@ -7,6 +7,7 @@ import { type DatabaseWriter } from "./_generated/server";
 import { DUMMY_PHC, verifier } from "./lib/argon";
 import { writeAudit, type AuditActor } from "./lib/audit";
 import { checkDevice } from "./lib/deviceAuth";
+import { MAX_VERSION_CHARS } from "./lib/feed/version";
 import {
   actionOfKind,
   BYTES_PER_GB,
@@ -402,6 +403,8 @@ const installResult = v.object({
   attempts: v.number(),
   exitCode: v.optional(v.union(v.number(), v.null())),
   detail: v.optional(v.union(v.string(), v.null())),
+  // Phase 6 Step 10: the version the PC has (plan 4.4.1). Absent = keep what is stored; null = clear it.
+  installedVersion: v.optional(v.union(v.string(), v.null())),
 });
 type InstallResult = Infer<typeof installResult>;
 
@@ -430,6 +433,19 @@ function checkInstalls(results: InstallResult[]): void {
 function cleanInstallDetail(detail: string | null | undefined): string | undefined {
   if (detail === null || detail === undefined) return undefined;
   return detail.length <= MAX_INSTALL_DETAIL && INSTALL_DETAILS.has(detail) ? detail : undefined;
+}
+
+/** `[0-9A-Za-z.+-]`, 1 to `MAX_VERSION_CHARS`: the version text of plan 4.3 (the same rule as `apps.desktop.version`). */
+const INSTALLED_VERSION = /^[0-9A-Za-z.+-]+$/;
+
+/**
+ * The reported `installedVersion` as the server understands it: a string to store, `null` to clear, `undefined` to leave the
+ * stored value alone. A value that is not version text is dropped (= `undefined`), never a reason to refuse the report (version
+ * skew must not stall the agent's queue, like `cleanInstallDetail`).
+ */
+function cleanInstalledVersion(value: string | null | undefined): string | null | undefined {
+  if (value === undefined || value === null) return value;
+  return value.length >= 1 && value.length <= MAX_VERSION_CHARS && INSTALLED_VERSION.test(value) ? value : undefined;
 }
 
 /**
@@ -569,7 +585,9 @@ async function ingestDriverResult(
  * with the PC's group; `orgStats.failedInstallCount` (live failed rows only,
  * lib/installs.ts) moves in the same mutation. A `detail` outside
  * the fixed list is dropped (the result is stored without it). An id that is a driver (Step 14b) goes to `driverResults`
- * (`ingestDriverResult`; `appRevision` is then the driver revision). Returns `accepted` (= every result) and the rows written.
+ * (`ingestDriverResult`; `appRevision` is then the driver revision). `installedVersion` (Phase 6) rides the same upsert and counts
+ * as a difference only when the stored value would change (absent keeps, null or `removed` clears, a malformed one is dropped).
+ * Returns `accepted` (= every result) and the rows written.
  */
 async function ingestInstalls(ctx: Ctx, results: InstallResult[], now: number): Promise<{ accepted: number; written: number }> {
   let failedDelta = 0;
@@ -597,28 +615,41 @@ async function ingestInstalls(ctx: Ctx, results: InstallResult[], now: number): 
       detail: cleanInstallDetail(r.detail),
       groupId,
     };
+    // Phase 6: a version is reported by the agent next to the state. `removed` (the app is gone) and an explicit null clear it;
+    // an absent (or malformed) value keeps what is stored.
+    const reported = cleanInstalledVersion(r.installedVersion);
     const counts = next.state === "failed" && (await check.live(groupId, app._id)) ? 1 : 0;
     const row = await ctx.db
       .query("installResults")
       .withIndex("by_device_app", (q) => q.eq("deviceId", ctx.device._id).eq("appId", app._id))
       .first();
     if (row === null) {
-      await ctx.db.insert("installResults", { orgId: ctx.device.orgId, deviceId: ctx.device._id, appId: app._id, ...next, updatedAt: now });
+      const installedVersion = next.state === "removed" || reported === null ? undefined : reported;
+      await ctx.db.insert("installResults", {
+        orgId: ctx.device.orgId,
+        deviceId: ctx.device._id,
+        appId: app._id,
+        ...next,
+        ...(installedVersion !== undefined ? { installedVersion } : {}),
+        updatedAt: now,
+      });
       written++;
       failedDelta += counts;
       continue;
     }
+    const installedVersion = next.state === "removed" || reported === null ? undefined : (reported ?? row.installedVersion);
     const same =
       row.state === next.state &&
       row.appRevision === next.appRevision &&
       row.attempts === next.attempts &&
       row.exitCode === next.exitCode &&
       row.detail === next.detail &&
-      row.groupId === next.groupId;
+      row.groupId === next.groupId &&
+      row.installedVersion === installedVersion;
     if (same) continue;
     const counted = row.state === "failed" && (await check.live(row.groupId, app._id)) ? 1 : 0;
-    // `undefined` removes a stale exit code, detail or tag.
-    await ctx.db.patch(row._id, { ...next, updatedAt: now });
+    // `undefined` removes a stale exit code, detail, tag or version.
+    await ctx.db.patch(row._id, { ...next, installedVersion, updatedAt: now });
     written++;
     failedDelta += counts - counted;
   }

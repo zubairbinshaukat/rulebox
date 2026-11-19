@@ -629,6 +629,9 @@ export const liveApi: DataApi = {
     );
     return useMapped(call);
   },
+  useRollbackApp() {
+    return useMapped(useMutation(api.apps.rollbackVersion));
+  },
   useResolveWinget() {
     return useMapped(useAction(api.apps.resolveWinget));
   },

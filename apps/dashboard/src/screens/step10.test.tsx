@@ -8,6 +8,8 @@ import type { Me } from "../data/types";
 import { MeContext } from "../lib/member";
 import { strings } from "../lib/strings";
 import { appEditStrings } from "../lib/screenStrings/appEdit";
+import { appUpdateStrings } from "../lib/screenStrings/appUpdates";
+import { updateRefusalStrings } from "../lib/screenStrings/updateRefusals";
 import { appsStrings } from "../lib/screenStrings/apps";
 import { fileTypesStrings } from "../lib/screenStrings/fileTypes";
 
@@ -419,6 +421,119 @@ describe("AppEdit: a Windows program", () => {
       expect(await screen.findByText(strings.validate.exePath)).toBeTruthy();
     }
     expect(createDesktop).not.toHaveBeenCalled();
+  });
+});
+
+describe("AppEdit: Updates card (Phase 6 Step 10; apps:get feedStatus, apps:rollbackVersion)", () => {
+  const install = { kind: "msi", url: "https://dl.example.com/pos-2.msi", sha256: sha, sizeBytes: 2000, silentArgs: [], successExitCodes: [0], removeWhenUnassigned: true };
+  const feed = { kind: "tauri", url: "https://updates.example.com/latest.json", pubkey: "RWTestKeyAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA", target: "windows-x86_64-nsis" };
+  const program = (over: Record<string, unknown> = {}, desktop: Record<string, unknown> = {}) => ({
+    _id: "a2",
+    name: "POS",
+    kind: "desktop",
+    archived: false,
+    revision: 5,
+    createdAt: 1,
+    assignments: [],
+    fileTypes: [],
+    directEmployeeCount: 0,
+    groupOptions: [],
+    denials30d: [],
+    desktop: { source: "msi", exe: "{ProgramFiles}\\Pos\\pos.exe", args: [], fileArgTemplate: [], resetFolders: [], install, ...desktop },
+    ...over,
+  });
+  const managed = (over: Record<string, unknown> = {}) =>
+    program(over, { version: "2.0.0", update: { mode: "managed", feed, autoPublish: true, applyWhen: "boot_or_signed_out", rollbackOnFail: true }, previous: { version: "1.9.0", url: "https://dl.example.com/pos-1.msi", sha256: "cd".repeat(32), sizeBytes: 1000 } });
+  const field = (label: string) => screen.getByRole("textbox", { name: new RegExp(`^${label}`) }) as HTMLInputElement;
+
+  it("a Managed program shows its mode, the feed status line (no address or key in it) and Roll back to the previous version", async () => {
+    cx.results["apps:get"] = managed({ feedStatus: { status: "bad_signature", failures: 2, lastCheckedAt: Date.now() - 60_000, seenVersion: "2.1.0" } });
+    ui(<AppEdit />, "admin", "/apps/a2");
+    await screen.findByText(appUpdateStrings.updates);
+    expect(screen.getByRole("radio", { name: appUpdateStrings.updateModes.managed }).getAttribute("aria-checked")).toBe("true");
+    expect(field(appUpdateStrings.version).value).toBe("2.0.0");
+    expect(screen.getByText(appUpdateStrings.feedStatusProblem.bad_signature)).toBeTruthy();
+    expect(screen.getByText(new RegExp(appUpdateStrings.feedStatusSeen("2.1.0").replace(/\./g, "\\.")))).toBeTruthy();
+    const rollback = vi.fn(async () => ({ revision: 6 }));
+    cx.fns["apps:rollbackVersion"] = rollback;
+    fireEvent.click(screen.getByRole("button", { name: appUpdateStrings.rollbackTo("1.9.0") }));
+    const dialog = await screen.findByRole("dialog");
+    expect(within(dialog).getByText(appUpdateStrings.rollbackBody("2.0.0", "1.9.0"))).toBeTruthy();
+    fireEvent.click(within(dialog).getByRole("button", { name: appUpdateStrings.rollback }));
+    await waitFor(() => expect(rollback).toHaveBeenCalledWith({ appId: "a2", expectedRevision: 5 }));
+  });
+
+  it("no Roll back without an older version, for a viewer, or outside Managed", async () => {
+    cx.results["apps:get"] = managed();
+    ui(<AppEdit />, "viewer", "/apps/a2");
+    await screen.findByText(appUpdateStrings.updates);
+    expect(screen.queryByRole("button", { name: /^Roll back to/ })).toBeNull();
+    cleanup();
+    cx.results["apps:get"] = program({}, { version: "2.0.0", update: { mode: "managed" } });
+    ui(<AppEdit />, "admin", "/apps/a2");
+    await screen.findByText(appUpdateStrings.updates);
+    expect(screen.queryByRole("button", { name: /^Roll back to/ })).toBeNull();
+    expect(screen.getByText(appUpdateStrings.rollbackNone)).toBeTruthy();
+    expect(screen.queryByText(appUpdateStrings.feedStatusWorking)).toBeNull(); // no feed, no status line
+  });
+
+  it("saving a Pinned program sends no update block and never a previous; a Managed one needs an ordered version", async () => {
+    const update = vi.fn(async () => ({ revision: 6 }));
+    cx.fns["apps:update"] = update;
+    cx.results["apps:get"] = program();
+    ui(<AppEdit />, "admin", "/apps/a2");
+    await screen.findByText(appUpdateStrings.updates);
+    fireEvent.click(screen.getByRole("button", { name: strings.common.saveChanges }));
+    await waitFor(() => expect(update).toHaveBeenCalledTimes(1));
+    const sent = (update.mock.calls[0] as unknown as [{ desktop: { desktop: Record<string, unknown> } }])[0].desktop.desktop;
+    expect(sent).not.toHaveProperty("update");
+    expect(sent).not.toHaveProperty("previous");
+    expect(sent).not.toHaveProperty("version");
+    expect((sent.install as { sizeBytes: number }).sizeBytes).toBe(2000); // the same installer keeps its size
+
+    fireEvent.click(screen.getByRole("radio", { name: appUpdateStrings.updateModes.managed }));
+    fireEvent.change(field(appUpdateStrings.version), { target: { value: "v2" } });
+    fireEvent.click(screen.getByRole("button", { name: strings.common.saveChanges }));
+    expect(await screen.findByText(appEditStrings.versionNotOrdered)).toBeTruthy();
+    expect(update).toHaveBeenCalledTimes(1);
+    fireEvent.change(field(appUpdateStrings.version), { target: { value: "2.0.0" } });
+    fireEvent.click(screen.getByRole("button", { name: strings.common.saveChanges }));
+    await waitFor(() => expect(update).toHaveBeenCalledTimes(2));
+    const saved = (update.mock.calls[1] as unknown as [{ desktop: { desktop: { version: string; update: Record<string, unknown> } } }])[0].desktop.desktop;
+    expect(saved.version).toBe("2.0.0");
+    expect(saved.update).toEqual({ mode: "managed", feed: undefined, autoPublish: true, applyWhen: "boot_or_signed_out", rollbackOnFail: true });
+  });
+
+  it("Vendor needs a publisher inline, and a Windows signer needs a product; Chrome is forced to Vendor", async () => {
+    const update = vi.fn(async () => ({ revision: 6 }));
+    cx.fns["apps:update"] = update;
+    cx.results["apps:get"] = program();
+    ui(<AppEdit />, "admin", "/apps/a2");
+    await screen.findByText(appUpdateStrings.updates);
+    fireEvent.click(screen.getByRole("radio", { name: appUpdateStrings.updateModes.vendor }));
+    fireEvent.click(screen.getByRole("button", { name: strings.common.saveChanges }));
+    expect(await screen.findByText(appEditStrings.needsPublisher)).toBeTruthy();
+    fireEvent.change(field(appUpdateStrings.publisher), { target: { value: "Microsoft Corporation" } });
+    expect(await screen.findByText(appEditStrings.publisherBroadWindows)).toBeTruthy();
+    fireEvent.change(field(appUpdateStrings.publisherProduct), { target: { value: "Microsoft Teams" } });
+    fireEvent.click(screen.getByRole("button", { name: strings.common.saveChanges }));
+    await waitFor(() => expect(update).toHaveBeenCalledTimes(1));
+    cleanup();
+
+    cx.results["apps:get"] = program({}, { exe: "{ProgramFiles}\\Google\\Chrome\\Application\\chrome.exe" });
+    ui(<AppEdit />, "admin", "/apps/a2");
+    await screen.findByText(appUpdateStrings.updates);
+    expect(screen.getByText(appUpdateStrings.browserForced)).toBeTruthy();
+    expect(screen.queryByRole("radio", { name: appUpdateStrings.updateModes.pinned })).toBeNull();
+  });
+
+  it("a server refusal of plan 4.4 is explained in one sentence", async () => {
+    cx.results["apps:get"] = program();
+    cx.fns["apps:update"] = vi.fn().mockRejectedValue(new ConvexError({ code: "invalid_argument", field: "update.minVersion", detail: "min_above_bootstrap" }));
+    ui(<AppEdit />, "admin", "/apps/a2");
+    await screen.findByText(appUpdateStrings.updates);
+    fireEvent.click(screen.getByRole("button", { name: strings.common.saveChanges }));
+    expect(await screen.findByText(updateRefusalStrings.min_above_bootstrap)).toBeTruthy();
   });
 });
 

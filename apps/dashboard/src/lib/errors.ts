@@ -25,6 +25,13 @@ export class AppError extends Error {
 const KNOWN_CODES: ReadonlySet<string> = new Set(ERROR_CODES);
 
 /**
+ * Sentences for an `invalid_argument` refusal that names a `detail` (the update-mode refusals of plan 4.4). A screen registers its own
+ * when its chunk loads, so they are not part of the first load.
+ */
+const DETAIL_SENTENCES: Record<string, string> = {};
+export const registerDetailSentences = (sentences: Readonly<Record<string, string>>): void => void Object.assign(DETAIL_SENTENCES, sentences);
+
+/**
  * Accepts our `AppError` or anything shaped like a `ConvexError`
  * (`{ data: { code } }`) whose code is one of `ERROR_CODES`. Only the known
  * fields are copied (numbers and short strings), never the server's message.
@@ -66,6 +73,8 @@ export function messageForCode(code: ErrorCode, data?: Omit<ErrorData, "code">):
         if (data.detail === "username") return strings.validate.passwordEqualsUsername;
         return strings.validate.passwordMember;
       }
+      // A refusal with a registered sentence of its own (the update modes, plan 4.4).
+      if (data?.detail !== undefined && Object.hasOwn(DETAIL_SENTENCES, data.detail)) return DETAIL_SENTENCES[data.detail]!;
       return data?.field ? e.invalidField(data.field) : e.invalidArgument;
     case "stale_edit":
       return e.staleEdit;

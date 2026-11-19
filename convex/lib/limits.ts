@@ -267,6 +267,13 @@ export const MAX_EXE_PATH = 260;
 /** Largest installer the agent downloads (4.8: 4 GiB). */
 export const MAX_INSTALLER_BYTES = 4 * 1024 * 1024 * 1024;
 export const MAX_SUCCESS_EXIT_CODES = 16;
+/** (Phase 6, plan 4.2) An Authenticode subject: `MAX_PUBLISHER_SUBJECT` in `rulebox-policy`. */
+export const MAX_PUBLISHER_SUBJECT = 200;
+/** (Phase 6) A publisher rule's product name: `MAX_PUBLISHER_FIELD` in `rulebox-policy`. */
+export const MAX_PUBLISHER_PRODUCT = 100;
+/** (Phase 6) A vendor feed: its https address, the vendor's public key (base64) and the platform key of `latest.json`. */
+export const MAX_FEED_PUBKEY = 512;
+export const MAX_FEED_TARGET = 40;
 /** `apps:list` page size cap. */
 export const MAX_APP_PAGE = 50;
 /** `apps:get`: assignments (`appAssignments.by_app`), file types and direct employees read per app. */

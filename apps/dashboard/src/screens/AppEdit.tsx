@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState, type CSSProperties } from "react";
+import { lazy, Suspense, useMemo, useRef, useState, type CSSProperties } from "react";
 import { Link, useNavigate, useParams, useSearchParams } from "react-router";
 import { Button, Checkbox, Input, Pill, SegmentedControl, Select, Switch, Textarea } from "@rulebox/ui";
 import IconDownload from "~icons/solar/download-minimalistic-linear";
@@ -26,14 +26,19 @@ import {
   type AppDetail,
   type AppInstallRow,
   type AppKind,
+  type ApplyWhen,
   type Audience,
   type DesktopSource,
   type DesktopSpec,
   type InstallCounts,
   type InstallState,
+  type UpdateMode,
+  type UpdateSpec,
   type WingetResolved,
 } from "../data/types";
 import { AppPermissions } from "./AppPermissions";
+// The Updates card (Phase 6 Step 10) is a chunk of its own: most edits are of websites, and the card is the largest part of the form.
+const UpdatesCard = lazy(() => import("./AppUpdates"));
 import { AppGlyph } from "../components/AppGlyph";
 import { Card } from "../components/Card";
 import { ConfirmDialog } from "../components/ConfirmDialog";
@@ -58,9 +63,10 @@ import { useCan } from "../lib/member";
 import { SkeletonBlock, SkeletonRows } from "../components/Skeleton";
 import { useToast } from "../lib/toast";
 import { formatBytes, formatCount, shortHex } from "../lib/format";
-import { messageFor } from "../lib/errors";
+import { messageFor, registerDetailSentences } from "../lib/errors";
 import { strings } from "../lib/strings";
 import { appEditStrings } from "../lib/screenStrings/appEdit";
+import { updateRefusalStrings } from "../lib/screenStrings/updateRefusals";
 import { appsStrings } from "../lib/screenStrings/apps";
 import { devicesStrings } from "../lib/screenStrings/devices";
 import { groupStrings } from "../lib/screenStrings/group";
@@ -69,12 +75,15 @@ import { installStateStrings } from "../lib/screenStrings/installState";
 import { useForm } from "../lib/useForm";
 import { assignmentErrorMessage } from "./groups/errors";
 import * as v from "../lib/validate";
+import * as u from "../lib/apps/updateRules";
 
 const s = appEditStrings;
+// The sentences for the refusals of the update modes ride this chunk, not the first load (`lib/errors.ts`).
+registerDetailSentences(updateRefusalStrings);
 const HUES = [175, 150, 100, 60, 40, 20, 0, 330, 300, 260, 220, 200];
 const SOURCES: DesktopSource[] = ["winget", "msi", "exe", "portable", "preinstalled"];
 
-interface FormValues extends Record<string, unknown> {
+export interface FormValues extends Record<string, unknown> {
   name: string;
   description: string;
   hue: number | undefined;
@@ -93,11 +102,31 @@ interface FormValues extends Record<string, unknown> {
   args: string;
   fileArg: string;
   resetFolders: string;
+  // Phase 6: versions and update modes
+  version: string;
+  updateMode: UpdateMode;
+  publisher: string;
+  publisherProduct: string;
+  minVersion: string;
+  feedUrl: string;
+  feedPubkey: string;
+  feedTarget: string;
+  autoPublish: boolean;
+  applyWhen: ApplyWhen;
+  rollbackOnFail: boolean;
+}
+
+export type FormApi = ReturnType<typeof useForm<FormValues>>;
+
+/** Chrome and Edge can only be Vendor mode (plan 4.4.2): the form shows and saves that whatever was picked. */
+function effectiveMode(x: FormValues): UpdateMode {
+  return u.browserAppOf(x.exe) !== null ? "vendor" : x.updateMode;
 }
 
 function initialValues(d: AppDetail, kind: AppKind): FormValues {
   const desk = d.desktop;
   const install = desk?.install;
+  const up = desk?.update;
   const source = desk?.source ?? "winget";
   return {
     name: d.name,
@@ -127,6 +156,64 @@ function initialValues(d: AppDetail, kind: AppKind): FormValues {
     args: v.joinArgs(desk?.args ?? []),
     fileArg: v.joinArgs(desk?.fileArgTemplate ?? (kind === "desktop" ? ["{file}"] : [])),
     resetFolders: (desk?.resetFolders ?? []).join("\n"),
+    version: desk?.version ?? "",
+    updateMode: up?.mode ?? "pinned",
+    publisher: up?.publisher ?? "",
+    publisherProduct: up?.publisherProduct ?? "",
+    minVersion: up?.minVersion ?? "",
+    feedUrl: up?.feed?.url ?? "",
+    feedPubkey: up?.feed?.pubkey ?? "",
+    feedTarget: up?.feed?.target ?? "windows-x86_64-nsis",
+    autoPublish: up?.autoPublish ?? true,
+    applyWhen: up?.applyWhen ?? "boot_or_signed_out",
+    rollbackOnFail: up?.rollbackOnFail ?? true,
+  };
+}
+
+/** The version fields of the form against the rules of plan 4.4 (the server decides; these are the inline messages). */
+function updateProblems(x: FormValues): Partial<Record<keyof FormValues & string, string>> {
+  const mode = effectiveMode(x);
+  const version = x.version.trim();
+  const min = x.minVersion.trim();
+  const hasInstaller = x.source !== "preinstalled";
+  const out: Partial<Record<keyof FormValues & string, string>> = {};
+  if (version !== "" && !u.isVersionText(version)) out.version = s.versionText;
+  if (mode === "managed") {
+    if (!hasInstaller) out.updateMode = s.needsInstaller;
+    if (out.version === undefined) out.version = version === "" ? s.versionNeeded : u.isOrderedVersion(version) ? undefined : s.versionNotOrdered;
+    if (x.feedUrl.trim() !== "") {
+      if (v.installerUrl(x.feedUrl) !== null) out.feedUrl = s.feedUrlBad;
+      if (!u.isFeedKey(x.feedPubkey)) out.feedPubkey = s.feedKeyBad;
+      if (!u.isFeedTarget(x.feedTarget)) out.feedTarget = s.feedTargetBad;
+    }
+  }
+  if (mode === "vendor") {
+    const publisher = x.publisher.trim();
+    if (publisher === "" && u.browserAppOf(x.exe) === null) out.publisher = s.needsPublisher;
+    else if (publisher !== "" && x.publisherProduct.trim() === "" && u.publisherTooBroad(publisher)) out.publisher = s.publisherBroadWindows;
+    if (min !== "") {
+      if (!u.isOrderedVersion(min)) out.minVersion = s.versionNotOrdered;
+      else if (!hasInstaller) out.minVersion = s.needsInstaller;
+      else if (out.version === undefined && !u.isOrderedVersion(version)) out.version = version === "" ? s.versionNeeded : s.versionNotOrdered;
+      else if (u.numbersAbove(min, version)) out.minVersion = s.minAboveVersion;
+    }
+  }
+  return out;
+}
+
+/** `desktop.update` as the form saves it: Pinned is no block at all (the server stores none). */
+function updateSpec(x: FormValues): UpdateSpec | undefined {
+  const mode = effectiveMode(x);
+  if (mode === "pinned") return undefined;
+  if (mode === "vendor") {
+    return { mode, publisher: x.publisher.trim() || undefined, publisherProduct: x.publisherProduct.trim() || undefined, minVersion: x.minVersion.trim() || undefined };
+  }
+  return {
+    mode,
+    feed: x.feedUrl.trim() ? { kind: "tauri", url: x.feedUrl.trim(), pubkey: x.feedPubkey.replace(/\s+/g, ""), target: x.feedTarget.trim() } : undefined,
+    autoPublish: x.autoPublish,
+    applyWhen: x.applyWhen,
+    rollbackOnFail: x.rollbackOnFail,
   };
 }
 
@@ -150,17 +237,25 @@ function validateValues(kind: AppKind, x: FormValues): Partial<Record<keyof Form
     args: v.args(v.splitArgs(x.args)) ?? undefined,
     fileArg: v.fileArgTemplate(v.splitArgs(x.fileArg)) ?? undefined,
     resetFolders: v.resetFolders(v.lines(x.resetFolders)) ?? undefined,
+    ...updateProblems(x),
   };
 }
 
-function desktopSpec(x: FormValues): DesktopSpec {
+/** `previous` is never sent: it is the server's field (`apps:update` ignores it). */
+function desktopSpec(x: FormValues, before?: DesktopSpec): DesktopSpec {
+  const version = x.version.trim() || undefined;
+  const update = updateSpec(x);
   const base = {
     source: x.source,
     exe: x.exe.trim(),
     args: v.splitArgs(x.args),
     fileArgTemplate: v.splitArgs(x.fileArg),
     resetFolders: v.lines(x.resetFolders),
+    ...(version !== undefined ? { version } : {}),
+    ...(update !== undefined ? { update } : {}),
   };
+  // The form does not know an installer's size: the same installer keeps the one the server has.
+  const sameInstaller = before?.install !== undefined && before.install.url === x.installUrl.trim() && before.install.sha256 === x.sha256.trim().toLowerCase();
   switch (x.source) {
     case "winget":
       return { ...base, wingetId: x.resolved?.packageId ?? x.wingetId.trim(), wingetVersion: x.resolved?.version, install: x.resolved?.install };
@@ -173,7 +268,7 @@ function desktopSpec(x: FormValues): DesktopSpec {
           kind: x.source,
           url: x.installUrl.trim(),
           sha256: x.sha256.trim().toLowerCase(),
-          sizeBytes: 0,
+          sizeBytes: sameInstaller ? before.install!.sizeBytes : 0,
           silentArgs: x.source === "exe" ? v.splitArgs(x.silentArgs) : [],
           productCode: x.source === "msi" && x.productCode.trim() ? x.productCode.trim().toUpperCase() : undefined,
           successExitCodes: [0],
@@ -240,6 +335,10 @@ function AppScreen({ d, kind, isNew }: { d: AppDetail; kind: AppKind; isNew: boo
             readOnly={!canAct}
             revision={revision}
             onSaved={() => setRevision((r) => r + 1)}
+            onRolledBack={(next) => {
+              setRevision(next);
+              setFormKey((k) => k + 1);
+            }}
             onReload={() => {
               setRevision(d.revision);
               setFormKey((k) => k + 1);
@@ -312,6 +411,7 @@ function AppForm({
   readOnly,
   revision,
   onSaved,
+  onRolledBack,
   onReload,
 }: {
   d: AppDetail;
@@ -320,6 +420,8 @@ function AppForm({
   readOnly: boolean;
   revision: number;
   onSaved: () => void;
+  /** After `apps:rollbackVersion`: the revision to send next (the form starts again from the rolled-back app). */
+  onRolledBack: (revision: number) => void;
   onReload: () => void;
 }) {
   const navigate = useNavigate();
@@ -375,7 +477,7 @@ function AppForm({
         toast(s.saved);
       }
     } else {
-      const desktop = { ...common, desktop: desktopSpec(values) };
+      const desktop = { ...common, desktop: desktopSpec(values, d.desktop) };
       if (isNew) {
         const id = await createDesktop(desktop);
         toast(s.created(common.name));
@@ -597,6 +699,10 @@ function AppForm({
                 </Field>
               </div>
             </Card>
+
+            <Suspense fallback={<div className="dash-card dash-card--pad"><SkeletonBlock lines={4} /></div>}>
+              <UpdatesCard d={d} f={f} mode={effectiveMode(x)} browser={u.browserAppOf(x.exe) !== null} isNew={isNew} readOnly={readOnly} revision={revision} onRolledBack={onRolledBack} />
+            </Suspense>
           </>
         )}
       </fieldset>
@@ -987,6 +1093,13 @@ function InstallList({ appId, state }: { appId: string; state: InstallState }) {
         ),
       },
       { key: "state", header: s.installState, cell: (r) => <InstallStatePill state={r.state} /> },
+      // Display only: the server does not sort or filter by it (the list stays ordered by time).
+      {
+        key: "version",
+        header: s.installedVersion,
+        isEmpty: (r) => r.installedVersion === undefined,
+        cell: (r) => (r.installedVersion !== undefined ? <span className="dash-mono">{r.installedVersion}</span> : <span className="dash-muted">—</span>),
+      },
       {
         key: "detail",
         header: strings.common.details,

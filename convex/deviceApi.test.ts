@@ -495,6 +495,44 @@ describe("deviceApi:report installs part (plan 4.8 amended, A12)", () => {
     expect(await stats()).toBe(0);
   });
 
+  test("installedVersion (Phase 6): stored, an unchanged report writes nothing, a change writes once, absent keeps, null or removed clears, a bad value is dropped not refused", async () => {
+    const s = await seed();
+    const ids = await apps(s);
+    const send = (...installs: ReturnType<typeof result>[]) => s.t.mutation(api.deviceApi.report, { ...creds(s.device), installs });
+    const versionOf = async () => (await installRows(s)).find((r) => r.appId === ids.a)?.installedVersion;
+
+    await send(result(ids.a, "installed", { installedVersion: "1.2.3" }));
+    expect(await versionOf()).toBe("1.2.3");
+    const same = await probe(() => send(result(ids.a, "installed", { installedVersion: "1.2.3" })));
+    expect(same.io.writes).toBe(0);
+    // Absent keeps the stored value, and writes nothing when the rest is the same.
+    const absent = await probe(() => send(result(ids.a, "installed")));
+    expect(absent.io.writes).toBe(0);
+    expect(await versionOf()).toBe("1.2.3");
+    // A change is one row write; a state change without a version keeps it.
+    const changed = await probe(() => send(result(ids.a, "installed", { installedVersion: "1.2.4-beta.1+7" })));
+    expect(changed.io.writes).toBe(1);
+    expect(await versionOf()).toBe("1.2.4-beta.1+7");
+    await send(result(ids.a, "failed", { detail: "exit_code", attempts: 2 }));
+    expect(await versionOf()).toBe("1.2.4-beta.1+7");
+    // Bad values (spaces, too long, empty, a path) are dropped: the report is accepted and the stored value stays.
+    for (const bad of ["1.0 beta", "9".repeat(41), "", "C:\\x\\y.exe"]) {
+      const out = await send(result(ids.a, "failed", { detail: "exit_code", attempts: 2, installedVersion: bad }));
+      expect(out).toEqual({ accepted: { installs: 1, audit: 0 } });
+      expect(await versionOf()).toBe("1.2.4-beta.1+7");
+    }
+    // A bad value on a new row stores no version.
+    await send(result(ids.b, "installed", { installedVersion: "not a version" }));
+    expect((await installRows(s)).find((r) => r.appId === ids.b)?.installedVersion).toBeUndefined();
+    // An explicit null clears it, and so does `removed`.
+    await send(result(ids.a, "installed", { installedVersion: null }));
+    expect(await versionOf()).toBeUndefined();
+    await send(result(ids.a, "installed", { installedVersion: "2.0.0" }));
+    expect(await versionOf()).toBe("2.0.0");
+    await send(result(ids.a, "removed", { installedVersion: "2.0.0" }));
+    expect(await versionOf()).toBeUndefined();
+  });
+
   test("a detail outside the fixed list is dropped, the result is stored and the status and audit parts still go through", async () => {
     const s = await seed();
     const ids = await apps(s);

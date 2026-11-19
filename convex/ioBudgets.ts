@@ -206,13 +206,15 @@ export const IO_BUDGETS: Record<string, IoBudget> = {
   // Phase 5 Step 11: + the last 30 `orgSecurityDaily` rows (a website only; each <= 500 denial rows of ~90 B =
   // 45 KB worst case, a few hundred bytes in practice). They change once a day (the 01:00 UTC rollup), so the
   // subscription is not re-run by device reports. UNSURE: the byte cap is the worst case, not a measurement.
-  "apps:get": { maxReads: 3 + 1 + 500 + 500 + 201 + 1001 + 30, maxReadBytes: 2_000_000, maxWrites: 0, maxWriteBytes: 0, live: true },
+  // Phase 6 Step 10: + the app's `appFeeds` row (`by_app`, only for a Managed app with a feed; it changes at most twice a day).
+  "apps:get": { maxReads: 3 + 1 + 500 + 500 + 201 + 1001 + 30 + 1, maxReadBytes: 2_000_000, maxWrites: 0, maxWriteBytes: 0, live: true },
   // <= 500 non-archived apps (the group page's picker; subscribed only while its dialog is open).
   "apps:options": { maxReads: 3 + 500, maxReadBytes: 500_000, maxWrites: 0, maxWriteBytes: 0, live: true },
   // orgPlans, orgStats (+ platformSettings before migration); writes: app, orgStats, audit.
   "apps:createWeb": { maxReads: 4 + 3, maxReadBytes: 4_096, maxWrites: 3, maxWriteBytes: 4_096 },
   // as createWeb, + the portable app's path patched once its id is known.
-  "apps:createDesktop": { maxReads: 4 + 3, maxReadBytes: 4_096, maxWrites: 4, maxWriteBytes: 8_192 },
+  // Phase 6 Step 10: + the `appFeeds` row of a Managed app with a feed (one `by_app` read, one insert).
+  "apps:createDesktop": { maxReads: 4 + 3 + 2, maxReadBytes: 6_144, maxWrites: 5, maxWriteBytes: 10_240 },
   // ---- Phase 5 Step 16b: THE CATALOGUE IS RING-GATED (plan 4.3 rule 6, 4.14). Every change of an app record, a file-type rule or an
   // assignment takes a new configuration version of the groups that assign the app, in the same transaction:
   //   `snapshotAppGroups` = assignments by app (Step 20b: <= MAX_SNAPSHOT_GROUPS_TOTAL + 1 = 501 per app, typically a handful; more than 500
@@ -228,7 +230,11 @@ export const IO_BUDGETS: Record<string, IoBudget> = {
   //   UNSURE: the worst-case byte caps (ten 256 KiB versions) are not measured.
   // app, file types (only when the file argument is cleared), snapshotAppGroups, publishApp (assignments <= 10 after the cap, grants <= 51 with
   // their groups, queue); unchanged: 1 read, 0 writes.
-  "apps:update": { maxReads: 4 + 1 + 1 + (501 + 10 + 10 * 921 + 200) + 10 + 51 + 51 * 21 + 1, maxReadBytes: 3_500_000, maxWrites: 4 + 10 * 13, maxWriteBytes: 2_700_000 },
+  // Phase 6 Step 10: + the `appFeeds` row when the mode is or was Managed (<= 2 reads, 1 write: upsert or delete).
+  "apps:update": { maxReads: 4 + 1 + 1 + 2 + (501 + 10 + 10 * 921 + 200) + 10 + 51 + 51 * 21 + 1, maxReadBytes: 3_500_000, maxWrites: 4 + 1 + 10 * 13, maxWriteBytes: 2_700_000 },
+  // Phase 6 Step 10 (plan 4.16): as a changed `apps:update` (app, feed row, snapshotAppGroups, publishApp; writes: app, feed row,
+  // audit, per group <= 13, queue). Rare. A rollback that is refused (no older version) reads the app only.
+  "apps:rollbackVersion": { maxReads: 4 + 1 + 1 + (501 + 10 + 10 * 921 + 200) + 10 + 51 + 51 * 21 + 1, maxReadBytes: 3_500_000, maxWrites: 4 + 1 + 10 * 13, maxWriteBytes: 2_700_000 },
   // Phase 5 Step 11. Same permissions again: app only (wrapper + 1 read, 0 writes). A change: as `apps:update` (Step 16b: every
   // assigning group is snapshotted; Step 20b: the first 10 in the call, the rest by scheduled batches).
   "apps:setPermissions": { maxReads: 4 + 1 + (501 + 10 + 10 * 921 + 200) + 10 + 51 + 51 * 21 + 1, maxReadBytes: 3_500_000, maxWrites: 4 + 10 * 13, maxWriteBytes: 2_700_000 },
@@ -241,7 +247,8 @@ export const IO_BUDGETS: Record<string, IoBudget> = {
     maxWriteBytes: 2_700_000,
   },
   // app, assignments `.first()`, file types `.first()`; writes: app, audit, one scheduled purge (+ icon file).
-  "apps:remove": { maxReads: 4 + 3, maxReadBytes: 6_144, maxWrites: 3, maxWriteBytes: 2_048 },
+  // Phase 6 Step 10: + the `appFeeds` row (read and deleted, only for a Managed app).
+  "apps:remove": { maxReads: 4 + 3 + 1, maxReadBytes: 8_192, maxWrites: 4, maxWriteBytes: 2_560 },
   // app, snapshotAppGroups (Step 16b: the revision is part of the frozen record, so a retry is ring-gated too), publishApp; writes: app,
   // audit, per group <= 13, queue.
   "apps:retry": { maxReads: 4 + 1 + (501 + 10 + 10 * 921 + 200) + 10 + 51 + 51 * 21 + 1, maxReadBytes: 3_500_000, maxWrites: 4 + 10 * 13, maxWriteBytes: 2_700_000 },

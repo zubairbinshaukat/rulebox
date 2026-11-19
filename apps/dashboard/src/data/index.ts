@@ -74,6 +74,7 @@ export const {
   useSetAppArchived,
   useDeleteApp,
   useRetryApp,
+  useRollbackApp,
   useResolveWinget,
   useFetchWebMeta,
   useSaveAppIcon,

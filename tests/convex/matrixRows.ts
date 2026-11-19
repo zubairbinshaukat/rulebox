@@ -891,6 +891,11 @@ export const ROWS: Row[] = [
     expect: { ...ADMIN_MAJOR, default: "invalid_argument", foreign: "not_found" }, // not archived
   },
   {
+    name: "apps:rollbackVersion",
+    call: (a, f) => a.mutation(api.apps.rollbackVersion, { appId: f.appId, expectedRevision: 0 }),
+    expect: { ...ADMIN_UNLOCKED, default: "invalid_argument", foreign: "not_found" }, // a website has no versions
+  },
+  {
     name: "apps:retry",
     call: (a, f) => a.mutation(api.apps.retry, { appId: f.appId }),
     expect: { ...ADMIN_UNLOCKED, default: "invalid_argument", foreign: "not_found" }, // a website has nothing to install

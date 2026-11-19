@@ -46,6 +46,31 @@ type WebPermissions = CatalogWebPermissions;
 
 // ---------------------------------------------------------------- builder input
 
+/** (Phase 6) The device's view of `desktop.update` (`UpdateSpec` in `rulebox-policy`). */
+export type DocUpdate = {
+  mode: "pinned" | "vendor" | "managed";
+  publisher?: string;
+  publisherProduct?: string;
+  minVersion?: string;
+  applyWhen?: "boot_or_signed_out" | "when_closed";
+  rollbackOnFail?: boolean;
+};
+
+/**
+ * PURE. `update` as a device gets it: the fields of `DocUpdate` in the order of the Rust struct (the document's bytes are
+ * signed), absent ones left out. Everything else a stored spec carries (the vendor feed, `autoPublish`) is dropped here.
+ */
+export function docUpdate(u: DocUpdate): DocUpdate {
+  return {
+    mode: u.mode,
+    ...(u.publisher !== undefined ? { publisher: u.publisher } : {}),
+    ...(u.publisherProduct !== undefined ? { publisherProduct: u.publisherProduct } : {}),
+    ...(u.minVersion !== undefined ? { minVersion: u.minVersion } : {}),
+    ...(u.applyWhen !== undefined ? { applyWhen: u.applyWhen } : {}),
+    ...(u.rollbackOnFail !== undefined ? { rollbackOnFail: u.rollbackOnFail } : {}),
+  };
+}
+
 /** One app as the builder needs it (a subset of the `apps` row). */
 export type BuildApp = {
   _id: string;
@@ -71,6 +96,14 @@ export type BuildApp = {
       removeWhenUnassigned: boolean;
     };
     resetFolders: string[];
+    /** (Phase 6) The version this install delivers. */
+    version?: string;
+    /**
+     * (Phase 6) What a device may know about the update mode. The stored spec also holds `feed` and `autoPublish`: the
+     * builder never copies them (`docUpdate`), so a feed address or key cannot reach a device (plan 4.3 rule 3). `previous`
+     * stays on the server too: the agent keeps the old installer file itself.
+     */
+    update?: DocUpdate;
   };
   /** Resolved icon (`ctx.storage.getUrl`), Step 10. */
   icon?: { url: string; sha256: string };
@@ -207,6 +240,9 @@ function catalogEntry(
                     removeWhenUnassigned: install.removeWhenUnassigned,
                   },
             resetFolders: [...d.resetFolders],
+            // Phase 6: left out when absent, so a Phase 4 or 5 document keeps its bytes (the committed vectors pin it).
+            ...(d.version !== undefined ? { version: d.version } : {}),
+            ...(d.update !== undefined ? { update: docUpdate(d.update) } : {}),
           }
         : null,
     pinnedTaskbar: opts.pinnedTaskbar,

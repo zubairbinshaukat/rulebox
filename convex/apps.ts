@@ -2,11 +2,11 @@ import { paginationOptsValidator, paginationResultValidator } from "convex/serve
 import { v, type Infer } from "convex/values";
 import { internal } from "./_generated/api";
 import type { Doc, Id } from "./_generated/dataModel";
-import { env, type DatabaseReader } from "./_generated/server";
+import { env, type DatabaseReader, type DatabaseWriter } from "./_generated/server";
 import { publishApp, snapshotAppGroups } from "./lib/appPublish";
 import { writeAudit } from "./lib/audit";
 import { checkRevision, getInOrg, nextRevision } from "./lib/authz";
-import { normalizeAppDescription, normalizeAppName, normalizeDesktop, normalizeHue, normalizeWeb, withAppId, wingetIdProblem, wingetVersionProblem } from "./lib/appRules";
+import { normalizeAppDescription, normalizeAppName, normalizeDesktop, normalizeHue, normalizeWeb, previousFor, withAppId, wingetIdProblem, wingetVersionProblem } from "./lib/appRules";
 import { base64Decode, sha256HexOfBytes } from "./lib/crypto";
 import { deepEqual } from "./lib/deepEqual";
 import { programDenied } from "./lib/denyList";
@@ -32,7 +32,7 @@ import { STORED_INSTALL_STATES } from "./lib/deviceApiRules";
 import { assignedGroupsOf, failedFollowArchive } from "./lib/installs";
 import { assertWithinLimit, bumpOrgStats, bumpStats } from "./lib/plans";
 import { consumeOrFail } from "./lib/rateLimits";
-import { audience, appKind, desktopSpec, installState, webPermissions, webSpec, wingetResolved } from "./lib/validators";
+import { appFeedStatus, audience, appKind, desktopSpec, installState, webPermissions, webSpec, wingetResolved } from "./lib/validators";
 import { serverDay } from "./lib/lockdownReports";
 import { iconDataUrl, fetchWebMeta as scanWebMeta, pngSize } from "./lib/webmeta";
 import { resolveWinget as resolveFromGithub } from "./lib/winget";
@@ -63,6 +63,59 @@ const actorArg = v.object({ type: v.literal("member"), id: v.string(), label: v.
 async function iconUrlOf(ctx: { storage: { getUrl(id: Id<"_storage">): Promise<string | null> } }, app: Doc<"apps">): Promise<string | undefined> {
   if (app.icon === undefined) return undefined;
   return (await ctx.storage.getUrl(app.icon.storageId)) ?? undefined;
+}
+
+// ---------------------------------------------------------------- vendor feed row (Phase 6 Step 10, plan 4.2)
+
+type DesktopSpecIn = Infer<typeof desktopSpec>;
+
+/** The vendor feed of a Managed app, or undefined (any other mode has none; a Managed app may also have none). */
+function feedOf(d: DesktopSpecIn | undefined): NonNullable<NonNullable<DesktopSpecIn["update"]>["feed"]> | undefined {
+  return d?.update?.mode === "managed" ? d.update.feed : undefined;
+}
+
+async function feedRowOf(ctx: { db: DatabaseReader }, appId: Id<"apps">): Promise<Doc<"appFeeds"> | null> {
+  return await ctx.db
+    .query("appFeeds")
+    .withIndex("by_app", (q) => q.eq("appId", appId))
+    .first();
+}
+
+/**
+ * Keeps the app's `appFeeds` row in step with its spec, in the caller's transaction: created (due now) when a feed appears,
+ * reset when the feed settings change (so a check that started earlier cannot write its result), deleted when the app leaves
+ * Managed mode or loses the feed. Nothing is read unless the old or the new mode is Managed, and nothing is written when the
+ * feed settings are the same.
+ */
+async function syncFeedRow(
+  ctx: { db: DatabaseWriter },
+  orgId: Id<"organizations">,
+  appId: Id<"apps">,
+  before: DesktopSpecIn | undefined,
+  after: DesktopSpecIn,
+): Promise<void> {
+  if (before?.update?.mode !== "managed" && after.update?.mode !== "managed") return;
+  const row = await feedRowOf(ctx, appId);
+  const feed = feedOf(after);
+  if (feed === undefined) {
+    if (row !== null) await ctx.db.delete(row._id);
+    return;
+  }
+  if (row === null) {
+    await ctx.db.insert("appFeeds", { orgId, appId, nextCheckAt: Date.now(), status: "ok", failures: 0, revision: 0 });
+    return;
+  }
+  if (deepEqual(feedOf(before), feed)) return;
+  await ctx.db.patch(row._id, {
+    nextCheckAt: Date.now(),
+    lastCheckedAt: undefined,
+    status: "ok",
+    failures: 0,
+    etag: undefined,
+    seenVersion: undefined,
+    pending: undefined,
+    revision: row.revision + 1,
+  });
 }
 
 // ---------------------------------------------------------------- reads
@@ -216,9 +269,23 @@ export const get = memberQuery("viewer")({
     groupOptions: v.array(v.object({ _id: v.id("groups"), name: v.string() })),
     /** Blocked permission requests of the last 30 days, per kind, most first (web apps; empty for a program or no denials). */
     denials30d: v.array(v.object({ kind: v.string(), count: v.number() })),
+    /**
+     * (Phase 6) Where the vendor feed of a Managed app stands: never its address, key, hash or etag. Absent for any app without a feed
+     * (no `appFeeds` row is read for it).
+     */
+    feedStatus: v.optional(
+      v.object({
+        status: appFeedStatus,
+        failures: v.number(),
+        lastCheckedAt: v.optional(v.number()),
+        seenVersion: v.optional(v.string()),
+        pending: v.optional(v.object({ version: v.string(), foundAt: v.number() })),
+      }),
+    ),
   }),
   handler: async (ctx, args) => {
     const app = await getInOrg(ctx, "apps", args.appId, ctx.orgId);
+    const feedRow = feedOf(app.desktop) !== undefined ? await feedRowOf(ctx, app._id) : null;
     const assignments = await ctx.db
       .query("appAssignments")
       .withIndex("by_app", (q) => q.eq("appId", app._id))
@@ -258,6 +325,17 @@ export const get = memberQuery("viewer")({
       .take(APP_EMPLOYEE_COUNT_CAP + 1);
     return {
       denials30d: await denialsOf(ctx, app),
+      ...(feedRow !== null
+        ? {
+            feedStatus: {
+              status: feedRow.status,
+              failures: feedRow.failures,
+              ...(feedRow.lastCheckedAt !== undefined ? { lastCheckedAt: feedRow.lastCheckedAt } : {}),
+              ...(feedRow.seenVersion !== undefined ? { seenVersion: feedRow.seenVersion } : {}),
+              ...(feedRow.pending !== undefined ? { pending: { version: feedRow.pending.version, foundAt: feedRow.pending.foundAt } } : {}),
+            },
+          }
+        : {}),
       _id: app._id,
       name: app.name,
       description: app.description,
@@ -356,6 +434,8 @@ export const installs = memberQuery("viewer")({
       attempts: v.number(),
       exitCode: v.optional(v.number()),
       detail: v.optional(v.string()),
+      /** (Phase 6) The version the PC reports for the app; display only. */
+      installedVersion: v.optional(v.string()),
       updatedAt: v.number(),
     }),
   ),
@@ -382,6 +462,7 @@ export const installs = memberQuery("viewer")({
         attempts: r.attempts,
         exitCode: r.exitCode,
         detail: r.detail,
+        installedVersion: r.installedVersion,
         updatedAt: r.updatedAt,
       });
     }
@@ -470,6 +551,7 @@ export const createDesktop = memberMutation("admin")({
     const name = normalizeAppName(args.name);
     const description = normalizeAppDescription(args.description);
     const hue = normalizeHue(args.hue);
+    // `previous` in the input is ignored by `normalizeDesktop`; a new app has none.
     const desktop = normalizeDesktop(args.desktop);
     const stats = await assertWithinLimit(ctx, ctx.orgId, "apps");
     const appId = await ctx.db.insert("apps", {
@@ -484,9 +566,12 @@ export const createDesktop = memberMutation("admin")({
       createdAt: Date.now(),
     });
     // The id is known now: a portable app's folder is `{RuleboxApps}\<id>\` (re-checked with the real id).
+    let stored = desktop;
     if (desktop.exe.includes("{AppId}")) {
-      await ctx.db.patch(appId, { desktop: normalizeDesktop(withAppId(desktop, appId), appId) });
+      stored = normalizeDesktop(withAppId(desktop, appId), appId);
+      await ctx.db.patch(appId, { desktop: stored });
     }
+    await syncFeedRow(ctx, ctx.orgId, appId, undefined, stored);
     await bumpStats(ctx, stats, { appCount: 1 });
     await writeAudit(ctx, {
       orgId: ctx.orgId,
@@ -526,12 +611,19 @@ export const update = memberMutation("admin")({
     if (args.desktop !== undefined && app.kind !== "desktop") fail("invalid_argument", { field: "kind" });
 
     const input = args.web ?? args.desktop!;
+    // `previous` is the SERVER's field: whatever the form sent is ignored, `previousFor` decides what is kept (plan 4.4.4).
+    let desktopNext: DesktopSpecIn | undefined;
+    if (args.desktop !== undefined) {
+      const normalized = normalizeDesktop(args.desktop.desktop, app._id);
+      const previous = previousFor(app.desktop, normalized);
+      desktopNext = previous !== undefined ? { ...normalized, previous } : normalized;
+    }
     const fields: Pick<Doc<"apps">, "name" | "description" | "hue" | "web" | "desktop"> = {
       name: normalizeAppName(input.name),
       description: normalizeAppDescription(input.description),
       hue: normalizeHue(input.hue),
       web: args.web !== undefined ? normalizeWeb(args.web.url, args.web.allowedDomains, app.web?.permissions) : undefined,
-      desktop: args.desktop !== undefined ? normalizeDesktop(args.desktop.desktop, app._id) : undefined,
+      desktop: desktopNext,
     };
     if (deepEqual(fields, { name: app.name, description: app.description, hue: app.hue, web: app.web, desktop: app.desktop })) {
       return { revision: app.revision };
@@ -546,6 +638,7 @@ export const update = memberMutation("admin")({
     }
     const revision = nextRevision(app);
     await ctx.db.patch(app._id, { ...fields, revision });
+    if (fields.desktop !== undefined) await syncFeedRow(ctx, ctx.orgId, app._id, app.desktop, fields.desktop);
     await writeAudit(ctx, {
       orgId: ctx.orgId,
       actor: ctx.actor,
@@ -657,6 +750,11 @@ export const remove = memberMutation("admin", { major: "apps:remove" })({
     if (dependents.length > 0) fail("has_dependents", { detail: dependents.join(", ") });
 
     if (app.icon !== undefined) await ctx.storage.delete(app.icon.storageId);
+    // The vendor feed row goes with the app (read only for a Managed app).
+    if (app.desktop?.update?.mode === "managed") {
+      const feedRow = await feedRowOf(ctx, app._id);
+      if (feedRow !== null) await ctx.db.delete(feedRow._id);
+    }
     await ctx.db.delete(app._id);
     // Archived apps are not counted (archiving freed the slot): no counter change here.
     await ctx.scheduler.runAfter(0, internal.apps.purgeApp, { appId: app._id });
@@ -725,8 +823,55 @@ export const retry = memberMutation("admin")({
   },
 });
 
-// ---------------------------------------------------------------- icon
+/**
+ * Go back one version (admin; plan 4.4.4, Phase 6 Step 10): the Managed app's installer and its `previous` swap places, under a
+ * new revision, so the PCs install the older version again (the agent's engine, Step 11, never downgrades by itself: this is the
+ * admin's deliberate act). `stale_edit` when someone saved in between. `invalid_argument`: field "appId" for a website or an app
+ * that is not Managed, field "previous" when there is no older version to go back to. The feed's `seenVersion` becomes the version
+ * rolled back FROM, so the resolver (Step 12) does not publish it again. Audited as `app.updated` with its own summary.
+ */
+export const rollbackVersion = memberMutation("admin")({
+  args: { appId: v.string(), expectedRevision: v.number() },
+  returns: v.object({ revision: v.number() }),
+  handler: async (ctx, args) => {
+    const app = await getInOrg(ctx, "apps", args.appId, ctx.orgId);
+    checkRevision(app, args.expectedRevision);
+    const d = app.desktop;
+    if (app.kind !== "desktop" || d === undefined || d.update?.mode !== "managed" || d.install === undefined) fail("invalid_argument", { field: "appId" });
+    const previous = d.previous;
+    if (previous === undefined) fail("invalid_argument", { field: "previous" });
+    const from = d.version;
+    // The swap: the old coordinates become current, the current ones (with their version) become `previous`.
+    // (`normalizeDesktop` ignores the input's `previous`: it is set again below.)
+    const swapped = normalizeDesktop(
+      { ...d, version: previous.version, install: { ...d.install, url: previous.url, sha256: previous.sha256, sizeBytes: previous.sizeBytes } },
+      app._id,
+    );
+    const next: DesktopSpecIn = from !== undefined && d.install !== undefined
+      ? { ...swapped, previous: { version: from, url: d.install.url, sha256: d.install.sha256, sizeBytes: d.install.sizeBytes } }
+      : swapped;
+    const revision = nextRevision(app);
+    await ctx.db.patch(app._id, { desktop: next, revision });
+    if (from !== undefined && feedOf(d) !== undefined) {
+      const row = await feedRowOf(ctx, app._id);
+      if (row !== null && row.seenVersion !== from) await ctx.db.patch(row._id, { seenVersion: from });
+    }
+    await writeAudit(ctx, {
+      orgId: ctx.orgId,
+      actor: ctx.actor,
+      action: "app.updated",
+      targetType: "app",
+      targetId: app._id,
+      targetLabel: app.name,
+      summary: `Rolled back ${app.name} from ${from ?? "the current version"} to ${previous.version}`,
+    });
+    await snapshotAppGroups(ctx, [app._id], `Rollback of ${app.name}`, ctx.member._id);
+    await publishApp(ctx, ctx.orgId, app._id);
+    return { revision };
+  },
+});
 
+// ---------------------------------------------------------------- icon
 /**
  * Store the icon `fetchWebMeta` previewed (admin). `png` is the base64 of a
  * PNG of at most 32 KiB and 512 x 512 pixels: anything else is

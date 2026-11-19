@@ -176,6 +176,8 @@ export interface DataApi {
   useSetAppArchived: Mutation<{ appId: Id; archived: boolean }>;
   useDeleteApp: Mutation<{ appId: Id }>;
   useRetryApp: Mutation<{ appId: Id }>;
+  /** `apps:rollbackVersion` (admin, `expectedRevision`): a Managed program goes back to its previous installer. Resolves to the new revision. */
+  useRollbackApp: Mutation<{ appId: Id; expectedRevision: number }, { revision: number }>;
   useResolveWinget: Mutation<{ packageId: string; version?: string }, WingetResolved>;
   useFetchWebMeta: Mutation<{ url: string }, WebMeta>;
   /** `apps:saveIcon`: stores the PNG `useFetchWebMeta` previewed (its `data:` URL), after the app is saved. */
