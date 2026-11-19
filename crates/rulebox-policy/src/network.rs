@@ -118,6 +118,27 @@ pub enum DriverKind {
 }
 unknown_on_new_values!(DriverKind { Inf => "inf", Exe => "exe", Msi => "msi" });
 
+/// (Phase 6, plan 4.8) Where a driver's files come from. Absent on a Phase 5 driver:
+/// the agent then goes by `kind`. `Unknown` is refused as an unknown way to install
+/// (the driver is not installed), never guessed.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, TS)]
+#[serde(rename_all = "snake_case")]
+#[ts(export)]
+pub enum DriverSource {
+    /// A zip with the extracted `.inf`, `.cat` and files (preferred).
+    InfZip,
+    /// The vendor's EXE or MSI with its silent switches, through the install engine.
+    VendorExe,
+    /// The vendor's EXE with fixed extract arguments, then the `inf_zip` path.
+    VendorExeExtract,
+    Unknown,
+}
+unknown_on_new_values!(DriverSource {
+    InfZip => "inf_zip",
+    VendorExe => "vendor_exe",
+    VendorExeExtract => "vendor_exe_extract",
+});
+
 /// One driver package pushed to the device (Step 14b). Never shown as a tile.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
 #[serde(rename_all = "camelCase")]
@@ -143,6 +164,10 @@ pub struct DriverSpec {
     pub success_exit_codes: Vec<i32>,
     #[ts(type = "number")]
     pub revision: u64,
+    /// (Phase 6) Omitted when absent, so a Phase 5 driver serializes as before.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub source: Option<DriverSource>,
 }
 
 fn within(text: &str, max: usize) -> Result<(), LimitError> {
@@ -221,6 +246,7 @@ mod tests {
             silent_args: Vec::new(),
             success_exit_codes: Vec::new(),
             revision: 3,
+            source: None,
         }
     }
 

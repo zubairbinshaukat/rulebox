@@ -26,7 +26,7 @@ use windows::Win32::System::Threading::{
 };
 
 use crate::error::{api_err, Result, Win32Error};
-use crate::guard::require_test_machine;
+use crate::guard::require_armed_machine;
 use crate::sid::{user_sid_of_token, Sid};
 use crate::util::{to_wide, OwnedHandle};
 
@@ -162,7 +162,7 @@ pub fn session_processes(session_id: u32) -> Result<Vec<ProcessInfo>> {
 ///
 /// DESTRUCTIVE: guarded.
 pub fn terminate(pid: u32, expected_image: &Path, expected_user: &Sid) -> Result<()> {
-    require_test_machine()?;
+    require_armed_machine()?;
     let process = open_process(pid, PROCESS_QUERY_LIMITED_INFORMATION | PROCESS_TERMINATE)?;
 
     // The checks and the termination use the same handle, so a reused process id
@@ -211,7 +211,7 @@ fn token_u32(token: &OwnedHandle, class: windows::Win32::Security::TOKEN_INFORMA
 ///
 /// DESTRUCTIVE: guarded.
 pub fn launch_in_session(session_id: u32, expected_user: &Sid, exe: &Path) -> Result<u32> {
-    require_test_machine()?;
+    require_armed_machine()?;
     if !exe.is_absolute() || !exe.is_file() {
         return Err(Win32Error::Invalid(format!("not an existing absolute path: {}", exe.display())));
     }
@@ -353,7 +353,7 @@ mod tests {
 
     #[test]
     fn mutating_functions_are_blocked_by_the_guard() {
-        if crate::guard::is_test_machine() {
+        if crate::guard::is_armed_machine() {
             return;
         }
         let user = crate::sid::current_user_sid().unwrap();

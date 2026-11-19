@@ -6,6 +6,7 @@ import type { DesiredState } from "./DesiredState";
 import type { DeviceInfo } from "./DeviceInfo";
 import type { DeviceLockView } from "./DeviceLockView";
 import type { DisplayMode } from "./DisplayMode";
+import type { DisplayModeSource } from "./DisplayModeSource";
 import type { EnrollmentStatus } from "./EnrollmentStatus";
 import type { KeyboardView } from "./KeyboardView";
 import type { KioskStatus } from "./KioskStatus";
@@ -57,4 +58,19 @@ printing: PrintingView | null,
 /**
  * (1.3) Status of the managed Wi-Fi (Phase 3 P11: status only).
  */
-network: NetworkView | null, };
+network: NetworkView | null, 
+/**
+ * (1.4, plan 4.14) Most web app windows open at once (1 to 12). `None` from a 1.3
+ * agent: the Staff App's own default (Lite 3, Standard 8).
+ */
+webWindowCap: number | null, 
+/**
+ * (1.4) Minutes of silence after which a hidden web app window is closed; 0 = off
+ * (5 to 240 otherwise). `None` from a 1.3 agent: the Staff App's own default
+ * (Lite 30, Standard off).
+ */
+webIdleCloseMin: number | null, 
+/**
+ * (1.4) Where `display_mode` came from. Missing from a 1.3 agent: `auto`.
+ */
+displayModeSource: DisplayModeSource, };

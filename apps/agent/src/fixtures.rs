@@ -99,12 +99,16 @@ fn web_app(id: &str, name: &str, url: &str, domain: &str, pinned_taskbar: bool, 
             url: url.to_string(),
             allowed_domains: vec![domain.to_string()],
             permissions: WebPermissions::default(),
+            browser: Default::default(),
+            browser_exe: None,
+            browser_ready: false,
         }),
         desktop: None,
         pinned_taskbar,
         pinned_desktop: true,
         icon_png_base64: None,
         hue: Some(hue),
+        update: None,
     }
 }
 
@@ -126,6 +130,7 @@ pub fn catalogue() -> Vec<AppEntry> {
             pinned_desktop: false,
             icon_png_base64: None,
             hue: None,
+            update: None,
         },
         // Real sites, so the VM can load them. Subdomains of an allowed domain are
         // allowed too (`www.zubyr.dev` needs no entry). Links from one site to the
@@ -185,6 +190,7 @@ pub fn catalogue() -> Vec<AppEntry> {
             pinned_desktop: true,
             icon_png_base64: None,
             hue: Some(30),
+            update: None,
         },
         // `msconfig.exe` has `requestedExecutionLevel="requireAdministrator"` in its
         // manifest, so CreateProcessW answers error 740 for every non-elevated token
@@ -206,6 +212,7 @@ pub fn catalogue() -> Vec<AppEntry> {
             pinned_desktop: true,
             icon_png_base64: None,
             hue: Some(340),
+            update: None,
         },
     ]
 }

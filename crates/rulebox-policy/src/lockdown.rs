@@ -53,6 +53,22 @@ pub enum LimitError {
     BadSsid,
     #[error("a printer port must be 1 to 65535")]
     BadPort,
+    /// (Phase 6, plan 4.3) More than 60 web apps that open in Chrome or Edge.
+    #[error("more than 60 browser web apps")]
+    TooManyBrowserApps,
+    /// (Phase 6) More than 800 browser URL patterns on one device.
+    #[error("more than 800 browser URL patterns")]
+    TooManyBrowserPatterns,
+    /// (Phase 6, plan 4.14) `webWindowCap` outside 1 to 12.
+    #[error("the web window cap must be 1 to 12")]
+    BadWindowCap,
+    /// (Phase 6) `webIdleCloseMin` that is neither 0 nor 5 to 240.
+    #[error("the idle-close time must be 0 or 5 to 240 minutes")]
+    BadIdleClose,
+    /// (Phase 6, plan 4.17) `ruleboxRelease` without an ordered version, an https URL
+    /// or a SHA-256.
+    #[error("the Rulebox release needs an ordered version, an https URL and a SHA-256")]
+    BadRelease,
 }
 
 // ---------------------------------------------------------------- enums

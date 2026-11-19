@@ -12,7 +12,7 @@
 
 use crate::autologon::{check_winlogon_value, FORBIDDEN_WINLOGON_VALUES, WINLOGON_KEY};
 use crate::error::{Result, Win32Error};
-use crate::guard::require_test_machine;
+use crate::guard::require_armed_machine;
 use crate::registry::{delete_hklm_key, get_hklm, list_hklm_value_names, set_hklm, RegValue};
 
 /// The Safe Mode registration key name (plan 4.16). Under the two `SafeBoot` roots only
@@ -117,7 +117,7 @@ pub fn list_value_names(path: &str) -> Result<Vec<String>> {
 /// DESTRUCTIVE: guarded.
 pub fn set_machine_value(path: &str, name: &str, value: Option<&RegValue>) -> Result<()> {
     check_write(path, name, value)?;
-    require_test_machine()?;
+    require_armed_machine()?;
     set_hklm(path.trim_matches('\\'), name, value)
 }
 
@@ -138,7 +138,7 @@ pub fn check_safe_boot_mode(mode: &str) -> Result<String> {
 /// DESTRUCTIVE: guarded.
 pub fn delete_safe_boot_entry(mode: &str) -> Result<()> {
     let path = check_safe_boot_mode(mode)?;
-    require_test_machine()?;
+    require_armed_machine()?;
     delete_hklm_key(&path)
 }
 
@@ -201,7 +201,7 @@ mod tests {
 
     #[test]
     fn a_write_inside_the_roots_reaches_the_guard_on_the_dev_machine() {
-        if crate::guard::is_test_machine() {
+        if crate::guard::is_armed_machine() {
             return;
         }
         let result = set_machine_value(ALLOWED_ROOTS[1], "HideFastUserSwitching", Some(&RegValue::Dword(1)));
@@ -233,7 +233,7 @@ mod tests {
 
     #[test]
     fn deleting_the_safe_mode_key_meets_the_guard_on_the_dev_machine() {
-        if crate::guard::is_test_machine() {
+        if crate::guard::is_armed_machine() {
             return;
         }
         assert!(matches!(delete_safe_boot_entry("Minimal"), Err(Win32Error::Guard(_))));

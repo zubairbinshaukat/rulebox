@@ -5,6 +5,11 @@ edition.workspace = true
 license.workspace = true
 publish = false
 
+[features]
+# (Phase 6 Step 5) Forwards to the production door of the machine guard; only the release
+# workflow sets it (never a default).
+production = ["rulebox-win32/production"]
+
 [dependencies]
 rulebox-ipc = { workspace = true, features = ["client", "server"] }
 rulebox-policy.workspace = true

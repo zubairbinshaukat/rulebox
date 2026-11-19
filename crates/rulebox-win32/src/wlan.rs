@@ -25,7 +25,7 @@ use windows::Win32::NetworkManagement::WiFi::{
 };
 
 use crate::error::{code_err, Result, Win32Error};
-use crate::guard::require_test_machine;
+use crate::guard::require_armed_machine;
 use crate::util::to_wide;
 
 /// The prefix of every profile Rulebox owns.
@@ -297,7 +297,7 @@ pub fn check_filters(ssids: &[&str]) -> Result<()> {
 /// DESTRUCTIVE: guarded.
 pub fn set_profile(xml_with_key: &str) -> Result<()> {
     check_profile_xml(xml_with_key)?;
-    require_test_machine()?;
+    require_armed_machine()?;
     let client = open()?.ok_or(Win32Error::NotFound)?;
     let guids = interface_guids(&client)?;
     if guids.is_empty() {
@@ -324,7 +324,7 @@ pub fn set_profile(xml_with_key: &str) -> Result<()> {
 /// DESTRUCTIVE: guarded.
 pub fn delete_profile(name: &str) -> Result<()> {
     check_profile_name(name)?;
-    require_test_machine()?;
+    require_armed_machine()?;
     let Some(client) = open()? else {
         return Ok(());
     };
@@ -345,7 +345,7 @@ pub fn delete_profile(name: &str) -> Result<()> {
 /// DESTRUCTIVE: guarded.
 pub fn set_filters(ssids: &[&str]) -> Result<()> {
     check_filters(ssids)?;
-    require_test_machine()?;
+    require_armed_machine()?;
     let client = open()?.ok_or(Win32Error::NotFound)?;
     if ssids.is_empty() {
         // SAFETY: the client handle is open; no list removes the filter.
@@ -416,7 +416,7 @@ mod tests {
 
     #[test]
     fn writers_meet_the_guard_on_the_dev_machine() {
-        if crate::guard::is_test_machine() {
+        if crate::guard::is_armed_machine() {
             return;
         }
         assert!(matches!(set_profile(XML), Err(Win32Error::Guard(_))));

@@ -219,6 +219,9 @@ mod tests {
             keyboard: None,
             printing: None,
             network: None,
+            web_window_cap: None,
+            web_idle_close_min: None,
+            display_mode_source: Default::default(),
         };
         // A 1.0 agent sends no `extra`.
         let mut value = serde_json::json!({ "snapshot": serde_json::to_value(&snapshot).unwrap() });

@@ -289,6 +289,10 @@ pub fn initial_snapshot(
         keyboard: None,
         printing: None,
         network: None,
+        // Protocol 1.4 fields: absent until Phase 6 Step 19 fills them from the policy.
+        web_window_cap: None,
+        web_idle_close_min: None,
+        display_mode_source: Default::default(),
     };
     policy.apply_to_snapshot(&mut snapshot);
     snapshot
@@ -302,6 +306,10 @@ pub async fn run(
     // The demo world exists only in the simulated agent (README answers table, 1.1).
     if deps.sim.demo && !deps.simulate {
         bail!("the demo world (--sim-demo) is only available together with --simulate");
+    }
+    // (Phase 6 Step 5) A release build has no demo employees, test marker or not.
+    if deps.sim.demo && !crate::config::demo_world_allowed() {
+        bail!(crate::config::DEMO_REFUSED);
     }
     if deps.sim.staff_session && !deps.simulate {
         bail!("--sim-staff-session is only available together with --simulate");
@@ -1165,7 +1173,7 @@ mod tests {
         let linked = tokio::time::timeout(Duration::from_secs(10), events.recv()).await.unwrap().unwrap();
         match linked {
             ClientEvent::Linked(hello) => {
-                assert_eq!((hello.protocol.major, hello.protocol.minor), (1, 3));
+                assert_eq!((hello.protocol.major, hello.protocol.minor), (1, 4));
                 // No employee directory: no `session` or `apps`; the exit and the 1.3 capabilities
                 // are always listed.
                 assert_eq!(

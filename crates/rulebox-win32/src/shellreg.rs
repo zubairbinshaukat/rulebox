@@ -9,7 +9,7 @@
 use std::path::Path;
 
 use crate::error::Result;
-use crate::guard::require_test_machine;
+use crate::guard::require_armed_machine;
 use crate::registry::{with_user_hive, HiveKey, RegValue};
 use crate::sid::Sid;
 
@@ -41,7 +41,7 @@ impl Mechanism {
 ///
 /// DESTRUCTIVE: guarded.
 pub fn set_user_shell(sid: &Sid, profile: &Path, mechanism: Mechanism, command: Option<&str>) -> Result<()> {
-    require_test_machine()?;
+    require_armed_machine()?;
     with_user_hive(sid, profile, |hive| write_shell(hive, mechanism, command))
 }
 
@@ -50,7 +50,7 @@ pub fn set_user_shell(sid: &Sid, profile: &Path, mechanism: Mechanism, command: 
 ///
 /// DESTRUCTIVE: guarded.
 pub fn get_user_shell(sid: &Sid, profile: &Path, mechanism: Mechanism) -> Result<Option<String>> {
-    require_test_machine()?;
+    require_armed_machine()?;
     with_user_hive(sid, profile, |hive| match hive.get(mechanism.key(), SHELL_VALUE)? {
         Some(RegValue::String(text)) => Ok(Some(text)),
         Some(RegValue::Dword(_)) | None => Ok(None),
@@ -62,7 +62,7 @@ pub fn get_user_shell(sid: &Sid, profile: &Path, mechanism: Mechanism) -> Result
 ///
 /// DESTRUCTIVE: guarded.
 pub fn set_user_policy_dword(sid: &Sid, profile: &Path, name: &str, value: Option<u32>) -> Result<()> {
-    require_test_machine()?;
+    require_armed_machine()?;
     if name.eq_ignore_ascii_case(SHELL_VALUE) {
         return Err(crate::Win32Error::Invalid("the shell value is written with set_user_shell".into()));
     }

@@ -60,7 +60,7 @@ use windows::Win32::Storage::FileSystem::{
 use windows::Win32::System::IO::IO_STATUS_BLOCK;
 
 use crate::error::{code_err, Result, Win32Error};
-use crate::guard::require_test_machine;
+use crate::guard::require_armed_machine;
 use crate::security::enable_privileges;
 use crate::util::OwnedHandle;
 
@@ -140,7 +140,7 @@ pub enum TreeOutcome {
 ///
 /// DESTRUCTIVE: guarded.
 pub fn reset_below(root: &Path, shared: &[&str], own: &[&str], stop: &dyn Fn() -> bool) -> Result<TreeOutcome> {
-    require_test_machine()?;
+    require_armed_machine()?;
     if own.is_empty() {
         return Err(Win32Error::Invalid("no folder to reset".into()));
     }
@@ -750,7 +750,7 @@ mod tests {
 
     #[test]
     fn reset_is_blocked_by_the_guard_on_the_dev_machine() {
-        if crate::guard::is_test_machine() {
+        if crate::guard::is_armed_machine() {
             return;
         }
         let t = profile();

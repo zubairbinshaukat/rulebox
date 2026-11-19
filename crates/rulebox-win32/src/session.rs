@@ -7,7 +7,7 @@ use windows::Win32::System::RemoteDesktop::{
 };
 
 use crate::error::{api_err, Result};
-use crate::guard::require_test_machine;
+use crate::guard::require_armed_machine;
 use crate::sid::{user_sid_of_token, Sid};
 use crate::util::OwnedHandle;
 
@@ -90,7 +90,7 @@ fn session_user_sid(session_id: u32) -> Option<Sid> {
 ///
 /// DESTRUCTIVE: guarded.
 pub fn logoff(session_id: u32) -> Result<()> {
-    require_test_machine()?;
+    require_armed_machine()?;
     // SAFETY: the current server handle is the local machine; `bwait` is false.
     unsafe { WTSLogoffSession(Some(WTS_CURRENT_SERVER_HANDLE), session_id, false) }
         .map_err(|e| api_err("WTSLogoffSession", &e))
@@ -111,7 +111,7 @@ mod tests {
 
     #[test]
     fn logoff_is_blocked_by_the_guard() {
-        if crate::guard::is_test_machine() {
+        if crate::guard::is_armed_machine() {
             return;
         }
         assert!(matches!(logoff(0xFFFF), Err(Win32Error::Guard(_))));

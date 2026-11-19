@@ -24,7 +24,7 @@ use windows::Win32::System::Services::{
 };
 
 use crate::error::{api_err, Result, Win32Error};
-use crate::guard::require_test_machine;
+use crate::guard::require_armed_machine;
 use crate::security::{dacl_sddl_of, SecurityAttributes};
 use crate::util::to_wide;
 
@@ -279,7 +279,7 @@ pub fn query(name: &str) -> Result<Option<ServiceConfig>> {
 /// DESTRUCTIVE: guarded.
 pub fn set_start(name: &str, start: u32) -> Result<()> {
     check_start(name, start)?;
-    require_test_machine()?;
+    require_armed_machine()?;
     let service = require_service(name, SERVICE_CHANGE_CONFIG)?;
     // SAFETY: the service is open with SERVICE_CHANGE_CONFIG; every other argument means
     // "no change" (SERVICE_NO_CHANGE, null strings).
@@ -332,7 +332,7 @@ pub fn get_security(name: &str) -> Result<Option<String>> {
 pub fn set_security(name: &str, sddl: &str) -> Result<()> {
     check_agent_only(name)?;
     check_service_sddl(sddl)?;
-    require_test_machine()?;
+    require_armed_machine()?;
     let attrs = SecurityAttributes::from_sddl(sddl)?;
     let service = require_service(name, WRITE_DAC)?;
     // SAFETY: the service is open with WRITE_DAC; the descriptor is valid while `attrs` lives.
@@ -400,7 +400,7 @@ fn parse_multi_string(multi: PWSTR) -> Vec<String> {
 pub fn set_required_privileges(name: &str, privileges: &[&str]) -> Result<()> {
     check_agent_only(name)?;
     check_required_privileges(privileges)?;
-    require_test_machine()?;
+    require_armed_machine()?;
     if privileges.iter().any(|p| p.is_empty() || !p.chars().all(|c| c.is_ascii_alphanumeric())) {
         return Err(Win32Error::Invalid("a privilege name is letters and digits".into()));
     }
@@ -461,7 +461,7 @@ mod tests {
 
     #[test]
     fn writers_meet_the_guard_on_the_dev_machine() {
-        if crate::guard::is_test_machine() {
+        if crate::guard::is_armed_machine() {
             return;
         }
         assert!(matches!(set_start("Spooler", START_DISABLED), Err(Win32Error::Guard(_))));

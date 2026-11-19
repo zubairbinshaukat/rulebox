@@ -123,6 +123,10 @@ fn demo_snapshot() -> AgentSnapshot {
             managed_only: false,
             ssids: Vec::new(),
         }),
+        // Protocol 1.4: the Staff App's own defaults.
+        web_window_cap: None,
+        web_idle_close_min: None,
+        display_mode_source: Default::default(),
     }
 }
 

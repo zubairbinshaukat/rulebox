@@ -1121,6 +1121,7 @@ fn driver(id: &str, kind: DriverKind, bytes: &[u8], revision: u64) -> DriverSpec
         silent_args: if kind == DriverKind::Exe { vec!["/S".into(), "/quiet".into()] } else { Vec::new() },
         success_exit_codes: vec![0],
         revision,
+        source: None,
     }
 }
 

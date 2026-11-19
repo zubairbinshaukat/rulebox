@@ -357,6 +357,7 @@ mod tests {
             silent_args: if kind == DriverKind::Exe { vec!["/S".into()] } else { Vec::new() },
             success_exit_codes: vec![0],
             revision: 1,
+            source: None,
         }
     }
 

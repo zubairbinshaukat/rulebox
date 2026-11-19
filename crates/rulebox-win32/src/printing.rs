@@ -23,7 +23,7 @@ use windows::Win32::Graphics::Printing::{
 use windows::Win32::Security::PSECURITY_DESCRIPTOR;
 
 use crate::error::{api_err, Result, Win32Error};
-use crate::guard::require_test_machine;
+use crate::guard::require_armed_machine;
 use crate::security::{dacl_sddl_of, SecurityAttributes};
 use crate::util::{pwstr_to_string, to_wide};
 
@@ -359,7 +359,7 @@ fn xcv(command: &str, input: &[u8]) -> Result<()> {
 /// DESTRUCTIVE: guarded. UNVERIFIED on a real print spooler (Step 21).
 pub fn add_port(spec: &PortSpec) -> Result<()> {
     check_port_spec(spec)?;
-    require_test_machine()?;
+    require_armed_machine()?;
     // SAFETY: PortData1 is plain old data; all-zero is a valid value.
     let mut data: PortData1 = unsafe { std::mem::zeroed() };
     fill(&mut data.port_name, &spec.name);
@@ -382,7 +382,7 @@ pub fn add_port(spec: &PortSpec) -> Result<()> {
 /// DESTRUCTIVE: guarded.
 pub fn delete_port(name: &str) -> Result<()> {
     check_own_port_name(name)?;
-    require_test_machine()?;
+    require_armed_machine()?;
     let wide = to_wide(name);
     // SAFETY: the slice covers exactly the UTF-16 units (with the terminator) of `wide`.
     let bytes = unsafe { std::slice::from_raw_parts(wide.as_ptr().cast::<u8>(), wide.len() * 2) };
@@ -432,14 +432,14 @@ fn printui(flag: &str, unc: &str) -> Result<()> {
 /// driver from the server in this call is the open question of plan 4.15 (`driver_not_approved`).
 pub fn connect_share(unc: &str) -> Result<()> {
     check_share_name(unc)?;
-    require_test_machine()?;
+    require_armed_machine()?;
     printui("/ga", unc)
 }
 
 /// Removes a per-machine printer connection (`PrintUIEntry /gd`). DESTRUCTIVE: guarded.
 pub fn disconnect_share(unc: &str) -> Result<()> {
     check_share_name(unc)?;
-    require_test_machine()?;
+    require_armed_machine()?;
     printui("/gd", unc)
 }
 /// Creates a local queue on an existing port with an installed driver.
@@ -447,7 +447,7 @@ pub fn disconnect_share(unc: &str) -> Result<()> {
 /// DESTRUCTIVE: guarded.
 pub fn add(spec: &PrinterSpec) -> Result<()> {
     check_spec(spec)?;
-    require_test_machine()?;
+    require_armed_machine()?;
     let mut name = to_wide(&spec.name);
     let mut port = to_wide(&spec.port);
     let mut driver = to_wide(&spec.driver);
@@ -477,7 +477,7 @@ pub fn add(spec: &PrinterSpec) -> Result<()> {
 /// DESTRUCTIVE: guarded.
 pub fn delete(name: &str) -> Result<()> {
     check_own_name(name)?;
-    require_test_machine()?;
+    require_armed_machine()?;
     let Some(printer) = open(name, PRINTER_ALL_ACCESS.0)? else {
         return Ok(());
     };
@@ -514,7 +514,7 @@ pub fn get_security(name: &str) -> Result<Option<String>> {
 /// DESTRUCTIVE: guarded.
 pub fn set_security(name: &str, sddl: &str) -> Result<()> {
     check_plain_name(name)?;
-    require_test_machine()?;
+    require_armed_machine()?;
     let attrs = SecurityAttributes::from_sddl(sddl)?;
     let printer = open(name, PRINTER_ALL_ACCESS.0)?.ok_or(Win32Error::NotFound)?;
     let info = PRINTER_INFO_3 { pSecurityDescriptor: PSECURITY_DESCRIPTOR(attrs.descriptor().0) };
@@ -612,7 +612,7 @@ mod tests {
 
     #[test]
     fn writers_meet_the_guard_on_the_dev_machine() {
-        if crate::guard::is_test_machine() {
+        if crate::guard::is_armed_machine() {
             return;
         }
         assert!(matches!(add(&spec("Front desk (Rulebox)")), Err(Win32Error::Guard(_))));

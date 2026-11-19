@@ -629,7 +629,7 @@ mod tests {
         let rig = Rig::start(Vec::new());
         let mut client = RawClient::connect(&rig.name).await;
         let hello = hello(&mut client).await;
-        assert_eq!(hello.protocol, ProtocolVersion { major: 1, minor: 3 });
+        assert_eq!(hello.protocol, ProtocolVersion { major: 1, minor: 4 });
         assert_eq!(hello.capabilities, ["state", "health"]);
         assert_eq!(hello.agent_version, env!("CARGO_PKG_VERSION"));
         rig.stop().await;
@@ -659,7 +659,7 @@ mod tests {
             let Frame::Response { id: 0, ok: true, result: Some(result), .. } = answer else {
                 panic!("the hello of an older minor must be accepted: {answer:?}");
             };
-            assert_eq!(result["protocol"], json!({ "major": 1, "minor": 3 }));
+            assert_eq!(result["protocol"], json!({ "major": 1, "minor": 4 }));
             for text in REST {
                 let request: Frame = serde_json::from_str(text).unwrap();
                 client.send(request).await;

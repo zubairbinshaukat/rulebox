@@ -11,6 +11,7 @@ mod catalog;
 mod cleanup;
 mod cli;
 mod compat;
+mod config;
 mod directory;
 mod employee_cache;
 mod enroll;
@@ -162,6 +163,8 @@ fn dispatch(cli: Cli) -> anyhow::Result<u8> {
             logging::init_stderr_only();
             Ok(lockdown::status::run(json, &mut std::io::stdout().lock(), &mut std::io::stderr().lock()))
         }
+        // (Phase 6 Step 5) Read-only: the machine guard's conditions. No logging, no pipe.
+        Command::GuardStatus { json } => Ok(config::run_guard_status(json, &mut std::io::stdout().lock())),
         Command::HashPin => Ok(hash_pin(
             &mut std::io::stdin().lock(),
             &mut std::io::stdout().lock(),
@@ -334,42 +337,9 @@ fn run_compat(json: bool, out: &mut dyn Write) -> anyhow::Result<u8> {
     if json {
         writeln!(out, "{}", serde_json::to_string_pretty(&report.to_json())?)?;
     } else {
-        write_compat_text(&report, out)?;
+        report.write_text(out)?;
     }
     Ok(0)
-}
-
-fn write_compat_text(report: &compat::CompatReport, out: &mut dyn Write) -> std::io::Result<()> {
-    let os = &report.os;
-    writeln!(out, "Windows build : {}.{} ({})", os.build, os.ubr, os.display_version)?;
-    writeln!(out, "Edition       : {} (product type {})", os.edition_id, os.product_type)?;
-    writeln!(out, "Architecture  : {}", os.arch)?;
-    writeln!(out, "Memory        : {} MB{}", os.ram_mb, if report.lite_mode { " (Lite mode)" } else { "" })?;
-    writeln!(out, "System disk   : {} GB free", os.system_disk_free_gb)?;
-    writeln!(
-        out,
-        "Joined        : domain {}, Entra {}",
-        if os.domain_joined { "yes" } else { "no" },
-        if os.entra_joined { "yes" } else { "no" }
-    )?;
-    writeln!(out, "S mode        : {}", if os.s_mode { "yes" } else { "no" })?;
-    let blockers = report.blocker_codes();
-    if blockers.is_empty() {
-        writeln!(out, "Blockers      : none")?;
-    } else {
-        writeln!(out, "Blockers      : {}", blockers.join(", "))?;
-    }
-    if report.warnings.is_empty() {
-        writeln!(out, "Warnings      : none")?;
-    } else {
-        let warnings: Vec<String> = report
-            .warnings
-            .iter()
-            .map(|w| serde_json::to_value(w).ok().and_then(|v| v.as_str().map(str::to_string)).unwrap_or_default())
-            .collect();
-        writeln!(out, "Warnings      : {}", warnings.join(", "))?;
-    }
-    Ok(())
 }
 
 #[cfg(test)]

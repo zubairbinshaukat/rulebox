@@ -4,7 +4,7 @@
 //! The test reads the source of every module that can change the machine as text and
 //! checks, for each `pub fn` that is not on that module's read-only list:
 //!
-//! - its first real statement is `require_test_machine()?;`, with nothing before it but
+//! - its first real statement is `require_armed_machine()?;`, with nothing before it but
 //!   pure `check_*` rule calls (the allow-list check that returns `Forbidden` before the
 //!   guard, plan 4.5 rule 2);
 //! - it carries the doc line `DESTRUCTIVE: guarded` (a note may follow).
@@ -17,7 +17,7 @@ use std::path::PathBuf;
 
 use rulebox_win32::{machinereg, staffreg, Win32Error};
 
-const GUARD: &str = "require_test_machine()?";
+const GUARD: &str = "require_armed_machine()?";
 
 /// A module and what is allowed to skip the guard. Names starting with `check_` are pure
 /// rule checks and never need it.
@@ -189,15 +189,15 @@ fn removing_a_guard_line_makes_the_scan_fail() {
 
 #[test]
 fn the_scanner_notices_each_way_to_get_it_wrong() {
-    let good = "/// DESTRUCTIVE: guarded.\npub fn write(path: &str) -> Result<()> {\n    check_path(path)?;\n    require_test_machine()?;\n    set(path)\n}\n";
+    let good = "/// DESTRUCTIVE: guarded.\npub fn write(path: &str) -> Result<()> {\n    check_path(path)?;\n    require_armed_machine()?;\n    set(path)\n}\n";
     assert!(scan(good, &[]).is_empty());
     // No guard at all.
-    assert_eq!(scan(&good.replace("    require_test_machine()?;\n", ""), &[]).len(), 1);
+    assert_eq!(scan(&good.replace("    require_armed_machine()?;\n", ""), &[]).len(), 1);
     // The effect before the guard.
-    let late = "/// DESTRUCTIVE: guarded.\npub fn write(path: &str) -> Result<()> {\n    set(path)?;\n    require_test_machine()?;\n    Ok(())\n}\n";
+    let late = "/// DESTRUCTIVE: guarded.\npub fn write(path: &str) -> Result<()> {\n    set(path)?;\n    require_armed_machine()?;\n    Ok(())\n}\n";
     assert_eq!(scan(late, &[]).len(), 1);
     // A guard that is only mentioned in a comment.
-    let comment = "/// DESTRUCTIVE: guarded.\npub fn write() -> Result<()> {\n    // require_test_machine()?;\n    set()\n}\n";
+    let comment = "/// DESTRUCTIVE: guarded.\npub fn write() -> Result<()> {\n    // require_armed_machine()?;\n    set()\n}\n";
     assert_eq!(scan(comment, &[]).len(), 1);
     // No doc line.
     assert_eq!(scan(&good.replace("/// DESTRUCTIVE: guarded.\n", ""), &[]).len(), 1);
@@ -266,4 +266,129 @@ fn both_root_lists_are_what_the_plan_says() {
             assert!(!lower.contains(banned), "{root}");
         }
     }
+}
+
+// -- (Phase 6 Step 5, plan 4.11) the two doors ----------------------------------------------------
+
+fn all_sources() -> Vec<(String, String)> {
+    let dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("src");
+    let mut found = Vec::new();
+    for entry in std::fs::read_dir(&dir).unwrap_or_else(|e| panic!("cannot read {}: {e}", dir.display())) {
+        let path = entry.unwrap_or_else(|e| panic!("cannot read an entry: {e}")).path();
+        if path.extension().is_some_and(|e| e == "rs") {
+            let name = path.file_stem().map(|s| s.to_string_lossy().to_string()).unwrap_or_default();
+            let text = std::fs::read_to_string(&path).unwrap_or_else(|e| panic!("cannot read {}: {e}", path.display()));
+            found.push((name, text));
+        }
+    }
+    found
+}
+
+fn non_test_code(source: &str) -> &str {
+    source.split("\n#[cfg(test)]").next().unwrap_or(source)
+}
+
+#[test]
+fn no_mutating_code_checks_the_test_marker_alone() {
+    // Every mutating function calls `require_armed_machine`; `require_test_machine` and
+    // `is_test_machine` belong to test-only helpers, none of which live in this crate's modules.
+    let mut seen = 0;
+    for (name, text) in all_sources() {
+        if name == "guard" {
+            continue;
+        }
+        seen += 1;
+        let code = non_test_code(&text);
+        assert!(!code.contains("require_test_machine"), "{name}.rs calls require_test_machine; use require_armed_machine");
+        assert!(!code.contains("is_test_machine"), "{name}.rs calls is_test_machine; use is_armed_machine");
+    }
+    assert!(seen > 20, "the scan read too few files");
+}
+
+#[test]
+fn the_other_mutating_modules_call_the_armed_guard() {
+    // Modules that are not in `MODULES` (they have no allow-list or read-only split) but change the machine.
+    for file in ["registry", "tree", "process", "session", "shellreg", "lsa", "security", "accounts"] {
+        let text = source(file);
+        assert!(non_test_code(&text).contains("require_armed_machine()?"), "{file}.rs");
+    }
+}
+
+#[test]
+fn the_vm_test_stays_on_the_test_marker_alone() {
+    // The VM lifecycle test changes the machine and must run only on the test VM: it keeps the
+    // test door, whatever door a production build would open.
+    let path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests").join("vm_lifecycle.rs");
+    let text = std::fs::read_to_string(&path).unwrap_or_else(|e| panic!("cannot read {}: {e}", path.display()));
+    assert!(text.contains("require_test_machine()"));
+    assert!(!text.contains("require_armed_machine"));
+}
+
+/// What is wrong with one Cargo.toml: the feature `production` in a default list, or turned on
+/// for `rulebox-win32` in a dependency line. Only the definitions `production = [...]` are fine.
+fn production_leaks(manifest: &str) -> Vec<String> {
+    let mut problems = Vec::new();
+    for line in manifest.lines() {
+        let line = line.split('#').next().unwrap_or("").trim();
+        if !line.contains("production") || line.starts_with("production") {
+            continue;
+        }
+        if line.starts_with("default") || line.contains("rulebox-win32") || line.contains("features") {
+            problems.push(line.to_string());
+        }
+    }
+    problems
+}
+
+fn workspace_manifests() -> Vec<PathBuf> {
+    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("..").join("..");
+    let mut found = vec![root.join("Cargo.toml"), root.join("apps").join("staff-app").join("src-tauri").join("Cargo.toml")];
+    for group in ["apps", "crates"] {
+        let Ok(entries) = std::fs::read_dir(root.join(group)) else { continue };
+        for entry in entries.flatten() {
+            let manifest = entry.path().join("Cargo.toml");
+            if manifest.is_file() {
+                found.push(manifest);
+            }
+        }
+    }
+    found
+}
+
+#[test]
+fn the_production_feature_is_in_no_default_and_no_dependency_line() {
+    let manifests = workspace_manifests();
+    assert!(manifests.len() >= 6, "{manifests:?}");
+    for path in manifests {
+        let text = std::fs::read_to_string(&path).unwrap_or_else(|e| panic!("cannot read {}: {e}", path.display()));
+        assert!(production_leaks(&text).is_empty(), "{}: {:?}", path.display(), production_leaks(&text));
+    }
+    // The feature itself exists, is empty, and the agent only forwards it.
+    let win32 = std::fs::read_to_string(PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("Cargo.toml")).unwrap_or_default();
+    assert!(win32.contains("\nproduction = []"));
+    let agent = std::fs::read_to_string(PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("..").join("..").join("apps").join("agent").join("Cargo.toml"))
+        .unwrap_or_default();
+    assert!(agent.contains("production = [\"rulebox-win32/production\"]"));
+}
+
+#[test]
+fn the_leak_scanner_notices_a_default_and_a_dependency_feature() {
+    assert!(production_leaks("[features]\ndefault = [\"production\"]\n").len() == 1);
+    assert!(production_leaks("rulebox-win32 = { workspace = true, features = [\"production\"] }\n").len() == 1);
+    assert!(production_leaks("[features]\nproduction = [\"rulebox-win32/production\"]\n").is_empty());
+    assert!(production_leaks("# default = [\"production\"]\n").is_empty());
+}
+
+#[cfg(not(feature = "production"))]
+#[test]
+fn a_plain_test_build_has_no_production_feature() {
+    assert!(!std::hint::black_box(rulebox_win32::guard::PRODUCTION_FEATURE));
+}
+
+#[cfg(feature = "production")]
+#[test]
+fn a_production_test_build_is_still_not_armed_on_this_machine() {
+    // A debug build never opens the production door, and the dev machine has neither marker.
+    assert!(std::hint::black_box(rulebox_win32::guard::PRODUCTION_FEATURE));
+    assert!(matches!(rulebox_win32::guard::require_armed_machine(), Err(Win32Error::Guard(_))));
 }

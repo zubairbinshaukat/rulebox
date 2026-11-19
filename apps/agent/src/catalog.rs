@@ -108,6 +108,8 @@ fn entry_for(
         // (Step 14) From the icon cache; without one the Staff App draws a letter tile.
         icon_png_base64: icon(app),
         hue: app.hue,
+        // (Phase 6 Step 4) Protocol 1.4: no update state until Step 11 sets it.
+        update: None,
     };
     match app.kind {
         CatalogKind::Builtin => {
@@ -125,6 +127,11 @@ fn entry_for(
                 url: web.url.clone(),
                 allowed_domains: web.allowed_domains.clone(),
                 permissions: permissions(app),
+                // (Phase 6 Step 4) Protocol 1.4: every web app opens in the built-in window
+                // until Step 17 fills the browser fields.
+                browser: rulebox_policy::catalog::BrowserKind::Builtin,
+                browser_exe: None,
+                browser_ready: false,
             });
         }
         CatalogKind::Desktop => {
@@ -360,6 +367,10 @@ mod tests {
             product_code: None,
             success_exit_codes: vec![0],
             remove_when_unassigned: false,
+            tech: None,
+            answer_file: None,
+            timeout_min: None,
+            publisher: None,
         });
         // The program is there (an older copy, a half-finished install): not enough.
         platform.add_file(r"C:\Program Files\Good\good.exe");

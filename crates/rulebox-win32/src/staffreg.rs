@@ -12,7 +12,7 @@
 use std::path::Path;
 
 use crate::error::{Result, Win32Error};
-use crate::guard::require_test_machine;
+use crate::guard::require_armed_machine;
 use crate::registry::{get_loaded_user_value, list_loaded_user_value_names, with_user_hive, RegValue};
 use crate::sid::Sid;
 
@@ -105,7 +105,7 @@ pub fn list_value_names(sid: &Sid, profile: &Path, path: &str) -> Result<Vec<Str
 /// DESTRUCTIVE: guarded.
 pub fn write_value(sid: &Sid, profile: &Path, path: &str, name: &str, value: &RegValue) -> Result<()> {
     check_write(path, name)?;
-    require_test_machine()?;
+    require_armed_machine()?;
     let path = path.trim_matches('\\');
     with_user_hive(sid, profile, |hive| hive.set(path, name, Some(value)))
 }
@@ -115,7 +115,7 @@ pub fn write_value(sid: &Sid, profile: &Path, path: &str, name: &str, value: &Re
 /// DESTRUCTIVE: guarded.
 pub fn delete_value(sid: &Sid, profile: &Path, path: &str, name: &str) -> Result<()> {
     check_write(path, name)?;
-    require_test_machine()?;
+    require_armed_machine()?;
     let path = path.trim_matches('\\');
     with_user_hive(sid, profile, |hive| hive.set(path, name, None))
 }
@@ -184,7 +184,7 @@ mod tests {
 
     #[test]
     fn writes_inside_the_roots_reach_the_guard_on_the_dev_machine() {
-        if crate::guard::is_test_machine() {
+        if crate::guard::is_armed_machine() {
             return;
         }
         let sid = crate::sid::current_user_sid().unwrap();

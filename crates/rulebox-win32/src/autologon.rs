@@ -117,7 +117,7 @@ mod tests {
             Err(Win32Error::Invalid(_))
         ));
         // Deleting passes the name checks and then meets the guard (dev machine).
-        if !crate::guard::is_test_machine() {
+        if !crate::guard::is_armed_machine() {
             assert!(matches!(set_winlogon_value("AutoLogonCount", None), Err(Win32Error::Guard(_))));
         }
     }
@@ -142,7 +142,7 @@ mod tests {
 
     #[test]
     fn listed_machine_writes_reach_the_guard_on_the_dev_machine() {
-        if crate::guard::is_test_machine() {
+        if crate::guard::is_armed_machine() {
             return;
         }
         let value = RegValue::Dword(1);

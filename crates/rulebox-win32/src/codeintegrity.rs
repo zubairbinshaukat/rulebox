@@ -12,7 +12,7 @@
 use std::path::PathBuf;
 
 use crate::error::{Result, Win32Error};
-use crate::guard::require_test_machine;
+use crate::guard::require_armed_machine;
 
 /// `CiPolicies\Active` below the Windows folder.
 const ACTIVE_RELATIVE: &str = r"System32\CodeIntegrity\CiPolicies\Active";
@@ -54,7 +54,7 @@ fn file_name(id: &str) -> String {
 /// DESTRUCTIVE: guarded.
 pub fn deploy_policy(policy_id: &str, binary: &[u8]) -> Result<()> {
     let id = check_policy_id(policy_id)?;
-    require_test_machine()?;
+    require_armed_machine()?;
     if binary.is_empty() {
         return Err(Win32Error::Invalid("an empty policy file".into()));
     }
@@ -125,7 +125,7 @@ pub fn read_policy(policy_id: &str) -> Result<Option<Vec<u8>>> {
 ///
 /// DESTRUCTIVE: guarded.
 pub fn refresh() -> Result<()> {
-    require_test_machine()?;
+    require_armed_machine()?;
     run_citool(&["--refresh"])
 }
 
@@ -136,7 +136,7 @@ pub fn refresh() -> Result<()> {
 /// DESTRUCTIVE: guarded.
 pub fn remove_policy(policy_id: &str) -> Result<()> {
     let id = check_policy_id(policy_id)?;
-    require_test_machine()?;
+    require_armed_machine()?;
     if citool_available() {
         let braced = format!("{{{id}}}");
         let _ = run_citool(&["--remove-policy", &braced]);
@@ -207,7 +207,7 @@ mod tests {
 
     #[test]
     fn deploy_remove_and_refresh_meet_the_guard_on_the_dev_machine() {
-        if crate::guard::is_test_machine() {
+        if crate::guard::is_armed_machine() {
             return;
         }
         let id = "8a6eb3cd-ba2e-4a97-a1f9-4f4a3b1c0001";

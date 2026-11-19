@@ -35,7 +35,7 @@ use windows::Win32::System::Diagnostics::Etw::{
 };
 
 use crate::error::{code_err, Result, Win32Error};
-use crate::guard::require_test_machine;
+use crate::guard::require_armed_machine;
 use crate::util::to_wide;
 
 /// One process start. No command line, no window title (Phase 5 rule 6).
@@ -292,7 +292,7 @@ fn start_session() -> Result<u64> {
 ///
 /// DESTRUCTIVE: guarded.
 pub fn start_trace(sink: ProcessSink) -> Result<TraceHandle> {
-    require_test_machine()?;
+    require_armed_machine()?;
     let mut sessions = lock(&SESSIONS);
     if !sessions.is_empty() {
         return Err(Win32Error::AlreadyExists);
@@ -362,7 +362,7 @@ fn enable_provider(control: u64) -> Result<()> {
 ///
 /// DESTRUCTIVE: guarded.
 pub fn stop_trace(handle: TraceHandle) -> Result<()> {
-    require_test_machine()?;
+    require_armed_machine()?;
     let session = {
         let mut sessions = lock(&SESSIONS);
         match sessions.iter().position(|s| s.id == handle.0) {
@@ -483,7 +483,7 @@ mod tests {
 
     #[test]
     fn both_calls_meet_the_guard_first_on_the_dev_machine() {
-        if crate::guard::is_test_machine() {
+        if crate::guard::is_armed_machine() {
             return;
         }
         assert!(matches!(start_trace(Box::new(|_| {})), Err(Win32Error::Guard(_))));

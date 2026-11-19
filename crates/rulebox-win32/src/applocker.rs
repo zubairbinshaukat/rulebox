@@ -25,7 +25,7 @@ use windows::Win32::System::Variant::{VariantClear, VARIANT, VT_BSTR};
 use windows::Win32::System::Wmi::{IWbemClassObject, IWbemContext, IWbemServices, WBEM_GENERIC_FLAG_TYPE};
 
 use crate::error::{Result, Win32Error};
-use crate::guard::require_test_machine;
+use crate::guard::require_armed_machine;
 use crate::registry::{count_hklm_subkeys, delete_hklm_tree, get_hklm, set_hklm, RegValue};
 use crate::wmi::{hr_err, with_services};
 
@@ -216,7 +216,7 @@ pub fn check_policy(xml: &str) -> Result<Vec<Collection>> {
 /// DESTRUCTIVE: guarded.
 pub fn set_policy(xml: &str, mechanism: Mechanism) -> Result<()> {
     let collections = check_policy(xml)?;
-    require_test_machine()?;
+    require_armed_machine()?;
     match mechanism {
         Mechanism::Local => set_local(&collections),
         Mechanism::Csp => set_csp(&collections),
@@ -227,7 +227,7 @@ pub fn set_policy(xml: &str, mechanism: Mechanism) -> Result<()> {
 ///
 /// DESTRUCTIVE: guarded.
 pub fn clear_policy(mechanism: Mechanism) -> Result<()> {
-    require_test_machine()?;
+    require_armed_machine()?;
     match mechanism {
         Mechanism::Local => clear_local(),
         Mechanism::Csp => clear_csp(),
@@ -428,7 +428,7 @@ mod tests {
 
     #[test]
     fn writers_meet_the_guard_first_on_the_dev_machine() {
-        if crate::guard::is_test_machine() {
+        if crate::guard::is_armed_machine() {
             return;
         }
         assert!(matches!(set_policy("<AppLockerPolicy/>", Mechanism::Local), Err(Win32Error::Guard(_))));

@@ -33,6 +33,7 @@ pub mod notice;
 pub mod paths;
 pub mod roster;
 pub mod seal;
+pub mod version;
 
 use lockdown::{ConfigRef, LimitError, LockdownPolicy, UsbTempAllow};
 use network::{DriverSpec, PrinterSpec, WifiProfile, MAX_DRIVERS, MAX_PRINTERS, MAX_WIFI_PROFILES};
@@ -67,6 +68,84 @@ pub struct AgentDoc {
     pub usb_temp_allow: Option<UsbTempAllow>,
     pub broadcasts: Vec<Broadcast>,
     pub config: Option<ConfigRef>,
+    /// (Phase 6 Step 4, plan 4.3, 4.14) The administrator's display-mode choice for this
+    /// PC (the device value wins over the group's; the server sends the winner). Absent
+    /// = `auto`. The agent computes the effective mode and tells the Staff App.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub display_mode: Option<DisplayModeOverride>,
+    /// (Phase 6) Open web app windows allowed at once, 1 to 12. Absent = Lite 3,
+    /// Standard 8 (the agent's default).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub web_window_cap: Option<u8>,
+    /// (Phase 6) Minutes after which a hidden, silent web app window is closed: 0 = off,
+    /// 5 to 240. Absent = Lite 30, Standard off.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub web_idle_close_min: Option<u16>,
+    /// (Phase 6) Group switch: browser web apps may upload files
+    /// (`AllowFileSelectionDialogs`, plan 4.9.3). Absent = false.
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub browser_uploads: bool,
+    /// (Phase 6 Step 20, plan 4.17) The Rulebox build this organization wants on its PCs.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub rulebox_release: Option<RuleboxRelease>,
+}
+
+/// (Phase 6, plan 4.14) `displayMode` of a group or device. `Unknown` behaves as `Auto`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub enum DisplayModeOverride {
+    Auto,
+    Standard,
+    Lite,
+    Unknown,
+}
+unknown_on_new_values!(DisplayModeOverride { Auto => "auto", Standard => "standard", Lite => "lite" });
+
+impl DisplayModeOverride {
+    /// `Unknown` is `Auto`.
+    pub fn effective(self) -> Self {
+        if self == Self::Unknown {
+            Self::Auto
+        } else {
+            self
+        }
+    }
+}
+
+/// (Phase 6 Step 20, plan 4.17) Coordinates of the MSI that upgrades Rulebox itself.
+/// Signed like everything else; checked by SHA-256 (and, once signing is live, by signer).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub struct RuleboxRelease {
+    /// Ordered (see [`version`]).
+    pub version: String,
+    /// `https://` only.
+    pub url: String,
+    /// 64 lower-case hex.
+    pub sha256: String,
+    #[ts(type = "number")]
+    pub size_bytes: u64,
+}
+
+/// `webWindowCap` range (plan 4.14).
+pub const WEB_WINDOW_CAP_RANGE: std::ops::RangeInclusive<u8> = 1..=12;
+/// `webIdleCloseMin` range; 0 = off.
+pub const WEB_IDLE_CLOSE_RANGE: std::ops::RangeInclusive<u16> = 5..=240;
+
+impl RuleboxRelease {
+    /// Ordered version, https URL, well-formed hash.
+    pub fn check_limits(&self) -> Result<(), LimitError> {
+        let ok = version::is_ordered(&self.version)
+            && catalog::check_https("ruleboxRelease.url", &self.url).is_ok()
+            && catalog::check_sha256("ruleboxRelease.sha256", &self.sha256).is_ok();
+        if ok {
+            Ok(())
+        } else {
+            Err(LimitError::BadRelease)
+        }
+    }
 }
 
 impl AgentDoc {
@@ -97,6 +176,15 @@ impl AgentDoc {
         self.drivers.iter().try_for_each(DriverSpec::check_limits)?;
         if let Some(lock) = &self.device_lock {
             lock.check_limits()?;
+        }
+        if self.web_window_cap.is_some_and(|cap| !WEB_WINDOW_CAP_RANGE.contains(&cap)) {
+            return Err(LimitError::BadWindowCap);
+        }
+        if self.web_idle_close_min.is_some_and(|min| min != 0 && !WEB_IDLE_CLOSE_RANGE.contains(&min)) {
+            return Err(LimitError::BadIdleClose);
+        }
+        if let Some(release) = &self.rulebox_release {
+            release.check_limits()?;
         }
         if self.broadcasts.iter().filter(|b| b.is_active(now_ms)).count() > MAX_ACTIVE_BROADCASTS {
             return Err(LimitError::TooManyBroadcasts);

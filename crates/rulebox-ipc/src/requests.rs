@@ -14,6 +14,7 @@
 
 use std::fmt;
 
+use rulebox_policy::catalog::BrowserKind;
 use serde::{Deserialize, Serialize};
 
 /// Parameters of `session.signIn`.
@@ -175,6 +176,22 @@ pub struct AppEntry {
     pub icon_png_base64: Option<String>,
     #[serde(default)]
     pub hue: Option<u16>,
+    /// (1.4) Set while the agent is updating this desktop app. `None` from a 1.3 agent
+    /// and when no update is under way.
+    #[serde(default)]
+    pub update: Option<AppUpdateState>,
+}
+
+/// (1.4, plan 4.4.5) What an update of an installed desktop app is doing. The Staff App
+/// shows "Updating..." on the tile (and cannot start the app) for `Updating`, and
+/// "Waiting for the app to close" for `WaitingForClose`. `Unknown` (a state a later agent
+/// adds) is read like `Updating`: the tile cannot be started either way.
+#[derive(Serialize, Debug, Clone, Copy, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub enum AppUpdateState {
+    Updating,
+    WaitingForClose,
+    Unknown,
 }
 
 /// A client that reads `Unknown` skips that app.
@@ -200,6 +217,19 @@ pub struct WebApp {
     pub url: String,
     pub allowed_domains: Vec<String>,
     pub permissions: WebPermissions,
+    /// (1.4, plan 4.9.1) The browser the administrator chose. A 1.3 agent does not send
+    /// it, and a 1.3 client ignores it: both mean the built-in window. The Staff App
+    /// still opens the built-in window in Lite mode and when `browser_ready` is false.
+    #[serde(default)]
+    pub browser: BrowserKind,
+    /// (1.4) The resolved path of the browser program (`chrome.exe` or `msedge.exe`) the
+    /// Staff App asks the launcher service to start; `None` for the built-in window.
+    #[serde(default)]
+    pub browser_exe: Option<String>,
+    /// (1.4) True once the browser's policies for this PC are written and journalled as
+    /// applied (plan 4.9.3). The Staff App never opens a browser window before that.
+    #[serde(default)]
+    pub browser_ready: bool,
 }
 
 /// PRD 24.1: a web app may show notifications and download files by default;
@@ -235,6 +265,8 @@ impl Default for WebPermissions {
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct DesktopApp {
+    /// The **resolved** path (plan 4.4.3, 1.4): a template with a `*` folder has been
+    /// turned into the folder of the highest installed version. Never a pattern.
     pub exe: String,
     pub args: Vec<String>,
     pub file_arg_template: Vec<String>,
@@ -347,6 +379,18 @@ pub struct ProgramBlockedData {
 
 /// (1.3) The longest `displayName` of `program.blocked`, in characters.
 pub const MAX_PROGRAM_NAME_CHARS: usize = 100;
+
+/// (1.4, plan 4.4.5) Data of the `apps.updating` event: the sign-in screen shows
+/// "Updating apps..." while the agent installs updates before the employee signs in.
+/// `count` is how many apps are being updated (0 = done, show the normal sign-in);
+/// `until` is the latest time the sign-in is held, in Unix milliseconds. The hold is
+/// at most 5 minutes; after `until` the employee is let in whatever the state.
+#[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct AppsUpdatingData {
+    pub count: u32,
+    pub until: u64,
+}
 unknown_on_new_values!(VerifyOutcome {
     Ok => "ok",
     WrongCredentials => "wrongCredentials",
@@ -356,6 +400,10 @@ unknown_on_new_values!(AppKind {
     Builtin => "builtin",
     Web => "web",
     Desktop => "desktop",
+});
+unknown_on_new_values!(AppUpdateState {
+    Updating => "updating",
+    WaitingForClose => "waitingForClose",
 });
 unknown_on_new_values!(AdminExitOutcome {
     SigningOut => "signingOut",
@@ -455,9 +503,11 @@ mod tests {
             "web": { "url": "https://portal.company.com/orders", "allowedDomains": ["portal.company.com"],
                      "permissions": { "camera": false, "microphone": false, "screenShare": false,
                                       "clipboardRead": false, "notifications": true, "downloads": true,
-                                      "printing": false, "geolocation": false } },
+                                      "printing": false, "geolocation": false },
+                     "browser": "builtin", "browserExe": null, "browserReady": false },
             "desktop": null,
-            "pinnedTaskbar": true, "pinnedDesktop": true, "iconPngBase64": null, "hue": 175
+            "pinnedTaskbar": true, "pinnedDesktop": true, "iconPngBase64": null, "hue": 175,
+            "update": null
         } ] }));
         let app = &list.apps[0];
         assert_eq!(app.kind, AppKind::Web);
@@ -470,14 +520,75 @@ mod tests {
         golden::<AppEntry>(json!({
             "id": "files", "name": "My files", "description": "Your files", "kind": "builtin",
             "builtin": { "tool": "files" }, "web": null, "desktop": null,
-            "pinnedTaskbar": true, "pinnedDesktop": false, "iconPngBase64": null, "hue": null
+            "pinnedTaskbar": true, "pinnedDesktop": false, "iconPngBase64": null, "hue": null,
+            "update": null
         }));
         golden::<AppEntry>(json!({
             "id": "notepad", "name": "Notepad", "description": null, "kind": "desktop",
             "builtin": null, "web": null,
             "desktop": { "exe": "C:\\Windows\\System32\\notepad.exe", "args": [], "fileArgTemplate": ["{file}"] },
-            "pinnedTaskbar": false, "pinnedDesktop": true, "iconPngBase64": "iVBORw0KGgo=", "hue": 30
+            "pinnedTaskbar": false, "pinnedDesktop": true, "iconPngBase64": "iVBORw0KGgo=", "hue": 30,
+            "update": null
         }));
+    }
+
+    /// (1.4) The browser of a web app, the update state of a desktop app and the event data.
+    #[test]
+    fn protocol_1_4_golden_json() {
+        let permissions = json!({ "camera": false, "microphone": false, "screenShare": false, "clipboardRead": false,
+                                  "notifications": true, "downloads": true, "printing": false, "geolocation": false });
+        let web: WebApp = golden(json!({
+            "url": "https://portal.company.com/orders", "allowedDomains": ["portal.company.com"],
+            "permissions": permissions,
+            "browser": "chrome", "browserExe": "C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe",
+            "browserReady": true
+        }));
+        assert_eq!((web.browser, web.browser_ready), (BrowserKind::Chrome, true));
+        let edge: WebApp = golden(json!({
+            "url": "https://x.test/", "allowedDomains": [], "permissions": permissions,
+            "browser": "edge", "browserExe": null, "browserReady": false
+        }));
+        assert_eq!(edge.browser, BrowserKind::Edge);
+
+        for (text, state) in [("updating", AppUpdateState::Updating), ("waitingForClose", AppUpdateState::WaitingForClose)] {
+            let entry: AppEntry = golden(json!({
+                "id": "tally", "name": "Tally", "description": null, "kind": "desktop", "builtin": null, "web": null,
+                "desktop": { "exe": "C:\\Program Files\\Tally\\tally.exe", "args": [], "fileArgTemplate": [] },
+                "pinnedTaskbar": false, "pinnedDesktop": true, "iconPngBase64": null, "hue": null, "update": text
+            }));
+            assert_eq!(entry.update, Some(state));
+        }
+        let data: AppsUpdatingData = golden(json!({ "count": 2, "until": 1_760_990_300_000_u64 }));
+        assert_eq!(data, AppsUpdatingData { count: 2, until: 1_760_990_300_000 });
+    }
+
+    /// (1.4) A 1.3 agent sends none of the new keys: the defaults are the old behaviour.
+    #[test]
+    fn a_1_3_app_entry_reads_with_the_1_4_defaults() {
+        let web: WebApp = serde_json::from_value(json!({
+            "url": "https://x.test/", "allowedDomains": [], "permissions": {}
+        }))
+        .unwrap();
+        assert_eq!((web.browser, web.browser_exe, web.browser_ready), (BrowserKind::Builtin, None, false));
+        let entry: AppEntry = serde_json::from_value(json!({
+            "id": "a", "name": "A", "kind": "web", "web": { "url": "https://x.test/", "allowedDomains": [], "permissions": {} }
+        }))
+        .unwrap();
+        assert_eq!(entry.update, None);
+    }
+
+    /// (1.4) Values a later agent adds are `Unknown`, not errors; a browser the Staff App
+    /// does not know is not launched (it falls back to the built-in window).
+    #[test]
+    fn new_1_4_enum_values_are_unknown() {
+        let state: AppUpdateState = serde_json::from_value(json!("rebooting")).unwrap();
+        assert_eq!(state, AppUpdateState::Unknown);
+        let web: WebApp = serde_json::from_value(json!({
+            "url": "https://x.test/", "allowedDomains": [], "permissions": {}, "browser": "firefox"
+        }))
+        .unwrap();
+        assert_eq!(web.browser, BrowserKind::Unknown);
+        assert_eq!(web.browser.effective(), BrowserKind::Builtin);
     }
 
     #[test]
@@ -529,6 +640,8 @@ mod tests {
         ]);
         use SessionEndReason as R;
         check(&[R::EmployeeRemoved, R::CredentialChanged, R::Revoked, R::DeviceLocked, R::Unknown]);
+        check(&[AppUpdateState::Updating, AppUpdateState::WaitingForClose, AppUpdateState::Unknown]);
+        check(&[BrowserKind::Builtin, BrowserKind::Edge, BrowserKind::Chrome, BrowserKind::Unknown]);
         check(&[VerifyOutcome::Ok, VerifyOutcome::WrongCredentials, VerifyOutcome::LockedOut, VerifyOutcome::Unknown]);
         check(&[AppKind::Builtin, AppKind::Web, AppKind::Desktop, AppKind::Unknown]);
         check(&[

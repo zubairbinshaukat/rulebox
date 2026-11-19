@@ -78,6 +78,137 @@ pub struct CatalogWebPermissions {
     pub geolocation: bool,
 }
 
+// ---------------------------------------------------------------- Phase 6 enums (plan 4.3)
+//
+// Absent optional values of the Phase 6 fields are **omitted**, never `null`, so a
+// Phase 4 or Phase 5 document serializes to the same bytes as before (the
+// `catalog-v2.json` vector pins it). Multi-word values use `snake_case`: they are the
+// literals of the Convex validators (plan 4.2), so the document builder copies them.
+
+/// How the version of a desktop app is kept (plan 4.4). `Unknown` behaves as
+/// `Pinned` (the safe value: Rulebox installs what the catalogue says and nothing else).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, TS)]
+#[serde(rename_all = "snake_case")]
+#[ts(export)]
+pub enum UpdateMode {
+    Pinned,
+    Vendor,
+    Managed,
+    Unknown,
+}
+unknown_on_new_values!(UpdateMode { Pinned => "pinned", Vendor => "vendor", Managed => "managed" });
+
+impl UpdateMode {
+    /// The mode the engine acts on: `Unknown` is `Pinned`.
+    pub fn effective(self) -> Self {
+        if self == Self::Unknown {
+            Self::Pinned
+        } else {
+            self
+        }
+    }
+}
+
+/// When a managed update may run on a PC where the app is already installed (4.4.5).
+/// `Unknown` behaves as the default, `BootOrSignedOut`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, TS)]
+#[serde(rename_all = "snake_case")]
+#[ts(export)]
+pub enum ApplyWhen {
+    BootOrSignedOut,
+    WhenClosed,
+    Unknown,
+}
+unknown_on_new_values!(ApplyWhen { BootOrSignedOut => "boot_or_signed_out", WhenClosed => "when_closed" });
+
+/// What kind of installer file an install is (plan 4.7). `Unknown` is read as a plain
+/// EXE (`Exe`): the engine runs it with the admin's own switches and nothing else.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, TS)]
+#[serde(rename_all = "snake_case")]
+#[ts(export)]
+pub enum InstallTech {
+    Msi,
+    Nsis,
+    Inno,
+    Burn,
+    InstallshieldMsi,
+    InstallshieldScript,
+    AdvancedInstaller,
+    Exe,
+    Unknown,
+}
+unknown_on_new_values!(InstallTech {
+    Msi => "msi",
+    Nsis => "nsis",
+    Inno => "inno",
+    Burn => "burn",
+    InstallshieldMsi => "installshield_msi",
+    InstallshieldScript => "installshield_script",
+    AdvancedInstaller => "advanced_installer",
+    Exe => "exe",
+});
+
+impl InstallTech {
+    /// The technology the engine acts on: `Unknown` is a plain EXE.
+    pub fn effective(self) -> Self {
+        if self == Self::Unknown {
+            Self::Exe
+        } else {
+            self
+        }
+    }
+}
+
+/// Which browser opens a web app (plan 4.9.1). `Unknown` behaves as `Builtin`.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub enum BrowserKind {
+    #[default]
+    Builtin,
+    Edge,
+    Chrome,
+    Unknown,
+}
+unknown_on_new_values!(BrowserKind { Builtin => "builtin", Edge => "edge", Chrome => "chrome" });
+
+impl BrowserKind {
+    /// The browser the Staff App may use: `Unknown` is the built-in window.
+    pub fn effective(self) -> Self {
+        if self == Self::Unknown {
+            Self::Builtin
+        } else {
+            self
+        }
+    }
+}
+
+/// The kind of vendor feed a managed app is resolved from (plan 4.5). Only the
+/// **server** reads a feed. The type exists for the dashboard; no struct that a
+/// device receives holds the feed URL or the key (plan 4.3).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub enum FeedKind {
+    Tauri,
+    Unknown,
+}
+unknown_on_new_values!(FeedKind { Tauri => "tauri" });
+
+/// `web.browser`: `{ "kind": "builtin" }`, `{ "kind": "edge" }` or
+/// `{ "kind": "chrome", "appId": "<Chrome app in the catalogue>" }`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub struct BrowserChoice {
+    pub kind: BrowserKind,
+    /// `chrome` only: the catalogue id of the Chrome desktop app, so the agent knows
+    /// the exe and that it is installed.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub app_id: Option<String>,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
 #[serde(rename_all = "camelCase")]
 #[ts(export)]
@@ -86,6 +217,25 @@ pub struct WebSpec {
     pub url: String,
     pub allowed_domains: Vec<String>,
     pub permissions: CatalogWebPermissions,
+    /// (Phase 6) Absent = the built-in window.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub browser: Option<BrowserChoice>,
+}
+
+impl WebSpec {
+    /// The browser the Staff App may launch (Lite mode and a missing exe fall back to
+    /// the built-in window in the Staff App, plan 4.9.1). Absent, `Unknown`, and a
+    /// `chrome` choice without the Chrome app's id are all `Builtin`.
+    pub fn browser_kind(&self) -> BrowserKind {
+        match &self.browser {
+            None => BrowserKind::Builtin,
+            Some(choice) => match choice.kind.effective() {
+                BrowserKind::Chrome if choice.app_id.as_deref().is_none_or(str::is_empty) => BrowserKind::Builtin,
+                kind => kind,
+            },
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, TS)]
@@ -119,6 +269,100 @@ pub struct InstallSpec {
     pub product_code: Option<String>,
     pub success_exit_codes: Vec<i32>,
     pub remove_when_unassigned: bool,
+    /// (Phase 6) What the installer file is. Absent = plain EXE.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub tech: Option<InstallTech>,
+    /// (Phase 6) The answer file of a wizard installer (`{AnswerFile}` in `silent_args`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub answer_file: Option<AnswerFile>,
+    /// (Phase 6) Minutes the installer may run: 5 to 120, absent = 30.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub timeout_min: Option<u32>,
+    /// (Phase 6) The expected Authenticode subject of the installer file; checked by
+    /// the agent before it runs the file (`publisher_mismatch`). Absent = no check.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub publisher: Option<String>,
+}
+
+/// (Phase 6) The recorded answer file of an InstallShield or similar wizard
+/// installer: a file like the installer, verified the same way.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub struct AnswerFile {
+    /// `https://` only.
+    pub url: String,
+    /// 64 lower-case hex.
+    pub sha256: String,
+    /// At most [`MAX_ANSWER_FILE_BYTES`]; 0 = unknown.
+    #[ts(type = "number")]
+    pub size_bytes: u64,
+}
+
+/// (Phase 6) The installer of the version before the current one (one step back), for
+/// Roll back. Never holds a feed.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub struct PreviousVersion {
+    pub version: String,
+    /// `https://` only.
+    pub url: String,
+    /// 64 lower-case hex.
+    pub sha256: String,
+    /// 0 = unknown.
+    #[ts(type = "number")]
+    pub size_bytes: u64,
+}
+
+/// (Phase 6, plan 4.2) The update mode of a desktop app **as a device sees it**. The
+/// server keeps more (`feed` with the URL and public key, `autoPublish`): none of that
+/// is a field here, and a `feed` key in a document is ignored and never written back
+/// (plan 4.3 rule 3: the device gets only the resolved version, URL and hash).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub struct UpdateSpec {
+    pub mode: UpdateMode,
+    /// Vendor: the Authenticode subject of the vendor's updater and programs.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub publisher: Option<String>,
+    /// Vendor: narrows the publisher rule to one product name.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub publisher_product: Option<String>,
+    /// Vendor: an installed version below this runs the bootstrap again.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub min_version: Option<String>,
+    /// Managed: absent = `boot_or_signed_out`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub apply_when: Option<ApplyWhen>,
+    /// Managed: absent = true.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub rollback_on_fail: Option<bool>,
+}
+
+impl UpdateSpec {
+    /// Absent and `Unknown` are `BootOrSignedOut`.
+    pub fn apply_when(&self) -> ApplyWhen {
+        match self.apply_when {
+            Some(ApplyWhen::WhenClosed) => ApplyWhen::WhenClosed,
+            _ => ApplyWhen::BootOrSignedOut,
+        }
+    }
+
+    /// Absent is true.
+    pub fn rollback_on_fail(&self) -> bool {
+        self.rollback_on_fail.unwrap_or(true)
+    }
 }
 
 /// A program on the PC. `exe` and the folder lists are path templates (plan 4.8
@@ -133,6 +377,27 @@ pub struct DesktopSpec {
     pub file_arg_template: Vec<String>,
     pub install: Option<InstallSpec>,
     pub reset_folders: Vec<String>,
+    /// (Phase 6) The version this install delivers: free text for a Pinned app,
+    /// ordered (`crate::version`) for Vendor and Managed. At most 40 characters of
+    /// `[0-9A-Za-z.+-]`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub version: Option<String>,
+    /// (Phase 6) Absent = Pinned.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub update: Option<UpdateSpec>,
+    /// (Phase 6) One step back, for Roll back.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub previous: Option<PreviousVersion>,
+}
+
+impl DesktopSpec {
+    /// What the engine acts on: absent and `Unknown` are `Pinned`.
+    pub fn update_mode(&self) -> UpdateMode {
+        self.update.as_ref().map_or(UpdateMode::Pinned, |update| update.mode.effective())
+    }
 }
 
 /// The icon file in Convex storage; the agent checks `sha256` after download.
@@ -185,16 +450,66 @@ pub enum CatalogError {
     NotHttps(&'static str),
     #[error("{0} must be 64 lower-case hex characters")]
     BadSha256(&'static str),
+    /// (Phase 6) A version or a text longer than its limit, or with a character that
+    /// is not `[0-9A-Za-z.+-]` (a version).
+    #[error("{0} is too long or has a character that is not allowed")]
+    BadText(&'static str),
+    /// (Phase 6, plan 4.4.1) A Vendor `minVersion` or a Managed `version` that has no
+    /// order (`version_not_ordered` on the server).
+    #[error("{0} has no order, but this update mode needs one")]
+    VersionNotOrdered(&'static str),
+    /// (Phase 6, plan 4.4.3) Vendor mode without a publisher (`vendor_mode_needs_publisher`).
+    #[error("vendor mode needs a publisher")]
+    VendorNeedsPublisher,
+    /// (Phase 6) `timeoutMin` outside 5 to 120.
+    #[error("the timeout must be 5 to 120 minutes")]
+    BadTimeout,
+    /// (Phase 6) An answer file larger than 256 KiB.
+    #[error("the answer file is larger than 256 KiB")]
+    AnswerFileTooLarge,
 }
 
-fn check_https(field: &'static str, url: &str) -> Result<(), CatalogError> {
+/// Longest answer file (plan 4.3): 256 KiB.
+pub const MAX_ANSWER_FILE_BYTES: u64 = 256 * 1024;
+/// `timeoutMin` range (plan 4.2); absent = [`DEFAULT_TIMEOUT_MIN`].
+pub const TIMEOUT_MIN_RANGE: std::ops::RangeInclusive<u32> = 5..=120;
+pub const DEFAULT_TIMEOUT_MIN: u32 = 30;
+/// `publisher` (an Authenticode subject), in characters (same limit as an exception's).
+pub const MAX_PUBLISHER: usize = crate::lockdown::MAX_PUBLISHER_SUBJECT;
+/// `publisherProduct`, in characters.
+pub const MAX_PUBLISHER_PRODUCT: usize = crate::lockdown::MAX_PUBLISHER_FIELD;
+/// Browser web apps per device (plan 4.3).
+pub const MAX_BROWSER_WEB_APPS: usize = 60;
+/// Combined browser URL patterns per device (plan 4.3; the browsers' own limit is 1,000).
+pub const MAX_BROWSER_URL_PATTERNS: usize = 800;
+
+fn check_text(field: &'static str, text: &str, max: usize) -> Result<(), CatalogError> {
+    if text.chars().count() > max {
+        return Err(CatalogError::BadText(field));
+    }
+    Ok(())
+}
+
+/// A version text: at most 40 characters of `[0-9A-Za-z.+-]` (plan 4.3).
+pub(crate) fn check_version_text(field: &'static str, text: &str) -> Result<(), CatalogError> {
+    let ok = !text.is_empty()
+        && text.chars().count() <= crate::version::MAX_VERSION_CHARS
+        && text.bytes().all(|b| b.is_ascii_alphanumeric() || matches!(b, b'.' | b'+' | b'-'));
+    if ok {
+        Ok(())
+    } else {
+        Err(CatalogError::BadText(field))
+    }
+}
+
+pub(crate) fn check_https(field: &'static str, url: &str) -> Result<(), CatalogError> {
     match url.get(..8) {
         Some(scheme) if scheme.eq_ignore_ascii_case("https://") && url.len() > 8 => Ok(()),
         _ => Err(CatalogError::NotHttps(field)),
     }
 }
 
-fn check_sha256(field: &'static str, hash: &str) -> Result<(), CatalogError> {
+pub(crate) fn check_sha256(field: &'static str, hash: &str) -> Result<(), CatalogError> {
     let ok = hash.len() == 64 && hash.bytes().all(|b| matches!(b, b'0'..=b'9' | b'a'..=b'f'));
     if ok {
         Ok(())
@@ -271,9 +586,113 @@ impl CatalogApp {
             }
             check_https("install.url", &install.url)?;
             check_sha256("install.sha256", &install.sha256)?;
+            // (Phase 6) An unknown `tech` is a plain EXE, so it is not refused.
+            if let Some(answer) = &install.answer_file {
+                check_https("install.answerFile.url", &answer.url)?;
+                check_sha256("install.answerFile.sha256", &answer.sha256)?;
+                if answer.size_bytes > MAX_ANSWER_FILE_BYTES {
+                    return Err(CatalogError::AnswerFileTooLarge);
+                }
+            }
+            if install.timeout_min.is_some_and(|minutes| !TIMEOUT_MIN_RANGE.contains(&minutes)) {
+                return Err(CatalogError::BadTimeout);
+            }
+            if let Some(publisher) = &install.publisher {
+                check_text("install.publisher", publisher, MAX_PUBLISHER)?;
+            }
+        }
+        if let Some(desktop) = &self.desktop {
+            desktop.validate_update()?;
         }
         Ok(())
     }
+}
+
+impl DesktopSpec {
+    /// The Phase 6 fields: version text, update mode rules (plan 4.4.1, 4.4.3), the
+    /// previous version. Defence in depth for what the server refuses at save time.
+    fn validate_update(&self) -> Result<(), CatalogError> {
+        if let Some(version) = &self.version {
+            check_version_text("desktop.version", version)?;
+        }
+        if let Some(previous) = &self.previous {
+            check_version_text("desktop.previous.version", &previous.version)?;
+            check_https("desktop.previous.url", &previous.url)?;
+            check_sha256("desktop.previous.sha256", &previous.sha256)?;
+        }
+        let Some(update) = &self.update else {
+            return Ok(());
+        };
+        if let Some(publisher) = &update.publisher {
+            check_text("update.publisher", publisher, MAX_PUBLISHER)?;
+        }
+        if let Some(product) = &update.publisher_product {
+            check_text("update.publisherProduct", product, MAX_PUBLISHER_PRODUCT)?;
+        }
+        if let Some(min_version) = &update.min_version {
+            check_version_text("update.minVersion", min_version)?;
+        }
+        let ordered = |text: &Option<String>| text.as_deref().is_some_and(crate::version::is_ordered);
+        match update.mode {
+            // `Unknown` behaves as Pinned, which has no rule.
+            UpdateMode::Pinned | UpdateMode::Unknown => {}
+            UpdateMode::Vendor => {
+                if update.publisher.as_deref().is_none_or(|p| p.trim().is_empty()) {
+                    return Err(CatalogError::VendorNeedsPublisher);
+                }
+                if update.min_version.is_some() {
+                    if !ordered(&update.min_version) {
+                        return Err(CatalogError::VersionNotOrdered("update.minVersion"));
+                    }
+                    if !ordered(&self.version) {
+                        return Err(CatalogError::VersionNotOrdered("desktop.version"));
+                    }
+                }
+            }
+            UpdateMode::Managed => {
+                if !ordered(&self.version) {
+                    return Err(CatalogError::VersionNotOrdered("desktop.version"));
+                }
+            }
+        }
+        Ok(())
+    }
+}
+
+/// (Phase 6, plan 4.3) The per-device limits of the catalogue: at most 60 browser web
+/// apps, and at most 800 distinct browser URL patterns (the allowed domains and the
+/// start host of those apps). The agent refuses the whole document
+/// (`policy_rejected`) like every other limit. Browser rules of a Chrome or Edge
+/// *desktop* app (plan 4.9.7) add to the patterns when Step 16 gives them a field.
+pub fn check_limits(catalog: &[CatalogApp]) -> Result<(), crate::lockdown::LimitError> {
+    use crate::lockdown::LimitError;
+    let mut apps = 0usize;
+    let mut patterns = std::collections::BTreeSet::new();
+    for web in catalog.iter().filter_map(|app| app.web.as_ref()) {
+        if web.browser_kind() == BrowserKind::Builtin {
+            continue;
+        }
+        apps += 1;
+        if apps > MAX_BROWSER_WEB_APPS {
+            return Err(LimitError::TooManyBrowserApps);
+        }
+        patterns.extend(web.allowed_domains.iter().map(|d| d.to_ascii_lowercase()));
+        if let Some(host) = url_host(&web.url) {
+            patterns.insert(host.to_ascii_lowercase());
+        }
+        if patterns.len() > MAX_BROWSER_URL_PATTERNS {
+            return Err(LimitError::TooManyBrowserPatterns);
+        }
+    }
+    Ok(())
+}
+
+/// The host of an `https://` URL (no user info, port or path), or `None`.
+fn url_host(url: &str) -> Option<&str> {
+    let rest = url.get(..8).filter(|scheme| scheme.eq_ignore_ascii_case("https://")).map(|_| &url[8..])?;
+    let authority = rest.split(['/', '?', '#']).next()?;
+    let host = authority.rsplit('@').next()?.split(':').next()?;
+    (!host.is_empty()).then_some(host)
 }
 
 /// `doc.catalog` entry by entry: each element parsed and validated on its own,

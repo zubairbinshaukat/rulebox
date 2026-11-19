@@ -21,7 +21,7 @@ use windows::Win32::System::Registry::{
 };
 
 use crate::error::{code_err, Result, Win32Error};
-use crate::guard::require_test_machine;
+use crate::guard::require_armed_machine;
 use crate::security::enable_privileges;
 use crate::sid::Sid;
 use crate::util::to_wide;
@@ -203,7 +203,7 @@ pub fn get_hklm(path: &str, name: &str) -> Result<Option<RegValue>> {
 ///
 /// DESTRUCTIVE: guarded.
 pub fn set_hklm(path: &str, name: &str, value: Option<&RegValue>) -> Result<()> {
-    require_test_machine()?;
+    require_armed_machine()?;
     match value {
         Some(_) => {
             let key = create_key(HKEY_LOCAL_MACHINE, path, KEY_SET_VALUE | KEY_WOW64_64KEY)?;
@@ -222,7 +222,7 @@ pub fn set_hklm(path: &str, name: &str, value: Option<&RegValue>) -> Result<()> 
 ///
 /// DESTRUCTIVE: guarded.
 pub fn delete_hklm_key(path: &str) -> Result<()> {
-    require_test_machine()?;
+    require_armed_machine()?;
     let wide = to_wide(path);
     // SAFETY: `wide` is NUL-terminated and outlives the call; the 64-bit view flag is
     // the documented `samDesired` value for `RegDeleteKeyExW`.
@@ -239,7 +239,7 @@ pub fn delete_hklm_key(path: &str) -> Result<()> {
 ///
 /// DESTRUCTIVE: guarded.
 pub fn delete_hklm_tree(path: &str) -> Result<()> {
-    require_test_machine()?;
+    require_armed_machine()?;
     let Some(key) = open_key(HKEY_LOCAL_MACHINE, path, KEY_ALL_ACCESS | KEY_WOW64_64KEY)? else {
         return Ok(());
     };
@@ -387,7 +387,7 @@ impl HiveKey {
 ///
 /// DESTRUCTIVE: guarded.
 pub fn with_user_hive<T>(sid: &Sid, profile: &Path, f: impl FnOnce(&HiveKey) -> Result<T>) -> Result<T> {
-    require_test_machine()?;
+    require_armed_machine()?;
     let access = KEY_READ | KEY_WRITE;
     if let Some(root) = open_key(HKEY_USERS, sid.as_str(), access)? {
         return f(&HiveKey { root });

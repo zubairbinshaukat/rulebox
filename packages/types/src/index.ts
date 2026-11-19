@@ -131,3 +131,20 @@ export * from "./generated/UsbTempAllow";
 export * from "./generated/WifiProfile";
 export * from "./generated/WifiSecurity";
 export * from "./generated/WinCombos";
+
+// Phase 6: update modes, installer technology, browser web apps, display-mode override, IPC 1.4
+// (crates/rulebox-policy/src/{catalog,network,lib}.rs, crates/rulebox-ipc/src/types.rs). `feed` (URL and
+// key) is not a type here on purpose: it never reaches a device (plan 4.3).
+export * from "./generated/AnswerFile";
+export * from "./generated/ApplyWhen";
+export * from "./generated/BrowserChoice";
+export * from "./generated/BrowserKind";
+export * from "./generated/DisplayModeOverride";
+export * from "./generated/DisplayModeSource";
+export * from "./generated/DriverSource";
+export * from "./generated/FeedKind";
+export * from "./generated/InstallTech";
+export * from "./generated/PreviousVersion";
+export * from "./generated/RuleboxRelease";
+export * from "./generated/UpdateMode";
+export * from "./generated/UpdateSpec";

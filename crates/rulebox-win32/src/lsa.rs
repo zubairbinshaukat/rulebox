@@ -16,7 +16,7 @@ use windows::Win32::Security::Authentication::Identity::{
 };
 
 use crate::error::{code_err, Result, Win32Error};
-use crate::guard::require_test_machine;
+use crate::guard::require_armed_machine;
 
 /// `POLICY_GET_PRIVATE_INFORMATION`.
 const POLICY_GET_PRIVATE_INFORMATION: u32 = 0x0000_0004;
@@ -146,7 +146,7 @@ pub fn secret_get(name: &str) -> Result<Option<String>> {
 ///
 /// DESTRUCTIVE: guarded.
 pub fn secret_set(name: &str, value: Option<&str>) -> Result<()> {
-    require_test_machine()?;
+    require_armed_machine()?;
     let mut name_buf = name_units(name)?;
     let key = counted(&mut name_buf)?;
     let policy = Policy::open(POLICY_CREATE_SECRET)?;
@@ -212,7 +212,7 @@ mod tests {
     /// LSA call is made (the guard is the first statement).
     #[test]
     fn writes_are_guarded_on_this_machine() {
-        if crate::guard::is_test_machine() {
+        if crate::guard::is_armed_machine() {
             return; // inside the VM the guard passes; the VM tests cover this
         }
         assert!(matches!(secret_set("L$RuleboxNeverWritten", Some("x")), Err(Win32Error::Guard(_))));

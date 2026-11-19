@@ -64,6 +64,9 @@ fn snapshot() -> AgentSnapshot {
         keyboard: None,
         printing: None,
         network: None,
+        web_window_cap: None,
+        web_idle_close_min: None,
+        display_mode_source: Default::default(),
     }
 }
 

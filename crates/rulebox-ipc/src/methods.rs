@@ -36,6 +36,10 @@ pub mod events {
     /// (1.3) `ProgramBlockedData`: the process watch ended a Staff program. At most once
     /// per program per session.
     pub const PROGRAM_BLOCKED: &str = "program.blocked";
+    /// (1.4, capability `appUpdates`) `AppsUpdatingData`: the agent is installing app updates
+    /// before sign-in; the sign-in screen shows "Updating apps..." until `until` (at most
+    /// 5 minutes). Sent on change only.
+    pub const APPS_UPDATING: &str = "apps.updating";
 }
 
 /// First request on every connection; triggers peer verification.
@@ -150,7 +154,15 @@ mod tests {
         assert_eq!(crate::CAP_BROADCASTS, "broadcasts");
         assert_eq!(crate::CAP_KEYBOARD_POLICY, "keyboardPolicy");
         assert_eq!(crate::CAP_PERMISSION_REPORTS, "permissionReports");
-        assert_eq!((crate::PROTOCOL_MAJOR, crate::PROTOCOL_MINOR), (1, 3));
+    }
+
+    /// (Phase 6 Step 4) The minor is bumped, the major is not (plan 4.15).
+    #[test]
+    fn protocol_1_4_names_match_the_contract() {
+        assert_eq!(events::APPS_UPDATING, "apps.updating");
+        assert_eq!(crate::CAP_BROWSER_APPS, "browserApps");
+        assert_eq!(crate::CAP_APP_UPDATES, "appUpdates");
+        assert_eq!((crate::PROTOCOL_MAJOR, crate::PROTOCOL_MINOR), (1, 4));
     }
 
     #[test]

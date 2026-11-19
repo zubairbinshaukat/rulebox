@@ -147,6 +147,9 @@ fn locked_snapshot() -> AgentSnapshot {
         keyboard: Some(KeyboardView { win_combos: WinCombos::Swallow }),
         printing: Some(PrintingView { available: false }),
         network: Some(NetworkView { managed_only: false, ssids: vec![] }),
+        web_window_cap: None,
+        web_idle_close_min: None,
+        display_mode_source: Default::default(),
     }
 }
 
@@ -170,7 +173,7 @@ fn a_1_1_and_a_1_2_hello_are_understood_and_answered_with_a_version_they_accept(
             capabilities: vec!["state".into(), "health".into(), "deviceLock".into(), "broadcasts".into()],
         };
         let wire = serde_json::to_value(&answer).unwrap();
-        assert_eq!(wire["protocol"], json!({ "major": 1, "minor": 3 }));
+        assert_eq!(wire["protocol"], json!({ "major": 1, "minor": PROTOCOL_MINOR }));
         assert_eq!(wire["protocol"]["major"], json!(hello.protocol.major));
         // A client that does not know a capability string ignores it: it only looks for its own.
         let caps: Vec<String> = serde_json::from_value(wire["capabilities"].clone()).unwrap();

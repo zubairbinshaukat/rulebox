@@ -139,6 +139,21 @@ pub enum DisplayMode {
     Unknown,
 }
 
+/// (1.4, plan 4.14) Where the effective display mode came from: the PC's own choice
+/// (`device`, which wins), its group's (`group`), or nobody's, so the PC's RAM decides
+/// (`auto`). `Unknown` is read as `Auto`.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub enum DisplayModeSource {
+    #[default]
+    Auto,
+    Group,
+    Device,
+    Unknown,
+}
+unknown_on_new_values!(DisplayModeSource { Auto => "auto", Group => "group", Device => "device" });
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
 #[serde(rename_all = "camelCase")]
 #[ts(export)]
@@ -186,6 +201,18 @@ pub struct AgentSnapshot {
     /// (1.3) Status of the managed Wi-Fi (Phase 3 P11: status only).
     #[serde(default)]
     pub network: Option<NetworkView>,
+    /// (1.4, plan 4.14) Most web app windows open at once (1 to 12). `None` from a 1.3
+    /// agent: the Staff App's own default (Lite 3, Standard 8).
+    #[serde(default)]
+    pub web_window_cap: Option<u32>,
+    /// (1.4) Minutes of silence after which a hidden web app window is closed; 0 = off
+    /// (5 to 240 otherwise). `None` from a 1.3 agent: the Staff App's own default
+    /// (Lite 30, Standard off).
+    #[serde(default)]
+    pub web_idle_close_min: Option<u32>,
+    /// (1.4) Where `display_mode` came from. Missing from a 1.3 agent: `auto`.
+    #[serde(default)]
+    pub display_mode_source: DisplayModeSource,
 }
 
 /// (1.3) What the lock view shows. Nothing secret, never an employee.
@@ -361,6 +388,9 @@ mod tests {
             keyboard: Some(KeyboardView { win_combos: WinCombos::Swallow }),
             printing: Some(PrintingView { available: true }),
             network: Some(NetworkView { managed_only: true, ssids: vec!["Shop".into()] }),
+            web_window_cap: Some(3),
+            web_idle_close_min: Some(30),
+            display_mode_source: DisplayModeSource::Group,
         }
     }
 
@@ -397,7 +427,10 @@ mod tests {
                              "acknowledged": false }],
             "keyboard": { "winCombos": "swallow" },
             "printing": { "available": true },
-            "network": { "managedOnly": true, "ssids": ["Shop"] }
+            "network": { "managedOnly": true, "ssids": ["Shop"] },
+            "webWindowCap": 3,
+            "webIdleCloseMin": 30,
+            "displayModeSource": "group"
         });
         let snapshot = full_snapshot();
         assert_eq!(serde_json::to_value(&snapshot).unwrap(), expected);
@@ -427,6 +460,9 @@ mod tests {
             keyboard: None,
             printing: None,
             network: None,
+            web_window_cap: None,
+            web_idle_close_min: None,
+            display_mode_source: DisplayModeSource::Auto,
         };
         let value = serde_json::to_value(&snapshot).unwrap();
         assert_eq!(value["device"], json!(null));
@@ -443,7 +479,39 @@ mod tests {
         assert_eq!(value["keyboard"], json!(null));
         assert_eq!(value["printing"], json!(null));
         assert_eq!(value["network"], json!(null));
+        // The 1.4 fields too: null, or `auto`.
+        assert_eq!(value["webWindowCap"], json!(null));
+        assert_eq!(value["webIdleCloseMin"], json!(null));
+        assert_eq!(value["displayModeSource"], json!("auto"));
         assert_eq!(serde_json::from_value::<AgentSnapshot>(value).unwrap(), snapshot);
+    }
+
+    /// (1.4) A 1.3 agent does not send the three 1.4 keys; a 1.4 client reads the defaults.
+    #[test]
+    fn snapshot_from_a_1_3_agent_parses() {
+        let mut value = serde_json::to_value(full_snapshot()).unwrap();
+        let object = value.as_object_mut().unwrap();
+        for key in ["webWindowCap", "webIdleCloseMin", "displayModeSource"] {
+            assert!(object.remove(key).is_some());
+        }
+        let parsed = serde_json::from_value::<AgentSnapshot>(value).unwrap();
+        assert_eq!((parsed.web_window_cap, parsed.web_idle_close_min), (None, None));
+        assert_eq!(parsed.display_mode_source, DisplayModeSource::Auto);
+        assert_eq!(parsed.printing, Some(PrintingView { available: true }));
+    }
+
+    #[test]
+    fn display_mode_source_values() {
+        for (text, source) in [
+            ("auto", DisplayModeSource::Auto),
+            ("group", DisplayModeSource::Group),
+            ("device", DisplayModeSource::Device),
+            ("fleet", DisplayModeSource::Unknown),
+        ] {
+            assert_eq!(serde_json::from_value::<DisplayModeSource>(json!(text)).unwrap(), source);
+        }
+        assert_eq!(serde_json::to_value(DisplayModeSource::Device).unwrap(), json!("device"));
+        assert_eq!(DisplayModeSource::default(), DisplayModeSource::Auto);
     }
 
     /// A 1.2 agent does not send the five 1.3 keys; a 1.3 client reads "nothing".

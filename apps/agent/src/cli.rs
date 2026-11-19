@@ -87,6 +87,12 @@ pub enum Command {
         #[arg(long)]
         json: bool,
     },
+    /// (Phase 6) Read-only: which condition of the machine guard holds and which failed
+    /// (test-machine door and production door). Exit code 1 when the guard is closed.
+    GuardStatus {
+        #[arg(long)]
+        json: bool,
+    },
     /// (1.1) Hash an exit PIN: reads one line (6 to 12 digits) from standard input and
     /// prints the Argon2id hash. Touches no file, pipe or registry key.
     HashPin,
@@ -207,6 +213,8 @@ mod tests {
         assert_eq!(parse(&["compat", "--json"]), Command::Compat { json: true });
         assert_eq!(parse(&["lockdown-status"]), Command::LockdownStatus { json: false });
         assert_eq!(parse(&["lockdown-status", "--json"]), Command::LockdownStatus { json: true });
+        assert_eq!(parse(&["guard-status"]), Command::GuardStatus { json: false });
+        assert_eq!(parse(&["guard-status", "--json"]), Command::GuardStatus { json: true });
         assert_eq!(parse(&["hash-pin"]), Command::HashPin);
     }
 

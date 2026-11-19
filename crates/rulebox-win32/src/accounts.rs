@@ -19,7 +19,7 @@ use windows::Win32::Security::{LogonUserW, LOGON32_LOGON_NETWORK, LOGON32_PROVID
 use windows::Win32::UI::Shell::{CreateProfile, DeleteProfileW};
 
 use crate::error::{api_err, code_err, Result, Win32Error};
-use crate::guard::require_test_machine;
+use crate::guard::require_armed_machine;
 use crate::registry::{get_hklm, RegValue};
 use crate::sid::{localized_group_name, lookup_account_name, Sid};
 use crate::util::{from_wide_ptr, pwstr_to_string, to_wide, NetApiBuffer, OwnedHandle, SecretWide};
@@ -190,7 +190,7 @@ pub fn enabled_local_accounts() -> Result<Vec<UserInfo>> {
 ///
 /// DESTRUCTIVE: guarded.
 pub fn create_standard_user(name: &str, full_name: &str, comment: &str, password: &str) -> Result<Sid> {
-    require_test_machine()?;
+    require_armed_machine()?;
     check_user_name(name)?;
 
     let mut name_w = to_wide(name);
@@ -288,7 +288,7 @@ fn require_plain_user(name: &str) -> Result<()> {
 ///
 /// DESTRUCTIVE: guarded.
 pub fn set_password(name: &str, password: &str) -> Result<()> {
-    require_test_machine()?;
+    require_armed_machine()?;
     require_plain_user(name)?;
     let name_w = to_wide(name);
     let mut password_w = SecretWide::new(password);
@@ -344,7 +344,7 @@ pub fn get_account_lockout() -> Result<LockoutPolicy> {
 ///
 /// DESTRUCTIVE: guarded.
 pub fn set_account_lockout(policy: LockoutPolicy) -> Result<()> {
-    require_test_machine()?;
+    require_armed_machine()?;
     // The window cannot be longer than the lockout duration (Windows refuses it).
     if policy.threshold > 0 && policy.window_s > policy.duration_s {
         return Err(Win32Error::Invalid("the observation window is longer than the lockout duration".into()));
@@ -370,7 +370,7 @@ pub fn set_account_lockout(policy: LockoutPolicy) -> Result<()> {
 ///
 /// DESTRUCTIVE: guarded (a wrong password counts toward the account lockout).
 pub fn test_logon(name: &str, password: &str) -> Result<bool> {
-    require_test_machine()?;
+    require_armed_machine()?;
     check_user_name(name)?;
     let name_w = to_wide(name);
     let domain_w = to_wide(".");
@@ -417,7 +417,7 @@ pub fn test_logon(name: &str, password: &str) -> Result<bool> {
 ///
 /// DESTRUCTIVE: guarded.
 pub fn ensure_profile(sid: &Sid, name: &str) -> Result<PathBuf> {
-    require_test_machine()?;
+    require_armed_machine()?;
     check_user_name(name)?;
     let sid_w = to_wide(sid.as_str());
     let name_w = to_wide(name);
@@ -452,7 +452,7 @@ pub fn profile_path(sid: &Sid) -> Result<PathBuf> {
 ///
 /// DESTRUCTIVE: guarded.
 pub fn delete_user_and_profile(sid: &Sid, name: &str) -> Result<()> {
-    require_test_machine()?;
+    require_armed_machine()?;
     require_plain_user(name)?;
     match lookup_account_name(name)? {
         Some(found) if found == *sid => {}
@@ -491,7 +491,7 @@ mod tests {
     #[test]
     fn the_lockout_policy_reads_and_its_writer_meets_the_guard() {
         let policy = get_account_lockout().unwrap();
-        if !crate::guard::is_test_machine() {
+        if !crate::guard::is_armed_machine() {
             assert!(matches!(set_account_lockout(policy), Err(Win32Error::Guard(_))));
         }
     }
@@ -527,7 +527,7 @@ mod tests {
 
     #[test]
     fn every_mutating_function_is_blocked_by_the_guard() {
-        if crate::guard::is_test_machine() {
+        if crate::guard::is_armed_machine() {
             return;
         }
         let sid = crate::sid::current_user_sid().unwrap();

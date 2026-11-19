@@ -17,7 +17,7 @@ use std::path::PathBuf;
 use std::process::Command;
 
 use crate::error::{Result, Win32Error};
-use crate::guard::require_test_machine;
+use crate::guard::require_armed_machine;
 
 /// The only object Rulebox touches.
 pub const CURRENT_OBJECT: &str = "{current}";
@@ -106,7 +106,7 @@ pub fn get(object: &str, element: &str) -> Result<Option<String>> {
 /// DESTRUCTIVE: guarded.
 pub fn set(object: &str, element: &str, value: &str) -> Result<()> {
     check_set(object, element, value)?;
-    require_test_machine()?;
+    require_armed_machine()?;
     let word = if value.eq_ignore_ascii_case("Yes") { "Yes" } else { "No" };
     run_bcdedit(&["/set", CURRENT_OBJECT, RECOVERY_ENABLED, word]).map(|_| ())
 }
@@ -134,7 +134,7 @@ mod tests {
 
     #[test]
     fn the_writer_meets_the_guard_before_anything_else() {
-        if crate::guard::is_test_machine() {
+        if crate::guard::is_armed_machine() {
             return;
         }
         assert!(matches!(set("{current}", "recoveryenabled", "No"), Err(Win32Error::Guard(_))));

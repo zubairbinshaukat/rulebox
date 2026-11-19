@@ -1,7 +1,8 @@
-//! The agent <-> shell IPC contract (protocol 1.3): message types, framing codec
+//! The agent <-> shell IPC contract (protocol 1.4): message types, framing codec
 //! and error codes. See `docs/plans/phase-2-agent-core.md` Section 6 (1.1 is the
-//! additive addendum in 6.11; nothing of 1.0 changed), Phase 4 Section 5.2 (1.2) and
-//! `docs/plans/phase-5-lockdown.md` Section 4.12 (1.3).
+//! additive addendum in 6.11; nothing of 1.0 changed), Phase 4 Section 5.2 (1.2),
+//! `docs/plans/phase-5-lockdown.md` Section 4.12 (1.3) and
+//! `docs/plans/phase-6-installer-pilot.md` Section 4.15 (1.4).
 //!
 //! TypeScript types for `types.rs` are generated with ts-rs into
 //! `packages/types/src/generated/` (run `pnpm gen:types`). The 1.1 request and
@@ -57,7 +58,15 @@ pub const PROTOCOL_MAJOR: u16 = 1;
 /// or 1.2 client ignores the events and the new snapshot keys and reads the new
 /// values as `Unknown`; a 1.3 client on an older agent finds the capabilities
 /// missing and shows nothing of it.
-pub const PROTOCOL_MINOR: u16 = 3;
+///
+/// (Phase 6 Step 4) 1.4 adds `WebApp.browser`, `browserExe` and `browserReady`, the
+/// `AppEntry.update` state, the snapshot's `webWindowCap`, `webIdleCloseMin` and
+/// `displayModeSource`, and the event `apps.updating`; `DesktopApp.exe` is now the
+/// **resolved** path of a template with a `*` folder (plan Phase 6, 4.15). Additive, same
+/// major: a 1.3 Staff App ignores the new keys and the event and opens every web app in
+/// the built-in window; a 1.4 Staff App on a 1.3 agent finds them missing and reads the
+/// defaults (built-in window, no update state, its own window cap and idle close).
+pub const PROTOCOL_MINOR: u16 = 4;
 
 /// Pipe the Staff App connects to.
 pub const SHELL_PIPE: &str = r"\\.\pipe\dev.rulebox.agent.shell";
@@ -99,3 +108,9 @@ pub const CAP_BROADCASTS: &str = "broadcasts";
 pub const CAP_KEYBOARD_POLICY: &str = "keyboardPolicy";
 /// (1.3) The request `webapp.reportDenials`.
 pub const CAP_PERMISSION_REPORTS: &str = "permissionReports";
+/// (1.4) `WebApp.browser`, `browserExe` and `browserReady` are filled in (browser web
+/// apps, plan 4.9). Without it the Staff App opens every web app in the built-in window.
+pub const CAP_BROWSER_APPS: &str = "browserApps";
+/// (1.4) `AppEntry.update` and the event `apps.updating` (plan 4.4.5). Without it the
+/// Staff App shows no "Updating..." state.
+pub const CAP_APP_UPDATES: &str = "appUpdates";

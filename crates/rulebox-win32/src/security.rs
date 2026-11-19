@@ -22,7 +22,7 @@ use windows::Win32::Storage::FileSystem::{CreateDirectoryW, FILE_ATTRIBUTE_REPAR
 use windows::Win32::System::Threading::{GetCurrentProcess, OpenProcessToken};
 
 use crate::error::{api_err, code_err, Result, Win32Error};
-use crate::guard::require_test_machine;
+use crate::guard::require_armed_machine;
 use crate::sid::{psid_to_string, Sid};
 use crate::util::{from_wide_ptr, to_wide, LocalAllocGuard, OwnedHandle};
 
@@ -115,7 +115,7 @@ impl SecurityAttributes {
 ///
 /// DESTRUCTIVE: guarded.
 pub fn create_protected_dir(path: &Path) -> Result<()> {
-    require_test_machine()?;
+    require_armed_machine()?;
     let attrs = SecurityAttributes::from_sddl(PROTECTED_DIR_SDDL)?;
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent)
@@ -395,7 +395,7 @@ pub fn list_folder_dacls(root: &Path, max_depth: u32, skip_names: &[&str], max_e
 /// DESTRUCTIVE: guarded.
 pub fn set_path_dacl(path: &Path, sddl: &str) -> Result<()> {
     check_acl_path(path)?;
-    require_test_machine()?;
+    require_armed_machine()?;
     let attrs = SecurityAttributes::from_sddl(sddl)?;
     let dacl = attrs.dacl()?;
     let flag = if SecurityAttributes::dacl_is_protected(sddl) {
@@ -540,7 +540,7 @@ mod tests {
     fn set_path_dacl_checks_the_path_then_the_guard_and_changes_nothing() {
         let sddl = "D:P(A;OICI;FA;;;SY)";
         assert!(matches!(set_path_dacl(Path::new(r"..\x"), sddl), Err(Win32Error::Forbidden(_))));
-        if !crate::guard::is_test_machine() {
+        if !crate::guard::is_armed_machine() {
             let err = set_path_dacl(Path::new(r"C:\rulebox-guard-test-must-not-exist"), sddl).unwrap_err();
             assert!(matches!(err, Win32Error::Guard(_)));
         }
