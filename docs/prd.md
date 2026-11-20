@@ -749,7 +749,7 @@ All components use free tiers or free-for-open-source services.
 | Staff App | Tauri v2 + Vite + React, custom UI |
 | Shell integration | Rust with the `windows` crate (Win32 window, shell and compositor APIs) |
 | Window materials | Mica/Acrylic effects on Windows 11 via Tauri window effects |
-| Agent | Rust (`windows-service` crate + Convex Rust client) |
+| Agent | Rust (`windows-service` crate + Convex Rust client). Win32 calls go through `crates/rulebox-win32`; the one exception is the native Rulebox Setup window (`apps/agent/src/setup/ui.rs`), which uses the `windows` crate directly (changed 2026-11-21, Phase 6 Step 8, owner decision) |
 | Installer | WiX v7 MSI (hand-authored), per machine (changed 2026-11, Phase 6). **Licence note:** WiX v7 needs its Open Source Maintenance Fee (OSMF) EULA accepted, and a maintenance fee is due once revenue from projects that use WiX reaches US$10,000 a year |
 | Installer storage | Pilot: administrators give an https URL (for example GitHub Releases) and the SHA-256 is recorded. Uploads come with the hosting work in the hosting plan (pooled free object-storage accounts, provider decided when that work starts); Convex file storage is too limited (changed 2026-11, Phase 6; replaces "Cloudflare R2") |
 | App updates | Agent-installed; the Tauri update **format** only, no Tauri updater in the Staff session (Section 23.2) (changed 2026-11, Phase 6; was "Tauri updater + GitHub Releases") |

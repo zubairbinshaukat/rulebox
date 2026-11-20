@@ -63,6 +63,21 @@ Nothing in this plan was compiled or run.
   Phase 5 Step 14b and was only aligned.
 - **2026-11-19:** Phase 6 Step 3 is done (commit `73eb607`: device aliases
   removed, one `LITE_MAX_RAM_MB`).
+- **2026-11-21:** the owner accepted every recommendation raised while building
+  Steps 8-19:
+  - **Step 8:** the agent may import the `windows` crate directly for the Setup
+    window (`setup/ui.rs` only). Note it in PRD 14 and the Step 8 file list.
+  - **Step 13:** strict `{...}` rule on `silentArgs` (only `{AnswerFile}` and
+    `{LogFile}`), also applied to apps saved before Step 13 on their next save.
+  - **Step 14 / 17:** when Step 17 wires the document check, do **not** call
+    `check_silent_args` from `catalog::check_limits`; bad switches make only that
+    app `unsupported` (`check_spec`), never refuse the whole document.
+  - **Step 16:** geolocation stays blocked for browser web apps, with screen share,
+    clipboard read and downloads.
+  - **Step 19:** Lite wallpaper is built together with the branding wallpaper
+    feature (deferred Phase 4 Q3); until then Lite keeps the flat desktop.
+  - **Dashboard size budgets:** overview 166.5 KB, DeviceDetail 25.5 KB, AppEdit
+    29 KB (in `apps/dashboard/scripts/size.mjs`) are approved.
 
 ---
 

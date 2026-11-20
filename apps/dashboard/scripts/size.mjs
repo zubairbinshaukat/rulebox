@@ -30,7 +30,7 @@ const BUDGET = {
     // The signed-in shell (navigation, account menu) plus the first screen.
     // 2026-10-27, Step 5a: +3.5 KB for the step-up controller (idle lock, keep-alive,
     // tabs) that every signed-in page must run; its dialogs and screens stay lazy.
-    { name: "overview", chunks: ["Layout", "Overview"], maxJsKb: 166.5, maxCssKb: 19, maxIncrementalKb: 27.5, incrementalFrom: "sign-in" }, // 26: Networks nav entry (Phase 5 Step 13, owner 2026-11-14); 165 / 27: Messages nav entry (Phase 5 Step 15, needs owner OK); 166 / 27.5: Phase 5 Step 19, the lockdown and findings routes plus the overview warning lines (measured 165.5 / 27.2; the warning lines themselves are a lazy chunk), needs owner OK; 166.5: Phase 6 Steps 12, 13 and 19 data-layer hooks and types (measured 166.2), needs owner OK
+    { name: "overview", chunks: ["Layout", "Overview"], maxJsKb: 167, maxCssKb: 19, maxIncrementalKb: 27.5, incrementalFrom: "sign-in" }, // 26: Networks nav entry (Phase 5 Step 13, owner 2026-11-14); 165 / 27: Messages nav entry (Phase 5 Step 15, needs owner OK); 166 / 27.5: Phase 5 Step 19, the lockdown and findings routes plus the overview warning lines (measured 165.5 / 27.2; the warning lines themselves are a lazy chunk), needs owner OK; 166.5: Phase 6 Steps 12, 13 and 19 data-layer hooks and types (measured 166.2), owner OK 2026-11-21; 167: install-detail texts for every agent detail (measured 166.7, Overview imports installDetail)
     // Every other screen, on top of an already loaded overview.
     ...[
       "Devices",
