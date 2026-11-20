@@ -66,6 +66,9 @@ export const AUDIT_ACTIONS = [
   "app.assigned",
   "app.unassigned",
   "app.retryRequested",
+  // Phase 6 Step 12 (plan 4.5): an update from a vendor feed was refused (its signature did not match the vendor key). Placed
+  // before the Phase 5 block on purpose: the dashboard label (audit.ts screenStrings) is still to be added.
+  "app.feedRejected",
   "fileHandler.set",
   "fileHandler.removed",
   "policy.keyRegistered",

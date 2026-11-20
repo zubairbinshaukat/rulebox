@@ -7,6 +7,8 @@ import { FormError } from "../components/FormError";
 import { InlineNotice } from "../components/Notice";
 import { formatCount } from "../lib/format";
 import { appEditStrings } from "../lib/screenStrings/appEdit";
+import { appBrowserStrings } from "../lib/screenStrings/appBrowser";
+import { isBrowserBlocked } from "../lib/apps/browserRules";
 import { strings } from "../lib/strings";
 import { useToast } from "../lib/toast";
 
@@ -34,6 +36,9 @@ export function AppPermissions({
   onReload: () => void;
 }) {
   const saved = d.web!.permissions;
+  // Phase 6 Step 16: in a Chrome or Edge window some permissions do nothing (plan 4.9.3): they are shown off, with the reason, and cannot be changed.
+  const browser = d.web!.browser?.kind === "edge" || d.web!.browser?.kind === "chrome" ? d.web!.browser.kind : null;
+  const fixedOff = (key: keyof WebPermissions): boolean => browser !== null && isBrowserBlocked(key);
   const setPermissions = useSetAppPermissions();
   const toast = useToast();
   const list = useRef<HTMLUListElement>(null);
@@ -77,12 +82,13 @@ export function AppPermissions({
       <Card title={s.permissions} sub={s.permissionsSub}>
         <div className="dash-form">
           {readOnly ? <InlineNotice tone="neutral" title={s.permissionsReadOnly} /> : null}
+          {browser !== null ? <InlineNotice tone="neutral" title={appBrowserStrings.permissionsBrowserNote(appBrowserStrings.kinds[browser])} /> : null}
           <ul className="dash-perm" ref={list} aria-label={s.permissions}>
             {WEB_PERMISSION_KEYS.map((key) => (
               <li key={key} className="dash-perm__row" data-perm={key} data-highlight={highlight === key || undefined}>
                 <span className="dash-cell-stack">
-                  <Switch checked={draft[key]} onChange={(on) => toggle(key, on)} label={s.permissionNames[key]} disabled={readOnly || pending} />
-                  <span className="dash-cell-sub">{s.permissionHints[key]}</span>
+                  <Switch checked={fixedOff(key) ? false : draft[key]} onChange={(on) => toggle(key, on)} label={s.permissionNames[key]} disabled={readOnly || pending || fixedOff(key)} />
+                  <span className="dash-cell-sub">{fixedOff(key) && isBrowserBlocked(key) ? appBrowserStrings.forcedOff[key] : s.permissionHints[key]}</span>
                 </span>
                 <span className="dash-perm__default">{s.permissionDefault(NEW_WEB_APP_PERMISSIONS[key])}</span>
               </li>
@@ -126,7 +132,7 @@ export function AppPermissions({
                   <span>
                     <strong>{name}</strong> <span className="dash-perm__num dash-muted">{s.blockedCount(formatCount(count))}</span>
                   </span>
-                  {known && !readOnly ? (
+                  {known && !readOnly && !fixedOff(kind) ? (
                     saved[kind] ? null : draft[kind] ? (
                       <span className="dash-muted">{s.allowKindDone}</span>
                     ) : (

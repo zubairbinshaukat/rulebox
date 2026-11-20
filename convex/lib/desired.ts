@@ -1,9 +1,12 @@
 import type { CatalogApp, CatalogWebPermissions } from "@rulebox/types";
 import { sha256HexSync } from "./crypto";
+import { browserAppOf } from "./appRules";
 import { programDenied } from "./denyList";
 import type { GroupConfigContent } from "./groupConfig";
 import {
   MAX_ACTIVE_BROADCASTS,
+  MAX_BROWSER_URL_PATTERNS,
+  MAX_BROWSER_WEB_APPS,
   MAX_DEVICE_DRIVERS,
   MAX_DEVICE_PRINTERS,
   MAX_DEVICE_WIFI,
@@ -80,7 +83,8 @@ export type BuildApp = {
   hue?: number;
   archived: boolean;
   revision: number;
-  web?: { url: string; allowedDomains: string[]; permissions: WebPermissions };
+  /** `browser` (Phase 6): absent = the built-in window; `builtin` is treated the same. */
+  web?: { url: string; allowedDomains: string[]; permissions: WebPermissions; browser?: { kind: "builtin" | "edge" | "chrome"; appId?: string } };
   desktop?: {
     exe: string;
     args: string[];
@@ -204,6 +208,17 @@ function permissionsOf(p: WebPermissions): WebPermissions {
   };
 }
 
+/**
+ * (Phase 6, plan 4.9.1) `web.browser` as a device gets it, in the key order of `BrowserChoice` in `rulebox-policy`: Edge, or Chrome with the
+ * id of its program. The built-in window is no key at all. Whether the Chrome program is in this catalogue is checked afterwards
+ * (`buildCatalogChecked`), which is where the choice falls back to the built-in window.
+ */
+function docBrowser(b: { kind: "builtin" | "edge" | "chrome"; appId?: string } | undefined): { browser?: NonNullable<NonNullable<CatalogApp["web"]>["browser"]> } {
+  if (b === undefined || b.kind === "builtin") return {};
+  if (b.kind === "edge") return { browser: { kind: "edge" } };
+  return b.appId !== undefined && b.appId !== "" ? { browser: { kind: "chrome", appId: b.appId } } : {};
+}
+
 function catalogEntry(
   app: BuildApp,
   opts: { audience: "everyone" | "selected"; pinnedTaskbar: boolean; pinnedDesktop: boolean; employeeIds: string[] },
@@ -218,7 +233,13 @@ function catalogEntry(
     builtin: null,
     web:
       app.kind === "web" && app.web !== undefined
-        ? { url: app.web.url, allowedDomains: [...app.web.allowedDomains], permissions: permissionsOf(app.web.permissions) }
+        ? {
+            url: app.web.url,
+            allowedDomains: [...app.web.allowedDomains],
+            permissions: permissionsOf(app.web.permissions),
+            // Phase 6: left out for the built-in window, so a Phase 4 or 5 document keeps its bytes (the committed vectors pin it).
+            ...docBrowser(app.web.browser),
+          }
         : null,
     desktop:
       app.kind === "desktop" && d !== undefined
@@ -271,7 +292,24 @@ function catalogEntry(
  * reach a device.
  */
 export function buildCatalog(input: BuildInput): CatalogApp[] {
-  if (input.group === null) return [filesEntry()];
+  return buildCatalogChecked(input).catalog;
+}
+
+/** (Phase 6 Step 16) Something the builder changed on its own to keep a document safe; shown to the admin, never an error. */
+export type CatalogWarning = {
+  appId: string;
+  /** `browser_app_unavailable`: a web app asked for Chrome, but its Chrome program is archived, deleted, no longer Chrome, or not in this group's catalogue, so it opens in the built-in window (plan 4.9.1, risk 54). */
+  code: "browser_app_unavailable";
+};
+
+/**
+ * `buildCatalog` and what it had to correct (plan Step 16 item 5). A web app whose `browser` is `chrome` keeps it only when the Chrome
+ * program it names is in the SAME catalogue (assigned, not archived, not denied) and still is Chrome (`browserAppOf`): the agent finds
+ * the exe through it. Otherwise the document carries the web app WITHOUT a browser (the built-in window) and the result has a warning.
+ * Edge needs no program.
+ */
+export function buildCatalogChecked(input: BuildInput): { catalog: CatalogApp[]; warnings: CatalogWarning[] } {
+  if (input.group === null) return { catalog: [filesEntry()], warnings: [] };
   const usable = (a: BuildApp): boolean =>
     !a.archived && !(a.kind === "desktop" && a.desktop !== undefined && programDenied(a.desktop.exe));
   const apps = new Map(input.apps.filter(usable).map((a) => [a._id, a]));
@@ -302,8 +340,47 @@ export function buildCatalog(input: BuildInput): CatalogApp[] {
     if (app === undefined || out.has(appId) || app.kind !== "web") continue;
     out.set(appId, catalogEntry(app, { audience: "selected", pinnedTaskbar: false, pinnedDesktop: false, employeeIds }));
   }
+  const warnings: CatalogWarning[] = [];
+  for (const [id, entry] of out) {
+    const choice = entry.web?.browser;
+    if (entry.web === null || choice === undefined || choice.kind !== "chrome") continue;
+    const chrome = choice.appId === undefined ? undefined : out.get(choice.appId);
+    if (chrome?.kind === "desktop" && chrome.desktop !== null && browserAppOf(chrome.desktop.exe) === "chrome") continue;
+    out.set(id, { ...entry, web: { url: entry.web.url, allowedDomains: entry.web.allowedDomains, permissions: entry.web.permissions } });
+    warnings.push({ appId: id, code: "browser_app_unavailable" });
+  }
   const rest = [...out.values()].sort((x, y) => byText(x.id, y.id));
-  return [filesEntry(), ...rest];
+  warnings.sort((x, y) => byText(x.appId, y.appId));
+  return { catalog: [filesEntry(), ...rest], warnings };
+}
+
+/** (Phase 6 Step 16) A device document that would break a browser limit (plan 4.3); `publish.ts` records it with the group's name. */
+export class BrowserLimitError extends Error {
+  constructor(readonly limit: "too_many_browser_apps" | "too_many_browser_urls") {
+    super(limit);
+  }
+}
+
+/**
+ * PURE. The per-device browser limits of plan 4.3, the same arithmetic as `check_limits` in `rulebox-policy` (which makes the agent refuse
+ * the whole document): at most MAX_BROWSER_WEB_APPS browser web apps and MAX_BROWSER_URL_PATTERNS distinct patterns (the allowed domains
+ * and the start host of those apps, lower-case). Built-in web apps count for nothing. Throws `BrowserLimitError`.
+ */
+export function checkBrowserLimits(catalog: CatalogApp[]): void {
+  let apps = 0;
+  const patterns = new Set<string>();
+  for (const entry of catalog) {
+    const web = entry.web;
+    if (web === null || web.browser === undefined || (web.browser.kind !== "edge" && web.browser.kind !== "chrome")) continue;
+    if (++apps > MAX_BROWSER_WEB_APPS) throw new BrowserLimitError("too_many_browser_apps");
+    for (const d of web.allowedDomains) patterns.add(d.toLowerCase());
+    try {
+      patterns.add(new URL(web.url).hostname.toLowerCase());
+    } catch {
+      // A start address the server stored is https with a host; nothing to add otherwise.
+    }
+    if (patterns.size > MAX_BROWSER_URL_PATTERNS) throw new BrowserLimitError("too_many_browser_urls");
+  }
 }
 
 /**
@@ -313,6 +390,7 @@ export function buildCatalog(input: BuildInput): CatalogApp[] {
  */
 export function buildDeviceDoc(input: BuildInput, version = 0): DesiredDocV2 {
   const catalog = buildCatalog(input);
+  checkBrowserLimits(catalog); // throws `BrowserLimitError`: the publisher records it with the group's name
   const appIds = catalog.map((c) => c.id);
   const inCatalog = new Set(appIds);
 

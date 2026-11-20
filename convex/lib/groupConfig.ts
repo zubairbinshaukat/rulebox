@@ -175,6 +175,10 @@ export function configApp(app: Doc<"apps">): ConfigApp {
               printing: p.printing,
               geolocation: p.geolocation,
             },
+            // Phase 6: left out for the built-in window, so a version made before it keeps its content hash.
+            ...(w.browser !== undefined && w.browser.kind !== "builtin"
+              ? { browser: w.browser.appId !== undefined ? { kind: w.browser.kind, appId: w.browser.appId } : { kind: w.browser.kind } }
+              : {}),
           },
     desktop:
       app.kind !== "desktop" || d === undefined

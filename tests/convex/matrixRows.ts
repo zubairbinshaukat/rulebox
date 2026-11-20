@@ -895,6 +895,28 @@ export const ROWS: Row[] = [
     call: (a, f) => a.mutation(api.apps.rollbackVersion, { appId: f.appId, expectedRevision: 0 }),
     expect: { ...ADMIN_UNLOCKED, default: "invalid_argument", foreign: "not_found" }, // a website has no versions
   },
+  // Phase 6 Step 12 (plan 4.16): the vendor feed of a Managed program. A website has none, so an authorized call stops at `invalid_argument`
+  // (the fixture's program is Preinstalled); the real paths are in `feeds.test.ts`.
+  {
+    name: "feeds:approve",
+    call: (a, f) => a.mutation(api.feeds.approve, { appId: f.appId, expectedRevision: 0 }),
+    expect: { ...ADMIN_UNLOCKED, default: "invalid_argument", foreign: "not_found" },
+  },
+  {
+    name: "feeds:dismiss",
+    call: (a, f) => a.mutation(api.feeds.dismiss, { appId: f.appId, expectedRevision: 0 }),
+    expect: { ...ADMIN_UNLOCKED, default: "invalid_argument", foreign: "not_found" },
+  },
+  {
+    name: "feeds:setPaused",
+    call: (a, f) => a.mutation(api.feeds.setPaused, { appId: f.appId, paused: true }),
+    expect: { ...ADMIN_UNLOCKED, default: "invalid_argument", foreign: "not_found" },
+  },
+  {
+    name: "feeds:checkNow",
+    call: (a, f) => a.action(api.feeds.checkNow, { appId: f.appId }),
+    expect: { ...ADMIN_UNLOCKED, default: "invalid_argument", foreign: "not_found" },
+  },
   {
     name: "apps:retry",
     call: (a, f) => a.mutation(api.apps.retry, { appId: f.appId }),

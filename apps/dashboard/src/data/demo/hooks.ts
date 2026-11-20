@@ -35,6 +35,8 @@ import {
   type DesktopSpec,
   type AppOption,
   type AppRow,
+  type BrowserChoice,
+  type WebSpec,
   type AssignmentRow,
   type AuditEntry,
   type BroadcastRow,
@@ -69,6 +71,7 @@ import { byKey, contains, relevance, useDemoServerPage } from "./lists";
 import { lockdownWarningsOf } from "./lockdown";
 import * as validate from "../../lib/validate";
 import * as rules from "../../lib/apps/updateRules";
+import { MAX_BROWSER_SITES } from "../../lib/apps/browserRules";
 import { BROADCAST_ACTIVE_MAX, BROADCAST_BODY_MAX, BROADCAST_TITLE_MAX, LOCK_CONTACT_MAX, LOCK_MESSAGE_MAX, noticeProblem } from "../../lib/noticeRules";
 import { MAX_WIFI_GROUPS, MAX_WIFI_NAME, MAX_WIFI_PROFILES, WIFI_SECURITIES, passphraseProblem, ssidProblem } from "../../lib/wifiRules";
 import {
@@ -230,6 +233,15 @@ function approvedNames(db: DemoDb): string[] {
   return driverChoices([...db.approvedDrivers, ...db.drivers.flatMap((d) => d.provides)]);
 }
 
+/** `apps:get` `chromeApp`: the Chrome program a website opens in, and whether it can still be used (the demo's copy of the server's read). */
+function chromeAppOf(db: DemoDb, a: DbApp): { chromeApp?: AppDetail["chromeApp"] } {
+  const choice = a.web?.browser;
+  if (choice?.kind !== "chrome") return {};
+  const chrome = db.apps.find((x) => x._id === choice.appId);
+  if (!chrome) return {};
+  return { chromeApp: { _id: chrome._id, name: chrome.name, usable: chrome.kind === "desktop" && !chrome.archived && rules.browserAppOf(chrome.desktop?.exe ?? "") === "chrome" } };
+}
+
 function canOpenFiles(a: DbApp) {
   return a.kind === "desktop" && (a.desktop?.fileArgTemplate.length ?? 0) > 0;
 }
@@ -237,7 +249,10 @@ function canOpenFiles(a: DbApp) {
 function appOptions(db: DemoDb): AppOption[] {
   return db.apps
     .filter((a) => !a.archived)
-    .map((a) => ({ _id: a._id, name: a.name, kind: a.kind, canOpenFiles: canOpenFiles(a) }))
+    .map((a) => {
+      const browser = a.kind === "desktop" ? rules.browserAppOf(a.desktop?.exe ?? "") : null;
+      return { _id: a._id, name: a.name, kind: a.kind, canOpenFiles: canOpenFiles(a), ...(browser !== null ? { browser } : {}) };
+    })
     .sort((a, b) => a.name.localeCompare(b.name));
 }
 
@@ -469,12 +484,41 @@ function requirePilotDevice(db: DemoDb, groupId: string, leaving: string[] = [])
 const wholeBetween = (n: number, min: number, max: number) => Number.isInteger(n) && n >= min && n <= max;
 
 /**
+ * The demo's copy of `normalizeBrowser` plus the Chrome program check of `apps.ts` (plan 4.9.1): Built-in is no field, Edge carries no id,
+ * Chrome names a non-archived Chrome program of the organization (`browser_app_required`). `check` is false when the choice did not change.
+ */
+function demoBrowser(db: DemoDb, input: BrowserChoice | undefined, check = true): BrowserChoice | undefined {
+  if (!input) return undefined;
+  const appId = input.appId?.trim() ?? "";
+  if (input.kind !== "chrome") {
+    if (appId !== "") fail("invalid_argument", { field: "browser" });
+    return input.kind === "edge" ? { kind: "edge" } : undefined;
+  }
+  const chrome = db.apps.find((a) => a._id === appId);
+  const usable = chrome !== undefined && chrome.kind === "desktop" && !chrome.archived && rules.browserAppOf(chrome.desktop?.exe ?? "") === "chrome";
+  if (appId === "" || (check && !usable)) fail("invalid_argument", { field: "browser", detail: "browser_app_required" });
+  return { kind: "chrome", appId };
+}
+
+/** The demo's copy of `normalizeBrowserSites`: at most 200 domains, only for Chrome or Edge, empty = none. */
+function demoSites(sites: string[] | undefined, exe: string): string[] | undefined {
+  const list = [...new Set((sites ?? []).map((s) => s.trim()).filter(Boolean))];
+  if (list.length === 0) return undefined;
+  if (rules.browserAppOf(exe) === null) fail("invalid_argument", { field: "browserSites", detail: "not_a_browser_app" });
+  if (list.length > MAX_BROWSER_SITES || list.some((s) => validate.domain(s))) fail("invalid_argument", { field: "browserSites" });
+  return list;
+}
+
+/**
  * The demo's copy of what the server does to a program's versioning (`convex/lib/appRules.ts`): the refusals of plan 4.4 and
  * `previous`, which is the server's field (what the form sends is ignored).
  */
 function demoDesktop(old: DesktopSpec | undefined, input: DesktopSpec): DesktopSpec {
   const next: DesktopSpec = { ...input };
   delete next.previous; // the server's field: what the form sent is ignored
+  delete next.browserSites;
+  const sites = demoSites(input.browserSites, next.exe);
+  if (sites !== undefined) next.browserSites = sites;
   const browser = rules.browserAppOf(next.exe);
   const mode = browser !== null ? "vendor" : (next.update?.mode ?? "pinned");
   const version = next.version?.trim() || undefined;
@@ -1675,6 +1719,7 @@ export const demoApi: DataApi = {
         directEmployeeCount: Math.min(db.employeeApps.filter((m) => m.appId === a._id).length, 1001),
         groupOptions: groupOptions(db),
         denials30d: a.kind === "web" ? [...(db.appDenials.get(a._id) ?? [])].sort((x, y) => y.count - x.count || (x.kind < y.kind ? -1 : 1)) : [],
+        ...chromeAppOf(db, a),
         // The resolver (Step 12) fills the real status: the demo shows a feed that has just been checked.
         ...(a.desktop?.update?.mode === "managed" && a.desktop.update.feed ? { feedStatus: { status: "ok" as const, failures: 0, lastCheckedAt: Date.now() - 3 * 3_600_000, seenVersion: a.desktop.version } } : {}),
       };
@@ -1703,6 +1748,7 @@ export const demoApi: DataApi = {
           const name = nameOrFail(input.name, validate.NAME_MAX.app);
           if (validate.webUrl(input.url)) fail("invalid_argument", { field: "url" });
           if (validate.domains(input.allowedDomains)) fail("invalid_argument", { field: "allowedDomains" });
+          const browser = demoBrowser(db, input.browser);
           const id = newId("app");
           const host = new URL(input.url).hostname;
           db.apps.push({
@@ -1715,6 +1761,7 @@ export const demoApi: DataApi = {
               url: input.url.trim(),
               allowedDomains: [...new Set([host, ...input.allowedDomains])],
               permissions: { ...NEW_WEB_APP_PERMISSIONS },
+              ...(browser ? { browser } : {}),
             },
             archived: false,
             revision: 1,
@@ -1764,7 +1811,11 @@ export const demoApi: DataApi = {
             a.hue = web.hue;
             if (validate.webUrl(web.url)) fail("invalid_argument", { field: "url" });
             const host = new URL(web.url).hostname;
-            a.web = { ...(a.web ?? { permissions: { ...NEW_WEB_APP_PERMISSIONS } }), url: web.url.trim(), allowedDomains: [...new Set([host, ...web.allowedDomains])] };
+            // Only a CHANGED choice is checked against the Chrome program (as the server does).
+            const browser = demoBrowser(db, web.browser, web.browser?.appId !== a.web?.browser?.appId || web.browser?.kind !== a.web?.browser?.kind);
+            const next: WebSpec = { ...(a.web ?? { permissions: { ...NEW_WEB_APP_PERMISSIONS } }), url: web.url.trim(), allowedDomains: [...new Set([host, ...web.allowedDomains])] };
+            delete next.browser;
+            a.web = browser ? { ...next, browser } : next;
           }
           if (desktop && a.kind === "desktop") {
             a.name = nameOrFail(desktop.name, validate.NAME_MAX.app);

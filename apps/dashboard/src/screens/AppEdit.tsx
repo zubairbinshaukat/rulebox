@@ -28,6 +28,7 @@ import {
   type AppKind,
   type ApplyWhen,
   type Audience,
+  type BrowserKind,
   type DesktopSource,
   type DesktopSpec,
   type InstallCounts,
@@ -37,6 +38,7 @@ import {
   type WingetResolved,
 } from "../data/types";
 import { AppPermissions } from "./AppPermissions";
+import { BrowserRulesCard, OpensInCard } from "./AppBrowser";
 // The Updates card (Phase 6 Step 10) is a chunk of its own: most edits are of websites, and the card is the largest part of the form.
 const UpdatesCard = lazy(() => import("./AppUpdates"));
 import { AppGlyph } from "../components/AppGlyph";
@@ -67,6 +69,7 @@ import { messageFor, registerDetailSentences } from "../lib/errors";
 import { strings } from "../lib/strings";
 import { appEditStrings } from "../lib/screenStrings/appEdit";
 import { updateRefusalStrings } from "../lib/screenStrings/updateRefusals";
+import { appBrowserStrings, browserRefusalStrings } from "../lib/screenStrings/appBrowser";
 import { appsStrings } from "../lib/screenStrings/apps";
 import { devicesStrings } from "../lib/screenStrings/devices";
 import { groupStrings } from "../lib/screenStrings/group";
@@ -76,10 +79,12 @@ import { useForm } from "../lib/useForm";
 import { assignmentErrorMessage } from "./groups/errors";
 import * as v from "../lib/validate";
 import * as u from "../lib/apps/updateRules";
+import { browserSitesProblem } from "../lib/apps/browserRules";
 
 const s = appEditStrings;
 // The sentences for the refusals of the update modes ride this chunk, not the first load (`lib/errors.ts`).
 registerDetailSentences(updateRefusalStrings);
+registerDetailSentences(browserRefusalStrings);
 const HUES = [175, 150, 100, 60, 40, 20, 0, 330, 300, 260, 220, 200];
 const SOURCES: DesktopSource[] = ["winget", "msi", "exe", "portable", "preinstalled"];
 
@@ -114,6 +119,10 @@ export interface FormValues extends Record<string, unknown> {
   autoPublish: boolean;
   applyWhen: ApplyWhen;
   rollbackOnFail: boolean;
+  // Phase 6 Step 16: browser web apps (a website) and browser rules (Chrome or Edge as a program)
+  browserKind: BrowserKind;
+  chromeAppId: string;
+  sites: string;
 }
 
 export type FormApi = ReturnType<typeof useForm<FormValues>>;
@@ -167,6 +176,9 @@ function initialValues(d: AppDetail, kind: AppKind): FormValues {
     autoPublish: up?.autoPublish ?? true,
     applyWhen: up?.applyWhen ?? "boot_or_signed_out",
     rollbackOnFail: up?.rollbackOnFail ?? true,
+    browserKind: d.web?.browser?.kind ?? "builtin",
+    chromeAppId: d.web?.browser?.kind === "chrome" ? (d.web.browser.appId ?? "") : "",
+    sites: (desk?.browserSites ?? []).join("\n"),
   };
 }
 
@@ -223,7 +235,12 @@ function validateValues(kind: AppKind, x: FormValues): Partial<Record<keyof Form
     description: v.optionalText(x.description, v.NAME_MAX.description) ?? undefined,
   };
   if (kind === "web") {
-    return { ...common, url: v.webUrl(x.url) ?? undefined, domains: v.domains(v.lines(x.domains)) ?? undefined };
+    return {
+      ...common,
+      url: v.webUrl(x.url) ?? undefined,
+      domains: v.domains(v.lines(x.domains)) ?? undefined,
+      chromeAppId: x.browserKind === "chrome" && x.chromeAppId === "" ? appBrowserStrings.chromeNeeded : undefined,
+    };
   }
   const needsInstall = x.source === "msi" || x.source === "exe" || x.source === "portable";
   return {
@@ -238,6 +255,7 @@ function validateValues(kind: AppKind, x: FormValues): Partial<Record<keyof Form
     fileArg: v.fileArgTemplate(v.splitArgs(x.fileArg)) ?? undefined,
     resetFolders: v.resetFolders(v.lines(x.resetFolders)) ?? undefined,
     ...updateProblems(x),
+    sites: u.browserAppOf(x.exe) !== null ? (browserSitesProblem(v.lines(x.sites).map((l) => l.toLowerCase()), appBrowserStrings.sitesTooMany) ?? undefined) : undefined,
   };
 }
 
@@ -245,6 +263,8 @@ function validateValues(kind: AppKind, x: FormValues): Partial<Record<keyof Form
 function desktopSpec(x: FormValues, before?: DesktopSpec): DesktopSpec {
   const version = x.version.trim() || undefined;
   const update = updateSpec(x);
+  // The allowed sites belong to Chrome and Edge only (the server refuses them for another program).
+  const sites = u.browserAppOf(x.exe) !== null ? [...new Set(v.lines(x.sites).map((l) => l.toLowerCase()))] : [];
   const base = {
     source: x.source,
     exe: x.exe.trim(),
@@ -253,6 +273,7 @@ function desktopSpec(x: FormValues, before?: DesktopSpec): DesktopSpec {
     resetFolders: v.lines(x.resetFolders),
     ...(version !== undefined ? { version } : {}),
     ...(update !== undefined ? { update } : {}),
+    ...(sites.length > 0 ? { browserSites: sites } : {}),
   };
   // The form does not know an installer's size: the same installer keeps the one the server has.
   const sameInstaller = before?.install !== undefined && before.install.url === x.installUrl.trim() && before.install.sha256 === x.sha256.trim().toLowerCase();
@@ -464,7 +485,14 @@ function AppForm({
   async function save(values: FormValues) {
     const common = { name: values.name.trim(), description: values.description.trim() || undefined, hue: values.hue };
     if (kind === "web") {
-      const web = { ...common, url: values.url.trim(), allowedDomains: v.lines(values.domains).map((s2) => s2.toLowerCase()) };
+      const web = {
+        ...common,
+        url: values.url.trim(),
+        allowedDomains: v.lines(values.domains).map((s2) => s2.toLowerCase()),
+        // The Rulebox window is no field at all (the server stores none either).
+        ...(values.browserKind === "edge" ? { browser: { kind: "edge" as const } } : {}),
+        ...(values.browserKind === "chrome" ? { browser: { kind: "chrome" as const, appId: values.chromeAppId } } : {}),
+      };
       if (isNew) {
         const id = await createWeb(web);
         await storeIcon(id, web.url);
@@ -516,57 +544,60 @@ function AppForm({
         </Card>
 
         {kind === "web" ? (
-          <Card title={s.url}>
-            <div className="dash-form">
-              <Field label={s.url} hint={s.urlHint} error={f.errors.url} required>
-                {(p) => (
-                  <div className="dash-row" style={{ flexWrap: "nowrap", alignItems: "stretch" }}>
-                    <Input
-                      {...p}
-                      type="url"
-                      inputMode="url"
-                      placeholder="https://"
-                      spellCheck={false}
-                      autoCapitalize="off"
-                      value={x.url}
-                      onChange={(e) => f.set("url", e.target.value)}
-                    />
-                    <Button
-                      variant="ghost"
-                      disabled={helper.pending || Boolean(v.webUrl(x.url))}
-                      aria-busy={helper.pending}
-                      onClick={() =>
-                        void runHelper(async () => {
-                          const requested = x.url.trim();
-                          const meta = await fetchMeta({ url: requested });
-                          if (meta.name && !x.name.trim()) f.set("name", meta.name);
-                          if (meta.hue !== undefined) f.set("hue", nearestHue(meta.hue));
-                          setIcon(meta.iconPreviewUrl ? { forUrl: requested, data: meta.iconPreviewUrl } : null);
-                          return meta.iconPreviewUrl ? s.fetchedWithIcon : s.fetched;
-                        })
-                      }
-                    >
-                      <IconMagic aria-hidden="true" />
-                      {helper.pending ? s.fetching : s.fetch}
-                    </Button>
+          <>
+            <Card title={s.url}>
+              <div className="dash-form">
+                <Field label={s.url} hint={s.urlHint} error={f.errors.url} required>
+                  {(p) => (
+                    <div className="dash-row" style={{ flexWrap: "nowrap", alignItems: "stretch" }}>
+                      <Input
+                        {...p}
+                        type="url"
+                        inputMode="url"
+                        placeholder="https://"
+                        spellCheck={false}
+                        autoCapitalize="off"
+                        value={x.url}
+                        onChange={(e) => f.set("url", e.target.value)}
+                      />
+                      <Button
+                        variant="ghost"
+                        disabled={helper.pending || Boolean(v.webUrl(x.url))}
+                        aria-busy={helper.pending}
+                        onClick={() =>
+                          void runHelper(async () => {
+                            const requested = x.url.trim();
+                            const meta = await fetchMeta({ url: requested });
+                            if (meta.name && !x.name.trim()) f.set("name", meta.name);
+                            if (meta.hue !== undefined) f.set("hue", nearestHue(meta.hue));
+                            setIcon(meta.iconPreviewUrl ? { forUrl: requested, data: meta.iconPreviewUrl } : null);
+                            return meta.iconPreviewUrl ? s.fetchedWithIcon : s.fetched;
+                          })
+                        }
+                      >
+                        <IconMagic aria-hidden="true" />
+                        {helper.pending ? s.fetching : s.fetch}
+                      </Button>
+                    </div>
+                  )}
+                </Field>
+                <HelperResult helper={helper} />
+                {icon !== null ? (
+                  <div className="dash-row" style={{ flexWrap: "nowrap", alignItems: "center", gap: 12 }}>
+                    <AppGlyph name={x.name || "?"} hue={x.hue} iconUrl={icon} size="lg" />
+                    <span className="dash-muted">{s.iconPreview}</span>
                   </div>
-                )}
-              </Field>
-              <HelperResult helper={helper} />
-              {icon !== null ? (
-                <div className="dash-row" style={{ flexWrap: "nowrap", alignItems: "center", gap: 12 }}>
-                  <AppGlyph name={x.name || "?"} hue={x.hue} iconUrl={icon} size="lg" />
-                  <span className="dash-muted">{s.iconPreview}</span>
-                </div>
-              ) : null}
-              <Field label={s.allowedDomains} hint={s.allowedDomainsHint} error={f.errors.domains} optional>
-                {(p) => (
-                  <Textarea {...p} rows={3} spellCheck={false} autoCapitalize="off" className="dash-mono" value={x.domains} onChange={(e) => f.set("domains", e.target.value)} />
-                )}
-              </Field>
-              {isNew ? <p className="dash-muted">{s.permissionsHint}</p> : null}
-            </div>
-          </Card>
+                ) : null}
+                <Field label={s.allowedDomains} hint={s.allowedDomainsHint} error={f.errors.domains} optional>
+                  {(p) => (
+                    <Textarea {...p} rows={3} spellCheck={false} autoCapitalize="off" className="dash-mono" value={x.domains} onChange={(e) => f.set("domains", e.target.value)} />
+                  )}
+                </Field>
+                {isNew ? <p className="dash-muted">{s.permissionsHint}</p> : null}
+              </div>
+            </Card>
+            <OpensInCard d={d} f={f} isNew={isNew} />
+          </>
         ) : (
           <>
             <Card title={s.source} sub={s.sourceHints[x.source]}>
@@ -699,6 +730,8 @@ function AppForm({
                 </Field>
               </div>
             </Card>
+
+            {u.browserAppOf(x.exe) !== null ? <BrowserRulesCard f={f} /> : null}
 
             <Suspense fallback={<div className="dash-card dash-card--pad"><SkeletonBlock lines={4} /></div>}>
               <UpdatesCard d={d} f={f} mode={effectiveMode(x)} browser={u.browserAppOf(x.exe) !== null} isNew={isNew} readOnly={readOnly} revision={revision} onRolledBack={onRolledBack} />

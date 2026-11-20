@@ -7,6 +7,7 @@
 // to measure after doing its own setup UNPROBED (rows the function needs that the fixture does not have).
 // A function that cannot run here has an entry in `UNMEASURED` with the reason; its row in
 // `convex/ioBudgets.ts` is marked ESTIMATE.
+import { vi } from "vitest";
 import { internal } from "../../convex/_generated/api";
 import type { Id } from "../../convex/_generated/dataModel";
 import { base64Encode, sha256HexSync } from "../../convex/lib/crypto";
@@ -19,6 +20,7 @@ import { TEST_KEY } from "./keys";
 import { seedLargeOrg, LARGE } from "./largeOrg";
 import { addWifi, createKeys, MASTER_A, MASTER_B, sealKeyPair, setMaster } from "./phase5";
 import { APPLY_REPORT, DRIVER_ROW, type Fixture } from "./matrixRows";
+import { FEED_URL, healthyFeed, INSTALLER, INSTALLER_URL, stubFetch, TARGET, VENDOR_PUBKEY } from "./feeds";
 
 declare const process: { env: Record<string, string | undefined> };
 
@@ -180,6 +182,36 @@ async function rollingRollout(c: InternalEnv, pilots: number): Promise<Id<"group
     });
   });
 }
+/**
+ * (Phase 6 Step 12) A Rulebox-managed program with a vendor feed that is due now (`appFeeds` row included), optionally assigned to the
+ * fixture's group. Version 1.0.0; the feed's vectors say 2.1.0.
+ */
+async function managedFeedApp(c: InternalEnv, name: string, opts: { assigned: boolean }): Promise<{ appId: Id<"apps">; feedId: Id<"appFeeds"> }> {
+  return await c.f.t.run(async (ctx) => {
+    const orgId = c.f.orgId;
+    const appId = await ctx.db.insert("apps", {
+      orgId,
+      name,
+      kind: "desktop",
+      desktop: {
+        source: "exe",
+        exe: "{ProgramFiles}\\Zahras\\zahras.exe",
+        args: [],
+        fileArgTemplate: [],
+        resetFolders: [],
+        install: { kind: "exe", url: "https://downloads.example.com/zahras-1.0.0.exe", sha256: "a".repeat(64), sizeBytes: 1000, silentArgs: ["/S"], successExitCodes: [0], removeWhenUnassigned: false },
+        version: "1.0.0",
+        update: { mode: "managed", feed: { kind: "tauri", url: FEED_URL, pubkey: VENDOR_PUBKEY, target: TARGET } },
+      },
+      archived: false,
+      revision: 0,
+      createdAt: Date.now(),
+    });
+    if (opts.assigned) await ctx.db.insert("appAssignments", { orgId, groupId: c.f.groupId, appId, audience: "everyone", pinnedTaskbar: false, pinnedDesktop: false });
+    const feedId = await ctx.db.insert("appFeeds", { orgId, appId, nextCheckAt: Date.now() - 1000, status: "ok", failures: 0, revision: 0 });
+    return { appId, feedId };
+  });
+}
 export const INTERNAL_CALLS: Record<string, InternalCase | InternalCase[]> = {
   // ---------------------------------------------------------------- account
   "account:authorize": async (c) => () =>
@@ -246,6 +278,37 @@ export const INTERNAL_CALLS: Record<string, InternalCase | InternalCase[]> = {
     return () => c.f.t.query(internal.apps.cachedWinget, { packageId: "7zip.7zip", version: "", now: Date.now() });
   },
   "apps:storeWinget": async (c) => () => c.f.t.mutation(internal.apps.storeWinget, { packageId: "7zip.7zip", version: "", resolved: winget, now: Date.now() }),
+
+  // ---------------------------------------------------------------- Phase 6 Step 12: the vendor feed resolver
+  // The worst batch: ten feeds are due (and an eleventh stays for the next hour).
+  "feeds:tick": async (c) => {
+    for (let i = 0; i < 11; i++) await managedFeedApp(c, `Feed app ${i}`, { assigned: false });
+    return () => c.f.t.mutation(internal.feeds.tick, {});
+  },
+  "feeds:loadForCheck": async (c) => {
+    const { feedId } = await managedFeedApp(c, "Feed app", { assigned: false });
+    return () => c.f.t.query(internal.feeds.loadForCheck, { feedId });
+  },
+  "feeds:feedForApp": async (c) => {
+    const { appId } = await managedFeedApp(c, "Feed app", { assigned: false });
+    return () => c.f.t.query(internal.feeds.feedForApp, { orgId: c.f.orgId, appId });
+  },
+  // A NEW version of an app that the fixture's group assigns, with autoPublish: the publish path of `apps:update` (the worst case).
+  "feeds:recordResult": async (c) => {
+    const { feedId } = await managedFeedApp(c, "Feed app", { assigned: true });
+    return () =>
+      c.f.t.mutation(internal.feeds.recordResult, {
+        feedId,
+        feedRevision: 0,
+        outcome: { kind: "new", version: "2.1.0", url: INSTALLER_URL, sha256: "e".repeat(64), sizeBytes: INSTALLER.length, etag: '"v-2.1.0"' },
+      });
+  },
+  // The whole check against a stubbed vendor feed (the real vectors): load, fetch, download, verify, publish.
+  "feeds:check": async (c) => {
+    const { feedId } = await managedFeedApp(c, "Feed app", { assigned: true });
+    vi.stubGlobal("fetch", stubFetch(healthyFeed()));
+    return () => c.f.t.action(internal.feeds.check, { feedId });
+  },
 
   // ---------------------------------------------------------------- device API
   "deviceApi:loadForVerify": async (c) => () =>

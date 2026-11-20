@@ -7,6 +7,7 @@ import { internalMutation } from "./lib/functions";
 import { SYSTEM_ACTOR, writeAudit } from "./lib/audit";
 import { base64Decode } from "./lib/crypto";
 import {
+  BrowserLimitError,
   buildDeviceDoc,
   buildPayload,
   contentHashOf,
@@ -579,7 +580,23 @@ async function publishDevice(ctx: MutationCtx, run: RunState, device: Doc<"devic
 async function publishOne(ctx: MutationCtx, run: RunState, device: Doc<"devices">): Promise<"done" | "deferred"> {
   try {
     return await publishDevice(ctx, run, device);
-  } catch {
+  } catch (e) {
+    // Phase 6 Step 16 (plan 4.3): the group's browser web apps are more than a device document may carry. Said with the
+    // group's name, so the admin knows which group to trim; the other PCs and groups are not touched.
+    if (e instanceof BrowserLimitError) {
+      const group = device.groupId !== undefined ? await ctx.db.get(device.groupId) : null;
+      const what = e.limit === "too_many_browser_apps" ? "browser web apps (limit 60)" : "browser web addresses (limit 800)";
+      await writeAudit(ctx, {
+        orgId: device.orgId,
+        actor: SYSTEM_ACTOR,
+        action: "policy.publishFailed",
+        targetType: "device",
+        targetId: device._id,
+        targetLabel: device.name,
+        summary: `Could not publish to the PC ${device.name}: the group ${group?.name ?? "of this PC"} has too many ${what}`,
+      });
+      return "done";
+    }
     await writeAudit(ctx, {
       orgId: device.orgId,
       actor: SYSTEM_ACTOR,

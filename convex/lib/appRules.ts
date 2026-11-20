@@ -8,6 +8,7 @@ import {
   MAX_APP_DESCRIPTION,
   MAX_APP_NAME,
   MAX_APP_URL,
+  MAX_BROWSER_SITES,
   MAX_FEED_PUBKEY,
   MAX_FEED_TARGET,
   MAX_INSTALLER_BYTES,
@@ -16,7 +17,7 @@ import {
   MAX_SUCCESS_EXIT_CODES,
 } from "./limits";
 import { APP_ID_PLACEHOLDER, argsProblem, exePathProblem, fileArgProblem, resetFoldersProblem } from "./pathRules";
-import { NEW_WEB_APP_PERMISSIONS, type desktopSpec, type installSpec } from "./validators";
+import { NEW_WEB_APP_PERMISSIONS, type browserChoice, type desktopSpec, type installSpec, type webSpec } from "./validators";
 
 // Validation and normalization of what an admin submits for an app (plan Step
 // 10 item 3). PURE apart from `fail`, which throws a `ConvexError`. Every
@@ -25,6 +26,8 @@ import { NEW_WEB_APP_PERMISSIONS, type desktopSpec, type installSpec } from "./v
 
 type DesktopSpec = Infer<typeof desktopSpec>;
 type InstallSpec = Infer<typeof installSpec>;
+type BrowserChoice = Infer<typeof browserChoice>;
+type WebSpec = Infer<typeof webSpec>;
 
 // C0 controls, DEL and the bidi direction marks / overrides / isolates (they reorder or hide text).
 // eslint-disable-next-line no-control-regex
@@ -55,19 +58,56 @@ export function normalizeHue(hue: number | undefined): number | undefined {
  * allowed and listed first; the rest keep the admin's order, de-duplicated.
  * `permissions` is what a new app starts with (`NEW_WEB_APP_PERMISSIONS`); `apps:update` passes the app's
  * own, and `apps:setPermissions` is the only way to change them.
+ * `browser` (Phase 6 Step 16, plan 4.9.1) is checked for its SHAPE here (`normalizeBrowser`); that a `chrome` choice names a real,
+ * non-archived Chrome program of the organization needs the database and is checked by `apps.ts`.
  */
 export function normalizeWeb(
   url: string,
   allowedDomains: string[],
   permissions = NEW_WEB_APP_PERMISSIONS,
-): { url: string; allowedDomains: string[]; permissions: typeof NEW_WEB_APP_PERMISSIONS } {
+  browser?: BrowserChoice,
+): WebSpec {
   const trimmed = url.trim();
   if (webUrlProblem(trimmed) !== null || trimmed.length > MAX_APP_URL) fail("invalid_argument", { field: "url" });
   const host = new URL(trimmed).hostname.toLowerCase();
   const extra = allowedDomains.map((d) => d.trim());
   if (extra.length > MAX_ALLOWED_DOMAINS || extra.some(domainProblem)) fail("invalid_argument", { field: "allowedDomains" });
+  const choice = normalizeBrowser(browser);
   // At most 20 entries of the admin's own; the URL's host comes on top of them.
-  return { url: trimmed, allowedDomains: [...new Set([host, ...extra])], permissions: { ...permissions } };
+  return { url: trimmed, allowedDomains: [...new Set([host, ...extra])], permissions: { ...permissions }, ...(choice !== undefined ? { browser: choice } : {}) };
+}
+
+/**
+ * `web.browser` as it is stored (plan 4.9.1): the built-in window is "no field at all", so a document that never had a browser
+ * choice keeps its bytes and a save that picks Built-in again changes nothing else. Edge carries no id; Chrome needs the id of
+ * the Chrome program (`browser_app_required` when it is missing; whether it exists is `apps.ts`'s check).
+ */
+export function normalizeBrowser(b: BrowserChoice | undefined): BrowserChoice | undefined {
+  if (b === undefined) return undefined;
+  const appId = b.appId?.trim() ?? "";
+  switch (b.kind) {
+    case "builtin":
+    case "edge":
+      if (appId !== "") fail("invalid_argument", { field: "browser" });
+      return b.kind === "edge" ? { kind: "edge" } : undefined;
+    case "chrome":
+      if (appId === "") fail("invalid_argument", { field: "browser", detail: "browser_app_required" });
+      return { kind: "chrome", appId };
+  }
+}
+
+/**
+ * The allowed sites of a Chrome or Edge program (plan 4.9.7, the "Browser rules" card): at most MAX_BROWSER_SITES domains
+ * (`example.com`, `*.example.com`), de-duplicated, in the admin's order. Only a program the server recognises as a browser
+ * (`browserAppOf`) may have any (`not_a_browser_app`); an empty list is "no list".
+ */
+export function normalizeBrowserSites(sites: string[] | undefined, exe: string): string[] | undefined {
+  if (sites === undefined) return undefined;
+  const list = [...new Set(sites.map((s) => s.trim()).filter((s) => s !== ""))];
+  if (list.length === 0) return undefined;
+  if (browserAppOf(exe) === null) fail("invalid_argument", { field: "browserSites", detail: "not_a_browser_app" });
+  if (list.length > MAX_BROWSER_SITES || list.some(domainProblem)) fail("invalid_argument", { field: "browserSites" });
+  return list;
 }
 
 /** `https://` with a host and no credentials (installers may live on a LAN server: no private-host rule). */
@@ -293,7 +333,8 @@ export function normalizeDesktop(d: DesktopSpec, appId?: string): DesktopSpec {
   const resetFolders = [...new Set(d.resetFolders.map((f) => f.trim()))];
   if (resetFoldersProblem(resetFolders) !== null) fail("invalid_argument", { field: "resetFolders" });
 
-  const base = { exe, args, fileArgTemplate, resetFolders };
+  const browserSites = normalizeBrowserSites(d.browserSites, exe);
+  const base = { exe, args, fileArgTemplate, resetFolders, ...(browserSites !== undefined ? { browserSites } : {}) };
   switch (d.source) {
     case "preinstalled":
       if (d.install !== undefined || d.wingetId !== undefined || d.wingetVersion !== undefined) fail("invalid_argument", { field: "source" });

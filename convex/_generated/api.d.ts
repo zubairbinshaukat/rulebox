@@ -17,6 +17,7 @@ import type * as crons from "../crons.js";
 import type * as deviceApi from "../deviceApi.js";
 import type * as devices from "../devices.js";
 import type * as drivers from "../drivers.js";
+import type * as feeds from "../feeds.js";
 import type * as employees from "../employees.js";
 import type * as enrollment from "../enrollment.js";
 import type * as enrollmentCodes from "../enrollmentCodes.js";
@@ -124,6 +125,7 @@ declare const fullApi: ApiFromModules<{
   deviceApi: typeof deviceApi;
   devices: typeof devices;
   drivers: typeof drivers;
+  feeds: typeof feeds;
   employees: typeof employees;
   enrollment: typeof enrollment;
   enrollmentCodes: typeof enrollmentCodes;

@@ -24,4 +24,8 @@ crons.interval("presence sweep", { minutes: 5 }, internal.presence.sweep, {});
 // (plan 4.14). Reads one empty `by_state_stage` range when nothing is rolling; each rolling group is evaluated in its own transaction.
 crons.interval("rollout tick", { minutes: 15 }, internal.rollouts.tick, {});
 
+// Phase 6 Step 12 (plan 4.5): the vendor feeds of Rulebox-managed apps. ONE hourly tick for the whole deployment; it claims at most
+// 10 feeds that are due (each is checked about once a day) and reads one empty index range when none is. No device takes part.
+crons.interval("feed tick", { hours: 1 }, internal.feeds.tick, {});
+
 export default crons;

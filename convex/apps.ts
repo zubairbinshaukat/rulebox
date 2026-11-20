@@ -6,7 +6,7 @@ import { env, type DatabaseReader, type DatabaseWriter } from "./_generated/serv
 import { publishApp, snapshotAppGroups } from "./lib/appPublish";
 import { writeAudit } from "./lib/audit";
 import { checkRevision, getInOrg, nextRevision } from "./lib/authz";
-import { normalizeAppDescription, normalizeAppName, normalizeDesktop, normalizeHue, normalizeWeb, previousFor, withAppId, wingetIdProblem, wingetVersionProblem } from "./lib/appRules";
+import { browserAppOf, normalizeAppDescription, normalizeAppName, normalizeDesktop, normalizeHue, normalizeWeb, previousFor, withAppId, wingetIdProblem, wingetVersionProblem } from "./lib/appRules";
 import { base64Decode, sha256HexOfBytes } from "./lib/crypto";
 import { deepEqual } from "./lib/deepEqual";
 import { programDenied } from "./lib/denyList";
@@ -32,7 +32,7 @@ import { STORED_INSTALL_STATES } from "./lib/deviceApiRules";
 import { assignedGroupsOf, failedFollowArchive } from "./lib/installs";
 import { assertWithinLimit, bumpOrgStats, bumpStats } from "./lib/plans";
 import { consumeOrFail } from "./lib/rateLimits";
-import { appFeedStatus, audience, appKind, desktopSpec, installState, webPermissions, webSpec, wingetResolved } from "./lib/validators";
+import { appFeedStatus, audience, appKind, browserChoice, desktopSpec, installState, webPermissions, webSpec, wingetResolved } from "./lib/validators";
 import { serverDay } from "./lib/lockdownReports";
 import { iconDataUrl, fetchWebMeta as scanWebMeta, pngSize } from "./lib/webmeta";
 import { resolveWinget as resolveFromGithub } from "./lib/winget";
@@ -116,6 +116,25 @@ async function syncFeedRow(
     pending: undefined,
     revision: row.revision + 1,
   });
+}
+
+// ---------------------------------------------------------------- browser web apps (Phase 6 Step 16, plan 4.9.1)
+
+/** Whether a stored app can be the Chrome program of a browser web app: a non-archived desktop app whose exe is `chrome.exe`. */
+function isUsableChromeApp(app: Doc<"apps">): boolean {
+  return app.kind === "desktop" && !app.archived && browserAppOf(app.desktop?.exe ?? "") === "chrome";
+}
+
+/**
+ * A `chrome` choice names an existing, non-archived Chrome program of THIS organization (`browser_app_required`, field "browser"): the
+ * agent finds the exe through it. One read (`db.get`); nothing is read for the built-in window or Edge. Another organization's app, an
+ * unknown id, an archived app or a program that is not Chrome all give the same refusal, so nothing is confirmed about other tenants.
+ */
+async function assertChromeApp(ctx: { db: DatabaseReader }, orgId: Id<"organizations">, choice: { kind: string; appId?: string } | undefined): Promise<void> {
+  if (choice?.kind !== "chrome") return;
+  const id = choice.appId === undefined ? null : ctx.db.normalizeId("apps", choice.appId);
+  const chrome = id === null ? null : await ctx.db.get(id);
+  if (chrome === null || chrome.orgId !== orgId || !isUsableChromeApp(chrome)) fail("invalid_argument", { field: "browser", detail: "browser_app_required" });
 }
 
 // ---------------------------------------------------------------- reads
@@ -282,9 +301,18 @@ export const get = memberQuery("viewer")({
         pending: v.optional(v.object({ version: v.string(), foundAt: v.number() })),
       }),
     ),
+    /**
+     * (Phase 6 Step 16) The Chrome program a website opens in (`web.browser.kind` "chrome"): its name, and whether it can still be used
+     * (not archived, still Chrome). Absent for any other app, and when the program is gone (a deleted one); in that case, and when `usable`
+     * is false, PCs open the website in the built-in window and the page says so. One `db.get`, only for such a website.
+     */
+    chromeApp: v.optional(v.object({ _id: v.id("apps"), name: v.string(), usable: v.boolean() })),
   }),
   handler: async (ctx, args) => {
     const app = await getInOrg(ctx, "apps", args.appId, ctx.orgId);
+    const chromeId = app.web?.browser?.kind === "chrome" && app.web.browser.appId !== undefined ? ctx.db.normalizeId("apps", app.web.browser.appId) : null;
+    const chromeRow = chromeId !== null ? await ctx.db.get(chromeId) : null;
+    const chromeApp = chromeRow !== null && chromeRow.orgId === ctx.orgId ? { _id: chromeRow._id, name: chromeRow.name, usable: isUsableChromeApp(chromeRow) } : undefined;
     const feedRow = feedOf(app.desktop) !== undefined ? await feedRowOf(ctx, app._id) : null;
     const assignments = await ctx.db
       .query("appAssignments")
@@ -325,6 +353,7 @@ export const get = memberQuery("viewer")({
       .take(APP_EMPLOYEE_COUNT_CAP + 1);
     return {
       denials30d: await denialsOf(ctx, app),
+      ...(chromeApp !== undefined ? { chromeApp } : {}),
       ...(feedRow !== null
         ? {
             feedStatus: {
@@ -476,14 +505,24 @@ export const installs = memberQuery("viewer")({
  */
 export const options = memberQuery("viewer")({
   args: {},
-  returns: v.array(v.object({ _id: v.id("apps"), name: v.string(), kind: appKind, canOpenFiles: v.boolean() })),
+    // `browser` (Phase 6 Step 16): the program is Chrome or Edge (by its exe), so the website form can offer the Chrome ones. No extra read.
+  returns: v.array(v.object({ _id: v.id("apps"), name: v.string(), kind: appKind, canOpenFiles: v.boolean(), browser: v.optional(v.union(v.literal("chrome"), v.literal("edge"))) })),
   handler: async (ctx) => {
     const apps = await ctx.db
       .query("apps")
       .withIndex("by_org_archived", (q) => q.eq("orgId", ctx.orgId).eq("archived", false))
       .take(MAX_APP_OPTIONS);
     return apps
-      .map((a) => ({ _id: a._id, name: a.name, kind: a.kind, canOpenFiles: a.kind === "desktop" && (a.desktop?.fileArgTemplate.length ?? 0) > 0 && !programDenied(a.desktop?.exe ?? "") }))
+      .map((a) => {
+        const browser = a.kind === "desktop" ? browserAppOf(a.desktop?.exe ?? "") : null;
+        return {
+          _id: a._id,
+          name: a.name,
+          kind: a.kind,
+          canOpenFiles: a.kind === "desktop" && (a.desktop?.fileArgTemplate.length ?? 0) > 0 && !programDenied(a.desktop?.exe ?? ""),
+          ...(browser !== null ? { browser } : {}),
+        };
+      })
       .sort((a, b) => a.name.localeCompare(b.name));
   },
 });
@@ -496,6 +535,8 @@ const webInput = {
   hue: v.optional(v.number()),
   url: v.string(),
   allowedDomains: v.array(v.string()),
+  /** (Phase 6) Which browser opens it; absent or `builtin` = the Rulebox window. */
+  browser: v.optional(browserChoice),
 };
 
 /**
@@ -511,7 +552,8 @@ export const createWeb = memberMutation("admin")({
     const name = normalizeAppName(args.name);
     const description = normalizeAppDescription(args.description);
     const hue = normalizeHue(args.hue);
-    const web = normalizeWeb(args.url, args.allowedDomains);
+    const web = normalizeWeb(args.url, args.allowedDomains, undefined, args.browser);
+    await assertChromeApp(ctx, ctx.orgId, web.browser);
     const stats = await assertWithinLimit(ctx, ctx.orgId, "apps");
     const appId = await ctx.db.insert("apps", {
       orgId: ctx.orgId,
@@ -618,11 +660,14 @@ export const update = memberMutation("admin")({
       const previous = previousFor(app.desktop, normalized);
       desktopNext = previous !== undefined ? { ...normalized, previous } : normalized;
     }
+    const web = args.web !== undefined ? normalizeWeb(args.web.url, args.web.allowedDomains, app.web?.permissions, args.web.browser) : undefined;
+    // Only a CHANGED choice is checked against the Chrome program: a save of something else must still work when that program was archived since.
+    if (web !== undefined && !deepEqual(web.browser, app.web?.browser)) await assertChromeApp(ctx, ctx.orgId, web.browser);
     const fields: Pick<Doc<"apps">, "name" | "description" | "hue" | "web" | "desktop"> = {
       name: normalizeAppName(input.name),
       description: normalizeAppDescription(input.description),
       hue: normalizeHue(input.hue),
-      web: args.web !== undefined ? normalizeWeb(args.web.url, args.web.allowedDomains, app.web?.permissions) : undefined,
+      web,
       desktop: desktopNext,
     };
     if (deepEqual(fields, { name: app.name, description: app.description, hue: app.hue, web: app.web, desktop: app.desktop })) {

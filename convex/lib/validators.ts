@@ -92,10 +92,20 @@ export const DEFAULT_WEB_PERMISSIONS: Infer<typeof webPermissions> = {
  */
 export const NEW_WEB_APP_PERMISSIONS: Infer<typeof webPermissions> = { ...DEFAULT_WEB_PERMISSIONS, printing: true };
 
+/**
+ * (Phase 6, plan 4.9.1) Which browser opens a web app. `builtin` is the default and is never stored (the field is absent);
+ * `chrome` names the Chrome program (a desktop app whose exe is `chrome.exe`) of the same organization, so the agent knows the
+ * exe and that it is installed. Edge uses its fixed per-machine paths. Same shape as `BrowserChoice` in `rulebox-policy`.
+ */
+export const browserKind = v.union(v.literal("builtin"), v.literal("edge"), v.literal("chrome"));
+export const browserChoice = v.object({ kind: browserKind, appId: v.optional(v.string()) });
+
 export const webSpec = v.object({
   url: v.string(),
   allowedDomains: v.array(v.string()),
   permissions: webPermissions,
+  // Phase 6: optional, so old rows stay valid (no migration). Absent = the built-in window.
+  browser: v.optional(browserChoice),
 });
 
 export const installSpec = v.object({
@@ -172,6 +182,9 @@ export const desktopSpec = v.object({
   version: v.optional(v.string()), // <= 40 chars of [0-9A-Za-z.+-]: the version this install delivers
   update: v.optional(updateSpec),
   previous: v.optional(previousVersion),
+  // Phase 6 Step 16 (plan 4.9.7): the allowed sites of a Chrome or Edge program ("Browser rules"), <= 200 domains. Server-only until the
+  // catalogue (`rulebox-policy` `DesktopSpec`) has a field for it: `lib/desired.ts` does not copy it into a device document yet.
+  browserSites: v.optional(v.array(v.string())),
 });
 
 export const appKind = v.union(v.literal("web"), v.literal("desktop"));

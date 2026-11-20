@@ -274,6 +274,15 @@ export const MAX_PUBLISHER_PRODUCT = 100;
 /** (Phase 6) A vendor feed: its https address, the vendor's public key (base64) and the platform key of `latest.json`. */
 export const MAX_FEED_PUBKEY = 512;
 export const MAX_FEED_TARGET = 40;
+/** (Phase 6, plan 4.9.7) The allowed sites of a Chrome or Edge program ("Browser rules" card). */
+export const MAX_BROWSER_SITES = 200;
+/**
+ * (Phase 6, plan 4.3) Per device document: browser web apps and distinct browser URL patterns. The same numbers as
+ * `MAX_BROWSER_WEB_APPS` / `MAX_BROWSER_URL_PATTERNS` in `rulebox-policy` (the agent refuses a document above them;
+ * the browsers' own limit is 1,000 patterns).
+ */
+export const MAX_BROWSER_WEB_APPS = 60;
+export const MAX_BROWSER_URL_PATTERNS = 800;
 /** `apps:list` page size cap. */
 export const MAX_APP_PAGE = 50;
 /** `apps:get`: assignments (`appAssignments.by_app`), file types and direct employees read per app. */

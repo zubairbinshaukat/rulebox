@@ -1312,6 +1312,29 @@ installs in the browser.
 **Do NOT:** close a running app; run an installer outside the allowed
 program list; report progress states for upgrades (terminal only).
 
+**Status (2026-11-21): done pending VM checks, uncommitted.** Notes:
+
+- **Not built here (decided): the `apps.updating` event and the 5-minute
+  sign-in hold ("Updating apps...").** They need the Staff App and the
+  session hold, so Step 17/18 builds them. The engine only sets
+  `AppEntry.update` (`Updating` / `WaitingForClose`). If Step 17/18 wants the
+  engine to own the count of apps updating at boot, expose it from
+  `InstallBook`.
+- Windows apply to Pinned and Managed updates; a running app makes an update
+  wait in every window; Vendor "occasions" are the existing reconcile
+  triggers (no new timer).
+- The six new install details (`publisher_mismatch`, `update_rolled_back`,
+  `rollback_failed`, `rollback_unsupported`, `version_too_low`,
+  `waiting_for_close`) are in `INSTALL_DETAILS` (`convex/lib/deviceApiRules.ts`)
+  and in the Rust list (`details_are_exactly_the_servers_fixed_list`).
+- Tests added at the end: rollback of an EXE (previous installer run again,
+  no uninstall) and of a portable app (previous file placed again), a
+  `Deferred` outcome with `applyWhen: when_closed`, and two updates at once
+  (id order, one at a time; a running app holds back only its own update).
+- Unverified until the VM (Step 22): file version read from real exes,
+  process-exit wake, vendor updater signer scan, versioned-folder AppLocker
+  rule.
+
 ---
 
 ### Step 12 — Server: feed resolver
@@ -1341,6 +1364,17 @@ Check now buttons.
 **Do NOT:** call the feed from a query or from the device; follow a
 redirect to another scheme; store the downloaded installer; add a second
 cron.
+
+**Status (2026-11-21, uncommitted):** server side done. Files: `convex/feeds.ts`, `convex/lib/feed/{limits,minisign,tauri,fetch,resolve}.ts`,
+`convex/crons.ts` (one `feed tick`), `convex/feeds.test.ts`, `tests/convex/feeds.ts`, vectors in `convex/testdata/feed/` (made with `tauri signer`,
+tauri-cli 2.12.2: `signature` / `pubkey` are base64 of the `.sig` / `.pub` FILE text, algorithm `ED` = prehashed BLAKE2b-512, key id must match, the
+global signature over the trusted comment is checked too). Choices made where the plan was silent: `platforms` lookup is `<target>-nsis` (`-msi` for an MSI
+program) then `<target>`; `seenVersion` is the highest feed version processed (published, offered, dismissed, or rolled back from) and nothing at or below it is
+downloaded again; `failures` counts consecutive checks that ended the same way (the backoff of 1 h / 4 h / 24 h applies to `unreachable` only); the etag is kept
+after every outcome except `unreachable` (so a bad signature is not downloaded again until the vendor changes the file); a new version drops an MSI `productCode`
+(it belongs to one version); extra admin function `feeds:setPaused` (plan 4.5 item 6 had no way to set the state); new audit action `app.feedRejected` (the
+dashboard label in `screenStrings/audit.ts` is still to add). Not done: dashboard status line and the Approve / Dismiss / Check now / Pause buttons, the
+`updateFlag` on the app row (4.16), the 100 MiB run on the dev deployment (the action's 10 minute / 64 MiB limits are unverified; the body is streamed and never held).
 
 ---
 

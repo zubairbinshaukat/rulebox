@@ -49,6 +49,9 @@ export const rateLimiter = new RateLimiter(components.rateLimiter, {
   // tenant cannot use the deployment as a proxy or burn the GitHub quota.
   webMeta: { kind: "token bucket", rate: 20, period: MINUTE_MS, capacity: 20 },
   wingetResolve: { kind: "token bucket", rate: 20, period: MINUTE_MS, capacity: 20 },
+  // `feeds:checkNow` (Phase 6 Step 12, plan 4.5 item 4), key = the app's feed row: one check per five minutes per app
+  // (each one may download an installer of up to 512 MiB).
+  feedCheckNow: { kind: "token bucket", rate: 1, period: 5 * MINUTE_MS, capacity: 1 },
   // Employees (plan Step 11 item 6). Each password set or create-with-password
   // costs one Argon2id hash (~100-300 ms of CPU) in an action: 300 per hour per
   // organization, consumed before hashing.
@@ -109,6 +112,7 @@ export type LimitName =
   | "checkNow"
   | "webMeta"
   | "wingetResolve"
+  | "feedCheckNow"
   | "employeeWrites"
   | "wifiPassphrase"
   | "verifyPerDevice"

@@ -680,10 +680,22 @@ export interface PermissionDenialCount {
   count: number;
 }
 
+/** Which browser opens a website (Phase 6, plan 4.9.1). Built-in is the default and is never stored (the field is absent). */
+export type BrowserKind = "builtin" | "edge" | "chrome";
+export const BROWSER_KINDS: BrowserKind[] = ["builtin", "edge", "chrome"];
+
+/** `web.browser`: Chrome carries the id of a Chrome program of the organization (a Windows program whose exe is `chrome.exe`). */
+export interface BrowserChoice {
+  kind: BrowserKind;
+  appId?: Id;
+}
+
 export interface WebSpec {
   url: string;
   allowedDomains: string[];
   permissions: WebPermissions;
+  /** Phase 6: absent = the Rulebox window. */
+  browser?: BrowserChoice;
 }
 
 export interface InstallSpec {
@@ -745,6 +757,8 @@ export interface DesktopSpec {
   update?: UpdateSpec;
   /** Set by the server only: the form never sends it. */
   previous?: PreviousVersion;
+  /** Phase 6 Step 16: the allowed sites of a Chrome or Edge program (at most 200 domains; the "Browser rules" card). */
+  browserSites?: string[];
 }
 
 /** Where the last check of a vendor feed ended (`apps:get` `feedStatus.status`). */
@@ -798,6 +812,8 @@ export interface AppOption {
   name: string;
   kind: AppKind;
   canOpenFiles: boolean;
+  /** Phase 6: the program is Chrome or Edge (by its exe), so a website can be set to open in it. */
+  browser?: "chrome" | "edge";
 }
 
 /** `apps:get` */
@@ -821,6 +837,8 @@ export interface AppDetail {
   denials30d: PermissionDenialCount[];
   /** Phase 6: the vendor feed's state, only for a Managed program with a feed. */
   feedStatus?: FeedStatus;
+  /** Phase 6 Step 16: the Chrome program a website opens in. `usable` false = archived or no longer Chrome; absent while the choice is Chrome = the program is gone. */
+  chromeApp?: { _id: Id; name: string; usable: boolean };
 }
 
 export interface WebAppInput {
@@ -829,6 +847,8 @@ export interface WebAppInput {
   hue?: number;
   url: string;
   allowedDomains: string[];
+  /** Phase 6: left out for the Rulebox window. */
+  browser?: BrowserChoice;
 }
 
 export interface DesktopAppInput {
