@@ -48,6 +48,8 @@ export interface AppTileProps extends Omit<ButtonHTMLAttributes<HTMLButtonElemen
   icon?: ReactNode;
   /** Shows the small accent dot: the app is open. */
   running?: boolean;
+  /** Shows a small "Paused" mark: the app's window was closed for being idle; opening it starts fresh (Phase 6 Step 19). */
+  paused?: boolean;
   /** Notification count in the corner. */
   badge?: number;
   /** Default "md"; lg/sm scale the art and the text. */
@@ -65,6 +67,7 @@ export function AppTile({
   mono,
   icon,
   running = false,
+  paused = false,
   badge,
   size = "md",
   hue,
@@ -132,6 +135,11 @@ export function AppTile({
               <span className="rb-dot" aria-hidden="true" />
               <span className="rb-sr-only">, open</span>
             </>
+          ) : paused ? (
+            <span className="rb-tile__paused" data-testid="tile-paused">
+              Paused
+              <span className="rb-sr-only">, closed to save memory; opens fresh</span>
+            </span>
           ) : null}
         </span>
         {description ? <span className="rb-tile__desc">{description}</span> : null}

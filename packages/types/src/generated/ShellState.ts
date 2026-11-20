@@ -34,4 +34,9 @@ broadcasts: Array<BroadcastDto>,
  * (Protocol 1.3) The agent says whether the PC has printers (`None`: an older agent,
  * the app's own `printing` permission alone decides).
  */
-printingAvailable?: boolean, };
+printingAvailable?: boolean, 
+/**
+ * (Phase 6 Step 19, plan 4.14) Ids of web apps whose window the idle close shut: their tile keeps a "paused" mark until the
+ * app is opened again or the next person signs in. Opening one starts at the app's start address.
+ */
+pausedApps: Array<string>, };

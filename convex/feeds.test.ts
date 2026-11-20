@@ -449,7 +449,7 @@ describe("feeds:check: what is written (and what is not)", () => {
     expect(await check(s, feedId)).toEqual({ result: "failed", status: "bad_signature" });
     // The etag of that file is kept: the next check gets a 304 and does not download (or audit) it again.
     expect(await check(s, feedId)).toEqual({ result: "unchanged", status: "bad_signature" });
-    expect(await appRow(s, id)).toEqual(before);
+    expect(await appRow(s, id)).toEqual({ ...before, updateFlag: "feed_error" }); // only the list's mark changes, not the revision
     expect(await feedRow(s, id)).toMatchObject({ status: "bad_signature", failures: 1 });
     const rejected = (await audits(s)).filter((a) => a.action === "app.feedRejected");
     expect(rejected).toEqual([{ action: "app.feedRejected", actorType: "system", summary: "Refused an update of Zahras POS: its signature did not match the vendor key" }]);
@@ -679,5 +679,75 @@ describe("feeds:checkNow and the admin mutations", () => {
     const view = await s.a.as.query(api.apps.get, { appId: id });
     const text = JSON.stringify(view.feedStatus);
     for (const secret of [FEED_URL, VENDOR_PUBKEY, "latest.json", '"v-2.1.0"', SHA, INSTALLER_URL]) expect(text, secret).not.toContain(secret);
+  });
+});
+
+describe("apps.updateFlag: the Apps list's mark (plan 4.16), written only when it changes", () => {
+  const list = (s: Env) => s.a.as.query(api.apps.list, { archived: false, paginationOpts: { numItems: 10, cursor: null } });
+  const flagOf = async (s: Env, id: Id<"apps">) => (await appRow(s, id))!.updateFlag;
+
+  test("an offer sets 'available' (no revision bump, shown by apps:list without a new read); Approve and Dismiss clear it", async () => {
+    const s = await setup();
+    const id = await managedApp(s, { autoPublish: false });
+    const feedId = await feedIdOf(s, id);
+    useFeed(healthyFeed());
+    await check(s, feedId);
+    expect(await flagOf(s, id)).toBe("available");
+    expect((await appRow(s, id))!.revision).toBe(0);
+    expect((await list(s)).page.find((r) => r._id === id)?.updateFlag).toBe("available");
+    await s.a.as.mutation(api.feeds.approve, { appId: id, expectedRevision: 0 });
+    expect(await flagOf(s, id)).toBeUndefined();
+
+    const other = await managedApp(s, { autoPublish: false }, "Other POS");
+    await check(s, await feedIdOf(s, other));
+    expect(await flagOf(s, other)).toBe("available");
+    await s.a.as.mutation(api.feeds.dismiss, { appId: other, expectedRevision: 0 });
+    expect(await flagOf(s, other)).toBeUndefined();
+    expect((await list(s)).page.find((r) => r._id === other)).not.toHaveProperty("updateFlag");
+  });
+
+  test("a bad signature sets 'feed_error'; a calm downgrade and a paused feed do not; unreachable only after 7 failed checks in a row", async () => {
+    const s = await setup();
+    const id = await managedApp(s);
+    const feedId = await feedIdOf(s, id);
+    const changed = INSTALLER.slice();
+    changed[9] = changed[9]! ^ 1;
+    useFeed({ ...healthyFeed(), [INSTALLER_URL]: () => new Response(changed) });
+    await check(s, feedId);
+    expect(await flagOf(s, id)).toBe("feed_error");
+    await s.a.as.mutation(api.feeds.setPaused, { appId: id, paused: true });
+    expect(await flagOf(s, id)).toBeUndefined();
+    await s.a.as.mutation(api.feeds.setPaused, { appId: id, paused: false });
+    expect(await flagOf(s, id)).toBeUndefined();
+
+    useFeed({});
+    for (let i = 1; i <= 6; i++) {
+      await check(s, feedId);
+      expect(await flagOf(s, id), `after ${i}`).toBeUndefined();
+    }
+    await check(s, feedId);
+    expect(await flagOf(s, id)).toBe("feed_error");
+    useFeed(healthyFeed());
+    await check(s, feedId);
+    expect(await flagOf(s, id)).toBeUndefined();
+  });
+
+  test("the same state writes nothing; leaving Managed mode or changing the feed settings drops the mark", async () => {
+    const s = await setup();
+    const id = await managedApp(s, { autoPublish: false });
+    const feedId = await feedIdOf(s, id);
+    useFeed(healthyFeed());
+    await check(s, feedId);
+    const again = await probe(() => s.a.as.mutation(api.feeds.setPaused, { appId: id, paused: false }));
+    expect(again.io.writes).toBe(0);
+    expect(await flagOf(s, id)).toBe("available");
+    // New feed settings start clean.
+    await s.a.as.mutation(api.apps.update, { appId: id, expectedRevision: 0, desktop: { name: "Zahras POS", desktop: spec({ autoPublish: false, feed: { ...FEED, pubkey: OTHER_PUBKEY } }) as never } });
+    expect(await flagOf(s, id)).toBeUndefined();
+
+    await check(s, await feedIdOf(s, id)).catch(() => undefined);
+    const rev = (await appRow(s, id))!.revision;
+    await s.a.as.mutation(api.apps.update, { appId: id, expectedRevision: rev, desktop: { name: "Zahras POS", desktop: spec({ mode: "pinned", feed: undefined }, { version: undefined }) as never } });
+    expect(await flagOf(s, id)).toBeUndefined();
   });
 });

@@ -108,6 +108,28 @@ export const webSpec = v.object({
   browser: v.optional(browserChoice),
 });
 
+/**
+ * (Phase 6 Step 13, plan 4.2, 4.7) What an installer file is. Absent = a plain EXE. Same literals as `InstallTech` in
+ * `rulebox-policy` (which also has `unknown`, never stored: an unknown value on a device reads as a plain EXE).
+ */
+export const installTech = v.union(
+  v.literal("msi"),
+  v.literal("nsis"),
+  v.literal("inno"),
+  v.literal("burn"),
+  v.literal("installshield_msi"),
+  v.literal("installshield_script"),
+  v.literal("advanced_installer"),
+  v.literal("exe"),
+);
+
+/** (Phase 6 Step 13) The recorded answer file of a wizard installer (`.iss`, at most 256 KiB), verified like the installer. */
+export const answerFileSpec = v.object({
+  url: v.string(), // https:// only
+  sha256: v.string(), // 64 lower-case hex
+  sizeBytes: v.number(), // 0 .. 256 KiB; 0 = unknown
+});
+
 export const installSpec = v.object({
   kind: v.union(v.literal("msi"), v.literal("exe"), v.literal("portable")),
   url: v.string(), // https:// only
@@ -117,6 +139,11 @@ export const installSpec = v.object({
   productCode: v.optional(v.string()), // msi; "{GUID}" upper-case
   successExitCodes: v.array(v.number()),
   removeWhenUnassigned: v.boolean(),
+  // Phase 6 Step 13: all optional, so old rows stay valid (no migration).
+  tech: v.optional(installTech),
+  answerFile: v.optional(answerFileSpec),
+  timeoutMin: v.optional(v.number()), // 5..120, absent = 30
+  publisher: v.optional(v.string()), // the expected signer of the installer file (<= 200); the device checks it before it runs the file
 });
 
 /**
@@ -155,6 +182,13 @@ export const appFeedStatus = v.union(
   v.literal("paused"),
 );
 
+/**
+ * (Phase 6 Step 12, plan 4.16) What the Apps list shows next to a Managed program, kept on the app row so `apps:list` reads nothing
+ * extra: "available" = a new version waits for approval, "feed_error" = the feed has a problem the admin should look at.
+ * Written by `feeds.ts` only when it changes.
+ */
+export const appUpdateFlag = v.union(v.literal("available"), v.literal("feed_error"));
+
 /** (Phase 6) The installer one step back, kept by `apps:update` in Managed mode and swapped back by `apps:rollbackVersion`. */
 export const previousVersion = v.object({
   version: v.string(),
@@ -186,6 +220,13 @@ export const desktopSpec = v.object({
   // catalogue (`rulebox-policy` `DesktopSpec`) has a field for it: `lib/desired.ts` does not copy it into a device document yet.
   browserSites: v.optional(v.array(v.string())),
 });
+
+/**
+ * (Phase 6 Step 19, plan 4.14) The administrator's display-mode choice for a group or a PC. `auto` = no choice at this level (the
+ * PC's RAM decides, or the group's choice for a PC). Same literals as `DisplayModeOverride` in `rulebox-policy`.
+ */
+export const displayModeOverride = v.union(v.literal("auto"), v.literal("standard"), v.literal("lite"));
+export type DisplayModeChoice = Infer<typeof displayModeOverride>;
 
 export const appKind = v.union(v.literal("web"), v.literal("desktop"));
 export const audience = v.union(v.literal("everyone"), v.literal("selected"));

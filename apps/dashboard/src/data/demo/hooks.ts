@@ -33,6 +33,7 @@ import {
   type AppDetail,
   type AppKind,
   type DesktopSpec,
+  type DetectedTech,
   type AppOption,
   type AppRow,
   type BrowserChoice,
@@ -68,9 +69,11 @@ import {
 } from "../types";
 import type { ServerList } from "../serverList";
 import { byKey, contains, relevance, useDemoServerPage } from "./lists";
+import { demoFeedStatus, demoUpdateFlag, resetDemoFeedOnEdit, useDemoApproveFeedUpdate, useDemoCheckFeedNow, useDemoDismissFeedUpdate, useDemoSetFeedPaused } from "./feeds";
 import { lockdownWarningsOf } from "./lockdown";
 import * as validate from "../../lib/validate";
 import * as rules from "../../lib/apps/updateRules";
+import { prefillFor } from "@convex/lib/installerDetect";
 import { MAX_BROWSER_SITES } from "../../lib/apps/browserRules";
 import { BROADCAST_ACTIVE_MAX, BROADCAST_BODY_MAX, BROADCAST_TITLE_MAX, LOCK_CONTACT_MAX, LOCK_MESSAGE_MAX, noticeProblem } from "../../lib/noticeRules";
 import { MAX_WIFI_GROUPS, MAX_WIFI_NAME, MAX_WIFI_PROFILES, WIFI_SECURITIES, passphraseProblem, ssidProblem } from "../../lib/wifiRules";
@@ -782,6 +785,8 @@ export const demoApi: DataApi = {
         flags: { noGroup: !d.groupId, revoked: d.revoked, rotateCredential: d.rotateCredential },
         lock: db.locks.get(d._id) ?? null,
         groups: groupOptions(db),
+        displayMode: d.displayMode ?? "auto",
+        groupDisplayMode: g?.displayMode ?? "auto",
       };
     });
   },
@@ -1336,6 +1341,9 @@ export const demoApi: DataApi = {
           .slice(0, 150),
         deviceCount: Math.min(db.devices.filter((d) => d.groupId === g._id).length, 501),
         employeeCount: Math.min(db.groupMembers.filter((m) => m.groupId === g._id).length, 501),
+        displayMode: g.displayMode,
+        webWindowCap: g.webWindowCap,
+        webIdleCloseMin: g.webIdleCloseMin,
       };
     });
   },
@@ -1383,6 +1391,64 @@ export const demoApi: DataApi = {
             summary: renamed ? `Renamed the group ${before} to ${clean}` : `Changed the description of the group ${clean}`,
           });
           return { revision: g.revision };
+        }),
+      [],
+    );
+  },
+
+  // `groups:setDisplay` (Phase 6 Step 19): the same ranges as the server (`convex/lib/displayRules.ts`); nothing changed = no write.
+  useSetGroupDisplay() {
+    return useCallback(
+      ({ groupId, expectedRevision, displayMode, webWindowCap, webIdleCloseMin }) =>
+        runMutation("admin", ({ db, audit }) => {
+          const g = find(db.groups, groupId);
+          checkRevision(g, expectedRevision);
+          const mode = displayMode === "auto" ? undefined : displayMode;
+          const wholeIn = (n: number, lo: number, hi: number) => Number.isInteger(n) && n >= lo && n <= hi;
+          if (webWindowCap !== null && !wholeIn(webWindowCap, 1, 12)) fail("invalid_argument", { field: "webWindowCap" });
+          if (webIdleCloseMin !== null && webIdleCloseMin !== 0 && !wholeIn(webIdleCloseMin, 5, 240)) fail("invalid_argument", { field: "webIdleCloseMin" });
+          const cap = webWindowCap ?? undefined;
+          const idle = webIdleCloseMin ?? undefined;
+          if (mode === g.displayMode && cap === g.webWindowCap && idle === g.webIdleCloseMin) return { revision: g.revision };
+          g.displayMode = mode;
+          g.webWindowCap = cap;
+          g.webIdleCloseMin = idle;
+          g.revision++;
+          republishGroup(db, g._id, "display settings changed");
+          audit({
+            action: "group.displayModeChanged",
+            targetType: "group",
+            targetId: g._id,
+            targetLabel: g.name,
+            summary: `Changed the display settings of the group ${g.name}`,
+          });
+          return { revision: g.revision };
+        }),
+      [],
+    );
+  },
+
+  // `fleet:setDisplayMode` (Phase 6 Step 19): unchanged = no write; a revoked PC is refused.
+  useSetDeviceDisplayMode() {
+    return useCallback(
+      ({ deviceId, expectedRevision, displayMode }) =>
+        runMutation("admin", ({ db, audit }) => {
+          const d = find(db.devices, deviceId);
+          if (d.revoked) fail("conflict", { detail: "device revoked" });
+          checkRevision(d, expectedRevision);
+          const mode = displayMode === "auto" ? undefined : displayMode;
+          if (mode === d.displayMode) return { revision: d.revision };
+          d.displayMode = mode;
+          d.revision++;
+          bumpVersion(db, d._id, "display mode changed");
+          audit({
+            action: "device.displayModeChanged",
+            targetType: "device",
+            targetId: d._id,
+            targetLabel: d.name,
+            summary: `Set the display mode of the PC ${d.name} to ${mode === "lite" ? "Lite" : mode === "standard" ? "Standard" : "automatic (by memory)"}`,
+          });
+          return { revision: d.revision };
         }),
       [],
     );
@@ -1720,8 +1786,8 @@ export const demoApi: DataApi = {
         groupOptions: groupOptions(db),
         denials30d: a.kind === "web" ? [...(db.appDenials.get(a._id) ?? [])].sort((x, y) => y.count - x.count || (x.kind < y.kind ? -1 : 1)) : [],
         ...chromeAppOf(db, a),
-        // The resolver (Step 12) fills the real status: the demo shows a feed that has just been checked.
-        ...(a.desktop?.update?.mode === "managed" && a.desktop.update.feed ? { feedStatus: { status: "ok" as const, failures: 0, lastCheckedAt: Date.now() - 3 * 3_600_000, seenVersion: a.desktop.version } } : {}),
+        // The demo's feed row (`demo/feeds.ts`): a feed that was checked a few hours ago, until "Check now" or a change.
+        ...(a.kind === "desktop" && demoFeedStatus(a) ? { feedStatus: demoFeedStatus(a)! } : {}),
       };
     });
   },
@@ -1821,7 +1887,9 @@ export const demoApi: DataApi = {
             a.name = nameOrFail(desktop.name, validate.NAME_MAX.app);
             a.description = desktop.description?.trim() || undefined;
             a.hue = desktop.hue;
+            const before = a.desktop;
             a.desktop = demoDesktop(a.desktop, { ...desktop.desktop, exe: desktop.desktop.exe.replace("{AppId}", a._id) });
+            resetDemoFeedOnEdit(a, before);
           }
           a.revision++;
           audit({ action: "app.updated", targetType: "app", targetId: a._id, targetLabel: a.name, summary: "App settings changed." });
@@ -1940,6 +2008,12 @@ export const demoApi: DataApi = {
     );
   },
 
+  // ---- vendor feed (Phase 6 Step 12): `demo/feeds.ts`.
+  useApproveFeedUpdate: useDemoApproveFeedUpdate,
+  useDismissFeedUpdate: useDemoDismissFeedUpdate,
+  useCheckFeedNow: useDemoCheckFeedNow,
+  useSetFeedPaused: useDemoSetFeedPaused,
+
   useResolveWinget() {
     return useCallback(async ({ packageId, version }) => {
       await sleep(latency() + 400);
@@ -1991,6 +2065,45 @@ export const demoApi: DataApi = {
       // A drawn tile stands in for the PNG a real site would offer (the demo stores nothing).
       const icon = `data:image/svg+xml,${encodeURIComponent(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64"><rect width="64" height="64" rx="14" fill="hsl(${hash} 55% 48%)"/><text x="32" y="43" font-size="32" text-anchor="middle" fill="white" font-family="sans-serif">${(base[0] ?? "?").toUpperCase()}</text></svg>`)}`;
       return { name: base.charAt(0).toUpperCase() + base.slice(1), hue: hash, ...(host.includes("noicon") ? {} : { iconPreviewUrl: icon }) };
+    }, []);
+  },
+
+  /** The demo twin of `apps:inspectInstaller`: the technology comes from words in the address (nsis, inno, burn, ...), no network. */
+  useInspectInstaller() {
+    return useCallback(async ({ url }) => {
+      await sleep(latency() + 400);
+      if (validate.installerUrl(url) !== null) fail("invalid_argument", { field: "url" });
+      const path = url.toLowerCase();
+      if (new URL(url).hostname.includes("fail")) fail("invalid_argument", { field: "url", detail: "inspect_failed" });
+      if (path.includes("norange")) fail("invalid_argument", { field: "url", detail: "inspect_unsupported" });
+      if (path.endsWith(".zip") || path.endsWith(".html")) fail("invalid_argument", { field: "url", detail: "inspect_not_installer" });
+      const tech: DetectedTech = path.endsWith(".msi")
+        ? "msi"
+        : path.includes("nsis")
+          ? "nsis"
+          : path.includes("inno")
+            ? "inno"
+            : path.includes("burn")
+              ? "burn"
+              : path.includes("script")
+                ? "installshield_script"
+                : path.includes("shield")
+                  ? "installshield_msi"
+                  : path.includes("advanced")
+                    ? "advanced_installer"
+                    : "exe";
+      const p = prefillFor(tech);
+      return {
+        tech,
+        kind: tech === "msi" ? "msi" : "exe",
+        confidence: tech === "exe" ? "low" : "high",
+        silentArgs: p.silentArgs,
+        successExitCodes: p.successExitCodes,
+        needsAnswerFile: p.needsAnswerFile,
+        perUserLikely: tech === "nsis",
+        ...(tech === "exe" || tech === "msi" ? {} : { signer: "Demo Software Ltd", fileVersion: "2.4.1.0", productName: "Demo Setup", companyName: "Demo Software Ltd" }),
+        sizeBytes: 48_234_496,
+      };
     }, []);
   },
 
@@ -2838,6 +2951,7 @@ export const demoAppsApi: AppsApi = {
           createdAt: a.createdAt,
           ...appGroupCount(db.assignments.filter((x) => x.appId === a._id).length),
           summary: a.kind === "desktop" ? installSummary(db, a._id) : null,
+          ...(demoUpdateFlag(a) ? { updateFlag: demoUpdateFlag(a)! } : {}),
         }),
       );
     });

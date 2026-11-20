@@ -11,8 +11,10 @@ use std::fmt;
 
 use rulebox_ipc::hotkey::{self, DEFAULT_ADMIN_EXIT_HOTKEY};
 use rulebox_ipc::types::{
-    AdminExitInfo, AgentSnapshot, DeviceLockView, KeyboardView, NetworkView, PowerOptions, PrintingView,
+    AdminExitInfo, AgentSnapshot, DeviceLockView, DisplayMode, DisplayModeSource, KeyboardView, NetworkView, PowerOptions,
+    PrintingView,
 };
+use rulebox_policy::DisplayModeOverride;
 use serde_json::Value;
 
 use rulebox_policy::catalog::CatalogApp;
@@ -100,6 +102,35 @@ pub struct AgentPolicy {
     /// (Step 14b) `doc.drivers`: driver packages the install engine puts on the PC. Entries that do not parse or break
     /// the size limits are dropped. Never a tile, never part of the snapshot.
     pub drivers: Vec<DriverSpec>,
+    /// (Phase 6 Step 19, plan 4.14) `doc.displayMode`: the administrator's winner (device over group); `Auto` when absent.
+    /// `Unknown` (a value a newer server adds) is `Auto`.
+    pub display_override: DisplayModeOverride,
+    /// (Step 19) Whose choice `display_override` is (`doc.displayModeSource`). `Auto` while there is no override.
+    pub display_source: DisplayModeSource,
+    /// (Step 19) `doc.webWindowCap`, only when within 1 to 12 (the signed document is refused as a whole otherwise).
+    pub web_window_cap: Option<u32>,
+    /// (Step 19) `doc.webIdleCloseMin`: 0 = off, else 5 to 240.
+    pub web_idle_close_min: Option<u32>,
+}
+
+/// Defaults of plan 4.14 for the web window cap.
+pub const LITE_WEB_WINDOW_CAP: u32 = 3;
+pub const STANDARD_WEB_WINDOW_CAP: u32 = 8;
+/// Lite closes an idle web window after this many minutes; Standard never does.
+pub const LITE_IDLE_CLOSE_MIN: u32 = 30;
+
+/// (Step 19, PRD 22.5) The display mode a PC uses: the device's choice, else the group's (the document carries the
+/// winner and says whose it is), else what its RAM decides. `Auto` and `Unknown` overrides fall through to the RAM.
+pub fn effective_display_mode(
+    ram_mode: DisplayMode,
+    over: DisplayModeOverride,
+    source: DisplayModeSource,
+) -> (DisplayMode, DisplayModeSource) {
+    match over.effective() {
+        DisplayModeOverride::Lite => (DisplayMode::Lite, source),
+        DisplayModeOverride::Standard => (DisplayMode::Standard, source),
+        _ => (ram_mode, DisplayModeSource::Auto),
+    }
 }
 
 /// Parses the entries of a JSON list one by one, so one bad entry does not cost the others.
@@ -151,7 +182,43 @@ fn win_combos_from_doc(doc: &Value) -> Option<WinCombos> {
     )
 }
 
+/// `doc.displayMode`; a value of the wrong type is `Auto` (nothing is forced by a document that cannot be read).
+fn display_override_of(doc: &Value) -> DisplayModeOverride {
+    doc.get("displayMode")
+        .and_then(|value| serde_json::from_value::<DisplayModeOverride>(value.clone()).ok())
+        .map_or(DisplayModeOverride::Auto, DisplayModeOverride::effective)
+}
+
+/// `doc.displayModeSource` (`device` or `group`). An absent or unknown value is `Unknown`, which the Staff App reads as `Auto`.
+fn display_source_of(doc: &Value) -> DisplayModeSource {
+    match doc.get("displayModeSource").and_then(Value::as_str) {
+        None => DisplayModeSource::Auto,
+        Some("device") => DisplayModeSource::Device,
+        Some("group") => DisplayModeSource::Group,
+        Some(_) => DisplayModeSource::Unknown,
+    }
+}
+
+/// A whole number of a document key inside `range`; anything else is `None` (the agent's default applies).
+fn number_in(doc: &Value, key: &str, range: std::ops::RangeInclusive<u32>) -> Option<u32> {
+    let number = doc.get(key)?.as_u64().and_then(|n| u32::try_from(n).ok())?;
+    range.contains(&number).then_some(number)
+}
+
 impl AgentPolicy {
+    /// (Phase 6 Step 19) Sets what depends on the PC's RAM: the effective display mode and where it came from, and the web
+    /// window cap and idle close the Staff App enforces (the document's value, else the default of the effective mode).
+    /// Run after `apply_to_snapshot`, whenever a policy is applied.
+    pub fn apply_display(&self, snapshot: &mut AgentSnapshot, ram_mode: DisplayMode) {
+        let (mode, source) = effective_display_mode(ram_mode, self.display_override, self.display_source);
+        let lite = mode == DisplayMode::Lite;
+        snapshot.display_mode = mode;
+        snapshot.display_mode_source = source;
+        snapshot.web_window_cap =
+            Some(self.web_window_cap.unwrap_or(if lite { LITE_WEB_WINDOW_CAP } else { STANDARD_WEB_WINDOW_CAP }));
+        snapshot.web_idle_close_min = Some(self.web_idle_close_min.unwrap_or(if lite { LITE_IDLE_CLOSE_MIN } else { 0 }));
+    }
+
     /// No document, no `adminExit` key or no `pinHash` give an exit that is off and
     /// has no problem: there is no default PIN. A hash that fails
     /// `kdf::check_hash` turns the exit off with a problem (fail closed: a broken
@@ -196,6 +263,10 @@ impl AgentPolicy {
                         .collect()
                 })
                 .unwrap_or_default(),
+            display_override: display_override_of(doc),
+            display_source: display_source_of(doc),
+            web_window_cap: number_in(doc, "webWindowCap", 1..=12),
+            web_idle_close_min: number_in(doc, "webIdleCloseMin", 0..=240).filter(|min| *min == 0 || *min >= 5),
             admin_exit: AdminExitPolicy::from_value(doc.get("adminExit")),
             power: doc.get("power").and_then(|value| serde_json::from_value(value.clone()).ok()),
             org_name: doc

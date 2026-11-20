@@ -4,6 +4,7 @@ import { domainProblem, webUrlProblem } from "./hostRules";
 import { compareVersions, isOrdered, MAX_VERSION_CHARS } from "./feed/version";
 import {
   MAX_ALLOWED_DOMAINS,
+  MAX_ANSWER_FILE_BYTES,
   MAX_APP_ARG_LENGTH,
   MAX_APP_DESCRIPTION,
   MAX_APP_NAME,
@@ -11,10 +12,12 @@ import {
   MAX_BROWSER_SITES,
   MAX_FEED_PUBKEY,
   MAX_FEED_TARGET,
+  MAX_INSTALL_TIMEOUT_MIN,
   MAX_INSTALLER_BYTES,
   MAX_PUBLISHER_PRODUCT,
   MAX_PUBLISHER_SUBJECT,
   MAX_SUCCESS_EXIT_CODES,
+  MIN_INSTALL_TIMEOUT_MIN,
 } from "./limits";
 import { APP_ID_PLACEHOLDER, argsProblem, exePathProblem, fileArgProblem, resetFoldersProblem } from "./pathRules";
 import { NEW_WEB_APP_PERMISSIONS, type browserChoice, type desktopSpec, type installSpec, type webSpec } from "./validators";
@@ -167,6 +170,78 @@ export function normalizeInstall(i: InstallSpec, expectedKinds: readonly Install
     successExitCodes,
     // An exe installer cannot be uninstalled in Phase 4 (4.8): the flag is meaningless there.
     removeWhenUnassigned: i.kind === "exe" ? false : i.removeWhenUnassigned,
+    ...normalizeInstallerDetails(i, silentArgs),
+  };
+}
+
+// ---------------------------------------------------------------- installer details (Phase 6 Step 13, plan 4.2, 4.6, 4.7)
+
+/**
+ * The refusals of the installer details, as the `detail` of an `invalid_argument` (`field` names where the admin fixes it).
+ * The dashboard maps each to one sentence (`installRefusalStrings`).
+ */
+export const INSTALL_REFUSALS = ["answer_file_unused", "answer_file_missing", "answer_file_not_iss", "silent_arg_token"] as const;
+
+/**
+ * The tokens of `silentArgs` (`check_silent_args` in `rulebox-policy`): every `{` or `}` must start exactly `{AnswerFile}` or
+ * `{LogFile}`. Other braces are refused, because the agent would pass them on as text.
+ */
+export function silentArgTokenProblem(list: string[]): boolean {
+  for (const arg of list) {
+    let rest = arg;
+    for (let at = rest.search(/[{}]/); at !== -1; at = rest.search(/[{}]/)) {
+      const tail = rest.slice(at);
+      const token = ["{AnswerFile}", "{LogFile}"].find((t) => tail.startsWith(t));
+      if (token === undefined) return true;
+      rest = tail.slice(token.length);
+    }
+  }
+  return false;
+}
+
+/**
+ * `tech`, `answerFile`, `timeoutMin` and `publisher` as they are stored. A technology is only kept when it is one of the wizard
+ * technologies: "plain EXE" and "MSI" are the same as no value at all, so a save that says so changes nothing else. `tech` has to fit
+ * the kind (an MSI package is `msi`, an EXE is anything but `msi`, a portable file has none). The answer file and the timeout belong
+ * to an installer that runs (not a portable file), the answer file to an EXE only, and `{AnswerFile}` in the switches and an answer
+ * file go together (an unused file would be downloaded for nothing, a token without a file would reach the installer as text).
+ * The size of an answer file is a hint, 0 = unknown.
+ */
+function normalizeInstallerDetails(i: InstallSpec, silentArgs: string[]): Pick<InstallSpec, "tech" | "answerFile" | "timeoutMin" | "publisher"> {
+  const tech = i.tech;
+  if (tech !== undefined) {
+    const fits = i.kind === "msi" ? tech === "msi" : i.kind === "exe" ? tech !== "msi" : false;
+    if (!fits) fail("invalid_argument", { field: "install.tech" });
+  }
+  if (silentArgTokenProblem(silentArgs)) fail("invalid_argument", { field: "install.silentArgs", detail: "silent_arg_token" });
+  const usesToken = silentArgs.some((a) => a.includes("{AnswerFile}"));
+  let answerFile: InstallSpec["answerFile"];
+  if (i.answerFile !== undefined) {
+    if (i.kind !== "exe") fail("invalid_argument", { field: "install.answerFile" });
+    const url = i.answerFile.url.trim();
+    if (httpsUrlProblem(url)) fail("invalid_argument", { field: "install.answerFile.url" });
+    // `.iss` only (an InstallShield response file), judged by the path so a query string does not hide the extension.
+    if (!new URL(url).pathname.toLowerCase().endsWith(".iss")) fail("invalid_argument", { field: "install.answerFile.url", detail: "answer_file_not_iss" });
+    if (!SHA256.test(i.answerFile.sha256)) fail("invalid_argument", { field: "install.answerFile.sha256" });
+    const size = i.answerFile.sizeBytes;
+    if (!Number.isInteger(size) || size < 0 || size > MAX_ANSWER_FILE_BYTES) fail("invalid_argument", { field: "install.answerFile.sizeBytes" });
+    if (!usesToken) fail("invalid_argument", { field: "install.answerFile", detail: "answer_file_unused" });
+    answerFile = { url, sha256: i.answerFile.sha256.toLowerCase(), sizeBytes: size };
+  } else if (usesToken) {
+    fail("invalid_argument", { field: "install.silentArgs", detail: "answer_file_missing" });
+  }
+  const minutes = i.timeoutMin;
+  if (minutes !== undefined) {
+    if (i.kind === "portable" || !Number.isInteger(minutes) || minutes < MIN_INSTALL_TIMEOUT_MIN || minutes > MAX_INSTALL_TIMEOUT_MIN) {
+      fail("invalid_argument", { field: "install.timeoutMin" });
+    }
+  }
+  const publisher = shortText(i.publisher, "install.publisher", MAX_PUBLISHER_SUBJECT);
+  return {
+    ...(tech !== undefined && tech !== "exe" && tech !== "msi" ? { tech } : {}),
+    ...(answerFile !== undefined ? { answerFile } : {}),
+    ...(minutes !== undefined ? { timeoutMin: minutes } : {}),
+    ...(publisher !== undefined ? { publisher } : {}),
   };
 }
 

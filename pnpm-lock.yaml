@@ -401,6 +401,9 @@ importers:
       '@gsap/react':
         specifier: 'catalog:'
         version: 2.1.2(gsap@3.15.0)(react@19.3.0)
+      '@noble/hashes':
+        specifier: 'catalog:'
+        version: 2.4.0
       '@rulebox/types':
         specifier: workspace:*
         version: link:../../packages/types

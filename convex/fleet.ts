@@ -33,7 +33,8 @@ import { bumpOrgStatsIfPresent, loadOrgPlan } from "./lib/plans";
 import { requestPublish } from "./lib/publish";
 import { consumeOrFail } from "./lib/rateLimits";
 import { requireStepUp } from "./lib/stepUp";
-import { diskBand, installState, reportedStatusFields } from "./lib/validators";
+import { diskBand, displayModeOverride, installState, reportedStatusFields } from "./lib/validators";
+import { modeText } from "./lib/displayRules";
 
 // Devices in the dashboard (plan Step 7 items 4, 10-13; 4.13 amended).
 //
@@ -273,6 +274,9 @@ export const get = memberQuery("viewer")({
     protection: v.union(securityPosture, v.null()),
     /** Step 19: does the agent know lockdown ("lockdown/1")? null before its first report. */
     lockdownCapable: v.union(v.boolean(), v.null()),
+    /** Phase 6 Step 19 (plan 4.14): this PC's own display-mode choice and its group's (`auto` = none). Both come from rows already read. */
+    displayMode: displayModeOverride,
+    groupDisplayMode: displayModeOverride,
     /** Step 19: the PC's apply report (plan 4.11): fixed codes only; null until it sends one. */
     apply: v.union(
       v.object({
@@ -327,6 +331,8 @@ export const get = memberQuery("viewer")({
       ring: (d.ring ?? "everyone") as RingValue,
       rolloutRevision: rollout?.revision ?? 0,
       usbAllowUntil: d.usbTempAllowUntil ?? null,
+      displayMode: d.displayMode ?? "auto",
+      groupDisplayMode: group?.displayMode ?? "auto",
       protection: report?.security ?? null,
       lockdownCapable: report === null && apply === null ? null : (capabilities ?? []).includes("lockdown/1"),
       apply:
@@ -625,6 +631,36 @@ export const setKiosk = memberMutation("admin")({
       targetId: device._id,
       targetLabel: device.name,
       summary: `${args.enabled ? "Turned on" : "Turned off"} kiosk mode on the PC ${device.name}`,
+    });
+    return { revision };
+  },
+});
+
+/**
+ * (Phase 6 Step 19, plan 4.14, 4.16) This PC's own display-mode choice (admin): `lite` or `standard` wins over its group's choice and
+ * over what its memory selects; `auto` clears it. `stale_edit` when someone saved in between; nothing changed = no write. Republishes
+ * the device and audits `device.displayModeChanged`. 5 reads, 3 writes. The dashboard warns when `standard` is forced on a PC with
+ * 4 GB of memory or less; the server does not refuse it (the administrator knows the hardware).
+ */
+export const setDisplayMode = memberMutation("admin")({
+  args: { deviceId: v.string(), expectedRevision: v.number(), displayMode: displayModeOverride },
+  returns: v.object({ revision: v.number() }),
+  handler: async (ctx, args) => {
+    const { device } = await activeDevice(ctx, args.deviceId);
+    checkRevision(device, args.expectedRevision);
+    const displayMode = args.displayMode === "auto" ? undefined : args.displayMode;
+    if (displayMode === device.displayMode) return { revision: device.revision ?? 0 };
+    const revision = nextRevision(device);
+    await ctx.db.patch(device._id, { displayMode, revision });
+    await requestPublish(ctx, ctx.orgId, { deviceIds: [device._id] });
+    await writeAudit(ctx, {
+      orgId: ctx.orgId,
+      actor: ctx.actor,
+      action: "device.displayModeChanged",
+      targetType: "device",
+      targetId: device._id,
+      targetLabel: device.name,
+      summary: `Set the display mode of the PC ${device.name} to ${modeText(displayMode)}`,
     });
     return { revision };
   },

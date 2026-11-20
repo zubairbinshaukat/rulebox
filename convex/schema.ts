@@ -4,10 +4,12 @@ import { v } from "convex/values";
 import {
   appFeedStatus,
   appKind,
+  appUpdateFlag,
   audience,
   auditActorType,
   desktopSpec,
   diskBand,
+  displayModeOverride,
   installState,
   inviteKind,
   memberStatus,
@@ -348,6 +350,11 @@ export default defineSchema({
     // `orgStats.groupCount` / `maxGroups` (owner decision 2026-10-27: a free
     // tenant has 3 usable groups besides it).
     isDefault: v.optional(v.boolean()),
+    // Phase 6 Step 19 (plan 4.2, 4.14; widen-only, absent = no choice): the group's display-mode choice and its web window
+    // cap (1..12) and idle close in minutes (0 = off, else 5..240). Published as agent-only keys; the PC's own choice wins.
+    displayMode: v.optional(displayModeOverride),
+    webWindowCap: v.optional(v.number()),
+    webIdleCloseMin: v.optional(v.number()),
   })
     .index("by_org", ["orgId"])
     .index("by_org_name", ["orgId", "name"]),
@@ -378,6 +385,9 @@ export default defineSchema({
     sealPublicKey: v.optional(v.string()),
     sealKeyId: v.optional(v.string()),
     usbTempAllowUntil: v.optional(v.number()),
+    // Phase 6 Step 19 (plan 4.2, 4.14): this PC's display-mode choice; it wins over its group's. Absent = auto (no choice).
+    // Lives here, like `kioskEnabled`: it changes rarely and the publisher already holds the row.
+    displayMode: v.optional(displayModeOverride),
     // DEPRECATED (moved to deviceCredentials)
     secretHash: v.optional(v.string()),
     previousSecretHash: v.optional(v.string()),
@@ -573,6 +583,9 @@ export default defineSchema({
     archived: v.boolean(),
     revision: v.number(),
     createdAt: v.number(),
+    // Phase 6 Step 12 (plan 4.16): the Apps list's "update available" / "feed problem" mark. Written by `feeds.ts` only when it
+    // changes, and NOT a revision bump (it is not an edit of the app).
+    updateFlag: v.optional(appUpdateFlag),
   })
     .index("by_org", ["orgId"])
     .index("by_org_archived", ["orgId", "archived"])

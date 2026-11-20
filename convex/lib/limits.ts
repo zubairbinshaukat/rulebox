@@ -267,6 +267,11 @@ export const MAX_EXE_PATH = 260;
 /** Largest installer the agent downloads (4.8: 4 GiB). */
 export const MAX_INSTALLER_BYTES = 4 * 1024 * 1024 * 1024;
 export const MAX_SUCCESS_EXIT_CODES = 16;
+/** (Phase 6 Step 13, plan 4.3) An answer file: `MAX_ANSWER_FILE_BYTES` in `rulebox-policy`. */
+export const MAX_ANSWER_FILE_BYTES = 256 * 1024;
+/** (Phase 6 Step 13, plan 4.2) `install.timeoutMin`: `TIMEOUT_MIN_RANGE` in `rulebox-policy`; absent = 30. */
+export const MIN_INSTALL_TIMEOUT_MIN = 5;
+export const MAX_INSTALL_TIMEOUT_MIN = 120;
 /** (Phase 6, plan 4.2) An Authenticode subject: `MAX_PUBLISHER_SUBJECT` in `rulebox-policy`. */
 export const MAX_PUBLISHER_SUBJECT = 200;
 /** (Phase 6) A publisher rule's product name: `MAX_PUBLISHER_FIELD` in `rulebox-policy`. */

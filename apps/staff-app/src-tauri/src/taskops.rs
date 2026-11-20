@@ -10,6 +10,7 @@ use crate::appwin::{self, AppWindows};
 use crate::launcher::{failure_notice, plan_launch, LaunchPlan};
 use crate::model::NoticeTone;
 use crate::state::AppState;
+use crate::webapp::CapOutcome;
 use crate::tasks::{click_action, plan_show_desktop, ClickAction, ShowDesktopPlan, TaskServices};
 
 /// A click on a window's taskbar button: restore, minimize or focus.
@@ -107,6 +108,37 @@ pub fn show_desktop(services: &TaskServices) {
     }
 }
 
+/// (Phase 6 Step 19) The employee picked the window `label` in the "close one first" dialog: close it, then open the app that was
+/// waiting. When the cap was lowered meanwhile and is still reached, the same app keeps waiting and the dialog asks again. A label
+/// that is not an open web window, or nothing waiting, closes nothing. Blocks on window calls: run it from a worker thread.
+pub fn close_for_cap(app: &AppHandle, state: &AppState, label: &str) -> CapOutcome {
+    let Some(web) = app.try_state::<std::sync::Arc<crate::webapp::WebApps>>() else {
+        return CapOutcome::Nothing;
+    };
+    let Some((_gone, waiting)) = web.take_for_close(label) else {
+        return CapOutcome::Nothing;
+    };
+    if let Some(window) = app.get_webview_window(label) {
+        if let Err(error) = window.destroy() {
+            tracing::warn!(%error, label, "a web window could not be closed for the limit");
+        }
+    }
+    if web.at_cap(state.web_window_cap()) {
+        web.set_pending(&waiting);
+        return CapOutcome::StillFull;
+    }
+    let entry = state.read(|s| s.apps.items.iter().find(|a| a.id == waiting).cloned());
+    match entry.map(|entry| (web.open(app, state, &entry), entry.name)) {
+        Some((Ok(_), _)) => CapOutcome::Opened,
+        Some((Err(error), name)) => {
+            tracing::warn!(%error, app = %waiting, "web app window failed");
+            state.notify(NoticeTone::Warning, format!("{name} could not be opened."), Some(error));
+            CapOutcome::Opened
+        }
+        None => CapOutcome::Nothing,
+    }
+}
+
 /// Open an app from the catalogue: focus it when it is open, else start it.
 pub fn launch(app: &AppHandle, services: &TaskServices, state: &AppState, id: &str) {
     let (catalogue, tasks, closing) =
@@ -157,7 +189,25 @@ pub fn launch(app: &AppHandle, services: &TaskServices, state: &AppState, id: &s
         },
         LaunchPlan::OpenWeb => {
             let entry = catalogue.iter().find(|app| app.id == id);
-            let opened = match (entry, app.try_state::<std::sync::Arc<crate::webapp::WebApps>>()) {
+            let web = app.try_state::<std::sync::Arc<crate::webapp::WebApps>>();
+            // (Phase 6 Step 19) At the window cap the employee chooses which window to close; nothing is closed silently.
+            if let (Some(_), Some(web)) = (entry, web.as_ref()) {
+                if web.at_cap(state.web_window_cap()) {
+                    web.set_pending(id);
+                    let host = app.state::<std::sync::Arc<crate::shellwin::DesktopHost>>();
+                    if let Err(error) = crate::shellwin::popup_open(app, &host, crate::shellwin::PopupKind::WindowCap, None) {
+                        web.cancel_pending();
+                        tracing::warn!(%error, app = id, "the window limit dialog could not be shown");
+                        state.notify(
+                            NoticeTone::Warning,
+                            "Too many windows are open.",
+                            Some("Close one, then open this app again.".into()),
+                        );
+                    }
+                    return;
+                }
+            }
+            let opened = match (entry, web) {
                 (Some(entry), Some(web)) => web.open(app, state, entry),
                 _ => Err("that app is not available".to_string()),
             };

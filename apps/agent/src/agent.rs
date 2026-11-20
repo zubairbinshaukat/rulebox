@@ -242,6 +242,15 @@ pub fn load_cached_desired(paths: &DataPaths) -> Option<CachedDesired> {
     }
 }
 
+/// The display mode the PC's RAM selects on its own (PRD 22.5): Lite at `LITE_MAX_RAM_MB` or less. An unreadable RAM size
+/// means Standard. (Phase 6 Step 19: the administrator's override is applied on top by `AgentPolicy::apply_display`.)
+pub fn ram_display_mode(platform: &dyn Platform) -> DisplayMode {
+    match platform.os_info() {
+        Ok(os) if os.ram_mb <= LITE_MAX_RAM_MB => DisplayMode::Lite,
+        _ => DisplayMode::Standard,
+    }
+}
+
 /// The snapshot shown to the Staff App before any backend contact. The protocol
 /// 1.1 fields `adminExit`, `power` and `orgName` come from `policy` (never the
 /// PIN hash).
@@ -251,11 +260,8 @@ pub fn initial_snapshot(
     _config: &AgentConfig,
     policy: &AgentPolicy,
 ) -> AgentSnapshot {
-    let ram_mb = platform.os_info().map(|os| os.ram_mb);
-    let display_mode = match ram_mb {
-        Ok(mb) if mb <= LITE_MAX_RAM_MB => DisplayMode::Lite,
-        _ => DisplayMode::Standard,
-    };
+    // The RAM picks the mode on its own; the administrator's override is applied by `apply_display` below.
+    let display_mode = ram_display_mode(platform);
     let enrollment = match &state.enrollment {
         None => EnrollmentStatus::NotEnrolled,
         Some(e) if e.revoked => EnrollmentStatus::Revoked,
@@ -289,12 +295,13 @@ pub fn initial_snapshot(
         keyboard: None,
         printing: None,
         network: None,
-        // Protocol 1.4 fields: absent until Phase 6 Step 19 fills them from the policy.
+        // Protocol 1.4 fields: filled by `apply_display` just below (Phase 6 Step 19).
         web_window_cap: None,
         web_idle_close_min: None,
         display_mode_source: Default::default(),
     };
     policy.apply_to_snapshot(&mut snapshot);
+    policy.apply_display(&mut snapshot, display_mode);
     snapshot
 }
 
@@ -861,7 +868,7 @@ async fn clear_session_when_not_enrolled(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use rulebox_ipc::types::KioskPhase;
+    use rulebox_ipc::types::{DisplayModeSource, KioskPhase};
 
     use crate::platform::sim::SimPlatform;
     use crate::state::{Enrollment, KioskApplied, KioskRecord};
@@ -986,6 +993,62 @@ mod tests {
         assert_eq!(snapshot.device.map(|d| d.id), Some("d1".to_string()));
         assert_eq!(snapshot.kiosk.phase, KioskPhase::Applied);
         assert_eq!(snapshot.desired_state_version, 7);
+    }
+
+    /// (Phase 6 Step 19, plan 4.14) Effective mode = the document's winner (device over group), else the RAM; the
+    /// snapshot says whose choice it was and carries the resolved window cap and idle close.
+    #[test]
+    fn the_override_beats_the_ram_and_the_snapshot_says_whose_it_is() {
+        let dir = TempDir::new();
+        let sim = SimPlatform::new(dir.path().to_path_buf());
+        let snapshot_for = |ram_mb: u64, document: serde_json::Value| {
+            sim.with_world(|w| w.os.ram_mb = ram_mb);
+            let policy = AgentPolicy::from_doc(Some(&document));
+            initial_snapshot(&AgentState::default(), &sim, &AgentConfig::default(), &policy)
+        };
+        let low = 4096;
+        let high = 16_384;
+
+        // No override: the RAM decides; the defaults of the mode apply.
+        let s = snapshot_for(low, serde_json::json!({}));
+        assert_eq!((s.display_mode, s.display_mode_source), (DisplayMode::Lite, DisplayModeSource::Auto));
+        assert_eq!((s.web_window_cap, s.web_idle_close_min), (Some(3), Some(30)));
+        let s = snapshot_for(high, serde_json::json!({}));
+        assert_eq!((s.display_mode, s.display_mode_source), (DisplayMode::Standard, DisplayModeSource::Auto));
+        assert_eq!((s.web_window_cap, s.web_idle_close_min), (Some(8), Some(0)));
+
+        // A group override beats the RAM both ways; a device override is reported as the device's.
+        let s = snapshot_for(high, serde_json::json!({ "displayMode": "lite", "displayModeSource": "group" }));
+        assert_eq!((s.display_mode, s.display_mode_source), (DisplayMode::Lite, DisplayModeSource::Group));
+        assert_eq!((s.web_window_cap, s.web_idle_close_min), (Some(3), Some(30)));
+        let s = snapshot_for(low, serde_json::json!({ "displayMode": "standard", "displayModeSource": "device" }));
+        assert_eq!((s.display_mode, s.display_mode_source), (DisplayMode::Standard, DisplayModeSource::Device));
+        assert_eq!((s.web_window_cap, s.web_idle_close_min), (Some(8), Some(0)));
+
+        // "auto", an unknown value and a wrong type fall through to the RAM.
+        for bad in [serde_json::json!("auto"), serde_json::json!("dim"), serde_json::json!(5)] {
+            let s = snapshot_for(low, serde_json::json!({ "displayMode": bad, "displayModeSource": "device" }));
+            assert_eq!((s.display_mode, s.display_mode_source), (DisplayMode::Lite, DisplayModeSource::Auto));
+        }
+        // An override with no source still applies (source `auto`); an unknown source reads `unknown` (the Staff App treats it as auto).
+        let s = snapshot_for(high, serde_json::json!({ "displayMode": "lite" }));
+        assert_eq!((s.display_mode, s.display_mode_source), (DisplayMode::Lite, DisplayModeSource::Auto));
+        let s = snapshot_for(high, serde_json::json!({ "displayMode": "lite", "displayModeSource": "fleet" }));
+        assert_eq!((s.display_mode, s.display_mode_source), (DisplayMode::Lite, DisplayModeSource::Unknown));
+
+        // The cap and the idle close come from the document when set; out-of-range values are ignored.
+        let s = snapshot_for(high, serde_json::json!({ "webWindowCap": 12, "webIdleCloseMin": 5 }));
+        assert_eq!((s.web_window_cap, s.web_idle_close_min), (Some(12), Some(5)));
+        let s = snapshot_for(low, serde_json::json!({ "webWindowCap": 1, "webIdleCloseMin": 0 }));
+        assert_eq!((s.web_window_cap, s.web_idle_close_min), (Some(1), Some(0)));
+        for bad in [0, 13, 99] {
+            let s = snapshot_for(low, serde_json::json!({ "webWindowCap": bad }));
+            assert_eq!(s.web_window_cap, Some(3), "{bad}");
+        }
+        for bad in [1, 4, 241] {
+            let s = snapshot_for(low, serde_json::json!({ "webIdleCloseMin": bad }));
+            assert_eq!(s.web_idle_close_min, Some(30), "{bad}");
+        }
     }
 
     /// A simulated agent on pipe names of its own.

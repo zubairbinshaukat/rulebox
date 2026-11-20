@@ -29,7 +29,24 @@ export type PopupKind =
   | "switcher"
   | "thumb"
   | "confirm"
-  | "monitor";
+  | "monitor"
+  | "windowCap";
+
+/** One open web window in the "close one first" dialog (Rust `webapp::CapWindow`). */
+export interface CapWindow {
+  label: string;
+  appName: string;
+}
+
+/** What the "close one first" dialog shows (Rust `webapp::CapPrompt`): the cap, the app that waits and the open windows. */
+export interface CapPrompt {
+  cap: number;
+  appName: string;
+  windows: CapWindow[];
+}
+
+/** What picking a window did (Rust `webapp::CapOutcome`). `stillFull`: the cap is still reached, ask again. */
+export type CapOutcome = "opened" | "stillFull" | "nothing";
 
 /** A control's rectangle in **physical** pixels, relative to its window. */
 export interface AnchorRect {
@@ -126,6 +143,9 @@ type Commands = {
   switch_user: { args: Record<string, never>; result: void };
   sign_out: { args: Record<string, never>; result: void };
   closing_apps: { args: Record<string, never>; result: string[] };
+  window_cap_state: { args: Record<string, never>; result: CapPrompt | null };
+  window_cap_close: { args: { label: string }; result: CapOutcome };
+  window_cap_cancel: { args: Record<string, never>; result: void };
   lock: { args: Record<string, never>; result: void };
   unlock: { args: { password: string }; result: VerifyOutcomeDto };
   power_sleep: { args: Record<string, never>; result: void };

@@ -51,6 +51,8 @@ export const IO_BUDGETS: Record<string, IoBudget> = {
   "groups:create": { maxReads: 9, maxReadBytes: 5_120, maxWrites: 4, maxWriteBytes: 3_072 },
   // group, name check; unchanged: 0 writes; else group + audit.
   "groups:rename": { maxReads: 6, maxReadBytes: 2_048, maxWrites: 2, maxWriteBytes: 1_024 },
+  // Phase 6 Step 19 (plan 4.16): the group (display settings ride on its row), the publish queue row; writes: group, audit, publish queue.
+  "groups:setDisplay": { maxReads: 9, maxReadBytes: 6_144, maxWrites: 3, maxWriteBytes: 2_048 },
   // group, 3 x `.first()` dependents, unexpired codes of the group (<= 100), orgStats;
   // writes: delete, orgStats, audit. Refused: 0 writes.
   // Phase 5 Step 19: + the group's `groupLockdown` row (read and deleted).
@@ -153,6 +155,8 @@ export const IO_BUDGETS: Record<string, IoBudget> = {
   "fleet:move": { maxReads: 9 + 51 + 200 + 200 + 400, maxReadBytes: 400_000, maxWrites: 4 + 50 + 200 + 1, maxWriteBytes: 60_000 },
   // device, credentials, (off: step-up row again), publishQueue; writes: device, queue, audit.
   "fleet:setKiosk": { maxReads: 9, maxReadBytes: 6_144, maxWrites: 3, maxWriteBytes: 2_048 },
+  // Phase 6 Step 19 (plan 4.16): same shape as setKiosk (device, credentials, publish queue); writes: device, audit, publish queue. No step-up.
+  "fleet:setDisplayMode": { maxReads: 9, maxReadBytes: 6_144, maxWrites: 3, maxWriteBytes: 2_048 },
   // device, credentials, device again, summary, orgStats, liveness, shard, presence; writes:
   // credentials, orgStats, liveness, shard, presence, audit. Already revoked: 0 writes.
   // Step 17 review: + the PC's install results un-tagged (as fleet:move). Step 14b: + <= 50 driver results re-tagged (first page only).
@@ -233,8 +237,9 @@ export const IO_BUDGETS: Record<string, IoBudget> = {
   // app, file types (only when the file argument is cleared), snapshotAppGroups, publishApp (assignments <= 10 after the cap, grants <= 51 with
   // their groups, queue); unchanged: 1 read, 0 writes.
   // Phase 6 Step 10: + the `appFeeds` row when the mode is or was Managed (<= 2 reads, 1 write: upsert or delete).
+  // Phase 6 Step 12: + 1 write when the app carried an `updateFlag` that goes with the feed row.
   // Phase 6 Step 16: + one `db.get` of the Chrome program when a website's browser choice CHANGES to Chrome.
-  "apps:update": { maxReads: 4 + 1 + 1 + 2 + 1 + (501 + 10 + 10 * 921 + 200) + 10 + 51 + 51 * 21 + 1, maxReadBytes: 3_500_000, maxWrites: 4 + 1 + 10 * 13, maxWriteBytes: 2_700_000 },
+  "apps:update": { maxReads: 4 + 1 + 1 + 2 + 1 + (501 + 10 + 10 * 921 + 200) + 10 + 51 + 51 * 21 + 1, maxReadBytes: 3_500_000, maxWrites: 4 + 1 + 1 + 10 * 13, maxWriteBytes: 2_700_000 },
   // Phase 6 Step 10 (plan 4.16): as a changed `apps:update` (app, feed row, snapshotAppGroups, publishApp; writes: app, feed row,
   // audit, per group <= 13, queue). Rare. A rollback that is refused (no older version) reads the app only.
   "apps:rollbackVersion": { maxReads: 4 + 1 + 1 + (501 + 10 + 10 * 921 + 200) + 10 + 51 + 51 * 21 + 1, maxReadBytes: 3_500_000, maxWrites: 4 + 1 + 10 * 13, maxWriteBytes: 2_700_000 },
@@ -261,15 +266,18 @@ export const IO_BUDGETS: Record<string, IoBudget> = {
   "apps:fetchWebMeta": { maxReads: 6, maxReadBytes: 4_096, maxWrites: 1, maxWriteBytes: 512 },
   // authorize (4) + cache lookup + cache write + 2 rate-limiter rows (a cached answer reads 5).
   "apps:resolveWinget": { maxReads: 8, maxReadBytes: 8_192, maxWrites: 2, maxWriteBytes: 4_096 },
+  // Phase 6 Step 13 (plan 4.7, 4.16): authorize (4) + 1 rate-limiter row (read and write); the three range reads are outside the
+  // database and the answer is not stored. ESTIMATE until `ioBudgets.test.ts` measures it (the matrix row stops at an early refusal).
+  "apps:inspectInstaller": { maxReads: 6, maxReadBytes: 4_096, maxWrites: 1, maxWriteBytes: 512 },
   // ---- Phase 6 Step 12 (plan 4.5, 4.16): the vendor feed resolver. ESTIMATES until measured (see the internal rows below).
   // authorize (4) + `feedForApp` (2) + 1 rate-limiter row; the check itself is the internal `feeds:loadForCheck` + `feeds:recordResult` rows.
   // A new version published by the check writes what `apps:update` writes (the publish path), so that is the worst case here.
-  "feeds:checkNow": { maxReads: 4 + 2 + 2 + (501 + 10 + 10 * 921 + 200) + 10 + 51 + 51 * 21 + 1, maxReadBytes: 3_500_000, maxWrites: 1 + 1 + 1 + 10 * 13, maxWriteBytes: 2_700_000 },
+  "feeds:checkNow": { maxReads: 4 + 2 + 2 + (501 + 10 + 10 * 921 + 200) + 10 + 51 + 51 * 21 + 1, maxReadBytes: 3_500_000, maxWrites: 1 + 1 + 1 + 1 + 10 * 13, maxWriteBytes: 2_700_000 },
   // app, feed row, then (approve) the publish path of `apps:update`: app, feed row, audit, per group <= 13, queue.
-  "feeds:approve": { maxReads: 4 + 1 + 1 + (501 + 10 + 10 * 921 + 200) + 10 + 51 + 51 * 21 + 1, maxReadBytes: 3_500_000, maxWrites: 4 + 1 + 10 * 13, maxWriteBytes: 2_700_000 },
-  // wrapper (4) + app + feed row; writes: feed row, audit.
-  "feeds:dismiss": { maxReads: 4 + 2, maxReadBytes: 8_192, maxWrites: 2, maxWriteBytes: 4_096 },
-  "feeds:setPaused": { maxReads: 4 + 2, maxReadBytes: 8_192, maxWrites: 2, maxWriteBytes: 4_096 },
+  "feeds:approve": { maxReads: 4 + 1 + 1 + (501 + 10 + 10 * 921 + 200) + 10 + 51 + 51 * 21 + 1, maxReadBytes: 3_500_000, maxWrites: 4 + 1 + 1 + 10 * 13, maxWriteBytes: 2_700_000 },
+  // wrapper (4) + app + feed row; writes: feed row, the app's `updateFlag` (only when it changes), audit.
+  "feeds:dismiss": { maxReads: 4 + 2, maxReadBytes: 8_192, maxWrites: 3, maxWriteBytes: 4_096 },
+  "feeds:setPaused": { maxReads: 4 + 2, maxReadBytes: 8_192, maxWrites: 3, maxWriteBytes: 4_096 },
   // app, rule by extension, rules (<= 200, only for a new one), snapshotAppGroups for the program and the one that lost the extension
   // (2 x 11 assignments, <= 10 groups together), publishApp x2; writes: rule, audit, per group <= 13, queue.
   // MEASURED (a program in one group of the fixture): 20 reads / 5.5 KB, 5 writes / 4.3 KB.
@@ -542,9 +550,9 @@ export const IO_BUDGETS: Record<string, IoBudget> = {
   // feed row + app row; writes: the feed row only when something changed (an unchanged check writes 0). A NEW version with autoPublish
   // adds the publish path of `apps:update` (app, audit, snapshotAppGroups, publishApp; per group <= 13 writes, queue).
   // MEASURED through `feeds:check` on an app no group assigns: new version 4 reads / 2.2 KB, 3 writes / 1.2 KB (feed row, app, audit); a 304 or an unchanged answer 4 reads, 0 writes.
-  "feeds:recordResult": { maxReads: 2 + (501 + 10 + 10 * 921 + 200) + 10 + 51 + 51 * 21 + 1, maxReadBytes: 3_500_000, maxWrites: 1 + 1 + 1 + 10 * 13, maxWriteBytes: 2_700_000 },
+  "feeds:recordResult": { maxReads: 2 + (501 + 10 + 10 * 921 + 200) + 10 + 51 + 51 * 21 + 1, maxReadBytes: 3_500_000, maxWrites: 1 + 1 + 1 + 1 + 10 * 13, maxWriteBytes: 2_700_000 },
   // loadForCheck (2) + recordResult; the network is outside the database. At most once a day per Managed app.
-  "feeds:check": { maxReads: 2 + 2 + (501 + 10 + 10 * 921 + 200) + 10 + 51 + 51 * 21 + 1, maxReadBytes: 3_500_000, maxWrites: 1 + 1 + 1 + 10 * 13, maxWriteBytes: 2_700_000 },
+  "feeds:check": { maxReads: 2 + 2 + (501 + 10 + 10 * 921 + 200) + 10 + 51 + 51 * 21 + 1, maxReadBytes: 3_500_000, maxWrites: 1 + 1 + 1 + 1 + 10 * 13, maxWriteBytes: 2_700_000 },
 
   // ---- device API (the sign-in action's two internal calls) and the device-action authorizer
   // MEASURED 5 reads / 1.4 KB (no password row). Full path: credentials, device, org, liveness, employee, lockout, secret, membership = 8 (+ limiter, uncounted).

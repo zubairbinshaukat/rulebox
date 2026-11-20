@@ -33,14 +33,19 @@ import {
   type DesktopSpec,
   type InstallCounts,
   type InstallState,
+  type WizardTech,
   type UpdateMode,
   type UpdateSpec,
   type WingetResolved,
 } from "../data/types";
 import { AppPermissions } from "./AppPermissions";
 import { BrowserRulesCard, OpensInCard } from "./AppBrowser";
+import type { InspectState } from "./AppInstaller";
 // The Updates card (Phase 6 Step 10) is a chunk of its own: most edits are of websites, and the card is the largest part of the form.
 const UpdatesCard = lazy(() => import("./AppUpdates"));
+// The installer details (Phase 6 Step 13: Detect, the pre-filled switches, answer file, timeout) are one lazy chunk too.
+const DetectRow = lazy(() => import("./AppInstaller").then((m) => ({ default: m.DetectRow })));
+const InstallerCard = lazy(() => import("./AppInstaller").then((m) => ({ default: m.InstallerCard })));
 import { AppGlyph } from "../components/AppGlyph";
 import { Card } from "../components/Card";
 import { ConfirmDialog } from "../components/ConfirmDialog";
@@ -70,6 +75,7 @@ import { strings } from "../lib/strings";
 import { appEditStrings } from "../lib/screenStrings/appEdit";
 import { updateRefusalStrings } from "../lib/screenStrings/updateRefusals";
 import { appBrowserStrings, browserRefusalStrings } from "../lib/screenStrings/appBrowser";
+import { installFormStrings, installRefusalStrings } from "../lib/screenStrings/installRefusals";
 import { appsStrings } from "../lib/screenStrings/apps";
 import { devicesStrings } from "../lib/screenStrings/devices";
 import { groupStrings } from "../lib/screenStrings/group";
@@ -79,12 +85,14 @@ import { useForm } from "../lib/useForm";
 import { assignmentErrorMessage } from "./groups/errors";
 import * as v from "../lib/validate";
 import * as u from "../lib/apps/updateRules";
+import * as ins from "../lib/apps/installerRules";
 import { browserSitesProblem } from "../lib/apps/browserRules";
 
 const s = appEditStrings;
 // The sentences for the refusals of the update modes ride this chunk, not the first load (`lib/errors.ts`).
 registerDetailSentences(updateRefusalStrings);
 registerDetailSentences(browserRefusalStrings);
+registerDetailSentences(installRefusalStrings);
 const HUES = [175, 150, 100, 60, 40, 20, 0, 330, 300, 260, 220, 200];
 const SOURCES: DesktopSource[] = ["winget", "msi", "exe", "portable", "preinstalled"];
 
@@ -123,6 +131,14 @@ export interface FormValues extends Record<string, unknown> {
   browserKind: BrowserKind;
   chromeAppId: string;
   sites: string;
+  // Phase 6 Step 13: installer details (an MSI or EXE program)
+  tech: WizardTech | "";
+  successCodes: string;
+  timeoutMin: string;
+  installPublisher: string;
+  answerOn: boolean;
+  answerUrl: string;
+  answerSha256: string;
 }
 
 export type FormApi = ReturnType<typeof useForm<FormValues>>;
@@ -179,7 +195,37 @@ function initialValues(d: AppDetail, kind: AppKind): FormValues {
     browserKind: d.web?.browser?.kind ?? "builtin",
     chromeAppId: d.web?.browser?.kind === "chrome" ? (d.web.browser.appId ?? "") : "",
     sites: (desk?.browserSites ?? []).join("\n"),
+    tech: install?.tech !== undefined ? ins.storedTech(install.tech) : "",
+    successCodes: ins.formatExitCodes(install?.successExitCodes ?? [0]),
+    timeoutMin: install?.timeoutMin !== undefined ? String(install.timeoutMin) : "",
+    installPublisher: install?.publisher ?? "",
+    answerOn: install?.answerFile !== undefined,
+    answerUrl: install?.answerFile?.url ?? "",
+    answerSha256: install?.answerFile?.sha256 ?? "",
   };
+}
+
+/** The installer details of an MSI or EXE program against the rules of plan 4.2 and 4.6 (the server decides; these are the inline messages). */
+function installerProblems(x: FormValues): Partial<Record<keyof FormValues & string, string>> {
+  if (x.source !== "msi" && x.source !== "exe") return {};
+  const out: Partial<Record<keyof FormValues & string, string>> = {};
+  if (ins.timeoutProblem(x.timeoutMin)) out.timeoutMin = installFormStrings.timeoutBad;
+  if (x.installPublisher.trim().length > ins.MAX_PUBLISHER) out.installPublisher = installFormStrings.publisherBad;
+  if (x.source !== "exe") return out;
+  if (ins.parseExitCodes(x.successCodes) === null) out.successCodes = installFormStrings.successCodesBad;
+  const args = v.splitArgs(x.silentArgs);
+  const usesToken = args.some((a) => a.includes("{AnswerFile}"));
+  if (ins.silentArgTokenProblem(args)) out.silentArgs ??= installFormStrings.tokenBad;
+  if (x.answerOn) {
+    const url = ins.answerUrlProblem(x.answerUrl);
+    if (url !== null) out.answerUrl = installFormStrings.answerUrlBad;
+    const hash = v.sha256(x.answerSha256);
+    if (hash !== null) out.answerSha256 = hash;
+    if (!usesToken) out.silentArgs ??= installFormStrings.answerNeedsToken;
+  } else if (usesToken) {
+    out.silentArgs ??= installFormStrings.tokenNeedsAnswer;
+  }
+  return out;
 }
 
 /** The version fields of the form against the rules of plan 4.4 (the server decides; these are the inline messages). */
@@ -243,7 +289,7 @@ function validateValues(kind: AppKind, x: FormValues): Partial<Record<keyof Form
     };
   }
   const needsInstall = x.source === "msi" || x.source === "exe" || x.source === "portable";
-  return {
+  const problems: Partial<Record<keyof FormValues & string, string | undefined>> = {
     ...common,
     wingetId: x.source === "winget" ? (v.wingetId(x.wingetId) ?? (x.resolved ? undefined : s.resolveFirst)) : undefined,
     installUrl: needsInstall ? (v.installerUrl(x.installUrl) ?? undefined) : undefined,
@@ -257,6 +303,9 @@ function validateValues(kind: AppKind, x: FormValues): Partial<Record<keyof Form
     ...updateProblems(x),
     sites: u.browserAppOf(x.exe) !== null ? (browserSitesProblem(v.lines(x.sites).map((l) => l.toLowerCase()), appBrowserStrings.sitesTooMany) ?? undefined) : undefined,
   };
+  // The installer details (Phase 6 Step 13) never replace a message a field already has.
+  for (const [key, message] of Object.entries(installerProblems(x))) problems[key as keyof FormValues & string] ??= message;
+  return problems;
 }
 
 /** `previous` is never sent: it is the server's field (`apps:update` ignores it). */
@@ -282,7 +331,16 @@ function desktopSpec(x: FormValues, before?: DesktopSpec): DesktopSpec {
       return { ...base, wingetId: x.resolved?.packageId ?? x.wingetId.trim(), wingetVersion: x.resolved?.version, install: x.resolved?.install };
     case "preinstalled":
       return base;
-    default:
+    default: {
+      // Phase 6 Step 13: the installer details of an MSI or EXE. A portable file runs no installer, so it has none.
+      const runs = x.source === "msi" || x.source === "exe";
+      const exe = x.source === "exe";
+      const answerUrl = x.answerUrl.trim();
+      const answerSha = x.answerSha256.trim().toLowerCase();
+      const oldAnswer = before?.install?.answerFile;
+      // The form does not know an answer file's size either: the same file keeps the one the server has.
+      const answerSize = oldAnswer !== undefined && oldAnswer.url === answerUrl && oldAnswer.sha256 === answerSha ? oldAnswer.sizeBytes : 0;
+      const publisher = x.installPublisher.trim();
       return {
         ...base,
         install: {
@@ -290,12 +348,17 @@ function desktopSpec(x: FormValues, before?: DesktopSpec): DesktopSpec {
           url: x.installUrl.trim(),
           sha256: x.sha256.trim().toLowerCase(),
           sizeBytes: sameInstaller ? before.install!.sizeBytes : 0,
-          silentArgs: x.source === "exe" ? v.splitArgs(x.silentArgs) : [],
+          silentArgs: exe ? v.splitArgs(x.silentArgs) : [],
           productCode: x.source === "msi" && x.productCode.trim() ? x.productCode.trim().toUpperCase() : undefined,
-          successExitCodes: [0],
-          removeWhenUnassigned: x.source === "exe" ? false : x.removeWhenUnassigned,
+          successExitCodes: (runs ? ins.parseExitCodes(x.successCodes) : null) ?? [0],
+          removeWhenUnassigned: exe ? false : x.removeWhenUnassigned,
+          ...(exe && x.tech !== "" ? { tech: x.tech } : {}),
+          ...(exe && x.answerOn ? { answerFile: { url: answerUrl, sha256: answerSha, sizeBytes: answerSize } } : {}),
+          ...(runs && x.timeoutMin.trim() !== "" ? { timeoutMin: Number(x.timeoutMin) } : {}),
+          ...(runs && publisher !== "" ? { publisher } : {}),
         },
       };
+    }
   }
 }
 
@@ -459,6 +522,8 @@ function AppForm({
   const form = useRef<HTMLFormElement>(null);
   const f = useForm<FormValues>(initialValues(d, kind), (x) => validateValues(kind, x));
   const [helper, setHelper] = useState<{ pending: boolean; error: unknown; note: string | null }>({ pending: false, error: null, note: null });
+  // What the last "Detect" said (Phase 6 Step 13): shared by the row under the installer address and the installer details card.
+  const [inspect, setInspect] = useState<InspectState>({ result: null, from: null, kept: [], prefilled: {}, note: null });
   const x = f.values;
   const icon = fetchedIcon !== null && fetchedIcon.forUrl === x.url.trim() ? fetchedIcon.data : null;
 
@@ -681,6 +746,11 @@ function AppForm({
                         <Input {...p} type="url" inputMode="url" spellCheck={false} autoCapitalize="off" placeholder="https://" value={x.installUrl} onChange={(e) => f.set("installUrl", e.target.value)} />
                       )}
                     </Field>
+                    {x.source !== "portable" ? (
+                      <Suspense fallback={null}>
+                        <DetectRow f={f} state={inspect} setState={setInspect} readOnly={readOnly} />
+                      </Suspense>
+                    ) : null}
                     <Field label={s.sha256} error={f.errors.sha256} required>
                       {(p) => (
                         <Input {...p} className="dash-mono" spellCheck={false} autoCapitalize="off" maxLength={80} value={x.sha256} onChange={(e) => f.set("sha256", e.target.value)} />
@@ -690,7 +760,17 @@ function AppForm({
                 ) : null}
                 {x.source === "exe" ? (
                   <>
-                    <Field label={s.silentArgs} hint={s.silentArgsHint} error={f.errors.silentArgs} required>
+                    <Field
+                      label={
+                        <>
+                          {s.silentArgs}
+                          {inspect.prefilled.silentArgs !== undefined && x.silentArgs.trim() !== inspect.prefilled.silentArgs ? <span className="dash-field__optional"> ({installFormStrings.edited})</span> : null}
+                        </>
+                      }
+                      hint={s.silentArgsHint}
+                      error={f.errors.silentArgs}
+                      required
+                    >
                       {(p) => <Input {...p} className="dash-mono" spellCheck={false} value={x.silentArgs} onChange={(e) => f.set("silentArgs", e.target.value)} />}
                     </Field>
                     <InlineNotice tone="neutral" title={s.removeExeNote} />
@@ -706,6 +786,12 @@ function AppForm({
                 ) : null}
               </div>
             </Card>
+
+            {x.source === "msi" || x.source === "exe" ? (
+              <Suspense fallback={null}>
+                <InstallerCard f={f} state={inspect} readOnly={readOnly} />
+              </Suspense>
+            ) : null}
 
             <Card title={s.exe}>
               <div className="dash-form">

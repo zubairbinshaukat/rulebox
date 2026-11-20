@@ -28,6 +28,15 @@ export const appsStrings = {
   installSummary: (installed: number, failed: number, inProgress: number) =>
     `${formatNumber(installed)} installed · ${formatNumber(failed)} failed · ${formatNumber(inProgress)} pending`,
   noInstalls: "Nothing to install",
+  /** Phase 6 Step 12: the mark next to a program's name (`apps:list` `updateFlag`). */
+  updateFlag: {
+    available: "Update waiting",
+    feed_error: "Feed problem",
+  },
+  updateFlagHint: {
+    available: "A new version from the vendor's update feed is waiting for your approval.",
+    feed_error: "The vendor's update feed has a problem. Open the app to see it.",
+  },
   sources: {
     winget: "winget",
     msi: "MSI",

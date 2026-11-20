@@ -1,4 +1,4 @@
-import { useEffect, useState, type ReactNode } from "react";
+import { lazy, Suspense, useEffect, useState, type ReactNode } from "react";
 import { Link, useNavigate, useParams } from "react-router";
 import { Button, Input, Pill, Select, Switch } from "@rulebox/ui";
 import IconPen from "~icons/solar/pen-linear";
@@ -52,6 +52,9 @@ import { devicesStrings } from "../lib/screenStrings/devices";
 import { installStrings } from "../lib/screenStrings/install";
 import { kioskPhaseStrings } from "../lib/screenStrings/kioskPhase";
 import { shellHealthStrings } from "../lib/screenStrings/shellHealth";
+
+// Phase 6 Step 19: the display-mode card is its own lazy chunk (keeps DeviceDetail inside its 25 KB budget).
+const DeviceDisplayCard = lazy(() => import("./display/DeviceDisplayCard").then((m) => ({ default: m.DeviceDisplayCard })));
 import { useNow } from "../lib/useNow";
 import * as v from "../lib/validate";
 
@@ -239,6 +242,9 @@ function Device({ d, liveness }: { d: Detail; liveness: QueryState<DeviceLivenes
 
         <div className="dash-stack">
           <Settings d={d} />
+          <Suspense fallback={null}>
+            <DeviceDisplayCard d={d} />
+          </Suspense>
           <LockCard d={d} />
           <ProtectionCard deviceId={d._id} />
           <UsbAllowCard deviceId={d._id} />

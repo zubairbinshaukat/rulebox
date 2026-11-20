@@ -94,7 +94,7 @@ const APP_COMMANDS: &[&str] = &[
 ];
 
 /// Commands only the popup page may call (the thumbnail preview).
-const POPUP_COMMANDS: &[&str] = &["thumb_state", "thumb_attach"];
+const POPUP_COMMANDS: &[&str] = &["thumb_state", "thumb_attach", "window_cap_state", "window_cap_close", "window_cap_cancel"];
 
 /// Commands only the administrator-exit dialog may call.
 const EXIT_COMMANDS: &[&str] = &["admin_exit_state", "admin_exit_submit", "admin_exit_close", "admin_exit_hotkey"];

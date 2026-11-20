@@ -216,6 +216,51 @@ pub fn popup_close(
     Ok(())
 }
 
+/// (Phase 6 Step 19) The "close one first" dialog asks what it shows: the cap, the app that is waiting and the open web
+/// windows. `None` when nothing is waiting (the dialog then closes itself).
+#[tauri::command]
+pub fn window_cap_state(
+    window: Window,
+    state: State<'_, AppState>,
+    web: State<'_, Arc<crate::webapp::WebApps>>,
+) -> Result<Option<crate::webapp::CapPrompt>, CommandError> {
+    require_label(&window, "shell-popup")?;
+    let catalogue = state.read(|shell| shell.apps.items.clone());
+    Ok(web.cap_prompt(state.web_window_cap(), &catalogue))
+}
+
+/// (Phase 6 Step 19) The employee picked a window to close so that the waiting app can open. Only an open web window is closed.
+#[tauri::command]
+pub async fn window_cap_close(
+    window: Window,
+    app: AppHandle,
+    state: State<'_, AppState>,
+    host: State<'_, Arc<DesktopHost>>,
+    label: String,
+) -> Result<crate::webapp::CapOutcome, CommandError> {
+    require_label(&window, "shell-popup")?;
+    let (state, handle) = (state.inner().clone(), app.clone());
+    let outcome = blocking(move || taskops::close_for_cap(&handle, &state, &label)).await?;
+    if outcome != crate::webapp::CapOutcome::StillFull {
+        crate::shellwin::popup_close(&app, &host);
+    }
+    Ok(outcome)
+}
+
+/// (Phase 6 Step 19) The employee changed their mind: nothing is closed and the app does not open.
+#[tauri::command]
+pub fn window_cap_cancel(
+    window: Window,
+    app: AppHandle,
+    host: State<'_, Arc<DesktopHost>>,
+    web: State<'_, Arc<crate::webapp::WebApps>>,
+) -> Result<(), CommandError> {
+    require_label(&window, "shell-popup")?;
+    web.cancel_pending();
+    crate::shellwin::popup_close(&app, &host);
+    Ok(())
+}
+
 /// The taskbar page reports where its pills are (physical pixels, relative to the
 /// taskbar window). Only those areas take mouse input; the transparent strip
 /// between and around them lets clicks reach the window behind. An empty list

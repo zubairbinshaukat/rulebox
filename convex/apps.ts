@@ -6,7 +6,7 @@ import { env, type DatabaseReader, type DatabaseWriter } from "./_generated/serv
 import { publishApp, snapshotAppGroups } from "./lib/appPublish";
 import { writeAudit } from "./lib/audit";
 import { checkRevision, getInOrg, nextRevision } from "./lib/authz";
-import { browserAppOf, normalizeAppDescription, normalizeAppName, normalizeDesktop, normalizeHue, normalizeWeb, previousFor, withAppId, wingetIdProblem, wingetVersionProblem } from "./lib/appRules";
+import { browserAppOf, httpsUrlProblem, normalizeAppDescription, normalizeAppName, normalizeDesktop, normalizeHue, normalizeWeb, previousFor, withAppId, wingetIdProblem, wingetVersionProblem } from "./lib/appRules";
 import { base64Decode, sha256HexOfBytes } from "./lib/crypto";
 import { deepEqual } from "./lib/deepEqual";
 import { programDenied } from "./lib/denyList";
@@ -32,10 +32,11 @@ import { STORED_INSTALL_STATES } from "./lib/deviceApiRules";
 import { assignedGroupsOf, failedFollowArchive } from "./lib/installs";
 import { assertWithinLimit, bumpOrgStats, bumpStats } from "./lib/plans";
 import { consumeOrFail } from "./lib/rateLimits";
-import { appFeedStatus, audience, appKind, browserChoice, desktopSpec, installState, webPermissions, webSpec, wingetResolved } from "./lib/validators";
+import { appFeedStatus, appUpdateFlag, audience, appKind, browserChoice, desktopSpec, installState, installTech, webPermissions, webSpec, wingetResolved } from "./lib/validators";
 import { serverDay } from "./lib/lockdownReports";
 import { iconDataUrl, fetchWebMeta as scanWebMeta, pngSize } from "./lib/webmeta";
 import { resolveWinget as resolveFromGithub } from "./lib/winget";
+import { inspectInstallerUrl } from "./lib/installerInspect";
 
 // Apps (plan Step 10; 4.8). An app is a website or a Windows program an admin
 // adds once and assigns to groups. Everything that decides what a device may
@@ -85,7 +86,7 @@ async function feedRowOf(ctx: { db: DatabaseReader }, appId: Id<"apps">): Promis
  * Keeps the app's `appFeeds` row in step with its spec, in the caller's transaction: created (due now) when a feed appears,
  * reset when the feed settings change (so a check that started earlier cannot write its result), deleted when the app leaves
  * Managed mode or loses the feed. Nothing is read unless the old or the new mode is Managed, and nothing is written when the
- * feed settings are the same.
+ * feed settings are the same. `hadFlag`: the app row carries an `updateFlag` (Step 12), which goes with the row it described.
  */
 async function syncFeedRow(
   ctx: { db: DatabaseWriter },
@@ -93,12 +94,14 @@ async function syncFeedRow(
   appId: Id<"apps">,
   before: DesktopSpecIn | undefined,
   after: DesktopSpecIn,
+  hadFlag = false,
 ): Promise<void> {
   if (before?.update?.mode !== "managed" && after.update?.mode !== "managed") return;
   const row = await feedRowOf(ctx, appId);
   const feed = feedOf(after);
   if (feed === undefined) {
     if (row !== null) await ctx.db.delete(row._id);
+    if (hadFlag) await ctx.db.patch(appId, { updateFlag: undefined });
     return;
   }
   if (row === null) {
@@ -116,6 +119,7 @@ async function syncFeedRow(
     pending: undefined,
     revision: row.revision + 1,
   });
+  if (hadFlag) await ctx.db.patch(appId, { updateFlag: undefined });
 }
 
 // ---------------------------------------------------------------- browser web apps (Phase 6 Step 16, plan 4.9.1)
@@ -153,6 +157,8 @@ const appRow = v.object({
   groupCountMore: v.boolean(),
   /** Install counts come with Step 17 (`apps:list` never reads `installResults`). */
   summary: v.null(),
+  /** (Phase 6 Step 12) "available" = a vendor update waits for approval, "feed_error" = the feed has a problem. A field of the app row: no extra read. */
+  updateFlag: v.optional(appUpdateFlag),
 });
 
 /**
@@ -203,6 +209,7 @@ export const list = memberQuery("viewer")({
         groupCount: Math.min(groups.length, APP_LIST_GROUP_CAP),
         groupCountMore: groups.length > APP_LIST_GROUP_CAP,
         summary: null,
+        ...(a.updateFlag !== undefined ? { updateFlag: a.updateFlag } : {}),
       });
     }
     return { ...result, page };
@@ -683,7 +690,7 @@ export const update = memberMutation("admin")({
     }
     const revision = nextRevision(app);
     await ctx.db.patch(app._id, { ...fields, revision });
-    if (fields.desktop !== undefined) await syncFeedRow(ctx, ctx.orgId, app._id, app.desktop, fields.desktop);
+    if (fields.desktop !== undefined) await syncFeedRow(ctx, ctx.orgId, app._id, app.desktop, fields.desktop, app.updateFlag !== undefined);
     await writeAudit(ctx, {
       orgId: ctx.orgId,
       actor: ctx.actor,
@@ -1074,5 +1081,47 @@ export const resolveWinget = memberAction("admin")({
     const resolved = await resolveFromGithub(packageId, version, { githubToken: env.GITHUB_TOKEN });
     await ctx.runMutation(internal.apps.storeWinget, { packageId, version: version ?? "", resolved, now: Date.now() });
     return resolved;
+  },
+});
+
+// ---------------------------------------------------------------- installer inspection (Phase 6 Step 13, plan 4.7)
+
+const installerInspection = v.object({
+  tech: installTech,
+  kind: v.union(v.literal("msi"), v.literal("exe")),
+  confidence: v.union(v.literal("high"), v.literal("medium"), v.literal("low")),
+  /** The pre-filled switches (may hold `{AnswerFile}`) and success codes (`0` first) of the detected technology. */
+  silentArgs: v.array(v.string()),
+  successExitCodes: v.array(v.number()),
+  needsAnswerFile: v.boolean(),
+  perUserLikely: v.boolean(),
+  /** The subject the file CLAIMS to be signed by. Display only: the device checks the real signature. */
+  signer: v.optional(v.string()),
+  executionLevel: v.optional(v.string()),
+  fileVersion: v.optional(v.string()),
+  productName: v.optional(v.string()),
+  companyName: v.optional(v.string()),
+  /** The file's size from the host's `Content-Range`, when it said. Display only. */
+  sizeBytes: v.optional(v.number()),
+});
+
+/**
+ * "Detect" next to an installer address (admin; plan 4.7): reads at most three byte ranges of the file at `url` (its first 2 MiB, its
+ * certificate table, its last 64 KiB) and answers what kind of installer it looks like with the switches and success codes to
+ * pre-fill. Stores nothing and never reads a whole file. `invalid_argument` field "url": a bad address, or `detail` `inspect_blocked`
+ * (not a public https address), `inspect_unsupported` (the host does not do Range requests: the form stays manual), `inspect_failed`,
+ * `inspect_not_installer` (not an EXE or MSI). Rate limited per organization (30 an hour). The answer is advice for the form: nothing
+ * in it reaches a device unless the admin saves it.
+ */
+export const inspectInstaller = memberAction("admin")({
+  args: { url: v.string() },
+  returns: installerInspection,
+  handler: async (ctx, args): Promise<Infer<typeof installerInspection>> => {
+    const url = args.url.trim();
+    if (httpsUrlProblem(url)) fail("invalid_argument", { field: "url" });
+    await consumeOrFail(ctx, "installerInspect", ctx.orgId);
+    const r = await inspectInstallerUrl(url);
+    if (!r.ok) fail("invalid_argument", { field: "url", detail: `inspect_${r.reason}` });
+    return { ...r.inspection, ...(r.sizeBytes !== undefined ? { sizeBytes: r.sizeBytes } : {}) };
   },
 });

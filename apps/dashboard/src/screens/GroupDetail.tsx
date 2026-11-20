@@ -46,6 +46,7 @@ import { groupsStrings } from "../lib/screenStrings/groups";
 import { useForm } from "../lib/useForm";
 import * as v from "../lib/validate";
 import { AssignAppDialog, EditAssignmentDialog } from "./groups/AssignmentDialogs";
+import { GroupDisplayCard } from "./display/GroupDisplayCard";
 import { groupErrorMessage, groupFieldError } from "./groups/errors";
 import { groupText } from "./groups/strings";
 
@@ -113,6 +114,7 @@ function Group({ g }: { g: Detail }) {
       <DeleteGroup g={g} open={deleting} onClose={() => setDeleting(false)} />
 
       <Assignments g={g} />
+      <GroupDisplayCard g={g} />
       <div className="dash-grid dash-grid--2">
         <GroupDevices groupId={g._id} />
         <GroupEmployees groupId={g._id} />

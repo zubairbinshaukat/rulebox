@@ -14,6 +14,7 @@ import {
   FEED_JITTER_MS,
   FEED_PAUSED_FOR_MS,
   FEED_TICK_BATCH,
+  FEED_WARN_FAILURES,
 } from "./lib/feed/limits";
 import { compareVersions } from "./lib/feed/version";
 import { internalMutation, internalQuery, memberAction, memberMutation } from "./lib/functions";
@@ -65,16 +66,41 @@ function feedConfigOf(app: Doc<"apps">) {
   return app.kind === "desktop" && app.desktop?.update?.mode === "managed" ? app.desktop.update.feed : undefined;
 }
 
-/** `patch` with only the fields that differ from the stored row (write only on change). `undefined` removes a field. */
-async function patchChanged(ctx: Pick<MutationCtx, "db">, row: Doc<"appFeeds">, fields: Partial<Record<keyof Doc<"appFeeds">, unknown>>): Promise<boolean> {
+/**
+ * The mark the Apps list shows for a feed (plan 4.16, `apps.updateFlag`): a version waiting for approval wins over a problem;
+ * a problem is a refused signature, an unreadable feed or an installer over the cap, or an unreachable feed that failed
+ * `FEED_WARN_FAILURES` checks in a row (plan 4.5 item 3). A paused feed, a calm `downgrade` and a working feed have none.
+ */
+export function updateFlagOf(row: Pick<Doc<"appFeeds">, "status" | "failures" | "pending">): Doc<"apps">["updateFlag"] {
+  if (row.pending !== undefined) return "available";
+  if (row.status === "bad_signature" || row.status === "bad_feed" || row.status === "too_large") return "feed_error";
+  if (row.status === "unreachable" && row.failures >= FEED_WARN_FAILURES) return "feed_error";
+  return undefined;
+}
+
+/** Writes the app's `updateFlag` only when it differs (no revision bump: it is not an edit of the app). */
+async function syncUpdateFlag(ctx: Pick<MutationCtx, "db">, app: Doc<"apps">, row: Pick<Doc<"appFeeds">, "status" | "failures" | "pending">): Promise<void> {
+  const flag = updateFlagOf(row);
+  if (app.updateFlag !== flag) await ctx.db.patch(app._id, { updateFlag: flag });
+}
+
+/**
+ * `patch` with only the fields that differ from the stored row (write only on change). `undefined` removes a field. Keeps the
+ * app's `updateFlag` in step with the new row state (a second write only when the flag changes).
+ */
+async function patchChanged(ctx: Pick<MutationCtx, "db">, app: Doc<"apps">, row: Doc<"appFeeds">, fields: Partial<Record<keyof Doc<"appFeeds">, unknown>>): Promise<boolean> {
   const changed: Record<string, unknown> = {};
   for (const [key, value] of Object.entries(fields)) {
     const old = (row as Record<string, unknown>)[key];
     const same = key === "pending" ? JSON.stringify(old ?? null) === JSON.stringify(value ?? null) : old === value;
     if (!same) changed[key] = value;
   }
-  if (Object.keys(changed).length === 0) return false;
+  if (Object.keys(changed).length === 0) {
+    await syncUpdateFlag(ctx, app, row);
+    return false;
+  }
   await ctx.db.patch(row._id, changed);
+  await syncUpdateFlag(ctx, app, { ...row, ...changed });
   return true;
 }
 
@@ -210,18 +236,18 @@ export const recordResult = internalMutation({
     switch (o.kind) {
       case "not_modified": {
         // The same file as last time: only a check that failed to reach the feed gets back to "ok".
-        await patchChanged(ctx, row, { ...(row.status === "unreachable" ? answered : {}), ...touch });
+        await patchChanged(ctx, app, row, { ...(row.status === "unreachable" ? answered : {}), ...touch });
         return { result: "unchanged", status: row.status === "unreachable" ? "ok" : row.status };
       }
       case "downgrade": {
-        await patchChanged(ctx, row, { status: "downgrade", failures: 0, etag: o.etag, ...touch });
+        await patchChanged(ctx, app, row, { status: "downgrade", failures: 0, etag: o.etag, ...touch });
         return { result: "unchanged", status: "downgrade" };
       }
       case "current": {
         const higher = row.seenVersion === undefined || compareVersions(o.version, row.seenVersion) === 1;
         // An offer that the app has caught up with (an admin published it by hand) is no offer any more.
         const stale = row.pending !== undefined && (appVersion === undefined || compareVersions(row.pending.version, appVersion) !== 1);
-        await patchChanged(ctx, row, {
+        await patchChanged(ctx, app, row, {
           ...answered,
           etag: o.etag,
           ...(higher ? { seenVersion: o.version } : {}),
@@ -237,7 +263,7 @@ export const recordResult = internalMutation({
         // A network error keeps the stored etag (the file may be unchanged); every other failure is about this release and keeps its own.
         const etag = o.status === "unreachable" ? row.etag : o.etag;
         const backoff = o.status === "unreachable" ? { nextCheckAt: now + FEED_BACKOFF_MS[Math.min(failures, FEED_BACKOFF_MS.length) - 1]! } : {};
-        await patchChanged(ctx, row, { status: o.status, failures, etag, ...backoff, ...touch });
+        await patchChanged(ctx, app, row, { status: o.status, failures, etag, ...backoff, ...touch });
         if (o.status === "bad_signature" && row.status !== "bad_signature") {
           await writeAudit(ctx, {
             orgId: app.orgId,
@@ -254,7 +280,7 @@ export const recordResult = internalMutation({
       case "new": {
         // Someone may have published (or rolled back) while the installer was downloading: only a version above the app's counts.
         if (appVersion === undefined || compareVersions(o.version, appVersion) !== 1) {
-          await patchChanged(ctx, row, { ...answered, etag: o.etag, ...touch });
+          await patchChanged(ctx, app, row, { ...answered, etag: o.etag, ...touch });
           return { result: "unchanged", status: "ok" };
         }
         const release: Release = { version: o.version, url: o.url, sha256: o.sha256, sizeBytes: o.sizeBytes };
@@ -265,13 +291,13 @@ export const recordResult = internalMutation({
           });
           if (revision === null) {
             // The app's own settings refuse the new installer: nothing changed, shown as a bad feed, the etag not kept so a fix is seen.
-            await patchChanged(ctx, row, { status: "bad_feed", failures: row.failures + 1, etag: undefined, ...touch });
+            await patchChanged(ctx, app, row, { status: "bad_feed", failures: row.failures + 1, etag: undefined, ...touch });
             return { result: "failed", status: "bad_feed" };
           }
-          await patchChanged(ctx, row, { ...answered, etag: o.etag, seenVersion: o.version, pending: undefined, ...touch });
+          await patchChanged(ctx, app, row, { ...answered, etag: o.etag, seenVersion: o.version, pending: undefined, ...touch });
           return { result: "published", status: "ok", version: o.version };
         }
-        await patchChanged(ctx, row, {
+        await patchChanged(ctx, app, row, {
           ...answered,
           etag: o.etag,
           seenVersion: o.version,
@@ -368,6 +394,7 @@ export const approve = memberMutation("admin")({
     );
     if (revision === null) fail("invalid_argument", { field: "pending" });
     await ctx.db.patch(row._id, { pending: undefined });
+    await syncUpdateFlag(ctx, app, { status: row.status, failures: row.failures, pending: undefined });
     return { revision };
   },
 });
@@ -381,6 +408,7 @@ export const dismiss = memberMutation("admin")({
     if (row.pending === undefined) fail("invalid_argument", { field: "pending" });
     const version = row.pending.version;
     await ctx.db.patch(row._id, { pending: undefined });
+    await syncUpdateFlag(ctx, app, { status: row.status, failures: row.failures, pending: undefined });
     await writeAudit(ctx, {
       orgId: ctx.orgId,
       actor: ctx.actor,
@@ -409,6 +437,7 @@ export const setPaused = memberMutation("admin")({
       row._id,
       args.paused ? { status: "paused", nextCheckAt: Date.now() + FEED_PAUSED_FOR_MS } : { status: "ok", failures: 0, nextCheckAt: Date.now() },
     );
+    await syncUpdateFlag(ctx, app, { status: args.paused ? "paused" : "ok", failures: args.paused ? row.failures : 0, pending: row.pending });
     await writeAudit(ctx, {
       orgId: ctx.orgId,
       actor: ctx.actor,

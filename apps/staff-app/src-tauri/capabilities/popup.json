@@ -1,10 +1,13 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "popup",
-  "description": "The shared popup window only: what the thumbnail preview needs on top of the shell commands.",
+  "description": "The shared popup window only: what the thumbnail preview and the window limit dialog need on top of the shell commands.",
   "windows": ["shell-popup"],
   "permissions": [
     "allow-thumb-state",
-    "allow-thumb-attach"
+    "allow-thumb-attach",
+    "allow-window-cap-state",
+    "allow-window-cap-close",
+    "allow-window-cap-cancel"
   ]
 }

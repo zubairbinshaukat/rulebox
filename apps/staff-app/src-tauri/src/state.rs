@@ -50,6 +50,8 @@ struct Inner {
     /// Theme of the sign-in screen (organization / dev setting). An employee's
     /// choice replaces `display.theme` only while they are signed in.
     org_theme: Mutex<crate::model::ThemeDto>,
+    /// (Phase 6 Step 19) The web window cap and idle close the agent sent (`None`: an older agent, the defaults of the mode apply).
+    web_limits: Mutex<crate::webapp::idle::SentLimits>,
     /// Debug: when set, agent link updates do not overwrite a forced boot link.
     #[cfg(debug_assertions)]
     pub(crate) dev_hold_link: AtomicBool,
@@ -75,6 +77,7 @@ impl AppState {
                 denial_counts: Mutex::new(std::collections::BTreeMap::new()),
                 denial_flush_running: AtomicBool::new(false),
                 org_theme: Mutex::new(org_theme),
+                web_limits: Mutex::new(crate::webapp::idle::SentLimits::default()),
                 #[cfg(debug_assertions)]
                 dev_hold_link: AtomicBool::new(false),
             }),
@@ -95,6 +98,23 @@ impl AppState {
             .org_theme
             .lock()
             .unwrap_or_else(|e| e.into_inner()) = theme;
+    }
+
+    /// (Phase 6 Step 19) What the agent sent for the web window cap and the idle close.
+    pub fn set_web_limits(&self, limits: crate::webapp::idle::SentLimits) {
+        *self.inner.web_limits.lock().unwrap_or_else(|e| e.into_inner()) = limits;
+    }
+
+    /// The window cap that applies now: the agent's value, else the default of the display mode.
+    pub fn web_window_cap(&self) -> usize {
+        let sent = self.inner.web_limits.lock().unwrap_or_else(|e| e.into_inner()).cap;
+        crate::webapp::idle::effective_cap(self.read(|shell| shell.display.lite), sent)
+    }
+
+    /// How long a hidden, silent web window may stay open; `None` = never closed for idleness.
+    pub fn web_idle_close(&self) -> Option<std::time::Duration> {
+        let sent = self.inner.web_limits.lock().unwrap_or_else(|e| e.into_inner()).idle_close_min;
+        crate::webapp::idle::effective_idle(self.read(|shell| shell.display.lite), sent)
     }
 
     pub fn set_files_root(&self, path: Option<String>) {
@@ -673,6 +693,13 @@ pub fn apply_snapshot(state: &AppState, snap: Option<rulebox_ipc::types::AgentSn
         if handlers != state.files().handlers() {
             state.files().set_handlers(handlers);
         }
+    }
+
+    if let Some(ref snap) = snap {
+        state.set_web_limits(crate::webapp::idle::SentLimits {
+            cap: snap.web_window_cap,
+            idle_close_min: snap.web_idle_close_min,
+        });
     }
 
     let lock_changed = state.modify(|s| {

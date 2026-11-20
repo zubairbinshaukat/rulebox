@@ -2,7 +2,7 @@ import { internal } from "../_generated/api";
 import type { Doc, Id } from "../_generated/dataModel";
 import type { DatabaseReader, MutationCtx } from "../_generated/server";
 import { sha256HexSync } from "./crypto";
-import { docUpdate, type BuildApp } from "./desired";
+import { docInstallExtras, docUpdate, type BuildApp } from "./desired";
 import { fail } from "./errors";
 import {
   KEEP_GROUP_CONFIGS,
@@ -199,6 +199,8 @@ export function configApp(app: Doc<"apps">): ConfigApp {
                     productCode: i.productCode ?? null,
                     successExitCodes: [...i.successExitCodes],
                     removeWhenUnassigned: i.removeWhenUnassigned,
+                    // Phase 6 Step 13: left out when absent, so a version made before it keeps its content hash.
+                    ...docInstallExtras(i),
                   },
             resetFolders: [...d.resetFolders],
             // Phase 6: only what a device may know (`docUpdate` drops the feed), left out when absent so an older version keeps its hash.

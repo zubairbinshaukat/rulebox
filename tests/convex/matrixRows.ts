@@ -561,6 +561,13 @@ export const ROWS: Row[] = [
     expect: { ...ADMIN_UNLOCKED, foreign: "not_found" },
   },
   {
+    name: "groups:setDisplay",
+    // Phase 6 Step 19: unchanged settings (no choice, no limits) = no write, every allowed caller gets the same answer.
+    call: (a, f) =>
+      a.mutation(api.groups.setDisplay, { groupId: f.groupId, expectedRevision: 0, displayMode: "auto", webWindowCap: null, webIdleCloseMin: null }),
+    expect: { ...ADMIN_UNLOCKED, foreign: "not_found" },
+  },
+  {
     name: "groups:remove",
     call: (a, f) => a.mutation(api.groups.remove, { groupId: f.groupId }),
     expect: { ...ADMIN_MAJOR, default: "has_dependents", foreign: "not_found" },
@@ -604,6 +611,12 @@ export const ROWS: Row[] = [
     name: "fleet:setKiosk",
     // Turning it ON (unchanged here) needs an unlocked session; OFF is major (fleet.test.ts).
     call: (a, f) => a.mutation(api.fleet.setKiosk, { deviceId: f.deviceId, expectedRevision: 0, enabled: true }),
+    expect: { ...ADMIN_UNLOCKED, foreign: "not_found" },
+  },
+  {
+    name: "fleet:setDisplayMode",
+    // Phase 6 Step 19: `auto` on a PC with no choice = no write.
+    call: (a, f) => a.mutation(api.fleet.setDisplayMode, { deviceId: f.deviceId, expectedRevision: 0, displayMode: "auto" }),
     expect: { ...ADMIN_UNLOCKED, foreign: "not_found" },
   },
   // Phase 5 Step 15: the device lock (the same text again = no change) and broadcasts.
@@ -936,6 +949,12 @@ export const ROWS: Row[] = [
   {
     name: "apps:resolveWinget",
     call: (a) => a.action(api.apps.resolveWinget, { packageId: "not a package" }),
+    expect: { ...ADMIN_UNLOCKED, default: "invalid_argument" },
+  },
+  {
+    name: "apps:inspectInstaller",
+    // An address that is not https is refused before anything is fetched.
+    call: (a) => a.action(api.apps.inspectInstaller, { url: "http://example.com/setup.exe" }),
     expect: { ...ADMIN_UNLOCKED, default: "invalid_argument" },
   },
   { name: "fileHandlers:page", call: (a) => a.query(api.fileHandlers.page, { paginationOpts: { numItems: 10, cursor: null } }), expect: { ...VIEWER, foreign: "ok" } },

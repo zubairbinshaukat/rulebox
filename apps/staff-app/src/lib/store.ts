@@ -20,6 +20,7 @@ export const EMPTY_SHELL_STATE: ShellState = {
   banner: null,
   capabilities: [],
   broadcasts: [],
+  pausedApps: [],
 };
 
 let current: ShellState = EMPTY_SHELL_STATE;

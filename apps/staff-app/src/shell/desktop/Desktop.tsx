@@ -111,6 +111,7 @@ export function Desktop({ shell, employee }: DesktopProps) {
         <AppGrid
           apps={shell.apps.items}
           tasks={shell.tasks}
+          paused={shell.pausedApps}
           status={shell.apps.status}
           onRetry={() => void refreshCatalogue()}
         />

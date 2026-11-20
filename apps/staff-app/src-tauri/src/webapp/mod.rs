@@ -11,6 +11,7 @@ pub mod blocked;
 pub mod download;
 mod hooks;
 pub mod icon;
+pub mod idle;
 pub mod nav;
 pub mod permissions;
 
@@ -47,6 +48,8 @@ pub struct WebWindow {
     initial_blank: AtomicBool,
     /// What the bar above the site shows (see `nav.rs`, `bar.rs`).
     pub nav: Mutex<nav::NavState>,
+    /// (Phase 6 Step 19) Hidden, audible, capturing: what the idle close needs (`idle.rs`).
+    pub activity: idle::Activity,
 }
 
 impl WebWindow {
@@ -71,12 +74,61 @@ impl WebWindow {
 struct Inner {
     next: u32,
     windows: HashMap<String, Arc<WebWindow>>,
+    /// (Phase 6 Step 19) The app the employee wanted to open when the window cap stopped it: it opens once they pick a window to close.
+    pending: Option<String>,
 }
 
 /// The web windows that are open.
 #[derive(Default)]
 pub struct WebApps {
     inner: Mutex<Inner>,
+}
+
+/// (Phase 6 Step 19) One open window in the "close one first" dialog.
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CapWindow {
+    pub label: String,
+    pub app_name: String,
+}
+
+/// (Phase 6 Step 19) What the "close one first" dialog shows: the cap, the app waiting to open and the windows that could be closed.
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CapPrompt {
+    pub cap: usize,
+    pub app_name: String,
+    pub windows: Vec<CapWindow>,
+}
+
+/// (Phase 6 Step 19) The result of picking a window to close.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub enum CapOutcome {
+    /// The window was closed and the app opened.
+    Opened,
+    /// Still at the cap (it was lowered meanwhile): ask again.
+    StillFull,
+    /// Nothing is waiting, or that window is not one of ours.
+    Nothing,
+}
+
+/// A web window for tests of the code around the window list (no real window behind it).
+#[doc(hidden)]
+#[allow(clippy::expect_used)] // a fixed, valid address
+pub fn test_window(label: &str, app_id: &str, app_name: &str) -> Arc<WebWindow> {
+    Arc::new(WebWindow {
+        label: label.to_string(),
+        app_id: app_id.to_string(),
+        app_name: app_name.to_string(),
+        employee_id: "e1".to_string(),
+        allow: AllowList::new("https://example.com/", &[]).expect("a valid start address"),
+        permissions: WebPermissions::default(),
+        last_allowed: Mutex::new("https://example.com/".to_string()),
+        initial_blank: AtomicBool::new(false),
+        nav: Mutex::new(nav::NavState::default()),
+        activity: idle::Activity::default(),
+    })
 }
 
 /// A window label allows letters, digits and `-`, `_`, `/`, `:`.
@@ -133,6 +185,110 @@ impl WebApps {
         }
     }
 
+    /// Adds a window to the list without a real window behind it (tests only).
+    #[doc(hidden)]
+    pub fn insert_for_test(&self, window: Arc<WebWindow>) {
+        if let Ok(mut inner) = self.inner.lock() {
+            inner.windows.insert(window.label.clone(), window);
+        }
+    }
+
+    /// Would one more window pass the cap? (Browser windows of Phase 6 Step 18 will be counted here too.)
+    pub fn at_cap(&self, cap: usize) -> bool {
+        idle::at_cap(self.count_open(), cap)
+    }
+
+    /// The app that waits for the employee to close a window (the cap stopped it). A newer request replaces an older one.
+    pub fn set_pending(&self, app_id: &str) {
+        if let Ok(mut inner) = self.inner.lock() {
+            inner.pending = Some(app_id.to_string());
+        }
+    }
+
+    fn take_pending(&self) -> Option<String> {
+        self.inner.lock().ok().and_then(|mut inner| inner.pending.take())
+    }
+
+    /// Forgets what waited for a window to close (the employee cancelled).
+    pub fn cancel_pending(&self) {
+        let _ = self.take_pending();
+    }
+
+    /// What the "close one first" dialog shows, or `None` when nothing waits. Windows are listed by app name, then label.
+    pub fn cap_prompt(&self, cap: usize, catalogue: &[AppEntry]) -> Option<CapPrompt> {
+        let inner = self.inner.lock().ok()?;
+        let waiting = inner.pending.as_deref()?;
+        let app_name = catalogue.iter().find(|app| app.id == waiting).map_or_else(|| "this app".to_string(), |app| app.name.clone());
+        let mut windows: Vec<CapWindow> = inner
+            .windows
+            .values()
+            .map(|window| CapWindow { label: window.label.clone(), app_name: window.app_name.clone() })
+            .collect();
+        windows.sort_by(|a, b| (a.app_name.to_lowercase(), &a.label).cmp(&(b.app_name.to_lowercase(), &b.label)));
+        Some(CapPrompt { cap, app_name, windows })
+    }
+
+    /// The employee picked `label` to close. Only a window of this list is closed; the waiting app is returned
+    /// (`None`: nothing was waiting or the label is not one of ours, and nothing was closed). The window is removed from the
+    /// list at once, so the cap sees the room without waiting for the window's own destroy event.
+    pub fn take_for_close(&self, label: &str) -> Option<(Arc<WebWindow>, String)> {
+        let mut inner = self.inner.lock().ok()?;
+        if inner.pending.is_none() || !inner.windows.contains_key(label) {
+            return None;
+        }
+        let window = inner.windows.remove(label)?;
+        let waiting = inner.pending.take()?;
+        Some((window, waiting))
+    }
+
+    /// The facts the idle close needs about every open window. `modal_open` answers whether a dialog is open over a label.
+    pub fn idle_facts(&self, now: std::time::Instant, modal_open: impl Fn(&str) -> bool) -> Vec<idle::WindowFacts> {
+        let windows: Vec<Arc<WebWindow>> = self.inner.lock().map_or_else(|_| Vec::new(), |inner| inner.windows.values().cloned().collect());
+        windows
+            .into_iter()
+            .map(|window| {
+                let quiet_for = window.activity.quiet_for(now);
+                idle::WindowFacts {
+                    label: window.label.clone(),
+                    app_id: window.app_id.clone(),
+                    quiet_for,
+                    capturing: window.activity.capturing(),
+                    // Only a hidden window is a candidate, so only its dialogs are looked up (a Win32 call each).
+                    modal_open: quiet_for.is_some() && modal_open(&window.label),
+                }
+            })
+            .collect()
+    }
+
+    /// (Phase 6 Step 19) One look at the open windows (the once-a-minute timer calls this): every window that has been hidden
+    /// and silent for the idle time, with no capture and no dialog open, is closed, and its app gets the "paused" mark. Nothing is
+    /// closed while nobody is signed in or when no idle time applies.
+    pub fn idle_tick(&self, app: &AppHandle, state: &AppState) {
+        let signed_in = state.read(|shell| matches!(shell.session, SessionState::SignedIn { .. }));
+        if !signed_in {
+            if state.read(|shell| !shell.paused_apps.is_empty()) {
+                state.update(|shell| shell.paused_apps.clear());
+            }
+            return;
+        }
+        let Some(idle) = state.web_idle_close() else { return };
+        let facts = self.idle_facts(std::time::Instant::now(), |label| {
+            app.get_webview_window(label)
+                .and_then(|window| window.hwnd().ok())
+                .is_some_and(|hwnd| rulebox_desktop::control::has_modal_dialog(hwnd.0 as isize))
+        });
+        for candidate in idle::idle_candidates(&facts, idle) {
+            let result = pause_then_close(state, &candidate.app_id, || match app.get_webview_window(&candidate.label) {
+                Some(window) => window.close().map_err(|error| error.to_string()),
+                None => Ok(()),
+            });
+            match result {
+                Ok(()) => tracing::info!(app = %candidate.app_id, "an idle web window was closed and its app paused"),
+                Err(error) => tracing::warn!(%error, app = %candidate.app_id, "an idle web window could not be closed"),
+            }
+        }
+    }
+
     /// Open a window for a catalogue web app. Returns its label.
     pub fn open(self: &Arc<Self>, app: &AppHandle, state: &AppState, entry: &AppEntry) -> Result<String, String> {
         let AppKind::Web(web) = &entry.kind else {
@@ -169,7 +325,12 @@ impl WebApps {
             last_allowed: Mutex::new(start.to_string()),
             initial_blank: AtomicBool::new(true),
             nav: Mutex::new(nav::NavState::default()),
+            activity: idle::Activity::default(),
         });
+        // (Phase 6 Step 19) Opening a paused app starts it fresh at its start address: the mark goes.
+        if state.read(|shell| shell.paused_apps.contains(&entry.id)) {
+            state.update(|shell| shell.paused_apps.retain(|id| id != &entry.id));
+        }
 
         // The window starts on `about:blank`, never on the app's address: the
         // hardening hooks are installed first, and only then does the same UI-thread
@@ -179,7 +340,7 @@ impl WebApps {
         if let Ok(mut inner) = self.inner.lock() {
             inner.windows.insert(label.clone(), Arc::clone(&info));
         }
-        self.watch(&window, &label);
+        self.watch(&window, &label, Arc::clone(&info));
         hooks::install(
             &window,
             Arc::new(hooks::HookContext {
@@ -203,7 +364,7 @@ impl WebApps {
     }
 
     /// Forget a closed window; pause the page of a minimized one.
-    fn watch(self: &Arc<Self>, window: &WebviewWindow, label: &str) {
+    fn watch(self: &Arc<Self>, window: &WebviewWindow, label: &str, info: Arc<WebWindow>) {
         let host = Arc::clone(self);
         let label = label.to_string();
         let handle = window.clone();
@@ -215,11 +376,35 @@ impl WebApps {
                 let minimized = handle.is_minimized().unwrap_or(false);
                 if suspended.swap(minimized, std::sync::atomic::Ordering::SeqCst) != minimized {
                     hooks::set_suspended(&handle, minimized);
+                    // Phase 6 Step 19: the idle close counts the time a window stays minimized.
+                    info.activity.set_hidden(minimized, std::time::Instant::now());
                 }
             }
             _ => {}
         });
     }
+}
+
+/// (Phase 6 Step 19) The app gets its "paused" mark **before** its window is closed, so no window ever goes away without the mark;
+/// when closing fails the mark is taken back.
+pub fn pause_then_close<E>(state: &AppState, app_id: &str, close: impl FnOnce() -> Result<(), E>) -> Result<(), E> {
+    if !state.read(|shell| shell.paused_apps.iter().any(|id| id == app_id)) {
+        state.update(|shell| shell.paused_apps.push(app_id.to_string()));
+    }
+    let result = close();
+    if result.is_err() {
+        state.update(|shell| shell.paused_apps.retain(|id| id != app_id));
+    }
+    result
+}
+
+/// (Phase 6 Step 19) Starts the one coarse timer of the idle close (once a minute). Keep the guard: dropping it stops the timer.
+pub fn start_idle_watch(app: AppHandle, state: AppState, web: Arc<WebApps>) -> idle::Ticker {
+    idle::spawn_ticker(idle::TICK, move || {
+        let (app, state, web) = (app.clone(), state.clone(), Arc::clone(&web));
+        // The look reads Win32 state: a worker thread, never the timer's own.
+        tauri::async_runtime::spawn_blocking(move || web.idle_tick(&app, &state));
+    })
 }
 
 fn build_window(

@@ -124,5 +124,9 @@ export const auditStrings = {
     "device.driftReasserted": "PC put a changed setting back",
     "device.safeModeBlocked": "Safe Mode sign-in blocked",
     "device.clockJump": "PC clock jumped",
+    // Phase 6.
+    "device.displayModeChanged": "PC display mode changed",
+    "group.displayModeChanged": "Group display settings changed",
+    "app.feedRejected": "Vendor update refused",
   } as Record<string, string>,
 } as const;

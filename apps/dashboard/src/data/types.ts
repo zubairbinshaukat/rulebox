@@ -325,7 +325,25 @@ export interface GroupDetail {
   assignments: AssignmentRow[];
   deviceCount: number;
   employeeCount: number;
+  /** Phase 6 Step 19 (plan 4.14): the group's display choice, web window cap (1-12) and idle close in minutes (0 = off, 5-240); absent = none. */
+  displayMode?: DisplayChoice;
+  webWindowCap?: number;
+  webIdleCloseMin?: number;
 }
+
+/** Phase 6 Step 19: an administrator's display-mode choice for a group or a PC; `auto` = none (the PC's memory decides). */
+export type DisplayChoice = "auto" | "standard" | "lite";
+
+/** `groups:setDisplay` and the limits the server enforces (`convex/lib/displayRules.ts`). `null` = the mode's default. */
+export interface GroupDisplayInput {
+  groupId: Id;
+  expectedRevision: number;
+  displayMode: DisplayChoice;
+  webWindowCap: number | null;
+  webIdleCloseMin: number | null;
+}
+export const WEB_WINDOW_CAP_RANGE = { min: 1, max: 12 } as const;
+export const IDLE_CLOSE_RANGE = { min: 5, max: 240 } as const;
 
 export interface GroupOption {
   _id: Id;
@@ -458,6 +476,9 @@ export interface DeviceDetail {
   lock: DeviceLock | null;
   /** Group picker options (`groups.by_org` `.take(500)`). */
   groups: GroupOption[];
+  /** Phase 6 Step 19 (plan 4.14): this PC's own display choice and its group's. An older server has neither (`auto`). */
+  displayMode?: DisplayChoice;
+  groupDisplayMode?: DisplayChoice;
 }
 
 /**
@@ -707,6 +728,46 @@ export interface InstallSpec {
   productCode?: string;
   successExitCodes: number[];
   removeWhenUnassigned: boolean;
+  /** Phase 6 Step 13: what the installer file is (a wizard technology). Absent = a plain EXE or an MSI. */
+  tech?: InstallTech;
+  /** Phase 6 Step 13: the recorded answer file of an InstallShield-style installer (`.iss`, at most 256 KiB). `{AnswerFile}` in `silentArgs` points at it. */
+  answerFile?: AnswerFileSpec;
+  /** Phase 6 Step 13: minutes the installer may run, 5 to 120; absent = 30. */
+  timeoutMin?: number;
+  /** Phase 6 Step 13: the expected signer of the installer file; the PC checks it before running the file. */
+  publisher?: string;
+}
+
+/** What the server accepts as `install.tech` (it keeps only the wizard technologies: a plain EXE and an MSI are no value at all). */
+export type InstallTech = "msi" | "nsis" | "inno" | "burn" | "installshield_msi" | "installshield_script" | "advanced_installer" | "exe";
+/** The technologies the form lets an admin pick and the server stores. */
+export type WizardTech = Exclude<InstallTech, "msi" | "exe">;
+export const INSTALL_TECHS: WizardTech[] = ["nsis", "inno", "burn", "installshield_msi", "installshield_script", "advanced_installer"];
+/** What `apps:inspectInstaller` can say a file is. */
+export type DetectedTech = InstallTech;
+
+export interface AnswerFileSpec {
+  url: string;
+  sha256: string;
+  sizeBytes: number;
+}
+
+/** `apps:inspectInstaller`: advice for the form. Nothing in it reaches a PC unless the admin saves it. */
+export interface InstallerInspection {
+  tech: DetectedTech;
+  kind: "msi" | "exe";
+  confidence: "high" | "medium" | "low";
+  silentArgs: string[];
+  successExitCodes: number[];
+  needsAnswerFile: boolean;
+  perUserLikely: boolean;
+  /** The subject the file CLAIMS to be signed by. Shown only. */
+  signer?: string;
+  executionLevel?: string;
+  fileVersion?: string;
+  productName?: string;
+  companyName?: string;
+  sizeBytes?: number;
 }
 
 /** How a program's version is kept (Phase 6): left alone, kept by its vendor's own updater, or by Rulebox from the vendor's feed. */
@@ -805,6 +866,18 @@ export interface AppRow {
   groupCount: number;
   groupCountMore: boolean;
   summary: InstallSummary | null;
+  /** Phase 6 Step 12: a field of the app row (no extra read). "available" = a vendor update waits for approval, "feed_error" = the feed has a problem. */
+  updateFlag?: AppUpdateFlag;
+}
+
+/** `apps:list` `updateFlag` (plan 4.16). */
+export type AppUpdateFlag = "available" | "feed_error";
+
+/** What `feeds:checkNow` did (`result`), and the feed's status afterwards. */
+export interface FeedCheckResult {
+  result: "skipped" | "unchanged" | "published" | "pending" | "failed";
+  status?: FeedCheckStatus;
+  version?: string;
 }
 
 export interface AppOption {

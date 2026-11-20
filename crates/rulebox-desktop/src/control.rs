@@ -61,6 +61,18 @@ pub fn is_open(hwnd: isize) -> bool {
     unsafe { IsWindow(Some(hwnd_from(hwnd))) }.as_bool()
 }
 
+/// Is a modal dialog (a file picker, a print dialog, a message box) open over this window? Windows disables the owner of a modal
+/// dialog, so a window that is not enabled has one. Read-only; a stale handle answers `false`. (Phase 6 Step 19: the idle close
+/// never closes such a window.)
+pub fn has_modal_dialog(hwnd: isize) -> bool {
+    use windows::Win32::UI::Input::KeyboardAndMouse::IsWindowEnabled;
+    if !is_open(hwnd) {
+        return false;
+    }
+    // SAFETY: a handle query only.
+    !unsafe { IsWindowEnabled(hwnd_from(hwnd)) }.as_bool()
+}
+
 /// Is this window (or the window it belongs to) the foreground window?
 fn is_foreground(hwnd: isize) -> bool {
     // SAFETY: handle query only.

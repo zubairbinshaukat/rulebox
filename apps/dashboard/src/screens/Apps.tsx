@@ -85,6 +85,11 @@ export default function Apps() {
             {a.kind === "web" ? <IconGlobal aria-hidden="true" /> : <IconMonitor aria-hidden="true" />}
             <span>{a.kind === "web" ? s.web : s.desktop}</span>
             {a.source ? <Pill>{s.sources[a.source]}</Pill> : null}
+            {a.updateFlag ? (
+              <Pill tone={a.updateFlag === "available" ? "accent" : "warning"} title={s.updateFlagHint[a.updateFlag]}>
+                {s.updateFlag[a.updateFlag]}
+              </Pill>
+            ) : null}
           </span>
         ),
       },

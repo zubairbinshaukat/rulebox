@@ -56,6 +56,10 @@ pub struct ShellState {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub printing_available: Option<bool>,
+    /// (Phase 6 Step 19, plan 4.14) Ids of web apps whose window the idle close shut: their tile keeps a "paused" mark until the
+    /// app is opened again or the next person signs in. Opening one starts at the app's start address.
+    #[serde(default)]
+    pub paused_apps: Vec<String>,
 }
 
 /// What the lock view shows (`AgentSnapshot.deviceLock`). No employee, nothing secret.
@@ -150,6 +154,7 @@ impl ShellState {
             device_lock: None,
             broadcasts: Vec::new(),
             printing_available: None,
+            paused_apps: Vec::new(),
         }
     }
 }

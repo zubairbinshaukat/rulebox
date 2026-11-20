@@ -20,10 +20,11 @@ import {
   MAX_GROUP_NAME,
   MAX_GROUPS_LISTED,
 } from "./lib/limits";
+import { cleanIdleClose, cleanWindowCap, modeText, nullableNumber } from "./lib/displayRules";
 import { DEFAULT_LOCKDOWN_SETTINGS } from "./lib/lockdownValidators";
 import { assertWithinLimit, bumpOrgStats, bumpStats } from "./lib/plans";
 import { requestPublish } from "./lib/publish";
-import { appKind, audience } from "./lib/validators";
+import { appKind, audience, displayModeOverride } from "./lib/validators";
 
 // Groups (plan Step 5.6; PRD 3.1). Tiny table: every read goes through
 // `groups.by_org` / `groups.by_org_name`. Counts per group come from
@@ -59,6 +60,10 @@ const groupRow = v.object({
   isDefault: v.boolean(),
   devices: cappedCount,
   employees: cappedCount,
+  /** Phase 6 Step 19: the group's display settings; absent = no choice (auto, the mode's defaults). */
+  displayMode: v.optional(displayModeOverride),
+  webWindowCap: v.optional(v.number()),
+  webIdleCloseMin: v.optional(v.number()),
 });
 
 function rowOf(g: Doc<"groups">, counts: Awaited<ReturnType<typeof countsOf>>) {
@@ -70,6 +75,9 @@ function rowOf(g: Doc<"groups">, counts: Awaited<ReturnType<typeof countsOf>>) {
     createdAt: g.createdAt ?? g._creationTime,
     isDefault: g.isDefault === true,
     ...counts,
+    ...(g.displayMode !== undefined ? { displayMode: g.displayMode } : {}),
+    ...(g.webWindowCap !== undefined ? { webWindowCap: g.webWindowCap } : {}),
+    ...(g.webIdleCloseMin !== undefined ? { webIdleCloseMin: g.webIdleCloseMin } : {}),
   };
 }
 
@@ -265,6 +273,49 @@ export const rename = memberMutation("admin")({
       targetId: group._id,
       targetLabel: name,
       summary: nameChanged ? `Renamed the group ${group.name} to ${name}` : `Changed the description of the group ${name}`,
+    });
+    return { revision };
+  },
+});
+
+/**
+ * (Phase 6 Step 19, plan 4.14, 4.16) The group's display settings (admin): its display-mode choice (`auto` = none), the most web app
+ * windows open at once (1..12, `null` = Lite 3 / Standard 8) and the minutes after which a hidden, silent one is closed (0 = off, 5..240,
+ * `null` = Lite 30 / Standard off). A PC's own choice (`fleet:setDisplayMode`) wins over the group's. `stale_edit` when someone saved in
+ * between; nothing changed = no write, no publish. Republishes the group's PCs and audits `group.displayModeChanged`. 5 reads, 3 writes.
+ */
+export const setDisplay = memberMutation("admin")({
+  args: {
+    groupId: v.string(),
+    expectedRevision: v.number(),
+    displayMode: displayModeOverride,
+    webWindowCap: nullableNumber,
+    webIdleCloseMin: nullableNumber,
+  },
+  returns: v.object({ revision: v.number() }),
+  handler: async (ctx, args) => {
+    const group = await getInOrg(ctx, "groups", args.groupId, ctx.orgId);
+    checkRevision(group, args.expectedRevision);
+    const displayMode = args.displayMode === "auto" ? undefined : args.displayMode;
+    const webWindowCap = cleanWindowCap(args.webWindowCap);
+    const webIdleCloseMin = cleanIdleClose(args.webIdleCloseMin);
+    if (displayMode === group.displayMode && webWindowCap === group.webWindowCap && webIdleCloseMin === group.webIdleCloseMin) {
+      return { revision: group.revision ?? 0 };
+    }
+    const revision = nextRevision(group);
+    await ctx.db.patch(group._id, { displayMode, webWindowCap, webIdleCloseMin, revision });
+    await requestPublish(ctx, ctx.orgId, { groupIds: [group._id] });
+    const parts = [`display mode ${modeText(displayMode)}`];
+    parts.push(webWindowCap === undefined ? "window limit by mode" : `at most ${webWindowCap} web windows`);
+    parts.push(webIdleCloseMin === undefined ? "idle close by mode" : webIdleCloseMin === 0 ? "idle close off" : `idle close after ${webIdleCloseMin} min`);
+    await writeAudit(ctx, {
+      orgId: ctx.orgId,
+      actor: ctx.actor,
+      action: "group.displayModeChanged",
+      targetType: "group",
+      targetId: group._id,
+      targetLabel: group.name,
+      summary: `Changed the display settings of the group ${group.name}: ${parts.join(", ")}`,
     });
     return { revision };
   },

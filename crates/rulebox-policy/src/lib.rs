@@ -91,10 +91,11 @@ pub struct AgentDoc {
 }
 
 /// (Phase 6, plan 4.14) `displayMode` of a group or device. `Unknown` behaves as `Auto`.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, TS)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, TS)]
 #[serde(rename_all = "camelCase")]
 #[ts(export)]
 pub enum DisplayModeOverride {
+    #[default]
     Auto,
     Standard,
     Lite,

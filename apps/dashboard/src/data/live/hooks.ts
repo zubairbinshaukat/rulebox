@@ -325,6 +325,9 @@ export const liveApi: DataApi = {
       revision: g.revision,
       deviceCount: cappedNumber(g.devices),
       employeeCount: cappedNumber(g.employees),
+      displayMode: g.displayMode,
+      webWindowCap: g.webWindowCap,
+      webIdleCloseMin: g.webIdleCloseMin,
       assignments: apps.map((a) => ({
         _id: a.assignmentId,
         appId: a.appId,
@@ -344,6 +347,12 @@ export const liveApi: DataApi = {
   },
   useUpdateGroup() {
     return useMapped(useMutation(api.groups.rename));
+  },
+  useSetGroupDisplay() {
+    return useMapped(useMutation(api.groups.setDisplay));
+  },
+  useSetDeviceDisplayMode() {
+    return useMapped(useMutation(api.fleet.setDisplayMode));
   },
   useDeleteGroup() {
     const remove = useMutation(api.groups.remove);
@@ -632,11 +641,34 @@ export const liveApi: DataApi = {
   useRollbackApp() {
     return useMapped(useMutation(api.apps.rollbackVersion));
   },
+  // ---- vendor feed (Phase 6 Step 12): `convex/feeds.ts`.
+  useApproveFeedUpdate() {
+    return useMapped(useMutation(api.feeds.approve));
+  },
+  useDismissFeedUpdate() {
+    return useMapped(useMutation(api.feeds.dismiss));
+  },
+  useCheckFeedNow() {
+    return useMapped(useAction(api.feeds.checkNow));
+  },
+  useSetFeedPaused() {
+    const set = useMutation(api.feeds.setPaused);
+    const call = useCallback(
+      async (a: { appId: string; paused: boolean }) => {
+        await set(a);
+      },
+      [set],
+    );
+    return useMapped(call);
+  },
   useResolveWinget() {
     return useMapped(useAction(api.apps.resolveWinget));
   },
   useFetchWebMeta() {
     return useMapped(useAction(api.apps.fetchWebMeta));
+  },
+  useInspectInstaller() {
+    return useMapped(useAction(api.apps.inspectInstaller));
   },
   useSaveAppIcon() {
     const save = useAction(api.apps.saveIcon);

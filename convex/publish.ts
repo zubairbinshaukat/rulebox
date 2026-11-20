@@ -11,10 +11,12 @@ import {
   buildDeviceDoc,
   buildPayload,
   contentHashOf,
+  displayKeys,
   MAX_PAYLOAD_BYTES,
   utf8Length,
   type BuildApp,
   type BuildInput,
+  type DisplayInput,
   type DocBroadcast,
   type Phase5Input,
 } from "./lib/desired";
@@ -74,7 +76,11 @@ type OrgInputs = {
  * Group-level inputs, loaded once per group (and per configuration version, Step 16b) per run and shared by its devices.
  * `fileHandlers` is set only when the catalogue comes from a configuration version (else the organization's live rules apply).
  */
-type GroupInputs = Pick<BuildInput, "group" | "assignments" | "apps" | "employees" | "employeeApps"> & { fileHandlers?: BuildInput["fileHandlers"] };
+type GroupInputs = Pick<BuildInput, "group" | "assignments" | "apps" | "employees" | "employeeApps"> & {
+  fileHandlers?: BuildInput["fileHandlers"];
+  /** (Phase 6 Step 19) The group row's display settings (read with the group, so no extra read). Live, not ring-gated. */
+  display?: Omit<DisplayInput, "device">;
+};
 
 /** The live direct grants of a group's enabled members and what reading them cost. One load per group and run, whatever the ring. */
 export type GrantLoad = { employees: GroupInputs["employees"]; employeeApps: GroupInputs["employeeApps"]; ranges: number; docs: number };
@@ -203,6 +209,11 @@ export async function loadGroupInputs(
       employees,
       employeeApps,
       ...(frozen === undefined ? {} : { fileHandlers: frozen.fileHandlers }),
+      display: {
+        ...(group.displayMode !== undefined ? { group: group.displayMode } : {}),
+        ...(group.webWindowCap !== undefined ? { webWindowCap: group.webWindowCap } : {}),
+        ...(group.webIdleCloseMin !== undefined ? { webIdleCloseMin: group.webIdleCloseMin } : {}),
+      },
     },
     ranges,
     docs,
@@ -460,8 +471,11 @@ async function publishDevice(ctx: MutationCtx, run: RunState, device: Doc<"devic
   }
 
   const phase5 = await loadPhase5(ctx, run, device, ring, cfg);
+  // Phase 6 Step 19: the PC's own display choice (the device row is already loaded) over its group's.
+  const display: DisplayInput = { ...group.display, ...(device.displayMode !== undefined ? { device: device.displayMode } : {}) };
   const input: BuildInput = {
     ...(phase5 === undefined ? {} : { phase5 }),
+    ...(Object.keys(displayKeys(display)).length === 0 ? {} : { display }),
     org: { _id: run.org.org._id, name: run.org.org.name },
     settings: run.org.settings,
     pinHash: run.org.pinHash,

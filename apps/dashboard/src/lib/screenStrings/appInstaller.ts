@@ -1,0 +1,72 @@
+import type { DetectedTech, WizardTech } from "../../data/types";
+import { installFormStrings } from "./installRefusals";
+
+/**
+ * The text of the installer details of a Windows program (Phase 6 Step 13, plan 4.7): "Detect", the result line, the pre-filled
+ * switches and exit codes, the answer file and the per-user warning. It rides the App screen's lazy chunk, not the first load.
+ */
+export const appInstallerStrings = {
+  ...installFormStrings,
+  detect: "Detect",
+  detecting: "Detecting…",
+  detectHint: "Reads the first few KiB of the installer from its address and suggests the silent switches. Nothing is saved until you press Save.",
+  checkFile: "Check a file on this computer",
+  checkingFile: "Checking…",
+  chooseFile: "Choose an EXE or MSI file to check",
+  checkFileHint: "The file is read in this browser to find its type and its SHA-256. It is not uploaded anywhere.",
+  techNames: {
+    msi: "MSI package",
+    nsis: "NSIS installer",
+    inno: "Inno Setup installer",
+    burn: "WiX Burn installer",
+    installshield_msi: "InstallShield installer (MSI inside)",
+    installshield_script: "InstallShield installer (InstallScript)",
+    advanced_installer: "Advanced Installer installer",
+    exe: "Windows program",
+  } satisfies Record<DetectedTech, string>,
+  looksLike: (name: string, confidence: "high" | "medium" | "low") =>
+    confidence === "high" ? `${name}.` : confidence === "medium" ? `Probably: ${name}.` : `Possibly: ${name}. This is a guess, so check the switches.`,
+  unknownExe: "Rulebox could not tell how this program installs silently. Ask the vendor for its silent switches.",
+  signer: (name: string) => `The file says it is signed by ${name}. That is only what it claims: the PC checks the real signature.`,
+  version: (version: string) => `Version ${version}.`,
+  prefilled: "Switches and exit codes were filled in. Check them, then save.",
+  prefilledNothing: "Nothing needed filling in.",
+  kept: (what: string) => `Kept what you typed in ${what}.`,
+  keptNames: { silentArgs: "the switches", successCodes: "the success codes", tech: "the installer type" },
+  sourceMsi: "This is an MSI package. Pick MSI above so Rulebox runs it the right way.",
+  sourceExe: "This is a program, not an MSI package. Pick EXE above and give its silent switches.",
+  hashFilled: "The SHA-256 was filled in from the file.",
+  hashDiffers: (hash: string) => `The file's SHA-256 is ${hash}. It differs from the one you typed, so nothing was changed.`,
+  hashSame: "The file matches the SHA-256 you typed.",
+  notInstaller: "That file is not a Windows program or an MSI package.",
+  fileFailed: "The file could not be read.",
+  // ---- the details card
+  card: "Installer details",
+  cardSub: "How the PC runs the installer and when it gives up. Most of it is filled in by Detect.",
+  tech: "Installer type",
+  techNone: "Not set (a plain program)",
+  techHint: "Tells the PC what kind of installer this is. Detect sets it.",
+  techOptions: {
+    nsis: "NSIS",
+    inno: "Inno Setup",
+    burn: "WiX Burn",
+    installshield_msi: "InstallShield (MSI inside)",
+    installshield_script: "InstallShield (InstallScript)",
+    advanced_installer: "Advanced Installer",
+  } satisfies Record<WizardTech, string>,
+  successCodes: "Success exit codes",
+  successCodesHint: "Whole numbers separated by commas. 0 always counts. Add 3010 or 1641 when a restart after the install is fine.",
+  timeout: "Give up after (minutes)",
+  timeoutHint: "5 to 120. Empty means 30. A wizard that waits for a click is stopped after this time and shows “needs interaction”.",
+  publisher: "Expected signer",
+  publisherHint: "Optional. The PC refuses to run the installer unless it is signed by this name.",
+  useSigner: (name: string) => `Use “${name}”`,
+  perUser: "This may be a per-user installer: it does not ask for administrator rights, so it may install for the wrong account and the program will not be found. Try it on one PC first.",
+  // ---- the answer file
+  answerOn: "Use an answer file",
+  answerHint: "A recorded set of answers for an InstallShield wizard. Record it once on a test PC: run the installer with /r /f1\"C:\\setup.iss\", click through the wizard, then put setup.iss on an https:// address and paste its address and SHA-256 here. Put {AnswerFile} in the switches where the file goes.",
+  answerNeeded: "This installer cannot run silently without an answer file.",
+  answerUrl: "Answer file address",
+  answerUrlHint: "An https:// address ending in .iss, at most 256 KiB.",
+  answerSha: "Answer file SHA-256",
+} as const;

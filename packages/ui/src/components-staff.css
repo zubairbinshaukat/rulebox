@@ -354,6 +354,18 @@
   -webkit-line-clamp: 1;
 }
 
+/* "Paused": the window was closed for being idle (Phase 6 Step 19). Text on the tile, no motion. */
+.rb-tile__paused {
+  flex: none;
+  font-size: 11px;
+  font-weight: 500;
+  line-height: 1;
+  padding: 3px 7px;
+  border-radius: 999px;
+  color: var(--rb-muted);
+  border: 1px solid var(--rb-line, currentColor);
+}
+
 /* Lite and reduced motion: the card still answers hover, but nothing pops or drifts. */
 [data-lite="true"] .rb-tile:hover,
 [data-lite="true"] .rb-tile:hover .rb-tile__icon,

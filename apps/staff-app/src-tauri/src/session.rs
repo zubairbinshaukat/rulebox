@@ -128,6 +128,8 @@ pub fn apply_sign_in_outcome(state: &AppState, outcome: SignInOutcome) -> Result
                     offline,
                 };
                 s.display.theme = theme;
+                // (Phase 6 Step 19) A paused mark belongs to the person whose window was closed.
+                s.paused_apps.clear();
                 s.apps = CatalogState {
                     status: CatalogStatus::Loading,
                     items: Vec::new(),

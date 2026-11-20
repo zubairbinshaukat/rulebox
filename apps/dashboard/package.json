@@ -21,6 +21,7 @@
   "dependencies": {
     "@convex-dev/auth": "catalog:",
     "@gsap/react": "catalog:",
+    "@noble/hashes": "catalog:",
     "@rulebox/types": "workspace:*",
     "@rulebox/ui": "workspace:*",
     "@simplewebauthn/browser": "catalog:",

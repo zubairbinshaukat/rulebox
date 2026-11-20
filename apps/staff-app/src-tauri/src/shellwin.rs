@@ -52,6 +52,8 @@ pub enum PopupKind {
     Confirm,
     /// The developer resource monitor (debug builds).
     Monitor,
+    /// (Phase 6 Step 19) "Too many windows are open": which one to close first (`webapp::idle`).
+    WindowCap,
 }
 
 impl PopupKind {
@@ -65,6 +67,7 @@ impl PopupKind {
             PopupKind::Thumb => (272, 196),
             PopupKind::Confirm => (400, 220),
             PopupKind::Monitor => (420, 540),
+            PopupKind::WindowCap => (440, 380),
         }
     }
 }
@@ -696,7 +699,11 @@ pub fn popup_open(
             .is_some();
     // A confirm with no menu behind it (the lock screen's "Log out instead")
     // belongs in the middle of the screen, not in the taskbar's corner.
-    let rect = if kind == PopupKind::Switcher || (kind == PopupKind::Confirm && anchor.is_none() && !switching) {
+    // The window limit dialog comes from a click on an app, wherever that was: it belongs in the middle of the screen.
+    let rect = if kind == PopupKind::Switcher
+        || kind == PopupKind::WindowCap
+        || (kind == PopupKind::Confirm && anchor.is_none() && !switching)
+    {
         placement::centered_rect(size, bounds)
     } else if anchor.is_none() && switching {
         match (popup.outer_position(), popup.outer_size()) {

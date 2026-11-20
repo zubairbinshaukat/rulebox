@@ -91,5 +91,8 @@ export function deviceDetailOf(d: GetResult): DeviceDetail {
     // An older server (rolling deploy) has no `lock`: no lock.
     lock: d.lock ?? null,
     groups: d.groups,
+    // Phase 6 Step 19: an older server has neither.
+    displayMode: d.displayMode ?? "auto",
+    groupDisplayMode: d.groupDisplayMode ?? "auto",
   };
 }

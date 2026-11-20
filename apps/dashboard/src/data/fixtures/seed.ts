@@ -13,6 +13,7 @@ import type {
   AuditActorType,
   CompatReport,
   DesktopSpec,
+  FeedCheckStatus,
   InstallState,
   KioskPhase,
   OrgSettings,
@@ -103,6 +104,10 @@ export interface DbGroup {
   description?: string;
   revision: number;
   createdAt: number;
+  /** Phase 6 Step 19: the group's display choice, web window cap and idle close; undefined = none. */
+  displayMode?: "standard" | "lite";
+  webWindowCap?: number;
+  webIdleCloseMin?: number;
 }
 export interface DbDevice {
   _id: string;
@@ -110,6 +115,8 @@ export interface DbDevice {
   groupId?: string;
   revoked: boolean;
   kioskEnabled: boolean;
+  /** Phase 6 Step 19: this PC's own display choice; undefined = none. */
+  displayMode?: "standard" | "lite";
   enrolledAt: number;
   revision: number;
   rotateCredential: boolean;
@@ -159,6 +166,20 @@ export interface DbApp {
   archived: boolean;
   revision: number;
   createdAt: number;
+  /** The `appFeeds` row of a Managed program with a vendor feed (Phase 6 Step 12), made when the demo first needs it. */
+  feed?: DbFeed;
+}
+/** The demo's copy of `appFeeds`: never the feed's address, key or hash (the demo's "found" release is made up on a check). */
+export interface DbFeed {
+  status: FeedCheckStatus;
+  failures: number;
+  lastCheckedAt?: number;
+  seenVersion?: string;
+  pending?: { version: string; foundAt: number };
+  /** The last "Check now" (one per five minutes per app). */
+  lastCheckNowAt?: number;
+  /** The demo's feed "has" one new release to find: set once a check has found it (a feed lists what it lists, it does not invent more). */
+  found?: boolean;
 }
 export interface DbAssignment {
   _id: string;

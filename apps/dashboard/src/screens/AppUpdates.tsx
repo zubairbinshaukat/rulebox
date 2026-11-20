@@ -1,7 +1,8 @@
-import { useState } from "react";
+import { useState, type ReactNode } from "react";
 import { Button, Input, SegmentedControl, Select, Switch, Textarea } from "@rulebox/ui";
 import { UPDATE_MODES, type AppDetail, type ApplyWhen, type FeedStatus, type UpdateMode } from "../data/types";
-import { useRollbackApp } from "../data";
+import { useApproveFeedUpdate, useCheckFeedNow, useDismissFeedUpdate, useRollbackApp, useSetFeedPaused } from "../data";
+import { messageFor, toAppError } from "../lib/errors";
 import { Card } from "../components/Card";
 import { ConfirmDialog } from "../components/ConfirmDialog";
 import { Field, FieldSet } from "../components/Field";
@@ -127,7 +128,7 @@ export default function UpdatesCard({
           </>
         ) : null}
 
-        {!isNew && d.feedStatus ? <FeedStatusLine status={d.feedStatus} /> : null}
+        {!isNew && d.feedStatus ? <FeedStatusLine appId={d._id} status={d.feedStatus} revision={revision} dirty={f.dirty} readOnly={readOnly} onApproved={onRolledBack} /> : null}
       </div>
 
       {previous ? (
@@ -150,19 +151,145 @@ export default function UpdatesCard({
   );
 }
 
-/** Where the vendor feed stands: a calm line when it works, a notice when it does not (7 failures in a row is a warning of its own). */
-function FeedStatusLine({ status }: { status: FeedStatus }) {
+/** One sentence for a refused feed action (the errors that have a plain meaning here, else the usual one). */
+function feedErrorText(e: unknown): string {
+  const err = toAppError(e);
+  if (err?.code === "stale_edit") return s.feedStale;
+  if (err?.code === "rate_limited") return s.feedCheckTooSoon;
+  if (err?.code === "conflict" && err.detail === "paused") return s.feedCheckPaused;
+  if (err?.code === "invalid_argument" && err.field === "pending") return s.feedNoLongerOffered;
+  return messageFor(e);
+}
+
+/**
+ * Where the vendor feed stands: a calm line when it works, a notice when it does not (7 failures in a row is a warning of its own).
+ * Admins get Approve / Dismiss for an offered version, Check now and Pause / Resume (`feeds:*`; the status itself needs no query).
+ */
+function FeedStatusLine({
+  appId,
+  status,
+  revision,
+  dirty,
+  readOnly,
+  onApproved,
+}: {
+  appId: string;
+  status: FeedStatus;
+  revision: number;
+  dirty: boolean;
+  readOnly: boolean;
+  /** After Approve: the revision to send next (the form starts again from the published app). */
+  onApproved: (revision: number) => void;
+}) {
+  const toast = useToast();
+  const approve = useApproveFeedUpdate();
+  const dismiss = useDismissFeedUpdate();
+  const checkNow = useCheckFeedNow();
+  const setPaused = useSetFeedPaused();
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const paused = status.status === "paused";
+  const offered = status.pending?.version;
+  // One action at a time; the answer is a toast, a refusal is one sentence under the line.
+  const run = async (action: () => Promise<void>) => {
+    if (busy) return;
+    setBusy(true);
+    setError(null);
+    try {
+      await action();
+    } catch (e) {
+      setError(feedErrorText(e));
+    } finally {
+      setBusy(false);
+    }
+  };
+  const actions = (
+    <RoleGate minRole="admin">
+      <div className="dash-row" style={{ gap: 8 }}>
+        {offered !== undefined ? (
+          <>
+            <Button
+              type="button"
+              className="dash-btn--sm"
+              disabled={readOnly || busy || dirty}
+              onClick={() =>
+                run(async () => {
+                  const done = await approve({ appId, expectedRevision: revision });
+                  onApproved(done.revision);
+                  toast(s.feedApproved(offered));
+                })
+              }
+            >
+              {s.feedApprove}
+            </Button>
+            <Button
+              type="button"
+              variant="ghost"
+              className="dash-btn--sm"
+              disabled={readOnly || busy}
+              onClick={() =>
+                run(async () => {
+                  await dismiss({ appId, expectedRevision: revision });
+                  toast(s.feedDismissed(offered));
+                })
+              }
+            >
+              {s.feedDismiss}
+            </Button>
+          </>
+        ) : null}
+        <Button
+          type="button"
+          variant="ghost"
+          className="dash-btn--sm"
+          disabled={readOnly || busy || paused}
+          onClick={() =>
+            run(async () => {
+              const r = await checkNow({ appId });
+              toast(r.result === "pending" || r.result === "published" ? s.feedChecked[r.result](r.version ?? "") : s.feedChecked[r.result]);
+            })
+          }
+        >
+          {s.feedCheckNow}
+        </Button>
+        <Button
+          type="button"
+          variant="ghost"
+          className="dash-btn--sm"
+          disabled={readOnly || busy}
+          onClick={() =>
+            run(async () => {
+              await setPaused({ appId, paused: !paused });
+              toast(paused ? s.feedResumed : s.feedPaused);
+            })
+          }
+        >
+          {paused ? s.feedResume : s.feedPause}
+        </Button>
+      </div>
+    </RoleGate>
+  );
+  return (
+    <>
+      <FeedStatusNotice status={status} action={actions} hint={offered !== undefined && dirty ? s.feedApproveDirty : undefined} />
+      {error ? <InlineNotice tone="danger" alert title={error} /> : null}
+    </>
+  );
+}
+
+function FeedStatusNotice({ status, action, hint }: { status: FeedStatus; action: ReactNode; hint?: string }) {
   const problem = status.status === "ok" ? null : s.feedStatusProblem[status.status];
   const checked = status.lastCheckedAt !== undefined ? <RelativeTime ms={status.lastCheckedAt} /> : null;
   const detail = (
     <>
       {checked ? <>{s.feedStatusChecked} {checked}. </> : <>{s.feedStatusNever} </>}
       {status.seenVersion ? <>{s.feedStatusSeen(status.seenVersion)} </> : null}
-      {status.failures > 0 ? <>{s.feedStatusFailures(status.failures)}</> : null}
+      {status.failures > 0 ? <>{s.feedStatusFailures(status.failures)} </> : null}
+      {hint ?? null}
     </>
   );
   if (status.pending) {
-    return <InlineNotice tone="accent" title={s.feedStatusPending(status.pending.version)} detail={detail} />;
+    return <InlineNotice tone="accent" title={s.feedStatusPending(status.pending.version)} detail={detail} action={action} />;
   }
-  return <InlineNotice tone={problem === null ? "neutral" : status.failures >= 7 ? "danger" : "warning"} title={problem ?? s.feedStatusWorking} detail={detail} />;
+  return <InlineNotice tone={problem === null ? "neutral" : status.failures >= 7 ? "danger" : "warning"} title={problem ?? s.feedStatusWorking} detail={detail} action={action} />;
 }

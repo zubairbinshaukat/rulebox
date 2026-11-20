@@ -74,6 +74,27 @@ export function docUpdate(u: DocUpdate): DocUpdate {
   };
 }
 
+/** (Phase 6 Step 13) The installer fields after `removeWhenUnassigned` in `InstallSpec` of `rulebox-policy`, in the order of the Rust struct. */
+export type DocInstallExtras = {
+  tech?: "msi" | "nsis" | "inno" | "burn" | "installshield_msi" | "installshield_script" | "advanced_installer" | "exe";
+  answerFile?: { url: string; sha256: string; sizeBytes: number };
+  timeoutMin?: number;
+  publisher?: string;
+};
+
+/**
+ * PURE. The Phase 6 installer fields as a device gets them, in the order of the Rust struct (the document's bytes are signed), absent
+ * ones left out so a Phase 4 or 5 document keeps its bytes (the committed vectors pin it).
+ */
+export function docInstallExtras(i: DocInstallExtras): DocInstallExtras {
+  return {
+    ...(i.tech !== undefined ? { tech: i.tech } : {}),
+    ...(i.answerFile !== undefined ? { answerFile: { url: i.answerFile.url, sha256: i.answerFile.sha256, sizeBytes: i.answerFile.sizeBytes } } : {}),
+    ...(i.timeoutMin !== undefined ? { timeoutMin: i.timeoutMin } : {}),
+    ...(i.publisher !== undefined ? { publisher: i.publisher } : {}),
+  };
+}
+
 /** One app as the builder needs it (a subset of the `apps` row). */
 export type BuildApp = {
   _id: string;
@@ -98,6 +119,11 @@ export type BuildApp = {
       productCode?: string;
       successExitCodes: number[];
       removeWhenUnassigned: boolean;
+      /** (Phase 6 Step 13) What the installer file is, its answer file, its time limit and its expected signer. Absent = left out of the document. */
+      tech?: DocInstallExtras["tech"];
+      answerFile?: DocInstallExtras["answerFile"];
+      timeoutMin?: number;
+      publisher?: string;
     };
     resetFolders: string[];
     /** (Phase 6) The version this install delivers. */
@@ -144,9 +170,39 @@ export type DocBroadcast = {
   issuedAtMs: number;
 };
 
+/**
+ * (Phase 6 Step 19, plan 4.14) The administrator's display settings that reach one PC: its own choice, its group's choice and
+ * the group's window cap and idle close. Absent or all-empty = none of the four agent-only keys (a Phase 4 or 5 document keeps its bytes).
+ */
+export type DisplayInput = {
+  device?: "auto" | "standard" | "lite";
+  group?: "auto" | "standard" | "lite";
+  webWindowCap?: number;
+  webIdleCloseMin?: number;
+};
+
+/**
+ * PURE. The agent-only keys of plan 4.14 in document order: `displayMode` (the winner: the PC's own choice, else the group's; `auto`
+ * means no choice and falls through) with `displayModeSource` (whose choice it is), then `webWindowCap`, then `webIdleCloseMin`.
+ * Each key is left out when it has no value.
+ */
+export function displayKeys(d: DisplayInput): Record<string, string | number> {
+  const out: Record<string, string | number> = {};
+  const mode = d.device !== undefined && d.device !== "auto" ? ([d.device, "device"] as const) : d.group !== undefined && d.group !== "auto" ? ([d.group, "group"] as const) : null;
+  if (mode !== null) {
+    out.displayMode = mode[0];
+    out.displayModeSource = mode[1];
+  }
+  if (d.webWindowCap !== undefined) out.webWindowCap = d.webWindowCap;
+  if (d.webIdleCloseMin !== undefined) out.webIdleCloseMin = d.webIdleCloseMin;
+  return out;
+}
+
 export type BuildInput = {
   /** Phase 5 sections (4.3). Optional so every Phase 4 caller and vector stays as it was. */
   phase5?: Phase5Input;
+  /** Phase 6 Step 19: the display settings of this PC and its group. Optional like `phase5`. */
+  display?: DisplayInput;
   org: { _id: string; name: string };
   settings: OrgSettings;
   /** Argon2id PHC of the device exit PIN, or null when none is set. */
@@ -259,6 +315,7 @@ function catalogEntry(
                     productCode: install.productCode ?? null,
                     successExitCodes: [...install.successExitCodes],
                     removeWhenUnassigned: install.removeWhenUnassigned,
+                    ...docInstallExtras(install),
                   },
             resetFolders: [...d.resetFolders],
             // Phase 6: left out when absent, so a Phase 4 or 5 document keeps its bytes (the committed vectors pin it).
@@ -430,6 +487,8 @@ export function buildDeviceDoc(input: BuildInput, version = 0): DesiredDocV2 {
     doc.relocate = { url: input.relocate.url, deviceId: input.relocate.deviceId, notBefore: input.relocate.notBefore };
   }
   if (input.phase5 !== undefined) addPhase5Keys(doc, input.phase5);
+  // Phase 6 Step 19: after every older key, so the committed vectors (no display settings) stay byte for byte.
+  if (input.display !== undefined) Object.assign(doc, displayKeys(input.display));
   return doc;
 }
 

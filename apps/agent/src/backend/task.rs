@@ -338,7 +338,12 @@ impl DesiredSync {
         if let Err(error) = saved {
             tracing::error!("cannot save the device lock: {error}");
         }
-        ctx.snapshot.update(|snapshot| apply_to_snapshot(snapshot, &desired, version, &policy));
+        // (Phase 6 Step 19) The administrator's display-mode override is applied over what the RAM picks.
+        let ram_mode = crate::agent::ram_display_mode(ctx.platform.as_ref());
+        ctx.snapshot.update(|snapshot| {
+            apply_to_snapshot(snapshot, &desired, version, &policy);
+            policy.apply_display(snapshot, ram_mode);
+        });
         publish_policy(&ctx.policy_tx, policy);
         self.accepted = Some((version, envelope.payload.clone()));
         tracing::info!(version, kiosk_enabled = desired.kiosk_enabled, key_id = %envelope.key_id, "desired state accepted");

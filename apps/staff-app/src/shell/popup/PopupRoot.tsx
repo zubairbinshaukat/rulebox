@@ -11,6 +11,7 @@ import { QuickSettings } from "./QuickSettings";
 import { StartMenu } from "./StartMenu";
 import { Switcher } from "./Switcher";
 import { ThumbPreview } from "./ThumbPreview";
+import { WindowCap } from "./WindowCap";
 
 /**
  * The shared popup. Escape, blur and a click on the desktop or taskbar close
@@ -117,6 +118,7 @@ const POPUP_SEMANTICS: Record<
   switcher: { role: "dialog", label: "Switch apps", takesFocus: false },
   thumb: { role: undefined, label: undefined, takesFocus: false },
   monitor: { role: "dialog", label: "Resources", takesFocus: true },
+  windowCap: { role: "alertdialog", label: "Too many windows are open", takesFocus: true },
 };
 
 function renderKind(kind: PopupKind | null): ReactNode {
@@ -137,6 +139,8 @@ function renderKind(kind: PopupKind | null): ReactNode {
       return <ThumbPreview />;
     case "monitor":
       return <Monitor />;
+    case "windowCap":
+      return <WindowCap />;
     default: {
       const unreachable: never = kind;
       return unreachable;

@@ -169,6 +169,9 @@ pub fn run() {
             commands::power_shut_down,
             commands::restart_rulebox,
             commands::launch_app,
+            commands::window_cap_state,
+            commands::window_cap_close,
+            commands::window_cap_cancel,
             commands::task_click,
             commands::task_close,
             commands::task_end,
@@ -239,7 +242,11 @@ pub fn run() {
 
             app.manage(services.clone());
             app.manage(std::sync::Arc::new(appwin::AppWindows::default()));
-            app.manage(std::sync::Arc::new(webapp::WebApps::default()));
+            let web_apps = std::sync::Arc::new(webapp::WebApps::default());
+            app.manage(std::sync::Arc::clone(&web_apps));
+            // (Phase 6 Step 19) The one timer of the web window idle close. Held in managed state: it stops when the app exits.
+            let shell_state = app.state::<AppState>().inner().clone();
+            app.manage(webapp::start_idle_watch(app.handle().clone(), shell_state, web_apps));
             let host = shellwin::init(app.handle(), mode, services.clone())?;
             app.manage(host);
             // Debug builds: live CPU and memory per app in the taskbar (developer aid).

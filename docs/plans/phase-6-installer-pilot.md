@@ -1373,8 +1373,18 @@ program) then `<target>`; `seenVersion` is the highest feed version processed (p
 downloaded again; `failures` counts consecutive checks that ended the same way (the backoff of 1 h / 4 h / 24 h applies to `unreachable` only); the etag is kept
 after every outcome except `unreachable` (so a bad signature is not downloaded again until the vendor changes the file); a new version drops an MSI `productCode`
 (it belongs to one version); extra admin function `feeds:setPaused` (plan 4.5 item 6 had no way to set the state); new audit action `app.feedRejected` (the
-dashboard label in `screenStrings/audit.ts` is still to add). Not done: dashboard status line and the Approve / Dismiss / Check now / Pause buttons, the
-`updateFlag` on the app row (4.16), the 100 MiB run on the dev deployment (the action's 10 minute / 64 MiB limits are unverified; the body is streamed and never held).
+dashboard label in `screenStrings/audit.ts`, added below). Not done: the 100 MiB run on the dev deployment (the action's 10 minute / 64 MiB limits are unverified; the body is streamed and never held).
+
+**Dashboard part (2026-11-21, uncommitted):** done. The feed status line of the app page (`AppUpdates.tsx`) has Approve / Dismiss (only while a version is offered; Approve is
+disabled while the form has unsaved changes, and takes the returned revision like Roll back), Check now (off while paused) and Pause / Resume, admin only; a refusal is one
+sentence under the line (`stale_edit`, `rate_limited`, paused `conflict`, nothing offered any more). Hooks `useApproveFeedUpdate`, `useDismissFeedUpdate`, `useCheckFeedNow`,
+`useSetFeedPaused` in `data/` (live and `demo/feeds.ts`; the demo "finds" the next patch version once per app). `app.feedRejected` moved to the END of `AUDIT_ACTIONS`
+(`convex/lib/audit.ts`) so `audit.test.ts` covers its label ("Vendor update refused"). **`updateFlag`** (4.16): optional `apps.updateFlag` (`"available"` while a version waits for
+approval, `"feed_error"` for `bad_signature` / `bad_feed` / `too_large` or `unreachable` after 7 failed checks in a row; `downgrade` and `paused` have none), set by
+`feeds.ts` only when it differs (a second write in the same mutation as the feed row; NO revision bump, so an open edit form is not made stale), cleared by `apps:update` when
+the feed row is deleted or reset; `apps:list` returns it from the row it already reads (no new read, no new query); the Apps list shows an "Update waiting" / "Feed problem"
+pill. Budget rows: `feeds:dismiss`, `feeds:setPaused` 2 -> 3 writes, `feeds:recordResult` / `check` / `checkNow` / `approve` and `apps:update` + 1 write. Known gap: when
+"Check now" publishes (auto-publish on), the open form still holds the old revision, so its next save gets the usual "someone else changed this" with Reload.
 
 ---
 
@@ -1401,6 +1411,24 @@ editable), `AppEdit.tsx`, strings.
 **Verify:** `pnpm test:convex`; dashboard checks; screenshots.
 **Do NOT:** trust the detected signer for anything but display; upload the
 local file anywhere; let a pre-fill run without the admin saving.
+
+**Status (2026-11-21, uncommitted):** server and dashboard done; no screenshot taken (no dev server was run) and no VM. Files: `convex/lib/installerDetect.ts`
+(pure detector + `certificateRange`, PE headers / resources / `.wixburn` / marker strings / claimed signer from the PKCS#7 table), `convex/lib/installerInspect.ts` (Range
+reads, https + public host + every redirect re-checked), `apps:inspectInstaller` in `convex/apps.ts` (rate limit `installerInspect`, 30 an hour per organization),
+validators `installTech` / `answerFileSpec` and the four new `installSpec` fields, `lib/appRules.ts` (`normalizeInstallerDetails`), `lib/desired.ts` + `lib/groupConfig.ts`
+(`docInstallExtras`: the fields reach the signed document in the order of the Rust struct, left out when absent so the committed vectors stay), dashboard
+`AppInstaller.tsx` (lazy: Detect row and details card), `lib/apps/{installerRules,installerPrefill,localInstaller}.ts`, strings `appInstaller.ts` / `installRefusals.ts`. Fixtures are
+built by `tests/convex/installerFixtures.ts` (hand-built, no third-party bytes: nothing to license). Choices where the plan was silent: the answer file must end in `.iss`
+(judged by the URL path); `{AnswerFile}` in `silentArgs` and an answer file must go together (`answer_file_unused` / `answer_file_missing`), and any other `{...}` in `silentArgs`
+is refused (`silent_arg_token`, the rule of `check_silent_args` in `rulebox-policy`: it also applies to apps saved before this step); `tech` must fit the kind and "exe" / "msi" are
+stored as no value; `timeoutMin` and the answer file are refused on a portable file, the answer file on an MSI; refusals of Detect are `invalid_argument` on field `url` with
+`detail` `inspect_blocked` / `inspect_unsupported` / `inspect_failed` / `inspect_not_installer` (no new error code); the Range answer is judged by `Content-Range`, a 200 is
+accepted only for a file that fits the first request; the detected size is shown and never stored; the claimed signer is shown and only copied into "Expected signer" when the admin
+presses the button. The local file check imports the same detector (`@convex/lib/installerDetect`) and `@noble/hashes` (resolved from the root `package.json`; the dashboard's own
+`package.json` does not list it yet). Bundle: initial-load routes unchanged by this step, but the AppEdit route is 28.0 KB gzip on top of overview (was about 24.6; budget 25), so
+`scripts/size.mjs` allows 29 for AppEdit (needs owner OK); `overview` (166.2 > 166) and `DeviceDetail` (25.9 > 25) are over from other work in the tree, not measured per change.
+**For Step 14 (agent):** `catalog.rs` `check_limits` does not yet call `check_silent_args` on `install.silent_args` (the server now refuses bad tokens, the agent should too);
+the agent must expand `{AnswerFile}` / `{LogFile}`, honour `tech`-independent `successExitCodes` (3010 / 1641 listed), `timeoutMin` and `publisher`; no Rust type changed here.
 
 ---
 
@@ -1537,6 +1565,43 @@ WebView2 profile folder for a browser.
 **Verify:** convex, agent and Staff App tests; screenshots in Lite.
 **Do NOT:** enable WebView2 browser flags; add a heartbeat field; close a
 window without the "paused" mark.
+
+**Status (2026-11-21): built and tested; items 1-3 and 5 done, item 4
+open, no screenshots yet (no server or Tauri run allowed in this session).**
+
+- **Server:** `groups:setDisplay` (display mode, window cap, idle close; on the
+  group row, read with the group, no extra read) and `fleet:setDisplayMode`
+  (on the device row). Both admin, `expectedRevision`, no write when nothing
+  changed, one publish, audit `group.displayModeChanged` /
+  `device.displayModeChanged`. Ranges refused server-side (cap 1-12, idle 0 or
+  5-240) because the agent refuses a whole document otherwise. Document keys
+  `displayMode` (the winner: device over group; `auto` falls through),
+  `displayModeSource` (`device` or `group`, **new key beyond the plan's
+  list**, so the agent can fill `display_mode_source`), `webWindowCap`,
+  `webIdleCloseMin`; none when nothing is set (vectors unchanged).
+  `fleet:get` returns `displayMode` and `groupDisplayMode`; `groups:get` the
+  group's three fields. Budget rows and matrix rows added (estimates).
+- **Agent:** `AgentPolicy::apply_display` resolves the effective mode
+  (override, else RAM), the source, and the cap and idle close with the
+  defaults of the effective mode (Lite 3 and 30 min, Standard 8 and off), and
+  sends them in the 1.4 snapshot fields. No heartbeat field.
+- **Staff App:** `webapp/idle.rs` (pure rules, per-window `Activity`, the one
+  once-a-minute timer, dropped = stopped); at the cap a popup (`windowCap`)
+  asks which window to close, nothing closes silently; idle close skips
+  windows playing audio (`IsDocumentPlayingAudio`), that were given camera,
+  microphone or screen (flag kept for the window's life, WebView2 has no
+  "is capturing" query) or that have a dialog open (owner window disabled,
+  `control::has_modal_dialog`); the "paused" mark is set **before** the close
+  and taken back if the close fails; the tile shows "Paused". No WebView2
+  flags added.
+- **Dashboard:** Display card on the group page and on the PC page (warning
+  when Standard applies to a PC that reports 4 GB or less).
+- **Open:** item 4 (Lite wallpaper). There is no wallpaper file or pipeline
+  yet (branding wallpaper is deferred, Phase 4 Q3) and Lite already drops the
+  blurred backdrop, so there is nothing to compress. Needs the owner: build
+  the pipeline with the branding feature, or accept the flat Lite desktop.
+  Browser windows (Step 18) must be counted by `WebApps::at_cap` when that
+  step lands.
 
 ---
 

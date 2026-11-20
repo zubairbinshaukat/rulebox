@@ -208,6 +208,11 @@ unsafe fn setup(
         if let Err(error) = notifications(&core, context) {
             tracing::warn!(%error, "notifications could not be routed on this WebView2 runtime");
         }
+        // Phase 6 Step 19: the idle close must not close a window that plays audio. A runtime too old for the event
+        // cannot say, so the window is then treated as silent (and only a hidden window is ever closed).
+        if let Err(error) = audio_state(&core, context) {
+            tracing::warn!(%error, "audio state could not be followed on this WebView2 runtime");
+        }
         // Convenience, not security: without the bar the site simply has the whole window and no
         // Back / Forward / Reload buttons (the keys come with the bar's events and are lost too).
         if let Err(error) = barhost::attach(controller, environment, context) {
@@ -260,6 +265,11 @@ unsafe fn permission_requests(core: &ICoreWebView2, context: &Arc<HookContext>) 
                 let kind = kind_of(raw);
                 let origin_allowed = context.window.allow.allows(&uri);
                 let decision = decide(kind, &context.window.permissions, origin_allowed);
+                // Phase 6 Step 19: a page that was given the camera or the microphone may be capturing; the idle close
+                // leaves such a window alone.
+                if decision == Decision::Allow && matches!(kind, PermissionKind::Camera | PermissionKind::Microphone) {
+                    context.window.activity.mark_capture();
+                }
                 args.SetState(match decision {
                     Decision::Allow => COREWEBVIEW2_PERMISSION_STATE_ALLOW,
                     Decision::Deny => COREWEBVIEW2_PERMISSION_STATE_DENY,
@@ -343,8 +353,36 @@ unsafe fn screen_capture(core: &ICoreWebView2, context: &Arc<HookContext>) -> wi
                             "Screen sharing is not allowed for this app.",
                             Some(context.window.app_name.clone()),
                         );
+                    } else {
+                        // Phase 6 Step 19: a window that shares the screen is not closed for being idle.
+                        context.window.activity.mark_capture();
                     }
                 }
+                Ok(())
+            })),
+            &mut token,
+        )?;
+    }
+    Ok(())
+}
+
+/// Follows whether the page is playing audio (`IsDocumentPlayingAudio`) into the window's activity record.
+unsafe fn audio_state(core: &ICoreWebView2, context: &Arc<HookContext>) -> windows::core::Result<()> {
+    use webview2_com::IsDocumentPlayingAudioChangedEventHandler;
+    use webview2_com::Microsoft::Web::WebView2::Win32::ICoreWebView2_8;
+
+    let core8: ICoreWebView2_8 = core.cast()?;
+    let context = Arc::clone(context);
+    let mut token = Default::default();
+    unsafe {
+        core8.add_IsDocumentPlayingAudioChanged(
+            &IsDocumentPlayingAudioChangedEventHandler::create(Box::new(move |sender, _| {
+                let Some(sender) = sender else { return Ok(()) };
+                let Ok(core8) = sender.cast::<ICoreWebView2_8>() else { return Ok(()) };
+                let mut playing = windows::core::BOOL::default();
+                // SAFETY: only writes the out-parameter it is given.
+                core8.IsDocumentPlayingAudio(&mut playing)?;
+                context.window.activity.set_audible(playing.as_bool(), std::time::Instant::now());
                 Ok(())
             })),
             &mut token,

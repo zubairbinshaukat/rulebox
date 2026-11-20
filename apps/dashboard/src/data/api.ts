@@ -16,10 +16,14 @@ import type {
   EmployeeDetail,
   EmployeeInput,
   FailedInstallRow,
+  FeedCheckResult,
+  DisplayChoice,
   GroupDetail,
+  GroupDisplayInput,
   GroupRow,
   Id,
   InstallCounts,
+  InstallerInspection,
   KeysScreen,
   MeResult,
   NetworksScreen,
@@ -135,6 +139,10 @@ export interface DataApi {
   useCreateGroup: Mutation<{ name: string; description?: string }, Id>;
   /** `description`: undefined = unchanged, "" = cleared (the server's rule). */
   useUpdateGroup: Mutation<{ groupId: Id; expectedRevision: number; name: string; description?: string }, { revision: number }>;
+  /** `groups:setDisplay` (admin, Phase 6 Step 19): display mode, web window cap and idle close of the group; republishes its PCs. */
+  useSetGroupDisplay: Mutation<GroupDisplayInput, { revision: number }>;
+  /** `fleet:setDisplayMode` (admin, Phase 6 Step 19): the PC's own display mode; wins over its group's. */
+  useSetDeviceDisplayMode: Mutation<{ deviceId: Id; expectedRevision: number; displayMode: DisplayChoice }, { revision: number }>;
   useDeleteGroup: Mutation<{ groupId: Id }>;
   useAssignApp: Mutation<{ groupId: Id; appId: Id; audience: Audience; pinnedTaskbar: boolean; pinnedDesktop: boolean }>;
   useUpdateAssignment: Mutation<{ assignmentId: Id; audience: Audience; pinnedTaskbar: boolean; pinnedDesktop: boolean }>;
@@ -178,8 +186,22 @@ export interface DataApi {
   useRetryApp: Mutation<{ appId: Id }>;
   /** `apps:rollbackVersion` (admin, `expectedRevision`): a Managed program goes back to its previous installer. Resolves to the new revision. */
   useRollbackApp: Mutation<{ appId: Id; expectedRevision: number }, { revision: number }>;
+  /** `feeds:approve` (admin, `expectedRevision`; `stale_edit` when someone saved in between): publishes the version the vendor feed offered. Resolves to the new revision. */
+  useApproveFeedUpdate: Mutation<{ appId: Id; expectedRevision: number }, { revision: number }>;
+  /** `feeds:dismiss` (admin, `expectedRevision`): the offered version is not offered again; a newer one is. */
+  useDismissFeedUpdate: Mutation<{ appId: Id; expectedRevision: number }, { revision: number }>;
+  /** `feeds:checkNow` (admin ACTION; one per five minutes per app = `rate_limited`, `conflict` while paused): the daily check, at once. */
+  useCheckFeedNow: Mutation<{ appId: Id }, FeedCheckResult>;
+  /** `feeds:setPaused` (admin): pause or resume the checks of one app's feed. */
+  useSetFeedPaused: Mutation<{ appId: Id; paused: boolean }>;
   useResolveWinget: Mutation<{ packageId: string; version?: string }, WingetResolved>;
   useFetchWebMeta: Mutation<{ url: string }, WebMeta>;
+  /**
+   * `apps:inspectInstaller` (admin action, 30 an hour per organization): reads at most three byte ranges of the installer at `url`
+   * and says what it is. Advice for the form only; the refusal's `detail` is `inspect_blocked`, `inspect_unsupported`, `inspect_failed`
+   * or `inspect_not_installer`.
+   */
+  useInspectInstaller: Mutation<{ url: string }, InstallerInspection>;
   /** `apps:saveIcon`: stores the PNG `useFetchWebMeta` previewed (its `data:` URL), after the app is saved. */
   useSaveAppIcon: Mutation<{ appId: Id; png: string }>;
 

@@ -155,4 +155,22 @@ describe("AppGrid icons", () => {
     expect(tile.querySelector(".rb-tile__icon--glyph svg")).not.toBeNull();
     expect(tile.querySelector("img")).toBeNull();
   });
+
+  it("marks an app whose window the idle close shut as Paused, and drops the mark while it is open", () => {
+    const { rerender } = render(<AppGrid apps={[app("p", "Pausable", null), app("q", "Other", null)]} paused={["p"]} status="ready" />);
+    expect(tileOf("Pausable").querySelector("[data-testid='tile-paused']")).not.toBeNull();
+    expect(tileOf("Pausable").textContent).toMatch(/Paused/);
+    expect(tileOf("Other").querySelector("[data-testid='tile-paused']")).toBeNull();
+    // Opened again: the window exists, the dot shows and the mark goes (a stale id must never show both).
+    rerender(
+      <AppGrid
+        apps={[app("p", "Pausable", null), app("q", "Other", null)]}
+        paused={["p"]}
+        tasks={[{ id: "1", appId: "p", title: "Pausable", iconKey: "x", active: true, minimized: false, flashing: false, hung: false, own: false, recency: 1 }]}
+        status="ready"
+      />,
+    );
+    expect(tileOf("Pausable").querySelector("[data-testid='tile-paused']")).toBeNull();
+    expect(tileOf("Pausable").querySelector(".rb-dot")).not.toBeNull();
+  });
 });

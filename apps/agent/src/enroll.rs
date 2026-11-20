@@ -439,10 +439,12 @@ impl EnrollDeps {
             tracing::warn!(undelivered, "audit records that were never delivered were discarded");
         }
         publish_policy(&ctx.policy_tx, AgentPolicy::default());
+        let ram_mode = crate::agent::ram_display_mode(ctx.platform.as_ref());
         ctx.snapshot.update(|snapshot| {
             snapshot.desired_state = None;
             snapshot.desired_state_version = 0;
             AgentPolicy::default().apply_to_snapshot(snapshot);
+            AgentPolicy::default().apply_display(snapshot, ram_mode);
         });
     }
 
@@ -517,7 +519,11 @@ impl EnrollDeps {
         }) {
             tracing::error!("cannot save the unenrolled state: {error}");
         }
-        ctx.snapshot.update(not_enrolled_snapshot);
+        let ram_mode = crate::agent::ram_display_mode(ctx.platform.as_ref());
+        ctx.snapshot.update(|snapshot| {
+            not_enrolled_snapshot(snapshot);
+            AgentPolicy::default().apply_display(snapshot, ram_mode);
+        });
         tracing::info!("this PC is no longer enrolled");
         Ok(())
     }

@@ -66,9 +66,6 @@ export const AUDIT_ACTIONS = [
   "app.assigned",
   "app.unassigned",
   "app.retryRequested",
-  // Phase 6 Step 12 (plan 4.5): an update from a vendor feed was refused (its signature did not match the vendor key). Placed
-  // before the Phase 5 block on purpose: the dashboard label (audit.ts screenStrings) is still to be added.
-  "app.feedRejected",
   "fileHandler.set",
   "fileHandler.removed",
   "policy.keyRegistered",
@@ -126,6 +123,12 @@ export const AUDIT_ACTIONS = [
   "device.driftReasserted",
   "device.safeModeBlocked",
   "device.clockJump",
+  // Phase 6 Step 19 (plan 4.14): the display-mode override of a PC or a group, and the group's web window cap and idle close.
+  "device.displayModeChanged",
+  "group.displayModeChanged",
+  // Phase 6 Step 12 (plan 4.5): an update from a vendor feed was refused (its signature did not match the vendor key).
+  // After the Phase 5 block on purpose: `audit.test.ts` checks that everything from `lockdown.settingsChanged` on has a dashboard label.
+  "app.feedRejected",
 ] as const;
 
 export type AuditAction = (typeof AUDIT_ACTIONS)[number];

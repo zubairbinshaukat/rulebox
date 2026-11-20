@@ -23,11 +23,13 @@ const WHEEL_PAUSE_MS = 450;
 export interface AppGridProps {
   apps: AppEntry[];
   tasks?: TaskItem[];
+  /** Ids of web apps whose window the idle close shut (Phase 6 Step 19): their tile shows "Paused". */
+  paused?: readonly string[];
   status: "idle" | "loading" | "ready" | "error";
   onRetry?: () => void;
 }
 
-export function AppGrid({ apps, tasks = [], status, onRetry }: AppGridProps) {
+export function AppGrid({ apps, tasks = [], paused = [], status, onRetry }: AppGridProps) {
   const areaRef = useRef<HTMLDivElement>(null);
   const [area, setArea] = useState({ w: 800, h: 500 });
   // The measured element changes between the loading, empty and tiles views.
@@ -86,12 +88,22 @@ export function AppGrid({ apps, tasks = [], status, onRetry }: AppGridProps) {
 
   return (
     <div ref={areaRef} style={areaStyle}>
-      <PagedTiles apps={apps} tasks={tasks} layout={layout} />
+      <PagedTiles apps={apps} tasks={tasks} paused={paused} layout={layout} />
     </div>
   );
 }
 
-function PagedTiles({ apps, tasks, layout }: { apps: AppEntry[]; tasks: TaskItem[]; layout: PageLayout }) {
+function PagedTiles({
+  apps,
+  tasks,
+  paused,
+  layout,
+}: {
+  apps: AppEntry[];
+  tasks: TaskItem[];
+  paused: readonly string[];
+  layout: PageLayout;
+}) {
   const level = useMotionLevel();
   const gridRef = useRef<HTMLDivElement>(null);
   const [page, setPage] = useState(0);
@@ -287,6 +299,7 @@ function PagedTiles({ apps, tasks, layout }: { apps: AppEntry[]; tasks: TaskItem
                 tabIndex={firstOnPage + i === reachable ? 0 : -1}
                 onFocus={() => setTabStop(firstOnPage + i)}
                 running={running.has(app.id)}
+                paused={paused.includes(app.id) && !running.has(app.id)}
                 size={layout.tier}
                 onClick={() => void launch(app.id)}
               />
@@ -342,7 +355,7 @@ function PagedTiles({ apps, tasks, layout }: { apps: AppEntry[]; tasks: TaskItem
 function AppCard({
   app,
   ...rest
-}: { app: AppEntry } & Pick<AppTileProps, "tabIndex" | "onFocus" | "running" | "size" | "onClick">) {
+}: { app: AppEntry } & Pick<AppTileProps, "tabIndex" | "onFocus" | "running" | "paused" | "size" | "onClick">) {
   const art = useIconArt(app.iconUrl);
   return (
     <AppTile
