@@ -96,6 +96,18 @@ pub enum Command {
     /// (1.1) Hash an exit PIN: reads one line (6 to 12 digits) from standard input and
     /// prints the Argon2id hash. Touches no file, pipe or registry key.
     HashPin,
+    /// (Phase 6 Step 8) Rulebox Setup: a small window that checks this PC, installs the WebView2
+    /// Runtime if it is missing, takes the enrollment code and enrolls. Asks Windows for
+    /// administrator rights itself (a UAC prompt) when it is not elevated; the installer's finish
+    /// page and the Start menu shortcut start it this way.
+    Setup {
+        /// Everything in memory: a simulated PC and service, no prompt, nothing changed.
+        #[arg(long)]
+        simulate: bool,
+        /// Set by the program itself on the copy it starts for the prompt (so a refusal does not loop).
+        #[arg(long, hide = true)]
+        relaunched: bool,
+    },
 }
 
 #[derive(Subcommand, Debug, PartialEq, Eq)]
@@ -216,6 +228,19 @@ mod tests {
         assert_eq!(parse(&["guard-status"]), Command::GuardStatus { json: false });
         assert_eq!(parse(&["guard-status", "--json"]), Command::GuardStatus { json: true });
         assert_eq!(parse(&["hash-pin"]), Command::HashPin);
+        assert_eq!(parse(&["setup"]), Command::Setup { simulate: false, relaunched: false });
+        assert_eq!(parse(&["setup", "--simulate"]), Command::Setup { simulate: true, relaunched: false });
+        assert_eq!(parse(&["setup", "--relaunched"]), Command::Setup { simulate: false, relaunched: true });
+    }
+
+    #[test]
+    fn the_installers_shortcut_arguments_parse_and_service_run_is_unchanged() {
+        // The MSI's "Rulebox Setup" shortcut runs `rulebox-agent.exe setup`; the elevated copy gets
+        // `setup --relaunched`. The service entry point stays exactly `service run`.
+        assert!(Cli::try_parse_from(["rulebox-agent", "setup"]).is_ok());
+        assert!(Cli::try_parse_from(["rulebox-agent", "setup", "--relaunched"]).is_ok());
+        assert_eq!(parse(&["service", "run"]), Command::Service { action: ServiceAction::Run });
+        assert!(Cli::try_parse_from(["rulebox-agent", "setup", "--code", "x"]).is_err(), "no code on a command line");
     }
 
     #[test]

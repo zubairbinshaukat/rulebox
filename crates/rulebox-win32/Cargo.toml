@@ -61,6 +61,8 @@ windows = { workspace = true, features = [
     "Win32_System_Variant",
     "Win32_System_Wmi",
     "Win32_UI_Shell",
+    # (Phase 6 Step 8) security::relaunch_setup_elevated: ShellExecuteExW takes SW_SHOWNORMAL.
+    "Win32_UI_WindowsAndMessaging",
 ] }
 
 [lints]

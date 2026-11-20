@@ -180,9 +180,24 @@ struct Inner {
     /// and the session is gone. Set by `on_policy`; the snapshot (`deviceLock`, filled from the same policy
     /// before the first request is served) says the same, so a sign-in right at start is refused too.
     device_locked: AtomicBool,
+    /// (Phase 6 Step 11, plan 4.4.5) Whether an employee is signed in, for the install engine's apply windows: it wakes the
+    /// engine when the answer changes, so an update that waits for a sign-out needs no timer. Updated by
+    /// [`Inner::presence_changed`] after every change of `session`.
+    presence: watch::Sender<bool>,
 }
 
 impl Inner {
+    /// `session` was set or taken: tell whoever watches the sign-in state (only when the answer changed). Never call it
+    /// while holding the `session` lock.
+    fn presence_changed(&self) {
+        let signed_in = lock(&self.session).is_some();
+        self.presence.send_if_modified(|current| {
+            let changed = *current != signed_in;
+            *current = signed_in;
+            changed
+        });
+    }
+
     /// The PC is locked (plan 4.17): the policy said so, or the snapshot the Staff App sees does.
     fn locked(&self) -> bool {
         self.device_locked.load(Ordering::SeqCst) || self.snapshot_rx.borrow().device_lock.is_some()
@@ -252,8 +267,15 @@ impl SessionManager {
                 events: Mutex::new(None),
                 cleanup: Mutex::new(None),
                 device_locked: AtomicBool::new(false),
+                presence: watch::channel(false).0,
             }),
         })
+    }
+
+    /// (Phase 6 Step 11, plan 4.4.5) Whether an employee is signed in, and a wake when it changes (the install engine's
+    /// apply windows: "Signed out" lets an update run).
+    pub fn presence(&self) -> watch::Receiver<bool> {
+        self.inner.presence.subscribe()
     }
 
     /// (Phase 4 Step 16) Where "an employee session ended" goes (the cleanup task);
@@ -348,6 +370,7 @@ impl SessionManager {
             };
             if let Some(reason) = ended {
                 tracing::info!(?reason, "employee session ended by the roster");
+                inner.presence_changed();
                 inner.emit(SessionEvent::Ended(reason));
                 inner.ended();
                 return;
@@ -379,6 +402,7 @@ impl SessionManager {
     pub fn end(&self, reason: SessionEndReason) {
         if lock(&self.inner.session).take().is_some() {
             tracing::info!(?reason, "employee session ended");
+            self.inner.presence_changed();
             self.inner.emit(SessionEvent::Ended(reason));
             self.inner.ended();
         }
@@ -395,6 +419,7 @@ impl SessionManager {
         let had = lock(&self.inner.session).take().is_some();
         if had {
             tracing::info!(reason, "employee session cleared");
+            self.inner.presence_changed();
             // (Step 16) e.g. the Staff Windows session ended with an employee signed in.
             self.inner.ended();
         }
@@ -461,6 +486,7 @@ impl ShellExtension for SessionManager {
                     // No session is still a success.
                     if lock(&inner.session).take().is_some() {
                         tracing::info!("employee signed out");
+                        inner.presence_changed();
                         // (Step 16) The Staff App closed the apps before this call.
                         inner.ended();
                     }
@@ -824,6 +850,7 @@ async fn sign_in(inner: &Arc<Inner>, params: SignInParams) -> Result<SignInResul
     if inner.locked() && matches!(&result, Ok(done) if done.outcome == SignInOutcome::Ok) {
         if lock(&inner.session).take().is_some() {
             tracing::info!("a sign-in finished while the PC was being locked; the session was taken back");
+            inner.presence_changed();
             inner.ended();
         }
         return Ok(outcome_only(SignInOutcome::DeviceLocked));
@@ -1035,6 +1062,7 @@ fn start_session(
         roster_group: marks.roster_group,
         roster_epoch: marks.roster_epoch,
     });
+    inner.presence_changed();
     result
 }
 

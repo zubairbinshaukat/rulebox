@@ -727,6 +727,7 @@ mod tests {
             attempts,
             exit_code: None,
             detail: None,
+            installed_version: None,
         };
         rig.queue.push_install(result(InstallState::Pending, 0));
         let (batch, _) = rig.next().await;

@@ -105,6 +105,36 @@ pub fn is_armed_machine() -> bool {
     require_armed_machine().is_ok()
 }
 
+/// (Phase 6 Step 8) The one condition the production door does not need while the agent writes
+/// the install marker's own `ComputerName` (and `KioskOn`): the marker cannot name this computer
+/// before it has been written. A major upgrade deletes the whole `Install` key, so this happens
+/// at every service start, and without it a freshly upgraded PC could never arm itself.
+pub const MARKER_BOOTSTRAP_CONDITION: &str = "install_computer_matches";
+
+/// The pure rule behind [`require_marker_writable`]: a door is open, or every production-door
+/// condition except [`MARKER_BOOTSTRAP_CONDITION`] holds. That is still a release build with the
+/// `production` feature whose exe sits in the folder named by `InstallDir`, and that folder is
+/// admin-only, so a copy of the exe elsewhere or a debug build never qualifies.
+pub fn marker_write_allowed(evaluation: &Evaluation) -> bool {
+    evaluation.door.is_some()
+        || evaluation
+            .production_door
+            .iter()
+            .filter(|condition| condition.name != MARKER_BOOTSTRAP_CONDITION)
+            .all(|condition| condition.met)
+}
+
+/// Ok when the install marker's `ComputerName` and `KioskOn` may be written (see
+/// [`marker_write_allowed`]). Read-only. Never creates a marker. For
+/// `installmarker::write_*` only; every other mutating function uses [`require_armed_machine`].
+pub fn require_marker_writable() -> Result<()> {
+    let evaluation = evaluate(&read_inputs(false));
+    if marker_write_allowed(&evaluation) {
+        return Ok(());
+    }
+    Err(Win32Error::Guard(evaluation.refusal()))
+}
+
 /// Ok only if `HKLM\SOFTWARE\Rulebox\TestMachine\ComputerName` (REG_SZ) equals
 /// this computer's name (case-insensitive). Read-only. Never creates the marker.
 /// For test-only helpers; mutating functions use [`require_armed_machine`].
@@ -482,6 +512,54 @@ mod tests {
         inputs.install_computer = Ok("PC-01".into());
         inputs.computer = Err("could not read the computer name".into());
         assert_eq!(evaluate(&inputs).door, None);
+    }
+
+    #[test]
+    fn the_marker_may_be_written_when_only_the_computer_name_is_missing() {
+        // (Phase 6 Step 8) The first start after an install or a major upgrade: the marker has
+        // no `ComputerName` yet, so the production door is closed, but the marker may be written.
+        let mut inputs = installed();
+        inputs.install_computer = Err("the install marker is not present".into());
+        let evaluation = evaluate(&inputs);
+        assert_eq!(evaluation.door, None);
+        assert!(marker_write_allowed(&evaluation));
+        // Naming another PC (a cloned disk) is no obstacle to the rule itself: the agent decides
+        // not to overwrite it (apps/agent/src/install_marker.rs).
+        inputs.install_computer = Ok("OTHER-PC".into());
+        assert!(marker_write_allowed(&evaluate(&inputs)));
+        // An open door always qualifies.
+        assert!(marker_write_allowed(&evaluate(&installed())));
+    }
+
+    #[test]
+    fn every_other_condition_is_still_needed_to_write_the_marker() {
+        let missing_name = || {
+            let mut inputs = installed();
+            inputs.install_computer = Err("absent".into());
+            inputs
+        };
+        type Break = fn(&mut Inputs);
+        let breaks: [(&str, Break); 5] = [
+            ("no production feature", |i| i.production_feature = false),
+            ("debug build", |i| i.debug_build = true),
+            ("no install marker", |i| i.install_dir = Err("absent".into())),
+            ("exe in another folder", |i| i.exe_dir = Ok(r"C:\Users\Someone\Downloads".into())),
+            ("folder others can write", |i| i.folder_admin_only = Ok(false)),
+        ];
+        for (name, change) in breaks {
+            let mut inputs = missing_name();
+            change(&mut inputs);
+            assert!(!marker_write_allowed(&evaluate(&inputs)), "{name}");
+        }
+        // The bootstrap condition names the one condition the rule skips, and it exists.
+        let evaluation = evaluate(&missing_name());
+        assert!(evaluation.production_door.iter().any(|c| c.name == MARKER_BOOTSTRAP_CONDITION));
+    }
+
+    #[test]
+    fn dev_machine_may_not_write_the_marker() {
+        // A debug build has no production door and the dev PC has no test marker.
+        assert!(matches!(require_marker_writable(), Err(Win32Error::Guard(_))));
     }
 
     #[test]

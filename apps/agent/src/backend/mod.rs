@@ -198,6 +198,30 @@ pub struct InstallReport {
     /// One of the server's fixed texts (`download_failed`, `hash_mismatch`, ...).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub detail: Option<String>,
+    /// (Phase 6 Step 11, plan 4.4.1) The version the PC has. Absent (`None`): the server keeps what it stored;
+    /// `Some(Some(text))`: store it; `Some(None)`: JSON `null`, the server clears it (also what a `removed` state does).
+    #[serde(default, skip_serializing_if = "Option::is_none", with = "double_option")]
+    pub installed_version: Option<Option<String>>,
+}
+
+/// `Option<Option<String>>` as "absent / `null` / a text": the outer `None` is a missing key (skipped when writing), the
+/// inner `None` an explicit `null`.
+mod double_option {
+    use serde::{Deserialize, Deserializer, Serialize, Serializer};
+
+    #[allow(clippy::option_option)]
+    pub fn serialize<S: Serializer>(value: &Option<Option<String>>, serializer: S) -> Result<S::Ok, S::Error> {
+        match value {
+            Some(inner) => inner.serialize(serializer),
+            // Skipped by `skip_serializing_if`; `null` would be wrong here, so write the inner none.
+            None => serializer.serialize_none(),
+        }
+    }
+
+    #[allow(clippy::option_option)]
+    pub fn deserialize<'de, D: Deserializer<'de>>(deserializer: D) -> Result<Option<Option<String>>, D::Error> {
+        Option::<String>::deserialize(deserializer).map(Some)
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]

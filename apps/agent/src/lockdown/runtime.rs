@@ -245,17 +245,19 @@ pub fn machine_facts(
     doc: &serde_json::Value,
 ) -> Facts {
     let mut catalogue_exe_folders: Vec<String> = Vec::new();
+    let (catalog, _) = catalog_from_doc(doc);
     if let Ok(roots) = platform.path_roots() {
-        let (catalog, _) = catalog_from_doc(doc);
         for app in &catalog {
             let Some(desktop) = app.desktop.as_ref() else {
                 continue;
             };
-            // A template that breaks the path rules is never started, so it needs no folder.
+            // A template that breaks the path rules is never started, so it needs no folder. A program in a versioned
+            // folder (`...\App\app-*\app.exe`, plan 4.4.3) is covered by the folder **above** the `*`: the path rule is on
+            // it, and `allowlist::build` refuses it unless it is admin-only.
             if let Ok(exe) = expand_exe(&desktop.exe, &app.id, app.is_portable(), &roots) {
-                if let Some((folder, _)) = exe.rsplit_once('\\') {
-                    if !catalogue_exe_folders.iter().any(|known| known.eq_ignore_ascii_case(folder)) {
-                        catalogue_exe_folders.push(folder.to_string());
+                if let Some(folder) = crate::installs::version::program_folder(&exe) {
+                    if !catalogue_exe_folders.iter().any(|known| known.eq_ignore_ascii_case(&folder)) {
+                        catalogue_exe_folders.push(folder);
                     }
                 }
             }
@@ -267,6 +269,8 @@ pub fn machine_facts(
         current_ssid: platform.wlan_current_ssid().unwrap_or(None),
         protected_paths: Vec::new(),
         catalogue_exe_folders,
+        // (Phase 6 Step 11) The publisher rules of the vendor-mode apps of the catalogue.
+        vendor_exceptions: super::allowlist::vendor_exceptions(&catalog),
         rulebox_folders: Some(RuleboxFolders { install_root: install.root().to_path_buf(), state_dir: paths.state_dir() }),
         ..Facts::default()
     }

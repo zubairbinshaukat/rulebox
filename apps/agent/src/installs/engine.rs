@@ -38,21 +38,27 @@
 //! are re-runnable: msiexec repairs or answers success for an installed product);
 //! a removal simply runs again (`1605` "unknown product" counts as removed).
 
-use std::collections::{BTreeMap, BTreeSet, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
+use rulebox_ipc::requests::AppUpdateState;
 use rulebox_ipc::types::{AgentSnapshot, ConnectionStatus, EnrollmentStatus};
-use rulebox_policy::catalog::{CatalogApp, InstallKind, InstallSpec};
-use rulebox_policy::paths::{check_args, expand_exe, PathRoots};
+use rulebox_policy::catalog::{ApplyWhen, CatalogApp, InstallKind, InstallSpec, UpdateMode};
+use rulebox_policy::paths::{check_args, exe_pattern, expand_exe, PathRoots};
 use serde::{Deserialize, Serialize};
-use tokio::sync::watch;
+use tokio::sync::{mpsc, watch};
 use tokio_util::sync::CancellationToken;
 
 use super::download::{check_https, part_path, Downloader};
 use super::drivers_rules::DriverRecord;
 use super::report::report_of;
+use super::version::{
+    self as versions, boot_window_open, check_installed, detection, kept_file_name, may_keep, publisher_matches,
+    resolve_pattern, vendor_needs_bootstrap, verify_step, VerifyStep, VersionCheck, WindowInputs, MAX_UPDATE_FAILURES,
+    UPDATE_RETRY_GAP,
+};
 use super::{
     download_deadline, exe_install_command, icons, is_reparse_point, is_safe_id, is_sha256, judge_install,
     judge_removal, msi_install_command, msi_removal_command, open_verified, product_code, Detail, ExitVerdict,
@@ -62,11 +68,16 @@ use super::{
 use crate::agent_policy::AgentPolicy;
 use crate::backend::InstallReport;
 use crate::paths::DataPaths;
-use crate::platform::{BootIdentity, InstallerCommand, InstallerExit, Platform, PlatformError};
+use crate::platform::{BootIdentity, ExitWatch, InstallerCommand, InstallerExit, Platform, PlatformError};
 use crate::report::ReportQueue;
 use crate::state::{lock, read_json, remove_file_if_exists, write_atomic, SharedState};
 
-pub const INSTALLS_SCHEMA: u32 = 1;
+/// `installs.json` schema. 1 -> 2 (Phase 6 Step 11, plan 4.6): a record gains `version`, `installedVersion`,
+/// `mode`, `previous` and the update fields. A schema 1 file loads with defaults (and is saved as 2 at its
+/// next change); an agent from before Phase 6 refuses a schema 2 file and starts empty.
+pub const INSTALLS_SCHEMA: u32 = 2;
+/// The oldest schema this agent still reads.
+const INSTALLS_SCHEMA_OLDEST: u32 = 1;
 
 /// The local state of one app. Only `pending` and the terminal states are
 /// reported (`report.rs`).
@@ -165,6 +176,76 @@ pub struct InstallRecord {
     /// in use) since the last other outcome; after `BUSY_WINDOW` a busy answer counts.
     #[serde(default)]
     pub busy_since_ms: Option<u64>,
+
+    // -- (Phase 6 Step 11, journal schema 2) A schema 1 file has none of these: each has a default. --
+    /// The catalogue's `desktop.version` of the installer this record follows.
+    #[serde(default)]
+    pub version: Option<String>,
+    /// The version the PC has (plan 4.4.1): the program's file version, else the version the engine last installed.
+    /// Reported as `installedVersion` when it changes.
+    #[serde(default)]
+    pub installed_version: Option<String>,
+    /// How the version is kept (plan 4.4). `Unknown` is stored as `Pinned`.
+    #[serde(default = "pinned")]
+    pub mode: UpdateMode,
+    /// `applyWhen: when_closed` (plan 4.4.5 window 3).
+    #[serde(default)]
+    pub when_closed: bool,
+    /// An app that **is installed** gets another version (plan 4.6 "Upgrade test"): the record keeps its
+    /// state (`installed`, the program works and its tile stays) and the work is staged, waits for an apply
+    /// window and runs. Only terminal states are reported for it.
+    #[serde(default)]
+    pub update: bool,
+    /// The update's installer is downloaded and verified: only the apply window is missing.
+    #[serde(default)]
+    pub staged: bool,
+    /// While an update runs: the old version still works. Cleared when the installer starts, set again by a
+    /// roll-back, or by an update that failed before the installer ran.
+    #[serde(default = "works")]
+    pub old_works: bool,
+    /// The installer of the version on the PC, kept on disk for a roll-back (Managed with `rollbackOnFail` only).
+    #[serde(default)]
+    pub kept: Option<KeptInstaller>,
+    /// The installer of the version before the last update, until the new one was healthy for one sign-in.
+    #[serde(default)]
+    pub previous: Option<KeptInstaller>,
+    /// `previous` is deleted at the next employee sign-in (the new version ran healthy long enough to sign in).
+    #[serde(default)]
+    pub heal_pending: bool,
+    /// Vendor mode (plan 4.4.3): the first miss, or the last look, of a program that is not at its path (Unix ms).
+    #[serde(default)]
+    pub verifying_since_ms: Option<u64>,
+    /// Looks after the first miss.
+    #[serde(default)]
+    pub verify_looks: u32,
+}
+
+/// An installer file kept in the downloads folder (`<sha256>.<ext>`), with what a roll-back needs to run it again.
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct KeptInstaller {
+    pub sha256: String,
+    /// `msi` or `exe` (checked again by [`versions::kept_file_name`] before the file is used).
+    pub ext: String,
+    pub version: Option<String>,
+    pub kind: RecordKind,
+    pub silent_args: Vec<String>,
+    pub success_exit_codes: Vec<i32>,
+}
+
+impl KeptInstaller {
+    /// The file name in the downloads folder, `None` for a hash or extension that is not what it must be.
+    fn file_name(&self) -> Option<String> {
+        kept_file_name(&self.sha256, &self.ext)
+    }
+}
+
+fn pinned() -> UpdateMode {
+    UpdateMode::Pinned
+}
+
+fn works() -> bool {
+    true
 }
 
 /// A record written before `preexisting` existed: nobody knows whether Rulebox
@@ -207,21 +288,65 @@ impl InstallRecord {
             preexisting: false,
             on_pc: false,
             busy_since_ms: None,
+            version: None,
+            installed_version: None,
+            mode: UpdateMode::Pinned,
+            when_closed: false,
+            update: false,
+            staged: false,
+            old_works: true,
+            kept: None,
+            previous: None,
+            heal_pending: false,
+            verifying_since_ms: None,
+            verify_looks: 0,
         }
     }
 
-    /// Whether an operation is waiting for this record (time aside).
+    /// The failures after which this record gives up until its revision changes: 6 for an install, 3 for an update
+    /// (plan 4.6 "Update retries").
+    fn max_failures(&self) -> u32 {
+        if self.update {
+            MAX_UPDATE_FAILURES
+        } else {
+            MAX_FAILURES
+        }
+    }
+
+    /// Whether an operation is waiting for this record (time aside, and for an update the apply window aside).
     fn runnable(&self) -> bool {
         match self.state {
             LocalState::Pending => !self.removal,
             LocalState::Removing => self.removal,
-            LocalState::Failed => self.attempts < MAX_FAILURES,
+            LocalState::Failed => self.attempts < self.max_failures(),
+            // An installed app with an update waiting: stage it, then run it in a window.
+            LocalState::Installed => self.update && !self.removal,
+            _ => false,
+        }
+    }
+
+    /// Whether the app's tile may be shown: it is installed and works, or it is being updated and the old version
+    /// still does (or the installer is running: the tile then says "Updating..." and cannot be started).
+    pub fn visible(&self) -> bool {
+        if self.removal {
+            return false;
+        }
+        match self.state {
+            LocalState::Installed => true,
+            LocalState::Installing => self.update,
+            LocalState::Downloading => self.update && self.old_works,
+            LocalState::Failed => self.update && self.old_works,
             _ => false,
         }
     }
 
     fn file_name(&self) -> String {
         format!("{}.{}", self.sha256, self.kind.ext())
+    }
+
+    /// The installer files this record keeps on disk besides its own (`kept`, `previous`).
+    fn kept_files(&self) -> impl Iterator<Item = String> + '_ {
+        [self.kept.as_ref(), self.previous.as_ref()].into_iter().flatten().filter_map(KeptInstaller::file_name)
     }
 }
 
@@ -285,7 +410,12 @@ pub struct InstallBook {
 impl InstallBook {
     pub fn open(path: PathBuf) -> Arc<Self> {
         let file = match read_json::<InstallsFile>(&path) {
-            Ok(Some(file)) if file.schema == INSTALLS_SCHEMA => file,
+            // A schema 1 file (an agent before Phase 6) loads as it is: every new field has a default. It is saved
+            // as schema 2 with the first change.
+            Ok(Some(mut file)) if (INSTALLS_SCHEMA_OLDEST..=INSTALLS_SCHEMA).contains(&file.schema) => {
+                file.schema = INSTALLS_SCHEMA;
+                file
+            }
             Ok(Some(file)) => {
                 tracing::error!(schema = file.schema, "installs.json has an unknown schema; starting without install records");
                 InstallsFile::default()
@@ -320,21 +450,41 @@ impl InstallBook {
         result
     }
 
-    /// The app is installed in this version (`sha256`).
+    /// The app is installed in this version (`sha256`), or is being updated to it and the old version still works.
     pub fn is_installed(&self, app_id: &str, sha256: &str) -> bool {
-        lock(&self.file)
-            .apps
-            .get(app_id)
-            .is_some_and(|r| r.state == LocalState::Installed && !r.removal && r.sha256 == sha256)
+        lock(&self.file).apps.get(app_id).is_some_and(|r| r.visible() && r.sha256 == sha256)
     }
 
-    fn installed_ids(&self) -> BTreeSet<String> {
-        lock(&self.file)
-            .apps
-            .values()
-            .filter(|r| r.state == LocalState::Installed && !r.removal)
-            .map(|r| r.app_id.clone())
-            .collect()
+    /// (Phase 6 Step 11, plan 4.4.5) What the tile of `app_id` says about an update: "Updating..." while the installer
+    /// runs, "Waiting for the app to close" while an update that needs the app closed (`applyWhen: when_closed`) waits.
+    pub fn update_state(&self, app_id: &str) -> Option<AppUpdateState> {
+        let file = lock(&self.file);
+        let record = file.apps.get(app_id)?;
+        if !record.update || record.removal {
+            return None;
+        }
+        match record.state {
+            LocalState::Installing => Some(AppUpdateState::Updating),
+            LocalState::Installed
+                if record.when_closed && record.detail.as_deref() == Some(Detail::WaitingForClose.as_str()) =>
+            {
+                Some(AppUpdateState::WaitingForClose)
+            }
+            _ => None,
+        }
+    }
+
+    /// The ids of the apps whose tile may show.
+    #[cfg(test)]
+    fn installed_ids(&self) -> std::collections::BTreeSet<String> {
+        lock(&self.file).apps.values().filter(|r| r.visible()).map(|r| r.app_id.clone()).collect()
+    }
+
+    /// The apps whose tile may show and what each says about an update: when it changes, the session recomputes
+    /// the employee's apps.
+    fn visible_apps(&self) -> BTreeMap<String, Option<AppUpdateState>> {
+        let ids: Vec<String> = lock(&self.file).apps.values().filter(|r| r.visible()).map(|r| r.app_id.clone()).collect();
+        ids.into_iter().map(|id| { let state = self.update_state(&id); (id, state) }).collect()
     }
 
     /// The server accepted `report`: mark it, and forget a finished removal.
@@ -384,13 +534,21 @@ fn ms(duration: Duration) -> u64 {
     u64::try_from(duration.as_millis()).unwrap_or(u64::MAX)
 }
 
-/// Counts a failure on `record`.
+/// Counts a failure on `record`. An install waits 1, 5, 15, 60, 360 minutes; an update (plan 4.6) waits an hour
+/// at least, for its next apply window, and gives up after 3.
 fn fail_record(record: &mut InstallRecord, detail: Option<Detail>, exit_code: Option<i64>, now: u64) {
     record.attempts = record.attempts.saturating_add(1);
     record.state = LocalState::Failed;
     record.detail = detail.map(|d| d.as_str().to_string());
     record.last_exit_code = exit_code;
-    record.next_try_ms = backoff_after(record.attempts).map_or(0, |wait| now.saturating_add(ms(wait)));
+    record.staged = false;
+    record.next_try_ms = if record.attempts >= record.max_failures() {
+        0
+    } else if record.update {
+        now.saturating_add(ms(UPDATE_RETRY_GAP))
+    } else {
+        backoff_after(record.attempts).map_or(0, |wait| now.saturating_add(ms(wait)))
+    };
 }
 
 /// What one download needs (an app's installer, or a driver's file).
@@ -412,8 +570,23 @@ pub struct Spec {
     pub product_code: Option<String>,
     pub success_exit_codes: Vec<i32>,
     pub remove_when_unassigned: bool,
-    /// The expanded program path.
+    /// The expanded program path (a pattern with one `*` for a program in a versioned folder, plan 4.4.3).
     pub exe: String,
+    /// (Phase 6 Step 11) `desktop.version`.
+    pub version: Option<String>,
+    /// The update mode the engine acts on (`Unknown` is `Pinned`).
+    pub mode: UpdateMode,
+    /// `applyWhen: when_closed`.
+    pub when_closed: bool,
+    /// Managed: undo a failed update with the previous installer (absent = true).
+    pub rollback_on_fail: bool,
+    /// Vendor: an installed version below this runs the bootstrap again.
+    pub min_version: Option<String>,
+    /// The Authenticode subject the installer file must be signed by (`install.publisher`, else the Vendor
+    /// updater's `update.publisher`). `None`: no check.
+    pub publisher: Option<String>,
+    /// Vendor: the signer of the vendor's own updater and programs (`update.publisher`).
+    pub updater_publisher: Option<String>,
 }
 
 pub fn install_of(app: &CatalogApp) -> Option<&InstallSpec> {
@@ -462,6 +635,8 @@ pub fn check_spec(app: &CatalogApp, roots: &PathRoots) -> Result<Spec, &'static 
         }
         RecordKind::Portable => {}
     }
+    let mode = desktop.update_mode();
+    let update = desktop.update.as_ref();
     Ok(Spec {
         kind,
         url: install.url.clone(),
@@ -473,6 +648,21 @@ pub fn check_spec(app: &CatalogApp, roots: &PathRoots) -> Result<Spec, &'static 
         // An exe cannot be uninstalled in Phase 4: never "removable".
         remove_when_unassigned: install.remove_when_unassigned && kind != RecordKind::Exe,
         exe,
+        version: desktop.version.clone(),
+        mode,
+        when_closed: update.is_some_and(|u| u.apply_when() == ApplyWhen::WhenClosed),
+        rollback_on_fail: update.is_none_or(|u| u.rollback_on_fail()),
+        min_version: if mode == UpdateMode::Vendor { update.and_then(|u| u.min_version.clone()) } else { None },
+        publisher: install
+            .publisher
+            .clone()
+            .or_else(|| if mode == UpdateMode::Vendor { update.and_then(|u| u.publisher.clone()) } else { None })
+            .filter(|subject| !subject.trim().is_empty()),
+        updater_publisher: if mode == UpdateMode::Vendor {
+            update.and_then(|u| u.publisher.clone()).filter(|subject| !subject.trim().is_empty())
+        } else {
+            None
+        },
     })
 }
 
@@ -487,6 +677,9 @@ fn copy_spec(record: &mut InstallRecord, spec: &Spec) {
     record.product_code = spec.product_code.clone();
     record.exe = Some(spec.exe.clone());
     record.remove_when_unassigned = spec.remove_when_unassigned;
+    record.version = spec.version.clone();
+    record.mode = spec.mode;
+    record.when_closed = spec.when_closed;
 }
 
 /// Everything the engine needs.
@@ -510,12 +703,25 @@ pub struct EngineDeps {
     /// (Step 14b) The agent state: a driver package the engine published is written into the journal, so a restore of
     /// everything (un-enrolling) removes it again.
     pub shared: Arc<SharedState>,
+    /// (Phase 6 Step 11, plan 4.4.5) Whether an employee is signed in (`SessionManager::presence`). The apply window
+    /// reads it; a sign-in or sign-out wakes the engine.
+    pub signed_in: watch::Receiver<bool>,
 }
 
 struct Engine {
     deps: EngineDeps,
     /// Icon hashes tried in this run (a failing icon is not fetched in a loop).
     icons_tried: HashSet<String>,
+    /// (Phase 6 Step 11) When this engine started (Unix ms): the boot window of plan 4.4.5 counts from it.
+    started_ms: u64,
+    /// An employee has been signed in since the engine started (the boot window is over for good).
+    ever_signed_in: bool,
+    /// The sign-in state the last pass saw (a change to `true` is a sign-in: the previous installers go).
+    was_signed_in: bool,
+    /// Waits for processes of apps whose update needs them closed, by process id (`WAKE_SOURCES`: `app_exit`).
+    exit_watches: HashMap<u32, Arc<dyn ExitWatch>>,
+    /// A watched process ended: wakes the loop.
+    exit_tx: mpsc::UnboundedSender<u32>,
 }
 
 /// The next operation: an app or a driver (Step 14b), an install or a removal.
@@ -523,11 +729,96 @@ struct Job {
     id: String,
     removal: bool,
     driver: bool,
+    /// (Phase 6 Step 11) Only download and verify the installer of an update; its run waits for an apply window.
+    stage: bool,
+}
+
+/// What the engine does next, and what it waits for when there is nothing to do.
+struct Plan {
+    job: Option<Job>,
+    /// When the earliest waiting operation comes due (Unix ms): the `retry_timer` wake source.
+    wake: Option<u64>,
+}
+
+/// What reconcile reads from the PC for one app (a program path, its file version, the vendor's updater).
+struct AppFacts {
+    /// The program, resolved (`None`: it is not at its path).
+    exe: Option<PathBuf>,
+    /// The program's file version.
+    detected: Option<String>,
+    /// A program signed by the app's vendor runs as SYSTEM (only asked of a Vendor app whose program is missing).
+    publisher_busy: bool,
+}
+
+/// The account the services run as; the vendor's updater, when it is a service, is its process.
+const SYSTEM_SID: &str = "S-1-5-18";
+
+/// The program of `spec_exe` as it is on this PC: a plain path as it is, a template with one `*` resolved to the highest
+/// version folder that has the program (plan 4.4.3). `None`: the program is not there.
+pub fn resolve_program(platform: &dyn Platform, spec_exe: &str) -> Option<PathBuf> {
+    if !versions::is_pattern(spec_exe) {
+        let path = PathBuf::from(spec_exe);
+        return platform.file_exists(&path).then_some(path);
+    }
+    let pattern = exe_pattern(spec_exe)?;
+    let names = platform.list_folder_names(Path::new(&pattern.folder)).unwrap_or_default();
+    let path = PathBuf::from(resolve_pattern(&pattern, &names)?);
+    platform.file_exists(&path).then_some(path)
+}
+
+/// The state of a record whose operation did not end: `removing` for a removal, `installed` for an app that is being
+/// updated (it still is installed), `pending` for a first install.
+fn wait_state(record: &InstallRecord) -> LocalState {
+    if record.removal {
+        LocalState::Removing
+    } else if record.update {
+        LocalState::Installed
+    } else {
+        LocalState::Pending
+    }
+}
+
+/// Plan 4.4.3: a Vendor app that is installed and below its `minVersion` runs the bootstrap again, in an apply window.
+fn vendor_minimum(record: &mut InstallRecord, spec: &Spec, revision: u64) {
+    if spec.mode == UpdateMode::Vendor
+        && record.state == LocalState::Installed
+        && !record.update
+        && vendor_needs_bootstrap(record.installed_version.as_deref(), spec.min_version.as_deref(), spec.version.as_deref())
+    {
+        tracing::info!(app_id = %record.app_id, "a vendor-updated app is below its minimum version; the bootstrap runs in an apply window");
+        start_update(record, revision);
+    }
+}
+
+/// An app that is installed gets another installer (plan 4.6 "Upgrade test"): the record keeps working, stages the
+/// installer, and waits for an apply window. Nothing is reported for it until it ends.
+fn start_update(record: &mut InstallRecord, revision: u64) {
+    record.revision = revision;
+    record.update = true;
+    record.staged = false;
+    record.state = LocalState::Installed;
+    record.attempts = 0;
+    record.next_try_ms = 0;
+    record.last_exit_code = None;
+    record.detail = None;
+    record.busy_since_ms = None;
+    record.old_works = true;
+    record.verifying_since_ms = None;
+    record.verify_looks = 0;
 }
 
 /// How an operation ended, before it is written down.
 enum Outcome {
+    /// A driver's install ended well (apps use [`Outcome::AppInstalled`]).
     Installed { exit_code: i32 },
+    /// (Phase 6 Step 11) An app's install ended well. `warning` is a detail that rides on the `installed` result
+    /// (`version_too_low` for a Pinned app).
+    AppInstalled { exit_code: i32, warning: Option<Detail> },
+    /// (Phase 6 Step 11) An update's installer is downloaded and verified; it waits for its apply window.
+    Staged,
+    /// (Phase 6 Step 11) The apply window closed between the download and the start of the installer: nothing ran,
+    /// the update waits again (a sign-in, or the app started).
+    Deferred,
     Removed,
     /// `1618`, or a portable program in use: retried in 2 minutes, not counted,
     /// for at most `BUSY_WINDOW` (then a counted failure with this exit code).
@@ -559,8 +850,9 @@ impl Engine {
         }
     }
 
-    fn visible_changed(&self, before: &BTreeSet<String>) {
-        if self.deps.book.installed_ids() != *before {
+    /// A tile appeared or went, or its update state changed: the session recomputes the employee's apps.
+    fn visible_changed(&self, before: &BTreeMap<String, Option<AppUpdateState>>) {
+        if self.deps.book.visible_apps() != *before {
             (self.deps.on_visible_change)();
         }
     }
@@ -583,7 +875,8 @@ impl Engine {
                 match record.state {
                     LocalState::Downloading => {
                         tracing::info!(app_id = %record.app_id, "a download was interrupted; it starts again");
-                        record.state = if record.removal { LocalState::Removing } else { LocalState::Pending };
+                        // An update's app is still installed: it goes back to waiting for its update, not to `pending`.
+                        record.state = wait_state(record);
                     }
                     LocalState::Installing => {
                         tracing::warn!(app_id = %record.app_id, "the agent stopped while an installer ran; counted as a failed attempt");
@@ -673,6 +966,8 @@ impl Engine {
             .values()
             .filter(|r| !r.removal && r.runnable())
             .map(InstallRecord::file_name)
+            // (Phase 6 Step 11) The installers kept for a roll-back (the version on the PC, the one before the last update).
+            .chain(file.apps.values().filter(|r| !r.removal).flat_map(InstallRecord::kept_files))
             // (Step 14b) A driver still waiting for its download or install keeps its file too.
             .chain(file.drivers.values().filter(|r| !r.removal && r.runnable()).map(DriverRecord::file_name))
             .collect();
@@ -696,6 +991,58 @@ impl Engine {
         }
     }
 
+    // ---------------------------------------------------------------- what the PC says (Phase 6 Step 11)
+
+    /// The program of `spec_exe`: a plain path as it is, a template with one `*` resolved to the highest version
+    /// folder that has the program (plan 4.4.3). `None`: the program is not there.
+    fn resolve_exe(&self, spec_exe: &str) -> Option<PathBuf> {
+        resolve_program(self.deps.platform.as_ref(), spec_exe)
+    }
+
+    /// Whether a process of `exe` runs in any session. A question that cannot be answered counts as "yes": the
+    /// agent never closes a running app, so it never updates one it cannot see is closed.
+    fn app_running(&self, exe: &Path) -> bool {
+        let Ok(sessions) = self.deps.platform.sessions() else { return true };
+        for session in sessions {
+            match self.deps.platform.find_processes(session.id, exe) {
+                Ok(pids) if pids.is_empty() => {}
+                Ok(_) | Err(_) => return true,
+            }
+        }
+        false
+    }
+
+    /// Whether a program signed by `publisher` runs as SYSTEM (plan 4.4.3: the vendor's updater may be replacing the
+    /// program right now). A process list that cannot be read counts as "yes".
+    fn publisher_process_running(&self, publisher: &str) -> bool {
+        let Ok(processes) = self.deps.platform.session_processes(0) else { return true };
+        let mut checked: HashMap<PathBuf, bool> = HashMap::new();
+        for process in processes.into_iter().filter(|p| p.user_sid == SYSTEM_SID) {
+            let hit = *checked.entry(process.image.clone()).or_insert_with(|| {
+                matches!(self.deps.platform.file_identity(&process.image), Ok(Some(identity))
+                    if identity.signer.as_deref().is_some_and(|signer| publisher_matches(signer, publisher)))
+            });
+            if hit {
+                return true;
+            }
+        }
+        false
+    }
+
+    /// What reconcile needs to know about the PC for one app, read **before** the records are locked.
+    fn app_facts(&self, spec: &Spec, record: Option<&InstallRecord>) -> AppFacts {
+        let exe = self.resolve_exe(&spec.exe);
+        let detected = exe.as_deref().and_then(|path| self.deps.platform.file_version(path).ok().flatten());
+        // Only a Vendor app that is installed but whose program is not there asks about the vendor's updater.
+        let publisher_busy = spec.mode == UpdateMode::Vendor
+            && exe.is_none()
+            && record.is_some_and(|r| r.state == LocalState::Installed && !r.removal && !r.update)
+            && spec.updater_publisher.as_deref().is_some_and(|publisher| self.publisher_process_running(publisher));
+        AppFacts { exe, detected, publisher_busy }
+    }
+
+    // ---------------------------------------------------------------- reconcile
+
     /// Brings the records in line with the catalogue (no operation runs here).
     fn reconcile(&self, policy: &AgentPolicy) {
         // No verified document, or a catalogue that did not parse: nothing is
@@ -710,11 +1057,23 @@ impl Engine {
                 return;
             }
         };
-        let platform = &self.deps.platform;
-        let before = self.deps.book.installed_ids();
+        let now = self.now();
+        let before = self.deps.book.visible_apps();
+        // (Phase 6 Step 11) What the PC says about every app, before the records are locked: a file version or a
+        // process list takes a while and the install records are read by the session meanwhile.
+        let known = self.deps.book.snapshot();
+        let mut facts: HashMap<String, AppFacts> = HashMap::new();
+        for app in &policy.catalog {
+            if install_of(app).is_none() {
+                continue;
+            }
+            if let Ok(spec) = check_spec(app, &roots) {
+                facts.insert(app.id.clone(), self.app_facts(&spec, known.apps.get(&app.id)));
+            }
+        }
         let (reports, doomed) = self.deps.book.update(|file| {
             let mut out = Vec::new();
-            let mut doomed = Vec::new();
+            let mut doomed: Vec<String> = Vec::new();
             let mut wanted = HashSet::new();
             for app in &policy.catalog {
                 let Some(install) = install_of(app) else { continue };
@@ -742,13 +1101,17 @@ impl Engine {
                             record.remove_when_unassigned = old.remove_when_unassigned;
                             record.on_pc = rulebox_may_have_installed(old);
                             record.preexisting = old.preexisting;
+                            record.installed_version = old.installed_version.clone();
+                            // The installers kept for a roll-back go with the entry that cannot be installed.
+                            doomed.extend(old.kept_files());
                         }
                         out.extend(mark(&mut record));
                         file.apps.insert(app.id.clone(), record);
                         continue;
                     }
                 };
-                let exe_exists = platform.file_exists(Path::new(&spec.exe));
+                let Some(fact) = facts.get(&app.id) else { continue };
+                let exe_exists = fact.exe.is_some();
                 match file.apps.get_mut(&app.id) {
                     None => {
                         // A program already at its path is taken as installed (its
@@ -757,14 +1120,24 @@ impl Engine {
                         let state = if exe_exists { LocalState::Installed } else { LocalState::Pending };
                         let mut record = fresh_record(app, &spec, state);
                         record.preexisting = exe_exists;
+                        record.installed_version = fact.detected.clone();
                         out.extend(mark(&mut record));
+                        vendor_minimum(&mut record, &spec, app.revision);
                         file.apps.insert(app.id.clone(), record);
                     }
                     Some(record) => {
-                        let restart = record.sha256 != spec.sha256 || record.removal || record.state == LocalState::Unsupported;
+                        let sha_changed = record.sha256 != spec.sha256;
+                        // The app is installed and works (or its update failed and the old version still does): a
+                        // new version is an update, not a first install.
+                        let upgradable = !record.removal
+                            && (record.state == LocalState::Installed
+                                || (record.state == LocalState::Failed && record.update && record.old_works));
+                        let restart = record.removal
+                            || record.state == LocalState::Unsupported
+                            || (sha_changed && !upgradable);
                         if restart {
-                            // A new version (always installed again), a re-assignment
-                            // or an entry that became usable.
+                            // A new version of an app that is not installed, a re-assignment or an entry that
+                            // became usable: a first install again.
                             let state = if record.sha256 == spec.sha256 && exe_exists {
                                 LocalState::Installed
                             } else {
@@ -773,34 +1146,114 @@ impl Engine {
                             if record.sha256 != spec.sha256 {
                                 doomed.push(record.file_name());
                             }
+                            doomed.extend(record.kept_files());
                             // Found again at its path without Rulebox having put it
                             // there (for example after Rulebox removed it): preexisting.
                             let preexisting = record.preexisting
                                 || (state == LocalState::Installed && !rulebox_may_have_installed(record));
+                            let installed_version = if exe_exists { fact.detected.clone() } else { None };
                             *record = fresh_record(app, &spec, state);
                             record.preexisting = preexisting;
+                            record.installed_version = installed_version;
                             out.extend(mark(record));
+                            vendor_minimum(record, &spec, app.revision);
                             continue;
                         }
-                        copy_spec(record, &spec);
-                        if record.revision != app.revision {
-                            record.revision = app.revision;
-                            if record.state == LocalState::Failed {
-                                // Retry: a new revision starts the attempts again.
-                                record.state = LocalState::Pending;
-                                record.attempts = 0;
-                                record.next_try_ms = 0;
-                                record.detail = None;
-                                record.last_exit_code = None;
-                                out.extend(mark(record));
+                        if sha_changed {
+                            // Plan 4.6 "Upgrade test": the installer changed for an app that is installed.
+                            let old_file = record.file_name();
+                            match spec.mode {
+                                // Vendor (plan 4.4.3): the bootstrap changed, the vendor's updater owns the version.
+                                // Nothing runs; the record follows the catalogue so the tile stays.
+                                UpdateMode::Vendor => {
+                                    tracing::info!(app_id = %app.id, "the bootstrap of a vendor-updated app changed; nothing is reinstalled");
+                                    record.sha256 = spec.sha256.clone();
+                                    copy_spec(record, &spec);
+                                    record.revision = app.revision;
+                                    record.state = LocalState::Installed;
+                                    record.update = false;
+                                    record.staged = false;
+                                    record.attempts = 0;
+                                    record.next_try_ms = 0;
+                                    record.detail = None;
+                                    record.last_exit_code = None;
+                                    record.old_works = true;
+                                    out.extend(mark(record));
+                                }
+                                _ => {
+                                    tracing::info!(app_id = %app.id, "a new version is waiting for an apply window");
+                                    record.sha256 = spec.sha256.clone();
+                                    copy_spec(record, &spec);
+                                    start_update(record, app.revision);
+                                }
+                            }
+                            if !record.kept_files().any(|name| name == old_file) {
+                                doomed.push(old_file);
+                            }
+                        } else {
+                            copy_spec(record, &spec);
+                            if record.revision != app.revision {
+                                record.revision = app.revision;
+                                if record.state == LocalState::Failed {
+                                    // Retry: a new revision starts the attempts again (an update goes back to waiting
+                                    // for its window, a first install back to `pending`).
+                                    record.state = wait_state(record);
+                                    record.staged = false;
+                                    record.attempts = 0;
+                                    record.next_try_ms = 0;
+                                    record.detail = None;
+                                    record.last_exit_code = None;
+                                    out.extend(mark(record));
+                                }
                             }
                         }
                         if record.state == LocalState::Installed && !exe_exists {
-                            tracing::warn!(app_id = %app.id, "the program of an installed app is gone; installing it again");
-                            record.state = LocalState::Pending;
-                            record.attempts = 0;
-                            record.next_try_ms = 0;
-                            out.extend(mark(record));
+                            if spec.mode == UpdateMode::Vendor && !record.update {
+                                // Plan 4.4.3: the vendor's updater may be mid-update. Look again at the next two
+                                // reconcile occasions, at least 15 minutes apart; then install the bootstrap again.
+                                match verify_step(record.verifying_since_ms, record.verify_looks, now, fact.publisher_busy) {
+                                    VerifyStep::Start => {
+                                        tracing::info!(app_id = %app.id, "the program of a vendor-updated app is not there; looking again later");
+                                        record.verifying_since_ms = Some(now);
+                                        record.verify_looks = 0;
+                                    }
+                                    VerifyStep::Wait => {}
+                                    VerifyStep::Look => {
+                                        record.verifying_since_ms = Some(now);
+                                        record.verify_looks += 1;
+                                    }
+                                    VerifyStep::Reinstall => {
+                                        tracing::warn!(app_id = %app.id, "the program of a vendor-updated app is still missing; installing the bootstrap again");
+                                        record.verifying_since_ms = None;
+                                        record.verify_looks = 0;
+                                        record.state = LocalState::Pending;
+                                        record.attempts = 0;
+                                        record.next_try_ms = 0;
+                                        out.extend(mark(record));
+                                    }
+                                }
+                            } else {
+                                tracing::warn!(app_id = %app.id, "the program of an installed app is gone; installing it again");
+                                record.state = LocalState::Pending;
+                                record.update = false;
+                                record.staged = false;
+                                record.old_works = true;
+                                record.attempts = 0;
+                                record.next_try_ms = 0;
+                                out.extend(mark(record));
+                            }
+                        } else if record.state == LocalState::Installed {
+                            record.verifying_since_ms = None;
+                            record.verify_looks = 0;
+                            // The version the PC has (plan 4.4.1); reported once, when it changes.
+                            if !record.update {
+                                let current = detection(fact.detected.clone(), record.installed_version.as_deref());
+                                if current != record.installed_version {
+                                    record.installed_version = current;
+                                    out.extend(mark(record));
+                                }
+                            }
+                            vendor_minimum(record, &spec, app.revision);
                         }
                     }
                 }
@@ -814,6 +1267,7 @@ impl Engine {
                     // from before `preexisting`): dropped, never run.
                     if record.preexisting && record.state != LocalState::Removed {
                         tracing::info!(app_id = %id, "not installed by Rulebox; its removal is dropped (hidden only)");
+                        doomed.extend(record.kept_files());
                         file.apps.remove(&id);
                     }
                     continue;
@@ -826,9 +1280,16 @@ impl Engine {
                 // Something Rulebox put there may be on the PC: installed, an
                 // install that ran, or the version before an `unsupported` entry.
                 let on_pc = rulebox_may_have_installed(record);
+                // The installers kept for a roll-back go with the assignment.
+                doomed.extend(record.kept_files());
+                record.kept = None;
+                record.previous = None;
+                record.heal_pending = false;
                 if record.remove_when_unassigned && can_remove && on_pc && !record.preexisting {
                     tracing::info!(app_id = %id, "unassigned; it will be removed");
                     record.removal = true;
+                    record.update = false;
+                    record.staged = false;
                     record.state = LocalState::Removing;
                     record.attempts = 0;
                     record.next_try_ms = 0;
@@ -849,33 +1310,170 @@ impl Engine {
         self.visible_changed(&before);
     }
 
-    /// The next operation that is due: `(app id, is a removal)`. Installs wait for
-    /// the connection.
-    fn next_job(&self, online: bool) -> Option<Job> {
-        let now = self.now();
-        let file = self.deps.book.snapshot();
-        file.apps
-            .values()
-            .find(|r| r.runnable() && r.next_try_ms <= now && (r.removal || online))
-            .map(|r| Job { id: r.app_id.clone(), removal: r.removal, driver: false })
-            // (Step 14b) Apps first, then drivers.
-            .or_else(|| {
-                file.drivers
-                    .values()
-                    .find(|r| r.runnable() && r.next_try_ms <= now && (r.removal || online))
-                    .map(|r| Job { id: r.driver_id.clone(), removal: r.removal, driver: true })
-            })
+    // ---------------------------------------------------------------- apply windows (plan 4.4.5)
+
+    /// Reads whether an employee is signed in. A sign-in ends the boot window for good and deletes the installers kept
+    /// from before the last update (the new version ran long enough for an employee to sign in).
+    fn refresh_presence(&mut self, rx: &mut watch::Receiver<bool>) -> bool {
+        let signed_in = *rx.borrow_and_update();
+        if signed_in {
+            self.ever_signed_in = true;
+            if !self.was_signed_in {
+                self.forget_previous_installers();
+            }
+        }
+        self.was_signed_in = signed_in;
+        signed_in
     }
 
-    /// When the earliest waiting operation comes due (Unix ms).
-    fn next_wake(&self, online: bool) -> Option<u64> {
+    /// The installers kept for a roll-back are deleted once the new version has been healthy for one sign-in.
+    fn forget_previous_installers(&self) {
+        let doomed = self.deps.book.update(|file| {
+            let mut doomed = Vec::new();
+            for record in file.apps.values_mut().filter(|r| r.heal_pending) {
+                record.heal_pending = false;
+                if let Some(previous) = record.previous.take() {
+                    // The file of the version on the PC (`kept`) is never the one that goes.
+                    if record.kept.as_ref().map(|k| &k.sha256) != Some(&previous.sha256) {
+                        doomed.extend(previous.file_name());
+                    }
+                }
+            }
+            doomed
+        });
+        for name in doomed {
+            self.delete_download(&name);
+        }
+    }
+
+    /// Whether the update of `record` may run now: an apply window is open and the app is not running.
+    fn window_open(&self, record: &InstallRecord, signed_in: bool) -> bool {
+        let now = self.now();
+        let running = record
+            .exe
+            .as_deref()
+            .and_then(|exe| self.resolve_exe(exe))
+            .is_some_and(|path| self.app_running(&path));
+        versions::window(WindowInputs {
+            signed_in,
+            boot_open: boot_window_open(self.started_ms, now, self.ever_signed_in),
+            when_closed: record.when_closed,
+            app_running: running,
+        })
+        .is_some()
+    }
+
+    /// An update that is ready and waits for its window says so once (`installed` with the detail
+    /// `waiting_for_close`: the dashboard shows "Waiting for the app to close"); it stops saying so when it runs.
+    fn evaluate_waiting(&self, signed_in: bool) {
         let file = self.deps.book.snapshot();
-        file.apps
-            .values()
-            .filter(|r| r.runnable() && (r.removal || online))
-            .map(|r| r.next_try_ms)
-            .chain(file.drivers.values().filter(|r| r.runnable() && (r.removal || online)).map(|r| r.next_try_ms))
-            .min()
+        let mut verdicts: Vec<(String, bool)> = Vec::new();
+        for record in file.apps.values() {
+            if record.update && !record.removal && record.state == LocalState::Installed && record.staged {
+                verdicts.push((record.app_id.clone(), self.window_open(record, signed_in)));
+            }
+        }
+        if verdicts.is_empty() {
+            return;
+        }
+        let before = self.deps.book.visible_apps();
+        let waiting = Detail::WaitingForClose.as_str();
+        let reports = self.deps.book.update(|file| {
+            let mut out = Vec::new();
+            for (id, open) in &verdicts {
+                let Some(record) = file.apps.get_mut(id) else { continue };
+                let says_waiting = record.detail.as_deref() == Some(waiting);
+                if !open && !says_waiting {
+                    tracing::info!(app_id = %id, "an update is ready and waits for an apply window");
+                    record.detail = Some(waiting.to_string());
+                    out.extend(mark(record));
+                } else if *open && says_waiting {
+                    // The next result (installed or failed) replaces it; nothing is reported for the change.
+                    record.detail = None;
+                }
+            }
+            out
+        });
+        self.push(reports);
+        self.visible_changed(&before);
+    }
+
+    /// The wake source `app_exit` (plan 4.4.5): for an update that waits and whose app runs, one wait on each process
+    /// handle. The wait is the operating system's, not a timer; it ends the moment the process does.
+    fn watch_exits(&mut self) {
+        let file = self.deps.book.snapshot();
+        let sessions = self.deps.platform.sessions().unwrap_or_default();
+        for record in file.apps.values() {
+            let waits = record.update && !record.removal && (record.staged || record.state == LocalState::Failed);
+            if !waits {
+                continue;
+            }
+            let Some(exe) = record.exe.as_deref().and_then(|exe| self.resolve_exe(exe)) else { continue };
+            for session in &sessions {
+                for pid in self.deps.platform.find_processes(session.id, &exe).unwrap_or_default() {
+                    if self.exit_watches.contains_key(&pid) {
+                        continue;
+                    }
+                    match self.deps.platform.watch_process_exit(pid) {
+                        Ok(Some(watch)) => {
+                            self.exit_watches.insert(pid, Arc::clone(&watch));
+                            let tx = self.exit_tx.clone();
+                            drop(tokio::task::spawn_blocking(move || {
+                                if watch.wait() {
+                                    let _ = tx.send(pid);
+                                }
+                            }));
+                        }
+                        Ok(None) => {}
+                        Err(error) => tracing::warn!("cannot watch a process for its exit: {error}"),
+                    }
+                }
+            }
+        }
+    }
+
+    /// The engine stops: every wait for a process ends (its blocking thread returns).
+    fn cancel_exit_watches(&mut self) {
+        for (_, watch) in self.exit_watches.drain() {
+            watch.cancel();
+        }
+    }
+
+    // ---------------------------------------------------------------- what to do next
+
+    /// The next operation that is due and what the engine waits for when there is none. Installs wait for the
+    /// connection. An update that is ready waits for its apply window and contributes **no timer** while it does:
+    /// a sign-in, a sign-out or the app's exit wakes the engine (`WAKE_SOURCES`).
+    fn plan(&self, online: bool, signed_in: bool) -> Plan {
+        let now = self.now();
+        let file = self.deps.book.snapshot();
+        let mut wake: Option<u64> = None;
+        for record in file.apps.values() {
+            if !record.runnable() || !(record.removal || online) {
+                continue;
+            }
+            // Staging (the download) is not gated; running an update's installer is.
+            let stage = record.update && !record.removal && record.state == LocalState::Installed && !record.staged;
+            let gated = record.update && !record.removal && !stage;
+            if gated && !self.window_open(record, signed_in) {
+                continue;
+            }
+            if record.next_try_ms <= now {
+                return Plan { job: Some(Job { id: record.app_id.clone(), removal: record.removal, driver: false, stage }), wake: None };
+            }
+            wake = Some(wake.map_or(record.next_try_ms, |w| w.min(record.next_try_ms)));
+        }
+        // (Step 14b) Apps first, then drivers.
+        for record in file.drivers.values() {
+            if !record.runnable() || !(record.removal || online) {
+                continue;
+            }
+            if record.next_try_ms <= now {
+                return Plan { job: Some(Job { id: record.driver_id.clone(), removal: record.removal, driver: true, stage: false }), wake: None };
+            }
+            wake = Some(wake.map_or(record.next_try_ms, |w| w.min(record.next_try_ms)));
+        }
+        Plan { job: None, wake }
     }
 
     /// The missing icons; stops as soon as the agent stops.
@@ -902,10 +1500,11 @@ impl Engine {
     }
 
     /// `Some(found)`, or `None` when the agent stopped before the program appeared.
-    async fn wait_for_exe(&self, exe: &Path, shutdown: &CancellationToken) -> Option<bool> {
+    async fn wait_for_exe(&self, spec_exe: &str, shutdown: &CancellationToken) -> Option<bool> {
         let deadline = tokio::time::Instant::now() + self.deps.exe_wait;
         loop {
-            if self.deps.platform.file_exists(exe) {
+            // A program in a versioned folder (plan 4.4.3) is found by its template.
+            if self.resolve_exe(spec_exe).is_some() {
                 return Some(true);
             }
             if tokio::time::Instant::now() >= deadline {
@@ -1015,13 +1614,107 @@ impl Engine {
         Ok(dest)
     }
 
-    async fn install(&self, app_id: &str, spec: &Spec, roots: &PathRoots, shutdown: &CancellationToken) -> Outcome {
+    /// Whether the apply window of the update of `app_id` is still open (read again right before the installer starts: an
+    /// employee may have signed in, or the app been started, while the installer downloaded).
+    fn window_still_open(&self, app_id: &str) -> bool {
+        let Some(record) = self.deps.book.snapshot().apps.get(app_id).cloned() else { return false };
+        self.window_open(&record, *self.deps.signed_in.borrow())
+    }
+
+    /// The installer file's signer is the `wanted` publisher (plan 4.4.3). A file that is not signed, or whose signature
+    /// cannot be read, is not.
+    fn publisher_ok(&self, file: &Path, wanted: &str) -> bool {
+        match self.deps.platform.file_identity(file) {
+            Ok(Some(identity)) => identity.signer.as_deref().is_some_and(|signer| publisher_matches(signer, wanted)),
+            Ok(None) | Err(_) => false,
+        }
+    }
+
+    /// Runs one package: `msiexec /i`, the installer exe with its silent arguments, or the portable copy. `Err(InUse)`:
+    /// a portable program is running. `spec_exe` may be a template with a `*` (a versioned folder): then no one path is
+    /// expected to appear.
+    #[allow(clippy::too_many_arguments)]
+    async fn run_package(
+        &self,
+        app_id: &str,
+        kind: RecordKind,
+        file: &Path,
+        silent_args: &[String],
+        spec_exe: &str,
+        roots: &PathRoots,
+        shutdown: &CancellationToken,
+    ) -> Result<InstallerExit, PlatformError> {
+        let exe = PathBuf::from(spec_exe);
+        let downloads = self.deps.paths.downloads_dir();
+        let expected = !versions::is_pattern(spec_exe);
+        match kind {
+            RecordKind::Msi => {
+                let Some(system_root) = roots.system_root.as_deref() else {
+                    return Err(PlatformError::Refused("the Windows folder is not known"));
+                };
+                self.prune_msi_logs();
+                let _ = std::fs::create_dir_all(self.deps.paths.logs_dir());
+                let log = self.deps.paths.install_log(app_id);
+                let mut cmd = msi_install_command(Path::new(system_root), file, &log, &downloads, &exe);
+                if !expected {
+                    cmd.expected_exe = None;
+                }
+                self.run_installer(cmd, shutdown).await
+            }
+            RecordKind::Exe => {
+                let mut cmd = exe_install_command(file, silent_args, &downloads, &exe);
+                if !expected {
+                    cmd.expected_exe = None;
+                }
+                self.run_installer(cmd, shutdown).await
+            }
+            RecordKind::Portable => {
+                let platform = Arc::clone(&self.deps.platform);
+                let (from, to) = (file.to_path_buf(), exe);
+                tokio::task::spawn_blocking(move || platform.place_portable(&from, &to))
+                    .await
+                    .unwrap_or_else(|error| Err(PlatformError::Other(error.to_string())))
+                    .map(|()| InstallerExit::Code(0))
+            }
+        }
+    }
+
+    /// One install or update of an app. `update`: the app is installed and gets another installer (only terminal states
+    /// are reported, the old version stays usable until the installer starts). `stage_only`: download and verify the
+    /// installer and stop; its run waits for an apply window.
+    async fn install(
+        &self,
+        app_id: &str,
+        spec: &Spec,
+        roots: &PathRoots,
+        shutdown: &CancellationToken,
+        update: bool,
+        stage_only: bool,
+    ) -> Outcome {
         self.set_state(app_id, LocalState::Downloading);
         let dest = match self.download(app_id, spec, shutdown).await {
             Ok(dest) => dest,
             Err(Some(detail)) => return Outcome::Failed { detail: Some(detail), exit_code: None },
             Err(None) => return Outcome::Abandoned,
         };
+        let staged = |staged: bool| {
+            self.deps.book.update(|file| {
+                if let Some(record) = file.apps.get_mut(app_id) {
+                    record.staged = staged;
+                }
+            });
+        };
+        if stage_only {
+            tracing::info!(app_id, "the update is downloaded and waits for an apply window");
+            staged(true);
+            return Outcome::Staged;
+        }
+        // The window may have closed while the installer downloaded (an employee signed in, the app was started).
+        if update && !self.window_still_open(app_id) {
+            tracing::info!(app_id, "the apply window closed before the update could start; it waits again");
+            staged(true);
+            return Outcome::Deferred;
+        }
         self.set_state(app_id, LocalState::Installing);
         // Locked and hashed again through the handle that stays open while the
         // installer runs: what runs is what was verified.
@@ -1037,36 +1730,62 @@ impl Engine {
                 return Outcome::Failed { detail: Some(Detail::DownloadFailed), exit_code: None };
             }
         };
-        let exe = PathBuf::from(&spec.exe);
-        let downloads = self.deps.paths.downloads_dir();
-        tracing::info!(app_id, kind = ?spec.kind, "installing");
-        let ran = match spec.kind {
-            RecordKind::Msi => {
-                let Some(system_root) = roots.system_root.as_deref() else {
-                    return Outcome::Failed { detail: Some(Detail::Unsupported), exit_code: None };
-                };
-                self.prune_msi_logs();
-                let _ = std::fs::create_dir_all(self.deps.paths.logs_dir());
-                let log = self.deps.paths.install_log(app_id);
-                let cmd = msi_install_command(Path::new(system_root), verified.path(), &log, &downloads, &exe);
-                self.run_installer(cmd, shutdown).await
+        // (Phase 6 Step 11, plan 4.4.3) Signed by the publisher the catalogue names, or it does not run.
+        if let Some(wanted) = &spec.publisher {
+            if !self.publisher_ok(verified.path(), wanted) {
+                tracing::error!(app_id, "the installer is not signed by the app's publisher; nothing ran");
+                drop(verified);
+                return Outcome::Failed { detail: Some(Detail::PublisherMismatch), exit_code: None };
             }
-            RecordKind::Exe => {
-                let cmd = exe_install_command(verified.path(), &spec.silent_args, &downloads, &exe);
-                self.run_installer(cmd, shutdown).await
+        }
+        if update {
+            // The installer is about to touch the old version: it may not work afterwards. The installer of the version
+            // that is on the PC becomes `previous` (what a roll-back runs); the tile says "Updating...".
+            let doomed = self.deps.book.update(|file| {
+                let mut doomed = Vec::new();
+                if let Some(record) = file.apps.get_mut(app_id) {
+                    record.old_works = false;
+                    record.detail = None;
+                    let new_previous = record.kept.clone();
+                    // A `previous` of an earlier update that was never healed is replaced: its file goes (unless it is the
+                    // very file that is kept now).
+                    if let Some(old) = record.previous.take() {
+                        if new_previous.as_ref().map(|k| &k.sha256) != Some(&old.sha256) {
+                            doomed.extend(old.file_name());
+                        }
+                    }
+                    record.previous = new_previous;
+                }
+                doomed
+            });
+            for name in doomed {
+                self.delete_download(&name);
             }
-            RecordKind::Portable => {
-                let platform = Arc::clone(&self.deps.platform);
-                let (from, to) = (verified.path().to_path_buf(), exe.clone());
-                tokio::task::spawn_blocking(move || platform.place_portable(&from, &to))
-                    .await
-                    .unwrap_or_else(|error| Err(PlatformError::Other(error.to_string())))
-                    .map(|()| InstallerExit::Code(0))
-            }
-        };
+            (self.deps.on_visible_change)();
+        }
+        tracing::info!(app_id, kind = ?spec.kind, update, "installing");
+        let ran = self.run_package(app_id, spec.kind, verified.path(), &spec.silent_args, &spec.exe, roots, shutdown).await;
         // Held until the installer and everything it started are gone (the
         // platform returns only then).
         drop(verified);
+        let outcome = self.judge(app_id, spec, &dest, ran, shutdown).await;
+        // Plan 4.6 "Rollback on failure": a Managed update that failed after the installer touched the old version.
+        let touched = self.deps.book.snapshot().apps.get(app_id).is_some_and(|record| !record.old_works);
+        if update && touched && spec.mode == UpdateMode::Managed && spec.rollback_on_fail && matches!(outcome, Outcome::Failed { .. }) {
+            return self.roll_back(app_id, spec, roots, shutdown, outcome).await;
+        }
+        outcome
+    }
+
+    /// How an installer run ended, as an [`Outcome`].
+    async fn judge(
+        &self,
+        app_id: &str,
+        spec: &Spec,
+        dest: &Path,
+        ran: Result<InstallerExit, PlatformError>,
+        shutdown: &CancellationToken,
+    ) -> Outcome {
         match ran {
             Err(PlatformError::InUse) => {
                 tracing::info!(app_id, "the old program is running; the upgrade waits");
@@ -1091,11 +1810,8 @@ impl Engine {
                     if restart {
                         self.note_restart();
                     }
-                    match self.wait_for_exe(&exe, shutdown).await {
-                        Some(true) => {
-                            let _ = remove_file_if_exists(&dest);
-                            Outcome::Installed { exit_code: code }
-                        }
+                    match self.wait_for_exe(&spec.exe, shutdown).await {
+                        Some(true) => self.installed(app_id, spec, dest, code),
                         Some(false) => {
                             tracing::warn!(app_id, "the installer succeeded but the program is not at its path");
                             Outcome::Failed { detail: Some(Detail::ExeMissingAfterInstall), exit_code: Some(i64::from(code)) }
@@ -1107,6 +1823,159 @@ impl Engine {
                 }
             },
         }
+    }
+
+    /// The installer succeeded and the program is there: check its version (plan 4.6 "Detection"), decide what to keep
+    /// for a roll-back and write down the version the PC has.
+    fn installed(&self, app_id: &str, spec: &Spec, dest: &Path, code: i32) -> Outcome {
+        let file_version = self
+            .resolve_exe(&spec.exe)
+            .and_then(|path| self.deps.platform.file_version(&path).ok().flatten());
+        let too_low = check_installed(file_version.as_deref(), spec.version.as_deref()) == VersionCheck::TooLow;
+        // A Vendor app that has to reach its `minVersion` and did not, fails like a Managed one: nothing else would
+        // ever stop the engine from running the bootstrap again.
+        let below_min = match (file_version.as_deref(), spec.min_version.as_deref()) {
+            (Some(file), Some(min)) => versions::is_lower(file, min) == Some(true),
+            _ => false,
+        };
+        if (too_low && spec.mode == UpdateMode::Managed) || below_min {
+            tracing::warn!(app_id, "the program's version is lower than the version this install delivers");
+            return Outcome::Failed { detail: Some(Detail::VersionTooLow), exit_code: Some(i64::from(code)) };
+        }
+        let version = detection(file_version, spec.version.as_deref());
+        let keep = self.keep_installer(app_id, spec, dest);
+        if keep.is_none() {
+            let _ = remove_file_if_exists(dest);
+        }
+        let doomed = self.deps.book.update(|file| {
+            let mut doomed = Vec::new();
+            if let Some(record) = file.apps.get_mut(app_id) {
+                record.installed_version = version;
+                let replaced = record.kept.take();
+                record.kept = keep;
+                record.heal_pending = record.previous.is_some();
+                // The file of the version that was on the PC stays while it is `previous`; else it is not needed.
+                if let Some(old) = replaced {
+                    let still_needed = record.previous.as_ref().is_some_and(|p| p.sha256 == old.sha256)
+                        || record.kept.as_ref().is_some_and(|k| k.sha256 == old.sha256);
+                    if !still_needed {
+                        doomed.extend(old.file_name());
+                    }
+                }
+            }
+            doomed
+        });
+        for name in doomed {
+            self.delete_download(&name);
+        }
+        Outcome::AppInstalled { exit_code: code, warning: too_low.then_some(Detail::VersionTooLow) }
+    }
+
+    /// Plan 4.6 "Previous installer": a Managed app with `rollbackOnFail` keeps the installer it was just installed
+    /// from, so the next update can be undone. Nothing is kept while the system drive has less than 3 GiB free, or when
+    /// all kept installers would pass 2 GiB.
+    fn keep_installer(&self, app_id: &str, spec: &Spec, dest: &Path) -> Option<KeptInstaller> {
+        if spec.mode != UpdateMode::Managed || !spec.rollback_on_fail {
+            return None;
+        }
+        let size = std::fs::metadata(dest).ok()?.len();
+        let free = self.deps.platform.disk_free_bytes().ok()?;
+        if !may_keep(free, self.kept_bytes(app_id), size) {
+            tracing::info!(app_id, "the installer is not kept for a roll-back (not enough free disk, or the kept installers are at their limit)");
+            return None;
+        }
+        Some(KeptInstaller {
+            sha256: spec.sha256.clone(),
+            ext: spec.kind.ext().to_string(),
+            version: spec.version.clone(),
+            kind: spec.kind,
+            silent_args: spec.silent_args.clone(),
+            success_exit_codes: spec.success_exit_codes.clone(),
+        })
+    }
+
+    /// The bytes of the installers kept for a roll-back: every app's `previous`, and every other app's `kept` (this
+    /// app's `kept` is replaced by the one being decided).
+    fn kept_bytes(&self, app_id: &str) -> u64 {
+        let dir = self.deps.paths.downloads_dir();
+        let file = self.deps.book.snapshot();
+        file.apps
+            .values()
+            .flat_map(|record| {
+                let own = record.app_id == app_id;
+                [record.kept.as_ref().filter(|_| !own), record.previous.as_ref()].into_iter().flatten().filter_map(KeptInstaller::file_name)
+            })
+            .map(|name| std::fs::metadata(dir.join(name)).map_or(0, |meta| meta.len()))
+            .sum()
+    }
+
+    /// Plan 4.6 "Rollback on failure": the update failed after the installer touched the old version; run the previous
+    /// installer once. The result is `failed` with `update_rolled_back` (the old version works), `rollback_failed`, or
+    /// `rollback_unsupported` (an MSI cannot be installed over a newer one, and the new one's product code is not known
+    /// to uninstall it first). `failed` is the update's own failure, returned when there is nothing to roll back to.
+    async fn roll_back(&self, app_id: &str, spec: &Spec, roots: &PathRoots, shutdown: &CancellationToken, failed: Outcome) -> Outcome {
+        let Outcome::Failed { exit_code, .. } = &failed else { return failed };
+        let exit_code = *exit_code;
+        let record = self.deps.book.snapshot().apps.get(app_id).cloned();
+        let Some(previous) = record.and_then(|r| r.previous).filter(|p| p.file_name().is_some()) else {
+            tracing::warn!(app_id, "the update failed and there is no previous installer to roll back to");
+            return failed;
+        };
+        let Some(name) = previous.file_name() else { return failed };
+        tracing::warn!(app_id, "the update failed; rolling back to the previous installer");
+        let rolled = |detail: Detail| Outcome::Failed { detail: Some(detail), exit_code };
+        let file = self.deps.paths.downloads_dir().join(name);
+        // An MSI cannot be installed over a newer version of itself: the new one is uninstalled first, by its product code.
+        if previous.kind == RecordKind::Msi {
+            let (Some(code), Some(system_root)) = (spec.product_code.as_deref(), roots.system_root.as_deref()) else {
+                tracing::warn!(app_id, "an MSI cannot be installed over a newer one and the product code of the new one is not known");
+                return rolled(Detail::RollbackUnsupported);
+            };
+            self.prune_msi_logs();
+            let _ = std::fs::create_dir_all(self.deps.paths.logs_dir());
+            let log = self.deps.paths.install_log(app_id);
+            let cmd = msi_removal_command(Path::new(system_root), code, &log, &self.deps.paths.downloads_dir(), None);
+            match self.run_installer(cmd, shutdown).await {
+                Ok(InstallerExit::Cancelled) => return Outcome::Interrupted,
+                Ok(InstallerExit::Code(removed)) if matches!(judge_removal(removed), ExitVerdict::Success { .. }) => {}
+                _ => return rolled(Detail::RollbackFailed),
+            }
+        }
+        let Ok(verified) = open_verified(&file, &previous.sha256) else {
+            tracing::error!(app_id, "the previous installer is missing or changed; no roll-back");
+            return rolled(Detail::RollbackFailed);
+        };
+        let ran = self.run_package(app_id, previous.kind, verified.path(), &previous.silent_args, &spec.exe, roots, shutdown).await;
+        drop(verified);
+        let succeeded = match ran {
+            Ok(InstallerExit::Cancelled) => return Outcome::Interrupted,
+            Ok(InstallerExit::Code(code)) => match judge_install(previous.kind == RecordKind::Msi, &previous.success_exit_codes, code) {
+                ExitVerdict::Success { restart } => {
+                    if restart {
+                        self.note_restart();
+                    }
+                    true
+                }
+                ExitVerdict::Busy | ExitVerdict::Failure => false,
+            },
+            Ok(InstallerExit::TimedOut) | Err(_) => false,
+        };
+        if !succeeded || self.wait_for_exe(&spec.exe, shutdown).await != Some(true) {
+            tracing::error!(app_id, "the roll-back did not bring the old version back");
+            return rolled(Detail::RollbackFailed);
+        }
+        let file_version = self.resolve_exe(&spec.exe).and_then(|path| self.deps.platform.file_version(&path).ok().flatten());
+        let version = detection(file_version, previous.version.as_deref());
+        self.deps.book.update(|file| {
+            if let Some(record) = file.apps.get_mut(app_id) {
+                record.old_works = true;
+                record.installed_version = version;
+                record.previous = None;
+                record.heal_pending = false;
+            }
+        });
+        tracing::info!(app_id, "rolled back: the old version works again");
+        rolled(Detail::UpdateRolledBack)
     }
 
     async fn remove(&self, record: &InstallRecord, roots: &PathRoots, shutdown: &CancellationToken) -> Outcome {
@@ -1197,21 +2066,38 @@ impl Engine {
                 return None;
             }
             let record = file.apps.get_mut(app_id)?;
-            // Back to waiting (not counted) after an uncounted interruption.
+            // Back to waiting (not counted) after an uncounted interruption. An app that is being updated is still
+            // installed: it goes back to `installed`, not to `pending`.
             let wait_again = |record: &mut InstallRecord| {
                 if matches!(record.state, LocalState::Downloading | LocalState::Installing) {
-                    record.state = if record.removal { LocalState::Removing } else { LocalState::Pending };
+                    record.state = wait_state(record);
                 }
             };
+            let outcome = match outcome {
+                Outcome::Installed { exit_code } => Outcome::AppInstalled { exit_code, warning: None },
+                other => other,
+            };
             match outcome {
-                Outcome::Installed { exit_code } => {
+                Outcome::Installed { .. } => None,
+                Outcome::AppInstalled { exit_code, warning } => {
                     tracing::info!(app_id, "installed");
                     record.state = LocalState::Installed;
-                    record.detail = None;
+                    // A warning rides on the result (`version_too_low` for an app that is not Managed).
+                    record.detail = warning.map(|detail| detail.as_str().to_string());
                     record.last_exit_code = (exit_code != 0).then_some(i64::from(exit_code));
                     record.next_try_ms = 0;
                     record.busy_since_ms = None;
+                    record.update = false;
+                    record.staged = false;
+                    record.old_works = true;
+                    record.verifying_since_ms = None;
+                    record.verify_looks = 0;
                     mark(record)
+                }
+                // An update's installer is ready, or its window closed: the app stays installed and nothing is reported.
+                Outcome::Staged | Outcome::Deferred => {
+                    wait_again(record);
+                    None
                 }
                 Outcome::Removed => {
                     tracing::info!(app_id, "removed");
@@ -1248,7 +2134,7 @@ impl Engine {
                 Outcome::Failed { detail, exit_code } => {
                     record.busy_since_ms = None;
                     fail_record(record, detail, exit_code, now);
-                    if record.attempts >= MAX_FAILURES {
+                    if record.attempts >= record.max_failures() {
                         tracing::warn!(app_id, attempts = record.attempts, "giving up until the app changes (Retry)");
                     }
                     mark(record)
@@ -1265,13 +2151,16 @@ impl Engine {
         // Exhausted: its download is not needed any more.
         let file = self.deps.book.snapshot();
         if let Some(record) = file.apps.get(app_id) {
-            if record.state == LocalState::Failed && record.attempts >= MAX_FAILURES {
-                self.delete_download(&record.file_name());
+            if record.state == LocalState::Failed && record.attempts >= record.max_failures() {
+                // Not the file the version on the PC was installed from (`kept`): a roll-back needs that one.
+                if !record.kept_files().any(|name| name == record.file_name()) {
+                    self.delete_download(&record.file_name());
+                }
             }
         }
     }
 
-    async fn run_job(&self, app_id: &str, removal: bool, policy: &AgentPolicy, shutdown: &CancellationToken) {
+    async fn run_job(&self, app_id: &str, removal: bool, stage: bool, policy: &AgentPolicy, shutdown: &CancellationToken) {
         // Anything that keeps the job from starting waits like a busy installer (not
         // counted), so the loop never spins on it.
         let roots = match self.deps.platform.path_roots() {
@@ -1281,7 +2170,7 @@ impl Engine {
                 return self.finish(app_id, Outcome::Wait);
             }
         };
-        let before = self.deps.book.installed_ids();
+        let before = self.deps.book.visible_apps();
         let outcome = if removal {
             let Some(record) = self.deps.book.snapshot().apps.get(app_id).cloned() else { return };
             self.remove(&record, &roots, shutdown).await
@@ -1290,7 +2179,8 @@ impl Engine {
             let Some(Ok(spec)) = spec else {
                 return self.finish(app_id, Outcome::Wait);
             };
-            self.install(app_id, &spec, &roots, shutdown).await
+            let update = self.deps.book.snapshot().apps.get(app_id).is_some_and(|record| record.update);
+            self.install(app_id, &spec, &roots, shutdown, update, stage).await
         };
         self.finish(app_id, outcome);
         self.visible_changed(&before);
@@ -1298,15 +2188,47 @@ impl Engine {
 }
 
 /// The `installs` task (started by `agent::run`).
+///
+/// **What wakes it** is [`WAKE_SOURCES`](versions::WAKE_SOURCES) and nothing else: the signed document (`policy`),
+/// enrollment and the connection (`snapshot`), an employee signing in or out (`presence`), a watched process of an app
+/// that has an update waiting ending (`app_exit`), and the earliest retry that is due (`retry_timer`). There is no
+/// interval and no polling: an update that waits for an apply window sleeps until one of the first four happens.
 pub async fn run_install_task(
     deps: EngineDeps,
-    mut policy_rx: watch::Receiver<AgentPolicy>,
-    mut snapshot_rx: watch::Receiver<AgentSnapshot>,
+    policy_rx: watch::Receiver<AgentPolicy>,
+    snapshot_rx: watch::Receiver<AgentSnapshot>,
     shutdown: CancellationToken,
 ) {
-    let mut engine = Engine { deps, icons_tried: HashSet::new() };
+    tracing::debug!(wake_sources = ?versions::WAKE_SOURCES, "the install engine starts");
+    let (exit_tx, exit_rx) = mpsc::unbounded_channel();
+    let presence_rx = deps.signed_in.clone();
+    let signed_in_now = *presence_rx.borrow();
+    let started_ms = (deps.now_ms)();
+    let mut engine = Engine {
+        deps,
+        icons_tried: HashSet::new(),
+        started_ms,
+        ever_signed_in: signed_in_now,
+        was_signed_in: signed_in_now,
+        exit_watches: HashMap::new(),
+        exit_tx,
+    };
     engine.recover();
+    run_loop(&mut engine, policy_rx, snapshot_rx, presence_rx, exit_rx, &shutdown).await;
+    // Every wait for a process ends with the engine (its blocking thread returns).
+    engine.cancel_exit_watches();
+}
+
+async fn run_loop(
+    engine: &mut Engine,
+    mut policy_rx: watch::Receiver<AgentPolicy>,
+    mut snapshot_rx: watch::Receiver<AgentSnapshot>,
+    mut presence_rx: watch::Receiver<bool>,
+    mut exit_rx: mpsc::UnboundedReceiver<u32>,
+    shutdown: &CancellationToken,
+) {
     let mut catalog_seen: Option<Vec<CatalogApp>> = None;
+    let mut presence_open = true;
     loop {
         if shutdown.is_cancelled() {
             return;
@@ -1320,30 +2242,35 @@ pub async fn run_install_task(
                 snapshot.convex_url.clone(),
             )
         };
+        let signed_in = engine.refresh_presence(&mut presence_rx);
         let mut wake = None;
         if enrolled {
             engine.reconcile(&policy);
             engine.reconcile_drivers(&policy);
+            engine.evaluate_waiting(signed_in);
             if online && policy.has_document {
                 if catalog_seen.as_ref() != Some(&policy.catalog) {
                     // A new catalogue: icons that failed before may work now.
                     engine.icons_tried.clear();
                     catalog_seen = Some(policy.catalog.clone());
                 }
-                engine.fetch_icons(&policy, deployment.as_deref(), &shutdown).await;
+                engine.fetch_icons(&policy, deployment.as_deref(), shutdown).await;
                 if shutdown.is_cancelled() {
                     return;
                 }
             }
-            if let Some(job) = engine.next_job(online) {
+            let plan = engine.plan(online, signed_in);
+            if let Some(job) = plan.job {
                 if job.driver {
-                    engine.run_driver_job(&job.id, job.removal, &policy, &shutdown).await;
+                    engine.run_driver_job(&job.id, job.removal, &policy, shutdown).await;
                 } else {
-                    engine.run_job(&job.id, job.removal, &policy, &shutdown).await;
+                    engine.run_job(&job.id, job.removal, job.stage, &policy, shutdown).await;
                 }
                 continue;
             }
-            wake = engine.next_wake(online);
+            // Nothing to do now: an update that waits for the app to close is woken by the app's exit.
+            engine.watch_exits();
+            wake = plan.wake;
         }
         let now = engine.now();
         let timer = async {
@@ -1364,6 +2291,17 @@ pub async fn run_install_task(
                 if changed.is_err() {
                     shutdown.cancelled().await;
                     return;
+                }
+            }
+            changed = presence_rx.changed(), if presence_open => {
+                if changed.is_err() {
+                    // No session layer any more: sign-in state stops changing, nothing else is affected.
+                    presence_open = false;
+                }
+            }
+            ended = exit_rx.recv() => {
+                if let Some(pid) = ended {
+                    engine.exit_watches.remove(&pid);
                 }
             }
             () = timer => {}

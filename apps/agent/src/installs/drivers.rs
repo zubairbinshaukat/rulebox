@@ -455,7 +455,8 @@ impl Engine {
                     wait_again(record);
                     None
                 }
-                Outcome::Abandoned | Outcome::Dropped => None,
+                // (Phase 6 Step 11) What only an app's install can end in.
+                Outcome::Abandoned | Outcome::Dropped | Outcome::Staged | Outcome::Deferred | Outcome::AppInstalled { .. } => None,
             }
         });
         self.push(report.into_iter().collect());

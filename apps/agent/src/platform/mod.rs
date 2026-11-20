@@ -3,6 +3,7 @@
 //! in memory; `WindowsPlatform` (Step 10) forwards to `rulebox-win32`.
 
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
@@ -17,6 +18,8 @@ pub use rulebox_win32::accounts::LockoutPolicy;
 pub use rulebox_win32::applocker::{AppLockerState, Mechanism as AppLockerMechanism};
 pub use rulebox_win32::etw::{ProcessSink, ProcessStart, TraceHandle, TraceStats};
 pub use rulebox_win32::eventlog::EventRecord;
+// (Phase 6 Step 8) The kind of an entry written to the Application event log.
+pub use rulebox_win32::eventwrite::Kind as EventKind;
 pub use rulebox_win32::fileid::{FileIdentity, FileStamp};
 pub use rulebox_win32::process::ProcessInfo;
 pub use rulebox_win32::posture::SecurityPosture;
@@ -83,6 +86,10 @@ pub const MUTATING_METHODS: &[&str] = &[
     "remove_safe_boot_entry",
     // Phase 5 Step 6.
     "refresh_ci_policies",
+    // Phase 6 Step 8.
+    "write_install_marker",
+    "run_webview_bootstrapper",
+    "report_event",
 ];
 
 /// (Phase 5 Step 3, plan 4.5 rule 2) Whether `path` may get a new ACL: it is the install
@@ -283,6 +290,16 @@ pub enum PlatformError {
     Other(String),
 }
 
+/// (Phase 6 Step 8) One value of the install marker `HKLM\SOFTWARE\Rulebox\Install` that the
+/// agent keeps (the MSI writes `InstallDir` and `Version`).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum InstallMarkerValue {
+    /// What the production guard compares with this computer.
+    ComputerName(String),
+    /// What the MSI's uninstall guard reads: 1 while the kiosk is on.
+    KioskOn(bool),
+}
+
 /// (Phase 4 Step 16) What [`Platform::reset_folder`] did.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ResetOutcome {
@@ -293,6 +310,14 @@ pub enum ResetOutcome {
     /// A file in it is open (sharing violation): what could be deleted is deleted,
     /// the rest stays for the retry.
     InUse,
+}
+
+/// (Phase 6 Step 11) One wait for a process to end ([`Platform::watch_process_exit`]). `wait` blocks (call it from a
+/// blocking thread) until the process ended (`true`) or `cancel` was called (`false`). No polling on the real
+/// platform: it waits on the process handle.
+pub trait ExitWatch: Send + Sync {
+    fn wait(&self) -> bool;
+    fn cancel(&self);
 }
 
 // (Phase 5 Step 3) Nothing calls the new seam yet: the layers of Steps 4 to 20 do.
@@ -418,6 +443,15 @@ pub trait Platform: Send + Sync + 'static {
     fn file_sha256(&self, path: &Path, max_bytes: u64) -> Result<Option<String>, PlatformError>;
     /// The kernel's loss counters of a running process trace (edge case 45).
     fn process_trace_stats(&self, handle: TraceHandle) -> Result<TraceStats, PlatformError>;
+    /// (Phase 6 Step 11, plan 4.4.1) The file version of a program: the fixed numbers of its version resource as
+    /// `a.b.c.d`. `Ok(None)`: no such file, or it has no version. Read-only.
+    fn file_version(&self, path: &Path) -> Result<Option<String>, PlatformError>;
+    /// (Phase 6 Step 11, plan 4.4.3) The names of the folders directly inside `dir`, for a versioned program
+    /// folder (`app-1.2.3`). `Ok(empty)`: no such folder. Read-only; never follows a link.
+    fn list_folder_names(&self, dir: &Path) -> Result<Vec<String>, PlatformError>;
+    /// (Phase 6 Step 11, plan 4.4.5) Something that wakes when process `pid` ends, so the install engine learns that an
+    /// app closed without a timer. `Ok(None)`: the process is gone or cannot be watched. Read-only.
+    fn watch_process_exit(&self, pid: u32) -> Result<Option<Arc<dyn ExitWatch>>, PlatformError>;
 
     // mutating: every `WindowsPlatform` implementation calls `guard::require_armed_machine()` first (via `guard()`)
     fn create_staff_user(&self, spec: &StaffUserSpec, password: &str) -> Result<String, PlatformError>;
@@ -533,4 +567,26 @@ pub trait Platform: Send + Sync + 'static {
     /// (Phase 5 Step 5) Deletes `SafeBoot\<mode>\RuleboxAgent` (`Minimal` or `Network`), the
     /// agent's own Safe Mode key, and nothing else.
     fn remove_safe_boot_entry(&self, mode: &str) -> Result<(), PlatformError>;
+
+    // mutating, Phase 6 Step 8 (plan 4.10): the install marker, the WebView2 bootstrapper and one
+    // event log entry. The first one is allowed one condition less than the others (the marker
+    // cannot name this computer before it has been written); see `guard::marker_write_allowed`.
+    /// Sets one value of the install marker. `Ok(false)`: the marker (the MSI's `Install` key) does
+    /// not exist, so nothing was written and nothing was created (a dev PC, a VM, no MSI).
+    fn write_install_marker(&self, value: &InstallMarkerValue) -> Result<bool, PlatformError>;
+    /// Runs Microsoft's WebView2 bootstrapper (`/silent /install`) and waits for it, at most
+    /// `timeout`. `exe` must be `MicrosoftEdgeWebview2Setup.exe` in the install folder, and its
+    /// SHA-256 must equal `expected_sha256` at the moment of the start (checked again here, after
+    /// the caller's own check). The process and everything it starts are ended on a timeout or a
+    /// cancel. Blocking: call it from a worker thread.
+    fn run_webview_bootstrapper(
+        &self,
+        exe: &Path,
+        expected_sha256: &str,
+        timeout: Duration,
+        cancel: &CancellationToken,
+    ) -> Result<InstallerExit, PlatformError>;
+    /// Writes one entry to the Windows Application event log (source `Rulebox Agent`). The text
+    /// must never hold a secret.
+    fn report_event(&self, kind: EventKind, event_id: u32, message: &str) -> Result<(), PlatformError>;
 }

@@ -150,6 +150,13 @@ export const INSTALL_DETAILS: ReadonlySet<string> = new Set([
   // Step 14b (drivers): an INF package whose catalog is not validly signed, and an archive the agent refused to unpack.
   "unsigned_driver",
   "bad_package",
+  // Phase 6 Step 11 (versions, modes, rollback): publisher check, rollback outcomes, version floor, update waiting for a running app.
+  "publisher_mismatch",
+  "update_rolled_back",
+  "rollback_failed",
+  "rollback_unsupported",
+  "version_too_low",
+  "waiting_for_close",
 ]);
 
 /** The install states a report stores (A12, 4.8 amended): `pending` (accepted) and the terminal ones. */

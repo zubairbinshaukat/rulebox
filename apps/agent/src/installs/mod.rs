@@ -33,6 +33,7 @@ pub mod drivers_rules;
 pub mod icons;
 pub mod report;
 pub mod unzip;
+pub mod version;
 
 /// An installer still running after this long is killed (`failed` / `timeout`).
 pub const INSTALL_TIMEOUT: Duration = Duration::from_secs(30 * 60);
@@ -101,10 +102,24 @@ pub enum Detail {
     UnsignedDriver,
     /// (Step 14b) The zip was refused (unsafe path, too big, no such `.inf`).
     BadPackage,
+    // -- (Phase 6 Step 11, plan 4.6 "New details") Not yet in `INSTALL_DETAILS` of
+    //    `convex/lib/deviceApiRules.ts`: until they are, the server stores such a result without its detail. --
+    /// The installer file is not signed by the app's `publisher`: it was not run.
+    PublisherMismatch,
+    /// A failed update was undone: the old version works again.
+    UpdateRolledBack,
+    /// A failed update could not be undone (the previous installer failed, or is gone).
+    RollbackFailed,
+    /// A failed update cannot be undone (an MSI cannot be installed over a newer one and its product code is unknown).
+    RollbackUnsupported,
+    /// The program's file version is lower than the version the catalogue says it installs.
+    VersionTooLow,
+    /// An update is ready and waits for the apply window.
+    WaitingForClose,
 }
 
 impl Detail {
-    pub const ALL: [Detail; 12] = [
+    pub const ALL: [Detail; 18] = [
         Detail::DownloadFailed,
         Detail::HashMismatch,
         Detail::TooLarge,
@@ -117,6 +132,12 @@ impl Detail {
         Detail::RemoveFailed,
         Detail::UnsignedDriver,
         Detail::BadPackage,
+        Detail::PublisherMismatch,
+        Detail::UpdateRolledBack,
+        Detail::RollbackFailed,
+        Detail::RollbackUnsupported,
+        Detail::VersionTooLow,
+        Detail::WaitingForClose,
     ];
 
     pub fn as_str(self) -> &'static str {
@@ -133,6 +154,12 @@ impl Detail {
             Detail::RemoveFailed => "remove_failed",
             Detail::UnsignedDriver => "unsigned_driver",
             Detail::BadPackage => "bad_package",
+            Detail::PublisherMismatch => "publisher_mismatch",
+            Detail::UpdateRolledBack => "update_rolled_back",
+            Detail::RollbackFailed => "rollback_failed",
+            Detail::RollbackUnsupported => "rollback_unsupported",
+            Detail::VersionTooLow => "version_too_low",
+            Detail::WaitingForClose => "waiting_for_close",
         }
     }
 
@@ -649,7 +676,7 @@ mod tests {
 
     #[test]
     fn details_are_exactly_the_servers_fixed_list() {
-        // `INSTALL_DETAILS` in convex/lib/deviceApiRules.ts, in its order.
+        // `INSTALL_DETAILS` in convex/lib/deviceApiRules.ts, in its order (the last six are the Phase 6 Step 11 details).
         let server = [
             "download_failed",
             "hash_mismatch",
@@ -663,6 +690,12 @@ mod tests {
             "remove_failed",
             "unsigned_driver",
             "bad_package",
+            "publisher_mismatch",
+            "update_rolled_back",
+            "rollback_failed",
+            "rollback_unsupported",
+            "version_too_low",
+            "waiting_for_close",
         ];
         let ours: Vec<&str> = Detail::ALL.iter().map(|d| d.as_str()).collect();
         assert_eq!(ours, server);

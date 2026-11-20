@@ -216,6 +216,16 @@ pub fn set_hklm(path: &str, name: &str, value: Option<&RegValue>) -> Result<()> 
     }
 }
 
+/// (Phase 6 Step 8) Writes one value of a key that already exists (64-bit view); `Ok(false)`
+/// when the key is not there, in which case nothing is created. Crate-private and **not
+/// guarded here**: its only caller, `installmarker`, applies the marker guard first.
+pub(crate) fn set_hklm_existing_key(path: &str, name: &str, value: &RegValue) -> Result<bool> {
+    match open_key(HKEY_LOCAL_MACHINE, path, KEY_SET_VALUE | KEY_WOW64_64KEY)? {
+        Some(key) => write_value(&key, name, Some(value)).map(|()| true),
+        None => Ok(false),
+    }
+}
+
 /// (Phase 5 Step 5) Deletes the key `HKLM\<path>` (64-bit view) if it has no subkeys. A
 /// key that does not exist succeeds. Callers restrict which keys reach this
 /// (`machinereg::delete_safe_boot_entry`).

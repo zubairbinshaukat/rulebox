@@ -16,7 +16,7 @@ use super::{
     ProcessInfo, ProcessSink, ProcessStart, RegData, RegValueRef, ResetOutcome, SecurityPosture, ServiceConfig,
     SessionInfo, ShellBinaries, ShellMechanism, StaffUserSpec, TraceHandle, TraceStats, WlanState,
 };
-use super::{FolderAcl, LocalAdminAccount};
+use super::{EventKind, FolderAcl, InstallMarkerValue, LocalAdminAccount};
 use rulebox_win32::posture::{BitLocker, SecureBoot, Tpm};
 use rulebox_win32::{applocker, bcd, codeintegrity, eventlog, machinereg, printing, service, staffreg, wlan};
 
@@ -131,6 +131,14 @@ pub enum SimOp {
     // Phase 6 Step 6 (read-only).
     Webview2Version,
     ProtectedPrintOn,
+    // Phase 6 Step 11 (all read-only).
+    FileVersion,
+    ListFolderNames,
+    WatchProcessExit,
+    // Phase 6 Step 8 (all three change the machine).
+    WriteInstallMarker,
+    RunWebviewBootstrapper,
+    ReportEvent,
 }
 
 impl SimOp {
@@ -186,6 +194,9 @@ impl SimOp {
                 | SimOp::ProcessTraceStats
                 | SimOp::Webview2Version
                 | SimOp::ProtectedPrintOn
+                | SimOp::FileVersion
+                | SimOp::ListFolderNames
+                | SimOp::WatchProcessExit
         )
     }
 }
@@ -251,6 +262,11 @@ pub struct SimWorld {
     pub installer_creates_exe: bool,
     /// (Step 14) Every installer run, in order (nothing is ever executed).
     pub installer_runs: Vec<InstallerCommand>,
+    /// (Phase 6 Step 11) The file version of a program (lowercase path to `a.b.c.d`).
+    pub file_versions: HashMap<String, String>,
+    /// (Phase 6 Step 11) The version a successful install of the installer file named by this SHA-256 gives its
+    /// program (`file_versions` of the expected exe). An installer without an entry leaves the version alone.
+    pub installer_versions: HashMap<String, String>,
     /// (Step 14b) The `oem<N>.inf` packages of the fake driver store, and the number the next one gets.
     pub driver_store: std::collections::BTreeSet<String>,
     pub next_oem: u32,
@@ -315,6 +331,14 @@ pub struct SimWorld {
     /// Windows protected print mode is on.
     pub webview2_pv: Option<String>,
     pub protected_print: bool,
+    /// (Phase 6 Step 8) Every accepted `run_webview_bootstrapper` call (the exe and the hash it
+    /// was given), what the run answers, and what the runtime's `pv` becomes after a success
+    /// (`None`: the run changes nothing, as when it was blocked or failed quietly).
+    pub bootstrapper_runs: Vec<(PathBuf, String)>,
+    pub bootstrapper_exit: InstallerExit,
+    pub bootstrapper_installs_pv: Option<String>,
+    /// (Phase 6 Step 8) Every `report_event` call: kind, id, text.
+    pub events: Vec<(super::EventKind, u32, String)>,
     /// DACLs of files and folders (lowercase path to SDDL).
     pub path_acls: HashMap<String, String>,
     /// (Step 8) Program files the watchdog can ask about (lowercase path to what the file says).
@@ -365,6 +389,8 @@ impl SimWorld {
             installer_exits: VecDeque::new(),
             installer_creates_exe: true,
             installer_runs: Vec::new(),
+            file_versions: HashMap::new(),
+            installer_versions: HashMap::new(),
             driver_store: std::collections::BTreeSet::new(),
             next_oem: 1,
             driver_add_publishes: true,
@@ -421,6 +447,10 @@ impl SimWorld {
             },
             webview2_pv: Some("130.0.2849.80".into()),
             protected_print: false,
+            bootstrapper_runs: Vec::new(),
+            bootstrapper_exit: InstallerExit::Code(0),
+            bootstrapper_installs_pv: Some("131.0.2903.51".into()),
+            events: Vec::new(),
             path_acls: HashMap::new(),
             programs: HashMap::new(),
             trace_stats: TraceStats::default(),
@@ -484,6 +514,41 @@ fn sim_services() -> HashMap<String, SimService> {
         .collect()
 }
 
+/// (Phase 6 Step 11) One simulated wait for a process to end: `wait` blocks on a condition variable (no polling, like
+/// the real one) until the process left the machine (`true`) or the wait was cancelled (`false`).
+pub struct SimExit {
+    done: Mutex<Option<bool>>,
+    wake: std::sync::Condvar,
+}
+
+impl SimExit {
+    fn new() -> Self {
+        Self { done: Mutex::new(None), wake: std::sync::Condvar::new() }
+    }
+
+    fn finish(&self, ended: bool) {
+        let mut done = lock(&self.done);
+        done.get_or_insert(ended);
+        self.wake.notify_all();
+    }
+}
+
+impl super::ExitWatch for SimExit {
+    fn wait(&self) -> bool {
+        let mut done = lock(&self.done);
+        loop {
+            if let Some(ended) = *done {
+                return ended;
+            }
+            done = self.wake.wait(done).unwrap_or_else(PoisonError::into_inner);
+        }
+    }
+
+    fn cancel(&self) {
+        self.finish(false);
+    }
+}
+
 /// (Step 16 review) A reset that blocks: see [`SimWorld::reset_hang`].
 #[derive(Debug, Clone)]
 pub struct SimHang {
@@ -504,6 +569,9 @@ pub struct SimPlatform {
     data_dir: PathBuf,
     /// Running process traces (Phase 5 Step 3); tests feed them with `emit_process_start`.
     traces: Mutex<Vec<(TraceHandle, ProcessSink)>>,
+    /// (Phase 6 Step 11) The waits for a process to end that are running (`watch_process_exit`); a process that
+    /// leaves the simulated machine ends the waits of its id.
+    exit_waiters: Mutex<Vec<(u32, std::sync::Arc<SimExit>)>>,
     /// Every operation in the order it was called (tests only).
     #[cfg(test)]
     calls: Mutex<Vec<SimOp>>,
@@ -520,9 +588,36 @@ impl SimPlatform {
             failures: Mutex::new(HashMap::new()),
             data_dir,
             traces: Mutex::new(Vec::new()),
+            exit_waiters: Mutex::new(Vec::new()),
             #[cfg(test)]
             calls: Mutex::new(Vec::new()),
         }
+    }
+
+    /// (Phase 6 Step 11) A process left the machine: the waits for it end.
+    fn signal_exit(&self, pid: u32) {
+        let mut waiters = lock(&self.exit_waiters);
+        waiters.retain(|(waiting_for, watch)| {
+            if *waiting_for == pid {
+                watch.finish(true);
+                false
+            } else {
+                true
+            }
+        });
+    }
+
+    /// (Phase 6 Step 11, tests) The process `pid` ends: it leaves the machine and every wait for it returns.
+    #[cfg(test)]
+    pub fn end_process(&self, pid: u32) {
+        lock(&self.world).processes.retain(|p| p.pid != pid);
+        self.signal_exit(pid);
+    }
+
+    /// (Phase 6 Step 11, tests) How many waits for a process end are running.
+    #[cfg(test)]
+    pub fn exit_waits_running(&self) -> usize {
+        lock(&self.exit_waiters).iter().filter(|(_, watch)| lock(&watch.done).is_none()).count()
     }
 
     /// The operations called so far, oldest first (tests only).
@@ -794,7 +889,12 @@ impl Platform for SimPlatform {
         self.check(SimOp::LogoffSession)?;
         let mut world = lock(&self.world);
         world.sessions.retain(|s| s.id != session_id);
+        let ended: Vec<u32> = world.processes.iter().filter(|p| p.session_id == session_id).map(|p| p.pid).collect();
         world.processes.retain(|p| p.session_id != session_id);
+        drop(world);
+        for pid in ended {
+            self.signal_exit(pid);
+        }
         Ok(())
     }
 
@@ -830,6 +930,8 @@ impl Platform for SimPlatform {
         match found {
             Some(index) => {
                 world.processes.remove(index);
+                drop(world);
+                self.signal_exit(pid);
                 Ok(())
             }
             None => Err(PlatformError::NotFound),
@@ -929,8 +1031,17 @@ impl Platform for SimPlatform {
                 || (cmd.removal && code == MSI_UNKNOWN_PRODUCT);
             if success && cmd.removal {
                 world.files.remove(exe);
+                world.file_versions.remove(&acl_key(exe));
             } else if success && world.installer_creates_exe {
                 world.files.insert(exe.clone());
+                // (Phase 6 Step 11) The file version the installer file gives its program: by the installer's SHA-256
+                // (the file stem of the exe, or of the `.msi` that msiexec was given).
+                let is_msiexec = cmd.program.file_name().is_some_and(|n| n.eq_ignore_ascii_case("msiexec.exe"));
+                let file = if is_msiexec { cmd.args.get(1).map(PathBuf::from) } else { Some(cmd.program.clone()) };
+                let stem = file.and_then(|f| f.file_stem().map(|s| s.to_string_lossy().to_ascii_lowercase()));
+                if let Some(version) = stem.and_then(|stem| world.installer_versions.get(&stem).cloned()) {
+                    world.file_versions.insert(acl_key(exe), version);
+                }
             }
         }
         Ok(exit)
@@ -1285,6 +1396,44 @@ impl Platform for SimPlatform {
             .and_then(|p| p.sha256.clone()))
     }
 
+    fn file_version(&self, path: &Path) -> Result<Option<String>, PlatformError> {
+        self.check(SimOp::FileVersion)?;
+        Ok(lock(&self.world).file_versions.get(&acl_key(path)).cloned())
+    }
+
+    fn list_folder_names(&self, dir: &Path) -> Result<Vec<String>, PlatformError> {
+        self.check(SimOp::ListFolderNames)?;
+        let world = lock(&self.world);
+        let mut names: Vec<String> = Vec::new();
+        // A folder is named by the first part below `dir` of anything inside it (a file needs a second part).
+        let inside = world
+            .files
+            .iter()
+            .map(|path| (path, 2))
+            .chain(world.dirs.iter().map(|path| (path, 1)))
+            .filter_map(|(path, needed)| {
+                let rest: Vec<_> = path.strip_prefix(dir).ok()?.components().collect();
+                (rest.len() >= needed).then(|| rest[0].as_os_str().to_string_lossy().into_owned())
+            });
+        for name in inside {
+            if !names.contains(&name) {
+                names.push(name);
+            }
+        }
+        names.sort();
+        Ok(names)
+    }
+
+    fn watch_process_exit(&self, pid: u32) -> Result<Option<std::sync::Arc<dyn super::ExitWatch>>, PlatformError> {
+        self.check(SimOp::WatchProcessExit)?;
+        if !lock(&self.world).processes.iter().any(|p| p.pid == pid) {
+            return Ok(None);
+        }
+        let watch = std::sync::Arc::new(SimExit::new());
+        lock(&self.exit_waiters).push((pid, std::sync::Arc::clone(&watch)));
+        Ok(Some(watch))
+    }
+
     fn process_trace_stats(&self, handle: TraceHandle) -> Result<TraceStats, PlatformError> {
         self.check(SimOp::ProcessTraceStats)?;
         if !lock(&self.traces).iter().any(|(h, _)| *h == handle) {
@@ -1543,6 +1692,61 @@ impl Platform for SimPlatform {
             return Err(PlatformError::Refused("not a Rulebox folder"));
         }
         lock(&self.world).path_acls.insert(acl_key(path), sddl.to_string());
+        Ok(())
+    }
+
+    /// (Phase 6 Step 8) Like `WindowsPlatform`: only when the MSI's `Install` key exists (it
+    /// holds `InstallDir`); nothing is created otherwise.
+    fn write_install_marker(&self, value: &InstallMarkerValue) -> Result<bool, PlatformError> {
+        self.check(SimOp::WriteInstallMarker)?;
+        let install_dir = RegValueRef { path: rulebox_win32::guard::INSTALL_KEY.into(), name: rulebox_win32::guard::INSTALL_DIR_VALUE.into() };
+        let mut world = lock(&self.world);
+        if !world.machine_values.contains_key(&install_dir) {
+            return Ok(false);
+        }
+        let (name, data) = match value {
+            InstallMarkerValue::ComputerName(name) => {
+                rulebox_win32::installmarker::check_computer_name(name).map_err(map_err)?;
+                (rulebox_win32::guard::INSTALL_COMPUTER_VALUE, RegData::String(name.clone()))
+            }
+            InstallMarkerValue::KioskOn(on) => (rulebox_win32::installmarker::KIOSK_ON_VALUE, RegData::Dword(u32::from(*on))),
+        };
+        world.machine_values.insert(RegValueRef { path: rulebox_win32::guard::INSTALL_KEY.into(), name: name.into() }, data);
+        Ok(true)
+    }
+
+    /// (Phase 6 Step 8) The same refusals as `WindowsPlatform` (the file's place, then its pinned
+    /// hash), then the scripted answer; a success changes the runtime's `pv` as scripted.
+    fn run_webview_bootstrapper(
+        &self,
+        exe: &Path,
+        expected_sha256: &str,
+        _timeout: Duration,
+        _cancel: &CancellationToken,
+    ) -> Result<InstallerExit, PlatformError> {
+        self.check(SimOp::RunWebviewBootstrapper)?;
+        let install_root = PathBuf::from(sim_path_roots().program_files).join("Rulebox");
+        if !crate::setup::webview2::bootstrapper_path_ok(&install_root, exe) {
+            return Err(PlatformError::Refused("not the WebView2 bootstrapper of the install folder"));
+        }
+        let mut world = lock(&self.world);
+        let actual = world.programs.get(&acl_key(exe)).and_then(|program| program.sha256.clone());
+        if !actual.is_some_and(|hash| hash.eq_ignore_ascii_case(expected_sha256)) {
+            return Err(PlatformError::Refused("the WebView2 bootstrapper is not the pinned file"));
+        }
+        world.bootstrapper_runs.push((exe.to_path_buf(), expected_sha256.to_string()));
+        let exit = world.bootstrapper_exit;
+        if exit == InstallerExit::Code(0) {
+            if let Some(pv) = world.bootstrapper_installs_pv.clone() {
+                world.webview2_pv = Some(pv);
+            }
+        }
+        Ok(exit)
+    }
+
+    fn report_event(&self, kind: EventKind, event_id: u32, message: &str) -> Result<(), PlatformError> {
+        self.check(SimOp::ReportEvent)?;
+        lock(&self.world).events.push((kind, event_id, rulebox_win32::eventwrite::clip_message(message)));
         Ok(())
     }
 }

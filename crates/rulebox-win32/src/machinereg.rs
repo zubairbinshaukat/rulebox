@@ -53,6 +53,10 @@ pub const ALLOWED_ROOTS: &[&str] = &[
     // Delivery Optimization's download mode (peer sharing off). Policy keys only.
     DATA_COLLECTION,
     DELIVERY_OPTIMIZATION,
+    // (Phase 6 Step 8) The MSI's pending enrollment code: the agent deletes its `Code` value
+    // (plan 4.10). Nothing else of `HKLM\SOFTWARE\Rulebox\Install` is writable through here;
+    // `ComputerName` and `KioskOn` go through `installmarker`.
+    crate::installmarker::PENDING_KEY,
 ];
 
 fn is_subtree_root(root: &str) -> bool {
@@ -183,6 +187,22 @@ mod tests {
         ] {
             assert!(matches!(check_write(path, "X", Some(&value)), Err(Win32Error::Forbidden(_))), "{path}");
             assert!(matches!(set_machine_value(path, "X", Some(&value)), Err(Win32Error::Forbidden(_))), "{path}");
+        }
+    }
+
+    #[test]
+    fn only_the_pending_enrollment_key_of_the_install_marker_is_writable() {
+        // (Phase 6 Step 8) The agent deletes `Install\Pending\Code`; the marker itself is not here.
+        let code = crate::installmarker::PENDING_KEY;
+        assert!(check_write(code, "Code", None).is_ok());
+        for path in [
+            r"SOFTWARE\Rulebox\Install",
+            r"SOFTWARE\Rulebox",
+            r"SOFTWARE\Rulebox\InstallX",
+            r"SOFTWARE\Rulebox\Install\PendingX",
+            r"SOFTWARE\Rulebox\Install\Pending\..\..",
+        ] {
+            assert!(matches!(check_write(path, "InstallDir", None), Err(Win32Error::Forbidden(_))), "{path}");
         }
     }
 

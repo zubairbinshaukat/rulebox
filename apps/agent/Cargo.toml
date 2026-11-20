@@ -40,6 +40,16 @@ tracing.workspace = true
 tracing-appender.workspace = true
 tracing-subscriber.workspace = true
 windows-service.workspace = true
+# (Phase 6 Step 8) Rulebox Setup's native window, `setup/ui.rs` only (plan 4.10.1: the launcher's
+# Win32 toolkit, no WebView). Every other Win32 call stays in rulebox-win32.
+windows = { workspace = true, features = [
+    "Win32_Foundation",
+    "Win32_Graphics_Gdi",
+    "Win32_System_Console",
+    "Win32_System_LibraryLoader",
+    "Win32_UI_Input_KeyboardAndMouse",
+    "Win32_UI_WindowsAndMessaging",
+] }
 
 [build-dependencies]
 # (Phase 5 Step 6) build.rs hashes the embedded App Control binaries.

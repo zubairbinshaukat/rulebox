@@ -447,9 +447,46 @@ pub fn process_is_elevated() -> Result<bool> {
     Ok(elevation.TokenIsElevated != 0)
 }
 
+/// The only arguments [`relaunch_setup_elevated`] passes: no caller text ever reaches the new
+/// process's command line.
+pub const SETUP_ARGUMENTS: &str = "setup --relaunched";
+
+/// (Phase 6 Step 8) Starts this program again with the `runas` verb and the fixed arguments
+/// [`SETUP_ARGUMENTS`], so Windows asks for administrator rights (a consent prompt, or a password
+/// for a standard user) and Rulebox Setup runs elevated. The caller then ends. Returns an error
+/// when the prompt is declined or the program cannot start. It changes nothing on the machine by
+/// itself (a prompt, then our own exe), so it is not guarded; the guarded work happens in the
+/// elevated copy.
+pub fn relaunch_setup_elevated() -> Result<()> {
+    use windows::Win32::UI::Shell::{ShellExecuteExW, SEE_MASK_NOASYNC, SHELLEXECUTEINFOW};
+    use windows::Win32::UI::WindowsAndMessaging::SW_SHOWNORMAL;
+
+    let exe = std::env::current_exe().map_err(|e| Win32Error::Invalid(format!("cannot find this program: {e}")))?;
+    let verb = to_wide("runas");
+    let file = to_wide(&exe.to_string_lossy());
+    let arguments = to_wide(SETUP_ARGUMENTS);
+    let mut info = SHELLEXECUTEINFOW {
+        cbSize: std::mem::size_of::<SHELLEXECUTEINFOW>() as u32,
+        fMask: SEE_MASK_NOASYNC,
+        lpVerb: PCWSTR(verb.as_ptr()),
+        lpFile: PCWSTR(file.as_ptr()),
+        lpParameters: PCWSTR(arguments.as_ptr()),
+        nShow: SW_SHOWNORMAL.0,
+        ..Default::default()
+    };
+    // SAFETY: `info` is fully initialised; the three strings are NUL-terminated and outlive the call.
+    unsafe { ShellExecuteExW(&mut info) }.map_err(|e| api_err("ShellExecuteExW", &e))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_setup_relaunch_passes_only_fixed_arguments() {
+        // `--relaunched` tells the new copy not to ask for rights a second time.
+        assert_eq!(SETUP_ARGUMENTS, "setup --relaunched");
+    }
 
     #[test]
     fn the_process_token_can_be_read() {

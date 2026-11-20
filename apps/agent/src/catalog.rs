@@ -22,7 +22,7 @@ use rulebox_policy::catalog::{parse_catalog, CatalogApp, CatalogKind, CatalogToo
 use rulebox_policy::paths::{check_args, check_file_args, expand_exe, PathRoots};
 use serde_json::Value;
 
-use crate::installs::engine::{install_of, InstallBook};
+use crate::installs::engine::{install_of, resolve_program, InstallBook};
 use crate::installs::icons;
 use crate::platform::Platform;
 
@@ -91,6 +91,7 @@ fn entry_for(
     roots: Option<&PathRoots>,
     installed: &dyn Fn(&CatalogApp, &str) -> InstallView,
     icon: &dyn Fn(&CatalogApp) -> Option<String>,
+    resolve: &dyn Fn(&str) -> Option<String>,
 ) -> Option<AppEntry> {
     if !app.is_supported() || !app.visible_to(employee_id) {
         return None;
@@ -150,6 +151,9 @@ fn entry_for(
                     return None;
                 }
             };
+            // (Phase 6 Step 11, plan 4.4.3) A program in a versioned folder (`app-*\app.exe`) is sent as the path of the
+            // highest version that is there; with none there, the app is not installed.
+            let exe = if exe.contains('*') { resolve(&exe)? } else { exe };
             if installed(app, &exe) != InstallView::Installed {
                 return None;
             }
@@ -174,18 +178,20 @@ pub fn visible_apps(
     roots: Option<&PathRoots>,
     installed: &dyn Fn(&CatalogApp, &str) -> InstallView,
 ) -> Vec<AppEntry> {
-    visible_apps_with_icons(catalog, employee_id, roots, installed, &|_| None)
+    visible_apps_with_icons(catalog, employee_id, roots, installed, &|_| None, &|_| None)
 }
 
-/// [`visible_apps`] with `icon(app)` filling `iconPngBase64`.
+/// [`visible_apps`] with `icon(app)` filling `iconPngBase64`, and `resolve(template)` the path of a program in a
+/// versioned folder (plan 4.4.3).
 pub fn visible_apps_with_icons(
     catalog: &[CatalogApp],
     employee_id: &str,
     roots: Option<&PathRoots>,
     installed: &dyn Fn(&CatalogApp, &str) -> InstallView,
     icon: &dyn Fn(&CatalogApp) -> Option<String>,
+    resolve: &dyn Fn(&str) -> Option<String>,
 ) -> Vec<AppEntry> {
-    catalog.iter().filter_map(|app| entry_for(app, employee_id, roots, installed, icon)).collect()
+    catalog.iter().filter_map(|app| entry_for(app, employee_id, roots, installed, icon, resolve)).collect()
 }
 
 /// [`visible_apps`] on this PC: the platform's roots; with the install records
@@ -237,7 +243,17 @@ impl AppResolver {
             let dir = self.icons_dir.as_deref()?;
             icons::icon_base64(dir, app.icon.as_ref()?)
         };
-        visible_apps_with_icons(catalog, employee_id, roots.as_ref(), &installed, &icon)
+        let resolve = |exe: &str| {
+            resolve_program(self.platform.as_ref(), exe).map(|path| path.to_string_lossy().into_owned())
+        };
+        let mut entries = visible_apps_with_icons(catalog, employee_id, roots.as_ref(), &installed, &icon, &resolve);
+        // (Phase 6 Step 11, plan 4.4.5) "Updating..." / "Waiting for the app to close" on the tile of an app being updated.
+        if let Some(book) = &self.installs {
+            for entry in entries.iter_mut().filter(|entry| entry.desktop.is_some()) {
+                entry.update = book.update_state(&entry.id);
+            }
+        }
+        entries
     }
 }
 

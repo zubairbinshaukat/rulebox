@@ -119,6 +119,10 @@ pub struct Facts {
     /// expanded). llowlist App Control is refused while one is outside Program Files and the
     /// Windows folder (llowlist_level_with_user_install, edge case 48).
     pub catalogue_exe_folders: Vec<String>,
+    /// (Phase 6 Step 11, plan 4.4.3) The publisher rule of every assigned vendor-mode app, made from the catalogue
+    /// (`allowlist::vendor_exceptions`): added to the document's exceptions for AppLocker and the process watch, never for
+    /// App Control.
+    pub vendor_exceptions: Vec<rulebox_policy::lockdown::ExceptionRule>,
     /// (Step 17) The install folder and the agent's `state` folder, whose ACLs the tamper
     /// protection checks and repairs (plan 4.16). `None`: not known, the folder check is skipped.
     pub rulebox_folders: Option<super::tamper::RuleboxFolders>,

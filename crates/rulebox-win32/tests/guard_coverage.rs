@@ -255,7 +255,8 @@ fn both_root_lists_are_what_the_plan_says() {
     // the `DataCollection` and `DeliveryOptimization` policy keys (PRD 22.3).
     assert_eq!(staffreg::ALLOWED_ROOTS.len(), 16);
     assert!(staffreg::ALLOWED_ROOTS.contains(&r"Software\Policies\Microsoft\Windows\RemovableStorageDevices"));
-    assert_eq!(machinereg::ALLOWED_ROOTS.len(), 11);
+    assert_eq!(machinereg::ALLOWED_ROOTS.len(), 12);
+    assert!(machinereg::ALLOWED_ROOTS.contains(&rulebox_win32::installmarker::PENDING_KEY));
     assert!(machinereg::ALLOWED_ROOTS.contains(&machinereg::DATA_COLLECTION));
     assert!(machinereg::ALLOWED_ROOTS.contains(&machinereg::DELIVERY_OPTIMIZATION));
     assert!(machinereg::ALLOWED_ROOTS.contains(&machinereg::DEVICE_INSTALL_RESTRICTIONS));
@@ -308,10 +309,25 @@ fn no_mutating_code_checks_the_test_marker_alone() {
 #[test]
 fn the_other_mutating_modules_call_the_armed_guard() {
     // Modules that are not in `MODULES` (they have no allow-list or read-only split) but change the machine.
-    for file in ["registry", "tree", "process", "session", "shellreg", "lsa", "security", "accounts"] {
+    for file in ["registry", "tree", "process", "session", "shellreg", "lsa", "security", "accounts", "eventwrite"] {
         let text = source(file);
         assert!(non_test_code(&text).contains("require_armed_machine()?"), "{file}.rs");
     }
+}
+
+/// (Phase 6 Step 8) The install marker's own writes use the marker door (the production door without its
+/// ComputerName condition) and nothing else: no direct registry write, no other guard.
+#[test]
+fn the_install_marker_writes_use_the_marker_guard_and_never_create_the_key() {
+    let text = source("installmarker");
+    let code = non_test_code(&text);
+    assert_eq!(code.matches("require_marker_writable()?;").count(), 2, "one per write function");
+    assert!(!code.contains("require_test_machine") && !code.contains("set_hklm("), "no other door, no key creation");
+    assert!(code.contains("set_hklm_existing_key("));
+    // The helper that does the write is crate-private and opens an existing key only.
+    let registry = source("registry");
+    assert!(non_test_code(&registry).contains("pub(crate) fn set_hklm_existing_key"));
+    assert!(!non_test_code(&registry).split("pub(crate) fn set_hklm_existing_key").nth(1).unwrap_or_default().split("\n}\n").next().unwrap_or_default().contains("create_key"));
 }
 
 #[test]

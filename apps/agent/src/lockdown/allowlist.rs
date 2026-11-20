@@ -336,6 +336,48 @@ pub fn is_user_writable_location(path: &str, roots: &PathRoots) -> bool {
     risky.iter().any(|root| inside(&lower, root)) || lower.contains("\\appdata\\") || lower.contains("\\temp\\")
 }
 
+// ---------------------------------------------------------------- the catalogue's own rules (Phase 6 Step 11)
+
+/// (Phase 6 Step 11, plan 4.4.3) The publisher rule of every desktop app in `catalog` that updates itself (mode `vendor`): the
+/// vendor's updater and programs, signed by `update.publisher` (narrowed by `update.publisherProduct`), may start for the Staff
+/// SID like any exception (Phase 5 D2). Only **AppLocker and the process watch**; App Control never gets one (Phase 5 D3: an
+/// exception never loosens it). The id is `vendor-<app id>`, so a rule disappears with its app: the catalogue holds only the
+/// apps assigned to this PC. An app without a publisher gets none (the server refuses that save, `vendor_mode_needs_publisher`;
+/// defence in depth: a publisher-less rule would allow nothing it can name).
+pub fn vendor_exceptions(catalog: &[rulebox_policy::catalog::CatalogApp]) -> Vec<ExceptionRule> {
+    catalog
+        .iter()
+        .filter_map(|app| {
+            let desktop = app.desktop.as_ref()?;
+            if desktop.update_mode() != rulebox_policy::catalog::UpdateMode::Vendor {
+                return None;
+            }
+            let update = desktop.update.as_ref()?;
+            let subject = update.publisher.as_deref().filter(|subject| !subject.trim().is_empty())?;
+            Some(ExceptionRule {
+                id: format!("vendor-{}", app.id),
+                app_id: Some(app.id.clone()),
+                kind: ExceptionKind::Publisher,
+                publisher: Some(rulebox_policy::lockdown::PublisherMatch {
+                    subject: subject.to_string(),
+                    product: update.publisher_product.clone().filter(|product| !product.trim().is_empty()),
+                    file_name: None,
+                }),
+                sha256: None,
+                path: None,
+                layers: vec![ExceptionLayer::AppLocker, ExceptionLayer::ProcWatch],
+            })
+        })
+        .collect()
+}
+
+/// The document's exceptions and the catalogue's own ([`vendor_exceptions`]) as one list for [`Inputs::exceptions`].
+pub fn with_vendor_exceptions(document: &[ExceptionRule], vendor: &[ExceptionRule]) -> Vec<ExceptionRule> {
+    let mut all = document.to_vec();
+    all.extend(vendor.iter().cloned());
+    all
+}
+
 // ---------------------------------------------------------------- the allow-list
 
 /// An exception rule as AppLocker will carry it.

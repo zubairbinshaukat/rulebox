@@ -13,7 +13,8 @@ use std::time::Duration;
 
 use anyhow::{bail, Context};
 use rulebox_win32::{
-    accounts, applocker, bcd, codeintegrity, etw, eventlog, fileid, machinereg, posture, printing, service, staffreg, wlan,
+    accounts, applocker, bcd, codeintegrity, etw, eventlog, eventwrite, fileid, installmarker, machinereg, posture, printing,
+    service, staffreg, wlan,
 };
 use rulebox_win32::guard::require_armed_machine;
 use rulebox_win32::registry::{self, get_hklm, RegValue};
@@ -25,6 +26,7 @@ use rulebox_win32::{dpapi, lsa, osinfo, process, security, session, Win32Error};
 use serde::Deserialize;
 use tokio_util::sync::CancellationToken;
 
+use super::{EventKind, InstallMarkerValue};
 use super::{
     acl_target_allowed, AppLockerMechanism, AppLockerState, BootIdentity, EventRecord, InstallerCommand, InstallerExit,
     FileIdentity, FileStamp, LocalUser, LockoutPolicy, OsInfo, Platform, PlatformError, PortSpec, PrinterInfo, PrinterSpec,
@@ -88,6 +90,12 @@ fn guard() -> Result<(), PlatformError> {
     require_armed_machine().map_err(map_err)
 }
 
+/// (Phase 6 Step 8) The guard of the install-marker write only: the same, except that the marker
+/// may not name this computer yet (`rulebox_win32::guard::marker_write_allowed`).
+fn marker_guard() -> Result<(), PlatformError> {
+    rulebox_win32::guard::require_marker_writable().map_err(map_err)
+}
+
 fn parse_sid(sid: &str) -> Result<Sid, PlatformError> {
     Sid::parse(sid).map_err(map_err)
 }
@@ -141,6 +149,19 @@ pub(crate) fn staff_app_exe(install_root: &Path, json: &str) -> Option<PathBuf> 
 
 fn io_err(error: std::io::Error) -> PlatformError {
     PlatformError::Other(format!("file error: {error}"))
+}
+
+/// (Phase 6 Step 11) The real wait for a process to end: `rulebox_win32::procexit`.
+struct WinExitWatch(rulebox_win32::procexit::ExitWatch);
+
+impl super::ExitWatch for WinExitWatch {
+    fn wait(&self) -> bool {
+        self.0.wait()
+    }
+
+    fn cancel(&self) {
+        self.0.cancel();
+    }
 }
 
 impl Platform for WindowsPlatform {
@@ -783,6 +804,35 @@ impl Platform for WindowsPlatform {
         etw::trace_stats(handle).map_err(map_err)
     }
 
+    fn file_version(&self, path: &Path) -> Result<Option<String>, PlatformError> {
+        Ok(rulebox_win32::version::file_version(path))
+    }
+
+    fn list_folder_names(&self, dir: &Path) -> Result<Vec<String>, PlatformError> {
+        let entries = match std::fs::read_dir(dir) {
+            Ok(entries) => entries,
+            Err(e) if matches!(e.kind(), std::io::ErrorKind::NotFound | std::io::ErrorKind::NotADirectory) => return Ok(Vec::new()),
+            Err(e) => return Err(io_err(e)),
+        };
+        let mut names = Vec::new();
+        for entry in entries.flatten() {
+            // `file_type` does not follow a link: a junction or symbolic link is not a folder here.
+            if entry.file_type().is_ok_and(|kind| kind.is_dir() && !kind.is_symlink()) {
+                if let Ok(name) = entry.file_name().into_string() {
+                    names.push(name);
+                }
+            }
+        }
+        names.sort();
+        Ok(names)
+    }
+
+    fn watch_process_exit(&self, pid: u32) -> Result<Option<std::sync::Arc<dyn super::ExitWatch>>, PlatformError> {
+        Ok(rulebox_win32::procexit::ExitWatch::open(pid)
+            .map_err(map_err)?
+            .map(|watch| std::sync::Arc::new(WinExitWatch(watch)) as std::sync::Arc<dyn super::ExitWatch>))
+    }
+
     fn write_staff_value(&self, sid: &str, path: &str, name: &str, data: &RegData) -> Result<(), PlatformError> {
         staffreg::check_write(path, name).map_err(map_err)?;
         guard()?;
@@ -943,6 +993,75 @@ impl Platform for WindowsPlatform {
         machinereg::check_safe_boot_mode(mode).map_err(map_err)?;
         guard()?;
         machinereg::delete_safe_boot_entry(mode).map_err(map_err)
+    }
+
+    /// (Phase 6 Step 8) The marker guard is the production door without its last condition (the
+    /// marker is what is being written); `installmarker` checks it again.
+    fn write_install_marker(&self, value: &InstallMarkerValue) -> Result<bool, PlatformError> {
+        marker_guard()?;
+        let wrote = match value {
+            InstallMarkerValue::ComputerName(name) => installmarker::write_computer_name(name),
+            InstallMarkerValue::KioskOn(on) => installmarker::write_kiosk_on(*on),
+        };
+        wrote.map(|written| written == installmarker::MarkerWrite::Written).map_err(map_err)
+    }
+
+    /// (Phase 6 Step 8) Only `MicrosoftEdgeWebview2Setup.exe` in the install folder, and only when
+    /// its SHA-256 is the pinned one right now. Same job object as an installer: the bootstrapper
+    /// and everything it starts end on a timeout or a cancel (and when this process ends).
+    fn run_webview_bootstrapper(
+        &self,
+        exe: &Path,
+        expected_sha256: &str,
+        timeout: Duration,
+        cancel: &CancellationToken,
+    ) -> Result<InstallerExit, PlatformError> {
+        use std::os::windows::io::AsHandle;
+        use std::os::windows::process::CommandExt;
+        if !crate::setup::webview2::bootstrapper_path_ok(self.install.root(), exe) {
+            return Err(PlatformError::Refused("not the WebView2 bootstrapper of the install folder"));
+        }
+        guard()?;
+        let actual = self.file_sha256(exe, crate::setup::webview2::MAX_BOOTSTRAPPER_BYTES)?;
+        if !actual.is_some_and(|hash| hash.eq_ignore_ascii_case(expected_sha256)) {
+            return Err(PlatformError::Refused("the WebView2 bootstrapper is not the pinned file"));
+        }
+        let job = KillOnCloseJob::new().map_err(map_err)?;
+        let child = std::process::Command::new(exe)
+            .args(crate::setup::webview2::BOOTSTRAPPER_ARGS)
+            .stdin(std::process::Stdio::null())
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .creation_flags(CREATE_NO_WINDOW | CREATE_SUSPENDED)
+            .spawn()
+            .map_err(io_err)?;
+        let mut run = JobRun { child, job };
+        let started = run.job.assign(run.child.as_handle()).and_then(|()| job::resume_process(run.child.id()));
+        if let Err(error) = started {
+            let _ = run.child.kill();
+            let _ = run.child.wait();
+            return Err(map_err(error));
+        }
+        let start = std::time::Instant::now();
+        loop {
+            if let Some(code) = run.try_exit().map_err(io_err)? {
+                return Ok(InstallerExit::Code(code));
+            }
+            if cancel.is_cancelled() {
+                run.kill_all();
+                return Ok(InstallerExit::Cancelled);
+            }
+            if start.elapsed() >= timeout {
+                run.kill_all();
+                return Ok(InstallerExit::TimedOut);
+            }
+            std::thread::sleep(INSTALLER_POLL);
+        }
+    }
+
+    fn report_event(&self, kind: EventKind, event_id: u32, message: &str) -> Result<(), PlatformError> {
+        guard()?;
+        eventwrite::report(eventwrite::SOURCE, kind, event_id, message).map_err(map_err)
     }
 }
 

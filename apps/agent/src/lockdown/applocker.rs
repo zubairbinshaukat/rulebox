@@ -657,11 +657,13 @@ pub fn apply(ctx: &ApplyCtx<'_>, doc: &AgentDoc) -> LayerState {
         }
     };
     let protected = protected_folders(ctx, &roots);
+    // (Phase 6 Step 11, plan 4.4.3) The document's exceptions and the publisher rule of every vendor-mode app.
+    let exceptions = allowlist::with_vendor_exceptions(&lockdown.exceptions, &ctx.facts.vendor_exceptions);
     let inputs = Inputs {
         roots: &roots,
         protected: &protected,
         catalogue_folders: &ctx.facts.catalogue_exe_folders,
-        exceptions: &lockdown.exceptions,
+        exceptions: &exceptions,
         accessibility_tools: lockdown.accessibility_tools,
         windows_scan: &scan,
         staff_sid: &staff,

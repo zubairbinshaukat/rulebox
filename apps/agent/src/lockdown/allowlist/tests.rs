@@ -365,3 +365,91 @@ fn a_pc_that_does_not_tell_its_windows_folder_builds_nothing() {
     let p = protected();
     assert_eq!(build(&inputs(&r, &p, &[], &[], &[]), no_acl).unwrap_err(), "windows_folder_unknown");
 }
+
+// ---------------------------------------------------------------- Phase 6 Step 11 (plan 4.4.3)
+
+fn catalogue_app(id: &str, exe: &str, update: Option<serde_json::Value>) -> rulebox_policy::catalog::CatalogApp {
+    let mut desktop = serde_json::json!({ "exe": exe, "args": [], "fileArgTemplate": [], "resetFolders": [], "install": null });
+    if let Some(update) = update {
+        desktop["update"] = update;
+    }
+    serde_json::from_value(serde_json::json!({
+        "id": id, "name": id, "description": null, "kind": "desktop", "builtin": null, "web": null, "desktop": desktop,
+        "pinnedTaskbar": false, "pinnedDesktop": false, "hue": null, "icon": null,
+        "audience": "everyone", "employeeIds": [], "revision": 1
+    }))
+    .unwrap()
+}
+
+#[test]
+fn every_vendor_mode_app_gets_a_publisher_rule_and_nothing_else_does() {
+    use serde_json::json;
+    let catalog = vec![
+        catalogue_app("vendor1", r"{ProgramFiles}\Acme\acme.exe", Some(json!({ "mode": "vendor", "publisher": "O=Acme Ltd", "publisherProduct": "Acme Suite" }))),
+        catalogue_app("vendor2", r"{ProgramFiles}\Beta\beta.exe", Some(json!({ "mode": "vendor", "publisher": "CN=Beta" }))),
+        catalogue_app("managed", r"{ProgramFiles}\M\m.exe", Some(json!({ "mode": "managed" }))),
+        catalogue_app("pinned", r"{ProgramFiles}\P\p.exe", Some(json!({ "mode": "pinned", "publisher": "O=Ignored" }))),
+        catalogue_app("plain", r"{ProgramFiles}\N\n.exe", None),
+        // Vendor mode without a publisher allows nothing it could name (the server refuses that save).
+        catalogue_app("nopub", r"{ProgramFiles}\X\x.exe", Some(json!({ "mode": "vendor" }))),
+        // An unknown mode is Pinned.
+        catalogue_app("unknown", r"{ProgramFiles}\U\u.exe", Some(json!({ "mode": "hologram", "publisher": "O=Ignored" }))),
+    ];
+    let rules = vendor_exceptions(&catalog);
+    assert_eq!(rules.iter().map(|r| r.id.as_str()).collect::<Vec<_>>(), ["vendor-vendor1", "vendor-vendor2"]);
+    assert_eq!(rules[0].app_id.as_deref(), Some("vendor1"));
+    assert_eq!(
+        rules[0].publisher,
+        Some(PublisherMatch { subject: "O=Acme Ltd".into(), product: Some("Acme Suite".into()), file_name: None })
+    );
+    assert_eq!(rules[1].publisher, Some(PublisherMatch { subject: "CN=Beta".into(), product: None, file_name: None }));
+    for rule in &rules {
+        assert_eq!(rule.kind, ExceptionKind::Publisher);
+        // AppLocker and the process watch only: there is no App Control layer to name (Phase 5 D3).
+        assert_eq!(rule.layers, [ExceptionLayer::AppLocker, ExceptionLayer::ProcWatch]);
+        assert_eq!(rule.validate(), Ok(()));
+    }
+    // It disappears with the app: the catalogue holds only the apps assigned to this PC.
+    assert!(vendor_exceptions(&catalog[2..]).is_empty());
+    assert!(vendor_exceptions(&[]).is_empty());
+}
+
+#[test]
+fn the_vendor_rules_feed_the_applocker_and_process_watch_allow_lists_like_any_exception() {
+    use serde_json::json;
+    let r = roots();
+    let p = protected();
+    let vendor = vendor_exceptions(&[catalogue_app("v1", r"{ProgramFiles}\Acme\acme.exe", Some(json!({ "mode": "vendor", "publisher": "O=Acme Ltd" })))]);
+    let own = ExceptionRule { id: "ex1".into(), sha256: Some("ab".repeat(32)), ..exception(ExceptionKind::Hash, vec![ExceptionLayer::AppLocker]) };
+    let all = with_vendor_exceptions(std::slice::from_ref(&own), &vendor);
+    assert_eq!(all.len(), 2);
+    for layer in [ExceptionLayer::AppLocker, ExceptionLayer::ProcWatch] {
+        let list = build_for(&inputs(&r, &p, &[], &[], &all), layer, no_acl).unwrap();
+        assert!(
+            list.exceptions.contains(&AllowException::Publisher { subject: "O=Acme Ltd".into(), product: None, file_name: None }),
+            "{layer:?}"
+        );
+    }
+    // The document's own exception for another layer is unchanged.
+    let procwatch = build_for(&inputs(&r, &p, &[], &[], &all), ExceptionLayer::ProcWatch, no_acl).unwrap();
+    assert_eq!(procwatch.exceptions.len(), 1);
+    // Without a vendor app, nothing is added.
+    assert_eq!(with_vendor_exceptions(std::slice::from_ref(&own), &[]), [own]);
+}
+
+#[test]
+fn a_program_in_a_versioned_folder_has_its_path_rule_on_the_folder_above_the_star() {
+    let r = roots();
+    let p = protected();
+    let folder = crate::installs::version::program_folder(r"C:\Program Files\Vendor\App\app-*\app.exe").unwrap();
+    assert_eq!(folder, r"C:\Program Files\Vendor\App");
+    // Admin-only: the folder is a path rule, so every `app-<version>` below it starts.
+    let list = build(&inputs(&r, &p, &[], std::slice::from_ref(&folder), &[]), |_| Ok(Some(ADMIN_ONLY.into()))).unwrap();
+    assert_eq!(list.catalogue.as_slice(), std::slice::from_ref(&folder));
+    // Writable by standard users: refused and named, never a path rule.
+    let list = build(&inputs(&r, &p, &[], std::slice::from_ref(&folder), &[]), |_| Ok(Some("D:(A;OICI;0x1301bf;;;BU)".into()))).unwrap();
+    assert!(list.catalogue.is_empty());
+    assert_eq!(list.notes, ["catalogue_folder_writable"]);
+    // A plain program keeps its own folder.
+    assert_eq!(crate::installs::version::program_folder(r"C:\Program Files\Acme\acme.exe").as_deref(), Some(r"C:\Program Files\Acme"));
+}

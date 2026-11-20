@@ -1,6 +1,7 @@
 //! `rulebox-agent`: service host and CLI. `run --console`, the admin-pipe commands
 //! `status`, `enroll` and `unenroll`, `compat`, `hash-pin`, and (Step 11) the
 //! service host and its commands `service run|install|uninstall` and `recover`.
+//! (Phase 6 Step 8) `setup`: Rulebox Setup, a small native window.
 
 mod admin_exit;
 mod agent;
@@ -17,6 +18,7 @@ mod employee_cache;
 mod enroll;
 mod enroll_code;
 mod fixtures;
+mod install_marker;
 mod installs;
 mod ipc_admin;
 mod ipc_conn;
@@ -38,6 +40,7 @@ mod roster;
 mod secrets;
 mod service;
 mod session;
+mod setup;
 mod state;
 #[cfg(test)]
 mod testutil;
@@ -170,6 +173,9 @@ fn dispatch(cli: Cli) -> anyhow::Result<u8> {
             &mut std::io::stdout().lock(),
             &mut std::io::stderr().lock(),
         )),
+        // (Phase 6 Step 8) Rulebox Setup: no data directory and no logging of its own (the
+        // checks are read-only; the changes go through the service and the guarded seam).
+        Command::Setup { simulate, relaunched } => Ok(setup::run(simulate, relaunched, &mut std::io::stderr().lock())),
     }
 }
 

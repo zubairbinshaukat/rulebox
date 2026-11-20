@@ -301,6 +301,13 @@ fn webview2_major(version: &str) -> Option<u32> {
     version.split('.').next()?.parse().ok()
 }
 
+/// (Phase 6 Step 8) Whether the `pv` text the registry holds is a WebView2 Runtime the Staff App
+/// runs on: a real version (not empty, not `0.0.0.0`) of at least [`MIN_WEBVIEW2_MAJOR`]. The
+/// same reading `build_with` makes, so Setup and the report never disagree.
+pub fn webview2_is_good(raw: Option<String>) -> bool {
+    clean_webview2_version(raw).as_deref().and_then(webview2_major).is_some_and(|major| major >= MIN_WEBVIEW2_MAJOR)
+}
+
 /// Edge and Chrome at the per-machine paths (read-only: `path_roots` and `file_exists`).
 fn browsers(platform: &dyn Platform) -> Result<CompatBrowsers, PlatformError> {
     let roots = platform.path_roots()?;
@@ -572,6 +579,24 @@ mod tests {
             // The blocker replaces the warning; the two never appear together.
             assert!(report.warnings.is_empty(), "{pv:?}: {:?}", report.warnings);
             assert_eq!(report.blocker_codes().contains(&"webview2_too_old"), blocked);
+        }
+    }
+
+    #[test]
+    fn setup_and_the_report_agree_on_what_a_good_runtime_is() {
+        for (pv, good) in [
+            (None, false),
+            (Some(""), false),
+            (Some("0.0.0.0"), false),
+            (Some("garbage"), false),
+            (Some("124.9.9.9"), false),
+            (Some("125.0.0.0"), true),
+            (Some(" 130.0.2849.80 "), true),
+        ] {
+            assert_eq!(webview2_is_good(pv.map(str::to_string)), good, "{pv:?}");
+            let (_dir, sim) = webview2(pv);
+            let report = build_with(&sim, None, false, Options { webview2_install_attempted: true }).unwrap();
+            assert_eq!(!report.blockers.contains(&Blocker::Webview2TooOld), good, "{pv:?}");
         }
     }
 

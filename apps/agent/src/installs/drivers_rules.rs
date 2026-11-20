@@ -179,6 +179,7 @@ pub fn report_of(record: &DriverRecord) -> Option<InstallReport> {
         attempts: record.attempts,
         exit_code: record.last_exit_code,
         detail: record.detail.as_deref().and_then(Detail::parse).map(|d| d.as_str().to_string()),
+        installed_version: None,
     })
 }
 

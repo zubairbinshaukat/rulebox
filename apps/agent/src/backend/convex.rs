@@ -772,6 +772,7 @@ mod tests {
             attempts: 2,
             exit_code: Some(1603),
             detail: Some("exit_code".into()),
+            installed_version: None,
         };
         let batch = ReportBatch { status: None, installs: vec![install], audit: vec![record], dropped: 4 };
         let args = report_args(&auth(), &batch);
@@ -786,6 +787,32 @@ mod tests {
             to_json(args["installs"].clone()),
             json!([{ "appId": "app1", "state": "failed", "appRevision": 3, "attempts": 2, "exitCode": 1603, "detail": "exit_code" }])
         );
+        // (Phase 6 Step 11) `installedVersion`: absent keeps, a text stores, `null` clears.
+        let with_version = |version: Option<Option<&str>>| InstallReport {
+            app_id: "app1".into(),
+            state: InstallState::Installed,
+            app_revision: 3,
+            attempts: 0,
+            exit_code: None,
+            detail: None,
+            installed_version: version.map(|inner| inner.map(str::to_string)),
+        };
+        let installs = |versions: Vec<InstallReport>| {
+            let args = report_args(&auth(), &ReportBatch { installs: versions, ..ReportBatch::default() });
+            to_json(args["installs"].clone())
+        };
+        assert_eq!(
+            installs(vec![with_version(None), with_version(Some(Some("2.1.0.0"))), with_version(Some(None))]),
+            json!([
+                { "appId": "app1", "state": "installed", "appRevision": 3, "attempts": 0 },
+                { "appId": "app1", "state": "installed", "appRevision": 3, "attempts": 0, "installedVersion": "2.1.0.0" },
+                { "appId": "app1", "state": "installed", "appRevision": 3, "attempts": 0, "installedVersion": null }
+            ])
+        );
+        let back: InstallReport = serde_json::from_value(json!({ "appId": "a", "state": "installed", "appRevision": 1, "attempts": 0, "installedVersion": null })).unwrap();
+        assert_eq!(back.installed_version, Some(None));
+        let back: InstallReport = serde_json::from_value(json!({ "appId": "a", "state": "installed", "appRevision": 1, "attempts": 0 })).unwrap();
+        assert_eq!(back.installed_version, None);
         // Numbers are floats on the wire (`v.number()`).
         let Value::Object(audit) = &args["audit"] else { panic!("audit is not an object") };
         assert!(matches!(audit["dropped"], Value::Float64(n) if n == 4.0));

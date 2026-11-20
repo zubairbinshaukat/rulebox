@@ -254,6 +254,16 @@ fn host(reporter: Reporter, token: CancellationToken, control_rx: mpsc::Unbounde
         _ => return failed,
     };
 
+    // 1b. (Phase 6 Step 8) The install marker's ComputerName, at every start: a major upgrade
+    //     deletes the whole marker, and the production guard (which the data directory check
+    //     below already needs) cannot open without it. Before everything that is guarded, and
+    //     before logging exists, so its outcome is logged a little later. KioskOn follows in
+    //     `agent::run`, which knows the state.
+    let marker_name = {
+        let platform = platform::windows::WindowsPlatform::new(install.clone(), paths.clone());
+        crate::install_marker::assert_computer_name(&platform)
+    };
+
     // 2. The data directory is checked (and repaired when allowed) before logging
     //    starts: the logs live inside it. A refusal writes nothing at all.
     if platform::windows::ensure_data_dir(paths.root()).is_err() {
@@ -265,6 +275,7 @@ fn host(reporter: Reporter, token: CancellationToken, control_rx: mpsc::Unbounde
     };
     let _ = crate::PANIC_LOG_DIR.set(paths.logs_dir());
     tracing::info!(version = env!("CARGO_PKG_VERSION"), "service starting");
+    marker_name.log();
     reporter.start_pending(2);
 
     // 3. The runtime and the real dependencies, then `Running`.
@@ -1002,6 +1013,21 @@ mod tests {
         assert!(out.is_empty(), "nothing was printed or run");
         assert_eq!(std::fs::read(paths.agent_state()).unwrap(), bytes);
         assert!(!paths.recovered_flag().exists());
+    }
+
+    /// (Phase 6 Step 8) The marker's `ComputerName` is written before the first guarded step of the
+    /// start path, or an upgraded PC could never arm itself (the guard needs the name).
+    #[test]
+    fn the_install_marker_is_written_before_the_data_directory_check() {
+        let source = include_str!("service.rs");
+        let code = source.split("\n#[cfg(test)]").next().unwrap_or(source);
+        let host = &code[code.find("fn host(").expect("the host function")..];
+        let marker = host.find("assert_computer_name(").expect("the marker step is in the start path");
+        let data_dir = host.find("ensure_data_dir(paths.root())").expect("the data directory check");
+        let logging = host.find("logging::init(").expect("logging starts");
+        assert!(marker < data_dir && data_dir < logging, "{marker} {data_dir} {logging}");
+        // `service run` itself is untouched.
+        assert!(code.contains(r#"launch_arguments: vec![OsString::from("service"), OsString::from("run")]"#));
     }
 
     #[test]

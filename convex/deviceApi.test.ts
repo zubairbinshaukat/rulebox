@@ -533,6 +533,18 @@ describe("deviceApi:report installs part (plan 4.8 amended, A12)", () => {
     expect(await versionOf()).toBeUndefined();
   });
 
+  test("the Phase 6 Step 11 details (publisher, rollback, version, waiting) are on the fixed list and stored", async () => {
+    const s = await seed();
+    const ids = await apps(s);
+    const stored = async () => (await installRows(s)).find((r) => r.appId === ids.a)?.detail;
+    for (const detail of ["publisher_mismatch", "update_rolled_back", "rollback_failed", "rollback_unsupported", "version_too_low"]) {
+      await s.t.mutation(api.deviceApi.report, { ...creds(s.device), installs: [result(ids.a, "failed", { detail })] });
+      expect(await stored()).toBe(detail);
+    }
+    await s.t.mutation(api.deviceApi.report, { ...creds(s.device), installs: [result(ids.a, "installed", { detail: "waiting_for_close" })] });
+    expect(await stored()).toBe("waiting_for_close");
+  });
+
   test("a detail outside the fixed list is dropped, the result is stored and the status and audit parts still go through", async () => {
     const s = await seed();
     const ids = await apps(s);

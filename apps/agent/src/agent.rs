@@ -562,6 +562,27 @@ pub async fn run(
         }
     }
 
+    // (Phase 6 Step 8) The enrollment code a silent install left (`msiexec ... ENROLLCODE=<code>`):
+    // read once, enroll, delete, in every outcome. Nothing happens when there is none. The
+    // simulated agent has no installer; a real or simulated PC without the value does nothing.
+    if !deps.sim.demo {
+        tasks.spawn(crate::setup::pending::run(
+            Arc::clone(&deps.platform),
+            Arc::clone(&enroller),
+            Arc::clone(&shared),
+            deps.install.root().to_path_buf(),
+            shutdown.clone(),
+        ));
+        // (Phase 6 Step 8) `KioskOn` of the install marker, which the MSI's uninstall guard reads:
+        // filled at every start (a major upgrade wipes the key) and kept while the kiosk changes.
+        tasks.spawn(crate::install_marker::run_kiosk_marker(
+            Arc::clone(&deps.platform),
+            Arc::clone(&shared),
+            snapshot_rx.clone(),
+            shutdown.clone(),
+        ));
+    }
+
     tasks.spawn(ipc_admin::run_pipe(
         AdminPipe {
             name: deps.pipes.admin.clone(),
@@ -606,6 +627,8 @@ pub async fn run(
                 install_timeout: INSTALL_TIMEOUT,
                 exe_wait: EXE_WAIT,
                 shared: Arc::clone(&shared),
+                // (Phase 6 Step 11) The apply windows of app updates follow the employee's sign-in.
+                signed_in: session.presence(),
             },
             install_policy_rx,
             snapshot_rx.clone(),

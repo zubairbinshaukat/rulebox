@@ -3874,6 +3874,7 @@ dependencies = [
  "tracing",
  "tracing-appender",
  "tracing-subscriber",
+ "windows",
  "windows-service",
  "x25519-dalek",
  "zeroize",

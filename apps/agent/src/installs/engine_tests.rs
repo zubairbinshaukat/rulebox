@@ -63,6 +63,8 @@ struct Rig {
     paths: DataPaths,
     policy_tx: watch::Sender<AgentPolicy>,
     snapshot_tx: watch::Sender<AgentSnapshot>,
+    /// (Phase 6 Step 11) Whether an employee is signed in (`false` at the start: the apply window is open).
+    presence_tx: watch::Sender<bool>,
     shared: Arc<SharedState>,
     shutdown: CancellationToken,
     task: Option<JoinHandle<()>>,
@@ -106,6 +108,7 @@ fn rig_in(dir: TempDir) -> Rig {
         paths,
         policy_tx: watch::channel(policy).0,
         snapshot_tx,
+        presence_tx: watch::channel(false).0,
         shutdown: CancellationToken::new(),
         task: None,
         visible_calls: Arc::new(AtomicUsize::new(0)),
@@ -135,6 +138,7 @@ impl Rig {
             install_timeout: Duration::from_secs(1800),
             exe_wait: Duration::from_secs(10),
             shared: Arc::clone(&self.shared),
+            signed_in: self.presence_tx.subscribe(),
         };
         self.task = Some(tokio::spawn(run_install_task(
             deps,
@@ -525,9 +529,14 @@ async fn new_sha_triggers_reinstall() {
     let v2 = app("a1", "msi", b"v2", 2, true);
     rig.serve(&v2, b"v2");
     rig.downloader.hold();
+    rig.report.accept_installs();
     rig.set_catalog(vec![v2.clone()]);
     rig.until("pending v2", |r| r.record("a1").is_some_and(|x| x.sha256 == sha(b"v2"))).await;
-    assert!(rig.visible(std::slice::from_ref(&v2)).is_empty(), "hidden while the new version installs");
+    // (Phase 6 Step 11) The old version works while the new one downloads: the tile stays, and only terminal states go
+    // out for an upgrade (no `pending`).
+    rig.settle().await;
+    assert_eq!(rig.visible(std::slice::from_ref(&v2)), ["a1"], "the installed app keeps its tile while its update downloads");
+    assert!(rig.report.queued_installs().is_empty(), "no progress state for an upgrade: {:?}", rig.report.queued_installs());
     rig.stop().await;
     rig.downloader = FakeDownloader::new();
     rig.serve(&v2, b"v2");
@@ -1577,5 +1586,1154 @@ async fn driver_folders_a_crash_left_behind_are_deleted_at_start() {
     std::fs::write(stale.join("x64").join("b.inf"), b"left over").unwrap();
     rig.start();
     rig.until("swept", |r| !r.work_dir_exists()).await;
+    rig.stop().await;
+}
+
+// ===================================================================== Phase 6 Step 11
+//
+// Versions, update modes, apply windows, keep-previous and roll-back (plan 4.4, 4.6). Everything runs on `SimPlatform`
+// (nothing is executed, nothing touches the real PC) with the clock paused: only an event can wake the engine, so a
+// test that advances the clock by days and sees nothing happen is a test that no timer was added.
+
+use crate::backend::InstallReport;
+use crate::platform::sim::SimProcess;
+
+const GIB: u64 = 1024 * 1024 * 1024;
+const ACME: &str = "CN=Acme Ltd, O=Acme Ltd, L=Oslo, C=NO";
+const STAFF_SID: &str = "S-1-5-21-1-2-3-1001";
+
+fn with_update(mut app: CatalogApp, version: &str, update: serde_json::Value) -> CatalogApp {
+    let desktop = app.desktop.as_mut().unwrap();
+    desktop.version = Some(version.into());
+    desktop.update = Some(serde_json::from_value(update).unwrap());
+    app
+}
+
+fn managed(app: CatalogApp, version: &str) -> CatalogApp {
+    with_update(app, version, json!({ "mode": "managed" }))
+}
+
+fn pinned(app: CatalogApp, version: &str) -> CatalogApp {
+    with_update(app, version, json!({ "mode": "pinned" }))
+}
+
+fn vendor(app: CatalogApp, version: &str, min_version: Option<&str>) -> CatalogApp {
+    let mut update = json!({ "mode": "vendor", "publisher": "O=Acme Ltd" });
+    if let Some(min) = min_version {
+        update["minVersion"] = json!(min);
+    }
+    with_update(app, version, update)
+}
+
+fn key(path: &Path) -> String {
+    path.to_string_lossy().replace('/', "\\").to_ascii_lowercase()
+}
+
+impl Rig {
+    fn installer_file(&self, bytes: &[u8], ext: &str) -> PathBuf {
+        self.paths.downloads_dir().join(format!("{}.{ext}", sha(bytes)))
+    }
+
+    /// The installer of `bytes` is signed by `signer`.
+    fn sign_installer(&self, bytes: &[u8], ext: &str, signer: &str) {
+        let identity = FileIdentity { signer: Some(signer.to_string()), original_name: None, product: None };
+        self.sim.add_program(self.installer_file(bytes, ext).to_str().unwrap(), identity, None);
+    }
+
+    /// A successful install of `bytes` gives the program this file version.
+    fn installs_version(&self, bytes: &[u8], version: &str) {
+        self.sim.with_world(|w| w.installer_versions.insert(sha(bytes), version.to_string()));
+    }
+
+    /// The program of `app` has this file version now (`None`: no version resource).
+    fn set_file_version(&self, app: &CatalogApp, version: Option<&str>) {
+        let key = key(&exe_of(app));
+        self.sim.with_world(|w| match version {
+            Some(version) => w.file_versions.insert(key, version.to_string()),
+            None => w.file_versions.remove(&key),
+        });
+    }
+
+    /// A reconcile occasion (something the engine listens for changed): the document is sent again.
+    fn poke(&self) {
+        self.policy_tx.send_modify(|_| {});
+    }
+
+    /// The app runs in an employee's session.
+    fn run_app(&self, app: &CatalogApp, pid: u32) {
+        let exists = self.sim.with_world(|w| w.sessions.iter().any(|s| s.id == 2));
+        if !exists {
+            self.sim.add_session(2, Some(STAFF_SID), true);
+        }
+        self.sim.with_world(|w| {
+            w.processes.push(SimProcess { pid, session_id: 2, image: exe_of(app), user_sid: STAFF_SID.into() });
+        });
+    }
+
+    fn reports(&self) -> Vec<InstallReport> {
+        self.report.queued_installs()
+    }
+
+    fn assert_every_run_is_allowed(&self) {
+        let downloads = self.paths.downloads_dir();
+        let drivers = self.paths.drivers_dir();
+        for run in self.runs() {
+            assert!(
+                crate::installs::installer_command_allowed(&run.program, &run.args, Some(Path::new(r"C:\Windows")), &downloads, &drivers),
+                "outside the allowed program list: {run:?}"
+            );
+        }
+    }
+}
+
+/// Installs `v1` and returns the rig (started, `v1` installed, the report queue empty).
+async fn rig_with_installed(v1: &CatalogApp, bytes: &[u8]) -> Rig {
+    let mut rig = rig();
+    rig.serve(v1, bytes);
+    rig.set_catalog(vec![v1.clone()]);
+    rig.start();
+    rig.until("v1 installed", |r| r.state(&v1.id) == Some(LocalState::Installed)).await;
+    rig.report.accept_installs();
+    rig
+}
+
+// ---------------------------------------------------------------- journal schema 2
+
+#[tokio::test(start_paused = true)]
+async fn a_schema_1_record_of_an_agent_before_phase_6_loads_and_upgrades_cleanly() {
+    let dir = TempDir::new();
+    let paths = DataPaths::new(dir.path().to_path_buf());
+    std::fs::create_dir_all(paths.state_dir()).unwrap();
+    let v1 = app("a1", "msi", b"v1", 1, true);
+    let mut record = InstallRecord::new("a1", RecordKind::Msi, &sha(b"v1"), 1, LocalState::Installed);
+    record.exe = Some(exe_of(&v1).to_string_lossy().into_owned());
+    record.product_code = Some(CODE.into());
+    record.remove_when_unassigned = true;
+    // What a 1.3-era agent wrote: none of the Phase 6 keys.
+    let mut value = serde_json::to_value(&record).unwrap();
+    for name in [
+        "version", "installedVersion", "mode", "whenClosed", "update", "staged", "oldWorks", "kept", "previous", "healPending",
+        "verifyingSinceMs", "verifyLooks",
+    ] {
+        assert!(value.as_object_mut().unwrap().remove(name).is_some(), "{name} is written by this agent");
+    }
+    let file = json!({ "schema": 1, "restartPendingSinceMs": null, "apps": { "a1": value } });
+    std::fs::write(paths.installs(), serde_json::to_vec(&file).unwrap()).unwrap();
+
+    let book = InstallBook::open(paths.installs());
+    let loaded = book.snapshot();
+    assert_eq!(loaded.schema, INSTALLS_SCHEMA, "read as schema 2");
+    let old = &loaded.apps["a1"];
+    assert_eq!((old.mode, old.update, old.staged, old.old_works), (UpdateMode::Pinned, false, false, true));
+    assert_eq!((old.version.as_deref(), old.installed_version.as_deref()), (None, None));
+    assert!(old.kept.is_none() && old.previous.is_none() && old.verifying_since_ms.is_none() && !old.heal_pending);
+    drop(book);
+
+    // An unknown (newer) schema is still refused: the engine starts without records.
+    let future = json!({ "schema": 3, "restartPendingSinceMs": null, "apps": { "a1": { "appId": "a1" } } });
+    let elsewhere = dir.path().join("future-installs.json");
+    std::fs::write(&elsewhere, serde_json::to_vec(&future).unwrap()).unwrap();
+    assert!(InstallBook::open(elsewhere).snapshot().apps.is_empty());
+
+    // The agent starts on the old file: the installed app is left alone, and the next version installs as an update.
+    let mut rig = rig_in(dir);
+    rig.sim.add_file(exe_of(&v1).to_str().unwrap());
+    rig.set_catalog(vec![v1]);
+    rig.start();
+    rig.settle().await;
+    assert!(rig.runs().is_empty());
+    assert_eq!(rig.state("a1"), Some(LocalState::Installed));
+    let v2 = app("a1", "msi", b"v2", 2, true);
+    rig.serve(&v2, b"v2");
+    rig.set_catalog(vec![v2.clone()]);
+    rig.until("v2", |r| r.record("a1").is_some_and(|x| x.sha256 == sha(b"v2") && x.state == LocalState::Installed && !x.update)).await;
+    assert_eq!(rig.runs().len(), 1);
+    let on_disk: serde_json::Value = serde_json::from_slice(&std::fs::read(rig.paths.installs()).unwrap()).unwrap();
+    assert_eq!(on_disk["schema"], 2, "saved as schema 2 with the first change");
+    assert_eq!(rig.visible(&[v2]), ["a1"]);
+    rig.stop().await;
+}
+
+// ---------------------------------------------------------------- unknown mode, Pinned
+
+#[tokio::test(start_paused = true)]
+async fn an_unknown_update_mode_behaves_as_pinned() {
+    let v1 = with_update(app("a1", "msi", b"v1", 1, true), "1.0", json!({ "mode": "hologram" }));
+    let mut rig = rig_with_installed(&v1, b"v1").await;
+    let record = rig.record("a1").unwrap();
+    assert_eq!(record.mode, UpdateMode::Pinned, "stored as Pinned");
+    assert!(record.kept.is_none(), "a Pinned app keeps no installer");
+    assert!(rig.downloads().is_empty());
+    // A different SHA-256 installs again (nothing adopts it as a Vendor app would).
+    let v2 = with_update(app("a1", "msi", b"v2", 2, true), "2.0", json!({ "mode": "hologram" }));
+    rig.serve(&v2, b"v2");
+    rig.set_catalog(vec![v2]);
+    rig.until("v2", |r| r.record("a1").is_some_and(|x| x.sha256 == sha(b"v2") && x.state == LocalState::Installed && !x.update)).await;
+    assert_eq!(rig.runs().len(), 2);
+    rig.stop().await;
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_pinned_update_that_fails_is_not_rolled_back_and_keeps_nothing() {
+    let v1 = pinned(app("a1", "msi", b"v1", 1, true), "1.0");
+    let mut rig = rig_with_installed(&v1, b"v1").await;
+    let v2 = pinned(app("a1", "msi", b"v2", 2, true), "2.0");
+    rig.serve(&v2, b"v2");
+    rig.sim.with_world(|w| w.installer_exits.push_back(InstallerExit::Code(1603)));
+    rig.set_catalog(vec![v2]);
+    rig.until("failed", |r| r.state("a1") == Some(LocalState::Failed)).await;
+    assert_eq!(rig.runs().len(), 2, "no roll-back run");
+    let record = rig.record("a1").unwrap();
+    assert_eq!((record.detail.as_deref(), record.attempts, record.old_works), (Some("exit_code"), 1, false));
+    assert!(record.previous.is_none() && record.kept.is_none());
+    rig.stop().await;
+}
+
+// ---------------------------------------------------------------- apply windows (plan 4.4.5)
+
+#[tokio::test(start_paused = true)]
+async fn an_update_waits_for_the_employee_to_sign_out_and_no_timer_wakes_it() {
+    let v1 = app("a1", "msi", b"v1", 1, true);
+    let mut rig = rig_with_installed(&v1, b"v1").await;
+    // An employee signs in: the window "signed out" is closed (the default `boot_or_signed_out`).
+    rig.presence_tx.send_replace(true);
+    rig.settle().await;
+    let v2 = app("a1", "msi", b"v2", 2, true);
+    rig.serve(&v2, b"v2");
+    rig.set_catalog(vec![v2.clone()]);
+    // The download happens at once, in the background; the installer waits.
+    rig.until("staged", |r| r.record("a1").is_some_and(|x| x.staged)).await;
+    rig.settle().await;
+    assert_eq!(rig.runs().len(), 1, "the installer of the update did not run");
+    assert_eq!(rig.visible(std::slice::from_ref(&v2)), ["a1"], "the tile stays while the update waits");
+    assert!(rig.installer_file(b"v2", "msi").exists(), "the installer is downloaded and verified");
+    // One terminal result says so: installed, with the detail `waiting_for_close`, and no `pending`.
+    let waiting = rig.reports();
+    assert_eq!(waiting.len(), 1);
+    assert_eq!((waiting[0].state, waiting[0].app_revision), (InstallState::Installed, 2));
+    assert_eq!(waiting[0].detail.as_deref(), Some("waiting_for_close"));
+    // However long it waits, nothing wakes the engine: no timer, no polling.
+    advance(Duration::from_secs(30 * 24 * 3600)).await;
+    rig.settle().await;
+    assert_eq!(rig.runs().len(), 1);
+    assert_eq!(rig.downloader.calls().len(), 2, "the installer was downloaded once");
+    // The employee signs out: the update runs and says installed.
+    rig.presence_tx.send_replace(false);
+    rig.until("v2 installed", |r| r.record("a1").is_some_and(|x| x.state == LocalState::Installed && !x.update && x.sha256 == sha(b"v2"))).await;
+    assert_eq!(rig.runs().len(), 2);
+    let done = rig.reports();
+    assert_eq!((done.len(), done[0].state, done[0].detail.clone()), (1, InstallState::Installed, None));
+    rig.assert_every_run_is_allowed();
+    rig.stop().await;
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_running_app_makes_the_update_wait_even_when_nobody_is_signed_in_and_its_exit_wakes_the_engine() {
+    let v1 = app("a1", "msi", b"v1", 1, true);
+    let mut rig = rig_with_installed(&v1, b"v1").await;
+    rig.run_app(&v1, 777);
+    let v2 = app("a1", "msi", b"v2", 2, true);
+    rig.serve(&v2, b"v2");
+    rig.set_catalog(vec![v2.clone()]);
+    rig.until("staged", |r| r.record("a1").is_some_and(|x| x.staged)).await;
+    // The engine waits on the process itself (the exit is the wake source), not on a timer.
+    rig.until("watching the process", |r| r.sim.exit_waits_running() == 1).await;
+    advance(Duration::from_secs(7 * 24 * 3600)).await;
+    rig.settle().await;
+    assert_eq!(rig.runs().len(), 1, "an installer never runs over a running app");
+    assert!(!rig.sim.calls().contains(&SimOp::TerminateProcess), "a running app is never closed");
+    assert_eq!(rig.reports().iter().map(|r| r.detail.clone()).collect::<Vec<_>>(), [Some("waiting_for_close".to_string())]);
+    // The app closes: the update runs.
+    rig.sim.end_process(777);
+    rig.until("v2 installed", |r| r.record("a1").is_some_and(|x| x.state == LocalState::Installed && x.sha256 == sha(b"v2") && !x.update)).await;
+    assert_eq!(rig.runs().len(), 2);
+    assert_eq!(rig.sim.exit_waits_running(), 0);
+    rig.stop().await;
+}
+
+#[tokio::test(start_paused = true)]
+async fn when_closed_lets_an_update_run_for_a_signed_in_employee_once_the_app_is_closed() {
+    let v1 = with_update(app("a1", "msi", b"v1", 1, true), "1.0", json!({ "mode": "pinned", "applyWhen": "when_closed" }));
+    let mut rig = rig_with_installed(&v1, b"v1").await;
+    rig.presence_tx.send_replace(true);
+    rig.run_app(&v1, 901);
+    rig.settle().await;
+    let v2 = with_update(app("a1", "msi", b"v2", 2, true), "2.0", json!({ "mode": "pinned", "applyWhen": "when_closed" }));
+    rig.serve(&v2, b"v2");
+    rig.set_catalog(vec![v2.clone()]);
+    rig.until("waiting", |r| r.book.update_state("a1") == Some(AppUpdateState::WaitingForClose)).await;
+    // The tile says "Waiting for the app to close".
+    let resolver = AppResolver::with_installs(Arc::clone(&rig.sim) as Arc<dyn Platform>, Arc::clone(&rig.book), rig.paths.icons_dir());
+    let entries = resolver.visible(std::slice::from_ref(&v2), "emp1");
+    assert_eq!(entries.iter().map(|e| e.update).collect::<Vec<_>>(), [Some(AppUpdateState::WaitingForClose)]);
+    assert_eq!(rig.runs().len(), 1);
+    // The employee closes the app (still signed in): the update runs.
+    rig.sim.end_process(901);
+    rig.until("v2 installed", |r| r.record("a1").is_some_and(|x| x.state == LocalState::Installed && x.sha256 == sha(b"v2") && !x.update)).await;
+    assert_eq!(rig.runs().len(), 2);
+    assert_eq!(rig.book.update_state("a1"), None);
+    rig.stop().await;
+}
+
+#[tokio::test(start_paused = true)]
+async fn an_update_in_progress_reports_nothing_and_the_tile_says_updating() {
+    let v1 = app("a1", "msi", b"v1", 1, true);
+    let mut rig = rig_with_installed(&v1, b"v1").await;
+    let v2 = app("a1", "msi", b"v2", 2, true);
+    rig.serve(&v2, b"v2");
+    rig.sim.with_world(|w| w.installer_hangs = true);
+    rig.set_catalog(vec![v2.clone()]);
+    rig.until("the installer runs", |r| r.runs().len() == 2).await;
+    rig.settle().await;
+    assert_eq!(rig.state("a1"), Some(LocalState::Installing));
+    assert_eq!(rig.book.update_state("a1"), Some(AppUpdateState::Updating));
+    assert!(rig.reports().is_empty(), "no progress state for an upgrade: {:?}", rig.reports());
+    let resolver = AppResolver::with_installs(Arc::clone(&rig.sim) as Arc<dyn Platform>, Arc::clone(&rig.book), rig.paths.icons_dir());
+    let entries = resolver.visible(std::slice::from_ref(&v2), "emp1");
+    assert_eq!(entries.iter().map(|e| (e.id.as_str(), e.update)).collect::<Vec<_>>(), [("a1", Some(AppUpdateState::Updating))]);
+    // The agent stops: the installer is ended, nothing is counted, and the update runs again at the next start.
+    rig.stop().await;
+    let record = rig.record("a1").unwrap();
+    assert_eq!((record.state, record.attempts, record.update), (LocalState::Installed, 0, true));
+    rig.sim.with_world(|w| w.installer_hangs = false);
+    rig.start();
+    rig.until("v2 installed", |r| r.record("a1").is_some_and(|x| x.state == LocalState::Installed && !x.update && x.sha256 == sha(b"v2"))).await;
+    rig.stop().await;
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_window_that_closes_during_the_download_defers_the_installer() {
+    let v1 = app("a1", "msi", b"v1", 1, true);
+    let mut rig = rig_with_installed(&v1, b"v1").await;
+    let v2 = app("a1", "msi", b"v2", 2, true);
+    rig.serve(&v2, b"v2");
+    rig.sim.with_world(|w| w.installer_exits.push_back(InstallerExit::Code(1603)));
+    rig.set_catalog(vec![v2.clone()]);
+    rig.until("failed once", |r| r.record("a1").is_some_and(|x| x.state == LocalState::Failed && x.attempts == 1)).await;
+    // The retry an hour later downloads again (the file is gone) and an employee signs in meanwhile.
+    std::fs::remove_file(rig.installer_file(b"v2", "msi")).unwrap();
+    let gate = rig.downloader.hold();
+    advance(Duration::from_secs(3601)).await;
+    rig.until("downloading", |r| r.downloader.calls().len() == 3).await;
+    rig.presence_tx.send_replace(true);
+    rig.settle().await;
+    gate.add_permits(10);
+    rig.until("deferred", |r| r.record("a1").is_some_and(|x| x.state == LocalState::Installed && x.staged && x.update)).await;
+    assert_eq!(rig.runs().len(), 2, "nothing ran while the employee was signed in");
+    rig.presence_tx.send_replace(false);
+    rig.until("v2 installed", |r| r.record("a1").is_some_and(|x| x.state == LocalState::Installed && !x.update && x.sha256 == sha(b"v2"))).await;
+    assert_eq!(rig.runs().len(), 3);
+    rig.stop().await;
+}
+
+// ---------------------------------------------------------------- keep previous, roll back, retries (plan 4.6)
+
+/// A Managed app: v1 installed (its installer is kept), then a v2 whose installer fails with 1603 and is rolled back.
+async fn rolled_back_rig(retries: usize) -> (Rig, CatalogApp, CatalogApp) {
+    let v1 = managed(app("a1", "msi", b"v1", 1, true), "1.0.0");
+    let v2 = managed(app("a1", "msi", b"v2", 2, true), "2.0.0");
+    let mut rig = rig();
+    rig.installs_version(b"v1", "1.0.0.0");
+    rig.installs_version(b"v2", "2.0.0.0");
+    rig.serve(&v1, b"v1");
+    rig.serve(&v2, b"v2");
+    rig.set_catalog(vec![v1.clone()]);
+    rig.start();
+    rig.until("v1 installed", |r| r.state("a1") == Some(LocalState::Installed)).await;
+    rig.report.accept_installs();
+    // Each attempt: the installer of v2 fails, msiexec removes it by product code, the installer of v1 comes back.
+    for _ in 0..retries {
+        rig.sim.with_world(|w| {
+            w.installer_exits.push_back(InstallerExit::Code(1603));
+            w.installer_exits.push_back(InstallerExit::Code(0));
+            w.installer_exits.push_back(InstallerExit::Code(0));
+        });
+    }
+    (rig, v1, v2)
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_managed_installer_is_kept_and_a_failed_update_rolls_back_and_reports_once() {
+    let (mut rig, v1, v2) = rolled_back_rig(1).await;
+    let before = rig.record("a1").unwrap();
+    assert_eq!(before.installed_version.as_deref(), Some("1.0.0.0"));
+    let kept = before.kept.clone().expect("the installer of v1 is kept for a roll-back");
+    assert_eq!((kept.sha256.as_str(), kept.ext.as_str(), kept.version.as_deref()), (sha(b"v1").as_str(), "msi", Some("1.0.0")));
+    assert_eq!(rig.downloads(), [format!("{}.msi", sha(b"v1"))], "only the kept installer is on disk");
+    rig.set_catalog(vec![v2.clone()]);
+    rig.until("rolled back", |r| r.record("a1").is_some_and(|x| x.state == LocalState::Failed && x.attempts == 1)).await;
+    // v1 installer, v2 installer (fails), msiexec /x by the product code, v1 installer again.
+    let runs = rig.runs();
+    assert_eq!(runs.len(), 4);
+    assert_eq!(runs[1].args[..2], ["/i".to_string(), rig.installer_file(b"v2", "msi").to_string_lossy().into_owned()]);
+    assert_eq!(runs[2].args[..2], ["/x", CODE]);
+    assert_eq!(runs[3].args[..2], ["/i".to_string(), rig.installer_file(b"v1", "msi").to_string_lossy().into_owned()]);
+    rig.assert_every_run_is_allowed();
+    let record = rig.record("a1").unwrap();
+    assert_eq!((record.detail.as_deref(), record.last_exit_code, record.old_works), (Some("update_rolled_back"), Some(1603), true));
+    assert_eq!(record.installed_version.as_deref(), Some("1.0.0.0"), "the old version is back");
+    assert!(record.previous.is_none() && record.kept.is_some());
+    assert_eq!(rig.visible(&[v1, v2]), ["a1"], "the old version works: the tile stays");
+    // Exactly one result, a terminal one: failed, rolled back, with the version the PC has.
+    let reports = rig.reports();
+    assert_eq!(reports.len(), 1, "{reports:?}");
+    assert_eq!((reports[0].state, reports[0].attempts, reports[0].exit_code), (InstallState::Failed, 1, Some(1603)));
+    assert_eq!(reports[0].detail.as_deref(), Some("update_rolled_back"));
+    assert_eq!(reports[0].installed_version, Some(Some("1.0.0.0".to_string())));
+    rig.stop().await;
+}
+
+#[tokio::test(start_paused = true)]
+async fn an_update_that_failed_is_retried_at_the_next_window_three_times_an_hour_apart_then_is_final() {
+    let (mut rig, _v1, v2) = rolled_back_rig(3).await;
+    rig.set_catalog(vec![v2.clone()]);
+    rig.until("first failure", |r| r.record("a1").is_some_and(|x| x.attempts == 1 && x.state == LocalState::Failed)).await;
+    assert_eq!(rig.runs().len(), 4);
+    // Not before an hour.
+    advance(Duration::from_secs(59 * 60)).await;
+    rig.settle().await;
+    assert_eq!(rig.runs().len(), 4, "not retried inside the hour");
+    advance(Duration::from_secs(2 * 60)).await;
+    rig.until("second failure", |r| r.record("a1").is_some_and(|x| x.attempts == 2 && x.state == LocalState::Failed)).await;
+    assert_eq!(rig.runs().len(), 7);
+    advance(Duration::from_secs(61 * 60)).await;
+    rig.until("third failure", |r| r.record("a1").is_some_and(|x| x.attempts == 3 && x.state == LocalState::Failed)).await;
+    assert_eq!(rig.runs().len(), 10);
+    // Final until a new revision (Retry).
+    advance(Duration::from_secs(10 * 24 * 3600)).await;
+    rig.settle().await;
+    assert_eq!(rig.runs().len(), 10, "three attempts, then final");
+    let reports = rig.reports();
+    assert_eq!((reports.len(), reports[0].attempts), (1, 3));
+    assert_eq!(rig.visible(&[v2]), ["a1"], "the old version works after every roll-back");
+    // A new revision starts the attempts again.
+    let retry = managed(app("a1", "msi", b"v2", 3, true), "2.0.0");
+    rig.sim.with_world(|w| w.installer_exits.extend([InstallerExit::Code(0)]));
+    rig.set_catalog(vec![retry]);
+    rig.until("installed", |r| r.record("a1").is_some_and(|x| x.state == LocalState::Installed && x.sha256 == sha(b"v2") && !x.update)).await;
+    assert_eq!(rig.record("a1").unwrap().installed_version.as_deref(), Some("2.0.0.0"));
+    rig.stop().await;
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_new_version_that_installs_keeps_the_old_installer_until_the_next_sign_in() {
+    let v1 = managed(app("a1", "msi", b"v1", 1, true), "1.0.0");
+    let v2 = managed(app("a1", "msi", b"v2", 2, true), "2.0.0");
+    let mut rig = rig();
+    rig.installs_version(b"v2", "2.0.0.0");
+    rig.serve(&v1, b"v1");
+    rig.serve(&v2, b"v2");
+    rig.set_catalog(vec![v1]);
+    rig.start();
+    rig.until("v1", |r| r.state("a1") == Some(LocalState::Installed)).await;
+    rig.set_catalog(vec![v2.clone()]);
+    rig.until("v2", |r| r.record("a1").is_some_and(|x| x.sha256 == sha(b"v2") && x.state == LocalState::Installed && !x.update)).await;
+    let record = rig.record("a1").unwrap();
+    assert_eq!(record.previous.as_ref().map(|p| p.sha256.clone()), Some(sha(b"v1")));
+    assert_eq!(record.kept.as_ref().map(|k| k.sha256.clone()), Some(sha(b"v2")));
+    assert!(record.heal_pending);
+    let mut on_disk = rig.downloads();
+    on_disk.sort();
+    let mut expected = vec![format!("{}.msi", sha(b"v1")), format!("{}.msi", sha(b"v2"))];
+    expected.sort();
+    assert_eq!(on_disk, expected, "the new installer and the one before it");
+    // An employee signs in: the new version ran healthy long enough; the old installer goes.
+    rig.presence_tx.send_replace(true);
+    rig.until("healed", |r| r.record("a1").is_some_and(|x| x.previous.is_none() && !x.heal_pending)).await;
+    assert_eq!(rig.downloads(), [format!("{}.msi", sha(b"v2"))]);
+    rig.stop().await;
+}
+
+#[tokio::test(start_paused = true)]
+async fn an_msi_without_a_product_code_cannot_be_rolled_back() {
+    let mut v1 = managed(app("a1", "msi", b"v1", 1, true), "1.0.0");
+    let mut v2 = managed(app("a1", "msi", b"v2", 2, true), "2.0.0");
+    for app in [&mut v1, &mut v2] {
+        app.desktop.as_mut().unwrap().install.as_mut().unwrap().product_code = None;
+    }
+    let mut rig = rig_with_installed(&v1, b"v1").await;
+    rig.serve(&v2, b"v2");
+    rig.sim.with_world(|w| w.installer_exits.push_back(InstallerExit::Code(1603)));
+    rig.set_catalog(vec![v2.clone()]);
+    rig.until("failed", |r| r.state("a1") == Some(LocalState::Failed)).await;
+    rig.settle().await;
+    let record = rig.record("a1").unwrap();
+    assert_eq!((record.detail.as_deref(), record.old_works), (Some("rollback_unsupported"), false));
+    assert_eq!(rig.runs().len(), 2, "neither msiexec /x nor the old installer ran");
+    assert!(rig.visible(&[v2]).is_empty(), "the old version is not known to work");
+    let reports = rig.reports();
+    assert_eq!((reports.len(), reports[0].detail.as_deref()), (1, Some("rollback_unsupported")));
+    assert_eq!(reports[0].installed_version, Some(None), "the version the PC has is unknown: cleared");
+    rig.stop().await;
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_rollback_whose_previous_installer_fails_says_so() {
+    let (mut rig, _v1, v2) = rolled_back_rig(1).await;
+    // The old installer fails too (the last of the three scripted exits).
+    rig.sim.with_world(|w| {
+        w.installer_exits.clear();
+        w.installer_exits.extend([InstallerExit::Code(1603), InstallerExit::Code(0), InstallerExit::Code(1603)]);
+    });
+    rig.set_catalog(vec![v2]);
+    rig.until("failed", |r| r.state("a1") == Some(LocalState::Failed)).await;
+    let record = rig.record("a1").unwrap();
+    assert_eq!((record.detail.as_deref(), record.old_works), (Some("rollback_failed"), false));
+    assert_eq!(rig.runs().len(), 4);
+    // A hand-edited `installs.json` cannot make the roll-back start anything else: a kept file is a hash and `.msi` / `.exe`.
+    rig.stop().await;
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_tampered_kept_installer_is_never_started() {
+    let (mut rig, _v1, v2) = rolled_back_rig(1).await;
+    // The kept file changed on disk: its SHA-256 no longer matches, so it is not run (and the update's failure stays).
+    std::fs::write(rig.installer_file(b"v1", "msi"), b"planted").unwrap();
+    rig.set_catalog(vec![v2]);
+    rig.until("failed", |r| r.state("a1") == Some(LocalState::Failed)).await;
+    assert_eq!(rig.record("a1").unwrap().detail.as_deref(), Some("rollback_failed"));
+    let runs = rig.runs();
+    assert!(runs.iter().all(|run| !run.args.iter().any(|a| a.contains("planted"))));
+    assert_eq!(runs.len(), 3, "the install of v1, the failed v2 and the uninstall of v2: the planted file never ran");
+    rig.assert_every_run_is_allowed();
+    rig.stop().await;
+}
+
+#[tokio::test(start_paused = true)]
+async fn low_disk_keeps_no_installer_and_the_failed_update_then_has_nothing_to_roll_back_to() {
+    let v1 = managed(app("a1", "msi", b"v1", 1, true), "1.0.0");
+    let v2 = managed(app("a1", "msi", b"v2", 2, true), "2.0.0");
+    let mut rig = rig();
+    rig.sim.with_world(|w| w.disk_free_bytes = 2 * GIB);
+    rig.serve(&v1, b"v1");
+    rig.serve(&v2, b"v2");
+    rig.set_catalog(vec![v1]);
+    rig.start();
+    rig.until("v1", |r| r.state("a1") == Some(LocalState::Installed)).await;
+    assert!(rig.record("a1").unwrap().kept.is_none(), "under 3 GiB free: nothing is kept");
+    assert!(rig.downloads().is_empty());
+    rig.sim.with_world(|w| w.installer_exits.push_back(InstallerExit::Code(1603)));
+    rig.set_catalog(vec![v2]);
+    rig.until("failed", |r| r.state("a1") == Some(LocalState::Failed)).await;
+    let record = rig.record("a1").unwrap();
+    assert_eq!((record.detail.as_deref(), record.old_works), (Some("exit_code"), false), "the installer's own failure");
+    assert_eq!(rig.runs().len(), 2, "no roll-back run");
+    rig.stop().await;
+}
+
+#[tokio::test(start_paused = true)]
+async fn rollback_on_fail_false_keeps_no_installer() {
+    let v1 = with_update(app("a1", "msi", b"v1", 1, true), "1.0.0", json!({ "mode": "managed", "rollbackOnFail": false }));
+    let mut rig = rig_with_installed(&v1, b"v1").await;
+    assert!(rig.record("a1").unwrap().kept.is_none());
+    assert!(rig.downloads().is_empty());
+    rig.stop().await;
+}
+
+// ---------------------------------------------------------------- version detection (plan 4.6 "Detection")
+
+#[tokio::test(start_paused = true)]
+async fn a_version_below_the_catalogues_is_a_failure_for_managed_and_a_warning_for_pinned() {
+    // Managed: the installer ran, but the program says 1.5 and the catalogue says 2.0.
+    let managed_app = managed(app("m1", "msi", b"m", 1, true), "2.0.0");
+    let pinned_app = pinned(app("p1", "msi", b"p", 1, true), "2.0.0");
+    let mut rig = rig();
+    rig.installs_version(b"m", "1.5.0.0");
+    rig.installs_version(b"p", "1.5.0.0");
+    rig.serve(&managed_app, b"m");
+    rig.serve(&pinned_app, b"p");
+    rig.set_catalog(vec![managed_app, pinned_app]);
+    rig.start();
+    rig.until("both ended", |r| r.state("m1") == Some(LocalState::Failed) && r.state("p1") == Some(LocalState::Installed)).await;
+    let m = rig.record("m1").unwrap();
+    assert_eq!((m.detail.as_deref(), m.last_exit_code), (Some("version_too_low"), Some(0)));
+    let p = rig.record("p1").unwrap();
+    assert_eq!((p.detail.as_deref(), p.installed_version.as_deref()), (Some("version_too_low"), Some("1.5.0.0")));
+    let reports = rig.reports();
+    let pinned_report = reports.iter().find(|r| r.app_id == "p1").unwrap();
+    assert_eq!((pinned_report.state, pinned_report.detail.as_deref()), (InstallState::Installed, Some("version_too_low")));
+    assert_eq!(pinned_report.installed_version, Some(Some("1.5.0.0".to_string())));
+    rig.stop().await;
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_program_without_a_version_resource_has_the_version_the_engine_installed() {
+    let v1 = pinned(app("a1", "msi", b"v1", 1, true), "7.1");
+    let mut rig = rig();
+    rig.serve(&v1, b"v1");
+    rig.set_catalog(vec![v1]);
+    rig.start();
+    rig.until("v1", |r| r.state("a1") == Some(LocalState::Installed)).await;
+    assert_eq!(rig.record("a1").unwrap().installed_version.as_deref(), Some("7.1"));
+    assert_eq!(rig.reports()[0].installed_version, Some(Some("7.1".to_string())));
+    rig.stop().await;
+}
+
+// ---------------------------------------------------------------- the publisher of an installer file (plan 4.4.3)
+
+#[tokio::test(start_paused = true)]
+async fn an_installer_not_signed_by_the_publisher_does_not_run() {
+    let mut a1 = app("a1", "msi", b"signed", 1, true);
+    a1.desktop.as_mut().unwrap().install.as_mut().unwrap().publisher = Some("O=Acme Ltd".into());
+    let mut rig = rig();
+    rig.serve(&a1, b"signed");
+    rig.set_catalog(vec![a1.clone()]);
+    // Signed by somebody else.
+    rig.sign_installer(b"signed", "msi", "CN=Evil Corp, O=Evil Corp, C=US");
+    rig.start();
+    rig.until("refused", |r| r.state("a1") == Some(LocalState::Failed)).await;
+    assert_eq!(rig.record("a1").unwrap().detail.as_deref(), Some("publisher_mismatch"));
+    assert!(rig.runs().is_empty(), "nothing ran");
+    // Unsigned: refused too (no signer is not the publisher).
+    rig.sim.with_world(|w| w.programs.clear());
+    let again = {
+        let mut next = app("a1", "msi", b"signed", 2, true);
+        next.desktop.as_mut().unwrap().install.as_mut().unwrap().publisher = Some("O=Acme Ltd".into());
+        next
+    };
+    rig.set_catalog(vec![again.clone()]);
+    rig.until("refused again", |r| r.record("a1").is_some_and(|x| x.revision == 2 && x.state == LocalState::Failed)).await;
+    assert!(rig.runs().is_empty());
+    // Signed by the publisher: it runs.
+    rig.sign_installer(b"signed", "msi", ACME);
+    let third = {
+        let mut next = app("a1", "msi", b"signed", 3, true);
+        next.desktop.as_mut().unwrap().install.as_mut().unwrap().publisher = Some("O=Acme Ltd".into());
+        next
+    };
+    rig.set_catalog(vec![third]);
+    rig.until("installed", |r| r.state("a1") == Some(LocalState::Installed)).await;
+    assert_eq!(rig.runs().len(), 1);
+    rig.stop().await;
+}
+
+// ---------------------------------------------------------------- Vendor self-update: every row of the table of 4.4.3
+
+/// A Vendor app whose bootstrap (`bytes`) is signed by the vendor, with the program preinstalled at `file_version`.
+fn signed_vendor(rig: &Rig, id: &str, bytes: &[u8], version: &str, min: Option<&str>, revision: u64) -> CatalogApp {
+    let app = vendor(app(id, "msi", bytes, revision, true), version, min);
+    rig.serve(&app, bytes);
+    rig.sign_installer(bytes, "msi", ACME);
+    app
+}
+
+#[tokio::test(start_paused = true)]
+async fn vendor_row_1_not_installed_installs_the_bootstrap_after_the_publisher_check() {
+    let mut rig = rig();
+    let boot = vendor(app("a1", "msi", b"boot", 1, true), "1.0", None);
+    rig.serve(&boot, b"boot");
+    rig.set_catalog(vec![boot.clone()]);
+    rig.sign_installer(b"boot", "msi", "CN=Evil Corp, O=Evil Corp, C=US");
+    rig.start();
+    rig.until("refused", |r| r.state("a1") == Some(LocalState::Failed)).await;
+    assert_eq!(rig.record("a1").unwrap().detail.as_deref(), Some("publisher_mismatch"));
+    assert!(rig.runs().is_empty());
+    // The vendor's own signature: the bootstrap runs, like a Pinned install.
+    rig.sign_installer(b"boot", "msi", ACME);
+    let again = vendor(app("a1", "msi", b"boot", 2, true), "1.0", None);
+    rig.set_catalog(vec![again]);
+    rig.until("installed", |r| r.state("a1") == Some(LocalState::Installed)).await;
+    let record = rig.record("a1").unwrap();
+    assert_eq!((record.mode, record.version.as_deref()), (UpdateMode::Vendor, Some("1.0")));
+    assert!(record.kept.is_none(), "a Vendor bootstrap is not kept");
+    assert_eq!(rig.runs().len(), 1);
+    rig.stop().await;
+}
+
+#[tokio::test(start_paused = true)]
+async fn vendor_row_2_a_new_bootstrap_hash_changes_nothing_on_a_pc_that_has_the_app() {
+    let mut rig = rig();
+    rig.installs_version(b"boot1", "1.0.0.0");
+    let boot1 = signed_vendor(&rig, "a1", b"boot1", "1.0", None, 1);
+    rig.set_catalog(vec![boot1.clone()]);
+    rig.start();
+    rig.until("installed", |r| r.state("a1") == Some(LocalState::Installed)).await;
+    rig.report.accept_installs();
+    let calls_before = rig.downloader.calls().len();
+    let boot2 = signed_vendor(&rig, "a1", b"boot2", "2.0", None, 2);
+    rig.set_catalog(vec![boot2.clone()]);
+    rig.until("followed", |r| r.record("a1").is_some_and(|x| x.sha256 == sha(b"boot2"))).await;
+    rig.settle().await;
+    assert_eq!(rig.runs().len(), 1, "no reinstall");
+    assert_eq!(rig.downloader.calls().len(), calls_before, "not even a download");
+    let record = rig.record("a1").unwrap();
+    assert_eq!((record.state, record.update, record.version.as_deref(), record.revision), (LocalState::Installed, false, Some("2.0"), 2));
+    assert_eq!(record.installed_version.as_deref(), Some("1.0.0.0"), "the vendor's updater owns the version");
+    assert_eq!(rig.visible(&[boot2]), ["a1"], "the tile stays");
+    // The record keeps the new values: its result carries the new revision.
+    let reports = rig.reports();
+    assert_eq!((reports.len(), reports[0].app_revision, reports[0].state), (1, 2, InstallState::Installed));
+    rig.stop().await;
+}
+
+#[tokio::test(start_paused = true)]
+async fn vendor_row_3_a_missing_program_is_looked_for_twice_and_never_while_the_updater_runs() {
+    let mut rig = rig();
+    let boot = signed_vendor(&rig, "a1", b"boot", "1.0", None, 1);
+    rig.set_catalog(vec![boot.clone()]);
+    rig.start();
+    rig.until("installed", |r| r.state("a1") == Some(LocalState::Installed)).await;
+    let exe = exe_of(&boot);
+    rig.sim.with_world(|w| {
+        w.files.remove(&exe);
+    });
+    let minutes = |n: u64| Duration::from_secs(n * 60);
+    // First miss: nothing is installed, the looking starts (a local state, never reported).
+    rig.report.accept_installs();
+    rig.poke();
+    rig.settle().await;
+    let record = rig.record("a1").unwrap();
+    assert!(record.verifying_since_ms.is_some() && record.verify_looks == 0);
+    assert_eq!(rig.runs().len(), 1);
+    assert!(rig.reports().is_empty(), "`verifying` is not reported");
+    // Reconcile occasions inside 15 minutes change nothing.
+    advance(minutes(14)).await;
+    rig.poke();
+    rig.settle().await;
+    assert_eq!(rig.record("a1").unwrap().verify_looks, 0);
+    // The first look, 15 minutes after the miss.
+    advance(minutes(2)).await;
+    rig.poke();
+    rig.settle().await;
+    assert_eq!(rig.record("a1").unwrap().verify_looks, 1);
+    assert_eq!(rig.runs().len(), 1);
+    // A program signed by the vendor runs as SYSTEM (its updater): the second look waits, however late.
+    let updater = r"C:\Program Files\Acme\updater.exe";
+    rig.sim.add_program(updater, FileIdentity { signer: Some(ACME.into()), original_name: None, product: None }, None);
+    rig.sim.with_world(|w| w.processes.push(SimProcess { pid: 31, session_id: 0, image: PathBuf::from(updater), user_sid: "S-1-5-18".into() }));
+    advance(minutes(60)).await;
+    rig.poke();
+    rig.settle().await;
+    assert_eq!(rig.runs().len(), 1, "never while the vendor's updater runs");
+    assert_eq!(rig.record("a1").unwrap().verify_looks, 1);
+    // A SYSTEM process of somebody else does not count.
+    rig.sim.with_world(|w| w.processes.clear());
+    rig.sim.add_program(r"C:\Windows\System32\other.exe", FileIdentity { signer: Some("CN=Other, O=Other".into()), original_name: None, product: None }, None);
+    rig.sim.with_world(|w| w.processes.push(SimProcess { pid: 32, session_id: 0, image: PathBuf::from(r"C:\Windows\System32\other.exe"), user_sid: "S-1-5-18".into() }));
+    // The second look still finds nothing: the bootstrap is installed again.
+    rig.poke();
+    rig.until("installed again", |r| r.runs().len() == 2 && r.state("a1") == Some(LocalState::Installed)).await;
+    assert_eq!(rig.record("a1").unwrap().verifying_since_ms, None);
+    rig.stop().await;
+}
+
+#[tokio::test(start_paused = true)]
+async fn vendor_row_3_a_program_that_comes_back_ends_the_looking() {
+    let mut rig = rig();
+    let boot = signed_vendor(&rig, "a1", b"boot", "1.0", None, 1);
+    rig.set_catalog(vec![boot.clone()]);
+    rig.start();
+    rig.until("installed", |r| r.state("a1") == Some(LocalState::Installed)).await;
+    let exe = exe_of(&boot);
+    rig.sim.with_world(|w| {
+        w.files.remove(&exe);
+    });
+    rig.poke();
+    rig.settle().await;
+    assert!(rig.record("a1").unwrap().verifying_since_ms.is_some());
+    // The vendor's updater put it back.
+    rig.sim.add_file(exe.to_str().unwrap());
+    rig.poke();
+    rig.settle().await;
+    assert_eq!(rig.record("a1").unwrap().verifying_since_ms, None);
+    advance(Duration::from_secs(3 * 3600)).await;
+    rig.poke();
+    rig.settle().await;
+    assert_eq!(rig.runs().len(), 1, "nothing was reinstalled");
+    rig.stop().await;
+}
+
+#[tokio::test(start_paused = true)]
+async fn vendor_row_4_below_the_minimum_the_bootstrap_runs_at_the_next_apply_window() {
+    let mut rig = rig();
+    let boot = signed_vendor(&rig, "a1", b"boot", "3.0", Some("2.0"), 1);
+    // The PC has 1.0 of the program; the bootstrap brings 3.0.
+    rig.sim.add_file(exe_of(&boot).to_str().unwrap());
+    rig.set_file_version(&boot, Some("1.0.0.0"));
+    rig.installs_version(b"boot", "3.0.0.0");
+    // An employee is signed in: the window is closed.
+    rig.presence_tx.send_replace(true);
+    rig.set_catalog(vec![boot.clone()]);
+    rig.start();
+    rig.until("staged", |r| r.record("a1").is_some_and(|x| x.update && x.staged)).await;
+    rig.settle().await;
+    assert!(rig.runs().is_empty(), "no run while the employee is signed in");
+    assert_eq!(rig.record("a1").unwrap().installed_version.as_deref(), Some("1.0.0.0"));
+    // Signed out: the current bootstrap runs, and the new version is reported once.
+    rig.report.accept_installs();
+    rig.presence_tx.send_replace(false);
+    rig.until("updated", |r| r.record("a1").is_some_and(|x| !x.update && x.state == LocalState::Installed && x.installed_version.as_deref() == Some("3.0.0.0"))).await;
+    assert_eq!(rig.runs().len(), 1);
+    let reports = rig.reports();
+    assert_eq!((reports.len(), reports[0].installed_version.clone()), (1, Some(Some("3.0.0.0".to_string()))));
+    // A bootstrap that does not reach the minimum is a failure, not a loop.
+    rig.stop().await;
+}
+
+#[tokio::test(start_paused = true)]
+async fn vendor_row_4_a_bootstrap_that_does_not_reach_the_minimum_fails_once_and_does_not_loop() {
+    let mut rig = rig();
+    let boot = signed_vendor(&rig, "a1", b"boot", "3.0", Some("2.0"), 1);
+    rig.sim.add_file(exe_of(&boot).to_str().unwrap());
+    rig.set_file_version(&boot, Some("1.0.0.0"));
+    // The bootstrap runs but leaves the program at 1.5 (an old payload).
+    rig.installs_version(b"boot", "1.5.0.0");
+    rig.set_catalog(vec![boot]);
+    rig.start();
+    rig.until("failed", |r| r.state("a1") == Some(LocalState::Failed)).await;
+    assert_eq!(rig.record("a1").unwrap().detail.as_deref(), Some("version_too_low"));
+    // Three tries at the most, an hour apart, then final: never a loop.
+    advance(Duration::from_secs(5 * 3600)).await;
+    rig.settle().await;
+    assert!(rig.runs().len() <= 3, "{} runs", rig.runs().len());
+    advance(Duration::from_secs(10 * 24 * 3600)).await;
+    rig.settle().await;
+    assert!(rig.runs().len() <= 3);
+    rig.stop().await;
+}
+
+#[tokio::test(start_paused = true)]
+async fn vendor_row_5_an_installed_version_above_the_bootstrap_is_left_alone_never_a_downgrade() {
+    let mut rig = rig();
+    let boot = signed_vendor(&rig, "a1", b"boot", "3.0", Some("2.0"), 1);
+    rig.sim.add_file(exe_of(&boot).to_str().unwrap());
+    rig.set_file_version(&boot, Some("5.0.0.0"));
+    rig.set_catalog(vec![boot.clone()]);
+    rig.start();
+    rig.until("found", |r| r.state("a1") == Some(LocalState::Installed)).await;
+    rig.settle().await;
+    assert!(rig.runs().is_empty() && rig.downloader.calls().is_empty());
+    assert_eq!(rig.record("a1").unwrap().installed_version.as_deref(), Some("5.0.0.0"));
+    // An older bootstrap arrives (hash and version change): nothing runs either.
+    let older = signed_vendor(&rig, "a1", b"older", "2.5", Some("2.0"), 2);
+    rig.set_catalog(vec![older]);
+    rig.until("followed", |r| r.record("a1").is_some_and(|x| x.sha256 == sha(b"older"))).await;
+    rig.settle().await;
+    assert!(rig.runs().is_empty() && rig.downloader.calls().is_empty());
+    assert_eq!(rig.record("a1").unwrap().installed_version.as_deref(), Some("5.0.0.0"));
+    // A minimum that is above the bootstrap itself is not run either (the server refuses that save; this is the second check).
+    let broken = signed_vendor(&rig, "a1", b"older", "2.5", Some("9.0"), 3);
+    rig.set_catalog(vec![broken]);
+    rig.settle().await;
+    assert!(rig.runs().is_empty());
+    rig.stop().await;
+}
+
+#[tokio::test(start_paused = true)]
+async fn vendor_row_6_a_version_that_changes_by_itself_is_reported_once() {
+    let mut rig = rig();
+    let boot = signed_vendor(&rig, "a1", b"boot", "1.0", None, 1);
+    rig.sim.add_file(exe_of(&boot).to_str().unwrap());
+    rig.set_file_version(&boot, Some("1.0.0.0"));
+    rig.set_catalog(vec![boot.clone()]);
+    rig.start();
+    rig.until("found", |r| r.state("a1") == Some(LocalState::Installed)).await;
+    assert_eq!(rig.reports()[0].installed_version, Some(Some("1.0.0.0".to_string())));
+    rig.report.accept_installs();
+    // The vendor's updater moved the program to 1.4.
+    rig.set_file_version(&boot, Some("1.4.0.0"));
+    rig.poke();
+    rig.until("noticed", |r| r.record("a1").is_some_and(|x| x.installed_version.as_deref() == Some("1.4.0.0"))).await;
+    let reports = rig.reports();
+    assert_eq!((reports.len(), reports[0].installed_version.clone()), (1, Some(Some("1.4.0.0".to_string()))));
+    // The same version again: nothing is sent.
+    rig.report.accept_installs();
+    rig.poke();
+    rig.settle().await;
+    assert!(rig.reports().is_empty());
+    assert!(rig.runs().is_empty());
+    rig.stop().await;
+}
+
+// ---------------------------------------------------------------- a program in a versioned folder (plan 4.4.3)
+
+#[tokio::test(start_paused = true)]
+async fn a_program_in_a_versioned_folder_is_found_at_the_highest_version() {
+    let mut a1 = app("a1", "exe", b"boot", 1, false);
+    a1.desktop.as_mut().unwrap().exe = r"{ProgramFiles}\Vendor\App\app-*\app.exe".into();
+    let low = r"C:\Program Files\Vendor\App\app-1.2.0\app.exe";
+    let high = r"C:\Program Files\Vendor\App\app-1.10.0\app.exe";
+    let mut rig = rig();
+    rig.sim.add_file(low);
+    rig.sim.add_file(high);
+    rig.sim.add_file(r"C:\Program Files\Vendor\App\readme.txt");
+    rig.sim.with_world(|w| {
+        w.file_versions.insert(key(Path::new(high)), "1.10.0.0".into());
+        w.file_versions.insert(key(Path::new(low)), "1.2.0.0".into());
+    });
+    rig.set_catalog(vec![a1.clone()]);
+    rig.start();
+    rig.until("found", |r| r.state("a1") == Some(LocalState::Installed)).await;
+    assert!(rig.runs().is_empty() && rig.downloader.calls().is_empty(), "it is installed: nothing to do");
+    assert_eq!(rig.record("a1").unwrap().installed_version.as_deref(), Some("1.10.0.0"));
+    // The employee's app list carries the resolved path.
+    let resolver = AppResolver::with_installs(Arc::clone(&rig.sim) as Arc<dyn Platform>, Arc::clone(&rig.book), rig.paths.icons_dir());
+    let entries = resolver.visible(std::slice::from_ref(&a1), "emp1");
+    assert_eq!(entries.iter().map(|e| e.desktop.as_ref().unwrap().exe.clone()).collect::<Vec<_>>(), [high]);
+    rig.stop().await;
+}
+
+// ---------------------------------------------------------------- what wakes the engine (plan 4.6 "No new timer")
+
+#[test]
+fn wake_sources_are_listed_and_nothing_else_wakes_the_engine() {
+    use crate::installs::version::WAKE_SOURCES;
+    let source = include_str!("engine.rs");
+    let start = source.find("async fn run_loop(").expect("the engine's loop");
+    let end = start + source[start..].find("#[path = \"drivers.rs\"]").expect("the end of the loop");
+    let body = &source[start..end];
+    // The one `select!` of the loop: every arm, and no more.
+    let select = &body[body.find("tokio::select! {").expect("the select")..];
+    let select = &select[..select.find("\n        }\n").expect("the end of the select")];
+    let arms: Vec<&str> = select.lines().filter(|line| line.contains(" => ")).collect();
+    assert_eq!(arms.len(), 6, "{arms:#?}");
+    for (arm, name) in [
+        ("shutdown.cancelled()", "(stopping)"),
+        ("policy_rx.changed()", "policy"),
+        ("snapshot_rx.changed()", "snapshot"),
+        ("presence_rx.changed()", "presence"),
+        ("exit_rx.recv()", "app_exit"),
+        ("timer", "retry_timer"),
+    ] {
+        assert!(arms.iter().any(|line| line.contains(arm)), "{name}: no arm for {arm}");
+    }
+    assert_eq!(WAKE_SOURCES, ["policy", "snapshot", "presence", "app_exit", "retry_timer"]);
+    assert_eq!(WAKE_SOURCES.len() + 1, arms.len(), "every arm but the stop is a listed wake source");
+    // No interval, and only two sleeps in the whole engine: the retry timer, and the bounded wait for the program to
+    // appear right after an installer (a job step, not a wake source).
+    let code = &source[..source.find("#[path = \"drivers.rs\"]").unwrap()];
+    assert!(!code.contains("tokio::time::interval") && !code.contains("std::thread::sleep"), "no polling loop");
+    assert_eq!(code.matches("tokio::time::sleep(").count(), 2);
+    assert_eq!(body.matches("tokio::time::sleep(").count(), 1, "the loop's only timer is the retry timer");
+    // The sources that wait for events are channels and handles, never a period.
+    let drivers = include_str!("drivers.rs");
+    assert!(!drivers.contains("tokio::time::interval"));
+}
+
+#[tokio::test(start_paused = true)]
+async fn an_update_that_waits_contributes_no_timer_to_the_plan() {
+    // The plan of an engine whose only work is an update that waits for its window has no wake time at all.
+    let v1 = app("a1", "msi", b"v1", 1, true);
+    let mut rig = rig_with_installed(&v1, b"v1").await;
+    rig.presence_tx.send_replace(true);
+    rig.settle().await;
+    let v2 = app("a1", "msi", b"v2", 2, true);
+    rig.serve(&v2, b"v2");
+    rig.set_catalog(vec![v2]);
+    rig.until("staged", |r| r.record("a1").is_some_and(|x| x.staged)).await;
+    rig.stop().await;
+    // Rebuild an engine on the same records and ask it.
+    let (exit_tx, _exit_rx) = mpsc::unbounded_channel::<u32>();
+    let deps = EngineDeps {
+        platform: Arc::clone(&rig.sim) as Arc<dyn Platform>,
+        downloader: Arc::new(rig.downloader.clone()),
+        paths: rig.paths.clone(),
+        book: Arc::clone(&rig.book),
+        report: Arc::clone(&rig.report),
+        now_ms: Arc::new(|| BASE_MS),
+        on_visible_change: Arc::new(|| {}),
+        on_driver_change: Arc::new(|| {}),
+        install_timeout: Duration::from_secs(1800),
+        exe_wait: Duration::from_secs(10),
+        shared: Arc::clone(&rig.shared),
+        signed_in: rig.presence_tx.subscribe(),
+    };
+    let engine = Engine {
+        deps,
+        icons_tried: HashSet::new(),
+        started_ms: BASE_MS,
+        ever_signed_in: true,
+        was_signed_in: true,
+        exit_watches: HashMap::new(),
+        exit_tx,
+    };
+    let plan = engine.plan(true, true);
+    assert!(plan.job.is_none() && plan.wake.is_none(), "waiting for an event, not for a time");
+    // Signed out: the same record is a job.
+    let plan = engine.plan(true, false);
+    assert!(plan.job.is_some_and(|job| job.id == "a1" && !job.stage));
+}
+
+// ---------------------------------------------------------------- roll-back of EXE and portable installs, Deferred, ordering
+
+#[tokio::test(start_paused = true)]
+async fn an_exe_update_that_fails_is_rolled_back_by_running_the_previous_installer_again() {
+    let v1 = managed(app("a1", "exe", b"v1", 1, true), "1.0.0");
+    let v2 = managed(app("a1", "exe", b"v2", 2, true), "2.0.0");
+    let mut rig = rig();
+    rig.installs_version(b"v1", "1.0.0.0");
+    rig.installs_version(b"v2", "2.0.0.0");
+    rig.serve(&v1, b"v1");
+    rig.serve(&v2, b"v2");
+    rig.set_catalog(vec![v1.clone()]);
+    rig.start();
+    rig.until("v1 installed", |r| r.state("a1") == Some(LocalState::Installed)).await;
+    rig.report.accept_installs();
+    let kept = rig.record("a1").unwrap().kept.expect("the installer of v1 is kept");
+    assert_eq!((kept.ext.as_str(), kept.kind), ("exe", RecordKind::Exe));
+    // The installer of v2 fails; the roll-back is the old installer, run again (an EXE needs no uninstall first).
+    rig.sim.with_world(|w| {
+        w.installer_exits.push_back(InstallerExit::Code(1));
+        w.installer_exits.push_back(InstallerExit::Code(0));
+    });
+    rig.set_catalog(vec![v2.clone()]);
+    rig.until("rolled back", |r| r.record("a1").is_some_and(|x| x.state == LocalState::Failed && x.attempts == 1)).await;
+    let runs = rig.runs();
+    assert_eq!(runs.len(), 3, "v1, the failed v2, v1 again: {runs:?}");
+    assert_eq!(runs[1].program, rig.installer_file(b"v2", "exe"));
+    assert_eq!(runs[2].program, rig.installer_file(b"v1", "exe"), "the previous installer, by its own hash");
+    assert_eq!(runs[2].args.first().map(String::as_str), Some("/S"), "with its own silent arguments");
+    assert!(runs.iter().all(|run| !run.args.iter().any(|a| a == "/x")), "no uninstall for an EXE");
+    rig.assert_every_run_is_allowed();
+    let record = rig.record("a1").unwrap();
+    assert_eq!((record.detail.as_deref(), record.last_exit_code, record.old_works), (Some("update_rolled_back"), Some(1), true));
+    assert_eq!(record.installed_version.as_deref(), Some("1.0.0.0"), "the old version is back");
+    assert!(record.previous.is_none() && record.kept.is_some());
+    assert_eq!(rig.visible(&[v1, v2]), ["a1"], "the old version works: the tile stays");
+    let reports = rig.reports();
+    assert_eq!(reports.len(), 1, "{reports:?}");
+    assert_eq!((reports[0].state, reports[0].detail.as_deref()), (InstallState::Failed, Some("update_rolled_back")));
+    assert_eq!(reports[0].installed_version, Some(Some("1.0.0.0".to_string())));
+    rig.stop().await;
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_portable_update_that_fails_is_rolled_back_by_placing_the_previous_file_again() {
+    let v1 = managed(app("a1", "portable", b"v1", 1, true), "1.0.0");
+    let v2 = managed(app("a1", "portable", b"v2", 2, true), "2.0.0");
+    let mut rig = rig();
+    // The simulated platform does not read a version out of a placed file: the program says 1.5 all the time, which is
+    // fine for v1 (1.0.0) and too low for v2 (2.0.0), so the update fails after the file was replaced.
+    rig.set_file_version(&v1, Some("1.5.0.0"));
+    rig.serve(&v1, b"v1");
+    rig.serve(&v2, b"v2");
+    rig.set_catalog(vec![v1.clone()]);
+    rig.start();
+    rig.until("v1 placed", |r| r.state("a1") == Some(LocalState::Installed)).await;
+    rig.report.accept_installs();
+    let kept = rig.record("a1").unwrap().kept.expect("the file of v1 is kept");
+    assert_eq!((kept.ext.as_str(), kept.kind), ("exe", RecordKind::Portable));
+    let places = |rig: &Rig| rig.sim.calls().iter().filter(|op| **op == SimOp::PlacePortable).count();
+    assert_eq!(places(&rig), 1);
+    rig.set_catalog(vec![v2.clone()]);
+    rig.until("rolled back", |r| r.record("a1").is_some_and(|x| x.state == LocalState::Failed && x.attempts == 1)).await;
+    assert_eq!(places(&rig), 3, "v1, v2, then v1 again");
+    assert!(rig.runs().is_empty(), "a portable app never runs an installer");
+    assert!(rig.sim.file_exists(&exe_of(&v1)), "the program is there again");
+    let record = rig.record("a1").unwrap();
+    assert_eq!((record.detail.as_deref(), record.old_works), (Some("update_rolled_back"), true));
+    assert!(record.previous.is_none() && record.kept.is_some());
+    assert_eq!(rig.visible(&[v1, v2]), ["a1"]);
+    let reports = rig.reports();
+    assert_eq!(reports.len(), 1, "{reports:?}");
+    assert_eq!((reports[0].state, reports[0].detail.as_deref()), (InstallState::Failed, Some("update_rolled_back")));
+    rig.stop().await;
+}
+
+#[tokio::test(start_paused = true)]
+async fn an_update_whose_when_closed_window_closes_during_the_download_is_deferred_until_the_app_closes() {
+    let v1 = with_update(app("a1", "msi", b"v1", 1, true), "1.0", json!({ "mode": "pinned", "applyWhen": "when_closed" }));
+    let mut rig = rig_with_installed(&v1, b"v1").await;
+    // An employee is signed in and the app is closed: for `when_closed` the window is open.
+    rig.presence_tx.send_replace(true);
+    rig.settle().await;
+    let v2 = with_update(app("a1", "msi", b"v2", 2, true), "2.0", json!({ "mode": "pinned", "applyWhen": "when_closed" }));
+    rig.serve(&v2, b"v2");
+    rig.sim.with_world(|w| w.installer_exits.push_back(InstallerExit::Code(1603)));
+    rig.set_catalog(vec![v2.clone()]);
+    rig.until("failed once", |r| r.record("a1").is_some_and(|x| x.state == LocalState::Failed && x.attempts == 1)).await;
+    assert_eq!(rig.runs().len(), 2, "the window was open: the installer ran");
+    // The retry an hour later downloads again; the employee starts the app while the download is on its way.
+    std::fs::remove_file(rig.installer_file(b"v2", "msi")).unwrap();
+    let gate = rig.downloader.hold();
+    advance(Duration::from_secs(3601)).await;
+    rig.until("downloading", |r| r.downloader.calls().len() == 3).await;
+    rig.run_app(&v1, 902);
+    rig.settle().await;
+    gate.add_permits(10);
+    // Deferred: downloaded and verified, kept, not started; it says it waits for the app to close.
+    rig.until("deferred", |r| r.record("a1").is_some_and(|x| x.state == LocalState::Installed && x.staged && x.update)).await;
+    rig.until("says so", |r| r.book.update_state("a1") == Some(AppUpdateState::WaitingForClose)).await;
+    assert_eq!(rig.runs().len(), 2, "nothing ran over the open app");
+    assert!(rig.installer_file(b"v2", "msi").exists());
+    assert!(!rig.sim.calls().contains(&SimOp::TerminateProcess), "a running app is never closed");
+    // The employee closes the app (still signed in): the update runs.
+    rig.sim.end_process(902);
+    rig.until("v2 installed", |r| r.record("a1").is_some_and(|x| x.state == LocalState::Installed && !x.update && x.sha256 == sha(b"v2"))).await;
+    assert_eq!(rig.runs().len(), 3);
+    assert_eq!(rig.book.update_state("a1"), None);
+    rig.stop().await;
+}
+
+/// Two installed apps (`a1`, `a2`) with an update each, staged while an employee is signed in.
+async fn two_staged_updates() -> (Rig, CatalogApp, CatalogApp) {
+    let (a1, a2) = (app("a1", "msi", b"a1v1", 1, true), app("a2", "msi", b"a2v1", 1, true));
+    let mut rig = rig();
+    rig.serve(&a1, b"a1v1");
+    rig.serve(&a2, b"a2v1");
+    rig.set_catalog(vec![a2.clone(), a1.clone()]);
+    rig.start();
+    rig.until("both installed", |r| r.state("a1") == Some(LocalState::Installed) && r.state("a2") == Some(LocalState::Installed)).await;
+    rig.report.accept_installs();
+    rig.presence_tx.send_replace(true);
+    rig.settle().await;
+    let (n1, n2) = (app("a1", "msi", b"a1v2", 2, true), app("a2", "msi", b"a2v2", 2, true));
+    rig.serve(&n1, b"a1v2");
+    rig.serve(&n2, b"a2v2");
+    rig.set_catalog(vec![n2.clone(), n1.clone()]);
+    rig.until("both staged", |r| r.record("a1").is_some_and(|x| x.staged) && r.record("a2").is_some_and(|x| x.staged)).await;
+    rig.settle().await;
+    assert_eq!(rig.runs().len(), 2, "no installer of an update ran while the employee was signed in");
+    (rig, n1, n2)
+}
+
+#[tokio::test(start_paused = true)]
+async fn two_updates_that_wait_run_one_at_a_time_in_the_order_of_the_app_ids_when_the_window_opens() {
+    let (mut rig, _n1, _n2) = two_staged_updates().await;
+    // Each says it waits, once.
+    let waiting: Vec<_> = rig.reports().iter().map(|r| (r.app_id.clone(), r.detail.clone())).collect();
+    assert_eq!(waiting.len(), 2, "{waiting:?}");
+    assert!(waiting.iter().all(|(_, detail)| detail.as_deref() == Some("waiting_for_close")));
+    rig.presence_tx.send_replace(false);
+    rig.until("both updated", |r| {
+        r.record("a1").is_some_and(|x| x.sha256 == sha(b"a1v2") && !x.update && x.state == LocalState::Installed)
+            && r.record("a2").is_some_and(|x| x.sha256 == sha(b"a2v2") && !x.update && x.state == LocalState::Installed)
+    })
+    .await;
+    let runs = rig.runs();
+    assert_eq!(runs.len(), 4);
+    // The catalogue lists a2 first; the engine goes by the app ids: a1, then a2. One at a time (the SimPlatform
+    // runs an installer to its end before the next).
+    assert_eq!(runs[2].args[1], rig.installer_file(b"a1v2", "msi").to_string_lossy());
+    assert_eq!(runs[3].args[1], rig.installer_file(b"a2v2", "msi").to_string_lossy());
+    rig.assert_every_run_is_allowed();
+    // Two terminal results, one per app, no failure.
+    let done = rig.reports();
+    assert_eq!(done.len(), 2, "{done:?}");
+    assert!(done.iter().all(|r| r.state == InstallState::Installed && r.detail.is_none()));
+    rig.stop().await;
+}
+
+#[tokio::test(start_paused = true)]
+async fn of_two_updates_only_the_one_whose_app_is_closed_runs_and_the_other_waits_for_its_own_app() {
+    let (mut rig, n1, n2) = two_staged_updates().await;
+    // a1 is running: a2 (later in id order) must not be held back by it, and a1 must not be updated under its user.
+    let old_a1 = app("a1", "msi", b"a1v1", 1, true);
+    rig.run_app(&old_a1, 311);
+    rig.presence_tx.send_replace(false);
+    rig.until("a2 updated", |r| r.record("a2").is_some_and(|x| x.sha256 == sha(b"a2v2") && !x.update && x.state == LocalState::Installed)).await;
+    rig.settle().await;
+    let runs = rig.runs();
+    assert_eq!(runs.len(), 3, "only a2's installer ran");
+    assert_eq!(runs[2].args[1], rig.installer_file(b"a2v2", "msi").to_string_lossy());
+    assert!(rig.record("a1").is_some_and(|x| x.update && x.staged && x.state == LocalState::Installed), "a1 still waits");    assert_eq!(rig.book.update_state("a2"), None);
+    assert!(!rig.sim.calls().contains(&SimOp::TerminateProcess));
+    // a1's app closes: its update runs now.
+    rig.sim.end_process(311);
+    rig.until("a1 updated", |r| r.record("a1").is_some_and(|x| x.sha256 == sha(b"a1v2") && !x.update && x.state == LocalState::Installed)).await;
+    let runs = rig.runs();
+    assert_eq!(runs.len(), 4);
+    assert_eq!(runs[3].args[1], rig.installer_file(b"a1v2", "msi").to_string_lossy());
+    assert_eq!(rig.visible(&[n1, n2]), ["a1", "a2"]);
     rig.stop().await;
 }

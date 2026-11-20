@@ -78,18 +78,30 @@ pub struct EnrollDeps {
 
 pub struct Enroller {
     inner: Arc<EnrollDeps>,
+    /// (Phase 6 Step 8) Two enrollments never run at once: the one a person starts through the
+    /// admin pipe (`enroll`, Rulebox Setup) and the one the service starts at its own start with
+    /// the code the installer left (`setup::pending`). The admin pipe has its own lock for
+    /// enroll and unenroll; this one also covers the call that does not come through the pipe.
+    gate: Arc<tokio::sync::Mutex<()>>,
 }
 
 impl Enroller {
     pub fn new(deps: EnrollDeps) -> Self {
-        Self { inner: Arc::new(deps) }
+        Self { inner: Arc::new(deps), gate: Arc::new(tokio::sync::Mutex::new(())) }
     }
 }
 
 impl AdminHandler for Enroller {
     fn enroll(&self, params: AdminEnrollParams) -> BoxFuture<'static, Result<AdminEnrollResult, RpcError>> {
         let inner = Arc::clone(&self.inner);
-        async move { inner.enroll(params).await }.boxed()
+        let gate = Arc::clone(&self.gate);
+        async move {
+            let Ok(_running) = gate.try_lock_owned() else {
+                return Err(rpc_error(ErrorCode::Busy, "Another enrollment is already running.", true));
+            };
+            inner.enroll(params).await
+        }
+        .boxed()
     }
 
     fn unenroll(&self, params: AdminUnenrollParams) -> BoxFuture<'static, Result<(), RpcError>> {

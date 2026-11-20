@@ -573,3 +573,31 @@ fn a_revoked_or_unenrolled_pc_and_a_missing_document_are_left_alone() {
     rig.shared.update(|state| state.enrollment = None).unwrap();
     assert_eq!(rig.runtime.pass(), PassResult::default());
 }
+
+#[test]
+fn the_machine_facts_carry_the_versioned_folder_and_the_vendor_publisher_rules_of_the_catalogue() {
+    // (Phase 6 Step 11, plan 4.4.3) The path rule is on the folder above the `*`; a vendor-mode app adds a publisher rule.
+    let dir = TempDir::new();
+    let sim = SimPlatform::new(dir.path().to_path_buf());
+    let paths = DataPaths::new(dir.path().to_path_buf());
+    let install = InstallPaths::new(PathBuf::from(sim_path_roots().program_files).join("Rulebox"));
+    let entry = |id: &str, exe: &str, update: serde_json::Value| {
+        json!({
+            "id": id, "name": id, "description": null, "kind": "desktop", "builtin": null, "web": null,
+            "desktop": { "exe": exe, "args": [], "fileArgTemplate": [], "resetFolders": [], "install": null, "update": update },
+            "pinnedTaskbar": false, "pinnedDesktop": false, "hue": null, "icon": null,
+            "audience": "everyone", "employeeIds": [], "revision": 1
+        })
+    };
+    let doc = json!({ "catalog": [
+        entry("a1", r"{ProgramFiles}\Vendor\App\app-*\app.exe", json!({ "mode": "vendor", "publisher": "O=Vendor Ltd" })),
+        entry("a2", r"{ProgramFiles}\Plain\plain.exe", json!({ "mode": "pinned" })),
+    ] });
+    let facts = machine_facts(&sim, &install, &paths, false, &doc);
+    assert_eq!(facts.catalogue_exe_folders, [r"C:\Program Files\Vendor\App", r"C:\Program Files\Plain"]);
+    assert_eq!(facts.vendor_exceptions.len(), 1);
+    assert_eq!(facts.vendor_exceptions[0].app_id.as_deref(), Some("a1"));
+    // No catalogue, no rules.
+    let none = machine_facts(&sim, &install, &paths, false, &json!({}));
+    assert!(none.catalogue_exe_folders.is_empty() && none.vendor_exceptions.is_empty());
+}
