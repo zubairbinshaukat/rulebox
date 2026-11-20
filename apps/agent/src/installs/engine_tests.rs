@@ -2737,3 +2737,329 @@ async fn of_two_updates_only_the_one_whose_app_is_closed_runs_and_the_other_wait
     assert_eq!(rig.visible(&[n1, n2]), ["a1", "a2"]);
     rig.stop().await;
 }
+
+// ---------------------------------------------------------------- wizard installers (Phase 6 Step 14)
+
+/// An exe app with the given silent arguments, and an answer file when `answer` is given (served by `serve_wizard`).
+fn wizard(id: &str, installer: &[u8], answer: Option<&[u8]>, silent_args: &[&str], revision: u64) -> CatalogApp {
+    let mut app = app(id, "exe", installer, revision, false);
+    let install = app.desktop.as_mut().unwrap().install.as_mut().unwrap();
+    install.silent_args = silent_args.iter().map(|arg| (*arg).to_string()).collect();
+    install.answer_file = answer.map(|bytes| AnswerFile { url: answer_url(id, bytes), sha256: sha(bytes), size_bytes: bytes.len() as u64 });
+    app
+}
+
+fn answer_url(id: &str, bytes: &[u8]) -> String {
+    format!("https://downloads.example.com/{id}/answer-{}", &sha(bytes)[..8])
+}
+
+const WIZARD_ARGS: [&str; 3] = ["/s", "/f1{AnswerFile}", "/f2{LogFile}"];
+
+impl Rig {
+    fn serve_wizard(&self, app: &CatalogApp, installer: &[u8], answer: Option<&[u8]>) {
+        self.serve(app, installer);
+        if let Some(bytes) = answer {
+            self.downloader.serve(&answer_url(&app.id, bytes), bytes);
+        }
+    }
+
+    fn answer_file(&self, bytes: &[u8]) -> PathBuf {
+        self.paths.downloads_dir().join(format!("{}.iss", sha(bytes)))
+    }
+
+    /// The exe wait of the engine (10 s) is over.
+    async fn exe_wait_passes(&self) {
+        for _ in 0..12 {
+            advance(Duration::from_secs(1)).await;
+            self.settle().await;
+        }
+    }
+}
+
+#[test]
+fn check_spec_reads_the_answer_file_the_timeout_and_the_token_rule() {
+    let roots = crate::platform::sim::sim_path_roots();
+    let good = wizard("w1", b"setup", Some(b"answers"), &WIZARD_ARGS, 1);
+    let spec = check_spec(&good, &roots).unwrap();
+    assert_eq!(spec.answer_file.as_ref().map(|a| a.sha256.clone()), Some(sha(b"answers")));
+    assert_eq!(spec.timeout_min, None);
+    // `{LogFile}` alone needs no answer file; the answer file is then not used (and not downloaded).
+    let log_only = wizard("w2", b"setup", None, &["/s", "/f2{LogFile}"], 1);
+    assert_eq!(check_spec(&log_only, &roots).unwrap().answer_file, None);
+    let unused = wizard("w3", b"setup", Some(b"answers"), &["/S"], 1);
+    assert_eq!(check_spec(&unused, &roots).unwrap().answer_file, None, "an answer file no argument names is never fetched");
+    // The token without an answer file, any other `{...}`, and a lone brace are refused.
+    for bad in [&["/f1{AnswerFile}"][..], &["/DIR={app}"][..], &["{"][..], &["{answerfile}"][..], &["/s", "{LogFile"][..]] {
+        let app = wizard("w4", b"setup", None, bad, 1);
+        assert!(check_spec(&app, &roots).is_err(), "{bad:?}");
+    }
+    // The answer file's own rules: https, a SHA-256, at most 256 KiB.
+    let mut http = good.clone();
+    http.desktop.as_mut().unwrap().install.as_mut().unwrap().answer_file.as_mut().unwrap().url = "http://downloads.example.com/a.iss".into();
+    assert!(check_spec(&http, &roots).is_err());
+    let mut hash = good.clone();
+    hash.desktop.as_mut().unwrap().install.as_mut().unwrap().answer_file.as_mut().unwrap().sha256 = "ABC".into();
+    assert!(check_spec(&hash, &roots).is_err());
+    let mut big = good.clone();
+    big.desktop.as_mut().unwrap().install.as_mut().unwrap().answer_file.as_mut().unwrap().size_bytes = 256 * 1024 + 1;
+    assert!(check_spec(&big, &roots).is_err());
+    // `timeoutMin`: 5 to 120.
+    for (minutes, ok) in [(5, true), (45, true), (120, true), (4, false), (121, false), (0, false)] {
+        let mut app = good.clone();
+        app.desktop.as_mut().unwrap().install.as_mut().unwrap().timeout_min = Some(minutes);
+        assert_eq!(check_spec(&app, &roots).is_ok(), ok, "{minutes}");
+    }
+}
+
+#[tokio::test(start_paused = true)]
+async fn the_answer_file_is_fetched_verified_and_both_tokens_become_paths_in_the_data_folder() {
+    let mut rig = rig();
+    let w = wizard("w1", b"setup bytes", Some(b"[InstallShield Silent]"), &WIZARD_ARGS, 1);
+    rig.serve_wizard(&w, b"setup bytes", Some(b"[InstallShield Silent]"));
+    rig.set_catalog(vec![w.clone()]);
+    rig.start();
+    rig.until("installed", |r| r.state("w1") == Some(LocalState::Installed)).await;
+    let runs = rig.runs();
+    assert_eq!(runs.len(), 1);
+    let answer = rig.answer_file(b"[InstallShield Silent]");
+    let log = rig.paths.install_log("w1");
+    assert_eq!(runs[0].program, rig.installer_file(b"setup bytes", "exe"));
+    assert_eq!(runs[0].args, ["/s".to_string(), format!("/f1{}", answer.display()), format!("/f2{}", log.display())]);
+    assert!(!answer.to_string_lossy().contains(' ') && !log.to_string_lossy().contains(' '), "no quoting is needed inside /f1");
+    // Hash-checked like the installer: the answer file came from its own URL.
+    assert!(rig.downloader.calls().contains(&answer_url("w1", b"[InstallShield Silent]")));
+    rig.assert_every_run_is_allowed();
+    assert!(rig.downloads().is_empty(), "the installer and its answer file are deleted after success: {:?}", rig.downloads());
+    rig.stop().await;
+}
+
+#[tokio::test(start_paused = true)]
+async fn an_answer_file_with_a_wrong_hash_never_reaches_the_installer() {
+    let mut rig = rig();
+    let w = wizard("w1", b"setup", Some(b"the real answers"), &WIZARD_ARGS, 1);
+    rig.serve(&w, b"setup");
+    // The server serves other bytes at the answer URL (a swapped file).
+    rig.downloader.serve(&answer_url("w1", b"the real answers"), b"swapped answers!");
+    rig.set_catalog(vec![w.clone()]);
+    rig.start();
+    rig.until("failed", |r| r.state("w1") == Some(LocalState::Failed)).await;
+    let record = rig.record("w1").unwrap();
+    assert_eq!((record.detail.as_deref(), record.last_exit_code), (Some("answer_file_failed"), None));
+    assert!(rig.runs().is_empty(), "the installer never ran");
+    assert!(!rig.answer_file(b"the real answers").exists() && !rig.answer_file(b"swapped answers!").exists(), "nothing wrong stays on disk");
+    assert!(rig.visible(&[w]).is_empty());
+    let reports = rig.reports();
+    assert!(reports.iter().any(|r| r.state == InstallState::Failed && r.detail.as_deref() == Some("answer_file_failed")), "{reports:?}");
+    rig.stop().await;
+}
+
+#[tokio::test(start_paused = true)]
+async fn an_answer_file_that_cannot_be_fetched_is_answer_file_failed_and_a_planted_one_is_replaced() {
+    let mut rig = rig();
+    let w = wizard("w1", b"setup", Some(b"answers"), &WIZARD_ARGS, 1);
+    rig.serve(&w, b"setup");
+    // Nothing is served at the answer URL (404), and a file is planted under its name with other content.
+    std::fs::create_dir_all(rig.paths.downloads_dir()).unwrap();
+    std::fs::write(rig.answer_file(b"answers"), b"planted").unwrap();
+    rig.set_catalog(vec![w.clone()]);
+    rig.start();
+    rig.until("failed", |r| r.state("w1") == Some(LocalState::Failed)).await;
+    assert_eq!(rig.record("w1").unwrap().detail.as_deref(), Some("answer_file_failed"));
+    assert!(rig.runs().is_empty());
+    assert!(!rig.answer_file(b"answers").exists(), "the planted file did not survive the check");
+    // The retry (a new revision) finds the file served and runs.
+    rig.downloader.serve(&answer_url("w1", b"answers"), b"answers");
+    rig.set_catalog(vec![wizard("w1", b"setup", Some(b"answers"), &WIZARD_ARGS, 2)]);
+    rig.until("installed", |r| r.state("w1") == Some(LocalState::Installed)).await;
+    assert_eq!(rig.runs().len(), 1);
+    rig.stop().await;
+}
+
+#[tokio::test(start_paused = true)]
+async fn an_exe_with_3010_listed_is_a_success_that_asks_for_a_restart_and_unlisted_it_is_a_failure() {
+    let mut rig = rig();
+    let mut listed = wizard("w1", b"setup", None, &["/quiet", "/norestart"], 1);
+    listed.desktop.as_mut().unwrap().install.as_mut().unwrap().success_exit_codes = vec![0, 3010, 1641];
+    let unlisted = wizard("w2", b"setup2", None, &["/S"], 1);
+    rig.serve(&listed, b"setup");
+    rig.serve(&unlisted, b"setup2");
+    rig.sim.with_world(|w| {
+        w.installer_exits.push_back(InstallerExit::Code(3010));
+        w.installer_exits.push_back(InstallerExit::Code(3010));
+    });
+    rig.set_catalog(vec![listed.clone(), unlisted.clone()]);
+    rig.start();
+    rig.until("both ended", |r| r.state("w1") == Some(LocalState::Installed) && r.record("w2").is_some_and(|x| x.attempts == 1)).await;
+    let w1 = rig.record("w1").unwrap();
+    assert_eq!((w1.state, w1.last_exit_code, w1.detail), (LocalState::Installed, Some(3010), None));
+    assert_eq!(rig.report.restart_pending(), Some(true), "the restart is noted, never done");
+    let w2 = rig.record("w2").unwrap();
+    assert_eq!((w2.state, w2.detail.as_deref(), w2.last_exit_code), (LocalState::Failed, Some("exit_code"), Some(3010)));
+    rig.stop().await;
+}
+
+#[tokio::test(start_paused = true)]
+async fn the_apps_own_timeout_reaches_the_installer_and_the_default_is_the_engines() {
+    let mut rig = rig();
+    let mut slow = wizard("w1", b"setup", None, &["/S"], 1);
+    slow.desktop.as_mut().unwrap().install.as_mut().unwrap().timeout_min = Some(45);
+    let plain = wizard("w2", b"setup2", None, &["/S"], 1);
+    rig.serve(&slow, b"setup");
+    rig.serve(&plain, b"setup2");
+    rig.set_catalog(vec![slow, plain]);
+    rig.start();
+    rig.until("both installed", |r| r.state("w1") == Some(LocalState::Installed) && r.state("w2") == Some(LocalState::Installed)).await;
+    let timeouts = rig.sim.with_world(|w| w.installer_timeouts.clone());
+    assert_eq!(timeouts, [Duration::from_secs(45 * 60), Duration::from_secs(1800)], "apps run in id order");
+    rig.stop().await;
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_stalled_installer_says_needs_interaction_and_a_plain_timeout_says_timeout() {
+    let mut rig = rig();
+    let stuck = wizard("w1", b"setup", None, &["/S"], 1);
+    let slow = wizard("w2", b"setup2", None, &["/S"], 1);
+    rig.serve(&stuck, b"setup");
+    rig.serve(&slow, b"setup2");
+    rig.sim.with_world(|w| {
+        w.installer_exits.push_back(InstallerExit::Stalled);
+        w.installer_exits.push_back(InstallerExit::TimedOut);
+    });
+    rig.set_catalog(vec![stuck.clone(), slow.clone()]);
+    rig.start();
+    rig.until("both failed", |r| r.record("w1").is_some_and(|x| x.attempts == 1) && r.record("w2").is_some_and(|x| x.attempts == 1)).await;
+    let (w1, w2) = (rig.record("w1").unwrap(), rig.record("w2").unwrap());
+    assert_eq!((w1.state, w1.detail.as_deref(), w1.last_exit_code), (LocalState::Failed, Some("needs_interaction"), None));
+    assert_eq!((w2.state, w2.detail.as_deref(), w2.last_exit_code), (LocalState::Failed, Some("timeout"), None));
+    assert!(rig.visible(&[stuck, slow]).is_empty(), "neither is half installed");
+    let reports = rig.reports();
+    assert!(reports.iter().any(|r| r.app_id == "w1" && r.detail.as_deref() == Some("needs_interaction")), "{reports:?}");
+    rig.stop().await;
+}
+
+#[tokio::test(start_paused = true)]
+async fn an_installer_that_put_the_program_in_the_system_profile_says_installed_per_user() {
+    let mut rig = rig();
+    let w = wizard("w1", b"setup", None, &["/S"], 1);
+    rig.serve(&w, b"setup");
+    rig.sim.with_world(|world| world.installer_creates_exe = false);
+    // The program is in the profile of SYSTEM, three folders down (`AppData\Local\Programs\Vendor\w1.exe`).
+    rig.sim.add_file(r"C:\Windows\System32\config\systemprofile\AppData\Local\Programs\Vendor\W1.EXE");
+    rig.set_catalog(vec![w.clone()]);
+    rig.start();
+    rig.until("ran", |r| r.runs().len() == 1).await;
+    rig.exe_wait_passes().await;
+    rig.until("failed", |r| r.state("w1") == Some(LocalState::Failed)).await;
+    let record = rig.record("w1").unwrap();
+    assert_eq!((record.detail.as_deref(), record.last_exit_code), (Some("installed_per_user"), Some(0)));
+    assert!(rig.visible(&[w]).is_empty());
+    assert!(rig.sim.calls().contains(&SimOp::FindFileBelow));
+    rig.stop().await;
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_program_too_deep_in_the_profile_or_of_another_name_or_elsewhere_is_exe_missing() {
+    for (case, file) in [
+        ("too deep", r"C:\Windows\System32\config\systemprofile\AppData\a\b\c\d\e\w1.exe"),
+        ("another name", r"C:\Windows\System32\config\systemprofile\AppData\Local\other.exe"),
+        ("another place", r"C:\Users\Staff\AppData\Local\Programs\w1.exe"),
+        ("above AppData", r"C:\Windows\System32\config\systemprofile\w1.exe"),
+    ] {
+        let mut rig = rig();
+        let w = wizard("w1", b"setup", None, &["/S"], 1);
+        rig.serve(&w, b"setup");
+        rig.sim.with_world(|world| world.installer_creates_exe = false);
+        rig.sim.add_file(file);
+        rig.set_catalog(vec![w]);
+        rig.start();
+        rig.until("ran", |r| r.runs().len() == 1).await;
+        rig.exe_wait_passes().await;
+        rig.until("failed", |r| r.state("w1") == Some(LocalState::Failed)).await;
+        assert_eq!(rig.record("w1").unwrap().detail.as_deref(), Some("exe_missing_after_install"), "{case}");
+        rig.stop().await;
+    }
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_failing_per_user_probe_leaves_the_plain_exe_missing() {
+    let mut rig = rig();
+    let w = wizard("w1", b"setup", None, &["/S"], 1);
+    rig.serve(&w, b"setup");
+    rig.sim.with_world(|world| world.installer_creates_exe = false);
+    rig.sim.add_file(r"C:\Windows\System32\config\systemprofile\AppData\Local\w1.exe");
+    rig.sim.fail_next(SimOp::FindFileBelow, PlatformError::Other("denied".into()));
+    rig.set_catalog(vec![w]);
+    rig.start();
+    rig.until("ran", |r| r.runs().len() == 1).await;
+    rig.exe_wait_passes().await;
+    rig.until("failed", |r| r.state("w1") == Some(LocalState::Failed)).await;
+    assert_eq!(rig.record("w1").unwrap().detail.as_deref(), Some("exe_missing_after_install"));
+    rig.stop().await;
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_roll_back_runs_the_previous_installer_with_its_own_answer_file() {
+    let v1 = managed(wizard("w1", b"v1", Some(b"answers one"), &WIZARD_ARGS, 1), "1.0.0");
+    let v2 = managed(wizard("w1", b"v2", Some(b"answers two"), &WIZARD_ARGS, 2), "2.0.0");
+    let mut rig = rig();
+    rig.installs_version(b"v1", "1.0.0.0");
+    rig.installs_version(b"v2", "2.0.0.0");
+    rig.serve_wizard(&v1, b"v1", Some(b"answers one"));
+    rig.serve_wizard(&v2, b"v2", Some(b"answers two"));
+    rig.set_catalog(vec![v1.clone()]);
+    rig.start();
+    rig.until("v1 installed", |r| r.state("w1") == Some(LocalState::Installed)).await;
+    rig.report.accept_installs();
+    // The kept installer takes its answer file with it; the one of the install is not deleted from under a roll-back.
+    let kept = rig.record("w1").unwrap().kept.expect("v1 is kept");
+    assert_eq!(kept.answer_sha256, Some(sha(b"answers one")));
+    assert!(rig.answer_file(b"answers one").exists() && rig.installer_file(b"v1", "exe").exists());
+    rig.sim.with_world(|w| {
+        w.installer_exits.push_back(InstallerExit::Code(1));
+        w.installer_exits.push_back(InstallerExit::Code(0));
+    });
+    rig.set_catalog(vec![v2.clone()]);
+    rig.until("rolled back", |r| r.record("w1").is_some_and(|x| x.state == LocalState::Failed && x.attempts == 1)).await;
+    let runs = rig.runs();
+    assert_eq!(runs.len(), 3, "v1, the failed v2, v1 again: {runs:?}");
+    assert_eq!(runs[1].args[1], format!("/f1{}", rig.answer_file(b"answers two").display()), "v2 runs with its own answers");
+    assert_eq!(runs[2].program, rig.installer_file(b"v1", "exe"));
+    assert_eq!(runs[2].args[1], format!("/f1{}", rig.answer_file(b"answers one").display()), "v1 again with the answers of v1");
+    assert_eq!(rig.record("w1").unwrap().detail.as_deref(), Some("update_rolled_back"));
+    rig.assert_every_run_is_allowed();
+    rig.stop().await;
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_kept_answer_file_that_changed_makes_the_roll_back_fail_and_nothing_runs() {
+    let v1 = managed(wizard("w1", b"v1", Some(b"answers one"), &WIZARD_ARGS, 1), "1.0.0");
+    let v2 = managed(wizard("w1", b"v2", Some(b"answers two"), &WIZARD_ARGS, 2), "2.0.0");
+    let mut rig = rig();
+    rig.installs_version(b"v1", "1.0.0.0");
+    rig.installs_version(b"v2", "2.0.0.0");
+    rig.serve_wizard(&v1, b"v1", Some(b"answers one"));
+    rig.serve_wizard(&v2, b"v2", Some(b"answers two"));
+    rig.set_catalog(vec![v1.clone()]);
+    rig.start();
+    rig.until("v1 installed", |r| r.state("w1") == Some(LocalState::Installed)).await;
+    rig.report.accept_installs();
+    std::fs::write(rig.answer_file(b"answers one"), b"tampered").unwrap();
+    rig.sim.with_world(|w| w.installer_exits.push_back(InstallerExit::Code(1)));
+    rig.set_catalog(vec![v2]);
+    rig.until("failed", |r| r.record("w1").is_some_and(|x| x.state == LocalState::Failed && x.attempts == 1)).await;
+    assert_eq!(rig.record("w1").unwrap().detail.as_deref(), Some("rollback_failed"));
+    assert_eq!(rig.runs().len(), 2, "v1, then v2 (which failed); the previous installer was not started again");
+    rig.stop().await;
+}
+
+#[test]
+fn a_record_from_before_the_answer_file_loads_with_none() {
+    let record = InstallRecord::new("a1", RecordKind::Exe, &sha(b"x"), 1, LocalState::Installed);
+    let mut value = serde_json::to_value(&record).unwrap();
+    value.as_object_mut().unwrap().remove("answerSha256");
+    let back: InstallRecord = serde_json::from_value(value).unwrap();
+    assert_eq!(back.answer_sha256, None);
+    let kept = serde_json::json!({ "sha256": sha(b"x"), "ext": "exe", "version": null, "kind": "exe", "silentArgs": ["/S"], "successExitCodes": [0] });
+    let kept: KeptInstaller = serde_json::from_value(kept).unwrap();
+    assert_eq!(kept.answer_sha256, None);
+}

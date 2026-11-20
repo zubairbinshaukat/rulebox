@@ -321,6 +321,26 @@ fn browser_limits_are_per_device() {
 }
 
 #[test]
+fn an_installers_silent_args_follow_the_token_rule_in_the_limits() {
+    // (Phase 6 Step 14) `check_silent_args` on every install: the two tokens pass, nothing else in braces does.
+    let with_args = |args: Value| {
+        let mut app = desktop(json!({}), json!({}));
+        app["desktop"]["install"]["silentArgs"] = args;
+        vec![parse(&app)]
+    };
+    assert_eq!(check_limits(&with_args(json!(["/s", "/f1{AnswerFile}", "/f2{LogFile}"]))), Ok(()));
+    assert_eq!(check_limits(&with_args(json!(["/S", "/VERYSILENT", "/NORESTART"]))), Ok(()));
+    assert_eq!(check_limits(&with_args(json!([]))), Ok(()));
+    for bad in [json!(["/DIR={app}"]), json!(["{answerfile}"]), json!(["{"]), json!(["a\nb"]), json!(vec!["/a"; 17])] {
+        assert_eq!(check_limits(&with_args(bad.clone())), Err(LimitError::BadSilentArgs), "{bad}");
+    }
+    // An app without an install, and a web app, are not looked at.
+    let mut plain = desktop(json!({}), json!({}));
+    plain["desktop"]["install"] = Value::Null;
+    assert_eq!(check_limits(&[parse(&plain), web("w", "https://a.example.test/", &[], Value::Null)]), Ok(()));
+}
+
+#[test]
 fn driver_source_is_omitted_when_absent() {
     let spec = |source: Option<DriverSource>| DriverSpec {
         id: "d".into(),

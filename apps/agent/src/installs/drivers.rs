@@ -240,7 +240,7 @@ impl Engine {
 
     async fn install_driver(&self, id: &str, plan: &DriverPlan, roots: &PathRoots, shutdown: &CancellationToken) -> Outcome {
         self.set_driver_state(id, LocalState::Downloading);
-        let file = DownloadFile { url: &plan.url, sha256: &plan.sha256, size_bytes: plan.size_bytes, ext: plan.kind.ext() };
+        let file = DownloadFile { url: &plan.url, sha256: &plan.sha256, size_bytes: plan.size_bytes, ext: plan.kind.ext(), cap: MAX_DOWNLOAD_BYTES };
         let dest = match self.download_file(id, &file, shutdown).await {
             Ok(dest) => dest,
             Err(Some(detail)) => return Outcome::Failed { detail: Some(detail), exit_code: None },
@@ -311,7 +311,8 @@ impl Engine {
                 Outcome::Failed { detail: None, exit_code: None }
             }
             Ok(InstallerExit::Cancelled) => Outcome::Interrupted,
-            Ok(InstallerExit::TimedOut) => {
+            // (Step 14) A driver's installer that stalled is a timeout for now; `needs_interaction` is for apps.
+            Ok(InstallerExit::TimedOut | InstallerExit::Stalled) => {
                 tracing::warn!(driver_id = id, "the driver installer did not finish in time and was stopped");
                 Outcome::Failed { detail: Some(Detail::Timeout), exit_code: None }
             }

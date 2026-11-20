@@ -117,7 +117,7 @@ pub fn ensure(
         Ok(Err(version)) => match exit {
             InstallerExit::Code(0) => Outcome::StillTooOld { version },
             InstallerExit::Code(code) => Outcome::RunFailed { detail: format!("exit code {code}") },
-            InstallerExit::TimedOut => Outcome::RunFailed { detail: "it did not finish in time".to_string() },
+            InstallerExit::TimedOut | InstallerExit::Stalled => Outcome::RunFailed { detail: "it did not finish in time".to_string() },
             InstallerExit::Cancelled => Outcome::RunFailed { detail: "it was cancelled".to_string() },
         },
         Err(detail) => Outcome::RunFailed { detail },

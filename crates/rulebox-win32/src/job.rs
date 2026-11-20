@@ -14,17 +14,22 @@
 
 use std::os::windows::io::{AsRawHandle, BorrowedHandle};
 
-use windows::core::PCWSTR;
-use windows::Win32::Foundation::HANDLE;
+use windows::core::{BOOL, PCWSTR};
+use windows::Win32::Foundation::{HANDLE, HWND, LPARAM};
 use windows::Win32::System::Diagnostics::ToolHelp::{
     CreateToolhelp32Snapshot, Thread32First, Thread32Next, TH32CS_SNAPTHREAD, THREADENTRY32,
 };
 use windows::Win32::System::JobObjects::{
-    AssignProcessToJobObject, CreateJobObjectW, JobObjectBasicAccountingInformation, JobObjectExtendedLimitInformation,
-    QueryInformationJobObject, SetInformationJobObject, TerminateJobObject, JOBOBJECT_BASIC_ACCOUNTING_INFORMATION,
-    JOBOBJECT_EXTENDED_LIMIT_INFORMATION, JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE,
+    AssignProcessToJobObject, CreateJobObjectW, JobObjectBasicAccountingInformation, JobObjectBasicProcessIdList,
+    JobObjectExtendedLimitInformation, QueryInformationJobObject, SetInformationJobObject, TerminateJobObject,
+    JOBOBJECT_BASIC_ACCOUNTING_INFORMATION, JOBOBJECT_BASIC_PROCESS_ID_LIST, JOBOBJECT_EXTENDED_LIMIT_INFORMATION,
+    JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE,
 };
 use windows::Win32::System::Threading::{OpenThread, ResumeThread, THREAD_SUSPEND_RESUME};
+use windows::Win32::UI::WindowsAndMessaging::{EnumWindows, GetWindowThreadProcessId, IsWindowVisible};
+
+/// The most process ids [`KillOnCloseJob::process_ids`] lists (an installer's tree is a handful of processes).
+pub const MAX_LISTED_PROCESSES: usize = 256;
 
 use crate::error::{api_err, Result, Win32Error};
 use crate::util::OwnedHandle;
@@ -75,6 +80,80 @@ impl KillOnCloseJob {
         }
         .map_err(|e| api_err("QueryInformationJobObject", &e))?;
         Ok(info.ActiveProcesses)
+    }
+
+    /// (Phase 6 Step 14) The CPU time (user + kernel) every process of the job has used so far, ended ones included
+    /// (the job's own accounting). Read-only.
+    pub fn cpu_time(&self) -> Result<std::time::Duration> {
+        let mut info = JOBOBJECT_BASIC_ACCOUNTING_INFORMATION::default();
+        // SAFETY: `info` is a writable structure of the size passed.
+        unsafe {
+            QueryInformationJobObject(
+                Some(self.0.raw()),
+                JobObjectBasicAccountingInformation,
+                std::ptr::from_mut(&mut info).cast(),
+                std::mem::size_of::<JOBOBJECT_BASIC_ACCOUNTING_INFORMATION>() as u32,
+                None,
+            )
+        }
+        .map_err(|e| api_err("QueryInformationJobObject", &e))?;
+        // The times are in 100 ns units.
+        let ticks = info.TotalUserTime.saturating_add(info.TotalKernelTime).max(0) as u64;
+        Ok(std::time::Duration::from_nanos(ticks.saturating_mul(100)))
+    }
+
+    /// (Phase 6 Step 14) The ids of the processes of the job that still run (at most [`MAX_LISTED_PROCESSES`]).
+    pub fn process_ids(&self) -> Result<Vec<u32>> {
+        // The list is a header of two `u32` and then one `usize` per process; a `usize` buffer has the alignment of it.
+        let mut buffer = vec![0usize; 1 + MAX_LISTED_PROCESSES];
+        // SAFETY: `buffer` is writable for the size passed and aligned for the structure.
+        unsafe {
+            QueryInformationJobObject(
+                Some(self.0.raw()),
+                JobObjectBasicProcessIdList,
+                buffer.as_mut_ptr().cast(),
+                (buffer.len() * std::mem::size_of::<usize>()) as u32,
+                None,
+            )
+        }
+        .map_err(|e| api_err("QueryInformationJobObject", &e))?;
+        // SAFETY: the call filled the header; the buffer is at least as large as the structure.
+        let listed = unsafe { (*buffer.as_ptr().cast::<JOBOBJECT_BASIC_PROCESS_ID_LIST>()).NumberOfProcessIdsInList } as usize;
+        Ok(buffer[1..].iter().take(listed.min(MAX_LISTED_PROCESSES)).map(|id| *id as u32).collect())
+    }
+
+    /// (Phase 6 Step 14, plan 4.6 "Timeout") Whether a process of the job owns a **visible** top-level window on the
+    /// desktop of the calling thread. The agent is a service, so that is the service desktop: a window there is an
+    /// installer waiting for somebody to click, and nobody can (the Staff session never sees it). Read-only.
+    pub fn has_visible_window(&self) -> Result<bool> {
+        let pids = self.process_ids()?;
+        if pids.is_empty() {
+            return Ok(false);
+        }
+        struct Search {
+            pids: Vec<u32>,
+            found: bool,
+        }
+        unsafe extern "system" fn each(window: HWND, lparam: LPARAM) -> BOOL {
+            // SAFETY: `lparam` is the `Search` below, alive and not shared while `EnumWindows` runs.
+            let search = unsafe { &mut *(lparam.0 as *mut Search) };
+            // SAFETY: plain queries on a window handle the system just gave this callback.
+            if unsafe { IsWindowVisible(window) }.as_bool() {
+                let mut pid = 0u32;
+                // SAFETY: `pid` is writable.
+                unsafe { GetWindowThreadProcessId(window, Some(&mut pid)) };
+                if search.pids.contains(&pid) {
+                    search.found = true;
+                    return BOOL(0);
+                }
+            }
+            BOOL(1)
+        }
+        let mut search = Search { pids, found: false };
+        // SAFETY: the callback only touches `search`, which outlives the call. `EnumWindows` reports an error when the
+        // callback stops the walk early; that is the "found" case, so the result is not looked at.
+        let _ = unsafe { EnumWindows(Some(each), LPARAM(std::ptr::from_mut(&mut search) as isize)) };
+        Ok(search.found)
     }
 
     /// Ends every process in the job (asynchronously: poll `active_processes`).
@@ -163,6 +242,20 @@ mod tests {
             assert!(Instant::now() < deadline, "the job must become empty");
             std::thread::sleep(Duration::from_millis(50));
         }
+    }
+
+    #[test]
+    fn the_job_lists_its_processes_and_its_cpu_time_and_a_console_process_has_no_window() {
+        let job = KillOnCloseJob::new().unwrap();
+        assert!(job.process_ids().unwrap().is_empty());
+        assert!(!job.has_visible_window().unwrap());
+        let mut child = ping(true);
+        job.assign(child.as_handle()).unwrap();
+        assert_eq!(job.process_ids().unwrap(), [child.id()]);
+        assert!(job.cpu_time().unwrap() < Duration::from_secs(60));
+        assert!(!job.has_visible_window().unwrap(), "a suspended console program shows no window");
+        job.terminate(1).unwrap();
+        wait_gone(&mut child);
     }
 
     #[test]

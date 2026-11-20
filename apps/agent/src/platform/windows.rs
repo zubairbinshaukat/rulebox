@@ -495,7 +495,7 @@ impl Platform for WindowsPlatform {
                     Err(PlatformError::NotFound)
                 }
             }
-            InstallerExit::TimedOut => Err(PlatformError::Other("pnputil did not finish in time".into())),
+            InstallerExit::TimedOut | InstallerExit::Stalled => Err(PlatformError::Other("pnputil did not finish in time".into())),
             InstallerExit::Cancelled => Err(PlatformError::Other("cancelled".into())),
         }
     }
@@ -827,6 +827,44 @@ impl Platform for WindowsPlatform {
         Ok(names)
     }
 
+    fn find_file_below(&self, root: &Path, file_name: &str, max_depth: u32) -> Result<bool, PlatformError> {
+        if file_name.is_empty() || file_name.contains(['\\', '/', ':']) {
+            return Ok(false);
+        }
+        // A breadth-first walk with a budget: the profile of SYSTEM is small, but a hostile or broken tree must not hold
+        // the engine. Links are never entered (`file_type` does not follow them).
+        let mut level = vec![root.to_path_buf()];
+        let mut seen = 0usize;
+        for depth in 0..=max_depth {
+            let mut next = Vec::new();
+            for dir in &level {
+                let entries = match std::fs::read_dir(dir) {
+                    Ok(entries) => entries,
+                    Err(e) if matches!(e.kind(), std::io::ErrorKind::NotFound | std::io::ErrorKind::NotADirectory) => continue,
+                    Err(e) => return Err(io_err(e)),
+                };
+                for entry in entries.flatten() {
+                    seen += 1;
+                    if seen > FIND_FILE_MAX_ENTRIES {
+                        return Ok(false);
+                    }
+                    let Ok(kind) = entry.file_type() else { continue };
+                    if kind.is_symlink() {
+                        continue;
+                    }
+                    if kind.is_file() && entry.file_name().to_string_lossy().eq_ignore_ascii_case(file_name) {
+                        return Ok(true);
+                    }
+                    if kind.is_dir() && depth < max_depth {
+                        next.push(entry.path());
+                    }
+                }
+            }
+            level = next;
+        }
+        Ok(false)
+    }
+
     fn watch_process_exit(&self, pid: u32) -> Result<Option<std::sync::Arc<dyn super::ExitWatch>>, PlatformError> {
         Ok(rulebox_win32::procexit::ExitWatch::open(pid)
             .map_err(map_err)?
@@ -1096,6 +1134,8 @@ const CREATE_NO_WINDOW: u32 = 0x0800_0000;
 const CREATE_SUSPENDED: u32 = 0x0000_0004;
 /// How often a running installer (and the agent's stop) is checked.
 const INSTALLER_POLL: Duration = Duration::from_millis(500);
+/// (Phase 6 Step 14) The most directory entries `find_file_below` looks at.
+const FIND_FILE_MAX_ENTRIES: usize = 20_000;
 /// After ending the job, how long to wait for its processes to be gone.
 const KILL_DRAIN: Duration = Duration::from_secs(10);
 /// Where Windows keeps its boot counter (`BootId`, DWORD).
@@ -1115,6 +1155,14 @@ impl RunningInstaller for JobRun {
 
     fn active(&mut self) -> std::io::Result<u32> {
         self.job.active_processes().map_err(std::io::Error::other)
+    }
+
+    fn cpu_time(&mut self) -> Option<Duration> {
+        self.job.cpu_time().ok()
+    }
+
+    fn has_window(&mut self) -> bool {
+        self.job.has_visible_window().unwrap_or(false)
     }
 
     fn kill_all(&mut self) {
@@ -1207,6 +1255,31 @@ mod tests {
         assert!(os.ram_mb > 0);
         assert!(!os.arch.is_empty());
         assert!(!platform().computer_name().unwrap().is_empty());
+    }
+
+    #[test]
+    fn find_file_below_walks_a_bounded_tree_read_only() {
+        // (Phase 6 Step 14) The per-user probe on a real folder: a name, at most `max_depth` folders down, any case.
+        let dir = crate::testutil::TempDir::new();
+        let four = dir.path().join("a").join("b").join("c").join("d");
+        let six = four.join("e").join("f");
+        std::fs::create_dir_all(&six).unwrap();
+        std::fs::write(four.join("App.exe"), b"x").unwrap();
+        std::fs::write(six.join("deep.exe"), b"x").unwrap();
+        std::fs::write(dir.path().join("top.exe"), b"x").unwrap();
+        let p = platform();
+        assert!(p.find_file_below(dir.path(), "app.exe", 4).unwrap());
+        assert!(p.find_file_below(dir.path(), "APP.EXE", 5).unwrap());
+        assert!(!p.find_file_below(dir.path(), "app.exe", 3).unwrap(), "one folder too deep");
+        assert!(!p.find_file_below(dir.path(), "deep.exe", 4).unwrap());
+        assert!(p.find_file_below(dir.path(), "deep.exe", 6).unwrap());
+        assert!(p.find_file_below(dir.path(), "top.exe", 0).unwrap());
+        // Folders are not files; a missing root and a name with a separator are plain `false`.
+        assert!(!p.find_file_below(dir.path(), "a", 4).unwrap());
+        assert!(!p.find_file_below(&dir.path().join("missing"), "app.exe", 4).unwrap());
+        for bad in ["", r"a\App.exe", "a/App.exe", "App.exe:stream"] {
+            assert!(!p.find_file_below(dir.path(), bad, 6).unwrap(), "{bad:?}");
+        }
     }
 
     #[test]

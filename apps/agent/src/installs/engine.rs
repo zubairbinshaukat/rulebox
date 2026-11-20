@@ -45,14 +45,18 @@ use std::time::Duration;
 
 use rulebox_ipc::requests::AppUpdateState;
 use rulebox_ipc::types::{AgentSnapshot, ConnectionStatus, EnrollmentStatus};
-use rulebox_policy::catalog::{ApplyWhen, CatalogApp, InstallKind, InstallSpec, UpdateMode};
-use rulebox_policy::paths::{check_args, exe_pattern, expand_exe, PathRoots};
+use rulebox_policy::catalog::{
+    AnswerFile, ApplyWhen, CatalogApp, InstallKind, InstallSpec, UpdateMode, MAX_ANSWER_FILE_BYTES, TIMEOUT_MIN_RANGE,
+};
+use rulebox_policy::paths::{check_silent_args, exe_pattern, expand_exe, PathRoots};
 use serde::{Deserialize, Serialize};
 use tokio::sync::{mpsc, watch};
 use tokio_util::sync::CancellationToken;
 
+use super::answer::{answer_file_name, expand_silent_args, uses_answer_file, uses_log_file, ANSWER_EXT};
 use super::download::{check_https, part_path, Downloader};
 use super::drivers_rules::DriverRecord;
+use super::probe::{program_file_name, systemprofile_appdata, PER_USER_MAX_DEPTH};
 use super::report::report_of;
 use super::version::{
     self as versions, boot_window_open, check_installed, detection, kept_file_name, may_keep, publisher_matches,
@@ -218,6 +222,12 @@ pub struct InstallRecord {
     /// Looks after the first miss.
     #[serde(default)]
     pub verify_looks: u32,
+
+    // -- (Phase 6 Step 14) Wizard installers. A record from before has none. --
+    /// The SHA-256 of the answer file the installer runs with (`<sha256>.iss` in the downloads folder), when its
+    /// `silentArgs` use `{AnswerFile}`. The file is kept while this record is waiting to run.
+    #[serde(default)]
+    pub answer_sha256: Option<String>,
 }
 
 /// An installer file kept in the downloads folder (`<sha256>.<ext>`), with what a roll-back needs to run it again.
@@ -231,6 +241,9 @@ pub struct KeptInstaller {
     pub kind: RecordKind,
     pub silent_args: Vec<String>,
     pub success_exit_codes: Vec<i32>,
+    /// (Phase 6 Step 14) The answer file of that installer (`{AnswerFile}` in `silent_args`), kept with it.
+    #[serde(default)]
+    pub answer_sha256: Option<String>,
 }
 
 impl KeptInstaller {
@@ -238,6 +251,16 @@ impl KeptInstaller {
     fn file_name(&self) -> Option<String> {
         kept_file_name(&self.sha256, &self.ext)
     }
+
+    /// The answer file's name in the downloads folder, `None` when there is none or its hash is not a SHA-256.
+    fn answer_name(&self) -> Option<String> {
+        answer_name_of(self.answer_sha256.as_deref())
+    }
+}
+
+/// `<sha256>.iss` for a well-formed hash.
+fn answer_name_of(sha256: Option<&str>) -> Option<String> {
+    sha256.filter(|sha| is_sha256(sha)).map(answer_file_name)
 }
 
 fn pinned() -> UpdateMode {
@@ -300,6 +323,7 @@ impl InstallRecord {
             heal_pending: false,
             verifying_since_ms: None,
             verify_looks: 0,
+            answer_sha256: None,
         }
     }
 
@@ -344,9 +368,18 @@ impl InstallRecord {
         format!("{}.{}", self.sha256, self.kind.ext())
     }
 
-    /// The installer files this record keeps on disk besides its own (`kept`, `previous`).
+    /// The files this record keeps on disk besides its own (`kept`, `previous`): their installers and answer files.
     fn kept_files(&self) -> impl Iterator<Item = String> + '_ {
-        [self.kept.as_ref(), self.previous.as_ref()].into_iter().flatten().filter_map(KeptInstaller::file_name)
+        [self.kept.as_ref(), self.previous.as_ref()]
+            .into_iter()
+            .flatten()
+            .flat_map(|kept| [kept.file_name(), kept.answer_name()])
+            .flatten()
+    }
+
+    /// The answer file the record's own run needs (`<sha256>.iss`).
+    fn answer_file(&self) -> Option<String> {
+        answer_name_of(self.answer_sha256.as_deref())
     }
 }
 
@@ -557,6 +590,9 @@ struct DownloadFile<'a> {
     sha256: &'a str,
     size_bytes: u64,
     ext: &'static str,
+    /// The most the file may be when its size is not known (and the most it may ever be): [`MAX_DOWNLOAD_BYTES`] for
+    /// an installer, 256 KiB for an answer file.
+    cap: u64,
 }
 
 /// What the engine installs, checked from a catalogue entry.
@@ -587,6 +623,11 @@ pub struct Spec {
     pub publisher: Option<String>,
     /// Vendor: the signer of the vendor's own updater and programs (`update.publisher`).
     pub updater_publisher: Option<String>,
+    /// (Phase 6 Step 14) The answer file of a wizard installer. Only set for an exe whose `silentArgs` use
+    /// `{AnswerFile}`: the engine downloads and verifies it, and never runs the installer without it.
+    pub answer_file: Option<AnswerFile>,
+    /// (Phase 6 Step 14) Minutes the installer may run (5 to 120); `None`: the engine's default (30).
+    pub timeout_min: Option<u32>,
 }
 
 pub fn install_of(app: &CatalogApp) -> Option<&InstallSpec> {
@@ -617,13 +658,29 @@ pub fn check_spec(app: &CatalogApp, roots: &PathRoots) -> Result<Spec, &'static 
         rulebox_policy::paths::PathProblem::Denied => "the program is on the deny list",
         _ => "the program path does not pass the template rules",
     })?;
+    if install.timeout_min.is_some_and(|minutes| !TIMEOUT_MIN_RANGE.contains(&minutes)) {
+        return Err("the installer timeout is not 5 to 120 minutes");
+    }
     let mut product = None;
+    let mut answer_file = None;
     match kind {
         RecordKind::Exe => {
             if install.silent_args.is_empty() {
                 return Err("an exe needs silent arguments");
             }
-            check_args(&install.silent_args).map_err(|_| "the silent arguments do not pass the rules")?;
+            // (Phase 6 Step 14) The rules of `check_args`, and no `{...}` but `{AnswerFile}` and `{LogFile}`.
+            check_silent_args(&install.silent_args).map_err(|_| "the silent arguments do not pass the rules")?;
+            if uses_answer_file(&install.silent_args) {
+                let answer = install.answer_file.as_ref().ok_or("the silent arguments use {AnswerFile} but the app has no answer file")?;
+                check_https(&answer.url).map_err(|_| "the answer file URL is not https://")?;
+                if !is_sha256(&answer.sha256) {
+                    return Err("the answer file hash is not a SHA-256");
+                }
+                if answer.size_bytes > MAX_ANSWER_FILE_BYTES {
+                    return Err("the answer file is larger than 256 KiB");
+                }
+                answer_file = Some(answer.clone());
+            }
         }
         RecordKind::Msi => {
             if roots.system_root.is_none() {
@@ -663,6 +720,9 @@ pub fn check_spec(app: &CatalogApp, roots: &PathRoots) -> Result<Spec, &'static 
         } else {
             None
         },
+        answer_file,
+        // A portable file is only copied: it has no installer to time.
+        timeout_min: if kind == RecordKind::Portable { None } else { install.timeout_min },
     })
 }
 
@@ -680,6 +740,7 @@ fn copy_spec(record: &mut InstallRecord, spec: &Spec) {
     record.version = spec.version.clone();
     record.mode = spec.mode;
     record.when_closed = spec.when_closed;
+    record.answer_sha256 = spec.answer_file.as_ref().map(|answer| answer.sha256.clone());
 }
 
 /// Everything the engine needs.
@@ -965,7 +1026,8 @@ impl Engine {
             .apps
             .values()
             .filter(|r| !r.removal && r.runnable())
-            .map(InstallRecord::file_name)
+            .flat_map(|r| [Some(r.file_name()), r.answer_file()])
+            .flatten()
             // (Phase 6 Step 11) The installers kept for a roll-back (the version on the PC, the one before the last update).
             .chain(file.apps.values().filter(|r| !r.removal).flat_map(InstallRecord::kept_files))
             // (Step 14b) A driver still waiting for its download or install keeps its file too.
@@ -1491,8 +1553,17 @@ impl Engine {
     /// Runs one installer in a blocking thread; `shutdown` ends it (and everything
     /// it started) at the platform's next poll.
     async fn run_installer(&self, cmd: InstallerCommand, shutdown: &CancellationToken) -> Result<InstallerExit, PlatformError> {
+        self.run_installer_for(cmd, self.deps.install_timeout, shutdown).await
+    }
+
+    /// The minutes an app's installer may run: its own `timeoutMin` (5 to 120), else the engine's default.
+    fn timeout_of(&self, spec: &Spec) -> Duration {
+        spec.timeout_min.map_or(self.deps.install_timeout, |minutes| Duration::from_secs(u64::from(minutes) * 60))
+    }
+
+    /// [`Engine::run_installer`] with the app's own timeout.
+    async fn run_installer_for(&self, cmd: InstallerCommand, timeout: Duration, shutdown: &CancellationToken) -> Result<InstallerExit, PlatformError> {
         let platform = Arc::clone(&self.deps.platform);
-        let timeout = self.deps.install_timeout;
         let cancel = shutdown.clone();
         tokio::task::spawn_blocking(move || platform.run_installer(&cmd, timeout, &cancel))
             .await
@@ -1532,6 +1603,14 @@ impl Engine {
         }
     }
 
+    /// The install log of `app_id` (`<data>\logs\install-<appId>.log`) with its folder ready: older logs pruned, the
+    /// folder created. Used by an MSI and by an exe that names `{LogFile}`.
+    fn prepare_log(&self, app_id: &str) -> PathBuf {
+        self.prune_msi_logs();
+        let _ = std::fs::create_dir_all(self.deps.paths.logs_dir());
+        self.deps.paths.install_log(app_id)
+    }
+
     /// Keeps at most `KEEP_MSI_LOGS - 1` older MSI logs (the next run adds one).
     fn prune_msi_logs(&self) {
         let Ok(entries) = std::fs::read_dir(self.deps.paths.logs_dir()) else { return };
@@ -1551,7 +1630,21 @@ impl Engine {
 
     /// Download (or reuse) the installer; `Err(None)` = the agent is stopping.
     async fn download(&self, app_id: &str, spec: &Spec, shutdown: &CancellationToken) -> Result<PathBuf, Option<Detail>> {
-        let file = DownloadFile { url: &spec.url, sha256: &spec.sha256, size_bytes: spec.size_bytes, ext: spec.kind.ext() };
+        let file = DownloadFile { url: &spec.url, sha256: &spec.sha256, size_bytes: spec.size_bytes, ext: spec.kind.ext(), cap: MAX_DOWNLOAD_BYTES };
+        self.download_file(app_id, &file, shutdown).await
+    }
+
+    /// (Phase 6 Step 14) Download (or reuse) the answer file of a wizard installer, `<sha256>.iss` in the downloads folder,
+    /// at most 256 KiB. The same download path as the installer: https only, streamed through SHA-256, deleted when the
+    /// hash is wrong, reused when it still matches. `Err(None)`: the agent is stopping.
+    async fn download_answer(&self, app_id: &str, answer: &AnswerFile, shutdown: &CancellationToken) -> Result<PathBuf, Option<Detail>> {
+        let file = DownloadFile {
+            url: &answer.url,
+            sha256: &answer.sha256,
+            size_bytes: answer.size_bytes,
+            ext: ANSWER_EXT,
+            cap: MAX_ANSWER_FILE_BYTES,
+        };
         self.download_file(app_id, &file, shutdown).await
     }
 
@@ -1569,7 +1662,7 @@ impl Engine {
         // The download, then the installed files (twice its size). An unknown size
         // (0): the most a download may write (4 GiB) now, and twice the real size
         // once it is known.
-        let need = if spec.size_bytes > 0 { spec.size_bytes.saturating_mul(3) } else { MAX_DOWNLOAD_BYTES };
+        let need = if spec.size_bytes > 0 { spec.size_bytes.saturating_mul(3) } else { spec.cap };
         self.check_disk(app_id, need)?;
         let dest = dir.join(format!("{}.{}", spec.sha256, spec.ext));
         let mut reused = false;
@@ -1585,7 +1678,7 @@ impl Engine {
             }
         }
         if !reused {
-            let max = if spec.size_bytes > 0 { spec.size_bytes.min(MAX_DOWNLOAD_BYTES) } else { MAX_DOWNLOAD_BYTES };
+            let max = if spec.size_bytes > 0 { spec.size_bytes.min(spec.cap) } else { spec.cap };
             let deadline = download_deadline(spec.size_bytes);
             tracing::info!(app_id, "downloading the installer");
             tokio::select! {
@@ -1630,9 +1723,10 @@ impl Engine {
         }
     }
 
-    /// Runs one package: `msiexec /i`, the installer exe with its silent arguments, or the portable copy. `Err(InUse)`:
-    /// a portable program is running. `spec_exe` may be a template with a `*` (a versioned folder): then no one path is
-    /// expected to appear.
+    /// Runs one package: `msiexec /i`, the installer exe with its silent arguments (already expanded: no token is left
+    /// in them), or the portable copy. `Err(InUse)`: a portable program is running. `spec_exe` may be a template with a
+    /// `*` (a versioned folder): then no one path is expected to appear. `timeout` ends the installer and everything it
+    /// started.
     #[allow(clippy::too_many_arguments)]
     async fn run_package(
         &self,
@@ -1642,6 +1736,7 @@ impl Engine {
         silent_args: &[String],
         spec_exe: &str,
         roots: &PathRoots,
+        timeout: Duration,
         shutdown: &CancellationToken,
     ) -> Result<InstallerExit, PlatformError> {
         let exe = PathBuf::from(spec_exe);
@@ -1659,14 +1754,14 @@ impl Engine {
                 if !expected {
                     cmd.expected_exe = None;
                 }
-                self.run_installer(cmd, shutdown).await
+                self.run_installer_for(cmd, timeout, shutdown).await
             }
             RecordKind::Exe => {
                 let mut cmd = exe_install_command(file, silent_args, &downloads, &exe);
                 if !expected {
                     cmd.expected_exe = None;
                 }
-                self.run_installer(cmd, shutdown).await
+                self.run_installer_for(cmd, timeout, shutdown).await
             }
             RecordKind::Portable => {
                 let platform = Arc::clone(&self.deps.platform);
@@ -1696,6 +1791,19 @@ impl Engine {
             Ok(dest) => dest,
             Err(Some(detail)) => return Outcome::Failed { detail: Some(detail), exit_code: None },
             Err(None) => return Outcome::Abandoned,
+        };
+        // (Phase 6 Step 14, plan 4.6 "Answer file") The answer file is fetched the same way, before anything runs and before
+        // an update is staged: an installer whose answers are missing or wrong is not started.
+        let answer_dest = match &spec.answer_file {
+            Some(answer) => match self.download_answer(app_id, answer, shutdown).await {
+                Ok(path) => Some(path),
+                Err(Some(why)) => {
+                    tracing::error!(app_id, why = why.as_str(), "the answer file could not be fetched or does not match its SHA-256; the installer is not run");
+                    return Outcome::Failed { detail: Some(Detail::AnswerFileFailed), exit_code: None };
+                }
+                Err(None) => return Outcome::Abandoned,
+            },
+            None => None,
         };
         let staged = |staged: bool| {
             self.deps.book.update(|file| {
@@ -1730,6 +1838,23 @@ impl Engine {
                 return Outcome::Failed { detail: Some(Detail::DownloadFailed), exit_code: None };
             }
         };
+        // (Step 14) The answer file is locked and hashed again through its own handle, held until the installer ended:
+        // a file with another hash never reaches the installer.
+        let answer_held = match (&spec.answer_file, &answer_dest) {
+            (Some(answer), Some(path)) => match open_verified(path, &answer.sha256) {
+                Ok(held) => Some(held),
+                Err(FileCheckError::Mismatch | FileCheckError::NotPlain) => {
+                    tracing::error!(app_id, "the answer file changed after its download; deleted, nothing ran");
+                    let _ = remove_file_if_exists(path);
+                    return Outcome::Failed { detail: Some(Detail::AnswerFileFailed), exit_code: None };
+                }
+                Err(FileCheckError::Io(error)) => {
+                    tracing::error!(app_id, "cannot open the answer file: {error}");
+                    return Outcome::Failed { detail: Some(Detail::AnswerFileFailed), exit_code: None };
+                }
+            },
+            _ => None,
+        };
         // (Phase 6 Step 11, plan 4.4.3) Signed by the publisher the catalogue names, or it does not run.
         if let Some(wanted) = &spec.publisher {
             if !self.publisher_ok(verified.path(), wanted) {
@@ -1738,6 +1863,17 @@ impl Engine {
                 return Outcome::Failed { detail: Some(Detail::PublisherMismatch), exit_code: None };
             }
         }
+        // (Step 14) `{AnswerFile}` and `{LogFile}` become paths in the agent's own data folder, nothing else is expanded.
+        // Before an update marks the old version as touched: a failure here changes nothing on the PC.
+        let log = if uses_log_file(&spec.silent_args) { self.prepare_log(app_id) } else { self.deps.paths.install_log(app_id) };
+        let args = match expand_silent_args(&spec.silent_args, answer_held.as_ref().map(|held| held.path()), &log) {
+            Ok(args) => args,
+            Err(error) => {
+                // `check_spec` refuses these before the engine gets here; defence in depth.
+                tracing::error!(app_id, ?error, "the silent arguments cannot be expanded; nothing ran");
+                return Outcome::Failed { detail: Some(Detail::Unsupported), exit_code: None };
+            }
+        };
         if update {
             // The installer is about to touch the old version: it may not work afterwards. The installer of the version
             // that is on the PC becomes `previous` (what a roll-back runs); the tile says "Updating...".
@@ -1764,11 +1900,13 @@ impl Engine {
             (self.deps.on_visible_change)();
         }
         tracing::info!(app_id, kind = ?spec.kind, update, "installing");
-        let ran = self.run_package(app_id, spec.kind, verified.path(), &spec.silent_args, &spec.exe, roots, shutdown).await;
+        let timeout = self.timeout_of(spec);
+        let ran = self.run_package(app_id, spec.kind, verified.path(), &args, &spec.exe, roots, timeout, shutdown).await;
         // Held until the installer and everything it started are gone (the
         // platform returns only then).
+        drop(answer_held);
         drop(verified);
-        let outcome = self.judge(app_id, spec, &dest, ran, shutdown).await;
+        let outcome = self.judge(app_id, spec, &dest, ran, roots, shutdown).await;
         // Plan 4.6 "Rollback on failure": a Managed update that failed after the installer touched the old version.
         let touched = self.deps.book.snapshot().apps.get(app_id).is_some_and(|record| !record.old_works);
         if update && touched && spec.mode == UpdateMode::Managed && spec.rollback_on_fail && matches!(outcome, Outcome::Failed { .. }) {
@@ -1784,6 +1922,7 @@ impl Engine {
         spec: &Spec,
         dest: &Path,
         ran: Result<InstallerExit, PlatformError>,
+        roots: &PathRoots,
         shutdown: &CancellationToken,
     ) -> Outcome {
         match ran {
@@ -1800,6 +1939,11 @@ impl Engine {
                 tracing::warn!(app_id, "the installer did not finish in time and was stopped");
                 Outcome::Failed { detail: Some(Detail::Timeout), exit_code: None }
             }
+            // (Step 14, plan 4.6 "Timeout") It ran out of time without using the CPU, or showed a window nobody can see.
+            Ok(InstallerExit::Stalled) => {
+                tracing::warn!(app_id, "the installer did not finish in time and looked stuck on a question (idle, or a window); it was stopped");
+                Outcome::Failed { detail: Some(Detail::NeedsInteraction), exit_code: None }
+            }
             Ok(InstallerExit::Code(code)) => match judge_install(spec.kind == RecordKind::Msi, &spec.success_exit_codes, code) {
                 ExitVerdict::Busy => Outcome::Busy { exit_code: Some(i64::from(code)) },
                 ExitVerdict::Failure => {
@@ -1813,8 +1957,16 @@ impl Engine {
                     match self.wait_for_exe(&spec.exe, shutdown).await {
                         Some(true) => self.installed(app_id, spec, dest, code),
                         Some(false) => {
-                            tracing::warn!(app_id, "the installer succeeded but the program is not at its path");
-                            Outcome::Failed { detail: Some(Detail::ExeMissingAfterInstall), exit_code: Some(i64::from(code)) }
+                            // (Step 14, plan 4.6 "Per-user installer") A file with the program's name in the profile of SYSTEM
+                            // says the installer put it in the account it ran as.
+                            let detail = if self.installed_per_user(&spec.exe, roots) {
+                                tracing::warn!(app_id, "the installer succeeded but put the program in the profile of the account it ran as (a per-user installer)");
+                                Detail::InstalledPerUser
+                            } else {
+                                tracing::warn!(app_id, "the installer succeeded but the program is not at its path");
+                                Detail::ExeMissingAfterInstall
+                            };
+                            Outcome::Failed { detail: Some(detail), exit_code: Some(i64::from(code)) }
                         }
                         // Stopping: the next start runs it again (installers are
                         // re-runnable), not counted.
@@ -1822,6 +1974,24 @@ impl Engine {
                     }
                 }
             },
+        }
+    }
+
+    /// (Phase 6 Step 14, plan 4.6 "Per-user installer", heuristic) Whether a file with the program's name sits in the
+    /// profile of SYSTEM (`<SystemRoot>\System32\config\systemprofile\AppData`, at most 4 folders deep, read-only). A
+    /// program whose name is not known (a path that ends in a `*`) or a PC whose Windows folder is not known never
+    /// answers yes; neither does a folder that cannot be read.
+    fn installed_per_user(&self, spec_exe: &str, roots: &PathRoots) -> bool {
+        let (Some(name), Some(system_root)) = (program_file_name(spec_exe), roots.system_root.as_deref()) else {
+            return false;
+        };
+        let root = systemprofile_appdata(Path::new(system_root));
+        match self.deps.platform.find_file_below(&root, name, PER_USER_MAX_DEPTH) {
+            Ok(found) => found,
+            Err(error) => {
+                tracing::debug!("cannot look for a per-user install: {error}");
+                false
+            }
         }
     }
 
@@ -1854,6 +2024,15 @@ impl Engine {
                 let replaced = record.kept.take();
                 record.kept = keep;
                 record.heal_pending = record.previous.is_some();
+                // (Step 14) The answer files: the one this install used, and the one of the installer that was replaced,
+                // go unless a kept installer still needs them (a roll-back runs the installer with its answers).
+                let mut answers: Vec<String> = spec.answer_file.iter().map(|answer| answer_file_name(&answer.sha256)).collect();
+                answers.extend(replaced.as_ref().and_then(KeptInstaller::answer_name));
+                for name in answers {
+                    if !record.kept_files().any(|kept| kept == name) {
+                        doomed.push(name);
+                    }
+                }
                 // The file of the version that was on the PC stays while it is `previous`; else it is not needed.
                 if let Some(old) = replaced {
                     let still_needed = record.previous.as_ref().is_some_and(|p| p.sha256 == old.sha256)
@@ -1891,6 +2070,7 @@ impl Engine {
             kind: spec.kind,
             silent_args: spec.silent_args.clone(),
             success_exit_codes: spec.success_exit_codes.clone(),
+            answer_sha256: spec.answer_file.as_ref().map(|answer| answer.sha256.clone()),
         })
     }
 
@@ -1945,7 +2125,28 @@ impl Engine {
             tracing::error!(app_id, "the previous installer is missing or changed; no roll-back");
             return rolled(Detail::RollbackFailed);
         };
-        let ran = self.run_package(app_id, previous.kind, verified.path(), &previous.silent_args, &spec.exe, roots, shutdown).await;
+        // (Step 14) The previous installer's own answer file (verified again, held while it runs) and log file.
+        let answer_held = match previous.answer_name() {
+            Some(answer_name) => {
+                let path = self.deps.paths.downloads_dir().join(answer_name);
+                match previous.answer_sha256.as_deref().map(|sha| open_verified(&path, sha)) {
+                    Some(Ok(held)) => Some(held),
+                    _ => {
+                        tracing::error!(app_id, "the previous installer's answer file is missing or changed; no roll-back");
+                        return rolled(Detail::RollbackFailed);
+                    }
+                }
+            }
+            None => None,
+        };
+        let log = if uses_log_file(&previous.silent_args) { self.prepare_log(app_id) } else { self.deps.paths.install_log(app_id) };
+        let Ok(args) = expand_silent_args(&previous.silent_args, answer_held.as_ref().map(|held| held.path()), &log) else {
+            tracing::error!(app_id, "the previous installer's silent arguments cannot be expanded; no roll-back");
+            return rolled(Detail::RollbackFailed);
+        };
+        let timeout = self.timeout_of(spec);
+        let ran = self.run_package(app_id, previous.kind, verified.path(), &args, &spec.exe, roots, timeout, shutdown).await;
+        drop(answer_held);
         drop(verified);
         let succeeded = match ran {
             Ok(InstallerExit::Cancelled) => return Outcome::Interrupted,
@@ -1958,7 +2159,7 @@ impl Engine {
                 }
                 ExitVerdict::Busy | ExitVerdict::Failure => false,
             },
-            Ok(InstallerExit::TimedOut) | Err(_) => false,
+            Ok(InstallerExit::TimedOut | InstallerExit::Stalled) | Err(_) => false,
         };
         if !succeeded || self.wait_for_exe(&spec.exe, shutdown).await != Some(true) {
             tracing::error!(app_id, "the roll-back did not bring the old version back");
@@ -2011,7 +2212,7 @@ impl Engine {
                         ExitVerdict::Busy => Outcome::Busy { exit_code: Some(i64::from(code)) },
                         ExitVerdict::Failure => Outcome::Failed { detail: Some(Detail::RemoveFailed), exit_code: Some(i64::from(code)) },
                     },
-                    Ok(InstallerExit::TimedOut) => Outcome::Failed { detail: Some(Detail::Timeout), exit_code: None },
+                    Ok(InstallerExit::TimedOut | InstallerExit::Stalled) => Outcome::Failed { detail: Some(Detail::Timeout), exit_code: None },
                     Err(error) => {
                         tracing::error!(app_id, "msiexec did not run: {error}");
                         Outcome::Failed { detail: Some(Detail::RemoveFailed), exit_code: None }
@@ -2155,6 +2356,12 @@ impl Engine {
                 // Not the file the version on the PC was installed from (`kept`): a roll-back needs that one.
                 if !record.kept_files().any(|name| name == record.file_name()) {
                     self.delete_download(&record.file_name());
+                }
+                // (Step 14) And its answer file, unless a kept installer needs it.
+                if let Some(answer) = record.answer_file() {
+                    if !record.kept_files().any(|name| name == answer) {
+                        self.delete_download(&answer);
+                    }
                 }
             }
         }

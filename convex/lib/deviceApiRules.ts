@@ -135,7 +135,11 @@ export function recordSummary(
   return text;
 }
 
-/** Install `detail` values the agent may send (Step 12 item 3). */
+/**
+ * Install `detail` values the agent may send (Step 12 item 3). The same list, in the same order, is `Detail::ALL` in
+ * `apps/agent/src/installs/mod.rs`; both are compared with `apps/agent/tests/vectors/install-details.json` by a test
+ * on each side, so a detail added on one side only fails the build.
+ */
 export const INSTALL_DETAILS: ReadonlySet<string> = new Set([
   "download_failed",
   "hash_mismatch",
@@ -157,6 +161,11 @@ export const INSTALL_DETAILS: ReadonlySet<string> = new Set([
   "rollback_unsupported",
   "version_too_low",
   "waiting_for_close",
+  // Phase 6 Step 14 (wizard installers): stuck on a question nobody sees (timeout heuristic), installed for the wrong
+  // account (per-user heuristic), answer file missing or with a wrong SHA-256.
+  "needs_interaction",
+  "installed_per_user",
+  "answer_file_failed",
 ]);
 
 /** The install states a report stores (A12, 4.8 amended): `pending` (accepted) and the terminal ones. */

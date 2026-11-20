@@ -8,7 +8,8 @@ import type { Id } from "./_generated/dataModel";
 import source from "./deviceApi.ts?raw";
 import { ARGON2_PARAMS, DUMMY_PHC, verifier } from "./lib/argon";
 import { sha256HexSync } from "./lib/crypto";
-import { BYTES_PER_GB, EMPLOYEE_LOCK_MS, EMPLOYEE_MAX_FAILURES } from "./lib/deviceApiRules";
+import installDetailsRaw from "../apps/agent/tests/vectors/install-details.json?raw";
+import { BYTES_PER_GB, EMPLOYEE_LOCK_MS, EMPLOYEE_MAX_FAILURES, INSTALL_DETAILS } from "./lib/deviceApiRules";
 import { DAY_MS, MINUTE_MS } from "./lib/limits";
 import { rateLimiter } from "./lib/rateLimits";
 
@@ -543,6 +544,23 @@ describe("deviceApi:report installs part (plan 4.8 amended, A12)", () => {
     }
     await s.t.mutation(api.deviceApi.report, { ...creds(s.device), installs: [result(ids.a, "installed", { detail: "waiting_for_close" })] });
     expect(await stored()).toBe("waiting_for_close");
+  });
+
+  test("the Phase 6 Step 14 details (needs_interaction, installed_per_user, answer_file_failed) are on the fixed list and stored", async () => {
+    const s = await seed();
+    const ids = await apps(s);
+    const stored = async () => (await installRows(s)).find((r) => r.appId === ids.a)?.detail;
+    for (const detail of ["needs_interaction", "installed_per_user", "answer_file_failed"]) {
+      await s.t.mutation(api.deviceApi.report, { ...creds(s.device), installs: [result(ids.a, "failed", { detail })] });
+      expect(await stored()).toBe(detail);
+    }
+  });
+
+  test("INSTALL_DETAILS is exactly the list the agent compares with (apps/agent/tests/vectors/install-details.json)", () => {
+    // The Rust test `details_are_exactly_the_servers_fixed_list` reads the same file: a detail on one side only fails one of the two.
+    const shared = (JSON.parse(installDetailsRaw) as { details: string[] }).details;
+    expect([...INSTALL_DETAILS]).toEqual(shared);
+    for (const detail of shared) expect(detail).toMatch(/^[a-z0-9:_ -]*$/);
   });
 
   test("a detail outside the fixed list is dropped, the result is stored and the status and audit parts still go through", async () => {

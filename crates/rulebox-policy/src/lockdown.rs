@@ -69,6 +69,10 @@ pub enum LimitError {
     /// or a SHA-256.
     #[error("the Rulebox release needs an ordered version, an https URL and a SHA-256")]
     BadRelease,
+    /// (Phase 6 Step 14) An installer's `silentArgs` break the rules of `check_silent_args` (a limit, a control
+    /// character, or a `{...}` that is not `{AnswerFile}` or `{LogFile}`).
+    #[error("an installer's silent arguments break the rules")]
+    BadSilentArgs,
 }
 
 // ---------------------------------------------------------------- enums

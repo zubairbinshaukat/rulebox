@@ -27,15 +27,18 @@ use sha2::{Digest, Sha256};
 
 use crate::platform::{InstallerCommand, InstallerExit};
 
+pub mod answer;
 pub mod download;
 pub mod engine;
 pub mod drivers_rules;
 pub mod icons;
+pub mod probe;
 pub mod report;
 pub mod unzip;
 pub mod version;
 
-/// An installer still running after this long is killed (`failed` / `timeout`).
+/// An installer still running after this long is killed (`failed` / `timeout`). The default of `timeoutMin` (30);
+/// an app's own `timeoutMin` (5 to 120, plan 4.6) replaces it.
 pub const INSTALL_TIMEOUT: Duration = Duration::from_secs(30 * 60);
 /// No download may be larger than this, whatever the catalogue says.
 pub const MAX_DOWNLOAD_BYTES: u64 = 4 * 1024 * 1024 * 1024;
@@ -102,8 +105,7 @@ pub enum Detail {
     UnsignedDriver,
     /// (Step 14b) The zip was refused (unsafe path, too big, no such `.inf`).
     BadPackage,
-    // -- (Phase 6 Step 11, plan 4.6 "New details") Not yet in `INSTALL_DETAILS` of
-    //    `convex/lib/deviceApiRules.ts`: until they are, the server stores such a result without its detail. --
+    // -- (Phase 6 Step 11, plan 4.6 "New details") In `INSTALL_DETAILS` of `convex/lib/deviceApiRules.ts` too. --
     /// The installer file is not signed by the app's `publisher`: it was not run.
     PublisherMismatch,
     /// A failed update was undone: the old version works again.
@@ -116,10 +118,20 @@ pub enum Detail {
     VersionTooLow,
     /// An update is ready and waits for the apply window.
     WaitingForClose,
+    // -- (Phase 6 Step 14, plan 4.6 "New details") Wizard installers. The other two details of that row
+    //    (`driver_unsigned`, `protected_print_on`) belong to Step 15 (drivers). --
+    /// The installer ran into its timeout while it used almost no CPU, or showed a window nobody can see: it
+    /// probably waited for an answer (heuristic).
+    NeedsInteraction,
+    /// The installer succeeded but put the program in the profile of the account it ran as (SYSTEM), not where the
+    /// catalogue says (heuristic).
+    InstalledPerUser,
+    /// The answer file could not be fetched, or does not match its SHA-256: the installer was not run.
+    AnswerFileFailed,
 }
 
 impl Detail {
-    pub const ALL: [Detail; 18] = [
+    pub const ALL: [Detail; 21] = [
         Detail::DownloadFailed,
         Detail::HashMismatch,
         Detail::TooLarge,
@@ -138,6 +150,9 @@ impl Detail {
         Detail::RollbackUnsupported,
         Detail::VersionTooLow,
         Detail::WaitingForClose,
+        Detail::NeedsInteraction,
+        Detail::InstalledPerUser,
+        Detail::AnswerFileFailed,
     ];
 
     pub fn as_str(self) -> &'static str {
@@ -160,6 +175,9 @@ impl Detail {
             Detail::RollbackUnsupported => "rollback_unsupported",
             Detail::VersionTooLow => "version_too_low",
             Detail::WaitingForClose => "waiting_for_close",
+            Detail::NeedsInteraction => "needs_interaction",
+            Detail::InstalledPerUser => "installed_per_user",
+            Detail::AnswerFileFailed => "answer_file_failed",
         }
     }
 
@@ -509,6 +527,12 @@ pub trait RunningInstaller {
     fn try_exit(&mut self) -> std::io::Result<Option<i32>>;
     /// How many processes of the job still run (the started one included).
     fn active(&mut self) -> std::io::Result<u32>;
+    /// (Phase 6 Step 14) The CPU time every process of the job has used so far, ended ones included; `None` when it
+    /// cannot be read. Read-only.
+    fn cpu_time(&mut self) -> Option<Duration>;
+    /// (Phase 6 Step 14) Whether a process of the job shows a visible top-level window on the service desktop.
+    /// Read-only; `false` when it cannot be read.
+    fn has_window(&mut self) -> bool;
     /// Ends every process of the job and waits (bounded) until they are gone.
     fn kill_all(&mut self);
 }
@@ -527,7 +551,10 @@ pub struct InstallerWait {
 ///   `Code`;
 /// - the agent is stopping (`cancelled`): everything is ended, `Cancelled`;
 /// - `timeout` passed: everything is ended, `TimedOut` (or `Code` when the
-///   process itself had ended).
+///   process itself had ended). (Phase 6 Step 14) Just **before** it is ended the tree is looked at once
+///   ([`probe::looks_stuck`]): under one second of CPU in the last five minutes, or a visible window, is `Stalled`
+///   (`needs_interaction`) instead. The CPU time is read once, five minutes before the timeout (at the start when the
+///   timeout is not longer than that), so the whole check costs two reads and no timer.
 ///
 /// Returns only once the job was found empty or was ended, so the caller can keep
 /// the verified file and the run's TEMP folder until nothing of the run is left.
@@ -541,7 +568,13 @@ pub fn wait_for_installer(
     sleep: &dyn Fn(Duration),
 ) -> std::io::Result<InstallerExit> {
     let mut exited: Option<(i32, Duration)> = None;
+    // (Step 14) The CPU time at the sample point; `Some(None)`: the point passed and the time could not be read.
+    let mut cpu_then: Option<Option<Duration>> = None;
+    let sample_at = probe::cpu_sample_at(wait.timeout);
     loop {
+        if cpu_then.is_none() && exited.is_none() && elapsed() >= sample_at {
+            cpu_then = Some(run.cpu_time());
+        }
         if cancelled() {
             run.kill_all();
             return Ok(InstallerExit::Cancelled);
@@ -572,8 +605,15 @@ pub fn wait_for_installer(
             }
         }
         if elapsed() >= wait.timeout {
+            // The process itself had ended and only what it started still runs: the exit code is the answer.
+            if let Some((code, _)) = exited {
+                run.kill_all();
+                return Ok(InstallerExit::Code(code));
+            }
+            // Looked at before the tree is ended (a dead tree shows no window and uses no more CPU).
+            let stuck = probe::looks_stuck(cpu_then.flatten(), run.cpu_time(), run.has_window());
             run.kill_all();
-            return Ok(exited.map_or(InstallerExit::TimedOut, |(code, _)| InstallerExit::Code(code)));
+            return Ok(if stuck { InstallerExit::Stalled } else { InstallerExit::TimedOut });
         }
         sleep(wait.poll);
     }
@@ -676,29 +716,18 @@ mod tests {
 
     #[test]
     fn details_are_exactly_the_servers_fixed_list() {
-        // `INSTALL_DETAILS` in convex/lib/deviceApiRules.ts, in its order (the last six are the Phase 6 Step 11 details).
-        let server = [
-            "download_failed",
-            "hash_mismatch",
-            "too_large",
-            "low_disk",
-            "timeout",
-            "exit_code",
-            "exe_missing_after_install",
-            "unsupported",
-            "busy",
-            "remove_failed",
-            "unsigned_driver",
-            "bad_package",
-            "publisher_mismatch",
-            "update_rolled_back",
-            "rollback_failed",
-            "rollback_unsupported",
-            "version_too_low",
-            "waiting_for_close",
-        ];
+        // `INSTALL_DETAILS` in convex/lib/deviceApiRules.ts, in its order, through the shared file: the same file is read
+        // by a Convex test that compares it with `INSTALL_DETAILS` (plan Step 14 item 4). The ones after
+        // `unsigned_driver` and `bad_package` are Phase 6: Step 11 (six) and Step 14 (three).
+        #[derive(serde::Deserialize)]
+        struct Shared {
+            details: Vec<String>,
+        }
+        let shared: Shared = serde_json::from_str(include_str!("../../tests/vectors/install-details.json")).expect("the shared list parses");
+        let server: Vec<&str> = shared.details.iter().map(String::as_str).collect();
         let ours: Vec<&str> = Detail::ALL.iter().map(|d| d.as_str()).collect();
         assert_eq!(ours, server);
+        assert_eq!(server.len(), 21);
         for detail in Detail::ALL {
             // The server's character rule `^[a-z0-9:_ -]*$` and length (<= 200).
             assert!(detail.as_str().bytes().all(|b| matches!(b, b'a'..=b'z' | b'0'..=b'9' | b':' | b'_' | b' ' | b'-')));
@@ -986,9 +1015,30 @@ mod tests {
         children_until: Option<Duration>,
         killed: bool,
         fail_query: bool,
+        /// (Step 14) The tree uses one second of CPU per second (false: none) and shows a window (or not).
+        busy: bool,
+        window: bool,
+        cpu_unreadable: bool,
+        /// The CPU time was read at these clock times, and the window was looked at (before the kill, or not).
+        cpu_reads: Vec<Duration>,
+        window_looks: Vec<bool>,
     }
 
     impl RunningInstaller for FakeRun<'_> {
+        fn cpu_time(&mut self) -> Option<Duration> {
+            self.cpu_reads.push(self.clock.get());
+            if self.cpu_unreadable {
+                None
+            } else if self.busy {
+                Some(self.clock.get())
+            } else {
+                Some(Duration::ZERO)
+            }
+        }
+        fn has_window(&mut self) -> bool {
+            self.window_looks.push(self.killed);
+            self.window && !self.killed
+        }
         fn try_exit(&mut self) -> std::io::Result<Option<i32>> {
             if self.fail_query {
                 return Err(std::io::Error::other("query failed"));
@@ -1029,6 +1079,11 @@ mod tests {
             children_until: children_until.map(Duration::from_secs),
             killed: false,
             fail_query: false,
+            busy: true,
+            window: false,
+            cpu_unreadable: false,
+            cpu_reads: Vec::new(),
+            window_looks: Vec::new(),
         }
     }
 
@@ -1058,6 +1113,68 @@ mod tests {
         assert_eq!(run_fake(&mut run, None).unwrap(), InstallerExit::TimedOut);
         assert!(run.killed, "the job (every process) is ended");
         assert_eq!(clock.get(), Duration::from_secs(1800));
+    }
+
+    #[test]
+    fn an_idle_installer_at_the_timeout_is_stalled_and_the_tree_is_still_ended() {
+        let clock = std::cell::Cell::new(Duration::ZERO);
+        let mut run = fake(&clock, None, None);
+        run.busy = false;
+        assert_eq!(run_fake(&mut run, None).unwrap(), InstallerExit::Stalled);
+        assert!(run.killed, "the tree is killed on a stall too");
+        assert_eq!(clock.get(), Duration::from_secs(1800));
+        // Read once five minutes before the timeout, and once at it; the window was looked at before the kill.
+        assert_eq!(run.cpu_reads.first().copied().map(|at| at.as_secs()), Some(1500));
+        assert_eq!(run.cpu_reads.len(), 2);
+        assert_eq!(run.window_looks, [false]);
+    }
+
+    #[test]
+    fn a_window_at_the_timeout_is_stalled_even_when_the_cpu_is_busy() {
+        let clock = std::cell::Cell::new(Duration::ZERO);
+        let mut run = fake(&clock, None, None);
+        run.window = true;
+        assert_eq!(run_fake(&mut run, None).unwrap(), InstallerExit::Stalled);
+        assert!(run.killed);
+    }
+
+    #[test]
+    fn a_busy_installer_at_the_timeout_is_a_plain_timeout_and_an_unreadable_cpu_is_too() {
+        let clock = std::cell::Cell::new(Duration::ZERO);
+        let mut run = fake(&clock, None, None);
+        assert_eq!(run_fake(&mut run, None).unwrap(), InstallerExit::TimedOut);
+        assert!(run.killed);
+        // CPU time unreadable and no window: nothing says stuck, so it stays a plain timeout.
+        let clock = std::cell::Cell::new(Duration::ZERO);
+        let mut run = fake(&clock, None, None);
+        run.busy = false;
+        run.cpu_unreadable = true;
+        assert_eq!(run_fake(&mut run, None).unwrap(), InstallerExit::TimedOut);
+        assert!(run.killed);
+    }
+
+    #[test]
+    fn a_timeout_of_five_minutes_or_less_samples_the_cpu_at_the_start() {
+        let clock = std::cell::Cell::new(Duration::ZERO);
+        let mut run = fake(&clock, None, None);
+        run.busy = false;
+        let wait = InstallerWait { timeout: Duration::from_secs(300), tail_grace: Duration::from_secs(120), poll: Duration::from_millis(500) };
+        let out = wait_for_installer(&mut run, wait, &|| false, &|| clock.get(), &|d| clock.set(clock.get() + d)).unwrap();
+        assert_eq!(out, InstallerExit::Stalled);
+        assert_eq!(run.cpu_reads.first().copied(), Some(Duration::ZERO));
+        assert_eq!(clock.get(), Duration::from_secs(300));
+    }
+
+    #[test]
+    fn a_process_that_ended_with_children_left_is_its_exit_code_not_a_stall() {
+        let clock = std::cell::Cell::new(Duration::ZERO);
+        // setup.exe ended at 10 s, a child still runs at the timeout (grace 120 s is shorter than the rest).
+        let mut run = fake(&clock, Some(10), None);
+        run.busy = false;
+        let wait = InstallerWait { timeout: Duration::from_secs(60), tail_grace: Duration::from_secs(3600), poll: Duration::from_millis(500) };
+        let out = wait_for_installer(&mut run, wait, &|| false, &|| clock.get(), &|d| clock.set(clock.get() + d)).unwrap();
+        assert_eq!(out, InstallerExit::Code(7));
+        assert!(run.killed);
     }
 
     #[test]

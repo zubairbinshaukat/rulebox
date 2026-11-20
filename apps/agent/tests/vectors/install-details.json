@@ -1,0 +1,26 @@
+{
+  "comment": "The install result details an agent may send, in the order of Detail::ALL in apps/agent/src/installs/mod.rs. The same list is INSTALL_DETAILS in convex/lib/deviceApiRules.ts; a Rust test and a Convex test each compare their list with this file, so a detail added on one side only fails the build.",
+  "details": [
+    "download_failed",
+    "hash_mismatch",
+    "too_large",
+    "low_disk",
+    "timeout",
+    "exit_code",
+    "exe_missing_after_install",
+    "unsupported",
+    "busy",
+    "remove_failed",
+    "unsigned_driver",
+    "bad_package",
+    "publisher_mismatch",
+    "update_rolled_back",
+    "rollback_failed",
+    "rollback_unsupported",
+    "version_too_low",
+    "waiting_for_close",
+    "needs_interaction",
+    "installed_per_user",
+    "answer_file_failed"
+  ]
+}

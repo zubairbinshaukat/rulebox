@@ -135,6 +135,8 @@ pub enum SimOp {
     FileVersion,
     ListFolderNames,
     WatchProcessExit,
+    // Phase 6 Step 14 (read-only).
+    FindFileBelow,
     // Phase 6 Step 8 (all three change the machine).
     WriteInstallMarker,
     RunWebviewBootstrapper,
@@ -197,6 +199,7 @@ impl SimOp {
                 | SimOp::FileVersion
                 | SimOp::ListFolderNames
                 | SimOp::WatchProcessExit
+                | SimOp::FindFileBelow
         )
     }
 }
@@ -262,6 +265,8 @@ pub struct SimWorld {
     pub installer_creates_exe: bool,
     /// (Step 14) Every installer run, in order (nothing is ever executed).
     pub installer_runs: Vec<InstallerCommand>,
+    /// (Phase 6 Step 14) The timeout each installer run was given (`installer_runs`, same order).
+    pub installer_timeouts: Vec<Duration>,
     /// (Phase 6 Step 11) The file version of a program (lowercase path to `a.b.c.d`).
     pub file_versions: HashMap<String, String>,
     /// (Phase 6 Step 11) The version a successful install of the installer file named by this SHA-256 gives its
@@ -389,6 +394,7 @@ impl SimWorld {
             installer_exits: VecDeque::new(),
             installer_creates_exe: true,
             installer_runs: Vec::new(),
+            installer_timeouts: Vec::new(),
             file_versions: HashMap::new(),
             installer_versions: HashMap::new(),
             driver_store: std::collections::BTreeSet::new(),
@@ -972,7 +978,7 @@ impl Platform for SimPlatform {
     fn run_installer(
         &self,
         cmd: &InstallerCommand,
-        _timeout: Duration,
+        timeout: Duration,
         cancel: &CancellationToken,
     ) -> Result<InstallerExit, PlatformError> {
         self.check(SimOp::RunInstaller)?;
@@ -984,6 +990,7 @@ impl Platform for SimPlatform {
         let hangs = {
             let mut world = lock(&self.world);
             world.installer_runs.push(cmd.clone());
+            world.installer_timeouts.push(timeout);
             world.installer_hangs
         };
         if hangs {
@@ -1399,6 +1406,22 @@ impl Platform for SimPlatform {
     fn file_version(&self, path: &Path) -> Result<Option<String>, PlatformError> {
         self.check(SimOp::FileVersion)?;
         Ok(lock(&self.world).file_versions.get(&acl_key(path)).cloned())
+    }
+
+    fn find_file_below(&self, root: &Path, file_name: &str, max_depth: u32) -> Result<bool, PlatformError> {
+        self.check(SimOp::FindFileBelow)?;
+        if file_name.is_empty() || file_name.contains(['\\', '/', ':']) {
+            return Ok(false);
+        }
+        let world = lock(&self.world);
+        Ok(world.files.iter().any(|path| {
+            let Ok(rest) = path.strip_prefix(root) else { return false };
+            let parts: Vec<_> = rest.components().collect();
+            // The file itself is the last part; `max_depth` counts the folders above it.
+            !parts.is_empty()
+                && parts.len() <= max_depth as usize + 1
+                && parts.last().is_some_and(|last| last.as_os_str().to_string_lossy().eq_ignore_ascii_case(file_name))
+        }))
     }
 
     fn list_folder_names(&self, dir: &Path) -> Result<Vec<String>, PlatformError> {

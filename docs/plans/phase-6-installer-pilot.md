@@ -1451,6 +1451,27 @@ the agent must expand `{AnswerFile}` / `{LogFile}`, honour `tech`-independent `s
 **Do NOT:** show any window in the Staff session; pass admin text through
 a shell; widen the allowed program list beyond 4.6.
 
+**Status (2026-11-21, uncommitted):** agent side done on the dev PC (SimPlatform and fakes only); no installer was run for real. Files: new
+`apps/agent/src/installs/answer.rs` (the two tokens, one-pass expansion; `check_silent_args` first) and `probe.rs` (the pure rules `looks_stuck`, `cpu_sample_at`,
+the system-profile path, the program file name); `installs/mod.rs` (three new details, `RunningInstaller::{cpu_time, has_window}`, `wait_for_installer` samples the CPU five minutes
+before the timeout and looks once, before the kill, at the CPU and the windows: `InstallerExit::Stalled`); `installs/engine.rs` (`Spec.{answer_file, timeout_min}`, `check_spec`
+uses `check_silent_args` and refuses `{AnswerFile}` without an answer file, answer file 256 KiB cap and https/SHA-256 checks; the answer file is downloaded like the installer into
+`<data>\downloads\<sha256>.iss`, opened locked and hashed again through its own handle held while the installer runs, expanded into `silentArgs`; the previous installer's answer file is
+kept with it for a roll-back; per-app `timeoutMin`; `needs_interaction` / `timeout`; `installed_per_user`); `platform/{mod,sim,windows}.rs` (`InstallerExit::Stalled`, read-only
+`Platform::find_file_below`), `crates/rulebox-win32/src/job.rs` (`cpu_time`, `process_ids`, `has_visible_window`), `crates/rulebox-policy` (`catalog::check_limits` calls
+`check_silent_args`: `LimitError::BadSilentArgs`), `convex/lib/deviceApiRules.ts` + `convex/deviceApi.test.ts`. The details lists are compared through one shared file,
+`apps/agent/tests/vectors/install-details.json` (a Rust test and a Convex `?raw` test read it). Decisions where the plan was silent or loose: only the three details of this step
+(`needs_interaction`, `installed_per_user`, `answer_file_failed`) were added to the lists; `driver_unsigned` and `protected_print_on` of the 4.6 row are Step 15's. An answer file whose
+arguments never name `{AnswerFile}` is not downloaded; one the server refused (`answer_file_unused`) cannot reach a device anyway. Any answer-file failure (404, wrong hash, too big,
+disk) is the one detail `answer_file_failed`, counted and retried like any failure. `needs_interaction` is judged by the job's own CPU accounting (user + kernel of every process,
+ended ones included) and by any visible top-level window of the job on the service desktop; "last five minutes" is one sample taken five minutes before the timeout (at the start when
+the timeout is 5 minutes). The per-user search covers only `<SystemRoot>\System32\config\systemprofile\AppData`, 4 folders deep, 20,000 entries at most, links never entered; a program
+path whose last part has a `*` is never searched for. `catalog::check_limits` is **not called by the agent yet** (Step 17 wires it): when it is, one bad `silentArgs` refuses the whole
+document, while `check_spec` already makes only that app `unsupported`; decide at Step 17 whether the document-wide rule is wanted. A driver's installer that stalls still reports
+`timeout` (drivers are Step 15). **Unverified until the VM (Step 23):** the CPU accounting and window detection on a real installer, a real InstallShield `/s /f1` run, per-user detection
+with a real NSIS or Inno `asInvoker` installer, the answer file lock against a real installer reading it. The dashboard text for `timeout` still says "30 minutes" and the three new
+details have no dashboard text yet (`screenStrings/install.ts`).
+
 ---
 
 ### Step 15 — Drivers

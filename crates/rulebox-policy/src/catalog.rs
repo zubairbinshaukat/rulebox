@@ -19,6 +19,8 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use ts_rs::TS;
 
+use crate::paths::check_silent_args;
+
 /// Id of the built-in Files app (`FILES_APP_ID` in `desired.ts`).
 pub const FILES_APP_ID: &str = "files";
 
@@ -664,8 +666,18 @@ impl DesktopSpec {
 /// start host of those apps). The agent refuses the whole document
 /// (`policy_rejected`) like every other limit. Browser rules of a Chrome or Edge
 /// *desktop* app (plan 4.9.7) add to the patterns when Step 16 gives them a field.
+///
+/// (Phase 6 Step 14) Also the rule of an installer's `silentArgs`: `check_silent_args` (the argument limits, and no
+/// `{...}` but `{AnswerFile}` and `{LogFile}`), the same rule the server applies at save time. Note for whoever wires
+/// this function into the agent's document check: it refuses the **whole document** for one bad entry. The install
+/// engine's own `check_spec` applies the same rule per app (that app only is `unsupported`).
 pub fn check_limits(catalog: &[CatalogApp]) -> Result<(), crate::lockdown::LimitError> {
     use crate::lockdown::LimitError;
+    for install in catalog.iter().filter_map(|app| app.desktop.as_ref()?.install.as_ref()) {
+        if check_silent_args(&install.silent_args).is_err() {
+            return Err(LimitError::BadSilentArgs);
+        }
+    }
     let mut apps = 0usize;
     let mut patterns = std::collections::BTreeSet::new();
     for web in catalog.iter().filter_map(|app| app.web.as_ref()) {

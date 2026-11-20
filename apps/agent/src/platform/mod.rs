@@ -248,6 +248,10 @@ pub enum InstallerExit {
     Code(i32),
     /// Still running at the timeout: it was killed (with everything it started).
     TimedOut,
+    /// (Phase 6 Step 14, plan 4.6 "Timeout") Like `TimedOut` (it was killed with everything it started), but just before
+    /// that the installer had used almost no CPU for the last five minutes, or showed a window on the service desktop:
+    /// it was waiting for somebody to answer a question nobody can see (`needs_interaction`).
+    Stalled,
     /// (Review fix) The agent is stopping: the installer and everything it started
     /// were ended. Not a failed attempt.
     Cancelled,
@@ -449,6 +453,11 @@ pub trait Platform: Send + Sync + 'static {
     /// (Phase 6 Step 11, plan 4.4.3) The names of the folders directly inside `dir`, for a versioned program
     /// folder (`app-1.2.3`). `Ok(empty)`: no such folder. Read-only; never follows a link.
     fn list_folder_names(&self, dir: &Path) -> Result<Vec<String>, PlatformError>;
+    /// (Phase 6 Step 14, plan 4.6 "Per-user installer") Whether a file named `file_name` (a bare name, compared without
+    /// regard to case) exists in `root` or in a folder at most `max_depth` levels below it. Read-only; never follows a
+    /// link; bounded (it stops after a fixed number of entries and then says `false`). `Ok(false)`: no such file, or
+    /// no such folder.
+    fn find_file_below(&self, root: &Path, file_name: &str, max_depth: u32) -> Result<bool, PlatformError>;
     /// (Phase 6 Step 11, plan 4.4.5) Something that wakes when process `pid` ends, so the install engine learns that an
     /// app closed without a timer. `Ok(None)`: the process is gone or cannot be watched. Read-only.
     fn watch_process_exit(&self, pid: u32) -> Result<Option<Arc<dyn ExitWatch>>, PlatformError>;
