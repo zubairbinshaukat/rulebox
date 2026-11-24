@@ -298,10 +298,37 @@ the forgot-PIN email is off.
 - `RULEBOX_HOSTED`: leave it unset when you run Rulebox for yourself. It is
   only for a shared, multi-customer deployment.
 
+## Code signing policy
+
+Release builds of Rulebox are built from this repository by GitHub Actions
+([`release.yml`](.github/workflows/release.yml)) and published with a
+`SHA256SUMS` file; see [Releasing Rulebox](docs/guides/release.md).
+
+- **Today releases are unsigned.** Their file names end in `-unsigned`.
+  Windows SmartScreen will warn when you run one. Check the download against
+  `SHA256SUMS` and use unsigned builds on test or pilot PCs only.
+- **Planned signing:** free code signing provided by
+  [SignPath.io](https://signpath.io), certificate by
+  [SignPath Foundation](https://signpath.org). This applies only once the
+  application is approved; until then nothing here is signed.
+- **What gets signed:** only the files built from this repository by the
+  release workflow: `rulebox-agent.exe`, `rulebox-shell.exe`,
+  `rulebox-staff.exe` and the MSI that contains them. Never apps that
+  customers add to their PCs.
+- **Roles:** the repository owner (GitHub: `zubairbinshaukat`) is the author,
+  reviewer and approver of every signing request. Each request is made by the
+  release workflow from a version tag; signing is never done from a developer
+  PC.
+- **Privacy:** Rulebox sends nothing to its authors. Each installation talks
+  only to the Convex deployment its own administrator set up, and downloads
+  only the installers and icons that administrator's signed policy names
+  (plus Microsoft's WebView2 runtime when the PC lacks it).
+
 ## Docs
 
 - [Product spec (PRD)](docs/prd.md)
 - [Phase plans](docs/plans/README.md)
+- [Releasing Rulebox](docs/guides/release.md)
 - [Third-party notices](THIRD_PARTY_NOTICES.md)
 
 ## License

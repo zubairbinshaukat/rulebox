@@ -1,0 +1,317 @@
+# Release pipeline (plan docs/plans/phase-6-installer-pilot.md, Step 9; how-to: docs/guides/release.md).
+#
+# A tag "vX.Y.Z" (or "vX.Y.Z-rc1") builds the three release binaries with the production
+# guard, runs the tests, builds the WiX v7 MSI and publishes a GitHub release with a
+# SHA256SUMS file. A manual run (workflow_dispatch) does everything except publish: it is a
+# dry run that leaves the files as workflow artifacts.
+#
+# UNSIGNED UNTIL SIGNPATH IS APPROVED: files are named "-unsigned". The SignPath steps below
+# are scaffolded and stay off until the repository variable SIGNPATH_ENABLED is "true".
+#
+# Nothing in this file is a secret. Secrets and variables are listed in docs/guides/release.md.
+# Every action is pinned to an exact tag; re-check the tags when you update them.
+
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Version for the dry run, x.y.z (nothing is published)"
+        required: true
+        type: string
+
+# Least privilege by default; the one job raises it to what publishing needs.
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+defaults:
+  run:
+    shell: pwsh
+
+env:
+  # WiX v7 (plan 4.10). Pinned so a release is repeatable. UNVERIFIED: confirm this exact
+  # version exists on NuGet (`dotnet tool search wix`) before the first tag.
+  WIX_VERSION: "7.0.0"
+  # Signing is on only when the owner sets the repository variable (after SignPath approves).
+  SIGNED: ${{ vars.SIGNPATH_ENABLED == 'true' && 'true' || 'false' }}
+
+jobs:
+  release:
+    name: Build, test, package
+    runs-on: windows-latest
+    timeout-minutes: 120
+    permissions:
+      contents: write # create the release and upload its files (tag builds only)
+    steps:
+      - name: Check out
+        uses: actions/checkout@v4.2.2
+        with:
+          persist-credentials: false
+
+      - name: Work out the version
+        id: ver
+        env:
+          INPUT_VERSION: ${{ inputs.version }}
+        run: |
+          if ($env:GITHUB_REF_TYPE -eq 'tag') { $tag = $env:GITHUB_REF_NAME } else { $tag = "v$($env:INPUT_VERSION)" }
+          if ($tag -notmatch '^v(\d+\.\d+\.\d+)(-[0-9A-Za-z.-]+)?$') {
+            throw "'$tag' is not a release tag. Use vX.Y.Z or vX.Y.Z-suffix."
+          }
+          # The MSI counts only x.y.z (the fourth field is ignored by Windows Installer).
+          $version = $Matches[1]
+          $prerelease = if ($Matches[2]) { 'true' } else { 'false' }
+          $publish = if ($env:GITHUB_REF_TYPE -eq 'tag') { 'true' } else { 'false' }
+          "tag=$tag", "version=$version", "prerelease=$prerelease", "publish=$publish" |
+            Add-Content -Path $env:GITHUB_OUTPUT
+          Write-Host "tag=$tag version=$version prerelease=$prerelease publish=$publish signed=$env:SIGNED"
+
+      # ---- toolchains -------------------------------------------------------------------
+      - name: Install pnpm
+        uses: pnpm/action-setup@v4.1.0 # reads "packageManager" from package.json
+
+      - name: Install Node
+        uses: actions/setup-node@v4.4.0
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install Rust
+        run: rustup toolchain install stable --profile minimal # rust-toolchain.toml says "stable"
+
+      - name: Cache Cargo
+        uses: Swatinem/rust-cache@v2.7.8
+
+      - name: Install JavaScript dependencies
+        run: pnpm install --frozen-lockfile
+
+      # ---- tests (before the long release build, so a failure is quick) -----------------
+      - name: Rust workspace tests
+        run: cargo test --workspace --locked
+
+      - name: Production guard tests (the feature on)
+        # Same guard crate with the production door compiled in; a debug test build must
+        # still refuse to arm a dev machine (crates/rulebox-win32/tests/guard_coverage.rs).
+        run: cargo test --locked -p rulebox-win32 --features production --test guard_coverage
+
+      - name: JavaScript tests (all packages, Convex, scripts, installer sources)
+        run: |
+          pnpm -r --if-present test
+          pnpm test:convex
+          pnpm test:scripts
+          pnpm test:installer
+
+      # ---- release binaries -------------------------------------------------------------
+      - name: Build agent and launcher (release, production guard)
+        # `rulebox-win32/production` is the feature the agent's own `production` forwards to
+        # (apps/agent/Cargo.toml), and the launcher depends on the same crate, so one flag
+        # covers both. The Staff App never touches the guard and is built without it.
+        # Only this workflow sets the feature; the guard tests keep it out of every default.
+        run: cargo build --release --locked -p rulebox-agent -p rulebox-shell --features rulebox-win32/production
+
+      - name: Build Staff App (release)
+        # `tauri build` (not plain cargo) because it builds the pages and turns on Tauri's
+        # `custom-protocol`; a plain release build would look for the dev server.
+        # TAURI_SIGNING_PRIVATE_KEY is the update-format signing key (PRD 23.8). It is
+        # created by the owner and lives only in repository secrets. The Staff App does not
+        # self-update (plan D-f), so Tauri ignores it for now; it is passed to this one step
+        # only, so that turning on updater artifacts later needs no workflow change.
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        run: pnpm --filter @rulebox/staff-app tauri build --no-bundle
+
+      - name: Collect the three binaries
+        run: |
+          New-Item -ItemType Directory -Force dist/bin, dist/msi, dist/release | Out-Null
+          foreach ($name in 'rulebox-agent.exe', 'rulebox-shell.exe', 'rulebox-staff.exe') {
+            $src = Join-Path 'target/release' $name
+            if (-not (Test-Path $src)) { throw "Release build did not produce $src" }
+            Copy-Item $src dist/bin/
+          }
+          Get-ChildItem dist/bin | Select-Object Name, Length
+
+      # ---- code signing, part 1: the executables (disabled until SignPath approves) ------
+      - name: Upload binaries for signing
+        id: upload_bins
+        if: ${{ vars.SIGNPATH_ENABLED == 'true' }}
+        uses: actions/upload-artifact@v4.6.2
+        with:
+          name: binaries-for-signing
+          path: dist/bin/*.exe
+          if-no-files-found: error
+
+      - name: Sign binaries (SignPath)
+        if: ${{ vars.SIGNPATH_ENABLED == 'true' }}
+        # SCAFFOLD, never run so far. UNVERIFIED: this action tag and its input names; read
+        # the action's README when SignPath approves. Set up on SignPath's side: a project
+        # with an artifact configuration that signs the .exe files at the root of the zip.
+        uses: signpath/github-action-submit-signing-request@v1.1
+        with:
+          api-token: ${{ secrets.SIGNPATH_API_TOKEN }}
+          organization-id: ${{ vars.SIGNPATH_ORGANIZATION_ID }}
+          project-slug: ${{ vars.SIGNPATH_PROJECT_SLUG }}
+          signing-policy-slug: ${{ vars.SIGNPATH_SIGNING_POLICY_SLUG }}
+          artifact-configuration-slug: ${{ vars.SIGNPATH_BINARIES_CONFIGURATION_SLUG }}
+          github-artifact-id: ${{ steps.upload_bins.outputs.artifact-id }}
+          wait-for-completion: true
+          output-artifact-directory: dist/signed-bin
+
+      - name: Use the signed binaries
+        if: ${{ vars.SIGNPATH_ENABLED == 'true' }}
+        run: |
+          foreach ($name in 'rulebox-agent.exe', 'rulebox-shell.exe', 'rulebox-staff.exe') {
+            $signed = Join-Path 'dist/signed-bin' $name
+            if (-not (Test-Path $signed)) { throw "SignPath did not return $name" }
+            $status = (Get-AuthenticodeSignature $signed).Status
+            if ($status -ne 'Valid') { throw "$name signature is $status, not Valid" }
+            Copy-Item $signed dist/bin/ -Force
+          }
+
+      # ---- the MSI ----------------------------------------------------------------------
+      - name: Install WiX
+        run: |
+          dotnet tool install --global wix --version $env:WIX_VERSION
+          # `dotnet tool install --global` puts the tool in %USERPROFILE%\.dotnet\tools
+          "$env:USERPROFILE\.dotnet\tools" | Add-Content -Path $env:GITHUB_PATH
+          & "$env:USERPROFILE\.dotnet\tools\wix.exe" --version
+
+      - name: Accept the WiX EULA (Open Source Maintenance Fee)
+        # WiX v7 refuses to run until its EULA is accepted. Accepting is a deliberate act of
+        # the project owner. The record (who, when, which version) and the fee rule (a fee
+        # is due once revenue from projects that use WiX reaches US$10,000 a year) are in
+        # apps/installer/README.md, "WiX v7 EULA (OSMF) record"; the plan is
+        # docs/plans/phase-6-installer-pilot.md, Section 4.10 ("OSMF").
+        # build.ps1 also passes `-acceptEula wix7` below, which is the part the build needs;
+        # this step makes the acceptance visible in the log. UNVERIFIED: the exact
+        # `wix eula accept` spelling; a failure here is only a warning for that reason.
+        run: |
+          Write-Host '::notice title=WiX EULA::Accepting the WiX v7 OSMF EULA for this build. Record: apps/installer/README.md'
+          wix eula accept wix7
+          if ($LASTEXITCODE -ne 0) {
+            Write-Host '::warning title=WiX EULA::`wix eula accept wix7` failed; build.ps1 -AcceptEula still passes -acceptEula wix7.'
+            $global:LASTEXITCODE = 0
+          }
+
+      - name: Add the WiX extensions
+        run: |
+          $v = ((wix --version | Select-Object -First 1).ToString().Trim() -split '[+\s]')[0]
+          wix extension add --global "WixToolset.UI.wixext/$v"
+          wix extension add --global "WixToolset.Util.wixext/$v"
+          wix extension list --global
+
+      - name: Build the MSI
+        env:
+          VERSION: ${{ steps.ver.outputs.version }}
+        run: pwsh apps/installer/build.ps1 -BinDir dist/bin -Version $env:VERSION -OutDir dist/msi -AcceptEula
+
+      # ---- code signing, part 2: the MSI (disabled until SignPath approves) -------------
+      - name: Upload MSI for signing
+        id: upload_msi
+        if: ${{ vars.SIGNPATH_ENABLED == 'true' }}
+        uses: actions/upload-artifact@v4.6.2
+        with:
+          name: msi-for-signing
+          path: dist/msi/*.msi
+          if-no-files-found: error
+
+      - name: Sign MSI (SignPath)
+        if: ${{ vars.SIGNPATH_ENABLED == 'true' }}
+        # SCAFFOLD, see the note on the binaries step. A second artifact configuration that
+        # signs the .msi at the root of the zip.
+        uses: signpath/github-action-submit-signing-request@v1.1
+        with:
+          api-token: ${{ secrets.SIGNPATH_API_TOKEN }}
+          organization-id: ${{ vars.SIGNPATH_ORGANIZATION_ID }}
+          project-slug: ${{ vars.SIGNPATH_PROJECT_SLUG }}
+          signing-policy-slug: ${{ vars.SIGNPATH_SIGNING_POLICY_SLUG }}
+          artifact-configuration-slug: ${{ vars.SIGNPATH_MSI_CONFIGURATION_SLUG }}
+          github-artifact-id: ${{ steps.upload_msi.outputs.artifact-id }}
+          wait-for-completion: true
+          output-artifact-directory: dist/signed-msi
+
+      # ---- release files and SHA256SUMS -------------------------------------------------
+      - name: Name the files and write SHA256SUMS
+        env:
+          VERSION: ${{ steps.ver.outputs.version }}
+        run: |
+          $built = "Rulebox-$($env:VERSION)-x64.msi"
+          if ($env:SIGNED -eq 'true') {
+            $source = Join-Path 'dist/signed-msi' $built
+            $final = $built
+            if (-not (Test-Path $source)) { throw "SignPath did not return $built" }
+            $status = (Get-AuthenticodeSignature $source).Status
+            if ($status -ne 'Valid') { throw "$built signature is $status, not Valid" }
+          } else {
+            $source = Join-Path 'dist/msi' $built
+            $final = "Rulebox-$($env:VERSION)-x64-unsigned.msi"
+            if (-not (Test-Path $source)) { throw "build.ps1 did not produce $built" }
+          }
+          Copy-Item $source (Join-Path 'dist/release' $final)
+
+          # "<sha256>  <file name>", lower case, LF, no BOM: `sha256sum -c` reads it as is.
+          $lines = Get-ChildItem dist/release -File | Where-Object Name -ne 'SHA256SUMS' | Sort-Object Name |
+            ForEach-Object { '{0}  {1}' -f (Get-FileHash $_.FullName -Algorithm SHA256).Hash.ToLowerInvariant(), $_.Name }
+          [IO.File]::WriteAllText((Join-Path (Get-Location) 'dist/release/SHA256SUMS'), (($lines -join "`n") + "`n"), [Text.UTF8Encoding]::new($false))
+          Get-Content dist/release/SHA256SUMS
+          "### Release files`n" + '```' + "`n" + ($lines -join "`n") + "`n" + '```' | Add-Content -Path $env:GITHUB_STEP_SUMMARY
+
+      - name: Upload release files (workflow artifact)
+        uses: actions/upload-artifact@v4.6.2
+        with:
+          name: rulebox-release-${{ steps.ver.outputs.version }}
+          path: dist/release/*
+          if-no-files-found: error
+
+      # ---- publish (tag builds only) ----------------------------------------------------
+      - name: Publish the GitHub release
+        if: ${{ steps.ver.outputs.publish == 'true' }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.ver.outputs.tag }}
+          VERSION: ${{ steps.ver.outputs.version }}
+          PRERELEASE: ${{ steps.ver.outputs.prerelease }}
+        run: |
+          $notes = @("Rulebox $($env:VERSION) for Windows 10 and 11 (x64). Verify the download against ``SHA256SUMS`` (docs/guides/release.md).", '')
+          if ($env:SIGNED -ne 'true') {
+            $notes += '**This build is not code-signed.** Windows SmartScreen will warn when you run it. Check its SHA-256 against `SHA256SUMS` before you install, and install it only on a test PC or a pilot PC you manage.'
+            $notes += ''
+          }
+          Set-Content -Path dist/notes.md -Value ($notes -join "`n") -Encoding utf8NoBOM
+
+          $files = (Get-ChildItem dist/release -File).FullName
+          gh release view $env:TAG *> $null
+          if ($LASTEXITCODE -eq 0) {
+            # A re-run of the same tag: replace the files, keep the release.
+            gh release upload $env:TAG $files --clobber
+          } else {
+            $create = @($env:TAG) + $files + @('--title', "Rulebox $($env:VERSION)", '--notes-file', 'dist/notes.md', '--generate-notes', '--verify-tag')
+            if ($env:PRERELEASE -eq 'true') { $create += '--prerelease' }
+            gh release create @create
+          }
+          if ($LASTEXITCODE -ne 0) { throw 'gh release failed' }
+
+      # ---- website rebuild (optional, off unless configured) ----------------------------
+      - name: Trigger the website rebuild
+        # Sends a repository_dispatch (event type "rulebox-release") that a future
+        # .github/workflows/website.yml listens for (docs/plans/website-nextjs.md, Section 17).
+        # Skipped unless the repository variable WEBSITE_REBUILD is "true". By default it
+        # dispatches to this repository with the workflow token; to reach another repository
+        # set WEBSITE_DISPATCH_REPO ("owner/name") and the secret WEBSITE_DISPATCH_TOKEN.
+        # A failure here never fails the release.
+        if: ${{ steps.ver.outputs.publish == 'true' && vars.WEBSITE_REBUILD == 'true' }}
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ secrets.WEBSITE_DISPATCH_TOKEN || github.token }}
+          TARGET_REPO: ${{ vars.WEBSITE_DISPATCH_REPO || github.repository }}
+          TAG: ${{ steps.ver.outputs.tag }}
+          VERSION: ${{ steps.ver.outputs.version }}
+        run: |
+          gh api "repos/$($env:TARGET_REPO)/dispatches" -f event_type=rulebox-release -f "client_payload[tag]=$($env:TAG)" -f "client_payload[version]=$($env:VERSION)"
+          if ($LASTEXITCODE -ne 0) { throw 'repository_dispatch failed' }
