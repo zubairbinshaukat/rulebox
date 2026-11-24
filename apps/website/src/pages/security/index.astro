@@ -1,0 +1,238 @@
+---
+import Base from "../../layouts/Base.astro";
+import PageHero from "../../components/PageHero.astro";
+import Faq from "../../components/Faq.astro";
+import CtaClose from "../../components/CtaClose.astro";
+import Icon from "../../components/Icon.astro";
+import type { IconName } from "../../components/Icon.astro";
+import { REPO_URL } from "../../config";
+import { SECURITY_FAQ } from "../../data/faq";
+
+const threats: { t: string; icon: IconName }[] = [
+  { t: "Staff escaping the desktop", icon: "forbidden" },
+  { t: "Tampering with the agent", icon: "settings" },
+  { t: "One person reading another's data", icon: "eye-closed" },
+  { t: "A compromised dashboard account", icon: "user-block" },
+  { t: "A stolen enrolment code", icon: "key" },
+  { t: "A network attacker", icon: "routing" },
+];
+const strip = [
+  { v: "SHA-256", l: "on every installer", tone: "blue" },
+  { v: "Signed", l: "policies on every PC", tone: "sun" },
+  { v: "Every", l: "admin action in the audit log", tone: "coral" },
+  { v: "0", l: "admin rights for staff", tone: "mint" },
+];
+---
+
+<Base
+  title="Security: How Rulebox Protects a PC"
+  description="The threat model, the lockdown layers, signed policies, hash-checked installers, and the limits we know about."
+  path="/security"
+  og="security"
+  crumbs={[{ name: "Security", path: "/security" }]}
+>
+  <PageHero label="Security" title="How Rulebox protects a PC, and how it could fail." sub="We would rather show the design than a badge." tone="coral" icon="shield" primary={{ label: "Read the code", href: REPO_URL }} secondary={{ label: "Report a problem", href: "/security/disclosure" }} />
+
+  <section class="section-tight">
+    <div class="container">
+      <dl class="strip">
+        {strip.map((s) => <div data-tone={s.tone}><dt>{s.l}</dt><dd>{s.v}</dd></div>)}
+      </dl>
+    </div>
+  </section>
+
+  <section class="follow">
+    <div class="container sec">
+      <div class="num mono">01</div>
+      <div class="body">
+        <h2 class="h2">What we defend against</h2>
+        <div class="pair">
+          <ul class="icon-list" role="list">
+            {threats.slice(0, 3).map((x) => <li data-tone="coral"><span class="il-icon"><Icon name={x.icon} /></span><p>{x.t}</p></li>)}
+          </ul>
+          <ul class="icon-list" role="list">
+            {threats.slice(3).map((x) => <li data-tone="coral"><span class="il-icon"><Icon name={x.icon} /></span><p>{x.t}</p></li>)}
+          </ul>
+        </div>
+      </div>
+    </div>
+
+    <div class="container sec">
+      <div class="num mono">02</div>
+      <div class="body">
+        <h2 class="h2">Layers on the PC</h2>
+        <ol class="icon-list" role="list">
+          <li data-tone="blue"><span class="il-icon"><Icon name="user-check" /></span><p><strong>Standard user.</strong> Staff never have admin rights.</p></li>
+          <li data-tone="sun"><span class="il-icon"><Icon name="checklist" /></span><p><strong>Approved programs only.</strong> Application allowlisting decides what can start.</p></li>
+          <li data-tone="coral"><span class="il-icon"><Icon name="forbidden" /></span><p><strong>Policy restrictions.</strong> Task Manager, Run, Command Prompt, PowerShell, Registry Editor and Windows key shortcuts are off.</p></li>
+          <li data-tone="violet"><span class="il-icon"><Icon name="shield" /></span><p><strong>A protected service.</strong> The agent runs as a service staff cannot stop.</p></li>
+          <li data-tone="mint"><span class="il-icon"><Icon name="refresh" /></span><p><strong>A process watchdog.</strong> If the desktop crashes, it comes back.</p></li>
+        </ol>
+      </div>
+    </div>
+
+    <div class="container sec">
+      <div class="num mono">03</div>
+      <div class="body">
+        <h2 class="h2">Trust in what we send</h2>
+        <ul class="icon-list plain ticks" role="list">
+          <li><span class="il-icon"><Icon name="check" /></span><p>TLS for every connection.</p></li>
+          <li><span class="il-icon"><Icon name="check" /></span><p>SHA-256 checked on every installer before it runs.</p></li>
+          <li><span class="il-icon"><Icon name="check" /></span><p>Policies signed with your organisation's key. A PC rejects anything with a bad signature.</p></li>
+          <li><span class="il-icon"><Icon name="check" /></span><p>Optional publisher check for installers.</p></li>
+          <li><span class="il-icon"><Icon name="check" /></span><p>Short-lived enrolment codes that you can revoke.</p></li>
+        </ul>
+      </div>
+    </div>
+
+    <div class="container sec">
+      <div class="num mono">04</div>
+      <div class="body">
+        <h2 class="h2">The dashboard</h2>
+        <ul class="icon-list plain ticks" role="list">
+          <li><span class="il-icon"><Icon name="check" /></span><p>Password plus PIN for every member.</p></li>
+          <li><span class="il-icon"><Icon name="check" /></span><p>Optional passkeys.</p></li>
+          <li><span class="il-icon"><Icon name="check" /></span><p>The dashboard locks again on every reopen.</p></li>
+          <li><span class="il-icon"><Icon name="check" /></span><p>A 24-hour lockout after repeated wrong PINs.</p></li>
+          <li><span class="il-icon"><Icon name="check" /></span><p>An audit log of every administrative action.</p></li>
+        </ul>
+      </div>
+    </div>
+
+    <div class="container sec">
+      <div class="num mono">05</div>
+      <div class="body">
+        <h2 class="h2">How we test</h2>
+        <ul class="icon-list plain ticks" role="list">
+          <li><span class="il-icon"><Icon name="check" /></span><p>A 74-row escape checklist, run against each release. Results are published per release.</p></li>
+          <li><span class="il-icon"><Icon name="check" /></span><p>Automated tests across the agent, the staff desktop and the backend.</p></li>
+          <li><span class="il-icon"><Icon name="check" /></span><p>Every allowed app is tested for file-dialog and link escapes.</p></li>
+        </ul>
+      </div>
+    </div>
+
+    <div class="container sec">
+      <div class="num mono">06</div>
+      <div class="body">
+        <h2 class="h2">Known limits</h2>
+        <ul class="icon-list limits" role="list">
+          <li data-tone="coral"><span class="il-icon"><Icon name="danger" /></span><p>Windows Home installs with "Reduced" protection, because Home lacks some lockdown layers. The dashboard shows a badge on these PCs.</p></li>
+          <li data-tone="coral"><span class="il-icon"><Icon name="danger" /></span><p>Desktop apps with their own file dialogs can still browse outside a person's folder in v1.</p></li>
+          <li data-tone="coral"><span class="il-icon"><Icon name="danger" /></span><p>Physical attacks, such as booting from USB, need a BIOS password and BitLocker, which you set up.</p></li>
+          <li data-tone="coral"><span class="il-icon"><Icon name="danger" /></span><p>A Windows version that no longer receives security updates is still at risk. Rulebox flags these PCs; it cannot fix them.</p></li>
+        </ul>
+      </div>
+    </div>
+
+    <div class="container sec">
+      <div class="num mono">07</div>
+      <div class="body">
+        <h2 class="h2">Report a problem</h2>
+        <p class="lead">No lockdown is perfect. If you find a way out, tell us.</p>
+        <a class="btn btn-primary" href="/security/disclosure">How to report a vulnerability<Icon name="arrow-right" /></a>
+      </div>
+    </div>
+  </section>
+
+  <Faq items={SECURITY_FAQ} title="Security questions" />
+  <CtaClose headline="No certificates yet. Here is the code instead." sub="Read it, test it, and tell us what you find." />
+</Base>
+
+<style>
+  /* Four facts: 2 columns on tablets, 4 on desktop, never 3 + 1. */
+  .strip {
+    display: grid;
+    gap: var(--grid-gap);
+    grid-template-columns: 1fr;
+  }
+  @media (min-width: 560px) {
+    .strip {
+      grid-template-columns: repeat(2, 1fr);
+    }
+  }
+  @media (min-width: 1020px) {
+    .strip {
+      grid-template-columns: repeat(4, 1fr);
+    }
+  }
+  .strip div {
+    display: flex;
+    flex-direction: column-reverse;
+    justify-content: flex-end;
+    gap: var(--card-gap);
+    padding: var(--card-pad);
+    border-radius: var(--radius-lg);
+    background: var(--tone-soft);
+  }
+  .strip dd {
+    font-family: var(--font-display);
+    font-size: var(--fs-h2);
+    font-weight: var(--fw-heading);
+    letter-spacing: var(--ls-h2);
+    line-height: 1;
+    color: var(--tone-ink);
+  }
+  .strip dt {
+    color: var(--ink-2);
+    line-height: var(--lh-tight);
+  }
+  /* The sections after the strip drop their top padding: one gap, not two. */
+  .follow {
+    padding-top: 0;
+  }
+  .sec {
+    display: grid;
+    gap: var(--sp-4);
+    padding-block: var(--section-y-tight);
+    border-top: 1px solid var(--line);
+  }
+  @media (min-width: 900px) {
+    .sec {
+      grid-template-columns: 160px 1fr;
+      gap: var(--sp-8);
+      align-items: first baseline;
+    }
+  }
+  .num {
+    font-size: var(--fs-body);
+    color: var(--muted);
+  }
+  .body {
+    display: grid;
+    gap: var(--sp-6);
+    max-width: 860px;
+    justify-items: start;
+  }
+  .body > .h2 {
+    margin-bottom: var(--sp-2);
+  }
+  .body > .icon-list,
+  .body > .pair {
+    width: 100%;
+  }
+  /* Six threats: two lists of three, side by side. */
+  .pair {
+    display: grid;
+    gap: 0 var(--sp-9);
+  }
+  @media (min-width: 720px) {
+    .pair {
+      grid-template-columns: 1fr 1fr;
+    }
+  }
+  .pair .icon-list + .icon-list {
+    background-image: none;
+  }
+  @media (min-width: 720px) {
+    .pair .icon-list + .icon-list {
+      background: var(--rule) top / 100% 1px no-repeat;
+    }
+  }
+  /* Short one-line facts get a slightly lower row than the two-line layers. */
+  .ticks {
+    --row-h: var(--sp-10);
+  }
+  .ticks .il-icon {
+    color: var(--success);
+  }
+</style>

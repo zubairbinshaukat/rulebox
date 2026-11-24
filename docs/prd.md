@@ -937,7 +937,7 @@ and a clean custom UI, all in one open-source package.
 | 15 | Audit log and signed policies | Both in **v1** (moved from v1.x), because the backend can push installers to every device (Section 12.3) |
 | 16 | Icon set | **Solar Icons** by 480 Design (CC BY 4.0), soft and rounded. Dashboard: *Linear*, with *Bold Duotone* for active states. Staff App: *Bold Duotone*, with *Bold* for selected states. Bundled at build time from Iconify data (`@iconify-json/solar` + `unplugin-icons`) so only used icons ship and nothing loads online. Attribution "Icons: Solar by 480 Design (CC BY 4.0)" appears in `THIRD_PARTY_NOTICES.md` and the Staff App and dashboard About screens. App icons still come from app manifests (Section 6.1) |
 | 17 | Offline-first assets | The Staff App works with **no internet**: fonts, icons, GSAP and all UI assets are bundled. No CDNs, Google Fonts, icon fonts or online icon APIs at runtime |
-| 18 | Logo and brand animations | Logo: rounded box holding a 7×9 tile grid that forms a pixel "R" with a **green leg** (`#12b76a`). Its **splash, loading, open-desktop and lock animations are kept as designed** and run as pure CSS (Section 25.5). The UI accent stays teal |
+| 18 | Logo and brand animations | Logo (owner decision 2026-11-25, replaces the pixel "R"): a soft **deep-teal cube with a glowing amber keyhole**, a 3D render, with a flat vector version for 16-32 px. Splash, loading, open-desktop and lock animations run as **pure CSS** on layers of the render (Section 25.5). Keyhole amber `#f2a12a` (`--rb-brand`) is a logo colour only; the UI accent stays teal |
 | 19 | Fonts | **Figtree** (variable, OFL) for all UI text; **Geist Mono** (OFL) for numbers, codes and small uppercase labels. Both bundled for offline use (Decision 17) |
 
 ---
@@ -1322,36 +1322,48 @@ Applies to the Staff App and the dashboard.
 
 ### 25.5 Logo and brand animations (Decision 18)
 
-Design reference: `design/logo/rulebox_pixel_r_logo_v2_dense_grid.html`
-(gitignored). The animations are kept as designed.
+**The logo** (owner decision 2026-11-25; it replaces the pixel "R"): a soft,
+rounded **deep-teal cube** seen at a 3/4 angle, with a **glowing warm amber
+keyhole** cut into its front face.
 
-**Logo geometry** (`viewBox="0 0 120 120"`). Source of truth:
-`packages/ui/src/brand/geometry.ts`.
-
-| Part | Shape | Color |
+| Part | What it is | Where it lives |
 |---|---|---|
-| Box | `rect x=9 y=9 w=102 h=102 rx=28`, stroke 6, no fill | Ink token |
-| Grid | 7 columns × 9 rows of `7×7 rx=2` tiles, pitch 8.6, first tile at `x=30.7 y=22.1` | |
-| Allowed tiles | Form the letter **R** | Ink token |
-| Leg tiles | The R's leg (rows 6–8, columns 3–6) | **Brand green `#12b76a`** (`--rb-brand`) |
-| Blocked tiles | Drawn at 40% size, 45% opacity; hidden below ~40 px | Muted token |
-| App icon | Same grid, white tiles on a `#141413` tile (`rx=30`), no box | |
+| Master | 1254 px 3D render, transparent background. Never edited; a new render replaces it | `assets/brand/source/logo-cube-master.png` |
+| Flat mark | The same cube traced as three flat faces (top `#14929b`, front `#0b6970`, side `#05474d`), a light bevel and the amber keyhole (gradient `#e88f1c` to `#ffc75a`, drawn 12% larger so it reads at 16 px). Same 100-unit square as the render's crop, so the two line up | `packages/ui/src/brand/geometry.ts` |
+| Colours | Cube teal `#0b6970` (close to the site primary `#005c62`); keyhole amber `#f2a12a` = `--rb-brand` | tokens.css |
 
-The green is the **logo color only**. The UI accent stays teal
-(`--rb-accent`).
+`--rb-brand` is the **keyhole amber**, a logo colour only (the wordmark
+dot, the glow). It is never used for text or meaningful icons (about 2:1 on
+paper). The UI accent stays teal (`--rb-accent`).
 
-Wordmark: "rulebox", lowercase, weight 500, followed by a small green
+Wordmark: "rulebox", lowercase, weight 500, followed by a small amber
 square. Tagline: "Only what you allow".
 
-Static files (SVG, PNG, ICO, favicons, Tauri icons) are generated from the
-geometry by `pnpm gen:brand` into `assets/brand/` and the app folders.
+**Sizes.** The render turns to mush below about 40 px, so:
+
+- **28 px and up** (UI): the render, as a small WebP from a srcset
+  (128/256/512 px, 4-18 KB).
+- **Below 28 px**, the taskbar Start button, favicons and 16-32 px icons:
+  the flat mark (vector).
+- Icon files mix the two: `.ico` holds the flat mark at 16/24/32 px and the
+  render at 48/64/256 px.
+
+**Pipeline.** `pnpm gen:brand` (`scripts/build-brand.mjs`, sharp + resvg)
+derives everything from the master and the flat mark: it crops the cube to
+a square, makes the body opaque (the render's body is alpha 253-254),
+writes favicons (SVG, ICO, apple-touch on a paper tile), Tauri icons, the
+WiX installer bitmaps, PNG sizes, and the WebP images for the UI. It also
+**splits the render into layers** for the animation: the cube with the
+keyhole dark (*body*), the keyhole light alone (*light*, found by its
+warmth: red well above blue), and a mask of the cube's highlights (*sheen*).
+Light over body at full opacity is the render.
 
 | Animation | Where used | Sequence |
 |---|---|---|
-| **Splash** | App start, before the login screen | Box outline draws in (0.9 s) while rotating from −45° and scaling up; all tiles pop in as dots; a green scan line passes top to bottom and turns on the R row by row; the leg tiles spin in and kick; wordmark letters rise in with a stagger |
-| **Loading** | Waiting states (agent starting, first sync, sign-in check) | Looping (1.8 s): a short segment of the outline travels around the box; the scan line passes down and each row pulses as it is crossed; wordmark dimmed |
-| **Open desktop** | After successful sign-in | Scan line passes up; blocked dots and the wordmark leave; R tiles spin away; the box scales up and fades; the last leg tile moves to the center and grows until it covers the screen, then fades to reveal the desktop |
-| **Lock** | Returning to the login screen | Outline draws in; tiles fly in from random positions; scan line, leg kick and wordmark as in Splash |
+| **Splash** | App start, before the login screen | The cube drops in softly (0.6 s) and lands with a squash and rebound, a contact shadow growing under it; the keyhole stays dark, then **ignites** like a filament (two flickers, then full) while a warm glow blooms out of it and fades; a light sweep runs along the top edge; the wordmark letters rise in |
+| **Loading** | Waiting states (agent starting, first sync, sign-in check, the `Spinner`) | Looping (1.8 s): the keyhole light breathes (full to 30%) with the glow, and a sheen passes over the top edge; wordmark dimmed |
+| **Open desktop** | After successful sign-in | The wordmark lifts away, the cube dips and the keyhole flares; then the view **flies into the keyhole**: the keyhole, as a shape of warm light, grows until it covers the window (`onCovered`: the desktop is swapped in underneath), and the light fades to reveal the desktop. Dark theme uses a warmer, dimmer light so the fade goes through amber, not grey |
+| **Lock** | Returning to the login screen (signing out) | The reverse: warm light covers the window, the view zooms back out of the keyhole until the cube sits in place, the light shrinks back into the keyhole and dims a little, the cube settles with a small squash, then the sweep and the wordmark as in Splash |
 
 Implementation rules:
 
@@ -1360,17 +1372,23 @@ Implementation rules:
   exception to 25.2: CSS animations need no JavaScript per frame, can play
   before the app bundle has loaded, and hold no timeline objects in memory.
   GSAP remains the library for everything else.
-- Tiles, scan line, wordmark and the flood are HTML elements that animate
-  only `transform`/`translate`/`scale` and `opacity`, so they run on the
-  compositor even while the main thread is busy starting the app.
-- The outline is one small SVG rect that animates `stroke-dashoffset`
-  (Splash, Lock and Loading). This is the only allowed exception to the
-  transform/opacity rule.
-- One-shot animations end on the resting style without a forwards fill, so
-  no layers stay promoted afterwards.
+- Every layer animates only `transform` (`translate`/`scale`) and
+  `opacity`, so it runs on the compositor even while the main thread is
+  busy starting the app. No filters and no animated blur: the glow is a
+  radial gradient (blended with `screen`) that scales and fades; the sweep
+  is a gradient band under a static mask.
+- The zoom of open and lock is exponential (constant perceived speed) and
+  sized by the component so the keyhole's round top reaches every corner of
+  the window.
+- Image layers are small WebP files picked by size and screen density
+  (at most ~25 KB for a 170 px logo on a 1.5x screen).
+- One-shot animations end on the resting style (the plain render) without a
+  forwards fill, so no layers stay promoted afterwards ("open" ends hidden
+  and is unmounted).
 - Lite mode and reduced motion: show the static logo with a short fade;
   "Loading" becomes a gentle opacity pulse; "Open desktop" becomes a
-  cross-fade.
+  cross-fade. The glow, sheen and light door are not drawn.
 - The splash never delays sign-in: it is skipped or cut short as soon as
   the login screen is ready.
-- Wherever the logo does not move, use the static `<LogoMark>` (one SVG).
+- Wherever the logo does not move, use the static `<LogoMark>` (one image,
+  or the flat SVG below 28 px).

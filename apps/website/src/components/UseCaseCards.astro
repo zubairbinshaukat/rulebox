@@ -1,0 +1,171 @@
+---
+/*
+ * The five industry pages as photo cards, in a 2 + 3 layout so the set
+ * never leaves an empty slot. Cards in a row share one height.
+ */
+import Icon from "./Icon.astro";
+import PhotoFrame from "./PhotoFrame.astro";
+import { USE_CASES } from "../data/useCases";
+import { USE_CASE_PHOTOS } from "../data/photos";
+
+interface Props {
+  /** Heading level for card titles, so the outline stays correct on each page. */
+  level?: "h2" | "h3";
+}
+const { level = "h3" } = Astro.props;
+const H = level;
+const spokes = USE_CASES.filter((u) => !u.hub);
+---
+
+<ul class="ucc" role="list">
+  {
+    spokes.map((s, i) => {
+      const photo = USE_CASE_PHOTOS[s.slug]!.hero;
+      const big = i < 2;
+      return (
+        <li class:list={["reveal", { big }]}>
+          <a class="card card-link" href={`/use-cases/${s.slug}`} data-tone={s.tone}>
+            <PhotoFrame
+              photo={photo}
+              class="card-photo"
+              widths={big ? [480, 720, 960, 1280] : [400, 640, 860]}
+              sizes={big ? "(min-width: 1020px) 620px, (min-width: 720px) 90vw, 100vw" : "(min-width: 1020px) 410px, (min-width: 720px) 45vw, 100vw"}
+            >
+              <span class="tag">
+                <Icon name={s.icon} />
+                {s.place}
+              </span>
+            </PhotoFrame>
+            <span class="body">
+              <H class="name">{s.name}</H>
+              <span class="line">{s.h1}</span>
+              <span class="go">
+                Read the story <Icon name="arrow-right" />
+              </span>
+            </span>
+          </a>
+        </li>
+      );
+    })
+  }
+</ul>
+
+<style>
+  .ucc {
+    display: grid;
+    gap: 16px;
+    grid-template-columns: 1fr;
+  }
+  @media (min-width: 720px) {
+    .ucc {
+      grid-template-columns: repeat(2, 1fr);
+    }
+    /* Five cards on two columns: the first runs full width, then 2 x 2. */
+    .ucc li:first-child {
+      grid-column: 1 / -1;
+    }
+  }
+  @media (min-width: 1020px) {
+    .ucc {
+      grid-template-columns: repeat(6, 1fr);
+    }
+    .ucc li {
+      grid-column: span 2;
+    }
+    .ucc li.big,
+    .ucc li:first-child {
+      grid-column: span 3;
+    }
+  }
+  .ucc li {
+    display: flex;
+  }
+  .card {
+    display: flex;
+    flex-direction: column;
+    width: 100%;
+    padding: 8px;
+    border-radius: calc(var(--radius-xl) + 4px);
+    background: var(--surface);
+    border: 1px solid var(--line);
+    color: var(--ink);
+  }
+  .card :global(.card-photo) {
+    aspect-ratio: 16 / 10;
+    border-radius: var(--radius-lg);
+    box-shadow: inset 0 0 0 1px var(--hairline);
+  }
+  .card :global(.card-photo .ph-img) {
+    transition: transform 0.6s var(--ease);
+  }
+  .card:hover :global(.card-photo .ph-img) {
+    transform: scale(1.04);
+  }
+  @media (min-width: 720px) and (max-width: 1019px) {
+    li:first-child .card :global(.card-photo) {
+      aspect-ratio: 16 / 7;
+    }
+  }
+  .tag {
+    position: absolute;
+    left: 12px;
+    top: 12px;
+    display: inline-flex;
+    align-items: center;
+    gap: 7px;
+    padding: 5px 12px 5px 8px;
+    border-radius: var(--radius-pill);
+    background: var(--chip-glass);
+    color: var(--tone-ink);
+    font-family: var(--font-mono);
+    font-size: 0.72rem;
+    font-weight: 500;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    backdrop-filter: blur(8px);
+  }
+  .tag :global(.icon) {
+    width: 16px;
+    height: 16px;
+  }
+  .body {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    flex: 1;
+    padding: 18px 16px 14px;
+  }
+  .name {
+    font-size: var(--fs-h3);
+    font-weight: 580;
+    letter-spacing: -0.02em;
+    line-height: 1.2;
+  }
+  .big .name {
+    font-size: clamp(1.4rem, 1.1rem + 1vw, 1.95rem);
+  }
+  .line {
+    color: var(--muted);
+  }
+  .go {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    margin-top: auto;
+    padding-top: 12px;
+    font-weight: 600;
+    font-size: 0.95rem;
+    color: var(--tone-ink);
+  }
+  .go :global(.icon) {
+    transition: transform 0.25s var(--ease);
+  }
+  .card:hover .go :global(.icon) {
+    transform: translateX(3px);
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .card:hover :global(.card-photo .ph-img) {
+      transform: none;
+    }
+  }
+</style>

@@ -1,0 +1,107 @@
+---
+/* Changelog: one MDX file per release in content/en/changelog. Until the
+   first public release there are none, and the page says so. */
+import { getCollection, render } from "astro:content";
+import Base from "../layouts/Base.astro";
+import PageHero from "../components/PageHero.astro";
+import Icon from "../components/Icon.astro";
+import { RELEASES_URL } from "../config";
+
+const entries = (await getCollection("changelog", (e) => !e.data.draft)).sort((a, b) => +b.data.date - +a.data.date);
+const rendered = await Promise.all(entries.map(async (e) => ({ e, Content: (await render(e)).Content })));
+---
+
+<Base title="Changelog | Rulebox" description="Every Rulebox release, newest first, with what changed and links to the installer and its checksum." path="/changelog" og="changelog" crumbs={[{ name: "Changelog", path: "/changelog" }]}>
+  <PageHero label="Changelog" title="Changelog" sub="Every Rulebox release, newest first." tone="mint" compact />
+  <section class="section-tight">
+    <div class="container">
+      {
+        rendered.length === 0 ? (
+          <div class="empty card" data-tone="sun">
+            <span class="tile-icon">
+              <Icon name="calendar" />
+            </span>
+            <div class="copy">
+              <h2 class="h3">No public release yet.</h2>
+              <p class="muted">
+                Rulebox is in an invite-only pilot. The first public release will be listed here with its date, its notes and a link to the
+                installer and its checksum. Until then, follow the work in the <a class="text-link" href="/roadmap">roadmap</a> and on{" "}
+                <a class="text-link" href={RELEASES_URL}>GitHub</a>.
+              </p>
+            </div>
+          </div>
+        ) : (
+          <ol class="list" role="list">
+            {rendered.map(({ e, Content }) => (
+              <li class="entry">
+                <p class="mono when">
+                  {e.data.date.toISOString().slice(0, 10)} · v{e.data.version}
+                </p>
+                <div class="body">
+                  <h2 class="h3">{e.data.title}</h2>
+                  <div class="prose">
+                    <Content />
+                  </div>
+                </div>
+              </li>
+            ))}
+          </ol>
+        )
+      }
+    </div>
+  </section>
+</Base>
+
+<style>
+  .empty {
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr);
+    column-gap: var(--sp-6);
+    align-items: center;
+  }
+  .copy {
+    display: grid;
+    gap: var(--card-gap);
+    max-width: var(--max-text);
+  }
+  @media (max-width: 599px) {
+    .empty {
+      grid-template-columns: 1fr;
+      row-gap: var(--sp-4);
+    }
+  }
+  .list {
+    display: grid;
+  }
+  .entry {
+    display: grid;
+    gap: var(--sp-3);
+    padding-block: var(--sp-8);
+    border-top: 1px solid var(--line);
+  }
+  .entry:first-child {
+    padding-top: 0;
+    border-top: 0;
+  }
+  .body {
+    display: grid;
+    gap: var(--sp-4);
+  }
+  @media (min-width: 900px) {
+    .entry {
+      grid-template-columns: repeat(12, minmax(0, 1fr));
+      column-gap: var(--col-gap);
+    }
+    .when {
+      grid-column: 1 / span 3;
+    }
+    .body {
+      grid-column: 4 / span 9;
+    }
+  }
+  .when {
+    color: var(--muted);
+    font-size: var(--fs-small);
+    line-height: var(--lh-h3);
+  }
+</style>

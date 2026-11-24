@@ -30,8 +30,9 @@
   --rb-focus: oklch(0.5 0.085 175);
   --rb-accent-soft: oklch(0.94 0.03 175);
   --rb-accent-text: oklch(0.38 0.085 175);
-  /* Logo green; same in both themes. Mirrors LOGO_BRAND in brand/geometry.ts. */
-  --rb-brand: #12b76a;
+  /* Logo keyhole amber; same in both themes, logo accents only (never text).
+     Mirrors LOGO_AMBER in brand/geometry.ts. The UI accent stays teal. */
+  --rb-brand: #f2a12a;
   --rb-danger: oklch(0.6 0.17 25);
   --rb-danger-text: oklch(0.5 0.15 25);
   --rb-danger-soft: oklch(0.95 0.03 25);

@@ -1,0 +1,107 @@
+---
+/*
+ * A stock photo in a large rounded frame. AVIF, with WebP as the <img>
+ * fallback (every current browser has one of the two), at several widths
+ * (astro:assets, sharp at build time), explicit width/height, cropped with
+ * object-fit so the frame keeps its aspect ratio (no layout shift).
+ *
+ * parallax: the photo drifts a few percent inside its frame while the
+ * frame crosses the viewport. CSS scroll-driven animation, transform only,
+ * off with reduced motion and where the browser lacks view timelines.
+ */
+import { Picture } from "astro:assets";
+import type { Photo } from "../data/photos";
+
+interface Props {
+  photo: Photo;
+  /** CSS sizes attribute: how wide the frame is at each breakpoint. */
+  sizes: string;
+  widths?: number[];
+  /** Hero: eager + high fetch priority. Everything else lazy loads. */
+  priority?: boolean;
+  parallax?: boolean;
+  /** Soft gradient at the bottom, for text or chips laid over the photo. */
+  shade?: boolean;
+  class?: string;
+}
+const { photo, sizes, widths = [480, 720, 960, 1280], priority = false, parallax = false, shade = false, class: className } = Astro.props;
+---
+
+<div class:list={["frame", { parallax, shade }, className]} style={photo.focus ? `--focus: ${photo.focus}` : undefined}>
+  <Picture
+    src={photo.src}
+    alt={photo.alt}
+    formats={["avif"]}
+    fallbackFormat="webp"
+    widths={widths}
+    sizes={sizes}
+    quality={52}
+    loading={priority ? "eager" : "lazy"}
+    decoding={priority ? "sync" : "async"}
+    fetchpriority={priority ? "high" : "auto"}
+    class="ph-img"
+  />
+  <slot />
+</div>
+
+<style>
+  .frame {
+    position: relative;
+    overflow: hidden;
+    border-radius: var(--radius-xl);
+    background: var(--surface-2);
+    isolation: isolate;
+    box-shadow: var(--shadow-md);
+  }
+  /* Above the photo: a hairline inner edge so light photos do not melt into
+     the paper, and in dark mode a light dim so photos sit back on near-black. */
+  .frame::before {
+    content: "";
+    position: absolute;
+    inset: 0;
+    z-index: 0;
+    border-radius: inherit;
+    pointer-events: none;
+    background: var(--photo-dim);
+    box-shadow: inset 0 0 0 1px var(--hairline);
+  }
+  .frame :global(picture) {
+    display: contents;
+  }
+  .frame :global(.ph-img) {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    object-position: var(--focus, 50% 50%);
+    z-index: -1;
+  }
+  .frame.shade::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    z-index: 0;
+    pointer-events: none;
+    background:
+      linear-gradient(180deg, transparent 45%, var(--photo-scrim) 100%),
+      linear-gradient(90deg, color-mix(in oklch, var(--photo-scrim) 25%, transparent), transparent 40%);
+  }
+  @keyframes drift {
+    from {
+      transform: translateY(-4%) scale(1.1);
+    }
+    to {
+      transform: translateY(4%) scale(1.1);
+    }
+  }
+  @media (prefers-reduced-motion: no-preference) {
+    @supports (animation-timeline: view()) {
+      .frame.parallax :global(.ph-img) {
+        animation: drift linear both;
+        animation-timeline: view();
+        animation-range: cover 0% cover 100%;
+      }
+    }
+  }
+</style>

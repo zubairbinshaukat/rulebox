@@ -1,0 +1,78 @@
+---
+/* "What it does not do": stated plainly on every feature and use-case page. */
+import Icon from "./Icon.astro";
+interface Props {
+  items: string[];
+  title?: string;
+}
+const { items, title = "What it does not do" } = Astro.props;
+---
+
+{
+  items.length > 0 && (
+    <aside class="limits" aria-label={title}>
+      <span class="ic">
+        <Icon name="info" />
+      </span>
+      <div>
+        <h2 class="t">{title}</h2>
+        <ul role="list">
+          {items.map((t) => (
+            <li>{t}</li>
+          ))}
+        </ul>
+      </div>
+    </aside>
+  )
+}
+
+<style>
+  .limits {
+    display: flex;
+    gap: var(--sp-4);
+    padding: var(--card-pad);
+    border-radius: var(--radius-lg);
+    background: var(--c-coral-soft);
+    color: var(--ink);
+  }
+  /* The icon sits in a box exactly as tall as the title line, so the two centre. */
+  .ic {
+    flex: none;
+    display: grid;
+    place-items: center;
+    width: var(--sp-6);
+    height: calc(var(--fs-h3) * var(--lh-h3));
+    color: var(--c-coral-ink);
+  }
+  .ic :global(.icon) {
+    width: var(--sp-6);
+    height: var(--sp-6);
+    vertical-align: 0;
+  }
+  .t {
+    font-family: var(--font-display);
+    font-size: var(--fs-h3);
+    font-weight: var(--fw-heading);
+    line-height: var(--lh-h3);
+    letter-spacing: var(--ls-h3);
+    margin-bottom: var(--sp-3);
+  }
+  ul {
+    display: grid;
+    gap: var(--sp-2);
+  }
+  li {
+    color: var(--ink-2);
+    padding-left: var(--sp-5);
+    position: relative;
+  }
+  li::before {
+    content: "";
+    position: absolute;
+    left: 0;
+    top: calc(0.8em - 1px);
+    width: var(--sp-2);
+    height: 2px;
+    background: var(--c-coral-ink);
+  }
+</style>

@@ -1,0 +1,39 @@
+---
+import Base from "../layouts/Base.astro";
+import Hero from "../components/home/Hero.astro";
+import TrustBand from "../components/home/TrustBand.astro";
+import Manifesto from "../components/home/Manifesto.astro";
+import ThreeParts from "../components/home/ThreeParts.astro";
+import DaySteps from "../components/home/DaySteps.astro";
+import Bento from "../components/home/Bento.astro";
+import Connected from "../components/home/Connected.astro";
+import Places from "../components/home/Places.astro";
+import StatStrip from "../components/StatStrip.astro";
+import Faq from "../components/Faq.astro";
+import CtaClose from "../components/CtaClose.astro";
+import Preloader from "../components/Preloader.astro";
+import { HOME_FAQ } from "../data/faq";
+import { STRIP_A } from "../data/numbers";
+import { organizationLd, softwareLd, websiteLd } from "../lib/seo";
+---
+
+<Base
+  title="Rulebox: Open-Source Kiosk OS for Windows PCs"
+  description="Turn any Windows PC into a locked, branded staff workstation. Approved apps, websites and files only. Managed from the web. Open source (MIT)."
+  path="/"
+  og="home"
+  ld={[organizationLd(), websiteLd(), softwareLd()]}
+>
+  <Preloader slot="preload" />
+  <Hero />
+  <TrustBand />
+  <Manifesto />
+  <Places />
+  <ThreeParts />
+  <DaySteps />
+  <Bento />
+  <Connected />
+  <StatStrip ids={STRIP_A} />
+  <Faq items={HOME_FAQ} />
+  <CtaClose />
+</Base>

@@ -1,0 +1,162 @@
+---
+/* Plan Q3 (a): free and open source; hosted pilot is free; plans to be
+   announced. No prices before the pilot's numbers exist. */
+import Base from "../layouts/Base.astro";
+import PageHero from "../components/PageHero.astro";
+import Faq from "../components/Faq.astro";
+import CtaClose from "../components/CtaClose.astro";
+import Icon from "../components/Icon.astro";
+import { CTA_PRIMARY, REPO_URL } from "../config";
+import { PRICING_FAQ } from "../data/faq";
+---
+
+<Base
+  title="Pricing: Free and Open Source, Hosted Pilot | Rulebox"
+  description="The software is free under MIT. The hosted service is invite-only during the pilot. Public plans will be posted here."
+  path="/pricing"
+  og="pricing"
+  crumbs={[{ name: "Pricing", path: "/pricing" }]}
+>
+  <PageHero label="Pricing" title="Free to run. Simple to host." sub="No surprise bills. We will email every pilot organisation before anything changes." tone="mint" />
+
+  <section class="section-tight plans-sec">
+    <div class="container plans">
+      <article class="plan" data-tone="blue">
+        <p class="label" style="--dot: var(--tone)">Self-host</p>
+        <h2 class="h3">Free and open source.</h2>
+        <p class="price"><span class="amt">$0</span><span class="per">MIT licence, any number of PCs</span></p>
+        <p class="muted">Run it yourself under the MIT licence. You need your own Convex deployment for the backend.</p>
+        <ul role="list">
+          <li><Icon name="check" />Every feature in the release</li>
+          <li><Icon name="check" />No minimum number of PCs</li>
+          <li><Icon name="check" />Read and change the code</li>
+        </ul>
+        <div class="acts">
+          <a class="btn btn-ghost" href="/docs/self-hosting">Host it yourself</a>
+          <a class="link-arrow" href={REPO_URL}>View the source <Icon name="arrow-right" /></a>
+        </div>
+      </article>
+
+      <article class="plan featured" data-tone="sun">
+        <p class="label" style="--dot: var(--tone)">Hosted by us</p>
+        <h2 class="h3">Invite-only during the pilot.</h2>
+        <p class="price"><span class="amt">Free</span><span class="per">for pilot organisations</span></p>
+        <p class="muted">We run the backend and the dashboard. Pilot organisations pay nothing.</p>
+        <ul role="list">
+          <li><Icon name="check" />The web dashboard, hosted</li>
+          <li><Icon name="check" />No minimum number of PCs</li>
+          <li><Icon name="check" />Email before anything changes</li>
+        </ul>
+        <div class="acts">
+          <a class="btn btn-primary" href={CTA_PRIMARY.href}>{CTA_PRIMARY.label}<Icon name="arrow-right" /></a>
+        </div>
+      </article>
+
+      <article class="plan" data-tone="violet">
+        <p class="label" style="--dot: var(--tone)">After the pilot</p>
+        <h2 class="h3">Public plans, posted here.</h2>
+        <p class="price"><span class="amt small">To be announced</span></p>
+        <p class="muted">Public plans and prices will be posted on this page before the pilot ends. A paid hosted service pays for development; the software stays free.</p>
+        <div class="acts">
+          <a class="btn btn-ghost" href="/contact">Talk to us</a>
+        </div>
+      </article>
+    </div>
+  </section>
+
+  <Faq items={PRICING_FAQ} title="Pricing questions" />
+  <CtaClose />
+</Base>
+
+<style>
+  /* The FAQ below brings its own top padding. */
+  .plans-sec {
+    padding-bottom: 0;
+  }
+  .plans {
+    display: grid;
+    gap: var(--grid-gap);
+  }
+  /* Three plans, six shared rows (label, title, price, text, list, actions):
+     subgrid makes every row the same height in all cards, so the hairlines
+     and prices line up across the three. */
+  @media (min-width: 960px) {
+    .plans {
+      grid-template-columns: repeat(3, 1fr);
+      grid-template-rows: repeat(6, auto);
+      column-gap: var(--grid-gap);
+      row-gap: 0;
+    }
+    .plan {
+      grid-row: span 6;
+      grid-template-rows: subgrid;
+      row-gap: var(--sp-4);
+    }
+    .plan > ul {
+      grid-row: 5;
+    }
+    .plan > .acts {
+      grid-row: 6;
+    }
+  }
+  .plan {
+    display: grid;
+    gap: var(--sp-4);
+    align-content: start;
+    padding: var(--card-pad);
+    border-radius: var(--radius-xl);
+    background: var(--surface);
+    border: 1px solid var(--line);
+  }
+  .featured {
+    background:
+      radial-gradient(90% 60% at 100% 0%, var(--c-sun-soft), transparent 70%),
+      var(--surface);
+    border-color: var(--line-strong);
+    box-shadow: var(--shadow-md);
+  }
+  .price {
+    display: grid;
+    align-content: start;
+    gap: var(--sp-1);
+    padding-block: var(--sp-4);
+    border-block: 1px solid var(--line);
+  }
+  .amt {
+    font-family: var(--font-display);
+    font-size: clamp(2.75rem, 2.1rem + 2vw, 3.75rem);
+    font-weight: var(--fw-heading);
+    letter-spacing: var(--ls-display);
+    line-height: 1;
+  }
+  .amt.small {
+    font-size: clamp(1.75rem, 1.5rem + 0.9vw, 2.25rem);
+    letter-spacing: var(--ls-h2);
+  }
+  .per {
+    color: var(--muted);
+    font-size: var(--fs-small);
+  }
+  .plan > ul {
+    display: grid;
+    align-content: start;
+    gap: var(--sp-3);
+  }
+  li {
+    display: flex;
+    gap: var(--sp-3);
+    align-items: center;
+    line-height: var(--lh-tight);
+  }
+  li :global(.icon) {
+    color: var(--success);
+  }
+  .acts {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--sp-4);
+    align-items: center;
+    align-self: end;
+    padding-top: var(--sp-2);
+  }
+</style>

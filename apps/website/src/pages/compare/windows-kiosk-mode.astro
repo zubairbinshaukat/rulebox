@@ -1,0 +1,126 @@
+---
+/* Fair comparison in the Tailscale format (Story §11.1). Every fact about
+   Windows carries its source and the date it was checked. */
+import Base from "../../layouts/Base.astro";
+import PageHero from "../../components/PageHero.astro";
+import CtaClose from "../../components/CtaClose.astro";
+
+const SRC_OVERVIEW = "https://learn.microsoft.com/en-us/windows/configuration/assigned-access/overview";
+const SRC_QUICK = "https://learn.microsoft.com/en-us/windows/configuration/assigned-access/quickstart-restricted-user-experience";
+const CHECKED = "2026-11-21";
+const rows: { d: string; win: string; rb: string; src?: string }[] = [
+  { d: "Cost", win: "Included in Windows", rb: "Free software (MIT); hosting separate" },
+  { d: "Windows editions", win: "Pro, Enterprise, Education, IoT Enterprise", rb: "Any edition that passes the installer check; Home gets “Reduced” protection", src: SRC_OVERVIEW },
+  { d: "Single full-screen app", win: "Yes, and it restarts the app if closed", rb: "Not what Rulebox is for", src: SRC_OVERVIEW },
+  { d: "Multi-app desktop", win: "Yes: a “restricted user experience” with a tailored Start menu and taskbar", rb: "Yes: custom desktop, taskbar, Start menu", src: SRC_QUICK },
+  { d: "Setup", win: "XML configuration through Intune, a provisioning package or PowerShell as SYSTEM", rb: "One installer and an enrolment code", src: SRC_QUICK },
+  { d: "Per-person sign-in on a shared PC", win: "Different configurations for different Windows accounts", rb: "Built in: staff sign in inside Rulebox on any enrolled PC", src: SRC_OVERVIEW },
+  { d: "Remote changes", win: "Through an MDM such as Intune", rb: "Built-in web dashboard, rings and rollback" },
+  { d: "Built by", win: "Microsoft, supported with Windows", rb: "A small open-source project, in pilot" },
+];
+---
+
+<Base
+  title="Rulebox vs Windows Kiosk Mode (Assigned Access)"
+  description="A fair comparison: what Windows' built-in kiosk mode does well, where Rulebox differs, and who should pick which."
+  path="/compare/windows-kiosk-mode"
+  og="compare"
+  crumbs={[{ name: "Compare", path: "/compare/windows-kiosk-mode" }, { name: "Windows kiosk mode", path: "/compare/windows-kiosk-mode" }]}
+>
+  <PageHero label="Compare" title="Windows kiosk mode or Rulebox: which fits your PCs?" sub="Windows' Assigned Access is solid and built in. Here is where it shines, where Rulebox differs, and who should pick which." tone="blue" compact />
+
+  <section class="section-tight">
+    <div class="container">
+      <div class="table-wrap">
+        <table class="cmp">
+          <thead>
+            <tr>
+              <th scope="col">Dimension</th>
+              <th scope="col">Windows Assigned Access</th>
+              <th scope="col">Rulebox</th>
+            </tr>
+          </thead>
+          <tbody>
+            {
+              rows.map((r) => (
+                <tr>
+                  <th scope="row">{r.d}</th>
+                  <td>
+                    {r.win}
+                    {r.src && (
+                      <a class="src" href={r.src}>
+                        Microsoft Learn, checked {CHECKED}
+                      </a>
+                    )}
+                  </td>
+                  <td>{r.rb}</td>
+                </tr>
+              ))
+            }
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </section>
+
+  <section class="section-tight">
+    <div class="container">
+      <h2 class="h2 bl">The bottom line</h2>
+      <div class="grid grid-2">
+        <div class="pick card" data-tone="blue">
+          <h3 class="h3">Pick Windows kiosk mode</h3>
+          <p class="muted">For one app on one screen, such as signage or a check-in screen, or if you already run Intune and have people who know it.</p>
+        </div>
+        <div class="pick card" data-tone="mint">
+          <h3 class="h3">Pick Rulebox</h3>
+          <p class="muted">For shared staff PCs with a few apps, people who sign in and out, no MDM, and PCs you want to manage from a browser.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+  <CtaClose />
+</Base>
+
+<style>
+  .cmp {
+    width: 100%;
+    min-width: 680px;
+    border-collapse: collapse;
+  }
+  .cmp th,
+  .cmp td {
+    text-align: left;
+    vertical-align: top;
+    padding: 18px 16px;
+    border-bottom: 1px solid var(--line);
+  }
+  .cmp thead th {
+    font-family: var(--font-mono);
+    font-size: 0.74rem;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: var(--muted);
+    font-weight: 500;
+  }
+  .cmp tbody th {
+    font-weight: 620;
+    width: 22%;
+  }
+  .cmp td:last-child {
+    background: var(--c-mint-soft);
+  }
+  .src {
+    display: block;
+    margin-top: 6px;
+    font-size: 0.8rem;
+    color: var(--muted);
+  }
+  .bl {
+    margin-bottom: 24px;
+  }
+  .pick {
+    display: grid;
+    gap: 10px;
+    border-top: 5px solid var(--tone);
+  }
+</style>

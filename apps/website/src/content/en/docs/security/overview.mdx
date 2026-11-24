@@ -1,0 +1,36 @@
+---
+title: Security overview
+description: The threats Rulebox defends against, the lockdown layers on each PC, how policies are signed, and the limits we know about.
+section: Security
+order: 1
+updated: 2026-11-24
+draft: true
+---
+
+This page summarises the design. The full threat model will be published in these docs.
+
+## What we defend against
+
+- Staff escaping the desktop.
+- Tampering with the agent.
+- One person reading another's data.
+- A compromised dashboard account.
+- A stolen enrolment code.
+- A network attacker.
+
+## Layers on the PC
+
+Standard user, approved programs only, policy restrictions, a protected service, and a process watchdog.
+
+## Trust in what we send
+
+TLS for every connection. SHA-256 on every installer. Policies signed with your organisation's key; a PC rejects anything with a bad signature. An optional publisher check for installers. Short-lived enrolment codes that you can revoke.
+
+## Known limits
+
+- Windows Home gets "Reduced" protection.
+- Desktop apps with their own file dialogs can still browse outside a person's folder in v1.
+- Physical attacks need a BIOS password and BitLocker, which you set up.
+- An out-of-support Windows is still at risk.
+
+To report a problem, see [Report a security problem](/security/disclosure).

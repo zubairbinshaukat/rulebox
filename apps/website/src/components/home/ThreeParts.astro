@@ -1,0 +1,172 @@
+---
+/* "One PC, three parts, your rules" (core.what) as Qonto-style cards:
+   a picture panel on top, a short title and two lines under it. */
+import DesktopMock from "../DesktopMock.astro";
+---
+
+<section class="parts section" aria-labelledby="parts-title">
+  <div class="container">
+    <div class="section-head split">
+      <div>
+        <p class="label" style="--dot: var(--c-coral)">Three parts</p>
+        <h2 id="parts-title" class="h2" style="margin-top:var(--head-gap)">One PC, three parts, your rules.</h2>
+      </div>
+      <div class="side">
+        <p class="lead">A small service enforces the rules, a friendly desktop is what staff see, and a web dashboard is where you change them.</p>
+        <a class="btn btn-ghost" href="/product">How it works</a>
+      </div>
+    </div>
+
+    <div class="grid grid-3">
+      <a class="pc card-link" href="/features/lockdown">
+        <div class="art art-agent" data-tone="coral" aria-hidden="true">
+          <div class="term">
+            <p><span class="ok"></span>rulebox-agent <b>running</b></p>
+            <p><span class="ok"></span>policy v12 <b>signature ok</b></p>
+            <p><span class="ok"></span>installer sha-256 <b>match</b></p>
+            <p><span class="ok"></span>desktop watchdog <b>on</b></p>
+            <p class="deny"><span></span>regedit.exe <b>blocked</b></p>
+          </div>
+        </div>
+        <h3 class="h3">The agent</h3>
+        <p class="muted">A small Windows service that enforces your rules, installs apps and keeps the desktop alive.</p>
+      </a>
+
+      <a class="pc card-link" href="/features/staff-desktop">
+        <div class="art art-desk" data-tone="blue" aria-hidden="true">
+          <DesktopMock variant="desktop" class="mini-desk" />
+        </div>
+        <h3 class="h3">The staff desktop</h3>
+        <p class="muted">What people see: sign-in, taskbar, Start menu, approved apps and their own files.</p>
+      </a>
+
+      <a class="pc card-link" href="/features/dashboard">
+        <div class="art art-dash" data-tone="mint" aria-hidden="true">
+          <div class="table">
+            <p class="th"><span>PC</span><span>Group</span><span>State</span></p>
+            <p><span>Front desk 1</span><span>Reception</span><span class="st on">Online</span></p>
+            <p><span>Till 2</span><span>Shop floor</span><span class="st on">Online</span></p>
+            <p><span>Lab 07</span><span>Year 9</span><span class="st pend">Pending</span></p>
+            <p><span>Back office</span><span>Accounts</span><span class="st on">Online</span></p>
+          </div>
+        </div>
+        <h3 class="h3">The dashboard</h3>
+        <p class="muted">Where you manage PCs, people, apps and rules from any browser.</p>
+      </a>
+    </div>
+  </div>
+</section>
+
+<style>
+  .side {
+    display: grid;
+    gap: 20px;
+    justify-items: start;
+  }
+  .pc {
+    display: grid;
+    gap: 10px;
+    align-content: start;
+  }
+  .pc .h3 {
+    margin-top: 14px;
+  }
+  .art {
+    position: relative;
+    display: grid;
+    place-items: center;
+    aspect-ratio: 4 / 3;
+    border-radius: var(--radius-lg);
+    background:
+      radial-gradient(90% 80% at 20% 0%, var(--sheen-strong), transparent 60%),
+      var(--tone-soft);
+    overflow: hidden;
+    transition: transform 0.5s var(--ease-out);
+  }
+  .pc:hover .art > * {
+    transform: translateY(-4px);
+  }
+  .art > * {
+    transition: transform 0.5s var(--ease-out);
+  }
+  .term {
+    width: 78%;
+    padding: 18px 18px;
+    border-radius: 14px;
+    background: var(--night);
+    color: var(--on-night);
+    font-family: var(--font-mono);
+    font-size: 0.78rem;
+    line-height: 2;
+    box-shadow: var(--shadow-md);
+  }
+  .term p {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .term b {
+    margin-left: auto;
+    font-weight: 500;
+    color: var(--on-night-ok);
+  }
+  .term span {
+    width: 7px;
+    height: 7px;
+    border-radius: 2px;
+    background: var(--on-night-ok);
+  }
+  .term .deny b {
+    color: var(--on-night-deny);
+  }
+  .term .deny span {
+    background: var(--on-night-deny);
+    width: 3px;
+    height: 3px;
+    margin-inline: 2px;
+  }
+  /* The same drawn Staff App desktop as the rest of the site, small. */
+  .art-desk :global(.mini-desk) {
+    width: 86%;
+    border-radius: 12px;
+    box-shadow: var(--shadow-md);
+  }
+  .table {
+    width: 84%;
+    padding: 8px;
+    border-radius: 14px;
+    background: var(--surface);
+    box-shadow: var(--shadow-md);
+    font-size: 0.8rem;
+  }
+  .table p {
+    display: grid;
+    grid-template-columns: 1.2fr 1fr auto;
+    gap: 8px;
+    align-items: center;
+    padding: 8px 8px;
+    border-top: 1px solid var(--line);
+  }
+  .table .th {
+    border-top: 0;
+    font-family: var(--font-mono);
+    font-size: 0.68rem;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: var(--muted);
+  }
+  .st {
+    padding: 2px 8px;
+    border-radius: 99px;
+    font-size: 0.72rem;
+    font-weight: 650;
+  }
+  .st.on {
+    background: var(--c-mint-soft);
+    color: var(--c-mint-ink);
+  }
+  .st.pend {
+    background: var(--c-violet-soft);
+    color: var(--c-violet-ink);
+  }
+</style>

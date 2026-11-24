@@ -1,0 +1,86 @@
+---
+/* A strip of numbers. Every number comes from data/numbers.ts with its
+   source; the small mark links to /numbers where all sources are listed. */
+import { stat } from "../data/numbers";
+interface Props {
+  ids: string[];
+  title?: string;
+}
+const { ids, title } = Astro.props;
+const items = ids.map(stat);
+const tones = ["blue", "sun", "coral", "violet", "mint"];
+---
+
+<section class="strip section-tight" aria-label={title ?? "Rulebox in numbers"}>
+  <div class="container">
+    <dl class="row">
+      {
+        items.map((s, i) => (
+          <div class="cell reveal" data-tone={tones[i % tones.length]}>
+            <dt class="label-num">{s.label}</dt>
+            <dd class="num">{s.value}</dd>
+            <dd class="src">
+              <a href={`/numbers#${s.id}`}>Source: {s.source}</a>
+            </dd>
+          </div>
+        ))
+      }
+    </dl>
+  </div>
+</section>
+
+<style>
+  .row {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(min(100%, 200px), 1fr));
+    border-top: 1px solid var(--line);
+  }
+  .cell {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    padding: 26px 22px 22px 0;
+    border-bottom: 1px solid var(--line);
+  }
+  @media (min-width: 900px) {
+    .cell + .cell {
+      padding-left: 22px;
+      border-left: 1px solid var(--line);
+    }
+  }
+  .num {
+    order: -1;
+    font-size: clamp(2.6rem, 1.8rem + 2.4vw, 4.2rem);
+    font-weight: 560;
+    letter-spacing: -0.05em;
+    line-height: 1;
+  }
+  .num::after {
+    content: "";
+    display: block;
+    width: 28px;
+    height: 5px;
+    margin-top: 14px;
+    border-radius: 3px;
+    background: var(--tone);
+  }
+  .label-num {
+    color: var(--ink-2);
+    font-size: 0.98rem;
+    line-height: 1.4;
+  }
+  .src {
+    line-height: 1.5;
+  }
+  .src a {
+    font-family: var(--font-mono);
+    font-size: 0.7rem;
+    letter-spacing: 0.04em;
+    color: var(--muted);
+    text-decoration: none;
+  }
+  .src a:hover {
+    color: var(--ink);
+    text-decoration: underline;
+  }
+</style>

@@ -1,0 +1,278 @@
+---
+/* The full story (Story §5) as numbered chapters, with the three parts. */
+import Base from "../layouts/Base.astro";
+import PageHero from "../components/PageHero.astro";
+import ThreeParts from "../components/home/ThreeParts.astro";
+import CtaClose from "../components/CtaClose.astro";
+import Icon from "../components/Icon.astro";
+import DesktopMock from "../components/DesktopMock.astro";
+import { CTA_PRIMARY } from "../config";
+import { softwareLd } from "../lib/seo";
+
+const day = [
+  ["08:55", "Sara opens the laptop at the front desk. The sign-in screen shows the company name and a clock. She types her own username and password."],
+  ["08:56", "Her desktop appears. Her apps as tiles: the booking site, the accounts app, Zoom, her files. A taskbar at the bottom. It looks like Windows, only quieter. There is nothing to get wrong."],
+  ["11:20", "A PDF arrives through the booking site. She double-clicks it. It opens in Rulebox's own viewer. No \"choose an app\" question. No way to run a file that should not be run."],
+  ["13:00", "The internet drops for twenty minutes. Nothing changes on her screen. The rules are stored on the PC."],
+  ["17:05", "Sara logs out. Her apps close. Her web logins are hers alone. Ali signs in for the evening shift and sees his own apps, his own files."],
+];
+const tones = ["blue", "sun", "coral", "violet", "mint"];
+---
+
+<Base
+  title="How Rulebox Works: Agent, Staff Desktop, Dashboard"
+  description="See how Rulebox locks a Windows PC: a small service, a friendly staff desktop and a web dashboard that keeps every PC in line."
+  path="/product"
+  og="product"
+  ld={[softwareLd()]}
+  crumbs={[{ name: "How it works", path: "/product" }]}
+>
+  <PageHero label="How it works" title="One PC, three parts, your rules." sub="The whole story, from the PC everyone shares to the day you turn kiosk mode off again." tone="violet" icon="layers" primary={CTA_PRIMARY} secondary={{ label: "See all features", href: "/features" }} />
+
+  <article class="chapters">
+    <section class="ch container" aria-labelledby="c1">
+      <p class="num mono">01</p>
+      <div class="body">
+        <h2 id="c1" class="h2">The PC everyone shares, and nobody owns.</h2>
+        <div class="prose">
+          <p>Every workplace has one. The PC at the front desk. The one at the till. The row of them in the computer lab.</p>
+          <p>
+            It was set up for one job. Then real life happened. Someone installed a game. Someone saved their passwords in the browser.
+            Someone clicked a link in an email. Now it is slow, it shows the last person's inbox, and nobody knows what is on it.
+          </p>
+          <p>It is not bad people. It is an open PC.</p>
+        </div>
+      </div>
+    </section>
+
+    <section class="ch container" aria-labelledby="c2">
+      <p class="num mono">02</p>
+      <div class="body">
+        <h2 id="c2" class="h2">The usual fixes do not fit.</h2>
+        <ul class="icon-list" role="list">
+          <li data-tone="coral"><span class="il-icon"><Icon name="forbidden" /></span><p><strong>Stickers and rules</strong> ("Do not install anything") do not hold.</p></li>
+          <li data-tone="blue">
+            <span class="il-icon"><Icon name="window" /></span>
+            <p>
+              <strong>Windows' own kiosk mode</strong> is real, but it needs Windows Pro or higher and an XML file, and the multi-app mode is
+              built for IT departments. <a class="text-link src" href="https://learn.microsoft.com/en-us/windows/configuration/assigned-access/overview">Source: Microsoft Learn</a>
+            </p>
+          </li>
+          <li data-tone="violet">
+            <span class="il-icon"><Icon name="server" /></span>
+            <p>
+              <strong>Big device-management suites</strong> do a hundred things. They are priced per device with minimum orders, and they still
+              leave you to design the locked desktop yourself.
+            </p>
+          </li>
+          <li data-tone="sun">
+            <span class="il-icon"><Icon name="monitor" /></span>
+            <p>
+              <strong>Buying kiosk hardware</strong> costs real money. One kiosk software vendor puts legacy kiosk machines at about $1,000 to
+              $4,000 each. <a class="text-link src" href="https://www.42gears.com/products/surelock/">Source: 42Gears (vendor claim)</a>
+            </p>
+          </li>
+        </ul>
+        <p class="lead">A shop with six PCs does not have an IT department. It has a person who is "good with computers".</p>
+      </div>
+    </section>
+
+    <section class="ch container" aria-labelledby="c3">
+      <p class="num mono">03</p>
+      <div class="body">
+        <h2 id="c3" class="h2">One idea: only what you allow.</h2>
+        <p class="lead">Rulebox flips the PC. Nothing is available unless you approve it.</p>
+        <ol class="steps" role="list">
+          <li data-tone="blue"><span class="tile-icon"><Icon name="download" /></span><strong>Install.</strong> Run one installer on the PC. It checks the PC first.</li>
+          <li data-tone="sun"><span class="tile-icon"><Icon name="key" /></span><strong>Enrol.</strong> Type the code from your dashboard.</li>
+          <li data-tone="mint"><span class="tile-icon"><Icon name="settings" /></span><strong>Manage.</strong> Add people and apps. The PC follows.</li>
+        </ol>
+        <p class="muted">The PC restarts as a Rulebox workstation: your name, your logo, your apps.</p>
+      </div>
+    </section>
+
+    <section class="ch container" aria-labelledby="c4">
+      <p class="num mono">04</p>
+      <div class="body">
+        <h2 id="c4" class="h2">A day on a Rulebox PC.</h2>
+        <div class="day">
+          <ol class="timeline" role="list">
+            {
+              day.map(([t, text], i) => (
+                <li data-tone={tones[i]}>
+                  <span class="t mono">{t}</span>
+                  <p>{text}</p>
+                </li>
+              ))
+            }
+          </ol>
+          <div class="day-pic"><DesktopMock variant="desktop" /></div>
+        </div>
+        <p class="muted small">This scene is an illustration of the product, not a customer story.</p>
+      </div>
+    </section>
+
+    <section class="ch container" aria-labelledby="c5">
+      <p class="num mono">05</p>
+      <div class="body">
+        <h2 id="c5" class="h2">Meanwhile, at the dashboard.</h2>
+        <p class="lead">The administrator never touches the laptop again.</p>
+        <div class="grid grid-2 admin">
+          <div class="card" data-tone="sun"><span class="tile-icon"><Icon name="widget-add" /></span><h3 class="h3">Add an app</h3><p class="muted">Pick Zoom for the "Front desk" group. Every PC in the group installs it quietly and reports back.</p></div>
+          <div class="card" data-tone="blue"><span class="tile-icon"><Icon name="branch" /></span><h3 class="h3">Roll out with care</h3><p class="muted">Send a change to one test PC first, then a few, then everyone. If something breaks, go back one version with one click.</p></div>
+          <div class="card" data-tone="violet"><span class="tile-icon"><Icon name="lock" /></span><h3 class="h3">Lose a laptop</h3><p class="muted">Lock it from the dashboard. It shows "This laptop belongs to ..." and stays locked, even offline.</p></div>
+          <div class="card" data-tone="coral"><span class="tile-icon"><Icon name="bell" /></span><h3 class="h3">Tell everyone something</h3><p class="muted">Send a banner to every screen. "Maintenance at 5 pm. Please save your work."</p></div>
+        </div>
+        <p class="lead">Every change is versioned, signed and written to an audit log.</p>
+      </div>
+    </section>
+
+    <section class="ch container" aria-labelledby="c6">
+      <p class="num mono">06</p>
+      <div class="body">
+        <h2 id="c6" class="h2">Yours to keep, yours to undo.</h2>
+        <div class="prose">
+          <p>Rulebox is open source under the MIT licence. Read the code. Host the backend yourself, or let us host it.</p>
+          <p>And it is never a trap. Turn kiosk mode off in the dashboard and the PC is normal Windows again. Rulebox restores the settings it changed.</p>
+        </div>
+        <p class="closing">Your apps. Your rules. Only what you allow.</p>
+      </div>
+    </section>
+  </article>
+
+  <ThreeParts />
+  <CtaClose />
+</Base>
+
+<style>
+  .chapters {
+    display: grid;
+  }
+  .ch {
+    display: grid;
+    gap: var(--sp-4);
+    padding-block: var(--section-y-tight);
+    border-top: 1px solid var(--line);
+  }
+  .ch:first-child {
+    border-top: 0;
+  }
+  @media (min-width: 900px) {
+    .ch {
+      grid-template-columns: 160px 1fr;
+      gap: var(--sp-8);
+      align-items: first baseline;
+    }
+  }
+  .num {
+    font-size: var(--fs-body);
+    color: var(--muted);
+  }
+  .body {
+    display: grid;
+    gap: var(--sp-6);
+    max-width: 900px;
+  }
+  .body > .h2 {
+    max-width: 18ch;
+    margin-bottom: var(--sp-2);
+  }
+  .src {
+    margin-left: var(--sp-1);
+    font-size: var(--fs-xs);
+    white-space: nowrap;
+  }
+  .steps {
+    display: grid;
+    gap: var(--grid-gap);
+  }
+  @media (min-width: 720px) {
+    .steps {
+      grid-template-columns: repeat(3, 1fr);
+    }
+  }
+  .steps li {
+    display: grid;
+    align-content: start;
+    gap: var(--card-gap);
+    padding: var(--card-pad);
+    border-radius: var(--radius-lg);
+    background: var(--tone-soft);
+    color: var(--ink-2);
+  }
+  .steps strong {
+    color: var(--ink);
+  }
+  .steps .tile-icon,
+  .admin .tile-icon {
+    width: var(--icon-col);
+    height: var(--icon-col);
+    border-radius: 12px;
+    margin-bottom: var(--sp-1);
+  }
+  .steps .tile-icon {
+    background: var(--surface);
+  }
+  .day {
+    display: grid;
+    gap: var(--sp-7);
+    align-items: start;
+  }
+  @media (min-width: 1000px) {
+    .day {
+      grid-template-columns: 1fr 1fr;
+      gap: var(--sp-9);
+    }
+    .day-pic {
+      position: sticky;
+      top: 110px;
+    }
+  }
+  .timeline {
+    display: grid;
+    border-left: 1px solid var(--line-strong);
+  }
+  .timeline li {
+    position: relative;
+    display: grid;
+    gap: var(--sp-1);
+    padding: 0 0 var(--sp-6) var(--sp-6);
+  }
+  .timeline li:last-child {
+    padding-bottom: 0;
+  }
+  .timeline li::before {
+    content: "";
+    position: absolute;
+    left: calc(var(--sp-3) / -2 - 0.5px);
+    top: calc((var(--fs-body) * var(--lh-body) - var(--sp-3)) / 2);
+    width: var(--sp-3);
+    height: var(--sp-3);
+    border-radius: 4px;
+    background: var(--tone);
+  }
+  .t {
+    font-weight: 600;
+    color: var(--tone-ink);
+  }
+  .timeline p {
+    color: var(--ink-2);
+  }
+  .admin .card {
+    display: grid;
+    align-content: start;
+    gap: var(--card-gap);
+  }
+  .small {
+    font-size: var(--fs-xs);
+  }
+  .closing {
+    font-family: var(--font-display);
+    font-size: var(--fs-h2);
+    font-weight: var(--fw-heading);
+    line-height: var(--lh-h2);
+    letter-spacing: var(--ls-h2);
+    text-wrap: balance;
+    color: var(--primary-text);
+  }
+</style>

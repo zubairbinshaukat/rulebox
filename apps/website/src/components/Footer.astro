@@ -1,0 +1,152 @@
+---
+/* Footer after the Ordina reference: one big rounded panel, a short
+   promise with the notify field, link columns, and a giant wordmark that
+   the panel's bottom edge cuts. Side padding kept small (owner pick). */
+import Logo from "./Logo.astro";
+import NotifyForm from "./NotifyForm.astro";
+import { FOOTER_COLUMNS } from "../data/nav";
+import { TAGLINE } from "../config";
+const year = new Date().getFullYear();
+---
+
+<footer class="site-footer">
+  <div class="panel section-dark">
+    <div class="top">
+      <div class="intro">
+        <a href="/" class="brand" aria-label="Rulebox home"><Logo size={40} /></a>
+        <p class="promise">{TAGLINE}<br /><span>The staff PC that only does its job.</span></p>
+        <NotifyForm />
+      </div>
+      <nav class="cols" aria-label="Footer">
+        {
+          FOOTER_COLUMNS.map((c) => (
+            <div class="col">
+              <p class="col-title">{c.title}</p>
+              <ul role="list">
+                {c.links.map((l) => (
+                  <li>
+                    <a href={l.href}>{l.label}</a>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          ))
+        }
+      </nav>
+    </div>
+
+    <div class="bar">
+      <p>&copy; {year} Rulebox contributors. Open source under the MIT licence.</p>
+      <p class="bar-mid">Icons: Solar by 480 Design, CC BY 4.0.</p>
+    </div>
+
+    <p class="giant-mark" aria-hidden="true">Rulebox</p>
+  </div>
+</footer>
+
+<style>
+  .site-footer {
+    padding: 0 clamp(var(--sp-2), 1.2vw, var(--sp-4)) clamp(var(--sp-2), 1.2vw, var(--sp-4));
+  }
+  .panel {
+    position: relative;
+    overflow: hidden;
+    border-radius: var(--radius-xl);
+    background: var(--bg-stone);
+    border: 1px solid var(--line);
+    padding: clamp(var(--sp-7), 4vw, var(--sp-10)) clamp(var(--sp-5), 3vw, var(--sp-9)) 0;
+  }
+  .top {
+    display: grid;
+    gap: var(--sp-9);
+  }
+  @media (min-width: 1020px) {
+    .top {
+      grid-template-columns: minmax(320px, 1fr) 2fr;
+      gap: var(--sp-10);
+    }
+  }
+  .brand {
+    display: inline-block;
+    color: var(--ink);
+  }
+  .promise {
+    margin: var(--sp-6) 0 var(--sp-7);
+    font-family: var(--font-display);
+    font-size: clamp(1.75rem, 1.35rem + 1.3vw, 2.5rem);
+    font-weight: var(--fw-heading);
+    letter-spacing: var(--ls-h2);
+    line-height: 1.08;
+    text-wrap: balance;
+  }
+  .promise span {
+    color: var(--muted);
+  }
+  .cols {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: var(--sp-8) var(--sp-5);
+    align-content: start;
+  }
+  @media (min-width: 720px) {
+    .cols {
+      grid-template-columns: repeat(5, 1fr);
+    }
+  }
+  .col-title {
+    display: flex;
+    align-items: center;
+    height: 20px;
+    margin-bottom: var(--sp-4);
+    font-family: var(--font-mono);
+    font-size: var(--fs-label);
+    letter-spacing: var(--ls-label);
+    text-transform: uppercase;
+    color: var(--muted);
+  }
+  .col ul {
+    display: grid;
+    gap: var(--sp-3);
+  }
+  .col a {
+    display: block;
+    color: var(--ink-2);
+    text-decoration: none;
+    font-size: var(--fs-small);
+    line-height: 1.35;
+  }
+  .col a:hover {
+    color: var(--ink);
+    text-decoration: underline;
+  }
+  .bar {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--sp-3) var(--sp-6);
+    margin-top: var(--sp-10);
+    padding-top: var(--sp-5);
+    border-top: 1px solid var(--line);
+    font-size: var(--fs-xs);
+    color: var(--muted);
+  }
+  .bar-mid {
+    margin-right: auto;
+  }
+  .giant-mark {
+    margin: var(--sp-3) 0 0;
+    font-size: clamp(5rem, 23vw, 22rem);
+    font-weight: 640;
+    letter-spacing: -0.07em;
+    line-height: 0.74;
+    text-align: center;
+    color: var(--wordmark);
+    opacity: 0.92;
+    transform: translateY(0.12em);
+    user-select: none;
+    background: linear-gradient(180deg, var(--wordmark) 30%, transparent 100%);
+    -webkit-background-clip: text;
+    background-clip: text;
+    -webkit-text-fill-color: transparent;
+  }
+</style>

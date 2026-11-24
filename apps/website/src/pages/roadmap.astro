@@ -1,0 +1,162 @@
+---
+/* Roadmap from the truth table (Story §8.1). One line changes per claim. */
+import Base from "../layouts/Base.astro";
+import PageHero from "../components/PageHero.astro";
+import CtaClose from "../components/CtaClose.astro";
+
+const cols = [
+  {
+    title: "In v1",
+    kind: "v1",
+    tone: "mint",
+    note: "Built or being finished in the current phases. Each claim is re-checked against the release.",
+    items: [
+      "Custom desktop, taskbar, Start menu, real windows",
+      "Per-person sign-in on any enrolled PC",
+      "Offline sign-in after a first online sign-in",
+      "Separate web logins per person; session cleanup at log-out",
+      "App types: winget, web app, MSI/EXE, portable EXE",
+      "Web apps limited to listed domains",
+      "Built-in viewers: PDF, images, audio, video, text, Office preview",
+      "Executables and scripts never open",
+      "Per-person folder and soft storage quota",
+      "Desired state; offline PCs catch up",
+      "Layered lockdown, Full or Reduced by Windows edition",
+      "Signed policies and an audit log",
+      "Dashboard sign-in: password and PIN, optional passkey",
+      "Hidden admin exit with PIN",
+      "Kiosk mode on and off from the dashboard; settings restored",
+      "Lite mode on 4 GB PCs",
+      "Web app permissions (8)",
+      "Wi-Fi, printer and driver profiles",
+      "Rollout rings and rollback",
+      "Lost-device lock and broadcast messages",
+      "Branding: name, logo, colours, wallpaper",
+      "Roles: Owner, Admin, Viewer",
+    ],
+    fresh: ["Web apps in a locked-down Chrome or Edge window", "One MSI installer with a compatibility check", "Per-app update modes: pinned, vendor, Rulebox-managed"],
+  },
+  {
+    title: "Next, v1.x",
+    kind: "planned",
+    tone: "blue",
+    note: "Planned after v1.",
+    items: ["System tray host", "Multi-monitor", "Windows Update controls", "A code-signed installer (SignPath application pending)"],
+  },
+  {
+    title: "Later, v2",
+    kind: "planned",
+    tone: "violet",
+    note: "Planned, with privacy controls where they touch people.",
+    items: ["Android", "Remote screen view", "Usage tracking", "Shift-hour sign-in limits", "A one-command self-host setup", "Plugin app types"],
+  },
+  {
+    title: "Not planned",
+    kind: "not",
+    tone: "coral",
+    note: "Said plainly, so nobody waits for them.",
+    items: ["Linux", "iOS, unless there is clear demand"],
+  },
+];
+---
+
+<Base
+  title="Roadmap: What Is Built, What Is Next | Rulebox"
+  description="What Rulebox does today, what is coming in v1.x, and plans for v2 including Android."
+  path="/roadmap"
+  og="roadmap"
+  crumbs={[{ name: "Roadmap", path: "/roadmap" }]}
+>
+  <PageHero label="Roadmap" title="What is built. What is next." sub="Rulebox is in pilot. This page changes when the product does, never before." tone="violet" />
+
+  <section class="section-tight">
+    <div class="container board">
+      {
+        cols.map((c) => (
+          <section class="band" data-tone={c.tone} aria-labelledby={`rm-${c.kind}-${c.title.length}`}>
+            <header>
+              <span class="bar" aria-hidden="true" />
+              <h2 class="h2" id={`rm-${c.kind}-${c.title.length}`}>{c.title}</h2>
+              <p class="muted">{c.note}</p>
+            </header>
+            <ul role="list">
+              {c.fresh?.map((i) => (
+                <li>
+                  <span>{i}</span>
+                  <span class="status" data-kind="new">New</span>
+                </li>
+              ))}
+              {c.items.map((i) => (
+                <li>
+                  <span>{i}</span>
+                </li>
+              ))}
+            </ul>
+          </section>
+        ))
+      }
+    </div>
+  </section>
+  <CtaClose headline="Want something on this list?" sub="Tell us what your PCs need. Pilot requests shape what comes next." />
+</Base>
+
+<style>
+  .band {
+    display: grid;
+    gap: var(--sp-6);
+    padding-block: var(--sp-10);
+    border-top: 1px solid var(--line);
+  }
+  .band:first-child {
+    padding-top: 0;
+    border-top: 0;
+  }
+  @media (min-width: 900px) {
+    .band {
+      grid-template-columns: repeat(12, minmax(0, 1fr));
+      column-gap: var(--col-gap);
+    }
+    .band > header {
+      grid-column: 1 / span 4;
+      align-self: start;
+      position: sticky;
+      top: 100px;
+    }
+    .band > ul {
+      grid-column: 6 / span 7;
+    }
+  }
+  header {
+    display: grid;
+    gap: var(--sp-3);
+    justify-items: start;
+  }
+  .bar {
+    width: var(--sp-8);
+    height: var(--sp-1);
+    border-radius: var(--radius-pill);
+    background: var(--tone);
+  }
+  header p {
+    max-width: 32ch;
+    font-size: var(--fs-small);
+  }
+  ul {
+    display: grid;
+    background: linear-gradient(90deg, var(--line-strong), var(--line) 70%, transparent) top / 100% 1px no-repeat;
+  }
+  li > .status {
+    flex: none;
+  }
+  li {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--sp-4);
+    min-height: var(--sp-10);
+    padding-block: var(--sp-3);
+    background: linear-gradient(90deg, var(--line-strong), var(--line) 70%, transparent) bottom / 100% 1px no-repeat;
+    color: var(--ink-2);
+    line-height: var(--lh-tight);
+  }
+</style>

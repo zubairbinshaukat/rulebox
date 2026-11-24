@@ -1,11 +1,18 @@
-import { useLayoutEffect, useRef, type AnimationEvent, type CSSProperties } from "react";
-import { LOGO_BOX, LOGO_CELLS, LOGO_GRID, LOGO_VIEWBOX } from "../brand/geometry";
+import { useId, useLayoutEffect, useRef, type AnimationEvent, type CSSProperties } from "react";
+import { CUBE_MOTION } from "../brand/cube-motion";
 
 /**
  * Animated logo (PRD 25.5). All motion is CSS in logo-motion.css: no JS runs
- * per frame, and the tiles animate only transform and opacity so they stay on
- * the compositor while the app is still loading. Use <LogoMark> wherever the
- * logo does not move.
+ * per frame, and every layer animates only transform and opacity so it stays
+ * on the compositor while the app is still loading. Use <LogoMark> wherever
+ * the logo does not move.
+ *
+ * Layers (made by `pnpm gen:brand` from the master render):
+ *   body   the cube with the keyhole dark
+ *   light  the keyhole light alone; light over body is the render
+ *   bloom  a warm radial glow over the keyhole (CSS gradient, no blur filter)
+ *   sheen  a light band masked to the cube's highlights
+ *   door   the keyhole as a flat shape of warm light; open/lock zoom through it
  */
 
 export type LogoAnimation = "none" | "splash" | "loading" | "open" | "lock";
@@ -18,7 +25,7 @@ export interface LogoMotionProps {
   wordmark?: boolean;
   /** Line under the wordmark; `null` hides it. */
   tagline?: string | null;
-  /** "open" only: the green flood now covers the screen; swap in the desktop. */
+  /** "open" only: the keyhole light now covers the screen; swap in the desktop. */
   onCovered?: () => void;
   /** The animation finished ("loading" never does). */
   onDone?: () => void;
@@ -26,57 +33,28 @@ export interface LogoMotionProps {
 }
 
 const WORD = [..."rulebox"];
-const pct = (units: number) => `${(units / LOGO_VIEWBOX) * 100}%`;
+/** The keyhole's round top, in units of the 100-unit mark box (= % of the mark). */
+const K = CUBE_MOTION.circle;
 
-/** Small seeded PRNG so the "random" staggers are the same on every run. */
-function prng(seed: number) {
-  return () => {
-    seed = (seed + 0x6d2b79f5) | 0;
-    let t = Math.imul(seed ^ (seed >>> 15), 1 | seed);
-    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
-    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
-  };
-}
+/** Layer geometry, in % of the mark (set once; the CSS reads the custom properties). */
+const MARK_VARS = {
+  "--rb-lm-kx": `${K.cx}%`,
+  "--rb-lm-ky": `${K.cy}%`,
+  "--rb-lm-gx": `${CUBE_MOTION.glow.x}%`,
+  "--rb-lm-gy": `${CUBE_MOTION.glow.y}%`,
+} as CSSProperties;
 
-const TILES = (() => {
-  const rand = prng(7);
-  const r2 = (n: number) => Math.round(n * 100) / 100;
-  const maxDist = Math.hypot(4, 3);
-  const offCount = LOGO_CELLS.filter((c) => !c.on).length;
-  const legCount = LOGO_CELLS.filter((c) => c.leg).length;
-  let off = 0;
-  let leg = 0;
-  let row = -1;
-  let inRow = 0;
-  let legInRow = 0;
+const LIGHT_BOX: CSSProperties = {
+  left: `${CUBE_MOTION.keyhole.left}%`,
+  top: `${CUBE_MOTION.keyhole.top}%`,
+  width: `${CUBE_MOTION.keyhole.width}%`,
+  height: `${CUBE_MOTION.keyhole.height}%`,
+};
 
-  return LOGO_CELLS.map((c) => {
-    if (c.row !== row) {
-      row = c.row;
-      inRow = 0;
-      legInRow = 0;
-    }
-    const style = {
-      left: pct(LOGO_GRID.x0 + c.col * LOGO_GRID.pitch),
-      top: pct(LOGO_GRID.y0 + c.row * LOGO_GRID.pitch),
-      "--r": c.row,
-      // Position in the row's stagger (R tiles and leg tiles stagger separately).
-      "--k": c.leg ? legInRow++ : c.on ? inRow++ : 0,
-      // Distance from the grid centre, 0..1.
-      "--d": r2(Math.hypot(c.row - 4, c.col - 3) / maxDist),
-      // Random order, 0..1.
-      "--q": r2(rand()),
-      "--dx": Math.round(rand() * 240 - 120),
-      "--dy": Math.round(rand() * 240 - 120),
-      "--rot": Math.round(rand() * 360 - 180),
-      // Blocked tiles leave last-to-first; leg tiles run first-to-last.
-      "--b": c.on ? 0 : offCount - 1 - off++,
-      "--l": c.leg ? leg++ : 0,
-    } as CSSProperties;
-    const kind = c.leg ? (leg === legCount ? "is-on is-leg is-end" : "is-on is-leg") : c.on ? "is-on" : "is-off";
-    return { key: `${c.row}-${c.col}`, className: `rb-lm-cell ${kind}`, style };
-  });
-})();
+const SHEEN_MASK: CSSProperties = {
+  maskImage: `url(${CUBE_MOTION.sheen})`,
+  WebkitMaskImage: `url(${CUBE_MOTION.sheen})`,
+};
 
 export function LogoMotion({
   animation = "none",
@@ -88,41 +66,44 @@ export function LogoMotion({
   className,
 }: LogoMotionProps) {
   const root = useRef<HTMLDivElement>(null);
+  const gradient = `rb-lm-${useId().replace(/[^a-zA-Z0-9_-]/g, "")}`;
 
-  // The last leg tile grows into the flood; size it to reach every corner of the window.
+  // Open and lock zoom through the keyhole: size the zoom so its round top
+  // reaches every corner of the window.
   useLayoutEffect(() => {
     const el = root.current;
     const mark = el?.firstElementChild;
-    if (animation !== "open" || !el || !mark) return;
+    if ((animation !== "open" && animation !== "lock") || !el || !mark) return;
     const box = mark.getBoundingClientRect();
-    const cx = box.left + box.width / 2;
-    const cy = box.top + box.height / 2;
+    const cx = box.left + (box.width * K.cx) / 100;
+    const cy = box.top + (box.height * K.cy) / 100;
     const far = Math.hypot(Math.max(cx, window.innerWidth - cx), Math.max(cy, window.innerHeight - cy));
-    const tile = (box.width * LOGO_GRID.cell) / LOGO_VIEWBOX;
-    // 1.7: the tile's rounded corners reach only ~0.59 of its width along the diagonal.
-    el.style.setProperty("--rb-lm-flood", String(Math.ceil((far * 1.7) / tile)));
+    const radius = (box.width * K.r) / 100;
+    el.style.setProperty("--rb-lm-zoom", String(Math.ceil((far * 1.08) / radius)));
   }, [animation, size]);
 
+  const quiet = !wordmark || !tagline;
   function onAnimationEnd(e: AnimationEvent<HTMLDivElement>) {
     switch (e.animationName) {
-      case "rb-lm-flood-grow":
+      case "rb-lm-zoom-in":
         onCovered?.();
         break;
       case "rb-lm-fade-out":
         onCovered?.();
         onDone?.();
         break;
-      case "rb-lm-box-kick":
-        if (!wordmark) onDone?.();
+      case "rb-lm-sweep":
+        if (quiet && animation !== "loading") onDone?.();
         break;
       case "rb-lm-tag-in":
-      case "rb-lm-flood-out":
+      case "rb-lm-open-out":
       case "rb-lm-fade-in":
         onDone?.();
         break;
     }
   }
 
+  const srcSizes = `${size}px`;
   return (
     <div
       ref={root}
@@ -133,23 +114,45 @@ export function LogoMotion({
       aria-label="Rulebox"
       onAnimationEnd={onAnimationEnd}
     >
-      <div className="rb-lm-mark" aria-hidden="true">
-        <svg className="rb-lm-box" viewBox={`0 0 ${LOGO_VIEWBOX} ${LOGO_VIEWBOX}`}>
-          <rect
-            x={LOGO_BOX.x}
-            y={LOGO_BOX.y}
-            width={LOGO_BOX.size}
-            height={LOGO_BOX.size}
-            rx={LOGO_BOX.rx}
-            strokeWidth={LOGO_BOX.stroke}
-            pathLength={100}
-          />
-        </svg>
-        {TILES.map((t) => (
-          <i key={t.key} className={t.className} style={t.style} />
-        ))}
-        <div className="rb-lm-clip">
-          <div className="rb-lm-scan" />
+      <div className="rb-lm-mark" aria-hidden="true" style={MARK_VARS}>
+        <i className="rb-lm-shadow" />
+        <div className="rb-lm-zoom">
+          <div className="rb-lm-cube">
+            <img
+              className="rb-lm-body"
+              src={CUBE_MOTION.body.src}
+              srcSet={CUBE_MOTION.body.srcSet}
+              sizes={srcSizes}
+              alt=""
+              decoding="sync"
+              draggable={false}
+            />
+            {/* Width descriptors are the body's, so both layers pick the same resolution. */}
+            <img
+              className="rb-lm-light"
+              src={CUBE_MOTION.light.src}
+              srcSet={CUBE_MOTION.light.srcSet}
+              sizes={srcSizes}
+              style={LIGHT_BOX}
+              alt=""
+              decoding="sync"
+              draggable={false}
+            />
+            <i className="rb-lm-bloom" />
+            <div className="rb-lm-sheen" style={SHEEN_MASK}>
+              <i />
+            </div>
+          </div>
+          <svg className="rb-lm-door" viewBox="0 0 100 100">
+            <defs>
+              <radialGradient id={gradient} gradientUnits="userSpaceOnUse" cx={K.cx} cy={K.cy} r={K.r * 3.4}>
+                <stop offset="0" style={{ stopColor: "var(--rb-lm-door-0)" }} />
+                <stop offset="0.3" style={{ stopColor: "var(--rb-lm-door-1)" }} />
+                <stop offset="1" style={{ stopColor: "var(--rb-lm-door-2)" }} />
+              </radialGradient>
+            </defs>
+            <path d={CUBE_MOTION.door} fill={`url(#${gradient})`} />
+          </svg>
         </div>
       </div>
       {wordmark && (

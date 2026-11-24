@@ -1,0 +1,44 @@
+---
+import { getCollection } from "astro:content";
+import Docs from "../../layouts/Docs.astro";
+import Icon from "../../components/Icon.astro";
+import type { IconName } from "../../components/Icon.astro";
+
+const all = await getCollection("docs");
+const cards: { section: string; icon: IconName; tone: string; text: string }[] = [
+  { section: "Start here", icon: "signpost", tone: "blue", text: "What Rulebox is, and what a PC needs." },
+  { section: "Install and enrol", icon: "download", tone: "sun", text: "Download, verify, enrol, and undo." },
+  { section: "Security", icon: "shield", tone: "coral", text: "The design, the layers and the limits." },
+  { section: "Self-hosting", icon: "server", tone: "violet", text: "Run the backend yourself." },
+  { section: "Contributing", icon: "code", tone: "mint", text: "Build, run and test each part." },
+];
+---
+
+<Docs title="Rulebox documentation" description="Set up Rulebox, enrol PCs, understand the security design, host it yourself and contribute to the project." path="/docs">
+  <p class="lead">Short pages, plain words. Start with what Rulebox is, then install it on one test PC.</p>
+  <ul class="icon-list sections" role="list">
+    {
+      cards.map((c) => {
+        const first = all.filter((d) => d.data.section === c.section).sort((a, b) => a.data.order - b.data.order)[0];
+        return (
+          <li data-tone={c.tone}>
+            <span class="il-icon">
+              <Icon name={c.icon} />
+            </span>
+            <span class="il-text">
+              <a class="il-a" href={first ? `/docs/${first.id}` : "/docs"}>{c.section}</a>
+              <span class="muted">{c.text}</span>
+            </span>
+          </li>
+        );
+      })
+    }
+  </ul>
+</Docs>
+
+<style>
+  .sections {
+    margin-top: var(--sp-8);
+    padding-left: 0;
+  }
+</style>

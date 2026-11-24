@@ -1,0 +1,150 @@
+---
+/*
+ * The Staff App logo animation as a page preloader (owner, 2026-11-25):
+ * splash (the cube drops in, the keyhole lights, the wordmark comes up as it
+ * lands), then "open" flies through the keyhole into the page.
+ *
+ * Home page only (index.astro puts it in Base.astro's "preload" slot), and
+ * only for a visitor who arrived directly: typed URL, bookmark or a link
+ * from another site. Never on a reload, back/forward or a click inside the
+ * site, at most once per tab, never for bots, tools (Lighthouse, PageSpeed),
+ * reduced motion or Save-Data. ?preloader=0 skips it.
+ *
+ * SEO / Lighthouse: the server HTML has NO overlay. The inline script below
+ * (hashed into the CSP by headers.mjs) checks the rules and only then builds
+ * the overlay, before first paint; the cube images load only then.
+ * check-dist.mjs fails a build with overlay markup in the HTML, or with this
+ * script on any page but the home page.
+ *
+ * Timing: website-only overrides scoped under .rb-preloader (about 2.4 s
+ * instead of 4). packages/ui logo-motion.css is untouched: the Staff App's
+ * timings are tied to its own callbacks.
+ */
+import "../../../../packages/ui/src/logo-motion.css";
+import { CUBE_MOTION } from "../../../../packages/ui/src/brand/cube-motion";
+
+const K = CUBE_MOTION.circle;
+const size = 150;
+const word = [..."rulebox"];
+const markVars = `--rb-lm-kx:${K.cx}%;--rb-lm-ky:${K.cy}%;--rb-lm-gx:${CUBE_MOTION.glow.x}%;--rb-lm-gy:${CUBE_MOTION.glow.y}%`;
+const lightBox = `left:${CUBE_MOTION.keyhole.left}%;top:${CUBE_MOTION.keyhole.top}%;width:${CUBE_MOTION.keyhole.width}%;height:${CUBE_MOTION.keyhole.height}%`;
+const sheenMask = `mask-image:url(${CUBE_MOTION.sheen});-webkit-mask-image:url(${CUBE_MOTION.sheen})`;
+const img = (cls: string, l: { src: string; srcSet: string }, style = "") =>
+  `<img class="${cls}" src="${l.src}" srcset="${l.srcSet}" sizes="${size}px"${style ? ` style="${style}"` : ""} alt="" draggable="false">`;
+/* Same markup as packages/ui LogoMotion.tsx. */
+const overlay =
+  `<div class="rb-lm" data-anim="splash" style="--rb-lm-size:${size}px"><div class="rb-lm-mark" style="${markVars}"><i class="rb-lm-shadow"></i><div class="rb-lm-zoom"><div class="rb-lm-cube">` +
+  img("rb-lm-body", CUBE_MOTION.body) +
+  img("rb-lm-light", CUBE_MOTION.light, lightBox) +
+  `<i class="rb-lm-bloom"></i><div class="rb-lm-sheen" style="${sheenMask}"><i></i></div></div>` +
+  `<svg class="rb-lm-door" viewBox="0 0 100 100"><defs><radialGradient id="rb-pre-door" gradientUnits="userSpaceOnUse" cx="${K.cx}" cy="${K.cy}" r="${K.r * 3.4}"><stop offset="0" style="stop-color:var(--rb-lm-door-0)"></stop><stop offset="0.3" style="stop-color:var(--rb-lm-door-1)"></stop><stop offset="1" style="stop-color:var(--rb-lm-door-2)"></stop></radialGradient></defs><path d="${CUBE_MOTION.door}" fill="url(#rb-pre-door)"></path></svg></div></div>` +
+  `<div class="rb-lm-word">${word.map((ch, n) => `<span class="rb-lm-letter" style="--n:${n}">${ch}</span>`).join("")}<span class="rb-lm-dot" style="--n:${word.length}"></span></div>` +
+  `<div class="rb-lm-tag" style="--n:${word.length + 1}">Only what you allow</div></div>`;
+
+/* Runs at the top of <body>, before anything paints. Everything is in try:
+   any surprise means no overlay, never a covered page. */
+const script = `(function(){try{
+var d=document,w=window,n=navigator,h=d.documentElement,k="rb-preloaded";
+if(/[?&]preloader=0\\b/.test(location.search)||n.webdriver)return;
+if(/bot|crawl|spider|slurp|lighthouse|pagespeed|headlesschrome|chrome-lighthouse|google|bing|yandex|duckduck|baidu|facebookexternalhit|embedly|preview/i.test(n.userAgent))return;
+if(matchMedia("(prefers-reduced-motion: reduce)").matches||(n.connection&&n.connection.saveData))return;
+var e=performance.getEntriesByType("navigation")[0];if(e&&e.type!=="navigate")return;
+if(d.referrer){try{if(new URL(d.referrer).origin===location.origin)return}catch(x){}}
+if(sessionStorage.getItem(k))return;sessionStorage.setItem(k,"1");
+var el=d.createElement("div");el.className="rb-preloader";el.setAttribute("aria-hidden","true");el.innerHTML=${JSON.stringify(overlay)};
+d.body.prepend(el);h.classList.add("rb-preloading");
+var lm=el.firstChild,g=setTimeout(done,4500);
+function done(){clearTimeout(g);el.remove();h.classList.remove("rb-preloading")}
+lm.addEventListener("animationend",function(a){var m=a.animationName;
+if(m==="rb-lm-tag-in"&&lm.dataset.anim==="splash"){setTimeout(function(){var b=lm.firstChild.getBoundingClientRect(),cx=b.left+b.width*${K.cx}/100,cy=b.top+b.height*${K.cy}/100,far=Math.hypot(Math.max(cx,innerWidth-cx),Math.max(cy,innerHeight-cy));lm.style.setProperty("--rb-lm-zoom",String(Math.ceil(far*1.08/(b.width*${K.r}/100))));lm.dataset.anim="open"},120)}
+else if(m==="rb-lm-zoom-in")el.classList.add("is-open");
+else if(m==="rb-lm-open-out"||m==="rb-lm-fade-out")done()})
+}catch(x){}})();`;
+---
+
+<script is:inline set:html={script} />
+
+<style is:global>
+  .rb-preloader {
+    --rb-ink: var(--ink);
+    --rb-muted: var(--ink-2);
+    --rb-brand: var(--brand);
+    position: fixed;
+    inset: 0;
+    z-index: 1000;
+    display: grid;
+    place-items: center;
+    background: var(--bg);
+    overflow: hidden;
+  }
+  .rb-preloader.is-open {
+    background: transparent;
+  }
+  html.rb-preloading {
+    overflow: hidden;
+  }
+
+  /* ---------- Website timing (about 2.4 s; the app's stays as it is) ----------
+     Splash: the cube lands at 0.5 s and the wordmark rises with it; the tag
+     is in by about 1.05 s, the keyhole is lit by 1.2 s. Open: the wordmark
+     lifts away first (gone by 0.26 s) and only then does the cube zoom, so
+     the letters never sit on the growing cube. */
+  .rb-preloader .rb-lm[data-anim="splash"] {
+    --at-ignite: 0.55s;
+    --at-sweep: 0.8s;
+    --at-word: 0.4s;
+  }
+  .rb-preloader .rb-lm[data-anim="splash"] .rb-lm-cube {
+    animation:
+      rb-lm-drop 0.5s var(--rb-lm-fall) backwards,
+      rb-lm-squash 0.45s var(--rb-lm-sine) 0.48s;
+  }
+  .rb-preloader .rb-lm[data-anim="splash"] .rb-lm-shadow {
+    animation:
+      rb-lm-shadow-in 0.5s var(--rb-lm-fall) backwards,
+      rb-lm-shadow-squash 0.45s var(--rb-lm-sine) 0.48s;
+  }
+  .rb-preloader .rb-lm[data-anim="splash"] .rb-lm-light {
+    animation: rb-lm-ignite 0.6s linear var(--at-ignite) backwards;
+  }
+  .rb-preloader .rb-lm[data-anim="splash"] .rb-lm-bloom {
+    animation: rb-lm-bloom 0.9s var(--rb-lm-out) calc(var(--at-ignite) + 0.08s);
+  }
+  .rb-preloader .rb-lm[data-anim="splash"] .rb-lm-sheen > i {
+    animation: rb-lm-sweep 0.6s var(--rb-lm-in-out) var(--at-sweep);
+  }
+  .rb-preloader .rb-lm[data-anim="splash"] .rb-lm-letter {
+    animation: rb-lm-rise 0.32s var(--rb-lm-out) calc(var(--at-word) + var(--n) * 0.03s) backwards;
+  }
+  .rb-preloader .rb-lm[data-anim="splash"] .rb-lm-dot {
+    animation: rb-lm-dot-pop 0.4s var(--rb-lm-back-out-strong) calc(var(--at-word) + 0.24s) backwards;
+  }
+  .rb-preloader .rb-lm[data-anim="splash"] .rb-lm-tag {
+    animation: rb-lm-tag-in 0.32s var(--rb-lm-out) calc(var(--at-word) + 0.3s) backwards;
+  }
+  .rb-preloader .rb-lm[data-anim="open"] :is(.rb-lm-letter, .rb-lm-dot, .rb-lm-tag) {
+    animation: rb-lm-lift 0.18s var(--rb-lm-in) calc(var(--n) * 0.01s) forwards;
+  }
+  .rb-preloader .rb-lm[data-anim="open"] .rb-lm-shadow {
+    animation: rb-lm-gone 0.16s var(--rb-lm-in) 0.08s forwards;
+  }
+  .rb-preloader .rb-lm[data-anim="open"] .rb-lm-cube {
+    animation: rb-lm-dip 0.3s var(--rb-lm-in-out);
+  }
+  .rb-preloader .rb-lm[data-anim="open"] .rb-lm-bloom {
+    animation:
+      rb-lm-flare 0.26s var(--rb-lm-out) forwards,
+      rb-lm-gone 0.2s var(--rb-lm-in) 0.34s forwards;
+  }
+  .rb-preloader .rb-lm[data-anim="open"] .rb-lm-light {
+    animation: rb-lm-gone 0.18s linear 0.46s forwards;
+  }
+  .rb-preloader .rb-lm[data-anim="open"] .rb-lm-door {
+    animation: rb-lm-door-on 0.24s var(--rb-lm-out) 0.24s forwards;
+  }
+  .rb-preloader .rb-lm[data-anim="open"] .rb-lm-zoom {
+    animation:
+      rb-lm-zoom-in 0.62s var(--rb-lm-expo-in) 0.28s forwards,
+      rb-lm-open-out 0.3s ease-out 0.9s forwards;
+  }
+</style>

@@ -1,0 +1,106 @@
+---
+/*
+ * Beat 2, "the usual fixes do not fit", as one long sentence with small
+ * picture pills set into the line (Tandem reference). Words go from faint
+ * to full ink as the paragraph scrolls through the screen (GSAP scrub in
+ * scripts/home-motion.ts; reduced motion and no-JS show the finished paragraph).
+ */
+import Icon from "../Icon.astro";
+import type { IconName } from "../Icon.astro";
+
+type Part = { t: string } | { pill: IconName; tone: string; label: string };
+const parts: Part[] = [
+  { t: "Stickers that say “do not install anything” do not hold." },
+  { pill: "forbidden", tone: "coral", label: "Rules on paper" },
+  { t: "Windows’ own kiosk mode is real, but it needs Pro and an XML file." },
+  { pill: "code", tone: "blue", label: "XML" },
+  { t: "Big device suites do a hundred things, priced per device with minimum orders." },
+  { pill: "layers", tone: "violet", label: "Suites" },
+  { t: "A shop with six PCs does not have an IT department. It has a person who is “good with computers”." },
+];
+let n = 0;
+const tokens = parts.map((p) =>
+  "t" in p ? { words: p.t.split(" ").map((w) => ({ w, i: n++ })) } : { pill: p, i: n++ },
+);
+---
+
+<section class="manifesto section" aria-labelledby="fixes-title">
+  <div class="container">
+    <p class="label" id="fixes-title" style="--dot: var(--c-coral)">The usual fixes do not fit</p>
+    <p class="text" data-ink>
+      {
+        tokens.map((tok) =>
+          "words" in tok ? (
+            tok.words!.map((x) => <span class="tw" style={`--i:${x.i}`}>{x.w} </span>)
+          ) : (
+            <>
+              <span class="pill tw" style={`--i:${tok.i}`} data-tone={tok.pill!.tone}>
+                <Icon name={tok.pill!.pill} />
+                <span>{tok.pill!.label}</span>
+              </span>{" "}
+            </>
+          ),
+        )
+      }
+    </p>
+    <p class="answer reveal">
+      <span>So Rulebox starts from the other end: <strong>nothing runs unless you allow it.</strong></span>
+      <a class="link-arrow" href="/product">How it works <Icon name="arrow-right" /></a>
+    </p>
+  </div>
+</section>
+
+<style>
+  .text {
+    margin-top: 28px;
+    font-size: clamp(1.75rem, 1rem + 2.6vw, 3.4rem);
+    font-weight: 540;
+    letter-spacing: -0.035em;
+    line-height: 1.18;
+    max-width: 24em;
+    text-wrap: pretty;
+  }
+  .tw {
+    display: inline;
+  }
+  .pill {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.25em;
+    padding: 0.06em 0.42em 0.06em 0.18em;
+    border-radius: 99px;
+    /* Optical centring on the text line. "middle" puts the pill's centre at
+       baseline + half the x-height; mixed-case text reads centred a little
+       higher (between x-height and cap-height), so it is lifted by a small
+       offset in the pill's own em. One plain space sits on each side. */
+    vertical-align: middle;
+    position: relative;
+    top: -0.1em;
+    background: var(--tone-soft);
+    color: var(--tone-ink);
+    font-size: 0.62em;
+    font-weight: 620;
+    letter-spacing: -0.01em;
+    line-height: 1.5;
+  }
+  .pill :global(.icon) {
+    width: 1.5em;
+    height: 1.5em;
+    padding: 0.2em;
+    border-radius: 50%;
+    background: var(--tone);
+    color: var(--tone-on, var(--ink));
+  }
+  .answer {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    gap: 8px 18px;
+    margin-top: 40px;
+    font-size: var(--fs-lead);
+    color: var(--ink-2);
+  }
+  .answer strong {
+    color: var(--ink);
+  }
+</style>

@@ -1,9 +1,6 @@
 <div align="center">
 
-<picture>
-  <source media="(prefers-color-scheme: dark)" srcset="assets/brand/rulebox-mark-dark.svg">
-  <img src="assets/brand/rulebox-mark-light.svg" alt="Rulebox logo" width="112" height="112">
-</picture>
+<img src="assets/brand/png/rulebox-cube-256.png" alt="Rulebox logo: a teal cube with a glowing amber keyhole" width="112" height="112">
 
 # Rulebox
 
@@ -11,7 +8,7 @@
 
 Turn any Windows PC into a simple, locked PC that shows only the apps you choose.
 
-[![License: MIT](https://img.shields.io/badge/license-MIT-12b76a)](LICENSE)
+[![License: MIT](https://img.shields.io/badge/license-MIT-0b6970)](LICENSE)
 ![Platform: Windows 10 and 11](https://img.shields.io/badge/platform-Windows%2010%20%7C%2011-231e19)
 ![Status: early development](https://img.shields.io/badge/status-early%20development-e0a030)
 

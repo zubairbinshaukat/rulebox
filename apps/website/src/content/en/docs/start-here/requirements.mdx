@@ -1,0 +1,35 @@
+---
+title: Requirements and Windows editions
+description: What a PC needs for Rulebox, and why the protection level is Full or Reduced depending on the Windows edition.
+section: Start here
+order: 2
+updated: 2026-11-24
+draft: true
+---
+
+The installer checks every PC before it changes anything, and tells you what it found: the Windows version, the edition, the free disk space, and which protection level the PC can reach.
+
+## Full or Reduced protection
+
+Some lockdown layers exist only in certain Windows editions.
+
+- **Full** protection is the target for Windows Pro, Enterprise and Education.
+- **Reduced** protection applies to Windows Home, because Home lacks some lockdown layers. Rulebox still installs, and the dashboard shows a badge on these PCs.
+
+For the strongest lockdown, use Pro, Enterprise or Education.
+
+## What else the installer needs
+
+- Administrator rights to run it.
+- WebView2, which Setup installs. On Windows 10 this needs internet.
+- An enrolment code from your dashboard.
+
+## Memory
+
+Rulebox is built and tested for laptops with 4 GB of RAM. Lite mode switches on by itself on PCs with 4 GB or less.
+
+## Windows 10
+
+Windows 10 reached end of support on 14 October 2025. The installer still checks these PCs and tells you what it found, and the dashboard flags PCs whose Windows is out of support. A locked PC that no longer receives security updates is still at risk.
+
+> This page lists only what the installer checks. The exact minimum supported Windows build will be published here once release testing has confirmed it.

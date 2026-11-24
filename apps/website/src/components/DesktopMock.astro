@@ -1,0 +1,901 @@
+---
+/*
+ * A drawn (HTML/CSS) Rulebox Staff App screen. It is an illustration of the
+ * product, not a screenshot: names and apps are examples. It copies the real
+ * app's screens and their sizes (apps/staff-app/src/shell and packages/ui
+ * components-staff.css), so it looks like what staff really see:
+ *
+ *   desktop   Desktop.tsx + AppGrid.tsx: date · org line, greeting, glass app
+ *             tiles (gradient glyph art, faded corner glyph, running dot,
+ *             count badge), and the floating three-pill taskbar (Taskbar.tsx).
+ *   offline   the same desktop with the real "Offline" pill and Wi-Fi-off chip.
+ *   viewer    the built-in PDF viewer window (AppHost.tsx + PdfViewer.tsx):
+ *             46 px title bar, toolbar, page, over the desktop.
+ *   signin    SignIn.tsx: big clock, date, frosted "Sign in" card, org and
+ *             network status in the corners (no taskbar before sign-in).
+ *   evening   the next person's own desktop after the handover.
+ *
+ * The "My files" side panel is left out on purpose (owner, 2026-11-25).
+ * Everything is laid out on a virtual 1120 x 700 screen in the app's own
+ * pixel sizes: --p is one virtual pixel, so the mock scales as one picture.
+ * Colours are the --mock-* tokens (the Staff App's light theme).
+ */
+import IconCalendar from "~icons/solar/calendar-bold-duotone";
+import IconCard from "~icons/solar/card-bold-duotone";
+import IconVideo from "~icons/solar/clapperboard-play-bold-duotone";
+import IconFolder from "~icons/solar/folder-with-files-bold-duotone";
+import IconChat from "~icons/solar/chat-round-dots-bold-duotone";
+import IconBadge from "~icons/solar/user-id-bold-duotone";
+import IconChart from "~icons/solar/chart-2-bold-duotone";
+import IconDocument from "~icons/solar/document-text-bold-duotone";
+import IconDocFile from "~icons/solar/document-bold-duotone";
+import IconBell from "~icons/solar/bell-bold-duotone";
+import IconWifi from "~icons/solar/wi-fi-high-bold-duotone";
+import IconWifiOff from "~icons/solar/wi-fi-off-bold-duotone";
+import IconVolume from "~icons/solar/volume-loud-bold-duotone";
+import IconBattery from "~icons/solar/battery-full-bold-duotone";
+import IconSnap from "~icons/solar/widget-4-bold-duotone";
+import IconMin from "~icons/solar/minimize-square-bold-duotone";
+import IconMax from "~icons/solar/maximize-square-bold-duotone";
+import IconClose from "~icons/solar/close-square-bold-duotone";
+import IconZoomIn from "~icons/solar/magnifer-zoom-in-bold-duotone";
+import IconZoomOut from "~icons/solar/magnifer-zoom-out-bold-duotone";
+import { flatMarkSvg } from "../../../../packages/ui/src/brand/geometry";
+import { uid } from "../lib/uid";
+
+type Variant = "desktop" | "signin" | "viewer" | "offline" | "evening";
+interface Props {
+  variant?: Variant;
+  class?: string;
+}
+const { variant = "desktop", class: className } = Astro.props;
+
+/* The glyph keys of the real app (shell/appArt.ts); each has its own art colours. */
+const GLYPHS = {
+  calendar: IconCalendar,
+  card: IconCard,
+  video: IconVideo,
+  folder: IconFolder,
+  chat: IconChat,
+  badge: IconBadge,
+  chart: IconChart,
+  document: IconDocument,
+} as const;
+type Glyph = keyof typeof GLYPHS;
+interface App {
+  name: string;
+  desc: string;
+  glyph: Glyph;
+  badge?: number;
+}
+
+const BOOKINGS: App = { name: "Bookings", desc: "Front desk bookings", glyph: "calendar" };
+const ACCOUNTS: App = { name: "Accounts", desc: "Invoices and payments", glyph: "card" };
+const ZOOM: App = { name: "Zoom", desc: "Video calls", glyph: "video" };
+const FILES: App = { name: "My files", desc: "Your files on this PC", glyph: "folder" };
+const CHAT: App = { name: "Team chat", desc: "Messages", glyph: "chat", badge: 3 };
+const GUESTS: App = { name: "Guests", desc: "Check-in and visitors", glyph: "badge" };
+const REPORTS: App = { name: "Reports", desc: "Daily numbers", glyph: "chart" };
+const POLICIES: App = { name: "Policies", desc: "Staff handbook", glyph: "document" };
+const AUDIT: App = { name: "Night audit", desc: "End-of-day checks", glyph: "chart" };
+
+interface Scene {
+  who: string;
+  initials: string;
+  time: string;
+  /** Sign-in clock: the hour without a leading zero, as SignIn.tsx shows it. */
+  bigTime: string;
+  date: string;
+  shortDate: string;
+  greeting: string;
+  tiles: App[];
+  running: string[];
+  pinned: App[];
+  active?: string;
+}
+const morning: Scene = {
+  who: "Sara",
+  initials: "SK",
+  time: "08:56",
+  bigTime: "8:55",
+  date: "Monday 9 March",
+  shortDate: "9 Mar",
+  greeting: "Good morning",
+  tiles: [BOOKINGS, ACCOUNTS, ZOOM, FILES, CHAT, GUESTS, REPORTS, POLICIES],
+  running: ["Bookings"],
+  pinned: [BOOKINGS, ACCOUNTS, ZOOM, FILES],
+  active: "Bookings",
+};
+const scenes: Record<Variant, Scene> = {
+  desktop: morning,
+  signin: morning,
+  viewer: { ...morning, time: "11:20", running: ["Bookings"], active: "pdf" },
+  offline: { ...morning, time: "13:00", greeting: "Good afternoon", running: ["Bookings", "Accounts"] },
+  /* The next person, signed in a minute after the handover. greetingFor()
+     says "afternoon" before 18:00. */
+  evening: {
+    ...morning,
+    who: "Ali",
+    initials: "AR",
+    time: "17:06",
+    greeting: "Good afternoon",
+    tiles: [BOOKINGS, AUDIT, GUESTS, { ...CHAT, badge: 1 }, FILES, POLICIES],
+    running: [],
+    pinned: [BOOKINGS, GUESTS, FILES],
+    active: undefined,
+  },
+};
+const s = scenes[variant];
+const signin = variant === "signin";
+const offline = variant === "offline";
+/* AppGrid: every app on one page; tiles stay at the 236 px cap, so six apps
+   take three columns and eight take four (tileLayout.ts, fewest empty places). */
+const cols = s.tiles.length > 6 ? 4 : 3;
+/* The Start button shows the flat logo mark. */
+const startMark = flatMarkSvg({ id: uid("rb-mock-start") });
+---
+
+<div class:list={["mock", `v-${variant}`, className]} aria-hidden="true">
+  <div class="scr">
+    <div class="wall"><i class="ba"></i><i class="bb"></i></div>
+
+    {
+      signin ? (
+        <div class="signin">
+          <div class="clock-big">
+            <p class="big">{s.bigTime}</p>
+            <p class="day">{s.date}</p>
+          </div>
+          <div class="card">
+            <p class="card-title">Sign in</p>
+            <span class="field">sara</span>
+            <span class="pw-row">
+              <span class="field focus">
+                ••••••••<i class="caret" />
+              </span>
+              <span class="go">→</span>
+            </span>
+          </div>
+          <span class="corner left">Your Company</span>
+          <span class="corner right">
+            <span>Online</span>
+            <span>82%</span>
+          </span>
+        </div>
+      ) : (
+        <div class="desk">
+          <div class="head">
+            <p class="meta">
+              <span>{s.date}</span>
+              <span>·</span>
+              <span>Your Company</span>
+              {offline && <span class="pill-off">Offline</span>}
+            </p>
+            <p class="hello">
+              {s.greeting}, {s.who}
+            </p>
+          </div>
+          <div class="grid" style={`--cols:${cols}`}>
+            {s.tiles.map((app) => {
+              const G = GLYPHS[app.glyph];
+              return (
+                <div class="tile" data-art={app.glyph}>
+                  <span class="mark">
+                    <G />
+                  </span>
+                  <span class="t-top">
+                    <span class="art">
+                      <G />
+                    </span>
+                    {app.badge ? <span class="count">{app.badge}</span> : null}
+                  </span>
+                  <span class="t-text">
+                    <span class="t-name">
+                      {app.name}
+                      {s.running.includes(app.name) && <i class="dot" />}
+                    </span>
+                    <span class="t-desc">{app.desc}</span>
+                  </span>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )
+    }
+
+    {
+      variant === "viewer" && (
+        <div class="win">
+          <div class="titlebar">
+            <span class="tb-icon">
+              <IconDocFile />
+            </span>
+            <span class="tb-title">booking-2231.pdf</span>
+            <span class="tb-btn snap">
+              <IconSnap />
+            </span>
+            <span class="tb-btn">
+              <IconMin />
+            </span>
+            <span class="tb-btn">
+              <IconMax />
+            </span>
+            <span class="tb-btn">
+              <IconClose />
+            </span>
+          </div>
+          <div class="toolbar">
+            <span class="tl-page">Page 1 of 1</span>
+            <span class="tl-ic">
+              <IconZoomOut />
+            </span>
+            <span class="tl-zoom">100%</span>
+            <span class="tl-ic">
+              <IconZoomIn />
+            </span>
+            <span class="tl-fit">Fit width</span>
+          </div>
+          <div class="pages">
+            <div class="page">
+              <p class="pg-h">Booking confirmation</p>
+              <p class="pg-sub">Booking 2231 · Room 14 · 2 nights</p>
+              <hr />
+              <p>Guest: A. Example</p>
+              <p>Arrival: Monday 14:00</p>
+              <p>Departure: Wednesday 11:00</p>
+              <span class="pg-row">
+                <span>Room</span>
+                <span>180.00</span>
+              </span>
+              <span class="pg-row">
+                <span>Breakfast</span>
+                <span>24.00</span>
+              </span>
+              <span class="pg-row">
+                <span>Total</span>
+                <span>204.00</span>
+              </span>
+            </div>
+          </div>
+        </div>
+      )
+    }
+
+    {
+      !signin && (
+        <div class="taskbar">
+          <span class="dock start">
+            <Fragment set:html={startMark} />
+          </span>
+          <span class="dock apps">
+            {s.pinned.map((app) => {
+              const G = GLYPHS[app.glyph];
+              const open = s.running.includes(app.name);
+              return (
+                <span class="task" data-open={open || undefined} data-active={s.active === app.name || undefined}>
+                  <span class="t-art" data-art={app.glyph}>
+                    <G />
+                  </span>
+                  <i class="bar" />
+                </span>
+              );
+            })}
+            {variant === "viewer" && (
+              <span class="task" data-open data-active>
+                <span class="t-art doc">
+                  <IconDocFile />
+                </span>
+                <i class="bar" />
+              </span>
+            )}
+          </span>
+          <span class="dock tray">
+            <span class="chip sq">
+              <IconBell />
+            </span>
+            <span class="chip sys">
+              <span class={offline ? "muted" : "good"}>{offline ? <IconWifiOff /> : <IconWifi />}</span>
+              <span class="muted">
+                <IconVolume />
+              </span>
+              <span class="muted">
+                <IconBattery />
+              </span>
+              <b class="good">82%</b>
+            </span>
+            <span class="clock">
+              <b>{s.time}</b>
+              <span>{s.shortDate}</span>
+            </span>
+            <span class="avatar">{s.initials}</span>
+          </span>
+        </div>
+      )
+    }
+  </div>
+</div>
+
+<style>
+  /* ---------- Frame ---------- */
+  .mock {
+    container-type: inline-size;
+    position: relative;
+    aspect-ratio: 16 / 10;
+    border-radius: 18px;
+    overflow: hidden;
+    background: var(--mock-bg);
+    color: var(--mock-ink);
+    border: 1px solid var(--mock-edge);
+    box-shadow: var(--shadow-window);
+    font-family: var(--font-app);
+    line-height: 1.2;
+    isolation: isolate;
+    user-select: none;
+  }
+  .scr {
+    /* One virtual pixel of the 1120 px wide screen. */
+    --p: calc(100cqw / 1120);
+    position: absolute;
+    inset: 0;
+  }
+  .scr p {
+    margin: 0;
+  }
+  .scr :global(svg) {
+    display: block;
+    flex: none;
+  }
+
+  /* ---------- Backdrop (Backdrop.tsx: two soft blobs) ---------- */
+  .wall {
+    position: absolute;
+    inset: 0;
+    overflow: hidden;
+  }
+  .wall i {
+    position: absolute;
+    border-radius: 50%;
+  }
+  .ba {
+    width: calc(1232 * var(--p));
+    height: calc(1232 * var(--p));
+    left: calc(-504 * var(--p));
+    top: calc(-638 * var(--p));
+    background: radial-gradient(closest-side, var(--mock-blob-1) 45%, transparent 100%);
+    opacity: 0.5;
+  }
+  .bb {
+    width: calc(1120 * var(--p));
+    height: calc(1120 * var(--p));
+    right: calc(-448 * var(--p));
+    bottom: calc(-594 * var(--p));
+    background: radial-gradient(closest-side, var(--mock-blob-2) 45%, transparent 100%);
+    opacity: 0.7;
+  }
+
+  /* ---------- Desktop (Desktop.tsx) ---------- */
+  .desk {
+    position: relative;
+    display: flex;
+    flex-direction: column;
+    gap: calc(20 * var(--p));
+    padding: calc(28 * var(--p)) calc(36 * var(--p)) 0;
+  }
+  .head {
+    display: flex;
+    flex-direction: column;
+    gap: calc(6 * var(--p));
+  }
+  .meta {
+    display: flex;
+    align-items: center;
+    gap: calc(10 * var(--p));
+    font-size: calc(13.5 * var(--p));
+    color: var(--mock-muted);
+  }
+  .pill-off {
+    margin-left: calc(4 * var(--p));
+    padding: calc(2 * var(--p)) calc(8 * var(--p));
+    border-radius: 999px;
+    background: var(--mock-warn-soft);
+    color: var(--mock-warn-ink);
+    font-size: calc(12 * var(--p));
+    font-weight: 500;
+  }
+  .hello {
+    font-size: calc(32 * var(--p));
+    font-weight: 500;
+    letter-spacing: -0.025em;
+  }
+
+  /* ---------- App tiles (AppTile.tsx, size lg) ---------- */
+  .grid {
+    display: grid;
+    grid-template-columns: repeat(var(--cols), calc(236 * var(--p)));
+    grid-auto-rows: calc(214 * var(--p));
+    gap: calc(18 * var(--p));
+  }
+  .tile {
+    position: relative;
+    isolation: isolate;
+    display: flex;
+    flex-direction: column;
+    justify-content: space-between;
+    padding: calc(20 * var(--p));
+    border-radius: calc(22 * var(--p));
+    background: var(--mock-glass);
+    border: 1px solid var(--mock-glass-edge);
+    box-shadow:
+      0 calc(1 * var(--p)) calc(2 * var(--p)) var(--mock-shadow-soft),
+      0 calc(8 * var(--p)) calc(24 * var(--p)) calc(-12 * var(--p)) var(--mock-shadow);
+    overflow: hidden;
+  }
+  /* Each glyph's art colours (appArt.ts GLYPH_HUES). */
+  [data-art="calendar"] { --a: var(--mock-art-calendar-a); --b: var(--mock-art-calendar-b); }
+  [data-art="card"] { --a: var(--mock-art-card-a); --b: var(--mock-art-card-b); }
+  [data-art="video"] { --a: var(--mock-art-video-a); --b: var(--mock-art-video-b); }
+  [data-art="folder"] { --a: var(--mock-art-folder-a); --b: var(--mock-art-folder-b); }
+  [data-art="chat"] { --a: var(--mock-art-chat-a); --b: var(--mock-art-chat-b); }
+  [data-art="badge"] { --a: var(--mock-art-badge-a); --b: var(--mock-art-badge-b); }
+  [data-art="chart"] { --a: var(--mock-art-chart-a); --b: var(--mock-art-chart-b); }
+  [data-art="document"] { --a: var(--mock-art-document-a); --b: var(--mock-art-document-b); }
+  /* The large faded copy of the glyph in the corner. */
+  .mark {
+    position: absolute;
+    z-index: -1;
+    right: -14%;
+    bottom: -18%;
+    width: 60%;
+    aspect-ratio: 1;
+    color: var(--b);
+    opacity: 0.1;
+    transform: rotate(-6deg);
+  }
+  .mark :global(svg) {
+    width: 100%;
+    height: 100%;
+  }
+  .t-top {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+  }
+  .art {
+    display: grid;
+    place-items: center;
+    width: calc(64 * var(--p));
+    height: calc(64 * var(--p));
+    border-radius: calc(18 * var(--p));
+    color: var(--mock-glyph);
+    background: linear-gradient(150deg, var(--a), var(--b));
+    box-shadow: 0 calc(6 * var(--p)) calc(14 * var(--p)) calc(-6 * var(--p)) var(--b);
+  }
+  .art :global(svg) {
+    width: calc(34 * var(--p));
+    height: calc(34 * var(--p));
+  }
+  .count {
+    display: grid;
+    place-items: center;
+    min-width: calc(24 * var(--p));
+    height: calc(24 * var(--p));
+    padding: 0 calc(7 * var(--p));
+    border-radius: 999px;
+    background: var(--mock-go);
+    color: var(--mock-go-ink);
+    font-size: calc(12.5 * var(--p));
+    font-weight: 600;
+  }
+  .t-text {
+    display: flex;
+    flex-direction: column;
+    gap: calc(3 * var(--p));
+  }
+  .t-name {
+    display: flex;
+    align-items: center;
+    gap: calc(8 * var(--p));
+    font-size: calc(17 * var(--p));
+    font-weight: 600;
+    letter-spacing: -0.015em;
+    white-space: nowrap;
+  }
+  .dot {
+    width: calc(6 * var(--p));
+    height: calc(6 * var(--p));
+    border-radius: 50%;
+    background: var(--mock-accent);
+  }
+  .t-desc {
+    font-size: calc(13 * var(--p));
+    line-height: 1.38;
+    color: var(--mock-muted);
+  }
+
+  /* ---------- Taskbar (Taskbar.tsx: Start, apps, tray pills) ---------- */
+  .taskbar {
+    position: absolute;
+    left: calc(12 * var(--p));
+    right: calc(12 * var(--p));
+    bottom: calc(12 * var(--p));
+    display: grid;
+    grid-template-columns: 1fr auto 1fr;
+    align-items: center;
+    gap: calc(12 * var(--p));
+    height: calc(60 * var(--p));
+  }
+  .dock {
+    display: flex;
+    align-items: center;
+    height: calc(60 * var(--p));
+    padding: 0 calc(8 * var(--p));
+    gap: calc(6 * var(--p));
+    border-radius: calc(22 * var(--p));
+    background: var(--mock-bar);
+    border: 1px solid var(--mock-glass-edge);
+  }
+  .start {
+    justify-self: start;
+    justify-content: center;
+    width: calc(60 * var(--p));
+    padding: 0;
+  }
+  .start :global(svg) {
+    width: calc(30 * var(--p));
+    height: calc(30 * var(--p));
+  }
+  .apps {
+    justify-self: center;
+    padding: 0 calc(10 * var(--p));
+    gap: calc(4 * var(--p));
+  }
+  .task {
+    position: relative;
+    display: flex;
+    justify-content: center;
+    width: calc(48 * var(--p));
+    height: calc(50 * var(--p));
+    padding-top: calc(4 * var(--p));
+  }
+  .t-art {
+    display: grid;
+    place-items: center;
+    width: calc(34 * var(--p));
+    height: calc(34 * var(--p));
+    border-radius: calc(11 * var(--p));
+    color: var(--mock-glyph);
+    background: linear-gradient(150deg, var(--a), var(--b));
+    box-shadow: 0 calc(4 * var(--p)) calc(10 * var(--p)) calc(-5 * var(--p)) var(--b);
+  }
+  .t-art :global(svg) {
+    width: calc(20 * var(--p));
+    height: calc(20 * var(--p));
+  }
+  /* A window of Rulebox's own viewer: its kind icon on the app tint. */
+  .t-art.doc {
+    background: var(--mock-accent-soft);
+    color: var(--mock-accent-text);
+    box-shadow: none;
+  }
+  .bar {
+    position: absolute;
+    left: 50%;
+    bottom: calc(3 * var(--p));
+    width: calc(18 * var(--p));
+    height: calc(4 * var(--p));
+    margin-left: calc(-9 * var(--p));
+    border-radius: calc(2 * var(--p));
+    background: var(--mock-muted);
+    opacity: 0;
+    transform: scaleX(0.3334);
+  }
+  .task[data-open] .bar {
+    opacity: 1;
+  }
+  .task[data-active] .bar {
+    background: var(--mock-accent);
+    transform: none;
+  }
+  .tray {
+    justify-self: end;
+    gap: calc(8 * var(--p));
+  }
+  .chip {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: calc(10 * var(--p));
+    height: calc(40 * var(--p));
+    border-radius: calc(14 * var(--p));
+    background: var(--mock-chip);
+    font-size: calc(13 * var(--p));
+    font-weight: 600;
+  }
+  .chip :global(svg) {
+    width: calc(18 * var(--p));
+    height: calc(18 * var(--p));
+  }
+  .chip.sq {
+    width: calc(40 * var(--p));
+  }
+  .chip.sq :global(svg) {
+    width: calc(20 * var(--p));
+    height: calc(20 * var(--p));
+  }
+  .chip.sys {
+    padding: 0 calc(14 * var(--p));
+  }
+  .good {
+    color: var(--mock-good);
+  }
+  .muted {
+    color: var(--mock-muted);
+  }
+  .clock {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-end;
+    min-width: calc(72 * var(--p));
+    padding: 0 calc(10 * var(--p));
+    line-height: 1.15;
+    font-size: calc(12 * var(--p));
+    color: var(--mock-muted);
+  }
+  .clock b {
+    font-size: calc(14 * var(--p));
+    font-weight: 600;
+    color: var(--mock-ink);
+  }
+  .avatar {
+    display: grid;
+    place-items: center;
+    width: calc(40 * var(--p));
+    height: calc(40 * var(--p));
+    border-radius: 50%;
+    background: var(--mock-accent-soft);
+    color: var(--mock-accent-text);
+    font-size: calc(13 * var(--p));
+    font-weight: 500;
+  }
+
+  /* ---------- PDF viewer window (AppHost.tsx, PdfViewer.tsx) ---------- */
+  .win {
+    position: absolute;
+    left: calc(232 * var(--p));
+    top: calc(84 * var(--p));
+    width: calc(640 * var(--p));
+    height: calc(500 * var(--p));
+    display: flex;
+    flex-direction: column;
+    border-radius: calc(10 * var(--p));
+    overflow: hidden;
+    background: var(--mock-window);
+    border: 1px solid var(--mock-line);
+    box-shadow:
+      0 calc(1 * var(--p)) calc(2 * var(--p)) var(--mock-shadow-soft),
+      0 calc(28 * var(--p)) calc(64 * var(--p)) calc(-18 * var(--p)) var(--mock-shadow);
+  }
+  .titlebar {
+    flex: none;
+    display: flex;
+    align-items: center;
+    gap: calc(10 * var(--p));
+    height: calc(46 * var(--p));
+    padding: 0 calc(6 * var(--p)) 0 calc(14 * var(--p));
+    background: var(--mock-paper);
+    border-bottom: 1px solid var(--mock-line);
+  }
+  .tb-icon {
+    display: grid;
+    place-items: center;
+    width: calc(22 * var(--p));
+    height: calc(22 * var(--p));
+    border-radius: calc(6 * var(--p));
+    background: var(--mock-accent-soft);
+    color: var(--mock-accent-text);
+  }
+  .tb-icon :global(svg) {
+    width: calc(14 * var(--p));
+    height: calc(14 * var(--p));
+  }
+  .tb-title {
+    flex: 1;
+    font-size: calc(13.5 * var(--p));
+    font-weight: 500;
+  }
+  .tb-btn {
+    display: grid;
+    place-items: center;
+    width: calc(38 * var(--p));
+    height: calc(32 * var(--p));
+    color: var(--mock-muted);
+  }
+  .tb-btn.snap {
+    width: calc(32 * var(--p));
+    margin-right: calc(4 * var(--p));
+    color: var(--mock-ink);
+  }
+  .tb-btn :global(svg) {
+    width: calc(16 * var(--p));
+    height: calc(16 * var(--p));
+  }
+  .toolbar {
+    flex: none;
+    display: flex;
+    align-items: center;
+    gap: calc(6 * var(--p));
+    padding: calc(6 * var(--p)) calc(12 * var(--p));
+    border-bottom: 1px solid var(--mock-line);
+    background: var(--mock-window);
+    font-size: calc(12.5 * var(--p));
+  }
+  .tl-page {
+    min-width: calc(96 * var(--p));
+  }
+  .tl-ic {
+    display: grid;
+    place-items: center;
+    width: calc(32 * var(--p));
+    height: calc(32 * var(--p));
+    color: var(--mock-muted);
+  }
+  .tl-ic :global(svg) {
+    width: calc(16 * var(--p));
+    height: calc(16 * var(--p));
+  }
+  .tl-zoom {
+    min-width: calc(44 * var(--p));
+    text-align: center;
+  }
+  .tl-fit {
+    display: grid;
+    place-items: center;
+    height: calc(32 * var(--p));
+    padding: 0 calc(14 * var(--p));
+    border-radius: calc(12 * var(--p));
+    border: 1px solid var(--mock-line);
+    font-size: calc(13 * var(--p));
+    font-weight: 500;
+  }
+  .pages {
+    flex: 1;
+    min-height: 0;
+    overflow: hidden;
+    padding: calc(16 * var(--p)) calc(16 * var(--p)) 0;
+    background: var(--mock-bg);
+  }
+  .page {
+    display: flex;
+    flex-direction: column;
+    gap: calc(9 * var(--p));
+    height: 100%;
+    padding: calc(40 * var(--p)) calc(44 * var(--p));
+    background: var(--mock-page);
+    box-shadow:
+      0 calc(1 * var(--p)) calc(2 * var(--p)) var(--mock-shadow-soft),
+      0 calc(8 * var(--p)) calc(24 * var(--p)) calc(-12 * var(--p)) var(--mock-shadow);
+    font-family: var(--font-sans);
+    font-size: calc(12 * var(--p));
+    color: var(--mock-doc-title);
+  }
+  .pg-h {
+    font-size: calc(22 * var(--p));
+    font-weight: 700;
+    letter-spacing: -0.01em;
+  }
+  .page hr {
+    margin: calc(4 * var(--p)) 0;
+    border: 0;
+    border-top: 1px solid var(--mock-doc-line);
+  }
+  .pg-row {
+    display: flex;
+    justify-content: space-between;
+    padding: calc(7 * var(--p)) calc(8 * var(--p));
+    border-bottom: 1px solid var(--mock-doc-line);
+  }
+  .pg-row:first-of-type {
+    margin-top: calc(8 * var(--p));
+  }
+
+  /* ---------- Sign-in (SignIn.tsx) ---------- */
+  .signin {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: calc(28 * var(--p));
+    padding: calc(48 * var(--p)) calc(24 * var(--p)) calc(72 * var(--p));
+  }
+  .clock-big {
+    text-align: center;
+  }
+  .big {
+    font-size: calc(96 * var(--p));
+    font-weight: 500;
+    letter-spacing: -0.04em;
+    line-height: 1;
+  }
+  .scr .day {
+    margin-top: calc(8 * var(--p));
+    font-size: calc(18 * var(--p));
+    color: var(--mock-muted);
+  }
+  .card {
+    display: flex;
+    flex-direction: column;
+    gap: calc(12 * var(--p));
+    width: calc(360 * var(--p));
+    padding: calc(28 * var(--p));
+    border-radius: calc(20 * var(--p));
+    background: var(--mock-glass);
+    border: 1px solid var(--mock-glass-edge);
+    box-shadow:
+      0 calc(1 * var(--p)) calc(2 * var(--p)) var(--mock-shadow-soft),
+      0 calc(12 * var(--p)) calc(32 * var(--p)) calc(-16 * var(--p)) var(--mock-shadow);
+  }
+  .scr .card-title {
+    margin-bottom: calc(4 * var(--p));
+    font-size: calc(16 * var(--p));
+    font-weight: 500;
+  }
+  .field {
+    display: flex;
+    align-items: center;
+    flex: none;
+    height: calc(46 * var(--p));
+    padding: 0 calc(14 * var(--p));
+    border-radius: calc(12 * var(--p));
+    border: 1px solid var(--mock-control);
+    background: var(--mock-window);
+    font-size: calc(14.5 * var(--p));
+  }
+  .field.focus {
+    border-color: var(--mock-accent);
+    box-shadow:
+      0 0 0 calc(2 * var(--p)) var(--mock-window),
+      0 0 0 calc(4 * var(--p)) var(--mock-accent);
+    letter-spacing: 0.12em;
+  }
+  .caret {
+    width: 1px;
+    height: calc(18 * var(--p));
+    margin-left: calc(2 * var(--p));
+    background: var(--mock-ink);
+  }
+  .pw-row {
+    display: flex;
+    gap: calc(8 * var(--p));
+  }
+  .pw-row .field {
+    flex: 1;
+  }
+  .go {
+    display: grid;
+    place-items: center;
+    flex: none;
+    width: calc(46 * var(--p));
+    height: calc(46 * var(--p));
+    border-radius: calc(12 * var(--p));
+    background: var(--mock-go);
+    color: var(--mock-go-ink);
+    font-size: calc(15 * var(--p));
+  }
+  .corner {
+    position: absolute;
+    bottom: calc(20 * var(--p));
+    display: flex;
+    gap: calc(12 * var(--p));
+    font-size: calc(13 * var(--p));
+    color: var(--mock-muted);
+  }
+  .corner.left {
+    left: calc(24 * var(--p));
+  }
+  .corner.right {
+    right: calc(24 * var(--p));
+  }
+</style>

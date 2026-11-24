@@ -1,0 +1,218 @@
+---
+/*
+ * Download (plan §11). Plan Q4 (a): the page is public. Release data comes
+ * from src/data/release.json, written by scripts/fetch-release.mjs at build
+ * time once the repository has a release. Until then the page shows an
+ * honest "first release coming" state and no checksum at all.
+ */
+import Base from "../layouts/Base.astro";
+import PageHero from "../components/PageHero.astro";
+import Icon from "../components/Icon.astro";
+import { CTA_PRIMARY, RELEASES_URL } from "../config";
+import { softwareLd } from "../lib/seo";
+import release from "../data/release.json";
+
+interface Release {
+  version: string;
+  date: string;
+  msiUrl: string;
+  msiName: string;
+  sha256: string;
+  signed: boolean;
+}
+const rel = (release as { latest: Release | null }).latest;
+const file = rel?.msiName ?? "Rulebox-<version>.msi";
+---
+
+<Base
+  title="Download Rulebox for Windows"
+  description="Get the Rulebox installer for Windows, with its SHA-256 checksum and steps to verify the file."
+  path="/download"
+  og="download"
+  ld={[softwareLd(rel?.version)]}
+  crumbs={[{ name: "Download", path: "/download" }]}
+>
+  <PageHero label="Download" title="Download Rulebox for Windows." sub="One installer for every PC and every organisation. It checks the PC before it changes anything." tone="blue" icon="download" />
+
+  <section class="section-tight">
+    <div class="container layout">
+      <div class="main">
+        {
+          rel ? (
+            <div class="card dl">
+              <p class="label">Version {rel.version} · {rel.date}</p>
+              <a class="btn btn-primary btn-lg" href={rel.msiUrl}>
+                <Icon name="download" /> Download {rel.msiName}
+              </a>
+              <div class="sum">
+                <p class="sum-label">SHA-256</p>
+                <code id="sha">{rel.sha256}</code>
+                <button class="copy" type="button" data-copy="sha" aria-label="Copy checksum"><Icon name="copy" /></button>
+              </div>
+              <p class="muted">
+                {rel.signed
+                  ? "The installer is code-signed through SignPath. The certificate names SignPath Foundation, not Rulebox. That is expected."
+                  : "This build is not code-signed yet. Windows SmartScreen will warn before it runs. Check the hash below first."}
+              </p>
+            </div>
+          ) : (
+            <div class="card dl pending" data-tone="sun">
+              <span class="tile-icon"><Icon name="clock" /></span>
+              <h2 class="h3">The first public release is coming.</h2>
+              <p class="muted">
+                Rulebox is in an invite-only pilot. When the first release is published, the installer, its version, its date and its SHA-256
+                checksum appear on this page, pulled from the release itself. We will not show a download without its checksum.
+              </p>
+              <div class="acts">
+                <a class="btn btn-primary" href={CTA_PRIMARY.href}>{CTA_PRIMARY.label}<Icon name="arrow-right" /></a>
+                <a class="link-arrow" href={RELEASES_URL}>Releases on GitHub <Icon name="arrow-right" /></a>
+              </div>
+            </div>
+          )
+        }
+
+        <div class="block">
+          <h2 class="h3">Check the file before you run it</h2>
+          <p class="muted">Open PowerShell in your Downloads folder and run both commands. The first must print the same SHA-256 as this page.</p>
+          <pre><code>{`Get-FileHash .\\${file} -Algorithm SHA256\nGet-AuthenticodeSignature .\\${file}`}</code></pre>
+          <p class="muted">The checksum on this page and the file on GitHub come from two places on purpose: someone who changes one must also change the other.</p>
+        </div>
+
+        <aside class="warn" data-tone="coral">
+          <Icon name="danger" />
+          <p><strong>Install on a test PC first.</strong> Rulebox changes how the PC starts. You can turn kiosk mode off again, and uninstalling restores normal Windows.</p>
+        </aside>
+      </div>
+
+      <aside class="side">
+        <div class="card">
+          <h2 class="h3">What you need</h2>
+          <ul class="icon-list plain req" role="list">
+            <li><span class="il-icon"><Icon name="monitor" /></span><p><strong>A Windows PC.</strong> The installer checks the version, edition and free disk space and tells you the protection level: Full or Reduced.</p></li>
+            <li><span class="il-icon"><Icon name="key" /></span><p><strong>Administrator rights</strong> to run the installer.</p></li>
+            <li><span class="il-icon"><Icon name="globe" /></span><p><strong>WebView2</strong>, installed by Setup. On Windows 10 this needs internet.</p></li>
+            <li><span class="il-icon"><Icon name="password" /></span><p><strong>An enrolment code</strong> from your dashboard.</p></li>
+          </ul>
+          <p class="muted small">No dashboard yet? <a class="text-link" href="/pilot">Request a pilot invite</a>.</p>
+        </div>
+        <div class="card">
+          <h2 class="h3">Older versions</h2>
+          <p class="muted">Every release and its notes live on <a class="text-link" href={RELEASES_URL}>GitHub Releases</a>. See also the <a class="text-link" href="/changelog">changelog</a>.</p>
+        </div>
+      </aside>
+    </div>
+  </section>
+</Base>
+
+<style>
+  .layout {
+    display: grid;
+    gap: var(--sp-7);
+    align-items: start;
+  }
+  @media (min-width: 960px) {
+    .layout {
+      grid-template-columns: 1.5fr 1fr;
+      gap: var(--sp-9);
+    }
+  }
+  .main,
+  .side {
+    display: grid;
+    gap: var(--grid-gap);
+  }
+  .dl {
+    display: grid;
+    gap: var(--sp-4);
+    justify-items: start;
+  }
+  .dl .tile-icon {
+    width: var(--icon-col);
+    height: var(--icon-col);
+    border-radius: 12px;
+  }
+  .pending {
+    background:
+      radial-gradient(80% 90% at 100% 0%, var(--c-sun-soft), transparent 70%),
+      var(--surface);
+  }
+  .acts {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--sp-4);
+    align-items: center;
+    margin-top: var(--sp-2);
+  }
+  .sum {
+    display: flex;
+    align-items: center;
+    gap: var(--sp-3);
+    width: 100%;
+    padding: var(--sp-3) var(--sp-4);
+    border-radius: 12px;
+    background: var(--surface-2);
+  }
+  .sum code {
+    font-family: var(--font-mono);
+    font-size: var(--fs-xs);
+    overflow-wrap: anywhere;
+  }
+  .sum-label {
+    font-family: var(--font-mono);
+    font-size: var(--fs-label);
+    color: var(--muted);
+  }
+  .copy {
+    display: grid;
+    place-items: center;
+    margin-left: auto;
+    border: 0;
+    background: none;
+    cursor: pointer;
+    color: var(--muted);
+    padding: var(--sp-2);
+  }
+  .block {
+    display: grid;
+    gap: var(--sp-3);
+  }
+  pre {
+    margin: 0;
+    padding: var(--sp-4) var(--sp-5);
+    border-radius: var(--radius);
+    background: var(--night);
+    color: var(--on-night);
+    font-family: var(--font-mono);
+    font-size: var(--fs-xs);
+    line-height: var(--lh-body);
+    overflow-x: auto;
+  }
+  .warn {
+    display: flex;
+    gap: var(--sp-4);
+    align-items: center;
+    padding: var(--sp-4) var(--sp-5);
+    border-radius: var(--radius);
+    background: var(--tone-soft);
+  }
+  .warn :global(.icon) {
+    width: var(--sp-6);
+    height: var(--sp-6);
+    vertical-align: 0;
+    color: var(--tone-ink);
+  }
+  .side .card {
+    display: grid;
+    gap: var(--sp-4);
+    align-content: start;
+  }
+  .req {
+    font-size: var(--fs-small);
+  }
+  .req .il-icon {
+    color: var(--primary-text);
+  }
+  .small {
+    font-size: var(--fs-small);
+  }
+</style>

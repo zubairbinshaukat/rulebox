@@ -1,0 +1,51 @@
+---
+/* "Tell me when Rulebox is open to everyone" (Story 13.3). One field,
+   double opt-in. Posts to the /api/notify Worker. Turnstile runs in
+   invisible mode only after the visitor focuses the field (forms.ts). */
+import Icon from "./Icon.astro";
+import { TURNSTILE_SITE_KEY } from "../config";
+---
+
+<form class="notify" method="post" action="/api/notify" data-form="notify" data-sitekey={TURNSTILE_SITE_KEY} novalidate>
+  <label for="notify-email" class="n-label">Tell me when Rulebox is open to everyone</label>
+  <div class="row">
+    <input id="notify-email" class="input" type="email" name="email" autocomplete="email" required placeholder="you@work.example" />
+    <button class="btn btn-primary" type="submit">Notify me<Icon name="arrow-right" /></button>
+  </div>
+  <div class="hp" aria-hidden="true"><label>Leave empty <input type="text" name="website" tabindex="-1" autocomplete="off" /></label></div>
+  <p class="n-hint">One email to confirm, then one when it opens. Nothing else.</p>
+  <p class="form-msg" role="status" aria-live="polite" hidden></p>
+</form>
+
+<script>
+  import "../scripts/forms.ts";
+</script>
+
+<style>
+  .notify {
+    display: grid;
+    gap: var(--sp-3);
+    max-width: 460px;
+  }
+  .n-label {
+    font-weight: var(--fw-strong);
+    font-size: var(--fs-small);
+  }
+  .row {
+    display: flex;
+    gap: var(--sp-2);
+  }
+  .row .input {
+    border-radius: var(--radius-pill);
+    padding-inline: var(--sp-5);
+  }
+  .n-hint {
+    font-size: var(--fs-xs);
+    color: var(--muted);
+  }
+  @media (max-width: 420px) {
+    .row {
+      flex-direction: column;
+    }
+  }
+</style>

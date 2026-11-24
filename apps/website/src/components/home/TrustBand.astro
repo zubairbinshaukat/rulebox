@@ -1,0 +1,209 @@
+---
+/*
+ * Giant statement rising into the one dark band (Granola), then the
+ * Ordina-style "trusted by" section in Rulebox's own words. We have no
+ * customers to name yet, so the band names the places Rulebox is built
+ * for, and says plainly that real names come only with permission.
+ */
+import Icon from "../Icon.astro";
+import { USE_CASES, MORE_PLACES } from "../../data/useCases";
+const words = "The staff PC that only does its job.".split(" ");
+const places = USE_CASES.filter((u) => !u.hub);
+/* The grid must come out even: pick 4 or 3 columns by the number of cells
+   and let the last cell span whatever is left on the final row. */
+const cells = places.length + MORE_PLACES.length;
+const cols = cells % 4 === 0 ? 4 : cells % 3 === 0 ? 3 : 4;
+const rest = cells % cols;
+const lastSpan = rest ? cols - rest + 1 : 1;
+---
+
+<section class="statement" aria-label="What Rulebox is for">
+  <p class="giant container" aria-label="The staff PC that only does its job.">
+    {words.map((w, i) => <span class="w" style={`--i:${i}`} aria-hidden="true">{w} </span>)}
+  </p>
+</section>
+
+<section class="band section-dark" aria-labelledby="trust-title">
+  <div class="container">
+    <div class="head">
+      <h2 id="trust-title" class="h2">Built for teams that rely on a PC doing one job well.</h2>
+      <p class="lead">
+        Front desks, tills, labs and shift floors: places where one PC serves many people and nobody has time to fix it.
+      </p>
+    </div>
+
+    <ul class="places" role="list" style={`--cols:${cols};--last-span:${lastSpan}`}>
+      {
+        places.map((u) => (
+          <li>
+            <a class="place" href={`/use-cases/${u.slug}`} data-tone={u.tone}>
+              <Icon name={u.icon} />
+              <span class="p-name">{u.name}</span>
+              <span class="p-where">{u.place}</span>
+              <Icon name="arrow-up-right" class="p-go" />
+            </a>
+          </li>
+        ))
+      }
+      {
+        MORE_PLACES.map((m) => (
+          <li>
+            <span class="place quiet">
+              <Icon name={m.icon} />
+              <span class="p-name">{m.name}</span>
+              <span class="p-where">Page coming</span>
+            </span>
+          </li>
+        ))
+      }
+    </ul>
+
+    <p class="honest">
+      <Icon name="info" />
+      <span>
+        Rulebox is in an invite-only pilot. We will name the teams that use it here, once they agree in writing. Until then, you
+        get the <a href="/security">design</a>, the <a href="/open-source">code</a> and <a href="/numbers">every number with its source</a>.
+      </span>
+    </p>
+  </div>
+</section>
+
+<style>
+  .statement {
+    padding: clamp(40px, 8vw, 120px) 0 0;
+    overflow: hidden;
+  }
+  .giant {
+    font-size: clamp(3rem, 0.8rem + 8.4vw, 10rem);
+    font-weight: 560;
+    letter-spacing: -0.055em;
+    line-height: 0.9;
+    text-align: center;
+    text-wrap: balance;
+    padding-bottom: clamp(28px, 4vw, 56px);
+  }
+  .w {
+    display: inline-block;
+    white-space: pre;
+  }
+  /* The band slides up over the statement (home-motion.ts), so it paints
+     above it with its own solid background. */
+  .band {
+    position: relative;
+    z-index: 1;
+    padding-block: clamp(72px, 9vw, 130px);
+    border-radius: var(--radius-xl) var(--radius-xl) 0 0;
+  }
+  .head {
+    display: grid;
+    gap: 22px;
+    max-width: 900px;
+    margin: 0 auto clamp(40px, 5vw, 64px);
+    text-align: center;
+    justify-items: center;
+  }
+  .head .lead {
+    color: var(--muted);
+    max-width: 52ch;
+  }
+  .places {
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: 1px;
+    background: var(--line);
+    border: 1px solid var(--line);
+    border-radius: var(--radius-lg);
+    overflow: hidden;
+  }
+  @media (min-width: 560px) {
+    .places {
+      grid-template-columns: repeat(2, 1fr);
+    }
+    /* Odd count on two columns: the last cell takes the full row. */
+    .places > li:last-child:nth-child(odd) {
+      grid-column: 1 / -1;
+    }
+  }
+  @media (min-width: 1000px) {
+    .places {
+      grid-template-columns: repeat(var(--cols), 1fr);
+    }
+    .places > li:last-child:nth-child(odd) {
+      grid-column: auto;
+    }
+    .places > li:last-child {
+      grid-column: span var(--last-span);
+    }
+  }
+  .place {
+    position: relative;
+    display: grid;
+    grid-template-columns: auto 1fr;
+    grid-template-rows: auto auto;
+    column-gap: 14px;
+    align-items: center;
+    height: 100%;
+    padding: 26px 24px;
+    background: var(--bg);
+    color: var(--ink);
+    text-decoration: none;
+    transition: background-color 0.3s;
+  }
+  a.place:hover {
+    background: var(--surface);
+  }
+  .place > :global(.icon:first-child) {
+    grid-row: 1 / 3;
+    width: 34px;
+    height: 34px;
+    color: var(--tone, var(--muted));
+  }
+  .p-name {
+    font-weight: 620;
+    font-size: 1.06rem;
+    letter-spacing: -0.01em;
+  }
+  .p-where {
+    font-family: var(--font-mono);
+    font-size: 0.74rem;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: var(--muted);
+  }
+  .place :global(.p-go) {
+    position: absolute;
+    top: 18px;
+    right: 18px;
+    width: 18px;
+    height: 18px;
+    opacity: 0;
+    transform: translate(-4px, 4px);
+    transition:
+      opacity 0.25s,
+      transform 0.35s var(--ease-out);
+  }
+  a.place:hover :global(.p-go),
+  a.place:focus-visible :global(.p-go) {
+    opacity: 1;
+    transform: none;
+  }
+  .quiet {
+    color: var(--muted);
+  }
+  .honest {
+    display: flex;
+    gap: 12px;
+    align-items: flex-start;
+    max-width: 760px;
+    margin: 40px auto 0;
+    font-size: 0.98rem;
+    color: var(--muted);
+  }
+  .honest :global(.icon) {
+    margin-top: 3px;
+    color: var(--c-sun);
+  }
+  .honest a {
+    color: var(--ink);
+  }
+</style>

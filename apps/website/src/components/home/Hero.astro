@@ -1,0 +1,645 @@
+---
+/*
+ * Hero (Granola reference): huge calm headline left, the product on layered
+ * colour slabs right. On wide screens the section is tall and its stage is
+ * sticky: as you scroll, the slabs and the two badges tuck in behind the
+ * drawn desktop, the headline lifts away and "one idea" takes its place
+ * (GSAP scrub in scripts/home-motion.ts). Small screens, reduced motion and
+ * no-JavaScript get the same content stacked.
+ *
+ * Two looks (owner review, 2026-11-25):
+ *   photos (default)  a product shot: the drawn desktop floats on a large
+ *                     rounded photo backdrop of a till (Pexels, credited on
+ *                     /legal/licenses). On wide screens it starts smaller
+ *                     and grows as you scroll (home-motion.ts, heroShot).
+ *   slabs             the original flat colour slabs and their hand-over
+ * Add ?hero=slabs to the home URL to see the slabs. To make slabs the
+ * default for everyone, change DEFAULT_VARIANT below to "slabs".
+ */
+import { Picture } from "astro:assets";
+import DesktopMock from "../DesktopMock.astro";
+import Icon from "../Icon.astro";
+import { CTA_PRIMARY, CTA_SECONDARY } from "../../config";
+import { PHOTOS } from "../../data/photos";
+
+const DEFAULT_VARIANT: "photos" | "slabs" = "photos";
+/* Photo variant (owner review 3): ONE photo of a café till in use is the
+   backdrop (the .s3 box). Tablets: the desktop sits inside its frame, lower
+   right. Wide screens (owner, 2026-11-25): at rest the desktop overhangs the
+   frame's right and bottom edges, like a window over a photo; as you scroll
+   it grows into a full product shot across the right column while the photo
+   shrinks and slides in behind it, and one chip stays. Phones keep their own layout (photo on top, desktop lower left);
+   only the crop differs. .s1 and .s2 are drawn in the slab look (and .s1 as
+   the sun slab on phones). */
+const HERO_PHOTO = { photo: PHOTOS.homeHero, pos: "50% 40%", posSm: "58% 40%" };
+---
+
+<section class="hero" data-hero data-variant={DEFAULT_VARIANT} aria-labelledby="hero-title">
+  {/* ?hero=slabs or ?hero=photos overrides the default (owner preview). Runs before the stage is parsed. */}
+  <script is:inline>
+    (function () {
+      try {
+        var v = new URLSearchParams(location.search).get("hero");
+        if (v === "slabs" || v === "photos") document.currentScript.parentElement.setAttribute("data-variant", v);
+      } catch (e) {}
+    })();
+  </script>
+  <div class="sticky">
+    <div class="container grid">
+      <div class="left">
+        <div class="copy">
+          <a class="chip enter" href="/pilot" style="--d:.05s">
+            <span class="chip-tag">Pilot</span>
+            Rulebox is in an invite-only pilot
+            <Icon name="arrow-right" />
+          </a>
+          <h1 id="hero-title" class="display enter" style="--d:.12s">
+            Only what<br />you <span class="allow">allow.</span>
+          </h1>
+          <p class="lead sub enter" style="--d:.22s">
+            Rulebox turns any Windows PC into a locked, branded workstation. Staff sign in and see only their approved apps,
+            websites and files.
+          </p>
+          <div class="ctas enter" style="--d:.3s">
+            <a class="btn btn-primary btn-lg" href={CTA_PRIMARY.href}>{CTA_PRIMARY.label}<Icon name="arrow-right" /></a>
+            <a class="btn btn-ghost btn-lg" href={CTA_SECONDARY.href}>{CTA_SECONDARY.label}</a>
+          </div>
+          <ul class="proof enter" style="--d:.38s" role="list">
+            <li><Icon name="offline" />Works offline</li>
+            <li><Icon name="code" />MIT licence</li>
+            <li><Icon name="undo" />Reversible</li>
+          </ul>
+        </div>
+
+        <div class="next">
+          <p class="label" style="--dot: var(--c-sun)">One idea</p>
+          <h2 class="h2 next-title">Rulebox flips the PC. Nothing is available unless you approve&nbsp;it.</h2>
+          <ol class="rows icon-list plain" role="list">
+            <li>
+              <span class="il-icon"><Icon name="download" /></span>
+              <p><strong>Install</strong> one small program on a PC you own.</p>
+            </li>
+            <li>
+              <span class="il-icon"><Icon name="key-linear" /></span>
+              <p><strong>Type the code</strong> from your dashboard.</p>
+            </li>
+            <li>
+              <span class="il-icon"><Icon name="restart-linear" /></span>
+              <p><strong>It restarts</strong> as your branded workstation.</p>
+            </li>
+          </ol>
+        </div>
+      </div>
+
+      <div class="stage" aria-hidden="true">
+        <span class="slab s1"></span>
+        <span class="slab s2"><span class="pixels"></span></span>
+        <span class="slab s3" style={`--pos-lg:${HERO_PHOTO.pos};--pos-sm:${HERO_PHOTO.posSm}`}>
+          <Picture
+            src={HERO_PHOTO.photo.src}
+            alt=""
+            formats={["avif"]}
+            fallbackFormat="webp"
+            widths={[480, 720, 960, 1280, 1600]}
+            sizes="(min-width: 1440px) 840px, (min-width: 960px) 60vw, 92vw"
+            quality={55}
+            loading="eager"
+            decoding="async"
+            fetchpriority="high"
+            class="slab-img"
+          />
+          <span class="grade"></span>
+        </span>
+        <span class="float f1"><Icon name="forbidden" /> Task Manager <em>Not allowed</em></span>
+        <span class="float f2"><Icon name="shield" /> Installer hash-checked</span>
+        <div class="window">
+          <div class="enter" style="--d:.2s"><DesktopMock variant="desktop" /></div>
+        </div>
+      </div>
+    </div>
+  </div>
+  {/* Photo look on wide screens with motion: switch to the scrubbed layout and
+      measure its resting frame now, so the first paint is already right:
+      the stage scale and shift (--s0, --x0) and the desktop's resting place
+      over the photo (--wx, --wy, --wr: 39.2% / 42.5% of the stage, 52.6% of
+      its width). home-motion.ts re-measures on every refresh (same maths:
+      restFrame). */}
+  <script is:inline>
+    (function () {
+      try {
+        var hero = document.currentScript.parentElement;
+        if (hero.getAttribute("data-variant") !== "photos") return;
+        if (!matchMedia("(min-width: 960px)").matches || matchMedia("(prefers-reduced-motion: reduce)").matches) return;
+        hero.setAttribute("data-scrub", "");
+        var st = hero.querySelector(".stage");
+        var cp = hero.querySelector(".copy");
+        var bleed = -parseFloat(getComputedStyle(st).marginRight) || 0;
+        var gap = Math.min(72, Math.max(40, innerWidth * 0.05));
+        var right = st.offsetLeft + st.offsetWidth - bleed;
+        var left = cp.offsetLeft + cp.offsetWidth + gap;
+        hero.style.setProperty("--s0", Math.min(1, (right - left) / st.offsetWidth).toFixed(4));
+        hero.style.setProperty("--x0", -bleed + "px");
+        var w = st.querySelector(".window");
+        hero.style.setProperty("--wr", ((0.52624 * st.offsetWidth) / w.offsetWidth).toFixed(4));
+        hero.style.setProperty("--wx", 0.392 * st.offsetWidth - w.offsetLeft + "px");
+        hero.style.setProperty("--wy", 0.425 * st.offsetHeight - w.offsetTop + "px");
+      } catch (e) {}
+    })();
+  </script>
+</section>
+
+<style>
+  .hero {
+    position: relative;
+    overflow-x: clip;
+  }
+  .sticky {
+    position: relative;
+    padding-top: clamp(110px, 14vh, 150px);
+    padding-bottom: clamp(40px, 6vw, 80px);
+  }
+  .grid {
+    display: grid;
+    gap: clamp(40px, 5vw, 72px);
+    align-items: center;
+  }
+  @media (min-width: 960px) {
+    .grid {
+      grid-template-columns: minmax(0, 1fr) minmax(0, 1.08fr);
+    }
+  }
+  .left {
+    display: grid;
+    gap: 72px;
+  }
+  .copy,
+  .next {
+    min-width: 0;
+  }
+  .chip {
+    margin-bottom: 28px;
+  }
+  .chip :global(.icon) {
+    width: 16px;
+    height: 16px;
+    color: var(--muted);
+  }
+  h1 {
+    font-size: clamp(3.4rem, 1.6rem + 6.2vw, 7.4rem);
+  }
+  .allow {
+    position: relative;
+    color: var(--primary-text);
+  }
+  .sub {
+    margin-top: 28px;
+    max-width: 34ch;
+  }
+  .ctas {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 12px;
+    margin-top: 32px;
+  }
+  /* Trust line: three short facts, each with its own icon, on the buttons'
+     left edge; they wrap as whole items on narrow screens. */
+  .proof {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--sp-2) var(--sp-6);
+    margin: var(--sp-6) 0 0;
+    padding: 0;
+    list-style: none;
+    font-size: 0.94rem;
+    color: var(--ink-2);
+  }
+  .proof li {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--sp-2);
+    white-space: nowrap;
+  }
+  .proof :global(.icon) {
+    flex: none;
+    width: 18px;
+    height: 18px;
+    color: var(--primary-text);
+  }
+  .next-title {
+    margin: var(--sp-4) 0 var(--sp-7);
+    font-size: clamp(1.9rem, 1.2rem + 1.8vw, 2.9rem);
+    max-width: 17ch;
+    text-wrap: balance;
+  }
+
+  /* "How it starts": the shared Granola-style .icon-list (global.css). */
+  .rows {
+    max-width: 34rem;
+  }
+  .rows :global(.il-icon) {
+    color: var(--ink);
+  }
+  /* Stage: colour slabs behind the window (Granola collage, Shufti colours).
+     Paint order: slabs, then badges, then the window, so on scroll both
+     slabs and badges can slide in behind the desktop. */
+  .stage {
+    position: relative;
+    aspect-ratio: 1 / 0.86;
+    min-width: 0;
+  }
+  .slab {
+    position: absolute;
+    border-radius: var(--radius-lg);
+  }
+  .s1 {
+    left: 0;
+    top: 16%;
+    width: 30%;
+    height: 66%;
+    background: var(--c-sun);
+  }
+  .s2 {
+    left: 6%;
+    bottom: 0;
+    width: 44%;
+    height: 30%;
+    background: var(--night);
+    overflow: hidden;
+  }
+  .pixels {
+    position: absolute;
+    inset: 0;
+    background-image: radial-gradient(circle, var(--dots) 1.4px, transparent 1.6px);
+    background-size: 14px 14px;
+  }
+  .s3 {
+    right: -6%;
+    top: 0;
+    width: 62%;
+    height: 78%;
+    background:
+      radial-gradient(120% 90% at 20% 10%, var(--c-violet) 0%, transparent 55%),
+      radial-gradient(90% 90% at 90% 80%, var(--c-coral) 0%, transparent 60%),
+      var(--c-blue);
+  }
+  /* Photo variant: the same three boxes, each filled with a photo. */
+  .slab {
+    overflow: hidden;
+    isolation: isolate;
+  }
+  .slab :global(picture) {
+    display: contents;
+  }
+  .slab :global(.slab-img) {
+    position: absolute;
+    inset: 0;
+    z-index: -1;
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    object-position: var(--pos, 50% 50%);
+  }
+  .hero[data-variant="slabs"] .slab :global(.slab-img),
+  .hero[data-variant="slabs"] .grade,
+  .hero[data-variant="photos"] .s1,
+  .hero[data-variant="photos"] .s2 {
+    display: none;
+  }
+  /* One photo, top right; the desktop overlaps its lower-left corner. */
+  .hero[data-variant="photos"] .s3 {
+    --pos: var(--pos-lg);
+    right: 0;
+    top: 0;
+    width: 80%;
+    height: 70%;
+    border-radius: var(--radius-xl);
+    background: var(--surface-2);
+    box-shadow: var(--shadow-window);
+  }
+  /* Grade: a soft wash so the photo sits in the warm paper palette, and a
+     deep-teal shade rising from the corner the desktop covers. */
+  .grade {
+    position: absolute;
+    inset: 0;
+    border-radius: inherit;
+    pointer-events: none;
+    background:
+      radial-gradient(120% 90% at 0% 100%, color-mix(in oklch, var(--primary) 34%, transparent), transparent 60%),
+      linear-gradient(180deg, color-mix(in oklch, var(--c-sun-soft) 26%, transparent), transparent 55%);
+    box-shadow: inset 0 0 0 1px var(--hairline);
+  }
+  .hero[data-variant="photos"] .window {
+    left: 0;
+    right: 28%;
+    top: 30%;
+  }
+  .hero[data-variant="photos"] .f1 {
+    left: 0;
+    top: 8%;
+    bottom: auto;
+  }
+  /* Diagonal from the first chip: under the photo, clear of the desktop. */
+  .hero[data-variant="photos"] .f2 {
+    right: 0;
+    bottom: 5%;
+  }
+  /* Tablets and up: a product shot. The photo is a large rounded backdrop
+     that fills the stage, and the desktop floats inside its frame, lower
+     right, with the same photo margin on its right and bottom. The till
+     screen (left) and the barista's face (top right) stay in view. */
+  @media (min-width: 601px) {
+    .hero[data-variant="photos"] .stage {
+      aspect-ratio: 1.45 / 1;
+    }
+    .hero[data-variant="photos"] .s3 {
+      inset: 0;
+      width: auto;
+      height: auto;
+    }
+    .hero[data-variant="photos"] .window {
+      left: auto;
+      top: auto;
+      width: 61%;
+      right: 4.4%;
+      bottom: 6.4%; /* 4.4% of the width, in height terms (1.45 : 1) */
+    }
+    .hero[data-variant="photos"] .grade {
+      background:
+        radial-gradient(90% 80% at 100% 100%, color-mix(in oklch, var(--primary) 30%, transparent), transparent 62%),
+        linear-gradient(180deg, color-mix(in oklch, var(--c-sun-soft) 18%, transparent), transparent 40%);
+    }
+    /* Chips straddle the frame, over quiet parts of the photo. */
+    .hero[data-variant="photos"] .f1 {
+      left: -3%;
+      top: auto;
+      bottom: 12%;
+    }
+    .hero[data-variant="photos"] .f2 {
+      left: 24%;
+      right: auto;
+      top: -18px;
+      bottom: auto;
+    }
+  }
+  /* Wide screens: the backdrop runs on towards the window edge. */
+  @media (min-width: 960px) {
+    .hero[data-variant="photos"] {
+      --bleed: clamp(0px, max(0px, (100vw - var(--max)) / 2) + var(--gutter) - 40px, 88px);
+    }
+    .hero[data-variant="photos"] .stage {
+      margin-right: calc(-1 * var(--bleed));
+    }
+    /* Window over a photo (owner review, 2026-11-25): the photo frame leaves
+       room on the right and at the bottom of the stage, and the desktop,
+       bigger, overhangs both edges into that room. Its top-left corner stays
+       where the resting desktop always sat (45.6% / 48.3% of the photo), so
+       it never takes space up or to the left (the till screen stays in view);
+       it grows from that corner (home-motion.ts, scale origin 0 0). All in
+       stage units: photo 86% x 88%, desktop 59.8% wide (16:10 at a 1.45 stage
+       = 54.2% tall), so it ends 13% past the photo's right edge and 8.7% past
+       its bottom, and still inside the stage. */
+    .hero[data-variant="photos"] .s3 {
+      inset: 0 14% 12% 0;
+    }
+    /* The final frame (owner review, 2026-11-25): a full product shot. The
+       desktop spans the whole right-hand column (the stage without its bleed,
+       so it ends on the page's right edge) and sits centred in the stage;
+       margin-top is a share of the width (16:10, so half its height is
+       width / 3.2). It is laid out at this size, so it is never drawn larger
+       than 1x. The resting frame (photo-led, desktop overhanging its lower
+       right) is this, scaled down: --wx, --wy, --wr (see the script below and
+       restFrame in home-motion.ts). */
+    .hero[data-variant="photos"] .window {
+      left: 0;
+      right: var(--bleed);
+      top: 50%;
+      bottom: auto;
+      width: auto;
+      margin-top: calc((100% - var(--bleed)) / -3.2);
+    }
+    /* One chip in the final frame: it straddles the desktop's top edge at the
+       right, over the quiet strip above the tiles, like a notice that just
+       popped up, and overhangs the right edge a little (by up to 20px, never
+       past the page margin). */
+    .hero[data-variant="photos"] .f1 {
+      z-index: 2;
+      left: auto;
+      right: max(0px, var(--bleed) - 20px);
+      top: 50%;
+      bottom: auto;
+      margin-top: calc((100% - var(--bleed)) / -3.2);
+      transform: translateY(-50%);
+    }
+    /* Static (reduced motion, no JS): the final composition, beside the
+       headline (not centred on the whole stacked column). The photo and the
+       second chip are part of the scrolled story only. */
+    .hero[data-variant="photos"]:not([data-scrub]) .stage {
+      align-self: start;
+      margin-top: 72px;
+    }
+    .hero[data-variant="photos"]:not([data-scrub]) .s3,
+    .hero[data-variant="photos"]:not([data-scrub]) .f2 {
+      display: none;
+    }
+  }
+  /* Phones: the photo is the star, full width and tall like the use-case
+     heroes, with a sun slab peeking out behind its top-left corner; the
+     desktop is smaller and tucks into the lower-left. One chip, lower right. */
+  @media (max-width: 600px) {
+    .hero[data-variant="photos"] .stage {
+      aspect-ratio: 1 / 1.18;
+    }
+    .hero[data-variant="photos"] .s1 {
+      display: block;
+      left: -8px;
+      top: -12px;
+      width: 46%;
+      height: 34%;
+      border-radius: var(--radius-lg);
+    }
+    .hero[data-variant="photos"] .s3 {
+      left: 0;
+      right: 0;
+      width: auto;
+      height: 76%;
+      --pos: var(--pos-sm);
+    }
+    .hero[data-variant="photos"] .window {
+      left: 0;
+      right: 34%;
+      top: 58%;
+    }
+    .hero[data-variant="photos"] .f1 {
+      left: auto;
+      right: 12px;
+      top: 14px;
+      bottom: auto;
+    }
+  }
+  .window {
+    position: absolute;
+    left: 12%;
+    right: 2%;
+    top: 10%;
+  }
+  .float {
+    position: absolute;
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    padding: 9px 14px;
+    border-radius: var(--radius-pill);
+    background: var(--surface);
+    border: 1px solid var(--line);
+    box-shadow: var(--shadow-md);
+    font-size: 0.86rem;
+    font-weight: 600;
+    white-space: nowrap;
+  }
+  .float :global(.icon) {
+    flex: none;
+    width: 18px;
+    height: 18px;
+  }
+  .float em {
+    font-style: normal;
+    color: var(--c-coral-ink);
+    background: var(--c-coral-soft);
+    padding: 2px 8px;
+    border-radius: 99px;
+    font-size: 0.78rem;
+  }
+  /* Both badges sit clear of the window at rest, below its bottom edge. */
+  .f1 {
+    left: 2%;
+    bottom: 4%;
+  }
+  .f1 :global(.icon) {
+    color: var(--c-coral);
+  }
+  .f2 {
+    right: 2%;
+    bottom: 15%;
+  }
+  .f2 :global(.icon) {
+    color: var(--success);
+  }
+  @media (max-width: 600px) {
+    .f2 {
+      display: none;
+    }
+    .f1 {
+      bottom: 2%;
+    }
+  }
+  /* Small screens: copy, then the picture, then "one idea". */
+  @media (max-width: 959px) {
+    .left {
+      display: contents;
+    }
+    .copy {
+      order: 1;
+    }
+    .stage {
+      order: 2;
+    }
+    .next {
+      order: 3;
+      margin-top: 24px;
+    }
+  }
+
+  /* ---------- Scrubbed mode (wide screens, motion allowed, JS on) ---------- */
+  .hero[data-scrub] {
+    height: 210vh;
+  }
+  .hero[data-scrub] .sticky {
+    position: sticky;
+    top: 0;
+    height: 100vh;
+    min-height: 640px;
+    display: flex;
+    align-items: center;
+    padding-block: 90px 40px;
+  }
+  .hero[data-scrub] .grid {
+    width: 100%;
+  }
+  .hero[data-scrub] .left {
+    display: grid;
+    gap: 0;
+  }
+  .hero[data-scrub] .copy,
+  .hero[data-scrub] .next {
+    grid-area: 1 / 1;
+    align-self: center;
+  }
+  /* GSAP (home-motion.ts) scrubs transform and opacity from here on. Until
+     it arrives, the second part waits hidden behind the headline. */
+  .hero[data-scrub] .next {
+    opacity: 0;
+    visibility: hidden;
+  }
+
+  /* Photo look, scrubbed: the layout below is the FINAL frame (big backdrop,
+     big desktop, "one idea" in a narrower left column), so everything is
+     rasterised at full size and only ever scaled down, which keeps the
+     photo and the drawn desktop sharp. The resting frame is that, scaled
+     down: the inline script in this section and home-motion.ts measure
+     --s0 (stage scale) and --x0 (shift) so the first paint is already the
+     resting frame, before GSAP loads. */
+  .hero[data-scrub][data-variant="photos"] {
+    height: 240vh;
+  }
+  .hero[data-scrub][data-variant="photos"] .grid {
+    container-type: inline-size;
+    grid-template-columns: minmax(0, min(28rem, 40%)) minmax(0, 1fr);
+    column-gap: 56px;
+  }
+  /* "One idea" fills the narrow column; the headline keeps its resting
+     width (the column it had before) and simply overhangs it. */
+  .hero[data-scrub][data-variant="photos"] .left {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .hero[data-scrub][data-variant="photos"] .copy {
+    width: calc((100cqw - clamp(40px, 5vw, 72px)) / 2.08);
+  }
+  .hero[data-scrub][data-variant="photos"] .stage {
+    transform-origin: 100% 50%;
+    transform: translateX(var(--x0, 0px)) scale(var(--s0, 1));
+  }
+  /* The desktop rests small over the photo's lower right (where it always
+     sat) and grows into the full column; the photo shrinks and slides in
+     behind it (home-motion.ts). Both scale from their top-left corner. */
+  .hero[data-scrub][data-variant="photos"] .window {
+    transform-origin: 0 0;
+    transform: translate(var(--wx, 0px), var(--wy, 0px)) scale(var(--wr, 1));
+  }
+  .hero[data-scrub][data-variant="photos"] .s3 {
+    transform-origin: 0 0;
+  }
+  /* Chips are counter-scaled so they read at full size while the stage rests small. */
+  .hero[data-scrub][data-variant="photos"] .float {
+    transform: scale(calc(1 / var(--s0, 1)));
+  }
+  /* The first chip rests on the photo's lower-left edge; home-motion.ts tucks
+     it away and brings it back on the desktop's top edge (the final frame above). */
+  .hero[data-scrub][data-variant="photos"] .f1 {
+    left: -3%;
+    right: auto;
+    top: auto;
+    bottom: 17%;
+    margin-top: 0;
+    transform-origin: 0% 50%;
+  }
+  .hero[data-scrub][data-variant="photos"] .f2 {
+    transform-origin: 50% 0%;
+  }
+  /* Overscan, so the photo can settle (scale down) as the desktop grows. */
+  .hero[data-scrub][data-variant="photos"] .s3 :global(.slab-img) {
+    inset: -4%;
+    width: 108%;
+    height: 108%;
+    max-width: none;
+  }
+</style>

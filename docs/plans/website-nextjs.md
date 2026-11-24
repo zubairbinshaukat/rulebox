@@ -1,5 +1,53 @@
 # Rulebox public website — build plan (Next.js on Cloudflare)
 
+## Update 2026-11-24: framework is Astro
+
+The owner switched the framework from Next.js to **Astro** (7.x). Everything
+else in this plan still applies, translated as follows:
+
+- **Hosting (Q1 a):** `output: 'static'` writes `apps/website/dist/`; one
+  Cloudflare Worker serves it as static assets, with `run_worker_first` only
+  for `/api/*` (`apps/website/wrangler.jsonc`, `apps/website/worker/`).
+  `build.format: 'file'` + `trailingSlash: 'never'` + `html_handling:
+  'drop-trailing-slash'` replaces Next's `trailingSlash: false`.
+- **Metadata API → `src/layouts/Base.astro` + `src/lib/seo.ts`** (title,
+  description, canonical, OG/Twitter, robots, JSON-LD helpers).
+  `sitemap.ts` → `@astrojs/sitemap`; `robots.ts` / `llms.txt` /
+  `security.txt` → static endpoints in `src/pages/`.
+- **OG images:** `next/og` does not apply. `scripts/og.mjs` renders one
+  1200×630 card per page with the bundled Figtree font in the Playwright
+  Chromium the repo already has, into `public/og/` (committed, like the
+  brand files). The build check fails if a page's card is missing.
+- **MDX and content:** Astro content collections (`src/content.config.ts`,
+  Zod schemas) for docs, blog, changelog and legal. Numbers, claims,
+  features and use cases are typed data in `src/data/`.
+- **Docs (Section 8):** Fumadocs is Next-only. Docs use **Astro's own
+  content collections and a custom layout**, not Starlight, so `/docs`
+  shares the site's header, footer, tokens and Solar icons with no theme
+  mapping and no extra JavaScript. Static search (Pagefind) is a later step.
+- **Images:** no Next optimiser to replace; product visuals are drawn in
+  HTML/CSS, the logo is the cube render (WebP from `pnpm gen:brand`) or,
+  below 28 px, the flat SVG from `geometry.ts` (`Logo.astro`).
+- **Headers/CSP:** `scripts/headers.mjs` writes `dist/_headers` after each
+  build, hashing the inline scripts Astro emitted (CSP in Report-Only first).
+- **Animation (Section 13.1):** still CSS-first, transform/opacity only,
+  reduced motion honoured; one ~2 kB module script on every page; GSAP + ScrollTrigger on the home page only (~46 kB gzipped, loaded on demand, never under reduced motion).
+
+- **Website fonts (owner override of Decision 19, website only, 2026-11-24):**
+  the owner asked for Granola's type. Granola uses Quadrant (headings) and
+  Melange (text), both proprietary retail faces with no free licence; they
+  are not downloaded or bundled (using them would need a paid web-font
+  licence from their foundries). The site uses the closest SIL OFL 1.1
+  matches instead, self-hosted as woff2 (Latin + Latin Extended):
+  **Source Serif 4** (weight file, optical size fixed at 20) for headings and
+  **Instrument Sans** for text; Geist Mono stays for code. Fallbacks are
+  metric-matched Georgia / Arial. The apps (Staff App, dashboard) keep
+  Figtree, and so do the OG cards (`scripts/og.mjs`) until they are redrawn.
+- Website is light-only with dark accent sections; primary = Deep teal (owner, 2026-11-25).
+
+Anything below that names Next.js-specific APIs (`generateStaticParams`,
+`opengraph-image.tsx`, `next/font/local`, `out/`) maps to the items above.
+
 **Status:** Draft 1, not started · **Written:** 2026-11-21
 **Content source:** `docs/website/story-and-copy.md` (cited below as
 "Story §n")
@@ -814,8 +862,8 @@ How it fits the monorepo:
 - **Root scripts to add:** `dev:website`, `build:website`,
   `test:website` (this edits the root `package.json`; a task for the
   build step, not this plan).
-- **Brand:** take the logo from `packages/ui` (`<LogoMark>`,
-  `geometry.ts`). Never redraw it. Favicons and site icons come from
+- **Brand:** take the logo from `packages/ui` (the cube WebPs in
+  `brand/cube/`, the flat mark in `geometry.ts`; PRD 25.5). Never redraw it. Favicons and site icons come from
   `pnpm gen:brand`; extend that script to write the website's icons
   instead of adding files by hand.
 - **Design tokens:** reuse `packages/ui` tokens where the design pass

@@ -1,0 +1,243 @@
+---
+/*
+ * "Everything connected" (Qonto's "keep all your tools connected", adapted):
+ * PCs on the inner ring, the kinds of things you push on the outer ring,
+ * the dashboard in the middle. Rings turn slowly (transform only), pause
+ * off screen and stop with reduced motion.
+ */
+import Logo from "../Logo.astro";
+import Icon from "../Icon.astro";
+import type { IconName } from "../Icon.astro";
+
+const pcs: { name: string; tone: string }[] = [
+  { name: "Front desk", tone: "blue" },
+  { name: "Till 2", tone: "sun" },
+  { name: "Lab 07", tone: "violet" },
+  { name: "Reception", tone: "coral" },
+  { name: "Back office", tone: "mint" },
+];
+const things: { name: string; icon: IconName; tone: string }[] = [
+  { name: "winget apps", icon: "widget", tone: "sun" },
+  { name: "Web apps", icon: "globe", tone: "blue" },
+  { name: "MSI / EXE", icon: "box", tone: "coral" },
+  { name: "Portable EXE", icon: "programming", tone: "violet" },
+  { name: "Wi-Fi", icon: "wifi", tone: "mint" },
+  { name: "Printers", icon: "printer", tone: "blue" },
+  { name: "Branding", icon: "palette", tone: "coral" },
+];
+---
+
+<section class="connected section" aria-labelledby="conn-title">
+  <div class="container grid">
+    <div class="copy">
+      <p class="label" style="--dot: var(--c-violet)">Everything connected</p>
+      <h2 id="conn-title" class="h2">Change it once. Every PC follows.</h2>
+      <p class="lead">
+        Apps, web apps, Wi-Fi, printers and your brand live in one place. Each PC holds the latest version of its rules and moves to it
+        on its own, even after being offline.
+      </p>
+      <ul class="facts" role="list">
+        <li><Icon name="check" />Desired state, not commands: no backlog to replay.</li>
+        <li><Icon name="check" />Offline PCs catch up when they reconnect.</li>
+        <li><Icon name="check" />Four app types: winget, web app, MSI/EXE, portable.</li>
+      </ul>
+      <a class="link-arrow" href="/features/apps">Apps and web apps <Icon name="arrow-right" /></a>
+    </div>
+
+    <div class="orbit" data-loop aria-hidden="true">
+      <span class="ring r1"></span>
+      <span class="ring r2"></span>
+      <span class="ring r3"></span>
+      <div class="spin s-in" style={`--n:${pcs.length}`}>
+        {
+          pcs.map((p, i) => (
+            <span class="node pc" style={`--i:${i}`} data-tone={p.tone}>
+              <span class="upright">
+                <Icon name="laptop" />
+                {p.name}
+              </span>
+            </span>
+          ))
+        }
+      </div>
+      <div class="spin s-out" style={`--n:${things.length}`}>
+        {
+          things.map((t, i) => (
+            <span class="node thing" style={`--i:${i}`} data-tone={t.tone}>
+              <span class="upright">
+                <Icon name={t.icon} />
+                <span class="t-name">{t.name}</span>
+              </span>
+            </span>
+          ))
+        }
+      </div>
+      <div class="hub">
+        <Logo size={64} />
+        <span>Dashboard</span>
+      </div>
+    </div>
+  </div>
+</section>
+
+<style>
+  .connected {
+    overflow-x: clip;
+  }
+  .grid {
+    display: grid;
+    gap: 56px;
+    align-items: center;
+  }
+  @media (min-width: 960px) {
+    .grid {
+      grid-template-columns: minmax(0, 0.9fr) minmax(0, 1.1fr);
+    }
+  }
+  .copy {
+    display: grid;
+    gap: 22px;
+    justify-items: start;
+  }
+  .facts {
+    display: grid;
+    gap: 10px;
+  }
+  .facts li {
+    display: flex;
+    gap: 10px;
+    align-items: flex-start;
+    color: var(--ink-2);
+  }
+  .facts :global(.icon) {
+    color: var(--success);
+    margin-top: 3px;
+  }
+  .orbit {
+    --size: min(100%, 600px);
+    position: relative;
+    width: var(--size);
+    aspect-ratio: 1;
+    margin-inline: auto;
+    container-type: inline-size;
+  }
+  .ring {
+    position: absolute;
+    inset: var(--inset);
+    border-radius: 50%;
+    border: 1px solid var(--line);
+    background: radial-gradient(closest-side, transparent 92%, color-mix(in oklch, var(--ink) 3%, transparent));
+  }
+  .r1 {
+    --inset: 31%;
+    background: var(--surface);
+  }
+  .r2 {
+    --inset: 17%;
+  }
+  .r3 {
+    --inset: 2%;
+    border-style: dashed;
+  }
+  .spin {
+    position: absolute;
+    inset: 0;
+  }
+  .node {
+    position: absolute;
+    left: 50%;
+    top: 50%;
+    --a: calc(360deg / var(--n) * var(--i));
+    transform: rotate(var(--a)) translateY(calc(var(--r) * -1)) rotate(calc(var(--a) * -1));
+  }
+  .s-in .node {
+    --r: 33cqw;
+  }
+  .s-out .node {
+    --r: 48cqw;
+  }
+  .upright {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    transform: translate(-50%, -50%);
+    /* Counter-rotation happens around the node's anchor, which is the label's centre. */
+    transform-origin: 0 0;
+    white-space: nowrap;
+    border-radius: 99px;
+    font-weight: 620;
+  }
+  .pc .upright {
+    padding: 8px 14px 8px 8px;
+    background: var(--surface);
+    border: 1px solid var(--line);
+    box-shadow: var(--shadow-sm);
+    font-size: clamp(0.72rem, 2.2cqw, 0.92rem);
+  }
+  .pc :global(.icon) {
+    width: 28px;
+    height: 28px;
+    padding: 5px;
+    border-radius: 50%;
+    background: var(--tone-soft);
+    color: var(--tone-ink);
+  }
+  .thing .upright {
+    flex-direction: column;
+    gap: 6px;
+    font-size: clamp(0.66rem, 1.9cqw, 0.8rem);
+    color: var(--muted);
+  }
+  .thing :global(.icon) {
+    width: clamp(40px, 10cqw, 58px);
+    height: clamp(40px, 10cqw, 58px);
+    padding: clamp(9px, 2.4cqw, 14px);
+    border-radius: 50%;
+    background: var(--tone);
+    color: var(--tone-on, var(--ink));
+    box-shadow: var(--shadow-md);
+  }
+  .hub {
+    position: absolute;
+    inset: 38%;
+    display: grid;
+    place-items: center;
+    align-content: center;
+    gap: 6px;
+    border-radius: 50%;
+    background: var(--night);
+    color: var(--on-night);
+    font-family: var(--font-mono);
+    font-size: 0.72rem;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    box-shadow: var(--shadow-window);
+  }
+  .hub :global(.logo-mark) {
+    width: 44%;
+    height: auto;
+  }
+  @media (prefers-reduced-motion: no-preference) {
+    .s-in {
+      animation: spin 90s linear infinite;
+    }
+    .s-out {
+      animation: spin 140s linear infinite reverse;
+    }
+    .s-in .upright {
+      animation: spin 90s linear infinite reverse;
+    }
+    .s-out .upright {
+      animation: spin 140s linear infinite;
+    }
+    .orbit[data-paused] .spin,
+    .orbit[data-paused] .upright {
+      animation-play-state: paused;
+    }
+  }
+  @keyframes spin {
+    to {
+      rotate: 360deg;
+    }
+  }
+</style>

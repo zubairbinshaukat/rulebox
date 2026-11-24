@@ -1,0 +1,40 @@
+---
+import Base from "../../layouts/Base.astro";
+import PageHero from "../../components/PageHero.astro";
+import { SECURITY_EMAIL, REPO_URL } from "../../config";
+---
+
+<Base
+  title="Report a Security Problem | Rulebox"
+  description="How to report a vulnerability or a kiosk escape in Rulebox, what to include, and what happens after you report it."
+  path="/security/disclosure"
+  og="security"
+  crumbs={[{ name: "Security", path: "/security" }, { name: "Disclosure", path: "/security/disclosure" }]}
+>
+  <PageHero label="Security" title="Report a security problem." sub="A way out of the desktop, a way into the agent, or anything that looks wrong. Thank you for telling us first." tone="coral" compact />
+
+  <section class="section-tight">
+    <div class="container">
+      <div class="prose flush">
+        <h2>How to report</h2>
+        <p>Email <a href={`mailto:${SECURITY_EMAIL}`}>{SECURITY_EMAIL}</a>, or use GitHub's private vulnerability reporting on the <a href={`${REPO_URL}/security`}>repository's security page</a>. Please do not open a public issue for a vulnerability.</p>
+        <h2>What to include</h2>
+        <ul>
+          <li>The Rulebox version and the Windows version and edition.</li>
+          <li>The steps to reproduce, as short as you can make them.</li>
+          <li>What you expected, and what happened.</li>
+          <li>Whether you think it is being used against anyone today.</li>
+        </ul>
+        <h2>What happens next</h2>
+        <ul>
+          <li>We confirm that we received your report.</li>
+          <li>We reproduce it, fix it, and tell you before the fix is public.</li>
+          <li>With your permission, we credit you in the release notes.</li>
+        </ul>
+        <h2>Scope</h2>
+        <p>The agent, the staff desktop, the installer, the dashboard and the hosted backend. Physical attacks that need a BIOS password or BitLocker to stop are known limits; see <a href="/security">the security page</a>.</p>
+        <p>The same contact is published in <a href="/.well-known/security.txt">/.well-known/security.txt</a>.</p>
+      </div>
+    </div>
+  </section>
+</Base>

@@ -1,0 +1,285 @@
+---
+/*
+ * Docs layout (own content collection, not Starlight): three columns, the
+ * same header, footer, fonts and tokens as the marketing pages, Solar icons,
+ * and no extra JavaScript.
+ */
+import Base from "./Base.astro";
+import Icon from "../components/Icon.astro";
+import { getCollection } from "astro:content";
+import { REPO_URL } from "../config";
+import { articleLd } from "../lib/seo";
+
+interface Props {
+  title: string;
+  description: string;
+  path: string;
+  section?: string;
+  updated?: Date;
+  draft?: boolean;
+  headings?: { depth: number; slug: string; text: string }[];
+  editPath?: string;
+}
+const { title, description, path, section, updated, draft = false, headings = [], editPath } = Astro.props;
+
+const SECTIONS = ["Start here", "Install and enrol", "Manage", "Security", "Self-hosting", "Reference", "Contributing"];
+const all = await getCollection("docs");
+const groups = SECTIONS.map((s) => ({
+  name: s,
+  pages: all.filter((d) => d.data.section === s).sort((a, b) => a.data.order - b.data.order),
+})).filter((g) => g.pages.length);
+const toc = headings.filter((h) => h.depth === 2);
+const crumbs = [{ name: "Docs", path: "/docs" }, ...(section ? [{ name: title, path }] : [])];
+---
+
+<Base title={`${title} | Rulebox Docs`} description={description} path={path} og="docs" noindex={draft} crumbs={crumbs} ld={[articleLd({ type: "TechArticle", title, description, path })]}>
+  <div class="container docs">
+    <nav class="side" aria-label="Docs">
+      <details open class="side-box">
+        <summary>Contents</summary>
+        {
+          groups.map((g) => (
+            <div class="grp">
+              <p class="grp-name">{g.name}</p>
+              <ul role="list">
+                {g.pages.map((p) => {
+                  const href = `/docs/${p.id}`;
+                  return (
+                    <li>
+                      <a href={href} aria-current={href === path ? "page" : undefined}>
+                        <span>{p.data.title}</span>
+                        {p.data.draft && <span class="dot" title="Draft" />}
+                      </a>
+                    </li>
+                  );
+                })}
+              </ul>
+            </div>
+          ))
+        }
+      </details>
+    </nav>
+
+    <article class="main">
+      {section && <p class="label" style="--dot: var(--c-blue)">{section}</p>}
+      <h1 class="h1 doc-title">{title}</h1>
+      {
+        draft && (
+          <p class="draft">
+            <Icon name="info" /> Draft. This page is being written and checked against the release.
+          </p>
+        )
+      }
+      <div class="prose flush">
+        <slot />
+      </div>
+      <footer class="doc-foot" hidden={!updated && !editPath}>
+        {updated && <span class="muted">Last updated {updated.toISOString().slice(0, 10)}</span>}
+        {
+          editPath && (
+            <a class="text-link" href={`${REPO_URL}/edit/main/apps/website/${editPath}`}>
+              Edit this page
+            </a>
+          )
+        }
+      </footer>
+    </article>
+
+    <aside class="toc" aria-label="On this page">
+      {
+        toc.length > 0 && (
+          <>
+            <p class="grp-name">On this page</p>
+            <ul role="list">
+              {toc.map((h) => (
+                <li>
+                  <a href={`#${h.slug}`}>{h.text}</a>
+                </li>
+              ))}
+            </ul>
+          </>
+        )
+      }
+    </aside>
+  </div>
+</Base>
+
+<style>
+  .docs {
+    display: grid;
+    gap: var(--sp-7);
+    padding-top: var(--sp-6);
+    padding-bottom: var(--section-y);
+  }
+  @media (min-width: 900px) {
+    .docs {
+      grid-template-columns: 248px minmax(0, 1fr);
+      column-gap: var(--sp-9);
+    }
+  }
+  @media (min-width: 1240px) {
+    .docs {
+      grid-template-columns: 248px minmax(0, 1fr) 224px;
+    }
+  }
+  .side-box {
+    border-radius: var(--radius);
+  }
+  .side-box summary {
+    display: none;
+  }
+  @media (max-width: 899px) {
+    .side-box {
+      padding: var(--sp-3) var(--sp-4);
+      background: var(--surface);
+      border: 1px solid var(--line);
+    }
+    .side-box summary {
+      display: block;
+      font-weight: var(--fw-strong);
+      cursor: pointer;
+    }
+    .grp:first-of-type {
+      margin-top: var(--sp-4);
+    }
+  }
+  @media (min-width: 900px) {
+    .side {
+      position: sticky;
+      top: 100px;
+      align-self: start;
+      max-height: calc(100vh - 120px);
+      overflow-y: auto;
+    }
+    .grp:first-of-type {
+      margin-top: 0;
+    }
+  }
+  .grp {
+    margin-top: var(--sp-6);
+  }
+  .grp-name {
+    height: var(--sp-6);
+    padding-inline: var(--sp-3);
+    margin-bottom: var(--sp-1);
+    display: flex;
+    align-items: center;
+    font-family: var(--font-mono);
+    font-size: var(--fs-label);
+    letter-spacing: var(--ls-label);
+    text-transform: uppercase;
+    color: var(--muted);
+  }
+  .side ul {
+    display: grid;
+    gap: 0;
+  }
+  .side a {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--sp-2);
+    min-height: var(--sp-8);
+    padding: var(--sp-2) var(--sp-3);
+    border-radius: var(--radius-sm);
+    text-decoration: none;
+    color: var(--ink-2);
+    font-size: var(--fs-small);
+    line-height: var(--lh-tight);
+  }
+  .side a:hover {
+    background: var(--surface-2);
+  }
+  .side a[aria-current="page"] {
+    background: var(--primary-soft);
+    color: var(--primary-text);
+    font-weight: var(--fw-strong);
+  }
+  .dot {
+    flex: none;
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: var(--c-violet);
+  }
+  .main {
+    min-width: 0;
+  }
+  .main > .label {
+    display: flex;
+    height: var(--sp-6);
+    margin-bottom: var(--sp-3);
+  }
+  .doc-title {
+    margin-bottom: var(--sp-7);
+    font-size: var(--fs-h2);
+    line-height: var(--lh-h2);
+    letter-spacing: var(--ls-h2);
+  }
+  /* No label above (docs home): the title starts level with the sidebar. */
+  .main > .doc-title:first-child {
+    margin-top: var(--sp-2);
+  }
+  .draft {
+    display: flex;
+    gap: var(--sp-3);
+    align-items: center;
+    margin-bottom: var(--sp-6);
+    padding: var(--sp-3) var(--sp-4);
+    border-radius: var(--radius-sm);
+    background: var(--c-violet-soft);
+    color: var(--c-violet-ink);
+    font-weight: var(--fw-strong);
+  }
+  .doc-foot[hidden] {
+    display: none;
+  }
+  .doc-foot {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--sp-5);
+    margin-top: var(--sp-9);
+    padding-top: var(--sp-5);
+    border-top: 1px solid var(--line);
+    font-size: var(--fs-small);
+  }
+  .toc {
+    display: none;
+  }
+  @media (min-width: 1240px) {
+    .toc {
+      display: block;
+      position: sticky;
+      top: 100px;
+      align-self: start;
+    }
+    .toc .grp-name {
+      padding-inline: var(--sp-4);
+    }
+    .toc ul {
+      border-left: 1px solid var(--line);
+    }
+    .toc a {
+      display: flex;
+      align-items: center;
+      min-height: var(--sp-8);
+      padding: var(--sp-2) var(--sp-4);
+      color: var(--muted);
+      text-decoration: none;
+      font-size: var(--fs-small);
+      line-height: var(--lh-tight);
+    }
+    .toc a:hover {
+      color: var(--ink);
+    }
+  }
+  .main :global(.prose th:first-child),
+  .main :global(.prose td:first-child) {
+    padding-left: 0;
+  }
+  @media (min-width: 900px) {
+    .main :global(.prose td:first-child) {
+      white-space: nowrap;
+    }
+  }
+</style>

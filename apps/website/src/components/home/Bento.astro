@@ -1,0 +1,304 @@
+---
+/*
+ * Beat 5, "meanwhile, at the dashboard", as one component that shows
+ * several features at once (Qonto's multi-feature block): cards of mixed
+ * sizes, each holding a small drawn piece of the dashboard.
+ */
+import Icon from "../Icon.astro";
+---
+
+<section class="bento-wrap section stone" aria-labelledby="bento-title">
+  <div class="container">
+    <div class="section-head split">
+      <div>
+        <p class="label" style="--dot: var(--c-mint)">Meanwhile, at the dashboard</p>
+        <h2 id="bento-title" class="h2" style="margin-top:var(--head-gap)">You never touch the laptop again.</h2>
+      </div>
+      <p class="lead">Every change is versioned, signed and written to an audit log.</p>
+    </div>
+
+    <div class="bento">
+      <article class="b b-app" data-tone="sun">
+        <div class="b-text">
+          <h3 class="h3">Add an app</h3>
+          <p class="muted">Pick Zoom for the “Front desk” group. Every PC in the group installs it quietly and reports back.</p>
+        </div>
+        <div class="ui ui-install" data-loop aria-hidden="true">
+          <p class="ui-head"><span class="app-ico"><Icon name="video" /></span>Zoom <span class="arrow">→</span> <b>Front desk</b></p>
+          <ul role="list">
+            <li><span>Front desk 1</span><em class="ok">Installed</em></li>
+            <li><span>Front desk 2</span><em class="ok">Installed</em></li>
+            <li><span>Front desk 3</span><em class="run"><i></i>Installing</em></li>
+            <li><span>Front desk 4</span><em class="wait">Pending, offline</em></li>
+          </ul>
+        </div>
+      </article>
+
+      <article class="b b-rings" data-tone="blue">
+        <div class="b-text">
+          <h3 class="h3">Roll out with care</h3>
+          <p class="muted">One test PC first, then a few, then everyone. Something broke? Go back one version with one click.</p>
+        </div>
+        <div class="ui ui-rings" aria-hidden="true">
+          <p><span class="ring-name">Pilot</span><span class="bar"><i style="--w:100%"></i></span></p>
+          <p><span class="ring-name">Early</span><span class="bar"><i style="--w:64%"></i></span></p>
+          <p><span class="ring-name">Everyone</span><span class="bar"><i style="--w:0%"></i></span></p>
+          <span class="rollback"><Icon name="undo" />Roll back</span>
+        </div>
+      </article>
+
+      <article class="b b-lock" data-tone="violet">
+        <div class="b-text">
+          <h3 class="h3">Lose a laptop</h3>
+          <p class="muted">Lock it from the dashboard. It stays locked, even offline.</p>
+        </div>
+        <div class="ui ui-lock" aria-hidden="true">
+          <Icon name="lock" />
+          <p>This laptop belongs to<br /><b>Your Company</b></p>
+        </div>
+      </article>
+
+      <article class="b b-msg" data-tone="coral">
+        <div class="b-text">
+          <h3 class="h3">Tell everyone something</h3>
+          <p class="muted">Send a banner to every screen in a group.</p>
+        </div>
+        <div class="ui ui-banner" aria-hidden="true">
+          <Icon name="bell" />
+          <span>Maintenance at 5 pm. Please save your work.</span>
+        </div>
+      </article>
+
+      <article class="b b-log" data-tone="mint">
+        <div class="b-text">
+          <h3 class="h3">Versioned, signed, logged</h3>
+          <p class="muted">Every PC moves to the latest signed version of its rules. Every admin action is in the audit log.</p>
+        </div>
+        <ol class="ui ui-log" role="list" aria-hidden="true">
+          <li><b>v14</b><span>Apps changed for Front desk</span><em>signed</em></li>
+          <li><b>v13</b><span>Banner sent to All PCs</span><em>signed</em></li>
+          <li><b>v12</b><span>Wi-Fi profile added</span><em>signed</em></li>
+        </ol>
+      </article>
+    </div>
+    <p class="illus">Drawn examples of the dashboard, not live data.</p>
+  </div>
+</section>
+
+<style>
+  .bento {
+    display: grid;
+    gap: 16px;
+  }
+  @media (min-width: 860px) {
+    .bento {
+      grid-template-columns: repeat(6, 1fr);
+      grid-auto-rows: minmax(250px, auto);
+    }
+    .b-app {
+      grid-column: span 4;
+      grid-row: span 2;
+    }
+    .b-rings {
+      grid-column: span 2;
+      grid-row: span 2;
+    }
+    .b-lock,
+    .b-msg {
+      grid-column: span 2;
+    }
+    .b-log {
+      grid-column: span 2;
+    }
+  }
+  .b {
+    position: relative;
+    display: flex;
+    flex-direction: column;
+    gap: 22px;
+    padding: clamp(22px, 2.4vw, 30px);
+    border-radius: var(--radius-lg);
+    background: var(--surface);
+    border: 1px solid var(--line);
+    overflow: hidden;
+  }
+  .b-text {
+    display: grid;
+    gap: 8px;
+    max-width: 44ch;
+  }
+  .ui {
+    margin-top: auto;
+    border-radius: 16px;
+    background: var(--tone-soft);
+    padding: 16px;
+    font-size: 0.9rem;
+  }
+  .ui-install {
+    padding: clamp(16px, 3vw, 36px);
+  }
+  .ui-install .ui-head {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-bottom: 14px;
+    font-size: 1.05rem;
+    font-weight: 600;
+  }
+  .app-ico {
+    display: grid;
+    place-items: center;
+    width: 34px;
+    height: 34px;
+    border-radius: 10px;
+    background: var(--c-violet);
+    color: var(--c-violet-on);
+  }
+  .arrow {
+    color: var(--muted);
+  }
+  .ui-install ul {
+    display: grid;
+    gap: 6px;
+  }
+  .ui-install li {
+    display: flex;
+    justify-content: space-between;
+    gap: 10px;
+    padding: 12px 14px;
+    border-radius: 12px;
+    background: var(--surface);
+  }
+  .ui em {
+    font-style: normal;
+    font-size: 0.8rem;
+    font-weight: 650;
+    padding: 2px 10px;
+    border-radius: 99px;
+  }
+  .ok {
+    background: var(--c-mint-soft);
+    color: var(--c-mint-ink);
+  }
+  .run {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    background: var(--c-blue-soft);
+    color: var(--c-blue-ink);
+  }
+  .run i {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: var(--c-blue);
+    animation: pulse 1.4s var(--ease) infinite;
+  }
+  /* Paused while off screen (site.ts), so it never ticks during other scroll effects. */
+  .ui-install[data-paused] .run i {
+    animation-play-state: paused;
+  }
+  @keyframes pulse {
+    50% {
+      opacity: 0.25;
+      transform: scale(0.7);
+    }
+  }
+  .wait {
+    background: var(--c-violet-soft);
+    color: var(--c-violet-ink);
+  }
+  .ui-rings {
+    display: grid;
+    gap: 14px;
+  }
+  .ui-rings p {
+    display: grid;
+    gap: 6px;
+    font-weight: 600;
+  }
+  .bar {
+    position: relative;
+    height: 10px;
+    border-radius: 99px;
+    background: var(--surface);
+    overflow: hidden;
+  }
+  .bar i {
+    position: absolute;
+    inset: 0;
+    background: var(--c-blue);
+    border-radius: 99px;
+    width: var(--w);
+  }
+  .rollback {
+    justify-self: start;
+    display: inline-flex;
+    gap: 8px;
+    align-items: center;
+    padding: 8px 14px;
+    border-radius: 99px;
+    background: var(--ink);
+    color: var(--bg);
+    font-weight: 650;
+    font-size: 0.86rem;
+  }
+  .ui-lock {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    background: var(--night);
+    color: var(--on-night);
+  }
+  .ui-lock :global(.icon) {
+    width: 34px;
+    height: 34px;
+    color: var(--c-violet);
+    flex: none;
+  }
+  .ui-banner {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    font-weight: 600;
+  }
+  .ui-banner :global(.icon) {
+    width: 24px;
+    height: 24px;
+    color: var(--c-coral);
+    flex: none;
+  }
+  .ui-log {
+    display: grid;
+    gap: 6px;
+    font-family: var(--font-mono);
+    font-size: 0.78rem;
+  }
+  .ui-log li {
+    display: grid;
+    grid-template-columns: auto 1fr auto;
+    gap: 10px;
+    align-items: center;
+    padding: 8px 10px;
+    border-radius: 10px;
+    background: var(--surface);
+  }
+  .ui-log span {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .ui-log em {
+    padding: 1px 8px;
+    font-size: 0.72rem;
+  }
+  .ui-log em {
+    background: var(--c-mint-soft);
+    color: var(--c-mint-ink);
+  }
+  .illus {
+    margin-top: 16px;
+    font-size: 0.82rem;
+    color: var(--muted);
+  }
+</style>

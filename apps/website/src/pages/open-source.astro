@@ -1,0 +1,118 @@
+---
+import Base from "../layouts/Base.astro";
+import PageHero from "../components/PageHero.astro";
+import Points from "../components/Points.astro";
+import CtaClose from "../components/CtaClose.astro";
+import Icon from "../components/Icon.astro";
+import { ISSUES_URL, REPO_URL, RELEASES_URL } from "../config";
+---
+
+<Base
+  title="Open-Source Kiosk Software for Windows (MIT) | Rulebox"
+  description="Rulebox is MIT-licensed. Read the code that runs on your PCs, host it yourself, or let us host it."
+  path="/open-source"
+  og="open-source"
+  crumbs={[{ name: "Open source", path: "/open-source" }]}
+>
+  <PageHero label="Open source" title="Open by default." sub="Rulebox is MIT-licensed. Read it, run it, change it." tone="blue" icon="code" primary={{ label: "View the source", href: REPO_URL }} secondary={{ label: "Read the self-hosting guide", href: "/docs/self-hosting" }} />
+
+  <section class="section-tight">
+    <div class="container">
+      <h2 class="h2 t">Why open</h2>
+      <Points
+        items={[
+          { title: "You should be able to inspect what runs as SYSTEM.", text: "A lockdown tool has deep access to a PC. Closed source asks for blind trust." },
+          { title: "No lock-in.", text: "Your rules are plain data. The backend can be your own deployment. Leaving is an uninstall." },
+          { title: "Small organisations deserve good tools.", text: "A school with twelve PCs should not need a sales call." },
+        ]}
+      />
+    </div>
+  </section>
+
+  <section class="section-tight follow">
+    <div class="container two">
+      <div class="card">
+        <h2 class="h3">How we make money</h2>
+        <p class="muted">The software is free. A paid hosted service is planned. That pays for development.</p>
+      </div>
+      <div class="card">
+        <h2 class="h3">What "open" does not mean</h2>
+        <p class="muted">The hosted service's operator tools are run by us. Third-party parts keep their own licences, listed in the third-party notices. Two worth knowing: icons are Solar by 480 Design (CC BY 4.0), and the GSAP animation library used in the staff desktop is free to use but is not an open-source licence.</p>
+      </div>
+    </div>
+  </section>
+
+  <section class="section-tight follow">
+    <div class="container">
+      <ul class="links" role="list">
+        <li><a class="lk card-link" href={REPO_URL} data-tone="blue"><span class="il-icon"><Icon name="code" /></span><span class="lk-text"><strong>Repository</strong><span class="muted">The code, issues and discussions</span></span></a></li>
+        <li><a class="lk card-link" href={`${REPO_URL}/blob/main/LICENSE`} data-tone="mint"><span class="il-icon"><Icon name="document" /></span><span class="lk-text"><strong>Licence</strong><span class="muted">MIT</span></span></a></li>
+        <li><a class="lk card-link" href="/docs/self-hosting" data-tone="violet"><span class="il-icon"><Icon name="server" /></span><span class="lk-text"><strong>Self-hosting</strong><span class="muted">Run your own backend</span></span></a></li>
+        <li><a class="lk card-link" href={`${ISSUES_URL}?q=is%3Aopen+label%3A%22good+first+issue%22`} data-tone="sun"><span class="il-icon"><Icon name="hand-heart" /></span><span class="lk-text"><strong>Good first issues</strong><span class="muted">A place to start helping</span></span></a></li>
+        <li><a class="lk card-link" href="/legal/licenses" data-tone="coral"><span class="il-icon"><Icon name="checklist" /></span><span class="lk-text"><strong>Third-party notices</strong><span class="muted">Every licence we ship</span></span></a></li>
+        <li><a class="lk card-link" href={RELEASES_URL} data-tone="blue"><span class="il-icon"><Icon name="cloud-download" /></span><span class="lk-text"><strong>Releases</strong><span class="muted">Installers and notes</span></span></a></li>
+      </ul>
+    </div>
+  </section>
+  <CtaClose headline="Read it first." sub="Then join the pilot, or host it yourself." />
+</Base>
+
+<style>
+  /* Consecutive sections: one gap between blocks, not two stacked paddings. */
+  .follow {
+    padding-top: 0;
+  }
+  .t {
+    margin-bottom: var(--head-after);
+  }
+  .two {
+    display: grid;
+    gap: var(--grid-gap);
+  }
+  @media (min-width: 860px) {
+    .two {
+      grid-template-columns: 1fr 1fr;
+    }
+  }
+  .two .card {
+    display: grid;
+    gap: var(--card-gap);
+    align-content: start;
+  }
+  /* Six links: 1, 2 or 3 columns, never a half-empty last row. */
+  .links {
+    display: grid;
+    gap: var(--grid-gap);
+    grid-template-columns: 1fr;
+  }
+  @media (min-width: 640px) {
+    .links {
+      grid-template-columns: repeat(2, 1fr);
+    }
+  }
+  @media (min-width: 1020px) {
+    .links {
+      grid-template-columns: repeat(3, 1fr);
+    }
+  }
+  .lk {
+    display: flex;
+    gap: var(--sp-4);
+    align-items: center;
+    min-height: calc(var(--icon-col) + 2 * var(--sp-5));
+    padding: var(--sp-5);
+    border-radius: var(--radius-lg);
+    background: var(--surface);
+    border: 1px solid var(--line);
+  }
+  .lk .il-icon {
+    flex: none;
+  }
+  .lk-text {
+    display: grid;
+    line-height: var(--lh-tight);
+  }
+  .lk-text > span {
+    font-size: var(--fs-small);
+  }
+</style>

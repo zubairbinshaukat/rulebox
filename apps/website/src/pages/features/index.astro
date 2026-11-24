@@ -1,0 +1,143 @@
+---
+import Base from "../../layouts/Base.astro";
+import PageHero from "../../components/PageHero.astro";
+import CtaClose from "../../components/CtaClose.astro";
+import Icon from "../../components/Icon.astro";
+import { FEATURES } from "../../data/features";
+---
+
+<Base
+  title="Features: Lockdown, Staff Desktop, Apps and More | Rulebox"
+  description="Everything Rulebox does on a Windows PC and in the dashboard: lockdown, a friendly staff desktop, per-person sign-in, silent app installs and staged rollouts."
+  path="/features"
+  og="features"
+  crumbs={[{ name: "Features", path: "/features" }]}
+>
+  <PageHero label="Features" title="Everything staff need. Nothing they don't." sub="Each feature has its own page, with what it does, what it does not do, and where it matters." tone="sun" />
+
+  <section class="section-tight">
+    <div class="container">
+      <ul class="fgrid" role="list">
+        {
+          FEATURES.map((f, i) => (
+            <li class:list={["reveal", { big: i < 2 }]}>
+              <a class="fcard card-link" href={`/features/${f.slug}`} data-tone={f.tone}>
+                <span class="tile-icon">
+                  <Icon name={f.icon} />
+                </span>
+                <span class="fname">
+                  {f.name}
+                  {f.status && <span class="status" data-kind="new">{f.status}</span>}
+                </span>
+                <span class="fhead">{f.headline}</span>
+                <span class="fline">{f.oneLine}</span>
+                <Icon name="arrow-up-right" class="go" />
+              </a>
+            </li>
+          ))
+        }
+      </ul>
+    </div>
+  </section>
+  <CtaClose />
+</Base>
+
+<style>
+  /* 13 features, no holes: desktop = 3 columns with two double-width cards
+     (4 + 11 cells = 5 full rows); tablet = 2 columns with one double-width
+     card (2 + 12 cells = 7 full rows); phone = 1 column. */
+  .fgrid {
+    display: grid;
+    gap: var(--grid-gap);
+    grid-template-columns: 1fr;
+    --fs-feat: clamp(1.75rem, 1.45rem + 0.9vw, 2.25rem);
+  }
+  @media (min-width: 640px) {
+    .fgrid {
+      grid-template-columns: repeat(2, 1fr);
+    }
+    .big:first-child {
+      grid-column: span 2;
+    }
+    .fhead {
+      min-height: calc(2 * var(--fs-h3) * var(--lh-h3));
+    }
+    .big .fhead {
+      min-height: 0;
+    }
+  }
+  @media (min-width: 1100px) {
+    .fgrid {
+      grid-template-columns: repeat(3, 1fr);
+    }
+    .big {
+      grid-column: span 2;
+    }
+    /* Each double-width card leaves one cell beside it: dense packing fills it. */
+    .fgrid {
+      grid-auto-flow: dense;
+    }
+  }
+  .big .fhead {
+    font-size: var(--fs-feat);
+  }
+  .fcard {
+    position: relative;
+    display: flex;
+    flex-direction: column;
+    gap: var(--card-gap);
+    height: 100%;
+    padding: var(--card-pad);
+    border-radius: var(--radius-lg);
+    background: var(--surface);
+    border: 1px solid var(--line);
+  }
+  .fcard .tile-icon {
+    width: var(--icon-col);
+    height: var(--icon-col);
+    border-radius: 12px;
+    margin-bottom: var(--sp-2);
+  }
+  .big .fcard {
+    background:
+      radial-gradient(70% 90% at 100% 0%, var(--tone-soft), transparent 70%),
+      var(--surface);
+  }
+  .fname {
+    display: inline-flex;
+    gap: var(--sp-2);
+    align-items: center;
+    font-family: var(--font-mono);
+    font-size: var(--fs-label);
+    letter-spacing: var(--ls-label);
+    text-transform: uppercase;
+    color: var(--muted);
+  }
+  .fhead {
+    font-family: var(--font-display);
+    font-size: var(--fs-h3);
+    font-weight: var(--fw-heading);
+    letter-spacing: var(--ls-h3);
+    line-height: var(--lh-h3);
+    text-wrap: balance;
+  }
+  .fline {
+    color: var(--ink-2);
+    font-size: var(--fs-small);
+    line-height: var(--lh-tight);
+  }
+  .big .fline {
+    font-size: var(--fs-body);
+  }
+  :global(.go) {
+    position: absolute;
+    top: calc(var(--card-pad) + (var(--icon-col) - 1.15em) / 2);
+    right: var(--card-pad);
+    color: var(--muted);
+    transition: transform 0.3s var(--ease-out);
+  }
+  .fcard:hover :global(.go) {
+    transform: translate(2px, -2px);
+    color: var(--ink);
+  }
+</style>

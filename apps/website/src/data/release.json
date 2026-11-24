@@ -1,0 +1,4 @@
+{
+  "_note": "Written by scripts/fetch-release.mjs at build time. null until the first public release exists.",
+  "latest": null
+}

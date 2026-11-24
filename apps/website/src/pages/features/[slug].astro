@@ -1,0 +1,164 @@
+---
+import Base from "../../layouts/Base.astro";
+import PageHero from "../../components/PageHero.astro";
+import Points from "../../components/Points.astro";
+import Limits from "../../components/Limits.astro";
+import CtaClose from "../../components/CtaClose.astro";
+import Icon from "../../components/Icon.astro";
+import { FEATURES, type Feature } from "../../data/features";
+import { useCaseBySlug } from "../../data/useCases";
+import { CTA_PRIMARY } from "../../config";
+
+export function getStaticPaths() {
+  return FEATURES.map((f) => ({ params: { slug: f.slug }, props: { feature: f } }));
+}
+interface Props {
+  feature: Feature;
+}
+const { feature: f } = Astro.props;
+const path = `/features/${f.slug}`;
+const related = f.useCases.map(useCaseBySlug).filter((u) => !!u);
+const isLockdown = ["lockdown", "employee-sign-in", "apps", "reversible"].includes(f.slug);
+const others = FEATURES.filter((x) => x.slug !== f.slug).slice(0, 13);
+---
+
+<Base title={f.title} description={f.description} path={path} og={`features-${f.slug}`} crumbs={[{ name: "Features", path: "/features" }, { name: f.name, path }]}>
+  <PageHero
+    label={f.name}
+    title={f.headline}
+    sub={f.oneLine}
+    tone={f.tone}
+    icon={f.icon}
+    status={f.status}
+    primary={CTA_PRIMARY}
+    secondary={{ label: "Read the docs", href: "/docs" }}
+  />
+
+  <section class="section-tight">
+    <div class="container">
+      <Points items={f.points.map((text) => ({ text }))} />
+    </div>
+  </section>
+
+  <section class="section-tight follow">
+    <div class="container">
+      <div class="limits-wrap">
+        <Limits items={f.doesNotDo} />
+        <p class="src muted">Product reference: {f.prd}. Every claim is checked against the release before launch.</p>
+      </div>
+    </div>
+  </section>
+
+  <section class="section-tight follow">
+    <div class="container">
+      <div class="rel">
+        <div>
+          <h2 class="h3">Where it matters</h2>
+          <ul class="links" role="list">
+            {
+              related.map((u) => (
+                <li>
+                  <a class="link-arrow" href={`/use-cases/${u!.slug}`}>
+                    {u!.name} <Icon name="arrow-right" />
+                  </a>
+                </li>
+              ))
+            }
+            {
+              isLockdown && (
+                <li>
+                  <a class="link-arrow" href="/security">
+                    How Rulebox protects a PC <Icon name="arrow-right" />
+                  </a>
+                </li>
+              )
+            }
+            <li>
+              <a class="link-arrow" href="/compare/windows-kiosk-mode">
+                Compare with Windows kiosk mode <Icon name="arrow-right" />
+              </a>
+            </li>
+          </ul>
+        </div>
+        <div>
+          <h2 class="h3">Other features</h2>
+          <ul class="chips" role="list">
+            {
+              others.map((o) => (
+                <li>
+                  <a class="chip-link" href={`/features/${o.slug}`} data-tone={o.tone}>
+                    <Icon name={o.icon} />
+                    {o.name}
+                  </a>
+                </li>
+              ))
+            }
+          </ul>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <CtaClose />
+</Base>
+
+<style>
+  /* Sections after the first drop their top padding: one gap between blocks, not two. */
+  .follow {
+    padding-top: 0;
+  }
+  .limits-wrap {
+    display: grid;
+    gap: var(--sp-3);
+    max-width: 880px;
+  }
+  .src {
+    font-size: var(--fs-xs);
+  }
+  .rel {
+    display: grid;
+    gap: var(--sp-8);
+    padding-top: var(--sp-8);
+    border-top: 1px solid var(--line);
+  }
+  @media (min-width: 900px) {
+    .rel {
+      grid-template-columns: 1fr 1.4fr;
+      gap: var(--sp-9);
+    }
+  }
+  .rel > div {
+    display: grid;
+    align-content: start;
+    gap: var(--sp-5);
+  }
+  .links {
+    display: grid;
+    gap: var(--sp-3);
+  }
+  .chips {
+    display: grid;
+    gap: var(--sp-2);
+    grid-template-columns: repeat(auto-fill, minmax(min(100%, 240px), 1fr));
+  }
+  .chip-link {
+    display: flex;
+    align-items: center;
+    gap: var(--sp-2);
+    min-height: var(--icon-col);
+    padding: var(--sp-2) var(--sp-4) var(--sp-2) var(--sp-3);
+    border-radius: var(--radius-pill);
+    background: var(--surface);
+    border: 1px solid var(--line);
+    text-decoration: none;
+    font-weight: var(--fw-medium);
+    font-size: var(--fs-small);
+    line-height: var(--lh-tight);
+  }
+  .chip-link :global(.icon) {
+    color: var(--tone-ink);
+  }
+  .chip-link:hover {
+    border-color: var(--line-strong);
+  }
+</style>

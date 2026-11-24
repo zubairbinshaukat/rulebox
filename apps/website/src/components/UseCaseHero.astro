@@ -1,0 +1,217 @@
+---
+/*
+ * Use-case hero: headline and actions on top, then a wide photo of the
+ * real place in a large rounded frame. A drawn Rulebox desktop (the same
+ * DesktopMock used across the site) sits over the corner of the photo:
+ * "this PC, locked down". The photo is stock, the desktop an illustration.
+ */
+import Icon from "./Icon.astro";
+import type { IconName } from "./Icon.astro";
+import PhotoFrame from "./PhotoFrame.astro";
+import DesktopMock from "./DesktopMock.astro";
+import type { Photo } from "../data/photos";
+
+interface Props {
+  label: string;
+  title: string;
+  sub: string;
+  tone: "blue" | "sun" | "coral" | "violet" | "mint";
+  icon: IconName;
+  place: string;
+  photo: Photo;
+  mock?: "desktop" | "signin" | "evening";
+  primary?: { label: string; href: string };
+  secondary?: { label: string; href: string };
+}
+const { label, title, sub, tone, icon, place, photo, mock = "desktop", primary, secondary } = Astro.props;
+---
+
+<section class="uch" data-tone={tone}>
+  <div class="container">
+    <div class="top">
+      <div class="head">
+        <p class="label enter" style="--dot: var(--tone)">{label}</p>
+        <h1 class="h1 enter" style="--d:.08s">{title}</h1>
+      </div>
+      <div class="side">
+        <p class="lead enter" style="--d:.16s">{sub}</p>
+        {
+          (primary || secondary) && (
+            <div class="ctas enter" style="--d:.24s">
+              {primary && (
+                <a class="btn btn-primary btn-lg" href={primary.href}>
+                  {primary.label}
+                  <Icon name="arrow-right" />
+                </a>
+              )}
+              {secondary && (
+                <a class="btn btn-ghost btn-lg" href={secondary.href}>
+                  {secondary.label}
+                </a>
+              )}
+            </div>
+          )
+        }
+        <slot />
+      </div>
+    </div>
+
+    <div class="stage enter" style="--d:.12s">
+      <span class="slab" aria-hidden="true"></span>
+      <PhotoFrame
+        photo={photo}
+        priority
+        shade
+        class="hero-frame"
+        widths={[640, 960, 1280, 1600, 2000]}
+        sizes="(min-width: 1320px) 1240px, calc(100vw - 2 * clamp(16px, 3.2vw, 40px))"
+      >
+        <span class="place">
+          <span class="place-ic"><Icon name={icon} /></span>
+          {place}
+        </span>
+      </PhotoFrame>
+      <div class="mock-wrap" aria-hidden="true">
+        <DesktopMock variant={mock} />
+      </div>
+    </div>
+  </div>
+</section>
+
+<style>
+  .uch {
+    padding: 28px 0 clamp(16px, 2.5vw, 32px);
+  }
+  .top {
+    display: grid;
+    gap: 22px;
+    align-items: end;
+    margin-bottom: clamp(28px, 4vw, 52px);
+  }
+  @media (min-width: 1020px) {
+    .top {
+      grid-template-columns: 1.35fr 1fr;
+      gap: 56px;
+    }
+  }
+  .head {
+    display: grid;
+    gap: 18px;
+    justify-items: start;
+  }
+  .h1 {
+    max-width: 15ch;
+  }
+  .side {
+    display: grid;
+    gap: 20px;
+    justify-items: start;
+  }
+  .lead {
+    max-width: 44ch;
+  }
+  .ctas {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 12px;
+  }
+
+  .stage {
+    position: relative;
+    /* Room for the drawn desktop that hangs below the photo. */
+    margin-bottom: clamp(56px, 9vw, 120px);
+  }
+  .slab {
+    position: absolute;
+    right: -10px;
+    top: -14px;
+    width: 34%;
+    height: 62%;
+    border-radius: var(--radius-xl);
+    background:
+      radial-gradient(90% 80% at 20% 10%, var(--sheen), transparent 60%),
+      var(--tone);
+    z-index: 0;
+  }
+  .stage :global(.hero-frame) {
+    position: relative;
+    z-index: 1;
+    aspect-ratio: 16 / 7.4;
+    border-radius: clamp(20px, 2.4vw, 32px);
+  }
+  .place {
+    position: absolute;
+    left: clamp(14px, 2.2vw, 28px);
+    bottom: clamp(14px, 2.2vw, 28px);
+    z-index: 1;
+    display: inline-flex;
+    align-items: center;
+    gap: 10px;
+    padding: 7px 16px 7px 7px;
+    border-radius: var(--radius-pill);
+    background: var(--chip-glass);
+    color: var(--chip-glass-ink);
+    font-weight: 600;
+    font-size: 0.95rem;
+    box-shadow: var(--shadow-sm);
+    backdrop-filter: blur(10px);
+  }
+  .place-ic {
+    display: grid;
+    place-items: center;
+    width: 32px;
+    height: 32px;
+    border-radius: 50%;
+    background: var(--tone-soft);
+    color: var(--tone-ink);
+    font-size: 18px;
+  }
+  .mock-wrap {
+    position: absolute;
+    z-index: 2;
+    right: clamp(14px, 4vw, 56px);
+    bottom: calc(-1 * clamp(44px, 7vw, 96px));
+    width: clamp(220px, 32%, 420px);
+    border-radius: 18px;
+  }
+  @media (prefers-reduced-motion: no-preference) {
+    @supports (animation-timeline: view()) {
+      .mock-wrap {
+        animation: lift linear both;
+        animation-timeline: view();
+        animation-range: cover 30% cover 100%;
+      }
+    }
+  }
+  @keyframes lift {
+    from {
+      transform: translateY(0);
+    }
+    to {
+      transform: translateY(-28px);
+    }
+  }
+  @media (max-width: 719px) {
+    .stage :global(.hero-frame) {
+      aspect-ratio: 4 / 3.3;
+    }
+    .slab {
+      width: 46%;
+      right: -6px;
+      top: -10px;
+    }
+    /* The label above the headline already names the place; on a phone the
+       chip would cover faces, so the photo stays clean. */
+    .place {
+      display: none;
+    }
+    .mock-wrap {
+      width: 58%;
+      right: 12px;
+      bottom: -40px;
+    }
+    .stage {
+      margin-bottom: 64px;
+    }
+  }
+</style>

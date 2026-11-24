@@ -1,0 +1,71 @@
+---
+import { getCollection, render } from "astro:content";
+import Base from "../../layouts/Base.astro";
+import Icon from "../../components/Icon.astro";
+
+export async function getStaticPaths() {
+  const pages = await getCollection("legal");
+  return pages.map((entry) => ({ params: { slug: entry.id }, props: { entry } }));
+}
+const { entry } = Astro.props;
+const { Content } = await render(entry);
+const path = `/legal/${entry.id}`;
+// Keep hyphenated words whole so a title never breaks as "third-" / "party".
+const titleParts = entry.data.title.split(/(\S+-\S+)/);
+---
+
+<Base title={entry.data.title} description={entry.data.description} path={path} og="default" noindex={entry.data.draft} crumbs={[{ name: "Legal", path: "/legal/privacy" }, { name: entry.data.title, path }]}>
+  <header class="head">
+    <div class="container">
+      <p class="label" style="--dot: var(--c-blue)">Legal</p>
+      <h1 class="h1">{titleParts.map((p) => (p.includes("-") ? <span class="nb">{p}</span> : p))}</h1>
+    </div>
+  </header>
+  <section class="section-tight">
+    <div class="container">
+      {
+        entry.data.draft && (
+          <p class="draft">
+            <Icon name="info" /> Draft. A lawyer reviews this page before the pilot takes outside organisations.
+          </p>
+        )
+      }
+      <div class="prose flush"><Content /></div>
+      <p class="muted upd">Last updated {entry.data.updated.toISOString().slice(0, 10)}</p>
+    </div>
+  </section>
+</Base>
+
+<style>
+  .head {
+    padding-top: var(--sp-4);
+    padding-bottom: var(--sp-4);
+  }
+  .head .label {
+    margin-bottom: var(--head-gap);
+  }
+  .nb {
+    white-space: nowrap;
+  }
+  .head .h1 {
+    max-width: 22ch;
+  }
+  .head + .section-tight {
+    padding-top: var(--sp-7);
+  }
+  .draft {
+    display: inline-flex;
+    gap: var(--sp-3);
+    align-items: center;
+    margin-bottom: var(--sp-7);
+    padding: var(--sp-3) var(--sp-4);
+    border-radius: var(--radius-sm);
+    background: var(--c-violet-soft);
+    color: var(--c-violet-ink);
+    font-weight: var(--fw-strong);
+  }
+  .upd {
+    margin-top: var(--sp-8);
+    font-size: var(--fs-small);
+  }
+</style>

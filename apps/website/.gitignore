@@ -1,0 +1,6 @@
+dist/
+.astro/
+.screenshots/
+.og-tmp/
+.wrangler/
+.dev.vars

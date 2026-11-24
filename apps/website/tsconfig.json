@@ -1,0 +1,9 @@
+{
+  "extends": "astro/tsconfigs/strict",
+  "include": [".astro/types.d.ts", "src", "astro.config.ts", "scripts"],
+  "exclude": ["dist", "worker"],
+  "compilerOptions": {
+    "types": ["unplugin-icons/types/astro", "node"],
+    "noUncheckedIndexedAccess": true
+  }
+}

@@ -1,0 +1,414 @@
+---
+/* Use-case template, Story §6.13: hero, scene, problem, how, outcome,
+   limits, faq, related, cta. Measured outcomes come only after the pilot.
+   Photos are stock (src/data/photos.ts), credited at the foot of the page. */
+import Base from "../../layouts/Base.astro";
+import UseCaseHero from "../../components/UseCaseHero.astro";
+import UseCaseCards from "../../components/UseCaseCards.astro";
+import PhotoFrame from "../../components/PhotoFrame.astro";
+import PhotoCredits from "../../components/PhotoCredits.astro";
+import Limits from "../../components/Limits.astro";
+import Faq from "../../components/Faq.astro";
+import CtaClose from "../../components/CtaClose.astro";
+import Icon from "../../components/Icon.astro";
+import { USE_CASES, useCaseBySlug, type UseCase } from "../../data/useCases";
+import { USE_CASE_PHOTOS, photosFor } from "../../data/photos";
+import { featureBySlug } from "../../data/features";
+import { CTA_PRIMARY, CTA_SECONDARY } from "../../config";
+
+export function getStaticPaths() {
+  return USE_CASES.map((u) => ({ params: { slug: u.slug }, props: { uc: u } }));
+}
+interface Props {
+  uc: UseCase;
+}
+const { uc } = Astro.props;
+const path = `/use-cases/${uc.slug}`;
+const related = uc.related.map(useCaseBySlug).filter((x) => !!x);
+const photos = USE_CASE_PHOTOS[uc.slug]!;
+const MOCKS: Record<string, "desktop" | "signin" | "evening"> = { "schools-and-computer-labs": "signin", "call-centres": "signin", "hotels-front-desk": "evening" };
+const mock = MOCKS[uc.slug] ?? "desktop";
+const outcomeLayout = photos.outcome ? "photo" : uc.limits ? "pair" : "wide";
+---
+
+<Base title={uc.title} description={uc.description} path={path} og={`use-cases-${uc.slug}`} crumbs={[{ name: "Use cases", path: "/use-cases" }, { name: uc.name, path }]}>
+  <UseCaseHero
+    label={uc.name}
+    title={uc.h1}
+    sub={uc.sub}
+    tone={uc.tone}
+    icon={uc.icon}
+    place={uc.place}
+    photo={photos.hero}
+    mock={mock}
+    primary={CTA_PRIMARY}
+    secondary={CTA_SECONDARY}
+  >
+    {
+      !uc.hub && (
+        <p class="hub-link muted">
+          Part of <a class="text-link" href="/use-cases/shared-staff-pcs">shared staff PCs</a>, the problem behind every page here.
+        </p>
+      )
+    }
+  </UseCaseHero>
+
+  <div class="container body">
+    <section class="scene-grid" aria-label="The moment and the problem">
+      <figure class="scene reveal" data-tone={uc.tone}>
+        <p class="label" style="--dot: var(--tone)">The moment</p>
+        <blockquote>{uc.moment}</blockquote>
+        <figcaption>An illustration, not a customer story.</figcaption>
+      </figure>
+      <div class="problem">
+        <div class="problem-text reveal">
+          <p class="label" style="--dot: var(--c-coral)">The problem</p>
+          <p class="lead">{uc.problem}</p>
+        </div>
+        {photos.scene && <PhotoFrame photo={photos.scene} parallax class="scene-photo" sizes="(min-width: 900px) 560px, 100vw" />}
+      </div>
+    </section>
+
+    <section class="how-wrap" aria-labelledby="how-title">
+      <div class="how-head">
+        <h2 id="how-title" class="h2">How Rulebox solves&nbsp;it</h2>
+        <p class="muted">Each point links to the feature that does it.</p>
+      </div>
+      <ul class="how" role="list">
+        {
+          uc.how.map((h, i) => {
+            const f = h.feature ? featureBySlug(h.feature) : undefined;
+            return (
+              <li class="reveal" data-tone={f?.tone ?? "mint"}>
+                <span class="how-ic">{f ? <Icon name={f.icon} /> : <span class="mono">{i + 1}</span>}</span>
+                <p class="how-text">{h.text}</p>
+                {f && (
+                  <a class="how-link" href={`/features/${f.slug}`}>
+                    {f.name}
+                    <Icon name="arrow-right" />
+                  </a>
+                )}
+              </li>
+            );
+          })
+        }
+      </ul>
+    </section>
+
+    <section class:list={["outcome-grid", `o-${outcomeLayout}`]} aria-label="The outcome">
+      {photos.outcome && <PhotoFrame photo={photos.outcome} parallax class="outcome-photo" sizes="(min-width: 900px) 640px, 100vw" />}
+      <div class="outcome-col">
+        <div class="outcome reveal">
+          <p class="label" style="--dot: var(--c-mint)">The outcome</p>
+          <p class="out-text">{uc.outcome}</p>
+          <p class="muted small">Measured results will be published here after the pilot, with the customer's permission.</p>
+        </div>
+        {uc.limits && <Limits items={[uc.limits]} />}
+      </div>
+    </section>
+
+    {
+      uc.hub && (
+        <section aria-labelledby="places-title">
+          <div class="places-head">
+            <h2 id="places-title" class="h2">Pick your place</h2>
+            <p class="muted">Five places where one PC serves many people.</p>
+          </div>
+          <UseCaseCards />
+        </section>
+      )
+    }
+  </div>
+
+  <Faq items={uc.faq} title="Questions" />
+
+  <section class="section-tight foot">
+    <div class="container related">
+      <h2 class="h3">Related</h2>
+      <ul role="list">
+        {
+          related.map((r) => (
+            <li>
+              <a class="link-arrow" href={`/use-cases/${r!.slug}`}>
+                {r!.name} <Icon name="arrow-right" />
+              </a>
+            </li>
+          ))
+        }
+        <li><a class="link-arrow" href="/compare/windows-kiosk-mode">Rulebox or Windows kiosk mode <Icon name="arrow-right" /></a></li>
+        <li><a class="link-arrow" href="/docs">Read the docs <Icon name="arrow-right" /></a></li>
+      </ul>
+      <PhotoCredits photos={photosFor(uc.slug)} />
+    </div>
+  </section>
+
+  <CtaClose />
+</Base>
+
+<style>
+  .hub-link {
+    font-size: 0.95rem;
+  }
+  .body {
+    display: grid;
+    gap: clamp(72px, 9vw, 128px);
+    padding-block: clamp(24px, 3vw, 40px) clamp(8px, 2vw, 24px);
+  }
+
+  /* ---------- Moment + problem ---------- */
+  .scene-grid {
+    display: grid;
+    gap: 20px;
+  }
+  @media (min-width: 900px) {
+    .scene-grid {
+      grid-template-columns: 1fr 1fr;
+      gap: 20px;
+      align-items: stretch;
+    }
+  }
+  .scene {
+    display: grid;
+    align-content: space-between;
+    gap: 24px;
+    padding: clamp(26px, 4vw, 48px);
+    border-radius: var(--radius-xl);
+    background: var(--night);
+    color: var(--on-night);
+    --muted: var(--on-night-muted);
+  }
+  .scene blockquote {
+    font-size: clamp(1.3rem, 1rem + 1vw, 1.8rem);
+    line-height: 1.35;
+    letter-spacing: -0.02em;
+    font-weight: 500;
+  }
+  .scene figcaption {
+    font-size: 0.84rem;
+    color: var(--on-night-muted);
+  }
+  .problem {
+    display: grid;
+    gap: 20px;
+    grid-template-rows: auto 1fr;
+  }
+  .problem-text {
+    display: grid;
+    gap: 14px;
+    padding: clamp(22px, 3vw, 34px);
+    border-radius: var(--radius-xl);
+    background: var(--surface);
+    border: 1px solid var(--line);
+  }
+  .problem :global(.scene-photo) {
+    aspect-ratio: 16 / 10;
+  }
+  @media (min-width: 900px) {
+    .problem :global(.scene-photo) {
+      aspect-ratio: auto;
+      min-height: 280px;
+    }
+  }
+
+  /* ---------- How: one aligned list, any length ----------
+     Fixed icon column, text on one x for every row and centred on the
+     icon, hairline rules that fade out to the right. */
+  .how-wrap {
+    display: grid;
+    gap: 28px;
+  }
+  @media (min-width: 1020px) {
+    .how-wrap {
+      grid-template-columns: 5fr 7fr;
+      gap: 64px;
+      align-items: start;
+    }
+    .how-head {
+      position: sticky;
+      top: 120px;
+    }
+  }
+  .how-head {
+    display: grid;
+    gap: 14px;
+    align-content: start;
+  }
+  .how-head .h2 {
+    max-width: 13ch;
+  }
+  .how {
+    --rule: linear-gradient(90deg, var(--line-strong), var(--line) 55%, transparent);
+    display: grid;
+  }
+  .how li {
+    position: relative;
+    display: grid;
+    grid-template-columns: 44px minmax(0, 1fr) auto;
+    column-gap: 20px;
+    row-gap: 4px;
+    align-items: center;
+    padding: 22px 0;
+  }
+  .how li::before,
+  .how li:last-child::after {
+    content: "";
+    position: absolute;
+    left: 0;
+    right: 0;
+    height: 1px;
+    background: var(--rule);
+  }
+  .how li::before {
+    top: 0;
+  }
+  .how li:last-child::after {
+    bottom: 0;
+  }
+  .how-ic {
+    display: grid;
+    place-items: center;
+    width: 44px;
+    height: 44px;
+    border-radius: 13px;
+    background: var(--tone-soft);
+    color: var(--tone-ink);
+    font-size: 22px;
+  }
+  .how-text {
+    color: var(--ink-2);
+    font-size: 1.05rem;
+    line-height: 1.5;
+    max-width: 52ch;
+    text-wrap: pretty;
+  }
+  .how-link {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    justify-self: end;
+    padding: 6px 12px;
+    border-radius: var(--radius-pill);
+    background: var(--surface);
+    border: 1px solid var(--line);
+    color: var(--ink-2);
+    font-size: 0.86rem;
+    font-weight: 560;
+    white-space: nowrap;
+    text-decoration: none;
+  }
+  .how-link :global(.icon) {
+    width: 14px;
+    height: 14px;
+    transition: transform 0.25s var(--ease);
+  }
+  .how-link:hover {
+    color: var(--ink);
+    border-color: var(--line-strong);
+  }
+  .how-link:hover :global(.icon) {
+    transform: translateX(2px);
+  }
+  @media (max-width: 639px) {
+    .how li {
+      grid-template-columns: 44px minmax(0, 1fr);
+      align-items: start;
+    }
+    .how-text {
+      padding-top: 9px;
+    }
+    .how-link {
+      grid-column: 2;
+      justify-self: start;
+      margin-top: 8px;
+    }
+  }
+
+  .places-head {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 8px 32px;
+    margin-bottom: clamp(24px, 3vw, 40px);
+  }
+
+  /* ---------- Outcome: paired with a photo, or with the limits ---------- */
+  .outcome-grid {
+    display: grid;
+    gap: 20px;
+  }
+  .outcome-col {
+    display: grid;
+    gap: 20px;
+    align-content: start;
+  }
+  @media (min-width: 900px) {
+    .o-photo {
+      grid-template-columns: 1.05fr 1fr;
+      align-items: stretch;
+    }
+    .o-photo .outcome-col {
+      align-content: stretch;
+      grid-template-rows: 1fr auto;
+    }
+    .o-pair .outcome-col {
+      grid-template-columns: 1.1fr 1fr;
+      align-items: stretch;
+    }
+  }
+  .outcome-grid :global(.outcome-photo) {
+    aspect-ratio: 4 / 3;
+  }
+  @media (min-width: 900px) {
+    .outcome-grid :global(.outcome-photo) {
+      aspect-ratio: auto;
+      min-height: 420px;
+    }
+  }
+  .outcome {
+    display: grid;
+    align-content: center;
+    gap: 14px;
+    padding: clamp(24px, 3.4vw, 44px);
+    border-radius: var(--radius-xl);
+    background:
+      radial-gradient(70% 90% at 100% 0%, var(--sheen-soft), transparent 65%),
+      var(--c-mint-soft);
+  }
+  .o-wide .outcome {
+    padding: clamp(28px, 5vw, 64px);
+  }
+  .out-text {
+    font-size: clamp(1.35rem, 1.1rem + 0.8vw, 1.8rem);
+    font-weight: 560;
+    letter-spacing: -0.025em;
+    line-height: 1.25;
+    text-wrap: balance;
+  }
+  .o-wide .out-text {
+    font-size: clamp(1.6rem, 1.1rem + 1.8vw, 2.7rem);
+    max-width: 30ch;
+  }
+  .small {
+    font-size: 0.88rem;
+  }
+
+  /* ---------- Related + credits ---------- */
+  .foot {
+    padding-top: 0;
+  }
+  .related {
+    display: grid;
+    gap: 16px;
+    padding-top: 28px;
+    border-top: 1px solid var(--line);
+  }
+  .related ul {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 14px 32px;
+  }
+  .related :global(.credits) {
+    margin-top: 18px;
+  }
+</style>

@@ -1,0 +1,176 @@
+---
+import Base from "../../layouts/Base.astro";
+import PageHero from "../../components/PageHero.astro";
+import CtaClose from "../../components/CtaClose.astro";
+import Icon from "../../components/Icon.astro";
+import PhotoFrame from "../../components/PhotoFrame.astro";
+import PhotoCredits from "../../components/PhotoCredits.astro";
+import UseCaseCards from "../../components/UseCaseCards.astro";
+import { USE_CASES, MORE_PLACES } from "../../data/useCases";
+import { USE_CASE_PHOTOS } from "../../data/photos";
+const hub = USE_CASES.find((u) => u.hub)!;
+const spokes = USE_CASES.filter((u) => !u.hub);
+const hubPhoto = USE_CASE_PHOTOS[hub.slug]!.hero;
+const pagePhotos = [hubPhoto, ...spokes.map((s) => USE_CASE_PHOTOS[s.slug]!.hero)];
+---
+
+<Base
+  title="Use Cases: Shared PCs in Shops, Schools, Clinics | Rulebox"
+  description="Rulebox is for Windows PCs that staff share: tills, front desks, computer labs, clinic receptions and call centre floors. Find your place."
+  path="/use-cases"
+  og="use-cases"
+  crumbs={[{ name: "Use cases", path: "/use-cases" }]}
+>
+  <PageHero label="Use cases" title="Built for PCs that many people share." sub="Rulebox is for people who sign in and work. Pick the place that looks like yours." tone="blue" compact />
+
+  <section class="section-tight top">
+    <div class="container">
+      <a class="hub card-link enter" style="--d:.2s" href={`/use-cases/${hub.slug}`} data-tone="mint">
+        <span class="hub-text">
+          <span class="label" style="--dot: var(--c-mint)">Start here</span>
+          <strong class="h2">{hub.h1}</strong>
+          <span class="lead">{hub.sub}</span>
+          <span class="go">Shared staff PCs <Icon name="arrow-right" /></span>
+        </span>
+        <PhotoFrame
+          photo={hubPhoto}
+          priority
+          class="hub-photo"
+          widths={[480, 720, 960, 1280]}
+          sizes="(min-width: 960px) 640px, 100vw"
+        >
+          <span class="hub-badge"><Icon name={hub.icon} /></span>
+        </PhotoFrame>
+      </a>
+
+      <h2 class="h3 pick">Pick your place</h2>
+      <UseCaseCards />
+
+      <div class="more">
+        <h2 class="h3">More places, pages coming</h2>
+        <ul role="list">
+          {MORE_PLACES.map((m) => <li><Icon name={m.icon} />{m.name}</li>)}
+        </ul>
+      </div>
+
+      <aside class="not">
+        <h2 class="h3">Not a target</h2>
+        <p class="muted">
+          Unattended single-app screens such as digital signage, ticket machines and self-checkout. Windows' built-in single-app kiosk is made
+          for that. Rulebox is for people who sign in and work. <a class="text-link" href="/compare/windows-kiosk-mode">Compare the two</a>.
+        </p>
+      </aside>
+
+      <div class="credit-row">
+        <PhotoCredits photos={pagePhotos} mock={false} />
+      </div>
+    </div>
+  </section>
+  <CtaClose />
+</Base>
+
+<style>
+  .top {
+    padding-top: 8px;
+  }
+  .hub {
+    display: grid;
+    gap: 8px;
+    padding: 8px;
+    border-radius: calc(var(--radius-xl) + 6px);
+    background:
+      radial-gradient(60% 120% at 0% 100%, var(--c-mint-soft), transparent 70%),
+      var(--surface);
+    border: 1px solid var(--line);
+    color: var(--ink);
+    margin-bottom: clamp(48px, 6vw, 80px);
+  }
+  @media (min-width: 960px) {
+    .hub {
+      grid-template-columns: 1fr 1.1fr;
+      align-items: stretch;
+    }
+  }
+  .hub-text {
+    display: grid;
+    gap: 16px;
+    align-content: center;
+    justify-items: start;
+    padding: clamp(22px, 4vw, 52px);
+  }
+  .hub-text .h2 {
+    font-size: clamp(2rem, 1.3rem + 2.2vw, 3.2rem);
+  }
+  .go {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    margin-top: 6px;
+    padding: 10px 18px;
+    border-radius: var(--radius-pill);
+    background: var(--ink);
+    color: var(--bg);
+    font-weight: 600;
+  }
+  .go :global(.icon) {
+    transition: transform 0.25s var(--ease);
+  }
+  .hub:hover .go :global(.icon) {
+    transform: translateX(3px);
+  }
+  .hub :global(.hub-photo) {
+    aspect-ratio: 4 / 3;
+    border-radius: var(--radius-xl);
+  }
+  @media (min-width: 960px) {
+    .hub :global(.hub-photo) {
+      aspect-ratio: auto;
+      min-height: 420px;
+    }
+  }
+  .hub-badge {
+    position: absolute;
+    right: 16px;
+    top: 16px;
+    display: grid;
+    place-items: center;
+    width: 52px;
+    height: 52px;
+    border-radius: 16px;
+    background: var(--surface);
+    color: var(--c-mint-ink);
+    font-size: 26px;
+    box-shadow: var(--shadow-md);
+  }
+  .pick {
+    margin-bottom: 20px;
+  }
+  .more,
+  .not {
+    margin-top: 48px;
+    padding-top: 28px;
+    border-top: 1px solid var(--line);
+  }
+  .more ul {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px;
+    margin-top: 16px;
+  }
+  .more li {
+    display: inline-flex;
+    gap: 8px;
+    align-items: center;
+    padding: 8px 14px;
+    border-radius: 99px;
+    background: var(--surface-2);
+    color: var(--ink-2);
+  }
+  .not p {
+    margin-top: 10px;
+    max-width: 70ch;
+  }
+  .credit-row {
+    margin-top: 40px;
+  }
+</style>

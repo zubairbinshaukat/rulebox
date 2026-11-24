@@ -1,0 +1,86 @@
+---
+/* core.cta.close: the closing offer. Colour slabs echo the hero. */
+import Icon from "./Icon.astro";
+import { CTA_PRIMARY } from "../config";
+interface Props {
+  headline?: string;
+  sub?: string;
+}
+const { headline = "Your apps. Your rules.", sub = "Join the pilot, or read the code first." } = Astro.props;
+---
+
+<section class="close" aria-labelledby="close-title">
+  <div class="container">
+    <div class="box">
+      <span class="s s1" aria-hidden="true"></span>
+      <span class="s s2" aria-hidden="true"></span>
+      <span class="s s3" aria-hidden="true"></span>
+      <div class="inner">
+        <h2 id="close-title" class="display">{headline}</h2>
+        <p class="lead">{sub}</p>
+        <div class="ctas">
+          <a class="btn btn-primary btn-lg" href={CTA_PRIMARY.href}>{CTA_PRIMARY.label}<Icon name="arrow-right" /></a>
+          <a class="btn btn-ghost btn-lg" href="/docs">Read the docs</a>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<style>
+  .close {
+    padding-block: clamp(var(--sp-8), 6vw, var(--sp-12));
+  }
+  .box {
+    position: relative;
+    overflow: hidden;
+    border-radius: var(--radius-xl);
+    background: var(--bg-stone);
+    border: 1px solid var(--line);
+    padding: clamp(var(--sp-9), 8vw, var(--sp-13)) clamp(var(--sp-6), 5vw, var(--sp-11));
+    isolation: isolate;
+  }
+  .inner {
+    display: grid;
+    gap: var(--head-gap);
+    justify-items: start;
+    max-width: 760px;
+  }
+  .ctas {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--sp-3);
+    margin-top: var(--sp-2);
+  }
+  .s {
+    position: absolute;
+    z-index: -1;
+    border-radius: var(--radius-lg);
+  }
+  .s1 {
+    right: 6%;
+    top: -12%;
+    width: 15%;
+    height: 70%;
+    background: var(--c-sun);
+  }
+  .s2 {
+    right: 18%;
+    bottom: -18%;
+    width: 22%;
+    height: 52%;
+    background: var(--c-blue);
+  }
+  .s3 {
+    right: -4%;
+    bottom: 12%;
+    width: 12%;
+    height: 34%;
+    background: var(--c-coral);
+  }
+  @media (max-width: 860px) {
+    .s {
+      opacity: 0.25;
+    }
+  }
+</style>

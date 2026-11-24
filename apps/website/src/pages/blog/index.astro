@@ -1,0 +1,40 @@
+---
+import { getCollection } from "astro:content";
+import Base from "../../layouts/Base.astro";
+import PageHero from "../../components/PageHero.astro";
+
+const posts = (await getCollection("blog", (p) => !p.data.draft)).sort((a, b) => +b.data.date - +a.data.date);
+---
+
+<Base title="Blog | Rulebox" description="Engineering notes and the story behind Rulebox, the open-source kiosk OS for Windows, written by the people who build it." path="/blog" og="blog" crumbs={[{ name: "Blog", path: "/blog" }]}>
+  <PageHero label="Blog" title="Notes from the build." sub="How Rulebox is made, what broke, and why we chose what we chose." tone="coral" compact />
+  <section class="section-tight">
+    <div class="container">
+      {
+        posts.length === 0 ? (
+          <p class="lead">The first posts are being written. Subscribe through the <a class="text-link" href="/blog/rss.xml">RSS feed</a> to get them.</p>
+        ) : (
+          <ul class="grid grid-3" role="list">
+            {posts.map((p) => (
+              <li>
+                <a class="card card-link post" href={`/blog/${p.id}`}>
+                  <span class="mono muted">{p.data.date.toISOString().slice(0, 10)}</span>
+                  <strong class="h3">{p.data.title}</strong>
+                  <span class="muted">{p.data.description}</span>
+                </a>
+              </li>
+            ))}
+          </ul>
+        )
+      }
+    </div>
+  </section>
+</Base>
+
+<style>
+  .post {
+    display: grid;
+    gap: 10px;
+    height: 100%;
+  }
+</style>

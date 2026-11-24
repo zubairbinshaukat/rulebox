@@ -1,0 +1,153 @@
+---
+/* Top of every inner page: label, one H1, a lead and up to two actions.
+   A soft colour slab sits behind on the right, in the page's tone. */
+import Icon from "./Icon.astro";
+import type { IconName } from "./Icon.astro";
+
+interface Props {
+  label?: string;
+  title: string;
+  sub?: string;
+  tone?: "blue" | "sun" | "coral" | "violet" | "mint";
+  icon?: IconName;
+  primary?: { label: string; href: string };
+  secondary?: { label: string; href: string };
+  status?: string;
+  compact?: boolean;
+}
+const { label, title, sub, tone = "mint", icon, primary, secondary, status, compact = false } = Astro.props;
+---
+
+<section class:list={["ph", { compact }]} data-tone={tone}>
+  <div class="container inner">
+    <div class="text">
+      {
+        label && (
+          <p class="label enter" style="--dot: var(--tone)">
+            {label}
+            {status && <span class="status" data-kind={status === "New" ? "new" : undefined}>{status}</span>}
+          </p>
+        )
+      }
+      <h1 class="h1 enter" style="--d:.08s">{title}</h1>
+      {sub && <p class="lead enter" style="--d:.16s">{sub}</p>}
+      {
+        (primary || secondary) && (
+          <div class="ctas enter" style="--d:.24s">
+            {primary && (
+              <a class="btn btn-primary btn-lg" href={primary.href}>
+                {primary.label}
+                <Icon name="arrow-right" />
+              </a>
+            )}
+            {secondary && (
+              <a class="btn btn-ghost btn-lg" href={secondary.href}>
+                {secondary.label}
+              </a>
+            )}
+          </div>
+        )
+      }
+      <slot />
+    </div>
+    {
+      icon && (
+        <div class="art enter" style="--d:.15s" aria-hidden="true">
+          <span class="slab a" />
+          <span class="slab b" />
+          <span class="badge">
+            <Icon name={icon} />
+          </span>
+        </div>
+      )
+    }
+  </div>
+</section>
+
+<style>
+  /* The next section brings its own top padding, so the hero keeps only a
+     small bottom pad: no double gap between hero and content. */
+  .ph {
+    padding: var(--sp-6) 0 var(--sp-4);
+  }
+  .ph.compact {
+    padding-bottom: 0;
+  }
+  .inner {
+    display: grid;
+    gap: var(--sp-8);
+    align-items: center;
+  }
+  @media (min-width: 900px) {
+    .inner:has(.art) {
+      grid-template-columns: 1.5fr 1fr;
+    }
+  }
+  .text {
+    display: grid;
+    gap: var(--head-gap);
+    justify-items: start;
+  }
+  .h1 {
+    max-width: 20ch;
+  }
+  .lead {
+    max-width: 44ch;
+  }
+  .ctas {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--sp-3);
+    margin-top: var(--sp-2);
+  }
+  .art {
+    position: relative;
+    aspect-ratio: 1.15;
+    max-width: 440px;
+    width: 100%;
+    justify-self: end;
+  }
+  .slab {
+    position: absolute;
+    border-radius: var(--radius-xl);
+  }
+  .slab.a {
+    inset: 0 0 18% 22%;
+    background:
+      radial-gradient(90% 80% at 20% 10%, var(--sheen), transparent 60%),
+      var(--tone);
+  }
+  .slab.b {
+    left: 0;
+    bottom: 0;
+    width: 46%;
+    height: 46%;
+    background: var(--night);
+    background-image: radial-gradient(circle, var(--dots) 1.3px, transparent 1.5px);
+    background-size: 13px 13px;
+    background-color: var(--night);
+  }
+  .badge {
+    position: absolute;
+    left: 50%;
+    top: 42%;
+    translate: -50% -50%;
+    display: grid;
+    place-items: center;
+    width: 42%;
+    aspect-ratio: 1;
+    border-radius: 30%;
+    background: var(--surface);
+    color: var(--tone-ink);
+    box-shadow: var(--shadow-window);
+  }
+  .badge :global(.icon) {
+    width: 52%;
+    height: 52%;
+  }
+  @media (max-width: 899px) {
+    .art {
+      display: none;
+    }
+  }
+</style>

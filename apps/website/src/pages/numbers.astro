@@ -1,0 +1,103 @@
+---
+import Base from "../layouts/Base.astro";
+import PageHero from "../components/PageHero.astro";
+import { NUMBERS, type NumberKind } from "../data/numbers";
+
+const kinds: { kind: NumberKind; title: string; text: string; tone: string }[] = [
+  { kind: "PRD", title: "Product numbers", text: "True by design, from the product specification and plans in the repository.", tone: "mint" },
+  { kind: "MEASURED", title: "Measured", text: "Numbers we measured, with the date and conditions.", tone: "blue" },
+  { kind: "CITED", title: "Cited", text: "Numbers about the world, each with its source.", tone: "violet" },
+];
+---
+
+<Base title="Every Number on This Site, With Its Source | Rulebox" description="Every number on the Rulebox website, what kind of number it is, where it comes from and when we last checked it." path="/numbers" og="default" crumbs={[{ name: "Numbers", path: "/numbers" }]}>
+  <PageHero label="Numbers" title="Every number, with its source." sub="No customer counts, no ratings, no invented results. When the pilot gives us real results, they will appear here with permission." tone="violet" compact />
+
+  {
+    kinds.map((k) => (
+      <section class="section-tight" aria-labelledby={`k-${k.kind}`}>
+        <div class="container">
+          <div class="kh" data-tone={k.tone}>
+            <h2 class="h3" id={`k-${k.kind}`}>{k.title}</h2>
+            <p class="muted">{k.text}</p>
+          </div>
+          <div class="table-wrap">
+            <table class="t">
+              <thead>
+                <tr>
+                  <th scope="col">Number</th>
+                  <th scope="col">What it means</th>
+                  <th scope="col">Source</th>
+                  <th scope="col">Checked</th>
+                </tr>
+              </thead>
+              <tbody>
+                {NUMBERS.filter((n) => n.kind === k.kind).map((n) => (
+                  <tr id={n.id}>
+                    <td class="v">{n.value}</td>
+                    <td>
+                      {n.label}
+                      {n.note && <span class="note">{n.note}</span>}
+                    </td>
+                    <td>
+                      <a class="text-link" href={n.sourceUrl}>
+                        {n.source}
+                      </a>
+                    </td>
+                    <td class="mono">{n.checked}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </section>
+    ))
+  }
+</Base>
+
+<style>
+  .kh {
+    display: grid;
+    gap: 6px;
+    padding: 18px 20px;
+    border-radius: var(--radius);
+    background: var(--tone-soft);
+    margin-bottom: 12px;
+  }
+  .t {
+    width: 100%;
+    border-collapse: collapse;
+    min-width: 640px;
+  }
+  .t th,
+  .t td {
+    text-align: left;
+    vertical-align: top;
+    padding: 14px 12px;
+    border-bottom: 1px solid var(--line);
+  }
+  .t th {
+    font-family: var(--font-mono);
+    font-size: 0.72rem;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: var(--muted);
+    font-weight: 500;
+  }
+  .v {
+    font-size: 1.4rem;
+    font-weight: 580;
+    letter-spacing: -0.03em;
+    white-space: nowrap;
+  }
+  .note {
+    display: block;
+    margin-top: 4px;
+    font-size: 0.88rem;
+    color: var(--muted);
+  }
+  tr:target {
+    background: var(--c-sun-soft);
+  }
+</style>

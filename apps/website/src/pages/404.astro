@@ -1,0 +1,50 @@
+---
+import Base from "../layouts/Base.astro";
+import Icon from "../components/Icon.astro";
+import Logo from "../components/Logo.astro";
+---
+
+<Base title="Page not found" description="This page is not on the allowlist. Try the home page, the docs or the features instead." path="/404" noindex>
+  <section class="nf container">
+    <div class="mark" aria-hidden="true"><Logo size={120} /></div>
+    <p class="label" style="--dot: var(--c-coral)">404</p>
+    <h1 class="h1">This page is not on the allowlist.</h1>
+    <p class="lead">The address may be old, or mistyped. These are allowed:</p>
+    <ul class="go" role="list">
+      <li><a class="btn btn-primary" href="/">Home<Icon name="arrow-right" /></a></li>
+      <li><a class="btn btn-ghost" href="/features">Features</a></li>
+      <li><a class="btn btn-ghost" href="/docs">Docs</a></li>
+      <li><a class="btn btn-ghost" href="/pilot">Pilot</a></li>
+    </ul>
+  </section>
+</Base>
+
+<style>
+  .nf {
+    display: grid;
+    justify-items: center;
+    text-align: center;
+    padding-block: var(--section-y);
+  }
+  .mark {
+    margin-bottom: var(--sp-7);
+    color: var(--ink);
+    opacity: 0.9;
+  }
+  .nf .label {
+    margin-bottom: var(--head-gap);
+  }
+  .nf .h1 {
+    max-width: 14ch;
+    margin-bottom: var(--head-gap);
+  }
+  .nf .lead {
+    margin-bottom: var(--sp-7);
+  }
+  .go {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: center;
+    gap: var(--sp-3);
+  }
+</style>

@@ -1,0 +1,43 @@
+---
+title: Contributing
+description: How the Rulebox repository is laid out, the tools you need, and the commands to build, run and test each part.
+section: Contributing
+order: 1
+updated: 2026-11-24
+---
+
+Rulebox is one repository: a Cargo workspace for the Rust parts and a pnpm workspace for the web parts.
+
+## Repository layout
+
+| Part | Stack | Folder |
+|---|---|---|
+| Dashboard | Vite, React, TypeScript | `apps/dashboard/` |
+| Backend | Convex | `convex/` |
+| Staff desktop | Tauri v2, Vite, React | `apps/staff-app/` |
+| Agent | Rust Windows service | `apps/agent/` |
+| Installer | WiX MSI | `apps/installer/` |
+| Shared Rust | policy types and signing, IPC, Win32 helpers | `crates/` |
+| Shared TypeScript | design system, generated types | `packages/` |
+| Website | Astro | `apps/website/` |
+
+## Tools
+
+- Node 22 or later, and **pnpm** (never npm or yarn).
+- Rust, for the agent and the staff desktop.
+
+## Common commands
+
+```powershell
+pnpm dev:dashboard     # the dashboard
+pnpm dev:staff         # the staff desktop (Tauri)
+pnpm dev:convex        # the backend
+pnpm dev:website       # this website
+cargo check            # Rust parts
+```
+
+## Rules that matter
+
+- The staff desktop has no admin rights; every privileged action goes through the agent.
+- Icons are Solar only, bundled at build time. Nothing loads from a CDN at run time.
+- Test lockdown code on a virtual machine or a test PC, never on your own machine.

@@ -1,0 +1,127 @@
+---
+/* FAQ, after the Tandem reference: the questions on the left, the open
+   answer beside them. Built on <details>, so it works without JavaScript
+   and every answer is in the HTML for search engines and screen readers. */
+interface Props {
+  items: { q: string; a: string }[];
+  title?: string;
+  intro?: string;
+}
+const { items, title = "Questions, answered plainly", intro } = Astro.props;
+---
+
+<section class="faq section" aria-labelledby="faq-title">
+  <div class="container grid">
+    <div class="side">
+      <h2 id="faq-title" class="h2">{title}</h2>
+      {intro && <p class="lead">{intro}</p>}
+      <p class="muted">Something else? <a class="text-link" href="/contact">Ask us</a>.</p>
+    </div>
+    <div class="list">
+      {
+        items.map((it, i) => (
+          <details name="faq" open={i === 0}>
+            <summary>
+              <span>{it.q}</span>
+              <span class="plus" aria-hidden="true" />
+            </summary>
+            <p class="answer">{it.a}</p>
+          </details>
+        ))
+      }
+    </div>
+  </div>
+</section>
+
+<style>
+  /* The closing offer brings its own top padding: no double gap. */
+  .faq:has(+ :global(.close)) {
+    padding-bottom: 0;
+  }
+  .grid {
+    display: grid;
+    gap: var(--sp-8);
+  }
+  @media (min-width: 960px) {
+    .grid {
+      grid-template-columns: 0.8fr 1.2fr;
+      gap: var(--sp-11);
+    }
+    .side {
+      position: sticky;
+      top: 120px;
+      align-self: start;
+    }
+  }
+  .side {
+    display: grid;
+    gap: var(--head-gap);
+  }
+  details {
+    border-bottom: 1px solid var(--line);
+  }
+  details:first-child {
+    border-top: 1px solid var(--line);
+  }
+  summary {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: var(--sp-5);
+    padding: var(--sp-6) 0;
+    font-size: var(--fs-lead);
+    line-height: var(--lh-tight);
+    font-weight: var(--fw-medium);
+    letter-spacing: -0.01em;
+    cursor: pointer;
+    list-style: none;
+  }
+  summary::-webkit-details-marker {
+    display: none;
+  }
+  .plus {
+    position: relative;
+    flex: none;
+    width: var(--sp-7);
+    height: var(--sp-7);
+    border-radius: 50%;
+    background: var(--surface-2);
+  }
+  .plus::before,
+  .plus::after {
+    content: "";
+    position: absolute;
+    left: 50%;
+    top: 50%;
+    width: 12px;
+    height: 2px;
+    margin: -1px 0 0 -6px;
+    border-radius: 2px;
+    background: var(--ink);
+    transition: transform 0.3s var(--ease-out);
+  }
+  .plus::after {
+    transform: rotate(90deg);
+  }
+  details[open] .plus::after {
+    transform: rotate(0deg);
+  }
+  details[open] .plus {
+    background: var(--primary);
+  }
+  details[open] .plus::before,
+  details[open] .plus::after {
+    background: var(--on-primary);
+  }
+  .answer {
+    padding: 0 var(--sp-9) var(--sp-6) 0;
+    color: var(--ink-2);
+    font-size: var(--fs-body);
+    max-width: 62ch;
+  }
+  @media (prefers-reduced-motion: no-preference) {
+    details[open] .answer {
+      animation: rise 0.45s var(--ease-out) both;
+    }
+  }
+</style>

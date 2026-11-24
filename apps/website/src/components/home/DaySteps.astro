@@ -1,0 +1,356 @@
+---
+/*
+ * THE scroll-driven motion graphic of the site (Shufti reference, used once).
+ * Beat 4, "a day on a Rulebox PC": the times scroll past a sticky screen
+ * whose colour and state follow the step in view. Each step has its own
+ * colour from the vivid step palette. With motion on, home-motion.ts scrubs
+ * one continuous position through the steps (crossfades, a gliding tab pill);
+ * with reduced motion site.ts switches whole steps.
+ */
+import DesktopMock from "../DesktopMock.astro";
+import Icon from "../Icon.astro";
+import type { IconName } from "../Icon.astro";
+
+const steps: { time: string; tab: string; tone: string; icon: IconName; title: string; text: string; variant: "signin" | "desktop" | "viewer" | "offline" | "evening" }[] = [
+  {
+    time: "08:55",
+    tab: "Sign in",
+    tone: "blue",
+    icon: "login",
+    title: "Her own sign-in.",
+    text: "Sara opens the laptop at the front desk. The sign-in screen shows the company name and a clock. She types her own username and password.",
+    variant: "signin",
+  },
+  {
+    time: "08:56",
+    tab: "Desktop",
+    tone: "sun",
+    icon: "widget",
+    title: "Nothing to get wrong.",
+    text: "Her desktop appears. Her apps as tiles: the booking site, the accounts app, Zoom, her files. A taskbar at the bottom. It looks like Windows, only quieter.",
+    variant: "desktop",
+  },
+  {
+    time: "11:20",
+    tab: "Files",
+    tone: "coral",
+    icon: "file",
+    title: "Double-click, and it opens. Safely.",
+    text: "A PDF arrives through the booking site. She double-clicks it. It opens in Rulebox’s own viewer. No “choose an app” question. No way to run a file that should not be run.",
+    variant: "viewer",
+  },
+  {
+    time: "13:00",
+    tab: "Offline",
+    tone: "violet",
+    icon: "offline",
+    title: "The internet drops. Work does not.",
+    text: "The internet drops for twenty minutes. Nothing changes on her screen. The rules are stored on the PC.",
+    variant: "offline",
+  },
+  {
+    time: "17:05",
+    tab: "Handover",
+    tone: "mint",
+    icon: "users",
+    title: "One log-out, and the PC is ready for the next person.",
+    text: "Sara logs out. Her apps close. Her web logins are hers alone. Ali signs in for the evening shift and sees his own apps, his own files.",
+    variant: "evening",
+  },
+];
+---
+
+<section class="day section" data-steps aria-labelledby="day-title">
+  <div class="container">
+    <div class="section-head split">
+      <div>
+        <p class="label" style="--dot: var(--c-blue)">A day on a Rulebox PC</p>
+        <h2 id="day-title" class="h2" style="margin-top:var(--head-gap)">One laptop, two people, zero surprises.</h2>
+      </div>
+      <p class="lead">Follow the front-desk laptop through a working day. Scroll, or pick a time.</p>
+    </div>
+
+    <div class="layout">
+      <div class="stage-col">
+        <div class="stage-sticky">
+          <div class="tabs" role="group" aria-label="Jump to a time of day">
+            <span class="tab-pill" aria-hidden="true">
+              {steps.map((s) => <span data-tone={s.tone} />)}
+            </span>
+            {
+              steps.map((s, i) => (
+                <button type="button" class="tab" data-tab data-tone={s.tone} aria-current={i === 0 ? "step" : "false"}>
+                  <span class="mono">{s.time}</span>
+                  <span class="tab-name">{s.tab}</span>
+                </button>
+              ))
+            }
+          </div>
+          <div class="stage" data-stage data-active="0">
+            {steps.map((s) => <span class="tint" data-tone={s.tone} />)}
+            <span class="grain" aria-hidden="true" />
+            {
+              steps.map((s) => (
+                <div class="layer">
+                  <DesktopMock variant={s.variant} />
+                </div>
+              ))
+            }
+          </div>
+          <p class="note">An illustration of the product, not a customer story.</p>
+        </div>
+      </div>
+
+      <ol class="steps" role="list">
+        {
+          steps.map((s, i) => (
+            <li class="step" data-step data-tone={s.tone} data-current={i === 0 || undefined}>
+              <p class="time">
+                <span class="tile-icon">
+                  <Icon name={s.icon} />
+                </span>
+                <span class="mono">{s.time}</span>
+              </p>
+              <h3 class="h3">{s.title}</h3>
+              <p class="text">{s.text}</p>
+            </li>
+          ))
+        }
+      </ol>
+    </div>
+  </div>
+</section>
+
+<style>
+  .layout {
+    display: grid;
+    gap: 32px;
+  }
+  @media (min-width: 960px) {
+    .layout {
+      grid-template-columns: minmax(0, 0.8fr) minmax(0, 1.2fr);
+      gap: clamp(40px, 6vw, 96px);
+    }
+    .stage-col {
+      order: 2;
+    }
+  }
+  .stage-col {
+    position: relative;
+  }
+  /* Small screens: the screen sticks to the top while the steps pass under it. */
+  @media (max-width: 959px) {
+    .layout {
+      display: block;
+    }
+    .stage-col {
+      display: contents;
+    }
+    .stage {
+      aspect-ratio: 16 / 11;
+    }
+  }
+  .stage-sticky {
+    position: sticky;
+    top: 88px;
+    z-index: 2;
+    display: grid;
+    gap: 14px;
+    background: var(--bg);
+    padding-block: 8px;
+  }
+  @media (min-width: 960px) {
+    .stage-sticky {
+      top: max(96px, calc(50vh - 300px));
+      background: none;
+      padding: 0;
+    }
+  }
+  .tabs {
+    display: grid;
+    grid-template-columns: repeat(5, 1fr);
+    gap: 6px;
+  }
+  .tab {
+    display: grid;
+    gap: 0;
+    justify-items: center;
+    padding: 8px 4px;
+    border-radius: 12px;
+    border: 0;
+    background: var(--surface-2);
+    color: var(--muted);
+    cursor: pointer;
+    transition:
+      opacity 0.3s,
+      transform 0.35s var(--ease-out);
+  }
+  .tab .mono {
+    font-size: 0.78rem;
+  }
+  .tab-name {
+    font-size: 0.86rem;
+    font-weight: 640;
+  }
+  .tab[aria-current="step"] {
+    background: var(--tone);
+    color: var(--tone-on, var(--ink));
+    transform: translateY(-2px);
+  }
+  @media (max-width: 520px) {
+    .tab-name {
+      font-size: 0.72rem;
+    }
+  }
+  .stage {
+    position: relative;
+    aspect-ratio: 16 / 12;
+    border-radius: var(--radius-xl);
+    overflow: hidden;
+    isolation: isolate;
+  }
+  .tint {
+    position: absolute;
+    inset: 0;
+    background:
+      radial-gradient(80% 70% at 15% 10%, var(--sheen), transparent 60%),
+      var(--tone);
+    opacity: 0;
+    transition: opacity 0.6s var(--ease);
+    z-index: -2;
+  }
+  .grain {
+    position: absolute;
+    inset: 0;
+    z-index: -1;
+    background-image: radial-gradient(circle, var(--dots) 1px, transparent 1.3px);
+    background-size: 12px 12px;
+  }
+  .layer {
+    position: absolute;
+    inset: 9% 7% auto;
+    opacity: 0;
+    transform: translateY(18px) scale(0.97);
+    transition:
+      opacity 0.45s var(--ease),
+      transform 0.7s var(--ease-out);
+  }
+  .stage[data-active="0"] > .tint:nth-of-type(1),
+  .stage[data-active="1"] > .tint:nth-of-type(2),
+  .stage[data-active="2"] > .tint:nth-of-type(3),
+  .stage[data-active="3"] > .tint:nth-of-type(4),
+  .stage[data-active="4"] > .tint:nth-of-type(5) {
+    opacity: 1;
+  }
+  .stage[data-active="0"] > .layer:nth-of-type(1),
+  .stage[data-active="1"] > .layer:nth-of-type(2),
+  .stage[data-active="2"] > .layer:nth-of-type(3),
+  .stage[data-active="3"] > .layer:nth-of-type(4),
+  .stage[data-active="4"] > .layer:nth-of-type(5) {
+    opacity: 1;
+    transform: none;
+  }
+  .note {
+    font-size: 0.82rem;
+    color: var(--muted);
+  }
+  .steps {
+    display: grid;
+  }
+  .step {
+    display: grid;
+    align-content: center;
+    gap: 14px;
+    min-height: 62vh;
+    padding-block: 32px;
+    background: linear-gradient(90deg, var(--line-strong), var(--line) 55%, transparent) top / 100% 1px no-repeat;
+    transition: opacity 0.4s var(--ease);
+  }
+  .step:first-child {
+    background: none;
+  }
+  @media (max-width: 959px) {
+    .step {
+      min-height: 52vh;
+    }
+  }
+  :global(html.js) .step:not([data-current]) {
+    opacity: 0.32;
+  }
+  .time {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+  }
+  .time .mono {
+    font-size: 1.05rem;
+    font-weight: 600;
+    color: var(--tone-ink);
+  }
+  .step .h3 {
+    font-size: clamp(1.6rem, 1.2rem + 1.2vw, 2.3rem);
+    line-height: 1.08;
+    letter-spacing: -0.03em;
+    max-width: 18ch;
+  }
+  .text {
+    color: var(--ink-2);
+    font-size: 1.1rem;
+    max-width: 46ch;
+  }
+  /* ---------- Live mode (GSAP drives every frame) ----------
+     Inline transform and opacity come from home-motion.ts, so CSS
+     transitions must stand down or they would lag behind the scroll. */
+  .tabs {
+    position: relative;
+    isolation: isolate;
+  }
+  .tab-pill {
+    display: none;
+  }
+  [data-live] .tab-pill {
+    display: block;
+    position: absolute;
+    left: 0;
+    top: 0;
+    bottom: 0;
+    z-index: 1;
+    border-radius: 12px;
+    overflow: hidden;
+    pointer-events: none;
+  }
+  .tab-pill > span {
+    position: absolute;
+    inset: 0;
+    background: var(--tone);
+    opacity: 0;
+  }
+  .tab-pill > span:first-child {
+    opacity: 1;
+  }
+  /* Grey wells under the pill, labels above it. */
+  [data-live] .tab,
+  [data-live] .tab[aria-current="step"] {
+    position: relative;
+    background: transparent;
+    transform: none;
+    transition: none;
+  }
+  [data-live] .tab::before {
+    content: "";
+    position: absolute;
+    inset: 0;
+    z-index: 0;
+    border-radius: 12px;
+    background: var(--surface-2);
+  }
+  [data-live] .tab > span {
+    position: relative;
+    z-index: 2;
+  }
+  [data-live] .tint,
+  [data-live] .layer,
+  [data-live] .step {
+    transition: none;
+  }
+</style>

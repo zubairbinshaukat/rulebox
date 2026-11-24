@@ -1,0 +1,48 @@
+---
+/* Small credits line for the stock photos on a page. Credit is given even
+   though the Pexels License does not require it. */
+import { PHOTO_LICENSE, type Photo } from "../data/photos";
+interface Props {
+  photos: Photo[];
+  /** The page lays a drawn Rulebox desktop over a photo. */
+  mock?: boolean;
+}
+const { photos, mock = true } = Astro.props;
+// One entry per photographer, in page order.
+const seen = new Set<string>();
+const list = photos.filter((p) => (seen.has(p.pageUrl) ? false : (seen.add(p.pageUrl), true)));
+---
+
+{
+  list.length > 0 && (
+    <p class="credits">
+      Photos:{" "}
+      {list.map((p, i) => (
+        <>
+          <a href={p.pageUrl} rel="noopener" target="_blank">
+            {p.photographer}
+          </a>
+          {i < list.length - 1 ? ", " : ""}
+        </>
+      ))}{" "}
+      on Pexels, used under the{" "}
+      <a href={PHOTO_LICENSE.url} rel="noopener" target="_blank">
+        {PHOTO_LICENSE.name}
+      </a>
+      . Stock photos of real workplaces; the people and places shown are not Rulebox customers.{mock ? " The desktop over the photo is an illustration." : ""}{" "}
+      <a href="/legal/licenses">All credits</a>.
+    </p>
+  )
+}
+
+<style>
+  .credits {
+    font-size: 0.8rem;
+    line-height: 1.55;
+    color: var(--faint);
+    max-width: 90ch;
+  }
+  .credits a {
+    color: var(--muted);
+  }
+</style>

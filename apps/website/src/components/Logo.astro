@@ -1,0 +1,55 @@
+---
+/*
+ * The Rulebox mark: the teal cube with the amber keyhole (PRD 25.5).
+ * From 28 px: the 3D render (WebP made by `pnpm gen:brand`, picked from a
+ * srcset). Below 28 px, or with `compact`: the flat vector traced from it
+ * (packages/ui/src/brand/geometry.ts). Never redrawn by hand.
+ */
+import { flatMarkSvg } from "../../../../packages/ui/src/brand/geometry";
+import { uid } from "../lib/uid";
+import cube128 from "../../../../packages/ui/src/brand/cube/cube-128.webp";
+import cube256 from "../../../../packages/ui/src/brand/cube/cube-256.webp";
+import cube512 from "../../../../packages/ui/src/brand/cube/cube-512.webp";
+
+interface Props {
+  size?: number;
+  /** Use the flat vector mark (for very small sizes). */
+  compact?: boolean;
+  class?: string;
+  title?: string;
+}
+const { size = 32, compact = size < 28, class: className, title } = Astro.props;
+const srcset = `${cube128.src} 128w, ${cube256.src} 256w, ${cube512.src} 512w`;
+const svg = compact ? flatMarkSvg({ size, title, id: uid("rb-mark") }) : "";
+---
+
+{
+  compact ? (
+    <span class:list={["logo-mark", className]} style={`width:${size}px;height:${size}px`} set:html={svg} />
+  ) : (
+    <img
+      class:list={["logo-mark", className]}
+      src={cube256.src}
+      srcset={srcset}
+      sizes={`${size}px`}
+      width={size}
+      height={size}
+      alt={title ?? ""}
+      aria-hidden={title ? undefined : "true"}
+      decoding="async"
+      draggable="false"
+    />
+  )
+}
+
+<style>
+  .logo-mark {
+    display: inline-block;
+    flex: none;
+  }
+  span.logo-mark :global(svg) {
+    display: block;
+    width: 100%;
+    height: 100%;
+  }
+</style>

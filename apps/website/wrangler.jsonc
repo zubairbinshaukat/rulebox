@@ -1,0 +1,41 @@
+// One Worker for the whole website (plan §3.4, §12). Not deployed yet:
+// deploys run from CI with the owner's go-ahead. Secrets are set with
+// `wrangler secret put` and never live in this file:
+//   TURNSTILE_SECRET, RESEND_API_KEY, FORM_TO_ADDRESS, FORM_FROM_ADDRESS,
+//   NOTIFY_SECRET, optional SECURITY_TO_ADDRESS and RESEND_AUDIENCE_ID.
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "rulebox-website",
+  "main": "worker/index.ts",
+  "compatibility_date": "2026-11-01",
+  "assets": {
+    "directory": "./dist",
+    "binding": "ASSETS",
+    // /pricing serves pricing.html; /pricing/ redirects to /pricing.
+    "html_handling": "drop-trailing-slash",
+    // Unknown paths get dist/404.html with status 404.
+    "not_found_handling": "404-page",
+    // Only form posts run the script; every page view is a free static request.
+    "run_worker_first": ["/api/*"]
+  },
+  "vars": {
+    // Canonical origin (owner bought rulebox.org 2026-11-25; apex canonical, www redirects).
+    "SITE_ORIGIN": "https://rulebox.org",
+    "AUTO_REPLY": "true"
+  },
+  "ratelimits": [
+    {
+      "name": "FORM_LIMITER",
+      "namespace_id": "1001",
+      "simple": { "limit": 5, "period": 60 }
+    }
+  ],
+  "observability": { "enabled": true },
+  "env": {
+    // Previews on *.workers.dev: same code, never indexed (see public/_headers).
+    "preview": {
+      "name": "rulebox-website-preview",
+      "vars": { "SITE_ORIGIN": "https://rulebox-website-preview.workers.dev", "AUTO_REPLY": "false" }
+    }
+  }
+}

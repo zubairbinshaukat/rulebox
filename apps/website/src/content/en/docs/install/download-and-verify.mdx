@@ -1,0 +1,32 @@
+---
+title: Download and verify the installer
+description: Where to get the Rulebox installer, and how to check its SHA-256 checksum and signature in PowerShell before you run it.
+section: Install and enrol
+order: 1
+updated: 2026-11-24
+---
+
+There is one installer for every PC and every organisation. Get it from the [download page](/download), which links to the file on GitHub Releases and shows its SHA-256 checksum.
+
+## Check the file
+
+Open PowerShell in the folder where you saved the file and run:
+
+```powershell
+Get-FileHash .\Rulebox-<version>.msi -Algorithm SHA256
+Get-AuthenticodeSignature .\Rulebox-<version>.msi
+```
+
+The first command must print the same checksum as the download page. If it does not, do not run the file, and tell us through the [security page](/security/disclosure).
+
+## About the signature
+
+Until code signing is live, the installer is unsigned and Windows SmartScreen will warn before it runs. When it is signed through SignPath, the certificate names SignPath Foundation, not Rulebox. That is expected.
+
+## Install on a test PC first
+
+Rulebox changes how the PC starts. Try it on one PC before the others. You can always [return to normal Windows](/docs/install/return-to-normal-windows).
+
+## Next
+
+- [Enrol a PC](/docs/install/enrol-a-pc)

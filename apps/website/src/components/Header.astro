@@ -1,0 +1,865 @@
+---
+/*
+ * Site header. Desktop: one shared dropdown (Stripe-style morphing menu):
+ * a single container stays open while the pointer moves between "Product"
+ * and "Use cases", resizes to the new panel with an animated clip-path and
+ * slides the content sideways; a caret glides to the active trigger.
+ * Behaviour lives in src/scripts/nav.ts. Mobile: a full-screen sheet.
+ */
+import { getImage } from "astro:assets";
+import Logo from "./Logo.astro";
+import Icon from "./Icon.astro";
+import type { IconName } from "./Icon.astro";
+import { CTA_PRIMARY } from "../config";
+import { HEADER_LINKS, PRODUCT_MENU, SIGN_IN, USE_CASE_MENU } from "../data/nav";
+import { FEATURES } from "../data/features";
+import { USE_CASES } from "../data/useCases";
+import { USE_CASE_PHOTOS } from "../data/photos";
+
+interface Props {
+  path: string;
+}
+const { path } = Astro.props;
+const isActive = (href: string) => path === href || path.startsWith(`${href}/`);
+
+/* Product: the L1 features from the menu data, with their own icon and tone. */
+const slugOf = (href: string) => href.split("/").pop() ?? "";
+const featureItems = PRODUCT_MENU.filter((m) => m.href.startsWith("/features/")).map((m) => {
+  const f = FEATURES.find((x) => x.slug === slugOf(m.href));
+  return { ...m, icon: (f?.icon ?? "widget") as IconName, tone: f?.tone ?? "mint" };
+});
+const howItWorks = PRODUCT_MENU.find((m) => m.href === "/product");
+const allFeatures = PRODUCT_MENU.find((m) => m.href === "/features");
+
+/* Use cases: the industries, with a 2x thumbnail of each page's hero photo.
+   Thumbnails are tiny WebP files and load only when the panel first opens. */
+const useCaseItems = await Promise.all(
+  USE_CASE_MENU.filter((m) => m.href.startsWith("/use-cases/")).map(async (m) => {
+    const u = USE_CASES.find((x) => x.slug === slugOf(m.href));
+    const photo = USE_CASE_PHOTOS[slugOf(m.href)]?.hero;
+    const thumb = photo ? await getImage({ src: photo.src, width: 96, height: 96, fit: "cover", format: "webp", quality: 70 }) : null;
+    return { ...m, note: u?.place ?? m.note, icon: (u?.icon ?? "users") as IconName, tone: u?.tone ?? "mint", thumb: thumb?.src };
+  }),
+);
+const allUseCases = USE_CASE_MENU.find((m) => m.href === "/use-cases");
+
+const menus = [
+  { id: "product", label: "Product", active: path.startsWith("/product") || path.startsWith("/features") },
+  { id: "use-cases", label: "Use cases", active: path.startsWith("/use-cases") },
+];
+---
+
+<header class="site-header" data-header>
+  <div class="nav container" data-nav>
+    <span class="nav-bg" aria-hidden="true"></span>
+    <a class="brand" href="/" aria-label="Rulebox home">
+      <Logo size={30} />
+      <span class="wordmark">Rulebox</span>
+    </a>
+
+    <nav class="nav-main" aria-label="Main" data-dd-nav>
+      <ul role="list" class="nav-list">
+        {
+          menus.map((m) => (
+            <li>
+              <button
+                class="nav-link dd-trigger"
+                type="button"
+                id={`dd-t-${m.id}`}
+                aria-expanded="false"
+                aria-controls={`dd-${m.id}`}
+                data-dd-trigger={m.id}
+                data-active={m.active || undefined}
+              >
+                {m.label}
+                <Icon name="alt-down" class="caret" />
+              </button>
+            </li>
+          ))
+        }
+        {
+          HEADER_LINKS.map((l) => (
+            <li>
+              <a class="nav-link" href={l.href} aria-current={isActive(l.href) ? "page" : undefined}>
+                {l.label}
+              </a>
+            </li>
+          ))
+        }
+      </ul>
+
+      <div class="dd" data-dd>
+        <span class="dd-shadow" aria-hidden="true" data-dd-shadow></span>
+        <span class="dd-edge" aria-hidden="true" data-dd-edge></span>
+        <div class="dd-clip" data-dd-clip>
+          <div class="dd-panel dd-product" id="dd-product" role="group" aria-labelledby="dd-t-product" data-dd-panel="product" inert>
+            <ul class="dd-list" role="list">
+              {
+                featureItems.map((it) => (
+                  <li>
+                    <a class="dd-item" href={it.href} data-tone={it.tone} aria-current={isActive(it.href) ? "page" : undefined}>
+                      <span class="dd-icon">
+                        <Icon name={it.icon} />
+                      </span>
+                      <span class="dd-text">
+                        <span class="dd-title">{it.label}</span>
+                        <span class="dd-note">{it.note}</span>
+                      </span>
+                    </a>
+                  </li>
+                ))
+              }
+            </ul>
+            <div class="dd-side">
+              {
+                howItWorks && (
+                  <a class="dd-feature" href={howItWorks.href} data-tone="violet">
+                    <span class="dd-parts" aria-hidden="true">
+                      <span>
+                        <Icon name="cpu" />
+                        Agent
+                      </span>
+                      <span>
+                        <Icon name="monitor" />
+                        Staff desktop
+                      </span>
+                      <span>
+                        <Icon name="laptop" />
+                        Dashboard
+                      </span>
+                    </span>
+                    <span class="dd-feature-title">{howItWorks.label}</span>
+                    <span class="dd-note">{howItWorks.note}</span>
+                  </a>
+                )
+              }
+              {
+                allFeatures && (
+                  <a class="dd-all" href={allFeatures.href}>
+                    {allFeatures.label}
+                    <Icon name="arrow-right" />
+                  </a>
+                )
+              }
+            </div>
+          </div>
+
+          <div class="dd-panel dd-uses" id="dd-use-cases" role="group" aria-labelledby="dd-t-use-cases" data-dd-panel="use-cases" inert>
+            <ul class="dd-grid" role="list">
+              {
+                useCaseItems.map((it) => (
+                  <li>
+                    <a class="dd-item" href={it.href} data-tone={it.tone} aria-current={isActive(it.href) ? "page" : undefined}>
+                      <span class="dd-icon dd-thumb">
+                        <Icon name={it.icon} />
+                        {it.thumb && <img data-src={it.thumb} alt="" width="48" height="48" decoding="async" />}
+                      </span>
+                      <span class="dd-text">
+                        <span class="dd-title">{it.label}</span>
+                        <span class="dd-note">{it.note}</span>
+                      </span>
+                    </a>
+                  </li>
+                ))
+              }
+            </ul>
+            {
+              allUseCases && (
+                <div class="dd-foot">
+                  <a class="dd-all" href={allUseCases.href}>
+                    {allUseCases.label}
+                    <Icon name="arrow-right" />
+                  </a>
+                </div>
+              )
+            }
+          </div>
+        </div>
+        <span class="dd-arrow" aria-hidden="true" data-dd-arrow></span>
+      </div>
+    </nav>
+
+    <div class="nav-actions">
+      <a class="nav-link signin" href={SIGN_IN.href}>{SIGN_IN.label}</a>
+      <a class="btn btn-primary btn-sm cta" href={CTA_PRIMARY.href}>{CTA_PRIMARY.label}</a>
+      <button class="menu-toggle" type="button" aria-expanded="false" aria-controls="mobile-menu" data-mobile-toggle>
+        <span class="sr-only">Menu</span>
+        <span class="burger" aria-hidden="true"><span></span><span></span></span>
+      </button>
+    </div>
+  </div>
+
+  <div class="mobile-menu" id="mobile-menu" data-mobile-menu hidden>
+    <nav class="container mobile-inner" aria-label="Mobile">
+      <div class="m-group">
+        <p class="m-label">Product</p>
+        <ul role="list" class="m-rows">
+          {
+            howItWorks && (
+              <li>
+                <a href={howItWorks.href} data-tone="violet">
+                  <span class="m-icon">
+                    <Icon name="layers" />
+                  </span>
+                  {howItWorks.label}
+                </a>
+              </li>
+            )
+          }
+          {
+            featureItems.map((it) => (
+              <li>
+                <a href={it.href} data-tone={it.tone}>
+                  <span class="m-icon">
+                    <Icon name={it.icon} />
+                  </span>
+                  {it.label}
+                </a>
+              </li>
+            ))
+          }
+        </ul>
+        {allFeatures && <a class="m-all" href={allFeatures.href}>{allFeatures.label}<Icon name="arrow-right" /></a>}
+      </div>
+      <div class="m-group">
+        <p class="m-label">Use cases</p>
+        <ul role="list" class="m-rows">
+          {
+            useCaseItems.map((it) => (
+              <li>
+                <a href={it.href} data-tone={it.tone}>
+                  <span class="m-icon">
+                    <Icon name={it.icon} />
+                  </span>
+                  {it.label}
+                </a>
+              </li>
+            ))
+          }
+        </ul>
+        {allUseCases && <a class="m-all" href={allUseCases.href}>{allUseCases.label}<Icon name="arrow-right" /></a>}
+      </div>
+      <div class="m-group">
+        <p class="m-label">More</p>
+        <ul role="list" class="m-links">
+          {
+            HEADER_LINKS.map((l) => (
+              <li>
+                <a href={l.href} aria-current={isActive(l.href) ? "page" : undefined}>{l.label}</a>
+              </li>
+            ))
+          }
+          <li><a href={SIGN_IN.href}>{SIGN_IN.label}</a></li>
+        </ul>
+      </div>
+      <div class="m-foot">
+        <a class="btn btn-primary btn-lg m-cta" href={CTA_PRIMARY.href}>{CTA_PRIMARY.label}<Icon name="arrow-right" /></a>
+      </div>
+    </nav>
+  </div>
+</header>
+
+<style>
+  .site-header {
+    position: fixed;
+    inset: 0 0 auto;
+    z-index: 50;
+    pointer-events: none;
+  }
+  .nav {
+    position: relative;
+    display: flex;
+    align-items: center;
+    gap: var(--sp-6);
+    height: 76px;
+    pointer-events: auto;
+    transition: transform 0.5s var(--ease-out);
+  }
+  /* The detaching pill (Granola): fades in behind the same content and
+     the bar drops a few pixels, so it reads as lifting off the page. */
+  .nav-bg {
+    position: absolute;
+    inset: 10px max(6px, calc(var(--gutter) - 14px));
+    border-radius: var(--radius-pill);
+    background: var(--glass);
+    border: 1px solid var(--line);
+    box-shadow: var(--shadow-sm);
+    -webkit-backdrop-filter: blur(18px) saturate(1.3);
+    backdrop-filter: blur(18px) saturate(1.3);
+    opacity: 0;
+    transform: scale(1.025);
+    transition:
+      opacity 0.35s var(--ease),
+      transform 0.5s var(--ease-out);
+    z-index: -1;
+  }
+  :global(html[data-scrolled]) .nav {
+    transform: translateY(8px);
+  }
+  :global(html[data-scrolled]) .nav-bg {
+    opacity: 1;
+    transform: none;
+  }
+  .brand {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--sp-3);
+    text-decoration: none;
+    color: var(--ink);
+  }
+  .wordmark {
+    font-weight: var(--fw-strong);
+    font-size: 1.25rem;
+    letter-spacing: -0.025em;
+  }
+  .nav-main {
+    margin-inline: auto;
+  }
+  .nav-list {
+    display: flex;
+    gap: var(--sp-1);
+    list-style: none;
+    margin: 0;
+    padding: 0;
+  }
+  .nav-link {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--sp-1);
+    min-height: 40px;
+    padding: 0 var(--sp-3);
+    border-radius: var(--radius-pill);
+    border: 0;
+    background: none;
+    color: var(--ink-2);
+    font-size: var(--fs-small);
+    font-weight: var(--fw-medium);
+    text-decoration: none;
+    cursor: pointer;
+    transition: background-color 0.2s var(--ease);
+  }
+  .nav-link:hover,
+  .nav-link[aria-expanded="true"],
+  .nav-link[aria-current="page"],
+  .nav-link[data-active] {
+    color: var(--ink);
+  }
+  .nav-link[aria-current="page"],
+  .nav-link[data-active],
+  .nav-link[aria-expanded="true"] {
+    background: var(--surface-2);
+  }
+  .nav-link :global(.caret) {
+    width: 14px;
+    height: 14px;
+    opacity: 0.6;
+    transition: transform 0.3s var(--ease-out);
+  }
+  .nav-link[aria-expanded="true"] :global(.caret) {
+    transform: rotate(180deg);
+  }
+
+  /* ---------- The shared dropdown ----------
+     .dd is a fixed stage under the nav. Three layers share one animated
+     clip-path box (JS sets --cx/--cy... as inset values): .dd-edge draws a
+     1px border ring, .dd-clip is the surface and clips the sliding panels,
+     .dd-shadow is a plain box scaled with transform (blur distortion is
+     invisible under the surface). Only clip-path, transform and opacity
+     ever animate. */
+  .dd {
+    --t: 0.34s;
+    --e: cubic-bezier(0.22, 1, 0.36, 1);
+    position: absolute;
+    left: 0;
+    top: 64px;
+    width: 100%;
+    height: var(--dd-h, 420px);
+    pointer-events: none;
+    opacity: 0;
+    visibility: hidden;
+    transform: translateY(-6px);
+    transition:
+      opacity 0.2s var(--ease),
+      transform var(--t) var(--e),
+      visibility 0s 0.2s;
+  }
+  .dd[data-open] {
+    opacity: 1;
+    visibility: visible;
+    transform: none;
+    transition:
+      opacity 0.18s var(--ease),
+      transform var(--t) var(--e),
+      visibility 0s;
+  }
+  .dd-shadow,
+  .dd-edge,
+  .dd-clip {
+    position: absolute;
+    left: 0;
+    top: 0;
+  }
+  .dd-edge,
+  .dd-clip {
+    width: 100%;
+    height: 100%;
+    clip-path: var(--clip-o, inset(0 100% 100% 0 round 18px));
+    transition: clip-path var(--t) var(--e);
+  }
+  .dd-edge {
+    background: var(--line);
+  }
+  .dd-clip {
+    clip-path: var(--clip-i, inset(0 100% 100% 0 round 17px));
+    background: var(--surface);
+    pointer-events: auto;
+  }
+  .dd:not([data-open]) .dd-clip {
+    pointer-events: none;
+  }
+  .dd-shadow {
+    width: var(--dd-w, 640px);
+    height: var(--dd-h, 420px);
+    border-radius: 18px;
+    box-shadow: var(--shadow-pop);
+    transform-origin: 0 0;
+    transform: var(--shadow-t, scale(0));
+    transition: transform var(--t) var(--e);
+  }
+  .dd-arrow {
+    position: absolute;
+    left: 0;
+    top: -5px;
+    width: 12px;
+    height: 12px;
+    background: var(--surface);
+    border: 1px solid var(--line);
+    border-right: 0;
+    border-bottom: 0;
+    border-top-left-radius: 3px;
+    transform: translateX(var(--arrow-x, 0px)) rotate(45deg);
+    transition: transform var(--t) var(--e);
+  }
+  .dd[data-instant] .dd-edge,
+  .dd[data-instant] .dd-clip,
+  .dd[data-instant] .dd-shadow,
+  .dd[data-instant] .dd-arrow,
+  .dd[data-instant] .dd-panel {
+    transition: none !important;
+  }
+
+  .dd-panel {
+    position: absolute;
+    left: 0;
+    top: 0;
+    display: grid;
+    padding: var(--sp-3);
+    opacity: 0;
+    pointer-events: none;
+    transform: translateX(var(--px, 0px));
+    transition:
+      transform var(--t) var(--e),
+      opacity 0.2s var(--ease);
+  }
+  .dd-panel[data-state="in"] {
+    opacity: 1;
+    pointer-events: auto;
+    transition:
+      transform var(--t) var(--e),
+      opacity 0.26s var(--ease) 0.05s;
+  }
+  .dd-product {
+    width: 640px;
+    grid-template-columns: 1fr 236px;
+    gap: var(--sp-3);
+  }
+  .dd-uses {
+    width: 600px;
+  }
+  .dd-list,
+  .dd-grid {
+    display: grid;
+    gap: var(--sp-1) var(--sp-2);
+    margin: 0;
+    padding: 0;
+    list-style: none;
+  }
+  .dd-grid {
+    grid-template-columns: 1fr 1fr;
+  }
+  .dd-item {
+    display: grid;
+    grid-template-columns: 40px 1fr;
+    gap: var(--sp-3);
+    align-items: center;
+    min-height: 64px;
+    padding: var(--sp-3);
+    border-radius: 12px;
+    text-decoration: none;
+    color: var(--ink);
+    transition: background-color 0.15s var(--ease);
+  }
+  .dd-item:hover,
+  .dd-item:focus-visible {
+    background: var(--surface-2);
+  }
+  .dd-item:focus-visible {
+    outline-offset: -2px;
+  }
+  .dd-icon {
+    position: relative;
+    display: grid;
+    place-items: center;
+    width: 40px;
+    height: 40px;
+    overflow: hidden;
+    border-radius: 11px;
+    background: var(--tone-soft);
+    color: var(--tone-ink);
+  }
+  .dd-icon :global(.icon) {
+    width: 22px;
+    height: 22px;
+    vertical-align: 0;
+  }
+  .dd-thumb img {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    opacity: 0;
+    transition: opacity 0.3s var(--ease);
+  }
+  .dd-thumb img[src] {
+    opacity: 1;
+  }
+  .dd-text {
+    display: grid;
+    gap: 2px;
+    min-width: 0;
+  }
+  .dd-title {
+    font-size: var(--fs-small);
+    font-weight: var(--fw-strong);
+    line-height: 1.3;
+  }
+  .dd-note {
+    font-size: var(--fs-xs);
+    line-height: 1.35;
+    color: var(--muted);
+  }
+  .dd-side {
+    display: grid;
+    grid-template-rows: 1fr auto;
+    gap: var(--sp-2);
+  }
+  .dd-feature {
+    display: flex;
+    flex-direction: column;
+    gap: var(--sp-1);
+    padding: var(--sp-4);
+    border-radius: 14px;
+    background: var(--tone-soft);
+    text-decoration: none;
+    color: var(--ink);
+    transition: transform 0.3s var(--ease);
+  }
+  .dd-feature:hover {
+    transform: translateY(-2px);
+  }
+  .dd-parts {
+    display: grid;
+    gap: 6px;
+    margin-bottom: auto;
+    padding: var(--sp-1) 0 var(--sp-6);
+  }
+  .dd-parts span {
+    display: flex;
+    align-items: center;
+    gap: var(--sp-2);
+    height: 32px;
+    padding: 0 var(--sp-3);
+    border-radius: 9px;
+    background: var(--surface);
+    box-shadow: var(--shadow-xs);
+    font-size: var(--fs-xs);
+    font-weight: var(--fw-medium);
+    color: var(--ink-2);
+  }
+  .dd-parts span:nth-child(2) {
+    margin-left: var(--sp-4);
+  }
+  .dd-parts span:nth-child(3) {
+    margin-left: var(--sp-7);
+  }
+  .dd-parts :global(.icon) {
+    width: 16px;
+    height: 16px;
+    color: var(--tone-ink);
+  }
+  .dd-feature-title {
+    font-family: var(--font-display);
+    font-size: 1.375rem;
+    line-height: 1.1;
+    letter-spacing: -0.01em;
+  }
+  .dd-all {
+    display: inline-flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--sp-2);
+    min-height: 40px;
+    padding: 0 var(--sp-4);
+    border-radius: 12px;
+    font-size: var(--fs-small);
+    font-weight: var(--fw-strong);
+    color: var(--ink);
+    text-decoration: none;
+    transition: background-color 0.15s var(--ease);
+  }
+  .dd-all:hover,
+  .dd-all:focus-visible {
+    background: var(--surface-2);
+  }
+  .dd-all :global(.icon) {
+    transition: transform 0.25s var(--ease);
+  }
+  .dd-all:hover :global(.icon) {
+    transform: translateX(3px);
+  }
+  .dd-foot {
+    margin-top: var(--sp-2);
+    padding-top: var(--sp-2);
+    border-top: 1px solid var(--line);
+  }
+  .dd-foot .dd-all {
+    display: flex;
+  }
+
+  /* ---------- Actions and mobile ---------- */
+  .nav-actions {
+    display: flex;
+    align-items: center;
+    gap: var(--sp-2);
+  }
+  /* Menu button: a 44px touch target with no outline of its own; a soft
+     fill shows only on hover, focus and while the menu is open, so it reads
+     as part of the pill instead of a second pill inside it. */
+  .menu-toggle {
+    display: none;
+    width: 44px;
+    height: 44px;
+    margin-right: -2px;
+    place-items: center;
+    padding: 0;
+    border: 0;
+    border-radius: 50%;
+    background: transparent;
+    color: var(--ink);
+    cursor: pointer;
+    -webkit-tap-highlight-color: transparent;
+    transition: background-color 0.2s var(--ease);
+  }
+  .menu-toggle:hover,
+  .menu-toggle[aria-expanded="true"] {
+    background: var(--surface-2);
+  }
+  .burger {
+    position: relative;
+    display: block;
+    width: 20px;
+    height: 12px;
+  }
+  .burger span {
+    position: absolute;
+    left: 0;
+    width: 100%;
+    height: 2px;
+    border-radius: 2px;
+    background: currentColor;
+    transition: transform 0.3s var(--ease-out);
+  }
+  .burger span:first-child {
+    top: 1px;
+  }
+  .burger span:last-child {
+    bottom: 1px;
+  }
+  .menu-toggle[aria-expanded="true"] .burger span:first-child {
+    transform: translateY(4px) rotate(45deg);
+  }
+  .menu-toggle[aria-expanded="true"] .burger span:last-child {
+    transform: translateY(-4px) rotate(-45deg);
+  }
+  .mobile-menu {
+    pointer-events: auto;
+    position: fixed;
+    inset: 0;
+    z-index: -1;
+    display: flex;
+    flex-direction: column;
+    padding-top: 84px;
+    background: var(--bg);
+    animation: fade-in 0.2s var(--ease) both;
+  }
+  .mobile-menu[hidden] {
+    display: none;
+  }
+  /* Only the list scrolls, so nothing slides under the header bar. */
+  .mobile-inner {
+    flex: 1;
+    min-height: 0;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    display: grid;
+    align-content: start;
+    gap: var(--sp-7);
+    padding-top: var(--sp-4);
+    /* No bottom padding here: a sticky child stops at the scroller's
+       padding edge, so padding would let rows show below the CTA. */
+    padding-bottom: 0;
+  }
+  @media (prefers-reduced-motion: no-preference) {
+    .mobile-inner > * {
+      animation: rise 0.5s var(--ease-out) both;
+      animation-delay: calc(var(--i, 0) * 40ms);
+    }
+    .mobile-inner > :nth-child(2) {
+      --i: 1;
+    }
+    .mobile-inner > :nth-child(3) {
+      --i: 2;
+    }
+    .mobile-inner > :nth-child(4) {
+      --i: 3;
+    }
+  }
+  .m-label {
+    font-family: var(--font-mono);
+    font-size: var(--fs-label);
+    letter-spacing: var(--ls-label);
+    text-transform: uppercase;
+    color: var(--muted);
+    margin-bottom: var(--sp-2);
+  }
+  .m-rows,
+  .m-links {
+    display: grid;
+    margin: 0;
+    padding: 0;
+    list-style: none;
+  }
+  .m-rows a {
+    display: grid;
+    grid-template-columns: 32px 1fr;
+    gap: var(--sp-3);
+    align-items: center;
+    min-height: 52px;
+    font-size: 1.0625rem;
+    font-weight: var(--fw-medium);
+    text-decoration: none;
+    color: var(--ink);
+    border-bottom: 1px solid var(--line);
+  }
+  .m-icon {
+    display: grid;
+    place-items: center;
+    width: 32px;
+    height: 32px;
+    border-radius: 9px;
+    background: var(--tone-soft);
+    color: var(--tone-ink);
+  }
+  .m-icon :global(.icon) {
+    width: 18px;
+    height: 18px;
+    vertical-align: 0;
+  }
+  .m-all {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--sp-2);
+    min-height: 44px;
+    margin-top: var(--sp-1);
+    font-size: var(--fs-small);
+    font-weight: var(--fw-strong);
+    color: var(--accent-text);
+    text-decoration: none;
+  }
+  .m-links {
+    grid-template-columns: 1fr 1fr;
+    column-gap: var(--sp-4);
+  }
+  .m-links a {
+    display: flex;
+    align-items: center;
+    min-height: 48px;
+    font-size: 1.0625rem;
+    font-weight: var(--fw-medium);
+    text-decoration: none;
+    border-bottom: 1px solid var(--line);
+  }
+  .m-foot {
+    position: sticky;
+    bottom: 0;
+    padding: var(--sp-6) 0 calc(var(--sp-4) + env(safe-area-inset-bottom, 0px));
+    background: linear-gradient(transparent, var(--bg) var(--sp-6));
+  }
+  .m-cta {
+    width: 100%;
+  }
+  @media (max-width: 1080px) {
+    .signin {
+      display: none;
+    }
+  }
+  @media (max-width: 960px) {
+    .nav-main {
+      display: none;
+    }
+    .nav-actions {
+      margin-left: auto;
+    }
+    .menu-toggle {
+      display: grid;
+    }
+    /* Phones and tablets: the pill sits exactly on the page gutter, so its
+       outer edges line up with the text below; the logo and the menu button
+       sit inside it with their own padding. At the top of the page, before
+       the pill appears, the logo and button slide out to the gutter itself
+       (transform only), then tuck in as the pill fades in. */
+    .nav {
+      padding-inline: calc(var(--gutter) + 12px) calc(var(--gutter) + 6px);
+    }
+    .nav-bg {
+      inset: 6px var(--gutter);
+    }
+    .brand,
+    .nav-actions {
+      transition: transform 0.5s var(--ease-out);
+    }
+    :global(html:not([data-scrolled])) .nav:not(:has([aria-expanded="true"])) .brand {
+      transform: translateX(-12px);
+    }
+    :global(html:not([data-scrolled])) .nav:not(:has([aria-expanded="true"])) .nav-actions {
+      transform: translateX(6px);
+    }
+    /* With the sheet open the bar is always the pill, at any scroll. */
+    .nav:has([aria-expanded="true"]) .nav-bg {
+      opacity: 1;
+      transform: none;
+    }
+  }
+  @media (max-width: 520px) {
+    .cta {
+      display: none;
+    }
+    .nav {
+      height: 68px;
+    }
+    .mobile-menu {
+      padding-top: 76px;
+    }
+  }
+</style>

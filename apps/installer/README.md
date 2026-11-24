@@ -10,7 +10,7 @@ Design: `docs/plans/phase-6-installer-pilot.md` Section 4.10. Not Tauri's MSI ta
 | `Service.wxs` | `rulebox-agent.exe`, the `RuleboxAgent` service and its restart settings, the "Rulebox Setup" shortcut |
 | `StaffApp.wxs` | `rulebox-shell.exe`, `current.json`, `versions\<version>\rulebox-staff.exe` |
 | `Checks.wxs` | Launch conditions (administrator, x64, build 19045, 2 GB free) and the uninstall guard |
-| `UI.wxs` | WixUI_Minimal and the finish-page "Start Rulebox Setup" checkbox (the only custom action) |
+| `UI.wxs` | WixUI_Minimal, the logo bitmaps (`assets/brand/installer/`, from `pnpm gen:brand`) and the finish-page "Start Rulebox Setup" checkbox (the only custom action) |
 | `License.rtf` | Text shown on the licence page |
 | `build.ps1` | The build script |
 | `webview2-bootstrapper.sha256` | Pinned SHA-256 of Microsoft's WebView2 bootstrapper |

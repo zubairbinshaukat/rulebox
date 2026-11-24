@@ -15,6 +15,9 @@
      xmlns:ui="http://wixtoolset.org/schemas/v4/wxs/ui">
   <Fragment>
     <WixVariable Id="WixUILicenseRtf" Value="$(InstallerDir)\License.rtf" />
+    <!-- Logo bitmaps made by `pnpm gen:brand` (top banner; left panel of the welcome and finish pages). -->
+    <WixVariable Id="WixUIBannerBmp" Value="$(RepoRoot)\assets\brand\installer\banner.bmp" />
+    <WixVariable Id="WixUIDialogBmp" Value="$(RepoRoot)\assets\brand\installer\dialog.bmp" />
 
     <Property Id="WIXUI_EXITDIALOGOPTIONALCHECKBOXTEXT" Value="Start Rulebox Setup now to check this PC and connect it to your dashboard" />
     <Property Id="WIXUI_EXITDIALOGOPTIONALCHECKBOX" Value="1" />

@@ -1,0 +1,34 @@
+---
+title: What is Rulebox
+description: Rulebox is an open-source kiosk OS for Windows. It turns a PC into a locked, branded staff workstation managed from a web dashboard.
+section: Start here
+order: 1
+updated: 2026-11-24
+---
+
+Rulebox is an open-source kiosk OS for Windows. It turns an ordinary PC into a locked, branded workstation. Staff sign in and can use only the apps, websites and files you approve. You manage everything from a web dashboard.
+
+## The three parts
+
+| Part | What it does |
+|---|---|
+| **The agent** | A small Windows service that enforces your rules, installs apps and keeps the desktop alive. |
+| **The staff desktop** | What people see: sign-in, taskbar, Start menu, approved apps and their own files. |
+| **The dashboard** | Where you manage PCs, people, apps and rules from any browser. |
+
+## Does it replace Windows?
+
+No. Rulebox runs on top of Windows. It replaces the Windows desktop for one special "Staff" account and locks that account down. The administrator account stays normal Windows.
+
+## Desired state, not commands
+
+You never send a PC a list of commands. You change the rules in the dashboard, and each PC moves to the latest signed version of its rules. A PC that was offline does not replay a backlog; it goes straight to the current state when it reconnects.
+
+## What it is not for
+
+Unattended single-app screens such as digital signage, ticket machines and self-checkout. Windows' built-in single-app kiosk mode is made for that. Rulebox is for people who sign in and work.
+
+## Next
+
+- [Requirements and Windows editions](/docs/start-here/requirements)
+- [Download and verify the installer](/docs/install/download-and-verify)

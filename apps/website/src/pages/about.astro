@@ -1,0 +1,68 @@
+---
+/* Plan Q13 (a, owner's choice for now): a project-only page. A named
+   founder story can replace the "Who" section once the owner writes it. */
+import Base from "../layouts/Base.astro";
+import PageHero from "../components/PageHero.astro";
+import CtaClose from "../components/CtaClose.astro";
+import Icon from "../components/Icon.astro";
+import { REPO_URL } from "../config";
+---
+
+<Base
+  title="About Rulebox"
+  description="Why Rulebox exists, how it is built, and how the project is run: an open-source kiosk OS for the Windows PCs that staff share."
+  path="/about"
+  og="about"
+  crumbs={[{ name: "About", path: "/about" }]}
+>
+  <PageHero label="About" title="A small project for a common problem." sub="Every workplace has a PC that everyone shares and nobody owns. Rulebox exists to make that PC do its job, and nothing else." tone="sun" />
+
+  <section class="section-tight">
+    <div class="container cols">
+      <div class="prose flush">
+        <h2>Why it exists</h2>
+        <p>Shared PCs go wrong slowly. Someone installs a game, someone saves their passwords in the browser, someone clicks a link in an email. The usual fixes are stickers, Windows' own kiosk mode, or a device-management suite that does a hundred things. A shop with six PCs does not have an IT department. It has a person who is "good with computers".</p>
+        <p>Rulebox is for that person. Install one small program, type a code, and the PC becomes a locked, branded workstation that you manage from a web page.</p>
+        <h2>How it is built</h2>
+        <p>A Rust service on the PC, a friendly desktop for staff, and a web dashboard. Desired state, not commands: every change is versioned and signed, and a PC that was offline simply moves to the latest version. Every installer is hash-checked before it runs.</p>
+        <h2>How the project is run</h2>
+        <p>In the open, under the MIT licence. The roadmap, the changelog and the known limits are public. We publish no numbers without a source, and no customer names without written permission.</p>
+      </div>
+      <aside class="side" aria-label="More about Rulebox">
+        <ul class="icon-list" role="list">
+          <li data-tone="mint">
+            <span class="il-icon"><Icon name="code" /></span>
+            <span class="il-text"><a class="il-a" href={REPO_URL}>The code</a><span class="muted">Read it on GitHub</span></span>
+          </li>
+          <li data-tone="violet">
+            <span class="il-icon"><Icon name="signpost" /></span>
+            <span class="il-text"><a class="il-a" href="/roadmap">The roadmap</a><span class="muted">Built, next, later, not planned</span></span>
+          </li>
+          <li data-tone="coral">
+            <span class="il-icon"><Icon name="shield" /></span>
+            <span class="il-text"><a class="il-a" href="/security">The security design</a><span class="muted">And its limits</span></span>
+          </li>
+          <li data-tone="blue">
+            <span class="il-icon"><Icon name="letter" /></span>
+            <span class="il-text"><a class="il-a" href="/contact">Contact</a><span class="muted">We reply by email</span></span>
+          </li>
+        </ul>
+      </aside>
+    </div>
+  </section>
+  <CtaClose />
+</Base>
+
+<style>
+  .cols {
+    display: grid;
+    gap: var(--sp-8);
+    align-items: start;
+  }
+  @media (min-width: 960px) {
+    .cols {
+      grid-template-columns: minmax(0, 1.6fr) minmax(0, 1fr);
+      gap: var(--sp-10);
+    }
+  }
+</style>

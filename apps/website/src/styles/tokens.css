@@ -1,0 +1,537 @@
+/*
+ * Rulebox website tokens. Every colour on the site comes from here.
+ *
+ * The site is LIGHT ONLY (owner, 2026-11-25): warm paper pages with a few
+ * dark accent sections. There is no dark mode and no theme switch.
+ *
+ * How the colour system works
+ * ---------------------------
+ * 1. A palette sets every colour twice: a paper value (--lt-*) and a value
+ *    for dark sections (--dk-*). Components never read the raw --lt- and --dk- values.
+ * 2. The paper block maps --lt-* onto the tokens components use (--bg,
+ *    --ink, --primary ...). Inside .section-dark (alias .night) the same
+ *    tokens are remapped to --dk-*, so anything placed in a dark band,
+ *    the footer panel or a dark card just works.
+ * 3. --night / --on-night* are the dark palette seen from the paper side,
+ *    for small dark cards that do not take the whole scope.
+ * 4. There is one palette, Deep teal (final, owner 2026-11-25).
+ *
+ * Brand rules kept: warm paper neutrals (hue 70-85), one teal UI accent
+ * (hue 178-180) for links and focus, logo keyhole amber #f2a12a (--brand,
+ * decoration only, never text or meaningful icons) never changes, the
+ * vivid step colours (Shufti reference) are one family and never body text.
+ *
+ * scripts/contrast.mjs (part of the build) checks every text/background
+ * pair on paper and inside the dark scope.
+ */
+
+/* ---------- Palette: Deep teal (final, owner 2026-11-25) ---------- */
+:root {
+  /* Paper and layers: page, sunken band, raised surface, well, overlays */
+  --lt-bg: oklch(0.977 0.006 84);          --dk-bg: oklch(0.215 0.024 212);
+  --lt-bg-stone: oklch(0.951 0.01 82);     --dk-bg-stone: oklch(0.24 0.026 212);
+  --lt-surface: oklch(0.994 0.003 85);     --dk-surface: oklch(0.255 0.026 212);
+  --lt-surface-2: oklch(0.962 0.008 82);   --dk-surface-2: oklch(0.29 0.028 212);
+  --lt-glass: oklch(0.99 0.004 85 / 0.88); --dk-glass: oklch(0.25 0.026 212 / 0.86);
+  --lt-overlay: oklch(0.22 0.012 70 / 0.36); --dk-overlay: oklch(0.08 0.01 212 / 0.6);
+  /* A deeper well for code and cards inside a dark section */
+                                           --dk-night: oklch(0.175 0.022 212);
+
+  /* Ink levels (never pure white on the dark side) */
+  --lt-ink: oklch(0.215 0.014 70);         --dk-ink: oklch(0.955 0.008 195);
+  --lt-ink-2: oklch(0.355 0.013 70);       --dk-ink-2: oklch(0.875 0.012 200);
+  --lt-muted: oklch(0.475 0.012 70);       --dk-muted: oklch(0.79 0.02 205);
+  --lt-faint: oklch(0.53 0.01 72);         --dk-faint: oklch(0.71 0.02 205);
+
+  /* Hairlines; --control is the 3:1 edge of form controls */
+  --lt-line: oklch(0.9 0.008 80);          --dk-line: oklch(0.325 0.026 212);
+  --lt-line-strong: oklch(0.8 0.01 76);    --dk-line-strong: oklch(0.405 0.026 212);
+  --lt-control: oklch(0.63 0.012 74);      --dk-control: oklch(0.58 0.022 212);
+  --lt-knob: oklch(0.995 0.003 85);        --dk-knob: oklch(0.94 0.006 195);
+
+  /* Primary: Deep teal (petrol). Inside dark sections it is re-lit. */
+  --lt-primary: oklch(0.43 0.08 202);           --dk-primary: oklch(0.8 0.095 196);
+  --lt-primary-hover: oklch(0.385 0.075 202);   --dk-primary-hover: oklch(0.85 0.085 196);
+  --lt-primary-pressed: oklch(0.345 0.07 202);  --dk-primary-pressed: oklch(0.75 0.095 196);
+  --lt-on-primary: oklch(0.985 0.005 85);       --dk-on-primary: oklch(0.2 0.035 205);
+  --lt-primary-soft: oklch(0.94 0.028 200);     --dk-primary-soft: oklch(0.33 0.045 200);
+  --lt-primary-text: oklch(0.42 0.08 202);      --dk-primary-text: oklch(0.84 0.08 196);
+  --lt-primary-shadow: oklch(0.43 0.08 202 / 0.5); --dk-primary-shadow: oklch(0.05 0.02 205 / 0.6);
+
+  /* UI accent: teal (links, focus, selected controls) */
+  --lt-accent: oklch(0.53 0.09 178);       --dk-accent: oklch(0.78 0.09 180);
+  --lt-accent-text: oklch(0.46 0.085 180); --dk-accent-text: oklch(0.83 0.08 180);
+  --lt-accent-soft: oklch(0.94 0.03 178);  --dk-accent-soft: oklch(0.33 0.04 180);
+  --lt-focus: oklch(0.53 0.1 178);         --dk-focus: oklch(0.82 0.1 180);
+
+  /* Terminal states in dark cards */
+                                           --dk-on-night-ok: oklch(0.85 0.11 160);
+                                           --dk-on-night-deny: oklch(0.82 0.1 32);
+
+  /* Vivid step colours: one family. Paper side: L 0.64-0.68, C 0.13-0.15,
+     five spread hues; dark side: re-lit with a third less chroma so they
+     sit on the dark sections without glowing. Sun is the bright exception.
+     --*-on is the ink on the solid colour, --*-ink the text colour. */
+  --lt-c-blue: oklch(0.64 0.15 258);       --dk-c-blue: oklch(0.7 0.11 258);
+  --lt-c-blue-soft: oklch(0.945 0.03 258); --dk-c-blue-soft: oklch(0.33 0.05 258);
+  --lt-c-blue-ink: oklch(0.47 0.15 262);   --dk-c-blue-ink: oklch(0.86 0.07 258);
+  --lt-c-blue-on: oklch(0.2 0.03 262);     --dk-c-blue-on: oklch(0.18 0.03 262);
+
+  --lt-c-violet: oklch(0.64 0.15 296);       --dk-c-violet: oklch(0.7 0.11 296);
+  --lt-c-violet-soft: oklch(0.945 0.03 300); --dk-c-violet-soft: oklch(0.33 0.055 298);
+  --lt-c-violet-ink: oklch(0.47 0.16 298);   --dk-c-violet-ink: oklch(0.87 0.07 300);
+  --lt-c-violet-on: oklch(0.2 0.03 298);     --dk-c-violet-on: oklch(0.18 0.03 298);
+
+  --lt-c-coral: oklch(0.66 0.15 34);       --dk-c-coral: oklch(0.71 0.11 34);
+  --lt-c-coral-soft: oklch(0.945 0.03 38); --dk-c-coral-soft: oklch(0.33 0.05 22);
+  --lt-c-coral-ink: oklch(0.5 0.155 32);   --dk-c-coral-ink: oklch(0.86 0.07 36);
+  --lt-c-coral-on: oklch(0.2 0.03 34);     --dk-c-coral-on: oklch(0.18 0.03 34);
+
+  --lt-c-sun: oklch(0.86 0.145 90);        --dk-c-sun: oklch(0.84 0.11 90);
+  --lt-c-sun-soft: oklch(0.955 0.055 95);  --dk-c-sun-soft: oklch(0.34 0.035 82);
+  --lt-c-sun-ink: oklch(0.47 0.095 75);    --dk-c-sun-ink: oklch(0.89 0.09 92);
+  --lt-c-sun-on: oklch(0.24 0.04 80);      --dk-c-sun-on: oklch(0.2 0.035 80);
+
+  --lt-c-mint: oklch(0.68 0.13 162);       --dk-c-mint: oklch(0.72 0.1 162);
+  --lt-c-mint-soft: oklch(0.945 0.035 162); --dk-c-mint-soft: oklch(0.33 0.045 162);
+  --lt-c-mint-ink: oklch(0.45 0.1 162);    --dk-c-mint-ink: oklch(0.86 0.08 162);
+  --lt-c-mint-on: oklch(0.2 0.03 162);     --dk-c-mint-on: oklch(0.18 0.03 162);
+
+  /* Status */
+  --lt-success: oklch(0.56 0.13 155);      --dk-success: oklch(0.76 0.12 155);
+  --lt-success-soft: oklch(0.945 0.04 155); --dk-success-soft: oklch(0.33 0.05 155);
+  --lt-success-ink: oklch(0.43 0.1 155);   --dk-success-ink: oklch(0.87 0.09 155);
+  --lt-warning: oklch(0.635 0.14 62);      --dk-warning: oklch(0.8 0.13 75);
+  --lt-warning-soft: oklch(0.955 0.05 80); --dk-warning-soft: oklch(0.34 0.05 75);
+  --lt-warning-ink: oklch(0.48 0.11 60);   --dk-warning-ink: oklch(0.88 0.09 80);
+  --lt-danger: oklch(0.57 0.19 27);        --dk-danger: oklch(0.73 0.15 27);
+  --lt-danger-soft: oklch(0.945 0.035 25); --dk-danger-soft: oklch(0.33 0.06 25);
+  --lt-danger-ink: oklch(0.5 0.18 27);     --dk-danger-ink: oklch(0.86 0.09 25);
+
+  /* Light on colour: highlights and dot grain on slabs, photo treatment */
+  --lt-sheen-strong: oklch(1 0 0 / 0.5);   --dk-sheen-strong: oklch(1 0 0 / 0.06);
+  --lt-sheen: oklch(1 0 0 / 0.35);         --dk-sheen: oklch(1 0 0 / 0.14);
+  --lt-sheen-soft: oklch(1 0 0 / 0.16);    --dk-sheen-soft: oklch(1 0 0 / 0.05);
+  --lt-dots: oklch(1 0 0 / 0.3);           --dk-dots: oklch(1 0 0 / 0.17);
+  --lt-btn-sheen: oklch(1 0 0 / 0.18);     --dk-btn-sheen: oklch(1 0 0 / 0.3);
+  --lt-hairline: oklch(0.3 0.02 70 / 0.08); --dk-hairline: oklch(1 0 0 / 0.08);
+  --lt-photo-dim: oklch(0.2 0.01 70 / 0);  --dk-photo-dim: oklch(0.12 0.02 212 / 0.12);
+  --lt-photo-scrim: oklch(0.18 0.012 70 / 0.42); --dk-photo-scrim: oklch(0.1 0.02 212 / 0.55);
+  --lt-chip-glass: oklch(0.99 0.004 85 / 0.86); --dk-chip-glass: oklch(0.22 0.02 212 / 0.82);
+  --lt-chip-glass-ink: oklch(0.24 0.012 70); --dk-chip-glass-ink: oklch(0.94 0.008 195);
+  --lt-wordmark: oklch(0.215 0.014 70);    --dk-wordmark: oklch(0.72 0.02 205);
+
+  /* The drawn staff desktop (DesktopMock): the Staff App's own light theme
+     (packages/ui tokens.css, --rb-*), so the mock looks like the real app.
+     It is a picture of the light app, so dark sections keep the same values.
+     art-<glyph>-a/-b: the tile art gradient per app glyph (appArt.ts hues). */
+  --lt-mock-bg: oklch(0.935 0.009 85);      --dk-mock-bg: oklch(0.935 0.009 85);
+  --lt-mock-ink: oklch(0.24 0.012 70);      --dk-mock-ink: oklch(0.24 0.012 70);
+  --lt-mock-muted: oklch(0.5 0.012 70);     --dk-mock-muted: oklch(0.5 0.012 70);
+  --lt-mock-edge: oklch(1 0 0 / 0.7);       --dk-mock-edge: oklch(1 0 0 / 0.7);
+  --lt-mock-glass: oklch(0.995 0.002 85 / 0.72); --dk-mock-glass: oklch(0.995 0.002 85 / 0.72);
+  --lt-mock-glass-edge: oklch(1 0 0 / 0.85); --dk-mock-glass-edge: oklch(1 0 0 / 0.85);
+  --lt-mock-bar: oklch(0.99 0.003 85 / 0.8); --dk-mock-bar: oklch(0.99 0.003 85 / 0.8);
+  --lt-mock-chip: oklch(0.94 0.006 85);     --dk-mock-chip: oklch(0.94 0.006 85);
+  --lt-mock-blob-1: oklch(0.86 0.045 170);  --dk-mock-blob-1: oklch(0.86 0.045 170);
+  --lt-mock-blob-2: oklch(0.9 0.045 75);    --dk-mock-blob-2: oklch(0.9 0.045 75);
+  --lt-mock-accent: oklch(0.5 0.085 175);   --dk-mock-accent: oklch(0.5 0.085 175);
+  --lt-mock-accent-soft: oklch(0.94 0.03 175); --dk-mock-accent-soft: oklch(0.94 0.03 175);
+  --lt-mock-accent-text: oklch(0.38 0.085 175); --dk-mock-accent-text: oklch(0.38 0.085 175);
+  --lt-mock-good: oklch(0.42 0.1 150);      --dk-mock-good: oklch(0.42 0.1 150);
+  --lt-mock-warn-soft: oklch(0.95 0.05 80); --dk-mock-warn-soft: oklch(0.95 0.05 80);
+  --lt-mock-warn-ink: oklch(0.5 0.11 65);   --dk-mock-warn-ink: oklch(0.5 0.11 65);
+  --lt-mock-window: oklch(0.995 0.002 85);  --dk-mock-window: oklch(0.995 0.002 85);
+  --lt-mock-paper: oklch(0.982 0.003 85);   --dk-mock-paper: oklch(0.982 0.003 85);
+  --lt-mock-line: oklch(0.9 0.006 80);      --dk-mock-line: oklch(0.9 0.006 80);
+  --lt-mock-control: oklch(0.6 0.01 70);    --dk-mock-control: oklch(0.6 0.01 70);
+  --lt-mock-page: oklch(1 0 0);             --dk-mock-page: oklch(1 0 0);
+  --lt-mock-doc-line: oklch(0.88 0.008 80); --dk-mock-doc-line: oklch(0.88 0.008 80);
+  --lt-mock-doc-title: oklch(0.3 0.012 70); --dk-mock-doc-title: oklch(0.3 0.012 70);
+  --lt-mock-go: oklch(0.24 0.012 70);       --dk-mock-go: oklch(0.24 0.012 70);
+  --lt-mock-go-ink: oklch(0.995 0.002 85);  --dk-mock-go-ink: oklch(0.995 0.002 85);
+  --lt-mock-glyph: oklch(1 0 0);            --dk-mock-glyph: oklch(1 0 0);
+  --lt-mock-shadow: oklch(0.3 0.02 70 / 0.3); --dk-mock-shadow: oklch(0.3 0.02 70 / 0.3);
+  --lt-mock-shadow-soft: oklch(0.3 0.02 70 / 0.12); --dk-mock-shadow-soft: oklch(0.3 0.02 70 / 0.12);
+  --lt-mock-art-calendar-a: oklch(0.69 0.17 258); --dk-mock-art-calendar-a: oklch(0.69 0.17 258);
+  --lt-mock-art-calendar-b: oklch(0.55 0.17 270); --dk-mock-art-calendar-b: oklch(0.55 0.17 270);
+  --lt-mock-art-card-a: oklch(0.69 0.17 212); --dk-mock-art-card-a: oklch(0.69 0.17 212);
+  --lt-mock-art-card-b: oklch(0.55 0.17 224); --dk-mock-art-card-b: oklch(0.55 0.17 224);
+  --lt-mock-art-video-a: oklch(0.69 0.17 300); --dk-mock-art-video-a: oklch(0.69 0.17 300);
+  --lt-mock-art-video-b: oklch(0.55 0.17 312); --dk-mock-art-video-b: oklch(0.55 0.17 312);
+  --lt-mock-art-folder-a: oklch(0.69 0.17 62); --dk-mock-art-folder-a: oklch(0.69 0.17 62);
+  --lt-mock-art-folder-b: oklch(0.55 0.17 74); --dk-mock-art-folder-b: oklch(0.55 0.17 74);
+  --lt-mock-art-chat-a: oklch(0.69 0.17 280); --dk-mock-art-chat-a: oklch(0.69 0.17 280);
+  --lt-mock-art-chat-b: oklch(0.55 0.17 292); --dk-mock-art-chat-b: oklch(0.55 0.17 292);
+  --lt-mock-art-badge-a: oklch(0.69 0.17 178); --dk-mock-art-badge-a: oklch(0.69 0.17 178);
+  --lt-mock-art-badge-b: oklch(0.55 0.17 190); --dk-mock-art-badge-b: oklch(0.55 0.17 190);
+  --lt-mock-art-chart-a: oklch(0.69 0.17 135); --dk-mock-art-chart-a: oklch(0.69 0.17 135);
+  --lt-mock-art-chart-b: oklch(0.55 0.17 147); --dk-mock-art-chart-b: oklch(0.55 0.17 147);
+  --lt-mock-art-document-a: oklch(0.69 0.17 250); --dk-mock-art-document-a: oklch(0.69 0.17 250);
+  --lt-mock-art-document-b: oklch(0.55 0.17 262); --dk-mock-art-document-b: oklch(0.55 0.17 262);
+
+  /* Shadow colours (the shadow shapes are in the shared block) */
+  --lt-shadow-a: oklch(0.3 0.02 70 / 0.06); --dk-shadow-a: oklch(0.05 0.01 212 / 0.35);
+  --lt-shadow-b: oklch(0.3 0.02 70 / 0.22); --dk-shadow-b: oklch(0.05 0.01 212 / 0.6);
+  --lt-shadow-c: oklch(0.3 0.02 70 / 0.42); --dk-shadow-c: oklch(0.03 0.01 212 / 0.78);
+}
+
+/* ---------- Paper (the page) ---------- */
+:root {
+  color-scheme: light;
+  --bg: var(--lt-bg);
+  --bg-stone: var(--lt-bg-stone);
+  --surface: var(--lt-surface);
+  --surface-2: var(--lt-surface-2);
+  --glass: var(--lt-glass);
+  --overlay: var(--lt-overlay);
+  --ink: var(--lt-ink);
+  --ink-2: var(--lt-ink-2);
+  --muted: var(--lt-muted);
+  --faint: var(--lt-faint);
+  --line: var(--lt-line);
+  --line-strong: var(--lt-line-strong);
+  --control: var(--lt-control);
+  --knob: var(--lt-knob);
+  --primary: var(--lt-primary);
+  --primary-hover: var(--lt-primary-hover);
+  --primary-pressed: var(--lt-primary-pressed);
+  --on-primary: var(--lt-on-primary);
+  --primary-soft: var(--lt-primary-soft);
+  --primary-text: var(--lt-primary-text);
+  --primary-shadow: var(--lt-primary-shadow);
+  --accent: var(--lt-accent);
+  --accent-text: var(--lt-accent-text);
+  --accent-soft: var(--lt-accent-soft);
+  --focus: var(--lt-focus);
+  --c-blue: var(--lt-c-blue);
+  --c-blue-soft: var(--lt-c-blue-soft);
+  --c-blue-ink: var(--lt-c-blue-ink);
+  --c-blue-on: var(--lt-c-blue-on);
+  --c-violet: var(--lt-c-violet);
+  --c-violet-soft: var(--lt-c-violet-soft);
+  --c-violet-ink: var(--lt-c-violet-ink);
+  --c-violet-on: var(--lt-c-violet-on);
+  --c-coral: var(--lt-c-coral);
+  --c-coral-soft: var(--lt-c-coral-soft);
+  --c-coral-ink: var(--lt-c-coral-ink);
+  --c-coral-on: var(--lt-c-coral-on);
+  --c-sun: var(--lt-c-sun);
+  --c-sun-soft: var(--lt-c-sun-soft);
+  --c-sun-ink: var(--lt-c-sun-ink);
+  --c-sun-on: var(--lt-c-sun-on);
+  --c-mint: var(--lt-c-mint);
+  --c-mint-soft: var(--lt-c-mint-soft);
+  --c-mint-ink: var(--lt-c-mint-ink);
+  --c-mint-on: var(--lt-c-mint-on);
+  --success: var(--lt-success);
+  --success-soft: var(--lt-success-soft);
+  --success-ink: var(--lt-success-ink);
+  --warning: var(--lt-warning);
+  --warning-soft: var(--lt-warning-soft);
+  --warning-ink: var(--lt-warning-ink);
+  --danger: var(--lt-danger);
+  --danger-soft: var(--lt-danger-soft);
+  --danger-ink: var(--lt-danger-ink);
+  --sheen-strong: var(--lt-sheen-strong);
+  --sheen: var(--lt-sheen);
+  --sheen-soft: var(--lt-sheen-soft);
+  --dots: var(--lt-dots);
+  --btn-sheen: var(--lt-btn-sheen);
+  --hairline: var(--lt-hairline);
+  --photo-dim: var(--lt-photo-dim);
+  --photo-scrim: var(--lt-photo-scrim);
+  --chip-glass: var(--lt-chip-glass);
+  --chip-glass-ink: var(--lt-chip-glass-ink);
+  --wordmark: var(--lt-wordmark);
+  --mock-bg: var(--lt-mock-bg);
+  --mock-ink: var(--lt-mock-ink);
+  --mock-muted: var(--lt-mock-muted);
+  --mock-edge: var(--lt-mock-edge);
+  --mock-glass: var(--lt-mock-glass);
+  --mock-glass-edge: var(--lt-mock-glass-edge);
+  --mock-bar: var(--lt-mock-bar);
+  --mock-chip: var(--lt-mock-chip);
+  --mock-blob-1: var(--lt-mock-blob-1);
+  --mock-blob-2: var(--lt-mock-blob-2);
+  --mock-accent: var(--lt-mock-accent);
+  --mock-accent-soft: var(--lt-mock-accent-soft);
+  --mock-accent-text: var(--lt-mock-accent-text);
+  --mock-good: var(--lt-mock-good);
+  --mock-warn-soft: var(--lt-mock-warn-soft);
+  --mock-warn-ink: var(--lt-mock-warn-ink);
+  --mock-window: var(--lt-mock-window);
+  --mock-paper: var(--lt-mock-paper);
+  --mock-line: var(--lt-mock-line);
+  --mock-control: var(--lt-mock-control);
+  --mock-page: var(--lt-mock-page);
+  --mock-doc-line: var(--lt-mock-doc-line);
+  --mock-doc-title: var(--lt-mock-doc-title);
+  --mock-go: var(--lt-mock-go);
+  --mock-go-ink: var(--lt-mock-go-ink);
+  --mock-glyph: var(--lt-mock-glyph);
+  --mock-shadow: var(--lt-mock-shadow);
+  --mock-shadow-soft: var(--lt-mock-shadow-soft);
+  --mock-art-calendar-a: var(--lt-mock-art-calendar-a);
+  --mock-art-calendar-b: var(--lt-mock-art-calendar-b);
+  --mock-art-card-a: var(--lt-mock-art-card-a);
+  --mock-art-card-b: var(--lt-mock-art-card-b);
+  --mock-art-video-a: var(--lt-mock-art-video-a);
+  --mock-art-video-b: var(--lt-mock-art-video-b);
+  --mock-art-folder-a: var(--lt-mock-art-folder-a);
+  --mock-art-folder-b: var(--lt-mock-art-folder-b);
+  --mock-art-chat-a: var(--lt-mock-art-chat-a);
+  --mock-art-chat-b: var(--lt-mock-art-chat-b);
+  --mock-art-badge-a: var(--lt-mock-art-badge-a);
+  --mock-art-badge-b: var(--lt-mock-art-badge-b);
+  --mock-art-chart-a: var(--lt-mock-art-chart-a);
+  --mock-art-chart-b: var(--lt-mock-art-chart-b);
+  --mock-art-document-a: var(--lt-mock-art-document-a);
+  --mock-art-document-b: var(--lt-mock-art-document-b);
+  --shadow-a: var(--lt-shadow-a);
+  --shadow-b: var(--lt-shadow-b);
+  --shadow-c: var(--lt-shadow-c);
+  --night: var(--dk-bg);
+  --night-2: var(--dk-surface);
+  --night-line: var(--dk-line);
+  --on-night: var(--dk-ink);
+  --on-night-muted: var(--dk-muted);
+  --on-night-ok: var(--dk-on-night-ok);
+  --on-night-deny: var(--dk-on-night-deny);
+}
+
+/* ---------- Dark sections: the one dark palette ----------
+   Put .section-dark on a band, a panel or a card. .night is the older name
+   (kept, same scope). Background and text come with it. */
+.section-dark,
+.night {
+  color-scheme: dark;
+  --bg: var(--dk-bg);
+  --bg-stone: var(--dk-bg-stone);
+  --surface: var(--dk-surface);
+  --surface-2: var(--dk-surface-2);
+  --glass: var(--dk-glass);
+  --overlay: var(--dk-overlay);
+  --ink: var(--dk-ink);
+  --ink-2: var(--dk-ink-2);
+  --muted: var(--dk-muted);
+  --faint: var(--dk-faint);
+  --line: var(--dk-line);
+  --line-strong: var(--dk-line-strong);
+  --control: var(--dk-control);
+  --knob: var(--dk-knob);
+  --primary: var(--dk-primary);
+  --primary-hover: var(--dk-primary-hover);
+  --primary-pressed: var(--dk-primary-pressed);
+  --on-primary: var(--dk-on-primary);
+  --primary-soft: var(--dk-primary-soft);
+  --primary-text: var(--dk-primary-text);
+  --primary-shadow: var(--dk-primary-shadow);
+  --accent: var(--dk-accent);
+  --accent-text: var(--dk-accent-text);
+  --accent-soft: var(--dk-accent-soft);
+  --focus: var(--dk-focus);
+  --c-blue: var(--dk-c-blue);
+  --c-blue-soft: var(--dk-c-blue-soft);
+  --c-blue-ink: var(--dk-c-blue-ink);
+  --c-blue-on: var(--dk-c-blue-on);
+  --c-violet: var(--dk-c-violet);
+  --c-violet-soft: var(--dk-c-violet-soft);
+  --c-violet-ink: var(--dk-c-violet-ink);
+  --c-violet-on: var(--dk-c-violet-on);
+  --c-coral: var(--dk-c-coral);
+  --c-coral-soft: var(--dk-c-coral-soft);
+  --c-coral-ink: var(--dk-c-coral-ink);
+  --c-coral-on: var(--dk-c-coral-on);
+  --c-sun: var(--dk-c-sun);
+  --c-sun-soft: var(--dk-c-sun-soft);
+  --c-sun-ink: var(--dk-c-sun-ink);
+  --c-sun-on: var(--dk-c-sun-on);
+  --c-mint: var(--dk-c-mint);
+  --c-mint-soft: var(--dk-c-mint-soft);
+  --c-mint-ink: var(--dk-c-mint-ink);
+  --c-mint-on: var(--dk-c-mint-on);
+  --success: var(--dk-success);
+  --success-soft: var(--dk-success-soft);
+  --success-ink: var(--dk-success-ink);
+  --warning: var(--dk-warning);
+  --warning-soft: var(--dk-warning-soft);
+  --warning-ink: var(--dk-warning-ink);
+  --danger: var(--dk-danger);
+  --danger-soft: var(--dk-danger-soft);
+  --danger-ink: var(--dk-danger-ink);
+  --sheen-strong: var(--dk-sheen-strong);
+  --sheen: var(--dk-sheen);
+  --sheen-soft: var(--dk-sheen-soft);
+  --dots: var(--dk-dots);
+  --btn-sheen: var(--dk-btn-sheen);
+  --hairline: var(--dk-hairline);
+  --photo-dim: var(--dk-photo-dim);
+  --photo-scrim: var(--dk-photo-scrim);
+  --chip-glass: var(--dk-chip-glass);
+  --chip-glass-ink: var(--dk-chip-glass-ink);
+  --wordmark: var(--dk-wordmark);
+  --mock-bg: var(--dk-mock-bg);
+  --mock-ink: var(--dk-mock-ink);
+  --mock-muted: var(--dk-mock-muted);
+  --mock-edge: var(--dk-mock-edge);
+  --mock-glass: var(--dk-mock-glass);
+  --mock-glass-edge: var(--dk-mock-glass-edge);
+  --mock-bar: var(--dk-mock-bar);
+  --mock-chip: var(--dk-mock-chip);
+  --mock-blob-1: var(--dk-mock-blob-1);
+  --mock-blob-2: var(--dk-mock-blob-2);
+  --mock-accent: var(--dk-mock-accent);
+  --mock-accent-soft: var(--dk-mock-accent-soft);
+  --mock-accent-text: var(--dk-mock-accent-text);
+  --mock-good: var(--dk-mock-good);
+  --mock-warn-soft: var(--dk-mock-warn-soft);
+  --mock-warn-ink: var(--dk-mock-warn-ink);
+  --mock-window: var(--dk-mock-window);
+  --mock-paper: var(--dk-mock-paper);
+  --mock-line: var(--dk-mock-line);
+  --mock-control: var(--dk-mock-control);
+  --mock-page: var(--dk-mock-page);
+  --mock-doc-line: var(--dk-mock-doc-line);
+  --mock-doc-title: var(--dk-mock-doc-title);
+  --mock-go: var(--dk-mock-go);
+  --mock-go-ink: var(--dk-mock-go-ink);
+  --mock-glyph: var(--dk-mock-glyph);
+  --mock-shadow: var(--dk-mock-shadow);
+  --mock-shadow-soft: var(--dk-mock-shadow-soft);
+  --mock-art-calendar-a: var(--dk-mock-art-calendar-a);
+  --mock-art-calendar-b: var(--dk-mock-art-calendar-b);
+  --mock-art-card-a: var(--dk-mock-art-card-a);
+  --mock-art-card-b: var(--dk-mock-art-card-b);
+  --mock-art-video-a: var(--dk-mock-art-video-a);
+  --mock-art-video-b: var(--dk-mock-art-video-b);
+  --mock-art-folder-a: var(--dk-mock-art-folder-a);
+  --mock-art-folder-b: var(--dk-mock-art-folder-b);
+  --mock-art-chat-a: var(--dk-mock-art-chat-a);
+  --mock-art-chat-b: var(--dk-mock-art-chat-b);
+  --mock-art-badge-a: var(--dk-mock-art-badge-a);
+  --mock-art-badge-b: var(--dk-mock-art-badge-b);
+  --mock-art-chart-a: var(--dk-mock-art-chart-a);
+  --mock-art-chart-b: var(--dk-mock-art-chart-b);
+  --mock-art-document-a: var(--dk-mock-art-document-a);
+  --mock-art-document-b: var(--dk-mock-art-document-b);
+  --shadow-a: var(--dk-shadow-a);
+  --shadow-b: var(--dk-shadow-b);
+  --shadow-c: var(--dk-shadow-c);
+  --night: var(--dk-night);
+  --night-2: var(--dk-bg);
+  --night-line: var(--dk-line);
+  --on-night: var(--dk-ink);
+  --on-night-muted: var(--dk-muted);
+  --on-night-ok: var(--dk-on-night-ok);
+  --on-night-deny: var(--dk-on-night-deny);
+}
+
+/* ---------- Shadows ----------
+   Declared again inside dark sections so they pick up that scope's
+   shadow colours (a var() resolves where the property is declared). */
+:root,
+.section-dark,
+.night {
+  --shadow-xs: 0 1px 2px var(--shadow-a);
+  --shadow-sm: 0 1px 2px var(--shadow-a), 0 8px 24px -14px var(--shadow-b);
+  --shadow-md: 0 1px 2px var(--shadow-a), 0 18px 40px -20px var(--shadow-b);
+  --shadow-pop: 0 1px 2px var(--shadow-a), 0 24px 48px -16px var(--shadow-b);
+  --shadow-window: 0 1px 2px var(--shadow-a), 0 40px 80px -30px var(--shadow-c);
+}
+
+/* ---------- Shared, colour-free tokens ---------- */
+:root {
+  /* Logo keyhole amber: never changes (PRD 25.5). Decoration only (dots,
+     the running marker); 2:1 on paper, so never text or meaningful icons. */
+  --brand: #f2a12a;
+
+
+  /* Type (website only, owner override of Decision 19 on 2026-11-24):
+     Source Serif 4 for headings, Instrument Sans for text, Geist Mono for
+     code. Closest OFL matches for Granola's Quadrant + Melange. */
+  --font-display: "Source Serif 4 Variable", "Source Serif Fallback", Georgia, ui-serif, serif;
+  --font-sans: "Instrument Sans Variable", "Instrument Sans Fallback", ui-sans-serif, system-ui, "Segoe UI", sans-serif;
+  --font-mono: "Geist Mono Variable", "Geist Mono", ui-monospace, "Cascadia Mono", monospace;
+  /* The Staff App's face, for the drawn app mocks only (DesktopMock). */
+  --font-app: "Figtree Variable", "Instrument Sans Variable", ui-sans-serif, system-ui, sans-serif;
+
+  /* Fluid type scale. Serif headings sit at weight 400 with gentle negative
+     tracking (Granola: 86/80 hero, 48/48 h2, 24/25 h3). Each size has a
+     matching line height and tracking token so components never guess. */
+  --fs-giant: clamp(3.25rem, 1.1rem + 9vw, 10rem);
+  --fs-display: clamp(2.75rem, 1.35rem + 5.2vw, 6rem);
+  --fs-h1: clamp(2.5rem, 1.6rem + 3.4vw, 4.5rem);
+  --fs-h2: clamp(2rem, 1.45rem + 2.1vw, 3.25rem);
+  --fs-h3: clamp(1.25rem, 1.12rem + 0.45vw, 1.5rem);
+  --fs-h4: 1.0625rem;
+  --fs-lead: clamp(1.125rem, 1.03rem + 0.38vw, 1.3125rem);
+  --fs-body: 1.0625rem;
+  --fs-small: 0.9375rem;
+  --fs-xs: 0.8125rem;
+  --fs-label: 0.75rem;
+
+  --lh-display: 0.96;
+  --lh-h1: 1;
+  --lh-h2: 1.06;
+  --lh-h3: 1.18;
+  --lh-lead: 1.5;
+  --lh-body: 1.6;
+  --lh-tight: 1.35;
+
+  --ls-display: -0.03em;
+  --ls-h1: -0.025em;
+  --ls-h2: -0.02em;
+  --ls-h3: -0.01em;
+  --ls-body: 0;
+  --ls-label: 0.08em;
+
+  --fw-heading: 400;
+  --fw-body: 400;
+  --fw-medium: 500;
+  --fw-strong: 600;
+
+  /* Spacing: one 4 px scale. Use these steps only, never in-between values.
+     1=4 2=8 3=12 4=16 5=20 6=24 7=32 8=40 9=48 10=64 11=80 12=96 13=128 */
+  --sp-1: 4px;
+  --sp-2: 8px;
+  --sp-3: 12px;
+  --sp-4: 16px;
+  --sp-5: 20px;
+  --sp-6: 24px;
+  --sp-7: 32px;
+  --sp-8: 40px;
+  --sp-9: 48px;
+  --sp-10: 64px;
+  --sp-11: 80px;
+  --sp-12: 96px;
+  --sp-13: 128px;
+
+  /* Rhythm built from the scale */
+  --section-y: clamp(var(--sp-10), 8vw, var(--sp-13)); /* between sections */
+  --section-y-tight: clamp(var(--sp-9), 6vw, var(--sp-11));
+  --head-gap: var(--sp-5); /* label -> title -> lead inside a heading block */
+  --head-after: clamp(var(--sp-8), 4.5vw, var(--sp-10)); /* heading block -> content */
+  --stack: var(--sp-4); /* paragraphs in a block */
+  --card-pad: clamp(var(--sp-6), 2.4vw, var(--sp-7));
+  --card-gap: var(--sp-3); /* icon -> title -> text inside a card */
+  --grid-gap: var(--sp-5);
+  --row-h: 72px; /* icon list row (Granola list) */
+  --icon-col: 40px; /* fixed icon column in lists */
+
+  --radius-sm: 10px;
+  --radius: 16px;
+  --radius-lg: 22px;
+  --radius-xl: 28px;
+  --radius-pill: 999px;
+
+  /* Grid: 12 columns inside --max, gutters from the scale */
+  --gutter: clamp(var(--sp-4), 3.2vw, var(--sp-8));
+  --max: 1320px;
+  --max-text: 66ch;
+  --cols: 12;
+  --col-gap: clamp(var(--sp-4), 2vw, var(--sp-6));
+
+  --ease: cubic-bezier(0.2, 0.8, 0.2, 1);
+  --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
+}

@@ -1,0 +1,68 @@
+---
+/* A numbered list of points as cards, each in the next step colour. */
+interface Props {
+  items: { text: string; href?: string; title?: string }[];
+  columns?: 2 | 3;
+}
+const { items, columns = 3 } = Astro.props;
+const tones = ["blue", "sun", "coral", "violet", "mint"];
+---
+
+<ol class:list={["grid points", columns === 2 ? "grid-2" : "grid-3"]} role="list">
+  {
+    items.map((it, i) => (
+      <li class="pt reveal" data-tone={tones[i % tones.length]}>
+        <span class="n mono">{String(i + 1).padStart(2, "0")}</span>
+        {it.title && <h3 class="h3">{it.title}</h3>}
+        <p>{it.text}</p>
+        {it.href && (
+          <a class="text-link more" href={it.href}>
+            Learn more
+          </a>
+        )}
+      </li>
+    ))
+  }
+</ol>
+
+<style>
+  .pt {
+    position: relative;
+    display: flex;
+    flex-direction: column;
+    gap: var(--card-gap);
+    padding: var(--card-pad);
+    border-radius: var(--radius-lg);
+    background: var(--surface);
+    border: 1px solid var(--line);
+    overflow: hidden;
+  }
+  .pt::before {
+    content: "";
+    position: absolute;
+    left: 0;
+    top: 0;
+    width: 100%;
+    height: 5px;
+    background: var(--tone);
+  }
+  .n {
+    display: inline-grid;
+    place-items: center;
+    width: var(--icon-col);
+    height: var(--icon-col);
+    border-radius: 12px;
+    background: var(--tone-soft);
+    color: var(--tone-ink);
+    font-weight: 600;
+    margin-bottom: var(--sp-1);
+  }
+  p {
+    color: var(--ink-2);
+    font-size: var(--fs-body);
+  }
+  .more {
+    margin-top: auto;
+    padding-top: var(--sp-2);
+  }
+</style>

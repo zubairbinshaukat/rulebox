@@ -1,0 +1,36 @@
+{
+  "name": "@rulebox/website",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "astro dev",
+    "build": "node scripts/contrast.mjs && astro build && node scripts/headers.mjs && node scripts/check-dist.mjs",
+    "contrast": "node scripts/contrast.mjs --table",
+    "preview": "astro preview",
+    "check": "astro check",
+    "typecheck": "astro check && tsc --noEmit -p worker/tsconfig.json",
+    "og": "node scripts/og.mjs",
+    "fetch:release": "node scripts/fetch-release.mjs",
+    "shots": "node scripts/screenshots.mjs"
+  },
+  "dependencies": {
+    "@astrojs/mdx": "8.1.6",
+    "@astrojs/sitemap": "3.7.6",
+    "@fontsource-variable/figtree": "^5.3.0",
+    "@fontsource-variable/geist-mono": "^5.3.0",
+    "@fontsource-variable/instrument-sans": "5.3.0",
+    "@fontsource-variable/source-serif-4": "5.3.1",
+    "astro": "7.4.13",
+    "gsap": "catalog:"
+  },
+  "devDependencies": {
+    "@astrojs/check": "0.9.12",
+    "@cloudflare/workers-types": "5.20261109.1",
+    "@iconify-json/solar": "catalog:",
+    "@playwright/test": "catalog:",
+    "@resvg/resvg-js": "^2.6.2",
+    "typescript": "catalog:",
+    "unplugin-icons": "catalog:"
+  }
+}
