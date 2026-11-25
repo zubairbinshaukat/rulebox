@@ -248,14 +248,26 @@ fn a_file_cannot_be_renamed_copied_or_moved_to_a_program_name() {
         assert!(temp.join("Notes.txt").exists(), "the file keeps its name: {target}");
         assert!(!temp.join(target).exists(), "{target}");
     }
+    // An antivirus scan can hold a freshly written or program-named item for a moment
+    // ("used by another process", os error 32; seen on CI runners). Renames that must
+    // succeed get a few short retries for that one error; refusals are checked once.
+    let rename_ok = |from: &str, to: &str| {
+        for _ in 0..50 {
+            match session.rename(&rel(from), &rel(to)) {
+                Err(FileError::Io { message }) if message.contains("os error 32") => std::thread::sleep(std::time::Duration::from_millis(100)),
+                other => return other,
+            }
+        }
+        session.rename(&rel(from), &rel(to))
+    };
     // A harmless name still works, a case change too, and a folder's name is only a name.
-    assert_eq!(session.rename(&rel("Notes.txt"), &rel("Notes.md")), Ok(()));
-    assert_eq!(session.rename(&rel("Notes.md"), &rel("Notes.MD")), Ok(()));
-    assert_eq!(session.rename(&rel("dir"), &rel("dir.exe")), Ok(()));
-    assert_eq!(session.rename(&rel("dir.exe"), &rel("dir")), Ok(()));
+    assert_eq!(rename_ok("Notes.txt", "Notes.md"), Ok(()));
+    assert_eq!(rename_ok("Notes.md", "Notes.MD"), Ok(()));
+    assert_eq!(rename_ok("dir", "dir.exe"), Ok(()));
+    assert_eq!(rename_ok("dir.exe", "dir"), Ok(()));
     // Not even the name `old.exe` can be kept by renaming it to another program name.
     assert_eq!(session.rename(&rel("old.exe"), &rel("new.cmd")), blocked("cmd"));
-    assert_eq!(session.rename(&rel("old.exe"), &rel("old.txt")), Ok(()));
+    assert_eq!(rename_ok("old.exe", "old.txt"), Ok(()));
     std::fs::write(temp.join("setup.exe"), b"MZ").unwrap();
     // Copy and move keep the name, so a program-named file cannot be duplicated or moved either.
     assert_eq!(session.copy(&rel("setup.exe"), &rel("dir")), blocked("exe"));
