@@ -1,7 +1,4 @@
 # SHA-256 of Microsoft's Evergreen WebView2 bootstrapper (MicrosoftEdgeWebview2Setup.exe).
 # build.ps1 refuses any other file. Update with: build.ps1 -PinWebView2, review, commit.
 # The agent compiles the same value in (plan Phase 6 Step 8).
-#
-# NOT PINNED YET: no hash was fetched (the Step 7 sources were written offline). Run
-#   pwsh apps\installer\build.ps1 -BinDir <dir> -Version 0.0.0 -PinWebView2
-# on a PC with internet, then review and commit this file.
+fc2972da71d43e0c57b8d85a5cb9b200ed221f723cf43052d08ca722eb0bb22e  MicrosoftEdgeWebview2Setup.exe

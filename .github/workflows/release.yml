@@ -108,6 +108,12 @@ jobs:
           pnpm test:installer
 
       # ---- release binaries -------------------------------------------------------------
+      - name: Build App Control policy binaries
+        # A release build of the agent refuses to compile without them (apps/agent/build.rs).
+        # The script only converts the XML in apps/agent/policies/appcontrol into target\appcontrol\
+        # with ConfigCI (part of Windows on the runner); it never deploys a policy.
+        run: ./scripts/appcontrol-build.ps1
+
       - name: Build agent and launcher (release, production guard)
         # `rulebox-win32/production` is the feature the agent's own `production` forwards to
         # (apps/agent/Cargo.toml), and the launcher depends on the same crate, so one flag
