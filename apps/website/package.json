@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "astro dev",
-    "build": "node scripts/contrast.mjs && astro build && node scripts/headers.mjs && node scripts/check-dist.mjs",
+    "build": "node scripts/contrast.mjs && astro build && node scripts/sitemap-alias.mjs && node scripts/headers.mjs && node scripts/check-dist.mjs",
     "contrast": "node scripts/contrast.mjs --table",
     "preview": "astro preview",
     "check": "astro check",
