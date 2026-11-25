@@ -63,7 +63,7 @@ function Get-PinnedHash {
     if ($text -eq '' -or $text.StartsWith('#')) { continue }
     $first = ($text -split '\s+')[0]
     if ($first -match '^[0-9a-fA-F]{64}$') { return $first.ToLowerInvariant() }
-    throw "$PinFile: expected a 64-digit SHA-256, found '$first'."
+    throw "${PinFile}: expected a 64-digit SHA-256, found '$first'."
   }
   return $null
 }
