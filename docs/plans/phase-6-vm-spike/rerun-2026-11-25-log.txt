@@ -1,0 +1,72 @@
+Phase 6 spike, second run 2026-11-25 (evening), rulebox-test-pro, Windows 11 Pro 26300.9457, network adapter
+disconnected, update services stopped. Base: fresh-windows-11-pro + C:\rb-spike + run-wait.ps1 + rbtest autologon,
+checkpoint spike-base (deleted at the end). Copied from the VM console output (the VM's out folder was reverted).
+
+Input files (hash host = VM):
+  [DEV] Zahras POS Dev_1.0.2_x64-setup.exe  76645CA1290D4830A79492005FE7306A591CCED967690C02609EBE5DF761825F
+    NotSigned; ProductName "Zahras POS Dev"; FileVersion/ProductVersion 1.0.2; CompanyName empty
+    marker Nullsoft.NSIS.exehead; requestedExecutionLevel level="asInvoker"
+  Software_POS_Windows_Driver_V5.2.3.exe    4A657A81E437B538EDB5D9841D95CEADC9F2A71D5CC203AE0658EAD4C5A3C626
+    Valid, CN="BIXOLON CO.,LTD."; ProductName "BIXOLON POS Windows Driver" 5.2.3; marker Inno Setup (6.4.2);
+    requestedExecutionLevel asInvoker
+  TPCL-drv_11.10.0_E.exe                    2B80E1F43B256C1D7013513EBE0656902FDF7CB6ACDC43D126ED208006756E77
+
+== S-9 Zahras POS Dev 1.0.2, /S as SYSTEM
+tag=s9 who=nt authority\system session=0 args=/S
+start=20:04:40 end=20:04:56 (16 s incl. 10 s wait) exit=0; no app process started; no leftover installer process
+diff: UNINST HKEY_USERS\.DEFAULT\...\Uninstall\Zahras POS Dev | Zahras POS Dev | 1.0.2 |
+      InstallLocation "C:\WINDOWS\system32\config\systemprofile\AppData\Local\Zahras POS Dev" |
+      UninstallString "C:\WINDOWS\system32\config\systemprofile\AppData\Local\Zahras POS Dev\uninstall.exe"
+      Publisher "Zahra's Branded Collection"; no QuietUninstallString
+Files are NOT under System32\config\systemprofile (nothing found there); they are under SysWOW64 (32-bit redirection):
+  C:\Windows\SysWOW64\config\systemprofile\AppData\Local\Zahras POS Dev\zahras-pos-desktop.exe  depth=3 fv=1.0.2 pv=1.0.2 9.9 MB
+  C:\Windows\SysWOW64\config\systemprofile\AppData\Local\Zahras POS Dev\uninstall.exe           depth=3
+  C:\Windows\SysWOW64\config\systemprofile\AppData\Roaming\Microsoft\Windows\Start Menu\Programs\Zahras POS\Zahras POS Dev.lnk
+Nothing in Program Files. WebView2 runtime already present (155.0.4283.45).
+Uninstall as 64-bit SYSTEM with the registry's path (system32\...\uninstall.exe /S): Start-Process failed, file not found (exit empty).
+Uninstall with the real path (SysWOW64\...\uninstall.exe /S): exit 0 in ~1 s; exe and uninstall key gone.
+/S /ALLUSERS as SYSTEM: exit 0, installed per-user again (same SysWOW64 path, same HKU\.DEFAULT key): the build is currentUser only.
+
+== BIXOLON POS Windows Driver 5.2.3 (Inno Setup), as SYSTEM
+args=/VERYSILENT /SUPPRESSMSGBOXES /NORESTART /SP- /LOG="C:\rb-spike\out\bx-a-inno.txt"
+start=20:08:39 end=20:09:03 exit=0; no window (session 0); "Administrative install mode: Yes", "64-bit install mode: No"
+Inno log: files to C:\BIXOLON\POS Windows Driver\ (inf, cat, Driver32/64/ARM64, Utilities, Samples), "Installation process succeeded."
+  Run entry: C:\BIXOLON\POS Windows Driver\BxlWinDriver_Setup_x64.exe  Parameters: /silentinstall   9100 /name:
+             Process exit code: 4294967295   (the vendor's own driver setup failed; empty /name:)
+  Run entry: netsh firewall add allowedprogram ... exit 0
+No driver in the store, no printer driver, no printer, no port; no uninstall entry under HKLM (either view).
+Unpacked driver: BXLPOS.inf (Class=Printer, DriverVer=07/01/2026,5.2.3.0, CatalogFile=BXLPOS.cat),
+  bxlpos.cat Valid, CN=Microsoft Windows Hardware Compatibility Publisher (WHQL). 53 models, e.g. "BIXOLON SRP-350III".
+pnputil /add-driver C:\rb-spike\bx-inf\*.inf /subdirs /install as SYSTEM (inf + cat + Driver32/64/ARM64 copied, 46.8 MB):
+  exit 0; oem2.inf bxlpos.inf, Signer Microsoft Windows Hardware Compatibility Publisher, 07/01/2026 5.2.3.0
+  Add-PrinterDriver "BIXOLON SRP-350III" OK; Add-Printer on FILE: -> PrinterStatus Normal
+  Print processor "BIXOLON POS PRINT PROCESSOR" and monitor "BIXOLON POS LANGUAGE MONITOR" registered by the INF.
+Removal: Remove-Printer, then pnputil /delete-driver oem2.inf /uninstall -> "Driver package uninstalled. Failed to delete
+  driver package: One or more devices are presently installed using the specified INF." exit -536870339 (0xE000023D),
+  printer driver still listed. After Remove-PrinterDriver "BIXOLON SRP-350III": the same pnputil command exits 0,
+  "Driver package deleted successfully", driver gone.
+Note: the wrapper's result file and the pnputil redirect shared a name (bx-pnputil.txt); the wrapper overwrote the
+  pnputil text. The spike's S-10 step 6 has the same clash (tag s10-pnputil, file s10-pnputil.txt).
+
+== S-11 TPCL answer file
+Recorded as rbtest (Interactive, RunLevel Highest) in the VM window, driven by synthetic mouse:
+  TPCL-drv_11.10.0_E.exe /r /f1"C:\rb-spike\in\setup.iss"; Welcome > License (accepted) > Ready > Install >
+  Windows Security "Would you like to install this device software? Seagull Printers, Seagull Software, LLC"
+  ("Always trust" ticked by default) > Install > Finish. Screens s11-rec-01..05.png. setup.iss = s11-setup.iss.
+  Result: oem2.inf toshibatec.inf, Provider Seagull, Signer "Seagull Software, LLC" (not WHQL), staged only (no printer
+  driver added to the spooler); the Seagull cert 59A339DC...CC6F added to LocalMachine\TrustedPublisher by the tick.
+Attempt b (clean revert, no trust), /s /f1"...setup.iss" /f2"...log" as SYSTEM: exit 0, ResultCode=0, ~30 s, no window,
+  uninstall entry {06216D8D-027A-4116-B2E6-32328FA688BC} written, files in C:\TEC_DRV, Start menu links; BUT the driver
+  is NOT in the store. setupapi.dev.log: "Error 0xe0000242: The publisher of an Authenticode(tm) signed catalog has not
+  yet been established as trusted." / "Driver package signer is unknown. Assuming untrusted signer." / Exit status
+  FAILURE(0xe0000242). A false success. Repeated once (s11-c without trust, after a failed cert import): same.
+  pnputil /add-driver C:\TEC_DRV\TOSHIBATEC.inf /install as SYSTEM, no trust: "Failed to add driver package: The
+  publisher of an Authenticode(tm) signed catalog has not yet been established as trusted." (Get-AuthenticodeSignature
+  says toshibatec.cat is Valid, signer thumbprint 59A339DC...CC6F.)
+  Package ships the cert: C:\TEC_DRV\SeagullPublisher.cer (same thumbprint, expires 2028-03-08).
+With trust (certutil -f -addstore TrustedPublisher SeagullPublisher.cer as SYSTEM, exit 0; first try without -f
+  gave exit -2147024894, cause not found; Import-Certificate over PS Direct right after boot gave access denied):
+  pnputil on C:\TEC_DRV\TOSHIBATEC.inf: "Driver package added successfully. Published Name: oem2.inf".
+  Clean revert + trust + /s /f1 /f2 as SYSTEM (s11-c): exit 0, ResultCode=0, ~29 s, no window; toshibatec.inf in the
+  store (Seagull, 11/07/2025 11.10.0.0); Add-PrinterDriver "TOSHIBA B-EX4T1 (203 dpi)" OK; Add-Printer FILE: Normal;
+  Remove-PrinterDriver then pnputil /delete-driver oem2.inf /uninstall: exit 0.

@@ -51,10 +51,13 @@ const WEBVIEW2_KEYS: [&str; 2] = [
     r"SOFTWARE\WOW6432Node\Microsoft\EdgeUpdate\Clients\{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}",
     r"SOFTWARE\Microsoft\EdgeUpdate\Clients\{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}",
 ];
-/// (Phase 6 Step 6) Windows protected print mode: the policy and the state (unverified, plan 4.8).
-const PROTECTED_PRINT_VALUES: [(&str, &str); 2] = [
+/// (Phase 6 Step 15, plan 4.8) Windows protected print mode, as seen on build 26300 (VM spike S-12, 2026-11-25): the
+/// effective state the print service keeps, the value the Settings switch writes, and the value the Group Policy
+/// writes (the last one read from `Printing.admx`, not driven on the VM). Any one at 1 means on.
+const PROTECTED_PRINT_VALUES: [(&str, &str); 3] = [
+    (r"SYSTEM\CurrentControlSet\Control\Print", "WindowsProtectedPrintState"),
+    (r"SOFTWARE\Policies\Microsoft\Windows NT\Printers\WPP", "WindowsProtectedPrintMode"),
     (r"SOFTWARE\Policies\Microsoft\Windows NT\Printers\WPP", "WindowsProtectedPrintGroupPolicyState"),
-    (r"SYSTEM\CurrentControlSet\Control\Print\WPP", "EnabledNow"),
 ];
 /// (Phase 5 Step 7) The most folders one `folder_acls` scan returns.
 const FOLDER_SCAN_LIMIT: usize = 60_000;
@@ -723,9 +726,9 @@ impl Platform for WindowsPlatform {
         Ok(None)
     }
 
-    /// **Unverified** (plan 4.8, Step 2): the "Configure Windows protected print" policy
-    /// (`WindowsProtectedPrintGroupPolicyState`) and the state the print service keeps
-    /// (`Control\Print\WPP\EnabledNow`); either one at 1 counts as on.
+    /// Plan 4.8 (values seen in VM spike S-12): `Control\Print\WindowsProtectedPrintState`,
+    /// `WPP\WindowsProtectedPrintMode` (Settings switch) and `WPP\WindowsProtectedPrintGroupPolicyState`
+    /// (Group Policy, from the ADMX); any one at 1 counts as on.
     fn protected_print_on(&self) -> Result<bool, PlatformError> {
         for (path, name) in PROTECTED_PRINT_VALUES {
             if let Some(RegValue::Dword(1)) = get_hklm(path, name).map_err(map_err)? {

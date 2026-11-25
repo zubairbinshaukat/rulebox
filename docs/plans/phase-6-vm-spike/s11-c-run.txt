@@ -1,0 +1,22 @@
+tag=s11-c
+who=nt authority\system
+session=0
+exe=C:\rb-spike\in\TPCL-drv_11.10.0_E.exe
+args=/s /f1"C:\rb-spike\in\setup.iss" /f2"C:\rb-spike\out\s11-c-setup-log.txt"
+start=2026-11-25T20:28:49.7994529+05:00
+end=2026-11-25T20:29:18.6845077+05:00
+exit=0
+processes started since start (10 s after exit):
+
+Name                  Id SessionId StartTime            
+----                  -- --------- ---------            
+MicrosoftEdgeUpdate 6692         0 11/25/2026 8:29:15 PM
+MicrosoftEdgeUpdate 8504         0 11/25/2026 8:29:03 PM
+mscorsvw            2016         0 11/25/2026 8:29:18 PM
+svchost              856         0 11/25/2026 8:29:13 PM
+svchost             1268         0 11/25/2026 8:28:55 PM
+svchost             6372         0 11/25/2026 8:29:13 PM
+svchost             9072         0 11/25/2026 8:29:15 PM
+
+
+

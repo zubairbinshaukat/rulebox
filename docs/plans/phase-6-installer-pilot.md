@@ -496,7 +496,7 @@ algorithm `ED`): Step 12 pins it with a vector made by `tauri signer sign`.
 | Detection | Exe exists (as today) **and**, when `version` is ordered, file version ≥ `version` (`version_too_low` otherwise; a warning for Pinned, a failure for Managed) |
 | EXE reboot codes | 3010 / 1641 count as success-with-restart for EXE **when listed** in `successExitCodes`. The server pre-fills them per technology (4.7) |
 | Timeout | Per app `timeoutMin` (5-120). On timeout the agent looks at the dead process tree: CPU time in the last 5 min < 1 s, or a top-level window on the service desktop → detail `needs_interaction`, else `timeout` |
-| Per-user installer | Exit code says success, exe not found, and a file with the exe's name exists under `%WINDIR%\System32\config\systemprofile\AppData` (depth ≤ 4, read-only) → detail `installed_per_user` |
+| Per-user installer | Exit code says success, exe not found, and a file with the exe's name exists under `%WINDIR%\System32\config\systemprofile\AppData` **or `%WINDIR%\SysWOW64\config\systemprofile\AppData`** (depth ≤ 4, read-only) → detail `installed_per_user`. S-9 (2026-11-25): a 32-bit NSIS stub (Tauri, Zahras POS Dev 1.0.2) run as SYSTEM is redirected to the `SysWOW64` profile (`…\AppData\Local\Zahras POS Dev\zahras-pos-desktop.exe`, depth 3) while its `HKU\.DEFAULT` uninstall entry says `system32`; never trust that path for removal |
 | Answer file | Downloaded and verified like the installer, stored `<data>\downloads\<sha256>.iss`. `{AnswerFile}` and `{LogFile}` are the only tokens expanded inside `silentArgs`. The data path has no spaces, so no quoting is needed inside `/f1…` |
 | Allowed programs | Adds `System32\pnputil.exe` with **fixed** argument shapes (4.8). Nothing else. Still no PowerShell, no shell |
 | Report | `installedVersion` added to the payload; sent only when it or the state changed |
@@ -550,8 +550,18 @@ Run as SYSTEM with `/s /v"/qn /norestart"` (or `/S /V"/a …"`) it exits by
 itself in about 45 s with `-2147213312` (0x80042000), no window, nothing
 installed, and `setup.log` `ResultCode=-5` (no usable answer file). Treat
 that exit code on an InstallShield app as "needs an answer file", not as a
-generic failure. The `/s /f1` answer-file run is still **unverified** (the
-`.iss` must be recorded by hand; Step 23).
+generic failure. **`/s /f1` with a recorded `.iss` (second run, same day):**
+exit 0 and `ResultCode=0` in about 30 s with no window, but the driver was
+**not** added unless the Seagull publisher certificate was in
+`LocalMachine\TrustedPublisher` first (see 4.8). Exit code and `ResultCode`
+alone cannot tell a driver package's success.
+
+**Observed (X-1, 2026-11-25), BIXOLON POS driver 5.2.3 (Inno Setup):** the
+Inno row's switches run silently as SYSTEM and return 0, yet the package's
+own driver setup inside it fails (-1, in the Inno log only) and nothing is
+installed. Vendor driver packages wrapped in Inno or InstallShield can
+report success without a driver: for a driver, success means "the INF is in
+the store" (`inf_zip`, 4.8), never the wrapper's exit code.
 
 **Answer file:** a second URL + SHA-256 (+ size) on the app. `.iss` only,
 ≤ 256 KiB. The dashboard text explains how to record one on a test PC. The
@@ -568,12 +578,28 @@ its Phase 5 text. Phase 6 adds:
 | `vendor_exe` | The vendor EXE or MSI with its silent switches (and answer file), through the normal engine | When the vendor installer has a real silent mode |
 | `vendor_exe_extract` | The vendor EXE with fixed extract arguments into `<data>\drivers\<sha256>\`, then the `inf_zip` path on the result | **Not built** (S-10, 2026-11-25): the TPCL package documents no extract switch, `/S /V"/a …"` fails with `ResultCode=-5`, and its wizard unpacks only InstallScript cabinets, no `.inf`/`.cat` |
 
-**TPCL route after S-10/S-11:** no windowless route is proven yet. Open: (1)
-`vendor_exe` with `/s /f1"<answer file>"` from a hand-recorded `.iss`
-(Step 23), or (2) `inf_zip` built from the installed driver on a test PC
-(for example `pnputil /export-driver <oemN.inf> <folder>` after a hand
-install; **unverified**). The dashboard help must not tell the admin to
-"extract the package": the wizard exposes no `.inf`.
+**TPCL route after S-10/S-11 (both runs, 2026-11-25):** the driver is
+Authenticode-signed by **Seagull Software, LLC, not WHQL**, so Windows adds
+it only when that publisher is in `LocalMachine\TrustedPublisher`
+(otherwise setupapi `0xE0000242`, and the hand install shows a "trust this
+publisher?" prompt). `Get-AuthenticodeSignature` still says the `.cat` is
+`Valid`, so the catalog check passes and pnputil fails later. Proven routes,
+both as SYSTEM and windowless, **once the certificate is trusted**:
+(1) `vendor_exe` with `/s /f1"<answer file>"` (recorded `.iss`, `ResultCode=0`);
+(2) `inf_zip` from the files a silent install leaves in `C:\TEC_DRV`
+(`TOSHIBATEC.inf`, `toshibatec.cat`, the package ships `SeagullPublisher.cer`
+there too). Without the trust step both fail, (1) silently with exit 0.
+Adding a publisher to the machine's TrustedPublisher store is a security
+decision (it trusts every driver that publisher signs): **owner decision**,
+not built. Until then the agent must treat a non-WHQL driver package as
+`driver_untrusted_publisher` (new detail, Step 15) instead of reporting a
+pnputil failure.
+
+**Removal order (X-1):** `pnputil /delete-driver <oemN.inf> /uninstall`
+fails with `0xE000023D` while the spooler still has a printer driver from
+that INF. Remove the printers that use it and the printer driver
+(`DeletePrinterDriverEx`) first, then pnputil. Step 15's removal does not do
+this yet.
 
 Rules: no tile; `pnputil` argument shapes are fixed in code (`/add-driver
 <path> /subdirs /install`, `/delete-driver <oemN.inf> /uninstall`); removal
@@ -600,7 +626,8 @@ Warnings (read-only probes, shown on the driver's install row):
   `seagull_driver_present` (Toshiba TEC manuals say not to mix them and to
   remove the old TPCL driver before an upgrade). Not a blocker.
 - INF-only installs may miss the vendor's port or status monitor
-  **(unverified, Step 23)**.
+  **(unverified, Step 23)**. X-1: BIXOLON's INF registers its own print
+  processor and language monitor, so for that package nothing was missed.
 
 ### 4.9 Web apps in Chrome or Edge (D-g)
 
@@ -1173,6 +1200,13 @@ to `fresh-windows-11-pro`.** PASS: S-1, S-2, S-3, S-5, S-6, S-7 (Windows 11).
 DIFFERS: S-4 (Edge over 350 MB), S-10, S-11, S-12. NOT OBSERVED: S-8, S-9
 (no Zahras POS builds), S-11 answer-file run, S-7 Windows 10 half. Results
 and evidence: `phase-6-vm-spike.md`, `phase-6-vm-spike/`.
+**Second run (2026-11-25, owner's files):** S-9 DIFFERS (per-user files under
+`SysWOW64\config\systemprofile`; agent search fixed); S-11 passes only with
+the Seagull certificate trusted first (owner decision, 4.8); extra row X-1
+(BIXOLON, Inno): wrapper reports success without a driver, `inf_zip` works,
+removal needs the printer driver deleted first. Still NOT OBSERVED: S-8 (the
+Zahras POS build is per-user only; a `perMachine` build is needed), S-7
+Windows 10 half.
 
 ---
 
@@ -1564,7 +1598,7 @@ kept with it for a roll-back; per-app `timeoutMin`; `needs_interaction` / `timeo
 arguments never name `{AnswerFile}` is not downloaded; one the server refused (`answer_file_unused`) cannot reach a device anyway. Any answer-file failure (404, wrong hash, too big,
 disk) is the one detail `answer_file_failed`, counted and retried like any failure. `needs_interaction` is judged by the job's own CPU accounting (user + kernel of every process,
 ended ones included) and by any visible top-level window of the job on the service desktop; "last five minutes" is one sample taken five minutes before the timeout (at the start when
-the timeout is 5 minutes). The per-user search covers only `<SystemRoot>\System32\config\systemprofile\AppData`, 4 folders deep, 20,000 entries at most, links never entered; a program
+the timeout is 5 minutes). The per-user search covers only `<SystemRoot>\System32\config\systemprofile\AppData` and (since S-9, 2026-11-25) its `SysWOW64` twin, 4 folders deep, 20,000 entries at most, links never entered; a program
 path whose last part has a `*` is never searched for. `catalog::check_limits` is **not called by the agent yet** (Step 17 wires it): when it is, one bad `silentArgs` refuses the whole
 document, while `check_spec` already makes only that app `unsupported`; decide at Step 17 whether the document-wide rule is wanted. A driver's installer that stalls still reports
 `timeout` (drivers are Step 15). **Unverified until the VM (Step 23):** the CPU accounting and window detection on a real installer, a real InstallShield `/s /f1` run, per-user detection
@@ -1599,6 +1633,10 @@ adding the `apps/agent/src/drivers/{zip,inf,probe}.rs` files named below: the ne
   fix:** `PROTECTED_PRINT_VALUES` (`apps/agent/src/platform/windows.rs`) reads `Control\Print\WPP\EnabledNow`, which does not
   exist; a PC where the Settings switch turned the mode on reads as off. Read `Control\Print\WindowsProtectedPrintState`, keep
   `WindowsProtectedPrintGroupPolicyState`, add `WindowsProtectedPrintMode` (4.8). pnputil and the TPCL INF were not reached.
+  **Fixed 2026-11-25** (second run): `PROTECTED_PRINT_VALUES` reads the three S-12 values. Still open for Step 15 (4.8): the
+  removal order (delete the printer driver before `pnputil /delete-driver`, X-1), the `driver_untrusted_publisher` detail for a
+  non-WHQL package whose publisher is not trusted (S-11), and the owner's decision on adding a vendor certificate to
+  TrustedPublisher.
 
 **Machine:** dev. **PRD:** 24.2 (new bullet). **Files:** as Phase 5 Step
 14b, plus `apps/agent/src/drivers/{zip.rs,inf.rs,probe.rs}`.
@@ -2182,7 +2220,7 @@ accepted by the owner; no I/O row over budget.
 | 75 | 4 GB RAM during an install | One operation at a time (existing); installs at boot or signed out, not during work | 11 |
 | 76 | Clock skew | Apply windows use monotonic time since agent start; feed times are server times | 11, 12 |
 | 77 | Managed app's product folder is writable by Staff after the vendor's installer | Existing rule: `catalogue_folder_writable`, app refused with the reason | 11 |
-| 78 | Zahras POS built per-user by mistake | S-9 behaviour: `installed_per_user` | 23 |
+| 78 | Zahras POS built per-user by mistake | S-9 behaviour (observed 2026-11-25 with the Dev 1.0.2 build, which is per-user): exit 0, files in `SysWOW64\config\systemprofile\AppData\Local\<product>` → `installed_per_user` (search covers `SysWOW64` since then) | 23 |
 | 79 | Hosting provider or URL host down | `download_failed`, existing backoff; nothing else breaks | 11 |
 | 80 | Convex free-plan quota near its limit | Feed checks are in the "Defer" level of the degrade ladder (post-phase-5 2.12): paused for free tenants at level 3 | 12 |
 

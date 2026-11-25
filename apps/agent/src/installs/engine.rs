@@ -1979,21 +1979,23 @@ impl Engine {
     }
 
     /// (Phase 6 Step 14, plan 4.6 "Per-user installer", heuristic) Whether a file with the program's name sits in the
-    /// profile of SYSTEM (`<SystemRoot>\System32\config\systemprofile\AppData`, at most 4 folders deep, read-only). A
-    /// program whose name is not known (a path that ends in a `*`) or a PC whose Windows folder is not known never
-    /// answers yes; neither does a folder that cannot be read.
+    /// profile of SYSTEM (`<SystemRoot>\System32\config\systemprofile\AppData`, then its `SysWOW64` twin where a
+    /// 32-bit installer's files land; at most 4 folders deep, read-only). A program whose name is not known (a path
+    /// that ends in a `*`) or a PC whose Windows folder is not known never answers yes; neither does a folder that
+    /// cannot be read.
     fn installed_per_user(&self, spec_exe: &str, roots: &PathRoots) -> bool {
         let (Some(name), Some(system_root)) = (program_file_name(spec_exe), roots.system_root.as_deref()) else {
             return false;
         };
-        let root = systemprofile_appdata(Path::new(system_root));
-        match self.deps.platform.find_file_below(&root, name, PER_USER_MAX_DEPTH) {
-            Ok(found) => found,
-            Err(error) => {
-                tracing::debug!("cannot look for a per-user install: {error}");
-                false
+        systemprofile_appdata(Path::new(system_root)).iter().any(|root| {
+            match self.deps.platform.find_file_below(root, name, PER_USER_MAX_DEPTH) {
+                Ok(found) => found,
+                Err(error) => {
+                    tracing::debug!("cannot look for a per-user install: {error}");
+                    false
+                }
             }
-        }
+        })
     }
 
     /// The installer succeeded and the program is there: check its version (plan 4.6 "Detection"), decide what to keep

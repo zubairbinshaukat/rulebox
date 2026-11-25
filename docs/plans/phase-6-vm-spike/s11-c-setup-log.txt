@@ -1,0 +1,10 @@
+[InstallShield Silent]
+Version=v7.00
+File=Log File
+[ResponseResult]
+ResultCode=0
+[Application]
+Name=TPCL PRINTER DRIVER QM11_10_0
+Version=11.10.0
+Company=Toshiba Tec
+Lang=0409

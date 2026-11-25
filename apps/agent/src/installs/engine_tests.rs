@@ -3127,6 +3127,24 @@ async fn an_installer_that_put_the_program_in_the_system_profile_says_installed_
 }
 
 #[tokio::test(start_paused = true)]
+async fn a_32_bit_installer_that_put_the_program_in_the_syswow64_system_profile_says_installed_per_user() {
+    // VM spike S-9 (2026-11-25): a 32-bit Tauri NSIS stub run as SYSTEM writes to `SysWOW64\config\systemprofile`
+    // (file system redirection), although its uninstall entry names `system32`.
+    let mut rig = rig();
+    let w = wizard("w1", b"setup", None, &["/S"], 1);
+    rig.serve(&w, b"setup");
+    rig.sim.with_world(|world| world.installer_creates_exe = false);
+    rig.sim.add_file(r"C:\Windows\SysWOW64\config\systemprofile\AppData\Local\Vendor App\w1.exe");
+    rig.set_catalog(vec![w.clone()]);
+    rig.start();
+    rig.until("ran", |r| r.runs().len() == 1).await;
+    rig.exe_wait_passes().await;
+    rig.until("failed", |r| r.state("w1") == Some(LocalState::Failed)).await;
+    assert_eq!(rig.record("w1").unwrap().detail.as_deref(), Some("installed_per_user"));
+    rig.stop().await;
+}
+
+#[tokio::test(start_paused = true)]
 async fn a_program_too_deep_in_the_profile_or_of_another_name_or_elsewhere_is_exe_missing() {
     for (case, file) in [
         ("too deep", r"C:\Windows\System32\config\systemprofile\AppData\a\b\c\d\e\w1.exe"),

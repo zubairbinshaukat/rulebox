@@ -10,9 +10,9 @@
 //! "probably", and the dashboard text must not promise more. Never verified on a real PC outside the VM runs.
 //!
 //! **installed_per_user (heuristic):** the installer said success, the program is not at its path, and a file with
-//! the program's name sits in the profile of SYSTEM (`<SystemRoot>\System32\config\systemprofile\AppData`): the
-//! installer put the app in the account it ran as, not in Program Files. Only that profile is looked at, read-only,
-//! at most [`PER_USER_MAX_DEPTH`] folders deep.
+//! the program's name sits in the profile of SYSTEM (`<SystemRoot>\System32\config\systemprofile\AppData`, or its
+//! `SysWOW64` twin for a 32-bit installer): the installer put the app in the account it ran as, not in Program Files.
+//! Only that profile is looked at, read-only, at most [`PER_USER_MAX_DEPTH`] folders deep.
 
 use std::path::{Path, PathBuf};
 use std::time::Duration;
@@ -43,10 +43,14 @@ pub fn cpu_sample_at(timeout: Duration) -> Duration {
     timeout.saturating_sub(CPU_WINDOW)
 }
 
-/// `<SystemRoot>\System32\config\systemprofile\AppData`: where an installer that runs as SYSTEM puts what it installs
-/// "for the current user".
-pub fn systemprofile_appdata(system_root: &Path) -> PathBuf {
-    system_root.join("System32").join("config").join("systemprofile").join("AppData")
+/// The `AppData` folders of SYSTEM's profile, where an installer that runs as SYSTEM puts what it installs "for the
+/// current user": `<SystemRoot>\System32\config\systemprofile\AppData` for a 64-bit installer and
+/// `<SystemRoot>\SysWOW64\config\systemprofile\AppData` for a 32-bit one. File system redirection sends a 32-bit
+/// process's `System32` to `SysWOW64`, so a 32-bit NSIS stub's files land there even though the uninstall entry it
+/// writes says `system32` (VM spike S-9, 2026-11-25: Tauri NSIS, Zahras POS Dev 1.0.2).
+pub fn systemprofile_appdata(system_root: &Path) -> [PathBuf; 2] {
+    let under = |bits: &str| system_root.join(bits).join("config").join("systemprofile").join("AppData");
+    [under("System32"), under("SysWOW64")]
 }
 
 /// The file name to look for: the last part of the program's path template (a `*` or a bare name is not one).
@@ -93,7 +97,10 @@ mod tests {
     fn the_per_user_search_looks_only_in_the_system_profile_and_names_the_program() {
         assert_eq!(
             systemprofile_appdata(Path::new(r"C:\Windows")),
-            Path::new(r"C:\Windows\System32\config\systemprofile\AppData")
+            [
+                PathBuf::from(r"C:\Windows\System32\config\systemprofile\AppData"),
+                PathBuf::from(r"C:\Windows\SysWOW64\config\systemprofile\AppData"),
+            ]
         );
         assert_eq!(program_file_name(r"C:\Program Files\Vendor\App\app.exe"), Some("app.exe"));
         assert_eq!(program_file_name("app.exe"), Some("app.exe"));
