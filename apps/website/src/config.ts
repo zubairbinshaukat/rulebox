@@ -29,10 +29,13 @@ export const ISSUES_URL = `${REPO_URL}/issues`;
 /** The customer dashboard. Never link the operator console. */
 export const APP_URL = SITE_URL.replace("://", "://app.");
 
-/** Contact addresses (shown as a no-JavaScript fallback next to forms). */
-const host = new URL(SITE_URL).host;
-export const CONTACT_EMAIL = `hello@${host}`;
-export const SECURITY_EMAIL = `security@${host}`;
+/**
+ * The one public contact address (owner, 2026-11-25): general questions,
+ * early access, press and security reports. Fixed, not derived from SITE_URL,
+ * so preview builds show the real address too. The Worker's sending address
+ * is separate and is not shown anywhere.
+ */
+export const SUPPORT_EMAIL = "support@rulebox.org";
 
 /**
  * Cloudflare Turnstile site key (public). The default is Cloudflare's

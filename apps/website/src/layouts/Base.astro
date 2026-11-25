@@ -82,7 +82,7 @@ const allLd = crumbs?.length ? [...ld, breadcrumbLd([{ name: "Home", path: "/" }
       {crumbs?.length && !crumbsInline ? <Breadcrumbs items={crumbs} /> : null}
       <slot />
     </main>
-    <Footer />
+    <Footer path={path} />
     <script>
       import "../scripts/site.ts";
     </script>

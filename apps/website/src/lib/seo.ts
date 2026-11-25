@@ -1,4 +1,4 @@
-import { DEFAULT_DESCRIPTION, REPO_URL, SITE_NAME, SITE_URL } from "../config";
+import { DEFAULT_DESCRIPTION, REPO_URL, SITE_NAME, SITE_URL, SUPPORT_EMAIL } from "../config";
 import { SCREENS, SCREEN_SIZE, screenUrl } from "../data/screens";
 
 export interface PageMeta {
@@ -41,6 +41,13 @@ export function organizationLd() {
     url: SITE_URL,
     logo: `${SITE_URL}/icon-512.png`,
     sameAs: [REPO_URL],
+    email: SUPPORT_EMAIL,
+    contactPoint: {
+      "@type": "ContactPoint",
+      contactType: "customer support",
+      email: SUPPORT_EMAIL,
+      availableLanguage: "English",
+    },
   };
 }
 

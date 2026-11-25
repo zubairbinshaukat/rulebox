@@ -1,7 +1,20 @@
 ---
 /* "One PC, three parts, your rules" (core.what) as Qonto-style cards:
    a picture panel on top, a short title and two lines under it. */
-import DesktopMock from "../DesktopMock.astro";
+import Icon from "../Icon.astro";
+import type { IconName } from "../Icon.astro";
+
+/* The staff desktop, as a few approved-app tiles. Not the drawn Staff App
+   screen: that picture is shown twice on this page already (hero and "a day"),
+   and a third copy only repeats "Good morning, Sara". */
+const tiles: { icon: IconName; tone: string }[] = [
+  { icon: "calendar", tone: "sun" },
+  { icon: "calculator", tone: "blue" },
+  { icon: "video", tone: "coral" },
+  { icon: "folder", tone: "mint" },
+  { icon: "chat", tone: "violet" },
+  { icon: "document", tone: "sun" },
+];
 ---
 
 <section class="parts section" aria-labelledby="parts-title">
@@ -34,7 +47,12 @@ import DesktopMock from "../DesktopMock.astro";
 
       <a class="pc card-link" href="/features/staff-desktop">
         <div class="art art-desk" data-tone="blue" aria-hidden="true">
-          <DesktopMock variant="desktop" class="mini-desk" />
+          <div class="mini-desk">
+            <div class="tiles">
+              {tiles.map((t) => <span class="tile" data-tone={t.tone}><Icon name={t.icon} /></span>)}
+            </div>
+            <span class="dock"><i></i><i></i><i></i></span>
+          </div>
         </div>
         <h3 class="h3">The staff desktop</h3>
         <p class="muted">What people see: sign-in, taskbar, Start menu, approved apps and their own files.</p>
@@ -125,11 +143,47 @@ import DesktopMock from "../DesktopMock.astro";
     height: 3px;
     margin-inline: 2px;
   }
-  /* The same drawn Staff App desktop as the rest of the site, small. */
-  .art-desk :global(.mini-desk) {
-    width: 86%;
-    border-radius: 12px;
+  /* The staff desktop: approved apps as tiles, and a floating taskbar. */
+  .mini-desk {
+    display: grid;
+    gap: 14px;
+    justify-items: center;
+    width: 78%;
+    padding: 18px 18px 14px;
+    border-radius: 14px;
+    background: var(--surface);
     box-shadow: var(--shadow-md);
+  }
+  .tiles {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 10px;
+    width: 100%;
+  }
+  .tile {
+    display: grid;
+    place-items: center;
+    aspect-ratio: 1.15;
+    border-radius: 12px;
+    background: var(--tone-soft);
+    color: var(--tone-ink);
+  }
+  .tile :global(.icon) {
+    width: 28px;
+    height: 28px;
+  }
+  .dock {
+    display: flex;
+    gap: 8px;
+    padding: 6px 12px;
+    border-radius: 99px;
+    background: var(--surface-2);
+  }
+  .dock i {
+    width: 14px;
+    height: 14px;
+    border-radius: 5px;
+    background: var(--line-strong, var(--line));
   }
   .table {
     width: 84%;

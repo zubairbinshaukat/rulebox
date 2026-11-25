@@ -1,6 +1,6 @@
 import type { APIRoute } from "astro";
 import { getCollection } from "astro:content";
-import { SITE_URL, REPO_URL } from "../config";
+import { SITE_URL, REPO_URL, SUPPORT_EMAIL } from "../config";
 import { FEATURES } from "../data/features";
 import { USE_CASES } from "../data/useCases";
 
@@ -12,12 +12,16 @@ export const GET: APIRoute = async () => {
   const body = [
     "# Rulebox",
     "",
-    "> Rulebox is an open-source (MIT) kiosk OS for Windows. It turns a PC into a locked, branded staff workstation. Staff sign in and see only approved apps, websites and files. Administrators manage every PC from a web dashboard. It is in invite-only early access.",
+    "> Open-source (MIT) kiosk OS layer for Windows: locks a PC into a branded staff workstation, managed from a web dashboard.",
+    "",
+    "Rulebox runs on top of Windows; it does not replace it. Staff sign in and see only approved apps, websites and files. Administrators manage every PC from a web dashboard. Self-hosting is free (MIT). The hosted dashboard is paid, and free during invite-only early access.",
     "",
     "## Key pages",
     line("How it works", "/product", "The agent, the staff desktop and the dashboard."),
     line("Security", "/security", "Threat model, lockdown layers, signed policies, known limits."),
-    line("Pricing", "/pricing", "Free and open source; hosted early access is invite-only and free."),
+    line("Pricing", "/pricing", "Self-host free forever (MIT); the hosted dashboard is paid, free during early access."),
+    line("Early access", "/early-access", "Leave an email to hear when Rulebox opens, or to try it now."),
+    line("Contact", "/contact", "Questions, press, partnerships."),
     line("Roadmap", "/roadmap", "What is in v1, what is planned, what is not planned."),
     line("Numbers", "/numbers", "Every number on the site with its source."),
     line("Compare with Windows kiosk mode", "/compare/windows-kiosk-mode", "A fair comparison with Assigned Access."),
@@ -34,6 +38,10 @@ export const GET: APIRoute = async () => {
     "",
     "## Guides (blog)",
     ...posts.map((p) => line(p.data.title, `/blog/${p.id}`, p.data.description)),
+    "",
+    "## Contact",
+    "",
+    `Contact: ${SUPPORT_EMAIL}`,
     "",
   ].join("\n");
   return new Response(body, { headers: { "content-type": "text/plain; charset=utf-8" } });

@@ -1,0 +1,73 @@
+---
+/* The one email form on the site (footer, home, early-access page): leave an
+   email to hear when Rulebox opens to everyone, and optionally tick "I want to
+   try it now" to be written to about early access. Posts to the /api/notify
+   Worker, which sends a double opt-in confirmation first. Turnstile runs in
+   invisible mode only after the visitor focuses the form (forms.ts). */
+import Icon from "./Icon.astro";
+import { SUPPORT_EMAIL, TURNSTILE_SITE_KEY } from "../config";
+
+interface Props {
+  /** Prefix for element ids, so the form can appear twice on a page without clashes. */
+  id?: string;
+  /** Visible label above the field. */
+  label?: string;
+}
+const { id = "signup", label = "Get early access, or hear when Rulebox is open to everyone" } = Astro.props;
+---
+
+<form class="signup" method="post" action="/api/notify" data-form="signup" data-sitekey={TURNSTILE_SITE_KEY} data-support={SUPPORT_EMAIL} novalidate>
+  <label for={`${id}-email`} class="s-label">{label}</label>
+  <div class="row">
+    <input id={`${id}-email`} class="input" type="email" name="email" autocomplete="email" required maxlength="200" placeholder="you@work.example" />
+    <button class="btn btn-primary" type="submit">Notify me<Icon name="arrow-right" /></button>
+  </div>
+  <label class="check s-try">
+    <input class="checkbox" type="checkbox" name="tryNow" value="yes" />
+    <span>I want to try it now</span>
+  </label>
+  <div class="hp" aria-hidden="true"><label>Leave empty <input type="text" name="website" tabindex="-1" autocomplete="off" /></label></div>
+  <p class="s-hint">One email to confirm your address. Then one when Rulebox opens, or a reply about trying it now if you ticked the box. Nothing else.</p>
+  <p class="form-msg" role="status" aria-live="polite" hidden></p>
+  <noscript><p class="s-hint">This form needs JavaScript for its spam check. Email us instead: <a href={`mailto:${SUPPORT_EMAIL}`}>{SUPPORT_EMAIL}</a>.</p></noscript>
+</form>
+
+<script>
+  import "../scripts/forms.ts";
+</script>
+
+<style>
+  .signup {
+    display: grid;
+    gap: var(--sp-3);
+    max-width: 460px;
+  }
+  .s-label {
+    font-weight: var(--fw-strong);
+    font-size: var(--fs-small);
+  }
+  .row {
+    display: flex;
+    gap: var(--sp-2);
+  }
+  .row .input {
+    border-radius: var(--radius-pill);
+    padding-inline: var(--sp-5);
+  }
+  .s-try {
+    font-size: var(--fs-small);
+  }
+  .s-hint {
+    font-size: var(--fs-xs);
+    color: var(--muted);
+  }
+  .s-hint a {
+    color: inherit;
+    text-decoration: underline;
+  }
+  @media (max-width: 420px) {
+    .row {
+      flex-direction: column;
+    }
+  }
+</style>

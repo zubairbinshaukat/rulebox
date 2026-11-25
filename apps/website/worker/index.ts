@@ -4,10 +4,11 @@
  * assets.run_worker_first in wrangler.jsonc), so page views never count
  * against the Workers request limit.
  *
- *   POST /api/early-access   early-access request -> owner inbox + auto-reply
+ *   POST /api/notify         the one email form (footer, early-access page):
+ *                            { email, tryNow } -> double opt-in confirmation email
+ *   GET  /api/notify/confirm signed link     -> adds the address to the list; with
+ *                            tryNow it also emails the owner an early-access request
  *   POST /api/contact        contact form    -> owner inbox (routed by topic)
- *   POST /api/notify         "notify me"     -> double opt-in confirmation email
- *   GET  /api/notify/confirm signed link     -> adds the address to the list
  *
  * Every POST: JSON only, same-origin, honeypot empty, not faster than 2 s,
  * Turnstile token verified on the server, fields trimmed and capped, rate
@@ -20,7 +21,7 @@ export interface Env {
   FORM_LIMITER?: { limit(opts: { key: string }): Promise<{ success: boolean }> };
   TURNSTILE_SECRET: string;
   RESEND_API_KEY: string;
-  /** Owner inbox for early-access and general mail. */
+  /** Owner inbox for early-access requests and general mail. */
   FORM_TO_ADDRESS: string;
   /** Optional separate inbox for security-topic contact messages. */
   SECURITY_TO_ADDRESS?: string;
@@ -32,9 +33,11 @@ export interface Env {
   NOTIFY_SECRET: string;
   /** Optional Resend audience for the notify list; without it the owner gets an email. */
   RESEND_AUDIENCE_ID?: string;
-  /** "false" turns the early-access auto-reply off on a busy day (Resend free plan: 100 emails a day). */
-  AUTO_REPLY?: string;
+
 }
+
+/** Shown to visitors in error messages. Keep in step with src/config.ts (SUPPORT_EMAIL). */
+const SUPPORT_EMAIL = "support@rulebox.org";
 
 type Json = Record<string, unknown>;
 const MIN_ELAPSED_MS = 2000;
@@ -108,7 +111,7 @@ async function guard(req: Request, env: Env): Promise<Json | Response> {
   const ip = req.headers.get("cf-connecting-ip");
   if (env.FORM_LIMITER) {
     const { success } = await env.FORM_LIMITER.limit({ key: ip ?? "unknown" });
-    if (!success) return json(429, { message: "Too many messages from your connection. Please wait a minute, or email us." });
+    if (!success) return json(429, { message: `Too many messages from your connection. Please wait a minute, or email ${SUPPORT_EMAIL}.` });
   }
 
   let body: Json;
@@ -126,44 +129,6 @@ async function guard(req: Request, env: Env): Promise<Json | Response> {
   const ok = await verifyTurnstile(env.TURNSTILE_SECRET, clean(body.turnstileToken, 4096), ip);
   if (!ok) return json(403, { message: "The spam check did not pass. Please try again." });
   return body;
-}
-
-async function earlyAccess(req: Request, env: Env): Promise<Response> {
-  const b = await guard(req, env);
-  if (b instanceof Response) return b;
-  const f = {
-    name: clean(b.name, 120),
-    email: clean(b.email, 200),
-    organisation: clean(b.organisation, 160),
-    pcs: clean(b.pcs, 40),
-    useCase: clean(b.useCase, 80),
-    windows: clean(b.windows, 160),
-    message: clean(b.message, 3000, false),
-    consent: b.consent === "yes",
-  };
-  if (!f.name || !isEmail(f.email) || !f.organisation || !f.pcs || !f.useCase || !f.consent) {
-    return json(422, { message: "Please fill in every required field and tick the consent box." });
-  }
-  const text = [
-    `Name: ${f.name}`,
-    `Email: ${f.email}`,
-    `Organisation: ${f.organisation}`,
-    `PCs: ${f.pcs}`,
-    `Used for: ${f.useCase}`,
-    `Windows: ${f.windows || "-"}`,
-    "",
-    f.message || "(no message)",
-  ].join("\n");
-  const sent = await sendEmail(env, { to: env.FORM_TO_ADDRESS, subject: `Early-access request: ${f.organisation}`, text, replyTo: f.email });
-  if (!sent) return json(502, { message: "We could not send that right now. Please email us instead." });
-  if (env.AUTO_REPLY !== "false") {
-    await sendEmail(env, {
-      to: f.email,
-      subject: "We received your Rulebox early-access request",
-      text: `Hello ${f.name},\n\nThank you for your interest in Rulebox early access. We read every request and will reply by email.\n\nThe Rulebox team`,
-    });
-  }
-  return json(200, { message: "Thank you. We received your request and will reply by email." });
 }
 
 async function contact(req: Request, env: Env): Promise<Response> {
@@ -184,39 +149,50 @@ async function contact(req: Request, env: Env): Promise<Response> {
     text: `From: ${f.name} <${f.email}>\nTopic: ${f.topic}\n\n${f.message}`,
     replyTo: f.email,
   });
-  return sent ? json(200, { message: "Thank you. We will reply by email." }) : json(502, { message: "We could not send that right now. Please email us instead." });
+  return sent ? json(200, { message: "Thank you. We will reply by email." }) : json(502, { message: `We could not send that right now. Please email ${SUPPORT_EMAIL} instead.` });
 }
 
+/**
+ * The one signup form. Body: { email, tryNow?: boolean }. The address is
+ * confirmed by email first (double opt-in), so nobody can sign up someone
+ * else. tryNow rides inside the signed confirmation link, so it cannot be
+ * changed after the fact.
+ */
 async function notify(req: Request, env: Env): Promise<Response> {
   const b = await guard(req, env);
   if (b instanceof Response) return b;
   const email = clean(b.email, 200).toLowerCase();
   if (!isEmail(email)) return json(422, { message: "Please enter a valid email address." });
+  const tryNow = b.tryNow === true ? "1" : "0";
   const exp = Date.now() + 7 * 24 * 3600 * 1000;
-  const sig = await hmac(env.NOTIFY_SECRET, `${email}|${exp}`);
-  const link = `${env.SITE_ORIGIN}/api/notify/confirm?e=${encodeURIComponent(email)}&x=${exp}&s=${sig}`;
+  const sig = await hmac(env.NOTIFY_SECRET, `${email}|${exp}|${tryNow}`);
+  const link = `${env.SITE_ORIGIN}/api/notify/confirm?e=${encodeURIComponent(email)}&x=${exp}&t=${tryNow}&s=${sig}`;
+  const what = tryNow === "1" ? "asked to try Rulebox now and to hear when it opens to everyone" : "asked to hear when Rulebox opens to everyone";
   const sent = await sendEmail(env, {
     to: email,
-    subject: "Confirm: tell me when Rulebox is open to everyone",
-    text: `Someone (we hope you) asked to hear when Rulebox opens to everyone.\n\nConfirm here: ${link}\n\nIf it was not you, ignore this email and nothing happens.`,
+    subject: "Confirm your email for Rulebox",
+    text: `Someone (we hope you) ${what}.\n\nConfirm here: ${link}\n\nIf it was not you, ignore this email and nothing happens.\n\nQuestions: ${SUPPORT_EMAIL}`,
   });
-  return sent ? json(200, { message: "Almost done. Check your inbox to confirm." }) : json(502, { message: "We could not send the email right now. Please try later." });
+  return sent
+    ? json(200, { message: tryNow === "1" ? "Almost done. Check your inbox to confirm, and we will write about trying Rulebox." : "Almost done. Check your inbox to confirm." })
+    : json(502, { message: `We could not send the email right now. Please try later, or email ${SUPPORT_EMAIL}.` });
 }
 
 async function confirm(url: URL, env: Env): Promise<Response> {
   const email = clean(url.searchParams.get("e"), 200).toLowerCase();
   const exp = Number(url.searchParams.get("x"));
   const sig = url.searchParams.get("s") ?? "";
+  const tryNow = url.searchParams.get("t") === "1" ? "1" : "0";
   const page = (title: string, text: string, status = 200) =>
     new Response(
       `<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="robots" content="noindex"><title>${escapeHtml(title)}</title><body style="font:18px/1.6 system-ui,sans-serif;max-width:560px;margin:15vh auto;padding:0 20px;background:#f8f5f0;color:#231e19"><h1 style="letter-spacing:-.03em">${escapeHtml(title)}</h1><p>${escapeHtml(text)}</p><p><a href="/">Back to Rulebox</a></p></body></html>`,
       { status, headers: { "content-type": "text/html; charset=utf-8", "cache-control": "no-store" } },
     );
   if (!isEmail(email) || !exp || exp < Date.now()) return page("This link has expired", "Please sign up again from the website.", 400);
-  const expected = await hmac(env.NOTIFY_SECRET, `${email}|${exp}`);
+  const expected = await hmac(env.NOTIFY_SECRET, `${email}|${exp}|${tryNow}`);
   if (!timingSafeEqual(sig, expected)) return page("This link is not valid", "Please sign up again from the website.", 400);
 
-  let ok: boolean;
+  let ok = true;
   if (env.RESEND_AUDIENCE_ID) {
     const res = await fetch(`https://api.resend.com/audiences/${env.RESEND_AUDIENCE_ID}/contacts`, {
       method: "POST",
@@ -224,18 +200,26 @@ async function confirm(url: URL, env: Env): Promise<Response> {
       body: JSON.stringify({ email, unsubscribed: false }),
     });
     ok = res.ok;
-  } else {
-    ok = await sendEmail(env, { to: env.FORM_TO_ADDRESS, subject: "Notify list: new confirmed address", text: email });
   }
-  return ok ? page("You are on the list", "We will email you once when Rulebox is open to everyone. Nothing else.") : page("Something went wrong", "Please try the link again in a minute.", 502);
+  // The owner hears about every "try it now" (and about every address when there is no audience).
+  if (ok && (tryNow === "1" || !env.RESEND_AUDIENCE_ID)) {
+    ok = await sendEmail(env, {
+      to: env.FORM_TO_ADDRESS,
+      subject: tryNow === "1" ? "Early-access request: wants to try Rulebox now" : "Notify list: new confirmed address",
+      text: `${email}\n${tryNow === "1" ? "Confirmed their address and ticked: I want to try it now." : "Confirmed their address."}`,
+      replyTo: email,
+    });
+  }
+  if (!ok) return page("Something went wrong", `Please try the link again in a minute, or email ${SUPPORT_EMAIL}.`, 502);
+  return tryNow === "1"
+    ? page("You are on the list", "We will email you about trying Rulebox now, and once when it is open to everyone. Nothing else.")
+    : page("You are on the list", "We will email you once when Rulebox is open to everyone. Nothing else.");
 }
 
 export default {
   async fetch(req: Request, env: Env): Promise<Response> {
     const url = new URL(req.url);
     switch (url.pathname) {
-      case "/api/early-access":
-        return earlyAccess(req, env);
       case "/api/contact":
         return contact(req, env);
       case "/api/notify":

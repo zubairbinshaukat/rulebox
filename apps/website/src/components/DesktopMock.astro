@@ -52,9 +52,25 @@ interface Props {
    *  page as a real <img> with alt text, under the drawn screen, so search
    *  engines and screen readers get the picture. The drawn screen covers it. */
   shot?: boolean;
+  /** One plain-words description of the picture. Default: the variant's own description. */
+  label?: string;
+  /** The picture sits inside something that already describes it (a labelled stage):
+   *  hide it from assistive technology completely. */
+  decorative?: boolean;
 }
-const { variant = "desktop", class: className, shot = false } = Astro.props;
+const { variant = "desktop", class: className, shot = false, label, decorative = false } = Astro.props;
 const screen = shot && variant in SCREENS ? SCREENS[variant as ScreenKey] : undefined;
+/* The drawn screen is a picture, not page text: it is one image to a screen reader
+   and to search engines ("Good morning, Sara", "82%" and the rest stay inside
+   aria-hidden). Pictures with a rendered screenshot reuse that screenshot's alt. */
+const DESCRIPTIONS: Record<Variant, string> = {
+  desktop: SCREENS.desktop.alt,
+  signin: SCREENS.signin.alt,
+  viewer: SCREENS.viewer.alt,
+  offline: SCREENS.offline.alt,
+  evening: "Illustration of the Rulebox staff desktop after the handover: the next person's own apps and files on the same shared PC. Names and apps are examples.",
+};
+const description = label ?? DESCRIPTIONS[variant];
 
 /* The glyph keys of the real app (shell/appArt.ts); each has its own art colours. */
 const GLYPHS = {
@@ -141,7 +157,7 @@ const cols = s.tiles.length > 6 ? 4 : 3;
 const startMark = flatMarkSvg({ id: uid("rb-mock-start") });
 ---
 
-<div class:list={["mock", `v-${variant}`, className]} aria-hidden={screen ? undefined : "true"}>
+<div class:list={["mock", `v-${variant}`, className]} role={decorative ? undefined : "img"} aria-label={decorative ? undefined : description} aria-hidden={decorative ? "true" : undefined}>
   {
     screen && (
       <picture class="mock-shot">
@@ -160,7 +176,7 @@ const startMark = flatMarkSvg({ id: uid("rb-mock-start") });
       </picture>
     )
   }
-  <div class="scr" aria-hidden={screen ? "true" : undefined}>
+  <div class="scr" aria-hidden="true" inert>
     <div class="wall"><i class="ba"></i><i class="bb"></i></div>
 
     {

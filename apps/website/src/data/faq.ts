@@ -1,4 +1,5 @@
 /* FAQ copy. Source: Story §9. Items with an open [OWNER] or result slot are left out. */
+import { SUPPORT_EMAIL } from "../config";
 
 export const HOME_FAQ = [
   {
@@ -33,6 +34,10 @@ export const HOME_FAQ = [
     q: "Does it support Android, macOS or Linux?",
     a: "Windows only today. Android is planned for v2. Linux is not planned.",
   },
+  {
+    q: "How do I get help?",
+    a: `Email ${SUPPORT_EMAIL}. We reply by email. For a security problem, see the security page.`,
+  },
 ];
 
 export const SECURITY_FAQ = [
@@ -57,7 +62,7 @@ export const SECURITY_FAQ = [
 export const PRICING_FAQ = [
   {
     q: "How much does it cost?",
-    a: "The software is free and open source (MIT). Hosting it yourself costs whatever your own backend costs. The hosted service is in an invite-only early access, and early-access organisations pay nothing.",
+    a: "Self-hosting is free forever (MIT); it costs whatever your own backend costs. The hosted dashboard is paid, and free for organisations in the invite-only early access. Prices will be posted on the pricing page before early access ends.",
   },
   {
     q: "Is there a minimum number of PCs?",
@@ -70,6 +75,6 @@ export const PRICING_FAQ = [
   },
   {
     q: "How do I join early access?",
-    a: "Fill in the short form: organisation, number of PCs, what the PCs are used for. We reply by email.",
+    a: `Leave your email on the early-access page and tick “I want to try it now”. We reply by email. Questions? Write to ${SUPPORT_EMAIL}.`,
   },
 ];

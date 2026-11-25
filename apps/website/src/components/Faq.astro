@@ -2,6 +2,8 @@
 /* FAQ, after the Tandem reference: the questions on the left, the open
    answer beside them. Built on <details>, so it works without JavaScript
    and every answer is in the HTML for search engines and screen readers. */
+import { SUPPORT_EMAIL } from "../config";
+
 interface Props {
   items: { q: string; a: string }[];
   title?: string;
@@ -15,7 +17,7 @@ const { items, title = "Questions, answered plainly", intro } = Astro.props;
     <div class="side">
       <h2 id="faq-title" class="h2">{title}</h2>
       {intro && <p class="lead">{intro}</p>}
-      <p class="muted">Something else? <a class="text-link" href="/contact">Ask us</a>.</p>
+      <p class="muted">Something else? Email <a class="text-link" href={`mailto:${SUPPORT_EMAIL}`}>{SUPPORT_EMAIL}</a>, or <a class="text-link" href="/contact">use the contact page</a>.</p>
     </div>
     <div class="list">
       {

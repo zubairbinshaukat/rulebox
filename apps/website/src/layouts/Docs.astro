@@ -11,7 +11,7 @@
  */
 import Base from "./Base.astro";
 import Icon from "../components/Icon.astro";
-import { REPO_URL } from "../config";
+import { REPO_URL, SUPPORT_EMAIL } from "../config";
 import { articleLd } from "../lib/seo";
 import { docGroups, isoDate, longDate, readMinutes } from "../lib/content";
 
@@ -196,6 +196,13 @@ const current = flat[idx];
               </a>
             )}
           </nav>
+        )
+      }
+      {
+        !home && (
+          <p class="doc-help">
+            Stuck, or something wrong on this page? Email <a href={`mailto:${SUPPORT_EMAIL}`}>{SUPPORT_EMAIL}</a>.
+          </p>
         )
       }
     </article>
@@ -644,6 +651,15 @@ const current = flat[idx];
     width: 2px;
     border-radius: 2px;
     background: var(--primary);
+  }
+  .doc-help {
+    margin-top: var(--sp-8);
+    font-size: var(--fs-small);
+    color: var(--muted);
+  }
+  .doc-help a {
+    color: var(--ink);
+    text-underline-offset: 3px;
   }
   .toc-edit {
     display: inline-flex;

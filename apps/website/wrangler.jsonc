@@ -20,8 +20,7 @@
   },
   "vars": {
     // Canonical origin (owner bought rulebox.org 2026-11-25; apex canonical, www redirects).
-    "SITE_ORIGIN": "https://rulebox.org",
-    "AUTO_REPLY": "true"
+    "SITE_ORIGIN": "https://rulebox.org"
   },
   "ratelimits": [
     {
@@ -35,7 +34,7 @@
     // Previews on *.workers.dev: same code, never indexed (see public/_headers).
     "preview": {
       "name": "rulebox-website-preview",
-      "vars": { "SITE_ORIGIN": "https://rulebox-website-preview.workers.dev", "AUTO_REPLY": "false" }
+      "vars": { "SITE_ORIGIN": "https://rulebox-website-preview.workers.dev" }
     }
   }
 }

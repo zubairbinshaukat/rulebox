@@ -10,7 +10,7 @@ const SRC_QUICK = "https://learn.microsoft.com/en-us/windows/configuration/assig
 const CHECKED = "2026-11-21";
 const rows: { d: string; win: string; rb: string; src?: string }[] = [
   { d: "Cost", win: "Included in Windows", rb: "Free software (MIT); hosting separate" },
-  { d: "Windows editions", win: "Pro, Enterprise, Education, IoT Enterprise", rb: "Any edition that passes the installer check; Home gets “Reduced” protection", src: SRC_OVERVIEW },
+  { d: "Windows editions", win: "Pro, Enterprise, Education, IoT Enterprise", rb: "Any edition that passes the installer check", src: SRC_OVERVIEW },
   { d: "Single full-screen app", win: "Yes, and it restarts the app if closed", rb: "Not what Rulebox is for", src: SRC_OVERVIEW },
   { d: "Multi-app desktop", win: "Yes: a “restricted user experience” with a tailored Start menu and taskbar", rb: "Yes: custom desktop, taskbar, Start menu", src: SRC_QUICK },
   { d: "Setup", win: "XML configuration through Intune, a provisioning package or PowerShell as SYSTEM", rb: "One installer and an enrolment code", src: SRC_QUICK },

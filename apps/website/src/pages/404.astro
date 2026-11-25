@@ -2,6 +2,7 @@
 import Base from "../layouts/Base.astro";
 import Icon from "../components/Icon.astro";
 import Logo from "../components/Logo.astro";
+import { SUPPORT_EMAIL } from "../config";
 ---
 
 <Base title="Page not found" description="This page is not on the allowlist. Try the home page, the docs or the features instead." path="/404" noindex>
@@ -16,6 +17,7 @@ import Logo from "../components/Logo.astro";
       <li><a class="btn btn-ghost" href="/docs">Docs</a></li>
       <li><a class="btn btn-ghost" href="/early-access">Early access</a></li>
     </ul>
+    <p class="muted help">Looking for something? Email <a class="text-link" href={`mailto:${SUPPORT_EMAIL}`}>{SUPPORT_EMAIL}</a>.</p>
   </section>
 </Base>
 
@@ -25,6 +27,9 @@ import Logo from "../components/Logo.astro";
     justify-items: center;
     text-align: center;
     padding-block: var(--section-y);
+  }
+  .help {
+    margin-top: var(--sp-7);
   }
   .mark {
     margin-bottom: var(--sp-7);

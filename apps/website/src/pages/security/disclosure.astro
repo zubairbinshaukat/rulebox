@@ -1,7 +1,7 @@
 ---
 import Base from "../../layouts/Base.astro";
 import PageHero from "../../components/PageHero.astro";
-import { SECURITY_EMAIL, REPO_URL } from "../../config";
+import { SUPPORT_EMAIL, REPO_URL } from "../../config";
 ---
 
 <Base
@@ -17,7 +17,7 @@ import { SECURITY_EMAIL, REPO_URL } from "../../config";
     <div class="container">
       <div class="prose flush">
         <h2>How to report</h2>
-        <p>Email <a href={`mailto:${SECURITY_EMAIL}`}>{SECURITY_EMAIL}</a>, or use GitHub's private vulnerability reporting on the <a href={`${REPO_URL}/security`}>repository's security page</a>. Please do not open a public issue for a vulnerability.</p>
+        <p>Email <a href={`mailto:${SUPPORT_EMAIL}?subject=Security%20report`}>{SUPPORT_EMAIL}</a> with “Security” in the subject, or use GitHub's private vulnerability reporting on the <a href={`${REPO_URL}/security`}>repository's security page</a>. Please do not open a public issue for a vulnerability.</p>
         <h2>What to include</h2>
         <ul>
           <li>The Rulebox version and the Windows version and edition.</li>

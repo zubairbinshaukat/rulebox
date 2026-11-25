@@ -4,7 +4,7 @@ import PageHero from "../components/PageHero.astro";
 import Points from "../components/Points.astro";
 import CtaClose from "../components/CtaClose.astro";
 import Icon from "../components/Icon.astro";
-import { ISSUES_URL, REPO_URL, RELEASES_URL } from "../config";
+import { ISSUES_URL, REPO_URL, RELEASES_URL, SUPPORT_EMAIL } from "../config";
 ---
 
 <Base
@@ -52,6 +52,7 @@ import { ISSUES_URL, REPO_URL, RELEASES_URL } from "../config";
         <li><a class="lk card-link" href="/legal/licenses" data-tone="coral"><span class="il-icon"><Icon name="checklist" /></span><span class="lk-text"><strong>Third-party notices</strong><span class="muted">Every licence we ship</span></span></a></li>
         <li><a class="lk card-link" href={RELEASES_URL} data-tone="blue"><span class="il-icon"><Icon name="cloud-download" /></span><span class="lk-text"><strong>Releases</strong><span class="muted">Installers and notes</span></span></a></li>
       </ul>
+      <p class="muted help">Questions about the licence or the project? <a class="text-link" href={`mailto:${SUPPORT_EMAIL}`}>{SUPPORT_EMAIL}</a></p>
     </div>
   </section>
   <CtaClose headline="Read it first." sub="Then join early access, or host it yourself." />
@@ -64,6 +65,9 @@ import { ISSUES_URL, REPO_URL, RELEASES_URL } from "../config";
   }
   .t {
     margin-bottom: var(--head-after);
+  }
+  .help {
+    margin-top: var(--sp-6);
   }
   .two {
     display: grid;

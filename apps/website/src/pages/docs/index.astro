@@ -2,7 +2,7 @@
 import Docs from "../../layouts/Docs.astro";
 import Icon from "../../components/Icon.astro";
 import { docGroups } from "../../lib/content";
-import { ISSUES_URL } from "../../config";
+import { ISSUES_URL, SUPPORT_EMAIL } from "../../config";
 
 const groups = await docGroups();
 const quick = [
@@ -70,8 +70,8 @@ const quick = [
   <aside class="help">
     <Icon name="question" />
     <p>
-      Something missing or wrong? <a href={ISSUES_URL}>Open an issue on GitHub</a>, or read the{" "}
-      <a href="/blog">blog</a> for longer guides.
+      Something missing or wrong? <a href={ISSUES_URL}>Open an issue on GitHub</a>, or email{" "}
+      <a href={`mailto:${SUPPORT_EMAIL}`}>{SUPPORT_EMAIL}</a>. The <a href="/blog">blog</a> has longer guides.
     </p>
   </aside>
 </Docs>

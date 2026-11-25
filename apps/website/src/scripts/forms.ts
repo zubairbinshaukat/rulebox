@@ -101,6 +101,8 @@ function enhance(form: HTMLFormElement) {
   if (form.dataset.enhanced) return;
   form.dataset.enhanced = "1";
   const startedAt = Date.now();
+  /* Set by the page (data-support) so the address lives in one place, config.ts. */
+  const support = form.dataset.support ?? "support@rulebox.org";
   let widgetId: string | null = null;
   let box: HTMLDivElement | null = null;
 
@@ -139,10 +141,12 @@ function enhance(form: HTMLFormElement) {
     await prepare();
     const token = widgetId && window.turnstile ? window.turnstile.getResponse(widgetId) : undefined;
     if (!token) {
-      setMessage(form, "error", "Please wait a moment for the spam check, then send again.");
+      setMessage(form, "error", `Please wait a moment for the spam check, then send again. Or email ${support}.`);
       return;
     }
     const data: Record<string, unknown> = Object.fromEntries(new FormData(form).entries());
+    // Checkboxes go as true/false, ticked or not.
+    form.querySelectorAll<HTMLInputElement>("input[type=checkbox][name]").forEach((cb) => (data[cb.name] = cb.checked));
     data.turnstileToken = token;
     data.elapsedMs = Date.now() - startedAt;
     delete data["cf-turnstile-response"];
@@ -161,10 +165,10 @@ function enhance(form: HTMLFormElement) {
         setMessage(form, "ok", body.message ?? "Thank you. Check your inbox.");
         form.reset();
       } else {
-        setMessage(form, "error", body.message ?? "That did not work. Your text is still here; please try again.");
+        setMessage(form, "error", body.message ?? `That did not work. Your text is still here; please try again, or email ${support}.`);
       }
     } catch {
-      setMessage(form, "error", "We could not reach the server. Your text is still here; please try again.");
+      setMessage(form, "error", `We could not reach the server. Your text is still here; please try again, or email ${support}.`);
     } finally {
       if (button) button.disabled = false;
       if (widgetId && window.turnstile) window.turnstile.reset(widgetId);

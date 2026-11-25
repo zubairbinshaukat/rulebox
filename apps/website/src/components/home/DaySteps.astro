@@ -86,13 +86,13 @@ const steps: { time: string; tab: string; tone: string; icon: IconName; title: s
               ))
             }
           </div>
-          <div class="stage" data-stage data-active="0">
+          <div class="stage" data-stage data-active="0" role="img" aria-label="Illustration of the front-desk laptop through the day: the sign-in screen, Sara's desktop, a PDF open in the built-in viewer, the desktop while offline, and Ali's own desktop after the handover. Names and apps are examples.">
             {steps.map((s) => <span class="tint" data-tone={s.tone} />)}
             <span class="grain" aria-hidden="true" />
             {
               steps.map((s) => (
                 <div class="layer">
-                  <DesktopMock variant={s.variant} />
+                  <DesktopMock variant={s.variant} decorative />
                 </div>
               ))
             }

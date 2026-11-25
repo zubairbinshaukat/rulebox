@@ -58,8 +58,8 @@ const HERO_PHOTO = { photo: PHOTOS.homeHero, pos: "50% 40%", posSm: "58% 40%" };
             Only what<br />you <span class="allow">allow.</span>
           </h1>
           <p class="lead sub enter" style="--d:.22s">
-            Rulebox turns any Windows PC into a locked, branded workstation. Staff sign in and see only their approved apps,
-            websites and files.
+            A kiosk OS layer for Windows. It runs on top of the Windows you already have and turns any PC into a locked, branded
+            workstation: staff see only their approved apps, websites and files.
           </p>
           <div class="ctas enter" style="--d:.3s">
             <a class="btn btn-primary btn-lg" href={CTA_PRIMARY.href}>{CTA_PRIMARY.label}<Icon name="arrow-right" /></a>
@@ -70,6 +70,7 @@ const HERO_PHOTO = { photo: PHOTOS.homeHero, pos: "50% 40%", posSm: "58% 40%" };
             <li><Icon name="code" />MIT licence</li>
             <li><Icon name="undo" />Reversible</li>
           </ul>
+          <p class="price enter" style="--d:.44s">Self-host free forever (MIT). The hosted dashboard is paid, and free during early access. <a class="text-link" href="/pricing">Pricing</a></p>
         </div>
 
         <div class="next">
@@ -194,7 +195,13 @@ const HERO_PHOTO = { photo: PHOTOS.homeHero, pos: "50% 40%", posSm: "58% 40%" };
   }
   .sub {
     margin-top: 28px;
-    max-width: 34ch;
+    max-width: 38ch;
+  }
+  .price {
+    margin: var(--sp-4) 0 0;
+    max-width: 44ch;
+    font-size: 0.94rem;
+    color: var(--muted);
   }
   .ctas {
     display: flex;
