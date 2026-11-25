@@ -37,8 +37,9 @@ export function organizationLd() {
   return {
     "@context": "https://schema.org",
     "@type": "Organization",
+    "@id": `${SITE_URL}/#organization`,
     name: SITE_NAME,
-    url: SITE_URL,
+    url: `${SITE_URL}/`,
     logo: `${SITE_URL}/icon-512.png`,
     sameAs: [REPO_URL, INSTAGRAM_URL],
     email: SUPPORT_EMAIL,
@@ -51,8 +52,17 @@ export function organizationLd() {
   };
 }
 
+/** Google's site name comes mainly from this block on the home page (developers.google.com/search/docs/appearance/site-names). */
 export function websiteLd() {
-  return { "@context": "https://schema.org", "@type": "WebSite", name: SITE_NAME, url: SITE_URL };
+  return {
+    "@context": "https://schema.org",
+    "@type": "WebSite",
+    "@id": `${SITE_URL}/#website`,
+    name: SITE_NAME,
+    alternateName: [`${SITE_NAME} Kiosk OS`, "rulebox.org"],
+    url: `${SITE_URL}/`,
+    publisher: { "@id": `${SITE_URL}/#organization` },
+  };
 }
 
 /** Never add aggregateRating or review without real, visible reviews. */
