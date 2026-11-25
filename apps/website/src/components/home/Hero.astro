@@ -50,7 +50,8 @@ const HERO_PHOTO = { photo: PHOTOS.homeHero, pos: "50% 40%", posSm: "58% 40%" };
         <div class="copy">
           <a class="chip enter" href="/early-access" style="--d:.05s">
             <span class="chip-tag">Early access</span>
-            Rulebox is in invite-only early access
+            <span class="chip-long">Rulebox is in invite-only early access</span>
+            <span class="chip-short">Invite only, for now</span>
             <Icon name="arrow-right" />
           </a>
           <h1 id="hero-title" class="display enter" style="--d:.12s">
@@ -442,38 +443,60 @@ const HERO_PHOTO = { photo: PHOTOS.homeHero, pos: "50% 40%", posSm: "58% 40%" };
       display: none;
     }
   }
-  /* Phones: the photo is the star, full width and tall like the use-case
-     heroes, with a sun slab peeking out behind its top-left corner; the
-     desktop is smaller and tucks into the lower-left. One chip, lower right. */
+  /* Phones (owner, 2026-11-25): the desktop's roles swap with the photo. The
+     drawn desktop is the big full-width picture at the back, with a sun slab
+     peeking out behind its top-left corner; the POS photo is a smaller card
+     in front, overlapping its lower right. One chip, lower left. */
   @media (max-width: 600px) {
     .hero[data-variant="photos"] .stage {
-      aspect-ratio: 1 / 1.18;
+      aspect-ratio: 1 / 1.08;
     }
     .hero[data-variant="photos"] .s1 {
       display: block;
       left: -8px;
-      top: -12px;
-      width: 46%;
-      height: 34%;
+      top: -10px;
+      width: 42%;
+      height: 32%;
       border-radius: var(--radius-lg);
-    }
-    .hero[data-variant="photos"] .s3 {
-      left: 0;
-      right: 0;
-      width: auto;
-      height: 76%;
-      --pos: var(--pos-sm);
     }
     .hero[data-variant="photos"] .window {
       left: 0;
-      right: 34%;
-      top: 58%;
+      right: 0;
+      top: 4%;
+      z-index: 1;
+    }
+    .hero[data-variant="photos"] .s3 {
+      left: auto;
+      right: 0;
+      top: auto;
+      bottom: 0;
+      width: 60%;
+      height: 39%;
+      z-index: 2;
+      border-radius: var(--radius-lg);
+      --pos: var(--pos-lg);
     }
     .hero[data-variant="photos"] .f1 {
-      left: auto;
-      right: 12px;
-      top: 14px;
-      bottom: auto;
+      left: 0;
+      right: auto;
+      top: auto;
+      bottom: 3%;
+      z-index: 3;
+    }
+  }
+  /* The hero chip stays on one line on phones: shorter words there. */
+  .chip-short {
+    display: none;
+  }
+  .chip {
+    white-space: nowrap;
+  }
+  @media (max-width: 420px) {
+    .chip-long {
+      display: none;
+    }
+    .chip-short {
+      display: inline;
     }
   }
   .window {
