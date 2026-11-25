@@ -493,8 +493,24 @@ mod tests {
             )
             .expect("post");
         }
-        let event = rx.blocking_recv().expect("event");
-        assert!(matches!(event, DesktopEvent::DisplayChanged));
+        // The machine may broadcast its own messages to the window first (seen on
+        // CI runners), so look for ours among the events, with a time limit.
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        let mut seen = Vec::new();
+        let found = loop {
+            match rx.try_recv() {
+                Ok(DesktopEvent::DisplayChanged) => break true,
+                Ok(other) => seen.push(format!("{other:?}")),
+                Err(tokio::sync::mpsc::error::TryRecvError::Disconnected) => break false,
+                Err(tokio::sync::mpsc::error::TryRecvError::Empty) => {
+                    if std::time::Instant::now() >= deadline {
+                        break false;
+                    }
+                    std::thread::sleep(std::time::Duration::from_millis(10));
+                }
+            }
+        };
+        assert!(found, "no DisplayChanged event; other events: {seen:?}");
         msgloop.stop();
     }
 
