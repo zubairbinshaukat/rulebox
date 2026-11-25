@@ -1,0 +1,4 @@
+tag=a-6-downgrade who=nt authority\system session=0 elevated=True
+exe=msiexec.exe
+args=/i C:\rb-run\msi\Rulebox-0.1.0-x64-fixed.msi /qn /l*v C:\rb-run\out\a-6-downgrade-msi.log
+start=01:45:31 end=01:45:33 seconds=1.1 exit=1603

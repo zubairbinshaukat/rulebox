@@ -9,7 +9,7 @@ Design: `docs/plans/phase-6-installer-pilot.md` Section 4.10. Not Tauri's MSI ta
 | `Package.wxs` | Product, upgrade code, major upgrade, install folder and its ACL, install marker, pending enrollment code, WebView2 bootstrapper, notices, licence |
 | `Service.wxs` | `rulebox-agent.exe`, the `RuleboxAgent` service and its restart settings, the "Rulebox Setup" shortcut |
 | `StaffApp.wxs` | `rulebox-shell.exe`, `current.json`, `versions\<version>\rulebox-staff.exe` |
-| `Checks.wxs` | Launch conditions (administrator, x64, build 19045, 2 GB free) and the uninstall guard |
+| `Checks.wxs` | Launch conditions (administrator, x64, build 19045) and the uninstall guard (no free-space condition: see the file) |
 | `UI.wxs` | WixUI_Minimal, the logo bitmaps (`assets/brand/installer/`, from `pnpm gen:brand`) and the finish-page "Start Rulebox Setup" checkbox (the only custom action) |
 | `License.rtf` | Text shown on the licence page |
 | `build.ps1` | The build script |
@@ -40,7 +40,9 @@ test needs no WiX.
 
 Never run the MSI on the dev PC. Silent install on a test PC or VM:
 `msiexec /i Rulebox-0.1.0-x64.msi /qn ENROLLCODE=<code>` (the code is a hidden property and is written to
-`HKLM\SOFTWARE\Rulebox\Install\Pending`, readable by SYSTEM and Administrators only).
+`HKLM\SOFTWARE\Rulebox\Install\Pending`, readable by SYSTEM and Administrators only). **Do not add `/l*v`:** a verbose
+log prints the code in its `RegAddValue` line (Step 22 run A); Windows Installer cannot hide a registry value.
+The build also checks that `rulebox-agent.exe --version` is `-Version` (build the agent with `RULEBOX_VERSION`).
 
 ## Fixed values
 
@@ -63,7 +65,9 @@ commented step (`-acceptEula wix7`, Step 9) and the acceptance is recorded here.
 hosted offer or other revenue passes that line, the owner must start the sponsorship. Re-read the current
 terms when updating WiX.
 
-## Not verified without a real build
+## Checked on the VM (Step 22 run A, 2026-11-26)
 
-See `.personal/phase6-step7-pause.md` and plan Step 22: the property ACLs, the v7 element names and the
-silent-install behaviour were written from the documentation and have not been through WiX yet.
+The CI-built 0.1.0 MSI on Windows 11 Pro 26300: folder ACL, service and failure actions, install marker,
+Pending key ACL, Start menu shortcut, finish page, major upgrade, failed-upgrade rollback, downgrade refusal,
+uninstall guard and clean uninstall all as designed. Found and fixed: the free-space condition refused every
+install, the agent reported 0.0.0, the event source was not registered. Record: `docs/plans/phase-6-vm-results.md`.

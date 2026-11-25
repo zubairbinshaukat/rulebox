@@ -5,7 +5,7 @@ use std::path::PathBuf;
 use clap::{Parser, Subcommand};
 
 #[derive(Parser, Debug)]
-#[command(name = "rulebox-agent", version, about = "Rulebox kiosk agent")]
+#[command(name = "rulebox-agent", version = crate::AGENT_VERSION, about = "Rulebox kiosk agent")]
 pub struct Cli {
     #[command(subcommand)]
     pub command: Command,

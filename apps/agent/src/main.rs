@@ -54,6 +54,11 @@ use std::path::PathBuf;
 use std::process::ExitCode;
 use std::sync::{Arc, OnceLock};
 
+/// This agent's version: the release tag's x.y.z in a release build (`RULEBOX_VERSION`, set by the
+/// release workflow), else the package version. Everything that reports or compares the agent's
+/// version uses this, never `CARGO_PKG_VERSION` (see `build.rs`, `embed_version`).
+pub const AGENT_VERSION: &str = env!("RULEBOX_AGENT_VERSION");
+
 use anyhow::Context;
 use clap::Parser;
 use rulebox_ipc::admin::{AdminEnrollParams, AdminTrustKeyParams, AdminUnenrollParams};
@@ -377,5 +382,17 @@ mod tests {
             assert!(out.is_empty(), "nothing on stdout for {bad:?}");
             assert!(err.contains("6 to 12 digits"), "{err}");
         }
+    }
+
+    #[test]
+    fn the_agent_version_is_the_release_version_or_the_package_version_and_has_an_order() {
+        // Self-update compares the release with this value (Step 22 run A: a release agent said 0.0.0).
+        match option_env!("RULEBOX_VERSION").map(str::trim).filter(|v| !v.is_empty()) {
+            Some(release) => assert_eq!(AGENT_VERSION, release),
+            None => assert_eq!(AGENT_VERSION, env!("CARGO_PKG_VERSION")),
+        }
+        assert!(rulebox_policy::version::cmp(AGENT_VERSION, "0.0.0").is_some(), "{AGENT_VERSION} must be ordered");
+        let help = <cli::Cli as clap::CommandFactory>::command().render_version().to_string();
+        assert_eq!(help.trim(), format!("rulebox-agent {AGENT_VERSION}"), "--version prints the same number build.ps1 checks");
     }
 }

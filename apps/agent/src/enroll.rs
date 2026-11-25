@@ -312,7 +312,7 @@ impl EnrollDeps {
             device_secret_hash: sha256_hex(&secret),
             device_name,
             hardware_id_hash: hardware_id_hash(ctx.platform.as_ref()),
-            agent_version: env!("CARGO_PKG_VERSION").to_string(),
+            agent_version: crate::AGENT_VERSION.to_string(),
             compat: report.to_json(),
         };
         let response = match backend.enroll(request).await {
@@ -870,7 +870,7 @@ mod tests {
         assert_eq!(calls[0].token, TOKEN);
         assert_eq!(calls[0].device_secret_hash, sha256_hex(&secret));
         assert_eq!(calls[0].device_name, "Front desk");
-        assert_eq!(calls[0].agent_version, env!("CARGO_PKG_VERSION"));
+        assert_eq!(calls[0].agent_version, crate::AGENT_VERSION);
         assert_eq!(
             calls[0].hardware_id_hash.as_deref(),
             Some(sha256_hex("11111111-2222-3333-4444-555555555555").as_str())

@@ -364,7 +364,7 @@ fn cli_info() -> ClientInfo {
     ClientInfo {
         role: ClientRole::Admin,
         name: "rulebox-agent-cli".to_string(),
-        version: env!("CARGO_PKG_VERSION").to_string(),
+        version: crate::AGENT_VERSION.to_string(),
     }
 }
 

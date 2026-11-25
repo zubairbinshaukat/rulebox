@@ -1,0 +1,750 @@
+ARP {A60ACF6E-B145-4D90-940B-DB0FF80B4B61} | Rulebox | 0.1.1
+ARP AddressBook |  | 
+ARP AddressBook |  | 
+ARP Connection Manager |  | 
+ARP Connection Manager |  | 
+ARP DirectDrawEx |  | 
+ARP DirectDrawEx |  | 
+ARP DXM_Runtime |  | 
+ARP DXM_Runtime |  | 
+ARP Fontcore |  | 
+ARP Fontcore |  | 
+ARP IE40 |  | 
+ARP IE40 |  | 
+ARP IE4Data |  | 
+ARP IE4Data |  | 
+ARP IE5BAKEX |  | 
+ARP IE5BAKEX |  | 
+ARP IEData |  | 
+ARP IEData |  | 
+ARP Microsoft Edge | Microsoft Edge | 155.0.4283.45
+ARP Microsoft Edge Update |  | 1.3.287.9
+ARP Microsoft EdgeWebView | Microsoft Edge WebView2 Runtime | 155.0.4283.45
+ARP MobileOptionPack |  | 
+ARP MobileOptionPack |  | 
+ARP MPlayer2 |  | 
+ARP MPlayer2 |  | 
+ARP mstsc-4b0a31aa-df6a-4307-9b47-d5cc50009643 |  | 
+ARP SchedulingAgent |  | 
+ARP SchedulingAgent |  | 
+ARP WIC |  | 
+ARP WIC |  | 
+CACHED 4c781.msi
+EVSRC .NET Runtime
+EVSRC .NET Runtime Optimization Service
+EVSRC Application
+EVSRC Application Error
+EVSRC Application Hang
+EVSRC Application Management
+EVSRC Application-Addon-Event-Provider
+EVSRC AutoEnrollment
+EVSRC CardSpace 4.0.0.0
+EVSRC CertCa
+EVSRC CertCli
+EVSRC CertEnroll
+EVSRC Chkdsk
+EVSRC COM
+EVSRC COM+
+EVSRC DeliveryOptimization
+EVSRC Desktop Window Manager
+EVSRC DiskQuota
+EVSRC Dwminit
+EVSRC Edge
+EVSRC edgeupdate
+EVSRC edgeupdatem
+EVSRC Error Instrument
+EVSRC ESENT
+EVSRC EventSystem
+EVSRC Folder Redirection
+EVSRC Group Policy Applications
+EVSRC Group Policy Client
+EVSRC Group Policy Data Sources
+EVSRC Group Policy Device Settings
+EVSRC Group Policy Drive Maps
+EVSRC Group Policy Environment
+EVSRC Group Policy Files
+EVSRC Group Policy Folder Options
+EVSRC Group Policy Folders
+EVSRC Group Policy Ini Files
+EVSRC Group Policy Internet Settings
+EVSRC Group Policy Local Users and Groups
+EVSRC Group Policy Mail Profiles
+EVSRC Group Policy Network Options
+EVSRC Group Policy Network Shares
+EVSRC Group Policy Power Options
+EVSRC Group Policy Printers
+EVSRC Group Policy Regional Options
+EVSRC Group Policy Registry
+EVSRC Group Policy Scheduled Tasks
+EVSRC Group Policy Services
+EVSRC Group Policy Shortcuts
+EVSRC Group Policy Standard Edition
+EVSRC Group Policy Start Menu Settings
+EVSRC GroupPolicy
+EVSRC ipmiprv
+EVSRC Microsoft.Transactions.Bridge 4.0.0.0
+EVSRC Microsoft-Windows-AAD
+EVSRC Microsoft-Windows-ApplicationExperienceInfrastructure
+EVSRC Microsoft-Windows-AppModel-Runtime
+EVSRC Microsoft-Windows-AppModel-State
+EVSRC Microsoft-Windows-ASN1
+EVSRC Microsoft-Windows-Audio
+EVSRC Microsoft-Windows-Audit-CVE
+EVSRC Microsoft-Windows-AxInstallService
+EVSRC Microsoft-Windows-Backup
+EVSRC Microsoft-Windows-CAPI2
+EVSRC Microsoft-Windows-CertificateServicesClient
+EVSRC Microsoft-Windows-CertificateServicesClient-AutoEnrollment
+EVSRC Microsoft-Windows-CertificateServicesClient-CertEnroll
+EVSRC Microsoft-Windows-CertificateServicesClient-CredentialRoaming
+EVSRC Microsoft-Windows-CertificationAuthorityClient-CertCli
+EVSRC Microsoft-Windows-COMRuntime
+EVSRC Microsoft-Windows-Crypto-BCrypt
+EVSRC Microsoft-Windows-Crypto-CNG
+EVSRC Microsoft-Windows-Crypto-DPAPI
+EVSRC Microsoft-Windows-Crypto-DSSEnh
+EVSRC Microsoft-Windows-Crypto-NCrypt
+EVSRC Microsoft-Windows-Crypto-RNG
+EVSRC Microsoft-Windows-Crypto-RSAEnh
+EVSRC Microsoft-Windows-Deduplication
+EVSRC Microsoft-Windows-Defrag
+EVSRC Microsoft-Windows-DeliveryOptimization
+EVSRC Microsoft-Windows-DeviceGuard
+EVSRC Microsoft-Windows-DirectShow-Core
+EVSRC Microsoft-Windows-DirectShow-KernelSupport
+EVSRC Microsoft-Windows-EapHost
+EVSRC Microsoft-Windows-EFS
+EVSRC Microsoft-Windows-EventCollector
+EVSRC Microsoft-Windows-Folder Redirection
+EVSRC Microsoft-Windows-GenericRoaming
+EVSRC Microsoft-Windows-Immersive-Shell
+EVSRC Microsoft-Windows-KdsSvc
+EVSRC Microsoft-Windows-LiveId
+EVSRC Microsoft-Windows-PDH
+EVSRC Microsoft-Windows-PerfDisk
+EVSRC Microsoft-Windows-Perflib
+EVSRC Microsoft-Windows-PerfNet
+EVSRC Microsoft-Windows-PerfOS
+EVSRC Microsoft-Windows-PerfProc
+EVSRC Microsoft-Windows-ProcessExitMonitor
+EVSRC Microsoft-Windows-RemoteApp and Desktop Connections
+EVSRC Microsoft-Windows-RemoteAssistance
+EVSRC Microsoft-Windows-RestartManager
+EVSRC Microsoft-Windows-RPC-Events
+EVSRC Microsoft-Windows-Search
+EVSRC Microsoft-Windows-Security-EnterpriseData-FileRevocationManager
+EVSRC Microsoft-Windows-Security-Netlogon
+EVSRC Microsoft-Windows-Security-SPP
+EVSRC Microsoft-Windows-SmartCard-DeviceEnum
+EVSRC Microsoft-Windows-SoftwareRestrictionPolicies
+EVSRC Microsoft-Windows-SpellChecker
+EVSRC Microsoft-Windows-Spell-Checking
+EVSRC Microsoft-Windows-Spellchecking-Host
+EVSRC Microsoft-Windows-System-Restore
+EVSRC Microsoft-Windows-TerminalServices-ClientActiveXCore
+EVSRC Microsoft-Windows-User Profiles General
+EVSRC Microsoft-Windows-User Profiles Service
+EVSRC Microsoft-Windows-User-Loader
+EVSRC Microsoft-Windows-Video-For-Windows
+EVSRC Microsoft-Windows-WBioSrvc
+EVSRC Microsoft-Windows-WindowsSystemAssessmentTool
+EVSRC Microsoft-Windows-Winsrv
+EVSRC Microsoft-Windows-WMI
+EVSRC Microsoft-Windows-XWizards
+EVSRC MSDTC
+EVSRC MSDTC 2
+EVSRC MSDTC Client
+EVSRC MSDTC Client 2
+EVSRC MsiInstaller
+EVSRC PrintBrm
+EVSRC Process Exit Monitor
+EVSRC Profsvc
+EVSRC RasClient
+EVSRC Rulebox Agent
+EVSRC SceCli
+EVSRC SceSrv
+EVSRC SecurityCenter
+EVSRC ServiceModel Audit 4.0.0.0
+EVSRC SideBySide
+EVSRC Software Installation
+EVSRC Software Protection Platform Service
+EVSRC SpeechRuntime
+EVSRC SPP
+EVSRC SrmSvc
+EVSRC Standard TCP/IP Port
+EVSRC System Restore
+EVSRC System.IdentityModel 4.0.0.0
+EVSRC System.IO.Log 4.0.0.0
+EVSRC System.Runtime.Serialization 4.0.0.0
+EVSRC System.ServiceModel 4.0.0.0
+EVSRC Universal Print
+EVSRC usbperf
+EVSRC Userenv
+EVSRC VBRuntime
+EVSRC VSS
+EVSRC WerSvc
+EVSRC Windows Backup
+EVSRC Windows Error Reporting
+EVSRC Windows Mcp Registry
+EVSRC Windows Search Service
+EVSRC Windows Search Service Profile Notification
+EVSRC Wininit
+EVSRC Winlogon
+EVSRC WinMgmt
+EVSRC Wlclntfy
+EVSRC WMI.NET Provider Extension
+EVSRC Wow64 Emulation Layer
+EVSRC WSH
+FILE C:\Program Files\Rulebox\current.json
+FILE C:\Program Files\Rulebox\LICENSE
+FILE C:\Program Files\Rulebox\MicrosoftEdgeWebview2Setup.exe
+FILE C:\Program Files\Rulebox\rulebox-agent.exe
+FILE C:\Program Files\Rulebox\rulebox-shell.exe
+FILE C:\Program Files\Rulebox\THIRD_PARTY_NOTICES.md
+FILE C:\Program Files\Rulebox\versions
+FILE C:\Program Files\Rulebox\versions\0.1.0
+FILE C:\Program Files\Rulebox\versions\0.1.0\rulebox-staff.exe
+FILE C:\ProgramData\Microsoft\Windows\Start Menu\Programs\Rulebox\Rulebox Setup.lnk
+FILE C:\ProgramData\Rulebox\logs
+FILE C:\ProgramData\Rulebox\logs\agent.2026-11-25.log
+FILE C:\ProgramData\Rulebox\run22-keep.txt
+FILE C:\ProgramData\Rulebox\state
+FILE C:\ProgramData\Rulebox\state\agent-state.json
+FILE C:\ProgramData\Rulebox\state\secrets.bin
+KEY HKEY_LOCAL_MACHINE\SOFTWARE\Rulebox\Install
+KEY HKEY_LOCAL_MACHINE\SOFTWARE\Rulebox\StartMenu
+KEY HKLM:\SOFTWARE\Rulebox
+NOKEY HKLM:\SOFTWARE\WOW6432Node\Rulebox
+NOPATH C:\Windows\System32\config\systemprofile\AppData\Local\Rulebox
+PATH C:\Program Files\Rulebox
+PATH C:\ProgramData\Microsoft\Windows\Start Menu\Programs\Rulebox
+PATH C:\ProgramData\Rulebox
+SVC AarSvc_394dc | Manual | C:\WINDOWS\system32\svchost.exe -k AarSvcGroup -p
+SVC ADPSvc | Manual | C:\WINDOWS\system32\svchost.exe -k LocalServiceAndNoImpersonation -p
+SVC ALG | Manual | C:\WINDOWS\System32\alg.exe
+SVC AppIDSvc | Manual | C:\WINDOWS\system32\svchost.exe -k LocalServiceNetworkRestricted -p
+SVC Appinfo | Manual | C:\WINDOWS\system32\svchost.exe -k netsvcs -p
+SVC AppMgmt | Manual | C:\WINDOWS\system32\svchost.exe -k netsvcs -p
+SVC AppReadiness | Manual | C:\WINDOWS\System32\svchost.exe -k AppReadiness -p
+SVC AppVClient | Disabled | C:\WINDOWS\system32\AppVClient.exe
+SVC AppXSvc | Auto | C:\WINDOWS\system32\svchost.exe -k wsappx -p
+SVC ApxSvc | Manual | C:\WINDOWS\system32\svchost.exe -k LocalService -p
+SVC AssignedAccessManagerSvc | Manual | C:\WINDOWS\system32\svchost.exe -k AssignedAccessManagerSvc
+SVC AudioEndpointBuilder | Auto | C:\WINDOWS\System32\svchost.exe -k LocalSystemNetworkRestricted -p
+SVC Audiosrv | Auto | C:\WINDOWS\System32\svchost.exe -k LocalServiceNetworkRestricted -p
+SVC autotimesvc | Manual | C:\WINDOWS\system32\svchost.exe -k autoTimeSvc
+SVC AxInstSV | Manual | C:\WINDOWS\system32\svchost.exe -k AxInstSVGroup
+SVC BcastDVRUserService_394dc | Manual | C:\WINDOWS\system32\svchost.exe -k BcastDVRUserService
+SVC BDESVC | Manual | C:\WINDOWS\System32\svchost.exe -k netsvcs -p
+SVC BFE | Auto | C:\WINDOWS\system32\svchost.exe -k LocalServiceNoNetworkFirewall -p
+SVC BITS | Auto | C:\WINDOWS\System32\svchost.exe -k netsvcs -p
+SVC BluetoothUserService_394dc | Manual | C:\WINDOWS\system32\svchost.exe -k BthAppGroup -p
+SVC BrokerInfrastructure | Auto | C:\WINDOWS\system32\svchost.exe -k DcomLaunch -p
+SVC BTAGService | Manual | C:\WINDOWS\system32\svchost.exe -k LocalServiceNetworkRestricted
+SVC BthAvctpSvc | Manual | C:\WINDOWS\system32\svchost.exe -k LocalServiceRedirectionGuard -p
+SVC bthserv | Manual | C:\WINDOWS\system32\svchost.exe -k LocalService -p
+SVC camsvc | Auto | C:\WINDOWS\system32\svchost.exe -k osprivacy -p
+SVC CaptureService_394dc | Manual | C:\WINDOWS\system32\svchost.exe -k LocalService -p
+SVC cbdhsvc_394dc | Auto | C:\WINDOWS\system32\svchost.exe -k ClipboardSvcGroup -p
+SVC CDPSvc | Auto | C:\WINDOWS\system32\svchost.exe -k LocalService -p
+SVC CDPUserSvc_394dc | Auto | C:\WINDOWS\system32\svchost.exe -k UnistackSvcGroup
+SVC CertPropSvc | Manual | C:\WINDOWS\system32\svchost.exe -k netsvcs
+SVC ClipSVC | Manual | C:\WINDOWS\System32\svchost.exe -k wsappx -p
+SVC CloudBackupRestoreSvc_394dc | Manual | C:\WINDOWS\system32\svchost.exe -k UnistackSvcGroup
+SVC cloudidsvc | Manual | C:\WINDOWS\system32\svchost.exe -k CloudIdServiceGroup -p
+SVC COMSysApp | Manual | C:\WINDOWS\system32\dllhost.exe /Processid:{02D4B3F1-FD88-11D1-960D-00805FC79235}
+SVC ConsentUxUserSvc_394dc | Manual | C:\WINDOWS\system32\svchost.exe -k DevicesFlow
+SVC CoreMessagingRegistrar | Auto | C:\WINDOWS\system32\svchost.exe -k LocalServiceNoNetwork -p
+SVC CredentialEnrollmentManagerUserSvc_394dc | Manual | C:\WINDOWS\system32\CredentialEnrollmentManager.exe
+SVC CryptSvc | Auto | C:\WINDOWS\system32\svchost.exe -k NetworkService -p
+SVC CscService | Manual | C:\WINDOWS\System32\svchost.exe -k LocalSystemNetworkRestricted -p
+SVC DcomLaunch | Auto | C:\WINDOWS\system32\svchost.exe -k DcomLaunch -p
+SVC dcsvc | Manual | C:\WINDOWS\system32\svchost.exe -k netsvcs -p
+SVC defragsvc | Manual | C:\WINDOWS\system32\svchost.exe -k defragsvc
+SVC DeviceAssociationBrokerSvc_394dc | Manual | C:\WINDOWS\system32\svchost.exe -k DevicesFlow -p
+SVC DeviceAssociationService | Manual | C:\WINDOWS\system32\svchost.exe -k LocalSystemNetworkRestricted -p
+SVC DeviceInstall | Manual | C:\WINDOWS\system32\svchost.exe -k DcomLaunch -p
+SVC DevicePickerUserSvc_394dc | Manual | C:\WINDOWS\system32\svchost.exe -k DevicesFlow
+SVC DevicesFlowUserSvc_394dc | Manual | C:\WINDOWS\system32\svchost.exe -k DevicesFlow
+SVC DevQueryBroker | Manual | C:\WINDOWS\system32\svchost.exe -k LocalSystemNetworkRestricted -p
+SVC Dhcp | Auto | C:\WINDOWS\system32\svchost.exe -k LocalServiceNetworkRestricted -p
+SVC diagsvc | Manual | C:\WINDOWS\System32\svchost.exe -k diagnostics
+SVC DiagTrack | Auto | C:\WINDOWS\System32\svchost.exe -k utcsvc -p
+SVC DialogBlockingService | Disabled | C:\WINDOWS\system32\svchost.exe -k DialogBlockingService
+SVC DispBrokerDesktopSvc | Auto | C:\WINDOWS\system32\svchost.exe -k LocalService -p
+SVC DisplayEnhancementService | Manual | C:\WINDOWS\system32\svchost.exe -k LocalSystemNetworkRestricted -p
+SVC DmEnrollmentSvc | Manual | C:\WINDOWS\system32\svchost.exe -k netsvcs -p
+SVC dmwappushservice | Manual | C:\WINDOWS\system32\svchost.exe -k netsvcs -p
+SVC Dnscache | Auto | C:\WINDOWS\system32\svchost.exe -k NetworkService -p
+SVC DoSvc | Auto | C:\WINDOWS\System32\svchost.exe -k NetworkService -p
+SVC dot3svc | Manual | C:\WINDOWS\system32\svchost.exe -k LocalSystemNetworkRestricted -p
+SVC DPS | Auto | C:\WINDOWS\System32\svchost.exe -k LocalServiceNoNetwork -p
+SVC DsmSvc | Manual | C:\WINDOWS\system32\svchost.exe -k netsvcs -p
+SVC DsSvc | Manual | C:\WINDOWS\System32\svchost.exe -k LocalSystemNetworkRestricted -p
+SVC DusmSvc | Auto | C:\WINDOWS\System32\svchost.exe -k LocalServiceNetworkRestricted -p -s DusmSvc
+SVC EapHost | Manual | C:\WINDOWS\System32\svchost.exe -k netsvcs -p
+SVC edgeupdate | Auto | "C:\Program Files (x86)\Microsoft\EdgeUpdate\MicrosoftEdgeUpdate.exe" /svc
+SVC edgeupdatem | Manual | "C:\Program Files (x86)\Microsoft\EdgeUpdate\MicrosoftEdgeUpdate.exe" /medsvc
+SVC EFS | Manual | C:\WINDOWS\System32\lsass.exe
+SVC embeddedmode | Manual | C:\WINDOWS\System32\svchost.exe -k LocalSystemNetworkRestricted -p
+SVC EntAppSvc | Manual | C:\WINDOWS\system32\svchost.exe -k appmodelRedirectionGuard -p
+SVC EventLog | Auto | C:\WINDOWS\System32\svchost.exe -k LocalServiceNetworkRestricted -p
+SVC EventSystem | Auto | C:\WINDOWS\system32\svchost.exe -k LocalServiceRedirectionGuard -p
+SVC fdPHost | Manual | C:\WINDOWS\system32\svchost.exe -k LocalService -p
+SVC FDResPub | Manual | C:\WINDOWS\system32\svchost.exe -k LocalServiceAndNoImpersonation -p
+SVC fhsvc | Manual | C:\WINDOWS\system32\svchost.exe -k LocalSystemNetworkRestricted -p
+SVC FontCache | Auto | C:\WINDOWS\system32\svchost.exe -k LocalService -p
+SVC FrameServer | Manual | C:\WINDOWS\System32\svchost.exe -k Camera
+SVC FrameServerMonitor | Manual | C:\WINDOWS\System32\svchost.exe -k CameraMonitor
+SVC GameInputSvc | Manual | C:\WINDOWS\System32\GameInputSvc.exe
+SVC gpsvc | Auto | C:\WINDOWS\system32\svchost.exe -k GPSvcGroup
+SVC GraphicsPerfSvc | Manual | C:\WINDOWS\System32\svchost.exe -k GraphicsPerfSvcGroup
+SVC hidserv | Manual | C:\WINDOWS\system32\svchost.exe -k LocalSystemNetworkRestricted -p
+SVC hpatchmon | Manual | C:\WINDOWS\system32\svchost.exe -k LocalSystemNetworkRestricted -p
+SVC HvHost | Manual | C:\WINDOWS\system32\svchost.exe -k LocalSystemNetworkRestricted -p
+SVC icssvc | Manual | C:\WINDOWS\system32\svchost.exe -k LocalServiceNetworkRestricted -p
+SVC IKEEXT | Manual | C:\WINDOWS\system32\svchost.exe -k netsvcs -p
+SVC InstallService | Manual | C:\WINDOWS\System32\svchost.exe -k netsvcs -p
+SVC InventorySvc | Auto | C:\WINDOWS\system32\svchost.exe -k InvSvcGroup -p
+SVC iphlpsvc | Auto | C:\WINDOWS\System32\svchost.exe -k NetSvcs -p
+SVC IpxlatCfgSvc | Manual | C:\WINDOWS\System32\svchost.exe -k LocalSystemNetworkRestricted -p
+SVC IsoEnvBroker | Manual | C:\WINDOWS\system32\svchost.exe -k IsoEnvBroker -p
+SVC IsolationSession | Manual | C:\WINDOWS\system32\svchost.exe -k IsolationSession -p
+SVC KeyIso | Manual | C:\WINDOWS\system32\lsass.exe
+SVC KtmRm | Manual | C:\WINDOWS\System32\svchost.exe -k NetworkServiceAndNoImpersonation -p
+SVC LanmanServer | Auto | C:\WINDOWS\system32\svchost.exe -k netsvcs -p
+SVC LanmanWorkstation | Auto | C:\WINDOWS\System32\svchost.exe -k NetworkService -p
+SVC lfsvc | Manual | C:\WINDOWS\system32\svchost.exe -k netsvcsRedirectionGuard -p
+SVC LicenseManager | Manual | C:\WINDOWS\System32\svchost.exe -k LocalService -p
+SVC lltdsvc | Manual | C:\WINDOWS\System32\svchost.exe -k LocalService -p
+SVC lmhosts | Manual | C:\WINDOWS\System32\svchost.exe -k LocalServiceNetworkRestricted -p
+SVC LocalKdc | Manual | C:\WINDOWS\System32\lsass.exe
+SVC LSM | Auto | C:\WINDOWS\system32\svchost.exe -k DcomLaunch -p
+SVC LxpSvc | Manual | C:\WINDOWS\system32\svchost.exe -k netsvcs
+SVC MapsBroker | Auto | C:\WINDOWS\System32\svchost.exe -k NetworkService -p
+SVC McmSvc | Manual | C:\WINDOWS\system32\svchost.exe -k McmSvc -p -s McmSvc
+SVC McpManagementService | Manual | C:\WINDOWS\system32\svchost.exe -k McpManagementServiceGroup
+SVC MDCoreSvc | Auto | "C:\Program Files\Windows Defender\MpDefenderCoreService.exe"
+SVC MessagingService_394dc | Manual | C:\WINDOWS\system32\svchost.exe -k UnistackSvcGroup
+SVC MicrosoftEdgeElevationService | Manual | "C:\Program Files (x86)\Microsoft\Edge\Application\155.0.4283.45\elevation_service.exe"
+SVC midisrv | Manual | C:\WINDOWS\system32\midisrv.exe
+SVC mpssvc | Auto | C:\WINDOWS\system32\svchost.exe -k LocalServiceNoNetworkFirewall -p
+SVC MSDTC | Manual | C:\WINDOWS\System32\msdtc.exe
+SVC MSiSCSI | Manual | C:\WINDOWS\system32\svchost.exe -k netsvcs -p
+SVC msiserver | Manual | C:\WINDOWS\system32\msiexec.exe /V
+SVC MsKeyboardFilter | Disabled | C:\WINDOWS\system32\svchost.exe -k netsvcs -p
+SVC NaturalAuthentication | Manual | C:\WINDOWS\system32\svchost.exe -k netsvcs -p
+SVC NcaSvc | Manual | C:\WINDOWS\System32\svchost.exe -k NetSvcs -p
+SVC NcbService | Manual | C:\WINDOWS\System32\svchost.exe -k LocalSystemNetworkRestricted -p
+SVC NcdAutoSetup | Manual | C:\WINDOWS\System32\svchost.exe -k LocalServiceNoNetwork -p
+SVC Netlogon | Manual | C:\WINDOWS\system32\lsass.exe
+SVC Netman | Manual | C:\WINDOWS\System32\svchost.exe -k LocalSystemNetworkRestricted -p
+SVC netprofm | Manual | C:\WINDOWS\System32\svchost.exe -k netprofm -p
+SVC NetSetupSvc | Manual | C:\WINDOWS\System32\svchost.exe -k netsvcs -p
+SVC NetTcpPortSharing | Disabled | C:\WINDOWS\Microsoft.NET\Framework64\v4.0.30319\SMSvcHost.exe
+SVC NgcCtnrSvc | Manual | C:\WINDOWS\system32\svchost.exe -k LocalServiceNetworkRestricted -p
+SVC NgcSvc | Manual | C:\WINDOWS\system32\svchost.exe -k LocalSystemNetworkRestricted -p
+SVC NlaSvc | Manual | C:\WINDOWS\System32\svchost.exe -k netprofm -p
+SVC NPSMSvc_394dc | Manual | C:\WINDOWS\system32\svchost.exe -k LocalService -p
+SVC nsi | Auto | C:\WINDOWS\system32\svchost.exe -k LocalService -p
+SVC OneSyncSvc_394dc | Manual | C:\WINDOWS\system32\svchost.exe -k UnistackSvcGroup
+SVC P9RdrService_394dc | Manual | C:\WINDOWS\system32\svchost.exe -k P9RdrService -p
+SVC PcaSvc | Auto | C:\WINDOWS\system32\svchost.exe -k LocalSystemNetworkRestricted -p
+SVC PeerDistSvc | Manual | C:\WINDOWS\System32\svchost.exe -k PeerDist
+SVC PenService_394dc | Manual | C:\WINDOWS\system32\svchost.exe -k PenService
+SVC perceptionsimulation | Manual | C:\WINDOWS\system32\PerceptionSimulation\PerceptionSimulationService.exe
+SVC PerfHost | Manual | C:\WINDOWS\SysWow64\perfhost.exe
+SVC PhoneSvc | Manual | C:\WINDOWS\system32\svchost.exe -k LocalService -p
+SVC PimIndexMaintenanceSvc_394dc | Manual | C:\WINDOWS\system32\svchost.exe -k UnistackSvcGroup
+SVC pla | Manual | C:\WINDOWS\System32\svchost.exe -k LocalServiceNoNetwork -p
+SVC PlugPlay | Manual | C:\WINDOWS\system32\svchost.exe -k DcomLaunch -p
+SVC PolicyAgent | Manual | C:\WINDOWS\system32\svchost.exe -k NetworkServiceNetworkRestricted -p
+SVC Power | Auto | C:\WINDOWS\system32\svchost.exe -k DcomLaunch -p
+SVC PrintDeviceConfigurationService | Manual | C:\WINDOWS\System32\svchost.exe -k LocalSystemNetworkRestricted -p
+SVC PrintNotify | Manual | C:\WINDOWS\system32\svchost.exe -k print
+SVC PrintScanBrokerService | Manual | C:\WINDOWS\system32\svchost.exe -k PrintScanBrokerService -p
+SVC PrintWorkflowUserSvc_394dc | Manual | C:\WINDOWS\system32\svchost.exe -k PrintWorkflow
+SVC ProfSvc | Auto | C:\WINDOWS\system32\svchost.exe -k UserProfileService -p
+SVC PushToInstall | Manual | C:\WINDOWS\System32\svchost.exe -k netsvcs -p
+SVC QWAVE | Manual | C:\WINDOWS\system32\svchost.exe -k LocalServiceAndNoImpersonation -p
+SVC RasAuto | Manual | C:\WINDOWS\System32\svchost.exe -k netsvcs -p
+SVC RasMan | Manual | C:\WINDOWS\System32\svchost.exe -k netsvcs
+SVC refsdedupsvc | Manual | C:\WINDOWS\System32\ReFsDedupSvc.exe
+SVC RemoteAccess | Disabled | C:\WINDOWS\System32\svchost.exe -k netsvcs
+SVC RemoteRegistry | Disabled | C:\WINDOWS\system32\svchost.exe -k localService -p
+SVC RetailDemo | Manual | C:\WINDOWS\System32\svchost.exe -k rdxgroup
+SVC RmSvc | Manual | C:\WINDOWS\System32\svchost.exe -k LocalServiceNetworkRestricted
+SVC RpcEptMapper | Auto | C:\WINDOWS\system32\svchost.exe -k RPCSS -p
+SVC RpcLocator | Manual | C:\WINDOWS\system32\locator.exe
+SVC RpcSs | Auto | C:\WINDOWS\system32\svchost.exe -k rpcss -p
+SVC RuleboxAgent | Auto | "C:\Program Files\Rulebox\rulebox-agent.exe" service run
+SVC SamSs | Auto | C:\WINDOWS\system32\lsass.exe
+SVC SCardSvr | Manual | C:\WINDOWS\system32\svchost.exe -k LocalServiceAndNoImpersonation
+SVC ScDeviceEnum | Manual | C:\WINDOWS\system32\svchost.exe -k LocalSystemNetworkRestricted
+SVC Schedule | Auto | C:\WINDOWS\system32\svchost.exe -k netsvcs -p
+SVC SCPolicySvc | Manual | C:\WINDOWS\system32\svchost.exe -k netsvcs
+SVC SDRSVC | Manual | C:\WINDOWS\system32\svchost.exe -k SDRSVC
+SVC seclogon | Manual | C:\WINDOWS\system32\svchost.exe -k netsvcs -p
+SVC SecurityHealthService | Manual | C:\WINDOWS\system32\SecurityHealthService.exe
+SVC SEMgrSvc | Manual | C:\WINDOWS\system32\svchost.exe -k LocalService -p
+SVC SENS | Auto | C:\WINDOWS\system32\svchost.exe -k netsvcsRedirectionGuard -p
+SVC Sense | Manual | "C:\Program Files\Windows Defender Advanced Threat Protection\MsSense.exe"
+SVC SensorDataService | Manual | C:\WINDOWS\System32\SensorDataService.exe
+SVC SensorService | Manual | C:\WINDOWS\system32\svchost.exe -k LocalSystemNetworkRestricted -p
+SVC SensrSvc | Manual | C:\WINDOWS\system32\svchost.exe -k LocalServiceAndNoImpersonation -p
+SVC SessionEnv | Manual | C:\WINDOWS\System32\svchost.exe -k netsvcs -p
+SVC SharedAccess | Manual | C:\WINDOWS\System32\svchost.exe -k netsvcs -p
+SVC ShellHWDetection | Auto | C:\WINDOWS\System32\svchost.exe -k netsvcs -p
+SVC shpamsvc | Disabled | C:\WINDOWS\System32\svchost.exe -k netsvcsRedirectionGuard -p
+SVC smphost | Manual | C:\WINDOWS\System32\svchost.exe -k smphost
+SVC SmsRouter | Manual | C:\WINDOWS\system32\svchost.exe -k LocalServiceNetworkRestricted -p
+SVC SNMPTrap | Manual | C:\WINDOWS\System32\snmptrap.exe
+SVC Spooler | Auto | C:\WINDOWS\System32\spoolsv.exe
+SVC sppsvc | Auto | C:\WINDOWS\system32\sppsvc.exe
+SVC SSDPSRV | Manual | C:\WINDOWS\system32\svchost.exe -k LocalServiceAndNoImpersonationRedirectionGuard -p
+SVC ssh-agent | Disabled | C:\WINDOWS\System32\OpenSSH\ssh-agent.exe
+SVC SstpSvc | Manual | C:\WINDOWS\system32\svchost.exe -k LocalService -p
+SVC StateRepository | Auto | C:\WINDOWS\system32\svchost.exe -k appmodel -p
+SVC StiSvc | Manual | C:\WINDOWS\system32\svchost.exe -k imgsvc
+SVC StorSvc | Auto | C:\WINDOWS\System32\svchost.exe -k LocalSystemNetworkRestricted -p
+SVC svsvc | Manual | C:\WINDOWS\system32\svchost.exe -k LocalSystemNetworkRestricted -p
+SVC swprv | Manual | C:\WINDOWS\System32\svchost.exe -k swprv
+SVC SysMain | Auto | C:\WINDOWS\system32\svchost.exe -k LocalSystemNetworkRestricted -p
+SVC SystemEventsBroker | Auto | C:\WINDOWS\system32\svchost.exe -k DcomLaunch -p
+SVC TapiSrv | Manual | C:\WINDOWS\System32\svchost.exe -k NetworkService -p
+SVC TermService | Manual | C:\WINDOWS\System32\svchost.exe -k NetworkService
+SVC TextInputManagementService | Auto | C:\WINDOWS\System32\svchost.exe -k LocalSystemNetworkRestricted -p
+SVC Themes | Auto | C:\WINDOWS\System32\svchost.exe -k netsvcs -p
+SVC TieringEngineService | Manual | C:\WINDOWS\system32\TieringEngineService.exe
+SVC TimeBrokerSvc | Manual | C:\WINDOWS\system32\svchost.exe -k LocalServiceNetworkRestricted -p
+SVC TokenBroker | Manual | C:\WINDOWS\system32\svchost.exe -k netsvcs -p
+SVC TrkWks | Auto | C:\WINDOWS\System32\svchost.exe -k LocalSystemNetworkRestricted -p
+SVC TroubleshootingSvc | Manual | C:\WINDOWS\system32\svchost.exe -k netsvcs -p
+SVC TrustedInstaller | Manual | C:\WINDOWS\servicing\TrustedInstaller.exe
+SVC tzautoupdate | Disabled | C:\WINDOWS\system32\svchost.exe -k LocalService -p
+SVC UdkUserSvc_394dc | Manual | C:\WINDOWS\system32\svchost.exe -k UdkSvcGroup
+SVC UevAgentService | Disabled | C:\WINDOWS\system32\AgentService.exe
+SVC UmRdpService | Manual | C:\WINDOWS\System32\svchost.exe -k LocalSystemNetworkRestricted -p
+SVC UnistoreSvc_394dc | Manual | C:\WINDOWS\System32\svchost.exe -k UnistackSvcGroup
+SVC upnphost | Manual | C:\WINDOWS\system32\svchost.exe -k LocalServiceAndNoImpersonationRedirectionGuard -p
+SVC UserDataSvc_394dc | Manual | C:\WINDOWS\system32\svchost.exe -k UnistackSvcGroup
+SVC UserManager | Auto | C:\WINDOWS\system32\svchost.exe -k netsvcs -p
+SVC UsoSvc | Disabled | C:\WINDOWS\system32\svchost.exe -k netsvcs -p
+SVC VaultSvc | Manual | C:\WINDOWS\system32\lsass.exe
+SVC vds | Manual | C:\WINDOWS\System32\vds.exe
+SVC vmicguestinterface | Manual | C:\WINDOWS\system32\svchost.exe -k LocalSystemNetworkRestrictedRedirectionGuard -p
+SVC vmicheartbeat | Manual | C:\WINDOWS\system32\svchost.exe -k ICService -p
+SVC vmickvpexchange | Manual | C:\WINDOWS\system32\svchost.exe -k LocalSystemNetworkRestrictedRedirectionGuard -p
+SVC vmicrdv | Manual | C:\WINDOWS\system32\svchost.exe -k ICService -p
+SVC vmicshutdown | Manual | C:\WINDOWS\system32\svchost.exe -k LocalSystemNetworkRestrictedRedirectionGuard -p
+SVC vmictimesync | Manual | C:\WINDOWS\system32\svchost.exe -k LocalServiceNetworkRestricted -p
+SVC vmicvmsession | Manual | C:\WINDOWS\system32\svchost.exe -k LocalSystemNetworkRestrictedRedirectionGuard -p
+SVC vmicvss | Manual | C:\WINDOWS\system32\svchost.exe -k LocalSystemNetworkRestrictedRedirectionGuard -p
+SVC VSS | Manual | C:\WINDOWS\system32\vssvc.exe
+SVC W32Time | Manual | C:\WINDOWS\system32\svchost.exe -k LocalService
+SVC WaaSMedicSvc | Manual | C:\WINDOWS\system32\svchost.exe -k wusvcs -p
+SVC WalletService | Manual | C:\WINDOWS\System32\svchost.exe -k appmodel -p
+SVC WarpJITSvc | Manual | C:\WINDOWS\System32\svchost.exe -k LocalServiceNetworkRestricted
+SVC wbengine | Manual | "C:\WINDOWS\system32\wbengine.exe"
+SVC WbioSrvc | Manual | C:\WINDOWS\system32\svchost.exe -k WbioSvcGroup
+SVC Wcmsvc | Auto | C:\WINDOWS\system32\svchost.exe -k LocalServiceNetworkRestricted -p -s Wcmsvc
+SVC wcncsvc | Manual | C:\WINDOWS\System32\svchost.exe -k LocalServiceAndNoImpersonation -p
+SVC WdiServiceHost | Manual | C:\WINDOWS\System32\svchost.exe -k LocalService -p
+SVC WdiSystemHost | Manual | C:\WINDOWS\System32\svchost.exe -k LocalSystemNetworkRestricted -p
+SVC WdNisSvc | Manual | "C:\Program Files\Windows Defender\NisSrv.exe"
+SVC WebClient | Manual | C:\WINDOWS\system32\svchost.exe -k LocalService -p
+SVC webthreatdefsvc | Manual | C:\WINDOWS\system32\svchost.exe -k WebThreatDefense -p
+SVC webthreatdefusersvc_394dc | Auto | C:\WINDOWS\system32\svchost.exe -k LocalSystemNetworkRestricted -p
+SVC Wecsvc | Manual | C:\WINDOWS\system32\svchost.exe -k NetworkService -p
+SVC WEPHOSTSVC | Manual | C:\WINDOWS\system32\svchost.exe -k WepHostSvcGroup
+SVC wercplsupport | Manual | C:\WINDOWS\System32\svchost.exe -k netsvcs -p
+SVC WerSvc | Manual | C:\WINDOWS\System32\svchost.exe -k WerSvcGroup
+SVC WFDSConMgrSvc | Manual | C:\WINDOWS\system32\svchost.exe -k LocalServiceNetworkRestricted -p
+SVC whesvc | Auto | C:\WINDOWS\system32\svchost.exe -k whesvc -p
+SVC WiaRpc | Manual | C:\WINDOWS\system32\svchost.exe -k LocalSystemNetworkRestricted -p
+SVC WinDefend | Auto | "C:\Program Files\Windows Defender\MsMpEng.exe"
+SVC WinHttpAutoProxySvc | Manual | C:\WINDOWS\system32\svchost.exe -k LocalServiceHttp -p
+SVC Winmgmt | Auto | C:\WINDOWS\system32\svchost.exe -k netsvcs -p
+SVC WinRM | Manual | C:\WINDOWS\System32\svchost.exe -k NetworkService -p
+SVC wisvc | Manual | C:\WINDOWS\system32\svchost.exe -k netsvcs -p
+SVC WlanSvc | Manual | C:\WINDOWS\system32\svchost.exe -k LocalSystemNetworkRestricted -p
+SVC wlidsvc | Manual | C:\WINDOWS\system32\svchost.exe -k netsvcs -p
+SVC wlpasvc | Manual | C:\WINDOWS\system32\svchost.exe -k LocalServiceNetworkRestricted -p
+SVC WManSvc | Manual | C:\WINDOWS\system32\svchost.exe -k netsvcs -p
+SVC wmiApSrv | Manual | C:\WINDOWS\system32\wbem\WmiApSrv.exe
+SVC WMPNetworkSvc | Manual | "C:\Program Files\Windows Media Player\wmpnetwk.exe"
+SVC workfolderssvc | Manual | C:\WINDOWS\System32\svchost.exe -k LocalService -p
+SVC WpcMonSvc | Manual | C:\WINDOWS\system32\svchost.exe -k LocalService
+SVC WPDBusEnum | Manual | C:\WINDOWS\system32\svchost.exe -k LocalSystemNetworkRestricted
+SVC WpnService | Auto | C:\WINDOWS\system32\svchost.exe -k netsvcs -p
+SVC WpnUserService_394dc | Auto | C:\WINDOWS\system32\svchost.exe -k UnistackSvcGroup
+SVC WSAIFabricSvc | Auto | C:\WINDOWS\system32\svchost.exe -k WSAIFabricSvcGroup -p
+SVC wscsvc | Auto | C:\WINDOWS\System32\svchost.exe -k LocalServiceNetworkRestricted -p
+SVC WSearch | Auto | C:\WINDOWS\system32\SearchIndexer.exe /Embedding
+SVC wuauserv | Disabled | C:\WINDOWS\system32\svchost.exe -k netsvcs -p
+SVC wuqisvc | Manual | C:\WINDOWS\system32\svchost.exe -k WuqiSvcGroup -p
+SVC WwanSvc | Manual | C:\WINDOWS\system32\svchost.exe -k LocalSystemNetworkRestrictedRedirectionGuard -p
+SVC XblAuthManager | Manual | C:\WINDOWS\system32\svchost.exe -k netsvcsRedirectionGuard -p
+SVC XblGameSave | Manual | C:\WINDOWS\system32\svchost.exe -k netsvcs -p
+SVC XboxGipSvc | Manual | C:\WINDOWS\system32\svchost.exe -k netsvcs -p
+SVC XboxNetApiSvc | Manual | C:\WINDOWS\system32\svchost.exe -k netsvcs -p
+SVC ZTHELPER | Manual | C:\WINDOWS\system32\svchost.exe -k zthelper -p
+TASK \Microsoft\Windows\.NET Framework\.NET Framework NGEN v4.0.30319
+TASK \Microsoft\Windows\.NET Framework\.NET Framework NGEN v4.0.30319 64
+TASK \Microsoft\Windows\.NET Framework\.NET Framework NGEN v4.0.30319 64 Critical
+TASK \Microsoft\Windows\.NET Framework\.NET Framework NGEN v4.0.30319 Critical
+TASK \Microsoft\Windows\AccountHealth\RecoverabilityToastTask
+TASK \Microsoft\Windows\Active Directory Rights Management Services Client\AD RMS Rights Policy Template Management (Automated)
+TASK \Microsoft\Windows\Active Directory Rights Management Services Client\AD RMS Rights Policy Template Management (Manual)
+TASK \Microsoft\Windows\AppID\EDP Policy Manager
+TASK \Microsoft\Windows\AppID\PolicyConverter
+TASK \Microsoft\Windows\AppID\VerifiedPublisherCertStoreCheck
+TASK \Microsoft\Windows\Application Experience\MareBackup
+TASK \Microsoft\Windows\Application Experience\Microsoft Compatibility Appraiser Exp
+TASK \Microsoft\Windows\Application Experience\PcaPatchDbTask
+TASK \Microsoft\Windows\Application Experience\SdbinstMergeDbTask
+TASK \Microsoft\Windows\Application Experience\StartupAppTask
+TASK \Microsoft\Windows\ApplicationData\appuriverifierdaily
+TASK \Microsoft\Windows\ApplicationData\appuriverifierinstall
+TASK \Microsoft\Windows\ApplicationData\CleanupTemporaryState
+TASK \Microsoft\Windows\ApplicationData\DsSvcCleanup
+TASK \Microsoft\Windows\AppListBackup\Backup
+TASK \Microsoft\Windows\AppListBackup\BackupNonMaintenance
+TASK \Microsoft\Windows\AppxDeploymentClient\Pre-staged app cleanup
+TASK \Microsoft\Windows\AppxDeploymentClient\UCPD velocity
+TASK \Microsoft\Windows\Autochk\Proxy
+TASK \Microsoft\Windows\BitLocker\BitLocker Encrypt All Drives
+TASK \Microsoft\Windows\BitLocker\BitLocker MDM policy Refresh
+TASK \Microsoft\Windows\Bluetooth\UninstallDeviceTask
+TASK \Microsoft\Windows\BrokerInfrastructure\BgTaskRegistrationMaintenanceTask
+TASK \Microsoft\Windows\capabilityaccessmanager\maintenancetasks
+TASK \Microsoft\Windows\CertificateServicesClient\AikCertEnrollTask
+TASK \Microsoft\Windows\CertificateServicesClient\CryptoPolicyTask
+TASK \Microsoft\Windows\CertificateServicesClient\KeyPreGenTask
+TASK \Microsoft\Windows\CertificateServicesClient\SystemTask
+TASK \Microsoft\Windows\CertificateServicesClient\UserTask
+TASK \Microsoft\Windows\CertificateServicesClient\UserTask-Roam
+TASK \Microsoft\Windows\Chkdsk\ProactiveScan
+TASK \Microsoft\Windows\Chkdsk\SyspartRepair
+TASK \Microsoft\Windows\Clip\License Validation
+TASK \Microsoft\Windows\Clip\LicenseImdsIntegration
+TASK \Microsoft\Windows\CloudExperienceHost\CreateObjectTask
+TASK \Microsoft\Windows\CloudRestore\Backup
+TASK \Microsoft\Windows\CloudRestore\Restore
+TASK \Microsoft\Windows\ConsentUX\UnifiedConsent\UnifiedConsentSyncTask
+TASK \Microsoft\Windows\Containers\CmCleanup
+TASK \Microsoft\Windows\Customer Experience Improvement Program\Consolidator
+TASK \Microsoft\Windows\Customer Experience Improvement Program\UsbCeip
+TASK \Microsoft\Windows\Data Integrity Scan\Data Integrity Check And Scan
+TASK \Microsoft\Windows\Data Integrity Scan\Data Integrity Scan
+TASK \Microsoft\Windows\Data Integrity Scan\Data Integrity Scan for Crash Recovery
+TASK \Microsoft\Windows\Defrag\ScheduledDefrag
+TASK \Microsoft\Windows\Device Information\Device
+TASK \Microsoft\Windows\Device Information\Device User
+TASK \Microsoft\Windows\Device Setup\Driver Recovery on Reboot
+TASK \Microsoft\Windows\Device Setup\Metadata Refresh
+TASK \Microsoft\Windows\DeviceDirectoryClient\HandleCommand
+TASK \Microsoft\Windows\DeviceDirectoryClient\HandleWnsCommand
+TASK \Microsoft\Windows\DeviceDirectoryClient\IntegrityCheck
+TASK \Microsoft\Windows\DeviceDirectoryClient\LocateCommandUserSession
+TASK \Microsoft\Windows\DeviceDirectoryClient\RegisterDeviceAccountChange
+TASK \Microsoft\Windows\DeviceDirectoryClient\RegisterDeviceLocationRightsChange
+TASK \Microsoft\Windows\DeviceDirectoryClient\RegisterDevicePeriodic24
+TASK \Microsoft\Windows\DeviceDirectoryClient\RegisterDevicePolicyChange
+TASK \Microsoft\Windows\DeviceDirectoryClient\RegisterDeviceProtectionStateChanged
+TASK \Microsoft\Windows\DeviceDirectoryClient\RegisterDeviceSettingChange
+TASK \Microsoft\Windows\DeviceDirectoryClient\RegisterDeviceWnsFallback
+TASK \Microsoft\Windows\DeviceDirectoryClient\RegisterUserDevice
+TASK \Microsoft\Windows\Diagnosis\RecommendedTroubleshootingScanner
+TASK \Microsoft\Windows\Diagnosis\Scheduled
+TASK \Microsoft\Windows\Diagnosis\UnexpectedCodepath
+TASK \Microsoft\Windows\DirectX\DirectXDatabaseUpdater
+TASK \Microsoft\Windows\DirectX\DXGIAdapterCache
+TASK \Microsoft\Windows\DiskCleanup\SilentCleanup
+TASK \Microsoft\Windows\DiskDiagnostic\Microsoft-Windows-DiskDiagnosticDataCollector
+TASK \Microsoft\Windows\DiskDiagnostic\Microsoft-Windows-DiskDiagnosticResolver
+TASK \Microsoft\Windows\DiskFootprint\Diagnostics
+TASK \Microsoft\Windows\DiskFootprint\StorageSense
+TASK \Microsoft\Windows\DUSM\dusmtask
+TASK \Microsoft\Windows\EDP\EDP App Launch Task
+TASK \Microsoft\Windows\EDP\EDP Auth Task
+TASK \Microsoft\Windows\EDP\EDP Inaccessible Credentials Task
+TASK \Microsoft\Windows\EDP\StorageCardEncryption Task
+TASK \Microsoft\Windows\ExploitGuard\ExploitGuard MDM policy Refresh
+TASK \Microsoft\Windows\Feedback\Siuf\DmClient
+TASK \Microsoft\Windows\Feedback\Siuf\DmClientOnScenarioDownload
+TASK \Microsoft\Windows\File Classification Infrastructure\Property Definition Sync
+TASK \Microsoft\Windows\FileHistory\File History (maintenance mode)
+TASK \Microsoft\Windows\Flighting\FeatureConfig\BootstrapUsageDataReporting
+TASK \Microsoft\Windows\Flighting\FeatureConfig\GovernedFeatureUsageProcessing
+TASK \Microsoft\Windows\Flighting\FeatureConfig\ReconcileConfigs
+TASK \Microsoft\Windows\Flighting\FeatureConfig\ReconcileFeatures
+TASK \Microsoft\Windows\Flighting\FeatureConfig\SafeguardsReconciliation
+TASK \Microsoft\Windows\Flighting\FeatureConfig\UsageDataFlushing
+TASK \Microsoft\Windows\Flighting\FeatureConfig\UsageDataReceiver
+TASK \Microsoft\Windows\Flighting\FeatureConfig\UsageDataReporting
+TASK \Microsoft\Windows\Flighting\OneSettings\RefreshCache
+TASK \Microsoft\Windows\Hotpatch\Monitoring
+TASK \Microsoft\Windows\input\InputSettingsRestoreDataAvailable
+TASK \Microsoft\Windows\input\LocalUserSyncDataAvailable
+TASK \Microsoft\Windows\input\MouseSyncDataAvailable
+TASK \Microsoft\Windows\input\PenSyncDataAvailable
+TASK \Microsoft\Windows\input\RemoteMouseSyncDataAvailable
+TASK \Microsoft\Windows\input\RemotePenSyncDataAvailable
+TASK \Microsoft\Windows\input\RemoteTouchpadSyncDataAvailable
+TASK \Microsoft\Windows\input\syncpensettings
+TASK \Microsoft\Windows\input\TouchpadSyncDataAvailable
+TASK \Microsoft\Windows\InstallService\RestoreDevice
+TASK \Microsoft\Windows\InstallService\ScanForUpdates
+TASK \Microsoft\Windows\InstallService\ScanForUpdatesAsUser
+TASK \Microsoft\Windows\InstallService\SmartRetry
+TASK \Microsoft\Windows\InstallService\WakeUpAndContinueUpdates
+TASK \Microsoft\Windows\InstallService\WakeUpAndScanForUpdates
+TASK \Microsoft\Windows\International\Synchronize Language Settings
+TASK \Microsoft\Windows\Kernel\La57Cleanup
+TASK \Microsoft\Windows\LanguageComponentsInstaller\Installation
+TASK \Microsoft\Windows\LanguageComponentsInstaller\ReconcileLanguageResources
+TASK \Microsoft\Windows\LanguageComponentsInstaller\Uninstallation
+TASK \Microsoft\Windows\License Manager\TempSignedLicenseExchange
+TASK \Microsoft\Windows\Location\WindowsActionDialog
+TASK \Microsoft\Windows\Maintenance\WinSAT
+TASK \Microsoft\Windows\Management\Autopilot\DetectHardwareChange
+TASK \Microsoft\Windows\Management\Autopilot\RemediateHardwareChange
+TASK \Microsoft\Windows\Management\Provisioning\Cellular
+TASK \Microsoft\Windows\Management\Provisioning\Logon
+TASK \Microsoft\Windows\Management\Provisioning\MdmDiagnosticsCleanup
+TASK \Microsoft\Windows\Management\Provisioning\Retry
+TASK \Microsoft\Windows\Management\Provisioning\RunOnReboot
+TASK \Microsoft\Windows\Maps\MapsToastTask
+TASK \Microsoft\Windows\Maps\MapsUpdateTask
+TASK \Microsoft\Windows\MemoryDiagnostic\AutomaticOfflineMemoryDiagnostic
+TASK \Microsoft\Windows\MemoryDiagnostic\ProcessMemoryDiagnosticEvents
+TASK \Microsoft\Windows\MemoryDiagnostic\RunFullMemoryDiagnostic
+TASK \Microsoft\Windows\MUI\LPRemove
+TASK \Microsoft\Windows\Multimedia\SystemSoundsService
+TASK \Microsoft\Windows\Network Connectivity Status Indicator\NcsiIdentifyUserProxies
+TASK \Microsoft\Windows\NlaSvc\WiFiTask
+TASK \Microsoft\Windows\Offline Files\Background Synchronization
+TASK \Microsoft\Windows\Offline Files\Logon Synchronization
+TASK \Microsoft\Windows\PCRPF\PCR Prediction Framework Firmware Update Task
+TASK \Microsoft\Windows\PerformanceTrace\ShowFeedbackToast
+TASK \Microsoft\Windows\PerformanceTrace\WhesvcToast
+TASK \Microsoft\Windows\PI\Secure-Boot-Update
+TASK \Microsoft\Windows\PI\Sqm-Tasks
+TASK \Microsoft\Windows\Plug and Play\Device Install Group Policy
+TASK \Microsoft\Windows\Plug and Play\Device Install Reboot Required
+TASK \Microsoft\Windows\Plug and Play\Sysprep Generalize Drivers
+TASK \Microsoft\Windows\Pluton\Pluton-Ksp-Provisioning
+TASK \Microsoft\Windows\Power Efficiency Diagnostics\AnalyzeSystem
+TASK \Microsoft\Windows\Printing\EduPrintProv
+TASK \Microsoft\Windows\Printing\PrinterCleanupTask
+TASK \Microsoft\Windows\Printing\PrintJobCleanupTask
+TASK \Microsoft\Windows\PushToInstall\LoginCheck
+TASK \Microsoft\Windows\PushToInstall\Registration
+TASK \Microsoft\Windows\Ras\MobilityManager
+TASK \Microsoft\Windows\RecoveryEnvironment\VerifyWinRE
+TASK \Microsoft\Windows\ReFsDedupSvc\Initialization
+TASK \Microsoft\Windows\Registry\RegIdleBackup
+TASK \Microsoft\Windows\RemoteAssistance\RemoteAssistanceTask
+TASK \Microsoft\Windows\Servicing\OOBEFodSetup
+TASK \Microsoft\Windows\Servicing\StartComponentCleanup
+TASK \Microsoft\Windows\Setup\PITRTask
+TASK \Microsoft\Windows\Setup\SetupRecoveryDataTask
+TASK \Microsoft\Windows\SharedPC\Account Cleanup
+TASK \Microsoft\Windows\Shell\CreateObjectTask
+TASK \Microsoft\Windows\Shell\FamilySafetyMonitor
+TASK \Microsoft\Windows\Shell\FamilySafetyRefreshTask
+TASK \Microsoft\Windows\Shell\IndexerAutomaticMaintenance
+TASK \Microsoft\Windows\Shell\ThemeAssetTask_SyncFODState
+TASK \Microsoft\Windows\Shell\ThemesSyncedImageDownload
+TASK \Microsoft\Windows\Shell\UpdateUserPictureTask
+TASK \Microsoft\Windows\Shell\UpdateUserPictureTaskContained
+TASK \Microsoft\Windows\SoftwareProtectionPlatform\SvcRestartTask
+TASK \Microsoft\Windows\SoftwareProtectionPlatform\SvcRestartTaskLogon
+TASK \Microsoft\Windows\SoftwareProtectionPlatform\SvcRestartTaskNetwork
+TASK \Microsoft\Windows\SpacePort\SpaceAgentTask
+TASK \Microsoft\Windows\SpacePort\SpaceManagerTask
+TASK \Microsoft\Windows\Speech\SpeechModelDownloadTask
+TASK \Microsoft\Windows\StateRepository\MaintenanceTasks
+TASK \Microsoft\Windows\Storage Tiers Management\Storage Tiers Management Initialization
+TASK \Microsoft\Windows\Storage Tiers Management\Storage Tiers Optimization
+TASK \Microsoft\Windows\Subscription\EnableLicenseAcquisition
+TASK \Microsoft\Windows\Subscription\LicenseAcquisition
+TASK \Microsoft\Windows\Sustainability\PowerGridForecastTask
+TASK \Microsoft\Windows\Sustainability\SustainabilityTelemetry
+TASK \Microsoft\Windows\Sysmain\HybridDriveCachePrepopulate
+TASK \Microsoft\Windows\Sysmain\HybridDriveCacheRebalance
+TASK \Microsoft\Windows\Sysmain\ResPriStaticDbSync
+TASK \Microsoft\Windows\Sysmain\WsSwapAssessmentTask
+TASK \Microsoft\Windows\SystemRestore\SR
+TASK \Microsoft\Windows\Task Manager\Interactive
+TASK \Microsoft\Windows\TextServicesFramework\MsCtfMonitor
+TASK \Microsoft\Windows\Time Synchronization\ForceSynchronizeTime
+TASK \Microsoft\Windows\Time Synchronization\SynchronizeTime
+TASK \Microsoft\Windows\Time Zone\SynchronizeTimeZone
+TASK \Microsoft\Windows\TPM\Tpm-HASCertRetr
+TASK \Microsoft\Windows\TPM\Tpm-Maintenance
+TASK \Microsoft\Windows\TPM\Tpm-PreAttestationHealthCheck
+TASK \Microsoft\Windows\UpdateOrchestrator\Report policies
+TASK \Microsoft\Windows\UpdateOrchestrator\Schedule Maintenance Work
+TASK \Microsoft\Windows\UpdateOrchestrator\Schedule Scan
+TASK \Microsoft\Windows\UpdateOrchestrator\Schedule Scan Static Task
+TASK \Microsoft\Windows\UpdateOrchestrator\Schedule Wake To Work
+TASK \Microsoft\Windows\UpdateOrchestrator\Schedule Work
+TASK \Microsoft\Windows\UpdateOrchestrator\Start Oobe Expedite Work
+TASK \Microsoft\Windows\UpdateOrchestrator\StartOobeAppsScan_LicenseAccepted
+TASK \Microsoft\Windows\UpdateOrchestrator\StartOobeAppsScanAfterUpdate
+TASK \Microsoft\Windows\UpdateOrchestrator\UIEOrchestrator
+TASK \Microsoft\Windows\UpdateOrchestrator\USO_UxBroker
+TASK \Microsoft\Windows\UpdateOrchestrator\UUS Failover Task
+TASK \Microsoft\Windows\UPnP\UPnPHostConfig
+TASK \Microsoft\Windows\UsageAndQualityInsights\UsageAndQualityInsights-MaintenanceTask
+TASK \Microsoft\Windows\USB\Usb-Notifications
+TASK \Microsoft\Windows\User Profile Service\HiveUploadTask
+TASK \Microsoft\Windows\WaaSMedic\PerformRemediation
+TASK \Microsoft\Windows\WCM\WiFiTask
+TASK \Microsoft\Windows\WDI\ResolutionHost
+TASK \Microsoft\Windows\Windows Defender\Windows Defender Cache Maintenance
+TASK \Microsoft\Windows\Windows Defender\Windows Defender Cleanup
+TASK \Microsoft\Windows\Windows Defender\Windows Defender Scheduled Scan
+TASK \Microsoft\Windows\Windows Defender\Windows Defender Verification
+TASK \Microsoft\Windows\Windows Error Reporting\QueueReporting
+TASK \Microsoft\Windows\Windows Filtering Platform\BfeOnServiceStartTypeChange
+TASK \Microsoft\Windows\Windows Media Sharing\UpdateLibrary
+TASK \Microsoft\Windows\WindowsAI\ClickToDo\ModelCachingIdle
+TASK \Microsoft\Windows\WindowsAI\ClickToDo\ModelCachingLimit
+TASK \Microsoft\Windows\WindowsAI\ClickToDo\ModelCachingUpdate
+TASK \Microsoft\Windows\WindowsAI\Recall\InitialConfiguration
+TASK \Microsoft\Windows\WindowsAI\Recall\PolicyConfiguration
+TASK \Microsoft\Windows\WindowsAI\Settings\InitialConfiguration
+TASK \Microsoft\Windows\WindowsColorSystem\Calibration Loader
+TASK \Microsoft\Windows\WindowsUpdate\Refresh Group Policy Cache
+TASK \Microsoft\Windows\WindowsUpdate\Scheduled Start
+TASK \Microsoft\Windows\Wininet\CacheTask
+TASK \Microsoft\Windows\WlanSvc\CDSSync
+TASK \Microsoft\Windows\WlanSvc\MoProfileManagement
+TASK \Microsoft\Windows\WOF\WIM-Hash-Management
+TASK \Microsoft\Windows\WOF\WIM-Hash-Validation
+TASK \Microsoft\Windows\Work Folders\Work Folders Logon Synchronization
+TASK \Microsoft\Windows\Work Folders\Work Folders Maintenance Work
+TASK \Microsoft\Windows\Workplace Join\Automatic-Device-Join
+TASK \Microsoft\Windows\Workplace Join\Device-Sync
+TASK \Microsoft\Windows\Workplace Join\Recovery-Check
+TASK \Microsoft\Windows\WwanSvc\NotificationTask
+TASK \Microsoft\Windows\WwanSvc\OobeDiscovery
+TASK \Microsoft\XblGameSave\XblGameSaveTask
+TASK \MicrosoftEdgeUpdateTaskMachineCore{6ABA232B-EE87-4D0B-872B-6006788D0215}
+TASK \MicrosoftEdgeUpdateTaskMachineUA{FDFB5B50-B0FA-4FCC-862A-B8B824BDC469}
+TASK \OneDrive Reporting Task-S-1-5-21-1452024813-456936664-1956420132-1001
+TASK \OneDrive Reporting Task-S-1-5-21-1452024813-456936664-1956420132-1002
+TASK \OneDrive Standalone Update Task-S-1-5-21-1452024813-456936664-1956420132-1001
+TASK \OneDrive Standalone Update Task-S-1-5-21-1452024813-456936664-1956420132-1002
+TASK \OneDrive Startup Task-S-1-5-21-1452024813-456936664-1956420132-1001
+TASK \OneDrive Startup Task-S-1-5-21-1452024813-456936664-1956420132-1002
+TASK \SoftLanding\S-1-5-21-1452024813-456936664-1956420132-1001\SoftLandingCreativeManagementTask
+TASK \SoftLanding\S-1-5-21-1452024813-456936664-1956420132-1002\SoftLandingCreativeManagementTask
+VAL HKEY_LOCAL_MACHINE\SOFTWARE\Rulebox\Install\ComputerName
+VAL HKEY_LOCAL_MACHINE\SOFTWARE\Rulebox\Install\InstallDir
+VAL HKEY_LOCAL_MACHINE\SOFTWARE\Rulebox\Install\KioskOn
+VAL HKEY_LOCAL_MACHINE\SOFTWARE\Rulebox\Install\Version
+VAL HKEY_LOCAL_MACHINE\SOFTWARE\Rulebox\StartMenu\Setup

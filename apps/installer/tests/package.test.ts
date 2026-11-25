@@ -258,6 +258,23 @@ describe("service", () => {
   });
 });
 
+describe("event source", () => {
+  test("registers the agent's source with the .NET message file (Step 22 run A: Event Viewer showed no text)", () => {
+    const component = all("Component").find((el) => el.attrs.Id === "EventSource");
+    expect(component?.attrs.Bitness).toBe("always64");
+    const key = component?.children.find((el) => el.name === "RegistryKey");
+    // The same name as SOURCE in crates/rulebox-win32/src/eventwrite.rs.
+    expect(key?.attrs).toMatchObject({ Root: "HKLM", Key: "SYSTEM\\CurrentControlSet\\Services\\EventLog\\Application\\Rulebox Agent" });
+    const values = key?.children.filter((el) => el.name === "RegistryValue").map((el) => el.attrs) ?? [];
+    expect(values).toContainEqual(expect.objectContaining({
+      Name: "EventMessageFile",
+      Type: "expandable",
+      Value: "%SystemRoot%\\Microsoft.NET\\Framework64\\v4.0.30319\\EventLogMessages.dll",
+    }));
+    expect(values).toContainEqual(expect.objectContaining({ Name: "TypesSupported", Type: "integer", Value: "7" }));
+  });
+});
+
 describe("launch conditions", () => {
   const conditions = () => all("Launch").map((el) => el.attrs);
   const find = (needle: string) => {
@@ -266,14 +283,20 @@ describe("launch conditions", () => {
     return found[0];
   };
 
-  test("administrator, x64, build 19045 and 2 GiB free, each with its own message", () => {
+  test("administrator, x64 and build 19045, each with its own message", () => {
     expect(find("Privileged").Condition).toBe("Installed OR Privileged");
     expect(find("VersionNT64").Condition).toBe("Installed OR VersionNT64");
     expect(find("WINBUILD").Condition).toBe("Installed OR WINBUILD >= 19045");
-    expect(find("PrimaryVolumeSpaceAvailable").Condition).toBe("Installed OR PrimaryVolumeSpaceAvailable >= 2097152");
     const messages = conditions().map((attrs) => attrs.Message);
     expect(messages.every((message) => message && message.length > 20)).toBe(true);
     expect(new Set(messages).size).toBe(messages.length);
+  });
+
+  test("no free-space condition: PrimaryVolumeSpaceAvailable is 0 at LaunchConditions (Step 22 run A)", () => {
+    // In the UI and the silent install alike, even with PrimaryFolder set, so any threshold refused every
+    // install. Windows Installer's own costing still refuses files that do not fit; the 2 GB headroom is
+    // the compatibility report's low_disk warning (apps/agent/src/compat.rs).
+    expect(conditions().some((attrs) => attrs.Condition.includes("PrimaryVolumeSpace"))).toBe(false);
   });
 
   test("the build number is read from the registry (VersionNT stops at 8.1 values)", () => {

@@ -1,0 +1,4 @@
+tag=a-6-failing-upgrade who=nt authority\system session=0 elevated=True
+exe=msiexec.exe
+args=/i C:\rb-run\msi\Rulebox-0.1.2-x64-test.msi /qn /l*v C:\rb-run\out\a-6-failing-upgrade-msi.log
+start=01:44:33 end=01:44:41 seconds=8.3 exit=1603

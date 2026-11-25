@@ -5,9 +5,8 @@
   Conditions only: no script and no EXE custom action. Each condition has one message.
   Package.wxs references WINBUILD, which pulls this fragment in.
 
-  LaunchConditions runs After="CostFinalize" in both sequences, because
-  PrimaryVolumeSpaceAvailable is only known once costing has finished (the standard
-  position is earlier, so it is moved).
+  LaunchConditions runs After="CostFinalize" in both sequences (moved there for a free-space
+  check that Step 22 removed; the position was kept because run A tested it).
 -->
 <Wix xmlns="http://wixtoolset.org/schemas/v4/wxs">
   <Fragment>
@@ -36,8 +35,13 @@
     <!-- Windows 10 22H2 is build 19045; Windows 11 is higher. -->
     <Launch Condition="Installed OR WINBUILD &gt;= 19045" Message="Rulebox needs Windows 10 version 22H2 (build 19045) or newer, or Windows 11. Update Windows, then run this installer again." />
 
-    <!-- 2 GiB free on the system drive; PrimaryVolumeSpaceAvailable is in KB. -->
-    <Launch Condition="Installed OR PrimaryVolumeSpaceAvailable &gt;= 2097152" Message="Rulebox needs 2 GB of free disk space. Free some space, then run this installer again." />
+    <!--
+      No free-space condition. Step 22 run A (2026-11-26): PrimaryVolumeSpaceAvailable was 0 at
+      LaunchConditions in the UI and in the silent install, with and without PrimaryFolder, so a
+      ">= 2 GB" condition refused every install. Windows Installer's own costing still refuses an
+      install whose files do not fit; the 2 GB headroom is the compatibility report's `low_disk`
+      warning, shown by Rulebox Setup.
+    -->
 
     <!--
       Uninstall guard: while the kiosk is on, removal is refused. Not during a major upgrade

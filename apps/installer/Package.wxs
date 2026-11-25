@@ -50,8 +50,11 @@
 
     <!--
       The enrollment code for a silent install: msiexec /i Rulebox.msi /qn ENROLLCODE=<code>.
-      Hidden keeps the value out of the log; Secure lets it reach the elevated install.
-      It is written once, to HKLM\SOFTWARE\Rulebox\Install\Pending (below), and never shown.
+      Hidden keeps the value out of the property lines of a log; Secure lets it reach the elevated
+      install. It is written once, to HKLM\SOFTWARE\Rulebox\Install\Pending (below).
+      NOT hidden everywhere (Step 22 run A): a verbose log (/l*v) still prints it in the
+      RegAddValue line that writes it; Windows Installer has no way to hide a Registry table value.
+      Do not combine ENROLLCODE with /l*v, or delete that log. The agent deletes the value after use.
     -->
     <Property Id="ENROLLCODE" Hidden="yes" Secure="yes" />
 
@@ -110,6 +113,19 @@
         <RegistryKey Root="HKLM" Key="SOFTWARE\Rulebox\Install\Pending" ForceCreateOnInstall="yes" ForceDeleteOnUninstall="yes">
           <RegistryValue Id="PendingCodeValue" Name="Code" Type="string" Value="[ENROLLCODE]" KeyPath="yes" />
           <PermissionEx Sddl="D:P(A;OICI;KA;;;SY)(A;OICI;KA;;;BA)" />
+        </RegistryKey>
+      </Component>
+
+      <!--
+        The agent's event source (crates\rulebox-win32\src\eventwrite.rs, SOURCE). Without a message
+        file Event Viewer shows "the description cannot be found" instead of the agent's text (Step 22
+        run A). The .NET Framework 4 message file has one "%1" message for every id and is part of
+        Windows 10 and 11; EventCreate.exe covers ids 1 to 1000 only, and the agent uses 1001 and up.
+      -->
+      <Component Id="EventSource" Bitness="always64">
+        <RegistryKey Root="HKLM" Key="SYSTEM\CurrentControlSet\Services\EventLog\Application\Rulebox Agent" ForceDeleteOnUninstall="yes">
+          <RegistryValue Id="EventMessageFileValue" Name="EventMessageFile" Type="expandable" Value="%SystemRoot%\Microsoft.NET\Framework64\v4.0.30319\EventLogMessages.dll" KeyPath="yes" />
+          <RegistryValue Id="EventTypesSupportedValue" Name="TypesSupported" Type="integer" Value="7" />
         </RegistryKey>
       </Component>
 

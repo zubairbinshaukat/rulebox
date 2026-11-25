@@ -274,7 +274,7 @@ fn host(reporter: Reporter, token: CancellationToken, control_rx: mpsc::Unbounde
         Err(_) => return failed,
     };
     let _ = crate::PANIC_LOG_DIR.set(paths.logs_dir());
-    tracing::info!(version = env!("CARGO_PKG_VERSION"), "service starting");
+    tracing::info!(version = crate::AGENT_VERSION, "service starting");
     marker_name.log();
     reporter.start_pending(2);
 

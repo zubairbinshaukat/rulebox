@@ -306,7 +306,7 @@ async fn handshake(
 fn hello_value(engine: &Engine) -> RpcResult {
     let result = HelloResult {
         protocol: ProtocolVersion { major: PROTOCOL_MAJOR, minor: PROTOCOL_MINOR },
-        agent_version: env!("CARGO_PKG_VERSION").to_string(),
+        agent_version: crate::AGENT_VERSION.to_string(),
         capabilities: engine.dispatcher.capabilities(),
     };
     serde_json::to_value(result)

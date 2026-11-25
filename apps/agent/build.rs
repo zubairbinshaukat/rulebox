@@ -228,9 +228,31 @@ fn webview2_pin_failure(message: &str) -> ! {
     panic!("\n\nWebView2 bootstrapper pin: {message}\n");
 }
 
+/// (Phase 6 Step 22) The agent's version, `RULEBOX_AGENT_VERSION` for `env!`: `RULEBOX_VERSION` when the
+/// release workflow sets it (the tag's x.y.z, the same number the MSI carries), else the package
+/// version. Run A found a release agent saying 0.0.0, so self-update (which compares the release with
+/// the running version) would have marked every upgrade `did_not_take`. `build.ps1` refuses an agent
+/// whose `--version` is not the MSI's version.
+fn embed_version() {
+    println!("cargo:rerun-if-env-changed=RULEBOX_VERSION");
+    let version = match std::env::var("RULEBOX_VERSION") {
+        Ok(value) if !value.trim().is_empty() => {
+            let value = value.trim().to_string();
+            let parts: Vec<&str> = value.split('.').collect();
+            if parts.len() != 3 || parts.iter().any(|part| part.is_empty() || part.len() > 5 || !part.bytes().all(|b| b.is_ascii_digit())) {
+                panic!("\n\nRULEBOX_VERSION: {value:?} is not x.y.z (digits only, as the MSI's version).\n");
+            }
+            value
+        }
+        _ => std::env::var("CARGO_PKG_VERSION").unwrap_or_else(|_| fail("cargo did not set CARGO_PKG_VERSION.")),
+    };
+    println!("cargo:rustc-env=RULEBOX_AGENT_VERSION={version}");
+}
+
 fn main() {
     println!("cargo:rerun-if-changed=build.rs");
     println!("cargo:rerun-if-changed=src/setup/pin_parse.rs");
+    embed_version();
     embed_app_control();
     embed_webview2_pin();
     let windows_msvc = std::env::var("CARGO_CFG_TARGET_OS").is_ok_and(|os| os == "windows")

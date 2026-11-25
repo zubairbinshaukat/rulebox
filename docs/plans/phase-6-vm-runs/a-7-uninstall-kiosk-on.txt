@@ -1,0 +1,4 @@
+tag=a-7-uninstall-kiosk-on who=nt authority\system session=0 elevated=True
+exe=msiexec.exe
+args=/x C:\rb-run\msi\Rulebox-0.1.1-x64-test.msi /qn /l*v C:\rb-run\out\a-7-uninstall-kiosk-on-msi.log
+start=01:45:49 end=01:45:51 seconds=1.1 exit=1603

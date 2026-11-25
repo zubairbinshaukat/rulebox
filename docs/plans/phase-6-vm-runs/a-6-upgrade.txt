@@ -1,0 +1,4 @@
+tag=a-6-upgrade who=nt authority\system session=0 elevated=True
+exe=msiexec.exe
+args=/i C:\rb-run\msi\Rulebox-0.1.1-x64-test.msi /qn /l*v C:\rb-run\out\a-6-upgrade-msi.log
+start=01:43:53 end=01:43:59 seconds=6.3 exit=0

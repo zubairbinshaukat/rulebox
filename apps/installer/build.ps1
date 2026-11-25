@@ -75,6 +75,15 @@ foreach ($name in 'rulebox-agent.exe', 'rulebox-shell.exe', 'rulebox-staff.exe')
   }
 }
 
+# 1b. The agent must carry this version (Step 22 run A: a release agent said 0.0.0, which would make every
+#     self-update look like it did not take). The release workflow builds it with RULEBOX_VERSION=<Version>.
+if (-not $PinWebView2) {
+  $agentVersion = ((& (Join-Path $BinDir 'rulebox-agent.exe') --version) | Select-Object -First 1).ToString().Trim()
+  if ($agentVersion -ne "rulebox-agent $Version") {
+    throw "rulebox-agent.exe says '$agentVersion', not 'rulebox-agent $Version'. Build it with `$env:RULEBOX_VERSION = '$Version' (cargo build --release ...)."
+  }
+}
+
 # 2. WiX must already be there. This script never installs it.
 $wix = Get-Command wix -ErrorAction SilentlyContinue
 if (-not $wix -and -not $PinWebView2) {

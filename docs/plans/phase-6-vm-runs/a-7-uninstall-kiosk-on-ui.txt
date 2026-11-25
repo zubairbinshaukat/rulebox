@@ -1,0 +1,4 @@
+tag=a-7-uninstall-kiosk-on-ui who=rulebox\rbtest session=1 elevated=True
+exe=msiexec.exe
+args=/x C:\rb-run\msi\Rulebox-0.1.1-x64-test.msi /qb
+start=01:45:53 end=01:46:21 seconds=28.3 exit=1603

@@ -631,7 +631,7 @@ mod tests {
         let hello = hello(&mut client).await;
         assert_eq!(hello.protocol, ProtocolVersion { major: 1, minor: 4 });
         assert_eq!(hello.capabilities, ["state", "health"]);
-        assert_eq!(hello.agent_version, env!("CARGO_PKG_VERSION"));
+        assert_eq!(hello.agent_version, crate::AGENT_VERSION);
         rig.stop().await;
     }
 

@@ -1,0 +1,4 @@
+tag=a-7-uninstall-2 who=nt authority\system session=0 elevated=True
+exe=msiexec.exe
+args=/x C:\rb-run\msi\Rulebox-0.1.1-x64-test.msi /qn /l*v C:\rb-run\out\a-7-uninstall-2-msi.log
+start=01:46:32 end=01:46:34 seconds=2.1 exit=0

@@ -1,0 +1,84 @@
+2026-11-25T20:35:45.998641Z  INFO rulebox_agent::service: service starting version="0.0.0"
+2026-11-25T20:35:45.998717Z  INFO rulebox_agent::install_marker: the install marker now names this computer
+2026-11-25T20:35:45.999688Z  INFO rulebox_agent::agent: admin exit settings enabled=false hotkey=Ctrl+Shift+F12 problem=None
+2026-11-25T20:35:46.002480Z  INFO rulebox_agent::agent: agent started
+2026-11-25T20:35:46.010400Z  INFO rulebox_agent::install_marker: the install marker's KioskOn was updated on=false
+2026-11-25T20:35:46.010506Z  INFO rulebox_agent::ipc_conn: admin pipe listening on \\.\pipe\dev.rulebox.agent.admin
+2026-11-25T20:36:25.227835Z  INFO rulebox_agent::ipc_conn: client connected pipe="admin" connection_id=1 pid=8016 session_id=1 role=Admin
+2026-11-25T20:36:25.228467Z  INFO rulebox_agent::ipc_conn: client disconnected pipe="admin" connection_id=1 pid=8016 end=PeerClosed
+2026-11-25T20:38:55.099100Z  INFO rulebox_agent::ipc_conn: client connected pipe="admin" connection_id=2 pid=6632 session_id=0 role=Admin
+2026-11-25T20:38:55.099441Z  INFO rulebox_agent::ipc_conn: client disconnected pipe="admin" connection_id=2 pid=6632 end=PeerClosed
+2026-11-25T20:39:11.059880Z  INFO rulebox_agent::agent: agent stopped
+2026-11-25T20:39:11.060264Z  INFO rulebox_agent::service: service stopped
+2026-11-25T20:39:49.260517Z  INFO rulebox_agent::service: service starting version="0.0.0"
+2026-11-25T20:39:49.260571Z  INFO rulebox_agent::install_marker: the install marker now names this computer
+2026-11-25T20:39:49.261377Z  INFO rulebox_agent::agent: admin exit settings enabled=false hotkey=Ctrl+Shift+F12 problem=None
+2026-11-25T20:39:49.264050Z  INFO rulebox_agent::agent: agent started
+2026-11-25T20:39:49.272855Z  INFO rulebox_agent::setup::pending: the installer left an enrollment code; using it once
+2026-11-25T20:39:49.273864Z  INFO rulebox_agent::install_marker: the install marker's KioskOn was updated on=false
+2026-11-25T20:39:49.273932Z  INFO rulebox_agent::ipc_conn: admin pipe listening on \\.\pipe\dev.rulebox.agent.admin
+2026-11-25T20:39:49.274293Z  INFO rulebox_agent::setup::pending: WebView2 Runtime checked outcome=NotNeeded { version: "155.0.4283.45" }
+2026-11-25T20:39:49.305432Z ERROR convex::sync::web_socket_manager: Convex WebSocketWorker failed: Connection to wss://example.invalid/api/sync failed: IO error: No such host is known. (os error 11001). Backing off for 94.941467ms and retrying.
+2026-11-25T20:39:49.305474Z ERROR convex::client::worker: Convex Client Worker failed: "ProtocolFailure". Backing off for 9.922159ms and retrying.
+2026-11-25T20:39:49.305527Z  WARN rulebox_agent::setup::pending: the enrollment with the installer's code failed; trying again reason=backend_unreachable tries=1
+2026-11-25T20:39:59.334003Z ERROR convex::sync::web_socket_manager: Convex WebSocketWorker failed: Connection to wss://example.invalid/api/sync failed: IO error: No such host is known. (os error 11001). Backing off for 84.488136ms and retrying.
+2026-11-25T20:39:59.334017Z ERROR convex::client::worker: Convex Client Worker failed: "ProtocolFailure". Backing off for 53.08364ms and retrying.
+2026-11-25T20:39:59.334036Z  WARN rulebox_agent::setup::pending: the enrollment with the installer's code failed; trying again reason=backend_unreachable tries=2
+2026-11-25T20:40:59.378088Z ERROR convex::sync::web_socket_manager: Convex WebSocketWorker failed: Connection to wss://example.invalid/api/sync failed: IO error: No such host is known. (os error 11001). Backing off for 34.067494ms and retrying.
+2026-11-25T20:40:59.378148Z ERROR convex::client::worker: Convex Client Worker failed: "ProtocolFailure". Backing off for 41.168797ms and retrying.
+2026-11-25T20:40:59.468580Z ERROR convex::sync::web_socket_manager: Convex WebSocketWorker failed: Connection to wss://example.invalid/api/sync failed: IO error: No such host is known. (os error 11001). Backing off for 148.826981ms and retrying.
+2026-11-25T20:40:59.468626Z ERROR convex::client::worker: Convex Client Worker failed: "ProtocolFailure". Backing off for 127.686524ms and retrying.
+2026-11-25T20:40:59.762171Z ERROR convex::sync::web_socket_manager: Convex WebSocketWorker failed: Connection to wss://example.invalid/api/sync failed: IO error: No such host is known. (os error 11001). Backing off for 65.708685ms and retrying.
+2026-11-25T20:40:59.762270Z ERROR convex::client::worker: Convex Client Worker failed: "ProtocolFailure". Backing off for 78.574991ms and retrying.
+2026-11-25T20:40:59.921924Z ERROR convex::sync::web_socket_manager: Convex WebSocketWorker failed: Connection to wss://example.invalid/api/sync failed: IO error: No such host is known. (os error 11001). Backing off for 632.91893ms and retrying.
+2026-11-25T20:40:59.921972Z ERROR convex::client::worker: Convex Client Worker failed: "ProtocolFailure". Backing off for 268.112707ms and retrying.
+2026-11-25T20:41:00.846760Z ERROR convex::sync::web_socket_manager: Convex WebSocketWorker failed: Connection to wss://example.invalid/api/sync failed: IO error: No such host is known. (os error 11001). Backing off for 1.546483803s and retrying.
+2026-11-25T20:41:00.846841Z ERROR convex::client::worker: Convex Client Worker failed: "ProtocolFailure". Backing off for 290.65094ms and retrying.
+2026-11-25T20:41:02.693516Z ERROR convex::sync::web_socket_manager: Convex WebSocketWorker failed: Connection to wss://example.invalid/api/sync failed: IO error: No such host is known. (os error 11001). Backing off for 1.364297867s and retrying.
+2026-11-25T20:41:02.693585Z ERROR convex::client::worker: Convex Client Worker failed: "ProtocolFailure". Backing off for 725.914001ms and retrying.
+2026-11-25T20:41:04.798396Z ERROR convex::sync::web_socket_manager: Convex WebSocketWorker failed: Connection to wss://example.invalid/api/sync failed: IO error: No such host is known. (os error 11001). Backing off for 318.389893ms and retrying.
+2026-11-25T20:41:04.798530Z ERROR convex::client::worker: Convex Client Worker failed: "ProtocolFailure". Backing off for 5.521451569s and retrying.
+2026-11-25T20:41:10.664724Z ERROR convex::sync::web_socket_manager: Convex WebSocketWorker failed: Connection to wss://example.invalid/api/sync failed: IO error: No such host is known. (os error 11001). Backing off for 6.324229431s and retrying.
+2026-11-25T20:41:10.664831Z ERROR convex::client::worker: Convex Client Worker failed: "ProtocolFailure". Backing off for 10.674420166s and retrying.
+2026-11-25T20:41:27.675029Z ERROR convex::sync::web_socket_manager: Convex WebSocketWorker failed: Connection to wss://example.invalid/api/sync failed: IO error: No such host is known. (os error 11001). Backing off for 13.614143729s and retrying.
+2026-11-25T20:41:27.675082Z ERROR convex::client::worker: Convex Client Worker failed: "ProtocolFailure". Backing off for 4.959343672s and retrying.
+2026-11-25T20:41:29.382438Z ERROR rulebox_agent::setup::pending: could not enroll with the code from the installer; the code was deleted reason=backend_unreachable tries=3
+2026-11-25T20:43:54.585687Z  INFO rulebox_agent::agent: agent stopped
+2026-11-25T20:43:54.586378Z  INFO rulebox_agent::service: service stopped
+2026-11-25T20:43:57.358861Z  INFO rulebox_agent::service: service starting version="0.0.0"
+2026-11-25T20:43:57.358919Z  INFO rulebox_agent::install_marker: the install marker now names this computer
+2026-11-25T20:43:57.360409Z  INFO rulebox_agent::agent: admin exit settings enabled=false hotkey=Ctrl+Shift+F12 problem=None
+2026-11-25T20:43:57.362966Z  INFO rulebox_agent::agent: agent started
+2026-11-25T20:43:57.370800Z  INFO rulebox_agent::install_marker: the install marker's KioskOn was updated on=false
+2026-11-25T20:43:57.370897Z  INFO rulebox_agent::ipc_conn: admin pipe listening on \\.\pipe\dev.rulebox.agent.admin
+2026-11-25T20:44:34.898002Z  INFO rulebox_agent::agent: agent stopped
+2026-11-25T20:44:34.898442Z  INFO rulebox_agent::service: service stopped
+2026-11-25T20:44:37.603335Z  INFO rulebox_agent::service: service starting version="0.0.0"
+2026-11-25T20:44:37.603388Z  INFO rulebox_agent::install_marker: the install marker now names this computer
+2026-11-25T20:44:37.604473Z  INFO rulebox_agent::agent: admin exit settings enabled=false hotkey=Ctrl+Shift+F12 problem=None
+2026-11-25T20:44:37.606299Z  INFO rulebox_agent::agent: agent started
+2026-11-25T20:44:37.606772Z  INFO rulebox_agent::ipc_conn: admin pipe listening on \\.\pipe\dev.rulebox.agent.admin
+2026-11-25T20:44:37.607380Z  INFO rulebox_agent::install_marker: the install marker's KioskOn was updated on=false
+2026-11-25T20:44:38.831627Z  INFO rulebox_agent::agent: agent stopped
+2026-11-25T20:44:38.832212Z  INFO rulebox_agent::service: service stopped
+2026-11-25T20:44:40.142932Z  INFO rulebox_agent::service: service starting version="0.0.0"
+2026-11-25T20:44:40.144924Z  INFO rulebox_agent::agent: admin exit settings enabled=false hotkey=Ctrl+Shift+F12 problem=None
+2026-11-25T20:44:40.147015Z  INFO rulebox_agent::agent: agent started
+2026-11-25T20:44:40.147555Z  INFO rulebox_agent::ipc_conn: admin pipe listening on \\.\pipe\dev.rulebox.agent.admin
+2026-11-25T20:46:25.517544Z  INFO rulebox_agent::agent: agent stopped
+2026-11-25T20:46:25.518088Z  INFO rulebox_agent::service: service stopped
+2026-11-25T20:46:25.795689Z  INFO rulebox_agent::service: service starting version="0.0.0"
+2026-11-25T20:46:25.797349Z  INFO rulebox_agent::agent: admin exit settings enabled=false hotkey=Ctrl+Shift+F12 problem=None
+2026-11-25T20:46:25.799295Z  INFO rulebox_agent::agent: agent started
+2026-11-25T20:46:25.821256Z  INFO rulebox_agent::install_marker: the install marker's KioskOn was updated on=false
+2026-11-25T20:46:25.821330Z  INFO rulebox_agent::ipc_conn: admin pipe listening on \\.\pipe\dev.rulebox.agent.admin
+2026-11-25T20:46:32.771851Z  INFO rulebox_agent::agent: agent stopped
+2026-11-25T20:46:32.772170Z  INFO rulebox_agent::service: service stopped
+2026-11-25T20:47:52.635499Z  INFO rulebox_agent::service: service starting version="0.0.0"
+2026-11-25T20:47:52.635578Z  INFO rulebox_agent::install_marker: the install marker now names this computer
+2026-11-25T20:47:52.636276Z  INFO rulebox_agent::agent: admin exit settings enabled=false hotkey=Ctrl+Shift+F12 problem=None
+2026-11-25T20:47:52.637888Z  INFO rulebox_agent::agent: agent started
+2026-11-25T20:47:52.645065Z  INFO rulebox_agent::install_marker: the install marker's KioskOn was updated on=false
+2026-11-25T20:47:52.645130Z  INFO rulebox_agent::ipc_conn: admin pipe listening on \\.\pipe\dev.rulebox.agent.admin
+2026-11-25T20:49:32.194823Z  INFO rulebox_agent::ipc_conn: client connected pipe="admin" connection_id=1 pid=2592 session_id=1 role=Admin
+2026-11-25T20:49:32.195202Z  INFO rulebox_agent::ipc_conn: client disconnected pipe="admin" connection_id=1 pid=2592 end=PeerClosed

@@ -1,0 +1,58 @@
+== installed exe: guard-status (elevated, PS Direct as rbtest)
+Machine guard : open: production (installed release)
+Build         : release, feature `production` on
+Test door (the test-machine marker names this computer)
+  [FAIL] test_marker                 the test-machine marker is not present (Win32 error 2)
+Production door (an installed release, every line must hold)
+  [ok] production_feature          built with the cargo feature `production`
+  [ok] release_build               this is a release build
+  [ok] install_marker              InstallDir is C:\Program Files\Rulebox\
+  [ok] install_dir_is_exe_folder   the exe runs from C:\Program Files\Rulebox
+  [ok] install_folder_admin_only   only SYSTEM and Administrators can change the folder
+  [ok] install_computer_matches    the install marker names this computer (RULEBOX)
+exit=0
+== copy in C:\rb-run\copy: guard-status
+Machine guard : closed
+Build         : release, feature `production` on
+Test door (the test-machine marker names this computer)
+  [FAIL] test_marker                 the test-machine marker is not present (Win32 error 2)
+Production door (an installed release, every line must hold)
+  [ok] production_feature          built with the cargo feature `production`
+  [ok] release_build               this is a release build
+  [ok] install_marker              InstallDir is C:\Program Files\Rulebox\
+  [FAIL] install_dir_is_exe_folder   InstallDir is "C:\\Program Files\\Rulebox\\" but the exe runs from "C:\\rb-run\\copy"
+  [FAIL] install_folder_admin_only   the folder can be changed by other accounts, or is not owned by SYSTEM or Administrators
+  [ok] install_computer_matches    the install marker names this computer (RULEBOX)
+exit=1
+== test marker present?
+False
+== status (installed exe)
+agent version : 0.0.0
+enrollment    : notEnrolled
+device        : -
+backend       : -
+connection    : offline
+kiosk         : enabled=false phase=notApplied error=-
+shell         : notRunning
+display mode  : lite
+policy        : none received (applied version 0)
+clock         : ok
+admin exit    : off
+employee      : -
+audit queued  : 0
+exit=0
+== compat (installed exe)
+Windows build : 26300.9457 (26H2)
+Edition       : Professional (product type 48)
+Architecture  : x86_64
+Memory        : 2558 MB (Lite mode)
+System disk   : 38 GB free
+Joined        : domain no, Entra no
+S mode        : no
+Protection    : full
+WebView2      : 155.0.4283.45
+Browsers      : Edge
+Protected print: no
+Blockers      : none
+Warning       : low_ram - The PC has less than 3 GB of memory, below the target hardware.
+exit=0

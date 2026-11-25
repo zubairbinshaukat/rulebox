@@ -2,9 +2,10 @@
 //! clear message in the event log" when the installer's enrollment code could not be used).
 //!
 //! Only the source name [`SOURCE`] is accepted, so a bug cannot write under another program's
-//! name. The source is not registered with a message file, so Event Viewer shows its usual
-//! "description cannot be found" line followed by the text given here; registering the source
-//! (EventCreate.exe as message file) is an MSI follow-up and changes nothing for the agent.
+//! name. The MSI registers the source (`apps/installer/Package.wxs`, component `EventSource`) with
+//! the .NET Framework 4 message file, whose "%1" message covers every id, so Event Viewer shows the
+//! text given here. Without the MSI (a dev build on the VM) the source is unregistered and Event
+//! Viewer shows "the description cannot be found" before the text.
 
 use windows::core::PCWSTR;
 use windows::Win32::System::EventLog::{

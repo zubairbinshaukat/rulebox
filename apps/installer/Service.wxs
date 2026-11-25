@@ -7,8 +7,11 @@
   AGENT_SERVICE in crates\rulebox-win32\src\service.rs. apps\installer\tests\package.test.ts
   compares them.
 
-  No Account: the service runs as LocalSystem. The agent re-asserts its own security
-  descriptor and required privileges at every start, so the MSI does not set them.
+  No Account: the service runs as LocalSystem. The MSI leaves Windows' default service DACL
+  (only SYSTEM and Administrators can stop or change it; interactive users can query it) and
+  no required-privileges list. The agent sets its own DACL and privilege list while a lockdown
+  policy is applied (apps\agent\src\lockdown\tamper.rs, L7) and puts the originals back when it
+  is removed. Step 22 run A saw the defaults on an installed, not enrolled PC, as expected.
 -->
 <Wix xmlns="http://wixtoolset.org/schemas/v4/wxs"
      xmlns:util="http://wixtoolset.org/schemas/v4/wxs/util">

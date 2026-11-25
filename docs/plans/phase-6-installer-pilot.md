@@ -799,8 +799,9 @@ opens to the browser's blocked page.
 - **Service:** `ServiceInstall` (own process, auto start, Vital) +
   `ServiceControl`; `util:ServiceConfig` **nested under `ServiceInstall`**
   (restart on first, second and third failure, reset after 1 day, 5 s
-  delay). The agent re-asserts its own security descriptor and privileges
-  at start (Phase 5 Step 17), so the MSI does not duplicate them.
+  delay). The MSI leaves Windows' default service DACL and no privilege
+  list; the agent sets both only while a lockdown policy is applied (L7,
+  Phase 5 Step 17), not at every start (Step 22 run A).
 - **Upgrade:** `MajorUpgrade Schedule="afterInstallInitialize"` (a failed
   upgrade rolls back to the old version) with a `DowngradeErrorMessage`.
   Only three version fields count.
@@ -808,8 +809,12 @@ opens to the browser's blocked page.
   (`Privileged`), x64, build ≥ 19045 read by `RegistrySearch` of
   `HKLM\SOFTWARE\Microsoft\Windows NT\CurrentVersion` `CurrentBuildNumber`
   (`VersionNT` stops at 8.1 values; S-7 on build 26300: `VersionNT` 603 and
-  `WindowsBuild` 9600, so neither property can be used), free disk ≥ 2 GiB. One clear message
-  each.
+  `WindowsBuild` 9600, so neither property can be used). One clear message
+  each. **No free-disk condition (Step 22 run A):** `PrimaryVolumeSpaceAvailable`
+  was 0 at LaunchConditions in the UI and silent installs, with or without
+  `PrimaryFolder`, so "≥ 2 GiB" refused every install. Windows Installer's
+  own costing refuses files that do not fit; the 2 GB headroom is the compat
+  report's `low_disk` warning in Rulebox Setup.
 - **Uninstall guard:** while the kiosk is on, a condition blocks removal
   with "Turn kiosk mode off first" (reads `HKLM\SOFTWARE\Rulebox\Install`
   `KioskOn`, which the agent keeps). It does not apply during a major
@@ -822,12 +827,13 @@ opens to the browser's blocked page.
   finish. The finish page starts **Rulebox Setup** (4.10.1) unless the
   install is silent.
 - **Silent install:** `msiexec /i Rulebox.msi /qn ENROLLCODE=<code>`.
-  `ENROLLCODE` is a `Hidden` property (kept out of logs). It is written to
-  `HKLM\SOFTWARE\Rulebox\Install\Pending` with an ACL of SYSTEM and
-  Administrators only; the agent reads it at start, enrolls, deletes it.
-  **(unverified: setting the key ACL without a custom action; Step 7. If it
-  cannot be done, silent enrollment uses `rulebox-agent enroll` in a second
-  command instead.)**
+  `ENROLLCODE` is a `Hidden` property (kept out of the property lines of
+  a log). It is written to `HKLM\SOFTWARE\Rulebox\Install\Pending` with an
+  ACL of SYSTEM and Administrators only (`MsiLockPermissionsEx`, no custom
+  action: **confirmed** in Step 22 run A); the agent reads it at start,
+  enrolls, deletes it. **Differs (run A):** a verbose log (`/l*v`) still
+  prints the code in the `RegAddValue` line; open question Q-A1 in
+  `phase-6-vm-results.md`.
 - **WebView2:** the MSI installs Microsoft's Evergreen **bootstrapper**
   (about 1.8 MB, SHA-256 pinned at build time) into the install folder.
   It does not run it. Setup or the agent runs it (`/silent /install`) only
@@ -1910,6 +1916,25 @@ credentials in the browser build; serve files through Convex file storage.
 
 **Machine:** VM, fresh checkpoint. Results into
 `docs/plans/phase-6-vm-results.md`.
+
+**Status (2026-11-26, run A, evidence in `phase-6-vm-runs/`):**
+- **Passed:** items 1 (unsigned, UI elevated and not elevated, silent with `ENROLLCODE`), 2 (not an administrator), 3, 4 (Windows 11 part), 6 (upgrade, forced failing upgrade, downgrade) and 7 (refusal with `KioskOn=1` set by hand; clean uninstall). Install times are 2 to 7 s.
+- **Fixed:**
+  - the free-space condition refused every install, so it was removed;
+  - the release agent said 0.0.0, so `RULEBOX_VERSION` was added and `build.ps1` checks it;
+  - the event source was not registered, so `Package.wxs` now registers it.
+- **Differs (owner questions Q-A1, Q-A2):**
+  - a verbose log shows the `ENROLLCODE`;
+  - `ProgramData\Rulebox` stays after uninstall.
+- **Not run:**
+  - a signed MSI;
+  - low disk;
+  - Windows 10;
+  - item 5 (needs a dashboard code and the network);
+  - item 8;
+  - item 9.
+
+  Run A2 needs a CI MSI rebuilt with these fixes and an enrollment code.
 
 1. Unsigned and (if available) signed MSI: UI install, silent install with
    `ENROLLCODE`, the log holds no code.

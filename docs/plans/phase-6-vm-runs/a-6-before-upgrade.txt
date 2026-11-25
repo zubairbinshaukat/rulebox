@@ -1,0 +1,6 @@
+== before upgrade
+service pid 4308
+state sha256 F6EBAB3D2301B4A299A8038E014F244036B797B49193D8BD393429C0C4BB5FFF
+marker: InstallDir                Version ComputerName KioskOn
+----------                ------- ------------ -------
+C:\Program Files\Rulebox\ 0.1.0   RULEBOX            0

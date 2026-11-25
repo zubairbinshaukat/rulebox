@@ -1,0 +1,4 @@
+tag=a-2-nonadmin who=rulebox\rbtest session=1 elevated=False
+exe=msiexec.exe
+args=/i C:\rb-run\msi\Rulebox-0.1.0-x64-fixed.msi /qn /l*v C:\rb-run\out\a-2-nonadmin-msi.log
+start=01:46:58 end=01:46:59 seconds=1.2 exit=1603

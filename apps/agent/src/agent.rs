@@ -270,7 +270,7 @@ pub fn initial_snapshot(
     // The same mapping the reconciler uses after every reconcile.
     let kiosk = kiosk_status(&state.kiosk);
     let mut snapshot = AgentSnapshot {
-        agent_version: env!("CARGO_PKG_VERSION").to_string(),
+        agent_version: crate::AGENT_VERSION.to_string(),
         enrollment,
         device: state
             .enrollment
@@ -1564,7 +1564,7 @@ mod backend_tests {
         let first = fake.report_calls().into_iter().find(|r| r.batch.status.is_some()).unwrap();
         assert_eq!(first.auth.device_id, "dev-1");
         let status = first.batch.status.expect("the report carries the status");
-        assert_eq!(status.agent_version, env!("CARGO_PKG_VERSION"));
+        assert_eq!(status.agent_version, crate::AGENT_VERSION);
         // Step 9: the reconciler writes `last_applied_version` after a successful
         // reconcile, so the report says 3. A report that went in the
         // milliseconds before that reconcile finished reports 0; the next one (minutes

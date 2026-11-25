@@ -167,7 +167,7 @@ impl HttpDownloader {
             .redirect(policy)
             .connect_timeout(CONNECT_TIMEOUT)
             .read_timeout(STALL_TIMEOUT)
-            .user_agent(concat!("rulebox-agent/", env!("CARGO_PKG_VERSION")))
+            .user_agent(concat!("rulebox-agent/", env!("RULEBOX_AGENT_VERSION")))
             .build()
             .map_err(|e| DownloadError::Network(e.without_url().to_string()))?;
         Ok(Self { client })

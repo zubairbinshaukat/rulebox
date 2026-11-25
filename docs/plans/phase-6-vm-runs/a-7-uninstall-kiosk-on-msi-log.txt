@@ -1,0 +1,345 @@
+=== Verbose logging started: 26/11/2026  1:45:50  Build type: SHIP UNICODE 5.00.10011.00  Calling process: C:\WINDOWS\system32\msiexec.exe ===
+MSI (c) (40:94) [01:45:50:019]: Resetting cached policy values
+MSI (c) (40:94) [01:45:50:019]: Machine policy value 'Debug' is 0
+MSI (c) (40:94) [01:45:50:019]: ******* RunEngine:
+           ******* Product: C:\rb-run\msi\Rulebox-0.1.1-x64-test.msi
+           ******* Action: 
+           ******* CommandLine: **********
+MSI (c) (40:94) [01:45:50:021]: Client-side and UI is none or basic: Running entire install on the server.
+MSI (c) (40:94) [01:45:50:021]: Grabbed execution mutex.
+MSI (c) (40:94) [01:45:50:023]: Cloaking enabled.
+MSI (c) (40:94) [01:45:50:023]: Attempting to enable all disabled privileges before calling Install on Server
+MSI (c) (40:94) [01:45:50:025]: Incrementing counter to disable shutdown. Counter after increment: 0
+MSI (s) (90:34) [01:45:50:027]: Running installation inside multi-package transaction C:\rb-run\msi\Rulebox-0.1.1-x64-test.msi
+MSI (s) (90:34) [01:45:50:027]: Grabbed execution mutex.
+MSI (s) (90:28) [01:45:50:029]: Resetting cached policy values
+MSI (s) (90:28) [01:45:50:029]: Machine policy value 'Debug' is 0
+MSI (s) (90:28) [01:45:50:029]: ******* RunEngine:
+           ******* Product: C:\rb-run\msi\Rulebox-0.1.1-x64-test.msi
+           ******* Action: 
+           ******* CommandLine: **********
+MSI (s) (90:28) [01:45:50:029]: Machine policy value 'DisableUserInstalls' is 0
+MSI (s) (90:28) [01:45:50:029]: Note: 1: 2203 2: C:\WINDOWS\Installer\inprogressinstallinfo.ipi 3: -2147287038 
+MSI (s) (90:28) [01:45:50:031]: SRSetRestorePoint skipped for this transaction.
+MSI (s) (90:28) [01:45:50:031]: MSCOREE not loaded loading copy from system32
+MSI (s) (90:28) [01:45:50:033]: End dialog not enabled
+MSI (s) (90:28) [01:45:50:033]: Original package ==> C:\rb-run\msi\Rulebox-0.1.1-x64-test.msi
+MSI (s) (90:28) [01:45:50:033]: Package we're running from ==> C:\WINDOWS\Installer\4c781.msi
+MSI (s) (90:28) [01:45:50:033]: APPCOMPAT: Uninstall Flags override found.
+MSI (s) (90:28) [01:45:50:033]: APPCOMPAT: Uninstall VersionNT override found.
+MSI (s) (90:28) [01:45:50:033]: APPCOMPAT: Uninstall ServicePackLevel override found.
+MSI (s) (90:28) [01:45:50:033]: APPCOMPAT: looking for appcompat database entry with ProductCode '{A60ACF6E-B145-4D90-940B-DB0FF80B4B61}'.
+MSI (s) (90:28) [01:45:50:035]: APPCOMPAT: no matching ProductCode found in database.
+MSI (s) (90:28) [01:45:50:039]: Machine policy value 'DisablePatch' is 0
+MSI (s) (90:28) [01:45:50:039]: Machine policy value 'AllowLockdownPatch' is 0
+MSI (s) (90:28) [01:45:50:039]: Machine policy value 'DisableLUAPatching' is 0
+MSI (s) (90:28) [01:45:50:039]: Machine policy value 'DisableFlyWeightPatching' is 0
+MSI (s) (90:28) [01:45:50:039]: APPCOMPAT: looking for appcompat database entry with ProductCode '{A60ACF6E-B145-4D90-940B-DB0FF80B4B61}'.
+MSI (s) (90:28) [01:45:50:039]: APPCOMPAT: no matching ProductCode found in database.
+MSI (s) (90:28) [01:45:50:041]: Transforms are not secure.
+MSI (s) (90:28) [01:45:50:041]: PROPERTY CHANGE: Adding MsiLogFileLocation property. Its value is 'C:\rb-run\out\a-7-uninstall-kiosk-on-msi.log'.
+MSI (s) (90:28) [01:45:50:041]: Command Line: REMOVE=ALL CURRENTDIRECTORY=C:\WINDOWS\system32 CLIENTUILEVEL=3 CLIENTPROCESSID=7488 
+MSI (s) (90:28) [01:45:50:041]: PROPERTY CHANGE: Adding PackageCode property. Its value is '{B7712D6A-B344-4764-B71D-64A558C31828}'.
+MSI (s) (90:28) [01:45:50:041]: Product Code passed to Engine.Initialize:           '{A60ACF6E-B145-4D90-940B-DB0FF80B4B61}'
+MSI (s) (90:28) [01:45:50:041]: Product Code from property table before transforms: '{A60ACF6E-B145-4D90-940B-DB0FF80B4B61}'
+MSI (s) (90:28) [01:45:50:041]: Product Code from property table after transforms:  '{A60ACF6E-B145-4D90-940B-DB0FF80B4B61}'
+MSI (s) (90:28) [01:45:50:041]: Product registered: entering maintenance mode
+MSI (s) (90:28) [01:45:50:041]: Determined that existing product (either this product or the product being upgraded with a patch) is installed per-machine.
+MSI (s) (90:28) [01:45:50:041]: Product {A60ACF6E-B145-4D90-940B-DB0FF80B4B61} is admin assigned: LocalSystem owns the publish key.
+MSI (s) (90:28) [01:45:50:041]: Product {A60ACF6E-B145-4D90-940B-DB0FF80B4B61} is managed.
+MSI (s) (90:28) [01:45:50:041]: MSI_LUA: Credential prompt not required, user is an admin
+MSI (s) (90:28) [01:45:50:041]: PROPERTY CHANGE: Adding ProductState property. Its value is '5'.
+MSI (s) (90:28) [01:45:50:041]: PROPERTY CHANGE: Adding ProductToBeRegistered property. Its value is '1'.
+MSI (s) (90:28) [01:45:50:041]: Note: 1: 1402 2: HKEY_CURRENT_USER\Software\Microsoft\Windows\CurrentVersion\Policies\Explorer 3: 2 
+MSI (s) (90:28) [01:45:50:041]: Entering CMsiConfigurationManager::SetLastUsedSource.
+MSI (s) (90:28) [01:45:50:041]: Specifed source is already in a list.
+MSI (s) (90:28) [01:45:50:041]: User policy value 'SearchOrder' is 'nmu'
+MSI (s) (90:28) [01:45:50:041]: Machine policy value 'DisableBrowse' is 0
+MSI (s) (90:28) [01:45:50:041]: Machine policy value 'AllowLockdownBrowse' is 0
+MSI (s) (90:28) [01:45:50:041]: Adding new sources is allowed.
+MSI (s) (90:28) [01:45:50:041]: Package name retrieved from configuration data: 'Rulebox-0.1.1-x64-test.msi'
+MSI (s) (90:28) [01:45:50:041]: Note: 1: 2205 2:  3: Error 
+MSI (s) (90:28) [01:45:50:043]: Note: 1: 2262 2: AdminProperties 3: -2147287038 
+MSI (s) (90:28) [01:45:50:043]: Machine policy value 'DisableMsi' is 0
+MSI (s) (90:28) [01:45:50:043]: Machine policy value 'AlwaysInstallElevated' is 0
+MSI (s) (90:28) [01:45:50:043]: User policy value 'AlwaysInstallElevated' is 0
+MSI (s) (90:28) [01:45:50:043]: Product {A60ACF6E-B145-4D90-940B-DB0FF80B4B61} is admin assigned: LocalSystem owns the publish key.
+MSI (s) (90:28) [01:45:50:043]: Product {A60ACF6E-B145-4D90-940B-DB0FF80B4B61} is managed.
+MSI (s) (90:28) [01:45:50:043]: Running product '{A60ACF6E-B145-4D90-940B-DB0FF80B4B61}' with elevated privileges: Product is assigned.
+MSI (s) (90:28) [01:45:50:043]: PROPERTY CHANGE: Adding REMOVE property. Its value is 'ALL'.
+MSI (s) (90:28) [01:45:50:043]: PROPERTY CHANGE: Adding CURRENTDIRECTORY property. Its value is 'C:\WINDOWS\system32'.
+MSI (s) (90:28) [01:45:50:043]: PROPERTY CHANGE: Adding CLIENTUILEVEL property. Its value is '3'.
+MSI (s) (90:28) [01:45:50:043]: PROPERTY CHANGE: Adding CLIENTPROCESSID property. Its value is '7488'.
+MSI (s) (90:28) [01:45:50:043]: Machine policy value 'DisableAutomaticApplicationShutdown' is 0
+MSI (s) (90:28) [01:45:50:043]: PROPERTY CHANGE: Adding MsiRestartManagerSessionKey property. Its value is '10f7b3a5bad4a14bac13e41256292221'.
+MSI (s) (90:28) [01:45:50:043]: RESTART MANAGER: Session opened.
+MSI (s) (90:28) [01:45:50:043]: TRANSFORMS property is now: 
+MSI (s) (90:28) [01:45:50:043]: PROPERTY CHANGE: Adding PRODUCTLANGUAGE property. Its value is '1033'.
+MSI (s) (90:28) [01:45:50:043]: PROPERTY CHANGE: Adding VersionDatabase property. Its value is '500'.
+MSI (s) (90:28) [01:45:50:043]: SHELL32::SHGetFolderPath returned: C:\WINDOWS\system32\config\systemprofile\AppData\Roaming
+MSI (s) (90:28) [01:45:50:043]: SHELL32::SHGetFolderPath returned: C:\WINDOWS\system32\config\systemprofile\Favorites
+MSI (s) (90:28) [01:45:50:043]: SHELL32::SHGetFolderPath returned: C:\WINDOWS\system32\config\systemprofile\AppData\Roaming\Microsoft\Windows\Network Shortcuts
+MSI (s) (90:28) [01:45:50:043]: SHELL32::SHGetFolderPath returned: C:\WINDOWS\system32\config\systemprofile\Documents
+MSI (s) (90:28) [01:45:50:043]: SHELL32::SHGetFolderPath returned: C:\WINDOWS\system32\config\systemprofile\AppData\Roaming\Microsoft\Windows\Printer Shortcuts
+MSI (s) (90:28) [01:45:50:043]: SHELL32::SHGetFolderPath returned: C:\WINDOWS\system32\config\systemprofile\AppData\Roaming\Microsoft\Windows\Recent
+MSI (s) (90:28) [01:45:50:043]: SHELL32::SHGetFolderPath returned: C:\WINDOWS\system32\config\systemprofile\AppData\Roaming\Microsoft\Windows\SendTo
+MSI (s) (90:28) [01:45:50:043]: SHELL32::SHGetFolderPath returned: C:\WINDOWS\system32\config\systemprofile\AppData\Roaming\Microsoft\Windows\Templates
+MSI (s) (90:28) [01:45:50:043]: SHELL32::SHGetFolderPath returned: C:\ProgramData
+MSI (s) (90:28) [01:45:50:043]: SHELL32::SHGetFolderPath returned: C:\WINDOWS\system32\config\systemprofile\AppData\Local
+MSI (s) (90:28) [01:45:50:043]: SHELL32::SHGetFolderPath returned: C:\WINDOWS\system32\config\systemprofile\Pictures
+MSI (s) (90:28) [01:45:50:043]: SHELL32::SHGetFolderPath returned: C:\ProgramData\Microsoft\Windows\Start Menu\Programs\Administrative Tools
+MSI (s) (90:28) [01:45:50:043]: SHELL32::SHGetFolderPath returned: C:\ProgramData\Microsoft\Windows\Start Menu\Programs\Startup
+MSI (s) (90:28) [01:45:50:043]: SHELL32::SHGetFolderPath returned: C:\ProgramData\Microsoft\Windows\Start Menu\Programs
+MSI (s) (90:28) [01:45:50:043]: SHELL32::SHGetFolderPath returned: C:\ProgramData\Microsoft\Windows\Start Menu
+MSI (s) (90:28) [01:45:50:043]: SHELL32::SHGetFolderPath returned: C:\Users\Public\Desktop
+MSI (s) (90:28) [01:45:50:043]: SHELL32::SHGetFolderPath returned: C:\WINDOWS\system32\config\systemprofile\AppData\Roaming\Microsoft\Windows\Start Menu\Programs\Administrative Tools
+MSI (s) (90:28) [01:45:50:043]: SHELL32::SHGetFolderPath returned: C:\WINDOWS\system32\config\systemprofile\AppData\Roaming\Microsoft\Windows\Start Menu\Programs\Startup
+MSI (s) (90:28) [01:45:50:043]: SHELL32::SHGetFolderPath returned: C:\WINDOWS\system32\config\systemprofile\AppData\Roaming\Microsoft\Windows\Start Menu\Programs
+MSI (s) (90:28) [01:45:50:043]: SHELL32::SHGetFolderPath returned: C:\WINDOWS\system32\config\systemprofile\AppData\Roaming\Microsoft\Windows\Start Menu
+MSI (s) (90:28) [01:45:50:043]: SHELL32::SHGetFolderPath returned: C:\WINDOWS\system32\config\systemprofile\Desktop
+MSI (s) (90:28) [01:45:50:043]: SHELL32::SHGetFolderPath returned: C:\ProgramData\Microsoft\Windows\Templates
+MSI (s) (90:28) [01:45:50:043]: SHELL32::SHGetFolderPath returned: C:\WINDOWS\Fonts
+MSI (s) (90:28) [01:45:50:043]: Note: 1: 2898 2: MS Sans Serif 3: MS Sans Serif 4: 0 5: 16 
+MSI (s) (90:28) [01:45:50:047]: MSI_LUA: Setting AdminUser property to 1 because the product is already installed managed and per-machine
+MSI (s) (90:28) [01:45:50:047]: MSI_LUA: Setting MsiRunningElevated property to 1 because the install is already running elevated.
+MSI (s) (90:28) [01:45:50:047]: PROPERTY CHANGE: Adding MsiRunningElevated property. Its value is '1'.
+MSI (s) (90:28) [01:45:50:047]: PROPERTY CHANGE: Adding Privileged property. Its value is '1'.
+MSI (s) (90:28) [01:45:50:047]: Note: 1: 1402 2: HKEY_CURRENT_USER\Software\Microsoft\MS Setup (ACME)\User Info 3: 2 
+MSI (s) (90:28) [01:45:50:047]: PROPERTY CHANGE: Adding USERNAME property. Its value is 'user@example.invalid'.
+MSI (s) (90:28) [01:45:50:047]: Note: 1: 1402 2: HKEY_CURRENT_USER\Software\Microsoft\MS Setup (ACME)\User Info 3: 2 
+MSI (s) (90:28) [01:45:50:047]: PROPERTY CHANGE: Adding Installed property. Its value is '00:00:00'.
+MSI (s) (90:28) [01:45:50:047]: PROPERTY CHANGE: Adding DATABASE property. Its value is 'C:\WINDOWS\Installer\4c781.msi'.
+MSI (s) (90:28) [01:45:50:047]: PROPERTY CHANGE: Adding OriginalDatabase property. Its value is 'C:\rb-run\msi\Rulebox-0.1.1-x64-test.msi'.
+MSI (s) (90:28) [01:45:50:047]: Machine policy value 'MsiDisableEmbeddedUI' is 0
+MSI (s) (90:28) [01:45:50:047]: EEUI - Disabling MsiEmbeddedUI for service because it's not a quiet/basic install
+MSI (s) (90:28) [01:45:50:049]: Note: 1: 2205 2:  3: PatchPackage 
+MSI (s) (90:28) [01:45:50:049]: Machine policy value 'DisableRollback' is 0
+MSI (s) (90:28) [01:45:50:049]: User policy value 'DisableRollback' is 0
+MSI (s) (90:28) [01:45:50:049]: PROPERTY CHANGE: Adding UILevel property. Its value is '2'.
+=== Logging started: 26/11/2026  1:45:50 ===
+MSI (s) (90:28) [01:45:50:049]: Note: 1: 2203 2: C:\WINDOWS\Installer\inprogressinstallinfo.ipi 3: -2147287038 
+MSI (s) (90:28) [01:45:50:049]: PROPERTY CHANGE: Adding Preselected property. Its value is '1'.
+MSI (s) (90:28) [01:45:50:049]: APPCOMPAT: [DetectVersionLaunchCondition] Launch condition already passes.
+MSI (s) (90:28) [01:45:50:055]: PROPERTY CHANGE: Adding ACTION property. Its value is 'INSTALL'.
+MSI (s) (90:28) [01:45:50:055]: Doing action: INSTALL
+MSI (s) (90:28) [01:45:50:055]: Note: 1: 2205 2:  3: ActionText 
+Action start 1:45:50: INSTALL.
+MSI (s) (90:28) [01:45:50:057]: Running ExecuteSequence
+MSI (s) (90:28) [01:45:50:057]: Doing action: FindRelatedProducts
+MSI (s) (90:28) [01:45:50:057]: Note: 1: 2205 2:  3: ActionText 
+MSI (s) (90:28) [01:45:50:057]: Skipping FindRelatedProducts action: not run in maintenance mode
+Action start 1:45:50: FindRelatedProducts.
+MSI (s) (90:28) [01:45:50:057]: Doing action: AppSearch
+MSI (s) (90:28) [01:45:50:057]: Note: 1: 2205 2:  3: ActionText 
+Action ended 1:45:50: FindRelatedProducts. Return value 0.
+Action start 1:45:50: AppSearch.
+MSI (s) (90:28) [01:45:50:059]: Note: 1: 2262 2: Signature 3: -2147287038 
+MSI (s) (90:28) [01:45:50:059]: PROPERTY CHANGE: Adding WINBUILD property. Its value is '26300'.
+MSI (s) (90:28) [01:45:50:059]: Note: 1: 2262 2: Signature 3: -2147287038 
+MSI (s) (90:28) [01:45:50:059]: PROPERTY CHANGE: Adding KIOSKON property. Its value is '#1'.
+MSI (s) (90:28) [01:45:50:059]: Doing action: ValidateProductID
+MSI (s) (90:28) [01:45:50:059]: Note: 1: 2205 2:  3: ActionText 
+Action ended 1:45:50: AppSearch. Return value 1.
+Action start 1:45:50: ValidateProductID.
+MSI (s) (90:28) [01:45:50:061]: Doing action: CostInitialize
+MSI (s) (90:28) [01:45:50:061]: Note: 1: 2205 2:  3: ActionText 
+Action ended 1:45:50: ValidateProductID. Return value 1.
+MSI (s) (90:28) [01:45:50:061]: Machine policy value 'MaxPatchCacheSize' is 10
+MSI (s) (90:28) [01:45:50:061]: PROPERTY CHANGE: Adding ROOTDRIVE property. Its value is 'C:\'.
+MSI (s) (90:28) [01:45:50:061]: PROPERTY CHANGE: Adding CostingComplete property. Its value is '0'.
+MSI (s) (90:28) [01:45:50:061]: Note: 1: 2205 2:  3: Patch 
+MSI (s) (90:28) [01:45:50:061]: Note: 1: 2205 2:  3: PatchPackage 
+MSI (s) (90:28) [01:45:50:061]: Note: 1: 2205 2:  3: MsiPatchHeaders 
+MSI (s) (90:28) [01:45:50:061]: Note: 1: 2205 2:  3: __MsiPatchFileList 
+MSI (s) (90:28) [01:45:50:061]: Note: 1: 2205 2:  3: PatchPackage 
+MSI (s) (90:28) [01:45:50:061]: Note: 1: 2228 2:  3: PatchPackage 4: SELECT `DiskId`, `PatchId`, `LastSequence` FROM `Media`, `PatchPackage` WHERE `Media`.`DiskId`=`PatchPackage`.`Media_` ORDER BY `DiskId`  
+MSI (s) (90:28) [01:45:50:061]: Note: 1: 2205 2:  3: Patch 
+Action start 1:45:50: CostInitialize.
+MSI (s) (90:28) [01:45:50:061]: Doing action: FileCost
+MSI (s) (90:28) [01:45:50:061]: Note: 1: 2205 2:  3: ActionText 
+Action ended 1:45:50: CostInitialize. Return value 1.
+MSI (s) (90:28) [01:45:50:063]: Note: 1: 2205 2:  3: MsiAssembly 
+MSI (s) (90:28) [01:45:50:063]: Note: 1: 2205 2:  3: Class 
+MSI (s) (90:28) [01:45:50:063]: Note: 1: 2205 2:  3: Extension 
+MSI (s) (90:28) [01:45:50:063]: Note: 1: 2205 2:  3: TypeLib 
+Action start 1:45:50: FileCost.
+MSI (s) (90:28) [01:45:50:063]: Doing action: CostFinalize
+MSI (s) (90:28) [01:45:50:063]: Note: 1: 2205 2:  3: ActionText 
+Action ended 1:45:50: FileCost. Return value 1.
+MSI (s) (90:28) [01:45:50:063]: PROPERTY CHANGE: Adding OutOfDiskSpace property. Its value is '0'.
+MSI (s) (90:28) [01:45:50:063]: PROPERTY CHANGE: Adding OutOfNoRbDiskSpace property. Its value is '0'.
+MSI (s) (90:28) [01:45:50:063]: PROPERTY CHANGE: Adding PrimaryVolumeSpaceAvailable property. Its value is '0'.
+MSI (s) (90:28) [01:45:50:063]: PROPERTY CHANGE: Adding PrimaryVolumeSpaceRequired property. Its value is '0'.
+MSI (s) (90:28) [01:45:50:063]: PROPERTY CHANGE: Adding PrimaryVolumeSpaceRemaining property. Its value is '0'.
+MSI (s) (90:28) [01:45:50:063]: Note: 1: 2205 2:  3: MsiAssembly 
+MSI (s) (90:28) [01:45:50:063]: Note: 1: 2228 2:  3: MsiAssembly 4:  SELECT `MsiAssembly`.`Attributes`, `MsiAssembly`.`File_Application`, `MsiAssembly`.`File_Manifest`,  `Component`.`KeyPath` FROM `MsiAssembly`, `Component` WHERE  `MsiAssembly`.`Component_` = `Component`.`Component` AND `MsiAssembly`.`Component_` = ? 
+MSI (s) (90:28) [01:45:50:063]: PROPERTY CHANGE: Adding INSTALLFOLDER property. Its value is 'C:\Program Files\Rulebox'.
+MSI (s) (90:28) [01:45:50:065]: PROPERTY CHANGE: Adding CurrentVersionFolder property. Its value is 'C:\Program Files\Rulebox\versions\0.1.0'.
+MSI (s) (90:28) [01:45:50:065]: Note: 1: 2205 2:  3: Patch 
+MSI (s) (90:28) [01:45:50:065]: Note: 1: 2205 2:  3: Condition 
+MSI (s) (90:28) [01:45:50:065]: PROPERTY CHANGE: Adding TARGETDIR property. Its value is 'C:\'.
+MSI (s) (90:28) [01:45:50:065]: PROPERTY CHANGE: Adding RuleboxMenuFolder property. Its value is 'C:\ProgramData\Microsoft\Windows\Start Menu\Programs\Rulebox\'.
+MSI (s) (90:28) [01:45:50:065]: PROPERTY CHANGE: Modifying INSTALLFOLDER property. Its current value is 'C:\Program Files\Rulebox'. Its new value: 'C:\Program Files\Rulebox\'.
+MSI (s) (90:28) [01:45:50:065]: PROPERTY CHANGE: Adding VersionsFolder property. Its value is 'C:\Program Files\Rulebox\versions\'.
+MSI (s) (90:28) [01:45:50:065]: PROPERTY CHANGE: Modifying CurrentVersionFolder property. Its current value is 'C:\Program Files\Rulebox\versions\0.1.0'. Its new value: 'C:\Program Files\Rulebox\versions\0.1.0\'.
+MSI (s) (90:28) [01:45:50:065]: Target path resolution complete. Dumping Directory table...
+MSI (s) (90:28) [01:45:50:065]: Note: target paths subject to change (via custom actions or browsing)
+MSI (s) (90:28) [01:45:50:065]: Dir (target): Key: TARGETDIR	, Object: C:\
+MSI (s) (90:28) [01:45:50:065]: Dir (target): Key: WindowsFolder	, Object: C:\WINDOWS\
+MSI (s) (90:28) [01:45:50:065]: Dir (target): Key: ProgramMenuFolder	, Object: C:\ProgramData\Microsoft\Windows\Start Menu\Programs\
+MSI (s) (90:28) [01:45:50:065]: Dir (target): Key: RuleboxMenuFolder	, Object: C:\ProgramData\Microsoft\Windows\Start Menu\Programs\Rulebox\
+MSI (s) (90:28) [01:45:50:065]: Dir (target): Key: ProgramFiles64Folder	, Object: C:\Program Files\
+MSI (s) (90:28) [01:45:50:065]: Dir (target): Key: INSTALLFOLDER	, Object: C:\Program Files\Rulebox\
+MSI (s) (90:28) [01:45:50:065]: Dir (target): Key: VersionsFolder	, Object: C:\Program Files\Rulebox\versions\
+MSI (s) (90:28) [01:45:50:065]: Dir (target): Key: CurrentVersionFolder	, Object: C:\Program Files\Rulebox\versions\0.1.0\
+MSI (s) (90:28) [01:45:50:065]: PROPERTY CHANGE: Adding INSTALLLEVEL property. Its value is '1'.
+Action start 1:45:50: CostFinalize.
+MSI (s) (90:28) [01:45:50:067]: Doing action: LaunchConditions
+MSI (s) (90:28) [01:45:50:067]: Note: 1: 2205 2:  3: ActionText 
+Action ended 1:45:50: CostFinalize. Return value 1.
+Action start 1:45:50: LaunchConditions.
+MSI (s) (90:28) [01:45:50:067]: Note: 1: 2205 2:  3: Error 
+MSI (s) (90:28) [01:45:50:067]: Note: 1: 2228 2:  3: Error 4: SELECT `Message` FROM `Error` WHERE `Error` = 1709 
+MSI (s) (90:28) [01:45:50:067]: Product: Rulebox -- Turn kiosk mode off first. Open the Rulebox dashboard, turn the kiosk off for this PC, then uninstall Rulebox.
+
+Turn kiosk mode off first. Open the Rulebox dashboard, turn the kiosk off for this PC, then uninstall Rulebox.
+Action ended 1:45:50: LaunchConditions. Return value 3.
+Action ended 1:45:50: INSTALL. Return value 3.
+Property(S): ALLUSERS = 1
+Property(S): ErrorDialog = ErrorDlg
+Property(S): DefaultUIFont = WixUI_Font_Normal
+Property(S): WIXUI_EXITDIALOGOPTIONALCHECKBOXTEXT = Start Rulebox Setup now to check this PC and connect it to your dashboard
+Property(S): SecureCustomProperties = BURNMSIMODIFY;BURNMSIREPAIR;BURNMSIUNINSTALL;ENROLLCODE;WIX_DOWNGRADE_DETECTED;WIX_UPGRADE_DETECTED
+Property(S): ARPPRODUCTICON = RuleboxIcon.ico
+Property(S): UpgradeCode = {76E0E816-6BEE-40CB-8BA0-6B32C8A1EB56}
+Property(S): ProductVersion = 0.1.1
+Property(S): ProductName = Rulebox
+Property(S): WIXUI_EXITDIALOGOPTIONALCHECKBOX = 1
+Property(S): ARPNOMODIFY = 1
+Property(S): ProductLanguage = 1033
+Property(S): WixUIRMOption = UseRM
+Property(S): ProductCode = {A60ACF6E-B145-4D90-940B-DB0FF80B4B61}
+Property(S): MsiHiddenProperties = ENROLLCODE
+Property(S): Manufacturer = Rulebox
+Property(S): INSTALLFOLDER = C:\Program Files\Rulebox\
+Property(S): ProgramFiles64Folder = C:\Program Files\
+Property(S): RuleboxMenuFolder = C:\ProgramData\Microsoft\Windows\Start Menu\Programs\Rulebox\
+Property(S): ProgramMenuFolder = C:\ProgramData\Microsoft\Windows\Start Menu\Programs\
+Property(S): TARGETDIR = C:\
+Property(S): CurrentVersionFolder = C:\Program Files\Rulebox\versions\0.1.0\
+Property(S): VersionsFolder = C:\Program Files\Rulebox\versions\
+Property(S): WINBUILD = 26300
+Property(S): KIOSKON = #1
+Property(S): VersionNT = 603
+Property(S): MsiLogFileLocation = C:\rb-run\out\a-7-uninstall-kiosk-on-msi.log
+Property(S): PackageCode = {B7712D6A-B344-4764-B71D-64A558C31828}
+Property(S): ProductState = 5
+Property(S): ProductToBeRegistered = 1
+Property(S): REMOVE = ALL
+Property(S): CURRENTDIRECTORY = C:\WINDOWS\system32
+Property(S): CLIENTUILEVEL = 3
+Property(S): CLIENTPROCESSID = 7488
+Property(S): MsiRestartManagerSessionKey = 10f7b3a5bad4a14bac13e41256292221
+Property(S): PRODUCTLANGUAGE = 1033
+Property(S): VersionDatabase = 500
+Property(S): VersionMsi = 5.00
+Property(S): VersionNT64 = 603
+Property(S): WindowsBuild = 9600
+Property(S): ServicePackLevel = 0
+Property(S): ServicePackLevelMinor = 0
+Property(S): MsiNTProductType = 1
+Property(S): WindowsFolder = C:\WINDOWS\
+Property(S): WindowsVolume = C:\
+Property(S): System64Folder = C:\WINDOWS\system32\
+Property(S): SystemFolder = C:\WINDOWS\SysWOW64\
+Property(S): RemoteAdminTS = 1
+Property(S): TempFolder = C:\WINDOWS\TEMP\
+Property(S): ProgramFilesFolder = C:\Program Files (x86)\
+Property(S): CommonFilesFolder = C:\Program Files (x86)\Common Files\
+Property(S): CommonFiles64Folder = C:\Program Files\Common Files\
+Property(S): AppDataFolder = C:\WINDOWS\system32\config\systemprofile\AppData\Roaming\
+Property(S): FavoritesFolder = C:\WINDOWS\system32\config\systemprofile\Favorites\
+Property(S): NetHoodFolder = C:\WINDOWS\system32\config\systemprofile\AppData\Roaming\Microsoft\Windows\Network Shortcuts\
+Property(S): PersonalFolder = C:\WINDOWS\system32\config\systemprofile\Documents\
+Property(S): PrintHoodFolder = C:\WINDOWS\system32\config\systemprofile\AppData\Roaming\Microsoft\Windows\Printer Shortcuts\
+Property(S): RecentFolder = C:\WINDOWS\system32\config\systemprofile\AppData\Roaming\Microsoft\Windows\Recent\
+Property(S): SendToFolder = C:\WINDOWS\system32\config\systemprofile\AppData\Roaming\Microsoft\Windows\SendTo\
+Property(S): TemplateFolder = C:\ProgramData\Microsoft\Windows\Templates\
+Property(S): CommonAppDataFolder = C:\ProgramData\
+Property(S): LocalAppDataFolder = C:\WINDOWS\system32\config\systemprofile\AppData\Local\
+Property(S): MyPicturesFolder = C:\WINDOWS\system32\config\systemprofile\Pictures\
+Property(S): AdminToolsFolder = C:\ProgramData\Microsoft\Windows\Start Menu\Programs\Administrative Tools\
+Property(S): StartupFolder = C:\ProgramData\Microsoft\Windows\Start Menu\Programs\Startup\
+Property(S): StartMenuFolder = C:\ProgramData\Microsoft\Windows\Start Menu\
+Property(S): DesktopFolder = C:\Users\Public\Desktop\
+Property(S): FontsFolder = C:\WINDOWS\Fonts\
+Property(S): GPTSupport = 1
+Property(S): OLEAdvtSupport = 1
+Property(S): ShellAdvtSupport = 1
+Property(S): MsiAMD64 = 6
+Property(S): Msix64 = 6
+Property(S): Intel = 6
+Property(S): PhysicalMemory = 2559
+Property(S): VirtualMemory = 1793
+Property(S): AdminUser = 1
+Property(S): MsiTrueAdminUser = 1
+Property(S): LogonUser = SYSTEM
+Property(S): UserSID = S-1-5-18
+Property(S): UserLanguageID = 8192
+Property(S): ComputerName = RULEBOX
+Property(S): SystemLanguageID = 1033
+Property(S): ScreenX = 1024
+Property(S): ScreenY = 768
+Property(S): CaptionHeight = 23
+Property(S): BorderTop = 1
+Property(S): BorderSide = 1
+Property(S): TextHeight = 16
+Property(S): TextInternalLeading = 3
+Property(S): ColorBits = 32
+Property(S): TTCSupport = 1
+Property(S): Time = 1:45:50
+Property(S): Date = 26/11/2026
+Property(S): MsiNetAssemblySupport = 4.8.9221.0
+Property(S): MsiWin32AssemblySupport = 6.3.26100.9278
+Property(S): RedirectedDllSupport = 2
+Property(S): MsiRunningElevated = 1
+Property(S): Privileged = 1
+Property(S): USERNAME = user@example.invalid
+Property(S): Installed = 00:00:00
+Property(S): DATABASE = C:\WINDOWS\Installer\4c781.msi
+Property(S): OriginalDatabase = C:\rb-run\msi\Rulebox-0.1.1-x64-test.msi
+Property(S): UILevel = 2
+Property(S): Preselected = 1
+Property(S): ACTION = INSTALL
+Property(S): ROOTDRIVE = C:\
+Property(S): CostingComplete = 0
+Property(S): OutOfDiskSpace = 0
+Property(S): OutOfNoRbDiskSpace = 0
+Property(S): PrimaryVolumeSpaceAvailable = 0
+Property(S): PrimaryVolumeSpaceRequired = 0
+Property(S): PrimaryVolumeSpaceRemaining = 0
+Property(S): INSTALLLEVEL = 1
+MSI (s) (90:28) [01:45:50:097]: Note: 1: 1725 
+MSI (s) (90:28) [01:45:50:097]: Note: 1: 2205 2:  3: Error 
+MSI (s) (90:28) [01:45:50:097]: Note: 1: 2228 2:  3: Error 4: SELECT `Message` FROM `Error` WHERE `Error` = 1725 
+MSI (s) (90:28) [01:45:50:097]: Note: 1: 2205 2:  3: Error 
+MSI (s) (90:28) [01:45:50:097]: Note: 1: 2228 2:  3: Error 4: SELECT `Message` FROM `Error` WHERE `Error` = 1709 
+MSI (s) (90:28) [01:45:50:097]: Product: Rulebox -- Removal failed.
+
+MSI (s) (90:28) [01:45:50:097]: Windows Installer removed the product. Product Name: Rulebox. Product Version: 0.1.1. Product Language: 1033. Manufacturer: Rulebox. Removal success or error status: 1603.
+
+MSI (s) (90:28) [01:45:50:099]: Deferring clean up of packages/files, if any exist
+MSI (s) (90:28) [01:45:50:099]: MainEngineThread is returning 1603
+MSI (s) (90:34) [01:45:50:101]: RESTART MANAGER: Session closed.
+MSI (s) (90:34) [01:45:50:101]: No System Restore sequence number for this installation.
+=== Logging stopped: 26/11/2026  1:45:50 ===
+MSI (s) (90:34) [01:45:50:101]: User policy value 'DisableRollback' is 0
+MSI (s) (90:34) [01:45:50:101]: Machine policy value 'DisableRollback' is 0
+MSI (s) (90:34) [01:45:50:101]: Incrementing counter to disable shutdown. Counter after increment: 0
+MSI (s) (90:34) [01:45:50:101]: Note: 1: 1402 2: HKEY_LOCAL_MACHINE\Software\Microsoft\Windows\CurrentVersion\Installer\Rollback\Scripts 3: 2 
+MSI (s) (90:34) [01:45:50:101]: Note: 1: 1402 2: HKEY_LOCAL_MACHINE\Software\Microsoft\Windows\CurrentVersion\Installer\Rollback\Scripts 3: 2 
+MSI (s) (90:34) [01:45:50:101]: Decrementing counter to disable shutdown. If counter >= 0, shutdown will be denied.  Counter after decrement: -1
+MSI (c) (40:94) [01:45:50:102]: Decrementing counter to disable shutdown. If counter >= 0, shutdown will be denied.  Counter after decrement: -1
+MSI (c) (40:94) [01:45:50:102]: MainEngineThread is returning 1603
+=== Verbose logging stopped: 26/11/2026  1:45:50 ===
+

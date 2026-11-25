@@ -1,0 +1,460 @@
+=== Verbose logging started: 26/11/2026  1:31:37  Build type: SHIP UNICODE 5.00.10011.00  Calling process: C:\WINDOWS\system32\msiexec.exe ===
+MSI (c) (8C:58) [01:31:37:514]: Font created.  Charset: Req=0, Ret=0, Font: Req=MS Shell Dlg, Ret=MS Shell Dlg
+
+MSI (c) (8C:58) [01:31:37:514]: Font created.  Charset: Req=0, Ret=0, Font: Req=MS Shell Dlg, Ret=MS Shell Dlg
+
+MSI (c) (8C:A0) [01:31:37:550]: Resetting cached policy values
+MSI (c) (8C:A0) [01:31:37:550]: Machine policy value 'Debug' is 0
+MSI (c) (8C:A0) [01:31:37:550]: ******* RunEngine:
+           ******* Product: C:\rb-run\msi\Rulebox-0.1.0-x64-fixed.msi
+           ******* Action: 
+           ******* CommandLine: **********
+MSI (c) (8C:A0) [01:31:37:557]: Machine policy value 'DisableUserInstalls' is 0
+MSI (c) (8C:A0) [01:31:37:560]: Note: 1: 1402 2: HKEY_CURRENT_USER\Software\Microsoft\Windows\CurrentVersion\Policies\Explorer 3: 2 
+MSI (c) (8C:A0) [01:31:37:562]: SOFTWARE RESTRICTION POLICY: Verifying package --> 'C:\rb-run\msi\Rulebox-0.1.0-x64-fixed.msi' against software restriction policy
+MSI (c) (8C:A0) [01:31:38:266]: Note: 1: 2262 2: DigitalSignature 3: -2147287038 
+MSI (c) (8C:A0) [01:31:38:266]: SOFTWARE RESTRICTION POLICY: C:\rb-run\msi\Rulebox-0.1.0-x64-fixed.msi is not digitally signed
+MSI (c) (8C:A0) [01:31:38:282]: SOFTWARE RESTRICTION POLICY: C:\rb-run\msi\Rulebox-0.1.0-x64-fixed.msi is permitted to run at the 'unrestricted' authorization level.
+MSI (c) (8C:A0) [01:31:38:345]: Cloaking enabled.
+MSI (c) (8C:A0) [01:31:38:345]: Attempting to enable all disabled privileges before calling Install on Server
+MSI (c) (8C:A0) [01:31:38:349]: End dialog not enabled
+MSI (c) (8C:A0) [01:31:38:349]: Original package ==> C:\rb-run\msi\Rulebox-0.1.0-x64-fixed.msi
+MSI (c) (8C:A0) [01:31:38:349]: Package we're running from ==> C:\rb-run\msi\Rulebox-0.1.0-x64-fixed.msi
+MSI (c) (8C:A0) [01:31:38:353]: APPCOMPAT: Compatibility mode property overrides found.
+MSI (c) (8C:A0) [01:31:38:357]: APPCOMPAT: looking for appcompat database entry with ProductCode '{ADC58A2B-BE5D-47C9-8321-6EC3D1E4D6E9}'.
+MSI (c) (8C:A0) [01:31:38:361]: APPCOMPAT: no matching ProductCode found in database.
+MSI (c) (8C:A0) [01:31:38:411]: MSCOREE not loaded loading copy from system32
+MSI (c) (8C:A0) [01:31:38:434]: Machine policy value 'TransformsSecure' is 0
+MSI (c) (8C:A0) [01:31:38:434]: User policy value 'TransformsAtSource' is 0
+MSI (c) (8C:A0) [01:31:38:434]: Machine policy value 'DisablePatch' is 0
+MSI (c) (8C:A0) [01:31:38:434]: Machine policy value 'AllowLockdownPatch' is 0
+MSI (c) (8C:A0) [01:31:38:434]: Machine policy value 'DisableLUAPatching' is 0
+MSI (c) (8C:A0) [01:31:38:434]: Machine policy value 'DisableFlyWeightPatching' is 0
+MSI (c) (8C:A0) [01:31:38:440]: APPCOMPAT: looking for appcompat database entry with ProductCode '{ADC58A2B-BE5D-47C9-8321-6EC3D1E4D6E9}'.
+MSI (c) (8C:A0) [01:31:38:440]: APPCOMPAT: no matching ProductCode found in database.
+MSI (c) (8C:A0) [01:31:38:456]: Transforms are not secure.
+MSI (c) (8C:A0) [01:31:38:456]: PROPERTY CHANGE: Adding MsiLogFileLocation property. Its value is 'C:\rb-run\out\a-1-ui-install-msi.log'.
+MSI (c) (8C:A0) [01:31:38:456]: Command Line: CURRENTDIRECTORY=C:\WINDOWS\system32 CLIENTUILEVEL=0 CLIENTPROCESSID=3212 
+MSI (c) (8C:A0) [01:31:38:456]: PROPERTY CHANGE: Adding PackageCode property. Its value is '{A17E5B08-E920-46DB-9326-573E2146E102}'.
+MSI (c) (8C:A0) [01:31:38:456]: Product Code passed to Engine.Initialize:           ''
+MSI (c) (8C:A0) [01:31:38:456]: Product Code from property table before transforms: '{ADC58A2B-BE5D-47C9-8321-6EC3D1E4D6E9}'
+MSI (c) (8C:A0) [01:31:38:456]: Product Code from property table after transforms:  '{ADC58A2B-BE5D-47C9-8321-6EC3D1E4D6E9}'
+MSI (c) (8C:A0) [01:31:38:456]: Product not registered: beginning first-time install
+MSI (c) (8C:A0) [01:31:38:456]: PROPERTY CHANGE: Adding ProductState property. Its value is '-1'.
+MSI (c) (8C:A0) [01:31:38:456]: Entering CMsiConfigurationManager::SetLastUsedSource.
+MSI (c) (8C:A0) [01:31:38:456]: User policy value 'SearchOrder' is 'nmu'
+MSI (c) (8C:A0) [01:31:38:456]: Adding new sources is allowed.
+MSI (c) (8C:A0) [01:31:38:456]: PROPERTY CHANGE: Adding PackagecodeChanging property. Its value is '1'.
+MSI (c) (8C:A0) [01:31:38:456]: Package name extracted from package path: 'Rulebox-0.1.0-x64-fixed.msi'
+MSI (c) (8C:A0) [01:31:38:456]: Package to be registered: 'Rulebox-0.1.0-x64-fixed.msi'
+MSI (c) (8C:A0) [01:31:38:456]: Note: 1: 2205 2:  3: Error 
+MSI (c) (8C:A0) [01:31:38:456]: Note: 1: 2262 2: AdminProperties 3: -2147287038 
+MSI (c) (8C:A0) [01:31:38:456]: Machine policy value 'DisableMsi' is 0
+MSI (c) (8C:A0) [01:31:38:456]: Machine policy value 'AlwaysInstallElevated' is 0
+MSI (c) (8C:A0) [01:31:38:456]: User policy value 'AlwaysInstallElevated' is 0
+MSI (c) (8C:A0) [01:31:38:456]: Product installation will be elevated because user is admin and product is being installed per-machine.
+MSI (c) (8C:A0) [01:31:38:456]: Running product '{ADC58A2B-BE5D-47C9-8321-6EC3D1E4D6E9}' with elevated privileges: Product is assigned.
+MSI (c) (8C:A0) [01:31:38:456]: PROPERTY CHANGE: Adding CURRENTDIRECTORY property. Its value is 'C:\WINDOWS\system32'.
+MSI (c) (8C:A0) [01:31:38:456]: PROPERTY CHANGE: Adding CLIENTUILEVEL property. Its value is '0'.
+MSI (c) (8C:A0) [01:31:38:456]: PROPERTY CHANGE: Adding CLIENTPROCESSID property. Its value is '3212'.
+MSI (c) (8C:A0) [01:31:38:456]: TRANSFORMS property is now: 
+MSI (c) (8C:A0) [01:31:38:456]: PROPERTY CHANGE: Adding VersionDatabase property. Its value is '500'.
+MSI (c) (8C:A0) [01:31:38:474]: SHELL32::SHGetFolderPath returned: C:\Users\rbtest\AppData\Roaming
+MSI (c) (8C:A0) [01:31:38:474]: SHELL32::SHGetFolderPath returned: C:\Users\rbtest\Favorites
+MSI (c) (8C:A0) [01:31:38:474]: SHELL32::SHGetFolderPath returned: C:\Users\rbtest\AppData\Roaming\Microsoft\Windows\Network Shortcuts
+MSI (c) (8C:A0) [01:31:38:474]: SHELL32::SHGetFolderPath returned: C:\Users\rbtest\Documents
+MSI (c) (8C:A0) [01:31:38:474]: SHELL32::SHGetFolderPath returned: C:\Users\rbtest\AppData\Roaming\Microsoft\Windows\Printer Shortcuts
+MSI (c) (8C:A0) [01:31:38:474]: SHELL32::SHGetFolderPath returned: C:\Users\rbtest\AppData\Roaming\Microsoft\Windows\Recent
+MSI (c) (8C:A0) [01:31:38:474]: SHELL32::SHGetFolderPath returned: C:\Users\rbtest\AppData\Roaming\Microsoft\Windows\SendTo
+MSI (c) (8C:A0) [01:31:38:478]: SHELL32::SHGetFolderPath returned: C:\Users\rbtest\AppData\Roaming\Microsoft\Windows\Templates
+MSI (c) (8C:A0) [01:31:38:478]: SHELL32::SHGetFolderPath returned: C:\ProgramData
+MSI (c) (8C:A0) [01:31:38:478]: SHELL32::SHGetFolderPath returned: C:\Users\rbtest\AppData\Local
+MSI (c) (8C:A0) [01:31:38:478]: SHELL32::SHGetFolderPath returned: C:\Users\rbtest\Pictures
+MSI (c) (8C:A0) [01:31:38:478]: SHELL32::SHGetFolderPath returned: C:\ProgramData\Microsoft\Windows\Start Menu\Programs\Administrative Tools
+MSI (c) (8C:A0) [01:31:38:478]: SHELL32::SHGetFolderPath returned: C:\ProgramData\Microsoft\Windows\Start Menu\Programs\Startup
+MSI (c) (8C:A0) [01:31:38:478]: SHELL32::SHGetFolderPath returned: C:\ProgramData\Microsoft\Windows\Start Menu\Programs
+MSI (c) (8C:A0) [01:31:38:478]: SHELL32::SHGetFolderPath returned: C:\ProgramData\Microsoft\Windows\Start Menu
+MSI (c) (8C:A0) [01:31:38:480]: SHELL32::SHGetFolderPath returned: C:\Users\Public\Desktop
+MSI (c) (8C:A0) [01:31:38:480]: SHELL32::SHGetFolderPath returned: C:\Users\rbtest\AppData\Roaming\Microsoft\Windows\Start Menu\Programs\Administrative Tools
+MSI (c) (8C:A0) [01:31:38:480]: SHELL32::SHGetFolderPath returned: C:\Users\rbtest\AppData\Roaming\Microsoft\Windows\Start Menu\Programs\Startup
+MSI (c) (8C:A0) [01:31:38:480]: SHELL32::SHGetFolderPath returned: C:\Users\rbtest\AppData\Roaming\Microsoft\Windows\Start Menu\Programs
+MSI (c) (8C:A0) [01:31:38:480]: SHELL32::SHGetFolderPath returned: C:\Users\rbtest\AppData\Roaming\Microsoft\Windows\Start Menu
+MSI (c) (8C:A0) [01:31:38:480]: SHELL32::SHGetFolderPath returned: C:\Users\rbtest\Desktop
+MSI (c) (8C:A0) [01:31:38:480]: SHELL32::SHGetFolderPath returned: C:\ProgramData\Microsoft\Windows\Templates
+MSI (c) (8C:A0) [01:31:38:480]: SHELL32::SHGetFolderPath returned: C:\WINDOWS\Fonts
+MSI (c) (8C:A0) [01:31:38:482]: Note: 1: 2898 2: MS Sans Serif 3: MS Sans Serif 4: 0 5: 16 
+MSI (c) (8C:A0) [01:31:38:495]: MSI_LUA: Setting AdminUser property to 1 because this is the client or the user has already permitted elevation
+MSI (c) (8C:A0) [01:31:38:495]: MSI_LUA: Setting MsiRunningElevated property to 1 because the install is already running elevated.
+MSI (c) (8C:A0) [01:31:38:495]: PROPERTY CHANGE: Adding MsiRunningElevated property. Its value is '1'.
+MSI (c) (8C:A0) [01:31:38:495]: PROPERTY CHANGE: Adding Privileged property. Its value is '1'.
+MSI (c) (8C:A0) [01:31:38:495]: Note: 1: 1402 2: HKEY_CURRENT_USER\Software\Microsoft\MS Setup (ACME)\User Info 3: 2 
+MSI (c) (8C:A0) [01:31:38:495]: PROPERTY CHANGE: Adding USERNAME property. Its value is 'user@example.invalid'.
+MSI (c) (8C:A0) [01:31:38:495]: Note: 1: 1402 2: HKEY_CURRENT_USER\Software\Microsoft\MS Setup (ACME)\User Info 3: 2 
+MSI (c) (8C:A0) [01:31:38:495]: PROPERTY CHANGE: Adding DATABASE property. Its value is 'C:\rb-run\msi\Rulebox-0.1.0-x64-fixed.msi'.
+MSI (c) (8C:A0) [01:31:38:495]: PROPERTY CHANGE: Adding OriginalDatabase property. Its value is 'C:\rb-run\msi\Rulebox-0.1.0-x64-fixed.msi'.
+MSI (c) (8C:A0) [01:31:38:495]: Machine policy value 'MsiDisableEmbeddedUI' is 0
+MSI (c) (8C:A0) [01:31:38:495]: PROPERTY CHANGE: Adding SourceDir property. Its value is 'C:\rb-run\msi\'.
+MSI (c) (8C:A0) [01:31:38:495]: PROPERTY CHANGE: Adding SOURCEDIR property. Its value is 'C:\rb-run\msi\'.
+MSI (c) (8C:58) [01:31:38:503]: PROPERTY CHANGE: Adding VersionHandler property. Its value is '5.00'.
+=== Logging started: 26/11/2026  1:31:38 ===
+MSI (c) (8C:A0) [01:31:38:531]: Note: 1: 2205 2:  3: PatchPackage 
+MSI (c) (8C:A0) [01:31:38:531]: Machine policy value 'DisableRollback' is 0
+MSI (c) (8C:A0) [01:31:38:531]: User policy value 'DisableRollback' is 0
+MSI (c) (8C:A0) [01:31:38:531]: PROPERTY CHANGE: Adding UILevel property. Its value is '5'.
+MSI (c) (8C:A0) [01:31:38:531]: Note: 1: 2203 2: C:\WINDOWS\Installer\inprogressinstallinfo.ipi 3: -2147287038 
+MSI (c) (8C:A0) [01:31:38:537]: PROPERTY CHANGE: Modifying VersionNT property. Its current value is '603'. Its new value: '601'.
+MSI (c) (8C:A0) [01:31:38:537]: PROPERTY CHANGE: Modifying VersionNT64 property. Its current value is '603'. Its new value: '601'.
+MSI (c) (8C:A0) [01:31:38:537]: PROPERTY CHANGE: Modifying ServicePackLevel property. Its current value is '0'. Its new value: '14'.
+MSI (c) (8C:A0) [01:31:38:537]: PROPERTY CHANGE: Modifying ServicePackLevel property. Its current value is '14'. Its new value: '13'.
+MSI (c) (8C:A0) [01:31:38:537]: PROPERTY CHANGE: Modifying ServicePackLevel property. Its current value is '13'. Its new value: '12'.
+MSI (c) (8C:A0) [01:31:38:537]: PROPERTY CHANGE: Modifying ServicePackLevel property. Its current value is '12'. Its new value: '11'.
+MSI (c) (8C:A0) [01:31:38:537]: PROPERTY CHANGE: Modifying ServicePackLevel property. Its current value is '11'. Its new value: '10'.
+MSI (c) (8C:A0) [01:31:38:537]: PROPERTY CHANGE: Modifying ServicePackLevel property. Its current value is '10'. Its new value: '9'.
+MSI (c) (8C:A0) [01:31:38:537]: PROPERTY CHANGE: Modifying ServicePackLevel property. Its current value is '9'. Its new value: '8'.
+MSI (c) (8C:A0) [01:31:38:537]: PROPERTY CHANGE: Modifying ServicePackLevel property. Its current value is '8'. Its new value: '7'.
+MSI (c) (8C:A0) [01:31:38:537]: PROPERTY CHANGE: Modifying ServicePackLevel property. Its current value is '7'. Its new value: '6'.
+MSI (c) (8C:A0) [01:31:38:537]: PROPERTY CHANGE: Modifying ServicePackLevel property. Its current value is '6'. Its new value: '5'.
+MSI (c) (8C:A0) [01:31:38:537]: PROPERTY CHANGE: Modifying ServicePackLevel property. Its current value is '5'. Its new value: '4'.
+MSI (c) (8C:A0) [01:31:38:537]: PROPERTY CHANGE: Modifying ServicePackLevel property. Its current value is '4'. Its new value: '3'.
+MSI (c) (8C:A0) [01:31:38:537]: PROPERTY CHANGE: Modifying ServicePackLevel property. Its current value is '3'. Its new value: '2'.
+MSI (c) (8C:A0) [01:31:38:537]: PROPERTY CHANGE: Modifying ServicePackLevel property. Its current value is '2'. Its new value: '1'.
+MSI (c) (8C:A0) [01:31:38:537]: PROPERTY CHANGE: Modifying ServicePackLevel property. Its current value is '1'. Its new value: '0'.
+MSI (c) (8C:A0) [01:31:38:537]: PROPERTY CHANGE: Modifying VersionNT property. Its current value is '601'. Its new value: '600'.
+MSI (c) (8C:A0) [01:31:38:537]: PROPERTY CHANGE: Modifying VersionNT64 property. Its current value is '601'. Its new value: '600'.
+MSI (c) (8C:A0) [01:31:38:537]: PROPERTY CHANGE: Modifying ServicePackLevel property. Its current value is '0'. Its new value: '14'.
+MSI (c) (8C:A0) [01:31:38:537]: PROPERTY CHANGE: Modifying ServicePackLevel property. Its current value is '14'. Its new value: '13'.
+MSI (c) (8C:A0) [01:31:38:537]: PROPERTY CHANGE: Modifying ServicePackLevel property. Its current value is '13'. Its new value: '12'.
+MSI (c) (8C:A0) [01:31:38:537]: PROPERTY CHANGE: Modifying ServicePackLevel property. Its current value is '12'. Its new value: '11'.
+MSI (c) (8C:A0) [01:31:38:537]: PROPERTY CHANGE: Modifying ServicePackLevel property. Its current value is '11'. Its new value: '10'.
+MSI (c) (8C:A0) [01:31:38:537]: PROPERTY CHANGE: Modifying ServicePackLevel property. Its current value is '10'. Its new value: '9'.
+MSI (c) (8C:A0) [01:31:38:537]: PROPERTY CHANGE: Modifying ServicePackLevel property. Its current value is '9'. Its new value: '8'.
+MSI (c) (8C:A0) [01:31:38:537]: PROPERTY CHANGE: Modifying ServicePackLevel property. Its current value is '8'. Its new value: '7'.
+MSI (c) (8C:A0) [01:31:38:537]: PROPERTY CHANGE: Modifying ServicePackLevel property. Its current value is '7'. Its new value: '6'.
+MSI (c) (8C:A0) [01:31:38:537]: PROPERTY CHANGE: Modifying ServicePackLevel property. Its current value is '6'. Its new value: '5'.
+MSI (c) (8C:A0) [01:31:38:537]: PROPERTY CHANGE: Modifying ServicePackLevel property. Its current value is '5'. Its new value: '4'.
+MSI (c) (8C:A0) [01:31:38:537]: PROPERTY CHANGE: Modifying ServicePackLevel property. Its current value is '4'. Its new value: '3'.
+MSI (c) (8C:A0) [01:31:38:537]: PROPERTY CHANGE: Modifying ServicePackLevel property. Its current value is '3'. Its new value: '2'.
+MSI (c) (8C:A0) [01:31:38:537]: PROPERTY CHANGE: Modifying ServicePackLevel property. Its current value is '2'. Its new value: '1'.
+MSI (c) (8C:A0) [01:31:38:537]: PROPERTY CHANGE: Modifying ServicePackLevel property. Its current value is '1'. Its new value: '0'.
+MSI (c) (8C:A0) [01:31:38:537]: PROPERTY CHANGE: Modifying VersionNT property. Its current value is '600'. Its new value: '502'.
+MSI (c) (8C:A0) [01:31:38:537]: PROPERTY CHANGE: Modifying VersionNT64 property. Its current value is '600'. Its new value: '502'.
+MSI (c) (8C:A0) [01:31:38:537]: PROPERTY CHANGE: Modifying ServicePackLevel property. Its current value is '0'. Its new value: '14'.
+MSI (c) (8C:A0) [01:31:38:537]: PROPERTY CHANGE: Modifying ServicePackLevel property. Its current value is '14'. Its new value: '13'.
+MSI (c) (8C:A0) [01:31:38:537]: PROPERTY CHANGE: Modifying ServicePackLevel property. Its current value is '13'. Its new value: '12'.
+MSI (c) (8C:A0) [01:31:38:537]: PROPERTY CHANGE: Modifying ServicePackLevel property. Its current value is '12'. Its new value: '11'.
+MSI (c) (8C:A0) [01:31:38:537]: PROPERTY CHANGE: Modifying ServicePackLevel property. Its current value is '11'. Its new value: '10'.
+MSI (c) (8C:A0) [01:31:38:537]: PROPERTY CHANGE: Modifying ServicePackLevel property. Its current value is '10'. Its new value: '9'.
+MSI (c) (8C:A0) [01:31:38:537]: PROPERTY CHANGE: Modifying ServicePackLevel property. Its current value is '9'. Its new value: '8'.
+MSI (c) (8C:A0) [01:31:38:537]: PROPERTY CHANGE: Modifying ServicePackLevel property. Its current value is '8'. Its new value: '7'.
+MSI (c) (8C:A0) [01:31:38:537]: PROPERTY CHANGE: Modifying ServicePackLevel property. Its current value is '7'. Its new value: '6'.
+MSI (c) (8C:A0) [01:31:38:537]: PROPERTY CHANGE: Modifying ServicePackLevel property. Its current value is '6'. Its new value: '5'.
+MSI (c) (8C:A0) [01:31:38:537]: PROPERTY CHANGE: Modifying ServicePackLevel property. Its current value is '5'. Its new value: '4'.
+MSI (c) (8C:A0) [01:31:38:537]: PROPERTY CHANGE: Modifying ServicePackLevel property. Its current value is '4'. Its new value: '3'.
+MSI (c) (8C:A0) [01:31:38:537]: PROPERTY CHANGE: Modifying ServicePackLevel property. Its current value is '3'. Its new value: '2'.
+MSI (c) (8C:A0) [01:31:38:537]: PROPERTY CHANGE: Modifying ServicePackLevel property. Its current value is '2'. Its new value: '1'.
+MSI (c) (8C:A0) [01:31:38:537]: PROPERTY CHANGE: Modifying ServicePackLevel property. Its current value is '1'. Its new value: '0'.
+MSI (c) (8C:A0) [01:31:38:537]: PROPERTY CHANGE: Modifying VersionNT property. Its current value is '502'. Its new value: '501'.
+MSI (c) (8C:A0) [01:31:38:537]: PROPERTY CHANGE: Modifying VersionNT64 property. Its current value is '502'. Its new value: '501'.
+MSI (c) (8C:A0) [01:31:38:537]: PROPERTY CHANGE: Modifying ServicePackLevel property. Its current value is '0'. Its new value: '14'.
+MSI (c) (8C:A0) [01:31:38:537]: PROPERTY CHANGE: Modifying ServicePackLevel property. Its current value is '14'. Its new value: '13'.
+MSI (c) (8C:A0) [01:31:38:537]: PROPERTY CHANGE: Modifying ServicePackLevel property. Its current value is '13'. Its new value: '12'.
+MSI (c) (8C:A0) [01:31:38:537]: PROPERTY CHANGE: Modifying ServicePackLevel property. Its current value is '12'. Its new value: '11'.
+MSI (c) (8C:A0) [01:31:38:537]: PROPERTY CHANGE: Modifying ServicePackLevel property. Its current value is '11'. Its new value: '10'.
+MSI (c) (8C:A0) [01:31:38:537]: PROPERTY CHANGE: Modifying ServicePackLevel property. Its current value is '10'. Its new value: '9'.
+MSI (c) (8C:A0) [01:31:38:537]: PROPERTY CHANGE: Modifying ServicePackLevel property. Its current value is '9'. Its new value: '8'.
+MSI (c) (8C:A0) [01:31:38:537]: PROPERTY CHANGE: Modifying ServicePackLevel property. Its current value is '8'. Its new value: '7'.
+MSI (c) (8C:A0) [01:31:38:537]: PROPERTY CHANGE: Modifying ServicePackLevel property. Its current value is '7'. Its new value: '6'.
+MSI (c) (8C:A0) [01:31:38:537]: PROPERTY CHANGE: Modifying ServicePackLevel property. Its current value is '6'. Its new value: '5'.
+MSI (c) (8C:A0) [01:31:38:537]: PROPERTY CHANGE: Modifying ServicePackLevel property. Its current value is '5'. Its new value: '4'.
+MSI (c) (8C:A0) [01:31:38:537]: PROPERTY CHANGE: Modifying ServicePackLevel property. Its current value is '4'. Its new value: '3'.
+MSI (c) (8C:A0) [01:31:38:537]: PROPERTY CHANGE: Modifying ServicePackLevel property. Its current value is '3'. Its new value: '2'.
+MSI (c) (8C:A0) [01:31:38:537]: PROPERTY CHANGE: Modifying ServicePackLevel property. Its current value is '2'. Its new value: '1'.
+MSI (c) (8C:A0) [01:31:38:537]: PROPERTY CHANGE: Modifying ServicePackLevel property. Its current value is '1'. Its new value: '0'.
+MSI (c) (8C:A0) [01:31:38:537]: PROPERTY CHANGE: Modifying VersionNT property. Its current value is '501'. Its new value: '500'.
+MSI (c) (8C:A0) [01:31:38:537]: PROPERTY CHANGE: Modifying VersionNT64 property. Its current value is '501'. Its new value: '500'.
+MSI (c) (8C:A0) [01:31:38:537]: PROPERTY CHANGE: Modifying ServicePackLevel property. Its current value is '0'. Its new value: '14'.
+MSI (c) (8C:A0) [01:31:38:537]: PROPERTY CHANGE: Modifying ServicePackLevel property. Its current value is '14'. Its new value: '13'.
+MSI (c) (8C:A0) [01:31:38:537]: PROPERTY CHANGE: Modifying ServicePackLevel property. Its current value is '13'. Its new value: '12'.
+MSI (c) (8C:A0) [01:31:38:537]: PROPERTY CHANGE: Modifying ServicePackLevel property. Its current value is '12'. Its new value: '11'.
+MSI (c) (8C:A0) [01:31:38:539]: PROPERTY CHANGE: Modifying ServicePackLevel property. Its current value is '11'. Its new value: '10'.
+MSI (c) (8C:A0) [01:31:38:539]: PROPERTY CHANGE: Modifying ServicePackLevel property. Its current value is '10'. Its new value: '9'.
+MSI (c) (8C:A0) [01:31:38:539]: PROPERTY CHANGE: Modifying ServicePackLevel property. Its current value is '9'. Its new value: '8'.
+MSI (c) (8C:A0) [01:31:38:539]: PROPERTY CHANGE: Modifying ServicePackLevel property. Its current value is '8'. Its new value: '7'.
+MSI (c) (8C:A0) [01:31:38:539]: PROPERTY CHANGE: Modifying ServicePackLevel property. Its current value is '7'. Its new value: '6'.
+MSI (c) (8C:A0) [01:31:38:539]: PROPERTY CHANGE: Modifying ServicePackLevel property. Its current value is '6'. Its new value: '5'.
+MSI (c) (8C:A0) [01:31:38:539]: PROPERTY CHANGE: Modifying ServicePackLevel property. Its current value is '5'. Its new value: '4'.
+MSI (c) (8C:A0) [01:31:38:539]: PROPERTY CHANGE: Modifying ServicePackLevel property. Its current value is '4'. Its new value: '3'.
+MSI (c) (8C:A0) [01:31:38:539]: PROPERTY CHANGE: Modifying ServicePackLevel property. Its current value is '3'. Its new value: '2'.
+MSI (c) (8C:A0) [01:31:38:539]: PROPERTY CHANGE: Modifying ServicePackLevel property. Its current value is '2'. Its new value: '1'.
+MSI (c) (8C:A0) [01:31:38:539]: PROPERTY CHANGE: Modifying ServicePackLevel property. Its current value is '1'. Its new value: '0'.
+MSI (c) (8C:A0) [01:31:38:539]: PROPERTY CHANGE: Modifying VersionNT property. Its current value is '500'. Its new value: '400'.
+MSI (c) (8C:A0) [01:31:38:539]: PROPERTY CHANGE: Modifying VersionNT64 property. Its current value is '500'. Its new value: '400'.
+MSI (c) (8C:A0) [01:31:38:539]: PROPERTY CHANGE: Modifying ServicePackLevel property. Its current value is '0'. Its new value: '14'.
+MSI (c) (8C:A0) [01:31:38:539]: PROPERTY CHANGE: Modifying ServicePackLevel property. Its current value is '14'. Its new value: '13'.
+MSI (c) (8C:A0) [01:31:38:539]: PROPERTY CHANGE: Modifying ServicePackLevel property. Its current value is '13'. Its new value: '12'.
+MSI (c) (8C:A0) [01:31:38:539]: PROPERTY CHANGE: Modifying ServicePackLevel property. Its current value is '12'. Its new value: '11'.
+MSI (c) (8C:A0) [01:31:38:539]: PROPERTY CHANGE: Modifying ServicePackLevel property. Its current value is '11'. Its new value: '10'.
+MSI (c) (8C:A0) [01:31:38:539]: PROPERTY CHANGE: Modifying ServicePackLevel property. Its current value is '10'. Its new value: '9'.
+MSI (c) (8C:A0) [01:31:38:539]: PROPERTY CHANGE: Modifying ServicePackLevel property. Its current value is '9'. Its new value: '8'.
+MSI (c) (8C:A0) [01:31:38:539]: PROPERTY CHANGE: Modifying ServicePackLevel property. Its current value is '8'. Its new value: '7'.
+MSI (c) (8C:A0) [01:31:38:539]: PROPERTY CHANGE: Modifying ServicePackLevel property. Its current value is '7'. Its new value: '6'.
+MSI (c) (8C:A0) [01:31:38:539]: PROPERTY CHANGE: Modifying ServicePackLevel property. Its current value is '6'. Its new value: '5'.
+MSI (c) (8C:A0) [01:31:38:539]: PROPERTY CHANGE: Modifying ServicePackLevel property. Its current value is '5'. Its new value: '4'.
+MSI (c) (8C:A0) [01:31:38:539]: PROPERTY CHANGE: Modifying ServicePackLevel property. Its current value is '4'. Its new value: '3'.
+MSI (c) (8C:A0) [01:31:38:539]: PROPERTY CHANGE: Modifying ServicePackLevel property. Its current value is '3'. Its new value: '2'.
+MSI (c) (8C:A0) [01:31:38:539]: PROPERTY CHANGE: Modifying ServicePackLevel property. Its current value is '2'. Its new value: '1'.
+MSI (c) (8C:A0) [01:31:38:539]: PROPERTY CHANGE: Modifying ServicePackLevel property. Its current value is '1'. Its new value: '0'.
+MSI (c) (8C:A0) [01:31:38:539]: PROPERTY CHANGE: Modifying VersionNT property. Its current value is '400'. Its new value: '603'.
+MSI (c) (8C:A0) [01:31:38:539]: PROPERTY CHANGE: Modifying VersionNT64 property. Its current value is '400'. Its new value: '603'.
+MSI (c) (8C:A0) [01:31:38:605]: PROPERTY CHANGE: Adding ACTION property. Its value is 'INSTALL'.
+MSI (c) (8C:A0) [01:31:38:605]: Doing action: INSTALL
+MSI (c) (8C:A0) [01:31:38:605]: Note: 1: 2205 2:  3: ActionText 
+Action 1:31:38: INSTALL. 
+Action start 1:31:38: INSTALL.
+MSI (c) (8C:A0) [01:31:38:631]: UI Sequence table 'InstallUISequence' is present and populated.
+MSI (c) (8C:A0) [01:31:38:631]: Running UISequence
+MSI (c) (8C:A0) [01:31:38:631]: PROPERTY CHANGE: Adding EXECUTEACTION property. Its value is 'INSTALL'.
+MSI (c) (8C:A0) [01:31:38:631]: Doing action: FindRelatedProducts
+MSI (c) (8C:A0) [01:31:38:631]: Note: 1: 2205 2:  3: ActionText 
+Action 1:31:38: FindRelatedProducts. Searching for related applications Found application: [1]
+Action start 1:31:38: FindRelatedProducts.
+Action ended 1:31:38: FindRelatedProducts. Return value 1.
+MSI (c) (8C:A0) [01:31:38:635]: Doing action: PrepareDlg
+MSI (c) (8C:A0) [01:31:38:635]: Note: 1: 2205 2:  3: ActionText 
+Action 1:31:38: PrepareDlg. 
+Action start 1:31:38: PrepareDlg.
+MSI (c) (8C:58) [01:31:38:639]: Note: 1: 2205 2:  3: Error 
+MSI (c) (8C:58) [01:31:38:639]: Note: 1: 2228 2:  3: Error 4: SELECT `Message` FROM `Error` WHERE `Error` = 2898 
+Info 2898.For WixUI_Font_Normal textstyle, the system created a 'Tahoma' font, in 0 character set, of 13 pixels height.
+MSI (c) (8C:58) [01:31:38:643]: Note: 1: 2205 2:  3: Error 
+MSI (c) (8C:58) [01:31:38:643]: Note: 1: 2228 2:  3: Error 4: SELECT `Message` FROM `Error` WHERE `Error` = 2898 
+Info 2898.For WixUI_Font_Bigger textstyle, the system created a 'Tahoma' font, in 0 character set, of 19 pixels height.
+MSI (c) (8C:58) [01:31:38:663]: Note: 1: 2205 2:  3: Error 
+MSI (c) (8C:58) [01:31:38:663]: Note: 1: 2228 2:  3: Error 4: SELECT `Message` FROM `Error` WHERE `Error` = 2826 
+DEBUG: Error 2826:  Control BottomLine on dialog PrepareDlg extends beyond the boundaries of the dialog to the right by 4 pixels
+The installer has encountered an unexpected error installing this package. This may indicate a problem with this package. The error code is 2826. The arguments are: PrepareDlg, BottomLine, to the right
+Action 1:31:38: PrepareDlg. Dialog created
+Action ended 1:31:38: PrepareDlg. Return value 1.
+MSI (c) (8C:A0) [01:31:38:723]: Doing action: AppSearch
+MSI (c) (8C:A0) [01:31:38:723]: Note: 1: 2205 2:  3: ActionText 
+Action 1:31:38: AppSearch. Searching for installed applications Property: [1], Signature: [2]
+Action start 1:31:38: AppSearch.
+AppSearch: 
+MSI (c) (8C:A0) [01:31:38:725]: Note: 1: 2262 2: Signature 3: -2147287038 
+MSI (c) (8C:A0) [01:31:38:728]: PROPERTY CHANGE: Adding WINBUILD property. Its value is '26300'.
+AppSearch: 
+MSI (c) (8C:A0) [01:31:38:728]: Note: 1: 2262 2: Signature 3: -2147287038 
+MSI (c) (8C:A0) [01:31:38:728]: Note: 1: 1402 2: HKEY_LOCAL_MACHINE\SOFTWARE\Rulebox\Install 3: 2 
+Action ended 1:31:38: AppSearch. Return value 1.
+MSI (c) (8C:A0) [01:31:38:728]: Doing action: ValidateProductID
+MSI (c) (8C:A0) [01:31:38:728]: Note: 1: 2205 2:  3: ActionText 
+Action 1:31:38: ValidateProductID. 
+Action start 1:31:38: ValidateProductID.
+Action ended 1:31:38: ValidateProductID. Return value 1.
+MSI (c) (8C:A0) [01:31:38:730]: Doing action: CostInitialize
+MSI (c) (8C:A0) [01:31:38:730]: Note: 1: 2205 2:  3: ActionText 
+Action 1:31:38: CostInitialize. Computing space requirements
+Action start 1:31:38: CostInitialize.
+MSI (c) (8C:A0) [01:31:38:732]: Machine policy value 'MaxPatchCacheSize' is 10
+MSI (c) (8C:A0) [01:31:38:734]: PROPERTY CHANGE: Adding ROOTDRIVE property. Its value is 'C:\'.
+MSI (c) (8C:A0) [01:31:38:734]: PROPERTY CHANGE: Adding CostingComplete property. Its value is '0'.
+Action ended 1:31:38: CostInitialize. Return value 1.
+MSI (c) (8C:A0) [01:31:38:734]: Doing action: FileCost
+MSI (c) (8C:A0) [01:31:38:734]: Note: 1: 2205 2:  3: ActionText 
+Action 1:31:38: FileCost. Computing space requirements
+Action start 1:31:38: FileCost.
+MSI (c) (8C:A0) [01:31:38:736]: Note: 1: 2205 2:  3: MsiAssembly 
+MSI (c) (8C:A0) [01:31:38:738]: Note: 1: 2205 2:  3: Class 
+MSI (c) (8C:A0) [01:31:38:738]: Note: 1: 2205 2:  3: Extension 
+MSI (c) (8C:A0) [01:31:38:738]: Note: 1: 2205 2:  3: TypeLib 
+Action ended 1:31:38: FileCost. Return value 1.
+MSI (c) (8C:A0) [01:31:38:738]: Doing action: CostFinalize
+MSI (c) (8C:A0) [01:31:38:738]: Note: 1: 2205 2:  3: ActionText 
+Action 1:31:38: CostFinalize. Computing space requirements
+Action start 1:31:38: CostFinalize.
+MSI (c) (8C:A0) [01:31:38:746]: PROPERTY CHANGE: Adding OutOfDiskSpace property. Its value is '0'.
+MSI (c) (8C:A0) [01:31:38:746]: PROPERTY CHANGE: Adding OutOfNoRbDiskSpace property. Its value is '0'.
+MSI (c) (8C:A0) [01:31:38:746]: PROPERTY CHANGE: Adding PrimaryVolumeSpaceAvailable property. Its value is '0'.
+MSI (c) (8C:A0) [01:31:38:746]: PROPERTY CHANGE: Adding PrimaryVolumeSpaceRequired property. Its value is '0'.
+MSI (c) (8C:A0) [01:31:38:746]: PROPERTY CHANGE: Adding PrimaryVolumeSpaceRemaining property. Its value is '0'.
+MSI (c) (8C:A0) [01:31:38:746]: Note: 1: 2205 2:  3: Patch 
+MSI (c) (8C:A0) [01:31:38:746]: Note: 1: 2205 2:  3: Condition 
+MSI (c) (8C:A0) [01:31:38:746]: PROPERTY CHANGE: Adding TARGETDIR property. Its value is 'C:\'.
+MSI (c) (8C:A0) [01:31:38:746]: PROPERTY CHANGE: Adding RuleboxMenuFolder property. Its value is 'C:\ProgramData\Microsoft\Windows\Start Menu\Programs\Rulebox\'.
+MSI (c) (8C:A0) [01:31:38:746]: PROPERTY CHANGE: Adding INSTALLFOLDER property. Its value is 'C:\Program Files\Rulebox\'.
+MSI (c) (8C:A0) [01:31:38:746]: PROPERTY CHANGE: Adding VersionsFolder property. Its value is 'C:\Program Files\Rulebox\versions\'.
+MSI (c) (8C:A0) [01:31:38:746]: PROPERTY CHANGE: Adding CurrentVersionFolder property. Its value is 'C:\Program Files\Rulebox\versions\0.1.0\'.
+MSI (c) (8C:A0) [01:31:38:746]: Target path resolution complete. Dumping Directory table...
+MSI (c) (8C:A0) [01:31:38:746]: Note: target paths subject to change (via custom actions or browsing)
+MSI (c) (8C:A0) [01:31:38:746]: Dir (target): Key: TARGETDIR	, Object: C:\
+MSI (c) (8C:A0) [01:31:38:746]: Dir (target): Key: WindowsFolder	, Object: C:\WINDOWS\
+MSI (c) (8C:A0) [01:31:38:746]: Dir (target): Key: ProgramMenuFolder	, Object: C:\ProgramData\Microsoft\Windows\Start Menu\Programs\
+MSI (c) (8C:A0) [01:31:38:746]: Dir (target): Key: RuleboxMenuFolder	, Object: C:\ProgramData\Microsoft\Windows\Start Menu\Programs\Rulebox\
+MSI (c) (8C:A0) [01:31:38:746]: Dir (target): Key: ProgramFiles64Folder	, Object: C:\Program Files\
+MSI (c) (8C:A0) [01:31:38:746]: Dir (target): Key: INSTALLFOLDER	, Object: C:\Program Files\Rulebox\
+MSI (c) (8C:A0) [01:31:38:746]: Dir (target): Key: VersionsFolder	, Object: C:\Program Files\Rulebox\versions\
+MSI (c) (8C:A0) [01:31:38:746]: Dir (target): Key: CurrentVersionFolder	, Object: C:\Program Files\Rulebox\versions\0.1.0\
+MSI (c) (8C:A0) [01:31:38:748]: PROPERTY CHANGE: Adding INSTALLLEVEL property. Its value is '1'.
+MSI (c) (8C:A0) [01:31:38:748]: Note: 1: 2205 2:  3: MsiAssembly 
+MSI (c) (8C:A0) [01:31:38:748]: Note: 1: 2228 2:  3: MsiAssembly 4:  SELECT `MsiAssembly`.`Attributes`, `MsiAssembly`.`File_Application`, `MsiAssembly`.`File_Manifest`,  `Component`.`KeyPath` FROM `MsiAssembly`, `Component` WHERE  `MsiAssembly`.`Component_` = `Component`.`Component` AND `MsiAssembly`.`Component_` = ? 
+Action ended 1:31:38: CostFinalize. Return value 1.
+MSI (c) (8C:A0) [01:31:38:748]: Doing action: LaunchConditions
+MSI (c) (8C:A0) [01:31:38:748]: Note: 1: 2205 2:  3: ActionText 
+Action 1:31:38: LaunchConditions. Evaluating launch conditions
+Action start 1:31:38: LaunchConditions.
+Rulebox needs 2 GB of free disk space. Free some space, then run this installer again.
+MSI (c) (8C:A0) [01:32:13:461]: Note: 1: 2205 2:  3: Error 
+MSI (c) (8C:A0) [01:32:13:461]: Note: 1: 2228 2:  3: Error 4: SELECT `Message` FROM `Error` WHERE `Error` = 1709 
+MSI (c) (8C:A0) [01:32:13:477]: Product: Rulebox -- Rulebox needs 2 GB of free disk space. Free some space, then run this installer again.
+
+Action ended 1:32:13: LaunchConditions. Return value 3.
+MSI (c) (8C:A0) [01:32:13:479]: Doing action: FatalError
+MSI (c) (8C:A0) [01:32:13:479]: Note: 1: 2205 2:  3: ActionText 
+Action 1:32:13: FatalError. 
+Action start 1:32:13: FatalError.
+MSI (c) (8C:58) [01:32:13:487]: Note: 1: 2205 2:  3: Error 
+MSI (c) (8C:58) [01:32:13:487]: Note: 1: 2228 2:  3: Error 4: SELECT `Message` FROM `Error` WHERE `Error` = 2826 
+DEBUG: Error 2826:  Control BottomLine on dialog FatalError extends beyond the boundaries of the dialog to the right by 4 pixels
+The installer has encountered an unexpected error installing this package. This may indicate a problem with this package. The error code is 2826. The arguments are: FatalError, BottomLine, to the right
+Action 1:32:13: FatalError. Dialog created
+MSI (c) (8C:1C) [01:32:13:501]: Note: 1: 2205 2:  3: _RemoveFilePath 
+MSI (c) (8C:1C) [01:32:13:501]: PROPERTY CHANGE: Modifying CostingComplete property. Its current value is '0'. Its new value: '1'.
+MSI (c) (8C:1C) [01:32:13:501]: Note: 1: 2205 2:  3: BindImage 
+MSI (c) (8C:1C) [01:32:13:501]: Note: 1: 2205 2:  3: ProgId 
+MSI (c) (8C:1C) [01:32:13:501]: Note: 1: 2205 2:  3: PublishComponent 
+MSI (c) (8C:1C) [01:32:13:501]: Note: 1: 2205 2:  3: SelfReg 
+MSI (c) (8C:1C) [01:32:13:501]: Note: 1: 2205 2:  3: Extension 
+MSI (c) (8C:1C) [01:32:13:501]: Note: 1: 2205 2:  3: Font 
+MSI (c) (8C:1C) [01:32:13:501]: Note: 1: 2205 2:  3: Class 
+MSI (c) (8C:1C) [01:32:13:501]: Note: 1: 2205 2:  3: TypeLib 
+MSI (c) (8C:1C) [01:32:13:501]: Note: 1: 2727 2:  
+Action ended 1:32:17: FatalError. Return value 2.
+Action ended 1:32:17: INSTALL. Return value 3.
+Property(C): ALLUSERS = 1
+Property(C): WIXUI_EXITDIALOGOPTIONALCHECKBOXTEXT = Start Rulebox Setup now to check this PC and connect it to your dashboard
+Property(C): DefaultUIFont = WixUI_Font_Normal
+Property(C): SecureCustomProperties = BURNMSIMODIFY;BURNMSIREPAIR;BURNMSIUNINSTALL;ENROLLCODE;WIX_DOWNGRADE_DETECTED;WIX_UPGRADE_DETECTED
+Property(C): ProductVersion = 0.1.0
+Property(C): ProductName = Rulebox
+Property(C): UpgradeCode = {76E0E816-6BEE-40CB-8BA0-6B32C8A1EB56}
+Property(C): ProductLanguage = 1033
+Property(C): ARPPRODUCTICON = RuleboxIcon.ico
+Property(C): WIXUI_EXITDIALOGOPTIONALCHECKBOX = 1
+Property(C): ProductCode = {ADC58A2B-BE5D-47C9-8321-6EC3D1E4D6E9}
+Property(C): MsiHiddenProperties = ENROLLCODE
+Property(C): WixUIRMOption = UseRM
+Property(C): Manufacturer = Rulebox
+Property(C): ARPNOMODIFY = 1
+Property(C): ErrorDialog = ErrorDlg
+Property(C): INSTALLFOLDER = C:\Program Files\Rulebox\
+Property(C): ProgramFiles64Folder = C:\Program Files\
+Property(C): RuleboxMenuFolder = C:\ProgramData\Microsoft\Windows\Start Menu\Programs\Rulebox\
+Property(C): ProgramMenuFolder = C:\ProgramData\Microsoft\Windows\Start Menu\Programs\
+Property(C): TARGETDIR = C:\
+Property(C): SourceDir = C:\rb-run\msi\
+Property(C): CurrentVersionFolder = C:\Program Files\Rulebox\versions\0.1.0\
+Property(C): VersionsFolder = C:\Program Files\Rulebox\versions\
+Property(C): WINBUILD = 26300
+Property(C): VersionNT = 603
+Property(C): PrimaryFolder = INSTALLFOLDER
+Property(C): MsiLogFileLocation = C:\rb-run\out\a-1-ui-install-msi.log
+Property(C): PackageCode = {A17E5B08-E920-46DB-9326-573E2146E102}
+Property(C): ProductState = -1
+Property(C): PackagecodeChanging = 1
+Property(C): CURRENTDIRECTORY = C:\WINDOWS\system32
+Property(C): CLIENTUILEVEL = 0
+Property(C): CLIENTPROCESSID = 3212
+Property(C): VersionDatabase = 500
+Property(C): VersionMsi = 5.00
+Property(C): VersionNT64 = 603
+Property(C): WindowsBuild = 9600
+Property(C): ServicePackLevel = 0
+Property(C): ServicePackLevelMinor = 0
+Property(C): MsiNTProductType = 1
+Property(C): WindowsFolder = C:\WINDOWS\
+Property(C): WindowsVolume = C:\
+Property(C): System64Folder = C:\WINDOWS\system32\
+Property(C): SystemFolder = C:\WINDOWS\SysWOW64\
+Property(C): RemoteAdminTS = 1
+Property(C): TempFolder = C:\Users\rbtest\AppData\Local\Temp\
+Property(C): ProgramFilesFolder = C:\Program Files (x86)\
+Property(C): CommonFilesFolder = C:\Program Files (x86)\Common Files\
+Property(C): CommonFiles64Folder = C:\Program Files\Common Files\
+Property(C): AppDataFolder = C:\Users\rbtest\AppData\Roaming\
+Property(C): FavoritesFolder = C:\Users\rbtest\Favorites\
+Property(C): NetHoodFolder = C:\Users\rbtest\AppData\Roaming\Microsoft\Windows\Network Shortcuts\
+Property(C): PersonalFolder = C:\Users\rbtest\Documents\
+Property(C): PrintHoodFolder = C:\Users\rbtest\AppData\Roaming\Microsoft\Windows\Printer Shortcuts\
+Property(C): RecentFolder = C:\Users\rbtest\AppData\Roaming\Microsoft\Windows\Recent\
+Property(C): SendToFolder = C:\Users\rbtest\AppData\Roaming\Microsoft\Windows\SendTo\
+Property(C): TemplateFolder = C:\ProgramData\Microsoft\Windows\Templates\
+Property(C): CommonAppDataFolder = C:\ProgramData\
+Property(C): LocalAppDataFolder = C:\Users\rbtest\AppData\Local\
+Property(C): MyPicturesFolder = C:\Users\rbtest\Pictures\
+Property(C): AdminToolsFolder = C:\ProgramData\Microsoft\Windows\Start Menu\Programs\Administrative Tools\
+Property(C): StartupFolder = C:\ProgramData\Microsoft\Windows\Start Menu\Programs\Startup\
+Property(C): StartMenuFolder = C:\ProgramData\Microsoft\Windows\Start Menu\
+Property(C): DesktopFolder = C:\Users\Public\Desktop\
+Property(C): FontsFolder = C:\WINDOWS\Fonts\
+Property(C): GPTSupport = 1
+Property(C): OLEAdvtSupport = 1
+Property(C): ShellAdvtSupport = 1
+Property(C): MsiAMD64 = 6
+Property(C): Msix64 = 6
+Property(C): Intel = 6
+Property(C): PhysicalMemory = 2559
+Property(C): VirtualMemory = 1818
+Property(C): AdminUser = 1
+Property(C): MsiTrueAdminUser = 1
+Property(C): LogonUser = rbtest
+Property(C): UserSID = S-1-5-21-1452024813-456936664-1956420132-1002
+Property(C): UserLanguageID = 8192
+Property(C): ComputerName = RULEBOX
+Property(C): SystemLanguageID = 1033
+Property(C): ScreenX = 1024
+Property(C): ScreenY = 768
+Property(C): CaptionHeight = 23
+Property(C): BorderTop = 1
+Property(C): BorderSide = 1
+Property(C): TextHeight = 16
+Property(C): TextInternalLeading = 3
+Property(C): ColorBits = 32
+Property(C): TTCSupport = 1
+Property(C): Time = 1:32:17
+Property(C): Date = 26/11/2026
+Property(C): MsiNetAssemblySupport = 4.8.9221.0
+Property(C): MsiWin32AssemblySupport = 6.3.26100.9278
+Property(C): RedirectedDllSupport = 2
+Property(C): MsiRunningElevated = 1
+Property(C): Privileged = 1
+Property(C): USERNAME = user@example.invalid
+Property(C): DATABASE = C:\rb-run\msi\Rulebox-0.1.0-x64-fixed.msi
+Property(C): OriginalDatabase = C:\rb-run\msi\Rulebox-0.1.0-x64-fixed.msi
+Property(C): SOURCEDIR = C:\rb-run\msi\
+Property(C): VersionHandler = 5.00
+Property(C): UILevel = 5
+Property(C): ACTION = INSTALL
+Property(C): EXECUTEACTION = INSTALL
+Property(C): ROOTDRIVE = C:\
+Property(C): CostingComplete = 1
+Property(C): OutOfDiskSpace = 0
+Property(C): OutOfNoRbDiskSpace = 0
+Property(C): PrimaryVolumeSpaceAvailable = 0
+Property(C): PrimaryVolumeSpaceRequired = 0
+Property(C): PrimaryVolumeSpaceRemaining = 0
+Property(C): INSTALLLEVEL = 1
+=== Logging stopped: 26/11/2026  1:32:17 ===
+MSI (c) (8C:A0) [01:32:17:790]: Note: 1: 1708 
+MSI (c) (8C:A0) [01:32:17:790]: Note: 1: 2205 2:  3: Error 
+MSI (c) (8C:A0) [01:32:17:790]: Note: 1: 2228 2:  3: Error 4: SELECT `Message` FROM `Error` WHERE `Error` = 1708 
+MSI (c) (8C:A0) [01:32:17:790]: Note: 1: 2205 2:  3: Error 
+MSI (c) (8C:A0) [01:32:17:790]: Note: 1: 2228 2:  3: Error 4: SELECT `Message` FROM `Error` WHERE `Error` = 1709 
+MSI (c) (8C:A0) [01:32:17:790]: Product: Rulebox -- Installation failed.
+
+MSI (c) (8C:A0) [01:32:17:790]: Windows Installer installed the product. Product Name: Rulebox. Product Version: 0.1.0. Product Language: 1033. Manufacturer: Rulebox. Installation success or error status: 1603.
+
+MSI (c) (8C:A0) [01:32:17:790]: Grabbed execution mutex.
+MSI (c) (8C:A0) [01:32:17:790]: Cleaning up uninstalled install packages, if any exist
+MSI (c) (8C:A0) [01:32:17:799]: MainEngineThread is returning 1603
+=== Verbose logging stopped: 26/11/2026  1:32:17 ===
+

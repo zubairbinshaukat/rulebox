@@ -119,6 +119,10 @@ jobs:
         # (apps/agent/Cargo.toml), and the launcher depends on the same crate, so one flag
         # covers both. The Staff App never touches the guard and is built without it.
         # Only this workflow sets the feature; the guard tests keep it out of every default.
+        # RULEBOX_VERSION: the agent reports and compares this version (self-update), not the
+        # package's 0.0.0 (Step 22 run A); build.ps1 refuses an agent whose --version differs.
+        env:
+          RULEBOX_VERSION: ${{ steps.ver.outputs.version }}
         run: cargo build --release --locked -p rulebox-agent -p rulebox-shell --features rulebox-win32/production
 
       - name: Build Staff App (release)
