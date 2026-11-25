@@ -1684,6 +1684,16 @@ mod backend_tests {
         while tokio::time::timeout(Duration::from_millis(300), events.recv()).await.is_ok() {}
         push(&fake, 6, document(6, true, Some("shift+ctrl+f11")));
         let mut changed = Vec::new();
+        // The first event may take a while on a loaded machine (CI runners took
+        // longer than 800 ms); after it, a quiet 800 ms means no second one.
+        let first_deadline = tokio::time::Instant::now() + Duration::from_secs(30);
+        while changed.is_empty() && tokio::time::Instant::now() < first_deadline {
+            match tokio::time::timeout_at(first_deadline, events.recv()).await {
+                Ok(Some(ClientEvent::StateChanged(snapshot))) => changed.push(snapshot),
+                Ok(Some(_)) => {}
+                Ok(None) | Err(_) => break,
+            }
+        }
         while let Ok(Some(event)) = tokio::time::timeout(Duration::from_millis(800), events.recv()).await {
             if let ClientEvent::StateChanged(snapshot) = event {
                 changed.push(snapshot);
