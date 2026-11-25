@@ -359,8 +359,19 @@ Rules:
   `publisherProduct` (`publisher_too_broad`). The dashboard warns for every
   publisher that the rule covers all programs signed by that publisher.
 - The updater itself runs as SYSTEM (a service or task), where AppLocker's
-  Staff rules do not apply **(unverified, Step 2)**. An updater that starts
-  in the Staff session is covered by the publisher rule.
+  Staff rules do not apply (**confirmed S-5, S-6, 2026-11-25**: Chrome's and
+  Edge's updaters run only as SYSTEM in session 0; Staff-only rules logged
+  nothing for a SYSTEM-started program, enforced or audit). An updater that
+  starts in the Staff session is covered by the publisher rule. Keep the
+  Phase 5 allow rule for administrators and SYSTEM anyway: with it present,
+  a SYSTEM process start can still be logged as "allowed" (8002).
+- Catalogue values seen in S-5 (Chrome 158, Edge 158): Chrome `subject`
+  `Google LLC` (browser, `Google Chrome`, and updater, `Google Updater (x86)`,
+  share the subject; the updater lives in a versioned folder
+  `Google\GoogleUpdater\<ver>\updater.exe`). Edge `subject`
+  `Microsoft Corporation`, so it needs `publisherProduct`: `Microsoft Edge`
+  (browser) and `Microsoft Edge Update` (updater). WebView2's
+  `elevation_service.exe` also says `Microsoft Edge`.
 - **Exe that moves into a versioned folder:** the exe template may contain
   **one** `*` as a whole folder segment, never the first segment, never the
   file name (for example `{ProgramFiles}\Vendor\App\app-*\app.exe`). The
@@ -529,6 +540,19 @@ installer", **heuristic, unverified**), file version, product name.
 The admin can always edit the result. Pre-fill never overwrites a field
 the admin already typed.
 
+**Observed (S-10, S-11, 2026-11-25), the TPCL package:** an InstallShield
+**InstallScript** setup (`data1.cab` + `data1.hdr`, no `.msi`) whose exe
+still contains MSI strings (`IsScript.msi`, "Launching MSI prerequisite",
+the launcher help "For silent mode use: /S /v/qn"). So "InstallShield
+strings + embedded MSI" must mean an actual embedded `.msi` stream or file,
+never an `.msi` string; otherwise this package is mis-filled as Basic MSI.
+Run as SYSTEM with `/s /v"/qn /norestart"` (or `/S /V"/a …"`) it exits by
+itself in about 45 s with `-2147213312` (0x80042000), no window, nothing
+installed, and `setup.log` `ResultCode=-5` (no usable answer file). Treat
+that exit code on an InstallShield app as "needs an answer file", not as a
+generic failure. The `/s /f1` answer-file run is still **unverified** (the
+`.iss` must be recorded by hand; Step 23).
+
 **Answer file:** a second URL + SHA-256 (+ size) on the app. `.iss` only,
 ≤ 256 KiB. The dashboard text explains how to record one on a test PC. The
 answer file is in the signed document like the installer.
@@ -542,7 +566,14 @@ its Phase 5 text. Phase 6 adds:
 |---|---|---|
 | `inf_zip` | Unpack the zip (zip-slip guard, ≤ 2,000 entries, ≤ 1 GiB unpacked) into `<data>\drivers\<sha256>\`, check every `.cat` is validly signed, then `pnputil /add-driver <inf> /subdirs /install` | **Preferred.** The admin extracts the vendor package once on a test PC |
 | `vendor_exe` | The vendor EXE or MSI with its silent switches (and answer file), through the normal engine | When the vendor installer has a real silent mode |
-| `vendor_exe_extract` | The vendor EXE with fixed extract arguments into `<data>\drivers\<sha256>\`, then the `inf_zip` path on the result | **Only if Step 2 proves** the package extracts with no window. Otherwise not built |
+| `vendor_exe_extract` | The vendor EXE with fixed extract arguments into `<data>\drivers\<sha256>\`, then the `inf_zip` path on the result | **Not built** (S-10, 2026-11-25): the TPCL package documents no extract switch, `/S /V"/a …"` fails with `ResultCode=-5`, and its wizard unpacks only InstallScript cabinets, no `.inf`/`.cat` |
+
+**TPCL route after S-10/S-11:** no windowless route is proven yet. Open: (1)
+`vendor_exe` with `/s /f1"<answer file>"` from a hand-recorded `.iss`
+(Step 23), or (2) `inf_zip` built from the installed driver on a test PC
+(for example `pnputil /export-driver <oemN.inf> <folder>` after a hand
+install; **unverified**). The dashboard help must not tell the admin to
+"extract the package": the wizard exposes no `.inf`.
 
 Rules: no tile; `pnputil` argument shapes are fixed in code (`/add-driver
 <path> /subdirs /install`, `/delete-driver <oemN.inf> /uninstall`); removal
@@ -552,7 +583,19 @@ Warnings (read-only probes, shown on the driver's install row):
 
 - **Windows Protected Print Mode on** → printer drivers are refused with
   `protected_print_on` (Windows would remove third-party-driver printers).
-  **(unverified: the exact policy value to read; Step 2.)**
+  Values (S-12, 2026-11-25, build 26300), all REG_DWORD under HKLM; any one
+  at 1 means on:
+  - `SYSTEM\CurrentControlSet\Control\Print` `WindowsProtectedPrintState`:
+    the effective state (1 on, 0 off, absent = never turned on). Read first.
+  - `SOFTWARE\Policies\Microsoft\Windows NT\Printers\WPP`
+    `WindowsProtectedPrintMode`: written by the Settings switch (1 on, 0 off;
+    `EnabledBy`, `EnabledTimestamp` beside it while on).
+  - Same key, `WindowsProtectedPrintGroupPolicyState`: written by the Group
+    Policy "Configure Windows protected print" (1/0, from `Printing.admx`;
+    the policy route was not driven on the VM, **unverified** whether it also
+    sets `WindowsProtectedPrintState`).
+  `EnableWindowsProtectedPrint` and `Control\Print\WPP\EnabledNow` do not
+  exist on this build.
 - **Another Seagull-based driver already present** → warning
   `seagull_driver_present` (Toshiba TEC manuals say not to mix them and to
   remove the old TPCL driver before an upgrade). Not a blocker.
@@ -568,6 +611,11 @@ Warnings (read-only probes, shown on the driver's install row):
   installed). Edge uses its fixed per-machine paths.
 - The Staff App picks at launch: **Lite mode → built-in. Browser exe
   missing → built-in.** The dashboard says so next to the setting.
+- **Below 8 GB RAM, browser mode is off by default** (S-4, 2026-11-25:
+  first `--app` window 305 MB for Chrome, 397 MB for Edge, summed working
+  set; the Section 14 rule is "> 350 MB for either browser"). The Staff App
+  then picks built-in unless the admin turns browser mode on for that group
+  on purpose; the dashboard shows the measured cost.
 
 #### 4.9.2 Launch
 
@@ -599,11 +647,11 @@ through `staffreg` (two new roots; `guard_coverage` Staff count 16 → 18, the
 plan said 12 → 14 before Phase 5 Step 18 added four). The
 administrator's own browser stays normal, which matches "the admin account
 is not affected". `HKCU\Software\Policies` is not writable by a standard
-user. **Pending S-1** (VM spike, not run yet): the vendors' references do not
-say whether Chrome and Edge read `HKCU` policy on a workgroup PC. If S-1
-shows they ignore user-hive policy, use the machine keys instead (two new
-`machinereg` roots, count 12 → 14) and tell the owner: that also restricts
-the administrator's browser. Step 17 builds the Staff-hive design only.
+user. **Confirmed by S-1 (2026-11-25, Chrome 158 and Edge 158, workgroup
+PC, no MDM):** both list the Staff-hive values as Platform / Current user /
+Mandatory / OK and enforce them (blocked page, DevTools refused); the Staff
+account has only `ReadKey` on the keys. The machine-key fallback is not
+needed. Both browsers then say "managed by your organization".
 
 **Re-read at Step 17 (2026-11-25)** for **Chrome 159** (stable 159.0.8154.34;
 read from Chromium's `policy_definitions` on `main`, because Google's rendered
@@ -644,7 +692,11 @@ Step 17 (above). The catalogue is one data table in code
 on the document) with a test per row.
 
 **Reload:** registry writes are picked up by a running browser within 15
-minutes at worst, and some values only after a restart. So the agent
+minutes at worst, and some values only after a restart. Measured in S-2
+(2026-11-25): Edge about 10.5 min, Chrome about 13.5 min, policy page and
+blocklist both live with no click; Chrome flags `IncognitoModeAvailability`
+"Restart required" (Edge `InPrivateModeAvailability` applied live). Only
+the "allow" direction was timed; Step 24 times the restricting one. So the agent
 writes policies **before** the Staff App may show a browser tile: the IPC
 snapshot marks a browser web app `ready` only after the write is
 journalled as applied. Policy changes while a browser runs take effect at
@@ -659,6 +711,9 @@ install folder as a path rule for the Staff SID (`Program Files
 only if admin-only. Edge is no longer blocked for Staff once an Edge web
 app is assigned. That is acceptable because the policies apply to **every**
 window of that browser in the Staff account, not only to `--app` windows.
+Edge 158 also ships `msedge.exe` under `Microsoft\EdgeCore\<ver>\` and
+`EdgeCore\Optimized\`; the windows launched from `Edge\Application\msedge.exe`
+ran from `Edge\Application` (S-5), so the path rule stays on that folder.
 
 #### 4.9.5 Task tracking
 
@@ -667,7 +722,12 @@ Tasks map by exe path today (`tasks.rs:101`), so two web apps in one
 
 - **Primary:** map each top-level browser window to its app by the
   window's AppUserModelID (Chromium gives every `--app` window an id built
-  from the app URL and profile) **(unverified, Step 2)**.
+  from the app URL and profile). **Confirmed by S-3 (2026-11-25):**
+  `Chrome.<host>_<path>.<user-data-dir leaf>.<profile>` and
+  `MSEdge.<host>_<path>.…`, e.g. `Chrome.example.org_/.e1.Default`; stable
+  across close and reopen; both windows share one pid; one taskbar button
+  each. Visible top-level browser bubbles (Edge's "Translate page") have
+  **no** AUMID: skip windows without one, never map them to an app.
 - **Fallback:** one profile per employee **and app**
   (`…\browser\chrome\<employeeId>\<appId>`), so each app is its own process
   tree and maps by the launched process. Costs memory and loses shared
@@ -720,7 +780,8 @@ opens to the browser's blocked page.
 - **Launch conditions** (no script or EXE custom actions): administrator
   (`Privileged`), x64, build ≥ 19045 read by `RegistrySearch` of
   `HKLM\SOFTWARE\Microsoft\Windows NT\CurrentVersion` `CurrentBuildNumber`
-  (`VersionNT` stops at 8.1 values), free disk ≥ 2 GiB. One clear message
+  (`VersionNT` stops at 8.1 values; S-7 on build 26300: `VersionNT` 603 and
+  `WindowsBuild` 9600, so neither property can be used), free disk ≥ 2 GiB. One clear message
   each.
 - **Uninstall guard:** while the kiosk is on, a condition blocks removal
   with "Turn kiosk mode off first" (reads `HKLM\SOFTWARE\Rulebox\Install`
@@ -1106,6 +1167,12 @@ attack.
 **Done when:** every row has a result, or "could not observe" with the
 reason. Sections 4.7-4.9 are updated where a result differs from the plan.
 **Do NOT:** install anything on the dev machine; keep the VM state.
+
+**Status (2026-11-25): run on `rulebox-test-pro` (build 26300), VM reverted
+to `fresh-windows-11-pro`.** PASS: S-1, S-2, S-3, S-5, S-6, S-7 (Windows 11).
+DIFFERS: S-4 (Edge over 350 MB), S-10, S-11, S-12. NOT OBSERVED: S-8, S-9
+(no Zahras POS builds), S-11 answer-file run, S-7 Windows 10 half. Results
+and evidence: `phase-6-vm-spike.md`, `phase-6-vm-spike/`.
 
 ---
 
@@ -1528,6 +1595,10 @@ adding the `apps/agent/src/drivers/{zip,inf,probe}.rs` files named below: the ne
   an unsigned catalog stays `unsigned_driver` (4.6 called it `driver_unsigned`).
 - **Unverified (VM, Steps 23 and S-10):** the protected print registry value, the Seagull name heuristic (`seagull`, `tpcl`), and
   whether pnputil accepts the add shape on a real PC. INF-only installs may still miss the vendor's port or status monitor.
+- **Spike result (2026-11-25):** S-10 confirms `vendor_exe_extract` stays unbuilt (no windowless extract). **S-12 needs a code
+  fix:** `PROTECTED_PRINT_VALUES` (`apps/agent/src/platform/windows.rs`) reads `Control\Print\WPP\EnabledNow`, which does not
+  exist; a PC where the Settings switch turned the mode on reads as off. Read `Control\Print\WindowsProtectedPrintState`, keep
+  `WindowsProtectedPrintGroupPolicyState`, add `WindowsProtectedPrintMode` (4.8). pnputil and the TPCL INF were not reached.
 
 **Machine:** dev. **PRD:** 24.2 (new bullet). **Files:** as Phase 5 Step
 14b, plus `apps/agent/src/drivers/{zip.rs,inf.rs,probe.rs}`.
@@ -1594,7 +1665,9 @@ S-1 failed), `crates/rulebox-win32/tests/guard_coverage.rs`, tests.
 named here; leave policies behind after Disable kiosk.
 
 **Status (2026-11-25): built and tested on the simulator; items 1-7 done. The
-Staff-hive design only: pending S-1 (VM spike), no machine-hive roots.**
+Staff-hive design only, no machine-hive roots. S-1 passed (Chrome and Edge 158
+apply Staff-hive policy on a workgroup PC), so the design stands; S-2 measured
+reloads of about 10.5 min (Edge) and 13.5 min (Chrome), inside the rule.**
 
 - **Item 1:** the 4.9.3 table above is the re-read result. Versions: **Chrome 159**
   (stable 159.0.8154.34 on 2026-11-24; policy values from Chromium
@@ -1669,6 +1742,12 @@ the tile and taskbar components, agent profile cleanup
 the tiles.
 **Do NOT:** ShellExecute anything; pass `--kiosk`; reuse the built-in
 WebView2 profile folder for a browser.
+
+**Spike input (2026-11-25):** item 2 uses the **primary** (S-3 passed: one
+AUMID per app window, `Chrome.<host>_<path>.<leaf>.<profile>` /
+`MSEdge.…`, stable; skip windows with no AUMID). Item 1 adds the 4.9.1
+default: below 8 GB RAM fall back to built-in unless the group opted in
+(S-4).
 
 ---
 
@@ -2217,8 +2296,8 @@ are re-measured on the laptop.
 | Sign-in hold for updates | ≤ 5 min, usually 0 | Step 23 |
 | Kept previous installers | ≤ 2 GiB total, 0 below 3 GiB free | code |
 | Browser profile | cache ≤ 50 MB each; ≤ 10 profiles per browser | code |
-| One browser `--app` window beside the Staff App (Standard) | recorded, no budget yet; decision rule: if > 350 MB for the first window, keep browsers off below 8 GB by default | S-4, Step 24 |
-| Lite: web windows | ≤ 3 open; idle close 30 min | Step 26 |
+| One browser `--app` window beside the Staff App (Standard) | S-4 (browser alone, 4 GB VM): Chrome 305 MB, **Edge 397 MB** summed working set; over 350 MB → browsers off below 8 GB by default (4.9.1). Step 24 repeats it with the Staff App running | S-4, Step 24 |
+| Lite: web windows | ≤ 3 open; idle close 30 min. S-4, three windows in one profile: Chrome 441 MB, Edge 577 MB | Step 26 |
 | Staff App on 4 GB, desktop + 2 web apps | Phase 3 budgets hold | Step 26 |
 | Feed check | ≤ 60 s and inside action memory for a 100 MiB file | Step 12 |
 | Database I/O | 4.16 table | Steps 12, 25, 26 |

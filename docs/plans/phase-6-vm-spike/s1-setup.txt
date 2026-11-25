@@ -1,0 +1,68 @@
+== workgroup
+
+
+Name         : RULEBOX
+PartOfDomain : False
+Workgroup    : WORKGROUP
+
+
+
+
+AzureAdJoined : NO
+EnterpriseJoined : NO
+DomainJoined : NO
+existing machine browser policy keys: False
+== writes
+Registry::HKEY_USERS\S-1-5-21-1452024813-456936664-1956420132-1003\Software\Policies\Google\Chrome  DeveloperToolsAvailability = 2
+Registry::HKEY_USERS\S-1-5-21-1452024813-456936664-1956420132-1003\Software\Policies\Google\Chrome  DownloadRestrictions = 3
+Registry::HKEY_USERS\S-1-5-21-1452024813-456936664-1956420132-1003\Software\Policies\Google\Chrome  BackgroundModeEnabled = 0
+Registry::HKEY_USERS\S-1-5-21-1452024813-456936664-1956420132-1003\Software\Policies\Google\Chrome  BrowserSignin = 0
+Registry::HKEY_USERS\S-1-5-21-1452024813-456936664-1956420132-1003\Software\Policies\Google\Chrome\URLBlocklist  1 = example.org
+Registry::HKEY_USERS\S-1-5-21-1452024813-456936664-1956420132-1003\Software\Policies\Microsoft\Edge  DeveloperToolsAvailability = 2
+Registry::HKEY_USERS\S-1-5-21-1452024813-456936664-1956420132-1003\Software\Policies\Microsoft\Edge  DownloadRestrictions = 3
+Registry::HKEY_USERS\S-1-5-21-1452024813-456936664-1956420132-1003\Software\Policies\Microsoft\Edge  BackgroundModeEnabled = 0
+Registry::HKEY_USERS\S-1-5-21-1452024813-456936664-1956420132-1003\Software\Policies\Microsoft\Edge  BrowserSignin = 0
+Registry::HKEY_USERS\S-1-5-21-1452024813-456936664-1956420132-1003\Software\Policies\Microsoft\Edge\URLBlocklist  1 = example.org
+Registry::HKEY_USERS\S-1-5-21-1452024813-456936664-1956420132-1003\Software\Policies\Google\Chrome  IncognitoModeAvailability = 1
+Registry::HKEY_USERS\S-1-5-21-1452024813-456936664-1956420132-1003\Software\Policies\Microsoft\Edge  InPrivateModeAvailability = 1
+== ACLs
+spikestaff SID S-1-5-21-1452024813-456936664-1956420132-1003
+-- Policies
+
+IdentityReference                                                                                    RegistryRights AccessControlType IsInherited
+-----------------                                                                                    -------------- ----------------- -----------
+NT AUTHORITY\RESTRICTED                                                                                     ReadKey             Allow       False
+NT AUTHORITY\SYSTEM                                                                                     FullControl             Allow       False
+BUILTIN\Administrators                                                                                  FullControl             Allow       False
+rulebox\spikestaff                                                                                          ReadKey             Allow       False
+APPLICATION PACKAGE AUTHORITY\ALL APPLICATION PACKAGES                                                      ReadKey             Allow       False
+S-1-15-3-1024-1065365936-1281604716-3511738428-1654721687-432734479-3232135806-4053264122-3456934681        ReadKey             Allow       False
+
+
+
+-- Policies\Google\Chrome
+
+IdentityReference                                                                                    RegistryRights AccessControlType IsInherited
+-----------------                                                                                    -------------- ----------------- -----------
+NT AUTHORITY\SYSTEM                                                                                     FullControl             Allow        True
+BUILTIN\Administrators                                                                                  FullControl             Allow        True
+NT AUTHORITY\RESTRICTED                                                                                     ReadKey             Allow        True
+rulebox\spikestaff                                                                                          ReadKey             Allow        True
+APPLICATION PACKAGE AUTHORITY\ALL APPLICATION PACKAGES                                                      ReadKey             Allow        True
+S-1-15-3-1024-1065365936-1281604716-3511738428-1654721687-432734479-3232135806-4053264122-3456934681        ReadKey             Allow        True
+
+
+
+-- Policies\Microsoft\Edge
+
+IdentityReference                                                                                    RegistryRights AccessControlType IsInherited
+-----------------                                                                                    -------------- ----------------- -----------
+NT AUTHORITY\SYSTEM                                                                                     FullControl             Allow        True
+BUILTIN\Administrators                                                                                  FullControl             Allow        True
+NT AUTHORITY\RESTRICTED                                                                                     ReadKey             Allow        True
+rulebox\spikestaff                                                                                          ReadKey             Allow        True
+APPLICATION PACKAGE AUTHORITY\ALL APPLICATION PACKAGES                                                      ReadKey             Allow        True
+S-1-15-3-1024-1065365936-1281604716-3511738428-1654721687-432734479-3232135806-4053264122-3456934681        ReadKey             Allow        True
+
+
+

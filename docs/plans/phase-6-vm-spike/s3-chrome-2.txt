@@ -1,0 +1,2 @@
+hwnd=458778 pid=5292 title=[Example Domain] aumid=[Chrome.example.com_/.e1.Default]
+hwnd=328356 pid=5292 title=[Example Domain] aumid=[Chrome.example.org_/.e1.Default]

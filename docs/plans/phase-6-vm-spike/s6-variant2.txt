@@ -1,0 +1,56 @@
+== variant 2: AuditOnly, no admin rule
+
+
+<AppLockerPolicy Version="1">
+<RuleCollection Type="Exe" EnforcementMode="AuditOnly">
+<FilePathRule Id="04a413fb-0220-4fe2-997d-96a7d84eb0d4" Name="spike user Program Files" Description="" UserOrGroupSid="S-1-5-21-1452024813-456936664-1956420132-1003" Action="Allow">
+<Conditions>
+<FilePathCondition Path="%PROGRAMFILES%\*" />
+</Conditions>
+</FilePathRule>
+<FilePathRule Id="7d22c1a9-11b3-41d1-ad01-a54c7b21509d" Name="spike user Windows" Description="" UserOrGroupSid="S-1-5-21-1452024813-456936664-1956420132-1003" Action="Allow">
+<Conditions>
+<FilePathCondition Path="%WINDIR%\*" />
+</Conditions>
+</FilePathRule>
+</RuleCollection>
+</AppLockerPolicy>
+tag=s6-v2-system
+who=nt authority\system
+session=0
+exe=C:\rb-spike\probe.exe
+args=
+start=2026-11-25T19:18:27.8911732+05:00
+end=2026-11-25T19:18:38.0812586+05:00
+exit=0
+processes started since start (10 s after exit):
+
+-- control: same probe as spikestaff in audit mode
+rulebox\spikestaff
+-- probe.exe events (all variants)
+
+TimeCreated             Id User                                          Text                                                                                                                             
+-----------             -- ----                                          ----                                                                                                                             
+11/25/2026 7:18:42 PM 8003 S-1-5-21-1452024813-456936664-1956420132-1003 %OSDRIVE%\RB-SPIKE\PROBE.EXE was allowed to run but would have been prevented from running if the AppLocker policy were enforced.
+11/25/2026 7:17:37 PM 8004 S-1-5-21-1452024813-456936664-1956420132-1003 %OSDRIVE%\RB-SPIKE\PROBE.EXE was prevented from running.                                                                         
+
+
+
+-- any event by S-1-5-18 after policy change
+
+TimeCreated             Id Text                                                                
+-----------             -- ----                                                                
+11/25/2026 7:18:16 PM 8001 The AppLocker policy was applied successfully to this computer.     
+11/25/2026 7:18:15 PM 8001 The AppLocker policy was applied successfully to this computer.     
+11/25/2026 7:18:13 PM 8030 ManagedInstaller check SUCCEEDED during Appid verification of       
+11/25/2026 7:18:13 PM 8002 %SYSTEM32%\WINDOWSPOWERSHELL\V1.0\POWERSHELL.EXE was allowed to run.
+11/25/2026 7:17:33 PM 8030 ManagedInstaller check SUCCEEDED during Appid verification of       
+11/25/2026 7:17:33 PM 8002 %SYSTEM32%\WINDOWSPOWERSHELL\V1.0\POWERSHELL.EXE was allowed to run.
+11/25/2026 7:17:08 PM 8001 The AppLocker policy was applied successfully to this computer.     
+11/25/2026 7:17:06 PM 8030 ManagedInstaller check SUCCEEDED during Appid verification of       
+11/25/2026 7:17:06 PM 8002 %SYSTEM32%\WINDOWSPOWERSHELL\V1.0\POWERSHELL.EXE was allowed to run.
+11/25/2026 7:16:54 PM 8001 The AppLocker policy was applied successfully to this computer.     
+
+
+
+

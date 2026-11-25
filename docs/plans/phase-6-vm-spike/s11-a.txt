@@ -1,0 +1,17 @@
+tag=s11-a
+who=nt authority\system
+session=0
+exe=C:\rb-spike\in\TPCL-drv_11.10.0_E.exe
+args=/s /v"/qn /norestart"
+start=2026-11-25T19:23:27.5551812+05:00
+end=2026-11-25T19:24:13.6084305+05:00
+exit=-2147213312
+processes started since start (10 s after exit):
+
+Name              Id SessionId StartTime            
+----              -- --------- ---------            
+MoUsoCoreWorker 5332         0 11/25/2026 7:24:00 PM
+svchost         6816         0 11/25/2026 7:24:01 PM
+
+
+

@@ -1,0 +1,3 @@
+hwnd=262956 pid=5600 title=[Example Domain] aumid=[MSEdge.example.com_/.e1.Default]
+hwnd=393740 pid=5600 title=[Translate page from Russian?] aumid=[(none)]
+hwnd=655424 pid=5600 title=[Example Domain] aumid=[MSEdge.example.org_/.e1.Default]

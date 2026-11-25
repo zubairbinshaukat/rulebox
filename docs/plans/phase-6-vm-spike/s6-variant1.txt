@@ -1,0 +1,20 @@
+== variant 1 (after gpupdate): Enabled, admin rule
+tag=s6-v1-system
+who=nt authority\system
+session=0
+exe=C:\rb-spike\probe.exe
+args=
+start=2026-11-25T19:17:39.9203133+05:00
+end=2026-11-25T19:17:50.1305693+05:00
+exit=0
+processes started since start (10 s after exit):
+
+-- user run output:
+This program is blocked by group policy. For more information, contact your system administrator.
+
+TimeCreated             Id User                                          Text                                                    
+-----------             -- ----                                          ----                                                    
+11/25/2026 7:17:37 PM 8004 S-1-5-21-1452024813-456936664-1956420132-1003 %OSDRIVE%\RB-SPIKE\PROBE.EXE was prevented from running.
+
+
+

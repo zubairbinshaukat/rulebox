@@ -20,9 +20,12 @@ Result values:
 | DIFFERS | What the plan assumed is wrong or incomplete. Put the observed value in Notes and change the plan section named in the row. |
 | NOT OBSERVED | Could not run. Say why. The "Decides" section then keeps its plan default and stays marked "unverified". |
 
-Windows edition, version and build tested: ______
+Windows edition, version and build tested: Windows 11 Pro 26H2, build 26300.9457 (registry `ProductName` says "Windows 10 Pro", a known quirk)
 
-Chrome version: ______   Edge version: ______   Date of run: ______
+Chrome version: 158.0.8127.89 (updater 159.0.8140.0)   Edge version: 158.0.4370.33 (Edge Update 1.3.319.41)   Date of run: 2026-11-25
+
+Evidence: `docs/plans/phase-6-vm-spike/` (file names `<row>-<what>.<ext>`; the two MSI logs are stored as
+`s7-*-msi-log.txt` because `*.log` is git-ignored).
 
 ---
 
@@ -560,7 +563,9 @@ Do this **after** S-3 and S-4 so earlier rows ran without policies. Close all br
        $root = if ($w -eq 'hive') { "Registry::HKEY_USERS\$sid\Software\Policies" } else { 'HKLM:\SOFTWARE\Policies' }
        $key  = if ($b -eq 'chrome') { "$root\Google\Chrome" } else { "$root\Microsoft\Edge" }
        if ($l) { $key = "$key\$l" }
-       New-Item $key -Force | Out-Null
+       # Create only when missing: New-Item -Force on an existing key wipes its values and subkeys
+       # (seen in the 2026-11-25 run: only the last value written survived).
+       if (-not (Test-Path $key)) { New-Item $key -Force | Out-Null }
        $type = if ($v -is [int]) { 'DWord' } else { 'String' }
        New-ItemProperty -Path $key -Name $n -Value $v -PropertyType $type -Force | Out-Null
        "$key  $n = $v"
@@ -1135,23 +1140,69 @@ can see; if the effective state cannot be read, `protected_print_on` is dropped 
 
 ---
 
+## Run notes (2026-11-25)
+
+Run by Claude Code from the host over PowerShell Direct, with the screen read through Hyper-V thumbnails and
+driven with the synthetic keyboard and mouse. Differences from the steps above:
+
+- **No hand typing at the console.** `spikestaff` got a random throw-away password and was signed in by
+  autologon (Winlogon values inside the VM only; reverted). Group D/E steps that need an admin desktop used
+  autologon as `rbtest` and a scheduled task with `-RunLevel Highest` (a task cannot show a UAC prompt).
+- **Browser MSIs** were not on the host. They were downloaded from the vendors' URLs into the session
+  scratch folder (no install on the dev PC), copied in, hashes compared host = VM, Authenticode `Valid`
+  (Chrome MSI SHA-256 `AA958C31…C99B`, Edge MSI `54EEAB68…C4EC`, TPCL `2B80E1F4…6E77`).
+- **Windows Update filled the host disk.** The fresh checkpoint is not updated; with internet on, Windows
+  Update staged about 11 GB inside the VM during group A, the differencing disk grew to 23 GB, D: hit
+  0 bytes free and the VM went `PausedCritical` during S-2. Recovery: `target\debug\incremental` deleted
+  (9 GB), VM resumed, update services stopped, evidence saved. Groups B, D, E ran with the VM's network
+  adapter disconnected (they need no internet). **Next time:** disconnect the adapter or stop
+  `wuauserv`/`UsoSvc`/`DoSvc` right after every revert, and check D: before group A.
+- `Set-SpikePolicy` (S-1) had a bug (`New-Item -Force` wiped earlier values); fixed above before the counted run.
+- S-10/S-11: the package's help text and a read of its strings replaced the `/?` dialog (step 2).
+- The owner's `LightStudio-background` process (13.8 GB) left too little host RAM to start the VM for group B;
+  the owner allowed stopping it.
+
+S-4 table (median of three samples; sum over all processes of that browser; VM 4 GB, `spikestaff` desktop,
+no Staff App):
+
+| Browser | Windows | Processes | WS (MB) | PWS (MB) | Free RAM (MB) |
+|---|---|---|---|---|---|
+| Chrome | baseline | 0 | 0 | 0 | 1779 |
+| Chrome | 1 | 7 | 305 | 34 | 1586 |
+| Chrome | 3 | 10 | 441 | 46 | 1542 |
+| Edge | baseline | 0 | 0 | 0 | 1778 |
+| Edge | 1 | 8 | 397 | 42 | 1720 |
+| Edge | 3 | 11 | 577 | 48 | 1685 |
+
+PWS looks far too low (the `\Process(name#*)` counter sum seems to miss instances); treat it as unreliable.
+WS is the plan's measure; summed WS double-counts shared DLL pages, so it overstates real use. Free RAM
+moved by about 190 MB for Chrome's first window; Edge's free-RAM figure has no fresh baseline.
+
 ## Results
 
 | Row | Decides | Result (PASS / DIFFERS / NOT OBSERVED) | Notes (value seen, evidence file) | Date |
 |---|---|---|---|---|
-| S-1 | 4.9.3 Staff hive vs machine keys | | | |
-| S-2 | 4.9.3 reload rule | | | |
-| S-3 | 4.9.5 primary vs fallback | | | |
-| S-4 | Section 14 budgets, Lite rule | | | |
-| S-5 | 4.4.3 publisher values | | | |
-| S-6 | 4.4.3, 4.8 (SYSTEM vs Staff AppLocker rules) | | | |
-| S-7 | 4.10 launch conditions | | | |
-| S-8 | 4.4.4 | | | |
-| S-9 | 4.6 per-user detection | | | |
-| S-10 | 4.8 source choice | | | |
-| S-11 | 4.7 InstallShield rows | | | |
-| S-12 | 4.8 `protected_print_on` warning | | | |
+| S-1 | 4.9.3 Staff hive vs machine keys | PASS | Workgroup, not domain/Entra joined, no MDM. Chrome and Edge list all six Staff-hive values as Source `Platform`, Applies to `Current user`, Level `Mandatory`, Status `OK`; `example.org` shows "This page is blocked"; F12 and Ctrl+Shift+I give "DevTools not allowed" (Edge first shows its own one-time F12 prompt); `chrome://management` / `edge://management`: "managed by your organization". `spikestaff` has `ReadKey` only on `Software\Policies`, `…\Google\Chrome`, `…\Microsoft\Edge` (inherited; SYSTEM and Administrators FullControl). Evidence `s1-*` | 2026-11-25 |
+| S-2 | 4.9.3 reload rule | PASS | Changes written with both browsers open, no "Reload policies" click; the policy page updates by itself. Edge: (a) and (b) between 591 and ~630 s (about 10.5 min). Chrome: between 778 and 819 s (about 13.5 min). (b) `example.com` blocked in a new tab of the already open window, both browsers. (c) Chrome marks `IncognitoModeAvailability` "Restart required", yet Ctrl+Shift+N opened Incognito before the restart; Edge `InPrivateModeAvailability` applied live with no restart flag. Only the 1 → 0 (allow) direction was tested. After a full restart all values `OK`. Evidence `s2-*` | 2026-11-25 |
+| S-3 | 4.9.5 primary vs fallback | PASS | Chrome `Chrome.example.org_/.e1.Default` and `Chrome.example.com_/.e1.Default`; Edge `MSEdge.example.org_/.e1.Default` and `MSEdge.example.com_/.e1.Default` (shape `<Chrome\|MSEdge>.<host>_<path>.<user-data-dir leaf>.<profile>`). Same values after close and reopen. Both windows belong to one process (same pid). Taskbar: one button per window, not grouped. Edge also shows a visible top-level "Translate page" bubble (`Chrome_WidgetWin_1`) with **no** AUMID. Evidence `s3-*` | 2026-11-25 |
+| S-4 | Section 14 budgets, Lite rule | DIFFERS | First window WS: Chrome 305 MB (≤ 350), **Edge 397 MB (> 350)**. Three windows: Chrome 441 MB, Edge 577 MB. Table and caveats in Run notes. By the plan's rule (either browser > 350) browsers are off by default below 8 GB RAM. Evidence `s4-*` | 2026-11-25 |
+| S-5 | 4.4.3 publisher values | PASS | All exes `Valid`. Chrome: subject `CN=Google LLC, O=Google LLC, L=Mountain View, S=California, C=US, SERIALNUMBER=3582691, …` (EV), `chrome.exe` ProductName `Google Chrome` in `C:\Program Files\Google\Chrome\Application`; updater `C:\Program Files (x86)\Google\GoogleUpdater\159.0.8140.0\updater.exe` (and `Google\Update\GoogleUpdate.exe`), ProductName `Google Updater (x86)`, same subject. Edge: `CN=Microsoft Corporation, O=Microsoft Corporation, L=Redmond, S=Washington, C=US`; `msedge.exe` ProductName `Microsoft Edge` in `Edge\Application` (copies also in `EdgeCore\<ver>\` and `EdgeCore\Optimized\`; the running windows used `Edge\Application`); `MicrosoftEdgeUpdate.exe` ProductName `Microsoft Edge Update` in `EdgeUpdate\`. Note `Microsoft Edge` is also the ProductName of WebView2's `elevation_service.exe`. Services `edgeupdate`, `edgeupdatem`, `GoogleUpdater(Internal)Service…` run as LocalSystem; tasks run as SYSTEM; during an update check every updater process was SYSTEM in session 0, none in the `spikestaff` session. Evidence `s5-*` | 2026-11-25 |
+| S-6 | 4.4.3, 4.8 (SYSTEM vs Staff AppLocker rules) | PASS (result A) | Policy applied only after `gpupdate /force` (first try not enforced). Variant 1 (Enabled, Administrators `*`): `spikestaff` run blocked ("This program is blocked by group policy", 8004); SYSTEM run exit 0, no event for `probe.exe`. Variant 2 (AuditOnly, Staff-only rules): SYSTEM run exit 0, **no** 8002/8003 for `probe.exe` or its SYSTEM wrapper; control run as `spikestaff` logged 8003. Under variant 1 a SYSTEM `powershell.exe` started by Task Scheduler did log 8002 (allowed by the Administrators rule). Phase 5 row 1-09 was empty, so this was run here; settles the Phase 5 Section 21 item. Evidence `s6-*` | 2026-11-25 |
+| S-7 | 4.10 launch conditions | PASS (Windows 11); Windows 10 NOT OBSERVED (no Windows 10 machine) | Both MSI logs: `VersionNT = 603`, `VersionNT64 = 603`, **`WindowsBuild = 9600`** (not 26300; both stop at 8.1 values), `MsiNTProductType = 1`, `Privileged = 1`, `ALLUSERS = 1`. `CurrentBuildNumber` is REG_SZ `26300`, digits only, same in the 64- and 32-bit views. 4.10 already reads the registry value and not `WindowsBuild`, so 4.10 holds; never use `WindowsBuild`. The RegistrySearch inside a WiX-built MSI is Step 7/22. Evidence `s7-*` | 2026-11-25 |
+| S-8 | 4.4.4 | NOT OBSERVED | No Zahras POS per-machine NSIS build on the host (searched `D:\work`, Downloads; `D:\work\mzg\zahras-pos*` hold no built installer). Needs the owner's build (Q13). 4.4.4 keeps its plan text, unverified | 2026-11-25 |
+| S-9 | 4.6 per-user detection | NOT OBSERVED | Same: no per-user build available. 4.6 and risk 78 unchanged, unverified | 2026-11-25 |
+| S-10 | 4.8 source choice | DIFFERS | Package: InstallShield `setup.exe` (OriginalFilename "InstallShield Setup.exe"), signer `Toshiba Tec Corporation` `Valid`, FileVersion 11.10.0, an **InstallScript** project (unpacks `data1.cab` + `data1.hdr` + `ISSetup.dll`, no `.msi`); strings name `TEC.inf`, `TOSHIBATEC.inf`, `toshibatec.cat`, `DriverWizard.exe`, `*.ddz` (Seagull DriverWizard). Built-in help (string table 1203-1206): only `/L`, `/S` ("For silent mode use: /S /v/qn"), `/V`; **no extract switch documented**; no vendor readme on hand. `/S /V"/a /qn TARGETDIR=…"` as SYSTEM: ended by itself in 49 s, exit `-2147213312` (0x80042000), `setup.log` `ResultCode=-5`, nothing extracted, no window, no leftover process. Wizard route (admin, stopped on the Welcome page): `%TEMP%\{guid}\` holds only the InstallShield engine and `Disk1\data1.cab/.hdr`, **no `.inf` or `.cat`**. Steps 5-8 not run (no driver files). No Seagull/Toshiba driver before. So: no windowless extract, `vendor_exe_extract` stays unbuilt, and `inf_zip` needs the files from elsewhere. Evidence `s10-*` | 2026-11-25 |
+| S-11 | 4.7 InstallShield rows | DIFFERS (attempt 2 NOT OBSERVED) | InstallScript, not Basic MSI, although the exe contains MSI strings (`IsScript.msi`, "Launching MSI prerequisite", the `/S /v/qn` help). Attempt 1 `/s /v"/qn /norestart"` as SYSTEM: ends in ~46 s, exit `-2147213312`, `ResultCode=-5`, nothing installed, no window. Attempt 2 (`/s /f1"…setup.iss"`) not run: the answer file must be recorded by hand (step 2), not through Claude. No silent route proven yet. Evidence `s11-*` | 2026-11-25 |
+| S-12 | 4.8 `protected_print_on` warning | DIFFERS | Settings > Bluetooth & devices > Printers & scanners > "Windows protected print mode" (button "Set up" / "Turn off" with a confirm dialog; no UAC for an admin). **On** writes `HKLM\SOFTWARE\Policies\Microsoft\Windows NT\Printers\WPP` `WindowsProtectedPrintMode` = 1 (REG_DWORD) plus `EnabledBy` = 1 and `EnabledTimestamp` (QWORD), and `HKLM\SYSTEM\CurrentControlSet\Control\Print` `WindowsProtectedPrintState` = 1. **Off**: `WindowsProtectedPrintMode` = 0 (the other two removed), `WindowsProtectedPrintState` = 0. Before first use neither exists. While on, "Default install printers using Windows Ready Print" is locked On. The candidate `EnableWindowsProtectedPrint` does not exist, nor does `Control\Print\WPP\EnabledNow` (which the agent reads today). Group Policy route not driven: `Printing.admx` `ConfigureWindowsProtectedPrint` writes `WindowsProtectedPrintGroupPolicyState` 1/0 in the same `WPP` key (read from the ADMX, not observed); whether it also sets `WindowsProtectedPrintState` is unverified. Evidence `s12-*` | 2026-11-25 |
 
 Plan sections changed after the run (list them, with the row that caused each):
 
-- ______
+- 4.4.3: publisher values recorded and "(unverified, Step 2)" removed from the SYSTEM line (S-5, S-6).
+- 4.7: InstallShield note: an InstallScript package can carry MSI strings; observed failure code (S-10, S-11).
+- 4.8: `vendor_exe_extract` row: not built; TPCL route note; protected print values (S-10, S-11, S-12).
+- 4.9.1: browsers off by default below 8 GB RAM (S-4).
+- 4.9.3: Staff hive confirmed; measured reload times (S-1, S-2).
+- 4.9.4: Edge's running exe path (S-5).
+- 4.9.5: primary confirmed, AUMID shape, windows with no AUMID (S-3).
+- 4.10: `WindowsBuild` = 9600 note (S-7).
+- Section 14 browser rows; Steps 15, 17, 18 status lines (S-1..S-4, S-10..S-12).

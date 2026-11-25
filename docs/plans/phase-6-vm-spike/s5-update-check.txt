@@ -1,0 +1,16 @@
+start MicrosoftEdgeUpdateTaskMachineCore{6ABA232B-EE87-4D0B-872B-6006788D0215}
+start MicrosoftEdgeUpdateTaskMachineUA{FDFB5B50-B0FA-4FCC-862A-B8B824BDC469}
+start GoogleUpdaterTaskSystem159.0.8140.0{3E4AF3C1-859C-4777-9639-A8F66B580BFE}
+
+Name                    Session Owner  Path                                                                 Cmd                                                                                                                                                                                             
+----                    ------- -----  ----                                                                 ---                                                                                                                                                                                             
+MicrosoftEdgeUpdate.exe       0 SYSTEM C:\Program Files (x86)\Microsoft\EdgeUpdate\MicrosoftEdgeUpdate.exe  /c                                                                                                                                                                                              
+updater.exe                   0 SYSTEM C:\Program Files (x86)\Google\GoogleUpdater\159.0.8140.0\updater.exe --crash-handler --system "--database=C:\Program Files (x86)\Google\GoogleUpdater\159.0.8140.0\Crashpad" --url=https://clients2.google.com/cr/report --annotation=prod=Update4                   
+                                                                                                            --annotation=ver=159.0.8140.0 "--attachment=C:\Program Files (x86)\Google\GoogleUpdater\updater.log" "--attachment=C:\Program Files (x86)\Google\GoogleUpdater\updater_history.jsonl"           
+                                                                                                            --initial-client-data=0x2b8,0x2bc,0x2c0,0x2b4,0x2c4,0x1462734,0x1462740,0x146274c                                                                                                               
+updater.exe                   0 SYSTEM C:\Program Files (x86)\Google\GoogleUpdater\159.0.8140.0\updater.exe --system --windows-service --service=update                                                                                                                                                     
+updater.exe                   0 SYSTEM C:\Program Files (x86)\Google\GoogleUpdater\159.0.8140.0\updater.exe --system --windows-service --service=update-internal                                                                                                                                            
+updater.exe                   0 SYSTEM C:\Program Files (x86)\Google\GoogleUpdater\159.0.8140.0\updater.exe --wake --system                                                                                                                                                                                 
+
+
+

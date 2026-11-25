@@ -1,0 +1,190 @@
+== grouped (Status | O= | Product)
+
+Count Name                                                       
+----- ----                                                       
+    2 Valid | Google LLC | Google Chrome Installer               
+    7 Valid | Google LLC | Google Chrome                         
+    2 Valid | Google LLC | Google Updater (x86)                  
+    4 Valid | Microsoft Corporation | IEToEdge BHO               
+    7 Valid | Microsoft Corporation | Microsoft Edge Installer   
+   40 Valid | Microsoft Corporation | Microsoft Edge             
+    2 Valid | Microsoft Corporation | Microsoft Copilot Installer
+    4 Valid | Microsoft Corporation | Copilot                    
+    3 Valid | Microsoft Corporation | Microsoft Edge WebView2    
+    2 Valid | Microsoft Corporation | Copilot Update             
+    7 Valid | Microsoft Corporation | Microsoft Edge Update      
+
+
+
+== key exes
+
+
+File    : C:\Program Files\Google\Chrome\Application\158.0.8127.89\elevation_service.exe
+Status  : Valid
+Subject : CN=Google LLC, O=Google LLC, L=Mountain View, S=California, C=US, SERIALNUMBER=3582691, OID.2.5.4.15=Private Organization, OID.1.3.6.1.4.1.311.60.2.1.2=Delaware, OID.1.3.6.1.4.1.311.60.2.1.3=US
+Product : Google Chrome
+Company : Google LLC
+Version : 158.0.8127.89
+
+File    : C:\Program Files\Google\Chrome\Application\chrome.exe
+Status  : Valid
+Subject : CN=Google LLC, O=Google LLC, L=Mountain View, S=California, C=US, SERIALNUMBER=3582691, OID.2.5.4.15=Private Organization, OID.1.3.6.1.4.1.311.60.2.1.2=Delaware, OID.1.3.6.1.4.1.311.60.2.1.3=US
+Product : Google Chrome
+Company : Google LLC
+Version : 158.0.8127.89
+
+File    : C:\Program Files (x86)\Google\GoogleUpdater\159.0.8140.0\updater.exe
+Status  : Valid
+Subject : CN=Google LLC, O=Google LLC, L=Mountain View, S=California, C=US, SERIALNUMBER=3582691, OID.2.5.4.15=Private Organization, OID.1.3.6.1.4.1.311.60.2.1.2=Delaware, OID.1.3.6.1.4.1.311.60.2.1.3=US
+Product : Google Updater (x86)
+Company : Google LLC
+Version : 159.0.8140.0
+
+File    : C:\Program Files (x86)\Google\Update\GoogleUpdate.exe
+Status  : Valid
+Subject : CN=Google LLC, O=Google LLC, L=Mountain View, S=California, C=US, SERIALNUMBER=3582691, OID.2.5.4.15=Private Organization, OID.1.3.6.1.4.1.311.60.2.1.2=Delaware, OID.1.3.6.1.4.1.311.60.2.1.3=US
+Product : Google Updater (x86)
+Company : Google LLC
+Version : 159.0.8140.0
+
+File    : C:\Program Files (x86)\Microsoft\Edge\Application\158.0.4370.33\elevation_service.exe
+Status  : Valid
+Subject : CN=Microsoft Corporation, O=Microsoft Corporation, L=Redmond, S=Washington, C=US
+Product : Microsoft Edge
+Company : Microsoft Corporation
+Version : 158.0.4370.33
+
+File    : C:\Program Files (x86)\Microsoft\Edge\Application\158.0.4370.33\msedge.exe
+Status  : Valid
+Subject : CN=Microsoft Corporation, O=Microsoft Corporation, L=Redmond, S=Washington, C=US
+Product : Microsoft Edge
+Company : Microsoft Corporation
+Version : 158.0.4370.33
+
+File    : C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe
+Status  : Valid
+Subject : CN=Microsoft Corporation, O=Microsoft Corporation, L=Redmond, S=Washington, C=US
+Product : Microsoft Edge
+Company : Microsoft Corporation
+Version : 158.0.4370.33
+
+File    : C:\Program Files (x86)\Microsoft\EdgeCore\158.0.4370.33\elevation_service.exe
+Status  : Valid
+Subject : CN=Microsoft Corporation, O=Microsoft Corporation, L=Redmond, S=Washington, C=US
+Product : Microsoft Edge
+Company : Microsoft Corporation
+Version : 158.0.4370.33
+
+File    : C:\Program Files (x86)\Microsoft\EdgeCore\158.0.4370.33\msedge.exe
+Status  : Valid
+Subject : CN=Microsoft Corporation, O=Microsoft Corporation, L=Redmond, S=Washington, C=US
+Product : Microsoft Edge
+Company : Microsoft Corporation
+Version : 158.0.4370.33
+
+File    : C:\Program Files (x86)\Microsoft\EdgeCore\Optimized\elevation_service.exe
+Status  : Valid
+Subject : CN=Microsoft Corporation, O=Microsoft Corporation, L=Redmond, S=Washington, C=US
+Product : Microsoft Edge
+Company : Microsoft Corporation
+Version : 158.0.4370.33
+
+File    : C:\Program Files (x86)\Microsoft\EdgeCore\Optimized\msedge.exe
+Status  : Valid
+Subject : CN=Microsoft Corporation, O=Microsoft Corporation, L=Redmond, S=Washington, C=US
+Product : Microsoft Edge
+Company : Microsoft Corporation
+Version : 158.0.4370.33
+
+File    : C:\Program Files (x86)\Microsoft\EdgeUpdate\1.3.319.41\MicrosoftEdgeUpdate.exe
+Status  : Valid
+Subject : CN=Microsoft Corporation, O=Microsoft Corporation, L=Redmond, S=Washington, C=US
+Product : Microsoft Edge Update
+Company : Microsoft Corporation
+Version : 1.3.319.41
+
+File    : C:\Program Files (x86)\Microsoft\EdgeUpdate\MicrosoftEdgeUpdate.exe
+Status  : Valid
+Subject : CN=Microsoft Corporation, O=Microsoft Corporation, L=Redmond, S=Washington, C=US
+Product : Microsoft Edge Update
+Company : Microsoft Corporation
+Version : 1.3.319.41
+
+File    : C:\Program Files (x86)\Microsoft\EdgeWebView\Application\158.0.4370.33\elevation_service.exe
+Status  : Valid
+Subject : CN=Microsoft Corporation, O=Microsoft Corporation, L=Redmond, S=Washington, C=US
+Product : Microsoft Edge
+Company : Microsoft Corporation
+Version : 158.0.4370.33
+
+
+
+
+== services
+
+
+Name      : edgeupdate
+StartName : LocalSystem
+StartMode : Auto
+State     : Stopped
+PathName  : "C:\Program Files (x86)\Microsoft\EdgeUpdate\MicrosoftEdgeUpdate.exe" /svc
+
+Name      : edgeupdatem
+StartName : LocalSystem
+StartMode : Manual
+State     : Stopped
+PathName  : "C:\Program Files (x86)\Microsoft\EdgeUpdate\MicrosoftEdgeUpdate.exe" /medsvc
+
+Name      : MicrosoftEdgeElevationService
+StartName : LocalSystem
+StartMode : Manual
+State     : Stopped
+PathName  : "C:\Program Files (x86)\Microsoft\Edge\Application\158.0.4370.33\elevation_service.exe"
+
+Name      : GoogleUpdaterInternalService159.0.8140.0
+StartName : LocalSystem
+StartMode : Auto
+State     : Stopped
+PathName  : "C:\Program Files (x86)\Google\GoogleUpdater\159.0.8140.0\updater.exe" --system --windows-service --service=update-internal
+
+Name      : GoogleUpdaterService159.0.8140.0
+StartName : LocalSystem
+StartMode : Auto
+State     : Stopped
+PathName  : "C:\Program Files (x86)\Google\GoogleUpdater\159.0.8140.0\updater.exe" --system --windows-service --service=update
+
+Name      : GoogleChromeElevationService
+StartName : LocalSystem
+StartMode : Manual
+State     : Stopped
+PathName  : "C:\Program Files\Google\Chrome\Application\158.0.8127.89\elevation_service.exe"
+
+
+
+
+== tasks
+
+
+TaskName : MicrosoftEdgeUpdateBrowserReplacementTask
+RunAs    : SYSTEM
+Logon    : ServiceAccount
+Run      : C:\Program Files (x86)\Microsoft\EdgeUpdate\MicrosoftEdgeUpdate.exe
+
+TaskName : MicrosoftEdgeUpdateTaskMachineCore{6ABA232B-EE87-4D0B-872B-6006788D0215}
+RunAs    : SYSTEM
+Logon    : ServiceAccount
+Run      : C:\Program Files (x86)\Microsoft\EdgeUpdate\MicrosoftEdgeUpdate.exe
+
+TaskName : MicrosoftEdgeUpdateTaskMachineUA{FDFB5B50-B0FA-4FCC-862A-B8B824BDC469}
+RunAs    : SYSTEM
+Logon    : ServiceAccount
+Run      : C:\Program Files (x86)\Microsoft\EdgeUpdate\MicrosoftEdgeUpdate.exe
+
+TaskName : GoogleUpdaterTaskSystem159.0.8140.0{3E4AF3C1-859C-4777-9639-A8F66B580BFE}
+RunAs    : SYSTEM
+Logon    : ServiceAccount
+Run      : "C:\Program Files (x86)\Google\GoogleUpdater\159.0.8140.0\updater.exe"
+
+
+
+

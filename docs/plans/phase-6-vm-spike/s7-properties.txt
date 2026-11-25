@@ -1,0 +1,39 @@
+ spikestaff            console             1  Active      none   25/11/2026 4:49 pm
+chrome exit 0, edge exit 0
+== s7-chrome
+ALLUSERS = 1
+MsiNTProductType = 1
+Privileged = 1
+ServicePackLevel = 0
+VersionMsi = 5.00
+VersionNT = 603
+VersionNT64 = 603
+WindowsBuild = 9600
+== s7-edge
+ALLUSERS = 1
+MsiNTProductType = 1
+Privileged = 1
+ServicePackLevel = 0
+VersionMsi = 5.00
+VersionNT = 603
+VersionNT64 = 603
+WindowsBuild = 9600
+
+CurrentBuildNumber        : 26300
+CurrentBuild              : 26300
+UBR                       : 9457
+CurrentMajorVersionNumber : 10
+CurrentMinorVersionNumber : 0
+CurrentVersion            : 6.3
+
+kind: String
+
+HKEY_LOCAL_MACHINE\SOFTWARE\Microsoft\Windows NT\CurrentVersion
+    CurrentBuildNumber    REG_SZ    26300
+
+
+HKEY_LOCAL_MACHINE\SOFTWARE\Microsoft\Windows NT\CurrentVersion
+    CurrentBuildNumber    REG_SZ    26300
+
+chrome 158.0.8127.89
+edge   158.0.4370.33

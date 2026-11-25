@@ -1,0 +1,10 @@
+tag=s6-v2-system
+who=nt authority\system
+session=0
+exe=C:\rb-spike\probe.exe
+args=
+start=2026-11-25T19:18:27.8911732+05:00
+end=2026-11-25T19:18:38.0812586+05:00
+exit=0
+processes started since start (10 s after exit):
+

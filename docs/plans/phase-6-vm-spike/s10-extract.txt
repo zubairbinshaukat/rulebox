@@ -1,0 +1,24 @@
+tag=s10-extract
+who=nt authority\system
+session=0
+exe=C:\rb-spike\in\TPCL-drv_11.10.0_E.exe
+args=/S /V"/a /qn TARGETDIR=C:\rb-spike\tpcl-extract /l*v C:\rb-spike\out\s10-admin-msi.log"
+start=2026-11-25T19:21:19.2587093+05:00
+end=2026-11-25T19:22:08.3133493+05:00
+exit=-2147213312
+processes started since start (10 s after exit):
+
+Name        Id SessionId StartTime            
+----        -- --------- ---------            
+dllhost   9368         1 11/25/2026 7:22:07 PM
+dllhost  10088         1 11/25/2026 7:22:05 PM
+sppsvc   10344         0 11/25/2026 7:21:38 PM
+svchost   5416         0 11/25/2026 7:21:38 PM
+svchost   8164         0 11/25/2026 7:21:37 PM
+svchost   9088         0 11/25/2026 7:21:37 PM
+svchost   9648         0 11/25/2026 7:21:38 PM
+svchost  10532         0 11/25/2026 7:21:38 PM
+WmiPrvSE 10740         0 11/25/2026 7:21:38 PM
+
+
+

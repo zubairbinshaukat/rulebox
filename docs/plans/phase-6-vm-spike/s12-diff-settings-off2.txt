@@ -1,0 +1,30 @@
+s12-off2-1.reg 742
+s12-off2-2.reg 134392
+s12-off2-3.reg 79098
+== WPP key + state values now
+
+HKEY_LOCAL_MACHINE\SOFTWARE\Policies\Microsoft\Windows NT\Printers\WPP
+    WindowsProtectedPrintMode    REG_DWORD    0x0
+
+
+HKEY_LOCAL_MACHINE\SYSTEM\CurrentControlSet\Control\Print
+    WindowsProtectedPrintState    REG_DWORD    0x0
+
+== diff off -> off2 (key 1 and Protected lines only)
+
+InputObject                                                              SideIndicator
+-----------                                                              -------------
+[HKEY_LOCAL_MACHINE\SOFTWARE\Policies\Microsoft\Windows NT\Printers\WPP] =>           
+"WindowsProtectedPrintMode"=dword:00000000                               =>           
+                                                                         =>           
+
+
+
+
+InputObject                                           SideIndicator
+-----------                                           -------------
+"WindowsProtectedPrintState"=dword:00000000           =>           
+"WindowsProtectedPrintSupportVerified"=dword:00000001 =>           
+
+
+

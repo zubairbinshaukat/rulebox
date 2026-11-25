@@ -1,0 +1,37 @@
+== diff s10-before -> after-extract (added lines, PROC lines excluded)
+DIR  C:\Windows\System32\config\systemprofile\AppData\Local\Microsoft\Windows\PowerShell
+DIR  C:\Users\spikestaff\AppData\Local\D3DSCache\e3f2fbe77c89a5a
+== S-11 attempt 1
+t+: setup/s0/cpu0.3, TPCL-drv_11.10.0_E/s0/cpu0.1
+t+: TPCL-drv_11.10.0_E/s0/cpu0.1
+t+: TPCL-drv_11.10.0_E/s0/cpu0.1
+t+: 
+t+: 
+t+: 
+tag=s11-a
+who=nt authority\system
+session=0
+exe=C:\rb-spike\in\TPCL-drv_11.10.0_E.exe
+args=/s /v"/qn /norestart"
+start=2026-11-25T19:23:27.5551812+05:00
+end=2026-11-25T19:24:13.6084305+05:00
+exit=-2147213312
+processes started since start (10 s after exit):
+
+Name              Id SessionId StartTime            
+----              -- --------- ---------            
+MoUsoCoreWorker 5332         0 11/25/2026 7:24:00 PM
+svchost         6816         0 11/25/2026 7:24:01 PM
+
+
+
+elapsed s: 62
+temp: C:\Windows\Temp\{EE0A7CFA-91BA-4D2F-8B40-28CF58193940}
+[InstallShield Silent]
+Version=v7.00
+File=Log File
+[ResponseResult]
+ResultCode=-5
+drivers: 0
+== diff s10-after-extract -> s11-after-a
+DIR  C:\ProgramData\Microsoft\Windows Defender\Scans\RtSigs

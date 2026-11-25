@@ -1,0 +1,14 @@
+
+Rel              Length
+---              ------
+\Disk1                 
+\Disk1\setup.log 87    
+
+
+
+==== setup.log
+[InstallShield Silent]
+Version=v7.00
+File=Log File
+[ResponseResult]
+ResultCode=-5

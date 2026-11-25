@@ -1,0 +1,30 @@
+1200=Restart
+1201=Setup needs %lu KB free disk space in %s. Please free up some space and try again
+1202=You do not have sufficient privileges to complete this installation for all users of the machine. Log on as administrator and then retry this installation
+1203=Command line parameters:
+1204=/L language ID
+1205=/S Hide initialization dialog.  For silent mode use: /S /v/qn
+1206=/V parameters to MsiExec.exe
+1207=Windows(R) Installer %s found. This is an older version of the Windows(R) Installer. Click OK to continue.
+1208=ANSI code page for %s is not installed on the system and therefore setup cannot run in the selected language. Run the setup and select another language.
+1210=Setup requires Windows Installer version %s or higher to install the Microsoft .NET Framework version 2.0. Please install the Windows Installer version %s or higher and try again.
+== msi / product hints
+@.msi
+.cab
+data1.cab
+/US<url to IsScript.msi>8Setup Initializati
+1633=/US<url to IsScript.msi>
+Disk1\data1.cab
+sstcpipmon.ddz
+tt#base_11.10.0.0.ddz
+tt#t2s_11.10.0.0.ddz
+tt#tec_11.10.0.0.ddz
+DriverWizard.ddz
+TEC.inf
+TOSHIBATEC.inf
+toshibatec.cat
+tt#base_11.10.0.0.cab
+tt#t2s_11.10.0.0.cab
+tt#tec_11.10.0.0.cab
+data2.cab
+Disk1\data2.cab

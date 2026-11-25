@@ -1,0 +1,20 @@
+
+FullName                                                                                     Length
+--------                                                                                     ------
+C:\Users\rbtest\AppData\Local\Temp\F77.tmp                                                    65536
+C:\Users\rbtest\AppData\Local\Temp\{FDF4EDC7-E690-4F35-879D-C994BD768D7C}\0x0409.ini          22490
+C:\Users\rbtest\AppData\Local\Temp\{FDF4EDC7-E690-4F35-879D-C994BD768D7C}\ISSetup.dll        800256
+C:\Users\rbtest\AppData\Local\Temp\{FDF4EDC7-E690-4F35-879D-C994BD768D7C}\setup.exe         1193984
+C:\Users\rbtest\AppData\Local\Temp\{FDF4EDC7-E690-4F35-879D-C994BD768D7C}\setup.ini            2446
+C:\Users\rbtest\AppData\Local\Temp\{FDF4EDC7-E690-4F35-879D-C994BD768D7C}\Disk1\0x0409.ini    22490
+C:\Users\rbtest\AppData\Local\Temp\{FDF4EDC7-E690-4F35-879D-C994BD768D7C}\Disk1\data1.cab   1047907
+C:\Users\rbtest\AppData\Local\Temp\{FDF4EDC7-E690-4F35-879D-C994BD768D7C}\Disk1\data1.hdr     18543
+C:\Users\rbtest\AppData\Local\Temp\{FDF4EDC7-E690-4F35-879D-C994BD768D7C}\Disk1\ISSetup.dll  800256
+C:\Users\rbtest\AppData\Local\Temp\{FDF4EDC7-E690-4F35-879D-C994BD768D7C}\Disk1\layout.bin      522
+C:\Users\rbtest\AppData\Local\Temp\{FDF4EDC7-E690-4F35-879D-C994BD768D7C}\Disk1\setup.exe   1193984
+C:\Users\rbtest\AppData\Local\Temp\{FDF4EDC7-E690-4F35-879D-C994BD768D7C}\Disk1\setup.ini      2446
+
+
+
+== .inf/.cat/.ddz/.msi under temp
+

@@ -1,0 +1,153 @@
+S-4 raw samples 2026-11-25T17:25:44.9483379+05:00
+== baseline
+
+
+Browser             : chrome
+Processes           : 0
+WorkingSetMB        : 0
+PrivateWorkingSetMB : 0
+FreeRamMB           : 1779
+PSComputerName      : rulebox-test-pro
+RunspaceId          : c9b7d74d-6eea-427b-a279-e92f1b9c5b08
+
+
+
+Browser             : msedge
+Processes           : 0
+WorkingSetMB        : 0
+PrivateWorkingSetMB : 0
+FreeRamMB           : 1778
+PSComputerName      : rulebox-test-pro
+RunspaceId          : c9b7d74d-6eea-427b-a279-e92f1b9c5b08
+
+
+== chrome 1 window
+
+
+Browser             : chrome
+Processes           : 7
+WorkingSetMB        : 310
+PrivateWorkingSetMB : 36
+FreeRamMB           : 1575
+PSComputerName      : rulebox-test-pro
+RunspaceId          : c9b7d74d-6eea-427b-a279-e92f1b9c5b08
+
+
+
+Browser             : chrome
+Processes           : 7
+WorkingSetMB        : 305
+PrivateWorkingSetMB : 34
+FreeRamMB           : 1586
+PSComputerName      : rulebox-test-pro
+RunspaceId          : c9b7d74d-6eea-427b-a279-e92f1b9c5b08
+
+
+
+Browser             : chrome
+Processes           : 7
+WorkingSetMB        : 301
+PrivateWorkingSetMB : 32
+FreeRamMB           : 1591
+PSComputerName      : rulebox-test-pro
+RunspaceId          : c9b7d74d-6eea-427b-a279-e92f1b9c5b08
+
+
+== chrome 3 windows
+
+
+Browser             : chrome
+Processes           : 10
+WorkingSetMB        : 514
+PrivateWorkingSetMB : 64
+FreeRamMB           : 1481
+PSComputerName      : rulebox-test-pro
+RunspaceId          : c9b7d74d-6eea-427b-a279-e92f1b9c5b08
+
+
+
+Browser             : chrome
+Processes           : 10
+WorkingSetMB        : 441
+PrivateWorkingSetMB : 44
+FreeRamMB           : 1542
+PSComputerName      : rulebox-test-pro
+RunspaceId          : c9b7d74d-6eea-427b-a279-e92f1b9c5b08
+
+
+
+Browser             : chrome
+Processes           : 10
+WorkingSetMB        : 432
+PrivateWorkingSetMB : 46
+FreeRamMB           : 1648
+PSComputerName      : rulebox-test-pro
+RunspaceId          : c9b7d74d-6eea-427b-a279-e92f1b9c5b08
+
+
+== msedge 1 window
+
+
+Browser             : msedge
+Processes           : 8
+WorkingSetMB        : 397
+PrivateWorkingSetMB : 42
+FreeRamMB           : 1718
+PSComputerName      : rulebox-test-pro
+RunspaceId          : c9b7d74d-6eea-427b-a279-e92f1b9c5b08
+
+
+
+Browser             : msedge
+Processes           : 8
+WorkingSetMB        : 397
+PrivateWorkingSetMB : 42
+FreeRamMB           : 1720
+PSComputerName      : rulebox-test-pro
+RunspaceId          : c9b7d74d-6eea-427b-a279-e92f1b9c5b08
+
+
+
+Browser             : msedge
+Processes           : 8
+WorkingSetMB        : 397
+PrivateWorkingSetMB : 42
+FreeRamMB           : 1737
+PSComputerName      : rulebox-test-pro
+RunspaceId          : c9b7d74d-6eea-427b-a279-e92f1b9c5b08
+
+
+== msedge 3 windows
+
+
+Browser             : msedge
+Processes           : 11
+WorkingSetMB        : 591
+PrivateWorkingSetMB : 49
+FreeRamMB           : 1685
+PSComputerName      : rulebox-test-pro
+RunspaceId          : c9b7d74d-6eea-427b-a279-e92f1b9c5b08
+
+
+
+Browser             : msedge
+Processes           : 11
+WorkingSetMB        : 577
+PrivateWorkingSetMB : 48
+FreeRamMB           : 1681
+PSComputerName      : rulebox-test-pro
+RunspaceId          : c9b7d74d-6eea-427b-a279-e92f1b9c5b08
+
+
+
+Browser             : msedge
+Processes           : 11
+WorkingSetMB        : 563
+PrivateWorkingSetMB : 42
+FreeRamMB           : 1711
+PSComputerName      : rulebox-test-pro
+RunspaceId          : c9b7d74d-6eea-427b-a279-e92f1b9c5b08
+
+
+done 2026-11-25T17:37:19.7549566+05:00
+
