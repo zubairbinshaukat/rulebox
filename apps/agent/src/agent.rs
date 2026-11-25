@@ -1699,7 +1699,27 @@ mod backend_tests {
                 changed.push(snapshot);
             }
         }
-        assert_eq!(changed.len(), 1, "{changed:?}");
+        // The clock-skew check can publish its own state.changed at any moment (seen on
+        // CI: the same snapshot again with only the server time offset / clock-suspect
+        // fields different). The promise here is about the hotkey change: one event for
+        // it, and no other event that changes anything but those clock fields.
+        let without_clock = |snapshot: &AgentSnapshot| {
+            let mut value = serde_json::to_value(snapshot).unwrap();
+            if let Some(map) = value.as_object_mut() {
+                for key in ["serverTimeOffsetMs", "server_time_offset_ms", "clockSuspect", "clock_suspect"] {
+                    map.remove(key);
+                }
+            }
+            value
+        };
+        let mut distinct: Vec<serde_json::Value> = Vec::new();
+        for snapshot in &changed {
+            let value = without_clock(snapshot);
+            if distinct.last() != Some(&value) {
+                distinct.push(value);
+            }
+        }
+        assert_eq!(distinct.len(), 1, "{changed:?}");
         assert_eq!(changed[0].admin_exit.as_ref().unwrap().hotkey, "Ctrl+Shift+F11");
 
         // An employee signs in online, then the device is revoked remotely.
