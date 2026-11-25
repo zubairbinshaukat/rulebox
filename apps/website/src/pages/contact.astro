@@ -2,7 +2,7 @@
 import Base from "../layouts/Base.astro";
 import PageHero from "../components/PageHero.astro";
 import Icon from "../components/Icon.astro";
-import { SUPPORT_EMAIL, TURNSTILE_SITE_KEY } from "../config";
+import { INSTAGRAM_HANDLE, INSTAGRAM_URL, SUPPORT_EMAIL, TURNSTILE_SITE_KEY } from "../config";
 import { organizationLd } from "../lib/seo";
 ---
 
@@ -59,6 +59,11 @@ import { organizationLd } from "../lib/seo";
           <span class="tile-icon"><Icon name="users" /></span>
           <h2 class="h3">Want Rulebox on your PCs?</h2>
           <p class="muted">Leave your email on the <a class="text-link" href="/early-access">early-access page</a>.</p>
+        </div>
+        <div class="card" data-tone="violet">
+          <span class="tile-icon"><Icon name="gallery" /></span>
+          <h2 class="h3">Follow along</h2>
+          <p class="muted">Updates and behind-the-scenes on Instagram: <a class="text-link" href={INSTAGRAM_URL} rel="me noopener" target="_blank">{INSTAGRAM_HANDLE}</a>.</p>
         </div>
       </aside>
     </div>

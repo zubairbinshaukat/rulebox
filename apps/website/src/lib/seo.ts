@@ -1,4 +1,4 @@
-import { DEFAULT_DESCRIPTION, REPO_URL, SITE_NAME, SITE_URL, SUPPORT_EMAIL } from "../config";
+import { DEFAULT_DESCRIPTION, INSTAGRAM_URL, REPO_URL, SITE_NAME, SITE_URL, SUPPORT_EMAIL } from "../config";
 import { SCREENS, SCREEN_SIZE, screenUrl } from "../data/screens";
 
 export interface PageMeta {
@@ -40,7 +40,7 @@ export function organizationLd() {
     name: SITE_NAME,
     url: SITE_URL,
     logo: `${SITE_URL}/icon-512.png`,
-    sameAs: [REPO_URL],
+    sameAs: [REPO_URL, INSTAGRAM_URL],
     email: SUPPORT_EMAIL,
     contactPoint: {
       "@type": "ContactPoint",

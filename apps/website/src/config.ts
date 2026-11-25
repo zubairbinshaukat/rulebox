@@ -37,6 +37,10 @@ export const APP_URL = SITE_URL.replace("://", "://app.");
  */
 export const SUPPORT_EMAIL = "support@rulebox.org";
 
+/** Rulebox on Instagram (owner, 2026-11-25). */
+export const INSTAGRAM_HANDLE = "@rulebox_org";
+export const INSTAGRAM_URL = "https://www.instagram.com/rulebox_org/";
+
 /**
  * Cloudflare Turnstile site key (public). The default is Cloudflare's
  * documented "always passes" test key, so local builds work.

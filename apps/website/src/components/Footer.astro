@@ -5,7 +5,7 @@
 import Logo from "./Logo.astro";
 import SignupForm from "./SignupForm.astro";
 import { FOOTER_COLUMNS } from "../data/nav";
-import { SUPPORT_EMAIL, TAGLINE } from "../config";
+import { INSTAGRAM_HANDLE, INSTAGRAM_URL, SUPPORT_EMAIL, TAGLINE } from "../config";
 const year = new Date().getFullYear();
 interface Props {
   /** Page path. The early-access page has the same form as its main content, so the footer drops its copy there. */
@@ -44,7 +44,10 @@ const showSignup = path !== "/early-access";
     <div class="bar">
       <p>&copy; {year} Rulebox contributors. Open source under the MIT licence.</p>
       <p class="bar-mid">Icons: Solar by 480 Design, CC BY 4.0.</p>
-      <p><a href={`mailto:${SUPPORT_EMAIL}`}>{SUPPORT_EMAIL}</a></p>
+      <p class="bar-links">
+        <a href={INSTAGRAM_URL} rel="me noopener" target="_blank" aria-label={`Rulebox on Instagram (${INSTAGRAM_HANDLE})`}>Instagram</a>
+        <a href={`mailto:${SUPPORT_EMAIL}`}>{SUPPORT_EMAIL}</a>
+      </p>
     </div>
 
     <p class="giant-mark" aria-hidden="true">Rulebox</p>
@@ -146,6 +149,11 @@ const showSignup = path !== "/early-access";
   }
   .bar a:hover {
     color: var(--ink);
+  }
+  .bar-links {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--sp-4);
   }
   .giant-mark {
     margin: var(--sp-3) 0 0;

@@ -1,6 +1,6 @@
 import type { APIRoute } from "astro";
 import { getCollection } from "astro:content";
-import { SITE_URL, REPO_URL, SUPPORT_EMAIL } from "../config";
+import { SITE_URL, REPO_URL, SUPPORT_EMAIL, INSTAGRAM_URL } from "../config";
 import { FEATURES } from "../data/features";
 import { USE_CASES } from "../data/useCases";
 
@@ -42,6 +42,7 @@ export const GET: APIRoute = async () => {
     "## Contact",
     "",
     `Contact: ${SUPPORT_EMAIL}`,
+    `Instagram: ${INSTAGRAM_URL}`,
     "",
   ].join("\n");
   return new Response(body, { headers: { "content-type": "text/plain; charset=utf-8" } });
