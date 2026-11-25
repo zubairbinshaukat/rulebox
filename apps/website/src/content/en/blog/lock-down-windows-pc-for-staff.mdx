@@ -1,0 +1,175 @@
+---
+title: How to lock down a Windows PC for staff (without an IT department)
+seoTitle: How to Lock Down a Windows PC for Staff | Rulebox
+description: Six ways to lock a shared Windows PC so staff use only their work apps, compared honestly, with steps, edition limits and a checklist.
+lede: Local accounts, kiosk mode, Shell Launcher, AppLocker, Intune or kiosk software? What each one really does, which Windows edition it needs, and a checklist you can work through this week.
+date: 2026-11-25
+updated: 2026-11-25
+tags: [Windows lockdown, Shared PCs, Guides]
+---
+
+**TL;DR**
+
+- **Start with accounts.** Staff should never use an administrator account. That one change stops most software installs and settings changes.
+- **Windows has its own lockdown tools.** Assigned Access (kiosk mode) works on Pro, Enterprise and Education. Shell Launcher needs Enterprise or Education. App Control for Business and AppLocker block programs you did not approve.
+- **They are built for IT teams.** Most need XML, PowerShell run as SYSTEM, or a device-management service such as Intune.
+- **Dedicated kiosk software** packages the same ideas behind a simpler setup. Rulebox is one option. It is open source and in early access, and it is not the right fit for everyone. We say where below.
+
+## Why shared PCs drift
+
+A PC at a till, a front desk or a staff room starts clean. Then people use it. Someone installs a game. Someone saves a password in the browser. A pop-up offers a "free" PDF tool. A few months later the PC is slow, shows the last person's email, and nobody knows what is on it.
+
+None of this needs bad intent. It happens because the PC is open. The fix is to decide what staff need, allow that, and block the rest.
+
+## Step 1: Give staff a standard account
+
+This is the most important step, and it costs nothing. Standard accounts are built into Windows, Home included.
+
+A **standard user** runs apps with standard rights. When something needs administrator rights, such as most installers or system settings, Windows shows a User Account Control prompt, and without an administrator's approval the change does not happen ([Microsoft Learn: User Account Control](https://learn.microsoft.com/en-us/windows/security/application-security/application-control/user-account-control/)). Microsoft's own guidance for kiosks is to use "a user account with the least privileges, such as a local, standard user account" ([Microsoft Learn: Assigned Access recommendations](https://learn.microsoft.com/en-us/windows/configuration/assigned-access/recommendations)).
+
+<Steps>
+
+1. **Create one administrator account** for the owner or manager, with a strong password that staff do not know.
+2. **Create a standard account for staff.** In **Settings → Accounts → Other users**, add a user and leave the account type as *Standard User*.
+3. **Remove admin rights** from every account staff use. In the same screen, select the account, choose **Change account type** and pick *Standard User*.
+4. **Sign in as staff and test** the apps they need. Some older programs expect admin rights; fix those one by one rather than giving everyone admin.
+
+</Steps>
+
+<Callout type="tip">
+One shared staff account is simple, but everyone then sees everyone's files and browser logins. If several people use the PC, give each person their own standard account, or use a tool that gives each person a separate sign-in.
+</Callout>
+
+A standard account does not stop someone from running a program from a USB stick, opening any website, or filling the desktop with downloads. The next steps narrow that down.
+
+## Step 2: Choose how far to lock it
+
+There are five common ways to go further. They differ in what they block, which Windows edition they need, and how much work they take.
+
+| Option | What it does | Windows editions | Setup effort |
+|---|---|---|---|
+| Assigned Access: kiosk | One app full screen | Pro, Enterprise, Education, IoT Enterprise | Low (Settings app) |
+| Assigned Access: restricted user experience | Normal desktop, only listed apps | Pro, Enterprise, Education, IoT Enterprise | High (XML) |
+| Shell Launcher | Replaces the desktop with your own app | Enterprise, Education, IoT Enterprise | High (XML or MDM) |
+| App Control for Business / AppLocker | Blocks programs you did not approve | Pro and up (see below) | High (policies) |
+| Intune or another MDM | Pushes any of the above to many PCs | Pro and up | Medium, plus licences |
+
+Editions are from Microsoft Learn: [Assigned Access](https://learn.microsoft.com/en-us/windows/configuration/assigned-access/), [Shell Launcher](https://learn.microsoft.com/en-us/windows/configuration/shell-launcher/) and [App Control and AppLocker](https://learn.microsoft.com/en-us/windows/security/application-security/application-control/app-control-for-business/appcontrol-and-applocker-overview). Windows Home is not in the supported list for Assigned Access.
+
+### Assigned Access: one app, full screen
+
+Assigned Access has two modes. The **kiosk experience** runs one app full screen. Microsoft describes it as a single Universal Windows Platform (UWP) app or Microsoft Edge "in full screen above the lock screen", and if the app is closed, it restarts ([Microsoft Learn](https://learn.microsoft.com/en-us/windows/configuration/kiosk/)).
+
+You can set it up without any code: **Settings → Accounts → Other users → Set up a kiosk** ([quick start](https://learn.microsoft.com/en-us/windows/configuration/assigned-access/quickstart-kiosk)). If you pick Edge, you choose a full-screen website (a digital sign) or a public browser, and the start page.
+
+It fits a check-in screen, a price checker, a menu or a sign. It does not fit a PC where staff need email, a booking system and a few documents.
+
+### Assigned Access: the restricted user experience
+
+The second mode, sometimes called a *multi-app kiosk*, keeps the Windows desktop but only lets the user run a list of apps. The Start menu shows only those apps. You can set different lists for different accounts or groups ([Microsoft Learn](https://learn.microsoft.com/en-us/windows/configuration/assigned-access/)).
+
+This is the closest built-in match for a shared staff PC. The catch is setup. There is no Settings screen for it. You write an XML file and apply it through an MDM such as Intune, a provisioning package, or PowerShell running as SYSTEM ([quick start](https://learn.microsoft.com/en-us/windows/configuration/assigned-access/quickstart-kiosk)). We cover the file and its limits in [Windows kiosk mode explained](/blog/windows-kiosk-mode-explained).
+
+### Shell Launcher: your own desktop
+
+Shell Launcher replaces the normal Windows desktop (`Explorer.exe`) with an app you choose. That can be a line-of-business app or a custom launcher ([Microsoft Learn](https://learn.microsoft.com/en-us/windows/configuration/shell-launcher/)).
+
+Two things to know before you choose it:
+
+- It needs **Enterprise, Education or IoT Enterprise**. It is not supported on Pro.
+- On its own it locks very little. Microsoft notes that Shell Launcher "doesn't prevent a user from accessing other desktop applications and system components", and it has no default lockdown policies ([Microsoft Learn](https://learn.microsoft.com/en-us/windows/configuration/kiosk/)). You add those yourself.
+
+You also cannot use Shell Launcher and Assigned Access on the same PC.
+
+### App Control for Business and AppLocker: approved programs only
+
+These features decide which programs may run at all. A program that is not on the list does not start, even from a USB stick or the Downloads folder. This is called *application allowlisting*.
+
+- **App Control for Business** (formerly Windows Defender Application Control) is Microsoft's recommended option: "Customers who are able to implement application control using App Control, rather than AppLocker, should do so" ([Microsoft Learn](https://learn.microsoft.com/en-us/windows/security/application-security/application-control/app-control-for-business/appcontrol-and-applocker-overview)). Its policies apply to the whole PC.
+- **AppLocker** can set rules per user or group, which suits shared PCs. It still gets security fixes but no new features ([same page](https://learn.microsoft.com/en-us/windows/security/application-security/application-control/app-control-for-business/appcontrol-and-applocker-overview)). On Windows 11, and on Windows 10 from version 2004, AppLocker no longer needs a specific edition to enforce its policies ([Microsoft Learn: AppLocker requirements](https://learn.microsoft.com/en-us/windows/security/application-security/application-control/app-control-for-business/applocker/requirements-to-use-applocker)).
+
+<Callout type="warning">
+Allowlisting is powerful and easy to get wrong. A rule that is too strict can stop Windows updates or an app's own updater. Start in audit mode, read the logs for a week, then enforce. Keep a tested way back in, such as an admin account that the rules do not cover.
+</Callout>
+
+### Group Policy and Intune: the same settings, at scale
+
+Group Policy and MDM services such as Microsoft Intune do not add new lockdown powers. They deliver the settings above, plus hundreds of others (block Control Panel, hide drives, turn off USB storage), to many PCs at once.
+
+Intune is a strong choice if you already pay for Microsoft 365 plans that include it. Microsoft states that an Intune licence "is required for any user or device that benefits directly or indirectly" from the service, with a device-only option for kiosks and other shared devices ([Microsoft Learn: Intune licensing](https://learn.microsoft.com/en-us/intune/fundamentals/licensing)). You still design the lockdown yourself.
+
+### Dedicated kiosk software
+
+Kiosk software wraps these ideas into one product. It usually gives you a locked desktop or launcher, an allowlist of apps and websites, and a console to change things remotely. Products differ a lot in price, platform and depth, so compare them on the questions in the checklist below, not on feature lists.
+
+## Where Rulebox fits, and where it does not
+
+We build [Rulebox](/product), so read this part with that in mind.
+
+**Rulebox fits** when several staff share Windows PCs, you have no IT team or MDM, and you want each PC to behave the same from a web dashboard:
+
+- Staff sign in on [any enrolled PC](/features/employee-sign-in) and see a [simple desktop](/features/staff-desktop) with only their approved apps, websites and files.
+- [Layered lockdown](/features/lockdown): staff have no admin rights, only approved programs run, and Task Manager, the Run box and Windows shortcuts are blocked. Installers are checked against a SHA-256 hash before they run.
+- Changes reach every PC in the group, and PCs that were [offline](/features/offline) catch up when they reconnect.
+- It is open source (MIT), and you can [return a PC to normal Windows](/features/reversible) at any time.
+
+**Rulebox does not fit** when:
+
+- **You need one app on one screen**, such as a sign or a check-in kiosk. Windows' built-in kiosk mode already does this well, for free.
+- **You already run Intune** and have people who know it. Use what you have.
+- **You manage phones, tablets or Macs as well.** Rulebox is Windows only. Android is planned for v2.
+- **You need certified software** (SOC 2, ISO 27001). Rulebox has no certifications.
+- **You need something proven at scale today.** Rulebox is new and in early access.
+
+On Windows Home, some lockdown layers do not exist, so Rulebox runs with reduced protection there. Pro, Enterprise or Education gives the strongest lockdown. See the [fair comparison with Windows kiosk mode](/compare/windows-kiosk-mode) for the details.
+
+## A lockdown checklist
+
+Work through this list on one test PC first. It applies whatever tool you choose.
+
+**Accounts**
+
+- Staff use **standard** accounts. Nobody but the owner knows an admin password.
+- Each person has their own sign-in, or you accept that a shared account shares files and logins.
+- Auto sign-in, if used, signs in to a standard account only.
+
+**Apps and files**
+
+- Write down the apps and websites each role needs. Everything else is blocked.
+- Only approved programs can run, including from USB sticks and Downloads.
+- Installers come from known sources and are checked (a SHA-256 hash or a valid signature).
+- Staff files live in one place you can back up or clear.
+
+**Windows itself**
+
+- Settings, Control Panel, Task Manager, the Run box and the command line are blocked for staff.
+- Windows Update stays on. A locked PC without updates is still at risk.
+- The PC's edition supports the tools you chose (check **Settings → System → About**).
+
+**Running it**
+
+- You can change the rules for every PC from one place, or you have time to visit each one.
+- You know how to undo everything, and you have tested it.
+- You have tried to break out yourself: keyboard shortcuts, the file dialogs inside apps, browser links, and a USB stick.
+
+## Frequently asked questions
+
+### Can I lock down a PC running Windows Home?
+
+Partly. Standard accounts work on Home. Assigned Access needs Pro or higher, and Shell Launcher needs Enterprise or Education ([Microsoft Learn](https://learn.microsoft.com/en-us/windows/configuration/kiosk/)). Upgrading a Home PC to Pro is often the cheapest way to get the built-in tools.
+
+### Is a standard user account enough on its own?
+
+It stops most installs and settings changes, which is the biggest win. It does not limit which websites people visit or which portable programs they run. Add allowlisting or kiosk software for that.
+
+### What is the difference between kiosk mode and a multi-app kiosk?
+
+Kiosk mode (the *kiosk experience*) runs one app full screen. A multi-app kiosk (the *restricted user experience*) keeps the desktop but allows only a list of apps. Our post [Windows kiosk mode explained](/blog/windows-kiosk-mode-explained) covers both.
+
+### Do I need Intune to lock down a few PCs?
+
+No. You can set up each PC by hand. Intune, or software with its own dashboard, pays off when you have more PCs than you can visit, or when rules change often.
+
+### How do I get Rulebox?
+
+Rulebox is free and open source. The hosted service is in early access. [Request early access](/early-access), read [what Rulebox is](/docs/start-here/what-is-rulebox), or see the [download page](/download).

@@ -440,6 +440,27 @@
   --shadow-window: 0 1px 2px var(--shadow-a), 0 40px 80px -30px var(--shadow-c);
 }
 
+/* ---------- Code blocks ----------
+   Code blocks are always a dark well, on paper and in dark sections, so
+   they read the dark palette directly. Shiki's css-variables theme maps
+   onto these in global.css (--astro-code-*). */
+:root {
+  --code-bg: var(--dk-night);
+  --code-bar: var(--dk-bg);
+  --code-line: var(--dk-line);
+  --code-ink: var(--dk-ink);
+  --code-muted: var(--dk-muted);
+  --code-btn-hover: var(--dk-surface-2);
+  --code-keyword: var(--dk-c-violet-ink);
+  --code-function: var(--dk-c-blue-ink);
+  --code-string: var(--dk-c-mint-ink);
+  --code-constant: var(--dk-c-sun-ink);
+  --code-parameter: var(--dk-c-coral-ink);
+  --code-comment: var(--dk-faint);
+  --code-punct: var(--dk-ink-2);
+  --code-ok: var(--dk-on-night-ok);
+}
+
 /* ---------- Shared, colour-free tokens ---------- */
 :root {
   /* Logo keyhole amber: never changes (PRD 25.5). Decoration only (dots,

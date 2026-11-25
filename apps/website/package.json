@@ -10,7 +10,8 @@
     "preview": "astro preview",
     "check": "astro check",
     "typecheck": "astro check && tsc --noEmit -p worker/tsconfig.json",
-    "og": "node scripts/og.mjs",
+    "screens": "node scripts/screens.mjs",
+    "og": "node scripts/screens.mjs && node scripts/og.mjs",
     "fetch:release": "node scripts/fetch-release.mjs",
     "shots": "node scripts/screenshots.mjs"
   },

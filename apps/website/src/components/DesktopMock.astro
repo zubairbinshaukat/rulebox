@@ -42,13 +42,19 @@ import IconZoomIn from "~icons/solar/magnifer-zoom-in-bold-duotone";
 import IconZoomOut from "~icons/solar/magnifer-zoom-out-bold-duotone";
 import { flatMarkSvg } from "../../../../packages/ui/src/brand/geometry";
 import { uid } from "../lib/uid";
+import { SCREENS, SCREEN_SIZE, screenUrl, type ScreenKey } from "../data/screens";
 
 type Variant = "desktop" | "signin" | "viewer" | "offline" | "evening";
 interface Props {
   variant?: Variant;
   class?: string;
+  /** Also put the rendered screenshot (public/screens, scripts/screens.mjs) in the
+   *  page as a real <img> with alt text, under the drawn screen, so search
+   *  engines and screen readers get the picture. The drawn screen covers it. */
+  shot?: boolean;
 }
-const { variant = "desktop", class: className } = Astro.props;
+const { variant = "desktop", class: className, shot = false } = Astro.props;
+const screen = shot && variant in SCREENS ? SCREENS[variant as ScreenKey] : undefined;
 
 /* The glyph keys of the real app (shell/appArt.ts); each has its own art colours. */
 const GLYPHS = {
@@ -135,8 +141,26 @@ const cols = s.tiles.length > 6 ? 4 : 3;
 const startMark = flatMarkSvg({ id: uid("rb-mock-start") });
 ---
 
-<div class:list={["mock", `v-${variant}`, className]} aria-hidden="true">
-  <div class="scr">
+<div class:list={["mock", `v-${variant}`, className]} aria-hidden={screen ? undefined : "true"}>
+  {
+    screen && (
+      <picture class="mock-shot">
+        <source type="image/avif" srcset={`/screens/${screen.key}-800.avif 800w, ${screenUrl(screen.key, "avif")} 1600w`} sizes="(min-width: 960px) 50vw, 90vw" />
+        <img
+          src={screenUrl(screen.key)}
+          srcset={`/screens/${screen.key}-800.webp 800w, ${screenUrl(screen.key)} 1600w`}
+          sizes="(min-width: 960px) 50vw, 90vw"
+          width={SCREEN_SIZE.width}
+          height={SCREEN_SIZE.height}
+          alt={screen.alt}
+          loading="lazy"
+          decoding="async"
+          fetchpriority="low"
+        />
+      </picture>
+    )
+  }
+  <div class="scr" aria-hidden={screen ? "true" : undefined}>
     <div class="wall"><i class="ba"></i><i class="bb"></i></div>
 
     {
@@ -333,6 +357,16 @@ const startMark = flatMarkSvg({ id: uid("rb-mock-start") });
     isolation: isolate;
     user-select: none;
   }
+  /* The rendered screenshot sits under the drawn screen (same picture); the
+     opaque wall keeps it fully covered, so nothing doubles up. */
+  .mock-shot,
+  .mock-shot img {
+    position: absolute;
+    inset: 0;
+    z-index: -1;
+    width: 100%;
+    height: 100%;
+  }
   .scr {
     /* One virtual pixel of the 1120 px wide screen. */
     --p: calc(100cqw / 1120);
@@ -352,6 +386,7 @@ const startMark = flatMarkSvg({ id: uid("rb-mock-start") });
     position: absolute;
     inset: 0;
     overflow: hidden;
+    background: var(--mock-bg);
   }
   .wall i {
     position: absolute;

@@ -1,6 +1,6 @@
 /*
  * Use-case pages. Source: docs/website/story-and-copy.md §6.2-6.7 (Tier 1).
- * [PILOT RESULT] slots are left out on purpose: they ship only with real,
+ * [EARLY-ACCESS RESULT] slots are left out on purpose: they ship only with real,
  * approved results (Story §1, plan §7.2).
  */
 import type { IconName } from "../components/Icon.astro";

@@ -1,3 +1,5 @@
 # Permanent redirects (plan §6.9). A slug never changes without a line here.
 # Format: /old-path /new-path 301
 /features/web-apps /features/apps 301
+/pilot /early-access 301
+/pilot/ /early-access 301

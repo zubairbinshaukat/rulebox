@@ -4,7 +4,7 @@
  * assets.run_worker_first in wrangler.jsonc), so page views never count
  * against the Workers request limit.
  *
- *   POST /api/pilot          pilot request   -> owner inbox + auto-reply
+ *   POST /api/early-access   early-access request -> owner inbox + auto-reply
  *   POST /api/contact        contact form    -> owner inbox (routed by topic)
  *   POST /api/notify         "notify me"     -> double opt-in confirmation email
  *   GET  /api/notify/confirm signed link     -> adds the address to the list
@@ -20,7 +20,7 @@ export interface Env {
   FORM_LIMITER?: { limit(opts: { key: string }): Promise<{ success: boolean }> };
   TURNSTILE_SECRET: string;
   RESEND_API_KEY: string;
-  /** Owner inbox for pilot and general mail. */
+  /** Owner inbox for early-access and general mail. */
   FORM_TO_ADDRESS: string;
   /** Optional separate inbox for security-topic contact messages. */
   SECURITY_TO_ADDRESS?: string;
@@ -32,7 +32,7 @@ export interface Env {
   NOTIFY_SECRET: string;
   /** Optional Resend audience for the notify list; without it the owner gets an email. */
   RESEND_AUDIENCE_ID?: string;
-  /** "false" turns the pilot auto-reply off on a busy day (Resend free plan: 100 emails a day). */
+  /** "false" turns the early-access auto-reply off on a busy day (Resend free plan: 100 emails a day). */
   AUTO_REPLY?: string;
 }
 
@@ -128,7 +128,7 @@ async function guard(req: Request, env: Env): Promise<Json | Response> {
   return body;
 }
 
-async function pilot(req: Request, env: Env): Promise<Response> {
+async function earlyAccess(req: Request, env: Env): Promise<Response> {
   const b = await guard(req, env);
   if (b instanceof Response) return b;
   const f = {
@@ -154,13 +154,13 @@ async function pilot(req: Request, env: Env): Promise<Response> {
     "",
     f.message || "(no message)",
   ].join("\n");
-  const sent = await sendEmail(env, { to: env.FORM_TO_ADDRESS, subject: `Pilot request: ${f.organisation}`, text, replyTo: f.email });
+  const sent = await sendEmail(env, { to: env.FORM_TO_ADDRESS, subject: `Early-access request: ${f.organisation}`, text, replyTo: f.email });
   if (!sent) return json(502, { message: "We could not send that right now. Please email us instead." });
   if (env.AUTO_REPLY !== "false") {
     await sendEmail(env, {
       to: f.email,
-      subject: "We received your Rulebox pilot request",
-      text: `Hello ${f.name},\n\nThank you for your interest in the Rulebox pilot. We read every request and will reply by email.\n\nThe Rulebox team`,
+      subject: "We received your Rulebox early-access request",
+      text: `Hello ${f.name},\n\nThank you for your interest in Rulebox early access. We read every request and will reply by email.\n\nThe Rulebox team`,
     });
   }
   return json(200, { message: "Thank you. We received your request and will reply by email." });
@@ -234,8 +234,8 @@ export default {
   async fetch(req: Request, env: Env): Promise<Response> {
     const url = new URL(req.url);
     switch (url.pathname) {
-      case "/api/pilot":
-        return pilot(req, env);
+      case "/api/early-access":
+        return earlyAccess(req, env);
       case "/api/contact":
         return contact(req, env);
       case "/api/notify":

@@ -5,7 +5,7 @@
 // name to Content-Security-Policy once it has run clean for a while.
 
 import { createHash } from "node:crypto";
-import { readdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -59,6 +59,42 @@ const lines = [
   "/og/*",
   "  Cache-Control: public, max-age=86400",
   "",
+  "/screens/*",
+  "  Cache-Control: public, max-age=86400",
+  "",
 ];
+
+/*
+ * Stock photos stay out of image search (owner, 2026-11-25). Only product
+ * screens (/screens/*) and our own graphics should be indexed. Every photo
+ * comes from a source file in src/assets/use-cases or src/assets/home (the
+ * Pexels photos, see src/data/photos.ts); Astro emits each variant (sizes,
+ * formats, nav thumbnails) as /_astro/<source basename>.<hash>.<ext>. One
+ * rule per source basename covers all its variants and stays far below
+ * Cloudflare's 100-rule limit (one rule per file would not: ~235 files).
+ */
+const PHOTO_DIRS = ["src/assets/use-cases", "src/assets/home"].map((d) => join(root, d));
+const photosSrc = readFileSync(join(root, "src/data/photos.ts"), "utf8");
+const photoBases = new Set([
+  ...[...photosSrc.matchAll(/from "\.\.\/assets\/[^"]*?([^/"]+)\.(?:jpe?g|png|webp|avif)"/g)].map((m) => m[1]),
+  ...PHOTO_DIRS.filter(existsSync).flatMap((d) => readdirSync(d).filter((n) => /\.(jpe?g|png|webp|avif)$/i.test(n)).map((n) => n.replace(/\.[^.]+$/, ""))),
+]);
+const astroFiles = existsSync(join(dist, "_astro")) ? readdirSync(join(dist, "_astro")) : [];
+const noindex = [];
+for (const base of [...photoBases].sort()) {
+  const files = astroFiles.filter((n) => n.startsWith(`${base}.`));
+  if (!files.length) continue;
+  noindex.push({ base, files });
+  lines.push(`/_astro/${base}.*`, "  X-Robots-Tag: noindex", "");
+}
+const RULE_LIMIT = 100;
+const rules = lines.filter((l) => l.startsWith("/")).length;
+if (rules > RULE_LIMIT) throw new Error(`_headers has ${rules} rules; Cloudflare allows ${RULE_LIMIT}`);
+
 writeFileSync(join(dist, "_headers"), lines.join("\n"));
-console.log(`_headers written (${hashes.size} inline script hash(es), ${production ? "production" : "preview: noindex"})`);
+const photoFiles = noindex.reduce((n, x) => n + x.files.length, 0);
+console.log(
+  `_headers written (${hashes.size} inline script hash(es), ${production ? "production" : "preview: noindex"}; ` +
+    `noindex on ${photoFiles} stock-photo file(s) from ${noindex.length} source(s), ${rules} rules)`,
+);
+if (process.argv.includes("--list")) for (const x of noindex) console.log(`  noindex /_astro/${x.base}.*  (${x.files.length} files)`);

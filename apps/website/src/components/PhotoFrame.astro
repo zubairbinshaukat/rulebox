@@ -9,12 +9,13 @@
  * frame crosses the viewport. CSS scroll-driven animation, transform only,
  * off with reduced motion and where the browser lacks view timelines.
  */
-import { Picture } from "astro:assets";
 import type { Photo } from "../data/photos";
+import { photoSources } from "../lib/images";
 
 interface Props {
   photo: Photo;
-  /** CSS sizes attribute: how wide the frame is at each breakpoint. */
+  /** CSS sizes attribute: the width the photo is DRAWN at (object-fit:
+      cover can draw it wider than the frame; parallax adds 10%). */
   sizes: string;
   widths?: number[];
   /** Hero: eager + high fetch priority. Everything else lazy loads. */
@@ -24,23 +25,26 @@ interface Props {
   shade?: boolean;
   class?: string;
 }
-const { photo, sizes, widths = [480, 720, 960, 1280], priority = false, parallax = false, shade = false, class: className } = Astro.props;
+const { photo, sizes, widths = [480, 720, 960, 1280, 1600], priority = false, parallax = false, shade = false, class: className } = Astro.props;
+const s = await photoSources(photo.src, widths);
 ---
 
 <div class:list={["frame", { parallax, shade }, className]} style={photo.focus ? `--focus: ${photo.focus}` : undefined}>
-  <Picture
-    src={photo.src}
-    alt={photo.alt}
-    formats={["avif"]}
-    fallbackFormat="webp"
-    widths={widths}
-    sizes={sizes}
-    quality={52}
-    loading={priority ? "eager" : "lazy"}
-    decoding={priority ? "sync" : "async"}
-    fetchpriority={priority ? "high" : "auto"}
-    class="ph-img"
-  />
+  <picture>
+    <source type="image/avif" srcset={s.avif} sizes={sizes} />
+    <img
+      src={s.fallback}
+      srcset={s.webp}
+      sizes={sizes}
+      alt={photo.alt}
+      width={s.width}
+      height={s.height}
+      loading={priority ? "eager" : "lazy"}
+      decoding={priority ? "sync" : "async"}
+      fetchpriority={priority ? "high" : "auto"}
+      class="ph-img"
+    />
+  </picture>
   <slot />
 </div>
 

@@ -87,6 +87,13 @@ import Cart from "~icons/solar/cart-large-2-bold-duotone";
 import Window from "~icons/solar/window-frame-bold-duotone";
 import KeyLinear from "~icons/solar/key-minimalistic-linear";
 import RestartLinear from "~icons/solar/restart-linear";
+import Lightbulb from "~icons/solar/lightbulb-minimalistic-bold-duotone";
+import ClockLinear from "~icons/solar/clock-circle-linear";
+import CalendarLinear from "~icons/solar/calendar-linear";
+import PenLinear from "~icons/solar/pen-linear";
+import ArrowLeft from "~icons/solar/arrow-left-linear";
+import ListLinear from "~icons/solar/list-linear";
+import Tag from "~icons/solar/tag-linear";
 
 const ICONS = {
   "arrow-right": ArrowRight,
@@ -172,6 +179,13 @@ const ICONS = {
   window: Window,
   "key-linear": KeyLinear,
   "restart-linear": RestartLinear,
+  lightbulb: Lightbulb,
+  "clock-linear": ClockLinear,
+  "calendar-linear": CalendarLinear,
+  "pen-linear": PenLinear,
+  "arrow-left": ArrowLeft,
+  "list-linear": ListLinear,
+  tag: Tag,
 } as const;
 
 export type IconName = keyof typeof ICONS;
@@ -183,7 +197,10 @@ interface Props {
   size?: string;
 }
 const { name, class: className, label, size } = Astro.props;
-const Cmp = ICONS[name];
+/* unplugin-icons types each icon as taking no props; the compiled component
+   passes SVG attributes through, so type it as such. */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+const Cmp = ICONS[name] as unknown as (props: Record<string, unknown>) => any;
 if (!Cmp) throw new Error(`Icon "${name}" is not in the registry in Icon.astro`);
 ---
 

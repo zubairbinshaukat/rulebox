@@ -5,6 +5,8 @@ import Points from "../../components/Points.astro";
 import Limits from "../../components/Limits.astro";
 import CtaClose from "../../components/CtaClose.astro";
 import Icon from "../../components/Icon.astro";
+import ProductShot from "../../components/ProductShot.astro";
+import type { ScreenKey } from "../../data/screens";
 import { FEATURES, type Feature } from "../../data/features";
 import { useCaseBySlug } from "../../data/useCases";
 import { CTA_PRIMARY } from "../../config";
@@ -20,6 +22,9 @@ const path = `/features/${f.slug}`;
 const related = f.useCases.map(useCaseBySlug).filter((u) => !!u);
 const isLockdown = ["lockdown", "employee-sign-in", "apps", "reversible"].includes(f.slug);
 const others = FEATURES.filter((x) => x.slug !== f.slug).slice(0, 13);
+/* The product screen that best shows this feature (rendered by scripts/screens.mjs). */
+const SHOT: Record<string, ScreenKey> = { "employee-sign-in": "signin", offline: "offline", files: "viewer" };
+const shot: ScreenKey = SHOT[f.slug] ?? "desktop";
 ---
 
 <Base title={f.title} description={f.description} path={path} og={`features-${f.slug}`} crumbs={[{ name: "Features", path: "/features" }, { name: f.name, path }]}>
@@ -37,6 +42,12 @@ const others = FEATURES.filter((x) => x.slug !== f.slug).slice(0, 13);
   <section class="section-tight">
     <div class="container">
       <Points items={f.points.map((text) => ({ text }))} />
+    </div>
+  </section>
+
+  <section class="section-tight follow">
+    <div class="container">
+      <ProductShot screen={shot} caption={shot === "desktop" ? "What staff see: the Rulebox desktop" : undefined} />
     </div>
   </section>
 

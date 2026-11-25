@@ -48,9 +48,9 @@ const HERO_PHOTO = { photo: PHOTOS.homeHero, pos: "50% 40%", posSm: "58% 40%" };
     <div class="container grid">
       <div class="left">
         <div class="copy">
-          <a class="chip enter" href="/pilot" style="--d:.05s">
-            <span class="chip-tag">Pilot</span>
-            Rulebox is in an invite-only pilot
+          <a class="chip enter" href="/early-access" style="--d:.05s">
+            <span class="chip-tag">Early access</span>
+            Rulebox is in invite-only early access
             <Icon name="arrow-right" />
           </a>
           <h1 id="hero-title" class="display enter" style="--d:.12s">
@@ -91,10 +91,10 @@ const HERO_PHOTO = { photo: PHOTOS.homeHero, pos: "50% 40%", posSm: "58% 40%" };
         </div>
       </div>
 
-      <div class="stage" aria-hidden="true">
-        <span class="slab s1"></span>
-        <span class="slab s2"><span class="pixels"></span></span>
-        <span class="slab s3" style={`--pos-lg:${HERO_PHOTO.pos};--pos-sm:${HERO_PHOTO.posSm}`}>
+      <div class="stage">
+        <span class="slab s1" aria-hidden="true"></span>
+        <span class="slab s2" aria-hidden="true"><span class="pixels"></span></span>
+        <span class="slab s3" aria-hidden="true" style={`--pos-lg:${HERO_PHOTO.pos};--pos-sm:${HERO_PHOTO.posSm}`}>
           <Picture
             src={HERO_PHOTO.photo.src}
             alt=""
@@ -110,10 +110,10 @@ const HERO_PHOTO = { photo: PHOTOS.homeHero, pos: "50% 40%", posSm: "58% 40%" };
           />
           <span class="grade"></span>
         </span>
-        <span class="float f1"><Icon name="forbidden" /> Task Manager <em>Not allowed</em></span>
-        <span class="float f2"><Icon name="shield" /> Installer hash-checked</span>
+        <span class="float f1" aria-hidden="true"><Icon name="forbidden" /> Task Manager <em>Not allowed</em></span>
+        <span class="float f2" aria-hidden="true"><Icon name="shield" /> Installer hash-checked</span>
         <div class="window">
-          <div class="enter" style="--d:.2s"><DesktopMock variant="desktop" /></div>
+          <div class="enter" style="--d:.2s"><DesktopMock variant="desktop" shot /></div>
         </div>
       </div>
     </div>

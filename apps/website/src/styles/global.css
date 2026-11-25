@@ -1053,3 +1053,257 @@ dd {
 .prose td:last-child {
   padding-right: 0;
 }
+
+/* ---------- Prose extras: code frames, callouts, steps, tables, anchors ----------
+   Shared by docs and blog. Markup comes from lib/code-frame.ts (code),
+   components/Callout.astro, components/Steps.astro; scripts/prose.ts adds
+   the copy action, table wrappers and heading anchors. */
+:root {
+  --astro-code-foreground: var(--code-ink);
+  --astro-code-background: var(--code-bg);
+  --astro-code-token-keyword: var(--code-keyword);
+  --astro-code-token-function: var(--code-function);
+  --astro-code-token-string: var(--code-string);
+  --astro-code-token-string-expression: var(--code-string);
+  --astro-code-token-constant: var(--code-constant);
+  --astro-code-token-parameter: var(--code-parameter);
+  --astro-code-token-comment: var(--code-comment);
+  --astro-code-token-punctuation: var(--code-punct);
+  --astro-code-token-link: var(--code-function);
+}
+.prose .code {
+  margin-top: 1.5em;
+  border-radius: var(--radius);
+  background: var(--code-bg);
+  border: 1px solid var(--code-line);
+  overflow: hidden;
+  box-shadow: var(--shadow-xs);
+}
+.prose .code + * {
+  margin-top: 1.5em;
+}
+.code-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-3);
+  min-height: var(--sp-8);
+  padding: 0 var(--sp-2) 0 var(--sp-4);
+  background: var(--code-bar);
+  border-bottom: 1px solid var(--code-line);
+}
+.code-lang {
+  font-family: var(--font-mono);
+  font-size: var(--fs-label);
+  letter-spacing: var(--ls-label);
+  text-transform: uppercase;
+  color: var(--code-muted);
+}
+.code-copy {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 28px;
+  padding: 0 var(--sp-3) 0 var(--sp-2);
+  border: 0;
+  border-radius: var(--sp-2);
+  background: transparent;
+  color: var(--code-muted);
+  font-size: var(--fs-xs);
+  font-weight: var(--fw-medium);
+  cursor: pointer;
+}
+.code-copy:hover {
+  background: var(--code-btn-hover);
+  color: var(--code-ink);
+}
+.code-copy:focus-visible {
+  outline-color: var(--dk-focus);
+  outline-offset: 1px;
+}
+.code-copy .icon {
+  width: 16px;
+  height: 16px;
+  vertical-align: 0;
+}
+.code-copy .i-done,
+.code-copy[data-copied] .i-copy {
+  display: none;
+}
+.code-copy[data-copied] .i-done {
+  display: inline-block;
+  color: var(--code-ok);
+}
+.code-copy[data-copied] {
+  color: var(--code-ink);
+}
+html:not(.js) .code-copy {
+  display: none;
+}
+.prose .code pre {
+  margin: 0;
+  padding: var(--sp-4) var(--sp-5);
+  border-radius: 0;
+  background: var(--code-bg);
+  color: var(--code-ink);
+  overflow-x: auto;
+  font-size: 0.875rem;
+  line-height: 1.7;
+  tab-size: 2;
+}
+.prose .code pre:focus-visible {
+  outline-offset: -2px;
+}
+
+/* Callouts: Note, Tip, Warning */
+.callout {
+  --c-edge: var(--c-blue);
+  --c-soft: var(--c-blue-soft);
+  --c-ink: var(--c-blue-ink);
+  display: grid;
+  gap: var(--sp-2);
+  padding: var(--sp-4) var(--sp-5);
+  border-radius: var(--radius-sm);
+  background: var(--c-soft);
+  border: 1px solid color-mix(in oklch, var(--c-edge) 28%, transparent);
+  color: var(--ink-2);
+}
+.callout[data-kind="tip"] {
+  --c-edge: var(--c-mint);
+  --c-soft: var(--c-mint-soft);
+  --c-ink: var(--c-mint-ink);
+}
+.callout[data-kind="warning"] {
+  --c-edge: var(--warning);
+  --c-soft: var(--warning-soft);
+  --c-ink: var(--warning-ink);
+}
+.callout-head {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  font-weight: var(--fw-strong);
+  font-size: var(--fs-small);
+  color: var(--c-ink);
+}
+.callout-head .icon {
+  width: 18px;
+  height: 18px;
+}
+.callout-body > * + * {
+  margin-top: 0.6em;
+}
+.prose .callout + *,
+.prose * + .callout {
+  margin-top: 1.5em;
+}
+
+/* Numbered steps with markers */
+.steps > ol {
+  counter-reset: step;
+  list-style: none;
+  padding-left: 0;
+  display: grid;
+  gap: 0;
+}
+.steps > ol > li {
+  counter-increment: step;
+  position: relative;
+  padding: 0 0 var(--sp-6) calc(var(--sp-8) + var(--sp-2));
+  margin: 0;
+}
+.steps > ol > li::before {
+  content: counter(step);
+  position: absolute;
+  left: 0;
+  top: 0;
+  display: grid;
+  place-items: center;
+  width: var(--sp-8);
+  height: var(--sp-8);
+  border-radius: 50%;
+  background: var(--surface);
+  border: 1px solid var(--line-strong);
+  color: var(--ink);
+  font-family: var(--font-mono);
+  font-size: var(--fs-small);
+  font-weight: var(--fw-strong);
+  line-height: 1;
+}
+/* Rail between markers */
+.steps > ol > li:not(:last-child)::after {
+  content: "";
+  position: absolute;
+  left: calc(var(--sp-8) / 2);
+  top: calc(var(--sp-8) + var(--sp-1));
+  bottom: var(--sp-1);
+  width: 1px;
+  background: var(--line);
+}
+.steps > ol > li:last-child {
+  padding-bottom: 0;
+}
+.steps > ol > li > :first-child {
+  padding-top: var(--sp-2);
+}
+.steps > ol > li > * + * {
+  margin-top: 0.6em;
+}
+.prose .steps > ol > li + li {
+  margin-top: 0;
+}
+
+/* Tables (prose.ts wraps each in .table-wrap: framed, scrolls on its own) */
+.prose .table-wrap {
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--surface);
+}
+.prose .table-wrap table {
+  font-size: var(--fs-small);
+}
+.prose .table-wrap th {
+  background: var(--surface-2);
+  font-size: var(--fs-xs);
+  letter-spacing: 0.01em;
+}
+.prose .table-wrap :is(th, td),
+.prose .table-wrap :is(th, td):first-child,
+.prose .table-wrap :is(th, td):last-child {
+  padding: var(--sp-3) var(--sp-4);
+}
+.prose .table-wrap tr:last-child td {
+  border-bottom: 0;
+}
+
+/* Heading anchors (added by prose.ts), shown on hover or focus */
+.prose :is(h2, h3)[id] {
+  scroll-margin-top: 96px;
+}
+.prose .h-anchor {
+  margin-left: 0.35em;
+  color: var(--faint);
+  text-decoration: none;
+  font-family: var(--font-sans);
+  font-weight: var(--fw-medium);
+  opacity: 0;
+  transition: opacity 0.15s;
+}
+.h-anchor .icon {
+  display: inline-block;
+  width: 0.8em;
+  height: 0.8em;
+  vertical-align: -0.05em;
+}
+:is(h2, h3):hover > .h-anchor,
+.h-anchor:focus-visible {
+  opacity: 1;
+}
+.prose .h-anchor:hover {
+  color: var(--accent-text);
+}
+@media (hover: none) {
+  .h-anchor {
+    display: none;
+  }
+}

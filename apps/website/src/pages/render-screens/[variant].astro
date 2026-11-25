@@ -1,0 +1,29 @@
+---
+/*
+ * Render-only pages for scripts/screens.mjs: one DesktopMock per page at the
+ * screenshot width. They exist only in the script's own temporary build
+ * (RB_RENDER_SCREENS=1); the normal build gets no paths, so nothing ships.
+ */
+import "../../styles/global.css";
+import DesktopMock from "../../components/DesktopMock.astro";
+import { SCREENS, SCREEN_SIZE } from "../../data/screens";
+
+export function getStaticPaths() {
+  if (process.env.RB_RENDER_SCREENS !== "1") return [];
+  return Object.values(SCREENS).map((s) => ({ params: { variant: s.key }, props: { variant: s.variant } }));
+}
+const { variant } = Astro.props;
+---
+
+<!doctype html>
+<html lang="en-GB">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="robots" content="noindex, nofollow" />
+    <title>Render {variant}</title>
+  </head>
+  <body style={`margin:0;width:${SCREEN_SIZE.width}px`}>
+    <h1 class="sr-only">Render {variant}</h1>
+    <div id="screen"><DesktopMock variant={variant} /></div>
+  </body>
+</html>

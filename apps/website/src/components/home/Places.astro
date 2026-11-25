@@ -7,10 +7,26 @@
  * Photos are the use-case page heroes (Pexels, credited on /legal/licenses).
  * Motion: CSS only, transform and opacity, none with reduced motion.
  */
-import { Picture } from "astro:assets";
 import Icon from "../Icon.astro";
 import { USE_CASES } from "../../data/useCases";
 import { USE_CASE_PHOTOS } from "../../data/photos";
+import { photoSources } from "../../lib/images";
+
+/*
+ * Image sizes. Cards are taller than a 3:2 photo is wide, so object-fit:
+ * cover draws the photo at card height x 1.5, wider than the card itself.
+ * `sizes` names that drawn width, or browsers fetch a file that gets
+ * upscaled and looks soft (the old bug). Drawn widths:
+ *   desktop (4 cols, 400px tall): normal 600px, wide ~660px (wider than tall x 1.5)
+ *   tablet  (2 cols, 340px tall): max(46vw, 510px)
+ *   phone   (4:5 card, min(82%, 340px) wide): 1.875 x that, about min(154vw, 640px)
+ * Widths reach 2x the desktop draw. A 3x phone also gets the 1200 file (2x):
+ * sharp on a phone, and it keeps each card under ~70 kB.
+ */
+const SIZES_PHONE_TABLET = "(min-width: 720px) max(46vw, 510px), min(154vw, 640px)";
+const SIZES_NORMAL = `(min-width: 1020px) 600px, ${SIZES_PHONE_TABLET}`;
+const SIZES_WIDE = `(min-width: 1020px) 680px, ${SIZES_PHONE_TABLET}`;
+const WIDTHS = [480, 640, 800, 960, 1200];
 
 /* Hub first (wide), hotels last (wide): both photos are landscape scenes. */
 const order = [
@@ -21,10 +37,15 @@ const order = [
   "call-centres",
   "hotels-front-desk",
 ];
-const cards = order
-  .map((slug) => USE_CASES.find((u) => u.slug === slug))
-  .filter((u): u is NonNullable<typeof u> => !!u)
-  .map((u, i) => ({ u, photo: USE_CASE_PHOTOS[u.slug]!.hero, wide: i === 0 || i === order.length - 1 }));
+const cards = await Promise.all(
+  order
+    .map((slug) => USE_CASES.find((u) => u.slug === slug))
+    .filter((u): u is NonNullable<typeof u> => !!u)
+    .map(async (u, i) => {
+      const photo = USE_CASE_PHOTOS[u.slug]!.hero;
+      return { u, photo, wide: i === 0 || i === order.length - 1, img: await photoSources(photo.src, WIDTHS) };
+    }),
+);
 ---
 
 <section class="places section" aria-labelledby="places-title">
@@ -42,26 +63,24 @@ const cards = order
 
     <ul class="cards" role="list">
       {
-        cards.map(({ u, photo, wide }, i) => (
+        cards.map(({ u, photo, wide, img }, i) => (
           <li class:list={["cell", { wide }]} style={`--i:${i}`}>
             <a class="uc" href={`/use-cases/${u.slug}`} data-tone={u.tone}>
-              <Picture
-                src={photo.src}
-                alt=""
-                formats={["avif"]}
-                fallbackFormat="webp"
-                widths={wide ? [480, 720, 960, 1280] : [360, 540, 720]}
-                sizes={
-                  wide
-                    ? "(min-width: 1020px) 660px, (min-width: 720px) 46vw, 80vw"
-                    : "(min-width: 1020px) 330px, (min-width: 720px) 46vw, 80vw"
-                }
-                quality={52}
-                loading="lazy"
-                decoding="async"
-                class="img"
-                style={photo.focus ? `object-position:${photo.focus}` : undefined}
-              />
+              <picture>
+                <source type="image/avif" srcset={img.avif} sizes={wide ? SIZES_WIDE : SIZES_NORMAL} />
+                <img
+                  src={img.fallback}
+                  srcset={img.webp}
+                  sizes={wide ? SIZES_WIDE : SIZES_NORMAL}
+                  alt=""
+                  width={img.width}
+                  height={img.height}
+                  loading="lazy"
+                  decoding="async"
+                  class="img"
+                  style={photo.focus ? `object-position:${photo.focus}` : undefined}
+                />
+              </picture>
               <span class="scrim" aria-hidden="true" />
               <span class="tag">
                 <Icon name={u.icon} />
@@ -176,7 +195,8 @@ const cards = order
     transform: scale(1.001);
     transition: transform 0.9s var(--ease-out);
   }
-  /* Soft scrim: clear at the top, deep at the bottom where the text sits. */
+  /* Soft scrim: clear at the top, deep at the bottom where the text sits.
+     Kept to the lower ~60% so the photo itself stays crisp and bright. */
   .scrim {
     position: absolute;
     inset: 0;
@@ -184,10 +204,10 @@ const cards = order
     background:
       linear-gradient(
         to top,
-        color-mix(in oklch, var(--night) 92%, transparent) 0%,
-        color-mix(in oklch, var(--night) 72%, transparent) 28%,
-        color-mix(in oklch, var(--night) 30%, transparent) 50%,
-        transparent 68%
+        color-mix(in oklch, var(--night) 90%, transparent) 0%,
+        color-mix(in oklch, var(--night) 66%, transparent) 26%,
+        color-mix(in oklch, var(--night) 24%, transparent) 46%,
+        transparent 62%
       ),
       var(--photo-dim);
   }

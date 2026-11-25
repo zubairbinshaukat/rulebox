@@ -1,0 +1,23 @@
+---
+/* A boxed aside in docs and blog prose: Note, Tip or Warning.
+   Usage in MDX (no import needed in docs and blog, the layouts pass it in):
+   <Callout type="tip">Text with **markdown**.</Callout> */
+import Icon from "./Icon.astro";
+
+interface Props {
+  type?: "note" | "tip" | "warning";
+  title?: string;
+}
+const { type = "note", title } = Astro.props;
+const META = {
+  note: { icon: "info", label: "Note" },
+  tip: { icon: "lightbulb", label: "Tip" },
+  warning: { icon: "danger", label: "Warning" },
+} as const;
+const m = META[type];
+---
+
+<aside class="callout" data-kind={type} aria-label={title ?? m.label}>
+  <p class="callout-head"><Icon name={m.icon} />{title ?? m.label}</p>
+  <div class="callout-body"><slot /></div>
+</aside>

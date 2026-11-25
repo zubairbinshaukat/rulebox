@@ -31,14 +31,15 @@ const featureItems = PRODUCT_MENU.filter((m) => m.href.startsWith("/features/"))
 const howItWorks = PRODUCT_MENU.find((m) => m.href === "/product");
 const allFeatures = PRODUCT_MENU.find((m) => m.href === "/features");
 
-/* Use cases: the industries, with a 2x thumbnail of each page's hero photo.
-   Thumbnails are tiny WebP files and load only when the panel first opens. */
+/* Use cases: the industries, with a thumbnail of each page's hero photo.
+   Tiny WebP files (3x the 40px tile, kept 3:2 so CSS object-position can
+   follow the photo's focal point), loaded only when the panel first opens. */
 const useCaseItems = await Promise.all(
   USE_CASE_MENU.filter((m) => m.href.startsWith("/use-cases/")).map(async (m) => {
     const u = USE_CASES.find((x) => x.slug === slugOf(m.href));
     const photo = USE_CASE_PHOTOS[slugOf(m.href)]?.hero;
-    const thumb = photo ? await getImage({ src: photo.src, width: 96, height: 96, fit: "cover", format: "webp", quality: 70 }) : null;
-    return { ...m, note: u?.place ?? m.note, icon: (u?.icon ?? "users") as IconName, tone: u?.tone ?? "mint", thumb: thumb?.src };
+    const thumb = photo ? await getImage({ src: photo.src, width: 180, format: "webp", quality: 80 }) : null;
+    return { ...m, note: u?.place ?? m.note, icon: (u?.icon ?? "users") as IconName, tone: u?.tone ?? "mint", thumb: thumb?.src, focus: photo?.focus };
   }),
 );
 const allUseCases = USE_CASE_MENU.find((m) => m.href === "/use-cases");
@@ -152,7 +153,7 @@ const menus = [
                     <a class="dd-item" href={it.href} data-tone={it.tone} aria-current={isActive(it.href) ? "page" : undefined}>
                       <span class="dd-icon dd-thumb">
                         <Icon name={it.icon} />
-                        {it.thumb && <img data-src={it.thumb} alt="" width="48" height="48" decoding="async" />}
+                        {it.thumb && <img data-src={it.thumb} alt="" width="48" height="48" decoding="async" style={it.focus ? `object-position:${it.focus}` : undefined} />}
                       </span>
                       <span class="dd-text">
                         <span class="dd-title">{it.label}</span>

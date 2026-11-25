@@ -1,6 +1,6 @@
 ---
 /* Use-case template, Story §6.13: hero, scene, problem, how, outcome,
-   limits, faq, related, cta. Measured outcomes come only after the pilot.
+   limits, faq, related, cta. Measured outcomes come only after early access.
    Photos are stock (src/data/photos.ts), credited at the foot of the page. */
 import Base from "../../layouts/Base.astro";
 import UseCaseHero from "../../components/UseCaseHero.astro";
@@ -65,7 +65,7 @@ const outcomeLayout = photos.outcome ? "photo" : uc.limits ? "pair" : "wide";
           <p class="label" style="--dot: var(--c-coral)">The problem</p>
           <p class="lead">{uc.problem}</p>
         </div>
-        {photos.scene && <PhotoFrame photo={photos.scene} parallax class="scene-photo" sizes="(min-width: 900px) 560px, 100vw" />}
+        {photos.scene && <PhotoFrame photo={photos.scene} parallax class="scene-photo" sizes="(min-width: 900px) 680px, calc(100vw * 1.1)" />}
       </div>
     </section>
 
@@ -96,12 +96,12 @@ const outcomeLayout = photos.outcome ? "photo" : uc.limits ? "pair" : "wide";
     </section>
 
     <section class:list={["outcome-grid", `o-${outcomeLayout}`]} aria-label="The outcome">
-      {photos.outcome && <PhotoFrame photo={photos.outcome} parallax class="outcome-photo" sizes="(min-width: 900px) 640px, 100vw" />}
+      {photos.outcome && <PhotoFrame photo={photos.outcome} parallax class="outcome-photo" sizes="(min-width: 900px) 820px, calc(100vw * 1.24)" />}
       <div class="outcome-col">
         <div class="outcome reveal">
           <p class="label" style="--dot: var(--c-mint)">The outcome</p>
           <p class="out-text">{uc.outcome}</p>
-          <p class="muted small">Measured results will be published here after the pilot, with the customer's permission.</p>
+          <p class="muted small">Measured results will be published here after early access, with the customer's permission.</p>
         </div>
         {uc.limits && <Limits items={[uc.limits]} />}
       </div>

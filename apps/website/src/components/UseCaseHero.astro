@@ -63,8 +63,8 @@ const { label, title, sub, tone, icon, place, photo, mock = "desktop", primary, 
         priority
         shade
         class="hero-frame"
-        widths={[640, 960, 1280, 1600, 2000]}
-        sizes="(min-width: 1320px) 1240px, calc(100vw - 2 * clamp(16px, 3.2vw, 40px))"
+        widths={[640, 960, 1280, 1600]}
+        sizes="(min-width: 1320px) 1240px, (min-width: 720px) calc(100vw - 2 * clamp(16px, 3.2vw, 40px)), calc((100vw - 32px) * 1.24)"
       >
         <span class="place">
           <span class="place-ic"><Icon name={icon} /></span>

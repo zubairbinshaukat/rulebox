@@ -1,4 +1,5 @@
 import { DEFAULT_DESCRIPTION, REPO_URL, SITE_NAME, SITE_URL } from "../config";
+import { SCREENS, SCREEN_SIZE, screenUrl } from "../data/screens";
 
 export interface PageMeta {
   title: string;
@@ -59,6 +60,14 @@ export function softwareLd(version?: string) {
     url: SITE_URL,
     license: "https://opensource.org/license/mit",
     offers: { "@type": "Offer", price: "0", priceCurrency: "USD" },
+    // Product screenshots only (never stock photos): drawn Staff App screens.
+    screenshot: Object.values(SCREENS).map((s) => ({
+      "@type": "ImageObject",
+      url: `${SITE_URL}${screenUrl(s.key)}`,
+      width: SCREEN_SIZE.width,
+      height: SCREEN_SIZE.height,
+      caption: s.alt,
+    })),
     ...(version ? { softwareVersion: version } : {}),
   };
 }
@@ -76,14 +85,48 @@ export function breadcrumbLd(items: { name: string; path: string }[]) {
   };
 }
 
-export function articleLd(opts: { type: "BlogPosting" | "TechArticle"; title: string; description: string; path: string; date?: string; author?: string }) {
+/** The project as an organisation: publisher, and author where no person signs. */
+export function publisherLd() {
+  return {
+    "@type": "Organization",
+    name: SITE_NAME,
+    url: SITE_URL,
+    logo: { "@type": "ImageObject", url: `${SITE_URL}/icon-512.png`, width: 512, height: 512 },
+  };
+}
+
+export function articleLd(opts: {
+  type: "BlogPosting" | "TechArticle" | "Article";
+  title: string;
+  description: string;
+  path: string;
+  date?: string;
+  modified?: string;
+  /** Absolute image URL (the page's social card). */
+  image?: string;
+  /** A person's name, or omitted for the project (Organization). */
+  author?: string;
+  authorIsOrg?: boolean;
+  keywords?: string[];
+}) {
+  const author = opts.author
+    ? opts.authorIsOrg
+      ? { "@type": "Organization", name: opts.author, url: SITE_URL }
+      : { "@type": "Person", name: opts.author }
+    : undefined;
   return {
     "@context": "https://schema.org",
     "@type": opts.type,
     headline: opts.title,
     description: opts.description,
     url: canonical(opts.path),
+    mainEntityOfPage: { "@type": "WebPage", "@id": canonical(opts.path) },
+    inLanguage: "en-GB",
+    ...(opts.image ? { image: [opts.image] } : {}),
     ...(opts.date ? { datePublished: opts.date } : {}),
-    ...(opts.author ? { author: { "@type": "Person", name: opts.author } } : {}),
+    ...(opts.modified ?? opts.date ? { dateModified: opts.modified ?? opts.date } : {}),
+    ...(author ? { author } : {}),
+    ...(opts.keywords?.length ? { keywords: opts.keywords.join(", ") } : {}),
+    publisher: publisherLd(),
   };
 }

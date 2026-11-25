@@ -1,6 +1,6 @@
 ---
-/* Plan Q3 (a): free and open source; hosted pilot is free; plans to be
-   announced. No prices before the pilot's numbers exist. */
+/* Plan Q3 (a): free and open source; hosted early access is free; plans to be
+   announced. No prices before early access has produced real numbers. */
 import Base from "../layouts/Base.astro";
 import PageHero from "../components/PageHero.astro";
 import Faq from "../components/Faq.astro";
@@ -11,13 +11,13 @@ import { PRICING_FAQ } from "../data/faq";
 ---
 
 <Base
-  title="Pricing: Free and Open Source, Hosted Pilot | Rulebox"
-  description="The software is free under MIT. The hosted service is invite-only during the pilot. Public plans will be posted here."
+  title="Pricing: Free and Open Source, Hosted Early Access | Rulebox"
+  description="The software is free under MIT. The hosted service is invite-only during early access. Public plans will be posted here."
   path="/pricing"
   og="pricing"
   crumbs={[{ name: "Pricing", path: "/pricing" }]}
 >
-  <PageHero label="Pricing" title="Free to run. Simple to host." sub="No surprise bills. We will email every pilot organisation before anything changes." tone="mint" />
+  <PageHero label="Pricing" title="Free to run. Simple to host." sub="No surprise bills. We will email every early-access organisation before anything changes." tone="mint" />
 
   <section class="section-tight plans-sec">
     <div class="container plans">
@@ -39,9 +39,9 @@ import { PRICING_FAQ } from "../data/faq";
 
       <article class="plan featured" data-tone="sun">
         <p class="label" style="--dot: var(--tone)">Hosted by us</p>
-        <h2 class="h3">Invite-only during the pilot.</h2>
-        <p class="price"><span class="amt">Free</span><span class="per">for pilot organisations</span></p>
-        <p class="muted">We run the backend and the dashboard. Pilot organisations pay nothing.</p>
+        <h2 class="h3">Invite-only during early access.</h2>
+        <p class="price"><span class="amt">Free</span><span class="per">for early-access organisations</span></p>
+        <p class="muted">We run the backend and the dashboard. Early-access organisations pay nothing.</p>
         <ul role="list">
           <li><Icon name="check" />The web dashboard, hosted</li>
           <li><Icon name="check" />No minimum number of PCs</li>
@@ -53,10 +53,10 @@ import { PRICING_FAQ } from "../data/faq";
       </article>
 
       <article class="plan" data-tone="violet">
-        <p class="label" style="--dot: var(--tone)">After the pilot</p>
+        <p class="label" style="--dot: var(--tone)">After early access</p>
         <h2 class="h3">Public plans, posted here.</h2>
         <p class="price"><span class="amt small">To be announced</span></p>
-        <p class="muted">Public plans and prices will be posted on this page before the pilot ends. A paid hosted service pays for development; the software stays free.</p>
+        <p class="muted">Public plans and prices will be posted on this page before early access ends. A paid hosted service pays for development; the software stays free.</p>
         <div class="acts">
           <a class="btn btn-ghost" href="/contact">Talk to us</a>
         </div>

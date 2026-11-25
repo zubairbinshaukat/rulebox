@@ -1,5 +1,5 @@
 // Build gates on the static output (plan §6.1, §7.2, §12). Fails the build on:
-//   - placeholder strings ([PILOT RESULT, [RELEASE RESULT, [OWNER) in any page
+//   - placeholder strings ([EARLY-ACCESS RESULT, [RELEASE RESULT, [OWNER) in any page
 //   - the operator console address anywhere in the output
 //   - a page without exactly one <h1>, a <title>, a description or a canonical URL
 //   - a duplicate <title>
@@ -30,7 +30,7 @@ const files = walk(dist);
 const html = files.filter((f) => f.endsWith(".html"));
 const text = files.filter((f) => /\.(html|xml|txt|js|css|json)$/.test(f));
 
-const PLACEHOLDERS = ["[PILOT RESULT", "[RELEASE RESULT", "[OWNER"];
+const PLACEHOLDERS = ["[EARLY-ACCESS RESULT", "[RELEASE RESULT", "[OWNER"];
 const FORBIDDEN_HOSTS = ["fonts.googleapis.com", "fonts.gstatic.com", "api.iconify.design", "cdn.jsdelivr.net", "unpkg.com", "cdnjs.cloudflare.com"];
 const PRODUCTION = process.env.SITE_ENV === "production";
 /* The logo preloader (components/Preloader.astro) ships, but only as an
@@ -73,6 +73,26 @@ for (const f of html) {
   if (og && !existsSync(join(dist, "og", og))) errors.push(`${rel}: social card og/${og} is missing (run: pnpm --filter @rulebox/website og)`);
   const visible = body.replace(/<script[\s\S]*?<\/script>/g, "").replace(/<style[\s\S]*?<\/style>/g, "").replace(/<[^>]+>/g, " ").toLowerCase();
   for (const w of BANNED) if (visible.includes(w)) warnings.push(`${rel}: uses "${w}" (Story §4.5)`);
+}
+
+// Product screens (scripts/screens.mjs): every one a page uses must exist,
+// and the image sitemap and JSON-LD may list product screens only, never
+// stock photos (owner, 2026-11-25).
+for (const f of html) {
+  const body = readFileSync(f, "utf8");
+  for (const m of body.matchAll(/\/screens\/([a-z0-9-]+\.(?:webp|avif))/g)) {
+    if (!existsSync(join(dist, "screens", m[1]))) errors.push(`${relative(dist, f)}: product screen screens/${m[1]} is missing (run: pnpm --filter @rulebox/website screens)`);
+  }
+  for (const ld of body.matchAll(/<script type="application\/ld\+json">([\s\S]*?)<\/script>/g)) {
+    for (const u of ld[1].matchAll(/"url":"([^"]+\.(?:jpe?g|png|webp|avif))"/g)) {
+      if (!/\/(screens|og)\/|icon-512\.png$/.test(u[1])) errors.push(`${relative(dist, f)}: JSON-LD lists an image that is not a product screen: ${u[1]}`);
+    }
+  }
+}
+for (const f of files.filter((x) => /sitemap-\d+\.xml$/.test(x))) {
+  for (const m of readFileSync(f, "utf8").matchAll(/<image:loc>([^<]+)<\/image:loc>/g)) {
+    if (!m[1].includes("/screens/")) errors.push(`${relative(dist, f)}: image sitemap lists ${m[1]} (product screens only)`);
+  }
 }
 
 // Numbers: every entry needs a source URL and a recent check.

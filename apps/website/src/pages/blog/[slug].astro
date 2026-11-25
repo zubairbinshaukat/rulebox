@@ -1,39 +1,359 @@
 ---
+/*
+ * Blog post: breadcrumb, eyebrow, title, lede, meta, the post's social card
+ * as its cover (scripts/og.mjs), the article with "On this page" beside it
+ * on wide screens, tags, and other posts. BlogPosting JSON-LD with the
+ * project as author and publisher, plus the breadcrumb list.
+ */
 import { getCollection, render } from "astro:content";
 import Base from "../../layouts/Base.astro";
-import { articleLd } from "../../lib/seo";
+import Icon from "../../components/Icon.astro";
+import Callout from "../../components/Callout.astro";
+import Steps from "../../components/Steps.astro";
+import CtaClose from "../../components/CtaClose.astro";
+import { articleLd, ogImageUrl } from "../../lib/seo";
+import { isoDate, longDate, readMinutes } from "../../lib/content";
 
 export async function getStaticPaths() {
   const posts = await getCollection("blog");
   return posts.map((entry) => ({ params: { slug: entry.id }, props: { entry } }));
 }
 const { entry } = Astro.props;
-const { Content } = await render(entry);
+const { Content, headings } = await render(entry);
+const d = entry.data;
 const path = `/blog/${entry.id}`;
+const ogKey = `blog-${entry.id}`;
+const minutes = readMinutes(entry.body);
+const toc = headings.filter((h) => h.depth === 2);
+const isTeam = d.author === "The Rulebox team";
+const others = (await getCollection("blog", (p) => !p.data.draft && p.id !== entry.id)).sort((a, b) => +b.data.date - +a.data.date).slice(0, 2);
 ---
 
 <Base
-  title={entry.data.title}
-  description={entry.data.description}
+  title={d.seoTitle ?? d.title}
+  description={d.description}
   path={path}
   type="article"
-  og="blog"
-  noindex={entry.data.draft}
-  crumbs={[{ name: "Blog", path: "/blog" }, { name: entry.data.title, path }]}
-  ld={[articleLd({ type: "BlogPosting", title: entry.data.title, description: entry.data.description, path, date: entry.data.date.toISOString(), author: entry.data.author })]}
+  noindex={d.draft}
+  canonicalUrl={d.canonical}
+  crumbs={[{ name: "Blog", path: "/blog" }, { name: d.title, path }]}
+  crumbsInline
+  ld={[
+    articleLd({
+      type: "BlogPosting",
+      title: d.title,
+      description: d.description,
+      path,
+      date: isoDate(d.date),
+      modified: isoDate(d.updated),
+      image: ogImageUrl(ogKey),
+      author: d.author,
+      authorIsOrg: isTeam,
+      keywords: d.tags,
+    }),
+  ]}
 >
-  <article class="container post">
-    <p class="mono muted">{entry.data.date.toISOString().slice(0, 10)} · {entry.data.author}</p>
-    <h1 class="h1">{entry.data.title}</h1>
-    <div class="prose"><Content /></div>
+  <article class="post">
+    <header class="container post-head">
+      <nav class="crumbs" aria-label="Breadcrumb">
+        <ol role="list">
+          <li><a href="/">Home</a></li>
+          <li><a href="/blog">Blog</a></li>
+          <li><span aria-current="page">{d.title}</span></li>
+        </ol>
+      </nav>
+      {d.tags[0] && <p class="label" style="--dot: var(--c-coral)">{d.tags[0]}</p>}
+      <h1 class="post-title">{d.title}</h1>
+      <p class="lead post-lede">{d.lede ?? d.description}</p>
+      <p class="meta">
+        <span class="by">
+          {isTeam ? <img src="/favicon.svg" width="20" height="20" alt="" /> : <Icon name="user-id" />}
+          {d.author}
+        </span>
+        <span><Icon name="calendar-linear" /><time datetime={isoDate(d.date)}>{longDate(d.date)}</time></span>
+        <span><Icon name="clock-linear" />{minutes} min read</span>
+      </p>
+      <img class="cover" src={`/og/${ogKey}.png`} width="1200" height="630" alt="" fetchpriority="high" decoding="async" />
+    </header>
+
+    <div class="container post-grid">
+      <div class="post-main">
+        <div class="prose post-body">
+          <Content components={{ Callout, Steps }} />
+        </div>
+        {
+          d.tags.length > 0 && (
+            <ul class="tags" role="list" aria-label="Tags">
+              {d.tags.map((t) => (
+                <li>
+                  <Icon name="tag" />
+                  {t}
+                </li>
+              ))}
+            </ul>
+          )
+        }
+      </div>
+      {
+        toc.length > 2 && (
+          <aside class="toc" aria-label="On this page">
+            <div data-toc>
+              <p class="toc-name">On this page</p>
+              <ul role="list">
+                {toc.map((h) => (
+                  <li>
+                    <a href={`#${h.slug}`}>{h.text}</a>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          </aside>
+        )
+      }
+    </div>
   </article>
+
+  {
+    others.length > 0 && (
+      <section class="container more" aria-labelledby="more-title">
+        <h2 id="more-title" class="h3">More from the blog</h2>
+        <ul class="more-list" role="list">
+          {others.map((p) => (
+            <li>
+              <a class="more-card" href={`/blog/${p.id}`}>
+                <img src={`/og/blog-${p.id}.png`} width="1200" height="630" alt="" loading="lazy" decoding="async" />
+                <span class="more-text">
+                  <strong>{p.data.title}</strong>
+                  <span class="muted">{longDate(p.data.date)} · {readMinutes(p.body)} min read</span>
+                </span>
+              </a>
+            </li>
+          ))}
+        </ul>
+      </section>
+    )
+  }
+
+  <CtaClose />
 </Base>
 
+<script>
+  import "../../scripts/prose.ts";
+</script>
+
 <style>
-  .post {
+  .post-head {
     display: grid;
-    gap: 22px;
-    padding-top: 24px;
-    padding-bottom: 96px;
+    gap: var(--sp-4);
+    justify-items: start;
+    max-width: calc(880px + 2 * var(--gutter));
+    padding-top: calc(var(--sp-12) + var(--sp-2));
+  }
+  .crumbs ol {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--sp-2);
+    font-size: var(--fs-xs);
+    color: var(--muted);
+  }
+  .crumbs li + li::before {
+    content: "/";
+    margin-right: var(--sp-2);
+    color: var(--faint);
+  }
+  .crumbs a {
+    text-decoration: none;
+  }
+  .crumbs a:hover {
+    color: var(--ink);
+    text-decoration: underline;
+  }
+  .crumbs [aria-current] {
+    color: var(--ink-2);
+  }
+  .label {
+    margin-top: var(--sp-4);
+  }
+  .post-title {
+    font-family: var(--font-display);
+    font-weight: var(--fw-heading);
+    font-size: clamp(2.25rem, 1.6rem + 2.4vw, 3.75rem);
+    line-height: 1.04;
+    letter-spacing: var(--ls-h1);
+    text-wrap: balance;
+  }
+  .post-lede {
+    max-width: 60ch;
+  }
+  .meta {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--sp-2) var(--sp-5);
+    font-size: var(--fs-small);
+    color: var(--muted);
+  }
+  .meta > span {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+  }
+  .meta .by {
+    color: var(--ink);
+    font-weight: var(--fw-medium);
+  }
+  .meta img {
+    border-radius: 5px;
+  }
+  .meta :global(.icon) {
+    width: 16px;
+    height: 16px;
+  }
+  .cover {
+    width: 100%;
+    height: auto;
+    margin-top: var(--sp-4);
+    border-radius: var(--radius-lg);
+    border: 1px solid var(--line);
+    box-shadow: var(--shadow-md);
+  }
+  .post-grid {
+    display: grid;
+    gap: var(--sp-9);
+    max-width: calc(880px + 2 * var(--gutter));
+    padding-top: var(--sp-9);
+    padding-bottom: var(--sp-10);
+  }
+  @media (min-width: 1240px) {
+    .post-grid {
+      max-width: calc(880px + 260px + var(--sp-10) + 2 * var(--gutter));
+      grid-template-columns: minmax(0, 880px) 260px;
+      column-gap: var(--sp-10);
+    }
+    .post-head {
+      max-width: calc(880px + 260px + var(--sp-10) + 2 * var(--gutter));
+    }
+    .post-head > * {
+      max-width: 880px;
+    }
+  }
+  .post-main {
+    min-width: 0;
+  }
+  .post-body {
+    max-width: 70ch;
+  }
+  .post-body :global(h2) {
+    scroll-margin-top: 96px;
+  }
+  .tags {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--sp-2);
+    margin-top: var(--sp-9);
+    padding-top: var(--sp-5);
+    border-top: 1px solid var(--line);
+  }
+  .tags li {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 4px 12px;
+    border-radius: var(--radius-pill);
+    background: var(--surface-2);
+    color: var(--ink-2);
+    font-size: var(--fs-xs);
+  }
+  .tags :global(.icon) {
+    width: 14px;
+    height: 14px;
+    color: var(--muted);
+  }
+  .toc {
+    display: none;
+  }
+  @media (min-width: 1240px) {
+    .toc {
+      display: block;
+      position: sticky;
+      top: 100px;
+      align-self: start;
+    }
+  }
+  .toc-name {
+    margin-bottom: var(--sp-2);
+    font-size: var(--fs-xs);
+    font-weight: var(--fw-strong);
+  }
+  .toc ul {
+    border-left: 1px solid var(--line);
+  }
+  .toc li {
+    position: relative;
+  }
+  .toc a {
+    display: block;
+    padding: 5px var(--sp-3) 5px var(--sp-4);
+    color: var(--muted);
+    text-decoration: none;
+    font-size: var(--fs-xs);
+    line-height: var(--lh-tight);
+  }
+  .toc a:hover {
+    color: var(--ink);
+  }
+  .toc a[aria-current] {
+    color: var(--primary-text);
+    font-weight: var(--fw-strong);
+  }
+  .toc a[aria-current]::before {
+    content: "";
+    position: absolute;
+    left: -1px;
+    top: 4px;
+    bottom: 4px;
+    width: 2px;
+    border-radius: 2px;
+    background: var(--primary);
+  }
+  .more {
+    padding-bottom: var(--section-y-tight);
+  }
+  .more-list {
+    display: grid;
+    gap: var(--grid-gap);
+    margin-top: var(--sp-5);
+  }
+  @media (min-width: 720px) {
+    .more-list {
+      grid-template-columns: repeat(2, 1fr);
+    }
+  }
+  .more-card {
+    display: grid;
+    grid-template-columns: 140px 1fr;
+    gap: var(--sp-4);
+    align-items: center;
+    padding: var(--sp-3);
+    border-radius: var(--radius);
+    background: var(--surface);
+    border: 1px solid var(--line);
+    text-decoration: none;
+  }
+  .more-card:hover {
+    border-color: var(--line-strong);
+  }
+  .more-card img {
+    width: 100%;
+    height: auto;
+    border-radius: var(--radius-sm);
+  }
+  .more-text {
+    display: grid;
+    gap: var(--sp-1);
+    font-size: var(--fs-small);
+    line-height: var(--lh-tight);
+  }
+  .more-text .muted {
+    font-size: var(--fs-xs);
   }
 </style>

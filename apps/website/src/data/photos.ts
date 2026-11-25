@@ -22,14 +22,14 @@ import schoolsHero from "../assets/use-cases/schools-hero.jpg";
 import schoolsClass from "../assets/use-cases/schools-class.jpg";
 import schoolsPair from "../assets/use-cases/schools-pair.jpg";
 import clinicsHero from "../assets/use-cases/clinics-hero.jpg";
-import clinicsReception from "../assets/use-cases/clinics-reception.jpg";
+import clinicsPharmacist from "../assets/use-cases/clinics-pharmacist.jpg";
 import clinicsPharmacy from "../assets/use-cases/clinics-pharmacy.jpg";
 import callHero from "../assets/use-cases/call-centres-hero.jpg";
-import callFloor from "../assets/use-cases/call-centres-floor.jpg";
+import callAgent from "../assets/use-cases/call-centres-agent.jpg";
 import callPair from "../assets/use-cases/call-centres-pair.jpg";
 import hotelsHero from "../assets/use-cases/hotels-hero.jpg";
 import hotelsDesk from "../assets/use-cases/hotels-desk.jpg";
-import hotelsCard from "../assets/use-cases/hotels-card.jpg";
+import hotelsSign from "../assets/use-cases/hotels-sign.jpg";
 import homeHero from "../assets/home/hero-pos.jpg";
 
 export interface Photo {
@@ -70,30 +70,34 @@ export const PHOTOS = {
   },
   sharedOffice: {
     src: sharedOffice,
-    alt: "Staff at computer desks in an office, a colleague leaning in to help at one screen.",
-    focus: "45% 50%",
-    photographer: "Pavel Danilyuk",
-    photographerUrl: "https://www.pexels.com/@pavel-danilyuk/",
-    title: "People Working in front of their Computer Desks",
-    pageUrl: "https://www.pexels.com/photo/people-working-in-front-of-their-computer-desks-7658400/",
+    alt: "Two colleagues work together at a shared desktop computer in a bright office.",
+    focus: "52% 35%",
+    photographer: "Mikhail Nilov",
+    photographerUrl: "https://www.pexels.com/@mikhail-nilov/",
+    title: "Employees Sitting on Swivel Chairs while Looking at the Monitor",
+    pageUrl: "https://www.pexels.com/photo/employees-sitting-on-swivel-chairs-while-looking-at-the-monitor-7988750/",
   },
+  /* The maker's small logo on the till screen was softened in our copy. */
   retailHero: {
     src: retailHero,
-    alt: "A smiling cashier taps the touchscreen till at the counter of a small shop.",
-    focus: "52% 45%",
-    photographer: "Ketut Subiyanto",
-    photographerUrl: "https://www.pexels.com/@ketut-subiyanto/",
-    title: "Exited ethnic waitress working with cash desk in cozy cafeteria",
-    pageUrl: "https://www.pexels.com/photo/exited-ethnic-waitress-working-with-cash-desk-in-cozy-cafeteria-4473496/",
+    alt: "Close-up of a hand tapping an order on a touchscreen till at a shop counter.",
+    focus: "60% 40%",
+    photographer: "iMin Technology",
+    photographerUrl: "https://www.pexels.com/@imin-technology-276315592/",
+    title: "A Close-Up Shot of a Cashier Using a Point of Sale System",
+    pageUrl: "https://www.pexels.com/photo/a-close-up-shot-of-a-cashier-using-a-point-of-sale-system-12935074/",
   },
+  /* Small product and brand marks (a gum box, the scale maker's badge, the
+     shop name on the till screen) were softened, and the frame cropped
+     closer to the counter, in our copy. */
   retailTill: {
     src: retailTill,
-    alt: "A shop worker in an apron uses the screen of a till terminal by the window.",
-    focus: "55% 40%",
-    photographer: "Andrea Piacquadio",
-    photographerUrl: "https://www.pexels.com/@olly/",
-    title: "Woman Working as a Cashier",
-    pageUrl: "https://www.pexels.com/photo/woman-working-as-a-cashier-3801439/",
+    alt: "A shop worker in an apron at the counter, beside the till screen, scale and card reader.",
+    focus: "47% 40%",
+    photographer: "Polina Tankilevitch",
+    photographerUrl: "https://www.pexels.com/@polina-tankilevitch/",
+    title: "Cashier in Store",
+    pageUrl: "https://www.pexels.com/photo/cashier-in-store-3735172/",
   },
   retailBoutique: {
     src: retailBoutique,
@@ -133,21 +137,23 @@ export const PHOTOS = {
   },
   clinicsHero: {
     src: clinicsHero,
-    alt: "A bright clinic reception: patients register at the front desk while staff work at their screens.",
-    focus: "45% 55%",
-    photographer: "Pavel Danilyuk",
-    photographerUrl: "https://www.pexels.com/@pavel-danilyuk/",
-    title: "Couple During Registration in Clinic",
-    pageUrl: "https://www.pexels.com/photo/couple-during-registration-in-clinic-7108318/",
-  },
-  clinicsReception: {
-    src: clinicsReception,
-    alt: "A receptionist in scrubs, holding a tablet, smiles at a patient across a clinic front desk.",
-    focus: "40% 62%",
+    alt: "A clinic staff member in scrubs types at the desktop computer on his desk in a bright clinic.",
+    focus: "70% 0%",
     photographer: "Cedric Fauntleroy",
     photographerUrl: "https://www.pexels.com/@cedric-fauntleroy/",
-    title: "A Receptionist Smiling at a Person",
-    pageUrl: "https://www.pexels.com/photo/a-receptionist-smiling-at-a-person-4269203/",
+    title: "Side View of a Man Wearing Face Mask while Typing on Computer Keyboard",
+    pageUrl: "https://www.pexels.com/photo/side-view-of-a-man-wearing-face-mask-while-typing-on-computer-keyboard-4269490/",
+  },
+  /* The pharmacy chain's logo and name badge on the coat, and one product
+     box, were softened in our copy. */
+  clinicsPharmacist: {
+    src: clinicsPharmacist,
+    alt: "A pharmacist in a white coat works at the counter computer in front of shelves of medicines.",
+    focus: "58% 30%",
+    photographer: "World Sikh Organization of Canada",
+    photographerUrl: "https://www.pexels.com/@worldsikhorg/",
+    title: "Pharmacist at Counter",
+    pageUrl: "https://www.pexels.com/photo/pharmacist-at-counter-14797864/",
   },
   clinicsPharmacy: {
     src: clinicsPharmacy,
@@ -160,21 +166,21 @@ export const PHOTOS = {
   },
   callHero: {
     src: callHero,
-    alt: "Call centre agents with headsets on a call at their desktop PCs by a bright window.",
-    focus: "40% 45%",
+    alt: "A smiling call centre agent in a headset at his desk, with colleagues at a row of desktop PCs behind him.",
+    focus: "60% 36%",
     photographer: "Yan Krukau",
     photographerUrl: "https://www.pexels.com/@yankrukov/",
-    title: "Call Center Agent Working",
-    pageUrl: "https://www.pexels.com/photo/call-center-agent-working-8867267/",
+    title: "Man in Blue Sweater Using Headphones",
+    pageUrl: "https://www.pexels.com/photo/man-in-blue-sweater-using-headphones-8867244/",
   },
-  callFloor: {
-    src: callFloor,
-    alt: "An office floor of agents in headsets working at laptops on separate desks.",
-    focus: "50% 55%",
-    photographer: "MART PRODUCTION",
-    photographerUrl: "https://www.pexels.com/@mart-production/",
-    title: "People Working in Call Center",
-    pageUrl: "https://www.pexels.com/photo/people-working-in-call-center-7709240/",
+  callAgent: {
+    src: callAgent,
+    alt: "A call centre agent in a headset types at his desktop computer.",
+    focus: "62% 32%",
+    photographer: "Kampus Production",
+    photographerUrl: "https://www.pexels.com/@kampus/",
+    title: "Man in Blue Polo Shirt with Headset Using Black Computer",
+    pageUrl: "https://www.pexels.com/photo/man-in-blue-polo-shirt-with-headset-using-black-computer-8204318/",
   },
   callPair: {
     src: callPair,
@@ -187,30 +193,30 @@ export const PHOTOS = {
   },
   hotelsHero: {
     src: hotelsHero,
-    alt: "A hotel receptionist in a dark suit types at the front-desk computer in the lobby.",
-    focus: "35% 45%",
-    photographer: "iram shehzad",
-    photographerUrl: "https://www.pexels.com/@iram-shehzad-45081404/",
-    title: "Professional Receptionist at Work in Islamabad Hotel",
-    pageUrl: "https://www.pexels.com/photo/professional-receptionist-at-work-in-islamabad-hotel-36817019/",
+    alt: "A bright boutique hotel reception: a patterned marble front desk under pendant lamps.",
+    focus: "60% 55%",
+    photographer: "Abhishek Navlakha",
+    photographerUrl: "https://www.pexels.com/@navlakha/",
+    title: "Chic Miami Beach Hotel Reception Interior",
+    pageUrl: "https://www.pexels.com/photo/chic-miami-beach-hotel-reception-interior-34607320/",
   },
   hotelsDesk: {
     src: hotelsDesk,
-    alt: "A receptionist at a computer greets a guest across a long front desk with several workstations.",
-    focus: "45% 55%",
-    photographer: "FAKHRUL HASSAN",
-    photographerUrl: "https://www.pexels.com/@fakhrul-hassan-78162644/",
-    title: "Friendly Hotel Reception Interaction in Dhaka",
-    pageUrl: "https://www.pexels.com/photo/friendly-hotel-reception-interaction-in-dhaka-37680832/",
+    alt: "A modern hotel lobby with a dark marble front desk and a lounge of armchairs.",
+    focus: "40% 60%",
+    photographer: "Trần Chính",
+    photographerUrl: "https://www.pexels.com/@tr-n-chinh-587690133/",
+    title: "Modern Hotel Lounge",
+    pageUrl: "https://www.pexels.com/photo/modern-hotel-lounge-20382216/",
   },
-  hotelsCard: {
-    src: hotelsCard,
-    alt: "Close-up of a guest handing a card to a receptionist across a hotel desk.",
-    focus: "50% 45%",
-    photographer: "Mikhail Nilov",
-    photographerUrl: "https://www.pexels.com/@mikhail-nilov/",
-    title: "Man Handing a Credit Card to a Hotel Receptionist",
-    pageUrl: "https://www.pexels.com/photo/man-handing-a-credit-card-to-a-hotel-receptionist-7820359/",
+  hotelsSign: {
+    src: hotelsSign,
+    alt: "A brass reception sign and a service bell on a wooden hotel front desk.",
+    focus: "55% 55%",
+    photographer: "Andrea Piacquadio",
+    photographerUrl: "https://www.pexels.com/@olly/",
+    title: "Selective Focus Photo of Reception Signage",
+    pageUrl: "https://www.pexels.com/photo/selective-focus-photo-of-reception-signage-3768095/",
   },
 } satisfies Record<string, Photo>;
 
@@ -221,9 +227,9 @@ export const USE_CASE_PHOTOS: Record<string, { hero: Photo; scene?: Photo; outco
   "shared-staff-pcs": { hero: PHOTOS.sharedHero, scene: PHOTOS.sharedOffice },
   "retail-pos": { hero: PHOTOS.retailHero, scene: PHOTOS.retailTill, outcome: PHOTOS.retailBoutique },
   "schools-and-computer-labs": { hero: PHOTOS.schoolsHero, scene: PHOTOS.schoolsPair, outcome: PHOTOS.schoolsClass },
-  "clinics-and-pharmacies": { hero: PHOTOS.clinicsHero, scene: PHOTOS.clinicsReception, outcome: PHOTOS.clinicsPharmacy },
-  "call-centres": { hero: PHOTOS.callHero, scene: PHOTOS.callPair, outcome: PHOTOS.callFloor },
-  "hotels-front-desk": { hero: PHOTOS.hotelsHero, scene: PHOTOS.hotelsCard, outcome: PHOTOS.hotelsDesk },
+  "clinics-and-pharmacies": { hero: PHOTOS.clinicsHero, scene: PHOTOS.clinicsPharmacist, outcome: PHOTOS.clinicsPharmacy },
+  "call-centres": { hero: PHOTOS.callHero, scene: PHOTOS.callPair, outcome: PHOTOS.callAgent },
+  "hotels-front-desk": { hero: PHOTOS.hotelsHero, scene: PHOTOS.hotelsSign, outcome: PHOTOS.hotelsDesk },
 };
 
 /** Every photo on a page, in page order, for its small credits line. */

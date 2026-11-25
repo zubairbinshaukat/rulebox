@@ -1,6 +1,8 @@
 ---
 import { getCollection, render } from "astro:content";
 import Docs from "../../layouts/Docs.astro";
+import Callout from "../../components/Callout.astro";
+import Steps from "../../components/Steps.astro";
 
 export async function getStaticPaths() {
   const docs = await getCollection("docs");
@@ -19,6 +21,7 @@ const { Content, headings } = await render(entry);
   draft={entry.data.draft}
   headings={headings}
   editPath={entry.filePath}
+  body={entry.body}
 >
-  <Content />
+  <Content components={{ Callout, Steps }} />
 </Docs>

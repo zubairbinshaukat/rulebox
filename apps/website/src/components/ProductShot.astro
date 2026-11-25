@@ -1,0 +1,51 @@
+---
+/* A rendered product screen as a real image (public/screens, made by
+   scripts/screens.mjs from the drawn DesktopMock). Indexable: listed in the
+   image sitemap and the SoftwareApplication JSON-LD. The caption says it is
+   an illustration, because names and apps on it are examples. */
+import { SCREENS, SCREEN_SIZE, screenUrl, type ScreenKey } from "../data/screens";
+
+interface Props {
+  screen: ScreenKey;
+  caption?: string;
+}
+const { screen: key, caption } = Astro.props;
+const s = SCREENS[key];
+---
+
+<figure class="shot">
+  <picture>
+    <source type="image/avif" srcset={`/screens/${key}-800.avif 800w, ${screenUrl(key, "avif")} 1600w`} sizes="(min-width: 1100px) 880px, 92vw" />
+    <img
+      src={screenUrl(key)}
+      srcset={`/screens/${key}-800.webp 800w, ${screenUrl(key)} 1600w`}
+      sizes="(min-width: 1100px) 880px, 92vw"
+      width={SCREEN_SIZE.width}
+      height={SCREEN_SIZE.height}
+      alt={s.alt}
+      loading="lazy"
+      decoding="async"
+    />
+  </picture>
+  <figcaption>{caption ?? s.name}. An illustration of the real screen; names and apps are examples.</figcaption>
+</figure>
+
+<style>
+  .shot {
+    display: grid;
+    gap: var(--sp-3);
+    max-width: 880px;
+  }
+  img {
+    width: 100%;
+    height: auto;
+    border-radius: var(--radius-lg);
+    border: 1px solid var(--line);
+    box-shadow: var(--shadow-window);
+    background: var(--mock-bg);
+  }
+  figcaption {
+    font-size: var(--fs-xs);
+    color: var(--muted);
+  }
+</style>

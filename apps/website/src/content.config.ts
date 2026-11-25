@@ -34,9 +34,19 @@ const blog = defineCollection({
   loader: glob({ pattern: "**/*.mdx", base: "./src/content/en/blog" }),
   schema: z.object({
     ...base,
+    /** Search snippet: kept to 155 characters so it is not cut off. */
+    description: z.string().min(70).max(155),
     date: z.coerce.date(),
-    /** A real person (plan §6.4, BlogPosting). */
-    author: z.string(),
+    /** A real person (plan §6.4), or the project itself until there is an
+     *  author system; the project is marked up as an Organization. */
+    author: z.string().default("The Rulebox team"),
+    /** Canonical URL if not this page (a post first published elsewhere). */
+    canonical: z.url().optional(),
+    tags: z.array(z.string()).default([]),
+    /** Shorter <title> for search results when the headline is long (about 60 characters). */
+    seoTitle: z.string().max(60).optional(),
+    /** Short lede under the title; falls back to the description. */
+    lede: z.string().optional(),
   }),
 });
 

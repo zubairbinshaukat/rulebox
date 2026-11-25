@@ -1,5 +1,5 @@
 // Screenshots for the colour review (light-only site, Deep teal): 1440/390
-// for home, a use-case page, pricing, the pilot form and the open nav menu.
+// for home, a use-case page, pricing, the early-access form and the open nav menu.
 // One browser, one page at a time (low-memory machine).
 //
 //   node scripts/theme-shots.mjs [baseUrl] [--widths=390] [--only=home,nav]
@@ -23,7 +23,7 @@ const shots = {
   home: { path: "/", full: true },
   usecase: { path: "/use-cases/clinics-and-pharmacies", full: true },
   pricing: { path: "/pricing", full: true },
-  pilot: { path: "/pilot", full: true },
+  "early-access": { path: "/early-access", full: true },
   nav: { path: "/", full: false, nav: true },
 };
 const only = opt("only", Object.keys(shots));

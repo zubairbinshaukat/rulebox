@@ -1,0 +1,211 @@
+---
+title: "Windows kiosk mode explained: what it can and can't do"
+seoTitle: Windows Kiosk Mode Explained (Assigned Access) | Rulebox
+description: Assigned Access single-app and multi-app modes, the Windows editions they need, the XML file, real limits, and when a full kiosk shell fits better.
+lede: Windows has a kiosk mode built in, and for the right job it is excellent. Here is how it works, what the XML file looks like, where it stops, and how to tell whether you need something else.
+date: 2026-11-25
+updated: 2026-11-25
+tags: [Windows kiosk mode, Assigned Access, Guides]
+---
+
+**TL;DR**
+
+- **Windows kiosk mode is called Assigned Access.** It has two modes: a **kiosk experience** (one app, full screen) and a **restricted user experience** (the normal desktop with only listed apps, often called a *multi-app kiosk*).
+- **Editions:** Pro, Enterprise, Education and IoT Enterprise. Not Home.
+- **Single-app** is easy: there is a Settings screen. **Multi-app** needs an XML file applied through Intune or another MDM, a provisioning package, or PowerShell run as SYSTEM.
+- **Use it** for signs, check-in screens and simple locked desktops managed by an IT team. **Look further** if you need per-person sign-in on shared PCs, a custom desktop, or remote management without an MDM.
+
+## What "kiosk mode" means in Windows
+
+Microsoft's documentation describes two experiences, both built on a feature called **Assigned Access** ([Microsoft Learn: kiosk overview](https://learn.microsoft.com/en-us/windows/configuration/kiosk/)):
+
+| | Kiosk experience | Restricted user experience |
+|---|---|---|
+| Also called | Single-app kiosk | Multi-app kiosk |
+| What the user sees | One app, full screen | The Windows desktop and a Start menu with only allowed apps |
+| Apps | One UWP app or Microsoft Edge (or a desktop app via the XML file) | A list of UWP and desktop apps |
+| Accounts | One user account; can sign in automatically | Users or groups (local, Active Directory, Microsoft Entra ID) |
+| Setup | Settings app, PowerShell, XML | XML only |
+
+A third tool, **Shell Launcher**, replaces the whole Windows desktop with an app you choose. It is not part of Assigned Access, it needs Enterprise or Education, and you cannot use it on the same PC as Assigned Access ([Microsoft Learn](https://learn.microsoft.com/en-us/windows/configuration/kiosk/)).
+
+## Which Windows editions support it
+
+Assigned Access is supported on **Windows Pro, Enterprise, Education and IoT Enterprise** ([Microsoft Learn: Assigned Access](https://learn.microsoft.com/en-us/windows/configuration/assigned-access/)). Windows Home is not on that list. Shell Launcher is more limited: Enterprise, Education and IoT Enterprise only ([Microsoft Learn: Shell Launcher](https://learn.microsoft.com/en-us/windows/configuration/shell-launcher/)).
+
+<Callout type="tip">
+Not sure which edition a PC runs? Open **Settings → System → About** and look at **Edition**. On Home, upgrading to Pro is usually the first step before any built-in kiosk feature.
+</Callout>
+
+## Single-app kiosk: one app, full screen
+
+The kiosk experience runs one UWP app or Microsoft Edge "in full screen above the lock screen". When the kiosk account signs in, the app starts by itself, and if it is closed, it restarts ([Microsoft Learn](https://learn.microsoft.com/en-us/windows/configuration/kiosk/)).
+
+### Set it up in Settings
+
+<Steps>
+
+1. Sign in with an administrator account.
+2. Open **Settings → Accounts → Other users**. Under **Set up a kiosk**, select **Get started**.
+3. Create a new kiosk account, or choose an existing local standard account.
+4. Choose the app. If you choose Microsoft Edge, pick a full-screen website (a digital sign) or a public browser with some controls, and enter the start address. For a public browser, also choose when Edge restarts after a quiet period.
+5. Select **Close**, restart and test.
+
+</Steps>
+
+These steps follow Microsoft's [kiosk quick start](https://learn.microsoft.com/en-us/windows/configuration/assigned-access/quickstart-kiosk).
+
+### Microsoft Edge kiosk mode
+
+Edge has two kiosk types. **Digital/interactive signage** shows one site full screen. **Public browsing** runs a limited Edge with tabs. Both use an InPrivate session, so nothing is kept between visitors ([Microsoft Learn: Edge kiosk mode](https://learn.microsoft.com/en-us/deployedge/microsoft-edge-configure-kiosk-mode)).
+
+Two details worth knowing from the same page:
+
+- The idle timer (`--kiosk-idle-timeout-minutes`) closes Edge after a quiet period. It does not restart it. Assigned Access or Shell Launcher does that.
+- File open and save dialogs are not locked down automatically. Microsoft suggests the `ConfigureKeyboardShortcuts` policy to block the shortcuts that open them.
+
+### PowerShell for single-app kiosks
+
+The `Set-AssignedAccess` cmdlet "configures a user to launch only one app". The app must be a Windows Store app, and the account must be a local, non-administrator account ([Microsoft Learn: Set-AssignedAccess](https://learn.microsoft.com/en-us/powershell/module/assignedaccess/set-assignedaccess)). It does not set up multi-app kiosks.
+
+## Multi-app kiosk: the restricted user experience
+
+This mode keeps the Windows desktop but allows only the apps you list. The Start menu shows only those apps. You can give different accounts or groups different lists ([Microsoft Learn: Assigned Access](https://learn.microsoft.com/en-us/windows/configuration/assigned-access/)).
+
+There is no Settings screen for it. You describe it in an XML file.
+
+### The XML configuration file
+
+An Assigned Access file has two parts ([Microsoft Learn: configuration file](https://learn.microsoft.com/en-us/windows/configuration/assigned-access/configuration-file)):
+
+- **Profiles:** each one is either a `KioskModeApp` (single app) or an `AllAppsList` (the allowed apps), plus Start menu pins, the taskbar and File Explorer access.
+- **Configs:** each one ties a user account or a group to a profile.
+
+Here is a shortened Windows 11 example, based on Microsoft's quick start. It allows Calculator, Edge and File Explorer, pins them to Start, shows the taskbar, and signs in a local account automatically:
+
+```xml
+<?xml version="1.0" encoding="utf-8"?>
+<AssignedAccessConfiguration
+  xmlns="http://schemas.microsoft.com/AssignedAccess/2017/config"
+  xmlns:rs5="http://schemas.microsoft.com/AssignedAccess/201810/config"
+  xmlns:v3="http://schemas.microsoft.com/AssignedAccess/2020/config"
+  xmlns:v5="http://schemas.microsoft.com/AssignedAccess/2022/config">
+  <Profiles>
+    <Profile Id="{9A2A490F-10F6-4764-974A-43B19E722C23}">
+      <AllAppsList>
+        <AllowedApps>
+          <App AppUserModelId="Microsoft.WindowsCalculator_8wekyb3d8bbwe!App" />
+          <App DesktopAppPath="%windir%\explorer.exe" />
+          <App DesktopAppPath="%ProgramFiles(x86)%\Microsoft\Edge\Application\msedge.exe" />
+        </AllowedApps>
+      </AllAppsList>
+      <rs5:FileExplorerNamespaceRestrictions>
+        <rs5:AllowedNamespace Name="Downloads" />
+      </rs5:FileExplorerNamespaceRestrictions>
+      <v5:StartPins><![CDATA[{
+        "pinnedList": [
+          {"packagedAppId": "Microsoft.WindowsCalculator_8wekyb3d8bbwe!App"},
+          {"desktopAppLink": "%APPDATA%\\Microsoft\\Windows\\Start Menu\\Programs\\File Explorer.lnk"},
+          {"desktopAppLink": "%ALLUSERSPROFILE%\\Microsoft\\Windows\\Start Menu\\Programs\\Microsoft Edge.lnk"}
+        ]
+      }]]></v5:StartPins>
+      <Taskbar ShowTaskbar="true" />
+    </Profile>
+  </Profiles>
+  <Configs>
+    <Config>
+      <AutoLogonAccount rs5:DisplayName="Front desk" />
+      <DefaultProfile Id="{9A2A490F-10F6-4764-974A-43B19E722C23}" />
+    </Config>
+  </Configs>
+</AssignedAccessConfiguration>
+```
+
+A few rules from the documentation that catch people out:
+
+- **Namespaces matter.** Newer elements need their schema's namespace. `StartPins`, for example, arrived in Windows 11 version 22H2 and uses the `v5` (2022) namespace.
+- **List dependencies.** If an app needs another app to run, both must be in the allowed list.
+- **One kiosk app per file.** A file can hold only one `KioskModeApp` profile, and it can be assigned to users, not groups.
+- **Standard users only.** Assigning an administrator to a profile is not supported.
+- **Nested groups do not count.** A user in a group inside the configured group does not get the profile.
+- **File Explorer is locked by default.** `FileExplorerNamespaceRestrictions` can open up Downloads, removable drives, or both.
+
+### Applying the file
+
+Microsoft documents three ways ([quick start: restricted user experience](https://learn.microsoft.com/en-us/windows/configuration/assigned-access/quickstart-restricted-user-experience)):
+
+- **MDM:** set `./Vendor/MSFT/AssignedAccess/Configuration` in Intune or another MDM ([AssignedAccess CSP](https://learn.microsoft.com/en-us/windows/client-management/mdm/assignedaccess-csp)).
+- **Provisioning package:** `AssignedAccess/MultiAppAssignedAccessSettings` in Windows Configuration Designer.
+- **PowerShell:** through the MDM Bridge WMI provider, run as SYSTEM. Microsoft suggests `psexec.exe -i -s powershell.exe` for testing.
+
+```powershell
+# Run as SYSTEM. $config holds the XML above as a string.
+$obj = Get-CimInstance -Namespace "root\cimv2\mdm\dmmap" -ClassName "MDM_AssignedAccess"
+$obj.Configuration = [System.Net.WebUtility]::HtmlEncode($config)
+Set-CimInstance -CimInstance $obj
+```
+
+To remove it, set `Configuration` to `$null` the same way and restart. Microsoft notes that removing the configuration "can't revert all the changes"; for example, the Start menu layout stays.
+
+## What kiosk mode does well
+
+- **It is free and supported.** It ships with Windows and Microsoft documents it in depth.
+- **Single-app is simple.** A sign or a check-in screen takes minutes in Settings.
+- **It applies lockdown policies for you.** Assigned Access turns on a set of policy settings automatically; Shell Launcher has no default lockdown policies ([Microsoft Learn](https://learn.microsoft.com/en-us/windows/configuration/kiosk/)). Among the shortcuts it blocks are Ctrl+Shift+Esc (Task Manager), Win+R (Run) and Win+E (File Explorer) ([policy settings](https://learn.microsoft.com/en-us/windows/configuration/assigned-access/policy-settings)).
+- **It scales with Intune.** If you already run an MDM, one policy reaches every PC.
+
+## What it can't do (or does not do well)
+
+- **No Home edition.** Assigned Access needs Pro or higher.
+- **Multi-app has no simple setup.** It is XML, an MDM, a provisioning package or a SYSTEM PowerShell session.
+- **Some shortcuts stay open.** In a restricted user experience, Alt+F4, Alt+Tab, Alt+Shift+Tab and Ctrl+Alt+Del are not blocked; Microsoft points to Keyboard Filter for that ([recommendations](https://learn.microsoft.com/en-us/windows/configuration/assigned-access/recommendations)). In a single-app kiosk, Ctrl+Alt+Del exits by default unless you set a different `BreakoutSequence`.
+- **It is still the Windows desktop.** Staff see Windows' own Start menu and taskbar, trimmed. You cannot rebrand it or add your own sign-in screen.
+- **Per-person sign-in is your job.** Each person needs a Windows account (local, domain or Entra ID) that the configuration targets. On Entra ID groups, the PC needs internet when group members sign in ([configuration file](https://learn.microsoft.com/en-us/windows/configuration/assigned-access/configuration-file)).
+- **Some settings reach admins too.** Some of the policies apply to the whole device, "including administrator accounts" ([policy settings](https://learn.microsoft.com/en-us/windows/configuration/assigned-access/policy-settings)).
+- **Remote changes need an MDM.** Without Intune or similar, you change each PC by hand.
+- **Remote Desktop is not supported** for a kiosk experience ([Microsoft Learn](https://learn.microsoft.com/en-us/windows/configuration/assigned-access/)).
+
+## Kiosk mode or a full kiosk shell?
+
+Use **Windows kiosk mode** when:
+
+- the PC runs **one app** on one screen: signage, a check-in screen, a price checker or a menu;
+- you already use **Intune** and have someone who knows it;
+- your PCs run **Pro, Enterprise or Education**.
+
+Consider **Shell Launcher** when you run Enterprise or Education, need one desktop app as the whole interface, and can add your own lockdown policies.
+
+Consider **dedicated kiosk software** (a full kiosk shell) when:
+
+- several **staff share PCs** and each needs their own apps, files and web logins;
+- you want a **simple, branded desktop** rather than a trimmed Windows one;
+- you want to **change every PC from a web dashboard** without an MDM;
+- some PCs run **Windows Home**, and you accept reduced protection there.
+
+That second list is what we build [Rulebox](/product) for: a [locked, friendly desktop](/features/staff-desktop), [per-person sign-in](/features/employee-sign-in) on any enrolled PC, and [layered lockdown](/features/lockdown) managed from the web. It is open source and in early access, so it is newer and less proven than Windows' own tools. For one app on one screen, Windows kiosk mode is the better choice. Our [side-by-side comparison](/compare/windows-kiosk-mode) goes through each difference.
+
+## Frequently asked questions
+
+### Does Windows 11 Home have kiosk mode?
+
+No. Assigned Access is supported on Pro, Enterprise, Education and IoT Enterprise, and Home is not listed ([Microsoft Learn](https://learn.microsoft.com/en-us/windows/configuration/assigned-access/)).
+
+### Is Assigned Access the same as kiosk mode?
+
+Yes. Assigned Access is the Windows feature behind both the single-app kiosk and the multi-app (restricted user) experience.
+
+### Can a kiosk run a normal desktop app, not a Store app?
+
+Yes. In the XML file, `KioskModeApp` accepts a desktop app path (`ClassicAppPath`), and the restricted user experience lists desktop apps by path. Shell Launcher is the other route on Enterprise and Education.
+
+### How do I get out of kiosk mode?
+
+In a single-app kiosk, Ctrl+Alt+Del exits kiosk mode by default, so an administrator can sign in. You can change that key sequence with `BreakoutSequence` in the XML file. To remove the configuration itself, Microsoft shows a PowerShell example that clears it through the same `MDM_AssignedAccess` class, followed by a restart ([kiosk quick start](https://learn.microsoft.com/en-us/windows/configuration/assigned-access/quickstart-kiosk)).
+
+### Can I use Shell Launcher and Assigned Access together?
+
+No. Microsoft states that you can't configure both on the same system.
+
+### Where can I learn more about Rulebox?
+
+Read [what Rulebox is](/docs/start-here/what-is-rulebox), the guide to [locking down a Windows PC for staff](/blog/lock-down-windows-pc-for-staff), or [request early access](/early-access).

@@ -32,7 +32,7 @@ const L1 = [
   "/use-cases",
   "/use-cases/shared-staff-pcs",
   "/pricing",
-  "/pilot",
+  "/early-access",
   "/download",
   "/open-source",
   "/security",

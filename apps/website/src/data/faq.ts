@@ -57,7 +57,7 @@ export const SECURITY_FAQ = [
 export const PRICING_FAQ = [
   {
     q: "How much does it cost?",
-    a: "The software is free and open source (MIT). Hosting it yourself costs whatever your own backend costs. The hosted service is in an invite-only pilot, and pilot organisations pay nothing.",
+    a: "The software is free and open source (MIT). Hosting it yourself costs whatever your own backend costs. The hosted service is in an invite-only early access, and early-access organisations pay nothing.",
   },
   {
     q: "Is there a minimum number of PCs?",
@@ -69,7 +69,7 @@ export const PRICING_FAQ = [
     a: "Yes. You need your own Convex deployment. A one-command setup is planned.",
   },
   {
-    q: "How do I join the pilot?",
+    q: "How do I join early access?",
     a: "Fill in the short form: organisation, number of PCs, what the PCs are used for. We reply by email.",
   },
 ];

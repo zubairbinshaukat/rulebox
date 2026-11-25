@@ -22,7 +22,7 @@ export const DEFAULT_DESCRIPTION =
  * Public repository. Plan Q5 (a): public under an organisation named for the
  * project. The organisation does not exist yet, so this is a placeholder.
  */
-export const REPO_URL = "https://github.com/rulebox-dev/rulebox";
+export const REPO_URL = "https://github.com/zubairbinshaukat/rulebox";
 export const RELEASES_URL = `${REPO_URL}/releases`;
 export const ISSUES_URL = `${REPO_URL}/issues`;
 
@@ -41,8 +41,8 @@ export const SECURITY_EMAIL = `security@${host}`;
 export const TURNSTILE_SITE_KEY = process.env.PUBLIC_TURNSTILE_SITE_KEY ?? "1x00000000000000000000AA";
 
 /**
- * Primary call to action. After the pilot this becomes "Start free" ->
+ * Primary call to action. After early access this becomes "Start free" ->
  * `${APP_URL}/sign-up` (Story 13.2). One line to change.
  */
-export const CTA_PRIMARY = { label: "Request a pilot invite", href: "/pilot" } as const;
+export const CTA_PRIMARY = { label: "Request early access", href: "/early-access" } as const;
 export const CTA_SECONDARY = { label: "See how it works", href: "/product" } as const;
