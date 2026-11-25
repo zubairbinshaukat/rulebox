@@ -8,15 +8,14 @@
 
 use std::path::{Path, PathBuf};
 
-use rulebox_policy::network::DriverKind;
+use rulebox_policy::network::{DriverKind, DriverSource, DriverSpec};
 use rulebox_policy::paths::check_args;
-use rulebox_policy::network::DriverSpec;
 use serde::{Deserialize, Serialize};
 
 use super::download::check_https;
 use super::engine::{backoff_after, LocalState};
 use super::unzip::safe_entry_name;
-use super::{is_safe_id, is_sha256, msi_install_command, pnputil_path, Detail, MAX_DOWNLOAD_BYTES};
+use super::{is_published_inf, is_safe_id, is_sha256, msi_install_command, pnputil_path, Detail, MAX_DOWNLOAD_BYTES};
 use crate::backend::{InstallReport, InstallState};
 use crate::installs::MAX_FAILURES;
 use crate::platform::InstallerCommand;
@@ -187,6 +186,11 @@ pub fn report_of(record: &DriverRecord) -> Option<InstallReport> {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DriverPlan {
     pub kind: DriverRecordKind,
+    /// (Phase 6 Step 15, plan 4.8) Where the files come from: [`DriverSource::InfZip`] for a zip, [`DriverSource::VendorExe`]
+    /// for an exe or msi. Never `VendorExeExtract` or `Unknown`: those are refused by [`resolve_source`].
+    pub source: DriverSource,
+    /// The administrator's name of the driver (probes look at it; it is never put on a command line).
+    pub name: String,
     pub url: String,
     pub sha256: String,
     pub size_bytes: u64,
@@ -204,6 +208,27 @@ pub fn inf_path_ok(inf: &str) -> bool {
         && safe_entry_name(inf).is_some()
 }
 
+/// (Phase 6 Step 15, plan 4.8) The source of a driver. A Phase 5 document has none: the `kind` decides (`inf` is a zip,
+/// `exe` and `msi` are the vendor's installer). A document that names one must agree with the `kind`.
+///
+/// `vendor_exe_extract` (the vendor exe unpacked with fixed extract arguments, then the zip path on the result) is **not
+/// built**: it depends on VM spike row S-10 (does the TPCL exe unpack with no window, and with which switch), which has not
+/// run. Until it has, the value is understood and refused with a reason, never guessed and never run as a plain exe. The
+/// same goes for a source this agent does not know.
+pub fn resolve_source(kind: DriverRecordKind, source: Option<DriverSource>) -> Result<DriverSource, &'static str> {
+    let by_kind = match kind {
+        DriverRecordKind::Inf => DriverSource::InfZip,
+        DriverRecordKind::Exe | DriverRecordKind::Msi => DriverSource::VendorExe,
+    };
+    match source {
+        None => Ok(by_kind),
+        Some(DriverSource::VendorExeExtract) => Err("vendor_exe_extract is not supported (it waits for the S-10 test on a real PC)"),
+        Some(DriverSource::Unknown) => Err("unknown driver source"),
+        Some(source) if source == by_kind => Ok(source),
+        Some(_) => Err("the driver source does not fit its kind"),
+    }
+}
+
 /// Checks a driver of the signed document again on the PC (defence in depth: the document is signed). The reason names
 /// no value.
 pub fn check_driver(spec: &DriverSpec, system_root: Option<&str>) -> Result<DriverPlan, &'static str> {
@@ -211,6 +236,7 @@ pub fn check_driver(spec: &DriverSpec, system_root: Option<&str>) -> Result<Driv
         return Err("the driver id cannot name a file");
     }
     let kind = DriverRecordKind::of_spec(spec.kind).ok_or("unknown driver kind")?;
+    let source = resolve_source(kind, spec.source)?;
     check_https(&spec.url).map_err(|_| "the driver URL is not https://")?;
     if !is_sha256(&spec.sha256) {
         return Err("the driver hash is not a SHA-256");
@@ -244,6 +270,8 @@ pub fn check_driver(spec: &DriverSpec, system_root: Option<&str>) -> Result<Driv
     }
     Ok(DriverPlan {
         kind,
+        source,
+        name: spec.name.clone(),
         url: spec.url.clone(),
         sha256: spec.sha256.clone(),
         size_bytes: spec.size_bytes,
@@ -263,6 +291,22 @@ pub fn pnputil_add_command(system_root: &Path, inf: &Path, working_dir: &Path) -
         expected_exe: None,
         removal: false,
     }
+}
+
+/// `pnputil /delete-driver <oem<N>.inf> /uninstall`, the one command line the program rule allows for a removal
+/// (`installer_command_allowed`). `published` must be an `oem<N>.inf` name (`None` otherwise: nothing else is ever deleted
+/// through pnputil). Lower case, as the driver store lists it.
+pub fn pnputil_delete_command(system_root: &Path, published: &str) -> Option<InstallerCommand> {
+    if !is_published_inf(published) {
+        return None;
+    }
+    Some(InstallerCommand {
+        program: pnputil_path(system_root),
+        args: vec!["/delete-driver".into(), published.to_ascii_lowercase(), "/uninstall".into()],
+        working_dir: system_root.join("System32"),
+        expected_exe: None,
+        removal: true,
+    })
 }
 
 /// A vendor exe with its silent arguments, one by one; there is no program to wait for.
@@ -457,6 +501,35 @@ mod tests {
     }
 
     #[test]
+    fn the_source_follows_the_kind_and_the_extract_source_is_refused_with_a_reason() {
+        use DriverKind::{Exe, Inf, Msi};
+        // A Phase 5 document has no source: the kind decides.
+        for (kind, want) in [(Inf, DriverSource::InfZip), (Exe, DriverSource::VendorExe), (Msi, DriverSource::VendorExe)] {
+            assert_eq!(check_driver(&spec(kind), ROOT).unwrap().source, want, "{kind:?}");
+        }
+        let with = |kind, source| check_driver(&DriverSpec { source: Some(source), ..spec(kind) }, ROOT);
+        assert_eq!(with(Inf, DriverSource::InfZip).unwrap().source, DriverSource::InfZip);
+        assert_eq!(with(Exe, DriverSource::VendorExe).unwrap().source, DriverSource::VendorExe);
+        assert_eq!(with(Msi, DriverSource::VendorExe).unwrap().source, DriverSource::VendorExe);
+        // A source that does not fit its kind is refused, never guessed.
+        assert!(with(Inf, DriverSource::VendorExe).is_err());
+        assert!(with(Exe, DriverSource::InfZip).is_err());
+        assert!(with(Msi, DriverSource::InfZip).is_err());
+        // `vendor_exe_extract` is not built (S-10 has not run): refused for every kind, with its own reason.
+        for kind in [Inf, Exe, Msi] {
+            let reason = with(kind, DriverSource::VendorExeExtract).unwrap_err();
+            assert!(reason.contains("vendor_exe_extract") && reason.contains("S-10"), "{reason}");
+        }
+        assert_eq!(with(Exe, DriverSource::Unknown), Err("unknown driver source"));
+        // The reason is a fixed text: no value of the document is in it.
+        let mut odd = spec(Exe);
+        odd.name = "secret name".into();
+        odd.source = Some(DriverSource::VendorExeExtract);
+        assert!(!check_driver(&odd, ROOT).unwrap_err().contains("secret"));
+        assert_eq!(check_driver(&spec(Inf), ROOT).unwrap().name, "Brother");
+    }
+
+    #[test]
     fn commands_have_the_exact_shape_the_program_rule_allows() {
         use crate::installs::installer_command_allowed;
         let root = Path::new(r"C:\Windows");
@@ -468,6 +541,19 @@ mod tests {
         let add = pnputil_add_command(root, &inf, &work);
         assert!(installer_command_allowed(&add.program, &add.args, Some(root), downloads, drivers));
         assert_eq!(add.expected_exe, None);
+        // Exactly three arguments, in this order (plan 4.8; `/subdirs` is not passed: one named INF needs no traversal).
+        assert_eq!(add.program, Path::new(r"C:\Windows\System32\pnputil.exe"));
+        assert_eq!(add.args, ["/add-driver".to_string(), inf.to_string_lossy().into_owned(), "/install".to_string()]);
+        assert!(!add.removal);
+        // The removal: only an `oem<N>.inf` name, lower case, `/uninstall`, and the program rule allows it.
+        let delete = pnputil_delete_command(root, "OEM12.INF").unwrap();
+        assert_eq!(delete.program, Path::new(r"C:\Windows\System32\pnputil.exe"));
+        assert_eq!(delete.args, ["/delete-driver", "oem12.inf", "/uninstall"]);
+        assert!(delete.removal && delete.expected_exe.is_none());
+        assert!(installer_command_allowed(&delete.program, &delete.args, Some(root), downloads, drivers));
+        for bad in ["*", "*.inf", "netcfg.inf", r"C:\Windows\INF\oem12.inf", r"..\oem12.inf", "oem.inf", "oem12.inf /force", "oem12.inf&calc", ""] {
+            assert!(pnputil_delete_command(root, bad).is_none(), "{bad:?}");
+        }
         let msi = msi_driver_command(root, Path::new(r"C:\x\a.msi"), Path::new(r"C:\x\a.log"), downloads);
         assert!(msi.expected_exe.is_none() && !msi.removal);
         assert_eq!(&msi.args[2..4], ["/qn", "/norestart"]);

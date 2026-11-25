@@ -263,12 +263,26 @@ pub fn machine_facts(
             }
         }
     }
+    // (Phase 6 Step 17, plan 4.9.3, 4.9.4) What the catalogue asks of Chrome and Edge. The program folder of an
+    // assigned browser joins the catalogue's folders: the allow-list gives the Staff SID a path rule for it (only
+    // when it is admin-only, like every catalogue folder) and takes it away again when the browser is unassigned.
+    let browser = {
+        let roots = platform.path_roots().ok();
+        let exists = |path: &str| platform.file_exists(std::path::Path::new(path));
+        super::browser::BrowserInputs::from_catalog(&catalog, roots.as_ref(), &exists)
+    };
+    for folder in browser.allow_folders() {
+        if !catalogue_exe_folders.iter().any(|known| known.eq_ignore_ascii_case(&folder)) {
+            catalogue_exe_folders.push(folder);
+        }
+    }
     Facts {
         admin_signin_verified,
         // Unknown (the WLAN service cannot be asked) counts as "wired or unknown": no refusal.
         current_ssid: platform.wlan_current_ssid().unwrap_or(None),
         protected_paths: Vec::new(),
         catalogue_exe_folders,
+        browser,
         // (Phase 6 Step 11) The publisher rules of the vendor-mode apps of the catalogue.
         vendor_exceptions: super::allowlist::vendor_exceptions(&catalog),
         rulebox_folders: Some(RuleboxFolders { install_root: install.root().to_path_buf(), state_dir: paths.state_dir() }),

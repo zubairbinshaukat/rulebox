@@ -31,7 +31,8 @@ struct Module {
 const MODULES: &[Module] = &[
     Module { file: "machinereg", read_only: &["get_machine_value", "list_value_names"], guarded: 2 },
     // (Step 18) `list_value_names` only reads (the Staff start-up entries).
-    Module { file: "staffreg", read_only: &["read_value", "list_value_names"], guarded: 2 },
+    // (Phase 6 Step 17) `delete_key_if_empty` removes an emptied browser policy key (guarded).
+    Module { file: "staffreg", read_only: &["read_value", "list_value_names"], guarded: 3 },
     // (Step 6) `read_policy` and `citool_available` only read; `refresh` (CiTool) is guarded.
     Module { file: "codeintegrity", read_only: &["active_dir", "list_policies", "read_policy", "citool_available"], guarded: 3 },
     Module { file: "applocker", read_only: &["get_policy"], guarded: 2 },
@@ -253,8 +254,14 @@ fn both_root_lists_are_what_the_plan_says() {
     // (Step 18) Staff 12 -> 16: the Copilot and tips user policies (`WindowsCopilot`, `CloudContent`),
     // `Explorer\VisualEffects` and `Control Panel\Desktop\WindowMetrics` (PRD 22.2). Machine 9 -> 11:
     // the `DataCollection` and `DeliveryOptimization` policy keys (PRD 22.3).
-    assert_eq!(staffreg::ALLOWED_ROOTS.len(), 16);
+    // (Phase 6 Step 17) Staff 16 -> 18: the browser policy roots `Software\Policies\Google\Chrome` and
+    // `Software\Policies\Microsoft\Edge` (plan 4.9.3; the plan said 12 -> 14 before Phase 5 Step 18 added
+    // four). PENDING S-1: no machine-hive roots are added until the VM spike says the Staff hive is ignored.
+    assert_eq!(staffreg::ALLOWED_ROOTS.len(), 18);
     assert!(staffreg::ALLOWED_ROOTS.contains(&r"Software\Policies\Microsoft\Windows\RemovableStorageDevices"));
+    assert!(staffreg::ALLOWED_ROOTS.contains(&r"Software\Policies\Google\Chrome"));
+    assert!(staffreg::ALLOWED_ROOTS.contains(&r"Software\Policies\Microsoft\Edge"));
+    assert_eq!(staffreg::BROWSER_ROOTS.len(), 2);
     assert_eq!(machinereg::ALLOWED_ROOTS.len(), 12);
     assert!(machinereg::ALLOWED_ROOTS.contains(&rulebox_win32::installmarker::PENDING_KEY));
     assert!(machinereg::ALLOWED_ROOTS.contains(&machinereg::DATA_COLLECTION));

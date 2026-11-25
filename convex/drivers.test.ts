@@ -491,6 +491,17 @@ describe("driver results reported by the agent (deviceApi:report installs)", () 
     expect((await rows())[0]!.detail).toBeUndefined();
   });
 
+  test("the Phase 6 Step 15 warnings are kept: protected_print_on on a failure, seagull_driver_present on an installed result (a warning, not a failure)", async () => {
+    const { e, creds, made, result, rows } = await seed();
+    await e.t.mutation(api.deviceApi.report, { ...creds, installs: [result(made.id, "failed", { detail: "protected_print_on" })] });
+    expect((await rows())[0]).toMatchObject({ state: "failed", detail: "protected_print_on" });
+    await e.t.mutation(api.deviceApi.report, { ...creds, installs: [result(made.id, "installed", { detail: "seagull_driver_present", appRevision: 2, attempts: 0 })] });
+    expect((await rows())[0]).toMatchObject({ state: "installed", detail: "seagull_driver_present" });
+    // The warning does not count as a failure.
+    const detail = await e.viewer.query(api.drivers.detail, { id: made.id });
+    expect(detail.counts).toMatchObject({ installed: 1, failed: 0 });
+  });
+
   test("removing the PC (purge) deletes its driver results; moving it re-tags them", async () => {
     const { e, dev, made, creds, result, rows } = await seed();
     await e.t.mutation(api.deviceApi.report, { ...creds, installs: [result(made.id, "installed")] });

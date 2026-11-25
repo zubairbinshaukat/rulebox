@@ -89,6 +89,8 @@ pub enum SimOp {
     GetPathAcl,
     WriteStaffValue,
     DeleteStaffValue,
+    /// (Phase 6 Step 17) Removing an emptied browser policy key.
+    DeleteStaffKeyIfEmpty,
     DeployCiPolicy,
     RemoveCiPolicy,
     RefreshCiPolicies,
@@ -141,6 +143,8 @@ pub enum SimOp {
     WriteInstallMarker,
     RunWebviewBootstrapper,
     ReportEvent,
+    // Phase 6 Step 20 (changes the machine: it starts the MSI upgrade of Rulebox itself).
+    StartSelfUpgrade,
 }
 
 impl SimOp {
@@ -303,6 +307,8 @@ pub struct SimWorld {
     // -- Phase 5 Step 3 (plan 4.5): what the new seam methods read and write. --
     /// Staff hive values: (SID, lowercase key path, lowercase value name).
     pub staff_values: HashMap<(String, String, String), RegData>,
+    /// (Phase 6 Step 17) The emptied browser policy keys `delete_staff_key_if_empty` removed (lowercase paths, in order).
+    pub staff_keys_removed: Vec<String>,
     /// Active App Control policies: id (lowercase GUID) to the binary.
     pub ci_policies: std::collections::BTreeMap<String, Vec<u8>>,
     /// (Step 6) How many times `refresh_ci_policies` ran.
@@ -344,6 +350,9 @@ pub struct SimWorld {
     pub bootstrapper_installs_pv: Option<String>,
     /// (Phase 6 Step 8) Every `report_event` call: kind, id, text.
     pub events: Vec<(super::EventKind, u32, String)>,
+    /// (Phase 6 Step 20) Every accepted `start_self_upgrade` call: the MSI, the hash it was given and the log. The
+    /// simulated msiexec changes nothing: a test plays the new version by setting the snapshot's `agent_version`.
+    pub self_upgrades: Vec<(PathBuf, String, PathBuf)>,
     /// DACLs of files and folders (lowercase path to SDDL).
     pub path_acls: HashMap<String, String>,
     /// (Step 8) Program files the watchdog can ask about (lowercase path to what the file says).
@@ -411,6 +420,7 @@ impl SimWorld {
             app_data_redirected: Some(false),
             reset_hang: None,
             staff_values: HashMap::new(),
+            staff_keys_removed: Vec::new(),
             ci_policies: std::collections::BTreeMap::new(),
             ci_refreshes: 0,
             applocker: AppLockerState::default(),
@@ -453,6 +463,7 @@ impl SimWorld {
             },
             webview2_pv: Some("130.0.2849.80".into()),
             protected_print: false,
+            self_upgrades: Vec::new(),
             bootstrapper_runs: Vec::new(),
             bootstrapper_exit: InstallerExit::Code(0),
             bootstrapper_installs_pv: Some("131.0.2903.51".into()),
@@ -1487,6 +1498,24 @@ impl Platform for SimPlatform {
         Ok(())
     }
 
+    /// (Phase 6 Step 17) A key is only a path prefix of the values here, so "empty" means no value at
+    /// or below the path. The same key rule as `WindowsPlatform` (the browser roots only).
+    fn delete_staff_key_if_empty(&self, sid: &str, path: &str) -> Result<bool, PlatformError> {
+        self.check(SimOp::DeleteStaffKeyIfEmpty)?;
+        staffreg::check_browser_key(path).map_err(map_err)?;
+        let mut world = lock(&self.world);
+        if !world.users.values().any(|user| user.sid == sid) {
+            return Err(PlatformError::NotFound);
+        }
+        let (sid, key, _) = staff_key(sid, path, "");
+        let below = format!("{key}\\");
+        if world.staff_values.keys().any(|(s, p, _)| *s == sid && (*p == key || p.starts_with(&below))) {
+            return Ok(false);
+        }
+        world.staff_keys_removed.push(key);
+        Ok(true)
+    }
+
     fn deploy_ci_policy(&self, policy_id: &str, binary: &[u8]) -> Result<(), PlatformError> {
         self.check(SimOp::DeployCiPolicy)?;
         let id = codeintegrity::check_policy_id(policy_id).map_err(map_err)?;
@@ -1771,6 +1800,22 @@ impl Platform for SimPlatform {
         self.check(SimOp::ReportEvent)?;
         lock(&self.world).events.push((kind, event_id, rulebox_win32::eventwrite::clip_message(message)));
         Ok(())
+    }
+
+    /// (Phase 6 Step 20) The same refusals as `WindowsPlatform` (the file's place, then its hash read from the real file
+    /// of the test's data folder), then it only records the call: nothing is executed.
+    fn start_self_upgrade(&self, msi: &Path, expected_sha256: &str, log: &Path) -> Result<u32, PlatformError> {
+        self.check(SimOp::StartSelfUpgrade)?;
+        if !crate::selfupdate::upgrade_files_ok(&self.data_dir.join("selfupdate"), &self.data_dir.join("logs"), msi, expected_sha256, log) {
+            return Err(PlatformError::Refused("not the staged Rulebox MSI"));
+        }
+        let actual = std::fs::read(msi).ok().map(|bytes| hex_lower(&Sha256::digest(bytes)));
+        if !actual.is_some_and(|hash| hash.eq_ignore_ascii_case(expected_sha256)) {
+            return Err(PlatformError::Refused("the Rulebox MSI is not the verified file"));
+        }
+        let mut world = lock(&self.world);
+        world.self_upgrades.push((msi.to_path_buf(), expected_sha256.to_string(), log.to_path_buf()));
+        Ok(4242)
     }
 }
 

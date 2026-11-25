@@ -14,7 +14,7 @@ use rulebox_ipc::types::{
     AdminExitInfo, AgentSnapshot, DeviceLockView, DisplayMode, DisplayModeSource, KeyboardView, NetworkView, PowerOptions,
     PrintingView,
 };
-use rulebox_policy::DisplayModeOverride;
+use rulebox_policy::{DisplayModeOverride, RuleboxRelease};
 use serde_json::Value;
 
 use rulebox_policy::catalog::CatalogApp;
@@ -111,6 +111,9 @@ pub struct AgentPolicy {
     pub web_window_cap: Option<u32>,
     /// (Step 19) `doc.webIdleCloseMin`: 0 = off, else 5 to 240.
     pub web_idle_close_min: Option<u32>,
+    /// (Phase 6 Step 20, plan 4.17) `doc.ruleboxRelease`: the Rulebox build the organization wants. `None` when absent, of the
+    /// wrong shape or breaking `check_limits` (an unordered version, a URL that is not https, a bad hash): nothing is updated.
+    pub rulebox_release: Option<RuleboxRelease>,
 }
 
 /// Defaults of plan 4.14 for the web window cap.
@@ -199,6 +202,25 @@ fn display_source_of(doc: &Value) -> DisplayModeSource {
     }
 }
 
+/// (Phase 6 Step 20) `doc.ruleboxRelease`, when it parses and passes `check_limits`. A document that carries a bad one is
+/// still a valid document: the agent only updates nothing (and says why in its log).
+fn release_from_doc(doc: &Value) -> Option<RuleboxRelease> {
+    let value = doc.get("ruleboxRelease").filter(|value| !value.is_null())?;
+    match serde_json::from_value::<RuleboxRelease>(value.clone()) {
+        Ok(release) => match release.check_limits() {
+            Ok(()) => Some(release),
+            Err(error) => {
+                tracing::warn!(%error, "the Rulebox release of the document is not usable; nothing is updated");
+                None
+            }
+        },
+        Err(error) => {
+            tracing::warn!(%error, "the Rulebox release of the document does not parse; nothing is updated");
+            None
+        }
+    }
+}
+
 /// A whole number of a document key inside `range`; anything else is `None` (the agent's default applies).
 fn number_in(doc: &Value, key: &str, range: std::ops::RangeInclusive<u32>) -> Option<u32> {
     let number = doc.get(key)?.as_u64().and_then(|n| u32::try_from(n).ok())?;
@@ -267,6 +289,7 @@ impl AgentPolicy {
             display_source: display_source_of(doc),
             web_window_cap: number_in(doc, "webWindowCap", 1..=12),
             web_idle_close_min: number_in(doc, "webIdleCloseMin", 0..=240).filter(|min| *min == 0 || *min >= 5),
+            rulebox_release: release_from_doc(doc),
             admin_exit: AdminExitPolicy::from_value(doc.get("adminExit")),
             power: doc.get("power").and_then(|value| serde_json::from_value(value.clone()).ok()),
             org_name: doc
@@ -417,6 +440,30 @@ mod tests {
         assert_eq!(policy.drivers[0].kind, rulebox_policy::network::DriverKind::Unknown);
         assert!(AgentPolicy::from_doc(Some(&json!({}))).drivers.is_empty());
         assert!(AgentPolicy::from_doc(Some(&json!({ "drivers": "no" }))).drivers.is_empty());
+    }
+
+    #[test]
+    fn the_rulebox_release_is_read_and_a_bad_one_is_none() {
+        let sha = "a".repeat(64);
+        let good = json!({ "version": "0.1.1", "url": "https://dl.example.test/r.msi", "sha256": sha, "sizeBytes": 123 });
+        let policy = AgentPolicy::from_doc(Some(&json!({ "ruleboxRelease": good })));
+        let release = policy.rulebox_release.expect("a usable release");
+        assert_eq!((release.version.as_str(), release.size_bytes), ("0.1.1", 123));
+        // Absent, null and the wrong shape: nothing is updated, and the rest of the document is still read.
+        for document in [
+            json!({}),
+            json!({ "ruleboxRelease": null }),
+            json!({ "ruleboxRelease": "0.1.1" }),
+            json!({ "ruleboxRelease": { "version": "0.1.1" } }),
+            json!({ "ruleboxRelease": { "version": "banana", "url": "https://dl.example.test/r.msi", "sha256": sha, "sizeBytes": 1 } }),
+            json!({ "ruleboxRelease": { "version": "0.1.1", "url": "http://dl.example.test/r.msi", "sha256": sha, "sizeBytes": 1 } }),
+            json!({ "ruleboxRelease": { "version": "0.1.1", "url": "https://dl.example.test/r.msi", "sha256": "abc", "sizeBytes": 1 } }),
+        ] {
+            let policy = AgentPolicy::from_doc(Some(&document));
+            assert_eq!(policy.rulebox_release, None, "{document}");
+            assert!(policy.has_document, "{document}");
+        }
+        assert_eq!(AgentPolicy::from_doc(None).rulebox_release, None);
     }
 
     #[test]

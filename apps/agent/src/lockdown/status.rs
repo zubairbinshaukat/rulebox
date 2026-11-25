@@ -128,6 +128,7 @@ fn owner_word(owner: JournalOwner) -> &'static str {
         JournalOwner::Printer => "printers",
         JournalOwner::Perf => "performance",
         JournalOwner::Driver => "drivers",
+        JournalOwner::L1Browser => "L1-browser",
     }
 }
 

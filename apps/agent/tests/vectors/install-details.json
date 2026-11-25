@@ -21,6 +21,8 @@
     "waiting_for_close",
     "needs_interaction",
     "installed_per_user",
-    "answer_file_failed"
+    "answer_file_failed",
+    "protected_print_on",
+    "seagull_driver_present"
   ]
 }

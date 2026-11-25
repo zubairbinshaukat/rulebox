@@ -393,9 +393,21 @@ pub struct DesktopSpec {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub previous: Option<PreviousVersion>,
+    /// (Phase 6 Step 17, plan 4.9.7) The allowed sites of a Chrome or Edge program, the "Browser rules" card:
+    /// `example.com` or `*.example.com`, lower-case, at most [`MAX_BROWSER_SITES`]. Left out when the
+    /// administrator gave none (a Phase 4 to 6 document keeps its bytes). Only the agent's browser policies
+    /// read it ([`BrowserKind`] web apps add theirs); a program that is not a browser carries none.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub browser_sites: Option<Vec<String>>,
 }
 
 impl DesktopSpec {
+    /// The allowed sites of a browser program (empty when none were given).
+    pub fn browser_sites(&self) -> &[String] {
+        self.browser_sites.as_deref().unwrap_or(&[])
+    }
+
     /// What the engine acts on: absent and `Unknown` are `Pinned`.
     pub fn update_mode(&self) -> UpdateMode {
         self.update.as_ref().map_or(UpdateMode::Pinned, |update| update.mode.effective())
@@ -480,6 +492,8 @@ pub const DEFAULT_TIMEOUT_MIN: u32 = 30;
 pub const MAX_PUBLISHER: usize = crate::lockdown::MAX_PUBLISHER_SUBJECT;
 /// `publisherProduct`, in characters.
 pub const MAX_PUBLISHER_PRODUCT: usize = crate::lockdown::MAX_PUBLISHER_FIELD;
+/// Allowed sites of one Chrome or Edge program (plan 4.9.7; `MAX_BROWSER_SITES` on the server).
+pub const MAX_BROWSER_SITES: usize = 200;
 /// Browser web apps per device (plan 4.3).
 pub const MAX_BROWSER_WEB_APPS: usize = 60;
 /// Combined browser URL patterns per device (plan 4.3; the browsers' own limit is 1,000).
@@ -502,6 +516,22 @@ pub(crate) fn check_version_text(field: &'static str, text: &str) -> Result<(), 
     } else {
         Err(CatalogError::BadText(field))
     }
+}
+
+/// `example.com` or `*.example.com`: lower-case, no scheme, port or path, at most one leading
+/// wildcard, at least two labels of `[a-z0-9-]` (1 to 63, no leading or trailing hyphen), the
+/// whole name at most 253 characters. The rule of `domainProblem` in `convex/lib/hostRules.ts`.
+pub fn is_browser_site(site: &str) -> bool {
+    let host = site.strip_prefix("*.").unwrap_or(site);
+    let labels: Vec<&str> = host.split('.').collect();
+    host.len() <= 253
+        && labels.len() >= 2
+        && labels.iter().all(|label| {
+            (1..=63).contains(&label.len())
+                && !label.starts_with('-')
+                && !label.ends_with('-')
+                && label.bytes().all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'-')
+        })
 }
 
 pub(crate) fn check_https(field: &'static str, url: &str) -> Result<(), CatalogError> {
@@ -614,6 +644,11 @@ impl DesktopSpec {
     /// The Phase 6 fields: version text, update mode rules (plan 4.4.1, 4.4.3), the
     /// previous version. Defence in depth for what the server refuses at save time.
     fn validate_update(&self) -> Result<(), CatalogError> {
+        if let Some(sites) = &self.browser_sites {
+            if sites.len() > MAX_BROWSER_SITES || !sites.iter().all(|site| is_browser_site(site)) {
+                return Err(CatalogError::BadText("desktop.browserSites"));
+            }
+        }
         if let Some(version) = &self.version {
             check_version_text("desktop.version", version)?;
         }
@@ -664,8 +699,8 @@ impl DesktopSpec {
 /// (Phase 6, plan 4.3) The per-device limits of the catalogue: at most 60 browser web
 /// apps, and at most 800 distinct browser URL patterns (the allowed domains and the
 /// start host of those apps). The agent refuses the whole document
-/// (`policy_rejected`) like every other limit. Browser rules of a Chrome or Edge
-/// *desktop* app (plan 4.9.7) add to the patterns when Step 16 gives them a field.
+/// (`policy_rejected`) like every other limit. The browser rules of a Chrome or Edge
+/// *desktop* app (plan 4.9.7, `browser_sites`, Step 17) add their sites to the patterns.
 ///
 /// (Phase 6 Step 14) Also the rule of an installer's `silentArgs`: `check_silent_args` (the argument limits, and no
 /// `{...}` but `{AnswerFile}` and `{LogFile}`), the same rule the server applies at save time. Note for whoever wires
@@ -692,6 +727,13 @@ pub fn check_limits(catalog: &[CatalogApp]) -> Result<(), crate::lockdown::Limit
         if let Some(host) = url_host(&web.url) {
             patterns.insert(host.to_ascii_lowercase());
         }
+        if patterns.len() > MAX_BROWSER_URL_PATTERNS {
+            return Err(LimitError::TooManyBrowserPatterns);
+        }
+    }
+    // (Step 17) The allowed sites of a Chrome or Edge program count too: the same list the policy gets.
+    for site in catalog.iter().filter_map(|app| app.desktop.as_ref()).flat_map(|desktop| desktop.browser_sites()) {
+        patterns.insert(site.to_ascii_lowercase());
         if patterns.len() > MAX_BROWSER_URL_PATTERNS {
             return Err(LimitError::TooManyBrowserPatterns);
         }

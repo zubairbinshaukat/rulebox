@@ -34,6 +34,9 @@ export const IO_BUDGETS: Record<string, IoBudget> = {
   "settings:setExitPin": { maxReads: 7, maxReadBytes: 3_072, maxWrites: 5, maxWriteBytes: 2_048 },
   // org (x2), orgSecrets, publishQueue; no PIN set: 1 read, 0 writes.
   "settings:clearExitPin": { maxReads: 8, maxReadBytes: 3_072, maxWrites: 5, maxWriteBytes: 2_048 },
+  // Phase 6 Step 20 (plan 4.17): member wrapper + step-up, the organization row, the publish queue row; writes: organization, audit,
+  // publish queue (+ its scheduled run). Unchanged release: 0 writes. Owner-only, a few times a year: never subscribed.
+  "ruleboxRelease:set": { maxReads: 8, maxReadBytes: 4_096, maxWrites: 4, maxWriteBytes: 2_048 },
 
   // ---- Step 5: groups. Counts per group read `.take(501)` of devices and
   // groupMembers (plan Step 5.11); a free tenant (3 groups, 2 devices, 25

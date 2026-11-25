@@ -595,36 +595,53 @@ and on Disable kiosk.
 
 **Where (decision P6, Q5):** the **Staff hive** first:
 `Software\Policies\Google\Chrome` and `Software\Policies\Microsoft\Edge`
-through `staffreg` (two new roots, `guard_coverage` count 12 → 14). The
+through `staffreg` (two new roots; `guard_coverage` Staff count 16 → 18, the
+plan said 12 → 14 before Phase 5 Step 18 added four). The
 administrator's own browser stays normal, which matches "the admin account
 is not affected". `HKCU\Software\Policies` is not writable by a standard
-user. If Step 2 shows the browsers ignore user-hive policy on a workgroup
-PC, use the machine keys instead (two new `machinereg` roots, count 9 → 11)
-and tell the owner: that also restricts the administrator's browser.
+user. **Pending S-1** (VM spike, not run yet): the vendors' references do not
+say whether Chrome and Edge read `HKCU` policy on a workgroup PC. If S-1
+shows they ignore user-hive policy, use the machine keys instead (two new
+`machinereg` roots, count 12 → 14) and tell the owner: that also restricts
+the administrator's browser. Step 17 builds the Staff-hive design only.
 
-| Policy | Value | Note |
-|---|---|---|
-| `URLBlocklist` | `*`, `chrome://*` or `edge://*`, `file://*`, `view-source:*`, `javascript:*`, `data:*`, `ftp://*` and custom schemes | From Chrome 147 `*` no longer covers `chrome://`. Blocking all of `chrome://` "can cause errors" (Step 24 checks the window still works) |
-| `URLAllowlist` | Union of the primary and additional domains of all assigned browser web apps, plus the Chrome app's own list | ≤ 800 patterns per device (browser limit 1,000). Allowlist wins |
-| `DeveloperToolsAvailability` | 2 | |
-| `DownloadRestrictions` | 3 (all blocked) | Deviation from PRD 24.1 (Q6) |
-| `AllowFileSelectionDialogs` | false, or true when the group's `browserUploads` is on | Off breaks uploads |
-| `IncognitoModeAvailability` / `InPrivateModeAvailability` | 1 | Needs a browser restart |
-| `BrowserGuestModeEnabled`, `BrowserAddPersonEnabled` | false | |
-| `BrowserSignin` | 0 | Needs a restart |
-| `SyncDisabled`, `PasswordManagerEnabled` | true / false | names **(unverified)** |
-| `ExtensionInstallBlocklist` | `*` | name **(unverified)** |
-| `PrintingEnabled` | true only if some assigned browser web app allows printing and printers exist | Global, not per app |
-| `VideoCaptureAllowedUrls`, `AudioCaptureAllowedUrls`, `NotificationsAllowedForUrls` | the origins of the apps whose permission is on | Per origin, so per app. Defaults set to block. Names **(unverified)** |
-| `DefaultGeolocationSetting`, clipboard, screen capture defaults | block | Screen sharing and clipboard read stay blocked in browser mode in v1 |
-| `AutoLaunchProtocolsFromOrigins` | empty; `ExternalProtocolDialogShowAlwaysOpenCheckbox` false | External schemes are also in the blocklist |
-| `BackgroundModeEnabled`, Edge `StartupBoostEnabled` | false | Memory, and no process after the last window closes |
-| Edge `ConfigureKeyboardShortcuts` | disable new window, new InPrivate window, downloads, history, settings | Chrome has no such policy |
-| Edge `SleepingTabsEnabled`, `EfficiencyModeEnabled` | on | Memory; effect on `--app` windows not stated |
+**Re-read at Step 17 (2026-11-25)** for **Chrome 159** (stable 159.0.8154.34;
+read from Chromium's `policy_definitions` on `main`, because Google's rendered
+policy pages carry no text for automated readers) and **Edge 160** (Microsoft
+Learn, pages updated 2026-05 to 2026-11). Lists are **subkeys** of the policy
+root (`URLBlocklist\1`, `\2`, ...) with REG_SZ values; "list" below means that.
+Values are DWORDs unless noted. Restart column: the vendor says the value is
+read only at browser start.
 
-Every policy name and value is re-read from the vendor's reference at
-Step 17. The catalogue is one data table in code
-(`apps/agent/src/lockdown/browser.rs`) with a test per row.
+| Policy (Chrome / Edge) | Value | Restart | Note |
+|---|---|---|---|
+| `URLBlocklist` (list) | Chrome: `*`, `chrome://*`, `file://*`, `view-source:*`, `javascript:*`, `data:*`, `ftp://*`. Edge: the same with `edge://*` | no | From Chrome 147 `*` no longer covers `chrome://`. Both vendors warn that blocking the internal pages "can cause errors" (Microsoft: "not recommended"); Step 24 checks the window still works and the row goes if it does not. Custom schemes are covered by `*`. 1,000 entries at most. Do not block `chrome-untrusted://` |
+| `URLAllowlist` (list) | `https://host[:port]` for the start host and every allowed domain of each assigned browser web app and for the `browserSites` of a Chrome or Edge program; `*.x` is written as `x` (a host pattern already covers subdomains) | no | ≤ 800 patterns per device (limit 1,000). Allowlist wins over blocklist. Not written when empty (the browser then shows its blocked page) |
+| `DeveloperToolsAvailability` | 2 | no | Also controls "view page source" (Chrome and Edge ≥ 99) |
+| `DownloadRestrictions` | 3 (all blocked) | no | Deviation from PRD 24.1 (Q6) |
+| `AllowFileSelectionDialogs` | 0, or 1 when the group's `browserUploads` is on | no | Off breaks uploads |
+| `IncognitoModeAvailability` / Edge `InPrivateModeAvailability` | 1 | Chrome: yes | |
+| `BrowserGuestModeEnabled` | 0 | no | |
+| `BrowserAddPersonEnabled` / Edge `BrowserAddProfileEnabled` | 0 | no | Different names |
+| `BrowserSignin` | 0 | yes | |
+| `SyncDisabled`, `PasswordManagerEnabled` | 1 / 0 | no | Confirmed |
+| `ExtensionInstallBlocklist` (list) | `*` | no | Confirmed (`*` is the documented value) |
+| `PrintingEnabled` | 1 only if some assigned browser web app allows printing, else 0 | no | Global, not per app. **Changed:** not gated on "printers exist" (a policy that allows printing with no printer does nothing, and the agent has no printer read in this layer) |
+| `VideoCaptureAllowed`, `AudioCaptureAllowed` | 0 | no | **Changed:** the plan's "defaults set to block" has no default-setting policy (Chrome's `DefaultMediaStreamSetting` is deprecated, Edge has none). With these off, capture is available only to the `*AllowedUrls` origins, without a prompt |
+| `VideoCaptureAllowedUrls`, `AudioCaptureAllowedUrls`, `NotificationsAllowedForUrls` (lists) | `https://[*.]host[:port]/` of the apps whose camera, microphone or notification permission is on | no | Per origin, so per app. `*` is not supported |
+| `DefaultGeolocationSetting`, `DefaultNotificationsSetting`, `DefaultClipboardSetting` | 2 (block) | no | Edge's unset notification default is "allowed" (Chrome: "ask"), so it is set. Clipboard policy: Chrome ≥ 103, Edge ≥ 109 |
+| `ScreenCaptureAllowed` | 0 | no | Screen sharing stays blocked in v1 |
+| `AutoLaunchProtocolsFromOrigins` | **not written** | no | **Changed:** a JSON list; the vendors document no empty value, only "not configured" (no protocol launches without a prompt). External schemes are in the blocklist anyway |
+| `ExternalProtocolDialogShowAlwaysOpenCheckbox` | 0 | yes | |
+| `BackgroundModeEnabled` | 0 | no | Memory, and no process after the last window closes |
+| Edge `StartupBoostEnabled` | 0 | no | |
+| Edge `ConfigureKeyboardShortcuts` (REG_SZ JSON) | `{"disabled":[...]}` with `new_window`, `new_inprivate_window`, `downloads`, `history`, `favorites`, `view_source`, `open_file`, `save_page`, `task_manager`, `clear_browsing_data`, `profile` | yes | **Changed:** Edge has no command id for "settings"; Chrome has no such policy. The shortcut only removes the key, the UI still works |
+| Edge `SleepingTabsEnabled`, `EfficiencyModeEnabled` | 1 | no | Memory; effect on `--app` windows not stated (VM). **Added** for Chrome: `HighEfficiencyModeEnabled` 1 (memory saver) |
+
+Every policy name and value was re-read from the vendors' references at
+Step 17 (above). The catalogue is one data table in code
+(`apps/agent/src/lockdown/browser.rs`, `FIXED_ROWS`, plus the rows that depend
+on the document) with a test per row.
 
 **Reload:** registry writes are picked up by a running browser within 15
 minutes at worst, and some values only after a restart. So the agent
@@ -1491,6 +1508,27 @@ details have no dashboard text yet (`screenStrings/install.ts`).
 
 ### Step 15 — Drivers
 
+**Status (2026-11-25):** built on the dev machine (SimPlatform and convex-test only; not committed, nothing run on a VM).
+Phase 5 Step 14b was already in the tree (`installs/{drivers,drivers_rules,unzip}.rs`), so this step **extended** it instead of
+adding the `apps/agent/src/drivers/{zip,inf,probe}.rs` files named below: the new probes are `installs/drivers_probe.rs`.
+- **Sources (4.8):** `DriverSource` is read from the signed entry (`resolve_source` in `drivers_rules.rs`); an entry without one
+  goes by `kind` (`inf` = `inf_zip`, `exe`/`msi` = `vendor_exe`). A source that does not fit its kind, an unknown source and
+  **`vendor_exe_extract`** make that driver `unsupported` (nothing downloaded). `vendor_exe_extract` is **not built**: it waits
+  for VM spike row S-10; the enum value is defined and refused with a reason. The server does not emit `source` yet (the `kind`
+  says the same; no second copy to keep equal) - add it only when `vendor_exe_extract` is built.
+- **Warnings:** `protected_print_on` (an INF package of class `Printer` / `PrintQueue` is refused, as a failure with the usual
+  back-off, while `Platform::protected_print_on` is true; the zip is kept; a vendor exe or msi is opaque and is never refused
+  for this) and `seagull_driver_present` (rides on the `installed` result, never blocks; the package or its name in the document
+  says `seagull`/`tpcl` and an installed printer driver's name does too). Both are install details in `Detail::ALL`,
+  `INSTALL_DETAILS`, `install-details.json` and the dashboard texts (`screenStrings/install.ts`); 21 -> 23 details.
+- **Deviations from the 4.8 text:** (1) `pnputil /add-driver <inf> /install` **without `/subdirs`** (14b's shape, kept: one
+  named INF needs no traversal and the program rule stays tighter; a test pins the exact arguments, and the delete command now
+  comes from one pure builder, `pnputil_delete_command`); (2) the zip limit is now 2,000 entries (was 5,000), 1 GiB unpacked;
+  (3) the catalogs checked are the ones the INF names (`CatalogFile=`), which are the only ones Windows reads; (4) the detail for
+  an unsigned catalog stays `unsigned_driver` (4.6 called it `driver_unsigned`).
+- **Unverified (VM, Steps 23 and S-10):** the protected print registry value, the Seagull name heuristic (`seagull`, `tpcl`), and
+  whether pnputil accepts the add shape on a real PC. INF-only installs may still miss the vendor's port or status monitor.
+
 **Machine:** dev. **PRD:** 24.2 (new bullet). **Files:** as Phase 5 Step
 14b, plus `apps/agent/src/drivers/{zip.rs,inf.rs,probe.rs}`.
 
@@ -1554,6 +1592,58 @@ S-1 failed), `crates/rulebox-win32/tests/guard_coverage.rs`, tests.
 **Verify:** `cargo clippy` and `cargo test` for `rulebox-win32` and the agent.
 **Do NOT:** write any browser policy on the dev machine; add a root not
 named here; leave policies behind after Disable kiosk.
+
+**Status (2026-11-25): built and tested on the simulator; items 1-7 done. The
+Staff-hive design only: pending S-1 (VM spike), no machine-hive roots.**
+
+- **Item 1:** the 4.9.3 table above is the re-read result. Versions: **Chrome 159**
+  (stable 159.0.8154.34 on 2026-11-24; policy values from Chromium
+  `policy_definitions` on `main`, which can be ahead of stable, the registry
+  layout of Chrome lists and JSON strings follows the same scheme as Edge's
+  documented one and is not stated on Google's page) and **Edge 160** (Learn,
+  2026-11-24). Corrections to the plan: lists are subkeys; `BrowserAddProfileEnabled`
+  (Edge) vs `BrowserAddPersonEnabled` (Chrome); `EfficiencyModeEnabled`;
+  `AutoLaunchProtocolsFromOrigins` not written; no "default block" policy for
+  camera and microphone (use `VideoCaptureAllowed`/`AudioCaptureAllowed` = 0 plus
+  the allowed-URL lists); no Edge shortcut id for "settings"; `PrintingEnabled`
+  not gated on printers.
+- **Item 2:** `lockdown/browser.rs`: `BrowserInputs::from_catalog` (catalogue to
+  per-browser inputs), `compile` (pure; `FIXED_ROWS` table plus the allow list,
+  uploads, printing and per-origin lists), table tests per row.
+- **Item 3:** `browser::apply` runs inside `staff::apply` (the Staff layer's
+  state includes it, mode `on` when a browser is assigned), owner
+  `JournalOwner::L1Browser` (serialized `l1-browser`; drift, status and the
+  last-known-good rollback know it). Rows no longer wanted are restored through
+  the journal, so unassigning leaves nothing. Emptied keys are removed by the
+  journal restore itself (so Disable kiosk, `unenroll`, `recover` and rollback
+  all do it): new guarded `staffreg::delete_key_if_empty` (browser roots only),
+  `Platform::delete_staff_key_if_empty` (sim and Windows). A key that still holds
+  an administrator's own value stays.
+- **Item 4:** the program folder of an assigned browser joins
+  `Facts::catalogue_exe_folders` (`runtime::machine_facts`), so the allow-list
+  gives the Staff SID a path rule only while it is assigned, and only when it is
+  admin-only (the existing catalogue-folder rule).
+- **Item 5:** `AgentState.browser_ready` (set only when every row of that browser
+  is journalled as applied) feeds `apps.list` (`browser`, `browserExe`,
+  `browserReady`) through `AppResolver::with_browser_state`; `is_ready` also
+  needs the browser's journal rows to still exist.
+- **Item 6:** `invariants::check_browser_rows` (a set naming a key outside the two
+  roots is not written at all, layer detail `browser_key_outside_roots`);
+  `staffreg::ALLOWED_ROOTS` 16 → 18 and `guard_coverage` updated in the same
+  change (staffreg guarded functions 2 → 3).
+- **Item 7:** `lockdown/browser/tests.rs` (29 tests).
+- **Also (needed by item 1 and the server):** `DesktopSpec.browser_sites`
+  (`rulebox-policy`, omitted when absent; `packages/types` regenerated),
+  `convex/lib/desired.ts` and `groupConfig.ts` emit and freeze `browserSites`,
+  and both limit checks (`check_limits`, `checkBrowserLimits`) count a program's
+  sites in the 800 patterns.
+- **Left for Step 18 or later:** the Staff App launch, task mapping and profile
+  cleanup; an `apps.changed` event when `browserReady` flips (the Staff App must
+  ask `apps.list` again after the first apply); dashboard sentences for the new
+  layer detail codes `browser_too_many_urls` and `browser_key_outside_roots`
+  (the dashboard shows an unknown code as it is); the S-1, S-2 and Step 24 VM
+  rows (user-hive policy applies, reload time, the `chrome://*`/`edge://*`
+  block, `blob:`/`about:blank` under a `*` block, memory rows).
 
 ---
 
@@ -1642,6 +1732,31 @@ open, no screenshots yet (no server or Tauri run allowed in this session).**
 ---
 
 ### Step 20 — Rulebox's own update through the MSI (only if Q8 = yes)
+
+**Status (2026-11-25):** built on the dev machine (SimPlatform, FakeDownloader and convex-test only; not committed; **no msiexec or installer was run, no VM**). Files:
+new `apps/agent/src/selfupdate.rs` (+ `selfupdate_tests.rs`), `Platform::start_self_upgrade` (`platform/{mod,sim,windows}.rs`, in `MUTATING_METHODS`, guarded, detached
+`msiexec /i <staged msi> /qn /norestart /l*v`, no job object), `paths.rs` (`selfupdate_dir/state/log`), `agent_policy.rs` (`rulebox_release`, parsed with `check_limits`),
+`agent.rs` + `main.rs` (one task, own wake sources: document, snapshot, sign-in, one timer). Server: new `convex/ruleboxRelease.ts` (`ruleboxRelease:set`: owner, major
+step-up, `expectedRevision` of the organization, `null` clears, unchanged = 0 writes, audit `org.ruleboxReleaseChanged`, one all-PC publish), `schema.ts`
+(`organizations.phase6Settings.ruleboxRelease`), `lib/{validators,desired,stepUp,audit}.ts`, `publish.ts` (adds the key to every document, no extra read),
+`ioBudgets.ts` + `tests/convex/matrixRows.ts` rows, dashboard audit label. Tests: 27 agent (`cargo test -p rulebox-agent selfupdate`), 1 `agent_policy`, 8 Convex
+(`convex/ruleboxRelease.test.ts`). Decisions taken from the plan's recommendation or from the plan text:
+- **Never while signed in:** the apply window is "nobody signed in" (`SessionManager::presence`), read again right before the start; the MSI may be downloaded earlier.
+- **"Signing live" = the running agent's exe is Authenticode-signed.** Then the new MSI must carry the same signer subject (`publisher_matches`); a signed fleet never
+  accepts an unsigned MSI. A running agent that is unsigned (the `-unsigned` pilot builds): the SHA-256 of the signed document alone decides. A running exe whose
+  signature cannot be read pauses the update (never assumes "unsigned"). SignPath signs other projects with the same certificate, so the hash stays the identity.
+- **A failed release is `(version, sha256)` in `<data>\state\selfupdate.json`** (last 8), not retried until another version or another hash. Failures: hash mismatch (download
+  or the last re-hash before the start), publisher mismatch, platform refused the start, or the attempt did not take (the version after the restart is still lower
+  after a 30 minute grace; an agent restart inside the grace waits). A download that cannot finish (network, disk) is not a failure: 1 h apart, 3 times, then it waits for
+  a new document or the next agent start. Lower or equal or unordered versions are never installed (no download).
+- **One MSI at a time:** the task waits (2 min) while the install engine has an app or driver in `Installing`, so msiexec does not answer 1618.
+- The MSI is kept in its own `<data>\selfupdate\` folder (the install engine cleans `downloads\`); the agent does not set a TEMP for it (the Windows Installer service does
+  the work, not the client). It writes Application event log entries 1100 to 1103.
+- Server: the release is a setting of the **organization**, kept out of `settings` like `phase5Settings`; every PC of the organization gets the same key.
+**Left:** a real CI-built MSI and VM run 23 / Step 22 item 9 (an agent-driven upgrade with no employee signed in, and a failing one: confirm the service restarts into
+the new version, the rollback leaves the old one running, `selfupdate-msi.log` is written, and that `DETACHED_PROCESS` msiexec survives the service stop); no
+dashboard screen or `get` query for the release yet (set it through `ruleboxRelease:set`); the release workflow does not publish the release into the setting;
+`docs/prd.md` 23.9 already carries the v1 note ("an agent-driven MSI major upgrade with no employee signed in"); 23.4 was not checked.
 
 **Machine:** dev. **PRD:** 23.1, 23.2, 23.9. **Files:**
 `apps/agent/src/selfupdate.rs`, settings mutation, tests.

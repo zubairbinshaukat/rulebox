@@ -28,6 +28,7 @@ use std::sync::Arc;
 use rulebox_policy::paths::PathRoots;
 
 use super::*;
+use crate::installs::drivers_probe::{has_seagull_marker, inf_facts, protected_print_refuses, seagull_warning, InfFacts};
 use crate::installs::drivers_rules::{
     catalog_files, catalog_name_ok, check_driver, decode_inf, exe_driver_command, inf_file, msi_driver_command,
     pnputil_add_command, DriverPackage, DriverPlan, DriverRecordKind, MAX_INF_BYTES,
@@ -38,9 +39,16 @@ use crate::journal::{self, JournalCtx};
 /// An `oem<N>.inf` is hashed up to this size.
 const MAX_PUBLISHED_INF_BYTES: u64 = 64 * 1024 * 1024;
 
+/// An unpacked and judged INF package: the absolute path of the `.inf` and what its text says (class, Seagull marker).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PreparedInf {
+    pub inf: PathBuf,
+    pub facts: InfFacts,
+}
+
 /// Unpacks a driver zip and judges its INF. Blocking (file and signature reads); the extraction folder is deleted again on
-/// every failure. `Ok` is the absolute path of the `.inf`.
-pub fn prepare_inf_package(platform: &dyn Platform, zip: &Path, work: &Path, inf_rel: &str) -> Result<PathBuf, Detail> {
+/// every failure.
+pub fn prepare_inf_package(platform: &dyn Platform, zip: &Path, work: &Path, inf_rel: &str) -> Result<PreparedInf, Detail> {
     let result = prepare_inner(platform, zip, work, inf_rel);
     if result.is_err() {
         remove_tree(work);
@@ -52,7 +60,7 @@ fn is_plain_file(path: &Path) -> bool {
     std::fs::symlink_metadata(path).is_ok_and(|meta| meta.is_file() && !meta.file_type().is_symlink()) && matches!(is_reparse_point(path), Ok(false))
 }
 
-fn prepare_inner(platform: &dyn Platform, zip: &Path, work: &Path, inf_rel: &str) -> Result<PathBuf, Detail> {
+fn prepare_inner(platform: &dyn Platform, zip: &Path, work: &Path, inf_rel: &str) -> Result<PreparedInf, Detail> {
     if let Err(error) = extract(zip, work) {
         tracing::warn!("a driver package was refused: {error}");
         return Err(Detail::BadPackage);
@@ -66,7 +74,8 @@ fn prepare_inner(platform: &dyn Platform, zip: &Path, work: &Path, inf_rel: &str
         Ok(meta) if meta.len() <= MAX_INF_BYTES as u64 => std::fs::read(&inf).map_err(|_| Detail::BadPackage)?,
         _ => return Err(Detail::BadPackage),
     };
-    let catalogs = catalog_files(&decode_inf(&bytes));
+    let text = decode_inf(&bytes);
+    let catalogs = catalog_files(&text);
     // An INF without a catalog cannot be signed: Windows would prompt for it.
     if catalogs.is_empty() {
         tracing::warn!("a driver INF names no catalog file; refused as unsigned");
@@ -90,7 +99,7 @@ fn prepare_inner(platform: &dyn Platform, zip: &Path, work: &Path, inf_rel: &str
             }
         }
     }
-    Ok(inf)
+    Ok(PreparedInf { facts: inf_facts(&text), inf })
 }
 
 impl Engine {
@@ -265,6 +274,8 @@ impl Engine {
         let downloads = self.deps.paths.downloads_dir();
         tracing::info!(driver_id = id, kind = ?plan.kind, "installing a driver");
         let mut before: Option<Vec<String>> = None;
+        // (Step 15) A warning that rides on the `installed` result (`seagull_driver_present`).
+        let warning: Option<Detail>;
         let ran = match plan.kind {
             DriverRecordKind::Inf => {
                 let work = self.deps.paths.driver_work_dir(&plan.sha256);
@@ -274,8 +285,8 @@ impl Engine {
                 let prepared = tokio::task::spawn_blocking(move || prepare_inf_package(platform.as_ref(), &zip, &folder, &inf_rel))
                     .await
                     .unwrap_or(Err(Detail::BadPackage));
-                let inf = match prepared {
-                    Ok(inf) => inf,
+                let PreparedInf { inf, facts } = match prepared {
+                    Ok(prepared) => prepared,
                     Err(detail) => {
                         // The zip itself was the one the administrator uploaded and is no use: it goes.
                         drop(verified);
@@ -283,6 +294,14 @@ impl Engine {
                         return Outcome::Failed { detail: Some(detail), exit_code: None };
                     }
                 };
+                // Windows protected print mode removes printers that use a third-party driver: a printer driver is not
+                // installed while it is on. The zip is kept (it is fine; the mode may be switched off before the retry).
+                if protected_print_refuses(self.deps.platform.as_ref(), facts.printer_class) {
+                    tracing::warn!(driver_id = id, "protected print mode is on; the printer driver is not installed");
+                    remove_tree(&work);
+                    return Outcome::Failed { detail: Some(Detail::ProtectedPrintOn), exit_code: None };
+                }
+                warning = seagull_warning(self.deps.platform.as_ref(), facts.seagull_based || has_seagull_marker(&plan.name));
                 match self.deps.platform.driver_store_infs() {
                     Ok(list) => before = Some(list),
                     Err(error) => tracing::warn!("cannot read the driver store ({error}); a new package cannot be told apart"),
@@ -292,10 +311,14 @@ impl Engine {
                 remove_tree(&work);
                 ran
             }
+            // A vendor exe or msi is opaque: only the driver's name in the document can say it is Seagull-based, and
+            // whether it is a printer driver at all is unknown (so protected print mode never refuses it).
             DriverRecordKind::Exe => {
+                warning = seagull_warning(self.deps.platform.as_ref(), has_seagull_marker(&plan.name));
                 self.run_installer(exe_driver_command(verified.path(), &plan.silent_args, &downloads), shutdown).await
             }
             DriverRecordKind::Msi => {
+                warning = seagull_warning(self.deps.platform.as_ref(), has_seagull_marker(&plan.name));
                 self.prune_msi_logs();
                 let _ = std::fs::create_dir_all(self.deps.paths.logs_dir());
                 let log = self.deps.paths.install_log(&format!("drv-{id}"));
@@ -331,7 +354,7 @@ impl Engine {
                         self.record_published(id, before.as_deref(), roots);
                     }
                     let _ = remove_file_if_exists(&dest);
-                    Outcome::Installed { exit_code: code }
+                    Outcome::Installed { exit_code: code, warning }
                 }
             },
         }
@@ -408,10 +431,11 @@ impl Engine {
                 }
             };
             match outcome {
-                Outcome::Installed { exit_code } => {
+                Outcome::Installed { exit_code, warning } => {
                     tracing::info!(driver_id = id, "driver installed");
                     record.state = LocalState::Installed;
-                    record.detail = None;
+                    // A warning rides on the result (`seagull_driver_present`); it is not a failure.
+                    record.detail = warning.map(|detail| detail.as_str().to_string());
                     record.last_exit_code = (exit_code != 0).then_some(i64::from(exit_code));
                     record.next_try_ms = 0;
                     record.busy_since_ms = None;

@@ -320,6 +320,52 @@ fn browser_limits_are_per_device() {
     assert_eq!(check_limits(&unusable), Ok(()));
 }
 
+/// (Phase 6 Step 17, plan 4.9.7) `browserSites` of a Chrome or Edge program: omitted when absent (the
+/// vectors keep their bytes), serialized after `update`, validated like the server's `domainProblem`,
+/// at most 200, and counted in the 800 patterns of a device.
+#[test]
+fn the_browser_sites_of_a_browser_program_round_trip_validate_and_count() {
+    let plain = parse(&desktop(json!({}), json!({})));
+    assert!(plain.desktop.as_ref().unwrap().browser_sites.is_none());
+    assert!(!serde_json::to_string(&plain).unwrap().contains("browserSites"));
+
+    let sites = json!(["example.com", "*.orders.example.com"]);
+    let app = parse(&desktop(json!({ "browserSites": sites }), json!({})));
+    let spec = app.desktop.as_ref().unwrap();
+    assert_eq!(spec.browser_sites(), ["example.com", "*.orders.example.com"]);
+    assert_eq!(app.validate(), Ok(()));
+    let text = serde_json::to_string(&app).unwrap();
+    assert!(text.contains(r#""resetFolders":[],"browserSites":["example.com","*.orders.example.com"]}"#), "{text}");
+    assert_eq!(parse(&serde_json::from_str::<Value>(&text).unwrap()), app);
+
+    for bad in ["Example.com", "https://example.com", "example", "example.com/path", "-a.example.com", "a..com", "*.*.example.com", "exa mple.com"] {
+        let broken = parse(&desktop(json!({ "browserSites": [bad] }), json!({})));
+        assert_eq!(broken.validate(), Err(CatalogError::BadText("desktop.browserSites")), "{bad}");
+    }
+    let many: Vec<String> = (0..201).map(|i| format!("d{i}.example.test")).collect();
+    assert_eq!(parse(&desktop(json!({ "browserSites": many }), json!({}))).validate(), Err(CatalogError::BadText("desktop.browserSites")));
+    let exact: Vec<String> = (0..200).map(|i| format!("d{i}.example.test")).collect();
+    assert_eq!(parse(&desktop(json!({ "browserSites": exact }), json!({}))).validate(), Ok(()));
+
+    // The sites share the 800 patterns of the device with the web apps' domains.
+    let sites_app = |count: usize| {
+        let list: Vec<String> = (0..count).map(|i| format!("s{i}.example.test")).collect();
+        parse(&desktop(json!({ "browserSites": list }), json!({})))
+    };
+    let mut apps = vec![sites_app(200)];
+    let domains: Vec<String> = (0..599).map(|i| format!("d{i}.example.test")).collect();
+    let refs: Vec<&str> = domains.iter().map(String::as_str).collect();
+    apps.push(web("w", "https://start.example.test/", &refs, json!({ "kind": "edge" })));
+    assert_eq!(check_limits(&apps), Ok(())); // 200 + 599 + start host = 800
+    apps.push({
+        let mut extra = sites_app(1);
+        extra.id = "app2".into();
+        extra.desktop.as_mut().unwrap().browser_sites = Some(vec!["one-more.example.test".into()]);
+        extra
+    });
+    assert_eq!(check_limits(&apps), Err(LimitError::TooManyBrowserPatterns));
+}
+
 #[test]
 fn an_installers_silent_args_follow_the_token_rule_in_the_limits() {
     // (Phase 6 Step 14) `check_silent_args` on every install: the two tokens pass, nothing else in braces does.

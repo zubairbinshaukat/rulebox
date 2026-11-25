@@ -36,9 +36,11 @@ use super::{
 use super::{FolderAcl, LocalAdminAccount};
 use crate::cleanup::{resolve_reset, shell_folder_is_default};
 use crate::installs::{
-    installer_command_allowed, is_in_use, is_published_inf, is_reparse_point, pnputil_path, portable_dir_ok, portable_target_ok, wait_for_installer,
+    installer_command_allowed, is_in_use, is_published_inf, is_reparse_point, portable_dir_ok, portable_target_ok, wait_for_installer,
     InstallerWait, RunTemp, RunningInstaller, INSTALLER_TAIL_GRACE,
 };
+use crate::installs::drivers_rules::pnputil_delete_command;
+use crate::installs::msiexec_path;
 use crate::paths::{data_dir_action, DataDirAction, DataPaths, InstallPaths};
 use crate::state::write_atomic;
 
@@ -478,13 +480,8 @@ impl Platform for WindowsPlatform {
         guard()?;
         let published = published.to_ascii_lowercase();
         let root = system_root().ok_or_else(|| PlatformError::Other("the Windows folder is not known".into()))?;
-        let cmd = InstallerCommand {
-            program: pnputil_path(&root),
-            args: vec!["/delete-driver".into(), published.clone(), "/uninstall".into()],
-            working_dir: root.join("System32"),
-            expected_exe: None,
-            removal: true,
-        };
+        // The one command line `installer_command_allowed` lets pnputil run for a removal (built in `drivers_rules`, tested there).
+        let cmd = pnputil_delete_command(&root, &published).ok_or(PlatformError::Refused("not a published driver name"))?;
         match self.run_installer(&cmd, Duration::from_secs(10 * 60), &CancellationToken::new())? {
             InstallerExit::Code(0 | 3010) => Ok(()),
             InstallerExit::Code(_) => {
@@ -887,6 +884,14 @@ impl Platform for WindowsPlatform {
         staffreg::delete_value(&sid, &profile, path, name).map_err(map_err)
     }
 
+    fn delete_staff_key_if_empty(&self, sid: &str, path: &str) -> Result<bool, PlatformError> {
+        staffreg::check_browser_key(path).map_err(map_err)?;
+        guard()?;
+        let sid = parse_sid(sid)?;
+        let profile = accounts::profile_path(&sid).map_err(map_err)?;
+        staffreg::delete_key_if_empty(&sid, &profile, path).map_err(map_err)
+    }
+
     fn deploy_ci_policy(&self, policy_id: &str, binary: &[u8]) -> Result<(), PlatformError> {
         codeintegrity::check_policy_id(policy_id).map_err(map_err)?;
         guard()?;
@@ -1101,6 +1106,45 @@ impl Platform for WindowsPlatform {
         guard()?;
         eventwrite::report(eventwrite::SOURCE, kind, event_id, message).map_err(map_err)
     }
+
+    /// (Phase 6 Step 20, plan 4.17) Only `<sha256>.msi` of the agent's own `selfupdate` folder, and only when its SHA-256 is
+    /// the verified one right now. The process is **not** put in a kill-on-close job and not waited for: it is detached
+    /// (no console, its own process group), so the upgrade goes on when the MSI stops this service. (The install itself
+    /// runs inside the Windows Installer service, which is not our child either.) Nothing is read from its output.
+    fn start_self_upgrade(&self, msi: &Path, expected_sha256: &str, log: &Path) -> Result<u32, PlatformError> {
+        use std::os::windows::process::CommandExt;
+        if !crate::selfupdate::upgrade_files_ok(&self.data.selfupdate_dir(), &self.data.logs_dir(), msi, expected_sha256, log) {
+            return Err(PlatformError::Refused("not the staged Rulebox MSI"));
+        }
+        guard()?;
+        let Some(root) = system_root() else {
+            return Err(PlatformError::Other("the Windows folder is not known".into()));
+        };
+        // A link on the folder would let the file be swapped under the check below.
+        if is_reparse_point(&self.data.selfupdate_dir()).map_err(io_err)? {
+            return Err(PlatformError::Refused("the selfupdate folder is a link"));
+        }
+        let actual = self.file_sha256(msi, crate::selfupdate::MAX_RELEASE_BYTES)?;
+        if !actual.is_some_and(|hash| hash.eq_ignore_ascii_case(expected_sha256)) {
+            return Err(PlatformError::Refused("the Rulebox MSI is not the verified file"));
+        }
+        let child = std::process::Command::new(msiexec_path(&root))
+            .args(["/i"])
+            .arg(msi)
+            .args(["/qn", "/norestart", "/l*v"])
+            .arg(log)
+            .current_dir(self.data.selfupdate_dir())
+            .stdin(std::process::Stdio::null())
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .creation_flags(CREATE_NO_WINDOW | DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP)
+            .spawn()
+            .map_err(io_err)?;
+        let pid = child.id();
+        // Dropping a `Child` neither waits for nor ends the process.
+        drop(child);
+        Ok(pid)
+    }
 }
 
 // (Phase 5 Step 3) Nothing calls the new seam yet: the layers of Steps 4 to 20 do.
@@ -1132,6 +1176,10 @@ const USER_SHELL_FOLDERS_KEY: &str = r"Software\Microsoft\Windows\CurrentVersion
 const CREATE_NO_WINDOW: u32 = 0x0800_0000;
 /// `CREATE_SUSPENDED`: the installer is put in its job before it runs.
 const CREATE_SUSPENDED: u32 = 0x0000_0004;
+/// (Phase 6 Step 20) `DETACHED_PROCESS` and `CREATE_NEW_PROCESS_GROUP`: the self-upgrade's msiexec has no console and is not
+/// in the agent's process group (it also never joins a job: see `start_self_upgrade`).
+const DETACHED_PROCESS: u32 = 0x0000_0008;
+const CREATE_NEW_PROCESS_GROUP: u32 = 0x0000_0200;
 /// How often a running installer (and the agent's stop) is checked.
 const INSTALLER_POLL: Duration = Duration::from_millis(500);
 /// (Phase 6 Step 14) The most directory entries `find_file_below` looks at.
@@ -1359,6 +1407,7 @@ mod tests {
         let spec = PrinterSpec { name: "Front (Rulebox)".into(), port: "IP_1".into(), driver: "Driver".into(), comment: String::new() };
         blocked("write_staff_value", p.write_staff_value(sid, staff_key, "NoRun", &RegData::Dword(1)));
         blocked("delete_staff_value", p.delete_staff_value(sid, staff_key, "NoRun"));
+        blocked("delete_staff_key_if_empty", p.delete_staff_key_if_empty(sid, r"Software\Policies\Microsoft\Edge"));
         blocked("deploy_ci_policy", p.deploy_ci_policy(policy, b"cip"));
         blocked("remove_ci_policy", p.remove_ci_policy(policy));
         blocked("refresh_ci_policies", p.refresh_ci_policies());
@@ -1428,6 +1477,11 @@ mod tests {
         // Staff keys and the shell value.
         other(p.write_staff_value(sid, r"Software\Classes", "X", &RegData::Dword(1)), "not one Rulebox writes");
         other(p.delete_staff_value(sid, r"Software\Microsoft\Windows\CurrentVersion\RunOnce", "X"), "not one Rulebox writes");
+        // (Phase 6 Step 17) Only the browser policy keys can be removed, never another Staff root.
+        other(
+            p.delete_staff_key_if_empty(sid, r"Software\Microsoft\Windows\CurrentVersion\Policies\System").map(|_| ()),
+            "not one Rulebox writes",
+        );
         other(
             p.write_staff_value(sid, r"Software\Microsoft\Windows\CurrentVersion\Policies\System", "Shell", &RegData::String("x".into())),
             "set_user_shell",
@@ -1540,7 +1594,7 @@ mod tests {
             }
         }
         // (Step 14b) pnputil only with its two fixed command lines: any other arguments are refused first.
-        let pnputil = pnputil_path(&system_root().unwrap());
+        let pnputil = crate::installs::pnputil_path(&system_root().unwrap());
         for args in [vec!["/delete-driver", "*", "/uninstall"], vec!["/enum-drivers"], vec!["/add-driver", "*.inf", "/install"]] {
             let cmd = InstallerCommand {
                 program: pnputil.clone(),

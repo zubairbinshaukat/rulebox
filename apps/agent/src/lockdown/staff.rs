@@ -314,6 +314,10 @@ pub fn apply(ctx: &ApplyCtx<'_>, doc: &AgentDoc) -> LayerState {
         }
     }
 
+    // (Phase 6 Step 17) The browser policies of browser web apps (owner `L1-browser`) are part of this layer.
+    let browser = super::browser::apply(ctx, doc, &mut tally);
+    let mode = if browser.active { ReportedMode::On } else { mode };
+
     LayerState { mode, state: tally.status(), detail: tally.first_error.map(str::to_string) }
 }
 

@@ -206,6 +206,8 @@ export function configApp(app: Doc<"apps">): ConfigApp {
             // Phase 6: only what a device may know (`docUpdate` drops the feed), left out when absent so an older version keeps its hash.
             ...(d.version !== undefined ? { version: d.version } : {}),
             ...(d.update !== undefined ? { update: docUpdate(d.update) } : {}),
+            // Phase 6 Step 17: the allowed sites of a Chrome or Edge program, left out when absent or empty (an older version keeps its hash).
+            ...(d.browserSites !== undefined && d.browserSites.length > 0 ? { browserSites: [...d.browserSites] } : {}),
           },
     icon: app.icon === undefined ? null : { storageId: app.icon.storageId, sha256: app.icon.sha256 },
   };

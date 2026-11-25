@@ -129,6 +129,8 @@ export const AUDIT_ACTIONS = [
   // Phase 6 Step 12 (plan 4.5): an update from a vendor feed was refused (its signature did not match the vendor key).
   // After the Phase 5 block on purpose: `audit.test.ts` checks that everything from `lockdown.settingsChanged` on has a dashboard label.
   "app.feedRejected",
+  // Phase 6 Step 20 (plan 4.17): the owner set, changed or cleared the Rulebox build the PCs update to.
+  "org.ruleboxReleaseChanged",
 ] as const;
 
 export type AuditAction = (typeof AUDIT_ACTIONS)[number];

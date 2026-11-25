@@ -1557,6 +1557,175 @@ async fn restoring_everything_removes_the_rulebox_installed_packages_and_only_th
     assert!(rig.journal_ids().is_empty());
 }
 
+// ---------------------------------------------------------------- Phase 6 Step 15: sources and warnings
+
+#[tokio::test(start_paused = true)]
+async fn a_source_that_is_not_built_or_does_not_fit_is_unsupported_and_nothing_is_downloaded() {
+    use rulebox_policy::network::DriverSource;
+    for (kind, source) in [
+        (DriverKind::Exe, DriverSource::VendorExeExtract),
+        (DriverKind::Inf, DriverSource::VendorExeExtract),
+        (DriverKind::Inf, DriverSource::Unknown),
+        (DriverKind::Exe, DriverSource::InfZip),
+        (DriverKind::Inf, DriverSource::VendorExe),
+    ] {
+        let mut rig = rig();
+        let bytes = good_zip();
+        let spec = DriverSpec { source: Some(source), ..driver("drv1", kind, &bytes, 1) };
+        rig.serve_driver(&spec, &bytes);
+        rig.sign(&spec.sha256, "b.cat");
+        rig.set_drivers(vec![spec]);
+        rig.start();
+        rig.until("unsupported", |r| r.driver_state("drv1") == Some(LocalState::Unsupported)).await;
+        assert!(rig.runs().is_empty() && rig.downloader.calls().is_empty() && rig.store().is_empty(), "{kind:?} {source:?}");
+        assert_eq!(rig.driver_reports("drv1")[0].detail.as_deref(), Some("unsupported"));
+        rig.stop().await;
+    }
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_named_source_that_fits_installs_like_one_without_a_source() {
+    use rulebox_policy::network::DriverSource;
+    let mut rig = rig();
+    let zip = good_zip();
+    let inf = DriverSpec { source: Some(DriverSource::InfZip), ..driver("drvinf", DriverKind::Inf, &zip, 1) };
+    let exe_bytes = b"vendor exe";
+    let exe = DriverSpec { source: Some(DriverSource::VendorExe), ..driver("drvexe", DriverKind::Exe, exe_bytes, 1) };
+    rig.serve_driver(&inf, &zip);
+    rig.serve_driver(&exe, exe_bytes);
+    rig.sign(&inf.sha256, "b.cat");
+    rig.set_drivers(vec![inf, exe]);
+    rig.start();
+    rig.until("both installed", |r| {
+        r.driver_state("drvinf") == Some(LocalState::Installed) && r.driver_state("drvexe") == Some(LocalState::Installed)
+    })
+    .await;
+    assert_eq!(rig.runs().len(), 2);
+    rig.stop().await;
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_printer_driver_is_refused_while_protected_print_is_on_and_installs_once_it_is_off() {
+    let mut rig = rig();
+    let bytes = good_zip();
+    let spec = driver("drv1", DriverKind::Inf, &bytes, 1);
+    rig.serve_driver(&spec, &bytes);
+    rig.sign(&spec.sha256, "b.cat");
+    rig.sim.with_world(|w| w.protected_print = true);
+    rig.set_drivers(vec![spec.clone()]);
+    rig.start();
+    rig.until("refused", |r| r.driver_state("drv1") == Some(LocalState::Failed)).await;
+    let record = rig.driver_record("drv1").unwrap();
+    assert_eq!((record.detail.as_deref(), record.last_exit_code), (Some("protected_print_on"), None));
+    assert!(rig.runs().is_empty(), "pnputil is never started");
+    assert!(rig.store().is_empty() && rig.journal_ids().is_empty() && !rig.work_dir_exists());
+    assert_eq!(rig.downloads().len(), 1, "the zip is fine and is kept for the retry");
+    let reports = rig.driver_reports("drv1");
+    assert_eq!((reports[0].state, reports[0].detail.as_deref()), (InstallState::Failed, Some("protected_print_on")));
+    // The mode is switched off; the dashboard's Retry (a new revision) installs the same file.
+    rig.sim.with_world(|w| w.protected_print = false);
+    rig.set_drivers(vec![DriverSpec { revision: 2, ..spec }]);
+    rig.until("installed", |r| r.driver_state("drv1") == Some(LocalState::Installed)).await;
+    assert_eq!(rig.runs().len(), 1);
+    assert_eq!(rig.driver_record("drv1").unwrap().detail, None);
+    rig.stop().await;
+}
+
+#[tokio::test(start_paused = true)]
+async fn protected_print_does_not_stop_a_driver_that_is_not_a_printer_driver_or_is_opaque() {
+    let mut rig = rig();
+    rig.sim.with_world(|w| w.protected_print = true);
+    // A scanner-like INF (another class) and a vendor exe (class unknown).
+    let net = zip_bytes(&[
+        ("x64/b.inf", inf_text(&["b.cat"]).replace("Class=Printer", "Class=Image").as_bytes()),
+        ("x64/b.cat", b"cat"),
+    ]);
+    let inf = driver("drvinf", DriverKind::Inf, &net, 1);
+    let exe_bytes = b"vendor exe";
+    let exe = driver("drvexe", DriverKind::Exe, exe_bytes, 1);
+    rig.serve_driver(&inf, &net);
+    rig.serve_driver(&exe, exe_bytes);
+    rig.sign(&inf.sha256, "b.cat");
+    rig.set_drivers(vec![inf, exe]);
+    rig.start();
+    rig.until("both installed", |r| {
+        r.driver_state("drvinf") == Some(LocalState::Installed) && r.driver_state("drvexe") == Some(LocalState::Installed)
+    })
+    .await;
+    assert_eq!(rig.runs().len(), 2);
+    rig.stop().await;
+}
+
+fn seagull_zip() -> Vec<u8> {
+    let text = format!("{}[Strings]\r\nMfg=\"Seagull Scientific\"\r\n", inf_text(&["b.cat"]));
+    zip_bytes(&[("x64/b.inf", text.as_bytes()), ("x64/b.cat", b"cat")])
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_seagull_driver_next_to_another_one_installs_with_a_warning_and_is_not_blocked() {
+    let mut rig = rig();
+    let bytes = seagull_zip();
+    let spec = driver("drv1", DriverKind::Inf, &bytes, 1);
+    rig.serve_driver(&spec, &bytes);
+    rig.sign(&spec.sha256, "b.cat");
+    rig.sim.with_world(|w| w.printer_drivers.push("TOSHIBA TEC B-EX4T1 (TPCL)".into()));
+    rig.set_drivers(vec![spec]);
+    rig.start();
+    rig.until("installed", |r| r.driver_state("drv1") == Some(LocalState::Installed)).await;
+    let record = rig.driver_record("drv1").unwrap();
+    assert_eq!(record.detail.as_deref(), Some("seagull_driver_present"));
+    assert_eq!(record.packages.len(), 1, "installed and recorded as usual");
+    let reports = rig.driver_reports("drv1");
+    assert_eq!((reports[0].state, reports[0].detail.as_deref()), (InstallState::Installed, Some("seagull_driver_present")));
+    rig.stop().await;
+}
+
+#[tokio::test(start_paused = true)]
+async fn no_seagull_warning_without_a_second_seagull_driver_or_for_another_make() {
+    // Seagull-based package, nothing Seagull on the PC yet.
+    let mut rig = rig();
+    let bytes = seagull_zip();
+    let spec = driver("drv1", DriverKind::Inf, &bytes, 1);
+    rig.serve_driver(&spec, &bytes);
+    rig.sign(&spec.sha256, "b.cat");
+    rig.set_drivers(vec![spec]);
+    rig.start();
+    rig.until("installed", |r| r.driver_state("drv1") == Some(LocalState::Installed)).await;
+    assert_eq!(rig.driver_record("drv1").unwrap().detail, None);
+    rig.stop().await;
+    seagull_installed_next_to_another_make().await;
+}
+
+async fn seagull_installed_next_to_another_make() {
+    // A Seagull driver is on the PC but the new package is another make: no warning.
+    let mut rig = rig();
+    let bytes = good_zip();
+    let spec = driver("drv1", DriverKind::Inf, &bytes, 1);
+    rig.serve_driver(&spec, &bytes);
+    rig.sign(&spec.sha256, "b.cat");
+    rig.sim.with_world(|w| w.printer_drivers.push("Seagull Driver for TOSHIBA TEC".into()));
+    rig.set_drivers(vec![spec]);
+    rig.start();
+    rig.until("installed", |r| r.driver_state("drv1") == Some(LocalState::Installed)).await;
+    assert_eq!(rig.driver_record("drv1").unwrap().detail, None);
+    assert!(rig.driver_reports("drv1")[0].detail.is_none());
+    rig.stop().await;
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_vendor_exe_whose_name_says_tpcl_warns_when_a_seagull_driver_is_on_the_pc() {
+    let mut rig = rig();
+    let bytes = b"vendor exe";
+    let spec = DriverSpec { name: "TOSHIBA TEC TPCL driver 11.10".into(), ..driver("drv1", DriverKind::Exe, bytes, 1) };
+    rig.serve_driver(&spec, bytes);
+    rig.sim.with_world(|w| w.printer_drivers.push("Seagull Driver for TOSHIBA TEC B-EX4T2".into()));
+    rig.set_drivers(vec![spec]);
+    rig.start();
+    rig.until("installed", |r| r.driver_state("drv1") == Some(LocalState::Installed)).await;
+    assert_eq!(rig.driver_record("drv1").unwrap().detail.as_deref(), Some("seagull_driver_present"));
+    rig.stop().await;
+}
+
 #[test]
 fn installs_json_from_before_drivers_loads_and_a_driver_record_survives_a_round_trip() {
     let old = r#"{"schema":1,"restartPendingSinceMs":null,"restartBoot":null,"apps":{}}"#;

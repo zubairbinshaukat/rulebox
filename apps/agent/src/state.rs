@@ -90,6 +90,11 @@ pub struct AgentState {
     /// device reports `restartPending` until then (same mark as App Control's).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub perf_restart: Option<crate::lockdown::appcontrol::CiRestartMark>,
+    /// (Phase 6 Step 17, plan 4.9.3) The browsers (`chrome`, `edge`) whose policies are written and journalled as
+    /// applied for the newest document. `apps.list` says `browserReady` only for these: the Staff App never opens
+    /// a browser window before its policies are in place.
+    #[serde(default, skip_serializing_if = "std::collections::BTreeSet::is_empty")]
+    pub browser_ready: std::collections::BTreeSet<String>,
 }
 
 impl AgentState {
@@ -122,6 +127,7 @@ impl Default for AgentState {
             printer_marks: std::collections::BTreeMap::new(),
             device_lock: None,
             perf_restart: None,
+            browser_ready: std::collections::BTreeSet::new(),
         }
     }
 }

@@ -128,5 +128,6 @@ export const auditStrings = {
     "device.displayModeChanged": "PC display mode changed",
     "group.displayModeChanged": "Group display settings changed",
     "app.feedRejected": "Vendor update refused",
+    "org.ruleboxReleaseChanged": "Rulebox update release changed",
   } as Record<string, string>,
 } as const;

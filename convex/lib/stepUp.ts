@@ -89,6 +89,8 @@ export const MAJOR_ACTIONS = {
   "rollouts:rollback": { when: "always", why: "rolls a group back to an older configuration version" },
   // Step 19: fresh only when a program rule changes mode (off / audit / enforce) or App Control changes level.
   "lockdown:update": { when: "conditional", why: "publishes a policy that changes lock or kiosk settings" },
+  // Phase 6 Step 20 (plan 4.17): every PC of the organization installs this MSI as SYSTEM.
+  "ruleboxRelease:set": { when: "always", why: "chooses the Rulebox build every PC updates to" },
   // Plan and limit changes are made by an OPERATOR through the platform API,
   // never by a member function; the operator console has its own step-up
   // (post-Phase-5 plan 5.3), so they are not in this table.

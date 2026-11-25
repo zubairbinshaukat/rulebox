@@ -434,6 +434,8 @@ pub async fn run(
         report.set_install_ack(Arc::new(move |accepted| book.ack(accepted)));
     }
     let install_policy_rx = policy_rx.clone();
+    // (Phase 6 Step 20) Rulebox's own update reads `ruleboxRelease`.
+    let selfupdate_policy_rx = policy_rx.clone();
     // (Step 16) The session cleanup reads the catalogue when a round starts.
     let cleanup_policy_rx = policy_rx.clone();
     // (Phase 5 Step 12) The notice hub (broadcasts, acknowledgements) and the 1.3 requests.
@@ -446,7 +448,9 @@ pub async fn run(
         DirectorySetup::Convex => Arc::new(ConvexDirectory::new(
             Arc::clone(&link),
             policy_rx.clone(),
-            AppResolver::with_installs(Arc::clone(&deps.platform), Arc::clone(&installs), deps.paths.icons_dir()),
+            // (Phase 6 Step 17) `browserReady` follows the browser policies the lockdown runtime applied.
+            AppResolver::with_installs(Arc::clone(&deps.platform), Arc::clone(&installs), deps.paths.icons_dir())
+                .with_browser_state(Arc::clone(&shared)),
         )),
     };
     let audit_sink: Arc<dyn AuditSink> = match deps.audit_sink {
@@ -638,6 +642,27 @@ pub async fn run(
                 signed_in: session.presence(),
             },
             install_policy_rx,
+            snapshot_rx.clone(),
+            shutdown.clone(),
+        ));
+        // (Phase 6 Step 20, plan 4.17) Rulebox's own update through the MSI: only with no employee signed in, never
+        // while the install engine runs an installer. Its own task, its own wake sources.
+        let busy_book = Arc::clone(&installs);
+        tasks.spawn(crate::selfupdate::run_self_update_task(
+            crate::selfupdate::SelfUpdateDeps {
+                platform: Arc::clone(&deps.platform),
+                downloader: Arc::clone(&deps.downloader),
+                paths: deps.paths.clone(),
+                agent_exe: deps.install.agent_exe(),
+                now_ms: Arc::clone(&now_ms),
+                signed_in: session.presence(),
+                installer_busy: Arc::new(move || {
+                    let file = busy_book.snapshot();
+                    file.apps.values().any(|r| r.state == crate::installs::engine::LocalState::Installing)
+                        || file.drivers.values().any(|r| r.state == crate::installs::engine::LocalState::Installing)
+                }),
+            },
+            selfupdate_policy_rx,
             snapshot_rx.clone(),
             shutdown.clone(),
         ));

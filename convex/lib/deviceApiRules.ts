@@ -166,6 +166,10 @@ export const INSTALL_DETAILS: ReadonlySet<string> = new Set([
   "needs_interaction",
   "installed_per_user",
   "answer_file_failed",
+  // Phase 6 Step 15 (drivers): protected print mode is on and the package is a printer driver (a failure); a Seagull-based printer
+  // driver is already on the PC (a warning that rides on an installed result).
+  "protected_print_on",
+  "seagull_driver_present",
 ]);
 
 /** The install states a report stores (A12, 4.8 amended): `pending` (accepted) and the terminal ones. */

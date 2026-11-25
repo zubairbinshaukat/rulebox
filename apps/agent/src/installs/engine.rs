@@ -870,8 +870,9 @@ fn start_update(record: &mut InstallRecord, revision: u64) {
 
 /// How an operation ended, before it is written down.
 enum Outcome {
-    /// A driver's install ended well (apps use [`Outcome::AppInstalled`]).
-    Installed { exit_code: i32 },
+    /// A driver's install ended well (apps use [`Outcome::AppInstalled`]). `warning` is a detail that rides on the
+    /// `installed` result (Phase 6 Step 15: `seagull_driver_present`).
+    Installed { exit_code: i32, warning: Option<Detail> },
     /// (Phase 6 Step 11) An app's install ended well. `warning` is a detail that rides on the `installed` result
     /// (`version_too_low` for a Pinned app).
     AppInstalled { exit_code: i32, warning: Option<Detail> },
@@ -2275,7 +2276,7 @@ impl Engine {
                 }
             };
             let outcome = match outcome {
-                Outcome::Installed { exit_code } => Outcome::AppInstalled { exit_code, warning: None },
+                Outcome::Installed { exit_code, warning } => Outcome::AppInstalled { exit_code, warning },
                 other => other,
             };
             match outcome {

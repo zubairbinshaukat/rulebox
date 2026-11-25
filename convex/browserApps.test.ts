@@ -347,6 +347,37 @@ describe("the catalogue carries the browser (Step 16 item 5)", () => {
   });
 });
 
+describe("the allowed sites of a browser program reach the device (Step 17)", () => {
+  const withSites = (id: string, exe: string, sites?: string[]): BuildApp => {
+    const a = desktopApp(id, exe);
+    return { ...a, desktop: { ...a.desktop!, ...(sites !== undefined ? { browserSites: sites } : {}) } };
+  };
+  const desktopOf = (catalog: { id: string }[], id: string) => (catalog.find((c) => c.id === id) as unknown as { desktop: Record<string, unknown> }).desktop;
+
+  test("browserSites is a key of the desktop spec after resetFolders; absent or empty leaves it out", () => {
+    const { catalog } = buildCatalogChecked(
+      inputOf([withSites("c1", CHROME_EXE, ["portal.example.com", "*.cdn.example.com"]), withSites("c2", EDGE_EXE, []), withSites("c3", CHROME_EXE)]),
+    );
+    expect(desktopOf(catalog, "c1").browserSites).toEqual(["portal.example.com", "*.cdn.example.com"]);
+    expect(Object.keys(desktopOf(catalog, "c1")).slice(-2)).toEqual(["resetFolders", "browserSites"]);
+    expect(desktopOf(catalog, "c2")).not.toHaveProperty("browserSites");
+    expect(desktopOf(catalog, "c3")).not.toHaveProperty("browserSites");
+  });
+
+  test("the sites count in the 800 patterns of the device, once per distinct site", () => {
+    const sites = (n: number, prefix: string) => Array.from({ length: n }, (_, i) => `${prefix}${i}.example.com`);
+    const catalogOf = (apps: BuildApp[]) => buildCatalogChecked(inputOf(apps)).catalog;
+    const edge = webApp("e1", { kind: "edge" }, { web: { url: "https://start.example.com/", allowedDomains: sites(599, "d"), permissions: WEB_PERMS, browser: { kind: "edge" } } });
+    // 200 sites + 599 domains + the start host = 800.
+    expect(() => checkBrowserLimits(catalogOf([edge, withSites("c1", CHROME_EXE, sites(200, "s"))]))).not.toThrow();
+    expect(() => checkBrowserLimits(catalogOf([edge, withSites("c1", CHROME_EXE, sites(200, "s")), withSites("c2", EDGE_EXE, ["one-more.example.com"])]))).toThrowError(
+      expect.objectContaining({ limit: "too_many_browser_urls" }),
+    );
+    // The same sites on a second program add nothing.
+    expect(() => checkBrowserLimits(catalogOf([edge, withSites("c1", CHROME_EXE, sites(200, "s")), withSites("c2", EDGE_EXE, sites(200, "S"))]))).not.toThrow();
+  });
+});
+
 describe("the per-device browser limits (Step 16 item 3, plan 4.3)", () => {
   const edgeApp = (i: number, domains: string[]): BuildApp => {
     const a = webApp(`e${i}`, { kind: "edge" });

@@ -476,6 +476,8 @@ async function publishDevice(ctx: MutationCtx, run: RunState, device: Doc<"devic
   const input: BuildInput = {
     ...(phase5 === undefined ? {} : { phase5 }),
     ...(Object.keys(displayKeys(display)).length === 0 ? {} : { display }),
+    // Phase 6 Step 20: the organization's Rulebox release (read with the organization row: no extra read).
+    ...(run.org.org.phase6Settings?.ruleboxRelease === undefined ? {} : { ruleboxRelease: run.org.org.phase6Settings.ruleboxRelease }),
     org: { _id: run.org.org._id, name: run.org.org.name },
     settings: run.org.settings,
     pinHash: run.org.pinHash,

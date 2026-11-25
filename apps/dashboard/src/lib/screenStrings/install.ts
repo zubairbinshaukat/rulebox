@@ -31,6 +31,8 @@ export const installStrings = {
     needs_interaction: "The installer seems to wait for someone to answer. Check its silent switches or answer file.",
     installed_per_user: "The installer put the program in a user profile, not for everyone. Use a per-machine installer.",
     answer_file_failed: "The answer file couldn't be downloaded or didn't match its SHA-256, so the installer wasn't run.",
+    protected_print_on: "Windows protected print mode is on, so this printer driver wasn't installed. Windows would remove printers that use a third-party driver.",
+    seagull_driver_present: "Installed, but another Seagull-based printer driver is already on this PC. Toshiba TEC advises against mixing them: remove the old driver if printing misbehaves.",
   } as Record<string, string>,
   detailFallback: "The install failed.",
 } as const;

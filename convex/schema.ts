@@ -20,6 +20,7 @@ import {
   policyKeyStatus,
   reportedStatusFields,
   role,
+  ruleboxRelease,
   webSpec,
   wingetResolved,
 } from "./lib/validators";
@@ -79,6 +80,9 @@ export default defineSchema({
         newGroupDefaults: v.optional(lockdownSettings),
       }),
     ),
+    // Phase 6 (plan 4.2, 4.17): kept out of `settings` for the same reason. `ruleboxRelease` = the Rulebox build the
+    // organization wants (Step 20); missing = the agents update nothing. Written only by `ruleboxRelease:set`.
+    phase6Settings: v.optional(v.object({ ruleboxRelease: v.optional(ruleboxRelease) })),
   }),
 
   // tiny (1 per org). Written by settings:setExitPin / clearExitPin; read only

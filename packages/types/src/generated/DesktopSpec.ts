@@ -25,4 +25,11 @@ update?: UpdateSpec,
 /**
  * (Phase 6) One step back, for Roll back.
  */
-previous?: PreviousVersion, };
+previous?: PreviousVersion, 
+/**
+ * (Phase 6 Step 17, plan 4.9.7) The allowed sites of a Chrome or Edge program, the "Browser rules" card:
+ * `example.com` or `*.example.com`, lower-case, at most [`MAX_BROWSER_SITES`]. Left out when the
+ * administrator gave none (a Phase 4 to 6 document keeps its bytes). Only the agent's browser policies
+ * read it ([`BrowserKind`] web apps add theirs); a program that is not a browser carries none.
+ */
+browserSites?: Array<string>, };

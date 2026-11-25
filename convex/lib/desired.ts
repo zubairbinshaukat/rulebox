@@ -134,6 +134,8 @@ export type BuildApp = {
      * stays on the server too: the agent keeps the old installer file itself.
      */
     update?: DocUpdate;
+    /** (Phase 6 Step 17, plan 4.9.7) The allowed sites of a Chrome or Edge program; left out of the document when absent or empty. */
+    browserSites?: string[];
   };
   /** Resolved icon (`ctx.storage.getUrl`), Step 10. */
   icon?: { url: string; sha256: string };
@@ -203,6 +205,11 @@ export type BuildInput = {
   phase5?: Phase5Input;
   /** Phase 6 Step 19: the display settings of this PC and its group. Optional like `phase5`. */
   display?: DisplayInput;
+  /**
+   * Phase 6 Step 20 (plan 4.17): the Rulebox build the organization wants (`organizations.phase6Settings.ruleboxRelease`), the same
+   * for every PC. Absent = no key (a document without it stays byte for byte as it was).
+   */
+  ruleboxRelease?: { version: string; url: string; sha256: string; sizeBytes: number };
   org: { _id: string; name: string };
   settings: OrgSettings;
   /** Argon2id PHC of the device exit PIN, or null when none is set. */
@@ -321,6 +328,8 @@ function catalogEntry(
             // Phase 6: left out when absent, so a Phase 4 or 5 document keeps its bytes (the committed vectors pin it).
             ...(d.version !== undefined ? { version: d.version } : {}),
             ...(d.update !== undefined ? { update: docUpdate(d.update) } : {}),
+            // Phase 6 Step 17: after `update` (and the server-only `previous`), the order of `DesktopSpec` in `rulebox-policy`.
+            ...(d.browserSites !== undefined && d.browserSites.length > 0 ? { browserSites: [...d.browserSites] } : {}),
           }
         : null,
     pinnedTaskbar: opts.pinnedTaskbar,
@@ -438,6 +447,13 @@ export function checkBrowserLimits(catalog: CatalogApp[]): void {
     }
     if (patterns.size > MAX_BROWSER_URL_PATTERNS) throw new BrowserLimitError("too_many_browser_urls");
   }
+  // (Phase 6 Step 17) The allowed sites of a Chrome or Edge program share the device's patterns (as `check_limits` in Rust).
+  for (const entry of catalog) {
+    for (const site of entry.desktop?.browserSites ?? []) {
+      patterns.add(site.toLowerCase());
+      if (patterns.size > MAX_BROWSER_URL_PATTERNS) throw new BrowserLimitError("too_many_browser_urls");
+    }
+  }
 }
 
 /**
@@ -489,6 +505,11 @@ export function buildDeviceDoc(input: BuildInput, version = 0): DesiredDocV2 {
   if (input.phase5 !== undefined) addPhase5Keys(doc, input.phase5);
   // Phase 6 Step 19: after every older key, so the committed vectors (no display settings) stay byte for byte.
   if (input.display !== undefined) Object.assign(doc, displayKeys(input.display));
+  // Phase 6 Step 20: last, in the key order of `rulebox_policy::AgentDoc` (`ruleboxRelease` follows `browserUploads`).
+  if (input.ruleboxRelease !== undefined) {
+    const r = input.ruleboxRelease;
+    doc.ruleboxRelease = { version: r.version, url: r.url, sha256: r.sha256, sizeBytes: r.sizeBytes };
+  }
   return doc;
 }
 

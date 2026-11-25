@@ -38,6 +38,7 @@ mod recover;
 mod report;
 mod roster;
 mod secrets;
+mod selfupdate;
 mod service;
 mod session;
 mod setup;

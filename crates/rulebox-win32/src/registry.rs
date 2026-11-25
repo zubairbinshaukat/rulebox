@@ -373,6 +373,49 @@ impl HiveKey {
         }
     }
 
+    /// (Phase 6 Step 17) Deletes the key `<hive>\<subkey>` only when it has no values and no
+    /// subkeys. `Ok(false)`: it is not empty (nothing was changed); `Ok(true)`: it was deleted
+    /// or was not there. Only `staffreg::delete_key_if_empty` calls it, after its root check.
+    pub(crate) fn delete_key_if_empty(&self, subkey: &str) -> Result<bool> {
+        let Some(key) = open_key(self.root.0, subkey, KEY_QUERY_VALUE)? else {
+            return Ok(true);
+        };
+        let (mut subkeys, mut values) = (0u32, 0u32);
+        // SAFETY: the key is open with KEY_QUERY_VALUE; only the two count out pointers are
+        // passed, every other optional argument is null.
+        let status = unsafe {
+            RegQueryInfoKeyW(
+                key.0,
+                None,
+                None,
+                None,
+                Some(&mut subkeys),
+                None,
+                None,
+                Some(&mut values),
+                None,
+                None,
+                None,
+                None,
+            )
+        };
+        if status != ERROR_SUCCESS {
+            return Err(status_err("RegQueryInfoKeyW", status));
+        }
+        if subkeys != 0 || values != 0 {
+            return Ok(false);
+        }
+        drop(key);
+        let wide = to_wide(subkey);
+        // SAFETY: `wide` is NUL-terminated and outlives the call; the 64-bit view flag is the
+        // documented `samDesired` value for `RegDeleteKeyExW`; the key has no subkeys.
+        let status = unsafe { RegDeleteKeyExW(self.root.0, PCWSTR(wide.as_ptr()), KEY_WOW64_64KEY.0, None) };
+        if status == ERROR_FILE_NOT_FOUND || status == ERROR_SUCCESS {
+            return Ok(true);
+        }
+        Err(status_err("RegDeleteKeyExW", status))
+    }
+
     /// Writes (`Some`) or deletes (`None`) `<hive>\<subkey>\<name>`. Only code in
     /// this crate writes through a `HiveKey` (`shellreg.rs`).
     pub(crate) fn set(&self, subkey: &str, name: &str, value: Option<&RegValue>) -> Result<()> {

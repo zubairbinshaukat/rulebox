@@ -75,6 +75,7 @@ fn owner_word(owner: JournalOwner) -> &'static str {
         JournalOwner::Printer => "printer",
         JournalOwner::Perf => "perf",
         JournalOwner::Driver => "driver",
+        JournalOwner::L1Browser => "L1-browser",
     }
 }
 
@@ -165,7 +166,7 @@ impl DriftTracker {
     pub fn apply_to_layers(&self, layers: &mut LayerStates, now_ms: u64) {
         for owner in self.fighting_owners(now_ms) {
             let layer = match owner {
-                JournalOwner::L1 => &mut layers.staff,
+                JournalOwner::L1 | JournalOwner::L1Browser => &mut layers.staff,
                 JournalOwner::L2 | JournalOwner::Kiosk | JournalOwner::Wifi | JournalOwner::Printer | JournalOwner::Driver => &mut layers.machine,
                 JournalOwner::L3 => &mut layers.app_locker,
                 JournalOwner::L4 => &mut layers.app_control,

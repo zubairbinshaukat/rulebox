@@ -30,6 +30,7 @@ use crate::platform::{InstallerCommand, InstallerExit};
 pub mod answer;
 pub mod download;
 pub mod engine;
+pub mod drivers_probe;
 pub mod drivers_rules;
 pub mod icons;
 pub mod probe;
@@ -118,8 +119,9 @@ pub enum Detail {
     VersionTooLow,
     /// An update is ready and waits for the apply window.
     WaitingForClose,
-    // -- (Phase 6 Step 14, plan 4.6 "New details") Wizard installers. The other two details of that row
-    //    (`driver_unsigned`, `protected_print_on`) belong to Step 15 (drivers). --
+    // -- (Phase 6 Step 14, plan 4.6 "New details") Wizard installers. The other two details of that row belong to
+    //    Step 15 (drivers): `protected_print_on` (below) and `driver_unsigned`, which Step 14b had already built
+    //    under the name `unsigned_driver` (kept: it is in the committed vectors and the dashboard texts). --
     /// The installer ran into its timeout while it used almost no CPU, or showed a window nobody can see: it
     /// probably waited for an answer (heuristic).
     NeedsInteraction,
@@ -128,10 +130,17 @@ pub enum Detail {
     InstalledPerUser,
     /// The answer file could not be fetched, or does not match its SHA-256: the installer was not run.
     AnswerFileFailed,
+    // -- (Phase 6 Step 15, plan 4.8 "Warnings") Read-only probes of a driver install. --
+    /// Windows protected print mode is on and the package is a printer driver: Windows would remove printers that use a
+    /// third-party driver, so nothing was installed (a failure, retried; it clears when the mode is switched off).
+    ProtectedPrintOn,
+    /// A warning that rides on an `installed` result: a Seagull-based printer driver is already on the PC (Toshiba TEC
+    /// says not to mix them). Not a blocker.
+    SeagullDriverPresent,
 }
 
 impl Detail {
-    pub const ALL: [Detail; 21] = [
+    pub const ALL: [Detail; 23] = [
         Detail::DownloadFailed,
         Detail::HashMismatch,
         Detail::TooLarge,
@@ -153,6 +162,8 @@ impl Detail {
         Detail::NeedsInteraction,
         Detail::InstalledPerUser,
         Detail::AnswerFileFailed,
+        Detail::ProtectedPrintOn,
+        Detail::SeagullDriverPresent,
     ];
 
     pub fn as_str(self) -> &'static str {
@@ -178,6 +189,8 @@ impl Detail {
             Detail::NeedsInteraction => "needs_interaction",
             Detail::InstalledPerUser => "installed_per_user",
             Detail::AnswerFileFailed => "answer_file_failed",
+            Detail::ProtectedPrintOn => "protected_print_on",
+            Detail::SeagullDriverPresent => "seagull_driver_present",
         }
     }
 
@@ -718,7 +731,7 @@ mod tests {
     fn details_are_exactly_the_servers_fixed_list() {
         // `INSTALL_DETAILS` in convex/lib/deviceApiRules.ts, in its order, through the shared file: the same file is read
         // by a Convex test that compares it with `INSTALL_DETAILS` (plan Step 14 item 4). The ones after
-        // `unsigned_driver` and `bad_package` are Phase 6: Step 11 (six) and Step 14 (three).
+        // `unsigned_driver` and `bad_package` are Phase 6: Step 11 (six), Step 14 (three) and Step 15 (two).
         #[derive(serde::Deserialize)]
         struct Shared {
             details: Vec<String>,
@@ -727,7 +740,7 @@ mod tests {
         let server: Vec<&str> = shared.details.iter().map(String::as_str).collect();
         let ours: Vec<&str> = Detail::ALL.iter().map(|d| d.as_str()).collect();
         assert_eq!(ours, server);
-        assert_eq!(server.len(), 21);
+        assert_eq!(server.len(), 23);
         for detail in Detail::ALL {
             // The server's character rule `^[a-z0-9:_ -]*$` and length (<= 200).
             assert!(detail.as_str().bytes().all(|b| matches!(b, b'a'..=b'z' | b'0'..=b'9' | b':' | b'_' | b' ' | b'-')));

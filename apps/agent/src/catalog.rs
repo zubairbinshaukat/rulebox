@@ -24,7 +24,9 @@ use serde_json::Value;
 
 use crate::installs::engine::{install_of, resolve_program, InstallBook};
 use crate::installs::icons;
+use crate::lockdown::browser::{is_ready as browser_is_ready, Browser, BrowserInputs};
 use crate::platform::Platform;
+use crate::state::SharedState;
 
 /// `doc.catalog` is there but is not a list: logged, the catalogue is empty.
 pub const PROBLEM_CATALOG_INVALID: &str = "catalog_invalid";
@@ -83,6 +85,24 @@ fn permissions(app: &CatalogApp) -> WebPermissions {
     }
 }
 
+/// (Phase 6 Step 17, plan 4.9.1) What `apps.list` says about the browser of a web app: which browser the
+/// administrator chose, where its program is, and whether its policies are in place (`browserReady`, only after
+/// the L1-browser layer journalled them as applied). The Staff App falls back to the built-in window in Lite
+/// mode, when the program is missing and when `ready` is false (Step 18).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BrowserView {
+    pub kind: rulebox_policy::catalog::BrowserKind,
+    pub exe: Option<String>,
+    pub ready: bool,
+}
+
+impl BrowserView {
+    /// The built-in window.
+    pub fn builtin() -> Self {
+        Self { kind: rulebox_policy::catalog::BrowserKind::Builtin, exe: None, ready: false }
+    }
+}
+
 /// One catalogue entry as `employee_id` would see it, or `None` (not for them,
 /// not installed, or a path that does not pass the rules).
 fn entry_for(
@@ -92,6 +112,7 @@ fn entry_for(
     installed: &dyn Fn(&CatalogApp, &str) -> InstallView,
     icon: &dyn Fn(&CatalogApp) -> Option<String>,
     resolve: &dyn Fn(&str) -> Option<String>,
+    browser: &dyn Fn(&CatalogApp) -> BrowserView,
 ) -> Option<AppEntry> {
     if !app.is_supported() || !app.visible_to(employee_id) {
         return None;
@@ -124,15 +145,16 @@ fn entry_for(
         CatalogKind::Web => {
             let web = app.web.as_ref()?;
             entry.kind = AppKind::Web;
+            // (Phase 6 Step 17) Protocol 1.4: the browser the administrator chose, its program and whether
+            // its policies are applied. A built-in web app carries the old values.
+            let view = browser(app);
             entry.web = Some(WebApp {
                 url: web.url.clone(),
                 allowed_domains: web.allowed_domains.clone(),
                 permissions: permissions(app),
-                // (Phase 6 Step 4) Protocol 1.4: every web app opens in the built-in window
-                // until Step 17 fills the browser fields.
-                browser: rulebox_policy::catalog::BrowserKind::Builtin,
-                browser_exe: None,
-                browser_ready: false,
+                browser: view.kind,
+                browser_exe: view.exe,
+                browser_ready: view.ready,
             });
         }
         CatalogKind::Desktop => {
@@ -178,7 +200,7 @@ pub fn visible_apps(
     roots: Option<&PathRoots>,
     installed: &dyn Fn(&CatalogApp, &str) -> InstallView,
 ) -> Vec<AppEntry> {
-    visible_apps_with_icons(catalog, employee_id, roots, installed, &|_| None, &|_| None)
+    visible_apps_with_icons(catalog, employee_id, roots, installed, &|_| None, &|_| None, &|_| BrowserView::builtin())
 }
 
 /// [`visible_apps`] with `icon(app)` filling `iconPngBase64`, and `resolve(template)` the path of a program in a
@@ -190,8 +212,9 @@ pub fn visible_apps_with_icons(
     installed: &dyn Fn(&CatalogApp, &str) -> InstallView,
     icon: &dyn Fn(&CatalogApp) -> Option<String>,
     resolve: &dyn Fn(&str) -> Option<String>,
+    browser: &dyn Fn(&CatalogApp) -> BrowserView,
 ) -> Vec<AppEntry> {
-    catalog.iter().filter_map(|app| entry_for(app, employee_id, roots, installed, icon, resolve)).collect()
+    catalog.iter().filter_map(|app| entry_for(app, employee_id, roots, installed, icon, resolve, browser)).collect()
 }
 
 /// [`visible_apps`] on this PC: the platform's roots; with the install records
@@ -203,18 +226,27 @@ pub struct AppResolver {
     platform: Arc<dyn Platform>,
     installs: Option<Arc<InstallBook>>,
     icons_dir: Option<PathBuf>,
+    /// (Phase 6 Step 17) The agent state, for `browserReady` (the L1-browser layer's marks and journal). Without
+    /// it no browser web app is ever ready.
+    browser_state: Option<Arc<SharedState>>,
 }
 
 impl AppResolver {
     /// "Installed when the exe exists", no icons (tests).
     #[cfg(test)]
     pub fn new(platform: Arc<dyn Platform>) -> Self {
-        Self { platform, installs: None, icons_dir: None }
+        Self { platform, installs: None, icons_dir: None, browser_state: None }
     }
 
     /// (Step 14) The real rule: the install records and the icon cache.
     pub fn with_installs(platform: Arc<dyn Platform>, installs: Arc<InstallBook>, icons_dir: PathBuf) -> Self {
-        Self { platform, installs: Some(installs), icons_dir: Some(icons_dir) }
+        Self { platform, installs: Some(installs), icons_dir: Some(icons_dir), browser_state: None }
+    }
+
+    /// (Phase 6 Step 17) Lets `browserReady` follow the browser policies the lockdown runtime applied.
+    pub fn with_browser_state(mut self, state: Arc<SharedState>) -> Self {
+        self.browser_state = Some(state);
+        self
     }
 
     pub fn visible(&self, catalog: &[CatalogApp], employee_id: &str) -> Vec<AppEntry> {
@@ -246,7 +278,25 @@ impl AppResolver {
         let resolve = |exe: &str| {
             resolve_program(self.platform.as_ref(), exe).map(|path| path.to_string_lossy().into_owned())
         };
-        let mut entries = visible_apps_with_icons(catalog, employee_id, roots.as_ref(), &installed, &icon, &resolve);
+        // (Phase 6 Step 17) The browser of each web app: the program on this PC, and the ready mark of the policies.
+        let inputs = BrowserInputs::from_catalog(catalog, roots.as_ref(), &|path| self.platform.file_exists(Path::new(path)));
+        let ready: Vec<Browser> = self.browser_state.as_ref().map_or_else(Vec::new, |state| {
+            state.read(|state| Browser::ALL.into_iter().filter(|browser| browser_is_ready(state, *browser)).collect())
+        });
+        let browser = |app: &CatalogApp| {
+            let Some(kind) = app.web.as_ref().map(|web| web.browser_kind()) else {
+                return BrowserView::builtin();
+            };
+            match Browser::of_kind(kind) {
+                None => BrowserView::builtin(),
+                Some(chosen) => BrowserView {
+                    kind: chosen.kind(),
+                    exe: inputs.side(chosen).and_then(|side| side.exe.clone()),
+                    ready: ready.contains(&chosen),
+                },
+            }
+        };
+        let mut entries = visible_apps_with_icons(catalog, employee_id, roots.as_ref(), &installed, &icon, &resolve, &browser);
         // (Phase 6 Step 11, plan 4.4.5) "Updating..." / "Waiting for the app to close" on the tile of an app being updated.
         if let Some(book) = &self.installs {
             for entry in entries.iter_mut().filter(|entry| entry.desktop.is_some()) {

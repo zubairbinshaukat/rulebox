@@ -21,8 +21,9 @@ use std::path::{Path, PathBuf};
 
 use super::is_reparse_point;
 
-/// Most entries (files and folders) of a driver package.
-pub const MAX_ENTRIES: usize = 5000;
+/// Most entries (files and folders) of a driver package (plan 4.8: 2,000; a vendor package that is larger is trimmed to
+/// one architecture by the administrator before the zip is made).
+pub const MAX_ENTRIES: usize = 2000;
 /// Most bytes that may come out of the decompressor (all files together).
 pub const MAX_TOTAL_BYTES: u64 = 1024 * 1024 * 1024;
 /// Longest entry name, in characters.
@@ -296,6 +297,27 @@ mod tests {
         let (_dir, zip, dest) = work();
         zip_of(&zip, &[(&"x".repeat(241), b"x")]);
         assert_eq!(extract(&zip, &dest), Err(ZipError::UnsafePath));
+    }
+
+    #[test]
+    fn the_entry_limit_is_2000_and_a_traversal_entry_among_them_refuses_the_whole_zip() {
+        assert_eq!(MAX_ENTRIES, 2000);
+        assert_eq!(MAX_TOTAL_BYTES, 1024 * 1024 * 1024);
+        let names: Vec<String> = (0..=MAX_ENTRIES).map(|n| format!("f{n}.txt")).collect();
+        let entries: Vec<(&str, &[u8])> = names.iter().map(|n| (n.as_str(), &b"x"[..])).collect();
+        let (_dir, zip, dest) = work();
+        zip_of(&zip, &entries);
+        assert_eq!(extract(&zip, &dest), Err(ZipError::TooManyEntries), "2,001 entries");
+        assert!(!dest.exists());
+        // 2,000 plain entries and a traversal entry as the last one: refused as a whole, nothing stays.
+        let mut entries: Vec<(&str, &[u8])> = names.iter().take(MAX_ENTRIES - 1).map(|n| (n.as_str(), &b"x"[..])).collect();
+        entries.push(("sub/../../escape.inf", b"x"));
+        zip_of(&zip, &entries);
+        assert_eq!(extract(&zip, &dest), Err(ZipError::UnsafePath));
+        assert!(!dest.exists() && !dest.parent().unwrap().join("escape.inf").exists());
+        let plain: Vec<(&str, &[u8])> = names.iter().take(MAX_ENTRIES).map(|n| (n.as_str(), &b"x"[..])).collect();
+        zip_of(&zip, &plain);
+        assert_eq!(extract(&zip, &dest).map(|e| e.files), Ok(MAX_ENTRIES));
     }
 
     #[test]

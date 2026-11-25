@@ -551,6 +551,12 @@ export const ROWS: Row[] = [
   },
   { name: "settings:setExitPin", call: (a) => a.action(api.settings.setExitPin, { pin: "246813" }), expect: ADMIN_MAJOR },
   { name: "settings:clearExitPin", call: (a) => a.mutation(api.settings.clearExitPin, {}), expect: ADMIN_MAJOR },
+  {
+    name: "ruleboxRelease:set",
+    // Phase 6 Step 20: owner only, a fresh step-up. No release and none stored = no write; the foreign owner changes THEIR organization.
+    call: (a) => a.mutation(api.ruleboxRelease.set, { expectedRevision: 0, release: null }),
+    expect: { ...OWNER, foreign: "ok" },
+  },
   { name: "groups:list", call: (a) => a.query(api.groups.list, {}), expect: { ...VIEWER, foreign: "ok" } },
   { name: "groups:page", call: (a) => a.query(api.groups.page, { paginationOpts: { numItems: 10, cursor: null } }), expect: { ...VIEWER, foreign: "ok" } },
   { name: "groups:get", call: (a, f) => a.query(api.groups.get, { groupId: f.groupId }), expect: { ...VIEWER, foreign: "not_found" } },

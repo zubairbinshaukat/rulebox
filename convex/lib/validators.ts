@@ -228,6 +228,13 @@ export const desktopSpec = v.object({
 export const displayModeOverride = v.union(v.literal("auto"), v.literal("standard"), v.literal("lite"));
 export type DisplayModeChoice = Infer<typeof displayModeOverride>;
 
+/**
+ * (Phase 6 Step 20, plan 4.17) The Rulebox build the organization wants on its PCs: `ruleboxRelease` of the signed document
+ * (`RuleboxRelease` in `rulebox-policy`). Stored in `organizations.phase6Settings`; `ruleboxRelease:set` checks the values.
+ */
+export const ruleboxRelease = v.object({ version: v.string(), url: v.string(), sha256: v.string(), sizeBytes: v.number() });
+export type RuleboxReleaseValue = Infer<typeof ruleboxRelease>;
+
 export const appKind = v.union(v.literal("web"), v.literal("desktop"));
 export const audience = v.union(v.literal("everyone"), v.literal("selected"));
 

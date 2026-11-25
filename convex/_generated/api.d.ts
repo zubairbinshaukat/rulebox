@@ -100,6 +100,7 @@ import type * as platform from "../platform.js";
 import type * as presence from "../presence.js";
 import type * as publish from "../publish.js";
 import type * as rollouts from "../rollouts.js";
+import type * as ruleboxRelease from "../ruleboxRelease.js";
 import type * as seal from "../seal.js";
 import type * as security from "../security.js";
 import type * as settings from "../settings.js";
@@ -208,6 +209,7 @@ declare const fullApi: ApiFromModules<{
   presence: typeof presence;
   publish: typeof publish;
   rollouts: typeof rollouts;
+  ruleboxRelease: typeof ruleboxRelease;
   seal: typeof seal;
   security: typeof security;
   settings: typeof settings;

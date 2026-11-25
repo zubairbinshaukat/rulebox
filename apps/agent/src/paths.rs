@@ -210,6 +210,22 @@ impl DataPaths {
         self.drivers_dir().join("work").join(sha256)
     }
 
+    /// (Phase 6 Step 20, plan 4.17) Rulebox's own MSI while it is downloaded, verified and started: `<sha256>.msi`. Its own
+    /// folder (the install engine cleans `downloads`), inside the protected data directory like it.
+    pub fn selfupdate_dir(&self) -> PathBuf {
+        self.root.join("selfupdate")
+    }
+
+    /// (Step 20) The self-update's record: the attempt in flight and the releases that failed (`selfupdate.rs`).
+    pub fn selfupdate_state(&self) -> PathBuf {
+        self.state_dir().join("selfupdate.json")
+    }
+
+    /// (Step 20) The MSI log of the last Rulebox upgrade (`msiexec /l*v`).
+    pub fn selfupdate_log(&self) -> PathBuf {
+        self.logs_dir().join("selfupdate-msi.log")
+    }
+
     /// (Step 14) The MSI log of one app's last install or removal.
     pub fn install_log(&self, app_id: &str) -> PathBuf {
         self.logs_dir().join(format!("install-{app_id}.log"))

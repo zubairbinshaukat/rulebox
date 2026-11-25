@@ -123,6 +123,10 @@ pub struct Facts {
     /// (`allowlist::vendor_exceptions`): added to the document's exceptions for AppLocker and the process watch, never for
     /// App Control.
     pub vendor_exceptions: Vec<rulebox_policy::lockdown::ExceptionRule>,
+    /// (Phase 6 Step 17, plan 4.9.3) What the catalogue asks of Chrome and Edge, made from the catalogue by
+    /// `browser::BrowserInputs::from_catalog`: the L1-browser layer compiles its policy rows from it, and its
+    /// program folders join `catalogue_exe_folders` (plan 4.9.4).
+    pub browser: super::browser::BrowserInputs,
     /// (Step 17) The install folder and the agent's `state` folder, whose ACLs the tamper
     /// protection checks and repairs (plan 4.16). `None`: not known, the folder check is skipped.
     pub rulebox_folders: Option<super::tamper::RuleboxFolders>,
@@ -244,6 +248,23 @@ pub fn check_tables(tables: &DenyTables) -> Result<(), Refusal> {
     } else {
         Err(Refusal::WouldBlockInputDevice)
     }
+}
+
+/// The fixed code of a browser policy set that names a key outside the two browser roots.
+pub const BROWSER_KEY_OUTSIDE_ROOTS: &str = "browser_key_outside_roots";
+
+/// (Phase 6 Step 17, plan 4.9.3 and 4.6) A browser policy write can never touch a key outside the two
+/// browser roots of the Staff hive (`staffreg::BROWSER_ROOTS`): every `(key, value name)` the L1-browser
+/// layer is about to write must pass the Staff hive's own write rule **and** lie inside a browser root. One
+/// row that fails is the answer for the whole set: the layer writes nothing (a layer failure, not a document
+/// refusal: the rest of the document still applies).
+pub fn check_browser_rows<'a>(rows: impl IntoIterator<Item = (&'a str, &'a str)>) -> Result<(), &'static str> {
+    for (path, name) in rows {
+        if rulebox_win32::staffreg::check_write(path, name).is_err() || rulebox_win32::staffreg::check_browser_key(path).is_err() {
+            return Err(BROWSER_KEY_OUTSIDE_ROOTS);
+        }
+    }
+    Ok(())
 }
 
 /// Runs I1 to I7 and I10 in the order of the plan; the first failure is the answer.

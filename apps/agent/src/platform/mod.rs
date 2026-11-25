@@ -57,6 +57,8 @@ pub const MUTATING_METHODS: &[&str] = &[
     // Phase 5 Step 3.
     "write_staff_value",
     "delete_staff_value",
+    // Phase 6 Step 17.
+    "delete_staff_key_if_empty",
     "deploy_ci_policy",
     "remove_ci_policy",
     "set_applocker_policy",
@@ -90,6 +92,8 @@ pub const MUTATING_METHODS: &[&str] = &[
     "write_install_marker",
     "run_webview_bootstrapper",
     "report_event",
+    // Phase 6 Step 20.
+    "start_self_upgrade",
 ];
 
 /// (Phase 5 Step 3, plan 4.5 rule 2) Whether `path` may get a new ACL: it is the install
@@ -534,6 +538,9 @@ pub trait Platform: Send + Sync + 'static {
     /// and `Shell` is never written here (`Refused`/`Other` before the guard).
     fn write_staff_value(&self, sid: &str, path: &str, name: &str, data: &RegData) -> Result<(), PlatformError>;
     fn delete_staff_value(&self, sid: &str, path: &str, name: &str) -> Result<(), PlatformError>;
+    /// (Phase 6 Step 17) Deletes a browser policy key (`staffreg::BROWSER_ROOTS` or a key below one) of the
+    /// Staff hive when it holds no value and no subkey. `Ok(false)`: it still holds something.
+    fn delete_staff_key_if_empty(&self, sid: &str, path: &str) -> Result<bool, PlatformError>;
     /// Copies a binary App Control policy into the active folder as `{policy_id}.cip`.
     fn deploy_ci_policy(&self, policy_id: &str, binary: &[u8]) -> Result<(), PlatformError>;
     fn remove_ci_policy(&self, policy_id: &str) -> Result<(), PlatformError>;
@@ -598,4 +605,14 @@ pub trait Platform: Send + Sync + 'static {
     /// Writes one entry to the Windows Application event log (source `Rulebox Agent`). The text
     /// must never hold a secret.
     fn report_event(&self, kind: EventKind, event_id: u32, message: &str) -> Result<(), PlatformError>;
+
+    // mutating, Phase 6 Step 20 (plan 4.17): Rulebox's own upgrade. Its own method, never `run_installer`.
+    /// Starts the MSI upgrade of Rulebox itself: `msiexec /i <msi> /qn /norestart /l*v <log>` as SYSTEM, **outside** every
+    /// kill-on-close job, detached, so it survives the service stopping when the MSI replaces the agent. Returns the
+    /// process id of the msiexec client at once; it does not wait (the MSI's own rollback handles a failure, and the next
+    /// agent start reads the outcome from its version). `msi` must be `<sha256>.msi` directly in the agent's `selfupdate`
+    /// folder and `log` a `.log` directly in its `logs` folder (`selfupdate::upgrade_files_ok`: `Refused` otherwise,
+    /// before the guard), and the file's SHA-256 must be `expected_sha256` right now (checked again here, after the
+    /// caller's own check). Never called for anything but the signed document's `ruleboxRelease`.
+    fn start_self_upgrade(&self, msi: &Path, expected_sha256: &str, log: &Path) -> Result<u32, PlatformError>;
 }

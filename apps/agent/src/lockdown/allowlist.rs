@@ -5,7 +5,7 @@
 //! |---|---|
 //! | Invariant | the Rulebox install folder (agent, launcher, Staff App `versions\`, the managed apps folder) and the WebView2 runtime folder (invariants I1 and I2) |
 //! | Windows | the Windows folder **minus** the folders under it that standard users can write to (a scan of their DACLs plus [`KNOWN_WRITABLE_WINDOWS_FOLDERS`]) **and** [`STAFF_DENY_WINDOWS_BINARIES`] |
-//! | Catalogue | the folder of every catalogue app, as a path rule when it is admin-only, else refused |
+//! | Catalogue | the folder of every catalogue app, as a path rule when it is admin-only, else refused. (Phase 6 Step 17, plan 4.9.4) The program folder of an assigned browser (`browser::BrowserInputs::allow_folders`: Edge's per-machine folder, Chrome's from its catalogue app) is one of them while a browser web app or a Chrome or Edge program is assigned, and goes with it |
 //! | Exceptions | publisher, hash and path rules from `lockdown.exceptions` for the AppLocker layer |
 //! | Accessibility | Narrator, Magnifier and the on-screen keyboard, only with `accessibilityTools` |
 //!

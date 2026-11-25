@@ -38,6 +38,8 @@ pub mod apply;
 pub mod appcontrol;
 pub mod applocker;
 pub mod boot;
+// (Phase 6 Step 17) The Chrome and Edge policies of browser web apps (L1-browser, plan 4.9.3).
+pub mod browser;
 pub mod daily;
 pub mod drift;
 pub mod findings;

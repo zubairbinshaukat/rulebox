@@ -41,7 +41,16 @@ pub const ALLOWED_ROOTS: &[&str] = &[
     r"Software\Policies\Microsoft\Windows\CloudContent",
     r"Software\Microsoft\Windows\CurrentVersion\Explorer\VisualEffects",
     r"Control Panel\Desktop\WindowMetrics",
+    // (Phase 6 Step 17, plan 4.9.3) The browser policies of Chrome and Edge for browser web apps. Lists are
+    // subkeys (`URLBlocklist\1`, `\2`, ...), so the whole subtree is writable. PENDING S-1: whether the
+    // browsers read user-hive policy on a workgroup PC is a VM spike (row S-1). If they do not, the two
+    // roots move to `machinereg` (a plan change that also restricts the administrator's browser).
+    r"Software\Policies\Google\Chrome",
+    r"Software\Policies\Microsoft\Edge",
 ];
+
+/// (Phase 6 Step 17) The two browser policy roots, so the agent can name them without an index.
+pub const BROWSER_ROOTS: [&str; 2] = [r"Software\Policies\Google\Chrome", r"Software\Policies\Microsoft\Edge"];
 
 fn forbidden(path: &str) -> Win32Error {
     Win32Error::Forbidden(format!("the Staff hive key {path:?} is not one Rulebox writes"))
@@ -100,6 +109,31 @@ pub fn list_value_names(sid: &Sid, profile: &Path, path: &str) -> Result<Vec<Str
     with_user_hive(sid, profile, |hive| hive.value_names(path))
 }
 
+/// (Phase 6 Step 17) The key rule of [`delete_key_if_empty`]: a browser policy root or a key
+/// below one, never another root (the Windows policy keys may exist without Rulebox).
+pub fn check_browser_key(path: &str) -> Result<()> {
+    check_path(path)?;
+    let path = path.trim_matches('\\');
+    if BROWSER_ROOTS.iter().any(|root| under(path, root)) {
+        Ok(())
+    } else {
+        Err(forbidden(path))
+    }
+}
+
+/// (Phase 6 Step 17) Deletes the key `<hive of sid>\<path>` when it has no values and no
+/// subkeys (the browser policy roots and their list subkeys, once Rulebox has taken its values
+/// out). `Ok(false)`: the key still holds something (an administrator's own value, another
+/// list), nothing was changed. A key that is not there is `Ok(true)`.
+///
+/// DESTRUCTIVE: guarded.
+pub fn delete_key_if_empty(sid: &Sid, profile: &Path, path: &str) -> Result<bool> {
+    check_browser_key(path)?;
+    require_armed_machine()?;
+    let path = path.trim_matches('\\');
+    with_user_hive(sid, profile, |hive| hive.delete_key_if_empty(path))
+}
+
 /// Writes one value in the hive of `sid`.
 ///
 /// DESTRUCTIVE: guarded.
@@ -153,6 +187,28 @@ mod tests {
         }
     }
 
+    /// (Phase 6 Step 17) The two browser roots take policy values and list subkeys, and a
+    /// look-alike sibling (`Chrome Beta`, `EdgeUpdate`) is outside them.
+    #[test]
+    fn the_browser_roots_cover_their_subtree_and_nothing_next_to_it() {
+        for root in BROWSER_ROOTS {
+            assert!(ALLOWED_ROOTS.contains(&root));
+            assert!(check_write(root, "DeveloperToolsAvailability").is_ok());
+            assert!(check_write(&format!(r"{root}\URLBlocklist"), "1").is_ok());
+        }
+        for path in [
+            r"Software\Policies\Google",
+            r"Software\Policies\Google\Chrome Beta",
+            r"Software\Policies\Google\Chromium",
+            r"Software\Policies\Microsoft\EdgeUpdate",
+            r"Software\Policies\Microsoft\Edge\..\EdgeUpdate",
+            r"Software\Policies\Microsoft",
+            r"Software\Google\Chrome",
+        ] {
+            assert!(matches!(check_write(path, "X"), Err(Win32Error::Forbidden(_))), "{path}");
+        }
+    }
+
     #[test]
     fn the_shell_value_is_never_written_here() {
         for name in ["Shell", "shell", "SHELL"] {
@@ -194,6 +250,34 @@ mod tests {
             Err(Win32Error::Guard(_))
         ));
         assert!(matches!(delete_value(&sid, profile, ALLOWED_ROOTS[0], "DisableTaskMgr"), Err(Win32Error::Guard(_))));
+        // (Phase 6 Step 17) A browser key reaches the guard too; no hive is opened on this machine.
+        assert!(matches!(
+            write_value(&sid, profile, r"Software\Policies\Microsoft\Edge\URLBlocklist", "1", &RegValue::String("*".into())),
+            Err(Win32Error::Guard(_))
+        ));
+        assert!(matches!(delete_key_if_empty(&sid, profile, BROWSER_ROOTS[0]), Err(Win32Error::Guard(_))));
+    }
+
+    /// (Phase 6 Step 17) Only the browser roots' keys can be removed: not the other Staff roots,
+    /// not a sibling of a browser root, and not before the guard.
+    #[test]
+    fn only_browser_keys_can_be_removed() {
+        let sid = crate::sid::current_user_sid().unwrap();
+        let profile = Path::new(r"C:\rulebox-no-such-profile");
+        for path in [
+            ALLOWED_ROOTS[0],
+            r"Software\Policies\Microsoft\Windows\System",
+            r"Software\Policies\Microsoft\EdgeUpdate",
+            r"Software\Policies\Google",
+            "",
+        ] {
+            assert!(matches!(check_browser_key(path), Err(Win32Error::Forbidden(_))), "{path}");
+            assert!(matches!(delete_key_if_empty(&sid, profile, path), Err(Win32Error::Forbidden(_))), "{path}");
+        }
+        for root in BROWSER_ROOTS {
+            assert!(check_browser_key(root).is_ok());
+            assert!(check_browser_key(&format!(r"{root}\URLAllowlist")).is_ok());
+        }
     }
 
     #[test]

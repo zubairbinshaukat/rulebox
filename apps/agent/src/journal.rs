@@ -50,6 +50,10 @@ pub enum JournalOwner {
     Perf,
     /// (Step 14b) A driver package Rulebox put into the driver store.
     Driver,
+    /// (Phase 6 Step 17, plan 4.9.3) A Chrome or Edge policy value in the Staff hive (`L1-browser`). Part of the
+    /// Staff layer's state, restored with the rest of the journal and by the last-known-good rollback.
+    #[serde(rename = "l1-browser")]
+    L1Browser,
 }
 
 #[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
@@ -1171,12 +1175,18 @@ pub fn restore_all(ctx: &JournalCtx<'_>) -> RestoreReport {
 fn restore_matching(ctx: &JournalCtx<'_>, wanted: impl Fn(&JournalEntry) -> bool) -> RestoreReport {
     let mut report = RestoreReport::default();
     let entries: Vec<JournalEntry> = ctx.shared.read(|state| state.journal.iter().filter(|e| wanted(e)).cloned().collect());
+    let mut browser_keys: Vec<String> = Vec::new();
     for entry in entries.into_iter().rev() {
+        let key = browser_key_of(&entry);
         match restore_one(ctx, &entry) {
-            Ok(()) => report.restored.push(entry.id),
+            Ok(()) => {
+                browser_keys.extend(key);
+                report.restored.push(entry.id);
+            }
             Err(error) => report.failed.push((entry.id, error)),
         }
     }
+    prune_browser_keys(ctx, browser_keys);
     // The owner's kept password is no longer needed once no entry points at it.
     let secret_still_needed =
         ctx.shared.read(|state| state.journal.iter().any(|entry| entry.original == OriginalValue::InSecrets));
@@ -1189,6 +1199,51 @@ fn restore_matching(ctx: &JournalCtx<'_>, wanted: impl Fn(&JournalEntry) -> bool
         }
     }
     report
+}
+
+/// (Phase 6 Step 17) The browser policy key a restored Staff-hive entry lived in, if it is one.
+fn browser_key_of(entry: &JournalEntry) -> Option<String> {
+    match &entry.target {
+        JournalTarget::StaffValue { path, .. } if rulebox_win32::staffreg::check_browser_key(path).is_ok() => {
+            Some(path.trim_matches('\\').to_string())
+        }
+        _ => None,
+    }
+}
+
+/// (Phase 6 Step 17, plan 4.9.3) After a restore, the browser policy keys that Rulebox emptied go too (a list
+/// key such as `URLBlocklist`, then the root `...\Edge` or `...\Chrome`), so a PC with no browser web app
+/// has no browser policy key at all. A key that still holds something (an administrator's own value, another
+/// list, an entry whose restore failed) stays. Best effort: a failure here never fails the restore.
+fn prune_browser_keys(ctx: &JournalCtx<'_>, mut keys: Vec<String>) {
+    if keys.is_empty() {
+        return;
+    }
+    let Some(sid) = staff_sid(ctx) else {
+        return;
+    };
+    keys.sort_by_key(|key| key.to_ascii_lowercase());
+    keys.dedup_by_key(|key| key.to_ascii_lowercase());
+    // Deepest first: a list key goes before the root that holds it.
+    let mut chain: Vec<String> = Vec::new();
+    for key in keys {
+        let mut current = key.as_str();
+        loop {
+            if !chain.iter().any(|known| known.eq_ignore_ascii_case(current)) {
+                chain.push(current.to_string());
+            }
+            match current.rsplit_once('\\') {
+                Some((parent, _)) if rulebox_win32::staffreg::check_browser_key(parent).is_ok() => current = parent,
+                _ => break,
+            }
+        }
+    }
+    chain.sort_by_key(|key| std::cmp::Reverse(key.matches('\\').count()));
+    for key in chain {
+        if let Err(error) = ctx.platform.delete_staff_key_if_empty(&sid, &key) {
+            tracing::warn!("cannot remove the empty browser policy key: {error}");
+        }
+    }
 }
 
 /// Sets `Restoring`, puts the original back, removes the entry. On a failure the
