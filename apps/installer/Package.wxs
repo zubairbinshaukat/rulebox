@@ -46,7 +46,7 @@
 
     <Icon Id="RuleboxIcon.ico" SourceFile="$(RepoRoot)\apps\staff-app\src-tauri\icons\icon.ico" />
     <Property Id="ARPPRODUCTICON" Value="RuleboxIcon.ico" />
-    <Property Id="ARPNOMODIFY" Value="1" />
+    <!-- ARPNOMODIFY=1 comes from WixUI_Minimal; defining it here too is a duplicate (WIX0091). -->
 
     <!--
       The enrollment code for a silent install: msiexec /i Rulebox.msi /qn ENROLLCODE=<code>.
