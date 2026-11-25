@@ -166,11 +166,15 @@ describe("no script and no EXE custom action", () => {
   });
 
   test("it is started from the finish page only, never in a sequence, and not on uninstall", () => {
-    const publish = one("Publish");
-    expect(publish.attrs.Dialog).toBe("ExitDialog");
-    expect(publish.attrs.Event).toBe("DoAction");
-    expect(publish.attrs.Value).toBe("LaunchRuleboxSetup");
-    expect(publish.attrs.Condition).toContain("NOT Installed");
+    const publishes = all("Publish");
+    for (const publish of publishes) {
+      expect(publish.attrs.Dialog).toBe("ExitDialog");
+      expect(publish.attrs.Control).toBe("Finish");
+      expect(publish.attrs.Condition).toContain("NOT Installed");
+    }
+    const launch = publishes.filter((el) => el.attrs.Event === "DoAction");
+    expect(launch).toHaveLength(1);
+    expect(launch[0].attrs.Value).toBe("LaunchRuleboxSetup");
     for (const sequence of ["InstallExecuteSequence", "InstallUISequence"]) {
       for (const el of all(sequence)) {
         expect(el.children.filter((child) => child.name === "Custom")).toHaveLength(0);
@@ -179,8 +183,14 @@ describe("no script and no EXE custom action", () => {
   });
 
   test("the finish page opens the Rulebox Setup shortcut", () => {
-    const target = all("Property").find((el) => el.attrs.Id === "WixShellExecTarget");
+    // Set by the Finish button (a Publish value is formatted; a Property value is not),
+    // before the launch action runs.
+    expect(all("Property").find((el) => el.attrs.Id === "WixShellExecTarget")).toBeUndefined();
+    const publishes = all("Publish");
+    const target = publishes.find((el) => el.attrs.Property === "WixShellExecTarget");
     expect(target?.attrs.Value).toBe("[RuleboxMenuFolder]Rulebox Setup.lnk");
+    const launch = publishes.find((el) => el.attrs.Event === "DoAction");
+    expect(Number(target?.attrs.Order)).toBeLessThan(Number(launch?.attrs.Order));
     expect(one("Shortcut").attrs.Name).toBe("Rulebox Setup");
     expect(one("Shortcut").attrs.Arguments).toBe("setup");
   });
@@ -361,8 +371,10 @@ describe("silent enrollment", () => {
 
   test("the code is written to Install\\Pending, only when set, readable by SYSTEM and Administrators only", () => {
     const component = all("Component").find((el) => el.attrs.Id === "PendingEnrollment");
-    expect(component?.children.find((el) => el.name === "Condition")?.text.trim()).toBe("ENROLLCODE");
+    expect(component?.attrs.Condition).toBe("ENROLLCODE");
     const key = component?.children.find((el) => el.name === "RegistryKey");
+    // WiX v4+ applies PermissionEx on a RegistryKey only with ForceCreateOnInstall.
+    expect(key?.attrs.ForceCreateOnInstall).toBe("yes");
     expect(key?.attrs.Key).toBe(`${rustConst(GUARD_RS, "INSTALL_KEY")}\\Pending`);
     expect(key?.attrs.Root).toBe("HKLM");
     const value = key?.children.find((el) => el.name === "RegistryValue");

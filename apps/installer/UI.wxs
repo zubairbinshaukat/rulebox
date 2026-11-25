@@ -22,14 +22,16 @@
     <Property Id="WIXUI_EXITDIALOGOPTIONALCHECKBOXTEXT" Value="Start Rulebox Setup now to check this PC and connect it to your dashboard" />
     <Property Id="WIXUI_EXITDIALOGOPTIONALCHECKBOX" Value="1" />
 
-    <!-- ShellExecute on the shortcut: the shortcut carries the "setup" argument. -->
-    <Property Id="WixShellExecTarget" Value="[RuleboxMenuFolder]Rulebox Setup.lnk" />
+    <!-- ShellExecute on the shortcut: the shortcut carries the "setup" argument. The target is
+         set by the Finish button (below): a Publish value is formatted, a Property value is not,
+         so "[RuleboxMenuFolder]" would otherwise stay literal text. -->
 
     <CustomAction Id="LaunchRuleboxSetup" DllEntry="WixShellExec" BinaryRef="Wix4UtilCA_X64" Impersonate="yes" Return="check" />
 
     <UI Id="RuleboxUI">
       <ui:WixUI Id="WixUI_Minimal" />
-      <Publish Dialog="ExitDialog" Control="Finish" Event="DoAction" Value="LaunchRuleboxSetup" Condition="WIXUI_EXITDIALOGOPTIONALCHECKBOX = 1 AND NOT Installed" />
+      <Publish Dialog="ExitDialog" Control="Finish" Property="WixShellExecTarget" Value="[RuleboxMenuFolder]Rulebox Setup.lnk" Order="1" Condition="WIXUI_EXITDIALOGOPTIONALCHECKBOX = 1 AND NOT Installed" />
+      <Publish Dialog="ExitDialog" Control="Finish" Event="DoAction" Value="LaunchRuleboxSetup" Order="2" Condition="WIXUI_EXITDIALOGOPTIONALCHECKBOX = 1 AND NOT Installed" />
     </UI>
   </Fragment>
 </Wix>

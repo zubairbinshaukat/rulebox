@@ -83,7 +83,8 @@
         text as INSTALL_DIR_SDDL in crates\rulebox-win32\src\security.rs; the static test
         compares them. MsiLockPermissionsEx needs no custom action.
       -->
-      <Component Id="InstallFolderAcl">
+      <!-- Its KeyPath is the folder, so WiX cannot generate the GUID: keep this one fixed forever. -->
+      <Component Id="InstallFolderAcl" Guid="{B2EFD7C9-3F5C-40D7-8C49-34C72EC1F0AA}">
         <CreateFolder>
           <PermissionEx Sddl="D:P(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)(A;OICI;0x1200a9;;;BU)" />
         </CreateFolder>
@@ -105,9 +106,8 @@
         The pending enrollment code, only when ENROLLCODE was given. SYSTEM and Administrators
         only. The agent reads it at start, enrolls and deletes it.
       -->
-      <Component Id="PendingEnrollment" Bitness="always64">
-        <Condition>ENROLLCODE</Condition>
-        <RegistryKey Root="HKLM" Key="SOFTWARE\Rulebox\Install\Pending" ForceDeleteOnUninstall="yes">
+      <Component Id="PendingEnrollment" Bitness="always64" Condition="ENROLLCODE">
+        <RegistryKey Root="HKLM" Key="SOFTWARE\Rulebox\Install\Pending" ForceCreateOnInstall="yes" ForceDeleteOnUninstall="yes">
           <RegistryValue Id="PendingCodeValue" Name="Code" Type="string" Value="[ENROLLCODE]" KeyPath="yes" />
           <PermissionEx Sddl="D:P(A;OICI;KA;;;SY)(A;OICI;KA;;;BA)" />
         </RegistryKey>
