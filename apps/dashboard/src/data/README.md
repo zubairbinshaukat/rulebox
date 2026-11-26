@@ -105,6 +105,16 @@ Status: **live** = wired in `live/hooks.ts` (or in the hook's own seam).
 | `useRevokeInvite` | `useMutation(api.members.revokeInvite)` | live |
 | `useChangeRole` / `useSetMemberDisabled` | `useMutation(api.members.changeRole)` / `useMutation(api.members.setDisabled)`, both with `expectedRevision` (`stale_edit` when the member changed) | live |
 
+## Rulebox release hooks (`data/release/`, Phase 6 Step 20)
+
+The seam of the Settings → Updates tab (`ReleaseApi` in `release/api.ts`, `release/live.ts`, `release/demo.ts`, picked by the
+`@rulebox/release-impl` alias; only the lazy `screens/settings/UpdatesTab.tsx` imports it).
+
+| Hook | Convex | Status |
+|---|---|---|
+| `useRelease` | `api.ruleboxRelease.get` (viewer): `{ revision, release: { version, url, sha256, sizeBytes } \| null }`, one read of the organization row | live |
+| `useSetRelease` | `api.ruleboxRelease.set` (Owner, major: fresh step-up): `{ expectedRevision, release \| null }` → `{ revision }`; `stale_edit`; `invalid_argument` field `release.version` / `release.url` / `release.sha256` / `release.sizeBytes`; `null` clears | live |
+
 ## Enrollment-code hooks (`data/enrollment/`, plan Step 6)
 
 Same pattern as the step-up seam below (`EnrollmentApi` in `enrollment/api.ts`,

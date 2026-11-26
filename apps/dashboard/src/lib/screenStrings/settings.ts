@@ -9,6 +9,7 @@ export const settingsStrings = {
     organization: "Organization",
     adminExit: "Admin exit",
     signing: "Signing",
+    updates: "Updates",
     members: "Members",
     about: "About",
   },

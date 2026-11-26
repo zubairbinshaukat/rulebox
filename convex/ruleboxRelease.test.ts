@@ -88,6 +88,29 @@ describe("the document key (pure)", () => {
   });
 });
 
+describe("ruleboxRelease:get", () => {
+  test("none set: release null and the revision; after a save: the release, lower-cased, and the revision to send back", async () => {
+    const { t, orgId, owner } = await setup();
+    expect(await owner.as.query(api.ruleboxRelease.get, {})).toEqual({ revision: 0, release: null });
+    await owner.as.mutation(api.ruleboxRelease.set, { expectedRevision: 0, release: { ...RELEASE, sha256: SHA.toUpperCase() } });
+    expect(await owner.as.query(api.ruleboxRelease.get, {})).toEqual({ revision: 1, release: RELEASE });
+    // Every role reads it; the screen decides who may change it.
+    for (const role of ["admin", "viewer"] as const) {
+      const other = await asMember(t, { role, orgId });
+      expect(await other.as.query(api.ruleboxRelease.get, {})).toEqual({ revision: 1, release: RELEASE });
+    }
+    await owner.as.mutation(api.ruleboxRelease.set, { expectedRevision: 1, release: null });
+    expect(await owner.as.query(api.ruleboxRelease.get, {})).toEqual({ revision: 2, release: null });
+  });
+
+  test("one small read: the organization row, no write", async () => {
+    const { owner } = await setup();
+    const { io } = await probe(() => owner.as.query(api.ruleboxRelease.get, {}));
+    expect(io.writes).toBe(0);
+    expect(io.reads).toBeLessThanOrEqual(4);
+  });
+});
+
 describe("ruleboxRelease:set", () => {
   test("saves, bumps the organization's revision, audits and republishes every PC with the key", async () => {
     const { t, orgId, deviceId, owner } = await setup();

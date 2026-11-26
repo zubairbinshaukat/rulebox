@@ -551,6 +551,7 @@ export const ROWS: Row[] = [
   },
   { name: "settings:setExitPin", call: (a) => a.action(api.settings.setExitPin, { pin: "246813" }), expect: ADMIN_MAJOR },
   { name: "settings:clearExitPin", call: (a) => a.mutation(api.settings.clearExitPin, {}), expect: ADMIN_MAJOR },
+  { name: "ruleboxRelease:get", call: (a) => a.query(api.ruleboxRelease.get, {}), expect: { ...VIEWER, foreign: "ok" } },
   {
     name: "ruleboxRelease:set",
     // Phase 6 Step 20: owner only, a fresh step-up. No release and none stored = no write; the foreign owner changes THEIR organization.

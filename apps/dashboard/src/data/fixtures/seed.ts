@@ -308,6 +308,8 @@ export interface DemoDb {
     settings: OrgSettings;
     /** When the exit PIN was set (`organizations.exitPinSetAt`); undefined = none. */
     exitPinSetAt?: number;
+    /** `organizations.phase6Settings.ruleboxRelease` (Phase 6 Step 20); undefined = none set. */
+    ruleboxRelease?: { version: string; url: string; sha256: string; sizeBytes: number };
     /** `orgPlans`: the demo org is on the (placeholder) Team plan. */
     plan: { plan: PlanName; status: PlanStatus; limits: PlanLimits };
   };

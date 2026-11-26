@@ -3,7 +3,7 @@ import { writeAudit } from "./lib/audit";
 import { checkRevision, nextRevision } from "./lib/authz";
 import { fail } from "./lib/errors";
 import { isOrdered } from "./lib/feed/version";
-import { memberMutation } from "./lib/functions";
+import { memberMutation, memberQuery } from "./lib/functions";
 import { requestPublish } from "./lib/publish";
 import { httpsUrlProblem } from "./lib/appRules";
 import { ruleboxRelease, type RuleboxReleaseValue } from "./lib/validators";
@@ -36,6 +36,21 @@ export function normalizeRelease(input: RuleboxReleaseValue): RuleboxReleaseValu
   }
   return { version, url: input.url, sha256: input.sha256.toLowerCase(), sizeBytes: input.sizeBytes };
 }
+
+/**
+ * The release the organization's PCs update to (viewer), with the organization's revision to send back to `set`. `release` is
+ * `null` when none is set (the agents update nothing). One query for the Settings → Updates card: the organization row only
+ * (the member wrapper's reads included, 2 documents), no index, never a list. It re-runs only when the organization row changes.
+ */
+export const get = memberQuery("viewer")({
+  args: {},
+  returns: v.object({ revision: v.number(), release: v.union(ruleboxRelease, v.null()) }),
+  handler: async (ctx) => {
+    const org = await ctx.db.get(ctx.orgId);
+    if (org === null) fail("not_found");
+    return { revision: org.revision ?? 0, release: org.phase6Settings?.ruleboxRelease ?? null };
+  },
+});
 
 function same(a: RuleboxReleaseValue | undefined, b: RuleboxReleaseValue | undefined): boolean {
   if (a === undefined || b === undefined) return a === b;

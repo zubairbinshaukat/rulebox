@@ -12,13 +12,15 @@ import { SigningTab } from "./settings/SigningTab";
 
 // The Security tab (step-up, plan 4.16) is its own chunk: most visits never open it.
 const SecurityTab = lazy(() => import("./settings/SecurityTab"));
+// So is the Updates tab (Rulebox's own release, Owner only): its data seam loads with it.
+const UpdatesTab = lazy(() => import("./settings/UpdatesTab"));
 
-const TABS = ["organization", "adminExit", "signing", "members", "security", "about"] as const;
+const TABS = ["organization", "adminExit", "signing", "updates", "members", "security", "about"] as const;
 type Tab = (typeof TABS)[number];
 
 const tabLabel = (t: Tab) => (t === "security" ? sec.tab : settingsStrings.tabs[t]);
 
-/** Settings with tabs (`?tab=`): each tab is one query (`settings:get`, `keys:status`, `members:list`, `stepUp:status`). */
+/** Settings with tabs (`?tab=`): each tab is one query (`settings:get`, `keys:status`, `ruleboxRelease:get`, `members:list`, `stepUp:status`). */
 export default function Settings() {
   const [params, setParams] = useSearchParams();
   const raw = params.get("tab");
@@ -69,6 +71,11 @@ export default function Settings() {
         {tab === "organization" ? <OrganizationTab /> : null}
         {tab === "adminExit" ? <AdminExitTab /> : null}
         {tab === "signing" ? <SigningTab /> : null}
+        {tab === "updates" ? (
+          <Suspense fallback={<div className="dash-card dash-card--pad"><SkeletonBlock lines={6} /></div>}>
+            <UpdatesTab />
+          </Suspense>
+        ) : null}
         {tab === "members" ? <MembersTab /> : null}
         {tab === "security" ? (
           <Suspense fallback={<div className="dash-card dash-card--pad"><SkeletonBlock lines={6} /></div>}>
