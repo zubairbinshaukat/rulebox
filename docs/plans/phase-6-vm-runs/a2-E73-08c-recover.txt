@@ -1,0 +1,54 @@
+== before recover
+agent version : 0.1.1
+connection    : offline
+kiosk         : enabled=true phase=applied error=-
+shell         : healthy
+AutoAdminLogon=1 DefaultUserName=RuleboxStaff
+== recover --yes
+`recover` puts normal Windows back on this PC. It will:
+  - stop the Rulebox Agent service (if it runs)
+  - restore AutoAdminLogon
+  - restore DefaultUserName
+  - remove DisableAutomaticRestartSignOn (it did not exist before Rulebox)
+  - remove EnableFirstLogonAnimation (it did not exist before Rulebox)
+  - remove DisablePrivacyExperience (it did not exist before Rulebox)
+  - delete the automatic sign-in password secret
+  - delete the pending Staff password secret
+  - remove the Rulebox shell and lock policy from the RuleboxStaff account
+  - mark the kiosk as disabled in the agent state
+  - keep the kiosk off until the next enroll (recovered.flag)
+Recovery finished.
+Service: stopped.
+Changed:
+  - restore AutoAdminLogon
+  - restore DefaultUserName
+  - remove DisableAutomaticRestartSignOn (it did not exist before Rulebox)
+  - remove EnableFirstLogonAnimation (it did not exist before Rulebox)
+  - remove DisablePrivacyExperience (it did not exist before Rulebox)
+  - delete the automatic sign-in password secret
+  - delete the pending Staff password secret
+  - remove the Rulebox shell and lock policy from the RuleboxStaff account
+  - mark the kiosk as disabled in the agent state
+Flag: recovered.flag written. The service keeps the kiosk off until the next enroll or until you delete that file.
+Check:
+  - AutoAdminLogon was left at 0 because the original automatic sign-in password could not be restored. Set automatic sign-in up again if you want it.
+  - Restart the PC (or sign out of the Staff account) to get the normal Windows sign-in screen.
+  - The RuleboxStaff account and its files were not removed; `unenroll --remove-staff-account` does that.
+exit=0
+== after recover
+AutoAdminLogon=0 DefaultUserName=rbtest DefaultPassword=[]
+Account active               Yes
+Local Group Memberships      *Users                
+recovered.flag: True
+staff hive loaded: True
+sessions:
+ USERNAME              SESSIONNAME        ID  STATE   IDLE TIME  LOGON TIME
+ ruleboxstaff          console             1  Active      none   26/11/2026 7:28 am
+sessions after restart:
+No User exists for *
+kiosk         : enabled=false phase=applied error=-
+shell         : notRunning
+recovered     : kiosk held off (delete C:\ProgramData\Rulebox\state\recovered.flag or enroll again to lift it)
+staff Winlogon Shell: []
+staff policies System: 
+Local Group Memberships      *Users                

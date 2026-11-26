@@ -1,0 +1,10 @@
+60s after shift-logoff sessions:
+No User exists for *
+after restart:
+ USERNAME              SESSIONNAME        ID  STATE   IDLE TIME  LOGON TIME
+ ruleboxstaff          console             1  Active      none   26/11/2026 4:58 am
+logoff without shift at 05:00:37
+30s after plain logoff:
+No User exists for *
+sessions after dismissing lock screen:
+No User exists for *

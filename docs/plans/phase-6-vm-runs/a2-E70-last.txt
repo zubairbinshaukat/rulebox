@@ -1,0 +1,6 @@
+sessions:
+No User exists for *
+01:28:42.423441Z  INFO rulebox_agent::agent: admin exit settings enabled=true hotkey=Ctrl+Shift+F12 problem=None
+01:31:04.710203Z  INFO rulebox_agent::admin_exit: admin exit: correct PIN, signing the Staff session out session_id=1
+01:31:06.711664Z  INFO rulebox_agent::admin_exit: the Staff session was signed out for the admin exit session_id=1
+01:31:06.711755Z  INFO rulebox_agent::kiosk: exit hold set: automatic sign-in stays off for at most 5 minutes

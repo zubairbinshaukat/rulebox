@@ -412,6 +412,90 @@ async fn a_missing_launcher_is_relaunched_in_the_staff_session() {
     assert_eq!(rig.calls(SimOp::LaunchInSession), 1);
 }
 
+/// (Phase 6 Step 22 run A2) The old launcher after an MSI upgrade: Toolhelp still names it `rulebox-shell.exe`, but the
+/// installer moved its image to `C:\Config.Msi`.
+fn add_stale_launcher(rig: &Rig, pid: u32, session_id: u32, sid: &str) {
+    rig.add_process(pid, session_id, PathBuf::from(r"C:\Config.Msi\5f3a.rbf"), sid);
+    rig.sim.with_world(|world| {
+        world.exe_names.insert(pid, "rulebox-shell.exe".to_string());
+    });
+}
+
+fn call_index(rig: &Rig, op: SimOp) -> Option<usize> {
+    rig.sim.calls().iter().position(|call| *call == op)
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_stale_launcher_left_by_an_update_is_ended_before_the_launch() {
+    let mut rig = Rig::new();
+    add_stale_launcher(&rig, 950, 2, STAFF);
+    // Its image is not the installed launcher, so the lookup by image finds none.
+    rig.task.evaluate().await;
+    assert_eq!(rig.health(), ShellHealth::NotRunning);
+    rig.step(3).await;
+    assert_eq!(rig.calls(SimOp::EndStaleLaunchers), 1);
+    assert_eq!(rig.calls(SimOp::LaunchInSession), 1);
+    assert!(call_index(&rig, SimOp::EndStaleLaunchers) < call_index(&rig, SimOp::LaunchInSession));
+    assert_eq!(rig.sim.with_world(|world| world.stale_ended.clone()), [950]);
+    // Only the new launcher is left, at the installed path.
+    let left = rig.sim.with_world(|world| world.processes.iter().map(|p| p.image.clone()).collect::<Vec<_>>());
+    assert_eq!(left, [rig.launcher_exe()]);
+    rig.step(5).await;
+    assert_eq!(rig.health(), ShellHealth::Starting);
+    assert_eq!(rig.calls(SimOp::LaunchInSession), 1);
+}
+
+#[tokio::test(start_paused = true)]
+async fn the_installed_launcher_and_other_users_or_sessions_are_never_ended() {
+    let mut rig = Rig::new();
+    rig.add_launcher();
+    add_stale_launcher(&rig, 950, 2, STAFF);
+    add_stale_launcher(&rig, 951, 2, OTHER);
+    add_stale_launcher(&rig, 952, 3, STAFF);
+    // Staff-owned, in the session, but not a launcher.
+    rig.add_process(953, 2, rig.staff_exe(), STAFF);
+    let ended = rig.sim.end_stale_launchers(2, &rig.launcher_exe(), STAFF).unwrap();
+    assert_eq!(ended, [950]);
+    let mut left = rig.sim.with_world(|world| world.processes.iter().map(|p| p.pid).collect::<Vec<_>>());
+    left.sort_unstable();
+    assert_eq!(left, [900, 951, 952, 953]);
+    // A path that is not the launcher's is refused outright.
+    assert!(matches!(
+        rig.sim.end_stale_launchers(2, &rig.staff_exe(), STAFF),
+        Err(PlatformError::Refused(_))
+    ));
+
+    // The watchdog itself never looks for a stale one while the installed launcher runs.
+    for _ in 0..6 {
+        rig.step(5).await;
+    }
+    assert_eq!(rig.calls(SimOp::LaunchInSession), 0);
+    assert_eq!(rig.processes_in(&rig.launcher_exe()), [900]);
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_failure_to_end_a_stale_launcher_does_not_stop_the_launch() {
+    let mut rig = Rig::new();
+    add_stale_launcher(&rig, 950, 2, STAFF);
+    rig.sim.fail_next(SimOp::EndStaleLaunchers, PlatformError::AccessDenied);
+    rig.task.evaluate().await;
+    rig.step(3).await;
+    assert_eq!(rig.calls(SimOp::EndStaleLaunchers), 1);
+    assert_eq!(rig.calls(SimOp::LaunchInSession), 1);
+    assert!(rig.sim.with_world(|world| world.stale_ended.is_empty()));
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_simulated_agent_never_ends_a_stale_launcher() {
+    let mut rig = Rig::with(true, true);
+    add_stale_launcher(&rig, 950, 2, STAFF);
+    rig.task.evaluate().await;
+    rig.step(3).await;
+    assert_eq!(rig.calls(SimOp::EndStaleLaunchers), 0);
+    assert_eq!(rig.calls(SimOp::LaunchInSession), 1);
+    assert!(rig.sim.with_world(|world| world.processes.iter().any(|p| p.pid == 950)));
+}
+
 #[tokio::test(start_paused = true)]
 async fn a_present_launcher_is_left_alone_for_ten_minutes() {
     let mut rig = Rig::new();

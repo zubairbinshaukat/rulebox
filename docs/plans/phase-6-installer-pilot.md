@@ -1936,6 +1936,23 @@ credentials in the browser build; serve files through Convex file storage.
 
   Run A2 needs a CI MSI rebuilt with these fixes and an enrollment code.
 
+**Status (2026-11-26, run A2, CI MSI 0.1.1, network on, evidence `a2-*` in `phase-6-vm-runs/`):**
+- **Passed:**
+  - item 5 (enroll, kiosk on);
+  - E-70 (first and last), E-71 (default settings), E-73 (offline `recover`), E-74 (device side; the kiosk was turned off by a row edit, not the dashboard button);
+  - item 7 with the kiosk really on (refused) and after kiosk off (uninstall);
+  - item 8 (exit hold, kill-on-close job, `recover` for an LSA auto sign-in owner);
+  - item 9 (agent-driven upgrade to 0.1.4 confirmed by event 1100; failing 0.1.5 rolled back and recorded `did_not_take`).
+- **Fixed:**
+  - the stuck kiosk shell after an agent-driven upgrade (stale launcher; `end_stale_launchers`);
+  - a protocol error at enrollment logged no reason.
+- **Pilot:** E-72 (Shift at startup cannot be tested with Hyper-V's synthetic keyboard).
+- **Differs:**
+  - empty `versions\<old>` folders after agent-driven upgrades (Q-A3);
+  - uninstall leaves the RuleboxStaff account (Q-A2 extended);
+  - an empty `Policies\…\OOBE` key.
+- **Left:** verify the stale-launcher fix with an MSI built from it (next CI release), and the dashboard's Disable kiosk button and a release screen.
+
 1. Unsigned and (if available) signed MSI: UI install, silent install with
    `ENROLLCODE`, the log holds no code.
 2. Launch conditions: non-admin, low disk (simulated by a small VHD),

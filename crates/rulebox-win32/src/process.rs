@@ -3,6 +3,8 @@
 //! `launch_in_session` starts a program as the signed-in user of a session, with
 //! that user's own non-elevated token (never the linked token). `terminate` only
 //! ends a process whose image and owner both match what the caller expects.
+//! `end_stale_by_name` ends the old copy of a program that an update moved away
+//! while it ran (found by name, never by its image).
 
 use std::ffi::c_void;
 use std::path::{Path, PathBuf};
@@ -12,7 +14,7 @@ use windows::core::{PCWSTR, PWSTR};
 use windows::Win32::Foundation::HANDLE;
 use windows::Win32::Security::{
     DuplicateTokenEx, GetTokenInformation, SecurityImpersonation, TokenElevation, TokenElevationType,
-    TokenElevationTypeFull, TokenPrimary, TOKEN_ALL_ACCESS, TOKEN_ELEVATION, TOKEN_ELEVATION_TYPE, TOKEN_QUERY,
+    TokenElevationTypeFull, TokenPrimary, TokenSessionId, TOKEN_ALL_ACCESS, TOKEN_ELEVATION, TOKEN_ELEVATION_TYPE, TOKEN_QUERY,
 };
 use windows::Win32::System::Diagnostics::ToolHelp::{
     CreateToolhelp32Snapshot, Process32FirstW, Process32NextW, PROCESSENTRY32W, TH32CS_SNAPPROCESS,
@@ -21,8 +23,8 @@ use windows::Win32::System::Environment::{CreateEnvironmentBlock, DestroyEnviron
 use windows::Win32::System::RemoteDesktop::{ProcessIdToSessionId, WTSQueryUserToken};
 use windows::Win32::System::Threading::{
     CreateProcessAsUserW, OpenProcess, OpenProcessToken, QueryFullProcessImageNameW, TerminateProcess,
-    CREATE_UNICODE_ENVIRONMENT, PROCESS_INFORMATION, PROCESS_NAME_WIN32, PROCESS_QUERY_LIMITED_INFORMATION,
-    PROCESS_TERMINATE, STARTUPINFOW,
+    WaitForSingleObject, CREATE_UNICODE_ENVIRONMENT, PROCESS_INFORMATION, PROCESS_NAME_WIN32,
+    PROCESS_QUERY_LIMITED_INFORMATION, PROCESS_SYNCHRONIZE, PROCESS_TERMINATE, STARTUPINFOW,
 };
 
 use crate::error::{api_err, Result, Win32Error};
@@ -181,6 +183,113 @@ pub fn terminate(pid: u32, expected_image: &Path, expected_user: &Sid) -> Result
     }
     // SAFETY: `process` has PROCESS_TERMINATE access.
     unsafe { TerminateProcess(process.raw(), 1) }.map_err(|e| api_err("TerminateProcess", &e))
+}
+
+/// The name in a Toolhelp entry (`szExeFile`: the file name the process was started from, kept even when the file
+/// is later moved).
+fn toolhelp_name(raw: &[u16]) -> String {
+    let end = raw.iter().position(|&c| c == 0).unwrap_or(raw.len());
+    String::from_utf16_lossy(&raw[..end])
+}
+
+/// How long [`end_stale_by_name`] waits for an ended process to be gone (its handles, and so its mutexes, are released
+/// while it is torn down).
+const STALE_EXIT_WAIT_MS: u32 = 2000;
+
+/// The shared walk of [`find_stale_by_name`] and [`end_stale_by_name`]. A process counts when its Toolhelp name is
+/// `exe_name` (case-insensitive), it is in `session_id` and owned by `owner` (both read from the process's own token),
+/// and its image can be read and is not `installed_image`. A process that cannot be opened or described is never
+/// touched. With `terminate` the checks and the termination use one handle, so a reused process id is never ended.
+fn stale_scan(session_id: u32, exe_name: &str, installed_image: &Path, owner: &Sid, terminate: bool) -> Result<Vec<u32>> {
+    // SAFETY: a snapshot of all processes; the handle is owned by the guard below.
+    let snapshot = unsafe { CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0) }
+        .map_err(|e| api_err("CreateToolhelp32Snapshot", &e))?;
+    let snapshot = OwnedHandle::new(snapshot)?;
+
+    let installed = normalized(installed_image);
+    let access = if terminate {
+        PROCESS_QUERY_LIMITED_INFORMATION | PROCESS_TERMINATE | PROCESS_SYNCHRONIZE
+    } else {
+        PROCESS_QUERY_LIMITED_INFORMATION
+    };
+    let mut found = Vec::new();
+    let mut failure = None;
+    let mut entry = PROCESSENTRY32W { dwSize: std::mem::size_of::<PROCESSENTRY32W>() as u32, ..Default::default() };
+    // SAFETY: `entry` has its size set; `snapshot` is a valid snapshot handle.
+    let mut more = unsafe { Process32FirstW(snapshot.raw(), &mut entry) }.is_ok();
+    while more {
+        let pid = entry.th32ProcessID;
+        if toolhelp_name(&entry.szExeFile).eq_ignore_ascii_case(exe_name) {
+            match stale_candidate(pid, session_id, owner, &installed, access, terminate) {
+                Ok(true) => found.push(pid),
+                Ok(false) => {}
+                Err(error) => failure = Some(error),
+            }
+        }
+        // SAFETY: as above.
+        more = unsafe { Process32NextW(snapshot.raw(), &mut entry) }.is_ok();
+    }
+    match failure {
+        Some(error) if found.is_empty() => Err(error),
+        _ => Ok(found),
+    }
+}
+
+/// One process of [`stale_scan`]: `Ok(true)` when it is stale (and, with `terminate`, ended). `Ok(false)`: not stale, or
+/// not describable.
+fn stale_candidate(
+    pid: u32,
+    session_id: u32,
+    owner: &Sid,
+    installed: &str,
+    access: windows::Win32::System::Threading::PROCESS_ACCESS_RIGHTS,
+    terminate: bool,
+) -> Result<bool> {
+    let Ok(process) = open_process(pid, access) else {
+        return Ok(false);
+    };
+    let Some(image) = image_of_handle(&process) else {
+        return Ok(false);
+    };
+    if normalized(&image) == installed {
+        return Ok(false);
+    }
+    let mut token = HANDLE::default();
+    // SAFETY: `token` is a valid out pointer; `process` is a valid process handle.
+    if unsafe { OpenProcessToken(process.raw(), TOKEN_QUERY, &mut token) }.is_err() {
+        return Ok(false);
+    }
+    let token = OwnedHandle::new(token)?;
+    if token_u32(&token, TokenSessionId).ok() != Some(session_id) {
+        return Ok(false);
+    }
+    if !user_sid_of_token(&token).is_ok_and(|user| user == *owner) {
+        return Ok(false);
+    }
+    if terminate {
+        // SAFETY: `process` has PROCESS_TERMINATE access.
+        unsafe { TerminateProcess(process.raw(), 1) }.map_err(|e| api_err("TerminateProcess", &e))?;
+        // SAFETY: `process` has SYNCHRONIZE access. Best effort: a timeout only means the next look finds it again.
+        unsafe { WaitForSingleObject(process.raw(), STALE_EXIT_WAIT_MS) };
+    }
+    Ok(true)
+}
+
+/// The ids of processes in `session_id` owned by `owner` that were started as `exe_name` (the Toolhelp name, case-insensitive)
+/// but whose image is not `installed_image`: the old program of an update, whose file the installer moved away
+/// (`C:\Config.Msi\<x>.rbf`) while it kept running (Phase 6 Step 22 run A2). Read-only.
+pub fn find_stale_by_name(session_id: u32, exe_name: &str, installed_image: &Path, owner: &Sid) -> Result<Vec<u32>> {
+    stale_scan(session_id, exe_name, installed_image, owner, false)
+}
+
+/// Ends what [`find_stale_by_name`] finds, each one through a single handle that re-checks session, owner and image
+/// right before `TerminateProcess` (and waits briefly for it to be gone). Returns the ids ended. A process that is
+/// the installed program is never touched.
+///
+/// DESTRUCTIVE: guarded.
+pub fn end_stale_by_name(session_id: u32, exe_name: &str, installed_image: &Path, owner: &Sid) -> Result<Vec<u32>> {
+    require_armed_machine()?;
+    stale_scan(session_id, exe_name, installed_image, owner, true)
 }
 
 /// An environment block, destroyed on drop.
@@ -352,12 +461,47 @@ mod tests {
     }
 
     #[test]
+    fn a_stale_process_is_one_by_name_that_is_not_at_the_installed_path() {
+        let exe = std::env::current_exe().unwrap();
+        let name = exe.file_name().unwrap().to_string_lossy().into_owned();
+        let user = crate::sid::current_user_sid().unwrap();
+        let mut session = 0u32;
+        // SAFETY: a valid out pointer.
+        unsafe { ProcessIdToSessionId(std::process::id(), &mut session) }.unwrap();
+        let me = std::process::id();
+        // Started as `name`, but the installed program is somewhere else: this process looks left behind (any case).
+        let elsewhere = Path::new(r"C:\rulebox-test-no-such\installed.exe");
+        assert!(find_stale_by_name(session, &name.to_ascii_uppercase(), elsewhere, &user).unwrap().contains(&me));
+        // It is the installed program: never stale.
+        assert!(!find_stale_by_name(session, &name, &exe, &user).unwrap().contains(&me));
+        // Another name, another session, another owner: not found.
+        assert!(!find_stale_by_name(session, "rulebox-no-such.exe", elsewhere, &user).unwrap().contains(&me));
+        assert!(find_stale_by_name(0xFFFF_0000, &name, elsewhere, &user).unwrap().is_empty());
+        let other = Sid::parse("S-1-5-21-1-2-3-1999").unwrap();
+        assert!(!find_stale_by_name(session, &name, elsewhere, &other).unwrap().contains(&me));
+    }
+
+    #[test]
+    fn toolhelp_names_stop_at_the_nul() {
+        let mut raw = [0u16; 260];
+        for (slot, c) in raw.iter_mut().zip("rulebox-shell.exe".encode_utf16()) {
+            *slot = c;
+        }
+        assert_eq!(toolhelp_name(&raw), "rulebox-shell.exe");
+    }
+
+    #[test]
     fn mutating_functions_are_blocked_by_the_guard() {
         if crate::guard::is_armed_machine() {
             return;
         }
         let user = crate::sid::current_user_sid().unwrap();
         let exe = std::env::current_exe().unwrap();
+        let name = exe.file_name().unwrap().to_string_lossy().into_owned();
+        assert!(matches!(
+            end_stale_by_name(1, &name, Path::new(r"C:\rulebox-test-no-such\x.exe"), &user),
+            Err(Win32Error::Guard(_))
+        ));
         assert!(matches!(terminate(std::process::id(), &exe, &user), Err(Win32Error::Guard(_))));
         assert!(matches!(launch_in_session(1, &user, &exe), Err(Win32Error::Guard(_))));
     }

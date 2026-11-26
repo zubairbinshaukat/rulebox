@@ -1,0 +1,71 @@
+product={DCD83B32-A3E1-4E9C-9D57-B4C8884D1A5D}
+uninstall exit=0 seconds=2.2
+== baseline diff (before <= / after =>)
+=> HKLM\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Winlogon|AutoLogonSID|String|S-1-5-21-1452024813-456936664-1956420132-1003
+=> HKLM\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Winlogon|LastLogOffEndTimePerfCounter|QWord|30955887283
+=> HKLM\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Winlogon|LastUsedUsername|String|RuleboxStaff
+=> HKLM\SOFTWARE\Policies\Microsoft\Windows\OOBE|<no values>
+=> <the Staff account is signed out: its hive is not loaded and is not mounted by this script>
+=> IsolationSession|Manual|False
+=> wuauserv|Manual|False
+<= HKLM\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Winlogon|AutoLogonSID|String|S-1-5-21-1452024813-456936664-1956420132-1002
+<= HKLM\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Winlogon|LastLogOffEndTimePerfCounter|QWord|3275006760
+<= HKLM\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Winlogon|LastUsedUsername|String|rbtest
+<= HKLM\SOFTWARE\Policies\Microsoft\Windows\OOBE|<key absent>
+<= <the Staff account does not exist>
+<= AarSvc_41d8c|Manual|False
+<= BcastDVRUserService_41d8c|Manual|False
+<= BluetoothUserService_41d8c|Manual|False
+<= CaptureService_41d8c|Manual|False
+<= cbdhsvc_41d8c|Auto|True
+<= CDPUserSvc_41d8c|Auto|False
+<= CloudBackupRestoreSvc_41d8c|Manual|False
+<= ConsentUxUserSvc_41d8c|Manual|False
+<= CredentialEnrollmentManagerUserSvc_41d8c|Manual|False
+<= DeviceAssociationBrokerSvc_41d8c|Manual|False
+<= DevicePickerUserSvc_41d8c|Manual|False
+<= DevicesFlowUserSvc_41d8c|Manual|False
+<= IsolationSession|Auto|False
+<= MessagingService_41d8c|Manual|False
+<= NPSMSvc_41d8c|Manual|False
+<= OneSyncSvc_41d8c|Manual|False
+<= P9RdrService_41d8c|Manual|False
+<= PenService_41d8c|Manual|False
+<= PimIndexMaintenanceSvc_41d8c|Manual|False
+<= PrintWorkflowUserSvc_41d8c|Manual|False
+<= UdkUserSvc_41d8c|Manual|False
+<= UnistoreSvc_41d8c|Manual|False
+<= UserDataSvc_41d8c|Manual|False
+<= webthreatdefusersvc_41d8c|Auto|False
+<= WpnUserService_41d8c|Auto|False
+<= wuauserv|Disabled|False
+== leftovers
+Program Files\Rulebox: True
+HKLM\SOFTWARE\Rulebox: False
+service: False
+ProgramData\Rulebox: logs\agent.2026-11-25.log, logs\agent.2026-11-26.log, logs\selfupdate-msi.log, state\agent-state.json, state\apply-report.json, state\audit-queue.json, state\desired-state.json, state\lkg.json, state\lockdown-last.json, state\lockouts.json, state\roster.json, state\secrets.bin, state\selfupdate.json
+RuleboxStaff account: True
+== Program Files\Rulebox
+C:\Program Files\Rulebox\versions 1 07:25:30
+C:\Program Files\Rulebox\versions\0.1.1 1 05:47:28
+C:\Program Files\Rulebox\versions\0.1.2 1 06:17:28
+== uninstall log: folder/remove lines
+MSI (s) (B8:5C) [07:25:28:729]: PROPERTY CHANGE: Adding CurrentVersionFolder property. Its value is 'C:\Program Files\Rulebox\versions\0.1.4'.
+MSI (s) (B8:5C) [07:25:28:731]: PROPERTY CHANGE: Adding VersionsFolder property. Its value is 'C:\Program Files\Rulebox\versions\'.
+MSI (s) (B8:5C) [07:25:28:731]: PROPERTY CHANGE: Modifying CurrentVersionFolder property. Its current value is 'C:\Program Files\Rulebox\versions\0.1.4'. Its new value: 'C:\Program Files\Rulebox\versions\0.1.4\'.
+MSI (s) (B8:5C) [07:25:28:731]: Dir (target): Key: VersionsFolder	, Object: C:\Program Files\Rulebox\versions\
+MSI (s) (B8:5C) [07:25:28:731]: Dir (target): Key: CurrentVersionFolder	, Object: C:\Program Files\Rulebox\versions\0.1.4\
+MSI (s) (B8:5C) [07:25:28:841]: Doing action: RemoveFolders
+Action start 7:25:28: RemoveFolders.
+Action ended 7:25:28: RemoveFolders. Return value 1.
+MSI (s) (B8:5C) [07:25:30:013]: Executing op: SetTargetFolder(Folder=C:\Program Files\Rulebox\versions\0.1.4\)
+MSI (s) (B8:5C) [07:25:30:017]: Executing op: ActionStart(Name=RemoveFolders,Description=Removing folders Folder: [1],)
+Property(S): CurrentVersionFolder = C:\Program Files\Rulebox\versions\0.1.4\
+Property(S): VersionsFolder = C:\Program Files\Rulebox\versions\
+== OOBE key in before? 
+HKLM\SOFTWARE\Policies\Microsoft\Windows\OOBE|<key absent>
+== Staff profile
+C:\Users\RuleboxStaff loaded=False
+sessions after restart:
+ USERNAME              SESSIONNAME        ID  STATE   IDLE TIME  LOGON TIME
+ rbtest                console             1  Active      none   26/11/2026 7:26 am

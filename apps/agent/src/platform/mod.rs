@@ -94,6 +94,8 @@ pub const MUTATING_METHODS: &[&str] = &[
     "report_event",
     // Phase 6 Step 20.
     "start_self_upgrade",
+    // Phase 6 Step 22 (run A2).
+    "end_stale_launchers",
 ];
 
 /// (Phase 5 Step 3, plan 4.5 rule 2) Whether `path` may get a new ACL: it is the install
@@ -615,4 +617,13 @@ pub trait Platform: Send + Sync + 'static {
     /// before the guard), and the file's SHA-256 must be `expected_sha256` right now (checked again here, after the
     /// caller's own check). Never called for anything but the signed document's `ruleboxRelease`.
     fn start_self_upgrade(&self, msi: &Path, expected_sha256: &str, log: &Path) -> Result<u32, PlatformError>;
+
+    // mutating, Phase 6 Step 22 (run A2): the old launcher an MSI upgrade leaves running.
+    /// Ends every `rulebox-shell.exe` (by its Toolhelp name) in `session_id` that belongs to `staff_sid` and whose image is
+    /// **not** `installed_launcher`: the old launcher whose file the Windows Installer moved to `C:\Config.Msi` while it ran,
+    /// which `find_processes` (a full image path) no longer sees and which still holds the launcher's session mutex. Its
+    /// Staff App ends with it (kill-on-close job). The process at `installed_launcher`, another user's and another session's
+    /// are never touched. Returns the ids ended. `installed_launcher` must be named `rulebox-shell.exe` (`Refused`
+    /// before the guard).
+    fn end_stale_launchers(&self, session_id: u32, installed_launcher: &Path, staff_sid: &str) -> Result<Vec<u32>, PlatformError>;
 }

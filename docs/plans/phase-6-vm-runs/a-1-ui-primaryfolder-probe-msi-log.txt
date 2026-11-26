@@ -88,7 +88,7 @@ MSI (c) (8C:A0) [01:31:38:495]: MSI_LUA: Setting MsiRunningElevated property to 
 MSI (c) (8C:A0) [01:31:38:495]: PROPERTY CHANGE: Adding MsiRunningElevated property. Its value is '1'.
 MSI (c) (8C:A0) [01:31:38:495]: PROPERTY CHANGE: Adding Privileged property. Its value is '1'.
 MSI (c) (8C:A0) [01:31:38:495]: Note: 1: 1402 2: HKEY_CURRENT_USER\Software\Microsoft\MS Setup (ACME)\User Info 3: 2 
-MSI (c) (8C:A0) [01:31:38:495]: PROPERTY CHANGE: Adding USERNAME property. Its value is 'user@example.invalid'.
+MSI (c) (8C:A0) [01:31:38:495]: PROPERTY CHANGE: Adding USERNAME property. Its value is '<owner-email>'.
 MSI (c) (8C:A0) [01:31:38:495]: Note: 1: 1402 2: HKEY_CURRENT_USER\Software\Microsoft\MS Setup (ACME)\User Info 3: 2 
 MSI (c) (8C:A0) [01:31:38:495]: PROPERTY CHANGE: Adding DATABASE property. Its value is 'C:\rb-run\msi\Rulebox-0.1.0-x64-fixed.msi'.
 MSI (c) (8C:A0) [01:31:38:495]: PROPERTY CHANGE: Adding OriginalDatabase property. Its value is 'C:\rb-run\msi\Rulebox-0.1.0-x64-fixed.msi'.
@@ -427,7 +427,7 @@ Property(C): MsiWin32AssemblySupport = 6.3.26100.9278
 Property(C): RedirectedDllSupport = 2
 Property(C): MsiRunningElevated = 1
 Property(C): Privileged = 1
-Property(C): USERNAME = user@example.invalid
+Property(C): USERNAME = <owner-email>
 Property(C): DATABASE = C:\rb-run\msi\Rulebox-0.1.0-x64-fixed.msi
 Property(C): OriginalDatabase = C:\rb-run\msi\Rulebox-0.1.0-x64-fixed.msi
 Property(C): SOURCEDIR = C:\rb-run\msi\

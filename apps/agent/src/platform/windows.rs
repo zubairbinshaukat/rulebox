@@ -1148,7 +1148,19 @@ impl Platform for WindowsPlatform {
         drop(child);
         Ok(pid)
     }
+
+    /// (Phase 6 Step 22 run A2) By the Toolhelp name, never by the image: the old launcher's file was moved by the MSI.
+    fn end_stale_launchers(&self, session_id: u32, installed_launcher: &Path, staff_sid: &str) -> Result<Vec<u32>, PlatformError> {
+        if !installed_launcher.file_name().is_some_and(|name| name.eq_ignore_ascii_case(LAUNCHER_EXE_NAME)) {
+            return Err(PlatformError::Refused("not the launcher's path"));
+        }
+        guard()?;
+        process::end_stale_by_name(session_id, LAUNCHER_EXE_NAME, installed_launcher, &parse_sid(staff_sid)?).map_err(map_err)
+    }
 }
+
+/// (Phase 6 Step 22 run A2) The launcher's file name, as Toolhelp reports it.
+const LAUNCHER_EXE_NAME: &str = "rulebox-shell.exe";
 
 // (Phase 5 Step 3) Nothing calls the new seam yet: the layers of Steps 4 to 20 do.
 #[allow(dead_code)]
@@ -1380,6 +1392,7 @@ mod tests {
         blocked("logoff_session", p.logoff_session(1));
         blocked("launch_in_session", p.launch_in_session(1, sid, exe));
         blocked("terminate_process", p.terminate_process(1, exe, sid));
+        blocked("end_stale_launchers", p.end_stale_launchers(1, Path::new(r"C:\rulebox-test-no-such\rulebox-shell.exe"), sid));
         blocked("secrets_save", p.secrets_save(b"x"));
 
         // (Step 14) An installer the rule allows still meets the guard first.

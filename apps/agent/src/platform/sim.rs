@@ -145,6 +145,8 @@ pub enum SimOp {
     ReportEvent,
     // Phase 6 Step 20 (changes the machine: it starts the MSI upgrade of Rulebox itself).
     StartSelfUpgrade,
+    // Phase 6 Step 22 run A2 (changes the machine: it ends processes).
+    EndStaleLaunchers,
 }
 
 impl SimOp {
@@ -361,6 +363,11 @@ pub struct SimWorld {
     pub trace_stats: TraceStats,
     /// (Step 8) Every `terminate_process` call: process id, expected image, expected owner.
     pub terminations: Vec<(u32, PathBuf, String)>,
+    /// (Phase 6 Step 22 run A2) The name Toolhelp reports for a process whose image file was moved away while it ran
+    /// (a process without an entry is named after its image's file name).
+    pub exe_names: HashMap<u32, String>,
+    /// (Phase 6 Step 22 run A2) Every process id `end_stale_launchers` ended, in order.
+    pub stale_ended: Vec<u32>,
     next_rid: u32,
     next_pid: u32,
 }
@@ -472,6 +479,8 @@ impl SimWorld {
             programs: HashMap::new(),
             trace_stats: TraceStats::default(),
             terminations: Vec::new(),
+            exe_names: HashMap::new(),
+            stale_ended: Vec::new(),
             next_rid: 2000,
             next_pid: 4000,
         }
@@ -1816,6 +1825,38 @@ impl Platform for SimPlatform {
         let mut world = lock(&self.world);
         world.self_upgrades.push((msi.to_path_buf(), expected_sha256.to_string(), log.to_path_buf()));
         Ok(4242)
+    }
+
+    /// (Phase 6 Step 22 run A2) The same rule as `WindowsPlatform`: the Toolhelp name (`exe_names`, else the image's file
+    /// name), the session and the owner, and an image that is not the installed launcher.
+    fn end_stale_launchers(&self, session_id: u32, installed_launcher: &Path, staff_sid: &str) -> Result<Vec<u32>, PlatformError> {
+        self.check(SimOp::EndStaleLaunchers)?;
+        let wanted = "rulebox-shell.exe";
+        if !installed_launcher.file_name().is_some_and(|name| name.eq_ignore_ascii_case(wanted)) {
+            return Err(PlatformError::Refused("not the launcher's path"));
+        }
+        let mut world = lock(&self.world);
+        let stale: Vec<u32> = world
+            .processes
+            .iter()
+            .filter(|p| {
+                let name = world.exe_names.get(&p.pid).cloned().or_else(|| {
+                    p.image.file_name().map(|name| name.to_string_lossy().into_owned())
+                });
+                name.is_some_and(|name| name.eq_ignore_ascii_case(wanted))
+                    && p.session_id == session_id
+                    && p.user_sid == staff_sid
+                    && p.image != installed_launcher
+            })
+            .map(|p| p.pid)
+            .collect();
+        world.processes.retain(|p| !stale.contains(&p.pid));
+        world.stale_ended.extend(&stale);
+        drop(world);
+        for pid in &stale {
+            self.signal_exit(*pid);
+        }
+        Ok(stale)
     }
 }
 

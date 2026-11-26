@@ -164,12 +164,17 @@ pub fn backend_failure(error: &BackendError) -> RpcError {
             false,
             Some(serde_json::json!({ "serverCode": code })),
         ),
-        BackendError::Protocol(_) => operation_failed(
-            reasons::BACKEND_REJECTED,
-            "The backend sent an answer this agent does not understand.",
-            false,
-            Some(serde_json::json!({ "serverCode": "protocol_error" })),
-        ),
+        // (Step 22 run A2) The detail names the field that did not fit (built in backend/convex.rs from field names and
+        // public keys only, never from a secret); without it the log said nothing about why an old backend was refused.
+        BackendError::Protocol(detail) => {
+            tracing::warn!(%detail, "the backend's answer does not fit this agent; is the deployment older than the agent?");
+            operation_failed(
+                reasons::BACKEND_REJECTED,
+                "The backend sent an answer this agent does not understand.",
+                false,
+                Some(serde_json::json!({ "serverCode": "protocol_error" })),
+            )
+        }
     }
 }
 

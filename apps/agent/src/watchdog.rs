@@ -562,10 +562,28 @@ impl WatchdogTask {
         let platform = Arc::clone(&self.deps.platform);
         let exe = self.deps.install.shell_exe();
         let sid = staff_sid.to_string();
-        let result = {
+        // (Phase 6 Step 22 run A2) A launcher an MSI upgrade left running (its file moved to `C:\Config.Msi`) is not found by
+        // its image, yet still holds the launcher's mutex, so a new one would exit at once: end it first. Simulate mode
+        // never ends processes (see `terminate`).
+        let simulate = self.deps.simulate;
+        let outcome = {
             let exe = exe.clone();
-            blocking(move || platform.launch_in_session(session_id, &sid, &exe)).await
+            blocking(move || {
+                let ended = if simulate { Ok(Vec::new()) } else { platform.end_stale_launchers(session_id, &exe, &sid) };
+                (ended, platform.launch_in_session(session_id, &sid, &exe))
+            })
+            .await
         };
+        let result = outcome.map(|(ended, result)| {
+            match ended {
+                Ok(pids) if !pids.is_empty() => {
+                    tracing::info!(session_id, ?pids, "ended a stale rulebox-shell.exe left by an update");
+                }
+                Ok(_) => {}
+                Err(error) => tracing::warn!(session_id, "cannot end a stale rulebox-shell.exe: {error}; starting the launcher anyway"),
+            }
+            result
+        });
         match result {
             Some(Ok(pid)) => {
                 tracing::info!(session_id, pid, "rulebox-shell.exe was not running in the Staff session; started it");

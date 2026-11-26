@@ -1,0 +1,24 @@
+enrollment    : enrolled
+kiosk         : enabled=false phase=applied error=-
+shell         : notRunning
+policy        : version 5
+kiosk         : off
+document      : version 5, verified, no lockdown section
+journal       : 0 entries (0 pending, 0 restoring, 0 with an error, 0 unknown)
+Result: all green.
+Winlogon AutoAdminLogon=1 DefaultUserName=rbtest Shell=explorer.exe
+KioskOn=0
+sessions:
+No User exists for *
+Account active               Yes
+Local Group Memberships      *Users                
+01:28:39.441752Z  INFO rulebox_agent::backend::task: desired state accepted version=4 kiosk_enabled=true key_id=591e74141d90ce7e
+01:28:39.442854Z  INFO rulebox_agent::install_marker: the install marker's KioskOn was updated on=true
+01:28:42.446013Z  INFO rulebox_agent::backend::task: desired state accepted version=4 kiosk_enabled=true key_id=591e74141d90ce7e
+01:31:06.711664Z  INFO rulebox_agent::admin_exit: the Staff session was signed out for the admin exit session_id=1
+01:31:06.711755Z  INFO rulebox_agent::kiosk: exit hold set: automatic sign-in stays off for at most 5 minutes
+01:31:26.730232Z  INFO rulebox_agent::kiosk: the exit hold ended; automatic sign-in is armed again
+01:32:04.024297Z  INFO rulebox_agent::backend::task: desired state accepted version=4 kiosk_enabled=true key_id=591e74141d90ce7e
+02:23:22.138089Z  INFO rulebox_agent::backend::task: desired state accepted version=5 kiosk_enabled=false key_id=591e74141d90ce7e
+02:23:32.269999Z  INFO rulebox_agent::kiosk: the kiosk is off: the PC is back to normal Windows
+02:23:32.297212Z  INFO rulebox_agent::install_marker: the install marker's KioskOn was updated on=false

@@ -1,0 +1,18 @@
+Rulebox lockdown status
+enrolled      : yes
+kiosk         : on
+document      : version 1, verified, no lockdown section
+Layers (expected / reported):
+  [ok] staff        off      / off ok
+  [ok] machine      off      / off ok
+  [ok] appLocker    off      / off ok
+  [ok] appControl   off      / off ok
+  [ok] procWatch    off      / off ok
+  [ok] boot         off      / off ok
+  [ok] performance  off      / off ok
+invariants    : ok
+journal       : 5 entries (0 pending, 0 restoring, 0 with an error, 0 unknown)
+  kiosk            5
+posture       : secure boot on, BitLocker suspended, TPM ready, auto-recovery on, Safe Mode agent false
+last known good: version 1, on probation none, refused configurations 0
+Result: all green.

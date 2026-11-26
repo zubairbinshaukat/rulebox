@@ -104,7 +104,7 @@ MSI (s) (90:34) [01:46:59:378]: SHELL32::SHGetFolderPath returned: C:\ProgramDat
 MSI (s) (90:34) [01:46:59:378]: SHELL32::SHGetFolderPath returned: C:\WINDOWS\Fonts
 MSI (s) (90:34) [01:46:59:380]: Note: 1: 2898 2: MS Sans Serif 3: MS Sans Serif 4: 0 5: 16 
 MSI (s) (90:34) [01:46:59:383]: Note: 1: 1402 2: HKEY_CURRENT_USER\Software\Microsoft\MS Setup (ACME)\User Info 3: 2 
-MSI (s) (90:34) [01:46:59:383]: PROPERTY CHANGE: Adding USERNAME property. Its value is 'user@example.invalid'.
+MSI (s) (90:34) [01:46:59:383]: PROPERTY CHANGE: Adding USERNAME property. Its value is '<owner-email>'.
 MSI (s) (90:34) [01:46:59:383]: Note: 1: 1402 2: HKEY_CURRENT_USER\Software\Microsoft\MS Setup (ACME)\User Info 3: 2 
 MSI (s) (90:34) [01:46:59:383]: PROPERTY CHANGE: Adding DATABASE property. Its value is 'C:\WINDOWS\Installer\4c79e.msi'.
 MSI (s) (90:34) [01:46:59:383]: PROPERTY CHANGE: Adding OriginalDatabase property. Its value is 'C:\rb-run\msi\Rulebox-0.1.0-x64-fixed.msi'.
@@ -394,7 +394,7 @@ Property(S): Date = 26/11/2026
 Property(S): MsiNetAssemblySupport = 4.8.9221.0
 Property(S): MsiWin32AssemblySupport = 6.3.26100.9278
 Property(S): RedirectedDllSupport = 2
-Property(S): USERNAME = user@example.invalid
+Property(S): USERNAME = <owner-email>
 Property(S): DATABASE = C:\WINDOWS\Installer\4c79e.msi
 Property(S): OriginalDatabase = C:\rb-run\msi\Rulebox-0.1.0-x64-fixed.msi
 Property(S): UILevel = 2

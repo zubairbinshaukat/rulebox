@@ -1,0 +1,1040 @@
+2026-11-26T00:00:37.663986Z  INFO rulebox_agent::ipc_conn: client disconnected pipe="shell" connection_id=1 pid=5244 end=PeerClosed
+2026-11-26T00:00:37.687103Z  INFO rulebox_agent::watchdog: shell health changed health=NotRunning
+2026-11-26T00:02:09.794085Z  INFO rulebox_agent::agent: agent stopped
+2026-11-26T00:02:09.808317Z  INFO rulebox_agent::service: service stopped
+2026-11-26T00:02:18.230797Z  INFO rulebox_agent::service: service starting version="0.1.1"
+2026-11-26T00:02:18.260343Z  INFO rulebox_agent::agent: admin exit settings enabled=true hotkey=Ctrl+Shift+F12 problem=None
+2026-11-26T00:02:18.286807Z  INFO rulebox_agent::agent: agent started
+2026-11-26T00:02:18.302566Z  INFO rulebox_agent::agent: syncing with the backend
+2026-11-26T00:02:18.303230Z  INFO rulebox_agent::ipc_conn: shell pipe listening on \\.\pipe\dev.rulebox.agent.shell
+2026-11-26T00:02:18.307522Z  INFO rulebox_agent::backend::task: desired state accepted version=1 kiosk_enabled=true key_id=591e74141d90ce7e
+2026-11-26T00:02:18.308279Z  INFO rulebox_agent::ipc_conn: admin pipe listening on \\.\pipe\dev.rulebox.agent.admin
+2026-11-26T00:02:21.987927Z  INFO rulebox_agent::ipc_conn: client connected pipe="shell" connection_id=1 pid=5264 session_id=1 role=Shell
+2026-11-26T00:02:22.015715Z  INFO rulebox_agent::watchdog: shell health changed health=Starting
+2026-11-26T00:02:23.247118Z  INFO rulebox_agent::watchdog: shell.ready connection_id=1 pid=5264
+2026-11-26T00:02:23.334342Z  INFO rulebox_agent::watchdog: shell health changed health=Healthy
+2026-11-26T00:02:31.895392Z  INFO rulebox_agent::watchdog: shell.heartbeat (first on this connection) connection_id=1 pid=5264
+2026-11-26T00:04:04.276342Z  INFO rulebox_agent::ipc_conn: client connected pipe="admin" connection_id=1 pid=672 session_id=0 role=Admin
+2026-11-26T00:04:04.276846Z  INFO rulebox_agent::ipc_conn: client disconnected pipe="admin" connection_id=1 pid=672 end=PeerClosed
+2026-11-26T00:47:26.365477Z  INFO rulebox_agent::backend::task: desired state accepted version=2 kiosk_enabled=true key_id=591e74141d90ce7e
+2026-11-26T00:47:26.370165Z  INFO rulebox_agent::selfupdate: downloading the Rulebox update version=0.1.2
+2026-11-26T00:47:26.681589Z  INFO rulebox_agent::selfupdate: starting the Rulebox upgrade (msiexec /i /qn /norestart) from="0.1.1" to=0.1.2
+2026-11-26T00:47:26.704075Z  INFO rulebox_agent::selfupdate: msiexec started outside the agent's job pid=3820
+2026-11-26T00:47:27.236228Z  INFO rulebox_agent::ipc_conn: client disconnected pipe="shell" connection_id=1 pid=5264 end=Shutdown
+2026-11-26T00:47:27.236362Z  INFO rulebox_agent::agent: agent stopped
+2026-11-26T00:47:27.244385Z  INFO rulebox_agent::service: service stopped
+2026-11-26T00:47:29.147491Z  INFO rulebox_agent::service: service starting version="0.1.2"
+2026-11-26T00:47:29.147604Z  INFO rulebox_agent::install_marker: the install marker now names this computer
+2026-11-26T00:47:29.149163Z  INFO rulebox_agent::agent: admin exit settings enabled=true hotkey=Ctrl+Shift+F12 problem=None
+2026-11-26T00:47:29.151216Z  INFO rulebox_agent::agent: agent started
+2026-11-26T00:47:29.180119Z  INFO rulebox_agent::agent: syncing with the backend
+2026-11-26T00:47:29.180373Z  INFO rulebox_agent::ipc_conn: shell pipe listening on \\.\pipe\dev.rulebox.agent.shell
+2026-11-26T00:47:29.182715Z  INFO rulebox_agent::ipc_conn: admin pipe listening on \\.\pipe\dev.rulebox.agent.admin
+2026-11-26T00:47:29.182786Z  INFO rulebox_agent::backend::task: desired state accepted version=2 kiosk_enabled=true key_id=591e74141d90ce7e
+2026-11-26T00:47:29.183208Z  INFO rulebox_agent::install_marker: the install marker's KioskOn was updated on=true
+2026-11-26T00:47:30.377746Z  WARN rulebox_agent::ipc_shell: pipe client refused: image_not_allowed pid=5264 session_id=1 image=Some("C:\\Config.Msi\\29696c.rbf")
+2026-11-26T00:47:30.377766Z  WARN rulebox_agent::ipc_conn: rejected a pipe client pipe="shell" connection_id=1 reason="image_not_allowed"
+2026-11-26T00:47:32.399819Z  WARN rulebox_agent::ipc_shell: pipe client refused: image_not_allowed pid=5264 session_id=1 image=Some("C:\\Config.Msi\\29696c.rbf")
+2026-11-26T00:47:32.399876Z  WARN rulebox_agent::ipc_conn: rejected a pipe client pipe="shell" connection_id=2 reason="image_not_allowed"
+2026-11-26T00:47:34.254058Z  INFO rulebox_agent::watchdog: rulebox-shell.exe was not running in the Staff session; started it session_id=1 pid=3016
+2026-11-26T00:47:34.427228Z  WARN rulebox_agent::ipc_shell: pipe client refused: image_not_allowed pid=5264 session_id=1 image=Some("C:\\Config.Msi\\29696c.rbf")
+2026-11-26T00:47:34.427255Z  WARN rulebox_agent::ipc_conn: rejected a pipe client pipe="shell" connection_id=3 reason="image_not_allowed"
+2026-11-26T00:47:36.444938Z  WARN rulebox_agent::ipc_shell: pipe client refused: image_not_allowed pid=5264 session_id=1 image=Some("C:\\Config.Msi\\29696c.rbf")
+2026-11-26T00:47:36.444963Z  WARN rulebox_agent::ipc_conn: rejected a pipe client pipe="shell" connection_id=4 reason="image_not_allowed"
+2026-11-26T00:47:38.458918Z  WARN rulebox_agent::ipc_shell: pipe client refused: image_not_allowed pid=5264 session_id=1 image=Some("C:\\Config.Msi\\29696c.rbf")
+2026-11-26T00:47:38.458932Z  WARN rulebox_agent::ipc_conn: rejected a pipe client pipe="shell" connection_id=5 reason="image_not_allowed"
+2026-11-26T00:47:39.195653Z  INFO rulebox_agent::watchdog: rulebox-shell.exe was not running in the Staff session; started it session_id=1 pid=3436
+2026-11-26T00:47:40.475441Z  WARN rulebox_agent::ipc_shell: pipe client refused: image_not_allowed pid=5264 session_id=1 image=Some("C:\\Config.Msi\\29696c.rbf")
+2026-11-26T00:47:40.475466Z  WARN rulebox_agent::ipc_conn: rejected a pipe client pipe="shell" connection_id=6 reason="image_not_allowed"
+2026-11-26T00:47:42.488678Z  WARN rulebox_agent::ipc_shell: pipe client refused: image_not_allowed pid=5264 session_id=1 image=Some("C:\\Config.Msi\\29696c.rbf")
+2026-11-26T00:47:42.488706Z  WARN rulebox_agent::ipc_conn: rejected a pipe client pipe="shell" connection_id=7 reason="image_not_allowed"
+2026-11-26T00:47:44.199242Z  INFO rulebox_agent::watchdog: rulebox-shell.exe was not running in the Staff session; started it session_id=1 pid=2180
+2026-11-26T00:47:44.504875Z  WARN rulebox_agent::ipc_shell: pipe client refused: image_not_allowed pid=5264 session_id=1 image=Some("C:\\Config.Msi\\29696c.rbf")
+2026-11-26T00:47:44.504955Z  WARN rulebox_agent::ipc_conn: rejected a pipe client pipe="shell" connection_id=8 reason="image_not_allowed"
+2026-11-26T00:47:46.518052Z  WARN rulebox_agent::ipc_shell: pipe client refused: image_not_allowed pid=5264 session_id=1 image=Some("C:\\Config.Msi\\29696c.rbf")
+2026-11-26T00:47:46.518069Z  WARN rulebox_agent::ipc_conn: rejected a pipe client pipe="shell" connection_id=9 reason="image_not_allowed"
+2026-11-26T00:47:48.521683Z  WARN rulebox_agent::ipc_shell: pipe client refused: image_not_allowed pid=5264 session_id=1 image=Some("C:\\Config.Msi\\29696c.rbf")
+2026-11-26T00:47:48.521702Z  WARN rulebox_agent::ipc_conn: rejected a pipe client pipe="shell" connection_id=10 reason="image_not_allowed"
+2026-11-26T00:47:49.199896Z  INFO rulebox_agent::watchdog: rulebox-shell.exe was not running in the Staff session; started it session_id=1 pid=756
+2026-11-26T00:47:50.537913Z  WARN rulebox_agent::ipc_shell: pipe client refused: image_not_allowed pid=5264 session_id=1 image=Some("C:\\Config.Msi\\29696c.rbf")
+2026-11-26T00:47:50.537957Z  WARN rulebox_agent::ipc_conn: rejected a pipe client pipe="shell" connection_id=11 reason="image_not_allowed"
+2026-11-26T00:47:52.550395Z  WARN rulebox_agent::ipc_shell: pipe client refused: image_not_allowed pid=5264 session_id=1 image=Some("C:\\Config.Msi\\29696c.rbf")
+2026-11-26T00:47:52.550410Z  WARN rulebox_agent::ipc_conn: rejected a pipe client pipe="shell" connection_id=12 reason="image_not_allowed"
+2026-11-26T00:47:54.212586Z  INFO rulebox_agent::watchdog: rulebox-shell.exe was not running in the Staff session; started it session_id=1 pid=7064
+2026-11-26T00:47:54.563813Z  WARN rulebox_agent::ipc_shell: pipe client refused: image_not_allowed pid=5264 session_id=1 image=Some("C:\\Config.Msi\\29696c.rbf")
+2026-11-26T00:47:54.563827Z  WARN rulebox_agent::ipc_conn: rejected a pipe client pipe="shell" connection_id=13 reason="image_not_allowed"
+2026-11-26T00:47:56.579012Z  WARN rulebox_agent::ipc_shell: pipe client refused: image_not_allowed pid=5264 session_id=1 image=Some("C:\\Config.Msi\\29696c.rbf")
+2026-11-26T00:47:56.579025Z  WARN rulebox_agent::ipc_conn: rejected a pipe client pipe="shell" connection_id=14 reason="image_not_allowed"
+2026-11-26T00:47:58.595895Z  WARN rulebox_agent::ipc_shell: pipe client refused: image_not_allowed pid=5264 session_id=1 image=Some("C:\\Config.Msi\\29696c.rbf")
+2026-11-26T00:47:58.595912Z  WARN rulebox_agent::ipc_conn: rejected a pipe client pipe="shell" connection_id=15 reason="image_not_allowed"
+2026-11-26T00:47:59.214047Z  INFO rulebox_agent::watchdog: rulebox-shell.exe was not running in the Staff session; started it session_id=1 pid=4460
+2026-11-26T00:48:00.615361Z  WARN rulebox_agent::ipc_shell: pipe client refused: image_not_allowed pid=5264 session_id=1 image=Some("C:\\Config.Msi\\29696c.rbf")
+2026-11-26T00:48:00.615375Z  WARN rulebox_agent::ipc_conn: rejected a pipe client pipe="shell" connection_id=16 reason="image_not_allowed"
+2026-11-26T00:48:02.620782Z  WARN rulebox_agent::ipc_shell: pipe client refused: image_not_allowed pid=5264 session_id=1 image=Some("C:\\Config.Msi\\29696c.rbf")
+2026-11-26T00:48:02.620814Z  WARN rulebox_agent::ipc_conn: rejected a pipe client pipe="shell" connection_id=17 reason="image_not_allowed"
+2026-11-26T00:48:04.223369Z  INFO rulebox_agent::watchdog: rulebox-shell.exe was not running in the Staff session; started it session_id=1 pid=5620
+2026-11-26T00:48:04.626063Z  WARN rulebox_agent::ipc_shell: pipe client refused: image_not_allowed pid=5264 session_id=1 image=Some("C:\\Config.Msi\\29696c.rbf")
+2026-11-26T00:48:04.626077Z  WARN rulebox_agent::ipc_conn: rejected a pipe client pipe="shell" connection_id=18 reason="image_not_allowed"
+2026-11-26T00:48:06.630132Z  WARN rulebox_agent::ipc_shell: pipe client refused: image_not_allowed pid=5264 session_id=1 image=Some("C:\\Config.Msi\\29696c.rbf")
+2026-11-26T00:48:06.630155Z  WARN rulebox_agent::ipc_conn: rejected a pipe client pipe="shell" connection_id=19 reason="image_not_allowed"
+2026-11-26T00:48:08.650423Z  WARN rulebox_agent::ipc_shell: pipe client refused: image_not_allowed pid=5264 session_id=1 image=Some("C:\\Config.Msi\\29696c.rbf")
+2026-11-26T00:48:08.650436Z  WARN rulebox_agent::ipc_conn: rejected a pipe client pipe="shell" connection_id=20 reason="image_not_allowed"
+2026-11-26T00:48:09.229388Z  INFO rulebox_agent::watchdog: rulebox-shell.exe was not running in the Staff session; started it session_id=1 pid=600
+2026-11-26T00:48:10.660690Z  WARN rulebox_agent::ipc_shell: pipe client refused: image_not_allowed pid=5264 session_id=1 image=Some("C:\\Config.Msi\\29696c.rbf")
+2026-11-26T00:48:10.660709Z  WARN rulebox_agent::ipc_conn: rejected a pipe client pipe="shell" connection_id=21 reason="image_not_allowed"
+2026-11-26T00:48:12.677065Z  WARN rulebox_agent::ipc_shell: pipe client refused: image_not_allowed pid=5264 session_id=1 image=Some("C:\\Config.Msi\\29696c.rbf")
+2026-11-26T00:48:12.677129Z  WARN rulebox_agent::ipc_conn: rejected a pipe client pipe="shell" connection_id=22 reason="image_not_allowed"
+2026-11-26T00:48:14.229261Z  INFO rulebox_agent::watchdog: rulebox-shell.exe was not running in the Staff session; started it session_id=1 pid=5088
+2026-11-26T00:48:14.692062Z  WARN rulebox_agent::ipc_shell: pipe client refused: image_not_allowed pid=5264 session_id=1 image=Some("C:\\Config.Msi\\29696c.rbf")
+2026-11-26T00:48:14.692077Z  WARN rulebox_agent::ipc_conn: rejected a pipe client pipe="shell" connection_id=23 reason="image_not_allowed"
+2026-11-26T00:48:16.695669Z  WARN rulebox_agent::ipc_shell: pipe client refused: image_not_allowed pid=5264 session_id=1 image=Some("C:\\Config.Msi\\29696c.rbf")
+2026-11-26T00:48:16.695688Z  WARN rulebox_agent::ipc_conn: rejected a pipe client pipe="shell" connection_id=24 reason="image_not_allowed"
+2026-11-26T00:48:18.704230Z  WARN rulebox_agent::ipc_shell: pipe client refused: image_not_allowed pid=5264 session_id=1 image=Some("C:\\Config.Msi\\29696c.rbf")
+2026-11-26T00:48:18.704268Z  WARN rulebox_agent::ipc_conn: rejected a pipe client pipe="shell" connection_id=25 reason="image_not_allowed"
+2026-11-26T00:48:19.227701Z  INFO rulebox_agent::watchdog: rulebox-shell.exe was not running in the Staff session; started it session_id=1 pid=6200
+2026-11-26T00:48:20.720484Z  WARN rulebox_agent::ipc_shell: pipe client refused: image_not_allowed pid=5264 session_id=1 image=Some("C:\\Config.Msi\\29696c.rbf")
+2026-11-26T00:48:20.720499Z  WARN rulebox_agent::ipc_conn: rejected a pipe client pipe="shell" connection_id=26 reason="image_not_allowed"
+2026-11-26T00:48:22.727224Z  WARN rulebox_agent::ipc_shell: pipe client refused: image_not_allowed pid=5264 session_id=1 image=Some("C:\\Config.Msi\\29696c.rbf")
+2026-11-26T00:48:22.727239Z  WARN rulebox_agent::ipc_conn: rejected a pipe client pipe="shell" connection_id=27 reason="image_not_allowed"
+2026-11-26T00:48:24.230471Z  INFO rulebox_agent::watchdog: rulebox-shell.exe was not running in the Staff session; started it session_id=1 pid=3400
+2026-11-26T00:48:24.738256Z  WARN rulebox_agent::ipc_shell: pipe client refused: image_not_allowed pid=5264 session_id=1 image=Some("C:\\Config.Msi\\29696c.rbf")
+2026-11-26T00:48:24.738285Z  WARN rulebox_agent::ipc_conn: rejected a pipe client pipe="shell" connection_id=28 reason="image_not_allowed"
+2026-11-26T00:48:26.753130Z  WARN rulebox_agent::ipc_shell: pipe client refused: image_not_allowed pid=5264 session_id=1 image=Some("C:\\Config.Msi\\29696c.rbf")
+2026-11-26T00:48:26.753150Z  WARN rulebox_agent::ipc_conn: rejected a pipe client pipe="shell" connection_id=29 reason="image_not_allowed"
+2026-11-26T00:48:28.766936Z  WARN rulebox_agent::ipc_shell: pipe client refused: image_not_allowed pid=5264 session_id=1 image=Some("C:\\Config.Msi\\29696c.rbf")
+2026-11-26T00:48:28.766962Z  WARN rulebox_agent::ipc_conn: rejected a pipe client pipe="shell" connection_id=30 reason="image_not_allowed"
+2026-11-26T00:48:29.226954Z  INFO rulebox_agent::watchdog: rulebox-shell.exe was not running in the Staff session; started it session_id=1 pid=6216
+2026-11-26T00:48:30.798878Z  WARN rulebox_agent::ipc_shell: pipe client refused: image_not_allowed pid=5264 session_id=1 image=Some("C:\\Config.Msi\\29696c.rbf")
+2026-11-26T00:48:30.798939Z  WARN rulebox_agent::ipc_conn: rejected a pipe client pipe="shell" connection_id=31 reason="image_not_allowed"
+2026-11-26T00:48:32.808006Z  WARN rulebox_agent::ipc_shell: pipe client refused: image_not_allowed pid=5264 session_id=1 image=Some("C:\\Config.Msi\\29696c.rbf")
+2026-11-26T00:48:32.808021Z  WARN rulebox_agent::ipc_conn: rejected a pipe client pipe="shell" connection_id=32 reason="image_not_allowed"
+2026-11-26T00:48:34.232671Z  INFO rulebox_agent::watchdog: rulebox-shell.exe was not running in the Staff session; started it session_id=1 pid=5164
+2026-11-26T00:48:34.812199Z  WARN rulebox_agent::ipc_shell: pipe client refused: image_not_allowed pid=5264 session_id=1 image=Some("C:\\Config.Msi\\29696c.rbf")
+2026-11-26T00:48:34.812255Z  WARN rulebox_agent::ipc_conn: rejected a pipe client pipe="shell" connection_id=33 reason="image_not_allowed"
+2026-11-26T00:48:36.831871Z  WARN rulebox_agent::ipc_shell: pipe client refused: image_not_allowed pid=5264 session_id=1 image=Some("C:\\Config.Msi\\29696c.rbf")
+2026-11-26T00:48:36.831885Z  WARN rulebox_agent::ipc_conn: rejected a pipe client pipe="shell" connection_id=34 reason="image_not_allowed"
+2026-11-26T00:48:38.836536Z  WARN rulebox_agent::ipc_shell: pipe client refused: image_not_allowed pid=5264 session_id=1 image=Some("C:\\Config.Msi\\29696c.rbf")
+2026-11-26T00:48:38.836605Z  WARN rulebox_agent::ipc_conn: rejected a pipe client pipe="shell" connection_id=35 reason="image_not_allowed"
+2026-11-26T00:48:39.240093Z  INFO rulebox_agent::watchdog: rulebox-shell.exe was not running in the Staff session; started it session_id=1 pid=2752
+2026-11-26T00:48:40.847682Z  WARN rulebox_agent::ipc_shell: pipe client refused: image_not_allowed pid=5264 session_id=1 image=Some("C:\\Config.Msi\\29696c.rbf")
+2026-11-26T00:48:40.847696Z  WARN rulebox_agent::ipc_conn: rejected a pipe client pipe="shell" connection_id=36 reason="image_not_allowed"
+2026-11-26T00:48:42.877786Z  WARN rulebox_agent::ipc_shell: pipe client refused: image_not_allowed pid=5264 session_id=1 image=Some("C:\\Config.Msi\\29696c.rbf")
+2026-11-26T00:48:42.877820Z  WARN rulebox_agent::ipc_conn: rejected a pipe client pipe="shell" connection_id=37 reason="image_not_allowed"
+2026-11-26T00:48:44.242806Z  INFO rulebox_agent::watchdog: rulebox-shell.exe was not running in the Staff session; started it session_id=1 pid=1428
+2026-11-26T00:48:44.894611Z  WARN rulebox_agent::ipc_shell: pipe client refused: image_not_allowed pid=5264 session_id=1 image=Some("C:\\Config.Msi\\29696c.rbf")
+2026-11-26T00:48:44.894642Z  WARN rulebox_agent::ipc_conn: rejected a pipe client pipe="shell" connection_id=38 reason="image_not_allowed"
+2026-11-26T00:48:46.908196Z  WARN rulebox_agent::ipc_shell: pipe client refused: image_not_allowed pid=5264 session_id=1 image=Some("C:\\Config.Msi\\29696c.rbf")
+2026-11-26T00:48:46.908228Z  WARN rulebox_agent::ipc_conn: rejected a pipe client pipe="shell" connection_id=39 reason="image_not_allowed"
+2026-11-26T00:48:48.923764Z  WARN rulebox_agent::ipc_shell: pipe client refused: image_not_allowed pid=5264 session_id=1 image=Some("C:\\Config.Msi\\29696c.rbf")
+2026-11-26T00:48:48.923780Z  WARN rulebox_agent::ipc_conn: rejected a pipe client pipe="shell" connection_id=40 reason="image_not_allowed"
+2026-11-26T00:48:49.245599Z  INFO rulebox_agent::watchdog: rulebox-shell.exe was not running in the Staff session; started it session_id=1 pid=6492
+2026-11-26T00:48:50.940396Z  WARN rulebox_agent::ipc_shell: pipe client refused: image_not_allowed pid=5264 session_id=1 image=Some("C:\\Config.Msi\\29696c.rbf")
+2026-11-26T00:48:50.940413Z  WARN rulebox_agent::ipc_conn: rejected a pipe client pipe="shell" connection_id=41 reason="image_not_allowed"
+2026-11-26T00:48:52.955837Z  WARN rulebox_agent::ipc_shell: pipe client refused: image_not_allowed pid=5264 session_id=1 image=Some("C:\\Config.Msi\\29696c.rbf")
+2026-11-26T00:48:52.955852Z  WARN rulebox_agent::ipc_conn: rejected a pipe client pipe="shell" connection_id=42 reason="image_not_allowed"
+2026-11-26T00:48:54.257419Z  INFO rulebox_agent::watchdog: rulebox-shell.exe was not running in the Staff session; started it session_id=1 pid=5428
+2026-11-26T00:48:54.968988Z  WARN rulebox_agent::ipc_shell: pipe client refused: image_not_allowed pid=5264 session_id=1 image=Some("C:\\Config.Msi\\29696c.rbf")
+2026-11-26T00:48:54.969003Z  WARN rulebox_agent::ipc_conn: rejected a pipe client pipe="shell" connection_id=43 reason="image_not_allowed"
+2026-11-26T00:48:56.987246Z  WARN rulebox_agent::ipc_shell: pipe client refused: image_not_allowed pid=5264 session_id=1 image=Some("C:\\Config.Msi\\29696c.rbf")
+2026-11-26T00:48:56.987280Z  WARN rulebox_agent::ipc_conn: rejected a pipe client pipe="shell" connection_id=44 reason="image_not_allowed"
+2026-11-26T00:48:58.991832Z  WARN rulebox_agent::ipc_shell: pipe client refused: image_not_allowed pid=5264 session_id=1 image=Some("C:\\Config.Msi\\29696c.rbf")
+2026-11-26T00:48:58.991847Z  WARN rulebox_agent::ipc_conn: rejected a pipe client pipe="shell" connection_id=45 reason="image_not_allowed"
+2026-11-26T00:48:59.260792Z  INFO rulebox_agent::watchdog: rulebox-shell.exe was not running in the Staff session; started it session_id=1 pid=3612
+2026-11-26T00:49:01.005835Z  WARN rulebox_agent::ipc_shell: pipe client refused: image_not_allowed pid=5264 session_id=1 image=Some("C:\\Config.Msi\\29696c.rbf")
+2026-11-26T00:49:01.005851Z  WARN rulebox_agent::ipc_conn: rejected a pipe client pipe="shell" connection_id=46 reason="image_not_allowed"
+2026-11-26T00:49:03.019892Z  WARN rulebox_agent::ipc_shell: pipe client refused: image_not_allowed pid=5264 session_id=1 image=Some("C:\\Config.Msi\\29696c.rbf")
+2026-11-26T00:49:03.019916Z  WARN rulebox_agent::ipc_conn: rejected a pipe client pipe="shell" connection_id=47 reason="image_not_allowed"
+2026-11-26T00:49:04.261216Z  INFO rulebox_agent::watchdog: rulebox-shell.exe was not running in the Staff session; started it session_id=1 pid=4484
+2026-11-26T00:49:05.025175Z  WARN rulebox_agent::ipc_shell: pipe client refused: image_not_allowed pid=5264 session_id=1 image=Some("C:\\Config.Msi\\29696c.rbf")
+2026-11-26T00:49:05.025408Z  WARN rulebox_agent::ipc_conn: rejected a pipe client pipe="shell" connection_id=48 reason="image_not_allowed"
+2026-11-26T00:49:07.033915Z  WARN rulebox_agent::ipc_shell: pipe client refused: image_not_allowed pid=5264 session_id=1 image=Some("C:\\Config.Msi\\29696c.rbf")
+2026-11-26T00:49:07.033971Z  WARN rulebox_agent::ipc_conn: rejected a pipe client pipe="shell" connection_id=49 reason="image_not_allowed"
+2026-11-26T00:49:09.049427Z  WARN rulebox_agent::ipc_shell: pipe client refused: image_not_allowed pid=5264 session_id=1 image=Some("C:\\Config.Msi\\29696c.rbf")
+2026-11-26T00:49:09.049444Z  WARN rulebox_agent::ipc_conn: rejected a pipe client pipe="shell" connection_id=50 reason="image_not_allowed"
+2026-11-26T00:49:09.259384Z  INFO rulebox_agent::watchdog: rulebox-shell.exe was not running in the Staff session; started it session_id=1 pid=6488
+2026-11-26T00:49:11.068691Z  WARN rulebox_agent::ipc_shell: pipe client refused: image_not_allowed pid=5264 session_id=1 image=Some("C:\\Config.Msi\\29696c.rbf")
+2026-11-26T00:49:11.068727Z  WARN rulebox_agent::ipc_conn: rejected a pipe client pipe="shell" connection_id=51 reason="image_not_allowed"
+2026-11-26T00:49:13.076854Z  WARN rulebox_agent::ipc_shell: pipe client refused: image_not_allowed pid=5264 session_id=1 image=Some("C:\\Config.Msi\\29696c.rbf")
+2026-11-26T00:49:13.076874Z  WARN rulebox_agent::ipc_conn: rejected a pipe client pipe="shell" connection_id=52 reason="image_not_allowed"
+2026-11-26T00:49:14.260731Z  INFO rulebox_agent::watchdog: rulebox-shell.exe was not running in the Staff session; started it session_id=1 pid=5220
+2026-11-26T00:49:15.085772Z  WARN rulebox_agent::ipc_shell: pipe client refused: image_not_allowed pid=5264 session_id=1 image=Some("C:\\Config.Msi\\29696c.rbf")
+2026-11-26T00:49:15.085831Z  WARN rulebox_agent::ipc_conn: rejected a pipe client pipe="shell" connection_id=53 reason="image_not_allowed"
+2026-11-26T00:49:17.110871Z  WARN rulebox_agent::ipc_shell: pipe client refused: image_not_allowed pid=5264 session_id=1 image=Some("C:\\Config.Msi\\29696c.rbf")
+2026-11-26T00:49:17.110912Z  WARN rulebox_agent::ipc_conn: rejected a pipe client pipe="shell" connection_id=54 reason="image_not_allowed"
+2026-11-26T00:49:19.144065Z  WARN rulebox_agent::ipc_shell: pipe client refused: image_not_allowed pid=5264 session_id=1 image=Some("C:\\Config.Msi\\29696c.rbf")
+2026-11-26T00:49:19.144083Z  WARN rulebox_agent::ipc_conn: rejected a pipe client pipe="shell" connection_id=55 reason="image_not_allowed"
+2026-11-26T00:49:19.263365Z  INFO rulebox_agent::watchdog: rulebox-shell.exe was not running in the Staff session; started it session_id=1 pid=4624
+2026-11-26T00:49:21.158149Z  WARN rulebox_agent::ipc_shell: pipe client refused: image_not_allowed pid=5264 session_id=1 image=Some("C:\\Config.Msi\\29696c.rbf")
+2026-11-26T00:49:21.158161Z  WARN rulebox_agent::ipc_conn: rejected a pipe client pipe="shell" connection_id=56 reason="image_not_allowed"
+2026-11-26T00:49:23.176364Z  WARN rulebox_agent::ipc_shell: pipe client refused: image_not_allowed pid=5264 session_id=1 image=Some("C:\\Config.Msi\\29696c.rbf")
+2026-11-26T00:49:23.176399Z  WARN rulebox_agent::ipc_conn: rejected a pipe client pipe="shell" connection_id=57 reason="image_not_allowed"
+2026-11-26T00:49:24.277762Z  INFO rulebox_agent::watchdog: rulebox-shell.exe was not running in the Staff session; started it session_id=1 pid=6032
+2026-11-26T00:49:25.197539Z  WARN rulebox_agent::ipc_shell: pipe client refused: image_not_allowed pid=5264 session_id=1 image=Some("C:\\Config.Msi\\29696c.rbf")
+2026-11-26T00:49:25.197562Z  WARN rulebox_agent::ipc_conn: rejected a pipe client pipe="shell" connection_id=58 reason="image_not_allowed"
+2026-11-26T00:49:27.212043Z  WARN rulebox_agent::ipc_shell: pipe client refused: image_not_allowed pid=5264 session_id=1 image=Some("C:\\Config.Msi\\29696c.rbf")
+2026-11-26T00:49:27.212055Z  WARN rulebox_agent::ipc_conn: rejected a pipe client pipe="shell" connection_id=59 reason="image_not_allowed"
+2026-11-26T00:49:29.216587Z  WARN rulebox_agent::ipc_shell: pipe client refused: image_not_allowed pid=5264 session_id=1 image=Some("C:\\Config.Msi\\29696c.rbf")
+2026-11-26T00:49:29.216602Z  WARN rulebox_agent::ipc_conn: rejected a pipe client pipe="shell" connection_id=60 reason="image_not_allowed"
+2026-11-26T00:49:29.291631Z  INFO rulebox_agent::watchdog: rulebox-shell.exe was not running in the Staff session; started it session_id=1 pid=1216
+2026-11-26T00:49:31.222676Z  WARN rulebox_agent::ipc_shell: pipe client refused: image_not_allowed pid=5264 session_id=1 image=Some("C:\\Config.Msi\\29696c.rbf")
+2026-11-26T00:49:31.222713Z  WARN rulebox_agent::ipc_conn: rejected a pipe client pipe="shell" connection_id=61 reason="image_not_allowed"
+2026-11-26T00:49:33.242179Z  WARN rulebox_agent::ipc_shell: pipe client refused: image_not_allowed pid=5264 session_id=1 image=Some("C:\\Config.Msi\\29696c.rbf")
+2026-11-26T00:49:33.242196Z  WARN rulebox_agent::ipc_conn: rejected a pipe client pipe="shell" connection_id=62 reason="image_not_allowed"
+2026-11-26T00:49:34.289931Z  INFO rulebox_agent::watchdog: rulebox-shell.exe was not running in the Staff session; started it session_id=1 pid=3780
+2026-11-26T00:49:35.254703Z  WARN rulebox_agent::ipc_shell: pipe client refused: image_not_allowed pid=5264 session_id=1 image=Some("C:\\Config.Msi\\29696c.rbf")
+2026-11-26T00:49:35.254750Z  WARN rulebox_agent::ipc_conn: rejected a pipe client pipe="shell" connection_id=63 reason="image_not_allowed"
+2026-11-26T00:49:37.282834Z  WARN rulebox_agent::ipc_shell: pipe client refused: image_not_allowed pid=5264 session_id=1 image=Some("C:\\Config.Msi\\29696c.rbf")
+2026-11-26T00:49:37.283118Z  WARN rulebox_agent::ipc_conn: rejected a pipe client pipe="shell" connection_id=64 reason="image_not_allowed"
+2026-11-26T00:49:39.295157Z  INFO rulebox_agent::watchdog: rulebox-shell.exe was not running in the Staff session; started it session_id=1 pid=176
+2026-11-26T00:49:39.301604Z  WARN rulebox_agent::ipc_shell: pipe client refused: image_not_allowed pid=5264 session_id=1 image=Some("C:\\Config.Msi\\29696c.rbf")
+2026-11-26T00:49:39.301616Z  WARN rulebox_agent::ipc_conn: rejected a pipe client pipe="shell" connection_id=65 reason="image_not_allowed"
+2026-11-26T00:49:41.313189Z  WARN rulebox_agent::ipc_shell: pipe client refused: image_not_allowed pid=5264 session_id=1 image=Some("C:\\Config.Msi\\29696c.rbf")
+2026-11-26T00:49:41.313207Z  WARN rulebox_agent::ipc_conn: rejected a pipe client pipe="shell" connection_id=66 reason="image_not_allowed"
+2026-11-26T00:49:43.328094Z  WARN rulebox_agent::ipc_shell: pipe client refused: image_not_allowed pid=5264 session_id=1 image=Some("C:\\Config.Msi\\29696c.rbf")
+2026-11-26T00:49:43.328126Z  WARN rulebox_agent::ipc_conn: rejected a pipe client pipe="shell" connection_id=67 reason="image_not_allowed"
+2026-11-26T00:49:44.297918Z  INFO rulebox_agent::watchdog: rulebox-shell.exe was not running in the Staff session; started it session_id=1 pid=4488
+2026-11-26T00:49:45.333789Z  WARN rulebox_agent::ipc_shell: pipe client refused: image_not_allowed pid=5264 session_id=1 image=Some("C:\\Config.Msi\\29696c.rbf")
+2026-11-26T00:49:45.333875Z  WARN rulebox_agent::ipc_conn: rejected a pipe client pipe="shell" connection_id=68 reason="image_not_allowed"
+2026-11-26T00:49:47.337669Z  WARN rulebox_agent::ipc_shell: pipe client refused: image_not_allowed pid=5264 session_id=1 image=Some("C:\\Config.Msi\\29696c.rbf")
+2026-11-26T00:49:47.337694Z  WARN rulebox_agent::ipc_conn: rejected a pipe client pipe="shell" connection_id=69 reason="image_not_allowed"
+2026-11-26T00:49:49.303164Z  INFO rulebox_agent::watchdog: rulebox-shell.exe was not running in the Staff session; started it session_id=1 pid=1184
+2026-11-26T00:49:49.362567Z  WARN rulebox_agent::ipc_shell: pipe client refused: image_not_allowed pid=5264 session_id=1 image=Some("C:\\Config.Msi\\29696c.rbf")
+2026-11-26T00:49:49.362583Z  WARN rulebox_agent::ipc_conn: rejected a pipe client pipe="shell" connection_id=70 reason="image_not_allowed"
+2026-11-26T00:49:51.368102Z  WARN rulebox_agent::ipc_shell: pipe client refused: image_not_allowed pid=5264 session_id=1 image=Some("C:\\Config.Msi\\29696c.rbf")
+2026-11-26T00:49:51.368118Z  WARN rulebox_agent::ipc_conn: rejected a pipe client pipe="shell" connection_id=71 reason="image_not_allowed"
+2026-11-26T00:49:53.384822Z  WARN rulebox_agent::ipc_shell: pipe client refused: image_not_allowed pid=5264 session_id=1 image=Some("C:\\Config.Msi\\29696c.rbf")
+2026-11-26T00:49:53.384844Z  WARN rulebox_agent::ipc_conn: rejected a pipe client pipe="shell" connection_id=72 reason="image_not_allowed"
+2026-11-26T00:49:54.309907Z  INFO rulebox_agent::watchdog: rulebox-shell.exe was not running in the Staff session; started it session_id=1 pid=3968
+2026-11-26T00:49:55.391722Z  WARN rulebox_agent::ipc_shell: pipe client refused: image_not_allowed pid=5264 session_id=1 image=Some("C:\\Config.Msi\\29696c.rbf")
+2026-11-26T00:49:55.391738Z  WARN rulebox_agent::ipc_conn: rejected a pipe client pipe="shell" connection_id=73 reason="image_not_allowed"
+2026-11-26T00:49:57.417324Z  WARN rulebox_agent::ipc_shell: pipe client refused: image_not_allowed pid=5264 session_id=1 image=Some("C:\\Config.Msi\\29696c.rbf")
+2026-11-26T00:49:57.417342Z  WARN rulebox_agent::ipc_conn: rejected a pipe client pipe="shell" connection_id=74 reason="image_not_allowed"
+2026-11-26T00:49:59.311924Z  INFO rulebox_agent::watchdog: rulebox-shell.exe was not running in the Staff session; started it session_id=1 pid=3888
+2026-11-26T00:49:59.439199Z  WARN rulebox_agent::ipc_shell: pipe client refused: image_not_allowed pid=5264 session_id=1 image=Some("C:\\Config.Msi\\29696c.rbf")
+2026-11-26T00:49:59.439211Z  WARN rulebox_agent::ipc_conn: rejected a pipe client pipe="shell" connection_id=75 reason="image_not_allowed"
+2026-11-26T00:50:01.456456Z  WARN rulebox_agent::ipc_shell: pipe client refused: image_not_allowed pid=5264 session_id=1 image=Some("C:\\Config.Msi\\29696c.rbf")
+2026-11-26T00:50:01.456469Z  WARN rulebox_agent::ipc_conn: rejected a pipe client pipe="shell" connection_id=76 reason="image_not_allowed"
+2026-11-26T00:50:03.463224Z  WARN rulebox_agent::ipc_shell: pipe client refused: image_not_allowed pid=5264 session_id=1 image=Some("C:\\Config.Msi\\29696c.rbf")
+2026-11-26T00:50:03.463248Z  WARN rulebox_agent::ipc_conn: rejected a pipe client pipe="shell" connection_id=77 reason="image_not_allowed"
+2026-11-26T00:50:04.312374Z  INFO rulebox_agent::watchdog: rulebox-shell.exe was not running in the Staff session; started it session_id=1 pid=7044
+2026-11-26T00:50:05.477780Z  WARN rulebox_agent::ipc_shell: pipe client refused: image_not_allowed pid=5264 session_id=1 image=Some("C:\\Config.Msi\\29696c.rbf")
+2026-11-26T00:50:05.477798Z  WARN rulebox_agent::ipc_conn: rejected a pipe client pipe="shell" connection_id=78 reason="image_not_allowed"
+2026-11-26T00:50:07.497155Z  WARN rulebox_agent::ipc_shell: pipe client refused: image_not_allowed pid=5264 session_id=1 image=Some("C:\\Config.Msi\\29696c.rbf")
+2026-11-26T00:50:07.497170Z  WARN rulebox_agent::ipc_conn: rejected a pipe client pipe="shell" connection_id=79 reason="image_not_allowed"
+2026-11-26T00:50:09.322877Z  INFO rulebox_agent::watchdog: rulebox-shell.exe was not running in the Staff session; started it session_id=1 pid=6660
+2026-11-26T00:50:09.517650Z  WARN rulebox_agent::ipc_shell: pipe client refused: image_not_allowed pid=5264 session_id=1 image=Some("C:\\Config.Msi\\29696c.rbf")
+2026-11-26T00:50:09.517667Z  WARN rulebox_agent::ipc_conn: rejected a pipe client pipe="shell" connection_id=80 reason="image_not_allowed"
+2026-11-26T00:50:11.533224Z  WARN rulebox_agent::ipc_shell: pipe client refused: image_not_allowed pid=5264 session_id=1 image=Some("C:\\Config.Msi\\29696c.rbf")
+2026-11-26T00:50:11.533249Z  WARN rulebox_agent::ipc_conn: rejected a pipe client pipe="shell" connection_id=81 reason="image_not_allowed"
+2026-11-26T00:50:12.568980Z  INFO rulebox_agent::ipc_conn: client connected pipe="admin" connection_id=1 pid=5408 session_id=0 role=Admin
+2026-11-26T00:50:12.569297Z  INFO rulebox_agent::ipc_conn: client disconnected pipe="admin" connection_id=1 pid=5408 end=PeerClosed
+2026-11-26T00:50:13.551504Z  WARN rulebox_agent::ipc_shell: pipe client refused: image_not_allowed pid=5264 session_id=1 image=Some("C:\\Config.Msi\\29696c.rbf")
+2026-11-26T00:50:13.551525Z  WARN rulebox_agent::ipc_conn: rejected a pipe client pipe="shell" connection_id=82 reason="image_not_allowed"
+2026-11-26T00:50:14.335547Z  INFO rulebox_agent::watchdog: rulebox-shell.exe was not running in the Staff session; started it session_id=1 pid=6236
+2026-11-26T00:50:15.568189Z  WARN rulebox_agent::ipc_shell: pipe client refused: image_not_allowed pid=5264 session_id=1 image=Some("C:\\Config.Msi\\29696c.rbf")
+2026-11-26T00:50:15.568202Z  WARN rulebox_agent::ipc_conn: rejected a pipe client pipe="shell" connection_id=83 reason="image_not_allowed"
+2026-11-26T00:50:17.580437Z  WARN rulebox_agent::ipc_shell: pipe client refused: image_not_allowed pid=5264 session_id=1 image=Some("C:\\Config.Msi\\29696c.rbf")
+2026-11-26T00:50:17.580461Z  WARN rulebox_agent::ipc_conn: rejected a pipe client pipe="shell" connection_id=84 reason="image_not_allowed"
+2026-11-26T00:50:19.354411Z  INFO rulebox_agent::watchdog: rulebox-shell.exe was not running in the Staff session; started it session_id=1 pid=4228
+2026-11-26T00:50:19.598362Z  WARN rulebox_agent::ipc_shell: pipe client refused: image_not_allowed pid=5264 session_id=1 image=Some("C:\\Config.Msi\\29696c.rbf")
+2026-11-26T00:50:19.598374Z  WARN rulebox_agent::ipc_conn: rejected a pipe client pipe="shell" connection_id=85 reason="image_not_allowed"
+2026-11-26T00:50:21.616721Z  WARN rulebox_agent::ipc_shell: pipe client refused: image_not_allowed pid=5264 session_id=1 image=Some("C:\\Config.Msi\\29696c.rbf")
+2026-11-26T00:50:21.616749Z  WARN rulebox_agent::ipc_conn: rejected a pipe client pipe="shell" connection_id=86 reason="image_not_allowed"
+2026-11-26T00:50:23.623823Z  WARN rulebox_agent::ipc_shell: pipe client refused: image_not_allowed pid=5264 session_id=1 image=Some("C:\\Config.Msi\\29696c.rbf")
+2026-11-26T00:50:23.623849Z  WARN rulebox_agent::ipc_conn: rejected a pipe client pipe="shell" connection_id=87 reason="image_not_allowed"
+2026-11-26T00:50:24.366591Z  INFO rulebox_agent::watchdog: rulebox-shell.exe was not running in the Staff session; started it session_id=1 pid=3304
+2026-11-26T00:50:25.634007Z  WARN rulebox_agent::ipc_shell: pipe client refused: image_not_allowed pid=5264 session_id=1 image=Some("C:\\Config.Msi\\29696c.rbf")
+2026-11-26T00:50:25.634025Z  WARN rulebox_agent::ipc_conn: rejected a pipe client pipe="shell" connection_id=88 reason="image_not_allowed"
+2026-11-26T00:50:27.662278Z  WARN rulebox_agent::ipc_shell: pipe client refused: image_not_allowed pid=5264 session_id=1 image=Some("C:\\Config.Msi\\29696c.rbf")
+2026-11-26T00:50:27.662293Z  WARN rulebox_agent::ipc_conn: rejected a pipe client pipe="shell" connection_id=89 reason="image_not_allowed"
+2026-11-26T00:50:29.386495Z  INFO rulebox_agent::watchdog: rulebox-shell.exe was not running in the Staff session; started it session_id=1 pid=3268
+2026-11-26T00:50:29.664907Z  WARN rulebox_agent::ipc_shell: pipe client refused: image_not_allowed pid=5264 session_id=1 image=Some("C:\\Config.Msi\\29696c.rbf")
+2026-11-26T00:50:29.664936Z  WARN rulebox_agent::ipc_conn: rejected a pipe client pipe="shell" connection_id=90 reason="image_not_allowed"
+2026-11-26T00:50:31.672064Z  WARN rulebox_agent::ipc_shell: pipe client refused: image_not_allowed pid=5264 session_id=1 image=Some("C:\\Config.Msi\\29696c.rbf")
+2026-11-26T00:50:31.672078Z  WARN rulebox_agent::ipc_conn: rejected a pipe client pipe="shell" connection_id=91 reason="image_not_allowed"
+2026-11-26T00:50:33.679417Z  WARN rulebox_agent::ipc_shell: pipe client refused: image_not_allowed pid=5264 session_id=1 image=Some("C:\\Config.Msi\\29696c.rbf")
+2026-11-26T00:50:33.679434Z  WARN rulebox_agent::ipc_conn: rejected a pipe client pipe="shell" connection_id=92 reason="image_not_allowed"
+2026-11-26T00:50:34.388565Z  INFO rulebox_agent::watchdog: rulebox-shell.exe was not running in the Staff session; started it session_id=1 pid=6792
+2026-11-26T00:50:35.691381Z  WARN rulebox_agent::ipc_shell: pipe client refused: image_not_allowed pid=5264 session_id=1 image=Some("C:\\Config.Msi\\29696c.rbf")
+2026-11-26T00:50:35.691405Z  WARN rulebox_agent::ipc_conn: rejected a pipe client pipe="shell" connection_id=93 reason="image_not_allowed"
+2026-11-26T00:50:37.695751Z  WARN rulebox_agent::ipc_shell: pipe client refused: image_not_allowed pid=5264 session_id=1 image=Some("C:\\Config.Msi\\29696c.rbf")
+2026-11-26T00:50:37.695765Z  WARN rulebox_agent::ipc_conn: rejected a pipe client pipe="shell" connection_id=94 reason="image_not_allowed"
+2026-11-26T00:50:39.402828Z  INFO rulebox_agent::watchdog: rulebox-shell.exe was not running in the Staff session; started it session_id=1 pid=1812
+2026-11-26T00:50:39.708010Z  WARN rulebox_agent::ipc_shell: pipe client refused: image_not_allowed pid=5264 session_id=1 image=Some("C:\\Config.Msi\\29696c.rbf")
+2026-11-26T00:50:39.708043Z  WARN rulebox_agent::ipc_conn: rejected a pipe client pipe="shell" connection_id=95 reason="image_not_allowed"
+2026-11-26T00:50:41.721064Z  WARN rulebox_agent::ipc_shell: pipe client refused: image_not_allowed pid=5264 session_id=1 image=Some("C:\\Config.Msi\\29696c.rbf")
+2026-11-26T00:50:41.721124Z  WARN rulebox_agent::ipc_conn: rejected a pipe client pipe="shell" connection_id=96 reason="image_not_allowed"
+2026-11-26T00:50:43.726428Z  WARN rulebox_agent::ipc_shell: pipe client refused: image_not_allowed pid=5264 session_id=1 image=Some("C:\\Config.Msi\\29696c.rbf")
+2026-11-26T00:50:43.726490Z  WARN rulebox_agent::ipc_conn: rejected a pipe client pipe="shell" connection_id=97 reason="image_not_allowed"
+2026-11-26T00:50:44.413932Z  INFO rulebox_agent::watchdog: rulebox-shell.exe was not running in the Staff session; started it session_id=1 pid=2932
+2026-11-26T00:50:45.732783Z  WARN rulebox_agent::ipc_shell: pipe client refused: image_not_allowed pid=5264 session_id=1 image=Some("C:\\Config.Msi\\29696c.rbf")
+2026-11-26T00:50:45.732797Z  WARN rulebox_agent::ipc_conn: rejected a pipe client pipe="shell" connection_id=98 reason="image_not_allowed"
+2026-11-26T00:50:47.747665Z  WARN rulebox_agent::ipc_shell: pipe client refused: image_not_allowed pid=5264 session_id=1 image=Some("C:\\Config.Msi\\29696c.rbf")
+2026-11-26T00:50:47.747695Z  WARN rulebox_agent::ipc_conn: rejected a pipe client pipe="shell" connection_id=99 reason="image_not_allowed"
+2026-11-26T00:50:49.432226Z  INFO rulebox_agent::watchdog: rulebox-shell.exe was not running in the Staff session; started it session_id=1 pid=5424
+2026-11-26T00:50:49.770086Z  WARN rulebox_agent::ipc_shell: pipe client refused: image_not_allowed pid=5264 session_id=1 image=Some("C:\\Config.Msi\\29696c.rbf")
+2026-11-26T00:50:49.770110Z  WARN rulebox_agent::ipc_conn: rejected a pipe client pipe="shell" connection_id=100 reason="image_not_allowed"
+2026-11-26T00:50:51.776116Z  WARN rulebox_agent::ipc_shell: pipe client refused: image_not_allowed pid=5264 session_id=1 image=Some("C:\\Config.Msi\\29696c.rbf")
+2026-11-26T00:50:51.776141Z  WARN rulebox_agent::ipc_conn: rejected a pipe client pipe="shell" connection_id=101 reason="image_not_allowed"
+2026-11-26T00:50:53.784596Z  WARN rulebox_agent::ipc_shell: pipe client refused: image_not_allowed pid=5264 session_id=1 image=Some("C:\\Config.Msi\\29696c.rbf")
+2026-11-26T00:50:53.784618Z  WARN rulebox_agent::ipc_conn: rejected a pipe client pipe="shell" connection_id=102 reason="image_not_allowed"
+2026-11-26T00:50:54.433282Z  INFO rulebox_agent::watchdog: rulebox-shell.exe was not running in the Staff session; started it session_id=1 pid=756
+2026-11-26T00:50:55.789317Z  WARN rulebox_agent::ipc_shell: pipe client refused: image_not_allowed pid=5264 session_id=1 image=Some("C:\\Config.Msi\\29696c.rbf")
+2026-11-26T00:50:55.789350Z  WARN rulebox_agent::ipc_conn: rejected a pipe client pipe="shell" connection_id=103 reason="image_not_allowed"
+2026-11-26T00:50:57.803314Z  WARN rulebox_agent::ipc_shell: pipe client refused: image_not_allowed pid=5264 session_id=1 image=Some("C:\\Config.Msi\\29696c.rbf")
+2026-11-26T00:50:57.803327Z  WARN rulebox_agent::ipc_conn: rejected a pipe client pipe="shell" connection_id=104 reason="image_not_allowed"
+2026-11-26T00:50:59.435486Z  INFO rulebox_agent::watchdog: rulebox-shell.exe was not running in the Staff session; started it session_id=1 pid=1524
+2026-11-26T00:50:59.817860Z  WARN rulebox_agent::ipc_shell: pipe client refused: image_not_allowed pid=5264 session_id=1 image=Some("C:\\Config.Msi\\29696c.rbf")
+2026-11-26T00:50:59.817881Z  WARN rulebox_agent::ipc_conn: rejected a pipe client pipe="shell" connection_id=105 reason="image_not_allowed"
+2026-11-26T00:51:01.832709Z  WARN rulebox_agent::ipc_shell: pipe client refused: image_not_allowed pid=5264 session_id=1 image=Some("C:\\Config.Msi\\29696c.rbf")
+2026-11-26T00:51:01.832859Z  WARN rulebox_agent::ipc_conn: rejected a pipe client pipe="shell" connection_id=106 reason="image_not_allowed"
+2026-11-26T00:51:03.847070Z  WARN rulebox_agent::ipc_shell: pipe client refused: image_not_allowed pid=5264 session_id=1 image=Some("C:\\Config.Msi\\29696c.rbf")
+2026-11-26T00:51:03.847083Z  WARN rulebox_agent::ipc_conn: rejected a pipe client pipe="shell" connection_id=107 reason="image_not_allowed"
+2026-11-26T00:51:04.432218Z  INFO rulebox_agent::watchdog: rulebox-shell.exe was not running in the Staff session; started it session_id=1 pid=2984
+2026-11-26T00:51:05.865804Z  WARN rulebox_agent::ipc_shell: pipe client refused: image_not_allowed pid=5264 session_id=1 image=Some("C:\\Config.Msi\\29696c.rbf")
+2026-11-26T00:51:05.865830Z  WARN rulebox_agent::ipc_conn: rejected a pipe client pipe="shell" connection_id=108 reason="image_not_allowed"
+2026-11-26T00:51:07.882281Z  WARN rulebox_agent::ipc_shell: pipe client refused: image_not_allowed pid=5264 session_id=1 image=Some("C:\\Config.Msi\\29696c.rbf")
+2026-11-26T00:51:07.882304Z  WARN rulebox_agent::ipc_conn: rejected a pipe client pipe="shell" connection_id=109 reason="image_not_allowed"
+2026-11-26T00:51:09.445348Z  INFO rulebox_agent::watchdog: rulebox-shell.exe was not running in the Staff session; started it session_id=1 pid=4456
+2026-11-26T00:51:09.892721Z  WARN rulebox_agent::ipc_shell: pipe client refused: image_not_allowed pid=5264 session_id=1 image=Some("C:\\Config.Msi\\29696c.rbf")
+2026-11-26T00:51:09.892776Z  WARN rulebox_agent::ipc_conn: rejected a pipe client pipe="shell" connection_id=110 reason="image_not_allowed"
+2026-11-26T00:51:11.907039Z  WARN rulebox_agent::ipc_shell: pipe client refused: image_not_allowed pid=5264 session_id=1 image=Some("C:\\Config.Msi\\29696c.rbf")
+2026-11-26T00:51:11.907054Z  WARN rulebox_agent::ipc_conn: rejected a pipe client pipe="shell" connection_id=111 reason="image_not_allowed"
+2026-11-26T00:51:13.913067Z  WARN rulebox_agent::ipc_shell: pipe client refused: image_not_allowed pid=5264 session_id=1 image=Some("C:\\Config.Msi\\29696c.rbf")
+2026-11-26T00:51:13.913105Z  WARN rulebox_agent::ipc_conn: rejected a pipe client pipe="shell" connection_id=112 reason="image_not_allowed"
+2026-11-26T00:51:14.446847Z  INFO rulebox_agent::watchdog: rulebox-shell.exe was not running in the Staff session; started it session_id=1 pid=2072
+2026-11-26T00:51:15.926792Z  WARN rulebox_agent::ipc_shell: pipe client refused: image_not_allowed pid=5264 session_id=1 image=Some("C:\\Config.Msi\\29696c.rbf")
+2026-11-26T00:51:15.927746Z  WARN rulebox_agent::ipc_conn: rejected a pipe client pipe="shell" connection_id=113 reason="image_not_allowed"
+2026-11-26T00:51:17.940977Z  WARN rulebox_agent::ipc_shell: pipe client refused: image_not_allowed pid=5264 session_id=1 image=Some("C:\\Config.Msi\\29696c.rbf")
+2026-11-26T00:51:17.940998Z  WARN rulebox_agent::ipc_conn: rejected a pipe client pipe="shell" connection_id=114 reason="image_not_allowed"
+2026-11-26T00:51:19.447750Z  INFO rulebox_agent::watchdog: rulebox-shell.exe was not running in the Staff session; started it session_id=1 pid=372
+2026-11-26T00:51:19.958106Z  WARN rulebox_agent::ipc_shell: pipe client refused: image_not_allowed pid=5264 session_id=1 image=Some("C:\\Config.Msi\\29696c.rbf")
+2026-11-26T00:51:19.958127Z  WARN rulebox_agent::ipc_conn: rejected a pipe client pipe="shell" connection_id=115 reason="image_not_allowed"
+2026-11-26T00:51:21.964851Z  WARN rulebox_agent::ipc_shell: pipe client refused: image_not_allowed pid=5264 session_id=1 image=Some("C:\\Config.Msi\\29696c.rbf")
+2026-11-26T00:51:21.964915Z  WARN rulebox_agent::ipc_conn: rejected a pipe client pipe="shell" connection_id=116 reason="image_not_allowed"
+2026-11-26T00:51:23.970650Z  WARN rulebox_agent::ipc_shell: pipe client refused: image_not_allowed pid=5264 session_id=1 image=Some("C:\\Config.Msi\\29696c.rbf")
+2026-11-26T00:51:23.970697Z  WARN rulebox_agent::ipc_conn: rejected a pipe client pipe="shell" connection_id=117 reason="image_not_allowed"
+2026-11-26T00:51:24.448582Z  INFO rulebox_agent::watchdog: rulebox-shell.exe was not running in the Staff session; started it session_id=1 pid=6320
+2026-11-26T00:51:25.990449Z  WARN rulebox_agent::ipc_shell: pipe client refused: image_not_allowed pid=5264 session_id=1 image=Some("C:\\Config.Msi\\29696c.rbf")
+2026-11-26T00:51:25.990471Z  WARN rulebox_agent::ipc_conn: rejected a pipe client pipe="shell" connection_id=118 reason="image_not_allowed"
+2026-11-26T00:51:28.019872Z  WARN rulebox_agent::ipc_shell: pipe client refused: image_not_allowed pid=5264 session_id=1 image=Some("C:\\Config.Msi\\29696c.rbf")
+2026-11-26T00:51:28.019897Z  WARN rulebox_agent::ipc_conn: rejected a pipe client pipe="shell" connection_id=119 reason="image_not_allowed"
+2026-11-26T00:51:29.451336Z  INFO rulebox_agent::watchdog: rulebox-shell.exe was not running in the Staff session; started it session_id=1 pid=4332
+2026-11-26T00:51:30.037160Z  WARN rulebox_agent::ipc_shell: pipe client refused: image_not_allowed pid=5264 session_id=1 image=Some("C:\\Config.Msi\\29696c.rbf")
+2026-11-26T00:51:30.037174Z  WARN rulebox_agent::ipc_conn: rejected a pipe client pipe="shell" connection_id=120 reason="image_not_allowed"
+2026-11-26T00:51:32.066481Z  WARN rulebox_agent::ipc_shell: pipe client refused: image_not_allowed pid=5264 session_id=1 image=Some("C:\\Config.Msi\\29696c.rbf")
+2026-11-26T00:51:32.066498Z  WARN rulebox_agent::ipc_conn: rejected a pipe client pipe="shell" connection_id=121 reason="image_not_allowed"
+2026-11-26T00:51:34.082237Z  WARN rulebox_agent::ipc_shell: pipe client refused: image_not_allowed pid=5264 session_id=1 image=Some("C:\\Config.Msi\\29696c.rbf")
+2026-11-26T00:51:34.082262Z  WARN rulebox_agent::ipc_conn: rejected a pipe client pipe="shell" connection_id=122 reason="image_not_allowed"
+2026-11-26T00:51:34.449559Z  INFO rulebox_agent::watchdog: rulebox-shell.exe was not running in the Staff session; started it session_id=1 pid=5420
+2026-11-26T00:51:36.096454Z  WARN rulebox_agent::ipc_shell: pipe client refused: image_not_allowed pid=5264 session_id=1 image=Some("C:\\Config.Msi\\29696c.rbf")
+2026-11-26T00:51:36.096468Z  WARN rulebox_agent::ipc_conn: rejected a pipe client pipe="shell" connection_id=123 reason="image_not_allowed"
+2026-11-26T00:51:38.103148Z  WARN rulebox_agent::ipc_shell: pipe client refused: image_not_allowed pid=5264 session_id=1 image=Some("C:\\Config.Msi\\29696c.rbf")
+2026-11-26T00:51:38.103162Z  WARN rulebox_agent::ipc_conn: rejected a pipe client pipe="shell" connection_id=124 reason="image_not_allowed"
+2026-11-26T00:51:39.462887Z  INFO rulebox_agent::watchdog: rulebox-shell.exe was not running in the Staff session; started it session_id=1 pid=3024
+2026-11-26T00:51:40.110354Z  WARN rulebox_agent::ipc_shell: pipe client refused: image_not_allowed pid=5264 session_id=1 image=Some("C:\\Config.Msi\\29696c.rbf")
+2026-11-26T00:51:40.110374Z  WARN rulebox_agent::ipc_conn: rejected a pipe client pipe="shell" connection_id=125 reason="image_not_allowed"
+2026-11-26T00:51:42.127818Z  WARN rulebox_agent::ipc_shell: pipe client refused: image_not_allowed pid=5264 session_id=1 image=Some("C:\\Config.Msi\\29696c.rbf")
+2026-11-26T00:51:42.127832Z  WARN rulebox_agent::ipc_conn: rejected a pipe client pipe="shell" connection_id=126 reason="image_not_allowed"
+2026-11-26T00:51:44.146076Z  WARN rulebox_agent::ipc_shell: pipe client refused: image_not_allowed pid=5264 session_id=1 image=Some("C:\\Config.Msi\\29696c.rbf")
+2026-11-26T00:51:44.146099Z  WARN rulebox_agent::ipc_conn: rejected a pipe client pipe="shell" connection_id=127 reason="image_not_allowed"
+2026-11-26T00:51:44.467921Z  INFO rulebox_agent::watchdog: rulebox-shell.exe was not running in the Staff session; started it session_id=1 pid=6064
+2026-11-26T00:51:46.151857Z  WARN rulebox_agent::ipc_shell: pipe client refused: image_not_allowed pid=5264 session_id=1 image=Some("C:\\Config.Msi\\29696c.rbf")
+2026-11-26T00:51:46.151873Z  WARN rulebox_agent::ipc_conn: rejected a pipe client pipe="shell" connection_id=128 reason="image_not_allowed"
+2026-11-26T00:51:48.155359Z  WARN rulebox_agent::ipc_shell: pipe client refused: image_not_allowed pid=5264 session_id=1 image=Some("C:\\Config.Msi\\29696c.rbf")
+2026-11-26T00:51:48.155395Z  WARN rulebox_agent::ipc_conn: rejected a pipe client pipe="shell" connection_id=129 reason="image_not_allowed"
+2026-11-26T00:51:49.464825Z  INFO rulebox_agent::watchdog: rulebox-shell.exe was not running in the Staff session; started it session_id=1 pid=2536
+2026-11-26T00:51:50.177002Z  WARN rulebox_agent::ipc_shell: pipe client refused: image_not_allowed pid=5264 session_id=1 image=Some("C:\\Config.Msi\\29696c.rbf")
+2026-11-26T00:51:50.177030Z  WARN rulebox_agent::ipc_conn: rejected a pipe client pipe="shell" connection_id=130 reason="image_not_allowed"
+2026-11-26T00:51:52.193166Z  WARN rulebox_agent::ipc_shell: pipe client refused: image_not_allowed pid=5264 session_id=1 image=Some("C:\\Config.Msi\\29696c.rbf")
+2026-11-26T00:51:52.193190Z  WARN rulebox_agent::ipc_conn: rejected a pipe client pipe="shell" connection_id=131 reason="image_not_allowed"
+2026-11-26T00:51:54.196026Z  WARN rulebox_agent::ipc_shell: pipe client refused: image_not_allowed pid=5264 session_id=1 image=Some("C:\\Config.Msi\\29696c.rbf")
+2026-11-26T00:51:54.196039Z  WARN rulebox_agent::ipc_conn: rejected a pipe client pipe="shell" connection_id=132 reason="image_not_allowed"
+2026-11-26T00:51:54.478458Z  INFO rulebox_agent::watchdog: rulebox-shell.exe was not running in the Staff session; started it session_id=1 pid=6620
+2026-11-26T00:51:56.212584Z  WARN rulebox_agent::ipc_shell: pipe client refused: image_not_allowed pid=5264 session_id=1 image=Some("C:\\Config.Msi\\29696c.rbf")
+2026-11-26T00:51:56.212608Z  WARN rulebox_agent::ipc_conn: rejected a pipe client pipe="shell" connection_id=133 reason="image_not_allowed"
+2026-11-26T00:51:58.222012Z  WARN rulebox_agent::ipc_shell: pipe client refused: image_not_allowed pid=5264 session_id=1 image=Some("C:\\Config.Msi\\29696c.rbf")
+2026-11-26T00:51:58.222027Z  WARN rulebox_agent::ipc_conn: rejected a pipe client pipe="shell" connection_id=134 reason="image_not_allowed"
+2026-11-26T00:51:59.478132Z  INFO rulebox_agent::watchdog: rulebox-shell.exe was not running in the Staff session; started it session_id=1 pid=1428
+2026-11-26T00:52:00.236773Z  WARN rulebox_agent::ipc_shell: pipe client refused: image_not_allowed pid=5264 session_id=1 image=Some("C:\\Config.Msi\\29696c.rbf")
+2026-11-26T00:52:00.236799Z  WARN rulebox_agent::ipc_conn: rejected a pipe client pipe="shell" connection_id=135 reason="image_not_allowed"
+2026-11-26T00:52:02.242725Z  WARN rulebox_agent::ipc_shell: pipe client refused: image_not_allowed pid=5264 session_id=1 image=Some("C:\\Config.Msi\\29696c.rbf")
+2026-11-26T00:52:02.242740Z  WARN rulebox_agent::ipc_conn: rejected a pipe client pipe="shell" connection_id=136 reason="image_not_allowed"
+2026-11-26T00:52:04.255575Z  WARN rulebox_agent::ipc_shell: pipe client refused: image_not_allowed pid=5264 session_id=1 image=Some("C:\\Config.Msi\\29696c.rbf")
+2026-11-26T00:52:04.255602Z  WARN rulebox_agent::ipc_conn: rejected a pipe client pipe="shell" connection_id=137 reason="image_not_allowed"
+2026-11-26T00:52:04.491473Z  INFO rulebox_agent::watchdog: rulebox-shell.exe was not running in the Staff session; started it session_id=1 pid=4128
+2026-11-26T00:52:06.259632Z  WARN rulebox_agent::ipc_shell: pipe client refused: image_not_allowed pid=5264 session_id=1 image=Some("C:\\Config.Msi\\29696c.rbf")
+2026-11-26T00:52:06.259651Z  WARN rulebox_agent::ipc_conn: rejected a pipe client pipe="shell" connection_id=138 reason="image_not_allowed"
+2026-11-26T00:52:08.265499Z  WARN rulebox_agent::ipc_shell: pipe client refused: image_not_allowed pid=5264 session_id=1 image=Some("C:\\Config.Msi\\29696c.rbf")
+2026-11-26T00:52:08.265522Z  WARN rulebox_agent::ipc_conn: rejected a pipe client pipe="shell" connection_id=139 reason="image_not_allowed"
+2026-11-26T00:52:09.498114Z  INFO rulebox_agent::watchdog: rulebox-shell.exe was not running in the Staff session; started it session_id=1 pid=4472
+2026-11-26T00:52:10.272666Z  WARN rulebox_agent::ipc_shell: pipe client refused: image_not_allowed pid=5264 session_id=1 image=Some("C:\\Config.Msi\\29696c.rbf")
+2026-11-26T00:52:10.272680Z  WARN rulebox_agent::ipc_conn: rejected a pipe client pipe="shell" connection_id=140 reason="image_not_allowed"
+2026-11-26T00:52:12.277428Z  WARN rulebox_agent::ipc_shell: pipe client refused: image_not_allowed pid=5264 session_id=1 image=Some("C:\\Config.Msi\\29696c.rbf")
+2026-11-26T00:52:12.277448Z  WARN rulebox_agent::ipc_conn: rejected a pipe client pipe="shell" connection_id=141 reason="image_not_allowed"
+2026-11-26T00:52:14.283757Z  WARN rulebox_agent::ipc_shell: pipe client refused: image_not_allowed pid=5264 session_id=1 image=Some("C:\\Config.Msi\\29696c.rbf")
+2026-11-26T00:52:14.283784Z  WARN rulebox_agent::ipc_conn: rejected a pipe client pipe="shell" connection_id=142 reason="image_not_allowed"
+2026-11-26T00:52:14.491595Z  INFO rulebox_agent::watchdog: rulebox-shell.exe was not running in the Staff session; started it session_id=1 pid=3100
+2026-11-26T00:52:16.296501Z  WARN rulebox_agent::ipc_shell: pipe client refused: image_not_allowed pid=5264 session_id=1 image=Some("C:\\Config.Msi\\29696c.rbf")
+2026-11-26T00:52:16.296519Z  WARN rulebox_agent::ipc_conn: rejected a pipe client pipe="shell" connection_id=143 reason="image_not_allowed"
+2026-11-26T00:52:18.315458Z  WARN rulebox_agent::ipc_shell: pipe client refused: image_not_allowed pid=5264 session_id=1 image=Some("C:\\Config.Msi\\29696c.rbf")
+2026-11-26T00:52:18.315483Z  WARN rulebox_agent::ipc_conn: rejected a pipe client pipe="shell" connection_id=144 reason="image_not_allowed"
+2026-11-26T00:52:19.493201Z  INFO rulebox_agent::watchdog: rulebox-shell.exe was not running in the Staff session; started it session_id=1 pid=6312
+2026-11-26T00:52:20.346665Z  WARN rulebox_agent::ipc_shell: pipe client refused: image_not_allowed pid=5264 session_id=1 image=Some("C:\\Config.Msi\\29696c.rbf")
+2026-11-26T00:52:20.346692Z  WARN rulebox_agent::ipc_conn: rejected a pipe client pipe="shell" connection_id=145 reason="image_not_allowed"
+2026-11-26T00:52:22.366581Z  WARN rulebox_agent::ipc_shell: pipe client refused: image_not_allowed pid=5264 session_id=1 image=Some("C:\\Config.Msi\\29696c.rbf")
+2026-11-26T00:52:22.366594Z  WARN rulebox_agent::ipc_conn: rejected a pipe client pipe="shell" connection_id=146 reason="image_not_allowed"
+2026-11-26T00:52:24.391211Z  WARN rulebox_agent::ipc_shell: pipe client refused: image_not_allowed pid=5264 session_id=1 image=Some("C:\\Config.Msi\\29696c.rbf")
+2026-11-26T00:52:24.391225Z  WARN rulebox_agent::ipc_conn: rejected a pipe client pipe="shell" connection_id=147 reason="image_not_allowed"
+2026-11-26T00:52:24.492393Z  INFO rulebox_agent::watchdog: rulebox-shell.exe was not running in the Staff session; started it session_id=1 pid=1716
+2026-11-26T00:52:26.407314Z  WARN rulebox_agent::ipc_shell: pipe client refused: image_not_allowed pid=5264 session_id=1 image=Some("C:\\Config.Msi\\29696c.rbf")
+2026-11-26T00:52:26.407347Z  WARN rulebox_agent::ipc_conn: rejected a pipe client pipe="shell" connection_id=148 reason="image_not_allowed"
+2026-11-26T00:52:28.421802Z  WARN rulebox_agent::ipc_shell: pipe client refused: image_not_allowed pid=5264 session_id=1 image=Some("C:\\Config.Msi\\29696c.rbf")
+2026-11-26T00:52:28.421817Z  WARN rulebox_agent::ipc_conn: rejected a pipe client pipe="shell" connection_id=149 reason="image_not_allowed"
+2026-11-26T00:52:29.508632Z  INFO rulebox_agent::watchdog: rulebox-shell.exe was not running in the Staff session; started it session_id=1 pid=6828
+2026-11-26T00:52:30.440338Z  WARN rulebox_agent::ipc_shell: pipe client refused: image_not_allowed pid=5264 session_id=1 image=Some("C:\\Config.Msi\\29696c.rbf")
+2026-11-26T00:52:30.440354Z  WARN rulebox_agent::ipc_conn: rejected a pipe client pipe="shell" connection_id=150 reason="image_not_allowed"
+2026-11-26T00:52:32.461218Z  WARN rulebox_agent::ipc_shell: pipe client refused: image_not_allowed pid=5264 session_id=1 image=Some("C:\\Config.Msi\\29696c.rbf")
+2026-11-26T00:52:32.461232Z  WARN rulebox_agent::ipc_conn: rejected a pipe client pipe="shell" connection_id=151 reason="image_not_allowed"
+2026-11-26T00:52:34.472675Z  WARN rulebox_agent::ipc_shell: pipe client refused: image_not_allowed pid=5264 session_id=1 image=Some("C:\\Config.Msi\\29696c.rbf")
+2026-11-26T00:52:34.472718Z  WARN rulebox_agent::ipc_conn: rejected a pipe client pipe="shell" connection_id=152 reason="image_not_allowed"
+2026-11-26T00:52:34.510259Z  INFO rulebox_agent::watchdog: rulebox-shell.exe was not running in the Staff session; started it session_id=1 pid=4088
+2026-11-26T00:52:36.488054Z  WARN rulebox_agent::ipc_shell: pipe client refused: image_not_allowed pid=5264 session_id=1 image=Some("C:\\Config.Msi\\29696c.rbf")
+2026-11-26T00:52:36.488071Z  WARN rulebox_agent::ipc_conn: rejected a pipe client pipe="shell" connection_id=153 reason="image_not_allowed"
+2026-11-26T00:52:38.492929Z  WARN rulebox_agent::ipc_shell: pipe client refused: image_not_allowed pid=5264 session_id=1 image=Some("C:\\Config.Msi\\29696c.rbf")
+2026-11-26T00:52:38.492943Z  WARN rulebox_agent::ipc_conn: rejected a pipe client pipe="shell" connection_id=154 reason="image_not_allowed"
+2026-11-26T00:52:39.529565Z  INFO rulebox_agent::watchdog: rulebox-shell.exe was not running in the Staff session; started it session_id=1 pid=2040
+2026-11-26T00:52:40.506886Z  WARN rulebox_agent::ipc_shell: pipe client refused: image_not_allowed pid=5264 session_id=1 image=Some("C:\\Config.Msi\\29696c.rbf")
+2026-11-26T00:52:40.506915Z  WARN rulebox_agent::ipc_conn: rejected a pipe client pipe="shell" connection_id=155 reason="image_not_allowed"
+2026-11-26T00:52:42.516917Z  WARN rulebox_agent::ipc_shell: pipe client refused: image_not_allowed pid=5264 session_id=1 image=Some("C:\\Config.Msi\\29696c.rbf")
+2026-11-26T00:52:42.516934Z  WARN rulebox_agent::ipc_conn: rejected a pipe client pipe="shell" connection_id=156 reason="image_not_allowed"
+2026-11-26T00:52:44.524814Z  WARN rulebox_agent::ipc_shell: pipe client refused: image_not_allowed pid=5264 session_id=1 image=Some("C:\\Config.Msi\\29696c.rbf")
+2026-11-26T00:52:44.524832Z  WARN rulebox_agent::ipc_conn: rejected a pipe client pipe="shell" connection_id=157 reason="image_not_allowed"
+2026-11-26T00:52:44.535746Z  INFO rulebox_agent::watchdog: rulebox-shell.exe was not running in the Staff session; started it session_id=1 pid=2760
+2026-11-26T00:52:46.532140Z  WARN rulebox_agent::ipc_shell: pipe client refused: image_not_allowed pid=5264 session_id=1 image=Some("C:\\Config.Msi\\29696c.rbf")
+2026-11-26T00:52:46.532155Z  WARN rulebox_agent::ipc_conn: rejected a pipe client pipe="shell" connection_id=158 reason="image_not_allowed"
+2026-11-26T00:52:48.548885Z  WARN rulebox_agent::ipc_shell: pipe client refused: image_not_allowed pid=5264 session_id=1 image=Some("C:\\Config.Msi\\29696c.rbf")
+2026-11-26T00:52:48.548909Z  WARN rulebox_agent::ipc_conn: rejected a pipe client pipe="shell" connection_id=159 reason="image_not_allowed"
+2026-11-26T00:52:49.539241Z  INFO rulebox_agent::watchdog: rulebox-shell.exe was not running in the Staff session; started it session_id=1 pid=2976
+2026-11-26T00:52:50.581506Z  WARN rulebox_agent::ipc_shell: pipe client refused: image_not_allowed pid=5264 session_id=1 image=Some("C:\\Config.Msi\\29696c.rbf")
+2026-11-26T00:52:50.581533Z  WARN rulebox_agent::ipc_conn: rejected a pipe client pipe="shell" connection_id=160 reason="image_not_allowed"
+2026-11-26T00:52:52.590281Z  WARN rulebox_agent::ipc_shell: pipe client refused: image_not_allowed pid=5264 session_id=1 image=Some("C:\\Config.Msi\\29696c.rbf")
+2026-11-26T00:52:52.590471Z  WARN rulebox_agent::ipc_conn: rejected a pipe client pipe="shell" connection_id=161 reason="image_not_allowed"
+2026-11-26T00:52:54.536873Z  INFO rulebox_agent::watchdog: rulebox-shell.exe was not running in the Staff session; started it session_id=1 pid=1588
+2026-11-26T00:52:54.594325Z  WARN rulebox_agent::ipc_shell: pipe client refused: image_not_allowed pid=5264 session_id=1 image=Some("C:\\Config.Msi\\29696c.rbf")
+2026-11-26T00:52:54.594626Z  WARN rulebox_agent::ipc_conn: rejected a pipe client pipe="shell" connection_id=162 reason="image_not_allowed"
+2026-11-26T00:52:56.609535Z  WARN rulebox_agent::ipc_shell: pipe client refused: image_not_allowed pid=5264 session_id=1 image=Some("C:\\Config.Msi\\29696c.rbf")
+2026-11-26T00:52:56.609549Z  WARN rulebox_agent::ipc_conn: rejected a pipe client pipe="shell" connection_id=163 reason="image_not_allowed"
+2026-11-26T00:52:58.626567Z  WARN rulebox_agent::ipc_shell: pipe client refused: image_not_allowed pid=5264 session_id=1 image=Some("C:\\Config.Msi\\29696c.rbf")
+2026-11-26T00:52:58.626585Z  WARN rulebox_agent::ipc_conn: rejected a pipe client pipe="shell" connection_id=164 reason="image_not_allowed"
+2026-11-26T00:52:59.550306Z  INFO rulebox_agent::watchdog: rulebox-shell.exe was not running in the Staff session; started it session_id=1 pid=2908
+2026-11-26T00:53:00.643634Z  WARN rulebox_agent::ipc_shell: pipe client refused: image_not_allowed pid=5264 session_id=1 image=Some("C:\\Config.Msi\\29696c.rbf")
+2026-11-26T00:53:00.643652Z  WARN rulebox_agent::ipc_conn: rejected a pipe client pipe="shell" connection_id=165 reason="image_not_allowed"
+2026-11-26T00:53:02.658874Z  WARN rulebox_agent::ipc_shell: pipe client refused: image_not_allowed pid=5264 session_id=1 image=Some("C:\\Config.Msi\\29696c.rbf")
+2026-11-26T00:53:02.659473Z  WARN rulebox_agent::ipc_conn: rejected a pipe client pipe="shell" connection_id=166 reason="image_not_allowed"
+2026-11-26T00:53:04.565327Z  INFO rulebox_agent::watchdog: rulebox-shell.exe was not running in the Staff session; started it session_id=1 pid=6716
+2026-11-26T00:53:04.675572Z  WARN rulebox_agent::ipc_shell: pipe client refused: image_not_allowed pid=5264 session_id=1 image=Some("C:\\Config.Msi\\29696c.rbf")
+2026-11-26T00:53:04.675794Z  WARN rulebox_agent::ipc_conn: rejected a pipe client pipe="shell" connection_id=167 reason="image_not_allowed"
+2026-11-26T00:53:06.688792Z  WARN rulebox_agent::ipc_shell: pipe client refused: image_not_allowed pid=5264 session_id=1 image=Some("C:\\Config.Msi\\29696c.rbf")
+2026-11-26T00:53:06.688840Z  WARN rulebox_agent::ipc_conn: rejected a pipe client pipe="shell" connection_id=168 reason="image_not_allowed"
+2026-11-26T00:53:08.706523Z  WARN rulebox_agent::ipc_shell: pipe client refused: image_not_allowed pid=5264 session_id=1 image=Some("C:\\Config.Msi\\29696c.rbf")
+2026-11-26T00:53:08.706539Z  WARN rulebox_agent::ipc_conn: rejected a pipe client pipe="shell" connection_id=169 reason="image_not_allowed"
+2026-11-26T00:53:09.569936Z  INFO rulebox_agent::watchdog: rulebox-shell.exe was not running in the Staff session; started it session_id=1 pid=1596
+2026-11-26T00:53:10.723612Z  WARN rulebox_agent::ipc_shell: pipe client refused: image_not_allowed pid=5264 session_id=1 image=Some("C:\\Config.Msi\\29696c.rbf")
+2026-11-26T00:53:10.723688Z  WARN rulebox_agent::ipc_conn: rejected a pipe client pipe="shell" connection_id=170 reason="image_not_allowed"
+2026-11-26T00:53:12.741080Z  WARN rulebox_agent::ipc_shell: pipe client refused: image_not_allowed pid=5264 session_id=1 image=Some("C:\\Config.Msi\\29696c.rbf")
+2026-11-26T00:53:12.741094Z  WARN rulebox_agent::ipc_conn: rejected a pipe client pipe="shell" connection_id=171 reason="image_not_allowed"
+2026-11-26T00:53:14.583476Z  INFO rulebox_agent::watchdog: rulebox-shell.exe was not running in the Staff session; started it session_id=1 pid=4808
+2026-11-26T00:53:14.763590Z  WARN rulebox_agent::ipc_shell: pipe client refused: image_not_allowed pid=5264 session_id=1 image=Some("C:\\Config.Msi\\29696c.rbf")
+2026-11-26T00:53:14.763624Z  WARN rulebox_agent::ipc_conn: rejected a pipe client pipe="shell" connection_id=172 reason="image_not_allowed"
+2026-11-26T00:53:16.782389Z  WARN rulebox_agent::ipc_shell: pipe client refused: image_not_allowed pid=5264 session_id=1 image=Some("C:\\Config.Msi\\29696c.rbf")
+2026-11-26T00:53:16.782404Z  WARN rulebox_agent::ipc_conn: rejected a pipe client pipe="shell" connection_id=173 reason="image_not_allowed"
+2026-11-26T00:53:18.791143Z  WARN rulebox_agent::ipc_shell: pipe client refused: image_not_allowed pid=5264 session_id=1 image=Some("C:\\Config.Msi\\29696c.rbf")
+2026-11-26T00:53:18.791158Z  WARN rulebox_agent::ipc_conn: rejected a pipe client pipe="shell" connection_id=174 reason="image_not_allowed"
+2026-11-26T00:53:19.601461Z  INFO rulebox_agent::watchdog: rulebox-shell.exe was not running in the Staff session; started it session_id=1 pid=4028
+2026-11-26T00:53:20.798689Z  WARN rulebox_agent::ipc_shell: pipe client refused: image_not_allowed pid=5264 session_id=1 image=Some("C:\\Config.Msi\\29696c.rbf")
+2026-11-26T00:53:20.798711Z  WARN rulebox_agent::ipc_conn: rejected a pipe client pipe="shell" connection_id=175 reason="image_not_allowed"
+2026-11-26T00:53:22.803093Z  WARN rulebox_agent::ipc_shell: pipe client refused: image_not_allowed pid=5264 session_id=1 image=Some("C:\\Config.Msi\\29696c.rbf")
+2026-11-26T00:53:22.803110Z  WARN rulebox_agent::ipc_conn: rejected a pipe client pipe="shell" connection_id=176 reason="image_not_allowed"
+2026-11-26T00:53:24.606705Z  INFO rulebox_agent::watchdog: rulebox-shell.exe was not running in the Staff session; started it session_id=1 pid=2932
+2026-11-26T00:53:24.819694Z  WARN rulebox_agent::ipc_shell: pipe client refused: image_not_allowed pid=5264 session_id=1 image=Some("C:\\Config.Msi\\29696c.rbf")
+2026-11-26T00:53:24.819711Z  WARN rulebox_agent::ipc_conn: rejected a pipe client pipe="shell" connection_id=177 reason="image_not_allowed"
+2026-11-26T00:53:26.831934Z  WARN rulebox_agent::ipc_shell: pipe client refused: image_not_allowed pid=5264 session_id=1 image=Some("C:\\Config.Msi\\29696c.rbf")
+2026-11-26T00:53:26.831957Z  WARN rulebox_agent::ipc_conn: rejected a pipe client pipe="shell" connection_id=178 reason="image_not_allowed"
+2026-11-26T00:53:28.845897Z  WARN rulebox_agent::ipc_shell: pipe client refused: image_not_allowed pid=5264 session_id=1 image=Some("C:\\Config.Msi\\29696c.rbf")
+2026-11-26T00:53:28.845915Z  WARN rulebox_agent::ipc_conn: rejected a pipe client pipe="shell" connection_id=179 reason="image_not_allowed"
+2026-11-26T00:53:29.611737Z  INFO rulebox_agent::watchdog: rulebox-shell.exe was not running in the Staff session; started it session_id=1 pid=6952
+2026-11-26T00:53:30.865627Z  WARN rulebox_agent::ipc_shell: pipe client refused: image_not_allowed pid=5264 session_id=1 image=Some("C:\\Config.Msi\\29696c.rbf")
+2026-11-26T00:53:30.865651Z  WARN rulebox_agent::ipc_conn: rejected a pipe client pipe="shell" connection_id=180 reason="image_not_allowed"
+2026-11-26T00:53:32.877613Z  WARN rulebox_agent::ipc_shell: pipe client refused: image_not_allowed pid=5264 session_id=1 image=Some("C:\\Config.Msi\\29696c.rbf")
+2026-11-26T00:53:32.877625Z  WARN rulebox_agent::ipc_conn: rejected a pipe client pipe="shell" connection_id=181 reason="image_not_allowed"
+2026-11-26T00:53:34.613924Z  INFO rulebox_agent::watchdog: rulebox-shell.exe was not running in the Staff session; started it session_id=1 pid=1332
+2026-11-26T00:53:34.886091Z  INFO rulebox_agent::ipc_conn: client connected pipe="shell" connection_id=182 pid=1064 session_id=1 role=Shell
+2026-11-26T00:53:34.892715Z  INFO rulebox_agent::watchdog: shell health changed health=Starting
+2026-11-26T00:53:35.035404Z  INFO rulebox_agent::watchdog: shell health changed health=NotRunning
+2026-11-26T00:53:35.610518Z  INFO rulebox_agent::ipc_conn: client disconnected pipe="shell" connection_id=182 pid=1064 end=Shutdown
+2026-11-26T00:53:35.610856Z  INFO rulebox_agent::agent: agent stopped
+2026-11-26T00:53:35.617898Z  INFO rulebox_agent::service: service stopped
+2026-11-26T00:53:43.465829Z  INFO rulebox_agent::service: service starting version="0.1.2"
+2026-11-26T00:53:43.528170Z  INFO rulebox_agent::agent: admin exit settings enabled=true hotkey=Ctrl+Shift+F12 problem=None
+2026-11-26T00:53:43.564121Z  INFO rulebox_agent::agent: agent started
+2026-11-26T00:53:43.579625Z  INFO rulebox_agent::agent: syncing with the backend
+2026-11-26T00:53:43.581456Z  INFO rulebox_agent::ipc_conn: shell pipe listening on \\.\pipe\dev.rulebox.agent.shell
+2026-11-26T00:53:43.592769Z  INFO rulebox_agent::backend::task: desired state accepted version=2 kiosk_enabled=true key_id=591e74141d90ce7e
+2026-11-26T00:53:43.597524Z  INFO rulebox_agent::ipc_conn: admin pipe listening on \\.\pipe\dev.rulebox.agent.admin
+2026-11-26T00:53:47.494605Z  INFO rulebox_agent::ipc_conn: client connected pipe="shell" connection_id=1 pid=5248 session_id=1 role=Shell
+2026-11-26T00:53:47.543825Z  INFO rulebox_agent::watchdog: shell health changed health=Starting
+2026-11-26T00:53:48.703170Z  INFO rulebox_agent::watchdog: shell.ready connection_id=1 pid=5248
+2026-11-26T00:53:48.705750Z  INFO rulebox_agent::watchdog: shell health changed health=Healthy
+2026-11-26T00:53:57.473203Z  INFO rulebox_agent::watchdog: shell.heartbeat (first on this connection) connection_id=1 pid=5248
+2026-11-26T00:55:31.871649Z  INFO rulebox_agent::ipc_conn: client connected pipe="admin" connection_id=1 pid=7100 session_id=0 role=Admin
+2026-11-26T00:55:31.872022Z  INFO rulebox_agent::ipc_conn: client disconnected pipe="admin" connection_id=1 pid=7100 end=PeerClosed
+2026-11-26T01:16:30.803006Z  INFO rulebox_agent::backend::task: desired state accepted version=3 kiosk_enabled=true key_id=591e74141d90ce7e
+2026-11-26T01:17:26.371292Z ERROR rulebox_agent::selfupdate: the Rulebox upgrade did not take effect; the old version still runs version=0.1.2
+2026-11-26T01:17:26.386276Z  INFO rulebox_agent::selfupdate: downloading the Rulebox update version=0.1.4
+2026-11-26T01:17:26.761216Z  INFO rulebox_agent::selfupdate: starting the Rulebox upgrade (msiexec /i /qn /norestart) from="0.1.1" to=0.1.4
+2026-11-26T01:17:26.801554Z  INFO rulebox_agent::selfupdate: msiexec started outside the agent's job pid=2848
+2026-11-26T01:17:27.660351Z  INFO rulebox_agent::ipc_conn: client disconnected pipe="shell" connection_id=1 pid=5248 end=Shutdown
+2026-11-26T01:17:27.660616Z  INFO rulebox_agent::agent: agent stopped
+2026-11-26T01:17:27.667157Z  INFO rulebox_agent::service: service stopped
+2026-11-26T01:17:30.204855Z  INFO rulebox_agent::service: service starting version="0.1.4"
+2026-11-26T01:17:30.204996Z  INFO rulebox_agent::install_marker: the install marker now names this computer
+2026-11-26T01:17:30.208280Z  INFO rulebox_agent::agent: admin exit settings enabled=true hotkey=Ctrl+Shift+F12 problem=None
+2026-11-26T01:17:30.214063Z  INFO rulebox_agent::agent: agent started
+2026-11-26T01:17:30.276628Z  INFO rulebox_agent::agent: syncing with the backend
+2026-11-26T01:17:30.277072Z  INFO rulebox_agent::ipc_conn: shell pipe listening on \\.\pipe\dev.rulebox.agent.shell
+2026-11-26T01:17:30.281013Z  INFO rulebox_agent::backend::task: desired state accepted version=3 kiosk_enabled=true key_id=591e74141d90ce7e
+2026-11-26T01:17:30.281934Z  INFO rulebox_agent::install_marker: the install marker's KioskOn was updated on=true
+2026-11-26T01:17:30.282010Z  INFO rulebox_agent::ipc_conn: admin pipe listening on \\.\pipe\dev.rulebox.agent.admin
+2026-11-26T01:17:30.283728Z  INFO rulebox_agent::selfupdate: Rulebox was updated version=0.1.4
+2026-11-26T01:17:30.798846Z  WARN rulebox_agent::ipc_shell: pipe client refused: image_not_allowed pid=5248 session_id=1 image=Some("C:\\Config.Msi\\15ccda.rbf")
+2026-11-26T01:17:30.799019Z  WARN rulebox_agent::ipc_conn: rejected a pipe client pipe="shell" connection_id=1 reason="image_not_allowed"
+2026-11-26T01:17:32.810147Z  WARN rulebox_agent::ipc_shell: pipe client refused: image_not_allowed pid=5248 session_id=1 image=Some("C:\\Config.Msi\\15ccda.rbf")
+2026-11-26T01:17:32.810165Z  WARN rulebox_agent::ipc_conn: rejected a pipe client pipe="shell" connection_id=2 reason="image_not_allowed"
+2026-11-26T01:17:34.825309Z  WARN rulebox_agent::ipc_shell: pipe client refused: image_not_allowed pid=5248 session_id=1 image=Some("C:\\Config.Msi\\15ccda.rbf")
+2026-11-26T01:17:34.825328Z  WARN rulebox_agent::ipc_conn: rejected a pipe client pipe="shell" connection_id=3 reason="image_not_allowed"
+2026-11-26T01:17:35.402430Z  INFO rulebox_agent::watchdog: rulebox-shell.exe was not running in the Staff session; started it session_id=1 pid=3776
+2026-11-26T01:17:36.841716Z  WARN rulebox_agent::ipc_shell: pipe client refused: image_not_allowed pid=5248 session_id=1 image=Some("C:\\Config.Msi\\15ccda.rbf")
+2026-11-26T01:17:36.841756Z  WARN rulebox_agent::ipc_conn: rejected a pipe client pipe="shell" connection_id=4 reason="image_not_allowed"
+2026-11-26T01:17:38.854761Z  WARN rulebox_agent::ipc_shell: pipe client refused: image_not_allowed pid=5248 session_id=1 image=Some("C:\\Config.Msi\\15ccda.rbf")
+2026-11-26T01:17:38.854777Z  WARN rulebox_agent::ipc_conn: rejected a pipe client pipe="shell" connection_id=5 reason="image_not_allowed"
+2026-11-26T01:17:40.330944Z  INFO rulebox_agent::watchdog: rulebox-shell.exe was not running in the Staff session; started it session_id=1 pid=7076
+2026-11-26T01:17:40.869882Z  WARN rulebox_agent::ipc_shell: pipe client refused: image_not_allowed pid=5248 session_id=1 image=Some("C:\\Config.Msi\\15ccda.rbf")
+2026-11-26T01:17:40.869992Z  WARN rulebox_agent::ipc_conn: rejected a pipe client pipe="shell" connection_id=6 reason="image_not_allowed"
+2026-11-26T01:17:42.888238Z  WARN rulebox_agent::ipc_shell: pipe client refused: image_not_allowed pid=5248 session_id=1 image=Some("C:\\Config.Msi\\15ccda.rbf")
+2026-11-26T01:17:42.888256Z  WARN rulebox_agent::ipc_conn: rejected a pipe client pipe="shell" connection_id=7 reason="image_not_allowed"
+2026-11-26T01:17:44.905350Z  WARN rulebox_agent::ipc_shell: pipe client refused: image_not_allowed pid=5248 session_id=1 image=Some("C:\\Config.Msi\\15ccda.rbf")
+2026-11-26T01:17:44.905380Z  WARN rulebox_agent::ipc_conn: rejected a pipe client pipe="shell" connection_id=8 reason="image_not_allowed"
+2026-11-26T01:17:45.332296Z  INFO rulebox_agent::watchdog: rulebox-shell.exe was not running in the Staff session; started it session_id=1 pid=952
+2026-11-26T01:17:46.919790Z  WARN rulebox_agent::ipc_shell: pipe client refused: image_not_allowed pid=5248 session_id=1 image=Some("C:\\Config.Msi\\15ccda.rbf")
+2026-11-26T01:17:46.919805Z  WARN rulebox_agent::ipc_conn: rejected a pipe client pipe="shell" connection_id=9 reason="image_not_allowed"
+2026-11-26T01:17:48.933747Z  WARN rulebox_agent::ipc_shell: pipe client refused: image_not_allowed pid=5248 session_id=1 image=Some("C:\\Config.Msi\\15ccda.rbf")
+2026-11-26T01:17:48.933761Z  WARN rulebox_agent::ipc_conn: rejected a pipe client pipe="shell" connection_id=10 reason="image_not_allowed"
+2026-11-26T01:17:50.349126Z  INFO rulebox_agent::watchdog: rulebox-shell.exe was not running in the Staff session; started it session_id=1 pid=6656
+2026-11-26T01:17:50.950284Z  WARN rulebox_agent::ipc_shell: pipe client refused: image_not_allowed pid=5248 session_id=1 image=Some("C:\\Config.Msi\\15ccda.rbf")
+2026-11-26T01:17:50.950433Z  WARN rulebox_agent::ipc_conn: rejected a pipe client pipe="shell" connection_id=11 reason="image_not_allowed"
+2026-11-26T01:17:52.967764Z  WARN rulebox_agent::ipc_shell: pipe client refused: image_not_allowed pid=5248 session_id=1 image=Some("C:\\Config.Msi\\15ccda.rbf")
+2026-11-26T01:17:52.967800Z  WARN rulebox_agent::ipc_conn: rejected a pipe client pipe="shell" connection_id=12 reason="image_not_allowed"
+2026-11-26T01:17:54.972670Z  WARN rulebox_agent::ipc_shell: pipe client refused: image_not_allowed pid=5248 session_id=1 image=Some("C:\\Config.Msi\\15ccda.rbf")
+2026-11-26T01:17:54.972700Z  WARN rulebox_agent::ipc_conn: rejected a pipe client pipe="shell" connection_id=13 reason="image_not_allowed"
+2026-11-26T01:17:55.348983Z  INFO rulebox_agent::watchdog: rulebox-shell.exe was not running in the Staff session; started it session_id=1 pid=6184
+2026-11-26T01:17:56.981028Z  WARN rulebox_agent::ipc_shell: pipe client refused: image_not_allowed pid=5248 session_id=1 image=Some("C:\\Config.Msi\\15ccda.rbf")
+2026-11-26T01:17:56.981047Z  WARN rulebox_agent::ipc_conn: rejected a pipe client pipe="shell" connection_id=14 reason="image_not_allowed"
+2026-11-26T01:17:58.998140Z  WARN rulebox_agent::ipc_shell: pipe client refused: image_not_allowed pid=5248 session_id=1 image=Some("C:\\Config.Msi\\15ccda.rbf")
+2026-11-26T01:17:58.998179Z  WARN rulebox_agent::ipc_conn: rejected a pipe client pipe="shell" connection_id=15 reason="image_not_allowed"
+2026-11-26T01:18:00.364395Z  INFO rulebox_agent::watchdog: rulebox-shell.exe was not running in the Staff session; started it session_id=1 pid=6876
+2026-11-26T01:18:01.014684Z  WARN rulebox_agent::ipc_shell: pipe client refused: image_not_allowed pid=5248 session_id=1 image=Some("C:\\Config.Msi\\15ccda.rbf")
+2026-11-26T01:18:01.014707Z  WARN rulebox_agent::ipc_conn: rejected a pipe client pipe="shell" connection_id=16 reason="image_not_allowed"
+2026-11-26T01:18:03.043754Z  WARN rulebox_agent::ipc_shell: pipe client refused: image_not_allowed pid=5248 session_id=1 image=Some("C:\\Config.Msi\\15ccda.rbf")
+2026-11-26T01:18:03.043768Z  WARN rulebox_agent::ipc_conn: rejected a pipe client pipe="shell" connection_id=17 reason="image_not_allowed"
+2026-11-26T01:18:05.054469Z  WARN rulebox_agent::ipc_shell: pipe client refused: image_not_allowed pid=5248 session_id=1 image=Some("C:\\Config.Msi\\15ccda.rbf")
+2026-11-26T01:18:05.054485Z  WARN rulebox_agent::ipc_conn: rejected a pipe client pipe="shell" connection_id=18 reason="image_not_allowed"
+2026-11-26T01:18:05.363261Z  INFO rulebox_agent::watchdog: rulebox-shell.exe was not running in the Staff session; started it session_id=1 pid=6228
+2026-11-26T01:18:07.058880Z  WARN rulebox_agent::ipc_shell: pipe client refused: image_not_allowed pid=5248 session_id=1 image=Some("C:\\Config.Msi\\15ccda.rbf")
+2026-11-26T01:18:07.058949Z  WARN rulebox_agent::ipc_conn: rejected a pipe client pipe="shell" connection_id=19 reason="image_not_allowed"
+2026-11-26T01:18:09.067949Z  WARN rulebox_agent::ipc_shell: pipe client refused: image_not_allowed pid=5248 session_id=1 image=Some("C:\\Config.Msi\\15ccda.rbf")
+2026-11-26T01:18:09.067967Z  WARN rulebox_agent::ipc_conn: rejected a pipe client pipe="shell" connection_id=20 reason="image_not_allowed"
+2026-11-26T01:18:10.380234Z  INFO rulebox_agent::watchdog: rulebox-shell.exe was not running in the Staff session; started it session_id=1 pid=4004
+2026-11-26T01:18:11.074477Z  WARN rulebox_agent::ipc_shell: pipe client refused: image_not_allowed pid=5248 session_id=1 image=Some("C:\\Config.Msi\\15ccda.rbf")
+2026-11-26T01:18:11.074500Z  WARN rulebox_agent::ipc_conn: rejected a pipe client pipe="shell" connection_id=21 reason="image_not_allowed"
+2026-11-26T01:18:13.090193Z  WARN rulebox_agent::ipc_shell: pipe client refused: image_not_allowed pid=5248 session_id=1 image=Some("C:\\Config.Msi\\15ccda.rbf")
+2026-11-26T01:18:13.090211Z  WARN rulebox_agent::ipc_conn: rejected a pipe client pipe="shell" connection_id=22 reason="image_not_allowed"
+2026-11-26T01:18:15.124443Z  WARN rulebox_agent::ipc_shell: pipe client refused: image_not_allowed pid=5248 session_id=1 image=Some("C:\\Config.Msi\\15ccda.rbf")
+2026-11-26T01:18:15.124468Z  WARN rulebox_agent::ipc_conn: rejected a pipe client pipe="shell" connection_id=23 reason="image_not_allowed"
+2026-11-26T01:18:15.379366Z  INFO rulebox_agent::watchdog: rulebox-shell.exe was not running in the Staff session; started it session_id=1 pid=6632
+2026-11-26T01:18:17.140286Z  WARN rulebox_agent::ipc_shell: pipe client refused: image_not_allowed pid=5248 session_id=1 image=Some("C:\\Config.Msi\\15ccda.rbf")
+2026-11-26T01:18:17.140305Z  WARN rulebox_agent::ipc_conn: rejected a pipe client pipe="shell" connection_id=24 reason="image_not_allowed"
+2026-11-26T01:18:19.151160Z  WARN rulebox_agent::ipc_shell: pipe client refused: image_not_allowed pid=5248 session_id=1 image=Some("C:\\Config.Msi\\15ccda.rbf")
+2026-11-26T01:18:19.151247Z  WARN rulebox_agent::ipc_conn: rejected a pipe client pipe="shell" connection_id=25 reason="image_not_allowed"
+2026-11-26T01:18:20.393688Z  INFO rulebox_agent::watchdog: rulebox-shell.exe was not running in the Staff session; started it session_id=1 pid=6628
+2026-11-26T01:18:21.166693Z  WARN rulebox_agent::ipc_shell: pipe client refused: image_not_allowed pid=5248 session_id=1 image=Some("C:\\Config.Msi\\15ccda.rbf")
+2026-11-26T01:18:21.166716Z  WARN rulebox_agent::ipc_conn: rejected a pipe client pipe="shell" connection_id=26 reason="image_not_allowed"
+2026-11-26T01:18:23.185612Z  WARN rulebox_agent::ipc_shell: pipe client refused: image_not_allowed pid=5248 session_id=1 image=Some("C:\\Config.Msi\\15ccda.rbf")
+2026-11-26T01:18:23.185638Z  WARN rulebox_agent::ipc_conn: rejected a pipe client pipe="shell" connection_id=27 reason="image_not_allowed"
+2026-11-26T01:18:25.203292Z  WARN rulebox_agent::ipc_shell: pipe client refused: image_not_allowed pid=5248 session_id=1 image=Some("C:\\Config.Msi\\15ccda.rbf")
+2026-11-26T01:18:25.203305Z  WARN rulebox_agent::ipc_conn: rejected a pipe client pipe="shell" connection_id=28 reason="image_not_allowed"
+2026-11-26T01:18:25.411801Z  INFO rulebox_agent::watchdog: rulebox-shell.exe was not running in the Staff session; started it session_id=1 pid=4988
+2026-11-26T01:18:27.218954Z  WARN rulebox_agent::ipc_shell: pipe client refused: image_not_allowed pid=5248 session_id=1 image=Some("C:\\Config.Msi\\15ccda.rbf")
+2026-11-26T01:18:27.218999Z  WARN rulebox_agent::ipc_conn: rejected a pipe client pipe="shell" connection_id=29 reason="image_not_allowed"
+2026-11-26T01:18:29.229932Z  WARN rulebox_agent::ipc_shell: pipe client refused: image_not_allowed pid=5248 session_id=1 image=Some("C:\\Config.Msi\\15ccda.rbf")
+2026-11-26T01:18:29.229945Z  WARN rulebox_agent::ipc_conn: rejected a pipe client pipe="shell" connection_id=30 reason="image_not_allowed"
+2026-11-26T01:18:30.443026Z  INFO rulebox_agent::watchdog: rulebox-shell.exe was not running in the Staff session; started it session_id=1 pid=5268
+2026-11-26T01:18:31.237056Z  WARN rulebox_agent::ipc_shell: pipe client refused: image_not_allowed pid=5248 session_id=1 image=Some("C:\\Config.Msi\\15ccda.rbf")
+2026-11-26T01:18:31.237109Z  WARN rulebox_agent::ipc_conn: rejected a pipe client pipe="shell" connection_id=31 reason="image_not_allowed"
+2026-11-26T01:18:33.253188Z  WARN rulebox_agent::ipc_shell: pipe client refused: image_not_allowed pid=5248 session_id=1 image=Some("C:\\Config.Msi\\15ccda.rbf")
+2026-11-26T01:18:33.253204Z  WARN rulebox_agent::ipc_conn: rejected a pipe client pipe="shell" connection_id=32 reason="image_not_allowed"
+2026-11-26T01:18:35.262776Z  WARN rulebox_agent::ipc_shell: pipe client refused: image_not_allowed pid=5248 session_id=1 image=Some("C:\\Config.Msi\\15ccda.rbf")
+2026-11-26T01:18:35.262791Z  WARN rulebox_agent::ipc_conn: rejected a pipe client pipe="shell" connection_id=33 reason="image_not_allowed"
+2026-11-26T01:18:35.445057Z  INFO rulebox_agent::watchdog: rulebox-shell.exe was not running in the Staff session; started it session_id=1 pid=6188
+2026-11-26T01:18:37.280839Z  WARN rulebox_agent::ipc_shell: pipe client refused: image_not_allowed pid=5248 session_id=1 image=Some("C:\\Config.Msi\\15ccda.rbf")
+2026-11-26T01:18:37.280853Z  WARN rulebox_agent::ipc_conn: rejected a pipe client pipe="shell" connection_id=34 reason="image_not_allowed"
+2026-11-26T01:18:39.293976Z  WARN rulebox_agent::ipc_shell: pipe client refused: image_not_allowed pid=5248 session_id=1 image=Some("C:\\Config.Msi\\15ccda.rbf")
+2026-11-26T01:18:39.293989Z  WARN rulebox_agent::ipc_conn: rejected a pipe client pipe="shell" connection_id=35 reason="image_not_allowed"
+2026-11-26T01:18:40.457764Z  INFO rulebox_agent::watchdog: rulebox-shell.exe was not running in the Staff session; started it session_id=1 pid=2044
+2026-11-26T01:18:41.299701Z  WARN rulebox_agent::ipc_shell: pipe client refused: image_not_allowed pid=5248 session_id=1 image=Some("C:\\Config.Msi\\15ccda.rbf")
+2026-11-26T01:18:41.299722Z  WARN rulebox_agent::ipc_conn: rejected a pipe client pipe="shell" connection_id=36 reason="image_not_allowed"
+2026-11-26T01:18:43.310538Z  WARN rulebox_agent::ipc_shell: pipe client refused: image_not_allowed pid=5248 session_id=1 image=Some("C:\\Config.Msi\\15ccda.rbf")
+2026-11-26T01:18:43.310558Z  WARN rulebox_agent::ipc_conn: rejected a pipe client pipe="shell" connection_id=37 reason="image_not_allowed"
+2026-11-26T01:18:45.315577Z  WARN rulebox_agent::ipc_shell: pipe client refused: image_not_allowed pid=5248 session_id=1 image=Some("C:\\Config.Msi\\15ccda.rbf")
+2026-11-26T01:18:45.315594Z  WARN rulebox_agent::ipc_conn: rejected a pipe client pipe="shell" connection_id=38 reason="image_not_allowed"
+2026-11-26T01:18:45.472647Z  INFO rulebox_agent::watchdog: rulebox-shell.exe was not running in the Staff session; started it session_id=1 pid=1296
+2026-11-26T01:18:47.325768Z  WARN rulebox_agent::ipc_shell: pipe client refused: image_not_allowed pid=5248 session_id=1 image=Some("C:\\Config.Msi\\15ccda.rbf")
+2026-11-26T01:18:47.325802Z  WARN rulebox_agent::ipc_conn: rejected a pipe client pipe="shell" connection_id=39 reason="image_not_allowed"
+2026-11-26T01:18:49.344029Z  WARN rulebox_agent::ipc_shell: pipe client refused: image_not_allowed pid=5248 session_id=1 image=Some("C:\\Config.Msi\\15ccda.rbf")
+2026-11-26T01:18:49.344045Z  WARN rulebox_agent::ipc_conn: rejected a pipe client pipe="shell" connection_id=40 reason="image_not_allowed"
+2026-11-26T01:18:50.480042Z  INFO rulebox_agent::watchdog: rulebox-shell.exe was not running in the Staff session; started it session_id=1 pid=2416
+2026-11-26T01:18:51.349059Z  WARN rulebox_agent::ipc_shell: pipe client refused: image_not_allowed pid=5248 session_id=1 image=Some("C:\\Config.Msi\\15ccda.rbf")
+2026-11-26T01:18:51.349077Z  WARN rulebox_agent::ipc_conn: rejected a pipe client pipe="shell" connection_id=41 reason="image_not_allowed"
+2026-11-26T01:18:53.359530Z  WARN rulebox_agent::ipc_shell: pipe client refused: image_not_allowed pid=5248 session_id=1 image=Some("C:\\Config.Msi\\15ccda.rbf")
+2026-11-26T01:18:53.359546Z  WARN rulebox_agent::ipc_conn: rejected a pipe client pipe="shell" connection_id=42 reason="image_not_allowed"
+2026-11-26T01:18:55.374235Z  WARN rulebox_agent::ipc_shell: pipe client refused: image_not_allowed pid=5248 session_id=1 image=Some("C:\\Config.Msi\\15ccda.rbf")
+2026-11-26T01:18:55.374414Z  WARN rulebox_agent::ipc_conn: rejected a pipe client pipe="shell" connection_id=43 reason="image_not_allowed"
+2026-11-26T01:18:55.489494Z  INFO rulebox_agent::watchdog: rulebox-shell.exe was not running in the Staff session; started it session_id=1 pid=2116
+2026-11-26T01:18:57.403088Z  WARN rulebox_agent::ipc_shell: pipe client refused: image_not_allowed pid=5248 session_id=1 image=Some("C:\\Config.Msi\\15ccda.rbf")
+2026-11-26T01:18:57.403129Z  WARN rulebox_agent::ipc_conn: rejected a pipe client pipe="shell" connection_id=44 reason="image_not_allowed"
+2026-11-26T01:18:59.420279Z  WARN rulebox_agent::ipc_shell: pipe client refused: image_not_allowed pid=5248 session_id=1 image=Some("C:\\Config.Msi\\15ccda.rbf")
+2026-11-26T01:18:59.420662Z  WARN rulebox_agent::ipc_conn: rejected a pipe client pipe="shell" connection_id=45 reason="image_not_allowed"
+2026-11-26T01:19:00.488100Z  INFO rulebox_agent::watchdog: rulebox-shell.exe was not running in the Staff session; started it session_id=1 pid=3244
+2026-11-26T01:19:01.433544Z  WARN rulebox_agent::ipc_shell: pipe client refused: image_not_allowed pid=5248 session_id=1 image=Some("C:\\Config.Msi\\15ccda.rbf")
+2026-11-26T01:19:01.433561Z  WARN rulebox_agent::ipc_conn: rejected a pipe client pipe="shell" connection_id=46 reason="image_not_allowed"
+2026-11-26T01:19:03.438863Z  WARN rulebox_agent::ipc_shell: pipe client refused: image_not_allowed pid=5248 session_id=1 image=Some("C:\\Config.Msi\\15ccda.rbf")
+2026-11-26T01:19:03.438878Z  WARN rulebox_agent::ipc_conn: rejected a pipe client pipe="shell" connection_id=47 reason="image_not_allowed"
+2026-11-26T01:19:05.453005Z  WARN rulebox_agent::ipc_shell: pipe client refused: image_not_allowed pid=5248 session_id=1 image=Some("C:\\Config.Msi\\15ccda.rbf")
+2026-11-26T01:19:05.453034Z  WARN rulebox_agent::ipc_conn: rejected a pipe client pipe="shell" connection_id=48 reason="image_not_allowed"
+2026-11-26T01:19:05.488929Z  INFO rulebox_agent::watchdog: rulebox-shell.exe was not running in the Staff session; started it session_id=1 pid=3840
+2026-11-26T01:19:07.467128Z  WARN rulebox_agent::ipc_shell: pipe client refused: image_not_allowed pid=5248 session_id=1 image=Some("C:\\Config.Msi\\15ccda.rbf")
+2026-11-26T01:19:07.467149Z  WARN rulebox_agent::ipc_conn: rejected a pipe client pipe="shell" connection_id=49 reason="image_not_allowed"
+2026-11-26T01:19:09.471645Z  WARN rulebox_agent::ipc_shell: pipe client refused: image_not_allowed pid=5248 session_id=1 image=Some("C:\\Config.Msi\\15ccda.rbf")
+2026-11-26T01:19:09.471667Z  WARN rulebox_agent::ipc_conn: rejected a pipe client pipe="shell" connection_id=50 reason="image_not_allowed"
+2026-11-26T01:19:10.490796Z  INFO rulebox_agent::watchdog: rulebox-shell.exe was not running in the Staff session; started it session_id=1 pid=5504
+2026-11-26T01:19:11.480242Z  WARN rulebox_agent::ipc_shell: pipe client refused: image_not_allowed pid=5248 session_id=1 image=Some("C:\\Config.Msi\\15ccda.rbf")
+2026-11-26T01:19:11.480256Z  WARN rulebox_agent::ipc_conn: rejected a pipe client pipe="shell" connection_id=51 reason="image_not_allowed"
+2026-11-26T01:19:13.484891Z  WARN rulebox_agent::ipc_shell: pipe client refused: image_not_allowed pid=5248 session_id=1 image=Some("C:\\Config.Msi\\15ccda.rbf")
+2026-11-26T01:19:13.484913Z  WARN rulebox_agent::ipc_conn: rejected a pipe client pipe="shell" connection_id=52 reason="image_not_allowed"
+2026-11-26T01:19:15.490409Z  INFO rulebox_agent::watchdog: rulebox-shell.exe was not running in the Staff session; started it session_id=1 pid=6160
+2026-11-26T01:19:15.499309Z  WARN rulebox_agent::ipc_shell: pipe client refused: image_not_allowed pid=5248 session_id=1 image=Some("C:\\Config.Msi\\15ccda.rbf")
+2026-11-26T01:19:15.499330Z  WARN rulebox_agent::ipc_conn: rejected a pipe client pipe="shell" connection_id=53 reason="image_not_allowed"
+2026-11-26T01:19:17.517999Z  WARN rulebox_agent::ipc_shell: pipe client refused: image_not_allowed pid=5248 session_id=1 image=Some("C:\\Config.Msi\\15ccda.rbf")
+2026-11-26T01:19:17.518046Z  WARN rulebox_agent::ipc_conn: rejected a pipe client pipe="shell" connection_id=54 reason="image_not_allowed"
+2026-11-26T01:19:19.526151Z  WARN rulebox_agent::ipc_shell: pipe client refused: image_not_allowed pid=5248 session_id=1 image=Some("C:\\Config.Msi\\15ccda.rbf")
+2026-11-26T01:19:19.526182Z  WARN rulebox_agent::ipc_conn: rejected a pipe client pipe="shell" connection_id=55 reason="image_not_allowed"
+2026-11-26T01:19:20.491372Z  INFO rulebox_agent::watchdog: rulebox-shell.exe was not running in the Staff session; started it session_id=1 pid=5508
+2026-11-26T01:19:21.544522Z  WARN rulebox_agent::ipc_shell: pipe client refused: image_not_allowed pid=5248 session_id=1 image=Some("C:\\Config.Msi\\15ccda.rbf")
+2026-11-26T01:19:21.544572Z  WARN rulebox_agent::ipc_conn: rejected a pipe client pipe="shell" connection_id=56 reason="image_not_allowed"
+2026-11-26T01:19:23.548361Z  WARN rulebox_agent::ipc_shell: pipe client refused: image_not_allowed pid=5248 session_id=1 image=Some("C:\\Config.Msi\\15ccda.rbf")
+2026-11-26T01:19:23.548374Z  WARN rulebox_agent::ipc_conn: rejected a pipe client pipe="shell" connection_id=57 reason="image_not_allowed"
+2026-11-26T01:19:25.500706Z  INFO rulebox_agent::watchdog: rulebox-shell.exe was not running in the Staff session; started it session_id=1 pid=2844
+2026-11-26T01:19:25.574537Z  WARN rulebox_agent::ipc_shell: pipe client refused: image_not_allowed pid=5248 session_id=1 image=Some("C:\\Config.Msi\\15ccda.rbf")
+2026-11-26T01:19:25.574550Z  WARN rulebox_agent::ipc_conn: rejected a pipe client pipe="shell" connection_id=58 reason="image_not_allowed"
+2026-11-26T01:19:27.577629Z  WARN rulebox_agent::ipc_shell: pipe client refused: image_not_allowed pid=5248 session_id=1 image=Some("C:\\Config.Msi\\15ccda.rbf")
+2026-11-26T01:19:27.577663Z  WARN rulebox_agent::ipc_conn: rejected a pipe client pipe="shell" connection_id=59 reason="image_not_allowed"
+2026-11-26T01:19:29.605356Z  WARN rulebox_agent::ipc_shell: pipe client refused: image_not_allowed pid=5248 session_id=1 image=Some("C:\\Config.Msi\\15ccda.rbf")
+2026-11-26T01:19:29.605371Z  WARN rulebox_agent::ipc_conn: rejected a pipe client pipe="shell" connection_id=60 reason="image_not_allowed"
+2026-11-26T01:19:30.503941Z  INFO rulebox_agent::watchdog: rulebox-shell.exe was not running in the Staff session; started it session_id=1 pid=7164
+2026-11-26T01:19:31.621378Z  WARN rulebox_agent::ipc_shell: pipe client refused: image_not_allowed pid=5248 session_id=1 image=Some("C:\\Config.Msi\\15ccda.rbf")
+2026-11-26T01:19:31.621392Z  WARN rulebox_agent::ipc_conn: rejected a pipe client pipe="shell" connection_id=61 reason="image_not_allowed"
+2026-11-26T01:19:33.636452Z  WARN rulebox_agent::ipc_shell: pipe client refused: image_not_allowed pid=5248 session_id=1 image=Some("C:\\Config.Msi\\15ccda.rbf")
+2026-11-26T01:19:33.636477Z  WARN rulebox_agent::ipc_conn: rejected a pipe client pipe="shell" connection_id=62 reason="image_not_allowed"
+2026-11-26T01:19:35.505808Z  INFO rulebox_agent::watchdog: rulebox-shell.exe was not running in the Staff session; started it session_id=1 pid=4432
+2026-11-26T01:19:35.668303Z  WARN rulebox_agent::ipc_shell: pipe client refused: image_not_allowed pid=5248 session_id=1 image=Some("C:\\Config.Msi\\15ccda.rbf")
+2026-11-26T01:19:35.668318Z  WARN rulebox_agent::ipc_conn: rejected a pipe client pipe="shell" connection_id=63 reason="image_not_allowed"
+2026-11-26T01:19:37.685460Z  WARN rulebox_agent::ipc_shell: pipe client refused: image_not_allowed pid=5248 session_id=1 image=Some("C:\\Config.Msi\\15ccda.rbf")
+2026-11-26T01:19:37.685542Z  WARN rulebox_agent::ipc_conn: rejected a pipe client pipe="shell" connection_id=64 reason="image_not_allowed"
+2026-11-26T01:19:39.704513Z  WARN rulebox_agent::ipc_shell: pipe client refused: image_not_allowed pid=5248 session_id=1 image=Some("C:\\Config.Msi\\15ccda.rbf")
+2026-11-26T01:19:39.704524Z  WARN rulebox_agent::ipc_conn: rejected a pipe client pipe="shell" connection_id=65 reason="image_not_allowed"
+2026-11-26T01:19:40.503958Z  INFO rulebox_agent::watchdog: rulebox-shell.exe was not running in the Staff session; started it session_id=1 pid=4596
+2026-11-26T01:19:41.731120Z  WARN rulebox_agent::ipc_shell: pipe client refused: image_not_allowed pid=5248 session_id=1 image=Some("C:\\Config.Msi\\15ccda.rbf")
+2026-11-26T01:19:41.731139Z  WARN rulebox_agent::ipc_conn: rejected a pipe client pipe="shell" connection_id=66 reason="image_not_allowed"
+2026-11-26T01:19:43.763267Z  WARN rulebox_agent::ipc_shell: pipe client refused: image_not_allowed pid=5248 session_id=1 image=Some("C:\\Config.Msi\\15ccda.rbf")
+2026-11-26T01:19:43.763284Z  WARN rulebox_agent::ipc_conn: rejected a pipe client pipe="shell" connection_id=67 reason="image_not_allowed"
+2026-11-26T01:19:45.517026Z  INFO rulebox_agent::watchdog: rulebox-shell.exe was not running in the Staff session; started it session_id=1 pid=3864
+2026-11-26T01:19:45.777050Z  WARN rulebox_agent::ipc_shell: pipe client refused: image_not_allowed pid=5248 session_id=1 image=Some("C:\\Config.Msi\\15ccda.rbf")
+2026-11-26T01:19:45.777093Z  WARN rulebox_agent::ipc_conn: rejected a pipe client pipe="shell" connection_id=68 reason="image_not_allowed"
+2026-11-26T01:19:47.796380Z  WARN rulebox_agent::ipc_shell: pipe client refused: image_not_allowed pid=5248 session_id=1 image=Some("C:\\Config.Msi\\15ccda.rbf")
+2026-11-26T01:19:47.796399Z  WARN rulebox_agent::ipc_conn: rejected a pipe client pipe="shell" connection_id=69 reason="image_not_allowed"
+2026-11-26T01:19:49.809717Z  WARN rulebox_agent::ipc_shell: pipe client refused: image_not_allowed pid=5248 session_id=1 image=Some("C:\\Config.Msi\\15ccda.rbf")
+2026-11-26T01:19:49.809732Z  WARN rulebox_agent::ipc_conn: rejected a pipe client pipe="shell" connection_id=70 reason="image_not_allowed"
+2026-11-26T01:19:50.522772Z  INFO rulebox_agent::watchdog: rulebox-shell.exe was not running in the Staff session; started it session_id=1 pid=2244
+2026-11-26T01:19:51.826266Z  WARN rulebox_agent::ipc_shell: pipe client refused: image_not_allowed pid=5248 session_id=1 image=Some("C:\\Config.Msi\\15ccda.rbf")
+2026-11-26T01:19:51.826313Z  WARN rulebox_agent::ipc_conn: rejected a pipe client pipe="shell" connection_id=71 reason="image_not_allowed"
+2026-11-26T01:19:53.843126Z  WARN rulebox_agent::ipc_shell: pipe client refused: image_not_allowed pid=5248 session_id=1 image=Some("C:\\Config.Msi\\15ccda.rbf")
+2026-11-26T01:19:53.843176Z  WARN rulebox_agent::ipc_conn: rejected a pipe client pipe="shell" connection_id=72 reason="image_not_allowed"
+2026-11-26T01:19:55.533963Z  INFO rulebox_agent::watchdog: rulebox-shell.exe was not running in the Staff session; started it session_id=1 pid=1736
+2026-11-26T01:19:55.855904Z  WARN rulebox_agent::ipc_shell: pipe client refused: image_not_allowed pid=5248 session_id=1 image=Some("C:\\Config.Msi\\15ccda.rbf")
+2026-11-26T01:19:55.855954Z  WARN rulebox_agent::ipc_conn: rejected a pipe client pipe="shell" connection_id=73 reason="image_not_allowed"
+2026-11-26T01:19:57.871010Z  WARN rulebox_agent::ipc_shell: pipe client refused: image_not_allowed pid=5248 session_id=1 image=Some("C:\\Config.Msi\\15ccda.rbf")
+2026-11-26T01:19:57.871054Z  WARN rulebox_agent::ipc_conn: rejected a pipe client pipe="shell" connection_id=74 reason="image_not_allowed"
+2026-11-26T01:19:59.876920Z  WARN rulebox_agent::ipc_shell: pipe client refused: image_not_allowed pid=5248 session_id=1 image=Some("C:\\Config.Msi\\15ccda.rbf")
+2026-11-26T01:19:59.876933Z  WARN rulebox_agent::ipc_conn: rejected a pipe client pipe="shell" connection_id=75 reason="image_not_allowed"
+2026-11-26T01:20:00.551804Z  INFO rulebox_agent::watchdog: rulebox-shell.exe was not running in the Staff session; started it session_id=1 pid=6752
+2026-11-26T01:20:01.888753Z  WARN rulebox_agent::ipc_shell: pipe client refused: image_not_allowed pid=5248 session_id=1 image=Some("C:\\Config.Msi\\15ccda.rbf")
+2026-11-26T01:20:01.888766Z  WARN rulebox_agent::ipc_conn: rejected a pipe client pipe="shell" connection_id=76 reason="image_not_allowed"
+2026-11-26T01:20:03.905312Z  WARN rulebox_agent::ipc_shell: pipe client refused: image_not_allowed pid=5248 session_id=1 image=Some("C:\\Config.Msi\\15ccda.rbf")
+2026-11-26T01:20:03.905338Z  WARN rulebox_agent::ipc_conn: rejected a pipe client pipe="shell" connection_id=77 reason="image_not_allowed"
+2026-11-26T01:20:05.577524Z  INFO rulebox_agent::watchdog: rulebox-shell.exe was not running in the Staff session; started it session_id=1 pid=4132
+2026-11-26T01:20:05.918564Z  WARN rulebox_agent::ipc_shell: pipe client refused: image_not_allowed pid=5248 session_id=1 image=Some("C:\\Config.Msi\\15ccda.rbf")
+2026-11-26T01:20:05.918588Z  WARN rulebox_agent::ipc_conn: rejected a pipe client pipe="shell" connection_id=78 reason="image_not_allowed"
+2026-11-26T01:20:07.936317Z  WARN rulebox_agent::ipc_shell: pipe client refused: image_not_allowed pid=5248 session_id=1 image=Some("C:\\Config.Msi\\15ccda.rbf")
+2026-11-26T01:20:07.937245Z  WARN rulebox_agent::ipc_conn: rejected a pipe client pipe="shell" connection_id=79 reason="image_not_allowed"
+2026-11-26T01:20:09.968112Z  WARN rulebox_agent::ipc_shell: pipe client refused: image_not_allowed pid=5248 session_id=1 image=Some("C:\\Config.Msi\\15ccda.rbf")
+2026-11-26T01:20:09.968141Z  WARN rulebox_agent::ipc_conn: rejected a pipe client pipe="shell" connection_id=80 reason="image_not_allowed"
+2026-11-26T01:20:10.580782Z  INFO rulebox_agent::watchdog: rulebox-shell.exe was not running in the Staff session; started it session_id=1 pid=2384
+2026-11-26T01:20:11.987502Z  WARN rulebox_agent::ipc_shell: pipe client refused: image_not_allowed pid=5248 session_id=1 image=Some("C:\\Config.Msi\\15ccda.rbf")
+2026-11-26T01:20:11.987535Z  WARN rulebox_agent::ipc_conn: rejected a pipe client pipe="shell" connection_id=81 reason="image_not_allowed"
+2026-11-26T01:20:14.013087Z  WARN rulebox_agent::ipc_shell: pipe client refused: image_not_allowed pid=5248 session_id=1 image=Some("C:\\Config.Msi\\15ccda.rbf")
+2026-11-26T01:20:14.013101Z  WARN rulebox_agent::ipc_conn: rejected a pipe client pipe="shell" connection_id=82 reason="image_not_allowed"
+2026-11-26T01:20:15.596580Z  INFO rulebox_agent::watchdog: rulebox-shell.exe was not running in the Staff session; started it session_id=1 pid=6976
+2026-11-26T01:20:16.030515Z  WARN rulebox_agent::ipc_shell: pipe client refused: image_not_allowed pid=5248 session_id=1 image=Some("C:\\Config.Msi\\15ccda.rbf")
+2026-11-26T01:20:16.030557Z  WARN rulebox_agent::ipc_conn: rejected a pipe client pipe="shell" connection_id=83 reason="image_not_allowed"
+2026-11-26T01:20:18.061992Z  WARN rulebox_agent::ipc_shell: pipe client refused: image_not_allowed pid=5248 session_id=1 image=Some("C:\\Config.Msi\\15ccda.rbf")
+2026-11-26T01:20:18.062010Z  WARN rulebox_agent::ipc_conn: rejected a pipe client pipe="shell" connection_id=84 reason="image_not_allowed"
+2026-11-26T01:20:20.066011Z  WARN rulebox_agent::ipc_shell: pipe client refused: image_not_allowed pid=5248 session_id=1 image=Some("C:\\Config.Msi\\15ccda.rbf")
+2026-11-26T01:20:20.066037Z  WARN rulebox_agent::ipc_conn: rejected a pipe client pipe="shell" connection_id=85 reason="image_not_allowed"
+2026-11-26T01:20:20.600754Z  INFO rulebox_agent::watchdog: rulebox-shell.exe was not running in the Staff session; started it session_id=1 pid=5256
+2026-11-26T01:20:22.077714Z  WARN rulebox_agent::ipc_shell: pipe client refused: image_not_allowed pid=5248 session_id=1 image=Some("C:\\Config.Msi\\15ccda.rbf")
+2026-11-26T01:20:22.077735Z  WARN rulebox_agent::ipc_conn: rejected a pipe client pipe="shell" connection_id=86 reason="image_not_allowed"
+2026-11-26T01:20:24.092174Z  WARN rulebox_agent::ipc_shell: pipe client refused: image_not_allowed pid=5248 session_id=1 image=Some("C:\\Config.Msi\\15ccda.rbf")
+2026-11-26T01:20:24.092196Z  WARN rulebox_agent::ipc_conn: rejected a pipe client pipe="shell" connection_id=87 reason="image_not_allowed"
+2026-11-26T01:20:25.596743Z  INFO rulebox_agent::watchdog: rulebox-shell.exe was not running in the Staff session; started it session_id=1 pid=4404
+2026-11-26T01:20:26.108165Z  WARN rulebox_agent::ipc_shell: pipe client refused: image_not_allowed pid=5248 session_id=1 image=Some("C:\\Config.Msi\\15ccda.rbf")
+2026-11-26T01:20:26.108179Z  WARN rulebox_agent::ipc_conn: rejected a pipe client pipe="shell" connection_id=88 reason="image_not_allowed"
+2026-11-26T01:20:28.128030Z  WARN rulebox_agent::ipc_shell: pipe client refused: image_not_allowed pid=5248 session_id=1 image=Some("C:\\Config.Msi\\15ccda.rbf")
+2026-11-26T01:20:28.128499Z  WARN rulebox_agent::ipc_conn: rejected a pipe client pipe="shell" connection_id=89 reason="image_not_allowed"
+2026-11-26T01:20:30.139819Z  WARN rulebox_agent::ipc_shell: pipe client refused: image_not_allowed pid=5248 session_id=1 image=Some("C:\\Config.Msi\\15ccda.rbf")
+2026-11-26T01:20:30.139836Z  WARN rulebox_agent::ipc_conn: rejected a pipe client pipe="shell" connection_id=90 reason="image_not_allowed"
+2026-11-26T01:20:30.598911Z  INFO rulebox_agent::watchdog: rulebox-shell.exe was not running in the Staff session; started it session_id=1 pid=6104
+2026-11-26T01:20:32.156594Z  WARN rulebox_agent::ipc_shell: pipe client refused: image_not_allowed pid=5248 session_id=1 image=Some("C:\\Config.Msi\\15ccda.rbf")
+2026-11-26T01:20:32.156690Z  WARN rulebox_agent::ipc_conn: rejected a pipe client pipe="shell" connection_id=91 reason="image_not_allowed"
+2026-11-26T01:20:34.168465Z  WARN rulebox_agent::ipc_shell: pipe client refused: image_not_allowed pid=5248 session_id=1 image=Some("C:\\Config.Msi\\15ccda.rbf")
+2026-11-26T01:20:34.168483Z  WARN rulebox_agent::ipc_conn: rejected a pipe client pipe="shell" connection_id=92 reason="image_not_allowed"
+2026-11-26T01:20:35.613320Z  INFO rulebox_agent::watchdog: rulebox-shell.exe was not running in the Staff session; started it session_id=1 pid=2104
+2026-11-26T01:20:36.184159Z  WARN rulebox_agent::ipc_shell: pipe client refused: image_not_allowed pid=5248 session_id=1 image=Some("C:\\Config.Msi\\15ccda.rbf")
+2026-11-26T01:20:36.184254Z  WARN rulebox_agent::ipc_conn: rejected a pipe client pipe="shell" connection_id=93 reason="image_not_allowed"
+2026-11-26T01:20:38.202845Z  WARN rulebox_agent::ipc_shell: pipe client refused: image_not_allowed pid=5248 session_id=1 image=Some("C:\\Config.Msi\\15ccda.rbf")
+2026-11-26T01:20:38.202859Z  WARN rulebox_agent::ipc_conn: rejected a pipe client pipe="shell" connection_id=94 reason="image_not_allowed"
+2026-11-26T01:20:40.216396Z  WARN rulebox_agent::ipc_shell: pipe client refused: image_not_allowed pid=5248 session_id=1 image=Some("C:\\Config.Msi\\15ccda.rbf")
+2026-11-26T01:20:40.216411Z  WARN rulebox_agent::ipc_conn: rejected a pipe client pipe="shell" connection_id=95 reason="image_not_allowed"
+2026-11-26T01:20:40.627366Z  INFO rulebox_agent::watchdog: rulebox-shell.exe was not running in the Staff session; started it session_id=1 pid=6916
+2026-11-26T01:20:42.230985Z  WARN rulebox_agent::ipc_shell: pipe client refused: image_not_allowed pid=5248 session_id=1 image=Some("C:\\Config.Msi\\15ccda.rbf")
+2026-11-26T01:20:42.231000Z  WARN rulebox_agent::ipc_conn: rejected a pipe client pipe="shell" connection_id=96 reason="image_not_allowed"
+2026-11-26T01:20:44.262495Z  WARN rulebox_agent::ipc_shell: pipe client refused: image_not_allowed pid=5248 session_id=1 image=Some("C:\\Config.Msi\\15ccda.rbf")
+2026-11-26T01:20:44.262525Z  WARN rulebox_agent::ipc_conn: rejected a pipe client pipe="shell" connection_id=97 reason="image_not_allowed"
+2026-11-26T01:20:45.644067Z  INFO rulebox_agent::watchdog: rulebox-shell.exe was not running in the Staff session; started it session_id=1 pid=6208
+2026-11-26T01:20:46.278867Z  WARN rulebox_agent::ipc_shell: pipe client refused: image_not_allowed pid=5248 session_id=1 image=Some("C:\\Config.Msi\\15ccda.rbf")
+2026-11-26T01:20:46.278884Z  WARN rulebox_agent::ipc_conn: rejected a pipe client pipe="shell" connection_id=98 reason="image_not_allowed"
+2026-11-26T01:20:48.294875Z  WARN rulebox_agent::ipc_shell: pipe client refused: image_not_allowed pid=5248 session_id=1 image=Some("C:\\Config.Msi\\15ccda.rbf")
+2026-11-26T01:20:48.294891Z  WARN rulebox_agent::ipc_conn: rejected a pipe client pipe="shell" connection_id=99 reason="image_not_allowed"
+2026-11-26T01:20:50.298901Z  WARN rulebox_agent::ipc_shell: pipe client refused: image_not_allowed pid=5248 session_id=1 image=Some("C:\\Config.Msi\\15ccda.rbf")
+2026-11-26T01:20:50.298917Z  WARN rulebox_agent::ipc_conn: rejected a pipe client pipe="shell" connection_id=100 reason="image_not_allowed"
+2026-11-26T01:20:50.659856Z  INFO rulebox_agent::watchdog: rulebox-shell.exe was not running in the Staff session; started it session_id=1 pid=3292
+2026-11-26T01:20:52.310582Z  WARN rulebox_agent::ipc_shell: pipe client refused: image_not_allowed pid=5248 session_id=1 image=Some("C:\\Config.Msi\\15ccda.rbf")
+2026-11-26T01:20:52.310600Z  WARN rulebox_agent::ipc_conn: rejected a pipe client pipe="shell" connection_id=101 reason="image_not_allowed"
+2026-11-26T01:20:54.324906Z  WARN rulebox_agent::ipc_shell: pipe client refused: image_not_allowed pid=5248 session_id=1 image=Some("C:\\Config.Msi\\15ccda.rbf")
+2026-11-26T01:20:54.325473Z  WARN rulebox_agent::ipc_conn: rejected a pipe client pipe="shell" connection_id=102 reason="image_not_allowed"
+2026-11-26T01:20:55.661634Z  INFO rulebox_agent::watchdog: rulebox-shell.exe was not running in the Staff session; started it session_id=1 pid=2568
+2026-11-26T01:20:56.342452Z  WARN rulebox_agent::ipc_shell: pipe client refused: image_not_allowed pid=5248 session_id=1 image=Some("C:\\Config.Msi\\15ccda.rbf")
+2026-11-26T01:20:56.342476Z  WARN rulebox_agent::ipc_conn: rejected a pipe client pipe="shell" connection_id=103 reason="image_not_allowed"
+2026-11-26T01:20:58.356371Z  WARN rulebox_agent::ipc_shell: pipe client refused: image_not_allowed pid=5248 session_id=1 image=Some("C:\\Config.Msi\\15ccda.rbf")
+2026-11-26T01:20:58.356387Z  WARN rulebox_agent::ipc_conn: rejected a pipe client pipe="shell" connection_id=104 reason="image_not_allowed"
+2026-11-26T01:21:00.366015Z  WARN rulebox_agent::ipc_shell: pipe client refused: image_not_allowed pid=5248 session_id=1 image=Some("C:\\Config.Msi\\15ccda.rbf")
+2026-11-26T01:21:00.366032Z  WARN rulebox_agent::ipc_conn: rejected a pipe client pipe="shell" connection_id=105 reason="image_not_allowed"
+2026-11-26T01:21:00.657285Z  INFO rulebox_agent::watchdog: rulebox-shell.exe was not running in the Staff session; started it session_id=1 pid=7024
+2026-11-26T01:21:02.377823Z  WARN rulebox_agent::ipc_shell: pipe client refused: image_not_allowed pid=5248 session_id=1 image=Some("C:\\Config.Msi\\15ccda.rbf")
+2026-11-26T01:21:02.377906Z  WARN rulebox_agent::ipc_conn: rejected a pipe client pipe="shell" connection_id=106 reason="image_not_allowed"
+2026-11-26T01:21:04.403057Z  WARN rulebox_agent::ipc_shell: pipe client refused: image_not_allowed pid=5248 session_id=1 image=Some("C:\\Config.Msi\\15ccda.rbf")
+2026-11-26T01:21:04.403071Z  WARN rulebox_agent::ipc_conn: rejected a pipe client pipe="shell" connection_id=107 reason="image_not_allowed"
+2026-11-26T01:21:05.674831Z  INFO rulebox_agent::watchdog: rulebox-shell.exe was not running in the Staff session; started it session_id=1 pid=7112
+2026-11-26T01:21:06.418298Z  WARN rulebox_agent::ipc_shell: pipe client refused: image_not_allowed pid=5248 session_id=1 image=Some("C:\\Config.Msi\\15ccda.rbf")
+2026-11-26T01:21:06.418343Z  WARN rulebox_agent::ipc_conn: rejected a pipe client pipe="shell" connection_id=108 reason="image_not_allowed"
+2026-11-26T01:21:08.439177Z  WARN rulebox_agent::ipc_shell: pipe client refused: image_not_allowed pid=5248 session_id=1 image=Some("C:\\Config.Msi\\15ccda.rbf")
+2026-11-26T01:21:08.439609Z  WARN rulebox_agent::ipc_conn: rejected a pipe client pipe="shell" connection_id=109 reason="image_not_allowed"
+2026-11-26T01:21:10.454963Z  WARN rulebox_agent::ipc_shell: pipe client refused: image_not_allowed pid=5248 session_id=1 image=Some("C:\\Config.Msi\\15ccda.rbf")
+2026-11-26T01:21:10.455003Z  WARN rulebox_agent::ipc_conn: rejected a pipe client pipe="shell" connection_id=110 reason="image_not_allowed"
+2026-11-26T01:21:10.692203Z  INFO rulebox_agent::watchdog: rulebox-shell.exe was not running in the Staff session; started it session_id=1 pid=5912
+2026-11-26T01:21:12.465307Z  WARN rulebox_agent::ipc_shell: pipe client refused: image_not_allowed pid=5248 session_id=1 image=Some("C:\\Config.Msi\\15ccda.rbf")
+2026-11-26T01:21:12.465329Z  WARN rulebox_agent::ipc_conn: rejected a pipe client pipe="shell" connection_id=111 reason="image_not_allowed"
+2026-11-26T01:21:14.485310Z  WARN rulebox_agent::ipc_shell: pipe client refused: image_not_allowed pid=5248 session_id=1 image=Some("C:\\Config.Msi\\15ccda.rbf")
+2026-11-26T01:21:14.485326Z  WARN rulebox_agent::ipc_conn: rejected a pipe client pipe="shell" connection_id=112 reason="image_not_allowed"
+2026-11-26T01:21:15.696670Z  INFO rulebox_agent::watchdog: rulebox-shell.exe was not running in the Staff session; started it session_id=1 pid=600
+2026-11-26T01:21:16.497318Z  WARN rulebox_agent::ipc_shell: pipe client refused: image_not_allowed pid=5248 session_id=1 image=Some("C:\\Config.Msi\\15ccda.rbf")
+2026-11-26T01:21:16.497335Z  WARN rulebox_agent::ipc_conn: rejected a pipe client pipe="shell" connection_id=113 reason="image_not_allowed"
+2026-11-26T01:21:18.501875Z  WARN rulebox_agent::ipc_shell: pipe client refused: image_not_allowed pid=5248 session_id=1 image=Some("C:\\Config.Msi\\15ccda.rbf")
+2026-11-26T01:21:18.501892Z  WARN rulebox_agent::ipc_conn: rejected a pipe client pipe="shell" connection_id=114 reason="image_not_allowed"
+2026-11-26T01:21:20.512364Z  WARN rulebox_agent::ipc_shell: pipe client refused: image_not_allowed pid=5248 session_id=1 image=Some("C:\\Config.Msi\\15ccda.rbf")
+2026-11-26T01:21:20.512403Z  WARN rulebox_agent::ipc_conn: rejected a pipe client pipe="shell" connection_id=115 reason="image_not_allowed"
+2026-11-26T01:21:20.690262Z  INFO rulebox_agent::watchdog: rulebox-shell.exe was not running in the Staff session; started it session_id=1 pid=3544
+2026-11-26T01:21:22.518008Z  WARN rulebox_agent::ipc_shell: pipe client refused: image_not_allowed pid=5248 session_id=1 image=Some("C:\\Config.Msi\\15ccda.rbf")
+2026-11-26T01:21:22.518040Z  WARN rulebox_agent::ipc_conn: rejected a pipe client pipe="shell" connection_id=116 reason="image_not_allowed"
+2026-11-26T01:21:24.528514Z  WARN rulebox_agent::ipc_shell: pipe client refused: image_not_allowed pid=5248 session_id=1 image=Some("C:\\Config.Msi\\15ccda.rbf")
+2026-11-26T01:21:24.528532Z  WARN rulebox_agent::ipc_conn: rejected a pipe client pipe="shell" connection_id=117 reason="image_not_allowed"
+2026-11-26T01:21:25.705616Z  INFO rulebox_agent::watchdog: rulebox-shell.exe was not running in the Staff session; started it session_id=1 pid=4268
+2026-11-26T01:21:26.543511Z  WARN rulebox_agent::ipc_shell: pipe client refused: image_not_allowed pid=5248 session_id=1 image=Some("C:\\Config.Msi\\15ccda.rbf")
+2026-11-26T01:21:26.543532Z  WARN rulebox_agent::ipc_conn: rejected a pipe client pipe="shell" connection_id=118 reason="image_not_allowed"
+2026-11-26T01:21:28.559813Z  WARN rulebox_agent::ipc_shell: pipe client refused: image_not_allowed pid=5248 session_id=1 image=Some("C:\\Config.Msi\\15ccda.rbf")
+2026-11-26T01:21:28.559854Z  WARN rulebox_agent::ipc_conn: rejected a pipe client pipe="shell" connection_id=119 reason="image_not_allowed"
+2026-11-26T01:21:30.578039Z  WARN rulebox_agent::ipc_shell: pipe client refused: image_not_allowed pid=5248 session_id=1 image=Some("C:\\Config.Msi\\15ccda.rbf")
+2026-11-26T01:21:30.578071Z  WARN rulebox_agent::ipc_conn: rejected a pipe client pipe="shell" connection_id=120 reason="image_not_allowed"
+2026-11-26T01:21:30.748243Z  INFO rulebox_agent::watchdog: rulebox-shell.exe was not running in the Staff session; started it session_id=1 pid=6368
+2026-11-26T01:21:32.593854Z  WARN rulebox_agent::ipc_shell: pipe client refused: image_not_allowed pid=5248 session_id=1 image=Some("C:\\Config.Msi\\15ccda.rbf")
+2026-11-26T01:21:32.593908Z  WARN rulebox_agent::ipc_conn: rejected a pipe client pipe="shell" connection_id=121 reason="image_not_allowed"
+2026-11-26T01:21:34.607592Z  WARN rulebox_agent::ipc_shell: pipe client refused: image_not_allowed pid=5248 session_id=1 image=Some("C:\\Config.Msi\\15ccda.rbf")
+2026-11-26T01:21:34.607644Z  WARN rulebox_agent::ipc_conn: rejected a pipe client pipe="shell" connection_id=122 reason="image_not_allowed"
+2026-11-26T01:21:35.740770Z  INFO rulebox_agent::watchdog: rulebox-shell.exe was not running in the Staff session; started it session_id=1 pid=1816
+2026-11-26T01:21:36.623328Z  WARN rulebox_agent::ipc_shell: pipe client refused: image_not_allowed pid=5248 session_id=1 image=Some("C:\\Config.Msi\\15ccda.rbf")
+2026-11-26T01:21:36.623401Z  WARN rulebox_agent::ipc_conn: rejected a pipe client pipe="shell" connection_id=123 reason="image_not_allowed"
+2026-11-26T01:21:38.639366Z  WARN rulebox_agent::ipc_shell: pipe client refused: image_not_allowed pid=5248 session_id=1 image=Some("C:\\Config.Msi\\15ccda.rbf")
+2026-11-26T01:21:38.639385Z  WARN rulebox_agent::ipc_conn: rejected a pipe client pipe="shell" connection_id=124 reason="image_not_allowed"
+2026-11-26T01:21:40.657112Z  WARN rulebox_agent::ipc_shell: pipe client refused: image_not_allowed pid=5248 session_id=1 image=Some("C:\\Config.Msi\\15ccda.rbf")
+2026-11-26T01:21:40.657128Z  WARN rulebox_agent::ipc_conn: rejected a pipe client pipe="shell" connection_id=125 reason="image_not_allowed"
+2026-11-26T01:21:40.737102Z  INFO rulebox_agent::watchdog: rulebox-shell.exe was not running in the Staff session; started it session_id=1 pid=2208
+2026-11-26T01:21:42.675285Z  WARN rulebox_agent::ipc_shell: pipe client refused: image_not_allowed pid=5248 session_id=1 image=Some("C:\\Config.Msi\\15ccda.rbf")
+2026-11-26T01:21:42.675300Z  WARN rulebox_agent::ipc_conn: rejected a pipe client pipe="shell" connection_id=126 reason="image_not_allowed"
+2026-11-26T01:21:44.695510Z  WARN rulebox_agent::ipc_shell: pipe client refused: image_not_allowed pid=5248 session_id=1 image=Some("C:\\Config.Msi\\15ccda.rbf")
+2026-11-26T01:21:44.695543Z  WARN rulebox_agent::ipc_conn: rejected a pipe client pipe="shell" connection_id=127 reason="image_not_allowed"
+2026-11-26T01:21:45.753301Z  INFO rulebox_agent::watchdog: rulebox-shell.exe was not running in the Staff session; started it session_id=1 pid=2248
+2026-11-26T01:21:46.710080Z  WARN rulebox_agent::ipc_shell: pipe client refused: image_not_allowed pid=5248 session_id=1 image=Some("C:\\Config.Msi\\15ccda.rbf")
+2026-11-26T01:21:46.710096Z  WARN rulebox_agent::ipc_conn: rejected a pipe client pipe="shell" connection_id=128 reason="image_not_allowed"
+2026-11-26T01:21:48.716446Z  WARN rulebox_agent::ipc_shell: pipe client refused: image_not_allowed pid=5248 session_id=1 image=Some("C:\\Config.Msi\\15ccda.rbf")
+2026-11-26T01:21:48.716460Z  WARN rulebox_agent::ipc_conn: rejected a pipe client pipe="shell" connection_id=129 reason="image_not_allowed"
+2026-11-26T01:21:50.730633Z  WARN rulebox_agent::ipc_shell: pipe client refused: image_not_allowed pid=5248 session_id=1 image=Some("C:\\Config.Msi\\15ccda.rbf")
+2026-11-26T01:21:50.730646Z  WARN rulebox_agent::ipc_conn: rejected a pipe client pipe="shell" connection_id=130 reason="image_not_allowed"
+2026-11-26T01:21:50.751971Z  INFO rulebox_agent::watchdog: rulebox-shell.exe was not running in the Staff session; started it session_id=1 pid=6832
+2026-11-26T01:21:52.745773Z  WARN rulebox_agent::ipc_shell: pipe client refused: image_not_allowed pid=5248 session_id=1 image=Some("C:\\Config.Msi\\15ccda.rbf")
+2026-11-26T01:21:52.745797Z  WARN rulebox_agent::ipc_conn: rejected a pipe client pipe="shell" connection_id=131 reason="image_not_allowed"
+2026-11-26T01:21:54.763076Z  WARN rulebox_agent::ipc_shell: pipe client refused: image_not_allowed pid=5248 session_id=1 image=Some("C:\\Config.Msi\\15ccda.rbf")
+2026-11-26T01:21:54.763087Z  WARN rulebox_agent::ipc_conn: rejected a pipe client pipe="shell" connection_id=132 reason="image_not_allowed"
+2026-11-26T01:21:55.767489Z  INFO rulebox_agent::watchdog: rulebox-shell.exe was not running in the Staff session; started it session_id=1 pid=6912
+2026-11-26T01:21:56.767368Z  WARN rulebox_agent::ipc_shell: pipe client refused: image_not_allowed pid=5248 session_id=1 image=Some("C:\\Config.Msi\\15ccda.rbf")
+2026-11-26T01:21:56.767379Z  WARN rulebox_agent::ipc_conn: rejected a pipe client pipe="shell" connection_id=133 reason="image_not_allowed"
+2026-11-26T01:21:58.784080Z  WARN rulebox_agent::ipc_shell: pipe client refused: image_not_allowed pid=5248 session_id=1 image=Some("C:\\Config.Msi\\15ccda.rbf")
+2026-11-26T01:21:58.784092Z  WARN rulebox_agent::ipc_conn: rejected a pipe client pipe="shell" connection_id=134 reason="image_not_allowed"
+2026-11-26T01:22:00.769195Z  INFO rulebox_agent::watchdog: rulebox-shell.exe was not running in the Staff session; started it session_id=1 pid=196
+2026-11-26T01:22:00.793495Z  WARN rulebox_agent::ipc_shell: pipe client refused: image_not_allowed pid=5248 session_id=1 image=Some("C:\\Config.Msi\\15ccda.rbf")
+2026-11-26T01:22:00.793510Z  WARN rulebox_agent::ipc_conn: rejected a pipe client pipe="shell" connection_id=135 reason="image_not_allowed"
+2026-11-26T01:22:02.812667Z  WARN rulebox_agent::ipc_shell: pipe client refused: image_not_allowed pid=5248 session_id=1 image=Some("C:\\Config.Msi\\15ccda.rbf")
+2026-11-26T01:22:02.812708Z  WARN rulebox_agent::ipc_conn: rejected a pipe client pipe="shell" connection_id=136 reason="image_not_allowed"
+2026-11-26T01:22:04.825876Z  WARN rulebox_agent::ipc_shell: pipe client refused: image_not_allowed pid=5248 session_id=1 image=Some("C:\\Config.Msi\\15ccda.rbf")
+2026-11-26T01:22:04.826421Z  WARN rulebox_agent::ipc_conn: rejected a pipe client pipe="shell" connection_id=137 reason="image_not_allowed"
+2026-11-26T01:22:05.766049Z  INFO rulebox_agent::watchdog: rulebox-shell.exe was not running in the Staff session; started it session_id=1 pid=1136
+2026-11-26T01:22:06.842482Z  WARN rulebox_agent::ipc_shell: pipe client refused: image_not_allowed pid=5248 session_id=1 image=Some("C:\\Config.Msi\\15ccda.rbf")
+2026-11-26T01:22:06.842495Z  WARN rulebox_agent::ipc_conn: rejected a pipe client pipe="shell" connection_id=138 reason="image_not_allowed"
+2026-11-26T01:22:08.857763Z  WARN rulebox_agent::ipc_shell: pipe client refused: image_not_allowed pid=5248 session_id=1 image=Some("C:\\Config.Msi\\15ccda.rbf")
+2026-11-26T01:22:08.857783Z  WARN rulebox_agent::ipc_conn: rejected a pipe client pipe="shell" connection_id=139 reason="image_not_allowed"
+2026-11-26T01:22:10.775518Z  INFO rulebox_agent::watchdog: rulebox-shell.exe was not running in the Staff session; started it session_id=1 pid=6968
+2026-11-26T01:22:10.875681Z  WARN rulebox_agent::ipc_shell: pipe client refused: image_not_allowed pid=5248 session_id=1 image=Some("C:\\Config.Msi\\15ccda.rbf")
+2026-11-26T01:22:10.875713Z  WARN rulebox_agent::ipc_conn: rejected a pipe client pipe="shell" connection_id=140 reason="image_not_allowed"
+2026-11-26T01:22:12.902323Z  WARN rulebox_agent::ipc_shell: pipe client refused: image_not_allowed pid=5248 session_id=1 image=Some("C:\\Config.Msi\\15ccda.rbf")
+2026-11-26T01:22:12.902411Z  WARN rulebox_agent::ipc_conn: rejected a pipe client pipe="shell" connection_id=141 reason="image_not_allowed"
+2026-11-26T01:22:14.920974Z  WARN rulebox_agent::ipc_shell: pipe client refused: image_not_allowed pid=5248 session_id=1 image=Some("C:\\Config.Msi\\15ccda.rbf")
+2026-11-26T01:22:14.920989Z  WARN rulebox_agent::ipc_conn: rejected a pipe client pipe="shell" connection_id=142 reason="image_not_allowed"
+2026-11-26T01:22:15.772063Z  INFO rulebox_agent::watchdog: rulebox-shell.exe was not running in the Staff session; started it session_id=1 pid=4084
+2026-11-26T01:22:16.936657Z  WARN rulebox_agent::ipc_shell: pipe client refused: image_not_allowed pid=5248 session_id=1 image=Some("C:\\Config.Msi\\15ccda.rbf")
+2026-11-26T01:22:16.936693Z  WARN rulebox_agent::ipc_conn: rejected a pipe client pipe="shell" connection_id=143 reason="image_not_allowed"
+2026-11-26T01:22:18.951830Z  WARN rulebox_agent::ipc_shell: pipe client refused: image_not_allowed pid=5248 session_id=1 image=Some("C:\\Config.Msi\\15ccda.rbf")
+2026-11-26T01:22:18.951850Z  WARN rulebox_agent::ipc_conn: rejected a pipe client pipe="shell" connection_id=144 reason="image_not_allowed"
+2026-11-26T01:22:20.783850Z  INFO rulebox_agent::watchdog: rulebox-shell.exe was not running in the Staff session; started it session_id=1 pid=7072
+2026-11-26T01:22:20.957156Z  WARN rulebox_agent::ipc_shell: pipe client refused: image_not_allowed pid=5248 session_id=1 image=Some("C:\\Config.Msi\\15ccda.rbf")
+2026-11-26T01:22:20.957196Z  WARN rulebox_agent::ipc_conn: rejected a pipe client pipe="shell" connection_id=145 reason="image_not_allowed"
+2026-11-26T01:22:22.974593Z  WARN rulebox_agent::ipc_shell: pipe client refused: image_not_allowed pid=5248 session_id=1 image=Some("C:\\Config.Msi\\15ccda.rbf")
+2026-11-26T01:22:22.974608Z  WARN rulebox_agent::ipc_conn: rejected a pipe client pipe="shell" connection_id=146 reason="image_not_allowed"
+2026-11-26T01:22:24.982743Z  WARN rulebox_agent::ipc_shell: pipe client refused: image_not_allowed pid=5248 session_id=1 image=Some("C:\\Config.Msi\\15ccda.rbf")
+2026-11-26T01:22:24.982822Z  WARN rulebox_agent::ipc_conn: rejected a pipe client pipe="shell" connection_id=147 reason="image_not_allowed"
+2026-11-26T01:22:25.797187Z  INFO rulebox_agent::watchdog: rulebox-shell.exe was not running in the Staff session; started it session_id=1 pid=6668
+2026-11-26T01:22:26.988520Z  WARN rulebox_agent::ipc_shell: pipe client refused: image_not_allowed pid=5248 session_id=1 image=Some("C:\\Config.Msi\\15ccda.rbf")
+2026-11-26T01:22:26.988537Z  WARN rulebox_agent::ipc_conn: rejected a pipe client pipe="shell" connection_id=148 reason="image_not_allowed"
+2026-11-26T01:22:28.995447Z  WARN rulebox_agent::ipc_shell: pipe client refused: image_not_allowed pid=5248 session_id=1 image=Some("C:\\Config.Msi\\15ccda.rbf")
+2026-11-26T01:22:28.995462Z  WARN rulebox_agent::ipc_conn: rejected a pipe client pipe="shell" connection_id=149 reason="image_not_allowed"
+2026-11-26T01:22:30.813496Z  INFO rulebox_agent::watchdog: rulebox-shell.exe was not running in the Staff session; started it session_id=1 pid=2116
+2026-11-26T01:22:30.999451Z  WARN rulebox_agent::ipc_shell: pipe client refused: image_not_allowed pid=5248 session_id=1 image=Some("C:\\Config.Msi\\15ccda.rbf")
+2026-11-26T01:22:30.999466Z  WARN rulebox_agent::ipc_conn: rejected a pipe client pipe="shell" connection_id=150 reason="image_not_allowed"
+2026-11-26T01:22:33.027036Z  WARN rulebox_agent::ipc_shell: pipe client refused: image_not_allowed pid=5248 session_id=1 image=Some("C:\\Config.Msi\\15ccda.rbf")
+2026-11-26T01:22:33.027070Z  WARN rulebox_agent::ipc_conn: rejected a pipe client pipe="shell" connection_id=151 reason="image_not_allowed"
+2026-11-26T01:22:35.032203Z  WARN rulebox_agent::ipc_shell: pipe client refused: image_not_allowed pid=5248 session_id=1 image=Some("C:\\Config.Msi\\15ccda.rbf")
+2026-11-26T01:22:35.032218Z  WARN rulebox_agent::ipc_conn: rejected a pipe client pipe="shell" connection_id=152 reason="image_not_allowed"
+2026-11-26T01:22:35.833994Z  INFO rulebox_agent::watchdog: rulebox-shell.exe was not running in the Staff session; started it session_id=1 pid=2992
+2026-11-26T01:22:37.060065Z  WARN rulebox_agent::ipc_shell: pipe client refused: image_not_allowed pid=5248 session_id=1 image=Some("C:\\Config.Msi\\15ccda.rbf")
+2026-11-26T01:22:37.060099Z  WARN rulebox_agent::ipc_conn: rejected a pipe client pipe="shell" connection_id=153 reason="image_not_allowed"
+2026-11-26T01:22:39.080933Z  WARN rulebox_agent::ipc_shell: pipe client refused: image_not_allowed pid=5248 session_id=1 image=Some("C:\\Config.Msi\\15ccda.rbf")
+2026-11-26T01:22:39.080948Z  WARN rulebox_agent::ipc_conn: rejected a pipe client pipe="shell" connection_id=154 reason="image_not_allowed"
+2026-11-26T01:22:40.845320Z  INFO rulebox_agent::watchdog: rulebox-shell.exe was not running in the Staff session; started it session_id=1 pid=1932
+2026-11-26T01:22:41.090263Z  WARN rulebox_agent::ipc_shell: pipe client refused: image_not_allowed pid=5248 session_id=1 image=Some("C:\\Config.Msi\\15ccda.rbf")
+2026-11-26T01:22:41.090277Z  WARN rulebox_agent::ipc_conn: rejected a pipe client pipe="shell" connection_id=155 reason="image_not_allowed"
+2026-11-26T01:22:43.107151Z  WARN rulebox_agent::ipc_shell: pipe client refused: image_not_allowed pid=5248 session_id=1 image=Some("C:\\Config.Msi\\15ccda.rbf")
+2026-11-26T01:22:43.107170Z  WARN rulebox_agent::ipc_conn: rejected a pipe client pipe="shell" connection_id=156 reason="image_not_allowed"
+2026-11-26T01:22:45.123921Z  WARN rulebox_agent::ipc_shell: pipe client refused: image_not_allowed pid=5248 session_id=1 image=Some("C:\\Config.Msi\\15ccda.rbf")
+2026-11-26T01:22:45.123933Z  WARN rulebox_agent::ipc_conn: rejected a pipe client pipe="shell" connection_id=157 reason="image_not_allowed"
+2026-11-26T01:22:45.860934Z  INFO rulebox_agent::watchdog: rulebox-shell.exe was not running in the Staff session; started it session_id=1 pid=1516
+2026-11-26T01:22:47.137359Z  WARN rulebox_agent::ipc_shell: pipe client refused: image_not_allowed pid=5248 session_id=1 image=Some("C:\\Config.Msi\\15ccda.rbf")
+2026-11-26T01:22:47.137375Z  WARN rulebox_agent::ipc_conn: rejected a pipe client pipe="shell" connection_id=158 reason="image_not_allowed"
+2026-11-26T01:22:48.279565Z  INFO rulebox_agent::ipc_conn: client connected pipe="admin" connection_id=1 pid=4680 session_id=0 role=Admin
+2026-11-26T01:22:48.279946Z  INFO rulebox_agent::ipc_conn: client disconnected pipe="admin" connection_id=1 pid=4680 end=PeerClosed
+2026-11-26T01:22:49.144799Z  WARN rulebox_agent::ipc_shell: pipe client refused: image_not_allowed pid=5248 session_id=1 image=Some("C:\\Config.Msi\\15ccda.rbf")
+2026-11-26T01:22:49.144813Z  WARN rulebox_agent::ipc_conn: rejected a pipe client pipe="shell" connection_id=159 reason="image_not_allowed"
+2026-11-26T01:22:50.876801Z  INFO rulebox_agent::watchdog: rulebox-shell.exe was not running in the Staff session; started it session_id=1 pid=5228
+2026-11-26T01:22:51.151637Z  WARN rulebox_agent::ipc_shell: pipe client refused: image_not_allowed pid=5248 session_id=1 image=Some("C:\\Config.Msi\\15ccda.rbf")
+2026-11-26T01:22:51.151651Z  WARN rulebox_agent::ipc_conn: rejected a pipe client pipe="shell" connection_id=160 reason="image_not_allowed"
+2026-11-26T01:22:53.186001Z  WARN rulebox_agent::ipc_shell: pipe client refused: image_not_allowed pid=5248 session_id=1 image=Some("C:\\Config.Msi\\15ccda.rbf")
+2026-11-26T01:22:53.186040Z  WARN rulebox_agent::ipc_conn: rejected a pipe client pipe="shell" connection_id=161 reason="image_not_allowed"
+2026-11-26T01:22:55.215636Z  WARN rulebox_agent::ipc_shell: pipe client refused: image_not_allowed pid=5248 session_id=1 image=Some("C:\\Config.Msi\\15ccda.rbf")
+2026-11-26T01:22:55.215721Z  WARN rulebox_agent::ipc_conn: rejected a pipe client pipe="shell" connection_id=162 reason="image_not_allowed"
+2026-11-26T01:22:55.880826Z  INFO rulebox_agent::watchdog: rulebox-shell.exe was not running in the Staff session; started it session_id=1 pid=6596
+2026-11-26T01:22:57.232665Z  WARN rulebox_agent::ipc_shell: pipe client refused: image_not_allowed pid=5248 session_id=1 image=Some("C:\\Config.Msi\\15ccda.rbf")
+2026-11-26T01:22:57.232690Z  WARN rulebox_agent::ipc_conn: rejected a pipe client pipe="shell" connection_id=163 reason="image_not_allowed"
+2026-11-26T01:22:59.261962Z  WARN rulebox_agent::ipc_shell: pipe client refused: image_not_allowed pid=5248 session_id=1 image=Some("C:\\Config.Msi\\15ccda.rbf")
+2026-11-26T01:22:59.261975Z  WARN rulebox_agent::ipc_conn: rejected a pipe client pipe="shell" connection_id=164 reason="image_not_allowed"
+2026-11-26T01:23:00.885097Z  INFO rulebox_agent::watchdog: rulebox-shell.exe was not running in the Staff session; started it session_id=1 pid=5044
+2026-11-26T01:23:01.276955Z  WARN rulebox_agent::ipc_shell: pipe client refused: image_not_allowed pid=5248 session_id=1 image=Some("C:\\Config.Msi\\15ccda.rbf")
+2026-11-26T01:23:01.276972Z  WARN rulebox_agent::ipc_conn: rejected a pipe client pipe="shell" connection_id=165 reason="image_not_allowed"
+2026-11-26T01:23:05.331199Z  INFO rulebox_agent::agent: agent stopped
+2026-11-26T01:23:05.336160Z  INFO rulebox_agent::service: service stopped
+2026-11-26T01:23:14.933133Z  INFO rulebox_agent::service: service starting version="0.1.4"
+2026-11-26T01:23:15.064280Z  INFO rulebox_agent::agent: admin exit settings enabled=true hotkey=Ctrl+Shift+F12 problem=None
+2026-11-26T01:23:15.089404Z  INFO rulebox_agent::agent: agent started
+2026-11-26T01:23:15.105418Z  INFO rulebox_agent::agent: syncing with the backend
+2026-11-26T01:23:15.106994Z  INFO rulebox_agent::ipc_conn: shell pipe listening on \\.\pipe\dev.rulebox.agent.shell
+2026-11-26T01:23:15.142265Z  INFO rulebox_agent::ipc_conn: admin pipe listening on \\.\pipe\dev.rulebox.agent.admin
+2026-11-26T01:23:15.149260Z  INFO rulebox_agent::backend::task: desired state accepted version=3 kiosk_enabled=true key_id=591e74141d90ce7e
+2026-11-26T01:23:19.365064Z  INFO rulebox_agent::ipc_conn: client connected pipe="shell" connection_id=1 pid=5372 session_id=1 role=Shell
+2026-11-26T01:23:19.394195Z  INFO rulebox_agent::watchdog: shell health changed health=Starting
+2026-11-26T01:23:21.037712Z  INFO rulebox_agent::watchdog: shell.ready connection_id=1 pid=5372
+2026-11-26T01:23:21.083128Z  INFO rulebox_agent::watchdog: shell health changed health=Healthy
+2026-11-26T01:23:29.311361Z  INFO rulebox_agent::watchdog: shell.heartbeat (first on this connection) connection_id=1 pid=5372
+2026-11-26T01:24:59.833264Z  INFO rulebox_agent::ipc_conn: client connected pipe="admin" connection_id=1 pid=7116 session_id=0 role=Admin
+2026-11-26T01:24:59.833879Z  INFO rulebox_agent::ipc_conn: client disconnected pipe="admin" connection_id=1 pid=7116 end=PeerClosed
+2026-11-26T01:28:35.599601Z  INFO rulebox_agent::backend::task: desired state accepted version=4 kiosk_enabled=true key_id=591e74141d90ce7e
+2026-11-26T01:28:35.600172Z  INFO rulebox_agent::selfupdate: downloading the Rulebox update version=0.1.5
+2026-11-26T01:28:36.078372Z  INFO rulebox_agent::selfupdate: starting the Rulebox upgrade (msiexec /i /qn /norestart) from="0.1.4" to=0.1.5
+2026-11-26T01:28:36.129159Z  INFO rulebox_agent::selfupdate: msiexec started outside the agent's job pid=7052
+2026-11-26T01:28:37.552428Z  INFO rulebox_agent::ipc_conn: client disconnected pipe="shell" connection_id=1 pid=5372 end=Shutdown
+2026-11-26T01:28:37.552558Z  INFO rulebox_agent::agent: agent stopped
+2026-11-26T01:28:37.556019Z  INFO rulebox_agent::service: service stopped
+2026-11-26T01:28:39.393492Z  INFO rulebox_agent::service: service starting version="0.1.4"
+2026-11-26T01:28:39.393648Z  INFO rulebox_agent::install_marker: the install marker now names this computer
+2026-11-26T01:28:39.396042Z  INFO rulebox_agent::agent: admin exit settings enabled=true hotkey=Ctrl+Shift+F12 problem=None
+2026-11-26T01:28:39.399333Z  INFO rulebox_agent::agent: agent started
+2026-11-26T01:28:39.438147Z  INFO rulebox_agent::agent: syncing with the backend
+2026-11-26T01:28:39.438521Z  INFO rulebox_agent::ipc_conn: shell pipe listening on \\.\pipe\dev.rulebox.agent.shell
+2026-11-26T01:28:39.441752Z  INFO rulebox_agent::backend::task: desired state accepted version=4 kiosk_enabled=true key_id=591e74141d90ce7e
+2026-11-26T01:28:39.442854Z  INFO rulebox_agent::install_marker: the install marker's KioskOn was updated on=true
+2026-11-26T01:28:39.442928Z  INFO rulebox_agent::ipc_conn: admin pipe listening on \\.\pipe\dev.rulebox.agent.admin
+2026-11-26T01:28:41.323366Z  INFO rulebox_agent::agent: agent stopped
+2026-11-26T01:28:41.324551Z  INFO rulebox_agent::service: service stopped
+2026-11-26T01:28:42.394398Z  INFO rulebox_agent::service: service starting version="0.1.4"
+2026-11-26T01:28:42.423441Z  INFO rulebox_agent::agent: admin exit settings enabled=true hotkey=Ctrl+Shift+F12 problem=None
+2026-11-26T01:28:42.430357Z  INFO rulebox_agent::agent: agent started
+2026-11-26T01:28:42.441933Z  INFO rulebox_agent::agent: syncing with the backend
+2026-11-26T01:28:42.443331Z  INFO rulebox_agent::ipc_conn: shell pipe listening on \\.\pipe\dev.rulebox.agent.shell
+2026-11-26T01:28:42.446013Z  INFO rulebox_agent::backend::task: desired state accepted version=4 kiosk_enabled=true key_id=591e74141d90ce7e
+2026-11-26T01:28:42.449045Z  INFO rulebox_agent::ipc_conn: admin pipe listening on \\.\pipe\dev.rulebox.agent.admin
+2026-11-26T01:28:42.465951Z  INFO rulebox_agent::watchdog: shell health changed health=Starting
+2026-11-26T01:28:42.701130Z  INFO rulebox_agent::ipc_conn: client connected pipe="shell" connection_id=1 pid=5372 session_id=1 role=Shell
+2026-11-26T01:28:49.431189Z  INFO rulebox_agent::watchdog: shell.heartbeat (first on this connection) connection_id=1 pid=5372
+2026-11-26T01:28:49.437303Z  INFO rulebox_agent::watchdog: shell health changed health=Healthy
+2026-11-26T01:30:17.446903Z  INFO rulebox_agent::ipc_conn: client connected pipe="admin" connection_id=1 pid=7120 session_id=0 role=Admin
+2026-11-26T01:30:17.447250Z  INFO rulebox_agent::ipc_conn: client disconnected pipe="admin" connection_id=1 pid=7120 end=PeerClosed
+2026-11-26T01:31:04.710203Z  INFO rulebox_agent::admin_exit: admin exit: correct PIN, signing the Staff session out session_id=1
+2026-11-26T01:31:06.711664Z  INFO rulebox_agent::admin_exit: the Staff session was signed out for the admin exit session_id=1
+2026-11-26T01:31:06.711755Z  INFO rulebox_agent::kiosk: exit hold set: automatic sign-in stays off for at most 5 minutes
+2026-11-26T01:31:06.863504Z  INFO rulebox_agent::ipc_conn: client disconnected pipe="shell" connection_id=1 pid=5372 end=PeerClosed
+2026-11-26T01:31:06.877860Z  INFO rulebox_agent::watchdog: shell health changed health=NotRunning
+2026-11-26T01:31:26.730232Z  INFO rulebox_agent::kiosk: the exit hold ended; automatic sign-in is armed again
+2026-11-26T01:31:56.194885Z  WARN rulebox_agent::backend::task: the head subscription ended
+2026-11-26T01:31:56.210391Z  INFO rulebox_agent::agent: agent stopped
+2026-11-26T01:31:56.212928Z  INFO rulebox_agent::service: service stopped
+2026-11-26T01:32:03.933996Z  INFO rulebox_agent::service: service starting version="0.1.4"
+2026-11-26T01:32:03.974192Z  INFO rulebox_agent::agent: admin exit settings enabled=true hotkey=Ctrl+Shift+F12 problem=None
+2026-11-26T01:32:04.011018Z  INFO rulebox_agent::agent: agent started
+2026-11-26T01:32:04.019128Z  INFO rulebox_agent::agent: syncing with the backend
+2026-11-26T01:32:04.019455Z  INFO rulebox_agent::ipc_conn: shell pipe listening on \\.\pipe\dev.rulebox.agent.shell
+2026-11-26T01:32:04.024297Z  INFO rulebox_agent::backend::task: desired state accepted version=4 kiosk_enabled=true key_id=591e74141d90ce7e
+2026-11-26T01:32:04.025143Z  INFO rulebox_agent::ipc_conn: admin pipe listening on \\.\pipe\dev.rulebox.agent.admin
+2026-11-26T01:32:07.486696Z  INFO rulebox_agent::ipc_conn: client connected pipe="shell" connection_id=1 pid=5284 session_id=1 role=Shell
+2026-11-26T01:32:07.499625Z  INFO rulebox_agent::watchdog: shell health changed health=Starting
+2026-11-26T01:32:08.761896Z  INFO rulebox_agent::watchdog: shell.ready connection_id=1 pid=5284
+2026-11-26T01:32:08.828300Z  INFO rulebox_agent::watchdog: shell health changed health=Healthy
+2026-11-26T01:32:17.448338Z  INFO rulebox_agent::watchdog: shell.heartbeat (first on this connection) connection_id=1 pid=5284
+2026-11-26T01:33:48.838878Z  INFO rulebox_agent::ipc_conn: client connected pipe="admin" connection_id=1 pid=4984 session_id=0 role=Admin
+2026-11-26T01:33:48.839380Z  INFO rulebox_agent::ipc_conn: client disconnected pipe="admin" connection_id=1 pid=4984 end=PeerClosed
+2026-11-26T01:58:35.611977Z ERROR rulebox_agent::selfupdate: the Rulebox upgrade did not take effect; the old version still runs version=0.1.5
+2026-11-26T01:58:35.623211Z  WARN rulebox_agent::selfupdate: the Rulebox update is not done: this release failed before version=0.1.5
+2026-11-26T02:13:54.820978Z  INFO rulebox_agent::ipc_conn: client connected pipe="admin" connection_id=2 pid=3020 session_id=0 role=Admin
+2026-11-26T02:13:54.822006Z  INFO rulebox_agent::ipc_conn: client disconnected pipe="admin" connection_id=2 pid=3020 end=PeerClosed
+2026-11-26T02:14:04.878756Z  INFO rulebox_agent::ipc_conn: client connected pipe="admin" connection_id=3 pid=4136 session_id=0 role=Admin
+2026-11-26T02:14:04.879528Z  INFO rulebox_agent::ipc_conn: client disconnected pipe="admin" connection_id=3 pid=4136 end=PeerClosed
+2026-11-26T02:14:14.916909Z  INFO rulebox_agent::ipc_conn: client connected pipe="admin" connection_id=4 pid=948 session_id=0 role=Admin
+2026-11-26T02:14:14.918021Z  INFO rulebox_agent::ipc_conn: client disconnected pipe="admin" connection_id=4 pid=948 end=PeerClosed
+2026-11-26T02:14:24.968148Z  INFO rulebox_agent::ipc_conn: client connected pipe="admin" connection_id=5 pid=3420 session_id=0 role=Admin
+2026-11-26T02:14:24.968844Z  INFO rulebox_agent::ipc_conn: client disconnected pipe="admin" connection_id=5 pid=3420 end=PeerClosed
+2026-11-26T02:14:35.002586Z  INFO rulebox_agent::ipc_conn: client connected pipe="admin" connection_id=6 pid=740 session_id=0 role=Admin
+2026-11-26T02:14:35.003036Z  INFO rulebox_agent::ipc_conn: client disconnected pipe="admin" connection_id=6 pid=740 end=PeerClosed
+2026-11-26T02:14:45.046591Z  INFO rulebox_agent::ipc_conn: client connected pipe="admin" connection_id=7 pid=364 session_id=0 role=Admin
+2026-11-26T02:14:45.047251Z  INFO rulebox_agent::ipc_conn: client disconnected pipe="admin" connection_id=7 pid=364 end=PeerClosed
+2026-11-26T02:14:55.091748Z  INFO rulebox_agent::ipc_conn: client connected pipe="admin" connection_id=8 pid=4284 session_id=0 role=Admin
+2026-11-26T02:14:55.092287Z  INFO rulebox_agent::ipc_conn: client disconnected pipe="admin" connection_id=8 pid=4284 end=PeerClosed
+2026-11-26T02:15:05.134151Z  INFO rulebox_agent::ipc_conn: client connected pipe="admin" connection_id=9 pid=4640 session_id=0 role=Admin
+2026-11-26T02:15:05.134767Z  INFO rulebox_agent::ipc_conn: client disconnected pipe="admin" connection_id=9 pid=4640 end=PeerClosed
+2026-11-26T02:15:15.165249Z  INFO rulebox_agent::ipc_conn: client connected pipe="admin" connection_id=10 pid=2404 session_id=0 role=Admin
+2026-11-26T02:15:15.165952Z  INFO rulebox_agent::ipc_conn: client disconnected pipe="admin" connection_id=10 pid=2404 end=PeerClosed
+2026-11-26T02:15:25.206852Z  INFO rulebox_agent::ipc_conn: client connected pipe="admin" connection_id=11 pid=1908 session_id=0 role=Admin
+2026-11-26T02:15:25.207654Z  INFO rulebox_agent::ipc_conn: client disconnected pipe="admin" connection_id=11 pid=1908 end=PeerClosed
+2026-11-26T02:15:35.243920Z  INFO rulebox_agent::ipc_conn: client connected pipe="admin" connection_id=12 pid=5508 session_id=0 role=Admin
+2026-11-26T02:15:35.244256Z  INFO rulebox_agent::ipc_conn: client disconnected pipe="admin" connection_id=12 pid=5508 end=PeerClosed
+2026-11-26T02:15:45.318589Z  INFO rulebox_agent::ipc_conn: client connected pipe="admin" connection_id=13 pid=6508 session_id=0 role=Admin
+2026-11-26T02:15:45.319017Z  INFO rulebox_agent::ipc_conn: client disconnected pipe="admin" connection_id=13 pid=6508 end=PeerClosed
+2026-11-26T02:15:55.365807Z  INFO rulebox_agent::ipc_conn: client connected pipe="admin" connection_id=14 pid=4956 session_id=0 role=Admin
+2026-11-26T02:15:55.366272Z  INFO rulebox_agent::ipc_conn: client disconnected pipe="admin" connection_id=14 pid=4956 end=PeerClosed
+2026-11-26T02:16:05.408868Z  INFO rulebox_agent::ipc_conn: client connected pipe="admin" connection_id=15 pid=3456 session_id=0 role=Admin
+2026-11-26T02:16:05.409606Z  INFO rulebox_agent::ipc_conn: client disconnected pipe="admin" connection_id=15 pid=3456 end=PeerClosed
+2026-11-26T02:16:15.450569Z  INFO rulebox_agent::ipc_conn: client connected pipe="admin" connection_id=16 pid=1336 session_id=0 role=Admin
+2026-11-26T02:16:15.451164Z  INFO rulebox_agent::ipc_conn: client disconnected pipe="admin" connection_id=16 pid=1336 end=PeerClosed
+2026-11-26T02:16:25.483136Z  INFO rulebox_agent::ipc_conn: client connected pipe="admin" connection_id=17 pid=1592 session_id=0 role=Admin
+2026-11-26T02:16:25.483731Z  INFO rulebox_agent::ipc_conn: client disconnected pipe="admin" connection_id=17 pid=1592 end=PeerClosed
+2026-11-26T02:16:35.525140Z  INFO rulebox_agent::ipc_conn: client connected pipe="admin" connection_id=18 pid=4416 session_id=0 role=Admin
+2026-11-26T02:16:35.525542Z  INFO rulebox_agent::ipc_conn: client disconnected pipe="admin" connection_id=18 pid=4416 end=PeerClosed
+2026-11-26T02:16:45.569203Z  INFO rulebox_agent::ipc_conn: client connected pipe="admin" connection_id=19 pid=2888 session_id=0 role=Admin
+2026-11-26T02:16:45.569401Z  INFO rulebox_agent::ipc_conn: client disconnected pipe="admin" connection_id=19 pid=2888 end=PeerClosed
+2026-11-26T02:16:55.601713Z  INFO rulebox_agent::ipc_conn: client connected pipe="admin" connection_id=20 pid=3024 session_id=0 role=Admin
+2026-11-26T02:16:55.602028Z  INFO rulebox_agent::ipc_conn: client disconnected pipe="admin" connection_id=20 pid=3024 end=PeerClosed
+2026-11-26T02:17:05.646981Z  INFO rulebox_agent::ipc_conn: client connected pipe="admin" connection_id=21 pid=4248 session_id=0 role=Admin
+2026-11-26T02:17:05.647688Z  INFO rulebox_agent::ipc_conn: client disconnected pipe="admin" connection_id=21 pid=4248 end=PeerClosed
+2026-11-26T02:17:15.686052Z  INFO rulebox_agent::ipc_conn: client connected pipe="admin" connection_id=22 pid=880 session_id=0 role=Admin
+2026-11-26T02:17:15.686579Z  INFO rulebox_agent::ipc_conn: client disconnected pipe="admin" connection_id=22 pid=880 end=PeerClosed
+2026-11-26T02:17:25.721498Z  INFO rulebox_agent::ipc_conn: client connected pipe="admin" connection_id=23 pid=6148 session_id=0 role=Admin
+2026-11-26T02:17:25.722235Z  INFO rulebox_agent::ipc_conn: client disconnected pipe="admin" connection_id=23 pid=6148 end=PeerClosed
+2026-11-26T02:17:35.754275Z  INFO rulebox_agent::ipc_conn: client connected pipe="admin" connection_id=24 pid=6208 session_id=0 role=Admin
+2026-11-26T02:17:35.755298Z  INFO rulebox_agent::ipc_conn: client disconnected pipe="admin" connection_id=24 pid=6208 end=PeerClosed
+2026-11-26T02:17:45.789086Z  INFO rulebox_agent::ipc_conn: client connected pipe="admin" connection_id=25 pid=5792 session_id=0 role=Admin
+2026-11-26T02:17:45.789293Z  INFO rulebox_agent::ipc_conn: client disconnected pipe="admin" connection_id=25 pid=5792 end=PeerClosed
+2026-11-26T02:18:10.874163Z  INFO rulebox_agent::ipc_conn: client connected pipe="admin" connection_id=26 pid=3364 session_id=0 role=Admin
+2026-11-26T02:18:10.874554Z  INFO rulebox_agent::ipc_conn: client disconnected pipe="admin" connection_id=26 pid=3364 end=PeerClosed
+2026-11-26T02:23:22.138089Z  INFO rulebox_agent::backend::task: desired state accepted version=5 kiosk_enabled=false key_id=591e74141d90ce7e
+2026-11-26T02:23:32.269999Z  INFO rulebox_agent::kiosk: the kiosk is off: the PC is back to normal Windows
+2026-11-26T02:23:32.297212Z  INFO rulebox_agent::install_marker: the install marker's KioskOn was updated on=false
+2026-11-26T02:23:32.422989Z  INFO rulebox_agent::ipc_conn: client disconnected pipe="shell" connection_id=1 pid=5284 end=PeerClosed
+2026-11-26T02:23:32.423079Z  INFO rulebox_agent::watchdog: shell health changed health=NotRunning
+2026-11-26T02:24:54.016278Z  INFO rulebox_agent::ipc_conn: client connected pipe="admin" connection_id=27 pid=2952 session_id=0 role=Admin
+2026-11-26T02:24:54.016622Z  INFO rulebox_agent::ipc_conn: client disconnected pipe="admin" connection_id=27 pid=2952 end=PeerClosed
+2026-11-26T02:25:14.087453Z  INFO rulebox_agent::ipc_conn: client connected pipe="admin" connection_id=28 pid=4996 session_id=0 role=Admin
+2026-11-26T02:25:14.087851Z  INFO rulebox_agent::ipc_conn: client disconnected pipe="admin" connection_id=28 pid=4996 end=PeerClosed
+2026-11-26T02:25:28.910432Z  INFO rulebox_agent::agent: agent stopped
+2026-11-26T02:25:28.911450Z  INFO rulebox_agent::service: service stopped

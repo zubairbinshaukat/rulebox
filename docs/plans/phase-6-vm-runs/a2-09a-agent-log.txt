@@ -1,0 +1,106 @@
+2026-11-26T00:00:37.663986Z  INFO rulebox_agent::ipc_conn: client disconnected pipe="shell" connection_id=1 pid=5244 end=PeerClosed
+2026-11-26T00:00:37.687103Z  INFO rulebox_agent::watchdog: shell health changed health=NotRunning
+2026-11-26T00:02:09.794085Z  INFO rulebox_agent::agent: agent stopped
+2026-11-26T00:02:09.808317Z  INFO rulebox_agent::service: service stopped
+2026-11-26T00:02:18.230797Z  INFO rulebox_agent::service: service starting version="0.1.1"
+2026-11-26T00:02:18.260343Z  INFO rulebox_agent::agent: admin exit settings enabled=true hotkey=Ctrl+Shift+F12 problem=None
+2026-11-26T00:02:18.286807Z  INFO rulebox_agent::agent: agent started
+2026-11-26T00:02:18.302566Z  INFO rulebox_agent::agent: syncing with the backend
+2026-11-26T00:02:18.303230Z  INFO rulebox_agent::ipc_conn: shell pipe listening on \\.\pipe\dev.rulebox.agent.shell
+2026-11-26T00:02:18.307522Z  INFO rulebox_agent::backend::task: desired state accepted version=1 kiosk_enabled=true key_id=591e74141d90ce7e
+2026-11-26T00:02:18.308279Z  INFO rulebox_agent::ipc_conn: admin pipe listening on \\.\pipe\dev.rulebox.agent.admin
+2026-11-26T00:02:21.987927Z  INFO rulebox_agent::ipc_conn: client connected pipe="shell" connection_id=1 pid=5264 session_id=1 role=Shell
+2026-11-26T00:02:22.015715Z  INFO rulebox_agent::watchdog: shell health changed health=Starting
+2026-11-26T00:02:23.247118Z  INFO rulebox_agent::watchdog: shell.ready connection_id=1 pid=5264
+2026-11-26T00:02:23.334342Z  INFO rulebox_agent::watchdog: shell health changed health=Healthy
+2026-11-26T00:02:31.895392Z  INFO rulebox_agent::watchdog: shell.heartbeat (first on this connection) connection_id=1 pid=5264
+2026-11-26T00:04:04.276342Z  INFO rulebox_agent::ipc_conn: client connected pipe="admin" connection_id=1 pid=672 session_id=0 role=Admin
+2026-11-26T00:04:04.276846Z  INFO rulebox_agent::ipc_conn: client disconnected pipe="admin" connection_id=1 pid=672 end=PeerClosed
+2026-11-26T00:47:26.365477Z  INFO rulebox_agent::backend::task: desired state accepted version=2 kiosk_enabled=true key_id=591e74141d90ce7e
+2026-11-26T00:47:26.370165Z  INFO rulebox_agent::selfupdate: downloading the Rulebox update version=0.1.2
+2026-11-26T00:47:26.681589Z  INFO rulebox_agent::selfupdate: starting the Rulebox upgrade (msiexec /i /qn /norestart) from="0.1.1" to=0.1.2
+2026-11-26T00:47:26.704075Z  INFO rulebox_agent::selfupdate: msiexec started outside the agent's job pid=3820
+2026-11-26T00:47:27.236228Z  INFO rulebox_agent::ipc_conn: client disconnected pipe="shell" connection_id=1 pid=5264 end=Shutdown
+2026-11-26T00:47:27.236362Z  INFO rulebox_agent::agent: agent stopped
+2026-11-26T00:47:27.244385Z  INFO rulebox_agent::service: service stopped
+2026-11-26T00:47:29.147491Z  INFO rulebox_agent::service: service starting version="0.1.2"
+2026-11-26T00:47:29.147604Z  INFO rulebox_agent::install_marker: the install marker now names this computer
+2026-11-26T00:47:29.149163Z  INFO rulebox_agent::agent: admin exit settings enabled=true hotkey=Ctrl+Shift+F12 problem=None
+2026-11-26T00:47:29.151216Z  INFO rulebox_agent::agent: agent started
+2026-11-26T00:47:29.180119Z  INFO rulebox_agent::agent: syncing with the backend
+2026-11-26T00:47:29.180373Z  INFO rulebox_agent::ipc_conn: shell pipe listening on \\.\pipe\dev.rulebox.agent.shell
+2026-11-26T00:47:29.182715Z  INFO rulebox_agent::ipc_conn: admin pipe listening on \\.\pipe\dev.rulebox.agent.admin
+2026-11-26T00:47:29.182786Z  INFO rulebox_agent::backend::task: desired state accepted version=2 kiosk_enabled=true key_id=591e74141d90ce7e
+2026-11-26T00:47:29.183208Z  INFO rulebox_agent::install_marker: the install marker's KioskOn was updated on=true
+2026-11-26T00:47:34.254058Z  INFO rulebox_agent::watchdog: rulebox-shell.exe was not running in the Staff session; started it session_id=1 pid=3016
+2026-11-26T00:47:39.195653Z  INFO rulebox_agent::watchdog: rulebox-shell.exe was not running in the Staff session; started it session_id=1 pid=3436
+2026-11-26T00:47:44.199242Z  INFO rulebox_agent::watchdog: rulebox-shell.exe was not running in the Staff session; started it session_id=1 pid=2180
+2026-11-26T00:47:49.199896Z  INFO rulebox_agent::watchdog: rulebox-shell.exe was not running in the Staff session; started it session_id=1 pid=756
+2026-11-26T00:47:54.212586Z  INFO rulebox_agent::watchdog: rulebox-shell.exe was not running in the Staff session; started it session_id=1 pid=7064
+2026-11-26T00:47:59.214047Z  INFO rulebox_agent::watchdog: rulebox-shell.exe was not running in the Staff session; started it session_id=1 pid=4460
+2026-11-26T00:48:04.223369Z  INFO rulebox_agent::watchdog: rulebox-shell.exe was not running in the Staff session; started it session_id=1 pid=5620
+2026-11-26T00:48:09.229388Z  INFO rulebox_agent::watchdog: rulebox-shell.exe was not running in the Staff session; started it session_id=1 pid=600
+2026-11-26T00:48:14.229261Z  INFO rulebox_agent::watchdog: rulebox-shell.exe was not running in the Staff session; started it session_id=1 pid=5088
+2026-11-26T00:48:19.227701Z  INFO rulebox_agent::watchdog: rulebox-shell.exe was not running in the Staff session; started it session_id=1 pid=6200
+2026-11-26T00:48:24.230471Z  INFO rulebox_agent::watchdog: rulebox-shell.exe was not running in the Staff session; started it session_id=1 pid=3400
+2026-11-26T00:48:29.226954Z  INFO rulebox_agent::watchdog: rulebox-shell.exe was not running in the Staff session; started it session_id=1 pid=6216
+2026-11-26T00:48:34.232671Z  INFO rulebox_agent::watchdog: rulebox-shell.exe was not running in the Staff session; started it session_id=1 pid=5164
+2026-11-26T00:48:39.240093Z  INFO rulebox_agent::watchdog: rulebox-shell.exe was not running in the Staff session; started it session_id=1 pid=2752
+2026-11-26T00:48:44.242806Z  INFO rulebox_agent::watchdog: rulebox-shell.exe was not running in the Staff session; started it session_id=1 pid=1428
+2026-11-26T00:48:49.245599Z  INFO rulebox_agent::watchdog: rulebox-shell.exe was not running in the Staff session; started it session_id=1 pid=6492
+2026-11-26T00:48:54.257419Z  INFO rulebox_agent::watchdog: rulebox-shell.exe was not running in the Staff session; started it session_id=1 pid=5428
+2026-11-26T00:48:59.260792Z  INFO rulebox_agent::watchdog: rulebox-shell.exe was not running in the Staff session; started it session_id=1 pid=3612
+2026-11-26T00:49:04.261216Z  INFO rulebox_agent::watchdog: rulebox-shell.exe was not running in the Staff session; started it session_id=1 pid=4484
+2026-11-26T00:49:09.259384Z  INFO rulebox_agent::watchdog: rulebox-shell.exe was not running in the Staff session; started it session_id=1 pid=6488
+2026-11-26T00:49:14.260731Z  INFO rulebox_agent::watchdog: rulebox-shell.exe was not running in the Staff session; started it session_id=1 pid=5220
+2026-11-26T00:49:19.263365Z  INFO rulebox_agent::watchdog: rulebox-shell.exe was not running in the Staff session; started it session_id=1 pid=4624
+2026-11-26T00:49:24.277762Z  INFO rulebox_agent::watchdog: rulebox-shell.exe was not running in the Staff session; started it session_id=1 pid=6032
+2026-11-26T00:49:29.291631Z  INFO rulebox_agent::watchdog: rulebox-shell.exe was not running in the Staff session; started it session_id=1 pid=1216
+2026-11-26T00:49:34.289931Z  INFO rulebox_agent::watchdog: rulebox-shell.exe was not running in the Staff session; started it session_id=1 pid=3780
+2026-11-26T00:49:39.295157Z  INFO rulebox_agent::watchdog: rulebox-shell.exe was not running in the Staff session; started it session_id=1 pid=176
+2026-11-26T00:49:44.297918Z  INFO rulebox_agent::watchdog: rulebox-shell.exe was not running in the Staff session; started it session_id=1 pid=4488
+2026-11-26T00:49:49.303164Z  INFO rulebox_agent::watchdog: rulebox-shell.exe was not running in the Staff session; started it session_id=1 pid=1184
+2026-11-26T00:49:54.309907Z  INFO rulebox_agent::watchdog: rulebox-shell.exe was not running in the Staff session; started it session_id=1 pid=3968
+2026-11-26T00:49:59.311924Z  INFO rulebox_agent::watchdog: rulebox-shell.exe was not running in the Staff session; started it session_id=1 pid=3888
+2026-11-26T00:50:04.312374Z  INFO rulebox_agent::watchdog: rulebox-shell.exe was not running in the Staff session; started it session_id=1 pid=7044
+2026-11-26T00:50:09.322877Z  INFO rulebox_agent::watchdog: rulebox-shell.exe was not running in the Staff session; started it session_id=1 pid=6660
+2026-11-26T00:50:12.568980Z  INFO rulebox_agent::ipc_conn: client connected pipe="admin" connection_id=1 pid=5408 session_id=0 role=Admin
+2026-11-26T00:50:12.569297Z  INFO rulebox_agent::ipc_conn: client disconnected pipe="admin" connection_id=1 pid=5408 end=PeerClosed
+2026-11-26T00:50:14.335547Z  INFO rulebox_agent::watchdog: rulebox-shell.exe was not running in the Staff session; started it session_id=1 pid=6236
+2026-11-26T00:50:19.354411Z  INFO rulebox_agent::watchdog: rulebox-shell.exe was not running in the Staff session; started it session_id=1 pid=4228
+2026-11-26T00:50:24.366591Z  INFO rulebox_agent::watchdog: rulebox-shell.exe was not running in the Staff session; started it session_id=1 pid=3304
+2026-11-26T00:50:29.386495Z  INFO rulebox_agent::watchdog: rulebox-shell.exe was not running in the Staff session; started it session_id=1 pid=3268
+2026-11-26T00:50:34.388565Z  INFO rulebox_agent::watchdog: rulebox-shell.exe was not running in the Staff session; started it session_id=1 pid=6792
+2026-11-26T00:50:39.402828Z  INFO rulebox_agent::watchdog: rulebox-shell.exe was not running in the Staff session; started it session_id=1 pid=1812
+2026-11-26T00:50:44.413932Z  INFO rulebox_agent::watchdog: rulebox-shell.exe was not running in the Staff session; started it session_id=1 pid=2932
+2026-11-26T00:50:49.432226Z  INFO rulebox_agent::watchdog: rulebox-shell.exe was not running in the Staff session; started it session_id=1 pid=5424
+2026-11-26T00:50:54.433282Z  INFO rulebox_agent::watchdog: rulebox-shell.exe was not running in the Staff session; started it session_id=1 pid=756
+2026-11-26T00:50:59.435486Z  INFO rulebox_agent::watchdog: rulebox-shell.exe was not running in the Staff session; started it session_id=1 pid=1524
+2026-11-26T00:51:04.432218Z  INFO rulebox_agent::watchdog: rulebox-shell.exe was not running in the Staff session; started it session_id=1 pid=2984
+2026-11-26T00:51:09.445348Z  INFO rulebox_agent::watchdog: rulebox-shell.exe was not running in the Staff session; started it session_id=1 pid=4456
+2026-11-26T00:51:14.446847Z  INFO rulebox_agent::watchdog: rulebox-shell.exe was not running in the Staff session; started it session_id=1 pid=2072
+2026-11-26T00:51:19.447750Z  INFO rulebox_agent::watchdog: rulebox-shell.exe was not running in the Staff session; started it session_id=1 pid=372
+2026-11-26T00:51:24.448582Z  INFO rulebox_agent::watchdog: rulebox-shell.exe was not running in the Staff session; started it session_id=1 pid=6320
+2026-11-26T00:51:29.451336Z  INFO rulebox_agent::watchdog: rulebox-shell.exe was not running in the Staff session; started it session_id=1 pid=4332
+2026-11-26T00:51:34.449559Z  INFO rulebox_agent::watchdog: rulebox-shell.exe was not running in the Staff session; started it session_id=1 pid=5420
+2026-11-26T00:51:39.462887Z  INFO rulebox_agent::watchdog: rulebox-shell.exe was not running in the Staff session; started it session_id=1 pid=3024
+2026-11-26T00:51:44.467921Z  INFO rulebox_agent::watchdog: rulebox-shell.exe was not running in the Staff session; started it session_id=1 pid=6064
+2026-11-26T00:51:49.464825Z  INFO rulebox_agent::watchdog: rulebox-shell.exe was not running in the Staff session; started it session_id=1 pid=2536
+2026-11-26T00:51:54.478458Z  INFO rulebox_agent::watchdog: rulebox-shell.exe was not running in the Staff session; started it session_id=1 pid=6620
+2026-11-26T00:51:59.478132Z  INFO rulebox_agent::watchdog: rulebox-shell.exe was not running in the Staff session; started it session_id=1 pid=1428
+2026-11-26T00:52:04.491473Z  INFO rulebox_agent::watchdog: rulebox-shell.exe was not running in the Staff session; started it session_id=1 pid=4128
+2026-11-26T00:52:09.498114Z  INFO rulebox_agent::watchdog: rulebox-shell.exe was not running in the Staff session; started it session_id=1 pid=4472
+2026-11-26T00:52:14.491595Z  INFO rulebox_agent::watchdog: rulebox-shell.exe was not running in the Staff session; started it session_id=1 pid=3100
+2026-11-26T00:52:19.493201Z  INFO rulebox_agent::watchdog: rulebox-shell.exe was not running in the Staff session; started it session_id=1 pid=6312
+2026-11-26T00:52:24.492393Z  INFO rulebox_agent::watchdog: rulebox-shell.exe was not running in the Staff session; started it session_id=1 pid=1716
+2026-11-26T00:52:29.508632Z  INFO rulebox_agent::watchdog: rulebox-shell.exe was not running in the Staff session; started it session_id=1 pid=6828
+2026-11-26T00:52:34.510259Z  INFO rulebox_agent::watchdog: rulebox-shell.exe was not running in the Staff session; started it session_id=1 pid=4088
+2026-11-26T00:52:39.529565Z  INFO rulebox_agent::watchdog: rulebox-shell.exe was not running in the Staff session; started it session_id=1 pid=2040
+2026-11-26T00:52:44.535746Z  INFO rulebox_agent::watchdog: rulebox-shell.exe was not running in the Staff session; started it session_id=1 pid=2760
+2026-11-26T00:52:49.539241Z  INFO rulebox_agent::watchdog: rulebox-shell.exe was not running in the Staff session; started it session_id=1 pid=2976
+2026-11-26T00:52:54.536873Z  INFO rulebox_agent::watchdog: rulebox-shell.exe was not running in the Staff session; started it session_id=1 pid=1588
+2026-11-26T00:52:59.550306Z  INFO rulebox_agent::watchdog: rulebox-shell.exe was not running in the Staff session; started it session_id=1 pid=2908
+2026-11-26T00:53:04.565327Z  INFO rulebox_agent::watchdog: rulebox-shell.exe was not running in the Staff session; started it session_id=1 pid=6716
+2026-11-26T00:53:09.569936Z  INFO rulebox_agent::watchdog: rulebox-shell.exe was not running in the Staff session; started it session_id=1 pid=1596
+2026-11-26T00:53:14.583476Z  INFO rulebox_agent::watchdog: rulebox-shell.exe was not running in the Staff session; started it session_id=1 pid=4808
+2026-11-26T00:53:19.601461Z  INFO rulebox_agent::watchdog: rulebox-shell.exe was not running in the Staff session; started it session_id=1 pid=4028

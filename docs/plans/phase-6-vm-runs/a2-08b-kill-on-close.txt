@@ -1,0 +1,22 @@
+== before
+5248 rulebox-shell.exe parent=5204 session=1
+5292 rulebox-staff.exe parent=5248 session=1
+1140 rulebox-staff.exe parent=5292 session=1
+killing launcher 5248 at 04:54:20
+== 2 s after
+== 27 s after
+6224 rulebox-shell.exe parent=3492 session=1
+4596 rulebox-staff.exe parent=6224 session=1
+1144 rulebox-staff.exe parent=4596 session=1
+staff count=2
+shell         : healthy
+2026-11-25T23:52:24.531146Z  INFO rulebox_agent::watchdog: shell health changed health=Healthy
+2026-11-25T23:52:33.219491Z  INFO rulebox_agent::watchdog: shell.heartbeat (first on this connection) connection_id=1 pid=5292
+2026-11-25T23:54:20.177985Z  INFO rulebox_agent::ipc_conn: client disconnected pipe="shell" connection_id=1 pid=5292 end=PeerClosed
+2026-11-25T23:54:20.182685Z  INFO rulebox_agent::watchdog: shell health changed health=NotRunning
+2026-11-25T23:54:24.428394Z  INFO rulebox_agent::watchdog: rulebox-shell.exe was not running in the Staff session; started it session_id=1 pid=6224
+2026-11-25T23:54:24.764355Z  INFO rulebox_agent::ipc_conn: client connected pipe="shell" connection_id=2 pid=4596 session_id=1 role=Shell
+2026-11-25T23:54:24.772389Z  INFO rulebox_agent::watchdog: shell health changed health=Starting
+2026-11-25T23:54:25.919912Z  INFO rulebox_agent::watchdog: shell.ready connection_id=2 pid=4596
+2026-11-25T23:54:25.950022Z  INFO rulebox_agent::watchdog: shell health changed health=Healthy
+2026-11-25T23:54:34.764975Z  INFO rulebox_agent::watchdog: shell.heartbeat (first on this connection) connection_id=2 pid=4596

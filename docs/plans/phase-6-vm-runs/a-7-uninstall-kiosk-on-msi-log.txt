@@ -105,7 +105,7 @@ MSI (s) (90:28) [01:45:50:047]: MSI_LUA: Setting MsiRunningElevated property to 
 MSI (s) (90:28) [01:45:50:047]: PROPERTY CHANGE: Adding MsiRunningElevated property. Its value is '1'.
 MSI (s) (90:28) [01:45:50:047]: PROPERTY CHANGE: Adding Privileged property. Its value is '1'.
 MSI (s) (90:28) [01:45:50:047]: Note: 1: 1402 2: HKEY_CURRENT_USER\Software\Microsoft\MS Setup (ACME)\User Info 3: 2 
-MSI (s) (90:28) [01:45:50:047]: PROPERTY CHANGE: Adding USERNAME property. Its value is 'user@example.invalid'.
+MSI (s) (90:28) [01:45:50:047]: PROPERTY CHANGE: Adding USERNAME property. Its value is '<owner-email>'.
 MSI (s) (90:28) [01:45:50:047]: Note: 1: 1402 2: HKEY_CURRENT_USER\Software\Microsoft\MS Setup (ACME)\User Info 3: 2 
 MSI (s) (90:28) [01:45:50:047]: PROPERTY CHANGE: Adding Installed property. Its value is '00:00:00'.
 MSI (s) (90:28) [01:45:50:047]: PROPERTY CHANGE: Adding DATABASE property. Its value is 'C:\WINDOWS\Installer\4c781.msi'.
@@ -304,7 +304,7 @@ Property(S): MsiWin32AssemblySupport = 6.3.26100.9278
 Property(S): RedirectedDllSupport = 2
 Property(S): MsiRunningElevated = 1
 Property(S): Privileged = 1
-Property(S): USERNAME = user@example.invalid
+Property(S): USERNAME = <owner-email>
 Property(S): Installed = 00:00:00
 Property(S): DATABASE = C:\WINDOWS\Installer\4c781.msi
 Property(S): OriginalDatabase = C:\rb-run\msi\Rulebox-0.1.1-x64-test.msi

@@ -1,0 +1,12 @@
+ USERNAME              SESSIONNAME        ID  STATE   IDLE TIME  LOGON TIME
+ ruleboxstaff          console             1  Active      none   26/11/2026 5:02 am
+KioskOn=1
+uninstall exit=1603 seconds=1.3
+MSI (s) (E0:1C) [05:04:03:182]: Product: Rulebox -- Turn kiosk mode off first. Open the Rulebox dashboard, turn the kiosk off for this PC, then uninstall Rulebox.
+Turn kiosk mode off first. Open the Rulebox dashboard, turn the kiosk off for this PC, then uninstall Rulebox.
+Action ended 5:04:03: LaunchConditions. Return value 3.
+MSI (s) (E0:1C) [05:04:03:225]: MainEngineThread is returning 1603
+MSI (c) (C0:D0) [05:04:03:230]: MainEngineThread is returning 1603
+still installed: True
+kiosk         : enabled=true phase=applied error=-
+shell         : healthy

@@ -90,7 +90,7 @@ MSI (c) (18:34) [01:47:17:494]: MSI_LUA: Setting AdminUser property to 1 because
 MSI (c) (18:34) [01:47:17:494]: PROPERTY CHANGE: Adding AdminUser property. Its value is '1'.
 MSI (c) (18:34) [01:47:17:494]: PROPERTY CHANGE: Adding Privileged property. Its value is '1'.
 MSI (c) (18:34) [01:47:17:494]: Note: 1: 1402 2: HKEY_CURRENT_USER\Software\Microsoft\MS Setup (ACME)\User Info 3: 2 
-MSI (c) (18:34) [01:47:17:494]: PROPERTY CHANGE: Adding USERNAME property. Its value is 'user@example.invalid'.
+MSI (c) (18:34) [01:47:17:494]: PROPERTY CHANGE: Adding USERNAME property. Its value is '<owner-email>'.
 MSI (c) (18:34) [01:47:17:494]: Note: 1: 1402 2: HKEY_CURRENT_USER\Software\Microsoft\MS Setup (ACME)\User Info 3: 2 
 MSI (c) (18:34) [01:47:17:494]: PROPERTY CHANGE: Adding DATABASE property. Its value is 'C:\rb-run\msi\Rulebox-0.1.0-x64-fixed.msi'.
 MSI (c) (18:34) [01:47:17:494]: PROPERTY CHANGE: Adding OriginalDatabase property. Its value is 'C:\rb-run\msi\Rulebox-0.1.0-x64-fixed.msi'.
@@ -359,7 +359,7 @@ Action start 1:47:34: ExecuteAction.
 MSI (c) (18:34) [01:47:34:210]: PROPERTY CHANGE: Adding SECONDSEQUENCE property. Its value is '1'.
 MSI (c) (18:34) [01:47:34:210]: Grabbed execution mutex.
 MSI (c) (18:34) [01:47:34:210]: Incrementing counter to disable shutdown. Counter after increment: 0
-MSI (c) (18:34) [01:47:34:210]: Switching to server: INSTALLFOLDER="C:\Program Files\Rulebox\" TARGETDIR="C:\" WINBUILD="26300" CURRENTDIRECTORY="C:\WINDOWS\system32" CLIENTUILEVEL="0" CLIENTPROCESSID="6424" USERNAME="user@example.invalid" SOURCEDIR="C:\rb-run\msi\" ACTION="INSTALL" EXECUTEACTION="INSTALL" ROOTDRIVE="C:\" INSTALLLEVEL="1" SECONDSEQUENCE="1"  ADDLOCAL=Main  
+MSI (c) (18:34) [01:47:34:210]: Switching to server: INSTALLFOLDER="C:\Program Files\Rulebox\" TARGETDIR="C:\" WINBUILD="26300" CURRENTDIRECTORY="C:\WINDOWS\system32" CLIENTUILEVEL="0" CLIENTPROCESSID="6424" USERNAME="<owner-email>" SOURCEDIR="C:\rb-run\msi\" ACTION="INSTALL" EXECUTEACTION="INSTALL" ROOTDRIVE="C:\" INSTALLLEVEL="1" SECONDSEQUENCE="1"  ADDLOCAL=Main  
 MSI (s) (90:34) [01:47:34:214]: Running installation inside multi-package transaction C:\rb-run\msi\Rulebox-0.1.0-x64-fixed.msi
 MSI (s) (90:34) [01:47:34:214]: Grabbed execution mutex.
 MSI (s) (90:28) [01:47:34:216]: Resetting cached policy values
@@ -404,7 +404,7 @@ MSI (s) (90:28) [01:47:34:831]: APPCOMPAT: looking for appcompat database entry 
 MSI (s) (90:28) [01:47:34:831]: APPCOMPAT: no matching ProductCode found in database.
 MSI (s) (90:28) [01:47:34:831]: Transforms are not secure.
 MSI (s) (90:28) [01:47:34:831]: PROPERTY CHANGE: Adding MsiLogFileLocation property. Its value is 'C:\rb-run\out\a-1-ui-unelevated-msi.log'.
-MSI (s) (90:28) [01:47:34:831]: Command Line: INSTALLFOLDER=C:\Program Files\Rulebox\ TARGETDIR=C:\ WINBUILD=26300 CURRENTDIRECTORY=C:\WINDOWS\system32 CLIENTUILEVEL=0 CLIENTPROCESSID=6424 USERNAME=user@example.invalid SOURCEDIR=C:\rb-run\msi\ ACTION=INSTALL EXECUTEACTION=INSTALL ROOTDRIVE=C:\ INSTALLLEVEL=1 SECONDSEQUENCE=1 ADDLOCAL=Main ACTION=INSTALL 
+MSI (s) (90:28) [01:47:34:831]: Command Line: INSTALLFOLDER=C:\Program Files\Rulebox\ TARGETDIR=C:\ WINBUILD=26300 CURRENTDIRECTORY=C:\WINDOWS\system32 CLIENTUILEVEL=0 CLIENTPROCESSID=6424 USERNAME=<owner-email> SOURCEDIR=C:\rb-run\msi\ ACTION=INSTALL EXECUTEACTION=INSTALL ROOTDRIVE=C:\ INSTALLLEVEL=1 SECONDSEQUENCE=1 ADDLOCAL=Main ACTION=INSTALL 
 MSI (s) (90:28) [01:47:34:831]: PROPERTY CHANGE: Adding PackageCode property. Its value is '{6F564AD0-A616-4C97-A0E2-CC40E4FA36C1}'.
 MSI (s) (90:28) [01:47:34:831]: Product Code passed to Engine.Initialize:           ''
 MSI (s) (90:28) [01:47:34:831]: Product Code from property table before transforms: '{87CDB36E-B8CD-400D-B299-0564FE4ED0D6}'
@@ -437,7 +437,7 @@ MSI (s) (90:28) [01:47:51:068]: PROPERTY CHANGE: Adding WINBUILD property. Its v
 MSI (s) (90:28) [01:47:51:068]: PROPERTY CHANGE: Adding CURRENTDIRECTORY property. Its value is 'C:\WINDOWS\system32'.
 MSI (s) (90:28) [01:47:51:068]: PROPERTY CHANGE: Adding CLIENTUILEVEL property. Its value is '0'.
 MSI (s) (90:28) [01:47:51:068]: PROPERTY CHANGE: Adding CLIENTPROCESSID property. Its value is '6424'.
-MSI (s) (90:28) [01:47:51:068]: PROPERTY CHANGE: Adding USERNAME property. Its value is 'user@example.invalid'.
+MSI (s) (90:28) [01:47:51:068]: PROPERTY CHANGE: Adding USERNAME property. Its value is '<owner-email>'.
 MSI (s) (90:28) [01:47:51:068]: PROPERTY CHANGE: Adding SOURCEDIR property. Its value is 'C:\rb-run\msi\'.
 MSI (s) (90:28) [01:47:51:068]: PROPERTY CHANGE: Adding ACTION property. Its value is 'INSTALL'.
 MSI (s) (90:28) [01:47:51:068]: PROPERTY CHANGE: Adding EXECUTEACTION property. Its value is 'INSTALL'.
@@ -1041,7 +1041,7 @@ Property(S): PackagecodeChanging = 1
 Property(S): CURRENTDIRECTORY = C:\WINDOWS\system32
 Property(S): CLIENTUILEVEL = 0
 Property(S): CLIENTPROCESSID = 6424
-Property(S): USERNAME = user@example.invalid
+Property(S): USERNAME = <owner-email>
 Property(S): VersionDatabase = 500
 Property(S): ACTION = INSTALL
 Property(S): EXECUTEACTION = INSTALL
@@ -1257,7 +1257,7 @@ Property(C): MsiWin32AssemblySupport = 6.3.26100.9278
 Property(C): RedirectedDllSupport = 2
 Property(C): AdminUser = 1
 Property(C): Privileged = 1
-Property(C): USERNAME = user@example.invalid
+Property(C): USERNAME = <owner-email>
 Property(C): DATABASE = C:\rb-run\msi\Rulebox-0.1.0-x64-fixed.msi
 Property(C): OriginalDatabase = C:\rb-run\msi\Rulebox-0.1.0-x64-fixed.msi
 Property(C): SOURCEDIR = C:\rb-run\msi\

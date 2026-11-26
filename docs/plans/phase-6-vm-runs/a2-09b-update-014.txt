@@ -1,0 +1,46 @@
+agent version : 0.1.4
+kiosk         : enabled=true phase=applied error=-
+shell         : notRunning
+policy        : version 3
+employee      : -
+Install\Version=0.1.4
+== selfupdate.json
+{
+  "schema": 1,
+  "attempt": null,
+  "failed": [
+    {
+      "version": "0.1.2",
+      "sha256": "636df5deb44d132297db9b0d66daffbe7615b0f574dd0ecd53ecb91019c37d07",
+      "reason": "did_not_take"
+    }
+  ]
+}
+== events
+06:17:31 MsiInstaller 1033: Windows Installer installed the product. Product Name: Rulebox. Product Version: 0.1.4. Product Language: 1033. Manufacturer: Rulebox. Installation success or error status: 0.
+06:17:31 MsiInstaller 11707: Product: Rulebox -- Installation completed successfully.
+06:17:30 Rulebox Agent 1100: Rulebox was updated from version 0.1.1 to 0.1.4.
+06:17:26 Rulebox Agent 1101: Updating Rulebox from version 0.1.1 to 0.1.4.
+06:17:26 Rulebox Agent 1103: The update of Rulebox to version 0.1.2 did not take effect; version 0.1.1 still runs. It is not tried again until a new release.
+05:47:30 MsiInstaller 1033: Windows Installer installed the product. Product Name: Rulebox. Product Version: 0.1.2. Product Language: 1033. Manufacturer: Rulebox. Installation success or error status: 0.
+05:47:30 MsiInstaller 11707: Product: Rulebox -- Installation completed successfully.
+05:47:26 Rulebox Agent 1101: Updating Rulebox from version 0.1.1 to 0.1.2.
+== log
+01:17:26.371292Z ERROR rulebox_agent::selfupdate: the Rulebox upgrade did not take effect; the old version still runs version=0.1.2
+01:17:26.386276Z  INFO rulebox_agent::selfupdate: downloading the Rulebox update version=0.1.4
+01:17:26.761216Z  INFO rulebox_agent::selfupdate: starting the Rulebox upgrade (msiexec /i /qn /norestart) from="0.1.1" to=0.1.4
+01:17:26.801554Z  INFO rulebox_agent::selfupdate: msiexec started outside the agent's job pid=2848
+01:17:27.660616Z  INFO rulebox_agent::agent: agent stopped
+01:17:27.667157Z  INFO rulebox_agent::service: service stopped
+01:17:30.204855Z  INFO rulebox_agent::service: service starting version="0.1.4"
+01:17:30.281934Z  INFO rulebox_agent::install_marker: the install marker's KioskOn was updated on=true
+01:17:30.283728Z  INFO rulebox_agent::selfupdate: Rulebox was updated version=0.1.4
+01:17:35.402430Z  INFO rulebox_agent::watchdog: rulebox-shell.exe was not running in the Staff session; started it session_id=1 pid=3776
+01:17:40.330944Z  INFO rulebox_agent::watchdog: rulebox-shell.exe was not running in the Staff session; started it session_id=1 pid=7076
+01:17:45.332296Z  INFO rulebox_agent::watchdog: rulebox-shell.exe was not running in the Staff session; started it session_id=1 pid=952
+01:17:50.349126Z  INFO rulebox_agent::watchdog: rulebox-shell.exe was not running in the Staff session; started it session_id=1 pid=6656
+01:17:55.348983Z  INFO rulebox_agent::watchdog: rulebox-shell.exe was not running in the Staff session; started it session_id=1 pid=6184
+== procs
+5184 rulebox-shell.exe C:\Program Files\Rulebox\rulebox-shell.exe
+5248 rulebox-staff.exe C:\Program Files\Rulebox\versions\0.1.2\rulebox-staff.exe
+5332 rulebox-staff.exe C:\Program Files\Rulebox\versions\0.1.2\rulebox-staff.exe

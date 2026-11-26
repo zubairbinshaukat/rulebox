@@ -1,0 +1,17 @@
+06:58:35 1103: The update of Rulebox to version 0.1.5 did not take effect; version 0.1.4 still runs. It is not tried again until a new release.
+{
+  "schema": 1,
+  "attempt": null,
+  "failed": [
+    {
+      "version": "0.1.2",
+      "sha256": "636df5deb44d132297db9b0d66daffbe7615b0f574dd0ecd53ecb91019c37d07",
+      "reason": "did_not_take"
+    },
+    {
+      "version": "0.1.5",
+      "sha256": "723c0292b1ac23cb60af21e61f1a1e5837fa8cd0eb4f5b882cfef567d89c49c0",
+      "reason": "did_not_take"
+    }
+  ]
+}

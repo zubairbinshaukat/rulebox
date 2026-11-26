@@ -1,4 +1,5 @@
-param([string]$Version, [switch]$ForceFail, [switch]$FixDiskCheck, [string]$Base = 'Rulebox-0.1.0-x64-fixed.msi', [string]$Name, [switch]$EventSource)
+param([string]$Version, [switch]$ForceFail, [switch]$FixDiskCheck, [string]$Base = 'Rulebox-0.1.0-x64-fixed.msi', [string]$Name, [switch]$EventSource, [string]$BaseVersion = '0.1.0')
+# Run A2: -BaseVersion is the ProductVersion of -Base (its Upgrade rows name it), e.g. 0.1.4 for Rulebox-0.1.4-x64.msi.
 # Makes Rulebox-<Version>-x64-test.msi from the CI-built 0.1.0 MSI: new ProductCode, PackageCode,
 # ProductVersion and Upgrade rows (a real major upgrade of 0.1.0). Same files inside.
 # -ForceFail adds a deferred, elevated cmd.exe /c exit 1 just before InstallFinalize, so the
@@ -26,7 +27,7 @@ Edit-Idt 'Property' { param($l) $l | ForEach-Object {
   if ($_ -like "ProductVersion`t*") { "ProductVersion`t$Version" }
   elseif ($_ -like "ProductCode`t*") { "ProductCode`t$productCode" }
   else { $_ } } }
-Edit-Idt 'Upgrade' { param($l) $l | ForEach-Object { $_ -replace "`t0\.1\.0`t", "`t$Version`t" } }
+Edit-Idt 'Upgrade' { param($l) $l | ForEach-Object { $_ -replace ("`t" + [regex]::Escape($BaseVersion) + "`t"), "`t$Version`t" } }
 Edit-Idt '_SummaryInformation' { param($l) $l | ForEach-Object { if ($_ -like "9`t*") { "9`t$packageCode" } else { $_ } } }
 if ($FixDiskCheck) {
   Edit-Idt 'LaunchCondition' { param($l) $l | Where-Object { $_ -notlike '*PrimaryVolumeSpaceAvailable*' } }

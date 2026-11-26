@@ -5,7 +5,8 @@ $o += "== service"; $o += (sc.exe qc RuleboxAgent) ; $o += (sc.exe qfailure Rule
 $o += "== service SDDL"; $o += (sc.exe sdshow RuleboxAgent)
 $o += "== service privileges"; $o += (sc.exe qprivs RuleboxAgent)
 $o += "== folder ACL"
-foreach ($p in 'C:\Program Files\Rulebox','C:\Program Files\Rulebox\rulebox-agent.exe','C:\Program Files\Rulebox\versions\0.1.0\rulebox-staff.exe') {
+$staff = @(Get-ChildItem 'C:\Program Files\Rulebox\versions\*\rulebox-staff.exe' -ErrorAction SilentlyContinue | ForEach-Object FullName)
+foreach ($p in @('C:\Program Files\Rulebox','C:\Program Files\Rulebox\rulebox-agent.exe') + $staff) {
   if (Test-Path $p) { $a = Get-Acl $p; $o += "$p"; $o += "  SDDL $($a.Sddl)"; $o += "  protected=$($a.AreAccessRulesProtected)"; $o += ($a.Access | ForEach-Object { "  $($_.IdentityReference) $($_.FileSystemRights) $($_.AccessControlType) inherited=$($_.IsInherited)" }) }
 }
 $o += "== files"; $o += Get-ChildItem 'C:\Program Files\Rulebox' -Recurse -File | ForEach-Object { "{0} {1} v={2} sha256={3}" -f $_.FullName, $_.Length, $_.VersionInfo.FileVersion, (Get-FileHash $_.FullName).Hash }
