@@ -169,6 +169,12 @@ impl DataPaths {
         self.state_dir().join("cleanup-owed.json")
     }
 
+    /// (Phase 6 Step 18, plan 4.9.6) When each employee last signed in on this PC: which browser profiles are the most
+    /// recently used. Employee folder names and times only (`browser_profiles.rs`).
+    pub fn browser_profiles(&self) -> PathBuf {
+        self.state_dir().join("browser-profiles.json")
+    }
+
     /// (1.1) Simulate mode only: the files base the demo employees get (the real
     /// base is `<Staff profile>\RuleboxFiles`). The agent only names it.
     pub fn sim_files(&self) -> PathBuf {

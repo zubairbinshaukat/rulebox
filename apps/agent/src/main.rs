@@ -8,6 +8,7 @@ mod agent;
 mod agent_policy;
 mod audit;
 mod backend;
+mod browser_profiles;
 mod catalog;
 mod cleanup;
 mod cli;

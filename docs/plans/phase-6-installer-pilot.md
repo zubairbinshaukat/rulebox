@@ -1793,6 +1793,37 @@ AUMID per app window, `Chrome.<host>_<path>.<leaf>.<profile>` /
 default: below 8 GB RAM fall back to built-in unless the group opted in
 (S-4).
 
+**Status (2026-11-26): built and tested on the dev machine (Staff App 258 tests, agent targeted tests, clippy clean; no browser was
+started, no server run, no screenshots, nothing on a VM).** Items 1-5 done:
+- **Staff App** (`browserapp.rs`, new): `choose` (built-in window for: not chosen, Lite, below 7,168 MB RAM unless the display mode
+  was forced by the group or the PC, policies not `browserReady`, program missing, or not the absolute `chrome.exe`/`msedge.exe` of
+  the chosen browser), `launch_args` (exactly `--app=<url> --user-data-dir=<profile> --no-first-run --no-default-browser-check
+  --disk-cache-size=52428800`; the address goes through the URL parser so spaces and quotes are percent-encoded, `--` inside it stays
+  inside the one `--app=` argument, a login in the address, a non-https address or more than 2,048 characters is refused),
+  `profile_path` (`%LOCALAPPDATA%\dev.rulebox.staff\browser\<chrome|edge>\<employee folder>`), `match_browser_app` (expected AUMID
+  `<Chrome|MSEdge>.<host>_<path>.<employee folder>.Default`, compared without case; windows without an id, another leaf or another
+  browser map to no web app). `Launcher::start_browser` keeps the job (log out closes and ends it) but never maps its processes or
+  adopts windows (one browser process serves several apps). `TaskTable` maps by AUMID before the process; `taskops::launch` and
+  `close_for_cap` open through `browserapp::open_now` (browser, else the built-in window, also when the browser does not start);
+  `WebApps::at_cap_with` counts browser windows; the "close one first" dialog lists them (`browser-<task id>`) and closes one
+  gracefully, waits up to 3 s, then opens the waiting app.
+  `WebApp.browser` (`BrowserLaunch`) is Rust only (`serde(skip)`), so `@rulebox/types` is unchanged. Idle close does not apply to
+  browser windows (4.14).
+- **Agent**: `browserReady` flipping now says `apps.changed` (`SharedState::browser_ready_changes`, one small task in `agent.rs`
+  calls `SessionManager::resync`); `browser_profiles.rs` (new) plans the profile deletion and keeps `browser-profiles.json`
+  (employee folder to last sign-in); `cleanup.rs` runs it in every cleanup round through the same gate and the handle-based
+  `reset_folder` (so never while an employee is signed in or signing in, in-use folders are retried). Rules: employee not in the
+  roster of the document's group (only when that roster is synced, epoch above 0) loses both profiles; per browser the 10 most
+  recently used stay, cut at the first round of an agent run; below 3 GiB free on the system drive only 3 stay, at every round.
+  `resolve_reset` accepts exactly the template shape `browser_profiles::profile_template` makes for Rulebox's own folder
+  (`dev.rulebox.staff\browser\<chrome|edge>\<name>`); every other `dev.rulebox.staff` folder stays refused.
+- **Left / not done:** "reset on logout" per app does not exist for web apps in the catalogue (profiles are per employee and
+  browser), so there is no per-app wipe; deletion of old profiles at boot happens at the first cleanup round after the agent starts
+  (a PC where nobody signs in or out does not run one); screenshots of the tiles (nothing changed in the React tiles: the running
+  dot and taskbar button follow `app_id`); the dashboard texts for the browser setting and the 8 GB rule; VM rows (Step 24: a real
+  `--app` launch as the Staff user, two apps in one browser, AUMID of a path or port address, policies before the first window,
+  profile deletion with a real browser running).
+
 ---
 
 ### Step 19 — Lite tuning

@@ -54,6 +54,9 @@ struct Rig {
     /// Whether an employee is signed in (`false` at the start: the apply window is open).
     presence_tx: watch::Sender<bool>,
     busy: Arc<AtomicBool>,
+    /// (Q-A3) The hold the self-update sets and the Staff account it closes (`None`: no kiosk).
+    hold: crate::watchdog::ShellHold,
+    staff_sid: Arc<std::sync::Mutex<Option<String>>>,
     shutdown: CancellationToken,
     task: Option<JoinHandle<()>>,
     start: tokio::time::Instant,
@@ -83,6 +86,8 @@ fn rig() -> Rig {
         snapshot_tx: watch::channel(enrolled_snapshot(RUNNING)).0,
         presence_tx: watch::channel(false).0,
         busy: Arc::new(AtomicBool::new(false)),
+        hold: crate::watchdog::ShellHold::default(),
+        staff_sid: Arc::new(std::sync::Mutex::new(None)),
         shutdown: CancellationToken::new(),
         task: None,
         start: tokio::time::Instant::now(),
@@ -90,6 +95,11 @@ fn rig() -> Rig {
 }
 
 impl Rig {
+    fn shell(&self) -> UpgradeShell {
+        let staff = Arc::clone(&self.staff_sid);
+        UpgradeShell { hold: self.hold.clone(), staff_sid: Arc::new(move || staff.lock().unwrap().clone()) }
+    }
+
     fn start(&mut self) {
         let start = self.start;
         let busy = Arc::clone(&self.busy);
@@ -101,6 +111,7 @@ impl Rig {
             now_ms: Arc::new(move || BASE_MS + start.elapsed().as_millis() as u64),
             signed_in: self.presence_tx.subscribe(),
             installer_busy: Arc::new(move || busy.load(AtomicOrdering::SeqCst)),
+            shell: self.shell(),
         };
         self.task = Some(tokio::spawn(run_self_update_task(
             deps,
@@ -233,6 +244,106 @@ async fn the_new_agent_sees_its_new_version_and_the_attempt_is_done() {
     rig.stop().await;
 }
 
+// ------------------------------------------------------------------------------------------------ the Staff App is closed first (Q-A3)
+
+const STAFF: &str = "S-1-5-21-1000-2000-3000-2001";
+
+/// The Staff account is signed in on session 2 with the launcher and the Staff App running, and so is another user.
+fn staff_with_shell(rig: &Rig) {
+    rig.sim.add_session(2, Some(STAFF), true);
+    *rig.staff_sid.lock().unwrap() = Some(STAFF.to_string());
+    rig.sim.with_world(|world| {
+        let process = |pid, session_id, image: &str, sid: &str| crate::platform::sim::SimProcess {
+            pid,
+            session_id,
+            image: PathBuf::from(image),
+            user_sid: sid.to_string(),
+        };
+        world.processes.push(process(900, 2, r"C:\Program Files\Rulebox\rulebox-shell.exe", STAFF));
+        world.processes.push(process(901, 2, r"C:\Program Files\Rulebox\versions\0.1.0\rulebox-staff.exe", STAFF));
+        world.processes.push(process(902, 1, r"C:\Program Files\Rulebox\rulebox-shell.exe", "S-1-5-21-1000-2000-3000-1999"));
+    });
+}
+
+fn processes(rig: &Rig) -> Vec<u32> {
+    let mut pids = rig.sim.with_world(|world| world.processes.iter().map(|p| p.pid).collect::<Vec<_>>());
+    pids.sort_unstable();
+    pids
+}
+
+#[tokio::test(start_paused = true)]
+async fn the_staff_app_is_closed_before_msiexec_starts_and_the_watchdog_is_held() {
+    let mut rig = rig();
+    staff_with_shell(&rig);
+    let r = release("0.1.1");
+    rig.publish(&r);
+    rig.start();
+    rig.until("started", |rig| rig.started().len() == 1).await;
+    let calls = rig.sim.calls();
+    let position = |op: SimOp| calls.iter().position(|call| *call == op);
+    assert!(position(SimOp::EndStaffShell) < position(SimOp::StartSelfUpgrade), "closed first: {calls:?}");
+    // The launcher and the Staff App are gone; another user's process is not touched.
+    assert_eq!(processes(&rig), [902]);
+    // The watchdog is held for minutes (the wall clock of the test starts at BASE_MS), not for ever.
+    assert!(rig.hold.active(BASE_MS + 60_000));
+    assert!(!rig.hold.active(BASE_MS + 10 * 60_000));
+    rig.stop().await;
+}
+
+#[tokio::test(start_paused = true)]
+async fn nothing_is_closed_without_a_staff_account_or_while_an_employee_is_signed_in() {
+    let mut rig = rig();
+    // No kiosk: no Staff account to close, the upgrade starts as before.
+    let r = release("0.1.1");
+    rig.publish(&r);
+    rig.start();
+    rig.until("started", |rig| rig.started().len() == 1).await;
+    assert!(!rig.sim.calls().contains(&SimOp::EndStaffShell));
+    assert!(!rig.hold.active(BASE_MS));
+    rig.stop().await;
+
+    // An employee is signed in: the window is closed and nothing is touched, however long it waits.
+    let mut rig = self::rig();
+    staff_with_shell(&rig);
+    rig.presence_tx.send_replace(true);
+    let r = release("0.1.1");
+    rig.publish(&r);
+    rig.start();
+    rig.until("staged", |rig| rig.msi_path(&r).exists()).await;
+    advance(Duration::from_secs(3600)).await;
+    rig.settle().await;
+    assert!(!rig.sim.calls().contains(&SimOp::EndStaffShell));
+    assert_eq!(processes(&rig), [900, 901, 902]);
+    rig.stop().await;
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_failure_to_close_the_staff_app_does_not_stop_the_upgrade_and_releases_the_hold() {
+    let mut rig = rig();
+    staff_with_shell(&rig);
+    rig.sim.fail_next(SimOp::EndStaffShell, PlatformError::AccessDenied);
+    let r = release("0.1.1");
+    rig.publish(&r);
+    rig.start();
+    rig.until("started", |rig| rig.started().len() == 1).await;
+    assert!(!rig.hold.active(BASE_MS), "nothing was closed: the watchdog may act");
+    assert_eq!(processes(&rig), [900, 901, 902]);
+    rig.stop().await;
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_refused_start_releases_the_hold_so_the_staff_app_comes_back() {
+    let mut rig = rig();
+    staff_with_shell(&rig);
+    rig.sim.fail_next(SimOp::StartSelfUpgrade, PlatformError::Guard("not an armed machine".into()));
+    let r = release("0.1.1");
+    rig.publish(&r);
+    rig.start();
+    rig.until("failed", |rig| rig.file().failed.iter().any(|f| f.reason == reason::START_REFUSED)).await;
+    assert!(!rig.hold.active(BASE_MS), "the watchdog starts the launcher again at once");
+    rig.stop().await;
+}
+
 // ------------------------------------------------------------------------------------------------ never while signed in
 
 #[tokio::test(start_paused = true)]
@@ -336,6 +447,7 @@ fn a_file_swapped_right_before_the_start_is_refused_and_the_release_fails() {
         now_ms: Arc::new(|| BASE_MS),
         signed_in: rig.presence_tx.subscribe(),
         installer_busy: Arc::new(|| false),
+        shell: rig.shell(),
     };
     let mut updater = Updater::open(deps);
     std::fs::create_dir_all(rig.paths.selfupdate_dir()).unwrap();

@@ -36,8 +36,8 @@ use super::{
 use super::{FolderAcl, LocalAdminAccount};
 use crate::cleanup::{resolve_reset, shell_folder_is_default};
 use crate::installs::{
-    installer_command_allowed, is_in_use, is_published_inf, is_reparse_point, portable_dir_ok, portable_target_ok, wait_for_installer,
-    InstallerWait, RunTemp, RunningInstaller, INSTALLER_TAIL_GRACE,
+    installer_command_allowed, is_in_use, is_published_inf, is_reparse_point, portable_dir_ok, portable_target_ok, split_nsis_dir_tail,
+    wait_for_installer, InstallerWait, RunTemp, RunningInstaller, INSTALLER_TAIL_GRACE,
 };
 use crate::installs::drivers_rules::pnputil_delete_command;
 use crate::installs::msiexec_path;
@@ -440,8 +440,14 @@ impl Platform for WindowsPlatform {
         }
         let temp = RunTemp::create(&self.data.installer_temp_dir()).map_err(io_err)?;
         let job = KillOnCloseJob::new().map_err(map_err)?;
-        let child = std::process::Command::new(&cmd.program)
-            .args(&cmd.args)
+        // (Per-user installs, Tier A) A last argument `/D=<folder>` is NSIS's raw switch: it must not be quoted.
+        let (plain_args, raw_tail) = split_nsis_dir_tail(&cmd.args);
+        let mut command = std::process::Command::new(&cmd.program);
+        command.args(plain_args);
+        if let Some(tail) = raw_tail {
+            command.raw_arg(tail);
+        }
+        let child = command
             .current_dir(&cmd.working_dir)
             .env("TEMP", temp.path())
             .env("TMP", temp.path())
@@ -498,6 +504,28 @@ impl Platform for WindowsPlatform {
             InstallerExit::TimedOut | InstallerExit::Stalled => Err(PlatformError::Other("pnputil did not finish in time".into())),
             InstallerExit::Cancelled => Err(PlatformError::Other("cancelled".into())),
         }
+    }
+
+    fn printer_driver_install(&self, name: &str) -> Result<(), PlatformError> {
+        printing::check_plain_name(name).map_err(map_err)?;
+        guard()?;
+        printing::install_driver_from_store(name).map_err(map_err)
+    }
+
+    fn printer_driver_delete(&self, name: &str) -> Result<(), PlatformError> {
+        printing::check_plain_name(name).map_err(map_err)?;
+        guard()?;
+        printing::delete_driver(name).map_err(map_err)
+    }
+
+    fn trusted_publisher_add(&self, der: &[u8]) -> Result<(), PlatformError> {
+        guard()?;
+        rulebox_win32::publisher::add(der).map_err(map_err)
+    }
+
+    fn trusted_publisher_remove(&self, sha1: &str) -> Result<(), PlatformError> {
+        guard()?;
+        rulebox_win32::publisher::remove(sha1).map_err(map_err)
     }
 
     fn place_portable(&self, from: &Path, to: &Path) -> Result<(), PlatformError> {
@@ -698,6 +726,30 @@ impl Platform for WindowsPlatform {
             .collect();
         names.sort();
         Ok(names)
+    }
+
+    fn driver_package_models(&self, published: &str) -> Result<Vec<String>, PlatformError> {
+        if !is_published_inf(published) {
+            return Err(PlatformError::Refused("not a published driver name"));
+        }
+        let root = system_root().ok_or_else(|| PlatformError::Other("the Windows folder is not known".into()))?;
+        let file = root.join("INF").join(published.to_ascii_lowercase());
+        let bytes = match std::fs::metadata(&file) {
+            Ok(meta) if meta.is_file() && meta.len() <= crate::installs::drivers_rules::MAX_INF_BYTES as u64 => std::fs::read(&file).map_err(io_err)?,
+            Ok(meta) if meta.is_file() => return Err(PlatformError::Other("the package INF is too large to read".into())),
+            Ok(_) => return Ok(Vec::new()),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
+            Err(error) => return Err(io_err(error)),
+        };
+        Ok(crate::installs::drivers_rules::inf_models(&crate::installs::drivers_rules::decode_inf(&bytes)))
+    }
+
+    fn file_signer_cert(&self, path: &Path) -> Result<Option<super::SignerCert>, PlatformError> {
+        fileid::signer_cert(path).map_err(map_err)
+    }
+
+    fn trusted_publisher_has(&self, sha1: &str) -> Result<bool, PlatformError> {
+        rulebox_win32::publisher::trusted_publisher_has(sha1).map_err(map_err)
     }
 
     fn bcd_get(&self, object: &str, element: &str) -> Result<Option<String>, PlatformError> {
@@ -1157,7 +1209,23 @@ impl Platform for WindowsPlatform {
         guard()?;
         process::end_stale_by_name(session_id, LAUNCHER_EXE_NAME, installed_launcher, &parse_sid(staff_sid)?).map_err(map_err)
     }
+
+    /// (Phase 6 Q-A3) The launcher first (its kill-on-close job ends the Staff App with it), then any Staff App that is left.
+    fn end_staff_shell(&self, staff_sid: &str) -> Result<Vec<u32>, PlatformError> {
+        guard()?;
+        let owner = parse_sid(staff_sid)?;
+        let mut ended = Vec::new();
+        for session in self.sessions()?.iter().filter(|s| s.user_sid.as_deref().is_some_and(|user| user.eq_ignore_ascii_case(staff_sid))) {
+            for name in [LAUNCHER_EXE_NAME, STAFF_APP_EXE_NAME] {
+                ended.extend(process::end_all_by_name(session.id, name, &owner).map_err(map_err)?);
+            }
+        }
+        Ok(ended)
+    }
 }
+
+/// (Phase 6 Q-A3) The Staff App's file name (`versions\<version>\rulebox-staff.exe`), as Toolhelp reports it.
+const STAFF_APP_EXE_NAME: &str = "rulebox-staff.exe";
 
 /// (Phase 6 Step 22 run A2) The launcher's file name, as Toolhelp reports it.
 const LAUNCHER_EXE_NAME: &str = "rulebox-shell.exe";
@@ -1393,6 +1461,7 @@ mod tests {
         blocked("launch_in_session", p.launch_in_session(1, sid, exe));
         blocked("terminate_process", p.terminate_process(1, exe, sid));
         blocked("end_stale_launchers", p.end_stale_launchers(1, Path::new(r"C:\rulebox-test-no-such\rulebox-shell.exe"), sid));
+        blocked("end_staff_shell", p.end_staff_shell(sid));
         blocked("secrets_save", p.secrets_save(b"x"));
 
         // (Step 14) An installer the rule allows still meets the guard first.
@@ -1443,6 +1512,14 @@ mod tests {
         blocked("printer_port_add", p.printer_port_add(&port));
         blocked("printer_port_delete", p.printer_port_delete("Rulebox_k7"));
         blocked("driver_package_delete", p.driver_package_delete("oem12.inf"));
+        // (Phase 6 Step 15) The spooler's printer drivers and the TrustedPublisher store.
+        blocked("printer_driver_install", p.printer_driver_install("BIXOLON SRP-350III"));
+        blocked("printer_driver_delete", p.printer_driver_delete("BIXOLON SRP-350III"));
+        blocked("trusted_publisher_add", p.trusted_publisher_add(&[0x30; 100]));
+        blocked("trusted_publisher_remove", p.trusted_publisher_remove(&"ab".repeat(20)));
+        assert!(matches!(p.driver_package_models("netcfg.inf"), Err(PlatformError::Refused(_))), "only a published name is read");
+        assert_eq!(p.driver_package_models("oem99999.inf").unwrap_or_default().len(), 0, "no such package: nothing");
+        assert!(p.trusted_publisher_has(&"00".repeat(20)).is_ok_and(|has| !has));
         blocked("printer_share_connect", p.printer_share_connect(r"\\print01\hp"));
         blocked("printer_share_disconnect", p.printer_share_disconnect(r"\\print01\hp"));
         blocked("bcd_set", p.bcd_set("{current}", "recoveryenabled", "No"));

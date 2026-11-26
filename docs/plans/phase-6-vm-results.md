@@ -185,6 +185,11 @@ there only to build the test MSIs.
 
 ### Open questions for the owner
 
+- **Answered 2026-11-26 (owner), built on the dev PC, not yet VM-checked:** Q-A3 = (a) with (b) as the safety net (the agent
+  closes the Staff App before `msiexec`, `watchdog::ShellHold` keeps the watchdog from starting it again for five minutes;
+  `RemoveFolderEx` on `versions\` in `StaffApp.wxs`). Q-A2 = (c), extended: an uninstall-only custom action runs the
+  installed agent's `unenroll --remove-staff-account` (`Service.wxs`, `REMOVE="ALL" AND NOT UPGRADINGPRODUCTCODE`, before
+  `StopServices`). Logs stay.
 - **Q-A3 — empty `versions\<old>` folders after agent-driven upgrades.** When the Staff App runs during the
   upgrade its files are replaced in use; Windows deletes them at the next restart but leaves the folders, and the
   final uninstall leaves `C:\Program Files\Rulebox\versions\…` behind.

@@ -253,7 +253,25 @@ pub struct SelfUpdateDeps {
     pub signed_in: watch::Receiver<bool>,
     /// Whether the install engine is running an installer (Windows allows one MSI at a time: the upgrade would answer 1618).
     pub installer_busy: Arc<dyn Fn() -> bool + Send + Sync>,
+    /// (Phase 6 Q-A3) How the Staff App is closed before the MSI starts.
+    pub shell: UpgradeShell,
 }
+
+/// (Phase 6 Q-A3, owner-approved 2026-11-26) The Staff App is closed **before** `msiexec` starts. The apply window already
+/// guarantees that no employee is signed in, so nobody loses work; with no file of the old version in use, Windows Installer
+/// replaces everything in place (it no longer moves the running launcher to `C:\Config.Msi`, which left the stuck kiosk of
+/// run A2 and the empty `versions\<old>` folders after an uninstall). The watchdog is held off for [`SHELL_HOLD`] so it does
+/// not start the launcher again meanwhile; the upgraded agent (a new process) starts with no hold and starts the new launcher.
+#[derive(Clone)]
+pub struct UpgradeShell {
+    pub hold: crate::watchdog::ShellHold,
+    /// The Staff account's SID, `None` when there is no kiosk (nothing to close).
+    pub staff_sid: Arc<dyn Fn() -> Option<String> + Send + Sync>,
+}
+
+/// How long the watchdog is held off after the Staff App was closed. The MSI takes 4 to 7 s on the VM; if it never stops this
+/// service (an early refusal) the watchdog starts the launcher again when this has passed.
+const SHELL_HOLD: Duration = Duration::from_secs(5 * 60);
 
 /// What an attempt in `selfupdate.json` says now.
 enum Settle {
@@ -552,6 +570,25 @@ impl Updater {
         }
     }
 
+    /// (Phase 6 Q-A3) Closes the launcher and the Staff App of the Staff account, after the attempt is written and just
+    /// before `msiexec` starts. The watchdog is held first, so it cannot start the launcher between the two. A failure is
+    /// logged and the upgrade goes on as before (Windows Installer then replaces the files in use at the next restart): the
+    /// hold is released, since nothing was closed that the watchdog should leave closed.
+    fn close_staff_app(&self, now: u64) {
+        let Some(staff_sid) = (self.deps.shell.staff_sid)() else {
+            return;
+        };
+        self.deps.shell.hold.hold_until(now.saturating_add(ms(SHELL_HOLD)));
+        match self.deps.platform.end_staff_shell(&staff_sid) {
+            Ok(pids) if pids.is_empty() => tracing::info!("no Staff App was running; nothing to close before the Rulebox upgrade"),
+            Ok(pids) => tracing::info!(?pids, "closed the Staff App for the Rulebox upgrade (no employee is signed in)"),
+            Err(error) => {
+                tracing::warn!("cannot close the Staff App before the Rulebox upgrade: {error}; the MSI replaces its files anyway");
+                self.deps.shell.hold.release();
+            }
+        }
+    }
+
     /// The last checks and the start. Everything that can be refused is refused here, before the attempt is written.
     fn start(&mut self, release: &RuleboxRelease, running: &str, now: u64) -> Option<u64> {
         let msi = self.msi_path(&release.sha256);
@@ -602,6 +639,7 @@ impl Updater {
             return self.retry_at_ms;
         }
         self.event(EventKind::Information, EVENT_STARTING, &format!("Updating Rulebox from version {running} to {}.", release.version));
+        self.close_staff_app(now);
         tracing::info!(from = running, to = %release.version, "starting the Rulebox upgrade (msiexec /i /qn /norestart)");
         match self.deps.platform.start_self_upgrade(verified.path(), &release.sha256, &self.deps.paths.selfupdate_log()) {
             Ok(pid) => {
@@ -610,6 +648,8 @@ impl Updater {
             }
             Err(error) => {
                 tracing::error!("the Rulebox upgrade could not be started: {error}");
+                // The Staff App was closed for nothing: let the watchdog start it again now.
+                self.deps.shell.hold.release();
                 drop(verified);
                 self.file.attempt = None;
                 self.fail_release(release, reason::START_REFUSED);

@@ -48,12 +48,12 @@ use rulebox_ipc::types::{AgentSnapshot, ConnectionStatus, EnrollmentStatus};
 use rulebox_policy::catalog::{
     AnswerFile, ApplyWhen, CatalogApp, InstallKind, InstallSpec, UpdateMode, MAX_ANSWER_FILE_BYTES, TIMEOUT_MIN_RANGE,
 };
-use rulebox_policy::paths::{check_silent_args, exe_pattern, expand_exe, PathRoots};
+use rulebox_policy::paths::{check_install_dir_args, check_silent_args, exe_pattern, expand_exe, PathRoots};
 use serde::{Deserialize, Serialize};
 use tokio::sync::{mpsc, watch};
 use tokio_util::sync::CancellationToken;
 
-use super::answer::{answer_file_name, expand_silent_args, uses_answer_file, uses_log_file, ANSWER_EXT};
+use super::answer::{answer_file_name, expand_silent_args, uses_answer_file, uses_install_dir, uses_log_file, ANSWER_EXT};
 use super::download::{check_https, part_path, Downloader};
 use super::drivers_rules::DriverRecord;
 use super::probe::{program_file_name, systemprofile_appdata, PER_USER_MAX_DEPTH};
@@ -670,6 +670,9 @@ pub fn check_spec(app: &CatalogApp, roots: &PathRoots) -> Result<Spec, &'static 
             }
             // (Phase 6 Step 14) The rules of `check_args`, and no `{...}` but `{AnswerFile}` and `{LogFile}`.
             check_silent_args(&install.silent_args).map_err(|_| "the silent arguments do not pass the rules")?;
+            // (Per-user installs, Tier A) `{InstallDir}` only as `/D=` (last) or `/DIR=`, for a program under Program Files.
+            check_install_dir_args(&install.silent_args, &desktop.exe)
+                .map_err(|_| "{InstallDir} is only allowed as /D= (last) or /DIR=, for a program under Program Files")?;
             if uses_answer_file(&install.silent_args) {
                 let answer = install.answer_file.as_ref().ok_or("the silent arguments use {AnswerFile} but the app has no answer file")?;
                 check_https(&answer.url).map_err(|_| "the answer file URL is not https://")?;
@@ -724,6 +727,24 @@ pub fn check_spec(app: &CatalogApp, roots: &PathRoots) -> Result<Spec, &'static 
         // A portable file is only copied: it has no installer to time.
         timeout_min: if kind == RecordKind::Portable { None } else { install.timeout_min },
     })
+}
+
+/// (Per-user installs, Tier A, plan 5.1) The folder `{InstallDir}` stands for: the program's own folder (what
+/// `expand_exe` returned), when the arguments use the token and the program is a plain path (no `*`) in a folder **below**
+/// `Program Files` or `Program Files (x86)` (never the root itself, never another drive or root). `None` otherwise: the
+/// expansion then refuses the token and nothing runs. The installer is told to write into a folder only admins can change,
+/// so a per-user-only installer does not end up in SYSTEM's profile.
+fn install_dir_for(args: &[String], exe: &str, roots: &PathRoots) -> Option<String> {
+    if !uses_install_dir(args) || versions::is_pattern(exe) {
+        return None;
+    }
+    let folder = versions::program_folder(exe)?;
+    let below = |root: &str| {
+        let root = root.trim_end_matches('\\').to_ascii_lowercase();
+        let lower = folder.to_ascii_lowercase();
+        lower.len() > root.len() + 1 && lower.starts_with(&root) && lower.as_bytes()[root.len()] == b'\\'
+    };
+    (below(&roots.program_files) || roots.program_files_x86.as_deref().is_some_and(below)).then_some(folder)
 }
 
 fn fresh_record(app: &CatalogApp, spec: &Spec, state: LocalState) -> InstallRecord {
@@ -1867,7 +1888,8 @@ impl Engine {
         // (Step 14) `{AnswerFile}` and `{LogFile}` become paths in the agent's own data folder, nothing else is expanded.
         // Before an update marks the old version as touched: a failure here changes nothing on the PC.
         let log = if uses_log_file(&spec.silent_args) { self.prepare_log(app_id) } else { self.deps.paths.install_log(app_id) };
-        let args = match expand_silent_args(&spec.silent_args, answer_held.as_ref().map(|held| held.path()), &log) {
+        let install_dir = install_dir_for(&spec.silent_args, &spec.exe, roots);
+        let args = match expand_silent_args(&spec.silent_args, answer_held.as_ref().map(|held| held.path()), &log, install_dir.as_deref()) {
             Ok(args) => args,
             Err(error) => {
                 // `check_spec` refuses these before the engine gets here; defence in depth.
@@ -2143,7 +2165,8 @@ impl Engine {
             None => None,
         };
         let log = if uses_log_file(&previous.silent_args) { self.prepare_log(app_id) } else { self.deps.paths.install_log(app_id) };
-        let Ok(args) = expand_silent_args(&previous.silent_args, answer_held.as_ref().map(|held| held.path()), &log) else {
+        let install_dir = install_dir_for(&previous.silent_args, &spec.exe, roots);
+        let Ok(args) = expand_silent_args(&previous.silent_args, answer_held.as_ref().map(|held| held.path()), &log, install_dir.as_deref()) else {
             tracing::error!(app_id, "the previous installer's silent arguments cannot be expanded; no roll-back");
             return rolled(Detail::RollbackFailed);
         };

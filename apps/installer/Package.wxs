@@ -2,7 +2,9 @@
 <!--
   Rulebox MSI, the package itself (plan Phase 6, Section 4.10).
 
-  Hand-authored WiX v7. Per machine, x64, no script or EXE custom action.
+  Hand-authored WiX v7. Per machine, x64, no script. Two custom actions in all: the finish page's Setup
+  launcher (UI.wxs, a DLL entry of the Util extension) and the uninstall-only unenroll (Service.wxs, the
+  installed agent exe, owner-approved 2026-11-26).
   Built by build.ps1 (it passes Version, BinDir, RepoRoot, InstallerDir, StageDir).
 
   Layout (PRD 23.3):

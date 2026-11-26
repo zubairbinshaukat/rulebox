@@ -30,7 +30,7 @@ const BUDGET = {
     // The signed-in shell (navigation, account menu) plus the first screen.
     // 2026-10-27, Step 5a: +3.5 KB for the step-up controller (idle lock, keep-alive,
     // tabs) that every signed-in page must run; its dialogs and screens stay lazy.
-    { name: "overview", chunks: ["Layout", "Overview"], maxJsKb: 167, maxCssKb: 19, maxIncrementalKb: 27.5, incrementalFrom: "sign-in" }, // 26: Networks nav entry (Phase 5 Step 13, owner 2026-11-14); 165 / 27: Messages nav entry (Phase 5 Step 15, needs owner OK); 166 / 27.5: Phase 5 Step 19, the lockdown and findings routes plus the overview warning lines (measured 165.5 / 27.2; the warning lines themselves are a lazy chunk), needs owner OK; 166.5: Phase 6 Steps 12, 13 and 19 data-layer hooks and types (measured 166.2), owner OK 2026-11-21; 167: install-detail texts for every agent detail (measured 166.7, Overview imports installDetail)
+    { name: "overview", chunks: ["Layout", "Overview"], maxJsKb: 167.5, maxCssKb: 19, maxIncrementalKb: 27.5, incrementalFrom: "sign-in" }, // 167.5: new install-detail text (driver_untrusted_publisher) and the {InstallDir} refusal strings, 2026-11-26 (measured 167.1), needs owner OK; 26: Networks nav entry (Phase 5 Step 13, owner 2026-11-14); 165 / 27: Messages nav entry (Phase 5 Step 15, needs owner OK); 166 / 27.5: Phase 5 Step 19, the lockdown and findings routes plus the overview warning lines (measured 165.5 / 27.2; the warning lines themselves are a lazy chunk), needs owner OK; 166.5: Phase 6 Steps 12, 13 and 19 data-layer hooks and types (measured 166.2), owner OK 2026-11-21; 167: install-detail texts for every agent detail (measured 166.7, Overview imports installDetail)
     // Every other screen, on top of an already loaded overview.
     ...[
       "Devices",
@@ -59,7 +59,8 @@ const BUDGET = {
       // AppEdit 29 (Phase 6 Step 13, measured 28.0): the inline checks and the spec mapping of the installer details. Detect, the pre-fill, the
       // details card and the local file check are lazy chunks of their own (AppInstaller 4.5 KB, localInstaller 5.6 KB, loaded on use). Needs owner OK.
       // DeviceDetail 25.5 (Phase 6 Step 19, measured 25.0 after the display card became a lazy chunk). Needs owner OK.
-      maxIncrementalKb: screen === "AppEdit" ? 29 : screen === "DeviceDetail" ? 25.5 : 25,
+      // AppEdit 29.5 (2026-11-26, measured 29.2): the {InstallDir} token check in the silent-argument rules. Needs owner OK.
+      maxIncrementalKb: screen === "AppEdit" ? 29.5 : screen === "DeviceDetail" ? 25.5 : 25,
       incrementalFrom: "overview",
     })),
   ],

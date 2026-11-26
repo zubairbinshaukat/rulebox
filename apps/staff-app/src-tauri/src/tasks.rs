@@ -117,6 +117,9 @@ pub struct TaskTable {
     /// Built-in windows that show a catalogue app (the Files window): hwnd →
     /// app id, so the window groups under that app's pinned button.
     builtin_apps: HashMap<isize, String>,
+    /// (Phase 6 Step 18) The profile folder name of the signed-in employee: the part of a browser window's AppUserModelID that
+    /// tells whose profile it runs in. `None` while nobody is signed in: browser windows are then mapped to no web app.
+    browser_leaf: Option<String>,
 }
 
 impl TaskTable {
@@ -208,6 +211,16 @@ impl TaskTable {
         true
     }
 
+    /// (Phase 6 Step 18) Tell the table whose browser profile to expect in the AppUserModelID of a browser web app window.
+    /// Returns `true` when that changed.
+    pub fn set_browser_leaf(&mut self, leaf: Option<String>) -> bool {
+        if self.browser_leaf == leaf {
+            return false;
+        }
+        self.browser_leaf = leaf;
+        true
+    }
+
     /// Replace the set of hung windows. Returns `true` when it changed.
     pub fn set_hung(&mut self, hung: HashSet<isize>) -> bool {
         if self.hung == hung {
@@ -295,7 +308,15 @@ impl TaskTable {
                 Some(LabelKind::Shell) => continue,
                 Some(LabelKind::Builtin) => (true, self.builtin_apps.get(hwnd).cloned()),
                 Some(LabelKind::Web { app_id }) => (true, Some(app_id)),
-                None => (false, match_catalogue_app(info, catalogue, launched)),
+                // (Phase 6 Step 18) A Chrome or Edge window of a web app is told apart by its AppUserModelID first: the
+                // browser process is shared by every web app of the employee, so the process cannot name the app.
+                None => (
+                    false,
+                    self.browser_leaf
+                        .as_deref()
+                        .and_then(|leaf| crate::browserapp::match_browser_app(info.aumid.as_deref(), info.exe.as_deref(), catalogue, leaf))
+                        .or_else(|| match_catalogue_app(info, catalogue, launched)),
+                ),
             };
             items.push(TaskItem {
                 id: hwnd.to_string(),
@@ -773,6 +794,10 @@ impl TaskHost {
         let launched = self.services.launcher.pid_map(&self.table.pids());
         self.table
             .set_builtin_apps(builtin_apps_of(app, &state, labels));
+        self.table.set_browser_leaf(state.read(|s| match &s.session {
+            crate::model::SessionState::SignedIn { employee, .. } => Some(crate::webapp::employee_folder(&employee.id)),
+            _ => None,
+        }));
         let items = state.read(|s| self.table.items(labels, &s.apps.items, &launched));
         let differs = state.read(|s| s.tasks != items);
         if differs {

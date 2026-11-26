@@ -19,7 +19,7 @@ use windows::Win32::Security::Cryptography::Catalog::{
     CryptCATAdminAcquireContext2, CryptCATAdminCalcHashFromFileHandle2, CryptCATAdminEnumCatalogFromHash,
     CryptCATAdminReleaseCatalogContext, CryptCATAdminReleaseContext, CryptCATCatalogInfoFromContext, CATALOG_INFO,
 };
-use windows::Win32::Security::Cryptography::{CertGetNameStringW, CERT_CONTEXT};
+use windows::Win32::Security::Cryptography::{CertGetCertificateContextProperty, CertGetNameStringW, CERT_CONTEXT};
 use windows::Win32::Security::WinTrust::{
     WTHelperGetProvCertFromChain, WTHelperGetProvSignerFromChain, WTHelperProvDataFromStateData, WinVerifyTrust,
     WINTRUST_ACTION_GENERIC_VERIFY_V2, WINTRUST_CATALOG_INFO, WINTRUST_DATA, WINTRUST_FILE_INFO,
@@ -148,41 +148,123 @@ fn no_ui_window() -> HWND {
 /// Runs `WinVerifyTrust` for `data` (a state handle is kept open), reads the leaf certificate
 /// subject when the signature is valid, and always closes the state.
 fn verify(data: &mut WINTRUST_DATA) -> Option<String> {
+    verify_with(data, leaf_subject)
+}
+
+/// [`verify`] with the reader of the leaf certificate chosen by the caller. The reader runs only after a valid
+/// signature, while the state is open.
+fn verify_with<T>(data: &mut WINTRUST_DATA, read: unsafe fn(HANDLE) -> Option<T>) -> Option<T> {
     let mut action = WINTRUST_ACTION_GENERIC_VERIFY_V2;
     data.dwStateAction = WTD_STATEACTION_VERIFY;
     // SAFETY: `data` is fully set up and its file or catalog info outlives the call.
     let result = unsafe { WinVerifyTrust(no_ui_window(), &mut action, std::ptr::from_mut(data).cast()) };
-    let subject = if result == 0 {
+    let found = if result == 0 {
         // SAFETY: the state handle came from the successful verify above and is closed below.
-        unsafe { leaf_subject(data.hWVTStateData) }
+        unsafe { read(data.hWVTStateData) }
     } else {
         None
     };
     data.dwStateAction = WTD_STATEACTION_CLOSE;
     // SAFETY: closes the state opened above, with the same data.
     let _ = unsafe { WinVerifyTrust(no_ui_window(), &mut action, std::ptr::from_mut(data).cast()) };
-    subject
+    found
+}
+
+/// The leaf certificate of the first signer of an open, successful `WinVerifyTrust` state (null: none).
+///
+/// # Safety
+/// `state` must be the state handle of a successful `WinVerifyTrust` that is still open.
+unsafe fn leaf_context(state: HANDLE) -> *const CERT_CONTEXT {
+    // SAFETY: per the contract the state is open; the helpers return pointers into it (or null).
+    unsafe {
+        let provider = WTHelperProvDataFromStateData(state);
+        if provider.is_null() {
+            return std::ptr::null();
+        }
+        let signer = WTHelperGetProvSignerFromChain(provider, 0, false, 0);
+        if signer.is_null() {
+            return std::ptr::null();
+        }
+        let cert = WTHelperGetProvCertFromChain(signer, 0);
+        if cert.is_null() {
+            return std::ptr::null();
+        }
+        (*cert).pCert
+    }
 }
 
 /// # Safety
 /// `state` must be the state handle of a successful `WinVerifyTrust` that is still open.
 unsafe fn leaf_subject(state: HANDLE) -> Option<String> {
-    // SAFETY: per the contract the state is open; the helpers return pointers into it (or null).
+    // SAFETY: per the contract the state is open; the context is read while it is.
+    unsafe { subject_of(leaf_context(state)) }
+}
+
+/// The certificate that signed a file, as the machine's trust store needs it: the DER bytes and both thumbprints
+/// (lower-case hex of the SHA-1 and the SHA-256 of the DER, what Windows shows as "Thumbprint").
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SignerCert {
+    /// The subject in the form of [`FileIdentity::signer`]. For display only: never what trust is decided by.
+    pub subject: String,
+    pub sha1: String,
+    pub sha256: String,
+    pub der: Vec<u8>,
+}
+
+/// Most DER bytes of a signer certificate that are read (a real certificate is 1 to 3 KiB).
+const MAX_CERT_DER: usize = 16 * 1024;
+/// `CERT_SHA1_HASH_PROP_ID` and `CERT_SHA256_HASH_PROP_ID`.
+const SHA1_PROP: u32 = 3;
+const SHA256_PROP: u32 = 107;
+
+/// # Safety
+/// `cert` must be a certificate context that stays valid for the call.
+unsafe fn hash_property(cert: *const CERT_CONTEXT, property: u32, size: usize) -> Option<String> {
+    let mut bytes = vec![0u8; size];
+    let mut length = size as u32;
+    // SAFETY: `bytes` has room for `length` bytes; `cert` is valid per the contract.
+    unsafe { CertGetCertificateContextProperty(cert, property, Some(bytes.as_mut_ptr().cast()), &mut length) }.ok()?;
+    (length as usize == size).then(|| bytes.iter().map(|byte| format!("{byte:02x}")).collect())
+}
+
+/// # Safety
+/// `state` must be the state handle of a successful `WinVerifyTrust` that is still open.
+unsafe fn leaf_cert(state: HANDLE) -> Option<SignerCert> {
+    // SAFETY: per the contract the state is open; the context and its encoded bytes live as long as it does.
     unsafe {
-        let provider = WTHelperProvDataFromStateData(state);
-        if provider.is_null() {
-            return None;
-        }
-        let signer = WTHelperGetProvSignerFromChain(provider, 0, false, 0);
-        if signer.is_null() {
-            return None;
-        }
-        let cert = WTHelperGetProvCertFromChain(signer, 0);
+        let cert = leaf_context(state);
         if cert.is_null() {
             return None;
         }
-        subject_of((*cert).pCert)
+        let (bytes, length) = ((*cert).pbCertEncoded, (*cert).cbCertEncoded as usize);
+        if bytes.is_null() || length == 0 || length > MAX_CERT_DER {
+            return None;
+        }
+        Some(SignerCert {
+            subject: subject_of(cert)?,
+            sha1: hash_property(cert, SHA1_PROP, 20)?,
+            sha256: hash_property(cert, SHA256_PROP, 32)?,
+            der: std::slice::from_raw_parts(bytes, length).to_vec(),
+        })
     }
+}
+
+/// The certificate of the **embedded** signature of a file when that signature is valid (a `.cat` catalog is such a
+/// file: its own signature is embedded). `Ok(None)`: no such file, unsigned, or not trusted. No catalog lookup, no
+/// network (same rules as [`file_identity`]). Read-only.
+pub fn signer_cert(path: &Path) -> Result<Option<SignerCert>> {
+    if file_stamp(path)?.is_none() {
+        return Ok(None);
+    }
+    let wide = to_wide(&path.to_string_lossy());
+    let mut file = WINTRUST_FILE_INFO {
+        cbStruct: std::mem::size_of::<WINTRUST_FILE_INFO>() as u32,
+        pcwszFilePath: PCWSTR(wide.as_ptr()),
+        ..Default::default()
+    };
+    let mut data = base_data(WTD_CHOICE_FILE.0);
+    data.Anonymous.pFile = &mut file;
+    Ok(verify_with(&mut data, leaf_cert))
 }
 
 /// The subject in X.500 text, most specific part first (`CN=..., O=..., L=..., S=..., C=...`).
@@ -339,6 +421,22 @@ mod tests {
         }
         let me = file_identity(&std::env::current_exe().unwrap()).unwrap().unwrap();
         assert_eq!(me.signer, None);
+    }
+
+    #[test]
+    fn a_missing_or_unsigned_file_has_no_signer_certificate() {
+        assert_eq!(signer_cert(Path::new(r"C:\no such folder\x.cat")).unwrap(), None);
+        assert_eq!(signer_cert(&std::env::current_exe().unwrap()).unwrap(), None, "this unsigned test program");
+        // A file of Windows that carries its own signature (when this one does), reads as a complete certificate.
+        let windows = std::env::var("SystemRoot").unwrap_or_else(|_| r"C:\Windows".into());
+        for name in ["notepad.exe", "cmd.exe"] {
+            if let Some(cert) = signer_cert(&Path::new(&windows).join("System32").join(name)).unwrap() {
+                assert!(cert.subject.contains("Microsoft"), "{}", cert.subject);
+                assert_eq!((cert.sha1.len(), cert.sha256.len()), (40, 64));
+                assert!(cert.sha1.bytes().chain(cert.sha256.bytes()).all(|b| matches!(b, b'0'..=b'9' | b'a'..=b'f')));
+                assert_eq!(cert.der.first(), Some(&0x30), "DER starts with a SEQUENCE");
+            }
+        }
     }
 
     #[test]

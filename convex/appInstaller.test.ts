@@ -7,7 +7,7 @@ import { rangeHost } from "../tests/convex/rangeHost";
 import { api } from "./_generated/api";
 import type { Id } from "./_generated/dataModel";
 import { auditPolicy } from "./lib/audit";
-import { silentArgTokenProblem } from "./lib/appRules";
+import { installDirProblem, silentArgTokenProblem } from "./lib/appRules";
 
 // Phase 6 Step 13 (plan 4.2, 4.6, 4.7): the installer details of an app (`tech`, `answerFile`, `timeoutMin`, `publisher`, editable
 // `successExitCodes`), their pass-through into the signed document, and `apps:inspectInstaller`. No test touches the network.
@@ -143,6 +143,26 @@ describe("installer details: the refusals", () => {
     const { a } = await setup();
     expect(await refusal(a.as.mutation(api.apps.createDesktop, program({ silentArgs: ["/D={x}"] })))).toMatchObject({ field: "install.silentArgs", detail: "silent_arg_token" });
     expect(await refusal(a.as.mutation(api.apps.createDesktop, program({ silentArgs: ["/L={LogFile}"] })))).toBeNull();
+  });
+
+  test("{InstallDir} (per-user installs, Tier A): /D= last or /DIR=, for a plain Program Files program only", async () => {
+    // The agent's rule (`check_install_dir_args`, rulebox-policy); the agent repeats it on the PC.
+    const exe = "{ProgramFiles}\\Acme\\acme.exe";
+    expect(silentArgTokenProblem(["/S", "/D={InstallDir}"])).toBe(false);
+    expect(silentArgTokenProblem(["{installdir}"])).toBe(true);
+    expect(installDirProblem(["/S"], "{SystemRoot}\\System32\\x.exe")).toBe(false);
+    expect(installDirProblem(["/S", "/D={InstallDir}"], exe)).toBe(false);
+    expect(installDirProblem(["/VERYSILENT", "/DIR={InstallDir}", "/NORESTART"], "{ProgramFilesX86}\\V\\a.exe")).toBe(false);
+    for (const bad of [["/D={InstallDir}", "/S"], ["/S", "/D={InstallDir}x"], ["/S", "/d={InstallDir}"], ["/S", "{InstallDir}"], ["/S", "/D={InstallDir}{InstallDir}"], ["/DIR={InstallDir}", "/D={InstallDir}"], ["/S", "/LOG={InstallDir}"]]) {
+      expect(installDirProblem(bad, exe), JSON.stringify(bad)).toBe(true);
+    }
+    for (const badExe of ["{SystemRoot}\\System32\\x.exe", "{ProgramFiles}\\V\\app-*\\a.exe", "{RuleboxApps}\\k17abc\\a.exe", ""]) {
+      expect(installDirProblem(["/S", "/D={InstallDir}"], badExe), badExe).toBe(true);
+    }
+    const { a } = await setup();
+    expect(await refusal(a.as.mutation(api.apps.createDesktop, program({ silentArgs: ["/S", "/D={InstallDir}"] })))).toBeNull();
+    expect(await refusal(a.as.mutation(api.apps.createDesktop, program({ silentArgs: ["/D={InstallDir}", "/S"] })))).toMatchObject({ field: "install.silentArgs", detail: "install_dir_token" });
+    // A `*` or another root is refused by the program path rule before the token rule is asked (`installDirProblem` above covers both).
   });
 
   test("expected signer: text of at most 200 characters without control characters; success codes: integers, at most 16", async () => {

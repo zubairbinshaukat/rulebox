@@ -152,20 +152,26 @@ describe("package", () => {
   });
 });
 
-describe("no script and no EXE custom action", () => {
-  test("the only custom action is the WiX Util ShellExec DLL entry on the Setup shortcut", () => {
-    const action = one("CustomAction");
-    expect(action.attrs.Id).toBe("LaunchRuleboxSetup");
-    expect(action.attrs.DllEntry).toBe("WixShellExec");
-    expect(action.attrs.BinaryRef).toBe("Wix4UtilCA_X64");
+describe("custom actions: no script, two actions in all", () => {
+  const action = (id: string) => {
+    const found = all("CustomAction").filter((el) => el.attrs.Id === id);
+    expect(found, id).toHaveLength(1);
+    return found[0];
+  };
+
+  test("there are exactly two: the Util ShellExec DLL entry on the Setup shortcut and the uninstall-only unenroll", () => {
+    expect(all("CustomAction").map((el) => el.attrs.Id).sort()).toEqual(["LaunchRuleboxSetup", "UnenrollAtUninstall"]);
+    const launch = action("LaunchRuleboxSetup");
+    expect(launch.attrs.DllEntry).toBe("WixShellExec");
+    expect(launch.attrs.BinaryRef).toBe("Wix4UtilCA_X64");
     for (const forbidden of ["ExeCommand", "Script", "JScriptCall", "VBScriptCall", "FileRef", "Directory", "Property", "Value"]) {
-      expect(action.attrs[forbidden], forbidden).toBeUndefined();
+      expect(launch.attrs[forbidden], forbidden).toBeUndefined();
     }
     expect(all("Binary")).toHaveLength(0);
     expect(all("CustomActionRef")).toHaveLength(0);
   });
 
-  test("it is started from the finish page only, never in a sequence, and not on uninstall", () => {
+  test("the Setup action is started from the finish page only, never in a sequence, and not on uninstall", () => {
     const publishes = all("Publish");
     for (const publish of publishes) {
       expect(publish.attrs.Dialog).toBe("ExitDialog");
@@ -175,11 +181,72 @@ describe("no script and no EXE custom action", () => {
     const launch = publishes.filter((el) => el.attrs.Event === "DoAction");
     expect(launch).toHaveLength(1);
     expect(launch[0].attrs.Value).toBe("LaunchRuleboxSetup");
-    for (const sequence of ["InstallExecuteSequence", "InstallUISequence"]) {
-      for (const el of all(sequence)) {
-        expect(el.children.filter((child) => child.name === "Custom")).toHaveLength(0);
-      }
+    for (const el of all("InstallUISequence")) {
+      expect(el.children.filter((child) => child.name === "Custom")).toHaveLength(0);
     }
+    // The one entry of the execute sequence is the unenroll action (next test).
+    const custom = all("InstallExecuteSequence").flatMap((el) => el.children.filter((child) => child.name === "Custom"));
+    expect(custom.map((el) => el.attrs.Action)).toEqual(["UnenrollAtUninstall"]);
+  });
+
+  test("uninstall unenrolls, removes the Staff account and the device secrets: the installed agent, deferred, as SYSTEM, errors ignored", () => {
+    const unenroll = action("UnenrollAtUninstall");
+    // An EXE action run from the installed file: no script, no command line of its own, no property.
+    expect(unenroll.attrs).toMatchObject({
+      FileRef: "RuleboxAgentExe",
+      ExeCommand: "unenroll --remove-staff-account",
+      Execute: "deferred",
+      Impersonate: "no",
+      Return: "ignore",
+    });
+    for (const forbidden of ["Script", "JScriptCall", "VBScriptCall", "DllEntry", "BinaryRef", "Directory", "Property", "Value"]) {
+      expect(unenroll.attrs[forbidden], forbidden).toBeUndefined();
+    }
+    expect(all("File").some((el) => el.attrs.Id === "RuleboxAgentExe" && el.attrs.Name === "rulebox-agent.exe")).toBe(true);
+    // The arguments are the agent's own: `unenroll` with `--remove-staff-account` (clap: remove_staff_account).
+    const cli = readFileSync(join(repoRoot, "apps/agent/src/cli.rs"), "utf8");
+    expect(/Unenroll\s*\{[^}]*remove_staff_account:\s*bool/s.test(cli)).toBe(true);
+  });
+
+  test("it runs only at a real uninstall (never in a major upgrade) and while the service and its exe are still there", () => {
+    const entry = all("InstallExecuteSequence")
+      .flatMap((el) => el.children)
+      .find((child) => child.name === "Custom" && child.attrs.Action === "UnenrollAtUninstall");
+    // MajorUpgrade is afterInstallInitialize: the old product's removal runs in every upgrade, with UPGRADINGPRODUCTCODE set.
+    expect(entry?.attrs.Condition).toBe('REMOVE="ALL" AND NOT UPGRADINGPRODUCTCODE');
+    // It talks to the running service over the admin pipe: before it is stopped, so before its files are removed.
+    expect(entry?.attrs.Before).toBe("StopServices");
+    expect(entry?.attrs.After).toBeUndefined();
+    // The uninstall guard (kiosk on) uses the same words, so the two cannot drift apart.
+    expect(all("Launch").some((el) => el.attrs.Condition.includes('REMOVE="ALL" AND NOT UPGRADINGPRODUCTCODE'))).toBe(true);
+  });
+
+  test("the folder of old Staff App versions is removed with the product (RemoveFolderEx on its own directory)", () => {
+    const remove = all("util:RemoveFolderEx");
+    expect(remove).toHaveLength(1);
+    expect(remove[0].attrs).toMatchObject({ On: "uninstall", Property: "VERSIONSFOLDERPATH" });
+    // The WiX Util action runs before costing, when a Directory Id is still empty: the property is built from the install
+    // folder the marker recorded (Package.wxs: InstallDir = [INSTALLFOLDER]), as `<InstallDir>versions`.
+    const search = all("RegistrySearch").find((el) => el.attrs.Id === "RuleboxInstallDirSearch");
+    expect(search?.attrs).toMatchObject({
+      Root: "HKLM",
+      Key: rustConst(GUARD_RS, "INSTALL_KEY"),
+      Name: rustConst(GUARD_RS, "INSTALL_DIR_VALUE"),
+      Type: "directory",
+      Bitness: "always64",
+    });
+    expect(all("Property").find((el) => el.children.includes(search!))?.attrs.Id).toBe("RULEBOXINSTALLDIR");
+    const set = all("SetProperty").find((el) => el.attrs.Id === "VERSIONSFOLDERPATH");
+    expect(set?.attrs).toMatchObject({ Value: "[RULEBOXINSTALLDIR]versions", After: "AppSearch", Sequence: "execute", Condition: "RULEBOXINSTALLDIR" });
+    // The folder it deletes is the `versions` directory of the package, and nothing but that (`apps\` of portable apps stays).
+    const versions = all("Directory").find((el) => el.attrs.Id === "VersionsFolder");
+    expect(versions?.attrs.Name).toBe("versions");
+    // Its component is keyed by a registry value of its own (a folder cannot be a key path) and is part of the Staff App group.
+    const component = all("Component").find((el) => el.children.includes(remove[0]));
+    expect(component?.attrs).toMatchObject({ Id: "VersionsFolderCleanup", Directory: "VersionsFolder", Bitness: "always64" });
+    expect(component?.children.some((el) => el.name === "RegistryValue" && el.attrs.KeyPath === "yes")).toBe(true);
+    const group = all("ComponentGroup").find((el) => el.attrs.Id === "StaffAppGroup");
+    expect(group?.children).toContain(component);
   });
 
   test("the finish page opens the Rulebox Setup shortcut", () => {
@@ -203,7 +270,11 @@ describe("no script and no EXE custom action", () => {
   });
 
   test("no VBScript or JScript appears anywhere in the installer folder", () => {
-    for (const file of WXS_FILES) expect(raw[file], file).not.toMatch(/vbscript|jscript|\.vbs\b|\.js\b|ExeCommand/i);
+    for (const file of WXS_FILES) expect(raw[file], file).not.toMatch(/vbscript|jscript|\.vbs\b|\.js\b/i);
+    // The one EXE custom action is the agent's own `unenroll` (Service.wxs); no other file names a command line.
+    for (const file of WXS_FILES) {
+      expect(raw[file].match(/ExeCommand/g)?.length ?? 0, file).toBe(file === "Service.wxs" ? 1 : 0);
+    }
     expect(existsSync(join(installerDir, "scripts"))).toBe(false);
   });
 });
@@ -324,7 +395,8 @@ describe("launch conditions", () => {
 
   test("LaunchConditions is moved after CostFinalize in both sequences (disk space needs costing)", () => {
     for (const sequence of ["InstallUISequence", "InstallExecuteSequence"]) {
-      const action = one(sequence).children.find((el) => el.name === "LaunchConditions");
+      // (InstallExecuteSequence also appears in Service.wxs, for the unenroll action.)
+      const action = all(sequence).flatMap((el) => el.children).find((el) => el.name === "LaunchConditions");
       expect(action?.attrs.After, sequence).toBe("CostFinalize");
     }
   });

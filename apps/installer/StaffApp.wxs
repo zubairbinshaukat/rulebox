@@ -9,7 +9,8 @@
   Later versions are added and switched by the agent (PRD 23.4), not by the MSI.
   build.ps1 passes BinDir (the built binaries), StageDir and Version.
 -->
-<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs">
+<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs"
+     xmlns:util="http://wixtoolset.org/schemas/v4/wxs/util">
   <Fragment>
     <DirectoryRef Id="INSTALLFOLDER">
       <Directory Id="VersionsFolder" Name="versions">
@@ -19,6 +20,16 @@
   </Fragment>
 
   <Fragment>
+    <!--
+      The install folder as the marker recorded it (Package.wxs: InstallDir = [INSTALLFOLDER], with a trailing backslash),
+      read by AppSearch on every run (an install finds nothing yet, an uninstall and an upgrade find it), and the path of
+      `versions` below it. Only set when the marker is there, so a first install never names a relative path.
+    -->
+    <Property Id="RULEBOXINSTALLDIR">
+      <RegistrySearch Id="RuleboxInstallDirSearch" Root="HKLM" Key="SOFTWARE\Rulebox\Install" Name="InstallDir" Type="directory" Bitness="always64" />
+    </Property>
+    <SetProperty Id="VERSIONSFOLDERPATH" Value="[RULEBOXINSTALLDIR]versions" After="AppSearch" Sequence="execute" Condition="RULEBOXINSTALLDIR" />
+
     <ComponentGroup Id="StaffAppGroup">
       <Component Id="ShellLauncher" Directory="INSTALLFOLDER">
         <File Id="RuleboxShellExe" Name="rulebox-shell.exe" Source="$(BinDir)\rulebox-shell.exe" KeyPath="yes" />
@@ -34,6 +45,25 @@
 
       <Component Id="StaffAppExecutable" Directory="CurrentVersionFolder">
         <File Id="RuleboxStaffExe" Name="rulebox-staff.exe" Source="$(BinDir)\rulebox-staff.exe" KeyPath="yes" />
+      </Component>
+
+      <!--
+        Safety net for the folders of old versions (Phase 6 Step 22 run A2, Q-A3, owner-approved 2026-11-26). The MSI only
+        knows the files of its own version. An agent-driven upgrade used to replace the Staff App while it ran, so Windows
+        deleted the old files at the next restart and left `versions\<old>` behind, and the final uninstall left
+        C:\Program Files\Rulebox\versions\... as empty folders. The agent now closes the Staff App before the upgrade
+        (selfupdate.rs), so that no longer happens; this removes whatever is still there when the product is removed.
+        RemoveFolderEx deletes the whole `versions` folder when this component is removed. The property that names the
+        folder has to be known BEFORE costing (the WiX Util action runs before CostInitialize, so a Directory Id, which is only
+        resolved at CostFinalize, is empty then): it is built from the install folder the MSI itself wrote into the install
+        marker (the RegistrySearch and SetProperty below). It also runs when a major upgrade removes the old product: the new
+        version's files are installed after that, so nothing the new version needs is lost, and old folders are cleaned.
+        Windows Installer cannot undo it on a rollback; every file in it belongs to a component the rollback restores, so only
+        empty folders can be missing. The component's key path is a registry value, because a folder cannot be a key path.
+      -->
+      <Component Id="VersionsFolderCleanup" Directory="VersionsFolder" Bitness="always64">
+        <RegistryValue Root="HKLM" Key="SOFTWARE\Rulebox\Cleanup" Name="Versions" Type="integer" Value="1" KeyPath="yes" />
+        <util:RemoveFolderEx On="uninstall" Property="VERSIONSFOLDERPATH" />
       </Component>
     </ComponentGroup>
   </Fragment>

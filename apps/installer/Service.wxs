@@ -71,5 +71,35 @@
         <RegistryValue Root="HKLM" Key="SOFTWARE\Rulebox\StartMenu" Name="Setup" Type="integer" Value="1" KeyPath="yes" />
       </Component>
     </ComponentGroup>
+
+    <!--
+    Uninstall only (Phase 6 Step 22 run A2, Q-A2, owner-approved 2026-11-26): a PC that is uninstalled leaves the dashboard,
+    drops its device credentials and takes the RuleboxStaff account with it. The agent's unenroll command with its
+    remove-staff-account option (apps\agent\src\enroll.rs) tells the backend, switches the kiosk off if it is still on, signs
+    the Staff session out and deletes the account and its profile, and wipes the saved device secrets (secrets.bin) and
+    the organization's data. Logs and the rest of ProgramData\Rulebox stay (the owner kept "logs stay").
+
+    - It talks to the RUNNING service over the admin pipe (SYSTEM is allowed), so it runs Before="StopServices" and
+      before RemoveFiles: the service and the exe are both still there. It is an EXE custom action run from the
+      installed file, not a script. The "no EXE custom action" rule of Step 7 was lifted for this one action by the owner.
+    - REMOVE="ALL" is a real uninstall. UPGRADINGPRODUCTCODE is set while a MAJOR UPGRADE removes the old product
+      (MajorUpgrade is scheduled afterInstallInitialize, so the old product's removal runs in every upgrade): the action must
+      never run then, or an upgrade would unenroll the PC. The same condition guards the kiosk check in Checks.wxs.
+    - Return="ignore": the PC may be not enrolled, offline or the service stopped; the uninstall still goes on, and the
+      Staff account stays then (the `unenroll` command can be run by hand).
+    - The kiosk guard (Checks.wxs) has already refused the uninstall while the kiosk is on, so by now the PC is back to
+      normal Windows.
+    -->
+    <CustomAction
+        Id="UnenrollAtUninstall"
+        FileRef="RuleboxAgentExe"
+        ExeCommand="unenroll --remove-staff-account"
+        Execute="deferred"
+        Impersonate="no"
+        Return="ignore" />
+
+    <InstallExecuteSequence>
+      <Custom Action="UnenrollAtUninstall" Before="StopServices" Condition="REMOVE=&quot;ALL&quot; AND NOT UPGRADINGPRODUCTCODE" />
+    </InstallExecuteSequence>
   </Fragment>
 </Wix>

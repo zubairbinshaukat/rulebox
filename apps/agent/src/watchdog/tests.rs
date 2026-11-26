@@ -304,6 +304,7 @@ struct Rig {
     gate: Arc<Mutex<Gate>>,
     install: InstallPaths,
     task: WatchdogTask,
+    hold: crate::watchdog::ShellHold,
 }
 
 impl Rig {
@@ -325,6 +326,7 @@ impl Rig {
         let (snapshot, _rx) = SnapshotHandle::new(test_snapshot());
         let gate = Arc::new(Mutex::new(Gate { kiosk_enabled: true, staff_sid: Some(STAFF.to_string()) }));
         let gate_for_task = Arc::clone(&gate);
+        let hold = crate::watchdog::ShellHold::default();
         let task = WatchdogTask::new(WatchdogDeps {
             platform: sim.clone(),
             snapshot: snapshot.clone(),
@@ -332,8 +334,9 @@ impl Rig {
             kill_hung_shell,
             simulate,
             gate: Arc::new(move || crate::state::lock(&gate_for_task).clone()),
+            hold: hold.clone(),
         });
-        Self { _dir: dir, sim, snapshot, gate, install, task }
+        Self { _dir: dir, sim, snapshot, gate, install, task, hold }
     }
 
     fn launcher_exe(&self) -> PathBuf {
@@ -410,6 +413,34 @@ async fn a_missing_launcher_is_relaunched_in_the_staff_session() {
     rig.step(5).await;
     assert_eq!(rig.health(), ShellHealth::Starting);
     assert_eq!(rig.calls(SimOp::LaunchInSession), 1);
+}
+
+#[test]
+fn a_hold_is_a_deadline_that_can_be_released() {
+    let hold = crate::watchdog::ShellHold::default();
+    assert!(!hold.active(0) && !hold.active(1_000), "a new hold holds nothing");
+    hold.hold_until(5_000);
+    assert!(hold.active(4_999) && !hold.active(5_000), "it ends at its deadline");
+    let same = hold.clone();
+    same.release();
+    assert!(!hold.active(1), "every clone is the same hold");
+}
+
+/// (Phase 6 Q-A3) The self-update closed the Staff App for an MSI upgrade: the watchdog neither looks nor launches.
+#[tokio::test(start_paused = true)]
+async fn a_held_watchdog_does_not_start_the_launcher_until_the_hold_ends() {
+    let mut rig = Rig::new();
+    rig.hold.hold_until(crate::state::unix_ms() + 3_600_000);
+    rig.task.evaluate().await;
+    for _ in 0..4 {
+        rig.step(5).await;
+    }
+    assert_eq!(rig.calls(SimOp::LaunchInSession), 0);
+    assert_eq!(rig.calls(SimOp::Sessions), 0, "a held watchdog does not even look");
+    rig.hold.release();
+    rig.step(1).await;
+    rig.step(3).await;
+    assert_eq!(rig.calls(SimOp::LaunchInSession), 1, "released: the missing launcher is started as usual");
 }
 
 /// (Phase 6 Step 22 run A2) The old launcher after an MSI upgrade: Toolhelp still names it `rulebox-shell.exe`, but the
@@ -742,6 +773,7 @@ async fn the_real_gate_follows_enrollment_and_the_kiosk() {
         kill_hung_shell: true,
         simulate: false,
         gate: state_gate(Arc::clone(&shared)),
+        hold: crate::watchdog::ShellHold::default(),
     });
     let launches = |sim: &SimPlatform| sim.calls().iter().filter(|c| **c == SimOp::LaunchInSession).count();
 
@@ -861,6 +893,7 @@ async fn the_loop_ticks_wakes_on_session_events_and_stops_on_shutdown() {
         kill_hung_shell: true,
         simulate: false,
         gate: Arc::new(|| Gate { kiosk_enabled: true, staff_sid: Some(STAFF.to_string()) }),
+        hold: crate::watchdog::ShellHold::default(),
     };
     let join = tokio::spawn(run(deps, signals_rx, events_rx, None, shutdown.clone()));
     let settle = || async {

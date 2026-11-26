@@ -874,6 +874,28 @@ fn the_apps_list_says_browser_ready_only_after_the_policies_are_applied() {
     assert!(!web_of(plain.visible(&catalog, "e"), "w").browser_ready);
 }
 
+/// (Phase 6 Step 18) The session layer is told when the ready browsers change, so it can say `apps.changed` and the Staff App
+/// stops opening the built-in window for a browser web app that is ready now. Nothing is announced when nothing changed.
+#[test]
+fn a_change_of_the_ready_browsers_wakes_the_session_layer_and_only_then() {
+    let rig = Rig::new();
+    rig.platform.add_file(EDGE_EXE);
+    let catalog = vec![edge_web("w", &[])];
+    let inputs = BrowserInputs::from_catalog(&catalog, Some(&sim_path_roots()), &|path| path == EDGE_EXE);
+    let mut changes = rig.shared.browser_ready_changes();
+    assert!(!changes.has_changed().unwrap());
+
+    rig.run(&inputs);
+    assert!(changes.has_changed().unwrap(), "ready after the first apply");
+    assert_eq!(*changes.borrow_and_update(), 1);
+    // The same document again: still ready, nothing to announce.
+    rig.run(&inputs);
+    assert!(!changes.has_changed().unwrap());
+    // The last browser app is unassigned: not ready any more.
+    rig.run(&BrowserInputs::default());
+    assert!(changes.has_changed().unwrap());
+    assert!(rig.shared.read(|state| state.browser_ready.is_empty()));
+}
 #[test]
 fn the_browser_of_a_file_name_is_found_in_any_folder_and_case() {
     assert_eq!(browser_of_exe(r"C:\Anywhere\Chrome.EXE"), Some(Browser::Chrome));

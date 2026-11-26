@@ -2,6 +2,7 @@
 
 pub mod agent;
 pub mod appwin;
+pub mod browserapp;
 pub mod commands;
 pub mod covers;
 pub mod exit;

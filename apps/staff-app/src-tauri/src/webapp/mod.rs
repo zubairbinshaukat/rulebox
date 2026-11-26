@@ -138,7 +138,8 @@ fn label_part(text: &str) -> String {
         .collect()
 }
 
-fn employee_folder(employee_id: &str) -> String {
+/// The folder name of an employee (the profile folders of both the built-in window and the browsers use it).
+pub fn employee_folder(employee_id: &str) -> String {
     let clean = label_part(employee_id);
     if clean.is_empty() {
         "unknown".to_string()
@@ -193,9 +194,14 @@ impl WebApps {
         }
     }
 
-    /// Would one more window pass the cap? (Browser windows of Phase 6 Step 18 will be counted here too.)
+    /// Would one more window pass the cap? Counts the built-in windows only; see [`Self::at_cap_with`].
     pub fn at_cap(&self, cap: usize) -> bool {
-        idle::at_cap(self.count_open(), cap)
+        self.at_cap_with(cap, 0)
+    }
+
+    /// (Phase 6 Step 18) Would one more window pass the cap, when `browser_windows` web apps are open in Chrome or Edge too?
+    pub fn at_cap_with(&self, cap: usize, browser_windows: usize) -> bool {
+        idle::at_cap(self.count_open().saturating_add(browser_windows), cap)
     }
 
     /// The app that waits for the employee to close a window (the cap stopped it). A newer request replaces an older one.
@@ -209,6 +215,16 @@ impl WebApps {
         self.inner.lock().ok().and_then(|mut inner| inner.pending.take())
     }
 
+    /// (Phase 6 Step 18) The app that waits for a window to close, without ending the wait.
+    pub fn waiting_app(&self) -> Option<String> {
+        self.inner.lock().ok().and_then(|inner| inner.pending.clone())
+    }
+
+    /// (Phase 6 Step 18) Ends the wait and returns the app that waited (the employee closed a browser window for it).
+    pub fn take_waiting(&self) -> Option<String> {
+        self.take_pending()
+    }
+
     /// Forgets what waited for a window to close (the employee cancelled).
     pub fn cancel_pending(&self) {
         let _ = self.take_pending();
@@ -216,6 +232,11 @@ impl WebApps {
 
     /// What the "close one first" dialog shows, or `None` when nothing waits. Windows are listed by app name, then label.
     pub fn cap_prompt(&self, cap: usize, catalogue: &[AppEntry]) -> Option<CapPrompt> {
+        self.cap_prompt_with(cap, catalogue, &[])
+    }
+
+    /// (Phase 6 Step 18) The same, with the web apps open in a browser as `(label, app name)` entries of the list too.
+    pub fn cap_prompt_with(&self, cap: usize, catalogue: &[AppEntry], browser_windows: &[(String, String)]) -> Option<CapPrompt> {
         let inner = self.inner.lock().ok()?;
         let waiting = inner.pending.as_deref()?;
         let app_name = catalogue.iter().find(|app| app.id == waiting).map_or_else(|| "this app".to_string(), |app| app.name.clone());
@@ -223,6 +244,7 @@ impl WebApps {
             .windows
             .values()
             .map(|window| CapWindow { label: window.label.clone(), app_name: window.app_name.clone() })
+            .chain(browser_windows.iter().map(|(label, app_name)| CapWindow { label: label.clone(), app_name: app_name.clone() }))
             .collect();
         windows.sort_by(|a, b| (a.app_name.to_lowercase(), &a.label).cmp(&(b.app_name.to_lowercase(), &b.label)));
         Some(CapPrompt { cap, app_name, windows })

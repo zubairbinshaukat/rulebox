@@ -108,13 +108,56 @@ pub fn show_desktop(services: &TaskServices) {
     }
 }
 
+/// (Phase 6 Step 18) The employee picked a web app that is open in Chrome or Edge in the "close one first" dialog: its window is
+/// closed the way its own close button would, and the waiting app opens once Windows no longer has the window. A page that asks
+/// "leave this site?" keeps its window: the wait goes on and the dialog asks again (`StillFull`).
+fn close_browser_for_cap(
+    app: &AppHandle,
+    services: &TaskServices,
+    state: &AppState,
+    web: &std::sync::Arc<crate::webapp::WebApps>,
+    task_id: &str,
+) -> CapOutcome {
+    let Some((hwnd, _)) = services.registry.lookup(task_id) else {
+        return CapOutcome::Nothing;
+    };
+    let Some(waiting) = web.waiting_app() else {
+        return CapOutcome::Nothing;
+    };
+    if let Err(error) = control::close(hwnd) {
+        tracing::warn!(%error, "a browser window could not be closed for the limit");
+        return CapOutcome::StillFull;
+    }
+    if !crate::browserapp::wait_gone(hwnd) {
+        return CapOutcome::StillFull;
+    }
+    // The wait ends only now that there is room, so a window that stayed open leaves the dialog up.
+    let _ = web.take_waiting();
+    let entry = state.read(|s| s.apps.items.iter().find(|a| a.id == waiting).cloned());
+    match entry {
+        Some(entry) => {
+            if let Err(error) = crate::browserapp::open_now(app, services, state, web, &entry) {
+                tracing::warn!(%error, app = %waiting, "web app window failed");
+                state.notify(NoticeTone::Warning, format!("{} could not be opened.", entry.name), Some(error));
+            }
+            CapOutcome::Opened
+        }
+        None => CapOutcome::Nothing,
+    }
+}
+
 /// (Phase 6 Step 19) The employee picked the window `label` in the "close one first" dialog: close it, then open the app that was
 /// waiting. When the cap was lowered meanwhile and is still reached, the same app keeps waiting and the dialog asks again. A label
 /// that is not an open web window, or nothing waiting, closes nothing. Blocks on window calls: run it from a worker thread.
-pub fn close_for_cap(app: &AppHandle, state: &AppState, label: &str) -> CapOutcome {
+/// (Phase 6 Step 18) The label may also name a web app open in a browser (`browser-<task id>`).
+pub fn close_for_cap(app: &AppHandle, services: &TaskServices, state: &AppState, label: &str) -> CapOutcome {
     let Some(web) = app.try_state::<std::sync::Arc<crate::webapp::WebApps>>() else {
         return CapOutcome::Nothing;
     };
+    let browser_task = state.read(|s| crate::browserapp::browser_task_of_label(label, &s.apps.items, &s.tasks).map(str::to_string));
+    if let Some(task_id) = browser_task {
+        return close_browser_for_cap(app, services, state, &web, &task_id);
+    }
     let Some((_gone, waiting)) = web.take_for_close(label) else {
         return CapOutcome::Nothing;
     };
@@ -123,13 +166,14 @@ pub fn close_for_cap(app: &AppHandle, state: &AppState, label: &str) -> CapOutco
             tracing::warn!(%error, label, "a web window could not be closed for the limit");
         }
     }
-    if web.at_cap(state.web_window_cap()) {
+    let browser_open = state.read(|s| crate::browserapp::browser_window_count(&s.apps.items, &s.tasks));
+    if web.at_cap_with(state.web_window_cap(), browser_open) {
         web.set_pending(&waiting);
         return CapOutcome::StillFull;
     }
     let entry = state.read(|s| s.apps.items.iter().find(|a| a.id == waiting).cloned());
-    match entry.map(|entry| (web.open(app, state, &entry), entry.name)) {
-        Some((Ok(_), _)) => CapOutcome::Opened,
+    match entry.map(|entry| (crate::browserapp::open_now(app, services, state, &web, &entry), entry.name)) {
+        Some((Ok(()), _)) => CapOutcome::Opened,
         Some((Err(error), name)) => {
             tracing::warn!(%error, app = %waiting, "web app window failed");
             state.notify(NoticeTone::Warning, format!("{name} could not be opened."), Some(error));
@@ -191,8 +235,10 @@ pub fn launch(app: &AppHandle, services: &TaskServices, state: &AppState, id: &s
             let entry = catalogue.iter().find(|app| app.id == id);
             let web = app.try_state::<std::sync::Arc<crate::webapp::WebApps>>();
             // (Phase 6 Step 19) At the window cap the employee chooses which window to close; nothing is closed silently.
+            // (Phase 6 Step 18) Web apps open in Chrome or Edge count too.
+            let browser_open = crate::browserapp::browser_window_count(&catalogue, &tasks);
             if let (Some(_), Some(web)) = (entry, web.as_ref()) {
-                if web.at_cap(state.web_window_cap()) {
+                if web.at_cap_with(state.web_window_cap(), browser_open) {
                     web.set_pending(id);
                     let host = app.state::<std::sync::Arc<crate::shellwin::DesktopHost>>();
                     if let Err(error) = crate::shellwin::popup_open(app, &host, crate::shellwin::PopupKind::WindowCap, None) {
@@ -207,8 +253,10 @@ pub fn launch(app: &AppHandle, services: &TaskServices, state: &AppState, id: &s
                     return;
                 }
             }
+            // (Phase 6 Step 18) In the browser when the rules say so (not Lite, enough RAM, policies ready, program there);
+            // otherwise, and when the browser does not start, the built-in window.
             let opened = match (entry, web) {
-                (Some(entry), Some(web)) => web.open(app, state, entry),
+                (Some(entry), Some(web)) => crate::browserapp::open_now(app, services, state, &web, entry),
                 _ => Err("that app is not available".to_string()),
             };
             if let Err(error) = opened {

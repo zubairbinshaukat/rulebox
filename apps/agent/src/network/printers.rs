@@ -7,9 +7,11 @@
 //! * Kinds: `ipp` (the queue's port is the printer's URL, driver the IPP class driver or another approved one), `raw`
 //!   and `lpr` (a Standard TCP/IP port `Rulebox_<id>` first, journalled too), `share` (a per-machine connection to
 //!   `\\server\queue`).
-//! * Drivers come **only from the local driver store**: the agent has no way to install one, and a driver that is not
-//!   in the store is `failed / driver_missing` with nothing created. (The approved list itself is the server's: it is not
-//!   part of the signed document, so the agent can only check that the driver is really there.)
+//! * Drivers come **only from the local driver store**: a driver the spooler does not hold yet is registered from a package
+//!   that is already staged there (`Platform::printer_driver_install`, the `Add-PrinterDriver` step; a driver the install
+//!   engine put there with `pnputil` is only staged until then), and one that no staged package lists is
+//!   `failed / driver_missing` with nothing created. Nothing is fetched. (The approved list itself is the server's: it is
+//!   not part of the signed document, so the agent can only check that the driver is really there.)
 //! * The default printer of a group is written into the Staff hive (`...\Windows\Device`, plus
 //!   `LegacyDefaultPrinterMode = 1` so Windows does not move it), both journalled.
 //! * An item the document no longer lists, a printer whose revision changed (rebuilt) and the default when no printer is
@@ -355,7 +357,7 @@ pub fn apply(ctx: &ApplyCtx<'_>, doc: &AgentDoc) -> PrinterOutcome {
     let mut default_pick: Option<(String, String)> = None; // (printer id, name the Staff default points at)
 
     if !doc.printers.is_empty() {
-        let (queues, drivers) = match (platform.printer_list(), platform.printer_drivers()) {
+        let (queues, mut drivers) = match (platform.printer_list(), platform.printer_drivers()) {
             (Ok(queues), Ok(drivers)) => (queues, drivers),
             (Err(_), _) | (_, Err(_)) => {
                 // Cannot read the spooler: touch nothing, say so for every printer, keep what is there.
@@ -381,7 +383,15 @@ pub fn apply(ctx: &ApplyCtx<'_>, doc: &AgentDoc) -> PrinterOutcome {
                 outcome.items.push(item(spec, FAILED, Some("name_invalid")));
                 continue;
             }
-            // Drivers only from the local store; a missing one creates nothing (edge case 37).
+            // Drivers only from the local store; a missing one creates nothing (edge case 37). A driver that a package of the
+            // store lists (an INF driver the install engine put there with `pnputil`, or an inbox one) is registered with
+            // the spooler first: that is the step `Add-PrinterDriver` is (spike X-1). Nothing is ever fetched.
+            if !drivers.iter().any(|driver| driver.eq_ignore_ascii_case(&spec.driver)) && !matches!(plan, Plan::Share { .. }) {
+                match platform.printer_driver_install(&spec.driver) {
+                    Ok(()) => drivers.push(spec.driver.clone()),
+                    Err(error) => tracing::debug!(printer_id = %spec.id, "the driver is not in the driver store: {error}"),
+                }
+            }
             if !drivers.iter().any(|driver| driver.eq_ignore_ascii_case(&spec.driver)) {
                 outcome.items.push(item(spec, FAILED, Some("driver_missing")));
                 keep_built(&existing, &spec.id, &mut keep);

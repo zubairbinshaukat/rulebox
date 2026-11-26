@@ -35,6 +35,11 @@
 //!   fail the same way, so it does not keep the marker (owner decision pending).
 //!   Logged with the template only: never a file name.
 //!
+//! - (Phase 6 Step 18, plan 4.9.6) Every round also deletes the **browser profiles** that are not needed any more
+//!   (`browser_profiles.rs`: employees the roster dropped, the 10 most recently used per browser at boot, fewer when the
+//!   disk is nearly full). They go through the same gate, one folder at a time, so a browser of the Staff session never
+//!   runs while one is deleted.
+//!
 //! The deletion itself is `Platform::reset_folder` (mutating, guarded): on the dev
 //! machine `WindowsPlatform` refuses it, the tests use `SimPlatform`.
 
@@ -42,6 +47,7 @@ use std::collections::HashSet;
 use std::future::Future;
 use std::path::{Path, PathBuf};
 use std::pin::Pin;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
@@ -52,8 +58,10 @@ use tokio::time::Instant;
 use tokio_util::sync::CancellationToken;
 
 use crate::agent_policy::AgentPolicy;
+use crate::browser_profiles::{self, ProfileLedger};
 use crate::installs::plain_absolute;
 use crate::platform::{Platform, PlatformError, ResetOutcome};
+use crate::roster::RosterState;
 use crate::state::{lock, write_atomic};
 
 /// At most this many folders per round (bounded work whatever the catalogue holds;
@@ -112,8 +120,16 @@ impl ResetTarget {
 /// breaks the rules (`..`, an absolute path, an unknown token, a denied folder...)
 /// or a profile path that is not plain and absolute. Pure: no I/O.
 pub fn resolve_reset(profile_dir: &Path, template: &str) -> Result<ResetTarget, PlatformError> {
-    let (base, parts) =
-        reset_folder_parts(template).map_err(|_| PlatformError::Refused("the folder template breaks the rules"))?;
+    // (Phase 6 Step 18) The one Rulebox folder that may be deleted: a browser profile of a web app, in exactly the shape
+    // `browser_profiles::profile_template` makes. The general deny list keeps refusing every other `dev.rulebox.staff` folder.
+    let (app_data_folder, parts) = match browser_profiles::profile_parts(template) {
+        Some(parts) => ("Local", parts),
+        None => {
+            let (base, parts) =
+                reset_folder_parts(template).map_err(|_| PlatformError::Refused("the folder template breaks the rules"))?;
+            (base.app_data_folder(), parts)
+        }
+    };
     if !plain_absolute(profile_dir) {
         return Err(PlatformError::Refused("the Staff profile path is not a plain absolute path"));
     }
@@ -121,7 +137,7 @@ pub fn resolve_reset(profile_dir: &Path, template: &str) -> Result<ResetTarget, 
     let mut components = Vec::with_capacity(parts.len() + 2);
     let mut path = profile_dir.to_path_buf();
     chain.push(path.clone());
-    for part in ["AppData", base.app_data_folder()].into_iter().chain(parts) {
+    for part in ["AppData", app_data_folder].into_iter().chain(parts) {
         path.push(part);
         chain.push(path.clone());
         components.push(part.to_string());
@@ -198,6 +214,8 @@ pub struct CleanupGate {
     /// `cleanup-owed.json`; `None` in tests that keep it in memory.
     marker: Option<PathBuf>,
     requests: Mutex<Option<mpsc::UnboundedSender<CleanupRequest>>>,
+    /// (Phase 6 Step 18) When each employee last signed in: which browser profiles are the most recently used.
+    ledger: Mutex<Option<Arc<ProfileLedger>>>,
 }
 
 impl CleanupGate {
@@ -227,7 +245,21 @@ impl CleanupGate {
             changed: Notify::new(),
             marker,
             requests: Mutex::new(None),
+            ledger: Mutex::new(None),
         })
+    }
+
+    /// (Phase 6 Step 18) Where sign-ins are noted for the browser profile cleanup.
+    pub fn set_profile_ledger(&self, ledger: Arc<ProfileLedger>) {
+        *lock(&self.ledger) = Some(ledger);
+    }
+
+    /// (Phase 6 Step 18) An employee signed in: their browser profile is the most recently used now.
+    pub fn employee_signed_in(&self, employee_id: &str) {
+        let ledger = lock(&self.ledger).clone();
+        if let Some(ledger) = ledger {
+            ledger.touch(employee_id, crate::state::unix_ms());
+        }
     }
 
     /// Where requests go (the cleanup task).
@@ -375,6 +407,33 @@ pub struct CleanupDeps {
     pub session_active: Arc<dyn Fn() -> bool + Send + Sync>,
     pub gate: Arc<CleanupGate>,
     pub timings: CleanupTimings,
+    /// (Phase 6 Step 18) The browser profile cleanup; `None` leaves browser profiles alone (tests, the demo world).
+    pub browser_profiles: Option<BrowserProfiles>,
+}
+
+/// (Phase 6 Step 18) What a round needs to delete old browser profiles.
+pub struct BrowserProfiles {
+    /// Last sign-in of each employee.
+    pub ledger: Arc<ProfileLedger>,
+    /// The verified roster of the device's group.
+    pub roster_rx: watch::Receiver<RosterState>,
+    /// Set after the first pass of this agent run that ended without being stopped: "boot", when the 10 most recent rule applies.
+    pub boot_done: AtomicBool,
+}
+
+impl BrowserProfiles {
+    pub fn new(ledger: Arc<ProfileLedger>, roster_rx: watch::Receiver<RosterState>) -> Self {
+        Self { ledger, roster_rx, boot_done: AtomicBool::new(false) }
+    }
+
+    /// The folder names of the employees the roster lists, or `None` when the roster does not speak for the current
+    /// document (no document, no group, another group, nothing synced yet): nobody is then treated as removed.
+    fn members(&self, policy: &AgentPolicy) -> Option<std::collections::BTreeSet<String>> {
+        let roster = self.roster_rx.borrow();
+        let group = policy.roster_group_id.as_deref()?;
+        (policy.has_document && roster.group_id.as_deref() == Some(group) && roster.epoch > 0)
+            .then(|| roster.members.keys().map(|id| browser_profiles::folder_of(id)).collect())
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -491,7 +550,86 @@ impl Drop for InFlight {
     }
 }
 
-/// One full round: every catalogue app's folders, one at a time.
+/// How one folder of a round ended.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Step {
+    /// Reset, absent or refused for good.
+    Done,
+    /// In use, too slow or still being deleted by an earlier try.
+    Dirty,
+    /// Stopped: an employee is signing in or signed in, or the agent is stopping.
+    Stopped,
+}
+
+/// Deletes one folder below the Staff profile through the gate: never during a sign-in or a session, one at a time, with the
+/// watchdog of [`CleanupTimings::folder_timeout`]. `label` is what the log says (the template of an app's folder; for a browser
+/// profile only that it is one).
+async fn reset_one(
+    deps: &Arc<CleanupDeps>,
+    in_flight: &Arc<Mutex<HashSet<String>>>,
+    cancel: &CancellationToken,
+    profile: &Path,
+    template: &str,
+    label: &str,
+) -> Step {
+    if cancel.is_cancelled() {
+        return Step::Stopped;
+    }
+    if lock(in_flight).contains(template) {
+        // An earlier deletion of it is still running (the watchdog gave up).
+        return Step::Dirty;
+    }
+    // Never during a sign-in or a session (asked before every folder).
+    let Some(permit) = deps.gate.begin_delete(&*deps.session_active) else {
+        tracing::info!("session cleanup stopped: an employee is signing in or signed in");
+        return Step::Stopped;
+    };
+    lock(in_flight).insert(template.to_string());
+    let job = InFlight { set: Arc::clone(in_flight), template: template.to_string() };
+    let job_cancel = cancel.child_token();
+    let (platform, dir, name, token) = (Arc::clone(&deps.platform), profile.to_path_buf(), template.to_string(), job_cancel.clone());
+    let handle = tokio::task::spawn_blocking(move || {
+        let _held = (permit, job);
+        platform.reset_folder(&dir, &name, &token)
+    });
+    match tokio::time::timeout(deps.timings.folder_timeout, handle).await {
+        Ok(Ok(Ok(ResetOutcome::Removed))) => {
+            tracing::info!(template = %label, "session cleanup: folder reset");
+            Step::Done
+        }
+        Ok(Ok(Ok(ResetOutcome::Absent))) => {
+            tracing::debug!(template = %label, "session cleanup: nothing to reset");
+            Step::Done
+        }
+        Ok(Ok(Ok(ResetOutcome::InUse) | Err(PlatformError::InUse))) => {
+            tracing::info!(template = %label, "session cleanup: folder in use");
+            Step::Dirty
+        }
+        // A refusal or another error: logged, not retried (it would fail again).
+        Ok(Ok(Err(error))) => {
+            tracing::warn!(template = %label, %error, "session cleanup: folder not reset");
+            Step::Done
+        }
+        Ok(Err(_)) => {
+            tracing::warn!(template = %label, "session cleanup: the reset task failed");
+            Step::Dirty
+        }
+        Err(_) => {
+            // The watchdog: stop it between entries; whatever it is stuck in
+            // finishes in the background (it keeps its handles and its
+            // deletion permit until then).
+            job_cancel.cancel();
+            tracing::warn!(
+                template = %label,
+                "session cleanup: folder took longer than {} s; stopped and counted as in use",
+                deps.timings.folder_timeout.as_secs()
+            );
+            Step::Dirty
+        }
+    }
+}
+
+/// One full round: every catalogue app's folders, one at a time, then the browser profiles that are not needed any more.
 async fn run_round(deps: Arc<CleanupDeps>, in_flight: Arc<Mutex<HashSet<String>>>, cancel: CancellationToken) -> RoundEnd {
     let templates = reset_templates(&deps.policy_rx.borrow().catalog);
     let Some(staff) = (deps.staff)() else {
@@ -517,7 +655,7 @@ async fn run_round(deps: Arc<CleanupDeps>, in_flight: Arc<Mutex<HashSet<String>>
     if moved {
         tracing::warn!("session cleanup: the Staff profile folder is not the one saved at setup; using the one Windows reports");
     }
-    if templates.is_empty() {
+    if templates.is_empty() && deps.browser_profiles.is_none() {
         return RoundEnd::Clean;
     }
     // (Review, finding 6) Apps follow the shell folders; the cleanup does not.
@@ -530,54 +668,17 @@ async fn run_round(deps: Arc<CleanupDeps>, in_flight: Arc<Mutex<HashSet<String>>
     }
     let mut clean = true;
     for template in templates {
-        if cancel.is_cancelled() {
-            return RoundEnd::Stopped;
+        match reset_one(&deps, &in_flight, &cancel, &profile, &template, &template).await {
+            Step::Done => {}
+            Step::Dirty => clean = false,
+            Step::Stopped => return RoundEnd::Stopped,
         }
-        if lock(&in_flight).contains(&template) {
-            // An earlier deletion of it is still running (the watchdog gave up).
-            clean = false;
-            continue;
-        }
-        // Never during a sign-in or a session (asked before every folder).
-        let Some(permit) = deps.gate.begin_delete(&*deps.session_active) else {
-            tracing::info!("session cleanup stopped: an employee is signing in or signed in");
-            return RoundEnd::Stopped;
-        };
-        lock(&in_flight).insert(template.clone());
-        let job = InFlight { set: Arc::clone(&in_flight), template: template.clone() };
-        let job_cancel = cancel.child_token();
-        let (platform, dir, name, token) = (Arc::clone(&deps.platform), profile.clone(), template.clone(), job_cancel.clone());
-        let handle = tokio::task::spawn_blocking(move || {
-            let _held = (permit, job);
-            platform.reset_folder(&dir, &name, &token)
-        });
-        match tokio::time::timeout(deps.timings.folder_timeout, handle).await {
-            Ok(Ok(Ok(ResetOutcome::Removed))) => tracing::info!(template = %template, "session cleanup: folder reset"),
-            Ok(Ok(Ok(ResetOutcome::Absent))) => {
-                tracing::debug!(template = %template, "session cleanup: nothing to reset");
-            }
-            Ok(Ok(Ok(ResetOutcome::InUse) | Err(PlatformError::InUse))) => {
-                tracing::info!(template = %template, "session cleanup: folder in use");
-                clean = false;
-            }
-            // A refusal or another error: logged, not retried (it would fail again).
-            Ok(Ok(Err(error))) => tracing::warn!(template = %template, %error, "session cleanup: folder not reset"),
-            Ok(Err(_)) => {
-                tracing::warn!(template = %template, "session cleanup: the reset task failed");
-                clean = false;
-            }
-            Err(_) => {
-                // The watchdog: stop it between entries; whatever it is stuck in
-                // finishes in the background (it keeps its handles and its
-                // deletion permit until then).
-                job_cancel.cancel();
-                tracing::warn!(
-                    template = %template,
-                    "session cleanup: folder took longer than {} s; stopped and counted as in use",
-                    deps.timings.folder_timeout.as_secs()
-                );
-                clean = false;
-            }
+    }
+    if let Some(profiles) = &deps.browser_profiles {
+        match browser_pass(&deps, &in_flight, &cancel, &profile, profiles).await {
+            Step::Done => {}
+            Step::Dirty => clean = false,
+            Step::Stopped => return RoundEnd::Stopped,
         }
     }
     if clean {
@@ -587,6 +688,52 @@ async fn run_round(deps: Arc<CleanupDeps>, in_flight: Arc<Mutex<HashSet<String>>
     }
 }
 
+/// (Phase 6 Step 18, plan 4.9.6) Deletes the browser profiles `browser_profiles::plan` names.
+async fn browser_pass(
+    deps: &Arc<CleanupDeps>,
+    in_flight: &Arc<Mutex<HashSet<String>>>,
+    cancel: &CancellationToken,
+    profile: &Path,
+    profiles: &BrowserProfiles,
+) -> Step {
+    let root = profile.join("AppData").join("Local").join("dev.rulebox.staff").join("browser");
+    let mut present: Vec<(&'static str, String)> = Vec::new();
+    for browser in browser_profiles::BROWSERS {
+        match deps.platform.list_folder_names(&root.join(browser)) {
+            Ok(names) => present.extend(names.into_iter().map(|name| (browser, name))),
+            Err(error) => tracing::debug!(%error, browser, "session cleanup: cannot list the browser profiles"),
+        }
+    }
+    let roster = profiles.members(&deps.policy_rx.borrow());
+    let boot = !profiles.boot_done.load(Ordering::SeqCst);
+    let input = browser_profiles::PassInput {
+        present,
+        roster,
+        last_used: profiles.ledger.snapshot(),
+        disk_free: deps.platform.disk_free_bytes().ok(),
+        boot,
+    };
+    let mut step = Step::Done;
+    let mut remaining = input.present.clone();
+    for doomed in browser_profiles::plan(&input) {
+        let Some(template) = browser_profiles::profile_template(doomed.browser, &doomed.folder) else {
+            continue;
+        };
+        tracing::info!(browser = doomed.browser, why = ?doomed.why, "session cleanup: a browser profile goes");
+        match reset_one(deps, in_flight, cancel, profile, &template, "a browser profile").await {
+            Step::Done => remaining.retain(|(browser, folder)| !(*browser == doomed.browser && *folder == doomed.folder)),
+            Step::Dirty => step = Step::Dirty,
+            Step::Stopped => return Step::Stopped,
+        }
+    }
+    // The ledger keeps only employees that still have a profile folder in some browser.
+    let still_there: std::collections::BTreeSet<String> = remaining.into_iter().map(|(_, folder)| folder).collect();
+    profiles.ledger.retain_only(&still_there);
+    if step == Step::Done {
+        profiles.boot_done.store(true, Ordering::SeqCst);
+    }
+    step
+}
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -951,6 +1098,7 @@ mod tests {
             },
             gate: Arc::clone(&gate),
             timings: timings(),
+            browser_profiles: None,
         };
         tokio::spawn(run_cleanup(deps, rx, shutdown.clone()));
         Rig { _dir: dir, sim, gate, marker, active, policy_tx, shutdown }
@@ -1274,5 +1422,279 @@ mod tests {
         assert_eq!(r.resets(), 3);
         assert!(r.marker.is_file(), "the next start runs the rounds");
         assert!(CleanupGate::open(r.marker.clone()).is_owed());
+    }
+}
+
+/// (Phase 6 Step 18, plan 4.9.6) The browser profiles of web apps that open in Chrome or Edge.
+#[cfg(test)]
+mod browser_profile_tests {
+    use super::*;
+
+    use crate::platform::sim::{SimOp, SimPlatform};
+    use crate::testutil::TempDir;
+
+    const PROFILE: &str = r"C:\Users\RuleboxStaff";
+    const SID: &str = "S-1-5-21-1000-2000-3000-2001";
+    const ROOT: &str = r"C:\Users\RuleboxStaff\AppData\Local\dev.rulebox.staff\browser";
+
+    fn p(text: &str) -> PathBuf {
+        PathBuf::from(text)
+    }
+
+    struct Rig {
+        _dir: TempDir,
+        sim: Arc<SimPlatform>,
+        deps: Arc<CleanupDeps>,
+        active: Arc<AtomicBool>,
+        ledger: Arc<ProfileLedger>,
+    }
+
+    /// A Staff profile with the given profile folders `(browser, employee folder)`, each holding a cookie file; the roster of
+    /// group `g1` at epoch 5 lists `members`.
+    fn rig(folders: &[(&str, &str)], members: &[&str]) -> Rig {
+        let dir = TempDir::new();
+        let sim = Arc::new(SimPlatform::new(dir.path().to_path_buf()));
+        sim.with_world(|w| {
+            for d in [
+                PROFILE,
+                r"C:\Users\RuleboxStaff\AppData",
+                r"C:\Users\RuleboxStaff\AppData\Local",
+                r"C:\Users\RuleboxStaff\AppData\Local\dev.rulebox.staff",
+                ROOT,
+            ] {
+                w.dirs.insert(p(d));
+            }
+            for (browser, folder) in folders {
+                w.files.insert(p(&format!(r"{ROOT}\{browser}\{folder}\Default\Cookies")));
+            }
+            // The built-in window's own profile and the Staff App's other folders are never part of this.
+            w.files.insert(p(r"C:\Users\RuleboxStaff\AppData\Local\dev.rulebox.staff\web\emp1\Cookies"));
+            w.files.insert(p(r"C:\Users\RuleboxStaff\AppData\Local\dev.rulebox.staff\EBWebView\Default\Cookies"));
+            w.profile_dirs.insert(SID.into(), p(PROFILE));
+        });
+        let policy = AgentPolicy { has_document: true, roster_group_id: Some("g1".into()), ..AgentPolicy::default() };
+        // The receivers keep the last value after the senders are gone, which is all these tests read.
+        let (_, policy_rx) = watch::channel(policy);
+        let roster = RosterState {
+            group_id: Some("g1".into()),
+            epoch: 5,
+            members: members.iter().map(|id| ((*id).to_string(), 1)).collect(),
+            ..RosterState::default()
+        };
+        let (_, roster_rx) = watch::channel(roster);
+        let ledger = Arc::new(ProfileLedger::in_memory());
+        let active = Arc::new(AtomicBool::new(false));
+        let deps = Arc::new(CleanupDeps {
+            platform: Arc::clone(&sim) as Arc<dyn Platform>,
+            policy_rx,
+            staff: Arc::new(|| Some(StaffRef { sid: SID.into(), saved_profile: Some(p(PROFILE)) })),
+            session_active: {
+                let active = Arc::clone(&active);
+                Arc::new(move || active.load(Ordering::SeqCst))
+            },
+            gate: CleanupGate::in_memory(false),
+            timings: CleanupTimings::default(),
+            browser_profiles: Some(BrowserProfiles::new(Arc::clone(&ledger), roster_rx)),
+        });
+        Rig { _dir: dir, sim, deps, active, ledger }
+    }
+
+    impl Rig {
+        async fn round(&self) -> RoundEnd {
+            run_round(Arc::clone(&self.deps), Arc::default(), CancellationToken::new()).await
+        }
+
+        fn has(&self, browser: &str, folder: &str) -> bool {
+            let file = p(&format!(r"{ROOT}\{browser}\{folder}\Default\Cookies"));
+            self.sim.with_world(|w| w.files.contains(&file))
+        }
+
+        fn resets(&self) -> usize {
+            self.sim.calls().iter().filter(|op| **op == SimOp::ResetFolder).count()
+        }
+
+        fn boot_done(&self) -> bool {
+            self.deps.browser_profiles.as_ref().is_some_and(|profiles| profiles.boot_done.load(Ordering::SeqCst))
+        }
+    }
+
+    #[test]
+    fn a_browser_profile_resolves_below_the_staff_app_data_and_other_rulebox_folders_stay_refused() {
+        let template = browser_profiles::profile_template("chrome", "emp1").unwrap();
+        let target = resolve_reset(&p(PROFILE), &template).unwrap();
+        assert_eq!(target.components, ["AppData", "Local", "dev.rulebox.staff", "browser", "chrome", "emp1"]);
+        assert_eq!(target.target(), p(&format!(r"{ROOT}\chrome\emp1")));
+        assert_eq!(target.chain.len(), 7);
+        for refused in [
+            r"{LocalAppData}\dev.rulebox.staff\EBWebView",
+            r"{LocalAppData}\dev.rulebox.staff\web\emp1",
+            r"{LocalAppData}\dev.rulebox.staff\browser",
+            r"{LocalAppData}\dev.rulebox.staff\browser\chrome",
+            r"{LocalAppData}\dev.rulebox.staff\browser\chrome\..\..\web",
+            r"{LocalAppData}\dev.rulebox.staff\browser\firefox\emp1",
+            r"{RoamingAppData}\dev.rulebox.staff\browser\chrome\emp1",
+        ] {
+            assert!(matches!(resolve_reset(&p(PROFILE), refused), Err(PlatformError::Refused(_))), "{refused}");
+        }
+        // An administrator's `resetFolders` entry is still checked by the general rule: the same text made by hand is the same
+        // template, which only the signed document could deliver and the server never accepts.
+        assert!(rulebox_policy::paths::reset_folder_parts(&template).is_err());
+    }
+
+    #[tokio::test]
+    async fn an_employee_the_roster_dropped_loses_the_profile_in_both_browsers_and_nobody_else_does() {
+        let r = rig(&[("chrome", "emp1"), ("chrome", "gone"), ("edge", "gone"), ("edge", "emp1")], &["emp1"]);
+        assert_eq!(r.round().await, RoundEnd::Clean);
+        assert!(r.has("chrome", "emp1") && r.has("edge", "emp1"));
+        assert!(!r.has("chrome", "gone") && !r.has("edge", "gone"));
+        assert_eq!(r.resets(), 2);
+        // The built-in window's profile and the WebView2 folder are not browser profiles: untouched.
+        assert!(r.sim.with_world(|w| w.files.contains(&p(r"C:\Users\RuleboxStaff\AppData\Local\dev.rulebox.staff\web\emp1\Cookies"))));
+        assert!(r.sim.with_world(|w| w.files.contains(&p(r"C:\Users\RuleboxStaff\AppData\Local\dev.rulebox.staff\EBWebView\Default\Cookies"))));
+        // Nothing left to do: a second round deletes nothing.
+        assert_eq!(r.round().await, RoundEnd::Clean);
+        assert_eq!(r.resets(), 2);
+    }
+
+    #[tokio::test]
+    async fn a_roster_that_does_not_speak_for_the_document_removes_nobody() {
+        let r = rig(&[("chrome", "stranger")], &[]);
+        // Another group, no sync yet (epoch 0), no group in the document: each means "unknown", not "everybody left".
+        let wrong_group = RosterState { group_id: Some("other".into()), epoch: 9, ..RosterState::default() };
+        let (tx, rx) = watch::channel(wrong_group);
+        let profiles = BrowserProfiles::new(Arc::clone(&r.ledger), rx);
+        let policy = r.deps.policy_rx.borrow().clone();
+        assert_eq!(profiles.members(&policy), None);
+        tx.send(RosterState { group_id: Some("g1".into()), epoch: 0, ..RosterState::default() }).unwrap();
+        assert_eq!(profiles.members(&policy), None);
+        tx.send(RosterState { group_id: Some("g1".into()), epoch: 3, ..RosterState::default() }).unwrap();
+        assert_eq!(profiles.members(&policy), Some(std::collections::BTreeSet::new()));
+        assert_eq!(profiles.members(&AgentPolicy { roster_group_id: None, ..policy.clone() }), None);
+        assert_eq!(profiles.members(&AgentPolicy { has_document: false, ..policy }), None);
+        // The rig's own roster lists nobody at epoch 5 for g1: that one does remove the stranger.
+        assert_eq!(r.round().await, RoundEnd::Clean);
+        assert!(!r.has("chrome", "stranger"));
+    }
+
+    #[tokio::test]
+    async fn at_boot_only_the_ten_most_recently_used_stay_and_later_rounds_leave_the_rest_alone() {
+        let ids: Vec<String> = (0..12).map(|i| format!("e{i:02}")).collect();
+        let folders: Vec<(&str, &str)> = ids.iter().map(|id| ("chrome", id.as_str())).collect();
+        let members: Vec<&str> = ids.iter().map(String::as_str).collect();
+        let r = rig(&folders, &members);
+        for (i, id) in ids.iter().enumerate() {
+            r.ledger.touch(id, 1_000 + i as u64);
+        }
+        assert!(!r.boot_done());
+        assert_eq!(r.round().await, RoundEnd::Clean);
+        assert!(r.boot_done());
+        // e00 and e01 signed in longest ago.
+        assert!(!r.has("chrome", "e00") && !r.has("chrome", "e01"));
+        assert!((2..12).all(|i| r.has("chrome", &format!("e{i:02}"))));
+        assert_eq!(r.resets(), 2);
+        // Their ledger entries went with them.
+        assert!(!r.ledger.snapshot().contains_key("e00") && r.ledger.snapshot().contains_key("e11"));
+        // After boot a bigger crowd is not cut (plenty of disk).
+        r.sim.with_world(|w| {
+            for i in 20..26 {
+                w.files.insert(p(&format!(r"{ROOT}\chrome\e{i}\Default\Cookies")));
+            }
+        });
+        let list = r.sim.list_folder_names(&p(&format!(r"{ROOT}\chrome"))).unwrap();
+        assert_eq!(list.len(), 16);
+        // (They are not in the roster, so the roster rule takes them; the 10-rule itself did nothing more.)
+        assert_eq!(r.round().await, RoundEnd::Clean);
+        assert!((2..12).all(|i| r.has("chrome", &format!("e{i:02}"))));
+    }
+
+    #[tokio::test]
+    async fn short_of_disk_only_three_profiles_stay_at_every_round() {
+        let ids = ["a", "b", "c", "d", "e"];
+        let folders: Vec<(&str, &str)> = ids.iter().map(|id| ("edge", *id)).collect();
+        let r = rig(&folders, &ids);
+        for (i, id) in ids.iter().enumerate() {
+            r.ledger.touch(id, 10 + i as u64);
+        }
+        r.sim.with_world(|w| w.disk_free_bytes = browser_profiles::LOW_DISK_BYTES - 1);
+        assert_eq!(r.round().await, RoundEnd::Clean);
+        assert!(!r.has("edge", "a") && !r.has("edge", "b"));
+        assert!(r.has("edge", "c") && r.has("edge", "d") && r.has("edge", "e"));
+        // The employee who signed in last is never the one that goes.
+        assert!(r.ledger.snapshot().contains_key("e"));
+    }
+
+    #[tokio::test]
+    async fn nothing_is_deleted_while_an_employee_is_signed_in_so_no_browser_runs() {
+        let r = rig(&[("chrome", "gone")], &["emp1"]);
+        r.active.store(true, Ordering::SeqCst);
+        assert_eq!(r.round().await, RoundEnd::Stopped);
+        assert!(r.has("chrome", "gone"));
+        assert_eq!(r.resets(), 0);
+        assert!(!r.boot_done(), "a stopped pass is not the boot pass");
+        // A sign-in in progress stops it too.
+        r.active.store(false, Ordering::SeqCst);
+        let permit = r.deps.gate.enter_sign_in(false, Duration::ZERO).await.unwrap();
+        assert_eq!(r.round().await, RoundEnd::Stopped);
+        assert!(r.has("chrome", "gone"));
+        drop(permit);
+        assert_eq!(r.round().await, RoundEnd::Clean);
+        assert!(!r.has("chrome", "gone"));
+    }
+
+    #[tokio::test]
+    async fn a_profile_a_process_still_holds_open_stays_and_the_round_is_tried_again() {
+        let r = rig(&[("chrome", "gone"), ("edge", "gone")], &["emp1"]);
+        let held = p(&format!(r"{ROOT}\chrome\gone\Default\Cookies"));
+        r.sim.with_world(|w| w.open_files.insert(held.clone()));
+        assert_eq!(r.round().await, RoundEnd::Dirty);
+        assert!(r.has("chrome", "gone"), "in use: kept");
+        assert!(!r.has("edge", "gone"), "the other browser's profile did go");
+        assert!(!r.boot_done());
+        // The browser ended: the retry removes it.
+        r.sim.with_world(|w| w.open_files.clear());
+        assert_eq!(r.round().await, RoundEnd::Clean);
+        assert!(!r.has("chrome", "gone"));
+        assert!(r.boot_done());
+    }
+
+    #[tokio::test]
+    async fn a_link_planted_in_the_profile_tree_is_refused_and_nothing_is_deleted() {
+        let r = rig(&[("chrome", "gone")], &["emp1"]);
+        r.sim.with_world(|w| w.reparse_points.insert(p(&format!(r"{ROOT}\chrome"))));
+        let before = r.sim.with_world(|w| w.files.clone());
+        // The refusal is logged and not retried (it would fail the same way).
+        assert_eq!(r.round().await, RoundEnd::Clean);
+        assert_eq!(r.sim.with_world(|w| w.files.clone()), before);
+    }
+
+    #[tokio::test]
+    async fn without_the_browser_profile_cleanup_a_round_does_not_look_at_the_profiles() {
+        let r = rig(&[("chrome", "gone")], &["emp1"]);
+        let deps = Arc::new(CleanupDeps {
+            platform: Arc::clone(&r.deps.platform),
+            policy_rx: r.deps.policy_rx.clone(),
+            staff: Arc::clone(&r.deps.staff),
+            session_active: Arc::clone(&r.deps.session_active),
+            gate: Arc::clone(&r.deps.gate),
+            timings: r.deps.timings,
+            browser_profiles: None,
+        });
+        assert_eq!(run_round(deps, Arc::default(), CancellationToken::new()).await, RoundEnd::Clean);
+        assert!(r.has("chrome", "gone"));
+        assert!(!r.sim.calls().contains(&SimOp::ListFolderNames));
+    }
+
+    #[test]
+    fn a_sign_in_is_noted_for_the_most_recently_used_rule() {
+        let gate = CleanupGate::in_memory(false);
+        // No ledger set: nothing happens.
+        gate.employee_signed_in("emp1");
+        let ledger = Arc::new(ProfileLedger::in_memory());
+        gate.set_profile_ledger(Arc::clone(&ledger));
+        gate.employee_signed_in("emp1");
+        gate.employee_signed_in("emp 2");
+        let used = ledger.snapshot();
+        assert_eq!(used.keys().map(String::as_str).collect::<Vec<_>>(), ["emp-2", "emp1"]);
+        assert!(used.values().all(|ms| *ms > 1_600_000_000_000));
     }
 }

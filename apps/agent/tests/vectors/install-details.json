@@ -23,6 +23,7 @@
     "installed_per_user",
     "answer_file_failed",
     "protected_print_on",
-    "seagull_driver_present"
+    "seagull_driver_present",
+    "driver_untrusted_publisher"
   ]
 }

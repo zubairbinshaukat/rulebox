@@ -89,6 +89,9 @@ pub enum JournalTarget {
     /// (Step 14b) A package `oem<N>.inf` Rulebox published into the driver store; restore deletes it, but only while
     /// that file still has the SHA-256 recorded here (Windows reuses an `oem<N>.inf` name for another package).
     DriverPackage { published: String, sha256: String },
+    /// (Phase 6 Step 15, spike S-11) A publisher certificate Rulebox put into `LocalMachine\TrustedPublisher` for a driver
+    /// whose entry pinned it; restore removes it again. `thumbprint` is the SHA-1, lower-case hex.
+    TrustedPublisher { thumbprint: String },
     BcdElement { object: String, element: String },
     AccountLockoutPolicy,
     SafeBootEntry { mode: String },
@@ -427,6 +430,13 @@ pub fn driver_id(driver_id: &str, published: &str) -> String {
     format!("{DRIVER_ID_PREFIX}{driver_id}:{}", published.to_ascii_lowercase())
 }
 
+/// (Phase 6 Step 15, spike S-11) `driver-trust:<sha1 thumbprint>`. One entry per certificate, not per driver: two drivers that
+/// pin the same publisher share it, and it goes back with the last of them (`installs::drivers`).
+pub fn driver_trust_id(thumbprint: &str) -> String {
+    format!("{DRIVER_TRUST_PREFIX}{}", thumbprint.to_ascii_lowercase())
+}
+
+pub const DRIVER_TRUST_PREFIX: &str = "driver-trust:";
 pub const DRIVER_ID_PREFIX: &str = "driver:";
 pub const PRINTER_QUEUE_PREFIX: &str = "printer:";
 pub const PRINTER_PORT_PREFIX: &str = "printer-port:";
@@ -841,6 +851,36 @@ pub fn record_driver_package(
             state.journal.push(entry);
         }
     })
+}
+
+/// (Phase 6 Step 15, spike S-11) Writes down that Rulebox is about to put the publisher certificate with this SHA-1
+/// thumbprint into `LocalMachine\TrustedPublisher`: an `Applied` entry whose original is "not present", saved **before** the
+/// certificate is added (a restore of a certificate that never got there is a no-op), so a restore removes it again. Written
+/// once per certificate. Call it only when the store did not hold the certificate: a certificate that was trusted before
+/// Rulebox is never Rulebox's to remove.
+pub fn record_driver_trust(ctx: &JournalCtx<'_>, thumbprint: &str, since_version: u64) -> Result<(), JournalError> {
+    rulebox_win32::publisher::check_sha1(thumbprint).map_err(|_| JournalError::Platform(PlatformError::Refused("not a SHA-1 thumbprint")))?;
+    let id = driver_trust_id(thumbprint);
+    let entry = JournalEntry {
+        id: id.clone(),
+        owner: JournalOwner::Driver,
+        target: JournalTarget::TrustedPublisher { thumbprint: thumbprint.to_ascii_lowercase() },
+        original: OriginalValue::NotPresent,
+        phase: EntryPhase::Applied,
+        since_version,
+        recorded_at_ms: unix_ms(),
+        last_error: None,
+    };
+    persist(ctx, |state| {
+        if !state.journal.iter().any(|e| e.id == id) {
+            state.journal.push(entry);
+        }
+    })
+}
+
+/// Whether the journal holds an entry with this id.
+pub fn has_entry(ctx: &JournalCtx<'_>, id: &str) -> bool {
+    ctx.shared.read(|state| state.journal.iter().any(|entry| entry.id == id))
 }
 
 /// The only way to change the system (plan 4.4). The write order:
@@ -1404,6 +1444,11 @@ fn write_original(ctx: &JournalCtx<'_>, entry: &JournalEntry) -> Result<(), Jour
             OriginalValue::NotPresent | OriginalValue::Absent => driver_package_back(ctx, published, sha256),
             _ => Err(JournalError::Platform(PlatformError::Refused("original does not fit a driver package"))),
         },
+        // (Phase 6 Step 15) A publisher certificate Rulebox trusted for a driver is taken out again (one that is gone is fine).
+        JournalTarget::TrustedPublisher { thumbprint } => match &entry.original {
+            OriginalValue::NotPresent | OriginalValue::Absent => Ok(ctx.platform.trusted_publisher_remove(thumbprint)?),
+            _ => Err(JournalError::Platform(PlatformError::Refused("original does not fit a publisher certificate"))),
+        },
         // (Step 17) The agent service's DACL and privileges and a Rulebox folder's DACL go back to
         // what they were; a service or folder that is gone has nothing to restore.
         JournalTarget::ServiceSecurity { .. } | JournalTarget::PathAcl { .. } => match &entry.original {
@@ -1438,15 +1483,60 @@ fn driver_package_back(ctx: &JournalCtx<'_>, published: &str, sha256: &str) -> R
     };
     let file = std::path::Path::new(&system_root).join("INF").join(published);
     match ctx.platform.file_sha256(&file, 64 * 1024 * 1024)? {
-        Some(now) if now.eq_ignore_ascii_case(sha256) => match ctx.platform.driver_package_delete(published) {
-            Ok(()) | Err(PlatformError::NotFound) => Ok(()),
-            Err(error) => Err(error.into()),
-        },
+        Some(now) if now.eq_ignore_ascii_case(sha256) => {
+            // (Spike X-1) Windows keeps the package while the spooler still holds a printer driver from it: the queues that
+            // use those drivers, then the drivers, then the package.
+            release_spooler_drivers(ctx, published)?;
+            match ctx.platform.driver_package_delete(published) {
+                Ok(()) | Err(PlatformError::NotFound) => Ok(()),
+                Err(error) => Err(error.into()),
+            }
+        }
         _ => {
             tracing::info!("a driver package Rulebox published is gone or is not the same file any more; nothing is deleted");
             Ok(())
         }
     }
+}
+
+/// (Phase 6 Step 15, VM spike X-1) Lets go of what the spooler holds from the package `published` so that
+/// `pnputil /delete-driver` can remove it: `0xE000023D` ("one or more devices are presently installed using the specified
+/// INF") otherwise, even after the printers are gone, until the printer driver itself is removed.
+///
+/// 1. The printer drivers the package lists (`Platform::driver_package_models`) that the spooler holds now.
+/// 2. The queues that use one of them, only the ones Rulebox made (` (Rulebox)`): Windows refuses to remove a driver a queue
+///    uses. A queue of somebody else keeps its driver: step 3 then fails (`ERROR_PRINTER_DRIVER_IN_USE`) and the package
+///    stays, which is the right answer for a driver somebody prints with.
+/// 3. The printer drivers.
+///
+/// A package that lists no model, or none the spooler holds, has nothing to release.
+fn release_spooler_drivers(ctx: &JournalCtx<'_>, published: &str) -> Result<(), JournalError> {
+    let models = ctx.platform.driver_package_models(published)?;
+    if models.is_empty() {
+        return Ok(());
+    }
+    let held: Vec<String> = ctx
+        .platform
+        .printer_drivers()?
+        .into_iter()
+        .filter(|driver| models.iter().any(|model| model.eq_ignore_ascii_case(driver)))
+        .collect();
+    if held.is_empty() {
+        return Ok(());
+    }
+    for queue in ctx.platform.printer_list()? {
+        let uses = held.iter().any(|driver| driver.eq_ignore_ascii_case(&queue.driver));
+        if uses && queue.name.ends_with(rulebox_win32::printing::NAME_SUFFIX) {
+            ctx.platform.printer_delete(&queue.name)?;
+        }
+    }
+    for driver in &held {
+        match ctx.platform.printer_driver_delete(driver) {
+            Ok(()) | Err(PlatformError::NotFound) => {}
+            Err(error) => return Err(error.into()),
+        }
+    }
+    Ok(())
 }
 
 fn forget_printer_mark(ctx: &JournalCtx<'_>, id: &str) -> Result<(), JournalError> {
@@ -1508,7 +1598,7 @@ pub fn startup_recover(ctx: &JournalCtx<'_>) -> StartupReport {
             (_, EntryPhase::Restoring) => restoring.push(entry.id.clone()),
             (_, EntryPhase::Applied) => {}
             // (Step 14b) Only ever written as `Applied`; one that is not is left exactly as it is, never deleted by a guess.
-            (JournalTarget::DriverPackage { .. }, EntryPhase::Pending) => {}
+            (JournalTarget::DriverPackage { .. } | JournalTarget::TrustedPublisher { .. }, EntryPhase::Pending) => {}
             (target, EntryPhase::Pending) => {
                 let untouched = match target {
                     JournalTarget::MachineValue(_)

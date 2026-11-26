@@ -52,6 +52,9 @@ struct Inner {
     org_theme: Mutex<crate::model::ThemeDto>,
     /// (Phase 6 Step 19) The web window cap and idle close the agent sent (`None`: an older agent, the defaults of the mode apply).
     web_limits: Mutex<crate::webapp::idle::SentLimits>,
+    /// (Phase 6 Step 18) An administrator set the display mode for the group or the PC (the snapshot's displayModeSource is
+    /// group or device): browser web apps then also open below 8 GB RAM (plan 4.9.1).
+    display_forced: AtomicBool,
     /// Debug: when set, agent link updates do not overwrite a forced boot link.
     #[cfg(debug_assertions)]
     pub(crate) dev_hold_link: AtomicBool,
@@ -78,6 +81,7 @@ impl AppState {
                 denial_flush_running: AtomicBool::new(false),
                 org_theme: Mutex::new(org_theme),
                 web_limits: Mutex::new(crate::webapp::idle::SentLimits::default()),
+                display_forced: AtomicBool::new(false),
                 #[cfg(debug_assertions)]
                 dev_hold_link: AtomicBool::new(false),
             }),
@@ -103,6 +107,15 @@ impl AppState {
     /// (Phase 6 Step 19) What the agent sent for the web window cap and the idle close.
     pub fn set_web_limits(&self, limits: crate::webapp::idle::SentLimits) {
         *self.inner.web_limits.lock().unwrap_or_else(|e| e.into_inner()) = limits;
+    }
+
+    /// (Phase 6 Step 18) Whether an administrator chose the display mode (see display_forced of the inner state).
+    pub fn set_display_forced(&self, forced: bool) {
+        self.inner.display_forced.store(forced, Ordering::SeqCst);
+    }
+
+    pub fn display_forced(&self) -> bool {
+        self.inner.display_forced.load(Ordering::SeqCst)
     }
 
     /// The window cap that applies now: the agent's value, else the default of the display mode.
@@ -700,6 +713,10 @@ pub fn apply_snapshot(state: &AppState, snap: Option<rulebox_ipc::types::AgentSn
             cap: snap.web_window_cap,
             idle_close_min: snap.web_idle_close_min,
         });
+        state.set_display_forced(matches!(
+            snap.display_mode_source,
+            rulebox_ipc::types::DisplayModeSource::Group | rulebox_ipc::types::DisplayModeSource::Device
+        ));
     }
 
     let lock_changed = state.modify(|s| {

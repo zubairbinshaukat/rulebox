@@ -8,7 +8,7 @@
 
 use std::path::{Path, PathBuf};
 
-use rulebox_policy::network::{DriverKind, DriverSource, DriverSpec};
+use rulebox_policy::network::{is_thumbprint, DriverKind, DriverSource, DriverSpec};
 use rulebox_policy::paths::check_args;
 use serde::{Deserialize, Serialize};
 
@@ -18,7 +18,7 @@ use super::unzip::safe_entry_name;
 use super::{is_published_inf, is_safe_id, is_sha256, msi_install_command, pnputil_path, Detail, MAX_DOWNLOAD_BYTES};
 use crate::backend::{InstallReport, InstallState};
 use crate::installs::MAX_FAILURES;
-use crate::platform::InstallerCommand;
+use crate::platform::{InstallerCommand, SignerCert};
 
 /// Most packages one driver record remembers (each new version of an INF package adds one; the oldest are forgotten, which
 /// only means Rulebox no longer removes them).
@@ -95,6 +95,11 @@ pub struct DriverRecord {
     pub acked: bool,
     #[serde(default)]
     pub busy_since_ms: Option<u64>,
+    /// (Phase 6 Step 15, spike S-11) SHA-1 thumbprint (lower-case hex) of the publisher certificate this driver needed in
+    /// `LocalMachine\TrustedPublisher` and that Rulebox itself put there (journalled: `journal::driver_trust_id`). Never set
+    /// for a certificate that was already trusted before Rulebox, so a removal never takes away somebody else's trust.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub trusted_cert: Option<String>,
 }
 
 impl DriverRecord {
@@ -114,7 +119,14 @@ impl DriverRecord {
             reported: None,
             acked: false,
             busy_since_ms: None,
+            trusted_cert: None,
         }
+    }
+
+    /// Whether Rulebox changed the PC for this driver in a way a removal has to undo: a package it published or a publisher
+    /// certificate it trusted (INF drivers only).
+    pub fn has_changes(&self) -> bool {
+        self.kind == DriverRecordKind::Inf && (!self.packages.is_empty() || self.trusted_cert.is_some())
     }
 
     /// Whether an operation is waiting for this record (time aside).
@@ -198,6 +210,9 @@ pub struct DriverPlan {
     pub inf: Option<String>,
     pub silent_args: Vec<String>,
     pub success_exit_codes: Vec<i32>,
+    /// (Phase 6 Step 15, spike S-11) `Inf` only: the thumbprint (lower-case hex, 40 = SHA-1 or 64 = SHA-256) of the one
+    /// certificate every catalog of the package must be signed by, and that may then be trusted for it.
+    pub signer_thumbprint: Option<String>,
 }
 
 /// The `.inf` path of a zip entry, relative: plain components, at most 120 characters, ends in `.inf`.
@@ -244,6 +259,13 @@ pub fn check_driver(spec: &DriverSpec, system_root: Option<&str>) -> Result<Driv
     if spec.size_bytes > MAX_DOWNLOAD_BYTES {
         return Err("the driver is larger than 4 GiB");
     }
+    let signer_thumbprint = match spec.signer_thumbprint.as_deref() {
+        None => None,
+        Some(text) if kind == DriverRecordKind::Inf && is_thumbprint(text) => Some(text.to_ascii_lowercase()),
+        Some(_) if kind == DriverRecordKind::Inf => return Err("the signer thumbprint is not a SHA-1 or SHA-256 thumbprint"),
+        // An exe or msi is opaque: there is no catalog of it to check, so nothing could be pinned.
+        Some(_) => return Err("only an INF driver can pin a signer thumbprint"),
+    };
     let mut inf = None;
     match kind {
         DriverRecordKind::Inf => {
@@ -278,6 +300,7 @@ pub fn check_driver(spec: &DriverSpec, system_root: Option<&str>) -> Result<Driv
         inf,
         silent_args: if kind == DriverRecordKind::Exe { spec.silent_args.clone() } else { Vec::new() },
         success_exit_codes: spec.success_exit_codes.clone(),
+        signer_thumbprint,
     })
 }
 
@@ -386,6 +409,107 @@ pub fn inf_file(work: &Path, inf: &str) -> PathBuf {
     path
 }
 
+/// The exit code `pnputil` ends with when setupapi says `0xE0000242`, "the publisher of an Authenticode signed catalog has
+/// not yet been established as trusted" (spike S-11). Seen in spike X-1 for `0xE000023D` (delete), so pnputil is taken to hand
+/// the setupapi error back as its exit code; **unverified** for the add (VM step).
+pub const PNPUTIL_UNTRUSTED_PUBLISHER: i32 = -536_870_334;
+
+/// Whether the certificate is the one a document pinned: its SHA-1 (40 hex) or SHA-256 (64 hex) thumbprint, the pin in
+/// lower case (as [`check_driver`] gives it). Nothing else about the certificate (name, issuer) counts.
+pub fn cert_matches_pin(cert: &SignerCert, pin: &str) -> bool {
+    match pin.len() {
+        40 => cert.sha1 == pin,
+        64 => cert.sha256 == pin,
+        _ => false,
+    }
+}
+
+/// Most printer model names read from one INF.
+pub const MAX_MODELS: usize = 2048;
+
+/// The printer driver (model) names an INF lists, in order, without repeats: the names the print spooler holds printer
+/// drivers under. They are the left-hand sides of the lines of the model sections the `[Manufacturer]` section points at
+/// (`<base>` and `<base>.<decoration>` for every `TargetOSVersion` decoration, such as `NTamd64`), a `%key%` expanded from
+/// `[Strings]`. A key that cannot be expanded is skipped. The result is a **superset** for any one PC (x86 and ARM models
+/// too): it is only ever intersected with the drivers the spooler really holds.
+pub fn inf_models(inf: &str) -> Vec<String> {
+    // Section name (lower case) to its lines (comments and blanks removed). A name repeated adds to the first.
+    let mut sections: Vec<(String, Vec<&str>)> = Vec::new();
+    for raw in inf.lines() {
+        let line = raw.trim();
+        if line.is_empty() || line.starts_with(';') {
+            continue;
+        }
+        if let Some(name) = line.strip_prefix('[').and_then(|rest| rest.split(']').next()) {
+            sections.push((name.trim().to_ascii_lowercase(), Vec::new()));
+        } else if let Some((_, lines)) = sections.last_mut() {
+            lines.push(line);
+        }
+    }
+    // `[Strings]`: key (lower case) to value, the first definition wins.
+    let mut strings: std::collections::HashMap<String, String> = std::collections::HashMap::new();
+    for line in lines_of(&sections, "strings") {
+        if let Some((key, value)) = split_entry(line) {
+            strings.entry(key.to_ascii_lowercase()).or_insert_with(|| unquote(strip_comment(value)).to_string());
+        }
+    }
+    let expand = |text: &str| -> Option<String> {
+        let text = unquote(text.trim());
+        match text.strip_prefix('%').and_then(|rest| rest.strip_suffix('%')) {
+            Some(key) if !key.contains('%') => strings.get(&key.to_ascii_lowercase()).cloned(),
+            _ if text.contains('%') => None,
+            _ => Some(text.to_string()),
+        }
+    };
+
+    let mut model_sections: Vec<String> = Vec::new();
+    for line in lines_of(&sections, "manufacturer") {
+        let Some((_, value)) = split_entry(line) else { continue };
+        let mut parts = strip_comment(value).split(',').map(str::trim);
+        let Some(base) = parts.next().filter(|base| !base.is_empty()) else { continue };
+        let base = base.to_ascii_lowercase();
+        model_sections.push(base.clone());
+        model_sections.extend(parts.filter(|decoration| !decoration.is_empty()).map(|decoration| format!("{base}.{}", decoration.to_ascii_lowercase())));
+    }
+
+    let mut out: Vec<String> = Vec::new();
+    for name in &model_sections {
+        for line in lines_of(&sections, name) {
+            let Some((description, _)) = split_entry(line) else { continue };
+            let Some(model) = expand(description).map(|text| text.trim().to_string()).filter(|text| !text.is_empty()) else { continue };
+            if out.len() < MAX_MODELS && !out.iter().any(|known| known.eq_ignore_ascii_case(&model)) {
+                out.push(model);
+            }
+        }
+    }
+    out
+}
+
+/// The lines of every section with this (lower-case) name.
+fn lines_of<'a>(sections: &'a [(String, Vec<&'a str>)], name: &'a str) -> impl Iterator<Item = &'a str> + 'a {
+    sections.iter().filter(move |(section, _)| section.as_str() == name).flat_map(|(_, lines)| lines.iter().copied())
+}
+
+/// `key = value` of an INF line; a quoted key may contain `=`.
+fn split_entry(line: &str) -> Option<(&str, &str)> {
+    if let Some(rest) = line.strip_prefix('"') {
+        let end = rest.find('"')?;
+        let after = rest[end + 1..].trim_start().strip_prefix('=')?;
+        return Some((&line[..end + 2], after.trim()));
+    }
+    let (key, value) = line.split_once('=')?;
+    Some((key.trim(), value.trim()))
+}
+
+/// The part of a value before a `;` comment (a `;` inside quotes is rare enough in these lines to ignore).
+fn strip_comment(value: &str) -> &str {
+    value.split(';').next().unwrap_or("").trim()
+}
+
+fn unquote(text: &str) -> &str {
+    text.trim().trim_matches('"').trim()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -403,6 +527,7 @@ mod tests {
             success_exit_codes: vec![0],
             revision: 1,
             source: None,
+            signer_thumbprint: None,
         }
     }
 
@@ -527,6 +652,65 @@ mod tests {
         odd.source = Some(DriverSource::VendorExeExtract);
         assert!(!check_driver(&odd, ROOT).unwrap_err().contains("secret"));
         assert_eq!(check_driver(&spec(Inf), ROOT).unwrap().name, "Brother");
+    }
+
+    #[test]
+    fn a_pinned_signer_is_normalised_and_only_an_inf_driver_may_pin_one() {
+        let sha1 = "59A339DC".repeat(5);
+        let pinned = |kind, pin: &str| check_driver(&DriverSpec { signer_thumbprint: Some(pin.into()), ..spec(kind) }, ROOT);
+        assert_eq!(pinned(DriverKind::Inf, &sha1).unwrap().signer_thumbprint, Some(sha1.to_ascii_lowercase()));
+        assert_eq!(pinned(DriverKind::Inf, &"AB".repeat(32)).unwrap().signer_thumbprint, Some("ab".repeat(32)));
+        assert_eq!(check_driver(&spec(DriverKind::Inf), ROOT).unwrap().signer_thumbprint, None);
+        for bad in [String::new(), "59A339DC".to_string(), "g".repeat(40), "a".repeat(41)] {
+            assert!(pinned(DriverKind::Inf, &bad).is_err(), "{bad:?}");
+        }
+        // An exe or msi has no catalog to check: a pin on one is refused, never ignored.
+        for kind in [DriverKind::Exe, DriverKind::Msi] {
+            assert_eq!(pinned(kind, &sha1), Err("only an INF driver can pin a signer thumbprint"));
+        }
+        // The reason names no value.
+        assert!(!pinned(DriverKind::Inf, "secret").unwrap_err().contains("secret"));
+    }
+
+    #[test]
+    fn a_pin_matches_only_the_certificate_with_that_exact_thumbprint() {
+        let cert = crate::platform::sim::test_cert("CN=Seagull Software, LLC", 0xab);
+        assert!(cert_matches_pin(&cert, &cert.sha1) && cert_matches_pin(&cert, &cert.sha256));
+        // The wrong length, another certificate, the same subject name with another key: none match.
+        let other = crate::platform::sim::test_cert("CN=Seagull Software, LLC", 0xcd);
+        assert!(!cert_matches_pin(&cert, &other.sha1) && !cert_matches_pin(&cert, &other.sha256));
+        assert!(!cert_matches_pin(&cert, "") && !cert_matches_pin(&cert, &cert.sha1[..39]));
+        // A SHA-1 pin is never compared with the SHA-256 and the other way round.
+        assert!(!cert_matches_pin(&cert, &"ab".repeat(33)));
+    }
+
+    #[test]
+    fn the_models_of_an_inf_come_from_the_manufacturer_sections_with_strings_expanded() {
+        let inf = "; BIXOLON POS\r\n[Version]\r\nSignature=\"$Windows NT$\"\r\nClass=Printer\r\n\
+                   [Manufacturer]\r\n%Mfg%=BXL,NTamd64,NTx86\r\n\"Other\"=OTHER\r\n\
+                   [BXL]\r\n%srp350%=A,USB\\X\r\n\
+                   [BXL.NTamd64]\r\n%srp350%=A,USB\\X ; the same again\r\n\"BIXOLON SRP-350plusIII\" = B, USB\\Y\r\n%srp330%=C\r\n%missing%=D\r\n\
+                   [BXL.NTx86]\r\n\"BIXOLON x86 only\"=E\r\n\
+                   [OTHER]\r\n\"Other model\"=F\r\n\
+                   [NotListed]\r\n\"Not a model\"=G\r\n\
+                   [Strings]\r\nMfg=\"BIXOLON\"\r\nsrp350=\"BIXOLON SRP-350III\"\r\nSrp330 = \"BIXOLON SRP-330II\" ; two\r\n";
+        assert_eq!(
+            inf_models(inf),
+            ["BIXOLON SRP-350III", "BIXOLON SRP-350plusIII", "BIXOLON SRP-330II", "BIXOLON x86 only", "Other model"]
+        );
+        assert!(inf_models("").is_empty());
+        assert!(inf_models("[Version]\nClass=Net\n").is_empty());
+        // No section is created by a line before the first header, and an unterminated header does not panic.
+        assert!(inf_models("a=b\n[Manufacturer\n%x%=y").is_empty());
+        // A flood of models stops at the cap.
+        let many: String = std::iter::once("[Manufacturer]\nm=S\n[S]\n".to_string())
+            .chain((0..MAX_MODELS + 10).map(|n| format!("\"model {n}\"=I\n")))
+            .collect();
+        assert_eq!(inf_models(&many).len(), MAX_MODELS);
+        // UTF-16 text (what vendor INFs are) goes through `decode_inf` first.
+        let mut utf16 = vec![0xFF, 0xFE];
+        utf16.extend("[Manufacturer]\nm=S\n[S]\n\"Model A\"=I\n".encode_utf16().flat_map(u16::to_le_bytes));
+        assert_eq!(inf_models(&decode_inf(&utf16)), ["Model A"]);
     }
 
     #[test]

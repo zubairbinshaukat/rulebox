@@ -416,6 +416,24 @@ pub struct WebApp {
     pub url: String,
     pub allowed_domains: Vec<String>,
     pub permissions: WebPermissions,
+    /// (Phase 6 Step 18, plan 4.9.1) The browser the administrator chose, where its program is and whether the agent has
+    /// written its policies. Rust only: React never needs a program path, and `apps/staff-app/src-tauri/src/browserapp.rs`
+    /// decides at launch time whether the browser or the built-in window opens.
+    #[serde(skip)]
+    #[ts(skip)]
+    pub browser: BrowserLaunch,
+}
+
+/// (Phase 6 Step 18) What `apps.list` says about the browser of a web app (protocol 1.4). A 1.3 agent says nothing: the
+/// default is the built-in window.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct BrowserLaunch {
+    /// `Builtin` (also for a value this build does not know), `Edge` or `Chrome`.
+    pub kind: rulebox_policy::catalog::BrowserKind,
+    /// The browser program the agent resolved (`chrome.exe` or `msedge.exe`).
+    pub exe: Option<String>,
+    /// The agent journalled the browser's policies as applied: only then may a browser window open.
+    pub ready: bool,
 }
 
 #[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq, TS)]
@@ -671,6 +689,11 @@ pub fn map_wire_app(wire: rulebox_ipc::requests::AppEntry) -> Option<AppEntry> {
                     downloads: web.permissions.downloads,
                     printing: web.permissions.printing,
                     geolocation: web.permissions.geolocation,
+                },
+                browser: BrowserLaunch {
+                    kind: web.browser.effective(),
+                    exe: web.browser_exe,
+                    ready: web.browser_ready,
                 },
             })
         }

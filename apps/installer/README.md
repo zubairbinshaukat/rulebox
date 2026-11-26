@@ -7,10 +7,10 @@ Design: `docs/plans/phase-6-installer-pilot.md` Section 4.10. Not Tauri's MSI ta
 | File | What it holds |
 |---|---|
 | `Package.wxs` | Product, upgrade code, major upgrade, install folder and its ACL, install marker, pending enrollment code, WebView2 bootstrapper, notices, licence |
-| `Service.wxs` | `rulebox-agent.exe`, the `RuleboxAgent` service and its restart settings, the "Rulebox Setup" shortcut |
-| `StaffApp.wxs` | `rulebox-shell.exe`, `current.json`, `versions\<version>\rulebox-staff.exe` |
+| `Service.wxs` | `rulebox-agent.exe`, the `RuleboxAgent` service and its restart settings, the "Rulebox Setup" shortcut, the uninstall-only `UnenrollAtUninstall` action |
+| `StaffApp.wxs` | `rulebox-shell.exe`, `current.json`, `versions\<version>\rulebox-staff.exe`, the `versions` folder cleanup (`RemoveFolderEx`) |
 | `Checks.wxs` | Launch conditions (administrator, x64, build 19045) and the uninstall guard (no free-space condition: see the file) |
-| `UI.wxs` | WixUI_Minimal, the logo bitmaps (`assets/brand/installer/`, from `pnpm gen:brand`) and the finish-page "Start Rulebox Setup" checkbox (the only custom action) |
+| `UI.wxs` | WixUI_Minimal, the logo bitmaps (`assets/brand/installer/`, from `pnpm gen:brand`) and the finish-page "Start Rulebox Setup" checkbox (the only custom action that runs at install) |
 | `License.rtf` | Text shown on the licence page |
 | `build.ps1` | The build script |
 | `webview2-bootstrapper.sha256` | Pinned SHA-256 of Microsoft's WebView2 bootstrapper |
@@ -50,6 +50,19 @@ The build also checks that `rulebox-agent.exe --version` is `-Version` (build th
   product). The static test pins it.
 - The service name, its arguments, the install marker and the folder ACL equal the Rust sources
   (`apps/agent/src/service.rs`, `crates/rulebox-win32/src/{guard,security}.rs`); the test compares them.
+
+## Uninstall, upgrade and what is left (Step 22 run A2 answers, owner-approved 2026-11-26)
+
+- **Uninstall unenrolls.** `UnenrollAtUninstall` runs the installed `rulebox-agent.exe unenroll --remove-staff-account`
+  (deferred, SYSTEM, before the service is stopped) only when `REMOVE="ALL" AND NOT UPGRADINGPRODUCTCODE`. It tells the
+  backend, deletes the RuleboxStaff account and profile, and wipes the device secrets and the organization's data. Logs
+  stay in `ProgramData\Rulebox`. Errors are ignored (not enrolled, offline, service stopped): the uninstall goes on and the
+  account stays. A major upgrade never runs it, although MajorUpgrade removes the old product on every upgrade.
+- **Old Staff App folders.** The agent closes the Staff App before an agent-driven upgrade (`selfupdate.rs`), so no file is in
+  use; `RemoveFolderEx` removes `versions\` at uninstall (and when a major upgrade removes the old product) as a safety net.
+- **Not changed:** the empty `HKLM\SOFTWARE\Policies\Microsoft\Windows\OOBE` key the kiosk journal leaves behind (no effect).
+- Needs the VM (nothing here was run): the unenroll action over the admin pipe as SYSTEM, `RemoveFolderEx` with the
+  `VERSIONSFOLDERPATH` property, a major upgrade that leaves the enrolled PC enrolled.
 
 ## WiX v7 EULA (OSMF) record
 

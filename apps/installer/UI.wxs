@@ -7,9 +7,10 @@
   "Rulebox Setup" Start menu shortcut (Service.wxs). A silent install (/qn) shows no
   dialogs, so it never launches Setup; it enrolls through ENROLLCODE instead.
 
-  This is the only custom action in the package. It is a DLL entry point from the WiX Util
+  This is the only custom action that runs at install. It is a DLL entry point from the WiX Util
   extension (ShellExecute on a shortcut): no script and no EXE. It runs as the user, so the
-  agent's `setup` manifest must ask for administrator (a UAC prompt, plan Step 8).
+  agent's `setup` manifest must ask for administrator (a UAC prompt, plan Step 8). The other
+  custom action of the package runs at uninstall only (Service.wxs: the agent's unenroll).
 -->
 <Wix xmlns="http://wixtoolset.org/schemas/v4/wxs"
      xmlns:ui="http://wixtoolset.org/schemas/v4/wxs/ui">

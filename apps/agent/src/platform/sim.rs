@@ -16,7 +16,7 @@ use super::{
     ProcessInfo, ProcessSink, ProcessStart, RegData, RegValueRef, ResetOutcome, SecurityPosture, ServiceConfig,
     SessionInfo, ShellBinaries, ShellMechanism, StaffUserSpec, TraceHandle, TraceStats, WlanState,
 };
-use super::{EventKind, FolderAcl, InstallMarkerValue, LocalAdminAccount};
+use super::{EventKind, FolderAcl, InstallMarkerValue, LocalAdminAccount, SignerCert};
 use rulebox_win32::posture::{BitLocker, SecureBoot, Tpm};
 use rulebox_win32::{applocker, bcd, codeintegrity, eventlog, machinereg, printing, service, staffreg, wlan};
 
@@ -111,6 +111,14 @@ pub enum SimOp {
     // Phase 5 Step 14b.
     DriverPackageDelete,
     DriverStoreInfs,
+    // Phase 6 Step 15 (spike X-1 and S-11): the first three only read.
+    DriverPackageModels,
+    FileSignerCert,
+    TrustedPublisherHas,
+    PrinterDriverInstall,
+    PrinterDriverDelete,
+    TrustedPublisherAdd,
+    TrustedPublisherRemove,
     PrinterShareConnect,
     PrinterShareDisconnect,
     BcdSet,
@@ -147,6 +155,8 @@ pub enum SimOp {
     StartSelfUpgrade,
     // Phase 6 Step 22 run A2 (changes the machine: it ends processes).
     EndStaleLaunchers,
+    // Phase 6 Q-A3 (changes the machine: it ends the Staff App before an agent-driven upgrade).
+    EndStaffShell,
 }
 
 impl SimOp {
@@ -187,6 +197,9 @@ impl SimOp {
                 | SimOp::PrinterDrivers
                 | SimOp::PrinterPorts
                 | SimOp::DriverStoreInfs
+                | SimOp::DriverPackageModels
+                | SimOp::FileSignerCert
+                | SimOp::TrustedPublisherHas
                 | SimOp::BcdGet
                 | SimOp::ReadEventLog
                 | SimOp::ReadSecurityPosture
@@ -286,6 +299,22 @@ pub struct SimWorld {
     /// (Step 14b) Every `driver_package_delete` call (including those that failed), and whether the next ones fail.
     pub driver_deletes: Vec<String>,
     pub driver_delete_fails: bool,
+    /// (Phase 6 Step 15, spike X-1) The model names each package of the fake store lists (`oem<N>.inf` to names): what
+    /// `driver_package_models` answers and what `printer_driver_install` may register with the spooler. Like Windows,
+    /// `driver_package_delete` refuses a package while the spooler still holds a printer driver of one of its models.
+    pub driver_models: std::collections::BTreeMap<String, Vec<String>>,
+    /// What changed the printer side, in order: `queue:<name>`, `spooler-install:<driver>`, `spooler-delete:<driver>`,
+    /// `package:<oem<N>.inf>`. The removal-order tests read it.
+    pub driver_events: Vec<String>,
+    /// (Phase 6 Step 15, spike S-11) The certificate that signed a file (path key as `programs`), what
+    /// `file_signer_cert` answers.
+    pub signer_certs: HashMap<String, SignerCert>,
+    /// `LocalMachine\TrustedPublisher`: SHA-1 thumbprint to DER, and every add / remove in order (`add:<sha1>`, `remove:<sha1>`).
+    pub trusted_publishers: std::collections::BTreeMap<String, Vec<u8>>,
+    pub trusted_publisher_log: Vec<String>,
+    /// When set to a SHA-1 thumbprint, `pnputil /add-driver` fails as an untrusted publisher until that certificate is in
+    /// `trusted_publishers` (a package signed by a publisher that is not WHQL).
+    pub driver_requires_trust: Option<String>,
     /// (Step 14, tests) At each run, try to open the installer file for writing
     /// and record whether that was refused (the engine must hold it locked).
     pub probe_lock: bool,
@@ -418,6 +447,12 @@ impl SimWorld {
             driver_add_publishes: true,
             driver_deletes: Vec::new(),
             driver_delete_fails: false,
+            driver_models: std::collections::BTreeMap::new(),
+            driver_events: Vec::new(),
+            signer_certs: HashMap::new(),
+            trusted_publishers: std::collections::BTreeMap::new(),
+            trusted_publisher_log: Vec::new(),
+            driver_requires_trust: None,
             probe_lock: false,
             lock_probes: Vec::new(),
             dirs: std::collections::HashSet::new(),
@@ -1026,7 +1061,13 @@ impl Platform for SimPlatform {
             let refused = file.is_some_and(|f| std::fs::OpenOptions::new().write(true).open(f).is_err());
             world.lock_probes.push(refused);
         }
-        let exit = world.installer_exits.pop_front().unwrap_or(InstallerExit::Code(0));
+        let mut exit = world.installer_exits.pop_front().unwrap_or(InstallerExit::Code(0));
+        // (Spike S-11) A package signed by a publisher that is not trusted is refused by `pnputil /add-driver` (setupapi
+        // `0xE0000242`): the fake store only takes it once the certificate is in `trusted_publishers`.
+        let is_add = cmd.program.file_name().is_some_and(|n| n.eq_ignore_ascii_case("pnputil.exe")) && cmd.args.first().map(String::as_str) == Some("/add-driver");
+        if is_add && world.driver_requires_trust.as_ref().is_some_and(|sha1| !world.trusted_publishers.contains_key(sha1)) {
+            exit = InstallerExit::Code(crate::installs::drivers_rules::PNPUTIL_UNTRUSTED_PUBLISHER);
+        }
         // (Step 14b) pnputil: a success publishes (or deletes) an `oem<N>.inf` of the fake store.
         if let (InstallerExit::Code(MSI_SUCCESS | MSI_REBOOT_REQUIRED | MSI_REBOOT_INITIATED), Some(root)) = (exit, &system_root) {
             if cmd.program.file_name().is_some_and(|n| n.eq_ignore_ascii_case("pnputil.exe")) {
@@ -1082,15 +1123,80 @@ impl Platform for SimPlatform {
         let name = published.to_ascii_lowercase();
         let mut world = lock(&self.world);
         world.driver_deletes.push(name.clone());
+        world.driver_events.push(format!("package:{name}"));
         if world.driver_delete_fails {
             return Err(PlatformError::Other("pnputil could not delete the package".into()));
         }
-        if !world.driver_store.remove(&name) {
+        if !world.driver_store.contains(&name) {
             return Err(PlatformError::NotFound);
         }
+        // Spike X-1: "One or more devices are presently installed using the specified INF" (0xE000023D) while the spooler
+        // still holds a printer driver of the package.
+        let held = world.driver_models.get(&name).is_some_and(|models| {
+            models.iter().any(|model| world.printer_drivers.iter().any(|driver| driver.eq_ignore_ascii_case(model)))
+        });
+        if held {
+            return Err(PlatformError::Other("pnputil could not delete the package".into()));
+        }
+        world.driver_store.remove(&name);
         if let Some(root) = sim_path_roots().system_root {
             world.programs.remove(&acl_key(&Path::new(&root).join("INF").join(&name)));
         }
+        Ok(())
+    }
+
+    fn printer_driver_install(&self, name: &str) -> Result<(), PlatformError> {
+        self.check(SimOp::PrinterDriverInstall)?;
+        printing::check_plain_name(name).map_err(map_err)?;
+        let mut world = lock(&self.world);
+        if world.printer_drivers.iter().any(|driver| driver.eq_ignore_ascii_case(name)) {
+            return Ok(());
+        }
+        // Only a model of a package that is in the store (as on Windows: nothing is fetched from anywhere else).
+        let staged = world.driver_store.iter().any(|oem| {
+            world.driver_models.get(oem).is_some_and(|models| models.iter().any(|model| model.eq_ignore_ascii_case(name)))
+        });
+        if !staged {
+            return Err(PlatformError::Win32 { api: "InstallPrinterDriverFromPackageW", code: 1797 });
+        }
+        world.driver_events.push(format!("spooler-install:{name}"));
+        world.printer_drivers.push(name.to_string());
+        Ok(())
+    }
+
+    fn printer_driver_delete(&self, name: &str) -> Result<(), PlatformError> {
+        self.check(SimOp::PrinterDriverDelete)?;
+        printing::check_plain_name(name).map_err(map_err)?;
+        let mut world = lock(&self.world);
+        if !world.printer_drivers.iter().any(|driver| driver.eq_ignore_ascii_case(name)) {
+            return Err(PlatformError::NotFound);
+        }
+        // ERROR_PRINTER_DRIVER_IN_USE: a queue still uses it.
+        if world.printers.iter().any(|printer| printer.info.driver.eq_ignore_ascii_case(name)) {
+            return Err(PlatformError::Win32 { api: "DeletePrinterDriverExW", code: 3001 });
+        }
+        world.driver_events.push(format!("spooler-delete:{name}"));
+        world.printer_drivers.retain(|driver| !driver.eq_ignore_ascii_case(name));
+        Ok(())
+    }
+
+    fn trusted_publisher_add(&self, der: &[u8]) -> Result<(), PlatformError> {
+        self.check(SimOp::TrustedPublisherAdd)?;
+        rulebox_win32::publisher::check_der(der).map_err(map_err)?;
+        // The fake store keys by the thumbprint the test certificate carries (`test_cert`: the DER's second byte repeated).
+        let sha1 = format!("{:02x}", der[1]).repeat(20);
+        let mut world = lock(&self.world);
+        world.trusted_publisher_log.push(format!("add:{sha1}"));
+        world.trusted_publishers.entry(sha1).or_insert_with(|| der.to_vec());
+        Ok(())
+    }
+
+    fn trusted_publisher_remove(&self, sha1: &str) -> Result<(), PlatformError> {
+        self.check(SimOp::TrustedPublisherRemove)?;
+        rulebox_win32::publisher::check_sha1(sha1).map_err(map_err)?;
+        let mut world = lock(&self.world);
+        world.trusted_publisher_log.push(format!("remove:{sha1}"));
+        world.trusted_publishers.remove(&sha1.to_ascii_lowercase());
         Ok(())
     }
 
@@ -1287,6 +1393,25 @@ impl Platform for SimPlatform {
     fn driver_store_infs(&self) -> Result<Vec<String>, PlatformError> {
         self.check(SimOp::DriverStoreInfs)?;
         Ok(lock(&self.world).driver_store.iter().cloned().collect())
+    }
+
+    fn driver_package_models(&self, published: &str) -> Result<Vec<String>, PlatformError> {
+        self.check(SimOp::DriverPackageModels)?;
+        if !is_published_inf(published) {
+            return Err(PlatformError::Refused("not a published driver name"));
+        }
+        Ok(lock(&self.world).driver_models.get(&published.to_ascii_lowercase()).cloned().unwrap_or_default())
+    }
+
+    fn file_signer_cert(&self, path: &Path) -> Result<Option<SignerCert>, PlatformError> {
+        self.check(SimOp::FileSignerCert)?;
+        Ok(lock(&self.world).signer_certs.get(&acl_key(path)).cloned())
+    }
+
+    fn trusted_publisher_has(&self, sha1: &str) -> Result<bool, PlatformError> {
+        self.check(SimOp::TrustedPublisherHas)?;
+        rulebox_win32::publisher::check_sha1(sha1).map_err(map_err)?;
+        Ok(lock(&self.world).trusted_publishers.contains_key(&sha1.to_ascii_lowercase()))
     }
 
     fn printer_ports(&self) -> Result<Vec<String>, PlatformError> {
@@ -1661,7 +1786,11 @@ impl Platform for SimPlatform {
     fn printer_delete(&self, name: &str) -> Result<(), PlatformError> {
         self.check(SimOp::PrinterDelete)?;
         printing::check_own_name(name).map_err(map_err)?;
-        lock(&self.world).printers.retain(|p| p.info.name != name);
+        let mut world = lock(&self.world);
+        if world.printers.iter().any(|p| p.info.name == name) {
+            world.driver_events.push(format!("queue:{name}"));
+        }
+        world.printers.retain(|p| p.info.name != name);
         Ok(())
     }
 
@@ -1858,6 +1987,37 @@ impl Platform for SimPlatform {
         }
         Ok(stale)
     }
+
+    /// (Phase 6 Q-A3) The same rule as `WindowsPlatform`: the launcher and the Staff App (by the Toolhelp name, else the
+    /// image's file name) of the Staff account in any of its sessions, installed copy or not.
+    fn end_staff_shell(&self, staff_sid: &str) -> Result<Vec<u32>, PlatformError> {
+        self.check(SimOp::EndStaffShell)?;
+        let mut world = lock(&self.world);
+        let sessions: Vec<u32> = world
+            .sessions
+            .iter()
+            .filter(|s| s.user_sid.as_deref().is_some_and(|user| user.eq_ignore_ascii_case(staff_sid)))
+            .map(|s| s.id)
+            .collect();
+        let ended: Vec<u32> = world
+            .processes
+            .iter()
+            .filter(|p| {
+                let name = world.exe_names.get(&p.pid).cloned().or_else(|| p.image.file_name().map(|name| name.to_string_lossy().into_owned()));
+                name.is_some_and(|name| name.eq_ignore_ascii_case("rulebox-shell.exe") || name.eq_ignore_ascii_case("rulebox-staff.exe"))
+                    && sessions.contains(&p.session_id)
+                    && p.user_sid.eq_ignore_ascii_case(staff_sid)
+            })
+            .map(|p| p.pid)
+            .collect();
+        world.processes.retain(|p| !ended.contains(&p.pid));
+        world.stale_ended.extend(&ended);
+        drop(world);
+        for pid in &ended {
+            self.signal_exit(*pid);
+        }
+        Ok(ended)
+    }
 }
 
 /// Registry names are case-insensitive: so are the simulated Staff-hive keys.
@@ -1898,6 +2058,22 @@ impl SimPlatform {
             .programs
             .insert(acl_key(Path::new(path)), SimProgram { stamp, identity, sha256: sha256.map(str::to_string) });
     }
+
+    /// (Phase 6 Step 15) Says which certificate validly signed a file (the answer of `file_signer_cert`).
+    #[cfg(test)]
+    pub fn add_signer_cert(&self, path: &str, cert: SignerCert) {
+        lock(&self.world).signer_certs.insert(acl_key(Path::new(path)), cert);
+    }
+}
+
+/// (Phase 6 Step 15) A certificate for tests: the thumbprints are the byte `n` repeated (so two certificates differ by
+/// `n`), the DER is a fake `SEQUENCE` of the size `check_der` accepts.
+#[cfg(test)]
+pub fn test_cert(subject: &str, n: u8) -> SignerCert {
+    let hex = |len: usize| format!("{n:02x}").repeat(len);
+    let mut der = vec![n; 128];
+    der[0] = 0x30;
+    SignerCert { subject: subject.to_string(), sha1: hex(20), sha256: hex(32), der }
 }
 
 impl SimPlatform {

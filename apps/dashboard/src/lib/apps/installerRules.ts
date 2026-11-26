@@ -46,13 +46,13 @@ export function answerUrlProblem(value: string): "https" | "iss" | null {
   }
 }
 
-/** Every `{` or `}` must start exactly `{AnswerFile}` or `{LogFile}` (`check_silent_args` in `rulebox-policy`). */
+/** Every `{` or `}` must start exactly `{AnswerFile}`, `{LogFile}` or `{InstallDir}` (`check_silent_args` in `rulebox-policy`; the server also checks where `{InstallDir}` stands). */
 export function silentArgTokenProblem(list: string[]): boolean {
   for (const arg of list) {
     let rest = arg;
     for (let at = rest.search(/[{}]/); at !== -1; at = rest.search(/[{}]/)) {
       const tail = rest.slice(at);
-      const token = ["{AnswerFile}", "{LogFile}"].find((t) => tail.startsWith(t));
+      const token = ["{AnswerFile}", "{LogFile}", "{InstallDir}"].find((t) => tail.startsWith(t));
       if (token === undefined) return true;
       rest = tail.slice(token.length);
     }

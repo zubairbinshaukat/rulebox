@@ -16,9 +16,10 @@
 use windows::core::{PCWSTR, PWSTR};
 use windows::Win32::Foundation::HANDLE;
 use windows::Win32::Graphics::Printing::{
-    AddPrinterW, ClosePrinter, DeletePrinter, EnumPortsW, EnumPrinterDriversW, EnumPrintersW, GetPrinterW, OpenPrinterW,
-    SetPrinterW, XcvDataW, DRIVER_INFO_1W, PORT_INFO_1W, PRINTER_ACCESS_RIGHTS, PRINTER_ALL_ACCESS, PRINTER_DEFAULTSW,
-    PRINTER_ENUM_CONNECTIONS, PRINTER_ENUM_LOCAL, PRINTER_HANDLE, PRINTER_INFO_2W, PRINTER_INFO_3,
+    AddPrinterW, ClosePrinter, DeletePrinter, DeletePrinterDriverExW, EnumPortsW, EnumPrinterDriversW, EnumPrintersW, GetPrinterW,
+    InstallPrinterDriverFromPackageW, OpenPrinterW, SetPrinterW, XcvDataW, DPD_DELETE_UNUSED_FILES, DRIVER_INFO_1W, PORT_INFO_1W,
+    PRINTER_ACCESS_RIGHTS, PRINTER_ALL_ACCESS, PRINTER_DEFAULTSW, PRINTER_ENUM_CONNECTIONS, PRINTER_ENUM_LOCAL, PRINTER_HANDLE,
+    PRINTER_INFO_2W, PRINTER_INFO_3,
 };
 use windows::Win32::Security::PSECURITY_DESCRIPTOR;
 
@@ -184,8 +185,9 @@ pub fn list() -> Result<Vec<PrinterInfo>> {
     Ok(out)
 }
 
-/// The names of the printer drivers in the Windows driver store (current architecture). Read-only. The agent never
-/// installs a driver (plan 4.15): a printer whose driver is not in this list is `driver_missing`.
+/// The names of the printer drivers the spooler holds (current architecture). Read-only. The agent never fetches a driver
+/// (plan 4.15): a printer whose driver is not in this list is registered from a package already staged in the driver store
+/// ([`install_driver_from_store`]) or is `driver_missing`.
 pub fn list_drivers() -> Result<Vec<String>> {
     let (mut needed, mut returned) = (0u32, 0u32);
     // SAFETY: no buffer, size 0: only the size is asked for. Null name and environment: this machine, this architecture.
@@ -485,6 +487,46 @@ pub fn delete(name: &str) -> Result<()> {
     unsafe { DeletePrinter(printer.0) }.map_err(|e| api_err("DeletePrinter", &e))
 }
 
+/// `ERROR_UNKNOWN_PRINTER_DRIVER`: no printer driver of that name is installed.
+const UNKNOWN_PRINTER_DRIVER: u32 = 1797;
+
+/// Registers a printer driver with the spooler from a package that is already in the Windows driver store
+/// (`InstallPrinterDriverFromPackage` with no INF path: what `Add-PrinterDriver -Name` does). The agent never reaches out
+/// to a server, a CD or Windows Update: a name no staged package has is `ERROR_UNKNOWN_PRINTER_DRIVER` (1797). UNVERIFIED
+/// on a real PC (VM step): whether the NULL INF path finds a package staged by `pnputil /add-driver`.
+///
+/// DESTRUCTIVE: guarded.
+pub fn install_driver_from_store(name: &str) -> Result<()> {
+    check_plain_name(name)?;
+    require_armed_machine()?;
+    let wide = to_wide(name);
+    // SAFETY: `wide` is NUL-terminated and outlives the call; null server, INF path and environment mean this machine, the
+    // driver store and this architecture. Flags 0.
+    unsafe { InstallPrinterDriverFromPackageW(PCWSTR::null(), PCWSTR::null(), PCWSTR(wide.as_ptr()), PCWSTR::null(), 0) }
+        .map_err(|e| api_err("InstallPrinterDriverFromPackageW", &e))
+}
+
+/// Removes a printer driver from the spooler (`DeletePrinterDriverEx`, unused files too). Windows refuses while a queue
+/// still uses it (`ERROR_PRINTER_DRIVER_IN_USE`, 3001): the queues go first. A driver that is not installed is `NotFound`.
+/// This must happen before `pnputil /delete-driver` of the package it came from (`0xE000023D` otherwise, spike X-1).
+///
+/// DESTRUCTIVE: guarded.
+pub fn delete_driver(name: &str) -> Result<()> {
+    check_plain_name(name)?;
+    require_armed_machine()?;
+    let wide = to_wide(name);
+    // SAFETY: `wide` is NUL-terminated and outlives the call; null server and environment mean this machine and this
+    // architecture; version flag 0 with no `DPD_DELETE_SPECIFIC_VERSION` removes every version.
+    let done = unsafe { DeletePrinterDriverExW(PCWSTR::null(), PCWSTR::null(), PCWSTR(wide.as_ptr()), DPD_DELETE_UNUSED_FILES, 0) };
+    if done.as_bool() {
+        return Ok(());
+    }
+    match api_err("DeletePrinterDriverExW", &windows::core::Error::from_thread()) {
+        Win32Error::Api { code: UNKNOWN_PRINTER_DRIVER, .. } => Err(Win32Error::NotFound),
+        other => Err(other),
+    }
+}
+
 /// The DACL of a queue as SDDL. `Ok(None)` when there is no such queue. Read-only.
 pub fn get_security(name: &str) -> Result<Option<String>> {
     check_plain_name(name)?;
@@ -622,6 +664,11 @@ mod tests {
         assert!(matches!(delete_port("Rulebox_k7"), Err(Win32Error::Guard(_))));
         assert!(matches!(connect_share(r"\\print01\hp"), Err(Win32Error::Guard(_))));
         assert!(matches!(disconnect_share(r"\\print01\hp"), Err(Win32Error::Guard(_))));
+        // (Phase 6 Step 15) The spooler driver calls: a bad name is refused first, a good one meets the guard.
+        assert!(matches!(install_driver_from_store("BIXOLON SRP-350III"), Err(Win32Error::Guard(_))));
+        assert!(matches!(delete_driver("BIXOLON SRP-350III"), Err(Win32Error::Guard(_))));
+        assert!(matches!(install_driver_from_store(r"a\b"), Err(Win32Error::Forbidden(_))));
+        assert!(matches!(delete_driver(""), Err(Win32Error::Forbidden(_))));
     }
 
     /// Reads the real printer list; never writes. Run by hand.

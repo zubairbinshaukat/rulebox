@@ -225,8 +225,10 @@ pub fn window_cap_state(
     web: State<'_, Arc<crate::webapp::WebApps>>,
 ) -> Result<Option<crate::webapp::CapPrompt>, CommandError> {
     require_label(&window, "shell-popup")?;
-    let catalogue = state.read(|shell| shell.apps.items.clone());
-    Ok(web.cap_prompt(state.web_window_cap(), &catalogue))
+    let (catalogue, browser_windows) = state.read(|shell| {
+        (shell.apps.items.clone(), crate::browserapp::cap_windows(&shell.apps.items, &shell.tasks))
+    });
+    Ok(web.cap_prompt_with(state.web_window_cap(), &catalogue, &browser_windows))
 }
 
 /// (Phase 6 Step 19) The employee picked a window to close so that the waiting app can open. Only an open web window is closed.
@@ -235,12 +237,13 @@ pub async fn window_cap_close(
     window: Window,
     app: AppHandle,
     state: State<'_, AppState>,
+    services: State<'_, TaskServices>,
     host: State<'_, Arc<DesktopHost>>,
     label: String,
 ) -> Result<crate::webapp::CapOutcome, CommandError> {
     require_label(&window, "shell-popup")?;
-    let (state, handle) = (state.inner().clone(), app.clone());
-    let outcome = blocking(move || taskops::close_for_cap(&handle, &state, &label)).await?;
+    let (state, handle, services) = (state.inner().clone(), app.clone(), services.inner().clone());
+    let outcome = blocking(move || taskops::close_for_cap(&handle, &services, &state, &label)).await?;
     if outcome != crate::webapp::CapOutcome::StillFull {
         crate::shellwin::popup_close(&app, &host);
     }

@@ -29,4 +29,13 @@ silentArgs: Array<string>, successExitCodes: Array<number>, revision: number,
 /**
  * (Phase 6) Omitted when absent, so a Phase 5 driver serializes as before.
  */
-source?: DriverSource, };
+source?: DriverSource, 
+/**
+ * (Phase 6 Step 15, spike S-11) `inf` only. The one signing certificate this package may be trusted for: its SHA-1
+ * (40 hex) or SHA-256 (64 hex) thumbprint, as Windows shows it. A driver whose catalog is signed by a publisher that is
+ * not WHQL (Seagull Software for the Toshiba TEC TPCL driver) is only added by Windows once that publisher is in
+ * `LocalMachine\TrustedPublisher`. With this set, the agent first checks that **every** catalog of the package is
+ * validly signed by exactly this certificate and only then puts it into that store, so the trust is per driver and
+ * per certificate, never "every driver of a publisher by name". Omitted when absent.
+ */
+signerThumbprint?: string, };

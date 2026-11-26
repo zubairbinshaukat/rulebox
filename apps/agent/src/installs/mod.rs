@@ -137,10 +137,14 @@ pub enum Detail {
     /// A warning that rides on an `installed` result: a Seagull-based printer driver is already on the PC (Toshiba TEC
     /// says not to mix them). Not a blocker.
     SeagullDriverPresent,
+    // -- (Phase 6 Step 15, spike S-11) A driver whose catalog is signed by a publisher Windows does not trust. --
+    /// The driver's catalog is signed by a publisher that is not trusted on this PC and the entry does not pin it (or the
+    /// pinned certificate could not be trusted): Windows would refuse the package, so nothing was installed.
+    DriverUntrustedPublisher,
 }
 
 impl Detail {
-    pub const ALL: [Detail; 23] = [
+    pub const ALL: [Detail; 24] = [
         Detail::DownloadFailed,
         Detail::HashMismatch,
         Detail::TooLarge,
@@ -164,6 +168,7 @@ impl Detail {
         Detail::AnswerFileFailed,
         Detail::ProtectedPrintOn,
         Detail::SeagullDriverPresent,
+        Detail::DriverUntrustedPublisher,
     ];
 
     pub fn as_str(self) -> &'static str {
@@ -191,6 +196,7 @@ impl Detail {
             Detail::AnswerFileFailed => "answer_file_failed",
             Detail::ProtectedPrintOn => "protected_print_on",
             Detail::SeagullDriverPresent => "seagull_driver_present",
+            Detail::DriverUntrustedPublisher => "driver_untrusted_publisher",
         }
     }
 
@@ -415,6 +421,22 @@ pub fn exe_install_command(file: &Path, silent_args: &[String], working_dir: &Pa
         working_dir: working_dir.to_path_buf(),
         expected_exe: Some(exe.to_path_buf()),
         removal: false,
+    }
+}
+
+/// (Per-user installs, Tier A, plan 5.1) NSIS reads `/D=<folder>` **raw**: it must be the last argument and its value runs
+/// to the end of the command line, with no quotes even when the folder has spaces. `std::process::Command` would quote
+/// `/D=C:\Program Files\X` as one argument and NSIS would not recognise it, so a last argument of this shape is handed to
+/// the platform as a raw tail. Returns the arguments before it and the tail, or the whole list and `None` when the last
+/// argument is not `/D=` plus a folder that passes [`install_dir_text_ok`] (no quote, no control character, no `..`: nothing
+/// that could end the value early or smuggle a second argument; it is then quoted like any other argument).
+pub fn split_nsis_dir_tail(args: &[String]) -> (&[String], Option<&str>) {
+    let Some((last, before)) = args.split_last() else {
+        return (args, None);
+    };
+    match last.strip_prefix("/D=") {
+        Some(dir) if answer::install_dir_text_ok(dir) => (before, Some(last.as_str())),
+        _ => (args, None),
     }
 }
 
@@ -740,7 +762,7 @@ mod tests {
         let server: Vec<&str> = shared.details.iter().map(String::as_str).collect();
         let ours: Vec<&str> = Detail::ALL.iter().map(|d| d.as_str()).collect();
         assert_eq!(ours, server);
-        assert_eq!(server.len(), 23);
+        assert_eq!(server.len(), 24);
         for detail in Detail::ALL {
             // The server's character rule `^[a-z0-9:_ -]*$` and length (<= 200).
             assert!(detail.as_str().bytes().all(|b| matches!(b, b'a'..=b'z' | b'0'..=b'9' | b':' | b'_' | b' ' | b'-')));
@@ -748,6 +770,32 @@ mod tests {
         }
         assert_eq!(Detail::parse("rm -rf"), None);
         assert_eq!(Detail::parse("HASH_MISMATCH"), None);
+    }
+
+    #[test]
+    fn an_nsis_folder_switch_is_a_raw_tail_only_in_its_one_safe_shape() {
+        let s = |v: &[&str]| v.iter().map(|a| (*a).to_string()).collect::<Vec<_>>();
+        let args = s(&["/S", r"/D=C:\Program Files\Zahras POS Dev"]);
+        let (plain, tail) = split_nsis_dir_tail(&args);
+        assert_eq!(plain, ["/S".to_string()]);
+        assert_eq!(tail, Some(r"/D=C:\Program Files\Zahras POS Dev"));
+        // Not last, other spelling, Inno's switch, no switch and no arguments stay ordinary (quoted) arguments.
+        for ordinary in [
+            s(&[r"/D=C:\Program Files\X", "/S"]),
+            s(&[r"/d=C:\Program Files\X"]),
+            s(&[r"/DIR=C:\Program Files\X"]),
+            s(&["/S"]),
+            s(&[]),
+        ] {
+            let (plain, tail) = split_nsis_dir_tail(&ordinary);
+            assert_eq!((plain, tail), (&ordinary[..], None), "{ordinary:?}");
+        }
+        // Text that could end the value early or add an argument is never raw.
+        for hostile in [r#"/D=C:\Program Files\X" /S"#, "/D=C:\\Program Files\\X\n/S", r"/D=C:\Program Files\..\X", r"/D=C:\Program Files\X\", "/D=", r"/D=X"] {
+            let args = s(&["/S", hostile]);
+            let (plain, tail) = split_nsis_dir_tail(&args);
+            assert_eq!((plain, tail), (&args[..], None), "{hostile:?}");
+        }
     }
 
     #[test]

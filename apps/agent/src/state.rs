@@ -387,6 +387,9 @@ pub struct SharedState {
     platform: Arc<dyn Platform>,
     /// (Phase 5 Step 9) What the journal tells the drift tracker; in memory only.
     drift: Mutex<DriftGate>,
+    /// (Phase 6 Step 18) Counts the changes of `browser_ready`, so the session layer can tell the Staff App (`apps.changed`) when a
+    /// browser web app becomes (or stops being) ready to open. In memory only.
+    browser_ready_changes: watch::Sender<u64>,
 }
 
 /// A journal target that was written again because it no longer held its value.
@@ -418,7 +421,18 @@ impl SharedState {
             secrets: Mutex::new(None),
             platform,
             drift: Mutex::new(DriftGate::default()),
+            browser_ready_changes: watch::channel(0).0,
         })
+    }
+
+    /// (Phase 6 Step 18) `browser_ready` changed: wakes whoever watches [`Self::browser_ready_changes`].
+    pub fn note_browser_ready_changed(&self) {
+        self.browser_ready_changes.send_modify(|count| *count = count.wrapping_add(1));
+    }
+
+    /// (Phase 6 Step 18) A receiver that wakes at every change of `browser_ready`.
+    pub fn browser_ready_changes(&self) -> watch::Receiver<u64> {
+        self.browser_ready_changes.subscribe()
     }
 
     /// `journal::change` rewrote the already applied target `id`.

@@ -10,7 +10,8 @@ export const installRefusalStrings = {
   answer_file_unused: "The answer file is not used: put {AnswerFile} in the silent install arguments.",
   answer_file_missing: "{AnswerFile} is in the arguments but there is no answer file. Turn on “Use an answer file” and give it.",
   answer_file_not_iss: "The answer file's address must end in .iss.",
-  silent_arg_token: "Only {AnswerFile} and {LogFile} may be written in braces in the silent install arguments.",
+  silent_arg_token: "Only {AnswerFile}, {LogFile} and {InstallDir} may be written in braces in the silent install arguments.",
+  install_dir_token: "{InstallDir} only works as /D={InstallDir} (last argument, NSIS) or /DIR={InstallDir} (Inno Setup), and for a program under {ProgramFiles} or {ProgramFilesX86} without a * in its path.",
 } as const;
 
 
@@ -23,5 +24,5 @@ export const installFormStrings = {
   answerUrlBad: "Use an https:// address ending in .iss.",
   answerNeedsToken: "Put {AnswerFile} in the silent install arguments, where the installer takes its answer file.",
   tokenNeedsAnswer: "{AnswerFile} is in the arguments, so turn on “Use an answer file” and give the file.",
-  tokenBad: "Only {AnswerFile} and {LogFile} may be written in braces.",
+  tokenBad: "Only {AnswerFile}, {LogFile} and {InstallDir} may be written in braces.",
 } as const;

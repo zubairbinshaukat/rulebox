@@ -200,13 +200,16 @@ const STALE_EXIT_WAIT_MS: u32 = 2000;
 /// `exe_name` (case-insensitive), it is in `session_id` and owned by `owner` (both read from the process's own token),
 /// and its image can be read and is not `installed_image`. A process that cannot be opened or described is never
 /// touched. With `terminate` the checks and the termination use one handle, so a reused process id is never ended.
-fn stale_scan(session_id: u32, exe_name: &str, installed_image: &Path, owner: &Sid, terminate: bool) -> Result<Vec<u32>> {
+///
+/// `installed_image: None` (Phase 6 Q-A3, [`end_all_by_name`]) leaves out the "is the installed program" exception: every
+/// process of that name in the session and of that owner counts.
+fn stale_scan(session_id: u32, exe_name: &str, installed_image: Option<&Path>, owner: &Sid, terminate: bool) -> Result<Vec<u32>> {
     // SAFETY: a snapshot of all processes; the handle is owned by the guard below.
     let snapshot = unsafe { CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0) }
         .map_err(|e| api_err("CreateToolhelp32Snapshot", &e))?;
     let snapshot = OwnedHandle::new(snapshot)?;
 
-    let installed = normalized(installed_image);
+    let installed = installed_image.map(normalized);
     let access = if terminate {
         PROCESS_QUERY_LIMITED_INFORMATION | PROCESS_TERMINATE | PROCESS_SYNCHRONIZE
     } else {
@@ -220,7 +223,7 @@ fn stale_scan(session_id: u32, exe_name: &str, installed_image: &Path, owner: &S
     while more {
         let pid = entry.th32ProcessID;
         if toolhelp_name(&entry.szExeFile).eq_ignore_ascii_case(exe_name) {
-            match stale_candidate(pid, session_id, owner, &installed, access, terminate) {
+            match stale_candidate(pid, session_id, owner, installed.as_deref(), access, terminate) {
                 Ok(true) => found.push(pid),
                 Ok(false) => {}
                 Err(error) => failure = Some(error),
@@ -241,7 +244,7 @@ fn stale_candidate(
     pid: u32,
     session_id: u32,
     owner: &Sid,
-    installed: &str,
+    installed: Option<&str>,
     access: windows::Win32::System::Threading::PROCESS_ACCESS_RIGHTS,
     terminate: bool,
 ) -> Result<bool> {
@@ -251,7 +254,7 @@ fn stale_candidate(
     let Some(image) = image_of_handle(&process) else {
         return Ok(false);
     };
-    if normalized(&image) == installed {
+    if installed.is_some_and(|installed| normalized(&image) == installed) {
         return Ok(false);
     }
     let mut token = HANDLE::default();
@@ -279,7 +282,7 @@ fn stale_candidate(
 /// but whose image is not `installed_image`: the old program of an update, whose file the installer moved away
 /// (`C:\Config.Msi\<x>.rbf`) while it kept running (Phase 6 Step 22 run A2). Read-only.
 pub fn find_stale_by_name(session_id: u32, exe_name: &str, installed_image: &Path, owner: &Sid) -> Result<Vec<u32>> {
-    stale_scan(session_id, exe_name, installed_image, owner, false)
+    stale_scan(session_id, exe_name, Some(installed_image), owner, false)
 }
 
 /// Ends what [`find_stale_by_name`] finds, each one through a single handle that re-checks session, owner and image
@@ -289,7 +292,19 @@ pub fn find_stale_by_name(session_id: u32, exe_name: &str, installed_image: &Pat
 /// DESTRUCTIVE: guarded.
 pub fn end_stale_by_name(session_id: u32, exe_name: &str, installed_image: &Path, owner: &Sid) -> Result<Vec<u32>> {
     require_armed_machine()?;
-    stale_scan(session_id, exe_name, installed_image, owner, true)
+    stale_scan(session_id, exe_name, Some(installed_image), owner, true)
+}
+
+/// (Phase 6 Q-A3) Ends **every** process started as `exe_name` (the Toolhelp name, case-insensitive) in `session_id` and owned
+/// by `owner`, the installed copy included: the Staff App's launcher before an agent-driven MSI upgrade, so no file of the
+/// old version is in use when Windows Installer replaces it (no `C:\Config.Msi` rename, no folder left behind at the final
+/// uninstall). Each one is checked and ended through a single handle, like [`end_stale_by_name`]. A process that cannot be
+/// opened or described is never touched. Returns the ids ended.
+///
+/// DESTRUCTIVE: guarded.
+pub fn end_all_by_name(session_id: u32, exe_name: &str, owner: &Sid) -> Result<Vec<u32>> {
+    require_armed_machine()?;
+    stale_scan(session_id, exe_name, None, owner, true)
 }
 
 /// An environment block, destroyed on drop.
@@ -502,6 +517,7 @@ mod tests {
             end_stale_by_name(1, &name, Path::new(r"C:\rulebox-test-no-such\x.exe"), &user),
             Err(Win32Error::Guard(_))
         ));
+        assert!(matches!(end_all_by_name(1, &name, &user), Err(Win32Error::Guard(_))));
         assert!(matches!(terminate(std::process::id(), &exe, &user), Err(Win32Error::Guard(_))));
         assert!(matches!(launch_in_session(1, &user, &exe), Err(Win32Error::Guard(_))));
     }

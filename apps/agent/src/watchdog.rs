@@ -294,6 +294,33 @@ pub struct WatchdogDeps {
     /// processes that `SimPlatform` does not know.
     pub simulate: bool,
     pub gate: GateFn,
+    /// (Phase 6 Q-A3) While held, the watchdog neither starts the launcher nor ends the Staff App.
+    pub hold: ShellHold,
+}
+
+/// (Phase 6 Q-A3) "Leave the Staff App alone until this time": set by the self-update task right after it closed the launcher
+/// and the Staff App for an MSI upgrade, so the watchdog does not start them again while Windows Installer replaces their
+/// files (they would be in use again, which is what closing them avoided). It is a deadline, not a switch: if the MSI never
+/// stops this service (it was refused early) the watchdog looks again when the deadline passes. A new agent process after
+/// the upgrade starts with no hold. Cheap to clone; every clone is the same hold.
+#[derive(Clone, Default)]
+pub struct ShellHold(Arc<std::sync::atomic::AtomicU64>);
+
+impl ShellHold {
+    /// Holds until `unix_ms` (the wall clock, like `state::unix_ms`).
+    pub fn hold_until(&self, unix_ms: u64) {
+        self.0.store(unix_ms, std::sync::atomic::Ordering::SeqCst);
+    }
+
+    /// Lets the watchdog act again at once.
+    pub fn release(&self) {
+        self.0.store(0, std::sync::atomic::Ordering::SeqCst);
+    }
+
+    /// Whether `now_ms` is before the deadline.
+    pub fn active(&self, now_ms: u64) -> bool {
+        now_ms < self.0.load(std::sync::atomic::Ordering::SeqCst)
+    }
 }
 
 /// Wakes the task on a session or power event.
@@ -504,6 +531,12 @@ impl WatchdogTask {
     /// One look at the machine, one decision, its action, and the health in the
     /// snapshot.
     pub async fn evaluate(&mut self) {
+        // (Phase 6 Q-A3) The self-update closed the Staff App for an MSI upgrade: do not start it again until the
+        // deadline (or until the upgraded agent starts and has no hold).
+        if self.deps.hold.active(unix_ms()) {
+            tracing::debug!("the watchdog is held off while Rulebox updates itself");
+            return;
+        }
         let platform = Arc::clone(&self.deps.platform);
         let install = self.deps.install.clone();
         let gate = (self.deps.gate)();

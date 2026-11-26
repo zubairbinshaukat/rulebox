@@ -403,6 +403,29 @@ fn a_failed_queue_keeps_its_port_and_the_next_apply_finishes_the_job() {
 }
 
 #[test]
+fn a_driver_that_is_only_staged_in_the_store_is_registered_with_the_spooler_first() {
+    // Spike X-1: `pnputil /add-driver` only stages a package; the spooler gets the printer driver from it on demand.
+    let mut rig = Rig::new();
+    let model = "BIXOLON SRP-350III";
+    let mut counter = raw("p3", "Counter");
+    counter.driver = model.into();
+    // Nothing staged: still `driver_missing`, and nothing was fetched or created.
+    assert_eq!(states(&rig.apply(vec![counter.clone()])), [("p3", "failed", Some("driver_missing"))]);
+    assert!(rig.queues().is_empty() && !rig.platform.with_world(|w| w.printer_drivers.iter().any(|d| d == model)));
+    // Staged by a package of the store that lists the model: registered, then the queue is made.
+    rig.platform.with_world(|w| {
+        w.driver_store.insert("oem4.inf".to_string());
+        w.driver_models.insert("oem4.inf".to_string(), vec![model.to_string()]);
+    });
+    assert_eq!(states(&rig.apply(vec![counter.clone()])), [("p3", "applied", None)]);
+    assert_eq!(rig.queues(), [("Counter (Rulebox)".to_string(), "Rulebox_p3".to_string(), model.to_string(), "rulebox:p3".to_string())]);
+    assert_eq!(rig.platform.with_world(|w| w.driver_events.clone()), [format!("spooler-install:{model}")]);
+    // Already registered: not registered again.
+    assert_eq!(states(&rig.apply(vec![counter])), [("p3", "applied", None)]);
+    assert_eq!(rig.platform.with_world(|w| w.driver_events.len()), 1);
+}
+
+#[test]
 fn a_queue_deleted_behind_our_back_is_created_again() {
     let mut rig = Rig::new();
     rig.apply(vec![ipp("p1", "Front desk")]);
@@ -549,6 +572,8 @@ fn the_apply_never_installs_a_driver_and_only_ever_calls_the_printer_seam_it_nee
             "{op:?}"
         );
     }
-    // The drivers of the store are what they were.
+    // The drivers of the store are what they were: every driver asked for was there, so none was registered
+    // (`printer_driver_install` is only asked for a driver the spooler does not hold; see
+    // `a_driver_that_is_only_staged_in_the_store_is_registered_with_the_spooler_first`).
     assert_eq!(rig.platform.with_world(|w| w.printer_drivers.len()), 5);
 }

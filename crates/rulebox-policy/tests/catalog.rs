@@ -400,6 +400,7 @@ fn driver_source_is_omitted_when_absent() {
         success_exit_codes: Vec::new(),
         revision: 1,
         source,
+        signer_thumbprint: None,
     };
     assert!(!serde_json::to_string(&spec(None)).unwrap().contains("source"));
     let text = serde_json::to_string(&spec(Some(DriverSource::InfZip))).unwrap();

@@ -34,6 +34,7 @@ pub mod posture;
 pub mod printing;
 pub mod procexit;
 pub mod process;
+pub mod publisher;
 pub mod registry;
 pub mod security;
 pub mod service;

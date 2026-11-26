@@ -536,7 +536,10 @@ fn update_ready(ctx: &ApplyCtx<'_>, ready: &BTreeSet<String>, tally: &mut Tally)
         return;
     }
     let ready = ready.clone();
-    if let Err(error) = ctx.journal.shared.update(move |state| state.browser_ready = ready) {
+    let saved = ctx.journal.shared.update(move |state| state.browser_ready = ready);
+    // The change holds in memory even when saving failed: the Staff App must hear of it (`apps.changed`).
+    ctx.journal.shared.note_browser_ready_changed();
+    if let Err(error) = saved {
         tracing::error!("cannot save the browser readiness: {error}");
         tally.record(Err("state_not_saved"));
     }

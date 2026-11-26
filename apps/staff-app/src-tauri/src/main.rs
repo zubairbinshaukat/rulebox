@@ -36,6 +36,9 @@ mod webnav_tests;
 mod phase5_step12_tests;
 
 #[cfg(all(test, debug_assertions))]
+mod phase6_step18_tests;
+
+#[cfg(all(test, debug_assertions))]
 mod phase6_step19_tests;
 
 // Step 3 tests live here: the lib unit-test / integration-test harnesses exit
@@ -104,6 +107,7 @@ mod step3_tests {
                             url: "https://portal.company.com/orders".into(),
                             allowed_domains: vec!["portal.company.com".into()],
                             permissions: WebPermissions::default(),
+                            browser: Default::default(),
                         }),
                         icon_key: None,
                         icon_url: None,
@@ -537,6 +541,7 @@ mod step7_tests {
                 url: "https://x.test".into(),
                 allowed_domains: vec![],
                 permissions: WebPermissions::default(),
+                browser: Default::default(),
             }),
             ..desktop_app("w", "")
         };
@@ -805,6 +810,7 @@ mod step8_tests {
                     url: "https://x.test".into(),
                     allowed_domains: vec![],
                     permissions: WebPermissions::default(),
+                    browser: Default::default(),
                 }),
             ),
         ];

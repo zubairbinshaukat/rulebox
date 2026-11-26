@@ -248,6 +248,7 @@ fn entry_label(entry: &JournalEntry) -> String {
         JournalTarget::PrinterPort { name } => format!("remove the printer port {name}"),
         JournalTarget::PrinterSecurity { .. } => "restore the permissions of a print queue".to_string(),
         JournalTarget::DriverPackage { published, .. } => format!("remove the driver package {published}"),
+        JournalTarget::TrustedPublisher { thumbprint } => format!("remove the trusted publisher certificate {thumbprint}"),
         JournalTarget::BcdElement { element, .. } => format!("restore the boot setting {element}"),
         JournalTarget::AccountLockoutPolicy => "restore the account lockout policy".to_string(),
         JournalTarget::SafeBootEntry { mode } => format!("remove the Safe Mode registration ({mode})"),

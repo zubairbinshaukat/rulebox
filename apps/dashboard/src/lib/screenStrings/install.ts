@@ -29,10 +29,11 @@ export const installStrings = {
     version_too_low: "The program installed is older than the version this app is set to.",
     waiting_for_close: "The update is ready and waits for the program to be closed.",
     needs_interaction: "The installer seems to wait for someone to answer. Check its silent switches or answer file.",
-    installed_per_user: "The installer put the program in a user profile, not for everyone. Use a per-machine installer.",
+    installed_per_user: "The installer put the program in a user profile, not for everyone. Use a per-machine installer, or add /D={InstallDir} (NSIS, last) or /DIR={InstallDir} (Inno Setup) to the silent install arguments; if that is already there, this installer ignores it.",
     answer_file_failed: "The answer file couldn't be downloaded or didn't match its SHA-256, so the installer wasn't run.",
     protected_print_on: "Windows protected print mode is on, so this printer driver wasn't installed. Windows would remove printers that use a third-party driver.",
     seagull_driver_present: "Installed, but another Seagull-based printer driver is already on this PC. Toshiba TEC advises against mixing them: remove the old driver if printing misbehaves.",
+    driver_untrusted_publisher: "The driver is signed by a publisher this PC doesn't trust, so Windows refused it. Set the signing certificate's thumbprint on the driver to trust that one certificate for it.",
   } as Record<string, string>,
   detailFallback: "The install failed.",
 } as const;

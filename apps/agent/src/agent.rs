@@ -24,7 +24,8 @@ use crate::audit::{AuditHandle, AuditQueue, AuditSink, ConvexAuditSink};
 use crate::backend::task::{apply_to_snapshot, note_clock, os_jitter, BackendRunner, TaskContext};
 use crate::backend::{BackendFactory, BackendLink};
 use crate::catalog::AppResolver;
-use crate::cleanup::{self, CleanupDeps, CleanupGate, CleanupTimings, StaffRef};
+use crate::browser_profiles::ProfileLedger;
+use crate::cleanup::{self, BrowserProfiles, CleanupDeps, CleanupGate, CleanupTimings, StaffRef};
 use crate::directory::{ConvexDirectory, EmployeeDirectory};
 use crate::report::{run_report_task, ReportQueue};
 use crate::roster::RosterState;
@@ -436,6 +437,9 @@ pub async fn run(
     let install_policy_rx = policy_rx.clone();
     // (Phase 6 Step 20) Rulebox's own update reads `ruleboxRelease`.
     let selfupdate_policy_rx = policy_rx.clone();
+    // (Phase 6 Q-A3) The self-update closes the Staff App before the MSI starts; the watchdog must not start it again
+    // while the MSI replaces its files.
+    let shell_hold = watchdog::ShellHold::default();
     // (Step 16) The session cleanup reads the catalogue when a round starts.
     let cleanup_policy_rx = policy_rx.clone();
     // (Phase 5 Step 12) The notice hub (broadcasts, acknowledgements) and the 1.3 requests.
@@ -480,7 +484,7 @@ pub async fn run(
     // applied whenever a document or a roster arrives.
     let (session_events_tx, session_events_rx) = mpsc::unbounded_channel();
     session.set_events(session_events_tx);
-    let session_sync = (policy_rx.clone(), roster_rx);
+    let session_sync = (policy_rx.clone(), roster_rx.clone());
     let admin_exit = AdminExit::new(AdminExitDeps {
         policy_rx,
         lockouts: Arc::clone(&lockouts),
@@ -648,8 +652,21 @@ pub async fn run(
         // (Phase 6 Step 20, plan 4.17) Rulebox's own update through the MSI: only with no employee signed in, never
         // while the install engine runs an installer. Its own task, its own wake sources.
         let busy_book = Arc::clone(&installs);
+        let upgrade_shared = Arc::clone(&shared);
+        let upgrade_simulated = deps.simulate;
         tasks.spawn(crate::selfupdate::run_self_update_task(
             crate::selfupdate::SelfUpdateDeps {
+                shell: crate::selfupdate::UpgradeShell {
+                    hold: shell_hold.clone(),
+                    // A simulated agent has no real Staff session (the watchdog never ends processes there either).
+                    staff_sid: Arc::new(move || {
+                        if upgrade_simulated {
+                            None
+                        } else {
+                            upgrade_shared.read(|state| state.staff.as_ref().map(|staff| staff.sid.clone()))
+                        }
+                    }),
+                },
                 platform: Arc::clone(&deps.platform),
                 downloader: Arc::clone(&deps.downloader),
                 paths: deps.paths.clone(),
@@ -674,6 +691,9 @@ pub async fn run(
     // sign-in after a restart waits for the rounds the marker asks for.
     if !deps.sim.demo {
         let gate = CleanupGate::open(deps.paths.cleanup_owed());
+        // (Phase 6 Step 18) When each employee last signed in, for the browser profiles of web apps (plan 4.9.6).
+        let profile_ledger = Arc::new(ProfileLedger::open(deps.paths.browser_profiles()));
+        gate.set_profile_ledger(Arc::clone(&profile_ledger));
         let (cleanup_tx, cleanup_rx) = mpsc::unbounded_channel();
         gate.set_requests(cleanup_tx);
         session.set_cleanup(Arc::clone(&gate));
@@ -699,6 +719,7 @@ pub async fn run(
                 },
                 gate,
                 timings: CleanupTimings::default(),
+                browser_profiles: Some(BrowserProfiles::new(profile_ledger, roster_rx.clone())),
             },
             cleanup_rx,
             shutdown.clone(),
@@ -749,6 +770,9 @@ pub async fn run(
     }
     tasks.spawn(run_notices(notice_hub, notice_policy_rx, shutdown.clone()));
     tasks.spawn(sync_session(session_sync.0, session_sync.1, Arc::clone(&session), shutdown.clone()));
+    // (Phase 6 Step 18) A browser web app is ready once its browser's policies are applied: tell the Staff App (`apps.changed`)
+    // when that changes, so a tile does not keep opening the built-in window until the next sign-in.
+    tasks.spawn(resync_on_browser_ready(shared.browser_ready_changes(), Arc::clone(&session), shutdown.clone()));
     tasks.spawn(clear_session_when_not_enrolled(
         snapshot_rx.clone(),
         Arc::clone(&session),
@@ -770,6 +794,7 @@ pub async fn run(
             kill_hung_shell: deps.config.kill_hung_shell,
             simulate: deps.simulate,
             gate,
+            hold: shell_hold.clone(),
         },
         signals_rx,
         watchdog_events,
@@ -861,6 +886,22 @@ async fn sync_session(
                 }
                 let roster = roster_rx.borrow_and_update().clone();
                 session.on_roster(&roster);
+            }
+        }
+    }
+}
+
+/// (Phase 6 Step 18) The browsers whose policies are applied changed: recompute the employee's apps (`SessionManager::resync` says
+/// `apps.changed` when the list differs, which it does when a web app's `browserReady` flipped).
+async fn resync_on_browser_ready(mut changes: watch::Receiver<u64>, session: Arc<SessionManager>, shutdown: CancellationToken) {
+    loop {
+        tokio::select! {
+            () = shutdown.cancelled() => return,
+            changed = changes.changed() => {
+                if changed.is_err() {
+                    return;
+                }
+                session.resync();
             }
         }
     }

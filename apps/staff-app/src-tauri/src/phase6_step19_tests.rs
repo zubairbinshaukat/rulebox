@@ -33,6 +33,7 @@ fn web_app(id: &str, name: &str) -> AppEntry {
             url: "https://example.com/".into(),
             allowed_domains: vec![],
             permissions: WebPermissions::default(),
+            browser: Default::default(),
         }),
         icon_key: None,
         icon_url: None,

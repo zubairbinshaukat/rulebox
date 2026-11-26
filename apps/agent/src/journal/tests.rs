@@ -813,6 +813,127 @@ fn a_package_that_changed_or_vanished_is_not_deleted_by_a_restore() {
     }
 }
 
+// ---------------------------------------------------------------- Phase 6 Step 15: the removal order (spike X-1)
+
+const MODEL_A: &str = "BIXOLON SRP-350III";
+const MODEL_B: &str = "BIXOLON SRP-330II";
+
+/// A rig with the package `oem4.inf` in the fake store (it lists two models), journalled for `drv1`, and the spooler holding
+/// the first model as a printer driver.
+fn rig_with_a_registered_driver() -> Rig {
+    let rig = Rig::new();
+    rig.platform.with_world(|w| {
+        w.driver_store.insert("oem4.inf".to_string());
+        w.driver_models.insert("oem4.inf".to_string(), vec![MODEL_A.to_string(), MODEL_B.to_string()]);
+        w.printer_drivers.push(MODEL_A.to_string());
+    });
+    rig.platform.add_program(r"C:\Windows\INF\oem4.inf", Default::default(), Some("aa"));
+    record_driver_package(&rig.ctx(), "drv1", "oem4.inf", "aa", 1).unwrap();
+    rig
+}
+
+fn add_queue(rig: &Rig, name: &str, driver: &str) {
+    rig.platform.with_world(|w| {
+        w.printers.push(crate::platform::sim::SimPrinter {
+            info: crate::platform::PrinterInfo {
+                name: name.into(),
+                port: "FILE:".into(),
+                driver: driver.into(),
+                attributes: 64,
+                comment: String::new(),
+            },
+            sddl: None,
+        });
+    });
+}
+
+fn events(rig: &Rig) -> Vec<String> {
+    rig.platform.with_world(|w| w.driver_events.clone())
+}
+
+#[test]
+fn a_driver_package_is_removed_after_its_queues_and_its_printer_drivers() {
+    let rig = rig_with_a_registered_driver();
+    add_queue(&rig, "Counter (Rulebox)", MODEL_A);
+    add_queue(&rig, "Other printer", "Microsoft IPP Class Driver");
+    let report = restore_all(&rig.ctx());
+    assert!(report.is_complete(), "{:?}", report.failed);
+    // The queue first, then the printer driver of the package, then the package (never the other way round: pnputil
+    // refuses a package the spooler still holds a driver of).
+    assert_eq!(events(&rig), ["queue:Counter (Rulebox)", format!("spooler-delete:{MODEL_A}").as_str(), "package:oem4.inf"]);
+    rig.platform.with_world(|w| {
+        assert!(w.driver_store.is_empty());
+        assert!(!w.printer_drivers.iter().any(|d| d == MODEL_A));
+        assert!(w.printers.iter().any(|p| p.info.name == "Other printer"), "a queue of another driver is left alone");
+        assert!(w.printer_drivers.iter().any(|d| d == "Microsoft IPP Class Driver"), "inbox drivers stay");
+    });
+}
+
+#[test]
+fn a_package_the_spooler_does_not_hold_a_driver_of_is_removed_with_nothing_else_touched() {
+    let rig = rig_with_a_registered_driver();
+    rig.platform.with_world(|w| w.printer_drivers.retain(|d| d != MODEL_A));
+    let report = restore_all(&rig.ctx());
+    assert!(report.is_complete());
+    assert_eq!(events(&rig), ["package:oem4.inf"]);
+}
+
+#[test]
+fn a_queue_of_somebody_else_that_uses_the_driver_keeps_the_driver_and_the_package() {
+    let rig = rig_with_a_registered_driver();
+    // Not a ` (Rulebox)` queue: the agent never deletes it, so Windows keeps the driver (in use) and so must the package.
+    add_queue(&rig, "Back office", MODEL_A);
+    let report = restore_all(&rig.ctx());
+    assert_eq!(report.failed.len(), 1, "a failed removal is reported, never forgotten");
+    assert_eq!(events(&rig), Vec::<String>::new(), "pnputil is not even asked");
+    rig.platform.with_world(|w| {
+        assert!(w.driver_store.contains("oem4.inf") && w.printer_drivers.iter().any(|d| d == MODEL_A));
+        assert!(w.printers.iter().any(|p| p.info.name == "Back office"));
+    });
+    assert_eq!(rig.shared.read(|s| s.journal.len()), 1, "the entry stays for the next try");
+    // Once that queue is gone the next try goes through.
+    rig.platform.with_world(|w| w.printers.clear());
+    assert!(restore_all(&rig.ctx()).is_complete());
+    assert_eq!(events(&rig), [format!("spooler-delete:{MODEL_A}").as_str(), "package:oem4.inf"]);
+}
+
+#[test]
+fn the_sim_refuses_a_package_while_the_spooler_holds_a_driver_of_it_like_windows_does() {
+    // The behaviour the removal order exists for (spike X-1): without the release, pnputil fails.
+    let rig = rig_with_a_registered_driver();
+    assert!(rig.platform.driver_package_delete("oem4.inf").is_err());
+    assert!(rig.platform.with_world(|w| w.driver_store.contains("oem4.inf")));
+    rig.platform.printer_driver_delete(MODEL_A).unwrap();
+    rig.platform.driver_package_delete("oem4.inf").unwrap();
+}
+
+#[test]
+fn a_publisher_certificate_rulebox_trusted_is_removed_again_by_a_restore() {
+    let rig = Rig::new();
+    let cert = crate::platform::sim::test_cert("CN=Seagull Software, LLC", 0xab);
+    let ctx = rig.ctx();
+    record_driver_trust(&ctx, &cert.sha1, 3).unwrap();
+    record_driver_trust(&ctx, &cert.sha1.to_ascii_uppercase(), 4).unwrap();
+    rig.platform.trusted_publisher_add(&cert.der).unwrap();
+    let entries = rig.shared.read(|s| s.journal.clone());
+    assert_eq!(entries.len(), 1, "one entry per certificate");
+    assert_eq!(entries[0].id, driver_trust_id(&cert.sha1));
+    assert!(has_entry(&ctx, &driver_trust_id(&cert.sha1)) && !has_entry(&ctx, &driver_trust_id(&"cd".repeat(20))));
+    assert_eq!(serde_json::to_value(&entries[0]).unwrap()["target"], json!({ "trustedPublisher": { "thumbprint": cert.sha1 } }));
+    // An applied entry is left alone at start-up; a restore takes the certificate out.
+    let startup = startup_recover(&ctx);
+    assert!(startup.dropped.is_empty() && startup.restore.restored.is_empty());
+    assert!(rig.platform.trusted_publisher_has(&cert.sha1).unwrap());
+    assert!(restore_all(&ctx).is_complete());
+    assert!(!rig.platform.trusted_publisher_has(&cert.sha1).unwrap());
+    assert!(rig.shared.read(|s| s.journal.is_empty()));
+    // Anything but a SHA-1 thumbprint is refused before anything is written.
+    for bad in [String::new(), "ab".to_string(), "g".repeat(40), "ab".repeat(32)] {
+        assert!(record_driver_trust(&ctx, &bad, 1).is_err(), "{bad}");
+    }
+    assert!(rig.shared.read(|s| s.journal.is_empty()));
+}
+
 #[test]
 fn a_pending_driver_entry_is_never_settled_by_a_guess() {
     let rig = Rig::new();

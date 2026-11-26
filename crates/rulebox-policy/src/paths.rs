@@ -100,10 +100,15 @@ pub enum PathProblem {
     /// (Step 4) A `*` in the path of a portable app (it lives in its own folder).
     #[error("* is not allowed for a portable app")]
     WildcardPortable,
-    /// (Step 4) A `{token}` in the silent arguments that is not `{AnswerFile}` or
-    /// `{LogFile}`.
+    /// (Step 4) A `{token}` in the silent arguments that is not `{AnswerFile}`, `{LogFile}`
+    /// or `{InstallDir}`.
     #[error("unknown {{token}} in the arguments")]
     UnknownToken,
+    /// (Per-user installs, Tier A) `{InstallDir}` outside its two shapes (`/D={InstallDir}` as the last
+    /// argument, or `/DIR={InstallDir}`), or in an app whose program is not a plain path under
+    /// `{ProgramFiles}` / `{ProgramFilesX86}` (no `*`).
+    #[error("{{InstallDir}} is only allowed as /D={{InstallDir}} (last) or /DIR={{InstallDir}}, for a program under Program Files")]
+    InstallDirToken,
 }
 
 /// (Phase 4 Step 16 review) Folders below `{LocalAppData}` / `{RoamingAppData}`
@@ -347,13 +352,23 @@ pub fn check_args(list: &[String]) -> Result<(), PathProblem> {
 }
 
 /// The tokens an installer's `silentArgs` may hold (plan 4.6 "Answer file"). The agent
-/// replaces them with paths in its own data folder, which has no spaces.
-pub const SILENT_ARG_TOKENS: [&str; 2] = ["{AnswerFile}", "{LogFile}"];
+/// replaces `{AnswerFile}` and `{LogFile}` with paths in its own data folder, which has no
+/// spaces. `{InstallDir}` (per-user installs, Tier A) becomes the folder of the app's
+/// program: see [`check_install_dir_args`] for where it may stand.
+pub const SILENT_ARG_TOKENS: [&str; 3] = ["{AnswerFile}", "{LogFile}", "{InstallDir}"];
+
+/// The one token of [`SILENT_ARG_TOKENS`] that is about where the program goes.
+pub const INSTALL_DIR_TOKEN: &str = SILENT_ARG_TOKENS[2];
+/// NSIS: `/D=<folder>`, must be the last argument and is read raw (no quotes) to the end of the command line.
+pub const NSIS_DIR_PREFIX: &str = "/D=";
+/// Inno Setup: `/DIR=<folder>`, an ordinary argument.
+pub const INNO_DIR_PREFIX: &str = "/DIR=";
 
 /// (Phase 6 Step 4) `silentArgs`: the rules of [`check_args`], and every `{...}` in an
-/// argument must be exactly `{AnswerFile}` or `{LogFile}` (a lone `{` or `}` is refused
+/// argument must be exactly one of [`SILENT_ARG_TOKENS`] (a lone `{` or `}` is refused
 /// too). `check_args` itself is unchanged: `args` and `fileArgTemplate` keep their own
-/// rules (`{file}` is a token of `fileArgTemplate` only).
+/// rules (`{file}` is a token of `fileArgTemplate` only). Where `{InstallDir}` may stand is
+/// [`check_install_dir_args`].
 pub fn check_silent_args(list: &[String]) -> Result<(), PathProblem> {
     check_args(list)?;
     for arg in list {
@@ -367,6 +382,38 @@ pub fn check_silent_args(list: &[String]) -> Result<(), PathProblem> {
         }
     }
     Ok(())
+}
+
+/// (Per-user installs, Tier A, plan 4.2) Where `{InstallDir}` may stand. It carries the folder of the app's
+/// program into the installer's own install-folder switch, so a per-user-only installer writes into an
+/// admin-only Program Files folder instead of SYSTEM's profile. Allowed only when:
+/// - `exe` (the app's `desktop.exe` template) starts with `{ProgramFiles}\` or `{ProgramFilesX86}\` and has no `*`
+///   (a folder the agent can name before the installer ran), and
+/// - the argument holding it is exactly `/D={InstallDir}` **and the last argument** (NSIS), or exactly
+///   `/DIR={InstallDir}` (Inno Setup), and the token appears once in the list.
+///
+/// Anything else with the token is refused, so no second argument can ride along. A list without the token is
+/// always fine here (and is judged by [`check_silent_args`] as before).
+pub fn check_install_dir_args(list: &[String], exe: &str) -> Result<(), PathProblem> {
+    if !list.iter().any(|arg| arg.contains(INSTALL_DIR_TOKEN)) {
+        return Ok(());
+    }
+    let program_files = exe.starts_with(PROGRAM_FILES) || exe.starts_with(PROGRAM_FILES_X86);
+    if !program_files || exe.contains('*') {
+        return Err(PathProblem::InstallDirToken);
+    }
+    let with_token = list.iter().filter(|arg| arg.contains(INSTALL_DIR_TOKEN)).count();
+    let nsis = format!("{NSIS_DIR_PREFIX}{INSTALL_DIR_TOKEN}");
+    let inno = format!("{INNO_DIR_PREFIX}{INSTALL_DIR_TOKEN}");
+    let shaped = with_token == 1
+        && list.iter().enumerate().all(|(at, arg)| {
+            !arg.contains(INSTALL_DIR_TOKEN) || (*arg == nsis && at + 1 == list.len()) || *arg == inno
+        });
+    if shaped {
+        Ok(())
+    } else {
+        Err(PathProblem::InstallDirToken)
+    }
 }
 
 /// A path template with a `*` (see [`expand_exe`]) split at the folder that holds it:
@@ -620,6 +667,45 @@ mod tests {
         // `check_args` and `check_file_args` are unchanged.
         assert_eq!(check_args(&s(&["{x}"])), Ok(()));
         assert_eq!(check_file_args(&s(&["{file}"])), Ok(()));
+        // `{InstallDir}` is a known token for `check_silent_args`; where it may stand is `check_install_dir_args`.
+        assert_eq!(check_silent_args(&s(&["/S", "/D={InstallDir}"])), Ok(()));
+        assert_eq!(check_silent_args(&s(&["{installdir}"])), Err(PathProblem::UnknownToken));
+    }
+
+    #[test]
+    fn install_dir_has_two_shapes_and_needs_a_program_files_program() {
+        let s = |v: &[&str]| v.iter().map(|a| a.to_string()).collect::<Vec<_>>();
+        let exe = r"{ProgramFiles}\Zahras POS Dev\zahras-pos-desktop.exe";
+        // No token: nothing to check, whatever the program.
+        assert_eq!(check_install_dir_args(&s(&["/S"]), r"{SystemRoot}\System32\x.exe"), Ok(()));
+        // NSIS: `/D=` as the last argument. Inno: `/DIR=` anywhere.
+        assert_eq!(check_install_dir_args(&s(&["/S", "/D={InstallDir}"]), exe), Ok(()));
+        assert_eq!(check_install_dir_args(&s(&["/VERYSILENT", "/DIR={InstallDir}", "/NORESTART"]), exe), Ok(()));
+        assert_eq!(check_install_dir_args(&s(&["/S", "/D={InstallDir}"]), r"{ProgramFilesX86}\Vendor\a.exe"), Ok(()));
+        // `/D=` must be last, whole, and not repeated; nothing else carries the token.
+        for bad in [
+            &["/D={InstallDir}", "/S"][..],
+            &["/S", "/D={InstallDir}x"],
+            &["/S", "/d={InstallDir}"],
+            &["/S", "{InstallDir}"],
+            &["/S", "/D={InstallDir}{InstallDir}"],
+            &["/S", "/DIR={InstallDir}\\x"],
+            &["/S", "/D={InstallDir} /S"],
+            &["/DIR={InstallDir}", "/D={InstallDir}"],
+            &["/DIR={InstallDir}", "/DIR={InstallDir}"],
+            &["/S", "/LOG={InstallDir}"],
+        ] {
+            assert_eq!(check_install_dir_args(&s(bad), exe), Err(PathProblem::InstallDirToken), "{bad:?}");
+        }
+        // The program must be a plain path under Program Files: no other root, no versioned `*` folder, no portable app.
+        for bad_exe in [
+            r"{SystemRoot}\System32\x.exe",
+            r"{RuleboxApps}\k17abc\app.exe",
+            r"{ProgramFiles}\Vendor\app-*\app.exe",
+            r"C:\Users\x\app.exe",
+        ] {
+            assert_eq!(check_install_dir_args(&s(&["/S", "/D={InstallDir}"]), bad_exe), Err(PathProblem::InstallDirToken), "{bad_exe}");
+        }
     }
 
     #[test]

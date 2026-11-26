@@ -168,6 +168,20 @@ pub struct DriverSpec {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub source: Option<DriverSource>,
+    /// (Phase 6 Step 15, spike S-11) `inf` only. The one signing certificate this package may be trusted for: its SHA-1
+    /// (40 hex) or SHA-256 (64 hex) thumbprint, as Windows shows it. A driver whose catalog is signed by a publisher that is
+    /// not WHQL (Seagull Software for the Toshiba TEC TPCL driver) is only added by Windows once that publisher is in
+    /// `LocalMachine\TrustedPublisher`. With this set, the agent first checks that **every** catalog of the package is
+    /// validly signed by exactly this certificate and only then puts it into that store, so the trust is per driver and
+    /// per certificate, never "every driver of a publisher by name". Omitted when absent.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub signer_thumbprint: Option<String>,
+}
+
+/// Whether `text` is a certificate thumbprint: 40 (SHA-1) or 64 (SHA-256) hexadecimal digits, any case.
+pub fn is_thumbprint(text: &str) -> bool {
+    matches!(text.len(), 40 | 64) && text.bytes().all(|b| b.is_ascii_hexdigit())
 }
 
 fn within(text: &str, max: usize) -> Result<(), LimitError> {
@@ -226,6 +240,9 @@ impl DriverSpec {
         if crate::paths::check_args(&self.silent_args).is_err() {
             return Err(LimitError::TextTooLong);
         }
+        if self.signer_thumbprint.as_deref().is_some_and(|text| !is_thumbprint(text)) {
+            return Err(LimitError::TextTooLong);
+        }
         Ok(())
     }
 }
@@ -247,6 +264,7 @@ mod tests {
             success_exit_codes: Vec::new(),
             revision: 3,
             source: None,
+            signer_thumbprint: None,
         }
     }
 
@@ -274,6 +292,23 @@ mod tests {
         assert_eq!(DriverSpec { silent_args: vec!["/S".into(); 17], ..driver() }.check_limits(), Err(LimitError::TextTooLong));
         assert_eq!(DriverSpec { success_exit_codes: vec![0; 9], ..driver() }.check_limits(), Err(LimitError::TextTooLong));
         assert_eq!(DriverSpec { silent_args: vec!["a\nb".into()], ..driver() }.check_limits(), Err(LimitError::TextTooLong));
+        // The pinned signing certificate: a SHA-1 or SHA-256 thumbprint, nothing else.
+        for good in ["59A339DC".repeat(5), "ab".repeat(32)] {
+            assert_eq!(DriverSpec { signer_thumbprint: Some(good), ..driver() }.check_limits(), Ok(()));
+        }
+        let spaced = "59 A3 39 DC 59 A3 39 DC 59 A3 39 DC 59 A3 39 DC 59 A3 39 DC".to_string();
+        for bad in [String::new(), "59A339DC".to_string(), "g".repeat(40), "a".repeat(41), spaced] {
+            assert_eq!(DriverSpec { signer_thumbprint: Some(bad.clone()), ..driver() }.check_limits(), Err(LimitError::TextTooLong), "{bad:?}");
+        }
+    }
+
+    #[test]
+    fn the_signer_thumbprint_is_omitted_when_absent_and_comes_last() {
+        assert!(!serde_json::to_string(&driver()).unwrap().contains("signerThumbprint"));
+        let pinned = DriverSpec { signer_thumbprint: Some("ab".repeat(20)), source: Some(DriverSource::InfZip), ..driver() };
+        let text = serde_json::to_string(&pinned).unwrap();
+        assert!(text.ends_with(&format!(r#""source":"inf_zip","signerThumbprint":"{}"}}"#, "ab".repeat(20))), "{text}");
+        assert_eq!(serde_json::from_str::<DriverSpec>(&text).unwrap(), pinned);
     }
 
     fn printer() -> PrinterSpec {

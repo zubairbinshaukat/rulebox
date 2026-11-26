@@ -20,7 +20,7 @@ pub use rulebox_win32::etw::{ProcessSink, ProcessStart, TraceHandle, TraceStats}
 pub use rulebox_win32::eventlog::EventRecord;
 // (Phase 6 Step 8) The kind of an entry written to the Application event log.
 pub use rulebox_win32::eventwrite::Kind as EventKind;
-pub use rulebox_win32::fileid::{FileIdentity, FileStamp};
+pub use rulebox_win32::fileid::{FileIdentity, FileStamp, SignerCert};
 pub use rulebox_win32::process::ProcessInfo;
 pub use rulebox_win32::posture::SecurityPosture;
 pub use rulebox_win32::printing::{PortProtocol, PortSpec, PrinterInfo, PrinterSpec};
@@ -78,6 +78,11 @@ pub const MUTATING_METHODS: &[&str] = &[
     "printer_port_delete",
     // Phase 5 Step 14b.
     "driver_package_delete",
+    // Phase 6 Step 15 (spike X-1 and S-11): the spooler's printer drivers and the TrustedPublisher store.
+    "printer_driver_install",
+    "printer_driver_delete",
+    "trusted_publisher_add",
+    "trusted_publisher_remove",
     "printer_share_connect",
     "printer_share_disconnect",
     "bcd_set",
@@ -96,6 +101,7 @@ pub const MUTATING_METHODS: &[&str] = &[
     "start_self_upgrade",
     // Phase 6 Step 22 (run A2).
     "end_stale_launchers",
+    "end_staff_shell",
 ];
 
 /// (Phase 5 Step 3, plan 4.5 rule 2) Whether `path` may get a new ACL: it is the install
@@ -411,6 +417,17 @@ pub trait Platform: Send + Sync + 'static {
     /// (Phase 5 Step 14b) The `oem<N>.inf` packages in the driver store (`%SystemRoot%\INF`), lower case, sorted. Read-only:
     /// the install engine compares it before and after `pnputil /add-driver` to learn the name Windows gave a package.
     fn driver_store_infs(&self) -> Result<Vec<String>, PlatformError>;
+    /// (Phase 6 Step 15, spike X-1) The printer driver (model) names that the INF of a package of the driver store
+    /// lists, read from `%SystemRoot%\INF\<published>` (an `oem<N>.inf` name; anything else is `Refused`). Empty: no such
+    /// package or it lists none. These are the names the spooler may hold printer drivers under, which must go before
+    /// the package can. Read-only.
+    fn driver_package_models(&self, published: &str) -> Result<Vec<String>, PlatformError>;
+    /// (Phase 6 Step 15, spike S-11) The certificate of the embedded signature of a file when that signature is valid
+    /// (a `.cat` catalog included); `Ok(None)`: no such file, unsigned or not trusted. Read-only.
+    fn file_signer_cert(&self, path: &Path) -> Result<Option<SignerCert>, PlatformError>;
+    /// (Phase 6 Step 15, spike S-11) Whether `LocalMachine\TrustedPublisher` holds the certificate with this SHA-1
+    /// thumbprint (40 hex digits). Read-only.
+    fn trusted_publisher_has(&self, sha1: &str) -> Result<bool, PlatformError>;
     /// (Phase 5 Step 14b) The names of the printer ports on this machine.
     fn printer_ports(&self) -> Result<Vec<String>, PlatformError>;
     fn bcd_get(&self, object: &str, element: &str) -> Result<Option<String>, PlatformError>;
@@ -511,6 +528,20 @@ pub trait Platform: Send + Sync + 'static {
     /// the same job-object run as an installer. Only a name of the form `oem<N>.inf` is accepted (anything else is
     /// `Refused` before the guard). `NotFound`: no such package. Blocking.
     fn driver_package_delete(&self, published: &str) -> Result<(), PlatformError>;
+    /// (Phase 6 Step 15, spike X-1) Registers the printer driver `name` with the spooler from a package that is already
+    /// in the driver store (`InstallPrinterDriverFromPackage`, no INF path). `Win32` 1797: no staged package has a driver
+    /// of that name. Never fetches anything.
+    fn printer_driver_install(&self, name: &str) -> Result<(), PlatformError>;
+    /// (Phase 6 Step 15, spike X-1) Removes the printer driver `name` from the spooler. `NotFound`: not installed;
+    /// `Win32` 3001: a queue still uses it. Must come before `driver_package_delete` of its package (which fails with
+    /// `0xE000023D` while the spooler still holds a driver from it).
+    fn printer_driver_delete(&self, name: &str) -> Result<(), PlatformError>;
+    /// (Phase 6 Step 15, spike S-11) Puts a certificate (DER) into `LocalMachine\TrustedPublisher`. The caller has checked
+    /// that it is the one the signed document pinned. One that is there already is left as it is.
+    fn trusted_publisher_add(&self, der: &[u8]) -> Result<(), PlatformError>;
+    /// (Phase 6 Step 15, spike S-11) Removes the certificate with this SHA-1 thumbprint from the store again; one that is
+    /// not there is fine.
+    fn trusted_publisher_remove(&self, sha1: &str) -> Result<(), PlatformError>;
     /// (Step 14) Deletes a portable app's folder, only below `<install>\apps\`;
     /// refuses reparse points. A folder that is not there is fine. `InUse` when the
     /// program is running.
@@ -626,4 +657,12 @@ pub trait Platform: Send + Sync + 'static {
     /// are never touched. Returns the ids ended. `installed_launcher` must be named `rulebox-shell.exe` (`Refused`
     /// before the guard).
     fn end_stale_launchers(&self, session_id: u32, installed_launcher: &Path, staff_sid: &str) -> Result<Vec<u32>, PlatformError>;
+
+    // mutating, Phase 6 Q-A3: the Staff App is closed before an agent-driven MSI upgrade.
+    /// Ends the Staff account's launcher (`rulebox-shell.exe`, by its Toolhelp name, the installed copy included) and then
+    /// any Staff App (`rulebox-staff.exe`) in every session whose user is `staff_sid`, so no file of the old version is in
+    /// use when Windows Installer replaces it. Processes of other users and sessions are never touched. Returns the ids
+    /// ended. Called only by the self-update task, only while no employee is signed in, right before `start_self_upgrade`;
+    /// the watchdog is held off meanwhile (`watchdog::ShellHold`) so it does not start the launcher again.
+    fn end_staff_shell(&self, staff_sid: &str) -> Result<Vec<u32>, PlatformError>;
 }

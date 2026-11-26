@@ -2,7 +2,7 @@
 <!--
   Rulebox MSI, launch conditions and the uninstall guard (plan Phase 6, Section 4.10).
 
-  Conditions only: no script and no EXE custom action. Each condition has one message.
+  Conditions only. Each condition has one message.
   Package.wxs references WINBUILD, which pulls this fragment in.
 
   LaunchConditions runs After="CostFinalize" in both sequences (moved there for a free-space

@@ -1043,6 +1043,8 @@ fn start_session(
     // (Step 16 review) From now until a complete clean round, also across a restart.
     if let Some(gate) = inner.cleanup_gate() {
         gate.mark_owed();
+        // (Phase 6 Step 18) Their browser profile is the most recently used from now on.
+        gate.employee_signed_in(&employee.id);
     }
     let result = SignInResult {
         outcome: SignInOutcome::Ok,
@@ -2383,6 +2385,7 @@ mod tests {
                 session_active: Arc::new(move || manager.is_active()),
                 gate: Arc::clone(&gate),
                 timings: CleanupTimings::default(),
+                browser_profiles: None,
             },
             rx,
             shutdown.clone(),

@@ -139,7 +139,7 @@ export function wingetVersionProblem(version: string): boolean {
 }
 
 /** Normalized install spec for `kind`; `fail`s with `invalid_argument` and the field name. */
-export function normalizeInstall(i: InstallSpec, expectedKinds: readonly InstallSpec["kind"][]): InstallSpec {
+export function normalizeInstall(i: InstallSpec, expectedKinds: readonly InstallSpec["kind"][], exe = ""): InstallSpec {
   if (!expectedKinds.includes(i.kind)) fail("invalid_argument", { field: "install.kind" });
   if (httpsUrlProblem(i.url)) fail("invalid_argument", { field: "install.url" });
   if (!SHA256.test(i.sha256)) fail("invalid_argument", { field: "install.sha256" });
@@ -150,6 +150,7 @@ export function normalizeInstall(i: InstallSpec, expectedKinds: readonly Install
   const silentArgs = i.kind === "exe" ? i.silentArgs.map((a) => a.trim()).filter((a) => a !== "") : [];
   if (i.kind === "exe" && silentArgs.length === 0) fail("invalid_argument", { field: "install.silentArgs" });
   if (argsProblem(silentArgs) !== null) fail("invalid_argument", { field: "install.silentArgs" });
+  if (installDirProblem(silentArgs, exe)) fail("invalid_argument", { field: "install.silentArgs", detail: "install_dir_token" });
   let productCode: string | undefined;
   if (i.kind === "msi" && i.productCode !== undefined && i.productCode.trim() !== "") {
     if (!PRODUCT_CODE.test(i.productCode.trim())) fail("invalid_argument", { field: "install.productCode" });
@@ -180,23 +181,37 @@ export function normalizeInstall(i: InstallSpec, expectedKinds: readonly Install
  * The refusals of the installer details, as the `detail` of an `invalid_argument` (`field` names where the admin fixes it).
  * The dashboard maps each to one sentence (`installRefusalStrings`).
  */
-export const INSTALL_REFUSALS = ["answer_file_unused", "answer_file_missing", "answer_file_not_iss", "silent_arg_token"] as const;
+export const INSTALL_REFUSALS = ["answer_file_unused", "answer_file_missing", "answer_file_not_iss", "silent_arg_token", "install_dir_token"] as const;
 
 /**
- * The tokens of `silentArgs` (`check_silent_args` in `rulebox-policy`): every `{` or `}` must start exactly `{AnswerFile}` or
- * `{LogFile}`. Other braces are refused, because the agent would pass them on as text.
+ * The tokens of `silentArgs` (`check_silent_args` in `rulebox-policy`): every `{` or `}` must start exactly `{AnswerFile}`,
+ * `{LogFile}` or `{InstallDir}`. Other braces are refused, because the agent would pass them on as text.
  */
 export function silentArgTokenProblem(list: string[]): boolean {
   for (const arg of list) {
     let rest = arg;
     for (let at = rest.search(/[{}]/); at !== -1; at = rest.search(/[{}]/)) {
       const tail = rest.slice(at);
-      const token = ["{AnswerFile}", "{LogFile}"].find((t) => tail.startsWith(t));
+      const token = ["{AnswerFile}", "{LogFile}", "{InstallDir}"].find((t) => tail.startsWith(t));
       if (token === undefined) return true;
       rest = tail.slice(token.length);
     }
   }
   return false;
+}
+
+/**
+ * Where `{InstallDir}` may stand (`check_install_dir_args` in `rulebox-policy`; per-user installs, Tier A): the program is a plain
+ * path (no `*`) under `{ProgramFiles}\` or `{ProgramFilesX86}\`, and the one argument holding the token is exactly
+ * `/D={InstallDir}` as the **last** argument (NSIS) or exactly `/DIR={InstallDir}` (Inno Setup). Returns true when it is somewhere else.
+ */
+export function installDirProblem(list: string[], exe: string): boolean {
+  const TOKEN = "{InstallDir}";
+  if (!list.some((a) => a.includes(TOKEN))) return false;
+  const underProgramFiles = exe.startsWith("{ProgramFiles}\\") || exe.startsWith("{ProgramFilesX86}\\");
+  if (!underProgramFiles || exe.includes("*")) return true;
+  if (list.filter((a) => a.includes(TOKEN)).length !== 1) return true;
+  return !list.every((a, at) => !a.includes(TOKEN) || (a === `/D=${TOKEN}` && at === list.length - 1) || a === `/DIR=${TOKEN}`);
 }
 
 /**
@@ -421,7 +436,7 @@ export function normalizeDesktop(d: DesktopSpec, appId?: string): DesktopSpec {
       return {
         source: "winget",
         ...base,
-        install: normalizeInstall(d.install, ["msi", "exe"]),
+        install: normalizeInstall(d.install, ["msi", "exe"], exe),
         wingetId: d.wingetId,
         ...(d.wingetVersion !== undefined ? { wingetVersion: d.wingetVersion } : {}),
         ...normalizeVersioning(d, exe),
@@ -432,7 +447,7 @@ export function normalizeDesktop(d: DesktopSpec, appId?: string): DesktopSpec {
     case "portable": {
       if (d.install === undefined) fail("invalid_argument", { field: "install" });
       if (d.wingetId !== undefined || d.wingetVersion !== undefined) fail("invalid_argument", { field: "source" });
-      return { source: d.source, ...base, install: normalizeInstall(d.install, [d.source]), ...normalizeVersioning(d, exe) };
+      return { source: d.source, ...base, install: normalizeInstall(d.install, [d.source], exe), ...normalizeVersioning(d, exe) };
     }
   }
 }

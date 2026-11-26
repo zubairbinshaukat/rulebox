@@ -8,7 +8,13 @@
 //!   * `inf`: the zip is unpacked into `<data>\drivers\work\<sha256>` (`unzip.rs`: no unsafe path, link, bomb), the
 //!     `.inf` must be there, and **every `CatalogFile=` of its `[Version]` section must exist and be validly signed**
 //!     (`Platform::file_identity`). One that is not -> `failed / unsigned_driver` and `pnputil` is never started (Windows
-//!     would prompt for it; a prompt in the Staff session is a bug). Then `pnputil /add-driver <inf> /install` runs as
+//!     would prompt for it; a prompt in the Staff session is a bug). **A pinned publisher (spike S-11):** when the entry
+//!     carries `signerThumbprint`, every catalog must also be signed by exactly that certificate
+//!     (`Platform::file_signer_cert`, thumbprint compared, never the name) else `failed / driver_untrusted_publisher`; only
+//!     then is that one certificate put into `LocalMachine\TrustedPublisher` (journalled first, never when it was already
+//!     trusted) so Windows accepts a non-WHQL package (Seagull, the TPCL driver). Without a pin nothing is trusted and a
+//!     package Windows refuses for its publisher fails as `driver_untrusted_publisher` too. Then
+//!     `pnputil /add-driver <inf> /install` runs as
 //!     SYSTEM in the job object, without a window. The package name Windows gave (`oem<N>.inf`) is learned by comparing the
 //!     driver store before and after, written into the journal (a restore removes it) and into the record;
 //!   * `exe` / `msi`: the vendor installer with its silent arguments (an msi through `msiexec /i /qn /norestart`).
@@ -18,7 +24,11 @@
 //!   60, 360 minutes and the sixth is final until the entry's revision changes (the dashboard's Retry).
 //! - **A removal** happens only for packages Rulebox published itself (`DriverRecord::packages`) and only through the
 //!   journal: the file `%SystemRoot%\INF\oem<N>.inf` must still have the SHA-256 Rulebox recorded, else nothing is
-//!   deleted. Exe and msi drivers, and an INF package that was already in the store, are never removed.
+//!   deleted. Exe and msi drivers, and an INF package that was already in the store, are never removed. **Order (spike
+//!   X-1):** before `pnputil /delete-driver` the journal lets go of what the spooler holds from the package: the
+//!   ` (Rulebox)` queues that use its printer drivers, then those printer drivers (`journal::release_spooler_drivers`);
+//!   pnputil fails with `0xE000023D` otherwise. A publisher certificate Rulebox trusted goes back last, and only when no
+//!   other driver that stays needs it.
 //! - Results go to the server through the install report channel under the driver's id.
 
 use std::collections::HashSet;
@@ -30,8 +40,8 @@ use rulebox_policy::paths::PathRoots;
 use super::*;
 use crate::installs::drivers_probe::{has_seagull_marker, inf_facts, protected_print_refuses, seagull_warning, InfFacts};
 use crate::installs::drivers_rules::{
-    catalog_files, catalog_name_ok, check_driver, decode_inf, exe_driver_command, inf_file, msi_driver_command,
-    pnputil_add_command, DriverPackage, DriverPlan, DriverRecordKind, MAX_INF_BYTES,
+    catalog_files, catalog_name_ok, cert_matches_pin, check_driver, decode_inf, exe_driver_command, inf_file, msi_driver_command,
+    pnputil_add_command, DriverPackage, DriverPlan, DriverRecordKind, MAX_INF_BYTES, PNPUTIL_UNTRUSTED_PUBLISHER,
 };
 use crate::installs::unzip::{extract, remove_tree};
 use crate::journal::{self, JournalCtx};
@@ -39,17 +49,28 @@ use crate::journal::{self, JournalCtx};
 /// An `oem<N>.inf` is hashed up to this size.
 const MAX_PUBLISHED_INF_BYTES: u64 = 64 * 1024 * 1024;
 
+/// The publisher certificate of a package whose entry pinned one, after every catalog was checked to be signed by exactly it:
+/// the SHA-1 thumbprint (what the store and the journal are keyed by) and the certificate itself.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PinnedPublisher {
+    pub sha1: String,
+    pub der: Vec<u8>,
+}
+
 /// An unpacked and judged INF package: the absolute path of the `.inf` and what its text says (class, Seagull marker).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PreparedInf {
     pub inf: PathBuf,
     pub facts: InfFacts,
+    /// `Some` only when the entry pinned a signer thumbprint (and then every catalog matched it).
+    pub publisher: Option<PinnedPublisher>,
 }
 
 /// Unpacks a driver zip and judges its INF. Blocking (file and signature reads); the extraction folder is deleted again on
-/// every failure.
-pub fn prepare_inf_package(platform: &dyn Platform, zip: &Path, work: &Path, inf_rel: &str) -> Result<PreparedInf, Detail> {
-    let result = prepare_inner(platform, zip, work, inf_rel);
+/// every failure. `pin` is the entry's signer thumbprint ([`DriverPlan::signer_thumbprint`]): with it, **every** catalog the
+/// INF names must be validly signed by exactly that certificate, else `driver_untrusted_publisher` and nothing is trusted.
+pub fn prepare_inf_package(platform: &dyn Platform, zip: &Path, work: &Path, inf_rel: &str, pin: Option<&str>) -> Result<PreparedInf, Detail> {
+    let result = prepare_inner(platform, zip, work, inf_rel, pin);
     if result.is_err() {
         remove_tree(work);
     }
@@ -60,7 +81,7 @@ fn is_plain_file(path: &Path) -> bool {
     std::fs::symlink_metadata(path).is_ok_and(|meta| meta.is_file() && !meta.file_type().is_symlink()) && matches!(is_reparse_point(path), Ok(false))
 }
 
-fn prepare_inner(platform: &dyn Platform, zip: &Path, work: &Path, inf_rel: &str) -> Result<PreparedInf, Detail> {
+fn prepare_inner(platform: &dyn Platform, zip: &Path, work: &Path, inf_rel: &str, pin: Option<&str>) -> Result<PreparedInf, Detail> {
     if let Err(error) = extract(zip, work) {
         tracing::warn!("a driver package was refused: {error}");
         return Err(Detail::BadPackage);
@@ -82,6 +103,7 @@ fn prepare_inner(platform: &dyn Platform, zip: &Path, work: &Path, inf_rel: &str
         return Err(Detail::UnsignedDriver);
     }
     let folder = inf.parent().ok_or(Detail::BadPackage)?;
+    let mut publisher: Option<PinnedPublisher> = None;
     for name in catalogs {
         if !catalog_name_ok(&name) {
             return Err(Detail::BadPackage);
@@ -98,8 +120,25 @@ fn prepare_inner(platform: &dyn Platform, zip: &Path, work: &Path, inf_rel: &str
                 return Err(Detail::UnsignedDriver);
             }
         }
+        // (Spike S-11) A pinned entry trusts one certificate and nothing else: the one that signed this very catalog must be
+        // exactly it (by thumbprint, never by the name in the certificate), for every catalog of the package.
+        if let Some(pin) = pin {
+            match platform.file_signer_cert(&path) {
+                Ok(Some(cert)) if cert_matches_pin(&cert, pin) => {
+                    publisher.get_or_insert(PinnedPublisher { sha1: cert.sha1, der: cert.der });
+                }
+                Ok(_) => {
+                    tracing::warn!("a driver catalog is not signed by the certificate the entry pins; refused");
+                    return Err(Detail::DriverUntrustedPublisher);
+                }
+                Err(error) => {
+                    tracing::warn!("cannot read the certificate of a driver catalog ({error}); refused");
+                    return Err(Detail::DriverUntrustedPublisher);
+                }
+            }
+        }
     }
-    Ok(PreparedInf { facts: inf_facts(&text), inf })
+    Ok(PreparedInf { facts: inf_facts(&text), inf, publisher })
 }
 
 impl Engine {
@@ -147,6 +186,7 @@ impl Engine {
                         record.detail = Some(Detail::Unsupported.as_str().to_string());
                         if let Some(old) = file.drivers.get(&spec.id) {
                             record.packages = old.packages.clone();
+                            record.trusted_cert = old.trusted_cert.clone();
                         }
                         out.extend(record.mark());
                         file.drivers.insert(spec.id.clone(), record);
@@ -168,9 +208,10 @@ impl Engine {
                                 if record.sha256 != plan.sha256 || record.kind != plan.kind {
                                     doomed.push(record.file_name());
                                 }
-                                let packages = std::mem::take(&mut record.packages);
+                                let (packages, trusted_cert) = (std::mem::take(&mut record.packages), record.trusted_cert.take());
                                 *record = DriverRecord::new(&spec.id, plan.kind, &plan.sha256, spec.revision, LocalState::Pending);
                                 record.packages = packages;
+                                record.trusted_cert = trusted_cert;
                                 out.extend(record.mark());
                                 continue;
                             }
@@ -197,13 +238,13 @@ impl Engine {
                 if record.removal {
                     // A removal that already runs or finished stays until it is acknowledged; one with nothing of
                     // Rulebox's to remove is dropped.
-                    if record.packages.is_empty() && record.state != LocalState::Removed {
+                    if !record.has_changes() && record.state != LocalState::Removed {
                         file.drivers.remove(&id);
                     }
                     continue;
                 }
-                if record.kind == DriverRecordKind::Inf && !record.packages.is_empty() {
-                    tracing::info!(driver_id = %id, "unassigned; its Rulebox-installed package(s) will be removed");
+                if record.has_changes() {
+                    tracing::info!(driver_id = %id, "unassigned; its Rulebox-installed package(s) and trusted publisher will be removed");
                     record.removal = true;
                     record.state = LocalState::Removing;
                     record.attempts = 0;
@@ -281,11 +322,11 @@ impl Engine {
                 let work = self.deps.paths.driver_work_dir(&plan.sha256);
                 let inf_rel = plan.inf.clone().unwrap_or_default();
                 let platform = Arc::clone(&self.deps.platform);
-                let (zip, folder) = (verified.path().to_path_buf(), work.clone());
-                let prepared = tokio::task::spawn_blocking(move || prepare_inf_package(platform.as_ref(), &zip, &folder, &inf_rel))
+                let (zip, folder, pin) = (verified.path().to_path_buf(), work.clone(), plan.signer_thumbprint.clone());
+                let prepared = tokio::task::spawn_blocking(move || prepare_inf_package(platform.as_ref(), &zip, &folder, &inf_rel, pin.as_deref()))
                     .await
                     .unwrap_or(Err(Detail::BadPackage));
-                let PreparedInf { inf, facts } = match prepared {
+                let PreparedInf { inf, facts, publisher } = match prepared {
                     Ok(prepared) => prepared,
                     Err(detail) => {
                         // The zip itself was the one the administrator uploaded and is no use: it goes.
@@ -300,6 +341,14 @@ impl Engine {
                     tracing::warn!(driver_id = id, "protected print mode is on; the printer driver is not installed");
                     remove_tree(&work);
                     return Outcome::Failed { detail: Some(Detail::ProtectedPrintOn), exit_code: None };
+                }
+                // (Spike S-11) Windows adds a package signed by a non-WHQL publisher only once that publisher is trusted. The
+                // entry pinned the one certificate that may be (every catalog was just checked against it).
+                if let Some(publisher) = &publisher {
+                    if let Err(detail) = self.trust_publisher(id, publisher) {
+                        remove_tree(&work);
+                        return Outcome::Failed { detail: Some(detail), exit_code: None };
+                    }
                 }
                 warning = seagull_warning(self.deps.platform.as_ref(), facts.seagull_based || has_seagull_marker(&plan.name));
                 match self.deps.platform.driver_store_infs() {
@@ -344,7 +393,14 @@ impl Engine {
                 ExitVerdict::Busy => Outcome::Busy { exit_code: Some(i64::from(code)) },
                 ExitVerdict::Failure => {
                     tracing::warn!(driver_id = id, code, "the driver installer failed");
-                    Outcome::Failed { detail: Some(Detail::ExitCode), exit_code: Some(i64::from(code)) }
+                    // (Spike S-11) setupapi `0xE0000242`: the publisher of the catalog is not trusted, and the entry does
+                    // not pin it (a pinned one was trusted before pnputil ran). Said so, not as a bare exit code.
+                    let detail = if plan.kind == DriverRecordKind::Inf && code == PNPUTIL_UNTRUSTED_PUBLISHER {
+                        Detail::DriverUntrustedPublisher
+                    } else {
+                        Detail::ExitCode
+                    };
+                    Outcome::Failed { detail: Some(detail), exit_code: Some(i64::from(code)) }
                 }
                 ExitVerdict::Success { restart } => {
                     if restart {
@@ -358,6 +414,38 @@ impl Engine {
                 }
             },
         }
+    }
+
+    /// (Spike S-11) Puts the pinned publisher certificate into `LocalMachine\TrustedPublisher` when it is not there yet:
+    /// first the journal entry (so a restore takes it out again), then the certificate. A certificate that was trusted
+    /// before Rulebox is left alone and never recorded as Rulebox's. When the journal holds the entry (from this driver or
+    /// another one that pins the same certificate) the driver's record follows it, so a removal knows to hand it back.
+    fn trust_publisher(&self, id: &str, publisher: &PinnedPublisher) -> Result<(), Detail> {
+        let platform = self.deps.platform.as_ref();
+        let ctx = JournalCtx { platform, shared: self.deps.shared.as_ref() };
+        let present = platform.trusted_publisher_has(&publisher.sha1).map_err(|error| {
+            tracing::warn!(driver_id = id, "cannot read the trusted publisher store ({error}); the driver is not installed");
+            Detail::DriverUntrustedPublisher
+        })?;
+        if !present {
+            journal::record_driver_trust(&ctx, &publisher.sha1, 0).map_err(|error| {
+                tracing::error!(driver_id = id, "cannot journal the publisher certificate ({error}); it is not trusted");
+                Detail::DriverUntrustedPublisher
+            })?;
+            platform.trusted_publisher_add(&publisher.der).map_err(|error| {
+                tracing::error!(driver_id = id, "cannot trust the pinned publisher certificate: {error}");
+                Detail::DriverUntrustedPublisher
+            })?;
+            tracing::info!(driver_id = id, "the pinned publisher certificate of the driver is trusted now");
+        }
+        if journal::has_entry(&ctx, &journal::driver_trust_id(&publisher.sha1)) {
+            self.deps.book.update(|file| {
+                if let Some(record) = file.drivers.get_mut(id) {
+                    record.trusted_cert = Some(publisher.sha1.clone());
+                }
+            });
+        }
+        Ok(())
     }
 
     /// The package(s) `pnputil` just added: the names that are in the store now and were not before. Each goes into the
@@ -396,11 +484,25 @@ impl Engine {
     /// Removes the packages Rulebox published for this driver, through the journal (which deletes a package only while it
     /// is still the file Rulebox published). A driver with nothing of Rulebox's is just forgotten.
     async fn remove_driver(&self, record: &DriverRecord) -> Outcome {
-        if record.kind != DriverRecordKind::Inf || record.packages.is_empty() {
+        if !record.has_changes() {
             return Outcome::Dropped;
         }
         tracing::info!(driver_id = %record.driver_id, "removing an unassigned driver");
-        let ids: Vec<String> = record.packages.iter().map(|p| journal::driver_id(&record.driver_id, &p.published)).collect();
+        let mut ids: Vec<String> = record.packages.iter().map(|p| journal::driver_id(&record.driver_id, &p.published)).collect();
+        // (Spike S-11) The publisher certificate Rulebox trusted goes back too, unless another driver that is staying still
+        // needs it (it then goes with the last one).
+        if let Some(thumbprint) = &record.trusted_cert {
+            let still_needed = self
+                .deps
+                .book
+                .snapshot()
+                .drivers
+                .values()
+                .any(|other| other.driver_id != record.driver_id && !other.removal && other.trusted_cert.as_deref() == Some(thumbprint.as_str()));
+            if !still_needed {
+                ids.push(journal::driver_trust_id(thumbprint));
+            }
+        }
         let (platform, shared) = (Arc::clone(&self.deps.platform), Arc::clone(&self.deps.shared));
         let report = tokio::task::spawn_blocking(move || {
             let ctx = JournalCtx { platform: platform.as_ref(), shared: shared.as_ref() };
@@ -448,6 +550,7 @@ impl Engine {
                     record.last_exit_code = None;
                     record.busy_since_ms = None;
                     record.packages.clear();
+                    record.trusted_cert = None;
                     record.mark()
                 }
                 Outcome::Busy { exit_code } => {

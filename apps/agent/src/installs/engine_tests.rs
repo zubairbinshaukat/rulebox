@@ -1131,6 +1131,7 @@ fn driver(id: &str, kind: DriverKind, bytes: &[u8], revision: u64) -> DriverSpec
         success_exit_codes: vec![0],
         revision,
         source: None,
+        signer_thumbprint: None,
     }
 }
 
@@ -1446,6 +1447,242 @@ async fn a_failing_removal_is_retried_and_keeps_the_package_recorded() {
     advance(Duration::from_secs(61)).await;
     rig.until("removed", |r| r.driver_state("drv1") == Some(LocalState::Removed)).await;
     assert!(rig.store().is_empty());
+    rig.stop().await;
+}
+
+// ---------------------------------------------- Phase 6 Step 15: a pinned publisher (S-11) and the removal order (X-1)
+
+use crate::platform::sim::test_cert;
+
+impl Rig {
+    /// Marks `x64/<name>` of the package as validly signed by this certificate.
+    fn sign_with(&self, zip_sha: &str, name: &str, cert: &crate::platform::SignerCert) {
+        self.sign(zip_sha, name);
+        let path = self.paths.driver_work_dir(zip_sha).join("x64").join(name);
+        self.sim.add_signer_cert(&path.to_string_lossy(), cert.clone());
+    }
+
+    fn trusted(&self) -> Vec<String> {
+        self.sim.with_world(|w| w.trusted_publishers.keys().cloned().collect())
+    }
+
+    fn trust_log(&self) -> Vec<String> {
+        self.sim.with_world(|w| w.trusted_publisher_log.clone())
+    }
+}
+
+fn pin_signer(spec: DriverSpec, cert: &crate::platform::SignerCert) -> DriverSpec {
+    DriverSpec { signer_thumbprint: Some(cert.sha1.to_ascii_uppercase()), ..spec }
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_pinned_publisher_is_trusted_before_pnputil_and_given_back_with_the_driver() {
+    let mut rig = rig();
+    let cert = test_cert("CN=Seagull Software, LLC", 0xab);
+    // Like the TPCL driver: Windows refuses the package until the publisher's certificate is in TrustedPublisher.
+    rig.sim.with_world(|w| w.driver_requires_trust = Some(cert.sha1.clone()));
+    let bytes = good_zip();
+    let spec = pin_signer(driver("drv1", DriverKind::Inf, &bytes, 1), &cert);
+    rig.serve_driver(&spec, &bytes);
+    rig.sign_with(&spec.sha256, "b.cat", &cert);
+    rig.set_drivers(vec![spec]);
+    rig.start();
+    rig.until("installed", |r| r.driver_state("drv1") == Some(LocalState::Installed)).await;
+    assert_eq!(rig.runs().len(), 1, "pnputil ran once and was accepted, because the certificate was trusted first");
+    assert_eq!(rig.trusted(), vec![cert.sha1.clone()]);
+    assert_eq!(rig.trust_log(), [format!("add:{}", cert.sha1)]);
+    // The certificate's entry was written before the package's, so a restore takes the package out first.
+    assert_eq!(rig.journal_ids(), [format!("driver-trust:{}", cert.sha1), "driver:drv1:oem1.inf".to_string()]);
+    let record = rig.driver_record("drv1").unwrap();
+    assert_eq!((record.trusted_cert.clone(), record.detail.clone()), (Some(cert.sha1.clone()), None));
+    assert!(!rig.work_dir_exists());
+
+    // Unassigned: the package goes, then the certificate Rulebox trusted.
+    rig.set_drivers(Vec::new());
+    rig.until("removed", |r| r.driver_state("drv1") == Some(LocalState::Removed)).await;
+    assert_eq!(rig.deletes(), ["oem1.inf"]);
+    assert!(rig.trusted().is_empty(), "the certificate is taken out again");
+    assert_eq!(rig.trust_log(), [format!("add:{}", cert.sha1), format!("remove:{}", cert.sha1)]);
+    assert!(rig.journal_ids().is_empty());
+    assert_eq!(rig.driver_record("drv1").unwrap().trusted_cert, None);
+    rig.stop().await;
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_package_signed_by_another_certificate_than_the_pinned_one_is_refused_and_nothing_is_trusted() {
+    let mut rig = rig();
+    let pinned_cert = test_cert("CN=Seagull Software, LLC", 0xab);
+    // Same name in the certificate, another key: the thumbprint decides, never the name.
+    let other = test_cert("CN=Seagull Software, LLC", 0xcd);
+    let bytes = good_zip();
+    let spec = pin_signer(driver("drv1", DriverKind::Inf, &bytes, 1), &pinned_cert);
+    rig.serve_driver(&spec, &bytes);
+    rig.sign_with(&spec.sha256, "b.cat", &other);
+    rig.set_drivers(vec![spec]);
+    rig.start();
+    rig.until("failed", |r| r.driver_state("drv1") == Some(LocalState::Failed)).await;
+    let record = rig.driver_record("drv1").unwrap();
+    assert_eq!(record.detail.as_deref(), Some("driver_untrusted_publisher"));
+    assert!(rig.runs().is_empty(), "pnputil never ran");
+    assert!(rig.trusted().is_empty() && rig.trust_log().is_empty() && rig.journal_ids().is_empty());
+    assert!(rig.store().is_empty() && !rig.work_dir_exists());
+    assert!(rig.downloads().is_empty(), "the refused zip is deleted");
+    let reports = rig.driver_reports("drv1");
+    assert_eq!((reports[0].state, reports[0].detail.as_deref()), (InstallState::Failed, Some("driver_untrusted_publisher")));
+    rig.stop().await;
+}
+
+#[tokio::test(start_paused = true)]
+async fn every_catalog_of_a_pinned_package_must_carry_the_pinned_certificate() {
+    let mut rig = rig();
+    let cert = test_cert("CN=Seagull Software, LLC", 0xab);
+    let other = test_cert("CN=Somebody Else", 0xcd);
+    let zip = zip_bytes(&[("x64/b.inf", inf_text(&["b.cat", "c.cat"]).as_bytes()), ("x64/b.cat", b"1"), ("x64/c.cat", b"2")]);
+    let spec = pin_signer(driver("drv1", DriverKind::Inf, &zip, 1), &cert);
+    rig.serve_driver(&spec, &zip);
+    rig.sign_with(&spec.sha256, "b.cat", &cert);
+    rig.sign_with(&spec.sha256, "c.cat", &other);
+    rig.set_drivers(vec![spec]);
+    rig.start();
+    rig.until("failed", |r| r.driver_state("drv1") == Some(LocalState::Failed)).await;
+    assert_eq!(rig.driver_record("drv1").unwrap().detail.as_deref(), Some("driver_untrusted_publisher"));
+    assert!(rig.runs().is_empty() && rig.trusted().is_empty());
+    rig.stop().await;
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_pin_does_not_replace_the_signature_check() {
+    // The certificate matches but the catalog is not validly signed (no identity): refused as unsigned, nothing trusted.
+    let mut rig = rig();
+    let cert = test_cert("CN=Seagull Software, LLC", 0xab);
+    let bytes = good_zip();
+    let spec = pin_signer(driver("drv1", DriverKind::Inf, &bytes, 1), &cert);
+    rig.serve_driver(&spec, &bytes);
+    let path = rig.paths.driver_work_dir(&spec.sha256).join("x64").join("b.cat");
+    rig.sim.add_signer_cert(&path.to_string_lossy(), cert);
+    rig.set_drivers(vec![spec]);
+    rig.start();
+    rig.until("failed", |r| r.driver_state("drv1") == Some(LocalState::Failed)).await;
+    assert_eq!(rig.driver_record("drv1").unwrap().detail.as_deref(), Some("unsigned_driver"));
+    assert!(rig.runs().is_empty() && rig.trusted().is_empty());
+    rig.stop().await;
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_certificate_that_was_trusted_before_rulebox_is_never_recorded_or_removed() {
+    let mut rig = rig();
+    let cert = test_cert("CN=Seagull Software, LLC", 0xab);
+    rig.sim.with_world(|w| {
+        w.trusted_publishers.insert(cert.sha1.clone(), cert.der.clone());
+        w.driver_requires_trust = Some(cert.sha1.clone());
+    });
+    let bytes = good_zip();
+    let spec = pin_signer(driver("drv1", DriverKind::Inf, &bytes, 1), &cert);
+    rig.serve_driver(&spec, &bytes);
+    rig.sign_with(&spec.sha256, "b.cat", &cert);
+    rig.set_drivers(vec![spec]);
+    rig.start();
+    rig.until("installed", |r| r.driver_state("drv1") == Some(LocalState::Installed)).await;
+    assert!(rig.trust_log().is_empty(), "nothing was added");
+    assert_eq!(rig.journal_ids(), ["driver:drv1:oem1.inf"]);
+    assert_eq!(rig.driver_record("drv1").unwrap().trusted_cert, None);
+    rig.set_drivers(Vec::new());
+    rig.until("removed", |r| r.driver_state("drv1") == Some(LocalState::Removed)).await;
+    assert_eq!(rig.trusted(), vec![cert.sha1.clone()], "the administrator's trust is still there");
+    assert!(rig.trust_log().is_empty());
+    rig.stop().await;
+}
+
+#[tokio::test(start_paused = true)]
+async fn without_a_pin_nothing_is_trusted_and_an_untrusted_publisher_is_said_so() {
+    let mut rig = rig();
+    let cert = test_cert("CN=Seagull Software, LLC", 0xab);
+    rig.sim.with_world(|w| w.driver_requires_trust = Some(cert.sha1.clone()));
+    let bytes = good_zip();
+    let spec = driver("drv1", DriverKind::Inf, &bytes, 1);
+    rig.serve_driver(&spec, &bytes);
+    rig.sign_with(&spec.sha256, "b.cat", &cert);
+    rig.set_drivers(vec![spec]);
+    rig.start();
+    rig.until("failed", |r| r.driver_state("drv1") == Some(LocalState::Failed)).await;
+    let record = rig.driver_record("drv1").unwrap();
+    assert_eq!(record.detail.as_deref(), Some("driver_untrusted_publisher"));
+    assert_eq!(record.last_exit_code, Some(i64::from(crate::installs::drivers_rules::PNPUTIL_UNTRUSTED_PUBLISHER)));
+    assert!(rig.trusted().is_empty() && rig.trust_log().is_empty(), "no blanket trust of a publisher");
+    assert!(rig.store().is_empty());
+    rig.stop().await;
+}
+
+#[tokio::test(start_paused = true)]
+async fn two_drivers_that_pin_one_certificate_give_it_back_with_the_last_of_them() {
+    let mut rig = rig();
+    let cert = test_cert("CN=Seagull Software, LLC", 0xab);
+    let (zip1, zip2) = (good_zip(), zip_bytes(&[("x64/b.inf", inf_text(&["b.cat"]).as_bytes()), ("x64/b.cat", b"cat2"), ("x64/b.sys", b"sys2")]));
+    let (one, two) = (pin_signer(driver("drv1", DriverKind::Inf, &zip1, 1), &cert), pin_signer(driver("drv2", DriverKind::Inf, &zip2, 1), &cert));
+    for (spec, bytes) in [(&one, &zip1), (&two, &zip2)] {
+        rig.serve_driver(spec, bytes);
+        rig.sign_with(&spec.sha256, "b.cat", &cert);
+    }
+    rig.set_drivers(vec![one.clone(), two.clone()]);
+    rig.start();
+    rig.until("both installed", |r| {
+        r.driver_state("drv1") == Some(LocalState::Installed) && r.driver_state("drv2") == Some(LocalState::Installed)
+    })
+    .await;
+    // One journal entry for the certificate, and both drivers follow it.
+    assert_eq!(rig.journal_ids().iter().filter(|id| id.starts_with("driver-trust:")).count(), 1);
+    assert_eq!(rig.trust_log(), [format!("add:{}", cert.sha1)]);
+    assert_eq!(rig.driver_record("drv1").unwrap().trusted_cert, Some(cert.sha1.clone()));
+    assert_eq!(rig.driver_record("drv2").unwrap().trusted_cert, Some(cert.sha1.clone()));
+
+    // The first one leaves: the certificate stays for the second.
+    rig.set_drivers(vec![two.clone()]);
+    rig.until("drv1 removed", |r| r.driver_state("drv1") == Some(LocalState::Removed)).await;
+    assert_eq!(rig.trusted(), vec![cert.sha1.clone()]);
+    assert_eq!(rig.deletes().len(), 1);
+    // The last one leaves: now it goes.
+    rig.set_drivers(Vec::new());
+    rig.until("drv2 removed", |r| r.driver_state("drv2") == Some(LocalState::Removed)).await;
+    assert!(rig.trusted().is_empty());
+    assert_eq!(rig.trust_log(), [format!("add:{}", cert.sha1), format!("remove:{}", cert.sha1)]);
+    assert!(rig.journal_ids().is_empty());
+    rig.stop().await;
+}
+
+#[tokio::test(start_paused = true)]
+async fn removing_a_driver_removes_its_queue_then_its_spooler_driver_then_the_package() {
+    // Spike X-1: pnputil fails with 0xE000023D while the spooler still holds a printer driver of the package.
+    let mut rig = rig();
+    let bytes = good_zip();
+    let spec = driver("drv1", DriverKind::Inf, &bytes, 1);
+    rig.serve_driver(&spec, &bytes);
+    rig.sign(&spec.sha256, "b.cat");
+    rig.set_drivers(vec![spec]);
+    rig.start();
+    rig.until("installed", |r| r.driver_state("drv1") == Some(LocalState::Installed)).await;
+    // What the printers layer did afterwards: the model was registered with the spooler and a queue was made on it.
+    rig.sim.with_world(|w| {
+        w.driver_models.insert("oem1.inf".to_string(), vec!["BIXOLON SRP-350III".to_string()]);
+        w.printer_drivers.push("BIXOLON SRP-350III".to_string());
+        w.printers.push(crate::platform::sim::SimPrinter {
+            info: crate::platform::PrinterInfo {
+                name: "Counter (Rulebox)".into(),
+                port: "FILE:".into(),
+                driver: "BIXOLON SRP-350III".into(),
+                attributes: 64,
+                comment: "rulebox:k7".into(),
+            },
+            sddl: None,
+        });
+    });
+    rig.set_drivers(Vec::new());
+    rig.until("removed", |r| r.driver_state("drv1") == Some(LocalState::Removed)).await;
+    assert_eq!(
+        rig.sim.with_world(|w| w.driver_events.clone()),
+        ["queue:Counter (Rulebox)", "spooler-delete:BIXOLON SRP-350III", "package:oem1.inf"]
+    );
+    assert!(rig.store().is_empty());
+    assert_eq!(rig.driver_record("drv1").unwrap().detail, None, "no remove_failed");
     rig.stop().await;
 }
 
@@ -2978,6 +3215,95 @@ fn check_spec_reads_the_answer_file_the_timeout_and_the_token_rule() {
         app.desktop.as_mut().unwrap().install.as_mut().unwrap().timeout_min = Some(minutes);
         assert_eq!(check_spec(&app, &roots).is_ok(), ok, "{minutes}");
     }
+}
+
+// ---------------------------------------------------------------- {InstallDir} (per-user installs, Tier A)
+
+#[test]
+fn check_spec_lets_install_dir_stand_only_as_the_two_folder_switches_for_a_program_files_program() {
+    let roots = crate::platform::sim::sim_path_roots();
+    for good in [&["/S", "/D={InstallDir}"][..], &["/VERYSILENT", "/DIR={InstallDir}", "/NORESTART"][..]] {
+        assert!(check_spec(&wizard("w1", b"setup", None, good, 1), &roots).is_ok(), "{good:?}");
+    }
+    // Not last, glued to other text, another switch, twice, or lower case: refused.
+    for bad in [
+        &["/D={InstallDir}", "/S"][..],
+        &["/S", "/D={InstallDir}\\x"][..],
+        &["/S", "/LOG={InstallDir}"][..],
+        &["/S", "{InstallDir}"][..],
+        &["/DIR={InstallDir}", "/DIR={InstallDir}"][..],
+        &["/S", "/d={InstallDir}"][..],
+    ] {
+        assert!(check_spec(&wizard("w1", b"setup", None, bad, 1), &roots).is_err(), "{bad:?}");
+    }
+    // The program must be a plain path under Program Files: a versioned `*` folder has no known folder before the run.
+    let mut versioned = wizard("w1", b"setup", None, &["/S", "/D={InstallDir}"], 1);
+    versioned.desktop.as_mut().unwrap().exe = r"{ProgramFiles}\w1\app-*\w1.exe".into();
+    assert!(check_spec(&versioned, &roots).is_err());
+    let mut windows = wizard("w1", b"setup", None, &["/S", "/D={InstallDir}"], 1);
+    windows.desktop.as_mut().unwrap().exe = r"{SystemRoot}\System32\w1.exe".into();
+    assert!(check_spec(&windows, &roots).is_err());
+}
+
+#[test]
+fn install_dir_is_the_program_folder_below_program_files_and_nothing_else() {
+    let roots = crate::platform::sim::sim_path_roots();
+    let args = |list: &[&str]| list.iter().map(|a| (*a).to_string()).collect::<Vec<_>>();
+    let with = args(&["/S", "/D={InstallDir}"]);
+    assert_eq!(install_dir_for(&with, r"C:\Program Files\Zahras POS Dev\zahras.exe", &roots).as_deref(), Some(r"C:\Program Files\Zahras POS Dev"));
+    assert_eq!(install_dir_for(&with, r"C:\Program Files (x86)\Vendor\App\a.exe", &roots).as_deref(), Some(r"C:\Program Files (x86)\Vendor\App"));
+    // Never the root itself (the installer would write into `Program Files`), another drive, a look-alike folder or a pattern.
+    for exe in [
+        r"C:\Program Files\a.exe",
+        r"D:\Program Files\Vendor\a.exe",
+        r"C:\Program Files Extra\Vendor\a.exe",
+        r"C:\Windows\System32\a.exe",
+        r"C:\Program Files\Vendor\app-*\a.exe",
+    ] {
+        assert_eq!(install_dir_for(&with, exe, &roots), None, "{exe}");
+    }
+    // Without the token there is nothing to expand.
+    assert_eq!(install_dir_for(&args(&["/S"]), r"C:\Program Files\Vendor\a.exe", &roots), None);
+}
+
+#[tokio::test(start_paused = true)]
+async fn the_installer_gets_the_program_folder_in_its_own_folder_switch() {
+    let mut rig = rig();
+    let nsis = wizard("w1", b"nsis setup", None, &["/S", "/D={InstallDir}"], 1);
+    let inno = wizard("w2", b"inno setup", None, &["/VERYSILENT", "/DIR={InstallDir}"], 1);
+    rig.serve(&nsis, b"nsis setup");
+    rig.serve(&inno, b"inno setup");
+    rig.set_catalog(vec![nsis.clone(), inno.clone()]);
+    rig.start();
+    rig.until("both installed", |r| r.state("w1") == Some(LocalState::Installed) && r.state("w2") == Some(LocalState::Installed)).await;
+    let runs = rig.runs();
+    let args_of = |file: &[u8]| {
+        let name = format!("{}.exe", sha(file));
+        runs.iter().find(|run| run.program.file_name().is_some_and(|n| n.to_string_lossy() == name)).map(|run| run.args.clone())
+    };
+    // Spaces stay inside one argument; the platform decides how NSIS's raw switch is written.
+    assert_eq!(args_of(b"nsis setup"), Some(vec!["/S".to_string(), r"/D=C:\Program Files\w1".to_string()]));
+    assert_eq!(args_of(b"inno setup"), Some(vec!["/VERYSILENT".to_string(), r"/DIR=C:\Program Files\w2".to_string()]));
+    rig.stop().await;
+}
+
+#[tokio::test(start_paused = true)]
+async fn an_installer_that_ignores_the_folder_switch_still_ends_installed_per_user() {
+    // Plan 5.1 step 5 / PU-A2: nothing is trusted when the override is ignored; the device says where the program went.
+    let mut rig = rig();
+    let w = wizard("w1", b"setup", None, &["/S", "/D={InstallDir}"], 1);
+    rig.serve(&w, b"setup");
+    rig.sim.with_world(|world| world.installer_creates_exe = false);
+    rig.sim.add_file(r"C:\Windows\SysWOW64\config\systemprofile\AppData\Local\Vendor App\w1.exe");
+    rig.set_catalog(vec![w.clone()]);
+    rig.start();
+    rig.until("ran", |r| r.runs().len() == 1).await;
+    assert_eq!(rig.runs()[0].args.last().map(String::as_str), Some(r"/D=C:\Program Files\w1"));
+    rig.exe_wait_passes().await;
+    rig.until("failed", |r| r.state("w1") == Some(LocalState::Failed)).await;
+    assert_eq!(rig.record("w1").unwrap().detail.as_deref(), Some("installed_per_user"));
+    assert!(rig.visible(&[w]).is_empty());
+    rig.stop().await;
 }
 
 #[tokio::test(start_paused = true)]

@@ -124,6 +124,10 @@ struct Running {
     exe_name: Option<String>,
     started: Instant,
     job: JobHandle,
+    /// Whether the taskbar groups this job's windows under `app_id`. A browser job is **not** mapped: a second web app of the
+    /// same browser profile hands its window to the first browser process (one process, several apps), so the process cannot
+    /// say which app a window belongs to. Those windows are told apart by their AppUserModelID (`browserapp.rs`).
+    mapped: bool,
 }
 
 /// The programs this shell started, each in its own job object.
@@ -140,6 +144,16 @@ pub struct Launcher {
 impl Launcher {
     /// Start `exe` and remember its job.
     pub fn start(&self, app_id: &str, exe: &std::path::Path, args: &[String]) -> Result<u32, DesktopError> {
+        self.start_tracked(app_id, exe, args, true)
+    }
+
+    /// (Phase 6 Step 18) Start a browser for a web app. The job is kept (log out closes and ends it with the other jobs) but
+    /// its processes are never mapped to `app_id` and its windows are never adopted: see [`Running::mapped`].
+    pub fn start_browser(&self, app_id: &str, exe: &std::path::Path, args: &[String]) -> Result<u32, DesktopError> {
+        self.start_tracked(app_id, exe, args, false)
+    }
+
+    fn start_tracked(&self, app_id: &str, exe: &std::path::Path, args: &[String], mapped: bool) -> Result<u32, DesktopError> {
         let Launched { pid, job } = launch::launch(exe, args)?;
         self.running
             .lock()
@@ -151,6 +165,7 @@ impl Launcher {
                     .map(|name| name.to_string_lossy().into_owned()),
                 started: Instant::now(),
                 job,
+                mapped,
             });
         Ok(pid)
     }
@@ -170,6 +185,7 @@ impl Launcher {
                 .any(|entry| launch::job_pids(&entry.job).contains(&pid));
             let launches: Vec<(String, Option<String>, Duration)> = running
                 .iter()
+                .filter(|entry| entry.mapped)
                 .map(|entry| {
                     (
                         entry.app_id.clone(),
@@ -202,8 +218,10 @@ impl Launcher {
             let mut running = self.running.lock().unwrap_or_else(|e| e.into_inner());
             running.retain(|entry| {
                 let pids = launch::job_pids(&entry.job);
-                for pid in &pids {
-                    map.insert(*pid, entry.app_id.clone());
+                if entry.mapped {
+                    for pid in &pids {
+                        map.insert(*pid, entry.app_id.clone());
+                    }
                 }
                 // A job that has emptied is kept for a moment: a hand-off
                 // program's window may still be about to appear.
@@ -222,7 +240,7 @@ impl Launcher {
     /// adopted window, changing nothing (the developer resource monitor reads it).
     pub fn app_pids(&self) -> HashMap<u32, String> {
         let mut map = HashMap::new();
-        for entry in self.running.lock().unwrap_or_else(|e| e.into_inner()).iter() {
+        for entry in self.running.lock().unwrap_or_else(|e| e.into_inner()).iter().filter(|entry| entry.mapped) {
             for pid in launch::job_pids(&entry.job) {
                 map.insert(pid, entry.app_id.clone());
             }

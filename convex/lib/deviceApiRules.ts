@@ -170,6 +170,8 @@ export const INSTALL_DETAILS: ReadonlySet<string> = new Set([
   // driver is already on the PC (a warning that rides on an installed result).
   "protected_print_on",
   "seagull_driver_present",
+  // Phase 6 Step 15 (spike S-11): the driver's catalog is signed by a publisher this PC does not trust and the entry does not pin it.
+  "driver_untrusted_publisher",
 ]);
 
 /** The install states a report stores (A12, 4.8 amended): `pending` (accepted) and the terminal ones. */

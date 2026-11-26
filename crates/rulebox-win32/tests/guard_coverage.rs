@@ -43,7 +43,10 @@ const MODULES: &[Module] = &[
     Module { file: "wlan", read_only: &["list", "current_ssid", "last_connect_failures"], guarded: 3 },
     // (Step 7) `is_file_output_port` only classifies a port name.
     // (Step 14) `list_drivers` and `list_ports` only read; `add_port`, `delete_port`, `connect_share` and `disconnect_share` are guarded.
-    Module { file: "printing", read_only: &["list", "get_security", "is_file_output_port", "list_drivers", "list_ports"], guarded: 7 },
+    // (Phase 6 Step 15) `install_driver_from_store` and `delete_driver` register and remove a spooler printer driver (guarded).
+    Module { file: "printing", read_only: &["list", "get_security", "is_file_output_port", "list_drivers", "list_ports"], guarded: 9 },
+    // (Phase 6 Step 15) `trusted_publisher_has` only reads; `add` and `remove` change the TrustedPublisher store (guarded).
+    Module { file: "publisher", read_only: &["trusted_publisher_has"], guarded: 2 },
     Module { file: "bcd", read_only: &["get"], guarded: 1 },
     // (Step 8) `trace_stats` only reads the session's loss counters.
     Module { file: "etw", read_only: &["trace_stats"], guarded: 2 },
