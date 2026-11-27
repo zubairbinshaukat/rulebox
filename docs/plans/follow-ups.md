@@ -74,6 +74,21 @@ rarely used options behind "Advanced" or a later step; prefer a good default ove
 action per screen; short labels with the (i) tooltip (section 4) for the explanation. The planning agents
 must review every field against this rule and say which ones they hide, move or remove.
 
+**Automate the complex things (owner, 2026-11-28, same priority as the rule above):** "we must automate complex
+things so that a normal user can easily get used to our dashboard." Never ask a normal user for technical input
+up front.
+- **Add Windows app:** no silent-install command/arguments input by default. Pick a sensible silent mode
+  automatically (by installer type, or from winget data) and show a short line such as "Installs silently" with
+  an (i) tooltip. The command field goes under "Advanced".
+- **Add website / web app:** replace the raw "allow subdomains" input with an interactive example: the site's
+  address with parts the user can click or toggle ("also allow mail.example.com, shop.example.com") and a live
+  preview of which addresses open and which are blocked. Same data model; only the way it is entered changes.
+- **Add a PC (enrollment):** a few simple, guided steps (1. Create code, 2. Run the installer on the PC, 3. Done,
+  the PC appears here). No list of prerequisites up front. Download, copy and QR are one click, technical details
+  go behind (i) or "Advanced", and the page shows live progress when the new PC appears.
+- **Every form:** list every input a normal user would not understand and say how it is automated, defaulted,
+  hidden or turned into an interactive picker (`docs/plans/ui-pass/audit.md`).
+
 ### 1. Generic table (one fix, every table) — `01`, `02`
 - Short values wrap mid-phrase: "0 of 1 used", "4 minutes ago", "in 56 minutes" break over two lines while
   wider columns have room. Short cells (counts, dates, states, badges) stay on one line; columns size to
