@@ -202,8 +202,8 @@ fn check_network(doc: &AgentDoc, facts: &Facts) -> Result<(), Refusal> {
     Ok(())
 }
 
-/// I7.
-fn check_admin_signin(doc: &AgentDoc, facts: &Facts) -> Result<(), Refusal> {
+/// I7 (the lockout threshold; `hideAdminTiles` without E-71 is the machine layer's warning, not a refusal).
+fn check_lockout(doc: &AgentDoc) -> Result<(), Refusal> {
     let Some(lockdown) = &doc.lockdown else {
         return Ok(());
     };
@@ -276,7 +276,7 @@ pub fn validate(doc: &AgentDoc, facts: &Facts) -> Result<(), Refusal> {
     if facts.generated.blocks_administrators {
         return Err(Refusal::WouldBlockAdmin);
     }
-    check_admin_signin(doc, facts)?;
+    check_lockout(doc)?;
     check_input_devices(doc, facts)
 }
 

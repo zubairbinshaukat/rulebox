@@ -39,6 +39,11 @@
 //!   (`browser_profiles.rs`: employees the roster dropped, the 10 most recently used per browser at boot, fewer when the
 //!   disk is nearly full). They go through the same gate, one folder at a time, so a browser of the Staff session never
 //!   runs while one is deleted.
+//! - (Q-A5, owner 2026-11-28) The browser profiles also get a **profile-only round** ([`Stage::Profiles`]) 3 s after the agent
+//!   starts and after every change of the employees the roster lists, whenever nobody is signed in: a removed employee's profile
+//!   does not wait for the next sign-out. While somebody is signed in or signing in the round stops and tries again every 30 s
+//!   (the full rounds after the session end take it too, whichever comes first). It writes no marker: the roster and the profile
+//!   folders are read again at every start, so a restart loses nothing.
 //!
 //! The deletion itself is `Platform::reset_folder` (mutating, guarded): on the dev
 //! machine `WindowsPlatform` refuses it, the tests use `SimPlatform`.
@@ -444,6 +449,10 @@ enum Stage {
     Second,
     /// While still owed.
     Retry,
+    /// (Q-A5, owner 2026-11-28) Only the browser profiles the roster dropped (and the other `browser_profiles` rules), after
+    /// the roster changed or the agent started, when nobody is signed in. It never clears the owed marker and never touches
+    /// an app's folders: that is what the full rounds above are for.
+    Profiles,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -473,8 +482,28 @@ pub async fn run_cleanup(
     }
     let mut round: Option<(Stage, RoundFuture)> = None;
     let mut open = true;
+    // (Q-A5) A profile-only round is owed from the start of the agent (a removal that happened while it was stopped or while
+    // somebody was signed in) and after every change of the employees the roster lists. Nothing is written for it: the agent
+    // reads the roster and the profile folders again, so it holds across a restart.
+    let mut profiles_pending = deps.browser_profiles.is_some();
+    let mut last_members = deps.browser_profiles.as_ref().and_then(|profiles| profiles.members(&deps.policy_rx.borrow()));
+    let mut watching = deps.browser_profiles.as_ref().map(|profiles| (profiles.roster_rx.clone(), deps.policy_rx.clone()));
     loop {
+        if profiles_pending && round.is_none() && next.is_none() {
+            profiles_pending = false;
+            next = Some((Instant::now() + deps.timings.delay, Stage::Profiles));
+        }
         let due = if round.is_none() { next.map(|(at, _)| at) } else { None };
+        let watched = async {
+            match watching.as_mut() {
+                // A closed channel (the agent is stopping) ends the watch; it must not spin.
+                Some((roster, policy)) => tokio::select! {
+                    changed = roster.changed() => changed.is_ok(),
+                    changed = policy.changed() => changed.is_ok(),
+                },
+                None => std::future::pending::<bool>().await,
+            }
+        };
         let timer = async move {
             match due {
                 Some(at) => tokio::time::sleep_until(at).await,
@@ -505,15 +534,39 @@ pub async fn run_cleanup(
                 }
                 None => open = false,
             },
+            alive = watched => {
+                if !alive {
+                    watching = None;
+                    continue;
+                }
+                // The roster or the document changed: only a change of the employees the roster lists is of interest.
+                let members = deps.browser_profiles.as_ref().and_then(|profiles| profiles.members(&deps.policy_rx.borrow()));
+                if members != last_members {
+                    last_members = members;
+                    profiles_pending = true;
+                }
+            },
             end = running => {
                 let Some((stage, _)) = round.take() else {
                     continue;
                 };
                 // A request that arrived meanwhile already set `next`: it wins.
-                if next.is_some() || end == RoundEnd::Stopped {
+                if next.is_some() {
+                    continue;
+                }
+                if stage == Stage::Profiles {
+                    // Anything but a clean pass (somebody is signed in or signing in, a folder is in use) is tried again
+                    // later; the full rounds after a session end do it too, whichever comes first.
+                    if end != RoundEnd::Clean {
+                        next = Some((Instant::now() + deps.timings.retry_every, Stage::Profiles));
+                    }
+                    continue;
+                }
+                if end == RoundEnd::Stopped {
                     continue;
                 }
                 match (stage, end) {
+                    (Stage::Profiles, _) => {}
                     (Stage::First, _) => next = Some((Instant::now() + deps.timings.second_after, Stage::Second)),
                     (_, RoundEnd::Clean) => {
                         deps.gate.clear_owed();
@@ -530,8 +583,14 @@ pub async fn run_cleanup(
             },
             () = timer => {
                 if let Some((_, stage)) = next.take() {
-                    let future = run_round(Arc::clone(&deps), Arc::clone(&in_flight), shutdown.child_token());
-                    round = Some((stage, Box::pin(future)));
+                    let future: RoundFuture = if stage == Stage::Profiles {
+                        Box::pin(run_profiles_round(Arc::clone(&deps), Arc::clone(&in_flight), shutdown.child_token()))
+                    } else {
+                        // A full round deletes the browser profiles as well; a change that comes later sets the flag again.
+                        profiles_pending = false;
+                        Box::pin(run_round(Arc::clone(&deps), Arc::clone(&in_flight), shutdown.child_token()))
+                    };
+                    round = Some((stage, future));
                 }
             },
         }
@@ -685,6 +744,34 @@ async fn run_round(deps: Arc<CleanupDeps>, in_flight: Arc<Mutex<HashSet<String>>
         RoundEnd::Clean
     } else {
         RoundEnd::Dirty
+    }
+}
+
+/// (Q-A5) A round of the browser profiles alone: what [`run_round`] does after the app folders, without them, so it can run
+/// whenever nobody is signed in (after a roster change, at the start of the agent) and never touches the owed marker.
+/// `Stopped` while an employee is signed in or signing in (nothing is read or deleted then).
+async fn run_profiles_round(deps: Arc<CleanupDeps>, in_flight: Arc<Mutex<HashSet<String>>>, cancel: CancellationToken) -> RoundEnd {
+    let Some(profiles) = &deps.browser_profiles else {
+        return RoundEnd::Clean;
+    };
+    if (deps.session_active)() {
+        return RoundEnd::Stopped;
+    }
+    let Some(staff) = (deps.staff)() else {
+        return RoundEnd::Clean;
+    };
+    let profile = match deps.platform.staff_profile_dir(&staff.sid) {
+        Ok(Some(dir)) => dir,
+        Ok(None) => return RoundEnd::Clean,
+        Err(error) => {
+            tracing::warn!(%error, "browser profile cleanup: cannot read the Staff profile folder; tried again later");
+            return RoundEnd::Dirty;
+        }
+    };
+    match browser_pass(&deps, &in_flight, &cancel, &profile, profiles).await {
+        Step::Done => RoundEnd::Clean,
+        Step::Dirty => RoundEnd::Dirty,
+        Step::Stopped => RoundEnd::Stopped,
     }
 }
 
@@ -1447,6 +1534,8 @@ mod browser_profile_tests {
         deps: Arc<CleanupDeps>,
         active: Arc<AtomicBool>,
         ledger: Arc<ProfileLedger>,
+        roster_tx: watch::Sender<RosterState>,
+        _policy_tx: watch::Sender<AgentPolicy>,
     }
 
     /// A Staff profile with the given profile folders `(browser, employee folder)`, each holding a cookie file; the roster of
@@ -1473,15 +1562,14 @@ mod browser_profile_tests {
             w.profile_dirs.insert(SID.into(), p(PROFILE));
         });
         let policy = AgentPolicy { has_document: true, roster_group_id: Some("g1".into()), ..AgentPolicy::default() };
-        // The receivers keep the last value after the senders are gone, which is all these tests read.
-        let (_, policy_rx) = watch::channel(policy);
+        let (policy_tx, policy_rx) = watch::channel(policy);
         let roster = RosterState {
             group_id: Some("g1".into()),
             epoch: 5,
             members: members.iter().map(|id| ((*id).to_string(), 1)).collect(),
             ..RosterState::default()
         };
-        let (_, roster_rx) = watch::channel(roster);
+        let (roster_tx, roster_rx) = watch::channel(roster);
         let ledger = Arc::new(ProfileLedger::in_memory());
         let active = Arc::new(AtomicBool::new(false));
         let deps = Arc::new(CleanupDeps {
@@ -1496,10 +1584,66 @@ mod browser_profile_tests {
             timings: CleanupTimings::default(),
             browser_profiles: Some(BrowserProfiles::new(Arc::clone(&ledger), roster_rx)),
         });
-        Rig { _dir: dir, sim, deps, active, ledger }
+        Rig { _dir: dir, sim, deps, active, ledger, roster_tx, _policy_tx: policy_tx }
+    }
+
+    /// A running cleanup task of a Rig (one run of the agent).
+    struct Run {
+        gate: Arc<CleanupGate>,
+        shutdown: CancellationToken,
+    }
+
+    impl Run {
+        fn stop(&self) {
+            self.shutdown.cancel();
+        }
+    }
+
+    /// Lets the task and its blocking calls run (the clock is paused: this only advances it by `ms`).
+    async fn pass(ms: u64) {
+        for _ in 0..5 {
+            tokio::task::yield_now().await;
+        }
+        tokio::time::sleep(Duration::from_millis(ms)).await;
+        for _ in 0..20 {
+            tokio::task::yield_now().await;
+            tokio::time::sleep(Duration::from_millis(1)).await;
+        }
+    }
+
+    /// The roster lists exactly `members` from now on (the epoch moves on, as a real sync does).
+    fn roster_is(r: &Rig, epoch: u64, members: &[&str]) {
+        r.roster_tx
+            .send(RosterState {
+                group_id: Some("g1".into()),
+                epoch,
+                members: members.iter().map(|id| ((*id).to_string(), 1)).collect(),
+                ..RosterState::default()
+            })
+            .unwrap();
     }
 
     impl Rig {
+        /// Starts one run of the agent's cleanup task: a fresh gate (nothing owed) and a fresh `BrowserProfiles` (the boot pass
+        /// is still to come), on the same disk, ledger, roster and sign-in flag.
+        fn start(&self) -> Run {
+            let gate = CleanupGate::in_memory(false);
+            let (tx, rx) = mpsc::unbounded_channel();
+            gate.set_requests(tx);
+            let shutdown = CancellationToken::new();
+            let deps = CleanupDeps {
+                platform: Arc::clone(&self.deps.platform),
+                policy_rx: self.deps.policy_rx.clone(),
+                staff: Arc::clone(&self.deps.staff),
+                session_active: Arc::clone(&self.deps.session_active),
+                gate: Arc::clone(&gate),
+                timings: CleanupTimings::default(),
+                browser_profiles: Some(BrowserProfiles::new(Arc::clone(&self.ledger), self.roster_tx.subscribe())),
+            };
+            tokio::spawn(run_cleanup(deps, rx, shutdown.clone()));
+            Run { gate, shutdown }
+        }
+
         async fn round(&self) -> RoundEnd {
             run_round(Arc::clone(&self.deps), Arc::default(), CancellationToken::new()).await
         }
@@ -1682,6 +1826,108 @@ mod browser_profile_tests {
         assert_eq!(run_round(deps, Arc::default(), CancellationToken::new()).await, RoundEnd::Clean);
         assert!(r.has("chrome", "gone"));
         assert!(!r.sim.calls().contains(&SimOp::ListFolderNames));
+    }
+
+    // -- Q-A5 (owner 2026-11-28): a removed employee's profile goes the next time nobody is signed in ----------------------
+
+    #[tokio::test(start_paused = true)]
+    async fn a_removal_while_nobody_is_signed_in_deletes_the_profile_at_once_without_a_session_end() {
+        let r = rig(&[("chrome", "emp1"), ("chrome", "gone"), ("edge", "gone")], &["emp1", "gone"]);
+        let run = r.start();
+        pass(4_000).await;
+        assert!(r.has("chrome", "gone"), "still in the roster");
+        assert_eq!(r.resets(), 0);
+        // The boss removes the employee; nobody is signed in and no session ends.
+        roster_is(&r, 6, &["emp1"]);
+        pass(3_500).await;
+        assert!(!r.has("chrome", "gone") && !r.has("edge", "gone"), "both browsers' profiles of the removed employee went");
+        assert!(r.has("chrome", "emp1"));
+        assert_eq!(r.resets(), 2);
+        // Only the profiles: nothing is owed, the Staff App's other folders are not touched.
+        assert!(!run.gate.is_owed());
+        assert!(r.sim.with_world(|w| w.files.contains(&p(r"C:\Users\RuleboxStaff\AppData\Local\dev.rulebox.staff\web\emp1\Cookies"))));
+        // A roster change that removes nobody does nothing more.
+        roster_is(&r, 7, &["emp1", "new"]);
+        pass(35_000).await;
+        assert_eq!(r.resets(), 2);
+        run.stop();
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_removal_while_another_employee_is_signed_in_waits_and_goes_at_the_session_end() {
+        let r = rig(&[("chrome", "emp1"), ("chrome", "gone")], &["emp1", "gone"]);
+        r.active.store(true, Ordering::SeqCst);
+        let run = r.start();
+        pass(4_000).await;
+        roster_is(&r, 6, &["emp1"]);
+        pass(3_500).await;
+        assert!(r.has("chrome", "gone"), "an employee is signed in: no browser profile is touched");
+        assert_eq!(r.resets(), 0);
+        pass(65_000).await;
+        assert!(r.has("chrome", "gone"));
+        assert_eq!(r.resets(), 0);
+        // The employee signs out: the cleanup rounds of the session end take it (and the signed-in employee's own stays).
+        r.active.store(false, Ordering::SeqCst);
+        run.gate.mark_owed();
+        run.gate.session_ended();
+        pass(3_500).await;
+        assert!(!r.has("chrome", "gone") && r.has("chrome", "emp1"));
+        pass(10_500).await;
+        assert!(!run.gate.is_owed());
+        run.stop();
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_removal_while_somebody_is_signed_in_goes_when_nobody_is_even_without_a_session_end_event() {
+        // A sign-in that failed ends no session, so no session-end round follows: the retry finds it.
+        let r = rig(&[("chrome", "emp1"), ("chrome", "gone")], &["emp1", "gone"]);
+        let run = r.start();
+        pass(4_000).await;
+        r.active.store(true, Ordering::SeqCst);
+        roster_is(&r, 6, &["emp1"]);
+        pass(3_500).await;
+        assert!(r.has("chrome", "gone"));
+        r.active.store(false, Ordering::SeqCst);
+        pass(31_000).await;
+        assert!(!r.has("chrome", "gone"));
+        run.stop();
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_removal_survives_a_restart_of_the_agent() {
+        let r = rig(&[("chrome", "emp1"), ("chrome", "gone")], &["emp1", "gone"]);
+        // One run of the agent: an employee is signed in when the roster drops the other one, then the service stops.
+        r.active.store(true, Ordering::SeqCst);
+        let first = r.start();
+        pass(4_000).await;
+        roster_is(&r, 6, &["emp1"]);
+        pass(3_500).await;
+        assert!(r.has("chrome", "gone"));
+        first.stop();
+        pass(1_000).await;
+        // The PC was restarted: a new run, nobody signed in, the roster is the saved one (it no longer lists `gone`).
+        r.active.store(false, Ordering::SeqCst);
+        let second = r.start();
+        assert!(r.has("chrome", "gone"), "nothing before the new run's own first pass");
+        pass(3_500).await;
+        assert!(!r.has("chrome", "gone"), "the first pass of the new run removes it");
+        assert!(r.has("chrome", "emp1"));
+        assert!(!second.gate.is_owed());
+        second.stop();
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_roster_that_arrives_after_the_start_is_applied_when_it_does() {
+        // The agent starts before the backend has said which group this PC is in: nobody counts as removed yet.
+        let r = rig(&[("chrome", "gone")], &[]);
+        r.roster_tx.send(RosterState::default()).unwrap();
+        let run = r.start();
+        pass(4_000).await;
+        assert!(r.has("chrome", "gone"), "no roster yet: nobody is treated as removed");
+        roster_is(&r, 3, &["emp1"]);
+        pass(3_500).await;
+        assert!(!r.has("chrome", "gone"));
+        run.stop();
     }
 
     #[test]
