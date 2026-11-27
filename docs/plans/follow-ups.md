@@ -146,6 +146,11 @@ Questions from `docs/plans/phase-6-vm-results.md` "Run A3". All answered with th
 
 Seen on the dev deployment `gallant-ocelot-38` while preparing VM run A3.
 
+**Status 2026-11-28: items 1-5 done** (branch `t3/pin-setup-edge-cases`; not pushed). Setup is "unfinished" on the
+server as `account:me.pin.codesPending` (PIN set, recovery codes never made, pepper set); `stepUp:status.pin.recoveryAvailable`
+says up front whether codes can be made; `setActionPin` refuses a first PIN without the pepper; a dismissible
+passkey banner (`stepup/PasskeyReminder.tsx`) links to Settings, Security.
+
 1. **A missing server secret shows only "This isn't ready yet. Try again in a moment."** Step 2 (recovery
    codes) failed because `RULEBOX_RECOVERY_PEPPER` was not set (`convex/lib/recoveryCodes.ts`, `not_ready`).
    "Try again" can never help. Fix: map this `not_ready` detail to its own message (like

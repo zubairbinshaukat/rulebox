@@ -597,3 +597,53 @@ describe("action PIN: change, brute force, resets", () => {
     await expectCode(o.as.mutation(api.stepUp.clearActionPin, {}), "step_up_last_factor");
   });
 });
+
+describe("unfinished PIN setup (Phase 4b follow-up)", () => {
+  test("a PIN with no recovery codes yet is 'codesPending' on account:me until they are made", async () => {
+    const t = await setupAuth();
+    const o = await owner(t);
+    expect(await o.as.query(api.account.me, {})).toMatchObject({ pin: { required: true, set: false, codesPending: false } });
+    await o.as.action(api.stepUp.setActionPin, { pin: PIN });
+    // Step 1 done, tab closed: the server still says setup is unfinished (a reload resumes at step 2).
+    expect(await o.as.query(api.account.me, {})).toMatchObject({ pin: { required: true, set: true, codesPending: true } });
+    await o.as.action(api.stepUp.generateRecoveryCodes, {});
+    expect(await o.as.query(api.account.me, {})).toMatchObject({ pin: { required: true, set: true, codesPending: false } });
+  });
+
+  test("used-up codes are not 'unfinished': only never having made any is", async () => {
+    const t = await setupAuth();
+    const o = await owner(t);
+    await o.as.action(api.stepUp.setActionPin, { pin: PIN });
+    await o.as.action(api.stepUp.generateRecoveryCodes, {});
+    await t.run(async (ctx) => {
+      const f = await ctx.db.query("stepUpFactors").withIndex("by_user", (q) => q.eq("userId", o.userId)).first();
+      await ctx.db.patch(f!._id, { recoveryHashes: [] });
+    });
+    expect(await o.as.query(api.account.me, {})).toMatchObject({ pin: { codesPending: false } });
+  });
+
+  test("without the pepper: status says recovery codes are unavailable, the first PIN is refused (not_ready) and nobody is held in setup", async () => {
+    const t = await setupAuth();
+    const o = await owner(t);
+    expect((await o.as.query(api.stepUp.status, {})).pin.recoveryAvailable).toBe(true);
+    delete process.env.RULEBOX_RECOVERY_PEPPER;
+    expect((await o.as.query(api.stepUp.status, {})).pin.recoveryAvailable).toBe(false);
+    await expectCode(o.as.action(api.stepUp.setActionPin, { pin: PIN }), "not_ready");
+    // Nothing was saved: the person can finish setup once the operator has set the secret.
+    expect(await factors(t, o.userId)).toBeNull();
+    process.env.RULEBOX_RECOVERY_PEPPER = PEPPER;
+    await o.as.action(api.stepUp.setActionPin, { pin: PIN });
+    // A PIN that exists while the secret is missing does not trap the person in a setup that cannot finish.
+    delete process.env.RULEBOX_RECOVERY_PEPPER;
+    expect(await o.as.query(api.account.me, {})).toMatchObject({ pin: { set: true, codesPending: false } });
+  });
+
+  test("changing an existing PIN does not need the pepper", async () => {
+    const t = await setupAuth();
+    const o = await owner(t);
+    await o.as.action(api.stepUp.setActionPin, { pin: PIN });
+    delete process.env.RULEBOX_RECOVERY_PEPPER;
+    await o.as.action(api.stepUp.setActionPin, { pin: "731942" });
+    expect((await factors(t, o.userId))?.actionPinHash).toBeDefined();
+  });
+});

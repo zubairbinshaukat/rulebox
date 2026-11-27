@@ -6,7 +6,7 @@ import type { Me, StepUpStatus } from "../data/types";
 import { AppError, errorCodeOf } from "../lib/errors";
 import { MeContext } from "../lib/member";
 import { strings } from "../lib/strings";
-import { sec } from "../lib/stepup/strings";
+import { RECOVERY_SECRET_DETAIL, sec } from "../lib/stepup/strings";
 import { ToastProvider } from "../app/Toasts";
 
 // The data seam is mocked: these tests cover the step-up UI, not the backend
@@ -69,6 +69,7 @@ vi.mock("@simplewebauthn/browser", () => ({
   WebAuthnAbortService: { cancelCeremony: vi.fn() },
 }));
 
+import { PasskeyReminder } from "./PasskeyReminder";
 import { StepUpProvider } from "./StepUpProvider";
 import { useStepUpController } from "./context";
 import { withStepUp } from "../lib/stepUpRetry";
@@ -91,6 +92,7 @@ const pinOf = (over: Partial<StepUpStatus["pin"]> = {}): StepUpStatus["pin"] => 
   failedSinceUnlock: 0,
   attemptsBeforeLockout: 10,
   recoveryCodesLeft: 3,
+  recoveryAvailable: true,
   resetByEmail: true,
   ...over,
 });
@@ -567,6 +569,78 @@ describe("PIN setup after the first sign-in", () => {
     expect(m.generate).toHaveBeenCalledTimes(2);
   });
 
+  it("reload after step 1: the PIN screen first, then setup resumes at the codes (step 2), not the dashboard", async () => {
+    const unfinished = { ...owner, pin: { required: true, set: true, codesPending: true } } satisfies Me;
+    m.status = ready(st({}, { verifiedAt: 5, lastActiveAt: 5, method: "actionPin" }));
+    m.verifyPin.mockResolvedValue(verified);
+    m.generate.mockResolvedValue(CODES);
+    const view = ui(<p>overview</p>, { lockOnStart: true }, unfinished);
+    // A fresh load asks for the PIN (it is set), and the dashboard stays hidden.
+    expect(await screen.findByRole("heading", { name: sec.lockTitle })).toBeTruthy();
+    expect(screen.queryByText("overview")).toBeNull();
+    expect(m.generate).not.toHaveBeenCalled();
+    fireEvent.change(screen.getByLabelText(sec.pin), { target: { value: "482915" } });
+    fireEvent.click(screen.getByRole("button", { name: sec.unlock }));
+    // No PIN form again: straight to step 2, with codes made once.
+    expect(await screen.findByRole("heading", { name: sec.codesTitle })).toBeTruthy();
+    expect(await screen.findByText("AAAA-BBBB")).toBeTruthy();
+    expect(screen.queryByLabelText(sec.newPin)).toBeNull();
+    expect(screen.getByText(sec.setupStepOf(2, 2, sec.setupSteps[1]))).toBeTruthy();
+    expect(m.setPin).not.toHaveBeenCalled();
+    expect(m.generate).toHaveBeenCalledTimes(1);
+    // The server now knows the codes exist: Continue ends setup.
+    pinSaved(view);
+    fireEvent.click(screen.getByRole("checkbox", { name: sec.codesSaved }));
+    fireEvent.click(screen.getByRole("button", { name: sec.setupDone }));
+    expect(await screen.findByText("overview")).toBeTruthy();
+  });
+
+  it("a PIN with its codes made is not set up again after a reload (the PIN screen, then the dashboard)", async () => {
+    m.status = ready(st({}, { verifiedAt: 5, lastActiveAt: 5, method: "actionPin" }));
+    m.verifyPin.mockResolvedValue(verified);
+    ui(<p>overview</p>, { lockOnStart: true });
+    expect(await screen.findByRole("heading", { name: sec.lockTitle })).toBeTruthy();
+    fireEvent.change(screen.getByLabelText(sec.pin), { target: { value: "482915" } });
+    fireEvent.click(screen.getByRole("button", { name: sec.unlock }));
+    expect(await screen.findByText("overview")).toBeTruthy();
+    expect(m.generate).not.toHaveBeenCalled();
+  });
+
+  it("the server cannot make recovery codes: said before any PIN is saved, with no PIN form", async () => {
+    m.status = ready(st({ pin: pinOf({ set: false, recoveryAvailable: false }) }));
+    ui(<p>overview</p>, { lockOnStart: true }, noPin);
+    expect(await screen.findByText(sec.setupBlockedTitle)).toBeTruthy();
+    expect(screen.getByText(sec.setupBlockedDetail)).toBeTruthy();
+    expect(screen.queryByLabelText(sec.newPin)).toBeNull();
+    expect(screen.queryByRole("button", { name: sec.setPin })).toBeNull();
+    expect(screen.getByRole("button", { name: sec.setupBlockedAgain })).toBeTruthy();
+    expect(screen.getByRole("button", { name: sec.signOut })).toBeTruthy();
+    expect(m.setPin).not.toHaveBeenCalled();
+  });
+
+  it("a missing server secret at step 2 gets its own message: what is missing, who fixes it, the PIN is saved", async () => {
+    m.status = ready(st({ pin: pinOf({ set: false }) }));
+    m.setPin.mockResolvedValue(undefined);
+    m.generate.mockRejectedValue(new AppError({ code: "not_ready", detail: RECOVERY_SECRET_DETAIL }));
+    ui(<p>overview</p>, { lockOnStart: true }, noPin);
+    await screen.findByRole("heading", { name: sec.setupTitle });
+    fillPin("482915");
+    expect(await screen.findByText(sec.notReady[RECOVERY_SECRET_DETAIL]!)).toBeTruthy();
+    expect(screen.getByText(sec.codesPinSaved)).toBeTruthy();
+    expect(screen.queryByText(strings.errors.notReady)).toBeNull();
+  });
+
+  it("a not_ready of another kind keeps the generic sentence and no 'PIN saved' note", async () => {
+    m.status = ready(st({ pin: pinOf({ set: false }) }));
+    m.setPin.mockResolvedValue(undefined);
+    m.generate.mockRejectedValue(new AppError({ code: "not_ready" }));
+    ui(<p>overview</p>, { lockOnStart: true }, noPin);
+    await screen.findByRole("heading", { name: sec.setupTitle });
+    fillPin("482915");
+    expect(await screen.findByText(strings.errors.notReady)).toBeTruthy();
+    expect(screen.queryByText(sec.codesPinSaved)).toBeNull();
+  });
+
   it("a refused PIN is not kept in the fields", async () => {
     m.status = ready(st({ pin: pinOf({ set: false }) }));
     m.setPin.mockRejectedValue(new AppError({ code: "rate_limited" }));
@@ -586,6 +660,46 @@ describe("PIN setup after the first sign-in", () => {
     fillPin("482915");
     fireEvent.click(await screen.findByRole("button", { name: sec.signOutAndIn }));
     await waitFor(() => expect(m.signOut).toHaveBeenCalled());
+  });
+});
+
+describe("passkey reminder banner", () => {
+  beforeEach(() => {
+    (window as { PublicKeyCredential?: unknown }).PublicKeyCredential = function PublicKeyCredential() {};
+    try {
+      window.localStorage.clear();
+    } catch {
+      /* no storage */
+    }
+  });
+
+  it("shows when there is no passkey, links to Settings → Security, and Dismiss hides it for good", async () => {
+    const view = ui(<PasskeyReminder />);
+    expect(await screen.findByText(sec.passkeyReminderTitle)).toBeTruthy();
+    expect(screen.getByRole("link", { name: sec.passkeyReminderAction }).getAttribute("href")).toBe("/settings?tab=security");
+    fireEvent.click(screen.getByRole("button", { name: sec.passkeyReminderDismiss }));
+    expect(screen.queryByText(sec.passkeyReminderTitle)).toBeNull();
+    view.unmount();
+    ui(<PasskeyReminder />);
+    // Remembered in this browser (status is already "ready", so nothing is still loading here).
+    expect(screen.queryByText(sec.passkeyReminderTitle)).toBeNull();
+  });
+
+  it("stays away with a passkey, without passkey support, or while codes are still pending", async () => {
+    m.status = ready(st({ passkeys: [{ _id: "p1", name: "Laptop", createdAt: 1, lastUsedAt: null, synced: false, suspended: false }] }));
+    const first = ui(<PasskeyReminder />);
+    await waitFor(() => expect(screen.queryByText(sec.passkeyReminderTitle)).toBeNull());
+    first.unmount();
+
+    m.status = ready(st());
+    delete (window as { PublicKeyCredential?: unknown }).PublicKeyCredential;
+    const second = ui(<PasskeyReminder />);
+    await waitFor(() => expect(screen.queryByText(sec.passkeyReminderTitle)).toBeNull());
+    second.unmount();
+
+    (window as { PublicKeyCredential?: unknown }).PublicKeyCredential = function PublicKeyCredential() {};
+    ui(<PasskeyReminder />, undefined, { ...owner, pin: { required: true, set: true, codesPending: true } });
+    await waitFor(() => expect(screen.queryByText(sec.passkeyReminderTitle)).toBeNull());
   });
 });
 

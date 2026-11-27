@@ -14,7 +14,8 @@ import { AccountMenu } from "./AccountMenu";
 import { ChunkErrorBoundary } from "./ChunkErrorBoundary";
 import { ConnectionBanner } from "./ConnectionBanner";
 import { Nav } from "./Nav";
-import { PublishBanner } from "./PublishBanner";import { StepUpProvider } from "../stepup/StepUpProvider";
+import { PublishBanner } from "./PublishBanner";import { PasskeyReminder } from "../stepup/PasskeyReminder";
+import { StepUpProvider } from "../stepup/StepUpProvider";
 
 // `__DEMO__` is a build-time literal, so live builds drop this chunk entirely.
 const DemoControls = __DEMO__ ? lazy(() => import("./DemoControls")) : null;
@@ -136,6 +137,7 @@ function Shell() {
 
           <ConnectionBanner />
           <PublishBanner />
+          <PasskeyReminder />
           {versionMismatch ? (
             <div className="dash-banner dash-banner--accent" role="status">
               <span className="dash-banner__icon" aria-hidden="true">

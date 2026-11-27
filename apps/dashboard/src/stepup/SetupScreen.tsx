@@ -12,7 +12,8 @@ import { useMember } from "../lib/member";
 import type { StepUpController } from "../lib/stepup/controller";
 import { stepUpMessage } from "../lib/stepup/messages";
 import { isPasskeyCancel, passkeysSupported } from "../lib/stepup/passkey";
-import { sec } from "../lib/stepup/strings";
+import { RECOVERY_SECRET_DETAIL, sec } from "../lib/stepup/strings";
+import { dismissPasskeyReminder } from "./reminderStore";
 import { RecoveryCodes } from "./RecoveryCodes";
 import { SignOutAndIn } from "./Reauthenticate";
 import { SetPinForm } from "./SetPinForm";
@@ -23,7 +24,8 @@ type Phase = "pin" | "codes" | "passkey";
 
 /**
  * PIN setup right after the first sign-in (Phase 4b), for every role, shown
- * while `me.pin.required && !me.pin.set`:
+ * while `me.pin.required && !me.pin.set`, and again after a reload while the PIN is set but its recovery
+ * codes were never made (`me.pin.codesPending`, kept on the server): that resumes at step 2.
  *   1. choose the PIN (twice, with a "don't forget it" warning),
  *   2. the recovery codes, shown once (copy / download; Continue only after
  *      "I stored them"),
@@ -45,7 +47,7 @@ export default function SetupScreen({ controller }: { controller: StepUpControll
   const [phase, setPhase] = useState<Phase>(resumed ? "codes" : "pin");
   const [reauth, setReauth] = useState(false);
   const [codes, setCodes] = useState<string[] | null>(null);
-  const [codesError, setCodesError] = useState<string | null>(null);
+  const [codesError, setCodesError] = useState<{ text: string; secretMissing: boolean } | null>(null);
   const [codesBusy, setCodesBusy] = useState(false);
   const [stored, setStored] = useState(false);
 
@@ -63,7 +65,10 @@ export default function SetupScreen({ controller }: { controller: StepUpControll
     setCodesError(null);
     generate().then(
       (c) => setCodes(c),
-      (e: unknown) => setCodesError(stepUpMessage(e)),
+      (e: unknown) => {
+        const app = toAppError(e);
+        setCodesError({ text: stepUpMessage(e), secretMissing: app?.code === "not_ready" && app.detail === RECOVERY_SECRET_DETAIL });
+      },
     ).finally(() => setCodesBusy(false));
   }
 
@@ -98,7 +103,15 @@ export default function SetupScreen({ controller }: { controller: StepUpControll
         <>
           <p className="dash-overline">{sec.setupStepOf(step, total, sec.setupSteps[step - 1] ?? "")}</p>
 
-          {phase === "pin" ? (
+          {phase === "pin" && st !== null && st.pin.recoveryAvailable === false ? (
+            // The server can't make recovery codes: say so before a PIN is saved, so nobody is left half set up.
+            <>
+              <InlineNotice tone="danger" alert title={sec.setupBlockedTitle} detail={sec.setupBlockedDetail} />
+              <div>
+                <Button onClick={() => window.location.reload()}>{sec.setupBlockedAgain}</Button>
+              </div>
+            </>
+          ) : phase === "pin" ? (
             <>
               <InlineNotice tone="warning" title={sec.setupWarnTitle} detail={sec.setupWarnDetail} />
               <SetPinForm
@@ -122,6 +135,7 @@ export default function SetupScreen({ controller }: { controller: StepUpControll
 
           {phase === "codes" ? (
             <>
+              {resumed && !codes ? <InlineNotice tone="neutral" title={sec.setupResumedTitle} detail={sec.setupResumedDetail} /> : null}
               {codes ? (
                 <>
                   <RecoveryCodes codes={codes} email={me.email} />
@@ -141,7 +155,7 @@ export default function SetupScreen({ controller }: { controller: StepUpControll
                 </>
               ) : codesError ? (
                 <>
-                  <InlineNotice tone="danger" alert title={codesError} />
+                  <InlineNotice tone="danger" alert title={codesError.text} detail={codesError.secretMissing ? sec.codesPinSaved : undefined} />
                   <div>
                     <Button onClick={makeCodes} disabled={codesBusy} aria-busy={codesBusy}>
                       {sec.codesRetry}
@@ -157,7 +171,7 @@ export default function SetupScreen({ controller }: { controller: StepUpControll
             </>
           ) : null}
 
-          {phase === "passkey" ? <PasskeyStep onReauth={() => setReauth(true)} onDone={finish} /> : null}
+          {phase === "passkey" ? <PasskeyStep email={me.email} onReauth={() => setReauth(true)} onDone={finish} /> : null}
         </>
       )}
       <p className="dash-muted">{sec.setupWhy}</p>
@@ -169,7 +183,7 @@ export default function SetupScreen({ controller }: { controller: StepUpControll
 }
 
 /** Name + "Add passkey", then "Done"; or "Skip for now". */
-function PasskeyStep({ onReauth, onDone }: { onReauth: () => void; onDone: () => void }) {
+function PasskeyStep({ email, onReauth, onDone }: { email: string; onReauth: () => void; onDone: () => void }) {
   const add = useAddPasskey();
   const [name, setName] = useState<string>(sec.passkeyNameDefault);
   const [busy, setBusy] = useState(false);
@@ -216,7 +230,16 @@ function PasskeyStep({ onReauth, onDone }: { onReauth: () => void; onDone: () =>
               <IconKey aria-hidden="true" />
               {busy ? sec.usingPasskey : sec.addPasskey}
             </Button>
-            <Button type="button" variant="ghost" onClick={onDone} disabled={busy}>
+            <Button
+              type="button"
+              variant="ghost"
+              onClick={() => {
+                // A deliberate skip: don't nag with the banner right away.
+                dismissPasskeyReminder(email);
+                onDone();
+              }}
+              disabled={busy}
+            >
               {sec.setupPasskeySkip}
             </Button>
           </>

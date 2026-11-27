@@ -1,6 +1,7 @@
 import type { Doc, Id } from "../_generated/dataModel";
 import type { DatabaseReader, DatabaseWriter } from "../_generated/server";
 import { fail } from "./errors";
+import { recoveryPepper } from "./recoveryCodes";
 import {
   MAX_PASSKEYS,
   MAX_PIN_WINDOW_ENTRIES,
@@ -173,6 +174,24 @@ export async function stepUpRowOf(ctx: { db: DatabaseReader }, who: Who): Promis
 export async function hasPin(ctx: { db: DatabaseReader }, userId: Id<"users">): Promise<boolean> {
   const f = await factorsOf(ctx, userId);
   return f?.actionPinHash !== undefined;
+}
+
+/**
+ * `account:me.pin`: where the person is in PIN setup, from the one `stepUpFactors` row (no extra read).
+ * - `set`: the PIN exists.
+ * - `codesPending`: the PIN is set but recovery codes were never made (setup stopped after step 1: a
+ *   closed tab, a failed code call) AND this deployment can make them (the pepper is set; an env read,
+ *   no database cost). The dashboard then resumes setup at step 2 instead of letting the person in
+ *   with no way back. Without the pepper nothing could finish it, so the person is not held back.
+ */
+export async function pinSetupOf(
+  ctx: { db: DatabaseReader },
+  userId: Id<"users">,
+): Promise<{ required: boolean; set: boolean; codesPending: boolean }> {
+  const f = await factorsOf(ctx, userId);
+  const set = f?.actionPinHash !== undefined;
+  const never = f?.recoveryCreatedAt === undefined && (f?.recoveryHashes?.length ?? 0) === 0;
+  return { required: true, set, codesPending: set && never && recoveryPepper() !== null };
 }
 
 // ---------------------------------------------------------------- PIN attempt counters (`pinCounters`)

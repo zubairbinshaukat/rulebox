@@ -11,6 +11,9 @@
 import { formatDuration, formatNumber, plural } from "../format";
 import { secShell } from "./strings-shell";
 
+/** The `not_ready` detail of `requirePepper` (`convex/lib/recoveryCodes.ts`). */
+export const RECOVERY_SECRET_DETAIL = "RULEBOX_RECOVERY_PEPPER is missing or too short";
+
 export const sec = {
   ...secShell,
   tab: "Security",
@@ -89,6 +92,16 @@ export const sec = {
   setupWhy: "Why? A signed-in browser alone is not enough for changes that affect your PCs or your team.",
   setupSteps: ["PIN", "Recovery codes", "Passkey"],
   setupStepOf: (n: number, total: number, name: string) => `Step ${formatNumber(n)} of ${formatNumber(total)}: ${name}`,
+  /** Setup was left unfinished (tab closed, page reloaded): shown on the resumed codes step. */
+  setupResumedTitle: "Let's finish setting up",
+  setupResumedDetail: "Your PIN is saved. Two more steps, then you're in.",
+  /** The server can't make recovery codes: said before any PIN is saved (nothing is saved yet). */
+  setupBlockedTitle: "Setup can't finish yet",
+  setupBlockedDetail:
+    "This Rulebox server is missing a setting that recovery codes need (RULEBOX_RECOVERY_PEPPER). Only whoever runs the server can add it. Nothing is saved yet. Ask them, then check again.",
+  setupBlockedAgain: "Check again",
+  /** Added under the "server can't make codes" error on the codes step. */
+  codesPinSaved: "Your PIN is saved. Once the server is fixed, reload this page and enter your PIN to continue.",
 
   // ---- recovery codes (shown once)
   codesTitle: "Save your recovery codes",
@@ -122,6 +135,11 @@ export const sec = {
   setupPasskeySkip: "Skip for now",
   setupDone: "Continue to the dashboard",
   setupPasskeyDone: "Done",
+  /** Banner on every screen while the member has no passkey (dismissible; the passkey is optional). */
+  passkeyReminderTitle: "Add a passkey",
+  passkeyReminderBody: "Unlock the dashboard faster than typing your PIN.",
+  passkeyReminderAction: "Open Security",
+  passkeyReminderDismiss: "Dismiss",
 
   // ---- the /pin-reset page (the emailed link)
   resetTitle: "Choose a new PIN",
@@ -206,6 +224,9 @@ export const sec = {
 
   // ---- not_ready details
   notReady: {
+    /** The server's recovery-code secret (`convex/lib/recoveryCodes.ts`): trying again can't help; the operator must add it. */
+    [RECOVERY_SECRET_DETAIL]:
+      "A setting is missing on this Rulebox server, so recovery codes can't be made or used yet. Only whoever runs the server can add it.",
     "no action PIN": "No PIN is set yet.",
     "no passkey": "No usable passkey. Use your PIN.",
     "passkeys not configured": "Passkeys are not set up on this Rulebox server. Use your PIN.",

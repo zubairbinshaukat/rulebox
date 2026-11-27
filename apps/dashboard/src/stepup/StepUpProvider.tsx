@@ -14,7 +14,7 @@ const SetupScreen = lazy(() => import("./SetupScreen"));
 /**
  * Step-up for the signed-in shell (plan 4.16, Phase 4b): feeds `stepUp:status`
  * and the keep-alive / lock calls to the controller, and shows, instead of the
- * screens, the PIN setup (`me.pin.required && !me.pin.set`, every role) or the
+ * screens, the PIN setup (`me.pin.required && !me.pin.set`, or unfinished: `me.pin.codesPending`; every role) or the
  * PIN screen (on every page load, after idle time and "Lock now"), plus the
  * confirm dialog for calls that need it.
  */
@@ -39,13 +39,16 @@ export function StepUpProvider({ children, options }: { children: ReactNode; opt
 
   const snap = useSyncExternalStore(controller.subscribe, controller.getSnapshot, controller.getSnapshot);
   // `account:me` knows at once (no wait for the status query): no flash of the dashboard before PIN setup.
-  const needsSetup = me.pin.required && !me.pin.set;
+  // Unfinished setup lives on the server: no PIN yet, or a PIN whose recovery codes were never made
+  // (tab closed after step 1). The second one resumes at step 2 after the PIN screen.
+  const needsSetup = (me.pin.required && !me.pin.set) || me.pin.codesPending === true;
 
   let body: ReactNode = children;
   // A lock (idle, another tab, the server) wins over the setup screen: the recovery codes it may be
   // showing are dropped with it, and a new set is made when setup comes back. (The start lock, reason
-  // "load", does not: with no PIN yet there is nothing to ask for, and no lock screen should flash.)
-  const lockedOverSetup = snap.locked && snap.reason !== "load";
+  // "load", does not while setup is running or when there is no PIN yet: nothing to ask for, and no
+  // lock screen should flash. A reload with the PIN already set does ask for it first.)
+  const lockedOverSetup = snap.locked && (snap.reason !== "load" || (me.pin.set && !snap.setupActive));
   if ((needsSetup || snap.setupActive) && !lockedOverSetup) body = <SetupScreen controller={controller} />;
   else if (snap.locked) body = <LockScreen controller={controller} email={me.email} reason={snap.reason} />;
 

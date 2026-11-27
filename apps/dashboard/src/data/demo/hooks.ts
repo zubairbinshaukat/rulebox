@@ -101,6 +101,7 @@ import {
   controls,
   currentMember,
   db as getDb,
+  factorsOf,
   fail,
   hasPin,
   latency,
@@ -624,7 +625,7 @@ function meOf(): MeResult {
     orgId: getDb().org._id,
     orgName: getDb().org.name,
     // Every member needs a PIN (Phase 4b); `set` follows the demo factors, so PIN setup shows until one exists.
-    pin: { required: true, set: hasPin(m._id) },
+    pin: { required: true, set: hasPin(m._id), codesPending: hasPin(m._id) && factorsOf(m._id)?.recoveryMade !== true },
     serverApiVersion: SERVER_API_VERSION,
   };
   return me;

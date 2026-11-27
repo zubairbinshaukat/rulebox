@@ -159,6 +159,7 @@ export const demoStepUpApi: StepUpApi = {
           failedSinceUnlock: pinSet ? f.pinFailures : 0,
           attemptsBeforeLockout: pinSet && !longLockout ? Math.max(0, STEP_UP.pinHardLimit - f.pinFailures) : STEP_UP.pinHardLimit,
           recoveryCodesLeft: f?.recoveryCodes.length ?? 0,
+          recoveryAvailable: true,
           resetByEmail: true,
         },
         passkeys: (f?.passkeys ?? []).map((k) => ({
@@ -234,6 +235,7 @@ export const demoStepUpApi: StepUpApi = {
             if (!hasPin(m._id)) fail("step_up_setup_required", { detail: "pin" });
             const codes = newRecoveryCodes();
             factorsFor(m._id).recoveryCodes = codes;
+            factorsFor(m._id).recoveryMade = true;
             audit({ action: "member.recoveryCodesGenerated", targetLabel: m.email, summary: "New recovery codes for the action PIN." });
             return codes;
           },

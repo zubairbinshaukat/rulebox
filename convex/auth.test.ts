@@ -1,4 +1,4 @@
-import { describe, expect, test } from "vitest";
+import { afterEach, beforeEach, describe, expect, test } from "vitest";
 import { asToken, setupAuth, signIn } from "../tests/convex/auth";
 import { asMember, asUser, codeOf, expectCode, expectNoSecrets, makeOrg, type T } from "../tests/convex/identity";
 import { api, internal } from "./_generated/api";
@@ -20,6 +20,16 @@ async function errorOf(p: Promise<unknown>): Promise<unknown> {
   }
   throw new Error("expected an error");
 }
+
+declare const process: { env: Record<string, string | undefined> };
+
+// The first PIN needs the recovery-code secret (setup would otherwise stop after step 1).
+beforeEach(() => {
+  process.env.RULEBOX_RECOVERY_PEPPER = "auth-test-recovery-pepper-0123456789abcdef";
+});
+afterEach(() => {
+  delete process.env.RULEBOX_RECOVERY_PEPPER;
+});
 
 describe("setup:createOwnerInvite", () => {
   test("creates the organization with defaults; a second call refuses", async () => {
@@ -174,7 +184,7 @@ describe("sign-up and sign-in through Convex Auth", () => {
     });
     expectNoSecrets(me, [inviteCode]);
     // Security review finding 7: only stable fields (no lockout, counter or mail flag: those are in stepUp:status.pin).
-    expect(Object.keys((me as { pin: object }).pin).sort()).toEqual(["required", "set"]);
+    expect(Object.keys((me as { pin: object }).pin).sort()).toEqual(["codesPending", "required", "set"]);
     // Same code again, other email or same email: refused.
     await expectCode(
       signIn(t, { flow: "signUp", email: "x@acme.test", password: PASSWORD, inviteCode }),

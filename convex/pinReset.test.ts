@@ -22,6 +22,7 @@ type Sent = { to: string[]; subject: string; text: string };
 let sent: Sent[] = [];
 
 beforeEach(() => {
+  process.env.RULEBOX_RECOVERY_PEPPER = "pinreset-test-recovery-pepper-0123456789ab"; // the first PIN needs it
   sent = [];
   vi.stubGlobal(
     "fetch",
@@ -37,6 +38,7 @@ afterEach(() => {
   vi.useRealTimers();
   vi.unstubAllGlobals();
   delete process.env.RULEBOX_PLATFORM_KEY;
+  delete process.env.RULEBOX_RECOVERY_PEPPER;
 });
 
 const drain = (t: T) => t.finishAllScheduledFunctions(vi.runAllTimers);

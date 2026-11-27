@@ -389,7 +389,8 @@ export const IO_BUDGETS: Record<string, IoBudget> = {
   // person's `stepUpFactors` row (1; changes only when the PIN, its recovery codes or a passkey id
   // change, never on a wrong attempt: those counters live in `pinCounters`). NO secret, flag or
   // counter row (security review finding 7); the lock screen's lockout, attempts and "reset by email"
-  // are in `stepUp:status.pin`.
+  // are in `stepUp:status.pin`. `pin.codesPending` (PIN set, recovery codes never made, pepper set) comes
+  // from that same row plus an env read: no extra read, no new subscription.
   "account:me": { maxReads: 1 + 20 + 20 + 1, maxReadBytes: 16_000, maxWrites: 0, maxWriteBytes: 0, live: true },
   // Public action, SESSION-BOUND (no email argument): the caller's session (query: session row), then 2
   // limiter rows (per user, global; read + write each) and one scheduled run. The scheduled
@@ -425,6 +426,7 @@ export const IO_BUDGETS: Record<string, IoBudget> = {
   // ~400 B each), the session's `stepUpSessions` row, the `pinCounters` row (only with a PIN set) and,
   // with no PIN yet, the session row (bootstrap window). Re-runs when one of those rows changes: the
   // counters only on a wrong attempt, the step-up row at most once per activity quantum (4 minutes).
+  // `pin.recoveryAvailable` is an env read (pepper present): no database cost.
   "stepUp:status": { maxReads: 3 + 1 + 10 + 1 + 1 + 1, maxReadBytes: 12_288, maxWrites: 0, maxWriteBytes: 0, live: true },
 
   // ---- Step 18: rows for the functions that had none. MEASURED = the probe's number for a call that ran

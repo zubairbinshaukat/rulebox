@@ -24,6 +24,7 @@ import {
   deleteStepUpSessions,
   hasPin,
   markVerified,
+  pinSetupOf,
   sessionIsFresh,
   storePinHash,
 } from "./lib/stepUp";
@@ -78,11 +79,12 @@ const meResult = v.union(
      * Phase 4b: the action PIN every member must set to finish sign-in.
      * `set` false: route to PIN setup (every member write answers
      * `step_up_setup_required` until then). Only these STABLE fields live
-     * here (security review finding 7): the lock screen's lockout, attempt
+     * here (security review finding 7). `codesPending`: the PIN is set but its recovery codes were
+     * never made (setup was left unfinished): the dashboard resumes setup at step 2. The lock screen's lockout, attempt
      * count and "reset by email" are in `stepUp:status.pin`, so a wrong PIN
      * never re-runs this query for every open tab.
      */
-    pin: v.object({ required: v.boolean(), set: v.boolean() }),
+    pin: v.object({ required: v.boolean(), set: v.boolean(), codesPending: v.boolean() }),
   }),
 );
 
@@ -120,7 +122,7 @@ export const me = publicQuery({
       orgName: memberships.find((m) => m.orgId === current.orgId)?.orgName ?? "",
       memberships,
       serverApiVersion: SERVER_API_VERSION,
-      pin: { required: true, set: await hasPin(ctx, signedIn.userId) },
+      pin: await pinSetupOf(ctx, signedIn.userId),
     };
   },
 });
