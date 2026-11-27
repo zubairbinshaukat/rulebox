@@ -256,10 +256,15 @@ describe("codes a PC reports, as sentences", () => {
     "service_not_in_profile",
     "wifi_filters_error",
     "connect_failed",
+    "admin_tiles_skipped",
   ])("layer or item detail %s has a sentence", (code) => {
     expect(LAYER_DETAILS[code]).toBeTruthy();
     expect(layerDetailText(code)).not.toContain(code);
     expect(layerDetailText(code)!.endsWith(".")).toBe(true);
+  });
+
+  it("a PC that skipped the hidden admin accounts says so in plain words on its machine layer", () => {
+    expect(layerNoteOf("machine", { state: "ok", detail: "admin_tiles_skipped" })).toMatch(/^Admin accounts stay visible on this PC until sign-in as another user is confirmed/);
   });
 
   it("the print service stays on with printers, and a performance restart has its own note", () => {

@@ -44,6 +44,7 @@ export const LAYER_DETAILS: Record<string, string> = {
   accessibility_flags_unreadable: "The accessibility shortcut settings could not be read.",
   // PC restrictions and USB
   admin_signin_unverified: "Administrator accounts are not hidden: that is not confirmed as safe on this PC yet.",
+  admin_tiles_skipped: "Admin accounts stay visible on this PC until sign-in as another user is confirmed. Everything else was applied.",
   admin_list_unreadable: "The list of administrator accounts could not be read.",
   lockout_threshold_too_low: "The account lockout threshold is too low. It was not applied.",
   lockout_window_too_long: "The lockout counting time is longer than the lockout itself. It was not applied.",

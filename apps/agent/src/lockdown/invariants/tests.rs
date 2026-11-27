@@ -183,9 +183,12 @@ fn a_rule_set_that_would_block_administrators_is_refused() {
 // -- I7 -------------------------------------------------------------------------------------
 
 #[test]
-fn hide_admin_tiles_needs_the_e_71_flag_and_the_lockout_threshold_is_at_least_5() {
+fn hide_admin_tiles_without_the_e_71_flag_is_no_refusal_and_the_lockout_threshold_is_at_least_5() {
+    // Owner decision 2026-11-28: the document is not refused; the machine layer skips only that option
+    // (`machine::tests::hiding_tiles_before_e_71_skips_only_that_option_and_reports_a_warning`).
     let hidden = doc_with(LockdownPolicy::default());
-    assert_eq!(validate(&hidden, &Facts::default()), Err(Refusal::AdminSigninUnverified));
+    assert!(hidden.lockdown.as_ref().unwrap().machine.hide_admin_tiles);
+    assert_eq!(validate(&hidden, &Facts::default()), Ok(()));
     assert_eq!(validate(&hidden, &verified()), Ok(()));
 
     let shown = json_doc(json!({ "lockdown": { "machine": { "hideAdminTiles": false } } }));
@@ -256,8 +259,9 @@ fn a_refused_document_writes_nothing_and_keeps_the_previous_applied_state() {
     // Every kind of refusal that apply can reach leaves all three exactly as they were.
     let wrong_exit = Facts { generated: Generated { hooked_hotkeys: vec!["Alt+F4".into()], ..Generated::default() }, ..verified() };
     let hand_built = facts_with_usb(denying("745a17a0-74d3-11d0-b6fe-00a0c90f57da", &[], false));
+    let low_lockout = json_doc(json!({ "lockdown": { "machine": { "accountLockout": { "threshold": 2, "durationMin": 15, "windowMin": 15 } } } }));
     let cases = [
-        (&good, Facts::default(), "admin_signin_unverified"),
+        (&low_lockout, verified(), "lockout_threshold_too_low"),
         (&good, wrong_exit, "would_block_exit"),
         (&good, hand_built, "would_block_input_device"),
         (&AgentDoc::default(), facts_with_usb(denying("36fc9e60-c465-11cf-8056-444553540000", &[], true)), "would_block_input_device"),

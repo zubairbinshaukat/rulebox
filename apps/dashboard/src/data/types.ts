@@ -1328,7 +1328,7 @@ export const DEFAULT_LOCKDOWN_SETTINGS: LockdownSettings = {
     hideSwitchUser: true,
     hideSignInPower: true,
     denyElevationRequests: true,
-    hideAdminTiles: true,
+    hideAdminTiles: false,
     noWakePassword: true,
     restrictPrinterDrivers: true,
     fileOutputPrinters: true,

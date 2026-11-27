@@ -85,7 +85,8 @@ pub struct AgentConfig {
     pub shell_mechanism: ShellMechanism,
     /// (Phase 5 Step 4, plan 4.6 I7) The user sets this after checklist row E-71 passed on
     /// the VM: an administrator can still sign in with the admin tiles hidden. Until then
-    /// a document with `hideAdminTiles` is refused (`admin_signin_unverified`).
+    /// the machine layer skips `hideAdminTiles` alone and reports `admin_tiles_skipped`
+    /// (the rest of the document applies).
     pub admin_signin_verified: bool,
 }
 

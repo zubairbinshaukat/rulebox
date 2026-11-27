@@ -392,21 +392,47 @@ fn an_existing_tile_value_is_remembered_and_restored() {
 }
 
 #[test]
-fn hiding_tiles_before_e_71_is_refused_by_the_layer_and_by_the_invariant() {
+fn hiding_tiles_before_e_71_skips_only_that_option_and_reports_a_warning() {
     let rig = Rig::new();
     name_admins(&rig, &[(ADMIN_1, "Owner")]);
-    let doc = AgentDoc { lockdown: Some(tiles_on()), ..AgentDoc::default() };
-    // The whole apply refuses before any write (I7).
-    let refusal = apply_all(&rig.ctx_at(1_000, false), &doc).unwrap_err();
-    assert_eq!(refusal, ApplyRefusal::Refused("admin_signin_unverified"));
-    // The layer alone holds the same line.
+    // The rest of the section is on as well: it must still be applied (owner decision 2026-11-28, guard I7).
+    let policy = LockdownPolicy { machine: MachineRestrictions { hide_switch_user: true, ..tiles_on().machine }, ..off() };
+    let doc = AgentDoc { lockdown: Some(policy), ..AgentDoc::default() };
+    // The whole apply is not refused.
+    assert!(apply_all(&rig.ctx_at(1_000, false), &doc).is_ok());
+    // The layer: ok, one warning note, the other item written, no tile touched and the list not even read.
+    let before = rig.mutating();
     let state = apply(&rig.ctx_at(1_000, false), &doc);
-    assert_eq!((state.state, state.detail.as_deref()), (LayerStatus::Failed, Some("admin_signin_unverified")));
+    assert_eq!((state.mode, state.state, state.detail.as_deref()), (ReportedMode::On, LayerStatus::Ok, Some("admin_tiles_skipped")));
+    assert_eq!(rig.mutating(), before, "a second run writes nothing");
+    assert_eq!(rig.value(POL_SYSTEM, "HideFastUserSwitching"), Some(RegData::Dword(1)));
     assert_eq!(rig.value(USER_LIST, "Owner"), None);
-    assert_eq!(rig.mutating(), 0);
-    // After the user records E-71 it goes.
-    assert!(apply_all(&rig.ctx_at(1_000, true), &doc).is_ok());
+    assert!(!rig.platform.calls().contains(&SimOp::EnabledLocalAdminAccounts));
+    // A real failure still wins over the warning.
+    rig.platform.fail_next(SimOp::WriteMachineValue, PlatformError::AccessDenied);
+    let power = LockdownPolicy { machine: MachineRestrictions { hide_sign_in_power: true, ..tiles_on().machine }, ..off() };
+    let power_doc = AgentDoc { lockdown: Some(power), ..AgentDoc::default() };
+    let failed = apply(&rig.ctx_at(1_000, false), &power_doc);
+    assert_eq!(failed.detail.as_deref(), Some("access_denied"));
+    apply(&rig.ctx_at(1_000, false), &doc);
+    // After the user records E-71 the tiles are hidden and the warning is gone.
+    let state = apply(&rig.ctx_at(1_000, true), &doc);
+    assert_eq!((state.state, state.detail), (LayerStatus::Ok, None));
     assert_eq!(rig.value(USER_LIST, "Owner"), Some(RegData::Dword(0)));
+    // The flag taken back (config edited): the tiles come back and the warning returns.
+    let state = apply(&rig.ctx_at(1_000, false), &doc);
+    assert_eq!(state.detail.as_deref(), Some("admin_tiles_skipped"));
+    assert_eq!(rig.value(USER_LIST, "Owner"), None);
+}
+
+#[test]
+fn tiles_off_or_verified_report_no_warning() {
+    let rig = Rig::new();
+    name_admins(&rig, &[(ADMIN_1, "Owner")]);
+    let off_doc = AgentDoc { lockdown: Some(off()), ..AgentDoc::default() };
+    assert_eq!(apply(&rig.ctx_at(1_000, false), &off_doc).detail, None);
+    let on_doc = AgentDoc { lockdown: Some(tiles_on()), ..AgentDoc::default() };
+    assert_eq!(apply(&rig.ctx_at(1_000, true), &on_doc).detail, None);
 }
 
 #[test]

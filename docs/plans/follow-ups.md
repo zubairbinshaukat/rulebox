@@ -54,6 +54,8 @@ tablet, laptop and wide desktop widths (screenshots) before calling it done.
   this within a minute." and show per-group "PCs up to date: n of m".
 
 ### Bug: "Hide administrator accounts" is ON by default and blocks the whole lockdown (VM run A3, 2026-11-28)
+**DONE locally 2026-11-28 (branch `t3/post-vm-run-a3-followups`, needs the VM re-test):** default `false` for new groups (existing groups keep their stored value), the agent skips only that option without E-71 and reports the layer note `admin_tiles_skipped` (machine layer, shown on the device's Lockdown card), `admin_signin_unverified` is no longer produced. Original problem text below.
+
 - `DEFAULT_LOCKDOWN_SETTINGS.hideAdminTiles = true` (`convex/lib/lockdownValidators.ts:94`). A PC that never
   recorded E-71 (Other user sign-in works) refuses the **whole** lockdown section (`admin_signin_unverified`,
   guard I7), so a new group's PCs get no lockdown at all.

@@ -91,7 +91,8 @@ export const DEFAULT_LOCKDOWN_SETTINGS: LockdownSettings = {
     hideSwitchUser: true,
     hideSignInPower: true,
     denyElevationRequests: true,
-    hideAdminTiles: true,
+    // Off for new groups (owner 2026-11-28): needs E-71 on the PC; a PC without it skips the option and reports a warning.
+    hideAdminTiles: false,
     noWakePassword: true,
     restrictPrinterDrivers: true,
     fileOutputPrinters: true,
