@@ -19,7 +19,8 @@
     "test:convex": "vitest run --project convex",
     "test:scripts": "vitest run --project scripts",
     "test:installer": "vitest run --project installer",
-    "gen:vectors": "node scripts/gen-policy-vectors.mjs",
+    "ci:check": "pwsh -NoProfile -File scripts/ci-check.ps1",
+    "gen:vectors":"node scripts/gen-policy-vectors.mjs",
     "gen:types": "cargo test -p rulebox-policy -p rulebox-ipc -p rulebox-staff export_bindings",
     "gen:brand": "node scripts/build-brand.mjs"
   },
