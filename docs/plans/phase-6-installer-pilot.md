@@ -1639,10 +1639,10 @@ adding the `apps/agent/src/drivers/{zip,inf,probe}.rs` files named below: the ne
   fix:** `PROTECTED_PRINT_VALUES` (`apps/agent/src/platform/windows.rs`) reads `Control\Print\WPP\EnabledNow`, which does not
   exist; a PC where the Settings switch turned the mode on reads as off. Read `Control\Print\WindowsProtectedPrintState`, keep
   `WindowsProtectedPrintGroupPolicyState`, add `WindowsProtectedPrintMode` (4.8). pnputil and the TPCL INF were not reached.
-  **Fixed 2026-11-25** (second run): `PROTECTED_PRINT_VALUES` reads the three S-12 values. Still open for Step 15 (4.8): the
-  removal order (delete the printer driver before `pnputil /delete-driver`, X-1), the `driver_untrusted_publisher` detail for a
-  non-WHQL package whose publisher is not trusted (S-11), and the owner's decision on adding a vendor certificate to
-  TrustedPublisher.
+  **Fixed 2026-11-25** (second run): `PROTECTED_PRINT_VALUES` reads the three S-12 values. **Built 2026-11-26 (333b80f, agent
+  side, VM check pending):** the removal order (delete the printer driver before `pnputil /delete-driver`, X-1), the
+  `driver_untrusted_publisher` detail for a non-WHQL package whose publisher is not trusted (S-11), and the owner's decision
+  (trust the named certificate per driver, `signerThumbprint`). Left: the `signerThumbprint` field in Convex and the dashboard.
 
 **Machine:** dev. **PRD:** 24.2 (new bullet). **Files:** as Phase 5 Step
 14b, plus `apps/agent/src/drivers/{zip.rs,inf.rs,probe.rs}`.
@@ -1908,8 +1908,8 @@ step-up, `expectedRevision` of the organization, `null` clears, unchanged = 0 wr
   the work, not the client). It writes Application event log entries 1100 to 1103.
 - Server: the release is a setting of the **organization**, kept out of `settings` like `phase5Settings`; every PC of the organization gets the same key.
 **Left:** a real CI-built MSI and VM run 23 / Step 22 item 9 (an agent-driven upgrade with no employee signed in, and a failing one: confirm the service restarts into
-the new version, the rollback leaves the old one running, `selfupdate-msi.log` is written, and that `DETACHED_PROCESS` msiexec survives the service stop); no
-dashboard screen or `get` query for the release yet (set it through `ruleboxRelease:set`); the release workflow does not publish the release into the setting;
+the new version, the rollback leaves the old one running, `selfupdate-msi.log` is written, and that `DETACHED_PROCESS` msiexec survives the service stop; run A2
+passed both, 2026-11-26); the dashboard Settings > Updates card and the `ruleboxRelease:get` query are built (4fd6141, owner-only); the release workflow does not publish the release into the setting;
 `docs/prd.md` 23.9 already carries the v1 note ("an agent-driven MSI major upgrade with no employee signed in"); 23.4 was not checked.
 
 **Machine:** dev. **PRD:** 23.1, 23.2, 23.9. **Files:**
