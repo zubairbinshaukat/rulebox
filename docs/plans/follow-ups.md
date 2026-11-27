@@ -132,11 +132,11 @@ must review every field against this rule and say which ones they hide, move or 
 Questions from `docs/plans/phase-6-vm-results.md` "Run A3". All answered with the recommendation.
 
 - **Q-A4 (hideAdminTiles default):** answered as (c) both, see the bug section above.
-- **Q-A5 (deleted employee's browser profile):** after a roster change removes an employee, the agent runs a
+- **Q-A5 (deleted employee's browser profile) — DONE locally 2026-11-28, needs the VM** (`cleanup.rs` profile-only round at agent start and after every roster change, retried every 30 s while somebody is signed in): after a roster change removes an employee, the agent runs a
   profile-only cleanup for that employee's browser profile the next time nobody is signed in (not only at
   the next employee sign-out). Tests: removal while signed out, while another employee is signed in, across
   a restart.
-- **Q-A6 (ProgramData after uninstall):** the uninstall-only step deletes everything in
+- **Q-A6 (ProgramData after uninstall) — DONE locally 2026-11-28, needs the VM:** `PurgeDataAtUninstall` (new MSI action running `rulebox-agent purge-data` after StopServices, same condition as the unenroll); the uninstall-only step deletes everything in
   `C:\ProgramData\Rulebox` except `logs\` (so `state\` incl. `secrets.bin`, and `downloads\`). Must not run on
   major upgrade (same rule as UnenrollAtUninstall).
 - **Q-A7 (empty policy keys):** low priority, after the main fixes: on uninstall/restore remove the policy keys

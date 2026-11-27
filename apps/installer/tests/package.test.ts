@@ -152,15 +152,15 @@ describe("package", () => {
   });
 });
 
-describe("custom actions: no script, two actions in all", () => {
+describe("custom actions: no script, three actions in all", () => {
   const action = (id: string) => {
     const found = all("CustomAction").filter((el) => el.attrs.Id === id);
     expect(found, id).toHaveLength(1);
     return found[0];
   };
 
-  test("there are exactly two: the Util ShellExec DLL entry on the Setup shortcut and the uninstall-only unenroll", () => {
-    expect(all("CustomAction").map((el) => el.attrs.Id).sort()).toEqual(["LaunchRuleboxSetup", "UnenrollAtUninstall"]);
+  test("there are exactly three: the Util ShellExec DLL entry on the Setup shortcut and the two uninstall-only agent commands", () => {
+    expect(all("CustomAction").map((el) => el.attrs.Id).sort()).toEqual(["LaunchRuleboxSetup", "PurgeDataAtUninstall", "UnenrollAtUninstall"]);
     const launch = action("LaunchRuleboxSetup");
     expect(launch.attrs.DllEntry).toBe("WixShellExec");
     expect(launch.attrs.BinaryRef).toBe("Wix4UtilCA_X64");
@@ -184,9 +184,9 @@ describe("custom actions: no script, two actions in all", () => {
     for (const el of all("InstallUISequence")) {
       expect(el.children.filter((child) => child.name === "Custom")).toHaveLength(0);
     }
-    // The one entry of the execute sequence is the unenroll action (next test).
+    // The only entries of the execute sequence are the two uninstall actions (next tests).
     const custom = all("InstallExecuteSequence").flatMap((el) => el.children.filter((child) => child.name === "Custom"));
-    expect(custom.map((el) => el.attrs.Action)).toEqual(["UnenrollAtUninstall"]);
+    expect(custom.map((el) => el.attrs.Action)).toEqual(["UnenrollAtUninstall", "PurgeDataAtUninstall"]);
   });
 
   test("uninstall unenrolls, removes the Staff account and the device secrets: the installed agent, deferred, as SYSTEM, errors ignored", () => {
@@ -219,6 +219,45 @@ describe("custom actions: no script, two actions in all", () => {
     expect(entry?.attrs.After).toBeUndefined();
     // The uninstall guard (kiosk on) uses the same words, so the two cannot drift apart.
     expect(all("Launch").some((el) => el.attrs.Condition.includes('REMOVE="ALL" AND NOT UPGRADINGPRODUCTCODE'))).toBe(true);
+  });
+
+  test("uninstall also deletes everything in ProgramData\\Rulebox but the logs: the installed agent's purge-data, deferred, after the service stopped", () => {
+    const purge = action("PurgeDataAtUninstall");
+    expect(purge.attrs).toMatchObject({
+      FileRef: "RuleboxAgentExe",
+      ExeCommand: "purge-data",
+      Execute: "deferred",
+      Impersonate: "no",
+      Return: "ignore",
+    });
+    for (const forbidden of ["Script", "JScriptCall", "VBScriptCall", "DllEntry", "BinaryRef", "Directory", "Property", "Value"]) {
+      expect(purge.attrs[forbidden], forbidden).toBeUndefined();
+    }
+    // The command is the agent's own (clap: `PurgeData` -> `purge-data`), with no option of its own.
+    const cli = readFileSync(join(repoRoot, "apps/agent/src/cli.rs"), "utf8");
+    expect(/\n\s*PurgeData,/.test(cli)).toBe(true);
+    // What it keeps is the agent's own log folder, and the agent's data folder is where the kept name is looked up.
+    const purgeRs = readFileSync(join(repoRoot, "apps/agent/src/purge.rs"), "utf8");
+    expect(/pub const KEEP: &str = "logs";/.test(purgeRs)).toBe(true);
+    expect(/pub fn logs_dir\(&self\) -> PathBuf \{\s*self\.root\.join\("logs"\)/.test(readFileSync(join(repoRoot, "apps/agent/src/paths.rs"), "utf8"))).toBe(true);
+  });
+
+  test("the purge never runs in a major upgrade (same rule as the unenroll) and only once the service has stopped", () => {
+    const sequence = all("InstallExecuteSequence").flatMap((el) => el.children);
+    const purge = sequence.find((child) => child.name === "Custom" && child.attrs.Action === "PurgeDataAtUninstall");
+    const unenroll = sequence.find((child) => child.name === "Custom" && child.attrs.Action === "UnenrollAtUninstall");
+    // Exactly the unenroll's words: a real uninstall, and NOT while MajorUpgrade removes the old product.
+    expect(purge?.attrs.Condition).toBe('REMOVE="ALL" AND NOT UPGRADINGPRODUCTCODE');
+    expect(purge?.attrs.Condition).toBe(unenroll?.attrs.Condition);
+    // After the service stopped (it writes state\), before the agent's files and the install marker go (both come after StopServices).
+    expect(purge?.attrs.After).toBe("StopServices");
+    expect(purge?.attrs.Before).toBeUndefined();
+    // The unenroll talks to the running service, so it stays before the stop: the order is unenroll, stop, purge.
+    expect(unenroll?.attrs.Before).toBe("StopServices");
+    expect(sequence.indexOf(unenroll!)).toBeLessThan(sequence.indexOf(purge!));
+    // MajorUpgrade is still the only upgrade logic, and nothing else in the sequence names the purge.
+    expect(all("MajorUpgrade")).toHaveLength(1);
+    expect(sequence.filter((child) => child.attrs.Action === "PurgeDataAtUninstall")).toHaveLength(1);
   });
 
   test("the folder of old Staff App versions is removed with the product (RemoveFolderEx on its own directory)", () => {
@@ -271,9 +310,9 @@ describe("custom actions: no script, two actions in all", () => {
 
   test("no VBScript or JScript appears anywhere in the installer folder", () => {
     for (const file of WXS_FILES) expect(raw[file], file).not.toMatch(/vbscript|jscript|\.vbs\b|\.js\b/i);
-    // The one EXE custom action is the agent's own `unenroll` (Service.wxs); no other file names a command line.
+    // The two EXE custom actions are the agent's own `unenroll` and `purge-data` (Service.wxs); no other file names a command line.
     for (const file of WXS_FILES) {
-      expect(raw[file].match(/ExeCommand/g)?.length ?? 0, file).toBe(file === "Service.wxs" ? 1 : 0);
+      expect(raw[file].match(/ExeCommand/g)?.length ?? 0, file).toBe(file === "Service.wxs" ? 2 : 0);
     }
     expect(existsSync(join(installerDir, "scripts"))).toBe(false);
   });

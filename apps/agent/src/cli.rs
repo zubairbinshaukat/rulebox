@@ -75,6 +75,9 @@ pub enum Command {
         #[arg(long)]
         yes: bool,
     },
+    /// (Q-A6) Uninstall only: delete everything in the Rulebox data directory except `logs\`. The MSI runs it after the
+    /// service has stopped, never in an upgrade. Needs an elevated prompt on an armed machine.
+    PurgeData,
     /// Read-only compatibility report.
     Compat {
         #[arg(long)]
@@ -222,6 +225,8 @@ mod tests {
         );
         assert_eq!(parse(&["recover"]), Command::Recover { yes: false });
         assert_eq!(parse(&["recover", "--yes"]), Command::Recover { yes: true });
+        assert_eq!(parse(&["purge-data"]), Command::PurgeData);
+        assert!(Cli::try_parse_from(["rulebox-agent", "purge-data", "--yes"]).is_err(), "no options: it asks nothing and is not for typing");
         assert_eq!(parse(&["compat", "--json"]), Command::Compat { json: true });
         assert_eq!(parse(&["lockdown-status"]), Command::LockdownStatus { json: false });
         assert_eq!(parse(&["lockdown-status", "--json"]), Command::LockdownStatus { json: true });
