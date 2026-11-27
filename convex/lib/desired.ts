@@ -422,8 +422,11 @@ export function buildCatalogChecked(input: BuildInput): { catalog: CatalogApp[];
 
 /** (Phase 6 Step 16) A device document that would break a browser limit (plan 4.3); `publish.ts` records it with the group's name. */
 export class BrowserLimitError extends Error {
-  constructor(readonly limit: "too_many_browser_apps" | "too_many_browser_urls") {
+  // A plain field, not a `readonly limit` parameter property: Node's strip-only TypeScript (used by the installer test scripts) refuses those.
+  readonly limit: "too_many_browser_apps" | "too_many_browser_urls";
+  constructor(limit: "too_many_browser_apps" | "too_many_browser_urls") {
     super(limit);
+    this.limit = limit;
   }
 }
 
