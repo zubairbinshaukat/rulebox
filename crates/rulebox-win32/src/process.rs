@@ -11,7 +11,7 @@ use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use windows::core::{PCWSTR, PWSTR};
-use windows::Win32::Foundation::HANDLE;
+use windows::Win32::Foundation::{HANDLE, WAIT_OBJECT_0};
 use windows::Win32::Security::{
     DuplicateTokenEx, GetTokenInformation, SecurityImpersonation, TokenElevation, TokenElevationType,
     TokenElevationTypeFull, TokenPrimary, TokenSessionId, TOKEN_ALL_ACCESS, TOKEN_ELEVATION, TOKEN_ELEVATION_TYPE, TOKEN_QUERY,
@@ -270,12 +270,28 @@ fn stale_candidate(
         return Ok(false);
     }
     if terminate {
-        // SAFETY: `process` has PROCESS_TERMINATE access.
-        unsafe { TerminateProcess(process.raw(), 1) }.map_err(|e| api_err("TerminateProcess", &e))?;
-        // SAFETY: `process` has SYNCHRONIZE access. Best effort: a timeout only means the next look finds it again.
-        unsafe { WaitForSingleObject(process.raw(), STALE_EXIT_WAIT_MS) };
+        end_process(&process)?;
     }
     Ok(true)
+}
+
+/// Ends `process` (a handle with `PROCESS_TERMINATE | SYNCHRONIZE`) and waits up to [`STALE_EXIT_WAIT_MS`] for it.
+///
+/// A process that is already ending counts as ended: `TerminateProcess` refuses it with "access denied". That happens
+/// to the Staff App in [`end_all_by_name`] when the launcher was ended a moment before and its kill-on-close job is
+/// taking the Staff App down (Phase 6 Step 22 run A3: the error made the agent report "cannot close the Staff App" and
+/// release the hold, although both were closed). Any other process that refuses stays an error.
+fn end_process(process: &OwnedHandle) -> Result<()> {
+    // SAFETY: `process` has PROCESS_TERMINATE access.
+    let ended = unsafe { TerminateProcess(process.raw(), 1) };
+    // SAFETY: `process` has SYNCHRONIZE access. Best effort after a successful end: a timeout only means the next look
+    // finds it again.
+    let exited = unsafe { WaitForSingleObject(process.raw(), STALE_EXIT_WAIT_MS) } == WAIT_OBJECT_0;
+    match ended {
+        Ok(()) => Ok(()),
+        Err(_) if exited => Ok(()),
+        Err(error) => Err(api_err("TerminateProcess", &error)),
+    }
 }
 
 /// The ids of processes in `session_id` owned by `owner` that were started as `exe_name` (the Toolhelp name, case-insensitive)
@@ -494,6 +510,33 @@ mod tests {
         assert!(find_stale_by_name(0xFFFF_0000, &name, elsewhere, &user).unwrap().is_empty());
         let other = Sid::parse("S-1-5-21-1-2-3-1999").unwrap();
         assert!(!find_stale_by_name(session, &name, elsewhere, &other).unwrap().contains(&me));
+    }
+
+    /// Run A3: a process that already ended (here a child of this test, ended and reaped while a handle stays open) counts as
+    /// ended; `TerminateProcess` alone refuses it with "access denied". A live one is ended.
+    #[test]
+    fn ending_a_process_that_already_ended_is_not_an_error() {
+        let access = PROCESS_QUERY_LIMITED_INFORMATION | PROCESS_TERMINATE | PROCESS_SYNCHRONIZE;
+        let spawn = || {
+            std::process::Command::new(r"C:\Windows\System32\ping.exe")
+                .args(["-n", "30", "127.0.0.1"])
+                .stdout(std::process::Stdio::null())
+                .spawn()
+                .unwrap()
+        };
+
+        let mut live = spawn();
+        let handle = open_process(live.id(), access).unwrap();
+        end_process(&handle).unwrap();
+        assert_eq!(live.wait().unwrap().code(), Some(1));
+
+        let mut gone = spawn();
+        let handle = open_process(gone.id(), access).unwrap();
+        gone.kill().unwrap();
+        gone.wait().unwrap();
+        // SAFETY: a valid handle with PROCESS_TERMINATE access.
+        assert!(unsafe { TerminateProcess(handle.raw(), 1) }.is_err(), "Windows refuses to end an ended process");
+        end_process(&handle).unwrap();
     }
 
     #[test]

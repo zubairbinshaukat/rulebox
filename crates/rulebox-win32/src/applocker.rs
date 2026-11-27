@@ -262,12 +262,16 @@ fn set_local(collections: &[Collection]) -> Result<()> {
     Ok(())
 }
 
-/// The CSP leaf (instance id) and the WMI class of a collection.
+/// The CSP leaf (instance id) and the WMI class of a collection. The class names are what the MDM bridge lists on Windows 11
+/// Pro 26300 (Phase 6 Step 22 run A3, `tools/mdm-applocker-probe.ps1` as SYSTEM): only EXE and StoreApps carry
+/// `ApplicationLaunchRestrictions01_` in the name; MSI and Script are `MDM_AppLocker_MSI03` and `MDM_AppLocker_Script03`. The
+/// documented-looking `..._MSI03` / `..._Script03` names do not exist ("Invalid class"), so every policy write and every
+/// restore failed at the MSI collection.
 fn csp_names(collection: &str) -> (&'static str, &'static str) {
     match collection {
         "Exe" => ("EXE", "MDM_AppLocker_ApplicationLaunchRestrictions01_EXE03"),
-        "Msi" => ("MSI", "MDM_AppLocker_ApplicationLaunchRestrictions01_MSI03"),
-        "Script" => ("Script", "MDM_AppLocker_ApplicationLaunchRestrictions01_Script03"),
+        "Msi" => ("MSI", "MDM_AppLocker_MSI03"),
+        "Script" => ("Script", "MDM_AppLocker_Script03"),
         _ => ("StoreApps", "MDM_AppLocker_ApplicationLaunchRestrictions01_StoreApps03"),
     }
 }
@@ -326,6 +330,14 @@ fn csp_put(services: &IWbemServices, collection: &Collection) -> Result<()> {
 
 /// `WBEM_E_NOT_FOUND`: there is no such instance.
 const WBEM_E_NOT_FOUND: u32 = 0x8004_1002;
+/// `WBEM_E_INVALID_CLASS`: the bridge has no such class on this PC, so no instance of it can exist either.
+const WBEM_E_INVALID_CLASS: u32 = 0x8004_1010;
+
+/// Whether a `DeleteInstance` answer means "there is nothing to delete". An unknown class counts (run A3): a delete must
+/// never keep a restore, and so Disable kiosk and the uninstall, stuck on a class this Windows does not have.
+fn nothing_to_delete(code: u32) -> bool {
+    code == WBEM_E_NOT_FOUND || code == WBEM_E_INVALID_CLASS
+}
 
 fn csp_delete(services: &IWbemServices, collection: &str) -> Result<()> {
     let (leaf, class) = csp_names(collection);
@@ -334,7 +346,7 @@ fn csp_delete(services: &IWbemServices, collection: &str) -> Result<()> {
     let result = unsafe { services.DeleteInstance(&BSTR::from(path), WBEM_GENERIC_FLAG_TYPE(0), None::<&IWbemContext>, None) };
     match result {
         Ok(()) => Ok(()),
-        Err(e) if e.code().0 as u32 == WBEM_E_NOT_FOUND => Ok(()),
+        Err(e) if nothing_to_delete(e.code().0 as u32) => Ok(()),
         Err(e) => Err(hr_err("IWbemServices::DeleteInstance", &e)),
     }
 }
@@ -443,6 +455,23 @@ mod tests {
         let names: Vec<_> = WRITTEN_COLLECTIONS.iter().map(|c| csp_names(c)).collect();
         assert_eq!(names.len(), 4);
         assert!(names.iter().all(|(leaf, class)| !leaf.is_empty() && class.starts_with("MDM_AppLocker_")));
+        // The classes the MDM bridge listed on the run A3 VM (Windows 11 Pro 26300).
+        assert_eq!(
+            names,
+            [
+                ("EXE", "MDM_AppLocker_ApplicationLaunchRestrictions01_EXE03"),
+                ("MSI", "MDM_AppLocker_MSI03"),
+                ("Script", "MDM_AppLocker_Script03"),
+                ("StoreApps", "MDM_AppLocker_ApplicationLaunchRestrictions01_StoreApps03"),
+            ]
+        );
+    }
+
+    #[test]
+    fn a_missing_instance_or_class_is_nothing_to_delete() {
+        assert!(nothing_to_delete(0x8004_1002) && nothing_to_delete(0x8004_1010));
+        // Access denied and every other failure stay failures.
+        assert!(!nothing_to_delete(0x8007_0005) && !nothing_to_delete(0x8004_1003));
     }
 
     /// Reads the real policy store; never writes. Run by hand.

@@ -727,6 +727,21 @@ async fn a_download_that_cannot_finish_is_not_a_failed_release() {
     rig.stop().await;
 }
 
+/// Run A3: the owner saved a wrong link (404), then corrected it. Same version and hash, new URL: tried at once, not an hour later.
+#[tokio::test(start_paused = true)]
+async fn a_corrected_link_for_the_same_release_is_tried_at_once() {
+    let mut rig = rig();
+    let good = release("0.1.1");
+    let typo = RuleboxRelease { url: "https://dl.example.test/rulebox-0.1.1-typo.msi".into(), ..good.clone() };
+    rig.policy_tx.send_modify(|p| p.rulebox_release = Some(typo.clone()));
+    rig.start();
+    rig.until("the wrong link was tried", |rig| rig.downloader.calls() == vec![typo.url.clone()]).await;
+    rig.publish(&good);
+    rig.until("started from the corrected link", |rig| rig.started().len() == 1).await;
+    assert_eq!(rig.downloader.calls(), vec![typo.url.clone(), good.url.clone()]);
+    rig.stop().await;
+}
+
 #[tokio::test(start_paused = true)]
 async fn nothing_is_downloaded_while_offline_or_not_enrolled() {
     let mut rig = rig();

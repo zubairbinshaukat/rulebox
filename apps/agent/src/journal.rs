@@ -889,7 +889,18 @@ pub fn has_entry(ctx: &JournalCtx<'_>, id: &str) -> bool {
 ///    through the read-only seam and a `Pending` entry is saved.
 /// 2. The mutating `Platform` method is called (only when the value differs).
 /// 3. The entry is saved as `Applied`.
+///
+/// A failure of the platform is logged with the entry id (never the value): `lastError` keeps only a fixed code such as
+/// `platform_error`, and Phase 6 Step 22 run A3 found an AppLocker layer `partial` / `platform_error` with no line saying why.
 pub fn change(ctx: &JournalCtx<'_>, change: &Change) -> Result<ChangeOutcome, JournalError> {
+    let result = change_unlogged(ctx, change);
+    if let Err(JournalError::Platform(error)) = &result {
+        tracing::warn!(id = %change.id, "a system change failed: {error}");
+    }
+    result
+}
+
+fn change_unlogged(ctx: &JournalCtx<'_>, change: &Change) -> Result<ChangeOutcome, JournalError> {
     let desired = match (&change.target, &change.desired) {
         (JournalTarget::MachineValue(_), Desired::Machine(desired)) => Value::Reg(desired.clone()),
         (JournalTarget::StaffValue { .. }, Desired::Staff(desired)) => Value::Reg(desired.clone()),

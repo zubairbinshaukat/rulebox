@@ -121,6 +121,16 @@ pub fn check_start(name: &str, start: u32) -> Result<()> {
     Ok(())
 }
 
+/// (Phase 6 Step 22 run A3) Services whose configuration the SCM refuses to change, even for SYSTEM: `ChangeServiceConfigW`
+/// answers "access denied" for the Application Identity service on Windows 10 and 11 (its DACL gives SYSTEM no
+/// `SERVICE_CHANGE_CONFIG`). Their start type is the `Start` value of the service key, which SYSTEM may write (run A3, VM).
+/// Without this, Disable kiosk could not put AppIDSvc back and stopped there.
+const REGISTRY_START_SERVICES: &[&str] = &["AppIDSvc"];
+
+fn uses_registry_start(name: &str) -> bool {
+    REGISTRY_START_SERVICES.iter().any(|service| service.eq_ignore_ascii_case(name))
+}
+
 /// The rule of the two functions that change the agent service's security or privileges.
 pub fn check_agent_only(name: &str) -> Result<()> {
     check_name(name)?;
@@ -280,6 +290,11 @@ pub fn query(name: &str) -> Result<Option<ServiceConfig>> {
 pub fn set_start(name: &str, start: u32) -> Result<()> {
     check_start(name, start)?;
     require_armed_machine()?;
+    if uses_registry_start(name) {
+        // The service must exist; its key is never created here.
+        require_service(name, SERVICE_QUERY_CONFIG)?;
+        return crate::registry::set_hklm(&format!(r"SYSTEM\CurrentControlSet\Services\{name}"), "Start", Some(&crate::registry::RegValue::Dword(start)));
+    }
     let service = require_service(name, SERVICE_CHANGE_CONFIG)?;
     // SAFETY: the service is open with SERVICE_CHANGE_CONFIG; every other argument means
     // "no change" (SERVICE_NO_CHANGE, null strings).
@@ -449,6 +464,12 @@ mod tests {
         ] {
             assert!(matches!(check_start(name, start), Err(Win32Error::Forbidden(_))), "{name} {start}");
         }
+    }
+
+    #[test]
+    fn the_application_identity_start_type_goes_through_the_registry() {
+        assert!(uses_registry_start("AppIDSvc") && uses_registry_start("appidsvc"));
+        assert!(!uses_registry_start("Spooler") && !uses_registry_start(AGENT_SERVICE));
     }
 
     #[test]

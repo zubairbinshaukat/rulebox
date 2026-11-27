@@ -288,8 +288,9 @@ struct Updater {
     download_failures: u32,
     /// Earliest next try after a download failure, a busy installer or a paused rule (Unix ms).
     retry_at_ms: Option<u64>,
-    /// The release the counters above are about, `(version, sha256)`.
-    identity: Option<(String, String)>,
+    /// The release the counters above are about, `(version, sha256, url)`. The URL is part of it so a corrected link (the
+    /// owner fixes a typo, same build) is tried at once instead of after `RETRY_GAP` (Phase 6 Step 22 run A3).
+    identity: Option<(String, String, String)>,
     /// The last refusal that was logged, so a document that stays the same does not log again at every wake.
     logged: Option<(String, String, Refusal)>,
 }
@@ -437,7 +438,7 @@ impl Updater {
             self.clean_staged(None);
             return None;
         };
-        let identity = (release.version.clone(), release.sha256.clone());
+        let identity = (release.version.clone(), release.sha256.clone(), release.url.clone());
         if self.identity.as_ref() != Some(&identity) {
             // A new release: the counters start again.
             self.identity = Some(identity.clone());
