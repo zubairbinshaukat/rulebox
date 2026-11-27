@@ -14,6 +14,7 @@ Design: `docs/plans/phase-6-installer-pilot.md` Section 4.10. Not Tauri's MSI ta
 | `License.rtf` | Text shown on the licence page |
 | `build.ps1` | The build script |
 | `webview2-bootstrapper.sha256` | Pinned SHA-256 of Microsoft's WebView2 bootstrapper |
+| `vendor/MicrosoftEdgeWebview2Setup.exe` | Reviewed copy of that bootstrapper (Authenticode: Microsoft Corporation), used by `build.ps1` so builds do not break when Microsoft swaps the file behind its link. Refresh with `build.ps1 -PinWebView2`, check the signature, commit both files |
 | `tests/package.test.ts` | Static checks of the sources (`pnpm test:installer`) |
 
 ## Build

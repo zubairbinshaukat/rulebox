@@ -27,11 +27,15 @@
 
 .PARAMETER WebView2Bootstrapper
   A local MicrosoftEdgeWebview2Setup.exe. When omitted, the script uses one next to the
-  binaries in BinDir, or downloads Microsoft's Evergreen bootstrapper into the staging folder.
+  binaries in BinDir, then the reviewed copy in vendor\ (committed), and only downloads
+  Microsoft's Evergreen bootstrapper when neither exists. The vendored copy keeps builds
+  working when Microsoft swaps the file behind its permanent link (it did on 2026-11-27).
 
 .PARAMETER PinWebView2
-  Writes the SHA-256 of the bootstrapper into webview2-bootstrapper.sha256 and stops.
-  Review the diff and commit it. Step 8 compiles the same value into the agent.
+  Downloads a fresh bootstrapper (or takes -WebView2Bootstrapper), writes its SHA-256 into
+  webview2-bootstrapper.sha256, copies it to vendor\ and stops. Check its Authenticode
+  signature (Microsoft Corporation), review the diff and commit both files. Step 8 compiles
+  the same value into the agent.
 #>
 [CmdletBinding()]
 param(
@@ -53,6 +57,7 @@ $BinDir = (Resolve-Path -LiteralPath $BinDir).Path
 $StageDir = Join-Path $OutDir 'stage'
 $PinFile = Join-Path $InstallerDir 'webview2-bootstrapper.sha256'
 $BootstrapperName = 'MicrosoftEdgeWebview2Setup.exe'
+$VendoredBootstrapper = Join-Path $InstallerDir "vendor\$BootstrapperName"
 # Microsoft's permanent link to the Evergreen bootstrapper.
 $BootstrapperUrl = 'https://go.microsoft.com/fwlink/p/?LinkId=2124703'
 
@@ -96,8 +101,11 @@ New-Item -ItemType Directory -Force -Path $OutDir, $StageDir | Out-Null
 $bootstrapper = Join-Path $StageDir $BootstrapperName
 if ($WebView2Bootstrapper) {
   Copy-Item -LiteralPath $WebView2Bootstrapper -Destination $bootstrapper -Force
-} elseif (Test-Path -LiteralPath (Join-Path $BinDir $BootstrapperName)) {
+} elseif (-not $PinWebView2 -and (Test-Path -LiteralPath (Join-Path $BinDir $BootstrapperName))) {
   Copy-Item -LiteralPath (Join-Path $BinDir $BootstrapperName) -Destination $bootstrapper -Force
+} elseif (-not $PinWebView2 -and (Test-Path -LiteralPath $VendoredBootstrapper)) {
+  Write-Host "Using the vendored WebView2 bootstrapper $VendoredBootstrapper"
+  Copy-Item -LiteralPath $VendoredBootstrapper -Destination $bootstrapper -Force
 } else {
   Write-Host "Downloading the WebView2 bootstrapper from $BootstrapperUrl"
   Invoke-WebRequest -Uri $BootstrapperUrl -OutFile $bootstrapper
@@ -112,7 +120,11 @@ if ($PinWebView2) {
     "$actual  $BootstrapperName"
   ) -join "`n"
   Set-Content -LiteralPath $PinFile -Value $pinText -Encoding utf8NoBOM
-  Write-Host "Pinned $actual in $PinFile"
+  New-Item -ItemType Directory -Force (Split-Path $VendoredBootstrapper) | Out-Null
+  Copy-Item -LiteralPath $bootstrapper -Destination $VendoredBootstrapper -Force
+  $sig = Get-AuthenticodeSignature -LiteralPath $VendoredBootstrapper
+  Write-Host "Pinned $actual in $PinFile and copied it to $VendoredBootstrapper"
+  Write-Host "Authenticode: $($sig.Status), $($sig.SignerCertificate.Subject). Commit both only if Valid and Microsoft Corporation."
   return
 }
 
