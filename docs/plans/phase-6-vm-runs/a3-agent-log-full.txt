@@ -1,0 +1,268 @@
+2026-11-27T19:26:36.687937Z  INFO rulebox_agent::service: service starting version="0.1.1"
+2026-11-27T19:26:36.687985Z  INFO rulebox_agent::install_marker: the install marker now names this computer
+2026-11-27T19:26:36.689474Z  INFO rulebox_agent::agent: admin exit settings enabled=false hotkey=Ctrl+Shift+F12 problem=None
+2026-11-27T19:26:36.691235Z  INFO rulebox_agent::agent: agent started
+2026-11-27T19:26:36.695831Z  INFO rulebox_agent::setup::pending: the installer left an enrollment code; using it once
+2026-11-27T19:26:36.696394Z  INFO rulebox_agent::install_marker: the install marker's KioskOn was updated on=false
+2026-11-27T19:26:36.696469Z  INFO rulebox_agent::ipc_conn: admin pipe listening on \\.\pipe\dev.rulebox.agent.admin
+2026-11-27T19:26:36.696961Z  INFO rulebox_agent::setup::pending: WebView2 Runtime checked outcome=NotNeeded { version: "155.0.4283.45" }
+2026-11-27T19:26:39.531671Z ERROR rulebox_agent::setup::pending: could not enroll with the code from the installer; the code was deleted reason=backend_rejected tries=1
+2026-11-27T19:43:18.020562Z  INFO rulebox_agent::agent: agent stopped
+2026-11-27T19:43:18.021146Z  INFO rulebox_agent::service: service stopped
+2026-11-27T19:43:29.767720Z  INFO rulebox_agent::service: service starting version="0.1.1"
+2026-11-27T19:43:29.767788Z  INFO rulebox_agent::install_marker: the install marker now names this computer
+2026-11-27T19:43:29.778127Z  INFO rulebox_agent::agent: admin exit settings enabled=false hotkey=Ctrl+Shift+F12 problem=None
+2026-11-27T19:43:29.785302Z  INFO rulebox_agent::agent: agent started
+2026-11-27T19:43:29.803781Z  INFO rulebox_agent::setup::pending: the installer left an enrollment code; using it once
+2026-11-27T19:43:29.804209Z  INFO rulebox_agent::install_marker: the install marker's KioskOn was updated on=false
+2026-11-27T19:43:29.804294Z  INFO rulebox_agent::ipc_conn: admin pipe listening on \\.\pipe\dev.rulebox.agent.admin
+2026-11-27T19:43:29.805929Z  INFO rulebox_agent::setup::pending: WebView2 Runtime checked outcome=NotNeeded { version: "155.0.4283.45" }
+2026-11-27T19:43:31.898336Z  INFO rulebox_agent::enroll: this PC is enrolled device_id=jh7a43th514wf2mp4vvh347eg58k1tq4
+2026-11-27T19:43:32.605873Z  INFO rulebox_agent::kiosk: the kiosk is on: it takes effect at the next sign-out or restart
+2026-11-27T19:43:32.606340Z  INFO rulebox_agent::install_marker: the install marker's KioskOn was updated on=true
+2026-11-27T19:43:32.612094Z  INFO rulebox_agent::setup::pending: enrolled with the code from the installer
+2026-11-27T19:43:32.612543Z  INFO rulebox_agent::ipc_conn: shell pipe listening on \\.\pipe\dev.rulebox.agent.shell
+2026-11-27T19:43:33.797979Z  INFO rulebox_agent::backend::task: desired state accepted version=1 kiosk_enabled=true key_id=591e74141d90ce7e
+2026-11-27T19:43:33.806609Z  INFO rulebox_agent::backend::task: roster updated epoch=0 members=0
+2026-11-27T19:44:30.716075Z  INFO rulebox_agent::agent: agent stopped
+2026-11-27T19:44:30.739022Z  INFO rulebox_agent::service: service stopped
+2026-11-27T19:44:39.867317Z  INFO rulebox_agent::service: service starting version="0.1.1"
+2026-11-27T19:44:39.979864Z  INFO rulebox_agent::agent: admin exit settings enabled=true hotkey=Ctrl+Shift+F12 problem=None
+2026-11-27T19:44:40.027068Z  INFO rulebox_agent::agent: agent started
+2026-11-27T19:44:40.057620Z  INFO rulebox_agent::agent: syncing with the backend
+2026-11-27T19:44:40.059421Z  INFO rulebox_agent::ipc_conn: shell pipe listening on \\.\pipe\dev.rulebox.agent.shell
+2026-11-27T19:44:40.096823Z  INFO rulebox_agent::backend::task: desired state accepted version=1 kiosk_enabled=true key_id=591e74141d90ce7e
+2026-11-27T19:44:40.102136Z  INFO rulebox_agent::ipc_conn: admin pipe listening on \\.\pipe\dev.rulebox.agent.admin
+2026-11-27T19:44:45.167560Z  INFO rulebox_agent::watchdog: shell health changed health=Starting
+2026-11-27T19:44:46.755304Z  INFO rulebox_agent::watchdog: shell.ready connection_id=1 pid=5436
+2026-11-27T19:44:46.812641Z  INFO rulebox_agent::watchdog: shell health changed health=Healthy
+2026-11-27T19:51:02.274978Z  INFO rulebox_agent::backend::task: desired state accepted version=2 kiosk_enabled=true key_id=591e74141d90ce7e
+2026-11-27T19:51:02.278812Z  INFO rulebox_agent::selfupdate: downloading the Rulebox update version=0.1.2
+2026-11-27T19:51:02.593649Z  INFO rulebox_agent::selfupdate: starting the Rulebox upgrade (msiexec /i /qn /norestart) from="0.1.1" to=0.1.2
+2026-11-27T19:51:02.631427Z  INFO rulebox_agent::selfupdate: msiexec started outside the agent's job pid=6980
+2026-11-27T19:51:03.077884Z  INFO rulebox_agent::agent: agent stopped
+2026-11-27T19:51:03.087855Z  INFO rulebox_agent::service: service stopped
+2026-11-27T19:51:05.626660Z  INFO rulebox_agent::service: service starting version="0.1.2"
+2026-11-27T19:51:05.626769Z  INFO rulebox_agent::install_marker: the install marker now names this computer
+2026-11-27T19:51:05.627978Z  INFO rulebox_agent::agent: admin exit settings enabled=true hotkey=Ctrl+Shift+F12 problem=None
+2026-11-27T19:51:05.630058Z  INFO rulebox_agent::agent: agent started
+2026-11-27T19:51:05.643681Z  INFO rulebox_agent::agent: syncing with the backend
+2026-11-27T19:51:05.643904Z  INFO rulebox_agent::ipc_conn: shell pipe listening on \\.\pipe\dev.rulebox.agent.shell
+2026-11-27T19:51:05.644060Z  INFO rulebox_agent::ipc_conn: admin pipe listening on \\.\pipe\dev.rulebox.agent.admin
+2026-11-27T19:51:05.645199Z  INFO rulebox_agent::backend::task: desired state accepted version=2 kiosk_enabled=true key_id=591e74141d90ce7e
+2026-11-27T19:51:05.645890Z  INFO rulebox_agent::install_marker: the install marker's KioskOn was updated on=true
+2026-11-27T19:51:05.646218Z  INFO rulebox_agent::selfupdate: Rulebox was updated version=0.1.2
+2026-11-27T19:51:06.224771Z  WARN rulebox_agent::ipc_shell: pipe client refused: image_not_allowed pid=5436 session_id=1 image=Some("C:\\Config.Msi\\5efa2.rbf")
+2026-11-27T19:51:06.224795Z  WARN rulebox_agent::ipc_conn: rejected a pipe client pipe="shell" connection_id=1 reason="image_not_allowed"
+2026-11-27T19:51:08.239614Z  WARN rulebox_agent::ipc_shell: pipe client refused: image_not_allowed pid=5436 session_id=1 image=Some("C:\\Config.Msi\\5efa2.rbf")
+2026-11-27T19:51:08.239642Z  WARN rulebox_agent::ipc_conn: rejected a pipe client pipe="shell" connection_id=2 reason="image_not_allowed"
+2026-11-27T19:51:10.254301Z  WARN rulebox_agent::ipc_shell: pipe client refused: image_not_allowed pid=5436 session_id=1 image=Some("C:\\Config.Msi\\5efa2.rbf")
+2026-11-27T19:51:10.254319Z  WARN rulebox_agent::ipc_conn: rejected a pipe client pipe="shell" connection_id=3 reason="image_not_allowed"
+2026-11-27T19:51:10.798205Z  INFO rulebox_agent::watchdog: ended a stale rulebox-shell.exe left by an update session_id=1 pids=[5360]
+2026-11-27T19:51:10.798225Z  INFO rulebox_agent::watchdog: rulebox-shell.exe was not running in the Staff session; started it session_id=1 pid=3612
+2026-11-27T19:51:11.228362Z  INFO rulebox_agent::watchdog: shell health changed health=Starting
+2026-11-27T19:51:12.194731Z  INFO rulebox_agent::watchdog: shell.ready connection_id=4 pid=2328
+2026-11-27T19:51:12.226365Z  INFO rulebox_agent::watchdog: shell health changed health=Healthy
+2026-11-27T19:57:07.311905Z  INFO rulebox_agent::backend::task: desired state accepted version=3 kiosk_enabled=true key_id=591e74141d90ce7e
+2026-11-27T19:57:07.315549Z  INFO rulebox_agent::selfupdate: downloading the Rulebox update version=0.1.3
+2026-11-27T19:57:07.369172Z  WARN rulebox_agent::selfupdate: the Rulebox download failed: download failed: HTTP 404
+2026-11-27T19:58:06.491231Z  INFO rulebox_agent::agent: agent stopped
+2026-11-27T19:58:06.494903Z  INFO rulebox_agent::service: service stopped
+2026-11-27T19:58:06.770103Z  INFO rulebox_agent::service: service starting version="0.1.2"
+2026-11-27T19:58:06.772125Z  INFO rulebox_agent::agent: admin exit settings enabled=true hotkey=Ctrl+Shift+F12 problem=None
+2026-11-27T19:58:06.774084Z  INFO rulebox_agent::agent: agent started
+2026-11-27T19:58:06.787362Z  INFO rulebox_agent::agent: syncing with the backend
+2026-11-27T19:58:06.787610Z  INFO rulebox_agent::ipc_conn: shell pipe listening on \\.\pipe\dev.rulebox.agent.shell
+2026-11-27T19:58:06.789177Z  INFO rulebox_agent::backend::task: desired state accepted version=3 kiosk_enabled=true key_id=591e74141d90ce7e
+2026-11-27T19:58:06.789504Z  INFO rulebox_agent::ipc_conn: admin pipe listening on \\.\pipe\dev.rulebox.agent.admin
+2026-11-27T19:58:06.817151Z  INFO rulebox_agent::watchdog: shell health changed health=Starting
+2026-11-27T19:58:08.362683Z  INFO rulebox_agent::selfupdate: downloading the Rulebox update version=0.1.3
+2026-11-27T19:58:08.653118Z  INFO rulebox_agent::selfupdate: closed the Staff App for the Rulebox upgrade (no employee is signed in) pids=[3612]
+2026-11-27T19:58:08.653130Z  INFO rulebox_agent::selfupdate: starting the Rulebox upgrade (msiexec /i /qn /norestart) from="0.1.2" to=0.1.3
+2026-11-27T19:58:08.678449Z  INFO rulebox_agent::selfupdate: msiexec started outside the agent's job pid=1864
+2026-11-27T19:58:09.281558Z  INFO rulebox_agent::agent: agent stopped
+2026-11-27T19:58:09.283542Z  INFO rulebox_agent::service: service stopped
+2026-11-27T19:58:11.513518Z  INFO rulebox_agent::service: service starting version="0.1.3"
+2026-11-27T19:58:11.513644Z  INFO rulebox_agent::install_marker: the install marker now names this computer
+2026-11-27T19:58:11.516357Z  INFO rulebox_agent::agent: admin exit settings enabled=true hotkey=Ctrl+Shift+F12 problem=None
+2026-11-27T19:58:11.521393Z  INFO rulebox_agent::agent: agent started
+2026-11-27T19:58:11.523692Z  INFO rulebox_agent::agent: syncing with the backend
+2026-11-27T19:58:11.523986Z  INFO rulebox_agent::ipc_conn: shell pipe listening on \\.\pipe\dev.rulebox.agent.shell
+2026-11-27T19:58:11.524347Z  INFO rulebox_agent::ipc_conn: admin pipe listening on \\.\pipe\dev.rulebox.agent.admin
+2026-11-27T19:58:11.526922Z  INFO rulebox_agent::backend::task: desired state accepted version=3 kiosk_enabled=true key_id=591e74141d90ce7e
+2026-11-27T19:58:11.528357Z  INFO rulebox_agent::install_marker: the install marker's KioskOn was updated on=true
+2026-11-27T19:58:11.529437Z  INFO rulebox_agent::selfupdate: Rulebox was updated version=0.1.3
+2026-11-27T19:58:16.625984Z  INFO rulebox_agent::watchdog: rulebox-shell.exe was not running in the Staff session; started it session_id=1 pid=5968
+2026-11-27T19:58:17.018613Z  INFO rulebox_agent::watchdog: shell health changed health=Starting
+2026-11-27T19:58:18.317701Z  INFO rulebox_agent::watchdog: shell.ready connection_id=1 pid=2756
+2026-11-27T19:58:18.344867Z  INFO rulebox_agent::watchdog: shell health changed health=Healthy
+2026-11-27T20:00:18.056507Z  INFO rulebox_agent::backend::task: desired state accepted version=4 kiosk_enabled=true key_id=591e74141d90ce7e
+2026-11-27T20:00:18.077290Z  INFO rulebox_agent::selfupdate: downloading the Rulebox update version=0.1.4
+2026-11-27T20:00:18.206338Z  WARN rulebox_agent::selfupdate: the Rulebox download failed: download failed: HTTP 404
+2026-11-27T20:01:20.717556Z  INFO rulebox_agent::agent: agent stopped
+2026-11-27T20:01:20.731243Z  INFO rulebox_agent::service: service stopped
+2026-11-27T20:01:21.002989Z  INFO rulebox_agent::service: service starting version="0.1.3"
+2026-11-27T20:01:21.005741Z  INFO rulebox_agent::agent: admin exit settings enabled=true hotkey=Ctrl+Shift+F12 problem=None
+2026-11-27T20:01:21.007660Z  INFO rulebox_agent::agent: agent started
+2026-11-27T20:01:21.024060Z  INFO rulebox_agent::agent: syncing with the backend
+2026-11-27T20:01:21.024235Z  INFO rulebox_agent::ipc_conn: shell pipe listening on \\.\pipe\dev.rulebox.agent.shell
+2026-11-27T20:01:21.025829Z  INFO rulebox_agent::backend::task: desired state accepted version=4 kiosk_enabled=true key_id=591e74141d90ce7e
+2026-11-27T20:01:21.026124Z  INFO rulebox_agent::ipc_conn: admin pipe listening on \\.\pipe\dev.rulebox.agent.admin
+2026-11-27T20:01:21.044749Z  INFO rulebox_agent::watchdog: shell health changed health=Starting
+2026-11-27T20:01:22.316173Z  INFO rulebox_agent::selfupdate: downloading the Rulebox update version=0.1.4
+2026-11-27T20:01:22.546376Z  WARN rulebox_agent::selfupdate: cannot close the Staff App before the Rulebox upgrade: access denied; the MSI replaces its files anyway
+2026-11-27T20:01:22.546385Z  INFO rulebox_agent::selfupdate: starting the Rulebox upgrade (msiexec /i /qn /norestart) from="0.1.3" to=0.1.4
+2026-11-27T20:01:22.561139Z  INFO rulebox_agent::watchdog: shell health changed health=NotRunning
+2026-11-27T20:01:22.568652Z  INFO rulebox_agent::selfupdate: msiexec started outside the agent's job pid=2984
+2026-11-27T20:01:22.908542Z  INFO rulebox_agent::agent: agent stopped
+2026-11-27T20:01:22.909781Z  INFO rulebox_agent::service: service stopped
+2026-11-27T20:01:24.730269Z  INFO rulebox_agent::service: service starting version="0.1.3"
+2026-11-27T20:01:24.730348Z  INFO rulebox_agent::install_marker: the install marker now names this computer
+2026-11-27T20:01:24.731756Z  INFO rulebox_agent::agent: admin exit settings enabled=true hotkey=Ctrl+Shift+F12 problem=None
+2026-11-27T20:01:24.734033Z  INFO rulebox_agent::agent: agent started
+2026-11-27T20:01:24.736082Z  INFO rulebox_agent::agent: syncing with the backend
+2026-11-27T20:01:24.736317Z  INFO rulebox_agent::ipc_conn: shell pipe listening on \\.\pipe\dev.rulebox.agent.shell
+2026-11-27T20:01:24.736366Z  INFO rulebox_agent::ipc_conn: admin pipe listening on \\.\pipe\dev.rulebox.agent.admin
+2026-11-27T20:01:24.737079Z  INFO rulebox_agent::install_marker: the install marker's KioskOn was updated on=true
+2026-11-27T20:01:24.738869Z  INFO rulebox_agent::backend::task: desired state accepted version=4 kiosk_enabled=true key_id=591e74141d90ce7e
+2026-11-27T20:01:26.370626Z  INFO rulebox_agent::agent: agent stopped
+2026-11-27T20:01:26.371288Z  INFO rulebox_agent::service: service stopped
+2026-11-27T20:01:27.027665Z  INFO rulebox_agent::service: service starting version="0.1.3"
+2026-11-27T20:01:27.028569Z  INFO rulebox_agent::agent: admin exit settings enabled=true hotkey=Ctrl+Shift+F12 problem=None
+2026-11-27T20:01:27.030150Z  INFO rulebox_agent::agent: agent started
+2026-11-27T20:01:27.031047Z  INFO rulebox_agent::agent: syncing with the backend
+2026-11-27T20:01:27.031196Z  INFO rulebox_agent::ipc_conn: shell pipe listening on \\.\pipe\dev.rulebox.agent.shell
+2026-11-27T20:01:27.032436Z  INFO rulebox_agent::ipc_conn: admin pipe listening on \\.\pipe\dev.rulebox.agent.admin
+2026-11-27T20:01:27.032990Z  INFO rulebox_agent::backend::task: desired state accepted version=4 kiosk_enabled=true key_id=591e74141d90ce7e
+2026-11-27T20:01:32.050381Z  INFO rulebox_agent::watchdog: rulebox-shell.exe was not running in the Staff session; started it session_id=1 pid=5212
+2026-11-27T20:01:32.124702Z  INFO rulebox_agent::watchdog: shell health changed health=Starting
+2026-11-27T20:01:33.301985Z  INFO rulebox_agent::watchdog: shell.ready connection_id=1 pid=1132
+2026-11-27T20:01:33.381752Z  INFO rulebox_agent::watchdog: shell health changed health=Healthy
+2026-11-27T20:09:18.367252Z ERROR convex::sync::web_socket_manager: Convex WebSocketWorker failed: WebsocketConnectionError
+
+Caused by:
+    0: IO error: An existing connection was forcibly closed by the remote host. (os error 10054)
+    1: An existing connection was forcibly closed by the remote host. (os error 10054). Backing off for 98.227018ms and retrying.
+2026-11-27T20:09:18.367702Z ERROR convex::client::worker: Convex Client Worker failed: "ProtocolFailure". Backing off for 61.405736ms and retrying.
+2026-11-27T20:11:49.377699Z  INFO rulebox_agent::backend::task: roster updated epoch=1 members=1
+2026-11-27T20:17:27.260325Z  INFO rulebox_agent::backend::task: desired state accepted version=5 kiosk_enabled=true key_id=591e74141d90ce7e
+2026-11-27T20:17:27.270575Z  INFO rulebox_agent::installs::engine: downloading the installer app_id="j5734nm9ap758yngwnazb77vpx8k0kxs"
+2026-11-27T20:17:27.301597Z ERROR rulebox_agent::lockdown::runtime: the lockdown part of the document was refused; nothing was applied version=5 code="admin_signin_unverified"
+2026-11-27T20:17:28.056186Z  INFO rulebox_agent::installs::engine: installing app_id="j5734nm9ap758yngwnazb77vpx8k0kxs" kind=Exe update=false
+2026-11-27T20:17:30.195984Z  INFO rulebox_agent::installs::engine: installed app_id="j5734nm9ap758yngwnazb77vpx8k0kxs"
+2026-11-27T20:17:33.590645Z  INFO rulebox_agent::backend::task: desired state accepted version=6 kiosk_enabled=true key_id=591e74141d90ce7e
+2026-11-27T20:17:33.609224Z ERROR rulebox_agent::lockdown::runtime: the lockdown part of the document was refused; nothing was applied version=6 code="admin_signin_unverified"
+2026-11-27T20:21:52.749556Z  INFO rulebox_agent::backend::task: desired state accepted version=7 kiosk_enabled=true key_id=591e74141d90ce7e
+2026-11-27T20:31:22.321813Z ERROR rulebox_agent::selfupdate: the Rulebox upgrade did not take effect; the old version still runs version=0.1.4
+2026-11-27T20:31:22.332842Z  WARN rulebox_agent::selfupdate: the Rulebox update is not done: this release failed before version=0.1.4
+2026-11-27T20:33:33.894861Z  INFO rulebox_agent::admin_exit: admin exit: correct PIN, signing the Staff session out session_id=1
+2026-11-27T20:33:35.898540Z  INFO rulebox_agent::admin_exit: the Staff session was signed out for the admin exit session_id=1
+2026-11-27T20:33:35.898598Z  INFO rulebox_agent::kiosk: exit hold set: automatic sign-in stays off for at most 5 minutes
+2026-11-27T20:33:36.473877Z  INFO rulebox_agent::watchdog: shell health changed health=NotRunning
+2026-11-27T20:33:56.984065Z  INFO rulebox_agent::kiosk: the exit hold ended; automatic sign-in is armed again
+2026-11-27T20:34:04.080451Z  WARN rulebox_agent::backend::task: the head subscription ended
+2026-11-27T20:34:04.110416Z  INFO rulebox_agent::agent: agent stopped
+2026-11-27T20:34:04.111135Z  INFO rulebox_agent::service: service stopped
+2026-11-27T20:34:15.145721Z  INFO rulebox_agent::service: service starting version="0.1.3"
+2026-11-27T20:34:15.335984Z  INFO rulebox_agent::agent: admin exit settings enabled=true hotkey=Ctrl+Shift+F12 problem=None
+2026-11-27T20:34:15.471830Z  INFO rulebox_agent::agent: agent started
+2026-11-27T20:34:15.476756Z  INFO rulebox_agent::agent: settled the journal after a restart dropped=0 kept=1
+2026-11-27T20:34:15.495894Z  INFO rulebox_agent::agent: syncing with the backend
+2026-11-27T20:34:15.496076Z  INFO rulebox_agent::ipc_conn: shell pipe listening on \\.\pipe\dev.rulebox.agent.shell
+2026-11-27T20:34:15.618542Z  INFO rulebox_agent::backend::task: desired state accepted version=7 kiosk_enabled=true key_id=591e74141d90ce7e
+2026-11-27T20:34:15.619065Z  INFO rulebox_agent::ipc_conn: admin pipe listening on \\.\pipe\dev.rulebox.agent.admin
+2026-11-27T20:34:15.703811Z  WARN rulebox_agent::selfupdate: the Rulebox update is not done: this release failed before version=0.1.4
+2026-11-27T20:34:17.781890Z  INFO rulebox_agent::watchdog: shell health changed health=Starting
+2026-11-27T20:34:22.330228Z  INFO rulebox_agent::watchdog: shell.ready connection_id=1 pid=5604
+2026-11-27T20:34:22.404940Z  INFO rulebox_agent::watchdog: shell health changed health=Healthy
+2026-11-27T20:36:22.021097Z  INFO rulebox_agent::session: employee signed in username="a3test" offline=false
+2026-11-27T20:38:53.495137Z  INFO rulebox_agent::watchdog: shell health changed health=NotRunning
+2026-11-27T20:38:53.824844Z  INFO rulebox_agent::session: employee session cleared reason="staff session ended"
+2026-11-27T20:38:59.227596Z  WARN rulebox_agent::agent: the IPC tasks did not stop within 5 s
+2026-11-27T20:38:59.227658Z  INFO rulebox_agent::agent: agent stopped
+2026-11-27T20:39:25.262199Z  INFO rulebox_agent::service: service starting version="0.1.3"
+2026-11-27T20:39:25.404278Z  INFO rulebox_agent::agent: admin exit settings enabled=true hotkey=Ctrl+Shift+F12 problem=None
+2026-11-27T20:39:25.517418Z  INFO rulebox_agent::agent: agent started
+2026-11-27T20:39:25.570475Z  INFO rulebox_agent::agent: settled the journal after a restart dropped=1 kept=0
+2026-11-27T20:39:25.597531Z  INFO rulebox_agent::agent: syncing with the backend
+2026-11-27T20:39:25.602557Z  INFO rulebox_agent::ipc_conn: shell pipe listening on \\.\pipe\dev.rulebox.agent.shell
+2026-11-27T20:39:25.657414Z  INFO rulebox_agent::cleanup: session cleanup owed from before the agent started; the rounds run before the next sign-in
+2026-11-27T20:39:25.683127Z  INFO rulebox_agent::ipc_conn: admin pipe listening on \\.\pipe\dev.rulebox.agent.admin
+2026-11-27T20:39:25.687678Z  INFO rulebox_agent::backend::task: desired state accepted version=7 kiosk_enabled=true key_id=591e74141d90ce7e
+2026-11-27T20:39:25.691223Z  WARN rulebox_agent::selfupdate: the Rulebox update is not done: this release failed before version=0.1.4
+2026-11-27T20:39:28.020336Z  INFO rulebox_agent::watchdog: shell health changed health=Starting
+2026-11-27T20:39:30.580228Z  INFO rulebox_agent::watchdog: shell.ready connection_id=1 pid=5368
+2026-11-27T20:39:30.621453Z  INFO rulebox_agent::watchdog: shell health changed health=Healthy
+2026-11-27T20:39:38.699632Z  INFO rulebox_agent::cleanup: session cleanup complete
+2026-11-27T20:41:39.719091Z  INFO rulebox_agent::session: employee signed in username="a3test" offline=false
+2026-11-27T20:43:07.086266Z  INFO rulebox_agent::session: employee signed out
+2026-11-27T20:43:20.104171Z  INFO rulebox_agent::cleanup: session cleanup complete
+2026-11-27T20:52:24.535286Z  INFO rulebox_agent::backend::task: roster updated epoch=2 members=0
+2026-11-27T20:52:24.541646Z  INFO rulebox_agent::session: offline sign-in removed for employees the roster no longer allows count=1
+2026-11-27T20:53:26.056890Z  INFO rulebox_agent::watchdog: shell health changed health=NotRunning
+2026-11-27T20:53:32.726903Z  WARN rulebox_agent::agent: the IPC tasks did not stop within 5 s
+2026-11-27T20:53:32.726972Z  INFO rulebox_agent::agent: agent stopped
+2026-11-27T20:53:34.741766Z  INFO rulebox_agent::service: service stopped
+2026-11-27T20:53:48.954974Z  INFO rulebox_agent::service: service starting version="0.1.3"
+2026-11-27T20:53:49.063307Z  INFO rulebox_agent::agent: admin exit settings enabled=true hotkey=Ctrl+Shift+F12 problem=None
+2026-11-27T20:53:49.103287Z  INFO rulebox_agent::agent: agent started
+2026-11-27T20:53:49.130117Z  INFO rulebox_agent::agent: settled the journal after a restart dropped=1 kept=0
+2026-11-27T20:53:49.171348Z  INFO rulebox_agent::agent: syncing with the backend
+2026-11-27T20:53:49.173932Z  INFO rulebox_agent::ipc_conn: shell pipe listening on \\.\pipe\dev.rulebox.agent.shell
+2026-11-27T20:53:49.216208Z  INFO rulebox_agent::ipc_conn: admin pipe listening on \\.\pipe\dev.rulebox.agent.admin
+2026-11-27T20:53:49.236365Z  INFO rulebox_agent::backend::task: desired state accepted version=7 kiosk_enabled=true key_id=591e74141d90ce7e
+2026-11-27T20:53:49.239577Z  WARN rulebox_agent::selfupdate: the Rulebox update is not done: this release failed before version=0.1.4
+2026-11-27T20:53:51.258963Z  INFO rulebox_agent::watchdog: shell health changed health=Starting
+2026-11-27T20:53:53.034070Z  INFO rulebox_agent::watchdog: shell.ready connection_id=1 pid=5280
+2026-11-27T20:53:53.087821Z  INFO rulebox_agent::watchdog: shell health changed health=Healthy
+2026-11-27T20:57:39.066642Z  INFO rulebox_agent::backend::task: desired state accepted version=8 kiosk_enabled=false key_id=591e74141d90ce7e
+2026-11-27T20:57:51.770643Z ERROR rulebox_agent::kiosk: the kiosk could not be disabled: access denied; win32 error 2147749904 in IWbemServices::DeleteInstance code=access_denied
+2026-11-27T20:57:51.776003Z  WARN rulebox_agent::kiosk: the kiosk change failed; trying again in 60 s failures=1
+2026-11-27T20:57:52.039720Z  INFO rulebox_agent::watchdog: shell health changed health=NotRunning
+2026-11-27T20:57:52.476957Z ERROR rulebox_agent::kiosk: the kiosk could not be disabled: access denied; win32 error 2147749904 in IWbemServices::DeleteInstance code=access_denied
+2026-11-27T20:57:52.481771Z  WARN rulebox_agent::kiosk: the kiosk change failed; trying again in 300 s failures=2
+2026-11-27T20:57:52.670132Z ERROR rulebox_agent::kiosk: the kiosk could not be disabled: access denied; win32 error 2147749904 in IWbemServices::DeleteInstance code=access_denied
+2026-11-27T20:57:52.683054Z  WARN rulebox_agent::kiosk: the kiosk change failed; trying again in 900 s failures=3
+2026-11-27T20:57:53.236451Z ERROR rulebox_agent::kiosk: the kiosk could not be disabled: access denied; win32 error 2147749904 in IWbemServices::DeleteInstance code=access_denied
+2026-11-27T20:57:53.274235Z  WARN rulebox_agent::kiosk: the kiosk change failed; trying again in 900 s failures=4
+2026-11-27T20:59:48.835958Z  INFO rulebox_agent::agent: agent stopped
+2026-11-27T20:59:48.836425Z  INFO rulebox_agent::service: service stopped
+2026-11-27T20:59:49.114763Z  INFO rulebox_agent::service: service starting version="0.1.3"
+2026-11-27T20:59:49.116011Z  INFO rulebox_agent::agent: admin exit settings enabled=true hotkey=Ctrl+Shift+F12 problem=None
+2026-11-27T20:59:49.119532Z  INFO rulebox_agent::agent: agent started
+2026-11-27T20:59:49.240225Z  WARN rulebox_agent::agent: restore_incomplete: a restore will be tried again ids=["svc-start:AppIDSvc", "applocker:csp"]
+2026-11-27T20:59:49.318679Z  INFO rulebox_agent::agent: syncing with the backend
+2026-11-27T20:59:49.323205Z  INFO rulebox_agent::backend::task: desired state accepted version=8 kiosk_enabled=false key_id=591e74141d90ce7e
+2026-11-27T20:59:49.325145Z  INFO rulebox_agent::ipc_conn: shell pipe listening on \\.\pipe\dev.rulebox.agent.shell
+2026-11-27T20:59:49.325198Z  INFO rulebox_agent::ipc_conn: admin pipe listening on \\.\pipe\dev.rulebox.agent.admin
+2026-11-27T20:59:49.335188Z  WARN rulebox_agent::selfupdate: the Rulebox update is not done: this release failed before version=0.1.4
+2026-11-27T20:59:49.365970Z ERROR rulebox_agent::kiosk: the kiosk could not be disabled: access denied; win32 error 2147749904 in IWbemServices::DeleteInstance code=access_denied
+2026-11-27T20:59:49.369891Z  WARN rulebox_agent::kiosk: the kiosk change failed; trying again in 900 s failures=5
+2026-11-27T21:05:28.930051Z  INFO rulebox_agent::agent: agent stopped
+2026-11-27T21:05:28.930913Z  INFO rulebox_agent::service: service stopped
+2026-11-27T21:05:43.047395Z  INFO rulebox_agent::service: service starting version="0.1.3"
+2026-11-27T21:05:43.048610Z  INFO rulebox_agent::agent: admin exit settings enabled=true hotkey=Ctrl+Shift+F12 problem=None
+2026-11-27T21:05:43.052548Z  INFO rulebox_agent::agent: agent started
+2026-11-27T21:05:43.085451Z  WARN rulebox_agent::agent: restore_incomplete: a restore will be tried again ids=["svc-start:AppIDSvc", "applocker:csp"]
+2026-11-27T21:05:43.089906Z  INFO rulebox_agent::agent: syncing with the backend
+2026-11-27T21:05:43.090140Z  INFO rulebox_agent::ipc_conn: shell pipe listening on \\.\pipe\dev.rulebox.agent.shell
+2026-11-27T21:05:43.093362Z  INFO rulebox_agent::backend::task: desired state accepted version=8 kiosk_enabled=false key_id=591e74141d90ce7e
+2026-11-27T21:05:43.093682Z  INFO rulebox_agent::ipc_conn: admin pipe listening on \\.\pipe\dev.rulebox.agent.admin
+2026-11-27T21:05:43.094483Z  INFO rulebox_agent::kiosk: recovered: the kiosk is held off until the next enroll or until this file is deleted flag=C:\ProgramData\Rulebox\state\recovered.flag
+2026-11-27T21:05:43.094737Z  WARN rulebox_agent::selfupdate: the Rulebox update is not done: this release failed before version=0.1.4
+2026-11-27T21:06:22.511324Z  INFO rulebox_agent::agent: agent stopped
+2026-11-27T21:06:22.512158Z  INFO rulebox_agent::service: service stopped
+2026-11-27T21:06:22.716794Z  INFO rulebox_agent::service: service starting version="0.1.3"
+2026-11-27T21:06:22.717826Z  INFO rulebox_agent::agent: admin exit settings enabled=true hotkey=Ctrl+Shift+F12 problem=None
+2026-11-27T21:06:22.719643Z  INFO rulebox_agent::agent: agent started
+2026-11-27T21:06:22.726214Z  INFO rulebox_agent::agent: syncing with the backend
+2026-11-27T21:06:22.726464Z  INFO rulebox_agent::ipc_conn: shell pipe listening on \\.\pipe\dev.rulebox.agent.shell
+2026-11-27T21:06:22.726579Z  INFO rulebox_agent::ipc_conn: admin pipe listening on \\.\pipe\dev.rulebox.agent.admin
+2026-11-27T21:06:22.727780Z  INFO rulebox_agent::kiosk: recovered: the kiosk is held off until the next enroll or until this file is deleted flag=C:\ProgramData\Rulebox\state\recovered.flag
+2026-11-27T21:06:22.727791Z  INFO rulebox_agent::backend::task: desired state accepted version=8 kiosk_enabled=false key_id=591e74141d90ce7e
+2026-11-27T21:06:22.728489Z  INFO rulebox_agent::install_marker: the install marker's KioskOn was updated on=false
+2026-11-27T21:06:22.728763Z  WARN rulebox_agent::selfupdate: the Rulebox update is not done: this release failed before version=0.1.4
+2026-11-27T21:07:08.685591Z  INFO rulebox_agent::enroll: the backend was told about the unenrollment
+2026-11-27T21:07:08.719735Z  INFO rulebox_agent::enroll: this PC is no longer enrolled
+2026-11-27T21:07:08.752888Z  INFO rulebox_agent::agent: agent stopped
+2026-11-27T21:07:08.756032Z  INFO rulebox_agent::service: service stopped

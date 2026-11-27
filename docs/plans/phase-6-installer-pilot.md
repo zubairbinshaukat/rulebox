@@ -1984,6 +1984,24 @@ credentials in the browser build; serve files through Convex file storage.
   - an empty `Policies\…\OOBE` key.
 - **Left:** verify the stale-launcher fix with an MSI built from it (next CI release), and the dashboard's Disable kiosk button and a release screen.
 
+**Status (2026-11-28, run A3, CI MSIs 0.1.1 and 0.1.2 + test copies, dev backend `gallant-ocelot-38`, evidence `a3-*`):**
+- **Passed:**
+  - item 9a with the fix: the kiosk comes back by itself about 6 s after msiexec;
+  - ShellHold and `RemoveFolderEx` (no files in use, no empty `versions` folders);
+  - failing upgrade (rollback, 1103, `did_not_take`);
+  - E-70;
+  - item 7 refusal with the kiosk on;
+  - uninstall-only unenroll (Staff account and profile removed, device unenrolled, owner auto sign-in back);
+  - Step 18 smoke at 4 GB and 8 GB;
+  - per-user Tier A install (Zahras POS).
+- **Failed → fixed, not yet VM-checked:**
+  - Disable kiosk (and `recover`) could not restore AppLocker (wrong MSI/Script CSP classes) or AppIDSvc (SCM refuses);
+  - a "cannot close the Staff App" race;
+  - a 1 h wait after a corrected release URL;
+  - unlogged journal failures.
+- **Differs:** Q-A4 (default `hideAdminTiles` refuses the whole lockdown), Q-A5 (removed employee's browser profile stays), Q-A6 (`ProgramData\Rulebox\state` and `downloads` stay), Q-A7 (empty policy keys), Q-A8 (a restore that never finishes).
+- **Left:** a CI MSI with these fixes and a VM re-test of Disable kiosk, AppLocker (PU-A1 rule) and the upgrade warning; PU-A2; item 9 BIXOLON order.
+
 1. Unsigned and (if available) signed MSI: UI install, silent install with
    `ENROLLCODE`, the log holds no code.
 2. Launch conditions: non-admin, low disk (simulated by a small VHD),

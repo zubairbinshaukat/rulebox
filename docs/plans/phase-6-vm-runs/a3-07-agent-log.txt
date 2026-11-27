@@ -1,0 +1,8 @@
+2026-11-27T20:17:27.260325Z  INFO rulebox_agent::backend::task: desired state accepted version=5 kiosk_enabled=true key_id=591e74141d90ce7e
+2026-11-27T20:17:27.270575Z  INFO rulebox_agent::installs::engine: downloading the installer app_id="j5734nm9ap758yngwnazb77vpx8k0kxs"
+2026-11-27T20:17:27.301597Z ERROR rulebox_agent::lockdown::runtime: the lockdown part of the document was refused; nothing was applied version=5 code="admin_signin_unverified"
+2026-11-27T20:17:28.056186Z  INFO rulebox_agent::installs::engine: installing app_id="j5734nm9ap758yngwnazb77vpx8k0kxs" kind=Exe update=false
+2026-11-27T20:17:30.195984Z  INFO rulebox_agent::installs::engine: installed app_id="j5734nm9ap758yngwnazb77vpx8k0kxs"
+2026-11-27T20:17:33.590645Z  INFO rulebox_agent::backend::task: desired state accepted version=6 kiosk_enabled=true key_id=591e74141d90ce7e
+2026-11-27T20:17:33.609224Z ERROR rulebox_agent::lockdown::runtime: the lockdown part of the document was refused; nothing was applied version=6 code="admin_signin_unverified"
+2026-11-27T20:21:52.749556Z  INFO rulebox_agent::backend::task: desired state accepted version=7 kiosk_enabled=true key_id=591e74141d90ce7e

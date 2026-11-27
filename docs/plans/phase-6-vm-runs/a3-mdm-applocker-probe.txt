@@ -1,0 +1,32 @@
+whoami: nt authority\system
+classes: 8
+MDM_AppLocker_ApplicationLaunchRestrictions01_EXE03
+MDM_AppLocker_ApplicationLaunchRestrictions01_StoreApps03
+MDM_AppLocker_CodeIntegrity03
+MDM_AppLocker_DLL03
+MDM_AppLocker_EnterpriseDataProtection01_EXE03
+MDM_AppLocker_EnterpriseDataProtection01_StoreApps03
+MDM_AppLocker_MSI03
+MDM_AppLocker_Script03
+MDM_AppLocker_ApplicationLaunchRestrictions01_EXE03 instances=0 
+MDM_AppLocker_ApplicationLaunchRestrictions01_MSI03 ERROR Invalid class 
+MDM_AppLocker_ApplicationLaunchRestrictions01_Script03 ERROR Invalid class 
+MDM_AppLocker_ApplicationLaunchRestrictions01_StoreApps03 instances=0 
+--- HKLM AppLocker MDM store
+--- AppIDSvc
+[SC] QueryServiceConfig SUCCESS
+
+SERVICE_NAME: AppIDSvc
+        TYPE               : 20  WIN32_SHARE_PROCESS 
+        START_TYPE         : 2   AUTO_START
+        ERROR_CONTROL      : 1   NORMAL
+        BINARY_PATH_NAME   : C:\WINDOWS\system32\svchost.exe -k LocalServiceNetworkRestricted -p
+        LOAD_ORDER_GROUP   : ProfSvc_Group
+        TAG                : 0
+        DISPLAY_NAME       : Application Identity
+        DEPENDENCIES       : RpcSs
+                           : AppID
+                           : CryptSvc
+        SERVICE_START_NAME : NT Authority\LocalService
+
+D:(A;;CCLCSWRPWPDTLOCRRC;;;SY)(A;;CCDCLCSWRPWPDTLOCRSDRCWDWO;;;BA)(A;;CCLCSWLOCRRC;;;IU)(A;;CCLCSWLOCRRC;;;SU)S:(AU;FA;CCDCLCSWRPWPDTLOCRSDRCWDWO;;;WD)

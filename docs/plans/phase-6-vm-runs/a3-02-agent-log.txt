@@ -1,0 +1,30 @@
+2026-11-27T19:51:02.274978Z  INFO rulebox_agent::backend::task: desired state accepted version=2 kiosk_enabled=true key_id=591e74141d90ce7e
+2026-11-27T19:51:02.278812Z  INFO rulebox_agent::selfupdate: downloading the Rulebox update version=0.1.2
+2026-11-27T19:51:02.593649Z  INFO rulebox_agent::selfupdate: starting the Rulebox upgrade (msiexec /i /qn /norestart) from="0.1.1" to=0.1.2
+2026-11-27T19:51:02.631427Z  INFO rulebox_agent::selfupdate: msiexec started outside the agent's job pid=6980
+2026-11-27T19:51:03.077726Z  INFO rulebox_agent::ipc_conn: client disconnected pipe="shell" connection_id=1 pid=5436 end=Shutdown
+2026-11-27T19:51:03.077884Z  INFO rulebox_agent::agent: agent stopped
+2026-11-27T19:51:03.087855Z  INFO rulebox_agent::service: service stopped
+2026-11-27T19:51:05.626660Z  INFO rulebox_agent::service: service starting version="0.1.2"
+2026-11-27T19:51:05.626769Z  INFO rulebox_agent::install_marker: the install marker now names this computer
+2026-11-27T19:51:05.627978Z  INFO rulebox_agent::agent: admin exit settings enabled=true hotkey=Ctrl+Shift+F12 problem=None
+2026-11-27T19:51:05.630058Z  INFO rulebox_agent::agent: agent started
+2026-11-27T19:51:05.643681Z  INFO rulebox_agent::agent: syncing with the backend
+2026-11-27T19:51:05.643904Z  INFO rulebox_agent::ipc_conn: shell pipe listening on \\.\pipe\dev.rulebox.agent.shell
+2026-11-27T19:51:05.644060Z  INFO rulebox_agent::ipc_conn: admin pipe listening on \\.\pipe\dev.rulebox.agent.admin
+2026-11-27T19:51:05.645199Z  INFO rulebox_agent::backend::task: desired state accepted version=2 kiosk_enabled=true key_id=591e74141d90ce7e
+2026-11-27T19:51:05.645890Z  INFO rulebox_agent::install_marker: the install marker's KioskOn was updated on=true
+2026-11-27T19:51:05.646218Z  INFO rulebox_agent::selfupdate: Rulebox was updated version=0.1.2
+2026-11-27T19:51:06.224771Z  WARN rulebox_agent::ipc_shell: pipe client refused: image_not_allowed pid=5436 session_id=1 image=Some("C:\\Config.Msi\\5efa2.rbf")
+2026-11-27T19:51:06.224795Z  WARN rulebox_agent::ipc_conn: rejected a pipe client pipe="shell" connection_id=1 reason="image_not_allowed"
+2026-11-27T19:51:08.239614Z  WARN rulebox_agent::ipc_shell: pipe client refused: image_not_allowed pid=5436 session_id=1 image=Some("C:\\Config.Msi\\5efa2.rbf")
+2026-11-27T19:51:08.239642Z  WARN rulebox_agent::ipc_conn: rejected a pipe client pipe="shell" connection_id=2 reason="image_not_allowed"
+2026-11-27T19:51:10.254301Z  WARN rulebox_agent::ipc_shell: pipe client refused: image_not_allowed pid=5436 session_id=1 image=Some("C:\\Config.Msi\\5efa2.rbf")
+2026-11-27T19:51:10.254319Z  WARN rulebox_agent::ipc_conn: rejected a pipe client pipe="shell" connection_id=3 reason="image_not_allowed"
+2026-11-27T19:51:10.798205Z  INFO rulebox_agent::watchdog: ended a stale rulebox-shell.exe left by an update session_id=1 pids=[5360]
+2026-11-27T19:51:10.798225Z  INFO rulebox_agent::watchdog: rulebox-shell.exe was not running in the Staff session; started it session_id=1 pid=3612
+2026-11-27T19:51:11.220069Z  INFO rulebox_agent::ipc_conn: client connected pipe="shell" connection_id=4 pid=2328 session_id=1 role=Shell
+2026-11-27T19:51:11.228362Z  INFO rulebox_agent::watchdog: shell health changed health=Starting
+2026-11-27T19:51:12.194731Z  INFO rulebox_agent::watchdog: shell.ready connection_id=4 pid=2328
+2026-11-27T19:51:12.226365Z  INFO rulebox_agent::watchdog: shell health changed health=Healthy
+2026-11-27T19:51:21.221850Z  INFO rulebox_agent::watchdog: shell.heartbeat (first on this connection) connection_id=4 pid=2328

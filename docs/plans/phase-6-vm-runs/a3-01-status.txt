@@ -1,0 +1,22 @@
+agent version : 0.1.1
+enrollment    : enrolled
+device        : RULEBOX (jh7a43th514wf2mp4vvh347eg58k1tq4)
+backend       : https://gallant-ocelot-38.convex.cloud
+connection    : online
+kiosk         : enabled=true phase=applied error=-
+shell         : healthy
+display mode  : lite
+policy        : version 1
+clock         : ok, server offset -1639 ms
+admin exit    : on (Ctrl+Shift+F12)
+employee      : -
+audit queued  : 0
+
+
+Name    : RuleboxStaff
+Enabled : True
+Admin   : False
+
+
+
+

@@ -1,0 +1,13 @@
+--- after the PIN
+No User exists for *
+AutoAdminLogon=1 DefaultUserName=RuleboxStaff
+--- agent log
+2026-11-27T20:33:33.894861Z  INFO rulebox_agent::admin_exit: admin exit: correct PIN, signing the Staff session out session_id=1
+2026-11-27T20:33:35.898540Z  INFO rulebox_agent::admin_exit: the Staff session was signed out for the admin exit session_id=1
+2026-11-27T20:33:35.898598Z  INFO rulebox_agent::kiosk: exit hold set: automatic sign-in stays off for at most 5 minutes
+2026-11-27T20:33:56.984065Z  INFO rulebox_agent::kiosk: the exit hold ended; automatic sign-in is armed again
+--- dashboard audit (latest)
+01:33:32 device.adminExitSuccess The admin exit was used on the PC RULEBOX
+01:21:49 lockdown.settingsChanged Changed the lockdown settings of the group Default
+01:18:26 device.lockdownRefused The PC RULEBOX refused a lockdown policy (admin_signin_unverified)
+01:18:26 device.lockdownRefused The PC RULEBOX refused a lockdown policy (admin_signin_unverified)

@@ -1,0 +1,4 @@
+tag=a3-probe who=nt authority\system session=0 elevated=True
+exe=powershell.exe
+args=-NoProfile -ExecutionPolicy Bypass -File C:\rb-run\mdm-applocker-probe.ps1
+start=01:58:55 end=01:58:57 seconds=2.1 exit=0

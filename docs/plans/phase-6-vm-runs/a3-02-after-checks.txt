@@ -1,0 +1,43 @@
+agent version : 0.1.2
+enrollment    : enrolled
+device        : RULEBOX (jh7a43th514wf2mp4vvh347eg58k1tq4)
+backend       : https://gallant-ocelot-38.convex.cloud
+connection    : online
+kiosk         : enabled=true phase=applied error=-
+shell         : healthy
+display mode  : lite
+policy        : version 2
+clock         : ok, server offset -1629 ms
+admin exit    : on (Ctrl+Shift+F12)
+employee      : -
+audit queued  : 0
+--- RuleboxStaff: RuleboxStaff enabled=True
+--- state files
+agent-state.json 3766
+apply-report.json 210
+desired-state.json 1420
+lkg.json 1581
+lockdown-last.json 570
+roster.json 158
+secrets.bin 518
+selfupdate.json 52
+--- Winlogon
+AutoAdminLogon=1 DefaultUserName=RuleboxStaff DefaultPassword=<absent>
+--- versions folders
+0.1.1 files=0
+0.1.2 files=1
+--- selfupdate
+{
+  "schema": 1,
+  "attempt": null,
+  "failed": []
+}
+--- events
+00:51:06 MsiInstaller 1042: Ending a Windows Installer transaction: C:\ProgramData\Rulebox\selfupdate\765b3a6c832e158d7f829f8feb14b85fc882a0e4ea36148ddde69dc6c32c8f31.msi. Client Process I
+00:51:06 MsiInstaller 1033: Windows Installer installed the product. Product Name: Rulebox. Product Version: 0.1.2. Product Language: 1033. Manufacturer: Rulebox. Installation success or e
+00:51:06 MsiInstaller 11707: Product: Rulebox -- Installation completed successfully.
+00:51:05 Rulebox Agent 1100: Rulebox was updated from version 0.1.1 to 0.1.2.
+00:51:02 MsiInstaller 1040: Beginning a Windows Installer transaction: C:\ProgramData\Rulebox\selfupdate\765b3a6c832e158d7f829f8feb14b85fc882a0e4ea36148ddde69dc6c32c8f31.msi. Client Proces
+00:51:02 Rulebox Agent 1101: Updating Rulebox from version 0.1.1 to 0.1.2.
+00:43:32 Rulebox Agent 1000: Rulebox enrolled this PC with the enrollment code from the installer. The code was deleted from this PC.
+00:43:30 MsiInstaller 1042: Ending a Windows Installer transaction: C:\rb-deploy\Rulebox-0.1.1-x64-unsigned.msi. Client Process Id: 5452.

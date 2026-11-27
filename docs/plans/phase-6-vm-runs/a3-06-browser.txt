@@ -1,0 +1,17 @@
+--- 8 GB, Edge
+--- agent log (browser, roster, session)
+2026-11-27T20:35:49.757644Z  INFO rulebox_agent::ipc_conn: client connected pipe="admin" connection_id=1 pid=176 session_id=0 role=Admin
+2026-11-27T20:36:22.021097Z  INFO rulebox_agent::session: employee signed in username="a3test" offline=false
+2026-11-27T20:38:53.824844Z  INFO rulebox_agent::session: employee session cleared reason="staff session ended"
+2026-11-27T20:39:25.657414Z  INFO rulebox_agent::cleanup: session cleanup owed from before the agent started; the rounds run before the next sign-in
+2026-11-27T20:39:28.002529Z  INFO rulebox_agent::ipc_conn: client connected pipe="shell" connection_id=1 pid=5368 session_id=1 role=Shell
+2026-11-27T20:39:38.699632Z  INFO rulebox_agent::cleanup: session cleanup complete
+2026-11-27T20:41:05.567022Z  INFO rulebox_agent::ipc_conn: client connected pipe="admin" connection_id=1 pid=6404 session_id=0 role=Admin
+2026-11-27T20:41:39.719091Z  INFO rulebox_agent::session: employee signed in username="a3test" offline=false
+2026-11-27T20:42:56.125680Z  INFO rulebox_agent::ipc_conn: client connected pipe="admin" connection_id=2 pid=4500 session_id=0 role=Admin
+2026-11-27T20:43:07.086266Z  INFO rulebox_agent::session: employee signed out
+2026-11-27T20:43:13.222190Z  INFO rulebox_agent::ipc_conn: client connected pipe="admin" connection_id=3 pid=3252 session_id=0 role=Admin
+2026-11-27T20:43:20.104171Z  INFO rulebox_agent::cleanup: session cleanup complete
+2026-11-27T20:52:24.535286Z  INFO rulebox_agent::backend::task: roster updated epoch=2 members=0
+2026-11-27T20:52:24.541646Z  INFO rulebox_agent::session: offline sign-in removed for employees the roster no longer allows count=1
+--- profiles before restart: jn778b7f75kmz2f9vm602nm1qx8k1n1t

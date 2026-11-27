@@ -1,0 +1,4 @@
+tag=a3-recover who=nt authority\system session=0 elevated=True
+exe=powershell.exe
+args=-NoProfile -ExecutionPolicy Bypass -File C:\rb-run\recover.ps1
+start=02:05:28 end=02:05:29 seconds=1.1 exit=0

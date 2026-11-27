@@ -1,0 +1,67 @@
+{
+  "schema": 2,
+  "enrollment": {
+    "convexUrl": "https://gallant-ocelot-38.convex.cloud",
+    "deviceId": "jh7a43th514wf2mp4vvh347eg58k1tq4",
+    "orgId": "k176v26595efzqxanc7aa8mvb18h18by",
+    "deviceName": "RULEBOX",
+    "enrolledAtMs": 1795808611883,
+    "revoked": false,
+    "allowJoined": false
+  },
+  "pendingEnrollment": null,
+  "staff": {
+    "sid": "S-1-5-21-1452024813-456936664-1956420132-1003",
+    "userName": "RuleboxStaff",
+    "profileDir": "C:\\Users\\RuleboxStaff"
+  },
+  "kiosk": {
+    "applied": "disabled",
+    "lastError": null,
+    "failures": 0,
+    "lsaTakenOver": false,
+    "staffHive": null
+  },
+  "journal": [
+    {
+      "id": "applocker:csp",
+      "owner": "l3",
+      "target": "appLockerPolicy",
+      "original": "notPresent",
+      "phase": "restoring",
+      "sinceVersion": 7,
+      "recordedAtMs": 1795810920879,
+      "lastError": "platform_error"
+    },
+    {
+      "id": "svc-start:AppIDSvc",
+      "owner": "l3",
+      "target": {
+        "serviceStart": {
+          "name": "AppIDSvc"
+        }
+      },
+      "original": {
+        "serviceStart": 3
+      },
+      "phase": "restoring",
+      "sinceVersion": 7,
+      "recordedAtMs": 1795810921115,
+      "lastError": "access_denied"
+    }
+  ],
+  "lastAppliedVersion": 7,
+  "lastWallClockMs": 1795813543086,
+  "trustedKeys": [
+    {
+      "keyId": "591e74141d90ce7e",
+      "publicKey": "LzqZFsb+55N8w/+C/VbLuWy5VVO2kCgr0l13ykDFZ9s="
+    }
+  ],
+  "lastDocKeyId": "591e74141d90ce7e",
+  "acceptedVersion": 8,
+  "sealKeyRegistered": "34ff204e884bd5b6",
+  "browserReady": [
+    "edge"
+  ]
+}

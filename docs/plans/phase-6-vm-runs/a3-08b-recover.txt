@@ -1,0 +1,22 @@
+`recover` puts normal Windows back on this PC. It will:
+  - stop the Rulebox Agent service (if it runs)
+  - restore the start type of the service AppIDSvc
+  - remove the AppLocker policy
+  - delete the pending Staff password secret
+  - remove the Rulebox shell and lock policy from the RuleboxStaff account
+  - mark the kiosk as disabled in the agent state
+  - keep the kiosk off until the next enroll (recovered.flag)
+Recovery finished with problems.
+Service: stopped.
+Changed:
+  - delete the pending Staff password secret
+  - remove the Rulebox shell and lock policy from the RuleboxStaff account
+  - mark the kiosk as disabled in the agent state
+Flag: recovered.flag written. The service keeps the kiosk off until the next enroll or until you delete that file.
+Failed:
+  - restore the start type of the service AppIDSvc: access denied
+  - remove the AppLocker policy: win32 error 2147749904 in IWbemServices::DeleteInstance
+Check:
+  - Restart the PC (or sign out of the Staff account) to get the normal Windows sign-in screen.
+  - The RuleboxStaff account and its files were not removed; `unenroll --remove-staff-account` does that.
+exit=1

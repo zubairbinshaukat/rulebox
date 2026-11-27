@@ -1,0 +1,1 @@
+LSA secret names: DefaultPassword, DPAPI_SYSTEM, NL$KM

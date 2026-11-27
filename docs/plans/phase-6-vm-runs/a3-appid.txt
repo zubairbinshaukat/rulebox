@@ -1,0 +1,4 @@
+tag=a3-appid who=nt authority\system session=0 elevated=True
+exe=powershell.exe
+args=-NoProfile -ExecutionPolicy Bypass -File C:\rb-run\appid-manual.ps1
+start=01:59:45 end=01:59:46 seconds=1.1 exit=0

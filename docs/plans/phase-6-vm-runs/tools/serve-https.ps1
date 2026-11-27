@@ -11,9 +11,10 @@ while ($l.IsListening) {
   $c = $l.GetContext()
   $name = [IO.Path]::GetFileName($c.Request.Url.AbsolutePath)
   $path = Join-Path $Root $name
-  if ($name -like '*.msi' -and (Test-Path -LiteralPath $path)) {
+  # Run A3: also .exe (the per-user test installer, item 7). Do not send HEAD: run A3's first server died on one.
+  if (($name -like '*.msi' -or $name -like '*.exe') -and (Test-Path -LiteralPath $path)) {
     $bytes = [IO.File]::ReadAllBytes($path)
-    $c.Response.ContentType = 'application/x-msi'
+    $c.Response.ContentType = if ($name -like '*.msi') { 'application/x-msi' } else { 'application/octet-stream' }
     $c.Response.ContentLength64 = $bytes.Length
     $c.Response.OutputStream.Write($bytes, 0, $bytes.Length)
     $code = 200

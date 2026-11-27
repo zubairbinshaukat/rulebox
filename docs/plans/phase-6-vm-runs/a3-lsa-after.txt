@@ -1,0 +1,4 @@
+tag=a3-lsa-after who=nt authority\system session=0 elevated=True
+exe=powershell.exe
+args=-NoProfile -ExecutionPolicy Bypass -File C:\rb-run\lsa-names.ps1 -Tag a3-08b-lsa-after-uninstall
+start=02:07:27 end=02:07:28 seconds=1.1 exit=0

@@ -1,0 +1,4 @@
+tag=a3-drop who=nt authority\system session=0 elevated=True
+exe=powershell.exe
+args=-NoProfile -ExecutionPolicy Bypass -File C:\rb-run\drop-stuck.ps1
+start=02:06:22 end=02:06:38 seconds=16.2 exit=0

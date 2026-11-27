@@ -1,0 +1,140 @@
+== service
+[SC] QueryServiceConfig SUCCESS
+
+SERVICE_NAME: RuleboxAgent
+        TYPE               : 10  WIN32_OWN_PROCESS 
+        START_TYPE         : 2   AUTO_START
+        ERROR_CONTROL      : 1   NORMAL
+        BINARY_PATH_NAME   : "C:\Program Files\Rulebox\rulebox-agent.exe" service run
+        LOAD_ORDER_GROUP   : 
+        TAG                : 0
+        DISPLAY_NAME       : Rulebox Agent
+        DEPENDENCIES       : 
+        SERVICE_START_NAME : LocalSystem
+[SC] QueryServiceConfig2 SUCCESS
+
+SERVICE_NAME: RuleboxAgent
+        RESET_PERIOD (in seconds)    : 0
+        REBOOT_MESSAGE               : 
+        COMMAND_LINE                 : 
+
+
+SERVICE_NAME: RuleboxAgent 
+        TYPE               : 10  WIN32_OWN_PROCESS  
+        STATE              : 4  RUNNING 
+                                (STOPPABLE, NOT_PAUSABLE, ACCEPTS_SHUTDOWN)
+        WIN32_EXIT_CODE    : 0  (0x0)
+        SERVICE_EXIT_CODE  : 0  (0x0)
+        CHECKPOINT         : 0x0
+        WAIT_HINT          : 0x0
+        PID                : 592
+        FLAGS              : 
+== service SDDL
+
+D:(A;;CCLCSWRPWPDTLOCRRC;;;SY)(A;;CCDCLCSWRPWPDTLOCRSDRCWDWO;;;BA)(A;;CCLCSWLOCRRC;;;IU)(A;;CCLCSWLOCRRC;;;SU)S:(AU;FA;CCDCLCSWRPWPDTLOCRSDRCWDWO;;;WD)
+== service privileges
+[SC] QueryServiceConfig2 SUCCESS
+
+SERVICE_NAME: RuleboxAgent
+        PRIVILEGES       : 
+== folder ACL
+C:\Program Files\Rulebox
+  SDDL O:SYG:SYD:PAI(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)(A;OICI;0x1200a9;;;BU)
+  protected=True
+  NT AUTHORITY\SYSTEM FullControl Allow inherited=False
+  BUILTIN\Administrators FullControl Allow inherited=False
+  BUILTIN\Users ReadAndExecute, Synchronize Allow inherited=False
+C:\Program Files\Rulebox\rulebox-agent.exe
+  SDDL O:SYG:SYD:AI(A;ID;FA;;;SY)(A;ID;FA;;;BA)(A;ID;0x1200a9;;;BU)
+  protected=False
+  NT AUTHORITY\SYSTEM FullControl Allow inherited=True
+  BUILTIN\Administrators FullControl Allow inherited=True
+  BUILTIN\Users ReadAndExecute, Synchronize Allow inherited=True
+C:\Program Files\Rulebox\versions\0.1.3\rulebox-staff.exe
+  SDDL O:SYG:SYD:AI(A;ID;FA;;;SY)(A;ID;FA;;;BA)(A;ID;0x1200a9;;;BU)
+  protected=False
+  NT AUTHORITY\SYSTEM FullControl Allow inherited=True
+  BUILTIN\Administrators FullControl Allow inherited=True
+  BUILTIN\Users ReadAndExecute, Synchronize Allow inherited=True
+== files
+C:\Program Files\Rulebox\current.json 62 v= sha256=2422EA40710729A2B501323EB540882386248090E9EDB9C368C5D74B65A8AB24
+C:\Program Files\Rulebox\LICENSE 1073 v= sha256=AFBA38CC969660609C75D76BF0D20114D64C7B5B60DD0922BCFF92541BC006C0
+C:\Program Files\Rulebox\MicrosoftEdgeWebview2Setup.exe 1841888 v=1.3.319.43 sha256=32B9A5803BE0D338B20F3FAF9BD0932BEAD82320158C03D3807EDDCA081494B4
+C:\Program Files\Rulebox\rulebox-agent.exe 13496320 v= sha256=F7B79323C873821300153872FFF9DD27208BADCECDA8E0350B2074D0D3E3B5B7
+C:\Program Files\Rulebox\rulebox-shell.exe 954368 v= sha256=33414819BFE3B4E817E0D3543F785AF0892E1E8684706094C517F9BBE8DDFF4C
+C:\Program Files\Rulebox\THIRD_PARTY_NOTICES.md 11536 v= sha256=315FC24FC8AB0FEB7A8F2376BED24E5280CB0D619038ABBC6253CCBD1CCE5E83
+C:\Program Files\Rulebox\versions\0.1.3\rulebox-staff.exe 17707520 v=0.0.0 sha256=53CD85CC3DBFAB2F4C00A54906E5D64050278CA37830810E5471124F3C6A8E57
+== current.json
+{"version":"0.1.3","exe":"versions\\0.1.3\\rulebox-staff.exe"}
+== HKLM\SOFTWARE\Rulebox
+KEY HKEY_LOCAL_MACHINE\SOFTWARE\Rulebox\Cleanup
+  Versions (DWord) = 1
+KEY HKEY_LOCAL_MACHINE\SOFTWARE\Rulebox\Install
+  KioskOn (DWord) = 0
+  ComputerName (String) = RULEBOX
+  Version (String) = 0.1.3
+  InstallDir (String) = C:\Program Files\Rulebox\
+KEY HKEY_LOCAL_MACHINE\SOFTWARE\Rulebox\StartMenu
+  Setup (DWord) = 1
+== Start menu
+Rulebox Setup.lnk -> C:\Program Files\Rulebox\rulebox-agent.exe setup (wd C:\Program Files\Rulebox\)
+== ARP
+{BD5E5CD7-B99C-4B3A-B872-5FBCD99AF7E5} | Rulebox | 0.1.3 | NoModify=1 | MsiExec.exe /X{BD5E5CD7-B99C-4B3A-B872-5FBCD99AF7E5}
+== ProgramData\Rulebox
+C:\ProgramData\Rulebox\downloads 1
+C:\ProgramData\Rulebox\installer-temp 1
+C:\ProgramData\Rulebox\logs 1
+C:\ProgramData\Rulebox\selfupdate 1
+C:\ProgramData\Rulebox\state 1
+C:\ProgramData\Rulebox\downloads\76645ca1290d4830a79492005fe7306a591cced967690c02609ebe5df761825f.exe 2917229
+C:\ProgramData\Rulebox\logs\agent.2026-11-27.log 382472
+C:\ProgramData\Rulebox\logs\selfupdate-msi.log 391192
+C:\ProgramData\Rulebox\state\agent-state.json 799
+C:\ProgramData\Rulebox\state\apply-report.json 1170
+C:\ProgramData\Rulebox\state\audit-queue.json 50
+C:\ProgramData\Rulebox\state\browser-profiles.json 65
+C:\ProgramData\Rulebox\state\desired-state.json 4173
+C:\ProgramData\Rulebox\state\employee-cache.json 34
+C:\ProgramData\Rulebox\state\findings-state.json 198
+C:\ProgramData\Rulebox\state\findings.json 600
+C:\ProgramData\Rulebox\state\installs.json 1576
+C:\ProgramData\Rulebox\state\lkg.json 4454
+C:\ProgramData\Rulebox\state\lockdown-last.json 812
+C:\ProgramData\Rulebox\state\lockouts.json 178
+C:\ProgramData\Rulebox\state\recovered.flag 217
+C:\ProgramData\Rulebox\state\roster.json 158
+C:\ProgramData\Rulebox\state\secrets.bin 486
+C:\ProgramData\Rulebox\state\selfupdate.json 208
+== agent processes
+592 "C:\Program Files\Rulebox\rulebox-agent.exe" service run
+== Application events (Rulebox*, last 30)
+01:56:06 MsiInstaller 1042 Information: Ending a Windows Installer transaction: {BD5E5CD7-B99C-4B3A-B872-5FBCD99AF7E5}. Client Process Id: 1784.
+01:56:06 MsiInstaller 1034 Information: Windows Installer removed the product. Product Name: Rulebox. Product Version: 0.1.3. Product Language: 1033. Manufacturer: Rulebox. Removal success or error status: 1603.
+01:56:06 MsiInstaller 11725 Information: Product: Rulebox -- Removal failed.
+01:56:06 MsiInstaller 10005 Error: Product: Rulebox -- Turn kiosk mode off first. Open the Rulebox dashboard, turn the kiosk off for this PC, then uninstall Rulebox.
+01:56:06 MsiInstaller 1040 Information: Beginning a Windows Installer transaction: {BD5E5CD7-B99C-4B3A-B872-5FBCD99AF7E5}. Client Process Id: 1784.
+01:55:52 MsiInstaller 1042 Information: Ending a Windows Installer transaction: {10EB958F-D890-4BAD-8270-3AF2D08F2F1B}. Client Process Id: 1364.
+01:55:52 MsiInstaller 1040 Information: Beginning a Windows Installer transaction: {10EB958F-D890-4BAD-8270-3AF2D08F2F1B}. Client Process Id: 1364.
+01:31:22 Rulebox Agent 1103 Error: The update of Rulebox to version 0.1.4 did not take effect; version 0.1.3 still runs. It is not tried again until a new release.
+01:01:28 MsiInstaller 1042 Information: Ending a Windows Installer transaction: C:\ProgramData\Rulebox\selfupdate\6166941a35838c512f9dbb14360e32b1e3b0e155e4fdfde668065e40f3fb7491.msi. Client Process Id: 2984.
+01:01:28 MsiInstaller 1033 Information: Windows Installer installed the product. Product Name: Rulebox. Product Version: 0.1.4. Product Language: 1033. Manufacturer: Rulebox. Installation success or error status: 1603.
+01:01:28 MsiInstaller 11708 Information: Product: Rulebox -- Installation failed.
+01:01:25 MsiInstaller 11722 Error: Product: Rulebox -- Error 1722. There is a problem with this Windows Installer package. A program run as part of the setup did not finish as expected. Contact your support personnel or package vendor. Action RbForceFailForTest, location: C:\Program Files\Rulebox\, command: "C:\WINDOWS\SysWOW64\cmd.e
+01:01:22 MsiInstaller 1040 Information: Beginning a Windows Installer transaction: C:\ProgramData\Rulebox\selfupdate\6166941a35838c512f9dbb14360e32b1e3b0e155e4fdfde668065e40f3fb7491.msi. Client Process Id: 2984.
+01:01:22 Rulebox Agent 1101 Information: Updating Rulebox from version 0.1.3 to 0.1.4.
+00:58:12 MsiInstaller 1042 Information: Ending a Windows Installer transaction: C:\ProgramData\Rulebox\selfupdate\d8fc6ccd70677b917ee654b4ae6c496225b367a19d8a7aec0cff11af8a6a4037.msi. Client Process Id: 1864.
+00:58:12 MsiInstaller 1033 Information: Windows Installer installed the product. Product Name: Rulebox. Product Version: 0.1.3. Product Language: 1033. Manufacturer: Rulebox. Installation success or error status: 0.
+00:58:12 MsiInstaller 11707 Information: Product: Rulebox -- Installation completed successfully.
+00:58:11 Rulebox Agent 1100 Information: Rulebox was updated from version 0.1.2 to 0.1.3.
+00:58:08 MsiInstaller 1040 Information: Beginning a Windows Installer transaction: C:\ProgramData\Rulebox\selfupdate\d8fc6ccd70677b917ee654b4ae6c496225b367a19d8a7aec0cff11af8a6a4037.msi. Client Process Id: 1864.
+00:58:08 Rulebox Agent 1101 Information: Updating Rulebox from version 0.1.2 to 0.1.3.
+00:51:06 MsiInstaller 1042 Information: Ending a Windows Installer transaction: C:\ProgramData\Rulebox\selfupdate\765b3a6c832e158d7f829f8feb14b85fc882a0e4ea36148ddde69dc6c32c8f31.msi. Client Process Id: 6980.
+00:51:06 MsiInstaller 1033 Information: Windows Installer installed the product. Product Name: Rulebox. Product Version: 0.1.2. Product Language: 1033. Manufacturer: Rulebox. Installation success or error status: 0.
+00:51:06 MsiInstaller 11707 Information: Product: Rulebox -- Installation completed successfully.
+00:51:05 Rulebox Agent 1100 Information: Rulebox was updated from version 0.1.1 to 0.1.2.
+00:51:02 MsiInstaller 1040 Information: Beginning a Windows Installer transaction: C:\ProgramData\Rulebox\selfupdate\765b3a6c832e158d7f829f8feb14b85fc882a0e4ea36148ddde69dc6c32c8f31.msi. Client Process Id: 6980.
+00:51:02 Rulebox Agent 1101 Information: Updating Rulebox from version 0.1.1 to 0.1.2.
+00:43:32 Rulebox Agent 1000 Information: Rulebox enrolled this PC with the enrollment code from the installer. The code was deleted from this PC.
+00:43:30 MsiInstaller 1042 Information: Ending a Windows Installer transaction: C:\rb-deploy\Rulebox-0.1.1-x64-unsigned.msi. Client Process Id: 5452.
+00:43:30 MsiInstaller 1033 Information: Windows Installer installed the product. Product Name: Rulebox. Product Version: 0.1.1. Product Language: 1033. Manufacturer: Rulebox. Installation success or error status: 0.
+00:43:30 MsiInstaller 11707 Information: Product: Rulebox -- Installation completed successfully.

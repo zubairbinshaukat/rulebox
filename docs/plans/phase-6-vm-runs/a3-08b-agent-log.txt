@@ -1,0 +1,51 @@
+2026-11-27T20:57:39.066642Z  INFO rulebox_agent::backend::task: desired state accepted version=8 kiosk_enabled=false key_id=591e74141d90ce7e
+2026-11-27T20:57:51.770643Z ERROR rulebox_agent::kiosk: the kiosk could not be disabled: access denied; win32 error 2147749904 in IWbemServices::DeleteInstance code=access_denied
+2026-11-27T20:57:51.776003Z  WARN rulebox_agent::kiosk: the kiosk change failed; trying again in 60 s failures=1
+2026-11-27T20:57:52.039720Z  INFO rulebox_agent::watchdog: shell health changed health=NotRunning
+2026-11-27T20:57:52.476957Z ERROR rulebox_agent::kiosk: the kiosk could not be disabled: access denied; win32 error 2147749904 in IWbemServices::DeleteInstance code=access_denied
+2026-11-27T20:57:52.481771Z  WARN rulebox_agent::kiosk: the kiosk change failed; trying again in 300 s failures=2
+2026-11-27T20:57:52.670132Z ERROR rulebox_agent::kiosk: the kiosk could not be disabled: access denied; win32 error 2147749904 in IWbemServices::DeleteInstance code=access_denied
+2026-11-27T20:57:52.683054Z  WARN rulebox_agent::kiosk: the kiosk change failed; trying again in 900 s failures=3
+2026-11-27T20:57:53.236451Z ERROR rulebox_agent::kiosk: the kiosk could not be disabled: access denied; win32 error 2147749904 in IWbemServices::DeleteInstance code=access_denied
+2026-11-27T20:57:53.274235Z  WARN rulebox_agent::kiosk: the kiosk change failed; trying again in 900 s failures=4
+2026-11-27T20:59:48.835958Z  INFO rulebox_agent::agent: agent stopped
+2026-11-27T20:59:48.836425Z  INFO rulebox_agent::service: service stopped
+2026-11-27T20:59:49.114763Z  INFO rulebox_agent::service: service starting version="0.1.3"
+2026-11-27T20:59:49.116011Z  INFO rulebox_agent::agent: admin exit settings enabled=true hotkey=Ctrl+Shift+F12 problem=None
+2026-11-27T20:59:49.119532Z  INFO rulebox_agent::agent: agent started
+2026-11-27T20:59:49.240225Z  WARN rulebox_agent::agent: restore_incomplete: a restore will be tried again ids=["svc-start:AppIDSvc", "applocker:csp"]
+2026-11-27T20:59:49.318679Z  INFO rulebox_agent::agent: syncing with the backend
+2026-11-27T20:59:49.323205Z  INFO rulebox_agent::backend::task: desired state accepted version=8 kiosk_enabled=false key_id=591e74141d90ce7e
+2026-11-27T20:59:49.325145Z  INFO rulebox_agent::ipc_conn: shell pipe listening on \\.\pipe\dev.rulebox.agent.shell
+2026-11-27T20:59:49.325198Z  INFO rulebox_agent::ipc_conn: admin pipe listening on \\.\pipe\dev.rulebox.agent.admin
+2026-11-27T20:59:49.335188Z  WARN rulebox_agent::selfupdate: the Rulebox update is not done: this release failed before version=0.1.4
+2026-11-27T20:59:49.365970Z ERROR rulebox_agent::kiosk: the kiosk could not be disabled: access denied; win32 error 2147749904 in IWbemServices::DeleteInstance code=access_denied
+2026-11-27T20:59:49.369891Z  WARN rulebox_agent::kiosk: the kiosk change failed; trying again in 900 s failures=5
+2026-11-27T21:05:28.930051Z  INFO rulebox_agent::agent: agent stopped
+2026-11-27T21:05:28.930913Z  INFO rulebox_agent::service: service stopped
+2026-11-27T21:05:43.047395Z  INFO rulebox_agent::service: service starting version="0.1.3"
+2026-11-27T21:05:43.048610Z  INFO rulebox_agent::agent: admin exit settings enabled=true hotkey=Ctrl+Shift+F12 problem=None
+2026-11-27T21:05:43.052548Z  INFO rulebox_agent::agent: agent started
+2026-11-27T21:05:43.085451Z  WARN rulebox_agent::agent: restore_incomplete: a restore will be tried again ids=["svc-start:AppIDSvc", "applocker:csp"]
+2026-11-27T21:05:43.089906Z  INFO rulebox_agent::agent: syncing with the backend
+2026-11-27T21:05:43.090140Z  INFO rulebox_agent::ipc_conn: shell pipe listening on \\.\pipe\dev.rulebox.agent.shell
+2026-11-27T21:05:43.093362Z  INFO rulebox_agent::backend::task: desired state accepted version=8 kiosk_enabled=false key_id=591e74141d90ce7e
+2026-11-27T21:05:43.093682Z  INFO rulebox_agent::ipc_conn: admin pipe listening on \\.\pipe\dev.rulebox.agent.admin
+2026-11-27T21:05:43.094483Z  INFO rulebox_agent::kiosk: recovered: the kiosk is held off until the next enroll or until this file is deleted flag=C:\ProgramData\Rulebox\state\recovered.flag
+2026-11-27T21:05:43.094737Z  WARN rulebox_agent::selfupdate: the Rulebox update is not done: this release failed before version=0.1.4
+2026-11-27T21:06:22.511324Z  INFO rulebox_agent::agent: agent stopped
+2026-11-27T21:06:22.512158Z  INFO rulebox_agent::service: service stopped
+2026-11-27T21:06:22.716794Z  INFO rulebox_agent::service: service starting version="0.1.3"
+2026-11-27T21:06:22.717826Z  INFO rulebox_agent::agent: admin exit settings enabled=true hotkey=Ctrl+Shift+F12 problem=None
+2026-11-27T21:06:22.719643Z  INFO rulebox_agent::agent: agent started
+2026-11-27T21:06:22.726214Z  INFO rulebox_agent::agent: syncing with the backend
+2026-11-27T21:06:22.726464Z  INFO rulebox_agent::ipc_conn: shell pipe listening on \\.\pipe\dev.rulebox.agent.shell
+2026-11-27T21:06:22.726579Z  INFO rulebox_agent::ipc_conn: admin pipe listening on \\.\pipe\dev.rulebox.agent.admin
+2026-11-27T21:06:22.727780Z  INFO rulebox_agent::kiosk: recovered: the kiosk is held off until the next enroll or until this file is deleted flag=C:\ProgramData\Rulebox\state\recovered.flag
+2026-11-27T21:06:22.727791Z  INFO rulebox_agent::backend::task: desired state accepted version=8 kiosk_enabled=false key_id=591e74141d90ce7e
+2026-11-27T21:06:22.728489Z  INFO rulebox_agent::install_marker: the install marker's KioskOn was updated on=false
+2026-11-27T21:06:22.728763Z  WARN rulebox_agent::selfupdate: the Rulebox update is not done: this release failed before version=0.1.4
+2026-11-27T21:07:08.685591Z  INFO rulebox_agent::enroll: the backend was told about the unenrollment
+2026-11-27T21:07:08.719735Z  INFO rulebox_agent::enroll: this PC is no longer enrolled
+2026-11-27T21:07:08.752888Z  INFO rulebox_agent::agent: agent stopped
+2026-11-27T21:07:08.756032Z  INFO rulebox_agent::service: service stopped
