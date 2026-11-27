@@ -101,7 +101,10 @@ jobs:
         run: cargo test --locked -p rulebox-win32 --features production --test guard_coverage
 
       - name: JavaScript tests (all packages, Convex, scripts, installer sources)
+        # pwsh only checks the exit code of a step's LAST command; this makes every native
+        # command that fails stop the step (it hid failing staff-app tests until 2026-11-27).
         run: |
+          $PSNativeCommandUseErrorActionPreference = $true
           pnpm -r --if-present test
           pnpm test:convex
           pnpm test:scripts
@@ -187,6 +190,7 @@ jobs:
       # ---- the MSI ----------------------------------------------------------------------
       - name: Install WiX
         run: |
+          $PSNativeCommandUseErrorActionPreference = $true
           dotnet tool install --global wix --version $env:WIX_VERSION
           # `dotnet tool install --global` puts the tool in %USERPROFILE%\.dotnet\tools
           "$env:USERPROFILE\.dotnet\tools" | Add-Content -Path $env:GITHUB_PATH
@@ -211,6 +215,7 @@ jobs:
 
       - name: Add the WiX extensions
         run: |
+          $PSNativeCommandUseErrorActionPreference = $true
           $v = ((wix --version | Select-Object -First 1).ToString().Trim() -split '[+\s]')[0]
           wix extension add --global "WixToolset.UI.wixext/$v"
           wix extension add --global "WixToolset.Util.wixext/$v"

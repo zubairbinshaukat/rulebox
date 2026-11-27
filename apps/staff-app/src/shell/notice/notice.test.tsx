@@ -131,7 +131,8 @@ describe("broadcast text is plain text", () => {
     expect(screen.getByTestId("broadcast-title").textContent).toBe(EVIL_TITLE);
     expect(screen.getByTestId("broadcast-body").textContent).toBe(EVIL_BODY);
     expect(screen.getByText("<i>Org</i>")).toBeTruthy();
-    expect(container.querySelector("img, script, b, a, i")).toBeNull();
+    // The Rulebox logo (`<img class="rb-logo">`, LogoMark) is ours; any other element is injected markup.
+    expect(container.querySelector("img:not(.rb-logo), script, b, a, i")).toBeNull();
   });
 
   it("the lock view shows the message and the contact literally", () => {
@@ -140,7 +141,7 @@ describe("broadcast text is plain text", () => {
     );
     expect(screen.getByTestId("device-lock-message").textContent).toBe(EVIL_BODY);
     expect(screen.getByTestId("device-lock-contact").textContent).toBe("Contact: <b>boss</b>");
-    expect(container.querySelector("img, script, b > b, a")).toBeNull();
+    expect(container.querySelector("img:not(.rb-logo), script, b > b, a")).toBeNull();
   });
 });
 
