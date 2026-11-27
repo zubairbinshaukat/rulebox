@@ -518,6 +518,7 @@ fn write_flag(paths: &DataPaths) -> std::io::Result<()> {
 pub fn execute(env: &RecoverEnv<'_>, facts: &Facts, plan: &Plan, service: StopOutcome) -> RecoverReport {
     let mut done: Vec<String> = Vec::new();
     let mut failed: Vec<String> = Vec::new();
+    let mut stuck: Vec<String> = Vec::new();
     let mut outcome = Outcome { lsa_default_password_ok: true, staff_hive_ok: true, ..Outcome::default() };
 
     // The flag first (plan step 7 writes it last): if a step below fails, or the
@@ -594,11 +595,27 @@ pub fn execute(env: &RecoverEnv<'_>, facts: &Facts, plan: &Plan, service: StopOu
         };
         match result {
             Ok(()) => done.push(description),
-            Err(reason) => failed.push(format!("{description}: {reason}")),
+            Err(reason) => {
+                // (Q-A8) The ids of the entries that did not go back: `recover --forget <id>` can drop one whose value is back.
+                match step {
+                    Step::RestoreEntry { id, .. } => stuck.push(id.clone()),
+                    Step::RestoreValue { key, .. } | Step::DropPasswordValue { key } => stuck.push(journal::machine_id(key)),
+                    _ => {}
+                }
+                failed.push(format!("{description}: {reason}"));
+            }
         }
     }
 
-    RecoverReport { service, flag, done, failed, notes: plan.notes.clone() }
+    let mut notes = plan.notes.clone();
+    if !stuck.is_empty() {
+        notes.push(format!(
+            "If a value above is already back to what it was (put back by hand, for example), `rulebox-agent recover --forget <id>` \
+             drops its journal entry. The ids that did not go back: {}.",
+            stuck.join(", ")
+        ));
+    }
+    RecoverReport { service, flag, done, failed, notes }
 }
 
 fn clear_staff_hive(platform: &dyn Platform, sid: &str) -> Result<(), String> {
@@ -721,6 +738,186 @@ pub fn recover_interactive(
         0
     } else {
         crate::ipc_admin::EXIT_ERROR
+    }
+}
+
+// -- `recover --forget <id>` (Q-A8, owner-approved 2026-11-28) -------------------------------------------
+
+/// The log `--forget` appends to (in the kept `logs\` folder), one line per attempt.
+pub const FORGET_LOG: &str = "recover-forget.log";
+
+/// `recover --forget <id>`: the guard, the elevation check and the real folders, then [`forget_interactive`].
+pub fn run_forget(id: &str, yes: bool, input: &mut dyn BufRead, out: &mut dyn Write, err: &mut dyn Write) -> u8 {
+    let (install, paths) = match (InstallPaths::from_known_folders(), DataPaths::from_known_folders()) {
+        (Ok(install), Ok(paths)) => (install, paths),
+        (Err(error), _) | (_, Err(error)) => {
+            let _ = writeln!(err, "error: {error:#}");
+            return crate::ipc_admin::EXIT_ERROR;
+        }
+    };
+    if let Err(error) = crate::service::guard_armed("recover --forget") {
+        let _ = writeln!(err, "error: {error:#}");
+        return crate::ipc_admin::EXIT_ERROR;
+    }
+    match rulebox_win32::security::process_is_elevated() {
+        Ok(true) => {}
+        Ok(false) => {
+            let _ = writeln!(err, "error: run `recover --forget` from an elevated (Run as administrator) prompt.");
+            return crate::ipc_admin::EXIT_ERROR;
+        }
+        Err(error) => {
+            let _ = writeln!(err, "error: cannot tell whether this prompt is elevated: {error}");
+            return crate::ipc_admin::EXIT_ERROR;
+        }
+    }
+    let platform: Arc<dyn Platform> =
+        Arc::new(crate::platform::windows::WindowsPlatform::new(install, paths.clone()));
+    let stop = || crate::service::stop_service(SERVICE_STOP_WAIT);
+    let env = RecoverEnv {
+        platform: &platform,
+        paths: &paths,
+        verify_dir: &rulebox_win32::security::verify_protected_dir,
+        stop_service: &stop,
+    };
+    forget_interactive(&env, id, yes, input, out, err)
+}
+
+/// Appends one line to `logs\recover-forget.log` (best effort; the data directory was verified before). Only the entry id and
+/// the outcome: never a value.
+fn log_forget(paths: &DataPaths, id: &str, what: &str) {
+    let line = format!("[{}] recover --forget {id}: {what}\r\n", unix_ms());
+    let written = std::fs::create_dir_all(paths.logs_dir()).and_then(|()| {
+        std::fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(paths.logs_dir().join(FORGET_LOG))
+            .and_then(|mut file| file.write_all(line.as_bytes()))
+    });
+    if let Err(error) = written {
+        tracing::warn!("cannot write the recover --forget log: {error}");
+    }
+    tracing::info!("recover --forget {id}: {what}");
+}
+
+/// The shared state of the saved agent state file, opened offline (no service, no backend).
+fn offline_shared(env: &RecoverEnv<'_>, state: AgentState) -> Arc<SharedState> {
+    SharedState::new(StateStore::at(&env.paths.state_dir()), state, Arc::clone(env.platform))
+}
+
+/// Forgets one journal entry: the entry whose id is `id` is removed from the journal, but **only** when what is on the PC now
+/// already equals the original the journal recorded for it (so there is nothing left to put back). Used for a restore that can
+/// never finish, for example an entry whose value was put back by hand. It writes nothing to the machine; only the entry leaves
+/// the agent state. Order: read (nothing changes) → refuse unless the live value equals the original → confirm → stop the service
+/// (like `recover`, it must not write the state meanwhile) → read again → remove → one line in `logs\recover-forget.log`.
+/// Exit code 0 only when the entry was forgotten.
+pub fn forget_interactive(
+    env: &RecoverEnv<'_>,
+    id: &str,
+    yes: bool,
+    input: &mut dyn BufRead,
+    out: &mut dyn Write,
+    err: &mut dyn Write,
+) -> u8 {
+    let refuse = |err: &mut dyn Write, message: &str| {
+        let _ = writeln!(err, "{message}");
+        crate::ipc_admin::EXIT_ERROR
+    };
+    // 1. Look (read-only). The state must be readable from a data directory that is ours.
+    let (reading, trusted) = read_state(env.paths, env.verify_dir);
+    let StateReading::Readable(state) = reading else {
+        let why = match reading {
+            StateReading::DirNotTrusted(reason) => format!("the data directory is not used ({reason})"),
+            StateReading::Unreadable(reason) => format!("the agent state file cannot be read ({reason})"),
+            _ => "there is no agent state file".to_string(),
+        };
+        return refuse(err, &format!("error: {why}; nothing was changed."));
+    };
+    if !trusted {
+        return refuse(err, "error: the data directory is not used; nothing was changed.");
+    }
+    let label = state.journal.iter().find(|entry| entry.id == id).map(entry_label);
+    let shared = offline_shared(env, *state);
+    let ctx = JournalCtx { platform: env.platform.as_ref(), shared: shared.as_ref() };
+    match journal::forget_check(&ctx, id) {
+        Ok(journal::ForgetCheck::Matches) => {}
+        Ok(journal::ForgetCheck::NotFound) => {
+            log_forget(env.paths, id, "refused: no journal entry has this id");
+            let ids: Vec<String> = shared.read(|state| state.journal.iter().map(|entry| entry.id.clone()).collect());
+            let _ = writeln!(err, "error: no journal entry has the id `{id}`. Nothing was changed.");
+            if !ids.is_empty() {
+                let _ = writeln!(err, "The entries in the journal:");
+                for known in ids {
+                    let _ = writeln!(err, "  {known}");
+                }
+            }
+            return crate::ipc_admin::EXIT_ERROR;
+        }
+        Ok(journal::ForgetCheck::Differs) => {
+            log_forget(env.paths, id, "refused: the live value is not the recorded original");
+            return refuse(
+                err,
+                &format!(
+                    "error: `{id}` still has something to put back: what is on this PC now is not what the journal recorded as the \
+                     original. Run `recover` to restore it. Nothing was changed."
+                ),
+            );
+        }
+        Err(error) => {
+            log_forget(env.paths, id, &format!("refused: cannot compare ({error})"));
+            return refuse(err, &format!("error: cannot tell whether `{id}` is back to its original ({error}). Nothing was changed."));
+        }
+    }
+    // 2. Confirm.
+    let _ = writeln!(out, "`recover --forget` removes one entry from the Rulebox journal:");
+    let _ = writeln!(out, "  - {id}: {}", label.unwrap_or_default());
+    let _ = writeln!(out, "  - what is on this PC now already equals the original the journal recorded, so nothing is put back");
+    let _ = writeln!(out, "  - the Rulebox Agent service is stopped first (start it again afterwards)");
+    let _ = writeln!(out, "  - nothing else on this PC is changed");
+    if !yes {
+        let _ = write!(out, "Continue? [y/N] ");
+        let _ = out.flush();
+        let mut answer = String::new();
+        let confirmed = input.read_line(&mut answer).is_ok()
+            && matches!(answer.trim().to_ascii_lowercase().as_str(), "y" | "yes");
+        if !confirmed {
+            log_forget(env.paths, id, "declined");
+            return refuse(err, "Nothing was changed.");
+        }
+    }
+    // 3. Stop the service, read the state again (the service may have changed it while it ran), check again, remove.
+    let service = (env.stop_service)();
+    let (reading, trusted) = read_state(env.paths, env.verify_dir);
+    let StateReading::Readable(state) = reading else {
+        return refuse(err, "error: the agent state file can no longer be read; nothing was changed.");
+    };
+    if !trusted {
+        return refuse(err, "error: the data directory is not used; nothing was changed.");
+    }
+    let shared = offline_shared(env, *state);
+    let ctx = JournalCtx { platform: env.platform.as_ref(), shared: shared.as_ref() };
+    match journal::forget_entry(&ctx, id) {
+        Ok(journal::ForgetCheck::Matches) => {
+            log_forget(env.paths, id, "forgotten: the live value equals the recorded original");
+            let _ = writeln!(out, "Forgot `{id}`. Nothing else was changed.");
+            match service {
+                StopOutcome::Stopped => {
+                    let _ = writeln!(out, "The Rulebox Agent service was stopped: start it again (or restart the PC) when you are done.");
+                }
+                StopOutcome::TimedOut | StopOutcome::Failed(_) => {
+                    let _ = writeln!(out, "The Rulebox Agent service could not be stopped; it may write the journal again. Run this command again if the entry returns.");
+                }
+                StopOutcome::NotInstalled | StopOutcome::NotRunning => {}
+            }
+            0
+        }
+        Ok(other) => {
+            log_forget(env.paths, id, &format!("refused: changed while the service stopped ({other:?})"));
+            refuse(err, &format!("error: `{id}` changed while the service stopped; nothing was removed. Run `recover`."))
+        }
+        Err(error) => {
+            log_forget(env.paths, id, &format!("failed: {error}"));
+            refuse(err, &format!("error: cannot forget `{id}` ({error}). Nothing was changed."))
+        }
     }
 }
 
@@ -1316,6 +1513,219 @@ mod tests {
         assert_eq!(std::fs::read(world.paths.agent_state()).unwrap(), bytes);
         assert_eq!(listing(&world), before);
         assert!(!world.paths.recovered_flag().exists());
+    }
+
+    // -- Q-A8: `recover --forget <id>` ----------------------------------------------------------------
+
+    /// A world whose agent state holds these journal entries (as a stopped service left them).
+    fn world_with_journal(entries: Vec<JournalEntry>) -> World {
+        let world = World::new();
+        let shared = world.shared(World::enrolled_state());
+        shared.update(|state| state.journal.extend(entries)).unwrap();
+        drop(shared);
+        world
+    }
+
+    fn stuck_entry(name: &str, original: OriginalValue) -> JournalEntry {
+        let mut entry = JournalEntry::machine(winlogon(name), original, 3);
+        entry.phase = crate::journal::EntryPhase::Restoring;
+        entry.last_error = Some("access_denied".into());
+        entry
+    }
+
+    fn journal_ids(world: &World) -> Vec<String> {
+        world.state_file().journal.iter().map(|entry| entry.id.clone()).collect()
+    }
+
+    fn mutating_calls(world: &World) -> usize {
+        world.platform.calls().iter().filter(|op| op.is_mutating()).count()
+    }
+
+    fn forget_log(world: &World) -> String {
+        std::fs::read_to_string(world.paths.logs_dir().join(FORGET_LOG)).unwrap_or_default()
+    }
+
+    struct Forget {
+        code: u8,
+        out: String,
+        err: String,
+        stopped: u32,
+    }
+
+    fn forget(world: &World, id: &str, yes: bool, answer: &str, dir: DirCheck) -> Forget {
+        let verify = move |_: &Path| Ok(dir.clone());
+        let stopped = std::cell::Cell::new(0u32);
+        let stop = || {
+            stopped.set(stopped.get() + 1);
+            StopOutcome::Stopped
+        };
+        let dyn_platform: Arc<dyn Platform> = world.platform.clone();
+        let env = RecoverEnv { platform: &dyn_platform, paths: &world.paths, verify_dir: &verify, stop_service: &stop };
+        let (mut out, mut err) = (Vec::new(), Vec::new());
+        let code = forget_interactive(&env, id, yes, &mut answer.as_bytes(), &mut out, &mut err);
+        Forget { code, out: String::from_utf8(out).unwrap(), err: String::from_utf8(err).unwrap(), stopped: stopped.get() }
+    }
+
+    #[test]
+    fn forget_removes_only_the_entry_whose_value_is_already_back_and_logs_it() {
+        let stuck = stuck_entry("AutoAdminLogon", OriginalValue::String("1".into()));
+        let other = stuck_entry("DefaultUserName", OriginalValue::String("Owner".into()));
+        let world = world_with_journal(vec![stuck.clone(), other.clone()]);
+        // The value was put back by hand; the other entry's value is still the Rulebox one.
+        world.set(WINLOGON_KEY, "AutoAdminLogon", text("1"));
+        world.set(WINLOGON_KEY, "DefaultUserName", text("RuleboxStaff"));
+        let before = world.machine();
+        let mutating_before = mutating_calls(&world);
+
+        let result = forget(&world, &stuck.id, true, "", ok_dir());
+        assert_eq!(result.code, 0, "{} {}", result.out, result.err);
+        assert!(result.out.contains(&format!("Forgot `{}`", stuck.id)), "{}", result.out);
+        assert_eq!(result.stopped, 1, "the service is stopped before the state is written");
+        // Only that entry left the journal; nothing on the machine changed, nothing was written to it.
+        assert_eq!(journal_ids(&world), [other.id.clone()]);
+        assert_eq!(world.machine(), before);
+        assert_eq!(mutating_calls(&world), mutating_before);
+        // The action is logged: the id and the outcome, never a value.
+        let log = forget_log(&world);
+        assert!(log.contains(&format!("recover --forget {}: forgotten", stuck.id)), "{log}");
+        assert!(!log.contains("RuleboxStaff") && !log.contains("Owner"));
+        // A second time there is nothing to forget.
+        let again = forget(&world, &stuck.id, true, "", ok_dir());
+        assert_eq!(again.code, 1);
+        assert!(again.err.contains("no journal entry has the id") && again.err.contains(&other.id), "{}", again.err);
+    }
+
+    #[test]
+    fn forget_refuses_while_the_live_value_is_not_the_recorded_original() {
+        let entry = stuck_entry("AutoAdminLogon", OriginalValue::String("1".into()));
+        let world = world_with_journal(vec![entry.clone()]);
+        world.set(WINLOGON_KEY, "AutoAdminLogon", text("0")); // the Rulebox value is still there
+        let before = (world.machine(), journal_ids(&world));
+        let result = forget(&world, &entry.id, true, "", ok_dir());
+        assert_eq!(result.code, 1);
+        assert!(result.err.contains("still has something to put back"), "{}", result.err);
+        assert_eq!(result.stopped, 0, "refused before the service is touched");
+        assert_eq!((world.machine(), journal_ids(&world)), before);
+        assert!(forget_log(&world).contains("refused: the live value is not the recorded original"));
+        // Nothing there at all is not the original "1" either.
+        world.platform.with_world(|w| w.machine_values.clear());
+        assert_eq!(forget(&world, &entry.id, true, "", ok_dir()).code, 1);
+        assert_eq!(journal_ids(&world), [entry.id]);
+    }
+
+    #[test]
+    fn forget_treats_an_absent_original_and_an_absent_value_as_back() {
+        let entry = stuck_entry("DefaultDomainName", OriginalValue::Absent);
+        let world = world_with_journal(vec![entry.clone()]);
+        // Present: Rulebox's value is still there.
+        world.set(WINLOGON_KEY, "DefaultDomainName", text("RULEBOX"));
+        assert_eq!(forget(&world, &entry.id, true, "", ok_dir()).code, 1);
+        // Gone: the entry has nothing left to do.
+        world.platform.with_world(|w| w.machine_values.clear());
+        assert_eq!(forget(&world, &entry.id, true, "", ok_dir()).code, 0);
+        assert!(journal_ids(&world).is_empty());
+    }
+
+    #[test]
+    fn forget_asks_first_and_only_a_yes_goes_on() {
+        let entry = stuck_entry("AutoAdminLogon", OriginalValue::String("1".into()));
+        let world = world_with_journal(vec![entry.clone()]);
+        world.set(WINLOGON_KEY, "AutoAdminLogon", text("1"));
+        for answer in ["n\n", "\n", "maybe\n", ""] {
+            let result = forget(&world, &entry.id, false, answer, ok_dir());
+            assert_eq!(result.code, 1, "{answer:?}");
+            assert_eq!(result.stopped, 0);
+            assert!(result.out.contains("Continue? [y/N]"));
+            assert_eq!(journal_ids(&world), [entry.id.clone()], "{answer:?}");
+        }
+        assert!(forget_log(&world).contains("declined"));
+        let result = forget(&world, &entry.id, false, "Yes\n", ok_dir());
+        assert_eq!(result.code, 0, "{} {}", result.out, result.err);
+        assert_eq!(result.stopped, 1);
+        assert!(journal_ids(&world).is_empty());
+    }
+
+    #[test]
+    fn forget_refuses_an_entry_of_a_newer_agent_and_a_target_it_cannot_read() {
+        let mut unknown = stuck_entry("X", OriginalValue::Absent);
+        unknown.id = "future:thing".into();
+        unknown.target = crate::journal::JournalTarget::Unknown(serde_json::json!({ "futureThing": {} }));
+        let mut driver = stuck_entry("Y", OriginalValue::NotPresent);
+        driver.id = "driver:oem7.inf".into();
+        driver.target = crate::journal::JournalTarget::DriverPackage { published: "oem7.inf".into(), sha256: "ab".into() };
+        let world = world_with_journal(vec![unknown.clone(), driver.clone()]);
+        for entry in [&unknown, &driver] {
+            let result = forget(&world, &entry.id, true, "", ok_dir());
+            assert_eq!(result.code, 1, "{}", entry.id);
+            assert!(result.err.contains("cannot tell whether"), "{}", result.err);
+        }
+        assert_eq!(journal_ids(&world).len(), 2);
+    }
+
+    #[test]
+    fn forget_reads_nothing_from_a_data_directory_that_is_not_ours() {
+        let entry = stuck_entry("AutoAdminLogon", OriginalValue::String("1".into()));
+        let world = world_with_journal(vec![entry.clone()]);
+        world.set(WINLOGON_KEY, "AutoAdminLogon", text("1"));
+        let bytes = std::fs::read(world.paths.agent_state()).unwrap();
+        let link = DirCheck { is_reparse_point: true, ..ok_dir() };
+        let result = forget(&world, &entry.id, true, "", link);
+        assert_eq!(result.code, 1);
+        assert!(result.err.contains("the data directory is not used") && result.err.contains("nothing was changed"), "{}", result.err);
+        assert_eq!(result.stopped, 0);
+        assert_eq!(std::fs::read(world.paths.agent_state()).unwrap(), bytes);
+        assert!(!world.paths.logs_dir().exists(), "nothing is written into a directory that is not trusted");
+    }
+
+    #[test]
+    fn forget_checks_again_after_the_service_stopped() {
+        // The service wrote the Rulebox value again while it was being stopped: nothing is removed.
+        let entry = stuck_entry("AutoAdminLogon", OriginalValue::String("1".into()));
+        let world = world_with_journal(vec![entry.clone()]);
+        world.set(WINLOGON_KEY, "AutoAdminLogon", text("1"));
+        let verify = |_: &Path| Ok(ok_dir());
+        let stop = || {
+            world.set(WINLOGON_KEY, "AutoAdminLogon", text("0"));
+            StopOutcome::Stopped
+        };
+        let dyn_platform: Arc<dyn Platform> = world.platform.clone();
+        let env = RecoverEnv { platform: &dyn_platform, paths: &world.paths, verify_dir: &verify, stop_service: &stop };
+        let (mut out, mut err) = (Vec::new(), Vec::new());
+        assert_eq!(forget_interactive(&env, &entry.id, true, &mut "".as_bytes(), &mut out, &mut err), 1);
+        assert!(String::from_utf8(err).unwrap().contains("changed while the service stopped"));
+        assert_eq!(journal_ids(&world), [entry.id]);
+    }
+
+    #[test]
+    fn forget_is_refused_by_the_guard_before_anything_is_read_or_changed() {
+        if rulebox_win32::guard::is_armed_machine() {
+            return;
+        }
+        let (mut out, mut err) = (Vec::new(), Vec::new());
+        let code = run_forget("hklm:SOFTWARE\\X|Y", true, &mut "".as_bytes(), &mut out, &mut err);
+        assert_eq!(code, 1);
+        let error = String::from_utf8(err).unwrap();
+        assert!(error.contains("test-machine guard") && error.contains("recover --forget"), "{error}");
+        assert!(out.is_empty(), "no preview, no prompt");
+    }
+
+    #[test]
+    fn a_recover_that_could_not_restore_an_entry_names_its_id_for_forget() {
+        let world = World::new();
+        world.owner_autologon();
+        let shared = world.shared(World::enrolled_state());
+        world.enable_kiosk(&shared);
+        drop(shared);
+        // The write of the original fails once (the stuck restore of run A3).
+        world.platform.fail_next(SimOp::WriteMachineValue, PlatformError::AccessDenied);
+        let report = run_with(&world, ok_dir(), StopOutcome::Stopped);
+        assert!(!report.failed.is_empty(), "{report:#?}");
+        let note = report.notes.iter().find(|note| note.contains("recover --forget")).expect("a note about --forget");
+        // The id is the journal's own (`hklm:<key>|<name>`), the one `--forget` takes.
+        assert!(note.contains("hklm:SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion\\Winlogon|"), "{note}");
+        // A run without a failure has no such note.
+        let clean = run_with(&World::new(), ok_dir(), StopOutcome::Stopped);
+        assert!(clean.notes.iter().all(|note| !note.contains("--forget")));
     }
 
     // -- Phase 5 Step 20: every journal target type, offline, from the state folder alone --------

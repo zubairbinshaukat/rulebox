@@ -141,7 +141,7 @@ Questions from `docs/plans/phase-6-vm-results.md` "Run A3". All answered with th
   major upgrade (same rule as UnenrollAtUninstall).
 - **Q-A7 (empty policy keys):** low priority, after the main fixes: on uninstall/restore remove the policy keys
   Rulebox itself created (OOBE, PowerSettings\0e796bdb…, PointAndPrint), only when they are empty.
-- **Q-A8 (stuck restore):** add `recover --forget <id>`: admin only, asks for confirmation, refuses unless the
+- **Q-A8 (stuck restore) — DONE locally 2026-11-28, needs the VM** (`recover --forget <id> [--yes]`, `recover.rs::forget_interactive`; a `recover` that fails to restore an entry now prints the ids to use; log in `logs\recover-forget.log`): add `recover --forget <id>`: admin only, asks for confirmation, refuses unless the
   entry's live value already equals the recorded original, writes an audit/log line.
 
 ## Dashboard onboarding: PIN setup (Phase 4b) edge cases — found 2026-11-28

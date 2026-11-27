@@ -1218,6 +1218,41 @@ pub fn restore_entry(ctx: &JournalCtx<'_>, id: &str) -> Result<(), JournalError>
     }
 }
 
+/// What [`forget_check`] found for one journal entry.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ForgetCheck {
+    /// No entry has this id.
+    NotFound,
+    /// The live value is not the recorded original: the entry still has something to restore and is not forgotten.
+    Differs,
+    /// The live value already equals the recorded original: the entry has nothing left to do.
+    Matches,
+}
+
+/// (Q-A8, owner 2026-11-28) Read-only: does the entry `id` have nothing left to restore, because what is on the PC now equals
+/// the original it recorded? An entry of a kind this build does not know, or one whose live value cannot be read here (an
+/// error), is never "matches".
+pub fn forget_check(ctx: &JournalCtx<'_>, id: &str) -> Result<ForgetCheck, JournalError> {
+    let Some(entry) = find_entry(ctx, id) else {
+        return Ok(ForgetCheck::NotFound);
+    };
+    if matches!(entry.target, JournalTarget::Unknown(_)) {
+        return Err(JournalError::UnknownTarget);
+    }
+    let current = read_current(ctx, &entry.target)?;
+    Ok(if original_matches(ctx, &current, &entry.original) { ForgetCheck::Matches } else { ForgetCheck::Differs })
+}
+
+/// (Q-A8) Removes the entry `id` from the journal, only when [`forget_check`] says its live value already equals the original.
+/// Writes nothing to the machine, only the agent state. Returns what the check found (`Matches` = it was removed).
+pub fn forget_entry(ctx: &JournalCtx<'_>, id: &str) -> Result<ForgetCheck, JournalError> {
+    let found = forget_check(ctx, id)?;
+    if found == ForgetCheck::Matches {
+        persist(ctx, |state| state.journal.retain(|entry| entry.id != id))?;
+    }
+    Ok(found)
+}
+
 /// Restores the whole journal, last written first.
 pub fn restore_all(ctx: &JournalCtx<'_>) -> RestoreReport {
     restore_matching(ctx, |_| true)

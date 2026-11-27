@@ -126,7 +126,15 @@ fn dispatch(cli: Cli) -> anyhow::Result<u8> {
         Command::Service { action: ServiceAction::Uninstall { force } } => {
             Ok(service::run_uninstall(force, &mut std::io::stdout().lock(), &mut std::io::stderr().lock()))
         }
-        Command::Recover { yes } => Ok(recover::run_recover(
+        Command::Recover { yes, forget: None } => Ok(recover::run_recover(
+            yes,
+            &mut std::io::stdin().lock(),
+            &mut std::io::stdout().lock(),
+            &mut std::io::stderr().lock(),
+        )),
+        // (Q-A8) One journal entry whose value is already back; the rest of `recover` does not run.
+        Command::Recover { yes, forget: Some(id) } => Ok(recover::run_forget(
+            &id,
             yes,
             &mut std::io::stdin().lock(),
             &mut std::io::stdout().lock(),

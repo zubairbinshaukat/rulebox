@@ -74,6 +74,11 @@ pub enum Command {
     Recover {
         #[arg(long)]
         yes: bool,
+        /// (Q-A8) Forget one journal entry (its id is printed by a `recover` that could not restore it) whose live value
+        /// already equals the recorded original, so its restore can never finish. Administrator only; asks for confirmation (`--yes` skips
+        /// the question); refuses when the value is not back; logs the action; changes nothing else.
+        #[arg(long, value_name = "ID")]
+        forget: Option<String>,
     },
     /// (Q-A6) Uninstall only: delete everything in the Rulebox data directory except `logs\`. The MSI runs it after the
     /// service has stopped, never in an upgrade. Needs an elevated prompt on an armed machine.
@@ -223,8 +228,17 @@ mod tests {
             parse(&["trust-key", "11qYAYKxCrfVS/7TyWQHOg7hcvPapiMlrwIaaPcHURo=", "--simulate"]),
             Command::TrustKey { public_key: "11qYAYKxCrfVS/7TyWQHOg7hcvPapiMlrwIaaPcHURo=".into(), simulate: true }
         );
-        assert_eq!(parse(&["recover"]), Command::Recover { yes: false });
-        assert_eq!(parse(&["recover", "--yes"]), Command::Recover { yes: true });
+        assert_eq!(parse(&["recover"]), Command::Recover { yes: false, forget: None });
+        assert_eq!(parse(&["recover", "--yes"]), Command::Recover { yes: true, forget: None });
+        assert_eq!(
+            parse(&["recover", "--forget", "hklm:SOFTWARE\\X|Y"]),
+            Command::Recover { yes: false, forget: Some("hklm:SOFTWARE\\X|Y".into()) }
+        );
+        assert_eq!(
+            parse(&["recover", "--forget", "ci:abc", "--yes"]),
+            Command::Recover { yes: true, forget: Some("ci:abc".into()) }
+        );
+        assert!(Cli::try_parse_from(["rulebox-agent", "recover", "--forget"]).is_err(), "--forget needs an id");
         assert_eq!(parse(&["purge-data"]), Command::PurgeData);
         assert!(Cli::try_parse_from(["rulebox-agent", "purge-data", "--yes"]).is_err(), "no options: it asks nothing and is not for typing");
         assert_eq!(parse(&["compat", "--json"]), Command::Compat { json: true });
