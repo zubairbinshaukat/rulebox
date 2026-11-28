@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { settleApp } from "./apps/testKit";
 import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
-import { MemoryRouter, Route, Routes } from "react-router";
+import { MemoryRouter, Route, Routes, useLocation } from "react-router";
 import { getFunctionName, type FunctionReference } from "convex/server";
 import type { ReactNode } from "react";
 import type { Me } from "../data/types";
@@ -9,6 +9,9 @@ import { MeContext } from "../lib/member";
 import { strings } from "../lib/strings";
 import { appEditStrings } from "../lib/screenStrings/appEdit";
 import { auditStrings } from "../lib/screenStrings/audit";
+import { actorKind } from "../lib/auditText";
+import { timeZoneName } from "../lib/format";
+import { sinceFor } from "./audit/since";
 import { deviceText } from "./device/strings";
 import { installStrings } from "../lib/screenStrings/install";
 import { overviewText as s } from "./overview/text";
@@ -339,6 +342,17 @@ describe("Overview (overview:get)", () => {
   });
 });
 
+/** The Audit screen with its address on show, for the filters that live in the URL. */
+function AuditWithUrl() {
+  const l = useLocation();
+  return (
+    <>
+      <output data-testid="url">{l.pathname + l.search}</output>
+      <Audit />
+    </>
+  );
+}
+
 describe("Audit (audit:list)", () => {
   it("is the paginated log with time, action, actor, target link and summary", async () => {
     cx.pages["audit:list"] = [
@@ -355,6 +369,105 @@ describe("Audit (audit:list)", () => {
   it("an empty log says so", async () => {
     await ui(<Audit />, "viewer", "/audit");
     expect(screen.getByText(auditStrings.emptyTitle)).toBeTruthy();
+  });
+
+  it("who did it is in plain words: a team member, a PC (a link), Rulebox (no second word)", async () => {
+    cx.pages["audit:list"] = [
+      entry("e1"),
+      entry("e2", { actorType: "device", actorId: "d9", actorLabel: "Reception", action: "device.adminExitSuccess", summary: "Admin exit used" }),
+      entry("e3", { actorType: "system", actorLabel: "Rulebox", action: "policy.publishFailed", summary: "Could not publish" }),
+    ];
+    await ui(<Audit />, "viewer", "/audit");
+    const rows = screen.getAllByRole("row").slice(1);
+    expect(within(rows[0]!).getByText(actorKind("member"))).toBeTruthy();
+    expect(within(rows[1]!).getByText(actorKind("device"))).toBeTruthy();
+    expect(within(rows[1]!).getByRole("link", { name: "Reception" }).getAttribute("href")).toBe("/devices/d9");
+    // "Rulebox" already says it: no sub-line repeating it.
+    expect(within(rows[2]!).getAllByText("Rulebox")).toHaveLength(1);
+    // The old words are gone.
+    expect(screen.queryByText("Member")).toBeNull();
+    expect(screen.queryByText("Device")).toBeNull();
+  });
+
+  it("the details lose the field names; other summaries stay as the server wrote them", async () => {
+    cx.pages["audit:list"] = [
+      entry("e1", { action: "org.settingsChanged", summary: "Changed organization settings: offlineDays, power" }),
+      entry("e2", { action: "app.permissionsChanged", summary: "Changed permissions of Docs: screenShare allowed, clipboardRead blocked" }),
+      entry("e3", { action: "group.renamed", summary: "Renamed the group Front to Office" }),
+    ];
+    await ui(<Audit />, "viewer", "/audit");
+    expect(screen.getByText("Changed organization settings: offline sign-in days, power options")).toBeTruthy();
+    expect(screen.getByText("Changed permissions of Docs: screen sharing allowed, clipboard blocked")).toBeTruthy();
+    expect(screen.getByText("Renamed the group Front to Office")).toBeTruthy();
+    expect(screen.queryByText(/offlineDays|screenShare/)).toBeNull();
+  });
+
+  it("the time zone is not in the sentence: 'your local time', the zone in the (i); Print has its own (i)", async () => {
+    await ui(<Audit />, "viewer", "/audit");
+    expect(screen.getByText(new RegExp(auditStrings.timesLocal))).toBeTruthy();
+    expect(screen.queryByText(new RegExp(timeZoneName().replace("/", "\\/")))).toBeNull();
+    expect(screen.getByRole("button", { name: auditStrings.timeZoneInfoLabel })).toBeTruthy();
+    expect(screen.getByRole("button", { name: auditStrings.printInfoLabel })).toBeTruthy();
+    expect(screen.getByRole("button", { name: auditStrings.print })).toBeTruthy();
+  });
+
+  it("When: all time sends no 'since'; the URL value sends the start of that local day; the segments change it", async () => {
+    cx.pages["audit:list"] = [entry("e1")];
+    const view = await ui(<AuditWithUrl />, "viewer", "/audit");
+    expect(lastPaged("audit:list")!.args).toEqual({ paginationOpts: { numItems: 10, cursor: null }, sort: { key: "at", dir: "desc" } });
+    expect(within(screen.getByRole("radiogroup", { name: auditStrings.whenLabel })).getAllByRole("radio").map((r) => r.textContent)).toEqual(Object.values(auditStrings.when));
+    fireEvent.click(screen.getByRole("radio", { name: auditStrings.when["7d"] }));
+    expect(screen.getByTestId("url").textContent).toBe("/audit?since=7d");
+    expect(lastPaged("audit:list")!.args).toMatchObject({ since: sinceFor("7d") });
+    fireEvent.click(screen.getByRole("radio", { name: auditStrings.when.today }));
+    expect(lastPaged("audit:list")!.args).toMatchObject({ since: sinceFor("today") });
+    fireEvent.click(screen.getByRole("radio", { name: auditStrings.when.all }));
+    expect(screen.getByTestId("url").textContent).toBe("/audit");
+    expect(lastPaged("audit:list")!.args).not.toHaveProperty("since");
+    view.unmount();
+    await ui(<Audit />, "viewer", "/audit?since=30d&size=25");
+    expect(lastPaged("audit:list")!.args).toMatchObject({ since: sinceFor("30d"), paginationOpts: { numItems: 25, cursor: null } });
+    // A value nobody offers is all time.
+    cleanup();
+    await ui(<Audit />, "viewer", "/audit?since=bogus");
+    expect(lastPaged("audit:list")!.args).not.toHaveProperty("since");
+  });
+
+  it("Only this: the log switches to that item (audit:forTarget), a chip says so, its x brings everything back", async () => {
+    cx.pages["audit:list"] = [entry("e1", { action: "device.renamed", targetType: "device", targetId: "d1", targetLabel: "Front desk", summary: "Renamed" })];
+    cx.pages["audit:forTarget"] = [entry("e2", { action: "device.renamed", targetType: "device", targetId: "d1", targetLabel: "Front desk", summary: "Renamed again" })];
+    await ui(<AuditWithUrl />, "viewer", "/audit?page=2&since=7d");
+    fireEvent.click(screen.getByRole("button", { name: auditStrings.onlyThis("Front desk") }));
+    expect(screen.getByTestId("url").textContent).toBe("/audit?since=7d&about=d1&label=Front+desk");
+    expect(lastPaged("audit:forTarget")!.args).toMatchObject({ targetId: "d1", since: sinceFor("7d"), paginationOpts: { numItems: 10, cursor: null } });
+    expect(screen.getByText("Renamed again")).toBeTruthy();
+    expect(screen.getByText("Front desk", { selector: "strong" })).toBeTruthy();
+    // Everything on the page is about it: no "Only this" on the rows now.
+    expect(screen.queryByRole("button", { name: auditStrings.onlyThis("Front desk") })).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: auditStrings.clearAbout("Front desk") }));
+    expect(screen.getByTestId("url").textContent).toBe("/audit?since=7d");
+    expect(screen.getByText("Renamed")).toBeTruthy();
+  });
+
+  it("a filter with no rows says so in words and offers Clear filters; the chip works for a deleted item (by id)", async () => {
+    await ui(<AuditWithUrl />, "viewer", "/audit?since=today");
+    expect(screen.getByText(auditStrings.emptyPeriodTitle)).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: auditStrings.clearFilters }));
+    expect(screen.getByTestId("url").textContent).toBe("/audit");
+    expect(screen.getByText(auditStrings.emptyTitle)).toBeTruthy();
+    cleanup();
+    await ui(<AuditWithUrl />, "viewer", "/audit?about=gone1&label=Old+PC&since=30d");
+    expect(lastPaged("audit:forTarget")!.args).toMatchObject({ targetId: "gone1" });
+    expect(screen.getByText(auditStrings.emptyAboutTitle("Old PC", true))).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: auditStrings.clearFilters }));
+    expect(screen.getByTestId("url").textContent).toBe("/audit");
+  });
+
+  it("an item without an id (a code, a deleted record) has no Only this button", async () => {
+    cx.pages["audit:list"] = [entry("e1", { targetType: "enrollmentCode", targetLabel: "Front code", summary: "x" })];
+    await ui(<Audit />, "viewer", "/audit");
+    expect(screen.getByRole("link", { name: "Front code" })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: auditStrings.onlyThis("Front code") })).toBeNull();
   });
 });
 

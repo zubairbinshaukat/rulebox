@@ -1,0 +1,136 @@
+/* Audit log (screens/Audit.tsx): the When filter, the About chip and the "only this" button. Imported by the lazy screen. */
+
+/* Print and its (i) stay together, also where the header's actions stretch (a phone). */
+.au-print {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 100%;
+}
+@media print {
+  .au-print {
+    display: none;
+  }
+}
+
+/* The When segmented control: a full-width row on a phone-sized list (the list's own width decides, not the viewport). */
+.au-when {
+  min-width: 0;
+  max-width: 100%;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+.au-when::-webkit-scrollbar {
+  display: none;
+}
+.au-when .rb-seg button {
+  white-space: nowrap;
+}
+@container dt (max-width: 559px) {
+  .au-when {
+    flex: 1 1 100%;
+  }
+  .au-when .rb-seg {
+    display: flex;
+    width: 100%;
+  }
+  .au-when .rb-seg button {
+    flex: 1 1 0;
+    padding-inline: 8px;
+  }
+}
+
+/* "About: Front desk x": the removable chip. */
+.au-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  min-width: 0;
+  max-width: min(100%, 320px);
+  height: 32px;
+  padding: 0 4px 0 12px;
+  border: 1px solid color-mix(in oklch, var(--rb-accent) 45%, var(--rb-line));
+  border-radius: 999px;
+  background: color-mix(in oklch, var(--rb-accent-soft) 60%, var(--rb-surface));
+  color: var(--rb-accent-text);
+  font-size: 13px;
+}
+.au-chip__text {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.au-chip__text strong {
+  font-weight: 650;
+}
+.au-chip__x {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  border: 0;
+  border-radius: 50%;
+  background: transparent;
+  color: inherit;
+  font-size: 18px;
+  cursor: pointer;
+}
+.au-chip__x:hover {
+  background: color-mix(in oklch, var(--rb-accent) 14%, transparent);
+}
+.au-chip__x:focus-visible {
+  outline: 2px solid var(--rb-focus);
+  outline-offset: 1px;
+}
+
+/* The "On" cell: the link, then a small button that shows only this item's rows. */
+.au-target {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  max-width: 100%;
+  min-width: 0;
+}
+.au-target__name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.au-only {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--rb-muted);
+  font-size: 16px;
+  cursor: pointer;
+}
+.au-only:hover {
+  background: var(--rb-hover);
+  color: var(--rb-accent-text);
+}
+.au-only:focus-visible {
+  outline: 2px solid var(--rb-focus);
+  outline-offset: 1px;
+}
+@media (pointer: coarse) {
+  .au-only {
+    width: 36px;
+    height: 36px;
+  }
+}
+@media print {
+  .au-only,
+  .au-chip__x {
+    display: none;
+  }
+}

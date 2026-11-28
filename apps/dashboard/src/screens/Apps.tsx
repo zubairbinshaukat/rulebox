@@ -35,11 +35,21 @@ function Summary({ summary }: { summary: InstallSummary | null }) {
         <span style={{ width: pct(summary.failed), background: "var(--rb-danger)" }} />
         <span style={{ width: pct(summary.inProgress), background: "var(--rb-muted)" }} />
       </span>
-      <span className="dash-cell-sub" style={{ whiteSpace: "normal" }}>
+      <span className="dash-cell-sub">
         {formatCount(summary.installed, 1000)} {installStateStrings.installed.toLowerCase()} · {formatCount(summary.failed, 1000)}{" "}
         {installStateStrings.failed.toLowerCase()} · {formatCount(summary.inProgress, 1000)} {installStateStrings.pending.toLowerCase()}
       </span>
     </span>
+  );
+}
+
+/** "Update waiting" / "Feed problem" next to a program's type (nothing when the app has no flag). */
+function UpdateFlag({ app }: { app: AppRow }) {
+  if (!app.updateFlag) return null;
+  return (
+    <Pill tone={app.updateFlag === "available" ? "accent" : "warning"} title={s.updateFlagHint[app.updateFlag]}>
+      {s.updateFlag[app.updateFlag]}
+    </Pill>
   );
 }
 
@@ -61,7 +71,10 @@ export default function Apps() {
         key: "name",
         header: s.colName,
         primary: true,
+        type: "name",
+        maxWidth: 300,
         sortable: true,
+        cardLabel: s.colNameSort,
         cell: (a) => (
           <span className="dash-row" style={{ flexWrap: "nowrap", minWidth: 0 }}>
             <AppGlyph name={a.name} hue={a.hue} iconUrl={a.iconUrl} />
@@ -77,32 +90,58 @@ export default function Apps() {
             </span>
           </span>
         ),
+        // On a card the description is the line under the name, so the cell keeps the tile and the link.
+        cardCell: (a) => (
+          <span className="dash-row" style={{ flexWrap: "nowrap", minWidth: 0 }}>
+            <AppGlyph name={a.name} hue={a.hue} iconUrl={a.iconUrl} />
+            <Link className="dash-link dash-link--plain dash-truncate" to={`/apps/${a._id}`}>
+              {a.name}
+            </Link>
+          </span>
+        ),
+        cardSub: (a) => a.description ?? null,
       },
       {
         key: "kind",
         header: s.colKind,
-        nowrap: true,
+        type: "badge",
+        card: "status",
         cell: (a) => (
           <span className="dash-row" style={{ gap: 6, flexWrap: "nowrap" }}>
             {a.kind === "web" ? <IconGlobal aria-hidden="true" /> : <IconMonitor aria-hidden="true" />}
             <span>{a.kind === "web" ? s.web : s.desktop}</span>
             {a.source ? <Pill>{s.sources[a.source]}</Pill> : null}
-            {a.updateFlag ? (
-              <Pill tone={a.updateFlag === "available" ? "accent" : "warning"} title={s.updateFlagHint[a.updateFlag]}>
-                {s.updateFlag[a.updateFlag]}
-              </Pill>
-            ) : null}
+            <UpdateFlag app={a} />
+          </span>
+        ),
+        // Where the program comes from is technical: the table shows it, a card does not.
+        cardCell: (a) => (
+          <span className="dash-row" style={{ gap: 6 }}>
+            {a.kind === "web" ? <IconGlobal aria-hidden="true" /> : <IconMonitor aria-hidden="true" />}
+            <span>{a.kind === "web" ? s.web : s.desktop}</span>
+            <UpdateFlag app={a} />
           </span>
         ),
       },
-      { key: "groups", header: s.colGroups, nowrap: true, cell: (a) => (a.groupCount ? s.groups(a.groupCount, a.groupCountMore) : <span className="dash-muted">—</span>) },
-      { key: "installs", header: s.colInstalls, nowrap: true, isEmpty: (a) => a.kind === "web", cell: (a) => (a.kind === "web" ? <span className="dash-muted">—</span> : <Summary summary={a.summary} />) },
+      { key: "groups", header: s.colGroups, type: "short", card: "fact", cell: (a) => (a.groupCount ? s.groups(a.groupCount, a.groupCountMore) : <span className="dash-muted">—</span>) },
+      {
+        key: "installs",
+        header: s.colInstalls,
+        type: "text",
+        maxWidth: 220,
+        card: "fact",
+        cardWide: true,
+        isEmpty: (a) => a.kind === "web",
+        cell: (a) => (a.kind === "web" ? <span className="dash-muted">—</span> : <Summary summary={a.summary} />),
+      },
       {
         key: "created",
         header: s.colAdded,
-        nowrap: true,
+        type: "date",
         sortable: true,
         sortDefaultDir: "desc",
+        // `apps:list` does not return the date yet, so a card leaves it out until it does.
+        card: "hidden",
         isEmpty: (a) => a.createdAt === undefined,
         cell: (a) => (a.createdAt === undefined ? <span className="dash-muted">—</span> : <RelativeTime ms={a.createdAt} />),
       },

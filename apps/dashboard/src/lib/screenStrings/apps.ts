@@ -12,6 +12,8 @@ export const appsStrings = {
   showArchived: "Show archived",
   active: "Active",
   colName: "App",
+  /** The sort choices of the cards view read "Name: A to Z", not "App: A to Z". */
+  colNameSort: "Name",
   colKind: "Type",
   colGroups: "Groups",
   colInstalls: "Installs",

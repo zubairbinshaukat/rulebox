@@ -331,6 +331,19 @@ describe("Groups list (groups:page, one server-driven page at a time)", () => {
     expect(await screen.findByRole("link", { name: "Group 01" })).toBeTruthy();
     expect(await screen.findByLabelText(strings.table.sortSelect)).toBeTruthy();
   });
+
+  it("a card has the name as its link, the description under it and the counts as labelled facts; the sort choices say Name and Created", async () => {
+    cx.results["groups:page"] = groupsPage([{ ...groupRow("g1", "Front desk", 3), description: "The tills", employees: { count: 2, more: false } }]);
+    ui(<Groups />, "admin", "/groups");
+    fireEvent.click(screen.getByRole("radio", { name: strings.table.viewCards }));
+    const card = (await screen.findByRole("list", { name: groupsStrings.title })).querySelector("li")!;
+    expect(within(card).getByRole("link", { name: "Front desk" })).toBeTruthy();
+    expect(within(card).getByText("The tills")).toBeTruthy();
+    expect(within(card).getByText(groupsStrings.cardPcs).nextElementSibling?.textContent).toBe("3");
+    expect(within(card).getByText(groupsStrings.colEmployees).nextElementSibling?.textContent).toBe("2");
+    await screen.findByLabelText(strings.table.sortSelect);
+    expect(optionLabels(strings.table.sortSelect)).toEqual(["Name: A to Z", "Name: Z to A", "Created: newest first", "Created: oldest first"]);
+  });
 });
 describe("Group detail (groups:get)", () => {
   const detail = (revision: number, name = "Office", devices = 0, over: Record<string, unknown> = {}) => ({
@@ -425,7 +438,7 @@ describe("Group detail (groups:get)", () => {
     expect(menuItems()).toEqual([groupPage.stagedRollout]);
   });
 
-  it("assign: picks an app (those already in the group are left out), sends the audience and pins", async () => {
+  it("assign: with one app left (those already in the group are left out) it is chosen for them; the audience and pins are sent", async () => {
     cx.results["groups:get"] = detail(0);
     cx.results["apps:options"] = [
       { _id: "a1", name: "Notepad", kind: "desktop", canOpenFiles: true },
@@ -436,12 +449,43 @@ describe("Group detail (groups:get)", () => {
     ui(<GroupDetail />, "admin", "/groups/g1");
     fireEvent.click(assign());
     const dialog = await screen.findByRole("dialog");
-    const picker = within(dialog).getByLabelText(new RegExp(`^${groupStrings.app}`)) as HTMLSelectElement;
-    expect([...picker.options].map((o) => o.textContent)).toEqual(["Wiki"]);
-    fireEvent.change(within(dialog).getByLabelText(groupStrings.audience), { target: { value: "selected" } });
-    fireEvent.click(within(dialog).getByLabelText(groupStrings.pinTaskbar));
+    expect(within(dialog).getByLabelText(groupStrings.app).textContent).toContain("Wiki");
+    // Notepad is already in the group, so Wiki is the only choice; the list names its kind.
+    const listed = optionLabels(groupStrings.app);
+    expect(listed).toHaveLength(1);
+    expect(listed[0]).toContain("Wiki");
+    expect(listed[0]).toContain("Website");
+    // Who sees it: two cards, "Everyone in the group" chosen; pins: two toggles, Desktop on.
+    const everyone = within(dialog).getByRole("radio", { name: groupText.audienceCards.everyone });
+    expect(everyone.getAttribute("aria-checked")).toBe("true");
+    const desktop = within(dialog).getByRole("button", { name: groupText.pinDesktop });
+    expect(desktop.getAttribute("aria-pressed")).toBe("true");
+    expect(within(dialog).getByRole("button", { name: groupText.pinTaskbar }).getAttribute("aria-pressed")).toBe("false");
+    fireEvent.click(within(dialog).getByRole("radio", { name: groupText.audienceCards.selected }));
+    fireEvent.click(within(dialog).getByRole("button", { name: groupText.pinTaskbar }));
     fireEvent.click(within(dialog).getByRole("button", { name: groupStrings.assign }));
     await waitFor(() => expect(assignApp).toHaveBeenCalledWith({ groupId: "g1", appId: "a2", audience: "selected", pinnedTaskbar: true, pinnedDesktop: true }));
+  });
+
+  it("assign: with several apps left none is chosen for them; the picker is searchable and Assign asks for one", async () => {
+    cx.results["groups:get"] = detail(0);
+    cx.results["apps:options"] = [
+      { _id: "a1", name: "Notepad", kind: "desktop", canOpenFiles: true },
+      { _id: "a2", name: "Wiki", kind: "web", canOpenFiles: false },
+      { _id: "a3", name: "Calendar", kind: "web", canOpenFiles: false },
+    ];
+    const assignApp = vi.fn(async () => ({ assignmentId: "as2" }));
+    cx.fns["groups:assignApp"] = assignApp;
+    ui(<GroupDetail />, "admin", "/groups/g1");
+    fireEvent.click(assign());
+    const dialog = await screen.findByRole("dialog");
+    expect(within(dialog).getByLabelText(groupStrings.app).textContent).toContain(groupText.appPlaceholder);
+    fireEvent.click(within(dialog).getByRole("button", { name: groupStrings.assign }));
+    expect(await within(dialog).findByText(strings.validate.required)).toBeTruthy();
+    expect(assignApp).not.toHaveBeenCalled();
+    pickOption(groupStrings.app, /Calendar/);
+    fireEvent.click(within(dialog).getByRole("button", { name: groupStrings.assign }));
+    await waitFor(() => expect(assignApp).toHaveBeenCalledWith({ groupId: "g1", appId: "a3", audience: "everyone", pinnedTaskbar: false, pinnedDesktop: true }));
   });
 
   it("assign: the server's conflict and too_large refusals get their own sentences", async () => {
@@ -469,7 +513,9 @@ describe("Group detail (groups:get)", () => {
     ui(<GroupDetail />, "admin", "/groups/g1");
     fireEvent.click(screen.getByRole("button", { name: `${groupPage.edit}: Notepad` }));
     let dialog = await screen.findByRole("dialog");
-    fireEvent.click(within(dialog).getByLabelText(groupStrings.pinDesktop));
+    // The assignment is on the taskbar only: Desktop is off; turn it on.
+    expect(within(dialog).getByRole("button", { name: groupText.pinDesktop }).getAttribute("aria-pressed")).toBe("false");
+    fireEvent.click(within(dialog).getByRole("button", { name: groupText.pinDesktop }));
     fireEvent.click(within(dialog).getByRole("button", { name: strings.common.save }));
     await waitFor(() => expect(update).toHaveBeenCalledWith({ assignmentId: "as1", audience: "everyone", pinnedTaskbar: true, pinnedDesktop: true }));
     await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());

@@ -143,7 +143,6 @@ export const strings = {
     neverSeen: "Not seen yet",
     online: "Online",
     offline: "Offline",
-    timeZone: (tz: string) => `Times are shown in ${tz}.`,
   },
 
   /** The generic table (components/DataTable.tsx), its view switch and the pager. */

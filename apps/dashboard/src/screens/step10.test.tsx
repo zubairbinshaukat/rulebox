@@ -8,6 +8,7 @@ import type { ReactNode } from "react";
 import type { Me } from "../data/types";
 import { MeContext } from "../lib/member";
 import { strings } from "../lib/strings";
+import { pickOption } from "../test/select";
 import { appEditStrings } from "../lib/screenStrings/appEdit";
 import { appAddStrings } from "../lib/screenStrings/appAdd";
 import { appSiteAccessStrings } from "../lib/screenStrings/appSiteAccess";
@@ -305,7 +306,9 @@ describe("AppEdit: site permissions (apps:setPermissions, apps:get denials30d; P
     expect(within(rows[0]!).getByText(appEditStrings.permissionDefault(false))).toBeTruthy(); // camera
     expect(within(rows[4]!).getByText(appEditStrings.permissionDefault(true))).toBeTruthy(); // notifications
     expect(within(rows[6]!).getByText(appEditStrings.permissionDefault(true))).toBeTruthy(); // printing is allowed by default (PRD 24.1)
-    expect(screen.getByText(appEditStrings.printingNote)).toBeTruthy();
+    // The longer printing note is the (i) on the printing row, not a paragraph under the list.
+    expect(screen.queryByText(appEditStrings.printingNote)).toBeNull();
+    expect(within(rows[6]!).getByRole("button", { name: `About ${appEditStrings.permissionNames.printing}` })).toBeTruthy();
     // nothing to save until something changes
     expect((screen.getByRole("button", { name: appEditStrings.permissionsSave }) as HTMLButtonElement).disabled).toBe(true);
   });
@@ -460,7 +463,7 @@ describe("AppEdit: Updates card (Phase 6 Step 10; apps:get feedStatus, apps:roll
     cx.results["apps:get"] = managed({ feedStatus: { status: "bad_signature", failures: 2, lastCheckedAt: Date.now() - 60_000, seenVersion: "2.1.0" } });
     await ui(<AppEdit />, "admin", "/apps/a2?tab=updates");
     await screen.findByRole("heading", { name: appUpdateStrings.updates });
-    expect(screen.getByRole("radio", { name: appUpdateStrings.updateModes.managed }).getAttribute("aria-checked")).toBe("true");
+    expect(screen.getByRole("radio", { name: appUpdateStrings.modeLabels.managed }).getAttribute("aria-checked")).toBe("true");
     expect(field(appUpdateStrings.version).value).toBe("2.0.0");
     expect(screen.getByText(appUpdateStrings.feedStatusProblem.bad_signature)).toBeTruthy();
     expect(screen.getByText(new RegExp(appUpdateStrings.feedStatusSeen("2.1.0").replace(/\./g, "\\.")))).toBeTruthy();
@@ -483,7 +486,9 @@ describe("AppEdit: Updates card (Phase 6 Step 10; apps:get feedStatus, apps:roll
     await ui(<AppEdit />, "admin", "/apps/a2?tab=updates");
     await screen.findByRole("heading", { name: appUpdateStrings.updates });
     expect(screen.queryByRole("button", { name: /^Roll back to/ })).toBeNull();
-    expect(screen.getByText(appUpdateStrings.rollbackNone)).toBeTruthy();
+    // The "nothing to roll back to" help is an (i) tip next to the rollback switch, not a paragraph.
+    expect(screen.queryByText(appUpdateStrings.rollbackNone)).toBeNull();
+    expect(screen.getByRole("button", { name: `About ${appUpdateStrings.rollbackOnFail}` })).toBeTruthy();
     expect(screen.queryByText(appUpdateStrings.feedStatusWorking)).toBeNull(); // no feed, no status line
   });
 
@@ -504,7 +509,7 @@ describe("AppEdit: Updates card (Phase 6 Step 10; apps:get feedStatus, apps:roll
     expect(sent).not.toHaveProperty("version");
     expect((sent.install as { sizeBytes: number }).sizeBytes).toBe(2000); // the same installer keeps its size
 
-    fireEvent.click(screen.getByRole("radio", { name: appUpdateStrings.updateModes.managed }));
+    fireEvent.click(screen.getByRole("radio", { name: appUpdateStrings.modeLabels.managed }));
     fireEvent.change(field(appUpdateStrings.version), { target: { value: "v2" } });
     fireEvent.click(screen.getByRole("button", { name: strings.common.saveChanges }));
     expect(await screen.findByText(appEditStrings.versionNotOrdered)).toBeTruthy();
@@ -523,7 +528,7 @@ describe("AppEdit: Updates card (Phase 6 Step 10; apps:get feedStatus, apps:roll
     cx.results["apps:get"] = program();
     await ui(<AppEdit />, "admin", "/apps/a2?tab=updates");
     await screen.findByRole("heading", { name: appUpdateStrings.updates });
-    fireEvent.click(screen.getByRole("radio", { name: appUpdateStrings.updateModes.vendor }));
+    fireEvent.click(screen.getByRole("radio", { name: appUpdateStrings.modeLabels.vendor }));
     fireEvent.click(screen.getByRole("button", { name: strings.common.saveChanges }));
     expect(await screen.findByText(appEditStrings.needsPublisher)).toBeTruthy();
     fireEvent.change(field(appUpdateStrings.publisher), { target: { value: "Microsoft Corporation" } });
@@ -537,7 +542,7 @@ describe("AppEdit: Updates card (Phase 6 Step 10; apps:get feedStatus, apps:roll
     await ui(<AppEdit />, "admin", "/apps/a2?tab=updates");
     await screen.findByRole("heading", { name: appUpdateStrings.updates });
     expect(screen.getByText(appUpdateStrings.browserForced)).toBeTruthy();
-    expect(screen.queryByRole("radio", { name: appUpdateStrings.updateModes.pinned })).toBeNull();
+    expect(screen.queryByRole("radio", { name: appUpdateStrings.modeLabels.pinned })).toBeNull();
   });
 
   it("a server refusal of plan 4.4 is explained in one sentence", async () => {
@@ -559,41 +564,127 @@ describe("File types (fileHandlers:page, apps:options)", () => {
     { _id: "a1", name: "Docs", kind: "web", canOpenFiles: false },
   ];
 
-  it("lists the rules; adding sends the normalized extension and the app; removing sends the rule id", async () => {
+  const remove = (ext: string) => strings.table.actionFor(strings.common.remove, ext);
+  const openAdd = async () => {
+    fireEvent.click(screen.getByRole("button", { name: fileTypesStrings.add }));
+    return screen.findByRole("dialog");
+  };
+  const chip = (dialog: HTMLElement, label: string) => within(dialog).getByRole("button", { name: label });
+  const submit = (dialog: HTMLElement) => fireEvent.click(within(dialog).getByRole("button", { name: strings.common.add }));
+
+  it("lists the rules; Other types one extension (the normalized one goes to fileHandlers:set); removing sends the rule id", async () => {
     cx.results["fileHandlers:page"] = data;
     cx.results["apps:options"] = options;
     const set = vi.fn(async () => null);
-    const remove = vi.fn(async () => null);
+    const setMany = vi.fn(async () => null);
+    const removeFn = vi.fn(async () => null);
     cx.fns["fileHandlers:set"] = set;
-    cx.fns["fileHandlers:remove"] = remove;
+    cx.fns["fileHandlers:setMany"] = setMany;
+    cx.fns["fileHandlers:remove"] = removeFn;
     await ui(<FileTypes />, "admin", "/file-types");
     expect(screen.getByText(".pdf")).toBeTruthy();
-    fireEvent.click(screen.getByRole("button", { name: fileTypesStrings.add }));
-    const dialog = await screen.findByRole("dialog");
+    const dialog = await openAdd();
+    // The only program that can open files is chosen for them.
+    expect(within(dialog).getByLabelText(fileTypesStrings.app).textContent).toContain("Reader");
+    // The raw box is hidden until "Other…".
+    expect(within(dialog).queryByLabelText(new RegExp(`^${fileTypesStrings.extension}`))).toBeNull();
+    fireEvent.click(chip(dialog, fileTypesStrings.other));
     fireEvent.change(within(dialog).getByLabelText(new RegExp(`^${fileTypesStrings.extension}`)), { target: { value: "DOCX" } });
-    fireEvent.click(within(dialog).getByRole("button", { name: strings.common.add }));
+    submit(dialog);
     await waitFor(() => expect(set).toHaveBeenCalledWith({ extension: ".docx", appId: "a2" }));
+    expect(setMany).not.toHaveBeenCalled();
 
-    fireEvent.click(screen.getByRole("button", { name: `${strings.common.remove} .pdf` }));
+    fireEvent.click(screen.getByRole("button", { name: remove(".pdf") }));
     const confirm = await screen.findByRole("dialog");
     fireEvent.click(within(confirm).getByRole("button", { name: strings.common.remove }));
-    await waitFor(() => expect(remove).toHaveBeenCalledWith({ handlerId: "h1" }));
+    await waitFor(() => expect(removeFn).toHaveBeenCalledWith({ handlerId: "h1" }));
+  });
+
+  it("the chips: Pictures is one call with all its extensions, so it makes one settings version", async () => {
+    cx.results["fileHandlers:page"] = data;
+    cx.results["apps:options"] = options;
+    const set = vi.fn(async () => null);
+    const setMany = vi.fn(async () => null);
+    cx.fns["fileHandlers:set"] = set;
+    cx.fns["fileHandlers:setMany"] = setMany;
+    await ui(<FileTypes />, "admin", "/file-types");
+    const dialog = await openAdd();
+    expect(chip(dialog, "Pictures").getAttribute("aria-pressed")).toBe("false");
+    fireEvent.click(chip(dialog, "Pictures"));
+    expect(chip(dialog, "Pictures").getAttribute("aria-pressed")).toBe("true");
+    expect(within(dialog).getByText(fileTypesStrings.willAdd(".jpg .jpeg .png .gif .bmp"))).toBeTruthy();
+    submit(dialog);
+    await waitFor(() => expect(setMany).toHaveBeenCalledWith({ extensions: [".jpg", ".jpeg", ".png", ".gif", ".bmp"], appId: "a2" }));
+    expect(setMany).toHaveBeenCalledTimes(1);
+    expect(set).not.toHaveBeenCalled();
+  });
+
+  it("several chips, and Other on top of them, go in one call; a repeated extension is sent once", async () => {
+    cx.results["fileHandlers:page"] = data;
+    cx.results["apps:options"] = options;
+    const setMany = vi.fn(async () => null);
+    cx.fns["fileHandlers:setMany"] = setMany;
+    await ui(<FileTypes />, "admin", "/file-types");
+    const dialog = await openAdd();
+    fireEvent.click(chip(dialog, "PDF"));
+    fireEvent.click(chip(dialog, "Word"));
+    fireEvent.click(chip(dialog, fileTypesStrings.other));
+    fireEvent.change(within(dialog).getByLabelText(new RegExp(`^${fileTypesStrings.extension}`)), { target: { value: "PDF" } });
+    submit(dialog);
+    await waitFor(() => expect(setMany).toHaveBeenCalledWith({ extensions: [".pdf", ".docx", ".doc"], appId: "a2" }));
+    expect(setMany).toHaveBeenCalledTimes(1);
+  });
+
+  it("nothing chosen is refused with a plain sentence, before the server is asked", async () => {
+    cx.results["fileHandlers:page"] = data;
+    cx.results["apps:options"] = options;
+    const setMany = vi.fn(async () => null);
+    cx.fns["fileHandlers:setMany"] = setMany;
+    await ui(<FileTypes />, "admin", "/file-types");
+    const dialog = await openAdd();
+    submit(dialog);
+    expect(await within(dialog).findByText(fileTypesStrings.pickOne)).toBeTruthy();
+    expect(setMany).not.toHaveBeenCalled();
+  });
+
+  it("with several programs none is chosen for them; the picker is searchable and shows each kind", async () => {
+    cx.results["fileHandlers:page"] = data;
+    cx.results["apps:options"] = [...options, { _id: "a3", name: "Sheets", kind: "desktop", canOpenFiles: true }];
+    const setMany = vi.fn(async () => null);
+    cx.fns["fileHandlers:setMany"] = setMany;
+    await ui(<FileTypes />, "admin", "/file-types");
+    const dialog = await openAdd();
+    expect(within(dialog).getByLabelText(fileTypesStrings.app).textContent).toContain(fileTypesStrings.appPlaceholder);
+    fireEvent.click(chip(dialog, "PDF"));
+    submit(dialog);
+    expect(await within(dialog).findByText(strings.validate.required)).toBeTruthy();
+    expect(setMany).not.toHaveBeenCalled();
+    pickOption(fileTypesStrings.app, /Sheets/);
+    submit(dialog);
+    await waitFor(() => expect(setMany).toHaveBeenCalledWith({ extensions: [".pdf"], appId: "a3" }));
   });
 
   it("executables and scripts are refused in the dialog before the server is asked", async () => {
     cx.results["fileHandlers:page"] = data;
     cx.results["apps:options"] = options;
     const set = vi.fn(async () => null);
+    const setMany = vi.fn(async () => null);
     cx.fns["fileHandlers:set"] = set;
+    cx.fns["fileHandlers:setMany"] = setMany;
     await ui(<FileTypes />, "admin", "/file-types");
-    fireEvent.click(screen.getByRole("button", { name: fileTypesStrings.add }));
-    const dialog = await screen.findByRole("dialog");
+    const dialog = await openAdd();
+    fireEvent.click(chip(dialog, fileTypesStrings.other));
     for (const ext of ["exe", ".BAT", "ps1", "msi"]) {
       fireEvent.change(within(dialog).getByLabelText(new RegExp(`^${fileTypesStrings.extension}`)), { target: { value: ext } });
-      fireEvent.click(within(dialog).getByRole("button", { name: strings.common.add }));
+      submit(dialog);
       expect(await within(dialog).findByText(strings.validate.extensionDenied)).toBeTruthy();
     }
+    // Also next to a chip: the typed one is still checked.
+    fireEvent.click(chip(dialog, "PDF"));
+    submit(dialog);
+    expect(await within(dialog).findByText(strings.validate.extensionDenied)).toBeTruthy();
     expect(set).not.toHaveBeenCalled();
+    expect(setMany).not.toHaveBeenCalled();
   });
 
   it("a viewer sees the rules without add or remove", async () => {
@@ -602,6 +693,6 @@ describe("File types (fileHandlers:page, apps:options)", () => {
     await ui(<FileTypes />, "viewer", "/file-types");
     expect(screen.getByText(".pdf")).toBeTruthy();
     expect(screen.queryByRole("button", { name: fileTypesStrings.add })).toBeNull();
-    expect(screen.queryByRole("button", { name: `${strings.common.remove} .pdf` })).toBeNull();
+    expect(screen.queryByRole("button", { name: remove(".pdf") })).toBeNull();
   });
 });
