@@ -7,16 +7,18 @@ recommended option) so the owner can review afterwards.
 
 Plans in this folder:
 
-| File | Page(s) |
-|---|---|
-| `audit.md` | Every route rated against the owner's bar, every form input a normal user would not understand |
-| `foundations.md` | Shared components and layout rules (this README is the contract; foundations.md records what was built) |
-| `device-detail.md` | `/devices/:id` |
-| `settings.md` | `/settings` incl. Updates from GitHub releases |
-| `add-app.md` | `/apps/new`, `/apps/:id` (Windows app, website/web app, popular apps gallery) |
-| `lockdown.md` | `/groups/:id/lockdown`, `/lockdown/findings` |
-| `lists-and-cards.md` | Generic table, Table/Cards view, list pages |
-| `enrollment-networks.md` | `/enrollment` (guided steps), `/networks` + Wi-Fi/printer/driver forms |
+| File | Page(s) | Status (2026-11-28) |
+|---|---|---|
+| `audit.md` | Every route rated against the owner's bar, every form input a normal user would not understand | done |
+| (this README) | Shared components and layout rules (the contract; built in `6fb2400`, `f57f9be`, `900d438`, `bb42622`) | done |
+| `device-detail.md` | `/devices/:id` | built (step 18 VM-free; `fleet:get` deletion is a follow-up) |
+| `settings.md` | `/settings` incl. Updates from GitHub releases | built |
+| `add-app.md` | `/apps/new`, `/apps/:id` (Windows app, website/web app, popular apps gallery) | built (step 18 = owner's VM check) |
+| `lockdown.md` | `/groups/:id/lockdown`, `/lockdown/findings` | built (sync via `deviceLockdownSync`, backfill after deploy) |
+| `lists-and-cards.md` | Generic table, Table/Cards view, list pages | built |
+| `enrollment-networks.md` | `/enrollment` (guided steps), `/networks` + Wi-Fi/printer/driver forms | built |
+| `other-pages.md` | Group detail, Overview, Rollout, Employees, Messages, Audit log, dialogs | built |
+| `HANDOFF.md` | Final state, decisions, open questions | — |
 
 ## Owner rules for every page
 
