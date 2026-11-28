@@ -250,7 +250,8 @@ describe("the installer link is checked by itself", () => {
     await checked(check);
     await screen.findByText(a.silent.silent);
     fireEvent.change(linkBox(), { target: { value: "https://downloads.example.com/other.exe" } });
-    expect(screen.queryByText(a.silent.silent)).toBeNull();
+    // waitFor: under a loaded test run the reset can land a tick after the change event.
+    await waitFor(() => expect(screen.queryByText(a.silent.silent)).toBeNull());
     expect(screen.getByText(a.review.blocked.noLink)).toBeTruthy();
   });
 
