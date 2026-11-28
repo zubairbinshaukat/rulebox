@@ -2,6 +2,7 @@ import { useMemo } from "react";
 import { useHistory } from "../data/audit";
 import type { AuditEntry, Id } from "../data/types";
 import { actionLabel } from "../lib/audit";
+import { plainSummary } from "../lib/auditText";
 import { useListPaging, useListView, type ListConfig } from "../lib/listView";
 import { auditStrings } from "../lib/screenStrings/audit";
 import { deviceStrings } from "../lib/screenStrings/device";
@@ -28,10 +29,11 @@ export function HistoryPanel({ targetId, title = deviceStrings.history }: { targ
         key: "what",
         header: auditStrings.colAction,
         primary: true,
+        type: "name",
         cell: (e) => (
           <span className="dash-cell-stack">
             <strong style={{ fontWeight: 600 }}>{actionLabel(e.action)}</strong>
-            {e.summary ? <span className="dash-wrap dash-cell-sub" style={{ whiteSpace: "normal" }}>{e.summary}</span> : null}
+            {e.summary ? <span className="dash-wrap dash-cell-sub" style={{ whiteSpace: "normal" }}>{plainSummary(e)}</span> : null}
             <span className="dash-cell-sub">
               <ActorLabel entry={e} />
             </span>
@@ -53,6 +55,8 @@ export function HistoryPanel({ targetId, title = deviceStrings.history }: { targ
         list={history}
         total={null}
         skeletonRows={3}
+        // A two-column list in a side card: always a table, no Table | Cards switch and no card sort control (also not on an empty list).
+        stack={false}
         empty={<EmptyState compact title={auditStrings.historyNone} />}
       />
     </Card>

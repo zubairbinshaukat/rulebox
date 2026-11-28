@@ -8,7 +8,7 @@ import type { Me } from "../data/types";
 import { MeContext } from "../lib/member";
 import { VIEW_KEY } from "../lib/viewMode";
 import { strings } from "../lib/strings";
-import { pickOption } from "../test/select";
+import { pickOption, selectedText } from "../test/select";
 import { appEditStrings } from "../lib/screenStrings/appEdit";
 import { appsStrings } from "../lib/screenStrings/apps";
 import { auditStrings } from "../lib/screenStrings/audit";
@@ -283,7 +283,8 @@ describe("Apps: URL state, sort, search, pager", () => {
     expect(screen.queryByRole("table")).toBeNull();
     expect(within(list).getAllByRole("listitem")).toHaveLength(2);
     await screen.findByLabelText(strings.table.sortSelect);
-    pickOption(strings.table.sortSelect, strings.table.sortOption(appsStrings.colName, strings.table.sortDir.name.desc));
+    // The title column says "Name" for the sort words (its header is "App").
+    pickOption(strings.table.sortSelect, strings.table.sortOption(appsStrings.colNameSort, strings.table.sortDir.name.desc));
     expect(where()).toBe("/apps?sort=name&dir=desc");
     expect(last("apps:list")).toMatchObject({ sort: { key: "name", dir: "desc" } });
     expect(screen.getAllByRole("link", { name: /^App / })).toHaveLength(2);
@@ -369,7 +370,7 @@ describe("File types: a bounded table with offset cursors and an inline total", 
   it("the row opens the program; Remove (a button in the row) opens its dialog and does not navigate", async () => {
     cx.results["fileHandlers:page"] = page(rules(2), { total: 2, continueCursor: "o:2" });
     await ui(<FileTypes />, "/file-types");
-    fireEvent.click(screen.getByRole("button", { name: `${strings.common.remove} .e00` }));
+    fireEvent.click(screen.getByRole("button", { name: strings.table.actionFor(strings.common.remove, ".e00") }));
     expect(screen.getByRole("dialog")).toBeTruthy();
     expect(where()).toBe("/file-types");
     fireEvent.click(within(screen.getByRole("dialog")).getByRole("button", { name: strings.common.cancel }));
@@ -385,7 +386,8 @@ describe("File types: a bounded table with offset cursors and an inline total", 
     expect(cx.requests.some((r) => r.name === "apps:options")).toBe(false);
     fireEvent.click(screen.getByRole("button", { name: fileTypesStrings.add }));
     expect(cx.requests.some((r) => r.name === "apps:options")).toBe(true);
-    expect(screen.getByRole("option", { name: "Reader" })).toBeTruthy();
+    // One program can open files, so it is already chosen.
+    expect(selectedText(fileTypesStrings.app)).toContain("Reader");
   });
 });
 
@@ -483,9 +485,19 @@ describe("Settings > Members: two lists on one page", () => {
     cx.results["members:page"] = page([member(1)], { total: 1, continueCursor: "o:1" });
     cx.results["members:invitesPage"] = page([invite(1)], { total: 1, continueCursor: "o:1" });
     await ui(<MembersTab />, "/settings?tab=members", "owner");
-    fireEvent.click(screen.getByRole("button", { name: `${settingsStrings.members.revokeInvite}: invitee1@x.test` }));
+    fireEvent.click(screen.getByRole("button", { name: `${strings.common.revoke}: invitee1@x.test` }));
     expect(screen.getByRole("dialog")).toBeTruthy();
     expect(screen.getByRole("button", { name: `${settingsStrings.members.changeRole}: user01@x.test` })).toBeTruthy();
+  });
+
+  it("a few pending invites have no search box of their own; the invite's expiry is relative", async () => {
+    cx.results["members:page"] = page([member(1)], { total: 1, continueCursor: "o:1" });
+    cx.results["members:invitesPage"] = page([invite(1)], { total: 1, continueCursor: "o:1" });
+    await ui(<MembersTab />, "/settings?tab=members", "owner");
+    expect(screen.queryByRole("searchbox", { name: settingsStrings.members.invitesSearchLabel })).toBeNull();
+    expect(screen.getByRole("searchbox", { name: settingsStrings.members.searchLabel })).toBeTruthy();
+    const row = screen.getByText("invitee1@x.test").closest("tr")!;
+    expect(within(row).getByText(/^in /)).toBeTruthy();
   });
 });
 

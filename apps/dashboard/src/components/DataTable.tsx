@@ -77,7 +77,7 @@ export interface Column<T> {
   /** The direction a first click sorts by (dates and counts usually want "desc"). Default "asc". */
   sortDefaultDir?: SortDir;
 
-  /** Table width and wrapping class (see `ColumnType`). Default: from `primary` / `actions` / `numeric` / `nowrap`; nothing = wraps. */
+  /** Table width and wrapping class (see `ColumnType`). Default: from `primary` / `actions` / `numeric`, else `short` (never wraps): free text must say `text`. */
   type?: ColumnType;
   /** Width cap in px for `name`, `text`, `mono` and `badge` cells; longer content is cut (default per type). */
   maxWidth?: number;
@@ -334,7 +334,7 @@ function CardsPending() {
 /** A column whose cell never wraps and so cannot be squeezed below its content. */
 function isShort(c: Column<never>): boolean {
   const type = columnType(c);
-  return type !== null && type !== "name" && type !== "text";
+  return type !== "name" && type !== "text";
 }
 
 const MAX_BY_TYPE: Partial<Record<ColumnType, number>> = { name: 280, text: 360, mono: 200, badge: 280 };
@@ -344,7 +344,7 @@ const TRUNCATE_CH = 32;
 function cellClass(c: Column<never>, header = false): string {
   const type = columnType(c);
   return [
-    type ? `dash-col--${type}` : "",
+    `dash-col--${type}`,
     c.primary ? "dash-cell--name" : "",
     c.actions ? "dash-cell--actions" : "",
     c.numeric || type === "num" ? "rb-num" : "",
@@ -364,7 +364,7 @@ function cellContent(c: Column<unknown>, row: unknown): ReactNode {
   }
   const type = columnType(c);
   const cap = c.maxWidth ?? (type ? MAX_BY_TYPE[type] : undefined);
-  if (!type || cap === undefined || (type !== "name" && type !== "text" && type !== "mono" && type !== "badge")) return content;
+  if (cap === undefined || (type !== "name" && type !== "text" && type !== "mono" && type !== "badge")) return content;
   if (type !== "badge" && (typeof content === "string" || typeof content === "number")) {
     return (
       <Truncate full={String(content)} lines={type === "text" ? 2 : 1} maxWidth={cap}>

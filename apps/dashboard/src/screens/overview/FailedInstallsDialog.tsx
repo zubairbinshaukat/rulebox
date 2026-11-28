@@ -32,6 +32,7 @@ export default function FailedInstallsDialog({ count, onClose }: { count: number
         key: "app",
         header: s.colApp,
         primary: true,
+        type: "name",
         cell: (f) => (
           <span className="dash-cell-stack">
             <Link className="dash-link dash-link--plain dash-truncate" to={`/apps/${f.appId}`} title={f.appName}>
@@ -46,13 +47,14 @@ export default function FailedInstallsDialog({ count, onClose }: { count: number
       {
         key: "device",
         header: s.colDevice,
+        type: "name",
         cell: (f) => (
           <Link className="dash-link dash-truncate" to={`/devices/${f.deviceId}`} title={f.deviceName}>
             {f.deviceName}
           </Link>
         ),
       },
-      { key: "updated", header: s.colUpdated, sortable: true, sortDefaultDir: "desc", cell: (f) => <RelativeTime ms={f.updatedAt} /> },
+      { key: "updated", header: s.colUpdated, type: "date", sortable: true, sortDefaultDir: "desc", cell: (f) => <RelativeTime ms={f.updatedAt} /> },
     ],
     [],
   );

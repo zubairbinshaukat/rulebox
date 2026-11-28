@@ -8,7 +8,7 @@ import type { Me } from "../data/types";
 import { MeContext } from "../lib/member";
 import { setStepUpHandler } from "../lib/stepUpRetry";
 import { strings } from "../lib/strings";
-import { pickOption, selectedText } from "../test/select";
+import { optionLabels, pickOption, selectedText } from "../test/select";
 import { deviceText } from "./device/strings";
 import { ringErrorMessage, settingsText } from "./device/settingsStrings";
 import { deviceLockdownStrings as ds } from "./lockdown/deviceStrings";
@@ -211,17 +211,16 @@ describe("Devices (fleet:list, one server-driven page at a time)", () => {
   it("offers a No group filter: it sends groupId none at once (no waiting for the groups) and keeps it in the URL", () => {
     ui(<Devices />, "viewer", "/devices?group=none");
     expect(listArgs()).toEqual({ ...DEFAULT_ARGS, groupId: "none" });
-    expect((screen.getByLabelText(devicesStrings.groupFilter) as HTMLSelectElement).value).toBe("none");
+    expect(selectedText(devicesStrings.groupFilter)).toBe(devicesStrings.noGroupFilter);
   });
 
   it("choosing No group in the filter lists the PCs without a group, and All groups goes back", async () => {
     cx.results["groups:list"] = [GROUP];
     ui(<Devices />, "viewer", "/devices");
-    const select = screen.getByLabelText(devicesStrings.groupFilter) as HTMLSelectElement;
-    expect(within(select).getByRole("option", { name: devicesStrings.noGroupFilter })).toBeTruthy();
-    fireEvent.change(select, { target: { value: "none" } });
+    expect(optionLabels(devicesStrings.groupFilter)).toEqual([devicesStrings.allGroups, devicesStrings.noGroupFilter, "Sales"]);
+    pickOption(devicesStrings.groupFilter, devicesStrings.noGroupFilter);
     await waitFor(() => expect(listArgs()).toEqual({ ...DEFAULT_ARGS, groupId: "none" }));
-    fireEvent.change(select, { target: { value: "" } });
+    pickOption(devicesStrings.groupFilter, devicesStrings.allGroups);
     await waitFor(() => expect(listArgs()).toEqual(DEFAULT_ARGS));
   });
 
@@ -251,7 +250,7 @@ describe("Devices (fleet:list, one server-driven page at a time)", () => {
     // The unknown id never reaches fleet:list (it would answer not_found).
     expect(cx.queries.some((q) => JSON.stringify(q.args).includes("gone"))).toBe(false);
     expect(screen.queryByRole("alert")).toBeNull();
-    expect((screen.getByLabelText(devicesStrings.groupFilter) as HTMLSelectElement).value).toBe("");
+    expect(selectedText(devicesStrings.groupFilter)).toBe(devicesStrings.allGroups);
   });
 
   it("waits for the groups before running a list that has a group filter", () => {
@@ -382,6 +381,45 @@ describe("Devices (fleet:list, one server-driven page at a time)", () => {
     await screen.findByLabelText(strings.table.sortSelect);
     pickOption(strings.table.sortSelect, "Name: A to Z");
     expect(listArgs().sort).toEqual({ key: "name", dir: "asc" });
+  });
+
+  it("the cards put the group under the name, the alerts with the status, the policy in words and the Windows line last", async () => {
+    cx.results["groups:list"] = [];
+    cx.results["fleet:list"] = listPage([
+      row("d1", "Front desk", {
+        planState: "overLimit",
+        summary: { agentVersion: "0.4.0", windowsBuild: "26100", kioskPhase: "applied", outOfSupport: true, appliedVersion: 3, updatedAt: 1 },
+      }),
+      row("d2", "Back office", { groupId: undefined, groupName: undefined }),
+    ]);
+    ui(<Devices />, "viewer", "/devices");
+    fireEvent.click(screen.getByRole("radio", { name: strings.table.viewCards }));
+    const [first, second] = within(await screen.findByRole("list", { name: devicesStrings.title })).getAllByRole("listitem");
+    // Name, group under it, then the status pills (online, kiosk, over the limit, out of support).
+    expect(within(first!).getByRole("link", { name: "Front desk" })).toBeTruthy();
+    expect(within(first!).getByText("Sales")).toBeTruthy();
+    for (const word of [strings.common.online, devicesStrings.planOverLimit, devicesStrings.outOfSupport]) expect(within(first!).getByText(word)).toBeTruthy();
+    // The policy in words; the numbers are in the tooltip, never on the card.
+    expect(within(first!).getByText(devicesStrings.policyUpToDate)).toBeTruthy();
+    const waiting = within(second!).getByText(devicesStrings.policyWaiting);
+    expect(waiting.getAttribute("title")).toBe(devicesStrings.policyWaitingHint(2, 3));
+    expect(first!.textContent).not.toMatch(/\bv\d/);
+    expect(within(second!).getByText(devicesStrings.noGroup)).toBeTruthy();
+    // The Windows build and the agent are the last, muted line.
+    expect(within(first!).getByText(devicesStrings.windowsDetail("26100", "0.4.0"))).toBeTruthy();
+    expect(within(second!).queryByText(devicesStrings.planOverLimit)).toBeNull();
+  });
+
+  it("the table shows the policy in words and keeps Windows last; Check now is in the list's toolbar, not above it", () => {
+    cx.results["groups:list"] = [];
+    cx.results["fleet:list"] = listPage([row("d1", "Front desk"), row("d2", "Back office", { summary: { windowsBuild: "26100", appliedVersion: 3, updatedAt: 1 } })]);
+    ui(<Devices />, "admin", "/devices");
+    const heads = screen.getAllByRole("columnheader").map((h) => h.textContent);
+    expect(heads.slice(0, 6)).toEqual([devicesStrings.colName, devicesStrings.colStatus, devicesStrings.colKiosk, devicesStrings.colPolicy, expect.stringContaining(devicesStrings.colEnrolled), devicesStrings.colWindows]);
+    const rows = within(screen.getByRole("table")).getAllByRole("row");
+    expect(within(rows[1]!).getByText(devicesStrings.policyWaiting)).toBeTruthy();
+    expect(within(rows[2]!).getByText(devicesStrings.policyUpToDate)).toBeTruthy();
+    expect(screen.getByRole("button", { name: devicesStrings.checkNow }).closest(".dash-dt__toolbar")).not.toBeNull();
   });
 
   it("Check now asks the PCs of a page of 50", async () => {

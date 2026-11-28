@@ -118,22 +118,28 @@ function InstallList({ appId, state }: { appId: string; state: InstallState }) {
         key: "device",
         header: devicesStrings.colName,
         primary: true,
+        type: "name",
         cell: (r) => (
           <Link className="dash-link dash-link--plain dash-truncate" to={`/devices/${r.deviceId}`}>
             {r.deviceName}
           </Link>
         ),
       },
-      { key: "state", header: s.installState, cell: (r) => <InstallStatePill state={r.state} /> },
+      { key: "state", header: s.installState, type: "badge", card: "status", cell: (r) => <InstallStatePill state={r.state} /> },
       {
         key: "version",
         header: s.installedVersion,
+        type: "mono",
+        card: "detail",
         isEmpty: (r) => r.installedVersion === undefined,
         cell: (r) => (r.installedVersion !== undefined ? <span className="dash-mono">{r.installedVersion}</span> : <span className="dash-muted">—</span>),
       },
       {
         key: "detail",
         header: strings.common.details,
+        type: "text",
+        card: "detail",
+        cardLabel: false,
         isEmpty: (r) => r.state !== "failed",
         cell: (r) =>
           r.state === "failed" ? (
@@ -145,7 +151,7 @@ function InstallList({ appId, state }: { appId: string; state: InstallState }) {
             <span className="dash-muted">—</span>
           ),
       },
-      { key: "updated", header: s.colUpdated, sortable: true, sortDefaultDir: "desc", cell: (r) => <RelativeTime ms={r.updatedAt} /> },
+      { key: "updated", header: s.colUpdated, type: "date", sortable: true, sortDefaultDir: "desc", cell: (r) => <RelativeTime ms={r.updatedAt} /> },
     ],
     [],
   );

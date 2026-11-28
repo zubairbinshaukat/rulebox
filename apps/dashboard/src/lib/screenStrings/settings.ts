@@ -31,8 +31,6 @@ export const settingsStrings = {
     signing: "Your PCs only accept changes that are signed.",
     about: "Rulebox is open-source software under the MIT license.",
   },
-  /** Kept for the Members section (UI pass step 11 replaces it): the old tab name. */
-  tabs: { members: "Members" },
   /** The pill in the header of a section whose changes ask for a fresh PIN or passkey. */
   asksPin: "Asks for your PIN",
   asksPinInfo: "Saving this asks for your PIN or a passkey, because it changes every PC.",
@@ -95,8 +93,8 @@ export const settingsStrings = {
     stolenBody: "Rotate immediately. If the thief could reach your PCs, re-enroll them too.",
     finishConfirmTitle: "Finish the rotation?",
     finishConfirmBody: "PCs that don't trust the new key yet will stop receiving changes until re-enrolled.",
-  },  members: {
-    lead: "People who can sign in to this dashboard.",
+  },
+  members: {
     invite: "Invite member",
     inviteTitle: "Invite a member",
     email: "Email",
@@ -121,7 +119,7 @@ export const settingsStrings = {
     none: "No members match.",
     invitesSearchLabel: "Search invites",
     colInvite: "Invite",
-    colKind: "For",
+    colKind: "Type",
     colInvited: "Sent",
     colExpires: "Expires",
     you: "You",
@@ -135,7 +133,7 @@ export const settingsStrings = {
     disableBody: "They are signed out right away and can't sign in until enabled.",
     resetCode: "Create reset code",
     pendingInvites: "Pending invites",
-    expires: (when: string) => `Expires ${when}`,
+    expiresWord: "expires",
     revokeInvite: "Revoke invite",
     saved: "Member updated.",
   },

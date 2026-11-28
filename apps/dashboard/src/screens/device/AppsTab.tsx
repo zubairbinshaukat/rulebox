@@ -1,12 +1,11 @@
 import { useState } from "react";
 import { Link, useNavigate } from "react-router";
-import { Button } from "@rulebox/ui";
 import { useRetryApp } from "../../data";
 import { useDeviceInstalls } from "../../data/devices";
 import type { DeviceInstallRow, DevicePage } from "../../data/types";
 import { Card } from "../../components/Card";
 import { ConfirmDialog } from "../../components/ConfirmDialog";
-import type { Column } from "../../components/DataTable";
+import type { Column, RowAction } from "../../components/DataTable";
 import { EmptyState } from "../../components/EmptyState";
 import { InstallStatePill } from "../../components/InstallState";
 import { RelativeTime } from "../../components/RelativeTime";
@@ -36,6 +35,11 @@ export default function AppsTab({ d }: { d: Pick<DevicePage, "_id" | "group"> })
   const toast = useToast();
   const canAct = useCan("admin");
   const [confirming, setConfirming] = useState<DeviceInstallRow | null>(null);
+  // Retry restarts the app for every PC (confirmed first); an app that cannot be retried keeps the button, disabled, with the reason.
+  const actionsOf = (i: DeviceInstallRow): RowAction[] =>
+    canAct && i.state === "failed"
+      ? [{ label: installStrings.retry, onSelect: () => setConfirming(i), disabled: i.retryable === false, hint: i.retryable === false ? installStrings.retryUnavailable : undefined }]
+      : [];
   const cols: Column<DeviceInstallRow>[] = [
     {
       key: "app",
@@ -48,35 +52,19 @@ export default function AppsTab({ d }: { d: Pick<DevicePage, "_id" | "group"> })
         </Link>
       ),
     },
-    { key: "state", header: appEditStrings.installState, type: "badge", cell: (i) => <InstallStatePill state={i.state} /> },
+    { key: "state", header: appEditStrings.installState, type: "badge", card: "status", cell: (i) => <InstallStatePill state={i.state} /> },
     {
       key: "detail",
       header: strings.common.details,
       type: "text",
+      card: "detail",
+      cardLabel: false,
       isEmpty: (i) => i.state !== "failed",
       cell: (i) => (i.state === "failed" ? <span className="dash-muted" style={{ fontSize: 13 }}>{installDetail(i.detail)}</span> : null),
     },
-    { key: "updated", header: t.colUpdated, type: "date", sortable: true, sortDefaultDir: "desc", cell: (i) => <RelativeTime ms={i.updatedAt} /> },
-    {
-      key: "act",
-      header: strings.common.actions,
-      actions: true,
-      isEmpty: (i) => !(canAct && i.state === "failed"),
-      cell: (i) =>
-        canAct && i.state === "failed" ? (
-          <Button
-            variant="ghost"
-            className="dash-btn--sm"
-            disabled={i.retryable === false}
-            title={i.retryable === false ? installStrings.retryUnavailable : undefined}
-            onClick={() => setConfirming(i)}
-          >
-            {installStrings.retry}
-          </Button>
-        ) : null,
-    },
-  ];
-  return (
+    { key: "updated", header: t.colUpdated, type: "date", card: "fact", sortable: true, sortDefaultDir: "desc", cell: (i) => <RelativeTime ms={i.updatedAt} /> },
+    { key: "act", header: strings.common.actions, actions: true, rowActions: actionsOf, isEmpty: (i) => actionsOf(i).length === 0, cell: () => null },
+  ];  return (
     <Card title={t.appsTitle} body="none" className="dash-card--tight">
       {/* `apps:retry` restarts the app for every PC, so it is confirmed first. */}
       <ConfirmDialog
@@ -92,6 +80,7 @@ export default function AppsTab({ d }: { d: Pick<DevicePage, "_id" | "group"> })
         caption={t.appsTitle}
         columns={cols}
         getKey={(i) => i._id}
+        rowLabel={(i) => i.appName}
         paging={paging}
         list={installs}
         total={null}

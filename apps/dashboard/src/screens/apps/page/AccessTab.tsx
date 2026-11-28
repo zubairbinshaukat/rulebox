@@ -143,10 +143,11 @@ function AssignmentsTable({ rows }: { rows: Row[] }) {
           </Link>
         ),
       },
-      { key: "audience", header: groupStrings.audience, nowrap: true, cell: (a) => (a.audience === "everyone" ? groupStrings.audienceEveryone : groupStrings.audienceSelected) },
+      { key: "audience", header: groupStrings.audience, type: "short", cell: (a) => (a.audience === "everyone" ? groupStrings.audienceEveryone : groupStrings.audienceSelected) },
       {
         key: "pins",
         header: groupStrings.pins,
+        type: "short",
         isEmpty: (a) => !a.pinnedTaskbar && !a.pinnedDesktop,
         cell: (a) =>
           a.pinnedTaskbar || a.pinnedDesktop ? [a.pinnedTaskbar ? groupStrings.pinnedTaskbar : null, a.pinnedDesktop ? groupStrings.pinnedDesktop : null].filter(Boolean).join(" · ") : <span className="dash-muted">—</span>,

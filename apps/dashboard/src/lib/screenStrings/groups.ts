@@ -11,6 +11,10 @@ export const groupsStrings = {
   colDevices: "Devices",
   colEmployees: "Employees",
   colCreated: "Created",
+  /** The cards' sort choices: "Name: A to Z". */
+  colNameSort: "Name",
+  /** The label of the device count on a card. */
+  cardPcs: "PCs",
   searchLabel: "Search groups",
   searchPlaceholder: "Search by name or description",
   emptyTitle: "No groups yet",

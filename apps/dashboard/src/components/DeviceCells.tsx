@@ -66,8 +66,15 @@ export function PlanStateBadge({ planState }: { planState: DeviceRow["planState"
   return null;
 }
 
+/** "Up to date" or "Update waiting" (the version numbers are only in the tooltip). */
 export function PolicyCell({ applied, latest }: { applied?: number; latest?: number }) {
   if (latest === undefined) return <span className="dash-muted">—</span>;
-  if (applied === latest) return <span className="dash-mono">{s.policyCurrent(latest)}</span>;
-  return <Pill tone="warning">{s.policyWaiting(applied, latest)}</Pill>;
+  if (applied === latest) return <span>{s.policyUpToDate}</span>;
+  return (
+    <span>
+      <Pill tone="warning" title={s.policyWaitingHint(applied, latest)}>
+        {s.policyWaiting}
+      </Pill>
+    </span>
+  );
 }

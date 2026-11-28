@@ -174,7 +174,7 @@ describe("DataTable: short cells and long text", () => {
     expect(cellsOf(1)[1]!.className).toContain("dash-cell--nowrap");
   });
 
-  it("the name column takes the rest of the width only when every other column is short", () => {
+  it("the name column takes the rest of the width only when every other column is short (a column that says nothing is short)", () => {
     const table = () => screen.getByRole("table", { name: "Things" });
     const short: Column<Row>[] = [
       { key: "n", header: "N", primary: true, cell: (r) => r.name },
@@ -184,7 +184,10 @@ describe("DataTable: short cells and long text", () => {
     const { unmount } = show({ columns: short });
     expect(table().className).toContain("dash-table--fit");
     unmount();
-    show({ columns: [...short, { key: "free", header: "Free", cell: (r) => r.name }] });
+    const again = show({ columns: [...short, { key: "free", header: "Free", cell: (r) => r.name }] });
+    expect(table().className).toContain("dash-table--fit");
+    again.unmount();
+    show({ columns: [...short, { key: "free", header: "Free", type: "text", cell: (r) => r.name }] });
     expect(table().className).not.toContain("dash-table--fit");
   });
 

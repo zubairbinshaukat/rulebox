@@ -734,6 +734,32 @@
   }
 }
 
+/* ------------------------------------------------------------ Members */
+
+/* The members list, and the pending invites beside it (small cards) once the section is wide enough (`MembersTab.tsx` measures it
+   and sets `data-aside`), under it otherwise. With no pending invite there is no second column. */
+.set-members {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 18px;
+  align-items: start;
+  min-width: 0;
+}
+.set-members__main,
+.set-members__aside {
+  min-width: 0;
+}
+.set-members[data-aside]:has(.set-members__aside) {
+  grid-template-columns: minmax(0, 1fr) minmax(280px, 320px);
+}
+.set-member {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  max-width: 100%;
+  font-weight: 600;
+}
 /* ------------------------------------------------------------ About */
 
 .set-about {

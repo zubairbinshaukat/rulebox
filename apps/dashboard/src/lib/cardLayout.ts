@@ -104,8 +104,8 @@ function sortKind<T>(c: Column<T>): SortKind {
   const type = columnType(c);
   if (type === "date") return "date";
   if (type === "num") return "num";
-  // A list that has not declared its types yet: a column that sorts "newest first" first is a date.
-  if (type === null || type === "short") return c.sortDefaultDir === "desc" ? "date" : "name";
+  // A short column without a declared type that sorts "newest first" first is a date.
+  if (type === "short") return c.sortDefaultDir === "desc" ? "date" : "name";
   return "name";
 }
 

@@ -65,13 +65,13 @@ describe("cardLayout: roles", () => {
 });
 
 describe("columnType", () => {
-  it("is declared, or derived from primary / actions / numeric / nowrap; a column that says nothing wraps", () => {
+  it("is declared, or derived from primary / actions / numeric; a column that says nothing is short (never wraps)", () => {
     expect(columnType(col("a", { type: "mono" }))).toBe("mono");
     expect(columnType(col("a", { primary: true }))).toBe("name");
     expect(columnType(col("a", { actions: true }))).toBe("actions");
     expect(columnType(col("a", { numeric: true }))).toBe("num");
     expect(columnType(col("a", { nowrap: true }))).toBe("short");
-    expect(columnType(col("a"))).toBeNull();
+    expect(columnType(col("a"))).toBe("short");
   });
 });
 

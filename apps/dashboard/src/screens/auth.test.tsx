@@ -1,6 +1,6 @@
 import type { ReactNode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { MemoryRouter, Route, Routes, useLocation } from "react-router";
 import type { ServerList } from "../data/serverList";
 import type { InviteRow, MemberRow, Me } from "../data/types";
@@ -9,6 +9,8 @@ import { MeContext } from "../lib/member";
 import { reportUnauthenticated } from "../lib/session";
 import { strings } from "../lib/strings";
 import { settingsStrings } from "../lib/screenStrings/settings";
+import { secShell } from "../lib/stepup/strings-shell";
+import { pickOption, selectedText } from "../test/select";
 
 // The data seam is mocked (Convex is mocked one level down in live.test.tsx):
 // these tests cover what each screen does in every state of the real flows.
@@ -288,13 +290,73 @@ describe("Members: expectedRevision and stale edit", () => {
     </MemoryRouter>
   );
 
+  const openMore = async (email: string) => {
+    const more = await waitFor(() => {
+      const b = screen.getByRole("button", { name: strings.table.moreActionsFor(email) }) as HTMLButtonElement;
+      if (b.disabled) throw new Error("menu still loading");
+      return b;
+    });
+    fireEvent.click(more);
+  };
+
+  it("the row has one button, Change role; the rest is under More actions, the risky ones last, and your own row has none", async () => {
+    m.members = screenData(2);
+    render(tree());
+    expect(screen.getAllByRole("button", { name: new RegExp(`^${settingsStrings.members.changeRole}:`) })).toHaveLength(1);
+    expect(screen.queryByRole("button", { name: strings.table.moreActionsFor("owner@x.test") })).toBeNull();
+    expect(screen.queryByRole("button", { name: `${settingsStrings.members.disable}: sam@x.test` })).toBeNull();
+    await openMore("sam@x.test");
+    const items = within(screen.getByRole("menu")).getAllByRole("menuitem").map((i) => i.textContent);
+    expect(items).toEqual([settingsStrings.members.resetCode, secShell.resetMember, settingsStrings.members.disable]);
+  });
+
+  it("a disabled member offers Enable, which sends the row's revision without a dialog", async () => {
+    m.members = page<MemberRow>([
+      { _id: "me", email: "owner@x.test", role: "owner", status: "active", createdAt: 1, isYou: true, revision: 0 },
+      { _id: "m2", email: "sam@x.test", role: "admin", status: "disabled", createdAt: 2, isYou: false, revision: 5 },
+    ]);
+    m.setDisabled.mockResolvedValue(undefined);
+    render(tree());
+    await openMore("sam@x.test");
+    fireEvent.click(within(screen.getByRole("menu")).getByRole("menuitem", { name: settingsStrings.members.enable }));
+    await waitFor(() => expect(m.setDisabled).toHaveBeenCalledWith({ memberId: "m2", disabled: false, expectedRevision: 5 }));
+    expect(screen.queryByRole("dialog")).toBeNull();
+  });
+
+  it("an admin sees the members but no action and no Invite button", () => {
+    m.members = screenData(1);
+    render(
+      <MemoryRouter>
+        <ToastProvider>
+          <MeContext.Provider value={{ ...owner, role: "admin" }}>
+            <MembersTab />
+          </MeContext.Provider>
+        </ToastProvider>
+      </MemoryRouter>,
+    );
+    expect(screen.getByText(strings.app.ownerOnly)).toBeTruthy();
+    expect(screen.queryByRole("button", { name: settingsStrings.members.invite })).toBeNull();
+    expect(screen.queryByRole("button", { name: new RegExp(`^${settingsStrings.members.changeRole}:`) })).toBeNull();
+  });
+
+  it("the role picker says what each role may do", () => {
+    m.members = screenData(1);
+    render(tree());
+    fireEvent.click(screen.getByRole("button", { name: settingsStrings.members.invite }));
+    fireEvent.click(screen.getByLabelText(settingsStrings.members.role));
+    const options = within(screen.getByRole("listbox")).getAllByRole("option");
+    expect(options.map((o) => o.textContent)).toEqual(
+      (["owner", "admin", "viewer"] as const).map((r) => `${strings.app.roles[r]}${settingsStrings.members.roleHelp[r]}`),
+    );
+  });
+
   it("lists the pending invites the server returns (a table of their own); none pending hides the card", () => {
     m.members = screenData(1);
     const open: InviteRow = { _id: "i1", email: "open@x.test", role: "viewer", kind: "join", expiresAt: Date.now() + 60_000, createdAt: 1 };
     m.invites = page([open]);
     const view = render(tree());
     expect(screen.getByText("open@x.test")).toBeTruthy();
-    expect(screen.getByRole("button", { name: `${settingsStrings.members.revokeInvite}: open@x.test` })).toBeTruthy();
+    expect(screen.getByRole("button", { name: `${strings.common.revoke}: open@x.test` })).toBeTruthy();
     view.unmount();
     m.invites = page<InviteRow>([]);
     render(tree());
@@ -305,8 +367,8 @@ describe("Members: expectedRevision and stale edit", () => {
     m.changeRole.mockRejectedValueOnce(new AppError({ code: "stale_edit" })).mockResolvedValueOnce(undefined);
     const { rerender } = render(tree());
     fireEvent.click(screen.getByRole("button", { name: `${settingsStrings.members.changeRole}: sam@x.test` }));
-    const dialog = await screen.findByRole("dialog");
-    fireEvent.change(dialog.querySelector("select")!, { target: { value: "viewer" } });
+    await screen.findByRole("dialog");
+    pickOption(settingsStrings.members.role, /^Viewer/);
     fireEvent.click(screen.getByRole("button", { name: strings.common.save }));
     expect(await screen.findByText(strings.common.staleTitle)).toBeTruthy();
     expect(m.changeRole).toHaveBeenCalledWith({ memberId: "m2", role: "viewer", expectedRevision: 3 });
@@ -315,19 +377,21 @@ describe("Members: expectedRevision and stale edit", () => {
     m.members = screenData(4, "owner");
     rerender(tree());
     fireEvent.click(screen.getByRole("button", { name: strings.common.reload }));
-    expect((screen.getByRole("dialog").querySelector("select") as HTMLSelectElement).value).toBe("owner");
+    expect(selectedText(settingsStrings.members.role)).toContain(strings.app.roles.owner);
     expect(screen.queryByText(strings.common.staleTitle)).toBeNull();
-    fireEvent.change(screen.getByRole("dialog").querySelector("select")!, { target: { value: "viewer" } });
+    pickOption(settingsStrings.members.role, /^Viewer/);
     fireEvent.click(screen.getByRole("button", { name: strings.common.save }));
     await waitFor(() => expect(m.changeRole).toHaveBeenCalledTimes(2));
     expect(m.changeRole).toHaveBeenLastCalledWith({ memberId: "m2", role: "viewer", expectedRevision: 4 });
   });
 
-  it("disable sends the row's revision", async () => {
+  it("disable (under More actions) sends the row's revision", async () => {
     m.members = screenData(7);
     m.setDisabled.mockResolvedValue(undefined);
     render(tree());
-    fireEvent.click(screen.getByRole("button", { name: `${settingsStrings.members.disable}: sam@x.test` }));
+    // Change role is the one button of the row; Disable is in the menu, which is a lazy chunk.
+    await openMore("sam@x.test");
+    fireEvent.click(within(screen.getByRole("menu")).getByRole("menuitem", { name: settingsStrings.members.disable }));
     const dialog = await screen.findByRole("dialog");
     fireEvent.change(dialog.querySelector("input")!, { target: { value: "sam@x.test" } });
     fireEvent.click(screen.getByRole("button", { name: settingsStrings.members.disable }));

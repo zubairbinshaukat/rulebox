@@ -582,10 +582,10 @@ describe("DeviceDetail: installs (fleet:installs, Apps tab) and history (audit:f
     const reader = ((await screen.findByRole("link", { name: "Reader" })).closest("tr")) as HTMLElement;
     expect(lastPaged("fleet:installs")?.args).toMatchObject({ deviceId: "d1", paginationOpts: { numItems: 10, cursor: null }, sort: { key: "updated", dir: "desc" } });
     expect(within(reader).getByText(installStateStrings.failed)).toBeTruthy();
-    expect(within(reader).getByRole("button", { name: installStrings.retry })).toBeTruthy();
+    expect(within(reader).getByRole("button", { name: strings.table.actionFor(installStrings.retry, "Reader") })).toBeTruthy();
     const docs = screen.getByRole("link", { name: "Docs" }).closest("tr") as HTMLElement;
     expect(within(docs).getByText(installStateStrings.installed)).toBeTruthy();
-    expect(within(docs).queryByRole("button", { name: installStrings.retry })).toBeNull();
+    expect(within(docs).queryByRole("button", { name: /^Retry/ })).toBeNull();
     // The history belongs to the Activity tab: nothing asks for it here.
     expect(cx.paged.some((p) => p.name === "audit:forTarget")).toBe(false);
   });
@@ -613,7 +613,7 @@ describe("DeviceDetail: installs (fleet:installs, Apps tab) and history (audit:f
     const retry = vi.fn(async () => undefined);
     cx.fns["apps:retry"] = retry;
     await ui(<DeviceDetail />, "admin", APPS);
-    fireEvent.click(await screen.findByRole("button", { name: installStrings.retry }));
+    fireEvent.click(await screen.findByRole("button", { name: strings.table.actionFor(installStrings.retry, "Reader") }));
     const dialog = screen.getByRole("dialog");
     expect(within(dialog).getByText(installStrings.retryConfirmBody("Reader"))).toBeTruthy();
     expect(retry).not.toHaveBeenCalled();
@@ -622,7 +622,7 @@ describe("DeviceDetail: installs (fleet:installs, Apps tab) and history (audit:f
     expect(screen.queryByRole("dialog")).toBeNull();
     expect(retry).not.toHaveBeenCalled();
 
-    fireEvent.click(screen.getByRole("button", { name: installStrings.retry }));
+    fireEvent.click(screen.getByRole("button", { name: strings.table.actionFor(installStrings.retry, "Reader") }));
     fireEvent.click(within(screen.getByRole("dialog")).getByRole("button", { name: installStrings.retryConfirmAction }));
     await waitFor(() => expect(retry).toHaveBeenCalledWith({ appId: "a1" }));
     await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
@@ -632,7 +632,7 @@ describe("DeviceDetail: installs (fleet:installs, Apps tab) and history (audit:f
   it("Retry is disabled, with the reason, for an app the server says cannot be retried", async () => {
     withFailedInstall({ retryable: false });
     await ui(<DeviceDetail />, "admin", APPS);
-    const button = (await screen.findByRole("button", { name: installStrings.retry })) as HTMLButtonElement;
+    const button = (await screen.findByRole("button", { name: strings.table.actionFor(installStrings.retry, "Reader") })) as HTMLButtonElement;
     expect(button.disabled).toBe(true);
     expect(button.getAttribute("title")).toBe(installStrings.retryUnavailable);
   });

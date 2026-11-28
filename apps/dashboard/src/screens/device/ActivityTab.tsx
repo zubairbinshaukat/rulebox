@@ -58,12 +58,13 @@ function Versions({ deviceId, applied }: { deviceId: string; applied: number | u
 function versionCols(applied: number | undefined): Column<DocVersion>[] {
   return [
     { key: "version", header: t.versionCol, primary: true, type: "mono", cell: (v) => <span className="dash-chip dash-mono">v{formatNumber(v.version)}</span> },
-    { key: "reason", header: t.versionReason, type: "text", cell: (v) => v.reason },
-    { key: "date", header: t.versionDate, type: "date", cell: (v) => formatDateTime(v.createdAt) },
+    { key: "reason", header: t.versionReason, type: "text", card: "detail", cardLabel: false, cell: (v) => v.reason },
+    { key: "date", header: t.versionDate, type: "date", card: "fact", cell: (v) => formatDateTime(v.createdAt) },
     {
       key: "applied",
       header: t.versionApplied,
       type: "badge",
+      card: "status",
       isEmpty: (v) => applied !== v.version,
       cell: (v) => (applied === v.version ? <Pill tone="success">{t.versionAppliedNow}</Pill> : null),
     },
