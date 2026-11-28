@@ -584,12 +584,29 @@ describe("install status, overview, audit and history (Step 17)", () => {
       keys: [],
       signing: "missing",
       env: { active: null, next: null },
+      orgKeys: { signing: null, sealing: null, locked: false },
       publishFailedAt: 5,
       rosterPending: true,
     };
     const { result } = renderHook(() => live.useKeysScreen());
     expect(cx.requests.flatMap((r) => Object.values(r)).some((r) => getFunctionName((r as { query: FunctionReference<"query"> }).query) === "keys:status")).toBe(true);
-    expect(result.current).toMatchObject({ status: "ready", data: { publishFailedAt: 5, rosterPending: true, envKeyPresent: false } });
+    expect(result.current).toMatchObject({
+      status: "ready",
+      data: { publishFailedAt: 5, rosterPending: true, envKeyPresent: false, managed: "deployment", keyringLocked: false },
+    });
+  });
+
+  it("an organization with its own key is keyring-managed, and a locked keyring is reported", () => {
+    cx.queryResult = {
+      keys: [],
+      signing: "ok",
+      env: { active: null, next: null },
+      orgKeys: { signing: { keyId: "k", fingerprint: "f", origin: "generated" }, sealing: null, locked: true },
+      publishFailedAt: null,
+      rosterPending: false,
+    };
+    const { result } = renderHook(() => live.useKeysScreen());
+    expect(result.current).toMatchObject({ status: "ready", data: { managed: "keyring", keyringLocked: true } });
   });
 
   it("Publish again is keys:registerActive without force", async () => {

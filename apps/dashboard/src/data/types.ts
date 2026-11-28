@@ -255,6 +255,14 @@ export interface KeysScreen {
    * deployment holds another key.
    */
   signing: "ok" | "missing" | "mismatch";
+  /**
+   * Who holds the signing key: `keyring` = the organization's own key (created and kept by Rulebox on the server,
+   * `orgKeys.signing`), `deployment` = the key in the deployment's environment (`RULEBOX_POLICY_KEY`). The setup commands and
+   * the rotation exist only for `deployment` (the server refuses them for a keyring organization).
+   */
+  managed: "keyring" | "deployment";
+  /** The organization's own keys exist but this server cannot open them (`orgKeys.locked`): nothing new can be signed. */
+  keyringLocked: boolean;
   /** When a publish last failed for want of a key (null when it works). */
   publishFailedAt: number | null;
   /**

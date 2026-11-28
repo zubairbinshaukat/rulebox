@@ -1,6 +1,6 @@
 /**
- * Settings → Organization and Admin exit (plan Step 5): the sentences of the
- * two tabs and of the plan panel. A lazily loaded part of `lib/strings.ts`
+ * Settings → General, Admin exit, Rulebox updates (plan Step 5, UI pass): the sentences of the
+ * sections and of the plan panel. A lazily loaded part of `lib/strings.ts`
  * (same rules), so the sign-in page does not download them.
  *
  * "Exit PIN" is the PCs' admin-exit PIN. It is never the member's action PIN
@@ -8,6 +8,8 @@
  */
 import type { ExitPinProblem, HotkeyResult } from "../../lib/validate";
 import type { LimitKind, PlanName, PlanStatus } from "../../data/types";
+import type { GithubReleaseProblem } from "../../data/release/api";
+import type { PickWarning } from "./updates/pickRules";
 import { formatDate, formatNumber, plural } from "../../lib/format";
 import { strings } from "../../lib/strings";
 
@@ -26,16 +28,25 @@ const NOUNS: Record<LimitKind, [string, string]> = {
 /** "No limit" is `UNLIMITED` (1e9) on the server; anything at or above it reads as no limit. */
 export const UNLIMITED = 1_000_000_000;
 
+/** The presets of the two pickers: the stored value is added as one more option when it is not one of them. */
+export const OFFLINE_PRESETS = [0, 1, 3, 7, 14, 30] as const;
+export const QUOTA_PRESETS = [0, 1, 2, 5, 10, 20, 50, 100] as const;
+
 export const org = {
+  orgCard: "Your organization",
   name: "Organization name",
-  nameHint: "Shown on the PCs' sign-in screen.",
+  nameInfo: "Shown on the sign-in screen of every PC.",
+  pcsCard: "Employees on the PCs",
   offlineDays: "Offline sign-in",
-  offlineDaysHint: "How many days employees can sign in while a PC has no internet. 0 turns offline sign-in off.",
-  days: "days",
-  defaultQuota: "Default storage quota (GB)",
-  defaultQuotaHint: "Per employee. 0 = unlimited.",
-  power: "Power options for employees",
-  powerHint: "Which power buttons employees see on the PCs.",
+  offlineInfo: "How long employees can still sign in on a PC without internet. Off: they need the internet to sign in.",
+  /** `0` is "Off", 1 is "1 day", anything else "N days". */
+  days: (n: number) => (n === 0 ? "Off" : n === 1 ? "1 day" : `${formatNumber(n)} days`),
+  defaultQuota: "Storage per employee",
+  quotaInfo: "Space for each employee's files. You can change it for one employee on their page.",
+  /** `0` is unlimited on the server. */
+  gb: (n: number) => (n === 0 ? "Unlimited" : `${formatNumber(n)} GB`),
+  power: "Power buttons",
+  powerInfo: "The power buttons employees see on the PCs.",
   sleep: "Sleep",
   restart: "Restart",
   shutDown: "Shut down",
@@ -44,22 +55,32 @@ export const org = {
 };
 
 export const exit = {
-  lead: "A hidden way for an administrator to leave the kiosk on a PC: a key combination, then the exit PIN.",
-  enabled: "Allow admin exit",
-  enabledHint: "Changing the admin exit asks you to confirm with your action PIN or a passkey.",
+  card: "Open admin exit",
+  enabled: "Allow admin exit on PCs",
+  enabledInfo: "An administrator can leave the kiosk on a PC: press the key combination, then type the exit PIN. Employees don't see it.",
   hotkey: "Key combination",
+  hotkeyInfo: "Ctrl or Alt, optional Shift, plus one letter, digit or F1-F12.",
   hotkeyHint: "Ctrl or Alt (Shift optional) plus one letter, digit or F1–F12. For example Ctrl+Shift+F12.",
   hotkeyCanonical: (canonical: string) => `Saved as ${canonical}.`,
-  useDefault: "Use default",
+  hotkeyNow: (keys: string) => `Current key combination: ${keys}`,
+  change: "Change",
+  recording: "Press the keys now",
+  recordingHint: "Esc to cancel",
+  recordingLabel: "Press the key combination",
+  recordingStop: "Cancel",
+  useDefault: (keys: string) => `Use ${keys}`,
+  typeInstead: "Type it instead",
+  typeInsteadHint: "For a combination the browser keeps for itself, such as Alt+F4 or Ctrl+W.",
   pin: "Exit PIN",
   pinSetOn: (ms: number) => `PIN set on ${formatDate(ms)}. It is never shown again.`,
   pinSet: "A PIN is set. It is never shown again.",
+  pinIsSet: "PIN set",
   pinNotSet: "No PIN yet. Admin exit doesn't work until a PIN is set.",
   setPin: "Set PIN",
   changePin: "Change PIN",
   clearPin: "Clear PIN",
   pinTitle: "Set the exit PIN",
-  pinBody: "6 to 12 digits. Avoid repeated digits and simple runs. The PIN is never shown again. This is not your action PIN.",
+  pinInfo: "6 to 12 digits, no simple runs. It is not your own dashboard PIN.",
   newPin: "New exit PIN",
   repeatPin: "Repeat the exit PIN",
   pinSaved: "Exit PIN saved. PCs get it at their next update.",
@@ -67,8 +88,13 @@ export const exit = {
   clearBody: "Admin exit stops working on every PC until a new PIN is set.",
   cleared: "Exit PIN cleared.",
   saved: "Admin exit saved.",
+  howTitle: "How it works",
+  how: [
+    { title: "Press the keys on the PC", body: "Anywhere on the kiosk." },
+    { title: "Type the exit PIN", body: "Only an administrator knows it." },
+    { title: "The kiosk closes for you", body: "The PC goes back to Windows." },
+  ],
 };
-
 /** The grammar rule a key combination broke (the Rust `HotkeyError`), as a sentence. */
 export function hotkeyMessage(r: Extract<HotkeyResult, { ok: false }>): string {
   const why = ((): string => {
@@ -99,38 +125,88 @@ export function exitPinMessage(problem: ExitPinProblem | string | undefined): st
   return problem === "6 to 12 digits" || problem === undefined ? strings.validate.pin : strings.validate.pinWeak;
 }
 
-/** Settings → Updates (Phase 6 Step 20): the Rulebox build the PCs update to. */
+/** Settings → Rulebox updates (Phase 6 Step 20, UI pass): the Rulebox build the PCs update to, picked from the GitHub releases. */
 export const updates = {
-  title: "Rulebox update",
-  lead: "The Rulebox build your PCs update to. Each PC downloads it, checks its SHA-256 and installs it when nobody is signed in.",
-  currentTitle: "Current release",
-  noneTitle: "No release set",
-  noneBody: "PCs keep the Rulebox version they have. Set a release to update them.",
+  currentTitle: "Your PCs update to",
+  noneTitle: "No update chosen",
+  noneBody: "PCs keep the version they have.",
+  rulebox: (version: string) => `Rulebox ${version}`,
+  current: "Current",
+  technical: "Technical details",
   version: "Version",
   url: "Installer address",
   sha256: "SHA-256",
   size: "Size",
-  sizeBytes: (bytes: number, pretty: string) => `${pretty} (${formatNumber(bytes)} bytes)`,
-  formTitle: "Set the release",
-  formLead: "Use the numbers of the installer you published (the release page shows the version, the SHA-256 and the size).",
-  versionLabel: "Version",
-  versionHint: "For example 0.1.2. PCs only update to a higher version than they have, never down, and never retry a release that failed.",
-  urlLabel: "Installer address (https)",
-  urlHint: "A direct https:// link to the .msi, without a user name or password.",
-  shaLabel: "SHA-256",
-  shaHint: "64 hexadecimal digits. A PC refuses an installer that does not match.",
-  sizeLabel: "Size in bytes",
-  sizeHint: "Up to 1 GB (1,073,741,824 bytes).",
-  setRelease: "Set release",
-  saving: "Setting…",
+  sizeBytes: (bytes: number) => `${formatNumber(bytes)} bytes`,
   stop: "Stop updating",
   stopTitle: "Stop updating Rulebox?",
   stopBody: "PCs keep the version they have and no longer look for a newer one, until you set a release again.",
-  saved: "Release set. Every PC gets a newly signed policy.",
   cleared: "Release cleared. PCs no longer update Rulebox.",
   noChange: "Nothing changed.",
-  ownerOnly: "You can view this. Only an Owner can set the release.",
-  fresh: "Setting the release installs it on every PC as an administrator, so it asks you to confirm with your action PIN or a passkey.",
+  ownerOnly: "Only an Owner can choose the update.",
+  changedCurrent: "This release's installer was replaced on GitHub. Choose it again so your PCs get the new copy.",
+
+  releasesTitle: "Releases",
+  checked: "Checked",
+  refresh: "Refresh",
+  refreshing: "Checking…",
+  newest: "Newest",
+  testBuild: "Test build",
+  testBuildInfo: "A pre-release for trying out first.",
+  unsigned: "Not code-signed",
+  unsignedInfo: "Windows may warn when someone opens this installer by hand. Your PCs install it without asking.",
+  showNotes: "Show notes",
+  hideNotes: "Hide notes",
+  notesTruncated: "The notes are shortened. Read the rest on GitHub.",
+  viewOnGithub: "View on GitHub",
+  listLabel: "Rulebox releases",
+  loadError: "Couldn't load the releases from GitHub.",
+  busy: (time: string) => `GitHub is busy. Try again after ${time}.`,
+  busyLater: "GitHub is busy. Try again in a few minutes.",
+  busyInfo: "If this keeps happening, the person who runs your Rulebox server can add a GitHub token.",
+  busyInfoLabel: "About GitHub being busy",
+  stale: "Showing the list from",
+  emptyTitle: "No releases yet",
+  emptyBody: "New Rulebox versions appear here when they are published. To use your own build, open Advanced.",
+  allUnusable: "None of these can be used. Use Advanced for your own build.",
+  onNewest: "Your PCs are set to the newest release.",
+  choose: "Choose a release to update your PCs.",
+  selectedTitle: "Selected",
+  ownBuild: "Your own build",
+  mainAction: (version: string) => `Update PCs to ${version}`,
+  saving: "Saving…",
+  confirmTitle: (version: string) => `Update every PC to Rulebox ${version}?`,
+  confirmBody: "Each PC downloads it, checks it and installs it when nobody is signed in. PCs never go back to an older version.",
+  confirmButton: "Update PCs",
+  saved: (version: string) => `Saved. PCs install Rulebox ${version} when nobody is signed in.`,
+  unusable: {
+    no_msi: "Can't be used: the release has no installer.",
+    two_msis: "Can't be used: the release has two installers.",
+    version_mismatch: "Can't be used: its version doesn't match.",
+    no_checksums: "Can't be used: it has no checksum file.",
+    checksums_unreadable: "Can't be used: its checksum file can't be read.",
+    not_in_checksums: "Can't be used: the installer isn't in its checksum file.",
+    hash_mismatch: "Can't be used: the checksum doesn't match.",
+    too_large: "Can't be used: it is too large.",
+    invalid: "Can't be used: it isn't a valid release.",
+  } satisfies Record<GithubReleaseProblem, string>,
+  warnings: {
+    older: "This is older than the version you chose before. PCs that already have a newer one keep it.",
+    sameVersionOtherBuild: "PCs that already run this version keep their copy.",
+    changed: "This release's installer was replaced on GitHub. Choose it again so your PCs get the new copy.",
+    prerelease: "This is a test build. It goes to every PC.",
+  } satisfies Record<Exclude<PickWarning, "unsigned">, string>,
+
+  advanced: "Advanced: use your own build",
+  advancedLead: "Use this for an installer you built yourself. Picking a release above fills these in for you.",
+  versionLabel: "Version",
+  versionInfo: "For example 0.3.1. PCs only move to a higher version.",
+  urlLabel: "Installer address",
+  urlInfo: "A direct https:// link to the .msi file, without a user name or password.",
+  shaLabel: "SHA-256",
+  shaInfo: "The file's checksum, 64 characters. PCs refuse a file that doesn't match.",
+  sizeLabel: "Size in bytes",
+  sizeInfo: "The exact file size, up to 1 GB.",
   problems: {
     versionEmpty: "Enter the version.",
     versionLength: "A version has at most 40 characters.",
@@ -155,7 +231,11 @@ export const plan = {
   headline: (name: PlanName, parts: string[]) => `${plan.names[name]} plan${parts.length ? `: ${parts.join(", ")}` : ""}.`,
   of: (kind: LimitKind, used: number, limit: number) =>
     limit >= UNLIMITED ? count(used, ...NOUNS[kind]) : `${formatNumber(used)} of ${count(limit, ...NOUNS[kind])}`,
+  /** The value of a usage row: the label already names the thing (PCs), so only the numbers. */
+  rowValue: (used: number, limit: number) => (limit >= UNLIMITED ? formatNumber(used) : `${formatNumber(used)} of ${formatNumber(limit)}`),
   noLimit: "No limit",
+  info: "How much of your plan you use. Contact us to change the plan.",
+  infoLabel: "About usage",
   reached: "Limit reached",
   contact: "Contact us to upgrade.",
   suspended: "This organization is suspended. Nothing new can be added. Contact us.",

@@ -2661,6 +2661,9 @@ export const demoApi: DataApi = {
         envKeyPresent: db.env.key,
         envNextKeyPresent: db.env.next,
         signing: !db.env.key ? ("missing" as const) : hasActive ? ("ok" as const) : ("mismatch" as const),
+        // The demo organization keeps its own key (keyring): no environment warning, no setup commands, no rotation.
+        managed: "keyring" as const,
+        keyringLocked: false,
         publishFailedAt: db.publishFailedAt ?? null,
         rosterPending: db.rosterPending === true,
         keys: [...db.keys].sort((a, b) => a.createdAt - b.createdAt),

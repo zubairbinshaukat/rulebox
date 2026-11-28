@@ -115,6 +115,8 @@ function useLiveKeysScreen(): QueryState<KeysScreen> {
       envKeyPresent: data.env.active !== null,
       envNextKeyPresent: data.env.next !== null,
       signing: data.signing,
+      managed: data.orgKeys.signing !== null ? ("keyring" as const) : ("deployment" as const),
+      keyringLocked: data.orgKeys.locked,
       publishFailedAt: data.publishFailedAt,
       rosterPending: data.rosterPending,
       keys: data.keys.map((k) => ({ keyId: k.keyId, fingerprint: k.fingerprint, status: k.status, createdAt: k.createdAt })),

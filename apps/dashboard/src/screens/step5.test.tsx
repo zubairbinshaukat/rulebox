@@ -8,6 +8,7 @@ import type { Me, PlanScreen } from "../data/types";
 import { MeContext } from "../lib/member";
 import { setStepUpHandler } from "../lib/stepUpRetry";
 import { strings } from "../lib/strings";
+import { optionLabels, pickOption, selectedText } from "../test/select";
 import { auditStrings } from "../lib/screenStrings/audit";
 import { groupStrings } from "../lib/screenStrings/group";
 import { groupsStrings } from "../lib/screenStrings/groups";
@@ -185,7 +186,8 @@ describe("Groups list (groups:page, one server-driven page at a time)", () => {
     expect(within(table).getByText("2")).toBeTruthy();
     expect(lastArgs()).toEqual(DEFAULT_ARGS);
     // The bounded list carries its exact total: no separate count query.
-    expect(screen.getByText(`${strings.pager.records(2)} · ${strings.pager.pageOf(1, 1)}`)).toBeTruthy();
+    // One page at the default size: only how many records there are.
+    expect(screen.getByText(strings.pager.recordsShort(2))).toBeTruthy();
     expect(cx.queried.some((q) => q.name === "groups:count")).toBe(false);
   });
 
@@ -288,7 +290,8 @@ describe("Groups list (groups:page, one server-driven page at a time)", () => {
     await waitFor(() => expect(lastArgs()).toEqual({ paginationOpts: { numItems: 5, cursor: null }, sort: { key: "name", dir: "desc" } }));
     const names = within(screen.getByRole("table")).getAllByRole("link").map((l) => l.textContent);
     expect(names).toEqual(["Group 21", "Group 22", "Group 23", "Group 24", "Group 25"]);
-    fireEvent.change(screen.getByLabelText(strings.pager.rowsPerPage), { target: { value: "25" } });
+    await screen.findByLabelText(strings.pager.rowsPerPage); // the dropdown is a lazy chunk
+    pickOption(strings.pager.rowsPerPage, "25");
     await waitFor(() => expect(lastArgs().paginationOpts).toEqual({ numItems: 25, cursor: null }));
   });
 
@@ -318,13 +321,13 @@ describe("Groups list (groups:page, one server-driven page at a time)", () => {
     expect(await screen.findByText("group page")).toBeTruthy();
   });
 
-  it("the cards view draws the groups as cards", () => {
+  it("the cards view draws the groups as cards", async () => {
     cx.results["groups:page"] = groupsPage(many(2));
     ui(<Groups />, "admin", "/groups");
     fireEvent.click(screen.getByRole("radio", { name: strings.table.viewCards }));
     expect(document.documentElement.getAttribute("data-view")).toBe("cards");
-    expect(screen.getByRole("link", { name: "Group 01" })).toBeTruthy();
-    expect(screen.getByLabelText(strings.table.sortSelect)).toBeTruthy();
+    expect(await screen.findByRole("link", { name: "Group 01" })).toBeTruthy();
+    expect(await screen.findByLabelText(strings.table.sortSelect)).toBeTruthy();
   });
 });
 describe("Group detail (groups:get)", () => {
@@ -501,7 +504,7 @@ describe("Settings → Admin exit (settings:get / update / setExitPin / clearExi
     const update = vi.fn();
     cx.fns["settings:update"] = update;
     ui(<AdminExitTab />);
-    const input = screen.getByLabelText(new RegExp(exitText.hotkey)) as HTMLInputElement;
+    const input = screen.getByLabelText(exitText.hotkey) as HTMLInputElement;
     fireEvent.change(input, { target: { value: "Shift+F12" } });
     const error = screen.getByText(/add Ctrl or Alt/);
     expect(input.getAttribute("aria-describedby")).toContain(error.closest("p")!.id);
@@ -522,7 +525,7 @@ describe("Settings → Admin exit (settings:get / update / setExitPin / clearExi
       .mockResolvedValueOnce({ revision: 8, changed: ["adminExit"] });
     cx.fns["settings:update"] = update;
     ui(<AdminExitTab />);
-    const input = screen.getByLabelText(new RegExp(exitText.hotkey)) as HTMLInputElement;
+    const input = screen.getByLabelText(exitText.hotkey) as HTMLInputElement;
     fireEvent.change(input, { target: { value: "alt + f4" } });
     expect(screen.getByText(exitText.hotkeyCanonical("Alt+F4"))).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: strings.common.saveChanges }));
@@ -561,7 +564,7 @@ describe("Settings → Admin exit (settings:get / update / setExitPin / clearExi
     expect(screen.getByText(exitText.pinSetOn(setAt))).toBeTruthy();
     expect(screen.queryByRole("button", { name: exitText.changePin })).toBeNull();
     expect(screen.queryByRole("button", { name: strings.common.saveChanges })).toBeNull();
-    expect((screen.getByLabelText(new RegExp(exitText.hotkey)) as HTMLInputElement).disabled).toBe(true);
+    expect((screen.getByLabelText(exitText.hotkey) as HTMLInputElement).disabled).toBe(true);
   });
 
   it("a weak PIN is refused before sending; the server's refusal (detail) shows under the field", async () => {
@@ -573,8 +576,8 @@ describe("Settings → Admin exit (settings:get / update / setExitPin / clearExi
     ui(<AdminExitTab />);
     fireEvent.click(screen.getByRole("button", { name: exitText.setPin }));
     const dialog = screen.getByRole("dialog");
-    const pin = within(dialog).getByLabelText(new RegExp(exitText.newPin)) as HTMLInputElement;
-    const repeat = within(dialog).getByLabelText(new RegExp(exitText.repeatPin)) as HTMLInputElement;
+    const pin = within(dialog).getByLabelText(exitText.newPin) as HTMLInputElement;
+    const repeat = within(dialog).getByLabelText(exitText.repeatPin) as HTMLInputElement;
     expect(pin.getAttribute("inputmode")).toBe("numeric");
     expect(pin.getAttribute("autocomplete")).toBe("off");
     fireEvent.change(pin, { target: { value: "111111" } });
@@ -604,8 +607,8 @@ describe("Settings → Admin exit (settings:get / update / setExitPin / clearExi
     ui(<AdminExitTab />);
     fireEvent.click(screen.getByRole("button", { name: exitText.setPin }));
     const dialog = screen.getByRole("dialog");
-    fireEvent.change(within(dialog).getByLabelText(new RegExp(exitText.newPin)), { target: { value: "246813" } });
-    fireEvent.change(within(dialog).getByLabelText(new RegExp(exitText.repeatPin)), { target: { value: "246813" } });
+    fireEvent.change(within(dialog).getByLabelText(exitText.newPin), { target: { value: "246813" } });
+    fireEvent.change(within(dialog).getByLabelText(exitText.repeatPin), { target: { value: "246813" } });
     fireEvent.click(within(dialog).getByRole("button", { name: exitText.setPin }));
     expect(await screen.findByText(exitText.pinSaved)).toBeTruthy();
     expect(handler).toHaveBeenCalledOnce();
@@ -623,8 +626,8 @@ describe("Settings → Admin exit (settings:get / update / setExitPin / clearExi
     ui(<AdminExitTab />);
     fireEvent.click(screen.getByRole("button", { name: exitText.setPin }));
     const dialog = screen.getByRole("dialog");
-    fireEvent.change(within(dialog).getByLabelText(new RegExp(exitText.newPin)), { target: { value: "246813" } });
-    fireEvent.change(within(dialog).getByLabelText(new RegExp(exitText.repeatPin)), { target: { value: "246813" } });
+    fireEvent.change(within(dialog).getByLabelText(exitText.newPin), { target: { value: "246813" } });
+    fireEvent.change(within(dialog).getByLabelText(exitText.repeatPin), { target: { value: "246813" } });
     fireEvent.click(within(dialog).getByRole("button", { name: exitText.setPin }));
     expect(await within(dialog).findByText(strings.errors.stepUpRequired)).toBeTruthy();
   });
@@ -662,10 +665,110 @@ describe("Settings → Organization: plan and usage (settings:plan)", () => {
       throw new ConvexError({ code: "invalid_argument", field: "offlineDays" });
     });
     ui(<OrganizationTab />);
-    const days = screen.getByLabelText(/Offline sign-in/) as HTMLInputElement;
-    fireEvent.change(days, { target: { value: "5" } });
+    pickOption("Offline sign-in", "7 days");
     fireEvent.click(screen.getByRole("button", { name: strings.common.saveChanges }));
     const error = await screen.findByText(strings.errors.invalidArgument);
-    expect(days.getAttribute("aria-describedby")).toContain(error.closest("p")!.id);
+    expect(screen.getByLabelText("Offline sign-in").getAttribute("aria-describedby")).toContain(error.closest("p")!.id);
+  });
+});
+
+describe("Settings → General: the two pickers (settings:get / update)", () => {
+  it("offline sign-in and storage are pickers of presets, not number fields; nothing is typed", () => {
+    cx.results["settings:get"] = settingsData();
+    cx.results["settings:plan"] = freePlan;
+    ui(<OrganizationTab />);
+    expect(optionLabels("Offline sign-in")).toEqual(["Off", "1 day", "3 days", "7 days", "14 days", "30 days"]);
+    expect(optionLabels("Storage per employee")).toEqual(["Unlimited", "1 GB", "2 GB", "5 GB", "10 GB", "20 GB", "50 GB", "100 GB"]);
+    expect(selectedText("Offline sign-in")).toContain("3 days");
+    expect(selectedText("Storage per employee")).toContain("10 GB");
+    expect(screen.queryByRole("spinbutton")).toBeNull();
+    // The hints moved into (i) tips: the long sentences are not on the page.
+    expect(screen.queryByText(/0 = unlimited/)).toBeNull();
+    expect(screen.getByRole("button", { name: "About Offline sign-in" })).toBeTruthy();
+  });
+
+  it("a picked preset is sent as a number; Unlimited is 0 and Off is 0", async () => {
+    cx.results["settings:get"] = settingsData(3);
+    cx.results["settings:plan"] = freePlan;
+    const update = vi.fn().mockResolvedValue({ revision: 4, changed: ["offlineDays"] });
+    cx.fns["settings:update"] = update;
+    ui(<OrganizationTab />);
+    pickOption("Offline sign-in", "Off");
+    pickOption("Storage per employee", "Unlimited");
+    fireEvent.click(screen.getByRole("button", { name: strings.common.saveChanges }));
+    await waitFor(() => expect(update).toHaveBeenCalledOnce());
+    expect(update.mock.calls[0]![0]).toMatchObject({ expectedRevision: 3, settings: { offlineDays: 0, defaultQuotaGb: 0 } });
+  });
+
+  it("a stored value outside the presets is one more option and is saved unchanged unless another is picked", async () => {
+    const data = settingsData(2);
+    data.settings.offlineDays = 15;
+    data.settings.defaultQuotaGb = 7;
+    cx.results["settings:get"] = data;
+    cx.results["settings:plan"] = freePlan;
+    const update = vi.fn().mockResolvedValue({ revision: 3, changed: [] });
+    cx.fns["settings:update"] = update;
+    ui(<OrganizationTab />);
+    expect(optionLabels("Offline sign-in")).toEqual(["Off", "1 day", "3 days", "7 days", "14 days", "15 days", "30 days"]);
+    expect(optionLabels("Storage per employee")).toContain("7 GB");
+    expect(selectedText("Offline sign-in")).toContain("15 days");
+    fireEvent.click(screen.getByRole("button", { name: strings.common.saveChanges }));
+    await waitFor(() => expect(update).toHaveBeenCalledOnce());
+    expect(update.mock.calls[0]![0]).toMatchObject({ settings: { offlineDays: 15, defaultQuotaGb: 7 } });
+  });
+
+  it("'Contact us to upgrade.' shows only when a limit is reached", () => {
+    cx.results["settings:get"] = settingsData();
+    cx.results["settings:plan"] = { ...freePlan, usage: { ...freePlan.usage, groups: 1 } };
+    ui(<OrganizationTab />);
+    expect(screen.queryByText(/Contact us to upgrade\./)).toBeNull();
+    expect(screen.queryByText("Limit reached")).toBeNull();
+  });
+});
+
+describe("Settings → Admin exit: the key recorder (settings:update)", () => {
+  const press = (init: KeyboardEventInit) => fireEvent.keyDown(screen.getByRole("group", { name: exitText.recordingLabel }), init);
+
+  it("Change listens for the keys, shows them as key caps and sends the canonical text on save", async () => {
+    cx.results["settings:get"] = settingsData(5);
+    const update = vi.fn().mockResolvedValue({ revision: 6, changed: ["adminExit"] });
+    cx.fns["settings:update"] = update;
+    ui(<AdminExitTab />);
+    fireEvent.click(screen.getByRole("button", { name: exitText.change }));
+    press({ key: "k", code: "KeyK", ctrlKey: true, altKey: true });
+    expect(screen.queryByRole("group", { name: exitText.recordingLabel })).toBeNull();
+    expect(screen.getByRole("img", { name: exitText.hotkeyNow("Ctrl + Alt + K") })).toBeTruthy();
+    expect((screen.getByLabelText(exitText.hotkey) as HTMLInputElement).value).toBe("Ctrl+Alt+K");
+    fireEvent.click(screen.getByRole("button", { name: strings.common.saveChanges }));
+    await waitFor(() => expect(update).toHaveBeenCalledOnce());
+    expect(update.mock.calls[0]![0]).toMatchObject({ settings: { adminExit: { hotkey: "Ctrl+Alt+K" } } });
+  });
+
+  it("'Use Ctrl+Shift+F12' appears only when the combination is not the default, and brings it back", () => {
+    cx.results["settings:get"] = settingsData(5);
+    ui(<AdminExitTab />);
+    expect(screen.queryByRole("button", { name: exitText.useDefault("Ctrl+Shift+F12") })).toBeNull();
+    fireEvent.change(screen.getByLabelText(exitText.hotkey), { target: { value: "Alt+F4" } });
+    fireEvent.click(screen.getByRole("button", { name: exitText.useDefault("Ctrl+Shift+F12") }));
+    expect((screen.getByLabelText(exitText.hotkey) as HTMLInputElement).value).toBe("Ctrl+Shift+F12");
+  });
+
+  it("a combination the grammar refuses is explained in the open disclosure and never sent", async () => {
+    cx.results["settings:get"] = settingsData(5);
+    const update = vi.fn();
+    cx.fns["settings:update"] = update;
+    ui(<AdminExitTab />);
+    fireEvent.change(screen.getByLabelText(exitText.hotkey), { target: { value: "Shift+F12" } });
+    const error = screen.getByText(/add Ctrl or Alt/);
+    expect(error.closest("details")?.hasAttribute("open")).toBe(true);
+    fireEvent.click(screen.getByRole("button", { name: strings.common.saveChanges }));
+    await act(async () => undefined);
+    expect(update).not.toHaveBeenCalled();
+  });
+
+  it("the how-it-works strip names the three steps and shows the saved keys", () => {
+    cx.results["settings:get"] = settingsData(5);
+    ui(<AdminExitTab />);
+    for (const step of exitText.how) expect(screen.getByText(step.title)).toBeTruthy();
   });
 });

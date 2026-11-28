@@ -4,26 +4,63 @@ import { n } from "../strings";
 
 export const settingsStrings = {
   title: "Settings",
-  lead: "Organization-wide choices for every PC.",
-  tabs: {
-    organization: "Organization",
-    adminExit: "Admin exit",
-    signing: "Signing",
-    updates: "Updates",
-    members: "Members",
-    about: "About",
+  lead: "Choices for your whole organization.",
+  /** The section navigation (links that set `?tab=`); the ids are the URL ids and never change. */
+  nav: {
+    label: "Settings sections",
+    groups: { organization: "Organization", account: "Your account", pcs: "PCs", system: "System" },
+    items: {
+      organization: "General",
+      members: "Members",
+      security: "Your security",
+      adminExit: "Admin exit",
+      updates: "Rulebox updates",
+      signing: "Signing",
+      about: "About",
+    },
+    ownerOnly: "Owner only",
+    pinMissing: "No action PIN yet",
   },
-  // The Organization and Admin exit tabs' sentences: screens/settings/strings.ts.
+  /** The one line under a section's name (the name itself is `nav.items`). */
+  leads: {
+    organization: "Your organization's name, what employees get on the PCs and your plan.",
+    members: "People who can sign in to this dashboard.",
+    security: "Your action PIN, passkeys, recovery codes and password.",
+    adminExit: "Let an administrator leave the kiosk on a PC.",
+    updates: "Choose the Rulebox version your PCs install. They update when nobody is signed in.",
+    signing: "Your PCs only accept changes that are signed.",
+    about: "Rulebox is open-source software under the MIT license.",
+  },
+  /** Kept for the Members section (UI pass step 11 replaces it): the old tab name. */
+  tabs: { members: "Members" },
+  /** The pill in the header of a section whose changes ask for a fresh PIN or passkey. */
+  asksPin: "Asks for your PIN",
+  asksPinInfo: "Saving this asks for your PIN or a passkey, because it changes every PC.",
+  asksPinInfoLabel: "About asking for your PIN",
+  sectionLoading: "Loading this section",
+  // The General, Admin exit and Updates sections' sentences: screens/settings/strings.ts.
   signing: {
-    lead: "Every change sent to a PC is signed. PCs only accept changes signed by a key they trust.",
+    title: "Signing",
+    statusKeyring: "Changes to your PCs are signed automatically.",
+    statusDeployment: "Changes are signed with your server's key.",
+    statusOn: "Active",
+    statusOff: "Needs attention",
+    statusOffLine: "Nothing new can be signed right now.",
+    since: (when: string) => `Active since ${when}.`,
+    lockedTitle: "Rulebox can't open this organization's keys on this server",
+    lockedBody: "Nothing new reaches the PCs. Ask the person who runs your Rulebox server.",
     noKeyTitle: "No signing key registered",
     noKeyBody: "Create a key with the CLI, set it as RULEBOX_POLICY_KEY on the Convex deployment, then register it here.",
+    noKeyKeyring: "Nothing new can be signed until a key is registered.",
     envMissing: "RULEBOX_POLICY_KEY is not set on the deployment.",
     envNextMissing: "RULEBOX_POLICY_KEY_NEXT is not set on the deployment.",
     mismatchTitle: "The deployment's key is not this organization's key",
     mismatchBody:
-      "Nothing new can be sent to the PCs. Set RULEBOX_POLICY_KEY back to the registered key, or, if that key is lost, follow the steps under “If the key is lost”.",
+      "Nothing new can be sent to the PCs. Set RULEBOX_POLICY_KEY back to the registered key, or, if that key is lost, follow the steps under “If something goes wrong”.",
     publishFailed: (when: string) => `Publishing has failed since ${when}. PCs keep their last policy.`,
+    advancedTitle: "Advanced",
+    keyDetails: "Key details",
+    setupTitle: "Set up the key",
     cliTitle: "Create the key (once, on your own computer)",
     cliSteps: [
       { label: "1. Create a key (prints its key id, never the secret)", command: "node scripts/policy-key.mjs generate --out .tmp/policy-key.seed" },
@@ -50,15 +87,15 @@ export const settingsStrings = {
     finished: "Rotation finished. The old key is retired.",
     trust: (trusting: number, total: number) =>
       `${formatNumber(trusting)} of ${n(total, "device trusts", "devices trust")} the new key.`,
-    lostTitle: "If the key is lost",
+    wrongTitle: "If something goes wrong",
+    lostLabel: "The key is lost",
     lostBody:
       "PCs keep working with their last policy, but nothing new can be sent. Create a new key, register it, then re-enroll each PC (or run rulebox-agent trust-key on it as administrator).",
-    stolenTitle: "If the key is stolen",
+    stolenLabel: "The key is stolen",
     stolenBody: "Rotate immediately. If the thief could reach your PCs, re-enroll them too.",
     finishConfirmTitle: "Finish the rotation?",
     finishConfirmBody: "PCs that don't trust the new key yet will stop receiving changes until re-enrolled.",
-  },
-  members: {
+  },  members: {
     lead: "People who can sign in to this dashboard.",
     invite: "Invite member",
     inviteTitle: "Invite a member",
@@ -104,7 +141,9 @@ export const settingsStrings = {
   },
   about: {
     lead: "Rulebox is open-source software under the MIT license.",
-    dashboardVersion: "Dashboard version",
+    version: "Dashboard version",
+    source: "Source code",
+    technical: "Technical details",
     apiVersion: "Dashboard API version",
     credits: "Credits",
     solar: "Icons: Solar by 480 Design (CC BY 4.0)",
@@ -112,5 +151,7 @@ export const settingsStrings = {
     fonts: "Fonts: Figtree and Geist Mono (SIL Open Font License 1.1)",
     notices: "Full notices are in THIRD_PARTY_NOTICES.md in the source.",
     gallery: "Open the design gallery",
+    /** The public repository (also in the website's config). */
+    repoUrl: "https://github.com/zubairbinshaukat/rulebox",
   },
 } as const;

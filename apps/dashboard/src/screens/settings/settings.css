@@ -1,0 +1,824 @@
+/* Settings (UI pass 2026-11-28, docs/plans/ui-pass/settings.md section 4). Imported by the lazy screen, so it ships in the Settings chunk.
+   Tokens only. Settings lays itself out by ITS OWN width (container queries), not the window's:
+     .set-page    the whole Settings area       < 880 px: the section navigation is a strip   >= 880 px: a vertical rail
+     .set-section one open section              < 560 phone · 560-759 tablet · 760-1099 laptop · >= 1100 wide
+   Motion: the section switch is `dash-enter` (transform + opacity, dashboard.css), which already honours reduced motion and Lite. */
+
+.set-page {
+  container: settings / inline-size;
+  min-width: 0;
+}
+.set-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 18px;
+  align-items: start;
+  min-width: 0;
+}
+.set-section {
+  container: setsec / inline-size;
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+  min-width: 0;
+}
+.set-sr {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+  border: 0;
+}
+
+/* ------------------------------------------------------------ section navigation */
+
+.set-nav {
+  min-width: 0;
+}
+.set-nav ul {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+/* Strip (narrow): one scrolling line, the groups only separated by a thin rule. */
+.set-nav__groups {
+  display: flex;
+  align-items: stretch;
+  gap: 0;
+  overflow-x: auto;
+  overscroll-behavior-x: contain;
+  scrollbar-width: none;
+  border-bottom: 1px solid var(--rb-line);
+}
+.set-nav__groups::-webkit-scrollbar {
+  display: none;
+}
+.set-nav__group {
+  display: flex;
+  flex: none;
+  position: relative;
+}
+.set-nav__group + .set-nav__group {
+  margin-inline-start: 8px;
+  padding-inline-start: 8px;
+}
+.set-nav__group + .set-nav__group::before {
+  content: "";
+  position: absolute;
+  inset-block: 12px;
+  inset-inline-start: 0;
+  width: 1px;
+  background: var(--rb-line);
+}
+.set-nav__label {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+.set-nav__items {
+  display: flex;
+}
+.set-nav__link {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 46px;
+  padding: 0 12px;
+  border-radius: 10px 10px 0 0;
+  font-size: 14px;
+  font-weight: 600;
+  white-space: nowrap;
+  text-decoration: none;
+  color: var(--rb-muted);
+}
+.set-nav__link:hover {
+  color: var(--rb-ink);
+  background: var(--rb-hover);
+}
+.set-nav__link[aria-current="page"] {
+  color: var(--rb-ink);
+}
+.set-nav__link[aria-current="page"]::after {
+  content: "";
+  position: absolute;
+  inset-inline: 10px;
+  bottom: -1px;
+  height: 3px;
+  border-radius: 3px 3px 0 0;
+  background: var(--rb-accent);
+}
+.set-nav__link:focus-visible {
+  outline-offset: -2px;
+}
+.set-nav__icon {
+  flex: none;
+  font-size: 18px;
+}
+.set-nav__mark {
+  display: inline-flex;
+  font-size: 14px;
+  color: var(--rb-faint);
+}
+.set-nav__dot {
+  flex: none;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--rb-warning);
+  box-shadow: 0 0 0 3px var(--rb-warning-soft);
+}
+
+/* Rail (wide enough): grouped, vertical, sticky. */
+@container settings (min-width: 880px) {
+  .set-layout {
+    grid-template-columns: 208px minmax(0, 1fr);
+    gap: 28px;
+  }
+  .set-nav {
+    position: sticky;
+    top: calc(var(--dash-topbar) + 16px);
+  }
+  .set-nav__groups {
+    flex-direction: column;
+    gap: 18px;
+    overflow: visible;
+    border-bottom: 0;
+  }
+  .set-nav__group {
+    flex-direction: column;
+    gap: 4px;
+  }
+  .set-nav__group + .set-nav__group {
+    margin: 0;
+    padding: 0;
+  }
+  .set-nav__group + .set-nav__group::before {
+    display: none;
+  }
+  .set-nav__label {
+    position: static;
+    width: auto;
+    height: auto;
+    margin: 0;
+    padding: 0 12px;
+    overflow: visible;
+    clip-path: none;
+    font-size: 11.5px;
+    font-weight: 650;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: var(--rb-faint);
+  }
+  .set-nav__items {
+    flex-direction: column;
+    gap: 2px;
+  }
+  .set-nav__link {
+    display: flex;
+    min-height: 42px;
+    border-radius: var(--rb-r-md);
+  }
+  .set-nav__link[aria-current="page"] {
+    background: var(--rb-accent-soft);
+    color: var(--rb-accent-text);
+  }
+  .set-nav__link[aria-current="page"]::after {
+    display: none;
+  }
+  .set-nav__text {
+    flex: 1 1 auto;
+  }
+}
+@container settings (min-width: 1280px) {
+  .set-layout {
+    grid-template-columns: 224px minmax(0, 1fr);
+    gap: 32px;
+  }
+}
+
+/* ------------------------------------------------------------ section head */
+
+.set-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 8px 16px;
+  min-width: 0;
+}
+.set-head__text {
+  min-width: 0;
+}
+.set-head__title {
+  margin: 0;
+  font-size: 20px;
+  font-weight: 700;
+  letter-spacing: -0.015em;
+}
+.set-head__lead {
+  margin: 4px 0 0;
+  max-width: 62ch;
+  font-size: 14px;
+  color: var(--rb-muted);
+}
+.set-pin {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  flex: none;
+}
+.set-pin .rb-pill {
+  gap: 6px;
+}
+.set-pin .rb-pill svg {
+  font-size: 14px;
+}
+
+/* ------------------------------------------------------------ shared bits */
+
+.set-fs {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+.set-fields {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 190px), 1fr));
+  gap: 18px 20px;
+  min-width: 0;
+}
+.set-fs:disabled {
+  opacity: 0.85;
+}
+
+/* ------------------------------------------------------------ General */
+
+/* phone: name, PCs, plan, save · tablet: name, then PCs beside the plan · laptop: name over PCs beside the plan · wide: three columns.
+   The form is `display: contents`, so its cards and the plan card share one grid. */
+.set-general {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  grid-template-areas: "name" "pcs" "plan" "save";
+  gap: 18px;
+  align-items: start;
+  min-width: 0;
+}
+.set-general__form {
+  display: contents;
+}
+.set-general__name,
+.set-general__sk {
+  grid-area: name;
+}
+.set-general__pcs {
+  grid-area: pcs;
+}
+.set-general__plan {
+  grid-area: plan;
+}
+.set-save {
+  grid-area: save;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-width: 0;
+}
+.set-save__row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 14px;
+}
+@container setsec (max-width: 559px) {
+  /* The save bar sticks to the bottom of the screen while there are unsaved changes, and never covers the last field. */
+  .set-save[data-dirty] {
+    position: sticky;
+    bottom: 12px;
+    z-index: 5;
+    padding: 12px 14px;
+    border: 1px solid var(--rb-line);
+    border-radius: var(--rb-r-lg);
+    background: var(--rb-glass-strong);
+    box-shadow: var(--rb-shadow-md);
+    backdrop-filter: blur(12px);
+  }
+}
+/* The plan card spans the rows beside it; the last row is the flexible one, so its extra height never opens a gap above the save button. */
+@container setsec (min-width: 560px) {
+  .set-general {
+    grid-template-columns: minmax(0, 1.3fr) minmax(0, 1fr);
+    grid-template-rows: auto auto 1fr;
+    grid-template-areas: "name plan" "pcs plan" "save plan";
+  }
+}
+@container setsec (min-width: 760px) {
+  .set-general {
+    grid-template-columns: minmax(0, 2fr) minmax(0, 1fr);
+  }
+}
+@container setsec (min-width: 1100px) {
+  .set-general {
+    grid-template-columns: minmax(0, 0.9fr) minmax(0, 1.3fr) minmax(0, 1fr);
+    grid-template-rows: auto 1fr;
+    grid-template-areas: "name pcs plan" "save save plan";
+  }
+}
+
+/* Plan and usage: compact rows with a thin meter. */
+.set-plan {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  min-width: 0;
+}
+.set-plan__headline {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+  font-size: 13.5px;
+  color: var(--rb-muted);
+}
+.set-plan__headline strong {
+  font-weight: 600;
+}
+.set-usage {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  margin: 0;
+}
+.set-usage__row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-areas: "label value" "meter meter" "flag flag";
+  align-items: center;
+  gap: 6px 12px;
+}
+.set-usage__flag {
+  grid-area: flag;
+  justify-self: start;
+}
+.set-usage__row dt {
+  grid-area: label;
+  font-size: 13.5px;
+  font-weight: 550;
+  color: var(--rb-muted);
+}
+.set-usage__row dd {
+  grid-area: value;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+  font-size: 14px;
+  font-weight: 650;
+  font-variant-numeric: tabular-nums;
+}
+.set-usage__note {
+  font-size: 12.5px;
+  font-weight: 500;
+  color: var(--rb-muted);
+}
+.set-meter {
+  grid-area: meter;
+  height: 6px;
+  border-radius: 6px;
+  background: var(--rb-hover);
+  overflow: hidden;
+}
+.set-meter > span {
+  display: block;
+  height: 100%;
+  border-radius: 6px;
+  background: var(--rb-accent);
+}
+.set-usage__row[data-full] .set-meter > span {
+  background: var(--rb-warning);
+}
+
+/* ------------------------------------------------------------ Admin exit */
+
+/* phone: one column · tablet and laptop: the switch and keys beside the PIN, "how it works" as a strip underneath · wide: three columns. */
+.set-exit {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 18px;
+  align-items: start;
+  min-width: 0;
+}
+.set-exit__form {
+  display: contents;
+}
+.set-exit__form > .dash-card,
+.set-exit__pin,
+.set-exit__how {
+  min-width: 0;
+}
+@container setsec (min-width: 560px) {
+  .set-exit {
+    grid-template-columns: minmax(0, 1.3fr) minmax(0, 1fr);
+  }
+  .set-exit__how {
+    grid-column: 1 / -1;
+  }
+}
+@container setsec (min-width: 1100px) {
+  .set-exit {
+    grid-template-columns: minmax(0, 1.25fr) minmax(0, 1fr) minmax(0, 0.9fr);
+  }
+  .set-exit__how {
+    grid-column: auto;
+  }
+}
+.set-switch {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 44px;
+}
+.set-pinstate {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+  font-size: 14px;
+}
+.set-pinactions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+/* The key combination as key caps. */
+.set-keys {
+  display: inline-flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.set-keys__item {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.set-keys__plus {
+  font-size: 13px;
+  color: var(--rb-faint);
+}
+.set-keys__cap {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 36px;
+  height: 36px;
+  padding: 0 11px;
+  border: 1px solid var(--rb-line);
+  border-bottom-width: 3px;
+  border-radius: 10px;
+  background: var(--rb-paper);
+  font-family: var(--rb-font-mono);
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--rb-ink);
+}
+.set-rec {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px 14px;
+  min-width: 0;
+}
+.set-rec__pad {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  flex: 1 1 220px;
+  min-width: 0;
+  padding: 12px 16px;
+  border: 1.5px dashed var(--rb-accent);
+  border-radius: var(--rb-r-md);
+  background: var(--rb-accent-soft);
+  color: var(--rb-accent-text);
+  outline: none;
+}
+.set-rec__pad:focus-visible {
+  box-shadow: var(--dash-ring);
+}
+.set-rec__title {
+  font-size: 14px;
+  font-weight: 650;
+}
+.set-rec__hint {
+  font-size: 12.5px;
+  opacity: 0.85;
+}
+.set-rec__problem {
+  margin-top: 6px;
+  font-size: 13px;
+  font-weight: 550;
+  color: var(--rb-danger-text);
+}
+
+/* How it works: three steps. A row when the card is wide (tablet and laptop), a column when it is narrow. */
+.set-how {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 16px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  counter-reset: how;
+}
+@container setsec (min-width: 560px) and (max-width: 1099px) {
+  .set-how {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 22px;
+  }
+}
+.set-how__step {
+  position: relative;
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  min-width: 0;
+  counter-increment: how;
+}
+.set-how__icon {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  width: 40px;
+  height: 40px;
+  border-radius: 12px;
+  background: var(--rb-accent-soft);
+  color: var(--rb-accent-text);
+  font-size: 21px;
+}
+.set-how__text {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+}
+.set-how__title {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 650;
+}
+.set-how__title::before {
+  content: counter(how) ". ";
+  color: var(--rb-faint);
+}
+.set-how__body {
+  margin: 0;
+  font-size: 13px;
+  color: var(--rb-muted);
+}
+
+/* ------------------------------------------------------------ Signing */
+
+.set-sign {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 18px;
+  align-items: start;
+  min-width: 0;
+}
+@container setsec (min-width: 760px) {
+  .set-sign {
+    grid-template-columns: minmax(0, 1.15fr) minmax(0, 1fr);
+  }
+}
+.set-hero {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 14px;
+  min-width: 0;
+}
+.set-hero__icon {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  width: 52px;
+  height: 52px;
+  border-radius: 16px;
+  font-size: 28px;
+  background: var(--rb-success-soft);
+  color: var(--rb-success-text);
+}
+.set-hero[data-tone="off"] .set-hero__icon {
+  background: var(--rb-danger-soft);
+  color: var(--rb-danger-text);
+}
+.set-hero__text {
+  flex: 1 1 200px;
+  min-width: 0;
+}
+.set-hero__title {
+  margin: 0;
+  font-size: 16px;
+  font-weight: 650;
+  letter-spacing: -0.01em;
+}
+.set-hero__sub {
+  margin: 2px 0 0;
+  font-size: 13.5px;
+  color: var(--rb-muted);
+}
+.set-adv {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+.set-adv > .dash-advanced:first-child {
+  border-top: 0;
+}
+
+/* ------------------------------------------------------------ Your security */
+
+.set-sec {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  grid-template-areas: "strip" "pin" "passkeys" "recovery" "password";
+  gap: 18px;
+  align-items: start;
+  min-width: 0;
+}
+.set-strip {
+  grid-area: strip;
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px 14px;
+  padding: 12px 18px;
+  border: 1px solid var(--rb-line);
+  border-radius: var(--dash-radius-sm);
+  background: var(--rb-surface);
+  box-shadow: var(--dash-card-shadow);
+  min-width: 0;
+}
+.set-strip__icon {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  border-radius: 11px;
+  background: var(--rb-accent-soft);
+  color: var(--rb-accent-text);
+  font-size: 20px;
+}
+.set-strip__text {
+  flex: 1 1 220px;
+  min-width: 0;
+}
+.set-strip__title {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0;
+  font-size: 13px;
+  font-weight: 650;
+  color: var(--rb-muted);
+}
+.set-strip__line {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 550;
+}
+.set-sec__pin {
+  grid-area: pin;
+}
+.set-sec__passkeys {
+  grid-area: passkeys;
+}
+.set-sec__recovery {
+  grid-area: recovery;
+}
+.set-sec__password {
+  grid-area: password;
+}
+.set-sec__password .dash-card__head {
+  padding-bottom: 16px;
+}
+@container setsec (min-width: 600px) {
+  .set-sec {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    grid-template-areas: "strip strip" "pin recovery" "passkeys passkeys" "password password";
+  }
+}
+@container setsec (min-width: 1100px) {
+  .set-sec {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    grid-template-areas: "strip strip strip" "pin recovery password" "passkeys passkeys passkeys";
+  }
+}
+
+/* ------------------------------------------------------------ About */
+
+.set-about {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 18px;
+  align-items: start;
+  min-width: 0;
+}
+.set-about__tech {
+  min-width: 0;
+}
+@container setsec (min-width: 760px) {
+  .set-about {
+    grid-template-columns: minmax(0, 1.3fr) minmax(0, 1fr);
+    grid-template-areas: "id credits" "tech tech";
+  }
+  .set-about__id {
+    grid-area: id;
+  }
+  .set-about__credits {
+    grid-area: credits;
+  }
+  .set-about__tech {
+    grid-area: tech;
+  }
+}
+.set-about__hero {
+  display: flex;
+  align-items: flex-start;
+  gap: 18px;
+  min-width: 0;
+}
+.set-about__text {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+}
+.set-about__text p {
+  margin: 0;
+}
+.set-about__name {
+  font-size: 20px;
+  font-weight: 700;
+  letter-spacing: -0.015em;
+}
+.set-about__meta {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px 16px;
+  margin-top: 6px !important;
+}
+.set-about__meta .dash-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.set-credits {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 0;
+  padding-inline-start: 18px;
+  font-size: 14px;
+}
+.set-credits__note {
+  margin: 12px 0 0;
+  font-size: 13px;
+}
+
+.set-sec .su-actions {
+  align-items: center;
+}
+.set-how .set-keys {
+  flex-wrap: nowrap;
+  gap: 4px;
+}
+.set-how .set-keys__item {
+  gap: 4px;
+}
+.set-how .set-keys__cap {
+  min-width: 30px;
+  height: 30px;
+  padding: 0 8px;
+  font-size: 12px;
+}
