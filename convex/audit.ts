@@ -10,7 +10,8 @@ import { MAX_AUDIT_PAGE, MAX_AUDIT_TARGET_ID } from "./lib/limits";
 // written by `lib/audit.ts` only; these queries read them newest first through
 // the organization's own index ranges and return the shown fields only. The
 // only `sort` key is "at" (time), either direction (lib/listing.ts); no search
-// and no total (no exact counter).
+// and no total (no exact counter). UI pass 2026-11: both take an optional `since` (a time in ms; rows at or after it), a
+// `.gte("at", since)` on the same index (both indexes end in `at`), so the reads per page do not change and no index was added.
 
 function checkPage(numItems: number): void {
   checkPageSize(numItems, MAX_AUDIT_PAGE);
@@ -22,14 +23,15 @@ function checkPage(numItems: number): void {
  * per row. Re-runs only when a new row lands inside the loaded range.
  */
 export const list = memberQuery("viewer")({
-  args: { paginationOpts: paginationOptsValidator, sort: sortArg },
+  args: { paginationOpts: paginationOptsValidator, sort: sortArg, since: v.optional(v.number()) },
   returns: paginationResultValidator(auditEntryValue),
   handler: async (ctx, args) => {
     checkPage(args.paginationOpts.numItems);
     const sort = pickSort("audit", args.sort);
+    const since = args.since;
     const result = await ctx.db
       .query("auditLog")
-      .withIndex("by_org_at", (q) => q.eq("orgId", ctx.orgId))
+      .withIndex("by_org_at", (q) => (since === undefined ? q.eq("orgId", ctx.orgId) : q.eq("orgId", ctx.orgId).gte("at", since)))
       .order(sort.dir)
       .paginate(args.paginationOpts);
     return { ...result, page: result.page.map(auditEntryOf) };
@@ -43,15 +45,19 @@ export const list = memberQuery("viewer")({
  * rows can never match, whatever id is asked for.
  */
 export const forTarget = memberQuery("viewer")({
-  args: { targetId: v.string(), paginationOpts: paginationOptsValidator, sort: sortArg },
+  args: { targetId: v.string(), paginationOpts: paginationOptsValidator, sort: sortArg, since: v.optional(v.number()) },
   returns: paginationResultValidator(auditEntryValue),
   handler: async (ctx, args) => {
     checkPage(args.paginationOpts.numItems);
     const sort = pickSort("audit", args.sort);
     if (args.targetId.length < 1 || args.targetId.length > MAX_AUDIT_TARGET_ID) fail("invalid_argument", { field: "targetId" });
+    const since = args.since;
     const result = await ctx.db
       .query("auditLog")
-      .withIndex("by_org_target", (q) => q.eq("orgId", ctx.orgId).eq("targetId", args.targetId))
+      .withIndex("by_org_target", (q) => {
+        const base = q.eq("orgId", ctx.orgId).eq("targetId", args.targetId);
+        return since === undefined ? base : base.gte("at", since);
+      })
       .order(sort.dir)
       .paginate(args.paginationOpts);
     return { ...result, page: result.page.map(auditEntryOf) };
