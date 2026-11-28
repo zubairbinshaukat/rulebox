@@ -30,7 +30,6 @@ export { rovingKeyDown, type RovingOrientation } from "./roving";
 export { setTheme, setLite, type Theme } from "./theme";
 export { Select, type SelectProps, type SelectOption } from "./components/Select";
 export { SearchSelect, type SearchSelectProps } from "./components/SearchSelect";
-export { NativeSelect, type NativeSelectProps } from "./components/NativeSelect";
 export { InfoTip, type InfoTipProps } from "./components/InfoTip";
 export {
   placeFloating,
