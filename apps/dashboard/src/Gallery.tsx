@@ -38,10 +38,15 @@ import {
 import "@rulebox/ui/staff.css";
 import { useTheme } from "./app/theme";
 import { DataTable, type Column, type SortState } from "./components/DataTable";
+import { AttentionList, type AttentionItem } from "./components/AttentionList";
+import { ChipPicker } from "./components/ChipPicker";
+import { ChoiceCards } from "./components/ChoiceCards";
 import { EmptyState } from "./components/EmptyState";
-import { Field } from "./components/Field";
+import { Field, FieldSet } from "./components/Field";
+import { MoreMenu } from "./components/MoreMenu";
 import { Pager } from "./components/Pager";
 import { SearchInput } from "./components/SearchInput";
+import { StatTile, StatTiles } from "./components/StatTile";
 
 import Home2Linear from "~icons/solar/home-2-linear";
 import Home2Duo from "~icons/solar/home-2-bold-duotone";
@@ -121,6 +126,12 @@ import TrashLinear from "~icons/solar/trash-bin-2-linear";
 import CheckDuo from "~icons/solar/check-circle-bold-duotone";
 import DangerDuo from "~icons/solar/danger-triangle-bold-duotone";
 import LogoutLinear from "~icons/solar/logout-2-linear";
+import RenameLinear from "~icons/solar/pen-linear";
+import MonitorTile from "~icons/solar/monitor-linear";
+import UsersTile from "~icons/solar/users-group-rounded-linear";
+import AppsTile from "~icons/solar/box-linear";
+import ShieldTile from "~icons/solar/shield-check-linear";
+import DownloadTile from "~icons/solar/cloud-download-linear";
 
 type Icon = ComponentType<SVGProps<SVGSVGElement>>;
 type IconStyle = "linear" | "duotone" | "bold";
@@ -428,6 +439,131 @@ function DropdownDemo() {
   );
 }
 
+const GROUP_OPTIONS: SelectOption[] = [
+  { value: "front", label: "Front desk" },
+  { value: "kitchen", label: "Kitchen" },
+  { value: "office", label: "Back office" },
+  { value: "store", label: "Store room" },
+  { value: "counter", label: "Service counter" },
+  ...Array.from({ length: 12 }, (_, i) => ({ value: `team-${i + 1}`, label: `Team ${i + 1}` })),
+];
+
+/** The shared pieces of the group, Overview, rollout, employee and message pages (other-pages plan, section 0). */
+function OtherPagesDemo() {
+  const [style, setStyle] = useState<string | null>("banner");
+  const [audience, setAudience] = useState<string | null>("everyone");
+  const [groups, setGroups] = useState<string[]>(["front", "kitchen"]);
+  const [many, setMany] = useState<string[]>(GROUP_OPTIONS.slice(0, 15).map((o) => o.value));
+  const [last, setLast] = useState("Nothing chosen yet.");
+  const [showAttention, setShowAttention] = useState(true);
+  const attention: AttentionItem[] = [
+    { key: "info", tone: "info", title: "A change is reaching the first PCs", body: "It moves on by itself in 18 hours." },
+    { key: "warn", tone: "warning", title: "2 PCs are not in a group", body: "Nobody can sign in on them until they are in one.", action: { label: "Show", onClick: () => setLast("Show") } },
+    { key: "danger", tone: "danger", title: "Changes are not reaching your PCs", body: "Open Settings and press Publish again.", action: { label: "Open Settings", to: "/settings" } },
+    { key: "w2", tone: "warning", title: "PDF Reader is archived. PCs no longer get it." },
+    { key: "w3", tone: "warning", title: "Program blocking is still a trial run" },
+    { key: "i2", tone: "info", title: "Kiosk mode is off on 1 PC" },
+  ];
+  return (
+    <div id="gallery-other" style={{ display: "flex", flexDirection: "column", gap: 24 }}>
+      <Section title="ChoiceCards" description="A few large cards, one chosen. Arrow keys move and choose; stacks under 420 px.">
+        <div style={{ display: "flex", flexDirection: "column", gap: 20, maxWidth: 640 }}>
+          <ChoiceCards
+            name="style"
+            aria-label="Style"
+            value={style}
+            onChange={setStyle}
+            options={[
+              {
+                value: "banner",
+                label: "Banner",
+                hint: "A strip at the top. People can close it.",
+                art: <ChatDuo style={{ fontSize: 34 }} />,
+              },
+              {
+                value: "full",
+                label: "Full screen",
+                hint: "Covers the screen until someone presses OK.",
+                art: <MonitorDuo style={{ fontSize: 34 }} />,
+              },
+            ]}
+          />
+          <ChoiceCards
+            aria-label="Who sees it"
+            value={audience}
+            onChange={setAudience}
+            options={[
+              { value: "everyone", label: "Everyone in the group" },
+              { value: "chosen", label: "Only people I choose" },
+              { value: "none", label: "Nobody yet", hint: "Not available for this app.", disabled: true },
+            ]}
+          />
+        </div>
+      </Section>
+
+      <Section title="ChipPicker" description="Chips with a remove button and an Add box. Backspace takes the last chip off. After 12 chips, +N more.">
+        <div style={{ display: "flex", flexDirection: "column", gap: 20, maxWidth: 640 }}>
+          <FieldSet legend="Groups" hint="Can sign in on the PCs of these groups.">
+            <ChipPicker
+              label="Groups"
+              value={groups}
+              onChange={setGroups}
+              options={GROUP_OPTIONS}
+              emptyText="No groups chosen yet"
+              searchPlaceholder="Search groups"
+            />
+          </FieldSet>
+          <ChipPicker label="Many groups" value={many} onChange={setMany} options={GROUP_OPTIONS} emptyText="No groups chosen yet" max={16} />
+          <ChipPicker label="Read only" value={["front", "kitchen"]} onChange={() => {}} options={GROUP_OPTIONS} emptyText="None" disabled />
+        </div>
+      </Section>
+
+      <Section
+        title="MoreMenu"
+        description="The ... button of a page header: arrows, Esc returns focus. Danger items sit last after a divider."
+        action={
+          <MoreMenu
+            items={[
+              { label: "Delete group", icon: <TrashLinear />, danger: true, onSelect: () => setLast("Delete group") },
+              { label: "Rename", icon: <RenameLinear />, onSelect: () => setLast("Rename") },
+              { label: "Send a message", icon: <ChatLinear />, onSelect: () => setLast("Send a message") },
+              { label: "Staged rollout", icon: <RocketLinear />, to: "/gallery" },
+              { label: "Hidden for viewers", hidden: true, onSelect: () => {} },
+            ]}
+            label="More for Front desk"
+          />
+        }
+      >
+        <p style={{ margin: 0, fontSize: 13.5, color: "var(--rb-muted)" }}>Last choice: {last}</p>
+      </Section>
+
+      <Section
+        title="AttentionList"
+        description="Most urgent first, one action each, 5 shown then Show all. 1 column under 560 px, 2 from there."
+        action={
+          <Button variant="ghost" onClick={() => setShowAttention((v) => !v)}>
+            {showAttention ? "Clear them" : "Bring them back"}
+          </Button>
+        }
+      >
+        <AttentionList items={showAttention ? attention : []} label="Needs attention" emptyText="Everything is fine on your 523 PCs." />
+      </Section>
+
+      <Section title="StatTile" description="A compact number tile, 2 across on a phone. A link, a button or plain with an (i) tip.">
+        <StatTiles label="Numbers">
+          <StatTile label="PCs" value="523" sub="498 online" icon={<MonitorTile />} to="/devices" />
+          <StatTile label="People" value="1,204" icon={<UsersTile />} to="/employees" index={1} />
+          <StatTile label="Apps" value="37" sub="in 12 groups" icon={<AppsTile />} index={2} />
+          <StatTile label="Failed installs" value="4" sub="See the list" icon={<DownloadTile />} tone="warning" onClick={() => setLast("Failed installs")} index={3} />
+          <StatTile label="Protection" value="Trial run" icon={<ShieldTile />} info="Programs are noted but not blocked yet." index={4} />
+          <StatTile label="Everything" value="Fine" tone="ok" icon={<ShieldTile />} index={5} />
+          <StatTile label="Suspended" value="Yes" sub="Ask the owner" tone="danger" icon={<ShieldTile />} index={6} />
+        </StatTiles>
+      </Section>
+    </div>
+  );
+}
+
 /** `/gallery` (members only): the design system with its own theme and Lite switches. */
 export default function GalleryScreen() {
   const [theme, setTheme] = useTheme();
@@ -647,6 +783,8 @@ export function Gallery({ theme, onTheme, lite, onLite }: GalleryProps) {
           </div>
 
           <TableSection />
+
+          <OtherPagesDemo />
 
           {/* App tiles */}
           <Section title="App tiles" description="Staff App desktop. Dot = open, badge = notifications. size + hue props.">

@@ -1,0 +1,159 @@
+/* StatTile (components/StatTile.tsx): a compact number tile, about 72 px high. The same look as the device page's tiles
+   (`.ov-tile` in screens/device/device.css). Imported by the component (ships with the screens that use it). */
+.dash-tiles {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 170px), 1fr));
+  gap: 12px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+/* Two across on a phone, even when a row would fit three. */
+@media (max-width: 599px) {
+  .dash-tiles {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+.dash-tiles__item {
+  container: dash-tile / inline-size;
+  display: flex;
+  min-width: 0;
+}
+/* A narrow tile (two across on a phone) drops its icon and chevron: the words need the room. */
+@container dash-tile (max-width: 199px) {
+  .dash-tiles__item .dash-tile__icon,
+  .dash-tiles__item .dash-tile__go {
+    display: none;
+  }
+  .dash-tiles__item .dash-tile--link .dash-tile__label {
+    padding-inline-end: 0;
+  }
+  .dash-tiles__item .dash-tile {
+    padding-inline: 14px;
+  }
+}
+.dash-tile {
+  --tile-soft: var(--rb-accent-soft);
+  --tile-text: var(--rb-accent-text);
+  --tile-line: var(--rb-line);
+  position: relative;
+  flex: 1;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+  min-height: 72px;
+  padding: 12px 16px;
+  text-align: start;
+  text-decoration: none;
+  color: inherit;
+  font: inherit;
+  background: var(--rb-surface);
+  border: 1px solid var(--tile-line);
+  border-radius: 16px;
+  box-shadow: var(--dash-card-shadow);
+}
+.dash-tile[data-tone="ok"] {
+  --tile-soft: var(--rb-success-soft);
+  --tile-text: var(--rb-success-text);
+}
+.dash-tile[data-tone="warning"] {
+  --tile-soft: var(--rb-warning-soft);
+  --tile-text: var(--rb-warning-text);
+  --tile-line: color-mix(in oklch, var(--rb-warning) 45%, var(--rb-line));
+}
+.dash-tile[data-tone="danger"] {
+  --tile-soft: var(--rb-danger-soft);
+  --tile-text: var(--rb-danger-text);
+  --tile-line: color-mix(in oklch, var(--rb-danger) 45%, var(--rb-line));
+}
+.dash-tile__icon {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 36px;
+  height: 36px;
+  border-radius: 12px;
+  font-size: 20px;
+  background: var(--tile-soft);
+  color: var(--tile-text);
+}
+.dash-tile__text {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
+}
+.dash-tile__label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--rb-muted);
+}
+/* The value and the extra words share a row while they fit; the extra words drop under the value when they do not. */
+.dash-tile__line {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  column-gap: 8px;
+  min-width: 0;
+}
+.dash-tile__value {
+  font-size: 20px;
+  font-weight: 650;
+  line-height: 1.25;
+  letter-spacing: -0.015em;
+  font-variant-numeric: tabular-nums;
+  overflow-wrap: anywhere;
+}
+.dash-tile__sub {
+  font-size: 12.5px;
+  line-height: 1.35;
+  color: var(--rb-muted);
+}
+.dash-tile[data-tone] .dash-tile__value {
+  color: var(--tile-text);
+}
+.dash-tile__tip {
+  position: absolute;
+  inset-block-start: 8px;
+  inset-inline-end: 8px;
+  display: inline-flex;
+  color: var(--rb-muted);
+}
+.dash-tile:has(.dash-tile__tip) .dash-tile__label,
+.dash-tile--link .dash-tile__label {
+  padding-inline-end: 22px;
+}
+.dash-tile--link {
+  cursor: pointer;
+  transition:
+    border-color var(--rb-duration) var(--rb-ease),
+    transform var(--rb-duration) var(--rb-ease);
+}
+.dash-tile--link:hover {
+  border-color: color-mix(in oklch, var(--tile-text) 50%, var(--tile-line));
+  transform: translateY(-1px);
+}
+.dash-tile__go {
+  position: absolute;
+  inset-block-start: 10px;
+  inset-inline-end: 10px;
+  display: inline-flex;
+  font-size: 16px;
+  color: var(--tile-text);
+}
+@media (prefers-reduced-motion: reduce) {
+  .dash-tile--link,
+  .dash-tile--link:hover {
+    transition: none;
+    transform: none;
+  }
+}
+[data-lite="true"] .dash-tile--link,
+[data-lite="true"] .dash-tile--link:hover {
+  transition: none;
+  transform: none;
+}

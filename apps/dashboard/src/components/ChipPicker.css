@@ -1,0 +1,122 @@
+/* ChipPicker (components/ChipPicker.tsx): the chosen things as chips, then the "Add" box. Chips and the box share rows and
+   wrap; the box takes a whole row on a phone. Imported by the component (ships with the screens that use it). */
+.dash-pick {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+.dash-pick__list {
+  display: flex;
+  flex: 1 1 100%;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.dash-pick__empty {
+  flex: 1 1 100%;
+  margin: 0;
+  font-size: 13.5px;
+  color: var(--rb-muted);
+}
+.dash-pick__chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  min-width: 0;
+  max-width: 100%;
+  min-height: 36px;
+  padding-inline: 12px 4px;
+  border: 1px solid color-mix(in oklch, var(--rb-accent) 28%, var(--rb-line));
+  border-radius: 999px;
+  background: var(--rb-accent-soft);
+  color: var(--rb-accent-text);
+  font-size: 13.5px;
+  font-weight: 600;
+}
+.dash-pick__chip:has(.dash-pick__x:hover) {
+  border-color: color-mix(in oklch, var(--rb-danger) 40%, var(--rb-line));
+}
+/* A chip without a remove button (read-only) has the same padding on both sides. */
+.dash-pick__chip:not(:has(.dash-pick__x)) {
+  padding-inline-end: 12px;
+}
+.dash-pick__name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.dash-pick__x {
+  flex: none;
+  display: inline-grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  color: inherit;
+  font-size: 18px;
+  opacity: 0.7;
+  transition:
+    opacity var(--rb-duration) var(--rb-ease),
+    background var(--rb-duration) var(--rb-ease),
+    color var(--rb-duration) var(--rb-ease);
+}
+.dash-pick__x:hover {
+  opacity: 1;
+  background: var(--rb-danger-soft);
+  color: var(--rb-danger-text);
+}
+@media (pointer: coarse) {
+  .dash-pick__chip {
+    min-height: 40px;
+  }
+  .dash-pick__x {
+    width: 34px;
+    height: 34px;
+  }
+}
+.dash-pick__more {
+  display: inline-flex;
+}
+.dash-pick__toggle {
+  min-height: 36px;
+  padding: 0 12px;
+  border-radius: 999px;
+  font-size: 13.5px;
+  font-weight: 600;
+  color: var(--rb-muted);
+}
+.dash-pick__toggle:hover {
+  background: var(--rb-hover);
+  color: var(--rb-ink);
+}
+.dash-pick__addwrap {
+  flex: 1 1 200px;
+  min-width: 0;
+  max-width: 320px;
+}
+@media (max-width: 599px) {
+  .dash-pick__addwrap {
+    flex-basis: 100%;
+    max-width: none;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .dash-pick__x {
+    transition: none;
+  }
+}
+[data-lite="true"] .dash-pick__x {
+  transition: none;
+}
+@media (forced-colors: active) {
+  .dash-pick__chip {
+    border-color: CanvasText;
+  }
+}
