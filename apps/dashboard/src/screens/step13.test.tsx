@@ -7,9 +7,11 @@ import type { ReactNode } from "react";
 import type { Me } from "../data/types";
 import { MeContext } from "../lib/member";
 import { strings } from "../lib/strings";
-import { networksStrings as s } from "./networks/strings";
+import { pickOption } from "../test/select";
+import { networksStrings as n } from "./networks/strings";
+import { wifiStrings as s } from "./networks/wifiStrings";
 
-// Phase 5 Step 13 screens (Networks, WifiEdit with the password dialog) against the LIVE data seam with the Convex React
+// Phase 5 Step 13 screens (Networks cards, WifiEdit with the password in the form; UI pass 2026-11-28) against the LIVE data seam with the Convex React
 // hooks mocked: queries answer from `cx.results`, writes call `cx.fns` (convex/networks.test.ts covers the backend).
 const cx = vi.hoisted(() => ({
   results: {} as Record<string, unknown>,
@@ -115,62 +117,74 @@ const where = () => screen.getByTestId("where").textContent;
 const type = (label: string, value: string) => fireEvent.change(screen.getByLabelText(label), { target: { value } });
 const pageText = () => document.body.textContent ?? "";
 
-describe("Networks list (networks:list)", () => {
-  it("lists each network with its SSID, security, group chips and password status, and never a password", () => {
+
+const SECRET = "tr0ub4dor&3-horse-staple";
+const submit = () => fireEvent.click(screen.getByRole("button", { name: s.create }));
+
+describe("Networks page: Wi-Fi cards (networks:list)", () => {
+  it("shows each network as a card with its name, a status pill and two group chips, and never a password", () => {
     cx.results["networks:list"] = {
       wifi: [
-        { ...shop, groupCount: 7, groups: [1, 2, 3, 4, 5, 6, 7].map((n) => ({ _id: `g${n}`, name: `Group ${n}` })), passphrase: "LEAKED-SECRET-123", sealed: { ct: "LEAKED-BOX" } },
+        { ...shop, groupCount: 7, groups: [1, 2, 3, 4, 5, 6, 7].map((k) => ({ _id: `g${k}`, name: `Group ${k}` })), passphrase: "LEAKED-SECRET-123", sealed: { ct: "LEAKED-BOX" } },
         { ...shop, _id: "w2", name: "Back office", ssid: "Acme-Office", hidden: true, security: "wpa2Personal", hasPassphrase: false, passphraseSetAt: null, groupCount: 0, groups: [] },
-        { ...shop, _id: "w3", name: "Guests", ssid: "Acme-Guest", security: "open", hasPassphrase: false, passphraseSetAt: null, groupCount: 1, groups: [{ _id: "g9", name: "Lobby" }] },
+        { ...shop, _id: "w3", name: "Guests", ssid: "Guests", security: "open", hasPassphrase: false, passphraseSetAt: null, groupCount: 1, groups: [{ _id: "g9", name: "Lobby" }] },
       ],
       printers: [],
       drivers: [], addedDrivers: [], approvedDrivers: [],
     };
     ui(<Networks />, "admin", "/networks");
-    expect((cx.queried.find((q) => q.name === "networks:list")!.args)).toEqual({});
-    const list = screen.getByRole("list", { name: s.wifiSection });
-    const rows = within(list).getAllByRole("listitem");
+    expect(cx.queried.find((q) => q.name === "networks:list")!.args).toEqual({});
+    const rows = within(screen.getByRole("list", { name: n.wifiSection })).getAllByRole("listitem");
     expect(rows).toHaveLength(3);
+    // the whole card is the link to the network
     expect(within(rows[0]!).getByRole("link", { name: "Shop floor" }).getAttribute("href")).toBe("/networks/wifi/w1");
     expect(within(rows[0]!).getByText("Acme-Staff")).toBeTruthy();
-    expect(within(rows[0]!).getByText(/WPA2\/WPA3/)).toBeTruthy();
-    // 4 chips and "+3 more" (groupCount 7), password status as a date, never the value
-    expect(within(rows[0]!).getAllByRole("link").filter((l) => l.getAttribute("href")?.startsWith("/groups/"))).toHaveLength(4);
-    expect(within(rows[0]!).getByText(s.moreGroups(3))).toBeTruthy();
-    expect(within(rows[0]!).getByText(/Password set/)).toBeTruthy();
-    expect(within(rows[1]!).getByText(s.hidden)).toBeTruthy();
-    expect(within(rows[1]!).getByText(s.passphraseNone)).toBeTruthy();
-    expect(within(rows[1]!).getByText(s.noGroups)).toBeTruthy();
-    expect(within(rows[2]!).getByText(s.passphraseNotNeeded)).toBeTruthy();
+    expect(within(rows[0]!).getByText(n.passwordSet)).toBeTruthy();
+    // 2 chips and "+5" (groupCount 7)
+    expect(within(rows[0]!).getByText("Group 1")).toBeTruthy();
+    expect(within(rows[0]!).getByText("Group 2")).toBeTruthy();
+    expect(within(rows[0]!).queryByText("Group 3")).toBeNull();
+    expect(within(rows[0]!).getByText(n.moreChip(5))).toBeTruthy();
+    // no password yet: a warning pill and "not on any PCs"; hidden networks say so
+    expect(within(rows[1]!).getByText(n.needsPassword)).toBeTruthy();
+    expect(within(rows[1]!).getByText(n.hidden)).toBeTruthy();
+    expect(within(rows[1]!).getByText(n.notOnPcs)).toBeTruthy();
+    // an open network, whose Wi-Fi name is the card's own name, has no second line
+    expect(within(rows[2]!).getByText(n.openNetwork)).toBeTruthy();
+    expect(within(rows[2]!).queryByText("Guests", { selector: ".net-rec__sub *" })).toBeNull();
     expect(pageText()).not.toContain("LEAKED");
-    // an admin can add and edit
-    expect(screen.getAllByRole("link", { name: s.newWifi }).length).toBeGreaterThan(0);
-    expect(within(rows[0]!).getByRole("link", { name: `${s.edit} Shop floor` })).toBeTruthy();
+    // an admin can add: the header button and the small one of the section
+    expect(screen.getByRole("link", { name: n.addWifi }).getAttribute("href")).toBe("/networks/wifi/new");
+    expect(screen.getByRole("link", { name: n.addWifiShort })).toBeTruthy();
   });
 
-  it("a viewer sees the list read-only: no New, no Edit", () => {
+  it("a viewer sees the cards read-only: no Add anywhere", () => {
     cx.results["networks:list"] = { wifi: [shop], printers: [], drivers: [], addedDrivers: [], approvedDrivers: [] };
     ui(<Networks />, "viewer", "/networks");
-    expect(screen.getByText(s.readOnly)).toBeTruthy();
-    expect(screen.queryByRole("link", { name: s.newWifi })).toBeNull();
-    expect(screen.queryByRole("link", { name: `${s.edit} Shop floor` })).toBeNull();
+    expect(screen.getByText(n.readOnly)).toBeTruthy();
+    expect(screen.queryByRole("link", { name: n.addWifi })).toBeNull();
+    expect(screen.queryByRole("link", { name: n.addWifiShort })).toBeNull();
     expect(screen.getByRole("link", { name: "Shop floor" })).toBeTruthy();
   });
 
-  it("an empty organization gets the empty state with the add action (admins only)", () => {
+  it("an empty organization gets one compact row per section with the add action (admins only)", () => {
     cx.results["networks:list"] = { wifi: [], printers: [], drivers: [], addedDrivers: [], approvedDrivers: [] };
     ui(<Networks />, "admin", "/networks");
-    expect(screen.getByText(s.emptyTitle)).toBeTruthy();
-    expect(screen.getAllByRole("link", { name: s.newWifi })).toHaveLength(2);
+    expect(screen.getByText(n.emptyWifi)).toBeTruthy();
+    expect(screen.getByText(n.emptyPrinters)).toBeTruthy();
+    expect(screen.getByText(n.emptyDrivers)).toBeTruthy();
+    expect(screen.getByRole("link", { name: n.addWifi })).toBeTruthy();
+    expect(screen.getByRole("link", { name: n.addWifiShort })).toBeTruthy();
     cleanup();
     ui(<Networks />, "viewer", "/networks");
-    expect(screen.getByText(s.emptyTitle)).toBeTruthy();
-    expect(screen.queryByRole("link", { name: s.newWifi })).toBeNull();
+    expect(screen.getByText(n.emptyWifi)).toBeTruthy();
+    expect(screen.queryByRole("link", { name: n.addWifi })).toBeNull();
+    expect(screen.queryByRole("link", { name: n.addWifiShort })).toBeNull();
   });
 
   it("shows a skeleton while loading and the region error with Try again when the query fails", () => {
     ui(<Networks />, "admin", "/networks");
-    expect(screen.getByLabelText(s.loadingList)).toBeTruthy();
+    expect(screen.getByLabelText(n.loadingList)).toBeTruthy();
     cleanup();
     cx.results["networks:list"] = new Error("boom");
     ui(<Networks />, "admin", "/networks");
@@ -183,81 +197,126 @@ describe("New Wi-Fi network (/networks/wifi/new)", () => {
     cx.results["groups:list"] = GROUPS;
   });
 
-  it("has no password field; asks for a name and an SSID before it calls the server", async () => {
-    const save = vi.fn(async () => ({ id: "w9", revision: 1 }));
-    cx.fns["networks:saveWifi"] = save;
+  it("asks for the Wi-Fi name and the password up front, and checks them before it calls the server", async () => {
+    const create = vi.fn(async () => ({ id: "w9", revision: 2 }));
+    cx.fns["wifi:createWithPassphrase"] = create;
     ui(<WifiEdit />, "admin", "/networks/wifi/new");
-    expect(screen.queryByLabelText(/password/i)).toBeNull();
-    expect(screen.getByText(s.noPassphraseInForm)).toBeTruthy();
-    expect(screen.getByText(s.securityHelp.wpa2Wpa3Personal)).toBeTruthy();
-    fireEvent.click(screen.getByRole("button", { name: s.create }));
-    expect(await screen.findByText(s.nameProblem(60))).toBeTruthy();
-    expect(screen.getByText(s.ssidProblems.empty)).toBeTruthy();
-    expect(save).not.toHaveBeenCalled();
+    expect(screen.getByLabelText(s.ssid)).toBeTruthy();
+    expect((screen.getByLabelText(s.password) as HTMLInputElement).type).toBe("password");
+    expect(screen.getByRole("checkbox", { name: s.openNetwork })).toBeTruthy();
+    submit();
+    expect(await screen.findByText(s.ssidProblems.empty)).toBeTruthy();
+    expect(screen.getByText(s.passphraseProblems.empty)).toBeTruthy();
+    type(s.ssid, "Acme");
+    type(s.password, "short");
+    expect(screen.getByText(s.passphraseProblems.length)).toBeTruthy();
+    type(s.password, "pässwörd-123");
+    expect(screen.getByText(s.passphraseProblems.chars)).toBeTruthy();
+    expect(create).not.toHaveBeenCalled();
   });
 
-  it("counts the SSID in bytes (accents take more than one), refuses control characters and too long names", async () => {
-    const save = vi.fn(async () => ({ id: "w9", revision: 1 }));
-    cx.fns["networks:saveWifi"] = save;
+  it("counts the Wi-Fi name in bytes only when it gets long (accents take more than one), refuses control characters and too long names", async () => {
+    const create = vi.fn(async () => ({ id: "w9", revision: 2 }));
+    cx.fns["wifi:createWithPassphrase"] = create;
     ui(<WifiEdit />, "admin", "/networks/wifi/new");
-    type(s.name, "Shop");
+    type(s.password, SECRET);
     type(s.ssid, "Café");
-    expect(screen.getByTestId("ssid-bytes").textContent).toBe(s.ssidBytes(5));
+    expect(screen.queryByTestId("ssid-bytes")).toBeNull();
+    type(s.ssid, "é".repeat(13)); // 26 bytes: the counter appears
+    expect(screen.getByTestId("ssid-bytes").textContent).toBe(s.ssidBytes(26));
     type(s.ssid, "é".repeat(17)); // 17 characters, 34 bytes
     expect(screen.getByTestId("ssid-bytes").textContent).toBe(s.ssidBytesOver(34));
-    fireEvent.click(screen.getByRole("button", { name: s.create }));
+    submit();
     expect(await screen.findByText(s.ssidProblems.tooLong)).toBeTruthy();
     type(s.ssid, "bad\u0007name");
     expect(screen.getByText(s.ssidProblems.control)).toBeTruthy();
-    expect(save).not.toHaveBeenCalled();
+    expect(create).not.toHaveBeenCalled();
     type(s.ssid, "é".repeat(16)); // exactly 32 bytes is fine
-    fireEvent.click(screen.getByRole("button", { name: s.create }));
-    await waitFor(() => expect(save).toHaveBeenCalledTimes(1));
+    submit();
+    await waitFor(() => expect(create).toHaveBeenCalledTimes(1));
   });
 
-  it("creates the network without an id or a password and opens it (secured: the toast says to set the password)", async () => {
+  it("creates a secured network with its password in ONE call, no separate save, and opens it; the name follows the Wi-Fi name", async () => {
+    const create = vi.fn(async () => ({ id: "w9", revision: 2 }));
     const save = vi.fn(async () => ({ id: "w9", revision: 1 }));
+    cx.fns["wifi:createWithPassphrase"] = create;
     cx.fns["networks:saveWifi"] = save;
     ui(<WifiEdit />, "admin", "/networks/wifi/new");
-    type(s.name, "  Guests ");
-    type(s.ssid, "Acme Guests");
-    fireEvent.change(screen.getByLabelText(s.security), { target: { value: "wpa3Personal" } });
+    type(s.ssid, "  Acme Guests ");
+    // the name in Rulebox is the Wi-Fi name, trimmed, until it is edited
+    expect((screen.getByLabelText(s.nameInRulebox) as HTMLInputElement).value).toBe("Acme Guests");
+    type(s.password, SECRET);
+    pickOption(s.securityType, /^WPA3 only/);
     fireEvent.click(screen.getByRole("switch", { name: s.hiddenLabel }));
     fireEvent.click(screen.getByRole("checkbox", { name: "Group 2" }));
-    fireEvent.click(screen.getByRole("button", { name: s.create }));
-    await waitFor(() => expect(save).toHaveBeenCalledTimes(1));
-    expect(save).toHaveBeenCalledWith({ name: "Guests", ssid: "Acme Guests", hidden: true, security: "wpa3Personal", autoConnect: true, groupIds: ["g2"] });
-    expect(await screen.findByText(s.created("Guests"))).toBeTruthy();
+    submit();
+    await waitFor(() => expect(create).toHaveBeenCalledTimes(1));
+    expect(create).toHaveBeenCalledWith({ name: "Acme Guests", ssid: "  Acme Guests ", hidden: true, security: "wpa3Personal", autoConnect: true, groupIds: ["g2"], passphrase: SECRET });
+    expect(save).not.toHaveBeenCalled();
+    expect(await screen.findByText(s.created("Acme Guests"))).toBeTruthy();
     await waitFor(() => expect(where()).toBe("/networks/wifi/w9"));
+    expect(pageText()).not.toContain(SECRET);
   });
 
-  it("a save in more than 10 groups goes to the server (Step 20b: the server batches them); the form allows up to 100", async () => {
+  it("an edited name stops following the Wi-Fi name; an open network is a plain save without a password field", async () => {
+    const create = vi.fn(async () => ({ id: "w9", revision: 2 }));
     const save = vi.fn(async () => ({ id: "w9", revision: 1 }));
+    cx.fns["wifi:createWithPassphrase"] = create;
     cx.fns["networks:saveWifi"] = save;
     ui(<WifiEdit />, "admin", "/networks/wifi/new");
-    type(s.name, "Shop");
-    type(s.ssid, "Acme");
-    for (let i = 1; i <= 11; i++) fireEvent.click(screen.getByRole("checkbox", { name: `Group ${i}` }));
-    expect(screen.queryByText(/groups touched/)).toBeNull();
-    fireEvent.click(screen.getByRole("button", { name: s.create }));
+    type(s.ssid, "Lobby");
+    type(s.nameInRulebox, "Lobby guests");
+    type(s.ssid, "Lobby 2");
+    expect((screen.getByLabelText(s.nameInRulebox) as HTMLInputElement).value).toBe("Lobby guests");
+    fireEvent.click(screen.getByRole("checkbox", { name: s.openNetwork }));
+    expect(screen.queryByLabelText(s.password)).toBeNull();
+    expect(screen.getByText(s.openInfo)).toBeTruthy();
+    submit();
     await waitFor(() => expect(save).toHaveBeenCalledTimes(1));
-    expect((save.mock.calls[0] as unknown as [{ groupIds: string[] }])[0].groupIds).toHaveLength(11);
-    expect(s.groupsOver(100)).toBe("Pick at most 100 groups.");
+    expect(save).toHaveBeenCalledWith({ name: "Lobby guests", ssid: "Lobby 2", hidden: false, security: "open", autoConnect: true, groupIds: [] });
+    expect(create).not.toHaveBeenCalled();
   });
 
-  it("says in words when the server refuses too many networks", async () => {
-    cx.fns["networks:saveWifi"] = vi
+  it("starts with the group ticked when the organization has exactly one", () => {
+    cx.results["groups:list"] = [groupRow("g1", "Everyone")];
+    ui(<WifiEdit />, "admin", "/networks/wifi/new");
+    expect((screen.getByRole("checkbox", { name: "Everyone" }) as HTMLInputElement).checked).toBe(true);
+  });
+
+  it("a save in more than 10 groups goes to the server (the server batches them); the form allows up to 100", async () => {
+    const create = vi.fn(async () => ({ id: "w9", revision: 2 }));
+    cx.fns["wifi:createWithPassphrase"] = create;
+    ui(<WifiEdit />, "admin", "/networks/wifi/new");
+    type(s.ssid, "Acme");
+    type(s.password, SECRET);
+    for (let i = 1; i <= 11; i++) fireEvent.click(screen.getByRole("checkbox", { name: `Group ${i}` }));
+    submit();
+    await waitFor(() => expect(create).toHaveBeenCalledTimes(1));
+    expect((create.mock.calls[0] as unknown as [{ groupIds: string[] }])[0].groupIds).toHaveLength(11);
+    expect(n.groupsOver(100)).toBe("Pick at most 100 groups.");
+  });
+
+  it("says in words what the server refuses: too many networks, the Wi-Fi name, the password (under its field), the missing key", async () => {
+    cx.fns["wifi:createWithPassphrase"] = vi
       .fn()
       .mockRejectedValueOnce(new ConvexError({ code: "too_large", detail: "wifi" }))
-      .mockRejectedValueOnce(new ConvexError({ code: "invalid_argument", field: "ssid", detail: "characters" }));
+      .mockRejectedValueOnce(new ConvexError({ code: "invalid_argument", field: "ssid", detail: "characters" }))
+      .mockRejectedValueOnce(new ConvexError({ code: "invalid_argument", field: "passphrase", detail: "length" }))
+      .mockRejectedValueOnce(new ConvexError({ code: "not_ready", detail: "sealing_key" }));
     ui(<WifiEdit />, "admin", "/networks/wifi/new");
-    type(s.name, "Shop");
     type(s.ssid, "Acme");
-    fireEvent.click(screen.getByRole("button", { name: s.create }));
+    type(s.password, SECRET);
+    submit();
     expect(await screen.findByText(/at most 50 Wi-Fi networks/)).toBeTruthy();
-    // a server refusal about the SSID goes under the field, in our words
-    fireEvent.click(screen.getByRole("button", { name: s.create }));
+    submit();
     expect(await screen.findByText(s.ssidServerRefused)).toBeTruthy();
+    submit();
+    expect(await screen.findByText(s.passphraseServerRefused)).toBeTruthy();
+    submit();
+    expect(await screen.findByText(/encryption key isn't set up/)).toBeTruthy();
+    // the typed password stays in its field and is shown nowhere else
+    expect((screen.getByLabelText(s.password) as HTMLInputElement).value).toBe(SECRET);
+    expect(pageText()).not.toContain(SECRET);
   });
 
   it("a viewer gets the read-only notice instead of the form", () => {
@@ -273,48 +332,166 @@ describe("Wi-Fi network (/networks/wifi/:id)", () => {
     cx.results["networks:wifiDetail"] = shop;
   });
 
-  it("asks networks:wifiDetail for the id and shows the form, the password status and the apply counts", () => {
+  it("asks networks:wifiDetail for the id and shows the form, the saved password's status and the apply counts", () => {
     ui(<WifiEdit />, "admin", "/networks/wifi/w1");
     expect(cx.queried.find((q) => q.name === "networks:wifiDetail")!.args).toEqual({ id: "w1" });
-    expect((screen.getByLabelText(s.name) as HTMLInputElement).value).toBe("Shop floor");
     expect((screen.getByLabelText(s.ssid) as HTMLInputElement).value).toBe("Acme-Staff");
+    expect((screen.getByLabelText(s.nameInRulebox) as HTMLInputElement).value).toBe("Shop floor");
     expect((screen.getByRole("checkbox", { name: "Group 1" }) as HTMLInputElement).checked).toBe(true);
     expect((screen.getByRole("checkbox", { name: "Group 3" }) as HTMLInputElement).checked).toBe(false);
+    // a saved password shows its status and Change, not a field
     expect(screen.getByText(/^Set on /)).toBeTruthy();
-    const card = screen.getByRole("heading", { name: s.countsTitle }).closest("section")!;
-    for (const [label, n] of [[s.applied, "7"], [s.waiting, "2"], [s.failed, "1"], [s.unsupported, "0"]] as const) {
-      expect(within(card).getByText(label).nextElementSibling!.textContent).toBe(n);
+    expect(screen.getByRole("button", { name: s.change })).toBeTruthy();
+    expect(screen.queryByLabelText(s.password)).toBeNull();
+    const card = screen.getByRole("heading", { name: n.countsTitle }).closest("section")!;
+    for (const [label, count] of [[s.applied, "7"], [s.waiting, "2"], [s.failed, "1"], [s.unsupported, "0"]] as const) {
+      expect(within(card).getByText(label).nextElementSibling!.textContent).toBe(count);
     }
-    expect(within(card).getByText(s.countsSampled(10))).toBeTruthy();
+    expect(within(card).getByText(n.countsSampled(10))).toBeTruthy();
     expect(pageText()).not.toMatch(/LEAK/);
   });
 
   it("says when the counts were cut, and when no PC has reported yet", () => {
     cx.results["networks:wifiDetail"] = { ...shop, counts: { ...counts, sampled: 400, capped: true } };
     ui(<WifiEdit />, "admin", "/networks/wifi/w1");
-    expect(screen.getByText(s.countsCapped(400))).toBeTruthy();
+    expect(screen.getByText(n.countsCapped(400))).toBeTruthy();
     cleanup();
     cx.results["networks:wifiDetail"] = { ...shop, counts: { ...counts, applied: 0, failed: 0, waiting: 0, sampled: 0 } };
     ui(<WifiEdit />, "admin", "/networks/wifi/w1");
-    expect(screen.getByText(s.countsNone)).toBeTruthy();
+    expect(screen.getByText(n.countsNone)).toBeTruthy();
   });
 
-  it("saves with expectedRevision, then sends the revision the server returned; a stale edit offers Reload", async () => {
+  it("saves with expectedRevision and no password call, then sends the revision the server returned; a stale edit offers Reload", async () => {
     const save = vi.fn().mockResolvedValueOnce({ id: "w1", revision: 4 }).mockRejectedValueOnce(new ConvexError({ code: "stale_edit" }));
+    const set = vi.fn(async () => ({ revision: 9 }));
     cx.fns["networks:saveWifi"] = save;
+    cx.fns["wifi:setPassphrase"] = set;
     ui(<WifiEdit />, "admin", "/networks/wifi/w1");
-    type(s.name, "Shop floor 2");
+    type(s.nameInRulebox, "Shop floor 2");
     fireEvent.click(screen.getByRole("checkbox", { name: "Group 3" }));
     fireEvent.click(screen.getByRole("button", { name: strings.common.saveChanges }));
     await waitFor(() => expect(save).toHaveBeenCalledTimes(1));
     expect(save).toHaveBeenCalledWith({ id: "w1", expectedRevision: 3, name: "Shop floor 2", ssid: "Acme-Staff", hidden: false, security: "wpa2Wpa3Personal", autoConnect: true, groupIds: ["g1", "g2", "g3"] });
     expect(await screen.findByText(s.saved)).toBeTruthy();
-    type(s.name, "Shop floor 3");
+    type(s.nameInRulebox, "Shop floor 3");
     fireEvent.click(screen.getByRole("button", { name: strings.common.saveChanges }));
     await waitFor(() => expect(save).toHaveBeenCalledTimes(2));
     expect(save.mock.calls[1]![0]).toMatchObject({ expectedRevision: 4 });
     expect(await screen.findByText(strings.common.staleTitle)).toBeTruthy();
     expect(screen.getByRole("button", { name: strings.common.reload })).toBeTruthy();
+    expect(set).not.toHaveBeenCalled();
+  });
+
+  it("Change opens the password field; only the password changed means only the password call, with the profile's revision, and the typed text is forgotten", async () => {
+    const set = vi.fn(async () => ({ revision: 4 }));
+    const save = vi.fn<(a: unknown) => Promise<{ id: string; revision: number }>>(async () => ({ id: "w1", revision: 5 }));
+    cx.fns["wifi:setPassphrase"] = set;
+    cx.fns["networks:saveWifi"] = save;
+    ui(<WifiEdit />, "admin", "/networks/wifi/w1");
+    fireEvent.click(screen.getByRole("button", { name: s.change }));
+    const field = screen.getByLabelText(s.password) as HTMLInputElement;
+    expect(field.type).toBe("password");
+    expect(screen.getByText(s.keepEmpty)).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: strings.auth.showPassword }));
+    expect(field.type).toBe("text");
+    type(s.password, "short");
+    fireEvent.click(screen.getByRole("button", { name: strings.common.saveChanges }));
+    expect(await screen.findByText(s.passphraseProblems.length)).toBeTruthy();
+    expect(set).not.toHaveBeenCalled();
+    type(s.password, SECRET);
+    fireEvent.click(screen.getByRole("button", { name: strings.common.saveChanges }));
+    await waitFor(() => expect(set).toHaveBeenCalledTimes(1));
+    expect(set).toHaveBeenCalledWith({ id: "w1", passphrase: SECRET, expectedRevision: 3 });
+    expect(save).not.toHaveBeenCalled();
+    expect(await screen.findByText(s.saved)).toBeTruthy();
+    // the typed text is gone: not in a field, not on the page
+    expect(pageText()).not.toContain(SECRET);
+    expect(Array.from(document.querySelectorAll("input")).every((i) => !i.value.includes(SECRET))).toBe(true);
+    // the next save of the profile uses the revision the action returned
+    type(s.nameInRulebox, "Renamed");
+    fireEvent.click(screen.getByRole("button", { name: strings.common.saveChanges }));
+    await waitFor(() => expect(save).toHaveBeenCalledTimes(1));
+    expect(save.mock.calls[0]![0]).toMatchObject({ expectedRevision: 4 });
+    expect(JSON.stringify(save.mock.calls[0]![0])).not.toContain(SECRET);
+  });
+
+  it("profile and password changed: two calls in order; when the password fails the network is saved, the text stays and Try again sends only the password", async () => {
+    const calls: string[] = [];
+    const save = vi.fn(async () => {
+      calls.push("save");
+      return { id: "w1", revision: 4 };
+    });
+    const set = vi
+      .fn()
+      .mockImplementationOnce(async () => {
+        calls.push("set");
+        throw new ConvexError({ code: "invalid_argument", field: "passphrase", detail: "length" });
+      })
+      .mockImplementationOnce(async () => {
+        calls.push("set");
+        return { revision: 5 };
+      });
+    cx.fns["networks:saveWifi"] = save;
+    cx.fns["wifi:setPassphrase"] = set;
+    ui(<WifiEdit />, "admin", "/networks/wifi/w1");
+    type(s.nameInRulebox, "Shop floor 2");
+    fireEvent.click(screen.getByRole("button", { name: s.change }));
+    type(s.password, SECRET);
+    fireEvent.click(screen.getByRole("button", { name: strings.common.saveChanges }));
+    await waitFor(() => expect(set).toHaveBeenCalledTimes(1));
+    expect(calls).toEqual(["save", "set"]);
+    expect(set).toHaveBeenLastCalledWith({ id: "w1", passphrase: SECRET, expectedRevision: 4 });
+    expect(await screen.findByText(s.savedNoPassword)).toBeTruthy(); // the toast
+    expect(await screen.findByText(s.passphraseServerRefused)).toBeTruthy();
+    expect((screen.getByLabelText(s.password) as HTMLInputElement).value).toBe(SECRET);
+    expect(pageText()).not.toContain(SECRET);
+    fireEvent.click(screen.getByRole("button", { name: strings.common.saveChanges }));
+    await waitFor(() => expect(set).toHaveBeenCalledTimes(2));
+    expect(save).toHaveBeenCalledTimes(1);
+    expect(set).toHaveBeenLastCalledWith({ id: "w1", passphrase: SECRET, expectedRevision: 4 });
+  });
+
+  it("other password refusals are said in words: the missing key, a stale edit", async () => {
+    cx.fns["wifi:setPassphrase"] = vi
+      .fn()
+      .mockRejectedValueOnce(new ConvexError({ code: "not_ready", detail: "sealing_key" }))
+      .mockRejectedValueOnce(new ConvexError({ code: "stale_edit" }));
+    ui(<WifiEdit />, "admin", "/networks/wifi/w1");
+    fireEvent.click(screen.getByRole("button", { name: s.change }));
+    type(s.password, SECRET);
+    fireEvent.click(screen.getByRole("button", { name: strings.common.saveChanges }));
+    expect(await screen.findByText(/encryption key isn't set up/)).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: strings.common.saveChanges }));
+    expect(await screen.findByText(strings.common.staleTitle)).toBeTruthy();
+    expect(pageText()).not.toContain(SECRET);
+  });
+
+  it("ticking 'no password' on a secured network says the saved one is deleted and saves it as open, without a password call", async () => {
+    const save = vi.fn(async () => ({ id: "w1", revision: 4 }));
+    const set = vi.fn(async () => ({ revision: 9 }));
+    cx.fns["networks:saveWifi"] = save;
+    cx.fns["wifi:setPassphrase"] = set;
+    ui(<WifiEdit />, "admin", "/networks/wifi/w1");
+    fireEvent.click(screen.getByRole("checkbox", { name: s.openNetwork }));
+    expect(screen.getByText(s.openDeletes)).toBeTruthy();
+    expect(screen.queryByRole("button", { name: s.change })).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: strings.common.saveChanges }));
+    await waitFor(() => expect(save).toHaveBeenCalledTimes(1));
+    expect(save).toHaveBeenCalledWith(expect.objectContaining({ id: "w1", security: "open", expectedRevision: 3 }));
+    expect(set).not.toHaveBeenCalled();
+  });
+
+  it("a secured network without a password says PCs wait for it and shows the field at once; an open one has none", () => {
+    cx.results["networks:wifiDetail"] = { ...shop, hasPassphrase: false, passphraseSetAt: null };
+    ui(<WifiEdit />, "admin", "/networks/wifi/w1");
+    expect(screen.getByText(s.passwordMissing)).toBeTruthy();
+    expect(screen.getByLabelText(s.password)).toBeTruthy();
+    cleanup();
+    cx.results["networks:wifiDetail"] = { ...shop, security: "open", hasPassphrase: false, passphraseSetAt: null };
+    ui(<WifiEdit />, "admin", "/networks/wifi/w1");
+    expect(screen.queryByLabelText(s.password)).toBeNull();
+    expect((screen.getByRole("checkbox", { name: s.openNetwork }) as HTMLInputElement).checked).toBe(true);
+    expect(screen.queryByText(s.passwordMissing)).toBeNull();
   });
 
   it("deleting asks for the name, says the PCs remove the network, then goes back to the list", async () => {
@@ -333,125 +510,14 @@ describe("Wi-Fi network (/networks/wifi/:id)", () => {
     await waitFor(() => expect(where()).toBe("/networks"));
   });
 
-  it("a viewer sees the details, the status and the counts but no form, no Replace and no Remove", () => {
+  it("a viewer sees the details, the password status and the counts but no form, no Change and no Remove", () => {
     ui(<WifiEdit />, "viewer", "/networks/wifi/w1");
-    expect(screen.getByText(s.readOnly)).toBeTruthy();
+    expect(screen.getByText(n.readOnly)).toBeTruthy();
     expect(screen.queryByRole("button", { name: strings.common.saveChanges })).toBeNull();
-    expect(screen.queryByRole("button", { name: s.replacePassphrase })).toBeNull();
+    expect(screen.queryByRole("button", { name: s.change })).toBeNull();
     expect(screen.queryByRole("button", { name: s.remove })).toBeNull();
     expect(screen.getAllByText("Acme-Staff").length).toBeGreaterThan(0); // header chip and the details list
     expect(screen.getByText(/^Set on /)).toBeTruthy();
-    expect(screen.getByRole("heading", { name: s.countsTitle })).toBeTruthy();
-  });
-
-  it("an open network has no password to set; a secured one without a password says PCs wait for it", () => {
-    cx.results["networks:wifiDetail"] = { ...shop, security: "open", hasPassphrase: false, passphraseSetAt: null };
-    ui(<WifiEdit />, "admin", "/networks/wifi/w1");
-    expect(screen.getByText(s.passphraseOpen)).toBeTruthy();
-    expect(screen.queryByRole("button", { name: s.setPassphrase })).toBeNull();
-    expect(screen.queryByRole("button", { name: s.replacePassphrase })).toBeNull();
-    cleanup();
-    cx.results["networks:wifiDetail"] = { ...shop, hasPassphrase: false, passphraseSetAt: null };
-    ui(<WifiEdit />, "admin", "/networks/wifi/w1");
-    expect(screen.getByText(s.passphraseNotSet)).toBeTruthy();
-    expect(screen.getByRole("button", { name: s.setPassphrase })).toBeTruthy();
-  });
-});
-
-describe("Replace password dialog (wifi:setPassphrase)", () => {
-  const SECRET = "tr0ub4dor&3-horse-staple";
-
-  beforeEach(() => {
-    cx.results["groups:list"] = GROUPS;
-    cx.results["networks:wifiDetail"] = shop;
-  });
-
-  async function openDialog() {
-    ui(<WifiEdit />, "admin", "/networks/wifi/w1");
-    fireEvent.click(screen.getByRole("button", { name: s.replacePassphrase }));
-    return await screen.findByRole("dialog");
-  }
-
-  it("is a masked input with a show/hide toggle and checks the rule before it calls the server", async () => {
-    const set = vi.fn(async () => ({ revision: 4 }));
-    cx.fns["wifi:setPassphrase"] = set;
-    const dialog = await openDialog();
-    const field = within(dialog).getByLabelText(s.passphraseField) as HTMLInputElement;
-    expect(field.type).toBe("password");
-    fireEvent.click(within(dialog).getByRole("button", { name: strings.auth.showPassword }));
-    expect(field.type).toBe("text");
-    fireEvent.change(field, { target: { value: "short" } });
-    fireEvent.click(within(dialog).getByRole("button", { name: s.replacePassphrase }));
-    expect(await within(dialog).findByText(s.passphraseProblems.length)).toBeTruthy();
-    fireEvent.change(field, { target: { value: "pässwörd-123" } });
-    expect(within(dialog).getByText(s.passphraseProblems.chars)).toBeTruthy();
-    fireEvent.change(field, { target: { value: "x".repeat(64) } }); // 64 characters that are not all hex: too long
-    expect(within(dialog).getByText(s.passphraseProblems.length)).toBeTruthy();
-    expect(set).not.toHaveBeenCalled();
-    fireEvent.change(field, { target: { value: "a".repeat(63) } }); // 63 printable characters
-    expect(within(dialog).queryByText(s.passphraseProblems.length)).toBeNull();
-  });
-
-  it("sends the password only to the action, with the profile's revision; then closes and forgets it: not in the DOM, not in a toast", async () => {
-    const set = vi.fn(async () => ({ revision: 4 }));
-    const save = vi.fn<(a: unknown) => Promise<{ id: string; revision: number }>>(async () => ({ id: "w1", revision: 5 }));
-    cx.fns["wifi:setPassphrase"] = set;
-    cx.fns["networks:saveWifi"] = save;
-    const dialog = await openDialog();
-    fireEvent.change(within(dialog).getByLabelText(s.passphraseField), { target: { value: SECRET } });
-    fireEvent.click(within(dialog).getByRole("button", { name: s.replacePassphrase }));
-    await waitFor(() => expect(set).toHaveBeenCalledTimes(1));
-    expect(set).toHaveBeenCalledWith({ id: "w1", passphrase: SECRET, expectedRevision: 3 });
-    expect(await screen.findByText(s.passphraseSaved)).toBeTruthy();
-    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
-    expect(pageText()).not.toContain(SECRET);
-    expect(Array.from(document.querySelectorAll("input")).every((i) => !i.value.includes(SECRET))).toBe(true);
-    // the next save of the profile uses the revision the action returned, and carries no password
-    fireEvent.click(screen.getByRole("button", { name: strings.common.saveChanges }));
-    await waitFor(() => expect(save).toHaveBeenCalledTimes(1));
-    expect(save.mock.calls[0]![0]).toMatchObject({ expectedRevision: 4 });
-    expect(JSON.stringify(save.mock.calls[0]![0])).not.toContain(SECRET);
-    // opening the dialog again starts empty
-    fireEvent.click(screen.getByRole("button", { name: s.replacePassphrase }));
-    const again = await screen.findByRole("dialog");
-    expect((within(again).getByLabelText(s.passphraseField) as HTMLInputElement).value).toBe("");
-  });
-
-  it("closing with Cancel drops what was typed", async () => {
-    const dialog = await openDialog();
-    fireEvent.change(within(dialog).getByLabelText(s.passphraseField), { target: { value: SECRET } });
-    fireEvent.click(within(dialog).getByRole("button", { name: strings.common.cancel }));
-    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
-    expect(pageText()).not.toContain(SECRET);
-  });
-
-  it("a server refusal is shown in our words under the field, never the typed text; other errors keep the dialog open", async () => {
-    cx.fns["wifi:setPassphrase"] = vi
-      .fn()
-      .mockRejectedValueOnce(new ConvexError({ code: "invalid_argument", field: "passphrase", detail: "length" }))
-      .mockRejectedValueOnce(new ConvexError({ code: "not_ready", detail: "sealing_key" }))
-      .mockRejectedValueOnce(new ConvexError({ code: "stale_edit" }));
-    const dialog = await openDialog();
-    const field = within(dialog).getByLabelText(s.passphraseField);
-    fireEvent.change(field, { target: { value: SECRET } });
-    const submit = () => fireEvent.click(within(dialog).getByRole("button", { name: s.replacePassphrase }));
-    submit();
-    expect(await within(dialog).findByText(s.passphraseServerRefused)).toBeTruthy();
-    submit();
-    expect(await within(dialog).findByText(/encryption key isn't set up/)).toBeTruthy();
-    submit();
-    expect(await within(dialog).findByText(strings.common.staleTitle)).toBeTruthy();
-    expect(screen.getByRole("dialog")).toBeTruthy();
-    // the typed text is only ever the input's value: no sentence, notice or toast repeats it
-    expect(pageText()).not.toContain(SECRET);
-    expect((within(dialog).getByLabelText(s.passphraseField) as HTMLInputElement).value).toBe(SECRET);
-  });
-
-  it("an unset password offers Set, not Replace", async () => {
-    cx.results["networks:wifiDetail"] = { ...shop, hasPassphrase: false, passphraseSetAt: null };
-    ui(<WifiEdit />, "admin", "/networks/wifi/w1");
-    fireEvent.click(screen.getByRole("button", { name: s.setPassphrase }));
-    const dialog = await screen.findByRole("dialog");
-    expect(within(dialog).getByRole("heading", { name: s.passphraseTitleSet })).toBeTruthy();
+    expect(screen.getByRole("heading", { name: n.countsTitle })).toBeTruthy();
   });
 });

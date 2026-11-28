@@ -1,231 +1,193 @@
+import type { ReactNode } from "react";
 import { Link } from "react-router";
+import { Pill } from "@rulebox/ui";
 import IconWifi from "~icons/solar/wi-fi-router-minimalistic-linear";
 import IconAdd from "~icons/solar/add-circle-linear";
 import IconPrinter from "~icons/solar/printer-linear";
-import { useNetworks } from "../data";
 import IconDriver from "~icons/solar/server-square-linear";
+import { useNetworks } from "../data";
 import type { DriverRow, PrinterRow, WifiRow } from "../data/types";
-import { Card } from "../components/Card";
-import { EmptyState } from "../components/EmptyState";
 import { InlineNotice } from "../components/Notice";
 import { PageHeader } from "../components/PageHeader";
 import { QueryRegion } from "../components/Region";
 import { RoleGate } from "../components/RoleGate";
 import { SkeletonBlock } from "../components/Skeleton";
-import { formatDate } from "../lib/format";
 import { useCan } from "../lib/member";
 import { ApprovedDrivers } from "./networks/ApprovedDrivers";
+import { printerHost } from "./networks/model";
+import { EmptyRow, RecordCard, SectionCard } from "./networks/RecordCard";
 import { networksStrings as s } from "./networks/strings";
+import "./networks/networks.css";
 
-/** Group chips shown per row; the rest is "+N more" (the detail page lists them all). */
-const CHIPS = 4;
-
-function PassphraseStatus({ w }: { w: WifiRow }) {
-  if (w.security === "open") return <span className="dash-muted">{s.passphraseNotNeeded}</span>;
-  if (w.hasPassphrase && w.passphraseSetAt !== null) return <span>{s.setOn(formatDate(w.passphraseSetAt))}</span>;
-  if (w.hasPassphrase) return <span>{s.passphraseSet}</span>;
-  return <span className="dash-net__warn">{s.passphraseNone}</span>;
-}
-
-function WifiItem({ w, canEdit }: { w: WifiRow; canEdit: boolean }) {
+function WifiCard({ w }: { w: WifiRow }) {
+  const pill =
+    w.security === "open" ? (
+      <Pill>{s.openNetwork}</Pill>
+    ) : w.hasPassphrase ? (
+      <Pill tone="success" dot>
+        {s.passwordSet}
+      </Pill>
+    ) : (
+      <Pill tone="warning" dot>
+        {s.needsPassword}
+      </Pill>
+    );
+  // The Wi-Fi name only when it says more than the card's own title; the security type stays on the detail page.
+  const parts: ReactNode[] = [];
+  if (w.ssid !== w.name) parts.push(<span key="ssid" className="dash-mono net-rec__ssid">{w.ssid}</span>);
+  if (w.hidden) parts.push(<span key="hidden">{s.hidden}</span>);
   return (
-    <li className="dash-list__item dash-net__item">
-      <span className="dash-list__icon dash-list__icon--accent" aria-hidden="true">
-        <IconWifi />
-      </span>
-      <div className="dash-list__body">
-        <Link className="dash-link dash-list__title dash-wrap" to={`/networks/wifi/${w._id}`}>
-          {w.name}
-        </Link>
-        <span className="dash-list__meta">
-          <span className="dash-mono dash-wrap">{w.ssid}</span> · {s.securityShort[w.security]}
-          {w.hidden ? (
-            <>
-              {" "}
-              <span className="dash-chip">{s.hidden}</span>
-            </>
-          ) : null}
-        </span>
-        <span className="dash-list__meta">
-          <PassphraseStatus w={w} />
-        </span>
-        <GroupChips groups={w.groups} groupCount={w.groupCount} />
-      </div>
-      {canEdit ? (
-        <Link className="rb-btn rb-btn--ghost dash-btn--sm" to={`/networks/wifi/${w._id}`} aria-label={`${s.edit} ${w.name}`}>
-          {s.edit}
-        </Link>
-      ) : null}
-    </li>
+    <RecordCard
+      to={`/networks/wifi/${w._id}`}
+      icon={<IconWifi />}
+      title={w.name}
+      pill={pill}
+      sub={parts.length > 0 ? joined(parts) : undefined}
+      groups={w.groups}
+      groupCount={w.groupCount}
+    />
   );
 }
 
-function GroupChips({ groups, groupCount }: { groups: { _id: string; name: string }[]; groupCount: number }) {
-  const shown = groups.slice(0, CHIPS);
+function PrinterCard({ p }: { p: PrinterRow }) {
   return (
-    <span className="dash-net__chips">
-      {groupCount === 0 ? (
-        <span className="dash-list__meta">{s.noGroups}</span>
-      ) : (
+    <RecordCard
+      to={`/networks/printers/${p._id}`}
+      icon={<IconPrinter />}
+      title={p.name}
+      pill={p.defaultGroupCount > 0 ? <Pill tone="accent">{s.defaultPill}</Pill> : undefined}
+      sub={
         <>
-          {shown.map((g) => (
-            <Link key={g._id} to={`/groups/${g._id}`} className="dash-chip dash-link--plain">
-              {g.name}
-            </Link>
-          ))}
-          {groupCount > shown.length ? <span className="dash-list__meta">{s.moreGroups(groupCount - shown.length)}</span> : null}
+          {s.printerKindCard[p.kind]} · <span className="dash-mono net-rec__ssid">{printerHost(p.kind, p.address)}</span>
         </>
-      )}
-    </span>
+      }
+      groups={p.groups}
+      groupCount={p.groupCount}
+    />
   );
 }
 
-function PrinterItem({ p, canEdit }: { p: PrinterRow; canEdit: boolean }) {
+function DriverCard({ d }: { d: DriverRow }) {
   return (
-    <li className="dash-list__item dash-net__item">
-      <span className="dash-list__icon dash-list__icon--accent" aria-hidden="true">
-        <IconPrinter />
-      </span>
-      <div className="dash-list__body">
-        <Link className="dash-link dash-list__title dash-wrap" to={`/networks/printers/${p._id}`}>
-          {p.name}
-        </Link>
-        <span className="dash-list__meta">
-          {s.kindShort[p.kind]} · <span className="dash-mono dash-wrap">{p.address}</span>
-          {p.kind === "raw" && p.port !== null ? <span className="dash-mono">{`:${p.port}`}</span> : null}
-          {p.kind === "lpr" && p.queue !== null ? <span className="dash-mono">{` / ${p.queue}`}</span> : null}
-        </span>
-        <span className="dash-list__meta">
-          {s.driverLabel}: {p.driver}
-          {p.defaultGroupCount > 0 ? (
-            <>
-              {" "}
-              <span className="dash-chip">{s.defaultBadge(p.defaultGroupCount)}</span>
-            </>
-          ) : null}
-        </span>
-        <GroupChips groups={p.groups} groupCount={p.groupCount} />
-      </div>
-      {canEdit ? (
-        <Link className="rb-btn rb-btn--ghost dash-btn--sm" to={`/networks/printers/${p._id}`} aria-label={`${s.edit} ${p.name}`}>
-          {s.edit}
-        </Link>
-      ) : null}
-    </li>
+    <RecordCard
+      to={`/networks/drivers/${d._id}`}
+      icon={<IconDriver />}
+      title={d.name}
+      sub={s.driverClassCard[d.deviceClass]}
+      groups={d.groups}
+      groupCount={d.groupCount}
+    />
   );
 }
 
-function DriverItem({ d, canEdit }: { d: DriverRow; canEdit: boolean }) {
-  return (
-    <li className="dash-list__item dash-net__item">
-      <span className="dash-list__icon dash-list__icon--accent" aria-hidden="true">
-        <IconDriver />
-      </span>
-      <div className="dash-list__body">
-        <Link className="dash-link dash-list__title dash-wrap" to={`/networks/drivers/${d._id}`}>
-          {d.name}
-        </Link>
-        <span className="dash-list__meta">
-          <span className="dash-chip">{s.driverKindShort[d.kind]}</span> <span className="dash-chip">{s.driverClassShort[d.deviceClass]}</span>
-        </span>
-        {d.provides.length > 0 ? <span className="dash-list__meta dash-wrap">{s.driverProvidesLine(d.provides.join(", "))}</span> : null}
-        <GroupChips groups={d.groups} groupCount={d.groupCount} />
-      </div>
-      {canEdit ? (
-        <Link className="rb-btn rb-btn--ghost dash-btn--sm" to={`/networks/drivers/${d._id}`} aria-label={`${s.edit} ${d.name}`}>
-          {s.edit}
-        </Link>
-      ) : null}
-    </li>
-  );
+/** " · " between the parts of a card's muted line. */
+function joined(parts: ReactNode[]): ReactNode {
+  return parts.flatMap((p, i) => (i === 0 ? [p] : [<span key={`dot${i}`}> · </span>, p]));
 }
 
 /**
- * `networks:list`: one subscription for the whole screen, Wi-Fi, printers and drivers (each section is its own Card). No passphrase and no
+ * `networks:list`: one subscription for the whole screen, Wi-Fi, printers and drivers (each section is its own card). No passphrase and no
  * per-device counts here: those would re-run the list on every device report (the counts are on the detail pages).
  */
 export default function Networks() {
   const state = useNetworks();
   const canAct = useCan("admin");
-  const addWifi = (
+  const addLink = (to: string, label: string) => (
     <RoleGate minRole="admin">
-      <Link className="rb-btn rb-btn--primary" to="/networks/wifi/new">
+      <Link className="rb-btn rb-btn--ghost dash-btn--sm" to={to} aria-label={label}>
         <IconAdd aria-hidden="true" />
-        {s.newWifi}
+        {s.add}
       </Link>
     </RoleGate>
-  );
-  const addPrinter = (
-    <RoleGate minRole="admin">
-      <Link className="rb-btn rb-btn--primary" to="/networks/printers/new">
-        <IconAdd aria-hidden="true" />
-        {s.newPrinter}
-      </Link>
-    </RoleGate>
-  );
-  const addDriver = (
-    <RoleGate minRole="admin">
-      <Link className="rb-btn rb-btn--primary" to="/networks/drivers/new">
-        <IconAdd aria-hidden="true" />
-        {s.newDriver}
-      </Link>
-    </RoleGate>
-  );
-  const add = (
-    <>
-      {addWifi}
-      {addPrinter}
-      {addDriver}
-    </>
   );
   return (
-    <div className="dash-page">
-      <PageHeader title={s.title} lead={s.lead} actions={add} />
+    <div className="dash-page net-page">
+      <PageHeader
+        title={s.title}
+        lead={s.lead}
+        actions={
+          <RoleGate minRole="admin">
+            <Link className="rb-btn rb-btn--primary" to="/networks/wifi/new">
+              <IconAdd aria-hidden="true" />
+              {s.addWifi}
+            </Link>
+          </RoleGate>
+        }
+      />
       {!canAct ? <InlineNotice tone="neutral" title={s.readOnly} /> : null}
       <QueryRegion
         state={state}
         skeleton={
-          <div className="dash-card dash-card--pad" aria-label={s.loadingList}>
-            <SkeletonBlock lines={4} />
+          <div className="net-grid" aria-label={s.loadingList}>
+            <div className="dash-card dash-card--pad net-grid__wifi">
+              <SkeletonBlock lines={4} />
+            </div>
+            <div className="dash-card dash-card--pad net-grid__printers">
+              <SkeletonBlock lines={3} />
+            </div>
+            <div className="dash-card dash-card--pad net-grid__drivers">
+              <SkeletonBlock lines={2} />
+            </div>
           </div>
         }
       >
         {(data) => (
-          <div className="dash-stack">
-            <Card title={s.wifiSection} body="flush">
+          <div className="net-grid">
+            <SectionCard
+              className="net-grid__wifi"
+              name={s.wifiSection}
+              icon={<IconWifi />}
+              count={data.wifi.length}
+              info={s.wifiInfo}
+              add={data.wifi.length > 0 ? addLink("/networks/wifi/new", s.addWifiShort) : undefined}
+            >
               {data.wifi.length === 0 ? (
-                <EmptyState icon={<IconWifi />} title={s.emptyTitle} body={s.emptyBody} action={addWifi} />
+                <EmptyRow icon={<IconWifi />} text={s.emptyWifi} action={canAct ? addLink("/networks/wifi/new", s.addWifiShort) : undefined} />
               ) : (
-                <ul className="dash-list" aria-label={s.wifiSection}>
+                <ul className="net-list" aria-label={s.wifiSection}>
                   {data.wifi.map((w) => (
-                    <WifiItem key={w._id} w={w} canEdit={canAct} />
+                    <WifiCard key={w._id} w={w} />
                   ))}
                 </ul>
               )}
-            </Card>
-            <Card title={s.printersSection} sub={s.printersLead} body="flush">
+            </SectionCard>
+            <SectionCard
+              className="net-grid__printers"
+              name={s.printersSection}
+              icon={<IconPrinter />}
+              count={data.printers.length}
+              info={s.printersInfo}
+              add={data.printers.length > 0 ? addLink("/networks/printers/new", s.addPrinterShort) : undefined}
+            >
               {data.printers.length === 0 ? (
-                <EmptyState icon={<IconPrinter />} title={s.emptyPrintersTitle} body={s.emptyPrintersBody} action={addPrinter} />
+                <EmptyRow icon={<IconPrinter />} text={s.emptyPrinters} action={canAct ? addLink("/networks/printers/new", s.addPrinterShort) : undefined} />
               ) : (
-                <ul className="dash-list" aria-label={s.printersSection}>
+                <ul className="net-list" aria-label={s.printersSection}>
                   {data.printers.map((p) => (
-                    <PrinterItem key={p._id} p={p} canEdit={canAct} />
+                    <PrinterCard key={p._id} p={p} />
                   ))}
                 </ul>
               )}
-            </Card>
-            <Card title={s.driversSection} sub={s.driversLead} body="flush">
+            </SectionCard>
+            <SectionCard
+              className="net-grid__drivers net-sec--quiet"
+              name={s.driversSection}
+              icon={<IconDriver />}
+              count={data.drivers.length}
+              info={s.driversInfo}
+              add={data.drivers.length > 0 ? addLink("/networks/drivers/new", s.addDriverShort) : undefined}
+            >
               {data.drivers.length === 0 ? (
-                <EmptyState icon={<IconDriver />} title={s.emptyDriversTitle} body={s.emptyDriversBody} action={addDriver} />
+                <EmptyRow icon={<IconDriver />} text={s.emptyDrivers} sub={s.emptyDriversSub} action={canAct ? addLink("/networks/drivers/new", s.addDriverShort) : undefined} />
               ) : (
-                <ul className="dash-list" aria-label={s.driversSection}>
+                <ul className="net-list" aria-label={s.driversSection}>
                   {data.drivers.map((d) => (
-                    <DriverItem key={d._id} d={d} canEdit={canAct} />
+                    <DriverCard key={d._id} d={d} />
                   ))}
                 </ul>
               )}
-            </Card>
-            <ApprovedDrivers added={data.addedDrivers} drivers={data.drivers} />
+              <ApprovedDrivers added={data.addedDrivers} drivers={data.drivers} />
+            </SectionCard>
           </div>
         )}
       </QueryRegion>

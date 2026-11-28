@@ -2,7 +2,6 @@ import { useState } from "react";
 import { Button, Input } from "@rulebox/ui";
 import { useSetApprovedPrinterDrivers } from "../../data";
 import type { DriverRow } from "../../data/types";
-import { Card } from "../../components/Card";
 import { Field } from "../../components/Field";
 import { FormError } from "../../components/FormError";
 import { toAppError } from "../../lib/errors";
@@ -10,12 +9,13 @@ import { MAX_ADDED_NAMES, addedNameProblem, dedupeNames } from "../../lib/driver
 import { useCan } from "../../lib/member";
 import { INBOX_DRIVERS } from "../../lib/printerRules";
 import { useToast } from "../../lib/toast";
+import { AdvancedBox } from "./parts";
 import { networksStrings as s } from "./strings";
 
 /**
- * Approved printer drivers (Step 14b, owner decision 2a): the built-in Windows class drivers (read-only), the names an admin added
- * (chips with an add field and one Save, `networks:setApprovedPrinterDrivers`) and the names delivered drivers provide (read-only).
- * The list comes from `networks:list`: no query of its own.
+ * Printer driver names (Step 14b, owner decision 2a), inside the Drivers section's Advanced (UI pass): the built-in Windows class drivers
+ * (read-only), the names an admin added (chips with an add field and one Save, `networks:setApprovedPrinterDrivers`) and the names
+ * delivered drivers provide (read-only). The list comes from `networks:list`: no query of its own.
  */
 export function ApprovedDrivers({ added, drivers }: { added: string[]; drivers: DriverRow[] }) {
   const canAct = useCan("admin");
@@ -47,8 +47,9 @@ function ApprovedForm({ added, drivers, canAct }: { added: string[]; drivers: Dr
   };
 
   return (
-    <Card title={s.approvedTitle} sub={s.approvedLead}>
-      <div className="dash-stack">
+    <AdvancedBox title={s.approvedTitle} forceOpen={problem !== null || error !== null}>
+      <div className="dash-stack net-approved">
+        <p className="dash-cell-sub">{s.approvedLead}</p>
         <div>
           <p className="dash-cell-sub">{s.approvedBuiltIn}</p>
           <span className="dash-net__chips">
@@ -105,16 +106,21 @@ function ApprovedForm({ added, drivers, canAct }: { added: string[]; drivers: Dr
                 </div>
               )}
             </Field>
-            <FormError error={error} describe={(e) => { const a = toAppError(e); return a ? s.describeError(a.code, a.detail) : null; }} />
+            <FormError
+              error={error}
+              describe={(e) => {
+                const a = toAppError(e);
+                return a ? s.describeError(a.code, a.detail) : null;
+              }}
+            />
             <div className="dash-form__actions">
               <Button type="submit" disabled={!dirty || pending} aria-busy={pending}>
                 {s.approvedSave}
               </Button>
-              {dirty ? <span className="dash-form__status">{s.approvedUnsaved}</span> : null}
             </div>
           </form>
         ) : null}
       </div>
-    </Card>
+    </AdvancedBox>
   );
 }
