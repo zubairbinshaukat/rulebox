@@ -7,6 +7,11 @@
 
 /* Header: shared dropdown and mobile sheet */
 import "./nav";
+/* Forms (submit handler; Turnstile loads only when a form is focused). Part of this
+   script, not its own <script>: as a separate import it was a second link in the
+   request chain (HTML, form script, shared chunk). About 1.8 kB gzipped; it does
+   nothing on pages without a form[data-form]. */
+import "./forms";
 
 const root = document.documentElement;
 const reduceMotion = window.matchMedia("(prefers-reduced-motion: reduce)");
@@ -29,16 +34,34 @@ window.addEventListener("resize", onScroll, { passive: true });
 
 /* ---------- Home scroll choreography (GSAP, loaded only where needed) ----------
    home-motion.ts holds the hero hand-over, the word reveals and the "day"
-   graphic. It is a separate chunk, fetched only on pages with those hooks
-   and only when motion is allowed. The hero's sticky layout is switched on
-   here, before first paint, so nothing jumps when GSAP arrives. */
+   graphic. It is a separate chunk (about 47 kB gzipped), fetched only on pages
+   with those hooks and only when motion is allowed. The hero's sticky layout
+   is switched on here, before first paint, so nothing jumps when GSAP arrives.
+
+   It is fetched AFTER the page has loaded and the browser is idle, not while
+   the first screen is being built: nothing in it is needed for the first paint
+   (every start state is set in CSS or is below the fold), and fetching it from
+   this script put a second link in the request chain (HTML, this script, GSAP)
+   that competed with the LCP image, CSS and fonts. The first scroll, wheel,
+   touch or key press loads it at once, so the choreography is ready when the
+   visitor starts to move. */
 const wide = window.matchMedia("(min-width: 960px)");
 const hero = document.querySelector<HTMLElement>("[data-hero]");
 if (!reduceMotion.matches && document.querySelector("[data-hero], [data-steps], [data-ink]")) {
   if (hero && wide.matches) hero.setAttribute("data-scrub", "");
-  import("./home-motion")
-    .then((m) => m.start())
-    .catch(() => hero?.removeAttribute("data-scrub"));
+  let motionStarted = false;
+  const startMotion = () => {
+    if (motionStarted) return;
+    motionStarted = true;
+    for (const t of ["scroll", "wheel", "touchstart", "keydown", "pointerdown"]) window.removeEventListener(t, startMotion);
+    import("./home-motion")
+      .then((m) => m.start())
+      .catch(() => hero?.removeAttribute("data-scrub"));
+  };
+  for (const t of ["scroll", "wheel", "touchstart", "keydown", "pointerdown"]) window.addEventListener(t, startMotion, { passive: true });
+  const whenIdle = () => ("requestIdleCallback" in window ? window.requestIdleCallback(startMotion, { timeout: 1500 }) : setTimeout(startMotion, 300));
+  if (document.readyState === "complete") whenIdle();
+  else window.addEventListener("load", whenIdle, { once: true });
 }
 
 /* ---------- "A day" graphic without motion (reduced motion) ----------

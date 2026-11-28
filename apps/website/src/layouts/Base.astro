@@ -65,6 +65,8 @@ const allLd = crumbs?.length ? [...ld, breadcrumbLd([{ name: "Home", path: "/" }
     <link rel="alternate" type="application/rss+xml" title="Rulebox blog" href="/blog/rss.xml" />
     <link rel="preload" href={sansUrl} as="font" type="font/woff2" crossorigin />
     <link rel="preload" href={serifUrl} as="font" type="font/woff2" crossorigin />
+    {/* A page can preload its LCP image here (home: HeroPreload.astro). */}
+    <slot name="head" />
     {/* Marks that JavaScript runs, before first paint. Hashed in the CSP by headers.mjs. */}
     <script is:inline>
       document.documentElement.classList.add("js");

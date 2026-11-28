@@ -22,6 +22,7 @@
  */
 import "../../../../packages/ui/src/logo-motion.css";
 import { CUBE_MOTION } from "../../../../packages/ui/src/brand/cube-motion";
+import { CUBE_SIZES } from "../data/home-images";
 
 const K = CUBE_MOTION.circle;
 const size = 150;
@@ -29,12 +30,18 @@ const word = [..."rulebox"];
 const markVars = `--rb-lm-kx:${K.cx}%;--rb-lm-ky:${K.cy}%;--rb-lm-gx:${CUBE_MOTION.glow.x}%;--rb-lm-gy:${CUBE_MOTION.glow.y}%`;
 const lightBox = `left:${CUBE_MOTION.keyhole.left}%;top:${CUBE_MOTION.keyhole.top}%;width:${CUBE_MOTION.keyhole.width}%;height:${CUBE_MOTION.keyhole.height}%`;
 const sheenMask = `mask-image:url(${CUBE_MOTION.sheen});-webkit-mask-image:url(${CUBE_MOTION.sheen})`;
-const img = (cls: string, l: { src: string; srcSet: string }, style = "") =>
-  `<img class="${cls}" src="${l.src}" srcset="${l.srcSet}" sizes="${size}px"${style ? ` style="${style}"` : ""} alt="" draggable="false">`;
+/* The cube is drawn at `size` px. `sizes` (CUBE_SIZES, 140px) is a little under that, on purpose: the
+   set is 128/256/512w, so at 1x and at Windows' 125 to 175% scaling (a 150px cube is
+   188 to 263 device px) the 256w file is the right one and looks the same, where the
+   exact 150px would send 175% screens to the 512w file. 2x screens still get 512w.
+   The cube is the LCP while the overlay shows (the hero photo is under it), so the
+   body image is also fetched at high priority; the light layer is not. */
+const img = (cls: string, l: { src: string; srcSet: string }, style = "", priority = false) =>
+  `<img class="${cls}" src="${l.src}" srcset="${l.srcSet}" sizes="${CUBE_SIZES}"${priority ? ' fetchpriority="high"' : ""}${style ? ` style="${style}"` : ""} alt="" draggable="false">`;
 /* Same markup as packages/ui LogoMotion.tsx. */
 const overlay =
   `<div class="rb-lm" data-anim="splash" style="--rb-lm-size:${size}px"><div class="rb-lm-mark" style="${markVars}"><i class="rb-lm-shadow"></i><div class="rb-lm-zoom"><div class="rb-lm-cube">` +
-  img("rb-lm-body", CUBE_MOTION.body) +
+  img("rb-lm-body", CUBE_MOTION.body, "", true) +
   img("rb-lm-light", CUBE_MOTION.light, lightBox) +
   `<i class="rb-lm-bloom"></i><div class="rb-lm-sheen" style="${sheenMask}"><i></i></div></div>` +
   `<svg class="rb-lm-door" viewBox="0 0 100 100"><defs><radialGradient id="rb-pre-door" gradientUnits="userSpaceOnUse" cx="${K.cx}" cy="${K.cy}" r="${K.r * 3.4}"><stop offset="0" style="stop-color:var(--rb-lm-door-0)"></stop><stop offset="0.3" style="stop-color:var(--rb-lm-door-1)"></stop><stop offset="1" style="stop-color:var(--rb-lm-door-2)"></stop></radialGradient></defs><path d="${CUBE_MOTION.door}" fill="url(#rb-pre-door)"></path></svg></div></div>` +

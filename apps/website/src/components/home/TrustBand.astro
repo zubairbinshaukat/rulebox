@@ -20,8 +20,11 @@ const lastSpan = rest ? cols - rest + 1 : 1;
 ---
 
 <section class="statement" aria-label="What Rulebox is for">
-  <p class="giant container" aria-label="The staff PC that only does its job.">
-    {words.map((w, i) => <span class="w" style={`--i:${i}`} aria-hidden="true">{w} </span>)}
+  {/* The words are real text (like the Manifesto paragraph): no aria-label on the <p>
+      (not allowed on a generic element) and no aria-hidden copy, so assistive tech and
+      crawlers read one sentence. */}
+  <p class="giant container">
+    {words.map((w, i) => <span class="w" style={`--i:${i}`}>{w} </span>)}
   </p>
 </section>
 

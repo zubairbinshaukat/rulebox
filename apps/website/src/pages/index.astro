@@ -1,6 +1,7 @@
 ---
 import Base from "../layouts/Base.astro";
 import Hero from "../components/home/Hero.astro";
+import HomePreloads from "../components/home/HomePreloads.astro";
 import TrustBand from "../components/home/TrustBand.astro";
 import Manifesto from "../components/home/Manifesto.astro";
 import ThreeParts from "../components/home/ThreeParts.astro";
@@ -24,6 +25,7 @@ import { organizationLd, softwareLd, websiteLd } from "../lib/seo";
   og="home"
   ld={[organizationLd(), websiteLd(), softwareLd()]}
 >
+  <HomePreloads slot="head" />
   <Preloader slot="preload" />
   <Hero />
   <TrustBand />
@@ -37,3 +39,4 @@ import { organizationLd, softwareLd, websiteLd } from "../lib/seo";
   <Faq items={HOME_FAQ} />
   <CtaClose />
 </Base>
+

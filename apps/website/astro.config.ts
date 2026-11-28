@@ -43,7 +43,12 @@ export default defineConfig({
   build: {
     // /pricing -> pricing.html; Cloudflare static assets serve it at /pricing.
     format: "file",
-    inlineStylesheets: "auto",
+    // Inline every page's CSS (about 120 kB raw, 25 kB compressed per page). 'auto' kept four
+    // stylesheets (global, layout, page, DesktopMock) as separate files, and each is
+    // render-blocking: Lighthouse measured about 500 ms (mobile) before first paint, and the
+    // web fonts could only be found after the global sheet arrived. Cost: pages no longer
+    // share a cached stylesheet; the HTML (compressed by Cloudflare) carries it instead.
+    inlineStylesheets: "always",
   },
   prefetch: false,
   markdown: {

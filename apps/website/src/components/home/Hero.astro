@@ -21,6 +21,7 @@ import DesktopMock from "../DesktopMock.astro";
 import Icon from "../Icon.astro";
 import { CTA_PRIMARY, CTA_SECONDARY } from "../../config";
 import { PHOTOS } from "../../data/photos";
+import { HERO_QUALITY, HERO_SIZES, HERO_WIDTHS } from "../../data/home-images";
 
 const DEFAULT_VARIANT: "photos" | "slabs" = "photos";
 /* Photo variant (owner review 3): ONE photo of a café till in use is the
@@ -102,12 +103,11 @@ const HERO_PHOTO = { photo: PHOTOS.homeHero, pos: "50% 40%", posSm: "58% 40%" };
             alt=""
             formats={["avif"]}
             fallbackFormat="webp"
-            widths={[480, 720, 960, 1280, 1600]}
-            sizes="(min-width: 1440px) 840px, (min-width: 960px) 60vw, 92vw"
-            quality={55}
+            widths={HERO_WIDTHS}
+            sizes={HERO_SIZES}
+            quality={HERO_QUALITY}
             loading="eager"
             decoding="async"
-            fetchpriority="high"
             class="slab-img"
           />
           <span class="grade"></span>
@@ -673,3 +673,5 @@ const HERO_PHOTO = { photo: PHOTOS.homeHero, pos: "50% 40%", posSm: "58% 40%" };
     max-width: none;
   }
 </style>
+
+

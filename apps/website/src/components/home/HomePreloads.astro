@@ -1,0 +1,49 @@
+---
+/*
+ * <head> preloads for the home page's LCP candidates, via Base.astro's "head"
+ * slot, so each fetch starts with the first bytes of the HTML (the stylesheet
+ * is inlined now, and the body is reached only after it).
+ *
+ *  - The hero photo, where it is the largest thing on the first screen:
+ *    tablets, and wide screens that scrub (see HERO_PRELOAD_MEDIA). The <img>
+ *    in Hero.astro has no fetchpriority of its own: on phones the photo is
+ *    below the fold.
+ *  - The logo cube of the preloader. That overlay is built by an inline script,
+ *    and only for visitors who arrive directly (see Preloader.astro), so its
+ *    image could not be found in the HTML. It is the LCP on phones, where the
+ *    photo is out of sight. Visitors who skip the overlay (reload, a click
+ *    inside the site, bots) still get this one small file, which the browser
+ *    keeps in cache for the next visit.
+ *
+ *  - The two fonts of the drawn desktop in the hero (Figtree, Geist Mono). They
+ *    sit above the fold, and without a preload the browser found them only
+ *    once it had matched the CSS to the page, then swapped them in and laid
+ *    the mock out again.
+ *
+ * Same srcset, quality and sizes as the images they stand for
+ * (data/home-images.ts), so each preload names the file the page then uses.
+ */
+import { getImage } from "astro:assets";
+import figtreeUrl from "@fontsource-variable/figtree/files/figtree-latin-wght-normal.woff2?url";
+import geistMonoUrl from "@fontsource-variable/geist-mono/files/geist-mono-latin-wght-normal.woff2?url";
+import { CUBE_MOTION } from "../../../../../packages/ui/src/brand/cube-motion";
+import { PHOTOS } from "../../data/photos";
+import { CUBE_SIZES, HERO_PRELOAD_MEDIA, HERO_QUALITY, HERO_SIZES, HERO_WIDTHS } from "../../data/home-images";
+
+const hero = await getImage({ src: PHOTOS.homeHero.src, widths: HERO_WIDTHS, format: "avif", quality: HERO_QUALITY });
+const cube = CUBE_MOTION.body;
+---
+
+<link rel="preload" href={figtreeUrl} as="font" type="font/woff2" crossorigin />
+<link rel="preload" href={geistMonoUrl} as="font" type="font/woff2" crossorigin />
+<link rel="preload" as="image" type="image/webp" href={cube.src} imagesrcset={cube.srcSet} imagesizes={CUBE_SIZES} fetchpriority="high" />
+<link
+  rel="preload"
+  as="image"
+  type="image/avif"
+  href={hero.src}
+  imagesrcset={hero.srcSet.attribute}
+  imagesizes={HERO_SIZES}
+  media={HERO_PRELOAD_MEDIA}
+  fetchpriority="high"
+/>

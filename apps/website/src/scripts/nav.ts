@@ -50,6 +50,17 @@ function setupDropdown(nav: HTMLElement, navMain: HTMLElement, dd: HTMLElement, 
     clearTimeout(closeTimer);
   };
 
+  /* Sizes are read when the stage is first opened, not at load: reading
+     offsetWidth/offsetHeight forces a full-page layout, which at load landed
+     right after first paint (about 150 ms on the home page) for a menu most
+     visits never open. After that first read they are kept up to date. */
+  let measured = false;
+  function ensureMeasured() {
+    if (measured) return;
+    measured = true;
+    measure();
+  }
+
   function measure() {
     maxW = 0;
     maxH = 0;
@@ -107,6 +118,7 @@ function setupDropdown(nav: HTMLElement, navMain: HTMLElement, dd: HTMLElement, 
     if (!desktop.matches || active === id) return;
     const p = panels.get(id);
     if (!p) return;
+    ensureMeasured();
     loadImages(p);
 
     if (!active) {
@@ -244,8 +256,7 @@ function setupDropdown(nav: HTMLElement, navMain: HTMLElement, dd: HTMLElement, 
   });
 
   /* ----- Sizes ----- */
-  measure();
-  document.fonts?.ready.then(measure).catch(() => {});
+  document.fonts?.ready.then(() => measured && measure()).catch(() => {});
   let raf = 0;
   window.addEventListener(
     "resize",
@@ -253,7 +264,7 @@ function setupDropdown(nav: HTMLElement, navMain: HTMLElement, dd: HTMLElement, 
       cancelAnimationFrame(raf);
       raf = requestAnimationFrame(() => {
         if (!desktop.matches) close();
-        else measure();
+        else if (measured) measure();
       });
     },
     { passive: true },
