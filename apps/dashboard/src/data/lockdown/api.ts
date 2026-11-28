@@ -1,5 +1,5 @@
 import type { ListQuery, ServerList } from "../serverList";
-import type { AllowInput, AllowOptions, DeviceLockdown, FindingRow, FindingStatus, Id, LockdownSettings, LockdownView, QueryState } from "../types";
+import type { AllowInput, AllowOptions, FindingRow, FindingStatus, Id, LockdownSettings, LockdownSync, LockdownView, QueryState } from "../types";
 
 type Mutation<A, R = void> = () => (args: A) => Promise<R>;
 
@@ -10,6 +10,11 @@ type Mutation<A, R = void> = () => (args: A) => Promise<R>;
 export interface LockdownApi {
   /** `lockdown:groupView` (viewer): the group's settings, its newest exceptions and how many findings are open. */
   useLockdownView: (groupId: Id) => QueryState<LockdownView>;
+  /**
+   * `lockdown:groupSync` (viewer): "PCs up to date: n of m". A query of its own, subscribed only while the group lockdown screen is open,
+   * so a PC's report never re-runs the form's `useLockdownView`.
+   */
+  useLockdownSync: (groupId: Id) => QueryState<LockdownSync>;
   /** `lockdown:update` (admin; MAJOR when a program rule changes mode or App Control changes level: the hook opens the step-up dialog and retries). */
   useSaveLockdown: Mutation<{ groupId: Id; settings: LockdownSettings; expectedRevision: number }, { revision: number }>;
   /** `lockdown:findings` (viewer): one page of one status; sort key `seen` only; no search, no total. */
@@ -22,11 +27,6 @@ export interface LockdownApi {
   useIgnoreFinding: Mutation<{ findingId: Id }>;
   /** `lockdown:removeException` (admin). */
   useRemoveException: Mutation<{ exceptionId: Id }>;
-  /**
-   * The lockdown part of `fleet:get` for the device page's cards. The SAME query and arguments as `useDeviceDetail`, so Convex
-   * serves both from one subscription: no extra read. (Kept here so the first load does not carry the lockdown fields.)
-   */
-  useDeviceLockdown: (deviceId: Id) => QueryState<DeviceLockdown>;
   /** `fleet:allowUsb` (admin): 1 to 8 whole hours; 0 ends it now. */
   useAllowUsb: Mutation<{ deviceId: Id; hours: number }, { until: number | null }>;
 }

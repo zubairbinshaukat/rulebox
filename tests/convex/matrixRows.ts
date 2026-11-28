@@ -713,6 +713,7 @@ export const ROWS: Row[] = [
   { name: "lockdown:groupView", call: (a, f) => a.query(api.lockdown.groupView, { groupId: f.groupId }), expect: { ...VIEWER, foreign: "not_found" } },
   {
     name: "lockdown:findings",
+  { name: "lockdown:groupSync", call: (a, f) => a.query(api.lockdown.groupSync, { groupId: f.groupId }), expect: { ...VIEWER, foreign: "not_found" } },
     call: (a) => a.query(api.lockdown.findings, { status: "new", paginationOpts: { numItems: 25, cursor: null } }),
     expect: { ...VIEWER, foreign: "ok" },
   },

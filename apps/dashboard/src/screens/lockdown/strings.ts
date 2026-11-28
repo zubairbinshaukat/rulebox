@@ -15,94 +15,174 @@ import {
   type UsbSwitch,
 } from "../../data/types";
 import { toAppError } from "../../lib/errors";
+import type { PresetId } from "./presets";
 
-/** Strings of the lockdown screens (Phase 5 Step 19, plan 4.20). Plain words, short sentences. */
+/**
+ * Strings of the lockdown screens (UI pass, `docs/plans/ui-pass/lockdown.md` section 8). Plain words, short sentences.
+ *
+ * Mode words (UI only; the data stays `off | audit | enforce`): Off, Trial run (only report), Block.
+ * Check names: appLocker = Employee program list, appControl = Windows safety list, procWatch = Rulebox program check.
+ * The Windows feature names (AppLocker, App Control) appear only in `appLockerHelp` and `appControlHelp`, the (i) texts of those two
+ * checks (`strings.test.ts` pins this). A key ending in `Help`, `Info` or `Hint`, and the second item of a `[label, info]` pair, is
+ * an (i) text: at most three short sentences.
+ */
 const n = (count: number, one: string, other: string) => `${count} ${count === 1 ? one : other}`;
+const plus = (more: boolean) => (more ? "+" : "");
 
-/** Said next to every setting that also changes the PC for administrators (plan 4.20 text rule). */
-export const EVERYONE = "Applies to everyone on this PC, including administrators.";
-const STAFF_ONLY = "Applies to employees only. Administrators are not affected.";
+/** Said once at the top of "Everyone" sections and in the (i) texts of settings that also change the PC for administrators. */
+export const EVERYONE = "Everyone, including administrators.";
+const EVERYONE_SHORT = "Everyone, incl. administrators.";
+const STAFF_ONLY = "Employees only.";
 
 type StaffKey = keyof LockdownSettings["staff"];
 type MachineSwitch = Exclude<keyof LockdownSettings["machine"], "accountLockout">;
+type PresetText = { name: string; lead: string; points: string[]; badge?: string };
 
 export const lockdownStrings = {
   title: "Lockdown",
-  titleFor: (group: string) => `Lockdown of ${group}`,
-  lead: "What employees can and cannot do on the PCs of this group. Changes reach the pilot ring first when rings are on.",
+  titleFor: (group: string) => `Lockdown · ${group}`,
+  lead: "What employees can and cannot do on this group's PCs.",
   back: "Back to the group",
   loadingTitle: "Loading",
   readOnly: "Only administrators can change these settings.",
-  // ---- findings link
-  findingsNone: "No program is waiting for a decision.",
-  findingsNew: (count: number, more: boolean) => `Audit findings: ${more ? `${OPEN_FINDINGS_CAP}+` : count} new`,
-  findingsDetail: "Programs that the rules would block. Allow the ones your employees need before you enforce.",
-  findingsOpen: "Review findings",
-  auditLong: (days: number) => `The program rules have been in audit mode for ${n(days, "day", "days")}.`,
-  auditLongDetail: "Audit mode only records what would be blocked. Review the findings, then switch to Enforce.",
-  // ---- program rules
-  rulesTitle: "Program rules",
-  rulesLead: "Three checks decide which programs may start. Start in Audit, review the findings, then switch to Enforce.",
-  modes: { off: "Off", audit: "Audit", enforce: "Enforce" } satisfies Record<LayerMode, string>,
+
+  // ---- Your PCs (`lockdown:groupSync`)
+  syncTitle: "Your PCs",
+  upToDate: (upToDate: number, total: number, more: boolean) => `PCs up to date: ${upToDate} of ${total}${plus(more)}`,
+  allUpToDate: (total: number) => (total === 1 ? "This PC is up to date." : `All ${total} PCs are up to date.`),
+  sending: (upToDate: number, total: number) => (total === 1 ? `Sending: ${upToDate} of 1 PC has it` : `Sending: ${upToDate} of ${total} PCs have it`),
+  waiting: (count: number) => `${count} waiting`,
+  waitingInfo: "A PC gets the change the next time it is online. Rulebox never restarts a PC on its own.",
+  problems: (count: number) => `${count} could not apply it:`,
+  problemsInfo: "Open the PC to see why. Nothing was changed on it.",
+  noPcs: "No PCs in this group yet.",
+  noPcsAction: "Add a PC",
+  notSent: "Not sent yet. Your PCs get these settings when you save.",
+  ringsOn: "Rollout rings are on: pilot PCs get changes first.",
+  ringsHalted: "The rollout is paused. Other PCs wait until you resume it.",
+  ringsAction: "Open rollout",
+  reduced: (count: number) =>
+    `${count === 1 ? "1 PC runs" : `${count} PCs run`} Windows Home: the employee program list does not work there. The Rulebox program check still does.`,
+  adminTilesPending: (count: number) =>
+    `Admin accounts stay visible on ${n(count, "PC", "PCs")} until Other user sign-in is confirmed there.`,
+
+  // ---- Protection level (presets are derived on the client; nothing is stored)
+  levelTitle: "Protection level",
+  levelInfo: "Sets many Windows restrictions at once. Fine-tune them in Advanced settings.",
+  presets: {
+    basic: {
+      name: "Basic",
+      lead: "Hides the risky Windows tools. Everything else stays open.",
+      points: ["USB drives allowed", "Settings app available", "Accessibility tools allowed"],
+    },
+    standard: {
+      name: "Standard",
+      badge: "Recommended",
+      lead: "The usual kiosk lockdown. Good for most shops.",
+      points: ["Windows tools hidden", "USB drives allowed", "Accounts lock after 10 wrong passwords"],
+    },
+    strict: {
+      name: "Strict",
+      lead: "For public or shared PCs. Also blocks USB drives and phones.",
+      points: ["USB drives and phones blocked", "Accounts lock after 5 wrong passwords", "Also applies to devices already plugged in"],
+    },
+  } satisfies Record<PresetId, PresetText>,
+  custom: (name: string, changes: number) => `Custom: ${name} with ${n(changes, "change", "changes")}`,
+  customReset: (name: string) => `Reset to ${name}`,
+  customShow: "Show changes",
+  changed: "Changed",
+
+  // ---- Program blocking (one control for the three program checks)
+  modeTitle: "Program blocking",
+  modeInfo: "Decides which programs may start for employees. Start with a trial run, review the programs it finds, then block.",
+  modes: { off: "Off", audit: "Trial run", enforce: "Block" } satisfies Record<LayerMode, string>,
+  modeSub: { off: "Nothing is checked.", audit: "Only report", enforce: "Not allowed = does not start" } satisfies Record<LayerMode, string>,
   modeHelp: {
-    off: "Nothing is checked or recorded.",
-    audit: "Nothing is blocked. Programs that would be blocked are listed as findings.",
-    enforce: "Programs outside the rules are blocked.",
+    off: "Programs are not checked or reported.",
+    audit: "Nothing is blocked. Programs that would be blocked are listed for you to review.",
+    enforce: "Only Windows, Rulebox, the apps you assigned and the programs you allowed can start.",
   } satisfies Record<LayerMode, string>,
-  appLocker: "Allowed programs for employees (AppLocker)",
-  appLockerHelp: `Employees can start only Windows, Rulebox and the programs you assigned. ${STAFF_ONLY}`,
-  appControl: "App Control",
-  appControlHelp: `Blocks programs that are known to get around security rules. ${EVERYONE}`,
-  appControlLevel: "App Control level",
-  levels: { recommendedBlocks: "Recommended blocks", allowlist: "Allow list only" } satisfies Record<AppControlLevel, string>,
+  mixed: "Mixed: set per check in Advanced settings.",
+  trialDays: (days: number) => `Trial run for ${n(days, "day", "days")}.`,
+  trialLong: (days: number) => `Trial run for ${days} days. Review the programs, then switch to Block.`,
+
+  // ---- Programs to review (card with a link to the list)
+  reviewTitle: "Programs to review",
+  reviewCount: (count: number, more: boolean) => `${count}${plus(more)}`,
+  reviewLead: "Allow what employees need before you block.",
+  reviewNone: "Nothing to review.",
+  reviewOpen: "Review programs",
+
+  // ---- Advanced settings
+  advanced: "Advanced settings",
+  tags: { staff: "Employees only", everyone: "Everyone, incl. administrators" },
+  checksTitle: "Program checks",
+  staffTitle: "Windows tools for employees",
+  machineTitle: "Sign-in screen and PC",
+  lockoutTitle: "Wrong passwords",
+  usbTitle: "USB devices",
+  inputTitle: "Keyboard and accessibility",
+  bootTitle: "Start-up and recovery",
+  perfTitle: "Speed",
+  netTitle: "Wi-Fi",
+
+  // program checks
+  appLocker: "Employee program list",
+  appLockerHelp:
+    "Employees can start only Windows, Rulebox and the programs you assigned or allowed. Administrators are not affected. Uses Windows AppLocker (not on Windows Home).",
+  appControl: "Windows safety list",
+  appControlHelp:
+    "Blocks programs that are known to get around security rules, for everyone on the PC, including administrators. Uses Windows App Control.",
+  appControlLevel: "Safety list strength",
+  levels: { recommendedBlocks: "Recommended list", allowlist: "Strict list" } satisfies Record<AppControlLevel, string>,
   levelHelp: {
-    recommendedBlocks: "Blocks a list of programs that Microsoft recommends blocking. Everything else is allowed.",
-    allowlist: "Only Windows, the Program Files folders and Rulebox may run. This also restricts administrators. Check each PC first.",
+    recommendedBlocks: "Blocks the programs Microsoft recommends blocking.",
+    allowlist: "Only Windows and installed programs may run, also for administrators. Try it on one PC first.",
   } satisfies Record<AppControlLevel, string>,
-  procWatch: "Process watch",
-  procWatchHelp: `Rulebox watches what the employee account starts and closes anything that is not allowed. ${STAFF_ONLY}`,
-  // ---- employee restrictions
-  staffTitle: "Employee restrictions",
-  staffLead: `Windows features hidden or turned off for the employee account. ${STAFF_ONLY}`,
+  procWatch: "Rulebox program check",
+  procWatchHelp:
+    "Rulebox closes any program an employee starts that is not allowed. Works on every Windows edition. Administrators are not affected.",
+
+  // Windows tools for employees: [label, (i) text]
   staff: {
-    taskManager: ["Turn off Task Manager", "Also removes it from the Ctrl+Alt+Del screen."],
-    run: ["Turn off the Run dialog", ""],
-    commandPrompt: ["Turn off the command prompt", "Batch files are refused too."],
-    registryTools: ["Turn off the registry editor", ""],
-    settings: ["Turn off Settings and Control Panel", ""],
+    taskManager: ["Hide Task Manager", "Also removes it from the Ctrl+Alt+Del screen."],
+    run: ["Hide the Run box", ""],
+    commandPrompt: ["Block the command prompt", "Batch files are refused too."],
+    registryTools: ["Block the registry editor", ""],
+    settings: ["Hide Settings and Control Panel", ""],
     signOut: ["Remove Sign out from Ctrl+Alt+Del", "Employees sign out in the Staff App."],
     changePassword: ["Remove Change password from Ctrl+Alt+Del", ""],
-    hideDrives: ["Hide drives in file dialogs", "This only hides them. The program rules decide what can run."],
+    hideDrives: ["Hide drives in Open and Save windows", "This only hides them. Program blocking decides what can run."],
     accessibilityHotkeys: ["Turn off accessibility shortcut keys", "For example pressing Shift five times."],
     officeMacros: ["Turn off Office macros", "Macros in Word, Excel and PowerPoint do not run."],
   } satisfies Record<StaffKey, [string, string]>,
-  // ---- PC restrictions
-  machineTitle: "PC restrictions",
-  machineLead: `Settings of the whole PC. ${EVERYONE}`,
+
+  // Sign-in screen and PC: [label, (i) text]
   machine: {
     hideSwitchUser: ["Hide Switch user", ""],
     hideSignInPower: ["Hide the power button on the sign-in screen", ""],
-    denyElevationRequests: ["Never ask employees for an administrator password", "A program that needs administrator rights does not start for an employee."],
-    hideAdminTiles: ["Hide administrator accounts on the sign-in screen", "Administrators sign in with Other user. Used only on PCs where that is confirmed to work."],
-    noWakePassword: ["Do not ask for a password after sleep", ""],
-    restrictPrinterDrivers: ["Only administrators may install printer drivers", ""],
-    fileOutputPrinters: ["Hide printers that save to a file", "For example Print to PDF, so employees cannot save documents that way."],
+    hideAdminTiles: ["Hide administrator accounts", "Administrators sign in with Other user. Used only on PCs where that is confirmed to work."],
+    noWakePassword: ["No password after sleep", ""],
+    denyElevationRequests: ["Never ask employees for an admin password", "A program that needs administrator rights does not start for an employee."],
+    restrictPrinterDrivers: ["Only administrators install printer drivers", ""],
+    fileOutputPrinters: ["Hide Print to PDF and other print-to-file printers", "So employees cannot save documents that way."],
   } satisfies Record<MachineSwitch, [string, string]>,
+
+  // wrong passwords
   lockout: "Lock an account after wrong passwords",
-  lockoutHelp: "Off leaves the PC's own setting as it is.",
-  lockoutThreshold: "Wrong passwords before the lock",
+  lockoutHelp: "Off leaves the PC's own setting as it is. Applies to every account on the PC.",
+  lockoutThreshold: "Wrong passwords allowed",
   lockoutThresholdHint: `A whole number from ${MIN_LOCKOUT_THRESHOLD} to ${MAX_LOCKOUT_THRESHOLD}.`,
   lockoutDuration: "Lock for (minutes)",
-  lockoutWindow: "Count wrong passwords within (minutes)",
-  lockoutWindowHint: "Not longer than the lock itself.",
+  lockoutWindow: "Count within (minutes)",
+  lockoutWindowHint: "Wrong passwords are counted for this long. Not longer than the lock.",
   lockoutProblems: {
     threshold: `Use a whole number from ${MIN_LOCKOUT_THRESHOLD} to ${MAX_LOCKOUT_THRESHOLD}.`,
     duration: `Use a whole number from 1 to ${MAX_LOCKOUT_MINUTES}.`,
     window: "Use a whole number from 1 up to the lock time.",
   },
-  // ---- USB
-  usbTitle: "USB devices",
-  usbLead: "Choose which kinds of USB devices may be used. Each kind has its own switch.",
+
+  // USB
   usbAlways: "Keyboards, mice and touch screens always work.",
   usb: {
     storage: "USB drives and memory cards",
@@ -112,90 +192,117 @@ export const lockdownStrings = {
     other: "Other USB devices",
   } satisfies Record<"storage" | "printers" | "imaging" | "phones" | "other", string>,
   usbHelp: {
-    storage: `Also covers memory-card readers inside printers. The Staff App has no other way to hand in files in this version. ${STAFF_ONLY}`,
-    printers: `Network printers keep working. ${EVERYONE}`,
-    imaging: EVERYONE,
+    storage: `Also covers card readers inside printers. Employees have no other way to hand in files yet. ${STAFF_ONLY}`,
+    printers: `Network printers keep working. ${EVERYONE_SHORT}`,
+    imaging: EVERYONE_SHORT,
     phones: STAFF_ONLY,
-    other: `A fixed list of device kinds, for example serial ports and modems. ${EVERYONE}`,
+    other: `A fixed list of device kinds, for example serial ports and modems. ${EVERYONE_SHORT}`,
   } satisfies Record<"storage" | "printers" | "imaging" | "phones" | "other", string>,
-  storageModes: { allow: "Allowed", readOnly: "Read only", block: "Blocked" } satisfies Record<UsbStorageMode, string>,
+  storageModes: { allow: "Allowed", readOnly: "Read only (open, not save)", block: "Blocked" } satisfies Record<UsbStorageMode, string>,
   usbModes: { allow: "Allowed", block: "Blocked" } satisfies Record<UsbSwitch, string>,
   usbOtherWarning: "Blocking other USB devices can stop special equipment from working. Test it on one PC first.",
-  usbRetroactive: "Also apply to devices that are already plugged in",
-  usbRetroactiveHint: "Without this, a block only affects devices that are plugged in later.",
-  // ---- keyboard and accessibility
-  inputTitle: "Keyboard and accessibility",
+  usbRetroactive: "Also apply to devices already plugged in",
+  usbRetroactiveHint: "Without this, a block only affects devices plugged in later.",
+
+  // keyboard and accessibility
   winCombos: "Block Windows-key shortcuts",
-  winCombosHelp: "For example Windows+R and Windows+E. The administrator exit keeps working.",
-  accessibilityTools: "Allow the Windows accessibility tools",
-  accessibilityToolsHelp: "Narrator, Magnifier and the on-screen keyboard. The Staff App's own accessibility features are always on.",
-  // ---- start-up
-  bootTitle: "Start-up and recovery",
-  autoRecovery: "Turn off automatic Windows recovery",
-  autoRecoveryHelp: "Stops the PC from opening the recovery screen after failed starts. Left on by itself on PCs that BitLocker protects.",
+  winCombosHelp: "For example Windows+R and Windows+E. The admin exit keeps working.",
+  accessibilityTools: "Allow Narrator, Magnifier and the on-screen keyboard",
+  accessibilityToolsHelp: "The Staff App's own accessibility features are always on.",
+
+  // start-up and recovery
+  autoRecovery: "Hide the Windows recovery screen",
+  autoRecoveryHelp: "Stops the PC from opening recovery after failed starts. Left on by itself on PCs that BitLocker protects.",
   safeModeGuard: "Keep employees out of Safe Mode",
   safeModeGuardHelp: "Rulebox also runs in Safe Mode and does not sign the employee account in there.",
-  // ---- performance
-  perfTitle: "Performance",
-  perfLead: "Makes slow PCs feel faster.",
-  staffTuning: "Tune Windows for the employee account",
-  staffTuningHelp: "Turns off animations, background apps and start-up programs for employees.",
-  kioskProfile: "Use the kiosk performance profile",
-  kioskProfileHelp: `Stops Windows services a kiosk PC does not need. ${EVERYONE}`,
+
+  // speed
+  staffTuning: "Make Windows lighter for employees",
+  staffTuningHelp: "Turns off animations, background apps and start-up programs.",
+  kioskProfile: "Turn off unneeded Windows services",
+  kioskProfileHelp: EVERYONE_SHORT,
   noPrinting: "This group does not print",
-  noPrintingHelp: "Stops the print service to save memory. The print service stays on whenever this group has printers.",
-  // ---- networks
-  netTitle: "Networks",
-  wifiManagedOnly: "Managed Wi-Fi networks only",
-  wifiManagedOnlyConfirm: "I understand this PC may go offline",
-  wifiManagedOnlyConfirmHint: "Tick this to apply the rule even if a PC is on another network now. That PC goes offline until it sees a network from the list.",
-  wifiManagedOnlyHelp: `The PC can join only the Wi-Fi networks you assigned to this group. Needs at least one. ${EVERYONE}`,
-  // ---- exceptions
-  exceptionsTitle: "Exceptions",
-  exceptionsLead: "Programs you allowed from the findings. They are allowed for employees on the PCs of this group.",
-  exceptionsNone: "No exceptions yet. Allow a program from the findings list.",
-  exceptionsTruncated: "Showing the newest 50 exceptions.",
-  exceptionKinds: { publisher: "Publisher", hash: "This exact file", path: "Folder" } satisfies Record<ExceptionKind, string>,
-  exceptionWhat: (r: { kind: ExceptionKind; subject: string | null; fileName: string | null; hashStart: string | null; path: string | null }) =>
-    r.kind === "publisher" ? `${r.fileName ?? "Any program"} signed by ${r.subject ?? "the publisher"}` : r.kind === "hash" ? `File ${r.hashStart ?? ""}…` : (r.path ?? ""),
-  breaksOnUpdate: "Breaks on update",
-  breaksOnUpdateHelp: "This rule matches one exact file. When the program updates, it is blocked again.",
+  noPrintingHelp: "Stops the print service to save memory. It stays on whenever this group has printers.",
+
+  // Wi-Fi
+  wifiManagedOnly: "Only this group's Wi-Fi networks",
+  wifiManagedOnlyHelp: "PCs can join only the Wi-Fi networks you added for this group. Needs at least one.",
+  wifiManagedOnlyConfirm: "Apply even if a PC goes offline",
+  wifiManagedOnlyConfirmHint: "A PC on another network goes offline until it sees one of this group's networks.",
+
+  // ---- Extra allowed programs (the programs allowed from the review list)
+  exceptionsTitle: "Extra allowed programs",
+  exceptionsInfo: "Programs you allowed from the review list. The apps you assigned to this group are always allowed.",
+  exceptionsNone: "None yet.",
+  exceptionsTruncated: "Showing the newest 50.",
+  exceptionKinds: { publisher: "By publisher", hash: "This exact version", path: "By folder" } satisfies Record<ExceptionKind, string>,
+  /** The row text: what was allowed, in plain words (no fingerprint; `exceptionTitle` has the technical value for the hover text). */
+  exceptionWhat: (r: { kind: ExceptionKind; subject: string | null; fileName: string | null; hashStart: string | null; path: string | null }) => {
+    if (r.kind === "publisher") return `${r.fileName ?? "Any program"} from ${r.subject ?? "the publisher"}`;
+    if (r.kind === "hash") return `${r.fileName ?? "A program"} (this exact version)`;
+    const parts = (r.path ?? "").split("\\").filter((p) => p !== "");
+    return parts.slice(-2).join("\\");
+  },
+  /** The hover text of a row: the exact value (the start of the fingerprint, or the whole folder). */
+  exceptionTitle: (r: { kind: ExceptionKind; hashStart: string | null; path: string | null }) =>
+    r.kind === "hash" ? `Fingerprint ${r.hashStart ?? ""}…` : r.kind === "path" ? (r.path ?? "") : "",
+  breaksOnUpdate: "Allow again after updates",
+  breaksOnUpdateHelp: "This matches one exact version. After an update the program is blocked until you allow it again.",
   forApp: (app: string) => `For ${app}`,
   removeException: "Remove",
-  removeExceptionTitle: "Remove this exception?",
-  removeExceptionBody: "The program is blocked again once the rules are enforced. Its finding goes back to the open list.",
-  exceptionRemoved: "Exception removed.",
-  // ---- save
-  save: "Save settings",
-  discard: "Discard changes",
-  saved: "Lockdown settings saved.",
-  enforceTitle: "Save these settings?",
-  enforceIntro: (layers: string[]) => `You are switching ${layers.join(" and ")} to Enforce. Programs outside the rules will be blocked.`,
+  removeExceptionTitle: (file: string) => `Remove ${file}?`,
+  removeExceptionBody: "It is blocked again once the group blocks programs. It goes back to the review list.",
+  exceptionRemoved: "Removed.",
+
+  // ---- Save bar and confirmations
+  save: "Save",
+  discard: "Undo changes",
+  unsaved: (count: number) => n(count, "unsaved change", "unsaved changes"),
+  changesInfoMore: (count: number) => `and ${count} more`,
+  saved: "Saved. Your PCs get this within a minute.",
+  savedRings: "Saved. Pilot PCs get this within a minute; the others when the rollout moves on.",
+  enforceTitle: "Start blocking programs?",
+  enforceIntro: "From now on, programs that are not allowed do not start on this group's PCs.",
   enforceFindings: (count: number, more: boolean) =>
-    count === 0 ? "No finding is waiting for a decision." : `${more ? `More than ${OPEN_FINDINGS_CAP}` : count} ${count === 1 && !more ? "finding is" : "findings are"} still open. Those programs will be blocked.`,
-  enforceAppControl: "App Control applies to everyone on this PC, including administrators.",
-  enforceAuditFirst: "A PC that has never run in audit mode audits for 24 hours first.",
-  managedConfirm: "Managed networks only: a PC that is on another Wi-Fi network stays as it is and reports a refusal. A PC with no managed network in range goes offline, and then Rulebox cannot reach it.",
+    count === 0 ? "Nothing is waiting for review." : `${count}${plus(more)} ${count === 1 && !more ? "program is" : "programs are"} still waiting for review. They will be blocked.`,
+  enforceAppControl: "The Windows safety list also applies to administrators.",
+  enforceAuditFirst: "A PC that never had a trial run does one for 24 hours first.",
+  enforceReview: "Review programs first",
+  managedConfirm:
+    "Only this group's Wi-Fi: a PC on another network keeps it and reports a problem. A PC with none of these networks in range goes offline, and then Rulebox cannot reach it.",
   enforceConfirm: "Save and apply",
+
   // ---- errors
-  managedEmpty: "Assign a Wi-Fi network to this group first. Managed networks only needs at least one.",
-  badLockout: "Check the account lockout numbers.",
+  managedEmpty: "Add a Wi-Fi network to this group first.",
+  badLockout: "Check the wrong-password numbers.",
+
+  // ---- Legacy keys of the old group screen (`Lockdown.tsx`); the composition step removes them with that screen.
+  findingsNew: (count: number, more: boolean) => `Programs to review: ${more ? `${OPEN_FINDINGS_CAP}+` : count}`,
+  findingsDetail: "Allow the programs your employees need before you block.",
+  findingsOpen: "Review programs",
+  auditLong: (days: number) => `Trial run for ${n(days, "day", "days")}.`,
+  auditLongDetail: "Nothing is blocked yet. Review the programs, then switch to Block.",
+  rulesTitle: "Program blocking",
+  rulesLead: "Three checks decide which programs may start. Start with a trial run, review the programs, then block.",
+  staffLead: `Windows tools hidden or turned off for employees. ${STAFF_ONLY}`,
+  machineLead: `Settings of the whole PC. ${EVERYONE}`,
+  usbLead: "Choose which kinds of USB devices may be used.",
+  perfLead: "Makes slow PCs feel faster.",
 };
 
 export const findingsStrings = {
-  title: "Findings",
-  lead: "Programs the rules blocked or would block on your PCs. Allow what your employees need. Ignore the rest.",
+  title: "Programs to review",
+  lead: "Programs your PCs stopped, or would stop in a trial run. Allow what employees need.",
   back: "Back",
-  statuses: { new: "Open", allowed: "Allowed", ignored: "Ignored" } satisfies Record<FindingStatus, string>,
+  statuses: { new: "To review", allowed: "Allowed", ignored: "Ignored" } satisfies Record<FindingStatus, string>,
   statusLabel: "Show",
   colProgram: "Program",
-  colSigner: "Signed by",
   colWhere: "Found in",
-  colLayer: "Rule",
   colDevices: "PCs",
   colSeen: "Last seen",
   colActions: "Actions",
-  unsigned: "Not signed",
+  unsigned: "Unknown publisher",
+  unsignedInfo: "The program is not signed, so it can only be allowed as this exact version.",
   folders: {
     windows: "Windows folder",
     programFiles: "Program Files",
@@ -203,54 +310,65 @@ export const findingsStrings = {
     userProfile: "Employee's own folders",
     userTemp: "Temporary files",
     removable: "USB drive",
-    network: "Network share",
+    network: "Network folder",
     other: "Another folder",
   } as Record<string, string>,
-  layers: { appLocker: "AppLocker", appControl: "App Control", procWatch: "Process watch" } satisfies Record<FindingLayer, string>,
+  layers: { appLocker: "Employee program list", appControl: "Windows safety list", procWatch: "Rulebox program check" } satisfies Record<FindingLayer, string>,
   pcs: (count: number) => n(count, "PC", "PCs"),
-  allow: "Allow for app…",
+  allow: "Allow",
   ignore: "Ignore",
   ignoreTitle: (file: string) => `Ignore ${file}?`,
-  ignoreBody: "It leaves the open list. Nothing is allowed. You can still allow it later from the Ignored list.",
-  ignored: "Finding ignored.",
-  emptyTitle: { new: "No open findings", allowed: "Nothing allowed yet", ignored: "Nothing ignored" } satisfies Record<FindingStatus, string>,
+  ignoreBody: "It leaves the review list. Nothing is allowed. You can still allow it from Ignored.",
+  ignored: "Ignored.",
+  emptyTitle: { new: "Nothing to review", allowed: "Nothing allowed yet", ignored: "Nothing ignored" } satisfies Record<FindingStatus, string>,
   emptyBody: {
-    new: "When a program is blocked, or would be blocked in audit mode, it shows up here.",
-    allowed: "Programs you allow from the open list show up here.",
-    ignored: "Findings you ignore show up here.",
+    new: "When a PC stops a program, or would in a trial run, it shows up here.",
+    allowed: "Programs you allow from the review list show up here.",
+    ignored: "Programs you ignore show up here.",
   } satisfies Record<FindingStatus, string>,
-  appControlNote: "App Control findings cannot be allowed per program.",
+  appControlNote: "Can't be allowed",
+  appControlInfo: "Windows blocks this one for everyone because it can get around security rules. It cannot be allowed one by one.",
+  howTitle: "How to review",
+  howSteps: ["Allow what your employees need.", "Ignore the rest.", "Switch the group to Block."],
+  backToGroup: (group: string) => `Back to ${group}`,
+
   // ---- allow dialog
   allowTitle: (file: string) => `Allow ${file}`,
-  allowLead: "Rulebox adds a rule so employees can start this program. It applies to AppLocker and the process watch.",
-  ruleKind: "How to recognise the program",
+  allowLead: "Employees in the chosen groups can start this program.",
+  recognisedBy: {
+    publisher: (signer: string) => `Recognised by its publisher, ${signer}. Keeps working after updates.`,
+    hash: "Recognised as this exact version. After an update, allow it again.",
+    path: "Recognised by its folder.",
+  },
+  ruleKind: "How to recognise it",
   kinds: {
-    publisher: "By its publisher (recommended)",
-    hash: "This exact file",
-    path: "By its folder",
+    publisher: "By publisher (recommended)",
+    hash: "This exact version",
+    path: "By folder",
   } satisfies Record<ExceptionKind, string>,
   kindHelp: {
-    publisher: (signer: string) => `Any version of this program signed by ${signer}. Keeps working after updates.`,
-    hash: "Only this one file. Breaks on update: a new version is blocked until you allow it again.",
+    publisher: (signer: string) => `Any version signed by ${signer}. Keeps working after updates.`,
+    hash: "Only this exact version. After an update, allow it again.",
     path: "Any file with this name in a folder only administrators can change.",
   },
   kindUnavailable: {
-    publisher: "Not possible: the program is not signed.",
-    hash: "Not possible: the PC did not send the file's fingerprint.",
-    path: "Not possible: the program is not in a folder that only administrators can change.",
+    publisher: "Not signed",
+    hash: "The PC did not send its fingerprint",
+    path: "Not in a protected folder",
   } satisfies Record<ExceptionKind, string>,
   folder: "Folder",
   folderHint: "Start with {ProgramFiles}, {ProgramFilesX86} or {RuleboxApps}, for example {ProgramFiles}\\Acme.",
   folderProblem: "Enter a folder under {ProgramFiles}, {ProgramFilesX86} or {RuleboxApps}.",
-  groups: "Allow in these groups",
-  groupsHint: `Choose up to ${MAX_ALLOW_GROUPS} groups.`,
+  groups: "Allow in",
+  groupsFilter: "Find a group",
+  groupsHint: `Up to ${MAX_ALLOW_GROUPS} groups.`,
   groupsProblem: "Choose at least one group.",
   groupsTooMany: `Choose at most ${MAX_ALLOW_GROUPS} groups at a time.`,
-  app: "Program it belongs to",
-  appNone: "No program",
-  appHint: "Optional. Helps you find the exception later.",
+  app: "Belongs to app",
+  appNone: "No app",
+  appHint: "Optional. Helps you find it later.",
   reason: "Note",
-  reasonHint: `Optional. Why this is allowed. Up to ${MAX_EXCEPTION_REASON} characters.`,
+  reasonHint: `Optional. Up to ${MAX_EXCEPTION_REASON} characters.`,
   reasonProblem: `Use at most ${MAX_EXCEPTION_REASON} characters.`,
   allowConfirm: "Allow",
   allowing: "Allowing…",
@@ -259,13 +377,17 @@ export const findingsStrings = {
   // ---- refusals of `lockdown:allow`
   errors: {
     no_signer: "This program is not signed, so it cannot be allowed by publisher.",
-    no_hash: "The PC did not send this file's fingerprint, so it cannot be allowed as an exact file.",
-    app_control_finding: "App Control findings cannot be allowed per program.",
+    no_hash: "The PC did not send this program's fingerprint, so it cannot be allowed as an exact version.",
+    app_control_finding: "Windows safety list programs cannot be allowed one by one.",
     path_not_admin_only: "This program is not in a folder that only administrators can change, so it cannot be allowed by folder.",
-    already_allowed: "This finding is allowed already. Remove its exceptions first.",
+    already_allowed: "This program is allowed already. Remove its extra allowed programs first.",
   } as Record<string, string>,
   tooManyGroups: `Choose at most ${MAX_ALLOW_GROUPS} groups at a time.`,
-  tooManyExceptions: "This group has 200 exceptions already. Remove one first.",
+  tooManyExceptions: "This group has 200 extra allowed programs already. Remove one first.",
+
+  // ---- Legacy keys of the old findings screen (`Findings.tsx`); the findings step removes them with that screen.
+  colSigner: "Publisher",
+  colLayer: "Check",
 };
 
 /** The sentence for the refusals of the lockdown functions that need their own words (null = the usual sentence). */

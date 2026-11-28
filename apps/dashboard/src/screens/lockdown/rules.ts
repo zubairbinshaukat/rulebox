@@ -7,6 +7,8 @@ import {
   type LayerMode,
   type LockdownSettings,
 } from "../../data/types";
+import { valueAt } from "./presets";
+import { lockdownStrings } from "./strings";
 
 /** Pure rules of the lockdown screens (Phase 5 Step 19); the server checks the same things (`convex/lockdown.ts`). */
 
@@ -78,6 +80,55 @@ export type RuleLayer = (typeof RULE_LAYERS)[number];
 /** The program rules whose mode changes between two settings. */
 export function changedLayers(from: LockdownSettings, to: LockdownSettings): { layer: RuleLayer; from: LayerMode; to: LayerMode }[] {
   return RULE_LAYERS.filter((k) => from[k].mode !== to[k].mode).map((k) => ({ layer: k, from: from[k].mode, to: to[k].mode }));
+}
+
+/** The "Program blocking" control: the mode all three program checks share, or "mixed" when they differ (set per check in Advanced). */
+export function programModeOf(s: LockdownSettings): LayerMode | "mixed" {
+  const mode = s.appLocker.mode;
+  return s.appControl.mode === mode && s.procWatch.mode === mode ? mode : "mixed";
+}
+
+/** The settings with all three program checks set to one mode (the safety list strength is kept). */
+export function setProgramMode(s: LockdownSettings, mode: LayerMode): LockdownSettings {
+  return { ...s, appLocker: { mode }, appControl: { ...s.appControl, mode }, procWatch: { mode } };
+}
+
+type Leaf = { path: string; label: string };
+
+/** Every setting a person can change, in screen order, with its plain label. */
+const LEAVES: readonly Leaf[] = [
+  { path: "appLocker.mode", label: lockdownStrings.appLocker },
+  { path: "appControl.mode", label: lockdownStrings.appControl },
+  { path: "appControl.level", label: lockdownStrings.appControlLevel },
+  { path: "procWatch.mode", label: lockdownStrings.procWatch },
+  ...(Object.keys(lockdownStrings.staff) as (keyof typeof lockdownStrings.staff)[]).map((k) => ({ path: `staff.${k}`, label: lockdownStrings.staff[k][0] })),
+  ...(Object.keys(lockdownStrings.machine) as (keyof typeof lockdownStrings.machine)[]).map((k) => ({ path: `machine.${k}`, label: lockdownStrings.machine[k][0] })),
+  { path: "machine.accountLockout", label: lockdownStrings.lockout },
+  ...(Object.keys(lockdownStrings.usb) as (keyof typeof lockdownStrings.usb)[]).map((k) => ({ path: `usb.${k}`, label: lockdownStrings.usb[k] })),
+  { path: "usb.retroactive", label: lockdownStrings.usbRetroactive },
+  { path: "keyboard.winCombos", label: lockdownStrings.winCombos },
+  { path: "accessibilityTools", label: lockdownStrings.accessibilityTools },
+  { path: "boot.autoRecovery", label: lockdownStrings.autoRecovery },
+  { path: "boot.safeModeGuard", label: lockdownStrings.safeModeGuard },
+  { path: "performance.staffTuning", label: lockdownStrings.staffTuning },
+  { path: "performance.kioskProfile", label: lockdownStrings.kioskProfile },
+  { path: "performance.noPrinting", label: lockdownStrings.noPrinting },
+  { path: "wifiManagedOnly", label: lockdownStrings.wifiManagedOnly },
+  { path: "wifiManagedOnlyConfirmed", label: lockdownStrings.wifiManagedOnlyConfirm },
+];
+
+/** How many changes the save bar names; the rest is "and N more". */
+export const MAX_CHANGE_LABELS = 8;
+
+/** What changed between two settings, for the save bar: plain labels, at most `max` named, `count` = all of them. */
+export function changeLabels(before: LockdownSettings, next: LockdownSettings, max: number = MAX_CHANGE_LABELS): { labels: string[]; count: number; more: number } {
+  const differs = (path: string) => stable(valueAt(before, path) ?? false) !== stable(valueAt(next, path) ?? false);
+  const modePaths = ["appLocker.mode", "appControl.mode", "procWatch.mode"];
+  // The three program checks moved together (the "Program blocking" control): one change, not three.
+  const together = modePaths.every(differs) && programModeOf(next) !== "mixed" && programModeOf(before) !== "mixed";
+  const all = LEAVES.filter((l) => differs(l.path) && !(together && modePaths.includes(l.path))).map((l) => l.label);
+  if (together) all.unshift(lockdownStrings.modeTitle);
+  return { labels: all.slice(0, max), count: all.length, more: Math.max(0, all.length - max) };
 }
 
 /** Folder classes only administrators can write to: the only ones a path exception may name (plan 4.9, edge case 13). */

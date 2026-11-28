@@ -677,6 +677,17 @@ export const IO_BUDGETS: Record<string, IoBudget> = {
   // wrapper + step-up (4, + the step-up row again on a mode change) + group + settings row + organization + <= 51 Wi-Fi profiles (only when
   // "managed networks only" is switched on) + one snapshot (<= 1121 reads, 13 writes); writes: settings row + <= 2 audit rows. No change: 0 writes.
   "lockdown:update": { maxReads: 4 + 1 + 1 + 1 + 1 + 51 + 1121, maxReadBytes: 2_500_000, maxWrites: 13 + 1 + 2, maxWriteBytes: 2_700_000 },
+  // The "PCs up to date: n of m" card, subscribed only while the group lockdown screen is open: wrapper (3) + group + rollout row + the group's PCs
+  // (<= 201, `devices.by_group`) + the group's apply reports AT OR ABOVE the newest configuration version (<= 201, `by_org_config` range from that
+  // version, so a PC that has not caught up yet costs no report read). A separate query so reports never re-run `groupView`.
+  // Re-runs: when a PC row of the group, the rollout row or a report in the range changes: about once per PC after a save (that IS the live
+  // counter), never on a ping. No smaller per-PC row holds the configuration version AND the apply state (`deviceSummary.appliedVersion` is the
+  // signed document's version), so the floor is one PC row (~0.33 KB) + one report (~0.85 KB here; up to ~2 KB with many capabilities / networks).
+  // MEASURED (`IO_REPORT=1`, realistic report: 7 layers, 1 Wi-Fi network, 2 capabilities): matrix fixture (group without PCs) 4 reads / 850 B;
+  // 2 PCs up to date 8 reads / 3.3 KB; 50 PCs nobody has the newest version yet 54 reads / 18.4 KB; 50 PCs all up to date 104 reads / 60.8 KB;
+  // 200 PCs all up to date 404 reads / 240.5 KB. One catch-up of a 50-PC group with the screen open = 51 runs, about 2.0 MB read (the plan's
+  // all-reports read: 7.5 MB). The byte budget keeps room for reports twice that size.
+  "lockdown:groupSync": { maxReads: 3 + 1 + 1 + 201 + 201, maxReadBytes: 450_000, maxWrites: 0, maxWriteBytes: 0, live: true },
   // wrapper (4) + finding + app + <= 100 groups (MAX_ALLOW_GROUPS, one read each); the FIRST 10 each: its exceptions (<= 201) + one snapshot; the rest
   // go to `groupBatches:allowBatch` (scheduled, 10 per run); writes per group: exception + <= 13; + finding + audit.
   "lockdown:allow": { maxReads: 4 + 2 + 100 + 10 * 201 + 10 * 1121, maxReadBytes: 2_800_000, maxWrites: 10 * 14 + 2, maxWriteBytes: 2_700_000 },

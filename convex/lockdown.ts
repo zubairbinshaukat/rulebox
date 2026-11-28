@@ -19,6 +19,7 @@ import {
   MAX_GROUPS_JOINED,
   MAX_LOCKOUT_MINUTES,
   MAX_LOCKOUT_THRESHOLD,
+  LOCKDOWN_SYNC_CAP,
   MAX_WIFI_PROFILES,
   MIN_LOCKOUT_THRESHOLD,
   OPEN_FINDINGS_CAP,
@@ -29,8 +30,11 @@ import { checkPageSize, pickSort, sortArg } from "./lib/listing";
 import {
   DEFAULT_LOCKDOWN_SETTINGS,
   findingLayer,
+  applyState,
   findingStatus,
   lockdownSettings,
+  rolloutState,
+  type ApplyStateValue,
   type ExceptionRuleValue,
   type LockdownSettings,
 } from "./lib/lockdownValidators";
@@ -44,6 +48,8 @@ import { requireStepUp } from "./lib/stepUp";
 // - `groupView` is one small query: the group, its settings row, the newest MAX_EXCEPTIONS_LISTED exceptions and at most
 //   OPEN_FINDINGS_CAP + 1 open findings for the "N new" link. It re-runs when one of those changes, never on a device report
 //   other than a NEW finding.
+// - `groupSync` ("PCs up to date: n of m") is its own query on the group's PCs and the apply reports at the newest configuration version, so
+//   a PC's report never re-runs `groupView`; it is read only while the screen is open.
 // - `findings` is one page of `lockdownFindings.by_org_status_seen` (index + cursor); `lockdownFindingDevices` is never read here.
 // - Every write that changes what PCs get takes a new group configuration version in the same transaction (`snapshotGroupConfig`,
 //   which also asks for the publish). An "Allow" may name at most MAX_ALLOW_GROUPS groups: the first SNAPSHOT_SYNC_GROUPS are done in
@@ -148,6 +154,94 @@ export const groupView = memberQuery("viewer")({
       openFindings: Math.min(open.length, OPEN_FINDINGS_CAP),
       openFindingsMore: open.length > OPEN_FINDINGS_CAP,
     };
+  },
+});
+
+/**
+ * The apply-report codes that mean "Hide administrator accounts was left off on this PC because Other user sign-in is not confirmed
+ * there" (the PC reports it as the `machine` layer's detail, or as the whole policy's refusal). The agent owns the final code.
+ */
+export const ADMIN_TILES_CODES: ReadonlySet<string> = new Set(["admin_signin_unverified"]);
+
+/** Names of the PCs that could not apply the settings listed on the "Your PCs" card (the rest are a count). */
+const SYNC_PROBLEM_NAMES = 3;
+
+/**
+ * "PCs up to date: n of m" on the group lockdown screen (viewer). A separate query from `groupView` so a PC's report never re-runs the
+ * form (same split as `rollouts:groupView` / `rollouts:health`). Subscribed only while that screen is open.
+ *
+ * Source: the group's PCs (`devices.by_group`, m) and the apply reports AT OR ABOVE the newest configuration version
+ * (`deviceApplyReports.by_org_config`, an index range that starts at that version, so a PC that has not caught up yet costs no read).
+ * No other per-PC row holds the configuration version and the state the PC applied it in (`deviceSummary.appliedVersion` is the signed
+ * document's version, not the group configuration's). The newest version is `max(pointers)` of the rollout row (configuration texts are
+ * never read); no rollout row = nothing was sent yet. A PC is up to date when its report is at that version and `applied` or `partial`
+ * (partial = it got the settings, with notes); `refused | failed | rolledBack` are problems; the rest (offline, busy, never reported,
+ * still on an older version, an agent too old to name its group configuration) is waiting. With rollout rings on the pilot PCs are
+ * ahead and the others wait for the promotion. A PC that moved to another group is ignored (it keeps a stale report until it re-applies).
+ * `reduced` (Windows Home: the AppLocker or App Control layer is `unsupported`) and `adminTilesPending` count the PCs that already
+ * have the newest settings.
+ *
+ * I/O: wrapper + group + rollout row + <= LOCKDOWN_SYNC_CAP + 1 PCs + <= LOCKDOWN_SYNC_CAP + 1 reports; re-runs when a PC row of the
+ * group, the rollout row or one of those reports changes (about once per PC after a save, which IS the live counter; never on a ping).
+ */
+export const groupSync = memberQuery("viewer")({
+  args: { groupId: v.string() },
+  returns: v.object({
+    total: v.number(),
+    totalMore: v.boolean(),
+    upToDate: v.number(),
+    problems: v.number(),
+    problemPcs: v.array(v.object({ deviceId: v.id("devices"), name: v.string(), state: applyState })),
+    reduced: v.number(),
+    adminTilesPending: v.number(),
+    newestVersion: v.union(v.number(), v.null()),
+    ringsOn: v.boolean(),
+    rolloutState,
+  }),
+  handler: async (ctx, args) => {
+    const group = await getInOrg(ctx, "groups", args.groupId, ctx.orgId);
+    const rollout = await ctx.db
+      .query("groupRollouts")
+      .withIndex("by_group", (q) => q.eq("groupId", group._id))
+      .unique();
+    const pcs = await ctx.db
+      .query("devices")
+      .withIndex("by_group", (q) => q.eq("groupId", group._id))
+      .take(LOCKDOWN_SYNC_CAP + 1);
+    const members = new Map<Id<"devices">, Doc<"devices">>(pcs.slice(0, LOCKDOWN_SYNC_CAP).map((d) => [d._id, d]));
+    const out = {
+      total: members.size,
+      totalMore: pcs.length > LOCKDOWN_SYNC_CAP,
+      upToDate: 0,
+      problems: 0,
+      problemPcs: [] as { deviceId: Id<"devices">; name: string; state: ApplyStateValue }[],
+      reduced: 0,
+      adminTilesPending: 0,
+      newestVersion: null as number | null,
+      ringsOn: rollout?.enabled ?? false,
+      rolloutState: rollout?.state ?? ("idle" as const),
+    };
+    if (rollout === null) return out; // nothing was sent yet
+    const newest = Math.max(rollout.pointers.pilot, rollout.pointers.early, rollout.pointers.everyone);
+    out.newestVersion = newest;
+    if (members.size === 0) return out;
+
+    const reports = await ctx.db
+      .query("deviceApplyReports")
+      .withIndex("by_org_config", (q) => q.eq("orgId", ctx.orgId).eq("config.groupId", group._id).gte("config.version", newest))
+      .take(LOCKDOWN_SYNC_CAP + 1);
+    for (const r of reports.slice(0, LOCKDOWN_SYNC_CAP)) {
+      const pc = members.get(r.deviceId);
+      if (pc === undefined) continue; // moved to another group since it reported
+      if (r.state === "applied" || r.state === "partial") out.upToDate++;
+      else {
+        out.problems++;
+        if (out.problemPcs.length < SYNC_PROBLEM_NAMES) out.problemPcs.push({ deviceId: pc._id, name: pc.name, state: r.state });
+      }
+      if (r.layers.appLocker.state === "unsupported" || r.layers.appControl.state === "unsupported") out.reduced++;
+      if (ADMIN_TILES_CODES.has(r.layers.machine.detail ?? "") || ADMIN_TILES_CODES.has(r.refusal ?? "")) out.adminTilesPending++;
+    }
+    return out;
   },
 });
 

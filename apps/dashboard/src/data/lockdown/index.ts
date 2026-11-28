@@ -8,4 +8,4 @@ import type { LockdownApi } from "./api";
 
 const api: LockdownApi = lockdownApi;
 
-export const { useLockdownView, useSaveLockdown, useFindingsPage, useAllowOptions, useAllowFinding, useIgnoreFinding, useRemoveException, useDeviceLockdown, useAllowUsb } = api;
+export const { useLockdownView, useLockdownSync, useSaveLockdown, useFindingsPage, useAllowOptions, useAllowFinding, useIgnoreFinding, useRemoveException, useAllowUsb } = api;

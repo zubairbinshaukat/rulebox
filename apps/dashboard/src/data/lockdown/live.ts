@@ -1,36 +1,23 @@
 /**
- * Live lockdown hooks (Phase 5 Step 19, `convex/lockdown.ts`, `fleet:allowUsb`, the lockdown part of `fleet:get`).
+ * Live lockdown hooks (Phase 5 Step 19, `convex/lockdown.ts`, `fleet:allowUsb`). The device page's lockdown fields come with
+ * `fleet:page` (`useDevicePage`), not from here.
  * `lockdown:update` is major only for a mode change: `useMapped` opens the step-up dialog when the server asks.
  */
 import { useMutation } from "convex/react";
-import type { FunctionReturnType } from "convex/server";
 import { useCallback } from "react";
 import { api } from "@convex/_generated/api";
-import { useMapped, useMappedState, useMemberQuery } from "../live/convex";
+import { useMapped, useMemberQuery } from "../live/convex";
 import { useServerPage } from "../live/serverList";
 import { listArgs } from "../serverList";
-import type { DeviceLockdown, FindingRow } from "../types";
+import type { FindingRow } from "../types";
 import type { LockdownApi } from "./api";
-
-type FleetGet = FunctionReturnType<typeof api.fleet.get>;
-
-/** The lockdown fields of `fleet:get`; an older server (rolling deploy) has none of them. */
-export function deviceLockdownOf(d: FleetGet): DeviceLockdown {
-  return {
-    ring: d.ring ?? "everyone",
-    groupId: d.group?._id ?? null,
-    rolloutRevision: d.rolloutRevision ?? 0,
-    revoked: d.flags.revoked,
-    usbAllowUntil: d.usbAllowUntil ?? null,
-    protection: d.protection ?? null,
-    lockdownCapable: d.lockdownCapable ?? null,
-    apply: d.apply ?? null,
-  };
-}
 
 export const liveLockdownApi: LockdownApi = {
   useLockdownView(groupId) {
     return useMemberQuery(api.lockdown.groupView, { groupId });
+  },
+  useLockdownSync(groupId) {
+    return useMemberQuery(api.lockdown.groupSync, { groupId });
   },
   useSaveLockdown() {
     return useMapped(useMutation(api.lockdown.update));
@@ -64,10 +51,6 @@ export const liveLockdownApi: LockdownApi = {
       [remove],
     );
     return useMapped(call);
-  },
-  // The same query and arguments as the device page (`useDeviceDetail`): one subscription on the server.
-  useDeviceLockdown(deviceId) {
-    return useMappedState(useMemberQuery(api.fleet.get, { deviceId }), deviceLockdownOf);
   },
   useAllowUsb() {
     return useMapped(useMutation(api.fleet.allowUsb));

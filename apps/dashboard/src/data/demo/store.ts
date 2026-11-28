@@ -173,7 +173,15 @@ export function setControls(patch: Partial<DemoControls>) {
   notify();
 }
 
+const resetHooks = new Set<() => void>();
+
+/** Registers something to clear when the demo data is reset (a feature's timers). */
+export function onDemoReset(hook: () => void) {
+  resetHooks.add(hook);
+}
+
 export function resetDemo() {
+  for (const hook of resetHooks) hook();
   state.db = seed();
   state.factors = seedFactors(state.db);
   state.failedSignIns = 0;

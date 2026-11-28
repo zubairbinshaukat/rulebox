@@ -321,7 +321,7 @@ function Form({ groupId, v, onReload }: { groupId: string; v: LockdownView; onRe
           <>
             {enforcing.length > 0 ? (
               <>
-                <p>{s.enforceIntro(enforcing.map((l) => s[l.layer]))}</p>
+                <p>{s.enforceIntro}</p>
                 <p>{s.enforceFindings(v.openFindings, v.openFindingsMore)}</p>
                 {enforcing.some((l) => l.layer === "appControl") ? <p>{s.enforceAppControl}</p> : null}
                 <p>{s.enforceAuditFirst}</p>
@@ -345,7 +345,7 @@ function Exceptions({ v }: { v: LockdownView }) {
   const toast = useToast();
   const [removing, setRemoving] = useState<ExceptionRow | null>(null);
   return (
-    <Card title={s.exceptionsTitle} sub={s.exceptionsLead}>
+    <Card title={s.exceptionsTitle} sub={s.exceptionsInfo}>
       <div className="dash-form">
         {v.exceptions.length === 0 ? <p className="dash-muted">{s.exceptionsNone}</p> : null}
         {v.exceptions.length > 0 ? (
@@ -378,7 +378,7 @@ function Exceptions({ v }: { v: LockdownView }) {
       </div>
       <ConfirmDialog
         open={removing !== null}
-        title={s.removeExceptionTitle}
+        title={s.removeExceptionTitle(removing?.rule.fileName ?? "this program")}
         body={s.removeExceptionBody}
         confirmLabel={s.removeException}
         danger
