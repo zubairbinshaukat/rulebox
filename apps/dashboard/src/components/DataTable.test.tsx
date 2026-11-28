@@ -93,6 +93,79 @@ describe("DataTable: structure", () => {
   });
 });
 
+describe("DataTable: short cells and long text", () => {
+  const cellsOf = (row: number) => within(screen.getAllByRole("row")[row]!).getAllByRole("cell");
+
+  it("numeric and action columns never wrap by themselves; a plain column wraps unless it says nowrap", () => {
+    show();
+    const [name, count, actions] = cellsOf(1);
+    expect(name!.className).not.toContain("dash-cell--nowrap");
+    expect(count!.className).toContain("dash-cell--nowrap");
+    expect(actions!.className).toContain("dash-cell--nowrap");
+  });
+
+  it("nowrap on a column keeps its cells on one line (dates, states, counts like '0 of 1 used')", () => {
+    const withNowrap: Column<Row>[] = [
+      { key: "n", header: "N", primary: true, cell: (r) => r.name },
+      { key: "u", header: "Used", nowrap: true, cell: () => "0 of 1 used" },
+    ];
+    show({ columns: withNowrap });
+    expect(cellsOf(1)[0]!.className).not.toContain("dash-cell--nowrap");
+    expect(cellsOf(1)[1]!.className).toContain("dash-cell--nowrap");
+  });
+
+  it("the name column takes the rest of the width only when every other column is short", () => {
+    const table = () => screen.getByRole("table", { name: "Things" });
+    const short: Column<Row>[] = [
+      { key: "n", header: "N", primary: true, cell: (r) => r.name },
+      { key: "c", header: "C", numeric: true, cell: (r) => r.count },
+      { key: "t", header: "T", truncate: 20, cell: (r) => r.name },
+    ];
+    const { unmount } = show({ columns: short });
+    expect(table().className).toContain("dash-table--fit");
+    unmount();
+    show({ columns: [...short, { key: "free", header: "Free", cell: (r) => r.name }] });
+    expect(table().className).not.toContain("dash-table--fit");
+  });
+
+  it("truncate cuts after that many characters (32 for true), keeps the full text and offers it as the title", () => {
+    const long = "A very long free text that goes on and on and on and on";
+    const cols2: Column<Row>[] = [
+      { key: "n", header: "N", primary: true, cell: (r) => r.name },
+      { key: "a", header: "A", truncate: 12, cell: () => long },
+      { key: "b", header: "B", truncate: true, cell: () => long },
+    ];
+    show({ columns: cols2 });
+    const [, a, b] = cellsOf(1);
+    const spanA = a!.querySelector<HTMLElement>(".dash-cell-trunc")!;
+    const spanB = b!.querySelector<HTMLElement>(".dash-cell-trunc")!;
+    expect(spanA.style.maxWidth).toBe("12ch");
+    expect(spanB.style.maxWidth).toBe("32ch");
+    expect(spanA.textContent).toBe(long);
+    expect(spanA.title).toBe(long);
+    // A truncating column cannot be squeezed either.
+    expect(a!.className).toContain("dash-cell--nowrap");
+  });
+
+  it("gives the title of a truncated element cell only when the text is really cut", () => {
+    const cols2: Column<Row>[] = [{ key: "a", header: "A", truncate: 10, cell: (r) => <b>{r.name}</b> }];
+    show({ columns: cols2 });
+    const span = cellsOf(1)[0]!.querySelector<HTMLElement>(".dash-cell-trunc")!;
+    expect(span.title).toBe("");
+    Object.defineProperty(span, "scrollWidth", { configurable: true, value: 300 });
+    Object.defineProperty(span, "clientWidth", { configurable: true, value: 100 });
+    fireEvent.mouseEnter(span);
+    expect(span.title).toBe("Alpha");
+  });
+
+  it("in cards view the one-line table rules stay off", () => {
+    localStorage.setItem(VIEW_KEY, "cards");
+    show();
+    expect(screen.getByRole("table", { name: "Things" }).className).not.toContain("dash-table--fit");
+    expect(cellsOf(1)[1]!.className).not.toContain("dash-cell--nowrap");
+  });
+});
+
 describe("DataTable: sorting", () => {
   it("only sortable columns get a button and aria-sort; the rest stay plain headers", () => {
     show({ sort: { key: "name", dir: "asc" }, onSortChange: vi.fn() });

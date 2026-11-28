@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Button, Select } from "@rulebox/ui";
+import { Button, NativeSelect } from "@rulebox/ui";
 import { useSetDeviceDisplayMode } from "../../data";
 import type { DeviceDetail, DisplayChoice } from "../../data/types";
 import { Card } from "../../components/Card";
@@ -49,9 +49,9 @@ export function DeviceDisplayCard({ d }: { d: DeviceDetail }) {
         >
           <Field label={s.mode} hint={group === "auto" ? s.autoNote : s.groupChoice(modeName(group))}>
             {(p) => (
-              <Select {...p} value={mode} disabled={d.revoked} onChange={(e) => setMode(e.target.value as DisplayChoice)}>
+              <NativeSelect {...p} value={mode} disabled={d.revoked} onChange={(e) => setMode(e.target.value as DisplayChoice)}>
                 <ModeOptions />
-              </Select>
+              </NativeSelect>
             )}
           </Field>
           {warn ? <InlineNotice tone="warning" title={s.standardOnSmallPc} /> : null}

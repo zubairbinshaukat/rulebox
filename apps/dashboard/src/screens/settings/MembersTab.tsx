@@ -1,5 +1,5 @@
 import { useCallback, useMemo, useState } from "react";
-import { Button, Input, Pill, Select } from "@rulebox/ui";
+import { Button, Input, Pill, NativeSelect } from "@rulebox/ui";
 import IconUserPlus from "~icons/solar/user-plus-rounded-linear";
 import {
   useChangeRole,
@@ -365,13 +365,13 @@ function InviteDialog({ onClose, onCode }: { onClose: () => void; onCode: (email
         </Field>
         <Field label={s.role} hint={s.roleHelp[f.values.role]}>
           {(p) => (
-            <Select {...p} value={f.values.role} onChange={(e) => f.set("role", e.target.value as Role)}>
+            <NativeSelect {...p} value={f.values.role} onChange={(e) => f.set("role", e.target.value as Role)}>
               {ROLES.map((r) => (
                 <option key={r} value={r}>
                   {strings.app.roles[r]}
                 </option>
               ))}
-            </Select>
+            </NativeSelect>
           )}
         </Field>
         <FormError error={f.serverError} />
@@ -416,13 +416,13 @@ function RoleDialog({ opened, live, onClose }: { opened: MemberRow; live: Member
       <div className="dash-form">
         <Field label={s.role} hint={s.roleHelp[f.values.role]}>
           {(p) => (
-            <Select {...p} value={f.values.role} onChange={(e) => f.set("role", e.target.value as Role)}>
+            <NativeSelect {...p} value={f.values.role} onChange={(e) => f.set("role", e.target.value as Role)}>
               {ROLES.map((r) => (
                 <option key={r} value={r}>
                   {strings.app.roles[r]}
                 </option>
               ))}
-            </Select>
+            </NativeSelect>
           )}
         </Field>
         <FormError

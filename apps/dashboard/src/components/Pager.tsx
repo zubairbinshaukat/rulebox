@@ -1,5 +1,5 @@
 import { useId, type ReactNode } from "react";
-import { Select } from "@rulebox/ui";
+import { NativeSelect } from "@rulebox/ui";
 import IconPrev from "~icons/solar/alt-arrow-left-linear";
 import IconNext from "~icons/solar/alt-arrow-right-linear";
 import { PAGE_SIZES, pageItems } from "../lib/cursorPager";
@@ -47,8 +47,10 @@ export interface PagerProps {
 }
 
 /**
- * The bar under a table: "147 records · Page 1 of 15", `‹ 1 2 … 15 ›`, and the
- * rows-per-page select. Only pages that can really be opened are buttons.
+ * The bar under a table: "147 records · Page 1 of 15", `‹ 1 2 … 15 ›` and the rows-per-page select.
+ * One row when the footer is at least 680 px wide (summary left, pages centred, select right), otherwise
+ * the pages on top and the summary and select under them (see `.dash-pager` in dashboard.css).
+ * Only pages that can really be opened are buttons.
  * Presentation only: `useCursorPager` (lib/cursorPager.ts) keeps the cursors.
  */
 export function Pager({ page, pageSize, total, reachablePages, onPage, onPageSize, hasNext, loading = false, pageSizes = PAGE_SIZES, labels }: PagerProps) {
@@ -99,13 +101,13 @@ export function Pager({ page, pageSize, total, reachablePages, onPage, onPageSiz
         <label htmlFor={selectId} className="dash-pager__size-label">
           {l.rowsPerPage}
         </label>
-        <Select id={selectId} compact value={String(pageSize)} onChange={(e) => onPageSize(Number(e.target.value))}>
+        <NativeSelect id={selectId} compact value={String(pageSize)} onChange={(e) => onPageSize(Number(e.target.value))}>
           {sizes.map((s) => (
             <option key={s} value={s}>
               {s}
             </option>
           ))}
-        </Select>
+        </NativeSelect>
       </div>
     </div>
   );

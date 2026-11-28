@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router";
-import { Button, Pill, Select } from "@rulebox/ui";
+import { Button, Pill, NativeSelect } from "@rulebox/ui";
 import IconMonitor from "~icons/solar/monitor-linear";
 import IconAdd from "~icons/solar/add-square-linear";
 import IconRefresh from "~icons/solar/refresh-linear";
@@ -59,11 +59,13 @@ function columns(now: number): Column<DeviceRow>[] {
     {
       key: "status",
       header: s.colStatus,
+      nowrap: true,
       cell: (d) => <DeviceOnline presence={d.presence} now={now} />,
     },
     {
       key: "windows",
       header: s.colWindows,
+      nowrap: true,
       isEmpty: (d) => !d.report?.osBuild,
       cell: (d) =>
         d.report?.osBuild ? (
@@ -80,11 +82,12 @@ function columns(now: number): Column<DeviceRow>[] {
           <span className="dash-muted">—</span>
         ),
     },
-    { key: "kiosk", header: s.colKiosk, cell: (d) => <KioskCell row={d} /> },
-    { key: "created", header: s.colEnrolled, sortable: true, sortDefaultDir: "desc", cell: (d) => <RelativeTime ms={d.enrolledAt} /> },
+    { key: "kiosk", header: s.colKiosk, nowrap: true, cell: (d) => <KioskCell row={d} /> },
+    { key: "created", header: s.colEnrolled, nowrap: true, sortable: true, sortDefaultDir: "desc", cell: (d) => <RelativeTime ms={d.enrolledAt} /> },
     {
       key: "policy",
       header: s.colPolicy,
+      nowrap: true,
       cell: (d) => (
         <span className="dash-cell-stack">
           <PolicyCell applied={d.report?.appliedVersion} latest={d.latestVersion} />
@@ -200,11 +203,11 @@ function DeviceList({ groupId, groups }: { groupId: string; groups: QueryState<G
       <label className="dash-sr" htmlFor="device-group-filter">
         {s.groupFilter}
       </label>
-      <Select id="device-group-filter" compact value={groupId} onChange={(e) => paging.view.setFilter("group", e.target.value || null)}>
+      <NativeSelect id="device-group-filter" compact value={groupId} onChange={(e) => paging.view.setFilter("group", e.target.value || null)}>
         <option value="">{s.allGroups}</option>
         <option value={NO_GROUP_FILTER}>{s.noGroupFilter}</option>
         {groups.status === "ready" ? groups.data.map((g) => <option key={g._id} value={g._id}>{g.name}</option>) : null}
-      </Select>
+      </NativeSelect>
     </>
   );
 

@@ -1,5 +1,5 @@
 import { useState, type ReactNode } from "react";
-import { Button, Input, SegmentedControl, Select, Switch, Textarea } from "@rulebox/ui";
+import { Button, Input, SegmentedControl, NativeSelect, Switch, Textarea } from "@rulebox/ui";
 import { UPDATE_MODES, type AppDetail, type ApplyWhen, type FeedStatus, type UpdateMode } from "../data/types";
 import { useApproveFeedUpdate, useCheckFeedNow, useDismissFeedUpdate, useRollbackApp, useSetFeedPaused } from "../data";
 import { messageFor, toAppError } from "../lib/errors";
@@ -114,13 +114,13 @@ export default function UpdatesCard({
             ) : null}
             <Field label={s.applyWhen} optional>
               {(p) => (
-                <Select {...p} value={x.applyWhen} onChange={(e) => f.set("applyWhen", e.target.value as ApplyWhen)}>
+                <NativeSelect {...p} value={x.applyWhen} onChange={(e) => f.set("applyWhen", e.target.value as ApplyWhen)}>
                   {(Object.keys(s.applyWhens) as ApplyWhen[]).map((w) => (
                     <option key={w} value={w}>
                       {s.applyWhens[w]}
                     </option>
                   ))}
-                </Select>
+                </NativeSelect>
               )}
             </Field>
             <Switch checked={x.rollbackOnFail} onChange={(val) => f.set("rollbackOnFail", val)} label={s.rollbackOnFail} disabled={readOnly} />

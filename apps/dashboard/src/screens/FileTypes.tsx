@@ -1,6 +1,6 @@
 import { useMemo, useState } from "react";
 import { Link, useNavigate } from "react-router";
-import { Button, Input, Select } from "@rulebox/ui";
+import { Button, Input, NativeSelect } from "@rulebox/ui";
 import IconDoc from "~icons/solar/document-text-linear";
 import IconAdd from "~icons/solar/add-circle-linear";
 import { useAppOptions, useRemoveFileHandler, useSetFileHandler } from "../data";
@@ -179,13 +179,13 @@ function AddForm({ options, onClose }: { options: AppOption[]; onClose: () => vo
         </Field>
         <Field label={s.app} hint={s.appHint} error={f.errors.appId} required>
           {(p) => (
-            <Select {...p} value={f.values.appId} onChange={(e) => f.set("appId", e.target.value)} disabled={options.length === 0}>
+            <NativeSelect {...p} value={f.values.appId} onChange={(e) => f.set("appId", e.target.value)} disabled={options.length === 0}>
               {options.map((a) => (
                 <option key={a._id} value={a._id}>
                   {a.name}
                 </option>
               ))}
-            </Select>
+            </NativeSelect>
           )}
         </Field>
         <FormError error={f.serverError} />

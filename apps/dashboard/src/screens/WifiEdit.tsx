@@ -1,6 +1,6 @@
 import { useRef, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router";
-import { Button, Checkbox, Input, Select, Switch } from "@rulebox/ui";
+import { Button, Checkbox, Input, NativeSelect, Switch } from "@rulebox/ui";
 import IconKey from "~icons/solar/key-linear";
 import { useDeleteWifi, useGroupsScreen, useSaveWifi, useWifiDetail } from "../data";
 import type { WifiApplyCounts, WifiDetail, WifiInput, WifiSecurity } from "../data/types";
@@ -301,13 +301,13 @@ function ProfileForm({
         </Field>
         <Field label={s.security} hint={s.securityHelp[f.values.security]}>
           {(p) => (
-            <Select {...p} value={f.values.security} onChange={(e) => f.set("security", e.target.value as WifiSecurity)}>
+            <NativeSelect {...p} value={f.values.security} onChange={(e) => f.set("security", e.target.value as WifiSecurity)}>
               {WIFI_SECURITIES.map((k) => (
                 <option key={k} value={k}>
                   {s.securityNames[k]}
                 </option>
               ))}
-            </Select>
+            </NativeSelect>
           )}
         </Field>
         <div className="dash-net__switch">

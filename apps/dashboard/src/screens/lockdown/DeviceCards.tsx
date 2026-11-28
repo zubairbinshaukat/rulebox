@@ -1,5 +1,5 @@
 import { useState, type ReactNode } from "react";
-import { Button, Pill, Select } from "@rulebox/ui";
+import { Button, Pill, NativeSelect } from "@rulebox/ui";
 import { useSetRings } from "../../data";
 import { useAllowUsb, useDeviceLockdown } from "../../data/lockdown";
 import { LAYER_NAMES, MAX_USB_ALLOW_HOURS, RINGS, type DeviceLockdown, type Id, type Ring, type SecurityPosture } from "../../data/types";
@@ -174,7 +174,7 @@ function RingPicker({ deviceId, ld }: { deviceId: Id; ld: DeviceLockdown }) {
     <>
       <Field label={s.ring} hint={s.ringHint}>
         {(p) => (
-          <Select
+          <NativeSelect
             {...p}
             value={ld.ring}
             disabled={pending}
@@ -199,7 +199,7 @@ function RingPicker({ deviceId, ld }: { deviceId: Id; ld: DeviceLockdown }) {
                 {RING_LABELS[r]}
               </option>
             ))}
-          </Select>
+          </NativeSelect>
         )}
       </Field>
       <FormError error={error} onReload={() => setError(null)} describe={ringErrorMessage} />
@@ -261,13 +261,13 @@ function UsbAllow({ deviceId, ld }: { deviceId: Id; ld: DeviceLockdown }) {
             <>
               <Field label={s.usbHours} hint={s.usbMax}>
                 {(p) => (
-                  <Select {...p} value={String(hours)} disabled={pending} onChange={(e) => setHours(Number(e.target.value))}>
+                  <NativeSelect {...p} value={String(hours)} disabled={pending} onChange={(e) => setHours(Number(e.target.value))}>
                     {HOUR_CHOICES.map((h) => (
                       <option key={h} value={h}>
                         {s.usbHour(h)}
                       </option>
                     ))}
-                  </Select>
+                  </NativeSelect>
                 )}
               </Field>
               <div className="dash-form__actions">

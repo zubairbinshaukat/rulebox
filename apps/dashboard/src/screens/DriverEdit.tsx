@@ -1,6 +1,6 @@
 import { useRef, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router";
-import { Button, Checkbox, Input, Select, Textarea } from "@rulebox/ui";
+import { Button, Checkbox, Input, NativeSelect, Textarea } from "@rulebox/ui";
 import { useDeleteDriver, useDriverDetail, useGroupsScreen, useRetryDriver, useSaveDriver } from "../data";
 import type { DriverClass, DriverCounts, DriverDetail, DriverInput, DriverKind } from "../data/types";
 import { Card } from "../components/Card";
@@ -295,24 +295,24 @@ function DriverForm({
         </Field>
         <Field label={s.driverClassLabel} hint={s.driverClassHint}>
           {(p) => (
-            <Select {...p} value={f.values.deviceClass} onChange={(e) => f.set("deviceClass", e.target.value as DriverClass)}>
+            <NativeSelect {...p} value={f.values.deviceClass} onChange={(e) => f.set("deviceClass", e.target.value as DriverClass)}>
               {DRIVER_CLASSES.map((c) => (
                 <option key={c} value={c}>
                   {s.driverClassShort[c]}
                 </option>
               ))}
-            </Select>
+            </NativeSelect>
           )}
         </Field>
         <Field label={s.driverKind} hint={s.driverKindHelp[kind]}>
           {(p) => (
-            <Select {...p} value={kind} onChange={(e) => f.set("kind", e.target.value as DriverKind)}>
+            <NativeSelect {...p} value={kind} onChange={(e) => f.set("kind", e.target.value as DriverKind)}>
               {DRIVER_KINDS.map((k) => (
                 <option key={k} value={k}>
                   {s.driverKindNames[k]}
                 </option>
               ))}
-            </Select>
+            </NativeSelect>
           )}
         </Field>
         <Field label={s.driverUrl} hint={s.driverUrlHint} error={f.errors.url ?? serverField("url", s.driverUrlProblems.scheme)} required>

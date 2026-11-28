@@ -1,5 +1,5 @@
 import { Link } from "react-router";
-import { Select, SegmentedControl, Textarea } from "@rulebox/ui";
+import { NativeSelect, SegmentedControl, Textarea } from "@rulebox/ui";
 import { useAppOptions } from "../data";
 import { BROWSER_KINDS, type AppDetail, type BrowserKind } from "../data/types";
 import { Card } from "../components/Card";
@@ -67,7 +67,7 @@ function ChromePicker({ d, f, isNew }: { d: AppDetail; f: FormApi; isNew: boolea
     <>
       <Field label={s.chromeApp} hint={s.chromeAppHint} error={f.errors.chromeAppId} required>
         {(p) => (
-          <Select {...p} value={x.chromeAppId} onChange={(e) => f.set("chromeAppId", e.target.value)}>
+          <NativeSelect {...p} value={x.chromeAppId} onChange={(e) => f.set("chromeAppId", e.target.value)}>
             <option value="">{s.chromeAppPick}</option>
             {x.chromeAppId !== "" && !known ? <option value={x.chromeAppId}>{d.chromeApp?.name ?? x.chromeAppId}</option> : null}
             {chrome.map((p2) => (
@@ -75,7 +75,7 @@ function ChromePicker({ d, f, isNew }: { d: AppDetail; f: FormApi; isNew: boolea
                 {p2.name}
               </option>
             ))}
-          </Select>
+          </NativeSelect>
         )}
       </Field>
       {chrome.length === 0 ? (

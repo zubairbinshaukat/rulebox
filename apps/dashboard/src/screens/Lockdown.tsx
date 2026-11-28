@@ -1,6 +1,6 @@
 import { useState, type ReactNode } from "react";
 import { Link, useParams } from "react-router";
-import { Button, Checkbox, Input, Pill, Select, Switch } from "@rulebox/ui";
+import { Button, Checkbox, Input, Pill, NativeSelect, Switch } from "@rulebox/ui";
 import { useLockdownView, useRemoveException, useSaveLockdown } from "../data/lockdown";
 import { LAYER_MODES, type ExceptionRow, type LayerMode, type LockdownSettings, type LockdownView, type UsbStorageMode, type UsbSwitch } from "../data/types";
 import { Card } from "../components/Card";
@@ -76,13 +76,13 @@ function Choice<T extends string>({
   return (
     <Field label={label} hint={hint}>
       {(p) => (
-        <Select {...p} value={value} disabled={disabled} onChange={(e) => onChange(e.target.value as T)}>
+        <NativeSelect {...p} value={value} disabled={disabled} onChange={(e) => onChange(e.target.value as T)}>
           {options.map(([v, text]) => (
             <option key={v} value={v}>
               {text}
             </option>
           ))}
-        </Select>
+        </NativeSelect>
       )}
     </Field>
   );

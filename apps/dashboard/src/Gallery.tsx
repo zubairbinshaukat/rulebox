@@ -24,17 +24,22 @@ import {
   Switch,
   Tabs,
   TitleBar,
+  InfoTip,
+  NativeSelect,
+  SearchSelect,
   Select,
   Textarea,
   Checkbox,
   setLite,
   type LogoAnimation,
+  type SelectOption,
   type Theme,
 } from "@rulebox/ui";
 import "@rulebox/ui/staff.css";
 import { useTheme } from "./app/theme";
 import { DataTable, type Column, type SortState } from "./components/DataTable";
 import { EmptyState } from "./components/EmptyState";
+import { Field } from "./components/Field";
 import { Pager } from "./components/Pager";
 import { SearchInput } from "./components/SearchInput";
 
@@ -351,6 +356,78 @@ function TableSection() {
   );
 }
 
+const SHORT_OPTIONS: SelectOption[] = [
+  { value: "front", label: "Front desk", hint: "12 PCs" },
+  { value: "office", label: "Back office", hint: "4 PCs" },
+  { value: "kitchen", label: "Kitchen" },
+  { value: "old", label: "Retired group", disabled: true },
+];
+
+const LONG_OPTIONS: SelectOption[] = [
+  { value: "short", label: "All groups" },
+  {
+    value: "long",
+    label:
+      "North region, second floor, reception and waiting area, shared with the training team and the visiting contractors",
+    hint: "A very long label wraps over up to three lines in the list and is cut with an ellipsis in the box",
+  },
+  { value: "unbroken", label: "Reception-desk-with-an-extremely-long-name-and-no-spaces-at-all-to-break-on-0123456789" },
+];
+
+const APP_NAMES = ["Zoom", "Chrome", "Café Till", "Notepad++", "Slack", "Teams", "VLC", "7-Zip", "Acrobat", "Skype"];
+const MANY_OPTIONS: SelectOption[] = Array.from({ length: 40 }, (_, i) => ({
+  value: `app-${i + 1}`,
+  label: `${APP_NAMES[i % APP_NAMES.length]} ${["Pro", "Lite", "Web", "Beta"][Math.floor(i / APP_NAMES.length)]}`,
+}));
+
+/** The custom dropdowns and the (i) tip, in the dashboard's Field. */
+function DropdownDemo() {
+  const [group, setGroup] = useState("front");
+  const [long, setLong] = useState("long");
+  const [compact, setCompact] = useState("short");
+  const [app, setApp] = useState("");
+  return (
+    <Section
+      title="Dropdowns and tips"
+      description="Select, SearchSelect and InfoTip: open them near the bottom of the window to see them flip up."
+    >
+      <div style={{ display: "flex", flexDirection: "column", gap: 18, maxWidth: 360 }}>
+        <Field label="Group" info="Every PC in a group gets the same apps and rules.">
+          {(p) => <Select {...p} value={group} onChange={setGroup} options={SHORT_OPTIONS} />}
+        </Field>
+        <Field label="Long labels" hint="The box cuts the text, the list wraps it.">
+          {(p) => <Select {...p} value={long} onChange={setLong} options={LONG_OPTIONS} />}
+        </Field>
+        <Field label="App" info="Type to find an app. Letters match with or without accents.">
+          {(p) => (
+            <SearchSelect
+              {...p}
+              value={app}
+              onChange={setApp}
+              options={MANY_OPTIONS}
+              placeholder="Choose an app"
+              searchPlaceholder="Search apps"
+              emptyText="No app found"
+            />
+          )}
+        </Field>
+        <Field label="Compact, with an error" error="Choose a group first.">
+          {(p) => <Select {...p} compact value={compact} onChange={setCompact} options={LONG_OPTIONS.slice(0, 1)} />}
+        </Field>
+        <Field label="Disabled">
+          {(p) => <Select {...p} value="front" onChange={() => {}} options={SHORT_OPTIONS} disabled />}
+        </Field>
+        <p style={{ margin: 0, fontSize: 13.5, color: "var(--rb-muted)", display: "flex", alignItems: "center", gap: 8 }}>
+          Alone in a sentence
+          <InfoTip label="About this sentence" placement="bottom">
+            A tooltip opens on hover or focus and flips when there is no room. On a phone, tap it.
+          </InfoTip>
+        </p>
+      </div>
+    </Section>
+  );
+}
+
 /** `/gallery` (members only): the design system with its own theme and Lite switches. */
 export default function GalleryScreen() {
   const [theme, setTheme] = useTheme();
@@ -524,15 +601,14 @@ export function Gallery({ theme, onTheme, lite, onLite }: GalleryProps) {
             </Section>
 
             {/* Form controls (Phase 4) */}
-            <Section title="Form controls" description="Select (native), Textarea, Checkbox.">
+            <DropdownDemo />
+
+            <Section title="Form controls" description="NativeSelect (until it is removed), Textarea, Checkbox.">
               <div style={{ display: "flex", flexDirection: "column", gap: 12, maxWidth: 360 }}>
-                <Select aria-label="Group" defaultValue="front">
+                <NativeSelect aria-label="Group" defaultValue="front">
                   <option value="front">Front desk</option>
                   <option value="office">Back office</option>
-                </Select>
-                <Select aria-label="Compact select" compact defaultValue="all">
-                  <option value="all">All groups</option>
-                </Select>
+                </NativeSelect>
                 <Textarea aria-label="Notes" placeholder="Allowed domains, one per line" rows={3} />
                 <Checkbox label="Pin to taskbar" defaultChecked />
                 <Checkbox label="Show on desktop" hint="The tile appears on the Staff App desktop." />

@@ -1,6 +1,6 @@
 import { useRef, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router";
-import { Button, Checkbox, Input, Select } from "@rulebox/ui";
+import { Button, Checkbox, Input, NativeSelect } from "@rulebox/ui";
 import { useDeletePrinter, useGroupsScreen, useNetworks, usePrinterDetail, useSavePrinter } from "../data";
 import type { PrinterDetail, PrinterInput, PrinterKind, WifiApplyCounts } from "../data/types";
 import { Card } from "../components/Card";
@@ -266,7 +266,7 @@ function PrinterForm({
         </Field>
         <Field label={s.kindLabel} hint={s.kindHelp[kind]}>
           {(p) => (
-            <Select
+            <NativeSelect
               {...p}
               value={kind}
               onChange={(e) => {
@@ -281,7 +281,7 @@ function PrinterForm({
                   {s.kindNames[k]}
                 </option>
               ))}
-            </Select>
+            </NativeSelect>
           )}
         </Field>
         <Field label={s.addressLabel[kind]} hint={s.addressHint[kind]} error={f.errors.address ?? serverField("address", s.addressProblems.host)} required>
@@ -309,13 +309,13 @@ function PrinterForm({
         ) : null}
         <Field label={s.driverLabel} hint={s.driverHint} error={serverField("driver", s.driverRefused)}>
           {(p) => (
-            <Select {...p} value={f.values.driver} onChange={(e) => f.set("driver", e.target.value)}>
+            <NativeSelect {...p} value={f.values.driver} onChange={(e) => f.set("driver", e.target.value)}>
               {choices.map((name) => (
                 <option key={name} value={name}>
                   {!approved.includes(name) ? `${name} (${s.driverNotListed})` : delivered.has(name.toLowerCase()) ? `${name} (${s.driverDelivered})` : name}
                 </option>
               ))}
-            </Select>
+            </NativeSelect>
           )}
         </Field>
         <FieldSet legend={s.groups} hint={s.printerGroupsHint} error={f.errors.groupIds ?? serverField("groupIds", s.groupsServerRefused)}>

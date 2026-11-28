@@ -34,6 +34,7 @@ export default function Audit() {
       {
         key: "at",
         header: s.colTime,
+        nowrap: true,
         sortable: true,
         sortDefaultDir: "desc",
         cell: (e) => (
@@ -47,6 +48,7 @@ export default function Audit() {
       {
         key: "actor",
         header: s.colActor,
+        nowrap: true,
         cell: (e) => (
           <span className="dash-cell-stack" style={{ maxWidth: 260 }}>
             <span className="dash-truncate" title={e.actorLabel}>
@@ -56,7 +58,7 @@ export default function Audit() {
           </span>
         ),
       },
-      { key: "target", header: s.colTarget, isEmpty: (e) => !e.targetLabel, cell: (e) => (e.targetLabel ? <span className="dash-truncate" style={{ maxWidth: 240 }}><TargetLink entry={e} /></span> : <span className="dash-muted">—</span>) },
+      { key: "target", header: s.colTarget, nowrap: true, isEmpty: (e) => !e.targetLabel, cell: (e) => (e.targetLabel ? <span className="dash-truncate" style={{ maxWidth: 240 }}><TargetLink entry={e} /></span> : <span className="dash-muted">—</span>) },
       { key: "summary", header: s.colSummary, isEmpty: (e) => !e.summary, cell: (e) => <span className="dash-wrap" style={{ display: "block", maxWidth: 360, fontSize: 13.5 }}>{e.summary}</span> },
     ],
     [],

@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Button, Select } from "@rulebox/ui";
+import { Button, NativeSelect } from "@rulebox/ui";
 import { useSetGroupDisplay } from "../../data";
 import { IDLE_CLOSE_RANGE, WEB_WINDOW_CAP_RANGE, type DisplayChoice, type GroupDetail } from "../../data/types";
 import { Card } from "../../components/Card";
@@ -55,29 +55,29 @@ export function GroupDisplayCard({ g }: { g: GroupDetail }) {
         >
           <Field label={s.mode} hint={mode === "auto" ? s.autoNote : undefined}>
             {(p) => (
-              <Select {...p} value={mode} onChange={(e) => setMode(e.target.value as DisplayChoice)}>
+              <NativeSelect {...p} value={mode} onChange={(e) => setMode(e.target.value as DisplayChoice)}>
                 <ModeOptions />
-              </Select>
+              </NativeSelect>
             )}
           </Field>
           {mode === "standard" ? <InlineNotice tone="warning" title={s.standardOnSmallGroup} /> : null}
           <Field label={s.windowCap} hint={s.windowCapHint}>
             {(p) => (
-              <Select {...p} value={cap === null ? "" : String(cap)} onChange={(e) => setCap(e.target.value === "" ? null : Number(e.target.value))}>
+              <NativeSelect {...p} value={cap === null ? "" : String(cap)} onChange={(e) => setCap(e.target.value === "" ? null : Number(e.target.value))}>
                 <option value="">{s.capDefault}</option>
                 {capValues.map((n) => (
                   <option key={n} value={n}>
                     {s.capOption(n)}
                   </option>
                 ))}
-              </Select>
+              </NativeSelect>
             )}
           </Field>
           <Field label={s.idleClose} hint={s.idleCloseHint}>
             {(p) => (
-              <Select {...p} value={idle === null ? "" : String(idle)} onChange={(e) => setIdle(e.target.value === "" ? null : Number(e.target.value))}>
+              <NativeSelect {...p} value={idle === null ? "" : String(idle)} onChange={(e) => setIdle(e.target.value === "" ? null : Number(e.target.value))}>
                 <IdleCloseOptions current={idle} min={IDLE_CLOSE_RANGE.min} max={IDLE_CLOSE_RANGE.max} />
-              </Select>
+              </NativeSelect>
             )}
           </Field>
           <div className="dash-row">

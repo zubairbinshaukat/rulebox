@@ -1,6 +1,6 @@
 import { useMemo } from "react";
 import { Link, useNavigate } from "react-router";
-import { Pill, Select } from "@rulebox/ui";
+import { Pill, NativeSelect } from "@rulebox/ui";
 import IconUsers from "~icons/solar/users-group-rounded-linear";
 import IconUserPlus from "~icons/solar/user-plus-rounded-linear";
 import { useGroupsScreen } from "../data";
@@ -75,7 +75,7 @@ export default function Employees() {
           </Link>
         ),
       },
-      { key: "username", header: s.colUsername, sortable: !groupId, cell: (e) => <span className="dash-mono dash-truncate" title={e.username}>{e.username}</span> },
+      { key: "username", header: s.colUsername, truncate: 28, sortable: !groupId, cell: (e) => <span className="dash-mono dash-truncate" title={e.username}>{e.username}</span> },
       {
         key: "groups",
         header: s.colGroups,
@@ -96,10 +96,11 @@ export default function Employees() {
             </span>
           ),
       },
-      { key: "quota", header: s.colQuota, cell: (e) => quotaLabel(e.quotaGb) },
+      { key: "quota", header: s.colQuota, nowrap: true, cell: (e) => quotaLabel(e.quotaGb) },
       {
         key: "status",
         header: s.colStatus,
+        nowrap: true,
         cell: (e) => (e.disabled ? <StatusDot tone="neutral" label={s.disabled} /> : <StatusDot tone="success" label={s.active} />),
       },
     ],
@@ -120,10 +121,10 @@ export default function Employees() {
       <label className="dash-sr" htmlFor="employee-group-filter">
         {devicesStrings.groupFilter}
       </label>
-      <Select id="employee-group-filter" compact value={groupId} onChange={(e) => paging.view.setFilter("group", e.target.value || null)}>
+      <NativeSelect id="employee-group-filter" compact value={groupId} onChange={(e) => paging.view.setFilter("group", e.target.value || null)}>
         <option value="">{devicesStrings.allGroups}</option>
         {groups.status === "ready" ? groups.data.map((g) => <option key={g._id} value={g._id}>{g.name}</option>) : null}
-      </Select>
+      </NativeSelect>
     </>
   );
 

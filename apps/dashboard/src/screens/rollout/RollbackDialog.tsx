@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Button, Checkbox, Select } from "@rulebox/ui";
+import { Button, Checkbox, NativeSelect } from "@rulebox/ui";
 import { useRollback } from "../../data";
 import { RINGS, type Ring, type RolloutRow, type RolloutView } from "../../data/types";
 import { Field, FieldSet } from "../../components/Field";
@@ -87,13 +87,13 @@ function Inner({ groupId, rollout, versions, onClose }: { groupId: string; rollo
         ) : (
           <Field label={s.rollbackVersion}>
             {(p) => (
-              <Select {...p} value={version} onChange={(e) => setVersion(e.target.value)}>
+              <NativeSelect {...p} value={version} onChange={(e) => setVersion(e.target.value)}>
                 {versions.map((v) => (
                   <option key={v.version} value={String(v.version)}>
                     {s.rollbackVersionOption(v.version, v.reason, formatDate(v.createdAt))}
                   </option>
                 ))}
-              </Select>
+              </NativeSelect>
             )}
           </Field>
         )}

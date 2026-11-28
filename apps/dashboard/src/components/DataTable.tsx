@@ -1,5 +1,5 @@
 import { memo, useCallback, useEffect, useId, useRef, type MouseEvent, type ReactNode } from "react";
-import { Select } from "@rulebox/ui";
+import { NativeSelect } from "@rulebox/ui";
 import IconSort from "~icons/solar/sort-vertical-linear";
 import IconAsc from "~icons/solar/arrow-up-linear";
 import IconDesc from "~icons/solar/arrow-down-linear";
@@ -30,6 +30,16 @@ export interface Column<T> {
   /** Right-aligned action buttons; no label on phones. */
   actions?: boolean;
   numeric?: boolean;
+  /**
+   * The cell never wraps. Set it on every short value: dates and "4 minutes ago", states and badges,
+   * counts like "0 of 1 used", versions. `numeric` and `actions` columns are nowrap without it.
+   */
+  nowrap?: boolean;
+  /**
+   * Long free text: the cell is cut with an ellipsis after this many characters (`true` = 32), never wraps,
+   * and the full text shows on hover (it always stays in the page for screen readers and find-in-page).
+   */
+  truncate?: boolean | number;
   className?: string;
   /** Hide the cell on phones when it has nothing to show. */
   isEmpty?: (row: T) => boolean;
@@ -125,6 +135,8 @@ export function DataTable<T>({
   });
   const activate = useCallback((row: unknown) => (click.current as ((r: unknown) => void) | undefined)?.(row), []);
 
+  // Every column except the name can only get as narrow as its content: the name column then takes the rest of the width.
+  const fit = !asCards && columns.every((c) => c.primary || isShort(c));
   const sortable = onSortChange ? columns.filter((c) => c.sortable && !c.actions) : [];
   const showSwitch = stack && (viewSwitch ?? framed);
   const showToolbar = toolbar != null || showSwitch;
@@ -150,7 +162,7 @@ export function DataTable<T>({
         aria-busy={busy || undefined}
         data-busy={busy || undefined}
       >
-        <table className={["rb-table", stack ? "dash-table--stack" : ""].filter(Boolean).join(" ")}>
+        <table className={["rb-table", stack ? "dash-table--stack" : "", fit ? "dash-table--fit" : ""].filter(Boolean).join(" ")}>
           <caption className="dash-sr">{caption}</caption>
           <thead>
             <tr>
@@ -182,7 +194,7 @@ export function DataTable<T>({
           </thead>
           <tbody>
             {rows.map((row) => (
-              <Row key={getKey(row)} row={row} columns={columns as Column<unknown>[]} dim={isDim?.(row) ?? false} onActivate={onRowClick ? activate : undefined} />
+              <Row key={getKey(row)} row={row} columns={columns as Column<unknown>[]} dim={isDim?.(row) ?? false} onActivate={onRowClick ? activate : undefined} cards={asCards} />
             ))}
           </tbody>
         </table>
@@ -200,7 +212,7 @@ export function DataTable<T>({
               <label htmlFor={sortId} className="dash-sr">
                 {strings.table.sortSelect}
               </label>
-              <Select
+              <NativeSelect
                 id={sortId}
                 compact
                 value={sort ? `${sort.key}:${sort.dir}` : ""}
@@ -217,7 +229,7 @@ export function DataTable<T>({
                     </option>
                   )),
                 )}
-              </Select>
+              </NativeSelect>
             </div>
           ) : null}
           {showSwitch ? <ViewSwitch /> : null}
@@ -246,16 +258,45 @@ function ignoreRowClick(e: MouseEvent<HTMLElement>): boolean {
   return Boolean(selection && !selection.isCollapsed && selection.toString().length > 0);
 }
 
+/** A column whose cell never wraps and so cannot be squeezed below its content. */
+function isShort(c: Column<never>): boolean {
+  return Boolean(c.nowrap || c.numeric || c.actions || c.truncate);
+}
+
+const TRUNCATE_CH = 32;
+
+/** Long text in a cell: cut after `max` characters. The title (the full text) is set when the text is really cut. */
+function Truncated({ max, children }: { max: number; children: ReactNode }) {
+  return (
+    <span
+      className="dash-cell-trunc"
+      style={{ maxWidth: `${max}ch` }}
+      title={typeof children === "string" ? children : undefined}
+      onMouseEnter={(e) => {
+        const el = e.currentTarget;
+        if (typeof children === "string") return;
+        if (el.scrollWidth > el.clientWidth) el.title = el.textContent ?? "";
+        else el.removeAttribute("title");
+      }}
+    >
+      {children}
+    </span>
+  );
+}
+
 const Row = memo(function Row({
   row,
   columns,
   dim,
   onActivate,
+  cards,
 }: {
   row: unknown;
   columns: Column<unknown>[];
   dim: boolean;
   onActivate?: (row: unknown) => void;
+  /** Cards view: cells stack, so the one-line rules of the table view stay off. */
+  cards: boolean;
 }) {
   return (
     <tr
@@ -274,10 +315,13 @@ const Row = memo(function Row({
           c.primary ? "dash-cell--name" : "",
           c.actions ? "dash-cell--actions" : "",
           c.numeric ? "rb-num" : "",
+          !cards && isShort(c) ? "dash-cell--nowrap" : "",
           c.className ?? "",
         ]
           .filter(Boolean)
           .join(" ");
+        const content = c.cell(row);
+        const max = c.truncate === true ? TRUNCATE_CH : c.truncate || 0;
         return (
           <td
             key={c.key}
@@ -286,7 +330,7 @@ const Row = memo(function Row({
             data-primary={c.primary || undefined}
             data-empty={c.isEmpty?.(row) || undefined}
           >
-            {c.cell(row)}
+            {max > 0 ? <Truncated max={max}>{content}</Truncated> : content}
           </td>
         );
       })}

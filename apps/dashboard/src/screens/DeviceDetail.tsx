@@ -1,6 +1,6 @@
 import { lazy, Suspense, useEffect, useState, type ReactNode } from "react";
 import { Link, useNavigate, useParams } from "react-router";
-import { Button, Input, Pill, Select, Switch } from "@rulebox/ui";
+import { Button, Input, Pill, NativeSelect, Switch } from "@rulebox/ui";
 import IconPen from "~icons/solar/pen-linear";
 import IconBell from "~icons/solar/bell-linear";
 import {
@@ -474,14 +474,14 @@ function Settings({ d }: { d: Detail }) {
           >
             <Field label={s.group}>
               {(p) => (
-                <Select {...p} value={groupId} onChange={(e) => setGroupId(e.target.value)}>
+                <NativeSelect {...p} value={groupId} onChange={(e) => setGroupId(e.target.value)}>
                   {groupId === "" ? <option value="">{devicesStrings.noGroup}</option> : null}
                   {d.groups.map((g) => (
                     <option key={g._id} value={g._id}>
                       {g.name}
                     </option>
                   ))}
-                </Select>
+                </NativeSelect>
               )}
             </Field>
             <FormError

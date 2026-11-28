@@ -64,6 +64,7 @@ export default function Groups() {
       {
         key: "created",
         header: s.colCreated,
+        nowrap: true,
         sortable: true,
         sortDefaultDir: "desc",
         isEmpty: (g) => g.createdAt === undefined,

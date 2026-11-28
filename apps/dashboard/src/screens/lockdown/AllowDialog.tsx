@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Button, Checkbox, Input, Select } from "@rulebox/ui";
+import { Button, Checkbox, Input, NativeSelect } from "@rulebox/ui";
 import { useAllowFinding, useAllowOptions } from "../../data/lockdown";
 import { MAX_ALLOW_GROUPS, MAX_EXCEPTION_REASON, type ExceptionKind, type FindingRow } from "../../data/types";
 import { Field, FieldSet } from "../../components/Field";
@@ -97,14 +97,14 @@ function Inner({ finding, onClose }: { finding: FindingRow; onClose: () => void 
         {possible.length === 0 ? <InlineNotice tone="warning" title={s.appControlNote} /> : null}
         <Field label={s.ruleKind} hint={kind === null ? undefined : kindHelp(kind)}>
           {(p) => (
-            <Select {...p} value={kind ?? ""} disabled={pending || possible.length === 0} onChange={(e) => setKind(e.target.value as ExceptionKind)}>
+            <NativeSelect {...p} value={kind ?? ""} disabled={pending || possible.length === 0} onChange={(e) => setKind(e.target.value as ExceptionKind)}>
               {kind === null ? <option value="">—</option> : null}
               {KINDS.map((k) => (
                 <option key={k} value={k} disabled={!possible.includes(k)}>
                   {s.kinds[k]}
                 </option>
               ))}
-            </Select>
+            </NativeSelect>
           )}
         </Field>
         {/* Why a kind is not offered, in words (a disabled option cannot explain itself). */}
@@ -141,14 +141,14 @@ function Inner({ finding, onClose }: { finding: FindingRow; onClose: () => void 
         </FieldSet>
         <Field label={s.app} hint={s.appHint} optional>
           {(p) => (
-            <Select {...p} value={appId} disabled={pending} onChange={(e) => setAppId(e.target.value)}>
+            <NativeSelect {...p} value={appId} disabled={pending} onChange={(e) => setAppId(e.target.value)}>
               <option value="">{s.appNone}</option>
               {apps.map((a) => (
                 <option key={a._id} value={a._id}>
                   {a.name}
                 </option>
               ))}
-            </Select>
+            </NativeSelect>
           )}
         </Field>
         <Field label={s.reason} hint={s.reasonHint} error={touched && badReason ? s.reasonProblem : null} optional>

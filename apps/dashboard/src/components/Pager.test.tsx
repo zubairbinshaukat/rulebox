@@ -94,6 +94,13 @@ describe("Pager", () => {
     expect(select.value).toBe("20");
   });
 
+  it("lays out as three parts the CSS arranges per width: the summary, the page buttons, rows per page", () => {
+    show();
+    const bar = nav().parentElement!;
+    expect(bar.className).toBe("dash-pager");
+    expect([...bar.children].map((c) => c.className)).toEqual(["dash-pager__summary", "dash-pager__nav", "dash-pager__size"]);
+  });
+
   it("announces busy while a page loads", () => {
     show({ loading: true });
     expect(nav().getAttribute("aria-busy")).toBe("true");

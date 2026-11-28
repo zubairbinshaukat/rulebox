@@ -80,6 +80,7 @@ export default function Apps() {
       {
         key: "kind",
         header: s.colKind,
+        nowrap: true,
         cell: (a) => (
           <span className="dash-row" style={{ gap: 6, flexWrap: "nowrap" }}>
             {a.kind === "web" ? <IconGlobal aria-hidden="true" /> : <IconMonitor aria-hidden="true" />}
@@ -93,11 +94,12 @@ export default function Apps() {
           </span>
         ),
       },
-      { key: "groups", header: s.colGroups, cell: (a) => (a.groupCount ? s.groups(a.groupCount, a.groupCountMore) : <span className="dash-muted">—</span>) },
-      { key: "installs", header: s.colInstalls, isEmpty: (a) => a.kind === "web", cell: (a) => (a.kind === "web" ? <span className="dash-muted">—</span> : <Summary summary={a.summary} />) },
+      { key: "groups", header: s.colGroups, nowrap: true, cell: (a) => (a.groupCount ? s.groups(a.groupCount, a.groupCountMore) : <span className="dash-muted">—</span>) },
+      { key: "installs", header: s.colInstalls, nowrap: true, isEmpty: (a) => a.kind === "web", cell: (a) => (a.kind === "web" ? <span className="dash-muted">—</span> : <Summary summary={a.summary} />) },
       {
         key: "created",
         header: s.colAdded,
+        nowrap: true,
         sortable: true,
         sortDefaultDir: "desc",
         isEmpty: (a) => a.createdAt === undefined,

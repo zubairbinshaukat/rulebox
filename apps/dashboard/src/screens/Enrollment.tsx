@@ -1,6 +1,6 @@
 import { useEffect, useId, useMemo, useRef, useState, type ReactNode } from "react";
 import { Link } from "react-router";
-import { Button, Input, Pill, Select, type PillTone } from "@rulebox/ui";
+import { Button, Input, Pill, NativeSelect, type PillTone } from "@rulebox/ui";
 import IconAdd from "~icons/solar/add-square-linear";
 import IconKey from "~icons/solar/key-minimalistic-linear";
 import { useGroupsScreen, usePlan } from "../data";
@@ -136,6 +136,7 @@ function CodeList({ canAct, onRevoke, emptyAction }: { canAct: boolean; onRevoke
       {
         key: "group",
         header: s.colGroup,
+        truncate: 24,
         cell: (c) =>
           c.groupId && c.groupName ? (
             <Link className="dash-link dash-truncate" to={`/groups/${c.groupId}`} title={c.groupName}>
@@ -145,13 +146,14 @@ function CodeList({ canAct, onRevoke, emptyAction }: { canAct: boolean; onRevoke
             <span className="dash-muted">{c.groupId ? s.groupGone : "—"}</span>
           ),
       },
-      { key: "uses", header: s.colUses, cell: (c) => <span className="dash-mono">{s.used(Math.max(0, c.usesTotal - c.usesLeft), c.usesTotal)}</span> },
-      { key: "created", header: s.colCreated, sortable: true, sortDefaultDir: "desc", cell: (c) => <RelativeTime ms={c.createdAt} /> },
-      { key: "expires", header: s.colExpires, sortable: true, sortDefaultDir: "desc", cell: (c) => <RelativeTime ms={c.expiresAt} /> },
-      { key: "state", header: s.colState, cell: (c) => <StateCell row={c} /> },
+      { key: "uses", header: s.colUses, nowrap: true, cell: (c) => <span className="dash-mono">{s.used(Math.max(0, c.usesTotal - c.usesLeft), c.usesTotal)}</span> },
+      { key: "created", header: s.colCreated, nowrap: true, sortable: true, sortDefaultDir: "desc", cell: (c) => <RelativeTime ms={c.createdAt} /> },
+      { key: "expires", header: s.colExpires, nowrap: true, sortable: true, sortDefaultDir: "desc", cell: (c) => <RelativeTime ms={c.expiresAt} /> },
+      { key: "state", header: s.colState, nowrap: true, cell: (c) => <StateCell row={c} /> },
       {
         key: "by",
         header: s.colCreatedBy,
+        truncate: 20,
         isEmpty: (c) => !c.createdByEmail,
         cell: (c) => (
           <span className="dash-truncate" title={c.createdByEmail} style={{ maxWidth: 220 }}>
@@ -291,7 +293,7 @@ function CreateDialog({ groups, onClose, onCreated }: { groups: GroupRow[]; onCl
       <div className="dash-form">
         <Field label={s.group} hint={s.groupHint} error={f.errors.groupId} required>
           {(fp) => (
-            <Select {...fp} value={f.values.groupId} onChange={(e) => f.set("groupId", e.target.value)}>
+            <NativeSelect {...fp} value={f.values.groupId} onChange={(e) => f.set("groupId", e.target.value)}>
               {groups.length !== 1 ? (
                 <option value="" disabled>
                   {s.pickGroup}
@@ -302,7 +304,7 @@ function CreateDialog({ groups, onClose, onCreated }: { groups: GroupRow[]; onCl
                   {g.name}
                 </option>
               ))}
-            </Select>
+            </NativeSelect>
           )}
         </Field>
         <div className="dash-form__row">
@@ -313,14 +315,14 @@ function CreateDialog({ groups, onClose, onCreated }: { groups: GroupRow[]; onCl
           </Field>
           <Field label={s.expiry} error={f.values.ttl === CUSTOM ? null : (f.errors.ttl ?? ttlServer)} required>
             {(fp) => (
-              <Select {...fp} value={f.values.ttl} onChange={(e) => f.set("ttl", e.target.value)}>
+              <NativeSelect {...fp} value={f.values.ttl} onChange={(e) => f.set("ttl", e.target.value)}>
                 {s.expiryOptions.map((o) => (
                   <option key={o.minutes} value={String(o.minutes)}>
                     {o.label}
                   </option>
                 ))}
                 <option value={CUSTOM}>{s.custom}</option>
-              </Select>
+              </NativeSelect>
             )}
           </Field>
         </div>
@@ -337,13 +339,13 @@ function CreateDialog({ groups, onClose, onCreated }: { groups: GroupRow[]; onCl
                   value={f.values.customAmount}
                   onChange={(e) => f.set("customAmount", e.target.value)}
                 />
-                <Select aria-label={s.customUnit} value={f.values.customUnit} onChange={(e) => f.set("customUnit", e.target.value as TtlUnit)}>
+                <NativeSelect aria-label={s.customUnit} value={f.values.customUnit} onChange={(e) => f.set("customUnit", e.target.value as TtlUnit)}>
                   {(Object.keys(s.units) as TtlUnit[]).map((u) => (
                     <option key={u} value={u}>
                       {s.units[u]}
                     </option>
                   ))}
-                </Select>
+                </NativeSelect>
               </div>
             )}
           </Field>

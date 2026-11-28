@@ -218,7 +218,7 @@ export default defineConfig(({ mode, command }) => {
             // far better than a dozen tiny ones; the few sign-in and entry icons and the icons
             // of the other screens stay out, so no page loads icons it does not draw.
             { name: "icons", test: new RegExp(`~icons[\\\\/]solar[\\\\/](${SHELL_ICONS.join("|")})-(linear|bold-duotone)\\.jsx$`) },
-            { name: "core", test: /([\\/]apps[\\/]dashboard[\\/]src[\\/](lib|data)|[\\/]packages[\\/]ui[\\/]src)[\\/](?!(stepup|screenStrings|enrollment|devices|apps|employees|audit|members|lockdown|release)[\\/])(?!components[\\/](AppTile|FileChip|IconButton|LogoMotion|Notice|Panel|ProgressBar|Slider|StatCard|Surface|Tabs|TitleBar)\.).*\.tsx?$/ },
+            { name: "core", test: /([\\/]apps[\\/]dashboard[\\/]src[\\/](lib|data)|[\\/]packages[\\/]ui[\\/]src)[\\/](?!(stepup|screenStrings|enrollment|devices|apps|employees|audit|members|lockdown|release)[\\/])(?!components[\\/](AppTile|FileChip|IconButton|InfoTip|LogoMotion|Notice|Panel|ProgressBar|SearchSelect|Select|Slider|StatCard|Surface|Tabs|TitleBar)\.)(?!floating\.).*\.tsx?$/ },
             // The four tiny page parts every signed-in screen shares (card, page header, relative time,
             // role gate) ride along: four 0.2 to 0.5 KB files cost more in headers than here, in one.
             { name: "core", test: /[\\/]apps[\\/]dashboard[\\/]src[\\/]components[\\/](Card|PageHeader|RelativeTime|RoleGate)\.tsx$/ },

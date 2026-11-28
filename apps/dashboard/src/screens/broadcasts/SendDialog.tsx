@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Button, Checkbox, Input, Select, Textarea } from "@rulebox/ui";
+import { Button, Checkbox, Input, NativeSelect, Textarea } from "@rulebox/ui";
 import { useGroupsScreen, useSendBroadcast } from "../../data";
 import type { BroadcastStyle } from "../../data/types";
 import { Field } from "../../components/Field";
@@ -96,23 +96,23 @@ function SendInner({ target, onClose }: { target: SendTarget; onClose: () => voi
         ) : (
           <Field label={s.toGroup} error={touched && targetMissing ? s.targetProblem : null} required>
             {(p) => (
-              <Select {...p} value={groupId} onChange={(e) => setGroupId(e.target.value)}>
+              <NativeSelect {...p} value={groupId} onChange={(e) => setGroupId(e.target.value)}>
                 <option value="">{groupRows.length === 0 && groups.status === "ready" ? s.noGroups : s.pickGroup}</option>
                 {groupRows.map((g) => (
                   <option key={g._id} value={g._id}>
                     {g.name}
                   </option>
                 ))}
-              </Select>
+              </NativeSelect>
             )}
           </Field>
         )}
         <Field label={s.style} hint={s.styleHelp[style]}>
           {(p) => (
-            <Select {...p} value={style} onChange={(e) => setStyle(e.target.value as BroadcastStyle)}>
+            <NativeSelect {...p} value={style} onChange={(e) => setStyle(e.target.value as BroadcastStyle)}>
               <option value="banner">{s.styles.banner}</option>
               <option value="fullscreen">{s.styles.fullscreen}</option>
-            </Select>
+            </NativeSelect>
           )}
         </Field>
         <Field label={s.messageTitle} error={touched && titleProblem ? s.titleProblems[titleProblem] : null} hint={s.titleCount([...title.trim()].length)} required>
@@ -123,13 +123,13 @@ function SendInner({ target, onClose }: { target: SendTarget; onClose: () => voi
         </Field>
         <Field label={s.expiry}>
           {(p) => (
-            <Select {...p} value={expiry} onChange={(e) => setExpiry(e.target.value)}>
+            <NativeSelect {...p} value={expiry} onChange={(e) => setExpiry(e.target.value)}>
               {EXPIRY_CHOICES.map((c) => (
                 <option key={c.key} value={c.key}>
                   {s.expiryChoices[c.key]}
                 </option>
               ))}
-            </Select>
+            </NativeSelect>
           )}
         </Field>
         <Checkbox label={s.ackRequired} hint={s.ackHint} checked={ackRequired} onChange={(e) => setAckRequired(e.target.checked)} />

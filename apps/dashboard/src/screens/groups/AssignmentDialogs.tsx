@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Button, Checkbox, Select } from "@rulebox/ui";
+import { Button, Checkbox, NativeSelect } from "@rulebox/ui";
 import { useAppOptions, useAssignApp, useUpdateAssignment } from "../../data";
 import type { AssignmentRow, Audience } from "../../data/types";
 import { Field, FieldSet } from "../../components/Field";
@@ -25,10 +25,10 @@ function AssignmentFields({ values, onChange }: { values: Fields; onChange: (nex
     <>
       <Field label={s.audience} hint={groupText.audienceHint}>
         {(p) => (
-          <Select {...p} value={values.audience} onChange={(e) => onChange({ ...values, audience: e.target.value as Audience })}>
+          <NativeSelect {...p} value={values.audience} onChange={(e) => onChange({ ...values, audience: e.target.value as Audience })}>
             <option value="everyone">{s.audienceEveryone}</option>
             <option value="selected">{s.audienceSelected}</option>
-          </Select>
+          </NativeSelect>
         )}
       </Field>
       <FieldSet legend={s.pins}>
@@ -89,13 +89,13 @@ function AssignForm({ groupId, apps, onClose }: { groupId: string; apps: { _id: 
         {apps.length === 0 ? <InlineNotice tone="neutral" title={groupText.noAppsToAssign} /> : null}
         <Field label={s.app} error={f.errors.appId} required>
           {(p) => (
-            <Select {...p} value={f.values.appId} onChange={(e) => f.set("appId", e.target.value)} disabled={apps.length === 0}>
+            <NativeSelect {...p} value={f.values.appId} onChange={(e) => f.set("appId", e.target.value)} disabled={apps.length === 0}>
               {apps.map((a) => (
                 <option key={a._id} value={a._id}>
                   {a.name}
                 </option>
               ))}
-            </Select>
+            </NativeSelect>
           )}
         </Field>
         <AssignmentFields

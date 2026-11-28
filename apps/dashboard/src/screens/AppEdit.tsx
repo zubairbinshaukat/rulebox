@@ -1,6 +1,6 @@
 import { lazy, Suspense, useMemo, useRef, useState, type CSSProperties } from "react";
 import { Link, useNavigate, useParams, useSearchParams } from "react-router";
-import { Button, Checkbox, Input, Pill, SegmentedControl, Select, Switch, Textarea } from "@rulebox/ui";
+import { Button, Checkbox, Input, Pill, SegmentedControl, NativeSelect, Switch, Textarea } from "@rulebox/ui";
 import IconDownload from "~icons/solar/download-minimalistic-linear";
 import IconMagic from "~icons/solar/stars-linear";
 import IconAdd from "~icons/solar/add-circle-linear";
@@ -1082,21 +1082,21 @@ function AssignToGroup({ d, onClose }: { d: AppDetail; onClose: () => void }) {
       <div className="dash-form">
         <Field label={strings.enrollment.group} error={f.errors.groupId} required>
           {(p) => (
-            <Select {...p} value={f.values.groupId} onChange={(e) => f.set("groupId", e.target.value)}>
+            <NativeSelect {...p} value={f.values.groupId} onChange={(e) => f.set("groupId", e.target.value)}>
               {options.map((g) => (
                 <option key={g._id} value={g._id}>
                   {g.name}
                 </option>
               ))}
-            </Select>
+            </NativeSelect>
           )}
         </Field>
         <Field label={groupStrings.audience}>
           {(p) => (
-            <Select {...p} value={f.values.audience} onChange={(e) => f.set("audience", e.target.value as Audience)}>
+            <NativeSelect {...p} value={f.values.audience} onChange={(e) => f.set("audience", e.target.value as Audience)}>
               <option value="everyone">{groupStrings.audienceEveryone}</option>
               <option value="selected">{groupStrings.audienceSelected}</option>
-            </Select>
+            </NativeSelect>
           )}
         </Field>
         <FieldSet legend={groupStrings.pins}>

@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { Button, Input, Select, Switch } from "@rulebox/ui";
+import { Button, Input, NativeSelect, Switch } from "@rulebox/ui";
 import IconDetect from "~icons/solar/magnifer-linear";
 import IconFile from "~icons/solar/file-check-linear";
 import { useInspectInstaller } from "../data";
@@ -173,14 +173,14 @@ export function InstallerCard({ f, state, readOnly }: { f: FormApi; state: Inspe
         {exe ? (
           <Field label={s.tech} hint={s.techHint} optional>
             {(p) => (
-              <Select {...p} value={x.tech} onChange={(e) => f.set("tech", e.target.value as WizardTech | "")}>
+              <NativeSelect {...p} value={x.tech} onChange={(e) => f.set("tech", e.target.value as WizardTech | "")}>
                 <option value="">{s.techNone}</option>
                 {INSTALL_TECHS.map((t) => (
                   <option key={t} value={t}>
                     {s.techOptions[t]}
                   </option>
                 ))}
-              </Select>
+              </NativeSelect>
             )}
           </Field>
         ) : null}
