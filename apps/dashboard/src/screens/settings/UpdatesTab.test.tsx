@@ -607,6 +607,8 @@ describe("Settings → Rulebox updates: release notes are text", () => {
     cx.results["ruleboxRelease:get"] = screenData(null);
     const { container } = ui();
     await screen.findByRole("radiogroup");
+    // Closed, only whole blocks show (the first heading and what follows); open them to see everything.
+    fireEvent.click(screen.getByRole("button", { name: s.showNotes }));
     const body = container.querySelector(".upd-notes__body")!;
     expect(body.querySelector("script, img, a")).toBeNull();
     expect(body.textContent).toContain("Big news");

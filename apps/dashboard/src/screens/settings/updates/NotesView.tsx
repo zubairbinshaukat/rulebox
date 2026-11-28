@@ -12,10 +12,13 @@ export function NotesView({ notes, truncated }: { notes: string; truncated: bool
   const blocks = useMemo(() => notesBlocks(notes), [notes]);
   if (blocks.length === 0) return null;
   const long = blocks.length > 2 || blocks.reduce((n, b) => n + b.text.length, 0) > SHORT_CHARS;
+  const all = groups(blocks);
+  // Closed, show whole blocks only (the first heading with what follows it), so the clamp never cuts a heading in half.
+  const shown = open || !long ? all : all.slice(0, all[0]?.kind === "heading" ? 2 : 1);
   return (
     <div className="upd-notes" data-open={open || !long || undefined}>
       <div className="upd-notes__body" id={id}>
-        {groups(blocks).map((g, i) =>
+        {shown.map((g, i) =>
           g.kind === "bullets" ? (
             <ul key={i} className="upd-notes__list">
               {g.items.map((t, j) => (
