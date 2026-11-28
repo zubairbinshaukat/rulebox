@@ -75,6 +75,8 @@ import { AdminExitTab } from "./settings/AdminExitTab";
 import { OrganizationTab } from "./settings/OrganizationTab";
 import { exit as exitText, planLimitMessage } from "./settings/strings";
 import { groupText } from "./groups/strings";
+import { groupPage } from "./group/strings";
+import { displayStrings } from "../lib/screenStrings/display";
 
 const admin: Me = {
   email: "admin@x.test",
@@ -331,13 +333,55 @@ describe("Groups list (groups:page, one server-driven page at a time)", () => {
   });
 });
 describe("Group detail (groups:get)", () => {
-  const detail = (revision: number, name = "Office", devices = 0) => ({
-    group: { ...groupRow("g1", name, devices), revision, description: "Back office" },
+  const detail = (revision: number, name = "Office", devices = 0, over: Record<string, unknown> = {}) => ({
+    group: { ...groupRow("g1", name, devices), revision, description: "Back office", ...over },
     apps: [{ assignmentId: "as1", appId: "a1", name: "Notepad", kind: "desktop", archived: false, audience: "everyone", pinnedTaskbar: true, pinnedDesktop: false }],
   });
+  const assign = () => screen.getAllByRole("button", { name: groupPage.assignApp })[0]!;
+  const more = () => fireEvent.click(screen.getByRole("button", { name: groupPage.more }));
+  const menuItems = () => screen.getAllByRole("menuitem").map((i) => i.textContent);
+  const pickMore = (label: string) => {
+    more();
+    fireEvent.click(screen.getByRole("menuitem", { name: label }));
+  };
 
-  it("admins can assign apps; the devices (Step 7) and the history (Step 17) are live", () => {
+  it("the header: the name, Assign app as the main button, Protection, a More menu; the tabs and the apps", () => {
     cx.results["groups:get"] = detail(0);
+    ui(<GroupDetail />, "admin", "/groups/g1");
+    expect(screen.getByRole("heading", { level: 1, name: "Office" })).toBeTruthy();
+    expect(screen.getByText("Back office")).toBeTruthy();
+    expect(assign().className).toContain("rb-btn--primary");
+    expect(screen.getByRole("link", { name: groupPage.protection }).getAttribute("href")).toBe("/groups/g1/lockdown");
+    expect(screen.getAllByRole("tab").map((t) => t.textContent)).toEqual([groupPage.tabs.overview, groupPage.tabs.pcs, groupPage.tabs.people, groupPage.tabs.activity]);
+    expect(screen.getByText("Notepad")).toBeTruthy();
+    // Rename and Delete are not buttons of the header: they are in the menu, Delete last.
+    expect(screen.queryByRole("button", { name: groupPage.rename })).toBeNull();
+    expect(screen.queryByRole("button", { name: strings.common.delete })).toBeNull();
+    more();
+    expect(menuItems()).toEqual([groupPage.stagedRollout, groupPage.sendMessage, groupPage.rename, groupPage.deleteGroup]);
+  });
+
+  it("the Overview reads groups:get only; the PCs tab adds fleet:list for the group, the People tab employees:list, Activity the history", () => {
+    cx.results["groups:get"] = detail(0);
+    cx.results["fleet:list"] = { page: [], isDone: true, continueCursor: "c" };
+    cx.results["employees:list"] = { page: [], isDone: true, continueCursor: "c" };
+    cx.results["audit:forTarget"] = { page: [], isDone: true, continueCursor: "c" };
+    const names = () => new Set(cx.queried.map((q) => q.name));
+    const view = ui(<GroupDetail />, "admin", "/groups/g1");
+    expect([...names()]).toEqual(["groups:get"]);
+    view.unmount();
+    cx.queried = [];
+    ui(<GroupDetail />, "admin", "/groups/g1?tab=pcs");
+    expect(names().has("groups:get")).toBe(true);
+    return waitFor(() => expect(names().has("fleet:list")).toBe(true)).then(() => {
+      expect(names().has("employees:list")).toBe(false);
+      expect(names().has("audit:forTarget")).toBe(false);
+      expect(cx.queried.find((q) => q.name === "fleet:list")!.args).toMatchObject({ groupId: "g1" });
+    });
+  });
+
+  it("the PCs tab lists the group's PCs with a link to each and Add a PC for this group", async () => {
+    cx.results["groups:get"] = detail(0, "Office", 1);
     cx.results["audit:forTarget"] = { page: [], isDone: true, continueCursor: "c" };
     cx.results["fleet:list"] = {
       page: [
@@ -357,21 +401,28 @@ describe("Group detail (groups:get)", () => {
       isDone: true,
       continueCursor: "c",
     };
-    ui(<GroupDetail />, "admin", "/groups/g1");
-    expect(screen.getByRole("heading", { level: 1, name: "Office" })).toBeTruthy();
-    expect(screen.getByText("Notepad")).toBeTruthy();
-    expect(screen.getByRole("button", { name: groupStrings.assign })).toBeTruthy();
-    expect(screen.getByRole("link", { name: "Front desk" }).getAttribute("href")).toBe("/devices/d1");
-    expect(screen.getAllByText(auditStrings.historyNone).length).toBeGreaterThanOrEqual(1);
+    ui(<GroupDetail />, "admin", "/groups/g1?tab=pcs");
+    expect((await screen.findByRole("link", { name: "Front desk" })).getAttribute("href")).toBe("/devices/d1");
+    expect(screen.getByRole("link", { name: groupPage.pcs.add }).getAttribute("href")).toBe("/enrollment?group=g1");
   });
 
-  it("viewers see the assigned apps without the buttons", () => {
+  it("the Activity tab shows the history", async () => {
+    cx.results["groups:get"] = detail(0);
+    cx.results["audit:forTarget"] = { page: [], isDone: true, continueCursor: "c" };
+    ui(<GroupDetail />, "admin", "/groups/g1?tab=activity");
+    expect((await screen.findAllByText(auditStrings.historyNone)).length).toBeGreaterThanOrEqual(1);
+  });
+
+  it("viewers see the apps without Assign, Edit and Unassign, and a More menu with Staged rollout only", () => {
     cx.results["groups:get"] = detail(0);
     ui(<GroupDetail />, "viewer", "/groups/g1");
     expect(screen.getByText("Notepad")).toBeTruthy();
-    expect(screen.queryByRole("button", { name: groupStrings.assign })).toBeNull();
-    expect(screen.queryByRole("button", { name: `${strings.common.edit} Notepad` })).toBeNull();
-    expect(screen.queryByRole("button", { name: `${groupStrings.unassign} Notepad` })).toBeNull();
+    expect(screen.queryByRole("button", { name: groupPage.assignApp })).toBeNull();
+    expect(screen.queryByRole("button", { name: `${groupPage.edit}: Notepad` })).toBeNull();
+    expect(screen.queryByRole("button", { name: `${groupStrings.unassign}: Notepad` })).toBeNull();
+    expect(screen.getByRole("link", { name: groupPage.protection })).toBeTruthy();
+    more();
+    expect(menuItems()).toEqual([groupPage.stagedRollout]);
   });
 
   it("assign: picks an app (those already in the group are left out), sends the audience and pins", async () => {
@@ -380,17 +431,17 @@ describe("Group detail (groups:get)", () => {
       { _id: "a1", name: "Notepad", kind: "desktop", canOpenFiles: true },
       { _id: "a2", name: "Wiki", kind: "web", canOpenFiles: false },
     ];
-    const assign = vi.fn(async () => ({ assignmentId: "as2" }));
-    cx.fns["groups:assignApp"] = assign;
+    const assignApp = vi.fn(async () => ({ assignmentId: "as2" }));
+    cx.fns["groups:assignApp"] = assignApp;
     ui(<GroupDetail />, "admin", "/groups/g1");
-    fireEvent.click(screen.getByRole("button", { name: groupStrings.assign }));
+    fireEvent.click(assign());
     const dialog = await screen.findByRole("dialog");
     const picker = within(dialog).getByLabelText(new RegExp(`^${groupStrings.app}`)) as HTMLSelectElement;
     expect([...picker.options].map((o) => o.textContent)).toEqual(["Wiki"]);
     fireEvent.change(within(dialog).getByLabelText(groupStrings.audience), { target: { value: "selected" } });
     fireEvent.click(within(dialog).getByLabelText(groupStrings.pinTaskbar));
     fireEvent.click(within(dialog).getByRole("button", { name: groupStrings.assign }));
-    await waitFor(() => expect(assign).toHaveBeenCalledWith({ groupId: "g1", appId: "a2", audience: "selected", pinnedTaskbar: true, pinnedDesktop: true }));
+    await waitFor(() => expect(assignApp).toHaveBeenCalledWith({ groupId: "g1", appId: "a2", audience: "selected", pinnedTaskbar: true, pinnedDesktop: true }));
   });
 
   it("assign: the server's conflict and too_large refusals get their own sentences", async () => {
@@ -401,7 +452,7 @@ describe("Group detail (groups:get)", () => {
       .mockRejectedValueOnce(new ConvexError({ code: "conflict", field: "app" }))
       .mockRejectedValueOnce(new ConvexError({ code: "too_large", detail: "group apps" }));
     ui(<GroupDetail />, "admin", "/groups/g1");
-    fireEvent.click(screen.getByRole("button", { name: groupStrings.assign }));
+    fireEvent.click(assign());
     const dialog = await screen.findByRole("dialog");
     fireEvent.click(within(dialog).getByRole("button", { name: groupStrings.assign }));
     expect(await within(dialog).findByText(groupText.alreadyAssigned)).toBeTruthy();
@@ -409,32 +460,96 @@ describe("Group detail (groups:get)", () => {
     expect(await within(dialog).findByText(groupText.tooManyApps)).toBeTruthy();
   });
 
-  it("edit sends the assignment id with the new audience and pins; unassign asks first", async () => {
+  it("edit sends the assignment id with the new audience and pins; unassign asks first (row buttons)", async () => {
     cx.results["groups:get"] = detail(0);
     const update = vi.fn(async () => null);
     const unassign = vi.fn(async () => null);
     cx.fns["groups:updateAssignment"] = update;
     cx.fns["groups:unassignApp"] = unassign;
     ui(<GroupDetail />, "admin", "/groups/g1");
-    fireEvent.click(screen.getByRole("button", { name: `${strings.common.edit} Notepad` }));
+    fireEvent.click(screen.getByRole("button", { name: `${groupPage.edit}: Notepad` }));
     let dialog = await screen.findByRole("dialog");
     fireEvent.click(within(dialog).getByLabelText(groupStrings.pinDesktop));
     fireEvent.click(within(dialog).getByRole("button", { name: strings.common.save }));
     await waitFor(() => expect(update).toHaveBeenCalledWith({ assignmentId: "as1", audience: "everyone", pinnedTaskbar: true, pinnedDesktop: true }));
     await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
 
-    fireEvent.click(screen.getByRole("button", { name: `${groupStrings.unassign} Notepad` }));
+    fireEvent.click(screen.getByRole("button", { name: `${groupStrings.unassign}: Notepad` }));
     dialog = await screen.findByRole("dialog");
     expect(unassign).not.toHaveBeenCalled();
     fireEvent.click(within(dialog).getByRole("button", { name: groupStrings.unassign }));
     await waitFor(() => expect(unassign).toHaveBeenCalledWith({ assignmentId: "as1" }));
   });
 
-  it("delete is blocked up front by what the screen knows (devices, apps)", () => {
+  it("an archived app is a warning card with Unassign, which asks first; the tab says how many things need a look", async () => {
+    cx.results["groups:get"] = { ...detail(0), apps: [{ assignmentId: "as9", appId: "a9", name: "PDF Reader", kind: "desktop", archived: true, audience: "everyone", pinnedTaskbar: false, pinnedDesktop: true }] };
+    const unassign = vi.fn(async () => null);
+    cx.fns["groups:unassignApp"] = unassign;
+    ui(<GroupDetail />, "admin", "/groups/g1");
+    expect(screen.getByRole("tab", { name: new RegExp(`^${groupPage.tabs.overview}\\s*1$`) })).toBeTruthy();
+    const card = screen.getByRole("heading", { name: new RegExp(groupPage.problem.archivedTitle("PDF Reader")) }).closest("article")!;
+    fireEvent.click(within(card as HTMLElement).getByRole("button", { name: groupPage.problem.unassign }));
+    const dialog = await screen.findByRole("dialog");
+    fireEvent.click(within(dialog).getByRole("button", { name: groupStrings.unassign }));
+    await waitFor(() => expect(unassign).toHaveBeenCalledWith({ assignmentId: "as9" }));
+  });
+
+  it("a halted rollout and an old trial run are cards that go to the rollout and to the protection", () => {
+    const now = Date.now();
+    cx.results["groups:get"] = {
+      ...detail(0),
+      rollout: { enabled: true, state: "halted" },
+      lockdownAuditSince: now - 20 * 24 * 60 * 60 * 1000,
+    };
+    ui(<GroupDetail />, "viewer", "/groups/g1");
+    expect(screen.getByRole("link", { name: groupPage.problem.openRollout }).getAttribute("href")).toBe("/groups/g1/rollout");
+    expect(screen.getByRole("link", { name: groupPage.problem.openProtection }).getAttribute("href")).toBe("/groups/g1/lockdown");
+  });
+
+  it("an empty group gets the three steps; Add a PC goes to the enrollment page with this group; a viewer sees no buttons", () => {
+    cx.results["groups:get"] = { ...detail(0), apps: [] };
+    const view = ui(<GroupDetail />, "admin", "/groups/g1");
+    const steps = within(screen.getByRole("list", { name: groupPage.ready.stepsLabel }));
+    expect(steps.getAllByRole("listitem")).toHaveLength(3);
+    expect(steps.getByRole("link", { name: groupPage.ready.pcs.action }).getAttribute("href")).toBe("/enrollment?group=g1");
+    expect(steps.getByRole("button", { name: groupPage.ready.apps.action })).toBeTruthy();
+    view.unmount();
+    ui(<GroupDetail />, "viewer", "/groups/g1");
+    const ready = within(screen.getByRole("list", { name: groupPage.ready.stepsLabel }));
+    expect(ready.queryAllByRole("button")).toHaveLength(0);
+    expect(ready.queryAllByRole("link")).toHaveLength(0);
+  });
+
+  it("a group with an app, a PC and a person has no checklist", () => {
+    cx.results["groups:get"] = detail(0, "Office", 1, { employees: { count: 2, more: false } });
+    ui(<GroupDetail />, "admin", "/groups/g1");
+    expect(screen.queryByText(groupPage.ready.title)).toBeNull();
+  });
+
+  it("the Display and memory row: its state, and Change (admins) opens the dialog", async () => {
+    cx.results["groups:get"] = detail(0, "Office", 0, { displayMode: "lite" });
+    const view = ui(<GroupDetail />, "admin", "/groups/g1");
+    expect(screen.getByText(groupPage.setup.lite)).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: groupPage.setup.changeLabel(groupPage.setup.display) }));
+    expect(await screen.findByRole("dialog", { name: displayStrings.title })).toBeTruthy();
+    view.unmount();
+    ui(<GroupDetail />, "viewer", "/groups/g1");
+    expect(screen.queryByRole("button", { name: groupPage.setup.changeLabel(groupPage.setup.display) })).toBeNull();
+  });
+
+  it("Send a message opens the compose dialog for this group", async () => {
+    cx.results["groups:get"] = detail(0);
+    cx.results["groups:page"] = { page: [], isDone: true, continueCursor: "c" };
+    ui(<GroupDetail />, "admin", "/groups/g1");
+    pickMore(groupPage.sendMessage);
+    expect(await screen.findByRole("dialog")).toBeTruthy();
+  });
+
+  it("delete (More, last) is blocked up front by what the screen knows (devices, apps)", async () => {
     cx.results["groups:get"] = detail(0, "Office", 3);
     ui(<GroupDetail />, "admin", "/groups/g1");
-    fireEvent.click(screen.getByRole("button", { name: strings.common.delete }));
-    expect(within(screen.getByRole("dialog")).getByText(groupText.hasDependents("devices, apps"))).toBeTruthy();
+    pickMore(groupPage.deleteGroup);
+    expect(within(await screen.findByRole("dialog")).getByText(groupText.hasDependents("devices, apps"))).toBeTruthy();
   });
 
   it("has_dependents from the server (enrollment codes) is explained in the dialog", async () => {
@@ -443,8 +558,8 @@ describe("Group detail (groups:get)", () => {
       throw new ConvexError({ code: "has_dependents", detail: "enrollment codes" });
     });
     ui(<GroupDetail />, "admin", "/groups/g1");
-    fireEvent.click(screen.getByRole("button", { name: strings.common.delete }));
-    const dialog = screen.getByRole("dialog");
+    pickMore(groupPage.deleteGroup);
+    const dialog = await screen.findByRole("dialog");
     fireEvent.change(within(dialog).getByRole("textbox"), { target: { value: "Office" } });
     fireEvent.click(within(dialog).getByRole("button", { name: strings.common.delete }));
     const text = groupText.hasDependents("enrollment codes");
@@ -452,7 +567,7 @@ describe("Group detail (groups:get)", () => {
     expect(text).toContain("revoke them");
   });
 
-  it("rename: stale_edit shows 'Someone else changed this'; Reload takes their values and revision", async () => {
+  it("rename (More): stale_edit shows 'Someone else changed this'; Reload takes their values and revision", async () => {
     cx.results["groups:get"] = detail(2);
     const rename = vi
       .fn()
@@ -460,8 +575,8 @@ describe("Group detail (groups:get)", () => {
       .mockResolvedValueOnce({ revision: 4 });
     cx.fns["groups:rename"] = rename;
     const view = ui(<GroupDetail />, "admin", "/groups/g1");
-    fireEvent.click(screen.getByRole("button", { name: strings.common.edit }));
-    let dialog = screen.getByRole("dialog");
+    pickMore(groupPage.rename);
+    let dialog = await screen.findByRole("dialog");
     fireEvent.change(within(dialog).getByLabelText(new RegExp(groupsStrings.name)), { target: { value: "Mine" } });
     fireEvent.click(within(dialog).getByRole("button", { name: strings.common.save }));
     expect(await within(dialog).findByText(strings.common.staleTitle)).toBeTruthy();
@@ -489,15 +604,7 @@ describe("Group detail (groups:get)", () => {
     // "" clears the description on the server.
     expect(rename.mock.calls[1]![0]).toEqual({ groupId: "g1", expectedRevision: 3, name: "Theirs", description: "" });
   });
-
-  it("viewer: no Edit or Delete", () => {
-    cx.results["groups:get"] = detail(0);
-    ui(<GroupDetail />, "viewer", "/groups/g1");
-    expect(screen.queryByRole("button", { name: strings.common.edit })).toBeNull();
-    expect(screen.queryByRole("button", { name: strings.common.delete })).toBeNull();
-  });
 });
-
 describe("Settings → Admin exit (settings:get / update / setExitPin / clearExitPin)", () => {
   it("an invalid key combination names the grammar rule as you type and is never sent", async () => {
     cx.results["settings:get"] = settingsData();

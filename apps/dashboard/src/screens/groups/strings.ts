@@ -7,7 +7,7 @@ import { formatNumber, plural } from "../../lib/format";
 
 const DEPENDENT_NAMES: Record<string, string> = {
   devices: "the PCs in it (move them to another group)",
-  employees: "its employees (remove them from the group)",
+  employees: "its people (remove them from the group)",
   apps: "its apps (unassign them)",
   "enrollment codes": "its active enrollment codes (revoke them)",
 };
