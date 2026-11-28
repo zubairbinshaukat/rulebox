@@ -1,6 +1,7 @@
 import type { ReactNode } from "react";
 import type { SelectOption } from "@rulebox/ui";
-import type { CardRole, Column, ColumnType, SortState } from "../components/DataTable";
+import type { CardRole, Column, SortState } from "../components/DataTable";
+import { columnType, tableColumns } from "./columns";
 import { strings } from "./strings";
 
 /** At most this many facts per card; further `fact` columns are shown as details. */
@@ -27,23 +28,8 @@ export function cardRole<T>(c: Column<T>): CardRole {
   return c.card ?? (c.primary ? "title" : c.actions ? "actions" : "fact");
 }
 
-/**
- * The column's table type. `null` for a column that declares nothing and is not short: it keeps the
- * old "wraps like normal text" behaviour until its screen declares a `type` (the spec's default is `short`).
- */
-export function columnType<T>(c: Column<T>): ColumnType | null {
-  if (c.type) return c.type;
-  if (c.primary) return "name";
-  if (c.actions) return "actions";
-  if (c.numeric) return "num";
-  if (c.nowrap || c.truncate) return "short";
-  return null;
-}
-
-/** The columns the table draws: every one except the card-only ones (`table: false`). */
-export function tableColumns<T>(columns: readonly Column<T>[]): Column<T>[] {
-  return columns.filter((c) => c.table !== false);
-}
+// `columnType` and `tableColumns` live in ./columns (the table path needs them without this file).
+export { columnType, tableColumns };
 
 const warned = new WeakSet<object>();
 

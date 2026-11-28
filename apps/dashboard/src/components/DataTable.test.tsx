@@ -67,12 +67,13 @@ describe("DataTable: structure", () => {
     expect(region.className).toContain("dash-table-wrap");
   });
 
-  it("in cards view the list is a list named by the caption with one item per row and no table; stack={false} stays a table", () => {
+  it("in cards view the list is a list named by the caption with one item per row and no table; stack={false} stays a table", async () => {
     localStorage.setItem(VIEW_KEY, "cards");
     const { unmount } = show();
+    // The cards code is a lazy chunk: the list appears a moment after the first render.
+    const list = await screen.findByRole("list", { name: "Things" });
     expect(screen.queryByRole("region", { name: "Things" })).toBeNull();
     expect(screen.queryByRole("table")).toBeNull();
-    const list = screen.getByRole("list", { name: "Things" });
     expect(within(list).getAllByRole("listitem")).toHaveLength(2);
     unmount();
     show({ stack: false });
@@ -88,17 +89,17 @@ describe("DataTable: structure", () => {
     expect(rows[2]!.getAttribute("data-dim")).toBe("true");
   });
 
-  it("cards show facts as a label above the value (dt / dd), with the header or cardLabel as the label", () => {
+  it("cards show facts as a label above the value (dt / dd), with the header or cardLabel as the label", async () => {
     localStorage.setItem(VIEW_KEY, "cards");
     show({ columns: [cols[0]!, { ...cols[1]!, cardLabel: "How many" }] });
-    const [first] = screen.getAllByRole("listitem");
+    const [first] = await screen.findAllByRole("listitem");
     expect(within(first!).getByText("How many").tagName).toBe("DT");
     expect(within(first!).getByText("3").closest("dd")).not.toBeNull();
     // The name is the title and the real link.
     expect(within(first!).getByRole("link", { name: "Alpha" })).toBeTruthy();
   });
 
-  it("card-only columns (table: false) are not in the table but are in the cards", () => {
+  it("card-only columns (table: false) are not in the table but are in the cards", async () => {
     const withExtra: Column<Row>[] = [...cols, { key: "x", header: "Extra", table: false, card: "detail", cell: () => "only on cards" }];
     const { unmount } = show({ columns: withExtra });
     expect(screen.getAllByRole("columnheader").map((h) => h.textContent)).toEqual(["Name", "Count", "Actions"]);
@@ -106,10 +107,10 @@ describe("DataTable: structure", () => {
     unmount();
     localStorage.setItem(VIEW_KEY, "cards");
     show({ columns: withExtra });
-    expect(screen.getAllByText("only on cards")).toHaveLength(2);
+    expect(await screen.findAllByText("only on cards")).toHaveLength(2);
   });
 
-  it("a rowActions column draws the same buttons in the table cell and the card footer", () => {
+  it("a rowActions column draws the same buttons in the table cell and the card footer", async () => {
     const onRevoke = vi.fn();
     const withActions: Column<Row>[] = [
       cols[0]!,
@@ -121,7 +122,7 @@ describe("DataTable: structure", () => {
     unmount();
     localStorage.setItem(VIEW_KEY, "cards");
     show({ columns: withActions, rowLabel: (r) => r.name });
-    fireEvent.click(screen.getByRole("button", { name: "Revoke: Bravo" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Revoke: Bravo" }));
     expect(onRevoke).toHaveBeenLastCalledWith("b");
   });
 
@@ -257,30 +258,32 @@ describe("DataTable: sorting", () => {
     expect(onSortChange).toHaveBeenCalledWith({ key: "name", dir: "asc" });
   });
 
-  it("offers the custom sort select in the toolbar for the cards view only, in plain words", () => {
+  it("offers the custom sort select in the toolbar for the cards view only, in plain words", async () => {
     const onSortChange = vi.fn();
     const { unmount } = show({ framed: true, sort: { key: "name", dir: "asc" }, onSortChange });
     expect(screen.queryByLabelText("Sort by")).toBeNull();
     unmount();
     localStorage.setItem(VIEW_KEY, "cards");
     show({ framed: true, sort: { key: "name", dir: "asc" }, onSortChange });
+    await screen.findByLabelText("Sort by");
     expect(selectedText("Sort by")).toBe("Name: A to Z");
     expect(optionLabels("Sort by")).toEqual(["Name: A to Z", "Name: Z to A", "Count: most first", "Count: fewest first"]);
     pickOption("Sort by", "Count: fewest first");
     expect(onSortChange).toHaveBeenCalledWith({ key: "count", dir: "asc" });
   });
 
-  it("lists a default order that has no column first, so the select can show the current order", () => {
+  it("lists a default order that has no column first, so the select can show the current order", async () => {
     localStorage.setItem(VIEW_KEY, "cards");
     show({ framed: true, sort: { key: "added", dir: "desc" }, onSortChange: vi.fn(), defaultSort: { key: "added", dir: "desc", label: "Newest first" } });
+    await screen.findByLabelText("Sort by");
     expect(selectedText("Sort by")).toBe("Newest first");
     expect(optionLabels("Sort by")[0]).toBe("Newest first");
   });
 
-  it("while a search orders by relevance the sort select is disabled and says so", () => {
+  it("while a search orders by relevance the sort select is disabled and says so", async () => {
     localStorage.setItem(VIEW_KEY, "cards");
     show({ framed: true, sortNote: "Best matches first" });
-    const trigger = screen.getByLabelText("Sort by") as HTMLButtonElement;
+    const trigger = (await screen.findByLabelText("Sort by")) as HTMLButtonElement;
     expect(trigger.disabled).toBe(true);
     expect(trigger.textContent).toBe("Best matches first");
   });
@@ -395,7 +398,7 @@ describe("DataTable: toolbar and view switch", () => {
     expect(screen.getByRole("radiogroup", { name: "View" })).toBeTruthy();
   });
 
-  it("the switch changes the one global view (and the attribute the CSS reads)", () => {
+  it("the switch changes the one global view (and the attribute the CSS reads)", async () => {
     show({ framed: true });
     expect((screen.getByRole("radio", { name: "Table" }) as HTMLElement).getAttribute("aria-checked")).toBe("true");
     fireEvent.click(screen.getByRole("radio", { name: "Cards" }));
@@ -404,7 +407,7 @@ describe("DataTable: toolbar and view switch", () => {
     expect(screen.getByRole("radio", { name: "Cards" }).getAttribute("aria-checked")).toBe("true");
     // The wrapper is no scroll region any more: the rows are a list of cards.
     expect(screen.queryByRole("region", { name: "Things" })).toBeNull();
-    expect(screen.getByRole("list", { name: "Things" })).toBeTruthy();
+    expect(await screen.findByRole("list", { name: "Things" })).toBeTruthy();
   });
 
   it("the legacy layout (inside the screen's own Card) gets no toolbar and no switch", () => {

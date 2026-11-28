@@ -1,5 +1,4 @@
-import { useId, type ReactNode } from "react";
-import { Select } from "@rulebox/ui";
+import { lazy, Suspense, useId, type ReactNode } from "react";
 import IconPrev from "~icons/solar/alt-arrow-left-linear";
 import IconNext from "~icons/solar/alt-arrow-right-linear";
 import { PAGE_SIZES, pageItems } from "../lib/cursorPager";
@@ -26,6 +25,9 @@ const DEFAULT_LABELS: PagerLabels = {
   summary: (page, pages, total) =>
     total !== null && pages !== null ? `${tight(strings.pager.records(total))} · ${tight(strings.pager.pageOf(page, pages))}` : tight(strings.pager.page(page)),
 };
+
+// The rows-per-page dropdown loads only when the full bar is drawn (a one-page list never needs it).
+const PageSizeSelect = lazy(() => import("./PageSizeSelect").then((m) => ({ default: m.PageSizeSelect })));
 
 const tight = (text: string) => text.replace(/ /g, "\u00a0");
 
@@ -63,7 +65,6 @@ export function Pager({ page, pageSize, total, reachablePages, onPage, onPageSiz
   const canNext = (pages === null || page < pages) && (hasNext || reachablePages.has(page + 1));
   // A page size outside the list (a stale URL) is still shown, not silently replaced.
   const sizes = pageSizes.includes(pageSize) ? pageSizes : [...pageSizes, pageSize].sort((a, b) => a - b);
-  const sizeOptions = sizes.map((s) => ({ value: String(s), label: String(s) }));
 
   // One page at the default size: nothing to turn or change, only how many records there are.
   if (page === 1 && !hasNext && pageSize === pageSizes[0] && (total === null || total <= pageSize)) {
@@ -114,7 +115,9 @@ export function Pager({ page, pageSize, total, reachablePages, onPage, onPageSiz
         <label htmlFor={selectId} className="dash-pager__size-label">
           {l.rowsPerPage}
         </label>
-        <Select id={selectId} compact value={String(pageSize)} options={sizeOptions} onChange={(v) => onPageSize(Number(v))} />
+        <Suspense fallback={<span className="rb-select rb-select--compact" aria-hidden="true"><span className="rb-select__control">{pageSize}</span></span>}>
+          <PageSizeSelect id={selectId} value={pageSize} sizes={sizes} onChange={onPageSize} />
+        </Suspense>
       </div>
     </div>
   );

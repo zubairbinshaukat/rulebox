@@ -5,6 +5,12 @@ import IconCards from "~icons/solar/widget-4-linear";
 import { strings } from "../lib/strings";
 import { useViewMode, type ViewMode } from "../lib/viewMode";
 
+/** Starts downloading the cards code (the same dynamic imports `cardsLazy.ts` makes; a no-op once loaded). */
+function preloadCards() {
+  void import("./CardGrid");
+  void import("./CardsSortSelect");
+}
+
 const OPTIONS: { value: ViewMode; label: string; Icon: typeof IconTable }[] = [
   { value: "table", label: strings.table.viewTable, Icon: IconTable },
   { value: "cards", label: strings.table.viewCards, Icon: IconCards },
@@ -38,6 +44,9 @@ export function ViewSwitch({ iconOnly = false }: { iconOnly?: boolean }) {
           aria-checked={view === value}
           tabIndex={view === value ? 0 : -1}
           title={label}
+          // The cards code is a separate download: start it as soon as the person reaches for the switch.
+          onPointerEnter={value === "cards" ? preloadCards : undefined}
+          onFocus={value === "cards" ? preloadCards : undefined}
           onClick={() => setView(value)}
         >
           <Icon aria-hidden="true" />

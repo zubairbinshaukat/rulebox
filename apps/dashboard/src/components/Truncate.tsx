@@ -1,5 +1,5 @@
-import { useCallback, useLayoutEffect, useRef, useState, type CSSProperties, type FocusEvent, type ReactNode } from "react";
-import { placeFloating } from "@rulebox/ui";
+import { useCallback, useLayoutEffect, useRef, useState, type FocusEvent, type ReactNode } from "react";
+import { truncateBoxProps } from "./truncateBox";
 
 /**
  * Text cut with an ellipsis (1 to 3 lines) whose full text shows in one shared tooltip, and only when it
@@ -8,8 +8,8 @@ import { placeFloating } from "@rulebox/ui";
  * find-in-page, so the tooltip is `aria-hidden`. Touch devices get no tooltip: the record's page shows it all.
  *
  * Cut plain text (an email, a signer) is a tab stop so keyboard users can reach the tooltip; text that
- * fits, or that holds its own link or button, never is. One `ResizeObserver` and one tooltip node serve
- * the whole page.
+ * fits, or that holds its own link or button, never is. One `ResizeObserver` serves the whole page, and
+ * the tooltip itself (`truncateTip.ts`) is downloaded the first time a cut text is hovered or focused.
  */
 export interface TruncateProps {
   /** The full text for the tooltip. Default: the text the element holds. */
@@ -21,7 +21,6 @@ export interface TruncateProps {
   children: ReactNode;
 }
 
-const SHOW_DELAY_MS = 400;
 const FOCUSABLE = 'a[href], button, input, select, textarea, [tabindex]';
 
 /** True when the element's content does not fit its box. */
@@ -29,7 +28,7 @@ function isCut(el: HTMLElement, lines: number): boolean {
   return lines > 1 ? el.scrollHeight > el.clientHeight + 1 : el.scrollWidth > el.clientWidth + 1;
 }
 
-// ---- one observer, one tooltip for the whole page -------------------------------------------------
+// ---- one observer for the whole page --------------------------------------------------------------
 
 const watchers = new Map<Element, () => void>();
 let observer: ResizeObserver | null = null;
@@ -50,53 +49,31 @@ function watch(el: HTMLElement, onSize: () => void): () => void {
   };
 }
 
-let tip: HTMLDivElement | null = null;
-let owner: HTMLElement | null = null;
-let timer = 0;
-let listening = false;
+// ---- the tooltip module, loaded on first use ------------------------------------------------------
+
+type TipModule = typeof import("./truncateTip");
+let loaded: TipModule | null = null;
+let loading: Promise<TipModule> | null = null;
+/** The element the person is pointing at or focused on: a tooltip that finishes loading late checks it is still wanted. */
+let wanted: HTMLElement | null = null;
+
+function loadTip(): Promise<TipModule> {
+  loading ??= import("./truncateTip").then((m) => (loaded = m));
+  return loading;
+}
 
 function hide() {
-  window.clearTimeout(timer);
-  timer = 0;
-  owner = null;
-  if (tip) tip.hidden = true;
+  wanted = null;
+  loaded?.hideTip();
 }
 
-function onEscape(e: KeyboardEvent) {
-  if (e.key === "Escape") hide();
-}
-
-function ensureTip(): HTMLDivElement {
-  if (!tip || !tip.isConnected) {
-    tip = document.createElement("div");
-    tip.className = "dash-truncate-tip";
-    tip.setAttribute("aria-hidden", "true");
-    tip.hidden = true;
-    document.body.appendChild(tip);
-  }
-  if (!listening) {
-    listening = true;
-    document.addEventListener("keydown", onEscape);
-    window.addEventListener("scroll", hide, { capture: true, passive: true });
-  }
-  return tip;
-}
-
-function show(el: HTMLElement, text: string) {
-  const t = ensureTip();
-  t.textContent = text;
-  t.hidden = false;
-  owner = el;
-  placeFloating(el, t, { side: "bottom", align: "start", gap: 6 });
-}
-
-function schedule(el: HTMLElement, text: () => string, lines: number, immediate: boolean) {
-  window.clearTimeout(timer);
+function request(el: HTMLElement, text: string, lines: number, immediate: boolean) {
   // Touch: a tap fires "mouseenter" too, but there is nothing to hover; the record's page shows the full text.
   if (!immediate && window.matchMedia?.("(hover: none)").matches) return;
   if (!isCut(el, lines)) return;
-  if (immediate) show(el, text());
-  else timer = window.setTimeout(() => show(el, text()), SHOW_DELAY_MS);
+  wanted = el;
+  if (loaded) loaded.scheduleTip(el, text, immediate);
+  else void loadTip().then((m) => (wanted === el ? m.scheduleTip(el, text, immediate) : undefined));
 }
 
 export function Truncate({ full, lines = 1, maxWidth, className, children }: TruncateProps) {
@@ -115,23 +92,21 @@ export function Truncate({ full, lines = 1, maxWidth, className, children }: Tru
     const stop = watch(el, measure);
     return () => {
       stop();
-      if (owner === el) hide();
+      if (wanted === el) hide();
+      loaded?.releaseTip(el);
     };
   }, [measure]);
 
   const text = () => full ?? ref.current?.textContent ?? "";
-  const style: CSSProperties | undefined = maxWidth === undefined ? undefined : { maxWidth };
 
   return (
     <span
       ref={ref}
-      className={["dash-truncate-box", lines > 1 ? "dash-truncate-box--lines" : "", className ?? ""].filter(Boolean).join(" ")}
-      data-lines={lines}
-      style={lines > 1 ? ({ ...style, "--dash-lines": lines } as CSSProperties) : style}
+      {...truncateBoxProps(lines, maxWidth, className)}
       tabIndex={tab ? 0 : undefined}
-      onMouseEnter={(e) => schedule(e.currentTarget, text, lines, false)}
+      onMouseEnter={(e) => request(e.currentTarget, text(), lines, false)}
       onMouseLeave={hide}
-      onFocus={(e: FocusEvent<HTMLSpanElement>) => schedule(e.currentTarget, text, lines, true)}
+      onFocus={(e: FocusEvent<HTMLSpanElement>) => request(e.currentTarget, text(), lines, true)}
       onBlur={hide}
     >
       {children}

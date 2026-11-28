@@ -1610,6 +1610,13 @@ a.dash-stat:hover {
     grid-template-columns: repeat(4, minmax(0, 1fr));
   }
 }
+/* The cards' place while their code downloads the first time. */
+.dash-cards-pending {
+  min-height: 180px;
+}
+.dash-dt__sortsel {
+  min-height: 40px;
+}
 .dash-cards__item {
   display: flex;
   min-width: 0;

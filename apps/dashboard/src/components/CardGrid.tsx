@@ -1,9 +1,11 @@
 import { memo, useId, useMemo, type ReactNode } from "react";
-import { cardLayout, columnType, type CardLayout } from "../lib/cardLayout";
+import { cardLayout, type CardLayout } from "../lib/cardLayout";
+import { columnType } from "../lib/columns";
 import { ignoreRowClick } from "../lib/rowClick";
 import { strings } from "../lib/strings";
 import type { Column } from "./DataTable";
 import { RowActions } from "./RowActions";
+import { Skeleton } from "./Skeleton";
 import { Truncate } from "./Truncate";
 
 export interface CardGridProps<T> {
@@ -174,3 +176,30 @@ const RecordCard = memo(function RecordCard({
     </li>
   );
 });
+
+export interface SkeletonCardsProps {
+  count?: number;
+  flat?: boolean;
+}
+
+/** Placeholder cards for the Cards view, in the same grid as the real ones: a title, a subtitle and 2 × 2 facts. */
+export function SkeletonCards({ count = 6, flat = false }: SkeletonCardsProps) {
+  return (
+    <div className="dash-cards" role="status" aria-label={strings.app.loading} data-flat={flat || undefined}>
+      {Array.from({ length: Math.min(count, 6) }, (_, i) => (
+        <div className="dash-rcard dash-rcard--sk" key={i}>
+          <Skeleton width="62%" height={16} />
+          <Skeleton width="40%" height={12} />
+          <div className="dash-rcard__facts">
+            {Array.from({ length: 4 }, (_, f) => (
+              <div className="dash-rcard__fact" key={f}>
+                <Skeleton width="45%" height={10} />
+                <Skeleton width="75%" height={13} style={{ marginTop: 6 }} />
+              </div>
+            ))}
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}

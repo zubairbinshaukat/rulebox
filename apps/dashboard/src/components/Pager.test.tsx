@@ -79,16 +79,18 @@ describe("Pager", () => {
     expect((screen.getByRole("button", { name: "Next page" }) as HTMLButtonElement).disabled).toBe(true);
   });
 
-  it("changes the rows per page (10, 25, 50) with the custom select", () => {
+  it("changes the rows per page (10, 25, 50) with the custom select", async () => {
     const p = show();
+    await screen.findByLabelText("Rows per page"); // the dropdown is a lazy chunk
     expect(optionLabels("Rows per page")).toEqual(["10", "25", "50"]);
     expect(selectedText("Rows per page")).toBe("10");
     pickOption("Rows per page", "25");
     expect(p.onPageSize).toHaveBeenCalledWith(25);
   });
 
-  it("keeps a page size from a stale URL visible", () => {
+  it("keeps a page size from a stale URL visible", async () => {
     show({ pageSize: 20 });
+    await screen.findByLabelText("Rows per page");
     expect(optionLabels("Rows per page")).toEqual(["10", "20", "25", "50"]);
     expect(selectedText("Rows per page")).toBe("20");
   });
@@ -105,9 +107,9 @@ describe("Pager", () => {
     expect(container.firstChild).toBeNull();
   });
 
-  it("a size other than the default keeps the size select, so the person can go back", () => {
+  it("a size other than the default keeps the size select, so the person can go back", async () => {
     show({ total: 3, hasNext: false, pageSize: 25, reachablePages: new Set([1]) });
-    expect(screen.getByLabelText("Rows per page")).toBeTruthy();
+    expect(await screen.findByLabelText("Rows per page")).toBeTruthy();
     expect(screen.getByRole("navigation", { name: "Pagination" })).toBeTruthy();
   });
 

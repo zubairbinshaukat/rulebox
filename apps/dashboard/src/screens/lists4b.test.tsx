@@ -247,11 +247,12 @@ describe("Apps: URL state, sort, search, pager", () => {
     expect(last("apps:list")).toMatchObject({ paginationOpts: { numItems: 10, cursor: null } });
   });
 
-  it("changing the page size or the tab starts over on page 1 and keeps the rest", () => {
+  it("changing the page size or the tab starts over on page 1 and keeps the rest", async () => {
     cx.results["apps:list"] = page(apps(10), { isDone: false, continueCursor: "CUR1" });
     ui(<Apps />, "/apps?sort=name&dir=asc");
     fireEvent.click(screen.getByRole("button", { name: strings.pager.next }));
     expect(where()).toBe("/apps?sort=name&dir=asc&page=2");
+    await screen.findByLabelText(strings.pager.rowsPerPage); // the dropdown is a lazy chunk
     pickOption(strings.pager.rowsPerPage, "50");
     expect(where()).toBe("/apps?sort=name&dir=asc&size=50");
     expect(last("apps:list")).toEqual({ archived: false, paginationOpts: { numItems: 50, cursor: null }, sort: { key: "name", dir: "asc" } });
@@ -270,12 +271,15 @@ describe("Apps: URL state, sort, search, pager", () => {
     expect(where()).toBe("/apps/a1");
   });
 
-  it("the Cards view keeps the same rows and offers a sort select that sends the same sort", () => {
+  it("the Cards view keeps the same rows and offers a sort select that sends the same sort", async () => {
     localStorage.setItem(VIEW_KEY, "cards");
     cx.results["apps:list"] = page(apps(2));
     ui(<Apps />, "/apps");
+    // The cards code is a lazy chunk: the list appears a moment after the first render.
+    const list = await screen.findByRole("list", { name: appsStrings.title });
     expect(screen.queryByRole("table")).toBeNull();
-    expect(within(screen.getByRole("list", { name: appsStrings.title })).getAllByRole("listitem")).toHaveLength(2);
+    expect(within(list).getAllByRole("listitem")).toHaveLength(2);
+    await screen.findByLabelText(strings.table.sortSelect);
     pickOption(strings.table.sortSelect, strings.table.sortOption(appsStrings.colName, strings.table.sortDir.name.desc));
     expect(where()).toBe("/apps?sort=name&dir=desc");
     expect(last("apps:list")).toMatchObject({ sort: { key: "name", dir: "desc" } });
@@ -484,7 +488,7 @@ describe("Settings > Members: two lists on one page", () => {
 describe("HistoryPanel: a small list in a card", () => {
   const entry = (i: number) => ({ _id: `e${i}`, at: 10_000 - i, actorType: "member", actorLabel: "owner@x.test", action: "group.renamed", summary: `Entry ${i}` });
 
-  it("keeps its page in the component (not the URL), reads audit:forTarget one page at a time, and has no total", () => {
+  it("keeps its page in the component (not the URL), reads audit:forTarget one page at a time, and has no total", async () => {
     cx.results["audit:forTarget"] = page(Array.from({ length: 10 }, (_, i) => entry(i)), { isDone: false, continueCursor: "CUR1" });
     ui(<HistoryPanel targetId="d1" />, "/apps/a1");
     expect(last("audit:forTarget")).toEqual({ targetId: "d1", paginationOpts: { numItems: 10, cursor: null }, sort: { key: "at", dir: "desc" } });
@@ -492,6 +496,7 @@ describe("HistoryPanel: a small list in a card", () => {
     expect(last("audit:forTarget")).toMatchObject({ paginationOpts: { numItems: 10, cursor: "CUR1" } });
     expect(screen.getByText(strings.pager.page(2))).toBeTruthy();
     expect(where()).toBe("/apps/a1");
+    await screen.findByLabelText(strings.pager.rowsPerPage); // the dropdown is a lazy chunk
     pickOption(strings.pager.rowsPerPage, "25");
     expect(last("audit:forTarget")).toMatchObject({ paginationOpts: { numItems: 25, cursor: null } });
     expect(where()).toBe("/apps/a1");

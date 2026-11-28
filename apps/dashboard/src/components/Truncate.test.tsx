@@ -8,6 +8,13 @@ function size(el: HTMLElement, scroll: number, client: number) {
   Object.defineProperty(el, "clientWidth", { configurable: true, value: client });
 }
 
+/** The tooltip code is downloaded the first time a cut text is hovered or focused: let that finish. */
+async function loaded() {
+  await act(async () => {
+    await vi.dynamicImportSettled();
+  });
+}
+
 const tip = () => document.querySelector<HTMLElement>(".dash-truncate-tip");
 const visible = () => tip() !== null && !tip()!.hidden;
 
@@ -17,12 +24,13 @@ afterEach(() => {
 });
 
 describe("Truncate", () => {
-  it("shows the full text after 400 ms of hover, only when the text is really cut", () => {
+  it("shows the full text after 400 ms of hover, only when the text is really cut", async () => {
     vi.useFakeTimers();
     render(<Truncate full="owner@example.com">owner@exam…</Truncate>);
     const box = screen.getByText("owner@exam…");
     size(box, 300, 100);
     fireEvent.mouseEnter(box);
+    await loaded();
     expect(visible()).toBe(false);
     act(() => {
       vi.advanceTimersByTime(399);
@@ -39,19 +47,34 @@ describe("Truncate", () => {
     expect(visible()).toBe(false);
   });
 
-  it("shows nothing for text that fits", () => {
+  it("shows nothing for text that fits, and does not even download the tooltip code for it", async () => {
     vi.useFakeTimers();
     render(<Truncate>short</Truncate>);
     const box = screen.getByText("short");
     size(box, 50, 100);
     fireEvent.mouseEnter(box);
+    await loaded();
     act(() => {
       vi.advanceTimersByTime(1000);
     });
     expect(visible()).toBe(false);
   });
 
-  it("shows at once on focus, hides on blur and on Escape", () => {
+  it("leaving before the tooltip code has arrived shows nothing", async () => {
+    vi.useFakeTimers();
+    render(<Truncate full="full text">cut</Truncate>);
+    const box = screen.getByText("cut");
+    size(box, 300, 100);
+    fireEvent.mouseEnter(box);
+    fireEvent.mouseLeave(box);
+    await loaded();
+    act(() => {
+      vi.advanceTimersByTime(1000);
+    });
+    expect(visible()).toBe(false);
+  });
+
+  it("shows at once on focus, hides on blur and on Escape", async () => {
     render(
       <Truncate>
         <a href="/x">A long link</a>
@@ -60,22 +83,25 @@ describe("Truncate", () => {
     const box = screen.getByRole("link").parentElement!;
     size(box, 300, 100);
     fireEvent.focus(screen.getByRole("link"));
+    await loaded();
     expect(visible()).toBe(true);
     expect(tip()!.textContent).toBe("A long link");
     fireEvent.keyDown(document, { key: "Escape" });
     expect(visible()).toBe(false);
     fireEvent.focus(screen.getByRole("link"));
+    await loaded();
     expect(visible()).toBe(true);
     fireEvent.blur(screen.getByRole("link"));
     expect(visible()).toBe(false);
   });
 
-  it("measures clamped text by height (2 or 3 lines)", () => {
+  it("measures clamped text by height (2 or 3 lines)", async () => {
     render(<Truncate lines={2}>a long summary that goes on</Truncate>);
     const box = screen.getByText("a long summary that goes on");
     Object.defineProperty(box, "scrollHeight", { configurable: true, value: 60 });
     Object.defineProperty(box, "clientHeight", { configurable: true, value: 40 });
     fireEvent.focus(box);
+    await loaded();
     expect(visible()).toBe(true);
   });
 
@@ -119,7 +145,7 @@ describe("Truncate", () => {
     expect(box.style.getPropertyValue("--dash-lines")).toBe("3");
   });
 
-  it("gives no tooltip on touch (no hover)", () => {
+  it("gives no tooltip on touch (no hover)", async () => {
     vi.useFakeTimers();
     vi.stubGlobal("matchMedia", (q: string) => ({ matches: q === "(hover: none)" }));
     try {
@@ -127,6 +153,7 @@ describe("Truncate", () => {
       const box = screen.getByText("cut on a phone");
       size(box, 300, 100);
       fireEvent.mouseEnter(box);
+      await loaded();
       act(() => {
         vi.advanceTimersByTime(1000);
       });

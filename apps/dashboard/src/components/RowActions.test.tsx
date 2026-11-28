@@ -1,7 +1,15 @@
 import { describe, expect, it, vi } from "vitest";
-import { fireEvent, render, screen, within } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { RowActions } from "./RowActions";
 import type { RowAction } from "./DataTable";
+
+/** The real "More actions" button: enabled once the lazy menu module has loaded. */
+const moreButton = (name: string) =>
+  waitFor(() => {
+    const b = screen.getByRole("button", { name: `More actions for ${name}` }) as HTMLButtonElement;
+    if (b.disabled) throw new Error("menu still loading");
+    return b;
+  });
 
 const act = (label: string, over: Partial<RowAction> = {}): RowAction => ({ label, onSelect: vi.fn(), ...over });
 
@@ -32,11 +40,12 @@ describe("RowActions", () => {
   describe("more than two", () => {
     const four = () => [act("Reset code"), act("Change role", { primary: true }), act("Disable", { danger: true }), act("Reset sign-in")];
 
-    it("the primary action stays inline, the rest go behind More actions, destructive items last", () => {
+    it("the primary action stays inline, the rest go behind More actions, destructive items last", async () => {
       render(<RowActions actions={four()} rowName="ann@x.test" />);
       expect(screen.getByRole("button", { name: "Change role: ann@x.test" })).toBeTruthy();
       expect(screen.queryByRole("button", { name: /Reset code/ })).toBeNull();
-      fireEvent.click(screen.getByRole("button", { name: "More actions for ann@x.test" }));
+      // The menu is a lazy chunk: its button replaces a blank placeholder a moment after the first render.
+      fireEvent.click(await moreButton("ann@x.test"));
       const items = within(screen.getByRole("menu")).getAllByRole("menuitem").map((i) => i.textContent);
       expect(items).toEqual(["Reset code", "Reset sign-in", "Disable"]);
     });
@@ -46,10 +55,10 @@ describe("RowActions", () => {
       expect(screen.getByRole("button", { name: "One: r" })).toBeTruthy();
     });
 
-    it("focus goes into the menu, arrows / Home / End move, Enter runs the item and closes", () => {
+    it("focus goes into the menu, arrows / Home / End move, Enter runs the item and closes", async () => {
       const list = four();
       render(<RowActions actions={list} rowName="ann" />);
-      const more = screen.getByRole("button", { name: "More actions for ann" });
+      const more = await moreButton("ann");
       fireEvent.click(more);
       const items = within(screen.getByRole("menu")).getAllByRole("menuitem");
       expect(document.activeElement).toBe(items[0]);
@@ -65,18 +74,18 @@ describe("RowActions", () => {
       expect(document.activeElement).toBe(more);
     });
 
-    it("Escape closes the menu and puts the focus back on the button", () => {
+    it("Escape closes the menu and puts the focus back on the button", async () => {
       render(<RowActions actions={four()} rowName="ann" />);
-      const more = screen.getByRole("button", { name: "More actions for ann" });
+      const more = await moreButton("ann");
       fireEvent.click(more);
       fireEvent.keyDown(within(screen.getByRole("menu")).getAllByRole("menuitem")[0]!, { key: "Escape" });
       expect(screen.queryByRole("menu")).toBeNull();
       expect(document.activeElement).toBe(more);
     });
 
-    it("a disabled item in the menu shows its hint", () => {
+    it("a disabled item in the menu shows its hint", async () => {
       render(<RowActions actions={[act("A", { primary: true }), act("B", { disabled: true, hint: "Not yet" }), act("C")]} rowName="r" />);
-      fireEvent.click(screen.getByRole("button", { name: "More actions for r" }));
+      fireEvent.click(await moreButton("r"));
       const b = screen.getByRole("menuitem", { name: /B/ }) as HTMLButtonElement;
       expect(b.disabled).toBe(true);
       expect(b.textContent).toContain("Not yet");

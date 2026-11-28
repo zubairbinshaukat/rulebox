@@ -1,19 +1,18 @@
-import { memo, useCallback, useEffect, useId, useMemo, useRef, type ReactNode, type RefObject } from "react";
-import { Select } from "@rulebox/ui";
+import { memo, Suspense, useCallback, useEffect, useMemo, useRef, type ReactNode, type RefObject } from "react";
 import IconSort from "~icons/solar/sort-vertical-linear";
 import IconAsc from "~icons/solar/arrow-up-linear";
 import IconDesc from "~icons/solar/arrow-down-linear";
-import { columnType, sortOptions, tableColumns } from "../lib/cardLayout";
+import { columnType, tableColumns } from "../lib/columns";
 import { type SortDir } from "../lib/cursorPager";
 import { ignoreRowClick } from "../lib/rowClick";
 import { strings } from "../lib/strings";
 import { useViewMode } from "../lib/viewMode";
-import { CardGrid } from "./CardGrid";
 import { EmptyState } from "./EmptyState";
 import { RegionError } from "./Region";
 import { RowActions } from "./RowActions";
-import { SkeletonCards, SkeletonRows } from "./Skeleton";
-import { Truncate } from "./Truncate";
+import { SkeletonRows } from "./Skeleton";
+import { CardGridLazy, CardsSortSelectLazy, SkeletonCardsLazy } from "./cardsLazy";
+import { TruncateLazy as Truncate } from "./TruncateLazy";
 import { ViewSwitch } from "./ViewSwitch";
 
 export type { SortDir };
@@ -190,7 +189,6 @@ export function DataTable<T>({
 }: DataTableProps<T>) {
   const [view] = useViewMode();
   const asCards = stack && view === "cards";
-  const sortId = useId();
   const surfaceRef = useRef<HTMLDivElement>(null);
 
   // The rows are memoized: give them one handler that never changes and reads the latest callback.
@@ -205,9 +203,9 @@ export function DataTable<T>({
   const shown = useMemo(() => tableColumns(columns), [columns]);
   // Every column except the name can only get as narrow as its content: the name column then takes the rest of the width.
   const fit = !asCards && shown.every((c) => c.primary || isShort(c));
-  const options = useMemo(() => sortOptions(columns, defaultSort), [columns, defaultSort]);
   const showSwitch = stack && (viewSwitch ?? framed);
-  const showSort = asCards && (sortNote !== undefined || (onSortChange !== undefined && options.length > 0));
+  const sortsHere = columns.some((c) => c.sortable && !c.actions);
+  const showSort = asCards && (sortNote !== undefined || (onSortChange !== undefined && (sortsHere || defaultSort !== undefined)));
   const showToolbar = toolbar != null || toolbarEnd != null || showSwitch || showSort;
   // Cards sit on the page itself; the card is only for the states that have no cards (empty, error).
   const bare = asCards && (state === "ready" || state === "loading");
@@ -217,24 +215,33 @@ export function DataTable<T>({
 
   let body: ReactNode;
   if (state === "loading") {
-    body = asCards ? <SkeletonCards count={skeletonRows} flat={!framed} /> : <SkeletonRows rows={skeletonRows} columns={Math.min(Math.max(shown.length - 1, 1), 5)} />;
+    body = asCards ? (
+      <Suspense fallback={<CardsPending />}>
+        <SkeletonCardsLazy count={skeletonRows} flat={!framed} />
+      </Suspense>
+    ) : (
+      <SkeletonRows rows={skeletonRows} columns={Math.min(Math.max(shown.length - 1, 1), 5)} />
+    );
   } else if (state === "error") {
     body = <RegionError error={error} onRetry={onRetry} />;
   } else if (state === "empty") {
     body = empty ?? <EmptyState title={strings.table.emptyTitle} />;
   } else if (asCards) {
+    // The cards code loads only now, when a list is really shown as cards (cardsLazy.ts).
     body = (
-      <CardGrid
-        caption={caption}
-        columns={columns}
-        rows={rows}
-        getKey={getKey}
-        isDim={isDim}
-        onActivate={onRowClick ? activate : undefined}
-        rowLabel={rowLabel}
-        busy={busy}
-        flat={!framed}
-      />
+      <Suspense fallback={<CardsPending />}>
+        <CardGridLazy
+          caption={caption}
+          columns={columns as Column<unknown>[]}
+          rows={rows}
+          getKey={getKey as (row: unknown) => string}
+          isDim={isDim as ((row: unknown) => boolean) | undefined}
+          onActivate={onRowClick ? (activate as (row: unknown) => void) : undefined}
+          rowLabel={rowLabel as ((row: unknown) => string) | undefined}
+          busy={busy}
+          flat={!framed}
+        />
+      </Suspense>
     );
   } else {
     body = (
@@ -297,19 +304,9 @@ export function DataTable<T>({
               {toolbarEnd != null ? <div className="dash-dt__listactions">{toolbarEnd}</div> : null}
               {showSort ? (
                 <div className="dash-dt__sortsel">
-                  <Select
-                    id={sortId}
-                    compact
-                    aria-label={strings.table.sortSelect}
-                    options={sortNote !== undefined ? [] : options}
-                    value={sortNote !== undefined || !sort ? "" : `${sort.key}:${sort.dir}`}
-                    placeholder={sortNote ?? strings.table.sortSelect}
-                    disabled={sortNote !== undefined}
-                    onChange={(v) => {
-                      const [key, dir] = v.split(":");
-                      if (key && (dir === "asc" || dir === "desc")) onSortChange?.({ key, dir });
-                    }}
-                  />
+                  <Suspense fallback={null}>
+                    <CardsSortSelectLazy columns={columns as Column<never>[]} sort={sort} onSortChange={onSortChange} defaultSort={defaultSort} sortNote={sortNote} />
+                  </Suspense>
                 </div>
               ) : null}
               {showSwitch ? <ViewSwitch /> : null}
@@ -323,6 +320,11 @@ export function DataTable<T>({
       </div>
     </div>
   );
+}
+
+/** The place of the cards while their code loads (a moment, the first time): no layout jump. */
+function CardsPending() {
+  return <div className="dash-cards-pending" role="status" aria-label={strings.app.loading} />;
 }
 
 /** A column whose cell never wraps and so cannot be squeezed below its content. */

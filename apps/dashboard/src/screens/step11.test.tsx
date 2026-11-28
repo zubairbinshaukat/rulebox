@@ -227,6 +227,7 @@ describe("Employees list (employees:list, one server-driven page at a time)", ()
     expect(listArgs()).toEqual({ paginationOpts: { numItems: 25, cursor: null }, sort: { key: "username", dir: "desc" } });
     fireEvent.click(screen.getByRole("button", { name: strings.pager.next }));
     await waitFor(() => expect(listArgs().paginationOpts).toEqual({ numItems: 25, cursor: "cur-2" }));
+    await screen.findByLabelText(strings.pager.rowsPerPage); // the dropdown is a lazy chunk
     pickOption(strings.pager.rowsPerPage, "50");
     await waitFor(() => expect(listArgs().paginationOpts).toEqual({ numItems: 50, cursor: null }));
     cleanup();
@@ -242,15 +243,15 @@ describe("Employees list (employees:list, one server-driven page at a time)", ()
     await waitFor(() => expect(screen.getByTestId("where").textContent).toBe("/employees/e1"));
   });
 
-  it("the cards view lists the same employees as cards", () => {
+  it("the cards view lists the same employees as cards", async () => {
     cx.results["groups:list"] = [];
     cx.results["employees:list"] = listPage([row("e1", "Maya Lee")]);
     ui(<Employees />, "admin", "/employees");
     fireEvent.click(screen.getByRole("radio", { name: strings.table.viewCards }));
     expect(document.documentElement.getAttribute("data-view")).toBe("cards");
+    expect(await screen.findByRole("list", { name: employeesStrings.title })).toBeTruthy();
     expect(screen.getByRole("link", { name: "Maya Lee" })).toBeTruthy();
-    expect(screen.getByRole("list", { name: employeesStrings.title })).toBeTruthy();
-    expect(screen.getByLabelText(strings.table.sortSelect)).toBeTruthy();
+    expect(await screen.findByLabelText(strings.table.sortSelect)).toBeTruthy();
   });
 
   it("an empty organization says so; an empty search says nothing matched", () => {
