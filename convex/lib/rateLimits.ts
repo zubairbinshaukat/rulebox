@@ -55,6 +55,9 @@ export const rateLimiter = new RateLimiter(components.rateLimiter, {
   // `apps:inspectInstaller` (Phase 6 Step 13, plan 4.16), key = the organization: 30 an hour; each click reads at most 2.3 MiB of the
   // admin's installer host.
   installerInspect: { kind: "token bucket", rate: 30, period: HOUR_MS, capacity: 30 },
+  // `apps:fingerprintInstaller` (UI pass add-app D8), key = the organization: 10 an hour; each call downloads the admin's installer
+  // (up to 512 MiB) through the server, so it is far tighter than the three-range `installerInspect`.
+  installerFingerprint: { kind: "token bucket", rate: 10, period: HOUR_MS, capacity: 10 },
   // Employees (plan Step 11 item 6). Each password set or create-with-password
   // costs one Argon2id hash (~100-300 ms of CPU) in an action: 300 per hour per
   // organization, consumed before hashing.
@@ -117,6 +120,7 @@ export type LimitName =
   | "wingetResolve"
   | "feedCheckNow"
   | "installerInspect"
+  | "installerFingerprint"
   | "employeeWrites"
   | "wifiPassphrase"
   | "verifyPerDevice"

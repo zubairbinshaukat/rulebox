@@ -85,6 +85,8 @@ export const {
   useResolveWinget,
   useFetchWebMeta,
   useInspectInstaller,
+  useFingerprintInstaller,
+  useAppByWinget,
   useSaveAppIcon,
   useNetworks,
   useWifiDetail,

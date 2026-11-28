@@ -686,6 +686,12 @@ export const liveApi: DataApi = {
   useInspectInstaller() {
     return useMapped(useAction(api.apps.inspectInstaller));
   },
+  useFingerprintInstaller() {
+    return useMapped(useAction(api.apps.fingerprintInstaller));
+  },
+  useAppByWinget(packageId) {
+    return useMemberQuery(api.apps.byWinget, packageId === "skip" ? "skip" : { packageId });
+  },
   useSaveAppIcon() {
     const save = useAction(api.apps.saveIcon);
     const call = useCallback(

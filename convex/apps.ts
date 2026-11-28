@@ -37,6 +37,7 @@ import { serverDay } from "./lib/lockdownReports";
 import { iconDataUrl, fetchWebMeta as scanWebMeta, pngSize } from "./lib/webmeta";
 import { resolveWinget as resolveFromGithub } from "./lib/winget";
 import { inspectInstallerUrl } from "./lib/installerInspect";
+import { fingerprintInstallerUrl } from "./lib/installerFingerprint";
 
 // Apps (plan Step 10; 4.8). An app is a website or a Windows program an admin
 // adds once and assigns to groups. Everything that decides what a device may
@@ -531,6 +532,26 @@ export const options = memberQuery("viewer")({
         };
       })
       .sort((a, b) => a.name.localeCompare(b.name));
+  },
+});
+
+/**
+ * "Is this winget package already an app?" (viewer; UI pass `add-app.md` D21): the duplicate notice of the review page. One indexed read
+ * (`by_org_winget`, `.take(1)`), never a scan of the apps. An archived app is answered too (`archived: true`) so the screen can say so.
+ * An id that is not a valid winget id answers `null` without reading anything. Case-sensitive, like the repository.
+ */
+export const byWinget = memberQuery("viewer")({
+  args: { packageId: v.string() },
+  returns: v.union(v.object({ _id: v.id("apps"), name: v.string(), archived: v.boolean() }), v.null()),
+  handler: async (ctx, args) => {
+    const packageId = args.packageId.trim();
+    if (wingetIdProblem(packageId)) return null;
+    const row = await ctx.db
+      .query("apps")
+      .withIndex("by_org_winget", (q) => q.eq("orgId", ctx.orgId).eq("desktop.wingetId", packageId))
+      .take(1);
+    const app = row[0];
+    return app === undefined ? null : { _id: app._id, name: app.name, archived: app.archived };
   },
 });
 
@@ -1123,5 +1144,35 @@ export const inspectInstaller = memberAction("admin")({
     const r = await inspectInstallerUrl(url);
     if (!r.ok) fail("invalid_argument", { field: "url", detail: `inspect_${r.reason}` });
     return { ...r.inspection, ...(r.sizeBytes !== undefined ? { sizeBytes: r.sizeBytes } : {}) };
+  },
+});
+
+const installerFingerprint = v.object({
+  /** Lower-case hex SHA-256 of every byte of the file. */
+  sha256: v.string(),
+  sizeBytes: v.number(),
+  /** What the file is. `null` is part of the contract (a file the detector could not read at all); today such a file is refused instead. */
+  inspection: v.union(installerInspection, v.null()),
+});
+
+/**
+ * "Check the link" of the Windows add flow (admin; UI pass `add-app.md` section 5, D8): downloads the installer at `url` ONCE over a
+ * checked https connection (public hosts only, every redirect re-checked, 512 MiB cap, one deadline), hashes it with SHA-256 while it
+ * streams, detects the installer type from its first 2 MiB, certificate table and last 64 KiB, and answers `{ sha256, sizeBytes,
+ * inspection }`. The file is never stored. Trust on first use: the hash comes from the same host as the file; it pins the file so a later
+ * swap is refused by the PC. `invalid_argument` field "url": a bad address, or `detail` `fingerprint_too_large` (use `inspectInstaller`
+ * and the local file check), `fingerprint_blocked` (not a public https address), `fingerprint_failed` (no answer, an error, too slow),
+ * `fingerprint_not_installer` (not an EXE or MSI). Rate limited per organization (10 an hour: each call can pull 512 MiB).
+ */
+export const fingerprintInstaller = memberAction("admin")({
+  args: { url: v.string() },
+  returns: installerFingerprint,
+  handler: async (ctx, args): Promise<Infer<typeof installerFingerprint>> => {
+    const url = args.url.trim();
+    if (httpsUrlProblem(url)) fail("invalid_argument", { field: "url" });
+    await consumeOrFail(ctx, "installerFingerprint", ctx.orgId);
+    const r = await fingerprintInstallerUrl(url);
+    if (!r.ok) fail("invalid_argument", { field: "url", detail: `fingerprint_${r.reason}` });
+    return { sha256: r.sha256, sizeBytes: r.sizeBytes, inspection: r.inspection };
   },
 });

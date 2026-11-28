@@ -1,5 +1,6 @@
 import { describe, expect, test } from "vitest";
 import { codeOf } from "../tests/convex/identity";
+import { wingetIdProblem } from "./lib/appRules";
 import {
   compareVersions,
   installerManifestUrl,
@@ -214,6 +215,19 @@ describe("parsing and ordering", () => {
     expect(installerManifestUrl("VideoLAN.VLC", "3.0.21")).toBe("https://raw.githubusercontent.com/microsoft/winget-pkgs/master/manifests/v/VideoLAN/VLC/3.0.21/VideoLAN.VLC.installer.yaml");
     expect(localeManifestUrl("VideoLAN.VLC", "3.0.21")).toContain("VideoLAN.VLC.locale.en-US.yaml");
     expect(versionListUrl("Microsoft.VisualStudioCode")).toBe("https://api.github.com/repos/microsoft/winget-pkgs/contents/manifests/m/Microsoft/VisualStudioCode");
+  });
+
+  test("a plus in the id is a plain path character: the addresses keep it and still stay inside the repository", () => {
+    expect(wingetIdProblem("Notepad++.Notepad++")).toBe(false);
+    expect(installerManifestUrl("Notepad++.Notepad++", "8.8.9")).toBe("https://raw.githubusercontent.com/microsoft/winget-pkgs/master/manifests/n/Notepad++/Notepad++/8.8.9/Notepad++.Notepad++.installer.yaml");
+    expect(localeManifestUrl("Notepad++.Notepad++", "8.8.9")).toBe("https://raw.githubusercontent.com/microsoft/winget-pkgs/master/manifests/n/Notepad++/Notepad++/8.8.9/Notepad++.Notepad++.locale.en-US.yaml");
+    expect(versionListUrl("Notepad++.Notepad++")).toBe("https://api.github.com/repos/microsoft/winget-pkgs/contents/manifests/n/Notepad++/Notepad++");
+    // the URL parser keeps the plus and does not turn it into a space or another path
+    for (const url of [installerManifestUrl("Notepad++.Notepad++", "8.8.9"), versionListUrl("Notepad++.Notepad++")]) {
+      expect(new URL(url).pathname).toContain("/Notepad++/Notepad++");
+    }
+    // only the plus is new: everything that changes a path stays refused
+    for (const id of ["+a.b", "a.+b", "a+/b.c", "a.b%2B", "a.b;c", "a.b c"]) expect(wingetIdProblem(id), id).toBe(true);
   });
 });
 

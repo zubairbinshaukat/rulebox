@@ -11,10 +11,10 @@
  *   (add-app plan step 18), then flips `verified`. A wrong path shows up on the PC as "exe_missing_after_install" and is
  *   fixed in the app's Details; it never runs anything else.
  * - Left out on purpose: remote-control tools (they bypass the kiosk), Store/MSIX-only apps, Microsoft 365 desktop
- *   (Click-to-Run), Webex (path unknown), and Notepad++: its winget id `Notepad++.Notepad++` contains a "+", which
- *   Rulebox's package-id rule (`v.wingetId`, `wingetIdProblem` on the server) does not accept yet.
+ *   (Click-to-Run), Webex (path unknown).
  *   Paint.NET: `dotPDN.PaintDotNet` exists, but Rulebox's resolver refuses its newest release (checked 2026-11-28:
- *   no machine-wide MSI or EXE). Add either back when those are fixed or the resolver learns the package.
+ *   no machine-wide MSI or EXE). Add it back when that is fixed or the resolver learns the package.
+ * - Notepad++ (`Notepad++.Notepad++`) is back since the package-id rule accepts a "+" (`v.wingetId`, `wingetIdProblem`).
  *
  * `confidence` records how sure we are of the entry, for the reviewer: `id` = the winget id exists in winget-pkgs AND the
  * server's `resolveWinget` accepted it with the real manifest (2026-11-28), `path` = how typical the program path is
@@ -323,6 +323,22 @@ export const GALLERY: readonly GalleryApp[] = [
     exe: `${PF}7-Zip\\7zFM.exe`,
     verified: false,
     confidence: { id: "checked", path: "typical" },
+  },
+  {
+    key: "notepadpp",
+    name: "Notepad++",
+    blurb: "Text and code editor",
+    category: "tools",
+    hue: 150,
+    kind: "desktop",
+    source: "winget",
+    wingetId: "Notepad++.Notepad++",
+    // Unsure: the id exists in winget-pkgs (8.8.9, nullsoft, machine scope) but the server's `resolveWinget` was not run on it,
+    // and the manifest's DefaultInstallLocation says `%ProgramFiles(x86)%\Notepad++` even for the x64 build (the 64-bit
+    // installer normally uses Program Files). The VM check settles which.
+    exe: `${PF}Notepad++\\notepad++.exe`,
+    verified: false,
+    confidence: { id: "none", path: "uncertain" },
   },
   {
     key: "keepassxc",

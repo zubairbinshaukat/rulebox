@@ -62,6 +62,7 @@ import type * as lib_groupConfig from "../lib/groupConfig.js";
 import type * as lib_hostRules from "../lib/hostRules.js";
 import type * as lib_hotkey from "../lib/hotkey.js";
 import type * as lib_installerDetect from "../lib/installerDetect.js";
+import type * as lib_installerFingerprint from "../lib/installerFingerprint.js";
 import type * as lib_installerInspect from "../lib/installerInspect.js";
 import type * as lib_installs from "../lib/installs.js";
 import type * as lib_keyring from "../lib/keyring.js";
@@ -184,6 +185,7 @@ declare const fullApi: ApiFromModules<{
   "lib/hostRules": typeof lib_hostRules;
   "lib/hotkey": typeof lib_hotkey;
   "lib/installerDetect": typeof lib_installerDetect;
+  "lib/installerFingerprint": typeof lib_installerFingerprint;
   "lib/installerInspect": typeof lib_installerInspect;
   "lib/installs": typeof lib_installs;
   "lib/keyring": typeof lib_keyring;

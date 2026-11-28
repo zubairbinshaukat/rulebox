@@ -47,6 +47,9 @@ describe("the popular apps gallery", () => {
   it("winget ids are unique and not the per-user or Store-only packages", () => {
     const ids = GALLERY.map((a) => a.wingetId).filter((id): id is string => id !== undefined);
     expect(new Set(ids).size).toBe(ids.length);
+    // an id with a plus is a real package, and the id rule accepts it
+    expect(ids).toContain("Notepad++.Notepad++");
+    expect(galleryApp("notepadpp")).toMatchObject({ wingetId: "Notepad++.Notepad++", category: "tools", verified: false, exe: "{ProgramFiles}\\Notepad++\\notepad++.exe", confidence: { path: "uncertain" } });
     // Microsoft.Teams is MSIX-only, SlackTechnologies.Slack is per-user only, Zoom.Zoom.EXE is per-user (D5, plan section 7).
     for (const bad of ["Microsoft.Teams", "SlackTechnologies.Slack", "Zoom.Zoom.EXE"]) expect(ids).not.toContain(bad);
   });

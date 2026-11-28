@@ -1223,3 +1223,94 @@ describe("apps:get denials30d", () => {
     expect(io.reads).toBeLessThan(3 + 1 + 1 + 1 + 30 + 10); // wrapper, app, groups, the 30 rows, small change
   });
 });
+
+// ---------------------------------------------------------------- UI pass: byWinget and ids with a plus
+
+const API_NPP = "https://api.github.com/repos/microsoft/winget-pkgs/contents/manifests/n/Notepad++/Notepad++";
+const wingetDesktop = (name: string, wingetId: string, over: Record<string, unknown> = {}) =>
+  desktop(name, { source: "winget", wingetId, wingetVersion: "1.0", fileArgTemplate: [], install: msiInstall, ...over });
+
+describe("apps:byWinget (UI pass add-app D21)", () => {
+  test("answers the app that already has that winget id, an archived one too, and nothing else", async () => {
+    const t = await setupAuth();
+    const orgId = await makeOrg(t);
+    const a = await admin(t, orgId);
+    const v = await asMember(t, { role: "viewer", orgId });
+    expect(await v.as.query(api.apps.byWinget, { packageId: "VideoLAN.VLC" })).toBeNull();
+    const vlc = await a.as.mutation(api.apps.createDesktop, wingetDesktop("VLC", "VideoLAN.VLC"));
+    await a.as.mutation(api.apps.createDesktop, wingetDesktop("7-Zip", "7zip.7zip"));
+    await a.as.mutation(api.apps.createDesktop, desktop("Own installer"));
+    await a.as.mutation(api.apps.createWeb, web("Docs"));
+    expect(await v.as.query(api.apps.byWinget, { packageId: "VideoLAN.VLC" })).toEqual({ _id: vlc, name: "VLC", archived: false });
+    expect(await v.as.query(api.apps.byWinget, { packageId: "  VideoLAN.VLC " })).toEqual({ _id: vlc, name: "VLC", archived: false });
+    // case-sensitive like the repository; unknown, empty and invalid ids answer null
+    for (const id of ["videolan.vlc", "VideoLAN.Other", "", "../x.y", "a b.c"]) expect(await v.as.query(api.apps.byWinget, { packageId: id }), id).toBeNull();
+    await a.as.mutation(api.apps.setArchived, { appId: vlc, archived: true });
+    expect(await v.as.query(api.apps.byWinget, { packageId: "VideoLAN.VLC" })).toEqual({ _id: vlc, name: "VLC", archived: true });
+    // the id follows an edit of the app
+    await a.as.mutation(api.apps.setArchived, { appId: vlc, archived: false });
+    await a.as.mutation(api.apps.update, { appId: vlc, expectedRevision: (await appRow(t, vlc))!.revision, desktop: wingetDesktop("VLC", "VideoLAN.VLC.Other") });
+    expect(await v.as.query(api.apps.byWinget, { packageId: "VideoLAN.VLC" })).toBeNull();
+    expect(await v.as.query(api.apps.byWinget, { packageId: "VideoLAN.VLC.Other" })).toMatchObject({ _id: vlc });
+  });
+
+  test("another organization's app with the same id is never answered", async () => {
+    const t = await setupAuth();
+    const orgA = await makeOrg(t, "A");
+    const orgB = await makeOrg(t, "B");
+    const a = await admin(t, orgA);
+    const b = await admin(t, orgB);
+    await b.as.mutation(api.apps.createDesktop, wingetDesktop("B's VLC", "VideoLAN.VLC"));
+    expect(await a.as.query(api.apps.byWinget, { packageId: "VideoLAN.VLC" })).toBeNull();
+    expect(await b.as.query(api.apps.byWinget, { packageId: "VideoLAN.VLC" })).toMatchObject({ name: "B's VLC" });
+  });
+
+  test("MEASURED: one indexed row, however many apps there are; an invalid id reads only the authorization", async () => {
+    const t = await setupAuth();
+    const orgId = await makeOrg(t);
+    const a = await admin(t, orgId);
+    for (let i = 0; i < 12; i++) await a.as.mutation(api.apps.createDesktop, wingetDesktop(`App ${i}`, `Vendor.App${i}`));
+    const hit = await probe(() => a.as.query(api.apps.byWinget, { packageId: "Vendor.App7" }));
+    const miss = await probe(() => a.as.query(api.apps.byWinget, { packageId: "Vendor.Nothing" }));
+    const bad = await probe(() => a.as.query(api.apps.byWinget, { packageId: "no dot" }));
+    console.log(`IO apps:byWinget hit ${hit.io.reads} reads (${hit.io.readBytes} B), miss ${miss.io.reads}, invalid ${bad.io.reads}, tables ${[...hit.io.tables].join(",")}`);
+    expect(hit.result).toMatchObject({ name: "App 7" });
+    expect(hit.io.writes).toBe(0);
+    expect(hit.io.reads).toBe(bad.io.reads + 1);
+    expect(miss.io.reads).toBe(bad.io.reads);
+    expect([...hit.io.tables].sort()).toEqual(["apps", "authSessions", "members"].sort());
+    expect(hit.io.reads).toBeLessThanOrEqual(3 + 1);
+  });
+});
+
+describe("a winget id with a plus (Notepad++.Notepad++)", () => {
+  test("an app can be saved with it, with its program path, and found by it", async () => {
+    const t = await setupAuth();
+    const orgId = await makeOrg(t);
+    const a = await admin(t, orgId);
+    const id = await a.as.mutation(api.apps.createDesktop, wingetDesktop("Notepad++", "Notepad++.Notepad++", { exe: "{ProgramFiles}\\Notepad++\\notepad++.exe" }));
+    expect((await appRow(t, id))?.desktop).toMatchObject({ source: "winget", wingetId: "Notepad++.Notepad++", exe: "{ProgramFiles}\\Notepad++\\notepad++.exe" });
+    expect(await a.as.query(api.apps.byWinget, { packageId: "Notepad++.Notepad++" })).toMatchObject({ _id: id, name: "Notepad++" });
+    // the plus does not open the door to anything else
+    for (const wingetId of ["+a.b", "a.+b", "a++", "a.b/../c", "a.b%2B"]) {
+      await expectCode(a.as.mutation(api.apps.createDesktop, wingetDesktop("Bad", wingetId)), "invalid_argument");
+    }
+  });
+
+  test("resolveWinget keeps the plus in the GitHub addresses (and checks the package identifier)", async () => {
+    const t = await setupAuth();
+    const orgId = await makeOrg(t);
+    const a = await admin(t, orgId);
+    const manifest = sevenZip.replace("PackageIdentifier: 7zip.7zip", "PackageIdentifier: Notepad++.Notepad++");
+    const locale = sevenZipLocale.replace("PackageIdentifier: 7zip.7zip", "PackageIdentifier: Notepad++.Notepad++");
+    const urls = stubFetch({
+      [API_NPP]: { body: JSON.stringify([{ name: "24.08", type: "dir" }]) },
+      [installerManifestUrl("Notepad++.Notepad++", "24.08")]: { body: manifest },
+      [localeManifestUrl("Notepad++.Notepad++", "24.08")]: { body: locale },
+    });
+    const r = await a.as.action(api.apps.resolveWinget, { packageId: "Notepad++.Notepad++" });
+    expect(r).toMatchObject({ packageId: "Notepad++.Notepad++", version: "24.08" });
+    expect(urls).toEqual([API_NPP, installerManifestUrl("Notepad++.Notepad++", "24.08"), localeManifestUrl("Notepad++.Notepad++", "24.08")]);
+    expect(urls[1]).toBe("https://raw.githubusercontent.com/microsoft/winget-pkgs/master/manifests/n/Notepad++/Notepad++/24.08/Notepad++.Notepad++.installer.yaml");
+  });
+});

@@ -30,10 +30,10 @@ import {
   NEW_WEB_APP_PERMISSIONS,
   NO_GROUP_FILTER,
   WEB_PERMISSION_KEYS,
+  type AppByWinget,
   type AppDetail,
   type AppKind,
   type DesktopSpec,
-  type DetectedTech,
   type AppOption,
   type AppRow,
   type BrowserChoice,
@@ -79,7 +79,7 @@ import { simulatedPcIds, simulatePcFor, stopSimulation } from "./enrollmentSim";
 import { deviceLockdownOf, lockdownWarningsOf } from "./lockdown";
 import * as validate from "../../lib/validate";
 import * as rules from "../../lib/apps/updateRules";
-import { prefillFor } from "@convex/lib/installerDetect";
+import { demoFingerprint, demoInspectionOf, demoResolveWinget } from "./wingetFixtures";
 import { MAX_BROWSER_SITES } from "../../lib/apps/browserRules";
 import { BROADCAST_ACTIVE_MAX, BROADCAST_BODY_MAX, BROADCAST_TITLE_MAX, LOCK_CONTACT_MAX, LOCK_MESSAGE_MAX, noticeProblem } from "../../lib/noticeRules";
 import { MAX_WIFI_GROUPS, MAX_WIFI_NAME, MAX_WIFI_PROFILES, WIFI_SECURITIES, passphraseProblem, ssidProblem } from "../../lib/wifiRules";
@@ -2091,42 +2091,10 @@ export const demoApi: DataApi = {
   useResolveWinget() {
     return useCallback(async ({ packageId, version }) => {
       await sleep(latency() + 400);
-      const id = packageId.trim();
-      if (validate.wingetId(id)) fail("invalid_argument", { field: "packageId" });
-      const known: Record<string, { kind: "msi" | "exe"; version: string; silent: string[]; where?: string; product?: string; name: string; publisher: string }> = {
-        "7zip.7zip": { kind: "msi", version: "24.08", silent: [], where: "{ProgramFiles}\\7-Zip", product: "{23170F69-40C1-2702-2408-000001000000}", name: "7-Zip", publisher: "Igor Pavlov" },
-        "videolan.vlc": { kind: "exe", version: "3.0.21", silent: ["/S"], where: "{ProgramFiles}\\VideoLAN\\VLC", name: "VLC media player", publisher: "VideoLAN" },
-        "notepad++.notepad++": { kind: "exe", version: "8.7.1", silent: ["/S"], where: "{ProgramFiles}\\Notepad++", name: "Notepad++", publisher: "Notepad++ Team" },
-      };
-      const lower = id.toLowerCase();
-      if (lower === "spotify.spotify") fail("winget_unsupported", { detail: "it only offers a per-user (Scope: user) installer" });
-      if (lower.startsWith("offline.")) fail("winget_unreachable");
-      const k = known[lower];
-      if (!k) fail("winget_unsupported", { detail: "no machine-wide x64 installer with a silent switch was found" });
-      const v = version?.trim() || k.version;
-      const hexChars = "0123456789abcdef";
-      let sha = "";
-      for (let i = 0; i < 64; i++) sha += hexChars[(i * 7 + lower.length) % 16];
-      return {
-        packageId: id,
-        version: v,
-        name: k.name,
-        publisher: k.publisher,
-        defaultInstallLocation: k.where,
-        install: {
-          kind: k.kind,
-          url: `https://downloads.example.com/winget/${lower}/${v}/setup.${k.kind}`,
-          sha256: sha,
-          sizeBytes: 12_345_678,
-          silentArgs: k.silent,
-          productCode: k.product,
-          successExitCodes: [0],
-          removeWhenUnassigned: k.kind === "msi",
-        },
-      };
+      // Every package of the popular-apps gallery is known (`wingetFixtures.ts`); Teams and Slack are refused like the live server does.
+      return demoResolveWinget(packageId, version);
     }, []);
   },
-
   useFetchWebMeta() {
     return useCallback(async ({ url }) => {
       await sleep(latency() + 300);
@@ -2151,36 +2119,34 @@ export const demoApi: DataApi = {
       if (new URL(url).hostname.includes("fail")) fail("invalid_argument", { field: "url", detail: "inspect_failed" });
       if (path.includes("norange")) fail("invalid_argument", { field: "url", detail: "inspect_unsupported" });
       if (path.endsWith(".zip") || path.endsWith(".html")) fail("invalid_argument", { field: "url", detail: "inspect_not_installer" });
-      const tech: DetectedTech = path.endsWith(".msi")
-        ? "msi"
-        : path.includes("nsis")
-          ? "nsis"
-          : path.includes("inno")
-            ? "inno"
-            : path.includes("burn")
-              ? "burn"
-              : path.includes("script")
-                ? "installshield_script"
-                : path.includes("shield")
-                  ? "installshield_msi"
-                  : path.includes("advanced")
-                    ? "advanced_installer"
-                    : "exe";
-      const p = prefillFor(tech);
-      return {
-        tech,
-        kind: tech === "msi" ? "msi" : "exe",
-        confidence: tech === "exe" ? "low" : "high",
-        silentArgs: p.silentArgs,
-        successExitCodes: p.successExitCodes,
-        needsAnswerFile: p.needsAnswerFile,
-        perUserLikely: tech === "nsis",
-        ...(tech === "exe" || tech === "msi" ? {} : { signer: "Demo Software Ltd", fileVersion: "2.4.1.0", productName: "Demo Setup", companyName: "Demo Software Ltd" }),
-        sizeBytes: 48_234_496,
-      };
+      return demoInspectionOf(url);
     }, []);
   },
 
+  /**
+   * The demo twin of `apps:fingerprintInstaller` (`wingetFixtures.ts`): the same refusals as the server (`big` in the address = too large,
+   * a private host = blocked, a host named `fail...` = failed, a zip or page = not an installer), else the technology the address names
+   * and a made-up hash that is the same for the same address. A little slower than "Detect": the server downloads the whole file.
+   */
+  useFingerprintInstaller() {
+    return useCallback(async ({ url }) => {
+      await sleep(latency() + 600);
+      return demoFingerprint(url);
+    }, []);
+  },
+
+  /** The demo twin of `apps:byWinget`: the app (archived or not) that carries the package id; `"skip"` loads nothing. */
+  useAppByWinget(packageId) {
+    const skip = packageId === "skip";
+    const state = useDemoQuery(`apps:byWinget:${skip ? "" : packageId.trim()}`, (db): AppByWinget | null => {
+      requireReader();
+      const id = skip ? "" : packageId.trim();
+      if (validate.wingetId(id)) return null;
+      const a = db.apps.find((x) => x.kind === "desktop" && x.desktop?.wingetId === id);
+      return a === undefined ? null : { _id: a._id, name: a.name, archived: a.archived };
+    });
+    return skip ? { status: "loading" } : state;
+  },
   useSaveAppIcon() {
     return useCallback(
       ({ appId, png }) =>

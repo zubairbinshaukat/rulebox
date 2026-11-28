@@ -830,6 +830,24 @@ export interface InstallerInspection {
   sizeBytes?: number;
 }
 
+/**
+ * `apps:fingerprintInstaller`: what the server found by downloading the linked installer once (never stored). `sha256` is of every
+ * byte (trust on first use: it pins the file for the PCs). `inspection` is `null` only when the type could not be read at all; today
+ * the server refuses such a file (`fingerprint_not_installer`) instead.
+ */
+export interface FingerprintResult {
+  sha256: string;
+  sizeBytes: number;
+  inspection: InstallerInspection | null;
+}
+
+/** `apps:byWinget`: the app that already carries a winget package id (the duplicate notice of the review page). */
+export interface AppByWinget {
+  _id: Id;
+  name: string;
+  archived: boolean;
+}
+
 /** How a program's version is kept (Phase 6): left alone, kept by its vendor's own updater, or by Rulebox from the vendor's feed. */
 export type UpdateMode = "pinned" | "vendor" | "managed";
 export const UPDATE_MODES: UpdateMode[] = ["pinned", "vendor", "managed"];

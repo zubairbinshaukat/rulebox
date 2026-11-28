@@ -792,6 +792,7 @@ export const ROWS: Row[] = [
   },
   { name: "apps:get", call: (a, f) => a.query(api.apps.get, { appId: f.appId }), expect: { ...VIEWER, foreign: "not_found" } },
   { name: "apps:options", call: (a) => a.query(api.apps.options, {}), expect: { ...VIEWER, foreign: "ok" } },
+  { name: "apps:byWinget", call: (a) => a.query(api.apps.byWinget, { packageId: "VideoLAN.VLC" }), expect: { ...VIEWER, foreign: "ok" } },
   {
     name: "apps:createWeb",
     call: (a) => a.mutation(api.apps.createWeb, { name: unique(), url: "https://example.com", allowedDomains: [] }),
@@ -1001,6 +1002,12 @@ export const ROWS: Row[] = [
     name: "apps:inspectInstaller",
     // An address that is not https is refused before anything is fetched.
     call: (a) => a.action(api.apps.inspectInstaller, { url: "http://example.com/setup.exe" }),
+    expect: { ...ADMIN_UNLOCKED, default: "invalid_argument" },
+  },
+  {
+    name: "apps:fingerprintInstaller",
+    // An address that is not https is refused before anything is fetched or the rate limit is charged.
+    call: (a) => a.action(api.apps.fingerprintInstaller, { url: "http://example.com/setup.exe" }),
     expect: { ...ADMIN_UNLOCKED, default: "invalid_argument" },
   },
   { name: "fileHandlers:page", call: (a) => a.query(api.fileHandlers.page, { paginationOpts: { numItems: 10, cursor: null } }), expect: { ...VIEWER, foreign: "ok" } },

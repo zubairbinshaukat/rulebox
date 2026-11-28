@@ -22,6 +22,8 @@ export type FeedFetchOptions = {
   /** `If-None-Match` value (the `latest.json` request only). */
   ifNoneMatch?: string;
   accept?: string;
+  /** Extra request headers (e.g. `accept-encoding: identity` so the bytes that are hashed are the file's own bytes). */
+  headers?: Record<string, string>;
   /** Called with every chunk, in order, as it arrives. The caller decides what to keep. */
   onChunk: (chunk: Uint8Array) => void;
 };
@@ -58,7 +60,7 @@ export async function fetchFeedResource(start: string, opts: FeedFetchOptions): 
     }
     for (let hop = 0; hop <= FEED_MAX_REDIRECTS; hop++) {
       if (!fetchableUrl(url)) return { ok: false, reason: "blocked" };
-      const headers: Record<string, string> = { accept: opts.accept ?? "*/*" };
+      const headers: Record<string, string> = { accept: opts.accept ?? "*/*", ...opts.headers };
       if (opts.ifNoneMatch !== undefined) headers["if-none-match"] = opts.ifNoneMatch;
       const res = await f(url.href, { method: "GET", redirect: "manual", signal: ctl.signal, headers });
       if (followedRedirect(res, url)) {

@@ -6,6 +6,7 @@
 import type {
   BroadcastInput,
   BroadcastRow,
+  AppByWinget,
   AppDetail,
   AppOption,
   Audience,
@@ -18,6 +19,7 @@ import type {
   EmployeeInput,
   FailedInstallRow,
   FeedCheckResult,
+  FingerprintResult,
   DisplayChoice,
   GroupDetail,
   GroupDisplayInput,
@@ -213,6 +215,17 @@ export interface DataApi {
    * or `inspect_not_installer`.
    */
   useInspectInstaller: Mutation<{ url: string }, InstallerInspection>;
+  /**
+   * `apps:fingerprintInstaller` (admin action, 10 an hour per organization): the server downloads the installer at `url` once (https,
+   * public hosts, at most 512 MiB, never stored), hashes it and says what it is. The refusal's `detail` is `fingerprint_too_large`
+   * (use `useInspectInstaller` + the local file check), `fingerprint_blocked`, `fingerprint_failed` or `fingerprint_not_installer`.
+   */
+  useFingerprintInstaller: Mutation<{ url: string }, FingerprintResult>;
+  /**
+   * `apps:byWinget` (viewer): the app that already has that winget package id, an archived one too, else `null`. One indexed row.
+   * `"skip"` subscribes to nothing (state `loading`).
+   */
+  useAppByWinget: (packageId: string | "skip") => QueryState<AppByWinget | null>;
   /** `apps:saveIcon`: stores the PNG `useFetchWebMeta` previewed (its `data:` URL), after the app is saved. */
   useSaveAppIcon: Mutation<{ appId: Id; png: string }>;
 

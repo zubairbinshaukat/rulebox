@@ -246,6 +246,12 @@ export const IO_BUDGETS: Record<string, IoBudget> = {
   "apps:get": { maxReads: 3 + 1 + 500 + 500 + 201 + 1001 + 30 + 1 + 1, maxReadBytes: 2_000_000, maxWrites: 0, maxWriteBytes: 0, live: true },
   // <= 500 non-archived apps (the group page's picker; subscribed only while its dialog is open).
   "apps:options": { maxReads: 3 + 500, maxReadBytes: 500_000, maxWrites: 0, maxWriteBytes: 0, live: true },
+  // UI pass (add-app D21): the duplicate notice of the review page. authorize + ONE row of `by_org_winget` (`.take(1)`); an id that is
+  // not a winget id, or that no app has, reads nothing but the authorization. Subscribed (live), but its index range only changes when a
+  // Windows app with that winget id is added, removed, archived or renamed.
+  // MEASURED (`convex/apps.test.ts`, 12 apps in the organization): a hit 3 reads / 1,011 B, a miss or an invalid id 2 reads (the session and
+  // the member); the large-org matrix row (no app has the id): 2 reads / 416 B. The budget (3 + 1) keeps the plan's headroom.
+  "apps:byWinget": { maxReads: 3 + 1, maxReadBytes: 6_144, maxWrites: 0, maxWriteBytes: 0, live: true },
   // orgPlans, orgStats (+ platformSettings before migration); writes: app, orgStats, audit.
   // Phase 6 Step 16: + one `db.get` of the Chrome program (only when the website opens in Chrome).
   "apps:createWeb": { maxReads: 4 + 3 + 1, maxReadBytes: 6_144, maxWrites: 3, maxWriteBytes: 4_096 },
@@ -300,6 +306,11 @@ export const IO_BUDGETS: Record<string, IoBudget> = {
   // Phase 6 Step 13 (plan 4.7, 4.16): authorize (4) + 1 rate-limiter row (read and write); the three range reads are outside the
   // database and the answer is not stored. ESTIMATE until `ioBudgets.test.ts` measures it (the matrix row stops at an early refusal).
   "apps:inspectInstaller": { maxReads: 6, maxReadBytes: 4_096, maxWrites: 1, maxWriteBytes: 512 },
+  // UI pass (add-app D8): authorize + 1 rate-limiter row (read and write), like `inspectInstaller`; the download (<= 512 MiB, streamed and
+  // hashed in the action, never stored) is outside the database. MEASURED in `convex/installerFingerprint.test.ts` (a whole call, a stub
+  // host): 3 reads / 659 B (session, member, step-up), 0 writes; the rate-limiter component's row (1 read + 1 write) is not seen by the
+  // probe, so the budget keeps room for it (6 / 1). The matrix row stops at the early https refusal (before the rate limit is charged).
+  "apps:fingerprintInstaller": { maxReads: 6, maxReadBytes: 4_096, maxWrites: 1, maxWriteBytes: 512 },
   // ---- Phase 6 Step 12 (plan 4.5, 4.16): the vendor feed resolver. ESTIMATES until measured (see the internal rows below).
   // authorize (4) + `feedForApp` (2) + 1 rate-limiter row; the check itself is the internal `feeds:loadForCheck` + `feeds:recordResult` rows.
   // A new version published by the check writes what `apps:update` writes (the publish path), so that is the worst case here.

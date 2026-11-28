@@ -124,7 +124,10 @@ export function httpsUrlProblem(value: string): boolean {
   }
 }
 
-const WINGET_ID = /^[A-Za-z0-9][A-Za-z0-9-]*(\.[A-Za-z0-9][A-Za-z0-9._-]*)+$/;
+// A "+" is allowed because real packages have one (`Notepad++.Notepad++`). It is a plain path character in the GitHub
+// addresses `lib/winget.ts` builds (verified: raw.githubusercontent.com answers both `Notepad++` and `Notepad%2B%2B`), so
+// those addresses stay un-encoded. Dashboard links that carry an id in a QUERY string must encode it (`+` reads as a space there).
+const WINGET_ID = /^[A-Za-z0-9][A-Za-z0-9+-]*(\.[A-Za-z0-9][A-Za-z0-9._+-]*)+$/;
 const WINGET_VERSION = /^[A-Za-z0-9][A-Za-z0-9._+-]{0,63}$/;
 const PRODUCT_CODE = /^\{[0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{12}\}$/;
 const SHA256 = /^[0-9a-fA-F]{64}$/;
