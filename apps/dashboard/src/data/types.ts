@@ -561,31 +561,6 @@ export interface DeviceDetail {
   groupDisplayMode?: DisplayChoice;
 }
 
-/**
- * The lockdown part of `fleet:get` (Phase 5 Step 19), read by the device page's Protection, Lockdown and USB cards through
- * `useDeviceLockdown` (the lockdown seam). Same query and arguments as the page itself, so it is the SAME subscription.
- */
-export interface DeviceLockdown {
-  /** The PC's rollout ring, its group and that group's rollout revision (what `rollouts:setRings` wants back). */
-  ring: Ring;
-  groupId: Id | null;
-  /**
-   * @deprecated UI pass 2026-11: the page query has no rollout row; the Settings tab gets it from `useDeviceSettingsOptions`.
-   * Still required and still filled from `fleet:get` only because the old cards (`lockdown/DeviceCards.tsx` RingPicker) read it as
-   * a `number` and another builder is editing that file; make it optional, then remove it, when the ring picker moves to Settings.
-   */
-  rolloutRevision: number;
-  revoked: boolean;
-  /** "Allow USB for this PC": until when (ms), or null. */
-  usbAllowUntil: number | null;
-  /** Physical protection as the agent reports it (plan 4.16); null until it reports. */
-  protection: SecurityPosture | null;
-  /** Does the agent know lockdown? null before its first report. */
-  lockdownCapable: boolean | null;
-  /** The PC's apply report (fixed codes only); null until it sends one. */
-  apply: ApplyReport | null;
-}
-
 /** `deviceLocks` of one PC: the text the lock view shows on every monitor. */
 export interface DeviceLock {
   lockId: string;
@@ -1435,29 +1410,6 @@ export const DEFAULT_LOCKDOWN_SETTINGS: LockdownSettings = {
 };
 
 export type ExceptionKind = "publisher" | "hash" | "path";
-/**
- * `lockdown:groupSync`: "PCs up to date: n of m" for the group lockdown screen. A PC is up to date when it applied (or partly
- * applied) the newest configuration version; `refused | failed | rolledBack` at that version are problems; the rest is waiting
- * (`total - upToDate - problems`). `reduced` and `adminTilesPending` count the PCs that already have the newest settings.
- */
-export interface LockdownSync {
-  /** PCs in the group, capped at 200 (`totalMore` = more than that). */
-  total: number;
-  totalMore: boolean;
-  upToDate: number;
-  problems: number;
-  /** At most three of the PCs that could not apply it, with the reason in fixed words. */
-  problemPcs: { deviceId: Id; name: string; state: ApplyState }[];
-  /** PCs where the employee program list or the Windows safety list is "not supported" (Windows Home). */
-  reduced: number;
-  /** PCs that left "Hide administrator accounts" off because Other user sign-in is not confirmed there. */
-  adminTilesPending: number;
-  /** The newest configuration version of the group; null = nothing was sent yet. */
-  newestVersion: number | null;
-  ringsOn: boolean;
-  rolloutState: RolloutPhase;
-}
-
 
 /** One exception of a group (`lockdown:groupView`). A hash rule shows only the start of the hash. */
 export interface ExceptionRow {
@@ -1481,6 +1433,29 @@ export interface LockdownView {
   /** Open findings of the organization, capped: `openFindingsMore` = more than that. */
   openFindings: number;
   openFindingsMore: boolean;
+}
+
+/**
+ * `lockdown:groupSync`: "PCs up to date: n of m" for the group lockdown screen. A PC is up to date when it applied (or partly
+ * applied) the newest configuration version; `refused | failed | rolledBack` at that version are problems; the rest is waiting
+ * (`total - upToDate - problems`). `reduced` and `adminTilesPending` count the PCs that already have the newest settings.
+ */
+export interface LockdownSync {
+  /** PCs in the group, capped at 200 (`totalMore` = more than that). */
+  total: number;
+  totalMore: boolean;
+  upToDate: number;
+  problems: number;
+  /** At most three of the PCs that could not apply it, with the reason in fixed words. */
+  problemPcs: { deviceId: Id; name: string; state: ApplyState }[];
+  /** PCs where the employee program list or the Windows safety list is "not supported" (Windows Home). */
+  reduced: number;
+  /** PCs that left "Hide administrator accounts" off because Other user sign-in is not confirmed there. */
+  adminTilesPending: number;
+  /** The newest configuration version of the group; null = nothing was sent yet. */
+  newestVersion: number | null;
+  ringsOn: boolean;
+  rolloutState: RolloutPhase;
 }
 
 export type FindingStatus = "new" | "allowed" | "ignored";

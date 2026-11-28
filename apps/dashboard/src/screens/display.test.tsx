@@ -7,6 +7,7 @@ import type { DeviceDetail, GroupDetail, Me } from "../data/types";
 import { MeContext } from "../lib/member";
 import { strings } from "../lib/strings";
 import { displayStrings as s } from "../lib/screenStrings/display";
+import { pickOption, selectedText } from "../test/select";
 
 // Phase 6 Step 19: the group's and the PC's display settings cards against the LIVE data seam with the Convex React hooks mocked
 // (convex/displayMode.test.ts covers the backend).
@@ -140,7 +141,7 @@ describe("DeviceDisplayCard (fleet:setDisplayMode)", () => {
     cx.fns["fleet:setDisplayMode"] = set;
     ui(<DeviceDisplayCard d={device({ displayMode: "auto", groupDisplayMode: "lite" })} />);
     expect(screen.getByText(s.groupChoice(s.modeLite))).toBeTruthy();
-    fireEvent.change(screen.getByLabelText(s.mode), { target: { value: "standard" } });
+    pickOption(s.mode, s.modeStandard);
     fireEvent.click(screen.getByRole("button", { name: strings.common.save }));
     await waitFor(() => expect(set).toHaveBeenCalledWith({ deviceId: "d1", expectedRevision: 7, displayMode: "standard" }));
   });
@@ -160,7 +161,7 @@ describe("DeviceDisplayCard (fleet:setDisplayMode)", () => {
 
   it("an older server (no display fields) reads as automatic; a revoked PC cannot be changed", () => {
     ui(<DeviceDisplayCard d={device({ revoked: true })} />);
-    expect((screen.getByLabelText(s.mode) as HTMLSelectElement).value).toBe("auto");
-    expect((screen.getByLabelText(s.mode) as HTMLSelectElement).disabled).toBe(true);
+    expect(selectedText(s.mode)).toBe(s.modeAuto);
+    expect((screen.getByLabelText(s.mode) as HTMLButtonElement).disabled).toBe(true);
   });
 });

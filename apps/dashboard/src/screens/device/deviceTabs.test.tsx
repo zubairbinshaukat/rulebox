@@ -6,6 +6,9 @@ import type { Me } from "../../data/types";
 import { MeContext } from "../../lib/member";
 import { deviceText as t } from "./strings";
 import { problemStrings } from "./problemStrings";
+import { networkStrings } from "./networkStrings";
+import { settingsText } from "./settingsStrings";
+import { deviceLockdownStrings as ds } from "../lockdown/deviceStrings";
 
 // The device page shell against the LIVE data seam with the Convex hooks mocked: the tab bar, the `?tab=` address, the badges and the
 // promise that a tab that is not open subscribes to nothing (docs/plans/ui-pass/device-detail.md section 3).
@@ -168,18 +171,43 @@ describe("DeviceDetail tabs", () => {
     await screen.findByRole("heading", { name: t.appsTitle });
     expect(names()).toEqual(["fleet:installs", "fleet:liveness", "fleet:page"]);
 
+    // Protection reads what the page already has: no query of its own.
+    cx.queried = [];
+    fireEvent.click(screen.getByRole("tab", { name: /Protection/ }));
+    await screen.findByRole("heading", { name: ds.lockdownTitle });
+    expect(names()).toEqual(["fleet:liveness", "fleet:page"]);
+
     cx.results["fleet:network"] = { groupId: "g1", reportedAt: null, wifi: [], printers: [], drivers: [] };
     cx.queried = [];
     fireEvent.click(screen.getByRole("tab", { name: /Network/ }));
-    await screen.findByText("No Wi-Fi networks for this group.");
+    await screen.findByText(networkStrings.none.wifi);
     expect(names()).toEqual(["fleet:liveness", "fleet:network", "fleet:page"]);
 
+    cx.results["fleet:deviceSettings"] = { groups: [{ _id: "g1", name: "Sales" }], rolloutRevision: 0 };
     cx.queried = [];
     fireEvent.click(screen.getByRole("tab", { name: /Settings/ }));
-    await screen.findByText("Danger zone");
+    await screen.findByText(settingsText.dangerZone);
     expect(names()).toEqual(["fleet:deviceSettings", "fleet:liveness", "fleet:page"]);
   });
 
+  it("the page never calls fleet:get, on any tab", async () => {
+    cx.results["fleet:network"] = { groupId: "g1", reportedAt: null, wifi: [], printers: [], drivers: [] };
+    cx.results["fleet:deviceSettings"] = { groups: [{ _id: "g1", name: "Sales" }], rolloutRevision: 0 };
+    cx.results["fleet:versions"] = [];
+    open();
+    for (const tab of [/Apps/, /Protection/, /Network/, /Activity/, /Settings/, /Overview/]) {
+      fireEvent.click(screen.getByRole("tab", { name: tab }));
+      await screen.findByRole("tabpanel");
+    }
+    expect(names()).not.toContain("fleet:get");
+    expect(cx.queried.length).toBeGreaterThan(0);
+  });
+
+  it("a viewer's Settings tab subscribes to nothing but the page", async () => {
+    open("/devices/d1?tab=settings", "viewer");
+    await screen.findByText(settingsText.general);
+    expect(names()).toEqual(["fleet:liveness", "fleet:page"]);
+  });
   it("Activity reads the history, and the settings versions only after the disclosure opens", async () => {
     cx.results["fleet:versions"] = [{ version: 3, createdAt: Date.now() - 3_600_000, reason: "Group settings changed" }];
     open("/devices/d1?tab=activity");
@@ -216,6 +244,17 @@ describe("DeviceDetail tabs", () => {
     expect(within(screen.getByRole("tab", { name: /Overview/ })).getByText("1").getAttribute("data-tone")).toBe("danger");
   });
 
+  it("the Protection badge counts lockdown problems (danger when the PC refused), and only those", () => {
+    const layers = Object.fromEntries(["staff", "machine", "appLocker", "appControl", "procWatch", "boot", "performance"].map((n) => [n, { mode: "on", state: "ok" }]));
+    cx.results["fleet:page"] = page({
+      apply: { state: "refused", refusal: "managed_networks_empty", appliedVersion: 3, lkgVersion: 2, configVersion: 4, updatedAt: Date.now(), layers },
+      lockdownCapable: true,
+    });
+    open();
+    expect(within(screen.getByRole("tab", { name: /Protection/ })).getByText("1").getAttribute("data-tone")).toBe("danger");
+    expect(within(screen.getByRole("tab", { name: /Apps/ })).queryByText(/\d/)).toBeNull();
+    expect(within(screen.getByRole("tab", { name: /Network/ })).queryByText(/\d/)).toBeNull();
+  });
   it("a problem's button opens the tab it points at", async () => {
     cx.results["fleet:page"] = page({ failedInstalls: { count: 1, more: false, names: ["Zoom"] } });
     cx.pages["fleet:installs"] = [{ _id: "i1", appId: "a1", appName: "Zoom", state: "failed", attempts: 2, updatedAt: Date.now() }];

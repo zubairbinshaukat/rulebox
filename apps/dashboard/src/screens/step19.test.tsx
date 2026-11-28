@@ -7,7 +7,7 @@ import type { ReactNode } from "react";
 import {
   DEFAULT_LOCKDOWN_SETTINGS,
   type ApplyReport,
-  type DeviceLockdown,
+  type DevicePage,
   type ExceptionRow,
   type FindingRow,
   type LayerState,
@@ -19,9 +19,10 @@ import {
 import { LAYER_DETAILS, REFUSAL_CODES, REFUSALS, layerDetailText, layerNoteOf, layerStateOf, protectionGaps, refusalText } from "./lockdown/codes";
 import { allowKinds, changedLayers, folderProblem, lockoutDraftOf, lockoutProblems, sameSettings, settingsOf } from "./lockdown/rules";
 import { MeContext } from "../lib/member";
+import { optionLabels, pickOption } from "../test/select";
 import { groupStrings } from "../lib/screenStrings/group";
 import { strings } from "../lib/strings";
-import { deviceLockdownStrings as ds, RING_LABELS, ringErrorMessage } from "./lockdown/deviceStrings";
+import { deviceLockdownStrings as ds } from "./lockdown/deviceStrings";
 import { EVERYONE, findingsStrings as fs, lockdownErrorMessage, lockdownStrings as s } from "./lockdown/strings";
 import { overviewLockdownStrings } from "./overview/strings";
 
@@ -150,28 +151,13 @@ const apply = (over: Partial<Omit<ApplyReport, "layers">> & { layers?: Partial<A
   ...over,
   layers: { staff: layer("on"), machine: layer("on"), appLocker: layer("audit"), appControl: layer("audit"), procWatch: layer("audit"), boot: layer("on"), performance: layer("on"), ...over.layers },
 });
-/** What `fleet:get` answers, as far as the lockdown cards read it (`deviceLockdownOf` in the live seam). */
-const fleetGet = (over: Partial<DeviceLockdown> = {}) => {
-  const ld: DeviceLockdown = { ring: "everyone", groupId: "g1", rolloutRevision: 4, revoked: false, usbAllowUntil: null, protection: null, lockdownCapable: true, apply: null, ...over };
-  return {
-    _id: "d1",
-    name: "Desk 1",
-    group: ld.groupId === null ? null : { _id: ld.groupId, name: "Front desk" },
-    flags: { noGroup: ld.groupId === null, revoked: ld.revoked, rotateCredential: false },
-    ring: ld.ring,
-    rolloutRevision: ld.rolloutRevision,
-    usbAllowUntil: ld.usbAllowUntil,
-    protection: ld.protection,
-    lockdownCapable: ld.lockdownCapable,
-    apply: ld.apply,
-  };
-};
-/** Renders one of the device page's lockdown cards over that answer. */
-const cardOf = (node: ReactNode, over: Partial<DeviceLockdown> = {}, role: Me["role"] = "admin") => {
-  cx.results["fleet:get"] = fleetGet(over);
-  return ui(node, role, "/devices/d1");
-};
-const byLabel = (within_: HTMLElement, label: string) => within(within_).getByLabelText(label, { exact: false });
+/** What the device page's lockdown cards read of a PC (they get it from `fleet:page`, `useDevicePage`). */
+type CardPc = Pick<DevicePage, "_id" | "revoked" | "usbAllowUntil" | "protection" | "lockdownCapable" | "apply" | "report">;
+/** Renders one of the device page's lockdown cards over that PC. */
+const cardOf = (node: (d: CardPc) => ReactNode, over: Partial<CardPc> = {}, role: Me["role"] = "admin") => {
+  const d: CardPc = { _id: "d1", revoked: false, usbAllowUntil: null, protection: null, lockdownCapable: true, apply: null, report: null, ...over };
+  return ui(node(d), role, "/devices/d1");
+};const byLabel = (within_: HTMLElement, label: string) => within(within_).getByLabelText(label, { exact: false });
 const card = (title: string) => screen.getByRole("region", { name: title });
 const lastArgs = (name: string) => [...cx.queried].reverse().find((q) => q.name === name)?.args;
 
@@ -645,63 +631,74 @@ describe("the findings screen", () => {
 });
 
 describe("the device page cards", () => {
-  it("read the lockdown part of fleet:get: the same query and arguments as the device page, so one subscription", () => {
-    cardOf(
+  it("read the page, not a query of their own: the Protection tab subscribes to nothing", () => {
+    cardOf((d) => (
       <>
-        <ProtectionCard deviceId="d1" />
-        <LockdownCard deviceId="d1" />
-        <UsbAllowCard deviceId="d1" />
-      </>,
-    );
-    expect(new Set(cx.queried.map((q) => `${q.name}:${JSON.stringify(q.args)}`))).toEqual(new Set(['fleet:get:{"deviceId":"d1"}']));
+        <ProtectionCard d={d} />
+        <LockdownCard d={d} />
+        <UsbAllowCard d={d} />
+      </>
+    ));
+    expect(cx.queried).toEqual([]);
   });
 
   it("an older server without the lockdown fields shows empty cards, not an error", () => {
-    cx.results["fleet:get"] = { _id: "d1", name: "Desk 1", group: null, flags: { noGroup: true, revoked: false, rotateCredential: false } };
-    ui(
-      <>
-        <ProtectionCard deviceId="d1" />
-        <LockdownCard deviceId="d1" />
-        <UsbAllowCard deviceId="d1" />
-      </>,
-      "admin",
-      "/devices/d1",
+    cardOf(
+      (d) => (
+        <>
+          <ProtectionCard d={d} />
+          <LockdownCard d={d} />
+          <UsbAllowCard d={d} />
+        </>
+      ),
+      { lockdownCapable: null },
     );
-    expect(screen.getByText(ds.protectionNone)).toBeTruthy();
-    expect(screen.getByText(ds.noReport)).toBeTruthy();
-    expect(screen.getByText(ds.ringNoGroup)).toBeTruthy();
+    // Protection and Lockdown both say "has not sent this yet".
+    expect(screen.getAllByText(ds.protectionNone)).toHaveLength(2);
     expect(screen.getByText(ds.usbOff)).toBeTruthy();
   });
 
-  it("Protection: green only when everything is in place", () => {
-    cardOf(<ProtectionCard deviceId="d1" />, { protection: { secureBoot: "on", bitLocker: "on", autoRecovery: "off", safeModeAgent: true, tpm: "ready", serviceAcl: "ok" } });
+  it("Protection: green only when everything is in place; TPM and service protection are technical details", () => {
+    cardOf((d) => <ProtectionCard d={d} />, { protection: { secureBoot: "on", bitLocker: "on", autoRecovery: "off", safeModeAgent: true, tpm: "ready", serviceAcl: "ok" } });
     expect(screen.getByText(ds.protectionOk)).toBeTruthy();
     expect(screen.queryByText(ds.protectionMissing)).toBeNull();
+    // Four plain rows; the rest is in the (closed) technical details.
+    expect(within(screen.getByRole("list", { name: ds.protectionTitle })).getAllByRole("listitem")).toHaveLength(4);
+    expect((screen.getByText(ds.tpm).closest("details") as HTMLDetailsElement).open).toBe(false);
   });
 
-  it("Protection: lists what is missing with the plain warning", () => {
-    cardOf(<ProtectionCard deviceId="d1" />, { protection: { secureBoot: "on", bitLocker: "off", autoRecovery: "on", safeModeAgent: false, serviceAcl: "drift", aclDrift: 2 } });
-    expect(screen.getByText("Someone with physical access and boot media can bypass software controls on this PC.")).toBeTruthy();
-    expect(screen.getByText(ds.missingList([ds.missing.bitLocker, ds.missing.autoRecovery, ds.missing.safeMode]), { exact: false })).toBeTruthy();
+  it("Protection: says in plain words what to turn on, and that Rulebox never does it", () => {
+    cardOf((d) => <ProtectionCard d={d} />, { protection: { secureBoot: "on", bitLocker: "off", autoRecovery: "on", safeModeAgent: false, serviceAcl: "drift", aclDrift: 2 } });
+    expect(screen.getByText(ds.protectionMissing)).toBeTruthy();
+    expect(screen.getByText(ds.turnOn([ds.bitLocker]), { exact: false })).toBeTruthy();
+    expect(screen.getByText(ds.never, { exact: false })).toBeTruthy();
     expect(screen.getByText(ds.values.drift!)).toBeTruthy();
     expect(screen.queryByText(ds.protectionOk)).toBeNull();
   });
 
+  it("Protection: only Safe Mode or automatic recovery missing lists what is missing", () => {
+    cardOf((d) => <ProtectionCard d={d} />, { protection: { secureBoot: "on", bitLocker: "off", autoRecovery: "on", safeModeAgent: true } });
+    cleanup();
+    cardOf((d) => <ProtectionCard d={d} />, { protection: { secureBoot: "on", bitLocker: "on", autoRecovery: "off", safeModeAgent: false } });
+    expect(screen.getByText(ds.missingList([ds.missing.safeMode]), { exact: false })).toBeTruthy();
+  });
+
   it("Protection: nothing reported yet says so", () => {
-    cardOf(<ProtectionCard deviceId="d1" />, { protection: null });
+    cardOf((d) => <ProtectionCard d={d} />, { protection: null });
     expect(screen.getByText(ds.protectionNone)).toBeTruthy();
   });
 
-  it("Lockdown: a refusal is shown in plain words, never as a code", () => {
-    cardOf(<LockdownCard deviceId="d1" />, { apply: apply({ state: "refused", refusal: "would_block_input_device" }) });
+  it("Lockdown: a refusal is shown in plain words, never as a code (the code is a technical detail)", () => {
+    cardOf((d) => <LockdownCard d={d} />, { apply: apply({ state: "refused", refusal: "would_block_input_device" }) });
     expect(screen.getByText(ds.states.refused)).toBeTruthy();
     expect(screen.getByText(ds.refusedTitle)).toBeTruthy();
     expect(screen.getByText(REFUSALS.would_block_input_device!)).toBeTruthy();
-    expect(document.body.textContent).not.toContain("would_block_input_device");
+    const code = screen.getByText("would_block_input_device");
+    expect(code.closest("details")).toBeTruthy();
   });
 
-  it("Lockdown: every layer with its mode, state and note; the versions", () => {
-    cardOf(<LockdownCard deviceId="d1" />, {
+  it("Lockdown: every layer by its plain name with its mode, state and note; the versions are technical details", () => {
+    cardOf((d) => <LockdownCard d={d} />, {
       apply: apply({
         state: "partial",
         layers: {
@@ -717,87 +714,76 @@ describe("the device page cards", () => {
     const list = screen.getByRole("list", { name: ds.layerList });
     expect(within(list).getAllByRole("listitem")).toHaveLength(7);
     for (const label of Object.values(ds.layers)) expect(within(list).getByText(label)).toBeTruthy();
-    for (const state of ["Auditing first", "Restart needed", "Working", "Partly applied", "Failed"]) expect(within(list).getAllByText(state).length).toBeGreaterThan(0);
+    for (const state of [ds.auditFirst, "Restart needed", "Working", "Partly applied", "Failed"]) expect(within(list).getAllByText(state).length).toBeGreaterThan(0);
+    // The mode words of the group lockdown page.
+    for (const mode of [ds.modes.off, ds.modes.audit, ds.modes.enforce, ds.modes.on]) expect(mode).toBeTruthy();
+    expect(within(list).getAllByText(ds.modes.enforce!).length).toBe(2);
+    expect(within(list).getByText(ds.modes.audit!)).toBeTruthy();
+    expect(within(list).getAllByText(ds.modes.on!).length).toBe(4);
     expect(within(list).getByText(LAYER_DETAILS.no_printing_ignored!, { exact: false })).toBeTruthy();
     expect(within(list).getByText(LAYER_DETAILS.snapshot_fallback!, { exact: false })).toBeTruthy();
     expect(within(list).getByText(/Code: brand_new_code/)).toBeTruthy();
-    expect(screen.getByText(ds.version(5))).toBeTruthy();
-    expect(screen.getByText(ds.version(7))).toBeTruthy();
+    // Settings version and last working settings: under Technical details, plain numbers.
+    const tech = screen.getByText(ds.configVersion).closest("details") as HTMLDetailsElement;
+    expect(tech.open).toBe(false);
+    expect(screen.getByText(ds.configVersion).parentElement!.textContent).toContain("5");
+    expect(screen.getByText(ds.lkg).parentElement!.textContent).toContain("7");
+    expect(screen.queryByText(ds.version(5))).toBeNull();
   });
 
-  it("Lockdown: a Home PC shows Reduced protection; a rolled back PC says why", () => {
-    cardOf(<LockdownCard deviceId="d1" />, { apply: apply({ state: "rolledBack", refusal: "crash_loop", layers: { appLocker: layer("audit", "unsupported", "applocker_not_on_this_edition") } }) });
+  it("Lockdown: a Home PC says its program list is not available; the compatibility report names what cannot be used; a rolled back PC says why", () => {
+    cardOf((d) => <LockdownCard d={d} />, { apply: apply({ state: "rolledBack", refusal: "crash_loop", layers: { appLocker: layer("audit", "unsupported", "applocker_not_on_this_edition") } }) });
+    expect(screen.getByText(ds.reducedTitle)).toBeTruthy();
     expect(screen.getByText(ds.reducedHome)).toBeTruthy();
     expect(screen.getByText(ds.rolledBackTitle)).toBeTruthy();
+    cleanup();
+    const compat = { os: {}, blockers: [], warnings: [], liteMode: false, protection: "reduced", layers: { appLocker: false, appControl: true } } as unknown as NonNullable<DevicePage["report"]>["compat"];
+    cardOf((d) => <LockdownCard d={d} />, { apply: apply(), report: { updatedAt: 1, compat } as DevicePage["report"] });
+    expect(screen.getByText(ds.reducedDetail([ds.layerAppLocker]))).toBeTruthy();
   });
 
   it("Lockdown: an agent from before lockdown is named; no report yet says so", () => {
-    cardOf(<LockdownCard deviceId="d1" />, { lockdownCapable: false });
-    expect(screen.getByText("Agent too old for lockdown")).toBeTruthy();
+    cardOf((d) => <LockdownCard d={d} />, { lockdownCapable: false });
+    expect(screen.getByText(ds.tooOld)).toBeTruthy();
     cleanup();
-    cardOf(<LockdownCard deviceId="d1" />, { lockdownCapable: null });
+    cardOf((d) => <LockdownCard d={d} />, { lockdownCapable: null });
     expect(screen.getByText(ds.noReport)).toBeTruthy();
   });
 
-  it("Lockdown: the ring picker moves this one PC with the rollout revision; a viewer reads the ring", async () => {
-    const setRings = vi.fn<(a: unknown) => Promise<{ revision: number; changed: number }>>(async () => ({ revision: 5, changed: 1 }));
-    cx.fns["rollouts:setRings"] = setRings;
-    cardOf(<LockdownCard deviceId="d1" />);
-    fireEvent.change(screen.getByLabelText(ds.ring), { target: { value: "pilot" } });
-    await waitFor(() => expect(setRings).toHaveBeenCalledWith({ groupId: "g1", deviceIds: ["d1"], ring: "pilot", expectedRevision: 4 }));
-    expect(await screen.findByText(ds.ringSaved)).toBeTruthy();
-    cleanup();
-    cardOf(<LockdownCard deviceId="d1" />, { ring: "early" }, "viewer");
-    expect(screen.queryByLabelText(ds.ring)).toBeNull();
-    expect(screen.getByText(RING_LABELS.early)).toBeTruthy();
-  });
-
-  it("Lockdown: emptying the pilot ring is refused in words; a PC without a group has no ring to choose", async () => {
-    cx.fns["rollouts:setRings"] = vi.fn().mockRejectedValue(new ConvexError({ code: "conflict", detail: "no_pilot_devices" }));
-    cardOf(<LockdownCard deviceId="d1" />, { ring: "pilot" });
-    fireEvent.change(screen.getByLabelText(ds.ring), { target: { value: "everyone" } });
-    expect(await screen.findByText(ringErrorMessage(new ConvexError({ code: "conflict", detail: "no_pilot_devices" }))!)).toBeTruthy();
-    cleanup();
-    cardOf(<LockdownCard deviceId="d1" />, { groupId: null });
-    expect(screen.queryByLabelText(ds.ring)).toBeNull();
-    expect(screen.getByText(ds.ringNoGroup)).toBeTruthy();
-  });
-
-  it("Allow USB: at most 8 hours, sent as whole hours; the fixed line is there", async () => {
+  it("Allow USB: at most 8 hours, sent as whole hours; the fixed line is in the (i)", async () => {
     const allowUsb = vi.fn<(a: unknown) => Promise<{ until: number | null }>>(async () => ({ until: NOW + 4 * 3_600_000 }));
     cx.fns["fleet:allowUsb"] = allowUsb;
-    cardOf(<UsbAllowCard deviceId="d1" />);
-    expect(screen.getByText("Keyboards, mice and touch screens always work.", { exact: false })).toBeTruthy();
+    cardOf((d) => <UsbAllowCard d={d} />);
     expect(screen.getByText(ds.usbOff)).toBeTruthy();
-    const hours = screen.getByLabelText(ds.usbHours, { exact: false }) as HTMLSelectElement;
-    expect([...hours.options].map((o) => o.value)).toEqual(["1", "2", "4", "8"]);
-    fireEvent.change(hours, { target: { value: "4" } });
+    expect(optionLabels(ds.usbHours)).toEqual(["1 hour", "2 hours", "4 hours", "8 hours"]);
+    pickOption(ds.usbHours, "4 hours");
     fireEvent.click(screen.getByRole("button", { name: ds.usbAllow }));
     await waitFor(() => expect(allowUsb).toHaveBeenCalledWith({ deviceId: "d1", hours: 4 }));
     expect(await screen.findByText(ds.usbStarted(4))).toBeTruthy();
+    expect(ds.usbInfo).toContain("Keyboards, mice and touch screens always work.");
   });
 
   it("Allow USB: an open window shows until when and End now sends 0 hours", async () => {
     const allowUsb = vi.fn<(a: unknown) => Promise<{ until: number | null }>>(async () => ({ until: null }));
     cx.fns["fleet:allowUsb"] = allowUsb;
-    cardOf(<UsbAllowCard deviceId="d1" />, { usbAllowUntil: Date.now() + 2 * 3_600_000 });
-    expect(screen.getByText(/USB devices are allowed on this PC until/)).toBeTruthy();
+    cardOf((d) => <UsbAllowCard d={d} />, { usbAllowUntil: Date.now() + 2 * 3_600_000 });
+    expect(screen.getByText(/USB devices are allowed until/)).toBeTruthy();
     expect(screen.queryByRole("button", { name: ds.usbAllow })).toBeNull();
     fireEvent.click(screen.getByRole("button", { name: ds.usbEnd }));
     await waitFor(() => expect(allowUsb).toHaveBeenCalledWith({ deviceId: "d1", hours: 0 }));
   });
 
   it("Allow USB: a window that has run out reads as off", () => {
-    cardOf(<UsbAllowCard deviceId="d1" />, { usbAllowUntil: Date.now() - 60_000 });
+    cardOf((d) => <UsbAllowCard d={d} />, { usbAllowUntil: Date.now() - 60_000 });
     expect(screen.getByText(ds.usbOff)).toBeTruthy();
     expect(screen.getByRole("button", { name: ds.usbAllow })).toBeTruthy();
   });
 
   it("Allow USB: a viewer and a revoked PC get no button", () => {
-    cardOf(<UsbAllowCard deviceId="d1" />, {}, "viewer");
+    cardOf((d) => <UsbAllowCard d={d} />, {}, "viewer");
     expect(screen.queryByRole("button", { name: ds.usbAllow })).toBeNull();
     cleanup();
-    cardOf(<UsbAllowCard deviceId="d1" />, { revoked: true });
+    cardOf((d) => <UsbAllowCard d={d} />, { revoked: true });
     expect(screen.queryByRole("button", { name: ds.usbAllow })).toBeNull();
   });
 });
@@ -841,7 +827,7 @@ describe("the overview warnings", () => {
     const o = overviewLockdownStrings;
     // The lines are a chunk of their own: they arrive a moment after the page.
     expect(await screen.findByText(o.auditTitle(["Sales", "Office"], true))).toBeTruthy();
-    expect(screen.getByText("Program rules still in audit mode: Sales, Office and more")).toBeTruthy();
+    expect(screen.getByText("Trial run for more than 14 days: Sales, Office and more")).toBeTruthy();
     expect(screen.getByText(o.haltedTitle(["Warehouse"], false))).toBeTruthy();
     expect(screen.getByText(o.notAppliedTitle(["Desk 9"], false))).toBeTruthy();
     expect(screen.getByRole("link", { name: o.auditAction }).getAttribute("href")).toBe("/groups/g1/lockdown");

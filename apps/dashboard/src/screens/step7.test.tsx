@@ -9,8 +9,9 @@ import { MeContext } from "../lib/member";
 import { setStepUpHandler } from "../lib/stepUpRetry";
 import { strings } from "../lib/strings";
 import { pickOption, selectedText } from "../test/select";
-import { deviceStrings } from "../lib/screenStrings/device";
 import { deviceText } from "./device/strings";
+import { ringErrorMessage, settingsText } from "./device/settingsStrings";
+import { deviceLockdownStrings as ds } from "./lockdown/deviceStrings";
 import { problemStrings, COMPAT_RULES, COMPAT_WARNING_FALLBACK } from "./device/problemStrings";
 import { lockStrings } from "./broadcasts/strings";
 import { devicesStrings } from "../lib/screenStrings/devices";
@@ -542,8 +543,8 @@ describe("DeviceDetail (fleet:page)", () => {
       expect(about.getByText(new RegExp(deviceText.lite))).toBeTruthy();
       expect(screen.queryByText(deviceText.allClear)).toBeNull();
       fireEvent.click(screen.getByRole("tab", { name: /Protection/ }));
-      expect(await screen.findByText(deviceStrings.reducedTitle)).toBeTruthy();
-      expect(screen.getByText(deviceStrings.reducedDetail([deviceStrings.layerAppLocker]))).toBeTruthy();
+      expect(await screen.findByText(ds.reducedTitle)).toBeTruthy();
+      expect(screen.getByText(ds.reducedDetail([ds.layerAppLocker]))).toBeTruthy();
     });
 
     it("an older agent's report (no Phase 6 fields) shows no browsers row and no notice, never a wrong value", async () => {
@@ -551,9 +552,9 @@ describe("DeviceDetail (fleet:page)", () => {
       open();
       expect(screen.queryByText(deviceText.browsers)).toBeNull();
       fireEvent.click(screen.getByRole("tab", { name: /Protection/ }));
-      // The lockdown cards (still the old ones) are the tab's content; they say loading until their query answers.
-      await screen.findAllByText(strings.app.loading);
-      expect(screen.queryByText(deviceStrings.reducedTitle)).toBeNull();
+      // The Lockdown card has nothing reported to show; there is no notice about a layer the report does not mention.
+      expect(await screen.findByText(ds.lockdownTitle)).toBeTruthy();
+      expect(screen.queryByText(ds.reducedTitle)).toBeNull();
     });
 
     it("a blocker after the WebView2 install attempt is a red problem", () => {
@@ -622,7 +623,7 @@ describe("DeviceDetail (fleet:page)", () => {
     expect(screen.getByText(problemStrings.revoked.title)).toBeTruthy();
     expect(screen.queryByRole("button", { name: deviceText.lockPc })).toBeNull();
     fireEvent.click(screen.getByRole("button", { name: problemStrings.revoked.action }));
-    expect(await screen.findByRole("button", { name: strings.common.remove })).toBeTruthy();
+    expect(await screen.findByRole("button", { name: settingsText.remove })).toBeTruthy();
   });
 
   it("warns when the PC has no group, and offers to turn kiosk mode back on in one click", async () => {
@@ -669,13 +670,16 @@ describe("DeviceDetail (fleet:page)", () => {
     await waitFor(() => expect(unlock).toHaveBeenCalledWith({ deviceId: "d1" }));
   });
 
-  describe("Settings tab (today's cards, until step 9 rebuilds it)", () => {
-    const settings = () => open("admin", "/devices/d1?tab=settings");
-    const options = { groups: [{ _id: "g1", name: "Sales" }, { _id: "g2", name: "Back office" }], rolloutRevision: 0 };
+  describe("Settings tab", () => {
+    const settings = (role: Me["role"] = "admin") => open(role, "/devices/d1?tab=settings");
+    const options = { groups: [{ _id: "g1", name: "Sales" }, { _id: "g2", name: "Back office" }], rolloutRevision: 4 };
+    const asAdmin = (over: Record<string, unknown> = {}) => {
+      cx.results["fleet:page"] = page(over);
+      cx.results["fleet:deviceSettings"] = options;
+    };
 
     it("kiosk off sends the revision, and the fresh step-up dialog is retried once", async () => {
-      cx.results["fleet:page"] = page();
-      cx.results["fleet:deviceSettings"] = options;
+      asAdmin();
       const setKiosk = vi
         .fn()
         .mockRejectedValueOnce(new ConvexError({ code: "step_up_required" }))
@@ -691,43 +695,151 @@ describe("DeviceDetail (fleet:page)", () => {
       off();
     });
 
-    it("disconnect needs the PC's name typed, then calls fleet:revoke", async () => {
-      cx.results["fleet:page"] = page();
-      cx.results["fleet:deviceSettings"] = options;
+    it("says what kiosk mode does now, in words", async () => {
+      asAdmin({ kioskEnabled: false });
+      settings();
+      expect(await screen.findByText(settingsText.kioskOffLine)).toBeTruthy();
+      expect(screen.getByRole("switch").getAttribute("aria-checked")).toBe("false");
+    });
+
+    it("Disconnect needs the PC's name typed, then calls fleet:revoke", async () => {
+      asAdmin();
       const revoke = vi.fn(async () => null);
       cx.fns["fleet:revoke"] = revoke;
       settings();
-      fireEvent.click(await screen.findByRole("button", { name: deviceStrings.revoke }));
+      fireEvent.click(await screen.findByRole("button", { name: settingsText.revoke }));
       const dialog = screen.getByRole("dialog");
-      const confirm = within(dialog).getByRole("button", { name: deviceStrings.revoke });
+      const confirm = within(dialog).getByRole("button", { name: settingsText.revoke });
       expect((confirm as HTMLButtonElement).disabled).toBe(true);
       fireEvent.change(within(dialog).getByRole("textbox"), { target: { value: "Front desk" } });
       fireEvent.click(confirm);
       await waitFor(() => expect(revoke).toHaveBeenCalledWith({ deviceId: "d1" }));
     });
 
-    it("move sends the revision (the groups come from fleet:deviceSettings); a viewer sees no actions", async () => {
-      cx.results["fleet:page"] = page();
-      cx.results["fleet:deviceSettings"] = options;
+    it("move: the group picker searches the groups of fleet:deviceSettings and sends the revision", async () => {
+      asAdmin();
       const move = vi.fn(async () => ({ revision: 8 }));
       cx.fns["fleet:move"] = move;
-      const view = settings();
-      fireEvent.change(await screen.findByLabelText(deviceStrings.group), { target: { value: "g2" } });
-      fireEvent.click(screen.getByRole("button", { name: deviceStrings.move }));
+      settings();
+      await screen.findByText(settingsText.general);
+      expect(selectedText(settingsText.group)).toContain("Sales");
+      fireEvent.click(screen.getByLabelText(settingsText.group));
+      fireEvent.change(screen.getByPlaceholderText(settingsText.groupSearch), { target: { value: "back" } });
+      const list = within(screen.getByRole("listbox"));
+      expect(list.queryByRole("option", { name: "Sales" })).toBeNull();
+      fireEvent.click(list.getByRole("option", { name: "Back office" }));
+      fireEvent.click(screen.getByRole("button", { name: settingsText.move }));
       await waitFor(() => expect(move).toHaveBeenCalledWith({ deviceId: "d1", expectedRevision: 7, groupId: "g2" }));
-      view.unmount();
+    });
 
+    it("a viewer reads the values and has no actions; nothing but the page is subscribed", async () => {
+      cx.results["fleet:page"] = page();
       cx.queried = [];
-      open("viewer", "/devices/d1?tab=settings");
-      await screen.findByText(deviceStrings.identity);
+      settings("viewer");
+      await screen.findByText(settingsText.general);
+      expect(within(screen.getByRole("region", { name: settingsText.general })).getByText("Sales")).toBeTruthy();
       expect(screen.queryByRole("switch")).toBeNull();
-      expect(screen.queryByRole("button", { name: deviceStrings.revoke })).toBeNull();
-      expect(screen.queryByRole("button", { name: deviceText.rename })).toBeNull();
-      // A viewer has no group picker, so the tab does not subscribe to the group list.
+      expect(screen.queryByRole("button", { name: settingsText.revoke })).toBeNull();
+      expect(screen.queryByRole("button", { name: settingsText.rename })).toBeNull();
+      expect(screen.queryByText(settingsText.dangerZone)).toBeNull();
       expect(cx.queried).not.toContain("fleet:deviceSettings");
     });
-  });
 
+    it("Rename opens the rename dialog with this PC's name", async () => {
+      asAdmin();
+      const rename = vi.fn(async () => ({ revision: 8 }));
+      cx.fns["fleet:rename"] = rename;
+      settings();
+      fireEvent.click(await screen.findByRole("button", { name: settingsText.rename }));
+      const dialog = await screen.findByRole("dialog");
+      fireEvent.change(within(dialog).getByRole("textbox"), { target: { value: "Reception" } });
+      fireEvent.click(within(dialog).getByRole("button", { name: strings.common.save }));
+      await waitFor(() => expect(rename).toHaveBeenCalledWith({ deviceId: "d1", expectedRevision: 7, name: "Reception" }));
+    });
+
+    it("Gets changes (the rollout ring) sends the rollout revision of fleet:deviceSettings; a viewer reads it", async () => {
+      asAdmin();
+      const setRings = vi.fn(async () => ({ revision: 5, changed: 1 }));
+      cx.fns["rollouts:setRings"] = setRings;
+      settings();
+      await screen.findByText(settingsText.advanced);
+      expect(selectedText(settingsText.ring)).toBe(settingsText.rings.everyone);
+      pickOption(settingsText.ring, settingsText.rings.pilot);
+      await waitFor(() => expect(setRings).toHaveBeenCalledWith({ groupId: "g1", deviceIds: ["d1"], ring: "pilot", expectedRevision: 4 }));
+      expect(await screen.findByText(settingsText.ringSaved)).toBeTruthy();
+      cleanup();
+
+      cx.results["fleet:page"] = page({ ring: "early" });
+      settings("viewer");
+      await screen.findByText(settingsText.advanced);
+      expect(screen.queryByLabelText(settingsText.ring)).toBeNull();
+      expect(screen.getByText(settingsText.rings.early)).toBeTruthy();
+    });
+
+    it("Gets changes: emptying the first group is refused in words; a PC without a group has none to choose", async () => {
+      asAdmin();
+      cx.fns["rollouts:setRings"] = vi.fn().mockRejectedValue(new ConvexError({ code: "conflict", detail: "no_pilot_devices" }));
+      cx.results["fleet:page"] = page({ ring: "pilot" });
+      settings();
+      await screen.findByText(settingsText.advanced);
+      pickOption(settingsText.ring, settingsText.rings.everyone);
+      expect(await screen.findByText(ringErrorMessage(new ConvexError({ code: "conflict", detail: "no_pilot_devices" }))!)).toBeTruthy();
+      cleanup();
+
+      asAdmin({ group: null, flags: { noGroup: true, revoked: false, rotateCredential: false } });
+      settings();
+      await screen.findByText(settingsText.advanced);
+      expect(screen.queryByLabelText(settingsText.ring)).toBeNull();
+      expect(screen.getByText(settingsText.ringNoGroup)).toBeTruthy();
+    });
+
+    it("Renew this PC's key asks first, then requests it; while one is waiting the button is off and the line says so", async () => {
+      asAdmin();
+      const rotate = vi.fn(async () => null);
+      cx.fns["fleet:requestCredentialRotation"] = rotate;
+      settings();
+      fireEvent.click(await screen.findByRole("button", { name: settingsText.rotateAction }));
+      fireEvent.click(within(screen.getByRole("dialog")).getByRole("button", { name: settingsText.rotateAction }));
+      await waitFor(() => expect(rotate).toHaveBeenCalledWith({ deviceId: "d1" }));
+      cleanup();
+
+      asAdmin({ flags: { noGroup: false, revoked: false, rotateCredential: true } });
+      settings();
+      expect(await screen.findByText(settingsText.rotatePending)).toBeTruthy();
+      expect((screen.getByRole("button", { name: settingsText.rotateAction }) as HTMLButtonElement).disabled).toBe(true);
+    });
+
+    it("'Choose a group' on a PC without one lands on the group picker, focused", async () => {
+      asAdmin({ group: null, flags: { noGroup: true, revoked: false, rotateCredential: false } });
+      open("admin", "/devices/d1");
+      fireEvent.click(screen.getByRole("button", { name: problemStrings.noGroup.action }));
+      await screen.findByText(settingsText.general);
+      await waitFor(() => expect(document.activeElement).toBe(screen.getByLabelText(settingsText.group)));
+      expect(selectedText(settingsText.group)).toBe(settingsText.chooseGroup);
+    });
+
+    it("a disconnected PC offers only Remove (name typed first); it subscribes to no group list", async () => {
+      cx.results["fleet:page"] = page({ revoked: true, presence: { online: false, since: 5, revoked: true }, flags: { noGroup: false, revoked: true, rotateCredential: false } });
+      const remove = vi.fn(async () => null);
+      cx.fns["fleet:remove"] = remove;
+      open("admin", "/devices/d1?tab=settings");
+      expect(screen.queryByRole("switch")).toBeNull();
+      expect(screen.queryByRole("button", { name: settingsText.revoke })).toBeNull();
+      expect(cx.queried).not.toContain("fleet:deviceSettings");
+      fireEvent.click(await screen.findByRole("button", { name: settingsText.remove }));
+      const dialog = screen.getByRole("dialog");
+      fireEvent.change(within(dialog).getByRole("textbox"), { target: { value: "Front desk" } });
+      fireEvent.click(within(dialog).getByRole("button", { name: settingsText.remove }));
+      await waitFor(() => expect(remove).toHaveBeenCalledWith({ deviceId: "d1" }));
+    });
+
+    it("'Remove this PC' from the Overview lands on the Remove button, focused", async () => {
+      cx.results["fleet:page"] = page({ revoked: true, presence: { online: false, since: 5, revoked: true }, flags: { noGroup: false, revoked: true, rotateCredential: false } });
+      open("admin", "/devices/d1");
+      fireEvent.click(screen.getByRole("button", { name: problemStrings.revoked.action }));
+      await waitFor(() => expect(document.activeElement).toBe(screen.getByRole("button", { name: settingsText.remove })));
+    });
+  });
   it("an unknown PC is a visible error (not_found has no Try again), not a blank page", () => {
     cx.results["fleet:page"] = new ConvexError({ code: "not_found" });
     open();

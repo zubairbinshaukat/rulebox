@@ -5,7 +5,7 @@
 //        --paths=devices:/devices,device:@device,settings:/settings?tab=updates \
 //        [--widths=390,820,1366,1920] [--themes=light,dark] [--full=0] [--storage=rulebox.view=cards]
 //
-// `@name` paths are discovered from the seeded demo lists: @device, @deviceLong,
+// `@name` paths are discovered from the seeded demo lists: @device, @deviceRevoked, @deviceLong,
 // @group, @groupEmpty, @employee, @app, @appWeb. A path may carry a query string.
 // Files are named <name>-<width>-<theme>.png. Only the browser page is captured.
 import { mkdirSync } from "node:fs";
@@ -88,6 +88,7 @@ async function newPage(width, theme) {
 
 const DISCOVER = {
   device: ["/devices", "OFFICE-SCANNER"],
+  deviceRevoked: ["/devices", "STOLEN-TABLET"],
   deviceLong: ["/devices", "WAREHOUSE-RECEIVING-DOCK-EAST-TERMINAL-02-LEGACY-HARDWARE-ON-LOAN-FROM-HEAD-OFFICE"],
   group: ["/groups", "Pharmacy counter"],
   groupEmpty: ["/groups", "Training room"],

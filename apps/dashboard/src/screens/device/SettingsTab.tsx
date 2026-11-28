@@ -1,117 +1,141 @@
-import { useState, type ReactNode } from "react";
+import { lazy, Suspense, useEffect, useRef, useState, type ReactNode } from "react";
 import { useNavigate } from "react-router";
-import { Button, NativeSelect, Pill, Switch } from "@rulebox/ui";
+import { Button, InfoTip, Pill, SearchSelect, Switch } from "@rulebox/ui";
+import IconPen from "~icons/solar/pen-linear";
+import IconMonitor from "~icons/solar/monitor-linear";
 import { useMoveDevice, useRemoveDevice, useRequestRotation, useRevokeDevice, useSetKiosk } from "../../data";
 import { useDeviceSettingsOptions } from "../../data/devices";
-import type { DevicePage, GroupOption } from "../../data/types";
+import type { DevicePage, DeviceSettingsOptions, QueryState } from "../../data/types";
 import { Card } from "../../components/Card";
 import { ConfirmDialog } from "../../components/ConfirmDialog";
 import { Field } from "../../components/Field";
 import { FormError } from "../../components/FormError";
 import { QueryRegion } from "../../components/Region";
-import { RoleGate } from "../../components/RoleGate";
 import { SkeletonBlock } from "../../components/Skeleton";
-import { formatDate } from "../../lib/format";
 import { messageFor } from "../../lib/errors";
+import { formatDate } from "../../lib/format";
 import { useCan } from "../../lib/member";
-import { deviceStrings as s } from "../../lib/screenStrings/device";
-import { devicesStrings } from "../../lib/screenStrings/devices";
 import { strings } from "../../lib/strings";
 import { useToast } from "../../lib/toast";
 import { DeviceDisplayCard } from "../display/DeviceDisplayCard";
+import { RingPicker } from "./RingPicker";
+import { settingsText as s } from "./settingsStrings";
 
-function KV({ label, value }: { label: string; value: ReactNode }) {
+const RenameDialog = lazy(() => import("./RenameDialog").then((m) => ({ default: m.RenameDialog })));
+
+const REMOVE_ID = "dev-remove";
+
+type Options = QueryState<DeviceSettingsOptions> | null;
+type Focus = "group" | "remove" | undefined;
+
+/**
+ * The Settings tab (UI pass step 9): General (name, group), Kiosk mode, Display and memory, Advanced (who gets changes first, a new
+ * key) and the Danger zone. Only an administrator who can still change this PC subscribes to `fleet:deviceSettings` (the group list
+ * and the rollout revision); a viewer or a disconnected PC reads values and subscribes to nothing. `focus` names the control a
+ * problem card sent the administrator here for ("Choose a group", "Remove this PC").
+ */
+export default function SettingsTab({ d, focus }: { d: DevicePage; focus?: Focus }) {
+  const canAct = useCan("admin") && !d.revoked;
+  return canAct ? <WithOptions d={d} focus={focus} /> : <Cards d={d} focus={focus} options={null} />;
+}
+
+function WithOptions({ d, focus }: { d: DevicePage; focus: Focus }) {
+  const options = useDeviceSettingsOptions(d._id);
+  return <Cards d={d} focus={focus} options={options} />;
+}
+
+function Cards({ d, focus, options }: { d: DevicePage; focus: Focus; options: Options }) {
+  const admin = useCan("admin");
+  return (
+    <div className="set" data-revoked={d.revoked || undefined}>
+      <div className="set__general">
+        <General d={d} focus={focus} options={options} />
+      </div>
+      {d.revoked ? null : (
+        <>
+          <div className="set__kiosk">
+            <Kiosk d={d} />
+          </div>
+          <div className="set__display">
+            <DeviceDisplayCard d={d} />
+          </div>
+          <div className="set__advanced">
+            <Advanced d={d} options={options} />
+          </div>
+        </>
+      )}
+      {admin ? (
+        <div className="set__danger">
+          <Danger d={d} focus={focus} />
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+function Row({ label, children }: { label: string; children: ReactNode }) {
   return (
     <div className="dash-kv__item">
       <dt>{label}</dt>
-      <dd>{value}</dd>
+      <dd>{children}</dd>
     </div>
   );
 }
 
-/**
- * STUB (UI pass step 9 replaces it): today's kiosk switch, group picker, display mode, identity and danger zone cards, in the
- * final arrangement (two columns, the danger zone full width). The group options now come from `fleet:deviceSettings`, subscribed
- * only while an admin has this tab open. Missing from the real tab yet: Rename here, the "Gets changes" ring picker and the
- * "Renew this PC's key" line under Advanced (the ring picker is still in the Protection stub's lockdown card).
- */
-export default function SettingsTab({ d, focus }: { d: DevicePage; focus?: "group" | "remove" }) {
-  return (
-    // `focus` = the control a problem card sent the admin here for ("Choose a group", "Remove this PC"); the real tab focuses it.
-    <div className="dash-stack" data-focus={focus}>
-      <div className="dash-grid dash-grid--2">
-        <General d={d} />
-        <DeviceDisplayCard d={d} />
-      </div>
-      <Card title={s.identity}>
-        <dl className="dash-kv">
-          <KV label={s.enrolled} value={formatDate(d.enrolledAt)} />
-          <KV label="ID" value={<span className="dash-mono">{d._id}</span>} />
-        </dl>
-      </Card>
-      <RoleGate minRole="admin">
-        <Danger d={d} />
-      </RoleGate>
-    </div>
-  );
-}
+// ---------------------------------------------------------------- General
 
-function General({ d }: { d: DevicePage }) {
+function General({ d, focus, options }: { d: DevicePage; focus: Focus; options: Options }) {
   const canAct = useCan("admin") && !d.revoked;
-  const setKiosk = useSetKiosk();
-  const toast = useToast();
+  const [renaming, setRenaming] = useState(false);
   return (
-    <Card title={strings.app.nav.settings}>
+    <Card title={s.general}>
       <div className="dash-form">
-        <div className="dash-switch-row">
-          <div className="dash-switch-row__text">
-            <span className="dash-switch-row__title" id="kiosk-label">
-              {s.kiosk}
+        <div className="set-name">
+          <div className="set-name__text">
+            <span className="set-name__label">{s.name}</span>
+            <span className="set-name__value" title={d.name}>
+              {d.name}
             </span>
-            <span className="dash-switch-row__hint">{s.kioskHelp}</span>
           </div>
           {canAct ? (
-            <Switch
-              checked={d.kioskEnabled}
-              label={d.kioskEnabled ? s.kioskOn : s.kioskOffLabel}
-              onChange={(enabled) =>
-                setKiosk({ deviceId: d._id, expectedRevision: d.revision, enabled }).catch((e) => toast(messageFor(e), "danger"))
-              }
-            />
-          ) : (
-            <Pill tone={d.kioskEnabled ? "success" : "warning"}>{d.kioskEnabled ? s.kioskOn : s.kioskOffLabel}</Pill>
-          )}
+            <Button variant="ghost" onClick={() => setRenaming(true)}>
+              <IconPen aria-hidden="true" />
+              {s.rename}
+            </Button>
+          ) : null}
         </div>
         <hr className="dash-divider" />
-        {canAct ? (
-          <GroupPicker d={d} />
+        {canAct && options !== null ? (
+          <QueryRegion state={options} skeleton={<SkeletonBlock lines={2} />}>
+            {(o) => <MoveForm d={d} groups={o.groups} focus={focus === "group"} />}
+          </QueryRegion>
         ) : (
-          <dl className="dash-kv" style={{ gridTemplateColumns: "1fr" }}>
-            <KV label={s.group} value={d.group?.name ?? devicesStrings.noGroup} />
+          <dl className="dash-kv set-kv">
+            <Row label={s.group}>{d.group?.name ?? s.noGroup}</Row>
           </dl>
         )}
+        <dl className="dash-kv set-kv">
+          <Row label={s.enrolled}>{formatDate(d.enrolledAt)}</Row>
+        </dl>
       </div>
+      <Suspense fallback={null}>{renaming ? <RenameDialog d={d} open onClose={() => setRenaming(false)} /> : null}</Suspense>
     </Card>
   );
 }
 
-function GroupPicker({ d }: { d: DevicePage }) {
-  const options = useDeviceSettingsOptions(d._id);
-  return (
-    <QueryRegion state={options} skeleton={<SkeletonBlock lines={2} />}>
-      {(o) => <MoveForm d={d} groups={o.groups} />}
-    </QueryRegion>
-  );
-}
-
-function MoveForm({ d, groups }: { d: DevicePage; groups: GroupOption[] }) {
+function MoveForm({ d, groups, focus }: { d: DevicePage; groups: DeviceSettingsOptions["groups"]; focus: boolean }) {
   const move = useMoveDevice();
   const toast = useToast();
   const [groupId, setGroupId] = useState(d.group?._id ?? "");
   const [base, setBase] = useState({ groupId: d.group?._id ?? "" });
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<unknown>(null);
+  const fieldId = useRef<string | null>(null);
   const changed = groupId !== base.groupId && groupId !== "";
+  // Arrived from "Choose a group": the picker takes the focus once its options are there.
+  useEffect(() => {
+    if (focus && fieldId.current) document.getElementById(fieldId.current)?.focus();
+  }, [focus]);
   return (
     <form
       className="dash-form"
@@ -134,17 +158,22 @@ function MoveForm({ d, groups }: { d: DevicePage; groups: GroupOption[] }) {
         );
       }}
     >
-      <Field label={s.group}>
-        {(p) => (
-          <NativeSelect {...p} value={groupId} onChange={(e) => setGroupId(e.target.value)}>
-            {groupId === "" ? <option value="">{devicesStrings.noGroup}</option> : null}
-            {groups.map((g) => (
-              <option key={g._id} value={g._id}>
-                {g.name}
-              </option>
-            ))}
-          </NativeSelect>
-        )}
+      <Field label={s.group} info={s.groupInfo}>
+        {(p) => {
+          fieldId.current = p.id;
+          return (
+            <SearchSelect
+              {...p}
+              value={groupId}
+              onChange={setGroupId}
+              disabled={pending}
+              placeholder={s.chooseGroup}
+              searchPlaceholder={s.groupSearch}
+              emptyText={s.groupEmpty}
+              options={groups.map((g) => ({ value: g._id, label: g.name }))}
+            />
+          );
+        }}
       </Field>
       <FormError
         error={error}
@@ -168,51 +197,114 @@ function MoveForm({ d, groups }: { d: DevicePage; groups: GroupOption[] }) {
   );
 }
 
-function Danger({ d }: { d: DevicePage }) {
+// ---------------------------------------------------------------- Kiosk mode
+
+function Kiosk({ d }: { d: DevicePage }) {
+  const canAct = useCan("admin");
+  const setKiosk = useSetKiosk();
+  const toast = useToast();
+  const on = d.kioskEnabled;
+  return (
+    <Card title={s.kiosk} actions={<InfoTip label={`About ${s.kiosk}`}>{s.kioskInfo}</InfoTip>}>
+      <div className="set-kiosk" data-on={on || undefined}>
+        <span className="set-kiosk__icon" aria-hidden="true">
+          <IconMonitor />
+        </span>
+        <p className="set-kiosk__text">{on ? s.kioskOnLine : s.kioskOffLine}</p>
+        {canAct ? (
+          <Switch
+            checked={on}
+            label={on ? s.kioskOn : s.kioskOff}
+            onChange={(enabled) => setKiosk({ deviceId: d._id, expectedRevision: d.revision, enabled }).catch((e) => toast(messageFor(e), "danger"))}
+          />
+        ) : (
+          <Pill tone={on ? "success" : "warning"}>{on ? s.kioskOn : s.kioskOff}</Pill>
+        )}
+      </div>
+    </Card>
+  );
+}
+
+// ---------------------------------------------------------------- Advanced
+
+function Advanced({ d, options }: { d: DevicePage; options: Options }) {
+  const canAct = useCan("admin");
+  const rotate = useRequestRotation();
+  const toast = useToast();
+  const [asking, setAsking] = useState(false);
+  return (
+    <Card title={s.advanced} body="none">
+      <div className="set-adv">
+        <RingPicker d={d} options={options} />
+        {canAct ? (
+          <div className="set-adv__row">
+            <div className="set-adv__text">
+              <span className="set-adv__title">
+                {s.rotate}
+                <InfoTip label={`About ${s.rotate}`}>{s.rotateInfo}</InfoTip>
+              </span>
+              {d.flags.rotateCredential ? <span className="dash-muted">{s.rotatePending}</span> : null}
+            </div>
+            <Button variant="ghost" onClick={() => setAsking(true)} disabled={d.flags.rotateCredential}>
+              {s.rotateAction}
+            </Button>
+          </div>
+        ) : null}
+      </div>
+      <ConfirmDialog
+        open={asking}
+        title={s.rotateTitle}
+        body={s.rotateBody}
+        confirmLabel={s.rotateAction}
+        onConfirm={() => rotate({ deviceId: d._id })}
+        onDone={() => toast(s.rotateRequested)}
+        onClose={() => setAsking(false)}
+      />
+    </Card>
+  );
+}
+
+// ---------------------------------------------------------------- Danger zone
+
+function Danger({ d, focus }: { d: DevicePage; focus: Focus }) {
   const navigate = useNavigate();
   const toast = useToast();
   const revoke = useRevokeDevice();
   const remove = useRemoveDevice();
-  const rotate = useRequestRotation();
-  const [dialog, setDialog] = useState<"revoke" | "remove" | "rotate" | null>(null);
+  const [dialog, setDialog] = useState<"revoke" | "remove" | null>(null);
+  // Arrived from "Remove this PC": the button takes the focus.
+  useEffect(() => {
+    if (focus === "remove") document.getElementById(REMOVE_ID)?.focus();
+  }, [focus]);
   return (
     <Card title={s.dangerZone} tone="danger">
-      <div className="dash-form">
-        {!d.revoked ? (
-          <>
-            <div className="dash-row dash-row--between">
-              <span className="dash-muted" style={{ flex: "1 1 200px" }}>{s.rotateBody}</span>
-              <Button variant="ghost" onClick={() => setDialog("rotate")} disabled={d.flags.rotateCredential}>
-                {s.rotate}
-              </Button>
-            </div>
-            {d.flags.rotateCredential ? <p className="dash-muted">{s.rotatePending}</p> : null}
-            <hr className="dash-divider" />
-            <div className="dash-row dash-row--between">
-              <span className="dash-muted" style={{ flex: "1 1 200px" }}>{s.revokeBody}</span>
-              <Button variant="danger-ghost" onClick={() => setDialog("revoke")}>
-                {s.revoke}
-              </Button>
-            </div>
-          </>
-        ) : (
-          <div className="dash-row dash-row--between">
-            <span className="dash-muted" style={{ flex: "1 1 200px" }}>{s.removeBody}</span>
-            <Button variant="danger-ghost" onClick={() => setDialog("remove")}>
-              {strings.common.remove}
-            </Button>
+      {d.revoked ? (
+        <div className="set-danger__row">
+          <div className="set-danger__text">
+            <span className="set-danger__title">
+              {s.remove}
+              <InfoTip label={`About ${s.remove}`}>{s.removeInfo}</InfoTip>
+            </span>
+            <span className="dash-muted">{s.disconnectedNote}</span>
           </div>
-        )}
-      </div>
-      <ConfirmDialog
-        open={dialog === "rotate"}
-        title={s.rotateTitle}
-        body={s.rotateBody}
-        confirmLabel={s.rotate}
-        onConfirm={() => rotate({ deviceId: d._id })}
-        onDone={() => toast(s.rotateRequested)}
-        onClose={() => setDialog(null)}
-      />
+          <Button id={REMOVE_ID} variant="danger-ghost" onClick={() => setDialog("remove")}>
+            {s.remove}
+          </Button>
+        </div>
+      ) : (
+        <div className="set-danger__row">
+          <div className="set-danger__text">
+            <span className="set-danger__title">
+              {s.revoke}
+              <InfoTip label={`About ${s.revoke}`}>{s.revokeInfo}</InfoTip>
+            </span>
+            <span className="dash-muted">{s.revokeLine}</span>
+          </div>
+          <Button variant="danger-ghost" onClick={() => setDialog("revoke")}>
+            {s.revoke}
+          </Button>
+        </div>
+      )}
       <ConfirmDialog
         open={dialog === "revoke"}
         title={s.revokeTitle}
@@ -227,7 +319,7 @@ function Danger({ d }: { d: DevicePage }) {
         open={dialog === "remove"}
         title={s.removeTitle}
         body={s.removeBody}
-        confirmLabel={strings.common.remove}
+        confirmLabel={s.remove}
         danger
         typeToConfirm={d.name}
         onConfirm={() => remove({ deviceId: d._id })}
