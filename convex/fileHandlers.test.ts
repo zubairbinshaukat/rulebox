@@ -215,6 +215,84 @@ describe("fileHandlers", () => {
     expect(list.io.reads).toBeLessThanOrEqual(3 + MAX_FILE_HANDLERS + 1 + 1);
   });
 
+  describe("setMany (the add dialog's chips)", () => {
+    const versions = (t: T, groupId: Id<"groups">) =>
+      t.run(async (ctx) => (await ctx.db.query("groupConfigs").withIndex("by_group_version", (q) => q.eq("groupId", groupId)).collect()).length);
+    const auditRows = (t: T, orgId: Id<"organizations">) =>
+      t.run(async (ctx) => (await ctx.db.query("auditLog").withIndex("by_org_at", (q) => q.eq("orgId", orgId)).take(200)).filter((r) => r.action === "fileHandler.set"));
+
+    async function setup() {
+      const t = await setupAuth();
+      const orgId = await makeOrg(t);
+      const a = await admin(t, orgId);
+      const reader = await a.as.mutation(api.apps.createDesktop, program("Reader"));
+      const viewer = await a.as.mutation(api.apps.createDesktop, program("Viewer"));
+      const { groupId } = await a.as.mutation(api.groups.create, { name: "Sales" });
+      for (const appId of [reader, viewer]) {
+        await a.as.mutation(api.groups.assignApp, { groupId, appId, audience: "everyone", pinnedTaskbar: false, pinnedDesktop: true });
+      }
+      return { t, orgId, a, reader, viewer, groupId };
+    }
+
+    test("adds the new rules and moves the ones another program had, with ONE audit row and ONE configuration version", async () => {
+      const s = await setup();
+      await s.a.as.mutation(api.fileHandlers.set, { extension: ".png", appId: s.viewer });
+      const before = await versions(s.t, s.groupId);
+      const auditBefore = (await auditRows(s.t, s.orgId)).length;
+
+      await s.a.as.mutation(api.fileHandlers.setMany, { extensions: [".JPG", "jpeg", ".png", ".gif", ".jpg"], appId: s.reader });
+
+      expect(await rules(s.t, s.orgId)).toEqual([
+        [".gif", s.reader],
+        [".jpeg", s.reader],
+        [".jpg", s.reader],
+        [".png", s.reader], // moved from Viewer
+      ]);
+      expect(await versions(s.t, s.groupId)).toBe(before + 1);
+      const rows = await auditRows(s.t, s.orgId);
+      expect(rows).toHaveLength(auditBefore + 1);
+      expect(rows[rows.length - 1]).toMatchObject({ targetId: s.reader, targetLabel: "Reader", summary: "Files ending in .gif, .jpeg, .jpg, .png now open with Reader" });
+    });
+
+    test("a long list is shortened in the audit sentence; the same call again writes nothing", async () => {
+      const s = await setup();
+      const exts = [".mp4", ".mov", ".avi", ".mkv", ".mp3", ".wav", ".m4a", ".txt"];
+      await s.a.as.mutation(api.fileHandlers.setMany, { extensions: exts, appId: s.reader });
+      const last = (await auditRows(s.t, s.orgId)).pop()!;
+      expect(last.summary).toBe("Files ending in .avi, .m4a, .mkv, .mov, .mp3, .mp4 and 2 more now open with Reader");
+      const again = await probe(() => s.a.as.mutation(api.fileHandlers.setMany, { extensions: exts, appId: s.reader }));
+      expect(again.io.writes).toBe(0);
+    });
+
+    test("one denied or malformed extension refuses the whole call: nothing is written", async () => {
+      const s = await setup();
+      await expectCode(s.a.as.mutation(api.fileHandlers.setMany, { extensions: [".pdf", ".exe"], appId: s.reader }), "invalid_argument");
+      await expectCode(s.a.as.mutation(api.fileHandlers.setMany, { extensions: [".pdf", ".a-b"], appId: s.reader }), "invalid_argument");
+      await expectCode(s.a.as.mutation(api.fileHandlers.setMany, { extensions: [], appId: s.reader }), "invalid_argument");
+      await expectCode(s.a.as.mutation(api.fileHandlers.setMany, { extensions: Array.from({ length: 21 }, (_, i) => `.q${i}`), appId: s.reader }), "invalid_argument");
+      expect(await rules(s.t, s.orgId)).toEqual([]);
+      expect(await auditRows(s.t, s.orgId)).toEqual([]);
+    });
+
+    test("the program must be able to open files; viewers cannot; another organization's program is not found; the 200-rule cap counts the new ones", async () => {
+      const s = await setup();
+      const site = await s.a.as.mutation(api.apps.createWeb, { name: "Wiki", url: "https://wiki.example.com", allowedDomains: [] });
+      await expectCode(s.a.as.mutation(api.fileHandlers.setMany, { extensions: [".pdf"], appId: site }), "invalid_argument");
+      const v = await asMember(s.t, { role: "viewer", orgId: s.orgId });
+      await giveStepUp(s.t, v);
+      await expectCode(v.as.mutation(api.fileHandlers.setMany, { extensions: [".pdf"], appId: s.reader }), "forbidden");
+      const other = await admin(s.t, await makeOrg(s.t, "Other"));
+      await expectCode(other.as.mutation(api.fileHandlers.setMany, { extensions: [".pdf"], appId: s.reader }), "not_found");
+
+      await s.t.run(async (ctx) => {
+        for (let i = 0; i < MAX_FILE_HANDLERS - 1; i++) await ctx.db.insert("fileHandlers", { orgId: s.orgId, extension: `.x${String(i).padStart(3, "0")}`, appId: s.reader });
+      });
+      await expectCode(s.a.as.mutation(api.fileHandlers.setMany, { extensions: [".pdf", ".doc"], appId: s.reader }), "too_large");
+      await s.a.as.mutation(api.fileHandlers.setMany, { extensions: [".pdf", ".x000"], appId: s.viewer }); // one new rule + one move fits
+      expect((await rules(s.t, s.orgId)).length).toBe(MAX_FILE_HANDLERS);
+    });
+  });
+
   test("viewers read but cannot write; remove needs a fresh step-up; other organizations see nothing", async () => {
     const t = await setupAuth();
     const orgId = await makeOrg(t);

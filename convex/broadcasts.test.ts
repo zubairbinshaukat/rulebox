@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import { setupAuth } from "../tests/convex/auth";
-import { enrollDevice } from "../tests/convex/devices";
+import { enrollDevice, probe } from "../tests/convex/devices";
 import { asMember, giveStepUp, makeOrg, type T } from "../tests/convex/identity";
 import { createKeys, MASTER_A, setMaster } from "../tests/convex/phase5";
 import { api } from "./_generated/api";
@@ -296,6 +296,65 @@ describe("broadcasts:cancel and broadcasts:list", () => {
     await giveStepUp(e.t, stranger);
     expect((await stranger.as.query(api.broadcasts.list, { paginationOpts: { numItems: 10, cursor: null } })).page).toEqual([]);
     await expect(stranger.as.mutation(api.broadcasts.cancel, { id: (first.page[0]!)._id })).rejects.toThrow(/not_found/);
+  });
+});
+
+describe("broadcasts:live (the 'On your PCs now' strip)", () => {
+  const live = (e: Env) => e.viewer.query(api.broadcasts.live, {});
+
+  test("returns the never-expiring and the timed live messages, newest sent first, with target names and counters", async () => {
+    const e = await setup();
+    await sendTo(e, { title: "Forever" });
+    await vi.advanceTimersByTimeAsync(1_000);
+    await sendTo(e, { title: "Timed", expiresAt: Date.now() + 5 * HOUR, ackRequired: true, target: { kind: "device", id: e.device.deviceId } });
+    const rows = await live(e);
+    expect(rows.map((b) => b.title)).toEqual(["Timed", "Forever"]);
+    expect(rows[0]).toMatchObject({ target: { kind: "device", name: "Desk 1" }, ackRequired: true, targetCount: 1, ackCount: 0, cancelledAt: null, expiresAt: expect.any(Number) });
+    expect(rows[1]).toMatchObject({ target: { kind: "group", name: "Sales" }, targetCount: 2, expiresAt: null });
+  });
+
+  test("a cancelled message is out; an expired one is still returned (the client hides it by its own clock)", async () => {
+    const e = await setup();
+    const gone = await sendTo(e, { title: "Cancelled" });
+    const forever = await sendTo(e, { title: "Forever" });
+    await sendTo(e, { title: "Soon over", expiresAt: Date.now() + HOUR });
+    await e.admin.mutation(api.broadcasts.cancel, { id: gone.id });
+    await expire(e, "Soon over");
+    const rows = await live(e);
+    expect(rows.map((b) => b.title).sort()).toEqual(["Forever", "Soon over"]);
+    expect(rows.find((b) => b.title === "Soon over")!.expiresAt).toBeLessThan(Date.now());
+    expect(rows.some((b) => b._id === forever.id)).toBe(true);
+  });
+
+  test("with the 20-message cap full of timed ones plus old expired ones, every live one is in the answer; reads stay bounded", async () => {
+    const e = await setup();
+    // 30 expired timed rows and 20 live timed rows, all written straight into the table (the cap would refuse the sends).
+    await e.t.run(async (ctx) => {
+      for (let i = 0; i < 30; i++) {
+        await ctx.db.insert("broadcasts", { orgId: e.orgId, target: { kind: "group", id: e.groupId }, style: "banner", title: `Old ${i}`, body: "x", expiresAt: 1_000 + i, ackRequired: false, createdAt: i });
+      }
+      for (let i = 0; i < MAX_ORG_ACTIVE_BROADCASTS; i++) {
+        await ctx.db.insert("broadcasts", { orgId: e.orgId, target: { kind: "group", id: e.groupId }, style: "banner", title: `Live ${i}`, body: "x", expiresAt: Date.now() + (i + 1) * HOUR, ackRequired: false, createdAt: 100 + i });
+      }
+    });
+    const { result, io } = await probe(() => live(e));
+    const titles = result.map((b) => b.title);
+    for (let i = 0; i < MAX_ORG_ACTIVE_BROADCASTS; i++) expect(titles).toContain(`Live ${i}`);
+    expect(result.length).toBeLessThanOrEqual(42);
+    expect(io.reads).toBeLessThanOrEqual(3 + 21 + 21 + 42);
+  });
+
+  test("another organization's messages never show, and a viewer can read it", async () => {
+    const e = await setup();
+    await sendTo(e, { title: "Mine" });
+    const otherOrg = await makeOrg(e.t, "Other");
+    const stranger = await asMember(e.t, { role: "viewer", orgId: otherOrg });
+    expect(await stranger.as.query(api.broadcasts.live, {})).toEqual([]);
+    expect((await live(e)).map((b) => b.title)).toEqual(["Mine"]);
+  });
+
+  test("nothing sent: an empty list", async () => {
+    expect(await live(await setup())).toEqual([]);
   });
 });
 

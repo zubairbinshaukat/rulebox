@@ -1,6 +1,6 @@
 import { paginationOptsValidator, paginationResultValidator } from "convex/server";
 import { v } from "convex/values";
-import type { Id } from "./_generated/dataModel";
+import type { Doc, Id } from "./_generated/dataModel";
 import type { DatabaseReader } from "./_generated/server";
 import { writeAudit } from "./lib/audit";
 import { getInOrg } from "./lib/authz";
@@ -67,41 +67,72 @@ export const list = memberQuery("viewer")({
       .withIndex("by_org_created", (q) => q.eq("orgId", ctx.orgId))
       .order(sort.dir)
       .paginate(args.paginationOpts);
-    const names = new Map<string, string | null>();
-    const nameOf = async (kind: "group" | "device", id: string): Promise<string | null> => {
-      const key = `${kind}:${id}`;
-      const hit = names.get(key);
-      if (hit !== undefined) return hit;
-      let name: string | null;
-      if (kind === "group") {
-        const gid = ctx.db.normalizeId("groups", id);
-        const g = gid === null ? null : await ctx.db.get(gid);
-        name = g === null ? null : g.name;
-      } else {
-        const did = ctx.db.normalizeId("devices", id);
-        const d = did === null ? null : await ctx.db.get(did);
-        name = d === null ? null : d.name;
-      }
-      names.set(key, name);
-      return name;
-    };
-    const page = [];
-    for (const b of result.page) {
-      page.push({
-        _id: b._id,
-        target: { kind: b.target.kind, id: b.target.id, name: await nameOf(b.target.kind, b.target.id) },
-        style: b.style,
-        title: b.title,
-        body: b.body,
-        expiresAt: b.expiresAt ?? null,
-        ackRequired: b.ackRequired,
-        createdAt: b.createdAt,
-        cancelledAt: b.cancelledAt ?? null,
-        targetCount: b.targetCount ?? 0,
-        ackCount: b.ackCount ?? 0,
-      });
+    return { ...result, page: await rowsOf(ctx, result.page) };
+  },
+});
+
+/** The shown fields of broadcast rows plus the current name of each target (a per-call cache: one get per distinct group / PC). */
+async function rowsOf(ctx: { db: DatabaseReader }, docs: Doc<"broadcasts">[]) {
+  const names = new Map<string, string | null>();
+  const nameOf = async (kind: "group" | "device", id: string): Promise<string | null> => {
+    const key = `${kind}:${id}`;
+    const hit = names.get(key);
+    if (hit !== undefined) return hit;
+    let name: string | null;
+    if (kind === "group") {
+      const gid = ctx.db.normalizeId("groups", id);
+      const g = gid === null ? null : await ctx.db.get(gid);
+      name = g === null ? null : g.name;
+    } else {
+      const did = ctx.db.normalizeId("devices", id);
+      const d = did === null ? null : await ctx.db.get(did);
+      name = d === null ? null : d.name;
     }
-    return { ...result, page };
+    names.set(key, name);
+    return name;
+  };
+  const page = [];
+  for (const b of docs) {
+    page.push({
+      _id: b._id,
+      target: { kind: b.target.kind, id: b.target.id, name: await nameOf(b.target.kind, b.target.id) },
+      style: b.style,
+      title: b.title,
+      body: b.body,
+      expiresAt: b.expiresAt ?? null,
+      ackRequired: b.ackRequired,
+      createdAt: b.createdAt,
+      cancelledAt: b.cancelledAt ?? null,
+      targetCount: b.targetCount ?? 0,
+      ackCount: b.ackCount ?? 0,
+    });
+  }
+  return page;
+}
+
+/**
+ * The messages that may still be showing on the PCs, for the "On your PCs now" strip (viewer; UI pass other-pages plan 5.2).
+ * Two bounded ranges of `broadcasts.by_org_open`: never cancelled with no expiry (<= LIVE_RANGE rows) and never cancelled with
+ * an expiry, LARGEST expiry first (<= LIVE_RANGE rows; every live timed message is among them because the organization has at most
+ * MAX_ORG_ACTIVE_BROADCASTS = 20 live ones and the live ones expire last). No clock is read here, so the query is not re-run by time:
+ * the caller drops the rows whose `expiresAt` has passed with its own clock. Newest sent first, <= 2 x LIVE_RANGE rows.
+ */
+const LIVE_RANGE = MAX_ORG_ACTIVE_BROADCASTS + 1;
+export const live = memberQuery("viewer")({
+  args: {},
+  returns: v.array(broadcastRow),
+  handler: async (ctx) => {
+    const forever = await ctx.db
+      .query("broadcasts")
+      .withIndex("by_org_open", (q) => q.eq("orgId", ctx.orgId).eq("cancelledAt", undefined).eq("expiresAt", undefined))
+      .take(LIVE_RANGE);
+    const timed = await ctx.db
+      .query("broadcasts")
+      .withIndex("by_org_open", (q) => q.eq("orgId", ctx.orgId).eq("cancelledAt", undefined).gt("expiresAt", 0))
+      .order("desc")
+      .take(LIVE_RANGE);
+    const rows = await rowsOf(ctx, [...forever, ...timed]);
+    return rows.sort((a, b) => b.createdAt - a.createdAt);
   },
 });
 

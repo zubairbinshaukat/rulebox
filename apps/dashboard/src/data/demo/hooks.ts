@@ -380,6 +380,7 @@ function assignmentRow(db: DemoDb, a: DemoDb["assignments"][number]): Assignment
     appName: app?.name ?? "",
     appKind: app?.kind ?? "web",
     hue: app?.hue,
+    archived: app?.archived ?? false,
     audience: a.audience,
     pinnedTaskbar: a.pinnedTaskbar,
     pinnedDesktop: a.pinnedDesktop,
@@ -1116,6 +1117,26 @@ export const demoApi: DataApi = {
         });
     });
   },
+  // `broadcasts:live`: what `by_org_open` returns: the never-cancelled rows with no expiry and the timed ones (largest expiry first), at most
+  // 21 of each, newest sent first. Expired rows are included on purpose: the screen hides them with its own clock.
+  useLiveBroadcasts() {
+    return useDemoQuery("broadcasts:live", (db) => {
+      requireReader();
+      const open = db.broadcasts.filter((b) => b.cancelledAt === null);
+      const forever = open.filter((b) => b.expiresAt === null).slice(0, 21);
+      const timed = open
+        .filter((b) => b.expiresAt !== null)
+        .sort((a, b) => (b.expiresAt ?? 0) - (a.expiresAt ?? 0))
+        .slice(0, 21);
+      return [...forever, ...timed]
+        .sort((a, b) => b.createdAt - a.createdAt)
+        .map((b): BroadcastRow => {
+          const t = b.target;
+          const name = t.kind === "group" ? (db.groups.find((g) => g._id === t.id)?.name ?? null) : (db.devices.find((d) => d._id === t.id)?.name ?? null);
+          return { ...b, target: { ...t, name } };
+        });
+    });
+  },
   useSendBroadcast() {
     return useCallback(
       (input) =>
@@ -1419,6 +1440,9 @@ export const demoApi: DataApi = {
         displayMode: g.displayMode,
         webWindowCap: g.webWindowCap,
         webIdleCloseMin: g.webIdleCloseMin,
+        // The two small rows `groups:get` reads (null = no row): the rollout row and the trial-run date of the lockdown row.
+        rollout: db.rollouts.has(g._id) ? { enabled: db.rollouts.get(g._id)!.enabled, state: db.rollouts.get(g._id)!.state } : null,
+        lockdownAuditSince: db.lockdown.get(g._id)?.auditSince ?? null,
       };
     });
   },
@@ -2534,6 +2558,38 @@ export const demoApi: DataApi = {
     );
   },
 
+  // `fileHandlers:setMany`: the checks of `set` for every extension (one refused = nothing written), one audit row for the whole call.
+  useSetFileHandlers() {
+    return useCallback(
+      ({ extensions, appId }) =>
+        runMutation("admin", ({ db, audit }) => {
+          if (extensions.length < 1 || extensions.length > 20) fail("invalid_argument", { field: "extensions" });
+          const exts = [...new Set(extensions.map((e) => validate.normalizeExtension(e)))];
+          for (const ext of exts) {
+            if (validate.extension(ext)) fail("invalid_argument", { field: "extension" });
+          }
+          const app = find(db.apps, appId);
+          if (!canOpenFiles(app)) fail("invalid_argument", { field: "app" });
+          const changed: string[] = [];
+          for (const ext of exts) {
+            const existing = db.fileHandlers.find((f) => f.extension === ext);
+            if (existing === undefined) {
+              db.fileHandlers.push({ _id: newId("fh"), extension: ext, appId });
+              changed.push(ext);
+            } else if (existing.appId !== appId) {
+              existing.appId = appId;
+              changed.push(ext);
+            }
+          }
+          if (changed.length === 0) return;
+          changed.sort();
+          const shown = changed.length > 6 ? `${changed.slice(0, 6).join(", ")} and ${changed.length - 6} more` : changed.join(", ");
+          audit({ action: "fileHandler.set", targetType: "app", targetId: app._id, targetLabel: app.name, summary: `Files ending in ${shown} now open with ${app.name}` });
+        }),
+      [],
+    );
+  },
+
   useRemoveFileHandler() {
     return useCallback(
       ({ handlerId }) =>
@@ -3087,11 +3143,15 @@ export const dataApi = demoApi;
 /** Audit lists: their own seam (data/audit), re-exported by data/audit/demo.ts. */
 export const demoAuditApi: AuditApi = {
   // `audit:list`: sort key "at" only (newest first by default), no search, no total.
-  useAuditScreen(query) {
-    return useDemoServerPage("audit:list", "", query, (db, sort) => {
+  // UI pass: `since` keeps the rows at or after it (`.gte("at", since)`); `targetId` is `audit:forTarget` (the same pages, one target's rows).
+  useAuditScreen({ since, targetId, ...query }) {
+    return useDemoServerPage(targetId === undefined ? "audit:list" : "audit:forTarget", `${targetId ?? ""}:${since ?? ""}`, query, (db, sort) => {
       requireReader();
       if (sort && sort.key !== "at") fail("invalid_argument", { field: "sort" });
-      return [...db.audit].sort(byKey((e) => e.at, sort?.dir ?? "desc")).map(auditEntry);
+      return db.audit
+        .filter((e) => (targetId === undefined || e.targetId === targetId) && (since === undefined || e.at >= since))
+        .sort(byKey((e) => e.at, sort?.dir ?? "desc"))
+        .map(auditEntry);
     });
   },
 

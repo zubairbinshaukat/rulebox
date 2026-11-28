@@ -267,6 +267,10 @@ export const liveApi: DataApi = {
     const { paginationOpts } = listArgs(query);
     return useServerPage<BroadcastRow>(api.broadcasts.list, { paginationOpts, sort: { key: "sent", dir: query.sort?.dir ?? "desc" } }, "broadcasts");
   },
+  // `broadcasts:live` (UI pass, "On your PCs now"): <= 42 rows of the never-cancelled messages; the screen drops the expired ones by its own clock.
+  useLiveBroadcasts() {
+    return useMemberQuery(api.broadcasts.live, {});
+  },
   useSendBroadcast() {
     return useMapped(useMutation(api.broadcasts.send));
   },
@@ -323,7 +327,7 @@ export const liveApi: DataApi = {
   },
   useGroupDetail(groupId) {
     const q = useMemberQuery(api.groups.get, { groupId });
-    return useMappedState(q, ({ group: g, apps }) => ({
+    return useMappedState(q, ({ group: g, apps, rollout, lockdownAuditSince }) => ({
       _id: g._id,
       name: g.name,
       description: g.description,
@@ -333,12 +337,16 @@ export const liveApi: DataApi = {
       displayMode: g.displayMode,
       webWindowCap: g.webWindowCap,
       webIdleCloseMin: g.webIdleCloseMin,
+      // UI pass: the two small rows `groups:get` now reads (null = no row yet).
+      rollout,
+      lockdownAuditSince,
       assignments: apps.map((a) => ({
         _id: a.assignmentId,
         appId: a.appId,
         appName: a.name,
         appKind: a.kind,
         hue: a.hue,
+        archived: a.archived,
         audience: a.audience,
         pinnedTaskbar: a.pinnedTaskbar,
         pinnedDesktop: a.pinnedDesktop,
@@ -711,6 +719,17 @@ export const liveApi: DataApi = {
         await set(a);
       },
       [set],
+    );
+    return useMapped(call);
+  },
+  // One call for the several extensions of a chip ("Pictures"): ONE configuration version per group, not one per extension.
+  useSetFileHandlers() {
+    const setMany = useMutation(api.fileHandlers.setMany);
+    const call = useCallback(
+      async (a: { extensions: string[]; appId: string }) => {
+        await setMany(a);
+      },
+      [setMany],
     );
     return useMapped(call);
   },

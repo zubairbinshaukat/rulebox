@@ -310,6 +310,11 @@ export interface AssignmentRow {
   appName: string;
   appKind: AppKind;
   hue?: number;
+  /**
+   * The app is archived: PCs no longer get it (the group page offers to unassign it). Filled by `groups:get` (`GroupDetail`); absent on the
+   * assignment rows of the app's own page (`AppDetail`), where the app's `archived` says it.
+   */
+  archived?: boolean;
   audience: Audience;
   pinnedTaskbar: boolean;
   pinnedDesktop: boolean;
@@ -333,6 +338,13 @@ export interface GroupDetail {
   displayMode?: DisplayChoice;
   webWindowCap?: number;
   webIdleCloseMin?: number;
+  /**
+   * UI pass (other-pages plan 1.3): the group's staged-rollout row (`groupRollouts`): on or off and the state; null = no row yet. Absent
+   * only on an older server, which the page treats as "unknown" (no rollout warning, the setup row shows a dash).
+   */
+  rollout?: { enabled: boolean; state: RolloutPhase } | null;
+  /** UI pass: since when the group's program rules are in trial run (ms), null = none are; absent on an older server. */
+  lockdownAuditSince?: number | null;
 }
 
 /** Phase 6 Step 19: an administrator's display-mode choice for a group or a PC; `auto` = none (the PC's memory decides). */

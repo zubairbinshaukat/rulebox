@@ -517,6 +517,52 @@ describe("apps, assignments and file types (Step 10)", () => {
       data: { assignments: [{ _id: "as1", appId: "a1", appName: "Notepad", hue: 40, audience: "everyone", pinnedTaskbar: true, pinnedDesktop: false }] },
     });
   });
+
+  it("groups:get also maps the archived flag of each assignment, the rollout state and the trial-run date (null stays null)", () => {
+    const group = { _id: "g1", name: "Office", revision: 0, createdAt: 1, isDefault: false, devices: { count: 0, more: false }, employees: { count: 0, more: false } };
+    const app = { assignmentId: "as1", appId: "a1", name: "Old reader", kind: "web", archived: true, audience: "everyone", pinnedTaskbar: false, pinnedDesktop: true };
+    cx.queryResult = { group, apps: [app], rollout: { enabled: true, state: "halted" }, lockdownAuditSince: 1_700_000_000_000 };
+    const first = renderHook(() => live.useGroupDetail("g1")).result.current;
+    expect(first).toMatchObject({
+      status: "ready",
+      data: { rollout: { enabled: true, state: "halted" }, lockdownAuditSince: 1_700_000_000_000, assignments: [{ appName: "Old reader", archived: true }] },
+    });
+    cx.queryResult = { group, apps: [{ ...app, archived: false }], rollout: null, lockdownAuditSince: null };
+    const bare = renderHook(() => live.useGroupDetail("g1")).result.current;
+    expect(bare).toMatchObject({ status: "ready", data: { rollout: null, lockdownAuditSince: null, assignments: [{ archived: false }] } });
+  });
+
+  it("setMany: the chips of one program go to fileHandlers:setMany in ONE call, and a refused extension keeps its code and field", async () => {
+    cx.fns["fileHandlers:setMany"] = vi.fn(async () => null);
+    const set = renderHook(() => live.useSetFileHandlers()).result.current;
+    await set({ extensions: [".jpg", ".jpeg", ".png"], appId: "a1" });
+    expect(cx.fns["fileHandlers:setMany"]).toHaveBeenCalledTimes(1);
+    expect(cx.fns["fileHandlers:setMany"]).toHaveBeenCalledWith({ extensions: [".jpg", ".jpeg", ".png"], appId: "a1" });
+
+    cx.fns["fileHandlers:setMany"] = vi.fn(async () => {
+      throw new ConvexError({ code: "invalid_argument", field: "extension", detail: "denied" });
+    });
+    const err = await set({ extensions: [".pdf", ".exe"], appId: "a1" }).catch((e: unknown) => e);
+    expect(errorCodeOf(err)).toBe("invalid_argument");
+    expect((err as AppError).field).toBe("extension");
+  });
+});
+
+describe("messages: the live strip (UI pass)", () => {
+  it("useLiveBroadcasts is broadcasts:live with no arguments, and is not asked before the session is confirmed", () => {
+    const row = { _id: "b1", target: { kind: "group", id: "g1", name: "Front desk" }, style: "banner", title: "Hi", body: "x", expiresAt: null, ackRequired: false, createdAt: 1, cancelledAt: null, targetCount: 2, ackCount: 0 };
+    cx.queryResult = [row];
+    const { result } = renderHook(() => live.useLiveBroadcasts());
+    const req = Object.values(cx.requests.at(-1)!)[0] as { query: FunctionReference<"query">; args: unknown };
+    expect(getFunctionName(req.query)).toBe("broadcasts:live");
+    expect(req.args).toEqual({});
+    expect(result.current).toEqual({ status: "ready", data: [row] });
+
+    cx.auth = { isLoading: true, isAuthenticated: false };
+    cx.requests = [];
+    renderHook(() => live.useLiveBroadcasts());
+    expect(cx.requests.flatMap((r) => Object.values(r))).toEqual([]);
+  });
 });
 
 describe("install status, overview, audit and history (Step 17)", () => {

@@ -118,6 +118,11 @@ export interface DataApi {
   // ---- broadcasts (Phase 5 Step 15, `convex/broadcasts.ts`).
   /** `broadcasts:list`: one page, newest first; sort key `sent` only, no search, the pager shows Previous / Next. */
   useBroadcastsPage: (query: ListQuery) => ServerList<BroadcastRow>;
+  /**
+   * `broadcasts:live` (viewer): the messages that may still be showing on the PCs, newest sent first (<= 42 rows, never cancelled ones). No
+   * clock is read on the server: an expired row (`expiresAt` in the past) is still returned and the screen hides it with its own clock.
+   */
+  useLiveBroadcasts: () => QueryState<BroadcastRow[]>;
   /** `broadcasts:send` (admin): a group or one PC; resolves to the new id and how many PCs it was aimed at. */
   useSendBroadcast: Mutation<BroadcastInput, { id: Id; targetCount: number }>;
   /** `broadcasts:cancel` (admin). */
@@ -274,6 +279,8 @@ export interface DataApi {
   // ---- file types
   // (the rules table, `useFileTypesPage`, is in the apps seam, `./apps`; the program picker is `useAppOptions`)
   useSetFileHandler: Mutation<{ extension: string; appId: Id }>;
+  /** `fileHandlers:setMany` (admin): up to 20 extensions to one program in ONE call, so one chip ("Pictures") is one configuration version per group. A denied extension refuses the whole call. */
+  useSetFileHandlers: Mutation<{ extensions: string[]; appId: Id }>;
   useRemoveFileHandler: Mutation<{ handlerId: Id }>;
 
   // ---- enrollment codes: their own seam (`enrollment/api.ts`), kept out of the first load.

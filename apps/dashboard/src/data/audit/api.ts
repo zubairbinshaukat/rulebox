@@ -8,8 +8,14 @@ import type { AuditEntry, Id } from "../types";
  * no total (no exact counter): the pager shows Previous / Next and "Page N".
  */
 export interface AuditApi {
-  /** `audit:list`, one page. */
-  useAuditScreen: (query: ListQuery) => ServerList<AuditEntry>;
+  /**
+   * `audit:list` (or `audit:forTarget` when `targetId` is set), one page. `since` (ms, rows at or after it) is the When filter; the screen passes the
+   * start of the local day so the subscription does not churn. `targetId` is "only this item" (any id the log has a row for, also a deleted one).
+   */
+  useAuditScreen: (query: AuditScreenQuery) => ServerList<AuditEntry>;
   /** `audit:forTarget({ targetId })`, one page: one device, employee, app or group. */
   useHistory: (targetId: Id, query: ListQuery) => ServerList<AuditEntry>;
 }
+
+/** What the audit screen filters by besides the page: both are arguments of the server query (existing indexes, no new one). */
+export type AuditScreenQuery = ListQuery & { since?: number; targetId?: Id };

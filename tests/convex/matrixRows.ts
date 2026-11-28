@@ -655,6 +655,7 @@ export const ROWS: Row[] = [
   },
   { name: "fleet:unlock", call: (a, f) => a.mutation(api.fleet.unlock, { deviceId: f.deviceId }), expect: { ...ADMIN_MAJOR, foreign: "not_found" } },
   { name: "broadcasts:list", call: (a) => a.query(api.broadcasts.list, { paginationOpts: { numItems: 25, cursor: null } }), expect: { ...VIEWER, foreign: "ok" } },
+  { name: "broadcasts:live", call: (a) => a.query(api.broadcasts.live, {}), expect: { ...VIEWER, foreign: "ok" } },
   {
     name: "broadcasts:send",
     call: (a, f) =>
@@ -1017,6 +1018,11 @@ export const ROWS: Row[] = [
     expect: { ...ADMIN_UNLOCKED, foreign: "not_found" },
   },
   {
+    name: "fileHandlers:setMany",
+    call: (a, f) => a.mutation(api.fileHandlers.setMany, { extensions: [".odt", ".rtf"], appId: f.desktopAppId }),
+    expect: { ...ADMIN_UNLOCKED, foreign: "not_found" },
+  },
+  {
     name: "fileHandlers:remove",
     // The first allowed caller deletes the rule; the next ones find nothing.
     call: (a, f) => a.mutation(api.fileHandlers.remove, { handlerId: f.handlerId }),
@@ -1139,8 +1145,7 @@ export const ROWS: Row[] = [
     call: (a) => a.query(api.overview.failedInstallsPage, { paginationOpts: { numItems: 10, cursor: null } }),
     expect: { ...VIEWER, foreign: "ok" },
   },
-  { name: "audit:list", call: (a) => a.query(api.audit.list, { paginationOpts: { numItems: 10, cursor: null } }), expect: { ...VIEWER, foreign: "ok" } },
-  {
+  { name: "audit:list", call: (a) => a.query(api.audit.list, { paginationOpts: { numItems: 10, cursor: null } }), expect: { ...VIEWER, foreign: "ok" } },  {
     name: "audit:forTarget",
     call: (a, f) => a.query(api.audit.forTarget, { targetId: f.deviceId, paginationOpts: { numItems: 10, cursor: null } }),
     expect: { ...VIEWER, foreign: "ok" }, // the foreign owner asks for THEIR history of that id: empty
