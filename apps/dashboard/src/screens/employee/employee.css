@@ -1,0 +1,520 @@
+/*
+ * Employee pages (UI pass 2026-11, docs/plans/ui-pass/other-pages.md section 4): the header, the profile form, the live summary of
+ * "Add employee", the password card and its generated password, the account card and the hand-over dialog. It follows the device
+ * and group pages so the three feel like one product. Shipped in the page's own chunk, not in the entry CSS. Tokens only; the only
+ * motion is the chevron of "Advanced" (a transform), none with reduced motion or Lite.
+ * Width bands: phone < 600 · tablet 600-1023 · laptop 1024-1599 · wide >= 1600. Sections lay themselves out by their own width where
+ * they can; the shell's breakpoints are media queries.
+ */
+
+.emp {
+  gap: 16px;
+}
+
+/* ------------------------------------------------------------ header */
+
+.emp-head {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 0;
+}
+.emp-head__who {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  min-width: 0;
+}
+.emp-head__avatar {
+  flex: none;
+}
+.emp-head__id {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 0;
+}
+.emp-head__name {
+  min-width: 0;
+  margin: 0;
+  font-size: clamp(24px, 2.6vw, 30px);
+  line-height: 1.15;
+  letter-spacing: -0.025em;
+  overflow-wrap: anywhere;
+  /* A very long name never pushes the page; the full name is in `title`. */
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+  overflow: hidden;
+}
+.emp-head__name:focus {
+  outline: none;
+}
+.emp-head__meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 12px;
+  min-width: 0;
+}
+.emp-head__user {
+  min-width: 0;
+  font-size: 13.5px;
+  color: var(--rb-muted);
+  overflow-wrap: anywhere;
+}
+.emp-head__user .dash-mono {
+  color: var(--rb-ink);
+  font-weight: 550;
+}
+@media (max-width: 599px) {
+  .emp-head__who {
+    gap: 12px;
+  }
+  .emp-head__avatar {
+    width: 46px !important;
+    height: 46px !important;
+    font-size: 15px !important;
+  }
+}
+
+.emp-skel__head {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin-bottom: 16px;
+}
+
+/* ------------------------------------------------------------ layout */
+
+/* A tablet puts the cards of the aside two by two; the last one (History, or the only one) takes the row. */
+@media (min-width: 640px) and (max-width: 1023px) {
+  .emp-split .dash-split__aside {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    align-items: start;
+  }
+  .emp-split .dash-split__aside > :last-child,
+  .emp-split .dash-split__aside > :first-child:nth-last-child(2) {
+    grid-column: 1 / -1;
+  }
+}
+
+/* ------------------------------------------------------------ the profile form */
+
+.emp-card {
+  --emp-pad: clamp(16px, 2vw, 22px);
+}
+.emp-form {
+  gap: 22px;
+}
+/* Two short fields side by side as soon as the card is about 540 px wide (the shared grid wants 640). */
+.emp-form .dash-form-grid {
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 260px), 1fr));
+}
+
+/* "Signs in as maria.fernanda  Change": it looks like the field above it but is only text until Change is pressed. */
+.emp-signin {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  min-height: 44px;
+  padding: 0 6px 0 14px;
+  border: 1px solid var(--rb-line);
+  border-radius: var(--rb-r-md);
+  background: var(--rb-paper);
+}
+.emp-signin__value {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 14px;
+  font-weight: 550;
+}
+.emp-signin__value[data-empty] {
+  font-family: var(--rb-font-sans);
+  font-weight: 450;
+  color: var(--rb-muted);
+}
+.emp-signin .rb-btn {
+  flex: none;
+}
+.emp-signin__edit {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+.emp-signin__edit .rb-input {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+.emp-signin__edit .rb-btn {
+  flex: none;
+}
+
+.emp-empty {
+  margin: 0;
+}
+
+/* A button that reads as a link (inside a sentence). */
+.emp-linkbtn {
+  display: inline;
+  padding: 0;
+  border: 0;
+  background: none;
+  font: inherit;
+  cursor: pointer;
+}
+
+.emp-pwtyped {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 6px;
+  min-width: 0;
+}
+.emp-pwtyped > .dash-input-affix {
+  align-self: stretch;
+}
+
+/* Advanced: one line that says what is set, so nobody has to open it to know. */
+.emp-adv > summary {
+  flex-wrap: wrap;
+  gap: 2px 10px;
+}
+.emp-adv__now {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  text-align: end;
+  font-size: 13px;
+  font-weight: 450;
+  color: var(--rb-muted);
+}
+@media (max-width: 479px) {
+  .emp-adv__now {
+    flex-basis: 100%;
+    text-align: start;
+    padding-inline-start: 23px;
+    margin-top: -10px;
+    padding-bottom: 8px;
+  }
+}
+
+/* The save row. On a phone it is a bar at the bottom of the screen: always for "Add employee", only after a change otherwise. */
+.emp-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+  padding-top: 4px;
+}
+@media (max-width: 599px) {
+  .emp-bar {
+    position: sticky;
+    bottom: 0;
+    z-index: 25;
+    flex-wrap: nowrap;
+    margin: 0 calc(-1 * var(--emp-pad)) calc(-1 * var(--emp-pad));
+    padding: 12px var(--emp-pad) calc(12px + env(safe-area-inset-bottom));
+    border-top: 1px solid var(--rb-line);
+    border-radius: 0 0 var(--dash-radius) var(--dash-radius);
+    background: color-mix(in srgb, var(--rb-surface) 94%, transparent);
+    -webkit-backdrop-filter: blur(14px);
+    backdrop-filter: blur(14px);
+  }
+  [data-lite="true"] .emp-bar {
+    background: var(--rb-surface);
+    -webkit-backdrop-filter: none;
+    backdrop-filter: none;
+  }
+  .emp-bar[data-clean] {
+    display: none;
+  }
+  .emp-bar > .rb-btn[type="submit"] {
+    flex: 1 1 auto;
+    justify-content: center;
+  }
+  .emp-bar .dash-form__status {
+    flex: 1 1 100%;
+    order: -1;
+  }
+}
+
+/* ------------------------------------------------------------ read-only profile */
+
+.emp-ro {
+  margin: 0;
+}
+.emp-ro__item {
+  min-width: 0;
+}
+.emp-ro dt {
+  margin-bottom: 6px;
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--rb-muted);
+}
+.emp-ro dd {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 550;
+  overflow-wrap: anywhere;
+}
+
+/* ------------------------------------------------------------ the generated password */
+
+.emp-pw {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 10px;
+  min-width: 0;
+}
+.emp-pw__box {
+  display: flex;
+  flex: 1 1 280px;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  padding: 6px 6px 6px 18px;
+  border: 1px solid color-mix(in oklch, var(--rb-accent) 30%, var(--rb-line));
+  border-radius: var(--rb-r-lg);
+  background: color-mix(in oklch, var(--rb-accent-soft) 70%, var(--rb-surface));
+}
+.emp-pw__value {
+  flex: 1 1 auto;
+  min-width: 0;
+  padding: 6px 0;
+  font-family: var(--rb-font-mono);
+  font-size: clamp(17px, 2vw, 20px);
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  color: var(--rb-accent-text);
+  overflow-wrap: anywhere;
+  /* One click selects the whole password. */
+  user-select: all;
+  cursor: text;
+}
+.emp-pw__copy {
+  flex: none;
+  background: var(--rb-surface);
+}
+.emp-pw__again {
+  flex: none;
+}
+.emp-pw__note {
+  flex: 1 1 100%;
+  margin: 0;
+  font-size: 12.5px;
+  color: var(--rb-muted);
+}
+.emp-pw__note:empty {
+  display: none;
+}
+
+/* ------------------------------------------------------------ the live summary of "Add employee" */
+
+.emp-summary__who {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  min-width: 0;
+}
+.emp-summary__id {
+  min-width: 0;
+}
+.emp-summary__name {
+  margin: 0;
+  font-size: 17px;
+  font-weight: 650;
+  line-height: 1.25;
+  overflow-wrap: anywhere;
+}
+.emp-summary__name[data-empty] {
+  font-size: 14px;
+  font-weight: 450;
+  color: var(--rb-muted);
+}
+.emp-summary__user {
+  margin: 2px 0 0;
+  font-size: 13px;
+  color: var(--rb-muted);
+  overflow-wrap: anywhere;
+}
+.emp-summary__user .dash-mono {
+  color: var(--rb-ink);
+  font-weight: 550;
+}
+.emp-summary__text {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 16px;
+  padding-top: 16px;
+  border-top: 1px solid var(--rb-line);
+  font-size: 14.5px;
+  line-height: 1.5;
+}
+.emp-summary__text p {
+  margin: 0;
+}
+.emp-summary__note {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  margin: 16px 0 0;
+  padding: 10px 12px;
+  border-radius: var(--rb-r-md);
+  background: var(--rb-accent-soft);
+  color: var(--rb-accent-text);
+  font-size: 13.5px;
+  line-height: 1.4;
+}
+.emp-summary__icon {
+  display: inline-flex;
+  flex: none;
+  margin-top: 1px;
+  font-size: 18px;
+}
+
+/* ------------------------------------------------------------ password card */
+
+.emp-pwrow {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px 14px;
+  min-width: 0;
+}
+.emp-pwrow__icon {
+  display: grid;
+  flex: none;
+  place-items: center;
+  width: 40px;
+  height: 40px;
+  border-radius: 12px;
+  font-size: 22px;
+  background: var(--rb-warning-soft);
+  color: var(--rb-warning-text);
+}
+.emp-pwrow[data-set] .emp-pwrow__icon {
+  background: var(--rb-accent-soft);
+  color: var(--rb-accent-text);
+}
+.emp-pwrow__text {
+  flex: 1 1 130px;
+  min-width: 0;
+}
+.emp-pwrow__title {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 650;
+}
+.emp-pwrow__sub {
+  margin: 2px 0 0;
+  font-size: 13.5px;
+  color: var(--rb-muted);
+}
+.emp-pwrow__btn {
+  flex: none;
+}
+
+/* ------------------------------------------------------------ account card */
+
+.emp-acc {
+  display: flex;
+  flex-direction: column;
+}
+.emp-acc__row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px 14px;
+  padding-block: 14px;
+  min-width: 0;
+}
+.emp-acc__row:first-child {
+  padding-top: 0;
+}
+.emp-acc__row:last-child {
+  padding-bottom: 0;
+}
+.emp-acc__row + .emp-acc__row {
+  border-top: 1px solid var(--rb-line);
+}
+.emp-acc__text {
+  display: flex;
+  flex: 1 1 170px;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+.emp-acc__title {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 14.5px;
+  font-weight: 650;
+}
+.emp-acc__line {
+  font-size: 13.5px;
+  color: var(--rb-muted);
+}
+
+/* ------------------------------------------------------------ dialogs */
+
+.emp-dlg {
+  gap: 16px;
+}
+.emp-dlg__lead {
+  margin: 0;
+}
+.emp-dlg__switch {
+  margin: 0;
+}
+
+.emp-hand {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+  text-align: center;
+}
+.emp-hand__icon {
+  display: inline-flex;
+  font-size: 48px;
+  color: var(--rb-success);
+}
+.emp-hand__lead {
+  margin: 0;
+  font-size: 15px;
+  color: var(--rb-muted);
+}
+.emp-hand .emp-pw {
+  width: 100%;
+  text-align: start;
+}
+.emp-hand__who {
+  margin: 0;
+  font-size: 14px;
+  color: var(--rb-muted);
+}
+.emp-hand__who strong {
+  color: var(--rb-ink);
+  font-weight: 650;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .emp-adv > summary::before {
+    transition: none;
+  }
+}
