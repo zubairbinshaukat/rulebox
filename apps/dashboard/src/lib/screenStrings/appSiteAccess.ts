@@ -39,6 +39,17 @@ export const appSiteAccessStrings = {
     format: "That isn't a site name. Use something like login.example.com.",
     duplicate: "That site is already in the list.",
   } satisfies Record<EntryProblem | "duplicate", string | ((s: string) => string)>,
+  /** The drawn address above the choices (the real control is the radio group below it). */
+  drawn: {
+    anything: "Any name here also opens",
+  },
+  /** The website form around the picker (`WebAppForm`). */
+  form: {
+    found: "Found the name and icon.",
+    foundName: "Found the name.",
+    iconAlt: "The site's icon",
+    iconSaved: "This icon is saved with the app.",
+  },
   // ---- the live preview
   preview: {
     title: "What employees can open",

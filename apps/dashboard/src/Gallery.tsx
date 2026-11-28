@@ -1,4 +1,5 @@
 import { useEffect, useState, type ComponentType, type ReactNode, type SVGProps } from "react";
+import { WebGalleryDemo } from "./screens/apps/web/WebGalleryDemo";
 import {
   AppTile,
   Avatar,
@@ -785,6 +786,8 @@ export function Gallery({ theme, onTheme, lite, onLite }: GalleryProps) {
           <TableSection />
 
           <OtherPagesDemo />
+
+          <WebGalleryDemo />
 
           {/* App tiles */}
           <Section title="App tiles" description="Staff App desktop. Dot = open, badge = notifications. size + hue props.">

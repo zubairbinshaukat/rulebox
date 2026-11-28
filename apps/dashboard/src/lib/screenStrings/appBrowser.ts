@@ -44,6 +44,18 @@ export const appBrowserStrings = {
   sitesHint: "One per line, like example.com or *.example.com. Up to 200.",
   sitesEmpty: "With no allowed site the browser opens only to its own blocked page.",
   sitesTooMany: "At most 200 sites.",
+  // ---- the chip editor of the browser rules (UI pass, add-app plan 13)
+  chips: {
+    legend: "Sites this browser may open",
+    info: "Each site also includes everything under it: portal.example.com opens its sub-pages, and example.com opens mail.example.com too.",
+    addLabel: "Add a site",
+    addPlaceholder: "portal.example.com",
+    addHint: "A site name like portal.example.com. Everything under it opens too.",
+    max: "Up to 200 sites.",
+    none: "No sites yet.",
+    rawList: "Edit the list by hand",
+    rawListInfo: "One site per line, like example.com. Up to 200.",
+  },
 } as const;
 
 /**
