@@ -95,6 +95,12 @@ pub struct AgentState {
     /// a browser window before its policies are in place.
     #[serde(default, skip_serializing_if = "std::collections::BTreeSet::is_empty")]
     pub browser_ready: std::collections::BTreeSet<String>,
+    /// (Q-A7, owner 2026-11-28) The HKLM policy keys Rulebox itself created, because they did not exist when it wrote its first
+    /// value in them (full paths, as written; at most one per path ignoring case). When the last journal entry below one is
+    /// restored and the key is empty, the key is deleted (`journal::prune_created_keys`). A key that existed before Rulebox, or
+    /// that nothing recorded, is never deleted.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub created_machine_keys: Vec<String>,
 }
 
 impl AgentState {
@@ -128,6 +134,7 @@ impl Default for AgentState {
             device_lock: None,
             perf_restart: None,
             browser_ready: std::collections::BTreeSet::new(),
+            created_machine_keys: Vec::new(),
         }
     }
 }

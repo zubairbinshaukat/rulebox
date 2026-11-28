@@ -636,6 +636,10 @@ impl Platform for WindowsPlatform {
         machinereg::list_value_names(path).map_err(map_err)
     }
 
+    fn machine_key_exists(&self, path: &str) -> Result<bool, PlatformError> {
+        machinereg::key_exists(path).map_err(map_err)
+    }
+
     fn read_staff_value(&self, sid: &str, path: &str, name: &str) -> Result<Option<RegData>, PlatformError> {
         let sid = parse_sid(sid)?;
         // The account (and with it the hive) may be gone: nothing is there to read.
@@ -945,6 +949,12 @@ impl Platform for WindowsPlatform {
         let sid = parse_sid(sid)?;
         let profile = accounts::profile_path(&sid).map_err(map_err)?;
         staffreg::delete_key_if_empty(&sid, &profile, path).map_err(map_err)
+    }
+
+    fn delete_machine_key_if_empty(&self, path: &str) -> Result<bool, PlatformError> {
+        machinereg::check_created_key(path).map_err(map_err)?;
+        guard()?;
+        machinereg::delete_key_if_empty(path).map_err(map_err)
     }
 
     fn deploy_ci_policy(&self, policy_id: &str, binary: &[u8]) -> Result<(), PlatformError> {

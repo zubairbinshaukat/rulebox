@@ -67,7 +67,10 @@ The build also checks that `rulebox-agent.exe --version` is `-Version` (build th
   expected, never follows a link, reports a file that is still open and goes on. Errors are ignored by the MSI.
 - **Old Staff App folders.** The agent closes the Staff App before an agent-driven upgrade (`selfupdate.rs`), so no file is in
   use; `RemoveFolderEx` removes `versions\` at uninstall (and when a major upgrade removes the old product) as a safety net.
-- **Not changed:** the empty `HKLM\SOFTWARE\Policies\Microsoft\Windows\OOBE` key the kiosk journal leaves behind (no effect).
+- **Empty policy keys (Q-A7, 2026-11-28):** a restore (Disable kiosk, unenroll, `recover`) now also removes the empty HKLM policy
+  keys Rulebox itself created (`...\Windows\OOBE`, `...\PowerSettings\0e796bdb-...`, `...\Printers\PointAndPrint`), but only those
+  the agent recorded creating (`createdMachineKeys` in the agent state) and only while they are empty. A PC set up by an older
+  agent has no record, so its leftover empty keys stay.
 - Needs the VM (nothing here was run): the unenroll action over the admin pipe as SYSTEM, `RemoveFolderEx` with the
   `VERSIONSFOLDERPATH` property, a major upgrade that leaves the enrolled PC enrolled, and (Q-A6) that after an uninstall
   only `ProgramData\Rulebox\logs\` is left while a major upgrade keeps `state\`, `secrets.bin` and `downloads\`.

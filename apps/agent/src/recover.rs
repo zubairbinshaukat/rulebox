@@ -607,6 +607,14 @@ pub fn execute(env: &RecoverEnv<'_>, facts: &Facts, plan: &Plan, service: StopOu
         }
     }
 
+    // (Q-A7) The registry values `recover` put back itself: a policy key Rulebox recorded creating, now empty, goes too.
+    if let Some(shared) = &shared {
+        let paths: Vec<String> = outcome.restored.iter().map(|key| key.path.clone()).collect();
+        if !paths.is_empty() {
+            journal::prune_created_keys(&JournalCtx { platform: env.platform.as_ref(), shared: shared.as_ref() }, &paths);
+        }
+    }
+
     let mut notes = plan.notes.clone();
     if !stuck.is_empty() {
         notes.push(format!(
@@ -1582,7 +1590,7 @@ mod tests {
         assert!(result.out.contains(&format!("Forgot `{}`", stuck.id)), "{}", result.out);
         assert_eq!(result.stopped, 1, "the service is stopped before the state is written");
         // Only that entry left the journal; nothing on the machine changed, nothing was written to it.
-        assert_eq!(journal_ids(&world), [other.id.clone()]);
+        assert_eq!(journal_ids(&world), std::slice::from_ref(&other.id));
         assert_eq!(world.machine(), before);
         assert_eq!(mutating_calls(&world), mutating_before);
         // The action is logged: the id and the outcome, never a value.
@@ -1636,7 +1644,7 @@ mod tests {
             assert_eq!(result.code, 1, "{answer:?}");
             assert_eq!(result.stopped, 0);
             assert!(result.out.contains("Continue? [y/N]"));
-            assert_eq!(journal_ids(&world), [entry.id.clone()], "{answer:?}");
+            assert_eq!(journal_ids(&world), std::slice::from_ref(&entry.id), "{answer:?}");
         }
         assert!(forget_log(&world).contains("declined"));
         let result = forget(&world, &entry.id, false, "Yes\n", ok_dir());
@@ -1707,6 +1715,37 @@ mod tests {
         let error = String::from_utf8(err).unwrap();
         assert!(error.contains("test-machine guard") && error.contains("recover --forget"), "{error}");
         assert!(out.is_empty(), "no preview, no prompt");
+    }
+
+    #[test]
+    fn recover_removes_the_empty_policy_key_rulebox_made_and_only_that_one() {
+        const OOBE: &str = r"SOFTWARE\Policies\Microsoft\Windows\OOBE";
+        let world = World::new();
+        let shared = world.shared(World::enrolled_state());
+        let write = |path: &str, name: &str| {
+            let change = crate::journal::Change::machine(
+                crate::journal::JournalOwner::Kiosk,
+                RegValueRef { path: path.into(), name: name.into() },
+                Some(RegData::Dword(1)),
+            );
+            let ctx = JournalCtx { platform: world.platform.as_ref(), shared: shared.as_ref() };
+            journal::change(&ctx, &change).unwrap();
+        };
+        // A key Rulebox made, and one that an administrator's value made before it.
+        world.set(r"SOFTWARE\Policies\Microsoft\Power\PowerSettings\0e796bdb-100d-47d6-a2d5-f7d2daa51f51", "Admin", RegData::Dword(1));
+        write(OOBE, "DisablePrivacyExperience");
+        write(r"SOFTWARE\Policies\Microsoft\Power\PowerSettings\0e796bdb-100d-47d6-a2d5-f7d2daa51f51", "ACSettingIndex");
+        assert_eq!(shared.get().created_machine_keys, [OOBE.to_string()]);
+        drop(shared);
+
+        let report = run_with(&world, ok_dir(), StopOutcome::Stopped);
+        assert!(report.is_complete(), "{report:#?}");
+        assert!(!world.platform.machine_key_exists(OOBE).unwrap(), "the key Rulebox made is gone");
+        assert!(
+            world.platform.machine_key_exists(r"SOFTWARE\Policies\Microsoft\Power\PowerSettings\0e796bdb-100d-47d6-a2d5-f7d2daa51f51").unwrap(),
+            "the key that was there before stays"
+        );
+        assert!(world.state_file().created_machine_keys.is_empty());
     }
 
     #[test]
