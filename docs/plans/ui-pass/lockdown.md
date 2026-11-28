@@ -297,6 +297,15 @@ reports whose `deviceId` is among the group's PCs (a PC that moved away keeps a 
 `max(pointers.pilot, early, everyone)`; no rollout row → `newestVersion: null`, `upToDate: 0`. New constant
 `LOCKDOWN_SYNC_CAP = 200` in `convex/lib/limits.ts` (same size as `RING_COUNT_CAP`). No new index, no schema change.
 
+**Changed by owner decision (2026-11-28, as built in `ae3159a`):** the read above cost ~60 KB per run for 50 PCs (~2 MB
+per catch-up per open screen). `groupSync` now reads a small table `deviceLockdownSync` (`orgId`, `deviceId`, `groupId`,
+`configVersion` (0 = waiting), `state?`, `adminTilesSkipped?`, `reduced?`, `updatedAt`; indexes `by_device`,
+`by_org_group_version`), kept out of the `devices` row (data rule 4) and written only when a fact changes (rule 5):
+`enrollment:enroll` inserts "waiting", `deviceApi:reportApply` patches on change, `fleet:move` re-points it as waiting,
+revoke/unenroll delete it. Measured: 2 PCs 1.5 KB, 50 PCs 14.6 KB, 200 PCs 55.5 KB. Backfill after deploy:
+`npx convex run maintenance:backfillLockdownSync '{}'` (pages of 100, idempotent). Before the backfill a group with no
+rows counts its PCs from `devices` as waiting.
+
 - Reads per run: wrapper 3 + group 1 + rollout 1 + ≤ 201 PCs (~0.5–1.5 KB) + ≤ 201 reports (~2.5 KB) ≈ **407 reads,
   ≤ 850 KB**. A free tenant (2 PCs) reads ~9 docs / ~8 KB.
 - Re-runs: when a PC row of the group, the rollout row or one of the group's apply reports changes. Reports change only when a
@@ -483,7 +492,8 @@ programs, then switch to Block."; notAppliedTitle "Lockdown not applied on: {nam
 - **More than 200 PCs**: "PCs up to date: 150 of 200+"; stale reports of moved PCs can use part of the 201-report window
   (they are filtered, so n can only be under-counted, never over).
 - **Revoked PCs** are counted in m (revocation lives in `deviceCredentials`; reading it would add a read per PC). They sit in
-  "waiting". Same as `groups:get` counts today. Follow-up if the owner minds.
+  "waiting". Same as `groups:get` counts today. Follow-up if the owner minds. **Superseded:** with the
+  `deviceLockdownSync` table (section 6 note) revoked PCs no longer count once their group has rows.
 - **Old agents** (no `config` in the report) never enter the range → "waiting"; the device page already says "too old".
 - **Rings on / paused**: up to date = the newest version, so non-pilot PCs wait for promotion; the card says so and links to
   the rollout page. Paused: `ringsHalted`.
