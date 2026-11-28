@@ -25,6 +25,7 @@ import { sha256HexSync, normalizeEmail } from "./lib/crypto";
 import { createPresence, orgPingInterval } from "./lib/presence";
 import { fail } from "./lib/errors";
 import { writeStatus } from "./lib/deviceReport";
+import { newWaitingRow } from "./lib/lockdownSync";
 import { ensureOrgRows } from "./lib/orgRows";
 import { assertWithinLimit, bumpStats, ensurePlatformSettings, newOrgPlanFields } from "./lib/plans";
 import { requestPublish } from "./lib/publish";
@@ -181,6 +182,7 @@ async function insertDevice(
     enrollmentTokenId: a.tokenId,
   });
   const ids = { deviceId, orgId: a.orgId };
+  if (a.groupId !== undefined) await ctx.db.insert("deviceLockdownSync", newWaitingRow({ _id: deviceId, orgId: a.orgId }, a.groupId, a.now));
   await ctx.db.insert("deviceCredentials", { ...ids, secretHash: sha256HexSync(a.secret), state: "active" });
   await createPresence(ctx, ids, a.now, a.intervalMs);
   await writeStatus(ctx, ids, { agentVersion: "0.4.0", compat: { blockers: [] } }, a.now, { counters: false });
@@ -364,6 +366,7 @@ function deviceChildren(ctx: MutationCtx, deviceId: Id<"devices">): Fetch[] {
     (n) => db.query("driverResults").withIndex("by_device_driver", (q) => q.eq("deviceId", deviceId)).take(n),
     // Phase 5 (Step 20b): the PC's apply report, daily counters, lock, findings seen and sealed Wi-Fi boxes.
     (n) => db.query("deviceApplyReports").withIndex("by_device", (q) => q.eq("deviceId", deviceId)).take(n),
+    (n) => db.query("deviceLockdownSync").withIndex("by_device", (q) => q.eq("deviceId", deviceId)).take(n),
     (n) => db.query("deviceSecurityDaily").withIndex("by_device_day", (q) => q.eq("deviceId", deviceId)).take(n),
     (n) => db.query("deviceLocks").withIndex("by_device", (q) => q.eq("deviceId", deviceId)).take(n),
     (n) => db.query("lockdownFindingDevices").withIndex("by_device", (q) => q.eq("deviceId", deviceId)).take(n),

@@ -2,6 +2,7 @@ import type { Doc, Id } from "../_generated/dataModel";
 import type { DatabaseReader, MutationCtx } from "../_generated/server";
 import type { CredentialState } from "./deviceAuth";
 import { retagDeviceInstalls } from "./installs";
+import { setSyncRow } from "./lockdownSync";
 import { bumpOrgStatsIfPresent } from "./plans";
 import { markRevoked } from "./presence";
 
@@ -61,6 +62,8 @@ export async function revokeDevice(
     revokedNoGroupDeviceCount: device.groupId === undefined ? 1 : 0,
   });
   await markRevoked(ctx, { deviceId: device._id, orgId: device.orgId }, now);
+  // A revoked PC leaves "PCs up to date: n of m" (`lockdown:groupSync`).
+  await setSyncRow(ctx, device, null, now);
   // A revoked PC's install results stop counting (`failedInstallCount`, lists; Step 17 review).
   await retagDeviceInstalls(ctx, device, undefined);
   return device;

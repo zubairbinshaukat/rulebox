@@ -563,7 +563,7 @@ describe("device page queries", () => {
         config: { groupId: e.groupId, version: 2, ring: "everyone" },
         state: extra.state ?? "applied",
         refusal: extra.state === "refused" ? "would_block_exit" : undefined,
-        layers: { ...LAYERS, machine: { mode: "on", state: "partial", detail: "admin_signin_unverified" } },
+        layers: { ...LAYERS, machine: { mode: "on", state: "ok", detail: "admin_tiles_skipped" } },
         wifi: extra.wifi ?? [],
         printers: extra.printers ?? [],
         lkgVersion: 2,
@@ -623,7 +623,7 @@ describe("device page queries", () => {
     expect(p.usbAllowUntil).not.toBeNull();
     expect(p.lockdownCapable).toBe(true);
     expect(p.apply).toMatchObject({ state: "applied", appliedVersion: 3, lkgVersion: 2, configVersion: 2 });
-    expect(p.apply?.layers.machine).toEqual({ mode: "on", state: "partial", detail: "admin_signin_unverified" });
+    expect(p.apply?.layers.machine).toEqual({ mode: "on", state: "ok", detail: "admin_tiles_skipped" });
     // The shared fields are the same as `fleet:get` answers (the page is its replacement).
     for (const k of ["_id", "name", "revision", "kioskEnabled", "enrolledAt", "group", "presence", "report", "flags", "lock", "ring", "usbAllowUntil", "protection", "lockdownCapable", "apply", "displayMode", "groupDisplayMode"] as const) {
       expect(p[k], k).toEqual(g[k]);

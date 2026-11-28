@@ -47,6 +47,8 @@ export interface Problem {
 
 const SEVERITY_RANK: Record<ProblemSeverity, number> = { danger: 0, warning: 1, info: 2 };
 const DAY_MS = 24 * 60 * 60 * 1000;
+/** Notes a lockdown layer can report while its state is `ok`, that still deserve a warning on the device page (`admin_tiles_skipped`, 2026-11-28). */
+const OK_LAYER_WARNINGS: ReadonlySet<string> = new Set(["admin_tiles_skipped"]);
 
 /** A PC that has been offline for longer than this is a problem (shorter is normal: it is switched off at night). */
 export const OFFLINE_PROBLEM_AFTER_MS = DAY_MS;
@@ -196,8 +198,10 @@ export function deviceProblems(p: DevicePage, live: DeviceLiveness | null, now: 
     const issues = new Map<string, { code: string | null; layers: LayerName[]; failed: boolean }>();
     for (const name of LAYER_NAMES) {
       const l = apply.layers[name];
-      if (l.state !== "failed" && l.state !== "partial") continue;
       const code = l.detail !== undefined && l.detail !== "" ? l.detail : null;
+      // A layer that is `ok` says nothing, except a warning the PC attaches to an applied layer (the hideAdminTiles slot).
+      const okWarning = l.state === "ok" && code !== null && OK_LAYER_WARNINGS.has(code);
+      if (l.state !== "failed" && l.state !== "partial" && !okWarning) continue;
       if (code === "restart_needed") continue; // the "Restart needed" problem says it
       const key = code ?? `none:${name}`;
       const issue = issues.get(key) ?? { code, layers: [], failed: false };

@@ -28,6 +28,7 @@ import {
   VERIFY_RESERVE_BELOW,
 } from "./lib/deviceApiRules";
 import { cleanCapabilities, statusValidator, writeStatus } from "./lib/deviceReport";
+import { setSyncRow, syncFieldsOf } from "./lib/lockdownSync";
 import { layerStates } from "./lib/lockdownValidators";
 import {
   addBlocked,
@@ -825,7 +826,13 @@ export const reportApply = deviceMutation({
     };
     if (existing === null) await ctx.db.insert("deviceApplyReports", row);
     else await ctx.db.replace(existing._id, row);
-    await chargeReport(ctx, ctx.device._id, 1);
+    // The small row `lockdown:groupSync` counts: written only when one of its five facts changes (a Wi-Fi or printer state change, for
+    // example, changes the report but not them).
+    // Only a configuration of the group the PC is in NOW counts (a PC that was just moved may still report its old group's): else the row
+    // says "waiting".
+    const pc = await ctx.db.get(ctx.device._id);
+    const syncWrites = await setSyncRow(ctx, ctx.device, syncFieldsOf(row, pc?.groupId), row.updatedAt);
+    await chargeReport(ctx, ctx.device._id, 1 + syncWrites);
     return { written: true };
   },
 });

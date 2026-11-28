@@ -547,6 +547,31 @@ export const INTERNAL_CALLS: Record<string, InternalCase | InternalCase[]> = {
   "maintenance:migratePlans": async (c) => () => c.f.t.mutation(internal.maintenance.migratePlans, {}),
   "maintenance:migrateDevices": async (c) => () => c.f.t.mutation(internal.maintenance.migrateDevices, {}),
   "maintenance:narrowDevices": async (c) => () => c.f.t.mutation(internal.maintenance.narrowDevices, {}),
+  // A full page of PCs (100, each with an apply report naming the configuration of its group): the backfill makes up to 100 sync rows.
+  "maintenance:backfillLockdownSync": async (c) => {
+    await c.f.t.run(async (ctx) => {
+      const layer = { mode: "audit", state: "ok" };
+      const pcs = await ctx.db.query("devices").withIndex("by_org", (q) => q.eq("orgId", c.f.orgId)).take(100);
+      for (const [i, d] of pcs.entries()) {
+        if (d.groupId === undefined) continue;
+        await ctx.db.insert("deviceApplyReports", {
+          orgId: c.f.orgId,
+          deviceId: d._id,
+          appliedVersion: 7,
+          config: { groupId: d.groupId, version: 1, ring: "everyone" },
+          state: "applied",
+          layers: { staff: layer, machine: layer, appLocker: layer, appControl: layer, procWatch: layer, boot: layer, performance: layer },
+          wifi: [{ profileId: "k57f1d0c9j3x8m2p4q6r8s0t2v4w6y8z", revision: 3, state: "applied" }],
+          printers: [],
+          lkgVersion: 6,
+          capabilities: ["lockdown/1", "wifi/1"],
+          contentHash: i.toString(16).padStart(64, "0"),
+          updatedAt: Date.now(),
+        });
+      }
+    });
+    return () => c.f.t.mutation(internal.maintenance.backfillLockdownSync, {});
+  },
   "maintenance:dropDesiredStates": async (c) => () => c.f.t.mutation(internal.maintenance.dropDesiredStates, {}),
   "maintenance:dropTotpTables": async (c) => {
     await c.f.t.run(async (ctx) => {

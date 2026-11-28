@@ -312,8 +312,31 @@ describe("deviceProblems", () => {
   });
 
   describe("the hideAdminTiles slot", () => {
+    // The agent since 2026-11-28: the policy is applied and the machine layer is ok, with a note.
+    const skipped = page({ apply: applyReport({ state: "applied", layers: layerState("machine", "ok", "admin_tiles_skipped") }) });
+    it("an ok machine layer with admin_tiles_skipped is ONE warning with the plain words and a link to the group's lockdown", () => {
+      expect(one(skipped, "layer:admin_tiles_skipped")).toMatchObject({
+        severity: "warning",
+        title: "Admin accounts stay visible on this PC",
+        action: { kind: "link", to: "/groups/g1/lockdown", label: s.openGroupLockdown },
+      });
+      expect(one(skipped, "layer:admin_tiles_skipped").body).toContain("until sign-in as another user is confirmed");
+      expect(one(skipped, "layer:admin_tiles_skipped").body).toContain('turn off "Hide administrator accounts" for the group');
+      expect(problems(skipped)).toHaveLength(1);
+    });
+    it("the note counts whatever the layer's state is (a partial layer too), still ONE warning", () => {
+      const partial = page({ apply: applyReport({ state: "partial", layers: layerState("machine", "partial", "admin_tiles_skipped") }) });
+      expect(ids(partial)).toEqual(["layer:admin_tiles_skipped"]);
+    });
+    it("an ok layer with any other note, and an ok layer without one, raise nothing", () => {
+      expect(problems(page({ apply: applyReport({ layers: layerState("machine", "ok", "snapshot_fallback") }) }))).toEqual([]);
+      expect(problems(page({ apply: applyReport({ layers: layerState("machine", "ok") }) }))).toEqual([]);
+    });
+    it("a viewer sees the new warning too", () => {
+      expect(one(skipped, "layer:admin_tiles_skipped", "viewer").action).toMatchObject({ to: "/groups/g1/lockdown" });
+    });
     const slot = page({ apply: applyReport({ state: "partial", layers: layerState("machine", "partial", "admin_signin_unverified") }) });
-    it("a partial machine layer with admin_signin_unverified is ONE warning with its own words and a link to the group's lockdown", () => {
+    it("an older agent: a partial machine layer with admin_signin_unverified is ONE warning with its own words and a link to the group's lockdown", () => {
       expect(one(slot, "layer:admin_signin_unverified")).toMatchObject({
         severity: "warning",
         title: "Admin accounts stay visible on this PC",

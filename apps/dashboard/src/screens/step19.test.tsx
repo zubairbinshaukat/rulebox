@@ -617,6 +617,8 @@ describe("the group lockdown screen", () => {
 
   it("the admin-accounts warning also sits under 'Hide administrator accounts' while that switch is on", async () => {
     cx.results["lockdown:groupSync"] = sync({ adminTilesPending: 2 });
+    // The switch is off for a new group (owner 2026-11-28), so this group has it on.
+    cx.results["lockdown:groupView"] = view({ settings: { ...D, machine: { ...D.machine, hideAdminTiles: true } } });
     ui(<Lockdown />);
     await openAdvanced();
     const machine = group(s.machineTitle);

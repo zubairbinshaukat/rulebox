@@ -11,6 +11,7 @@ import { credOf, revokeDevice } from "./lib/fleet";
 import { checkPageSize, cleanSearch, countResult, orgStatsRow, pickSort, sortArg } from "./lib/listing";
 import { internalMutation, memberMutation, memberQuery } from "./lib/functions";
 import { assignedAppsOf, liveChecker, retagDeviceInstalls } from "./lib/installs";
+import { setSyncRow, waitingFields } from "./lib/lockdownSync";
 import { cleanNoticeText } from "./lib/noticeText";
 import { applyState, layerStates, ring as ringValidator, securityPosture, type RingValue } from "./lib/lockdownValidators";
 import {
@@ -922,6 +923,8 @@ export const move = memberMutation("admin")({
     const revision = nextRevision(device);
     await ctx.db.patch(device._id, { groupId: group._id, revision });
     if (device.groupId === undefined) await bumpOrgStatsIfPresent(ctx, ctx.orgId, { noGroupDeviceCount: -1 });
+    // The old group's "up to date" counter stops counting it and the new group's counts it as waiting until it reports there.
+    await setSyncRow(ctx, device, waitingFields(group._id), Date.now());
     // Its install results follow it: the old group's apps stop counting, the new group's count (Step 17 review).
     await retagDeviceInstalls(ctx, device, group._id);
     await requestPublish(ctx, ctx.orgId, { deviceIds: [device._id] });

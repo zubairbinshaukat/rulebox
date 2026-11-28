@@ -91,6 +91,7 @@ export const IO_BUDGETS: Record<string, IoBudget> = {
   // or patch + one scheduled run) for the device's first signed document.
   "enrollment:enroll": { maxReads: 16, maxReadBytes: 12_288, maxWrites: 13, maxWriteBytes: 41_984 },
 
+  // UI pass: + the PC's `deviceLockdownSync` row ("waiting") when the code names a group: MEASURED 3 reads / 0.8 KB, 11 writes / 1.6 KB.
   // ---- Step 7: the agent's calls (plan 4.9, 5.1 amended). Measured with the probe
   // (convex-test, `JSON.stringify` bytes; patches counted as the patch value, so the
   // Convex-side write size is the full row + its index entries).
@@ -108,7 +109,8 @@ export const IO_BUDGETS: Record<string, IoBudget> = {
   // credentials, device, summary, orgStats, liveness, presence, shard; writes: credentials,
   // orgStats, liveness, shard, presence, audit. Measured 7 / 1.6 KB, 6 writes.
   // Step 18 probe: 7 reads / 1.7 KB, 7 writes (+ the PC's `installResults` tag clear, `.first()` read).
-  "devices:unenroll": { maxReads: 9, maxReadBytes: 4_096, maxWrites: 8, maxWriteBytes: 2_048 },
+  // UI pass: + the PC's `deviceLockdownSync` row (read, deleted). MEASURED 8 reads / 2.0 KB, 8 writes.
+  "devices:unenroll": { maxReads: 10, maxReadBytes: 4_096, maxWrites: 9, maxWriteBytes: 2_048 },
 
   // ---- Step 12: the device API (A9, A12). Counts include the wrapper's credentials read.
   // Sign-in: the action + ONE query (credentials, limiter check, device, org, liveness,
@@ -129,7 +131,9 @@ export const IO_BUDGETS: Record<string, IoBudget> = {
   // tests in `lockdownReports.test.ts` pin that); the numbers below are the call that does write. The rate limiter (one
   // `deviceReports` token per call that wrote, `deviceWrites` per row) is a component call, not counted.
   // credentials (wrapper), the device's one report row, the group named in `config`; writes: the report (insert or replace, ~2.5 KB).
-  "deviceApi:reportApply": { maxReads: 4, maxReadBytes: 8_192, maxWrites: 2, maxWriteBytes: 6_144 },
+  // UI pass: + the PC row and its `deviceLockdownSync` row (read every time the report is written; the sync row ~0.3 KB is written only when one of its facts
+  // changes). MEASURED (matrix, no `config`, no row yet) 3 reads / 0.9 KB, 2 writes / 0.6 KB.
+  "deviceApi:reportApply": { maxReads: 6, maxReadBytes: 8_192, maxWrites: 2, maxWriteBytes: 6_144 },
   // credentials; per finding (<= MAX_FINDINGS_PER_CALL = 50): the finding by (org, fingerprint) and, when it exists, the (finding, device) link;
   // writes per NEW pair: the link + the finding (insert, or patch of `deviceCount`). A repeat reads 2 and writes 0.
   "deviceApi:reportFindings": { maxReads: 1 + 2 * 50, maxReadBytes: 40_000, maxWrites: 2 * 50, maxWriteBytes: 60_000 },
@@ -183,7 +187,8 @@ export const IO_BUDGETS: Record<string, IoBudget> = {
   // (+ one scheduled publish run). Measured 8 / 1.7 KB, 4 writes.
   // Step 17 review: + the PC's install results re-tagged (<= 200 per run, `stats:retagDevice` continues)
   // with the app and the old / new assignment of each failed one; + their patches and orgStats.
-  "fleet:move": { maxReads: 9 + 51 + 200 + 200 + 400, maxReadBytes: 400_000, maxWrites: 4 + 50 + 200 + 1, maxWriteBytes: 60_000 },
+  // UI pass: + the PC's `deviceLockdownSync` row (read, re-pointed to the new group as "waiting": 1 more write when it changes).
+  "fleet:move": { maxReads: 10 + 51 + 200 + 200 + 400, maxReadBytes: 400_000, maxWrites: 5 + 50 + 200 + 1, maxWriteBytes: 60_000 },
   // device, credentials, (off: step-up row again), publishQueue; writes: device, queue, audit.
   "fleet:setKiosk": { maxReads: 9, maxReadBytes: 6_144, maxWrites: 3, maxWriteBytes: 2_048 },
   // Phase 6 Step 19 (plan 4.16): same shape as setKiosk (device, credentials, publish queue); writes: device, audit, publish queue. No step-up.
@@ -191,7 +196,8 @@ export const IO_BUDGETS: Record<string, IoBudget> = {
   // device, credentials, device again, summary, orgStats, liveness, shard, presence; writes:
   // credentials, orgStats, liveness, shard, presence, audit. Already revoked: 0 writes.
   // Step 17 review: + the PC's install results un-tagged (as fleet:move). Step 14b: + <= 50 driver results re-tagged (first page only).
-  "fleet:revoke": { maxReads: 13 + 51 + 200 + 200 + 200, maxReadBytes: 400_000, maxWrites: 6 + 50 + 200, maxWriteBytes: 60_000 },
+  // UI pass: + the PC's `deviceLockdownSync` row (read and deleted). MEASURED (a PC with a row, no install results) 12 reads / 2.9 KB, 7 writes.
+  "fleet:revoke": { maxReads: 14 + 51 + 200 + 200 + 200, maxReadBytes: 400_000, maxWrites: 7 + 50 + 200, maxWriteBytes: 60_000 },
   // device, credentials, the 6 per-device rows; deletes them + the device, audit, one scheduled
   // purge (installResults / documents, PURGE_BATCH per run). Not revoked: 0 writes.
   "fleet:remove": { maxReads: 12, maxReadBytes: 49_152, maxWrites: 8, maxWriteBytes: 1_024 },
@@ -690,18 +696,18 @@ export const IO_BUDGETS: Record<string, IoBudget> = {
   // wrapper (3) + group + settings row (+ the organization row while the group has none) + the newest <= 51 exceptions (~0.5 KB) + the apps they
   // name (<= 50, one get each, cached) + <= 51 open findings (~0.6 KB). Re-runs when the settings, an exception or an OPEN finding changes.
   "lockdown:groupView": { maxReads: 3 + 1 + 1 + 1 + 51 + 50 + 51, maxReadBytes: 170_000, maxWrites: 0, maxWriteBytes: 0, live: true },
-  // The "PCs up to date: n of m" card, subscribed only while the group lockdown screen is open: wrapper (3) + group + rollout row + the group's PCs
-  // (<= 201, `devices.by_group`) + the group's apply reports AT OR ABOVE the newest configuration version (<= 201, `by_org_config` range from that
-  // version, so a PC that has not caught up yet costs no report read). A separate query so reports never re-run `groupView`.
-  // Re-runs: when a PC row of the group, the rollout row or a report in the range changes: about once per PC after a save (that IS the live
-  // counter), never on a ping. No smaller per-PC row holds the configuration version AND the apply state (`deviceSummary.appliedVersion` is the
-  // signed document's version), so the floor is one PC row (~0.33 KB) + one report (~0.85 KB here; up to ~2 KB with many capabilities / networks).
-  // MEASURED (`IO_REPORT=1`, realistic report: 7 layers, 1 Wi-Fi network, 2 capabilities): matrix fixture (group without PCs) 4 reads / 850 B;
-  // 2 PCs up to date 8 reads / 3.3 KB; 50 PCs nobody has the newest version yet 54 reads / 18.4 KB; 50 PCs all up to date 104 reads / 60.8 KB;
-  // 200 PCs all up to date 404 reads / 240.5 KB. One catch-up of a 50-PC group with the screen open = 51 runs, about 2.0 MB read (the plan's
-  // all-reports read: 7.5 MB). The byte budget keeps room for reports twice that size.
-  "lockdown:groupSync": { maxReads: 3 + 1 + 1 + 201 + 201, maxReadBytes: 450_000, maxWrites: 0, maxWriteBytes: 0, live: true },
-  // wrapper (3) + one page of <= 50 findings (~0.6 KB each). `lockdownFindingDevices` is never read.
+  // The "PCs up to date: n of m" card, subscribed only while the group lockdown screen is open: wrapper (3) + group + rollout row + the group's
+  // `deviceLockdownSync` rows (<= 201: one small row per PC that is in the group and not revoked, ~0.28 KB; they hold the five facts counted,
+  // copied from the apply report only when one changes, so neither the PC row nor the ~1 to 2.5 KB report is read) + the names of <= 3 PCs that
+  // have a problem (one `get` each). A group that has no row at all (empty, or `maintenance:backfillLockdownSync` has not run) reads its PCs
+  // instead (`devices.by_group`, <= 201, ~0.35 KB). A separate query so reports never re-run `groupView`.
+  // Re-runs: when the rollout row or a row of the group changes: about once per PC after a save (that IS the live counter), never on a ping,
+  // and not when a PC's report changes without changing the facts.
+  // MEASURED (`IO_REPORT=1`, realistic report: 7 layers, 1 Wi-Fi network, 2 capabilities) with the rows: matrix fixture (group without PCs) 4 reads /
+  // 850 B; 2 PCs up to date 6 reads / 1.5 KB; 50 PCs 54 reads / 14.6 KB (nobody reported yet: 13.7 KB); 200 PCs 204 reads / 55.5 KB.
+  // BEFORE (full report + PC row per PC): 2 PCs 8 reads / 3.3 KB; 50 PCs 104 reads / 60.8 KB; 200 PCs 404 reads / 240.5 KB. One catch-up of a 50-PC
+  // group with the screen open = 51 runs: about 0.75 MB now (was about 2.0 MB).
+  "lockdown:groupSync": { maxReads: 3 + 1 + 1 + 201 + 3, maxReadBytes: 80_000, maxWrites: 0, maxWriteBytes: 0, live: true },  // wrapper (3) + one page of <= 50 findings (~0.6 KB each). `lockdownFindingDevices` is never read.
   "lockdown:findings": { maxReads: 3 + 50, maxReadBytes: 40_000, maxWrites: 0, maxWriteBytes: 0, live: true },
   // The "Allow for app" pickers, subscribed only while the dialog is open: wrapper (3) + <= 500 groups (~0.2 KB) + <= 200 apps (~2 KB).
   "lockdown:allowOptions": { maxReads: 3 + 500 + 200, maxReadBytes: 520_000, maxWrites: 0, maxWriteBytes: 0, live: true },
@@ -855,6 +861,10 @@ export const IO_BUDGETS: Record<string, IoBudget> = {
   // MEASURED (every online PC overdue; 110 PCs) 248 reads / 54 KB, 223 writes / 6 KB: per PC the liveness row, its presence row and
   // a shard counter; ~2.2 reads and ~2 writes per PC. SWEEP_BATCH = 500 PCs per run (it reschedules while full).
   "presence:sweep": { maxReads: 1_300, maxReadBytes: 300_000, maxWrites: 1_300, maxWriteBytes: 80_000 },
+  // UI pass (lockdown, one-time backfill of `deviceLockdownSync`, run once per deployment): one page of 100 PCs + per PC its credentials, its apply
+  // report (~2.5 KB at most) and its sync row; writes: one sync row per PC that has none or a different one (idempotent: a second run writes 0).
+  // MEASURED (100 PCs in groups, each with a report, no rows yet) 301 reads / 139 KB, 100 writes / 19.6 KB.
+  "maintenance:backfillLockdownSync": { maxReads: 100 * 4 + 1, maxReadBytes: 700_000, maxWrites: 100, maxWriteBytes: 60_000 },
   // MEASURED (200 PCs, every interval differs) 202 reads / 51 KB, 201 writes. Worst case: PING_PROPAGATION_BATCH = 200 liveness rows
   // + each PC's head (read, patched when it differs) + the plan.
   "presence:applyPingInterval": { maxReads: 1 + 200 * 2, maxReadBytes: 160_000, maxWrites: 200 * 2, maxWriteBytes: 60_000 },
@@ -929,7 +939,8 @@ export const IO_BUDGETS: Record<string, IoBudget> = {
   "testing:seedDevice": { maxReads: 8, maxReadBytes: 6_144, maxWrites: 14, maxWriteBytes: 4_096 },
   // MEASURED (count 200 = MAX_FLEET) 204 reads, 1,410 writes / 206 KB: ~7 rows per PC in ONE transaction. Test-only; far below Convex's
   // 16,000-write limit, but do not raise MAX_FLEET.
-  "testing:seedFleet": { maxReads: 210, maxReadBytes: 50_000, maxWrites: 1_450, maxWriteBytes: 240_000 },
+  // UI pass: + one `deviceLockdownSync` row per PC in a group (1,610 writes / 242 KB measured).
+  "testing:seedFleet": { maxReads: 210, maxReadBytes: 50_000, maxWrites: 1_650, maxWriteBytes: 270_000 },
   "testing:simulateEdit": { maxReads: 4, maxReadBytes: 2_048, maxWrites: 3, maxWriteBytes: 2_048 },
   // MEASURED 401 reads / 102 KB, 400 deletes: DELETE_BUDGET = 400 rows per run (it reschedules itself).
   "testing:deleteOrg": { maxReads: 410, maxReadBytes: 140_000, maxWrites: 400, maxWriteBytes: 4_096 },

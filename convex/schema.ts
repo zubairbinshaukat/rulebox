@@ -981,6 +981,29 @@ export default defineSchema({
     // Step 19: the overview's "did not apply the lockdown policy" warning (refused, rolled back): a few rows, never a scan.
     .index("by_org_state", ["orgId", "state"]),
 
+  // grows (1 per PC that is in a group and not revoked). The small facts `lockdown:groupSync` counts ("PCs up to date: n of m"), copied
+  // from the PC's apply report, and the group's membership list: the screen reads one ~0.3 KB row per PC instead of the PC (~0.35 KB) and
+  // its full report (~1 to 2.5 KB). Written ONLY when a fact changes (`lib/lockdownSync.ts`); never part of the `devices` row (CLAUDE.md
+  // rule 4). Created at enrollment, re-pointed when the PC moves, deleted when it is revoked; filled for old PCs by
+  // `maintenance:backfillLockdownSync`.
+  deviceLockdownSync: defineTable({
+    orgId: v.id("organizations"),
+    deviceId: v.id("devices"),
+    groupId: v.id("groups"),
+    /** The group configuration version the PC applied; 0 = waiting (it has no usable report of this group yet). */
+    configVersion: v.number(),
+    /** Absent while waiting. */
+    state: v.optional(applyState),
+    /** Stored only when true: the machine layer left "Hide administrator accounts" off until Other user sign-in is confirmed. */
+    adminTilesSkipped: v.optional(v.literal(true)),
+    /** Stored only when true: Windows Home (the AppLocker or App Control layer is `unsupported`). */
+    reduced: v.optional(v.literal(true)),
+    updatedAt: v.number(),
+  })
+    .index("by_device", ["deviceId"])
+    // One group's PCs, newest configuration version first when read descending (`lockdown:groupSync`).
+    .index("by_org_group_version", ["orgId", "groupId", "configVersion"]),
+
   // grows (<= 1 per device per day, only non-zero days; 14-day retention)
   deviceSecurityDaily: defineTable({
     orgId: v.id("organizations"),

@@ -887,11 +887,11 @@ describe("demo device page queries (UI pass 2026-11)", () => {
     expect((await ready(renderHook(() => demoApi.useDevicePage(byName("WAREHOUSE-01")._id)).result)).data.planState).toBe("overLimit");
   });
 
-  it("one PC shows the hideAdminTiles warning: its machine layer is partial with admin_signin_unverified", () => {
+  it("one PC shows the hideAdminTiles warning: the policy is applied, its machine layer is ok with admin_tiles_skipped", () => {
     resetDemo();
-    const rows = [...db().applyDetails.entries()].filter(([, a]) => a.layers.machine.detail === "admin_signin_unverified");
+    const rows = [...db().applyDetails.entries()].filter(([, a]) => a.layers.machine.detail === "admin_tiles_skipped");
     expect(rows).toHaveLength(1);
-    expect(rows[0]![1]).toMatchObject({ state: "partial", layers: { machine: { mode: "on", state: "partial" } } });
+    expect(rows[0]![1]).toMatchObject({ state: "applied", layers: { machine: { mode: "on", state: "ok" } } });
   });
 
   it("settings options, versions and the network tab answer for their PC; the closed versions disclosure loads nothing", async () => {

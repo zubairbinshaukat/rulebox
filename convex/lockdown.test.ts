@@ -3,12 +3,14 @@ import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import { setupAuth } from "../tests/convex/auth";
 import { enrollDevice, probe } from "../tests/convex/devices";
 import { asMember, expectCode, giveStepUp, makeOrg, type T } from "../tests/convex/identity";
+import { APPLY_REPORT } from "../tests/convex/matrixRows";
 import { addWifi, MASTER_A, setMaster } from "../tests/convex/phase5";
-import { api } from "./_generated/api";
+import { api, internal } from "./_generated/api";
 import type { Id } from "./_generated/dataModel";
 import { auditPolicy } from "./lib/audit";
 import { snapshotGroupConfig } from "./lib/groupConfig";
-import { DAY_MS, LOCKDOWN_SYNC_CAP, MAX_ALLOW_GROUPS, MAX_GROUP_EXCEPTIONS, MINUTE_MS, OPEN_FINDINGS_CAP } from "./lib/limits";
+import { newWaitingRow, setSyncRow, syncFieldsOf } from "./lib/lockdownSync";
+import { DAY_MS, LOCKDOWN_SYNC_BACKFILL_BATCH, LOCKDOWN_SYNC_CAP, MAX_ALLOW_GROUPS, MAX_GROUP_EXCEPTIONS, MINUTE_MS, OPEN_FINDINGS_CAP } from "./lib/limits";
 import { DEFAULT_LOCKDOWN_SETTINGS, type LockdownSettings } from "./lib/lockdownValidators";
 import { exceptionPath } from "./lockdown";
 
@@ -184,22 +186,34 @@ describe("lockdown:groupView and lockdown:update", () => {
 });
 
 type ApplyState = "applied" | "partial" | "refused" | "failed" | "rolledBack";
-type ReportSeed = { state?: ApplyState; version?: number | null; refusal?: string; machineDetail?: string; home?: boolean };
-/** A realistic apply report (7 layers, one Wi-Fi network, two capabilities) for a PC of the fixture's group. */
+type ReportSeed = {
+  state?: ApplyState;
+  version?: number | null;
+  refusal?: string;
+  machineDetail?: string;
+  machineState?: "ok" | "partial";
+  home?: boolean;
+  /** Insert the apply report only (as before the sync table existed): the PC's sync row is left as it is. */
+  raw?: boolean;
+};
+/**
+ * A realistic apply report (7 layers, one Wi-Fi network, two capabilities) for a PC of the fixture's group, with the sync row that
+ * `deviceApi:reportApply` would write for it (same helpers; `raw: true` leaves the row out).
+ */
 async function addReport(e: Env, deviceId: Id<"devices">, r: ReportSeed = {}, i = 0): Promise<void> {
   const ok = { mode: "audit", state: "ok" };
   const lock = r.home === true ? { mode: "audit", state: "unsupported", detail: "applocker_not_on_this_edition" } : ok;
-  await e.t.run((ctx) =>
-    ctx.db.insert("deviceApplyReports", {
+  await e.t.run(async (ctx) => {
+    const row = {
       orgId: e.orgId,
       deviceId,
       appliedVersion: 7,
-      config: r.version === null ? undefined : { groupId: e.groupId, version: r.version ?? 1, ring: "everyone" },
-      state: r.state ?? "applied",
+      config: r.version === null ? undefined : { groupId: e.groupId, version: r.version ?? 1, ring: "everyone" as const },
+      state: r.state ?? ("applied" as const),
       refusal: r.refusal,
       layers: {
         staff: ok,
-        machine: r.machineDetail === undefined ? ok : { mode: "on", state: "partial", detail: r.machineDetail },
+        machine: r.machineDetail === undefined ? ok : { mode: "on", state: r.machineState ?? "partial", detail: r.machineDetail },
         appLocker: lock,
         appControl: ok,
         procWatch: ok,
@@ -212,21 +226,31 @@ async function addReport(e: Env, deviceId: Id<"devices">, r: ReportSeed = {}, i 
       capabilities: ["lockdown/1", "wifi/1"],
       contentHash: i.toString(16).padStart(64, "0"),
       updatedAt: Date.now(),
-    }),
-  );
+    };
+    await ctx.db.insert("deviceApplyReports", row);
+    if (r.raw === true) return;
+    const pc = await ctx.db.get(deviceId);
+    await setSyncRow(ctx, { _id: deviceId, orgId: e.orgId }, syncFieldsOf(row, pc?.groupId), row.updatedAt);
+  });
 }
-/** More PCs in the fixture's group (rows only; no enrollment). */
-async function addPcs(e: Env, count: number, groupId: Id<"groups"> | undefined = e.groupId): Promise<Id<"devices">[]> {
+/**
+ * More PCs in the fixture's group (rows only; no enrollment), each with the "waiting" sync row that enrollment writes
+ * (`rows: false`: PCs as they were before the table existed).
+ */
+async function addPcs(e: Env, count: number, groupId: Id<"groups"> | undefined = e.groupId, opts: { rows?: boolean } = {}): Promise<Id<"devices">[]> {
   return await e.t.run(async (ctx) => {
     const token = (await ctx.db.get(e.pc.deviceId))!.enrollmentTokenId;
     const ids: Id<"devices">[] = [];
     for (let i = 0; i < count; i++) {
-      ids.push(await ctx.db.insert("devices", { orgId: e.orgId, groupId, name: `Counter ${i + 1}`, enrolledAt: Date.now(), enrollmentTokenId: token, hardwareIdHash: "c".repeat(64) }));
+      const deviceId = await ctx.db.insert("devices", { orgId: e.orgId, groupId, name: `Counter ${i + 1}`, enrolledAt: Date.now(), enrollmentTokenId: token, hardwareIdHash: "c".repeat(64) });
+      if (groupId !== undefined && opts.rows !== false) await ctx.db.insert("deviceLockdownSync", newWaitingRow({ _id: deviceId, orgId: e.orgId }, groupId, Date.now()));
+      ids.push(deviceId);
     }
     return ids;
   });
 }
 const sync = (e: Env, as = e.viewer) => as.query(api.lockdown.groupSync, { groupId: e.groupId });
+const syncRows = (e: Env) => e.t.run((ctx) => ctx.db.query("deviceLockdownSync").collect());
 const setPointers = (e: Env, patch: Partial<{ enabled: boolean; state: "idle" | "rolling" | "halted" }> & { pointers?: { pilot: number; early: number; everyone: number } }) =>
   e.t.run(async (ctx) => {
     const row = (await ctx.db.query("groupRollouts").withIndex("by_group", (q) => q.eq("groupId", e.groupId)).unique())!;
@@ -261,11 +285,14 @@ describe("lockdown:groupSync", () => {
     // more[4] never reported.
     const s = await sync(e);
     expect(s).toMatchObject({ total: 6, upToDate: 2, problems: 3, newestVersion: 1 });
-    expect(s.problemPcs).toEqual([
-      { deviceId: more[1], name: "Counter 2", state: "refused" },
-      { deviceId: more[2], name: "Counter 3", state: "failed" },
-      { deviceId: more[3], name: "Counter 4", state: "rolledBack" },
-    ]);
+    expect(s.problemPcs).toHaveLength(3);
+    expect(s.problemPcs).toEqual(
+      expect.arrayContaining([
+        { deviceId: more[1], name: "Counter 2", state: "refused" },
+        { deviceId: more[2], name: "Counter 3", state: "failed" },
+        { deviceId: more[3], name: "Counter 4", state: "rolledBack" },
+      ]),
+    );
     // Four problems: still three names, the count says four.
     await addReport(e, more[4]!, { state: "failed" }, 6);
     const s2 = await sync(e);
@@ -285,16 +312,26 @@ describe("lockdown:groupSync", () => {
     expect((await sync(e)).rolloutState).toBe("halted");
   });
 
-  test("a PC that moved to another group and an agent that names no configuration are not counted", async () => {
+  test("an agent that names no configuration waits (it is counted in the total, not as up to date)", async () => {
     const e = await setup();
-    const [moved, old] = await addPcs(e, 2);
-    await addReport(e, moved!, {}, 1);
-    await e.t.run((ctx) => ctx.db.patch(moved!, { groupId: undefined }));
-    await addReport(e, old!, { version: null }, 2); // an old agent: no `config`
+    const [old] = await addPcs(e, 1);
+    await addReport(e, old!, { version: null, state: "failed" }, 2); // an old agent: no `config`
+    const row = (await syncRows(e)).find((r) => r.deviceId === old);
+    expect(row).toMatchObject({ configVersion: 0 });
     expect(await sync(e)).toMatchObject({ total: 2, upToDate: 0, problems: 0 });
   });
 
-  test("no rollout row: not sent yet, nothing read from the reports", async () => {
+  // Before `maintenance:backfillLockdownSync` ran: PCs with no row.
+  test("a group whose PCs have no row yet counts them from `devices` and all of them wait", async () => {
+    const e = await setup();
+    await e.t.run(async (ctx) => {
+      for (const row of await ctx.db.query("deviceLockdownSync").collect()) await ctx.db.delete(row._id);
+    });
+    await addPcs(e, 4, e.groupId, { rows: false });
+    expect(await sync(e)).toMatchObject({ total: 5, totalMore: false, upToDate: 0, problems: 0, newestVersion: 1 });
+  });
+
+  test("no rollout row: not sent yet (the total is still counted), no report read", async () => {
     const e = await setup();
     await addReport(e, e.pc.deviceId, {}, 1);
     await e.t.run(async (ctx) => {
@@ -306,20 +343,26 @@ describe("lockdown:groupSync", () => {
     expect(io.tables.has("deviceApplyReports")).toBe(false);
   });
 
-  test("an empty group reads no report", async () => {
+  test("an empty group reads nothing but the group, the rollout row and two empty ranges", async () => {
     const e = await setup();
     const empty = await e.t.run((ctx) => ctx.db.insert("groups", { orgId: e.orgId, name: "Empty", revision: 0, createdAt: Date.now() }));
     await e.t.run((ctx) => snapshotGroupConfig(ctx, empty, "first"));
     const { result, io } = await probe(() => e.viewer.query(api.lockdown.groupSync, { groupId: empty }));
     expect(result).toMatchObject({ total: 0, totalMore: false, upToDate: 0, newestVersion: 1 });
     expect(io.tables.has("deviceApplyReports")).toBe(false);
+    expect(io.reads).toBeLessThanOrEqual(3 + 1 + 1);
   });
 
-  test("more PCs than the cap: the count stops at the cap and says there are more", async () => {
+  test("more PCs than the cap: the counts stop at the cap and say there are more", async () => {
     const e = await setup();
-    await addPcs(e, LOCKDOWN_SYNC_CAP + 2); // + the fixture's PC
-    const s = await sync(e);
-    expect(s).toMatchObject({ total: LOCKDOWN_SYNC_CAP, totalMore: true });
+    const ids = [e.pc.deviceId, ...(await addPcs(e, LOCKDOWN_SYNC_CAP + 1))]; // CAP + 2 PCs, all reported
+    for (const [i, id] of ids.entries()) await addReport(e, id, {}, i);
+    const { result, io } = await probe(() => sync(e));
+    expect(result.total).toBe(LOCKDOWN_SYNC_CAP);
+    expect(result.totalMore).toBe(true);
+    // The newest rows are the ones listed; the one row past the cap only says "more".
+    expect(result.upToDate).toBe(LOCKDOWN_SYNC_CAP);
+    expect(io.reads).toBeLessThanOrEqual(3 + 1 + 1 + (LOCKDOWN_SYNC_CAP + 1));
   });
 
   test("Windows Home and the admin-accounts warning are counted for the PCs that have the newest settings", async () => {
@@ -332,13 +375,27 @@ describe("lockdown:groupSync", () => {
     expect(await sync(e)).toMatchObject({ total: 4, upToDate: 3, problems: 1, reduced: 1, adminTilesPending: 2 });
   });
 
+  // Owner decision 2026-11-28: the agent skips only `hideAdminTiles`, the machine layer is `ok` (the policy `applied`) with this note.
+  test("`admin_tiles_skipped` counts whatever the machine layer's state is; the old `admin_signin_unverified` still counts", async () => {
+    const e = await setup();
+    const [skipped, skippedPartial, old] = await addPcs(e, 3);
+    await addReport(e, e.pc.deviceId, {}, 1); // nothing to say
+    await addReport(e, skipped!, { machineDetail: "admin_tiles_skipped", machineState: "ok" }, 2);
+    await addReport(e, skippedPartial!, { machineDetail: "admin_tiles_skipped", machineState: "partial", state: "partial" }, 3);
+    await addReport(e, old!, { machineDetail: "admin_signin_unverified", machineState: "partial", state: "partial" }, 4);
+    const rows = await syncRows(e);
+    expect(rows.filter((r) => r.adminTilesSkipped)).toHaveLength(3);
+    // All four have the newest settings: the warning does not make a PC a problem.
+    expect(await sync(e)).toMatchObject({ total: 4, upToDate: 4, problems: 0, adminTilesPending: 3 });
+  });
+
   test("another organization's group is not found", async () => {
     const e = await setup();
     const other = await asMember(e.t, { role: "owner", orgId: await makeOrg(e.t, "Other") });
     await expectCode(sync(e, other.as), "not_found");
   });
 
-  test("reads stay small: one PC row and one report per PC of the group", async () => {
+  test("reads stay small: one small sync row per PC of the group, no PC row and no full report", async () => {
     const e = await setup();
     const ids = [e.pc.deviceId, ...(await addPcs(e, 49))];
     // Other groups' PCs and reports are never read.
@@ -352,13 +409,16 @@ describe("lockdown:groupSync", () => {
       console.log(`IO lockdown:groupSync 50 PCs, nobody reported yet: reads ${before.io.reads}, ${before.io.readBytes} B`);
       console.log(`IO lockdown:groupSync 50 PCs, all up to date: reads ${io.reads}, ${io.readBytes} B`);
     }
-    expect(io.reads).toBeLessThanOrEqual(3 + 1 + 1 + 50 + 50);
+    expect(io.reads).toBeLessThanOrEqual(3 + 1 + 1 + 50);
+    expect(io.readBytes).toBeLessThan(22_000);
+    expect(io.tables.has("devices")).toBe(false);
     expect(io.tables.has("groupConfigs")).toBe(false);
+    expect(io.tables.has("deviceApplyReports")).toBe(false);
   });
 
-  // `IO_REPORT=1`: the numbers behind the MEASURED comment of `lockdown:groupSync` in `ioBudgets.ts` (a free tenant and a full group).
-  test.runIf(process.env.IO_REPORT !== undefined)("measure: 2 PCs and a full group", async () => {
-    for (const count of [2, LOCKDOWN_SYNC_CAP]) {
+  // `IO_REPORT=1`: the numbers behind the MEASURED comment of `lockdown:groupSync` in `ioBudgets.ts` (a free tenant, a shop, a full group).
+  test.runIf(process.env.IO_REPORT !== undefined)("measure: 2, 50 and 200 PCs", async () => {
+    for (const count of [2, 50, LOCKDOWN_SYNC_CAP]) {
       const e = await setup();
       const ids = [e.pc.deviceId, ...(await addPcs(e, count - 1))];
       for (const [i, id] of ids.entries()) await addReport(e, id, {}, i);
@@ -368,6 +428,164 @@ describe("lockdown:groupSync", () => {
   });
 });
 
+describe("deviceLockdownSync: kept right by enrollment, the report path, a move, a revoke and the backfill", () => {
+  /** The fixture PC's report; `config: null` leaves the configuration out (an old agent). */
+  const report = (e: Env, over: Record<string, unknown> = {}) => {
+    const { config = { groupId: e.groupId, version: 1, ring: "everyone" }, ...rest } = over;
+    return { deviceId: e.pc.deviceId, deviceSecret: e.pc.secret, ...APPLY_REPORT, ...(config === null ? {} : { config }), ...rest };
+  };
+  const send = (e: Env, over: Record<string, unknown> = {}) => e.t.mutation(api.deviceApi.reportApply, report(e, over) as never);
+
+  test("a PC enrolled into a group starts as waiting; one enrolled without a group has no row", async () => {
+    const e = await setup();
+    expect(await syncRows(e)).toEqual([
+      expect.objectContaining({ orgId: e.orgId, deviceId: e.pc.deviceId, groupId: e.groupId, configVersion: 0 }),
+    ]);
+    expect((await syncRows(e))[0]!.state).toBeUndefined();
+    expect(await sync(e)).toMatchObject({ total: 1, upToDate: 0, problems: 0 });
+    await enrollDevice(e.t, e.orgId, { name: "No group" });
+    expect(await syncRows(e)).toHaveLength(1);
+  });
+
+  test("a report fills the row; the same facts in another report write only the report; the same report writes nothing", async () => {
+    const e = await setup();
+    const first = await probe(() => send(e));
+    expect(first.result).toEqual({ written: true });
+    expect(first.io.writes).toBe(2); // the report and the sync row
+    const [row] = await syncRows(e);
+    expect(row).toMatchObject({ orgId: e.orgId, deviceId: e.pc.deviceId, groupId: e.groupId, configVersion: 1, state: "applied" });
+    expect(row!.adminTilesSkipped).toBeUndefined();
+    expect(row!.reduced).toBeUndefined();
+    expect(await sync(e)).toMatchObject({ total: 1, upToDate: 1 });
+
+    // A Wi-Fi state changed: the report changes, the facts do not: the sync row is NOT written (no re-run of the card).
+    vi.advanceTimersByTime(60_000);
+    const wifi = await probe(() => send(e, { contentHash: "d".repeat(64), wifi: [{ profileId: "p1", revision: 2, state: "failed" }] }));
+    expect(wifi.result).toEqual({ written: true });
+    expect(wifi.io.writes).toBe(1);
+    expect(await syncRows(e)).toEqual([row]); // untouched, `updatedAt` included
+
+    // The very same report again: nothing at all.
+    const same = await probe(() => send(e, { contentHash: "d".repeat(64), wifi: [{ profileId: "p1", revision: 2, state: "failed" }] }));
+    expect(same.result).toEqual({ written: false });
+    expect(same.io.writes).toBe(0);
+
+    // One of the facts changes: the row is patched in place (one document, no second row).
+    const refused = await probe(() => send(e, { contentHash: "e".repeat(64), state: "refused", refusal: "would_block_exit" }));
+    expect(refused.io.writes).toBe(2);
+    const after = await syncRows(e);
+    expect(after).toHaveLength(1);
+    expect(after[0]).toMatchObject({ _id: row!._id, state: "refused" });
+    expect(await sync(e)).toMatchObject({ upToDate: 0, problems: 1, problemPcs: [{ deviceId: e.pc.deviceId, state: "refused" }] });
+  });
+
+  test("the flags come from the report and are stored only when true: Windows Home and the admin-accounts note", async () => {
+    const e = await setup();
+    await send(e, {
+      layers: {
+        ...APPLY_REPORT.layers,
+        appLocker: { mode: "audit", state: "unsupported", detail: "applocker_not_on_this_edition" },
+        machine: { mode: "on", state: "ok", detail: "admin_tiles_skipped" },
+      },
+    });
+    expect((await syncRows(e))[0]).toMatchObject({ state: "applied", reduced: true, adminTilesSkipped: true });
+    expect(await sync(e)).toMatchObject({ upToDate: 1, reduced: 1, adminTilesPending: 1 });
+    // Fixed again: the flags go away (the keys are removed, not set to false).
+    await send(e, { contentHash: "4".repeat(64) });
+    const [row] = await syncRows(e);
+    expect(Object.keys(row!)).not.toContain("reduced");
+    expect(Object.keys(row!)).not.toContain("adminTilesSkipped");
+  });
+
+  test("a report without a configuration, or with another group's, makes the row wait again", async () => {
+    const e = await setup();
+    await send(e);
+    expect((await syncRows(e))[0]).toMatchObject({ configVersion: 1, state: "applied" });
+    await send(e, { contentHash: "1".repeat(64), config: null }); // an agent that does not name its configuration
+    expect((await syncRows(e))[0]).toMatchObject({ groupId: e.groupId, configVersion: 0 });
+    await send(e, { contentHash: "5".repeat(64) });
+    expect((await syncRows(e))[0]).toMatchObject({ configVersion: 1, state: "applied" });
+
+    // The PC is in the fixture's group; a report that names another group's configuration (it was just moved) is not counted for it.
+    const other = await e.t.run((ctx) => ctx.db.insert("groups", { orgId: e.orgId, name: "Other", revision: 0, createdAt: Date.now() }));
+    await send(e, { contentHash: "2".repeat(64), config: { groupId: other, version: 1, ring: "everyone" } });
+    expect((await syncRows(e))[0]).toMatchObject({ groupId: e.groupId, configVersion: 0 });
+    expect(await syncRows(e)).toHaveLength(1);
+  });
+
+  test("moving the PC to another group re-points its row (waiting); its first report there fills it", async () => {
+    const e = await setup();
+    await send(e);
+    const other = await e.t.run((ctx) => ctx.db.insert("groups", { orgId: e.orgId, name: "Front", revision: 0, createdAt: Date.now() }));
+    await e.t.run((ctx) => snapshotGroupConfig(ctx, other, "first"));
+    await drain(e.t);
+    const pc = await e.t.run((ctx) => ctx.db.get(e.pc.deviceId));
+    await e.admin.mutation(api.fleet.move, { deviceId: e.pc.deviceId, expectedRevision: pc!.revision ?? 0, groupId: other });
+    const rows = await syncRows(e);
+    expect(rows).toHaveLength(1); // one row per PC, never one per group
+    expect(rows[0]).toMatchObject({ groupId: other, configVersion: 0 });
+    expect(await sync(e)).toMatchObject({ total: 0, upToDate: 0 });
+    expect(await e.viewer.query(api.lockdown.groupSync, { groupId: other })).toMatchObject({ total: 1, upToDate: 0 });
+
+    await send(e, { contentHash: "3".repeat(64), config: { groupId: other, version: 1, ring: "everyone" } });
+    expect((await syncRows(e))[0]).toMatchObject({ groupId: other, configVersion: 1, state: "applied" });
+    expect(await e.viewer.query(api.lockdown.groupSync, { groupId: other })).toMatchObject({ total: 1, upToDate: 1 });
+    expect(await sync(e)).toMatchObject({ total: 0, upToDate: 0 });
+  });
+
+  test("revoking the PC deletes its row; removing it afterwards is a no-op for the table", async () => {
+    const e = await setup();
+    await send(e);
+    expect(await syncRows(e)).toHaveLength(1);
+    await e.admin.mutation(api.fleet.revoke, { deviceId: e.pc.deviceId });
+    expect(await syncRows(e)).toEqual([]);
+    expect(await sync(e)).toMatchObject({ upToDate: 0, problems: 0 });
+    await e.admin.mutation(api.fleet.remove, { deviceId: e.pc.deviceId });
+    await drain(e.t);
+    expect(await syncRows(e)).toEqual([]);
+  });
+
+  test("the backfill builds the rows from the PCs and their reports, page by page, and a second run writes nothing", async () => {
+    const e = await setup();
+    const pcs = await addPcs(e, LOCKDOWN_SYNC_BACKFILL_BATCH + 20, e.groupId, { rows: false }); // more than one page of PCs, as before the table existed
+    const other = await e.t.run((ctx) => ctx.db.insert("groups", { orgId: e.orgId, name: "Other", revision: 0, createdAt: Date.now() }));
+    const all = [e.pc.deviceId, ...pcs];
+    await e.t.run(async (ctx) => {
+      for (const row of await ctx.db.query("deviceLockdownSync").collect()) await ctx.db.delete(row._id); // none of the PCs has a row yet
+    });
+    for (const [i, id] of all.entries()) await addReport(e, id, { raw: true, state: i % 10 === 3 ? "failed" : "applied" }, i);
+    // Special cases: no configuration, a group the PC has left, a revoked PC, and a PC without a group.
+    const [noConfig, left, revoked, ungrouped] = pcs.slice(-4) as [Id<"devices">, Id<"devices">, Id<"devices">, Id<"devices">];
+    await e.t.run(async (ctx) => {
+      const report = (id: Id<"devices">) => ctx.db.query("deviceApplyReports").withIndex("by_device", (q) => q.eq("deviceId", id)).unique();
+      await ctx.db.patch((await report(noConfig))!._id, { config: undefined });
+      await ctx.db.patch((await report(left))!._id, { config: { groupId: other, version: 1, ring: "everyone" } });
+      await ctx.db.patch(revoked, { revoked: true }); // a PC revoked before the credentials split
+      await ctx.db.patch(ungrouped, { groupId: undefined });
+    });
+    expect(await syncRows(e)).toEqual([]);
+    expect(await sync(e)).toMatchObject({ total: all.length - 1, upToDate: 0, problems: 0 }); // no rows at all: counted from `devices` (all but the ungrouped PC), all waiting
+
+    const first = await e.t.mutation(internal.maintenance.backfillLockdownSync, {});
+    expect(first).toMatchObject({ pcs: LOCKDOWN_SYNC_BACKFILL_BATCH, done: false });
+    expect(first.written).toBeGreaterThan(0);
+    await drain(e.t); // the following pages
+    const rows = await syncRows(e);
+    expect(rows).toHaveLength(all.length - 2); // not the revoked PC, not the one without a group
+    expect(rows.every((r) => r.groupId === e.groupId)).toBe(true);
+    expect(rows.find((r) => r.deviceId === noConfig)).toMatchObject({ configVersion: 0 });
+    expect(rows.find((r) => r.deviceId === left)).toMatchObject({ configVersion: 0 });
+    const waiting = new Set([noConfig, left, revoked, ungrouped]);
+    const failed = all.filter((id, i) => i % 10 === 3 && !waiting.has(id)).length;
+    expect(await sync(e)).toMatchObject({ total: all.length - 2, upToDate: all.length - 4 - failed, problems: failed });
+
+    // Run again: every row already says what it should, nothing is written.
+    const again = await e.t.mutation(internal.maintenance.backfillLockdownSync, {});
+    expect(again).toMatchObject({ pcs: LOCKDOWN_SYNC_BACKFILL_BATCH, written: 0 });
+    await drain(e.t);
+    expect(await syncRows(e)).toHaveLength(all.length - 2);
+  });
+});
 describe("lockdown:findings", () => {
   test("pages through one status, last seen first, and never returns a hash or a path", async () => {
     const e = await setup();

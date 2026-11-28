@@ -708,6 +708,8 @@ export function seed(now: number = Date.now()): DemoDb {
     assign(gOffice, aNotepad),
     assign(gNight, aStock),
     assign(gNight, aClock, { pinnedTaskbar: true }),
+    // An archived app that is still assigned: the group page says "Old scheduler is archived. PCs no longer get it." (UI pass).
+    assign(gNight, aOld),
   ];
 
   const fileHandlers = [
@@ -926,10 +928,10 @@ export function seed(now: number = Date.now()): DemoDb {
     const id = frontIds[i];
     if (id !== undefined) applyDetails.set(id, applyOf({ state: "refused", refusal: code, configVersion: 5, lkgVersion: 4, appliedVersion: 4 }));
   });
-  // The first Front desk PC after those (FD-0NN): everything applied except "hide administrator accounts" (the machine layer is
-  // partial with `admin_signin_unverified`, what an agent after the hideAdminTiles fix reports), so the device page shows that warning.
+  // The first Front desk PC after those (FD-0NN): everything applied except "hide administrator accounts" (the policy is `applied`, the
+  // machine layer is `ok` with the note `admin_tiles_skipped`, what the agent reports since 2026-11-28), so the device page shows that warning.
   const adminTilesId = frontIds[REFUSAL_CODES.length];
-  if (adminTilesId !== undefined) applyDetails.set(adminTilesId, applyOf({ state: "partial", layers: { machine: layer("on", "partial", "admin_signin_unverified") } }));
+  if (adminTilesId !== undefined) applyDetails.set(adminTilesId, applyOf({ layers: { machine: layer("on", "ok", "admin_tiles_skipped") } }));
   const postures = new Map<string, SecurityPosture>([
     [dCounter1._id, { secureBoot: "on", bitLocker: "on", autoRecovery: "on", safeModeAgent: true, tpm: "ready", serviceAcl: "ok", aclDrift: 0, ciPolicies: [] }],
     [dCounter2._id, { secureBoot: "on", bitLocker: "off", autoRecovery: "off", safeModeAgent: true, tpm: "present", serviceAcl: "ok", aclDrift: 0 }],

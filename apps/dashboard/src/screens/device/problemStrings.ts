@@ -123,7 +123,15 @@ export const COMPAT_WARNING_FALLBACK: Rule = {
  * of `screens/lockdown/codes.ts` is used. A harmless note (the PC chose to keep something on) is `info`, so it does not raise an alarm.
  */
 export const LOCKDOWN_RULES: Record<string, Rule> = {
-  // The hideAdminTiles slot (plan section 5): an agent after the fix applies everything else and reports the machine layer as partial.
+  // The hideAdminTiles slot (plan section 5). The agent since 2026-11-28 applies everything else and reports the machine layer as `ok` with
+  // `admin_tiles_skipped` (the policy is `applied`); `problems.ts` raises it from an `ok` layer too (`OK_LAYER_WARNINGS`).
+  admin_tiles_skipped: {
+    title: "Admin accounts stay visible on this PC",
+    body: 'Admin accounts stay visible on this PC until sign-in as another user is confirmed. Everything else was applied. To stop this message, turn off "Hide administrator accounts" for the group.',
+    severity: "warning",
+    fix: "groupLockdown",
+  },
+  // The same slot from an agent before that change: the machine layer was `partial` (or the whole policy was refused).
   admin_signin_unverified: {
     title: "Admin accounts stay visible on this PC",
     body: 'Until "Other user" sign-in is confirmed on this PC, Rulebox does not hide administrator accounts. Everything else is applied. To stop this message, turn off "Hide administrator accounts" for the group.',

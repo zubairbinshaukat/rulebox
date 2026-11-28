@@ -38,6 +38,7 @@ import {
   type ExceptionRuleValue,
   type LockdownSettings,
 } from "./lib/lockdownValidators";
+import { ADMIN_TILES_CODES } from "./lib/lockdownSync";
 import { exePathProblem } from "./lib/pathRules";
 import { requireStepUp } from "./lib/stepUp";
 
@@ -157,11 +158,8 @@ export const groupView = memberQuery("viewer")({
   },
 });
 
-/**
- * The apply-report codes that mean "Hide administrator accounts was left off on this PC because Other user sign-in is not confirmed
- * there" (the PC reports it as the `machine` layer's detail, or as the whole policy's refusal). The agent owns the final code.
- */
-export const ADMIN_TILES_CODES: ReadonlySet<string> = new Set(["admin_signin_unverified"]);
+/** The apply-report codes of "Hide administrator accounts was left off on this PC" (`admin_tiles_skipped`, and the old agents' `admin_signin_unverified`). */
+export { ADMIN_TILES_CODES };
 
 /** Names of the PCs that could not apply the settings listed on the "Your PCs" card (the rest are a count). */
 const SYNC_PROBLEM_NAMES = 3;
@@ -170,19 +168,24 @@ const SYNC_PROBLEM_NAMES = 3;
  * "PCs up to date: n of m" on the group lockdown screen (viewer). A separate query from `groupView` so a PC's report never re-runs the
  * form (same split as `rollouts:groupView` / `rollouts:health`). Subscribed only while that screen is open.
  *
- * Source: the group's PCs (`devices.by_group`, m) and the apply reports AT OR ABOVE the newest configuration version
- * (`deviceApplyReports.by_org_config`, an index range that starts at that version, so a PC that has not caught up yet costs no read).
- * No other per-PC row holds the configuration version and the state the PC applied it in (`deviceSummary.appliedVersion` is the signed
- * document's version, not the group configuration's). The newest version is `max(pointers)` of the rollout row (configuration texts are
- * never read); no rollout row = nothing was sent yet. A PC is up to date when its report is at that version and `applied` or `partial`
- * (partial = it got the settings, with notes); `refused | failed | rolledBack` are problems; the rest (offline, busy, never reported,
- * still on an older version, an agent too old to name its group configuration) is waiting. With rollout rings on the pilot PCs are
- * ahead and the others wait for the promotion. A PC that moved to another group is ignored (it keeps a stale report until it re-applies).
- * `reduced` (Windows Home: the AppLocker or App Control layer is `unsupported`) and `adminTilesPending` count the PCs that already
- * have the newest settings.
+ * Source: the small `deviceLockdownSync` rows of the group (`by_org_group_version`, newest configuration version first): ONE row per PC that
+ * is in the group and not revoked, so the rows ARE m, and each holds the facts counted here (configuration version, apply state,
+ * `reduced`, `adminTilesSkipped`; `lib/lockdownSync.ts`), copied from the PC's apply report only when one of them changes. This query
+ * never reads a `devices` row (except the names of at most 3 PCs that have a problem) or a full apply report (~1 to 2.5 KB each). The
+ * newest version is `max(pointers)` of the rollout row (configuration texts are never read); no rollout row = nothing was sent yet. A PC
+ * is up to date when its row is at that version or above and `applied` or `partial` (partial = it got the settings, with notes);
+ * `refused | failed | rolledBack` are problems; the rest (offline, busy, never reported, still on an older version, an agent too old to
+ * name its group configuration, a PC just moved here) is waiting: m minus the two counts. With rollout rings on the pilot PCs are ahead
+ * and the others wait for the promotion. `reduced` (Windows Home) and `adminTilesPending` count the PCs that already have the newest
+ * settings. Past LOCKDOWN_SYNC_CAP PCs the rows with the newest versions are the ones listed (the waiting ones fall off the end).
  *
- * I/O: wrapper + group + rollout row + <= LOCKDOWN_SYNC_CAP + 1 PCs + <= LOCKDOWN_SYNC_CAP + 1 reports; re-runs when a PC row of the
- * group, the rollout row or one of those reports changes (about once per PC after a save, which IS the live counter; never on a ping).
+ * Before `maintenance:backfillLockdownSync` has run a group has NO rows: the PCs are then counted from `devices.by_group` and all wait,
+ * so the card is sane (just "0 up to date") instead of empty; a group that is filled only in part (some PCs enrolled or reported since the
+ * deploy) shows those PCs until the backfill adds the rest.
+ *
+ * I/O: wrapper + group + rollout row + <= LOCKDOWN_SYNC_CAP + 1 sync rows (+ <= 3 PC names); re-runs when the rollout row or one of the
+ * group's rows changes (about once per PC after a save, which IS the live counter; never on a ping, and not when a PC's report changes
+ * without changing the facts).
  */
 export const groupSync = memberQuery("viewer")({
   args: { groupId: v.string() },
@@ -204,14 +207,25 @@ export const groupSync = memberQuery("viewer")({
       .query("groupRollouts")
       .withIndex("by_group", (q) => q.eq("groupId", group._id))
       .unique();
-    const pcs = await ctx.db
-      .query("devices")
-      .withIndex("by_group", (q) => q.eq("groupId", group._id))
+    const rows = await ctx.db
+      .query("deviceLockdownSync")
+      .withIndex("by_org_group_version", (q) => q.eq("orgId", ctx.orgId).eq("groupId", group._id))
+      .order("desc")
       .take(LOCKDOWN_SYNC_CAP + 1);
-    const members = new Map<Id<"devices">, Doc<"devices">>(pcs.slice(0, LOCKDOWN_SYNC_CAP).map((d) => [d._id, d]));
+    let total = Math.min(rows.length, LOCKDOWN_SYNC_CAP);
+    let totalMore = rows.length > LOCKDOWN_SYNC_CAP;
+    if (rows.length === 0) {
+      // No row at all: an empty group, or the backfill has not run. Count the PCs themselves (all of them wait).
+      const pcs = await ctx.db
+        .query("devices")
+        .withIndex("by_group", (q) => q.eq("groupId", group._id))
+        .take(LOCKDOWN_SYNC_CAP + 1);
+      total = Math.min(pcs.length, LOCKDOWN_SYNC_CAP);
+      totalMore = pcs.length > LOCKDOWN_SYNC_CAP;
+    }
     const out = {
-      total: members.size,
-      totalMore: pcs.length > LOCKDOWN_SYNC_CAP,
+      total,
+      totalMore,
       upToDate: 0,
       problems: 0,
       problemPcs: [] as { deviceId: Id<"devices">; name: string; state: ApplyStateValue }[],
@@ -224,27 +238,23 @@ export const groupSync = memberQuery("viewer")({
     if (rollout === null) return out; // nothing was sent yet
     const newest = Math.max(rollout.pointers.pilot, rollout.pointers.early, rollout.pointers.everyone);
     out.newestVersion = newest;
-    if (members.size === 0) return out;
 
-    const reports = await ctx.db
-      .query("deviceApplyReports")
-      .withIndex("by_org_config", (q) => q.eq("orgId", ctx.orgId).eq("config.groupId", group._id).gte("config.version", newest))
-      .take(LOCKDOWN_SYNC_CAP + 1);
-    for (const r of reports.slice(0, LOCKDOWN_SYNC_CAP)) {
-      const pc = members.get(r.deviceId);
-      if (pc === undefined) continue; // moved to another group since it reported
+    for (const r of rows.slice(0, LOCKDOWN_SYNC_CAP)) {
+      if (r.state === undefined || r.configVersion < newest) continue; // waiting
       if (r.state === "applied" || r.state === "partial") out.upToDate++;
       else {
         out.problems++;
-        if (out.problemPcs.length < SYNC_PROBLEM_NAMES) out.problemPcs.push({ deviceId: pc._id, name: pc.name, state: r.state });
+        if (out.problemPcs.length < SYNC_PROBLEM_NAMES) {
+          const pc = await ctx.db.get(r.deviceId);
+          out.problemPcs.push({ deviceId: r.deviceId, name: pc?.name ?? "", state: r.state });
+        }
       }
-      if (r.layers.appLocker.state === "unsupported" || r.layers.appControl.state === "unsupported") out.reduced++;
-      if (ADMIN_TILES_CODES.has(r.layers.machine.detail ?? "") || ADMIN_TILES_CODES.has(r.refusal ?? "")) out.adminTilesPending++;
+      if (r.reduced === true) out.reduced++;
+      if (r.adminTilesSkipped === true) out.adminTilesPending++;
     }
     return out;
   },
 });
-
 /** `wifiManagedOnlyConfirmed` is stored only when it is true and "managed networks only" is on (else the key is left out), so equal settings stay equal. */
 function normalizeSettings(s: LockdownSettings): LockdownSettings {
   const { wifiManagedOnlyConfirmed, ...rest } = s;

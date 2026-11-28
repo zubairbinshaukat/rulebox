@@ -95,7 +95,8 @@ function newConfigVersion(db: DemoDb, groupId: string, reason: string, now: numb
 const SYNC_CAP = 200;
 const SYNC_PROBLEM_NAMES = 3;
 const CATCH_UP_MS = 1200;
-const ADMIN_TILES_CODES: ReadonlySet<string> = new Set(["admin_signin_unverified"]);
+/** `admin_tiles_skipped`: the agent since 2026-11-28 (machine layer `ok`); `admin_signin_unverified`: older agents. Same set as `convex/lib/lockdownSync.ts`. */
+const ADMIN_TILES_CODES: ReadonlySet<string> = new Set(["admin_tiles_skipped", "admin_signin_unverified"]);
 const newestOf = (p: { pilot: number; early: number; everyone: number }) => Math.max(p.pilot, p.early, p.everyone);
 
 /** The same rules as the server: the group's PCs and their reports at or above the newest configuration version. */
