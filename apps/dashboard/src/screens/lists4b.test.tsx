@@ -400,31 +400,32 @@ describe("Enrollment: action rows", () => {
     createdByEmail: "admin@x.test",
   });
 
-  it("sorts by created or expires on the server; Next opens the next page; a click on the row does nothing", () => {
+  it("is a list of cards: the sort control sorts by created or expires on the server; Next opens the next page; a click on the card does nothing", async () => {
     cx.results["groups:list"] = [{ _id: "g1", name: "Front desk", revision: 0, createdAt: 1, devices: { count: 0, more: false }, employees: { count: 0, more: false } }];
     cx.results["enrollmentCodes:list"] = page(Array.from({ length: 10 }, (_, i) => code(i)), { isDone: false, continueCursor: "CUR1" });
     ui(<Enrollment />, "/enrollment");
+    await screen.findByRole("list", { name: "Enrollment codes" });
+    expect(screen.queryByRole("table")).toBeNull();
     expect(last("enrollmentCodes:list")).toMatchObject({ paginationOpts: { numItems: 10, cursor: null }, sort: { key: "created", dir: "desc" } });
-    fireEvent.click(within(header("Expires")).getByRole("button"));
+    pickOption(strings.table.sortSelect, "Expires: newest first");
     expect(last("enrollmentCodes:list")).toMatchObject({ sort: { key: "expires", dir: "desc" } });
     expect(where()).toBe("/enrollment?sort=expires&dir=desc");
     fireEvent.click(screen.getByRole("button", { name: strings.pager.next }));
     expect(last("enrollmentCodes:list")).toMatchObject({ paginationOpts: { numItems: 10, cursor: "CUR1" }, sort: { key: "expires", dir: "desc" } });
-    const row = screen.getByText("Code 0").closest("tr") as HTMLElement;
-    expect(row.getAttribute("data-clickable")).toBeNull();
-    fireEvent.click(row);
+    const card = screen.getByText("Code 0").closest("article") as HTMLElement;
+    expect(card.getAttribute("data-clickable")).toBeNull();
+    fireEvent.click(card);
     expect(where()).toBe("/enrollment?sort=expires&dir=desc&page=2");
   });
 
-  it("Revoke (a button in the row) opens the confirm dialog", () => {
+  it("Revoke (a button on the card) opens the confirm dialog", async () => {
     cx.results["groups:list"] = [];
     cx.results["enrollmentCodes:list"] = page([code(1)]);
     ui(<Enrollment />, "/enrollment");
-    fireEvent.click(screen.getByRole("button", { name: "Revoke Code 1" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Revoke Code 1" }));
     expect(screen.getByRole("dialog")).toBeTruthy();
   });
 });
-
 describe("Settings > Members: two lists on one page", () => {
   const member = (i: number, over: object = {}) => ({
     _id: `m${i}`,

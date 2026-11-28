@@ -6,7 +6,7 @@ import { columnType, tableColumns } from "../lib/columns";
 import { type SortDir } from "../lib/cursorPager";
 import { ignoreRowClick } from "../lib/rowClick";
 import { strings } from "../lib/strings";
-import { useViewMode } from "../lib/viewMode";
+import { useViewMode, type ViewMode } from "../lib/viewMode";
 import { EmptyState } from "./EmptyState";
 import { RegionError } from "./Region";
 import { RowActions } from "./RowActions";
@@ -106,6 +106,8 @@ export interface DataTableProps<T> {
   isDim?: (row: T) => boolean;
   /** `false` keeps a table in every view (it makes no sense as cards); otherwise the global Table | Cards choice applies. */
   stack?: boolean;
+  /** Forces one view and hides the Table | Cards switch (a list in a narrow side column is always cards). */
+  view?: ViewMode;
   /** The record's name, for the names of its buttons ("Revoke: VM run A3"). Needed with `rowActions`. */
   rowLabel?: (row: T) => string;
 
@@ -167,6 +169,7 @@ export function DataTable<T>({
   getKey,
   isDim,
   stack = true,
+  view: forcedView,
   rowLabel,
   sort,
   onSortChange,
@@ -187,7 +190,8 @@ export function DataTable<T>({
   maxHeight,
   pageKey,
 }: DataTableProps<T>) {
-  const [view] = useViewMode();
+  const [chosen] = useViewMode();
+  const view = forcedView ?? chosen;
   const asCards = stack && view === "cards";
   const surfaceRef = useRef<HTMLDivElement>(null);
 
@@ -203,7 +207,7 @@ export function DataTable<T>({
   const shown = useMemo(() => tableColumns(columns), [columns]);
   // Every column except the name can only get as narrow as its content: the name column then takes the rest of the width.
   const fit = !asCards && shown.every((c) => c.primary || isShort(c));
-  const showSwitch = stack && (viewSwitch ?? framed);
+  const showSwitch = stack && forcedView === undefined && (viewSwitch ?? framed);
   const sortsHere = columns.some((c) => c.sortable && !c.actions);
   const showSort = asCards && (sortNote !== undefined || (onSortChange !== undefined && (sortsHere || defaultSort !== undefined)));
   const showToolbar = toolbar != null || toolbarEnd != null || showSwitch || showSort;

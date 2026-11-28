@@ -2,6 +2,7 @@ import type { ReactNode } from "react";
 import type { ServerList } from "../data/serverList";
 import type { ListPaging } from "../lib/listView";
 import { strings } from "../lib/strings";
+import type { ViewMode } from "../lib/viewMode";
 import { DataTable, type Column, type SortState, type TableState } from "./DataTable";
 import { EmptyState } from "./EmptyState";
 import { Pager } from "./Pager";
@@ -39,6 +40,8 @@ export interface ServerTableProps<T> {
   viewSwitch?: boolean;
   /** `false` keeps a table in every view. */
   stack?: boolean;
+  /** Forces one view (no switch): a list in a narrow side column is always cards. */
+  view?: ViewMode;
   skeletonRows?: number;
 }
 
@@ -68,6 +71,7 @@ export function ServerTable<T>({
   framed = false,
   viewSwitch,
   stack,
+  view: forcedView,
   skeletonRows,
 }: ServerTableProps<T>) {
   const { view, pager, req } = paging;
@@ -98,6 +102,7 @@ export function ServerTable<T>({
       isDim={isDim}
       rowLabel={rowLabel}
       stack={stack}
+      view={forcedView}
       sort={relevance ? undefined : view.sort}
       onSortChange={relevance ? undefined : view.setSort}
       defaultSort={defaultSort}
