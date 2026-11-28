@@ -7,6 +7,7 @@ import type { ReactNode } from "react";
 import type { Me } from "../data/types";
 import { MeContext } from "../lib/member";
 import { strings } from "../lib/strings";
+import { pickOption } from "../test/select";
 import { employeeStrings } from "../lib/screenStrings/employee";
 import { employeesStrings } from "../lib/screenStrings/employees";
 import { groupStrings } from "../lib/screenStrings/group";
@@ -186,7 +187,9 @@ describe("Employees list (employees:list, one server-driven page at a time)", ()
     await waitFor(() => expect(listArgs()).toEqual({ paginationOpts: { numItems: 10, cursor: null }, search: "maya" }));
     expect(last("employees:count")!.args).toEqual({ search: "maya" });
     expect(cx.queried.some((q) => q.name === "employees:search")).toBe(false);
-    expect(screen.getByText(strings.pager.page(1))).toBeTruthy();
+    // One short page and no total: no pager at all (no records line either).
+    expect(screen.queryByRole("navigation", { name: strings.pager.nav })).toBeNull();
+    expect(screen.queryByText(/records/)).toBeNull();
   });
 
   it("the group filter goes to the server as groupId; a group's members have one order, so no header sorts", () => {
@@ -224,7 +227,7 @@ describe("Employees list (employees:list, one server-driven page at a time)", ()
     expect(listArgs()).toEqual({ paginationOpts: { numItems: 25, cursor: null }, sort: { key: "username", dir: "desc" } });
     fireEvent.click(screen.getByRole("button", { name: strings.pager.next }));
     await waitFor(() => expect(listArgs().paginationOpts).toEqual({ numItems: 25, cursor: "cur-2" }));
-    fireEvent.change(screen.getByLabelText(strings.pager.rowsPerPage), { target: { value: "50" } });
+    pickOption(strings.pager.rowsPerPage, "50");
     await waitFor(() => expect(listArgs().paginationOpts).toEqual({ numItems: 50, cursor: null }));
     cleanup();
     ui(<Employees />, "admin", "/employees?size=9&sort=password&dir=asc");
@@ -246,6 +249,7 @@ describe("Employees list (employees:list, one server-driven page at a time)", ()
     fireEvent.click(screen.getByRole("radio", { name: strings.table.viewCards }));
     expect(document.documentElement.getAttribute("data-view")).toBe("cards");
     expect(screen.getByRole("link", { name: "Maya Lee" })).toBeTruthy();
+    expect(screen.getByRole("list", { name: employeesStrings.title })).toBeTruthy();
     expect(screen.getByLabelText(strings.table.sortSelect)).toBeTruthy();
   });
 

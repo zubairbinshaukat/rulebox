@@ -1,14 +1,19 @@
-import { memo, useCallback, useEffect, useId, useRef, type MouseEvent, type ReactNode } from "react";
-import { NativeSelect } from "@rulebox/ui";
+import { memo, useCallback, useEffect, useId, useMemo, useRef, type ReactNode, type RefObject } from "react";
+import { Select } from "@rulebox/ui";
 import IconSort from "~icons/solar/sort-vertical-linear";
 import IconAsc from "~icons/solar/arrow-up-linear";
 import IconDesc from "~icons/solar/arrow-down-linear";
+import { columnType, sortOptions, tableColumns } from "../lib/cardLayout";
 import { type SortDir } from "../lib/cursorPager";
+import { ignoreRowClick } from "../lib/rowClick";
 import { strings } from "../lib/strings";
 import { useViewMode } from "../lib/viewMode";
+import { CardGrid } from "./CardGrid";
 import { EmptyState } from "./EmptyState";
 import { RegionError } from "./Region";
-import { SkeletonRows } from "./Skeleton";
+import { RowActions } from "./RowActions";
+import { SkeletonCards, SkeletonRows } from "./Skeleton";
+import { Truncate } from "./Truncate";
 import { ViewSwitch } from "./ViewSwitch";
 
 export type { SortDir };
@@ -21,32 +26,76 @@ export interface SortState {
 /** `ready` is the default; `empty` shows `empty` instead of the table. */
 export type TableState = "loading" | "error" | "empty" | "ready";
 
+/**
+ * What a column holds. It sets the table's width and wrapping rules (`dash-col--<type>`):
+ * `name` the record's name (one line, cut at `maxWidth`, default 280 px); `text` free text (two lines, then cut, 360 px);
+ * `short` state words, roles, "0 of 1 used" (never wraps); `date` a `RelativeTime` (never wraps); `num` counts
+ * (end-aligned); `badge` pills (wrap between pills only, 280 px); `mono` builds, versions, usernames (one line, 200 px);
+ * `actions` buttons (end-aligned, never wraps).
+ */
+export type ColumnType = "name" | "text" | "short" | "date" | "num" | "badge" | "mono" | "actions";
+
+/** Where a column goes on a card. The default: `primary` is the title, `actions` the footer, everything else a fact. */
+export type CardRole = "title" | "subtitle" | "status" | "fact" | "detail" | "actions" | "hidden";
+
+export interface RowAction {
+  /** "Revoke". The accessible name adds the record: "Revoke: VM run A3". */
+  label: string;
+  onSelect: () => void;
+  danger?: boolean;
+  disabled?: boolean;
+  /** Why it is disabled (shown as a tooltip, or next to the item in the menu). */
+  hint?: string;
+  /** Stays a button when there are more than two actions; the others move into "More actions". */
+  primary?: boolean;
+}
+
 export interface Column<T> {
   key: string;
   header: string;
   cell: (row: T) => ReactNode;
-  /** The row's name cell: shown as the card title on phones. */
+  /** The record's name: the title of its card and the table's flexible column. */
   primary?: boolean;
-  /** Right-aligned action buttons; no label on phones. */
+  /** Buttons: right-aligned, no header text. */
   actions?: boolean;
+  /** Same as `type: "num"`. */
   numeric?: boolean;
   /**
-   * The cell never wraps. Set it on every short value: dates and "4 minutes ago", states and badges,
-   * counts like "0 of 1 used", versions. `numeric` and `actions` columns are nowrap without it.
+   * The cell never wraps (dates and "4 minutes ago", states, badges, counts like "0 of 1 used", versions).
+   * Implied by `type` short, date, num, badge, mono and actions.
    */
   nowrap?: boolean;
   /**
-   * Long free text: the cell is cut with an ellipsis after this many characters (`true` = 32), never wraps,
-   * and the full text shows on hover (it always stays in the page for screen readers and find-in-page).
+   * Deprecated, use `type` + `maxWidth` and `<Truncate>`. Cuts the cell with an ellipsis after this many
+   * characters (`true` = 32); the full text shows in the shared tooltip.
    */
   truncate?: boolean | number;
   className?: string;
-  /** Hide the cell on phones when it has nothing to show. */
+  /** The value is empty: a fact shows "—", other card slots are left out, a table cell stays blank. */
   isEmpty?: (row: T) => boolean;
   /** The header becomes a sort button. `key` is what `onSortChange` reports, so it must be a server sort key. */
   sortable?: boolean;
   /** The direction a first click sorts by (dates and counts usually want "desc"). Default "asc". */
   sortDefaultDir?: SortDir;
+
+  /** Table width and wrapping class (see `ColumnType`). Default: from `primary` / `actions` / `numeric` / `nowrap`; nothing = wraps. */
+  type?: ColumnType;
+  /** Width cap in px for `name`, `text`, `mono` and `badge` cells; longer content is cut (default per type). */
+  maxWidth?: number;
+  /** `false`: a card-only column (the table does not draw it). */
+  table?: boolean;
+  /** Where the column goes on a card. */
+  card?: CardRole;
+  /** What the card shows when it differs from the table cell (a shorter or simpler version). */
+  cardCell?: (row: T) => ReactNode;
+  /** The title column only: the subtitle line under the title. */
+  cardSub?: (row: T) => ReactNode;
+  /** The label above a fact or before a detail (default: `header`); `false` shows the value alone. */
+  cardLabel?: string | false;
+  /** A fact that spans the whole facts row and may wrap to 2 lines. */
+  cardWide?: boolean;
+  /** An `actions` column declared as data: the table cell and the card footer draw the same buttons (more than two: "More actions"). */
+  rowActions?: (row: T) => RowAction[];
 }
 
 export interface DataTableProps<T> {
@@ -58,10 +107,16 @@ export interface DataTableProps<T> {
   isDim?: (row: T) => boolean;
   /** `false` keeps a table in every view (it makes no sense as cards); otherwise the global Table | Cards choice applies. */
   stack?: boolean;
+  /** The record's name, for the names of its buttons ("Revoke: VM run A3"). Needed with `rowActions`. */
+  rowLabel?: (row: T) => string;
 
   /** The current sort. Sorting is the server's job: the table only draws the headers and reports clicks. */
   sort?: SortState;
   onSortChange?: (next: SortState) => void;
+  /** A server order that has no column ("Newest added"): the cards' sort control always lists it, so it can show the current order. */
+  defaultSort?: SortState & { label: string };
+  /** The sort control is disabled and says this instead (a search orders by relevance). */
+  sortNote?: string;
 
   /**
    * Makes the whole row clickable. Keep a real `<Link>` in the name cell: keyboard,
@@ -82,8 +137,10 @@ export interface DataTableProps<T> {
   /** The next page is loading: the old rows stay, dimmed, and the table is announced as busy. */
   busy?: boolean;
 
-  /** Above the table, left of the view switch: the search box and filters. */
+  /** Above the list, left: the search box and filters. */
   toolbar?: ReactNode;
+  /** Above the list, right, before the sort and the view switch: list-wide actions ("Check now"). */
+  toolbarEnd?: ReactNode;
   /** Under the table, inside the card (the `Pager`). Shown while `state` is "ready". */
   footer?: ReactNode;
   /** The table draws its own card. Leave off while the screen still wraps it in a `Card`. */
@@ -92,15 +149,17 @@ export interface DataTableProps<T> {
   viewSwitch?: boolean;
   /** Scrolls rows inside the table with the header stuck on top (e.g. "70vh"). Without it the page scrolls. */
   maxHeight?: number | string;
+  /** Changes with the page (the pager's page number): the list scrolls back into view when it does. */
+  pageKey?: string | number;
 }
 
 /**
- * The one table for every list (Phase 4b). A semantic `<table>`: `<th scope="col">`,
- * a caption for screen readers, sortable headers (`aria-sort`), an optional
- * clickable row, loading / empty / error states, a toolbar and a footer slot
- * (the `Pager`). Table view scrolls sideways in a labelled region at every width;
- * the cards view (`<html data-view="cards">`, see `lib/viewMode.ts`) turns each
- * row into a card whatever the width.
+ * The one list for every screen (Phase 4b, UI pass). The table view is a semantic `<table>`:
+ * `<th scope="col">`, a caption for screen readers, sortable headers (`aria-sort`), an optional
+ * clickable row, loading / empty / error states, a toolbar and a footer slot (the `Pager`);
+ * it scrolls sideways inside a labelled region and never makes the page wider.
+ * The cards view (global choice, see `lib/viewMode.ts`) draws a `CardGrid` from the same columns
+ * (roles in `lib/cardLayout.ts`), with a sort select in the toolbar instead of the headers.
  */
 export function DataTable<T>({
   caption,
@@ -109,8 +168,11 @@ export function DataTable<T>({
   getKey,
   isDim,
   stack = true,
+  rowLabel,
   sort,
   onSortChange,
+  defaultSort,
+  sortNote,
   onRowClick,
   state = "ready",
   skeletonRows = 8,
@@ -119,14 +181,17 @@ export function DataTable<T>({
   onRetry,
   busy = false,
   toolbar,
+  toolbarEnd,
   footer,
   framed = false,
   viewSwitch,
   maxHeight,
+  pageKey,
 }: DataTableProps<T>) {
   const [view] = useViewMode();
   const asCards = stack && view === "cards";
   const sortId = useId();
+  const surfaceRef = useRef<HTMLDivElement>(null);
 
   // The rows are memoized: give them one handler that never changes and reads the latest callback.
   const click = useRef(onRowClick);
@@ -135,38 +200,58 @@ export function DataTable<T>({
   });
   const activate = useCallback((row: unknown) => (click.current as ((r: unknown) => void) | undefined)?.(row), []);
 
+  useScrollToList(surfaceRef, pageKey);
+
+  const shown = useMemo(() => tableColumns(columns), [columns]);
   // Every column except the name can only get as narrow as its content: the name column then takes the rest of the width.
-  const fit = !asCards && columns.every((c) => c.primary || isShort(c));
-  const sortable = onSortChange ? columns.filter((c) => c.sortable && !c.actions) : [];
+  const fit = !asCards && shown.every((c) => c.primary || isShort(c));
+  const options = useMemo(() => sortOptions(columns, defaultSort), [columns, defaultSort]);
   const showSwitch = stack && (viewSwitch ?? framed);
-  const showToolbar = toolbar != null || showSwitch;
+  const showSort = asCards && (sortNote !== undefined || (onSortChange !== undefined && options.length > 0));
+  const showToolbar = toolbar != null || toolbarEnd != null || showSwitch || showSort;
+  // Cards sit on the page itself; the card is only for the states that have no cards (empty, error).
+  const bare = asCards && (state === "ready" || state === "loading");
 
   const nextSort = (c: Column<T>): SortState =>
     sort?.key === c.key ? { key: c.key, dir: sort.dir === "asc" ? "desc" : "asc" } : { key: c.key, dir: c.sortDefaultDir ?? "asc" };
 
   let body: ReactNode;
   if (state === "loading") {
-    body = <SkeletonRows rows={skeletonRows} columns={Math.min(Math.max(columns.length - 1, 1), 5)} />;
+    body = asCards ? <SkeletonCards count={skeletonRows} flat={!framed} /> : <SkeletonRows rows={skeletonRows} columns={Math.min(Math.max(shown.length - 1, 1), 5)} />;
   } else if (state === "error") {
     body = <RegionError error={error} onRetry={onRetry} />;
   } else if (state === "empty") {
     body = empty ?? <EmptyState title={strings.table.emptyTitle} />;
+  } else if (asCards) {
+    body = (
+      <CardGrid
+        caption={caption}
+        columns={columns}
+        rows={rows}
+        getKey={getKey}
+        isDim={isDim}
+        onActivate={onRowClick ? activate : undefined}
+        rowLabel={rowLabel}
+        busy={busy}
+        flat={!framed}
+      />
+    );
   } else {
     body = (
       <div
         className={["dash-table-wrap", maxHeight !== undefined ? "dash-table-wrap--scroll" : ""].filter(Boolean).join(" ")}
         style={maxHeight !== undefined ? { maxHeight } : undefined}
-        tabIndex={asCards ? undefined : 0}
-        role={asCards ? undefined : "region"}
-        aria-label={asCards ? undefined : caption}
+        tabIndex={0}
+        role="region"
+        aria-label={caption}
         aria-busy={busy || undefined}
         data-busy={busy || undefined}
       >
-        <table className={["rb-table", stack ? "dash-table--stack" : "", fit ? "dash-table--fit" : ""].filter(Boolean).join(" ")}>
+        <table className={["rb-table", stack ? "dash-table--cardable" : "", fit ? "dash-table--fit" : ""].filter(Boolean).join(" ")}>
           <caption className="dash-sr">{caption}</caption>
           <thead>
             <tr>
-              {columns.map((c) => {
+              {shown.map((c) => {
                 const canSort = Boolean(onSortChange && c.sortable && !c.actions);
                 const active = canSort && sort?.key === c.key ? sort.dir : null;
                 const Icon = active === "asc" ? IconAsc : active === "desc" ? IconDesc : IconSort;
@@ -174,7 +259,7 @@ export function DataTable<T>({
                   <th
                     key={c.key}
                     scope="col"
-                    className={c.numeric ? "rb-num" : undefined}
+                    className={cellClass(c, true) || undefined}
                     aria-sort={canSort ? (active === "asc" ? "ascending" : active === "desc" ? "descending" : "none") : undefined}
                   >
                     {c.actions ? (
@@ -194,7 +279,7 @@ export function DataTable<T>({
           </thead>
           <tbody>
             {rows.map((row) => (
-              <Row key={getKey(row)} row={row} columns={columns as Column<unknown>[]} dim={isDim?.(row) ?? false} onActivate={onRowClick ? activate : undefined} cards={asCards} />
+              <Row key={getKey(row)} row={row} columns={shown as Column<unknown>[]} dim={isDim?.(row) ?? false} onActivate={onRowClick ? activate : undefined} rowLabel={rowLabel as ((r: unknown) => string) | undefined} />
             ))}
           </tbody>
         </table>
@@ -203,39 +288,36 @@ export function DataTable<T>({
   }
 
   return (
-    <div className="dash-dt" data-framed={framed || undefined}>
+    <div className="dash-dt" data-framed={framed || undefined} data-mode={asCards ? "cards" : "table"}>
       {showToolbar ? (
         <div className="dash-dt__toolbar">
-          {toolbar != null ? <div className="dash-dt__tools">{toolbar}</div> : <span className="dash-dt__tools" />}
-          {sortable.length > 0 ? (
-            <div className="dash-dt__sortsel">
-              <label htmlFor={sortId} className="dash-sr">
-                {strings.table.sortSelect}
-              </label>
-              <NativeSelect
-                id={sortId}
-                compact
-                value={sort ? `${sort.key}:${sort.dir}` : ""}
-                onChange={(e) => {
-                  const [key, dir] = e.target.value.split(":");
-                  if (key && (dir === "asc" || dir === "desc")) onSortChange?.({ key, dir });
-                }}
-              >
-                {sort ? null : <option value="">{strings.table.sortSelect}</option>}
-                {sortable.flatMap((c) =>
-                  (["asc", "desc"] as const).map((dir) => (
-                    <option key={`${c.key}:${dir}`} value={`${c.key}:${dir}`}>
-                      {strings.table.sortOption(c.header, dir)}
-                    </option>
-                  )),
-                )}
-              </NativeSelect>
+          {toolbar != null ? <div className="dash-dt__tools">{toolbar}</div> : null}
+          {toolbarEnd != null || showSort || showSwitch ? (
+            <div className="dash-dt__end">
+              {toolbarEnd != null ? <div className="dash-dt__listactions">{toolbarEnd}</div> : null}
+              {showSort ? (
+                <div className="dash-dt__sortsel">
+                  <Select
+                    id={sortId}
+                    compact
+                    aria-label={strings.table.sortSelect}
+                    options={sortNote !== undefined ? [] : options}
+                    value={sortNote !== undefined || !sort ? "" : `${sort.key}:${sort.dir}`}
+                    placeholder={sortNote ?? strings.table.sortSelect}
+                    disabled={sortNote !== undefined}
+                    onChange={(v) => {
+                      const [key, dir] = v.split(":");
+                      if (key && (dir === "asc" || dir === "desc")) onSortChange?.({ key, dir });
+                    }}
+                  />
+                </div>
+              ) : null}
+              {showSwitch ? <ViewSwitch /> : null}
             </div>
           ) : null}
-          {showSwitch ? <ViewSwitch /> : null}
         </div>
       ) : null}
-      <div className={framed ? "dash-card dash-dt__surface" : "dash-dt__surface"}>
+      <div ref={surfaceRef} tabIndex={-1} className={framed && !bare ? "dash-card dash-dt__surface" : "dash-dt__surface"} data-bare={bare || undefined}>
         {body}
         {state === "ready" && footer ? <div className="dash-dt__footer">{footer}</div> : null}
       </div>
@@ -243,44 +325,51 @@ export function DataTable<T>({
   );
 }
 
-/** Elements inside a row that own their click: the row's click must not fire for them. */
-const OWN_CLICK =
-  'a, button, input, select, textarea, label, summary, [role="button"], [role="link"], [role="menuitem"], [role="checkbox"], [role="switch"], [role="dialog"], [role="alertdialog"], .rb-dialog-backdrop, [contenteditable="true"], [data-no-row-click]';
-
-function ignoreRowClick(e: MouseEvent<HTMLElement>): boolean {
-  if (e.defaultPrevented || e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return true;
-  // A dialog opened from a cell is portalled to <body>: React still bubbles its clicks here, but it is not in the row.
-  if (!e.currentTarget.contains(e.target as Node)) return true;
-  const hit = (e.target as Element).closest(OWN_CLICK);
-  if (hit && e.currentTarget.contains(hit)) return true;
-  // The person is selecting text in the row: not a click on the row.
-  const selection = window.getSelection?.();
-  return Boolean(selection && !selection.isCollapsed && selection.toString().length > 0);
-}
-
 /** A column whose cell never wraps and so cannot be squeezed below its content. */
 function isShort(c: Column<never>): boolean {
-  return Boolean(c.nowrap || c.numeric || c.actions || c.truncate);
+  const type = columnType(c);
+  return type !== null && type !== "name" && type !== "text";
 }
 
+const MAX_BY_TYPE: Partial<Record<ColumnType, number>> = { name: 280, text: 360, mono: 200, badge: 280 };
 const TRUNCATE_CH = 32;
 
-/** Long text in a cell: cut after `max` characters. The title (the full text) is set when the text is really cut. */
-function Truncated({ max, children }: { max: number; children: ReactNode }) {
+/** Classes of a `th` or `td`: the type, the no-wrap rule, the name cell and the end-aligned number. */
+function cellClass(c: Column<never>, header = false): string {
+  const type = columnType(c);
+  return [
+    type ? `dash-col--${type}` : "",
+    c.primary ? "dash-cell--name" : "",
+    c.actions ? "dash-cell--actions" : "",
+    c.numeric || type === "num" ? "rb-num" : "",
+    !header && isShort(c) ? "dash-cell--nowrap" : "",
+    !header ? (c.className ?? "") : "",
+  ]
+    .filter(Boolean)
+    .join(" ");
+}
+
+/** The cell's content in its width box: strings get the shared tooltip; richer cells bring their own `Truncate`. */
+function cellContent(c: Column<unknown>, row: unknown): ReactNode {
+  const content = c.cell(row);
+  if (c.truncate) {
+    const max = c.truncate === true ? TRUNCATE_CH : c.truncate;
+    return <Truncate maxWidth={`${max}ch`}>{content}</Truncate>;
+  }
+  const type = columnType(c);
+  const cap = c.maxWidth ?? (type ? MAX_BY_TYPE[type] : undefined);
+  if (!type || cap === undefined || (type !== "name" && type !== "text" && type !== "mono" && type !== "badge")) return content;
+  if (type !== "badge" && (typeof content === "string" || typeof content === "number")) {
+    return (
+      <Truncate full={String(content)} lines={type === "text" ? 2 : 1} maxWidth={cap}>
+        {content}
+      </Truncate>
+    );
+  }
   return (
-    <span
-      className="dash-cell-trunc"
-      style={{ maxWidth: `${max}ch` }}
-      title={typeof children === "string" ? children : undefined}
-      onMouseEnter={(e) => {
-        const el = e.currentTarget;
-        if (typeof children === "string") return;
-        if (el.scrollWidth > el.clientWidth) el.title = el.textContent ?? "";
-        else el.removeAttribute("title");
-      }}
-    >
-      {children}
-    </span>
+    <div className={`dash-cell-box dash-cell-box--${type}`} style={{ maxWidth: cap }}>
+      {content}
+    </div>
   );
 }
 
@@ -289,14 +378,13 @@ const Row = memo(function Row({
   columns,
   dim,
   onActivate,
-  cards,
+  rowLabel,
 }: {
   row: unknown;
   columns: Column<unknown>[];
   dim: boolean;
   onActivate?: (row: unknown) => void;
-  /** Cards view: cells stack, so the one-line rules of the table view stay off. */
-  cards: boolean;
+  rowLabel?: (row: unknown) => string;
 }) {
   return (
     <tr
@@ -311,29 +399,38 @@ const Row = memo(function Row({
       }
     >
       {columns.map((c) => {
-        const cls = [
-          c.primary ? "dash-cell--name" : "",
-          c.actions ? "dash-cell--actions" : "",
-          c.numeric ? "rb-num" : "",
-          !cards && isShort(c) ? "dash-cell--nowrap" : "",
-          c.className ?? "",
-        ]
-          .filter(Boolean)
-          .join(" ");
-        const content = c.cell(row);
-        const max = c.truncate === true ? TRUNCATE_CH : c.truncate || 0;
+        let content: ReactNode;
+        if (c.rowActions) {
+          const list = c.rowActions(row);
+          content = list.length > 0 ? <RowActions actions={list} rowName={rowLabel?.(row) ?? ""} /> : null;
+        } else {
+          content = cellContent(c, row);
+        }
         return (
-          <td
-            key={c.key}
-            className={cls || undefined}
-            data-label={c.header}
-            data-primary={c.primary || undefined}
-            data-empty={c.isEmpty?.(row) || undefined}
-          >
-            {max > 0 ? <Truncated max={max}>{content}</Truncated> : content}
+          <td key={c.key} className={cellClass(c) || undefined} data-empty={c.isEmpty?.(row) || undefined}>
+            {content}
           </td>
         );
       })}
     </tr>
   );
 });
+
+/**
+ * After the page changes, a list whose top is above the viewport scrolls back into view and takes the
+ * focus (without scrolling again), so keyboard and screen-reader users start at the new page. A list
+ * whose top is already visible leaves the focus on the pager button, so paging on with the keyboard works.
+ */
+function useScrollToList(ref: RefObject<HTMLDivElement | null>, pageKey: string | number | undefined) {
+  const previous = useRef(pageKey);
+  useEffect(() => {
+    if (previous.current === pageKey) return;
+    previous.current = pageKey;
+    const el = ref.current;
+    if (!el || el.getBoundingClientRect().top >= 0) return;
+    const calm =
+      document.documentElement.getAttribute("data-lite") === "true" || (typeof window.matchMedia === "function" && window.matchMedia("(prefers-reduced-motion: reduce)").matches);
+    el.scrollIntoView({ block: "start", behavior: calm ? "auto" : "smooth" });
+    el.focus({ preventScroll: true });
+  }, [pageKey, ref]);
+}

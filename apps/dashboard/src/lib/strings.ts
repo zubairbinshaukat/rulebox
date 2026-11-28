@@ -152,7 +152,21 @@ export const strings = {
     viewTable: "Table",
     viewCards: "Cards",
     sortSelect: "Sort by",
-    sortOption: (column: string, dir: "asc" | "desc") => `${column}, ${dir === "asc" ? "ascending" : "descending"}`,
+    /** "Enrolled: newest first". The direction words depend on the kind of column (`sortDir`). */
+    sortOption: (column: string, dirLabel: string) => `${column}: ${dirLabel}`,
+    sortDir: {
+      name: { asc: "A to Z", desc: "Z to A" },
+      date: { asc: "oldest first", desc: "newest first" },
+      num: { asc: "fewest first", desc: "most first" },
+    },
+    /** The sort control while a search orders the rows by relevance. */
+    bestMatches: "Best matches first",
+    moreActions: "More actions",
+    moreActionsFor: (name: string) => `More actions for ${name}`,
+    actionFor: (label: string, name: string) => `${label}: ${name}`,
+    moreItems: (n: number) => `+${n} more`,
+    /** An empty value in a card (the position stays the same on every card). */
+    empty: "—",
     emptyTitle: "Nothing here yet",
     updating: "Updating…",
     noResults: (text: string) => `No results for “${text}”.`,
@@ -167,6 +181,8 @@ export const strings = {
     next: "Next page",
     goTo: (page: number) => `Page ${formatNumber(page)}`,
     records: (n: number) => `${formatNumber(n)} ${n === 1 ? "record" : "records"}`,
+    /** The summary of a list that has one page only: "3 records". */
+    recordsShort: (n: number) => `${formatNumber(n)} ${n === 1 ? "record" : "records"}`,
     pageOf: (page: number, pages: number) => `Page ${formatNumber(page)} of ${formatNumber(pages)}`,
     page: (page: number) => `Page ${formatNumber(page)}`,
     rowsPerPage: "Rows per page",

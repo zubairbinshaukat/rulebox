@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import { fireEvent, render, screen, within } from "@testing-library/react";
+import { optionLabels, pickOption, selectedText } from "../test/select";
 import { Pager, type PagerProps } from "./Pager";
 
 function show(over: Partial<PagerProps> = {}) {
@@ -22,12 +23,12 @@ const nav = () => screen.getByRole("navigation", { name: "Pagination" });
 describe("Pager", () => {
   it("says how many records and which page, with the total known", () => {
     show();
-    expect(screen.getByRole("status").textContent).toBe("147 records · Page 1 of 15");
+    expect(screen.getByRole("status").textContent?.replace(/\s/g, " ")).toBe("147 records · Page 1 of 15");
   });
 
   it("says only 'Page N' when there is no total, and offers no last page", () => {
     show({ total: null, page: 3, reachablePages: new Set([1, 2, 3, 4]) });
-    expect(screen.getByRole("status").textContent).toBe("Page 3");
+    expect(screen.getByRole("status").textContent?.replace(/\s/g, " ")).toBe("Page 3");
     const buttons = within(nav()).getAllByRole("button").map((b) => b.getAttribute("aria-label"));
     expect(buttons).toEqual(["Previous page", "Page 1", "Page 2", "Page 3", "Page 4", "Next page"]);
   });
@@ -74,24 +75,45 @@ describe("Pager", () => {
   });
 
   it("without a total, Next follows hasNext", () => {
-    show({ total: null, hasNext: false, reachablePages: new Set([1]) });
+    show({ total: null, page: 2, hasNext: false, reachablePages: new Set([1, 2]) });
     expect((screen.getByRole("button", { name: "Next page" }) as HTMLButtonElement).disabled).toBe(true);
   });
 
-  it("changes the rows per page (10, 25, 50)", () => {
+  it("changes the rows per page (10, 25, 50) with the custom select", () => {
     const p = show();
-    const select = screen.getByLabelText("Rows per page") as HTMLSelectElement;
-    expect([...select.options].map((o) => o.value)).toEqual(["10", "25", "50"]);
-    expect(select.value).toBe("10");
-    fireEvent.change(select, { target: { value: "25" } });
+    expect(optionLabels("Rows per page")).toEqual(["10", "25", "50"]);
+    expect(selectedText("Rows per page")).toBe("10");
+    pickOption("Rows per page", "25");
     expect(p.onPageSize).toHaveBeenCalledWith(25);
   });
 
   it("keeps a page size from a stale URL visible", () => {
     show({ pageSize: 20 });
-    const select = screen.getByLabelText("Rows per page") as HTMLSelectElement;
-    expect([...select.options].map((o) => o.value)).toEqual(["10", "20", "25", "50"]);
-    expect(select.value).toBe("20");
+    expect(optionLabels("Rows per page")).toEqual(["10", "20", "25", "50"]);
+    expect(selectedText("Rows per page")).toBe("20");
+  });
+
+  it("one page at the default size shows only how many records there are", () => {
+    show({ total: 3, hasNext: false, reachablePages: new Set([1]) });
+    expect(screen.getByRole("status").textContent).toBe("3\u00a0records");
+    expect(screen.queryByRole("navigation")).toBeNull();
+    expect(screen.queryByLabelText("Rows per page")).toBeNull();
+  });
+
+  it("one page and no total shows nothing at all", () => {
+    const { container } = render(<Pager page={1} pageSize={10} total={null} hasNext={false} reachablePages={new Set([1])} onPage={vi.fn()} onPageSize={vi.fn()} />);
+    expect(container.firstChild).toBeNull();
+  });
+
+  it("a size other than the default keeps the size select, so the person can go back", () => {
+    show({ total: 3, hasNext: false, pageSize: 25, reachablePages: new Set([1]) });
+    expect(screen.getByLabelText("Rows per page")).toBeTruthy();
+    expect(screen.getByRole("navigation", { name: "Pagination" })).toBeTruthy();
+  });
+
+  it("the summary breaks after the dot, never inside 'Page 1 of 15'", () => {
+    show();
+    expect(screen.getByRole("status").textContent).toBe("147\u00a0records · Page\u00a01\u00a0of\u00a015");
   });
 
   it("lays out as three parts the CSS arranges per width: the summary, the page buttons, rows per page", () => {

@@ -1,5 +1,5 @@
 import { useId, type ReactNode } from "react";
-import { NativeSelect } from "@rulebox/ui";
+import { Select } from "@rulebox/ui";
 import IconPrev from "~icons/solar/alt-arrow-left-linear";
 import IconNext from "~icons/solar/alt-arrow-right-linear";
 import { PAGE_SIZES, pageItems } from "../lib/cursorPager";
@@ -22,11 +22,12 @@ const DEFAULT_LABELS: PagerLabels = {
   rowsPerPage: strings.pager.rowsPerPage,
   gap: strings.pager.gap,
   goTo: strings.pager.goTo,
+  // Spaces inside each part do not break, so a narrow footer wraps after the "·" and never inside "Page 1 of 15".
   summary: (page, pages, total) =>
-    total !== null && pages !== null
-      ? `${strings.pager.records(total)} · ${strings.pager.pageOf(page, pages)}`
-      : strings.pager.page(page),
+    total !== null && pages !== null ? `${tight(strings.pager.records(total))} · ${tight(strings.pager.pageOf(page, pages))}` : tight(strings.pager.page(page)),
 };
+
+const tight = (text: string) => text.replace(/ /g, "\u00a0");
 
 export interface PagerProps {
   /** 1-based. */
@@ -62,6 +63,18 @@ export function Pager({ page, pageSize, total, reachablePages, onPage, onPageSiz
   const canNext = (pages === null || page < pages) && (hasNext || reachablePages.has(page + 1));
   // A page size outside the list (a stale URL) is still shown, not silently replaced.
   const sizes = pageSizes.includes(pageSize) ? pageSizes : [...pageSizes, pageSize].sort((a, b) => a - b);
+  const sizeOptions = sizes.map((s) => ({ value: String(s), label: String(s) }));
+
+  // One page at the default size: nothing to turn or change, only how many records there are.
+  if (page === 1 && !hasNext && pageSize === pageSizes[0] && (total === null || total <= pageSize)) {
+    return total === null || total === 0 ? null : (
+      <div className="dash-pager dash-pager--single">
+        <p className="dash-pager__summary" role="status" aria-live="polite">
+          {tight(strings.pager.recordsShort(total))}
+        </p>
+      </div>
+    );
+  }
 
   return (
     <div className="dash-pager" data-loading={loading || undefined}>
@@ -101,13 +114,7 @@ export function Pager({ page, pageSize, total, reachablePages, onPage, onPageSiz
         <label htmlFor={selectId} className="dash-pager__size-label">
           {l.rowsPerPage}
         </label>
-        <NativeSelect id={selectId} compact value={String(pageSize)} onChange={(e) => onPageSize(Number(e.target.value))}>
-          {sizes.map((s) => (
-            <option key={s} value={s}>
-              {s}
-            </option>
-          ))}
-        </NativeSelect>
+        <Select id={selectId} compact value={String(pageSize)} options={sizeOptions} onChange={(v) => onPageSize(Number(v))} />
       </div>
     </div>
   );

@@ -1149,6 +1149,8 @@ a.dash-stat:hover {
   flex-direction: column;
   gap: 12px;
   min-width: 0;
+  /* The toolbar, the card grid and the sticky first column follow the width of the list itself, not the viewport. */
+  container: dt / inline-size;
 }
 .dash-dt:not([data-framed]) {
   gap: 0;
@@ -1177,19 +1179,32 @@ a.dash-stat:hover {
   flex: 0 1 240px;
   min-width: 160px;
 }
-@media (max-width: 599px) {
-  .dash-dt__tools .rb-select {
-    flex-basis: 100%;
-  }
+/* The right side of the toolbar: list actions, the sort select (cards only: the table has its headers), the view switch. */
+.dash-dt__end {
+  display: flex;
+  flex: none;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 10px 12px;
+  margin-inline-start: auto;
+  min-width: 0;
+}
+.dash-dt__listactions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
 }
 .dash-dt__sortsel {
-  display: none;
-  flex: 0 1 230px;
-  min-width: 160px;
-}
-/* Cards have no header row to sort by: the toolbar offers a select instead (only when this table is shown as cards). */
-html[data-view="cards"] .dash-dt:has(.dash-table--stack) .dash-dt__sortsel {
   display: flex;
+  flex: 0 1 230px;
+  min-width: 170px;
+}
+.dash-dt__sortsel .rb-select {
+  width: 100%;
+}
+/* The sentence about relevance duplicates the disabled sort select of the cards view. */
+.dash-dt[data-mode="cards"] .dash-dt__tools .dash-dt__note {
+  display: none;
 }
 .dash-dt__toolbar .rb-seg button {
   height: 32px;
@@ -1202,8 +1217,61 @@ html[data-view="cards"] .dash-dt:has(.dash-table--stack) .dash-dt__sortsel {
 .dash-viewswitch svg {
   font-size: 16px;
 }
+/* Toolbar per list width (container query): 880 and up one row; 560-879 search and filters, then a row for the right side;
+   under 560 the search alone, then filters, sort and the icon-only switch share a row. */
+@container dt (min-width: 880px) {
+  /* A small basis: the tools and the right side share one row, the tools shrink first. */
+  .dash-dt__tools {
+    flex: 1 1 360px;
+  }
+  .dash-dt__tools .dash-search {
+    flex: 1 1 200px;
+    max-width: 420px;
+  }
+}
+@container dt (min-width: 560px) and (max-width: 879px) {
+  .dash-dt__tools {
+    flex: 1 1 100%;
+  }
+  .dash-dt__end {
+    flex: 1 1 100%;
+  }
+}
+@container dt (max-width: 559px) {
+  .dash-dt__tools,
+  .dash-dt__end {
+    display: contents;
+  }
+  .dash-dt__tools .dash-search,
+  .dash-dt__tools > form {
+    flex: 1 1 100%;
+    max-width: none;
+  }
+  .dash-dt__tools .rb-select {
+    flex: 1 1 140px;
+    min-width: 0;
+  }
+  .dash-dt__sortsel {
+    flex: 1 1 140px;
+    min-width: 0;
+  }
+  .dash-dt__end > .dash-viewswitch {
+    margin-inline-start: auto;
+  }
+  .dash-viewswitch__label {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip: rect(0 0 0 0);
+    white-space: nowrap;
+  }
+}
 .dash-dt__surface {
   min-width: 0;
+}
+.dash-dt__surface:focus {
+  outline: none;
 }
 /* The card clips its contents, so the header row and the hovered last row follow the rounded corners.
    Scoped to cards that hold a table: other cards keep their focus rings and shadows unclipped. */
@@ -1214,6 +1282,16 @@ html[data-view="cards"] .dash-dt:has(.dash-table--stack) .dash-dt__sortsel {
 .dash-dt__footer {
   padding: 12px;
   border-top: 1px solid var(--rb-line);
+}
+/* A page with one page of rows and no total has no pager: no empty bar. */
+.dash-dt__footer:empty {
+  display: none;
+}
+/* Cards sit on the page: the pager is its own frosted bar under the grid, not a strip of a card. */
+.dash-dt__surface[data-bare] > .dash-dt__footer {
+  padding: 0;
+  border-top: 0;
+  margin-top: 16px;
 }
 /* A line of help in the toolbar (ordered by relevance) or above the pager (an empty page). */
 .dash-dt__note {
@@ -1231,6 +1309,9 @@ html[data-view="cards"] .dash-dt:has(.dash-table--stack) .dash-dt__sortsel {
 .dash-table-wrap {
   min-width: 0;
   overflow-x: auto;
+  /* The sideways scroll is part of the design: a thin visible bar tells people there is more. */
+  scrollbar-width: thin;
+  scrollbar-color: var(--rb-line-strong) transparent;
 }
 /* Sticky header: it sticks to the top of this box, so the box needs a height (the `maxHeight` prop). */
 .dash-table-wrap--scroll {
@@ -1322,34 +1403,123 @@ html[data-view="cards"] .dash-dt:has(.dash-table--stack) .dash-dt__sortsel {
 }
 .rb-table td.dash-cell--name {
   min-width: 160px;
-  max-width: 340px;
 }
-/* Short values (dates, states, counts, actions) never wrap and take only what they need (width 1% = content
-   width, the other columns share the rest): `Column.nowrap`, `numeric`, `actions`, `truncate`. */
+/* Column types (`Column.type`): short values (state words, dates, counts, versions, actions) never wrap and take only
+   what they need (width 1% = content width, the other columns share the rest). */
 .rb-table td.dash-cell--nowrap {
   width: 1%;
   white-space: nowrap;
 }
-/* Long free text (`Column.truncate`): cut with an ellipsis, the full text is the title and stays in the DOM. */
-.dash-cell-trunc {
+.rb-table th.dash-col--date,
+.rb-table td.dash-col--date {
+  min-width: 104px;
+}
+.rb-table td.dash-col--text {
+  min-width: 200px;
+}
+/* The cap of a name, text, mono or badge cell sits on an inner box: a max-width on the td itself is ignored by auto table layout.
+   Longer content is cut with an ellipsis (the shared tooltip, `Truncate`, shows the whole text). */
+.dash-cell-box {
+  display: block;
+  min-width: 0;
+}
+.dash-cell-box--name,
+.dash-cell-box--mono {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.dash-cell-box--text {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+  overflow: hidden;
+}
+.dash-cell-box a:focus-visible {
+  outline-offset: -2px;
+}
+/* The shared box of `Truncate`: one line with an ellipsis, or 2-3 lines clamped. The full text is in the DOM. */
+.dash-truncate-box {
   display: block;
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-/* Every other column is nowrap: columns are as wide as their content and the name column takes the rest
-   (and cuts a long name with an ellipsis; its link or text carries `dash-truncate`). */
+.dash-truncate-box--lines {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: var(--dash-lines, 2);
+  line-clamp: var(--dash-lines, 2);
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+.dash-truncate-box:focus-visible {
+  outline-offset: -2px;
+}
+.dash-truncate-tip {
+  position: fixed;
+  z-index: calc(var(--rb-z-banner) + 20);
+  box-sizing: border-box;
+  max-width: 320px;
+  padding: 7px 10px;
+  border-radius: var(--rb-r-sm);
+  border: 1px solid var(--rb-line);
+  background: var(--rb-surface);
+  color: var(--rb-ink);
+  box-shadow: var(--rb-shadow-popover);
+  font-size: 12.5px;
+  line-height: 1.4;
+  overflow-wrap: anywhere;
+  pointer-events: none;
+}
+.dash-truncate-tip[hidden] {
+  display: none;
+}
+/* Every other column is short: columns are as wide as their content and the name column takes the rest
+   (and cuts a long name with an ellipsis). */
 .dash-table--fit td.dash-cell--name {
   width: 100%;
   max-width: 0;
   overflow: hidden;
 }
 /* In a narrow card the name column takes what is left and cuts a long name with an ellipsis. */
-html:not([data-view="cards"]) .dash-card--tight .rb-table td.dash-cell--name {
+.dash-card--tight .rb-table td.dash-cell--name {
   width: 100%;
   max-width: 0;
   overflow: hidden;
+}
+/* A list narrower than 900 px scrolls sideways inside its card: the name column stays in view (a solid cell, a
+   hairline at its end), and is held to 200 px. Hover and focus colours are repainted as solid colours on it. */
+@container dt (max-width: 899px) {
+  .dash-table--cardable th:first-child,
+  .dash-table--cardable td:first-child {
+    position: sticky;
+    inset-inline-start: 0;
+    z-index: 2;
+    box-shadow: inset -1px 0 0 var(--rb-line);
+  }
+  .dash-table--cardable th:first-child {
+    z-index: 3;
+  }
+  .dash-table--cardable td:first-child {
+    background: var(--rb-surface);
+  }
+  .dash-table--cardable tbody tr:hover td:first-child,
+  .dash-table--cardable tbody tr[data-clickable]:active td:first-child,
+  .dash-table--cardable tbody tr[data-clickable]:has(.dash-cell--name a:focus-visible) td:first-child {
+    background: var(--rb-hover);
+  }
+  .dash-table--cardable td.dash-cell--name .dash-cell-box,
+  .dash-table--cardable td.dash-cell--name .dash-truncate-box {
+    max-width: 200px;
+  }
+  .dash-table--cardable.dash-table--fit td.dash-cell--name {
+    width: 1%;
+    max-width: none;
+    overflow: visible;
+  }
 }
 .rb-table td.dash-cell--actions {
   text-align: end;
@@ -1387,81 +1557,277 @@ html:not([data-view="cards"]) .dash-card--tight .rb-table td.dash-cell--name {
   text-overflow: ellipsis;
 }
 
-/* Cards view (Settings > View, or the switch above a table): each row becomes a small card, at every width;
-   cells show their column name. `html[data-view]` is set before the first paint (src/boot/boot.js).
-   `stack={false}` tables have no `dash-table--stack` class and stay tables. */
-html[data-view="cards"] .dash-table-wrap:has(> .dash-table--stack) {
-  overflow-x: visible;
-}
-html[data-view="cards"] .dash-table-wrap .dash-table--stack {
-  min-width: 0;
-}
-html[data-view="cards"] .dash-table--stack thead {
-  position: absolute;
-  width: 1px;
-  height: 1px;
-  overflow: hidden;
-  clip: rect(0 0 0 0);
-}
-html[data-view="cards"] .dash-table--stack,
-html[data-view="cards"] .dash-table--stack tbody,
-html[data-view="cards"] .dash-table--stack tr,
-html[data-view="cards"] .dash-table--stack td {
-  display: block;
-  width: 100%;
-}
-html[data-view="cards"] .dash-table--stack tr {
-  padding: 12px 16px;
-  border-bottom: 1px solid var(--rb-line);
-}
-html[data-view="cards"] .dash-table--stack tbody tr:last-child {
-  border-bottom: 0;
-}
-html[data-view="cards"] .dash-table--stack td,
-html[data-view="cards"] .dash-table-wrap .dash-table--stack td:first-child,
-html[data-view="cards"] .dash-table-wrap .dash-table--stack td:last-child {
-  display: flex;
+/* Row buttons (components/RowActions.tsx): in a table cell and in a card footer. */
+.dash-row-actions {
+  display: inline-flex;
   align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  min-height: 30px;
-  padding: 4px 0;
-  border: 0;
-  max-width: none;
-  text-align: end;
+  justify-content: flex-end;
+  gap: 6px;
 }
-html[data-view="cards"] .dash-table--stack td > * {
+.dash-row-menu {
+  position: fixed;
+  left: 0;
+  top: 0;
+  z-index: calc(var(--rb-z-banner) + 10);
+  box-sizing: border-box;
+  min-width: 200px;
+  max-width: calc(100vw - 16px);
+  overflow-y: auto;
+  border-radius: var(--rb-r-lg);
+  border: 1px solid var(--rb-line);
+  background: var(--rb-surface);
+  box-shadow: var(--rb-shadow-popover);
+}
+.dash-row-menu .rb-menu__item {
+  min-height: 40px;
+}
+
+/* Cards view (components/CardGrid.tsx; the Table | Cards switch, or a phone with no choice stored): one card per
+   record, in a grid whose columns come from the list's own width (container `dt`, see `.dash-dt`):
+   1 column under 560 px, 2 from 560, 3 from 880, 4 from 1240. */
+.dash-cards {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 12px;
+  align-items: stretch;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+@container dt (min-width: 560px) {
+  .dash-cards {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+@container dt (min-width: 880px) {
+  .dash-cards {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 16px;
+  }
+}
+@container dt (min-width: 1240px) {
+  .dash-cards {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+}
+.dash-cards__item {
+  display: flex;
   min-width: 0;
 }
-html[data-view="cards"] .dash-table--stack td::before {
-  content: attr(data-label);
-  flex: none;
-  max-width: 45%;
-  font-size: 12.5px;
-  font-weight: 600;
+.dash-cards[data-busy] {
+  opacity: 0.55;
+}
+.dash-rcard {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 auto;
+  gap: 10px;
+  min-width: 0;
+  padding: 16px;
+  border: 1px solid var(--rb-line);
+  border-radius: var(--dash-radius-sm);
+  background: var(--rb-surface);
+  box-shadow: var(--dash-card-shadow);
+  font-size: 14px;
+}
+/* Inside a card (detail pages): flat tiles, no card in a card. */
+.dash-cards[data-flat] {
+  padding: 12px;
+}
+.dash-cards[data-flat] .dash-rcard {
+  box-shadow: none;
+}
+.dash-rcard[data-dim] {
   color: var(--rb-muted);
-  text-align: start;
 }
-html[data-view="cards"] .dash-table--stack td[data-primary="true"],
-html[data-view="cards"] .dash-table-wrap .dash-table--stack td[data-primary="true"] {
-  justify-content: flex-start;
-  text-align: start;
-  padding-bottom: 6px;
+.dash-rcard[data-clickable] {
+  cursor: pointer;
+  transition: transform var(--rb-duration) var(--rb-ease);
+}
+.dash-rcard[data-clickable]:hover {
+  border-color: var(--rb-line-strong);
+  background: var(--rb-hover);
+  transform: translateY(-1px);
+}
+.dash-rcard:has(.dash-rcard__title a:focus-visible) {
+  outline: 2px solid var(--rb-accent);
+  outline-offset: 1px;
+  border-color: var(--rb-accent);
+}
+.dash-rcard__title a:focus-visible {
+  outline: none;
+}
+.dash-rcard__title {
   font-size: 15px;
+  font-weight: 600;
+  line-height: 1.35;
+  min-width: 0;
 }
-html[data-view="cards"] .dash-table--stack td[data-primary="true"]::before {
-  display: none;
+.dash-rcard__title .dash-truncate-box {
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
 }
-html[data-view="cards"] .dash-table--stack td.dash-cell--actions {
+/* A name cell written for the table cuts at one line with `dash-truncate`; on a card the title wraps to two lines. */
+.dash-rcard__title .dash-truncate {
+  display: inline;
+  white-space: normal;
+  overflow: visible;
+  overflow-wrap: anywhere;
+}
+.dash-rcard__sub {
+  margin-top: -6px;
+  font-size: 13px;
+  color: var(--rb-muted);
+  min-width: 0;
+}
+.dash-rcard__status {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+.dash-rcard__badge {
+  display: inline-flex;
+  align-items: center;
+  min-width: 0;
+  max-width: 100%;
+  white-space: nowrap;
+}
+.dash-rcard__badge .rb-pill {
+  max-width: 200px;
+}
+.dash-rcard__facts {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(124px, 1fr));
+  gap: 10px 16px;
+  margin: 0;
+  min-width: 0;
+}
+.dash-rcard__fact {
+  min-width: 0;
+}
+.dash-rcard__fact[data-wide] {
+  grid-column: 1 / -1;
+}
+.dash-rcard dt {
+  margin: 0 0 2px;
+  font-size: 11.5px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--rb-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.dash-rcard dd {
+  margin: 0;
+  min-width: 0;
+  font-size: 14px;
+}
+/* A cell written for the table stacks its parts in a column: on a card they keep their own width (a pill is not a bar). */
+.dash-rcard .dash-cell-stack {
+  align-items: flex-start;
+}
+.dash-rcard__details {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding-top: 10px;
+  border-top: 1px solid var(--rb-line);
+  font-size: 12.5px;
+  color: var(--rb-muted);
+  min-width: 0;
+}
+/* Details run on in one line of text: "Windows build 22631 · Agent 1.4.2", at most two lines. */
+.dash-rcard__inline {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+  overflow: hidden;
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+.dash-rcard__ditem,
+.dash-rcard__ditem dt,
+.dash-rcard__ditem dd {
+  display: inline;
+  margin: 0;
+  font-size: inherit;
+  letter-spacing: normal;
+  text-transform: none;
+  white-space: normal;
+}
+.dash-rcard__ditem dt {
+  font-weight: 600;
+  color: inherit;
+}
+.dash-rcard__ditem + .dash-rcard__ditem::before {
+  content: " · ";
+  white-space: pre;
+}
+.dash-rcard__text {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+  line-clamp: 3;
+  overflow: hidden;
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+.dash-rcard__text dt,
+.dash-rcard__text dd {
+  display: inline;
+  margin: 0;
+  font-size: inherit;
+  letter-spacing: normal;
+  text-transform: none;
+  white-space: normal;
+}
+.dash-rcard__text dt {
+  font-weight: 600;
+}
+.dash-rcard__text dt::after {
+  content: " ";
+}
+/* The footer is pinned to the bottom, so cards in one grid row line up. */
+.dash-rcard__actions {
+  display: flex;
   justify-content: flex-end;
-  width: 100%;
-  padding-top: 8px;
+  margin-top: auto;
 }
-html[data-view="cards"] .dash-table--stack td.dash-cell--actions::before {
-  display: none;
+.dash-rcard__actions[data-rule] {
+  padding-top: 10px;
+  border-top: 1px solid var(--rb-line);
 }
-html[data-view="cards"] .dash-table--stack td[data-empty="true"] {
-  display: none;
+.dash-rcard__details + .dash-rcard__actions {
+  padding-top: 2px;
+}
+/* Skeleton cards: same grid, same card, grey bars. */
+.dash-rcard--sk {
+  gap: 12px;
+}
+.dash-rcard--sk .dash-rcard__fact {
+  display: flex;
+  flex-direction: column;
+}
+.dash-cards[data-flat] .dash-rcard--sk {
+  box-shadow: none;
+}
+@media (prefers-reduced-motion: reduce) {
+  .dash-rcard[data-clickable],
+  .dash-rcard[data-clickable]:hover {
+    transform: none;
+    transition: none;
+  }
+}
+[data-lite="true"] .dash-rcard[data-clickable],
+[data-lite="true"] .dash-rcard[data-clickable]:hover {
+  transform: none;
+  transition: none;
 }
 
 .dash-list {
@@ -2141,12 +2507,21 @@ html[data-view="cards"] .dash-table--stack td[data-empty="true"] {
 .dash-dt__footer {
   container-type: inline-size;
 }
+/* One page of rows: only "3 records". */
+.dash-pager--single {
+  grid-template-columns: minmax(0, 1fr);
+  grid-template-areas: "summary";
+}
 /* The number strip scrolls sideways when it is wider than the room it has. */
 @container (min-width: 680px) {
   .dash-pager {
     grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
     grid-template-areas: "summary nav size";
     padding: 8px 12px 8px 18px;
+  }
+  .dash-pager--single {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-areas: "summary";
   }
 }
 @media (pointer: coarse) {

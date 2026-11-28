@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { fireEvent, render, screen, within } from "@testing-library/react";
 import { AppError } from "../lib/errors";
 import { VIEW_KEY } from "../lib/viewMode";
+import { optionLabels, pickOption, selectedText } from "../test/select";
 import { EmptyState } from "./EmptyState";
 import { DataTable, type Column, type DataTableProps } from "./DataTable";
 
@@ -66,23 +67,81 @@ describe("DataTable: structure", () => {
     expect(region.className).toContain("dash-table-wrap");
   });
 
-  it("in cards view the wrapper is no scroll region; stack={false} stays a table", () => {
+  it("in cards view the list is a list named by the caption with one item per row and no table; stack={false} stays a table", () => {
     localStorage.setItem(VIEW_KEY, "cards");
     const { unmount } = show();
     expect(screen.queryByRole("region", { name: "Things" })).toBeNull();
-    expect(screen.getByRole("table", { name: "Things" }).className).toContain("dash-table--stack");
+    expect(screen.queryByRole("table")).toBeNull();
+    const list = screen.getByRole("list", { name: "Things" });
+    expect(within(list).getAllByRole("listitem")).toHaveLength(2);
     unmount();
     show({ stack: false });
     expect(screen.getByRole("region", { name: "Things" })).toBeTruthy();
-    expect(screen.getByRole("table", { name: "Things" }).className).not.toContain("dash-table--stack");
+    expect(screen.getByRole("table", { name: "Things" })).toBeTruthy();
+    expect(screen.queryByRole("list", { name: "Things" })).toBeNull();
   });
 
-  it("greys dim rows and gives the cells their labels for the cards view", () => {
+  it("greys dim rows", () => {
     show({ isDim: (r) => r.id === "b" });
     const rows = screen.getAllByRole("row");
     expect(rows[1]!.getAttribute("data-dim")).toBeNull();
     expect(rows[2]!.getAttribute("data-dim")).toBe("true");
-    expect(within(rows[1]!).getAllByRole("cell")[1]!.getAttribute("data-label")).toBe("Count");
+  });
+
+  it("cards show facts as a label above the value (dt / dd), with the header or cardLabel as the label", () => {
+    localStorage.setItem(VIEW_KEY, "cards");
+    show({ columns: [cols[0]!, { ...cols[1]!, cardLabel: "How many" }] });
+    const [first] = screen.getAllByRole("listitem");
+    expect(within(first!).getByText("How many").tagName).toBe("DT");
+    expect(within(first!).getByText("3").closest("dd")).not.toBeNull();
+    // The name is the title and the real link.
+    expect(within(first!).getByRole("link", { name: "Alpha" })).toBeTruthy();
+  });
+
+  it("card-only columns (table: false) are not in the table but are in the cards", () => {
+    const withExtra: Column<Row>[] = [...cols, { key: "x", header: "Extra", table: false, card: "detail", cell: () => "only on cards" }];
+    const { unmount } = show({ columns: withExtra });
+    expect(screen.getAllByRole("columnheader").map((h) => h.textContent)).toEqual(["Name", "Count", "Actions"]);
+    expect(screen.queryByText("only on cards")).toBeNull();
+    unmount();
+    localStorage.setItem(VIEW_KEY, "cards");
+    show({ columns: withExtra });
+    expect(screen.getAllByText("only on cards")).toHaveLength(2);
+  });
+
+  it("a rowActions column draws the same buttons in the table cell and the card footer", () => {
+    const onRevoke = vi.fn();
+    const withActions: Column<Row>[] = [
+      cols[0]!,
+      { key: "act", header: "Actions", actions: true, cell: () => null, rowActions: (r) => [{ label: "Revoke", danger: true, onSelect: () => onRevoke(r.id) }] },
+    ];
+    const { unmount } = show({ columns: withActions, rowLabel: (r) => r.name });
+    fireEvent.click(screen.getByRole("button", { name: "Revoke: Alpha" }));
+    expect(onRevoke).toHaveBeenCalledWith("a");
+    unmount();
+    localStorage.setItem(VIEW_KEY, "cards");
+    show({ columns: withActions, rowLabel: (r) => r.name });
+    fireEvent.click(screen.getByRole("button", { name: "Revoke: Bravo" }));
+    expect(onRevoke).toHaveBeenLastCalledWith("b");
+  });
+
+  it("every row of a table gets the type class of its column on the header and the cell", () => {
+    const typed: Column<Row>[] = [
+      { key: "n", header: "N", primary: true, cell: (r) => r.name },
+      { key: "d", header: "D", type: "date", cell: () => "4 minutes ago" },
+      { key: "t", header: "T", type: "text", cell: () => "some free text" },
+      { key: "m", header: "M", type: "mono", cell: () => "22631" },
+    ];
+    show({ columns: typed });
+    const heads = screen.getAllByRole("columnheader").map((h) => h.className);
+    expect(heads[0]).toContain("dash-col--name");
+    expect(heads[1]).toContain("dash-col--date");
+    const cells = within(screen.getAllByRole("row")[1]!).getAllByRole("cell");
+    expect(cells[1]!.className).toContain("dash-cell--nowrap");
+    expect(cells[2]!.className).not.toContain("dash-cell--nowrap");
+    expect(cells[3]!.className).toContain("dash-col--mono");
+    // A long string in a capped cell is cut by the shared Truncate box at the type's cap.
+    expect(cells[2]!.querySelector<HTMLElement>(".dash-truncate-box")!.style.maxWidth).toBe("360px");
   });
 
   it("only scrolls rows inside the table (sticky header) when asked with maxHeight", () => {
@@ -128,7 +187,7 @@ describe("DataTable: short cells and long text", () => {
     expect(table().className).not.toContain("dash-table--fit");
   });
 
-  it("truncate cuts after that many characters (32 for true), keeps the full text and offers it as the title", () => {
+  it("truncate (legacy) cuts after that many characters (32 for true) and keeps the full text, with no title attribute", () => {
     const long = "A very long free text that goes on and on and on and on";
     const cols2: Column<Row>[] = [
       { key: "n", header: "N", primary: true, cell: (r) => r.name },
@@ -137,33 +196,23 @@ describe("DataTable: short cells and long text", () => {
     ];
     show({ columns: cols2 });
     const [, a, b] = cellsOf(1);
-    const spanA = a!.querySelector<HTMLElement>(".dash-cell-trunc")!;
-    const spanB = b!.querySelector<HTMLElement>(".dash-cell-trunc")!;
-    expect(spanA.style.maxWidth).toBe("12ch");
-    expect(spanB.style.maxWidth).toBe("32ch");
-    expect(spanA.textContent).toBe(long);
-    expect(spanA.title).toBe(long);
+    const boxA = a!.querySelector<HTMLElement>(".dash-truncate-box")!;
+    const boxB = b!.querySelector<HTMLElement>(".dash-truncate-box")!;
+    expect(boxA.style.maxWidth).toBe("12ch");
+    expect(boxB.style.maxWidth).toBe("32ch");
+    expect(boxA.textContent).toBe(long);
+    expect(boxA.hasAttribute("title")).toBe(false);
     // A truncating column cannot be squeezed either.
     expect(a!.className).toContain("dash-cell--nowrap");
   });
 
-  it("gives the title of a truncated element cell only when the text is really cut", () => {
-    const cols2: Column<Row>[] = [{ key: "a", header: "A", truncate: 10, cell: (r) => <b>{r.name}</b> }];
-    show({ columns: cols2 });
-    const span = cellsOf(1)[0]!.querySelector<HTMLElement>(".dash-cell-trunc")!;
-    expect(span.title).toBe("");
-    Object.defineProperty(span, "scrollWidth", { configurable: true, value: 300 });
-    Object.defineProperty(span, "clientWidth", { configurable: true, value: 100 });
-    fireEvent.mouseEnter(span);
-    expect(span.title).toBe("Alpha");
+  it("a name cell that is a plain string gets the shared tooltip box, capped at 280 px", () => {
+    show({ columns: [{ key: "n", header: "N", primary: true, cell: (r) => r.name }] });
+    const box = cellsOf(1)[0]!.querySelector<HTMLElement>(".dash-truncate-box")!;
+    expect(box.style.maxWidth).toBe("280px");
+    expect(box.textContent).toBe("Alpha");
   });
 
-  it("in cards view the one-line table rules stay off", () => {
-    localStorage.setItem(VIEW_KEY, "cards");
-    show();
-    expect(screen.getByRole("table", { name: "Things" }).className).not.toContain("dash-table--fit");
-    expect(cellsOf(1)[1]!.className).not.toContain("dash-cell--nowrap");
-  });
 });
 
 describe("DataTable: sorting", () => {
@@ -208,13 +257,32 @@ describe("DataTable: sorting", () => {
     expect(onSortChange).toHaveBeenCalledWith({ key: "name", dir: "asc" });
   });
 
-  it("offers a sort select in the toolbar for the cards view", () => {
+  it("offers the custom sort select in the toolbar for the cards view only, in plain words", () => {
     const onSortChange = vi.fn();
+    const { unmount } = show({ framed: true, sort: { key: "name", dir: "asc" }, onSortChange });
+    expect(screen.queryByLabelText("Sort by")).toBeNull();
+    unmount();
+    localStorage.setItem(VIEW_KEY, "cards");
     show({ framed: true, sort: { key: "name", dir: "asc" }, onSortChange });
-    const select = screen.getByLabelText("Sort by") as HTMLSelectElement;
-    expect([...select.options].map((o) => o.value)).toEqual(["name:asc", "name:desc", "count:asc", "count:desc"]);
-    fireEvent.change(select, { target: { value: "count:desc" } });
-    expect(onSortChange).toHaveBeenCalledWith({ key: "count", dir: "desc" });
+    expect(selectedText("Sort by")).toBe("Name: A to Z");
+    expect(optionLabels("Sort by")).toEqual(["Name: A to Z", "Name: Z to A", "Count: most first", "Count: fewest first"]);
+    pickOption("Sort by", "Count: fewest first");
+    expect(onSortChange).toHaveBeenCalledWith({ key: "count", dir: "asc" });
+  });
+
+  it("lists a default order that has no column first, so the select can show the current order", () => {
+    localStorage.setItem(VIEW_KEY, "cards");
+    show({ framed: true, sort: { key: "added", dir: "desc" }, onSortChange: vi.fn(), defaultSort: { key: "added", dir: "desc", label: "Newest first" } });
+    expect(selectedText("Sort by")).toBe("Newest first");
+    expect(optionLabels("Sort by")[0]).toBe("Newest first");
+  });
+
+  it("while a search orders by relevance the sort select is disabled and says so", () => {
+    localStorage.setItem(VIEW_KEY, "cards");
+    show({ framed: true, sortNote: "Best matches first" });
+    const trigger = screen.getByLabelText("Sort by") as HTMLButtonElement;
+    expect(trigger.disabled).toBe(true);
+    expect(trigger.textContent).toBe("Best matches first");
   });
 });
 
@@ -334,8 +402,9 @@ describe("DataTable: toolbar and view switch", () => {
     expect(document.documentElement.getAttribute("data-view")).toBe("cards");
     expect(localStorage.getItem(VIEW_KEY)).toBe("cards");
     expect(screen.getByRole("radio", { name: "Cards" }).getAttribute("aria-checked")).toBe("true");
-    // The wrapper is no scroll region any more.
+    // The wrapper is no scroll region any more: the rows are a list of cards.
     expect(screen.queryByRole("region", { name: "Things" })).toBeNull();
+    expect(screen.getByRole("list", { name: "Things" })).toBeTruthy();
   });
 
   it("the legacy layout (inside the screen's own Card) gets no toolbar and no switch", () => {

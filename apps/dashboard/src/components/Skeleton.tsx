@@ -24,6 +24,28 @@ export function SkeletonRows({ rows = 6, columns = 4 }: { rows?: number; columns
   );
 }
 
+/** Placeholder cards for the Cards view, in the same grid as the real ones: a title, a subtitle and 2 × 2 facts. */
+export function SkeletonCards({ count = 6, flat = false }: { count?: number; flat?: boolean }) {
+  return (
+    <div className="dash-cards" role="status" aria-label={strings.app.loading} data-flat={flat || undefined}>
+      {Array.from({ length: Math.min(count, 6) }, (_, i) => (
+        <div className="dash-rcard dash-rcard--sk" key={i}>
+          <Skeleton width="62%" height={16} />
+          <Skeleton width="40%" height={12} />
+          <div className="dash-rcard__facts">
+            {Array.from({ length: 4 }, (_, f) => (
+              <div className="dash-rcard__fact" key={f}>
+                <Skeleton width="45%" height={10} />
+                <Skeleton width="75%" height={13} style={{ marginTop: 6 }} />
+              </div>
+            ))}
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
 export function SkeletonBlock({ lines = 3 }: { lines?: number }) {
   return (
     <div role="status" aria-label={strings.app.loading} style={{ display: "flex", flexDirection: "column", gap: 12 }}>

@@ -3,7 +3,7 @@
 //   pnpm --filter @rulebox/dashboard dev:demo -- --port 4321 --strictPort   (in another terminal)
 //   node e2e/shots.mjs http://localhost:4321 --out=../../.tmp/ui-pass/devices \
 //        --paths=devices:/devices,device:@device,settings:/settings?tab=updates \
-//        [--widths=390,820,1366,1920] [--themes=light,dark] [--full=0]
+//        [--widths=390,820,1366,1920] [--themes=light,dark] [--full=0] [--storage=rulebox.view=cards]
 //
 // `@name` paths are discovered from the seeded demo lists: @device, @deviceLong,
 // @group, @groupEmpty, @employee, @app, @appWeb. A path may carry a query string.
@@ -19,6 +19,14 @@ const OUT = resolve(opt("out", "../../.tmp/ui-pass/shots"));
 const widths = opt("widths", "390,820,1366,1920").split(",").map(Number);
 const themes = opt("themes", "light,dark").split(",");
 const full = opt("full", "1") !== "0";
+// --storage=key=value[,key=value]: localStorage entries set before the app loads (e.g. rulebox.view=cards).
+const storage = opt("storage", "")
+  .split(",")
+  .filter(Boolean)
+  .map((kv) => {
+    const i = kv.indexOf("=");
+    return [kv.slice(0, i), kv.slice(i + 1)];
+  });
 const paths = opt("paths", "overview:/")
   .split(",")
   .filter(Boolean)
@@ -56,13 +64,17 @@ async function newPage(width, theme) {
     reducedMotion: "reduce",
     colorScheme: theme === "dark" ? "dark" : "light",
   });
-  await ctx.addInitScript((t) => {
-    try {
-      localStorage.setItem("rulebox.theme", t);
-    } catch {
-      /* ignore */
-    }
-  }, theme);
+  await ctx.addInitScript(
+    ([t, extra]) => {
+      try {
+        localStorage.setItem("rulebox.theme", t);
+        for (const [k, v] of extra) localStorage.setItem(k, v);
+      } catch {
+        /* ignore */
+      }
+    },
+    [theme, storage],
+  );
   const page = await ctx.newPage();
   page.on("pageerror", (e) => console.log(`  [pageerror] ${e.message}`));
   await page.goto(`${BASE}/sign-in`);

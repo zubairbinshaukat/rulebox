@@ -7,6 +7,7 @@ import type { Me } from "../data/types";
 import { MeContext } from "../lib/member";
 import { VIEW_KEY } from "../lib/viewMode";
 import { strings } from "../lib/strings";
+import { pickOption } from "../test/select";
 import { appEditStrings } from "../lib/screenStrings/appEdit";
 import { appsStrings } from "../lib/screenStrings/apps";
 import { auditStrings } from "../lib/screenStrings/audit";
@@ -251,7 +252,7 @@ describe("Apps: URL state, sort, search, pager", () => {
     ui(<Apps />, "/apps?sort=name&dir=asc");
     fireEvent.click(screen.getByRole("button", { name: strings.pager.next }));
     expect(where()).toBe("/apps?sort=name&dir=asc&page=2");
-    fireEvent.change(screen.getByLabelText(strings.pager.rowsPerPage), { target: { value: "50" } });
+    pickOption(strings.pager.rowsPerPage, "50");
     expect(where()).toBe("/apps?sort=name&dir=asc&size=50");
     expect(last("apps:list")).toEqual({ archived: false, paginationOpts: { numItems: 50, cursor: null }, sort: { key: "name", dir: "asc" } });
     fireEvent.click(screen.getByRole("radio", { name: appsStrings.archived }));
@@ -273,9 +274,9 @@ describe("Apps: URL state, sort, search, pager", () => {
     localStorage.setItem(VIEW_KEY, "cards");
     cx.results["apps:list"] = page(apps(2));
     ui(<Apps />, "/apps");
-    expect(screen.getByRole("table", { name: appsStrings.title }).className).toContain("dash-table--stack");
-    const select = screen.getByLabelText(strings.table.sortSelect) as HTMLSelectElement;
-    fireEvent.change(select, { target: { value: "name:desc" } });
+    expect(screen.queryByRole("table")).toBeNull();
+    expect(within(screen.getByRole("list", { name: appsStrings.title })).getAllByRole("listitem")).toHaveLength(2);
+    pickOption(strings.table.sortSelect, strings.table.sortOption(appsStrings.colName, strings.table.sortDir.name.desc));
     expect(where()).toBe("/apps?sort=name&dir=desc");
     expect(last("apps:list")).toMatchObject({ sort: { key: "name", dir: "desc" } });
     expect(screen.getAllByRole("link", { name: /^App / })).toHaveLength(2);
@@ -491,7 +492,7 @@ describe("HistoryPanel: a small list in a card", () => {
     expect(last("audit:forTarget")).toMatchObject({ paginationOpts: { numItems: 10, cursor: "CUR1" } });
     expect(screen.getByText(strings.pager.page(2))).toBeTruthy();
     expect(where()).toBe("/apps/a1");
-    fireEvent.change(screen.getByLabelText(strings.pager.rowsPerPage), { target: { value: "25" } });
+    pickOption(strings.pager.rowsPerPage, "25");
     expect(last("audit:forTarget")).toMatchObject({ paginationOpts: { numItems: 25, cursor: null } });
     expect(where()).toBe("/apps/a1");
   });
