@@ -1,0 +1,226 @@
+/*
+ * Overview (`/`, UI pass 2026-11, docs/plans/ui-pass/other-pages.md section 2): the greeting and one status line, four compact tiles,
+ * "Needs attention" as cards, the newest failed installs and the recent activity. Shipped in the screen's own chunk. Tokens only; the
+ * only motion is the shared `dash-enter` fade and lift (opacity + transform; none with reduced motion or Lite).
+ *
+ * The page lays itself out by its own width (container `hm`), not the screen's:
+ *   under 560   one column: tiles 2 x 2, attention, failed installs, activity (the newest 6)
+ *   560 - 859   attention full width, failed installs and activity side by side
+ *   860 - 1239  attention + failed installs on the left (2/3), activity on the right (1/3), like the device page
+ *   1240 up     three columns: attention | failed installs | activity
+ */
+
+.hm {
+  container: hm / inline-size;
+  gap: 20px;
+}
+
+/* ------------------------------------------------------------ status line */
+
+.hm-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 15.5px;
+  font-weight: 600;
+  line-height: 1.35;
+  color: var(--rb-ink);
+}
+.hm-status__icon {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  font-size: 17px;
+  background: var(--rb-success-soft);
+  color: var(--rb-success-text);
+}
+.hm-status[data-tone="warning"] .hm-status__icon {
+  background: var(--rb-warning-soft);
+  color: var(--rb-warning-text);
+}
+.hm-status[data-tone="danger"] .hm-status__icon {
+  background: var(--rb-danger-soft);
+  color: var(--rb-danger-text);
+}
+
+/* The one "Add" button of a phone: a filled button that opens a menu (the three buttons do not fit side by side). */
+.hm-add.dash-icon-btn {
+  width: auto;
+  height: auto;
+  min-height: 44px;
+  gap: 8px;
+  padding-inline: 18px;
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--rb-on-accent, #fff);
+}
+.hm-add.dash-icon-btn:hover,
+.hm-add.dash-icon-btn[aria-expanded="true"] {
+  color: var(--rb-on-accent, #fff);
+}
+
+/* ------------------------------------------------------------ tiles */
+
+/* Four across; two by two when the page is narrower than 700 px. */
+.hm .hm-tiles {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+@container hm (max-width: 699px) {
+  .hm .hm-tiles {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+/* ------------------------------------------------------------ the three blocks */
+
+.hm-body {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  grid-template-areas:
+    "attn"
+    "fail"
+    "act";
+  align-items: start;
+  gap: 18px;
+  min-width: 0;
+}
+.hm-attention {
+  grid-area: attn;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-width: 0;
+}
+.hm-failed {
+  grid-area: fail;
+}
+.hm-activity {
+  grid-area: act;
+}
+@container hm (min-width: 560px) {
+  .hm-body {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    grid-template-areas:
+      "attn attn"
+      "fail act";
+  }
+}
+@container hm (min-width: 860px) {
+  .hm-body {
+    grid-template-columns: minmax(0, 2fr) minmax(0, 1fr);
+    grid-template-rows: auto 1fr;
+    grid-template-areas:
+      "attn act"
+      "fail act";
+    column-gap: 22px;
+  }
+}
+@container hm (min-width: 1240px) {
+  .hm-body {
+    grid-template-columns: minmax(0, 5fr) minmax(0, 4fr) minmax(0, 4fr);
+    grid-template-rows: auto;
+    grid-template-areas: "attn fail act";
+  }
+}
+
+/* The number next to "Needs attention". */
+.hm-count {
+  align-self: center;
+  min-width: 22px;
+  padding: 1px 8px;
+  border-radius: 11px;
+  font-size: 12px;
+  font-weight: 650;
+  line-height: 1.5;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+  background: var(--rb-accent-soft);
+  color: var(--rb-accent-text);
+}
+.hm-count[data-tone="warning"] {
+  background: var(--rb-warning-soft);
+  color: var(--rb-warning-text);
+}
+.hm-count[data-tone="danger"] {
+  background: var(--rb-danger-soft);
+  color: var(--rb-danger-text);
+}
+
+/* ------------------------------------------------------------ failed installs */
+
+.hm-fail {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.hm-fail__item {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  min-width: 0;
+  padding: 12px clamp(16px, 2vw, 22px);
+}
+.hm-fail__item + .hm-fail__item {
+  border-top: 1px solid var(--rb-line);
+}
+.hm-fail__text {
+  flex: 1;
+  min-width: 0;
+}
+.hm-fail__title,
+.hm-fail__why {
+  margin: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.hm-fail__title {
+  font-size: 14.5px;
+  font-weight: 600;
+}
+.hm-fail__title a {
+  font-weight: 650;
+}
+.hm-fail__why {
+  margin-top: 2px;
+  font-size: 13px;
+  color: var(--rb-muted);
+}
+.hm-fail__when {
+  flex: none;
+  padding-top: 1px;
+  font-size: 12.5px;
+  color: var(--rb-muted);
+  white-space: nowrap;
+}
+
+/* ------------------------------------------------------------ recent activity */
+
+/* A phone shows the newest six; the rest is one tap away on "View all". */
+@container hm (max-width: 559px) {
+  .hm-activity .dash-timeline__item:nth-child(n + 7) {
+    display: none;
+  }
+}
+
+/* ------------------------------------------------------------ loading */
+
+.hm-skeleton {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+.hm-skeleton__tiles {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 12px;
+}
+@container hm (max-width: 699px) {
+  .hm-skeleton__tiles {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}

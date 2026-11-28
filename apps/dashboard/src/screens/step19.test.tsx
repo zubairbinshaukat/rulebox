@@ -22,11 +22,12 @@ import { allowKinds, changedLayers, folderProblem, lockoutDraftOf, lockoutProble
 import { MeContext } from "../lib/member";
 import { applyPreset } from "./lockdown/presets";
 import { optionLabels, pickOption, selectedText } from "../test/select";
-import { groupStrings } from "../lib/screenStrings/group";
+import { groupPage } from "./group/strings";
 import { strings } from "../lib/strings";
 import { deviceLockdownStrings as ds } from "./lockdown/deviceStrings";
 import { findingsStrings as fs, lockdownErrorMessage, lockdownStrings as s } from "./lockdown/strings";
 import { overviewLockdownStrings } from "./overview/strings";
+import { overviewText as ot } from "./overview/text";
 
 // Phase 5 Step 19 screens (group lockdown, findings, the device page's Protection / Lockdown / USB cards, the overview warnings)
 // against the LIVE data seam with the Convex React hooks mocked, like step16.test.tsx.
@@ -678,7 +679,7 @@ describe("the group lockdown screen", () => {
   it("the group page links to it, for admins and viewers alike", () => {
     cx.results["groups:get"] = { group: { _id: "g1", name: "Sales", revision: 0, devices: { count: 0, more: false }, employees: { count: 0, more: false } }, apps: [] };
     ui(<GroupDetail />, "viewer", "/groups/g1");
-    expect(screen.getByRole("link", { name: groupStrings.lockdown }).getAttribute("href")).toBe("/groups/g1/lockdown");
+    expect(screen.getByRole("link", { name: groupPage.protection }).getAttribute("href")).toBe("/groups/g1/lockdown");
   });
 });
 
@@ -1058,14 +1059,14 @@ describe("the overview warnings", () => {
   it("nothing to warn about: no lockdown line", () => {
     cx.results["overview:get"] = overview(none);
     ui(<Overview />, "admin", "/");
-    expect(screen.getByText(strings.overview.attentionNone)).toBeTruthy();
-    expect(screen.getByText(strings.overview.leadCalm)).toBeTruthy();
+    expect(screen.getByText(ot.attentionNone)).toBeTruthy();
+    expect(screen.getByText(ot.statusCalm(3))).toBeTruthy();
   });
 
   it("an older server without the field shows no warning and does not crash", () => {
     cx.results["overview:get"] = overview();
     ui(<Overview />, "admin", "/");
-    expect(screen.getByText(strings.overview.attentionNone)).toBeTruthy();
+    expect(screen.getByText(ot.attentionNone)).toBeTruthy();
   });
 
   it("groups too long in audit, paused rollouts and PCs that did not apply the policy, each with a link", async () => {
@@ -1088,8 +1089,8 @@ describe("the overview warnings", () => {
     expect(screen.getByRole("link", { name: o.haltedAction }).getAttribute("href")).toBe("/groups/g3/rollout");
     expect(screen.getByRole("link", { name: o.notAppliedAction }).getAttribute("href")).toBe("/devices/d9");
     // Three kinds of warnings count as three things that need attention; the empty state is gone.
-    expect(screen.getByText(strings.overview.leadAttention(3))).toBeTruthy();
-    expect(screen.queryByText(strings.overview.attentionNone)).toBeNull();
+    expect(screen.getByText(ot.statusAttention(3))).toBeTruthy();
+    expect(screen.queryByText(ot.attentionNone)).toBeNull();
     expect(document.body.textContent).not.toContain("would_block_exit");
   });
 });

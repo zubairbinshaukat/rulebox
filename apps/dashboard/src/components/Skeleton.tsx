@@ -33,17 +33,3 @@ export function SkeletonBlock({ lines = 3 }: { lines?: number }) {
     </div>
   );
 }
-
-export function SkeletonStats({ count = 4 }: { count?: number }) {
-  return (
-    <div className="dash-stats" role="status" aria-label={strings.app.loading}>
-      {Array.from({ length: count }, (_, i) => (
-        <div className="dash-stat" key={i}>
-          <Skeleton width={38} height={38} radius={12} style={{ marginBottom: 10 }} />
-          <Skeleton width="40%" height={28} />
-          <Skeleton width="60%" height={12} style={{ marginTop: 6 }} />
-        </div>
-      ))}
-    </div>
-  );
-}

@@ -24,14 +24,14 @@ import { checkBudget, kb, reportRoutes } from "./size-core.ts";
  */
 const BUDGET = {
   routes: [
-    // 146 / 146 / 151 / 168.5 (UI pass 2026-11-28, measured 145.3 / 145.7 / 150.9 / 167.5): every form's Field now carries the (i) InfoTip and its placement code (~1 KB). The dropdowns stay out of `core`. Needs owner OK.
-    { name: "sign-in", chunks: ["SignIn"], maxJsKb: 146, maxCssKb: 19 },
-    { name: "join", chunks: ["Join"], maxJsKb: 146, maxCssKb: 19, maxIncrementalKb: 5, incrementalFrom: "sign-in" },
-    { name: "pin-reset", chunks: ["PinReset"], maxJsKb: 151, maxCssKb: 19, maxIncrementalKb: 10, incrementalFrom: "sign-in" },
+    // 145 / 145 / 150 / 167.5 again (UI pass size trim 2026-11-28, measured 138.5 / 139.0 / 144.1 / 166.4). The UI pass had pushed them to 146 / 146 / 151 / 168.5 (measured 145.3 / 145.7 / 150.9 / 167.5 at the start of the pass, 148.0 / 148.6 / 153.6 / 177.7 after the new pages). What the trim did (vite.config.ts, src/app/Layout.tsx): `core` no longer holds the list state, the printer / driver / Wi-Fi / notice / rollout rules and four unused form controls; a `shell` chunk (audit and install texts, clock, view store, dialog and menu pieces, card and page header; no dependencies pulled in) is loaded by the signed-in shell only; the passkey reminder (with the step-up texts, ~5 KB) is a lazy chunk.
+    { name: "sign-in", chunks: ["SignIn"], maxJsKb: 145, maxCssKb: 19 },
+    { name: "join", chunks: ["Join"], maxJsKb: 145, maxCssKb: 19, maxIncrementalKb: 5, incrementalFrom: "sign-in" },
+    { name: "pin-reset", chunks: ["PinReset"], maxJsKb: 150, maxCssKb: 19, maxIncrementalKb: 10, incrementalFrom: "sign-in" },
     // The signed-in shell (navigation, account menu) plus the first screen.
     // 2026-10-27, Step 5a: +3.5 KB for the step-up controller (idle lock, keep-alive,
     // tabs) that every signed-in page must run; its dialogs and screens stay lazy.
-    { name: "overview", chunks: ["Layout", "Overview"], maxJsKb: 168.5, maxCssKb: 19, maxIncrementalKb: 27.5, incrementalFrom: "sign-in" }, // 167.5: new install-detail text (driver_untrusted_publisher) and the {InstallDir} refusal strings, 2026-11-26 (measured 167.1), needs owner OK; 26: Networks nav entry (Phase 5 Step 13, owner 2026-11-14); 165 / 27: Messages nav entry (Phase 5 Step 15, needs owner OK); 166 / 27.5: Phase 5 Step 19, the lockdown and findings routes plus the overview warning lines (measured 165.5 / 27.2; the warning lines themselves are a lazy chunk), needs owner OK; 166.5: Phase 6 Steps 12, 13 and 19 data-layer hooks and types (measured 166.2), owner OK 2026-11-21; 167: install-detail texts for every agent detail (measured 166.7, Overview imports installDetail)
+    { name: "overview", chunks: ["Layout", "Overview"], maxJsKb: 167.5, maxCssKb: 19, maxIncrementalKb: 27.5, incrementalFrom: "sign-in" }, // 167.5: new install-detail text (driver_untrusted_publisher) and the {InstallDir} refusal strings, 2026-11-26 (measured 167.1), needs owner OK; 26: Networks nav entry (Phase 5 Step 13, owner 2026-11-14); 165 / 27: Messages nav entry (Phase 5 Step 15, needs owner OK); 166 / 27.5: Phase 5 Step 19, the lockdown and findings routes plus the overview warning lines (measured 165.5 / 27.2; the warning lines themselves are a lazy chunk), needs owner OK; 166.5: Phase 6 Steps 12, 13 and 19 data-layer hooks and types (measured 166.2), owner OK 2026-11-21; 167: install-detail texts for every agent detail (measured 166.7, Overview imports installDetail)
     // Every other screen, on top of an already loaded overview.
     ...[
       "Devices",

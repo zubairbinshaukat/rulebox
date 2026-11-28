@@ -11,6 +11,7 @@ import { appEditStrings } from "../lib/screenStrings/appEdit";
 import { auditStrings } from "../lib/screenStrings/audit";
 import { deviceText } from "./device/strings";
 import { installStrings } from "../lib/screenStrings/install";
+import { overviewText as s } from "./overview/text";
 import { installStateStrings } from "../lib/screenStrings/installState";
 
 // Phase 4 Step 17 screens (Overview, Audit, the install cards of AppEdit and
@@ -170,81 +171,165 @@ describe("Overview (overview:get)", () => {
     await ui(<Overview />, "viewer", "/");
     expect(cx.queried.filter((q) => q.name === "overview:get").every((q) => JSON.stringify(q.args) === "{}")).toBe(true);
     expect(cx.queried.some((q) => q.name === "overview:failedInstallsPage")).toBe(false);
+    // One status line and four compact tiles: PCs with how many are online, employees, apps with their groups, failed installs.
+    expect(screen.getByText(s.statusCalm(12))).toBeTruthy();
     expect(screen.getByText("12")).toBeTruthy();
-    expect(screen.getByText(strings.overview.online)).toBeTruthy();
-    expect(screen.getByText(strings.overview.onlineOf(12))).toBeTruthy();
-    expect(screen.getByText(strings.overview.failedInstallsNone)).toBeTruthy();
-    expect(screen.getByText(strings.overview.attentionNone)).toBeTruthy();
+    expect(screen.getByText(s.pcsOnline(9))).toBeTruthy();
+    expect(screen.getByText(s.inGroups(2))).toBeTruthy();
+    expect(screen.getByRole("link", { name: new RegExp(s.employees) }).getAttribute("href")).toBe("/employees");
+    expect(screen.getByText(s.failedInstallsNone)).toBeTruthy();
+    expect(screen.getByText(s.attentionNone)).toBeTruthy();
   });
 
-  it("failed installs: the counter turns the list on, one page of 10 newest first, naming the app and the PC and linking to both", async () => {
+  it("an organization without a PC is welcomed, with a way to add the first one", async () => {
+    cx.results["overview:get"] = overviewData({}, { deviceCount: 0, employeeCount: 0, appCount: 0, groupCount: 0 });
+    await ui(<Overview />, "admin", "/");
+    expect(screen.getByText(s.statusWelcome, { exact: false })).toBeTruthy();
+    expect(screen.queryByText(s.statusCalm(0))).toBeNull();
+    expect(screen.getAllByRole("link", { name: s.addFirstPc }).some((a) => a.getAttribute("href") === "/enrollment")).toBe(true);
+  });
+
+  it("failed installs: the counter turns the card on, the newest five, naming the app and the PC and linking to both", async () => {
     cx.results["overview:get"] = overviewData({}, { failedInstallCount: 25 });
     cx.pages["overview:failedInstallsPage"] = [
-      { _id: "i1", deviceId: "d1", deviceName: "Front desk", appId: "a1", appName: "Reader", detail: "The download did not match its checksum.", updatedAt: Date.now() - 5_000 },
+      { _id: "i1", deviceId: "d1", deviceName: "Front desk", appId: "a1", appName: "Reader", detail: "download_failed", updatedAt: Date.now() - 5_000 },
     ];
     cx.statuses["overview:failedInstallsPage"] = "CanLoadMore";
     await ui(<Overview />, "viewer", "/");
-    expect(lastPaged("overview:failedInstallsPage")?.args).toEqual({ paginationOpts: { numItems: 10, cursor: null }, sort: { key: "updated", dir: "desc" } });
+    expect(lastPaged("overview:failedInstallsPage")?.args).toEqual({ paginationOpts: { numItems: 5, cursor: null }, sort: { key: "updated", dir: "desc" } });
     expect(screen.getByRole("link", { name: "Reader" }).getAttribute("href")).toBe("/apps/a1");
     expect(screen.getByRole("link", { name: "Front desk" }).getAttribute("href")).toBe("/devices/d1");
-    // The total is the overview's own counter; the pager can open the last page at once.
-    expect(screen.getByText(`${strings.pager.records(25)} · ${strings.pager.pageOf(1, 3)}`)).toBeTruthy();
-    expect(screen.getByRole("button", { name: strings.pager.goTo(3) })).toBeTruthy();
+    expect(screen.getByText(installStrings.details.download_failed!)).toBeTruthy();
+    // The table, its pager and the search box are not part of the first look.
+    expect(screen.queryByRole("table")).toBeNull();
+    expect(screen.getByRole("button", { name: s.seeAll(25) })).toBeTruthy();
   });
 
-  it("failed installs: Next reads the next page by its cursor, a sort click starts over, and the row opens the PC", async () => {
+  it("failed installs: a few of them (five or fewer) are all on the card, with nothing to open", async () => {
+    cx.results["overview:get"] = overviewData({}, { failedInstallCount: 2 });
+    cx.pages["overview:failedInstallsPage"] = [
+      { _id: "i1", deviceId: "d1", deviceName: "Front desk", appId: "a1", appName: "Reader", updatedAt: Date.now() - 5_000 },
+      { _id: "i2", deviceId: "d2", deviceName: "Back office", appId: "a2", appName: "Zoom", updatedAt: Date.now() - 9_000 },
+    ];
+    await ui(<Overview />, "viewer", "/");
+    expect(screen.getByRole("link", { name: "Back office" })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: /^See all/ })).toBeNull();
+  });
+
+  it("failed installs: See all opens the table (10 a page, newest first) and pauses the card; Next reads the next page by its cursor, a sort click starts over, and the row opens the PC", async () => {
     cx.results["overview:get"] = overviewData({}, { failedInstallCount: 25 });
     cx.pages["overview:failedInstallsPage"] = [
       { _id: "i1", deviceId: "d1", deviceName: "Front desk", appId: "a1", appName: "Reader", updatedAt: Date.now() - 5_000 },
     ];
     cx.statuses["overview:failedInstallsPage"] = "CanLoadMore";
     await ui(<Overview />, "viewer", "/");
-    fireEvent.click(screen.getByRole("button", { name: strings.pager.next }));
+    fireEvent.click(screen.getByRole("button", { name: s.seeAll(25) }));
+    const dialog = await screen.findByRole("dialog", { name: s.failedInstalls });
+    await waitFor(() => expect(lastPaged("overview:failedInstallsPage")?.args).toEqual({ paginationOpts: { numItems: 10, cursor: null }, sort: { key: "updated", dir: "desc" } }));
+    // The total is the overview's own counter; the pager can open the last page at once.
+    expect(within(dialog).getByText(`${strings.pager.records(25)} · ${strings.pager.pageOf(1, 3)}`)).toBeTruthy();
+    expect(within(dialog).getByRole("button", { name: strings.pager.goTo(3) })).toBeTruthy();
+    // One list at a time: the card behind the dialog asks for nothing more.
+    const asked = cx.paged.length;
+    fireEvent.click(within(dialog).getByRole("button", { name: strings.pager.next }));
     expect(lastPaged("overview:failedInstallsPage")?.args).toMatchObject({ paginationOpts: { numItems: 10, cursor: "c:1" } });
-    const updated = screen.getByRole("columnheader", { name: new RegExp(strings.overview.colUpdated) });
+    expect(cx.paged.slice(asked).every((p) => (p.args as { paginationOpts: { numItems: number } }).paginationOpts.numItems === 10)).toBe(true);
+    const updated = within(dialog).getByRole("columnheader", { name: new RegExp(s.colUpdated) });
     expect(updated.getAttribute("aria-sort")).toBe("descending");
     fireEvent.click(within(updated).getByRole("button"));
     expect(lastPaged("overview:failedInstallsPage")?.args).toEqual({ paginationOpts: { numItems: 10, cursor: null }, sort: { key: "updated", dir: "asc" } });
-    expect(screen.getByText(`${strings.pager.records(25)} · ${strings.pager.pageOf(1, 3)}`)).toBeTruthy();
+    expect(within(dialog).getByText(`${strings.pager.records(25)} · ${strings.pager.pageOf(1, 3)}`)).toBeTruthy();
   });
+
+  it("failed installs: the tile opens the same table and closing it brings the card back", async () => {
+    cx.results["overview:get"] = overviewData({}, { failedInstallCount: 7 });
+    cx.pages["overview:failedInstallsPage"] = [{ _id: "i1", deviceId: "d1", deviceName: "Front desk", appId: "a1", appName: "Reader", updatedAt: Date.now() - 5_000 }];
+    await ui(<Overview />, "viewer", "/");
+    fireEvent.click(screen.getByRole("button", { name: new RegExp(s.failedTile) }));
+    const dialog = await screen.findByRole("dialog", { name: s.failedInstalls });
+    fireEvent.click(within(dialog).getByRole("button", { name: strings.common.close }));
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+    expect(lastPaged("overview:failedInstallsPage")?.args).toEqual({ paginationOpts: { numItems: 5, cursor: null }, sort: { key: "updated", dir: "desc" } });
+  });
+
   it("attention: no key, no group, out of support, a failed publish, a suspended organization and a reached limit", async () => {
     cx.results["overview:get"] = overviewData(
       { signing: "none", publishFailedAt: 5, plan: { name: "free", status: "suspended", limits: { ...limits, maxApps: 4 } } },
       { noGroupDeviceCount: 2, outOfSupportCount: 3 },
     );
     await ui(<Overview />, "viewer", "/");
+    // Six cards: the list shows five and keeps the least urgent behind "Show all".
+    fireEvent.click(screen.getByRole("button", { name: "Show all (6)" }));
     for (const text of [
-      strings.overview.noKeyTitle,
-      strings.overview.noGroupTitle(2),
-      strings.overview.outOfSupportTitle(3),
-      strings.overview.publishFailedTitle,
-      strings.overview.suspendedTitle,
-      strings.overview.limitTitle(strings.overview.limitKinds.apps),
+      s.noKeyTitle,
+      s.noGroupTitle(2),
+      s.outOfSupportTitle(3),
+      s.publishFailedTitle,
+      s.suspendedTitle,
+      s.limitTitle(s.limitKinds.apps),
     ]) {
       expect(screen.getByText(text), text).toBeTruthy();
     }
   });
 
-  it("exactly at a limit is information: it is listed, but the lead stays calm", async () => {
-    cx.results["overview:get"] = overviewData({ plan: { name: "free", status: "active", limits: { ...limits, maxDevices: 2 } } }, { deviceCount: 2 });
+  it("attention: five cards first, most urgent first; Show all (n) reveals the rest", async () => {
+    cx.results["overview:get"] = overviewData(
+      { signing: "none", publishFailedAt: 5, rosterPending: true, plan: { name: "free", status: "suspended", limits: { ...limits, maxApps: 4, maxDevices: 12 } } },
+      { noGroupDeviceCount: 2, outOfSupportCount: 3 },
+    );
     await ui(<Overview />, "viewer", "/");
-    expect(screen.getByText(strings.overview.limitTitle(strings.overview.limitKinds.devices))).toBeTruthy();
-    expect(screen.getByText(strings.overview.leadCalm)).toBeTruthy();
-    expect(screen.queryByText(/need a look/)).toBeNull();
+    // Danger (no key, failed publish, suspended), then warnings (roster, no group), then notes (out of support, limits): 8 in all.
+    const titles = () => screen.getAllByRole("heading", { level: 3 }).map((h) => h.textContent ?? "");
+    expect(titles()).toHaveLength(5);
+    expect(titles()[0]).toContain(s.noKeyTitle);
+    expect(titles().every((t) => !t.includes(s.outOfSupportTitle(3)))).toBe(true);
+    fireEvent.click(screen.getByRole("button", { name: "Show all (8)" }));
+    expect(titles()).toHaveLength(8);
   });
 
-  it("over a limit is urgent: its own wording and it counts in the lead", async () => {
+  it("exactly at a limit is information: it is listed, but the status stays calm", async () => {
+    cx.results["overview:get"] = overviewData({ plan: { name: "free", status: "active", limits: { ...limits, maxDevices: 2 } } }, { deviceCount: 2 });
+    await ui(<Overview />, "viewer", "/");
+    expect(screen.getByText(s.limitTitle(s.limitKinds.devices))).toBeTruthy();
+    expect(screen.getByText(s.statusCalm(2))).toBeTruthy();
+    expect(screen.queryByText(/need you\./)).toBeNull();
+  });
+
+  it("over a limit is urgent: its own wording and it counts in the status line", async () => {
     cx.results["overview:get"] = overviewData({ plan: { name: "free", status: "active", limits: { ...limits, maxDevices: 2 } } }, { deviceCount: 3 });
     await ui(<Overview />, "viewer", "/");
-    expect(screen.getByText(strings.overview.overLimitTitle(strings.overview.limitKinds.devices))).toBeTruthy();
-    expect(screen.queryByText(strings.overview.limitTitle(strings.overview.limitKinds.devices))).toBeNull();
-    expect(screen.getByText(strings.overview.leadAttention(1))).toBeTruthy();
+    expect(screen.getByText(s.overLimitTitle(s.limitKinds.devices))).toBeTruthy();
+    expect(screen.queryByText(s.limitTitle(s.limitKinds.devices))).toBeNull();
+    expect(screen.getByText(s.statusAttention(1))).toBeTruthy();
   });
 
   it("a plan without limits (self-host) shows no limit warning", async () => {
     cx.results["overview:get"] = overviewData({ plan: { name: "custom", status: "active", limits: { ...limits, maxDevices: 1_000_000_000, maxApps: 1_000_000_000, maxEmployees: 1_000_000_000, maxGroups: 1_000_000_000 } } });
     await ui(<Overview />, "viewer", "/");
-    expect(screen.queryByText(/reached the limit/)).toBeNull();
+    expect(screen.queryByText(/can't add more/)).toBeNull();
+  });
+
+  it("a large fleet is told to owners only, without a vendor name", async () => {
+    cx.results["overview:get"] = overviewData({ plan: { name: "team", status: "active", limits: { ...limits, maxDevices: 1000 } } }, { deviceCount: 301 });
+    await ui(<Overview />, "owner", "/");
+    expect(screen.getByText(s.largeFleetTitle)).toBeTruthy();
+    expect(screen.getByText(s.largeFleetDetail)).toBeTruthy();
+    expect(document.body.textContent).not.toMatch(/convex/i);
+    cleanup();
+    await ui(<Overview />, "admin", "/");
+    expect(screen.queryByText(s.largeFleetTitle)).toBeNull();
+    // A note, not a problem: the status stays calm.
+    expect(screen.getByText(s.statusCalm(301))).toBeTruthy();
+  });
+
+  it("a viewer has no add buttons; an admin has them", async () => {
+    cx.results["overview:get"] = overviewData();
+    await ui(<Overview />, "viewer", "/");
+    expect(screen.queryByRole("link", { name: s.addPc })).toBeNull();
+    cleanup();
+    await ui(<Overview />, "admin", "/");
+    expect(screen.getByRole("link", { name: s.addPc }).getAttribute("href")).toBe("/enrollment");
+    expect(screen.getByRole("link", { name: s.addApp }).getAttribute("href")).toBe("/apps/new");
   });
 
   it("recent activity lists the audit rows the overview carries", async () => {
@@ -454,21 +539,21 @@ describe("Step 17 follow-ups: roster notice, no-group link, short pages, capped 
   it("Overview: a waiting roster update is listed and points to the signing settings; without one it is absent", async () => {
     cx.results["overview:get"] = overviewData({ rosterPending: true });
     await ui(<Overview />, "viewer", "/");
-    expect(screen.getByText(strings.overview.rosterPendingTitle)).toBeTruthy();
-    expect(screen.getByText(strings.overview.rosterPendingDetail)).toBeTruthy();
-    const item = screen.getByText(strings.overview.rosterPendingTitle).closest("li") as HTMLElement;
-    expect(within(item).getByRole("link", { name: strings.overview.noKeyAction }).getAttribute("href")).toBe("/settings?tab=signing");
+    expect(screen.getByText(s.rosterPendingTitle)).toBeTruthy();
+    expect(screen.getByText(s.rosterPendingDetail)).toBeTruthy();
+    const item = screen.getByText(s.rosterPendingTitle).closest("li") as HTMLElement;
+    expect(within(item).getByRole("link", { name: s.openSettings }).getAttribute("href")).toBe("/settings?tab=signing");
     cleanup();
     cx.results["overview:get"] = overviewData({ rosterPending: false });
     await ui(<Overview />, "viewer", "/");
-    expect(screen.queryByText(strings.overview.rosterPendingTitle)).toBeNull();
+    expect(screen.queryByText(s.rosterPendingTitle)).toBeNull();
   });
 
   it("Overview: the no-group warning opens the device list already filtered to PCs without a group", async () => {
     cx.results["overview:get"] = overviewData({}, { noGroupDeviceCount: 2 });
     await ui(<Overview />, "viewer", "/");
-    const item = screen.getByText(strings.overview.noGroupTitle(2)).closest("li") as HTMLElement;
-    expect(within(item).getByRole("link", { name: strings.overview.noGroupAction }).getAttribute("href")).toBe("/devices?group=none");
+    const item = screen.getByText(s.noGroupTitle(2)).closest("li") as HTMLElement;
+    expect(within(item).getByRole("link", { name: s.noGroupAction }).getAttribute("href")).toBe("/devices?group=none");
   });
 
   it("AppEdit: a short or empty page with more to read still offers Next, and reads the next page by its cursor", async () => {
