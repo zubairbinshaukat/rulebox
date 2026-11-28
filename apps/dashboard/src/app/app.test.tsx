@@ -325,7 +325,7 @@ describe("stale edit", () => {
     mock.settings = { status: "ready", data: data("Acme", 4) };
     mock.updateSettings.mockRejectedValueOnce(new AppError({ code: "stale_edit" }));
     const { rerender } = ui();
-    const name = screen.getByLabelText(/Organization name/) as HTMLInputElement;
+    const name = screen.getByLabelText("Organization name") as HTMLInputElement;
     fireEvent.change(name, { target: { value: "My edit" } });
     fireEvent.click(screen.getByRole("button", { name: strings.common.saveChanges }));
     expect(await screen.findByText(strings.common.staleTitle)).toBeTruthy();
@@ -341,7 +341,7 @@ describe("stale edit", () => {
       </ToastProvider>,
     );
     fireEvent.click(screen.getByRole("button", { name: strings.common.reload }));
-    expect((screen.getByLabelText(/Organization name/) as HTMLInputElement).value).toBe("Acme Ltd");
+    expect((screen.getByLabelText("Organization name") as HTMLInputElement).value).toBe("Acme Ltd");
     expect(screen.queryByText(strings.common.staleTitle)).toBeNull();
 
     mock.updateSettings.mockResolvedValueOnce({ revision: 6, changed: ["offlineDays"] });
@@ -353,15 +353,14 @@ describe("stale edit", () => {
   it("validates before sending and links the error to the field", async () => {
     mock.settings = { status: "ready", data: data("Acme", 1) };
     ui();
-    const days = screen.getByLabelText(/Offline sign-in/) as HTMLInputElement;
-    fireEvent.change(days, { target: { value: "31" } });
+    const name = screen.getByLabelText("Organization name") as HTMLInputElement;
+    fireEvent.change(name, { target: { value: "  " } });
     fireEvent.click(screen.getByRole("button", { name: strings.common.saveChanges }));
-    const error = await screen.findByText(strings.validate.integerRange(0, 30));
+    const error = await screen.findByText(strings.validate.required);
     expect(mock.updateSettings).not.toHaveBeenCalled();
-    expect(days.getAttribute("aria-invalid")).toBe("true");
-    expect(days.getAttribute("aria-describedby")).toContain(error.closest("p")!.id);
+    expect(name.getAttribute("aria-invalid")).toBe("true");
+    expect(name.getAttribute("aria-describedby")).toContain(error.closest("p")!.id);
   });
-
   it("is read-only for viewers (no save button)", () => {
     mock.settings = { status: "ready", data: data("Acme", 1) };
     render(
@@ -373,6 +372,6 @@ describe("stale edit", () => {
     );
     expect(screen.queryByRole("button", { name: strings.common.saveChanges })).toBeNull();
     // Inside a disabled <fieldset>: the input is disabled without its own attribute.
-    expect((screen.getByLabelText(/Organization name/) as HTMLInputElement).matches(":disabled")).toBe(true);
+    expect((screen.getByLabelText("Organization name") as HTMLInputElement).matches(":disabled")).toBe(true);
   });
 });

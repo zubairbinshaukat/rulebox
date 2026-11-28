@@ -291,6 +291,7 @@ describe("deleteOrg", () => {
       await ctx.db.insert("printers", { orgId, name: "P", kind: "raw", address: "10.0.0.1", driver: "Generic / Text Only", groupIds: [groupId], defaultForGroupIds: [], revision: 1, createdAt: now });
       await ctx.db.insert("deviceSealedSecrets", { orgId, deviceId, purpose: "wifi", targetId: "w", targetRevision: 1, sealKeyId: "k", sealed: "AAAA", createdAt: now });
       await ctx.db.insert("deviceApplyReports", { orgId, deviceId, appliedVersion: 1, state: "applied", layers: { staff: off, machine: off, appLocker: off, appControl: off, procWatch: off, boot: off, performance: off }, wifi: [], printers: [], capabilities: [], contentHash: "c".repeat(64), updatedAt: now });
+      await ctx.db.insert("deviceLockdownSync", { orgId, deviceId, groupId, configVersion: 1, state: "applied", updatedAt: now });
       await ctx.db.insert("deviceSecurityDaily", { orgId, deviceId, day: "2026-11-15", blocked, permissionDenials: [], drift: 0, tamper: 0 });
       await ctx.db.insert("orgSecurityDaily", { orgId, day: "2026-11-15", blocked, permissionDenials: [], devicesReporting: 1 });
       await ctx.db.insert("deviceLocks", { orgId, deviceId, lockId: "l", message: "m", lockedAt: now });

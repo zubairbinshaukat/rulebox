@@ -19,9 +19,9 @@ export const REFUSALS: Record<string, string> = {
   journal_unknown_target: "This PC has changes from a newer Rulebox version. Update the agent on this PC.",
   journal_unreadable: "This PC cannot read its record of changes. Run Rulebox recovery on the PC.",
   policy_rejected: "The PC could not accept the policy. It may be too large or not signed with a key the PC trusts.",
-  allowlist_level_with_user_install: "The App Control allow list cannot be used while an assigned program is installed in a user folder.",
+  allowlist_level_with_user_install: "The strict safety list cannot be used while an assigned app is installed for one user only.",
   section_unknown_value: "The policy has a setting this agent does not know. Update the agent on this PC.",
-  lkg_failed: "The PC could not go back to its last working policy. The program rules are in audit mode until the next restart.",
+  lkg_failed: "The PC could not go back to its last working policy. Program blocking is in trial run until the next restart.",
 };
 
 /** The refusal codes of plan 4.6 (one test per code keeps the sentences from going missing). */
@@ -36,7 +36,7 @@ export const LAYER_DETAILS: Record<string, string> = {
   fighting: "Something else on the PC keeps changing these settings back, for example a company policy. Rulebox stopped retrying for now.",
   access_denied: "Windows refused the change. It will be tried again.",
   restore_incomplete: "Some changes could not be undone yet. The PC keeps trying. Rulebox recovery on the PC can finish it.",
-  audit_first: "This PC has not run in audit mode yet, so it audits for 24 hours before it enforces.",
+  audit_first: "This PC has not had a trial run yet, so it reports only for 24 hours before it blocks.",
   // employee restrictions
   no_staff_account: "The employee account does not exist on this PC yet.",
   staff_hive_busy: "The employee profile was in use. It will be tried again.",
@@ -54,12 +54,12 @@ export const LAYER_DETAILS: Record<string, string> = {
   usb_combo_unsplit: "A combined USB device could not be split, so it stays allowed.",
   printer_list_unreadable: "The list of printers could not be read.",
   printer_security_unreadable: "The security of a printer could not be read.",
-  // AppLocker, App Control, process watch
-  applocker_not_on_this_edition: "This Windows edition does not support AppLocker.",
-  applocker_foreign_policy: "This PC already has AppLocker rules that Rulebox did not make. Rulebox left them alone.",
-  applocker_unreadable: "The AppLocker rules on this PC could not be read.",
-  app_id_service_missing: "The Windows service AppLocker needs is missing.",
-  app_id_service_unreadable: "The Windows service AppLocker needs could not be checked.",
+  // employee program list, Windows safety list, Rulebox program check
+  applocker_not_on_this_edition: "This Windows edition has no employee program list (AppLocker).",
+  applocker_foreign_policy: "This PC already has program rules that Rulebox did not make. Rulebox left them alone.",
+  applocker_unreadable: "The employee program list on this PC could not be read.",
+  app_id_service_missing: "The Windows service the employee program list needs is missing.",
+  app_id_service_unreadable: "The Windows service the employee program list needs could not be checked.",
   accounts_unreadable: "The accounts on this PC could not be read.",
   windows_scan_failed: "The Windows folder could not be checked for folders employees can write to.",
   windows_folder_unknown: "The Windows folder could not be found.",
@@ -69,14 +69,14 @@ export const LAYER_DETAILS: Record<string, string> = {
   exception_path_writable: "One folder exception points to a folder employees can write to. It was skipped.",
   writable_path_rule: "A rule would allow a folder employees can write to. It was refused.",
   restrictive_rule_not_staff: "A rule would restrict an account other than the employee account. It was refused.",
-  os_too_old_for_app_control: "This Windows version is too old for App Control.",
+  os_too_old_for_app_control: "This Windows version is too old for the Windows safety list.",
   os_info_unreadable: "The Windows version could not be read.",
-  appcontrol_not_built: "This agent was built without the App Control policies.",
-  policy_not_embedded: "The App Control policy is missing from this agent.",
-  allowlist_level_with_user_install: "The allow list is not used while an assigned program is installed in a user folder.",
-  snapshot_fallback: "The process watch uses a slower check on this PC. Programs are still blocked.",
-  blocked_by_guard: "The process watch is switched off on this test PC.",
-  watch_thread_failed: "The process watch stopped. It restarts with the agent.",
+  appcontrol_not_built: "This Rulebox build has no Windows safety list.",
+  policy_not_embedded: "This Rulebox build has no Windows safety list.",
+  allowlist_level_with_user_install: "The strict safety list cannot be used while an assigned app is installed for one user only.",
+  snapshot_fallback: "The Rulebox program check uses a slower method on this PC. Programs are still blocked.",
+  blocked_by_guard: "The Rulebox program check is switched off on this test PC.",
+  watch_thread_failed: "The Rulebox program check stopped. It restarts with Rulebox.",
   // start-up and tamper protection
   bitlocker_protects_os_volume: "Automatic recovery was left on because BitLocker protects this PC.",
   posture_unreadable: "The start-up protection of this PC could not be read.",
@@ -114,12 +114,12 @@ export const LAYER_STATES: Record<string, { label: string; tone: "success" | "wa
   failed: { label: "Failed", tone: "danger" },
   unsupported: { label: "Not supported", tone: "neutral" },
   restartPending: { label: "Restart needed", tone: "accent" },
-  auditFirst: { label: "Auditing first", tone: "accent" },
+  auditFirst: { label: "Trial run first", tone: "accent" },
   off: { label: "Off", tone: "neutral" },
 };
 
 /** A layer's mode as the PC reports it. */
-export const LAYER_MODE_LABELS: Record<string, string> = { off: "Off", audit: "Audit", enforce: "Enforce", on: "On" };
+export const LAYER_MODE_LABELS: Record<string, string> = { off: "Off", audit: "Trial run", enforce: "Block", on: "On" };
 
 const unknown = (code: string) => `Code: ${code}`;
 

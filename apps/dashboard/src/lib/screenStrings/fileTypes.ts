@@ -1,12 +1,42 @@
+/** The common kinds of file offered as chips in the Add dialog (UI pass `other-pages.md` 7.2): the word, then the extensions it stands for. */
+export const FILE_KINDS = [
+  { id: "pdf", label: "PDF", extensions: [".pdf"] },
+  { id: "word", label: "Word", extensions: [".docx", ".doc"] },
+  { id: "excel", label: "Excel", extensions: [".xlsx", ".xls"] },
+  { id: "powerpoint", label: "PowerPoint", extensions: [".pptx", ".ppt"] },
+  { id: "pictures", label: "Pictures", extensions: [".jpg", ".jpeg", ".png", ".gif", ".bmp"] },
+  { id: "music", label: "Music", extensions: [".mp3", ".wav", ".m4a"] },
+  { id: "video", label: "Video", extensions: [".mp4", ".mov", ".avi", ".mkv"] },
+  { id: "text", label: "Text", extensions: [".txt"] },
+  { id: "zip", label: "Zip", extensions: [".zip"] },
+] as const;
+
+export type FileKindId = (typeof FILE_KINDS)[number]["id"];
+
 export const fileTypesStrings = {
   title: "File types",
-  lead: "Which app opens which kind of file on the PCs. Nothing else opens files.",
+  lead: "Which program opens which kind of file.",
+  leadInfoLabel: "About file types",
+  leadInfo: "Only the programs you choose here open files on the PCs. Nothing else does.",
   add: "Add file type",
   addTitle: "Add a file type",
+  /** The chips: "Which files?" */
+  kinds: "Which files",
+  kindsInfoLabel: "About kinds of files",
+  kindsInfo: "Each chip stands for the usual endings of that kind of file, for example Pictures is .jpg, .jpeg, .png, .gif and .bmp.",
+  kindTitle: (label: string, extensions: readonly string[]) => `${label}: ${extensions.join(", ")}`,
+  other: "Other…",
   extension: "Extension",
   extensionHint: "For example .pdf",
+  pickOne: "Choose at least one kind of file.",
+  moveNote: "Files already set to another program move to this one.",
+  willAdd: (list: string) => `Adds ${list}`,
   app: "Opens with",
-  appHint: "Only Windows programs that can open files are listed.",
+  appInfoLabel: "About programs",
+  appInfo: "Only Windows programs that can open files are listed.",
+  appPlaceholder: "Choose a program",
+  appSearch: "Search programs",
+  appNoMatch: "No program matches.",
   colExtension: "Extension",
   colApp: "Opens with",
   searchLabel: "Search file types",
@@ -17,5 +47,6 @@ export const fileTypesStrings = {
   removeTitle: (ext: string) => `Stop opening ${ext} files?`,
   removeBody: "Employees can no longer open these files from Rulebox.",
   added: (ext: string) => `${ext} added.`,
+  addedMany: (n: number) => `${n} file types added.`,
   removed: (ext: string) => `${ext} removed.`,
 } as const;

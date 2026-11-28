@@ -31,7 +31,9 @@ const LOADERS: Record<ScreenName, Loader> = {
   Enrollment: () => import("../screens/Enrollment"),
   Audit: () => import("../screens/Audit"),
   Settings: () => import("../screens/Settings"),
-  Gallery: () => import("../Gallery"),
+  // The design gallery is a tool for demo and development builds (UI pass): a live build answers `/gallery` with Not found,
+  // and its ~30 KB chunk is not built at all (`__DEMO__` and `DEV` are build-time literals).
+  Gallery: __DEMO__ || import.meta.env.DEV ? () => import("../Gallery") : () => import("../screens/NotFound"),
   NotFound: () => import("../screens/NotFound"),
 };
 

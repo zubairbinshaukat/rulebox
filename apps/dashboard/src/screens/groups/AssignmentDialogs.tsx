@@ -1,13 +1,20 @@
-import { useState } from "react";
-import { Button, Checkbox, Select } from "@rulebox/ui";
+import { useMemo, useState } from "react";
+import { Button, SearchSelect } from "@rulebox/ui";
+import IconEveryone from "~icons/solar/users-group-rounded-linear";
+import IconChosen from "~icons/solar/user-check-rounded-linear";
+import IconTaskbar from "~icons/solar/align-bottom-linear";
+import IconDesktop from "~icons/solar/monitor-linear";
 import { useAppOptions, useAssignApp, useUpdateAssignment } from "../../data";
-import type { AssignmentRow, Audience } from "../../data/types";
+import type { AppOption, AssignmentRow, Audience } from "../../data/types";
+import { appSelectOptions } from "../../components/appOptions";
+import { ChoiceCards } from "../../components/ChoiceCards";
 import { Field, FieldSet } from "../../components/Field";
 import { FormError } from "../../components/FormError";
 import { Modal } from "../../components/Modal";
 import { InlineNotice } from "../../components/Notice";
 import { QueryRegion } from "../../components/Region";
 import { SkeletonBlock } from "../../components/Skeleton";
+import { ToggleChip } from "../../components/ToggleChip";
 import { useToast } from "../../lib/toast";
 import { strings } from "../../lib/strings";
 import { groupStrings } from "../../lib/screenStrings/group";
@@ -19,27 +26,32 @@ const s = groupStrings;
 
 type Fields = { audience: Audience; pinnedTaskbar: boolean; pinnedDesktop: boolean };
 
+const AUDIENCE_OPTIONS = [
+  { value: "everyone" as const, label: groupText.audienceCards.everyone, art: <IconEveryone /> },
+  { value: "selected" as const, label: groupText.audienceCards.selected, art: <IconChosen /> },
+];
+
 /** Audience and pins: the part of both dialogs that edits an assignment. */
 function AssignmentFields({ values, onChange }: { values: Fields; onChange: (next: Fields) => void }) {
   return (
     <>
-      <Field label={s.audience} hint={groupText.audienceHint}>
-        {(p) => (
-          <Select {...p} value={values.audience} onChange={(e) => onChange({ ...values, audience: e.target.value as Audience })}>
-            <option value="everyone">{s.audienceEveryone}</option>
-            <option value="selected">{s.audienceSelected}</option>
-          </Select>
-        )}
-      </Field>
-      <FieldSet legend={s.pins}>
-        <div className="dash-checks dash-checks--inline">
-          <Checkbox label={s.pinTaskbar} checked={values.pinnedTaskbar} onChange={(e) => onChange({ ...values, pinnedTaskbar: e.target.checked })} />
-          <Checkbox label={s.pinDesktop} checked={values.pinnedDesktop} onChange={(e) => onChange({ ...values, pinnedDesktop: e.target.checked })} />
+      <FieldSet legend={s.audience} info={groupText.audienceInfo} infoLabel={groupText.audienceInfoLabel}>
+        <ChoiceCards<Audience> aria-label={s.audience} columns={2} value={values.audience} onChange={(audience) => onChange({ ...values, audience })} options={AUDIENCE_OPTIONS} />
+      </FieldSet>
+      <FieldSet legend={groupText.pinsLegend}>
+        <div className="dash-tchips">
+          <ToggleChip icon={<IconTaskbar />} pressed={values.pinnedTaskbar} onToggle={() => onChange({ ...values, pinnedTaskbar: !values.pinnedTaskbar })}>
+            {groupText.pinTaskbar}
+          </ToggleChip>
+          <ToggleChip icon={<IconDesktop />} pressed={values.pinnedDesktop} onToggle={() => onChange({ ...values, pinnedDesktop: !values.pinnedDesktop })}>
+            {groupText.pinDesktop}
+          </ToggleChip>
         </div>
       </FieldSet>
     </>
   );
 }
+
 /** Give the group an app: pick it, choose who sees it and where it is pinned (`groups:assignApp`). */
 export function AssignAppDialog({ groupId, assignedAppIds, onClose }: { groupId: string; assignedAppIds: string[]; onClose: () => void }) {
   // Subscribed only while this dialog is open (`apps:options`, at most 500 apps).
@@ -57,11 +69,13 @@ export function AssignAppDialog({ groupId, assignedAppIds, onClose }: { groupId:
   );
 }
 
-function AssignForm({ groupId, apps, onClose }: { groupId: string; apps: { _id: string; name: string }[]; onClose: () => void }) {
+function AssignForm({ groupId, apps, onClose }: { groupId: string; apps: AppOption[]; onClose: () => void }) {
   const assign = useAssignApp();
   const toast = useToast();
-  const [initial] = useState(() => ({ appId: apps[0]?._id ?? "", audience: "everyone" as Audience, pinnedTaskbar: false, pinnedDesktop: true }));
+  // Nothing is chosen for them, unless there is only one app to choose from.
+  const [initial] = useState(() => ({ appId: apps.length === 1 ? apps[0]!._id : "", audience: "everyone" as Audience, pinnedTaskbar: false, pinnedDesktop: true }));
   const f = useForm(initial, (x) => ({ appId: x.appId ? undefined : strings.validate.required }));
+  const appOptions = useMemo(() => appSelectOptions(apps), [apps]);
   return (
     <Modal
       open
@@ -89,13 +103,16 @@ function AssignForm({ groupId, apps, onClose }: { groupId: string; apps: { _id: 
         {apps.length === 0 ? <InlineNotice tone="neutral" title={groupText.noAppsToAssign} /> : null}
         <Field label={s.app} error={f.errors.appId} required>
           {(p) => (
-            <Select {...p} value={f.values.appId} onChange={(e) => f.set("appId", e.target.value)} disabled={apps.length === 0}>
-              {apps.map((a) => (
-                <option key={a._id} value={a._id}>
-                  {a.name}
-                </option>
-              ))}
-            </Select>
+            <SearchSelect
+              {...p}
+              value={f.values.appId}
+              onChange={(id) => f.set("appId", id)}
+              options={appOptions}
+              placeholder={groupText.appPlaceholder}
+              searchPlaceholder={groupText.appSearch}
+              emptyText={groupText.appNoMatch}
+              disabled={apps.length === 0}
+            />
           )}
         </Field>
         <AssignmentFields

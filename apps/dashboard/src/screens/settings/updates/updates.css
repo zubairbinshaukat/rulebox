@@ -1,0 +1,352 @@
+/* Settings → Rulebox updates (UI pass, docs/plans/ui-pass/settings.md section 4). Imported by the lazy section, so it ships in its chunk.
+   Tokens only. Narrow (< 760 px of the section): current target, releases, Advanced, then the "Selected" bar sticks to the bottom once
+   something is picked. From 760 px: the releases and Advanced on the left, the current target and the selected release on the right,
+   sticky. Motion: only a tiny scale on the radio dot (transform), none with reduced motion or Lite. */
+
+.upd {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+  min-width: 0;
+}
+.upd__main,
+.upd__aside {
+  display: contents;
+}
+.upd__current {
+  order: 1;
+}
+.upd__list {
+  order: 2;
+}
+.upd__adv {
+  order: 3;
+}
+.upd__selected {
+  order: 4;
+  min-width: 0;
+}
+.upd--read {
+  max-width: 560px;
+}
+
+@container setsec (max-width: 759px) {
+  /* The main action stays in reach while the list is long; it never covers the last field (the page keeps its own bottom space). */
+  .upd__selected[data-active] {
+    position: sticky;
+    bottom: 12px;
+    z-index: 5;
+  }
+  .upd__selected[data-active] > .dash-card {
+    max-height: 55vh;
+    overflow-y: auto;
+    border-color: var(--rb-accent);
+    box-shadow: var(--rb-shadow-lg);
+  }
+}
+@container setsec (min-width: 760px) {
+  .upd {
+    display: grid;
+    grid-template-columns: minmax(0, 2fr) minmax(0, 1fr);
+    align-items: start;
+    gap: 22px;
+  }
+  .upd--read {
+    display: flex;
+  }
+  .upd__main,
+  .upd__aside {
+    display: flex;
+    flex-direction: column;
+    gap: 18px;
+    min-width: 0;
+  }
+  .upd__aside {
+    position: sticky;
+    top: calc(var(--dash-topbar) + 16px);
+  }
+}
+
+/* ------------------------------------------------------------ the current target and the selected release */
+
+.upd-current,
+.upd-sel {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-width: 0;
+}
+.upd-current__name,
+.upd-sel__name {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 10px;
+  margin: 0;
+  font-size: 17px;
+  letter-spacing: -0.01em;
+}
+.upd-current__meta,
+.upd-sel__meta {
+  margin: 0;
+  font-size: 13.5px;
+  color: var(--rb-muted);
+}
+.upd-sel__go {
+  width: 100%;
+  justify-content: center;
+}
+.upd-tech {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin: 0;
+}
+.upd-tech dt {
+  font-size: 12.5px;
+  font-weight: 550;
+  color: var(--rb-muted);
+}
+.upd-tech dd {
+  margin: 2px 0 0;
+  font-size: 13.5px;
+}
+
+/* ------------------------------------------------------------ the releases */
+
+.upd-tools {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 10px;
+}
+.upd-tools__checked {
+  font-size: 13px;
+  color: var(--rb-muted);
+}
+.upd-list {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.upd-list__stale {
+  margin: 0;
+  font-size: 13px;
+  color: var(--rb-muted);
+}
+.upd-rows {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.upd-row {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 14px 16px;
+  border: 1px solid var(--rb-line);
+  border-radius: var(--rb-r-lg);
+  background: var(--rb-surface);
+}
+.upd-row:hover:not([data-unusable]) {
+  border-color: var(--rb-line-strong);
+}
+.upd-row[data-checked] {
+  border-color: var(--rb-accent);
+  background: color-mix(in oklch, var(--rb-accent-soft) 60%, var(--rb-surface));
+  box-shadow: 0 0 0 1px var(--rb-accent);
+}
+.upd-row[data-unusable] {
+  background: var(--rb-paper);
+}
+.upd-row[data-unusable] .upd-row__title {
+  color: var(--rb-muted);
+}
+.upd-row__top {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 10px;
+  min-width: 0;
+}
+.upd-row__main {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+  cursor: pointer;
+}
+.upd-row[data-unusable] .upd-row__main {
+  cursor: default;
+}
+/* The whole row is the click target: the label's overlay covers it, the badges and links sit above it. */
+.upd-row__main::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+}
+.upd-row__badges,
+.upd-notes__toggle,
+.upd-row__link {
+  position: relative;
+  z-index: 1;
+}
+.upd-row__input {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  opacity: 0;
+  pointer-events: none;
+}
+.upd-row__dot {
+  display: grid;
+  place-items: center;
+  flex: none;
+  width: 20px;
+  height: 20px;
+  border: 2px solid var(--rb-line-strong);
+  border-radius: 50%;
+  background: var(--rb-surface);
+}
+.upd-row__dot::after {
+  content: "";
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: var(--rb-accent);
+  transform: scale(0);
+  transition: transform 0.15s var(--rb-ease);
+}
+.upd-row__input:checked + .upd-row__dot {
+  border-color: var(--rb-accent);
+}
+.upd-row__input:checked + .upd-row__dot::after {
+  transform: scale(1);
+}
+.upd-row__input:focus-visible + .upd-row__dot {
+  box-shadow: var(--dash-ring);
+}
+.upd-row__input:disabled + .upd-row__dot {
+  border-style: dashed;
+  border-color: var(--rb-line);
+}
+.upd-row__title {
+  font-size: 15px;
+  font-weight: 650;
+  letter-spacing: -0.01em;
+}
+.upd-row__badges {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+.upd-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+}
+.upd-row__date {
+  margin-inline-start: auto;
+  font-size: 13px;
+  white-space: nowrap;
+  color: var(--rb-muted);
+}
+.upd-row__problem {
+  margin: 0;
+  padding-inline-start: 32px;
+  font-size: 13px;
+  font-weight: 550;
+  color: var(--rb-danger-text);
+}
+.upd-row__problem--warn {
+  color: var(--rb-warning-text);
+}
+.upd-row__link {
+  align-self: flex-start;
+  margin-inline-start: 32px;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 13px;
+}
+
+/* Notes: plain text, clamped to a few lines (more on a wide page) until "Show notes". */
+.upd-notes {
+  --lines: 3;
+  position: relative;
+  padding-inline-start: 32px;
+  font-size: 13.5px;
+  line-height: 1.5;
+  color: var(--rb-muted);
+}
+@container setsec (min-width: 1100px) {
+  .upd-notes {
+    --lines: 6;
+  }
+}
+.upd-notes__body {
+  max-height: calc(var(--lines) * 1.5em);
+  overflow: hidden;
+  -webkit-mask-image: linear-gradient(to bottom, #000 60%, transparent);
+  mask-image: linear-gradient(to bottom, #000 60%, transparent);
+}
+.upd-notes[data-open] .upd-notes__body {
+  max-height: none;
+  -webkit-mask-image: none;
+  mask-image: none;
+}
+.upd-notes__h {
+  margin: 0 0 2px;
+  font-weight: 650;
+  color: var(--rb-ink);
+}
+.upd-notes__p {
+  margin: 0 0 6px;
+}
+.upd-notes__list {
+  margin: 0 0 6px;
+  padding-inline-start: 18px;
+}
+.upd-notes__more {
+  font-style: italic;
+}
+.upd-notes__toggle {
+  min-height: 32px;
+  padding: 0;
+  border: 0;
+  background: none;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--rb-accent-text);
+  cursor: pointer;
+}
+.upd-notes__toggle:hover {
+  text-decoration: underline;
+}
+
+/* Advanced: the details element is its own card. */
+.upd__adv {
+  padding-inline: 18px;
+  border: 1px solid var(--rb-line);
+  border-radius: var(--dash-radius);
+  background: var(--rb-surface);
+  box-shadow: var(--dash-card-shadow);
+}
+.upd__adv-lead {
+  margin: 0;
+  font-size: 13.5px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .upd-row__dot::after {
+    transition: none;
+  }
+}
+[data-lite="true"] .upd-row__dot::after {
+  transition: none;
+}

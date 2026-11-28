@@ -194,6 +194,67 @@ describe("queries", () => {
     expect(result.current.status === "ready" && result.current.data.flags.rotateCredential).toBe(true);
   });
 
+  it("useDevicePage subscribes to fleet:page and maps it; fields an older server lacks read as their defaults", () => {
+    cx.queryResult = {
+      _id: "d1",
+      name: "Front desk",
+      revision: 5,
+      kioskEnabled: true,
+      enrolledAt: 10,
+      revoked: false,
+      group: { _id: "g1", name: "Sales" },
+      presence: { online: true, since: 7, revoked: false },
+      outOfSupport: true,
+      report: { agentVersion: "0.4.1", kioskPhase: "weird", shellHealth: "healthy", compat: "nope", updatedAt: 8 },
+      flags: { noGroup: false, revoked: false, rotateCredential: false },
+      failedInstalls: { count: 2, more: true, names: ["Zoom", "Teams"] },
+      network: { wifiFailed: 1, printersFailed: 0 },
+      latestVersion: 4,
+      planState: "overLimit",
+    };
+    const { result } = renderHook(() => live.useDevicePage("d1"));
+    expect(getFunctionName((cx.requests.at(-1)!.q as unknown as { query: FunctionReference<"query"> }).query)).toBe("fleet:page");
+    expect(cx.requests.at(-1)!.q!.args).toEqual({ deviceId: "d1" });
+    if (result.current.status !== "ready") throw new Error("expected ready");
+    const page = result.current.data;
+    expect(page).toMatchObject({
+      revoked: false,
+      outOfSupport: true,
+      latestVersion: 4,
+      planState: "overLimit",
+      failedInstalls: { count: 2, more: true, names: ["Zoom", "Teams"] },
+      network: { wifiFailed: 1, printersFailed: 0 },
+    });
+    expect(page.report).toMatchObject({ kioskPhase: "unknown", shellHealth: "healthy", compat: undefined, outOfSupport: true, updatedAt: 8 });
+    // The lockdown, lock and display fields the (older) server did not send.
+    expect(page).toMatchObject({ lock: null, ring: "everyone", usbAllowUntil: null, protection: null, lockdownCapable: null, apply: null, displayMode: "auto", groupDisplayMode: "auto" });
+    expect("groups" in page || "versions" in page || "rolloutRevision" in page).toBe(false);
+  });
+
+  it("the device page's tab queries pass the PC id; the versions disclosure subscribes to nothing while closed", () => {
+    const name = () => getFunctionName((cx.requests.at(-1)!.q as unknown as { query: FunctionReference<"query"> }).query);
+    cx.queryResult = { groups: [{ _id: "g1", name: "Sales" }], rolloutRevision: 3 };
+    const settings = renderHook(() => liveDevicesApi.useDeviceSettingsOptions("d1")).result;
+    expect(name()).toBe("fleet:deviceSettings");
+    expect(cx.requests.at(-1)!.q!.args).toEqual({ deviceId: "d1" });
+    expect(settings.current).toEqual({ status: "ready", data: cx.queryResult });
+
+    cx.queryResult = { groupId: "g1", reportedAt: null, wifi: [], printers: [], drivers: [] };
+    renderHook(() => liveDevicesApi.useDeviceNetwork("d1"));
+    expect(name()).toBe("fleet:network");
+    expect(cx.requests.at(-1)!.q!.args).toEqual({ deviceId: "d1" });
+
+    cx.requests = [];
+    cx.queryResult = [{ version: 4, createdAt: 1, reason: "settings changed" }];
+    const closed = renderHook(() => liveDevicesApi.useDeviceVersions("d1", false)).result;
+    expect(cx.requests.flatMap((r) => Object.keys(r))).toEqual([]);
+    expect(closed.current.status).toBe("loading");
+    const open = renderHook(() => liveDevicesApi.useDeviceVersions("d1", true)).result;
+    expect(name()).toBe("fleet:versions");
+    expect(cx.requests.at(-1)!.q!.args).toEqual({ deviceId: "d1" });
+    expect(open.current).toEqual({ status: "ready", data: cx.queryResult });
+  });
+
   it("useDeviceLiveness and useCheckResult pass the liveness row / result through", () => {
     cx.queryResult = { lastContactAt: 60_000, online: true, fastUntil: null };
     const live1 = renderHook(() => live.useDeviceLiveness("d1")).result;

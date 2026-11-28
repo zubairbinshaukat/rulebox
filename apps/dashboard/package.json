@@ -25,6 +25,7 @@
     "@rulebox/types": "workspace:*",
     "@rulebox/ui": "workspace:*",
     "@simplewebauthn/browser": "catalog:",
+    "qrcode-generator": "catalog:",
     "convex": "catalog:",
     "gsap": "catalog:",
     "react": "catalog:",

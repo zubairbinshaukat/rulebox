@@ -135,7 +135,7 @@ describe("enrollmentCodes:create", () => {
     const groupId = await group(t, orgId);
     const a = await admin(t, orgId);
     const before = Date.now();
-    const { code, expiresAt } = await a.as.action(api.enrollmentCodes.create, { groupId, uses: 3, ttlMinutes: 60, label: " Branch 4 " });
+    const { code, expiresAt, tokenId } = await a.as.action(api.enrollmentCodes.create, { groupId, uses: 3, ttlMinutes: 60, label: " Branch 4 " });
 
     const parsed = agentParse(code);
     expect(parsed).toEqual({ convexUrl: "https://happy-animal-123.convex.cloud", token: expect.any(String) });
@@ -146,6 +146,9 @@ describe("enrollmentCodes:create", () => {
     const rows = await t.run((ctx) => ctx.db.query("enrollmentTokens").withIndex("by_org", (q) => q.eq("orgId", orgId)).take(10));
     expect(rows).toHaveLength(1);
     const row = rows[0]!;
+    // The row id comes back with the code (the wizard watches `progress` with it); it is not secret and is not the code.
+    expect(tokenId).toBe(row._id);
+    expect(code).not.toContain(tokenId);
     expect(row).toMatchObject({ tokenHash: sha256HexSync(token), usesLeft: 3, usesTotal: 3, groupId, label: "Branch 4", createdBy: a.memberId });
     expect(JSON.stringify(row)).not.toContain(token);
     expect((await stats(t, orgId))?.activeEnrollmentCodes).toBe(1);
@@ -310,6 +313,119 @@ describe("enrollmentCodes:list and revoke", () => {
     expect((await stats(t, orgId))?.activeEnrollmentCodes).toBe(0);
     await expect(t.mutation(api.enrollment.enroll, enrollArgs(tokenOf(code)))).rejects.toMatchObject({ data: { code: "token_revoked" } });
     expect(await devices(t, orgId)).toHaveLength(0);
+  });
+});
+
+describe("enrollmentCodes:progress (UI pass: the Add a PC wizard's live view of one code)", () => {
+  const RELEASE = { version: "0.4.0", url: "https://github.com/rulebox/rulebox/releases/download/v0.4.0/Rulebox-0.4.0-x64.msi", sha256: "a".repeat(64), sizeBytes: 31_000_000 };
+
+  test("a fresh code: counts, group name, no PCs, no download until the organization set a release; viewers may read it", async () => {
+    const t = await setupAuth();
+    const orgId = await makeOrg(t);
+    const groupId = await group(t, orgId, "Tills");
+    const a = await admin(t, orgId);
+    const { tokenId, expiresAt } = await a.as.action(api.enrollmentCodes.create, { groupId, uses: 5, ttlMinutes: 60, label: "Front desk" });
+    const viewer = await asMember(t, { role: "viewer", orgId });
+    const p = await viewer.as.query(api.enrollmentCodes.progress, { tokenId });
+    expect(p).toEqual({ label: "Front desk", groupId, groupName: "Tills", usesTotal: 5, usesLeft: 5, expiresAt, revoked: false, joined: 0, pcs: [], download: null });
+
+    // The organization's release shows as the download (the row the Settings screen writes).
+    await t.run((ctx) => ctx.db.patch(orgId, { phase6Settings: { ruleboxRelease: RELEASE } }));
+    expect((await a.as.query(api.enrollmentCodes.progress, { tokenId })).download).toEqual({ version: "0.4.0", url: RELEASE.url, sizeBytes: 31_000_000 });
+    // Neither the release's hash nor the code's hash is returned.
+    const stored = await t.run((ctx) => ctx.db.get(tokenId));
+    const text = JSON.stringify(await a.as.query(api.enrollmentCodes.progress, { tokenId }));
+    expect(text).not.toContain(RELEASE.sha256);
+    expect(text).not.toContain(stored!.tokenHash);
+  });
+
+  test("the PCs that joined with the code appear newest first with presence and kiosk phase; other codes' PCs do not", async () => {
+    const t = await setupAuth();
+    const orgId = await makeOrg(t);
+    const groupId = await group(t, orgId);
+    const a = await admin(t, orgId);
+    const mine = await a.as.action(api.enrollmentCodes.create, { groupId, uses: 3, ttlMinutes: 60 });
+    const other = await a.as.action(api.enrollmentCodes.create, { groupId, uses: 3, ttlMinutes: 60 });
+    const first = await t.mutation(api.enrollment.enroll, enrollArgs(tokenOf(mine.code), { deviceName: "FRONT-DESK-01" }));
+    await t.mutation(api.enrollment.enroll, enrollArgs(tokenOf(other.code), { deviceName: "SOMEONE-ELSE" }));
+    const second = await t.mutation(api.enrollment.enroll, enrollArgs(tokenOf(mine.code), { deviceName: "FRONT-DESK-02" }));
+
+    let p = await a.as.query(api.enrollmentCodes.progress, { tokenId: mine.tokenId });
+    expect(p).toMatchObject({ usesTotal: 3, usesLeft: 1, joined: 2 });
+    expect(p.pcs.map((x) => x.name)).toEqual(["FRONT-DESK-02", "FRONT-DESK-01"]);
+    expect(p.pcs[0]).toEqual({ _id: second.deviceId, name: "FRONT-DESK-02", enrolledAt: expect.any(Number), online: true });
+    expect(p.pcs[1]!._id).toBe(first.deviceId);
+    expect((await a.as.query(api.enrollmentCodes.progress, { tokenId: other.tokenId })).pcs.map((x) => x.name)).toEqual(["SOMEONE-ELSE"]);
+
+    // The first PC goes offline and the kiosk applies: presence and summary rows are what the screen maps to its stages.
+    await t.run(async (ctx) => {
+      const presence = await ctx.db.query("devicePresence").withIndex("by_device", (q) => q.eq("deviceId", first.deviceId)).unique();
+      await ctx.db.patch(presence!._id, { online: false });
+      const summary = await ctx.db.query("deviceSummary").withIndex("by_device", (q) => q.eq("deviceId", first.deviceId)).unique();
+      await ctx.db.patch(summary!._id, { kioskPhase: "applied" });
+    });
+    p = await a.as.query(api.enrollmentCodes.progress, { tokenId: mine.tokenId });
+    expect(p.pcs.find((x) => x._id === first.deviceId)).toEqual({ _id: first.deviceId, name: "FRONT-DESK-01", enrolledAt: expect.any(Number), online: false, kioskPhase: "applied" });
+    expect(p.pcs.find((x) => x._id === second.deviceId)!.kioskPhase).toBeUndefined();
+  });
+
+  test("12 PCs on one code: the 10 newest are named, `joined` says 12", async () => {
+    const t = await setupAuth();
+    const orgId = await makeOrg(t);
+    const groupId = await group(t, orgId);
+    const a = await admin(t, orgId);
+    const { tokenId } = await a.as.action(api.enrollmentCodes.create, { groupId, uses: 12, ttlMinutes: 60 });
+    await t.run(async (ctx) => {
+      await ctx.db.patch(tokenId, { usesLeft: 0 });
+      for (let i = 0; i < 12; i++) {
+        await ctx.db.insert("devices", { orgId, groupId, name: `PC ${String(i).padStart(2, "0")}`, enrolledAt: Date.now() + i, enrollmentTokenId: tokenId });
+      }
+    });
+    const p = await a.as.query(api.enrollmentCodes.progress, { tokenId });
+    expect(p).toMatchObject({ usesTotal: 12, usesLeft: 0, joined: 12 });
+    expect(p.pcs.map((x) => x.name)).toEqual(Array.from({ length: 10 }, (_, i) => `PC ${String(11 - i).padStart(2, "0")}`));
+    // A PC without presence / summary rows (never reported) is simply not online.
+    expect(p.pcs.every((x) => x.online === false && x.kioskPhase === undefined)).toBe(true);
+  });
+
+  test("revoked and expired codes say so; a code made before `usesTotal` existed takes its total from the PCs it can see", async () => {
+    const t = await setupAuth();
+    const orgId = await makeOrg(t);
+    const groupId = await group(t, orgId);
+    const a = await admin(t, orgId);
+    const { tokenId, code } = await a.as.action(api.enrollmentCodes.create, { groupId, uses: 2, ttlMinutes: 60 });
+    await t.mutation(api.enrollment.enroll, enrollArgs(tokenOf(code)));
+    await a.as.mutation(api.enrollmentCodes.revoke, { tokenId });
+    expect(await a.as.query(api.enrollmentCodes.progress, { tokenId })).toMatchObject({ revoked: true, joined: 1, usesLeft: 1 });
+    // The query takes no clock: the screen decides "expired" from `expiresAt`.
+    await t.run((ctx) => ctx.db.patch(tokenId, { expiresAt: Date.now() - 1 }));
+    expect(await a.as.query(api.enrollmentCodes.progress, { tokenId })).toMatchObject({ expiresAt: expect.any(Number), revoked: true });
+
+    // An old row (no usesTotal, no label, no group): total = what is left + the PCs found.
+    const oldId = await t.run(async (ctx) => {
+      const id = await ctx.db.insert("enrollmentTokens", { orgId, tokenHash: "2".repeat(64), expiresAt: Date.now() + 60_000, usesLeft: 4, createdAt: Date.now() });
+      await ctx.db.insert("devices", { orgId, name: "OLD-PC", enrolledAt: Date.now(), enrollmentTokenId: id });
+      return id;
+    });
+    const old = await a.as.query(api.enrollmentCodes.progress, { tokenId: oldId });
+    expect(old).toMatchObject({ usesTotal: 5, usesLeft: 4, joined: 1 });
+    expect(old.groupName).toBeUndefined();
+    expect(old.label).toBeUndefined();
+    expect(old.pcs.map((x) => x.name)).toEqual(["OLD-PC"]);
+  });
+
+  test("another organization's code, a deleted code and garbage are not_found", async () => {
+    const t = await setupAuth();
+    const orgId = await makeOrg(t);
+    const other = await makeOrg(t, "Other");
+    const groupId = await group(t, orgId);
+    const a = await admin(t, orgId);
+    const foreign = await admin(t, other);
+    const { tokenId } = await a.as.action(api.enrollmentCodes.create, { groupId, uses: 1, ttlMinutes: 60 });
+    await expectCode(foreign.as.query(api.enrollmentCodes.progress, { tokenId }), "not_found");
+    await expectCode(a.as.query(api.enrollmentCodes.progress, { tokenId: "garbage" }), "not_found");
+    await t.run((ctx) => ctx.db.delete(tokenId));
+    await expectCode(a.as.query(api.enrollmentCodes.progress, { tokenId }), "not_found");
   });
 });
 

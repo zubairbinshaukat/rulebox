@@ -1,6 +1,7 @@
 import { useState } from "react";
-import { Button, Input, Pill } from "@rulebox/ui";
+import { Button, InfoTip, Input, Pill } from "@rulebox/ui";
 import IconKey from "~icons/solar/key-minimalistic-square-linear";
+import IconClock from "~icons/solar/clock-circle-linear";
 import {
   useChangePassword,
   useGenerateRecoveryCodes,
@@ -92,12 +93,38 @@ function Security({ st }: { st: StepUpStatus }) {
   );
 
   return (
-    <>
+    <div className="set-sec">
+      <div className="set-strip">
+        <span className="set-strip__icon" aria-hidden="true">
+          <IconClock />
+        </span>
+        <div className="set-strip__text">
+          <p className="set-strip__title">
+            {sec.sessionCard}
+            <InfoTip label={`About ${sec.sessionCard}`}>{sec.sessionLockHint}</InfoTip>
+          </p>
+          <p className="set-strip__line">
+            {st.session.verifiedAt !== null && st.session.method !== null ? (
+              <SessionLine method={st.session.method} at={local(st.session.verifiedAt)} />
+            ) : (
+              sec.sessionNotVerified
+            )}
+          </p>
+        </div>
+        {controller && st.pin.set ? (
+          <Button variant="ghost" className="dash-btn--sm" onClick={() => controller.lockNow("manual")}>
+            {sec.lockNow}
+          </Button>
+        ) : null}
+      </div>
+
       <Card
+        level={3}
+        className="set-sec__pin"
         title={sec.pinCard}
-        sub={sec.pinCardSub}
         actions={
           <div className="su-actions">
+            <InfoTip label={`About ${sec.pinCard}`}>{sec.pinCardSub}</InfoTip>
             <Button variant="ghost" className="dash-btn--sm" onClick={() => setDialog({ kind: "pin" })}>
               {st.pin.set ? sec.changePin : sec.setPinButton}
             </Button>
@@ -111,16 +138,20 @@ function Security({ st }: { st: StepUpStatus }) {
       </Card>
 
       <Card
+        level={3}
+        className="set-sec__passkeys"
         title={sec.passkeysCard}
-        sub={sec.passkeysCardSub(MAX_PASSKEYS)}
         body="flush"
         actions={
-          canAddPasskey ? (
-            <Button variant="ghost" className="dash-btn--sm" onClick={() => setDialog({ kind: "addPasskey" })}>
-              <IconKey aria-hidden="true" />
-              {sec.addPasskey}
-            </Button>
-          ) : null
+          <div className="su-actions">
+            <InfoTip label={`About ${sec.passkeysCard}`}>{sec.passkeysCardSub(MAX_PASSKEYS)}</InfoTip>
+            {canAddPasskey ? (
+              <Button variant="ghost" className="dash-btn--sm" onClick={() => setDialog({ kind: "addPasskey" })}>
+                <IconKey aria-hidden="true" />
+                {sec.addPasskey}
+              </Button>
+            ) : null}
+          </div>
         }
       >
         {!st.passkeysAvailable || !browserPasskeys || st.passkeys.length === 0 || st.passkeys.length >= MAX_PASSKEYS ? (
@@ -173,32 +204,16 @@ function Security({ st }: { st: StepUpStatus }) {
       </Card>
 
       <Card
-        title={sec.sessionCard}
-        actions={
-          controller && st.pin.set ? (
-            <Button variant="ghost" className="dash-btn--sm" onClick={() => controller.lockNow("manual")}>
-              {sec.lockNow}
-            </Button>
-          ) : null
-        }
-      >
-        <p>
-          {st.session.verifiedAt !== null && st.session.method !== null ? (
-            <SessionLine method={st.session.method} at={local(st.session.verifiedAt)} />
-          ) : (
-            sec.sessionNotVerified
-          )}
-        </p>
-        <p className="dash-muted">{sec.sessionLockHint}</p>
-      </Card>
-
-      <Card
+        level={3}
+        className="set-sec__recovery"
         title={sec.recoveryCard}
-        sub={sec.recoveryCardSub}
         actions={
-          <Button variant="ghost" className="dash-btn--sm" onClick={() => setDialog({ kind: "newCodes" })}>
-            {sec.recoveryCreate}
-          </Button>
+          <div className="su-actions">
+            <InfoTip label={`About ${sec.recoveryCard}`}>{sec.recoveryCardSub}</InfoTip>
+            <Button variant="ghost" className="dash-btn--sm" onClick={() => setDialog({ kind: "newCodes" })}>
+              {sec.recoveryCreate}
+            </Button>
+          </div>
         }
       >
         <div className="dash-form">
@@ -218,20 +233,25 @@ function Security({ st }: { st: StepUpStatus }) {
       </Card>
 
       <Card
+        level={3}
+        className="set-sec__password"
         title={sec.passwordCard}
-        sub={sec.passwordCardSub}
+        body="none"
         actions={
-          <Button
-            variant="ghost"
-            className="dash-btn--sm"
-            onClick={() =>
-              void confirmFresh().then((ok) => {
-                if (ok) setDialog({ kind: "password" });
-              })
-            }
-          >
-            {sec.passwordChange}
-          </Button>
+          <div className="su-actions">
+            <InfoTip label={`About ${sec.passwordCard}`}>{sec.passwordCardSub}</InfoTip>
+            <Button
+              variant="ghost"
+              className="dash-btn--sm"
+              onClick={() =>
+                void confirmFresh().then((ok) => {
+                  if (ok) setDialog({ kind: "password" });
+                })
+              }
+            >
+              {sec.passwordChange}
+            </Button>
+          </div>
         }
       />
 
@@ -293,7 +313,7 @@ function Security({ st }: { st: StepUpStatus }) {
         onDone={() => toast(sec.passkeyRemoved)}
         onClose={() => setDialog(null)}
       />
-    </>
+    </div>
   );
 }
 

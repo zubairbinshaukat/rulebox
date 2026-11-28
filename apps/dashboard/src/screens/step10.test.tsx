@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { settleApp } from "./apps/testKit";
 import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { MemoryRouter, Route, Routes, useLocation } from "react-router";
 import { getFunctionName, type FunctionReference } from "convex/server";
@@ -7,7 +8,10 @@ import type { ReactNode } from "react";
 import type { Me } from "../data/types";
 import { MeContext } from "../lib/member";
 import { strings } from "../lib/strings";
+import { pickOption } from "../test/select";
 import { appEditStrings } from "../lib/screenStrings/appEdit";
+import { appAddStrings } from "../lib/screenStrings/appAdd";
+import { appSiteAccessStrings } from "../lib/screenStrings/appSiteAccess";
 import { appUpdateStrings } from "../lib/screenStrings/appUpdates";
 import { updateRefusalStrings } from "../lib/screenStrings/updateRefusals";
 import { appsStrings } from "../lib/screenStrings/apps";
@@ -75,8 +79,8 @@ function Where() {
   return <output data-testid="where">{l.pathname}</output>;
 }
 
-function ui(node: ReactNode, role: Me["role"], path: string) {
-  return render(
+async function ui(node: ReactNode, role: Me["role"], path: string) {
+  const result = render(
     <ToastProvider>
       <MeContext.Provider value={{ ...admin, role }}>
         <MemoryRouter initialEntries={[path]}>
@@ -91,6 +95,8 @@ function ui(node: ReactNode, role: Me["role"], path: string) {
       </MeContext.Provider>
     </ToastProvider>,
   );
+  await settleApp();
+  return result;
 }
 
 beforeEach(() => {
@@ -122,12 +128,12 @@ const webApp = {
 };
 
 describe("Apps list (apps:list)", () => {
-  it("asks for the active or the archived page, shows rows with the icon, source and group count; no install numbers yet", () => {
+  it("asks for the active or the archived page, shows rows with the icon, source and group count; no install numbers yet", async () => {
     cx.results["apps:list"] = pageOf([
       { _id: "a1", name: "Docs", kind: "web", archived: false, groupCount: 2, groupCountMore: false, summary: null, iconUrl: "https://x.convex.cloud/api/storage/1" },
       { _id: "a2", name: "Reader", kind: "desktop", source: "msi", archived: false, groupCount: 0, groupCountMore: false, summary: null },
     ]);
-    ui(<Apps />, "viewer", "/apps");
+    await ui(<Apps />, "viewer", "/apps");
     expect(lastArgs("apps:list")).toEqual({ archived: false, paginationOpts: { numItems: 10, cursor: null }, sort: { key: "created", dir: "desc" } });
     expect(screen.getByRole("link", { name: "Docs" }).getAttribute("href")).toBe("/apps/a1");
     expect(screen.getByText("2 groups")).toBeTruthy();
@@ -138,35 +144,42 @@ describe("Apps list (apps:list)", () => {
     expect(screen.queryByRole("link", { name: appsStrings.addWeb })).toBeNull();
   });
 
-  it("a long group list is shown as 10+ (the query reads only the first assignments)", () => {
+  it("a long group list is shown as 10+ (the query reads only the first assignments)", async () => {
     cx.results["apps:list"] = pageOf([{ _id: "a1", name: "Busy", kind: "web", archived: false, groupCount: 10, groupCountMore: true, summary: null }]);
-    ui(<Apps />, "viewer", "/apps");
+    await ui(<Apps />, "viewer", "/apps");
     expect(screen.getByText("10+ groups")).toBeTruthy();
   });
 
-  it("archived apps are a separate page of the same query", () => {
+  it("archived apps are a separate page of the same query", async () => {
     cx.results["apps:list"] = pageOf([]);
-    ui(<Apps />, "admin", "/apps?archived=1");
+    await ui(<Apps />, "admin", "/apps?archived=1");
     expect(lastArgs("apps:list")).toMatchObject({ archived: true });
     expect(screen.getByText(appsStrings.emptyArchivedTitle)).toBeTruthy();
   });
 });
 
 describe("AppEdit: a website", () => {
-  it("Fetch details fills the name, colour and icon; Save creates the app, then stores the icon, then opens it", async () => {
+  // The add page (`WebAdd`): the address is read by itself when it is left, the list is the picker's (or "Edit the list by hand" under Advanced).
+  const webAddress = () => screen.getByRole("textbox", { name: new RegExp(`^${appAddStrings.web.address}`) });
+  const leave = (value: string) => {
+    fireEvent.change(webAddress(), { target: { value } });
+    fireEvent.blur(webAddress());
+  };
+
+  it("the site is read when the address is left: name, colour and icon are filled; Add creates the app, then stores the icon, then opens it", async () => {
     const createWeb = vi.fn(async () => "a9");
     const saveIcon = vi.fn(async () => null);
     cx.fns["apps:createWeb"] = createWeb;
     cx.fns["apps:saveIcon"] = saveIcon;
-    cx.fns["apps:fetchWebMeta"] = vi.fn(async () => ({ name: "Example Docs", hue: 150, iconPreviewUrl: "data:image/png;base64,AAAA" }));
-    ui(<AppEdit />, "admin", "/apps/new?kind=web");
-    fireEvent.change(screen.getByRole("textbox", { name: new RegExp(`^${appEditStrings.url}`) }), { target: { value: "https://docs.example.com" } });
-    fireEvent.click(screen.getByRole("button", { name: appEditStrings.fetch }));
-    expect(await screen.findByText(appEditStrings.fetchedWithIcon)).toBeTruthy();
-    expect(screen.getByText(appEditStrings.iconPreview)).toBeTruthy();
+    const fetchMeta = vi.fn(async () => ({ name: "Example Docs", hue: 150, iconPreviewUrl: "data:image/png;base64,AAAA" }));
+    cx.fns["apps:fetchWebMeta"] = fetchMeta;
+    await ui(<AppEdit />, "admin", "/apps/new?kind=web");
+    leave("https://docs.example.com");
+    expect(await screen.findByText(appSiteAccessStrings.form.found)).toBeTruthy();
+    expect(fetchMeta).toHaveBeenCalledWith({ url: "https://docs.example.com" });
     expect((screen.getByRole("textbox", { name: new RegExp(`^${appEditStrings.name}`) }) as HTMLInputElement).value).toBe("Example Docs");
-    fireEvent.change(screen.getByRole("textbox", { name: new RegExp(`^${appEditStrings.allowedDomains}`) }), { target: { value: "*.cdn.example.com" } });
-    fireEvent.click(screen.getByRole("button", { name: strings.common.create }));
+    fireEvent.change(screen.getByRole("textbox", { name: new RegExp(`^${appAddStrings.web.rawList}`) }), { target: { value: "*.cdn.example.com" } });
+    fireEvent.click(screen.getByRole("button", { name: appAddStrings.web.add }));
     await waitFor(() => expect(saveIcon).toHaveBeenCalledWith({ appId: "a9", png: "data:image/png;base64,AAAA" }));
     expect(createWeb).toHaveBeenCalledWith({
       name: "Example Docs",
@@ -183,14 +196,13 @@ describe("AppEdit: a website", () => {
     cx.fns["apps:createWeb"] = vi.fn(async () => "a9");
     cx.fns["apps:saveIcon"] = saveIcon;
     cx.fns["apps:fetchWebMeta"] = vi.fn(async () => ({ name: "Docs", iconPreviewUrl: "data:image/png;base64,AAAA" }));
-    ui(<AppEdit />, "admin", "/apps/new?kind=web");
-    const url = screen.getByRole("textbox", { name: new RegExp(`^${appEditStrings.url}`) });
-    fireEvent.change(url, { target: { value: "https://docs.example.com" } });
-    fireEvent.click(screen.getByRole("button", { name: appEditStrings.fetch }));
-    await screen.findByText(appEditStrings.iconPreview);
-    fireEvent.change(url, { target: { value: "https://other.example.org" } });
-    expect(screen.queryByText(appEditStrings.iconPreview)).toBeNull();
-    fireEvent.click(screen.getByRole("button", { name: strings.common.create }));
+    await ui(<AppEdit />, "admin", "/apps/new?kind=web");
+    leave("https://docs.example.com");
+    await screen.findByText(appSiteAccessStrings.form.found);
+    expect(document.querySelector(".dash-glyph img")).not.toBeNull();
+    fireEvent.change(webAddress(), { target: { value: "https://other.example.org" } });
+    expect(document.querySelector(".dash-glyph img")).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: appAddStrings.web.add }));
     await waitFor(() => expect(screen.getByTestId("where").textContent).toBe("/apps/a9"));
     expect(saveIcon).not.toHaveBeenCalled();
   });
@@ -201,11 +213,10 @@ describe("AppEdit: a website", () => {
       throw new ConvexError({ code: "invalid_argument", field: "png" });
     });
     cx.fns["apps:fetchWebMeta"] = vi.fn(async () => ({ name: "Docs", iconPreviewUrl: "data:image/png;base64,AAAA" }));
-    ui(<AppEdit />, "admin", "/apps/new?kind=web");
-    fireEvent.change(screen.getByRole("textbox", { name: new RegExp(`^${appEditStrings.url}`) }), { target: { value: "https://docs.example.com" } });
-    fireEvent.click(screen.getByRole("button", { name: appEditStrings.fetch }));
-    await screen.findByText(appEditStrings.fetchedWithIcon);
-    fireEvent.click(screen.getByRole("button", { name: strings.common.create }));
+    await ui(<AppEdit />, "admin", "/apps/new?kind=web");
+    leave("https://docs.example.com");
+    await screen.findByText(appSiteAccessStrings.form.found);
+    fireEvent.click(screen.getByRole("button", { name: appAddStrings.web.add }));
     expect(await screen.findByText(new RegExp(appEditStrings.iconNotSaved))).toBeTruthy();
     await waitFor(() => expect(screen.getByTestId("where").textContent).toBe("/apps/a9"));
   });
@@ -213,12 +224,12 @@ describe("AppEdit: a website", () => {
   it("inline validation blocks an http address and a private one before anything is sent", async () => {
     const createWeb = vi.fn(async () => "a9");
     cx.fns["apps:createWeb"] = createWeb;
-    ui(<AppEdit />, "admin", "/apps/new?kind=web");
+    await ui(<AppEdit />, "admin", "/apps/new?kind=web");
     fireEvent.change(screen.getByRole("textbox", { name: new RegExp(`^${appEditStrings.name}`) }), { target: { value: "Docs" } });
-    fireEvent.change(screen.getByRole("textbox", { name: new RegExp(`^${appEditStrings.url}`) }), { target: { value: "http://docs.example.com" } });
-    fireEvent.click(screen.getByRole("button", { name: strings.common.create }));
+    fireEvent.change(webAddress(), { target: { value: "http://docs.example.com" } });
+    fireEvent.click(screen.getByRole("button", { name: appAddStrings.web.add }));
     expect(await screen.findByText(strings.validate.httpsUrl)).toBeTruthy();
-    fireEvent.change(screen.getByRole("textbox", { name: new RegExp(`^${appEditStrings.url}`) }), { target: { value: "https://10.0.0.1" } });
+    fireEvent.change(webAddress(), { target: { value: "https://10.0.0.1" } });
     expect(await screen.findByText(strings.validate.privateHost)).toBeTruthy();
     expect(createWeb).not.toHaveBeenCalled();
   });
@@ -227,7 +238,7 @@ describe("AppEdit: a website", () => {
     cx.results["apps:get"] = webApp;
     const update = vi.fn().mockRejectedValueOnce(new ConvexError({ code: "stale_edit" })).mockResolvedValueOnce({ revision: 4 });
     cx.fns["apps:update"] = update;
-    ui(<AppEdit />, "admin", "/apps/a1");
+    await ui(<AppEdit />, "admin", "/apps/a1");
     expect(cx.queried.find((q) => q.name === "apps:get")).toEqual({ name: "apps:get", args: { appId: "a1" } });
     fireEvent.change(screen.getByRole("textbox", { name: new RegExp(`^${appEditStrings.name}`) }), { target: { value: "Docs 2" } });
     fireEvent.click(screen.getByRole("button", { name: strings.common.saveChanges }));
@@ -236,8 +247,8 @@ describe("AppEdit: a website", () => {
     expect(await screen.findByText(strings.common.staleTitle)).toBeTruthy();
   });
 
-  it("a new app asks the server for nothing", () => {
-    ui(<AppEdit />, "admin", "/apps/new?kind=web");
+  it("a new app asks the server for nothing", async () => {
+    await ui(<AppEdit />, "admin", "/apps/new?kind=web");
     expect(cx.queried.filter((q) => q.name === "apps:get")).toEqual([]);
   });
 
@@ -245,7 +256,7 @@ describe("AppEdit: a website", () => {
     cx.results["apps:get"] = webApp;
     const assign = vi.fn().mockRejectedValueOnce(new ConvexError({ code: "conflict", field: "app" })).mockResolvedValueOnce({ assignmentId: "x" });
     cx.fns["groups:assignApp"] = assign;
-    ui(<AppEdit />, "admin", "/apps/a1");
+    await ui(<AppEdit />, "admin", "/apps/a1?tab=access");
     fireEvent.click(screen.getByRole("button", { name: appEditStrings.assign }));
     const dialog = await screen.findByRole("dialog");
     fireEvent.click(within(dialog).getByRole("button", { name: appEditStrings.assign }));
@@ -261,7 +272,7 @@ describe("AppEdit: a website", () => {
     const remove = vi.fn(async () => null);
     cx.fns["apps:setArchived"] = setArchived;
     cx.fns["apps:remove"] = remove;
-    ui(<AppEdit />, "admin", "/apps/a1");
+    await ui(<AppEdit />, "admin", "/apps/a1");
     fireEvent.click(screen.getByRole("button", { name: appEditStrings.unarchive }));
     await waitFor(() => expect(setArchived).toHaveBeenCalledWith({ appId: "a1", archived: false }));
     fireEvent.click(screen.getByRole("button", { name: strings.common.delete }));
@@ -272,9 +283,9 @@ describe("AppEdit: a website", () => {
     await waitFor(() => expect(screen.getByTestId("where").textContent).toBe("/apps"));
   });
 
-  it("a viewer sees the app read-only", () => {
+  it("a viewer sees the app read-only", async () => {
     cx.results["apps:get"] = webApp;
-    ui(<AppEdit />, "viewer", "/apps/a1");
+    await ui(<AppEdit />, "viewer", "/apps/a1");
     expect(screen.queryByRole("button", { name: strings.common.saveChanges })).toBeNull();
     expect(screen.getByText(strings.app.readOnly)).toBeTruthy();
   });
@@ -285,9 +296,9 @@ describe("AppEdit: site permissions (apps:setPermissions, apps:get denials30d; P
   const permCard = () => screen.getByRole("list", { name: appEditStrings.permissions });
   const kindsOn = () => within(permCard()).getAllByRole("switch").map((el) => el.getAttribute("aria-checked") === "true");
 
-  it("shows all eight switches in the saved state, each with its default, and the printing note", () => {
+  it("shows all eight switches in the saved state, each with its default, and the printing note", async () => {
     cx.results["apps:get"] = withDenials;
-    ui(<AppEdit />, "admin", "/apps/a1");
+    await ui(<AppEdit />, "admin", "/apps/a1?tab=permissions");
     // camera, microphone, screen sharing, clipboard, notifications, downloads, printing, location
     expect(kindsOn()).toEqual([false, false, false, false, true, true, false, false]);
     const rows = within(permCard()).getAllByRole("listitem");
@@ -295,7 +306,9 @@ describe("AppEdit: site permissions (apps:setPermissions, apps:get denials30d; P
     expect(within(rows[0]!).getByText(appEditStrings.permissionDefault(false))).toBeTruthy(); // camera
     expect(within(rows[4]!).getByText(appEditStrings.permissionDefault(true))).toBeTruthy(); // notifications
     expect(within(rows[6]!).getByText(appEditStrings.permissionDefault(true))).toBeTruthy(); // printing is allowed by default (PRD 24.1)
-    expect(screen.getByText(appEditStrings.printingNote)).toBeTruthy();
+    // The longer printing note is the (i) on the printing row, not a paragraph under the list.
+    expect(screen.queryByText(appEditStrings.printingNote)).toBeNull();
+    expect(within(rows[6]!).getByRole("button", { name: `About ${appEditStrings.permissionNames.printing}` })).toBeTruthy();
     // nothing to save until something changes
     expect((screen.getByRole("button", { name: appEditStrings.permissionsSave }) as HTMLButtonElement).disabled).toBe(true);
   });
@@ -304,7 +317,7 @@ describe("AppEdit: site permissions (apps:setPermissions, apps:get denials30d; P
     cx.results["apps:get"] = withDenials;
     const save = vi.fn(async () => ({ revision: 4 }));
     cx.fns["apps:setPermissions"] = save;
-    ui(<AppEdit />, "admin", "/apps/a1");
+    await ui(<AppEdit />, "admin", "/apps/a1?tab=permissions");
     expect(screen.getByText(appEditStrings.blocked30)).toBeTruthy();
     expect(screen.getByText(appEditStrings.blockedCount("41"))).toBeTruthy();
     expect(screen.getByText(appEditStrings.blockedCount("12"))).toBeTruthy();
@@ -331,7 +344,7 @@ describe("AppEdit: site permissions (apps:setPermissions, apps:get denials30d; P
     cx.results["apps:get"] = webApp;
     const save = vi.fn().mockResolvedValueOnce({ revision: 4 }).mockRejectedValueOnce(new ConvexError({ code: "stale_edit" }));
     cx.fns["apps:setPermissions"] = save;
-    ui(<AppEdit />, "admin", "/apps/a1");
+    await ui(<AppEdit />, "admin", "/apps/a1?tab=permissions");
     fireEvent.click(within(permCard()).getAllByRole("switch")[2]!);
     fireEvent.click(screen.getByRole("button", { name: appEditStrings.permissionsSave }));
     await waitFor(() => expect(save).toHaveBeenCalledTimes(1));
@@ -342,9 +355,9 @@ describe("AppEdit: site permissions (apps:setPermissions, apps:get denials30d; P
     expect(await screen.findByText(strings.common.staleTitle)).toBeTruthy();
   });
 
-  it("a viewer sees the switches and the counts but cannot change or save anything", () => {
+  it("a viewer sees the switches and the counts but cannot change or save anything", async () => {
     cx.results["apps:get"] = withDenials;
-    ui(<AppEdit />, "viewer", "/apps/a1");
+    await ui(<AppEdit />, "viewer", "/apps/a1?tab=permissions");
     expect(within(permCard()).getAllByRole("switch").every((el) => (el as HTMLButtonElement).disabled)).toBe(true);
     expect(screen.queryByRole("button", { name: appEditStrings.permissionsSave })).toBeNull();
     expect(screen.queryByRole("button", { name: appEditStrings.allowKind("Microphone") })).toBeNull();
@@ -352,23 +365,25 @@ describe("AppEdit: site permissions (apps:setPermissions, apps:get denials30d; P
     expect(screen.getByText(appEditStrings.permissionsReadOnly)).toBeTruthy();
   });
 
-  it("no denials says so; an already allowed kind has no Allow button; a program has no permissions card", () => {
+  it("no denials says so; an already allowed kind has no Allow button; a program has no permissions card", async () => {
     cx.results["apps:get"] = { ...webApp, denials30d: [{ kind: "notifications", count: 3 }] };
-    ui(<AppEdit />, "admin", "/apps/a1");
+    await ui(<AppEdit />, "admin", "/apps/a1?tab=permissions");
     expect(screen.queryByRole("button", { name: appEditStrings.allowKind("Notifications") })).toBeNull();
     cleanup();
     cx.results["apps:get"] = webApp;
-    ui(<AppEdit />, "admin", "/apps/a1");
+    await ui(<AppEdit />, "admin", "/apps/a1?tab=permissions");
     expect(screen.getByText(appEditStrings.blocked30None)).toBeTruthy();
     cleanup();
     cx.results["apps:get"] = { _id: "a2", name: "Reader", kind: "desktop", archived: false, revision: 1, createdAt: 1, assignments: [], fileTypes: [], directEmployeeCount: 0, groupOptions: [], denials30d: [], desktop: { source: "preinstalled", exe: "{ProgramFiles}\\R\\r.exe", args: [], fileArgTemplate: [], resetFolders: [] } };
-    ui(<AppEdit />, "admin", "/apps/a2");
+    await ui(<AppEdit />, "admin", "/apps/a2");
     expect(screen.queryByText(appEditStrings.blocked30)).toBeNull();
   });
 });
 
-describe("AppEdit: a Windows program", () => {
-  it("Resolve fills the install from winget; Save creates the program with that install and the exe path", async () => {
+describe("AppEdit: adding a Windows program (the review page; popular-apps flow is in apps/addApp.test.tsx)", () => {
+  const rest = () => screen.getByRole("textbox", { name: new RegExp(`^${appAddStrings.program.label}`) });
+
+  it("a winget id is looked up once; the name is filled in; Add creates the program with that install and the exe path", async () => {
     const resolved = {
       packageId: "7zip.7zip",
       version: "24.08",
@@ -380,14 +395,13 @@ describe("AppEdit: a Windows program", () => {
     const createDesktop = vi.fn<(input: unknown) => Promise<string>>(async () => "a8");
     cx.fns["apps:resolveWinget"] = resolve;
     cx.fns["apps:createDesktop"] = createDesktop;
-    ui(<AppEdit />, "admin", "/apps/new?kind=desktop");
-    fireEvent.change(screen.getByRole("textbox", { name: new RegExp(`^${appEditStrings.wingetId}`) }), { target: { value: "7zip.7zip" } });
-    fireEvent.click(screen.getByRole("button", { name: appEditStrings.resolve }));
-    expect(await screen.findByText(appEditStrings.resolved("7zip.7zip", "24.08"))).toBeTruthy();
-    expect(resolve).toHaveBeenCalledWith({ packageId: "7zip.7zip", version: undefined });
+    await ui(<AppEdit />, "admin", "/apps/new?kind=desktop&winget=7zip.7zip");
+    expect(await screen.findByText(appAddStrings.silent.silent)).toBeTruthy();
+    expect(resolve).toHaveBeenCalledTimes(1);
+    expect(resolve).toHaveBeenCalledWith({ packageId: "7zip.7zip" });
     expect((screen.getByRole("textbox", { name: new RegExp(`^${appEditStrings.name}`) }) as HTMLInputElement).value).toBe("7-Zip");
-    fireEvent.change(screen.getByRole("textbox", { name: new RegExp(`^${appEditStrings.exe}`) }), { target: { value: "{ProgramFiles}\\7-Zip\\7zFM.exe" } });
-    fireEvent.click(screen.getByRole("button", { name: strings.common.create }));
+    fireEvent.change(rest(), { target: { value: "7-Zip\\7zFM.exe" } });
+    fireEvent.click(screen.getByRole("button", { name: appAddStrings.review.add("7-Zip") }));
     await waitFor(() => expect(createDesktop).toHaveBeenCalledTimes(1));
     expect(createDesktop.mock.calls[0]![0]).toMatchObject({
       name: "7-Zip",
@@ -396,34 +410,33 @@ describe("AppEdit: a Windows program", () => {
     await waitFor(() => expect(screen.getByTestId("where").textContent).toBe("/apps/a8"));
   });
 
-  it("winget errors are explained in the form: unsupported with the reason, unreachable", async () => {
+  it("winget refusals are explained in plain words: per-user or Store package, then unreachable with Try again", async () => {
     cx.fns["apps:resolveWinget"] = vi
       .fn()
       .mockRejectedValueOnce(new ConvexError({ code: "winget_unsupported", detail: "it only offers a per-user installer" }))
       .mockRejectedValueOnce(new ConvexError({ code: "winget_unreachable" }));
-    ui(<AppEdit />, "admin", "/apps/new?kind=desktop");
-    fireEvent.change(screen.getByRole("textbox", { name: new RegExp(`^${appEditStrings.wingetId}`) }), { target: { value: "Spotify.Spotify" } });
-    fireEvent.click(screen.getByRole("button", { name: appEditStrings.resolve }));
-    expect(await screen.findByText(strings.errors.wingetUnsupportedBecause("it only offers a per-user installer"))).toBeTruthy();
-    fireEvent.click(screen.getByRole("button", { name: appEditStrings.resolve }));
-    expect(await screen.findByText(strings.errors.wingetUnreachable)).toBeTruthy();
+    await ui(<AppEdit />, "admin", "/apps/new?kind=desktop&winget=Spotify.Spotify");
+    expect(await screen.findByText(appAddStrings.unsupported.msixOrUser("Spotify.Spotify"))).toBeTruthy();
+    expect(screen.getByRole("link", { name: appAddStrings.review.useInstaller }).getAttribute("href")).toBe("/apps/new?kind=desktop&source=installer");
+    cleanup();
+    await ui(<AppEdit />, "admin", "/apps/new?kind=desktop&winget=Spotify.Spotify");
+    expect(await screen.findByText(appAddStrings.review.unreachable)).toBeTruthy();
+    expect(screen.getByRole("button", { name: appAddStrings.review.tryAgain })).toBeTruthy();
   });
 
-  it("path rules are checked inline: C:\\x.exe and a script are refused", async () => {
+  it("path rules are checked inline: C:\\x.exe, a script and .. are refused", async () => {
     const createDesktop = vi.fn(async () => "a8");
     cx.fns["apps:createDesktop"] = createDesktop;
-    ui(<AppEdit />, "admin", "/apps/new?kind=desktop");
-    fireEvent.click(screen.getByRole("radio", { name: appsStrings.sources.preinstalled }));
+    await ui(<AppEdit />, "admin", "/apps/new?kind=desktop&source=preinstalled");
     fireEvent.change(screen.getByRole("textbox", { name: new RegExp(`^${appEditStrings.name}`) }), { target: { value: "Tool" } });
-    for (const bad of ["C:\\x.exe", "{ProgramFiles}\\a\\b.bat", "{ProgramFiles}\\..\\x.exe"]) {
-      fireEvent.change(screen.getByRole("textbox", { name: new RegExp(`^${appEditStrings.exe}`) }), { target: { value: bad } });
-      fireEvent.click(screen.getByRole("button", { name: strings.common.create }));
+    for (const bad of ["C:\\x.exe", "a\\b.bat", "..\\x.exe"]) {
+      fireEvent.change(rest(), { target: { value: bad } });
+      fireEvent.click(screen.getByRole("button", { name: appAddStrings.review.add("Tool") }));
       expect(await screen.findByText(strings.validate.exePath)).toBeTruthy();
     }
     expect(createDesktop).not.toHaveBeenCalled();
   });
 });
-
 describe("AppEdit: Updates card (Phase 6 Step 10; apps:get feedStatus, apps:rollbackVersion)", () => {
   const install = { kind: "msi", url: "https://dl.example.com/pos-2.msi", sha256: sha, sizeBytes: 2000, silentArgs: [], successExitCodes: [0], removeWhenUnassigned: true };
   const feed = { kind: "tauri", url: "https://updates.example.com/latest.json", pubkey: "RWTestKeyAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA", target: "windows-x86_64-nsis" };
@@ -448,9 +461,9 @@ describe("AppEdit: Updates card (Phase 6 Step 10; apps:get feedStatus, apps:roll
 
   it("a Managed program shows its mode, the feed status line (no address or key in it) and Roll back to the previous version", async () => {
     cx.results["apps:get"] = managed({ feedStatus: { status: "bad_signature", failures: 2, lastCheckedAt: Date.now() - 60_000, seenVersion: "2.1.0" } });
-    ui(<AppEdit />, "admin", "/apps/a2");
-    await screen.findByText(appUpdateStrings.updates);
-    expect(screen.getByRole("radio", { name: appUpdateStrings.updateModes.managed }).getAttribute("aria-checked")).toBe("true");
+    await ui(<AppEdit />, "admin", "/apps/a2?tab=updates");
+    await screen.findByRole("heading", { name: appUpdateStrings.updates });
+    expect(screen.getByRole("radio", { name: appUpdateStrings.modeLabels.managed }).getAttribute("aria-checked")).toBe("true");
     expect(field(appUpdateStrings.version).value).toBe("2.0.0");
     expect(screen.getByText(appUpdateStrings.feedStatusProblem.bad_signature)).toBeTruthy();
     expect(screen.getByText(new RegExp(appUpdateStrings.feedStatusSeen("2.1.0").replace(/\./g, "\\.")))).toBeTruthy();
@@ -465,15 +478,17 @@ describe("AppEdit: Updates card (Phase 6 Step 10; apps:get feedStatus, apps:roll
 
   it("no Roll back without an older version, for a viewer, or outside Managed", async () => {
     cx.results["apps:get"] = managed();
-    ui(<AppEdit />, "viewer", "/apps/a2");
-    await screen.findByText(appUpdateStrings.updates);
+    await ui(<AppEdit />, "viewer", "/apps/a2?tab=updates");
+    await screen.findByRole("heading", { name: appUpdateStrings.updates });
     expect(screen.queryByRole("button", { name: /^Roll back to/ })).toBeNull();
     cleanup();
     cx.results["apps:get"] = program({}, { version: "2.0.0", update: { mode: "managed" } });
-    ui(<AppEdit />, "admin", "/apps/a2");
-    await screen.findByText(appUpdateStrings.updates);
+    await ui(<AppEdit />, "admin", "/apps/a2?tab=updates");
+    await screen.findByRole("heading", { name: appUpdateStrings.updates });
     expect(screen.queryByRole("button", { name: /^Roll back to/ })).toBeNull();
-    expect(screen.getByText(appUpdateStrings.rollbackNone)).toBeTruthy();
+    // The "nothing to roll back to" help is an (i) tip next to the rollback switch, not a paragraph.
+    expect(screen.queryByText(appUpdateStrings.rollbackNone)).toBeNull();
+    expect(screen.getByRole("button", { name: `About ${appUpdateStrings.rollbackOnFail}` })).toBeTruthy();
     expect(screen.queryByText(appUpdateStrings.feedStatusWorking)).toBeNull(); // no feed, no status line
   });
 
@@ -481,8 +496,11 @@ describe("AppEdit: Updates card (Phase 6 Step 10; apps:get feedStatus, apps:roll
     const update = vi.fn(async () => ({ revision: 6 }));
     cx.fns["apps:update"] = update;
     cx.results["apps:get"] = program();
-    ui(<AppEdit />, "admin", "/apps/a2");
-    await screen.findByText(appUpdateStrings.updates);
+    await ui(<AppEdit />, "admin", "/apps/a2?tab=updates");
+    await screen.findByRole("heading", { name: appUpdateStrings.updates });
+    // The save bar shows once something changed: type a version and clear it again.
+    fireEvent.change(field(appUpdateStrings.version), { target: { value: "1" } });
+    fireEvent.change(field(appUpdateStrings.version), { target: { value: "" } });
     fireEvent.click(screen.getByRole("button", { name: strings.common.saveChanges }));
     await waitFor(() => expect(update).toHaveBeenCalledTimes(1));
     const sent = (update.mock.calls[0] as unknown as [{ desktop: { desktop: Record<string, unknown> } }])[0].desktop.desktop;
@@ -491,7 +509,7 @@ describe("AppEdit: Updates card (Phase 6 Step 10; apps:get feedStatus, apps:roll
     expect(sent).not.toHaveProperty("version");
     expect((sent.install as { sizeBytes: number }).sizeBytes).toBe(2000); // the same installer keeps its size
 
-    fireEvent.click(screen.getByRole("radio", { name: appUpdateStrings.updateModes.managed }));
+    fireEvent.click(screen.getByRole("radio", { name: appUpdateStrings.modeLabels.managed }));
     fireEvent.change(field(appUpdateStrings.version), { target: { value: "v2" } });
     fireEvent.click(screen.getByRole("button", { name: strings.common.saveChanges }));
     expect(await screen.findByText(appEditStrings.versionNotOrdered)).toBeTruthy();
@@ -508,9 +526,9 @@ describe("AppEdit: Updates card (Phase 6 Step 10; apps:get feedStatus, apps:roll
     const update = vi.fn(async () => ({ revision: 6 }));
     cx.fns["apps:update"] = update;
     cx.results["apps:get"] = program();
-    ui(<AppEdit />, "admin", "/apps/a2");
-    await screen.findByText(appUpdateStrings.updates);
-    fireEvent.click(screen.getByRole("radio", { name: appUpdateStrings.updateModes.vendor }));
+    await ui(<AppEdit />, "admin", "/apps/a2?tab=updates");
+    await screen.findByRole("heading", { name: appUpdateStrings.updates });
+    fireEvent.click(screen.getByRole("radio", { name: appUpdateStrings.modeLabels.vendor }));
     fireEvent.click(screen.getByRole("button", { name: strings.common.saveChanges }));
     expect(await screen.findByText(appEditStrings.needsPublisher)).toBeTruthy();
     fireEvent.change(field(appUpdateStrings.publisher), { target: { value: "Microsoft Corporation" } });
@@ -521,17 +539,18 @@ describe("AppEdit: Updates card (Phase 6 Step 10; apps:get feedStatus, apps:roll
     cleanup();
 
     cx.results["apps:get"] = program({}, { exe: "{ProgramFiles}\\Google\\Chrome\\Application\\chrome.exe" });
-    ui(<AppEdit />, "admin", "/apps/a2");
-    await screen.findByText(appUpdateStrings.updates);
+    await ui(<AppEdit />, "admin", "/apps/a2?tab=updates");
+    await screen.findByRole("heading", { name: appUpdateStrings.updates });
     expect(screen.getByText(appUpdateStrings.browserForced)).toBeTruthy();
-    expect(screen.queryByRole("radio", { name: appUpdateStrings.updateModes.pinned })).toBeNull();
+    expect(screen.queryByRole("radio", { name: appUpdateStrings.modeLabels.pinned })).toBeNull();
   });
 
   it("a server refusal of plan 4.4 is explained in one sentence", async () => {
     cx.results["apps:get"] = program();
     cx.fns["apps:update"] = vi.fn().mockRejectedValue(new ConvexError({ code: "invalid_argument", field: "update.minVersion", detail: "min_above_bootstrap" }));
-    ui(<AppEdit />, "admin", "/apps/a2");
-    await screen.findByText(appUpdateStrings.updates);
+    await ui(<AppEdit />, "admin", "/apps/a2?tab=updates");
+    await screen.findByRole("heading", { name: appUpdateStrings.updates });
+    fireEvent.change(field(appUpdateStrings.version), { target: { value: "1" } });
     fireEvent.click(screen.getByRole("button", { name: strings.common.saveChanges }));
     expect(await screen.findByText(updateRefusalStrings.min_above_bootstrap)).toBeTruthy();
   });
@@ -545,49 +564,135 @@ describe("File types (fileHandlers:page, apps:options)", () => {
     { _id: "a1", name: "Docs", kind: "web", canOpenFiles: false },
   ];
 
-  it("lists the rules; adding sends the normalized extension and the app; removing sends the rule id", async () => {
+  const remove = (ext: string) => strings.table.actionFor(strings.common.remove, ext);
+  const openAdd = async () => {
+    fireEvent.click(screen.getByRole("button", { name: fileTypesStrings.add }));
+    return screen.findByRole("dialog");
+  };
+  const chip = (dialog: HTMLElement, label: string) => within(dialog).getByRole("button", { name: label });
+  const submit = (dialog: HTMLElement) => fireEvent.click(within(dialog).getByRole("button", { name: strings.common.add }));
+
+  it("lists the rules; Other types one extension (the normalized one goes to fileHandlers:set); removing sends the rule id", async () => {
     cx.results["fileHandlers:page"] = data;
     cx.results["apps:options"] = options;
     const set = vi.fn(async () => null);
-    const remove = vi.fn(async () => null);
+    const setMany = vi.fn(async () => null);
+    const removeFn = vi.fn(async () => null);
     cx.fns["fileHandlers:set"] = set;
-    cx.fns["fileHandlers:remove"] = remove;
-    ui(<FileTypes />, "admin", "/file-types");
+    cx.fns["fileHandlers:setMany"] = setMany;
+    cx.fns["fileHandlers:remove"] = removeFn;
+    await ui(<FileTypes />, "admin", "/file-types");
     expect(screen.getByText(".pdf")).toBeTruthy();
-    fireEvent.click(screen.getByRole("button", { name: fileTypesStrings.add }));
-    const dialog = await screen.findByRole("dialog");
+    const dialog = await openAdd();
+    // The only program that can open files is chosen for them.
+    expect(within(dialog).getByLabelText(fileTypesStrings.app).textContent).toContain("Reader");
+    // The raw box is hidden until "Other…".
+    expect(within(dialog).queryByLabelText(new RegExp(`^${fileTypesStrings.extension}`))).toBeNull();
+    fireEvent.click(chip(dialog, fileTypesStrings.other));
     fireEvent.change(within(dialog).getByLabelText(new RegExp(`^${fileTypesStrings.extension}`)), { target: { value: "DOCX" } });
-    fireEvent.click(within(dialog).getByRole("button", { name: strings.common.add }));
+    submit(dialog);
     await waitFor(() => expect(set).toHaveBeenCalledWith({ extension: ".docx", appId: "a2" }));
+    expect(setMany).not.toHaveBeenCalled();
 
-    fireEvent.click(screen.getByRole("button", { name: `${strings.common.remove} .pdf` }));
+    fireEvent.click(screen.getByRole("button", { name: remove(".pdf") }));
     const confirm = await screen.findByRole("dialog");
     fireEvent.click(within(confirm).getByRole("button", { name: strings.common.remove }));
-    await waitFor(() => expect(remove).toHaveBeenCalledWith({ handlerId: "h1" }));
+    await waitFor(() => expect(removeFn).toHaveBeenCalledWith({ handlerId: "h1" }));
+  });
+
+  it("the chips: Pictures is one call with all its extensions, so it makes one settings version", async () => {
+    cx.results["fileHandlers:page"] = data;
+    cx.results["apps:options"] = options;
+    const set = vi.fn(async () => null);
+    const setMany = vi.fn(async () => null);
+    cx.fns["fileHandlers:set"] = set;
+    cx.fns["fileHandlers:setMany"] = setMany;
+    await ui(<FileTypes />, "admin", "/file-types");
+    const dialog = await openAdd();
+    expect(chip(dialog, "Pictures").getAttribute("aria-pressed")).toBe("false");
+    fireEvent.click(chip(dialog, "Pictures"));
+    expect(chip(dialog, "Pictures").getAttribute("aria-pressed")).toBe("true");
+    expect(within(dialog).getByText(fileTypesStrings.willAdd(".jpg .jpeg .png .gif .bmp"))).toBeTruthy();
+    submit(dialog);
+    await waitFor(() => expect(setMany).toHaveBeenCalledWith({ extensions: [".jpg", ".jpeg", ".png", ".gif", ".bmp"], appId: "a2" }));
+    expect(setMany).toHaveBeenCalledTimes(1);
+    expect(set).not.toHaveBeenCalled();
+  });
+
+  it("several chips, and Other on top of them, go in one call; a repeated extension is sent once", async () => {
+    cx.results["fileHandlers:page"] = data;
+    cx.results["apps:options"] = options;
+    const setMany = vi.fn(async () => null);
+    cx.fns["fileHandlers:setMany"] = setMany;
+    await ui(<FileTypes />, "admin", "/file-types");
+    const dialog = await openAdd();
+    fireEvent.click(chip(dialog, "PDF"));
+    fireEvent.click(chip(dialog, "Word"));
+    fireEvent.click(chip(dialog, fileTypesStrings.other));
+    fireEvent.change(within(dialog).getByLabelText(new RegExp(`^${fileTypesStrings.extension}`)), { target: { value: "PDF" } });
+    submit(dialog);
+    await waitFor(() => expect(setMany).toHaveBeenCalledWith({ extensions: [".pdf", ".docx", ".doc"], appId: "a2" }));
+    expect(setMany).toHaveBeenCalledTimes(1);
+  });
+
+  it("nothing chosen is refused with a plain sentence, before the server is asked", async () => {
+    cx.results["fileHandlers:page"] = data;
+    cx.results["apps:options"] = options;
+    const setMany = vi.fn(async () => null);
+    cx.fns["fileHandlers:setMany"] = setMany;
+    await ui(<FileTypes />, "admin", "/file-types");
+    const dialog = await openAdd();
+    submit(dialog);
+    expect(await within(dialog).findByText(fileTypesStrings.pickOne)).toBeTruthy();
+    expect(setMany).not.toHaveBeenCalled();
+  });
+
+  it("with several programs none is chosen for them; the picker is searchable and shows each kind", async () => {
+    cx.results["fileHandlers:page"] = data;
+    cx.results["apps:options"] = [...options, { _id: "a3", name: "Sheets", kind: "desktop", canOpenFiles: true }];
+    const setMany = vi.fn(async () => null);
+    cx.fns["fileHandlers:setMany"] = setMany;
+    await ui(<FileTypes />, "admin", "/file-types");
+    const dialog = await openAdd();
+    expect(within(dialog).getByLabelText(fileTypesStrings.app).textContent).toContain(fileTypesStrings.appPlaceholder);
+    fireEvent.click(chip(dialog, "PDF"));
+    submit(dialog);
+    expect(await within(dialog).findByText(strings.validate.required)).toBeTruthy();
+    expect(setMany).not.toHaveBeenCalled();
+    pickOption(fileTypesStrings.app, /Sheets/);
+    submit(dialog);
+    await waitFor(() => expect(setMany).toHaveBeenCalledWith({ extensions: [".pdf"], appId: "a3" }));
   });
 
   it("executables and scripts are refused in the dialog before the server is asked", async () => {
     cx.results["fileHandlers:page"] = data;
     cx.results["apps:options"] = options;
     const set = vi.fn(async () => null);
+    const setMany = vi.fn(async () => null);
     cx.fns["fileHandlers:set"] = set;
-    ui(<FileTypes />, "admin", "/file-types");
-    fireEvent.click(screen.getByRole("button", { name: fileTypesStrings.add }));
-    const dialog = await screen.findByRole("dialog");
+    cx.fns["fileHandlers:setMany"] = setMany;
+    await ui(<FileTypes />, "admin", "/file-types");
+    const dialog = await openAdd();
+    fireEvent.click(chip(dialog, fileTypesStrings.other));
     for (const ext of ["exe", ".BAT", "ps1", "msi"]) {
       fireEvent.change(within(dialog).getByLabelText(new RegExp(`^${fileTypesStrings.extension}`)), { target: { value: ext } });
-      fireEvent.click(within(dialog).getByRole("button", { name: strings.common.add }));
+      submit(dialog);
       expect(await within(dialog).findByText(strings.validate.extensionDenied)).toBeTruthy();
     }
+    // Also next to a chip: the typed one is still checked.
+    fireEvent.click(chip(dialog, "PDF"));
+    submit(dialog);
+    expect(await within(dialog).findByText(strings.validate.extensionDenied)).toBeTruthy();
     expect(set).not.toHaveBeenCalled();
+    expect(setMany).not.toHaveBeenCalled();
   });
 
-  it("a viewer sees the rules without add or remove", () => {
+  it("a viewer sees the rules without add or remove", async () => {
     cx.results["fileHandlers:page"] = data;
     cx.results["apps:options"] = options;
-    ui(<FileTypes />, "viewer", "/file-types");
+    await ui(<FileTypes />, "viewer", "/file-types");
     expect(screen.getByText(".pdf")).toBeTruthy();
     expect(screen.queryByRole("button", { name: fileTypesStrings.add })).toBeNull();
-    expect(screen.queryByRole("button", { name: `${strings.common.remove} .pdf` })).toBeNull();
+    expect(screen.queryByRole("button", { name: remove(".pdf") })).toBeNull();
   });
 });

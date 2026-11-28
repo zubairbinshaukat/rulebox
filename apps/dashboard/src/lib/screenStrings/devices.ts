@@ -24,6 +24,7 @@ export const devicesStrings = {
   colWindows: "Windows",
   colKiosk: "Kiosk",
   colPolicy: "Policy",
+  colAlerts: "Needs a look",
   emptyTitle: "No devices yet",
   emptyBody: "Create an enrollment code to add the first PC.",
   emptyAction: "Create enrollment code",
@@ -38,8 +39,15 @@ export const devicesStrings = {
   outOfSupport: "Out of support",
   revoked: "Revoked",
   kioskOff: "Kiosk off",
-  policyCurrent: (v: number) => `v${formatNumber(v)}`,
-  policyWaiting: (applied: number | undefined, latest: number) =>
-    applied === undefined ? `– → v${latest}` : `v${applied} → v${latest}`,
-  count: (count: number) => n(count, "device", "devices"),
+  policyUpToDate: "Up to date",
+  policyWaiting: "Update waiting",
+  /** The tooltip of "Update waiting": the numbers are for support, so they are not on the card. */
+  policyWaitingHint: (applied: number | undefined, latest: number) =>
+    applied === undefined
+      ? `This PC has not applied any settings yet. The newest are version ${formatNumber(latest)}.`
+      : `This PC has version ${formatNumber(applied)}. The newest is version ${formatNumber(latest)}.`,
+  /** The technical line at the bottom of a PC's card. */
+  windowsDetail: (build: string, agent: string | undefined) => (agent ? `Windows build ${build} · Agent ${agent}` : `Windows build ${build}`),
+  groupSearch: "Search groups",
+  groupNoMatch: "No group with that name",  count: (count: number) => n(count, "device", "devices"),
 } as const;

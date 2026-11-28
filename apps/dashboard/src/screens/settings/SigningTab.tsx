@@ -1,5 +1,7 @@
 import { useState } from "react";
 import { Button, Pill, type PillTone } from "@rulebox/ui";
+import IconShieldOk from "~icons/solar/shield-check-linear";
+import IconShieldOff from "~icons/solar/shield-warning-linear";
 import { useFinishRotation, useKeysScreen, usePrepareRotation, useRegisterKey } from "../../data";
 import type { KeysScreen, PolicyKeyStatus } from "../../data/types";
 import { Card } from "../../components/Card";
@@ -41,6 +43,9 @@ function Signing({ k }: { k: KeysScreen }) {
   const [confirmFinish, setConfirmFinish] = useState(false);
   const active = k.keys.find((x) => x.status === "active");
   const next = k.keys.find((x) => x.status === "next");
+  // An organization with its own key (keyring) never touches the server's environment: no warning about it, no commands, no rotation.
+  const deployment = k.managed === "deployment";
+  const working = Boolean(active) && k.signing === "ok" && !k.keyringLocked && k.publishFailedAt === null;
 
   const run = (what: "register" | "prepare", fn: () => Promise<void>, done: string) => {
     setPending(what);
@@ -57,23 +62,34 @@ function Signing({ k }: { k: KeysScreen }) {
     );
   };
 
+  const publishAgain = (
+    <RoleGate minRole="owner">
+      <Button variant="ghost" className="dash-btn--sm" disabled={again.pending} aria-busy={again.pending} onClick={again.run}>
+        {again.pending ? p.publishing : p.again}
+      </Button>
+    </RoleGate>
+  );
+
   return (
-    <>
-      <Card title={settingsStrings.tabs.signing} sub={s.lead}>
-        <div className="dash-form">
+    <div className="set-sign">
+      <Card level={3} className="set-sign__status">
+        <div className="set-fs">
+          <div className="set-hero" data-tone={working ? "ok" : "off"}>
+            <span className="set-hero__icon" aria-hidden="true">
+              {working ? <IconShieldOk /> : <IconShieldOff />}
+            </span>
+            <div className="set-hero__text">
+              <p className="set-hero__title">{working ? (deployment ? s.statusDeployment : s.statusKeyring) : s.statusOffLine}</p>
+              {active && working ? <p className="set-hero__sub">{s.since(formatDate(active.createdAt))}</p> : null}
+            </div>
+            <Pill tone={working ? "success" : "danger"} dot>
+              {working ? s.statusOn : s.statusOff}
+            </Pill>
+          </div>
+
+          {k.keyringLocked ? <InlineNotice tone="danger" title={s.lockedTitle} detail={s.lockedBody} /> : null}
           {k.publishFailedAt !== null ? (
-            <InlineNotice
-              tone="danger"
-              title={s.publishFailed(formatDate(k.publishFailedAt))}
-              detail={p.signingHint}
-              action={
-                <RoleGate minRole="owner">
-                  <Button variant="ghost" className="dash-btn--sm" disabled={again.pending} aria-busy={again.pending} onClick={again.run}>
-                    {again.pending ? p.publishing : p.again}
-                  </Button>
-                </RoleGate>
-              }
-            />
+            <InlineNotice tone="danger" title={s.publishFailed(formatDate(k.publishFailedAt))} detail={p.signingHint} action={publishAgain} />
           ) : null}
           <FormError error={again.error} describe={publishErrorMessage} />
           {k.rosterPending ? (
@@ -81,109 +97,122 @@ function Signing({ k }: { k: KeysScreen }) {
               tone="warning"
               title={p.rosterTitle}
               detail={p.rosterBody}
-              action={
-                k.publishFailedAt === null ? (
-                  <RoleGate minRole="owner">
-                    <Button variant="ghost" className="dash-btn--sm" disabled={again.pending} aria-busy={again.pending} onClick={again.run}>
-                      {again.pending ? p.publishing : p.again}
-                    </Button>
-                  </RoleGate>
-                ) : undefined
-              }
+              action={k.publishFailedAt === null ? publishAgain : undefined}
             />
           ) : null}
-          {!k.envKeyPresent ? <InlineNotice tone="warning" title={s.envMissing} /> : null}
-          {active && k.envKeyPresent && k.signing === "mismatch" ? (
+          {deployment && !k.envKeyPresent ? <InlineNotice tone="warning" title={s.envMissing} /> : null}
+          {deployment && active && k.envKeyPresent && k.signing === "mismatch" ? (
             <InlineNotice tone="danger" title={s.mismatchTitle} detail={s.mismatchBody} />
-          ) : null}
-          {!active ? (
-            <RoleGate minRole="owner">
-              <div className="dash-form">
-                <p className="dash-list__title">{s.cliTitle}</p>
-                {s.cliSteps.map((step) => (
-                  <CopyField key={step.command} label={step.label} value={step.command} showLabel />
-                ))}
-                <p className="dash-muted">{s.cliNote}</p>
-              </div>
-            </RoleGate>
           ) : null}
           {!active ? (
             <InlineNotice
               tone="danger"
               title={s.noKeyTitle}
-              detail={s.noKeyBody}
+              detail={deployment ? s.noKeyBody : s.noKeyKeyring}
               action={
                 <RoleGate minRole="owner">
-                  <Button disabled={pending !== null || !k.envKeyPresent} aria-busy={pending === "register"} onClick={() => run("register", () => register(), s.registered)}>
+                  <Button disabled={pending !== null || (deployment && !k.envKeyPresent)} aria-busy={pending === "register"} onClick={() => run("register", () => register(), s.registered)}>
                     {s.register}
                   </Button>
                 </RoleGate>
               }
             />
           ) : null}
-          {k.keys.length ? (
-            <ul className="dash-list" aria-label={settingsStrings.tabs.signing}>
-              {k.keys.map((key) => (
-                <li key={key.keyId} className="dash-list__item" style={{ paddingInline: 0, alignItems: "flex-start" }}>
-                  <div className="dash-list__body">
-                    <p className="dash-list__title">
-                      {s.keyId} <span className="dash-mono">{key.keyId}</span>
-                    </p>
-                    <p className="dash-list__meta dash-mono dash-wrap">
-                      {s.fingerprint}: {key.fingerprint}
-                    </p>
-                    <p className="dash-list__meta">
-                      {s.created} {formatDate(key.createdAt)}
-                    </p>
-                  </div>
-                  <Pill tone={TONE[key.status]} dot>
-                    {s.status[key.status]}
-                  </Pill>
-                </li>
-              ))}
-            </ul>
-          ) : null}
           <FormError error={error} />
         </div>
       </Card>
 
-      {active ? (
-        <Card title={s.rotateTitle} sub={s.rotateLead}>
-          <div className="dash-form">
-            <ol className="dash-steps">
-              {s.rotateSteps.map((step) => (
-                <li key={step}>
-                  <div className="dash-steps__body">
-                    <p>{step}</p>
-                  </div>
-                </li>
-              ))}
-            </ol>
-            {next && k.trust ? <InlineNotice tone="accent" title={s.trust(k.trust.trusting, k.trust.total)} /> : null}
-            {next && !k.envNextKeyPresent ? <InlineNotice tone="neutral" title={s.envNextMissing} /> : null}
-            <RoleGate minRole="owner" fallback={<p className="dash-muted">{strings.app.ownerOnly}</p>}>
-              <div className="dash-form__actions">
-                {!next ? (
-                  <Button variant="ghost" disabled={pending !== null} aria-busy={pending === "prepare"} onClick={() => run("prepare", () => prepare(), s.prepared)}>
-                    {s.prepare}
-                  </Button>
-                ) : (
-                  <Button onClick={() => setConfirmFinish(true)}>{s.finish}</Button>
-                )}
-              </div>
+      <Card level={3} title={s.advancedTitle} className="set-sign__adv">
+        <div className="set-adv">
+          {deployment && !active ? (
+            <RoleGate minRole="owner">
+              <details className="dash-advanced" open>
+                <summary>{s.setupTitle}</summary>
+                <div className="dash-advanced__body">
+                  <p className="dash-list__title">{s.cliTitle}</p>
+                  {s.cliSteps.map((step) => (
+                    <CopyField key={step.command} label={step.label} value={step.command} showLabel />
+                  ))}
+                  <p className="dash-muted">{s.cliNote}</p>
+                </div>
+              </details>
             </RoleGate>
-          </div>
-        </Card>
-      ) : null}
+          ) : null}
 
-      <div className="dash-grid dash-grid--2">
-        <Card title={s.lostTitle}>
-          <p className="dash-muted">{s.lostBody}</p>
-        </Card>
-        <Card title={s.stolenTitle}>
-          <p className="dash-muted">{s.stolenBody}</p>
-        </Card>
-      </div>
+          {k.keys.length ? (
+            <details className="dash-advanced">
+              <summary>{s.keyDetails}</summary>
+              <div className="dash-advanced__body">
+                <ul className="dash-list" aria-label={s.keyDetails}>
+                  {k.keys.map((key) => (
+                    <li key={key.keyId} className="dash-list__item" style={{ paddingInline: 0, alignItems: "flex-start" }}>
+                      <div className="dash-list__body">
+                        <p className="dash-list__title">
+                          {s.keyId} <span className="dash-mono">{key.keyId}</span>
+                        </p>
+                        <p className="dash-list__meta dash-mono dash-wrap">
+                          {s.fingerprint}: {key.fingerprint}
+                        </p>
+                        <p className="dash-list__meta">
+                          {s.created} {formatDate(key.createdAt)}
+                        </p>
+                      </div>
+                      <Pill tone={TONE[key.status]} dot>
+                        {s.status[key.status]}
+                      </Pill>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            </details>
+          ) : null}
+
+          {deployment && active ? (
+            <details className="dash-advanced" open={Boolean(next) || undefined}>
+              <summary>{s.rotateTitle}</summary>
+              <div className="dash-advanced__body">
+                <p className="dash-muted">{s.rotateLead}</p>
+                <ol className="dash-steps">
+                  {s.rotateSteps.map((step) => (
+                    <li key={step}>
+                      <div className="dash-steps__body">
+                        <p>{step}</p>
+                      </div>
+                    </li>
+                  ))}
+                </ol>
+                {next && k.trust ? <InlineNotice tone="accent" title={s.trust(k.trust.trusting, k.trust.total)} /> : null}
+                {next && !k.envNextKeyPresent ? <InlineNotice tone="neutral" title={s.envNextMissing} /> : null}
+                <RoleGate minRole="owner" fallback={<p className="dash-muted">{strings.app.ownerOnly}</p>}>
+                  <div className="dash-form__actions">
+                    {!next ? (
+                      <Button variant="ghost" disabled={pending !== null} aria-busy={pending === "prepare"} onClick={() => run("prepare", () => prepare(), s.prepared)}>
+                        {s.prepare}
+                      </Button>
+                    ) : (
+                      <Button onClick={() => setConfirmFinish(true)}>{s.finish}</Button>
+                    )}
+                  </div>
+                </RoleGate>
+              </div>
+            </details>
+          ) : null}
+
+          <details className="dash-advanced">
+            <summary>{s.wrongTitle}</summary>
+            <div className="dash-advanced__body">
+              <div>
+                <p className="dash-list__title">{s.lostLabel}</p>
+                <p className="dash-muted">{s.lostBody}</p>
+              </div>
+              <div>
+                <p className="dash-list__title">{s.stolenLabel}</p>
+                <p className="dash-muted">{s.stolenBody}</p>
+              </div>
+            </div>
+          </details>
+        </div>
+      </Card>
 
       <ConfirmDialog
         open={confirmFinish}
@@ -196,6 +225,6 @@ function Signing({ k }: { k: KeysScreen }) {
         onDone={() => toast(s.finished)}
         onClose={() => setConfirmFinish(false)}
       />
-    </>
+    </div>
   );
 }

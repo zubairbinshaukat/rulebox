@@ -1,0 +1,545 @@
+/*
+ * Group page (UI pass 2026-11, docs/plans/ui-pass/other-pages.md section 1): the header, the sticky tab bar, the Overview (tiles,
+ * attention, "Get this group ready", apps, how the group is set up) and the small pieces of the other tabs. It copies the device page's
+ * header and tab bar so the two pages feel like one product. Shipped in the page's own chunk, not in the entry CSS. Tokens only; the
+ * only motion is a fade and a lift (opacity + transform), none with reduced motion or Lite.
+ * Width bands: phone < 600 · tablet 600-1023 · laptop 1024-1599 · wide >= 1600. Sections lay themselves out by their own width
+ * (container queries); only the shell's own breakpoints are media queries.
+ */
+
+.grp {
+  gap: 16px;
+}
+
+/* ------------------------------------------------------------ header */
+
+/* The header lays itself out by its own width: the buttons sit right of the name from 640 px, one row under it below. */
+.grp-head {
+  container: grp-head / inline-size;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+}
+.grp-head__grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  align-items: end;
+  gap: 14px 24px;
+  min-width: 0;
+}
+.grp-head__id {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+}
+.grp-head__name {
+  min-width: 0;
+  margin: 0;
+  font-size: clamp(24px, 2.6vw, 30px);
+  line-height: 1.15;
+  letter-spacing: -0.025em;
+  overflow-wrap: anywhere;
+  /* A very long name never pushes the page: three lines on a phone, two from 640 px; the full name is in `title`. */
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+  line-clamp: 3;
+  overflow: hidden;
+}
+.grp-head__name:focus {
+  outline: none;
+}
+.grp-head__lead {
+  max-width: 64ch;
+  margin: 0;
+  font-size: 15px;
+  line-height: 1.45;
+  color: var(--rb-muted);
+  overflow-wrap: anywhere;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+  overflow: hidden;
+}
+.grp-head__actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+/* A phone: the first button (Assign app, or Protection for a viewer) takes the width the others leave. */
+.grp-head__actions > :first-child {
+  flex: 1 1 auto;
+  justify-content: center;
+}
+@container grp-head (min-width: 640px) {
+  .grp-head__grid {
+    grid-template-columns: minmax(0, 1fr) auto;
+  }
+  .grp-head__actions {
+    flex-wrap: wrap;
+    justify-content: flex-end;
+  }
+  .grp-head__actions > :first-child {
+    flex: none;
+  }
+  .grp-head__name {
+    -webkit-line-clamp: 2;
+    line-clamp: 2;
+  }
+  .grp-head__lead {
+    -webkit-line-clamp: 3;
+    line-clamp: 3;
+  }
+}
+
+.grp-skel__title {
+  padding-block: 6px;
+}
+.grp-skel__tabs {
+  display: flex;
+  align-items: center;
+  gap: 28px;
+  min-height: 44px;
+  padding-inline: 14px;
+}
+
+/* ------------------------------------------------------------ sticky tab bar */
+
+/* Sticks under the shell's top bar. From 1024 px it also carries the group's name, which fades in once the page title has scrolled
+   away (plain CSS, transform + opacity). A phone keeps just the tabs, edge to edge. */
+.grp-bar {
+  position: sticky;
+  top: calc(var(--dash-topbar) - 1px);
+  z-index: 30;
+  display: flex;
+  align-items: stretch;
+  gap: 16px;
+  min-width: 0;
+  border-bottom: 1px solid var(--rb-line);
+  background: color-mix(in srgb, var(--rb-bg) 90%, transparent);
+  -webkit-backdrop-filter: blur(14px);
+  backdrop-filter: blur(14px);
+  transition: box-shadow var(--rb-duration) var(--rb-ease);
+}
+[data-lite="true"] .grp-bar {
+  background: var(--rb-bg);
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
+}
+.grp-bar[data-scrolled] {
+  box-shadow: 0 12px 20px -18px oklch(0.2 0.02 70 / 0.55);
+}
+.grp-bar .dash-ptabs {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+.grp-bar .dash-ptabs__bar {
+  border-bottom: 0;
+}
+.grp-bar__name {
+  display: none;
+  align-items: center;
+  flex: 0 1 auto;
+  min-width: 0;
+  max-width: 32%;
+  margin: 0;
+  font-size: 13.5px;
+  font-weight: 600;
+  opacity: 0;
+  transform: translateY(5px);
+  pointer-events: none;
+  transition:
+    opacity var(--rb-duration) var(--rb-ease),
+    transform var(--rb-duration) var(--rb-ease);
+}
+.grp-bar[data-scrolled] .grp-bar__name {
+  opacity: 1;
+  transform: none;
+}
+.grp-bar__text {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+@media (min-width: 1024px) {
+  .grp-bar__name {
+    display: flex;
+  }
+}
+@media (max-width: 599px) {
+  .grp-bar {
+    margin-inline: calc(-1 * var(--dash-gutter));
+  }
+  .grp-bar .dash-ptabs__bar {
+    margin-inline: 0;
+    padding-inline: var(--dash-gutter);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .grp-bar,
+  .grp-bar__name {
+    transition: none;
+  }
+}
+[data-lite="true"] .grp-bar,
+[data-lite="true"] .grp-bar__name {
+  transition: none;
+}
+
+/* ------------------------------------------------------------ overview */
+
+.grp-ov {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+  min-width: 0;
+}
+.grp-ov__section {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-width: 0;
+}
+.grp-badge {
+  align-self: center;
+  min-width: 22px;
+  padding: 1px 8px;
+  border-radius: 11px;
+  font-size: 12px;
+  font-weight: 650;
+  line-height: 1.5;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+  background: var(--rb-warning-soft);
+  color: var(--rb-warning-text);
+}
+.grp-badge[data-tone="danger"] {
+  background: var(--rb-danger-soft);
+  color: var(--rb-danger-text);
+}
+
+/* ------------------------------------------------------------ Get this group ready */
+
+.grp-ready {
+  container: grp-ready / inline-size;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  min-width: 0;
+  padding: clamp(16px, 2vw, 22px);
+  border: 1px solid color-mix(in oklch, var(--rb-accent) 32%, var(--rb-line));
+  border-radius: var(--dash-radius);
+  background: color-mix(in oklch, var(--rb-accent-soft) 42%, var(--rb-surface));
+  box-shadow: var(--dash-card-shadow);
+}
+.grp-ready__head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 4px 12px;
+}
+.grp-ready__title {
+  font-size: 17px;
+  font-weight: 650;
+  letter-spacing: -0.01em;
+}
+.grp-ready__progress {
+  font-size: 13px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  color: var(--rb-accent-text);
+}
+.grp-ready__steps {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.grp-step {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: center;
+  gap: 4px 14px;
+  min-width: 0;
+  padding: 12px 14px;
+  border: 1px solid var(--rb-line);
+  border-radius: 14px;
+  background: var(--rb-surface);
+}
+.grp-step[data-current] {
+  border-color: color-mix(in oklch, var(--rb-accent) 45%, var(--rb-line));
+}
+.grp-step__mark {
+  display: grid;
+  place-items: center;
+  width: 34px;
+  height: 34px;
+  border-radius: 50%;
+  border: 1.5px solid var(--rb-line-strong);
+  font-size: 14px;
+  font-weight: 650;
+  font-variant-numeric: tabular-nums;
+  color: var(--rb-muted);
+}
+.grp-step[data-current] .grp-step__mark {
+  border-color: var(--rb-accent);
+  background: var(--rb-accent-soft);
+  color: var(--rb-accent-text);
+}
+.grp-step[data-done] .grp-step__mark {
+  border: 0;
+  background: var(--rb-success-soft);
+  color: var(--rb-success-text);
+  font-size: 26px;
+}
+.grp-step__text {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
+}
+.grp-step__title {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 650;
+}
+.grp-step__body {
+  margin: 0;
+  font-size: 13.5px;
+  line-height: 1.4;
+  color: var(--rb-muted);
+}
+.grp-step[data-done] .grp-step__title,
+.grp-step[data-done] .grp-step__body {
+  color: var(--rb-muted);
+}
+.grp-step[data-done] .grp-step__title {
+  font-weight: 550;
+}
+.grp-step__action {
+  grid-column: 1 / -1;
+  margin-top: 8px;
+}
+.grp-step__action > * {
+  width: 100%;
+  justify-content: center;
+}
+@container grp-ready (min-width: 480px) {
+  .grp-step {
+    grid-template-columns: auto minmax(0, 1fr) auto;
+  }
+  .grp-step__action {
+    grid-column: 3;
+    grid-row: 1;
+    margin-top: 0;
+  }
+  .grp-step__action > * {
+    width: auto;
+  }
+}
+
+/* ------------------------------------------------------------ apps */
+
+.grp-apps:focus {
+  outline: none;
+}
+.grp-apps__body {
+  padding-top: 12px;
+}
+.grp-count {
+  font-size: 13px;
+  font-weight: 550;
+  color: var(--rb-muted);
+}
+.grp-app {
+  display: flex;
+  align-items: center;
+  flex-wrap: nowrap;
+  gap: 10px;
+  min-width: 0;
+}
+.grp-app__name {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.grp-app .rb-pill {
+  flex: none;
+}
+/* On a card the name may take two lines. */
+.dash-rcard__title .grp-app__name {
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+.dash-rcard__title .grp-app {
+  flex-wrap: wrap;
+}
+
+/* ------------------------------------------------------------ how this group is set up */
+
+.grp-setup {
+  container: grp-setup / inline-size;
+}
+.grp-setup__list {
+  display: flex;
+  flex-direction: column;
+  margin: 0;
+  padding: 6px 0 4px;
+  list-style: none;
+}
+.grp-setup__row {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 4px 14px;
+  min-width: 0;
+  padding: 12px clamp(16px, 2vw, 22px);
+}
+.grp-setup__row + .grp-setup__row {
+  border-top: 1px solid var(--rb-line);
+}
+.grp-setup__icon {
+  display: grid;
+  place-items: center;
+  width: 36px;
+  height: 36px;
+  border-radius: 12px;
+  font-size: 20px;
+  background: var(--rb-accent-soft);
+  color: var(--rb-accent-text);
+}
+.grp-setup__text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+.grp-setup__label {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--rb-muted);
+}
+.grp-setup__value {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  font-size: 15px;
+  font-weight: 650;
+  overflow-wrap: anywhere;
+}
+.grp-setup__action {
+  display: flex;
+}
+/* A wide card (a tablet, with the setup under the apps) puts its three rows side by side. */
+@container grp-setup (min-width: 560px) {
+  .grp-setup__list {
+    flex-direction: row;
+    padding: 4px 0;
+  }
+  .grp-setup__row {
+    flex: 1 1 0;
+    grid-template-columns: auto minmax(0, 1fr);
+    grid-template-areas:
+      "icon text"
+      "action action";
+    align-content: start;
+    padding-block: 14px;
+  }
+  .grp-setup__row + .grp-setup__row {
+    border-top: 0;
+    border-inline-start: 1px solid var(--rb-line);
+  }
+  .grp-setup__icon {
+    grid-area: icon;
+  }
+  .grp-setup__text {
+    grid-area: text;
+  }
+  .grp-setup__action {
+    grid-area: action;
+    margin-top: 8px;
+  }
+}
+
+/* ------------------------------------------------------------ the main button again, at the bottom of a phone */
+
+.grp-quick {
+  position: fixed;
+  inset-inline: 0;
+  bottom: 0;
+  z-index: 25;
+  padding: 10px var(--dash-gutter) calc(10px + env(safe-area-inset-bottom));
+  border-top: 1px solid var(--rb-line);
+  background: color-mix(in srgb, var(--rb-bg) 92%, transparent);
+  -webkit-backdrop-filter: blur(14px);
+  backdrop-filter: blur(14px);
+  opacity: 0;
+  transform: translateY(100%);
+  visibility: hidden;
+  transition:
+    opacity var(--rb-duration) var(--rb-ease),
+    transform var(--rb-duration) var(--rb-ease),
+    visibility 0s linear var(--rb-duration);
+}
+[data-lite="true"] .grp-quick {
+  background: var(--rb-bg);
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
+  transition: none;
+}
+.grp-quick[data-show] {
+  opacity: 1;
+  transform: none;
+  visibility: visible;
+  transition-delay: 0s;
+}
+.grp-quick .rb-btn {
+  width: 100%;
+  justify-content: center;
+}
+/* Room under the last card so the bar never covers it. */
+.grp-quick__space {
+  height: 0;
+}
+.grp-quick[data-show] + .grp-quick__space {
+  height: 64px;
+}
+@media (min-width: 600px) {
+  .grp-quick,
+  .grp-quick__space {
+    display: none;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .grp-quick {
+    transition: none;
+  }
+}
+
+/* The pins sit side by side on one line (the column never wraps). */
+.grp-pins {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+/* Four tiles across from a tablet up (the shared tiles would drop to 3 + 1 at 820 px). */
+@media (min-width: 600px) {
+  .grp-ov > .dash-tiles {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+}

@@ -1,0 +1,591 @@
+/*
+ * The website form and its site-access picker (UI pass 2026-11, docs/plans/ui-pass/add-app.md sections 6 and 13). Shipped with the
+ * components (the lazy website chunk and the browser-rules card), not in the entry CSS. Tokens only. The only motion is a short colour
+ * and lift on buttons (transform and opacity); reduced motion and Lite turn it off.
+ * Width bands: phone < 600 · tablet 600-1023 · laptop 1024-1599 · wide >= 1600. The picker and the preview lay themselves out by their
+ * own width (container queries).
+ */
+
+/* ------------------------------------------------------------ the form: main card + preview column */
+
+.web-form {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  min-width: 0;
+  width: 100%;
+}
+.web-form__main {
+  min-width: 0;
+}
+.web-form__fields {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+.web-form__aside {
+  /* On a phone and a tablet the preview and the Add bar are plain children of the form, so the bar can stick to the window. */
+  display: contents;
+}
+@media (min-width: 1024px) {
+  .web-form {
+    display: grid;
+    grid-template-columns: minmax(0, 3fr) minmax(300px, 2fr);
+    align-items: start;
+    gap: 18px 22px;
+  }
+  .web-form__aside {
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+    min-width: 0;
+    position: sticky;
+    top: calc(var(--dash-topbar) + 16px);
+  }
+}
+.web-page {
+  min-width: 0;
+}
+@media (min-width: 600px) and (max-width: 1023px) {
+  .web-page .web-form {
+    max-width: 760px;
+    margin-inline: auto;
+  }
+}
+
+/* The address's status line and the name beside the site's icon. */
+.web-fetch {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 4px 10px;
+  margin-top: -10px;
+  font-size: 13px;
+  color: var(--rb-muted);
+}
+.web-fetch:empty {
+  display: none;
+}
+.web-fetch__ok {
+  color: var(--rb-success-text);
+}
+.web-fetch__fail {
+  color: var(--rb-warning-text);
+}
+.web-name {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: end;
+  gap: 14px;
+}
+.web-name .dash-glyph {
+  margin-bottom: 2px;
+}
+
+/* ------------------------------------------------------------ the Add bar */
+
+.web-bar {
+  position: sticky;
+  bottom: 0;
+  z-index: 5;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-inline: calc(-1 * var(--dash-gutter));
+  padding: 12px var(--dash-gutter) calc(12px + env(safe-area-inset-bottom));
+  border-top: 1px solid var(--rb-line);
+  background: var(--rb-glass-strong);
+  -webkit-backdrop-filter: blur(var(--rb-blur));
+  backdrop-filter: blur(var(--rb-blur));
+}
+.web-bar .rb-btn--primary {
+  width: 100%;
+}
+@media (min-width: 600px) and (max-width: 1023px) {
+  .web-bar {
+    flex-direction: row;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: flex-end;
+  }
+  .web-bar > :where(.dash-notice) {
+    flex: 1 1 100%;
+  }
+  .web-bar .rb-btn--primary {
+    width: auto;
+  }
+}
+@media (min-width: 1024px) {
+  .web-bar {
+    position: static;
+    margin-inline: 0;
+    padding: 16px;
+    border: 1px solid var(--rb-line);
+    border-radius: var(--dash-radius);
+    background: var(--rb-surface);
+    box-shadow: var(--dash-card-shadow);
+    -webkit-backdrop-filter: none;
+    backdrop-filter: none;
+  }
+}
+
+/* ------------------------------------------------------------ the picker */
+
+.web-access {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  min-width: 0;
+  container: web-access / inline-size;
+}
+.web-access > .dash-field {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+.web-access__muted,
+.web-access__single,
+.web-access__star {
+  margin: 0;
+  font-size: 14px;
+  color: var(--rb-muted);
+}
+.web-access__single {
+  padding: 12px 14px;
+  border-radius: var(--rb-r-md);
+  background: var(--rb-accent-soft);
+  color: var(--rb-accent-text);
+  font-weight: 560;
+}
+
+/* The address, drawn with its parts: the allowed part is filled, the names in front of it are dashed ("any name here opens too"). */
+.web-addr {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 2px;
+  padding: 14px 16px;
+  border: 1px solid var(--rb-line);
+  border-radius: var(--rb-r-lg);
+  background: var(--rb-paper);
+  font-family: var(--rb-font-mono);
+  font-size: 15px;
+  overflow-wrap: anywhere;
+}
+.web-addr__scheme,
+.web-addr__dot,
+.web-addr__rest {
+  color: var(--rb-muted);
+}
+.web-addr__part {
+  min-height: 34px;
+  padding: 3px 10px;
+  border: 1.5px solid transparent;
+  border-radius: 9px;
+  font: inherit;
+  cursor: default;
+  transition:
+    transform var(--rb-duration) var(--rb-ease),
+    background var(--rb-duration) var(--rb-ease),
+    color var(--rb-duration) var(--rb-ease);
+}
+.web-addr__part[data-state="in"] {
+  background: var(--rb-accent);
+  color: var(--rb-on-ink);
+}
+.web-addr__part[data-state="under"] {
+  background: transparent;
+  border-color: var(--rb-accent);
+  border-style: dashed;
+  color: var(--rb-accent-text);
+}
+.web-addr__part:not(:disabled) {
+  cursor: pointer;
+}
+.web-addr__part:not(:disabled):hover {
+  transform: translateY(-1px);
+}
+.web-addr__part:disabled {
+  /* A part that cannot be chosen is still readable: the colours above stay. */
+  opacity: 1;
+}
+
+/* The levels: a radio group, one choice per row (two side by side when the picker is wide). */
+.web-levels {
+  display: grid;
+  gap: 8px;
+}
+@container web-access (min-width: 640px) {
+  .web-levels {
+    grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  }
+}
+.web-level {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  min-height: 56px;
+  padding: 12px 14px;
+  border: 1px solid var(--rb-line);
+  border-radius: var(--rb-r-md);
+  background: var(--rb-surface);
+  color: var(--rb-ink);
+  font: inherit;
+  text-align: start;
+  cursor: pointer;
+  transition:
+    background var(--rb-duration) var(--rb-ease),
+    border-color var(--rb-duration) var(--rb-ease);
+}
+.web-level:hover:not(:disabled) {
+  background: var(--rb-hover);
+}
+.web-level[aria-checked="true"] {
+  border-color: var(--rb-accent);
+  background: var(--rb-accent-soft);
+}
+.web-level:disabled {
+  cursor: not-allowed;
+}
+.web-level:disabled:not([aria-checked="true"]) {
+  background: transparent;
+  border-style: dashed;
+}
+.web-level__dot {
+  flex: none;
+  width: 20px;
+  height: 20px;
+  margin-top: 1px;
+  border: 2px solid var(--rb-line-strong);
+  border-radius: 50%;
+  background: var(--rb-surface);
+}
+.web-level[aria-checked="true"] .web-level__dot {
+  border-color: var(--rb-accent);
+  background: var(--rb-accent);
+  box-shadow: inset 0 0 0 3px var(--rb-surface);
+}
+.web-level__text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+.web-level__label {
+  font-size: 15px;
+  font-weight: 620;
+  overflow-wrap: anywhere;
+}
+.web-level__hint {
+  font-size: 13px;
+  color: var(--rb-muted);
+  overflow-wrap: anywhere;
+}
+.web-level[aria-checked="true"] .web-level__hint {
+  color: var(--rb-accent-text);
+}
+
+/* ------------------------------------------------------------ chips and the "Add a site" box */
+
+.web-chips {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-width: 0;
+}
+.web-chips__none,
+.web-chips__star,
+.web-chips__max {
+  margin: 0;
+  font-size: 13.5px;
+  color: var(--rb-muted);
+}
+.web-chips__list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  max-height: 260px;
+  overflow-y: auto;
+}
+.web-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 100%;
+  min-height: 36px;
+  padding: 2px 4px 2px 12px;
+  border: 1px solid var(--rb-line);
+  border-radius: 999px;
+  background: var(--rb-hover);
+  font-size: 13.5px;
+  font-weight: 550;
+}
+.web-chip[data-included] {
+  border-style: dashed;
+  background: transparent;
+}
+.web-chip__name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.web-chip__note {
+  flex: none;
+  font-size: 12.5px;
+  font-weight: 450;
+  color: var(--rb-muted);
+}
+.web-chip__x {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: transparent;
+  color: var(--rb-muted);
+  font-size: 19px;
+  cursor: pointer;
+}
+.web-chip__x:hover {
+  background: var(--rb-line);
+  color: var(--rb-ink);
+}
+.web-chip__x:focus-visible,
+.web-suggest__btn:focus-visible,
+.web-level:focus-visible,
+.web-addr__part:focus-visible,
+.web-prev__toggle:focus-visible {
+  outline: 2px solid var(--rb-focus);
+  outline-offset: 2px;
+}
+.web-suggest {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.web-suggest__btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 38px;
+  padding: 0 14px 0 10px;
+  border: 1px solid var(--rb-line-strong);
+  border-radius: 999px;
+  background: var(--rb-surface);
+  color: var(--rb-ink);
+  font: inherit;
+  font-size: 13.5px;
+  font-weight: 560;
+  cursor: pointer;
+  transition:
+    background var(--rb-duration) var(--rb-ease),
+    border-color var(--rb-duration) var(--rb-ease);
+}
+.web-suggest__btn:hover {
+  background: var(--rb-hover);
+}
+.web-suggest__btn[aria-pressed="true"] {
+  border-color: var(--rb-accent);
+  background: var(--rb-accent-soft);
+  color: var(--rb-accent-text);
+}
+.web-suggest__btn svg {
+  font-size: 18px;
+}
+.web-add {
+  display: flex;
+  align-items: stretch;
+  gap: 8px;
+}
+.web-add > .rb-input {
+  flex: 1;
+  min-width: 0;
+}
+
+/* ------------------------------------------------------------ the live preview */
+
+.web-prev {
+  container: web-prev / inline-size;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-width: 0;
+  padding: 16px;
+  border: 1px solid var(--rb-line);
+  border-radius: var(--dash-radius);
+  background: var(--rb-surface);
+  box-shadow: var(--dash-card-shadow);
+}
+.web-prev__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 4px 12px;
+}
+.web-prev__title {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 650;
+}
+.web-prev__count {
+  margin: 0;
+  font-size: 13px;
+  color: var(--rb-muted);
+}
+.web-prev__toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 36px;
+  padding: 0 4px 0 10px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--rb-accent-text);
+  font: inherit;
+  font-size: 13.5px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.web-prev__toggle svg {
+  font-size: 18px;
+  transition: transform var(--rb-duration) var(--rb-ease);
+}
+.web-prev__toggle[aria-expanded="true"] svg {
+  transform: rotate(180deg);
+}
+.web-prev__empty {
+  margin: 0;
+  font-size: 14px;
+  color: var(--rb-muted);
+}
+.web-prev__list {
+  display: grid;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.web-prev__list[hidden] {
+  display: none;
+}
+@container web-prev (min-width: 640px) {
+  .web-prev__list {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+.web-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-areas: "addr state" "what state";
+  align-items: center;
+  gap: 1px 10px;
+  padding: 8px 10px 8px 12px;
+  border: 1px solid var(--rb-line);
+  border-inline-start-width: 4px;
+  border-radius: 10px;
+  background: var(--rb-paper);
+}
+.web-row[data-open="true"] {
+  border-inline-start-color: var(--rb-success);
+}
+.web-row[data-open="false"] {
+  border-inline-start-color: var(--rb-danger);
+}
+.web-row__addr {
+  grid-area: addr;
+  min-width: 0;
+  font-family: var(--rb-font-mono);
+  font-size: 13px;
+  overflow-wrap: anywhere;
+}
+.web-row__what {
+  grid-area: what;
+  font-size: 12.5px;
+  color: var(--rb-muted);
+}
+.web-state {
+  grid-area: state;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 9px 3px 7px;
+  border-radius: 999px;
+  font-size: 12.5px;
+  font-weight: 650;
+}
+.web-state svg {
+  font-size: 16px;
+}
+.web-state[data-open="true"] {
+  background: var(--rb-success-soft);
+  color: var(--rb-success-text);
+}
+.web-state[data-open="false"] {
+  background: var(--rb-danger-soft);
+  color: var(--rb-danger-text);
+}
+.web-prev__notes {
+  display: grid;
+  gap: 4px;
+  margin: 0;
+  padding-inline-start: 18px;
+  font-size: 12.5px;
+  color: var(--rb-muted);
+}
+.web-try {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.web-try__answer {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+  font-size: 13.5px;
+  font-weight: 560;
+  overflow-wrap: anywhere;
+}
+.web-try__answer[data-open="true"] {
+  color: var(--rb-success-text);
+}
+.web-try__answer[data-open="false"] {
+  color: var(--rb-danger-text);
+}
+.web-try__answer svg {
+  flex: none;
+  font-size: 18px;
+}
+
+/* ------------------------------------------------------------ motion: reduced motion and Lite */
+
+@media (prefers-reduced-motion: reduce) {
+  .web-addr__part,
+  .web-level,
+  .web-suggest__btn,
+  .web-prev__toggle svg {
+    transition: none;
+  }
+  .web-addr__part:not(:disabled):hover {
+    transform: none;
+  }
+}
+[data-lite="true"] .web-addr__part,
+[data-lite="true"] .web-level,
+[data-lite="true"] .web-suggest__btn,
+[data-lite="true"] .web-prev__toggle svg {
+  transition: none;
+}
+[data-lite="true"] .web-addr__part:not(:disabled):hover {
+  transform: none;
+}

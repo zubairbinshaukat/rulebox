@@ -1,0 +1,13 @@
+/* App tiles inside a picker (appOptions.tsx): the list's 38 px tile shrinks to the picker's 20 px icon slot. */
+.rb-dd__oicon:has(.dash-glyph) {
+  width: 22px;
+}
+.rb-dd__oicon .dash-glyph {
+  width: 22px;
+  height: 22px;
+  border-radius: 7px;
+  font-size: 11px;
+}
+.rb-dd__oicon .dash-glyph svg {
+  font-size: 1.2em;
+}

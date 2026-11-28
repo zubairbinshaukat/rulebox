@@ -7,6 +7,7 @@ import { normalizeDeviceName } from "./lib/enrollmentCodes";
 import { fail, failWire } from "./lib/errors";
 import { publicMutation } from "./lib/functions";
 import { MAX_AGENT_VERSION, MAX_COMPAT_JSON_BYTES, MAX_DEVICE_NAME_INPUT } from "./lib/limits";
+import { newWaitingRow } from "./lib/lockdownSync";
 import { assertWithinLimit, bumpStats } from "./lib/plans";
 import { enrollmentKeysOf, orgPolicyKeys } from "./lib/policyKeys";
 import { requestPublish } from "./lib/publish";
@@ -160,6 +161,8 @@ export const enroll = publicMutation({
       hardwareIdHash,
     });
     const ids = { deviceId, orgId: token.orgId };
+    // In a group: counted as "waiting" on its lockdown screen until it reports (`lockdown:groupSync`).
+    if (token.groupId !== undefined) await ctx.db.insert("deviceLockdownSync", newWaitingRow({ _id: deviceId, orgId: token.orgId }, token.groupId, now));
     await ctx.db.insert("deviceCredentials", { ...ids, secretHash, state: "active" });
     await createPresence(ctx, ids, now, await orgPingInterval(ctx, token.orgId));
     await writeStatus(ctx, ids, { agentVersion: args.agentVersion, compat: args.compat }, now);

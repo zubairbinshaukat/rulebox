@@ -1,0 +1,732 @@
+/*
+ * Staged rollout page (`/groups/:id/rollout`), UI pass 2026-11 (docs/plans/ui-pass/other-pages.md section 3). Shipped with the lazy screen,
+ * not in the entry CSS. Tokens only.
+ * Width bands: phone < 600 · tablet 600-1023 · laptop 1024-1599 · wide >= 1600. A section lays itself out by its own width (container
+ * queries); the page split is the shared `dash-split`. Motion: the bar of the testing stage grows with `transform: scaleX` and the
+ * move bar rises (`dash-enter`); none of it with reduced motion or Lite.
+ */
+
+.ro-page {
+  min-width: 0;
+}
+.ro-note {
+  margin: 0;
+  font-size: 13.5px;
+  line-height: 1.45;
+  color: var(--rb-muted);
+}
+
+/* ------------------------------------------------------------ section cards */
+
+.ro-sec {
+  container: rosec / inline-size;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  min-width: 0;
+  padding: clamp(16px, 2vw, 22px);
+}
+.ro-sec__head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+.ro-sec__title {
+  min-width: 0;
+  margin: 0;
+  font-size: 16px;
+  font-weight: 650;
+  letter-spacing: -0.01em;
+}
+.ro-sec__actions {
+  display: flex;
+  align-items: center;
+  margin-inline-start: auto;
+}
+.ro-lead {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+/* ------------------------------------------------------------ paused banner */
+
+.ro-halted {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+/* ------------------------------------------------------------ the three stages */
+
+.ro-pipe-wrap {
+  container: ropipe / inline-size;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  min-width: 0;
+}
+.ro-pipe {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 24px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+@container ropipe (min-width: 640px) {
+  .ro-pipe {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 36px;
+  }
+}
+
+.ro-stage {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-width: 0;
+  padding: 16px 18px 18px;
+  border: 1.5px solid var(--rb-line);
+  border-radius: var(--rb-r-lg);
+  background: var(--rb-surface);
+  box-shadow: var(--rb-shadow-sm);
+}
+.ro-stage[data-state="testing"] {
+  border-color: var(--rb-accent);
+  background: color-mix(in oklch, var(--rb-accent-soft) 45%, var(--rb-surface));
+  box-shadow:
+    0 0 0 3px color-mix(in oklch, var(--rb-accent) 14%, transparent),
+    var(--rb-shadow-sm);
+}
+.ro-stage[data-state="paused"] {
+  border-color: var(--rb-danger);
+  background: color-mix(in oklch, var(--rb-danger-soft) 55%, var(--rb-surface));
+}
+.ro-stage[data-state="waiting"] {
+  border-style: dashed;
+  background: var(--rb-paper);
+  box-shadow: none;
+}
+
+/* The line from a stage to the next: grey until the change has passed the stage (then accent). Down on a phone, across from 640 px. */
+.ro-stage:not(:last-child)::after {
+  content: "";
+  position: absolute;
+  inset-block-start: 100%;
+  inset-inline-start: 31px;
+  width: 2px;
+  height: 24px;
+  background: var(--rb-line-strong);
+  opacity: 0.55;
+  transform-origin: top;
+}
+.ro-stage:not(:last-child)[data-passed]::after {
+  background: var(--rb-accent);
+  opacity: 1;
+  animation: ro-grow-y 0.6s var(--rb-ease) both;
+}
+@container ropipe (min-width: 640px) {
+  .ro-stage:not(:last-child)::after {
+    inset-block-start: 31px;
+    inset-inline-start: 100%;
+    width: 36px;
+    height: 2px;
+    transform-origin: left;
+  }
+  .ro-stage:not(:last-child)[data-passed]::after {
+    animation-name: ro-grow-x;
+  }
+  /* The arrow head. */
+  .ro-stage:not(:last-child)::before {
+    content: "";
+    position: absolute;
+    inset-block-start: 27px;
+    inset-inline-end: -36px;
+    width: 8px;
+    height: 8px;
+    border-block-start: 2px solid var(--rb-line-strong);
+    border-inline-end: 2px solid var(--rb-line-strong);
+    opacity: 0.55;
+    transform: rotate(45deg);
+  }
+  .ro-stage:not(:last-child)[data-passed]::before {
+    border-color: var(--rb-accent);
+    opacity: 1;
+  }
+}
+@keyframes ro-grow-x {
+  from {
+    transform: scaleX(0);
+  }
+}
+@keyframes ro-grow-y {
+  from {
+    transform: scaleY(0);
+  }
+}
+
+.ro-stage__top {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+.ro-stage__num {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  border: 1.5px solid var(--rb-line-strong);
+  border-radius: 50%;
+  font-size: 14px;
+  font-weight: 650;
+  font-variant-numeric: tabular-nums;
+  color: var(--rb-muted);
+  background: var(--rb-surface);
+}
+.ro-stage[data-state="done"] .ro-stage__num {
+  border-color: var(--rb-success);
+  background: var(--rb-success-soft);
+  color: var(--rb-success-text);
+}
+.ro-stage[data-state="testing"] .ro-stage__num {
+  border-color: var(--rb-accent);
+  background: var(--rb-accent);
+  color: var(--rb-on-ink);
+}
+.ro-stage[data-state="paused"] .ro-stage__num {
+  border-color: var(--rb-danger);
+  background: var(--rb-danger-soft);
+  color: var(--rb-danger-text);
+}
+.ro-stage__name {
+  min-width: 0;
+  margin: 0;
+  font-size: 17px;
+  font-weight: 650;
+  letter-spacing: -0.01em;
+}
+.ro-stage__count {
+  margin-inline-start: auto;
+  font-size: 13.5px;
+  font-variant-numeric: tabular-nums;
+  color: var(--rb-muted);
+  white-space: nowrap;
+}
+.ro-stage__state {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 10px;
+}
+.ro-stage__wait {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+  margin-block-start: auto;
+  padding: 10px 12px;
+  border-radius: 10px;
+  background: var(--rb-hover);
+  font-size: 13.5px;
+  color: var(--rb-muted);
+}
+.ro-stage__wait > svg {
+  flex: none;
+  width: 18px;
+  height: 18px;
+}
+
+/* What the stage has: a small label, the change in words, its date. */
+.ro-stage__has {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin: 0;
+  padding-block-start: 12px;
+  border-block-start: 1px solid var(--rb-line);
+  min-width: 0;
+}
+.ro-stage__haslabel {
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--rb-muted);
+}
+.ro-stage__change {
+  font-size: 15px;
+  font-weight: 650;
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+}
+.ro-stage__date {
+  font-size: 13px;
+  color: var(--rb-muted);
+}
+
+/* The stage in flight: how its PCs are doing and the next step. */
+.ro-stage__live {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-width: 0;
+  padding-block-start: 12px;
+  border-block-start: 1px solid var(--rb-line);
+}
+.ro-stage__auto {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.4;
+  color: var(--rb-muted);
+}
+.ro-stage__auto > svg {
+  flex: none;
+  width: 16px;
+  height: 16px;
+  margin-top: 1px;
+}
+.ro-stage__send,
+.ro-pipe__actions .rb-btn,
+.ro-hero__action .rb-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+}
+.ro-stage__send svg,
+.ro-pipe__actions .rb-btn svg {
+  flex: none;
+  width: 18px;
+  height: 18px;
+}
+.ro-stage__send {
+  width: 100%;
+}
+
+.ro-health {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-width: 0;
+}
+.ro-health__line {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0;
+  font-size: 14px;
+}
+.ro-bar {
+  display: flex;
+  gap: 3px;
+  height: 10px;
+  min-width: 0;
+  transform-origin: left;
+  animation: ro-grow-x 0.6s var(--rb-ease) both;
+}
+.ro-bar__seg {
+  flex-basis: 0;
+  flex-shrink: 1;
+  min-width: 6px;
+  border-radius: 999px;
+}
+.ro-bar__seg[data-tone="ok"] {
+  background: var(--rb-success);
+}
+.ro-bar__seg[data-tone="partial"] {
+  background: var(--rb-warning);
+}
+.ro-bar__seg[data-tone="bad"] {
+  background: var(--rb-danger);
+}
+.ro-bar__seg[data-tone="wait"] {
+  background: color-mix(in oklch, var(--rb-muted) 35%, var(--rb-line));
+}
+.ro-counts {
+  display: grid;
+  grid-template-columns: repeat(2, auto);
+  justify-content: start;
+  gap: 6px 22px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.ro-counts__item {
+  white-space: nowrap;
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  min-width: 0;
+  font-size: 13.5px;
+}
+.ro-counts__item[data-zero] {
+  opacity: 0.6;
+}
+.ro-counts__dot {
+  flex: none;
+  align-self: center;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+}
+.ro-counts__item[data-tone="ok"] .ro-counts__dot {
+  background: var(--rb-success);
+}
+.ro-counts__item[data-tone="partial"] .ro-counts__dot {
+  background: var(--rb-warning);
+}
+.ro-counts__item[data-tone="bad"] .ro-counts__dot {
+  background: var(--rb-danger);
+}
+.ro-counts__item[data-tone="wait"] .ro-counts__dot {
+  background: color-mix(in oklch, var(--rb-muted) 35%, var(--rb-line));
+}
+.ro-counts__n {
+  font-weight: 650;
+  font-variant-numeric: tabular-nums;
+}
+.ro-counts__label {
+  color: var(--rb-muted);
+}
+
+.ro-pipe__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+.ro-pipe__level {
+  margin-block-start: -4px;
+}
+
+/* "Technical details": the numbered versions behind the stages. */
+.ro-tech {
+  border-block-start: 0;
+}
+.ro-tech__list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  font-size: 13px;
+  color: var(--rb-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+/* ------------------------------------------------------------ turn on */
+
+.ro-hero {
+  container: rohero / inline-size;
+  min-width: 0;
+  padding: clamp(18px, 3vw, 32px);
+}
+.ro-hero__in {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  align-items: center;
+  gap: 20px 32px;
+  min-width: 0;
+}
+@container rohero (min-width: 640px) {
+  .ro-hero__in {
+    grid-template-columns: minmax(240px, 5fr) minmax(0, 7fr);
+  }
+}
+.ro-hero__art {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 16px;
+  min-width: 0;
+  padding: 22px 18px 18px;
+  border-radius: var(--rb-r-lg);
+  background: linear-gradient(145deg, var(--rb-accent-soft), color-mix(in oklch, var(--rb-accent-soft) 25%, var(--rb-surface)));
+}
+.ro-hero__icon {
+  display: inline-flex;
+  font-size: 44px;
+  color: var(--rb-accent);
+}
+.ro-hero__icon svg {
+  width: 44px;
+  height: 44px;
+}
+.ro-hero__steps {
+  display: flex;
+  width: 100%;
+  max-width: 280px;
+}
+.ro-hero__step {
+  position: relative;
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--rb-accent-text);
+}
+.ro-hero__step i {
+  position: relative;
+  z-index: 1;
+  width: 16px;
+  height: 16px;
+  border: 2px solid var(--rb-accent);
+  border-radius: 50%;
+  background: var(--rb-surface);
+}
+.ro-hero__step:first-child i {
+  background: var(--rb-accent);
+}
+.ro-hero__step:not(:last-child)::after {
+  content: "";
+  position: absolute;
+  inset-block-start: 7px;
+  inset-inline-start: calc(50% + 8px);
+  inset-inline-end: calc(-50% + 8px);
+  height: 2px;
+  background: color-mix(in oklch, var(--rb-accent) 45%, transparent);
+}
+.ro-hero__text {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-width: 0;
+}
+.ro-hero__title {
+  margin: 0;
+  font-size: clamp(19px, 2.2vw, 24px);
+  font-weight: 650;
+  letter-spacing: -0.015em;
+  line-height: 1.25;
+}
+.ro-hero__body {
+  max-width: 54ch;
+  margin: 0;
+  font-size: 15px;
+  line-height: 1.5;
+  color: var(--rb-muted);
+}
+.ro-hero__action {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 14px;
+  margin-block-start: 6px;
+}
+
+/* ------------------------------------------------------------ which PCs go first */
+
+.ro-members__bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px 16px;
+}
+.ro-members__find {
+  width: 22ch;
+  max-width: 100%;
+}
+.ro-members__list,
+.ro-pick {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 8px;
+  max-height: 440px;
+  margin: 0;
+  padding: 3px;
+  overflow-y: auto;
+  list-style: none;
+}
+@container rosec (min-width: 520px) {
+  .ro-members__list {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+@container rosec (min-width: 900px) {
+  .ro-members__list {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+.ro-pc,
+.ro-pick__row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  min-width: 0;
+  padding: 8px 12px;
+  border: 1px solid var(--rb-line);
+  border-radius: 10px;
+  background: var(--rb-surface);
+  transition:
+    border-color var(--rb-duration) var(--rb-ease),
+    background var(--rb-duration) var(--rb-ease);
+}
+.ro-pc .rb-checkbox,
+.ro-pick__row .rb-checkbox {
+  flex: 1;
+  min-width: 0;
+}
+.ro-pc[data-picked],
+.ro-pick__row[data-picked] {
+  border-color: var(--rb-accent);
+  background: color-mix(in oklch, var(--rb-accent-soft) 60%, var(--rb-surface));
+}
+.ro-pick {
+  max-height: 300px;
+}
+
+/* The bar that appears once PCs are ticked: it stays at the bottom of the card while the list scrolls. */
+.ro-move {
+  position: sticky;
+  inset-block-end: 12px;
+  z-index: 2;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px 16px;
+  padding: 10px 14px;
+  border: 1px solid color-mix(in oklch, var(--rb-accent) 45%, var(--rb-line));
+  border-radius: 14px;
+  background: var(--rb-glass-strong);
+  box-shadow: var(--rb-shadow-md);
+}
+.ro-move__count {
+  font-size: 14px;
+  font-weight: 650;
+}
+.ro-move__to {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  margin-inline-start: auto;
+  font-size: 14px;
+  white-space: nowrap;
+  color: var(--rb-muted);
+}
+.ro-move__select {
+  min-width: 9.5rem;
+}
+@media (max-width: 599px) {
+  .ro-move {
+    inset-block-end: 8px;
+  }
+  .ro-move__to {
+    flex: 1 1 100%;
+    margin-inline-start: 0;
+  }
+  .ro-move > .rb-btn {
+    flex: 1 1 100%;
+  }
+}
+
+/* ------------------------------------------------------------ moves on by itself */
+
+.ro-auto__read {
+  margin: 0;
+  font-size: 14.5px;
+  line-height: 1.5;
+}
+.ro-auto__numbers {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 16px 28px;
+}
+.ro-auto__numbers .dash-field {
+  flex: 0 0 auto;
+}
+/* The three cards stack until the card is wide enough for three across (an aside is narrower than that). */
+.ro-auto .dash-cc .dash-cc__grid[data-columns] {
+  grid-template-columns: minmax(0, 1fr);
+}
+@container rosec (min-width: 560px) {
+  .ro-auto .dash-cc .dash-cc__grid[data-columns="3"] {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+  .ro-auto .dash-cc .dash-cc__grid[data-columns="2"] {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+.ro-num {
+  width: 9ch;
+  max-width: 100%;
+  text-align: end;
+  font-variant-numeric: tabular-nums;
+}
+.ro-auto__switch {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.ro-auto__actions {
+  position: sticky;
+  inset-block-end: 12px;
+}
+
+/* ------------------------------------------------------------ undo dialog */
+
+.ro-undo {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 12px 14px;
+  border: 1px solid color-mix(in oklch, var(--rb-accent) 35%, var(--rb-line));
+  border-radius: var(--rb-r-md);
+  background: color-mix(in oklch, var(--rb-accent-soft) 55%, var(--rb-surface));
+}
+.ro-undo__label {
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--rb-muted);
+}
+.ro-undo__change {
+  font-size: 16px;
+  font-weight: 650;
+  overflow-wrap: anywhere;
+}
+.ro-undo__date {
+  font-size: 13px;
+  color: var(--rb-muted);
+}
+
+/* ------------------------------------------------------------ motion */
+
+@media (prefers-reduced-motion: reduce) {
+  .ro-bar,
+  .ro-stage:not(:last-child)[data-passed]::after {
+    animation: none;
+  }
+  .ro-pc,
+  .ro-pick__row {
+    transition: none;
+  }
+}
+[data-lite="true"] .ro-bar,
+[data-lite="true"] .ro-stage:not(:last-child)[data-passed]::after {
+  animation: none;
+}
+[data-lite="true"] .ro-pc,
+[data-lite="true"] .ro-pick__row {
+  transition: none;
+}
+@media (forced-colors: active) {
+  .ro-stage[data-state="testing"] {
+    border-color: Highlight;
+  }
+  .ro-stage:not(:last-child)::after {
+    background: CanvasText;
+  }
+}

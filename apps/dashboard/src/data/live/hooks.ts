@@ -22,12 +22,12 @@ import { makeFunctionReference, type FunctionReturnType } from "convex/server";
 import { useCallback, useMemo, useState } from "react";
 import { api } from "@convex/_generated/api";
 import type { DataApi } from "../api";
-import { cappedNumber, type Audience, type BroadcastRow, type FailedInstallRow, type GroupRow, type KeysScreen, type MeResult, type QueryState, type Role } from "../types";
+import { cappedNumber, type Audience, type BroadcastRow, type FailedInstallRow, type GroupRow, type KeysScreen, type MeResult, type QueryState, type Role, type WifiCreateInput } from "../types";
 import { listArgs, type ServerList } from "../serverList";
 import { useMappedList } from "./mapList";
 import { useServerPage } from "./serverList";
 import { appDetailOf, installCountsOf, NEW_APP } from "./apps";
-import { deviceDetailOf } from "./devices";
+import { deviceDetailOf, devicePageOf } from "./devices";
 import { employeeDetailOf, newEmployeeOf } from "./employees";
 import { mapError, useMapped, useMappedState, useMemberQuery } from "./convex";
 
@@ -115,6 +115,8 @@ function useLiveKeysScreen(): QueryState<KeysScreen> {
       envKeyPresent: data.env.active !== null,
       envNextKeyPresent: data.env.next !== null,
       signing: data.signing,
+      managed: data.orgKeys.signing !== null ? ("keyring" as const) : ("deployment" as const),
+      keyringLocked: data.orgKeys.locked,
       publishFailedAt: data.publishFailedAt,
       rosterPending: data.rosterPending,
       keys: data.keys.map((k) => ({ keyId: k.keyId, fingerprint: k.fingerprint, status: k.status, createdAt: k.createdAt })),
@@ -166,6 +168,9 @@ export const liveApi: DataApi = {
   // (the dialog opens and the call is retried once), the others an unlocked session.
   useDeviceDetail(deviceId) {
     return useMappedState(useMemberQuery(api.fleet.get, { deviceId }), deviceDetailOf);
+  },
+  useDevicePage(deviceId) {
+    return useMappedState(useMemberQuery(api.fleet.page, { deviceId }), devicePageOf);
   },
   useDeviceLiveness(deviceId) {
     return useMemberQuery(api.fleet.liveness, { deviceId });
@@ -262,6 +267,10 @@ export const liveApi: DataApi = {
     const { paginationOpts } = listArgs(query);
     return useServerPage<BroadcastRow>(api.broadcasts.list, { paginationOpts, sort: { key: "sent", dir: query.sort?.dir ?? "desc" } }, "broadcasts");
   },
+  // `broadcasts:live` (UI pass, "On your PCs now"): <= 42 rows of the never-cancelled messages; the screen drops the expired ones by its own clock.
+  useLiveBroadcasts() {
+    return useMemberQuery(api.broadcasts.live, {});
+  },
   useSendBroadcast() {
     return useMapped(useMutation(api.broadcasts.send));
   },
@@ -318,7 +327,7 @@ export const liveApi: DataApi = {
   },
   useGroupDetail(groupId) {
     const q = useMemberQuery(api.groups.get, { groupId });
-    return useMappedState(q, ({ group: g, apps }) => ({
+    return useMappedState(q, ({ group: g, apps, rollout, lockdownAuditSince }) => ({
       _id: g._id,
       name: g.name,
       description: g.description,
@@ -328,12 +337,16 @@ export const liveApi: DataApi = {
       displayMode: g.displayMode,
       webWindowCap: g.webWindowCap,
       webIdleCloseMin: g.webIdleCloseMin,
+      // UI pass: the two small rows `groups:get` now reads (null = no row yet).
+      rollout,
+      lockdownAuditSince,
       assignments: apps.map((a) => ({
         _id: a.assignmentId,
         appId: a.appId,
         appName: a.name,
         appKind: a.kind,
         hue: a.hue,
+        archived: a.archived,
         audience: a.audience,
         pinnedTaskbar: a.pinnedTaskbar,
         pinnedDesktop: a.pinnedDesktop,
@@ -553,6 +566,17 @@ export const liveApi: DataApi = {
   useSetWifiPassphrase() {
     return useMapped(useAction(api.wifi.setPassphrase));
   },
+  // UI pass: a new secured network with its password in one action (`convex/wifi.ts` `createWithPassphrase`). Only the five profile
+  // fields, the groups and the password go over the wire (no `id` / `expectedRevision`: the server refuses unknown arguments).
+  useCreateWifiWithPassphrase() {
+    const create = useAction(api.wifi.createWithPassphrase);
+    const call = useCallback(
+      (a: WifiCreateInput) =>
+        create({ name: a.name, ssid: a.ssid, hidden: a.hidden, security: a.security, autoConnect: a.autoConnect, groupIds: a.groupIds, passphrase: a.passphrase }),
+      [create],
+    );
+    return useMapped(call);
+  },
   // ---- printers (Phase 5 Step 14): same module, same rules.
   usePrinterDetail(id) {
     return useMemberQuery(api.networks.printerDetail, { id });
@@ -670,6 +694,12 @@ export const liveApi: DataApi = {
   useInspectInstaller() {
     return useMapped(useAction(api.apps.inspectInstaller));
   },
+  useFingerprintInstaller() {
+    return useMapped(useAction(api.apps.fingerprintInstaller));
+  },
+  useAppByWinget(packageId) {
+    return useMemberQuery(api.apps.byWinget, packageId === "skip" ? "skip" : { packageId });
+  },
   useSaveAppIcon() {
     const save = useAction(api.apps.saveIcon);
     const call = useCallback(
@@ -689,6 +719,17 @@ export const liveApi: DataApi = {
         await set(a);
       },
       [set],
+    );
+    return useMapped(call);
+  },
+  // One call for the several extensions of a chip ("Pictures"): ONE configuration version per group, not one per extension.
+  useSetFileHandlers() {
+    const setMany = useMutation(api.fileHandlers.setMany);
+    const call = useCallback(
+      async (a: { extensions: string[]; appId: string }) => {
+        await setMany(a);
+      },
+      [setMany],
     );
     return useMapped(call);
   },

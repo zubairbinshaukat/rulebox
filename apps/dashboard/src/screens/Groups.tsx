@@ -15,6 +15,7 @@ import { PageHeader } from "../components/PageHeader";
 import { RelativeTime } from "../components/RelativeTime";
 import { RoleGate } from "../components/RoleGate";
 import { ServerTable } from "../components/ServerTable";
+import { TruncateLazy as Truncate } from "../components/TruncateLazy";
 import { useToast } from "../lib/toast";
 import { formatCount } from "../lib/format";
 import { useListPaging, useListView, type ListConfig } from "../lib/listView";
@@ -45,25 +46,41 @@ export default function Groups() {
         key: "name",
         header: s.colName,
         primary: true,
+        type: "name",
+        maxWidth: 300,
         sortable: true,
+        // The cards' sort choices read "Name: A to Z", not "Group: A to Z".
+        cardLabel: s.colNameSort,
         cell: (g) => (
           <span className="dash-cell-stack">
-            <Link className="dash-link dash-link--plain dash-truncate" to={`/groups/${g._id}`} title={g.name}>
-              {g.name}
+            <Link className="dash-link dash-link--plain" to={`/groups/${g._id}`}>
+              <Truncate full={g.name} maxWidth={300}>
+                {g.name}
+              </Truncate>
             </Link>
             {g.description ? (
-              <span className="dash-cell-sub" title={g.description}>
-                {g.description}
+              <span className="dash-cell-sub">
+                <Truncate full={g.description} maxWidth={300}>
+                  {g.description}
+                </Truncate>
               </span>
             ) : null}
           </span>
         ),
+        cardCell: (g) => (
+          <Link className="dash-link dash-link--plain" to={`/groups/${g._id}`}>
+            {g.name}
+          </Link>
+        ),
+        cardSub: (g) => (g.description ? <Truncate full={g.description}>{g.description}</Truncate> : null),
       },
-      { key: "devices", header: s.colDevices, numeric: true, cell: (g) => formatCount(g.deviceCount, 500) },
-      { key: "employees", header: s.colEmployees, numeric: true, cell: (g) => formatCount(g.employeeCount, 500) },
+      { key: "devices", header: s.colDevices, type: "num", card: "fact", cardLabel: s.cardPcs, cell: (g) => formatCount(g.deviceCount, 500) },
+      { key: "employees", header: s.colEmployees, type: "num", card: "fact", cell: (g) => formatCount(g.employeeCount, 500) },
       {
         key: "created",
         header: s.colCreated,
+        type: "date",
+        card: "fact",
         sortable: true,
         sortDefaultDir: "desc",
         isEmpty: (g) => g.createdAt === undefined,
@@ -72,7 +89,6 @@ export default function Groups() {
     ],
     [],
   );
-
   const add = (
     <RoleGate minRole="admin">
       <Button onClick={() => setCreating(true)}>

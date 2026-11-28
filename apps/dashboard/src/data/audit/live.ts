@@ -12,8 +12,13 @@ import type { AuditApi } from "./api";
 const byTime = (q: ListQuery): ListQuery => ({ ...q, sort: { key: "at", dir: q.sort?.dir ?? "desc" }, search: undefined });
 
 export const liveAuditApi: AuditApi = {
-  useAuditScreen(query) {
-    return useServerPage<AuditEntry>(api.audit.list, listArgs(byTime(query)), "audit");
+  // `since` is sent only when set; with a `targetId` the screen reads `audit:forTarget` (the same pages, one target's rows).
+  useAuditScreen({ since, targetId, ...query }) {
+    const args = { ...listArgs(byTime(query)), ...(since === undefined ? {} : { since }) };
+    // Both hooks run on every render (rules of hooks); the one that is not wanted is skipped and subscribes to nothing.
+    const all = useServerPage<AuditEntry>(api.audit.list, targetId === undefined ? args : "skip", "audit");
+    const one = useServerPage<AuditEntry>(api.audit.forTarget, targetId === undefined ? "skip" : { targetId, ...args }, `audit:${targetId ?? ""}`);
+    return targetId === undefined ? all : one;
   },
   useHistory(targetId, query) {
     return useServerPage<AuditEntry>(api.audit.forTarget, { targetId, ...listArgs(byTime(query)) }, `history:${targetId}`);

@@ -1,5 +1,5 @@
 /**
- * Demo twin of `convex/lockdown.ts`, `fleet:allowUsb` and the lockdown parts of `fleet:get` / `overview:get` (Phase 5 Step 19).
+ * Demo twin of `convex/lockdown.ts`, `fleet:allowUsb` and the lockdown parts of `fleet:page` / `overview:get` (Phase 5 Step 19).
  * Same rules as the server: roles, the revision check, the conditional fresh step-up of a mode change, the refusal codes.
  */
 import { useCallback } from "react";
@@ -14,16 +14,17 @@ import {
   MAX_USB_ALLOW_HOURS,
   MIN_LOCKOUT_THRESHOLD,
   OPEN_FINDINGS_CAP,
-  type DeviceLockdown,
+  type DevicePage,
   type ExceptionRow,
   type FindingRow,
   type LockdownSettings,
+  type LockdownSync,
   type LockdownView,
   type LockdownWarnings,
 } from "../types";
 import { allowKinds, changedLayers, folderProblem, sameSettings } from "../../screens/lockdown/rules";
 import { byKey, useDemoServerPage } from "./lists";
-import { currentMember, db as getDb, fail, newId, runMutation, useDemoQuery } from "./store";
+import { currentMember, db as getDb, fail, newId, onDemoReset, runMutation, touch, useDemoQuery } from "./store";
 
 const DAY = 24 * 60 * 60 * 1000;
 const HOUR = 60 * 60 * 1000;
@@ -54,10 +55,27 @@ const settingsOf = (db: DemoDb, groupId: string): LockdownSettings => db.lockdow
 const anyAudit = (s: LockdownSettings) => s.appLocker.mode === "audit" || s.appControl.mode === "audit" || s.procWatch.mode === "audit";
 const whole = (v: number, min: number, max: number) => Number.isInteger(v) && v >= min && v <= max;
 
-/** A new configuration version for the group (what `snapshotGroupConfig` does): the rollout screen lists it. */
+/**
+ * A new configuration version for the group (what `snapshotGroupConfig` does): the rollout screen lists it. A group without a rollout
+ * row gets one (rings off, version 1), like the server's first snapshot. The PCs "catch up" one by one afterwards (`scheduleCatchUp`).
+ */
 function newConfigVersion(db: DemoDb, groupId: string, reason: string, now: number) {
   const r = db.rollouts.get(groupId);
-  if (!r) return;
+  if (!r) {
+    db.rollouts.set(groupId, {
+      enabled: false,
+      pointers: { pilot: 1, early: 1, everyone: 1 },
+      autoPromote: { enabled: false, bakeHours: 24, maxFailurePct: 10 },
+      autoRollback: true,
+      state: "idle",
+      haltReason: null,
+      stageStartedAt: null,
+      revision: 1,
+      versions: [{ version: 1, reason, createdAt: now }],
+    });
+    scheduleCatchUp(groupId);
+    return;
+  }
   const version = Math.max(...r.versions.map((v) => v.version), r.pointers.pilot) + 1;
   r.versions = [{ version, reason, createdAt: now }, ...r.versions].slice(0, 20);
   if (r.enabled) {
@@ -68,6 +86,97 @@ function newConfigVersion(db: DemoDb, groupId: string, reason: string, now: numb
     r.pointers = { pilot: version, early: version, everyone: version };
   }
   r.revision++;
+  scheduleCatchUp(groupId);
+}
+
+// ---------------------------------------------------------------- "PCs up to date" (`lockdown:groupSync`)
+
+/** Same cap as `LOCKDOWN_SYNC_CAP` on the server. */
+const SYNC_CAP = 200;
+const SYNC_PROBLEM_NAMES = 3;
+const CATCH_UP_MS = 1200;
+/** `admin_tiles_skipped`: the agent since 2026-11-28 (machine layer `ok`); `admin_signin_unverified`: older agents. Same set as `convex/lib/lockdownSync.ts`. */
+const ADMIN_TILES_CODES: ReadonlySet<string> = new Set(["admin_tiles_skipped", "admin_signin_unverified"]);
+const newestOf = (p: { pilot: number; early: number; everyone: number }) => Math.max(p.pilot, p.early, p.everyone);
+
+/** The same rules as the server: the group's PCs and their reports at or above the newest configuration version. */
+export function lockdownSyncOf(db: DemoDb, groupId: string): LockdownSync {
+  const g = find(db.groups, groupId);
+  const rollout = db.rollouts.get(g._id) ?? null;
+  const pcs = db.devices.filter((d) => d.groupId === g._id);
+  const members = pcs.slice(0, SYNC_CAP);
+  const out: LockdownSync = {
+    total: members.length,
+    totalMore: pcs.length > SYNC_CAP,
+    upToDate: 0,
+    problems: 0,
+    problemPcs: [],
+    reduced: 0,
+    adminTilesPending: 0,
+    newestVersion: rollout === null ? null : newestOf(rollout.pointers),
+    ringsOn: rollout?.enabled ?? false,
+    rolloutState: rollout?.state ?? "idle",
+  };
+  if (out.newestVersion === null) return out;
+  for (const pc of members) {
+    const r = db.applyDetails.get(pc._id);
+    if (r === undefined || r.configVersion === null || r.configVersion < out.newestVersion) continue;
+    if (r.state === "applied" || r.state === "partial") out.upToDate++;
+    else {
+      out.problems++;
+      if (out.problemPcs.length < SYNC_PROBLEM_NAMES) out.problemPcs.push({ deviceId: pc._id, name: pc.name, state: r.state });
+    }
+    if (r.layers.appLocker.state === "unsupported" || r.layers.appControl.state === "unsupported") out.reduced++;
+    if (ADMIN_TILES_CODES.has(r.layers.machine.detail ?? "") || ADMIN_TILES_CODES.has(r.refusal ?? "")) out.adminTilesPending++;
+  }
+  return out;
+}
+
+const catchUps = new Map<string, ReturnType<typeof setTimeout>>();
+onDemoReset(() => {
+  for (const timer of catchUps.values()) clearTimeout(timer);
+  catchUps.clear();
+});
+
+/**
+ * After a save the group's PCs pick the new settings up, one every 1.2 s (the demo has no agents): a PC that did not refuse, fail or
+ * roll back, is not revoked, and whose ring already follows the newest version gets a report at that version. The screen shows the
+ * counter go 0 -> m. One timer chain per group; a second save while it runs keeps it running (the target is read at every tick).
+ */
+function scheduleCatchUp(groupId: string) {
+  if (catchUps.has(groupId)) return;
+  const tick = () => {
+    catchUps.delete(groupId);
+    const db = getDb();
+    const rollout = db.rollouts.get(groupId);
+    if (rollout === undefined) return;
+    const newest = newestOf(rollout.pointers);
+    const next = db.devices.find((d) => {
+      if (d.groupId !== groupId || d.revoked || db.oldAgents.has(d._id)) return false;
+      if (rollout.pointers[d.ring ?? "everyone"] < newest) return false; // its ring waits for the promotion
+      const r = db.applyDetails.get(d._id);
+      if (r === undefined) return true;
+      if (r.state === "refused" || r.state === "failed" || r.state === "rolledBack") return false;
+      return (r.configVersion ?? 0) < newest;
+    });
+    if (next === undefined) return;
+    const now = Date.now();
+    const old = db.applyDetails.get(next._id);
+    const ok = { mode: "on", state: "ok" };
+    db.applyDetails.set(next._id, {
+      state: "applied",
+      refusal: null,
+      appliedVersion: newest,
+      lkgVersion: newest,
+      layers: { staff: ok, machine: ok, appLocker: ok, appControl: ok, procWatch: ok, boot: ok, performance: ok },
+      ...old,
+      configVersion: newest,
+      updatedAt: now,
+    });
+    touch();
+    catchUps.set(groupId, setTimeout(tick, CATCH_UP_MS));
+  };
+  catchUps.set(groupId, setTimeout(tick, CATCH_UP_MS));
 }
 
 function viewOf(db: DemoDb, groupId: string): LockdownView {
@@ -87,15 +196,12 @@ function viewOf(db: DemoDb, groupId: string): LockdownView {
   };
 }
 
-/** The lockdown fields of `fleet:get`. */
-export function deviceLockdownOf(db: DemoDb, d: DbDevice): DeviceLockdown {
+/** The lockdown fields of `fleet:page` (the Protection tab reads them from the page). */
+export function deviceLockdownOf(db: DemoDb, d: DbDevice): Pick<DevicePage, "ring" | "usbAllowUntil" | "protection" | "lockdownCapable" | "apply"> {
   const apply = db.applyDetails.get(d._id) ?? null;
   const reported = db.reports.has(d._id);
   return {
     ring: d.ring ?? "everyone",
-    groupId: d.groupId ?? null,
-    revoked: d.revoked,
-    rolloutRevision: (d.groupId ? db.rollouts.get(d.groupId)?.revision : undefined) ?? 0,
     usbAllowUntil: db.usbAllow.get(d._id) ?? null,
     protection: db.postures.get(d._id) ?? null,
     lockdownCapable: !reported && apply === null ? null : !db.oldAgents.has(d._id),
@@ -130,6 +236,14 @@ export const demoLockdownApi: LockdownApi = {
     return useDemoQuery(`lockdown:groupView:${groupId}`, (db) => {
       requireReader();
       return viewOf(db, groupId);
+    });
+  },
+
+  // `lockdown:groupSync`: its own query, so the form does not re-run while PCs report.
+  useLockdownSync(groupId) {
+    return useDemoQuery(`lockdown:groupSync:${groupId}`, (db) => {
+      requireReader();
+      return lockdownSyncOf(db, groupId);
     });
   },
 
@@ -288,14 +402,6 @@ export const demoLockdownApi: LockdownApi = {
         }),
       [],
     );
-  },
-
-  // The lockdown part of `fleet:get`.
-  useDeviceLockdown(deviceId) {
-    return useDemoQuery(`fleet:get:lockdown:${deviceId}`, (db) => {
-      requireReader();
-      return deviceLockdownOf(db, find(db.devices, deviceId));
-    });
   },
 
   // `fleet:allowUsb`: whole hours 1..8; 0 ends it; a revoked PC is refused.

@@ -1,36 +1,66 @@
+import { InfoTip } from "@rulebox/ui";
 import type { BroadcastStyle } from "../../data/types";
 import { broadcastStrings as b, lockStrings as l } from "./strings";
 
 /**
- * Previews of what a PC shows (plan 4.17): a miniature, not the Staff App. The text is rendered as TEXT (React escapes it,
- * line breaks are kept with `white-space: pre-wrap` in CSS), so markup typed into a form is shown as typed here too.
+ * A drawing of a PC with the message on it (UI pass): the desktop in miniature, the banner on top or the full-screen notice
+ * over it. Not the Staff App. The text is rendered as TEXT (React escapes it, line breaks are kept with `white-space: pre-wrap`
+ * in CSS), so markup typed into the form is shown as typed here too. Empty fields show a muted placeholder.
  */
 export function BroadcastPreview({ style, title, body, ackRequired }: { style: BroadcastStyle; title: string; body: string; ackRequired: boolean }) {
   const shownTitle = title.trim();
   const shownBody = body.trim();
+  const titleText = shownTitle || <span className="bc-ph">{b.previewTitleHolder}</span>;
+  const bodyText = shownBody || <span className="bc-ph">{b.previewBodyHolder}</span>;
   return (
-    <figure className="dash-preview" aria-label={b.preview}>
-      <figcaption className="dash-preview__cap">{style === "banner" ? b.previewBanner : b.previewFullscreen}</figcaption>
-      {style === "banner" ? (
-        <div className="dash-preview__screen">
-          <div className="dash-preview__banner" role="note">
-            <span className="dash-preview__text">
-              <strong>{shownTitle}</strong>
-              {shownBody ? <span> {shownBody}</span> : null}
+    <figure className="bc-prev" aria-label={b.preview}>
+      <figcaption className="bc-prev__cap">
+        <strong>{b.preview}</strong>
+        <span>{b.previewHint}</span>
+      </figcaption>
+      <div className="bc-screen" data-style={style}>
+        <div className="bc-screen__desk" aria-hidden="true">
+          <i className="bc-screen__hello" />
+          <i className="bc-screen__tile" />
+          <i className="bc-screen__tile" />
+          <i className="bc-screen__tile" />
+          <i className="bc-screen__tile" />
+        </div>
+        <div className="bc-screen__bar" aria-hidden="true">
+          <i />
+          <i />
+          <i />
+        </div>
+        {style === "banner" ? (
+          <div className="bc-banner" role="note">
+            <span className="bc-banner__text">
+              <strong>{titleText}</strong> <span className="bc-banner__sep">&mdash;</span> {bodyText}
             </span>
-            {ackRequired ? <span className="dash-preview__btn">{b.ok}</span> : <span className="dash-preview__btn dash-preview__btn--quiet">{b.dismiss}</span>}
+            <span className={ackRequired ? "bc-btn" : "bc-btn bc-btn--quiet"}>{ackRequired ? b.ok : b.dismiss}</span>
           </div>
-        </div>
-      ) : (
-        <div className="dash-preview__screen dash-preview__screen--cover">
-          <div className="dash-preview__card" role="note">
-            <strong className="dash-preview__title">{shownTitle}</strong>
-            {shownBody ? <p className="dash-preview__body">{shownBody}</p> : null}
-            <span className="dash-preview__btn">{b.ok}</span>
+        ) : (
+          <div className="bc-cover">
+            <div className="bc-note" role="note">
+              <strong className="bc-note__title">{titleText}</strong>
+              <p className="bc-note__body">{bodyText}</p>
+              <span className="bc-btn">{b.ok}</span>
+            </div>
           </div>
-        </div>
-      )}
+        )}
+      </div>
     </figure>
+  );
+}
+
+/** The two drawings on the style cards: a strip along the top, or a card over a dimmed screen. Decorative (the card carries the words). */
+export function StyleArt({ style }: { style: BroadcastStyle }) {
+  return (
+    <span className="bc-art" data-style={style}>
+      <i className="bc-art__strip" />
+      <i className="bc-art__card" />
+      <i className="bc-art__line" />
+      <i className="bc-art__line bc-art__line--short" />
+    </span>
   );
 }
 
@@ -40,7 +70,13 @@ export function LockPreview({ orgName, message, contact }: { orgName: string; me
   const who = contact.trim();
   return (
     <figure className="dash-preview" aria-label={l.preview}>
-      <figcaption className="dash-preview__cap">{l.preview}</figcaption>
+      <figcaption className="dash-preview__cap">
+        {/* What a lock does to the PC (three sentences) is the (i) next to the preview, not a paragraph above the form. */}
+        <span className="rb-labelrow">
+          {l.preview}
+          <InfoTip label={`About ${l.preview}`}>{l.lead}</InfoTip>
+        </span>
+      </figcaption>
       <div className="dash-preview__screen dash-preview__screen--cover">
         <div className="dash-preview__card" role="note">
           <span className="dash-preview__org">{l.previewOrg(orgName)}</span>

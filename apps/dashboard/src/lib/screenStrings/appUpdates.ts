@@ -8,11 +8,18 @@ export const appUpdateStrings = {
   versionHint: "The version this installer delivers, like 2.4.1. Shown to you; Rulebox compares it for the two update modes below.",
   versionPinnedHint: "Free text, shown only to you. Rulebox never compares it.",
   updateMode: "Update mode",
-  updateModes: {
+  // ---- UI pass (D27): the plain labels and (i) texts of the modes, used by the add page and the Updates tab.
+  modeLabels: {
     pinned: "Keep this version",
-    vendor: "The program updates itself",
-    managed: "Rulebox publishes updates",
+    vendor: "The app updates itself",
+    managed: "Rulebox updates it",
   },
+  modeInfo: {
+    pinned: "PCs keep the version you added until you change it.",
+    vendor: "The app's own updater keeps it current.",
+    managed: "Rulebox checks the vendor's update feed and installs new versions for you.",
+  },
+  modeBrowser: "Chrome and Edge always update themselves.",
   updateModeHelp: {
     pinned: "Rulebox installs exactly this installer and never changes the version. Change the installer here to move the PCs to a new one.",
     vendor:

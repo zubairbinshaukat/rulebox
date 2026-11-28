@@ -28,6 +28,8 @@ catalog:
   "@tanstack/react-virtual": 3.14.17
   pdfjs-dist: 6.4.299
   docx-preview: 0.4.1
+  # UI pass 2026-11-28: enrollment code QR (dashboard, lazy chunk)
+  qrcode-generator: 1.4.4
   dompurify: 3.4.17
   vitest: 5.0.4
   jsdom: 30.1.2

@@ -4,13 +4,19 @@ import { setupAuth } from "../tests/convex/auth";
 import { enrollDevice } from "../tests/convex/devices";
 import { asMember, giveStepUp, makeOrg, type T } from "../tests/convex/identity";
 import { createKeys, giveSealKey, MASTER_A, setMaster } from "../tests/convex/phase5";
-import { api } from "./_generated/api";
+import { api, internal } from "./_generated/api";
 import type { Id } from "./_generated/dataModel";
 import { auditPolicy } from "./lib/audit";
 import { base64Decode } from "./lib/crypto";
 import { MAX_NETWORK_GROUPS, MAX_WIFI_PROFILES } from "./lib/limits";
-import { openSealed } from "./lib/sealbox";
+import { encryptAtRest, openSealed } from "./lib/sealbox";
 import { checkPassphrase } from "./wifi";
+
+// `encryptAtRest` is the real one unless a test makes it throw once (`wifi:createWithPassphrase` cleanup).
+vi.mock("./lib/sealbox", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("./lib/sealbox")>();
+  return { ...actual, encryptAtRest: vi.fn(actual.encryptAtRest) };
+});
 
 // Wi-Fi profiles on the server (Phase 5 Step 13, plan 4.15, 4.20): save / delete / list / detail, the passphrase
 // action, the publisher's sealing flow and the guarantee that no plaintext passphrase is ever returned or stored.
@@ -184,6 +190,161 @@ describe("wifi:setPassphrase", () => {
     await expect(adm.as.mutation(api.networks.deleteWifi, { id })).rejects.toThrow(/not_found/);
     await expect(adm.as.query(api.networks.wifiDetail, { id })).rejects.toThrow(/not_found/);
     expect((await adm.as.query(api.networks.list, {})).wifi).toEqual([]);
+  });
+});
+
+describe("wifi:createWithPassphrase (UI pass: a secured network with its password in one call)", () => {
+  const create = (e: Env, over: Partial<{ name: string; ssid: string; security: "open" | "wpa2Personal" | "wpa3Personal" | "wpa2Wpa3Personal"; groupIds: string[]; passphrase: string }> = {}) =>
+    e.admin.action(api.wifi.createWithPassphrase, {
+      name: "Staff",
+      ssid: "Acme-Staff",
+      hidden: false,
+      security: "wpa2Personal",
+      autoConnect: true,
+      groupIds: [e.groupId],
+      passphrase: PASS,
+      ...over,
+    });
+  const nothingMade = async (e: Env) => {
+    expect(await profiles(e)).toHaveLength(0);
+    expect(await e.t.run((ctx) => ctx.db.query("groupConfigs").collect())).toHaveLength(0);
+    expect((await e.t.run((ctx) => ctx.db.query("auditLog").collect())).filter((a) => a.action.startsWith("wifi."))).toHaveLength(0);
+  };
+
+  test("one profile at revision 2 with its password, ONE configuration version per group that already says `hasPassphrase`, audited; the password is nowhere in the clear", async () => {
+    const e = await setup();
+    const second = await e.t.run((ctx) => ctx.db.insert("groups", { orgId: e.orgId, name: "Office", revision: 0, createdAt: Date.now() }));
+    const dev = await enrollDevice(e.t, e.orgId, { groupId: e.groupId });
+    const kp = await giveSealKey(e.t, dev.deviceId);
+
+    const made = await create(e, { groupIds: [second, e.groupId, e.groupId] });
+    expect(made).toEqual({ id: expect.any(String), revision: 2 });
+    const row = (await profiles(e))[0]!;
+    expect(row).toMatchObject({ _id: made.id, name: "Staff", ssid: "Acme-Staff", security: "wpa2Personal", revision: 2, passphraseRev: 2, passphraseSetAt: expect.any(Number) });
+    expect([...row.groupIds].sort()).toEqual([e.groupId, second].sort());
+    expect(row.passphrase).toEqual({ keyId: expect.any(String), sealed: expect.any(String) });
+
+    // One version per group (a create + setPassphrase would have made two), and PCs are told the password is there.
+    for (const groupId of [e.groupId, second]) {
+      const versions = await e.t.run((ctx) => ctx.db.query("groupConfigs").withIndex("by_group_version", (q) => q.eq("groupId", groupId)).collect());
+      expect(versions).toHaveLength(1);
+      expect(JSON.parse(versions[0]!.config).wifi).toEqual([expect.objectContaining({ id: made.id, ssid: "Acme-Staff", hasPassphrase: true })]);
+    }
+    const audit = (await e.t.run((ctx) => ctx.db.query("auditLog").collect())).map((a) => a.action).filter((a) => a.startsWith("wifi."));
+    expect(audit).toEqual(["wifi.created", "wifi.passphraseSet"]);
+
+    // The publisher seals it for the PC exactly as for `setPassphrase`; the box opens with the PC's key only.
+    await drain(e.t);
+    const doc = await fetchDoc(e.t, dev);
+    expect(doc.wifi).toEqual([expect.objectContaining({ id: made.id, revision: 2, sealed: expect.objectContaining({ keyId: kp.keyId }) })]);
+    expect(openSealed(doc.wifi[0]!.sealed!, kp.secret, { orgId: e.orgId, deviceId: dev.deviceId, profileId: made.id })).toBe(PASS);
+    expect(doc.raw).not.toContain(PASS);
+
+    // Not in a query result, not in a row, not in the audit.
+    const list = await e.viewer.query(api.networks.list, {});
+    expect(list.wifi[0]).toMatchObject({ _id: made.id, hasPassphrase: true, groupCount: 2 });
+    expect(JSON.stringify([list, await e.viewer.query(api.networks.wifiDetail, { id: made.id })])).not.toContain(PASS);
+    expect(JSON.stringify(await profiles(e))).not.toContain(PASS);
+    expect(JSON.stringify(await e.t.run((ctx) => ctx.db.query("auditLog").collect()))).not.toContain(PASS);
+    expect(JSON.stringify(await sealedRows(e))).not.toContain(PASS);
+  });
+
+  test("the same checks as saveWifi and setPassphrase, and a refused call writes nothing at all", async () => {
+    const e = await setup();
+    await expect(create(e, { name: "  " })).rejects.toThrow(/invalid_argument/);
+    await expect(create(e, { ssid: "a".repeat(33) })).rejects.toThrow(/invalid_argument/);
+    await expect(create(e, { passphrase: "1234567" })).rejects.toThrow(/invalid_argument/);
+    await expect(create(e, { passphrase: "x".repeat(64) })).rejects.toThrow(/invalid_argument/);
+    await expect(create(e, { security: "open" })).rejects.toThrow(/invalid_argument/);
+    const tooMany = await e.t.run(async (ctx) => {
+      const ids: Id<"groups">[] = [];
+      for (let i = 0; i < MAX_NETWORK_GROUPS + 1; i++) ids.push(await ctx.db.insert("groups", { orgId: e.orgId, name: `G${i}`, revision: 0, createdAt: 1 }));
+      return ids;
+    });
+    await expect(create(e, { groupIds: tooMany })).rejects.toThrow(/too_many/);
+    const other = await makeOrg(e.t, "Other");
+    const foreign = await e.t.run((ctx) => ctx.db.insert("groups", { orgId: other, name: "Theirs", revision: 0, createdAt: Date.now() }));
+    await expect(create(e, { groupIds: [e.groupId, foreign] })).rejects.toThrow(/not_found/);
+    await expect(create(e, { groupIds: ["garbage"] })).rejects.toThrow(/not_found/);
+    await expect(e.viewer.action(api.wifi.createWithPassphrase, { name: "N", ssid: "N", hidden: false, security: "wpa2Personal", autoConnect: true, groupIds: [], passphrase: PASS })).rejects.toThrow(/forbidden/);
+    await nothingMade(e);
+    // Valid 8-character, 63-character and 64-hex passwords are all accepted, in no group too (the group is chosen later).
+    await create(e, { name: "A", ssid: "A", passphrase: "12345678", groupIds: [] });
+    await create(e, { name: "B", ssid: "B", passphrase: "a".repeat(63), groupIds: [] });
+    expect((await create(e, { name: "C", ssid: "C", passphrase: "0123456789abcdef".repeat(4), groupIds: [] })).revision).toBe(2);
+    expect(await profiles(e)).toHaveLength(3);
+  });
+
+  test("without a sealing key: not_ready and nothing is created; at 50 profiles: too_large and nothing is created", async () => {
+    const t = await setupAuth();
+    const orgId = await makeOrg(t, "Acme", { noKey: true }); // no createKeys
+    const adm = await asMember(t, { role: "admin", orgId });
+    await giveStepUp(t, adm);
+    const args = { name: "N", ssid: "N", hidden: false, security: "wpa2Personal" as const, autoConnect: true, groupIds: [], passphrase: PASS };
+    await expect(adm.as.action(api.wifi.createWithPassphrase, args)).rejects.toThrow(/not_ready/);
+    expect(await t.run((ctx) => ctx.db.query("wifiProfiles").collect())).toHaveLength(0);
+
+    const e = await setup();
+    await e.t.run(async (ctx) => {
+      for (let i = 0; i < MAX_WIFI_PROFILES; i++) {
+        await ctx.db.insert("wifiProfiles", { orgId: e.orgId, name: `N${i}`, ssid: `N${i}`, hidden: false, security: "open", autoConnect: true, groupIds: [], revision: 1, createdAt: 1 });
+      }
+    });
+    await expect(create(e)).rejects.toThrow(/too_large/);
+    expect(await profiles(e)).toHaveLength(MAX_WIFI_PROFILES);
+    expect(await e.t.run((ctx) => ctx.db.query("groupConfigs").collect())).toHaveLength(0);
+  });
+
+  test("it shares setPassphrase's rate limit (30 an hour per organization); the refused call creates nothing", async () => {
+    const e = await setup();
+    for (let i = 0; i < 30; i++) await create(e, { name: `N${i}`, ssid: `N${i}`, groupIds: [] });
+    await expect(create(e, { name: "Over", ssid: "Over", groupIds: [] })).rejects.toThrow(/rate_limited/);
+    expect(await profiles(e)).toHaveLength(30);
+    await expect(e.admin.action(api.wifi.setPassphrase, { id: (await profiles(e))[0]!._id, passphrase: PASS, expectedRevision: 2 })).rejects.toThrow(/rate_limited/);
+  });
+
+  test("if the password cannot be stored the draft is deleted (audited), nothing was published, and the error is the original one without the password", async () => {
+    const e = await setup();
+    vi.mocked(encryptAtRest).mockImplementationOnce(() => {
+      throw new Error("sealing exploded");
+    });
+    let message = "";
+    try {
+      await create(e);
+    } catch (error) {
+      message = String(error);
+    }
+    expect(message).toContain("sealing exploded");
+    expect(message).not.toContain(PASS);
+    expect(await profiles(e)).toHaveLength(0);
+    expect(await e.t.run((ctx) => ctx.db.query("groupConfigs").collect())).toHaveLength(0);
+    const audit = (await e.t.run((ctx) => ctx.db.query("auditLog").collect())).filter((a) => a.action.startsWith("wifi."));
+    expect(audit.map((a) => a.action)).toEqual(["wifi.created", "wifi.deleted"]);
+    expect(audit[1]!.summary).toBe("Removed the Wi-Fi network Staff because its password could not be saved");
+    expect(JSON.stringify(audit)).not.toContain(PASS);
+    // The next attempt works.
+    expect((await create(e)).revision).toBe(2);
+    expect(await profiles(e)).toHaveLength(1);
+  });
+
+  test("discardDraft deletes only a plain draft: a profile with groups, a password or a later revision is left alone", async () => {
+    const e = await setup();
+    const actor = { type: "member" as const, id: "m", label: "admin@acme.test" };
+    const discard = (id: Id<"wifiProfiles">, orgId = e.orgId) => e.t.mutation(internal.wifi.discardDraft, { orgId, actor, id });
+    const withGroups = await e.admin.mutation(api.networks.saveWifi, profile([e.groupId], { name: "Grouped", ssid: "Grouped" }));
+    expect(await discard(withGroups.id)).toBe(false);
+    const draft = await e.admin.mutation(api.networks.saveWifi, profile([], { name: "Draft", ssid: "Draft" }));
+    const other = await makeOrg(e.t, "Other");
+    expect(await discard(draft.id, other)).toBe(false); // another organization's row
+    const edited = await e.admin.mutation(api.networks.saveWifi, { ...profile([], { name: "Draft", ssid: "Draft 2" }), id: draft.id, expectedRevision: 1 });
+    expect(edited.revision).toBe(2);
+    expect(await discard(draft.id)).toBe(false); // revision 2
+    const plain = await e.admin.mutation(api.networks.saveWifi, profile([], { name: "Plain", ssid: "Plain" }));
+    expect(await discard(plain.id)).toBe(true);
+    expect(await discard(plain.id)).toBe(false); // already gone
+    expect((await profiles(e)).map((p) => p.name).sort()).toEqual(["Draft", "Grouped"]);
+    const gone = (await e.t.run((ctx) => ctx.db.query("auditLog").collect())).filter((a) => a.action === "wifi.deleted");
+    expect(gone).toHaveLength(1);
   });
 });
 

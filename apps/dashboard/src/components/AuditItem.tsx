@@ -1,3 +1,4 @@
+import { lazy, Suspense } from "react";
 import { Link } from "react-router";
 import IconUser from "~icons/solar/user-rounded-linear";
 import IconMonitor from "~icons/solar/monitor-linear";
@@ -5,6 +6,8 @@ import IconBolt from "~icons/solar/bolt-linear";
 import type { AuditEntry } from "../data/types";
 import { actionLabel } from "../lib/audit";
 import { RelativeTime } from "./RelativeTime";
+
+const PlainSummary = lazy(() => import("./PlainSummary"));
 
 const TARGET_ROUTES: Record<string, string> = {
   device: "/devices/",
@@ -70,7 +73,14 @@ export function AuditTimelineItem({ entry, showTarget = true }: { entry: AuditEn
             </>
           ) : null}
         </p>
-        {entry.summary ? <p className="dash-timeline__summary">{entry.summary}</p> : null}
+        {entry.summary ? (
+          <p className="dash-timeline__summary">
+            {/* The overview shows this item in its first load: the word list comes a moment later, the sentence as written is there at once. */}
+            <Suspense fallback={entry.summary}>
+              <PlainSummary entry={entry} />
+            </Suspense>
+          </p>
+        ) : null}
         <p className="dash-timeline__meta">
           <ActorLabel entry={entry} /> · <RelativeTime ms={entry.at} />
         </p>

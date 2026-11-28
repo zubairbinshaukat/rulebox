@@ -409,6 +409,10 @@ export default defineSchema({
     .index("by_org_group_name", ["orgId", "groupId", "name"])
     // Phase 5 Step 16: the PCs of one rollout ring in a group ("everyone" = value "everyone" or no value).
     .index("by_group_ring", ["groupId", "ring"])
+    // UI pass (enrollment plan 3.3): the PCs that joined with one enrollment code, newest first (`enrollmentCodes:progress`, <= 10).
+    // Starts with `orgId` (the plan said `["enrollmentTokenId"]`): the scoped database only lets a member range start with the org or a
+    // checked id field, and `orgId` first keeps the tenant guard unchanged. Creation order follows the last field.
+    .index("by_org_enrollment_token", ["orgId", "enrollmentTokenId"])
     // DEPRECATED: enrollment idempotency for devices enrolled before the
     // credentials split; removed with the narrow step.
     .index("by_secret_hash", ["secretHash"])
@@ -595,6 +599,8 @@ export default defineSchema({
     .index("by_org_archived", ["orgId", "archived"])
     // Phase 4b list sort and search (lib/listing.ts).
     .index("by_org_archived_name", ["orgId", "archived", "name"])
+    // UI pass (add-app D21): `apps:byWinget`, the duplicate notice of the review page (one row per read; websites have no value).
+    .index("by_org_winget", ["orgId", "desktop.wingetId"])
     .searchIndex("search_name", { searchField: "name", filterFields: ["orgId", "archived"] }),
 
   // tiny (Phase 6 Step 10, plan 4.2): one row per Rulebox-managed app WITH a vendor feed. Created, updated and deleted by
@@ -841,6 +847,8 @@ export default defineSchema({
     // "Newest first" means newest `updatedAt` (Step 17 review), not creation.
     .index("by_device_updated", ["deviceId", "updatedAt"])
     .index("by_device_app", ["deviceId", "appId"])
+    // UI pass 2026-11: the device page's failed-install count (`fleet:page`, newest failed results of one PC).
+    .index("by_device_state_updated", ["deviceId", "state", "updatedAt"])
     .index("by_app_state_updated", ["appId", "state", "updatedAt"])
     .index("by_org_state_updated", ["orgId", "state", "updatedAt"]),
 
@@ -972,6 +980,29 @@ export default defineSchema({
     .index("by_org_config", ["orgId", "config.groupId", "config.version"])
     // Step 19: the overview's "did not apply the lockdown policy" warning (refused, rolled back): a few rows, never a scan.
     .index("by_org_state", ["orgId", "state"]),
+
+  // grows (1 per PC that is in a group and not revoked). The small facts `lockdown:groupSync` counts ("PCs up to date: n of m"), copied
+  // from the PC's apply report, and the group's membership list: the screen reads one ~0.3 KB row per PC instead of the PC (~0.35 KB) and
+  // its full report (~1 to 2.5 KB). Written ONLY when a fact changes (`lib/lockdownSync.ts`); never part of the `devices` row (CLAUDE.md
+  // rule 4). Created at enrollment, re-pointed when the PC moves, deleted when it is revoked; filled for old PCs by
+  // `maintenance:backfillLockdownSync`.
+  deviceLockdownSync: defineTable({
+    orgId: v.id("organizations"),
+    deviceId: v.id("devices"),
+    groupId: v.id("groups"),
+    /** The group configuration version the PC applied; 0 = waiting (it has no usable report of this group yet). */
+    configVersion: v.number(),
+    /** Absent while waiting. */
+    state: v.optional(applyState),
+    /** Stored only when true: the machine layer left "Hide administrator accounts" off until Other user sign-in is confirmed. */
+    adminTilesSkipped: v.optional(v.literal(true)),
+    /** Stored only when true: Windows Home (the AppLocker or App Control layer is `unsupported`). */
+    reduced: v.optional(v.literal(true)),
+    updatedAt: v.number(),
+  })
+    .index("by_device", ["deviceId"])
+    // One group's PCs, newest configuration version first when read descending (`lockdown:groupSync`).
+    .index("by_org_group_version", ["orgId", "groupId", "configVersion"]),
 
   // grows (<= 1 per device per day, only non-zero days; 14-day retention)
   deviceSecurityDaily: defineTable({

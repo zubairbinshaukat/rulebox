@@ -76,6 +76,21 @@ rarely used options behind "Advanced" or a later step; prefer a good default ove
 action per screen; short labels with the (i) tooltip (section 4) for the explanation. The planning agents
 must review every field against this rule and say which ones they hide, move or remove.
 
+**Automate the complex things (owner, 2026-11-28, same priority as the rule above):** "we must automate complex
+things so that a normal user can easily get used to our dashboard." Never ask a normal user for technical input
+up front.
+- **Add Windows app:** no silent-install command/arguments input by default. Pick a sensible silent mode
+  automatically (by installer type, or from winget data) and show a short line such as "Installs silently" with
+  an (i) tooltip. The command field goes under "Advanced".
+- **Add website / web app:** replace the raw "allow subdomains" input with an interactive example: the site's
+  address with parts the user can click or toggle ("also allow mail.example.com, shop.example.com") and a live
+  preview of which addresses open and which are blocked. Same data model; only the way it is entered changes.
+- **Add a PC (enrollment):** a few simple, guided steps (1. Create code, 2. Run the installer on the PC, 3. Done,
+  the PC appears here). No list of prerequisites up front. Download, copy and QR are one click, technical details
+  go behind (i) or "Advanced", and the page shows live progress when the new PC appears.
+- **Every form:** list every input a normal user would not understand and say how it is automated, defaulted,
+  hidden or turned into an interactive picker (`docs/plans/ui-pass/audit.md`).
+
 ### 1. Generic table (one fix, every table) — `01`, `02`
 - Short values wrap mid-phrase: "0 of 1 used", "4 minutes ago", "in 56 minutes" break over two lines while
   wider columns have room. Short cells (counts, dates, states, badges) stay on one line; columns size to
@@ -126,6 +141,24 @@ must review every field against this rule and say which ones they hide, move or 
 - Every page on desktop is one long column of full-width sections. Use the width: multi-column grids of
   sections, two-column forms where fields are short, side-by-side summary + detail. Define page-layout
   rules (breakpoints, max content width, column counts) once and apply them to every screen.
+
+## After the dashboard UI pass ships (found 2026-11-28)
+
+- **Run the lockdown-sync backfill after deploy:** `npx convex run maintenance:backfillLockdownSync '{}'` once on dev and
+  once on production (pages of 100, idempotent). Until then "PCs up to date" counts only PCs that enrolled, moved or
+  reported since the deploy (a group with no rows falls back to counting its PCs as waiting).
+- **Delete `fleet:get`** one release after the server with `fleet:page` is deployed (no dashboard calls it any more): remove
+  it with its `ioBudgets`/`matrixRows` rows and move its Convex tests (`fleet.test.ts`, `lockdown.test.ts`,
+  `broadcasts.test.ts`, `displayMode.test.ts`, `keys.test.ts`) to `fleet:page`. Same for the deprecated `useDeviceDetail` seam hook.
+- **VM check of the popular apps** (`docs/plans/ui-pass/add-app.md` step 18): install each gallery desktop entry, confirm
+  the program path (Reader, SumatraPDF, Foxit, GIMP, Audacity and Notepad++ are unconfirmed), set `verified: true`; check
+  the website entries' domains (Teams likely needs more).
+- **Installer fingerprint limit:** `apps:fingerprintInstaller` streams up to 512 MiB in a Convex action; try a 100 MiB file
+  on the dev deployment and lower the cap if the action runs out of time or memory.
+- **`*.x` entries in the Staff App's built-in window** (add-app D28): the picker never writes `*.`, but saved `*.x` entries
+  may do nothing there; add a test in the shell and fix it.
+- **Messages to every PC:** the server targets one group or one PC; an "Everyone" target needs a server change.
+- **Demo seed:** give Pharmacy counter PCs in the Early and Everyone stages so the Rollout page demo shows all three.
 
 ## VM run A3 owner answers (2026-11-28)
 

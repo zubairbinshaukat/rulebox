@@ -55,6 +55,28 @@ describe("boot.js", () => {
     expect(view()).toBe("table");
   });
 
+  it("with no saved list view, a phone-wide viewport gets cards; a saved choice wins at every width", () => {
+    const view = () => document.documentElement.getAttribute("data-view");
+    const width = (phone: boolean) => vi.stubGlobal("matchMedia", (q: string) => ({ matches: phone && q === "(max-width: 599px)" }));
+    try {
+      width(true);
+      boot("/sign-in", false);
+      expect(view()).toBe("cards");
+      localStorage.setItem("rulebox.view", "table");
+      boot("/sign-in", false);
+      expect(view()).toBe("table");
+      width(false);
+      localStorage.setItem("rulebox.view", "cards");
+      boot("/sign-in", false);
+      expect(view()).toBe("cards");
+      localStorage.clear();
+      boot("/sign-in", false);
+      expect(view()).toBe("table");
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
   it("falls back to the table when storage is blocked", () => {
     const spy = vi.spyOn(Storage.prototype, "getItem").mockImplementation(() => {
       throw new Error("blocked");

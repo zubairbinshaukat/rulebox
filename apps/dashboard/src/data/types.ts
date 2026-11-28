@@ -251,6 +251,14 @@ export interface KeysScreen {
    * deployment holds another key.
    */
   signing: "ok" | "missing" | "mismatch";
+  /**
+   * Who holds the signing key: `keyring` = the organization's own key (created and kept by Rulebox on the server,
+   * `orgKeys.signing`), `deployment` = the key in the deployment's environment (`RULEBOX_POLICY_KEY`). The setup commands and
+   * the rotation exist only for `deployment` (the server refuses them for a keyring organization).
+   */
+  managed: "keyring" | "deployment";
+  /** The organization's own keys exist but this server cannot open them (`orgKeys.locked`): nothing new can be signed. */
+  keyringLocked: boolean;
   /** When a publish last failed for want of a key (null when it works). */
   publishFailedAt: number | null;
   /**
@@ -302,6 +310,11 @@ export interface AssignmentRow {
   appName: string;
   appKind: AppKind;
   hue?: number;
+  /**
+   * The app is archived: PCs no longer get it (the group page offers to unassign it). Filled by `groups:get` (`GroupDetail`); absent on the
+   * assignment rows of the app's own page (`AppDetail`), where the app's `archived` says it.
+   */
+  archived?: boolean;
   audience: Audience;
   pinnedTaskbar: boolean;
   pinnedDesktop: boolean;
@@ -325,6 +338,13 @@ export interface GroupDetail {
   displayMode?: DisplayChoice;
   webWindowCap?: number;
   webIdleCloseMin?: number;
+  /**
+   * UI pass (other-pages plan 1.3): the group's staged-rollout row (`groupRollouts`): on or off and the state; null = no row yet. Absent
+   * only on an older server, which the page treats as "unknown" (no rollout warning, the setup row shows a dash).
+   */
+  rollout?: { enabled: boolean; state: RolloutPhase } | null;
+  /** UI pass: since when the group's program rules are in trial run (ms), null = none are; absent on an older server. */
+  lockdownAuditSince?: number | null;
 }
 
 /** Phase 6 Step 19: an administrator's display-mode choice for a group or a PC; `auto` = none (the PC's memory decides). */
@@ -455,7 +475,79 @@ export interface DocVersion {
   reason: string;
 }
 
-/** `fleet:get` */
+/**
+ * `fleet:page` (UI pass 2026-11, `docs/plans/ui-pass/device-detail.md` 6.1): the header, the Overview and the Protection tab of the
+ * device page, in one subscription for the whole page. It replaces `fleet:get`, so there is no group list, no versions and no
+ * rollout revision here: the Settings tab has `useDeviceSettingsOptions`, the Activity tab `useDeviceVersions`, the Network tab
+ * `useDeviceNetwork`. The server always sends the display, lockdown and lock fields; the live mapper fills what an older server lacks.
+ */
+export interface DevicePage {
+  _id: Id;
+  name: string;
+  revision: number;
+  revoked: boolean;
+  kioskEnabled: boolean;
+  enrolledAt: number;
+  group: GroupOption | null;
+  /** This PC's own display choice and its group's (`auto` = none). */
+  displayMode: DisplayChoice;
+  groupDisplayMode: DisplayChoice;
+  presence: DevicePresence;
+  /** The report as `fleet:get` had it; `report.outOfSupport` is `outOfSupport` below. */
+  report: DeviceReport | null;
+  /** The summary's out-of-support flag (also `report.outOfSupport`; there is no report before the first one). */
+  outOfSupport: boolean;
+  /** The head's newest published version and plan state; null before the first publish. */
+  latestVersion: number | null;
+  planState: DevicePlanState | null;
+  flags: { noGroup: boolean; revoked: boolean; rotateCredential: boolean };
+  /** The PC's device lock (plan 4.17), or null. */
+  lock: DeviceLock | null;
+  /** The lockdown fields (formerly `DeviceLockdown`, read by the Protection tab). */
+  ring: Ring;
+  /** "Allow USB for this PC": until when (ms), or null. */
+  usbAllowUntil: number | null;
+  /** Physical protection as the agent reports it (plan 4.16); null until it reports. */
+  protection: SecurityPosture | null;
+  /** Does the agent know lockdown? null before its first report. */
+  lockdownCapable: boolean | null;
+  /** The PC's apply report (fixed codes only); null until it sends one. */
+  apply: ApplyReport | null;
+  /**
+   * Failed installs that still count (the PC's group still assigns the app, the app is not archived), from the newest 10 failed
+   * results: `count` of those, `more` = the range was full (show "n+"), `names` at most two app names (newest first).
+   */
+  failedInstalls: { count: number; more: boolean; names: string[] };
+  /** Wi-Fi networks and printers whose apply result on this PC is "failed" (counted from its apply report). */
+  network: { wifiFailed: number; printersFailed: number };
+}
+
+/** `fleet:deviceSettings` (Settings tab, subscribed only while it is open). */
+export interface DeviceSettingsOptions {
+  /** The group picker's options, sorted by name (`groups.by_org` `.take(500)`). */
+  groups: GroupOption[];
+  /** The PC's group's rollout revision (what `rollouts:setRings` wants back); 0 = no rollout row or no group. */
+  rolloutRevision: number;
+}
+
+/** The state of one Wi-Fi network or printer on one PC (the buckets of `networks.ts`: applied / failed / unsupported / the rest). */
+export type NetworkItemState = "working" | "failed" | "waiting" | "notSupported";
+
+/** `fleet:network` (Network tab, subscribed only while it is open): the items of the PC's group with their state on THIS PC. Never a passphrase, address, URL or hash. */
+export interface DeviceNetwork {
+  groupId: Id | null;
+  /** When the PC last sent its apply report; null before the first. */
+  reportedAt: number | null;
+  wifi: { _id: Id; name: string; state: NetworkItemState; detail: string | null }[];
+  printers: { _id: Id; name: string; isDefault: boolean; state: NetworkItemState; detail: string | null }[];
+  /** A driver without a result yet has state `pending`. */
+  drivers: { _id: Id; name: string; state: InstallState; detail: string | null }[];
+}
+
+/**
+ * `fleet:get`.
+ * @deprecated UI pass 2026-11: the device page reads `DevicePage` (`useDevicePage`). Kept until the page is rebuilt on it.
+ */
 export interface DeviceDetail {
   _id: Id;
   name: string;
@@ -475,26 +567,6 @@ export interface DeviceDetail {
   /** Phase 6 Step 19 (plan 4.14): this PC's own display choice and its group's. An older server has neither (`auto`). */
   displayMode?: DisplayChoice;
   groupDisplayMode?: DisplayChoice;
-}
-
-/**
- * The lockdown part of `fleet:get` (Phase 5 Step 19), read by the device page's Protection, Lockdown and USB cards through
- * `useDeviceLockdown` (the lockdown seam). Same query and arguments as the page itself, so it is the SAME subscription.
- */
-export interface DeviceLockdown {
-  /** The PC's rollout ring, its group and that group's rollout revision (what `rollouts:setRings` wants back). */
-  ring: Ring;
-  groupId: Id | null;
-  rolloutRevision: number;
-  revoked: boolean;
-  /** "Allow USB for this PC": until when (ms), or null. */
-  usbAllowUntil: number | null;
-  /** Physical protection as the agent reports it (plan 4.16); null until it reports. */
-  protection: SecurityPosture | null;
-  /** Does the agent know lockdown? null before its first report. */
-  lockdownCapable: boolean | null;
-  /** The PC's apply report (fixed codes only); null until it sends one. */
-  apply: ApplyReport | null;
 }
 
 /** `deviceLocks` of one PC: the text the lock view shows on every monitor. */
@@ -764,6 +836,24 @@ export interface InstallerInspection {
   productName?: string;
   companyName?: string;
   sizeBytes?: number;
+}
+
+/**
+ * `apps:fingerprintInstaller`: what the server found by downloading the linked installer once (never stored). `sha256` is of every
+ * byte (trust on first use: it pins the file for the PCs). `inspection` is `null` only when the type could not be read at all; today
+ * the server refuses such a file (`fingerprint_not_installer`) instead.
+ */
+export interface FingerprintResult {
+  sha256: string;
+  sizeBytes: number;
+  inspection: InstallerInspection | null;
+}
+
+/** `apps:byWinget`: the app that already carries a winget package id (the duplicate notice of the review page). */
+export interface AppByWinget {
+  _id: Id;
+  name: string;
+  archived: boolean;
 }
 
 /** How a program's version is kept (Phase 6): left alone, kept by its vendor's own updater, or by Rulebox from the vendor's feed. */
@@ -1150,6 +1240,46 @@ export interface EnrollmentInput {
   label?: string;
 }
 
+/** `enrollmentCodes:create` (an action): the code exists only in this answer. `tokenId` is the row id (not secret): what `useEnrollmentProgress` watches. */
+export interface EnrollmentCreated {
+  code: string;
+  expiresAt: number;
+  tokenId: Id;
+}
+
+/** One PC that joined with a code (`enrollmentCodes:progress`). `kioskPhase` is what the PC reported: absent until its first report. */
+export interface EnrollmentPc {
+  _id: Id;
+  name: string;
+  enrolledAt: number;
+  online: boolean;
+  kioskPhase?: KioskPhase;
+}
+
+/**
+ * `enrollmentCodes:progress` (viewer): what the "Add a PC" wizard shows while it waits for one code to be used. Never the code or its
+ * hash. The clock is the screen's: "expired" is `expiresAt <= now` (use `displayState` from `screens/enrollment/model`), not a field.
+ */
+export interface EnrollmentProgress {
+  label?: string;
+  groupId?: Id;
+  groupName?: string;
+  /** For a code made before totals existed: `usesLeft + joined`. */
+  usesTotal: number;
+  usesLeft: number;
+  expiresAt: number;
+  revoked: boolean;
+  /** PCs that joined with this code (exact, also above the 10 named in `pcs`). */
+  joined: number;
+  /** The newest 10 PCs that joined with this code, newest first. */
+  pcs: EnrollmentPc[];
+  /** The Rulebox build the organization chose (Settings, Updates); null = none set: the screen links to the releases page. */
+  download: { version: string; url: string; sizeBytes: number } | null;
+}
+
+/** `wifi:createWithPassphrase`: a new SECURED network with its password (`security` is never "open"; an open network is `saveWifi`). */
+export type WifiCreateInput = Omit<WifiInput, "id" | "expectedRevision"> & { passphrase: string };
+
 // ---------------------------------------------------------------- audit
 
 export type AuditActorType = "member" | "device" | "system";
@@ -1369,6 +1499,29 @@ export interface LockdownView {
   /** Open findings of the organization, capped: `openFindingsMore` = more than that. */
   openFindings: number;
   openFindingsMore: boolean;
+}
+
+/**
+ * `lockdown:groupSync`: "PCs up to date: n of m" for the group lockdown screen. A PC is up to date when it applied (or partly
+ * applied) the newest configuration version; `refused | failed | rolledBack` at that version are problems; the rest is waiting
+ * (`total - upToDate - problems`). `reduced` and `adminTilesPending` count the PCs that already have the newest settings.
+ */
+export interface LockdownSync {
+  /** PCs in the group, capped at 200 (`totalMore` = more than that). */
+  total: number;
+  totalMore: boolean;
+  upToDate: number;
+  problems: number;
+  /** At most three of the PCs that could not apply it, with the reason in fixed words. */
+  problemPcs: { deviceId: Id; name: string; state: ApplyState }[];
+  /** PCs where the employee program list or the Windows safety list is "not supported" (Windows Home). */
+  reduced: number;
+  /** PCs that left "Hide administrator accounts" off because Other user sign-in is not confirmed there. */
+  adminTilesPending: number;
+  /** The newest configuration version of the group; null = nothing was sent yet. */
+  newestVersion: number | null;
+  ringsOn: boolean;
+  rolloutState: RolloutPhase;
 }
 
 export type FindingStatus = "new" | "allowed" | "ignored";

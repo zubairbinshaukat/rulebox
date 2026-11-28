@@ -558,6 +558,20 @@ export const ROWS: Row[] = [
     call: (a) => a.mutation(api.ruleboxRelease.set, { expectedRevision: 0, release: null }),
     expect: { ...OWNER, foreign: "ok" },
   },
+  {
+    name: "ruleboxRelease:githubReleases",
+    // UI pass: owner, an UNLOCKED session (it only reads public data). GitHub is stubbed to answer no releases: no test touches the network.
+    call: async (a) => {
+      const real = globalThis.fetch;
+      globalThis.fetch = (async () => new Response("[]", { status: 200, headers: { "content-type": "application/json" } })) as typeof fetch;
+      try {
+        return await a.action(api.ruleboxRelease.githubReleases, {});
+      } finally {
+        globalThis.fetch = real;
+      }
+    },
+    expect: { ...OWNER, ownerStale: "ok", foreign: "ok" },
+  },
   { name: "groups:list", call: (a) => a.query(api.groups.list, {}), expect: { ...VIEWER, foreign: "ok" } },
   { name: "groups:page", call: (a) => a.query(api.groups.page, { paginationOpts: { numItems: 10, cursor: null } }), expect: { ...VIEWER, foreign: "ok" } },
   { name: "groups:get", call: (a, f) => a.query(api.groups.get, { groupId: f.groupId }), expect: { ...VIEWER, foreign: "not_found" } },
@@ -585,6 +599,8 @@ export const ROWS: Row[] = [
     call: (a) => a.query(api.enrollmentCodes.list, { paginationOpts: { numItems: 10, cursor: null }, nowMs: Date.now() }),
     expect: { ...VIEWER, foreign: "ok" }, // the foreign owner lists THEIR codes
   },
+  // UI pass (enrollment plan 3.3): the "Add a PC" wizard's live progress of one code (the fixture's code: no PC joined with it).
+  { name: "enrollmentCodes:progress", call: (a, f) => a.query(api.enrollmentCodes.progress, { tokenId: f.tokenId }), expect: { ...VIEWER, foreign: "not_found" } },
   {
     name: "enrollmentCodes:create",
     call: (a, f) => a.action(api.enrollmentCodes.create, { groupId: f.groupId, uses: 1, ttlMinutes: 60 }),
@@ -603,6 +619,11 @@ export const ROWS: Row[] = [
     expect: { ...VIEWER, foreign: "ok" }, // the foreign owner lists THEIR devices
   },
   { name: "fleet:get", call: (a, f) => a.query(api.fleet.get, { deviceId: f.deviceId }), expect: { ...VIEWER, foreign: "not_found" } },
+  // UI pass 2026-11: the device page's queries (docs/plans/ui-pass/device-detail.md 6.1).
+  { name: "fleet:page", call: (a, f) => a.query(api.fleet.page, { deviceId: f.deviceId }), expect: { ...VIEWER, foreign: "not_found" } },
+  { name: "fleet:deviceSettings", call: (a, f) => a.query(api.fleet.deviceSettings, { deviceId: f.deviceId }), expect: { ...VIEWER, foreign: "not_found" } },
+  { name: "fleet:versions", call: (a, f) => a.query(api.fleet.versions, { deviceId: f.deviceId }), expect: { ...VIEWER, foreign: "not_found" } },
+  { name: "fleet:network", call: (a, f) => a.query(api.fleet.network, { deviceId: f.deviceId }), expect: { ...VIEWER, foreign: "not_found" } },
   {
     name: "fleet:rename",
     // Unchanged name: no write, every allowed caller gets the same answer.
@@ -634,6 +655,7 @@ export const ROWS: Row[] = [
   },
   { name: "fleet:unlock", call: (a, f) => a.mutation(api.fleet.unlock, { deviceId: f.deviceId }), expect: { ...ADMIN_MAJOR, foreign: "not_found" } },
   { name: "broadcasts:list", call: (a) => a.query(api.broadcasts.list, { paginationOpts: { numItems: 25, cursor: null } }), expect: { ...VIEWER, foreign: "ok" } },
+  { name: "broadcasts:live", call: (a) => a.query(api.broadcasts.live, {}), expect: { ...VIEWER, foreign: "ok" } },
   {
     name: "broadcasts:send",
     call: (a, f) =>
@@ -692,6 +714,7 @@ export const ROWS: Row[] = [
   // `allow` asks for a hash rule of a finding that has no hash (refused the same way for every admin); `ignore` names a finding that is ignored
   // already (no write); `removeException` names an exception that does not exist; `allowUsb` ends a window that is not open (no write).
   { name: "lockdown:groupView", call: (a, f) => a.query(api.lockdown.groupView, { groupId: f.groupId }), expect: { ...VIEWER, foreign: "not_found" } },
+  { name: "lockdown:groupSync", call: (a, f) => a.query(api.lockdown.groupSync, { groupId: f.groupId }), expect: { ...VIEWER, foreign: "not_found" } },
   {
     name: "lockdown:findings",
     call: (a) => a.query(api.lockdown.findings, { status: "new", paginationOpts: { numItems: 25, cursor: null } }),
@@ -770,6 +793,7 @@ export const ROWS: Row[] = [
   },
   { name: "apps:get", call: (a, f) => a.query(api.apps.get, { appId: f.appId }), expect: { ...VIEWER, foreign: "not_found" } },
   { name: "apps:options", call: (a) => a.query(api.apps.options, {}), expect: { ...VIEWER, foreign: "ok" } },
+  { name: "apps:byWinget", call: (a) => a.query(api.apps.byWinget, { packageId: "VideoLAN.VLC" }), expect: { ...VIEWER, foreign: "ok" } },
   {
     name: "apps:createWeb",
     call: (a) => a.mutation(api.apps.createWeb, { name: unique(), url: "https://example.com", allowedDomains: [] }),
@@ -829,6 +853,23 @@ export const ROWS: Row[] = [
     name: "wifi:setPassphrase",
     call: (a, f) => a.action(api.wifi.setPassphrase, { id: f.wifiId, passphrase: "short", expectedRevision: 1 }),
     expect: { ...ADMIN_UNLOCKED, default: "invalid_argument", foreign: "not_found" },
+  },
+  // UI pass (enrollment plan 4.3): a new secured network WITH its password in one call. The matrix's organization has no sealing key (no
+  // master key is set here), so an allowed caller stops at `not_ready` before anything is written; another organization's caller names
+  // this organization's group and gets `not_found` first. The I/O test runs the complete call (`COMPLETE_CALLS`).
+  {
+    name: "wifi:createWithPassphrase",
+    call: (a, f) =>
+      a.action(api.wifi.createWithPassphrase, {
+        name: "Matrix",
+        ssid: "Matrix",
+        hidden: false,
+        security: "wpa2Personal",
+        autoConnect: true,
+        groupIds: [f.groupId],
+        passphrase: "correct horse battery",
+      }),
+    expect: { ...ADMIN_UNLOCKED, default: "not_ready", foreign: "not_found" },
   },
   // Phase 5 Step 14: printers (the printer as it is = no change; a fresh printer is deleted).
   { name: "networks:printerDetail", call: (a, f) => a.query(api.networks.printerDetail, { id: f.printerId }), expect: { ...VIEWER, foreign: "not_found" } },
@@ -964,10 +1005,21 @@ export const ROWS: Row[] = [
     call: (a) => a.action(api.apps.inspectInstaller, { url: "http://example.com/setup.exe" }),
     expect: { ...ADMIN_UNLOCKED, default: "invalid_argument" },
   },
+  {
+    name: "apps:fingerprintInstaller",
+    // An address that is not https is refused before anything is fetched or the rate limit is charged.
+    call: (a) => a.action(api.apps.fingerprintInstaller, { url: "http://example.com/setup.exe" }),
+    expect: { ...ADMIN_UNLOCKED, default: "invalid_argument" },
+  },
   { name: "fileHandlers:page", call: (a) => a.query(api.fileHandlers.page, { paginationOpts: { numItems: 10, cursor: null } }), expect: { ...VIEWER, foreign: "ok" } },
   {
     name: "fileHandlers:set",
     call: (a, f) => a.mutation(api.fileHandlers.set, { extension: ".pdf", appId: f.desktopAppId }),
+    expect: { ...ADMIN_UNLOCKED, foreign: "not_found" },
+  },
+  {
+    name: "fileHandlers:setMany",
+    call: (a, f) => a.mutation(api.fileHandlers.setMany, { extensions: [".odt", ".rtf"], appId: f.desktopAppId }),
     expect: { ...ADMIN_UNLOCKED, foreign: "not_found" },
   },
   {
@@ -1093,8 +1145,7 @@ export const ROWS: Row[] = [
     call: (a) => a.query(api.overview.failedInstallsPage, { paginationOpts: { numItems: 10, cursor: null } }),
     expect: { ...VIEWER, foreign: "ok" },
   },
-  { name: "audit:list", call: (a) => a.query(api.audit.list, { paginationOpts: { numItems: 10, cursor: null } }), expect: { ...VIEWER, foreign: "ok" } },
-  {
+  { name: "audit:list", call: (a) => a.query(api.audit.list, { paginationOpts: { numItems: 10, cursor: null } }), expect: { ...VIEWER, foreign: "ok" } },  {
     name: "audit:forTarget",
     call: (a, f) => a.query(api.audit.forTarget, { targetId: f.deviceId, paginationOpts: { numItems: 10, cursor: null } }),
     expect: { ...VIEWER, foreign: "ok" }, // the foreign owner asks for THEIR history of that id: empty

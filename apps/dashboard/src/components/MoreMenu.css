@@ -1,0 +1,31 @@
+/* MoreMenu (components/MoreMenu.tsx): the popup is portalled to <body> and placed by `placeFloating`, like the row menu. */
+.dash-more__menu {
+  position: fixed;
+  left: 0;
+  top: 0;
+  z-index: calc(var(--rb-z-banner) + 10);
+  box-sizing: border-box;
+  min-width: 200px;
+  max-width: calc(100vw - 16px);
+  overflow-y: auto;
+  border-radius: var(--rb-r-lg);
+  border: 1px solid var(--rb-line);
+  background: var(--rb-surface);
+  box-shadow: var(--rb-shadow-popover);
+}
+.dash-more__menu .rb-menu {
+  min-width: 0;
+}
+.dash-more__menu .rb-menu__item {
+  min-height: 40px;
+}
+@media (pointer: coarse) {
+  .dash-more__menu .rb-menu__item {
+    min-height: 44px;
+  }
+}
+.dash-more__sep {
+  height: 1px;
+  margin: 4px 8px;
+  background: var(--rb-line);
+}

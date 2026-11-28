@@ -58,6 +58,23 @@ describe("audit lists", () => {
     expect(result.current.status).toBe("loading");
   });
 
+  it("the When filter sends `since` (and nothing when there is none); the log still reads audit:list only", () => {
+    renderHook(() => liveAuditApi.useAuditScreen({ numItems: 10, cursor: null, since: 1_700_000_000_000 }));
+    expect(last("audit:list")?.args).toEqual({ paginationOpts: first, sort: { key: "at", dir: "desc" }, since: 1_700_000_000_000 });
+    expect(cx.requests.some((r) => r.name === "audit:forTarget")).toBe(false);
+    cx.requests = [];
+    renderHook(() => liveAuditApi.useAuditScreen({ numItems: 10, cursor: null }));
+    expect(last("audit:list")?.args).not.toHaveProperty("since");
+  });
+
+  it("'only this item' reads audit:forTarget (with `since` too) and does not subscribe to audit:list", () => {
+    cx.results["audit:forTarget"] = page([entry]);
+    const { result } = renderHook(() => liveAuditApi.useAuditScreen({ numItems: 25, cursor: null, targetId: "grp1", since: 5 }));
+    expect(last("audit:forTarget")?.args).toEqual({ targetId: "grp1", paginationOpts: { numItems: 25, cursor: null }, sort: { key: "at", dir: "desc" }, since: 5 });
+    expect(cx.requests.some((r) => r.name === "audit:list")).toBe(false);
+    expect(result.current).toMatchObject({ status: "ready", items: [entry] });
+  });
+
   it("nothing is asked until the session is confirmed", () => {
     cx.auth = { isLoading: true, isAuthenticated: false };
     renderHook(() => liveAuditApi.useAuditScreen({ numItems: 10, cursor: null }));

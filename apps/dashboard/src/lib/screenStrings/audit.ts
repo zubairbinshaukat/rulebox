@@ -1,9 +1,11 @@
-import type { AuditActorType } from "../../data/types";
-
 export const auditStrings = {
   title: "Audit log",
   lead: "Everything that changed, newest first.",
-  colTime: "Time",
+  /** The time zone's name is technical: it is in the (i), the line says "your local time". */
+  timesLocal: "Times are your local time.",
+  timeZoneInfoLabel: "About the time zone",
+  timeZoneInfo: (tz: string) => `Times use the time zone of this computer (${tz}).`,
+  colTime: "When",
   colActor: "Who",
   colAction: "What",
   colTarget: "On",
@@ -11,11 +13,19 @@ export const auditStrings = {
   emptyTitle: "Nothing logged yet",
   emptyBody: "Changes and device events will show up here.",
   print: "Print",
-  actorTypes: {
-    member: "Member",
-    device: "Device",
-    system: "System",
-  } satisfies Record<AuditActorType, string>,
+  printInfoLabel: "About printing",
+  printInfo: "Prints this page of the log. Choose 50 rows per page to print more.",
+  /** The When filter (`?since=`): the segmented control and its words. */
+  whenLabel: "Show changes from",
+  when: { all: "All time", today: "Today", "7d": "7 days", "30d": "30 days" },
+  /** The About filter (`?about=&label=`): a chip, and the small button on a row's "On" cell. */
+  about: "About",
+  aboutThis: "this item",
+  onlyThis: (name: string) => `Show only ${name}`,
+  clearAbout: (name: string) => `Stop showing only ${name}`,
+  emptyPeriodTitle: "Nothing in this period.",
+  emptyAboutTitle: (name: string, period: boolean) => (period ? `Nothing logged about ${name} in this period.` : `Nothing logged about ${name}.`),
+  clearFilters: "Clear filters",
   historyNone: "No history for this item yet.",
   actions: {
     "org.settingsChanged": "Settings changed",

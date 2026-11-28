@@ -261,7 +261,8 @@ export function productCode(value: string): Check {
 export function wingetId(value: string): Check {
   const t = value.trim();
   if (!t) return v.required;
-  return /^[A-Za-z0-9][A-Za-z0-9-]*(\.[A-Za-z0-9][A-Za-z0-9._-]*)+$/.test(t) && t.length <= 128 ? null : v.wingetId;
+  // Mirrors `wingetIdProblem` of convex/lib/appRules.ts; "+" is allowed (`Notepad++.Notepad++` is a real package).
+  return /^[A-Za-z0-9][A-Za-z0-9+-]*(\.[A-Za-z0-9][A-Za-z0-9._+-]*)+$/.test(t) && t.length <= 128 ? null : v.wingetId;
 }
 
 /**

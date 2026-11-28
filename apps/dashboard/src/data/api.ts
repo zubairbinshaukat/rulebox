@@ -6,6 +6,7 @@
 import type {
   BroadcastInput,
   BroadcastRow,
+  AppByWinget,
   AppDetail,
   AppOption,
   Audience,
@@ -13,10 +14,12 @@ import type {
   DesktopAppInput,
   DeviceDetail,
   DeviceLiveness,
+  DevicePage,
   EmployeeDetail,
   EmployeeInput,
   FailedInstallRow,
   FeedCheckResult,
+  FingerprintResult,
   DisplayChoice,
   GroupDetail,
   GroupDisplayInput,
@@ -44,6 +47,7 @@ import type {
   WebAppInput,
   WebMeta,
   WebPermissions,
+  WifiCreateInput,
   WifiDetail,
   WifiInput,
   WingetResolved,
@@ -81,7 +85,16 @@ export interface DataApi {
 
   // ---- devices (fleet:*). The two paginated lists (`useDevicesScreen`,
   // `useDeviceInstalls`) are in their own seam, `./devices`.
+  /**
+   * @deprecated UI pass 2026-11: `fleet:get`, replaced by `useDevicePage`. Stays until the device screen is rebuilt on the page
+   * query; then it is removed with the query.
+   */
   useDeviceDetail: (deviceId: Id) => QueryState<DeviceDetail>;
+  /**
+   * `fleet:page`: the device page's header, Overview and Protection tab, subscribed for the whole page (the other tabs have
+   * their own queries in `./devices`). `not_found` for a foreign or unknown id. Call it next to `useDeviceLiveness`.
+   */
+  useDevicePage: (deviceId: Id) => QueryState<DevicePage>;
   /** `fleet:liveness`: subscribe only while the detail page is open (plan 4.9). */
   useDeviceLiveness: (deviceId: Id) => QueryState<DeviceLiveness>;
   /** `fleet:watch` (viewer): the page calls it on open and every 4 minutes while visible. */
@@ -105,6 +118,11 @@ export interface DataApi {
   // ---- broadcasts (Phase 5 Step 15, `convex/broadcasts.ts`).
   /** `broadcasts:list`: one page, newest first; sort key `sent` only, no search, the pager shows Previous / Next. */
   useBroadcastsPage: (query: ListQuery) => ServerList<BroadcastRow>;
+  /**
+   * `broadcasts:live` (viewer): the messages that may still be showing on the PCs, newest sent first (<= 42 rows, never cancelled ones). No
+   * clock is read on the server: an expired row (`expiresAt` in the past) is still returned and the screen hides it with its own clock.
+   */
+  useLiveBroadcasts: () => QueryState<BroadcastRow[]>;
   /** `broadcasts:send` (admin): a group or one PC; resolves to the new id and how many PCs it was aimed at. */
   useSendBroadcast: Mutation<BroadcastInput, { id: Id; targetCount: number }>;
   /** `broadcasts:cancel` (admin). */
@@ -202,6 +220,17 @@ export interface DataApi {
    * or `inspect_not_installer`.
    */
   useInspectInstaller: Mutation<{ url: string }, InstallerInspection>;
+  /**
+   * `apps:fingerprintInstaller` (admin action, 10 an hour per organization): the server downloads the installer at `url` once (https,
+   * public hosts, at most 512 MiB, never stored), hashes it and says what it is. The refusal's `detail` is `fingerprint_too_large`
+   * (use `useInspectInstaller` + the local file check), `fingerprint_blocked`, `fingerprint_failed` or `fingerprint_not_installer`.
+   */
+  useFingerprintInstaller: Mutation<{ url: string }, FingerprintResult>;
+  /**
+   * `apps:byWinget` (viewer): the app that already has that winget package id, an archived one too, else `null`. One indexed row.
+   * `"skip"` subscribes to nothing (state `loading`).
+   */
+  useAppByWinget: (packageId: string | "skip") => QueryState<AppByWinget | null>;
   /** `apps:saveIcon`: stores the PNG `useFetchWebMeta` previewed (its `data:` URL), after the app is saved. */
   useSaveAppIcon: Mutation<{ appId: Id; png: string }>;
 
@@ -219,6 +248,16 @@ export interface DataApi {
    * answer ever returns it. Resolves to the revision to send next.
    */
   useSetWifiPassphrase: Mutation<{ id: Id; passphrase: string; expectedRevision: number }, { revision: number }>;
+  /**
+   * `wifi:createWithPassphrase` (admin ACTION; UI pass): a NEW secured network together with its password, in one call and one
+   * publish (no PC ever sees the network without its password). `security` must not be "open": an open network has no password
+   * and is made with `useSaveWifi`. Resolves to the id and revision 2. Errors as `useSaveWifi` and `useSetWifiPassphrase`:
+   * `invalid_argument` (field `name` | `ssid` | `groupIds` | `passphrase` + detail `length` | `characters`, field `security` detail
+   * `open`), `not_found` (a group), `too_large` (detail `wifi`: 50 networks), `not_ready` (detail `sealing_key`), `rate_limited`.
+   * A failure after the network was made removes it again: nothing is left to clean up. The password lives only in the caller's
+   * form state until the call returns (never in a query, toast, error sentence, storage or URL).
+   */
+  useCreateWifiWithPassphrase: Mutation<WifiCreateInput, { id: Id; revision: number }>;
   /** `networks:printerDetail` (viewer) with the apply counts, computed on demand. A NEW printer has no detail: its screen builds the blank form itself. */
   usePrinterDetail: (id: Id) => QueryState<PrinterDetail>;
   /** `networks:savePrinter` (admin): create, or update with `expectedRevision`. Resolves to the id and the revision to send next. */
@@ -240,6 +279,8 @@ export interface DataApi {
   // ---- file types
   // (the rules table, `useFileTypesPage`, is in the apps seam, `./apps`; the program picker is `useAppOptions`)
   useSetFileHandler: Mutation<{ extension: string; appId: Id }>;
+  /** `fileHandlers:setMany` (admin): up to 20 extensions to one program in ONE call, so one chip ("Pictures") is one configuration version per group. A denied extension refuses the whole call. */
+  useSetFileHandlers: Mutation<{ extensions: string[]; appId: Id }>;
   useRemoveFileHandler: Mutation<{ handlerId: Id }>;
 
   // ---- enrollment codes: their own seam (`enrollment/api.ts`), kept out of the first load.

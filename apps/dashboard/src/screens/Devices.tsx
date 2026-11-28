@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router";
-import { Button, Pill, Select } from "@rulebox/ui";
+import { Button, Pill, SearchSelect } from "@rulebox/ui";
 import IconMonitor from "~icons/solar/monitor-linear";
 import IconAdd from "~icons/solar/add-square-linear";
 import IconRefresh from "~icons/solar/refresh-linear";
@@ -16,6 +16,7 @@ import { RelativeTime } from "../components/RelativeTime";
 import { RoleGate } from "../components/RoleGate";
 import { ServerTable } from "../components/ServerTable";
 import { SkeletonRows } from "../components/Skeleton";
+import { TruncateLazy as Truncate } from "../components/TruncateLazy";
 import { DeviceOnline, KioskCell, PlanStateBadge, PolicyCell } from "../components/DeviceCells";
 import { messageFor } from "../lib/errors";
 import { useListPaging, useListView, type ListConfig } from "../lib/listView";
@@ -32,21 +33,36 @@ const CHECK_WATCH_MS = 60_000;
 /** `fleet:list`: newest first by default; the name is the other index-backed order. A search is ordered by relevance. */
 const LIST: ListConfig = { sorts: ["created", "name"], defaultSort: { key: "created", dir: "desc" }, filters: ["group"] };
 
+/** The Windows line of a card: "Windows build 22631 · Agent 1.4.2". Technical, so it is the last thing on the card. */
+function windowsDetail(d: DeviceRow): string | null {
+  const build = d.report?.osBuild;
+  return build ? s.windowsDetail(build, d.report?.agentVersion) : null;
+}
+
+/** What needs a look on a card (the table shows each of these inside the cell it belongs to): over the plan, suspended, out of support. */
+const hasAlert = (d: DeviceRow) => d.planState === "overLimit" || d.planState === "suspended" || d.report?.outOfSupport === true;
+
 function columns(now: number): Column<DeviceRow>[] {
   return [
     {
       key: "name",
       header: s.colName,
       primary: true,
+      type: "name",
+      maxWidth: 280,
       sortable: true,
       cell: (d) => (
         <span className="dash-cell-stack">
-          <Link className="dash-link dash-link--plain dash-truncate" to={`/devices/${d._id}`} title={d.name}>
-            {d.name}
+          <Link className="dash-link dash-link--plain" to={`/devices/${d._id}`}>
+            <Truncate full={d.name} maxWidth={280}>
+              {d.name}
+            </Truncate>
           </Link>
           {d.groupName ? (
-            <span className="dash-cell-sub" title={d.groupName}>
-              {d.groupName}
+            <span className="dash-cell-sub">
+              <Truncate full={d.groupName} maxWidth={280}>
+                {d.groupName}
+              </Truncate>
             </span>
           ) : (
             <span>
@@ -55,15 +71,59 @@ function columns(now: number): Column<DeviceRow>[] {
           )}
         </span>
       ),
+      // The card puts the group under the name by itself (the next column).
+      cardCell: (d) => (
+        <Link className="dash-link dash-link--plain" to={`/devices/${d._id}`}>
+          {d.name}
+        </Link>
+      ),
+    },
+    // Card only: the table already shows the group under the name.
+    {
+      key: "group",
+      header: s.colGroup,
+      table: false,
+      card: "subtitle",
+      cell: (d) => (d.groupName ? <span className="dash-truncate">{d.groupName}</span> : <Pill tone="warning">{s.noGroup}</Pill>),
+    },
+    { key: "status", header: s.colStatus, type: "short", card: "status", cell: (d) => <DeviceOnline presence={d.presence} now={now} /> },
+    { key: "kiosk", header: s.colKiosk, type: "badge", card: "status", cell: (d) => <KioskCell row={d} /> },
+    // Card only: "Over limit", "Suspended" and "Out of support" sit in the Policy and Windows cells of the table.
+    {
+      key: "alerts",
+      header: s.colAlerts,
+      table: false,
+      card: "status",
+      isEmpty: (d) => !hasAlert(d),
+      cell: (d) => (
+        <>
+          <PlanStateBadge planState={d.planState} />
+          {d.report?.outOfSupport ? <Pill tone="danger">{s.outOfSupport}</Pill> : null}
+        </>
+      ),
     },
     {
-      key: "status",
-      header: s.colStatus,
-      cell: (d) => <DeviceOnline presence={d.presence} now={now} />,
+      key: "policy",
+      header: s.colPolicy,
+      type: "badge",
+      card: "fact",
+      cell: (d) => (
+        <span className="dash-cell-stack">
+          <PolicyCell applied={d.report?.appliedVersion} latest={d.latestVersion} />
+          <PlanStateBadge planState={d.planState} />
+        </span>
+      ),
+      cardCell: (d) => <PolicyCell applied={d.report?.appliedVersion} latest={d.latestVersion} />,
     },
+    { key: "created", header: s.colEnrolled, type: "date", card: "fact", sortable: true, sortDefaultDir: "desc", cell: (d) => <RelativeTime ms={d.enrolledAt} /> },
+    // Technical, so last: the build and the agent version are for support, not for deciding anything.
     {
       key: "windows",
       header: s.colWindows,
+      type: "mono",
+      maxWidth: 240,
+      card: "detail",
+      cardLabel: false,
       isEmpty: (d) => !d.report?.osBuild,
       cell: (d) =>
         d.report?.osBuild ? (
@@ -79,22 +139,10 @@ function columns(now: number): Column<DeviceRow>[] {
         ) : (
           <span className="dash-muted">—</span>
         ),
-    },
-    { key: "kiosk", header: s.colKiosk, cell: (d) => <KioskCell row={d} /> },
-    { key: "created", header: s.colEnrolled, sortable: true, sortDefaultDir: "desc", cell: (d) => <RelativeTime ms={d.enrolledAt} /> },
-    {
-      key: "policy",
-      header: s.colPolicy,
-      cell: (d) => (
-        <span className="dash-cell-stack">
-          <PolicyCell applied={d.report?.appliedVersion} latest={d.latestVersion} />
-          <PlanStateBadge planState={d.planState} />
-        </span>
-      ),
+      cardCell: windowsDetail,
     },
   ];
-}
-/** Asks the visible PCs (the first 50, and the label says so) to call in; `fleet:checkNow` allows one request a minute per organization. */
+}/** Asks the visible PCs (the first 50, and the label says so) to call in; `fleet:checkNow` allows one request a minute per organization. */
 function CheckNowButton({ ids, onStarted }: { ids: string[]; onStarted: (checkId: string) => void }) {
   const checkNow = useCheckNow();
   const toast = useToast();
@@ -195,26 +243,35 @@ function DeviceList({ groupId, groups }: { groupId: string; groups: QueryState<G
   const canCheck = useCan("admin");
   const rows = devices.status === "ready" ? devices.items : [];
 
+  // Groups can be many: a searchable list, not a plain drop-down.
   const filters = (
     <>
       <label className="dash-sr" htmlFor="device-group-filter">
         {s.groupFilter}
       </label>
-      <Select id="device-group-filter" compact value={groupId} onChange={(e) => paging.view.setFilter("group", e.target.value || null)}>
-        <option value="">{s.allGroups}</option>
-        <option value={NO_GROUP_FILTER}>{s.noGroupFilter}</option>
-        {groups.status === "ready" ? groups.data.map((g) => <option key={g._id} value={g._id}>{g.name}</option>) : null}
-      </Select>
+      <SearchSelect
+        id="device-group-filter"
+        compact
+        value={groupId}
+        onChange={(next) => paging.view.setFilter("group", next || null)}
+        options={[
+          { value: "", label: s.allGroups },
+          { value: NO_GROUP_FILTER, label: s.noGroupFilter },
+          ...(groups.status === "ready" ? groups.data.map((g) => ({ value: g._id, label: g.name })) : []),
+        ]}
+        searchPlaceholder={s.groupSearch}
+        emptyText={s.groupNoMatch}
+      />
     </>
   );
+  // "Check now" belongs to the list, not to the page: it asks the PCs shown here.
+  const checkNow =
+    canCheck && devices.status === "ready" && rows.length > 0 ? (
+      <CheckNowButton ids={rows.filter((d) => !d.revoked).map((d) => d._id)} onStarted={setCheckId} />
+    ) : undefined;
 
   return (
     <>
-      {canCheck && devices.status === "ready" && rows.length > 0 ? (
-        <div className="dash-row" style={{ justifyContent: "flex-end" }}>
-          <CheckNowButton ids={rows.filter((d) => !d.revoked).map((d) => d._id)} onStarted={setCheckId} />
-        </div>
-      ) : null}
       {checkId ? <CheckResultNotice key={checkId} checkId={checkId} onEnd={endCheck} /> : null}
       <ServerTable
         framed
@@ -227,6 +284,7 @@ function DeviceList({ groupId, groups }: { groupId: string; groups: QueryState<G
         search={{ label: s.searchLabel, placeholder: s.searchPlaceholder }}
         sortByRelevanceWhenSearching
         filters={filters}
+        toolbarEnd={checkNow}
         isDim={(d) => d.revoked}
         onRowClick={(d) => navigate(`/devices/${d._id}`)}
         empty={

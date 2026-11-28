@@ -18,4 +18,10 @@ export const employeesStrings = {
   noMatchTitle: "No employees match",
   noMatchBody: "Try another name or username.",
   moreGroups: "more",
+  /** The pill after the first groups of an employee: "+3 more", "+ more" when the list itself was cut. */
+  moreGroupsN: (k: number, cut: boolean) => (k > 0 ? `+${k}${cut ? "+" : ""} more` : "+ more"),
+  /** A list ordered by the day the employee was added: it has no column of its own. */
+  newestFirst: "Newest first",
+  groupSearch: "Search groups",
+  groupNoMatch: "No group with that name",
 } as const;

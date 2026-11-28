@@ -1,7 +1,7 @@
-import { describe, expect, it } from "vitest";
-import { renderHook, waitFor } from "@testing-library/react";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { cleanup, renderHook, waitFor } from "@testing-library/react";
 import { demoApi } from "./hooks";
-import { demoLockdownApi } from "./lockdown";
+import { demoLockdownApi, lockdownSyncOf } from "./lockdown";
 import { db, resetDemo, setRoleOverride, setSession } from "./store";
 import { DEFAULT_LOCKDOWN_SETTINGS } from "../types";
 import { LAYER_STATES, REFUSAL_CODES, layerDetailText, refusalText } from "../../screens/lockdown/codes";
@@ -63,12 +63,13 @@ describe("demo fixtures", () => {
   it("the device page carries the ring, the apply report and the protection", async () => {
     start();
     const d = db().devices.find((x) => x.name === "COUNTER-02")!;
-    const detail = (await ready(renderHook(() => demoLockdownApi.useDeviceLockdown(d._id)).result)).data;
-    expect(detail).toMatchObject({ ring: "pilot", groupId: d.groupId, revoked: false, rolloutRevision: 3, usbAllowUntil: null, lockdownCapable: true });
+    const detail = (await ready(renderHook(() => demoApi.useDevicePage(d._id)).result)).data;
+    expect(detail).toMatchObject({ ring: "pilot", group: { _id: d.groupId }, revoked: false, usbAllowUntil: null, lockdownCapable: true });
+    expect("rolloutRevision" in detail).toBe(false);
     expect(detail.apply?.layers.performance).toEqual({ mode: "on", state: "partial", detail: "no_printing_ignored" });
     expect(detail.protection?.bitLocker).toBe("off");
     const old = db().devices.find((x) => x.name === "LOANER-03")!;
-    expect((await ready(renderHook(() => demoLockdownApi.useDeviceLockdown(old._id)).result)).data.lockdownCapable).toBe(false);
+    expect((await ready(renderHook(() => demoApi.useDevicePage(old._id)).result)).data.lockdownCapable).toBe(false);
   });
 });
 
@@ -111,6 +112,88 @@ describe("demo lockdown settings", () => {
     expect(await save({ groupId: g._id, settings, expectedRevision: 1 })).toEqual({ revision: 2 });
     expect(db().lockdown.get(g._id)?.auditSince).toBeNull();
     expect(db().audit.at(-1)?.action).toBe("lockdown.layerModeChanged");
+  });
+});
+
+describe("demo PCs up to date (lockdown:groupSync)", () => {
+  afterEach(() => {
+    cleanup();
+    vi.useRealTimers();
+  });
+
+  it("Pharmacy counter: 2 of 3 up to date, one PC could not apply it, rollout rings on", async () => {
+    start();
+    const g = group("Pharmacy counter");
+    const sync = (await ready(renderHook(() => demoLockdownApi.useLockdownSync(g._id)).result)).data;
+    expect(sync).toEqual({
+      total: 3,
+      totalMore: false,
+      upToDate: 2,
+      problems: 1,
+      problemPcs: [{ deviceId: db().devices.find((d) => d.name === "COUNTER-03")!._id, name: "COUNTER-03", state: "failed" }],
+      reduced: 0,
+      adminTilesPending: 0,
+      newestVersion: 8,
+      ringsOn: true,
+      rolloutState: "rolling",
+    });
+  });
+
+  it("a group without a configuration version yet is not sent; a viewer can read; the cap is 200 PCs", async () => {
+    start();
+    const night = db().groups.find((x) => x.name.startsWith("Warehouse"))!;
+    expect((await ready(renderHook(() => demoLockdownApi.useLockdownSync(night._id)).result)).data).toMatchObject({ total: 2, upToDate: 0, problems: 0, newestVersion: null, ringsOn: false, rolloutState: "idle" });
+    setRoleOverride("viewer");
+    expect((await ready(renderHook(() => demoLockdownApi.useLockdownSync(group("Back office")._id)).result)).data).toMatchObject({ newestVersion: 4, rolloutState: "halted" });
+    setRoleOverride(null);
+    expect(lockdownSyncOf(db(), group("Front desk")._id)).toMatchObject({ total: 200, totalMore: true });
+  });
+
+  it("counts Windows Home PCs and the admin-accounts warning among the PCs that have the newest settings", () => {
+    start();
+    expect(lockdownSyncOf(db(), group("Back office")._id)).toMatchObject({ reduced: 1, adminTilesPending: 0 });
+    const front = lockdownSyncOf(db(), group("Front desk")._id);
+    // The PC that applied everything but "hide administrator accounts", and the PC that refused the whole policy for that reason.
+    expect(front.adminTilesPending).toBe(2);
+    expect(front.problems).toBeGreaterThan(3);
+    expect(front.problemPcs).toHaveLength(3);
+  });
+
+  it("a save makes the counter go up one PC at a time; a PC that failed stays waiting; rings on: only the pilot ring follows", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    start();
+    const g = group("Pharmacy counter");
+    const save = renderHook(() => demoLockdownApi.useSaveLockdown()).result.current;
+    const row = db().lockdown.get(g._id);
+    const settings = { ...(row?.settings ?? DEFAULT_LOCKDOWN_SETTINGS), accessibilityTools: !(row?.settings ?? DEFAULT_LOCKDOWN_SETTINGS).accessibilityTools };
+    const saved = save({ groupId: g._id, settings, expectedRevision: row?.revision ?? 0 });
+    await vi.advanceTimersByTimeAsync(1000);
+    await saved;
+    // A new version (9) went to the pilot ring; nobody has it yet.
+    expect(lockdownSyncOf(db(), g._id)).toMatchObject({ newestVersion: 9, upToDate: 0, problems: 0, total: 3 });
+    await vi.advanceTimersByTimeAsync(1200);
+    expect(lockdownSyncOf(db(), g._id).upToDate).toBe(1);
+    await vi.advanceTimersByTimeAsync(1200);
+    expect(lockdownSyncOf(db(), g._id).upToDate).toBe(2);
+    await vi.advanceTimersByTimeAsync(10_000);
+    // COUNTER-03 failed before: it is not picked up again (it waits), and the chain has ended.
+    expect(lockdownSyncOf(db(), g._id)).toMatchObject({ upToDate: 2, problems: 0 });
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it("the first save of a group that never sent anything creates its first version; resetting the demo stops the catch-up", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    start();
+    // "Back office" has PCs and rings on; "Training room" has none: use a group with PCs and no rollout row.
+    const night = db().groups.find((x) => x.name.startsWith("Warehouse"))!;
+    const save = renderHook(() => demoLockdownApi.useSaveLockdown()).result.current;
+    const saved = save({ groupId: night._id, settings: { ...DEFAULT_LOCKDOWN_SETTINGS, accessibilityTools: true }, expectedRevision: db().lockdown.get(night._id)?.revision ?? 0 });
+    await vi.advanceTimersByTimeAsync(1000);
+    await saved;
+    expect(lockdownSyncOf(db(), night._id)).toMatchObject({ newestVersion: 1, ringsOn: false, upToDate: 0, total: 2 });
+    expect(vi.getTimerCount()).toBeGreaterThan(0);
+    resetDemo();
+    expect(vi.getTimerCount()).toBe(0);
   });
 });
 

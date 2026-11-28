@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { settleApp } from "./apps/testKit";
 import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { MemoryRouter, Route, Routes, useLocation } from "react-router";
 import { getFunctionName, type FunctionReference } from "convex/server";
@@ -7,6 +8,7 @@ import type { Me } from "../data/types";
 import { MeContext } from "../lib/member";
 import { VIEW_KEY } from "../lib/viewMode";
 import { strings } from "../lib/strings";
+import { pickOption, selectedText } from "../test/select";
 import { appEditStrings } from "../lib/screenStrings/appEdit";
 import { appsStrings } from "../lib/screenStrings/apps";
 import { auditStrings } from "../lib/screenStrings/audit";
@@ -90,8 +92,8 @@ function Where() {
 }
 const where = () => screen.getByTestId("where").textContent;
 
-function ui(node: ReactNode, path: string, role: Me["role"] = "admin") {
-  return render(
+async function ui(node: ReactNode, path: string, role: Me["role"] = "admin") {
+  const result = render(
     <ToastProvider>
       <MeContext.Provider value={{ ...me, role }}>
         <MemoryRouter initialEntries={[path]}>
@@ -110,6 +112,8 @@ function ui(node: ReactNode, path: string, role: Me["role"] = "admin") {
       </MeContext.Provider>
     </ToastProvider>,
   );
+  await settleApp();
+  return result;
 }
 
 beforeEach(() => {
@@ -145,21 +149,21 @@ const enter = (label: string, text: string) => {
 const header = (name: string) => screen.getByRole("columnheader", { name: new RegExp(`^${name}`) });
 
 describe("Apps: URL state, sort, search, pager", () => {
-  it("reads page size, sort and filters from the URL; invalid values fall back silently", () => {
+  it("reads page size, sort and filters from the URL; invalid values fall back silently", async () => {
     cx.results["apps:list"] = page(apps(3));
-    ui(<Apps />, "/apps?size=25&sort=name&dir=desc");
+    await ui(<Apps />, "/apps?size=25&sort=name&dir=desc");
     expect(last("apps:list")).toEqual({ archived: false, paginationOpts: { numItems: 25, cursor: null }, sort: { key: "name", dir: "desc" } });
     expect(header(appsStrings.colName).getAttribute("aria-sort")).toBe("descending");
     cleanup();
     cx.requests = [];
-    ui(<Apps />, "/apps?size=7&sort=bogus&dir=up&page=-3&archived=maybe");
+    await ui(<Apps />, "/apps?size=7&sort=bogus&dir=up&page=-3&archived=maybe");
     expect(last("apps:list")).toEqual({ archived: false, paginationOpts: { numItems: 10, cursor: null }, sort: { key: "created", dir: "desc" } });
     expect(header(appsStrings.colAdded).getAttribute("aria-sort")).toBe("descending");
   });
 
-  it("clicking a sort header sends that sort to the server, toggles it, and starts over on page 1", () => {
+  it("clicking a sort header sends that sort to the server, toggles it, and starts over on page 1", async () => {
     cx.results["apps:list"] = page(apps(10), { isDone: false, continueCursor: "CUR1" });
-    ui(<Apps />, "/apps");
+    await ui(<Apps />, "/apps");
     fireEvent.click(screen.getByRole("button", { name: strings.pager.next }));
     expect(where()).toBe("/apps?page=2");
     expect(last("apps:list")).toMatchObject({ paginationOpts: { numItems: 10, cursor: "CUR1" } });
@@ -176,9 +180,9 @@ describe("Apps: URL state, sort, search, pager", () => {
     expect(last("apps:list")).toMatchObject({ sort: { key: "created", dir: "desc" } });
   });
 
-  it("typing does not search; Enter does (and so does the clear button); the text is in the URL", () => {
+  it("typing does not search; Enter does (and so does the clear button); the text is in the URL", async () => {
     cx.results["apps:list"] = page(apps(2));
-    ui(<Apps />, "/apps");
+    await ui(<Apps />, "/apps");
     const before = cx.requests.filter((r) => r.name === "apps:list").length;
     fireEvent.change(searchBox(appsStrings.searchLabel), { target: { value: "pos" } });
     expect(cx.requests.filter((r) => r.name === "apps:list").length).toBe(before);
@@ -195,20 +199,20 @@ describe("Apps: URL state, sort, search, pager", () => {
     expect(last("apps:list")).not.toHaveProperty("search");
   });
 
-  it("a search restored from the URL shows in the box; no result says so", () => {
+  it("a search restored from the URL shows in the box; no result says so", async () => {
     cx.results["apps:list"] = page([]);
-    ui(<Apps />, "/apps?q=zzz");
+    await ui(<Apps />, "/apps?q=zzz");
     expect(searchBox(appsStrings.searchLabel).value).toBe("zzz");
     expect(screen.getByText(strings.table.noResults("zzz"))).toBeTruthy();
   });
 
-  it("with a total: records, page count, the last page is the opposite order with total mod page size rows", () => {
+  it("with a total: records, page count, the last page is the opposite order with total mod page size rows", async () => {
     cx.results["apps:count"] = { total: 23 };
     cx.results["apps:list"] = (args: Record<string, unknown>) => {
       const { numItems, cursor } = args.paginationOpts as { numItems: number; cursor: string | null };
       return page(apps(numItems), { isDone: cursor === null && numItems === 10 ? false : true, continueCursor: "CUR" });
     };
-    ui(<Apps />, "/apps");
+    await ui(<Apps />, "/apps");
     expect(screen.getByText(`${strings.pager.records(23)} · ${strings.pager.pageOf(1, 3)}`)).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: strings.pager.goTo(3) }));
     expect(where()).toBe("/apps?page=3");
@@ -222,20 +226,20 @@ describe("Apps: URL state, sort, search, pager", () => {
   it("a refresh on the last page (a total is known) reopens it; a page that cannot be reached falls back to page 1", async () => {
     cx.results["apps:count"] = { total: 23 };
     cx.results["apps:list"] = page(apps(3));
-    ui(<Apps />, "/apps?page=3");
+    await ui(<Apps />, "/apps?page=3");
     await waitFor(() => expect(last("apps:list")).toMatchObject({ paginationOpts: { numItems: 3, cursor: null }, sort: { key: "created", dir: "asc" } }));
     expect(where()).toBe("/apps?page=3");
     cleanup();
     cx.requests = [];
-    ui(<Apps />, "/apps?page=2");
+    await ui(<Apps />, "/apps?page=2");
     await waitFor(() => expect(where()).toBe("/apps"));
     expect(last("apps:list")).toMatchObject({ paginationOpts: { numItems: 10, cursor: null } });
   });
 
-  it("without a total (archived tab) the pager shows Page N only and Next/Previous", () => {
+  it("without a total (archived tab) the pager shows Page N only and Next/Previous", async () => {
     cx.results["apps:count"] = { total: null };
     cx.results["apps:list"] = page(apps(10), { isDone: false, continueCursor: "CUR1" });
-    ui(<Apps />, "/apps?archived=1");
+    await ui(<Apps />, "/apps?archived=1");
     expect(screen.getByText(strings.pager.page(1))).toBeTruthy();
     expect(screen.queryByText(/records/)).toBeNull();
     expect(last("apps:list")).toMatchObject({ archived: true });
@@ -246,12 +250,13 @@ describe("Apps: URL state, sort, search, pager", () => {
     expect(last("apps:list")).toMatchObject({ paginationOpts: { numItems: 10, cursor: null } });
   });
 
-  it("changing the page size or the tab starts over on page 1 and keeps the rest", () => {
+  it("changing the page size or the tab starts over on page 1 and keeps the rest", async () => {
     cx.results["apps:list"] = page(apps(10), { isDone: false, continueCursor: "CUR1" });
-    ui(<Apps />, "/apps?sort=name&dir=asc");
+    await ui(<Apps />, "/apps?sort=name&dir=asc");
     fireEvent.click(screen.getByRole("button", { name: strings.pager.next }));
     expect(where()).toBe("/apps?sort=name&dir=asc&page=2");
-    fireEvent.change(screen.getByLabelText(strings.pager.rowsPerPage), { target: { value: "50" } });
+    await screen.findByLabelText(strings.pager.rowsPerPage); // the dropdown is a lazy chunk
+    pickOption(strings.pager.rowsPerPage, "50");
     expect(where()).toBe("/apps?sort=name&dir=asc&size=50");
     expect(last("apps:list")).toEqual({ archived: false, paginationOpts: { numItems: 50, cursor: null }, sort: { key: "name", dir: "asc" } });
     fireEvent.click(screen.getByRole("radio", { name: appsStrings.archived }));
@@ -259,9 +264,9 @@ describe("Apps: URL state, sort, search, pager", () => {
     expect(where()).not.toContain("page=");
   });
 
-  it("the whole row opens the app; the real link in the name cell still works", () => {
+  it("the whole row opens the app; the real link in the name cell still works", async () => {
     cx.results["apps:list"] = page([app(1), app(2)]);
-    ui(<Apps />, "/apps");
+    await ui(<Apps />, "/apps");
     const row = screen.getByRole("link", { name: "App 01" }).closest("tr") as HTMLElement;
     expect(row.getAttribute("data-clickable")).toBe("true");
     expect(screen.getByRole("link", { name: "App 01" }).getAttribute("href")).toBe("/apps/a1");
@@ -269,25 +274,29 @@ describe("Apps: URL state, sort, search, pager", () => {
     expect(where()).toBe("/apps/a1");
   });
 
-  it("the Cards view keeps the same rows and offers a sort select that sends the same sort", () => {
+  it("the Cards view keeps the same rows and offers a sort select that sends the same sort", async () => {
     localStorage.setItem(VIEW_KEY, "cards");
     cx.results["apps:list"] = page(apps(2));
-    ui(<Apps />, "/apps");
-    expect(screen.getByRole("table", { name: appsStrings.title }).className).toContain("dash-table--stack");
-    const select = screen.getByLabelText(strings.table.sortSelect) as HTMLSelectElement;
-    fireEvent.change(select, { target: { value: "name:desc" } });
+    await ui(<Apps />, "/apps");
+    // The cards code is a lazy chunk: the list appears a moment after the first render.
+    const list = await screen.findByRole("list", { name: appsStrings.title });
+    expect(screen.queryByRole("table")).toBeNull();
+    expect(within(list).getAllByRole("listitem")).toHaveLength(2);
+    await screen.findByLabelText(strings.table.sortSelect);
+    // The title column says "Name" for the sort words (its header is "App").
+    pickOption(strings.table.sortSelect, strings.table.sortOption(appsStrings.colNameSort, strings.table.sortDir.name.desc));
     expect(where()).toBe("/apps?sort=name&dir=desc");
     expect(last("apps:list")).toMatchObject({ sort: { key: "name", dir: "desc" } });
     expect(screen.getAllByRole("link", { name: /^App / })).toHaveLength(2);
   });
 
-  it("an error shows Try again; an empty tab shows its own sentence", () => {
+  it("an error shows Try again; an empty tab shows its own sentence", async () => {
     cx.results["apps:list"] = new Error("boom");
-    ui(<Apps />, "/apps");
+    await ui(<Apps />, "/apps");
     expect(screen.getByText(strings.common.regionFailed)).toBeTruthy();
     cleanup();
     cx.results["apps:list"] = page([]);
-    ui(<Apps />, "/apps?archived=1");
+    await ui(<Apps />, "/apps?archived=1");
     expect(screen.getByText(appsStrings.emptyArchivedTitle)).toBeTruthy();
   });
 });
@@ -295,9 +304,9 @@ describe("Apps: URL state, sort, search, pager", () => {
 describe("Audit: time sort, Previous / Next, no total", () => {
   const entry = (i: number) => ({ _id: `e${i}`, at: 10_000 - i, actorType: "member", actorLabel: "owner@x.test", action: "group.renamed", summary: `Entry ${i}` });
 
-  it("pages with the cursor the server gave, reads the direction from the URL and toggles it from the Time header", () => {
+  it("pages with the cursor the server gave, reads the direction from the URL and toggles it from the Time header", async () => {
     cx.results["audit:list"] = page(Array.from({ length: 10 }, (_, i) => entry(i)), { isDone: false, continueCursor: "CUR1" });
-    ui(<Audit />, "/audit");
+    await ui(<Audit />, "/audit");
     expect(last("audit:list")).toEqual({ paginationOpts: { numItems: 10, cursor: null }, sort: { key: "at", dir: "desc" } });
     expect(screen.getByText(strings.pager.page(1))).toBeTruthy();
     expect(screen.queryByRole("button", { name: strings.pager.goTo(5) })).toBeNull();
@@ -312,15 +321,15 @@ describe("Audit: time sort, Previous / Next, no total", () => {
 
   it("has no search box, and a refresh on page 3 falls back to page 1 (no cursors, no total)", async () => {
     cx.results["audit:list"] = page([entry(1)]);
-    ui(<Audit />, "/audit?page=3&size=25");
+    await ui(<Audit />, "/audit?page=3&size=25");
     expect(screen.queryByRole("searchbox")).toBeNull();
     await waitFor(() => expect(where()).toBe("/audit?size=25"));
     expect(last("audit:list")).toMatchObject({ paginationOpts: { numItems: 25, cursor: null } });
   });
 
-  it("an empty log says so", () => {
+  it("an empty log says so", async () => {
     cx.results["audit:list"] = page([]);
-    ui(<Audit />, "/audit");
+    await ui(<Audit />, "/audit");
     expect(screen.getByText(auditStrings.emptyTitle)).toBeTruthy();
   });
 });
@@ -334,7 +343,7 @@ describe("File types: a bounded table with offset cursors and an inline total", 
       const { cursor } = args.paginationOpts as { cursor: string | null };
       return page(cursor === "o:10" ? rules(4, 10) : rules(10), { total: 14, continueCursor: cursor === "o:10" ? "o:14" : "o:10", isDone: cursor === "o:10" });
     };
-    ui(<FileTypes />, "/file-types?page=2");
+    await ui(<FileTypes />, "/file-types?page=2");
     await waitFor(() => expect(last("fileHandlers:page")).toMatchObject({ paginationOpts: { numItems: 10, cursor: "o:10" } }));
     expect(screen.getByText(`${strings.pager.records(14)} · ${strings.pager.pageOf(2, 2)}`)).toBeTruthy();
     expect(where()).toBe("/file-types?page=2");
@@ -345,23 +354,23 @@ describe("File types: a bounded table with offset cursors and an inline total", 
 
   it("a stale page past the end goes back to page 1 once the total is known", async () => {
     cx.results["fileHandlers:page"] = page(rules(3), { total: 3, continueCursor: "o:3" });
-    ui(<FileTypes />, "/file-types?page=5");
+    await ui(<FileTypes />, "/file-types?page=5");
     await waitFor(() => expect(where()).toBe("/file-types"));
     expect(last("fileHandlers:page")).toMatchObject({ paginationOpts: { numItems: 10, cursor: null } });
   });
 
-  it("Enter searches the server (contains on extension or program); the box offers no live search", () => {
+  it("Enter searches the server (contains on extension or program); the box offers no live search", async () => {
     cx.results["fileHandlers:page"] = page(rules(1), { total: 1, continueCursor: "o:1" });
-    ui(<FileTypes />, "/file-types");
+    await ui(<FileTypes />, "/file-types");
     enter(fileTypesStrings.searchLabel, "pdf");
     expect(last("fileHandlers:page")).toEqual({ paginationOpts: { numItems: 10, cursor: null }, sort: { key: "extension", dir: "asc" }, search: "pdf" });
     expect(where()).toBe("/file-types?q=pdf");
   });
 
-  it("the row opens the program; Remove (a button in the row) opens its dialog and does not navigate", () => {
+  it("the row opens the program; Remove (a button in the row) opens its dialog and does not navigate", async () => {
     cx.results["fileHandlers:page"] = page(rules(2), { total: 2, continueCursor: "o:2" });
-    ui(<FileTypes />, "/file-types");
-    fireEvent.click(screen.getByRole("button", { name: `${strings.common.remove} .e00` }));
+    await ui(<FileTypes />, "/file-types");
+    fireEvent.click(screen.getByRole("button", { name: strings.table.actionFor(strings.common.remove, ".e00") }));
     expect(screen.getByRole("dialog")).toBeTruthy();
     expect(where()).toBe("/file-types");
     fireEvent.click(within(screen.getByRole("dialog")).getByRole("button", { name: strings.common.cancel }));
@@ -370,14 +379,15 @@ describe("File types: a bounded table with offset cursors and an inline total", 
     expect(where()).toBe("/apps/a1");
   });
 
-  it("the program picker subscribes to apps:options only while the add dialog is open", () => {
+  it("the program picker subscribes to apps:options only while the add dialog is open", async () => {
     cx.results["fileHandlers:page"] = page(rules(1), { total: 1, continueCursor: "o:1" });
     cx.results["apps:options"] = [{ _id: "a9", name: "Reader", kind: "desktop", canOpenFiles: true }];
-    ui(<FileTypes />, "/file-types");
+    await ui(<FileTypes />, "/file-types");
     expect(cx.requests.some((r) => r.name === "apps:options")).toBe(false);
     fireEvent.click(screen.getByRole("button", { name: fileTypesStrings.add }));
     expect(cx.requests.some((r) => r.name === "apps:options")).toBe(true);
-    expect(screen.getByRole("option", { name: "Reader" })).toBeTruthy();
+    // One program can open files, so it is already chosen.
+    expect(selectedText(fileTypesStrings.app)).toContain("Reader");
   });
 });
 
@@ -395,31 +405,32 @@ describe("Enrollment: action rows", () => {
     createdByEmail: "admin@x.test",
   });
 
-  it("sorts by created or expires on the server; Next opens the next page; a click on the row does nothing", () => {
+  it("is a list of cards: the sort control sorts by created or expires on the server; Next opens the next page; a click on the card does nothing", async () => {
     cx.results["groups:list"] = [{ _id: "g1", name: "Front desk", revision: 0, createdAt: 1, devices: { count: 0, more: false }, employees: { count: 0, more: false } }];
     cx.results["enrollmentCodes:list"] = page(Array.from({ length: 10 }, (_, i) => code(i)), { isDone: false, continueCursor: "CUR1" });
-    ui(<Enrollment />, "/enrollment");
+    await ui(<Enrollment />, "/enrollment");
+    await screen.findByRole("list", { name: "Enrollment codes" });
+    expect(screen.queryByRole("table")).toBeNull();
     expect(last("enrollmentCodes:list")).toMatchObject({ paginationOpts: { numItems: 10, cursor: null }, sort: { key: "created", dir: "desc" } });
-    fireEvent.click(within(header("Expires")).getByRole("button"));
+    pickOption(strings.table.sortSelect, "Expires: newest first");
     expect(last("enrollmentCodes:list")).toMatchObject({ sort: { key: "expires", dir: "desc" } });
     expect(where()).toBe("/enrollment?sort=expires&dir=desc");
     fireEvent.click(screen.getByRole("button", { name: strings.pager.next }));
     expect(last("enrollmentCodes:list")).toMatchObject({ paginationOpts: { numItems: 10, cursor: "CUR1" }, sort: { key: "expires", dir: "desc" } });
-    const row = screen.getByText("Code 0").closest("tr") as HTMLElement;
-    expect(row.getAttribute("data-clickable")).toBeNull();
-    fireEvent.click(row);
+    const card = screen.getByText("Code 0").closest("article") as HTMLElement;
+    expect(card.getAttribute("data-clickable")).toBeNull();
+    fireEvent.click(card);
     expect(where()).toBe("/enrollment?sort=expires&dir=desc&page=2");
   });
 
-  it("Revoke (a button in the row) opens the confirm dialog", () => {
+  it("Revoke (a button on the card) opens the confirm dialog", async () => {
     cx.results["groups:list"] = [];
     cx.results["enrollmentCodes:list"] = page([code(1)]);
-    ui(<Enrollment />, "/enrollment");
-    fireEvent.click(screen.getByRole("button", { name: "Revoke Code 1" }));
+    await ui(<Enrollment />, "/enrollment");
+    fireEvent.click(await screen.findByRole("button", { name: "Revoke Code 1" }));
     expect(screen.getByRole("dialog")).toBeTruthy();
   });
 });
-
 describe("Settings > Members: two lists on one page", () => {
   const member = (i: number, over: object = {}) => ({
     _id: `m${i}`,
@@ -433,10 +444,10 @@ describe("Settings > Members: two lists on one page", () => {
   });
   const invite = (i: number) => ({ _id: `i${i}`, email: `invitee${i}@x.test`, role: "viewer", kind: "join", expiresAt: Date.now() + 86_400_000, createdAt: 1_000 * i });
 
-  it("members and invites keep separate page, sort and search in one URL (invites use the i prefix)", () => {
+  it("members and invites keep separate page, sort and search in one URL (invites use the i prefix)", async () => {
     cx.results["members:page"] = page(Array.from({ length: 10 }, (_, i) => member(i)), { total: 14, continueCursor: "o:10", isDone: false });
     cx.results["members:invitesPage"] = page(Array.from({ length: 10 }, (_, i) => invite(i)), { total: 12, continueCursor: "o:10", isDone: false });
-    ui(<MembersTab />, "/settings?tab=members");
+    await ui(<MembersTab />, "/settings?tab=members");
     expect(last("members:page")).toEqual({ paginationOpts: { numItems: 10, cursor: null }, sort: { key: "email", dir: "asc" } });
     expect(last("members:invitesPage")).toMatchObject({ paginationOpts: { numItems: 10, cursor: null }, sort: { key: "created", dir: "desc" } });
     const [membersPager, invitesPager] = screen.getAllByRole("navigation", { name: strings.pager.nav });
@@ -459,10 +470,10 @@ describe("Settings > Members: two lists on one page", () => {
     expect(within(invitesPager!.parentElement!).getByText(/12 records/)).toBeTruthy();
   });
 
-  it("sorting the members by role goes to the server and starts over on page 1", () => {
+  it("sorting the members by role goes to the server and starts over on page 1", async () => {
     cx.results["members:page"] = page([member(1)], { total: 1, continueCursor: "o:1" });
     cx.results["members:invitesPage"] = page([], { total: 0, continueCursor: "o:0" });
-    ui(<MembersTab />, "/settings?tab=members&page=1");
+    await ui(<MembersTab />, "/settings?tab=members&page=1");
     fireEvent.click(within(header(settingsStrings.members.colRole)).getByRole("button"));
     expect(last("members:page")).toEqual({ paginationOpts: { numItems: 10, cursor: null }, sort: { key: "role", dir: "asc" } });
     expect(where()).toBe("/settings?tab=members&sort=role&dir=asc");
@@ -470,35 +481,46 @@ describe("Settings > Members: two lists on one page", () => {
     expect(screen.queryByText(settingsStrings.members.pendingInvites)).toBeNull();
   });
 
-  it("Revoke on an invite row is a button of the row; the member actions stay buttons too", () => {
+  it("Revoke on an invite row is a button of the row; the member actions stay buttons too", async () => {
     cx.results["members:page"] = page([member(1)], { total: 1, continueCursor: "o:1" });
     cx.results["members:invitesPage"] = page([invite(1)], { total: 1, continueCursor: "o:1" });
-    ui(<MembersTab />, "/settings?tab=members", "owner");
-    fireEvent.click(screen.getByRole("button", { name: `${settingsStrings.members.revokeInvite}: invitee1@x.test` }));
+    await ui(<MembersTab />, "/settings?tab=members", "owner");
+    fireEvent.click(screen.getByRole("button", { name: `${strings.common.revoke}: invitee1@x.test` }));
     expect(screen.getByRole("dialog")).toBeTruthy();
     expect(screen.getByRole("button", { name: `${settingsStrings.members.changeRole}: user01@x.test` })).toBeTruthy();
+  });
+
+  it("a few pending invites have no search box of their own; the invite's expiry is relative", async () => {
+    cx.results["members:page"] = page([member(1)], { total: 1, continueCursor: "o:1" });
+    cx.results["members:invitesPage"] = page([invite(1)], { total: 1, continueCursor: "o:1" });
+    await ui(<MembersTab />, "/settings?tab=members", "owner");
+    expect(screen.queryByRole("searchbox", { name: settingsStrings.members.invitesSearchLabel })).toBeNull();
+    expect(screen.getByRole("searchbox", { name: settingsStrings.members.searchLabel })).toBeTruthy();
+    const row = screen.getByText("invitee1@x.test").closest("tr")!;
+    expect(within(row).getByText(/^in /)).toBeTruthy();
   });
 });
 
 describe("HistoryPanel: a small list in a card", () => {
   const entry = (i: number) => ({ _id: `e${i}`, at: 10_000 - i, actorType: "member", actorLabel: "owner@x.test", action: "group.renamed", summary: `Entry ${i}` });
 
-  it("keeps its page in the component (not the URL), reads audit:forTarget one page at a time, and has no total", () => {
+  it("keeps its page in the component (not the URL), reads audit:forTarget one page at a time, and has no total", async () => {
     cx.results["audit:forTarget"] = page(Array.from({ length: 10 }, (_, i) => entry(i)), { isDone: false, continueCursor: "CUR1" });
-    ui(<HistoryPanel targetId="d1" />, "/apps/a1");
+    await ui(<HistoryPanel targetId="d1" />, "/apps/a1");
     expect(last("audit:forTarget")).toEqual({ targetId: "d1", paginationOpts: { numItems: 10, cursor: null }, sort: { key: "at", dir: "desc" } });
     fireEvent.click(screen.getByRole("button", { name: strings.pager.next }));
     expect(last("audit:forTarget")).toMatchObject({ paginationOpts: { numItems: 10, cursor: "CUR1" } });
     expect(screen.getByText(strings.pager.page(2))).toBeTruthy();
     expect(where()).toBe("/apps/a1");
-    fireEvent.change(screen.getByLabelText(strings.pager.rowsPerPage), { target: { value: "25" } });
+    await screen.findByLabelText(strings.pager.rowsPerPage); // the dropdown is a lazy chunk
+    pickOption(strings.pager.rowsPerPage, "25");
     expect(last("audit:forTarget")).toMatchObject({ paginationOpts: { numItems: 25, cursor: null } });
     expect(where()).toBe("/apps/a1");
   });
 
-  it("an empty history says so", () => {
+  it("an empty history says so", async () => {
     cx.results["audit:forTarget"] = page([]);
-    ui(<HistoryPanel targetId="d1" />, "/apps/a1");
+    await ui(<HistoryPanel targetId="d1" />, "/apps/a1");
     expect(screen.getByText(auditStrings.historyNone)).toBeTruthy();
   });
 });
@@ -529,9 +551,9 @@ describe("App page: install status and group assignments", () => {
     groupName: `Group ${String(i).padStart(2, "0")}`,
   });
 
-  it("assignments are a table with a small pager once there are more than 10; the row opens the group", () => {
+  it("assignments are a table with a small pager once there are more than 10; the row opens the group", async () => {
     cx.results["apps:get"] = { ...program, assignments: Array.from({ length: 12 }, (_, i) => assignment(i)) };
-    ui(<AppEdit />, "/apps/a1");
+    await ui(<AppEdit />, "/apps/a1?tab=access");
     const table = screen.getByRole("table", { name: appEditStrings.assignments });
     expect(within(table).getAllByRole("row")).toHaveLength(11); // header + 10
     fireEvent.click(screen.getByRole("button", { name: strings.pager.goTo(2) }));
@@ -543,20 +565,20 @@ describe("App page: install status and group assignments", () => {
     expect(cx.requests.some((r) => r.name.startsWith("groups:"))).toBe(false);
   });
 
-  it("a few assignments show no pager", () => {
+  it("a few assignments show no pager", async () => {
     cx.results["apps:get"] = { ...program, assignments: [assignment(1), assignment(2)] };
-    ui(<AppEdit />, "/apps/a1");
+    await ui(<AppEdit />, "/apps/a1?tab=access");
     const table = screen.getByRole("table", { name: appEditStrings.assignments });
     expect(within(table).getAllByRole("row")).toHaveLength(3);
     expect(screen.queryByRole("button", { name: strings.pager.goTo(2) })).toBeNull();
   });
 
-  it("the install list sorts by update time on the server and starts over when the state changes; its row opens the PC", () => {
+  it("the install list sorts by update time on the server and starts over when the state changes; its row opens the PC", async () => {
     cx.results["apps:get"] = program;
     cx.results["apps:installSummary"] = { pending: 0, downloading: 0, installing: 0, installed: 20, failed: 3, removing: 0, removed: 0, unsupported: 0 };
     cx.results["apps:installs"] = (args: Record<string, unknown>) =>
       page([{ _id: "i1", deviceId: "d1", deviceName: "Front desk", state: args.state, attempts: 1, updatedAt: Date.now() }], { isDone: false, continueCursor: "CUR1" });
-    ui(<AppEdit />, "/apps/a1");
+    await ui(<AppEdit />, "/apps/a1?tab=installs");
     expect(last("apps:installs")).toEqual({ appId: "a1", state: "installed", paginationOpts: { numItems: 10, cursor: null }, sort: { key: "updated", dir: "desc" } });
     fireEvent.click(screen.getByRole("button", { name: strings.pager.next }));
     expect(last("apps:installs")).toMatchObject({ paginationOpts: { numItems: 10, cursor: "CUR1" } });
@@ -566,7 +588,7 @@ describe("App page: install status and group assignments", () => {
     fireEvent.click(screen.getByRole("button", { name: new RegExp(`${installStateStrings.failed}\\s*3$`) }));
     expect(last("apps:installs")).toMatchObject({ state: "failed", paginationOpts: { numItems: 10, cursor: null } });
     // The URL is not touched by a list inside a card.
-    expect(where()).toBe("/apps/a1");
+    expect(where()).toBe("/apps/a1?tab=installs");
     fireEvent.click(screen.getByText("Front desk").closest("tr")!.querySelectorAll("td")[1]!);
     expect(screen.getByText("device page")).toBeTruthy();
   });

@@ -1,88 +1,79 @@
-import { lazy, Suspense, useRef, type KeyboardEvent } from "react";
+import { lazy, Suspense, useEffect } from "react";
 import { useSearchParams } from "react-router";
 import { PageHeader } from "../components/PageHeader";
 import { SkeletonBlock } from "../components/Skeleton";
 import { settingsStrings } from "../lib/screenStrings/settings";
-import { sec } from "../lib/stepup/strings";
+import { useMember } from "../lib/member";
 import { AboutTab } from "./settings/AboutTab";
-import { AdminExitTab } from "./settings/AdminExitTab";
-import { MembersTab } from "./settings/MembersTab";
 import { OrganizationTab } from "./settings/OrganizationTab";
-import { SigningTab } from "./settings/SigningTab";
+import { SectionHead } from "./settings/SectionHead";
+import { SectionNav } from "./settings/SectionNav";
+import { isSectionId, type SectionId } from "./settings/sections";
+import "./settings/settings.css";
 
-// The Security tab (step-up, plan 4.16) is its own chunk: most visits never open it.
+// Only the open section loads: General is the front door, the rest are chunks of their own (most visits never open them).
+const AdminExitTab = lazy(() => import("./settings/AdminExitTab").then((m) => ({ default: m.AdminExitTab })));
+const MembersTab = lazy(() => import("./settings/MembersTab").then((m) => ({ default: m.MembersTab })));
+const SigningTab = lazy(() => import("./settings/SigningTab").then((m) => ({ default: m.SigningTab })));
 const SecurityTab = lazy(() => import("./settings/SecurityTab"));
-// So is the Updates tab (Rulebox's own release, Owner only): its data seam loads with it.
 const UpdatesTab = lazy(() => import("./settings/UpdatesTab"));
 
-const TABS = ["organization", "adminExit", "signing", "updates", "members", "security", "about"] as const;
-type Tab = (typeof TABS)[number];
+function Loading() {
+  return (
+    <div className="dash-card dash-card--pad" aria-busy="true" aria-label={settingsStrings.sectionLoading}>
+      <SkeletonBlock lines={6} />
+    </div>
+  );
+}
 
-const tabLabel = (t: Tab) => (t === "security" ? sec.tab : settingsStrings.tabs[t]);
+function Section({ id }: { id: SectionId }) {
+  switch (id) {
+    case "organization":
+      return <OrganizationTab />;
+    case "about":
+      return <AboutTab />;
+    case "adminExit":
+      return <AdminExitTab />;
+    case "members":
+      return <MembersTab />;
+    case "signing":
+      return <SigningTab />;
+    case "security":
+      return <SecurityTab />;
+    case "updates":
+      return <UpdatesTab />;
+  }
+}
 
-/** Settings with tabs (`?tab=`): each tab is one query (`settings:get`, `keys:status`, `ruleboxRelease:get`, `members:list`, `stepUp:status`). */
+/**
+ * Settings (UI pass): a grouped section navigation (`?tab=`) and the open section. Each section is one query (`settings:get`,
+ * `keys:status`, `ruleboxRelease:get`, `members:page`, `stepUp:status`); a section that is not open loads and asks for nothing.
+ */
 export default function Settings() {
   const [params, setParams] = useSearchParams();
+  const me = useMember();
   const raw = params.get("tab");
-  const tab: Tab = (TABS as readonly string[]).includes(raw ?? "") ? (raw as Tab) : "organization";
-  const refs = useRef<Partial<Record<Tab, HTMLButtonElement | null>>>({});
+  const known = isSectionId(raw);
+  const active: SectionId = known ? raw : "organization";
 
-  const select = (t: Tab, focus = false) => {
-    setParams(t === "organization" ? {} : { tab: t }, { replace: true });
-    if (focus) refs.current[t]?.focus();
-  };
-
-  const onKeyDown = (e: KeyboardEvent<HTMLDivElement>) => {
-    const i = TABS.indexOf(tab);
-    let next: number | null = null;
-    if (e.key === "ArrowRight") next = (i + 1) % TABS.length;
-    if (e.key === "ArrowLeft") next = (i - 1 + TABS.length) % TABS.length;
-    if (e.key === "Home") next = 0;
-    if (e.key === "End") next = TABS.length - 1;
-    if (next === null) return;
-    e.preventDefault();
-    select(TABS[next]!, true);
-  };
+  // An unknown id is General: the address is cleaned up (replace, so Back does not return to it).
+  useEffect(() => {
+    if (raw !== null && !known) setParams({}, { replace: true });
+  }, [raw, known, setParams]);
 
   return (
     <div className="dash-page">
       <PageHeader title={settingsStrings.title} lead={settingsStrings.lead} />
-      <div role="tablist" aria-label={settingsStrings.title} className="dash-tabs" onKeyDown={onKeyDown}>
-        {TABS.map((t) => (
-          <button
-            key={t}
-            ref={(el) => {
-              refs.current[t] = el;
-            }}
-            type="button"
-            role="tab"
-            id={`settings-tab-${t}`}
-            aria-selected={tab === t}
-            aria-controls={`settings-panel-${t}`}
-            tabIndex={tab === t ? 0 : -1}
-            className="dash-tabs__tab"
-            onClick={() => select(t)}
-          >
-            {tabLabel(t)}
-          </button>
-        ))}
-      </div>
-      <div role="tabpanel" id={`settings-panel-${tab}`} aria-labelledby={`settings-tab-${tab}`} className="dash-stack">
-        {tab === "organization" ? <OrganizationTab /> : null}
-        {tab === "adminExit" ? <AdminExitTab /> : null}
-        {tab === "signing" ? <SigningTab /> : null}
-        {tab === "updates" ? (
-          <Suspense fallback={<div className="dash-card dash-card--pad"><SkeletonBlock lines={6} /></div>}>
-            <UpdatesTab />
-          </Suspense>
-        ) : null}
-        {tab === "members" ? <MembersTab /> : null}
-        {tab === "security" ? (
-          <Suspense fallback={<div className="dash-card dash-card--pad"><SkeletonBlock lines={6} /></div>}>
-            <SecurityTab />
-          </Suspense>
-        ) : null}
-        {tab === "about" ? <AboutTab /> : null}
+      <div className="set-page">
+        <div className="set-layout">
+          <SectionNav active={active} pinMissing={!me.pin.set} />
+          <div className="set-section dash-enter" key={active}>
+            <SectionHead id={active} />
+            <Suspense fallback={<Loading />}>
+              <Section id={active} />
+            </Suspense>
+          </div>
+        </div>
       </div>
     </div>
   );

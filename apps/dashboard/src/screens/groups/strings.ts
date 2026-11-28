@@ -7,7 +7,7 @@ import { formatNumber, plural } from "../../lib/format";
 
 const DEPENDENT_NAMES: Record<string, string> = {
   devices: "the PCs in it (move them to another group)",
-  employees: "its employees (remove them from the group)",
+  employees: "its people (remove them from the group)",
   apps: "its apps (unassign them)",
   "enrollment codes": "its active enrollment codes (revoke them)",
 };
@@ -26,7 +26,16 @@ export const groupText = {
   unassigned: (app: string) => `${app} unassigned.`,
   editAssignment: "Change how it appears",
   editAssignmentTitle: (app: string) => `How ${app} appears`,
-  audienceHint: "Who in the group sees the app. \"Only selected employees\" lists the employees who were given the app one by one.",
+  /** The Assign app / Change how it appears dialogs (UI pass `other-pages.md` 7.1). */
+  appPlaceholder: "Choose an app",
+  appSearch: "Search apps",
+  appNoMatch: "No app matches.",
+  audienceCards: { everyone: "Everyone in the group", selected: "Only people I choose" },
+  audienceInfoLabel: "About who sees it",
+  audienceInfo: "Only people I choose: only people who have this app under Extra apps on their employee page see it.",
+  pinsLegend: "Pin it to",
+  pinTaskbar: "Taskbar",
+  pinDesktop: "Desktop",
   /** `has_dependents` detail ("devices, employees, apps, enrollment codes") as a sentence. */
   hasDependents: (detail: string | undefined) => {
     const parts = (detail ?? "")

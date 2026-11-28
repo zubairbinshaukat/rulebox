@@ -516,6 +516,13 @@ export const MAX_FAILURE_PCT = 100;
  */
 export const MAX_FINDINGS_PAGE = 50;
 export const OPEN_FINDINGS_CAP = 50;
+/**
+ * `lockdown:groupSync` (the "PCs up to date: n of m" card): PCs counted per group, and apply reports read for them (both read with
+ * `.take(cap + 1)`; above it the count is shown as "200+"). Same size as `RING_COUNT_CAP`.
+ */
+export const LOCKDOWN_SYNC_CAP = 200;
+/** `maintenance:backfillLockdownSync`: apply reports turned into `deviceLockdownSync` rows per run (one report + its PC + its credentials each). */
+export const LOCKDOWN_SYNC_BACKFILL_BATCH = 100;
 export const MAX_EXCEPTIONS_LISTED = 50;
 export const MAX_ALLOW_GROUPS = MAX_NETWORK_GROUPS;
 export const MAX_EXCEPTION_REASON = 200;

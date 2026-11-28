@@ -546,3 +546,290 @@
   text-align: end;
   font-variant-numeric: tabular-nums;
 }
+
+/* ==========================================================================
+   UI pass: custom Select / SearchSelect and InfoTip (packages/ui floating.ts)
+   ========================================================================== */
+
+/* The trigger is a <button class="rb-select__control rb-dd__trigger"> inside the same
+   <span class="rb-select rb-select--dd"> as the native one: the 46 / 40 px look, the focus ring,
+   the chevron and every layout rule written for `.rb-select` (filter bars) apply unchanged. */
+.rb-select--dd .rb-dd__trigger {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  text-align: start;
+}
+.rb-select--dd .rb-dd__trigger[aria-expanded="true"] {
+  border-color: var(--rb-accent);
+}
+.rb-dd__value {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.rb-dd__value--placeholder {
+  color: var(--rb-muted);
+}
+.rb-dd__oicon {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  font-size: 18px;
+  color: var(--rb-muted);
+}
+.rb-select--dd .rb-select__chevron {
+  transition: transform var(--rb-duration) var(--rb-ease);
+}
+.rb-select--dd[data-open] .rb-select__chevron {
+  transform: rotate(180deg);
+}
+
+/* The popup: portalled to <body> and placed with position: fixed by placeFloating(), above a dialog's backdrop. */
+.rb-dd__popup {
+  position: fixed;
+  left: 0;
+  top: 0;
+  z-index: calc(var(--rb-z-banner) + 10);
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  width: max-content;
+  max-width: 420px;
+  max-height: 320px;
+  overflow: hidden;
+  background: var(--rb-surface);
+  color: var(--rb-ink);
+  border: 1px solid var(--rb-line);
+  border-radius: var(--rb-r-md);
+  box-shadow: var(--rb-shadow-popover);
+  font-family: var(--rb-font-sans);
+  font-size: 14px;
+  line-height: 1.4;
+  animation: rb-dd-in-down 140ms var(--rb-ease) backwards;
+}
+.rb-dd__popup[data-side="top"] {
+  animation-name: rb-dd-in-up;
+}
+@keyframes rb-dd-in-down {
+  from {
+    opacity: 0;
+    transform: translateY(-4px);
+  }
+}
+@keyframes rb-dd-in-up {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+}
+.rb-dd__list {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  flex: 1 1 auto;
+  min-height: 0;
+  padding: 6px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  outline: none;
+}
+.rb-dd__list[hidden] {
+  display: none;
+}
+.rb-dd__option {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  min-height: 40px;
+  padding: 9px 10px;
+  border-radius: var(--rb-r-sm);
+  color: var(--rb-ink);
+  cursor: pointer;
+}
+.rb-dd__popup--compact .rb-dd__option {
+  min-height: 36px;
+  padding-block: 7px;
+  font-size: 13.5px;
+}
+.rb-dd__option[data-active] {
+  background: var(--rb-hover);
+}
+.rb-dd__option[aria-selected="true"] {
+  color: var(--rb-accent-text);
+  font-weight: 600;
+}
+.rb-dd__option[aria-disabled="true"] {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+.rb-dd__option .rb-dd__oicon {
+  align-self: center;
+}
+.rb-dd__otext {
+  flex: 1 1 auto;
+  align-self: center;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+/* A long label wraps (3 lines at most) in the list; the trigger truncates it on one line. */
+.rb-dd__label,
+.rb-dd__hint {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  overflow-wrap: anywhere;
+}
+.rb-dd__label {
+  -webkit-line-clamp: 3;
+  line-clamp: 3;
+}
+.rb-dd__hint {
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+  font-size: 12.5px;
+  font-weight: 400;
+  color: var(--rb-muted);
+}
+.rb-dd__check {
+  flex: none;
+  align-self: center;
+  color: var(--rb-accent-text);
+}
+.rb-dd__search {
+  position: relative;
+  flex: none;
+  padding: 8px 8px 6px;
+  border-bottom: 1px solid var(--rb-line);
+}
+.rb-dd__search-icon {
+  position: absolute;
+  inset-inline-start: 20px;
+  top: 19px;
+  color: var(--rb-muted);
+  pointer-events: none;
+}
+.rb-dd__input {
+  box-sizing: border-box;
+  width: 100%;
+  height: 38px;
+  padding: 0 12px 0 34px;
+  border-radius: var(--rb-r-sm);
+  border: 1px solid var(--rb-line);
+  background: var(--rb-paper);
+  color: var(--rb-ink);
+  font: inherit;
+  font-size: 14px;
+  outline: none;
+  transition:
+    border-color var(--rb-duration) var(--rb-ease),
+    box-shadow var(--rb-duration) var(--rb-ease);
+}
+.rb-dd__input:focus {
+  border-color: var(--rb-accent);
+  box-shadow: 0 0 0 3px var(--rb-accent-soft);
+}
+.rb-dd__input::placeholder {
+  color: var(--rb-muted);
+}
+.rb-dd__status {
+  padding: 14px 16px;
+  text-align: center;
+  font-size: 13.5px;
+  color: var(--rb-muted);
+}
+@media (pointer: coarse) {
+  .rb-dd__option {
+    min-height: 44px;
+  }
+  /* 16 px: iOS zooms the page for anything smaller. */
+  .rb-dd__input {
+    font-size: 16px;
+  }
+}
+
+/* InfoTip: the (i) button after a label, and its tooltip / popover. */
+.rb-info {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+  /* A 24 px target that takes only 16 px of room in the row. */
+  width: 24px;
+  height: 24px;
+  margin: -4px;
+  padding: 0;
+  border-radius: 999px;
+  color: var(--rb-muted);
+  cursor: help;
+  vertical-align: middle;
+  transition: color var(--rb-duration) var(--rb-ease);
+}
+.rb-info:hover,
+.rb-info[aria-expanded="true"] {
+  color: var(--rb-accent-text);
+}
+.rb-info:focus-visible {
+  outline: 2px solid var(--rb-focus);
+  outline-offset: 0;
+}
+@media (pointer: coarse) {
+  /* A finger needs 44 px; the margin gives the room back. */
+  .rb-info {
+    width: 44px;
+    height: 44px;
+    margin: -14px;
+  }
+}
+.rb-info__tip {
+  position: fixed;
+  left: 0;
+  top: 0;
+  z-index: calc(var(--rb-z-banner) + 20);
+  box-sizing: border-box;
+  width: max-content;
+  max-width: 280px;
+  max-height: 60vh;
+  overflow-y: auto;
+  padding: 10px 12px;
+  border-radius: var(--rb-r-md);
+  border: 1px solid var(--rb-line);
+  background: var(--rb-surface);
+  color: var(--rb-ink);
+  box-shadow: var(--rb-shadow-popover);
+  font-family: var(--rb-font-sans);
+  font-size: 13px;
+  font-weight: 400;
+  line-height: 1.45;
+  text-align: start;
+  overflow-wrap: anywhere;
+  animation: rb-dd-in-down 140ms var(--rb-ease) backwards;
+}
+.rb-info__tip[data-side="top"] {
+  animation-name: rb-dd-in-up;
+}
+/* A label with its (i) on one row (the dashboard Field / FieldSet). */
+.rb-labelrow {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+/* Reduced motion: no entrance. (Lite mode is stopped for every element in tokens.css.) */
+@media (prefers-reduced-motion: reduce) {
+  :where(:root:not([data-force-motion="true"])) .rb-dd__popup,
+  :where(:root:not([data-force-motion="true"])) .rb-info__tip {
+    animation: none;
+  }
+  :where(:root:not([data-force-motion="true"])) .rb-select--dd .rb-select__chevron {
+    transition: none;
+  }
+}

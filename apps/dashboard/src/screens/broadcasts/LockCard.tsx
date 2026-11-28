@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { Button, Input, Pill, Textarea } from "@rulebox/ui";
 import { useLockDevice, useUnlockDevice } from "../../data";
-import type { DeviceDetail } from "../../data/types";
+import type { DevicePage } from "../../data/types";
 import { Card } from "../../components/Card";
 import { ConfirmDialog } from "../../components/ConfirmDialog";
 import { Field } from "../../components/Field";
@@ -15,11 +15,14 @@ import { useToast } from "../../lib/toast";
 import { LockPreview } from "./Preview";
 import { lockStrings as s } from "./strings";
 
+/** What the lock form needs of a PC (the device page and the old card both have it). */
+export type LockTarget = Pick<DevicePage, "_id" | "revoked" | "lock">;
+
 /**
  * The lock card of the device page (plan 4.17): lock or unlock one PC, with the message and contact the lock view shows and a
  * preview of it. Lock and unlock are major actions: the hook opens the confirmation dialog and retries once. A viewer sees the state only.
  */
-export function LockCard({ d }: { d: DeviceDetail }) {
+export function LockCard({ d }: { d: LockTarget }) {
   const locked = d.lock !== null;
   const orgName = useOrgName();
   return (
@@ -29,7 +32,6 @@ export function LockCard({ d }: { d: DeviceDetail }) {
       sub={locked && d.lock ? s.state(formatDateTime(d.lock.lockedAt)) : undefined}
     >
       <div className="dash-form">
-        <p className="dash-muted">{s.lead}</p>
         {d.revoked && !locked ? <InlineNotice tone="neutral" title={s.revokedNote} /> : null}
         <RoleGate
           minRole="admin"
@@ -47,7 +49,12 @@ function useOrgName(): string {
   return useMember().orgName;
 }
 
-function LockForm({ d }: { d: DeviceDetail }) {
+/**
+ * The lock form: message, contact, a preview of what the PC shows, and Lock / Update / Unlock. `onDone` runs after a lock or an update
+ * went through (the dialog closes); `onUnlock` hands the Unlock button to the caller (a dialog cannot open another one) instead of
+ * confirming here.
+ */
+export function LockForm({ d, onDone, onUnlock }: { d: LockTarget; onDone?: () => void; onUnlock?: () => void }) {
   const lock = useLockDevice();
   const unlock = useUnlockDevice();
   const toast = useToast();
@@ -76,6 +83,7 @@ function LockForm({ d }: { d: DeviceDetail }) {
           () => {
             setPending(false);
             toast(s.locked_ok);
+            onDone?.();
           },
           (err) => {
             setPending(false);
@@ -97,7 +105,7 @@ function LockForm({ d }: { d: DeviceDetail }) {
           {pending ? s.locking : d.lock ? s.update : s.lock}
         </Button>
         {d.lock ? (
-          <Button variant="primary" onClick={() => setUnlocking(true)} disabled={pending}>
+          <Button variant="primary" onClick={() => (onUnlock ? onUnlock() : setUnlocking(true))} disabled={pending}>
             {s.unlock}
           </Button>
         ) : null}
@@ -108,7 +116,10 @@ function LockForm({ d }: { d: DeviceDetail }) {
         body={s.unlockBody}
         confirmLabel={s.unlock}
         onConfirm={() => unlock({ deviceId: d._id })}
-        onDone={() => toast(s.unlocked_ok)}
+        onDone={() => {
+          toast(s.unlocked_ok);
+          onDone?.();
+        }}
         onClose={() => setUnlocking(false)}
       />
     </form>

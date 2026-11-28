@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Button, Checkbox, Select } from "@rulebox/ui";
+import { Button, Checkbox, InfoTip, Select } from "@rulebox/ui";
 import { useRollback } from "../../data";
 import { RINGS, type Ring, type RolloutRow, type RolloutView } from "../../data/types";
 import { Field, FieldSet } from "../../components/Field";
@@ -8,12 +8,14 @@ import { Modal } from "../../components/Modal";
 import { formatDate } from "../../lib/format";
 import { strings } from "../../lib/strings";
 import { useToast } from "../../lib/toast";
+import { previousChange } from "./stages";
 import { rolloutErrorMessage, rolloutStrings as s } from "./strings";
 
 /**
- * Roll the group back (plan 4.14): pick an older version and the rings that go back to it. With rings off every PC goes back, so the
- * ring list is not asked for. A major action: `useRollback` opens the step-up dialog and retries once. The current settings are not
- * touched: the next edit takes a new version.
+ * "Undo the last change" (PRD 24.3: one click). The PCs of every stage go back to the change before the newest one; nothing to choose.
+ * Under Advanced: another change to go back to (newest first, the version number only as a hint) and which stages go back (only asked
+ * with the staged rollout on: with it off every PC goes back). A major action: `useRollback` opens the step-up dialog and retries once.
+ * The group's current settings are not touched: the next edit takes a new version.
  */
 export function RollbackDialog({
   open,
@@ -35,25 +37,29 @@ export function RollbackDialog({
 function Inner({ groupId, rollout, versions, onClose }: { groupId: string; rollout: RolloutRow; versions: RolloutView["versions"]; onClose: () => void }) {
   const rollback = useRollback();
   const toast = useToast();
-  // The newest version older than the newest one any ring follows; else the newest kept.
-  const newest = Math.max(rollout.pointers.pilot, rollout.pointers.early, rollout.pointers.everyone);
-  const [version, setVersion] = useState(String((versions.find((v) => v.version < newest) ?? versions[0])?.version ?? ""));
-  const [rings, setRings] = useState<Record<Ring, boolean>>({ pilot: true, early: true, everyone: true });
-  const [touched, setTouched] = useState(false);
+  const previous = previousChange(rollout, versions);
+  const [version, setVersion] = useState(String(previous?.version ?? ""));
+  const [stages, setStages] = useState<Record<Ring, boolean>>({ pilot: true, early: true, everyone: true });
+  const [advancedOpen, setAdvancedOpen] = useState(false);
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<unknown>(null);
-  const chosen = RINGS.filter((r) => rings[r]);
-  const ringsProblem = rollout.enabled && chosen.length === 0;
-  const none = versions.length === 0;
+  const sorted = [...versions].sort((a, b) => b.version - a.version);
+  const target = sorted.find((v) => String(v.version) === version);
+  const chosen = RINGS.filter((r) => stages[r]);
+  const stagesProblem = rollout.enabled && chosen.length === 0;
+  const none = previous === undefined || target === undefined;
 
   function submit() {
-    setTouched(true);
-    if (none || ringsProblem || pending) return;
+    if (none || pending) return;
+    if (stagesProblem) {
+      setAdvancedOpen(true);
+      return;
+    }
     setPending(true);
     setError(null);
-    rollback({ groupId, toVersion: Number(version), rings: rollout.enabled ? chosen : [...RINGS], expectedRevision: rollout.revision }).then(
+    rollback({ groupId, toVersion: target.version, rings: rollout.enabled ? chosen : [...RINGS], expectedRevision: rollout.revision }).then(
       () => {
-        toast(s.rolledBackToast);
+        toast(s.undoToast);
         onClose();
       },
       (e) => {
@@ -66,7 +72,7 @@ function Inner({ groupId, rollout, versions, onClose }: { groupId: string; rollo
   return (
     <Modal
       open
-      title={s.rollbackTitle}
+      title={s.undoTitle}
       onClose={() => !pending && onClose()}
       onSubmit={submit}
       actions={
@@ -75,39 +81,63 @@ function Inner({ groupId, rollout, versions, onClose }: { groupId: string; rollo
             {strings.common.cancel}
           </Button>
           <Button type="submit" disabled={pending || none} aria-busy={pending}>
-            {pending ? s.rollingBack : s.rollbackConfirm}
+            {pending ? s.undoWorking : s.undoConfirm}
           </Button>
         </>
       }
     >
       <div className="dash-form">
-        <p className="dash-dialog__lead">{s.rollbackLead}</p>
+        <p className="dash-dialog__lead ro-lead">
+          {s.undoLead}
+          <InfoTip label={s.undoInfoLabel}>{s.undoInfo}</InfoTip>
+        </p>
         {none ? (
-          <p className="dash-muted">{s.rollbackNoVersions}</p>
+          <p className="ro-note">{s.undoNothing}</p>
         ) : (
-          <Field label={s.rollbackVersion}>
-            {(p) => (
-              <Select {...p} value={version} onChange={(e) => setVersion(e.target.value)}>
-                {versions.map((v) => (
-                  <option key={v.version} value={String(v.version)}>
-                    {s.rollbackVersionOption(v.version, v.reason, formatDate(v.createdAt))}
-                  </option>
-                ))}
-              </Select>
-            )}
-          </Field>
+          <div className="ro-undo">
+            <span className="ro-undo__label">{s.undoGoesBack}</span>
+            <strong className="ro-undo__change" title={s.versionTitle(target.version)}>
+              {target.reason}
+            </strong>
+            <span className="ro-undo__date">{formatDate(target.createdAt)}</span>
+          </div>
         )}
-        {rollout.enabled ? (
-          <FieldSet legend={s.rollbackRings} hint={s.rollbackRingsHint} error={touched && ringsProblem ? s.rollbackRingsProblem : null}>
-            <div className="dash-checks dash-checks--inline">
-              {RINGS.map((r) => (
-                <Checkbox key={r} label={s.rings[r]} checked={rings[r]} onChange={(e) => setRings((cur) => ({ ...cur, [r]: e.target.checked }))} />
-              ))}
+        {previous !== undefined ? (
+          <details
+            className="dash-advanced"
+            open={advancedOpen}
+            onToggle={(e) => setAdvancedOpen(e.currentTarget.open)}
+          >
+            <summary>{s.undoAdvanced}</summary>
+            <div className="dash-advanced__body">
+              <Field label={s.undoPick}>
+                {(p) => (
+                  <Select
+                    {...p}
+                    value={version}
+                    onChange={setVersion}
+                    options={sorted.map((v) => ({
+                      value: String(v.version),
+                      label: s.undoPickOption(v.reason, formatDate(v.createdAt)),
+                      hint: s.undoPickHint(v.version),
+                    }))}
+                  />
+                )}
+              </Field>
+              {rollout.enabled ? (
+                <FieldSet legend={s.undoStages} hint={s.undoStagesHint} error={stagesProblem ? s.undoStagesProblem : null}>
+                  <div className="dash-checks dash-checks--inline">
+                    {RINGS.map((r) => (
+                      <Checkbox key={r} label={s.stages[r]} checked={stages[r]} onChange={(e) => setStages((cur) => ({ ...cur, [r]: e.target.checked }))} />
+                    ))}
+                  </div>
+                </FieldSet>
+              ) : (
+                <p className="ro-note">{s.undoStagesOff}</p>
+              )}
             </div>
-          </FieldSet>
-        ) : (
-          <p className="dash-muted">{s.rollbackRingsOff}</p>
-        )}
+          </details>
+        ) : null}
         <FormError error={error} describe={(e) => rolloutErrorMessage(e)} />
       </div>
     </Modal>

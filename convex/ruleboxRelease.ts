@@ -1,11 +1,12 @@
 import { v } from "convex/values";
+import { env } from "./_generated/server";
 import { writeAudit } from "./lib/audit";
 import { checkRevision, nextRevision } from "./lib/authz";
 import { fail } from "./lib/errors";
-import { isOrdered } from "./lib/feed/version";
-import { memberMutation, memberQuery } from "./lib/functions";
+import { memberAction, memberMutation, memberQuery } from "./lib/functions";
+import { listGithubReleases, releasesRepo, type GithubReleasesResult } from "./lib/githubReleases";
 import { requestPublish } from "./lib/publish";
-import { httpsUrlProblem } from "./lib/appRules";
+import { MAX_RELEASE_BYTES, normalizeRelease } from "./lib/releaseRules";
 import { ruleboxRelease, type RuleboxReleaseValue } from "./lib/validators";
 
 // Rulebox's own update (Phase 6 Step 20, plan 4.17; PRD 23.2, 23.9). The owner names the Rulebox build the organization's PCs
@@ -13,29 +14,8 @@ import { ruleboxRelease, type RuleboxReleaseValue } from "./lib/validators";
 // (`apps/agent/src/selfupdate.rs`) downloads the MSI, checks its SHA-256, and starts the upgrade when no employee is signed
 // in. Nothing in this file talks to a device: the signed document is the only way the release reaches one.
 
-/** The largest MSI an agent downloads (`MAX_RELEASE_BYTES` in `selfupdate.rs`). */
-export const MAX_RELEASE_BYTES = 1024 * 1024 * 1024;
-/** `RuleboxRelease.version` is checked by `rulebox_policy::version`: at most 40 characters, `[0-9A-Za-z.+-]`. */
-const MAX_RELEASE_VERSION_CHARS = 40;
-const SHA256 = /^[0-9a-fA-F]{64}$/;
-
-/**
- * PURE. The release as the agent will accept it (`RuleboxRelease::check_limits`, a second check of the same rules): an ordered
- * version of at most 40 characters, an `https://` URL without credentials, a SHA-256 (stored in lower case) and a size from 1 byte to
- * 1 GiB. `invalid_argument` names the field. The version is trimmed; nothing else is changed.
- */
-export function normalizeRelease(input: RuleboxReleaseValue): RuleboxReleaseValue {
-  const version = input.version.trim();
-  if (version.length === 0 || version.length > MAX_RELEASE_VERSION_CHARS || !isOrdered(version)) {
-    fail("invalid_argument", { field: "release.version" });
-  }
-  if (httpsUrlProblem(input.url)) fail("invalid_argument", { field: "release.url" });
-  if (!SHA256.test(input.sha256)) fail("invalid_argument", { field: "release.sha256" });
-  if (!Number.isSafeInteger(input.sizeBytes) || input.sizeBytes < 1 || input.sizeBytes > MAX_RELEASE_BYTES) {
-    fail("invalid_argument", { field: "release.sizeBytes" });
-  }
-  return { version, url: input.url, sha256: input.sha256.toLowerCase(), sizeBytes: input.sizeBytes };
-}
+// The release rules (`normalizeRelease`, `MAX_RELEASE_BYTES`) live in `lib/releaseRules.ts` (the GitHub picker uses them too).
+export { MAX_RELEASE_BYTES, normalizeRelease };
 
 /**
  * The release the organization's PCs update to (viewer), with the organization's revision to send back to `set`. `release` is
@@ -96,4 +76,56 @@ export const set = memberMutation("owner", { major: "ruleboxRelease:set" })({
     });
     return { revision };
   },
+});
+
+// ---------------------------------------------------------------- the releases on GitHub (UI pass, Settings -> Updates)
+
+const releaseProblem = v.union(
+  v.literal("no_msi"),
+  v.literal("two_msis"),
+  v.literal("version_mismatch"),
+  v.literal("no_checksums"),
+  v.literal("checksums_unreadable"),
+  v.literal("not_in_checksums"),
+  v.literal("hash_mismatch"),
+  v.literal("too_large"),
+  v.literal("invalid"),
+);
+
+const githubRelease = v.object({
+  tag: v.string(),
+  title: v.string(),
+  version: v.string(),
+  prerelease: v.boolean(),
+  publishedAt: v.number(),
+  pageUrl: v.string(),
+  notes: v.string(),
+  notesTruncated: v.boolean(),
+  signed: v.boolean(),
+  msi: v.union(v.object({ name: v.string(), url: v.string(), sizeBytes: v.number(), sha256: v.string() }), v.null()),
+  problem: v.union(v.null(), releaseProblem),
+});
+
+export const githubReleasesResult = v.union(
+  v.object({ status: v.literal("ok"), repoUrl: v.string(), checkedAt: v.number(), stale: v.boolean(), releases: v.array(githubRelease) }),
+  v.object({
+    status: v.literal("unavailable"),
+    reason: v.union(v.literal("rate_limited"), v.literal("unreachable"), v.literal("not_found")),
+    retryAt: v.optional(v.number()),
+  }),
+);
+
+/**
+ * The newest releases of the Rulebox repository on GitHub, ready to fill the Updates form (owner, an unlocked session; it only reads
+ * public data, so it is not a major action: saving stays `ruleboxRelease:set`). Each release comes with the installer's address, size
+ * and SHA-256 (from the release's `SHA256SUMS`), or the reason it cannot be used. Never throws for GitHub's sake: the answer says
+ * `unavailable` (`rate_limited` with `retryAt`, `unreachable`, `not_found`) or `ok` with `stale: true` when an older list is all there
+ * is. Caching is in memory (no database reads or writes beyond the member check): see `lib/githubReleases.ts`. The repository is
+ * `zubairbinshaukat/rulebox` unless the deployment sets `RULEBOX_RELEASES_REPO` (`owner/name`); `GITHUB_TOKEN` (optional) raises the limit.
+ */
+export const githubReleases = memberAction("owner")({
+  args: { refresh: v.optional(v.boolean()) },
+  returns: githubReleasesResult,
+  handler: async (_ctx, args): Promise<GithubReleasesResult> =>
+    listGithubReleases({ repo: releasesRepo(env.RULEBOX_RELEASES_REPO), token: env.GITHUB_TOKEN, refresh: args.refresh === true }),
 });

@@ -5,10 +5,11 @@
  */
 import type { FunctionReturnType } from "convex/server";
 import type { api } from "@convex/_generated/api";
-import type { CompatReport, DeviceDetail, DeviceReport, DeviceRow, KioskPhase, ShellHealth } from "../types";
+import type { CompatReport, DeviceDetail, DevicePage, DeviceReport, DeviceRow, KioskPhase, ShellHealth } from "../types";
 
 type ListRow = FunctionReturnType<typeof api.fleet.list>["page"][number];
 type GetResult = NonNullable<FunctionReturnType<typeof api.fleet.get>>;
+type PageResult = NonNullable<FunctionReturnType<typeof api.fleet.page>>;
 
 const KIOSK_PHASES: readonly string[] = ["notApplied", "applying", "applied", "failed", "unknown"] satisfies KioskPhase[];
 const SHELL_HEALTH: readonly string[] = ["notRunning", "starting", "healthy", "unhealthy", "failed", "unknown"] satisfies ShellHealth[];
@@ -64,6 +65,50 @@ export function deviceRowOf(r: ListRow): DeviceRow {
   };
 }
 
+/** `fleet:page` as the screen's `DevicePage`. Tolerant of absent fields (a stale bundle or a newer field the server adds later). */
+export function devicePageOf(d: PageResult): DevicePage {
+  const r = d.report;
+  const report: DeviceReport | null = r
+    ? {
+        ...r,
+        kioskPhase: kioskPhaseOf(r.kioskPhase),
+        shellHealth: shellHealthOf(r.shellHealth),
+        compat: compatOf(r.compat),
+        // The out-of-support flag is computed on write into the summary (A8), not the report.
+        outOfSupport: d.outOfSupport === true,
+      }
+    : null;
+  return {
+    _id: d._id,
+    name: d.name,
+    revision: d.revision,
+    revoked: d.revoked === true || d.flags.revoked,
+    kioskEnabled: d.kioskEnabled,
+    enrolledAt: d.enrolledAt,
+    group: d.group ?? null,
+    displayMode: d.displayMode ?? "auto",
+    groupDisplayMode: d.groupDisplayMode ?? "auto",
+    presence: { online: d.presence.online, since: d.presence.since },
+    report,
+    outOfSupport: d.outOfSupport === true,
+    latestVersion: d.latestVersion ?? null,
+    planState: d.planState ?? null,
+    flags: d.flags,
+    lock: d.lock ?? null,
+    ring: d.ring ?? "everyone",
+    usbAllowUntil: d.usbAllowUntil ?? null,
+    protection: d.protection ?? null,
+    lockdownCapable: d.lockdownCapable ?? null,
+    apply: d.apply ?? null,
+    failedInstalls: d.failedInstalls ?? { count: 0, more: false, names: [] },
+    network: d.network ?? { wifiFailed: 0, printersFailed: 0 },
+  };
+}
+
+/**
+ * `fleet:get` as the screen's `DeviceDetail`.
+ * @deprecated UI pass 2026-11: the device page reads `fleet:page` (`devicePageOf`).
+ */
 export function deviceDetailOf(d: GetResult): DeviceDetail {
   const r = d.report;
   const report: DeviceReport | null = r

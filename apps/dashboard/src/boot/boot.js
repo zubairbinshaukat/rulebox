@@ -3,7 +3,7 @@
 // scripts. The build emits it as a hashed asset (vite.config.ts, plugin
 // "rulebox-boot") and fills in the route map.
 //
-// 1. Applies the saved theme (and the saved list view, table or cards), so a
+// 1. Applies the saved theme (and the list view, table or cards: the saved one, else by width), so a
 //    dark-mode user never sees a light flash or a table turning into cards.
 // 2. Build only: starts downloading the chunks of the screen this URL shows,
 //    in parallel with the entry script instead of after it (one network round
@@ -19,12 +19,17 @@
   }
   if (theme !== "light") document.documentElement.setAttribute("data-theme", theme);
 
-  // The list view (table or cards), see lib/viewMode.ts. Table unless "cards" is saved.
-  var view = "table";
+  // The list view (table or cards), see lib/viewMode.ts. A saved choice always wins; with none saved, a
+  // viewport under 600 px (a phone) shows cards and anything wider the table (no matchMedia: the table).
+  var view = "";
   try {
-    if (window.localStorage.getItem("rulebox.view") === "cards") view = "cards";
+    var savedView = window.localStorage.getItem("rulebox.view");
+    if (savedView === "table" || savedView === "cards") view = savedView;
   } catch (e) {
-    // Storage blocked: the table.
+    // Storage blocked: nothing saved.
+  }
+  if (!view) {
+    view = typeof window.matchMedia === "function" && window.matchMedia("(max-width: 599px)").matches ? "cards" : "table";
   }
   document.documentElement.setAttribute("data-view", view);
 

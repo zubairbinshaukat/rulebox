@@ -14,8 +14,12 @@ import { AccountMenu } from "./AccountMenu";
 import { ChunkErrorBoundary } from "./ChunkErrorBoundary";
 import { ConnectionBanner } from "./ConnectionBanner";
 import { Nav } from "./Nav";
-import { PublishBanner } from "./PublishBanner";import { PasskeyReminder } from "../stepup/PasskeyReminder";
+import { PublishBanner } from "./PublishBanner";
 import { StepUpProvider } from "../stepup/StepUpProvider";
+
+// The passkey reminder (with the long step-up texts and the WebAuthn helper it needs) loads after the first paint: it is a banner for
+// a member who has no passkey yet, so the first screen does not wait for it (UI pass size trim, 2026-11-28).
+const PasskeyReminder = lazy(() => import("../stepup/PasskeyReminder").then((m) => ({ default: m.PasskeyReminder })));
 
 // `__DEMO__` is a build-time literal, so live builds drop this chunk entirely.
 const DemoControls = __DEMO__ ? lazy(() => import("./DemoControls")) : null;
@@ -137,7 +141,9 @@ function Shell() {
 
           <ConnectionBanner />
           <PublishBanner />
-          <PasskeyReminder />
+          <Suspense fallback={null}>
+            <PasskeyReminder />
+          </Suspense>
           {versionMismatch ? (
             <div className="dash-banner dash-banner--accent" role="status">
               <span className="dash-banner__icon" aria-hidden="true">

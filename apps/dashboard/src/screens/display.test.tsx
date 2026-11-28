@@ -7,8 +7,9 @@ import type { DeviceDetail, GroupDetail, Me } from "../data/types";
 import { MeContext } from "../lib/member";
 import { strings } from "../lib/strings";
 import { displayStrings as s } from "../lib/screenStrings/display";
+import { optionLabels, pickOption, selectedText } from "../test/select";
 
-// Phase 6 Step 19: the group's and the PC's display settings cards against the LIVE data seam with the Convex React hooks mocked
+// Phase 6 Step 19: the group's display dialog (opened from the group page's setup row) and the PC's display card against the LIVE data seam with the Convex React hooks mocked
 // (convex/displayMode.test.ts covers the backend).
 const cx = vi.hoisted(() => ({ fns: {} as Record<string, (args?: unknown) => Promise<unknown>> }));
 
@@ -38,7 +39,7 @@ function fnFor(name: string) {
 import { ToastProvider } from "../app/Toasts";
 import { DeviceDisplayCard } from "./display/DeviceDisplayCard";
 import { standardOnSmallPc } from "./display/rules";
-import { GroupDisplayCard } from "./display/GroupDisplayCard";
+import { GroupDisplayDialog } from "./display/GroupDisplayCard";
 
 const admin: Me = { email: "a@x.test", role: "admin", status: "active", orgId: "org", orgName: "Acme", pin: { required: true, set: true }, serverApiVersion: 1 };
 
@@ -82,65 +83,65 @@ beforeEach(() => {
 });
 afterEach(() => cleanup());
 
-describe("GroupDisplayCard (groups:setDisplay)", () => {
+describe("GroupDisplayDialog (groups:setDisplay)", () => {
   it("sends the mode, the window limit and the idle close with the loaded revision; null means the default", async () => {
     const set = vi.fn(async () => ({ revision: 4 }));
     cx.fns["groups:setDisplay"] = set;
-    ui(<GroupDisplayCard g={group()} />);
+    const onClose = vi.fn();
+    ui(<GroupDisplayDialog g={group()} onClose={onClose} />);
     expect(screen.getByRole("button", { name: strings.common.save }).hasAttribute("disabled")).toBe(true);
 
-    fireEvent.change(screen.getByLabelText(s.mode), { target: { value: "lite" } });
-    fireEvent.change(screen.getByLabelText(s.windowCap), { target: { value: "2" } });
-    fireEvent.change(screen.getByLabelText(s.idleClose), { target: { value: "0" } });
+    pickOption(s.mode, s.modeLite);
+    pickOption(s.windowCap, s.capOption(2));
+    pickOption(s.idleClose, s.idleOff);
     fireEvent.click(screen.getByRole("button", { name: strings.common.save }));
     await waitFor(() => expect(set).toHaveBeenCalledTimes(1));
     expect(set).toHaveBeenCalledWith({ groupId: "g1", expectedRevision: 3, displayMode: "lite", webWindowCap: 2, webIdleCloseMin: 0 });
     expect(await screen.findByText(s.saved)).toBeTruthy();
+    expect(onClose).toHaveBeenCalled();
   });
 
   it("shows what the group holds, offers every cap from 1 to 12 and a stored odd idle time, and sends null for the defaults", async () => {
     const set = vi.fn(async () => ({ revision: 4 }));
     cx.fns["groups:setDisplay"] = set;
-    ui(<GroupDisplayCard g={group({ displayMode: "standard", webWindowCap: 5, webIdleCloseMin: 17 })} />);
-    expect((screen.getByLabelText(s.mode) as HTMLSelectElement).value).toBe("standard");
-    expect((screen.getByLabelText(s.windowCap) as HTMLSelectElement).value).toBe("5");
-    expect((screen.getByLabelText(s.idleClose) as HTMLSelectElement).value).toBe("17");
-    expect(screen.getAllByRole("option").filter((o) => /window/.test(o.textContent ?? "") && !/Default/.test(o.textContent ?? ""))).toHaveLength(12);
+    ui(<GroupDisplayDialog g={group({ displayMode: "standard", webWindowCap: 5, webIdleCloseMin: 17 })} onClose={() => undefined} />);
+    expect(selectedText(s.mode)).toBe(s.modeStandard);
+    expect(selectedText(s.windowCap)).toBe(s.capOption(5));
+    expect(selectedText(s.idleClose)).toBe(s.idleOption(17));
+    expect(optionLabels(s.windowCap).filter((o) => o !== s.capDefault)).toHaveLength(12);
     // Standard on small PCs: a warning is shown for the group too.
     expect(screen.getByText(s.standardOnSmallGroup)).toBeTruthy();
 
-    fireEvent.change(screen.getByLabelText(s.mode), { target: { value: "auto" } });
-    fireEvent.change(screen.getByLabelText(s.windowCap), { target: { value: "" } });
-    fireEvent.change(screen.getByLabelText(s.idleClose), { target: { value: "" } });
+    pickOption(s.mode, s.modeAuto);
+    pickOption(s.windowCap, s.capDefault);
+    pickOption(s.idleClose, s.idleDefault);
     fireEvent.click(screen.getByRole("button", { name: strings.common.save }));
     await waitFor(() => expect(set).toHaveBeenCalled());
     expect(set).toHaveBeenCalledWith({ groupId: "g1", expectedRevision: 3, displayMode: "auto", webWindowCap: null, webIdleCloseMin: null });
   });
 
-  it("a stale edit is reported and the form is not cleared; a viewer only reads", async () => {
+  it("a stale edit is reported inside the dialog and the choices are kept; Reload takes the group's values", async () => {
     cx.fns["groups:setDisplay"] = vi.fn(async () => {
       throw new ConvexError({ code: "stale_edit" });
     });
-    const view = ui(<GroupDisplayCard g={group()} />);
-    fireEvent.change(screen.getByLabelText(s.mode), { target: { value: "lite" } });
+    const onClose = vi.fn();
+    ui(<GroupDisplayDialog g={group({ displayMode: "lite" })} onClose={onClose} />);
+    pickOption(s.mode, s.modeStandard);
     fireEvent.click(screen.getByRole("button", { name: strings.common.save }));
-    await waitFor(() => expect(cx.fns["groups:setDisplay"]).toBeDefined());
-    expect(await screen.findByText(/changed|someone/i)).toBeTruthy();
-    expect((screen.getByLabelText(s.mode) as HTMLSelectElement).value).toBe("lite");
-    view.unmount();
-    ui(<GroupDisplayCard g={group({ displayMode: "lite" })} />, "viewer");
-    expect(screen.queryByRole("button", { name: strings.common.save })).toBeNull();
-    expect(screen.getByText(new RegExp(`${s.mode}: ${s.modeLite}`))).toBeTruthy();
+    expect(await screen.findByText(strings.common.staleTitle)).toBeTruthy();
+    expect(selectedText(s.mode)).toBe(s.modeStandard);
+    expect(onClose).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("button", { name: strings.common.reload }));
+    expect(selectedText(s.mode)).toBe(s.modeLite);
   });
 });
-
 describe("DeviceDisplayCard (fleet:setDisplayMode)", () => {
   it("sends the PC's own choice with the loaded revision", async () => {
     const set = vi.fn(async () => ({ revision: 8 }));
     cx.fns["fleet:setDisplayMode"] = set;
     ui(<DeviceDisplayCard d={device({ displayMode: "auto", groupDisplayMode: "lite" })} />);
     expect(screen.getByText(s.groupChoice(s.modeLite))).toBeTruthy();
-    fireEvent.change(screen.getByLabelText(s.mode), { target: { value: "standard" } });
+    pickOption(s.mode, s.modeStandard);
     fireEvent.click(screen.getByRole("button", { name: strings.common.save }));
     await waitFor(() => expect(set).toHaveBeenCalledWith({ deviceId: "d1", expectedRevision: 7, displayMode: "standard" }));
   });
@@ -160,7 +161,7 @@ describe("DeviceDisplayCard (fleet:setDisplayMode)", () => {
 
   it("an older server (no display fields) reads as automatic; a revoked PC cannot be changed", () => {
     ui(<DeviceDisplayCard d={device({ revoked: true })} />);
-    expect((screen.getByLabelText(s.mode) as HTMLSelectElement).value).toBe("auto");
-    expect((screen.getByLabelText(s.mode) as HTMLSelectElement).disabled).toBe(true);
+    expect(selectedText(s.mode)).toBe(s.modeAuto);
+    expect((screen.getByLabelText(s.mode) as HTMLButtonElement).disabled).toBe(true);
   });
 });

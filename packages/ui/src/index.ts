@@ -28,7 +28,16 @@ export { Notice, type NoticeProps, type NoticeTone } from "./components/Notice";
 export { Spinner, type SpinnerProps } from "./components/Spinner";
 export { rovingKeyDown, type RovingOrientation } from "./roving";
 export { setTheme, setLite, type Theme } from "./theme";
-export { Select, type SelectProps } from "./components/Select";
+export { Select, type SelectProps, type SelectOption } from "./components/Select";
+export { SearchSelect, type SearchSelectProps } from "./components/SearchSelect";
+export { InfoTip, type InfoTipProps } from "./components/InfoTip";
+export {
+  placeFloating,
+  useFloating,
+  type FloatingAlign,
+  type FloatingOptions,
+  type FloatingSide,
+} from "./floating";
 export { Textarea, type TextareaProps } from "./components/Textarea";
 export { Checkbox, type CheckboxProps } from "./components/Checkbox";
 

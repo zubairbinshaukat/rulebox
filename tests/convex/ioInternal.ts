@@ -38,6 +38,16 @@ export type InternalCase = (c: InternalEnv) => Promise<() => Promise<unknown>>;
 /** The app's Argon2id parameters, any salt / hash: what `employees:isAppPhc` and `testing:storeKnownPin` accept. */
 export const PHC = "$argon2id$v=19$m=19456,t=2,p=1$AAAAAAAAAAAAAAAAAAAAAA$AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA";
 const HEX = (s: string) => sha256HexSync(s);
+/** The arguments of `wifi:insertDraft` (the first step of `wifi:createWithPassphrase`). */
+const WIFI_DRAFT = (c: { f: { orgId: Id<"organizations"> }; actor: { type: "member"; id: string; label: string } }) => ({
+  orgId: c.f.orgId,
+  actor: c.actor,
+  name: "Draft",
+  ssid: "Draft",
+  hidden: false,
+  security: "wpa2Personal" as const,
+  autoConnect: true,
+});
 const MAIL = { to: "ana@acme.test", subject: "Hello", text: "Body" };
 
 /** The master key + mail settings, as `platform:setSecret` stores them (fetch is stubbed by the test). */
@@ -398,6 +408,33 @@ export const INTERNAL_CALLS: Record<string, InternalCase | InternalCase[]> = {
       expectedRevision: 1,
       atRest: { keyId: "0123456789abcdef", sealed: "AAAA" },
     }),
+  // UI pass (enrollment plan 4.3): `wifi:createWithPassphrase`'s four internal functions. The draft is made unprobed by the cases that need one.
+  "wifi:prepareCreate": async (c) => {
+    setMaster(MASTER_A);
+    await createKeys(c.f.t, c.f.orgId);
+    return () => c.f.t.query(internal.wifi.prepareCreate, { orgId: c.f.orgId, groupIds: [c.f.groupId] });
+  },
+  "wifi:insertDraft": async (c) => () => c.f.t.mutation(internal.wifi.insertDraft, WIFI_DRAFT(c)),
+  "wifi:finishCreate": async (c) => {
+    const id = await c.f.t.mutation(internal.wifi.insertDraft, WIFI_DRAFT(c));
+    return () =>
+      c.f.t.mutation(internal.wifi.finishCreate, {
+        orgId: c.f.orgId,
+        actor: c.actor,
+        by: c.f.targetMemberId,
+        id,
+        groupIds: [c.f.groupId],
+        atRest: { keyId: "0123456789abcdef", sealed: "AAAA" },
+      });
+  },
+  "wifi:discardDraft": async (c) => {
+    const id = await c.f.t.mutation(internal.wifi.insertDraft, WIFI_DRAFT(c));
+    return async () => {
+      const deleted = await c.f.t.mutation(internal.wifi.discardDraft, { orgId: c.f.orgId, actor: c.actor, id });
+      if (!deleted) throw new Error("wifi:discardDraft did not delete the draft"); // a refusal would measure the guard, not the function
+      return deleted;
+    };
+  },
   "seal:jobs": async (c) => {
     const { deviceIds } = await sealingSetup(c, 2);
     return () => c.f.t.query(internal.seal.jobs, { orgId: c.f.orgId, deviceIds });
@@ -510,6 +547,31 @@ export const INTERNAL_CALLS: Record<string, InternalCase | InternalCase[]> = {
   "maintenance:migratePlans": async (c) => () => c.f.t.mutation(internal.maintenance.migratePlans, {}),
   "maintenance:migrateDevices": async (c) => () => c.f.t.mutation(internal.maintenance.migrateDevices, {}),
   "maintenance:narrowDevices": async (c) => () => c.f.t.mutation(internal.maintenance.narrowDevices, {}),
+  // A full page of PCs (100, each with an apply report naming the configuration of its group): the backfill makes up to 100 sync rows.
+  "maintenance:backfillLockdownSync": async (c) => {
+    await c.f.t.run(async (ctx) => {
+      const layer = { mode: "audit", state: "ok" };
+      const pcs = await ctx.db.query("devices").withIndex("by_org", (q) => q.eq("orgId", c.f.orgId)).take(100);
+      for (const [i, d] of pcs.entries()) {
+        if (d.groupId === undefined) continue;
+        await ctx.db.insert("deviceApplyReports", {
+          orgId: c.f.orgId,
+          deviceId: d._id,
+          appliedVersion: 7,
+          config: { groupId: d.groupId, version: 1, ring: "everyone" },
+          state: "applied",
+          layers: { staff: layer, machine: layer, appLocker: layer, appControl: layer, procWatch: layer, boot: layer, performance: layer },
+          wifi: [{ profileId: "k57f1d0c9j3x8m2p4q6r8s0t2v4w6y8z", revision: 3, state: "applied" }],
+          printers: [],
+          lkgVersion: 6,
+          capabilities: ["lockdown/1", "wifi/1"],
+          contentHash: i.toString(16).padStart(64, "0"),
+          updatedAt: Date.now(),
+        });
+      }
+    });
+    return () => c.f.t.mutation(internal.maintenance.backfillLockdownSync, {});
+  },
   "maintenance:dropDesiredStates": async (c) => () => c.f.t.mutation(internal.maintenance.dropDesiredStates, {}),
   "maintenance:dropTotpTables": async (c) => {
     await c.f.t.run(async (ctx) => {

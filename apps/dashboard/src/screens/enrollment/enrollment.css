@@ -1,61 +1,898 @@
-/* Enrollment screen (loaded with its chunk). Tokens only; light and dark come from them. */
+/*
+ * "Add a PC" (route /enrollment; UI pass 2026-11, docs/plans/ui-pass/enrollment-networks.md section 5.1). Loaded with the screen's
+ * chunk. Tokens only. The wizard lays itself out by the width of its own card (container `addpc`), the page by the shell's bands:
+ * phone < 600 (one column, steps stacked, Copy sticks to the bottom) · tablet 600-1023 (steps in a row, code | actions) · laptop
+ * 1024-1599 and wide >= 1600 (wizard 2/3 + "Your codes" 1/3). The only motion is opacity and transform, none with reduced motion or Lite.
+ */
 
-.dash-onetime {
-  border-color: color-mix(in oklch, var(--rb-accent) 45%, var(--rb-line));
+/* ------------------------------------------------------------ the wizard card */
+
+.addpc {
+  container: addpc / inline-size;
+  overflow: hidden;
 }
-.dash-onetime__title:focus {
+.addpc__top {
+  padding: 18px clamp(16px, 4cqi, 28px);
+  background: color-mix(in oklch, var(--rb-accent-soft) 55%, var(--rb-surface));
+  border-bottom: 1px solid var(--rb-line);
+}
+.addpc__body {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+  min-width: 0;
+  padding: clamp(18px, 4cqi, 28px);
+}
+.addpc__heading {
+  margin: 0;
+  font-size: clamp(19px, 3cqi + 6px, 22px);
+  font-weight: 650;
+  letter-spacing: -0.02em;
+  line-height: 1.25;
+}
+.addpc__heading:focus {
   outline: none;
 }
-.dash-onetime__title:focus-visible {
-  outline: 2px solid var(--rb-accent);
-  outline-offset: 3px;
+.addpc__heading:focus-visible {
+  outline: 2px solid var(--rb-focus);
+  outline-offset: 4px;
   border-radius: 4px;
 }
-/* The code in blocks for reading aloud. Display only: the blocks have no
-   spaces between them, so selecting and copying gives the exact code. */
-.dash-onetime__code {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px 10px;
-  margin: 0;
-  padding: 16px;
-  border-radius: var(--rb-r-md);
-  background: var(--rb-paper);
-  border: 1px solid var(--rb-line);
-  font-family: var(--rb-font-mono);
-  font-size: clamp(17px, 2.4vw, 22px);
+
+/* The one main button of each step. */
+.addpc-primary {
+  height: 48px;
+  padding: 0 24px;
+  font-size: 15px;
   font-weight: 600;
-  line-height: 1.35;
-  letter-spacing: 0.04em;
+}
+
+/* ------------------------------------------------------------ the stepper */
+
+.addpc-steps {
+  display: flex;
+  flex-direction: column;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.addpc-step {
+  position: relative;
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
   min-width: 0;
+  padding-bottom: 16px;
 }
-.dash-onetime__code > span {
-  white-space: nowrap;
+.addpc-step:last-child {
+  padding-bottom: 0;
 }
-.dash-onetime__meta {
-  margin: 0;
-  color: var(--rb-muted);
+/* The line down to the next dot (a column on a phone). */
+.addpc-step:not(:last-child)::after {
+  content: "";
+  position: absolute;
+  inset-inline-start: 14px;
+  top: 32px;
+  bottom: 2px;
+  width: 2px;
+  border-radius: 1px;
+  background: var(--rb-line);
 }
-.dash-onetime__howto {
-  margin: 0;
+.addpc-step[data-state="done"]:not(:last-child)::after {
+  background: var(--rb-accent);
 }
-.dash-onetime__howto + .dash-onetime__howto {
-  margin-top: -6px;
+.addpc-step__dot {
+  display: grid;
+  place-items: center;
+  flex: none;
+  width: 30px;
+  height: 30px;
+  border-radius: 50%;
+  border: 2px solid var(--rb-line-strong);
+  background: var(--rb-surface);
   color: var(--rb-muted);
   font-size: 13.5px;
+  font-weight: 650;
+  font-variant-numeric: tabular-nums;
 }
-.dash-onetime__howto code {
-  font-family: var(--rb-font-mono);
-  font-size: 0.95em;
+.addpc-step__dot svg {
+  width: 16px;
+  height: 16px;
+}
+.addpc-step[data-state="current"] .addpc-step__dot {
+  border-color: var(--rb-accent);
+  background: var(--rb-accent);
+  color: var(--rb-on-ink);
+  box-shadow: 0 0 0 4px color-mix(in oklch, var(--rb-accent) 22%, transparent);
+}
+.addpc-step[data-state="done"] .addpc-step__dot {
+  border-color: var(--rb-accent);
+  background: var(--rb-accent-soft);
+  color: var(--rb-accent-text);
+}
+.addpc-step__text {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
+  padding-top: 5px;
+}
+.addpc-step__label {
+  font-size: 14.5px;
+  font-weight: 600;
+  line-height: 1.25;
+}
+.addpc-step[data-state="todo"] .addpc-step__label {
+  color: var(--rb-muted);
+  font-weight: 500;
+}
+.addpc-step__sub {
+  font-size: 12.5px;
+  color: var(--rb-muted);
   overflow-wrap: anywhere;
 }
 
-.dash-ttl-custom {
+/* From 520 px the three steps sit in a row with a line between them. */
+@container addpc (min-width: 520px) {
+  .addpc-steps {
+    flex-direction: row;
+    align-items: center;
+  }
+  .addpc-step {
+    flex: 1 1 auto;
+    align-items: center;
+    padding-bottom: 0;
+  }
+  .addpc-step:last-child {
+    flex: 0 1 auto;
+  }
+  .addpc-step__text {
+    padding-top: 0;
+  }
+  .addpc-step:not(:last-child)::after {
+    position: static;
+    flex: 1 1 24px;
+    min-width: 16px;
+    height: 2px;
+    margin-inline: 4px 14px;
+  }
+}
+
+/* ------------------------------------------------------------ step 1 */
+
+.addpc-form {
   display: flex;
+  flex-direction: column;
+  gap: 20px;
+  min-width: 0;
+}
+.addpc-form__fields {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 20px;
+  min-width: 0;
+}
+@container addpc (min-width: 560px) {
+  .addpc-form__fields {
+    grid-template-columns: minmax(0, 1.5fr) minmax(0, 1fr);
+    align-items: start;
+  }
+  .addpc-form__fields--one {
+    grid-template-columns: minmax(0, 420px);
+  }
+}
+.addpc-lead {
+  margin: 0;
+  color: var(--rb-muted);
+}
+.addpc-count {
+  display: flex;
+  align-items: center;
   gap: 8px;
   min-width: 0;
 }
-.dash-ttl-custom > * {
-  flex: 1;
+.addpc-count__input {
+  flex: 0 1 96px;
+  min-width: 64px;
+  text-align: center;
+  font-size: 18px;
+  font-weight: 650;
+  font-variant-numeric: tabular-nums;
+}
+.addpc-form__foot {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px 24px;
   min-width: 0;
+}
+.addpc-form__summary {
+  flex: 1 1 240px;
+  margin: 0;
+  color: var(--rb-muted);
+  font-size: 13.5px;
+  min-width: 0;
+}
+@container addpc (max-width: 519px) {
+  .addpc-form__foot {
+    flex-direction: column-reverse;
+    align-items: stretch;
+  }
+  .addpc-form__foot .addpc-primary {
+    width: 100%;
+  }
+  .addpc-form__summary {
+    flex-basis: auto;
+    text-align: center;
+  }
+}
+
+/* ------------------------------------------------------------ step 2 */
+
+.addpc-install {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+  min-width: 0;
+}
+.addpc-code {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 14px;
+  min-width: 0;
+}
+/* Code on the left, the three ways to use it on the right. */
+@container addpc (min-width: 700px) {
+  .addpc-code {
+    grid-template-columns: minmax(0, 1fr) 232px;
+    align-items: stretch;
+  }
+}
+.addpc-code__panel {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 10px;
+  min-width: 0;
+  padding: 16px 18px;
+  border: 1px solid var(--rb-line);
+  border-radius: var(--rb-r-16);
+  background: var(--rb-paper);
+  box-shadow: inset 0 1px 0 color-mix(in oklch, var(--rb-surface) 80%, transparent);
+}
+.addpc-code__head {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 12px;
+  font-weight: 650;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--rb-muted);
+}
+/* The code in blocks of four. Inline spans with no characters between them, so a selection copies the exact code. */
+.addpc-blocks {
+  margin: 0;
+  font-family: var(--rb-font-mono);
+  font-size: clamp(16px, 3.2cqi + 4px, 22px);
+  font-weight: 600;
+  line-height: 1.75;
+  letter-spacing: 0.03em;
+  overflow-wrap: normal;
+  min-width: 0;
+}
+.addpc-blocks__b {
+  display: inline;
+  margin-inline-end: 0.7ch;
+  white-space: nowrap;
+}
+.addpc-blocks > span:first-child .addpc-blocks__b {
+  color: var(--rb-accent-text);
+}
+.addpc-blocks--compact {
+  font-size: 13.5px;
+  line-height: 1.6;
+  font-weight: 500;
+}
+.addpc-code__manual {
+  margin: 0;
+  font-size: 13px;
+  color: var(--rb-muted);
+}
+.addpc-code__manual:empty {
+  display: none;
+}
+
+.addpc-actions {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 10px;
+  min-width: 0;
+}
+.addpc-copy,
+.addpc-download {
+  width: 100%;
+}
+.addpc-download {
+  height: 46px;
+  font-weight: 600;
+}
+.addpc-actions__more {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.addpc-actions__more > * {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+@container addpc (min-width: 520px) and (max-width: 699px) {
+  .addpc-actions {
+    flex-direction: row;
+    flex-wrap: wrap;
+  }
+  .addpc-copy,
+  .addpc-download {
+    flex: 1 1 200px;
+    width: auto;
+  }
+  .addpc-actions__more {
+    flex: 1 1 100%;
+  }
+}
+/* On a phone Copy stays in reach while the steps below scroll past. */
+@container addpc (max-width: 519px) {
+  .addpc-copy {
+    position: sticky;
+    bottom: calc(12px + env(safe-area-inset-bottom));
+    z-index: 2;
+    box-shadow: var(--rb-shadow-md);
+  }
+}
+
+.addpc-works {
+  margin: 0;
+  font-weight: 550;
+}
+.addpc-how {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 10px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.addpc-how > li {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  min-width: 0;
+}
+.addpc-how__n {
+  display: grid;
+  place-items: center;
+  flex: none;
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  background: var(--rb-hover);
+  color: var(--rb-ink);
+  font-size: 12.5px;
+  font-weight: 650;
+  font-variant-numeric: tabular-nums;
+}
+.addpc-how > li > span:last-child {
+  padding-top: 2px;
+}
+@container addpc (min-width: 760px) {
+  .addpc-how {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 12px;
+  }
+  .addpc-how > li {
+    flex-direction: column;
+    gap: 8px;
+    padding: 12px 14px;
+    border: 1px solid var(--rb-line);
+    border-radius: var(--rb-r-md);
+    background: var(--rb-surface);
+  }
+}
+.addpc-needs {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin: 0;
+  font-size: 13.5px;
+  color: var(--rb-muted);
+}
+.addpc-note {
+  margin: 0;
+  font-size: 13px;
+  color: var(--rb-muted);
+}
+.addpc-note--ok {
+  color: var(--rb-success-text);
+  font-weight: 600;
+}
+
+/* The one command: the text (it wraps anywhere, the code is long) and its Copy button. */
+.addpc-cmd {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+}
+.addpc-cmd__label {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 600;
+}
+.addpc-cmd__row {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  min-width: 0;
+}
+.addpc-cmd__text {
+  flex: 1 1 auto;
+  min-width: 0;
+  padding: 10px 12px;
+  border: 1px solid var(--rb-line);
+  border-radius: var(--rb-r-sm);
+  background: var(--rb-paper);
+  font-family: var(--rb-font-mono);
+  font-size: 12.5px;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+.addpc-cmd__row .rb-btn {
+  flex: none;
+}
+.addpc-cmd__manual {
+  margin: 0;
+  font-size: 13px;
+  color: var(--rb-muted);
+}
+.addpc-cmd__manual:empty {
+  display: none;
+}
+@container addpc (max-width: 519px) {
+  .addpc-cmd__row {
+    flex-direction: column;
+  }
+  .addpc-cmd__row .rb-btn {
+    align-self: flex-start;
+  }
+}
+
+/* Waiting for the PC: a dot with a ring that grows and fades (transform and opacity only). */
+.addpc-wait {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 16px 18px;
+  border: 1px dashed color-mix(in oklch, var(--rb-accent) 45%, var(--rb-line));
+  border-radius: var(--rb-r-md);
+  background: color-mix(in oklch, var(--rb-accent-soft) 45%, var(--rb-surface));
+}
+.addpc-wait__title {
+  margin: 0;
+  font-weight: 650;
+}
+.addpc-wait__sub {
+  margin: 2px 0 0;
+  font-size: 13px;
+  color: var(--rb-muted);
+}
+.addpc-pulse {
+  position: relative;
+  flex: none;
+  width: 12px;
+  height: 12px;
+  margin: 0 6px;
+  border-radius: 50%;
+  background: var(--rb-accent);
+}
+.addpc-pulse::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+  background: var(--rb-accent);
+  animation: addpc-ring 1.9s cubic-bezier(0.2, 0.8, 0.2, 1) infinite;
+}
+@keyframes addpc-ring {
+  from {
+    opacity: 0.55;
+    transform: scale(1);
+  }
+  to {
+    opacity: 0;
+    transform: scale(3);
+  }
+}
+
+/* ------------------------------------------------------------ step 3 */
+
+.addpc-joined {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  min-width: 0;
+}
+.addpc-pcs {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 360px), 1fr));
+  gap: 12px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.addpc-pc {
+  --stage-fill: var(--rb-accent);
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  min-width: 0;
+  padding: 14px 16px;
+  border: 1px solid var(--rb-line);
+  border-radius: var(--rb-r-16);
+  background: var(--rb-surface);
+}
+.addpc-pc[data-stage="ready"] {
+  --stage-fill: var(--rb-success);
+  border-color: color-mix(in oklch, var(--rb-success) 40%, var(--rb-line));
+}
+.addpc-pc__head {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+}
+.addpc-pc__icon {
+  display: grid;
+  place-items: center;
+  flex: none;
+  width: 42px;
+  height: 42px;
+  border-radius: 12px;
+  background: var(--rb-accent-soft);
+  color: var(--rb-accent-text);
+  font-size: 22px;
+}
+.addpc-pc[data-stage="ready"] .addpc-pc__icon {
+  background: var(--rb-success-soft);
+  color: var(--rb-success-text);
+}
+.addpc-pc__id {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+.addpc-pc__name {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 650;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.addpc-pc__meta {
+  margin: 1px 0 0;
+  font-size: 13px;
+  color: var(--rb-muted);
+}
+.addpc-pc__muted {
+  color: var(--rb-faint);
+}
+.addpc-pc__open {
+  flex: none;
+}
+
+/* Joined, Online, Setting up, Ready: four equal bars that fill (scaleX) as the PC comes further. */
+.addpc-stages {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.addpc-stage {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+}
+.addpc-stage__bar {
+  position: relative;
+  display: block;
+  height: 5px;
+  overflow: hidden;
+  border-radius: 3px;
+  background: var(--rb-line);
+}
+.addpc-stage__bar::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: 3px;
+  background: var(--stage-fill);
+  transform: scaleX(0);
+  transform-origin: left;
+  transition: transform 0.5s var(--rb-ease);
+}
+[dir="rtl"] .addpc-stage__bar::after {
+  transform-origin: right;
+}
+.addpc-stage[data-state="done"] .addpc-stage__bar::after {
+  transform: scaleX(1);
+}
+.addpc-stage[data-state="current"] .addpc-stage__bar::after {
+  transform: scaleX(0.55);
+  animation: addpc-working 1.4s ease-in-out infinite alternate;
+}
+@keyframes addpc-working {
+  from {
+    opacity: 1;
+  }
+  to {
+    opacity: 0.45;
+  }
+}
+.addpc-stage__label {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  min-width: 0;
+  font-size: 12px;
+  color: var(--rb-muted);
+}
+.addpc-stage__label > span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.addpc-stage__label svg {
+  flex: none;
+  width: 13px;
+  height: 13px;
+  color: var(--stage-fill);
+}
+.addpc-stage[data-state="current"] .addpc-stage__label {
+  color: var(--rb-ink);
+  font-weight: 650;
+}
+.addpc-attention {
+  display: inline-flex;
+  align-items: center;
+  align-self: flex-start;
+  gap: 6px;
+  padding: 7px 12px;
+  border-radius: var(--rb-r-sm);
+  background: var(--rb-warning-soft);
+  color: var(--rb-warning-text);
+  font-size: 13.5px;
+  font-weight: 650;
+  text-decoration: none;
+}
+.addpc-attention:hover {
+  text-decoration: underline;
+}
+.addpc-more {
+  margin: -4px 0 0;
+  font-size: 13.5px;
+}
+.addpc-next {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px 14px;
+  border: 1px dashed color-mix(in oklch, var(--rb-accent) 45%, var(--rb-line));
+  border-radius: var(--rb-r-md);
+  background: color-mix(in oklch, var(--rb-accent-soft) 40%, var(--rb-surface));
+}
+.addpc-next__text {
+  margin: 0;
+  font-size: 13.5px;
+  font-weight: 600;
+}
+.addpc-next__row {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  min-width: 0;
+}
+.addpc-next__row .addpc-blocks {
+  flex: 1 1 auto;
+}
+.addpc-next__row .rb-btn {
+  flex: none;
+}
+.addpc-end {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+@container addpc (max-width: 519px) {
+  .addpc-end {
+    flex-direction: column;
+  }
+  .addpc-end > * {
+    width: 100%;
+  }
+}
+
+/* ------------------------------------------------------------ closed wizard */
+
+.addpc-idle {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 16px 20px;
+  padding: clamp(18px, 3vw, 28px);
+  background: linear-gradient(135deg, color-mix(in oklch, var(--rb-accent-soft) 60%, var(--rb-surface)), var(--rb-surface) 70%);
+}
+.addpc-idle__icon {
+  display: grid;
+  place-items: center;
+  flex: none;
+  width: 56px;
+  height: 56px;
+  border-radius: 16px;
+  background: var(--rb-accent-soft);
+  color: var(--rb-accent-text);
+  font-size: 30px;
+}
+.addpc-idle__text {
+  flex: 1 1 240px;
+  min-width: 0;
+}
+.addpc-idle__title {
+  margin: 0;
+  font-size: 19px;
+  font-weight: 650;
+  letter-spacing: -0.02em;
+}
+.addpc-idle__body {
+  margin: 4px 0 0;
+  color: var(--rb-muted);
+}
+
+/* ------------------------------------------------------------ your codes */
+
+.addpc-aside__title:focus {
+  outline: none;
+}
+.addpc-aside__title:focus-visible {
+  outline: 2px solid var(--rb-focus);
+  outline-offset: 3px;
+  border-radius: 4px;
+}
+.addpc-aside__body {
+  padding: 4px 0 4px;
+  min-width: 0;
+}
+.addpc-aside__empty {
+  margin: 0;
+  padding: 8px 20px 20px;
+  color: var(--rb-muted);
+}
+/* A card here is already inside a card: tighter, and its buttons sit in one row. */
+.addpc-aside .dash-dt:not([data-framed]) .dash-dt__toolbar {
+  padding-top: 4px;
+}
+.addpc-aside .dash-rcard__actions {
+  gap: 6px;
+}
+/* Compact cards: the state pill sits beside the name, the group under it, then the facts and the buttons. */
+.addpc-aside .dash-rcard {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: start;
+  gap: 4px 10px;
+  padding: 12px 14px;
+}
+.addpc-aside .dash-rcard > * {
+  grid-column: 1 / -1;
+}
+.addpc-aside .dash-rcard__title {
+  grid-column: 1;
+  grid-row: 1;
+}
+.addpc-aside .dash-rcard__status {
+  grid-column: 2;
+  grid-row: 1;
+}
+.addpc-aside .dash-rcard__sub {
+  margin-top: 0;
+}
+.addpc-aside .dash-rcard__facts {
+  margin-top: 6px;
+}
+.addpc-aside .dash-rcard__actions {
+  margin-top: 6px;
+  padding-top: 8px;
+  border-top: 1px solid var(--rb-line);
+}
+/* Beside the wizard the list stays in view and scrolls inside its own column. */
+@media (min-width: 1024px) {
+  .enroll .dash-split__aside {
+    position: sticky;
+    top: calc(var(--dash-topbar) + 16px);
+    max-height: calc(100vh - var(--dash-topbar) - 32px);
+  }
+  .addpc-aside {
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+    overflow: hidden;
+  }
+  .addpc-aside__body {
+    overflow-y: auto;
+    overscroll-behavior: contain;
+  }
+}
+
+/* ------------------------------------------------------------ reduced motion and Lite */
+
+@media (prefers-reduced-motion: reduce) {
+  .addpc-pulse::after,
+  .addpc-stage[data-state="current"] .addpc-stage__bar::after {
+    animation: none;
+  }
+  .addpc-pulse::after {
+    display: none;
+  }
+  .addpc-stage__bar::after {
+    transition: none;
+  }
+}
+[data-lite="true"] .addpc-pulse::after,
+[data-lite="true"] .addpc-stage[data-state="current"] .addpc-stage__bar::after {
+  animation: none;
+}
+[data-lite="true"] .addpc-pulse::after {
+  display: none;
+}
+[data-lite="true"] .addpc-stage__bar::after {
+  transition: none;
+}
+
+/* ------------------------------------------------------------ QR dialog (QrDialog.tsx) */
+
+/* The picture is black on white in both themes on purpose: scanners need the contrast and a light quiet zone, so these two
+   colours are the one place the tokens are not used. */
+.dash-qr {
+  display: grid;
+  justify-items: center;
+  gap: 14px;
+  min-width: 0;
+}
+.dash-qr__box {
+  width: min(280px, 100%);
+  aspect-ratio: 1;
+  display: grid;
+  place-items: center;
+  border-radius: var(--rb-r-md);
+  background: #fff;
+  overflow: hidden;
+}
+.dash-qr__svg {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+.dash-qr__hint,
+.dash-qr__failed {
+  margin: 0;
+  text-align: center;
+  color: var(--rb-muted);
+  max-width: 34ch;
+}
+.dash-qr__failed {
+  color: var(--rb-danger-text);
 }

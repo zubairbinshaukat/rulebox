@@ -1,0 +1,989 @@
+/*
+ * Lockdown page (`/groups/:id/lockdown`) and Programs to review (`/lockdown/findings`), UI pass 2026-11
+ * (docs/plans/ui-pass/lockdown.md section 5). Shipped with the two lazy screens, not in the entry CSS. Tokens only.
+ * Width bands: phone < 600 · tablet 600-1023 · laptop 1024-1599 · wide >= 1600. A section lays itself out by its own width (container
+ * queries); media queries only place the sections on the page. Motion: the save bar rises (opacity + transform, `dash-enter`) and the
+ * progress bar grows with `transform: scaleX`; none of it with reduced motion or Lite.
+ */
+
+.lk {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+  min-width: 0;
+}
+
+/* ------------------------------------------------------------ page layout */
+
+/* One grid. Below 1024 px the two wrappers vanish (display: contents) so every card is a grid item and `order` interleaves
+   them: phone one column in reading order, tablet "Your PCs | Programs to review" first. From 1024 px they are real columns. */
+.lk-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  align-items: start;
+  gap: 16px;
+  min-width: 0;
+}
+.lk-main,
+.lk-aside {
+  display: contents;
+}
+@media (max-width: 1023px) {
+  .lk-sync {
+    order: 1;
+  }
+  .lk-level {
+    order: 2;
+  }
+  .lk-mode {
+    order: 3;
+  }
+  .lk-review {
+    order: 4;
+  }
+  .lk-adv-anchor {
+    order: 5;
+  }
+  .lk-extra {
+    order: 6;
+  }
+}
+@media (min-width: 600px) and (max-width: 1023px) {
+  .lk-layout {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 18px;
+  }
+  .lk-sync {
+    grid-column: 1;
+    grid-row: 1;
+    align-self: stretch;
+  }
+  .lk-review {
+    grid-column: 2;
+    grid-row: 1;
+    align-self: stretch;
+  }
+  .lk-level,
+  .lk-mode,
+  .lk-adv-anchor,
+  .lk-extra {
+    grid-column: 1 / -1;
+  }
+}
+@media (min-width: 1024px) {
+  .lk-layout {
+    grid-template-columns: minmax(0, 2fr) minmax(0, 1fr);
+    gap: 22px;
+  }
+  .lk-main,
+  .lk-aside {
+    display: flex;
+    flex-direction: column;
+    gap: 18px;
+    min-width: 0;
+  }
+  .lk-aside {
+    position: sticky;
+    top: calc(var(--dash-topbar) + 16px);
+  }
+}
+
+/* ------------------------------------------------------------ section cards */
+
+.lk-sec {
+  container: lksec / inline-size;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding: clamp(16px, 2vw, 22px);
+}
+.lk-sec__head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+.lk-sec__title {
+  min-width: 0;
+  margin: 0;
+  font-size: 16px;
+  font-weight: 650;
+  letter-spacing: -0.01em;
+}
+.lk-sec__actions {
+  display: flex;
+  align-items: center;
+  margin-inline-start: auto;
+}
+
+/* A line with an icon: notes, warnings and the problems of "Your PCs". Tone sets the colours; a tone is never only in a tooltip. */
+.lk-note {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.45;
+  color: var(--rb-muted);
+  min-width: 0;
+}
+.lk-note > svg {
+  flex: none;
+  width: 16px;
+  height: 16px;
+  margin-top: 2px;
+}
+.lk-note > span {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.lk-note a {
+  color: inherit;
+  font-weight: 600;
+}
+.lk-note[data-tone="warning"],
+.lk-note[data-tone="danger"],
+.lk-note[data-tone="success"] {
+  padding: 8px 12px;
+  border-radius: 10px;
+}
+.lk-note[data-tone="warning"] {
+  background: var(--rb-warning-soft);
+  color: var(--rb-warning-text);
+}
+.lk-note[data-tone="danger"] {
+  background: var(--rb-danger-soft);
+  color: var(--rb-danger-text);
+}
+.lk-note[data-tone="success"] {
+  background: var(--rb-success-soft);
+  color: var(--rb-success-text);
+}
+
+/* ------------------------------------------------------------ radio cards (protection level, program blocking) */
+
+.lk-rc {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 10px;
+  min-width: 0;
+}
+.lk-rc__card {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 0;
+  padding: 12px 14px;
+  border: 1.5px solid var(--rb-line);
+  border-radius: var(--dash-radius-sm);
+  background: var(--rb-surface);
+  cursor: pointer;
+  transition:
+    border-color var(--rb-duration) var(--rb-ease),
+    background var(--rb-duration) var(--rb-ease),
+    box-shadow var(--rb-duration) var(--rb-ease);
+}
+.lk-rc__card[data-disabled] {
+  cursor: default;
+  opacity: 0.7;
+}
+.lk-rc__card:hover:not([data-disabled]):not([data-checked]) {
+  border-color: color-mix(in oklch, var(--rb-accent) 45%, var(--rb-line));
+  background: color-mix(in oklch, var(--rb-accent-soft) 35%, var(--rb-surface));
+}
+.lk-rc__card[data-checked] {
+  border-color: var(--rb-accent);
+  background: color-mix(in oklch, var(--rb-accent-soft) 70%, var(--rb-surface));
+  box-shadow: 0 0 0 3px color-mix(in oklch, var(--rb-accent) 14%, transparent);
+}
+/* A custom setup is not any card: the nearest one gets a dashed edge. */
+.lk-rc__card[data-near] {
+  border-style: dashed;
+  border-color: color-mix(in oklch, var(--rb-accent) 55%, var(--rb-line));
+}
+.lk-rc__card:has(.lk-rc__input:focus-visible) {
+  outline: 2px solid var(--rb-focus);
+  outline-offset: 2px;
+}
+.lk-rc__input {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  margin: 0;
+  opacity: 0;
+  cursor: inherit;
+}
+.lk-rc__head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+.lk-rc__icon {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  width: 34px;
+  height: 34px;
+  border-radius: 10px;
+  background: var(--rb-hover);
+  color: var(--rb-muted);
+  font-size: 20px;
+  transition:
+    background var(--rb-duration) var(--rb-ease),
+    color var(--rb-duration) var(--rb-ease);
+}
+.lk-rc__icon svg {
+  width: 20px;
+  height: 20px;
+}
+.lk-rc__card[data-checked] .lk-rc__icon {
+  background: var(--rb-accent);
+  color: var(--rb-on-ink);
+}
+.lk-rc__name {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 8px;
+  min-width: 0;
+}
+.lk-rc__title {
+  font-size: 15px;
+  font-weight: 650;
+}
+.lk-rc__badge {
+  height: 20px;
+  padding: 0 8px;
+  font-size: 11px;
+}
+.lk-rc__mark {
+  flex: none;
+  width: 20px;
+  height: 20px;
+  margin-inline-start: auto;
+  border: 2px solid var(--rb-line-strong);
+  border-radius: 50%;
+  background: var(--rb-surface);
+  transition:
+    border-color var(--rb-duration) var(--rb-ease),
+    box-shadow var(--rb-duration) var(--rb-ease),
+    background var(--rb-duration) var(--rb-ease);
+}
+.lk-rc__card[data-checked] .lk-rc__mark {
+  border-color: var(--rb-accent);
+  background: var(--rb-accent);
+  box-shadow: inset 0 0 0 3px var(--rb-surface);
+}
+.lk-rc__lead {
+  font-size: 13.5px;
+  line-height: 1.4;
+  color: var(--rb-muted);
+}
+.lk-rc__points,
+.lk-rc__meter {
+  display: none;
+}
+.lk-rc__point {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  font-size: 13px;
+  line-height: 1.35;
+}
+.lk-rc__point svg {
+  flex: none;
+  width: 16px;
+  height: 16px;
+  margin-top: 1px;
+  color: var(--rb-accent-text);
+}
+.lk-rc__meter {
+  gap: 4px;
+  margin-top: auto;
+  padding-top: 4px;
+}
+.lk-rc__meter span {
+  width: 22px;
+  height: 5px;
+  border-radius: 3px;
+  background: var(--rb-line);
+}
+.lk-rc__meter span[data-on] {
+  background: color-mix(in oklch, var(--rb-accent) 55%, var(--rb-line));
+}
+.lk-rc__card[data-checked] .lk-rc__meter span[data-on] {
+  background: var(--rb-accent);
+}
+
+/* Protection level: stacked rows narrow, three across from 480 px, with the points from 640 px. */
+@container lksec (min-width: 480px) {
+  .lk-rc--level {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 12px;
+  }
+  .lk-rc--level .lk-rc__card {
+    padding: 14px 16px;
+  }
+  .lk-rc--level .lk-rc__head {
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr) auto;
+    align-items: start;
+    gap: 10px;
+  }
+  .lk-rc--level .lk-rc__icon {
+    grid-column: 1;
+    grid-row: 1;
+    width: 38px;
+    height: 38px;
+  }
+  .lk-rc--level .lk-rc__mark {
+    grid-column: 3;
+    grid-row: 1;
+    margin: 0;
+  }
+  .lk-rc--level .lk-rc__name {
+    grid-column: 1 / -1;
+    grid-row: 2;
+  }
+}
+@container lksec (min-width: 600px) {
+  .lk-rc--level .lk-rc__points {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    padding-top: 2px;
+  }
+  .lk-rc--level .lk-rc__meter {
+    display: flex;
+  }
+}
+/* Program blocking: three short cards in a row from 440 px. */
+@container lksec (min-width: 440px) {
+  .lk-rc--mode {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 12px;
+  }
+}
+
+.lk-custom {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px 12px;
+  padding: 10px 14px;
+  border: 1.5px dashed color-mix(in oklch, var(--rb-accent) 55%, var(--rb-line));
+  border-radius: var(--dash-radius-sm);
+  background: color-mix(in oklch, var(--rb-accent-soft) 45%, transparent);
+}
+.lk-custom__text {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--rb-accent-text);
+}
+.lk-custom__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.lk-modehelp {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 0;
+}
+.lk-modehelp__text,
+.lk-modehelp__sub {
+  margin: 0;
+  font-size: 13.5px;
+  line-height: 1.45;
+  color: var(--rb-muted);
+}
+.lk-modehelp__text {
+  color: var(--rb-ink);
+}
+
+/* ------------------------------------------------------------ Advanced settings */
+
+.lk-advcard {
+  min-width: 0;
+  padding: 0 clamp(16px, 2vw, 22px);
+}
+.lk-adv {
+  border-top: 0;
+}
+.lk-adv > summary {
+  min-height: 56px;
+  font-size: 15px;
+  font-weight: 650;
+  color: var(--rb-ink);
+}
+.lk-adv__title {
+  min-width: 0;
+}
+.lk-adv__count {
+  height: 22px;
+  font-size: 11.5px;
+}
+.lk-adv__cols {
+  columns: 290px 2;
+  column-gap: 16px;
+  padding: 2px 0 8px;
+}
+.lk-group {
+  container: lkg / inline-size;
+  break-inside: avoid;
+  margin: 0 0 16px;
+  padding: 14px 16px 12px;
+  border: 1px solid var(--rb-line);
+  border-radius: 14px;
+  background: var(--rb-paper);
+}
+.lk-group__head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 2px 10px;
+  margin-bottom: 8px;
+}
+.lk-group__title {
+  margin: 0;
+  font-size: 14.5px;
+  font-weight: 650;
+}
+.lk-group__tag {
+  font-size: 12px;
+  color: var(--rb-muted);
+}
+.lk-group__rows {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+.lk-row-wrap {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+}
+.lk-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 38px;
+  min-width: 0;
+  border-radius: 8px;
+}
+.lk-row .rb-switch,
+.lk-row .rb-checkbox {
+  flex: 1 1 auto;
+  min-width: 0;
+  line-height: 1.3;
+}
+.lk-row .rb-switch > span {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.lk-row[data-changed],
+.lk-sel[data-changed] {
+  margin-inline: -6px;
+  padding-inline: 6px;
+  background: color-mix(in oklch, var(--rb-accent-soft) 55%, transparent);
+}
+.lk-changed {
+  flex: none;
+  height: 20px;
+  padding: 0 8px;
+  font-size: 11px;
+}
+.lk-sel {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+  padding: 6px 0;
+  border-radius: 8px;
+}
+.lk-sel__label {
+  min-width: 0;
+}
+.lk-sel__label label {
+  min-width: 0;
+  font-size: 13.5px;
+  font-weight: 550;
+  overflow-wrap: anywhere;
+}
+.lk-sel .rb-select {
+  width: 100%;
+}
+@container lkg (min-width: 380px) {
+  .lk-sel {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) 196px;
+    align-items: center;
+    gap: 6px 12px;
+  }
+  .lk-sel > .lk-note {
+    grid-column: 1 / -1;
+  }
+}
+.lk-lockout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 12px;
+  margin: 6px 0 4px;
+  padding-inline-start: 14px;
+  border-inline-start: 2px solid var(--rb-line);
+}
+@container lkg (min-width: 440px) {
+  .lk-lockout {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+
+/* ------------------------------------------------------------ Your PCs */
+
+.lk-sync__body {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-width: 0;
+}
+.lk-sync__headline {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+  font-size: 15px;
+  font-weight: 650;
+  line-height: 1.3;
+}
+.lk-sync__headline svg {
+  flex: none;
+  width: 20px;
+  height: 20px;
+}
+.lk-sync__headline[data-done] {
+  color: var(--rb-success-text);
+}
+.lk-sync__more {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.lk-sync__link {
+  align-self: flex-start;
+}
+.lk-sync__toggle {
+  display: none;
+  align-self: flex-start;
+  min-height: 32px;
+  padding: 0;
+  border: 0;
+  background: none;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--rb-accent-text);
+  cursor: pointer;
+}
+@media (max-width: 599px) {
+  .lk-sync__toggle {
+    display: inline-flex;
+    align-items: center;
+  }
+  .lk-sync__body:not([data-open]) .lk-sync__more {
+    display: none;
+  }
+}
+.lk-meter {
+  height: 8px;
+  overflow: hidden;
+  border-radius: 99px;
+  background: var(--rb-hover);
+}
+.lk-meter__fill {
+  display: block;
+  width: 100%;
+  height: 100%;
+  border-radius: inherit;
+  background: var(--rb-accent);
+  transform-origin: 0 50%;
+  transition: transform 0.7s var(--rb-ease);
+}
+.lk-meter[data-done] .lk-meter__fill {
+  background: var(--rb-success);
+}
+@media (prefers-reduced-motion: reduce) {
+  .lk-meter__fill,
+  .lk-rc__card,
+  .lk-rc__icon,
+  .lk-rc__mark {
+    transition: none;
+  }
+}
+[data-lite="true"] .lk-meter__fill,
+[data-lite="true"] .lk-rc__card,
+[data-lite="true"] .lk-rc__icon,
+[data-lite="true"] .lk-rc__mark {
+  transition: none;
+}
+
+/* ------------------------------------------------------------ Programs to review (card) and Extra allowed programs */
+
+.lk-review__body {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: center;
+  gap: 10px 12px;
+}
+.lk-review__icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 38px;
+  height: 38px;
+  border-radius: 11px;
+  background: var(--rb-accent-soft);
+  color: var(--rb-accent-text);
+}
+.lk-review__icon svg {
+  width: 22px;
+  height: 22px;
+}
+.lk-review__lead {
+  margin: 0;
+  font-size: 13.5px;
+  line-height: 1.4;
+  color: var(--rb-muted);
+}
+.lk-review__link {
+  grid-column: 1 / -1;
+  justify-content: center;
+}
+@media (max-width: 599px) {
+  .lk-review__body {
+    grid-template-columns: auto minmax(0, 1fr) auto;
+  }
+  .lk-review__link {
+    grid-column: auto;
+  }
+}
+.lk-review__count {
+  height: 24px;
+  font-weight: 650;
+}
+
+.lk-extra__none {
+  margin: 0;
+}
+.lk-extra__list {
+  display: flex;
+  flex-direction: column;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+@media (min-width: 1024px) {
+  .lk-extra__list {
+    max-height: min(300px, 34vh);
+    overflow-y: auto;
+  }
+}
+.lk-extra__item {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 10px 0;
+  border-top: 1px solid var(--rb-line);
+}
+.lk-extra__item:first-child {
+  padding-top: 0;
+  border-top: 0;
+}
+.lk-extra__text {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+}
+.lk-extra__what {
+  font-size: 14px;
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+.lk-extra__sub {
+  font-size: 12.5px;
+  color: var(--rb-muted);
+  overflow-wrap: anywhere;
+}
+.lk-extra__flag {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 2px;
+}
+
+/* ------------------------------------------------------------ save bar */
+
+.lk-barwrap {
+  position: sticky;
+  bottom: max(12px, env(safe-area-inset-bottom));
+  z-index: 20;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-width: 0;
+}
+.lk-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px 16px;
+  padding: 10px 12px 10px 18px;
+  border: 1px solid var(--rb-line);
+  border-radius: 18px;
+  background: var(--rb-glass-strong);
+  box-shadow: var(--rb-shadow-md);
+  backdrop-filter: blur(14px);
+}
+.lk-bar__msg {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+.lk-bar__dot {
+  flex: none;
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: var(--rb-brand);
+}
+.lk-bar__count {
+  font-size: 14.5px;
+  font-weight: 650;
+}
+.lk-bar__actions {
+  display: flex;
+  flex: 0 1 auto;
+  align-items: center;
+  gap: 8px;
+  margin-inline-start: auto;
+}
+@media (max-width: 599px) {
+  .lk-bar {
+    padding: 10px 12px;
+  }
+  .lk-bar__actions {
+    flex: 1 1 100%;
+  }
+  .lk-bar__actions .rb-btn {
+    flex: 1 1 0;
+  }
+}
+.lk-tiplist {
+  margin: 0;
+  padding-inline-start: 18px;
+}
+
+/* ------------------------------------------------------------ Programs to review (page) */
+
+.lk-find {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  align-items: start;
+  gap: 16px;
+  min-width: 0;
+}
+.lk-find__main {
+  container: lkfind / inline-size;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  min-width: 0;
+}
+.lk-find__aside {
+  min-width: 0;
+}
+/* The list needs about 900 px for its five columns, so the steps are a strip above it until the page is wide enough for a side card. */
+@media (min-width: 600px) and (max-width: 1599px) {
+  .lk-find__aside {
+    order: -1;
+  }
+}
+@media (min-width: 1600px) {
+  .lk-find {
+    grid-template-columns: minmax(0, 2.4fr) minmax(300px, 1fr);
+    gap: 22px;
+  }
+  .lk-find__aside {
+    position: sticky;
+    top: calc(var(--dash-topbar) + 16px);
+  }
+}
+/* Phone: the steps are in the (i) next to the title and the list is cards. */
+.lk-howtip {
+  display: none;
+}
+@media (max-width: 599px) {
+  .lk-find__aside {
+    display: none;
+  }
+  .lk-howtip {
+    display: inline-flex;
+  }
+}
+.lk-how {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: clamp(16px, 2vw, 22px);
+}
+.lk-how__title {
+  margin: 0;
+  font-size: 16px;
+  font-weight: 650;
+}
+.lk-how__steps {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  counter-reset: how;
+}
+.lk-how__steps li {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  font-size: 14px;
+  line-height: 1.4;
+  counter-increment: how;
+}
+.lk-how__steps li::before {
+  content: counter(how);
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  background: var(--rb-accent-soft);
+  color: var(--rb-accent-text);
+  font-size: 13px;
+  font-weight: 700;
+}
+@media (min-width: 600px) and (max-width: 1599px) {
+  .lk-how {
+    flex-direction: row;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 8px 20px;
+    padding: 12px 16px;
+  }
+  .lk-how__title {
+    font-size: 14px;
+  }
+  .lk-how__steps {
+    flex-direction: row;
+    flex-wrap: wrap;
+    flex: 1 1 auto;
+    gap: 6px 20px;
+  }
+  .lk-how__steps li {
+    font-size: 13.5px;
+  }
+}
+/* A narrow list drops the "Found in" column; the folder moves under the program's name. */
+.lk-prog__where {
+  display: none;
+}
+@container lkfind (max-width: 899px) {
+  .lk-find .rb-table :is(th, td):nth-child(2) {
+    display: none;
+  }
+  .lk-prog__where {
+    display: block;
+    font-size: 12.5px;
+    color: var(--rb-muted);
+  }
+}
+.lk-prog__prod::before {
+  content: "·";
+  margin-inline-end: 8px;
+}
+.lk-prog {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+}
+.lk-prog__name {
+  display: block;
+  min-width: 0;
+  overflow: hidden;
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.lk-prog__sub {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 8px;
+  font-size: 12.5px;
+  color: var(--rb-muted);
+  min-width: 0;
+}
+
+/* ------------------------------------------------------------ Allow dialog */
+
+.lk-allow__why {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  margin: 0;
+  padding: 10px 12px;
+  border-radius: 12px;
+  background: var(--rb-accent-soft);
+  color: var(--rb-accent-text);
+  font-size: 13.5px;
+  line-height: 1.45;
+}
+.lk-allow__why svg {
+  flex: none;
+  width: 18px;
+  height: 18px;
+  margin-top: 1px;
+}
+.lk-allow__why[data-tone="warning"] {
+  background: var(--rb-warning-soft);
+  color: var(--rb-warning-text);
+}
+.lk-allow__groups {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 200px), 1fr));
+  gap: 6px 14px;
+  max-height: 220px;
+  overflow-y: auto;
+}
+.lk-allow__one {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 600;
+}
+.lk-allow__adv {
+  border-top: 1px solid var(--rb-line);
+}

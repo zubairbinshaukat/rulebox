@@ -17,6 +17,9 @@ import { MAX_FILE_HANDLERS } from "./lib/limits";
 // them again). Each device's document keeps a rule only when its app is in
 // that device's catalogue (`lib/desired.ts`).
 
+/** `setMany` takes at most this many extensions in one call (the add dialog's chips are 1-5 each). */
+const MAX_FILE_HANDLERS_PER_CALL = 20;
+
 /**
  * Can this app be the target of a rule? A non-archived program with a file
  * argument that is not a shell, script host or runtime (`DENY_PROGRAMS`: a
@@ -107,6 +110,66 @@ export const set = memberMutation("admin")({
     // (and the one that lost the extension); the first 10 groups at once, the rest by scheduled batches (Step 20b).
     await snapshotAppGroups(ctx, existing === null ? [app._id] : [existing.appId, app._id], `File type ${extension}`, ctx.member._id);
     if (existing !== null) await publishApp(ctx, ctx.orgId, existing.appId); // the program that lost the extension
+    await publishApp(ctx, ctx.orgId, app._id);
+    return null;
+  },
+});
+
+/**
+ * Set the program for several extensions at once (admin; UI pass other-pages plan 7.2: the "Pictures" chip is five extensions).
+ * Same checks as `set` for EVERY extension (1-20, duplicates ignored; one refused extension refuses the whole call, nothing is
+ * written) but ONE configuration version per group, one audit row and one publish per program, where a loop of `set` would make
+ * up to 20 versions and flood the rollback list. Extensions that already open with this program are skipped; nothing to change =
+ * no write. `too_large` when the new rules would pass 200.
+ */
+export const setMany = memberMutation("admin")({
+  args: { extensions: v.array(v.string()), appId: v.string() },
+  returns: v.null(),
+  handler: async (ctx, args) => {
+    if (args.extensions.length < 1 || args.extensions.length > MAX_FILE_HANDLERS_PER_CALL) fail("invalid_argument", { field: "extensions" });
+    const extensions = [...new Set(args.extensions.map(normalizeExtension))];
+    for (const extension of extensions) {
+      const problem = extensionProblem(extension);
+      if (problem !== null) fail("invalid_argument", { field: "extension", detail: problem });
+    }
+    const app = await getInOrg(ctx, "apps", args.appId, ctx.orgId);
+    if (!canOpenFiles(app)) fail("invalid_argument", { field: "app" });
+
+    const toInsert: string[] = [];
+    const toMove: Doc<"fileHandlers">[] = [];
+    for (const extension of extensions) {
+      const existing = await ctx.db
+        .query("fileHandlers")
+        .withIndex("by_org_ext", (q) => q.eq("orgId", ctx.orgId).eq("extension", extension))
+        .first();
+      if (existing === null) toInsert.push(extension);
+      else if (existing.appId !== app._id) toMove.push(existing);
+    }
+    if (toInsert.length === 0 && toMove.length === 0) return null;
+    if (toInsert.length > 0) {
+      const all = await ctx.db
+        .query("fileHandlers")
+        .withIndex("by_org_ext", (q) => q.eq("orgId", ctx.orgId))
+        .take(MAX_FILE_HANDLERS);
+      if (all.length + toInsert.length > MAX_FILE_HANDLERS) fail("too_large", { detail: "file types" });
+    }
+    for (const extension of toInsert) await ctx.db.insert("fileHandlers", { orgId: ctx.orgId, extension, appId: app._id });
+    for (const rule of toMove) await ctx.db.patch(rule._id, { appId: app._id });
+    const changed = [...toInsert, ...toMove.map((r) => r.extension)].sort();
+    const shown = changed.length > 6 ? `${changed.slice(0, 6).join(", ")} and ${changed.length - 6} more` : changed.join(", ");
+    await writeAudit(ctx, {
+      orgId: ctx.orgId,
+      actor: ctx.actor,
+      action: "fileHandler.set",
+      targetType: "app",
+      targetId: app._id,
+      targetLabel: app.name,
+      summary: `Files ending in ${shown} now open with ${app.name}`,
+    });
+    // One configuration version per group for the program and every program that lost an extension (as `set`, once for all).
+    const lost = [...new Set(toMove.map((r) => r.appId))];
+    await snapshotAppGroups(ctx, [...lost, app._id], `File types ${shown}`, ctx.member._id);
+    for (const appId of lost) await publishApp(ctx, ctx.orgId, appId);
     await publishApp(ctx, ctx.orgId, app._id);
     return null;
   },

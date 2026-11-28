@@ -50,6 +50,13 @@ import { driverRowOf, driverRowValue } from "./drivers";
 //                        -> { revision: number }. Errors: invalid_argument (field "passphrase", detail "length"|
 //                        "characters"; field "id" detail "open" for an open network), not_found, stale_edit,
 //                        not_ready (detail "sealing_key"), rate_limited.
+//   wifi:createWithPassphrase  action, admin, args { name, ssid, hidden, security: "wpa2Personal"|"wpa3Personal"|"wpa2Wpa3Personal",
+//                          autoConnect, groupIds: string[], passphrase: string } -> { id: Id<"wifiProfiles">, revision: 2 }
+//                        (UI pass, enrollment plan 4.3) A new SECURED network with its password in one call: a draft profile without
+//                        groups is inserted, the password is encrypted exactly as `setPassphrase` does, then ONE mutation stores the box,
+//                        puts the profile in its groups and snapshots them once (PCs never see it without its password). A failure after
+//                        the draft deletes it. Same errors as `saveWifi` + `setPassphrase`; `security: "open"` is invalid_argument (field
+//                        "security", detail "open"): an open network is made with `saveWifi`.
 //   WifiRow    = { _id, name, ssid, hidden, security, autoConnect, hasPassphrase: boolean,
 //                  passphraseSetAt: number | null, revision, groupCount: number,
 //                  groups: { _id, name }[] }   (first MAX_WIFI_LIST_GROUPS = 10 groups; groupCount = all)

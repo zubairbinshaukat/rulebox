@@ -5,6 +5,7 @@ import { type MutationCtx } from "./_generated/server";
 import { internalMutation } from "./lib/functions";
 import { writeStatus, type StatusInput } from "./lib/deviceReport";
 import { bumpOnline, minuteBucket, offlineAfterBucket, orgPingInterval } from "./lib/presence";
+import { setSyncRow, syncFieldsOf, type SyncFields } from "./lib/lockdownSync";
 import { loadOrgPlan } from "./lib/plans";
 import {
   AUDIT_PRUNE_BATCH,
@@ -13,6 +14,7 @@ import {
   DAY_MS,
   FLEET_CHECK_RETENTION_MS,
   INVITE_RETENTION_MS,
+  LOCKDOWN_SYNC_BACKFILL_BATCH,
   MAINTENANCE_BATCH,
   MIGRATION_DEVICE_BATCH,
   MIGRATION_ORG_BATCH,
@@ -538,5 +540,48 @@ export const dropTotpTables = internalMutation({
     const done = secrets.length < MIGRATION_DEVICE_BATCH && sessions.length < MIGRATION_DEVICE_BATCH;
     if (!done) await ctx.scheduler.runAfter(0, internal.maintenance.dropTotpTables, {});
     return { memberSecrets: secrets.length, mfaSessions: sessions.length, done };
+  },
+});
+
+/**
+ * UI pass (lockdown, 2026-11): fill `deviceLockdownSync` (the small per-PC rows `lockdown:groupSync` counts) for the PCs that exist today.
+ * New PCs get their row at enrollment, a move and a report by themselves, so this is needed ONCE, right after the deploy that adds the
+ * table; until it ran, the "PCs up to date" card of a group shows only the PCs that enrolled, moved or reported since (a group with none
+ * shows all its PCs as waiting). Pages through `devices` LOCKDOWN_SYNC_BACKFILL_BATCH at a time and, for each PC that is in a group and
+ * not revoked, writes the row from the PC's apply report (the facts when it names a configuration of the PC's group, else "waiting"); a PC
+ * without a group, a revoked PC, and a row of either, end with no row. Then it reschedules itself with the next cursor until the last page
+ * (`done: true`, `next: null`). Idempotent and safe to run while the app is live: a row is written only when it differs (a second run
+ * writes nothing). Run once per deployment (the dev one and the production one), right after `convex deploy`:
+ *   npx convex run maintenance:backfillLockdownSync '{}'
+ * The call returns the first page's numbers; follow the rest in the Convex dashboard logs (the last page says `done: true`). Cost: about
+ * 4 reads per PC and one write per PC, in pages of 100 (a 1,000-PC deployment = 10 runs).
+ */
+export const backfillLockdownSync = internalMutation({
+  args: { cursor: v.optional(v.union(v.string(), v.null())) },
+  returns: v.object({ pcs: v.number(), written: v.number(), done: v.boolean(), next: v.union(v.string(), v.null()) }),
+  handler: async (ctx, args) => {
+    const page = await ctx.db.query("devices").paginate({ numItems: LOCKDOWN_SYNC_BACKFILL_BATCH, cursor: args.cursor ?? null });
+    const now = Date.now();
+    let written = 0;
+    for (const device of page.page) {
+      let fields: SyncFields | null = null;
+      if (device.groupId !== undefined) {
+        const cred = await ctx.db
+          .query("deviceCredentials")
+          .withIndex("by_device", (q) => q.eq("deviceId", device._id))
+          .unique();
+        const revoked = cred !== null ? cred.state === "revoked" : device.revoked === true;
+        if (!revoked) {
+          const report = await ctx.db
+            .query("deviceApplyReports")
+            .withIndex("by_device", (q) => q.eq("deviceId", device._id))
+            .unique();
+          fields = syncFieldsOf(report, device.groupId);
+        }
+      }
+      written += await setSyncRow(ctx, device, fields, now);
+    }
+    if (!page.isDone) await ctx.scheduler.runAfter(0, internal.maintenance.backfillLockdownSync, { cursor: page.continueCursor });
+    return { pcs: page.page.length, written, done: page.isDone, next: page.isDone ? null : page.continueCursor };
   },
 });

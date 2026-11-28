@@ -1,5 +1,4 @@
-import { useId, type ReactNode } from "react";
-import { Select } from "@rulebox/ui";
+import { lazy, Suspense, useId, type ReactNode } from "react";
 import IconPrev from "~icons/solar/alt-arrow-left-linear";
 import IconNext from "~icons/solar/alt-arrow-right-linear";
 import { PAGE_SIZES, pageItems } from "../lib/cursorPager";
@@ -22,11 +21,15 @@ const DEFAULT_LABELS: PagerLabels = {
   rowsPerPage: strings.pager.rowsPerPage,
   gap: strings.pager.gap,
   goTo: strings.pager.goTo,
+  // Spaces inside each part do not break, so a narrow footer wraps after the "·" and never inside "Page 1 of 15".
   summary: (page, pages, total) =>
-    total !== null && pages !== null
-      ? `${strings.pager.records(total)} · ${strings.pager.pageOf(page, pages)}`
-      : strings.pager.page(page),
+    total !== null && pages !== null ? `${tight(strings.pager.records(total))} · ${tight(strings.pager.pageOf(page, pages))}` : tight(strings.pager.page(page)),
 };
+
+// The rows-per-page dropdown loads only when the full bar is drawn (a one-page list never needs it).
+const PageSizeSelect = lazy(() => import("./PageSizeSelect").then((m) => ({ default: m.PageSizeSelect })));
+
+const tight = (text: string) => text.replace(/ /g, "\u00a0");
 
 export interface PagerProps {
   /** 1-based. */
@@ -47,8 +50,10 @@ export interface PagerProps {
 }
 
 /**
- * The bar under a table: "147 records · Page 1 of 15", `‹ 1 2 … 15 ›`, and the
- * rows-per-page select. Only pages that can really be opened are buttons.
+ * The bar under a table: "147 records · Page 1 of 15", `‹ 1 2 … 15 ›` and the rows-per-page select.
+ * One row when the footer is at least 680 px wide (summary left, pages centred, select right), otherwise
+ * the pages on top and the summary and select under them (see `.dash-pager` in dashboard.css).
+ * Only pages that can really be opened are buttons.
  * Presentation only: `useCursorPager` (lib/cursorPager.ts) keeps the cursors.
  */
 export function Pager({ page, pageSize, total, reachablePages, onPage, onPageSize, hasNext, loading = false, pageSizes = PAGE_SIZES, labels }: PagerProps) {
@@ -60,6 +65,17 @@ export function Pager({ page, pageSize, total, reachablePages, onPage, onPageSiz
   const canNext = (pages === null || page < pages) && (hasNext || reachablePages.has(page + 1));
   // A page size outside the list (a stale URL) is still shown, not silently replaced.
   const sizes = pageSizes.includes(pageSize) ? pageSizes : [...pageSizes, pageSize].sort((a, b) => a - b);
+
+  // One page at the default size: nothing to turn or change, only how many records there are.
+  if (page === 1 && !hasNext && pageSize === pageSizes[0] && (total === null || total <= pageSize)) {
+    return total === null || total === 0 ? null : (
+      <div className="dash-pager dash-pager--single">
+        <p className="dash-pager__summary" role="status" aria-live="polite">
+          {tight(strings.pager.recordsShort(total))}
+        </p>
+      </div>
+    );
+  }
 
   return (
     <div className="dash-pager" data-loading={loading || undefined}>
@@ -99,13 +115,9 @@ export function Pager({ page, pageSize, total, reachablePages, onPage, onPageSiz
         <label htmlFor={selectId} className="dash-pager__size-label">
           {l.rowsPerPage}
         </label>
-        <Select id={selectId} compact value={String(pageSize)} onChange={(e) => onPageSize(Number(e.target.value))}>
-          {sizes.map((s) => (
-            <option key={s} value={s}>
-              {s}
-            </option>
-          ))}
-        </Select>
+        <Suspense fallback={<span className="rb-select rb-select--compact" aria-hidden="true"><span className="rb-select__control">{pageSize}</span></span>}>
+          <PageSizeSelect id={selectId} value={pageSize} sizes={sizes} onChange={onPageSize} />
+        </Suspense>
       </div>
     </div>
   );

@@ -1,8 +1,7 @@
-import { useState, type ReactNode } from "react";
-import { Button, Pill, Select } from "@rulebox/ui";
-import { useSetRings } from "../../data";
-import { useAllowUsb, useDeviceLockdown } from "../../data/lockdown";
-import { LAYER_NAMES, MAX_USB_ALLOW_HOURS, RINGS, type DeviceLockdown, type Id, type Ring, type SecurityPosture } from "../../data/types";
+import { useState } from "react";
+import { Button, InfoTip, Pill, Select } from "@rulebox/ui";
+import { useAllowUsb } from "../../data/lockdown";
+import { LAYER_NAMES, MAX_USB_ALLOW_HOURS, type DevicePage, type SecurityPosture } from "../../data/types";
 import { Card } from "../../components/Card";
 import { Field } from "../../components/Field";
 import { FormError } from "../../components/FormError";
@@ -10,34 +9,31 @@ import { InlineNotice } from "../../components/Notice";
 import { RelativeTime } from "../../components/RelativeTime";
 import { formatDateTime } from "../../lib/format";
 import { useCan } from "../../lib/member";
-import { strings } from "../../lib/strings";
 import { useToast } from "../../lib/toast";
 import { useNow } from "../../lib/useNow";
-import { LAYER_MODE_LABELS, layerNoteOf, layerStateOf, protectionGaps, refusalText } from "./codes";
-import { deviceLockdownStrings as s, RING_LABELS, ringErrorMessage } from "./deviceStrings";
+import { TechnicalDetails, type TechItem } from "../device/TechnicalDetails";
+import { layerNoteOf, layerStateOf, protectionGaps, refusalText } from "./codes";
+import { deviceLockdownStrings as s } from "./deviceStrings";
 
 /**
- * The device page's lockdown cards (plan 4.20). They read the lockdown part of `fleet:get` through `useDeviceLockdown`: the
- * same query and arguments as the page, so the same subscription and no extra read.
+ * The device page's lockdown cards (plan 4.20, UI pass 2026-11): they show what the page query (`fleet:page`) already carries, so
+ * the Protection tab subscribes to nothing of its own. Technical values (versions, TPM, folder repairs, codes) sit under
+ * "Technical details".
  */
-function useLockdown(deviceId: Id, title: string, body: (ld: DeviceLockdown) => ReactNode): ReactNode {
-  const ld = useDeviceLockdown(deviceId);
-  if (ld.status === "ready") return body(ld.data);
-  return (
-    <Card title={title}>
-      <p className="dash-muted">{ld.status === "loading" ? strings.app.loading : s.unavailable}</p>
-    </Card>
-  );
-}
 
 /** A reported code as words; a code this dashboard does not know is shown as it is. */
 const value = (code: string | undefined): string => (code === undefined ? "—" : (s.values[code] ?? code));
 
-function Row({ label, text, tone }: { label: string; text: string; tone?: "success" | "warning" | "neutral" }) {
+type Tone = "success" | "warning" | "neutral";
+
+function Row({ label, info, text, tone }: { label: string; info?: string; text: string; tone: Tone }) {
   return (
-    <li className="dash-roll__member">
-      <span>{label}</span>
-      {tone ? <Pill tone={tone}>{text}</Pill> : <span className="dash-muted">{text}</span>}
+    <li className="prot-row">
+      <span className="prot-row__label">
+        {label}
+        {info ? <InfoTip label={`About ${label}`}>{info}</InfoTip> : null}
+      </span>
+      <Pill tone={tone}>{text}</Pill>
     </li>
   );
 }
@@ -47,11 +43,8 @@ function Row({ label, text, tone }: { label: string; text: string; tone?: "succe
  * and the agent is registered for Safe Mode; otherwise it says what is missing and what that means. Report only: Rulebox never
  * turns BitLocker on.
  */
-export function ProtectionCard({ deviceId }: { deviceId: Id }) {
-  return useLockdown(deviceId, s.protectionTitle, (ld) => <Protection protection={ld.protection} />);
-}
-
-function Protection({ protection: p }: { protection: SecurityPosture | null }) {
+export function ProtectionCard({ d }: { d: Pick<DevicePage, "protection"> }) {
+  const p: SecurityPosture | null = d.protection;
   if (p === null) {
     return (
       <Card title={s.protectionTitle}>
@@ -60,42 +53,66 @@ function Protection({ protection: p }: { protection: SecurityPosture | null }) {
     );
   }
   const gaps = protectionGaps(p);
-  const good = (ok: boolean) => (ok ? "success" : "warning") as "success" | "warning";
+  const good = (ok: boolean): Tone => (ok ? "success" : "warning");
+  const fix = gaps.filter((g) => g === "secureBoot" || g === "bitLocker").map((g) => (g === "secureBoot" ? s.secureBoot : s.bitLocker));
+  const tech: TechItem[] = [];
+  if (p.tpm !== undefined) tech.push({ label: s.tpm, value: value(p.tpm), mono: false });
+  if (p.serviceAcl !== undefined) tech.push({ label: s.serviceAcl, value: value(p.serviceAcl), mono: false });
+  if (p.aclDrift !== undefined && p.aclDrift > 0) tech.push({ label: s.aclDrift, value: String(p.aclDrift), mono: false });
   return (
-    <Card title={s.protectionTitle}>
+    <Card title={s.protectionTitle} actions={<InfoTip label={`About ${s.protectionTitle}`}>{s.protectionInfo}</InfoTip>}>
       <div className="dash-form">
         {gaps.length === 0 ? (
           <InlineNotice tone="success" title={s.protectionOk} />
         ) : (
-          <InlineNotice tone="warning" title={s.protectionMissing} detail={`${s.missingList(gaps.map((g) => s.missing[g]))} ${s.never}`} />
+          <InlineNotice
+            tone="warning"
+            title={s.protectionMissing}
+            detail={`${fix.length > 0 ? s.turnOn(fix) : s.missingList(gaps.map((g) => s.missing[g]))} ${s.never}`}
+          />
         )}
-        <ul className="dash-roll__members" aria-label={s.protectionTitle}>
-          <Row label={s.secureBoot} text={value(p.secureBoot)} tone={good(p.secureBoot === "on")} />
-          <Row label={s.bitLocker} text={value(p.bitLocker)} tone={good(p.bitLocker === "on")} />
-          <Row label={s.autoRecovery} text={value(p.autoRecovery)} tone={good(!gaps.includes("autoRecovery"))} />
-          <Row label={s.safeMode} text={p.safeModeAgent === true ? s.registered : s.notRegistered} tone={good(p.safeModeAgent === true)} />
-          {p.tpm !== undefined ? <Row label={s.tpm} text={value(p.tpm)} /> : null}
-          {p.serviceAcl !== undefined ? <Row label={s.serviceAcl} text={value(p.serviceAcl)} tone={p.serviceAcl === "ok" ? "success" : "warning"} /> : null}
-          {p.aclDrift !== undefined && p.aclDrift > 0 ? <Row label={s.aclDrift} text={String(p.aclDrift)} /> : null}
+        <ul className="prot-rows" aria-label={s.protectionTitle}>
+          <Row label={s.secureBoot} info={s.secureBootInfo} text={value(p.secureBoot)} tone={good(p.secureBoot === "on")} />
+          <Row label={s.bitLocker} info={s.bitLockerInfo} text={value(p.bitLocker)} tone={good(p.bitLocker === "on")} />
+          <Row label={s.autoRecovery} info={s.autoRecoveryInfo} text={value(p.autoRecovery)} tone={good(!gaps.includes("autoRecovery"))} />
+          <Row label={s.safeMode} info={s.safeModeInfo} text={p.safeModeAgent === true ? s.yes : s.no} tone={good(p.safeModeAgent === true)} />
         </ul>
+        <TechnicalDetails items={tech} />
       </div>
     </Card>
   );
 }
 
-/**
- * The Lockdown card (plan 4.11, 4.20): what the PC reported after applying its policy: the overall state, the refusal in plain
- * words, each layer's mode, state and note, the last working version, and the PC's rollout ring. Codes only: the PC never sends
- * a path or a command line.
- */
-export function LockdownCard({ deviceId }: { deviceId: Id }) {
-  return useLockdown(deviceId, s.lockdownTitle, (ld) => <Lockdown deviceId={deviceId} ld={ld} />);
+/** What the compatibility report says cannot be used on this PC, in words. */
+function missingLayers(c: NonNullable<NonNullable<DevicePage["report"]>["compat"]>): string[] {
+  const missing: string[] = [];
+  if (c.layers?.appLocker === false) missing.push(s.layerAppLocker);
+  if (c.layers?.appControl === false) missing.push(s.layerAppControl);
+  return missing;
 }
 
-function Lockdown({ deviceId, ld }: { deviceId: Id; ld: DeviceLockdown }) {
-  const a = ld.apply;
+/**
+ * The Lockdown card (plan 4.11, 4.20): what the PC reported after applying its settings: the overall state, the refusal in plain
+ * words, each layer's mode, state and note. Versions and codes are under "Technical details". Codes only: the PC never sends a path
+ * or a command line.
+ */
+export function LockdownCard({ d }: { d: Pick<DevicePage, "apply" | "lockdownCapable" | "report"> }) {
+  const a = d.apply;
   const refusal = refusalText(a?.refusal);
+  const compat = d.report?.compat;
+  const missing = compat?.protection === "reduced" ? missingLayers(compat) : [];
+  // Windows Home: the apply report says a check is "unsupported"; the compatibility report says which ones cannot be used.
   const home = a !== null && (a.layers.appLocker.state === "unsupported" || a.layers.appControl.state === "unsupported");
+  const tech: TechItem[] = [];
+  if (a) {
+    tech.push({ label: s.configVersion, value: a.configVersion === null ? "—" : String(a.configVersion), mono: false });
+    tech.push({ label: s.lkg, value: a.lkgVersion === null ? "—" : String(a.lkgVersion), mono: false });
+    if (a.refusal) tech.push({ label: s.refusalCode, value: a.refusal });
+    for (const name of LAYER_NAMES) {
+      const l = a.layers[name];
+      if (l.detail) tech.push({ label: s.layerCode(s.layers[name]), value: l.detail });
+    }
+  }
   return (
     <Card
       title={s.lockdownTitle}
@@ -109,101 +126,41 @@ function Lockdown({ deviceId, ld }: { deviceId: Id; ld: DeviceLockdown }) {
       }
     >
       <div className="dash-form">
-        {ld.lockdownCapable === false ? <InlineNotice tone="warning" title={s.tooOld} detail={s.tooOldDetail} /> : null}
-        {a === null && ld.lockdownCapable !== false ? <p className="dash-muted">{s.noReport}</p> : null}
+        {d.lockdownCapable === false ? <InlineNotice tone="warning" title={s.tooOld} detail={s.tooOldDetail} /> : null}
+        {a === null && d.lockdownCapable !== false ? <p className="dash-muted">{s.noReport}</p> : null}
         {a?.state === "refused" ? <InlineNotice tone="danger" title={s.refusedTitle} detail={refusal ?? undefined} /> : null}
         {a?.state === "rolledBack" ? <InlineNotice tone="danger" title={s.rolledBackTitle} detail={refusal ?? s.rolledBackDetail} /> : null}
         {a !== null && a.state !== "refused" && a.state !== "rolledBack" && refusal !== null ? <InlineNotice tone="warning" title={refusal} /> : null}
-        {home ? <InlineNotice tone="neutral" title={s.reducedHome} detail={s.reducedHomeDetail} /> : null}
+        {missing.length > 0 ? (
+          <InlineNotice tone="neutral" title={s.reducedTitle} detail={s.reducedDetail(missing)} />
+        ) : home ? (
+          <InlineNotice tone="neutral" title={s.reducedTitle} detail={s.reducedHome} />
+        ) : null}
         {a ? (
-          <>
-            <ul className="dash-roll__members" aria-label={s.layerList}>
-              {LAYER_NAMES.map((name) => {
-                const l = a.layers[name];
-                const st = layerStateOf(l.state);
-                const note = layerNoteOf(name, l);
-                return (
-                  <li key={name} className="dash-roll__member">
-                    <span className="dash-cell-stack">
-                      <span>{s.layers[name]}</span>
-                      <span className="dash-cell-sub dash-wrap">{[LAYER_MODE_LABELS[l.mode] ?? l.mode, note].filter(Boolean).join(" · ")}</span>
+          <ul className="prot-layers" aria-label={s.layerList}>
+            {LAYER_NAMES.map((name) => {
+              const l = a.layers[name];
+              const st = l.state === "auditFirst" ? { label: s.auditFirst, tone: "accent" as const } : layerStateOf(l.state);
+              const note = layerNoteOf(name, l);
+              return (
+                <li key={name} className="prot-layer" data-tone={st.tone}>
+                  <div className="prot-layer__head">
+                    <span className="prot-layer__name">
+                      {s.layers[name]}
+                      <InfoTip label={`About ${s.layers[name]}`}>{s.layerInfo[name]}</InfoTip>
                     </span>
                     <Pill tone={st.tone}>{st.label}</Pill>
-                  </li>
-                );
-              })}
-            </ul>
-            <dl className="dash-kv">
-              <div className="dash-kv__item">
-                <dt>{s.configVersion}</dt>
-                <dd>{a.configVersion === null ? "—" : s.version(a.configVersion)}</dd>
-              </div>
-              <div className="dash-kv__item">
-                <dt>{s.lkg}</dt>
-                <dd>{a.lkgVersion === null ? "—" : s.version(a.lkgVersion)}</dd>
-              </div>
-            </dl>
-          </>
+                  </div>
+                  <p className="prot-layer__mode">{s.modes[l.mode] ?? l.mode}</p>
+                  {note ? <p className="prot-layer__note">{note}</p> : null}
+                </li>
+              );
+            })}
+          </ul>
         ) : null}
-        <RingPicker deviceId={deviceId} ld={ld} />
+        <TechnicalDetails items={tech} />
       </div>
     </Card>
-  );
-}
-
-/** The PC's rollout ring (plan 4.14, 4.20): `rollouts:setRings` for this one PC, with the rollout revision `fleet:get` carries. */
-function RingPicker({ deviceId, ld }: { deviceId: Id; ld: DeviceLockdown }) {
-  const setRings = useSetRings();
-  const canAct = useCan("admin");
-  const toast = useToast();
-  const [pending, setPending] = useState(false);
-  const [error, setError] = useState<unknown>(null);
-  const groupId = ld.groupId;
-  if (groupId === null) return <p className="dash-muted">{s.ringNoGroup}</p>;
-  if (!canAct || ld.revoked) {
-    return (
-      <dl className="dash-kv">
-        <div className="dash-kv__item">
-          <dt>{s.ring}</dt>
-          <dd>{RING_LABELS[ld.ring]}</dd>
-        </div>
-      </dl>
-    );
-  }
-  return (
-    <>
-      <Field label={s.ring} hint={s.ringHint}>
-        {(p) => (
-          <Select
-            {...p}
-            value={ld.ring}
-            disabled={pending}
-            onChange={(e) => {
-              const ring = e.target.value as Ring;
-              setPending(true);
-              setError(null);
-              setRings({ groupId, deviceIds: [deviceId], ring, expectedRevision: ld.rolloutRevision }).then(
-                () => {
-                  setPending(false);
-                  toast(s.ringSaved);
-                },
-                (err) => {
-                  setPending(false);
-                  setError(err);
-                },
-              );
-            }}
-          >
-            {RINGS.map((r) => (
-              <option key={r} value={r}>
-                {RING_LABELS[r]}
-              </option>
-            ))}
-          </Select>
-        )}
-      </Field>
-      <FormError error={error} onReload={() => setError(null)} describe={ringErrorMessage} />
-    </>
   );
 }
 
@@ -213,11 +170,7 @@ const HOUR_CHOICES = [1, 2, 4, MAX_USB_ALLOW_HOURS];
  * "Allow USB for this PC" (plan 4.3 `usbTempAllow`, edge case 62): lifts the group's USB blocks on this one PC for at most 8 hours,
  * then they apply again by themselves. Keyboards, mice and touch screens are never blocked, with or without it.
  */
-export function UsbAllowCard({ deviceId }: { deviceId: Id }) {
-  return useLockdown(deviceId, s.usbTitle, (ld) => <UsbAllow deviceId={deviceId} ld={ld} />);
-}
-
-function UsbAllow({ deviceId, ld }: { deviceId: Id; ld: DeviceLockdown }) {
+export function UsbAllowCard({ d }: { d: Pick<DevicePage, "_id" | "revoked" | "usbAllowUntil"> }) {
   const allowUsb = useAllowUsb();
   const canAct = useCan("admin");
   const toast = useToast();
@@ -225,13 +178,13 @@ function UsbAllow({ deviceId, ld }: { deviceId: Id; ld: DeviceLockdown }) {
   const [hours, setHours] = useState(1);
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<unknown>(null);
-  const until = ld.usbAllowUntil;
+  const until = d.usbAllowUntil;
   const open = until !== null && until > now;
 
   function run(h: number) {
     setPending(true);
     setError(null);
-    allowUsb({ deviceId, hours: h }).then(
+    allowUsb({ deviceId: d._id, hours: h }).then(
       () => {
         setPending(false);
         toast(h === 0 ? s.usbEnded : s.usbStarted(h));
@@ -244,13 +197,18 @@ function UsbAllow({ deviceId, ld }: { deviceId: Id; ld: DeviceLockdown }) {
   }
 
   return (
-    <Card title={s.usbTitle} actions={open ? <Pill tone="warning">{s.usbHour(Math.max(1, Math.ceil((until - now) / 3_600_000)))}</Pill> : undefined}>
+    <Card
+      title={s.usbTitle}
+      actions={
+        <>
+          {open ? <Pill tone="warning">{s.usbOpenPill}</Pill> : null}
+          <InfoTip label={`About ${s.usbTitle}`}>{s.usbInfo}</InfoTip>
+        </>
+      }
+    >
       <div className="dash-form">
-        <p className="dash-muted">
-          {s.usbLead} {s.usbAlways}
-        </p>
         <p>{open ? s.usbOn(formatDateTime(until)) : s.usbOff}</p>
-        {canAct && !ld.revoked ? (
+        {canAct && !d.revoked ? (
           open ? (
             <div className="dash-form__actions">
               <Button variant="ghost" disabled={pending} aria-busy={pending} onClick={() => run(0)}>
@@ -258,24 +216,22 @@ function UsbAllow({ deviceId, ld }: { deviceId: Id; ld: DeviceLockdown }) {
               </Button>
             </div>
           ) : (
-            <>
-              <Field label={s.usbHours} hint={s.usbMax}>
+            <div className="prot-usb">
+              <Field label={s.usbHours} className="prot-usb__hours">
                 {(p) => (
-                  <Select {...p} value={String(hours)} disabled={pending} onChange={(e) => setHours(Number(e.target.value))}>
-                    {HOUR_CHOICES.map((h) => (
-                      <option key={h} value={h}>
-                        {s.usbHour(h)}
-                      </option>
-                    ))}
-                  </Select>
+                  <Select
+                    {...p}
+                    value={String(hours)}
+                    disabled={pending}
+                    onChange={(v) => setHours(Number(v))}
+                    options={HOUR_CHOICES.map((h) => ({ value: String(h), label: s.usbHour(h) }))}
+                  />
                 )}
               </Field>
-              <div className="dash-form__actions">
-                <Button variant="ghost" disabled={pending} aria-busy={pending} onClick={() => run(hours)}>
-                  {s.usbAllow}
-                </Button>
-              </div>
-            </>
+              <Button variant="ghost" disabled={pending} aria-busy={pending} onClick={() => run(hours)}>
+                {s.usbAllow}
+              </Button>
+            </div>
           )
         ) : null}
         <FormError error={error} />

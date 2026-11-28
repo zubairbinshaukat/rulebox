@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router";
 import { getFunctionName, type FunctionReference } from "convex/server";
 import { ConvexError } from "convex/values";
@@ -52,6 +53,7 @@ function fnFor(name: string): Mock {
 import { ToastProvider } from "../app/Toasts";
 import Broadcasts from "./Broadcasts";
 import { LockCard } from "./broadcasts/LockCard";
+import { SendBroadcastDialog } from "./broadcasts/SendDialog";
 
 const admin: Me = {
   email: "admin@x.test",
@@ -93,7 +95,7 @@ const page = (rows: BroadcastRow[]) => ({ page: rows, isDone: true, continueCurs
 const groupRow = (id: string, name: string) => ({ _id: id, name, revision: 0, createdAt: 1, devices: { count: 0, more: false }, employees: { count: 0, more: false } });
 
 beforeEach(() => {
-  cx.results = { "broadcasts:list": page([]), "groups:list": [groupRow("g1", "Front desk"), groupRow("g2", "Back office")] };
+  cx.results = { "broadcasts:list": page([]), "broadcasts:live": [], "groups:list":[groupRow("g1", "Front desk"), groupRow("g2", "Back office")] };
   cx.queried = [];
   cx.fns = {};
 });
@@ -137,11 +139,12 @@ describe("the Broadcasts screen", () => {
     expect(within(rows[0]!).getByText(s.statuses.active)).toBeTruthy();
     expect(within(rows[1]!).getByText(s.statuses.expired)).toBeTruthy();
     expect(within(rows[1]!).getByText("Desk 1")).toBeTruthy();
-    expect(within(rows[1]!).getByText(s.noAckNeeded)).toBeTruthy();
+    expect(within(rows[1]!).getByText("—")).toBeTruthy();
     expect(within(rows[2]!).getByText(s.statuses.cancelled)).toBeTruthy();
     expect(within(rows[2]!).getByText(s.gone)).toBeTruthy();
     // Only the active one can be cancelled.
-    expect(screen.getAllByRole("button", { name: s.cancel })).toHaveLength(1);
+    expect(screen.getAllByRole("button", { name: new RegExp(`^${s.cancelRow}:`) })).toHaveLength(1);
+    expect(screen.getByRole("button", { name: `${s.cancelRow}: Privacy rules` })).toBeTruthy();
     // The query asks for ONE page, newest first, with no search.
     const asked = cx.queried.find((q) => q.name === "broadcasts:list")!.args as { paginationOpts: { numItems: number }; sort: unknown };
     expect(asked.sort).toEqual({ key: "sent", dir: "desc" });
@@ -164,7 +167,7 @@ describe("the Broadcasts screen", () => {
     cx.results["broadcasts:list"] = page([row()]);
     ui(<Broadcasts />, "viewer");
     expect(screen.queryByRole("button", { name: s.send })).toBeNull();
-    expect(screen.queryByRole("button", { name: s.cancel })).toBeNull();
+    expect(screen.queryByRole("button", { name: new RegExp(`^${s.cancelRow}:`) })).toBeNull();
     expect(screen.getByText("Till update tonight")).toBeTruthy();
   });
 
@@ -173,7 +176,7 @@ describe("the Broadcasts screen", () => {
     cx.fns["broadcasts:cancel"] = cancel;
     cx.results["broadcasts:list"] = page([row()]);
     ui(<Broadcasts />, "admin");
-    fireEvent.click(screen.getByRole("button", { name: s.cancel }));
+    fireEvent.click(screen.getByRole("button", { name: `${s.cancelRow}: Till update tonight` }));
     const dialog = screen.getByRole("dialog");
     expect(within(dialog).getByText(s.cancelTitle("Till update tonight"))).toBeTruthy();
     expect(cancel).not.toHaveBeenCalled();
@@ -190,6 +193,16 @@ describe("the send dialog", () => {
     return screen.getByRole("dialog");
   };
   const byLabel = (dialog: HTMLElement, label: string) => within(dialog).getByLabelText(new RegExp(`^${label}`));
+  /** Opens the group picker and chooses a group (the list is a popup outside the dialog). */
+  async function pickGroup(dialog: HTMLElement, name: string) {
+    const user = userEvent.setup();
+    await user.click(within(dialog).getByRole("button", { name: /^To/ }));
+    await user.click(screen.getByRole("option", { name }));
+  }
+  const fillText = (dialog: HTMLElement, title = "Hello", body = "World") => {
+    fireEvent.change(byLabel(dialog, s.messageTitle), { target: { value: title } });
+    fireEvent.change(byLabel(dialog, s.body), { target: { value: body } });
+  };
 
   it("asks for a group, a title and a message in words before it calls the server", () => {
     const send = vi.fn();
@@ -206,50 +219,133 @@ describe("the send dialog", () => {
     const send = vi.fn<(args: unknown) => Promise<{ id: string; targetCount: number }>>(async () => ({ id: "b9", targetCount: 4 }));
     cx.fns["broadcasts:send"] = send;
     const dialog = open();
-    fireEvent.change(byLabel(dialog, s.toGroup), { target: { value: "g2" } });
-    fireEvent.change(byLabel(dialog, s.style), { target: { value: "fullscreen" } });
-    fireEvent.change(byLabel(dialog, s.messageTitle), { target: { value: "  <i>Read me</i>  " } });
-    fireEvent.change(byLabel(dialog, s.body), { target: { value: "Line one\nLine two" } });
-    fireEvent.change(byLabel(dialog, s.expiry), { target: { value: "4h" } });
+    await pickGroup(dialog, "Back office");
+    fireEvent.click(within(dialog).getByRole("radio", { name: s.styleOptions.fullscreen.label }));
+    fillText(dialog, "  <i>Read me</i>  ", "Line one\nLine two");
+    fireEvent.click(within(dialog).getByRole("radio", { name: s.expiryChoices["7d"]! }));
     fireEvent.click(within(dialog).getByLabelText(new RegExp(s.ackRequired)));
-    // The preview is text, not markup.
+    // The preview is text, not markup, and says where it goes and for how long.
     expect(within(dialog).getAllByText("<i>Read me</i>").length).toBeGreaterThan(0);
-    expect(dialog.querySelector("i")).toBeNull();
+    expect([...dialog.querySelectorAll("i")].some((el) => el.textContent === "Read me")).toBe(false);
+    expect(within(dialog).getByText(s.recap("Back office", s.recapFor["7d"]!))).toBeTruthy();
 
     fireEvent.click(within(dialog).getByRole("button", { name: s.submit }));
     await waitFor(() => expect(send).toHaveBeenCalledTimes(1));
     const args = send.mock.calls[0]![0] as { target: unknown; style: string; title: string; body: string; expiresAt: number; ackRequired: boolean };
     expect(args).toMatchObject({ target: { kind: "group", id: "g2" }, style: "fullscreen", title: "<i>Read me</i>", body: "Line one\nLine two", ackRequired: true });
-    expect(args.expiresAt).toBeGreaterThan(Date.now() + 3 * HOUR);
-    expect(args.expiresAt).toBeLessThanOrEqual(Date.now() + 4 * HOUR);
+    expect(args.expiresAt).toBeGreaterThan(Date.now() + 6 * 24 * HOUR);
+    expect(args.expiresAt).toBeLessThanOrEqual(Date.now() + 7 * 24 * HOUR);
     expect(await screen.findByText(s.sent(4))).toBeTruthy();
   });
 
-  it("sends without an expiry when 'until I cancel it' is chosen", async () => {
+  it("defaults to a banner for 1 day, and offers four lengths without '4 hours'", async () => {
     const send = vi.fn<(args: unknown) => Promise<{ id: string; targetCount: number }>>(async () => ({ id: "b9", targetCount: 1 }));
     cx.fns["broadcasts:send"] = send;
     const dialog = open();
-    fireEvent.change(byLabel(dialog, s.toGroup), { target: { value: "g1" } });
-    fireEvent.change(byLabel(dialog, s.messageTitle), { target: { value: "Hello" } });
-    fireEvent.change(byLabel(dialog, s.body), { target: { value: "World" } });
-    fireEvent.change(byLabel(dialog, s.expiry), { target: { value: "none" } });
+    expect(within(dialog).getByRole("radio", { name: s.styleOptions.banner.label }).getAttribute("aria-checked")).toBe("true");
+    const lengths = Object.values(s.expiryChoices);
+    expect(lengths).toEqual(["1 hour", "1 day", "1 week", "Until I cancel"]);
+    expect(within(dialog).getByRole("radio", { name: "1 day" }).getAttribute("aria-checked")).toBe("true");
+    expect(within(dialog).queryByRole("radio", { name: /4 hours/ })).toBeNull();
+    await pickGroup(dialog, "Front desk");
+    fillText(dialog);
+    fireEvent.click(within(dialog).getByRole("button", { name: s.submit }));
+    await waitFor(() => expect(send).toHaveBeenCalledTimes(1));
+    const args = send.mock.calls[0]![0] as { style: string; expiresAt: number; ackRequired: boolean };
+    expect(args.style).toBe("banner");
+    expect(args.ackRequired).toBe(false);
+    expect(args.expiresAt).toBeGreaterThan(Date.now() + 23 * HOUR);
+    expect(args.expiresAt).toBeLessThanOrEqual(Date.now() + 24 * HOUR);
+  });
+
+  it("sends without an expiry when 'until I cancel' is chosen", async () => {
+    const send = vi.fn<(args: unknown) => Promise<{ id: string; targetCount: number }>>(async () => ({ id: "b9", targetCount: 1 }));
+    cx.fns["broadcasts:send"] = send;
+    const dialog = open();
+    await pickGroup(dialog, "Front desk");
+    fillText(dialog);
+    fireEvent.click(within(dialog).getByRole("radio", { name: s.expiryChoices.none! }));
     fireEvent.click(within(dialog).getByRole("button", { name: s.submit }));
     await waitFor(() => expect(send).toHaveBeenCalledTimes(1));
     expect((send.mock.calls[0]![0] as { expiresAt?: number }).expiresAt).toBeUndefined();
   });
 
+  it("shows a counter only when a text is within 20% of its limit, and in red past it", () => {
+    const dialog = open();
+    const title = byLabel(dialog, s.messageTitle);
+    fireEvent.change(title, { target: { value: "x".repeat(40) } });
+    expect(within(dialog).queryByText(s.titleCount(40))).toBeNull();
+    fireEvent.change(title, { target: { value: "x".repeat(64) } });
+    expect(within(dialog).getByText(s.titleCount(64))).toBeTruthy();
+    fireEvent.change(title, { target: { value: "x".repeat(81) } });
+    expect(within(dialog).getByText(s.titleCount(81)).getAttribute("data-over")).toBe("true");
+    const body = byLabel(dialog, s.body);
+    fireEvent.change(body, { target: { value: "y".repeat(399) } });
+    expect(within(dialog).queryByText(s.bodyCount(399))).toBeNull();
+    fireEvent.change(body, { target: { value: "y".repeat(400) } });
+    expect(within(dialog).getByText(s.bodyCount(400))).toBeTruthy();
+  });
+
+  it("explains the acknowledgement in an (i) tip, not under the checkbox", () => {
+    const dialog = open();
+    expect(within(dialog).getByRole("button", { name: s.ackInfoLabel })).toBeTruthy();
+    expect(within(dialog).queryByText(s.ackInfo)).toBeNull();
+  });
+
+  it("starts with the group it was opened from, and sends to it without choosing", async () => {
+    const send = vi.fn<(args: unknown) => Promise<{ id: string; targetCount: number }>>(async () => ({ id: "b9", targetCount: 2 }));
+    cx.fns["broadcasts:send"] = send;
+    ui(<SendBroadcastDialog open target={{ kind: "group", id: "g2", name: "Back office" }} onClose={() => undefined} />, "admin");
+    const dialog = screen.getByRole("dialog");
+    expect(within(dialog).getByRole("button", { name: /^To/ }).textContent).toContain("Back office");
+    fillText(dialog);
+    fireEvent.click(within(dialog).getByRole("button", { name: s.submit }));
+    await waitFor(() => expect(send).toHaveBeenCalledTimes(1));
+    expect((send.mock.calls[0]![0] as { target: unknown }).target).toEqual({ kind: "group", id: "g2" });
+  });
+
+  it("picks the only group by itself", async () => {
+    cx.results["groups:list"] = [groupRow("g1", "Front desk")];
+    const send = vi.fn<(args: unknown) => Promise<{ id: string; targetCount: number }>>(async () => ({ id: "b9", targetCount: 2 }));
+    cx.fns["broadcasts:send"] = send;
+    const dialog = open();
+    expect(within(dialog).getByRole("button", { name: /^To/ }).textContent).toContain("Front desk");
+    fillText(dialog);
+    fireEvent.click(within(dialog).getByRole("button", { name: s.submit }));
+    await waitFor(() => expect(send).toHaveBeenCalledTimes(1));
+    expect((send.mock.calls[0]![0] as { target: unknown }).target).toEqual({ kind: "group", id: "g1" });
+  });
+
+  it("offers to create a group when there is none", () => {
+    cx.results["groups:list"] = [];
+    const dialog = open();
+    expect(within(dialog).getByText(new RegExp(s.noGroups))).toBeTruthy();
+    expect(within(dialog).getByRole("link", { name: s.createGroup }).getAttribute("href")).toBe("/groups");
+  });
+
+  it("from a PC's page names the PC, has no group picker and sends to that PC", async () => {
+    const send = vi.fn<(args: unknown) => Promise<{ id: string; targetCount: number }>>(async () => ({ id: "b9", targetCount: 1 }));
+    cx.fns["broadcasts:send"] = send;
+    ui(<SendBroadcastDialog open target={{ kind: "device", id: "d1", name: "RECEPTION-01" }} onClose={() => undefined} />, "admin");
+    const dialog = screen.getByRole("dialog");
+    expect(within(dialog).getAllByText("RECEPTION-01").length).toBeGreaterThan(0);
+    expect(within(dialog).queryByRole("button", { name: /^To/ })).toBeNull();
+    fillText(dialog);
+    fireEvent.click(within(dialog).getByRole("button", { name: s.submit }));
+    await waitFor(() => expect(send).toHaveBeenCalledTimes(1));
+    expect((send.mock.calls[0]![0] as { target: unknown }).target).toEqual({ kind: "device", id: "d1" });
+  });
+
   it("says in words that 20 active messages is the limit, and keeps the dialog open", async () => {
     cx.fns["broadcasts:send"] = vi.fn().mockRejectedValue(new ConvexError({ code: "too_large", detail: "active" }));
     const dialog = open();
-    fireEvent.change(byLabel(dialog, s.toGroup), { target: { value: "g1" } });
-    fireEvent.change(byLabel(dialog, s.messageTitle), { target: { value: "Hello" } });
-    fireEvent.change(byLabel(dialog, s.body), { target: { value: "World" } });
+    await pickGroup(dialog, "Front desk");
+    fillText(dialog);
     fireEvent.click(within(dialog).getByRole("button", { name: s.submit }));
     expect(await within(dialog).findByText(s.tooManyActive)).toBeTruthy();
     expect(screen.getByRole("dialog")).toBeTruthy();
   });
 });
-
 const device = (over: Partial<DeviceDetail> = {}): DeviceDetail => ({
   _id: "d1",
   name: "Desk 1",

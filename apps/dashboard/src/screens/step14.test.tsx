@@ -7,9 +7,11 @@ import type { ReactNode } from "react";
 import type { Me } from "../data/types";
 import { MeContext } from "../lib/member";
 import { strings } from "../lib/strings";
-import { networksStrings as s } from "./networks/strings";
+import { pickOption, selectedText } from "../test/select";
+import { printerStrings as s } from "./networks/printerStrings";
+import { networksStrings as n } from "./networks/strings";
 
-// Phase 5 Step 14 screens (the Printers card of Networks, PrinterEdit) against the LIVE data seam with the Convex React hooks
+// Phase 5 Step 14 screens (the Printers section of Networks, PrinterEdit with one address field; UI pass 2026-11-28) against the LIVE data seam with the Convex React hooks
 // mocked: queries answer from `cx.results`, writes call `cx.fns` (convex/networks.printers.test.ts covers the backend).
 const cx = vi.hoisted(() => ({
   results: {} as Record<string, unknown>,
@@ -116,156 +118,260 @@ const front = {
 const where = () => screen.getByTestId("where").textContent;
 const type = (label: string, value: string) => fireEvent.change(screen.getByLabelText(label), { target: { value } });
 
-describe("Printers on the Networks list", () => {
-  it("lists each printer with its kind, address, driver, default badge and group chips; an admin can add and edit", () => {
+const listOf = (over: object = {}) => ({ wifi: [], printers: [], drivers: [], addedDrivers: [], approvedDrivers: DRIVERS, ...over });
+
+const submit = () => fireEvent.click(screen.getByRole("button", { name: s.create }));
+const savePrinter = () => fireEvent.click(screen.getByRole("button", { name: strings.common.saveChanges }));
+
+describe("Printers on the Networks page", () => {
+  it("shows each printer as a card: name, 'Network printer' and its host only, the Default pill and two group chips", () => {
     cx.results["networks:list"] = {
       wifi: [],
       drivers: [], addedDrivers: [], approvedDrivers: DRIVERS,
       printers: [
-        { ...front, groupCount: 6, groups: [1, 2, 3, 4, 5, 6].map((n) => ({ _id: `g${n}`, name: `Group ${n}` })) },
+        { ...front, groupCount: 6, groups: [1, 2, 3, 4, 5, 6].map((k) => ({ _id: `g${k}`, name: `Group ${k}` })) },
         { ...front, _id: "p2", name: "Labels", kind: "raw", address: "10.0.0.31", port: 9101, driver: "Generic / Text Only", groupCount: 0, defaultGroupCount: 0, groups: [] },
-        { ...front, _id: "p3", name: "Laser", kind: "lpr", address: "10.0.0.32", queue: "lp", groupCount: 1, defaultGroupCount: 0, groups: [{ _id: "g9", name: "Lobby" }] },
+        { ...front, _id: "p3", name: "Laser", kind: "share", address: "\\\\print01\\hp", groupCount: 1, defaultGroupCount: 0, groups: [{ _id: "g9", name: "Lobby" }] },
       ],
     };
     ui(<Networks />, "admin", "/networks");
-    const rows = within(screen.getByRole("list", { name: s.printersSection })).getAllByRole("listitem");
+    const rows = within(screen.getByRole("list", { name: n.printersSection })).getAllByRole("listitem");
     expect(rows).toHaveLength(3);
     expect(within(rows[0]!).getByRole("link", { name: "Front desk" }).getAttribute("href")).toBe("/networks/printers/p1");
-    expect(within(rows[0]!).getByText("ipp://10.0.0.20:631/ipp/print")).toBeTruthy();
-    expect(within(rows[0]!).getByText(s.defaultBadge(1))).toBeTruthy();
-    expect(within(rows[0]!).getAllByRole("link").filter((l) => l.getAttribute("href")?.startsWith("/groups/"))).toHaveLength(4);
-    expect(within(rows[0]!).getByText(s.moreGroups(2))).toBeTruthy();
-    expect(within(rows[1]!).getByText(":9101")).toBeTruthy();
-    expect(within(rows[1]!).getByText(s.noGroups)).toBeTruthy();
-    expect(within(rows[2]!).getByText("/ lp")).toBeTruthy();
-    expect(screen.getAllByRole("link", { name: s.newPrinter }).length).toBeGreaterThan(0);
-    expect(within(rows[0]!).getByRole("link", { name: `${s.edit} Front desk` })).toBeTruthy();
+    // the host, not the address with its port, path or queue
+    expect(rows[0]!.textContent).toContain("Network printer · 10.0.0.20");
+    expect(rows[0]!.textContent).not.toContain("ipp://");
+    expect(rows[0]!.textContent).not.toContain("Microsoft");
+    expect(within(rows[0]!).getByText(n.defaultPill)).toBeTruthy();
+    expect(within(rows[0]!).getByText("Group 2")).toBeTruthy();
+    expect(within(rows[0]!).queryByText("Group 3")).toBeNull();
+    expect(within(rows[0]!).getByText(n.moreChip(4))).toBeTruthy();
+    expect(rows[1]!.textContent).not.toContain("9101");
+    expect(within(rows[1]!).queryByText(n.defaultPill)).toBeNull();
+    expect(within(rows[1]!).getByText(n.notOnPcs)).toBeTruthy();
+    expect(rows[2]!.textContent).toContain("Shared printer · print01");
+    expect(screen.getByRole("link", { name: n.addPrinterShort }).getAttribute("href")).toBe("/networks/printers/new");
   });
 
-  it("an organization without printers gets the empty state with the add action; a viewer gets neither Add nor Edit", () => {
+  it("an organization without printers gets one compact row with Add; a viewer gets no Add", () => {
     ui(<Networks />, "admin", "/networks");
-    expect(screen.getByText(s.emptyPrintersTitle)).toBeTruthy();
-    expect(screen.getAllByRole("link", { name: s.newPrinter })).toHaveLength(2);
+    expect(screen.getByText(n.emptyPrinters)).toBeTruthy();
+    expect(screen.getByRole("link", { name: n.addPrinterShort })).toBeTruthy();
     cleanup();
     cx.results["networks:list"] = { wifi: [], drivers: [], addedDrivers: [], approvedDrivers: DRIVERS, printers: [front] };
     ui(<Networks />, "viewer", "/networks");
-    expect(screen.queryByRole("link", { name: s.newPrinter })).toBeNull();
-    expect(screen.queryByRole("link", { name: `${s.edit} Front desk` })).toBeNull();
+    expect(screen.queryByRole("link", { name: n.addPrinterShort })).toBeNull();
     expect(screen.getByRole("link", { name: "Front desk" })).toBeTruthy();
   });
 });
 
-describe("New printer (/networks/printers/new)", () => {
-  it("asks for a name and an address before it calls the server, in words", async () => {
+describe("New printer (/networks/printers/new): one address field", () => {
+  it("asks for an address and a name in words, and checks the address before it calls the server", async () => {
     const save = vi.fn(async () => ({ id: "p9", revision: 1 }));
     cx.fns["networks:savePrinter"] = save;
     ui(<PrinterEdit />, "admin", "/networks/printers/new");
-    expect(screen.getByText(s.driverHint)).toBeTruthy();
-    fireEvent.click(screen.getByRole("button", { name: s.createPrinter }));
-    expect(await screen.findByText(s.printerNameProblems.empty)).toBeTruthy();
-    expect(screen.getByText(s.addressProblems.empty)).toBeTruthy();
-    expect(save).not.toHaveBeenCalled();
+    submit();
+    expect(await screen.findByText(s.addressProblems.empty)).toBeTruthy();
+    expect(screen.getByText(s.nameProblems.empty)).toBeTruthy();
     type(s.name, "Front desk");
-    type(s.addressLabel.ipp, "http://10.0.0.1/ipp/print");
-    expect(screen.getByText(s.addressProblems.scheme)).toBeTruthy();
-    type(s.addressLabel.ipp, "ipp://user:pw@10.0.0.1/ipp/print");
+    type(s.address, "!!!");
+    expect(screen.getByText(s.addressNone)).toBeTruthy();
+    type(s.address, "ipp://user:pw@10.0.0.1/ipp/print");
     expect(screen.getByText(s.addressProblems.credentials)).toBeTruthy();
+    type(s.address, "\\\\print01");
+    expect(screen.getByText(s.addressProblems.share)).toBeTruthy();
+    type(s.address, `${"h".repeat(49)}:9100`); // a raw host longer than 48 characters
+    expect(screen.getByText(s.addressProblems.length)).toBeTruthy();
     expect(save).not.toHaveBeenCalled();
   });
 
-  it("the form follows the kind: a port for raw, a queue for LPR, a shared name for a share; the call carries only what applies", async () => {
+  it("reads the connection from the address and says so under the field", () => {
+    ui(<PrinterEdit />, "admin", "/networks/printers/new");
+    expect(screen.queryByText(/^Connects as/)).toBeNull();
+    for (const [text, line] of [
+      ["10.0.0.20", s.connectsAs("Network printer (IPP)")],
+      ["10.0.0.31:9101", s.connectsAs("Network printer, port 9101")],
+      ["10.0.0.32:9100", s.connectsAs("Network printer, port 9100")],
+      ["lpr://10.0.0.32/lp", s.connectsAs("Network printer, queue lp")],
+      ["\\\\print01\\hp", s.connectsAs("Shared by a server")],
+      ["http://10.0.0.5:631/ipp/print", s.connectsAs("Network printer (IPP)")],
+    ] as const) {
+      type(s.address, text);
+      expect(screen.getByText(line), text).toBeTruthy();
+    }
+  });
+
+  it("sends what the address means, with the driver Automatic picked by the kind; the call carries only what applies", async () => {
+    const save = vi.fn(async () => ({ id: "p9", revision: 1 }));
+    cx.fns["networks:savePrinter"] = save;
+    const make = async (address: string, expected: object) => {
+      save.mockClear();
+      ui(<PrinterEdit />, "admin", "/networks/printers/new");
+      type(s.address, address);
+      type(s.name, " Labels ");
+      fireEvent.click(screen.getByRole("checkbox", { name: "Group 2" }));
+      submit();
+      await waitFor(() => expect(save).toHaveBeenCalledTimes(1));
+      expect(save).toHaveBeenCalledWith({ name: "Labels", groupIds: ["g2"], defaultForGroupIds: [], ...expected });
+      cleanup();
+    };
+    await make("10.0.0.20", { kind: "ipp", address: "ipp://10.0.0.20/ipp/print", driver: "Microsoft IPP Class Driver" });
+    await make("10.0.0.31:9101", { kind: "raw", address: "10.0.0.31", port: 9101, driver: "Microsoft PCL6 Class Driver" });
+    await make("lpr://10.0.0.32/lp", { kind: "lpr", address: "10.0.0.32", queue: "lp", driver: "Microsoft PCL6 Class Driver" });
+    await make("\\\\print01\\hp", { kind: "share", address: "\\\\print01\\hp", driver: "Microsoft PCL6 Class Driver" });
+  });
+
+  it("opens the printer after it is added; 'Make it the default printer' makes it the default in every picked group", async () => {
     const save = vi.fn(async () => ({ id: "p9", revision: 1 }));
     cx.fns["networks:savePrinter"] = save;
     ui(<PrinterEdit />, "admin", "/networks/printers/new");
+    type(s.address, "10.0.0.20");
+    type(s.name, "Front desk");
+    fireEvent.click(screen.getByRole("checkbox", { name: "Group 1" }));
+    fireEvent.click(screen.getByRole("checkbox", { name: "Group 2" }));
+    fireEvent.click(screen.getByRole("switch", { name: s.makeDefault }));
+    submit();
+    await waitFor(() => expect(save).toHaveBeenCalledTimes(1));
+    expect(save).toHaveBeenCalledWith(expect.objectContaining({ groupIds: ["g1", "g2"], defaultForGroupIds: ["g1", "g2"] }));
+    expect(await screen.findByText(s.created("Front desk"))).toBeTruthy();
+    await waitFor(() => expect(where()).toBe("/networks/printers/p9"));
+  });
+
+  it("starts with the group ticked when the organization has exactly one", () => {
+    cx.results["groups:list"] = [groupRow("g1", "Everyone")];
+    ui(<PrinterEdit />, "admin", "/networks/printers/new");
+    expect((screen.getByRole("checkbox", { name: "Everyone" }) as HTMLInputElement).checked).toBe(true);
+  });
+
+  it("Advanced: a picked connection type stops the guessing and brings its own fields (port for raw, queue for LPR, with the queue error shown)", async () => {
+    const save = vi.fn(async () => ({ id: "p9", revision: 1 }));
+    cx.fns["networks:savePrinter"] = save;
+    ui(<PrinterEdit />, "admin", "/networks/printers/new");
+    expect(selectedText(s.connectionType)).toBe(s.automatic);
     expect(screen.queryByLabelText(s.port)).toBeNull();
     expect(screen.queryByLabelText(s.queue)).toBeNull();
-    fireEvent.change(screen.getByLabelText(s.kindLabel), { target: { value: "raw" } });
-    type(s.name, " Labels ");
-    type(s.addressLabel.raw, "10.0.0.31");
+    type(s.address, "10.0.0.31");
+    type(s.name, "Labels");
+    pickOption(s.connectionType, /^Network printer \(port\)/);
+    // the same host, now as a raw printer: the address is no longer read, the port has its own field
+    expect((screen.getByLabelText(s.address) as HTMLInputElement).value).toBe("10.0.0.31");
     type(s.port, "70000");
-    fireEvent.click(screen.getByRole("button", { name: s.createPrinter }));
+    submit();
     expect(await screen.findByText(s.portProblems.range)).toBeTruthy();
     expect(save).not.toHaveBeenCalled();
     type(s.port, "9101");
-    fireEvent.change(screen.getByLabelText(s.driverLabel), { target: { value: "Generic / Text Only" } });
-    fireEvent.click(screen.getByRole("checkbox", { name: "Group 2" }));
-    fireEvent.click(screen.getByRole("checkbox", { name: s.defaultIn("Group 2") }));
-    fireEvent.click(screen.getByRole("button", { name: s.createPrinter }));
+    submit();
     await waitFor(() => expect(save).toHaveBeenCalledTimes(1));
-    expect(save).toHaveBeenCalledWith({
-      name: "Labels",
-      kind: "raw",
-      address: "10.0.0.31",
-      port: 9101,
-      driver: "Generic / Text Only",
-      groupIds: ["g2"],
-      defaultForGroupIds: ["g2"],
-    });
-    expect(await screen.findByText(s.printerCreated("Labels"))).toBeTruthy();
-    await waitFor(() => expect(where()).toBe("/networks/printers/p9"));
+    expect(save).toHaveBeenCalledWith(expect.objectContaining({ kind: "raw", address: "10.0.0.31", port: 9101, driver: "Microsoft PCL6 Class Driver" }));
 
     cleanup();
     save.mockClear();
     ui(<PrinterEdit />, "admin", "/networks/printers/new");
-    fireEvent.change(screen.getByLabelText(s.kindLabel), { target: { value: "lpr" } });
+    type(s.address, "10.0.0.32");
     type(s.name, "Laser");
-    type(s.addressLabel.lpr, "10.0.0.32");
-    fireEvent.click(screen.getByRole("button", { name: s.createPrinter }));
+    pickOption(s.connectionType, /^Network printer \(LPR\)/);
+    submit();
     expect(await screen.findByText(s.queueProblems.required)).toBeTruthy();
     type(s.queue, "lp");
-    fireEvent.click(screen.getByRole("button", { name: s.createPrinter }));
+    submit();
     await waitFor(() => expect(save).toHaveBeenCalledTimes(1));
     expect(save).toHaveBeenCalledWith(expect.objectContaining({ kind: "lpr", queue: "lp", address: "10.0.0.32" }));
     expect((save.mock.calls[0] as unknown[])[0]).not.toHaveProperty("port");
+  });
 
-    cleanup();
-    save.mockClear();
+  it("the driver is Automatic unless another is picked from the approved list (delivered names are tagged)", async () => {
+    const save = vi.fn(async () => ({ id: "p9", revision: 1 }));
+    cx.fns["networks:savePrinter"] = save;
+    cx.results["networks:list"] = listOf({ approvedDrivers: [...DRIVERS, "Brother HL-L2350DW series"], drivers: [{ _id: "d1", name: "Brother", provides: ["Brother HL-L2350DW series"] }] });
     ui(<PrinterEdit />, "admin", "/networks/printers/new");
-    fireEvent.change(screen.getByLabelText(s.kindLabel), { target: { value: "share" } });
-    type(s.name, "Shared");
-    type(s.addressLabel.share, "print01\\hp");
-    fireEvent.click(screen.getByRole("button", { name: s.createPrinter }));
-    expect(await screen.findByText(s.addressProblems.share)).toBeTruthy();
-    expect(save).not.toHaveBeenCalled();
-    type(s.addressLabel.share, "\\\\print01\\hp");
-    fireEvent.click(screen.getByRole("button", { name: s.createPrinter }));
+    expect(selectedText(s.driver)).toBe(s.driverAuto);
+    fireEvent.click(screen.getByLabelText(s.driver));
+    const options = within(screen.getByRole("listbox")).getAllByRole("option").map((o) => o.textContent ?? "");
+    expect(options[0]).toContain(s.driverAuto);
+    for (const name of DRIVERS) expect(options.some((o) => o.includes(name))).toBe(true);
+    expect(options.some((o) => o.includes("Brother HL-L2350DW series") && o.includes(s.driverDelivered))).toBe(true);
+    expect(options[options.length - 1]).toContain(s.driverOther);
+    fireEvent.click(within(screen.getByRole("listbox")).getByRole("option", { name: /^HP Universal Printing PCL 6/ }));
+    type(s.address, "10.0.0.20");
+    type(s.name, "Front desk");
+    submit();
     await waitFor(() => expect(save).toHaveBeenCalledTimes(1));
-    expect(save).toHaveBeenCalledWith(expect.objectContaining({ kind: "share", address: "\\\\print01\\hp" }));
+    expect(save).toHaveBeenCalledWith(expect.objectContaining({ driver: "HP Universal Printing PCL 6" }));
   });
 
-  it("offers the approved drivers only (the inbox ones and what the organization added), with the 'already on the PC' note", () => {
+  it("'Another driver…' adds the typed name to the approved list FIRST, then saves the printer with it; a bad name is refused in words", async () => {
+    const calls: string[] = [];
+    const approve = vi.fn(async (a: unknown) => {
+      calls.push("approve");
+      return { addedDrivers: (a as { names: string[] }).names };
+    });
+    const save = vi.fn(async () => {
+      calls.push("save");
+      return { id: "p9", revision: 1 };
+    });
+    cx.fns["networks:setApprovedPrinterDrivers"] = approve;
+    cx.fns["networks:savePrinter"] = save;
+    cx.results["networks:list"] = listOf({ addedDrivers: ["HP Universal"], approvedDrivers: [...DRIVERS, "HP Universal"] });
     ui(<PrinterEdit />, "admin", "/networks/printers/new");
-    const options = within(screen.getByLabelText(s.driverLabel)).getAllByRole("option").map((o) => o.textContent);
-    expect(options).toEqual(DRIVERS);
-    expect(screen.getByText(/delivered by a Drivers entry/)).toBeTruthy();
+    type(s.address, "10.0.0.20");
+    type(s.name, "Front desk");
+    pickOption(s.driver, s.driverOther);
+    submit();
+    expect(await screen.findByText(n.approvedProblems.empty)).toBeTruthy();
+    expect(approve).not.toHaveBeenCalled();
+    type(s.driverOtherName, "Canon UFR II");
+    submit();
+    await waitFor(() => expect(save).toHaveBeenCalledTimes(1));
+    expect(approve).toHaveBeenCalledWith({ names: ["HP Universal", "Canon UFR II"] });
+    expect(calls).toEqual(["approve", "save"]);
+    expect(save).toHaveBeenCalledWith(expect.objectContaining({ driver: "Canon UFR II" }));
   });
 
-  it("a save in more than 10 groups goes to the server; says in words what the server refuses", async () => {
-    const save = vi.fn().mockRejectedValueOnce(new ConvexError({ code: "invalid_argument", field: "driver", detail: "not_approved" }))
+  it("'Another driver…' with a name that is already approved does not add it again", async () => {
+    const approve = vi.fn(async () => ({ addedDrivers: [] }));
+    const save = vi.fn(async () => ({ id: "p9", revision: 1 }));
+    cx.fns["networks:setApprovedPrinterDrivers"] = approve;
+    cx.fns["networks:savePrinter"] = save;
+    ui(<PrinterEdit />, "admin", "/networks/printers/new");
+    type(s.address, "10.0.0.20");
+    type(s.name, "Front desk");
+    pickOption(s.driver, s.driverOther);
+    type(s.driverOtherName, "hp universal printing pcl 6");
+    submit();
+    await waitFor(() => expect(save).toHaveBeenCalledTimes(1));
+    expect(approve).not.toHaveBeenCalled();
+    expect(save).toHaveBeenCalledWith(expect.objectContaining({ driver: "HP Universal Printing PCL 6" }));
+  });
+
+  it("a save in more than 10 groups goes to the server; says in words what the server refuses, the driver error even when Advanced is closed", async () => {
+    const save = vi
+      .fn()
+      .mockRejectedValueOnce(new ConvexError({ code: "invalid_argument", field: "driver", detail: "not_approved" }))
       .mockRejectedValueOnce(new ConvexError({ code: "invalid_argument", field: "name", detail: "taken" }))
       .mockRejectedValueOnce(new ConvexError({ code: "invalid_argument", field: "defaultForGroupIds", detail: "taken" }))
       .mockRejectedValueOnce(new ConvexError({ code: "too_large", detail: "printers" }));
     cx.fns["networks:savePrinter"] = save;
     ui(<PrinterEdit />, "admin", "/networks/printers/new");
     type(s.name, "Front desk");
-    type(s.addressLabel.ipp, "ipp://10.0.0.1/ipp/print");
+    type(s.address, "ipp://10.0.0.1/ipp/print");
     for (let i = 1; i <= 11; i++) fireEvent.click(screen.getByRole("checkbox", { name: `Group ${i}` }));
-    expect(screen.queryByText(/groups touched/)).toBeNull();
-    fireEvent.click(screen.getByRole("button", { name: s.createPrinter }));
+    submit();
     expect(await screen.findByText(s.driverRefused)).toBeTruthy();
     expect((save.mock.calls[0] as unknown as [{ groupIds: string[] }])[0].groupIds).toHaveLength(11);
-    fireEvent.click(screen.getByRole("button", { name: s.createPrinter }));
+    // the Advanced box opened by itself, so the error is not hidden
+    expect(document.querySelector("details.net-adv")!.hasAttribute("open")).toBe(true);
+    submit();
     expect(await screen.findByText(s.nameTaken)).toBeTruthy();
-    fireEvent.click(screen.getByRole("button", { name: s.createPrinter }));
+    submit();
     expect(await screen.findByText(s.defaultTaken)).toBeTruthy();
-    fireEvent.click(screen.getByRole("button", { name: s.createPrinter }));
+    submit();
     expect(await screen.findByText(/at most 100 printers/)).toBeTruthy();
   });
 
   it("a viewer gets the read-only notice instead of the form", () => {
     ui(<PrinterEdit />, "viewer", "/networks/printers/new");
     expect(screen.getByText(strings.app.readOnly)).toBeTruthy();
-    expect(screen.queryByRole("button", { name: s.createPrinter })).toBeNull();
+    expect(screen.queryByRole("button", { name: s.create })).toBeNull();
   });
 });
 
@@ -274,26 +380,46 @@ describe("Printer (/networks/printers/:id)", () => {
     cx.results["networks:printerDetail"] = front;
   });
 
-  it("asks networks:printerDetail for the id and shows the form, the defaults and the apply counts", () => {
+  it("asks networks:printerDetail for the id and shows the address as one field, the detected connection, the defaults and the apply counts", () => {
     ui(<PrinterEdit />, "admin", "/networks/printers/p1");
     expect(cx.queried.find((q) => q.name === "networks:printerDetail")!.args).toEqual({ id: "p1" });
     expect((screen.getByLabelText(s.name) as HTMLInputElement).value).toBe("Front desk");
-    expect((screen.getByLabelText(s.addressLabel.ipp) as HTMLInputElement).value).toBe("ipp://10.0.0.20:631/ipp/print");
+    expect((screen.getByLabelText(s.address) as HTMLInputElement).value).toBe("ipp://10.0.0.20:631/ipp/print");
+    expect(screen.getByText(s.connectsAs("Network printer (IPP)"))).toBeTruthy();
+    expect(selectedText(s.driver)).toBe(s.driverAuto);
     expect((screen.getByRole("checkbox", { name: "Group 1" }) as HTMLInputElement).checked).toBe(true);
     expect((screen.getByRole("checkbox", { name: "Group 3" }) as HTMLInputElement).checked).toBe(false);
+    // it is the default in one of its two groups: the switch is on, the details are under Advanced
+    expect((screen.getByRole("switch", { name: s.makeDefault })).getAttribute("aria-checked")).toBe("true");
+    expect(screen.getByText(s.defaultSome)).toBeTruthy();
     expect((screen.getByRole("checkbox", { name: s.defaultIn("Group 1") }) as HTMLInputElement).checked).toBe(true);
     expect((screen.getByRole("checkbox", { name: s.defaultIn("Group 2") }) as HTMLInputElement).checked).toBe(false);
-    const card = screen.getByRole("heading", { name: s.countsTitle }).closest("section")!;
-    expect(within(card).getByText(s.printerApplied).nextElementSibling!.textContent).toBe("6");
-    expect(within(card).getByText(s.printerFailed).nextElementSibling!.textContent).toBe("1");
-    expect(within(card).getByText(s.countsSampled(7))).toBeTruthy();
+    const card = screen.getByRole("heading", { name: n.countsTitle }).closest("section")!;
+    expect(within(card).getByText(s.applied).nextElementSibling!.textContent).toBe("6");
+    expect(within(card).getByText(s.failed).nextElementSibling!.textContent).toBe("1");
+    expect(within(card).getByText(n.countsSampled(7))).toBeTruthy();
   });
 
-  it("a driver that is no longer on the approved list stays selectable and is marked", () => {
+  it("shows a raw printer's port and a printer on another driver the way it was saved, and saves it unchanged", async () => {
+    cx.results["networks:printerDetail"] = { ...front, kind: "raw", address: "10.0.0.31", port: 9101, driver: "Generic / Text Only", defaultForGroupIds: [] };
+    const save = vi.fn(async () => ({ id: "p1", revision: 3 }));
+    cx.fns["networks:savePrinter"] = save;
+    ui(<PrinterEdit />, "admin", "/networks/printers/p1");
+    expect((screen.getByLabelText(s.address) as HTMLInputElement).value).toBe("10.0.0.31:9101");
+    expect(selectedText(s.driver)).toBe("Generic / Text Only");
+    savePrinter();
+    await waitFor(() => expect(save).toHaveBeenCalledTimes(1));
+    expect(save).toHaveBeenCalledWith(
+      expect.objectContaining({ id: "p1", expectedRevision: 2, kind: "raw", address: "10.0.0.31", port: 9101, driver: "Generic / Text Only", defaultForGroupIds: [] }),
+    );
+  });
+
+  it("a driver that is no longer on the approved list stays selected and is marked", () => {
     cx.results["networks:printerDetail"] = { ...front, driver: "Old Vendor Driver" };
     ui(<PrinterEdit />, "admin", "/networks/printers/p1");
-    expect((screen.getByLabelText(s.driverLabel) as HTMLSelectElement).value).toBe("Old Vendor Driver");
-    expect(screen.getByRole("option", { name: `Old Vendor Driver (${s.driverNotListed})` })).toBeTruthy();
+    expect(selectedText(s.driver)).toBe("Old Vendor Driver");
+    fireEvent.click(screen.getByLabelText(s.driver));
+    expect(within(screen.getByRole("listbox")).getByRole("option", { name: new RegExp(`^Old Vendor Driver.*${s.driverNotListed}`) })).toBeTruthy();
   });
 
   it("saves with the id and the revision it holds, and sends the next revision after a save; leaving a group drops its default", async () => {
@@ -303,39 +429,47 @@ describe("Printer (/networks/printers/:id)", () => {
     fireEvent.click(screen.getByRole("checkbox", { name: "Group 1" })); // leave the group it is the default of
     expect(screen.queryByRole("checkbox", { name: s.defaultIn("Group 1") })).toBeNull();
     type(s.name, "Front desk 2");
-    fireEvent.click(screen.getByRole("button", { name: strings.common.saveChanges }));
+    savePrinter();
     await waitFor(() => expect(save).toHaveBeenCalledTimes(1));
-    expect(save).toHaveBeenLastCalledWith(
-      expect.objectContaining({ id: "p1", expectedRevision: 2, name: "Front desk 2", groupIds: ["g2"], defaultForGroupIds: [] }),
-    );
-    expect(await screen.findByText(s.printerSaved)).toBeTruthy();
+    expect(save).toHaveBeenLastCalledWith(expect.objectContaining({ id: "p1", expectedRevision: 2, name: "Front desk 2", groupIds: ["g2"], defaultForGroupIds: [] }));
+    expect(await screen.findByText(s.saved)).toBeTruthy();
     type(s.name, "Front desk 3");
-    fireEvent.click(screen.getByRole("button", { name: strings.common.saveChanges }));
+    savePrinter();
     await waitFor(() => expect(save).toHaveBeenCalledTimes(2));
     expect(save).toHaveBeenLastCalledWith(expect.objectContaining({ expectedRevision: 3 }));
+  });
+
+  it("the per-group defaults under Advanced edit where it is the default", async () => {
+    const save = vi.fn(async () => ({ id: "p1", revision: 3 }));
+    cx.fns["networks:savePrinter"] = save;
+    ui(<PrinterEdit />, "admin", "/networks/printers/p1");
+    fireEvent.click(screen.getByRole("checkbox", { name: s.defaultIn("Group 2") }));
+    savePrinter();
+    await waitFor(() => expect(save).toHaveBeenCalledTimes(1));
+    expect(save).toHaveBeenCalledWith(expect.objectContaining({ defaultForGroupIds: ["g1", "g2"] }));
   });
 
   it("the stale-edit answer offers a reload; a viewer sees the printer read-only", async () => {
     cx.fns["networks:savePrinter"] = vi.fn().mockRejectedValue(new ConvexError({ code: "stale_edit" }));
     ui(<PrinterEdit />, "admin", "/networks/printers/p1");
     type(s.name, "Changed");
-    fireEvent.click(screen.getByRole("button", { name: strings.common.saveChanges }));
+    savePrinter();
     expect(await screen.findByRole("button", { name: strings.common.reload })).toBeTruthy();
     cleanup();
     ui(<PrinterEdit />, "viewer", "/networks/printers/p1");
-    expect(screen.getByText(s.readOnly)).toBeTruthy();
+    expect(screen.getByText(n.readOnly)).toBeTruthy();
     expect(screen.queryByRole("button", { name: strings.common.saveChanges })).toBeNull();
-    expect(screen.queryByRole("button", { name: s.removePrinter })).toBeNull();
+    expect(screen.queryByRole("button", { name: s.remove })).toBeNull();
   });
 
   it("removes the printer after the name is typed, then goes back to the list", async () => {
     const del = vi.fn(async () => null);
     cx.fns["networks:deletePrinter"] = del;
     ui(<PrinterEdit />, "admin", "/networks/printers/p1");
-    fireEvent.click(screen.getAllByRole("button", { name: s.removePrinter })[0]!);
+    fireEvent.click(screen.getAllByRole("button", { name: s.remove })[0]!);
     const dialog = await screen.findByRole("dialog");
     fireEvent.change(within(dialog).getByRole("textbox"), { target: { value: "Front desk" } });
-    fireEvent.click(within(dialog).getByRole("button", { name: s.removePrinter }));
+    fireEvent.click(within(dialog).getByRole("button", { name: s.remove }));
     await waitFor(() => expect(del).toHaveBeenCalledWith({ id: "p1" }));
     await waitFor(() => expect(where()).toBe("/networks"));
   });

@@ -1,0 +1,58 @@
+/* ToggleChip (components/ToggleChip.tsx): an on/off chip. Imported by the component, so it ships with the screens that use it. */
+.dash-tchips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  min-width: 0;
+}
+.dash-tchip {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  min-height: 40px;
+  max-width: 100%;
+  padding: 0 14px;
+  border: 1.5px solid var(--rb-line);
+  border-radius: 999px;
+  background: var(--rb-surface);
+  color: var(--rb-ink);
+  font: inherit;
+  font-size: 14px;
+  font-weight: 550;
+  cursor: pointer;
+  transition:
+    background var(--rb-duration) var(--rb-ease),
+    border-color var(--rb-duration) var(--rb-ease);
+}
+.dash-tchip:hover:not(:disabled):not([aria-pressed="true"]) {
+  background: var(--rb-hover);
+  border-color: color-mix(in oklch, var(--rb-accent) 40%, var(--rb-line));
+}
+.dash-tchip[aria-pressed="true"] {
+  border-color: var(--rb-accent);
+  background: color-mix(in oklch, var(--rb-accent-soft) 70%, var(--rb-surface));
+  color: var(--rb-accent-text);
+}
+.dash-tchip:disabled {
+  cursor: default;
+  opacity: 0.6;
+}
+.dash-tchip:focus-visible {
+  outline: 2px solid var(--rb-focus);
+  outline-offset: 2px;
+}
+.dash-tchip__icon {
+  display: inline-flex;
+  flex: none;
+  font-size: 18px;
+  color: var(--rb-muted);
+}
+.dash-tchip__icon--on {
+  color: var(--rb-accent);
+}
+.dash-tchip__label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}

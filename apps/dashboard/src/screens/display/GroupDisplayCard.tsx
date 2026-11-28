@@ -1,92 +1,98 @@
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { Button, Select } from "@rulebox/ui";
 import { useSetGroupDisplay } from "../../data";
 import { IDLE_CLOSE_RANGE, WEB_WINDOW_CAP_RANGE, type DisplayChoice, type GroupDetail } from "../../data/types";
-import { Card } from "../../components/Card";
 import { Field } from "../../components/Field";
+import { FormError } from "../../components/FormError";
+import { Modal } from "../../components/Modal";
 import { InlineNotice } from "../../components/Notice";
-import { RoleGate } from "../../components/RoleGate";
 import { useToast } from "../../lib/toast";
-import { messageFor } from "../../lib/errors";
 import { strings } from "../../lib/strings";
 import { displayStrings as s } from "../../lib/screenStrings/display";
-import { IdleCloseOptions, ModeOptions } from "./options";
+import { idleCloseOptions, MODE_OPTIONS, windowCapOptions } from "./options";
 
-/** The group's display settings (`groups:setDisplay`): mode, web window limit and idle close. Everyone reads them; admins change them. */
-export function GroupDisplayCard({ g }: { g: GroupDetail }) {
+const holds = (g: GroupDetail) => ({ mode: g.displayMode ?? ("auto" as DisplayChoice), cap: g.webWindowCap ?? null, idle: g.webIdleCloseMin ?? null });
+
+/**
+ * The group's display settings (`groups:setDisplay`) in a dialog that the "Display and memory" row of the group page opens (UI pass:
+ * the three drop-downs are performance tuning, so they are not on the page). Display mode, web window limit and idle close; the long
+ * explanations are (i) tips. `null` for the limit or the idle time means the mode's default. Admins only: the row hides the button
+ * from viewers.
+ */
+export function GroupDisplayDialog({ g, onClose }: { g: GroupDetail; onClose: () => void }) {
   const set = useSetGroupDisplay();
   const toast = useToast();
-  const saved = { mode: g.displayMode ?? "auto", cap: g.webWindowCap ?? null, idle: g.webIdleCloseMin ?? null };
+  const [saved, setSaved] = useState(() => holds(g));
+  const [revision, setRevision] = useState(g.revision);
   const [mode, setMode] = useState<DisplayChoice>(saved.mode);
   const [cap, setCap] = useState<number | null>(saved.cap);
   const [idle, setIdle] = useState<number | null>(saved.idle);
   const [pending, setPending] = useState(false);
+  const [error, setError] = useState<unknown>(null);
   const changed = mode !== saved.mode || cap !== saved.cap || idle !== saved.idle;
-  const capValues = Array.from({ length: WEB_WINDOW_CAP_RANGE.max - WEB_WINDOW_CAP_RANGE.min + 1 }, (_, i) => WEB_WINDOW_CAP_RANGE.min + i);
+  const capOptions = useMemo(() => windowCapOptions(WEB_WINDOW_CAP_RANGE.min, WEB_WINDOW_CAP_RANGE.max), []);
+  const idleOptions = useMemo(() => idleCloseOptions(idle, IDLE_CLOSE_RANGE.min, IDLE_CLOSE_RANGE.max), [idle]);
+
+  function submit() {
+    if (!changed || pending) return;
+    setPending(true);
+    setError(null);
+    set({ groupId: g._id, expectedRevision: revision, displayMode: mode, webWindowCap: cap, webIdleCloseMin: idle }).then(
+      () => {
+        setPending(false);
+        toast(s.saved);
+        onClose();
+      },
+      (err) => {
+        setPending(false);
+        setError(err);
+      },
+    );
+  }
 
   return (
-    <Card title={s.title} sub={s.groupLead}>
-      <RoleGate
-        minRole="admin"
-        fallback={
-          <p className="dash-muted">
-            {s.mode}: {saved.mode === "lite" ? s.modeLite : saved.mode === "standard" ? s.modeStandard : s.modeAuto}
-          </p>
-        }
-      >
-        <form
-          className="dash-form"
-          noValidate
-          onSubmit={(e) => {
-            e.preventDefault();
-            if (!changed || pending) return;
-            setPending(true);
-            set({ groupId: g._id, expectedRevision: g.revision, displayMode: mode, webWindowCap: cap, webIdleCloseMin: idle }).then(
-              () => {
-                setPending(false);
-                toast(s.saved);
-              },
-              (err) => {
-                setPending(false);
-                toast(messageFor(err), "danger");
-              },
-            );
+    <Modal
+      open
+      title={s.title}
+      onClose={() => !pending && onClose()}
+      onSubmit={submit}
+      actions={
+        <>
+          <Button variant="ghost" onClick={onClose} disabled={pending}>
+            {strings.common.cancel}
+          </Button>
+          <Button type="submit" disabled={!changed || pending} aria-busy={pending}>
+            {pending ? strings.common.saving : strings.common.save}
+          </Button>
+        </>
+      }
+    >
+      <div className="dash-form">
+        {/* No (i) on the first field: a dialog focuses its first control, and a tip would open over the title. */}
+        <Field label={s.mode} hint={mode === "auto" ? s.autoNote : undefined}>
+          {(p) => <Select {...p} value={mode} options={MODE_OPTIONS} onChange={(v) => setMode(v as DisplayChoice)} />}
+        </Field>
+        {mode === "standard" ? <InlineNotice tone="warning" title={s.standardOnSmallGroup} /> : null}
+        <Field label={s.windowCap} info={s.windowCapHint}>
+          {(p) => <Select {...p} value={cap === null ? "" : String(cap)} options={capOptions} onChange={(v) => setCap(v === "" ? null : Number(v))} />}
+        </Field>
+        <Field label={s.idleClose} info={s.idleCloseHint}>
+          {(p) => <Select {...p} value={idle === null ? "" : String(idle)} options={idleOptions} onChange={(v) => setIdle(v === "" ? null : Number(v))} />}
+        </Field>
+        <FormError
+          error={error}
+          onReload={() => {
+            // Their change arrived through the subscription: take their values and revision, keep nothing of ours.
+            const now = holds(g);
+            setSaved(now);
+            setMode(now.mode);
+            setCap(now.cap);
+            setIdle(now.idle);
+            setRevision(g.revision);
+            setError(null);
           }}
-        >
-          <Field label={s.mode} hint={mode === "auto" ? s.autoNote : undefined}>
-            {(p) => (
-              <Select {...p} value={mode} onChange={(e) => setMode(e.target.value as DisplayChoice)}>
-                <ModeOptions />
-              </Select>
-            )}
-          </Field>
-          {mode === "standard" ? <InlineNotice tone="warning" title={s.standardOnSmallGroup} /> : null}
-          <Field label={s.windowCap} hint={s.windowCapHint}>
-            {(p) => (
-              <Select {...p} value={cap === null ? "" : String(cap)} onChange={(e) => setCap(e.target.value === "" ? null : Number(e.target.value))}>
-                <option value="">{s.capDefault}</option>
-                {capValues.map((n) => (
-                  <option key={n} value={n}>
-                    {s.capOption(n)}
-                  </option>
-                ))}
-              </Select>
-            )}
-          </Field>
-          <Field label={s.idleClose} hint={s.idleCloseHint}>
-            {(p) => (
-              <Select {...p} value={idle === null ? "" : String(idle)} onChange={(e) => setIdle(e.target.value === "" ? null : Number(e.target.value))}>
-                <IdleCloseOptions current={idle} min={IDLE_CLOSE_RANGE.min} max={IDLE_CLOSE_RANGE.max} />
-              </Select>
-            )}
-          </Field>
-          <div className="dash-row">
-            <Button type="submit" disabled={!changed || pending} aria-busy={pending}>
-              {pending ? strings.common.saving : strings.common.save}
-            </Button>
-          </div>
-        </form>
-      </RoleGate>
-    </Card>
+        />
+      </div>
+    </Modal>
   );
 }

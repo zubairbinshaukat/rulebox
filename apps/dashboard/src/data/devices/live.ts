@@ -5,6 +5,7 @@
  * `fleet:count`, a separate small query that reads `orgStats` only.
  */
 import { api } from "@convex/_generated/api";
+import { useMemberQuery } from "../live/convex";
 import { useServerCount, useServerPage } from "../live/serverList";
 import { useMappedList } from "../live/mapList";
 import { deviceRowOf } from "../live/devices";
@@ -29,6 +30,17 @@ export const liveDevicesApi: DevicesApi = {
     // `fleet:installs` sorts by "updated" only, and has no search.
     const args = { deviceId, paginationOpts: listArgs(query).paginationOpts, sort: { key: "updated", dir: query.sort?.dir ?? "desc" } };
     return useServerPage<DeviceInstallRow>(api.fleet.installs, args, deviceId);
+  },
+  // The device page's per-tab queries: each is subscribed only while its tab is open (the screen mounts the hook then).
+  useDeviceSettingsOptions(deviceId) {
+    return useMemberQuery(api.fleet.deviceSettings, { deviceId });
+  },
+  // `enabled: false` subscribes to nothing (the disclosure is closed).
+  useDeviceVersions(deviceId, enabled) {
+    return useMemberQuery(api.fleet.versions, enabled ? { deviceId } : "skip");
+  },
+  useDeviceNetwork(deviceId) {
+    return useMemberQuery(api.fleet.network, { deviceId });
   },
 };
 

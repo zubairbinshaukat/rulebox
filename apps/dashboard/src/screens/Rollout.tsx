@@ -1,36 +1,40 @@
-import { useParams } from "react-router";
-import { Button } from "@rulebox/ui";
+import { useState } from "react";
+import { Link, useParams } from "react-router";
+import { InfoTip } from "@rulebox/ui";
 import IconRocket from "~icons/solar/rocket-2-linear";
-import { useResumeRollout, useRolloutView } from "../data";
-import type { RolloutRow, RolloutView } from "../data/types";
+import IconUndo from "~icons/solar/undo-left-linear";
+import IconPower from "~icons/solar/power-linear";
+import { useRolloutView } from "../data";
+import type { RolloutView } from "../data/types";
 import { EmptyState } from "../components/EmptyState";
-import { FormError } from "../components/FormError";
-import { InlineNotice } from "../components/Notice";
+import { MoreMenu, type MoreMenuItem } from "../components/MoreMenu";
 import { PageHeader } from "../components/PageHeader";
 import { QueryRegion } from "../components/Region";
 import { SkeletonBlock } from "../components/Skeleton";
 import { useCan } from "../lib/member";
-import { knownHaltReason } from "../lib/rolloutRules";
-import { useToast } from "../lib/toast";
 import { AutoPromoteCard } from "./rollout/AutoPromoteCard";
-import { HealthCard, IdleHealthCard } from "./rollout/HealthCard";
+import { HaltedBanner } from "./rollout/HaltedBanner";
 import { MembersCard } from "./rollout/MembersCard";
-import { PointersCard } from "./rollout/PointersCard";
-import { RingsCard } from "./rollout/RingsCard";
-import { rolloutErrorMessage, rolloutStrings as s } from "./rollout/strings";
-import { useRun } from "./rollout/useRun";
+import { Pipeline } from "./rollout/Pipeline";
+import { RolloutDialogs, type RolloutDialog } from "./rollout/RolloutDialogs";
+import { previousChange } from "./rollout/stages";
+import { rolloutStrings as s } from "./rollout/strings";
+import { TurnOnCard } from "./rollout/TurnOnCard";
+import "./rollout/rollout.css";
 
 /**
- * `/groups/:id/rollout` (plan 4.14, 4.20): rings on or off, what each ring follows, how the stage in flight is going, promotion,
- * rollback, automatic promotion and the group's PCs with their ring. `rollouts:groupView` is the quiet query; the health numbers are
- * their own subscription (`rollouts:health`), only while a stage is in flight. Admins change things, viewers read.
+ * `/groups/:id/rollout` (UI pass, `docs/plans/ui-pass/other-pages.md` section 3): the group's staged rollout as three connected stages
+ * (First, Early, Everyone) with the next action on the stage that is testing; "Turn on" first asks which PCs go first; "Moves on by
+ * itself" is Off / Careful / Quick with the numbers under Advanced; the group's PCs and their stage; "Undo the last change" in a dialog.
+ * `rollouts:groupView` is the quiet query; the health numbers are their own subscription (`rollouts:health`), only while a stage is in
+ * flight (the stage's card mounts it). Admins change things, viewers read.
  */
 export default function Rollout() {
   const { id = "" } = useParams();
   const view = useRolloutView(id);
-  const back = { to: `/groups/${id}`, label: s.back };
+  const back = { to: `/groups/${id}`, label: view.status === "ready" ? view.data.groupName : s.backFallback };
   return (
-    <div className="dash-page">
+    <div className="dash-page ro-page">
       {view.status !== "ready" ? <PageHeader title={view.status === "loading" ? s.loadingTitle : s.title} back={back} /> : null}
       <QueryRegion state={view} skeleton={<div className="dash-card dash-card--pad"><SkeletonBlock lines={5} /></div>}>
         {(v) => <Body groupId={id} v={v} back={back} />}
@@ -41,56 +45,66 @@ export default function Rollout() {
 
 function Body({ groupId, v, back }: { groupId: string; v: RolloutView; back: { to: string; label: string } }) {
   const r = v.rollout;
+  const canAct = useCan("admin");
+  const [dialog, setDialog] = useState<RolloutDialog | null>(null);
+  const halted = r?.state === "halted";
+  const items: MoreMenuItem[] =
+    r === null || !canAct
+      ? []
+      : [
+          { label: s.sendEveryoneNow, onSelect: () => setDialog("everyone"), hidden: v.stage === null || halted },
+          { label: s.undo, icon: <IconUndo aria-hidden="true" />, onSelect: () => setDialog("undo"), hidden: previousChange(r, v.versions) === undefined },
+          { label: s.turnOff, icon: <IconPower aria-hidden="true" />, onSelect: () => setDialog("off"), hidden: !r.enabled },
+        ];
   return (
     <>
-      <PageHeader back={back} title={<span className="dash-wrap">{s.titleFor(v.groupName)}</span>} lead={s.lead} />
+      <PageHeader
+        back={back}
+        title={s.title}
+        lead={
+          <>
+            {s.lead(v.groupName)} <InfoTip label={s.leadInfoLabel}>{s.leadInfo}</InfoTip>
+          </>
+        }
+        actions={<MoreMenu items={items} label={s.moreLabel} />}
+      />
       {r === null ? (
         <div className="dash-card dash-card--pad">
-          <EmptyState icon={<IconRocket />} title={s.noneTitle} body={s.noneBody} />
+          <EmptyState
+            icon={<IconRocket />}
+            title={s.noneTitle}
+            body={s.noneBody}
+            action={
+              <Link to={back.to} className="rb-btn rb-btn--ghost">
+                {s.noneAction}
+              </Link>
+            }
+          />
         </div>
       ) : (
         <>
-          {r.state === "halted" ? <HaltedBanner groupId={groupId} rollout={r} /> : null}
-          <RingsCard groupId={groupId} rollout={r} />
-          <PointersCard groupId={groupId} rollout={r} view={v} />
-          {v.stage !== null ? <HealthCard groupId={groupId} /> : r.enabled ? <IdleHealthCard /> : null}
-          <AutoPromoteCard groupId={groupId} rollout={r} />
-          <MembersCard groupId={groupId} rollout={r} view={v} />
+          {halted ? <HaltedBanner groupId={groupId} rollout={r} /> : null}
+          {r.enabled ? (
+            <>
+              <Pipeline groupId={groupId} rollout={r} view={v} onAction={setDialog} />
+              <div className="dash-split ro-split">
+                <div className="dash-split__main">
+                  <MembersCard groupId={groupId} rollout={r} view={v} />
+                </div>
+                <div className="dash-split__aside">
+                  <AutoPromoteCard groupId={groupId} rollout={r} />
+                </div>
+              </div>
+            </>
+          ) : (
+            <>
+              <TurnOnCard view={v} onTurnOn={() => setDialog("first")} />
+              <MembersCard groupId={groupId} rollout={r} view={v} />
+            </>
+          )}
+          <RolloutDialogs dialog={dialog} groupId={groupId} rollout={r} view={v} onClose={() => setDialog(null)} />
         </>
       )}
     </>
-  );
-}
-
-/** The red banner of a halted rollout, with the reason in words and Resume for an admin. */
-function HaltedBanner({ groupId, rollout }: { groupId: string; rollout: RolloutRow }) {
-  const resume = useResumeRollout();
-  const canAct = useCan("admin");
-  const toast = useToast();
-  const { busy, error, run, clear } = useRun();
-  const reason = knownHaltReason(rollout.haltReason);
-  return (
-    <div className="dash-form">
-      <InlineNotice
-        tone="danger"
-        alert
-        title={s.haltedTitle}
-        detail={`${reason ? s.haltReasons[reason] : s.haltGeneric} ${s.haltedHint}`}
-        action={
-          canAct ? (
-            <Button
-              variant="ghost"
-              className="dash-btn--sm"
-              disabled={busy !== null}
-              aria-busy={busy !== null}
-              onClick={() => void run("resume", () => resume({ groupId, expectedRevision: rollout.revision }), () => toast(s.resumedToast))}
-            >
-              {s.resume}
-            </Button>
-          ) : undefined
-        }
-      />
-      <FormError error={error} onReload={clear} describe={(e) => rolloutErrorMessage(e)} />
-    </div>
   );
 }

@@ -13,10 +13,15 @@ import { WEBMETA_MAX_REDIRECTS, WEBMETA_TIMEOUT_MS } from "./limits";
 
 type FetchLike = typeof fetch;
 
-export type FetchFailure = "blocked" | "redirects" | "redirect_followed" | "status" | "too_large" | "network";
+/** `not_modified`: a 304 answer to a request that sent `ifNoneMatch` (only then). */
+export type FetchFailure = "blocked" | "redirects" | "redirect_followed" | "status" | "too_large" | "network" | "not_modified";
+/**
+ * `headers` are the answer's headers (an ETag, rate-limit headers): present on success and on `status` / `not_modified`
+ * failures, absent when no answer was read (blocked, network, too large, ...).
+ */
 export type Fetched =
-  | { ok: true; url: URL; bytes: Uint8Array; contentType: string }
-  | { ok: false; reason: FetchFailure; status?: number };
+  | { ok: true; url: URL; bytes: Uint8Array; contentType: string; headers: Headers }
+  | { ok: false; reason: FetchFailure; status?: number; headers?: Headers };
 
 /**
  * The response body as bytes, or null when it is larger than `max`. The cap is
@@ -65,6 +70,11 @@ export type PublicFetchOptions = {
   maxRedirects?: number;
   /** Request headers per URL (so a token is sent only to the host that needs it, also after a redirect). */
   headers?: (url: URL) => Record<string, string>;
+  /**
+   * An ETag to send as `If-None-Match` on every request of the chain. A 304 answer then returns
+   * `{ ok: false, reason: "not_modified" }`. Without it a 304 stays an ordinary redirect-class answer (no `Location`: a failure).
+   */
+  ifNoneMatch?: string;
 };
 
 /**
@@ -106,11 +116,20 @@ export async function fetchPublic(start: string, opts: PublicFetchOptions): Prom
     }
     for (let hop = 0; hop <= (opts.maxRedirects ?? WEBMETA_MAX_REDIRECTS); hop++) {
       if (!fetchableUrl(url)) return { ok: false, reason: "blocked" };
-      const res = await f(url.href, { method: "GET", redirect: "manual", signal: ctl.signal, headers: { accept: opts.accept ?? "*/*", ...opts.headers?.(url) } });
+      const res = await f(url.href, {
+        method: "GET",
+        redirect: "manual",
+        signal: ctl.signal,
+        headers: { accept: opts.accept ?? "*/*", ...opts.headers?.(url), ...(opts.ifNoneMatch === undefined ? {} : { "if-none-match": opts.ifNoneMatch }) },
+      });
       // Whether the runtime honours `redirect: "manual"` is not something we can rely on: refuse any answer that did not come from the address we checked.
       if (followedRedirect(res, url)) {
         await res.body?.cancel().catch(() => undefined);
         return { ok: false, reason: "redirect_followed" };
+      }
+      if (res.status === 304 && opts.ifNoneMatch !== undefined) {
+        await res.body?.cancel().catch(() => undefined);
+        return { ok: false, reason: "not_modified", status: 304, headers: res.headers };
       }
       if (res.status >= 300 && res.status < 400) {
         const location = res.headers.get("location");
@@ -125,11 +144,11 @@ export async function fetchPublic(start: string, opts: PublicFetchOptions): Prom
       }
       if (!res.ok) {
         await res.body?.cancel().catch(() => undefined);
-        return { ok: false, reason: "status", status: res.status };
+        return { ok: false, reason: "status", status: res.status, headers: res.headers };
       }
       const bytes = await readLimited(res, opts.maxBytes);
       if (bytes === null) return { ok: false, reason: "too_large" };
-      return { ok: true, url, bytes, contentType: res.headers.get("content-type") ?? "" };
+      return { ok: true, url, bytes, contentType: res.headers.get("content-type") ?? "", headers: res.headers };
     }
     return { ok: false, reason: "redirects" };
   } catch {

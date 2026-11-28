@@ -1,0 +1,505 @@
+/* Networks (UI pass 2026-11-28, docs/plans/ui-pass/enrollment-networks.md section 4). Imported by the lazy Networks, Wi-Fi, printer and driver
+   screens, so it ships in their chunks. Tokens only. Page grid by band (the page's own width, like every page):
+     phone < 600 one column · tablet 600-1023 Wi-Fi | Printers, Drivers below · laptop 1024-1599 Wi-Fi left, Printers over Drivers right
+     wide >= 1600 three columns (Drivers narrower).
+   The record cards inside a section lay themselves out by the section's width (container query). Motion: `dash-enter` only (opacity and
+   transform, dashboard.css), which already honours reduced motion and Lite. */
+
+/* ------------------------------------------------------------ the page */
+
+.net-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 18px;
+  align-items: start;
+  min-width: 0;
+}
+@media (min-width: 600px) {
+  .net-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .net-grid__drivers {
+    grid-column: 1 / -1;
+  }
+}
+@media (min-width: 1024px) {
+  .net-grid__wifi {
+    grid-column: 1;
+    grid-row: 1 / span 2;
+  }
+  .net-grid__printers {
+    grid-column: 2;
+    grid-row: 1;
+  }
+  .net-grid__drivers {
+    grid-column: 2;
+    grid-row: 2;
+  }
+}
+@media (min-width: 1600px) {
+  .net-grid {
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) minmax(0, 0.8fr);
+  }
+  .net-grid__wifi,
+  .net-grid__printers,
+  .net-grid__drivers {
+    grid-row: 1;
+  }
+  .net-grid__wifi {
+    grid-column: 1;
+  }
+  .net-grid__printers {
+    grid-column: 2;
+  }
+  .net-grid__drivers {
+    grid-column: 3;
+  }
+}
+
+/* A section: head (icon, title, count, (i), Add) and the body. */
+.net-sec {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+.net-sec:nth-child(2) {
+  animation-delay: 50ms;
+}
+.net-sec:nth-child(3) {
+  animation-delay: 100ms;
+}
+.net-sec__head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 56px;
+  padding: 10px 14px 10px 18px;
+}
+.net-sec__icon {
+  display: inline-flex;
+  flex: none;
+  font-size: 20px;
+  color: var(--rb-accent-text);
+}
+.net-sec__title {
+  margin: 0;
+  font-size: 16px;
+  font-weight: 650;
+  letter-spacing: -0.01em;
+}
+.net-sec__count {
+  min-width: 24px;
+  padding: 1px 8px;
+  border-radius: 999px;
+  background: var(--rb-hover);
+  color: var(--rb-muted);
+  font-size: 12.5px;
+  font-weight: 600;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+}
+.net-sec__add {
+  display: flex;
+  margin-inline-start: auto;
+}
+.net-sec__body {
+  container: net / inline-size;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding: 0 14px 16px;
+  min-width: 0;
+}
+/* Drivers are rarer: a little quieter than the other two. */
+.net-sec--quiet .net-sec__title {
+  font-size: 15px;
+}
+.net-sec--quiet .net-sec__icon {
+  color: var(--rb-muted);
+}
+
+/* Record cards. */
+.net-list {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 10px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+@container net (min-width: 520px) {
+  .net-list {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+.net-rec {
+  position: relative;
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  min-width: 0;
+  padding: 12px 14px;
+  border: 1px solid var(--rb-line);
+  border-radius: var(--rb-r-md);
+  background: var(--rb-surface);
+  transition:
+    border-color var(--rb-duration) var(--rb-ease),
+    background-color var(--rb-duration) var(--rb-ease);
+}
+.net-rec:hover {
+  border-color: color-mix(in oklch, var(--rb-accent) 45%, var(--rb-line));
+  background: var(--rb-paper);
+}
+.net-rec:has(.net-rec__link:focus-visible) {
+  outline: 2px solid var(--rb-focus);
+  outline-offset: 2px;
+}
+.net-rec__icon {
+  display: grid;
+  flex: none;
+  place-items: center;
+  width: 38px;
+  height: 38px;
+  border-radius: 11px;
+  background: var(--rb-accent-soft);
+  color: var(--rb-accent-text);
+  font-size: 20px;
+}
+.net-rec__body {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+.net-rec__top {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+.net-rec__link {
+  flex: 1;
+  min-width: 0;
+  color: var(--rb-ink);
+  font-size: 14.5px;
+  font-weight: 650;
+  text-decoration: none;
+}
+.net-rec__link:focus-visible {
+  outline: none;
+}
+/* The name's link covers the whole card, so a click anywhere opens it. */
+.net-rec__link::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+}
+.net-rec__name {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.net-rec__top .rb-pill {
+  flex: none;
+}
+.net-rec__sub {
+  margin: 0;
+  overflow: hidden;
+  color: var(--rb-muted);
+  font-size: 13px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.net-rec__ssid {
+  font-size: 12.5px;
+}
+.net-rec__chips {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  margin-top: 2px;
+}
+.net-rec__chip {
+  min-height: 24px;
+  padding: 1px 9px;
+  font-size: 12px;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.net-rec__more,
+.net-rec__none {
+  color: var(--rb-muted);
+  font-size: 12.5px;
+}
+
+/* The compact empty state: one dashed row. */
+.net-empty {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 12px;
+  padding: 12px 14px;
+  border: 1px dashed var(--rb-line-strong);
+  border-radius: var(--rb-r-md);
+  color: var(--rb-muted);
+}
+.net-empty__icon {
+  display: inline-flex;
+  flex: none;
+  font-size: 20px;
+}
+.net-empty__text {
+  flex: 1 1 140px;
+  margin: 0;
+  font-size: 14px;
+}
+.net-empty__sub {
+  color: var(--rb-faint);
+}
+
+/* Printer driver names, inside the Drivers section. */
+.net-sec .net-adv {
+  border-top: 1px solid var(--rb-line);
+}
+.net-approved {
+  padding-block: 4px 6px;
+}
+
+/* ------------------------------------------------------------ the forms (Wi-Fi, printer, driver) */
+
+.net-formcol {
+  min-width: 0;
+}
+@media (max-width: 1023px) {
+  .net-formcol {
+    max-width: 680px;
+  }
+  .net-aside {
+    display: none;
+  }
+}
+.net-howinfo {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--rb-muted);
+  font-size: 13.5px;
+  font-weight: 550;
+}
+@media (min-width: 1024px) {
+  .net-howinfo {
+    display: none;
+  }
+}
+
+/* Short fields side by side as soon as two fit (a form column is narrower than the page). */
+.net-fields {
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 250px), 1fr));
+}
+
+/* "How it works" beside a new item. */
+.net-how {
+  padding: 18px 20px;
+}
+.net-how__title {
+  margin: 0 0 12px;
+  font-size: 15px;
+  font-weight: 650;
+}
+.net-how__list {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin: 0;
+  padding: 0;
+  counter-reset: how;
+  list-style: none;
+}
+.net-how__list li {
+  position: relative;
+  min-height: 24px;
+  padding-inline-start: 34px;
+  color: var(--rb-muted);
+  font-size: 14px;
+  line-height: 1.45;
+  counter-increment: how;
+}
+.net-how__list li::before {
+  content: counter(how);
+  position: absolute;
+  inset-block-start: -1px;
+  inset-inline-start: 0;
+  display: grid;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  background: var(--rb-accent-soft);
+  color: var(--rb-accent-text);
+  font-size: 12.5px;
+  font-weight: 650;
+}
+.net-how__code {
+  display: block;
+  margin-bottom: 2px;
+  color: var(--rb-ink);
+  font-family: var(--rb-font-mono);
+  font-size: 12.5px;
+  overflow-wrap: anywhere;
+}
+.net-how__foot {
+  margin: 14px 0 0;
+  color: var(--rb-muted);
+  font-size: 13px;
+}
+
+/* Groups as a tick list: two or three columns when there are many. */
+.net-checks {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 190px), 1fr));
+  gap: 8px 14px;
+  max-height: 220px;
+}
+.net-checks > * {
+  min-width: 0;
+}
+
+/* Advanced. */
+.net-adv {
+  margin-top: 2px;
+}
+.net-adv > summary {
+  min-height: 46px;
+}
+
+/* A line under a field: what Rulebox worked out (detected connection, fingerprint checked). */
+.net-detect {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0;
+  color: var(--rb-accent-text);
+  font-size: 13px;
+  font-weight: 550;
+}
+.net-detect svg {
+  flex: none;
+  font-size: 16px;
+}
+
+/* The saved password of a network: status and Change. */
+.net-pass {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 14px;
+  min-height: 44px;
+  padding: 8px 12px;
+  border: 1px solid var(--rb-line);
+  border-radius: var(--rb-r-md);
+  background: var(--rb-paper);
+}
+.net-pass__text {
+  flex: 1 1 160px;
+  margin: 0;
+  font-size: 14px;
+}
+.net-pass__note {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  margin: 0;
+  color: var(--rb-warning-text);
+  font-size: 13px;
+  font-weight: 550;
+}
+.net-pass__note svg {
+  flex: none;
+  margin-top: 1px;
+  font-size: 16px;
+}
+
+/* The two "check the file" buttons of the driver form and what they found. */
+.net-check {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 14px;
+  border: 1px solid var(--rb-line);
+  border-radius: var(--rb-r-md);
+  background: var(--rb-paper);
+}
+.net-check__title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+  font-size: 13.5px;
+  font-weight: 600;
+}
+.net-check__buttons {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.net-check__sum {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 10px;
+  margin: 0;
+  color: var(--rb-ink);
+  font-size: 13.5px;
+  font-weight: 550;
+}
+.net-check__ok {
+  display: inline-flex;
+  flex: none;
+  color: var(--rb-success-text);
+  font-size: 18px;
+}
+.net-check__warn {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  margin: 0;
+  color: var(--rb-danger-text);
+  font-size: 13px;
+  font-weight: 550;
+}
+.net-check__warn svg {
+  flex: none;
+  margin-top: 1px;
+  font-size: 16px;
+}
+
+/* The save row: on a phone it stays at the bottom of the screen while the form scrolls. */
+@media (max-width: 599px) {
+  .net-actions {
+    position: sticky;
+    bottom: 0;
+    z-index: 5;
+    margin-inline: calc(-1 * clamp(16px, 2vw, 22px));
+    margin-bottom: calc(-1 * clamp(16px, 2vw, 22px));
+    padding: 12px 16px;
+    border-top: 1px solid var(--rb-line);
+    border-radius: 0 0 var(--dash-radius, 16px) var(--dash-radius, 16px);
+    background: var(--rb-surface);
+  }
+  .net-actions .rb-btn--primary {
+    flex: 1 1 auto;
+  }
+}
+
+.net-switch {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}

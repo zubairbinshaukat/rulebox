@@ -115,6 +115,11 @@ describe("apps", () => {
     expect(v.domains(["Example.com"])).toBeTruthy();
     expect(v.domains(Array.from({ length: 21 }, (_, i) => `a${i}.example.com`))).toBeTruthy();
   });
+  it("winget ids = wingetIdProblem of convex/lib/appRules.ts, including a plus (Notepad++.Notepad++)", () => {
+    for (const id of ["VideoLAN.VLC", "7zip.7zip", "Adobe.Acrobat.Reader.64-bit", "Notepad++.Notepad++", "Foo+Bar.Baz+"]) expect(v.wingetId(id), id).toBeNull();
+    for (const id of ["", "no-dot", "+a.b", "a.+b", "a..b", "7zip/7zip", "a.b?x=1", "a.b c", "a.b%2B", "../x.y"]) expect(v.wingetId(id), id).toBeTruthy();
+    expect(v.wingetId(`a.${"b".repeat(127)}`)).toBeTruthy();
+  });
   it("exe path templates (Section 4.8)", () => {
     expect(v.exePath("{ProgramFiles}\\VideoLAN\\VLC\\vlc.exe", false)).toBeNull();
     expect(v.exePath("C:\\x.exe", false)).toBeTruthy();

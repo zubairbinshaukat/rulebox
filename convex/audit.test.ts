@@ -194,6 +194,42 @@ describe("audit:list", () => {
   });
 });
 
+describe("audit `since` (UI pass: the When filter)", () => {
+  test("list: only rows at or after `since`, both directions, pages follow each other, other organizations excluded", async () => {
+    const t = await setupAuth();
+    const orgId = await makeOrg(t);
+    const other = await makeOrg(t, "Other");
+    await seedAudit(t, orgId, 6); // at 1_000_000 .. 1_000_005
+    await seedAudit(t, other, 3, { label: "Theirs", base: 1_000_003 });
+    const viewer = await asMember(t, { role: "viewer", orgId });
+
+    const first = await viewer.as.query(api.audit.list, { ...page(2), since: 1_000_002 });
+    expect(first.page.map((r) => r.summary)).toEqual(["Row 5", "Row 4"]);
+    const rest = await viewer.as.query(api.audit.list, { ...page(10, first.continueCursor), since: 1_000_002 });
+    expect(rest.page.map((r) => r.summary)).toEqual(["Row 3", "Row 2"]);
+    expect(rest.isDone).toBe(true);
+    const oldest = await viewer.as.query(api.audit.list, { ...page(10), sort: { key: "at", dir: "asc" }, since: 1_000_004 });
+    expect(oldest.page.map((r) => r.summary)).toEqual(["Row 4", "Row 5"]);
+    expect((await viewer.as.query(api.audit.list, { ...page(10), since: 9_000_000 })).page).toEqual([]);
+    // No `since` = the whole log, as before.
+    expect((await viewer.as.query(api.audit.list, page(10))).page).toHaveLength(6);
+  });
+
+  test("forTarget: only that target's rows at or after `since`; a page still reads one row per hit", async () => {
+    const t = await setupAuth();
+    const orgId = await makeOrg(t);
+    await seedAudit(t, orgId, 5, { targetId: "dev1", label: "Mine", base: 2_000_000 });
+    await seedAudit(t, orgId, 5, { targetId: "dev2", label: "Elsewhere", base: 2_000_000 });
+    const viewer = await asMember(t, { role: "viewer", orgId });
+
+    const { result, io } = await probe(() => viewer.as.query(api.audit.forTarget, { targetId: "dev1", ...page(10), since: 2_000_003 }));
+    expect(result.page.map((r) => r.summary)).toEqual(["Mine 4", "Mine 3"]);
+    expect(io.reads).toBeLessThanOrEqual(2 + 6); // the member wrapper and the two rows
+    const all = await viewer.as.query(api.audit.forTarget, { targetId: "dev1", ...page(10) });
+    expect(all.page).toHaveLength(5);
+  });
+});
+
 describe("audit:forTarget", () => {
   test("only the rows of that target, newest first, paginated; another organization's rows with the same id never match", async () => {
     const t = await setupAuth();

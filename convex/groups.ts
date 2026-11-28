@@ -21,7 +21,7 @@ import {
   MAX_GROUPS_LISTED,
 } from "./lib/limits";
 import { cleanIdleClose, cleanWindowCap, modeText, nullableNumber } from "./lib/displayRules";
-import { DEFAULT_LOCKDOWN_SETTINGS } from "./lib/lockdownValidators";
+import { DEFAULT_LOCKDOWN_SETTINGS, rolloutState } from "./lib/lockdownValidators";
 import { assertWithinLimit, bumpOrgStats, bumpStats } from "./lib/plans";
 import { requestPublish } from "./lib/publish";
 import { appKind, audience, displayModeOverride } from "./lib/validators";
@@ -126,11 +126,18 @@ export const page = memberQuery("viewer")({
   },
 });
 
-/** One group with its counts and assigned apps (viewer). The devices list is `fleet:list({ groupId })`. */
+/**
+ * One group with its counts and assigned apps (viewer). The devices list is `fleet:list({ groupId })`.
+ * UI pass 2026-11 (other-pages plan 1.3): + `rollout` (the group's `groupRollouts.by_group` row: staged rollout on/off and its
+ * state; null = no row yet) and `lockdownAuditSince` (the group's `groupLockdown.by_group` row: since when its program rules
+ * are in trial run; null = none). Two `.unique()` reads of rows under 2 KB, both tiny (1 row per group).
+ */
 export const get = memberQuery("viewer")({
   args: { groupId: v.string() },
   returns: v.object({
     group: groupRow,
+    rollout: v.union(v.object({ enabled: v.boolean(), state: rolloutState }), v.null()),
+    lockdownAuditSince: v.union(v.number(), v.null()),
     apps: v.array(
       v.object({
         /** The `appAssignments` id: what `updateAssignment` / `unassignApp` take. */
@@ -168,7 +175,20 @@ export const get = memberQuery("viewer")({
         pinnedDesktop: a.pinnedDesktop,
       });
     }
-    return { group: rowOf(group, await countsOf(ctx, group._id)), apps };
+    const rollout = await ctx.db
+      .query("groupRollouts")
+      .withIndex("by_group", (q) => q.eq("groupId", group._id))
+      .unique();
+    const lockdown = await ctx.db
+      .query("groupLockdown")
+      .withIndex("by_group", (q) => q.eq("groupId", group._id))
+      .unique();
+    return {
+      group: rowOf(group, await countsOf(ctx, group._id)),
+      rollout: rollout === null ? null : { enabled: rollout.enabled, state: rollout.state },
+      lockdownAuditSince: lockdown?.auditSince ?? null,
+      apps,
+    };
   },
 });
 

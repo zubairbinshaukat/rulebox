@@ -35,6 +35,10 @@ const app = defineApp({
     // random characters, set by the operator. Missing: recovery codes can be
     // neither created nor used (`not_ready`).
     RULEBOX_RECOVERY_PEPPER: v.optional(v.string()),
+    // The GitHub repository whose releases the Settings -> Updates picker lists
+    // (`owner/name`, forks and self-hosters). Missing or not `owner/name`: the
+    // Rulebox repository. Read only by ruleboxRelease.ts.
+    RULEBOX_RELEASES_REPO: v.optional(v.string()),
   },
 });
 app.use(rateLimiter);

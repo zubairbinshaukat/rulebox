@@ -30,10 +30,10 @@ import {
   NEW_WEB_APP_PERMISSIONS,
   NO_GROUP_FILTER,
   WEB_PERMISSION_KEYS,
+  type AppByWinget,
   type AppDetail,
   type AppKind,
   type DesktopSpec,
-  type DetectedTech,
   type AppOption,
   type AppRow,
   type BrowserChoice,
@@ -41,17 +41,22 @@ import {
   type AssignmentRow,
   type AuditEntry,
   type BroadcastRow,
+  type DeviceNetwork,
+  type DevicePage,
   type DevicePresence,
   type DeviceRow,
   type EmployeeDetail,
   type EmployeeRow,
   type EnrollmentCodeRow,
+  type EnrollmentPc,
+  type EnrollmentProgress,
   type GroupOption,
   type InstallCounts,
   type InstallState,
   type InstallSummary,
   type Me,
   type MeResult,
+  type NetworkItemState,
   type DriverCounts,
   type DriverDetail,
   type DriverRow,
@@ -70,10 +75,11 @@ import {
 import type { ServerList } from "../serverList";
 import { byKey, contains, relevance, useDemoServerPage } from "./lists";
 import { demoFeedStatus, demoUpdateFlag, resetDemoFeedOnEdit, useDemoApproveFeedUpdate, useDemoCheckFeedNow, useDemoDismissFeedUpdate, useDemoSetFeedPaused } from "./feeds";
-import { lockdownWarningsOf } from "./lockdown";
+import { simulatedPcIds, simulatePcFor, stopSimulation } from "./enrollmentSim";
+import { deviceLockdownOf, lockdownWarningsOf } from "./lockdown";
 import * as validate from "../../lib/validate";
 import * as rules from "../../lib/apps/updateRules";
-import { prefillFor } from "@convex/lib/installerDetect";
+import { demoFingerprint, demoInspectionOf, demoResolveWinget } from "./wingetFixtures";
 import { MAX_BROWSER_SITES } from "../../lib/apps/browserRules";
 import { BROADCAST_ACTIVE_MAX, BROADCAST_BODY_MAX, BROADCAST_TITLE_MAX, LOCK_CONTACT_MAX, LOCK_MESSAGE_MAX, noticeProblem } from "../../lib/noticeRules";
 import { MAX_WIFI_GROUPS, MAX_WIFI_NAME, MAX_WIFI_PROFILES, WIFI_SECURITIES, passphraseProblem, ssidProblem } from "../../lib/wifiRules";
@@ -297,6 +303,35 @@ function deviceRow(db: DemoDb, d: DbDevice): DeviceRow {
   };
 }
 
+/** How many of the newest failed results of a PC the page looks at (`FAILED_INSTALL_RANGE` in `convex/fleet.ts`). */
+const FAILED_INSTALL_RANGE = 10;
+
+/**
+ * `fleet:page`'s `failedInstalls`: the newest 10 failed results of the PC that still count (its group assigns the app, the app is
+ * not archived; none for a revoked PC or one without a group), `more` when the range was full, at most two app names.
+ */
+function failedInstallsOf(db: DemoDb, d: DbDevice): DevicePage["failedInstalls"] {
+  if (d.revoked || !d.groupId) return { count: 0, more: false, names: [] };
+  const assigned = new Set(db.assignments.filter((a) => a.groupId === d.groupId).map((a) => a.appId));
+  const rows = db.installs
+    .filter((i) => i.deviceId === d._id && i.state === "failed")
+    .sort(byKey((i) => i.updatedAt, "desc"))
+    .slice(0, FAILED_INSTALL_RANGE);
+  const apps = rows.flatMap((i) => {
+    const app = assigned.has(i.appId) ? db.apps.find((a) => a._id === i.appId) : undefined;
+    return app && !app.archived ? [app.name] : [];
+  });
+  return { count: apps.length, more: rows.length === FAILED_INSTALL_RANGE, names: apps.slice(0, 2) };
+}
+
+/** The buckets of `convex/fleet.ts` `networkStateOf`: applied / failed / unsupported, anything else is still waiting. */
+function networkStateOf(state: string | undefined): NetworkItemState {
+  if (state === "applied") return "working";
+  if (state === "failed") return "failed";
+  if (state === "unsupported") return "notSupported";
+  return "waiting";
+}
+
 /** The head's plan state: a suspended organization suspends every PC; otherwise what the fixture says (null = never published). */
 function planState(db: DemoDb, d: DbDevice): DeviceRow["planState"] {
   if (d.revoked) return null;
@@ -345,6 +380,7 @@ function assignmentRow(db: DemoDb, a: DemoDb["assignments"][number]): Assignment
     appName: app?.name ?? "",
     appKind: app?.kind ?? "web",
     hue: app?.hue,
+    archived: app?.archived ?? false,
     audience: a.audience,
     pinnedTaskbar: a.pinnedTaskbar,
     pinnedDesktop: a.pinnedDesktop,
@@ -792,6 +828,45 @@ export const demoApi: DataApi = {
     });
   },
 
+  // `fleet:page` (UI pass 2026-11): the header, Overview and Protection tab in one query; nothing else is subscribed for the page.
+  useDevicePage(deviceId) {
+    return useDemoQuery(`fleet:page:${deviceId}`, (db): DevicePage => {
+      requireReader();
+      const d = find(db.devices, deviceId);
+      const g = d.groupId ? db.groups.find((x) => x._id === d.groupId) : undefined;
+      const ld = deviceLockdownOf(db, d);
+      const report = db.reports.get(d._id) ?? null;
+      return {
+        _id: d._id,
+        name: d.name,
+        revision: d.revision,
+        revoked: d.revoked,
+        kioskEnabled: d.kioskEnabled,
+        enrolledAt: d.enrolledAt,
+        group: g ? { _id: g._id, name: g.name } : null,
+        displayMode: d.displayMode ?? "auto",
+        groupDisplayMode: g?.displayMode ?? "auto",
+        presence: devicePresence(db, d),
+        report,
+        outOfSupport: report?.outOfSupport === true,
+        latestVersion: latestVersion(db, d._id) ?? null,
+        planState: planState(db, d) ?? null,
+        flags: { noGroup: !d.groupId, revoked: d.revoked, rotateCredential: d.rotateCredential },
+        lock: db.locks.get(d._id) ?? null,
+        ring: ld.ring,
+        usbAllowUntil: ld.usbAllowUntil,
+        protection: ld.protection,
+        lockdownCapable: ld.lockdownCapable,
+        apply: ld.apply,
+        failedInstalls: failedInstallsOf(db, d),
+        network: {
+          wifiFailed: db.networkResults.get(d._id)?.wifi.filter((w) => networkStateOf(w.state) === "failed").length ?? 0,
+          printersFailed: db.networkResults.get(d._id)?.printers.filter((p) => networkStateOf(p.state) === "failed").length ?? 0,
+        },
+      };
+    });
+  },
+
   // `fleet:liveness`: the one liveness row (minute buckets in the real backend).
   useDeviceLiveness(deviceId) {
     return useDemoQuery(`fleet:liveness:${deviceId}`, (db) => {
@@ -1035,6 +1110,26 @@ export const demoApi: DataApi = {
       if (sort !== undefined && sort.key !== "sent") fail("invalid_argument", { field: "sort" });
       return [...db.broadcasts]
         .sort(byKey((b) => b.createdAt, sort?.dir ?? "desc"))
+        .map((b): BroadcastRow => {
+          const t = b.target;
+          const name = t.kind === "group" ? (db.groups.find((g) => g._id === t.id)?.name ?? null) : (db.devices.find((d) => d._id === t.id)?.name ?? null);
+          return { ...b, target: { ...t, name } };
+        });
+    });
+  },
+  // `broadcasts:live`: what `by_org_open` returns: the never-cancelled rows with no expiry and the timed ones (largest expiry first), at most
+  // 21 of each, newest sent first. Expired rows are included on purpose: the screen hides them with its own clock.
+  useLiveBroadcasts() {
+    return useDemoQuery("broadcasts:live", (db) => {
+      requireReader();
+      const open = db.broadcasts.filter((b) => b.cancelledAt === null);
+      const forever = open.filter((b) => b.expiresAt === null).slice(0, 21);
+      const timed = open
+        .filter((b) => b.expiresAt !== null)
+        .sort((a, b) => (b.expiresAt ?? 0) - (a.expiresAt ?? 0))
+        .slice(0, 21);
+      return [...forever, ...timed]
+        .sort((a, b) => b.createdAt - a.createdAt)
         .map((b): BroadcastRow => {
           const t = b.target;
           const name = t.kind === "group" ? (db.groups.find((g) => g._id === t.id)?.name ?? null) : (db.devices.find((d) => d._id === t.id)?.name ?? null);
@@ -1345,6 +1440,9 @@ export const demoApi: DataApi = {
         displayMode: g.displayMode,
         webWindowCap: g.webWindowCap,
         webIdleCloseMin: g.webIdleCloseMin,
+        // The two small rows `groups:get` reads (null = no row): the rollout row and the trial-run date of the lockdown row.
+        rollout: db.rollouts.has(g._id) ? { enabled: db.rollouts.get(g._id)!.enabled, state: db.rollouts.get(g._id)!.state } : null,
+        lockdownAuditSince: db.lockdown.get(g._id)?.auditSince ?? null,
       };
     });
   },
@@ -1673,7 +1771,8 @@ export const demoApi: DataApi = {
             targetType: "employee",
             targetId: e._id,
             targetLabel: name,
-            summary: changed.length ? `Changed: ${changed.join(", ")}.` : "Saved without changes.",
+            // Same wording as the server (`convex/employees.ts`), so `plainSummary` rewords demo rows too.
+            summary: changed.length ? `Changed the ${changed.join(", ")} of ${name}` : "Saved without changes.",
           });
           return { revision: e.revision };
         }),
@@ -1831,7 +1930,8 @@ export const demoApi: DataApi = {
               ...(browser ? { browser } : {}),
             },
             archived: false,
-            revision: 1,
+            // The server's createWeb starts a website at revision 0.
+            revision: 0,
             createdAt: now,
           });
           audit({ action: "app.created", targetType: "app", targetId: id, targetLabel: name, summary: `Website “${name}” added.` });
@@ -2018,42 +2118,10 @@ export const demoApi: DataApi = {
   useResolveWinget() {
     return useCallback(async ({ packageId, version }) => {
       await sleep(latency() + 400);
-      const id = packageId.trim();
-      if (validate.wingetId(id)) fail("invalid_argument", { field: "packageId" });
-      const known: Record<string, { kind: "msi" | "exe"; version: string; silent: string[]; where?: string; product?: string; name: string; publisher: string }> = {
-        "7zip.7zip": { kind: "msi", version: "24.08", silent: [], where: "{ProgramFiles}\\7-Zip", product: "{23170F69-40C1-2702-2408-000001000000}", name: "7-Zip", publisher: "Igor Pavlov" },
-        "videolan.vlc": { kind: "exe", version: "3.0.21", silent: ["/S"], where: "{ProgramFiles}\\VideoLAN\\VLC", name: "VLC media player", publisher: "VideoLAN" },
-        "notepad++.notepad++": { kind: "exe", version: "8.7.1", silent: ["/S"], where: "{ProgramFiles}\\Notepad++", name: "Notepad++", publisher: "Notepad++ Team" },
-      };
-      const lower = id.toLowerCase();
-      if (lower === "spotify.spotify") fail("winget_unsupported", { detail: "it only offers a per-user (Scope: user) installer" });
-      if (lower.startsWith("offline.")) fail("winget_unreachable");
-      const k = known[lower];
-      if (!k) fail("winget_unsupported", { detail: "no machine-wide x64 installer with a silent switch was found" });
-      const v = version?.trim() || k.version;
-      const hexChars = "0123456789abcdef";
-      let sha = "";
-      for (let i = 0; i < 64; i++) sha += hexChars[(i * 7 + lower.length) % 16];
-      return {
-        packageId: id,
-        version: v,
-        name: k.name,
-        publisher: k.publisher,
-        defaultInstallLocation: k.where,
-        install: {
-          kind: k.kind,
-          url: `https://downloads.example.com/winget/${lower}/${v}/setup.${k.kind}`,
-          sha256: sha,
-          sizeBytes: 12_345_678,
-          silentArgs: k.silent,
-          productCode: k.product,
-          successExitCodes: [0],
-          removeWhenUnassigned: k.kind === "msi",
-        },
-      };
+      // Every package of the popular-apps gallery is known (`wingetFixtures.ts`); Teams and Slack are refused like the live server does.
+      return demoResolveWinget(packageId, version);
     }, []);
   },
-
   useFetchWebMeta() {
     return useCallback(async ({ url }) => {
       await sleep(latency() + 300);
@@ -2078,36 +2146,34 @@ export const demoApi: DataApi = {
       if (new URL(url).hostname.includes("fail")) fail("invalid_argument", { field: "url", detail: "inspect_failed" });
       if (path.includes("norange")) fail("invalid_argument", { field: "url", detail: "inspect_unsupported" });
       if (path.endsWith(".zip") || path.endsWith(".html")) fail("invalid_argument", { field: "url", detail: "inspect_not_installer" });
-      const tech: DetectedTech = path.endsWith(".msi")
-        ? "msi"
-        : path.includes("nsis")
-          ? "nsis"
-          : path.includes("inno")
-            ? "inno"
-            : path.includes("burn")
-              ? "burn"
-              : path.includes("script")
-                ? "installshield_script"
-                : path.includes("shield")
-                  ? "installshield_msi"
-                  : path.includes("advanced")
-                    ? "advanced_installer"
-                    : "exe";
-      const p = prefillFor(tech);
-      return {
-        tech,
-        kind: tech === "msi" ? "msi" : "exe",
-        confidence: tech === "exe" ? "low" : "high",
-        silentArgs: p.silentArgs,
-        successExitCodes: p.successExitCodes,
-        needsAnswerFile: p.needsAnswerFile,
-        perUserLikely: tech === "nsis",
-        ...(tech === "exe" || tech === "msi" ? {} : { signer: "Demo Software Ltd", fileVersion: "2.4.1.0", productName: "Demo Setup", companyName: "Demo Software Ltd" }),
-        sizeBytes: 48_234_496,
-      };
+      return demoInspectionOf(url);
     }, []);
   },
 
+  /**
+   * The demo twin of `apps:fingerprintInstaller` (`wingetFixtures.ts`): the same refusals as the server (`big` in the address = too large,
+   * a private host = blocked, a host named `fail...` = failed, a zip or page = not an installer), else the technology the address names
+   * and a made-up hash that is the same for the same address. A little slower than "Detect": the server downloads the whole file.
+   */
+  useFingerprintInstaller() {
+    return useCallback(async ({ url }) => {
+      await sleep(latency() + 600);
+      return demoFingerprint(url);
+    }, []);
+  },
+
+  /** The demo twin of `apps:byWinget`: the app (archived or not) that carries the package id; `"skip"` loads nothing. */
+  useAppByWinget(packageId) {
+    const skip = packageId === "skip";
+    const state = useDemoQuery(`apps:byWinget:${skip ? "" : packageId.trim()}`, (db): AppByWinget | null => {
+      requireReader();
+      const id = skip ? "" : packageId.trim();
+      if (validate.wingetId(id)) return null;
+      const a = db.apps.find((x) => x.kind === "desktop" && x.desktop?.wingetId === id);
+      return a === undefined ? null : { _id: a._id, name: a.name, archived: a.archived };
+    });
+    return skip ? { status: "loading" } : state;
+  },
   useSaveAppIcon() {
     return useCallback(
       ({ appId, png }) =>
@@ -2221,6 +2287,46 @@ export const demoApi: DataApi = {
           w.revision++;
           audit({ action: "wifi.passphraseSet", targetType: "wifi", targetId: w._id, targetLabel: w.name, summary: `Replaced the password of ${w.name}` });
           return { revision: w.revision };
+        }),
+      [],
+    );
+  },
+
+  /**
+   * The demo twin of `wifi:createWithPassphrase`: the checks of `saveWifi` (name, SSID, groups, 50 networks) and `setPassphrase`
+   * (the password), then ONE store change: a secured network that already has its password, revision 2, two audit rows as on the
+   * server. The text is checked and dropped: only the fact that a password is set is kept.
+   */
+  useCreateWifiWithPassphrase() {
+    return useCallback(
+      (input) =>
+        runMutation("admin", ({ db, audit, now }) => {
+          const name = nameOrFail(input.name, MAX_WIFI_NAME);
+          if (ssidProblem(input.ssid) !== null) fail("invalid_argument", { field: "ssid" });
+          if (input.security === "open") fail("invalid_argument", { field: "security", detail: "open" });
+          if (!WIFI_SECURITIES.includes(input.security)) fail("invalid_argument", { field: "security" });
+          if (input.groupIds.length > MAX_WIFI_GROUPS) fail("invalid_argument", { field: "groupIds", detail: "too_many" });
+          const problem = passphraseProblem(input.passphrase);
+          if (problem !== null) fail("invalid_argument", { field: "passphrase", detail: problem === "chars" ? "characters" : "length" });
+          if (db.wifi.length >= MAX_WIFI_PROFILES) fail("too_large", { detail: "wifi" });
+          const groupIds = [...new Set(input.groupIds)];
+          for (const g of groupIds) if (!db.groups.some((x) => x._id === g)) fail("not_found");
+          const row: DbWifi = {
+            _id: newId("wifi"),
+            name,
+            ssid: input.ssid,
+            hidden: input.hidden,
+            security: input.security,
+            autoConnect: input.autoConnect,
+            hasPassphrase: true,
+            passphraseSetAt: now,
+            groupIds,
+            revision: 2,
+          };
+          db.wifi.push(row);
+          audit({ action: "wifi.created", targetType: "wifi", targetId: row._id, targetLabel: name, summary: `Added the Wi-Fi network ${name}` });
+          audit({ action: "wifi.passphraseSet", targetType: "wifi", targetId: row._id, targetLabel: name, summary: `Replaced the password of ${name}` });
+          return { id: row._id, revision: row.revision };
         }),
       [],
     );
@@ -2454,6 +2560,38 @@ export const demoApi: DataApi = {
     );
   },
 
+  // `fileHandlers:setMany`: the checks of `set` for every extension (one refused = nothing written), one audit row for the whole call.
+  useSetFileHandlers() {
+    return useCallback(
+      ({ extensions, appId }) =>
+        runMutation("admin", ({ db, audit }) => {
+          if (extensions.length < 1 || extensions.length > 20) fail("invalid_argument", { field: "extensions" });
+          const exts = [...new Set(extensions.map((e) => validate.normalizeExtension(e)))];
+          for (const ext of exts) {
+            if (validate.extension(ext)) fail("invalid_argument", { field: "extension" });
+          }
+          const app = find(db.apps, appId);
+          if (!canOpenFiles(app)) fail("invalid_argument", { field: "app" });
+          const changed: string[] = [];
+          for (const ext of exts) {
+            const existing = db.fileHandlers.find((f) => f.extension === ext);
+            if (existing === undefined) {
+              db.fileHandlers.push({ _id: newId("fh"), extension: ext, appId });
+              changed.push(ext);
+            } else if (existing.appId !== appId) {
+              existing.appId = appId;
+              changed.push(ext);
+            }
+          }
+          if (changed.length === 0) return;
+          changed.sort();
+          const shown = changed.length > 6 ? `${changed.slice(0, 6).join(", ")} and ${changed.length - 6} more` : changed.join(", ");
+          audit({ action: "fileHandler.set", targetType: "app", targetId: app._id, targetLabel: app.name, summary: `Files ending in ${shown} now open with ${app.name}` });
+        }),
+      [],
+    );
+  },
+
   useRemoveFileHandler() {
     return useCallback(
       ({ handlerId }) =>
@@ -2591,6 +2729,9 @@ export const demoApi: DataApi = {
         envKeyPresent: db.env.key,
         envNextKeyPresent: db.env.next,
         signing: !db.env.key ? ("missing" as const) : hasActive ? ("ok" as const) : ("mismatch" as const),
+        // The demo organization keeps its own key (keyring): no environment warning, no setup commands, no rotation.
+        managed: "keyring" as const,
+        keyringLocked: false,
         publishFailedAt: db.publishFailedAt ?? null,
         rosterPending: db.rosterPending === true,
         keys: [...db.keys].sort((a, b) => a.createdAt - b.createdAt),
@@ -2828,7 +2969,66 @@ export const demoDevicesApi: DevicesApi = {
         }));
     });
   },
+
+  // The device page's per-tab queries (UI pass 2026-11).
+  useDeviceSettingsOptions(deviceId) {
+    return useDemoQuery(`fleet:deviceSettings:${deviceId}`, (db) => {
+      requireReader();
+      const d = find(db.devices, deviceId);
+      return { groups: groupOptions(db), rolloutRevision: (d.groupId ? db.rollouts.get(d.groupId)?.revision : undefined) ?? 0 };
+    });
+  },
+
+  useDeviceVersions(deviceId, enabled) {
+    const q = useDemoQuery(`fleet:versions:${deviceId}`, (db) => {
+      requireReader();
+      const d = find(db.devices, deviceId);
+      return (db.versions.get(d._id) ?? []).slice(0, 5).map((v) => ({ version: v.version, createdAt: v.createdAt, reason: v.reason }));
+    });
+    // Closed disclosure: nothing is subscribed (the live hook skips the query).
+    return enabled ? q : { status: "loading" };
+  },
+
+  useDeviceNetwork(deviceId) {
+    return useDemoQuery(`fleet:network:${deviceId}`, (db): DeviceNetwork => {
+      requireReader();
+      const d = find(db.devices, deviceId);
+      const groupId = d.groupId;
+      const reportedAt = db.applyDetails.get(d._id)?.updatedAt ?? null;
+      if (!groupId) return { groupId: null, reportedAt, wifi: [], printers: [], drivers: [] };
+      const r = db.networkResults.get(d._id);
+      const byName = <T extends { name: string }>(a: T, b: T) => a.name.localeCompare(b.name);
+      return {
+        groupId,
+        reportedAt,
+        wifi: db.wifi
+          .filter((w) => w.groupIds.includes(groupId))
+          .sort(byName)
+          .map((w) => {
+            const item = r?.wifi.find((x) => x.profileId === w._id);
+            return { _id: w._id, name: w.name, state: networkStateOf(item?.state), detail: item?.detail ?? null };
+          }),
+        printers: db.printers
+          .filter((p) => p.groupIds.includes(groupId))
+          .sort(byName)
+          .map((p) => {
+            const item = r?.printers.find((x) => x.printerId === p._id);
+            return { _id: p._id, name: p.name, isDefault: p.defaultForGroupIds.includes(groupId), state: networkStateOf(item?.state), detail: item?.detail ?? null };
+          }),
+        drivers: db.drivers
+          .filter((x) => x.groupIds.includes(groupId))
+          .sort(byName)
+          .map((x) => {
+            const item = r?.drivers.find((y) => y.driverId === x._id);
+            return { _id: x._id, name: x.name, state: item?.state ?? "pending", detail: item?.detail ?? null };
+          }),
+      };
+    });
+  },
 };
+
+/** What the demo's "Download Rulebox" opens when the demo organization has set no release (a made-up build; the address does not exist). */
+const DEMO_DOWNLOAD = { version: "0.1.0", url: "https://example.invalid/Rulebox-0.1.0-x64.msi", sizeBytes: 31_000_000 } as const;
 
 /** Enrollment codes: their own seam (`data/enrollment`), re-exported by `data/enrollment/demo.ts`. */
 export const demoEnrollmentApi: EnrollmentApi = {
@@ -2875,10 +3075,48 @@ export const demoEnrollmentApi: EnrollmentApi = {
           db.tokens.push({ _id: id, label: label?.trim() || undefined, groupId, usesLeft: uses, usesTotal: uses, expiresAt, revoked: false, createdAt: now, createdBy: me._id });
           audit({ action: "enrollment.codeCreated", targetType: "enrollmentCode", targetId: id, targetLabel: label?.trim() || undefined, summary: `Code for “${g.name}”, ${uses} uses.` });
           const code = `RBX1.${base64Url(`https://demo-deployment-123.convex.cloud#${token(20)}`)}`;
-          return { code, expiresAt };
+          // The demo has no real PC: one simulated PC joins this code a few seconds later (`demo/enrollmentSim.ts`).
+          simulatePcFor(id);
+          return { code, expiresAt, tokenId: id };
         }),
       [],
     );
+  },
+
+  /** `enrollmentCodes:progress` (viewer). `null` subscribes to nothing (state `loading`, like Convex's "skip"). */
+  useEnrollmentProgress(tokenId) {
+    const state = useDemoQuery(`enrollmentCodes:progress:${tokenId ?? "skip"}`, (db): EnrollmentProgress | null => {
+      if (tokenId === null) return null;
+      requireReader();
+      const t = find(db.tokens, tokenId);
+      const pcs: EnrollmentPc[] = simulatedPcIds(t._id)
+        .map((id) => db.devices.find((d) => d._id === id))
+        .filter((d): d is DbDevice => d !== undefined)
+        .sort((a, b) => b.enrolledAt - a.enrolledAt)
+        .slice(0, 10)
+        .map((d) => {
+          const phase = db.reports.get(d._id)?.kioskPhase;
+          return { _id: d._id, name: d.name, enrolledAt: d.enrolledAt, online: !d.revoked && db.onlineIds.has(d._id), ...(phase === undefined ? {} : { kioskPhase: phase }) };
+        });
+      const usesLeft = Math.max(0, t.usesLeft);
+      const release = db.org.ruleboxRelease;
+      return {
+        label: t.label,
+        groupId: t.groupId,
+        groupName: groupName(db, t.groupId),
+        usesTotal: t.usesTotal,
+        usesLeft,
+        expiresAt: t.expiresAt,
+        revoked: t.revoked,
+        joined: Math.max(0, t.usesTotal - usesLeft),
+        pcs,
+        // As the server: the organization's release, else none. The demo shows a made-up one so the download button has an address.
+        download: release ? { version: release.version, url: release.url, sizeBytes: release.sizeBytes } : DEMO_DOWNLOAD,
+      };
+    });
+    if (tokenId === null) return { status: "loading" };
+    if (state.status !== "ready") return state;
+    return state.data === null ? { status: "loading" } : { status: "ready", data: state.data };
   },
 
   useRevokeEnrollmentCode() {
@@ -2890,6 +3128,7 @@ export const demoEnrollmentApi: EnrollmentApi = {
             const t = find(db.tokens, tokenId);
             if (t.revoked) return;
             t.revoked = true;
+            stopSimulation(t._id);
             audit({ action: "enrollment.codeRevoked", targetType: "enrollmentCode", targetId: t._id, targetLabel: t.label, summary: "Code revoked." });
           },
           // A major action on the server (plan 4.16): fresh step-up.
@@ -2906,11 +3145,15 @@ export const dataApi = demoApi;
 /** Audit lists: their own seam (data/audit), re-exported by data/audit/demo.ts. */
 export const demoAuditApi: AuditApi = {
   // `audit:list`: sort key "at" only (newest first by default), no search, no total.
-  useAuditScreen(query) {
-    return useDemoServerPage("audit:list", "", query, (db, sort) => {
+  // UI pass: `since` keeps the rows at or after it (`.gte("at", since)`); `targetId` is `audit:forTarget` (the same pages, one target's rows).
+  useAuditScreen({ since, targetId, ...query }) {
+    return useDemoServerPage(targetId === undefined ? "audit:list" : "audit:forTarget", `${targetId ?? ""}:${since ?? ""}`, query, (db, sort) => {
       requireReader();
       if (sort && sort.key !== "at") fail("invalid_argument", { field: "sort" });
-      return [...db.audit].sort(byKey((e) => e.at, sort?.dir ?? "desc")).map(auditEntry);
+      return db.audit
+        .filter((e) => (targetId === undefined || e.targetId === targetId) && (since === undefined || e.at >= since))
+        .sort(byKey((e) => e.at, sort?.dir ?? "desc"))
+        .map(auditEntry);
     });
   },
 

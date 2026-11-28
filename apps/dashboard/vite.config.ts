@@ -218,10 +218,20 @@ export default defineConfig(({ mode, command }) => {
             // far better than a dozen tiny ones; the few sign-in and entry icons and the icons
             // of the other screens stay out, so no page loads icons it does not draw.
             { name: "icons", test: new RegExp(`~icons[\\\\/]solar[\\\\/](${SHELL_ICONS.join("|")})-(linear|bold-duotone)\\.jsx$`) },
-            { name: "core", test: /([\\/]apps[\\/]dashboard[\\/]src[\\/](lib|data)|[\\/]packages[\\/]ui[\\/]src)[\\/](?!(stepup|screenStrings|enrollment|devices|apps|employees|audit|members|lockdown|release)[\\/])(?!components[\\/](AppTile|FileChip|IconButton|LogoMotion|Notice|Panel|ProgressBar|Slider|StatCard|Surface|Tabs|TitleBar)\.).*\.tsx?$/ },
-            // The four tiny page parts every signed-in screen shares (card, page header, relative time,
-            // role gate) ride along: four 0.2 to 0.5 KB files cost more in headers than here, in one.
-            { name: "core", test: /[\\/]apps[\\/]dashboard[\\/]src[\\/]components[\\/](Card|PageHeader|RelativeTime|RoleGate)\.tsx$/ },
+            // `lib/cardLayout.ts`, `lib/columns.ts` and `lib/rowClick.ts` serve the list components only (the Cards view is a
+            // lazy chunk), so they stay out of `core` too. So do `lib/qr.ts` (the QR dialog of Add a PC) and `lib/drivers/` (the zip and
+            // INF readers of the driver form): each is reached only through a dynamic import. `lib/password.ts` (the employee form)
+            // and `lib/auditText.ts` (the audit log) belong to lazy screens too.
+            { name: "core", test: /([\\/]apps[\\/]dashboard[\\/]src[\\/](lib|data)|[\\/]packages[\\/]ui[\\/]src)[\\/](?!(stepup|screenStrings|enrollment|devices|apps|employees|audit|members|lockdown|release|drivers)[\\/])(?!components[\\/](AppTile|Checkbox|FileChip|IconButton|InfoTip|LogoMotion|Notice|Panel|ProgressBar|SearchSelect|Select|Slider|StatCard|Surface|Switch|Tabs|Textarea|TitleBar)\.)(?!floating\.)(?!(cardLayout|columns|rowClick|qr|password|auditText|listView|cursorPager|useDebounced|useUrlTab|links|printerRules|driverRules|wifiRules|noticeRules|rolloutRules)\.).*\.tsx?$/ },
+            // What the signed-in shell and the Overview need but the sign-in pages do not (the audit sentences, the install texts, the
+            // clock, the view switch's store, the dialog and menu pieces): one chunk of their own, so sign-in, join and PIN reset
+            // download none of it. The four tiny page parts every signed-in screen shares ride along.
+            {
+              name: "shell",
+              priority: 1,
+              includeDependenciesRecursively: false,
+              test: /([\\/]apps[\\/]dashboard[\\/]src[\\/]lib[\\/](audit|install|viewMode|useNow|publish|focus)\.ts|[\\/]apps[\\/]dashboard[\\/]src[\\/]lib[\\/]screenStrings[\\/](audit|install)\.ts|[\\/]packages[\\/]ui[\\/]src[\\/]components[\\/](MenuList|Dialog|Avatar|Pill)\.tsx|[\\/]apps[\\/]dashboard[\\/]src[\\/]components[\\/](Card|PageHeader|RelativeTime|RoleGate)\.tsx)$/,
+            },
           ],
         },
       },

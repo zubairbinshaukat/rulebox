@@ -4,6 +4,7 @@ import { asMember, expectCode, giveStepUp, makeOrg, type T } from "../tests/conv
 import { api, internal } from "./_generated/api";
 import type { Id } from "./_generated/dataModel";
 import { MINUTE_MS } from "./lib/limits";
+import { DEFAULT_LOCKDOWN_SETTINGS } from "./lib/lockdownValidators";
 
 // Groups (plan Step 5.6) and the `maxGroups` limit.
 
@@ -140,6 +141,55 @@ describe("groups", () => {
     });
     const g = await a.as.query(api.groups.get, { groupId });
     expect(g.apps).toMatchObject([{ name: "Mail", kind: "web", audience: "everyone", pinnedTaskbar: true, pinnedDesktop: false }]);
+  });
+
+  test("get carries the rollout state and the trial-run date (null without rows), and the archived flag of each assigned app", async () => {
+    const t = await setupAuth();
+    const orgId = await makeOrg(t);
+    const a = await admin(t, orgId);
+    const { groupId } = await a.as.mutation(api.groups.create, { name: "Sales" });
+    // A group made before rollouts existed: no rollout row, and no lockdown row either.
+    await t.run(async (ctx) => {
+      const lockdown = await ctx.db.query("groupLockdown").withIndex("by_group", (q) => q.eq("groupId", groupId)).unique();
+      await ctx.db.delete(lockdown!._id);
+    });
+    const bare = await a.as.query(api.groups.get, { groupId });
+    expect(bare.rollout).toBeNull();
+    expect(bare.lockdownAuditSince).toBeNull();
+
+    await t.run(async (ctx) => {
+      await ctx.db.insert("groupRollouts", {
+        orgId,
+        groupId,
+        enabled: true,
+        pointers: { pilot: 2, early: 1, everyone: 1 },
+        autoPromote: { enabled: false, bakeHours: 24, maxFailurePct: 10 },
+        autoRollback: false,
+        state: "halted",
+        haltReason: "too many failures",
+        revision: 3,
+      });
+      await ctx.db.insert("groupLockdown", {
+        orgId,
+        groupId,
+        settings: DEFAULT_LOCKDOWN_SETTINGS,
+        revision: 0,
+        auditSince: 1_700_000_000_000,
+      });
+      const appId = await ctx.db.insert("apps", { orgId, name: "Old reader", kind: "web", archived: true, revision: 0, createdAt: 0 });
+      await ctx.db.insert("appAssignments", { orgId, groupId, appId, audience: "everyone", pinnedTaskbar: false, pinnedDesktop: true });
+    });
+    const g = await a.as.query(api.groups.get, { groupId });
+    // Only the two fields the page needs: never the pointers, the halt reason or the lockdown settings.
+    expect(g.rollout).toEqual({ enabled: true, state: "halted" });
+    expect(g.lockdownAuditSince).toBe(1_700_000_000_000);
+    expect(g.apps).toMatchObject([{ name: "Old reader", archived: true }]);
+
+    // A viewer sees the same; another organization's group is not found.
+    const viewer = await asMember(t, { role: "viewer", orgId });
+    expect((await viewer.as.query(api.groups.get, { groupId })).rollout).toEqual({ enabled: true, state: "halted" });
+    const foreign = await admin(t, await makeOrg(t, "Other"));
+    await expectCode(foreign.as.query(api.groups.get, { groupId }), "not_found");
   });
 
   test("delete is refused while devices, employees, apps or usable codes reference the group", async () => {

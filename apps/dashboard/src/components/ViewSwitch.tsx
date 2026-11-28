@@ -5,6 +5,12 @@ import IconCards from "~icons/solar/widget-4-linear";
 import { strings } from "../lib/strings";
 import { useViewMode, type ViewMode } from "../lib/viewMode";
 
+/** Starts downloading the cards code (the same dynamic imports `cardsLazy.ts` makes; a no-op once loaded). */
+function preloadCards() {
+  void import("./CardGrid");
+  void import("./CardsSortSelect");
+}
+
 const OPTIONS: { value: ViewMode; label: string; Icon: typeof IconTable }[] = [
   { value: "table", label: strings.table.viewTable, Icon: IconTable },
   { value: "cards", label: strings.table.viewCards, Icon: IconCards },
@@ -14,6 +20,8 @@ const OPTIONS: { value: ViewMode; label: string; Icon: typeof IconTable }[] = [
  * Table | Cards, the one global list view. A segmented radio group like the
  * theme control, but with a Solar icon in each segment (the shared
  * `SegmentedControl` takes text only). The choice lives in `lib/viewMode.ts`.
+ * Icon and word; in a narrow list (container under 560 px) the word hides and the `title` names it.
+ * `iconOnly` forces the icon alone (the account menu).
  */
 export function ViewSwitch({ iconOnly = false }: { iconOnly?: boolean }) {
   const [view, setView] = useViewMode();
@@ -35,11 +43,15 @@ export function ViewSwitch({ iconOnly = false }: { iconOnly?: boolean }) {
           data-value={value}
           aria-checked={view === value}
           tabIndex={view === value ? 0 : -1}
-          title={iconOnly ? label : undefined}
+          title={label}
+          // The cards code is a separate download: start it as soon as the person reaches for the switch.
+          onPointerEnter={value === "cards" ? preloadCards : undefined}
+          onFocus={value === "cards" ? preloadCards : undefined}
           onClick={() => setView(value)}
         >
           <Icon aria-hidden="true" />
-          <span className={iconOnly ? "dash-sr" : undefined}>{label}</span>
+          {/* Text stays for screen readers; the list's container hides it under 560 px (dashboard.css). */}
+          <span className={iconOnly ? "dash-sr" : "dash-viewswitch__label"}>{label}</span>
         </button>
       ))}
     </div>

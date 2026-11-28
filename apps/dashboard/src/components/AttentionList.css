@@ -1,0 +1,151 @@
+/* AttentionList (components/AttentionList.tsx): "Needs attention" cards. The same look as the device page's problem cards
+   (`.ov-problem` in screens/device/device.css). The list lays itself out by its own width: one column under 560 px, two
+   from there; each card puts its button right of the text from 460 px of card width, full width under it below.
+   Imported by the component (ships with the screens that use it). */
+.dash-attn {
+  container: dash-attn / inline-size;
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 10px;
+  min-width: 0;
+}
+.dash-attn__list {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 12px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+@container dash-attn (min-width: 560px) {
+  .dash-attn__list {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+.dash-attn__wrap {
+  display: flex;
+  container: dash-attn-card / inline-size;
+  min-width: 0;
+}
+.dash-attn__card {
+  --sev: var(--rb-accent);
+  --sev-soft: var(--rb-accent-soft);
+  --sev-text: var(--rb-accent-text);
+  flex: 1;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-content: start;
+  align-items: start;
+  gap: 4px 14px;
+  min-width: 0;
+  padding: 16px;
+  border: 1px solid color-mix(in oklch, var(--sev) 32%, var(--rb-line));
+  border-radius: 16px;
+  background: color-mix(in oklch, var(--sev-soft) 38%, var(--rb-surface));
+  box-shadow: var(--dash-card-shadow);
+}
+.dash-attn__card[data-tone="danger"] {
+  --sev: var(--rb-danger);
+  --sev-soft: var(--rb-danger-soft);
+  --sev-text: var(--rb-danger-text);
+}
+.dash-attn__card[data-tone="warning"] {
+  --sev: var(--rb-warning);
+  --sev-soft: var(--rb-warning-soft);
+  --sev-text: var(--rb-warning-text);
+}
+.dash-attn__icon {
+  display: grid;
+  place-items: center;
+  width: 36px;
+  height: 36px;
+  border-radius: 12px;
+  font-size: 20px;
+  background: var(--sev-soft);
+  color: var(--sev-text);
+}
+.dash-attn__text {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+.dash-attn__title {
+  margin: 0;
+  font-size: 15.5px;
+  font-weight: 650;
+  line-height: 1.3;
+  overflow-wrap: anywhere;
+}
+.dash-attn__body {
+  margin: 0;
+  font-size: 14px;
+  line-height: 1.45;
+  color: var(--rb-muted);
+  overflow-wrap: anywhere;
+}
+.dash-attn__action {
+  grid-column: 1 / -1;
+  margin-top: 10px;
+}
+.dash-attn__action > * {
+  width: 100%;
+  justify-content: center;
+}
+@container dash-attn-card (min-width: 460px) {
+  .dash-attn__card {
+    grid-template-columns: auto minmax(0, 1fr) auto;
+    gap: 4px 16px;
+  }
+  .dash-attn__action {
+    grid-column: 3;
+    grid-row: 1;
+    align-self: center;
+    margin-top: 0;
+  }
+  .dash-attn__action > * {
+    width: auto;
+  }
+}
+.dash-attn__toggle {
+  align-self: flex-start;
+  min-height: 40px;
+  padding: 0 12px;
+  margin-inline-start: -12px;
+  border-radius: var(--rb-r-md);
+  font-size: 13.5px;
+  font-weight: 600;
+  color: var(--rb-accent-text);
+}
+.dash-attn__toggle:hover {
+  background: var(--rb-hover);
+}
+
+/* Nothing to do: one calm line, the way the device page says all is well. */
+.dash-attn-clear {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 16px 18px;
+  border: 1px solid color-mix(in oklch, var(--rb-success) 32%, var(--rb-line));
+  border-radius: 16px;
+  background: color-mix(in oklch, var(--rb-success-soft) 45%, var(--rb-surface));
+  box-shadow: var(--dash-card-shadow);
+}
+.dash-attn-clear__icon {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  font-size: 24px;
+  background: var(--rb-success-soft);
+  color: var(--rb-success-text);
+}
+.dash-attn-clear__text {
+  margin: 0;
+  font-size: 15.5px;
+  font-weight: 650;
+}

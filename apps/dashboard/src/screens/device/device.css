@@ -1,0 +1,1035 @@
+/*
+ * Device page (UI pass 2026-11, docs/plans/ui-pass/device-detail.md): the header, the sticky tab bar, the Overview and the small
+ * pieces of the other tabs. Shipped in the page's own chunk, not in the entry CSS. Tokens only; the only motion is a fade and a
+ * lift (opacity + transform), none with reduced motion or Lite.
+ * Width bands: phone < 600 · tablet 600-1023 · laptop 1024-1599 · wide >= 1600 (the shell's breakpoints are in dashboard.css).
+ */
+
+.dev {
+  gap: 16px;
+}
+
+/* ------------------------------------------------------------ header */
+
+/* The header lays itself out by its own width: the actions sit right of the name from 640 px, a 50/50 row under it below. */
+.dev-head {
+  container: dev-head / inline-size;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+}
+.dev-head__grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  align-items: end;
+  gap: 16px 24px;
+  min-width: 0;
+}
+.dev-head__id {
+  container: devid / inline-size;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-width: 0;
+}
+.dev-head__title {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  min-width: 0;
+}
+.dev-head__name {
+  min-width: 0;
+  margin: 0;
+  font-size: clamp(24px, 2.6vw, 30px);
+  line-height: 1.15;
+  letter-spacing: -0.025em;
+  overflow-wrap: anywhere;
+  /* A very long name never pushes the page: three lines on a phone, two from 640 px; the full name is in `title`. */
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+  line-clamp: 3;
+  overflow: hidden;
+}
+.dev-head__name:focus {
+  outline: none;
+}
+.dev-head__pen {
+  flex: none;
+  margin-top: 1px;
+}
+.dev-head__pills {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+.dev-head__meta {
+  display: flex;
+  flex-wrap: wrap;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  font-size: 13.5px;
+  color: var(--rb-muted);
+}
+.dev-head__meta li {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.dev-head__meta li:not(:last-child)::after {
+  content: "·";
+  margin-inline: 8px;
+}
+/* A narrow column puts the group on its own line, so a separator never hangs at the end of a line. */
+@container devid (max-width: 560px) {
+  .dev-head__meta li:first-child {
+    flex-basis: 100%;
+  }
+  .dev-head__meta li:first-child::after {
+    display: none;
+  }
+}
+.dev-head__meta a {
+  color: var(--rb-ink);
+  font-weight: 600;
+  text-decoration: none;
+}
+.dev-head__meta a:hover {
+  text-decoration: underline;
+}
+.dev-head__actions {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+@container dev-head (min-width: 640px) {
+  .dev-head__grid {
+    grid-template-columns: minmax(0, 1fr) auto;
+  }
+  .dev-head__actions {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: flex-end;
+  }
+  .dev-head__name {
+    -webkit-line-clamp: 2;
+    line-clamp: 2;
+  }
+}
+
+.dev-skel__title {
+  padding-block: 6px;
+}
+.dev-skel__tabs {
+  display: flex;
+  align-items: center;
+  gap: 28px;
+  min-height: 44px;
+  padding-inline: 14px;
+}
+
+/* ------------------------------------------------------------ sticky tab bar */
+
+/* Sticks under the shell's top bar. From 1024 px it also carries the PC's name, which fades in once the page title has
+   scrolled away (plain CSS, transform + opacity). A phone keeps just the tabs, edge to edge. */
+.dev-bar {
+  position: sticky;
+  top: calc(var(--dash-topbar) - 1px);
+  z-index: 30;
+  display: flex;
+  align-items: stretch;
+  gap: 16px;
+  min-width: 0;
+  border-bottom: 1px solid var(--rb-line);
+  background: color-mix(in srgb, var(--rb-bg) 90%, transparent);
+  -webkit-backdrop-filter: blur(14px);
+  backdrop-filter: blur(14px);
+  transition: box-shadow var(--rb-duration) var(--rb-ease);
+}
+[data-lite="true"] .dev-bar {
+  background: var(--rb-bg);
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
+}
+.dev-bar[data-scrolled] {
+  box-shadow: 0 12px 20px -18px oklch(0.2 0.02 70 / 0.55);
+}
+.dev-bar .dash-ptabs {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+.dev-bar .dash-ptabs__bar {
+  border-bottom: 0;
+}
+.dev-bar__name {
+  display: none;
+  align-items: center;
+  gap: 8px;
+  flex: 0 1 auto;
+  min-width: 0;
+  max-width: 32%;
+  margin: 0;
+  font-size: 13.5px;
+  font-weight: 600;
+  opacity: 0;
+  transform: translateY(5px);
+  pointer-events: none;
+  transition:
+    opacity var(--rb-duration) var(--rb-ease),
+    transform var(--rb-duration) var(--rb-ease);
+}
+.dev-bar[data-scrolled] .dev-bar__name {
+  opacity: 1;
+  transform: none;
+}
+.dev-bar__text {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.dev-bar__dot {
+  flex: none;
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: transparent;
+  border: 2px solid var(--rb-muted);
+}
+.dev-bar__dot[data-tone="success"] {
+  background: var(--rb-success);
+  border-color: var(--rb-success);
+}
+@media (min-width: 1024px) {
+  .dev-bar__name {
+    display: flex;
+  }
+}
+@media (max-width: 599px) {
+  .dev-bar {
+    margin-inline: calc(-1 * var(--dash-gutter));
+  }
+  .dev-bar .dash-ptabs__bar {
+    margin-inline: 0;
+    padding-inline: var(--dash-gutter);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .dev-bar,
+  .dev-bar__name {
+    transition: none;
+  }
+}
+[data-lite="true"] .dev-bar,
+[data-lite="true"] .dev-bar__name {
+  transition: none;
+}
+
+/* ------------------------------------------------------------ overview */
+
+.ov {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+  min-width: 0;
+}
+.ov__section {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-width: 0;
+}
+
+/* Tiles: 2 x 2 on a phone, 4 across from 600 px, 5 across (adds Memory) from 1600 px. */
+.ov-tiles {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.ov-tiles__item {
+  display: flex;
+  min-width: 0;
+}
+.ov-tiles__item[data-wide] {
+  display: none;
+}
+/* Its display flips with the width, which would restart an entrance animation: it just appears. */
+.ov-tiles__item[data-wide] .ov-tile {
+  animation: none;
+}
+@media (min-width: 600px) {
+  .ov-tiles {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 14px;
+  }
+}
+@media (min-width: 1600px) {
+  .ov-tiles {
+    grid-template-columns: repeat(5, minmax(0, 1fr));
+  }
+  .ov-tiles__item[data-wide] {
+    display: flex;
+  }
+}
+.ov-tile {
+  --ov-soft: var(--rb-accent-soft);
+  --ov-text: var(--rb-accent-text);
+  --ov-line: var(--rb-line);
+  position: relative;
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+  padding: 14px 16px 15px;
+  text-align: start;
+  color: inherit;
+  font: inherit;
+  background: var(--rb-surface);
+  border: 1px solid var(--ov-line);
+  border-radius: 16px;
+  box-shadow: var(--dash-card-shadow);
+}
+.ov-tile[data-tone="ok"] {
+  --ov-soft: var(--rb-success-soft);
+  --ov-text: var(--rb-success-text);
+}
+.ov-tile[data-tone="warn"] {
+  --ov-soft: var(--rb-warning-soft);
+  --ov-text: var(--rb-warning-text);
+  --ov-line: color-mix(in oklch, var(--rb-warning) 45%, var(--rb-line));
+}
+.ov-tile[data-tone="danger"] {
+  --ov-soft: var(--rb-danger-soft);
+  --ov-text: var(--rb-danger-text);
+  --ov-line: color-mix(in oklch, var(--rb-danger) 45%, var(--rb-line));
+}
+.ov-tile__top {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  min-width: 0;
+}
+.ov-tile:has(.ov-tile__tip) .ov-tile__top,
+.ov-tile--link .ov-tile__top {
+  padding-inline-end: 26px;
+}
+.ov-tile__icon {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  border-radius: 10px;
+  font-size: 17px;
+  background: var(--ov-soft);
+  color: var(--ov-text);
+}
+.ov-tile__label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--rb-muted);
+}
+.ov-tile__value {
+  margin-top: 8px;
+  font-size: 19px;
+  font-weight: 650;
+  line-height: 1.2;
+  letter-spacing: -0.015em;
+  overflow-wrap: anywhere;
+}
+.ov-tile__sub {
+  font-size: 12.5px;
+  line-height: 1.35;
+  color: var(--rb-muted);
+}
+.ov-tile__tip {
+  position: absolute;
+  inset-block-start: 11px;
+  inset-inline-end: 10px;
+  display: inline-flex;
+  color: var(--rb-muted);
+}
+.ov-tile--link {
+  cursor: pointer;
+  transition:
+    border-color var(--rb-duration) var(--rb-ease),
+    transform var(--rb-duration) var(--rb-ease);
+}
+.ov-tile--link:hover {
+  border-color: color-mix(in oklch, var(--ov-text) 50%, var(--ov-line));
+  transform: translateY(-1px);
+}
+.ov-tile__go {
+  position: absolute;
+  inset-block-start: 15px;
+  inset-inline-end: 12px;
+  display: inline-flex;
+  font-size: 16px;
+  color: var(--ov-text);
+}
+@media (prefers-reduced-motion: reduce) {
+  .ov-tile--link,
+  .ov-tile--link:hover {
+    transition: none;
+    transform: none;
+  }
+}
+[data-lite="true"] .ov-tile--link,
+[data-lite="true"] .ov-tile--link:hover {
+  transition: none;
+  transform: none;
+}
+
+/* Needs attention: a card per problem. Each lays itself out by its own width: the button sits right of the text from 520 px,
+   full width under it below. */
+.ov-problems {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.ov-problem-wrap {
+  container: ovp / inline-size;
+  min-width: 0;
+}
+.ov-problem {
+  --sev: var(--rb-accent);
+  --sev-soft: var(--rb-accent-soft);
+  --sev-text: var(--rb-accent-text);
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: start;
+  gap: 4px 14px;
+  padding: 16px;
+  border: 1px solid color-mix(in oklch, var(--sev) 32%, var(--rb-line));
+  border-radius: 16px;
+  background: color-mix(in oklch, var(--sev-soft) 38%, var(--rb-surface));
+  box-shadow: var(--dash-card-shadow);
+}
+.ov-problem[data-severity="danger"] {
+  --sev: var(--rb-danger);
+  --sev-soft: var(--rb-danger-soft);
+  --sev-text: var(--rb-danger-text);
+}
+.ov-problem[data-severity="warning"] {
+  --sev: var(--rb-warning);
+  --sev-soft: var(--rb-warning-soft);
+  --sev-text: var(--rb-warning-text);
+}
+.ov-problem__icon {
+  display: grid;
+  place-items: center;
+  width: 36px;
+  height: 36px;
+  border-radius: 12px;
+  font-size: 20px;
+  background: var(--sev-soft);
+  color: var(--sev-text);
+}
+.ov-problem__text {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+.ov-problem__title {
+  font-size: 15.5px;
+  font-weight: 650;
+  line-height: 1.3;
+  overflow-wrap: anywhere;
+}
+.ov-problem__body {
+  font-size: 14px;
+  line-height: 1.45;
+  color: var(--rb-muted);
+}
+.ov-problem__action {
+  grid-column: 1 / -1;
+  margin-top: 10px;
+}
+.ov-problem__action > * {
+  width: 100%;
+  justify-content: center;
+}
+@container ovp (min-width: 520px) {
+  .ov-problem {
+    grid-template-columns: auto minmax(0, 1fr) auto;
+    gap: 4px 16px;
+  }
+  .ov-problem__action {
+    grid-column: 3;
+    grid-row: 1;
+    align-self: center;
+    margin-top: 0;
+  }
+  .ov-problem__action > * {
+    width: auto;
+  }
+}
+.ov-problem .dev-tech {
+  margin-top: 4px;
+}
+
+.ov-clear {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 18px;
+  border: 1px solid color-mix(in oklch, var(--rb-success) 32%, var(--rb-line));
+  border-radius: 16px;
+  background: color-mix(in oklch, var(--rb-success-soft) 45%, var(--rb-surface));
+  box-shadow: var(--dash-card-shadow);
+}
+.ov-clear__icon {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  font-size: 24px;
+  background: var(--rb-success-soft);
+  color: var(--rb-success-text);
+}
+.ov-clear__title {
+  font-size: 15.5px;
+  font-weight: 650;
+}
+.ov-clear__sub {
+  font-size: 13.5px;
+  color: var(--rb-muted);
+}
+.ov-count {
+  align-self: center;
+  min-width: 22px;
+  padding: 1px 8px;
+  border-radius: 11px;
+  font-size: 12px;
+  font-weight: 650;
+  line-height: 1.5;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+  background: var(--rb-warning-soft);
+  color: var(--rb-warning-text);
+}
+.ov-count[data-tone="danger"] {
+  background: var(--rb-danger-soft);
+  color: var(--rb-danger-text);
+}
+.ov-more {
+  border-top: 0;
+}
+
+/* About this PC: label and value on a row; two columns when the card is wide (a tablet), one in the laptop's side column. */
+.ov-about-card {
+  container: ova / inline-size;
+}
+.ov-about {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  column-gap: 32px;
+  margin: 0;
+}
+.ov-about__row {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 10px 0;
+  border-bottom: 1px solid var(--rb-line);
+}
+.ov-about__row dt {
+  flex: none;
+  font-size: 13px;
+  font-weight: 550;
+  color: var(--rb-muted);
+}
+.ov-about__row dd {
+  min-width: 0;
+  margin: 0;
+  font-size: 14px;
+  font-weight: 600;
+  text-align: end;
+  overflow-wrap: anywhere;
+}
+.ov-about__note {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin-inline-start: 6px;
+  font-weight: 500;
+  color: var(--rb-muted);
+}
+.ov-about__none {
+  padding-top: 10px;
+}
+@container ova (min-width: 560px) {
+  .ov-about {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+.ov-about-card .dev-tech {
+  margin-top: 6px;
+  border-top: 0;
+}
+
+/* ------------------------------------------------------------ technical details */
+
+.dev-tech__body {
+  gap: 10px;
+}
+.dev-tech__lead {
+  font-size: 12.5px;
+  color: var(--rb-muted);
+}
+.dev-tech__list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 0;
+}
+.dev-tech__row {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
+}
+.dev-tech__row dt {
+  font-size: 12px;
+  font-weight: 550;
+  color: var(--rb-muted);
+}
+.dev-tech__row dd {
+  margin: 0;
+  font-size: 12.5px;
+  overflow-wrap: anywhere;
+}
+.dev-tech__foot {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.dev-tech__status {
+  font-size: 12.5px;
+  color: var(--rb-muted);
+}
+.dev-tech__area {
+  width: 100%;
+  padding: 8px 10px;
+  border: 1px solid var(--rb-line);
+  border-radius: var(--rb-r-sm);
+  background: var(--rb-surface);
+  color: var(--rb-ink);
+  font: 12.5px/1.5 var(--rb-font-mono);
+  resize: vertical;
+}
+
+
+
+/* ------------------------------------------------------------ Protection tab */
+
+/* The Lockdown card lays its seven layers out by its own width: one column on a phone, two from 560 px. The aside (Physical
+   protection, Allow USB) is a stack beside it on a laptop, two cards side by side on a tablet. */
+.prot > .dash-split__main {
+  container: prot / inline-size;
+}
+@media (min-width: 640px) and (max-width: 1023px) {
+  .prot__aside {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    align-items: start;
+  }
+}
+.prot-layers {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 10px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+@container prot (min-width: 560px) {
+  .prot-layers {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 12px;
+  }
+  /* The seventh layer has no partner: it takes the whole row instead of leaving a hole. */
+  .prot-layers > .prot-layer:last-child:nth-child(odd) {
+    grid-column: 1 / -1;
+  }
+}
+.prot-layer {
+  --prot-line: var(--rb-line);
+  --prot-text: var(--rb-muted);
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+  padding: 12px 14px 13px;
+  border: 1px solid var(--prot-line);
+  border-radius: 14px;
+  background: color-mix(in oklch, var(--rb-surface) 55%, var(--rb-bg));
+}
+.prot-layer[data-tone="warning"] {
+  --prot-line: color-mix(in oklch, var(--rb-warning) 42%, var(--rb-line));
+  --prot-text: var(--rb-warning-text);
+}
+.prot-layer[data-tone="danger"] {
+  --prot-line: color-mix(in oklch, var(--rb-danger) 42%, var(--rb-line));
+  --prot-text: var(--rb-danger-text);
+}
+.prot-layer__head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+}
+.prot-layer__name {
+  min-width: 0;
+  font-size: 14px;
+  font-weight: 650;
+  line-height: 1.35;
+}
+.prot-layer__name .rb-info,
+.prot-row__label .rb-info,
+.set-adv__title .rb-info,
+.set-danger__title .rb-info {
+  margin-inline-start: 4px;
+  vertical-align: -3px;
+}
+.prot-layer__head .rb-pill {
+  flex: none;
+}
+.prot-layer__mode {
+  margin: 0;
+  font-size: 13px;
+  color: var(--rb-muted);
+}
+.prot-layer__note {
+  margin: 4px 0 0;
+  font-size: 13px;
+  line-height: 1.4;
+  color: var(--prot-text);
+  overflow-wrap: anywhere;
+}
+.prot-rows {
+  display: flex;
+  flex-direction: column;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.prot-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 11px 0;
+  border-bottom: 1px solid var(--rb-line);
+}
+.prot-row:last-child {
+  border-bottom: 0;
+}
+.prot-row__label {
+  min-width: 0;
+  font-size: 14px;
+  font-weight: 550;
+}
+.prot-usb {
+  display: flex;
+  align-items: flex-end;
+  gap: 12px;
+}
+.prot-usb__hours {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+.prot .dev-tech {
+  border-top: 0;
+}
+
+/* ------------------------------------------------------------ Settings tab */
+
+/* The cards flow into columns (CSS multi-column), so a short card never sits in a tall row: one column on a phone, two from 640 px,
+   three from 1600 px. The browser balances the columns; the Danger zone spans all of them, except on a wide screen where it is the
+   last card of the last column. */
+.set {
+  column-count: 1;
+  column-gap: 18px;
+  min-width: 0;
+}
+.set > div {
+  display: block;
+  margin-bottom: 18px;
+  break-inside: avoid;
+  min-width: 0;
+}
+@media (min-width: 640px) {
+  .set {
+    column-count: 2;
+  }
+  .set__danger {
+    column-span: all;
+  }
+  .set[data-revoked] .set__danger {
+    column-span: none;
+  }
+}
+@media (min-width: 1600px) {
+  .set {
+    column-count: 3;
+    column-gap: 22px;
+  }
+  .set__danger,
+  .set[data-revoked] .set__danger {
+    column-span: none;
+  }
+}.set-name {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+.set-name__text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+.set-name__label {
+  font-size: 12.5px;
+  font-weight: 550;
+  color: var(--rb-muted);
+}
+.set-name__value {
+  font-size: 16px;
+  font-weight: 650;
+  overflow-wrap: anywhere;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+  overflow: hidden;
+}
+.set-kv {
+  grid-template-columns: minmax(0, 1fr);
+}
+.set-kiosk {
+  --set-soft: var(--rb-warning-soft);
+  --set-text: var(--rb-warning-text);
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 14px;
+}
+.set-kiosk[data-on] {
+  --set-soft: var(--rb-success-soft);
+  --set-text: var(--rb-success-text);
+}
+.set-kiosk__icon {
+  display: grid;
+  place-items: center;
+  width: 44px;
+  height: 44px;
+  border-radius: 14px;
+  font-size: 24px;
+  background: var(--set-soft);
+  color: var(--set-text);
+}
+.set-kiosk__text {
+  margin: 0;
+  font-size: 14px;
+  line-height: 1.45;
+}
+@media (max-width: 420px) {
+  .set-kiosk {
+    grid-template-columns: auto minmax(0, 1fr);
+  }
+  .set-kiosk > .rb-switch,
+  .set-kiosk > .rb-pill {
+    grid-column: 1 / -1;
+  }
+}
+.set-adv {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+  padding: 14px clamp(16px, 2vw, 22px) clamp(16px, 2vw, 22px);
+}
+.set-adv__row,
+.set-danger__row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px 16px;
+}
+.set-adv__text,
+.set-danger__text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  flex: 1 1 220px;
+  min-width: 0;
+  font-size: 13.5px;
+}
+.set-adv__title,
+.set-danger__title {
+  font-size: 14.5px;
+  font-weight: 650;
+}
+.set .dash-card__head ~ .set-adv {
+  padding-top: 12px;
+}
+
+/* ------------------------------------------------------------ Network tab */
+
+.net {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  min-width: 0;
+}
+.net-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px 16px;
+}
+.net-head__lead {
+  flex: 1 1 320px;
+  margin: 0;
+  font-size: 14px;
+  color: var(--rb-muted);
+}
+.net-head__when {
+  white-space: nowrap;
+}
+.net-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 18px;
+  align-items: start;
+  min-width: 0;
+}
+@media (min-width: 640px) {
+  .net-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  /* Drivers wrap under the other two instead of leaving a half-empty row. */
+  .net-card--drivers {
+    grid-column: 1 / -1;
+  }
+}
+@media (min-width: 1600px) {
+  .net-grid {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+  .net-card--drivers {
+    grid-column: auto;
+  }
+}
+.net-items {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.net-item {
+  --net-soft: var(--rb-bg);
+  --net-text: var(--rb-muted);
+  --net-line: var(--rb-line);
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: start;
+  gap: 4px 12px;
+  padding: 12px;
+  border: 1px solid var(--net-line);
+  border-radius: 14px;
+  background: color-mix(in oklch, var(--rb-surface) 55%, var(--rb-bg));
+}
+.net-item[data-state="working"] {
+  --net-soft: var(--rb-success-soft);
+  --net-text: var(--rb-success-text);
+}
+.net-item[data-state="failed"] {
+  --net-soft: var(--rb-danger-soft);
+  --net-text: var(--rb-danger-text);
+  --net-line: color-mix(in oklch, var(--rb-danger) 42%, var(--rb-line));
+}
+.net-item[data-state="notSupported"] {
+  --net-soft: var(--rb-warning-soft);
+  --net-text: var(--rb-warning-text);
+  --net-line: color-mix(in oklch, var(--rb-warning) 42%, var(--rb-line));
+}
+.net-item__icon {
+  display: grid;
+  place-items: center;
+  width: 34px;
+  height: 34px;
+  border-radius: 11px;
+  font-size: 19px;
+  background: var(--net-soft);
+  color: var(--net-text);
+}
+.net-item__text {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+  padding-top: 1px;
+}
+.net-item__name {
+  font-size: 14.5px;
+  font-weight: 650;
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+}
+.net-item__badge {
+  margin-inline-start: 8px;
+  padding: 1px 8px;
+  border-radius: 10px;
+  font-size: 11.5px;
+  font-weight: 600;
+  background: var(--rb-accent-soft);
+  color: var(--rb-accent-text);
+}
+.net-item__detail {
+  font-size: 13px;
+  line-height: 1.4;
+  color: var(--net-text);
+}
+.net-item[data-state="waiting"] .net-item__detail {
+  color: var(--rb-muted);
+}
+.net-item > .rb-pill {
+  align-self: start;
+  margin-top: 6px;
+}
+.net-item__tech {
+  margin-top: 2px;
+  border-top: 0;
+}
+.net-item__tech > summary {
+  min-height: 32px;
+}
+.net-card .dash-empty__action .rb-btn {
+  text-decoration: none;
+}

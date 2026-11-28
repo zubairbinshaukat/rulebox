@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { renderHook, waitFor } from "@testing-library/react";
-import { demoApi, demoDevicesApi, demoEmployeesApi } from "./hooks";
+import { demoApi, demoAuditApi, demoDevicesApi, demoEmployeesApi } from "./hooks";
 import { db, resetDemo, setControls, setSession, simulateConcurrentEdit, simulatePublishTrouble } from "./store";
 import { errorCodeOf } from "../../lib/errors";
 
@@ -664,6 +664,95 @@ describe("demo device lock and broadcasts (Phase 5 Step 15)", () => {
     await expect(send(input)).resolves.toBeDefined();
   }, 30_000);
 });
+describe("demo: data of the group, messages, audit and file-type pages (UI pass, other-pages O3)", () => {
+  const groupNamed = (name: string) => db().groups.find((g) => g.name === name)!;
+
+  it("the group page's data: rollout state and trial-run date from the fixtures, null without rows, the archived flag of each assignment", async () => {
+    resetDemo();
+    signInAs("owner@demo.rulebox.test");
+    const detail = async (name: string) => (await ready(renderHook(() => demoApi.useGroupDetail(groupNamed(name)._id)).result)).data;
+    const counter = await detail("Pharmacy counter");
+    expect(counter.rollout).toEqual({ enabled: true, state: "rolling" });
+    expect(Date.now() - counter.lockdownAuditSince!).toBeGreaterThan(14 * 86_400_000); // the trial-run warning shows
+    expect((await detail("Back office")).rollout).toEqual({ enabled: true, state: "halted" });
+    expect((await detail("Front desk")).rollout).toEqual({ enabled: false, state: "idle" });
+    expect((await detail("Front desk")).lockdownAuditSince).toBeLessThan(Date.now());
+    expect(counter.assignments.every((a) => a.archived === false)).toBe(true);
+    // An archived app that is still assigned.
+    const night = await detail("Warehouse & Receiving — Night Shift Team B (temp)");
+    expect(night.assignments.find((a) => a.appName === "Old scheduler")).toMatchObject({ archived: true });
+    // A group without rows: null, null.
+    const created = await renderHook(() => demoApi.useCreateGroup()).result.current({ name: "Brand new" });
+    const fresh = (await ready(renderHook(() => demoApi.useGroupDetail(created)).result)).data;
+    expect(fresh.rollout).toBeNull();
+    expect(fresh.lockdownAuditSince).toBeNull();
+  });
+
+  it("broadcasts:live keeps timed and never-ending messages, drops cancelled ones, and leaves an expired one for the screen's clock", async () => {
+    resetDemo();
+    signInAs("owner@demo.rulebox.test");
+    const send = renderHook(() => demoApi.useSendBroadcast()).result.current;
+    const cancel = renderHook(() => demoApi.useCancelBroadcast()).result.current;
+    const base = { target: { kind: "group" as const, id: db().groups[0]!._id }, style: "banner" as const, body: "B", ackRequired: false };
+    const fixtureLive = db().broadcasts.filter((b) => b.cancelledAt === null).length;
+    const forever = await send({ ...base, title: "Forever" });
+    const timed = await send({ ...base, title: "Timed", expiresAt: Date.now() + 3_600_000 });
+    const gone = await send({ ...base, title: "Cancelled" });
+    await cancel({ id: gone.id });
+    db().broadcasts.find((b) => b._id === timed.id)!.expiresAt = Date.now() - 1; // it ran out
+    const live = renderHook(() => demoApi.useLiveBroadcasts());
+    const rows = (await ready(live.result)).data;
+    const ids = rows.map((b) => b._id);
+    expect(ids).toContain(forever.id);
+    expect(ids).toContain(timed.id); // returned; hidden by the screen's own clock
+    expect(ids).not.toContain(gone.id);
+    expect(rows).toHaveLength(fixtureLive + 2);
+    expect(rows[0]!.createdAt).toBeGreaterThanOrEqual(rows[rows.length - 1]!.createdAt);
+    expect(rows.find((b) => b._id === forever.id)!.target.name).toBe(db().groups[0]!.name);
+  });
+
+  it("audit: `since` keeps the rows at or after it; `targetId` keeps one item's rows; both together; the newest first", async () => {
+    resetDemo();
+    signInAs("owner@demo.rulebox.test");
+    const all = db().audit;
+    const mid = [...all].sort((a, b) => a.at - b.at)[Math.floor(all.length / 2)]!.at;
+    const since = renderHook(() => demoAuditApi.useAuditScreen({ numItems: 50, cursor: null, since: mid }));
+    const rows = (await ready(since.result)).items;
+    expect(rows.length).toBe(Math.min(50, all.filter((e) => e.at >= mid).length)); // one page of 50
+    expect(rows.every((e) => e.at >= mid)).toBe(true);
+    expect(rows.map((e) => e.at)).toEqual([...rows.map((e) => e.at)].sort((a, b) => b - a));
+
+    const target = all.find((e) => e.targetId !== undefined)!.targetId!;
+    const one = renderHook(() => demoAuditApi.useAuditScreen({ numItems: 50, cursor: null, targetId: target }));
+    const ofTarget = (await ready(one.result)).items;
+    expect(ofTarget.length).toBe(Math.min(50, all.filter((e) => e.targetId === target).length));
+    expect(ofTarget.every((e) => e.targetId === target)).toBe(true);
+
+    const future = Date.now() + 1; // a stable argument, like the screen's start of the day
+    const both = renderHook(() => demoAuditApi.useAuditScreen({ numItems: 50, cursor: null, targetId: target, since: future }));
+    expect((await ready(both.result)).items).toEqual([]);
+  });
+
+  it("file types: setMany adds and moves the rules with ONE audit row, a refused extension refuses all, and the same call again writes nothing", async () => {
+    resetDemo();
+    signInAs("owner@demo.rulebox.test");
+    const setMany = renderHook(() => demoApi.useSetFileHandlers()).result.current;
+    const app = db().apps.find((a) => a.kind === "desktop" && !a.archived && (a.desktop?.fileArgTemplate.length ?? 0) > 0)!;
+    const before = db().fileHandlers.length;
+    const audits = () => db().audit.filter((e) => e.action === "fileHandler.set").length;
+    const a0 = audits();
+    await setMany({ extensions: ["JPG", ".jpeg", ".png", ".jpg"], appId: app._id });
+    expect(db().fileHandlers.filter((f) => f.appId === app._id).map((f) => f.extension)).toEqual(expect.arrayContaining([".jpg", ".jpeg", ".png"]));
+    expect(db().fileHandlers.length).toBeGreaterThanOrEqual(before);
+    expect(audits()).toBe(a0 + 1);
+    await setMany({ extensions: [".jpg", ".png"], appId: app._id });
+    expect(audits()).toBe(a0 + 1); // nothing to change
+    const rules = db().fileHandlers.length;
+    await expect(setMany({ extensions: [".pdf", ".exe"], appId: app._id })).rejects.toSatisfy((e) => errorCodeOf(e) === "invalid_argument");
+    await expect(setMany({ extensions: [], appId: app._id })).rejects.toSatisfy((e) => errorCodeOf(e) === "invalid_argument");
+    expect(db().fileHandlers.length).toBe(rules);
+  });
+});
 describe("demo rollout rings and rollback (Phase 5 Step 16)", () => {
   const VIEWER = "auditor.with.a.really.long.mailbox.name@regional-compliance-office.demo.rulebox.test";
   const group = (name: string) => db().groups.find((g) => g.name === name)!;
@@ -854,4 +943,71 @@ describe("demo rollout rings and rollback (Phase 5 Step 16)", () => {
     await rings({ groupId: front._id, deviceIds: [mine[0]!._id], ring: "everyone", expectedRevision: row.revision });
     expect(mine[0]!.ring).toBeUndefined();
   }, 15_000);
+});
+
+describe("demo device page queries (UI pass 2026-11)", () => {
+  const byName = (name: string) => db().devices.find((d) => d.name === name)!;
+
+  it("useDevicePage is the header, Overview and Protection data of one PC: report, head, lock, lockdown fields, failed installs, network counts", async () => {
+    resetDemo();
+    signInAs("owner@demo.rulebox.test");
+    const scanner = byName("OFFICE-SCANNER");
+    const page = (await ready(renderHook(() => demoApi.useDevicePage(scanner._id)).result)).data;
+    expect(page).toMatchObject({
+      name: "OFFICE-SCANNER",
+      revoked: false,
+      outOfSupport: true,
+      group: { name: "Back office" },
+      planState: "ok",
+      report: { kioskError: "desired_state_untrusted", trustedKeyIds: [] },
+      network: { wifiFailed: 1, printersFailed: 0 },
+      ring: "everyone",
+    });
+    expect(page.latestVersion).toBeGreaterThan(0);
+    expect(page.protection).toMatchObject({ secureBoot: "off" });
+    expect(page.apply?.state).toBe("partial");
+    expect("groups" in page || "versions" in page || "rolloutRevision" in page).toBe(false);
+
+    // A failed install of an app the PC's group assigns counts (OFFICE-MANAGER's failed label app is not assigned to its group: it does not); a revoked PC counts nothing.
+    expect(page.failedInstalls).toEqual({ count: 1, more: false, names: ["VLC media player"] });
+    expect((await ready(renderHook(() => demoApi.useDevicePage(byName("OFFICE-MANAGER")._id)).result)).data.failedInstalls.count).toBe(0);
+    const stolen = byName("STOLEN-TABLET");
+    expect((await ready(renderHook(() => demoApi.useDevicePage(stolen._id)).result)).data).toMatchObject({ revoked: true, failedInstalls: { count: 0, more: false, names: [] } });
+    expect((await ready(renderHook(() => demoApi.useDevicePage(byName("WAREHOUSE-01")._id)).result)).data.planState).toBe("overLimit");
+  });
+
+  it("one PC shows the hideAdminTiles warning: the policy is applied, its machine layer is ok with admin_tiles_skipped", () => {
+    resetDemo();
+    const rows = [...db().applyDetails.entries()].filter(([, a]) => a.layers.machine.detail === "admin_tiles_skipped");
+    expect(rows).toHaveLength(1);
+    expect(rows[0]![1]).toMatchObject({ state: "applied", layers: { machine: { mode: "on", state: "ok" } } });
+  });
+
+  it("settings options, versions and the network tab answer for their PC; the closed versions disclosure loads nothing", async () => {
+    resetDemo();
+    signInAs("owner@demo.rulebox.test");
+    const counter = byName("COUNTER-02");
+    const settings = (await ready(renderHook(() => demoDevicesApi.useDeviceSettingsOptions(counter._id)).result)).data;
+    expect(settings.groups.map((g) => g.name)).toEqual([...settings.groups.map((g) => g.name)].sort((a, b) => a.localeCompare(b)));
+    expect(settings.rolloutRevision).toBe(3);
+    const versions = (await ready(renderHook(() => demoDevicesApi.useDeviceVersions(counter._id, true)).result)).data;
+    expect(versions.length).toBeGreaterThan(0);
+    expect(versions.length).toBeLessThanOrEqual(5);
+    const closed = renderHook(() => demoDevicesApi.useDeviceVersions(counter._id, false)).result;
+    await new Promise((r) => setTimeout(r, 300));
+    expect(closed.current.status).toBe("loading");
+
+    const net = (await ready(renderHook(() => demoDevicesApi.useDeviceNetwork(counter._id)).result)).data;
+    expect(net.wifi).toMatchObject([{ name: "Shop floor", state: "working", detail: null }]);
+    expect(net.printers.map((p) => [p.name, p.state])).toEqual([
+      ["Front desk", "working"],
+      ["Warehouse label printer", "waiting"],
+    ]);
+    expect(net.drivers).toMatchObject([{ name: "Brother laser printer driver", state: "installed" }]);
+    const scanner = (await ready(renderHook(() => demoDevicesApi.useDeviceNetwork(byName("OFFICE-SCANNER")._id)).result)).data;
+    expect(scanner.wifi[0]).toMatchObject({ name: "Back office (hidden)", state: "failed", detail: "connect_failed" });
+    expect(scanner.drivers[0]).toMatchObject({ state: "failed", detail: "hash_mismatch" });
+    // A PC without a group has nothing.
+    expect((await ready(renderHook(() => demoDevicesApi.useDeviceNetwork(byName("SPARE-LAPTOP-07")._id)).result)).data).toMatchObject({ groupId: null, wifi: [], printers: [], drivers: [] });
+  });
 });

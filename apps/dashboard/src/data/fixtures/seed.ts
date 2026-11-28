@@ -274,6 +274,16 @@ export interface DbApplyReport {
   version: number;
   state: "applied" | "partial" | "failed" | "refused" | "rolledBack";
 }
+/**
+ * What one PC reported for the Wi-Fi networks, printers and drivers of its group (UI pass 2026-11; `fleet:network`): the apply
+ * report's `wifi[]` / `printers[]` items (raw agent states `applied`, `failed`, `unsupported`, anything else = waiting) and the
+ * PC's `driverResults`. An item the PC has not reported is missing (= waiting / pending).
+ */
+export interface DbNetworkResults {
+  wifi: { profileId: string; state: string; detail?: string }[];
+  printers: { printerId: string; state: string; detail?: string }[];
+  drivers: { driverId: string; state: InstallState; detail?: string }[];
+}
 /** `deviceLocks` (Phase 5 Step 15), by device id. */
 export interface DbLock {
   lockId: string;
@@ -359,6 +369,8 @@ export interface DemoDb {
   /** The PCs' full apply reports, their physical-protection reports, the live "Allow USB" windows, and agents from before lockdown. */
   applyDetails: Map<string, ApplyReport>;
   postures: Map<string, SecurityPosture>;
+  /** The PCs' Wi-Fi / printer / driver results by device id (UI pass 2026-11, the device page's Network tab); no entry = nothing reported. */
+  networkResults: Map<string, DbNetworkResults>;
   usbAllow: Map<string, number>;
   oldAgents: Set<string>;
   fileHandlers: { _id: string; extension: string; appId: string }[];
@@ -696,6 +708,8 @@ export function seed(now: number = Date.now()): DemoDb {
     assign(gOffice, aNotepad),
     assign(gNight, aStock),
     assign(gNight, aClock, { pinnedTaskbar: true }),
+    // An archived app that is still assigned: the group page says "Old scheduler is archived. PCs no longer get it." (UI pass).
+    assign(gNight, aOld),
   ];
 
   const fileHandlers = [
@@ -914,6 +928,10 @@ export function seed(now: number = Date.now()): DemoDb {
     const id = frontIds[i];
     if (id !== undefined) applyDetails.set(id, applyOf({ state: "refused", refusal: code, configVersion: 5, lkgVersion: 4, appliedVersion: 4 }));
   });
+  // The first Front desk PC after those (FD-0NN): everything applied except "hide administrator accounts" (the policy is `applied`, the
+  // machine layer is `ok` with the note `admin_tiles_skipped`, what the agent reports since 2026-11-28), so the device page shows that warning.
+  const adminTilesId = frontIds[REFUSAL_CODES.length];
+  if (adminTilesId !== undefined) applyDetails.set(adminTilesId, applyOf({ layers: { machine: layer("on", "ok", "admin_tiles_skipped") } }));
   const postures = new Map<string, SecurityPosture>([
     [dCounter1._id, { secureBoot: "on", bitLocker: "on", autoRecovery: "on", safeModeAgent: true, tpm: "ready", serviceAcl: "ok", aclDrift: 0, ciPolicies: [] }],
     [dCounter2._id, { secureBoot: "on", bitLocker: "off", autoRecovery: "off", safeModeAgent: true, tpm: "present", serviceAcl: "ok", aclDrift: 0 }],
@@ -1040,6 +1058,11 @@ export function seed(now: number = Date.now()): DemoDb {
     detail: "hash_mismatch",
     updatedAt: now - 2 * HOUR,
   });
+  // OFFICE-SCANNER (its group assigns the media player): a failed install that still counts, for the device page's "Needs attention".
+  const scannerInstall = installs.find((i) => i.deviceId === dOffice3._id && i.appId === aVlc._id);
+  const scannerFailure: DbInstall = { _id: scannerInstall?._id ?? id("ins"), deviceId: dOffice3._id, appId: aVlc._id, state: "failed", attempts: 5, exitCode: 1603, detail: "low_disk", updatedAt: now - 3 * HOUR };
+  if (scannerInstall) Object.assign(scannerInstall, scannerFailure, { installedVersion: undefined });
+  else installs.push(scannerFailure);
 
   // ---- employees
   const employees: DbEmployee[] = [];
@@ -1151,7 +1174,7 @@ export function seed(now: number = Date.now()): DemoDb {
     else if (r < 0.85) {
       const e = employees[(i * 5) % employees.length]!;
       log(at, "employee.updated", pick(members.slice(0, 2)), { type: "employee", id: e._id, label: e.name }, "Name, quota changed.");
-    } else log(at, "org.settingsChanged", owner, undefined, "Changed: offlineDays, power.");
+    } else log(at, "org.settingsChanged", owner, undefined, "Changed organization settings: offlineDays, power");
   }
   log(now - 26 * HOUR, "policy.publishFailed", null, { type: "device", id: devices[6]!._id, label: devices[6]!.name }, "The document was too large for this device.");
   log(now - 4 * HOUR, "enrollment.codeCreated", owner, { type: "enrollmentCode", id: tokens[0]!._id, label: "Branch 4 rollout" }, "Code for Front desk, 20 uses, 3 days.");
@@ -1258,6 +1281,7 @@ export function seed(now: number = Date.now()): DemoDb {
     exceptions,
     applyDetails,
     postures,
+    networkResults: new Map(),
     usbAllow: new Map(),
     oldAgents: new Set([dLoaner._id]),
     fileHandlers,
@@ -1268,6 +1292,33 @@ export function seed(now: number = Date.now()): DemoDb {
     env: { key: true, next: false },
     nextId,
   };
+  // ---- Wi-Fi, printers and drivers per PC (the device page's Network tab). Only a few PCs have anything to show; the others have
+  // reported nothing (every item of their group reads "waiting").
+  const wifiId = (name: string) => db.wifi.find((w) => w.name === name)!._id;
+  const printerId = (name: string) => db.printers.find((p) => p.name === name)!._id;
+  const driverId = (name: string) => db.drivers.find((x) => x.name === name)!._id;
+  // OFFICE-SCANNER: the hidden Back office network did not connect, the laser printer is there, the scanner driver failed.
+  db.networkResults.set(dOffice3._id, {
+    wifi: [{ profileId: wifiId("Back office (hidden)"), state: "failed", detail: "connect_failed" }],
+    printers: [{ printerId: printerId("Office laser"), state: "applied" }],
+    drivers: [{ driverId: driverId("Flatbed scanner"), state: "failed", detail: "hash_mismatch" }],
+  });
+  // COUNTER-02: everything works except the label printer, which has not been reported yet (still waiting).
+  db.networkResults.set(dCounter2._id, {
+    wifi: [{ profileId: wifiId("Shop floor"), state: "applied" }],
+    printers: [{ printerId: printerId("Front desk"), state: "applied" }],
+    drivers: [{ driverId: driverId("Brother laser printer driver"), state: "installed" }],
+  });
+  // COUNTER-01: all applied.
+  db.networkResults.set(dCounter1._id, {
+    wifi: [{ profileId: wifiId("Shop floor"), state: "applied" }],
+    printers: [
+      { printerId: printerId("Front desk"), state: "applied" },
+      { printerId: printerId("Warehouse label printer"), state: "applied" },
+    ],
+    drivers: [{ driverId: driverId("Brother laser printer driver"), state: "installed" }],
+  });
+
   // Extra apps, file types, members, invites and codes: several pages in the server-driven tables.
   padListFixtures(db, now);
   return db;
