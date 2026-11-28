@@ -144,6 +144,31 @@ Questions from `docs/plans/phase-6-vm-results.md` "Run A3". All answered with th
 - **Q-A8 (stuck restore) — DONE locally 2026-11-28, needs the VM** (`recover --forget <id> [--yes]`, `recover.rs::forget_interactive`; a `recover` that fails to restore an entry now prints the ids to use; log in `logs\recover-forget.log`): add `recover --forget <id>`: admin only, asks for confirmation, refuses unless the
   entry's live value already equals the recorded original, writes an audit/log line.
 
+## After Phase 6: live presence on Cloudflare Durable Objects (owner, 2026-11-28)
+
+Owner approved as an **optional layer, managed from the operator console** (`docs/plans/operator-console.md`).
+Write a plan first (owner reviews), then build.
+
+- **Why:** today a PC pings every 30 min (`DEFAULT_PING_INTERVAL_MS`, `convex/lib/plans.ts:74`) and counts as
+  offline only after ~76 min (`convex/lib/presence.ts:24`), to save Convex I/O. Same pattern the owner already
+  runs in another app: one Durable Object per organization holds every agent's WebSocket (connect/close = online/offline in
+  seconds), and the dashboard subscribes to the same object for live dots and counts. Peaks and last-seen are kept in
+  the object's own storage, and 24 h / 7 d history goes to Workers Analytics Engine. Convex is not touched.
+- **One Worker, many objects:** `idFromName(orgId)`; an object exists on first use and costs nothing idle. Nothing is
+  provisioned per org. WebSocket Hibernation API plus automatic ping replies are required for the free plan.
+- **Auth:** the tenant's Convex issues a short-lived signed token (agent and dashboard); the Worker verifies it with
+  the silo's public key and never calls Convex. Silo per tenant: the console registers each silo's public key with the Worker.
+- **Console manages it:** a `livePresence` entitlement in the registry (per plan, per-tenant override, kill switch
+  back to ping-only), the Worker's deploy and key rotation, per-tenant health/usage from Cloudflare's APIs, and
+  "reset this org's object".
+- **Fallback stays:** ping-based presence remains the source when the layer is off or unreachable (interval may grow,
+  e.g. 6 h, while live presence is on). Self-hosters without Cloudflare keep today's behaviour.
+- **Open in the plan:**
+  - "Filter by online" in server-side lists (the live set lives outside Convex);
+  - extra outbound host on locked-down networks;
+  - current free-plan limits for DO requests, duration and storage, and for Analytics Engine data points;
+  - PRD presence rules (PRD 11.1 rule 4/5) need updating; tell the owner what changed.
+
 ## Dashboard onboarding: PIN setup (Phase 4b) edge cases — found 2026-11-28
 
 Seen on the dev deployment `gallant-ocelot-38` while preparing VM run A3.
