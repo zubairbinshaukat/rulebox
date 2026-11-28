@@ -27,6 +27,7 @@ third-party assets and libraries, which keep their own licenses.
 | [Auth.js core](https://authjs.dev) (`@auth/core`) | Balazs Orban and contributors | [ISC](https://github.com/nextauthjs/next-auth/blob/main/LICENSE) | Used by Convex Auth for the password provider (backend). |
 | [Lucia](https://lucia-auth.com) (`lucia`) | pilcrowOnPaper | [MIT](https://github.com/lucia-auth/lucia/blob/main/LICENSE) | Scrypt password hashing (backend). |
 | [yaml](https://eemeli.org/yaml/) | Eemeli Aro | [ISC](https://github.com/eemeli/yaml/blob/main/LICENSE) | Reads winget manifests (backend). |
+| [qrcode-generator](https://github.com/kazuhikoarase/qrcode-generator) | Kazuhiko Arase | [MIT](https://github.com/kazuhikoarase/qrcode-generator/blob/master/LICENSE) | QR code of an enrollment code (dashboard, loaded only when shown). |
 | [React Router](https://reactrouter.com) (`react-router`) | Remix Software | [MIT](https://github.com/remix-run/react-router/blob/main/LICENSE.md) | Dashboard routing. |
 | [ed25519-dalek](https://github.com/dalek-cryptography/curve25519-dalek) | isis lovecruft, Henry de Valence and contributors | [BSD-3-Clause](https://github.com/dalek-cryptography/curve25519-dalek/blob/main/ed25519-dalek/LICENSE) | Verifies signed policies (agent, `rulebox-policy` crate). |
 | [reqwest](https://github.com/seanmonstar/reqwest) | Sean McArthur | [MIT or Apache-2.0](https://github.com/seanmonstar/reqwest#license) | HTTPS downloads of installers (agent). |
