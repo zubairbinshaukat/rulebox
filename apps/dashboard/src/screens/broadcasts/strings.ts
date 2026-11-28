@@ -1,7 +1,7 @@
 import { LOCK_CONTACT_MAX, LOCK_MESSAGE_MAX, BROADCAST_ACTIVE_MAX, BROADCAST_BODY_MAX, BROADCAST_TITLE_MAX } from "../../lib/noticeRules";
 import type { NoticeProblem } from "../../lib/noticeRules";
 
-/** Strings of the Broadcasts screen, the send dialog and the device lock card (Phase 5 Step 15, plan 4.17). */
+/** Strings of the Broadcasts screen, the send dialog and the device lock card (Phase 5 Step 15, plan 4.17; UI pass `other-pages.md` section 5). */
 const problem = (what: string, max: number): Record<NoticeProblem, string> => ({
   empty: `Enter ${what}.`,
   tooLong: `Use at most ${max} characters.`,
@@ -10,15 +10,20 @@ const problem = (what: string, max: number): Record<NoticeProblem, string> => ({
 
 export const broadcastStrings = {
   title: "Messages",
-  lead: "Send a banner or a full-screen notice to a group or to one PC. Messages are plain text. They never show on the Windows sign-in screen.",
+  lead: "Banners and full-screen notices on your PCs.",
+  leadInfoLabel: "About messages",
+  leadInfo: "Messages are plain text. They never show on the Windows sign-in screen.",
   send: "Send a message",
   emptyTitle: "No messages yet",
   emptyBody: "A message appears at the top of the desktop of every PC in the group, or covers the screen until someone presses OK.",
   colMessage: "Message",
   colTarget: "To",
+  /** The card's label for the target ("Sent to  Front desk · Group"). */
+  colSentTo: "Sent to",
   colSent: "Sent",
   colStatus: "Status",
-  colAcks: "Acknowledged",
+  colAcks: "Seen by",
+  colHow: "Shows as",
   colActions: "Actions",
   kinds: { group: "Group", device: "PC" },
   styles: { banner: "Banner", fullscreen: "Full screen" },
@@ -26,36 +31,64 @@ export const broadcastStrings = {
   /** Tone of the status pill. */
   statusTones: { active: "success", expired: "neutral", cancelled: "warning" } as const,
   gone: "(deleted)",
-  /** "Acknowledged on 14 of 20 PCs"; a message that asks for no acknowledgement shows a dash. */
+  /** "14 of 20 PCs"; a message that asks for no confirmation says so. */
   acks: (acked: number, of: number) => `${acked} of ${of} PC${of === 1 ? "" : "s"}`,
-  noAckNeeded: "Not asked for",
+  noAckNeeded: "No confirmation asked",
   expiresAt: (when: string) => `Until ${when}`,
-  noExpiry: "No expiry",
+  noExpiry: "Until cancelled",
+  /** The word on a row's or card's button ("Cancel: Fire drill" to a screen reader) and on the confirm button. */
   cancel: "Cancel message",
+  cancelRow: "Cancel",
   cancelTitle: (title: string) => `Cancel "${title}"?`,
   cancelBody: "PCs stop showing it with their next update. Employees who already acknowledged it are not affected.",
   cancelled: "Message cancelled.",
   sent: (n: number) => `Message sent to ${n} PC${n === 1 ? "" : "s"}.`,
+
+  // "On your PCs now"
+  liveTitle: "On your PCs now",
+  liveEmpty: "Nothing is showing on your PCs right now.",
+  liveFailed: "Could not load what is showing now.",
+  liveRetry: "Try again",
+  liveShowAll: (n: number) => `Show all ${n}`,
+  liveShowFewer: "Show fewer",
+  /** "Until 17:00" today, "Until Tue 14:00" this week, else "Until 3 Dec, 14:00". */
+  liveUntil: (when: string) => `Until ${when}`,
+  liveNoEnd: "Until cancelled",
+  /** What the card says about reach: how many PCs have it, or how many pressed OK when that was asked for. */
+  liveReach: (n: number) => `On ${n} PC${n === 1 ? "" : "s"}`,
+  liveSeen: (acked: number, of: number) => `${acked} of ${of} saw it`,
+  liveCancel: "Cancel",
+
   // the send dialog
   dialogTitle: "Send a message",
-  to: "Send to",
-  toGroup: "Group",
-  toDevice: (name: string) => `This PC: ${name}`,
+  to: "To",
   pickGroup: "Choose a group",
-  noGroups: "There are no groups yet. Create a group first.",
+  searchGroup: "Search groups",
+  noGroupMatch: "No group matches.",
+  noGroups: "You have no groups yet.",
+  createGroup: "Create a group",
   style: "Style",
-  styleHelp: { banner: "A strip at the top of the desktop. Employees can dismiss it.", fullscreen: "Covers the desktop until someone presses OK." },
+  styleOptions: {
+    banner: { label: "Banner", hint: "A strip at the top. People can close it." },
+    fullscreen: { label: "Full screen", hint: "Covers the screen until someone presses OK." },
+  },
   messageTitle: "Title",
   body: "Message",
   expiry: "Show for",
-  expiryChoices: { "1h": "1 hour", "4h": "4 hours", "24h": "24 hours", "7d": "7 days", none: "Until I cancel it" } as Record<string, string>,
-  ackRequired: "Ask for an acknowledgement",
-  ackHint: "The message cannot be dismissed until someone presses OK. Rulebox counts the PCs that did, never who pressed it.",
+  expiryChoices: { "1h": "1 hour", "24h": "1 day", "7d": "1 week", none: "Until I cancel" } as Record<string, string>,
+  /** The words in the "Shown on …" line under the preview. */
+  recapFor: { "1h": "for 1 hour", "24h": "for 1 day", "7d": "for 1 week", none: "until you cancel it" } as Record<string, string>,
+  ackRequired: "Keep it until someone presses OK",
+  ackInfoLabel: "About pressing OK",
+  ackInfo: "The message stays on the screen until someone presses OK on that PC. Rulebox counts the PCs where OK was pressed, never who pressed it.",
   preview: "Preview",
-  previewBanner: "On the desktop",
-  previewFullscreen: "Full screen",
+  previewHint: "How it looks on a PC",
+  previewTitleHolder: "Your title",
+  previewBodyHolder: "your message",
+  recap: (who: string, forWhat: string) => `Shown on ${who} ${forWhat}.`,
+  recapNobody: "Choose who gets it.",
   ok: "OK",
-  dismiss: "Dismiss",
+  dismiss: "Close",
   submit: "Send",
   sending: "Sending…",
   titleProblems: problem("a title", BROADCAST_TITLE_MAX),

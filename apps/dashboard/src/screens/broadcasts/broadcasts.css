@@ -1,0 +1,685 @@
+/* Messages (UI pass 2026-11-28, docs/plans/ui-pass/other-pages.md section 5). Imported by the lazy Broadcasts screen and by the send dialog
+   (also opened from the device page), so it ships in those chunks, not in the entry CSS. Tokens only.
+   Page by band:  phone < 600  "On your PCs now" is a row you scroll sideways, the list below
+                  tablet / laptop  the live messages are a grid above the list (first 6, then "Show all")
+                  wide >= 1600     the live messages are a column beside the list.
+   Dialog: the form and the preview side by side when the dialog is wide enough (container query), the preview under the form below that.
+   Motion: transform and opacity only; the "live" dot's ping is off for reduced motion and Lite. */
+
+/* ------------------------------------------------------------ the page */
+
+.bc-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 18px;
+  align-items: start;
+  min-width: 0;
+}
+.bc-grid__live,
+.bc-grid__list {
+  min-width: 0;
+}
+/* The live section has nothing to say (an empty list): no gap for it. */
+.bc-grid__live:empty {
+  display: none;
+}
+@media (min-width: 1600px) {
+  .bc-grid:not(:has(> .bc-grid__live:empty)) {
+    grid-template-columns: minmax(0, 1fr) 380px;
+  }
+  .bc-grid__list {
+    grid-column: 1;
+    grid-row: 1;
+  }
+  .bc-grid__live {
+    grid-column: 2;
+    grid-row: 1;
+    position: sticky;
+    inset-block-start: 16px;
+  }
+}
+
+.bc-cell__title {
+  display: block;
+  min-width: 0;
+  font-weight: 600;
+}
+
+/* ------------------------------------------------------------ On your PCs now */
+
+.bc-live {
+  container: bc-live / inline-size;
+  padding: 16px;
+  min-width: 0;
+}
+.bc-live__head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-block-end: 12px;
+}
+.bc-live__heading {
+  margin: 0;
+  font-size: 15.5px;
+  font-weight: 650;
+  letter-spacing: -0.01em;
+}
+.bc-live__count {
+  min-width: 24px;
+  padding: 1px 8px;
+  border-radius: 999px;
+  background: var(--rb-hover);
+  color: var(--rb-muted);
+  font-size: 12.5px;
+  font-weight: 600;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+}
+/* The "live" dot: a quiet ring pings out from it while something is showing. */
+.bc-live__dot {
+  position: relative;
+  flex: none;
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: var(--rb-line-strong);
+}
+.bc-live__dot[data-on] {
+  background: var(--rb-success);
+}
+.bc-live__dot[data-on]::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+  background: var(--rb-success);
+  opacity: 0;
+  animation: bc-ping 2.4s var(--rb-ease) infinite;
+}
+@keyframes bc-ping {
+  0% {
+    opacity: 0.55;
+    transform: scale(1);
+  }
+  70%,
+  100% {
+    opacity: 0;
+    transform: scale(2.8);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .bc-live__dot[data-on]::after {
+    animation: none;
+  }
+}
+[data-lite="true"] .bc-live__dot[data-on]::after {
+  animation: none;
+}
+
+.bc-live__list,
+.bc-live__skel {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 260px), 1fr));
+  gap: 10px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.bc-live__skel {
+  display: grid;
+}
+.bc-live__card {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  min-width: 0;
+  padding: 12px 12px 12px 12px;
+  border: 1px solid var(--rb-line);
+  border-radius: 14px;
+  background: color-mix(in oklch, var(--rb-hover) 55%, var(--rb-surface));
+}
+.bc-live__icon {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  border-radius: 11px;
+  background: var(--rb-accent-soft);
+  color: var(--rb-accent-text);
+  font-size: 20px;
+}
+/* A full-screen notice is the louder one: a warmer tile. */
+.bc-live__card[data-style="fullscreen"] .bc-live__icon {
+  background: var(--rb-warning-soft);
+  color: var(--rb-warning-text);
+}
+.bc-live__main {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+}
+.bc-live__title {
+  overflow: hidden;
+  font-size: 14.5px;
+  font-weight: 650;
+  line-height: 1.3;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.bc-live__to {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  font-size: 13.5px;
+}
+.bc-live__to > svg {
+  flex: none;
+  font-size: 15px;
+  color: var(--rb-muted);
+}
+.bc-live__to > span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.bc-live__foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  min-height: 28px;
+  min-width: 0;
+}
+.bc-live__meta {
+  min-width: 0;
+  font-size: 12.5px;
+  color: var(--rb-muted);
+  font-variant-numeric: tabular-nums;
+}
+.bc-live__cancel {
+  flex: none;
+  margin-inline-end: -6px;
+}
+/* How many PCs saw it: a thin bar that grows with `scaleX` (transform only). */
+.bc-live__bar {
+  display: block;
+  height: 4px;
+  margin-block-start: 4px;
+  border-radius: 2px;
+  background: var(--rb-line);
+  overflow: hidden;
+}
+.bc-live__bar > i {
+  display: block;
+  height: 100%;
+  border-radius: 2px;
+  background: var(--rb-accent);
+  transform-origin: left center;
+}
+[dir="rtl"] .bc-live__bar > i {
+  transform-origin: right center;
+}
+.bc-live__empty {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 0;
+  color: var(--rb-muted);
+  font-size: 14px;
+}
+.bc-live__empty > svg {
+  flex: none;
+  box-sizing: content-box;
+  padding: 7px;
+  border-radius: 50%;
+  background: var(--rb-hover);
+  font-size: 18px;
+}
+.bc-live__more {
+  margin-block-start: 10px;
+}
+
+/* Tablet and up: only the first six until "Show all". */
+@media (min-width: 600px) {
+  .bc-live__list[data-collapsed] > .bc-live__card:nth-child(n + 7) {
+    display: none;
+  }
+}
+/* Phone: one row to scroll sideways, cards snapping at the left edge; it runs to the card's edges. */
+@media (max-width: 599px) {
+  .bc-live {
+    padding: 14px 0 14px 14px;
+  }
+  .bc-live__head {
+    padding-inline-end: 14px;
+  }
+  .bc-live__list {
+    display: flex;
+    gap: 10px;
+    margin-inline-start: -14px;
+    padding: 2px 14px 6px;
+    overflow-x: auto;
+    scroll-snap-type: x mandatory;
+    scroll-padding-inline: 14px;
+    overscroll-behavior-x: contain;
+    scrollbar-width: none;
+  }
+  .bc-live__list::-webkit-scrollbar {
+    display: none;
+  }
+  .bc-live__card {
+    flex: 0 0 min(82%, 300px);
+    scroll-snap-align: start;
+  }
+  .bc-live__more {
+    display: none;
+  }
+  .bc-live__empty {
+    padding-inline-end: 14px;
+  }
+  .bc-live__skel {
+    padding-inline-end: 14px;
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+/* ------------------------------------------------------------ the send dialog */
+
+.dash-dialog.bc-dialog {
+  width: min(980px, 100%);
+}
+.bc-compose {
+  container: bc-compose / inline-size;
+  min-width: 0;
+}
+.bc-compose__grid {
+  display: flex;
+  flex-direction: column;
+  gap: 22px;
+  min-width: 0;
+}
+.bc-compose__form {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  min-width: 0;
+}
+.bc-compose__side {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-width: 0;
+  padding: 14px;
+  border: 1px solid var(--rb-line);
+  border-radius: 18px;
+  background: color-mix(in oklch, var(--rb-hover) 60%, var(--rb-surface));
+}
+@container bc-compose (min-width: 700px) {
+  .bc-compose__grid {
+    display: grid;
+    grid-template-columns: minmax(0, 3fr) minmax(0, 2fr);
+    gap: 28px;
+    align-items: start;
+  }
+  /* The preview stays in view while a long message scrolls the form. */
+  .bc-compose__side {
+    position: sticky;
+    inset-block-start: 0;
+    padding: 16px;
+  }
+}
+
+/* "To" for one PC: nothing to choose, just who. */
+.bc-to {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+  padding: 10px 14px;
+  border: 1px solid var(--rb-line);
+  border-radius: var(--rb-r-md);
+  background: var(--rb-hover);
+}
+.bc-to__label {
+  flex: none;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--rb-muted);
+}
+.bc-to__who {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  font-weight: 600;
+}
+.bc-to__who > svg {
+  flex: none;
+  font-size: 18px;
+  color: var(--rb-accent-text);
+}
+.bc-to__name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.bc-nogroups {
+  margin: 8px 0 0;
+  font-size: 13.5px;
+  color: var(--rb-muted);
+}
+
+/* The counter next to a text near its limit. */
+.bc-count {
+  display: block;
+  text-align: end;
+  font-variant-numeric: tabular-nums;
+}
+.bc-count[data-over] {
+  color: var(--rb-danger-text);
+  font-weight: 600;
+}
+
+/* "Show for": the four choices share the width. */
+.bc-seg .rb-seg {
+  display: flex;
+  width: 100%;
+}
+.bc-seg .rb-seg button {
+  flex: 1 1 auto;
+  min-width: 0;
+  height: 36px;
+  padding: 0 8px;
+  font-size: 13.5px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.bc-ack {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+/* The two style cards: a little drawing, then the words. */
+.bc-art {
+  position: relative;
+  display: block;
+  width: 100%;
+  height: 46px;
+  overflow: hidden;
+  border: 1.5px solid color-mix(in oklch, currentColor 45%, transparent);
+  border-radius: 9px;
+  background: color-mix(in oklch, currentColor 7%, var(--rb-surface));
+}
+.bc-art i {
+  position: absolute;
+  display: block;
+}
+.bc-art__strip {
+  inset: 0 0 auto 0;
+  height: 17px;
+  background: color-mix(in oklch, currentColor 28%, transparent);
+}
+.bc-art__line {
+  height: 3px;
+  border-radius: 2px;
+  background: currentColor;
+  opacity: 0.7;
+}
+.bc-art__card {
+  inset-inline-start: 50%;
+  inset-block-start: 50%;
+  width: 46%;
+  height: 64%;
+  border-radius: 6px;
+  background: var(--rb-surface);
+  box-shadow: 0 0 0 1.5px color-mix(in oklch, currentColor 55%, transparent);
+  transform: translate(-50%, -50%);
+}
+.bc-art[data-style="banner"] .bc-art__card {
+  display: none;
+}
+.bc-art[data-style="banner"] .bc-art__line {
+  inset-block-start: 7px;
+  inset-inline-start: 9px;
+  width: 50%;
+}
+.bc-art[data-style="banner"] .bc-art__line--short {
+  inset-inline-start: auto;
+  inset-inline-end: 9px;
+  width: 11%;
+}
+.bc-art[data-style="fullscreen"] {
+  background: color-mix(in oklch, currentColor 26%, var(--rb-surface));
+}
+.bc-art[data-style="fullscreen"] .bc-art__strip {
+  display: none;
+}
+.bc-art[data-style="fullscreen"] .bc-art__line {
+  inset-inline-start: 50%;
+  inset-block-start: calc(50% - 7px);
+  width: 28%;
+  transform: translateX(-50%);
+}
+.bc-art[data-style="fullscreen"] .bc-art__line--short {
+  inset-block-start: calc(50% + 3px);
+  width: 15%;
+}
+[dir="rtl"] .bc-art[data-style="fullscreen"] .bc-art__line {
+  transform: translateX(50%);
+}
+
+/* A narrow group (a phone): the cards stack, and each puts its drawing beside the words to save height. */
+@container dash-cc (max-width: 419px) {
+  .bc-compose .dash-cc__card {
+    flex-direction: row;
+    align-items: center;
+    gap: 14px;
+  }
+  .bc-compose .dash-cc__art {
+    flex: none;
+    width: 88px;
+  }
+}
+
+/* ------------------------------------------------------------ the preview: a desktop in miniature */
+
+.bc-prev {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-width: 0;
+  margin: 0;
+}
+.bc-prev__cap {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  font-size: 12.5px;
+  color: var(--rb-muted);
+}
+.bc-prev__cap strong {
+  font-size: 13.5px;
+  color: var(--rb-ink);
+}
+.bc-screen {
+  container: bc-screen / inline-size;
+  position: relative;
+  aspect-ratio: 16 / 10;
+  min-width: 0;
+  overflow: hidden;
+  border: 1px solid var(--rb-line-strong);
+  border-radius: 12px;
+  background:
+    radial-gradient(110% 90% at 0% 0%, color-mix(in oklch, var(--rb-accent) 24%, transparent), transparent 62%),
+    radial-gradient(90% 80% at 100% 100%, color-mix(in oklch, var(--rb-warning) 20%, transparent), transparent 60%), var(--rb-paper);
+  box-shadow: var(--rb-shadow-sm);
+}
+.bc-screen__desk {
+  position: absolute;
+  inset: 0;
+}
+.bc-screen__hello {
+  position: absolute;
+  inset-block-start: 14cqw;
+  inset-inline-start: 6cqw;
+  width: 30cqw;
+  height: 3.2cqw;
+  border-radius: 2cqw;
+  background: color-mix(in oklch, var(--rb-ink) 20%, transparent);
+}
+.bc-screen__tile {
+  position: absolute;
+  inset-block-start: 22cqw;
+  width: 12cqw;
+  height: 12cqw;
+  border: 1px solid var(--rb-line);
+  border-radius: 3cqw;
+  background: color-mix(in oklch, var(--rb-surface) 78%, transparent);
+}
+.bc-screen__tile:nth-of-type(2) {
+  inset-inline-start: 6cqw;
+}
+.bc-screen__tile:nth-of-type(3) {
+  inset-inline-start: 21cqw;
+}
+.bc-screen__tile:nth-of-type(4) {
+  inset-inline-start: 36cqw;
+}
+.bc-screen__tile:nth-of-type(5) {
+  inset-inline-start: 51cqw;
+}
+.bc-screen__bar {
+  position: absolute;
+  inset: auto 0 0 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 2cqw;
+  height: 8cqw;
+  border-block-start: 1px solid var(--rb-line);
+  background: color-mix(in oklch, var(--rb-surface) 82%, transparent);
+}
+.bc-screen__bar i {
+  display: block;
+  width: 4cqw;
+  height: 4cqw;
+  border-radius: 1.2cqw;
+  background: color-mix(in oklch, var(--rb-ink) 16%, transparent);
+}
+
+.bc-banner {
+  position: absolute;
+  inset: 0 0 auto 0;
+  display: flex;
+  align-items: center;
+  gap: 2.5cqw;
+  padding: 2.4cqw 3cqw;
+  background: color-mix(in oklch, var(--rb-accent-soft) 94%, var(--rb-surface));
+  border-block-end: 1px solid color-mix(in oklch, var(--rb-accent) 30%, var(--rb-line));
+  color: var(--rb-accent-text);
+  font-size: clamp(10px, 3.3cqw, 13.5px);
+  line-height: 1.35;
+  box-shadow: 0 4px 14px color-mix(in oklch, var(--rb-ink) 10%, transparent);
+}
+.bc-banner__sep {
+  opacity: 0.6;
+}
+.bc-banner__text {
+  display: -webkit-box;
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+}
+.bc-cover {
+  position: absolute;
+  inset: 0 0 8cqw 0;
+  display: grid;
+  place-items: center;
+  padding: 4cqw;
+  background: color-mix(in oklch, var(--rb-ink) 46%, transparent);
+}
+.bc-note {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2cqw;
+  box-sizing: border-box;
+  width: min(100%, 76cqw);
+  max-height: 100%;
+  padding: 4cqw 4.5cqw;
+  overflow: hidden;
+  border-radius: 14px;
+  background: var(--rb-surface);
+  box-shadow: var(--rb-shadow-md);
+  text-align: center;
+}
+.bc-note__title {
+  margin: 0;
+  max-width: 100%;
+  font-size: clamp(12px, 4.4cqw, 18px);
+  font-weight: 650;
+  line-height: 1.25;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
+.bc-note__body {
+  display: -webkit-box;
+  margin: 0;
+  max-width: 100%;
+  overflow: hidden;
+  overflow-wrap: anywhere;
+  font-size: clamp(10px, 3.3cqw, 13.5px);
+  line-height: 1.35;
+  white-space: pre-wrap;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 4;
+  line-clamp: 4;
+}
+.bc-btn {
+  flex: none;
+  padding: 0.7cqw 3.2cqw;
+  border-radius: 999px;
+  background: var(--rb-ink);
+  color: var(--rb-on-ink);
+  font-size: clamp(10px, 3.2cqw, 13px);
+  font-weight: 600;
+}
+.bc-btn--quiet {
+  background: transparent;
+  border: 1px solid color-mix(in oklch, var(--rb-accent) 45%, transparent);
+  color: var(--rb-accent-text);
+}
+.bc-ph {
+  color: var(--rb-muted);
+  font-weight: 500;
+}
+.bc-recap {
+  margin: 0;
+  font-size: 13.5px;
+  line-height: 1.4;
+  color: var(--rb-muted);
+  overflow-wrap: anywhere;
+}
+
+@media (forced-colors: active) {
+  .bc-live__card,
+  .bc-screen,
+  .bc-compose__side {
+    border-color: CanvasText;
+  }
+  .bc-live__bar > i {
+    background: Highlight;
+  }
+}

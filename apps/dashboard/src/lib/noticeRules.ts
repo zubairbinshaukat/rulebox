@@ -37,10 +37,9 @@ export function broadcastStatus(b: { cancelledAt: number | null; expiresAt: numb
 }
 
 const HOUR = 3_600_000;
-/** The expiry choices of the send form: hours from now, `null` = no expiry. The server allows up to a year. */
+/** The expiry choices of the send form: hours from now, `null` = no expiry. The server allows up to a year ("4 hours" was dropped from the form, UI pass). */
 export const EXPIRY_CHOICES: readonly { key: string; hours: number | null }[] = [
   { key: "1h", hours: 1 },
-  { key: "4h", hours: 4 },
   { key: "24h", hours: 24 },
   { key: "7d", hours: 168 },
   { key: "none", hours: null },
