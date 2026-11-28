@@ -10,6 +10,7 @@ import { strings } from "../lib/strings";
 import { appEditStrings } from "../lib/screenStrings/appEdit";
 import { appBrowserStrings, browserRefusalStrings } from "../lib/screenStrings/appBrowser";
 import { appUpdateStrings } from "../lib/screenStrings/appUpdates";
+import { optionLabels, pickOption, selectedText } from "../test/select";
 import { appAddStrings } from "../lib/screenStrings/appAdd";
 import { BROWSER_BLOCKED_PERMISSIONS, MAX_BROWSER_SITES, browserSitesProblem } from "../lib/apps/browserRules";
 
@@ -143,8 +144,10 @@ describe("AppEdit: Opens in (a website)", () => {
     cx.fns["apps:createWeb"] = create;
     await ui("admin", "/apps/new?kind=web");
     expect(opensIn(appBrowserStrings.kinds.builtin).getAttribute("aria-checked")).toBe("true");
-    expect(screen.getByText(appBrowserStrings.kindHelp.builtin)).toBeTruthy();
-    expect(screen.getByText(appBrowserStrings.fallbackNote)).toBeTruthy();
+    // The help and the fallback note sit in the (i) next to "Opens in", not in paragraphs.
+    expect(screen.queryByText(appBrowserStrings.fallbackNote)).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: `About ${appBrowserStrings.opensIn}` }));
+    expect(screen.getByRole("tooltip").textContent).toBe(`${appBrowserStrings.kindHelp.builtin} ${appBrowserStrings.fallbackNote}`);
     expect(screen.queryByText(appBrowserStrings.limitsTitle)).toBeNull();
     expect(queried("apps:options")).toEqual([]); // nothing is subscribed until Chrome is picked
     fireEvent.change(field(appEditStrings.name), { target: { value: "Docs" } });
@@ -159,8 +162,10 @@ describe("AppEdit: Opens in (a website)", () => {
     cx.fns["apps:createWeb"] = create;
     await ui("admin", "/apps/new?kind=web");
     fireEvent.click(opensIn(appBrowserStrings.kinds.edge));
-    expect(screen.getByText(appBrowserStrings.kindHelp.edge)).toBeTruthy();
-    expect(screen.getByText(appBrowserStrings.limitsTitle)).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: `About ${appBrowserStrings.opensIn}` }));
+    expect(screen.getByRole("tooltip").textContent).toContain(appBrowserStrings.kindHelp.edge);
+    // What browser mode cannot do is a closed disclosure ("<details>"), its lines are in the page.
+    expect(screen.getByText(appBrowserStrings.limitsTitle).closest("details")?.open).toBe(false);
     for (const line of appBrowserStrings.limits) expect(screen.getByText(line)).toBeTruthy();
     expect(queried("apps:options")).toEqual([]); // Edge needs no program
     fireEvent.change(field(appEditStrings.name), { target: { value: "Docs" } });
@@ -179,14 +184,15 @@ describe("AppEdit: Opens in (a website)", () => {
     expect(queried("apps:options")).toEqual([]);
     fireEvent.click(opensIn(appBrowserStrings.kinds.chrome));
     expect(queried("apps:options").length).toBeGreaterThan(0);
-    const picker = screen.getByLabelText(new RegExp(`^${appBrowserStrings.chromeApp}`)) as HTMLSelectElement;
-    expect(within(picker).getAllByRole("option").map((o) => o.textContent)).toEqual([appBrowserStrings.chromeAppPick, "Google Chrome", "Chrome Beta"]);
+    const chromeLabel = new RegExp(`^${appBrowserStrings.chromeApp}`);
+    expect(selectedText(chromeLabel)).toBe(appBrowserStrings.chromeAppPick);
+    expect(optionLabels(chromeLabel)).toEqual(["Google Chrome", "Chrome Beta"]);
     fireEvent.change(field(appEditStrings.name), { target: { value: "Docs" } });
     fireEvent.change(field(appAddStrings.web.address), { target: { value: "https://docs.example.com" } });
     fireEvent.click(screen.getByRole("button", { name: appAddStrings.web.add }));
     expect(await screen.findByText(appBrowserStrings.chromeNeeded)).toBeTruthy();
     expect(create).not.toHaveBeenCalled();
-    fireEvent.change(picker, { target: { value: "c2" } });
+    pickOption(chromeLabel, "Chrome Beta");
     fireEvent.click(screen.getByRole("button", { name: appAddStrings.web.add }));
     await waitFor(() => expect(create).toHaveBeenCalledTimes(1));
     expect(create.mock.calls[0]![0]).toMatchObject({ browser: { kind: "chrome", appId: "c2" } });
@@ -207,7 +213,7 @@ describe("AppEdit: Opens in (a website)", () => {
     cx.fns["apps:update"] = update;
     await ui("admin", "/apps/a1");
     expect(opensIn(appBrowserStrings.kinds.chrome).getAttribute("aria-checked")).toBe("true");
-    expect((screen.getByLabelText(new RegExp(`^${appBrowserStrings.chromeApp}`)) as HTMLSelectElement).value).toBe("c1");
+    expect(selectedText(new RegExp(`^${appBrowserStrings.chromeApp}`))).toBe("Google Chrome");
     expect(screen.queryByText(appBrowserStrings.chromeUnusable("Google Chrome"))).toBeNull();
     // The save bar shows once something changed.
     fireEvent.change(field(appEditStrings.name), { target: { value: "Docs 2" } });
@@ -240,7 +246,7 @@ describe("AppEdit: Opens in (a website)", () => {
     fireEvent.click(opensIn(appBrowserStrings.kinds.chrome));
     fireEvent.change(field(appEditStrings.name), { target: { value: "Docs" } });
     fireEvent.change(field(appAddStrings.web.address), { target: { value: "https://docs.example.com" } });
-    fireEvent.change(screen.getByLabelText(new RegExp(`^${appBrowserStrings.chromeApp}`)), { target: { value: "c1" } });
+    pickOption(new RegExp(`^${appBrowserStrings.chromeApp}`), "Google Chrome");
     fireEvent.click(screen.getByRole("button", { name: appAddStrings.web.add }));
     expect(await screen.findByText(browserRefusalStrings.browser_app_required)).toBeTruthy();
   });

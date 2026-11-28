@@ -47,7 +47,6 @@ export function LockDialog({ d, open, onClose }: { d: LockTarget; open: boolean;
         }
       >
         <div className="dash-form">
-          <p className="dash-muted">{ls.lead}</p>
           {/* A fresh form per lock: its fields start from the lock that is in force. */}
           <LockForm key={d.lock?.lockId ?? "none"} d={d} onDone={onClose} onUnlock={() => setUnlocking(true)} />
         </div>

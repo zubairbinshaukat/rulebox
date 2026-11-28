@@ -1,3 +1,4 @@
+import { InfoTip } from "@rulebox/ui";
 import type { BroadcastStyle } from "../../data/types";
 import { broadcastStrings as b, lockStrings as l } from "./strings";
 
@@ -69,7 +70,13 @@ export function LockPreview({ orgName, message, contact }: { orgName: string; me
   const who = contact.trim();
   return (
     <figure className="dash-preview" aria-label={l.preview}>
-      <figcaption className="dash-preview__cap">{l.preview}</figcaption>
+      <figcaption className="dash-preview__cap">
+        {/* What a lock does to the PC (three sentences) is the (i) next to the preview, not a paragraph above the form. */}
+        <span className="rb-labelrow">
+          {l.preview}
+          <InfoTip label={`About ${l.preview}`}>{l.lead}</InfoTip>
+        </span>
+      </figcaption>
       <div className="dash-preview__screen dash-preview__screen--cover">
         <div className="dash-preview__card" role="note">
           <span className="dash-preview__org">{l.previewOrg(orgName)}</span>

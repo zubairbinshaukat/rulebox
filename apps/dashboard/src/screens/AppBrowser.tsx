@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { Link } from "react-router";
-import { NativeSelect, SegmentedControl, Textarea } from "@rulebox/ui";
+import { SegmentedControl, Select, Textarea } from "@rulebox/ui";
 import { useAppOptions } from "../data";
 import { BROWSER_KINDS, type AppDetail, type BrowserKind } from "../data/types";
 import { Card } from "../components/Card";
@@ -34,7 +34,14 @@ export function OpensInFields({ d, f, isNew }: { d: AppDetail; f: FormApi; isNew
   const kind = f.values.browserKind;
   return (
     <div className="dash-form">
-      <FieldSet legend={s.opensIn} hint={s.kindHelp[kind]}>
+      <FieldSet
+        legend={s.opensIn}
+        info={
+          <>
+            {s.kindHelp[kind]} {s.fallbackNote}
+          </>
+        }
+      >
         <div style={{ overflowX: "auto", maxWidth: "100%" }}>
           <SegmentedControl<BrowserKind>
             aria-label={s.opensIn}
@@ -45,22 +52,24 @@ export function OpensInFields({ d, f, isNew }: { d: AppDetail; f: FormApi; isNew
         </div>
       </FieldSet>
       {kind === "chrome" ? <ChromePicker d={d} f={f} isNew={isNew} /> : null}
-      <p className="dash-field__hint">{s.fallbackNote}</p>
       {kind !== "builtin" ? <BrowserLimits /> : null}
     </div>
   );
 }
 
-/** The plain list of plan 4.9.8: what browser mode cannot do. */
+/** The plain list of plan 4.9.8: what browser mode cannot do, one closed disclosure instead of a list always on screen. */
 function BrowserLimits() {
   return (
-    <FieldSet legend={s.limitsTitle}>
-      <ul className="dash-muted" style={{ margin: 0, paddingLeft: 20, display: "grid", gap: 6 }}>
-        {s.limits.map((line) => (
-          <li key={line}>{line}</li>
-        ))}
-      </ul>
-    </FieldSet>
+    <details className="dash-advanced">
+      <summary>{s.limitsTitle}</summary>
+      <div className="dash-advanced__body">
+        <ul className="dash-muted" style={{ margin: 0, paddingLeft: 20, display: "grid", gap: 6 }}>
+          {s.limits.map((line) => (
+            <li key={line}>{line}</li>
+          ))}
+        </ul>
+      </div>
+    </details>
   );
 }
 
@@ -79,17 +88,19 @@ function ChromePicker({ d, f, isNew }: { d: AppDetail; f: FormApi; isNew: boolea
   const known = chrome.some((p) => p._id === x.chromeAppId);
   return (
     <>
-      <Field label={s.chromeApp} hint={s.chromeAppHint} error={f.errors.chromeAppId} required>
+      <Field label={s.chromeApp} info={s.chromeAppHint} error={f.errors.chromeAppId} required>
         {(p) => (
-          <NativeSelect {...p} value={x.chromeAppId} onChange={(e) => f.set("chromeAppId", e.target.value)}>
-            <option value="">{s.chromeAppPick}</option>
-            {x.chromeAppId !== "" && !known ? <option value={x.chromeAppId}>{d.chromeApp?.name ?? x.chromeAppId}</option> : null}
-            {chrome.map((p2) => (
-              <option key={p2._id} value={p2._id}>
-                {p2.name}
-              </option>
-            ))}
-          </NativeSelect>
+          <Select
+            {...p}
+            value={x.chromeAppId}
+            onChange={(id) => f.set("chromeAppId", id)}
+            placeholder={s.chromeAppPick}
+            options={[
+              // The program the server holds, while it is no longer in the list (archived): it stays visible until another is picked.
+              ...(x.chromeAppId !== "" && !known ? [{ value: x.chromeAppId, label: d.chromeApp?.name ?? x.chromeAppId }] : []),
+              ...chrome.map((p2) => ({ value: p2._id, label: p2.name })),
+            ]}
+          />
         )}
       </Field>
       {chrome.length === 0 ? (

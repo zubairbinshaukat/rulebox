@@ -8,12 +8,7 @@ export const appUpdateStrings = {
   versionHint: "The version this installer delivers, like 2.4.1. Shown to you; Rulebox compares it for the two update modes below.",
   versionPinnedHint: "Free text, shown only to you. Rulebox never compares it.",
   updateMode: "Update mode",
-  updateModes: {
-    pinned: "Keep this version",
-    vendor: "The program updates itself",
-    managed: "Rulebox publishes updates",
-  },
-  // ---- UI pass (D27): the plain labels and (i) texts of the modes, used by the add and edit pages. The old keys above stay for the card.
+  // ---- UI pass (D27): the plain labels and (i) texts of the modes, used by the add page and the Updates tab.
   modeLabels: {
     pinned: "Keep this version",
     vendor: "The app updates itself",

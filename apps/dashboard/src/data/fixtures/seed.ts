@@ -1174,7 +1174,7 @@ export function seed(now: number = Date.now()): DemoDb {
     else if (r < 0.85) {
       const e = employees[(i * 5) % employees.length]!;
       log(at, "employee.updated", pick(members.slice(0, 2)), { type: "employee", id: e._id, label: e.name }, "Name, quota changed.");
-    } else log(at, "org.settingsChanged", owner, undefined, "Changed: offlineDays, power.");
+    } else log(at, "org.settingsChanged", owner, undefined, "Changed organization settings: offlineDays, power");
   }
   log(now - 26 * HOUR, "policy.publishFailed", null, { type: "device", id: devices[6]!._id, label: devices[6]!.name }, "The document was too large for this device.");
   log(now - 4 * HOUR, "enrollment.codeCreated", owner, { type: "enrollmentCode", id: tokens[0]!._id, label: "Branch 4 rollout" }, "Code for Front desk, 20 uses, 3 days.");

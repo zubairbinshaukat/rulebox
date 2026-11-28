@@ -32,7 +32,6 @@ export function LockCard({ d }: { d: LockTarget }) {
       sub={locked && d.lock ? s.state(formatDateTime(d.lock.lockedAt)) : undefined}
     >
       <div className="dash-form">
-        <p className="dash-muted">{s.lead}</p>
         {d.revoked && !locked ? <InlineNotice tone="neutral" title={s.revokedNote} /> : null}
         <RoleGate
           minRole="admin"

@@ -26,7 +26,6 @@ import {
   Tabs,
   TitleBar,
   InfoTip,
-  NativeSelect,
   SearchSelect,
   Select,
   Textarea,
@@ -740,12 +739,8 @@ export function Gallery({ theme, onTheme, lite, onLite }: GalleryProps) {
             {/* Form controls (Phase 4) */}
             <DropdownDemo />
 
-            <Section title="Form controls" description="NativeSelect (until it is removed), Textarea, Checkbox.">
+            <Section title="Form controls" description="Textarea and Checkbox (Select and SearchSelect have their own section).">
               <div style={{ display: "flex", flexDirection: "column", gap: 12, maxWidth: 360 }}>
-                <NativeSelect aria-label="Group" defaultValue="front">
-                  <option value="front">Front desk</option>
-                  <option value="office">Back office</option>
-                </NativeSelect>
                 <Textarea aria-label="Notes" placeholder="Allowed domains, one per line" rows={3} />
                 <Checkbox label="Pin to taskbar" defaultChecked />
                 <Checkbox label="Show on desktop" hint="The tile appears on the Staff App desktop." />

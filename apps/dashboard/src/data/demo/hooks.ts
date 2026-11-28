@@ -1771,7 +1771,8 @@ export const demoApi: DataApi = {
             targetType: "employee",
             targetId: e._id,
             targetLabel: name,
-            summary: changed.length ? `Changed: ${changed.join(", ")}.` : "Saved without changes.",
+            // Same wording as the server (`convex/employees.ts`), so `plainSummary` rewords demo rows too.
+            summary: changed.length ? `Changed the ${changed.join(", ")} of ${name}` : "Saved without changes.",
           });
           return { revision: e.revision };
         }),

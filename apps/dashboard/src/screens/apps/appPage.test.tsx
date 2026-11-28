@@ -214,7 +214,7 @@ describe("one form, one save bar", () => {
     cx.fns["apps:update"] = vi.fn();
     await show(<AppEdit />, "admin", "/apps/a2?tab=updates");
     await screen.findByRole("heading", { name: appUpdateStrings.updates });
-    fireEvent.click(screen.getByRole("radio", { name: appUpdateStrings.updateModes.vendor }));
+    fireEvent.click(screen.getByRole("radio", { name: appUpdateStrings.modeLabels.vendor }));
     openTab(a.tabs.details);
     fireEvent.click(screen.getByRole("button", { name: a.saveBar.save }));
     expect(await screen.findByText(strings.validate.fixErrors(1))).toBeTruthy();

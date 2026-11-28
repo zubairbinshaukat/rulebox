@@ -49,7 +49,6 @@ function ApprovedForm({ added, drivers, canAct }: { added: string[]; drivers: Dr
   return (
     <AdvancedBox title={s.approvedTitle} forceOpen={problem !== null || error !== null}>
       <div className="dash-stack net-approved">
-        <p className="dash-cell-sub">{s.approvedLead}</p>
         <div>
           <p className="dash-cell-sub">{s.approvedBuiltIn}</p>
           <span className="dash-net__chips">
@@ -96,7 +95,7 @@ function ApprovedForm({ added, drivers, canAct }: { added: string[]; drivers: Dr
                 .finally(() => setPending(false));
             }}
           >
-            <Field label={s.approvedField} hint={s.approvedFieldHint} error={problem}>
+            <Field label={s.approvedField} info={s.approvedLead} hint={s.approvedFieldHint} error={problem}>
               {(p) => (
                 <div className="dash-row">
                   <Input {...p} value={draft} autoComplete="off" onChange={(e) => setDraft(e.target.value)} />

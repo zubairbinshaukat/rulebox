@@ -1,5 +1,5 @@
 import { useRef, useState } from "react";
-import { Button, Switch } from "@rulebox/ui";
+import { Button, InfoTip, Switch } from "@rulebox/ui";
 import { useSetAppPermissions } from "../data";
 import { NEW_WEB_APP_PERMISSIONS, WEB_PERMISSION_KEYS, type AppDetail, type WebPermissions } from "../data/types";
 import { Card } from "../components/Card";
@@ -93,13 +93,16 @@ export function AppPermissions({
               <li key={key} className="dash-perm__row" data-perm={key} data-highlight={highlight === key || undefined}>
                 <span className="dash-cell-stack">
                   <Switch checked={fixedOff(key) ? false : draft[key]} onChange={(on) => toggle(key, on)} label={s.permissionNames[key]} disabled={readOnly || pending || fixedOff(key)} />
-                  <span className="dash-cell-sub">{fixedOff(key) && isBrowserBlocked(key) ? appBrowserStrings.forcedOff[key] : s.permissionHints[key]}</span>
+                  <span className="dash-cell-sub">
+                    {fixedOff(key) && isBrowserBlocked(key) ? appBrowserStrings.forcedOff[key] : s.permissionHints[key]}
+                    {/* The longer note about printing is the (i) on its own row, not a paragraph under the list. */}
+                    {key === "printing" ? <InfoTip label={`About ${s.permissionNames.printing}`}>{s.printingNote}</InfoTip> : null}
+                  </span>
                 </span>
                 <span className="dash-perm__default">{s.permissionDefault(NEW_WEB_APP_PERMISSIONS[key])}</span>
               </li>
             ))}
           </ul>
-          <p className="dash-muted">{s.printingNote}</p>
           {!readOnly ? (
             <>
               <FormError error={error} onReload={onReload} />

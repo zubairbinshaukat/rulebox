@@ -1,5 +1,5 @@
 import type { ReactNode } from "react";
-import { Input, SegmentedControl, Switch } from "@rulebox/ui";
+import { InfoTip, Input, SegmentedControl, Switch } from "@rulebox/ui";
 import type { UpdateMode } from "../../../data/types";
 import { Field, FieldSet } from "../../../components/Field";
 import { appAddStrings } from "../../../lib/screenStrings/appAdd";
@@ -53,9 +53,9 @@ export function DesktopMore({
         </Field>
         <HuePicker value={x.hue} onChange={(h) => f.set("hue", h)} name={`hue-${appKey}`} disabled={readOnly} />
         {uninstall ? (
-          <div className="apps-switchrow">
+          <div className="rb-labelrow">
             <Switch checked={x.removeWhenUnassigned} onChange={(on) => f.set("removeWhenUnassigned", on)} label={t.lines.remove} disabled={readOnly} />
-            <p className="dash-field__hint">{t.lines.removeInfo}</p>
+            <InfoTip label={`About ${t.lines.remove}`}>{t.lines.removeInfo}</InfoTip>
           </div>
         ) : null}
         {updates ? (

@@ -1,4 +1,4 @@
-import { Button, Input, Select, Switch } from "@rulebox/ui";
+import { Button, InfoTip, Input, Select, Switch } from "@rulebox/ui";
 import { INSTALL_TECHS, type InstallerInspection, type WizardTech } from "../data/types";
 import { Field } from "../components/Field";
 import { InlineNotice } from "../components/Notice";
@@ -106,12 +106,14 @@ export function InstallCommand({
 
       {exe ? (
         <div className="dash-form-grid__full apps-command__answer">
-          <Switch checked={x.answerOn} onChange={(val) => f.set("answerOn", val)} label={s.answerOn} disabled={readOnly} />
-          <p className="dash-field__hint">{s.info.answer}</p>
+          <div className="rb-labelrow">
+            <Switch checked={x.answerOn} onChange={(val) => f.set("answerOn", val)} label={s.answerOn} disabled={readOnly} />
+            <InfoTip label={`About ${s.answerOn}`}>{s.info.answer}</InfoTip>
+          </div>
           {x.tech === "installshield_script" && !x.answerOn ? <InlineNotice tone="warning" title={s.answerNeeded} /> : null}
           {x.answerOn ? (
             <div className="dash-form-grid">
-              <Field label={s.answerUrl} hint={s.answerUrlHint} error={f.errors.answerUrl} required>
+              <Field label={s.answerUrl} info={s.answerUrlHint} error={f.errors.answerUrl} required>
                 {(p) => <Input {...p} type="url" inputMode="url" spellCheck={false} autoCapitalize="off" placeholder="https://" value={x.answerUrl} disabled={readOnly} onChange={(e) => text("answerUrl", e.target.value)} />}
               </Field>
               <Field label={s.answerSha} error={f.errors.answerSha256} required>
