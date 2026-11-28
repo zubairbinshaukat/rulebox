@@ -92,7 +92,7 @@ async function resolvePath(page, path) {
     await page.goto(`${BASE}${list}${text ? `?q=${encodeURIComponent(text)}` : ""}`);
     await unlock(page);
     await settle(page);
-    const link = text ? page.getByRole("link", { name: text, exact: true }).first() : page.locator("main a[href^='/employees/']").first();
+    const link = text ? page.getByRole("link", { name: text, exact: true }).first() : page.locator("main a[href^='/employees/']:not([href^='/employees/new'])").first();
     found[name] = await link.getAttribute("href");
   }
   return found[name] + rest;
